@@ -1509,13 +1509,14 @@
     </div>
     <div class="craft-grid">
 
-      <!-- Car engine — live glTF model, auto-rotating -->
+      <!-- Combustion Engine — live glTF model, auto-rotating -->
       <article class="craft-card">
         <div class="craft-media">
           <model-viewer
+            class="craft-model-viewer"
             id="engine-viewer"
-            src="carengine.glb"
-            alt="Detailed car engine 3D model"
+            src="carengine-optimized.glb"
+            alt="Combustion Engine 3D model"
             auto-rotate
             auto-rotate-delay="0"
             rotation-per-second="24deg"
@@ -1525,16 +1526,16 @@
             shadow-intensity="1"
             exposure="1.05"
             environment-image="neutral"
-            loading="eager"
+            loading="lazy"
             reveal="auto">
-            <div class="craft-loading" slot="progress-bar" id="engine-loading">
-              <div class="craft-loading-bar"><div class="craft-loading-fill" id="engine-loading-fill"></div></div>
-              <span id="engine-loading-pct">Loading model…</span>
+            <div class="craft-loading" slot="progress-bar">
+              <div class="craft-loading-bar"><div class="craft-loading-fill"></div></div>
+              <span class="craft-loading-pct">Loading model…</span>
             </div>
           </model-viewer>
-          <div class="craft-error" id="engine-error" hidden>
+          <div class="craft-error" hidden>
             <span class="craft-error-icon">⚠</span>
-            <p>This model couldn't load. Make sure <code>carengine.glb</code> is in the same folder as this page and the page is served over http(s) (not opened as a local file).</p>
+            <p>This model couldn't load. Make sure <code>carengine-optimized.glb</code> is in the same folder as this page and the page is served over http(s) (not opened as a local file).</p>
           </div>
           <span class="craft-badge">⟳ auto-rotate · drag to orbit</span>
         </div>
@@ -1542,6 +1543,117 @@
           <h3>Combustion Engine</h3>
           <p>A detailed, game-ready car engine rendered live in glTF — full topology and PBR materials, spinning right in your browser.</p>
           <div class="model-pills"><span class="model-pill">glTF</span><span class="model-pill">PBR</span><span class="model-pill">Hard-surface</span></div>
+        </div>
+      </article>
+
+      <!-- Motorcycle — live glTF model, auto-rotating -->
+      <article class="craft-card">
+        <div class="craft-media">
+          <model-viewer
+            class="craft-model-viewer"
+            id="motorcycle-viewer"
+            src="motorcycle-optimized.glb"
+            alt="Motorcycle 3D model"
+            auto-rotate
+            auto-rotate-delay="0"
+            rotation-per-second="24deg"
+            camera-controls
+            touch-action="pan-y"
+            interaction-prompt="none"
+            shadow-intensity="1"
+            exposure="1.05"
+            environment-image="neutral"
+            loading="lazy"
+            reveal="auto">
+            <div class="craft-loading" slot="progress-bar">
+              <div class="craft-loading-bar"><div class="craft-loading-fill"></div></div>
+              <span class="craft-loading-pct">Loading model…</span>
+            </div>
+          </model-viewer>
+          <div class="craft-error" hidden>
+            <span class="craft-error-icon">⚠</span>
+            <p>This model couldn't load. Make sure <code>motorcycle-optimized.glb</code> is in the same folder as this page and the page is served over http(s) (not opened as a local file).</p>
+          </div>
+          <span class="craft-badge">⟳ auto-rotate · drag to orbit</span>
+        </div>
+        <div class="craft-caption">
+          <h3>Motorcycle</h3>
+          <p>A fully modeled motorcycle with PBR materials — rendered live in the browser, no plugins required.</p>
+          <div class="model-pills"><span class="model-pill">glTF</span><span class="model-pill">PBR</span><span class="model-pill">Hard-surface</span></div>
+        </div>
+      </article>
+
+      <!-- Steampunk Character — live glTF model, auto-rotating -->
+      <article class="craft-card">
+        <div class="craft-media">
+          <model-viewer
+            class="craft-model-viewer"
+            id="steampunk-viewer"
+            src="steampunk_girl-optimized.glb"
+            alt="Steampunk Character 3D model"
+            auto-rotate
+            auto-rotate-delay="0"
+            rotation-per-second="24deg"
+            camera-controls
+            touch-action="pan-y"
+            interaction-prompt="none"
+            shadow-intensity="1"
+            exposure="1.05"
+            environment-image="neutral"
+            loading="lazy"
+            reveal="auto">
+            <div class="craft-loading" slot="progress-bar">
+              <div class="craft-loading-bar"><div class="craft-loading-fill"></div></div>
+              <span class="craft-loading-pct">Loading model…</span>
+            </div>
+          </model-viewer>
+          <div class="craft-error" hidden>
+            <span class="craft-error-icon">⚠</span>
+            <p>This model couldn't load. Make sure <code>steampunk_girl-optimized.glb</code> is in the same folder as this page and the page is served over http(s) (not opened as a local file).</p>
+          </div>
+          <span class="craft-badge">⟳ auto-rotate · drag to orbit</span>
+        </div>
+        <div class="craft-caption">
+          <h3>Steampunk Character</h3>
+          <p>A stylized character sculpt with steampunk detailing — textured, rigged-ready topology explorable in real time.</p>
+          <div class="model-pills"><span class="model-pill">glTF</span><span class="model-pill">Character</span><span class="model-pill">Sculpt</span></div>
+        </div>
+      </article>
+
+      <!-- PBR Sculpt — live glTF model, auto-rotating -->
+      <article class="craft-card">
+        <div class="craft-media">
+          <model-viewer
+            class="craft-model-viewer"
+            id="magic3d-viewer"
+            src="magic3d_pbr_model_8699477b-63a4-41c1-a4a5-aec6701a7f8e-optimized.glb"
+            alt="PBR Sculpt 3D model"
+            auto-rotate
+            auto-rotate-delay="0"
+            rotation-per-second="24deg"
+            camera-controls
+            touch-action="pan-y"
+            interaction-prompt="none"
+            shadow-intensity="1"
+            exposure="1.05"
+            environment-image="neutral"
+            loading="lazy"
+            reveal="auto">
+            <div class="craft-loading" slot="progress-bar">
+              <div class="craft-loading-bar"><div class="craft-loading-fill"></div></div>
+              <span class="craft-loading-pct">Loading model…</span>
+            </div>
+          </model-viewer>
+          <div class="craft-error" hidden>
+            <span class="craft-error-icon">⚠</span>
+            <p>This model couldn't load. Make sure <code>magic3d_pbr_model_8699477b-63a4-41c1-a4a5-aec6701a7f8e-optimized.glb</code> is in the same folder as this page and the page is served over http(s) (not opened as a local file).</p>
+          </div>
+          <span class="craft-badge">⟳ auto-rotate · drag to orbit</span>
+        </div>
+        <div class="craft-caption">
+          <h3>PBR Sculpt</h3>
+          <p>A physically-based render study exploring form, material, and light — orbit around it to see the surface detail.</p>
+          <div class="model-pills"><span class="model-pill">glTF</span><span class="model-pill">PBR</span><span class="model-pill">Sculpt</span></div>
         </div>
       </article>
 
@@ -3858,34 +3970,37 @@ panels.forEach(p => observer.observe(p));
 })();
 </script>
 <script>
-/* -- 3D CRAFT: engine model-viewer loading progress + error handling -- */
-(function engineViewerStatus() {
-  const mv = document.getElementById('engine-viewer');
-  if (!mv) return;
-  const fill = document.getElementById('engine-loading-fill');
-  const pct = document.getElementById('engine-loading-pct');
-  const loadingEl = document.getElementById('engine-loading');
-  const errorEl = document.getElementById('engine-error');
+/* -- 3D CRAFT: loading progress + error handling for every model-viewer card -- */
+(function craftViewerStatus() {
+  const viewers = document.querySelectorAll('.craft-model-viewer');
+  viewers.forEach((mv) => {
+    const media = mv.closest('.craft-media');
+    if (!media) return;
+    const fill = media.querySelector('.craft-loading-fill');
+    const pct = media.querySelector('.craft-loading-pct');
+    const loadingEl = media.querySelector('.craft-loading');
+    const errorEl = media.querySelector('.craft-error');
 
-  mv.addEventListener('progress', (e) => {
-    const p = Math.round((e.detail.totalProgress || 0) * 100);
-    if (fill) fill.style.width = p + '%';
-    if (pct) pct.textContent = p < 100 ? ('Loading model… ' + p + '%') : 'Preparing scene…';
-  });
-  mv.addEventListener('load', () => {
-    if (loadingEl) loadingEl.setAttribute('data-visible', 'false');
-  });
-  mv.addEventListener('error', () => {
-    if (loadingEl) loadingEl.setAttribute('data-visible', 'false');
-    if (errorEl) errorEl.hidden = false;
-  });
-  // Some browsers never fire 'error' for a stalled fetch — fail gracefully after a timeout.
-  setTimeout(() => {
-    if (mv.modelIsVisible === false && errorEl && errorEl.hidden) {
+    mv.addEventListener('progress', (e) => {
+      const p = Math.round((e.detail.totalProgress || 0) * 100);
+      if (fill) fill.style.width = p + '%';
+      if (pct) pct.textContent = p < 100 ? ('Loading model… ' + p + '%') : 'Preparing scene…';
+    });
+    mv.addEventListener('load', () => {
       if (loadingEl) loadingEl.setAttribute('data-visible', 'false');
-      errorEl.hidden = false;
-    }
-  }, 25000);
+    });
+    mv.addEventListener('error', () => {
+      if (loadingEl) loadingEl.setAttribute('data-visible', 'false');
+      if (errorEl) errorEl.hidden = false;
+    });
+    // Some browsers never fire 'error' for a stalled fetch — fail gracefully after a timeout.
+    setTimeout(() => {
+      if (mv.modelIsVisible === false && errorEl && errorEl.hidden) {
+        if (loadingEl) loadingEl.setAttribute('data-visible', 'false');
+        errorEl.hidden = false;
+      }
+    }, 25000);
+  });
 })();
 </script>
 </body></html>

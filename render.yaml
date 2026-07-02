@@ -1,0 +1,69 @@
+# Render Blueprint — deploys the portfolio backend as a single Web Service.
+#
+# Repo layout this file expects (repo root):
+#   portfolio.html
+#   carengine.glb
+#   backend/
+#     server.js
+#     package.json
+#     lib/ ...
+#     routes/ ...
+#     render.yaml   ← this file lives at the REPO ROOT, not inside backend/
+#
+# Usage:
+#   1. Commit this file as `render.yaml` at the root of your Git repo.
+#   2. In the Render Dashboard: New + → Blueprint → select this repo.
+#   3. Render reads this file and creates/updates the service automatically.
+#   4. After the first deploy, copy your live URL into the SITE_URL env var
+#      (Render will prompt you for it since it's marked sync: false below).
+#
+# Docs: https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: portfolio-backend
+    runtime: node
+    plan: free                      # bump to "starter" or higher to avoid free-tier spin-down
+    region: oregon                  # change to whichever region is closest to your visitors
+    branch: main
+    rootDir: backend                # server.js, package.json, etc. live here
+    buildCommand: ""                # zero dependencies — nothing to install
+    startCommand: node server.js
+    autoDeploy: true
+    healthCheckPath: /api/health
+
+    envVars:
+      # Render injects PORT automatically — do not set it here.
+      - key: HOST
+        value: 0.0.0.0
+
+      # backend/ is the service root, so the repo root (with portfolio.html
+      # and carengine.glb) is one level up from the checkout's src dir.
+      - key: PUBLIC_DIR
+        value: /opt/render/project/src
+
+      # Random secrets — Render generates and stores these for you.
+      - key: ADMIN_TOKEN
+        generateValue: true
+      - key: IP_SALT
+        generateValue: true
+
+      # Fill in once you know your Render URL (or a custom domain).
+      - key: SITE_URL
+        sync: false
+
+      # ── Optional features — uncomment and set in the Dashboard to enable ──
+      # - key: RESEND_API_KEY
+      #   sync: false
+      # - key: CONTACT_TO
+      #   value: nicholasgearinger@gmail.com
+      # - key: CONTACT_WEBHOOK_URL
+      #   sync: false
+      # - key: ANTHROPIC_API_KEY
+      #   sync: false
+      # - key: ASK_MODEL
+      #   value: claude-3-5-haiku-latest
+      # - key: GUESTBOOK_AUTO_APPROVE
+      #   value: "false"
+      # - key: CORS_ORIGINS
+      #   value: "*"

@@ -689,7 +689,7 @@
      hover adds a live tilt + lift (--hover-rx/ry/lift), and a "pop" scale
      (--pop) swells them as they cross the viewport centre. Each card has
      its own perspective() so the 3D holds regardless of ancestors. ── */
-  .about-card, .skill-card, .work-card, .dash-card, .process-step {
+  .about-card, .skill-card, .work-card, .dash-card, .process-step, .build-video-card {
     position: relative;
     transform:
       perspective(1000px)
@@ -702,6 +702,21 @@
     will-change: transform;
   }
   .model-card { position: relative; transition: border-color .3s, box-shadow .3s; }
+
+  /* ── BUILD (side-by-side, plain video card next to the heading) ── */
+  .build-grid { display: grid; grid-template-columns: 1.1fr .9fr; gap: 4rem; align-items: center; }
+  .build-text h2 { margin-top: .5rem; margin-bottom: 1.1rem; }
+  .build-video-card {
+    width: min(300px, 78vw);
+    aspect-ratio: 9 / 16;
+    margin: 0 auto;
+  }
+  .build-video-card video {
+    width: 100%; height: 100%; object-fit: cover; display: block;
+  }
+  @media (max-width: 768px) {
+    .build-grid { grid-template-columns: 1fr; gap: 2.5rem; text-align: center; }
+  }
 
   /* Cursor-following radial spotlight */
   .skill-card::before, .work-card::before,
@@ -1250,6 +1265,7 @@
   <ul id="nav-menu">
     <li><a href="#resume">Résumé</a></li>
     <li><a href="#skills">Skills</a></li>
+    <li><a href="#build">In Motion</a></li>
     <li><a href="#models">3D Work</a></li>
     <li><a href="#photography">Photography</a></li>
     <li><a href="#process">Process</a></li>
@@ -1576,6 +1592,23 @@
     </div>
   </div>
 
+</section>
+
+
+<!-- BUILD (smartphone demo reel, 3D scroll-tilt) -->
+<section id="build" class="panel">
+  <div class="panel-inner">
+    <div class="build-grid">
+      <div class="build-text">
+        <span class="section-label">In Motion</span>
+        <h2>Building applications<br>from the ground up</h2>
+        <p class="lead">From first commit to shipped product — a look at the craft behind the code.</p>
+      </div>
+      <div class="build-video-card">
+        <video id="phone-video" muted loop playsinline webkit-playsinline preload="auto" src="smartphone.mp4"></video>
+      </div>
+    </div>
+  </div>
 </section>
 
 
@@ -2395,6 +2428,7 @@ panels.forEach(p => observer.observe(p));
     { sel: '.work-card',    maxRy: 16, maxRx: 7,  pop: 0.05, alt: true  },
     { sel: '.dash-card',    maxRy: 12, maxRx: 6,  pop: 0.03, alt: true  },
     { sel: '.process-step', maxRy: 18, maxRx: 5,  pop: 0.04, alt: false, biasY: -1 },
+    { sel: '.build-video-card', maxRy: 16, maxRx: 8, pop: 0.05, alt: false },
   ];
 
   const items = [];
@@ -3683,6 +3717,23 @@ panels.forEach(p => observer.observe(p));
     if (isOpen() && !menu.contains(e.target) && !toggle.contains(e.target)) close();
   });
   window.addEventListener('resize', () => { if (window.innerWidth > 768 && isOpen()) close(); });
+})();
+</script>
+<script>
+/* -- BUILD SECTION: play the phone demo only while it's in view -- */
+(function phoneVideo() {
+  const video = document.getElementById('phone-video');
+  if (!video) return;
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    video.setAttribute('controls', '');
+    return;
+  }
+  const io = new IntersectionObserver((entries) => {
+    const e = entries[0];
+    if (e.isIntersecting) video.play().catch(() => {});
+    else video.pause();
+  }, { threshold: 0.35 });
+  io.observe(video);
 })();
 </script>
 </body></html>

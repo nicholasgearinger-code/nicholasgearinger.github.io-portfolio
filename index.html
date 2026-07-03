@@ -718,6 +718,36 @@
     background: var(--card-bg); border: 1px solid var(--card-border);
     font-size: .78rem; color: var(--slate);
   }
+
+  /* ── TOOLS & SOFTWARE badge grid ── */
+  .tools-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 1rem; max-width: 900px; margin: 0 auto;
+  }
+  .tool-badge {
+    position: relative;
+    display: flex; flex-direction: column; align-items: center; gap: .5rem;
+    padding: 1.3rem 1rem; border-radius: 1rem;
+    background: var(--card-bg); border: 1px solid var(--card-border);
+    opacity: 0; transform: translateY(16px) scale(.94);
+    transition: opacity .5s cubic-bezier(.22,1,.36,1), transform .5s cubic-bezier(.22,1,.36,1),
+                border-color .25s, box-shadow .25s;
+  }
+  .tool-badge.tool-in { opacity: 1; transform: translateY(0) scale(1); }
+  .tool-badge:hover {
+    border-color: var(--cyan); box-shadow: 0 14px 34px -14px rgba(34,211,238,.4);
+    transform: translateY(-3px) scale(1);
+  }
+  .tool-icon { font-size: 1.8rem; }
+  .tool-name { font-size: .82rem; color: var(--white); font-weight: 600; text-align: center; }
+  .tool-badge::after {
+    content: attr(data-years);
+    position: absolute; top: -.5rem; right: -.4rem;
+    font-size: .6rem; letter-spacing: .04em; text-transform: uppercase;
+    padding: .2rem .5rem; border-radius: 100px;
+    background: var(--navy); border: 1px solid var(--card-border); color: var(--cyan);
+  }
+
   .about-visual {
     position: relative; aspect-ratio: 1;
     max-width: 420px;
@@ -1543,6 +1573,7 @@
   </button>
   <ul id="nav-menu">
     <li><a href="#resume">Résumé</a></li>
+    <li><a href="#tools">Toolkit</a></li>
     <li><a href="#skills">Skills</a></li>
     <li><a href="#build">In Motion</a></li>
     <li><a href="#models">3D Work</a></li>
@@ -1671,19 +1702,19 @@
         <article class="resume-face">
           <span class="rface-num">01 — About</span>
           <h3 class="rface-title">Nicholas Gearinger</h3>
-          <p class="rface-role">AI Product Designer &amp; Engineer</p>
-          <p class="rface-bio">I design and build products where machine intelligence feels human. For five years I've moved between the design canvas and the codebase — shaping generative interfaces, shipping models, and making the complex feel effortless.</p>
+          <p class="rface-role">Creative Generalist — Design, 3D &amp; Game Dev</p>
+          <p class="rface-bio">A hard-working, self-motivated creative who's always picking up new skills — graphic design, photography, 3D modeling, texturing, and programming — while building a career around teamwork and genuine craft.</p>
           <div class="rface-facts">
-            <div class="rfact"><span>Based in</span><strong>San Francisco, CA</strong></div>
-            <div class="rfact"><span>Experience</span><strong>5+ years</strong></div>
-            <div class="rfact"><span>Focus</span><strong>Human–AI interfaces</strong></div>
-            <div class="rfact"><span>Status</span><strong>Open to roles</strong></div>
+            <div class="rfact"><span>Based in</span><strong>Boonsboro, MD</strong></div>
+            <div class="rfact"><span>Graphic Design</span><strong>3+ years</strong></div>
+            <div class="rfact"><span>Studied</span><strong>Game Development</strong></div>
+            <div class="rfact"><span>Also brings</span><strong>3+ yrs leadership</strong></div>
           </div>
           <div class="rface-tags">
-            <span class="tag">Generative UI</span>
-            <span class="tag">Design Systems</span>
-            <span class="tag">LLM Products</span>
-            <span class="tag">Creative Coding</span>
+            <span class="tag">Graphic Design</span>
+            <span class="tag">3D Modeling</span>
+            <span class="tag">Photography</span>
+            <span class="tag">Game Development</span>
           </div>
         </article>
 
@@ -1693,17 +1724,25 @@
           <h3 class="rface-title">Where I learned to think</h3>
           <div class="rtimeline">
             <div class="ritem">
-              <div class="ritem-year">2020</div>
+              <div class="ritem-year">2021–23</div>
               <div class="ritem-body">
-                <h4>Bachelor's in Communications</h4>
-                <p class="ritem-org">Shepherd University</p>
-                <p class="ritem-note">Grounded storytelling, media, and audience-focused communication that shapes how I present intelligent products.</p>
+                <h4>Art &amp; Design: Game Development</h4>
+                <p class="ritem-org">Full Sail University</p>
+                <p class="ritem-note">Focused study in game development, art, and design production pipelines.</p>
               </div>
             </div>
             <div class="ritem">
-              <div class="ritem-year">2017</div>
+              <div class="ritem-year">2017–20</div>
               <div class="ritem-body">
-                <h4>Associate's in Simulation &amp; Digital Entertainment</h4>
+                <h4>Bachelor's in Communications</h4>
+                <p class="ritem-org">Shepherd University</p>
+                <p class="ritem-note">Grounded storytelling, media, and audience-focused communication.</p>
+              </div>
+            </div>
+            <div class="ritem">
+              <div class="ritem-year">2014–17</div>
+              <div class="ritem-body">
+                <h4>A.A.S. Simulation &amp; Digital Entertainment</h4>
                 <p class="ritem-org">Hagerstown Community College</p>
                 <p class="ritem-note">Foundations in real-time graphics, interactive systems, and digital media production.</p>
               </div>
@@ -1717,27 +1756,35 @@
           <h3 class="rface-title">Selected roles</h3>
           <div class="rtimeline">
             <div class="ritem">
-              <div class="ritem-year">2022 – Now</div>
+              <div class="ritem-year">2025 – Now</div>
               <div class="ritem-body">
-                <h4>Senior AI Product Designer</h4>
-                <p class="ritem-org">Anthology Labs</p>
-                <p class="ritem-note">Lead design &amp; prototyping for generative tools; shipped an LLM copilot now used by 40k+ people.</p>
+                <h4>Seafood Department Manager</h4>
+                <p class="ritem-org">Weis Markets — Boonsboro, MD</p>
+                <p class="ritem-note">Leads the department, manages inventory &amp; ordering, and sets the team schedule while keeping service quality high.</p>
               </div>
             </div>
             <div class="ritem">
-              <div class="ritem-year">2020 – 2022</div>
+              <div class="ritem-year">2022 – 25</div>
               <div class="ritem-body">
-                <h4>Product Designer · AI Platform</h4>
-                <p class="ritem-org">Northstar AI</p>
-                <p class="ritem-note">Built the design system and model-evaluation dashboards behind three production ML features.</p>
+                <h4>Seafood Sales Associate</h4>
+                <p class="ritem-org">Weis Markets — Boonsboro, MD</p>
+                <p class="ritem-note">Delivered hands-on customer service and product prep before stepping up into management.</p>
               </div>
             </div>
             <div class="ritem">
-              <div class="ritem-year">2018 – 2020</div>
+              <div class="ritem-year">2020 – Now</div>
               <div class="ritem-body">
-                <h4>UX Engineer</h4>
-                <p class="ritem-org">Fieldwork Studio</p>
-                <p class="ritem-note">Bridged design &amp; front-end on data-heavy products; owned the creative-coding prototype pipeline.</p>
+                <h4>Lab Technician</h4>
+                <p class="ritem-org">Fredericktowne Labs — Myersville, MD</p>
+                <p class="ritem-note">Runs ammonia distillations, ion-selective electrode analysis, pH/hardness/alkalinity testing, and field water sampling.</p>
+              </div>
+            </div>
+            <div class="ritem">
+              <div class="ritem-year">2019</div>
+              <div class="ritem-body">
+                <h4>Residence Hall Improvement Crew</h4>
+                <p class="ritem-org">Shepherd University Residence Life</p>
+                <p class="ritem-note">Supported move-ins, room turnovers, electronic lock updates, and day-to-day Residence Life office operations.</p>
               </div>
             </div>
           </div>
@@ -1749,111 +1796,180 @@
           <h3 class="rface-title">What I bring</h3>
 
           <div class="rconst-wrap">
-            <svg class="rconst" id="rconst-svg" viewBox="0 0 340 340" aria-label="Skill tree, grouped by category">
+            <svg class="rconst" id="rconst-svg" viewBox="0 0 380 380" aria-label="Skill tree, grouped by category">
               <g class="rconst-lines">
-      <path class="rconst-line rconst-line-core" d="M 170,170 Q 182.0,120.0 170.0,70.0"></path>
-      <path class="rconst-line rconst-line-core" d="M 170,170 Q 220.0,182.0 270.0,170.0"></path>
-      <path class="rconst-line rconst-line-core" d="M 170,170 Q 158.0,220.0 170.0,270.0"></path>
-      <path class="rconst-line rconst-line-core" d="M 170,170 Q 120.0,158.0 70.0,170.0"></path>
-      <path class="rconst-line" d="M 170.0,70.0 Q 150.3,48.4 122.0,41.2"></path>
-      <path class="rconst-line" d="M 170.0,70.0 Q 178.4,42.0 170.0,14.0"></path>
-      <path class="rconst-line" d="M 170.0,70.0 Q 198.3,62.8 218.0,41.2"></path>
-      <path class="rconst-line" d="M 270.0,170.0 Q 291.6,150.3 298.8,122.0"></path>
-      <path class="rconst-line" d="M 270.0,170.0 Q 299.2,168.5 322.7,151.2"></path>
-      <path class="rconst-line" d="M 270.0,170.0 Q 293.5,187.3 322.7,188.8"></path>
-      <path class="rconst-line" d="M 270.0,170.0 Q 277.2,198.3 298.8,218.0"></path>
-      <path class="rconst-line" d="M 170.0,270.0 Q 189.7,291.6 218.0,298.8"></path>
-      <path class="rconst-line" d="M 170.0,270.0 Q 176.5,298.5 197.6,318.7"></path>
-      <path class="rconst-line" d="M 170.0,270.0 Q 161.6,298.0 170.0,326.0"></path>
-      <path class="rconst-line" d="M 170.0,270.0 Q 148.9,290.2 142.4,318.7"></path>
-      <path class="rconst-line" d="M 170.0,270.0 Q 141.7,277.2 122.0,298.8"></path>
-      <path class="rconst-line" d="M 70.0,170.0 Q 48.4,189.7 41.2,218.0"></path>
-      <path class="rconst-line" d="M 70.0,170.0 Q 42.0,161.6 14.0,170.0"></path>
-      <path class="rconst-line" d="M 70.0,170.0 Q 62.8,141.7 41.2,122.0"></path>
+      <path class="rconst-line rconst-line-core" d="M 190,190 Q 200.8,136.0 190.0,82.0"></path>
+      <path class="rconst-line rconst-line-core" d="M 190,190 Q 244.7,183.6 292.7,156.6"></path>
+      <path class="rconst-line rconst-line-core" d="M 190,190 Q 213.0,240.0 253.5,277.4"></path>
+      <path class="rconst-line rconst-line-core" d="M 190,190 Q 149.5,227.3 126.5,277.4"></path>
+      <path class="rconst-line rconst-line-core" d="M 190,190 Q 142.0,163.0 87.3,156.6"></path>
+      <path class="rconst-line" d="M 190.0,82.0 Q 173.7,55.3 145.4,41.9"></path>
+      <path class="rconst-line" d="M 190.0,82.0 Q 190.4,50.7 173.5,24.3"></path>
+      <path class="rconst-line" d="M 190.0,82.0 Q 206.9,55.6 206.5,24.3"></path>
+      <path class="rconst-line" d="M 190.0,82.0 Q 218.3,68.6 234.6,41.9"></path>
+      <path class="rconst-line" d="M 292.7,156.6 Q 300.1,126.2 289.6,96.7"></path>
+      <path class="rconst-line" d="M 292.7,156.6 Q 312.3,132.2 315.2,101.0"></path>
+      <path class="rconst-line" d="M 292.7,156.6 Q 320.8,142.7 336.6,115.7"></path>
+      <path class="rconst-line" d="M 292.7,156.6 Q 324.0,155.9 349.8,138.1"></path>
+      <path class="rconst-line" d="M 292.7,156.6 Q 321.4,169.2 352.3,163.9"></path>
+      <path class="rconst-line" d="M 292.7,156.6 Q 313.4,180.1 343.6,188.4"></path>
+      <path class="rconst-line" d="M 292.7,156.6 Q 301.5,186.7 325.4,206.9"></path>
+      <path class="rconst-line" d="M 253.5,277.4 Q 284.8,276.7 310.6,258.9"></path>
+      <path class="rconst-line" d="M 253.5,277.4 Q 281.3,291.8 312.4,288.6"></path>
+      <path class="rconst-line" d="M 253.5,277.4 Q 270.9,303.4 299.7,315.6"></path>
+      <path class="rconst-line" d="M 253.5,277.4 Q 256.2,308.6 275.6,333.2"></path>
+      <path class="rconst-line" d="M 253.5,277.4 Q 240.8,306.0 246.0,336.9"></path>
+      <path class="rconst-line" d="M 253.5,277.4 Q 228.6,296.4 218.2,325.9"></path>
+      <path class="rconst-line" d="M 126.5,277.4 Q 123.9,308.6 139.0,336.1"></path>
+      <path class="rconst-line" d="M 126.5,277.4 Q 107.8,302.5 106.0,333.8"></path>
+      <path class="rconst-line" d="M 126.5,277.4 Q 97.3,288.8 79.2,314.3"></path>
+      <path class="rconst-line" d="M 126.5,277.4 Q 95.7,271.6 66.8,283.7"></path>
+      <path class="rconst-line" d="M 87.3,156.6 Q 59.0,170.0 42.7,196.7"></path>
+      <path class="rconst-line" d="M 87.3,156.6 Q 56.1,154.0 28.6,169.1"></path>
+      <path class="rconst-line" d="M 87.3,156.6 Q 61.5,138.8 30.2,138.1"></path>
+      <path class="rconst-line" d="M 87.3,156.6 Q 73.9,128.3 47.2,112.0"></path>
+      <path class="rconst-line" d="M 87.3,156.6 Q 89.9,125.4 74.8,97.9"></path>
               </g>
-              <circle class="rconst-core" cx="170" cy="170" r="12"><title>Core skillset</title></circle>
-    <circle class="rconst-hub" cx="170.0" cy="70.0" r="11"><title>Design</title></circle>
-    <text class="rconst-hub-label" x="170.0" y="50.0" text-anchor="middle">DESIGN</text>
-    <circle class="rconst-hub" cx="270.0" cy="170.0" r="11"><title>Engineering</title></circle>
-    <text class="rconst-hub-label" x="290.0" y="175.0" text-anchor="start">ENGINEERING</text>
-    <circle class="rconst-hub" cx="170.0" cy="270.0" r="11"><title>Creative & 3D</title></circle>
-    <text class="rconst-hub-label" x="170.0" y="298.0" text-anchor="middle">CREATIVE & 3D</text>
-    <circle class="rconst-hub" cx="70.0" cy="170.0" r="11"><title>AI/ML</title></circle>
-    <text class="rconst-hub-label" x="50.0" y="175.0" text-anchor="end">AI/ML</text>
-    <g class="rconst-node" data-label="Product & UI Design" data-level="95" tabindex="0" role="button" aria-label="Product & UI Design, 95 percent">
-      <circle class="rconst-node-glow" cx="122.0" cy="41.2" r="27.5"></circle>
-      <circle class="rconst-node-dot" cx="122.0" cy="41.2" r="18.5"></circle>
-      <text class="rconst-node-icon" x="122.0" y="47.2" text-anchor="middle">🎨</text>
+              <circle class="rconst-core" cx="190" cy="190" r="12"><title>Core skillset</title></circle>
+    <circle class="rconst-hub" cx="190.0" cy="82.0" r="11"><title>Design & Branding</title></circle>
+    <text class="rconst-hub-label" x="190.0" y="66.0" text-anchor="middle">DESIGN & BRANDING</text>
+    <circle class="rconst-hub" cx="292.7" cy="156.6" r="11"><title>Adobe Suite</title></circle>
+    <text class="rconst-hub-label" x="306.7" y="160.6" text-anchor="start">ADOBE SUITE</text>
+    <circle class="rconst-hub" cx="253.5" cy="277.4" r="11"><title>3D & Animation</title></circle>
+    <text class="rconst-hub-label" x="253.5" y="299.4" text-anchor="middle">3D & ANIMATION</text>
+    <circle class="rconst-hub" cx="126.5" cy="277.4" r="11"><title>Programming & Web</title></circle>
+    <text class="rconst-hub-label" x="126.5" y="299.4" text-anchor="middle">PROGRAMMING & WEB</text>
+    <circle class="rconst-hub" cx="87.3" cy="156.6" r="11"><title>Professional Skills</title></circle>
+    <text class="rconst-hub-label" x="73.3" y="160.6" text-anchor="end">PROFESSIONAL SKILLS</text>
+    <g class="rconst-node" data-label="Graphic Design" data-level="92" data-years="3 yr" tabindex="0" role="button" aria-label="Graphic Design">
+      <circle class="rconst-node-glow" cx="145.4" cy="41.9" r="27.2"></circle>
+      <circle class="rconst-node-dot" cx="145.4" cy="41.9" r="18.2"></circle>
+      <text class="rconst-node-icon" x="145.4" y="47.9" text-anchor="middle">🎨</text>
     </g>
-    <g class="rconst-node" data-label="Design Systems" data-level="90" tabindex="0" role="button" aria-label="Design Systems, 90 percent">
-      <circle class="rconst-node-glow" cx="170.0" cy="14.0" r="27.0"></circle>
-      <circle class="rconst-node-dot" cx="170.0" cy="14.0" r="18.0"></circle>
-      <text class="rconst-node-icon" x="170.0" y="20.0" text-anchor="middle">🧩</text>
+    <g class="rconst-node" data-label="Illustration" data-level="65" data-years="familiar" tabindex="0" role="button" aria-label="Illustration">
+      <circle class="rconst-node-glow" cx="173.5" cy="24.3" r="24.5"></circle>
+      <circle class="rconst-node-dot" cx="173.5" cy="24.3" r="15.5"></circle>
+      <text class="rconst-node-icon" x="173.5" y="30.3" text-anchor="middle">🖋️</text>
     </g>
-    <g class="rconst-node" data-label="Motion & Prototyping" data-level="85" tabindex="0" role="button" aria-label="Motion & Prototyping, 85 percent">
-      <circle class="rconst-node-glow" cx="218.0" cy="41.2" r="26.5"></circle>
-      <circle class="rconst-node-dot" cx="218.0" cy="41.2" r="17.5"></circle>
-      <text class="rconst-node-icon" x="218.0" y="47.2" text-anchor="middle">🎬</text>
+    <g class="rconst-node" data-label="Branding" data-level="65" data-years="familiar" tabindex="0" role="button" aria-label="Branding">
+      <circle class="rconst-node-glow" cx="206.5" cy="24.3" r="24.5"></circle>
+      <circle class="rconst-node-dot" cx="206.5" cy="24.3" r="15.5"></circle>
+      <text class="rconst-node-icon" x="206.5" y="30.3" text-anchor="middle">🏷️</text>
     </g>
-    <g class="rconst-node" data-label="Web Development" data-level="90" tabindex="0" role="button" aria-label="Web Development, 90 percent">
-      <circle class="rconst-node-glow" cx="298.8" cy="122.0" r="27.0"></circle>
-      <circle class="rconst-node-dot" cx="298.8" cy="122.0" r="18.0"></circle>
-      <text class="rconst-node-icon" x="298.8" y="128.0" text-anchor="middle">💻</text>
+    <g class="rconst-node" data-label="Web Design" data-level="65" data-years="familiar" tabindex="0" role="button" aria-label="Web Design">
+      <circle class="rconst-node-glow" cx="234.6" cy="41.9" r="24.5"></circle>
+      <circle class="rconst-node-dot" cx="234.6" cy="41.9" r="15.5"></circle>
+      <text class="rconst-node-icon" x="234.6" y="47.9" text-anchor="middle">🌐</text>
     </g>
-    <g class="rconst-node" data-label="React / TypeScript" data-level="88" tabindex="0" role="button" aria-label="React / TypeScript, 88 percent">
-      <circle class="rconst-node-glow" cx="322.7" cy="151.2" r="26.8"></circle>
-      <circle class="rconst-node-dot" cx="322.7" cy="151.2" r="17.8"></circle>
-      <text class="rconst-node-icon" x="322.7" y="157.2" text-anchor="middle">⚛️</text>
+    <g class="rconst-node" data-label="Photoshop" data-level="65" data-years="familiar" tabindex="0" role="button" aria-label="Photoshop">
+      <circle class="rconst-node-glow" cx="289.6" cy="96.7" r="24.5"></circle>
+      <circle class="rconst-node-dot" cx="289.6" cy="96.7" r="15.5"></circle>
+      <text class="rconst-node-icon" x="289.6" y="102.7" text-anchor="middle">🖼️</text>
     </g>
-    <g class="rconst-node" data-label="Three.js / WebGL" data-level="82" tabindex="0" role="button" aria-label="Three.js / WebGL, 82 percent">
-      <circle class="rconst-node-glow" cx="322.7" cy="188.8" r="26.2"></circle>
-      <circle class="rconst-node-dot" cx="322.7" cy="188.8" r="17.2"></circle>
-      <text class="rconst-node-icon" x="322.7" y="194.8" text-anchor="middle">🧊</text>
+    <g class="rconst-node" data-label="Illustrator" data-level="65" data-years="familiar" tabindex="0" role="button" aria-label="Illustrator">
+      <circle class="rconst-node-glow" cx="315.2" cy="101.0" r="24.5"></circle>
+      <circle class="rconst-node-dot" cx="315.2" cy="101.0" r="15.5"></circle>
+      <text class="rconst-node-icon" x="315.2" y="107.0" text-anchor="middle">✏️</text>
     </g>
-    <g class="rconst-node" data-label="Python" data-level="75" tabindex="0" role="button" aria-label="Python, 75 percent">
-      <circle class="rconst-node-glow" cx="298.8" cy="218.0" r="25.5"></circle>
-      <circle class="rconst-node-dot" cx="298.8" cy="218.0" r="16.5"></circle>
-      <text class="rconst-node-icon" x="298.8" y="224.0" text-anchor="middle">🐍</text>
+    <g class="rconst-node" data-label="InDesign" data-level="74" data-years="1 yr" tabindex="0" role="button" aria-label="InDesign">
+      <circle class="rconst-node-glow" cx="336.6" cy="115.7" r="25.4"></circle>
+      <circle class="rconst-node-dot" cx="336.6" cy="115.7" r="16.4"></circle>
+      <text class="rconst-node-icon" x="336.6" y="121.7" text-anchor="middle">📐</text>
     </g>
-    <g class="rconst-node" data-label="Art" data-level="88" tabindex="0" role="button" aria-label="Art, 88 percent">
-      <circle class="rconst-node-glow" cx="218.0" cy="298.8" r="26.8"></circle>
-      <circle class="rconst-node-dot" cx="218.0" cy="298.8" r="17.8"></circle>
-      <text class="rconst-node-icon" x="218.0" y="304.8" text-anchor="middle">🖌️</text>
+    <g class="rconst-node" data-label="Premiere" data-level="65" data-years="familiar" tabindex="0" role="button" aria-label="Premiere">
+      <circle class="rconst-node-glow" cx="349.8" cy="138.1" r="24.5"></circle>
+      <circle class="rconst-node-dot" cx="349.8" cy="138.1" r="15.5"></circle>
+      <text class="rconst-node-icon" x="349.8" y="144.1" text-anchor="middle">🎞️</text>
     </g>
-    <g class="rconst-node" data-label="3D Modeling" data-level="86" tabindex="0" role="button" aria-label="3D Modeling, 86 percent">
-      <circle class="rconst-node-glow" cx="197.6" cy="318.7" r="26.6"></circle>
-      <circle class="rconst-node-dot" cx="197.6" cy="318.7" r="17.6"></circle>
-      <text class="rconst-node-icon" x="197.6" y="324.7" text-anchor="middle">🗿</text>
+    <g class="rconst-node" data-label="Audition" data-level="74" data-years="1 yr" tabindex="0" role="button" aria-label="Audition">
+      <circle class="rconst-node-glow" cx="352.3" cy="163.9" r="25.4"></circle>
+      <circle class="rconst-node-dot" cx="352.3" cy="163.9" r="16.4"></circle>
+      <text class="rconst-node-icon" x="352.3" y="169.9" text-anchor="middle">🎙️</text>
     </g>
-    <g class="rconst-node" data-label="Photography" data-level="85" tabindex="0" role="button" aria-label="Photography, 85 percent">
-      <circle class="rconst-node-glow" cx="170.0" cy="326.0" r="26.5"></circle>
-      <circle class="rconst-node-dot" cx="170.0" cy="326.0" r="17.5"></circle>
-      <text class="rconst-node-icon" x="170.0" y="332.0" text-anchor="middle">📷</text>
+    <g class="rconst-node" data-label="Creative Suite" data-level="65" data-years="familiar" tabindex="0" role="button" aria-label="Creative Suite">
+      <circle class="rconst-node-glow" cx="343.6" cy="188.4" r="24.5"></circle>
+      <circle class="rconst-node-dot" cx="343.6" cy="188.4" r="15.5"></circle>
+      <text class="rconst-node-icon" x="343.6" y="194.4" text-anchor="middle">🧰</text>
     </g>
-    <g class="rconst-node" data-label="Animation" data-level="84" tabindex="0" role="button" aria-label="Animation, 84 percent">
-      <circle class="rconst-node-glow" cx="142.4" cy="318.7" r="26.4"></circle>
-      <circle class="rconst-node-dot" cx="142.4" cy="318.7" r="17.4"></circle>
-      <text class="rconst-node-icon" x="142.4" y="324.7" text-anchor="middle">🎞️</text>
+    <g class="rconst-node" data-label="Video Production" data-level="65" data-years="familiar" tabindex="0" role="button" aria-label="Video Production">
+      <circle class="rconst-node-glow" cx="325.4" cy="206.9" r="24.5"></circle>
+      <circle class="rconst-node-dot" cx="325.4" cy="206.9" r="15.5"></circle>
+      <text class="rconst-node-icon" x="325.4" y="212.9" text-anchor="middle">📹</text>
     </g>
-    <g class="rconst-node" data-label="Game Development" data-level="80" tabindex="0" role="button" aria-label="Game Development, 80 percent">
-      <circle class="rconst-node-glow" cx="122.0" cy="298.8" r="26.0"></circle>
-      <circle class="rconst-node-dot" cx="122.0" cy="298.8" r="17.0"></circle>
-      <text class="rconst-node-icon" x="122.0" y="304.8" text-anchor="middle">🎮</text>
+    <g class="rconst-node" data-label="Maya" data-level="84" data-years="2 yr" tabindex="0" role="button" aria-label="Maya">
+      <circle class="rconst-node-glow" cx="310.6" cy="258.9" r="26.4"></circle>
+      <circle class="rconst-node-dot" cx="310.6" cy="258.9" r="17.4"></circle>
+      <text class="rconst-node-icon" x="310.6" y="264.9" text-anchor="middle">🗿</text>
     </g>
-    <g class="rconst-node" data-label="LLMs & Prompt Design" data-level="92" tabindex="0" role="button" aria-label="LLMs & Prompt Design, 92 percent">
-      <circle class="rconst-node-glow" cx="41.2" cy="218.0" r="27.2"></circle>
-      <circle class="rconst-node-dot" cx="41.2" cy="218.0" r="18.2"></circle>
-      <text class="rconst-node-icon" x="41.2" y="224.0" text-anchor="middle">🧠</text>
+    <g class="rconst-node" data-label="3ds Max" data-level="74" data-years="1 yr" tabindex="0" role="button" aria-label="3ds Max">
+      <circle class="rconst-node-glow" cx="312.4" cy="288.6" r="25.4"></circle>
+      <circle class="rconst-node-dot" cx="312.4" cy="288.6" r="16.4"></circle>
+      <text class="rconst-node-icon" x="312.4" y="294.6" text-anchor="middle">🧊</text>
     </g>
-    <g class="rconst-node" data-label="RAG & Fine-tuning" data-level="80" tabindex="0" role="button" aria-label="RAG & Fine-tuning, 80 percent">
-      <circle class="rconst-node-glow" cx="14.0" cy="170.0" r="26.0"></circle>
-      <circle class="rconst-node-dot" cx="14.0" cy="170.0" r="17.0"></circle>
-      <text class="rconst-node-icon" x="14.0" y="176.0" text-anchor="middle">🔗</text>
+    <g class="rconst-node" data-label="3D Animation" data-level="74" data-years="1 yr" tabindex="0" role="button" aria-label="3D Animation">
+      <circle class="rconst-node-glow" cx="299.7" cy="315.6" r="25.4"></circle>
+      <circle class="rconst-node-dot" cx="299.7" cy="315.6" r="16.4"></circle>
+      <text class="rconst-node-icon" x="299.7" y="321.6" text-anchor="middle">🎬</text>
     </g>
-    <g class="rconst-node" data-label="Model Evaluation" data-level="78" tabindex="0" role="button" aria-label="Model Evaluation, 78 percent">
-      <circle class="rconst-node-glow" cx="41.2" cy="122.0" r="25.8"></circle>
-      <circle class="rconst-node-dot" cx="41.2" cy="122.0" r="16.8"></circle>
-      <text class="rconst-node-icon" x="41.2" y="128.0" text-anchor="middle">📊</text>
+    <g class="rconst-node" data-label="2D Animation" data-level="74" data-years="1 yr" tabindex="0" role="button" aria-label="2D Animation">
+      <circle class="rconst-node-glow" cx="275.6" cy="333.2" r="25.4"></circle>
+      <circle class="rconst-node-dot" cx="275.6" cy="333.2" r="16.4"></circle>
+      <text class="rconst-node-icon" x="275.6" y="339.2" text-anchor="middle">🖌️</text>
+    </g>
+    <g class="rconst-node" data-label="Unreal Engine" data-level="65" data-years="familiar" tabindex="0" role="button" aria-label="Unreal Engine">
+      <circle class="rconst-node-glow" cx="246.0" cy="336.9" r="24.5"></circle>
+      <circle class="rconst-node-dot" cx="246.0" cy="336.9" r="15.5"></circle>
+      <text class="rconst-node-icon" x="246.0" y="342.9" text-anchor="middle">🎮</text>
+    </g>
+    <g class="rconst-node" data-label="Game Development" data-level="65" data-years="familiar" tabindex="0" role="button" aria-label="Game Development">
+      <circle class="rconst-node-glow" cx="218.2" cy="325.9" r="24.5"></circle>
+      <circle class="rconst-node-dot" cx="218.2" cy="325.9" r="15.5"></circle>
+      <text class="rconst-node-icon" x="218.2" y="331.9" text-anchor="middle">👾</text>
+    </g>
+    <g class="rconst-node" data-label="C++" data-level="65" data-years="familiar" tabindex="0" role="button" aria-label="C++">
+      <circle class="rconst-node-glow" cx="139.0" cy="336.1" r="24.5"></circle>
+      <circle class="rconst-node-dot" cx="139.0" cy="336.1" r="15.5"></circle>
+      <text class="rconst-node-icon" x="139.0" y="342.1" text-anchor="middle">💻</text>
+    </g>
+    <g class="rconst-node" data-label="JavaScript" data-level="65" data-years="familiar" tabindex="0" role="button" aria-label="JavaScript">
+      <circle class="rconst-node-glow" cx="106.0" cy="333.8" r="24.5"></circle>
+      <circle class="rconst-node-dot" cx="106.0" cy="333.8" r="15.5"></circle>
+      <text class="rconst-node-icon" x="106.0" y="339.8" text-anchor="middle">🟨</text>
+    </g>
+    <g class="rconst-node" data-label="Object-Oriented Programming" data-level="74" data-years="1 yr" tabindex="0" role="button" aria-label="Object-Oriented Programming">
+      <circle class="rconst-node-glow" cx="79.2" cy="314.3" r="25.4"></circle>
+      <circle class="rconst-node-dot" cx="79.2" cy="314.3" r="16.4"></circle>
+      <text class="rconst-node-icon" x="79.2" y="320.3" text-anchor="middle">🧩</text>
+    </g>
+    <g class="rconst-node" data-label="WordPress" data-level="74" data-years="1 yr" tabindex="0" role="button" aria-label="WordPress">
+      <circle class="rconst-node-glow" cx="66.8" cy="283.7" r="25.4"></circle>
+      <circle class="rconst-node-dot" cx="66.8" cy="283.7" r="16.4"></circle>
+      <text class="rconst-node-icon" x="66.8" y="289.7" text-anchor="middle">🌍</text>
+    </g>
+    <g class="rconst-node" data-label="Customer Service" data-level="92" data-years="3 yr" tabindex="0" role="button" aria-label="Customer Service">
+      <circle class="rconst-node-glow" cx="42.7" cy="196.7" r="27.2"></circle>
+      <circle class="rconst-node-dot" cx="42.7" cy="196.7" r="18.2"></circle>
+      <text class="rconst-node-icon" x="42.7" y="202.7" text-anchor="middle">🤝</text>
+    </g>
+    <g class="rconst-node" data-label="Microsoft Office" data-level="65" data-years="familiar" tabindex="0" role="button" aria-label="Microsoft Office">
+      <circle class="rconst-node-glow" cx="28.6" cy="169.1" r="24.5"></circle>
+      <circle class="rconst-node-dot" cx="28.6" cy="169.1" r="15.5"></circle>
+      <text class="rconst-node-icon" x="28.6" y="175.1" text-anchor="middle">📊</text>
+    </g>
+    <g class="rconst-node" data-label="PowerPoint" data-level="65" data-years="familiar" tabindex="0" role="button" aria-label="PowerPoint">
+      <circle class="rconst-node-glow" cx="30.2" cy="138.1" r="24.5"></circle>
+      <circle class="rconst-node-dot" cx="30.2" cy="138.1" r="15.5"></circle>
+      <text class="rconst-node-icon" x="30.2" y="144.1" text-anchor="middle">📈</text>
+    </g>
+    <g class="rconst-node" data-label="Google Suite" data-level="74" data-years="1 yr" tabindex="0" role="button" aria-label="Google Suite">
+      <circle class="rconst-node-glow" cx="47.2" cy="112.0" r="25.4"></circle>
+      <circle class="rconst-node-dot" cx="47.2" cy="112.0" r="16.4"></circle>
+      <text class="rconst-node-icon" x="47.2" y="118.0" text-anchor="middle">📁</text>
+    </g>
+    <g class="rconst-node" data-label="Photography" data-level="65" data-years="familiar" tabindex="0" role="button" aria-label="Photography">
+      <circle class="rconst-node-glow" cx="74.8" cy="97.9" r="24.5"></circle>
+      <circle class="rconst-node-dot" cx="74.8" cy="97.9" r="15.5"></circle>
+      <text class="rconst-node-icon" x="74.8" y="103.9" text-anchor="middle">📷</text>
     </g>
             </svg>
             <div class="rconst-tooltip" id="rconst-tooltip" hidden></div>
@@ -1862,6 +1978,35 @@
 
       </div>
       <div class="resume-hint">◀ drag to rotate ▶</div>
+  </div>
+</section>
+
+
+
+
+<!-- TOOLS & SOFTWARE (new component, built from real résumé data) -->
+<section id="tools" class="panel">
+  <div class="panel-inner">
+    <span class="section-label">Toolkit</span>
+    <h2>Software I<br>actually use</h2>
+    <p class="lead" style="margin:0 auto 2.5rem;">Pulled straight from my résumé — the real tools behind the work, not a buzzword list.</p>
+    <div class="tools-grid" id="tools-grid">
+      <div class="tool-badge" data-years="3 yr"><span class="tool-icon">🎨</span><span class="tool-name">Graphic Design</span></div>
+      <div class="tool-badge" data-years="familiar"><span class="tool-icon">🖼️</span><span class="tool-name">Photoshop</span></div>
+      <div class="tool-badge" data-years="familiar"><span class="tool-icon">✏️</span><span class="tool-name">Illustrator</span></div>
+      <div class="tool-badge" data-years="1 yr"><span class="tool-icon">📐</span><span class="tool-name">InDesign</span></div>
+      <div class="tool-badge" data-years="familiar"><span class="tool-icon">🎞️</span><span class="tool-name">Premiere</span></div>
+      <div class="tool-badge" data-years="1 yr"><span class="tool-icon">🎙️</span><span class="tool-name">Audition</span></div>
+      <div class="tool-badge" data-years="2 yr"><span class="tool-icon">🗿</span><span class="tool-name">Maya</span></div>
+      <div class="tool-badge" data-years="1 yr"><span class="tool-icon">🧊</span><span class="tool-name">3ds Max</span></div>
+      <div class="tool-badge" data-years="familiar"><span class="tool-icon">🎮</span><span class="tool-name">Unreal Engine</span></div>
+      <div class="tool-badge" data-years="familiar"><span class="tool-icon">💻</span><span class="tool-name">C++</span></div>
+      <div class="tool-badge" data-years="familiar"><span class="tool-icon">🟨</span><span class="tool-name">JavaScript</span></div>
+      <div class="tool-badge" data-years="1 yr"><span class="tool-icon">🌍</span><span class="tool-name">WordPress</span></div>
+      <div class="tool-badge" data-years="1 yr"><span class="tool-icon">📁</span><span class="tool-name">Google Suite</span></div>
+      <div class="tool-badge" data-years="familiar"><span class="tool-icon">📊</span><span class="tool-name">Microsoft Office</span></div>
+      <div class="tool-badge" data-years="3 yr"><span class="tool-icon">🤝</span><span class="tool-name">Customer Service</span></div>
+    </div>
   </div>
 </section>
 
@@ -2853,8 +2998,8 @@ panels.forEach(p => observer.observe(p));
   function showTooltip(node) {
     if (!constTooltip) return;
     const label = node.getAttribute('data-label');
-    const level = node.getAttribute('data-level');
-    constTooltip.innerHTML = label + '<span class="rconst-tt-level">' + level + '%</span>';
+    const years = node.getAttribute('data-years');
+    constTooltip.innerHTML = label + '<span class="rconst-tt-level">' + years + '</span>';
     constTooltip.hidden = false;
   }
   function hideTooltip() { if (constTooltip) constTooltip.hidden = true; }
@@ -4436,6 +4581,27 @@ panels.forEach(p => observer.observe(p));
   function tick() { timeEl.textContent = new Date().toLocaleTimeString([], { hour12: false }); }
   tick();
   setInterval(tick, 1000);
+})();
+</script>
+<script>
+/* -- TOOLS & SOFTWARE: staggered reveal on scroll into view -- */
+(function toolsReveal() {
+  const grid = document.getElementById('tools-grid');
+  if (!grid) return;
+  const badges = Array.from(grid.querySelectorAll('.tool-badge'));
+  if (!badges.length) return;
+
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    badges.forEach((b) => b.classList.add('tool-in'));
+    return;
+  }
+  const io = new IntersectionObserver((entries) => {
+    if (entries[0].isIntersecting) {
+      badges.forEach((b, i) => setTimeout(() => b.classList.add('tool-in'), i * 55));
+      io.disconnect();
+    }
+  }, { threshold: 0.25 });
+  io.observe(grid);
 })();
 </script>
 <script>

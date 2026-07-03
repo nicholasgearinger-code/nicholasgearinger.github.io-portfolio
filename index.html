@@ -116,19 +116,20 @@
   #particle-canvas {
     position: absolute;
     top: 0; left: 0;
-    width: 100%; height: 170vh;   /* extended — now the primary hero visual */
+    width: 100%; height: 170vh;   /* JS resizes this to span the full hero + bridge */
     z-index: 0;
     pointer-events: none;
-    /* Fade the node field on all sides — bottom fades into the circuit
-       bridge below, and the left/right/top edges soften into the page so
-       the field reads as an open depth of space, not a bounded rectangle. */
+    /* Fade the node field on all sides — bottom fades into the compiler
+       section below (right at the very end of the bridge), and the
+       left/right/top edges soften so the field reads as an open depth
+       of space, not a bounded rectangle. */
     -webkit-mask-image:
-      linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 55%, rgba(0,0,0,0) 88%),
+      linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 80%, rgba(0,0,0,0) 99%),
       linear-gradient(to right, rgba(0,0,0,0) 0%, rgba(0,0,0,1) 8%, rgba(0,0,0,1) 92%, rgba(0,0,0,0) 100%),
       linear-gradient(to top, rgba(0,0,0,0) 0%, rgba(0,0,0,1) 10%, rgba(0,0,0,1) 100%);
     -webkit-mask-composite: source-in, source-in;
     mask-image:
-      linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 55%, rgba(0,0,0,0) 88%),
+      linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 80%, rgba(0,0,0,0) 99%),
       linear-gradient(to right, rgba(0,0,0,0) 0%, rgba(0,0,0,1) 8%, rgba(0,0,0,1) 92%, rgba(0,0,0,0) 100%),
       linear-gradient(to top, rgba(0,0,0,0) 0%, rgba(0,0,0,1) 10%, rgba(0,0,0,1) 100%);
     mask-composite: intersect, intersect;
@@ -138,6 +139,9 @@
     position: relative; z-index: 2;
     text-shadow: 0 0 80px rgba(0,0,0,.7);
     padding: 0 1.5rem;
+    min-height: 82vh;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
   }
   .hero-eyebrow {
     display: inline-flex; align-items: center; gap: .5rem;
@@ -385,7 +389,7 @@
     width: 100%;
     height: 165vh;
     min-height: 1100px;
-    margin-top: 1.5rem;
+    margin-top: 0;          /* no gap — the particle field must read as continuous into the bridge */
     z-index: 1;            /* below hero text (z-index:2), above particle bg */
   }
   @media (max-width: 768px) {
@@ -1304,16 +1308,18 @@
   <!-- CIRCUIT BRIDGE — hero centrepiece: strands reveal & electrons flow as you scroll -->
   <div class="circuit-bridge" id="hero-bridge" data-bridge="hero"></div>
 
-  <!-- ABOUT ME — lead-in to the animated code compiler -->
-  <div class="compiler-intro">
-    <span class="section-label">About Me</span>
-    <h2>Curiosity,<br>crafted into code</h2>
-    <p class="lead">I turn questions into interfaces and ideas into working systems. Here's what makes me tick — compiled in real time.</p>
-  </div>
+</section>
 
-  <!-- ANIMATED CODE COMPILER -->
-  <div id="compiler-section">
-    <div id="compiler-wrap">
+<!-- ABOUT ME — lead-in to the animated code compiler -->
+<div class="compiler-intro">
+  <span class="section-label">About Me</span>
+  <h2>Curiosity,<br>crafted into code</h2>
+  <p class="lead">I turn questions into interfaces and ideas into working systems. Here's what makes me tick — compiled in real time.</p>
+</div>
+
+<!-- ANIMATED CODE COMPILER -->
+<div id="compiler-section">
+  <div id="compiler-wrap">
 
       <!-- Title bar -->
       <div class="cc-titlebar">
@@ -1370,8 +1376,6 @@
 
     </div><!-- /compiler-wrap -->
 </div><!-- /compiler-section -->
-
-</section>
 
 
 <div class="perspective-root">
@@ -2024,11 +2028,39 @@ let gravityMode = false; // toggle: repel vs attract
 // Blue hue spectrum: deep indigo 225, electric blue 210, sky 200, cyan 185, violet 250
 const HUES = [225, 210, 200, 195, 185, 248, 220, 205];
 
+let fadeMidFrac = 0.75; // fraction of canvas height where the bridge's midpoint falls (recomputed below)
+
 function resize() {
-  // Match the extended CSS height (170vh) so the drawing buffer covers the
-  // full visible area instead of being stretched/blank past the old 100vh.
+  // Span the canvas across the *entire* hero, including the circuit-bridge
+  // below the title — not just the top screen — so the node field reads as
+  // a continuous background behind the flowing data-stream animation.
+  // Measured from the actual DOM rather than a guessed vh value, since the
+  // bridge's height varies by breakpoint (165vh desktop / 100vh mobile).
+  const heroEl = document.getElementById('hero');
+  const bridgeEl = document.getElementById('hero-bridge');
+  const targetH = heroEl ? heroEl.offsetHeight : window.innerHeight * 1.7;
   W = canvas.width  = window.innerWidth;
-  H = canvas.height = window.innerHeight * 1.7;
+  H = canvas.height = targetH;
+  canvas.style.height = targetH + 'px';
+
+  // Fade the node field out by the MIDDLE of the circuit bridge, not its
+  // end — measured from the bridge's real position/height so it lands in
+  // the right place regardless of viewport or breakpoint.
+  if (bridgeEl && H > 0) {
+    const bridgeMidY = bridgeEl.offsetTop + bridgeEl.offsetHeight * 0.5;
+    fadeMidFrac = Math.max(0.1, Math.min(0.95, bridgeMidY / H));
+  }
+  const fStart = Math.max(0, (fadeMidFrac - 0.14) * 100).toFixed(1) + '%';
+  const fEnd   = Math.min(100, (fadeMidFrac + 0.14) * 100).toFixed(1) + '%';
+  const bottomFade =
+    `linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,1) ${fStart}, rgba(0,0,0,0) ${fEnd})`;
+  const rightFade = 'linear-gradient(to right, rgba(0,0,0,0) 0%, rgba(0,0,0,1) 8%, rgba(0,0,0,1) 92%, rgba(0,0,0,0) 100%)';
+  const topFade = 'linear-gradient(to top, rgba(0,0,0,0) 0%, rgba(0,0,0,1) 10%, rgba(0,0,0,1) 100%)';
+  const maskVal = `${bottomFade}, ${rightFade}, ${topFade}`;
+  canvas.style.maskImage = maskVal;
+  canvas.style.webkitMaskImage = maskVal;
+  canvas.style.maskComposite = 'intersect, intersect';
+  canvas.style.webkitMaskComposite = 'source-in, source-in';
 }
 
 class Particle {
@@ -2174,8 +2206,9 @@ class Particle {
 }
 
 function initParticles() {
-  // ~1 node per 3500px² — roughly 2× denser than before
-  const count = Math.min(600, Math.max(220, Math.floor((W * H) / 3500)));
+  // ~1 node per 3500px² — cap raised since the field now spans the full
+  // hero + circuit-bridge height, not just the top screen.
+  const count = Math.min(850, Math.max(220, Math.floor((W * H) / 3500)));
   particles = Array.from({ length: count }, (_, i) => new Particle(i));
 }
 
@@ -2260,10 +2293,14 @@ function animate() {
   requestAnimationFrame(animate);
   // Skip heavy drawing when the node field is scrolled away or tab hidden
   if (!__heroVisible() || !window.__tabVisible) return;
-  // Fade the whole field out as you scroll toward the circuit bridge, so the
-  // interactive nodes have vanished by the time the bridge takes over.
-  // Threshold extended to match the taller (170vh) canvas.
-  const sf = 1 - window.scrollY / (window.innerHeight * 1.35);
+  // Fade the whole field out gradually as you approach the end of the
+  // circuit bridge — the canvas's own height ends exactly at the bridge's
+  // bottom edge (it's the last element in #hero's flow), so this fades
+  // out over roughly the last quarter of scroll through the bridge.
+  // Fade the whole field out around the MIDDLE of the circuit bridge —
+  // fadeMidFrac is measured from the bridge's real position (set in
+  // resize()), so this stays correctly aligned regardless of viewport.
+  const sf = 1 - Math.max(0, (window.scrollY - H * (fadeMidFrac - 0.14))) / (H * 0.28);
   canvas.style.opacity = Math.max(0, Math.min(1, sf)).toFixed(3);
   frameT++;
   ctx.clearRect(0, 0, W, H);
@@ -2306,6 +2343,11 @@ resize();
 initParticles();
 animate();
 window.addEventListener('resize', window.__debounce(() => { resize(); initParticles(); }, 160));
+// Web fonts loading can reflow hero-content's height after first paint —
+// re-measure once they're ready so the canvas still spans the full bridge.
+if (document.fonts && document.fonts.ready) {
+  document.fonts.ready.then(() => { resize(); initParticles(); });
+}
 
 /* ── 3D SCROLL REVEAL ── */
 const panels = document.querySelectorAll('.panel');
@@ -3028,25 +3070,25 @@ panels.forEach(p => observer.observe(p));
   function drawBridge(ctx, W, H, fibers, cfg, scroll, frame, dt) {
     ctx.clearRect(0, 0, W, H);
 
-    /* ── Deep background — cached, only rebuilt when size/hue changes ── */
-    const bgKey = W + 'x' + H + 'x' + cfg.coreHue;
-    if (ctx.__bgKey !== bgKey) {
-      const bg = ctx.createRadialGradient(W*0.5, H*cfg.vanishY, 0, W*0.5, H*0.5, W*0.65);
-      bg.addColorStop(0,   `hsla(${cfg.coreHue},70%,12%,1)`);
-      bg.addColorStop(0.4, `hsla(${cfg.coreHue},55%,6%,1)`);
-      bg.addColorStop(1,   '#020810');
-      ctx.__bg = bg; ctx.__bgKey = bgKey;
-    }
-    ctx.fillStyle = ctx.__bg;
-    ctx.fillRect(0, 0, W, H);
+    /* No independent background wash here — the interactive particle
+       canvas behind the bridge (now spanning the full hero height) is the
+       single shared backdrop for both animations. Painting a second
+       background layer here, even at reduced alpha, created a visible
+       seam at the bridge's own boundary. The fiber streams, bloom, and
+       electrons below draw directly onto a transparent surface instead. */
 
     /* ── Bright vanish-point bloom ── */
     const vanishX = W * (0.5 + cfg.tiltBias);
     const vanishY = H * cfg.vanishY;
     const bloomR  = W * (0.18 + scroll * 0.12);
     const bloom   = ctx.createRadialGradient(vanishX, vanishY, 0, vanishX, vanishY, bloomR);
-    bloom.addColorStop(0,   `hsla(${cfg.coreHue},100%,90%,${0.28 + scroll*0.18})`);
-    bloom.addColorStop(0.3, `hsla(${cfg.coreHue},90%,60%,${0.14 + scroll*0.1})`);
+    // Baseline alpha lowered from 0.28/0.14 to near-zero — the bloom used to
+    // appear at nearly full brightness immediately (even at scroll=0), which
+    // created a bright halo sitting right at the seam with the particle
+    // field above. Now it fades in as you scroll, matching how the strands
+    // themselves grow in, instead of popping in already-lit.
+    bloom.addColorStop(0,   `hsla(${cfg.coreHue},100%,90%,${0.04 + scroll*0.34})`);
+    bloom.addColorStop(0.3, `hsla(${cfg.coreHue},90%,60%,${0.02 + scroll*0.19})`);
     bloom.addColorStop(1,   'transparent');
     ctx.fillStyle = bloom;
     ctx.fillRect(vanishX - bloomR, vanishY - bloomR, bloomR*2, bloomR*2);
@@ -3076,8 +3118,11 @@ panels.forEach(p => observer.observe(p));
       const { path, pts, len, brightness, lineW, hue, isBright, revealOffset } = fiber;
 
       // ── Progressive reveal: each strand grows out from the vanish point as
-      //    you scroll. revealOffset staggers them into a cascade. ──
-      const reveal = Math.max(0, Math.min(1, (scroll - 0.05 - revealOffset * 0.25) / 0.5));
+      //    you scroll. revealOffset staggers them into a cascade. Starts
+      //    growing immediately at scroll=0 (no flat delay) so there's no
+      //    empty gap between the particle field above and the first visible
+      //    strands — the two animations should read as continuous. ──
+      const reveal = Math.max(0, Math.min(1, (scroll - revealOffset * 0.25) / 0.5));
       fiber._reveal = reveal;
       fiber._revLen = len * reveal;
       if (reveal <= 0) return;
@@ -3219,6 +3264,7 @@ panels.forEach(p => observer.observe(p));
       this.canvas.style.inset    = '0';
       this.canvas.style.width    = '100%';
       this.canvas.style.height   = '100%';
+      this.canvas.style.transition = 'opacity .15s linear';
       this.frame  = 0;
       this.scroll = 0;
       this.cfg    = BRIDGE_CONFIGS[index % BRIDGE_CONFIGS.length];
@@ -3238,7 +3284,17 @@ panels.forEach(p => observer.observe(p));
     updateReveal() {
       const rect = this.div.getBoundingClientRect();
       const p    = (window.innerHeight - rect.top) / (window.innerHeight + rect.height);
-      this.scroll = Math.max(0, Math.min(1, p));
+      // Force fully dormant at the very top of the page. The hero title is
+      // shorter than most viewports, so part of the bridge already sits
+      // inside the initial viewport before any scrolling — without this
+      // check it would show some bloom/activity immediately on load,
+      // breaking the illusion of an animation waiting to be scrolled into.
+      this.scroll = window.scrollY <= 2 ? 0 : Math.max(0, Math.min(1, p));
+      // Smooth entrance: fade the whole canvas in over the first 10% of the
+      // bridge's own reveal range, instead of the strands/bloom just
+      // appearing the instant scrolling starts.
+      const entranceFade = Math.max(0, Math.min(1, this.scroll / 0.1));
+      this.canvas.style.opacity = entranceFade.toFixed(3);
     }
 
     draw(t, dt) {

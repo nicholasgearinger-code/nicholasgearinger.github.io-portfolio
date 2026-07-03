@@ -150,13 +150,36 @@
   h1 .line-2 { color: var(--green); display: block; font-weight: 400; }
   h1 .line-3 { color: var(--muted); font-weight: 400; font-size: .5em; letter-spacing: .01em; display: block; margin-top: .5em; }
   h1 .line-1 { display: block; }
-  /* Decode animation: name + title start hidden & blurred, JS resolves them */
-  h1 .line-1, h1 .line-2 {
-    opacity: 0; filter: blur(8px);
-    transition: opacity .7s ease, filter .7s ease;
-    will-change: opacity, filter;
+  h1 .line-1, h1 .line-2 { opacity: 0; }
+
+  /* Pulse line (terminal-prompt style, left of the title), then typewriter reveal */
+  .hero-title-row {
+    display: flex; align-items: center; justify-content: center;
+    gap: 1.1rem;
   }
-  .scramble-dim { color: var(--cyan); opacity: .9; }
+  .hero-pulse-line {
+    display: block; flex-shrink: 0;
+    width: 42px; height: 3px;
+    border-radius: 3px;
+    background: linear-gradient(90deg, var(--cyan), var(--blue));
+    transform: scaleX(0); opacity: 0; transform-origin: left center;
+    animation: heroLinePulse .68s ease-in-out 3;
+  }
+  @keyframes heroLinePulse {
+    0%   { transform: scaleX(0); opacity: 0; }
+    35%  { transform: scaleX(1); opacity: 1; }
+    65%  { transform: scaleX(1); opacity: 1; }
+    100% { transform: scaleX(0); opacity: 0; }
+  }
+  .type-ch { opacity: 0; }
+  .type-cursor {
+    display: inline-block; color: var(--cyan);
+    animation: typeCursorBlink .8s step-end infinite;
+  }
+  @keyframes typeCursorBlink { 50% { opacity: 0; } }
+  @media (max-width: 560px) {
+    .hero-title-row { flex-direction: column; gap: .8rem; }
+  }
   .hero-sub {
     color: var(--muted); font-size: 1.05rem; max-width: 480px;
     margin: 0 auto 2.5rem; line-height: 1.65;
@@ -743,7 +766,8 @@
 
   /* ── PROCESS ── */
   #process { }
-  .process-steps { display: flex; flex-direction: column; gap: 0; margin-top: 3rem; }
+  .process-intro { max-width: 640px; margin: 0 auto; text-align: center; }
+  .process-steps { display: flex; flex-direction: column; gap: 0; margin-top: 3.5rem; max-width: 640px; margin-left: auto; margin-right: auto; }
   .process-step {
     display: grid; grid-template-columns: 4rem 1px 1fr;
     gap: 0 1.5rem; align-items: start; padding-bottom: 3rem;
@@ -1224,13 +1248,10 @@
     <span></span><span></span><span></span>
   </button>
   <ul id="nav-menu">
-    <li><a href="#about">About</a></li>
     <li><a href="#resume">Résumé</a></li>
     <li><a href="#skills">Skills</a></li>
     <li><a href="#models">3D Work</a></li>
     <li><a href="#photography">Photography</a></li>
-    <li><a href="#work">Work</a></li>
-    <li><a href="#dashboard">Live Data</a></li>
     <li><a href="#process">Process</a></li>
     <li><a href="#contact" class="nav-cta">Let's Talk</a></li>
   </ul>
@@ -1240,15 +1261,18 @@
   <canvas id="particle-canvas"></canvas>
   <div class="hero-content">
     <div class="hero-eyebrow">Available for work · 2025</div>
-    <h1>
-      <span class="line-1">Nicholas Gearinger</span>
-      <span class="line-2">AI × Design</span>
-      <span class="line-3">Engineering Intelligent Experiences</span>
-    </h1>
-    <noscript><style>h1 .line-1, h1 .line-2 { opacity: 1 !important; filter: none !important; }</style></noscript>
+    <div class="hero-title-row">
+      <span class="hero-pulse-line" id="hero-pulse-line"></span>
+      <h1>
+        <span class="line-1">Nicholas Gearinger</span>
+        <span class="line-2">AI × Design</span>
+        <span class="line-3">Engineering Intelligent Experiences</span>
+      </h1>
+    </div>
+    <noscript><style>h1 .line-1, h1 .line-2 { opacity: 1 !important; } .hero-pulse-line { visibility: hidden !important; }</style></noscript>
     <p class="hero-sub">I build products at the intersection of artificial intelligence and human-centred design — from generative systems to interfaces people actually want to use.</p>
     <div class="hero-btns">
-      <a href="#work" class="btn-primary">View My Work</a>
+      <a href="#models" class="btn-primary">View My Work</a>
       <a href="#contact" class="btn-ghost">Get In Touch</a>
     </div>
   </div>
@@ -1335,43 +1359,6 @@
 <div class="perspective-root">
 
 <!-- ABOUT -->
-<section id="about" class="panel">
-  <div class="panel-inner">
-    <div class="about-grid">
-      <div>
-        <span class="section-label">Beyond the Code</span>
-        <h2>The story behind<br>the syntax</h2>
-        <p class="lead">I'm a multidisciplinary designer and AI engineer who's been translating complex machine intelligence into products people find intuitive, beautiful, and useful.</p>
-        <div class="about-tags">
-          <span class="tag">AI/ML Integration</span>
-          <span class="tag">Product Design</span>
-          <span class="tag">Generative UI</span>
-          <span class="tag">Prompt Engineering</span>
-          <span class="tag">Design Systems</span>
-          <span class="tag">Creative Coding</span>
-        </div>
-      </div>
-      <div class="about-visual">
-        <div class="orb orb-1"></div>
-        <div class="orb orb-2"></div>
-        <div class="about-card">
-          <div class="stat-row">
-            <div class="stat"><strong>5+</strong><span>Years experience</span></div>
-            <div class="stat"><strong>28</strong><span>Projects shipped</span></div>
-          </div>
-          <div class="stat-row">
-            <div class="stat"><strong>12</strong><span>AI models deployed</span></div>
-            <div class="stat"><strong>4</strong><span>Design awards</span></div>
-          </div>
-          <p style="font-size:.82rem;color:var(--slate);line-height:1.6;margin-top:.5rem;">Currently open to full-time roles and select freelance collaborations in AI product design.</p>
-        </div>
-      </div>
-    </div>
-  </div>
-
-</section>
-
-
 <!-- INTERACTIVE 3D RÉSUMÉ -->
 <section id="resume" class="panel">
   <div class="panel-inner">
@@ -1504,9 +1491,10 @@
 
       </div>
       <div class="resume-hint">◀ drag to rotate ▶</div>
-    </div>
   </div>
 </section>
+
+
 
 
 <!-- SKILLS -->
@@ -1620,7 +1608,7 @@
             shadow-intensity="1"
             exposure="1.05"
             environment-image="neutral"
-            loading="lazy"
+            loading="eager"
             reveal="auto">
             <div class="craft-loading" slot="progress-bar">
               <div class="craft-loading-bar"><div class="craft-loading-fill"></div></div>
@@ -1629,7 +1617,7 @@
           </model-viewer>
           <div class="craft-error" hidden>
             <span class="craft-error-icon">⚠</span>
-            <p>This model couldn't load. Make sure <code>carengine-optimized.glb</code> is in the same folder as this page and the page is served over http(s) (not opened as a local file).</p>
+            <p>This model couldn't load after several attempts. Make sure <code>carengine-optimized.glb</code> is in the same folder as this page and the page is served over http(s) (not opened as a local file).</p>
           </div>
           <span class="craft-badge">⟳ auto-rotate · drag to orbit</span>
         </div>
@@ -1657,7 +1645,7 @@
             shadow-intensity="1"
             exposure="1.05"
             environment-image="neutral"
-            loading="lazy"
+            loading="eager"
             reveal="auto">
             <div class="craft-loading" slot="progress-bar">
               <div class="craft-loading-bar"><div class="craft-loading-fill"></div></div>
@@ -1666,7 +1654,7 @@
           </model-viewer>
           <div class="craft-error" hidden>
             <span class="craft-error-icon">⚠</span>
-            <p>This model couldn't load. Make sure <code>motorcycle-optimized.glb</code> is in the same folder as this page and the page is served over http(s) (not opened as a local file).</p>
+            <p>This model couldn't load after several attempts. Make sure <code>motorcycle-optimized.glb</code> is in the same folder as this page and the page is served over http(s) (not opened as a local file).</p>
           </div>
           <span class="craft-badge">⟳ auto-rotate · drag to orbit</span>
         </div>
@@ -1694,7 +1682,7 @@
             shadow-intensity="1"
             exposure="1.05"
             environment-image="neutral"
-            loading="lazy"
+            loading="eager"
             reveal="auto">
             <div class="craft-loading" slot="progress-bar">
               <div class="craft-loading-bar"><div class="craft-loading-fill"></div></div>
@@ -1703,7 +1691,7 @@
           </model-viewer>
           <div class="craft-error" hidden>
             <span class="craft-error-icon">⚠</span>
-            <p>This model couldn't load. Make sure <code>steampunk_girl-optimized.glb</code> is in the same folder as this page and the page is served over http(s) (not opened as a local file).</p>
+            <p>This model couldn't load after several attempts. Make sure <code>steampunk_girl-optimized.glb</code> is in the same folder as this page and the page is served over http(s) (not opened as a local file).</p>
           </div>
           <span class="craft-badge">⟳ auto-rotate · drag to orbit</span>
         </div>
@@ -1731,7 +1719,7 @@
             shadow-intensity="1"
             exposure="1.05"
             environment-image="neutral"
-            loading="lazy"
+            loading="eager"
             reveal="auto">
             <div class="craft-loading" slot="progress-bar">
               <div class="craft-loading-bar"><div class="craft-loading-fill"></div></div>
@@ -1740,7 +1728,7 @@
           </model-viewer>
           <div class="craft-error" hidden>
             <span class="craft-error-icon">⚠</span>
-            <p>This model couldn't load. Make sure <code>magic3d_pbr_model_8699477b-63a4-41c1-a4a5-aec6701a7f8e-optimized.glb</code> is in the same folder as this page and the page is served over http(s) (not opened as a local file).</p>
+            <p>This model couldn't load after several attempts. Make sure <code>magic3d_pbr_model_8699477b-63a4-41c1-a4a5-aec6701a7f8e-optimized.glb</code> is in the same folder as this page and the page is served over http(s) (not opened as a local file).</p>
           </div>
           <span class="craft-badge">⟳ auto-rotate · drag to orbit</span>
         </div>
@@ -1796,302 +1784,51 @@
 </section>
 
 
-<!-- WORK -->
-<section id="work" class="panel">
-  <div class="panel-inner">
-    <span class="section-label">Selected Work</span>
-    <h2>Projects that<br>moved the needle</h2>
-    <div class="work-grid">
-
-      <div class="work-card featured">
-        <div class="work-thumb">
-          <div class="work-thumb-bg"></div>
-          <div class="work-thumb-accent" style="background:var(--teal);top:-20px;right:10%;"></div>
-          <div class="work-thumb-accent" style="background:var(--violet);bottom:-20px;left:15%;"></div>
-          <span class="work-thumb-label">Sentient Dashboard</span>
-        </div>
-        <div class="work-info">
-          <h3>Sentient — AI Operations Platform</h3>
-          <p>Redesigned an enterprise AI monitoring dashboard handling 40M+ daily model inferences. Reduced time-to-insight by 60% through progressive disclosure and contextual AI explanations.</p>
-          <div class="work-tags">
-            <span class="work-tag">Product Design</span>
-            <span class="work-tag">AI/ML</span>
-            <span class="work-tag">Data Viz</span>
-            <span class="work-tag">Enterprise UX</span>
-          </div>
-          <button class="clap-btn js-api-only" data-clap-id="sentient" style="display:none" aria-label="Appreciate this project">
-            <span class="clap-emoji">👏</span><span>Appreciate</span><span class="clap-count">0</span>
-          </button>
-        </div>
-      </div>
-
-      <div class="work-card">
-        <div class="work-thumb">
-          <div class="work-thumb-bg" style="background:linear-gradient(135deg,#0a2e0f 0%,#030D06 100%)"></div>
-          <div class="work-thumb-accent" style="background:var(--teal);top:20px;left:20%;opacity:.5;width:120px;height:120px;"></div>
-          <span class="work-thumb-label">Muse</span>
-        </div>
-        <div class="work-info">
-          <h3>Muse — Generative Creative Suite</h3>
-          <p>Designed and built a browser-based creative tool that lets illustrators steer diffusion models through gesture and sketch input.</p>
-          <div class="work-tags">
-            <span class="work-tag">Generative AI</span>
-            <span class="work-tag">Creative Tool</span>
-            <span class="work-tag">Canvas API</span>
-          </div>
-          <button class="clap-btn js-api-only" data-clap-id="muse" style="display:none" aria-label="Appreciate this project">
-            <span class="clap-emoji">👏</span><span>Appreciate</span><span class="clap-count">0</span>
-          </button>
-        </div>
-      </div>
-
-      <div class="work-card">
-        <div class="work-thumb">
-          <div class="work-thumb-bg" style="background:linear-gradient(135deg,#061a08 0%,#030D06 100%)"></div>
-          <div class="work-thumb-accent" style="background:#FF6BA8;bottom:10px;right:20%;opacity:.45;width:100px;height:100px;"></div>
-          <span class="work-thumb-label">Cortex</span>
-        </div>
-        <div class="work-info">
-          <h3>Cortex — Internal Knowledge Agent</h3>
-          <p>Built a RAG-powered company knowledge agent for a 300-person team — cutting average research time from 25 minutes to under 90 seconds.</p>
-          <div class="work-tags">
-            <span class="work-tag">RAG</span>
-            <span class="work-tag">LLM</span>
-            <span class="work-tag">Full-stack</span>
-          </div>
-          <button class="clap-btn js-api-only" data-clap-id="cortex" style="display:none" aria-label="Appreciate this project">
-            <span class="clap-emoji">👏</span><span>Appreciate</span><span class="clap-count">0</span>
-          </button>
-        </div>
-      </div>
-
-    </div>
-  </div>
-
-</section>
 
 
-<!-- DASHBOARD -->
-<section id="dashboard" class="panel">
-  <div class="panel-inner">
 
-    <div class="dash-header">
-      <span class="section-label sky">Live Data</span>
-      <h2>Real-time API<br>visualization dashboard</h2>
-      <p class="lead">A fully wired backend integration layer with WebSocket streaming, live metrics, heatmaps, and scatter analysis — all running in the browser. Swap the simulation for a real endpoint in ~10 lines.</p>
-    </div>
 
-    <div class="dash-frame">
-
-      <!-- topbar -->
-      <div class="dash-topbar">
-        <div class="dash-topbar-left">
-          <span style="font-weight:600;font-size:.88rem;color:#F0F8FF;letter-spacing:-.02em">Data<span style="color:#22D3EE">Viz</span></span>
-          <div class="dash-badge-live"><span class="dash-pulse"></span><span id="d-live-label">LIVE</span></div>
-          <div class="dash-endpoint" id="d-endpoint">ws://localhost:4000/stream</div>
-        </div>
-        <div class="dash-topbar-right">
-          <span style="font-size:.68rem;color:#475569">Refresh:</span>
-          <button class="dash-btn" id="d-btn-2s"   onclick="dSetRate(2000)">2s</button>
-          <button class="dash-btn dash-active" id="d-btn-500"  onclick="dSetRate(500)">500ms</button>
-          <button class="dash-btn" id="d-btn-100"  onclick="dSetRate(100)">100ms</button>
-          <button class="dash-btn dash-btn-danger" id="d-btn-pause" onclick="dTogglePause()">Pause</button>
-        </div>
-      </div>
-
-      <div class="dash-main">
-
-        <!-- config -->
-        <div class="dash-config">
-          <div style="font-size:.62rem;letter-spacing:.08em;text-transform:uppercase;color:#334155;margin-bottom:.6rem">API endpoint configuration</div>
-          <div class="dash-config-row">
-            <div class="dash-field"><label>Base URL</label><input id="d-url" type="text" value="wss://api.nicholasgearinger.com" placeholder="wss://..."></div>
-            <div class="dash-field"><label>Auth token</label><input id="d-token" type="text" value="sk-live-••••••••••••" placeholder="Bearer token"></div>
-            <div class="dash-field"><label>Data source</label>
-              <select id="d-source">
-                <option value="websocket">WebSocket stream</option>
-                <option value="sse">Server-Sent Events</option>
-                <option value="polling">REST polling</option>
-              </select>
-            </div>
-            <button class="dash-connect" onclick="dReconnect()">Connect</button>
-          </div>
-          <div class="dash-conn-row">
-            <div class="dash-conn-chip" style="background:rgba(52,211,153,.08);border-color:rgba(52,211,153,.25)">
-              <div class="dash-conn-dot" style="background:#34D399"></div><span style="color:#34D399">WebSocket</span>
-            </div>
-            <div class="dash-conn-chip" style="background:rgba(59,130,246,.08);border-color:rgba(59,130,246,.2)">
-              <div class="dash-conn-dot" style="background:#3B82F6"></div><span style="color:#60A5FA">REST API</span>
-            </div>
-            <div class="dash-conn-chip" style="background:rgba(167,139,250,.08);border-color:rgba(167,139,250,.2)">
-              <div class="dash-conn-dot" style="background:#A78BFA"></div><span style="color:#A78BFA">Event Bus</span>
-            </div>
-            <span style="font-size:.68rem;color:#334155;margin-left:auto">
-              Last sync: <span id="d-sync" style="color:#94A3B8">just now</span> ·
-              Messages: <span id="d-msgcount" style="color:#F0F8FF;font-family:'JetBrains Mono','Courier New',monospace">0</span>
-            </span>
-          </div>
-        </div>
-
-        <!-- KPIs -->
-        <div class="dash-kpi-row">
-          <div class="dash-kpi" style="--dk-accent:#3B82F6">
-            <div class="dash-kpi-label">Requests / sec</div>
-            <div class="dash-kpi-value" id="d-rps">—</div>
-            <div class="dash-kpi-delta dup" id="d-rps-d">↑ —</div>
-            <canvas class="dash-sparkline" id="d-spark-rps"></canvas>
-          </div>
-          <div class="dash-kpi" style="--dk-accent:#22D3EE">
-            <div class="dash-kpi-label">Avg latency</div>
-            <div class="dash-kpi-value" id="d-lat">—</div>
-            <div class="dash-kpi-delta" id="d-lat-d">—</div>
-            <canvas class="dash-sparkline" id="d-spark-lat"></canvas>
-          </div>
-          <div class="dash-kpi" style="--dk-accent:#34D399">
-            <div class="dash-kpi-label">Success rate</div>
-            <div class="dash-kpi-value" id="d-sr">—</div>
-            <div class="dash-kpi-delta dup" id="d-sr-d">—</div>
-            <canvas class="dash-sparkline" id="d-spark-sr"></canvas>
-          </div>
-          <div class="dash-kpi" style="--dk-accent:#A78BFA">
-            <div class="dash-kpi-label">Active conns</div>
-            <div class="dash-kpi-value" id="d-conn">—</div>
-            <div class="dash-kpi-delta" id="d-conn-d">—</div>
-            <canvas class="dash-sparkline" id="d-spark-conn"></canvas>
-          </div>
-          <div class="dash-kpi" style="--dk-accent:#FB7185">
-            <div class="dash-kpi-label">Error rate</div>
-            <div class="dash-kpi-value" id="d-err">—</div>
-            <div class="dash-kpi-delta ddown" id="d-err-d">—</div>
-            <canvas class="dash-sparkline" id="d-spark-err"></canvas>
-          </div>
-        </div>
-
-        <!-- Line + Latency -->
-        <div class="dash-grid-3">
-          <div class="dash-card">
-            <div class="dash-card-header">
-              <div class="dash-card-title"><div class="dash-card-dot" style="background:#3B82F6"></div>Throughput over time</div>
-              <div class="dash-card-actions">
-                <button class="dash-btn dash-active" id="d-tab-rps"   onclick="dSwitchMetric('rps')">Req/s</button>
-                <button class="dash-btn" id="d-tab-bytes" onclick="dSwitchMetric('bytes')">Bytes/s</button>
-                <button class="dash-btn" id="d-tab-conns" onclick="dSwitchMetric('conns')">Conns</button>
-              </div>
-            </div>
-            <div class="dash-card-body">
-              <div style="position:relative;height:180px"><canvas id="d-chart-line" role="img" aria-label="Live throughput line chart"></canvas></div>
-            </div>
-          </div>
-          <div class="dash-card">
-            <div class="dash-card-header">
-              <div class="dash-card-title"><div class="dash-card-dot" style="background:#22D3EE"></div>Endpoint latency</div>
-            </div>
-            <div class="dash-card-body"><div class="dash-lat-row" id="d-lat-breakdown"></div></div>
-          </div>
-        </div>
-
-        <!-- Heatmap + Donut -->
-        <div class="dash-grid-2">
-          <div class="dash-card">
-            <div class="dash-card-header">
-              <div class="dash-card-title"><div class="dash-card-dot" style="background:#818CF8"></div>24h request heatmap</div>
-              <span style="font-size:.67rem;color:#334155">Hover for details</span>
-            </div>
-            <div class="dash-card-body">
-              <div class="dash-heatmap-grid" id="d-heatmap"></div>
-              <div class="dash-heatmap-labels"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>23:00</span></div>
-              <div style="display:flex;align-items:center;gap:.4rem;margin-top:.65rem;font-size:.65rem;color:#334155">
-                <span>Low</span>
-                <div style="display:flex;gap:2px">
-                  <div style="width:10px;height:10px;border-radius:2px;background:rgba(59,130,246,.1)"></div>
-                  <div style="width:10px;height:10px;border-radius:2px;background:rgba(59,130,246,.3)"></div>
-                  <div style="width:10px;height:10px;border-radius:2px;background:rgba(59,130,246,.55)"></div>
-                  <div style="width:10px;height:10px;border-radius:2px;background:rgba(59,130,246,.8)"></div>
-                  <div style="width:10px;height:10px;border-radius:2px;background:#3B82F6"></div>
-                </div>
-                <span>High</span>
-              </div>
-            </div>
-          </div>
-          <div class="dash-card">
-            <div class="dash-card-header">
-              <div class="dash-card-title"><div class="dash-card-dot" style="background:#A78BFA"></div>Response code distribution</div>
-            </div>
-            <div class="dash-card-body" style="display:flex;align-items:center;gap:.9rem">
-              <div style="position:relative;height:140px;width:140px;flex-shrink:0"><canvas id="d-chart-donut" role="img" aria-label="Response code distribution"></canvas></div>
-              <div id="d-donut-legend" style="flex:1;display:flex;flex-direction:column;gap:.45rem"></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Scatter + Log -->
-        <div class="dash-grid-2">
-          <div class="dash-card">
-            <div class="dash-card-header">
-              <div class="dash-card-title"><div class="dash-card-dot" style="background:#FBBF24"></div>Latency vs payload size</div>
-              <span style="font-size:.67rem;color:#334155">Last 200 requests</span>
-            </div>
-            <div class="dash-card-body">
-              <div style="position:relative;height:170px"><canvas id="d-chart-scatter" role="img" aria-label="Scatter plot of latency vs payload"></canvas></div>
-            </div>
-          </div>
-          <div class="dash-card">
-            <div class="dash-card-header">
-              <div class="dash-card-title"><div class="dash-card-dot" style="background:#34D399"></div>Live API stream</div>
-              <button class="dash-btn" onclick="dClearLog()">Clear</button>
-            </div>
-            <div class="dash-log" id="d-log"></div>
-          </div>
-        </div>
-
-      </div><!-- /dash-main -->
-    </div><!-- /dash-frame -->
-  </div>
-
-</section>
 
 
 <!-- PROCESS -->
 <section id="process" class="panel">
   <div class="panel-inner">
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6rem;align-items:start;">
-      <div>
-        <span class="section-label">How I Work</span>
-        <h2>A process built for<br>intelligent products</h2>
-        <p class="lead">AI projects fail when engineering and design work in separate rooms. My process treats them as the same discipline from day one.</p>
+    <div class="process-intro">
+      <span class="section-label">How I Work</span>
+      <h2>A process built for<br>intelligent products</h2>
+      <p class="lead">AI projects fail when engineering and design work in separate rooms. My process treats them as the same discipline from day one.</p>
+    </div>
+    <div class="process-steps">
+      <div class="process-step">
+        <span class="step-num">01</span>
+        <div class="step-line"></div>
+        <div class="step-body">
+          <h3>Discover the real problem</h3>
+          <p>User interviews, technical audits, and AI opportunity mapping — before any wireframe exists.</p>
+        </div>
       </div>
-      <div class="process-steps">
-        <div class="process-step">
-          <span class="step-num">01</span>
-          <div class="step-line"></div>
-          <div class="step-body">
-            <h3>Discover the real problem</h3>
-            <p>User interviews, technical audits, and AI opportunity mapping — before any wireframe exists.</p>
-          </div>
+      <div class="process-step">
+        <span class="step-num">02</span>
+        <div class="step-line"></div>
+        <div class="step-body">
+          <h3>Define the AI's role</h3>
+          <p>Not every feature needs a model. I map where AI adds genuine value versus where it adds friction.</p>
         </div>
-        <div class="process-step">
-          <span class="step-num">02</span>
-          <div class="step-line"></div>
-          <div class="step-body">
-            <h3>Define the AI's role</h3>
-            <p>Not every feature needs a model. I map where AI adds genuine value versus where it adds friction.</p>
-          </div>
+      </div>
+      <div class="process-step">
+        <span class="step-num">03</span>
+        <div class="step-line"></div>
+        <div class="step-body">
+          <h3>Design and prototype in tandem</h3>
+          <p>Figma prototypes and live model outputs evolve side-by-side so design assumptions get tested early.</p>
         </div>
-        <div class="process-step">
-          <span class="step-num">03</span>
-          <div class="step-line"></div>
-          <div class="step-body">
-            <h3>Design and prototype in tandem</h3>
-            <p>Figma prototypes and live model outputs evolve side-by-side so design assumptions get tested early.</p>
-          </div>
-        </div>
-        <div class="process-step">
-          <span class="step-num">04</span>
-          <div class="step-line"></div>
-          <div class="step-body">
-            <h3>Ship, measure, iterate</h3>
-            <p>I stay through launch and beyond — tracking behaviour, retraining where needed, and closing the loop.</p>
-          </div>
+      </div>
+      <div class="process-step">
+        <span class="step-num">04</span>
+        <div class="step-line"></div>
+        <div class="step-body">
+          <h3>Ship, measure, iterate</h3>
+          <p>I stay through launch and beyond — tracking behaviour, retraining where needed, and closing the loop.</p>
         </div>
       </div>
     </div>
@@ -2735,305 +2472,7 @@ panels.forEach(p => observer.observe(p));
   update();
 })();
 </script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script>
-/* ── DASHBOARD ENGINE ── */
-(function initDash() {
-  if (typeof Chart === 'undefined') {
-    setTimeout(initDash, 100); return;
-  }
-
-  const dRand  = (a, b) => a + Math.random() * (b - a);
-  const dRandI = (a, b) => Math.floor(dRand(a, b + 1));
-
-  const ds = {
-    rps: 240, lat: 18, sr: 99.2, conns: 847, errRate: 0.8,
-    sRps: [], sLat: [], sSr: [], sConn: [], sErr: [],
-    lineData: [], lineLabels: [],
-    scatterData: [],
-    heatmap: Array.from({ length: 24 }, () => dRandI(10, 100)),
-    donut: { '2xx': 941, '3xx': 42, '4xx': 28, '5xx': 9 },
-    endpoints: [
-      { name: '/api/stream', lat: 12,  max: 50  },
-      { name: '/api/infer',  lat: 94,  max: 200 },
-      { name: '/api/search', lat: 31,  max: 100 },
-      { name: '/api/upload', lat: 178, max: 300 },
-      { name: '/api/auth',   lat: 8,   max: 50  },
-    ],
-    msgCount: 0, paused: false, metric: 'rps',
-    rate: 500, timer: null, _prev: null,
-  };
-
-  /* ── Simulated WebSocket tick (replace with real ws.onmessage in production) ── */
-  function dTick() {
-    if (ds.paused) return;
-    ds.msgCount++;
-    ds.rps     = Math.max(50,   Math.min(600,  ds.rps     + dRand(-25, 25)));
-    ds.lat     = Math.max(4,    Math.min(120,  ds.lat     + dRand(-3,  3)));
-    ds.sr      = Math.max(95,   Math.min(100,  ds.sr      + dRand(-.3, .3)));
-    ds.conns   = Math.max(200,  Math.min(1500, ds.conns   + dRand(-30, 30)));
-    ds.errRate = Math.max(.1,   Math.min(5,    ds.errRate + dRand(-.15,.15)));
-
-    const push = (arr, v) => { arr.push(v); if (arr.length > 20) arr.shift(); };
-    push(ds.sRps, ds.rps); push(ds.sLat, ds.lat);
-    push(ds.sSr,  ds.sr);  push(ds.sConn, ds.conns); push(ds.sErr, ds.errRate);
-
-    const ts = new Date().toLocaleTimeString('en', { hour12: false });
-    const lv  = ds.metric === 'rps' ? ds.rps : ds.metric === 'bytes' ? dRand(20000, 80000) : ds.conns;
-    ds.lineData.push(lv); ds.lineLabels.push(ts);
-    if (ds.lineData.length > 60) { ds.lineData.shift(); ds.lineLabels.shift(); }
-
-    ds.scatterData.push({ x: Math.round(dRand(100, 8000)), y: Math.round(ds.lat + dRand(-8, 8)) });
-    if (ds.scatterData.length > 200) ds.scatterData.shift();
-
-    ds.endpoints.forEach(e => { e.lat = Math.max(2, Math.min(e.max, e.lat + dRand(-6, 6))); });
-    Object.keys(ds.donut).forEach(k => { ds.donut[k] = Math.max(1, ds.donut[k] + dRandI(-3, 3)); });
-    const h = new Date().getHours();
-    ds.heatmap[h] = Math.max(0, Math.min(100, ds.heatmap[h] + dRandI(-2, 5)));
-
-    const methods = ['GET','GET','GET','POST','POST','WS','WS','ERROR'];
-    const paths   = ['/api/stream','/api/infer','/api/search','/api/upload','/api/auth'];
-    const m  = methods[dRandI(0, methods.length - 1)];
-    const p  = paths[dRandI(0, paths.length - 1)];
-    const ms = Math.round(dRand(2, 200));
-    const ok = m !== 'ERROR' && Math.random() > .04;
-
-    dUpdateAll();
-    dAppendLog({ ts, method: m, path: p, ms, status: ok ? (m === 'WS' ? 'open' : '200') : '500' });
-  }
-
-  /* ── KPIs ── */
-  function dUpdateAll() {
-    const f = (v, d = 0) => v.toFixed(d);
-    const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-    set('d-rps',  f(ds.rps));
-    set('d-lat',  f(ds.lat) + 'ms');
-    set('d-sr',   f(ds.sr, 1) + '%');
-    set('d-conn', Math.round(ds.conns));
-    set('d-err',  f(ds.errRate, 2) + '%');
-    set('d-msgcount', ds.msgCount.toLocaleString());
-
-    const prev = ds._prev || ds;
-    [['d-rps-d',  ds.rps,     prev.rps,     ''],
-     ['d-lat-d',  ds.lat,     prev.lat,     'ms'],
-     ['d-sr-d',   ds.sr,      prev.sr,      '%'],
-     ['d-conn-d', ds.conns,   prev.conns,   ''],
-     ['d-err-d',  ds.errRate, prev.errRate, '%']].forEach(([id, cur, p, suf]) => {
-      const el = document.getElementById(id); if (!el) return;
-      const d = cur - p;
-      el.textContent = (d >= 0 ? '↑ ' : '↓ ') + Math.abs(d).toFixed(suf ? 1 : 0) + suf;
-      el.className = 'dash-kpi-delta ' + (d >= 0 ? 'dup' : 'ddown');
-    });
-    ds._prev = { rps: ds.rps, lat: ds.lat, sr: ds.sr, conns: ds.conns, errRate: ds.errRate };
-
-    dSparkline('d-spark-rps',  ds.sRps,  '#3B82F6');
-    dSparkline('d-spark-lat',  ds.sLat,  '#22D3EE');
-    dSparkline('d-spark-sr',   ds.sSr,   '#34D399');
-    dSparkline('d-spark-conn', ds.sConn, '#A78BFA');
-    dSparkline('d-spark-err',  ds.sErr,  '#FB7185');
-
-    dUpdateLine(); dUpdateDonut(); dUpdateScatter(); dRenderHeatmap(); dRenderLatency();
-  }
-
-  /* ── Sparklines ── */
-  const _sparks = {};
-  function dSparkline(id, data, color) {
-    const c = document.getElementById(id); if (!c || data.length < 2) return;
-    const dpr = window.devicePixelRatio || 1;
-    const W = c.offsetWidth || 120, H = c.offsetHeight || 24;
-    if (!_sparks[id]) { c.width = W * dpr; c.height = H * dpr; _sparks[id] = true; }
-    const cx = c.getContext('2d');
-    cx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    cx.clearRect(0, 0, W, H);
-    const mn = Math.min(...data), mx = Math.max(...data), range = mx - mn || 1;
-    const pts = data.map((v, i) => ({ x: (i / (data.length - 1)) * W, y: H - ((v - mn) / range) * H * .8 - H * .1 }));
-    cx.beginPath(); pts.forEach((p, i) => i === 0 ? cx.moveTo(p.x, p.y) : cx.lineTo(p.x, p.y));
-    cx.strokeStyle = color; cx.lineWidth = 1.5; cx.stroke();
-    cx.lineTo(pts[pts.length-1].x, H); cx.lineTo(pts[0].x, H); cx.closePath();
-    const g = cx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, color + '44'); g.addColorStop(1, color + '00');
-    cx.fillStyle = g; cx.fill();
-  }
-
-  /* ── Charts ── */
-  let dLineChart = null, dDonutChart = null, dScatterChart = null;
-  const dDonutColors = { '2xx': '#34D399', '3xx': '#FBBF24', '4xx': '#FB7185', '5xx': '#EF4444' };
-  const axisStyle = {
-    ticks: { color: '#334155', font: { size: 9 } },
-    grid:  { color: 'rgba(255,255,255,.04)' },
-    border:{ color: 'rgba(255,255,255,.06)' },
-  };
-
-  function dInitCharts() {
-    const lc = document.getElementById('d-chart-line');
-    const dc = document.getElementById('d-chart-donut');
-    const sc = document.getElementById('d-chart-scatter');
-    if (!lc || !dc || !sc) return;
-
-    dLineChart = new Chart(lc.getContext('2d'), {
-      type: 'line',
-      data: { labels: [], datasets: [{ label: 'Req/s', data: [],
-        borderColor: '#3B82F6', backgroundColor: 'rgba(59,130,246,.07)',
-        borderWidth: 2, pointRadius: 0, fill: true, tension: .4 }] },
-      options: { responsive: true, maintainAspectRatio: false, animation: { duration: 0 },
-        plugins: { legend: { display: false } },
-        scales: { x: { ...axisStyle, ticks: { ...axisStyle.ticks, maxTicksLimit: 6, maxRotation: 0 } }, y: axisStyle } }
-    });
-
-    dDonutChart = new Chart(dc.getContext('2d'), {
-      type: 'doughnut',
-      data: { labels: ['2xx','3xx','4xx','5xx'],
-        datasets: [{ data: [94, 4, 1.5, .5], backgroundColor: Object.values(dDonutColors), borderWidth: 0, hoverOffset: 4 }] },
-      options: { responsive: true, maintainAspectRatio: false, cutout: '70%',
-        animation: { duration: 300 }, plugins: { legend: { display: false } } }
-    });
-
-    dScatterChart = new Chart(sc.getContext('2d'), {
-      type: 'scatter',
-      data: { datasets: [{ label: 'Request', data: [],
-        backgroundColor: 'rgba(251,191,36,.5)', pointRadius: 2.5, pointHoverRadius: 4 }] },
-      options: { responsive: true, maintainAspectRatio: false, animation: { duration: 0 },
-        plugins: { legend: { display: false },
-          tooltip: { callbacks: { label: ctx => `${ctx.parsed.x.toLocaleString()}B · ${ctx.parsed.y}ms` } } },
-        scales: {
-          x: { ...axisStyle, title: { display: true, text: 'Payload (bytes)', color: '#334155', font: { size: 9 } } },
-          y: { ...axisStyle, title: { display: true, text: 'Latency (ms)',    color: '#334155', font: { size: 9 } } },
-        }
-      }
-    });
-  }
-
-  function dUpdateLine() {
-    if (!dLineChart) return;
-    dLineChart.data.labels = [...ds.lineLabels];
-    dLineChart.data.datasets[0].data = [...ds.lineData];
-    const colors = { rps: '#3B82F6', bytes: '#22D3EE', conns: '#A78BFA' };
-    dLineChart.data.datasets[0].borderColor = colors[ds.metric] || '#3B82F6';
-    dLineChart.update('none');
-  }
-
-  function dUpdateDonut() {
-    if (!dDonutChart) return;
-    const total = Object.values(ds.donut).reduce((a, b) => a + b, 0);
-    dDonutChart.data.datasets[0].data = Object.values(ds.donut);
-    dDonutChart.update('none');
-    const leg = document.getElementById('d-donut-legend'); if (!leg) return;
-    leg.innerHTML = Object.entries(ds.donut).map(([k, v]) => {
-      const pct = ((v / total) * 100).toFixed(1);
-      return `<div style="display:flex;align-items:center;gap:.45rem;font-size:.72rem">
-        <div style="width:7px;height:7px;border-radius:2px;background:${dDonutColors[k]};flex-shrink:0"></div>
-        <span style="color:#475569;width:26px">${k}</span>
-        <div style="flex:1;background:rgba(255,255,255,.05);border-radius:100px;height:3px;overflow:hidden">
-          <div style="width:${pct}%;height:100%;background:${dDonutColors[k]};border-radius:100px;transition:width .3s"></div>
-        </div>
-        <span style="color:#F0F8FF;font-family:'JetBrains Mono','Courier New',monospace;font-size:.68rem;min-width:30px;text-align:right">${pct}%</span>
-      </div>`;
-    }).join('');
-  }
-
-  function dUpdateScatter() {
-    if (!dScatterChart) return;
-    dScatterChart.data.datasets[0].data = [...ds.scatterData];
-    dScatterChart.update('none');
-  }
-
-  /* ── Heatmap ── */
-  function dRenderHeatmap() {
-    const grid = document.getElementById('d-heatmap'); if (!grid) return;
-    const max = Math.max(...ds.heatmap) || 1;
-    grid.innerHTML = ds.heatmap.map((v, i) => {
-      const alpha  = 0.08 + (v / max) * 0.92;
-      const light  = Math.round(50 + (v / max) * 20);
-      return `<div class="dash-heatmap-cell"
-        style="background:hsla(217,80%,${light}%,${alpha.toFixed(2)})"
-        title="${String(i).padStart(2,'0')}:00 — ${v} req/s"></div>`;
-    }).join('');
-  }
-
-  /* ── Latency breakdown ── */
-  function dRenderLatency() {
-    const c = document.getElementById('d-lat-breakdown'); if (!c) return;
-    const cols = ['#3B82F6','#22D3EE','#A78BFA','#FBBF24','#34D399'];
-    c.innerHTML = ds.endpoints.map((e, i) => {
-      const pct = Math.round((e.lat / e.max) * 100);
-      const col = pct > 80 ? '#FB7185' : pct > 50 ? '#FBBF24' : cols[i % cols.length];
-      return `<div class="dash-lat-item">
-        <div class="dash-lat-label">${e.name.replace('/api/','')}</div>
-        <div class="dash-lat-bar-wrap">
-          <div class="dash-lat-bar" style="width:${pct}%;background:${col}"></div>
-        </div>
-        <div class="dash-lat-val" style="color:${col}">${Math.round(e.lat)}ms</div>
-      </div>`;
-    }).join('');
-  }
-
-  /* ── Log ── */
-  function dAppendLog({ ts, method, path, ms, status }) {
-    const log = document.getElementById('d-log'); if (!log) return;
-    const ok = status === '200' || status === 'open';
-    const e = document.createElement('div');
-    e.className = 'dash-log-entry';
-    e.innerHTML = `<span class="dash-log-ts">${ts}</span>
-      <span class="dash-log-method D${method}">${method.padEnd(5,' ')}</span>
-      <span class="dash-log-path">${path}</span>
-      <span class="dash-log-status ${ok ? 'dok' : 'derr'}">${status}</span>
-      <span class="dash-log-ms">${ms}ms</span>`;
-    log.prepend(e);
-    while (log.children.length > 60) log.removeChild(log.lastChild);
-  }
-
-  /* ── Controls ── */
-  window.dSetRate = function(ms) {
-    ds.rate = ms; clearInterval(ds.timer); ds.timer = setInterval(dTick, ms);
-    ['d-btn-2s','d-btn-500','d-btn-100'].forEach(id => document.getElementById(id)?.classList.remove('dash-active'));
-    const map = { 2000: 'd-btn-2s', 500: 'd-btn-500', 100: 'd-btn-100' };
-    document.getElementById(map[ms])?.classList.add('dash-active');
-  };
-
-  window.dTogglePause = function() {
-    ds.paused = !ds.paused;
-    const btn   = document.getElementById('d-btn-pause');
-    const lbl   = document.getElementById('d-live-label');
-    const pulse = document.querySelector('.dash-pulse');
-    if (ds.paused) {
-      if (btn)   { btn.textContent = 'Resume'; btn.style.background = 'rgba(251,113,133,.1)'; }
-      if (lbl)   lbl.textContent = 'PAUSED';
-      if (pulse) pulse.style.background = '#FB7185';
-    } else {
-      if (btn)   { btn.textContent = 'Pause'; btn.style.background = ''; }
-      if (lbl)   lbl.textContent = 'LIVE';
-      if (pulse) pulse.style.background = '#34D399';
-    }
-  };
-
-  window.dSwitchMetric = function(m) {
-    ds.metric = m; ds.lineData = []; ds.lineLabels = [];
-    ['d-tab-rps','d-tab-bytes','d-tab-conns'].forEach(id => document.getElementById(id)?.classList.remove('dash-active'));
-    document.getElementById('d-tab-' + m)?.classList.add('dash-active');
-  };
-
-  window.dClearLog = function() {
-    const l = document.getElementById('d-log'); if (l) l.innerHTML = '';
-  };
-
-  window.dReconnect = function() {
-    const url = document.getElementById('d-url')?.value || '';
-    const src = document.getElementById('d-source')?.value || 'websocket';
-    const ep  = document.getElementById('d-endpoint');
-    if (ep) ep.textContent = url + '/' + src;
-    const badge = document.querySelector('.dash-badge-live');
-    if (badge) { badge.style.opacity = '.3'; setTimeout(() => badge.style.opacity = '1', 400); }
-  };
-
-  /* ── Boot ── */
-  dInitCharts();
-  dRenderHeatmap();
-  dRenderLatency();
-  for (let i = 0; i < 20; i++) dTick(); // seed initial data
-  ds.timer = setInterval(dTick, ds.rate);
-})();
-
-
 /* ══════════════════════════════════════════════════════
    REAL-TIME ANIMATED CODE COMPILER
    ══════════════════════════════════════════════════════ */
@@ -4005,40 +3444,34 @@ panels.forEach(p => observer.observe(p));
 /* ── HERO DECODE: name + "AI × Design" resolve from code into letters ── */
 (function heroDecode() {
   const els = document.querySelectorAll('.line-1, h1 .line-2');
+  const pulseLine = document.getElementById('hero-pulse-line');
   if (!els.length) return;
-  const CODE = '<>{}[]()/\\|=+*!?#$%&01;:_—';
 
-  // Honor reduced-motion: just show the text.
+  // Honor reduced-motion: just show the text, skip the pulse + typing.
   if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    els.forEach((el) => { el.style.opacity = '1'; el.style.filter = 'none'; });
+    if (pulseLine) pulseLine.style.visibility = 'hidden';
+    els.forEach((el) => { el.style.opacity = '1'; });
     return;
   }
 
-  function scramble(el) {
-    const finalText = el.getAttribute('data-text') || el.textContent;
+  function typeLine(el, onDone) {
+    const text = el.getAttribute('data-text') || el.textContent;
+    el.innerHTML = text.split('').map((c) =>
+      c === ' ' ? ' ' : '<span class="type-ch">' + c + '</span>'
+    ).join('') + '<span class="type-cursor">|</span>';
     el.style.opacity = '1';
-    el.style.filter = 'blur(0)';
-    const len = finalText.length;
-    const q = [];
-    for (let i = 0; i < len; i++) {
-      q.push({ to: finalText[i], end: 14 + i * 2 + Math.floor(Math.random() * 12), char: null });
-    }
-    let frame = 0;
+    const chars = Array.from(el.querySelectorAll('.type-ch'));
+    const cursor = el.querySelector('.type-cursor');
+    let i = 0;
     (function tick() {
-      let out = '', done = 0;
-      for (let i = 0; i < len; i++) {
-        const c = q[i];
-        if (c.to === ' ') { out += ' '; done++; continue; }
-        if (frame >= c.end) { out += c.to; done++; }
-        else {
-          if (!c.char || Math.random() < 0.35) c.char = CODE[Math.floor(Math.random() * CODE.length)];
-          out += '<span class="scramble-dim">' + c.char + '</span>';
-        }
+      if (i < chars.length) {
+        chars[i].style.opacity = '1';
+        i++;
+        setTimeout(tick, 38 + Math.random() * 40);
+      } else {
+        if (cursor) cursor.remove();
+        if (onDone) onDone();
       }
-      el.innerHTML = out;
-      if (done >= len) { el.textContent = finalText; return; }
-      frame++;
-      requestAnimationFrame(tick);
     })();
   }
 
@@ -4046,8 +3479,15 @@ panels.forEach(p => observer.observe(p));
     els.forEach((el) => { if (!el.getAttribute('data-text')) el.setAttribute('data-text', el.textContent.trim()); });
     const name = document.querySelector('.line-1');
     const title = document.querySelector('h1 .line-2');
-    if (name) scramble(name);
-    if (title) setTimeout(() => scramble(title), 480);
+
+    // Three pulses of the line (animation runs for .68s × 3 ≈ 2.04s), then type.
+    const PULSE_MS = 2040;
+    setTimeout(() => {
+      if (pulseLine) pulseLine.style.visibility = 'hidden';
+      if (name) typeLine(name, () => {
+        if (title) setTimeout(() => typeLine(title), 200);
+      });
+    }, pulseLine ? PULSE_MS : 0);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
@@ -4098,6 +3538,9 @@ panels.forEach(p => observer.observe(p));
 /* -- 3D CRAFT: loading progress + error handling for every model-viewer card -- */
 (function craftViewerStatus() {
   const viewers = document.querySelectorAll('.craft-model-viewer');
+  const MAX_RETRIES = 3;
+  const STALL_MS = 12000; // if a model hasn't finished loading within this window, retry
+
   viewers.forEach((mv) => {
     const media = mv.closest('.craft-media');
     if (!media) return;
@@ -4105,6 +3548,34 @@ panels.forEach(p => observer.observe(p));
     const pct = media.querySelector('.craft-loading-pct');
     const loadingEl = media.querySelector('.craft-loading');
     const errorEl = media.querySelector('.craft-error');
+    const baseSrc = mv.getAttribute('src');
+    let attempt = 0;
+    let loaded = false;
+    let stallTimer = null;
+
+    function showLoading(msg) {
+      if (loadingEl) loadingEl.setAttribute('data-visible', 'true');
+      if (errorEl) errorEl.hidden = true;
+      if (fill) fill.style.width = '0%';
+      if (pct) pct.textContent = msg;
+    }
+    function showError() {
+      if (loadingEl) loadingEl.setAttribute('data-visible', 'false');
+      if (errorEl) errorEl.hidden = false;
+    }
+    function armStallTimeout() {
+      clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => { if (!loaded) retry(); }, STALL_MS);
+    }
+    function retry() {
+      if (loaded) return;
+      attempt++;
+      if (attempt > MAX_RETRIES) { showError(); return; }
+      showLoading('Retrying… (' + attempt + '/' + MAX_RETRIES + ')');
+      // Cache-bust so a bad/partial cached response can't be retried into the same failure.
+      mv.src = baseSrc + (baseSrc.includes('?') ? '&' : '?') + 'retry=' + Date.now();
+      armStallTimeout();
+    }
 
     mv.addEventListener('progress', (e) => {
       const p = Math.round((e.detail.totalProgress || 0) * 100);
@@ -4112,19 +3583,16 @@ panels.forEach(p => observer.observe(p));
       if (pct) pct.textContent = p < 100 ? ('Loading model… ' + p + '%') : 'Preparing scene…';
     });
     mv.addEventListener('load', () => {
+      loaded = true;
+      clearTimeout(stallTimer);
       if (loadingEl) loadingEl.setAttribute('data-visible', 'false');
+      if (errorEl) errorEl.hidden = true;
     });
-    mv.addEventListener('error', () => {
-      if (loadingEl) loadingEl.setAttribute('data-visible', 'false');
-      if (errorEl) errorEl.hidden = false;
-    });
-    // Some browsers never fire 'error' for a stalled fetch — fail gracefully after a timeout.
-    setTimeout(() => {
-      if (mv.modelIsVisible === false && errorEl && errorEl.hidden) {
-        if (loadingEl) loadingEl.setAttribute('data-visible', 'false');
-        errorEl.hidden = false;
-      }
-    }, 25000);
+    mv.addEventListener('error', retry);
+
+    // Kick off the stall watchdog immediately — loading="eager" means the
+    // fetch starts right away, before the section is ever scrolled to.
+    armStallTimeout();
   });
 })();
 </script>

@@ -2203,32 +2203,17 @@ let gravityMode = false; // toggle: repel vs attract
 // Blue hue spectrum: deep indigo 225, electric blue 210, sky 200, cyan 185, violet 250
 const HUES = [225, 210, 200, 195, 185, 248, 220, 205];
 
-let fadeMidFrac = 0.75; // fraction of canvas height where the bridge's midpoint falls (recomputed below)
-
 function resize() {
-  // Span the canvas across the *entire* hero, including the circuit-bridge
-  // below the title — not just the top screen — so the node field reads as
-  // a continuous background behind the flowing data-stream animation.
-  // Measured from the actual DOM rather than a guessed vh value, since the
-  // bridge's height varies by breakpoint (165vh desktop / 100vh mobile).
-  const heroEl = document.getElementById('hero');
-  const bridgeEl = document.getElementById('hero-bridge');
-  const targetH = heroEl ? heroEl.offsetHeight : window.innerHeight * 1.7;
+  // Contained to the hero title/subtitle block only — no longer spans into
+  // the circuit bridge, so the bridge reads as its own standalone piece
+  // against the plain page background instead of showing nodes through it.
+  const heroContentEl = document.querySelector('.hero-content');
+  const targetH = heroContentEl ? heroContentEl.offsetHeight + 80 : window.innerHeight;
   W = canvas.width  = window.innerWidth;
   H = canvas.height = targetH;
   canvas.style.height = targetH + 'px';
 
-  // Fade the node field out by the MIDDLE of the circuit bridge, not its
-  // end — measured from the bridge's real position/height so it lands in
-  // the right place regardless of viewport or breakpoint.
-  if (bridgeEl && H > 0) {
-    const bridgeMidY = bridgeEl.offsetTop + bridgeEl.offsetHeight * 0.5;
-    fadeMidFrac = Math.max(0.1, Math.min(0.95, bridgeMidY / H));
-  }
-  const fStart = Math.max(0, (fadeMidFrac - 0.14) * 100).toFixed(1) + '%';
-  const fEnd   = Math.min(100, (fadeMidFrac + 0.14) * 100).toFixed(1) + '%';
-  const bottomFade =
-    `linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,1) ${fStart}, rgba(0,0,0,0) ${fEnd})`;
+  const bottomFade = 'linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 68%, rgba(0,0,0,0) 97%)';
   const rightFade = 'linear-gradient(to right, rgba(0,0,0,0) 0%, rgba(0,0,0,1) 8%, rgba(0,0,0,1) 92%, rgba(0,0,0,0) 100%)';
   const topFade = 'linear-gradient(to top, rgba(0,0,0,0) 0%, rgba(0,0,0,1) 10%, rgba(0,0,0,1) 100%)';
   const maskVal = `${bottomFade}, ${rightFade}, ${topFade}`;
@@ -2468,14 +2453,9 @@ function animate() {
   requestAnimationFrame(animate);
   // Skip heavy drawing when the node field is scrolled away or tab hidden
   if (!__heroVisible() || !window.__tabVisible) return;
-  // Fade the whole field out gradually as you approach the end of the
-  // circuit bridge — the canvas's own height ends exactly at the bridge's
-  // bottom edge (it's the last element in #hero's flow), so this fades
-  // out over roughly the last quarter of scroll through the bridge.
-  // Fade the whole field out around the MIDDLE of the circuit bridge —
-  // fadeMidFrac is measured from the bridge's real position (set in
-  // resize()), so this stays correctly aligned regardless of viewport.
-  const sf = 1 - Math.max(0, (window.scrollY - H * (fadeMidFrac - 0.14))) / (H * 0.28);
+  // Fade the whole field out as you scroll past the hero title block —
+  // it's contained to that area now, not the circuit bridge below.
+  const sf = 1 - window.scrollY / (H * 0.9);
   canvas.style.opacity = Math.max(0, Math.min(1, sf)).toFixed(3);
   frameT++;
   ctx.clearRect(0, 0, W, H);

@@ -145,7 +145,6 @@
   }
   .hero-eyebrow {
     display: inline-flex; align-items: center; gap: .5rem;
-    font-family: 'JetBrains Mono', 'Courier New', monospace;
     font-size: .75rem; letter-spacing: .15em; text-transform: uppercase;
     color: var(--amber); margin-bottom: 1.5rem;
   }
@@ -153,14 +152,21 @@
     content: ''; display: block; width: 2rem; height: 1px; background: var(--amber); opacity: .5;
   }
   h1 {
-    font-family: 'JetBrains Mono', 'Courier New', monospace;
-    font-size: clamp(1.85rem, 4.6vw, 3.7rem);
-    font-weight: 500; line-height: 1.15; letter-spacing: -.01em;
-    margin-bottom: 1.5rem;
+    font-family: 'Syne', sans-serif;
+    font-size: clamp(2.3rem, 6.4vw, 4.9rem);
+    font-weight: 700; line-height: 1.1; letter-spacing: -.03em;
+    margin-bottom: 2.6rem;
     color: var(--white);
   }
-  h1 .line-2 { color: var(--green); display: block; font-weight: 400; }
-  h1 .line-3 { color: var(--muted); font-weight: 400; font-size: .5em; letter-spacing: .01em; display: block; margin-top: .5em; }
+  h1 .line-2 { color: var(--green); display: block; font-weight: 700; }
+  h1 .line-3 { color: var(--muted); font-weight: 400; font-size: .5em; letter-spacing: .01em; display: block; margin-top: 1.4em; }
+  h1 .line-3, .hero-sub {
+    opacity: 0; transform: translateY(18px);
+    transition: opacity .8s cubic-bezier(.22,1,.36,1), transform .8s cubic-bezier(.22,1,.36,1);
+  }
+  h1 .line-3.reveal-in, .hero-sub.reveal-in {
+    opacity: 1; transform: translateY(0);
+  }
   h1 .line-1 { display: block; }
   h1 .line-1, h1 .line-2 { opacity: 0; }
 
@@ -201,15 +207,39 @@
   .glitch-ch { opacity: 0; display: inline-block; position: relative; }
   .glitch-ch.gl-active {
     opacity: 1; color: var(--cyan);
-    text-shadow: -1.5px 0 #E879F9, 1.5px 0 #22D3EE;
+    text-shadow: -3px 0 #E879F9, 3px 0 #22D3EE;
   }
+  /* Each character flashes brighter through the glitch colors as it locks
+     in, then settles into a moderate cyan/magenta chromatic glow —
+     applied consistently across the title (line-1 overrides to white
+     below). Offset widened for a more visible chromatic split. */
   .glitch-ch.gl-locked {
-    opacity: 1; color: inherit; text-shadow: none;
-    animation: glitchLockFlash .25s ease-out;
+    opacity: 1; color: var(--cyan);
+    text-shadow:
+      -2px 0 #E879F9, 2px 0 #22D3EE,
+      0 0 6px rgba(34,211,238,.55), 0 0 14px rgba(232,121,249,.25);
+    animation: glitchLockFlash .3s ease-out;
   }
   @keyframes glitchLockFlash {
-    0%   { text-shadow: -2px 0 #E879F9, 2px 0 #22D3EE; filter: brightness(1.8); }
-    100% { text-shadow: none; filter: brightness(1); }
+    0%   { text-shadow: -3.5px 0 #E879F9, 3.5px 0 #22D3EE; filter: brightness(1.8); }
+    55%  { text-shadow: -2.5px 0 #E879F9, 2.5px 0 #22D3EE, 0 0 12px rgba(34,211,238,.8); filter: brightness(1.35); }
+    100% { text-shadow:
+             -2px 0 #E879F9, 2px 0 #22D3EE,
+             0 0 6px rgba(34,211,238,.55), 0 0 14px rgba(232,121,249,.25);
+           filter: brightness(1); }
+  }
+  /* The name resolves to white instead of staying in the cyan/magenta
+     chromatic split — still flashes through the same glitch colors on
+     the way in, then settles clean. */
+  .line-1 .glitch-ch.gl-locked {
+    color: #fff;
+    text-shadow: 0 0 6px rgba(255,255,255,.5);
+    animation: glitchLockFlashWhite .3s ease-out;
+  }
+  @keyframes glitchLockFlashWhite {
+    0%   { text-shadow: -3.5px 0 #E879F9, 3.5px 0 #22D3EE; filter: brightness(1.8); }
+    55%  { text-shadow: -2px 0 #E879F9, 2px 0 #22D3EE; filter: brightness(1.35); }
+    100% { text-shadow: 0 0 6px rgba(255,255,255,.5); filter: brightness(1); }
   }
   @media (max-width: 560px) {
     .hero-title-row { flex-direction: column; gap: .8rem; }
@@ -217,7 +247,7 @@
 
   .hero-sub {
     color: var(--muted); font-size: 1.05rem; max-width: 480px;
-    margin: 0 auto 2.5rem; line-height: 1.65;
+    margin: .5rem auto 2.5rem; line-height: 1.65;
   }
   .hero-btns { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
   .btn-primary {
@@ -1293,7 +1323,7 @@
       <span class="hero-pulse-line" id="hero-pulse-line"></span>
       <h1>
         <span class="line-1">Nicholas Gearinger</span>
-        <span class="line-2">AI × Design</span>
+        <span class="line-2">AI & Design</span>
         <span class="line-3">Engineering Intelligent Experiences</span>
       </h1>
     </div>
@@ -2368,6 +2398,37 @@ panels.forEach(p => observer.observe(p));
   const tabs  = Array.from(document.querySelectorAll('#resume-tabs .resume-tab'));
   if (!stage || !prism || !tabs.length) return;
 
+  const faces = Array.from(prism.querySelectorAll('.resume-face'));
+  // Containers whose own children should stagger individually rather than
+  // the whole container appearing as one flat block (facts, tags, timeline
+  // entries, skill groups all cascade in one-by-one).
+  const LIST_CONTAINERS = ['.rface-facts', '.rface-tags', '.rtimeline', '.rskills'];
+
+  function animateFaceText(faceEl) {
+    if (!faceEl || window.__reduceMotion) return;
+    let units = [];
+    Array.from(faceEl.children).forEach((child) => {
+      const isList = LIST_CONTAINERS.some((sel) => child.matches(sel));
+      if (isList && child.children.length) units.push(...Array.from(child.children));
+      else units.push(child);
+    });
+    if (!units.length) return;
+    units.forEach((el) => {
+      el.style.transition = 'none';
+      el.style.opacity = '0';
+      el.style.transform = 'translateY(14px)';
+    });
+    void faceEl.offsetHeight; // force reflow so the hidden state commits before animating
+    units.forEach((el, i) => {
+      requestAnimationFrame(() => {
+        el.style.transition = 'opacity .5s cubic-bezier(.22,1,.36,1), transform .5s cubic-bezier(.22,1,.36,1)';
+        el.style.transitionDelay = (i * 55) + 'ms';
+        el.style.opacity = '1';
+        el.style.transform = 'translateY(0)';
+      });
+    });
+  }
+
   let current = 0;      // active face 0..3
   let ry = 0;           // current rotateY in degrees
   let barsShown = false;
@@ -2388,13 +2449,14 @@ panels.forEach(p => observer.observe(p));
       if (fill) requestAnimationFrame(() => { fill.style.width = lvl + '%'; });
     });
   }
-  function goTo(i, animate) {
+  function goTo(i, animate, skipTextAnim) {
     current = ((i % 4) + 4) % 4;
     ry = -current * 90;
     if (!animate) prism.classList.add('dragging');   // skip transition
     apply();
     if (!animate) requestAnimationFrame(() => prism.classList.remove('dragging'));
     updateTabs();
+    if (!skipTextAnim) animateFaceText(faces[current]);
     if (current === 3) animateBars();
   }
 
@@ -2423,7 +2485,9 @@ panels.forEach(p => observer.observe(p));
     const snapped = Math.round(ry / 90) * 90;
     ry = snapped;
     apply();
-    current = (((-snapped / 90) % 4) + 4) % 4;
+    const next = (((-snapped / 90) % 4) + 4) % 4;
+    if (next !== current) animateFaceText(faces[next]);
+    current = next;
     updateTabs();
     if (current === 3) animateBars();
   }
@@ -2439,7 +2503,21 @@ panels.forEach(p => observer.observe(p));
   });
 
   window.addEventListener('resize', window.__debounce(apply, 160));
-  goTo(0, false);
+  goTo(0, false, true); // silent setup — text reveal fires below, once actually in view
+
+  // Reveal face 0's text the first time the résumé actually scrolls into
+  // view, rather than animating it invisibly before the user ever sees it.
+  if ('IntersectionObserver' in window) {
+    const firstReveal = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) {
+        animateFaceText(faces[current]);
+        firstReveal.disconnect();
+      }
+    }, { threshold: 0.2 });
+    firstReveal.observe(stage);
+  } else {
+    animateFaceText(faces[0]);
+  }
 })();
 
 /* ── ANIMATED HOVER: cursor spotlight + live 3D tilt (via CSS vars so it
@@ -2585,7 +2663,7 @@ panels.forEach(p => observer.observe(p));
   /* ── Source snippets ── */
   const SNIPPETS = [
     { lang: 'TypeScript', file: 'neural_net.ts', lines: [
-      [['sy-cmt','// Nicholas Gearinger — AI × Design']],
+      [['sy-cmt','// Nicholas Gearinger — AI & Design']],
       [['sy-kw','import '],['sy-cls','{ Transformer, Tokenizer }'],['sy-kw',' from '],['sy-str','"@ng/llm-core"']],
       [['sy-kw','import '],['sy-cls','{ Dataset, DataLoader }'],['sy-kw',' from '],['sy-str','"@ng/data"']],
       [[]],
@@ -3559,7 +3637,7 @@ panels.forEach(p => observer.observe(p));
 })();
 </script>
 <script>
-/* ── HERO GLITCH DECRYPT: name + "AI × Design" resolve via a cyberpunk
+/* ── HERO GLITCH DECRYPT: name + "AI & Design" resolve via a cyberpunk
       glitch effect — characters flicker through noise glyphs with RGB
       channel-split before locking into place, staggered rather than a
       linear typewriter, for a "terminal breach" feel. ── */
@@ -3574,6 +3652,10 @@ panels.forEach(p => observer.observe(p));
   if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     if (pulseLine) pulseLine.style.visibility = 'hidden';
     els.forEach((el) => { el.style.opacity = '1'; });
+    const line3 = document.querySelector('h1 .line-3');
+    const sub = document.querySelector('.hero-sub');
+    if (line3) line3.classList.add('reveal-in');
+    if (sub) sub.classList.add('reveal-in');
     return;
   }
 
@@ -3623,7 +3705,12 @@ panels.forEach(p => observer.observe(p));
     setTimeout(() => {
       if (pulseLine) pulseLine.style.visibility = 'hidden';
       if (name) glitchLine(name, () => {
-        if (title) setTimeout(() => glitchLine(title), 150);
+        if (title) setTimeout(() => glitchLine(title, () => {
+          const line3 = document.querySelector('h1 .line-3');
+          const sub = document.querySelector('.hero-sub');
+          if (line3) line3.classList.add('reveal-in');
+          if (sub) setTimeout(() => sub.classList.add('reveal-in'), 180);
+        }), 150);
       });
     }, pulseLine ? PULSE_MS : 0);
   }

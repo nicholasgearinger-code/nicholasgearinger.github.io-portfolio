@@ -646,7 +646,8 @@
     stroke: #E879F9; filter: drop-shadow(0 0 6px rgba(232,121,249,.7));
   }
   .rconst-node:hover .rconst-node-glow, .rconst-node:focus .rconst-node-glow { fill: rgba(232,121,249,.3); }
-  .rconst-node-icon { font-size: 17px; pointer-events: none; }
+  .rconst-node-icon { font-size: 15px; pointer-events: none; fill: var(--cyan); font-weight: 600; transition: fill .2s; }
+  .rconst-node:hover .rconst-node-icon, .rconst-node:focus .rconst-node-icon { fill: #E879F9; }
   .rconst-node:focus { outline: none; }
   .rconst-tooltip {
     position: absolute; left: 50%; bottom: -.4rem; transform: translate(-50%, 100%);
@@ -738,7 +739,8 @@
     border-color: var(--cyan); box-shadow: 0 14px 34px -14px rgba(34,211,238,.4);
     transform: translateY(-3px) scale(1);
   }
-  .tool-icon { font-size: 1.8rem; }
+  .tool-icon { font-size: 1.8rem; color: var(--cyan); transition: color .2s; }
+  .tool-badge:hover .tool-icon { color: #E879F9; }
   .tool-name { font-size: .82rem; color: var(--white); font-weight: 600; text-align: center; }
   .tool-badge::after {
     content: attr(data-years);
@@ -1844,132 +1846,132 @@
     <g class="rconst-node" data-label="Graphic Design" data-level="92" data-years="3 yr" tabindex="0" role="button" aria-label="Graphic Design">
       <circle class="rconst-node-glow" cx="145.4" cy="41.9" r="27.2"></circle>
       <circle class="rconst-node-dot" cx="145.4" cy="41.9" r="18.2"></circle>
-      <text class="rconst-node-icon" x="145.4" y="47.9" text-anchor="middle">🎨</text>
+      <text class="rconst-node-icon" x="145.4" y="47.9" text-anchor="middle">◈</text>
     </g>
     <g class="rconst-node" data-label="Illustration" data-level="65" data-years="familiar" tabindex="0" role="button" aria-label="Illustration">
       <circle class="rconst-node-glow" cx="173.5" cy="24.3" r="24.5"></circle>
       <circle class="rconst-node-dot" cx="173.5" cy="24.3" r="15.5"></circle>
-      <text class="rconst-node-icon" x="173.5" y="30.3" text-anchor="middle">🖋️</text>
+      <text class="rconst-node-icon" x="173.5" y="30.3" text-anchor="middle">✎</text>
     </g>
     <g class="rconst-node" data-label="Branding" data-level="65" data-years="familiar" tabindex="0" role="button" aria-label="Branding">
       <circle class="rconst-node-glow" cx="206.5" cy="24.3" r="24.5"></circle>
       <circle class="rconst-node-dot" cx="206.5" cy="24.3" r="15.5"></circle>
-      <text class="rconst-node-icon" x="206.5" y="30.3" text-anchor="middle">🏷️</text>
+      <text class="rconst-node-icon" x="206.5" y="30.3" text-anchor="middle">⬡</text>
     </g>
     <g class="rconst-node" data-label="Web Design" data-level="65" data-years="familiar" tabindex="0" role="button" aria-label="Web Design">
       <circle class="rconst-node-glow" cx="234.6" cy="41.9" r="24.5"></circle>
       <circle class="rconst-node-dot" cx="234.6" cy="41.9" r="15.5"></circle>
-      <text class="rconst-node-icon" x="234.6" y="47.9" text-anchor="middle">🌐</text>
+      <text class="rconst-node-icon" x="234.6" y="47.9" text-anchor="middle">⊕</text>
     </g>
     <g class="rconst-node" data-label="Photoshop" data-level="65" data-years="familiar" tabindex="0" role="button" aria-label="Photoshop">
       <circle class="rconst-node-glow" cx="289.6" cy="96.7" r="24.5"></circle>
       <circle class="rconst-node-dot" cx="289.6" cy="96.7" r="15.5"></circle>
-      <text class="rconst-node-icon" x="289.6" y="102.7" text-anchor="middle">🖼️</text>
+      <text class="rconst-node-icon" x="289.6" y="102.7" text-anchor="middle">◐</text>
     </g>
     <g class="rconst-node" data-label="Illustrator" data-level="65" data-years="familiar" tabindex="0" role="button" aria-label="Illustrator">
       <circle class="rconst-node-glow" cx="315.2" cy="101.0" r="24.5"></circle>
       <circle class="rconst-node-dot" cx="315.2" cy="101.0" r="15.5"></circle>
-      <text class="rconst-node-icon" x="315.2" y="107.0" text-anchor="middle">✏️</text>
+      <text class="rconst-node-icon" x="315.2" y="107.0" text-anchor="middle">◑</text>
     </g>
     <g class="rconst-node" data-label="InDesign" data-level="74" data-years="1 yr" tabindex="0" role="button" aria-label="InDesign">
       <circle class="rconst-node-glow" cx="336.6" cy="115.7" r="25.4"></circle>
       <circle class="rconst-node-dot" cx="336.6" cy="115.7" r="16.4"></circle>
-      <text class="rconst-node-icon" x="336.6" y="121.7" text-anchor="middle">📐</text>
+      <text class="rconst-node-icon" x="336.6" y="121.7" text-anchor="middle">▤</text>
     </g>
     <g class="rconst-node" data-label="Premiere" data-level="65" data-years="familiar" tabindex="0" role="button" aria-label="Premiere">
       <circle class="rconst-node-glow" cx="349.8" cy="138.1" r="24.5"></circle>
       <circle class="rconst-node-dot" cx="349.8" cy="138.1" r="15.5"></circle>
-      <text class="rconst-node-icon" x="349.8" y="144.1" text-anchor="middle">🎞️</text>
+      <text class="rconst-node-icon" x="349.8" y="144.1" text-anchor="middle">▶</text>
     </g>
     <g class="rconst-node" data-label="Audition" data-level="74" data-years="1 yr" tabindex="0" role="button" aria-label="Audition">
       <circle class="rconst-node-glow" cx="352.3" cy="163.9" r="25.4"></circle>
       <circle class="rconst-node-dot" cx="352.3" cy="163.9" r="16.4"></circle>
-      <text class="rconst-node-icon" x="352.3" y="169.9" text-anchor="middle">🎙️</text>
+      <text class="rconst-node-icon" x="352.3" y="169.9" text-anchor="middle">◉</text>
     </g>
     <g class="rconst-node" data-label="Creative Suite" data-level="65" data-years="familiar" tabindex="0" role="button" aria-label="Creative Suite">
       <circle class="rconst-node-glow" cx="343.6" cy="188.4" r="24.5"></circle>
       <circle class="rconst-node-dot" cx="343.6" cy="188.4" r="15.5"></circle>
-      <text class="rconst-node-icon" x="343.6" y="194.4" text-anchor="middle">🧰</text>
+      <text class="rconst-node-icon" x="343.6" y="194.4" text-anchor="middle">⬢</text>
     </g>
     <g class="rconst-node" data-label="Video Production" data-level="65" data-years="familiar" tabindex="0" role="button" aria-label="Video Production">
       <circle class="rconst-node-glow" cx="325.4" cy="206.9" r="24.5"></circle>
       <circle class="rconst-node-dot" cx="325.4" cy="206.9" r="15.5"></circle>
-      <text class="rconst-node-icon" x="325.4" y="212.9" text-anchor="middle">📹</text>
+      <text class="rconst-node-icon" x="325.4" y="212.9" text-anchor="middle">▣</text>
     </g>
     <g class="rconst-node" data-label="Maya" data-level="84" data-years="2 yr" tabindex="0" role="button" aria-label="Maya">
       <circle class="rconst-node-glow" cx="310.6" cy="258.9" r="26.4"></circle>
       <circle class="rconst-node-dot" cx="310.6" cy="258.9" r="17.4"></circle>
-      <text class="rconst-node-icon" x="310.6" y="264.9" text-anchor="middle">🗿</text>
+      <text class="rconst-node-icon" x="310.6" y="264.9" text-anchor="middle">◆</text>
     </g>
     <g class="rconst-node" data-label="3ds Max" data-level="74" data-years="1 yr" tabindex="0" role="button" aria-label="3ds Max">
       <circle class="rconst-node-glow" cx="312.4" cy="288.6" r="25.4"></circle>
       <circle class="rconst-node-dot" cx="312.4" cy="288.6" r="16.4"></circle>
-      <text class="rconst-node-icon" x="312.4" y="294.6" text-anchor="middle">🧊</text>
+      <text class="rconst-node-icon" x="312.4" y="294.6" text-anchor="middle">▲</text>
     </g>
     <g class="rconst-node" data-label="3D Animation" data-level="74" data-years="1 yr" tabindex="0" role="button" aria-label="3D Animation">
       <circle class="rconst-node-glow" cx="299.7" cy="315.6" r="25.4"></circle>
       <circle class="rconst-node-dot" cx="299.7" cy="315.6" r="16.4"></circle>
-      <text class="rconst-node-icon" x="299.7" y="321.6" text-anchor="middle">🎬</text>
+      <text class="rconst-node-icon" x="299.7" y="321.6" text-anchor="middle">◢</text>
     </g>
     <g class="rconst-node" data-label="2D Animation" data-level="74" data-years="1 yr" tabindex="0" role="button" aria-label="2D Animation">
       <circle class="rconst-node-glow" cx="275.6" cy="333.2" r="25.4"></circle>
       <circle class="rconst-node-dot" cx="275.6" cy="333.2" r="16.4"></circle>
-      <text class="rconst-node-icon" x="275.6" y="339.2" text-anchor="middle">🖌️</text>
+      <text class="rconst-node-icon" x="275.6" y="339.2" text-anchor="middle">◣</text>
     </g>
     <g class="rconst-node" data-label="Unreal Engine" data-level="65" data-years="familiar" tabindex="0" role="button" aria-label="Unreal Engine">
       <circle class="rconst-node-glow" cx="246.0" cy="336.9" r="24.5"></circle>
       <circle class="rconst-node-dot" cx="246.0" cy="336.9" r="15.5"></circle>
-      <text class="rconst-node-icon" x="246.0" y="342.9" text-anchor="middle">🎮</text>
+      <text class="rconst-node-icon" x="246.0" y="342.9" text-anchor="middle">⟐</text>
     </g>
     <g class="rconst-node" data-label="Game Development" data-level="65" data-years="familiar" tabindex="0" role="button" aria-label="Game Development">
       <circle class="rconst-node-glow" cx="218.2" cy="325.9" r="24.5"></circle>
       <circle class="rconst-node-dot" cx="218.2" cy="325.9" r="15.5"></circle>
-      <text class="rconst-node-icon" x="218.2" y="331.9" text-anchor="middle">👾</text>
+      <text class="rconst-node-icon" x="218.2" y="331.9" text-anchor="middle">⌘</text>
     </g>
     <g class="rconst-node" data-label="C++" data-level="65" data-years="familiar" tabindex="0" role="button" aria-label="C++">
       <circle class="rconst-node-glow" cx="139.0" cy="336.1" r="24.5"></circle>
       <circle class="rconst-node-dot" cx="139.0" cy="336.1" r="15.5"></circle>
-      <text class="rconst-node-icon" x="139.0" y="342.1" text-anchor="middle">💻</text>
+      <text class="rconst-node-icon" x="139.0" y="342.1" text-anchor="middle">⌬</text>
     </g>
     <g class="rconst-node" data-label="JavaScript" data-level="65" data-years="familiar" tabindex="0" role="button" aria-label="JavaScript">
       <circle class="rconst-node-glow" cx="106.0" cy="333.8" r="24.5"></circle>
       <circle class="rconst-node-dot" cx="106.0" cy="333.8" r="15.5"></circle>
-      <text class="rconst-node-icon" x="106.0" y="339.8" text-anchor="middle">🟨</text>
+      <text class="rconst-node-icon" x="106.0" y="339.8" text-anchor="middle">⌁</text>
     </g>
     <g class="rconst-node" data-label="Object-Oriented Programming" data-level="74" data-years="1 yr" tabindex="0" role="button" aria-label="Object-Oriented Programming">
       <circle class="rconst-node-glow" cx="79.2" cy="314.3" r="25.4"></circle>
       <circle class="rconst-node-dot" cx="79.2" cy="314.3" r="16.4"></circle>
-      <text class="rconst-node-icon" x="79.2" y="320.3" text-anchor="middle">🧩</text>
+      <text class="rconst-node-icon" x="79.2" y="320.3" text-anchor="middle">⧉</text>
     </g>
     <g class="rconst-node" data-label="WordPress" data-level="74" data-years="1 yr" tabindex="0" role="button" aria-label="WordPress">
       <circle class="rconst-node-glow" cx="66.8" cy="283.7" r="25.4"></circle>
       <circle class="rconst-node-dot" cx="66.8" cy="283.7" r="16.4"></circle>
-      <text class="rconst-node-icon" x="66.8" y="289.7" text-anchor="middle">🌍</text>
+      <text class="rconst-node-icon" x="66.8" y="289.7" text-anchor="middle">⊞</text>
     </g>
     <g class="rconst-node" data-label="Customer Service" data-level="92" data-years="3 yr" tabindex="0" role="button" aria-label="Customer Service">
       <circle class="rconst-node-glow" cx="42.7" cy="196.7" r="27.2"></circle>
       <circle class="rconst-node-dot" cx="42.7" cy="196.7" r="18.2"></circle>
-      <text class="rconst-node-icon" x="42.7" y="202.7" text-anchor="middle">🤝</text>
+      <text class="rconst-node-icon" x="42.7" y="202.7" text-anchor="middle">⟡</text>
     </g>
     <g class="rconst-node" data-label="Microsoft Office" data-level="65" data-years="familiar" tabindex="0" role="button" aria-label="Microsoft Office">
       <circle class="rconst-node-glow" cx="28.6" cy="169.1" r="24.5"></circle>
       <circle class="rconst-node-dot" cx="28.6" cy="169.1" r="15.5"></circle>
-      <text class="rconst-node-icon" x="28.6" y="175.1" text-anchor="middle">📊</text>
+      <text class="rconst-node-icon" x="28.6" y="175.1" text-anchor="middle">▦</text>
     </g>
     <g class="rconst-node" data-label="PowerPoint" data-level="65" data-years="familiar" tabindex="0" role="button" aria-label="PowerPoint">
       <circle class="rconst-node-glow" cx="30.2" cy="138.1" r="24.5"></circle>
       <circle class="rconst-node-dot" cx="30.2" cy="138.1" r="15.5"></circle>
-      <text class="rconst-node-icon" x="30.2" y="144.1" text-anchor="middle">📈</text>
+      <text class="rconst-node-icon" x="30.2" y="144.1" text-anchor="middle">▷</text>
     </g>
     <g class="rconst-node" data-label="Google Suite" data-level="74" data-years="1 yr" tabindex="0" role="button" aria-label="Google Suite">
       <circle class="rconst-node-glow" cx="47.2" cy="112.0" r="25.4"></circle>
       <circle class="rconst-node-dot" cx="47.2" cy="112.0" r="16.4"></circle>
-      <text class="rconst-node-icon" x="47.2" y="118.0" text-anchor="middle">📁</text>
+      <text class="rconst-node-icon" x="47.2" y="118.0" text-anchor="middle">◫</text>
     </g>
     <g class="rconst-node" data-label="Photography" data-level="65" data-years="familiar" tabindex="0" role="button" aria-label="Photography">
       <circle class="rconst-node-glow" cx="74.8" cy="97.9" r="24.5"></circle>
       <circle class="rconst-node-dot" cx="74.8" cy="97.9" r="15.5"></circle>
-      <text class="rconst-node-icon" x="74.8" y="103.9" text-anchor="middle">📷</text>
+      <text class="rconst-node-icon" x="74.8" y="103.9" text-anchor="middle">⊙</text>
     </g>
             </svg>
             <div class="rconst-tooltip" id="rconst-tooltip" hidden></div>
@@ -1991,21 +1993,21 @@
     <h2>Software I<br>actually use</h2>
     <p class="lead" style="margin:0 auto 2.5rem;">Pulled straight from my résumé — the real tools behind the work, not a buzzword list.</p>
     <div class="tools-grid" id="tools-grid">
-      <div class="tool-badge" data-years="3 yr"><span class="tool-icon">🎨</span><span class="tool-name">Graphic Design</span></div>
-      <div class="tool-badge" data-years="familiar"><span class="tool-icon">🖼️</span><span class="tool-name">Photoshop</span></div>
-      <div class="tool-badge" data-years="familiar"><span class="tool-icon">✏️</span><span class="tool-name">Illustrator</span></div>
-      <div class="tool-badge" data-years="1 yr"><span class="tool-icon">📐</span><span class="tool-name">InDesign</span></div>
-      <div class="tool-badge" data-years="familiar"><span class="tool-icon">🎞️</span><span class="tool-name">Premiere</span></div>
-      <div class="tool-badge" data-years="1 yr"><span class="tool-icon">🎙️</span><span class="tool-name">Audition</span></div>
-      <div class="tool-badge" data-years="2 yr"><span class="tool-icon">🗿</span><span class="tool-name">Maya</span></div>
-      <div class="tool-badge" data-years="1 yr"><span class="tool-icon">🧊</span><span class="tool-name">3ds Max</span></div>
-      <div class="tool-badge" data-years="familiar"><span class="tool-icon">🎮</span><span class="tool-name">Unreal Engine</span></div>
-      <div class="tool-badge" data-years="familiar"><span class="tool-icon">💻</span><span class="tool-name">C++</span></div>
-      <div class="tool-badge" data-years="familiar"><span class="tool-icon">🟨</span><span class="tool-name">JavaScript</span></div>
-      <div class="tool-badge" data-years="1 yr"><span class="tool-icon">🌍</span><span class="tool-name">WordPress</span></div>
-      <div class="tool-badge" data-years="1 yr"><span class="tool-icon">📁</span><span class="tool-name">Google Suite</span></div>
-      <div class="tool-badge" data-years="familiar"><span class="tool-icon">📊</span><span class="tool-name">Microsoft Office</span></div>
-      <div class="tool-badge" data-years="3 yr"><span class="tool-icon">🤝</span><span class="tool-name">Customer Service</span></div>
+      <div class="tool-badge" data-years="3 yr"><span class="tool-icon">◈</span><span class="tool-name">Graphic Design</span></div>
+      <div class="tool-badge" data-years="familiar"><span class="tool-icon">◐</span><span class="tool-name">Photoshop</span></div>
+      <div class="tool-badge" data-years="familiar"><span class="tool-icon">◑</span><span class="tool-name">Illustrator</span></div>
+      <div class="tool-badge" data-years="1 yr"><span class="tool-icon">▤</span><span class="tool-name">InDesign</span></div>
+      <div class="tool-badge" data-years="familiar"><span class="tool-icon">▶</span><span class="tool-name">Premiere</span></div>
+      <div class="tool-badge" data-years="1 yr"><span class="tool-icon">◉</span><span class="tool-name">Audition</span></div>
+      <div class="tool-badge" data-years="2 yr"><span class="tool-icon">◆</span><span class="tool-name">Maya</span></div>
+      <div class="tool-badge" data-years="1 yr"><span class="tool-icon">▲</span><span class="tool-name">3ds Max</span></div>
+      <div class="tool-badge" data-years="familiar"><span class="tool-icon">⟐</span><span class="tool-name">Unreal Engine</span></div>
+      <div class="tool-badge" data-years="familiar"><span class="tool-icon">⌬</span><span class="tool-name">C++</span></div>
+      <div class="tool-badge" data-years="familiar"><span class="tool-icon">⌁</span><span class="tool-name">JavaScript</span></div>
+      <div class="tool-badge" data-years="1 yr"><span class="tool-icon">⊞</span><span class="tool-name">WordPress</span></div>
+      <div class="tool-badge" data-years="1 yr"><span class="tool-icon">◫</span><span class="tool-name">Google Suite</span></div>
+      <div class="tool-badge" data-years="familiar"><span class="tool-icon">▦</span><span class="tool-name">Microsoft Office</span></div>
+      <div class="tool-badge" data-years="3 yr"><span class="tool-icon">⟡</span><span class="tool-name">Customer Service</span></div>
     </div>
   </div>
 </section>
@@ -2021,7 +2023,7 @@
     <div class="skills-grid">
 
       <div class="skill-card">
-        <div class="skill-icon" style="background:rgba(59,130,246,.15);">🧠</div>
+        <div class="skill-icon" style="background:rgba(59,130,246,.15);">⌬</div>
         <h3>AI & Machine Learning</h3>
         <p>Building intelligent features — from LLM-powered workflows to fine-tuned models and RAG pipelines.</p>
         <div class="pill-list">
@@ -2296,16 +2298,16 @@
 
       <div class="rphoto-stage" id="rphoto-stage">
         <div class="rphoto-track" id="rphoto-track">
-          <div class="rphoto-slide" style="background:linear-gradient(135deg,#3B82F6,#22D3EE)"><div class="rphoto-ph">📷</div></div>
-          <div class="rphoto-slide" style="background:linear-gradient(135deg,#818CF8,#3B82F6)"><div class="rphoto-ph">📷</div></div>
-          <div class="rphoto-slide" style="background:linear-gradient(135deg,#22D3EE,#7DD3FC)"><div class="rphoto-ph">📷</div></div>
-          <div class="rphoto-slide" style="background:linear-gradient(135deg,#F59E0B,#818CF8)"><div class="rphoto-ph">📷</div></div>
-          <div class="rphoto-slide" style="background:linear-gradient(135deg,#7DD3FC,#3B82F6)"><div class="rphoto-ph">📷</div></div>
-          <div class="rphoto-slide" style="background:linear-gradient(135deg,#3B82F6,#818CF8)"><div class="rphoto-ph">📷</div></div>
-          <div class="rphoto-slide" style="background:linear-gradient(135deg,#22D3EE,#F59E0B)"><div class="rphoto-ph">📷</div></div>
-          <div class="rphoto-slide" style="background:linear-gradient(135deg,#818CF8,#22D3EE)"><div class="rphoto-ph">📷</div></div>
-          <div class="rphoto-slide" style="background:linear-gradient(135deg,#F59E0B,#22D3EE)"><div class="rphoto-ph">📷</div></div>
-          <div class="rphoto-slide" style="background:linear-gradient(135deg,#3B82F6,#7DD3FC)"><div class="rphoto-ph">📷</div></div>
+          <div class="rphoto-slide" style="background:linear-gradient(135deg,#3B82F6,#22D3EE)"><div class="rphoto-ph">⊙</div></div>
+          <div class="rphoto-slide" style="background:linear-gradient(135deg,#818CF8,#3B82F6)"><div class="rphoto-ph">⊙</div></div>
+          <div class="rphoto-slide" style="background:linear-gradient(135deg,#22D3EE,#7DD3FC)"><div class="rphoto-ph">⊙</div></div>
+          <div class="rphoto-slide" style="background:linear-gradient(135deg,#F59E0B,#818CF8)"><div class="rphoto-ph">⊙</div></div>
+          <div class="rphoto-slide" style="background:linear-gradient(135deg,#7DD3FC,#3B82F6)"><div class="rphoto-ph">⊙</div></div>
+          <div class="rphoto-slide" style="background:linear-gradient(135deg,#3B82F6,#818CF8)"><div class="rphoto-ph">⊙</div></div>
+          <div class="rphoto-slide" style="background:linear-gradient(135deg,#22D3EE,#F59E0B)"><div class="rphoto-ph">⊙</div></div>
+          <div class="rphoto-slide" style="background:linear-gradient(135deg,#818CF8,#22D3EE)"><div class="rphoto-ph">⊙</div></div>
+          <div class="rphoto-slide" style="background:linear-gradient(135deg,#F59E0B,#22D3EE)"><div class="rphoto-ph">⊙</div></div>
+          <div class="rphoto-slide" style="background:linear-gradient(135deg,#3B82F6,#7DD3FC)"><div class="rphoto-ph">⊙</div></div>
         </div>
         <button type="button" class="rphoto-nav rphoto-prev" aria-label="Previous photo">‹</button>
         <button type="button" class="rphoto-nav rphoto-next" aria-label="Next photo">›</button>
@@ -2458,7 +2460,7 @@
 <div id="hud-widget">
   <div class="hud-row"><span class="hud-dot"></span><span>SYSTEM ONLINE</span></div>
   <div class="hud-row" id="hud-time">--:--:--</div>
-  <div class="hud-row js-api-only" id="hud-views-row" style="display:none">👁 <span id="hud-views"><strong>—</strong> views</span></div>
+  <div class="hud-row js-api-only" id="hud-views-row" style="display:none">◉ <span id="hud-views"><strong>—</strong> views</span></div>
   <button type="button" id="crt-toggle" aria-pressed="false">
     <span class="crt-sw"></span><span>CRT FX</span>
   </button>
@@ -2489,7 +2491,7 @@
   <span>© 2025 Nicholas Gearinger — AI & Design</span>
   <span>Built with intention, not a template.</span>
   <div class="foot-extra js-api-only" style="display:none">
-    <span class="view-count">👁 <strong id="view-num">—</strong> views</span>
+    <span class="view-count">◉ <strong id="view-num">—</strong> views</span>
     <form class="subscribe" id="subscribe-form">
       <input type="email" name="email" placeholder="Email for updates" aria-label="Email for updates">
       <input class="cf-hp" name="website" tabindex="-1" aria-hidden="true">

@@ -602,46 +602,50 @@
   .ritem-org { font-size: .82rem; color: var(--sky); font-weight: 600; margin-bottom: .3rem; }
   .ritem-note { font-size: .8rem; color: var(--muted); line-height: 1.55; }
 
-  /* Skill radar chart (category overview, above the detailed bars) */
-  .rradar-wrap { display: flex; justify-content: center; margin: .6rem 0 1.2rem; }
-  .rradar { width: min(220px, 60vw); height: auto; overflow: visible; }
-  .rradar-ring { fill: none; stroke: rgba(255,255,255,.08); stroke-width: .6; }
-  .rradar-axis { stroke: rgba(255,255,255,.12); stroke-width: .6; }
-  .rradar-shape {
-    fill: rgba(34,211,238,.18); stroke: var(--cyan); stroke-width: 1.6;
-    stroke-linejoin: round;
-    opacity: 0; transform: scale(.7); transform-origin: 100px 100px;
-    transition: opacity .6s ease, transform .6s cubic-bezier(.22,1,.36,1);
+  /* Skill constellation — hub-and-spoke, reusing the hero particle-field
+     visual language (core -> category hubs -> individual skill nodes). */
+  .rconst-wrap { position: relative; display: flex; justify-content: center; margin: .4rem 0; }
+  .rconst { width: min(320px, 82vw); height: auto; overflow: visible; }
+  .rconst-line {
+    stroke: rgba(56,189,248,.28); stroke-width: 1;
+    stroke-dasharray: 4 300; stroke-dashoffset: 0;
+    opacity: 0; transition: opacity .5s ease;
   }
-  .rradar-shape.rradar-in { opacity: 1; transform: scale(1); }
-  .rradar-dot {
-    r: 3; fill: var(--navy); stroke: var(--cyan); stroke-width: 1.6;
-    opacity: 0; transition: opacity .4s ease .5s;
+  .rconst-line.rconst-in { opacity: 1; stroke-dasharray: none; }
+  .rconst-core {
+    fill: var(--navy); stroke: #E879F9; stroke-width: 2;
+    r: 9; opacity: 0; transform: scale(.5); transform-origin: 150px 150px;
+    transition: opacity .5s ease, transform .5s cubic-bezier(.22,1,.36,1);
   }
-  .rradar-dot.rradar-in { opacity: 1; }
-  .rradar-label { font-size: 7.5px; fill: var(--slate); font-family: 'Inter', sans-serif; }
-  .rradar-val { fill: var(--cyan); font-weight: 700; }
-  .rskill-ico { display: inline-block; margin-right: .4em; }
-
-  /* Skills bars */
-  .rskills {
-    display: grid; grid-template-columns: 1fr 1fr; gap: .9rem 1.6rem;
-    margin-top: .3rem; overflow-y: auto; align-content: start;
+  .rconst-core.rconst-in { opacity: 1; transform: scale(1); }
+  .rconst-hub {
+    fill: var(--navy); stroke: var(--cyan); stroke-width: 1.8; r: 8;
+    opacity: 0; transform: scale(.5); transform-box: fill-box; transform-origin: center;
+    transition: opacity .45s ease, transform .45s cubic-bezier(.22,1,.36,1);
   }
-  .rskills::-webkit-scrollbar { width: 0; }
-  .rskill-cat {
-    display: block; font-size: .66rem; letter-spacing: .18em; text-transform: uppercase;
-    color: var(--violet); margin-bottom: .45rem;
+  .rconst-hub.rconst-in { opacity: 1; transform: scale(1); }
+  .rconst-hub-label {
+    font-size: 7.5px; letter-spacing: .06em; fill: var(--slate);
+    font-family: 'JetBrains Mono', monospace;
+    opacity: 0; transition: opacity .5s ease .1s;
   }
-  .rbar { margin-bottom: .45rem; }
-  .rbar > span { display: block; font-size: .8rem; color: var(--white); margin-bottom: .28rem; }
-  .rbar-track { height: 6px; border-radius: 100px; background: rgba(255,255,255,.06); overflow: hidden; }
-  .rbar-fill {
-    height: 100%; width: 0; border-radius: 100px;
-    background: linear-gradient(90deg, var(--cyan), var(--blue));
-    box-shadow: 0 0 12px rgba(34,211,238,.55);
-    transition: width 1.1s cubic-bezier(.4,0,.2,1);
+  .rconst-hub-label.rconst-in { opacity: 1; }
+  .rconst-node { cursor: pointer; opacity: 0; transform: scale(.4); transform-box: fill-box; transform-origin: center; transition: opacity .4s ease, transform .4s cubic-bezier(.22,1,.36,1); }
+  .rconst-node.rconst-in { opacity: 1; transform: scale(1); }
+  .rconst-node-glow { fill: rgba(34,211,238,.16); }
+  .rconst-node-dot { fill: var(--navy); stroke: var(--cyan); stroke-width: 1.4; }
+  .rconst-node:hover .rconst-node-dot, .rconst-node:focus .rconst-node-dot { stroke: #E879F9; }
+  .rconst-node:hover .rconst-node-glow, .rconst-node:focus .rconst-node-glow { fill: rgba(232,121,249,.28); }
+  .rconst-node-icon { font-size: 9px; pointer-events: none; }
+  .rconst-node:focus { outline: none; }
+  .rconst-tooltip {
+    position: absolute; left: 50%; bottom: -.4rem; transform: translate(-50%, 100%);
+    background: rgba(3,8,16,.92); border: 1px solid var(--card-border); border-radius: .6rem;
+    padding: .5rem .8rem; font-size: .74rem; color: var(--white); white-space: nowrap;
+    pointer-events: none; z-index: 5;
+    box-shadow: 0 12px 30px -8px rgba(0,0,0,.6);
   }
+  .rconst-tooltip .rconst-tt-level { color: var(--cyan); font-weight: 700; margin-left: .4em; }
 
   /* Photography coverflow carousel — standalone section (see #photography) */
   .photo-gallery { max-width: 900px; margin: 0 auto; text-align: center; }
@@ -1734,56 +1738,115 @@
           <span class="rface-num">04 — Skills</span>
           <h3 class="rface-title">What I bring</h3>
 
-          <div class="rradar-wrap">
-            <svg class="rradar" id="rradar-svg" viewBox="0 0 200 200" aria-label="Skill category overview: Design 90, Engineering 84, Creative &amp; 3D 85, AI/ML 83">
-              <polygon class="rradar-ring" points="100.0,81.2 118.8,100.0 100.0,118.8 81.2,100.0"></polygon>
-              <polygon class="rradar-ring" points="100.0,62.5 137.5,100.0 100.0,137.5 62.5,100.0"></polygon>
-              <polygon class="rradar-ring" points="100.0,43.8 156.2,100.0 100.0,156.2 43.8,100.0"></polygon>
-              <polygon class="rradar-ring" points="100.0,25.0 175.0,100.0 100.0,175.0 25.0,100.0"></polygon>
-              <line class="rradar-axis" x1="100" y1="100" x2="100.0" y2="25.0"></line>
-              <line class="rradar-axis" x1="100" y1="100" x2="175.0" y2="100.0"></line>
-              <line class="rradar-axis" x1="100" y1="100" x2="100.0" y2="175.0"></line>
-              <line class="rradar-axis" x1="100" y1="100" x2="25.0" y2="100.0"></line>
-              <polygon class="rradar-shape" id="rradar-shape" points="100.0,32.5 163.0,100.0 100.0,163.8 37.8,100.0"></polygon>
-              <circle class="rradar-dot" cx="100.0" cy="32.5"></circle>
-              <circle class="rradar-dot" cx="163.0" cy="100.0"></circle>
-              <circle class="rradar-dot" cx="100.0" cy="163.8"></circle>
-              <circle class="rradar-dot" cx="37.8" cy="100.0"></circle>
-              <text class="rradar-label" x="100" y="16" text-anchor="middle">Design <tspan class="rradar-val">90</tspan></text>
-              <text class="rradar-label" x="184" y="103" text-anchor="start">Engineering <tspan class="rradar-val">84</tspan></text>
-              <text class="rradar-label" x="100" y="190" text-anchor="middle">Creative &amp; 3D <tspan class="rradar-val">85</tspan></text>
-              <text class="rradar-label" x="16" y="103" text-anchor="end">AI/ML <tspan class="rradar-val">83</tspan></text>
+          <div class="rconst-wrap">
+            <svg class="rconst" id="rconst-svg" viewBox="0 0 300 300" aria-label="Skill constellation, grouped by category">
+              <g class="rconst-lines">
+      <line class="rconst-line rconst-line-core" x1="150" y1="150" x2="150.0" y2="72.0"></line>
+      <line class="rconst-line rconst-line-core" x1="150" y1="150" x2="228.0" y2="150.0"></line>
+      <line class="rconst-line rconst-line-core" x1="150" y1="150" x2="150.0" y2="228.0"></line>
+      <line class="rconst-line rconst-line-core" x1="150" y1="150" x2="72.0" y2="150.0"></line>
+      <line class="rconst-line" x1="150.0" y1="72.0" x2="115.6" y2="47.9"></line>
+      <line class="rconst-line" x1="150.0" y1="72.0" x2="150.0" y2="30.0"></line>
+      <line class="rconst-line" x1="150.0" y1="72.0" x2="184.4" y2="47.9"></line>
+      <line class="rconst-line" x1="228.0" y1="150.0" x2="252.1" y2="115.6"></line>
+      <line class="rconst-line" x1="228.0" y1="150.0" x2="267.9" y2="136.8"></line>
+      <line class="rconst-line" x1="228.0" y1="150.0" x2="267.9" y2="163.2"></line>
+      <line class="rconst-line" x1="228.0" y1="150.0" x2="252.1" y2="184.4"></line>
+      <line class="rconst-line" x1="150.0" y1="228.0" x2="184.4" y2="252.1"></line>
+      <line class="rconst-line" x1="150.0" y1="228.0" x2="169.4" y2="265.3"></line>
+      <line class="rconst-line" x1="150.0" y1="228.0" x2="150.0" y2="270.0"></line>
+      <line class="rconst-line" x1="150.0" y1="228.0" x2="130.6" y2="265.3"></line>
+      <line class="rconst-line" x1="150.0" y1="228.0" x2="115.6" y2="252.1"></line>
+      <line class="rconst-line" x1="72.0" y1="150.0" x2="47.9" y2="184.4"></line>
+      <line class="rconst-line" x1="72.0" y1="150.0" x2="30.0" y2="150.0"></line>
+      <line class="rconst-line" x1="72.0" y1="150.0" x2="47.9" y2="115.6"></line>
+              </g>
+              <circle class="rconst-core" cx="150" cy="150" r="9"><title>Core skillset</title></circle>
+    <circle class="rconst-hub" cx="150.0" cy="72.0" r="8"><title>Design</title></circle>
+    <text class="rconst-hub-label" x="150.0" y="56.0" text-anchor="middle">DESIGN</text>
+    <circle class="rconst-hub" cx="228.0" cy="150.0" r="8"><title>Engineering</title></circle>
+    <text class="rconst-hub-label" x="244.0" y="154.0" text-anchor="start">ENGINEERING</text>
+    <circle class="rconst-hub" cx="150.0" cy="228.0" r="8"><title>Creative & 3D</title></circle>
+    <text class="rconst-hub-label" x="150.0" y="250.0" text-anchor="middle">CREATIVE & 3D</text>
+    <circle class="rconst-hub" cx="72.0" cy="150.0" r="8"><title>AI/ML</title></circle>
+    <text class="rconst-hub-label" x="56.0" y="154.0" text-anchor="end">AI/ML</text>
+    <g class="rconst-node" data-label="Product & UI Design" data-level="95" tabindex="0" role="button" aria-label="Product & UI Design, 95 percent">
+      <circle class="rconst-node-glow" cx="115.6" cy="47.9" r="14.2"></circle>
+      <circle class="rconst-node-dot" cx="115.6" cy="47.9" r="8.2"></circle>
+      <text class="rconst-node-icon" x="115.6" y="51.1" text-anchor="middle">🎨</text>
+    </g>
+    <g class="rconst-node" data-label="Design Systems" data-level="90" tabindex="0" role="button" aria-label="Design Systems, 90 percent">
+      <circle class="rconst-node-glow" cx="150.0" cy="30.0" r="14.0"></circle>
+      <circle class="rconst-node-dot" cx="150.0" cy="30.0" r="8.0"></circle>
+      <text class="rconst-node-icon" x="150.0" y="33.2" text-anchor="middle">🧩</text>
+    </g>
+    <g class="rconst-node" data-label="Motion & Prototyping" data-level="85" tabindex="0" role="button" aria-label="Motion & Prototyping, 85 percent">
+      <circle class="rconst-node-glow" cx="184.4" cy="47.9" r="13.7"></circle>
+      <circle class="rconst-node-dot" cx="184.4" cy="47.9" r="7.7"></circle>
+      <text class="rconst-node-icon" x="184.4" y="51.1" text-anchor="middle">🎬</text>
+    </g>
+    <g class="rconst-node" data-label="Web Development" data-level="90" tabindex="0" role="button" aria-label="Web Development, 90 percent">
+      <circle class="rconst-node-glow" cx="252.1" cy="115.6" r="14.0"></circle>
+      <circle class="rconst-node-dot" cx="252.1" cy="115.6" r="8.0"></circle>
+      <text class="rconst-node-icon" x="252.1" y="118.8" text-anchor="middle">💻</text>
+    </g>
+    <g class="rconst-node" data-label="React / TypeScript" data-level="88" tabindex="0" role="button" aria-label="React / TypeScript, 88 percent">
+      <circle class="rconst-node-glow" cx="267.9" cy="136.8" r="13.8"></circle>
+      <circle class="rconst-node-dot" cx="267.9" cy="136.8" r="7.8"></circle>
+      <text class="rconst-node-icon" x="267.9" y="140.0" text-anchor="middle">⚛️</text>
+    </g>
+    <g class="rconst-node" data-label="Three.js / WebGL" data-level="82" tabindex="0" role="button" aria-label="Three.js / WebGL, 82 percent">
+      <circle class="rconst-node-glow" cx="267.9" cy="163.2" r="13.5"></circle>
+      <circle class="rconst-node-dot" cx="267.9" cy="163.2" r="7.5"></circle>
+      <text class="rconst-node-icon" x="267.9" y="166.39999999999998" text-anchor="middle">🧊</text>
+    </g>
+    <g class="rconst-node" data-label="Python" data-level="75" tabindex="0" role="button" aria-label="Python, 75 percent">
+      <circle class="rconst-node-glow" cx="252.1" cy="184.4" r="13.1"></circle>
+      <circle class="rconst-node-dot" cx="252.1" cy="184.4" r="7.1"></circle>
+      <text class="rconst-node-icon" x="252.1" y="187.6" text-anchor="middle">🐍</text>
+    </g>
+    <g class="rconst-node" data-label="Art" data-level="88" tabindex="0" role="button" aria-label="Art, 88 percent">
+      <circle class="rconst-node-glow" cx="184.4" cy="252.1" r="13.8"></circle>
+      <circle class="rconst-node-dot" cx="184.4" cy="252.1" r="7.8"></circle>
+      <text class="rconst-node-icon" x="184.4" y="255.29999999999998" text-anchor="middle">🖌️</text>
+    </g>
+    <g class="rconst-node" data-label="3D Modeling" data-level="86" tabindex="0" role="button" aria-label="3D Modeling, 86 percent">
+      <circle class="rconst-node-glow" cx="169.4" cy="265.3" r="13.7"></circle>
+      <circle class="rconst-node-dot" cx="169.4" cy="265.3" r="7.7"></circle>
+      <text class="rconst-node-icon" x="169.4" y="268.5" text-anchor="middle">🗿</text>
+    </g>
+    <g class="rconst-node" data-label="Photography" data-level="85" tabindex="0" role="button" aria-label="Photography, 85 percent">
+      <circle class="rconst-node-glow" cx="150.0" cy="270.0" r="13.7"></circle>
+      <circle class="rconst-node-dot" cx="150.0" cy="270.0" r="7.7"></circle>
+      <text class="rconst-node-icon" x="150.0" y="273.2" text-anchor="middle">📷</text>
+    </g>
+    <g class="rconst-node" data-label="Animation" data-level="84" tabindex="0" role="button" aria-label="Animation, 84 percent">
+      <circle class="rconst-node-glow" cx="130.6" cy="265.3" r="13.6"></circle>
+      <circle class="rconst-node-dot" cx="130.6" cy="265.3" r="7.6"></circle>
+      <text class="rconst-node-icon" x="130.6" y="268.5" text-anchor="middle">🎞️</text>
+    </g>
+    <g class="rconst-node" data-label="Game Development" data-level="80" tabindex="0" role="button" aria-label="Game Development, 80 percent">
+      <circle class="rconst-node-glow" cx="115.6" cy="252.1" r="13.4"></circle>
+      <circle class="rconst-node-dot" cx="115.6" cy="252.1" r="7.4"></circle>
+      <text class="rconst-node-icon" x="115.6" y="255.29999999999998" text-anchor="middle">🎮</text>
+    </g>
+    <g class="rconst-node" data-label="LLMs & Prompt Design" data-level="92" tabindex="0" role="button" aria-label="LLMs & Prompt Design, 92 percent">
+      <circle class="rconst-node-glow" cx="47.9" cy="184.4" r="14.1"></circle>
+      <circle class="rconst-node-dot" cx="47.9" cy="184.4" r="8.1"></circle>
+      <text class="rconst-node-icon" x="47.9" y="187.6" text-anchor="middle">🧠</text>
+    </g>
+    <g class="rconst-node" data-label="RAG & Fine-tuning" data-level="80" tabindex="0" role="button" aria-label="RAG & Fine-tuning, 80 percent">
+      <circle class="rconst-node-glow" cx="30.0" cy="150.0" r="13.4"></circle>
+      <circle class="rconst-node-dot" cx="30.0" cy="150.0" r="7.4"></circle>
+      <text class="rconst-node-icon" x="30.0" y="153.2" text-anchor="middle">🔗</text>
+    </g>
+    <g class="rconst-node" data-label="Model Evaluation" data-level="78" tabindex="0" role="button" aria-label="Model Evaluation, 78 percent">
+      <circle class="rconst-node-glow" cx="47.9" cy="115.6" r="13.3"></circle>
+      <circle class="rconst-node-dot" cx="47.9" cy="115.6" r="7.3"></circle>
+      <text class="rconst-node-icon" x="47.9" y="118.8" text-anchor="middle">📊</text>
+    </g>
             </svg>
-          </div>
-
-          <div class="rskills">
-            <div class="rskill-group">
-              <span class="rskill-cat">Design</span>
-              <div class="rbar" data-level="95"><span><span class="rskill-ico">🎨</span>Product &amp; UI Design</span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
-              <div class="rbar" data-level="90"><span><span class="rskill-ico">🧩</span>Design Systems</span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
-              <div class="rbar" data-level="85"><span><span class="rskill-ico">🎬</span>Motion &amp; Prototyping</span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
-            </div>
-            <div class="rskill-group">
-              <span class="rskill-cat">AI / ML</span>
-              <div class="rbar" data-level="92"><span><span class="rskill-ico">🧠</span>LLMs &amp; Prompt Design</span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
-              <div class="rbar" data-level="80"><span><span class="rskill-ico">🔗</span>RAG &amp; Fine-tuning</span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
-              <div class="rbar" data-level="78"><span><span class="rskill-ico">📊</span>Model Evaluation</span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
-            </div>
-            <div class="rskill-group">
-              <span class="rskill-cat">Engineering</span>
-              <div class="rbar" data-level="90"><span><span class="rskill-ico">💻</span>Web Development</span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
-              <div class="rbar" data-level="88"><span><span class="rskill-ico">⚛️</span>React / TypeScript</span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
-              <div class="rbar" data-level="82"><span><span class="rskill-ico">🧊</span>Three.js / WebGL</span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
-              <div class="rbar" data-level="75"><span><span class="rskill-ico">🐍</span>Python</span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
-            </div>
-            <div class="rskill-group">
-              <span class="rskill-cat">Creative &amp; 3D</span>
-              <div class="rbar" data-level="88"><span><span class="rskill-ico">🖌️</span>Art</span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
-              <div class="rbar" data-level="86"><span><span class="rskill-ico">🗿</span>3D Modeling</span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
-              <div class="rbar" data-level="85"><span><span class="rskill-ico">📷</span>Photography</span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
-              <div class="rbar" data-level="84"><span><span class="rskill-ico">🎞️</span>Animation</span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
-              <div class="rbar" data-level="80"><span><span class="rskill-ico">🎮</span>Game Development</span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
-            </div>
+            <div class="rconst-tooltip" id="rconst-tooltip" hidden></div>
           </div>
         </article>
 
@@ -2705,15 +2768,20 @@ panels.forEach(p => observer.observe(p));
   function animateBars() {
     if (barsShown) return;
     barsShown = true;
-    prism.querySelectorAll('.rbar').forEach(bar => {
-      const lvl = bar.getAttribute('data-level') || 0;
-      const fill = bar.querySelector('.rbar-fill');
-      if (fill) requestAnimationFrame(() => { fill.style.width = lvl + '%'; });
-    });
-    const shape = prism.querySelector('#rradar-shape');
-    const dots = prism.querySelectorAll('.rradar-dot');
-    if (shape) requestAnimationFrame(() => shape.classList.add('rradar-in'));
-    dots.forEach((d) => requestAnimationFrame(() => d.classList.add('rradar-in')));
+    const core = prism.querySelector('.rconst-core');
+    const coreLines = prism.querySelectorAll('.rconst-line-core');
+    const hubs = prism.querySelectorAll('.rconst-hub');
+    const hubLabels = prism.querySelectorAll('.rconst-hub-label');
+    const spokeLines = prism.querySelectorAll('.rconst-line:not(.rconst-line-core)');
+    const nodes = prism.querySelectorAll('.rconst-node');
+
+    const reveal = (el, delay) => setTimeout(() => el.classList.add('rconst-in'), delay);
+    if (core) reveal(core, 0);
+    coreLines.forEach((l, i) => reveal(l, 80 + i * 60));
+    hubs.forEach((h, i) => reveal(h, 260 + i * 70));
+    hubLabels.forEach((h, i) => reveal(h, 320 + i * 70));
+    spokeLines.forEach((l, i) => reveal(l, 480 + i * 35));
+    nodes.forEach((n, i) => reveal(n, 560 + i * 40));
   }
   function goTo(i, animate, skipTextAnim) {
     current = ((i % 4) + 4) % 4;
@@ -2769,6 +2837,26 @@ panels.forEach(p => observer.observe(p));
   });
 
   window.addEventListener('resize', window.__debounce(apply, 160));
+  // Skill constellation: hover/tap a node to see its name and level.
+  const constTooltip = document.getElementById('rconst-tooltip');
+  const constNodes = prism.querySelectorAll('.rconst-node');
+  function showTooltip(node) {
+    if (!constTooltip) return;
+    const label = node.getAttribute('data-label');
+    const level = node.getAttribute('data-level');
+    constTooltip.innerHTML = label + '<span class="rconst-tt-level">' + level + '%</span>';
+    constTooltip.hidden = false;
+  }
+  function hideTooltip() { if (constTooltip) constTooltip.hidden = true; }
+  constNodes.forEach((node) => {
+    node.addEventListener('mouseenter', () => showTooltip(node));
+    node.addEventListener('mouseleave', hideTooltip);
+    node.addEventListener('focus', () => showTooltip(node));
+    node.addEventListener('blur', hideTooltip);
+    node.addEventListener('click', (e) => { e.stopPropagation(); showTooltip(node); });
+  });
+  document.addEventListener('click', hideTooltip);
+
   goTo(0, false, true); // silent setup — text reveal fires below, once actually in view
 
   // Reveal face 0's text the first time the résumé actually scrolls into

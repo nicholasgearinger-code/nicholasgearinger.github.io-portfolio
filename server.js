@@ -55,6 +55,7 @@ const guestbook = require('./routes/guestbook');
 const projects = require('./routes/projects');
 const download = require('./routes/download');
 const ask = require('./routes/ask');
+const activityRoute = require('./routes/activity');
 
 /* ── Route table. Patterns support :params. ── */
 const routes = [
@@ -73,6 +74,7 @@ const routes = [
 
   ['POST', '/api/track', analytics.track],
   ['GET', '/api/analytics', analytics.summary],
+  ['GET', '/api/activity', activityRoute.activity],
 
   ['GET', '/api/guestbook', guestbook.list],
   ['POST', '/api/guestbook', guestbook.create],
@@ -116,6 +118,7 @@ const MIME = {
   '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
   '.webp': 'image/webp', '.gif': 'image/gif', '.ico': 'image/x-icon', '.mp4': 'video/mp4',
   '.woff2': 'font/woff2', '.woff': 'font/woff', '.txt': 'text/plain; charset=utf-8',
+  '.glb': 'model/gltf-binary', '.gltf': 'model/gltf+json',
 };
 
 function resolvePublicDir() {

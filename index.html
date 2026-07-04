@@ -63,13 +63,17 @@
     text-decoration: none; font-size: .84rem; font-weight: 600;
     letter-spacing: .01em;
     padding: .5rem 1.05rem; border-radius: 100px;
-    border: 1px solid transparent;
+    border: 1px solid var(--card-border); background: var(--card-bg);
+    color: var(--muted);
+    transition: color .3s, border-color .3s, background .3s, box-shadow .3s, transform .2s;
+  }
+  nav a:hover { color: var(--white); border-color: var(--cyan); background: rgba(34,211,238,.08); transform: translateY(-2px); }
+  nav a.nav-active {
     color: #041018;
     background: linear-gradient(120deg, var(--cyan), var(--blue));
+    border-color: transparent;
     box-shadow: 0 10px 28px -10px rgba(34,211,238,.65);
-    transition: box-shadow .3s, transform .2s, filter .2s;
   }
-  nav a:hover { filter: brightness(1.08); box-shadow: 0 12px 32px -8px rgba(34,211,238,.8); transform: translateY(-1px); }
   .nav-cta {
     padding: .5rem 1.25rem;
     border: 1px solid var(--violet) !important;
@@ -4626,6 +4630,33 @@ panels.forEach(p => observer.observe(p));
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && overlay.classList.contains('open')) close();
   });
+})();
+</script>
+<script>
+/* -- NAV SCROLL-SPY: highlights the current section's nav link, mirrors resume-tab.active -- */
+(function navScrollSpy() {
+  const links = Array.from(document.querySelectorAll('nav ul li a[href^="#"]'));
+  if (!links.length) return;
+  const map = new Map();
+  links.forEach((a) => {
+    const id = a.getAttribute('href').slice(1);
+    const section = document.getElementById(id);
+    if (section) map.set(section, a);
+  });
+  if (!map.size) return;
+
+  function clearActive() { links.forEach((a) => a.classList.remove('nav-active')); }
+
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) {
+        clearActive();
+        map.get(entry.target).classList.add('nav-active');
+      }
+    });
+  }, { rootMargin: '-45% 0px -50% 0px', threshold: 0 });
+
+  map.forEach((_, section) => io.observe(section));
 })();
 </script>
 <script>

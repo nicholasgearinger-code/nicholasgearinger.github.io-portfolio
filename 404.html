@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>404 — Route Not Found // Nicholas Gearinger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --navy: #020810;
+    --cyan: #22D3EE;
+    --sky: #7DD3FC;
+    --amber: #F59E0B;
+    --white: #F0F8FF;
+    --muted: #CBD5E1;
+    --card-border: rgba(125,211,252,0.14);
+  }
+  html, body { height: 100%; }
+  body {
+    background: var(--navy);
+    color: var(--white);
+    font-family: 'JetBrains Mono', monospace;
+    display: flex; align-items: center; justify-content: center;
+    padding: 1.5rem;
+    overflow: hidden;
+    position: relative;
+  }
+  /* faint scanlines, matching the main site's CRT flavor */
+  body::before {
+    content: '';
+    position: fixed; inset: 0; pointer-events: none; z-index: 1;
+    background: repeating-linear-gradient(to bottom, rgba(255,255,255,.025) 0px, rgba(255,255,255,.025) 1px, transparent 1px, transparent 3px);
+    mix-blend-mode: overlay;
+  }
+  .wrap {
+    position: relative; z-index: 2;
+    width: min(620px, 100%);
+    border: 1px solid var(--card-border);
+    border-radius: 10px;
+    background: linear-gradient(165deg, rgba(8,16,28,.9), rgba(3,9,17,.94));
+    box-shadow: 0 40px 100px -30px rgba(0,0,0,.8);
+  }
+  .bar {
+    display: flex; align-items: center; gap: .5rem;
+    padding: .7rem 1rem; border-bottom: 1px solid var(--card-border);
+    font-size: .72rem; color: var(--muted);
+  }
+  .bar .dot { width: 9px; height: 9px; border-radius: 50%; }
+  .bar .dot:nth-child(1) { background: #F87171; }
+  .bar .dot:nth-child(2) { background: var(--amber); }
+  .bar .dot:nth-child(3) { background: #4ADE80; }
+  .bar span.path { margin-left: .5rem; color: var(--sky); }
+
+  .term { padding: 1.6rem 1.5rem 1.9rem; }
+  .code {
+    font-family: 'Syne', sans-serif; font-weight: 800;
+    font-size: clamp(3rem, 12vw, 4.5rem);
+    color: var(--white);
+    line-height: 1;
+    letter-spacing: -.02em;
+  }
+  .code span { color: var(--cyan); text-shadow: 0 0 24px rgba(34,211,238,.55); }
+  .glitchline { color: #F87171; font-size: .82rem; margin: .9rem 0 1.3rem; }
+
+  .log { font-size: .82rem; line-height: 1.9; color: var(--muted); }
+  .log .ok { color: #4ADE80; }
+  .log .err { color: #F87171; }
+  .log .amber { color: var(--amber); }
+
+  .prompt-row {
+    display: flex; align-items: center; gap: .5rem;
+    margin-top: 1.4rem; font-size: .88rem;
+    color: var(--sky);
+  }
+  .caret {
+    display: inline-block; width: 8px; height: 1.1em;
+    background: var(--cyan); margin-left: 2px;
+    animation: blink 1s step-end infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .actions { display: flex; flex-wrap: wrap; gap: .7rem; margin-top: 1.6rem; }
+  .actions a {
+    text-decoration: none; font-family: 'JetBrains Mono', monospace;
+    font-size: .78rem; font-weight: 500; letter-spacing: .02em;
+    padding: .6rem 1.1rem; border-radius: 6px;
+    color: #041018; background: linear-gradient(120deg, var(--cyan), #3B82F6);
+    box-shadow: 0 10px 28px -10px rgba(34,211,238,.55);
+    transition: filter .2s, transform .15s;
+  }
+  .actions a.ghost {
+    color: var(--sky); background: transparent;
+    border: 1px solid var(--card-border); box-shadow: none;
+  }
+  .actions a:hover { filter: brightness(1.1); transform: translateY(-1px); }
+
+  @media (max-width: 480px) { .term { padding: 1.3rem 1.1rem 1.6rem; } }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="bar">
+      <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+      <span class="path">~/portfolio/routes<span id="reqpath"></span></span>
+    </div>
+    <div class="term">
+      <div class="code">4<span>0</span>4</div>
+      <div class="glitchline">SEGFAULT — requested route not mapped</div>
+      <div class="log">
+        <div><span class="amber">$</span> resolve --route "<span id="reqpath2">/unknown</span>"</div>
+        <div><span class="err">✕</span> route not found in manifest</div>
+        <div><span class="ok">✓</span> fallback handler engaged</div>
+        <div><span class="ok">✓</span> redirect options ready</div>
+      </div>
+      <div class="prompt-row">root@portfolio:~$ <span class="caret"></span></div>
+      <div class="actions">
+        <a href="/">← Return home</a>
+        <a class="ghost" href="/#contact">Contact me</a>
+      </div>
+    </div>
+  </div>
+  <script>
+    var p = window.location.pathname || '/unknown';
+    document.getElementById('reqpath').textContent = p;
+    document.getElementById('reqpath2').textContent = p;
+  </script>
+</body>
+</html>

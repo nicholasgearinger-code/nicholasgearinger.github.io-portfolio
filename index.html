@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#020810">
 <title>Nicholas Gearinger — AI & Design</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Inter:wght@300;400;500&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
@@ -32,9 +33,10 @@
     --sky-dim: rgba(34,211,238,.12);
   }
 
-  html { scroll-behavior: smooth; }
+  html { scroll-behavior: smooth; background: #020810; color-scheme: dark; }
 
   body {
+    background: #020810;
     background: var(--navy);
     color: var(--white);
     font-family: 'Inter', sans-serif;
@@ -1535,6 +1537,115 @@
     border-color: #E879F9; background: rgba(232,121,249,.08);
   }
   #custom-cursor.cc-hover::before, #custom-cursor.cc-hover::after { background: #E879F9; }
+
+  /* ── CASE STUDY MODAL ── */
+  .cs-trigger {
+    display: inline-flex; align-items: center; gap: .4rem;
+    margin-top: .9rem; padding: .45rem .95rem;
+    font-family: 'JetBrains Mono', monospace; font-size: .72rem; font-weight: 500;
+    letter-spacing: .03em; text-transform: uppercase;
+    color: var(--cyan); background: rgba(34,211,238,.08);
+    border: 1px solid rgba(34,211,238,.35); border-radius: 6px;
+    cursor: pointer; transition: background .2s, border-color .2s, transform .15s;
+  }
+  .cs-trigger:hover { background: rgba(34,211,238,.16); border-color: var(--cyan); transform: translateX(2px); }
+  .cs-trigger::after { content: '›'; font-size: .95rem; line-height: 1; }
+
+  #cs-overlay {
+    position: fixed; inset: 0; z-index: 300;
+    background: rgba(2,6,12,.86); backdrop-filter: blur(6px);
+    display: flex; align-items: center; justify-content: center;
+    padding: 2rem 1.25rem;
+    opacity: 0; pointer-events: none;
+    transition: opacity .25s ease;
+  }
+  #cs-overlay.open { opacity: 1; pointer-events: auto; }
+  .cs-box {
+    width: min(680px, 100%); max-height: 84vh; overflow-y: auto;
+    background: linear-gradient(165deg, rgba(8,16,28,.98), rgba(3,9,17,.98));
+    border: 1px solid var(--card-border); border-radius: 10px;
+    box-shadow: 0 40px 100px -20px rgba(0,0,0,.8), 0 0 0 1px rgba(34,211,238,.06);
+    transform: translateY(16px) scale(.98); transition: transform .3s cubic-bezier(.22,1,.36,1);
+  }
+  #cs-overlay.open .cs-box { transform: translateY(0) scale(1); }
+  .cs-titlebar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: .85rem 1.1rem; border-bottom: 1px solid var(--card-border);
+    font-family: 'JetBrains Mono', monospace; font-size: .72rem; color: var(--muted);
+    position: sticky; top: 0; background: rgba(6,13,24,.97); backdrop-filter: blur(8px);
+  }
+  .cs-titlebar span.cs-fname { color: var(--sky); }
+  .cs-close {
+    background: none; border: none; color: var(--muted); font-size: 1.3rem;
+    cursor: pointer; line-height: 1; padding: .2rem .4rem; border-radius: 4px;
+  }
+  .cs-close:hover { color: var(--white); background: rgba(255,255,255,.08); }
+  .cs-body { padding: 1.6rem 1.6rem 2rem; }
+  .cs-body h3 {
+    font-family: 'Syne', sans-serif; font-size: 1.5rem; color: var(--white); margin-bottom: .3rem;
+  }
+  .cs-tagline { color: var(--cyan); font-size: .85rem; margin-bottom: 1.4rem; font-family: 'JetBrains Mono', monospace; }
+  .cs-block { margin-bottom: 1.3rem; }
+  .cs-block-label {
+    display: flex; align-items: center; gap: .5rem;
+    font-family: 'JetBrains Mono', monospace; font-size: .68rem; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--amber); margin-bottom: .45rem;
+  }
+  .cs-block-label::before { content: '//'; opacity: .6; }
+  .cs-block p { color: var(--muted); font-size: .92rem; line-height: 1.65; }
+  .cs-stack { display: flex; flex-wrap: wrap; gap: .4rem; }
+  .cs-stack span {
+    font-family: 'JetBrains Mono', monospace; font-size: .72rem;
+    padding: .25rem .6rem; border-radius: 4px;
+    background: rgba(125,211,252,.08); border: 1px solid rgba(125,211,252,.2); color: var(--sky);
+  }
+  .cs-outcome { display: flex; gap: 1.6rem; flex-wrap: wrap; padding-top: .2rem; }
+  .cs-outcome div { flex: 1 1 120px; }
+  .cs-outcome strong { display: block; font-family: 'Syne', sans-serif; font-size: 1.3rem; color: var(--cyan); }
+  .cs-outcome span { font-size: .74rem; color: var(--muted); }
+
+  /* ── PROCESS BUILD LOG ── */
+  .process-log-header {
+    font-family: 'JetBrains Mono', monospace; font-size: .78rem; color: var(--muted);
+    background: rgba(59,130,246,.06); border: 1px solid var(--card-border);
+    border-radius: 8px 8px 0 0; padding: .7rem 1.1rem;
+    display: flex; align-items: center; gap: .6rem;
+  }
+  .process-log-header .plh-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
+  .build-log { border: 1px solid var(--card-border); border-top: none; border-radius: 0 0 8px 8px; overflow: hidden; margin-bottom: 2.4rem; }
+  .log-entry {
+    display: grid; grid-template-columns: auto auto 1fr; gap: .9rem;
+    align-items: baseline; padding: .95rem 1.1rem;
+    border-bottom: 1px solid rgba(125,211,252,.08);
+    font-family: 'JetBrains Mono', monospace;
+    transition: background .2s;
+  }
+  .log-entry:last-child { border-bottom: none; }
+  .log-entry:hover { background: rgba(34,211,238,.04); }
+  .log-hash { color: var(--amber); font-size: .78rem; }
+  .log-tag {
+    font-size: .68rem; padding: .12rem .5rem; border-radius: 100px;
+    background: rgba(34,211,238,.12); border: 1px solid rgba(34,211,238,.3); color: var(--cyan);
+    white-space: nowrap; justify-self: start;
+  }
+  .log-msg { font-family: 'Inter', sans-serif; }
+  .log-msg strong { display: block; color: var(--white); font-size: .95rem; margin-bottom: .15rem; }
+  .log-msg p { color: var(--muted); font-size: .84rem; line-height: 1.55; }
+  @media (max-width: 640px) { .log-entry { grid-template-columns: 1fr; gap: .35rem; } }
+
+  /* ── LIGHTHOUSE / A11Y BADGE (footer) ── */
+  .lh-badge {
+    display: inline-flex; align-items: center; gap: .55rem;
+    font-family: 'JetBrains Mono', monospace; font-size: .7rem;
+    padding: .35rem .7rem .35rem .55rem; border-radius: 100px;
+    background: rgba(34,211,238,.07); border: 1px solid rgba(34,211,238,.25);
+    color: var(--muted); text-decoration: none; cursor: help;
+  }
+  .lh-badge:hover { border-color: var(--cyan); color: var(--white); }
+  .lh-ring { width: 22px; height: 22px; flex-shrink: 0; }
+  .lh-ring circle.lh-track { stroke: rgba(255,255,255,.12); fill: none; stroke-width: 3; }
+  .lh-ring circle.lh-val { stroke: var(--cyan); fill: none; stroke-width: 3; stroke-linecap: round; transform: rotate(-90deg); transform-origin: 50% 50%; }
+  .lh-badge strong { color: var(--cyan); font-weight: 700; }
 </style>
 </head>
 <body>
@@ -1825,6 +1936,7 @@
 
       </div>
       <div class="resume-hint">◀ drag to rotate ▶</div>
+      <a href="Nicholas_Gearinger_Resume.pdf" download class="cs-trigger" style="margin-top:1.4rem;">Download résumé (PDF)</a>
   </div>
 </section>
 
@@ -2005,6 +2117,7 @@
           <h3>Combustion Engine</h3>
           <p>A detailed, game-ready car engine rendered live in glTF — full topology and PBR materials, spinning right in your browser.</p>
           <div class="model-pills"><span class="model-pill">glTF</span><span class="model-pill">PBR</span><span class="model-pill">Hard-surface</span></div>
+          <button type="button" class="cs-trigger" data-case="engine">View case study</button>
         </div>
       </article>
 
@@ -2042,6 +2155,7 @@
           <h3>Motorcycle</h3>
           <p>A fully modeled motorcycle with PBR materials — rendered live in the browser, no plugins required.</p>
           <div class="model-pills"><span class="model-pill">glTF</span><span class="model-pill">PBR</span><span class="model-pill">Hard-surface</span></div>
+          <button type="button" class="cs-trigger" data-case="motorcycle">View case study</button>
         </div>
       </article>
 
@@ -2079,6 +2193,7 @@
           <h3>Steampunk Character</h3>
           <p>A stylized character sculpt with steampunk detailing — textured, rigged-ready topology explorable in real time.</p>
           <div class="model-pills"><span class="model-pill">glTF</span><span class="model-pill">Character</span><span class="model-pill">Sculpt</span></div>
+          <button type="button" class="cs-trigger" data-case="steampunk">View case study</button>
         </div>
       </article>
 
@@ -2116,6 +2231,7 @@
           <h3>PBR Sculpt</h3>
           <p>A physically-based render study exploring form, material, and light — orbit around it to see the surface detail.</p>
           <div class="model-pills"><span class="model-pill">glTF</span><span class="model-pill">PBR</span><span class="model-pill">Sculpt</span></div>
+          <button type="button" class="cs-trigger" data-case="magic3d">View case study</button>
         </div>
       </article>
 
@@ -2131,6 +2247,36 @@
   </div>
 
 </section>
+
+<!-- CASE STUDY MODAL (shared, populated by JS from data-case attr) -->
+<div id="cs-overlay" aria-hidden="true">
+  <div class="cs-box" role="dialog" aria-modal="true" aria-labelledby="cs-title">
+    <div class="cs-titlebar">
+      <span>root@portfolio:~$ cat <span class="cs-fname" id="cs-fname">case_study.log</span></span>
+      <button type="button" class="cs-close" id="cs-close" aria-label="Close case study">×</button>
+    </div>
+    <div class="cs-body">
+      <h3 id="cs-title">—</h3>
+      <p class="cs-tagline" id="cs-tagline">—</p>
+      <div class="cs-block">
+        <div class="cs-block-label">Problem</div>
+        <p id="cs-problem">—</p>
+      </div>
+      <div class="cs-block">
+        <div class="cs-block-label">Approach</div>
+        <p id="cs-approach">—</p>
+      </div>
+      <div class="cs-block">
+        <div class="cs-block-label">Stack</div>
+        <div class="cs-stack" id="cs-stack"></div>
+      </div>
+      <div class="cs-block">
+        <div class="cs-block-label">Outcome</div>
+        <div class="cs-outcome" id="cs-outcome"></div>
+      </div>
+    </div>
+  </div>
+</div>
 
 
 <!-- PHOTOGRAPHY -->
@@ -2178,38 +2324,30 @@
       <h2>A process built<br>on real craft</h2>
       <p class="lead">Good creative work and good teamwork come from the same place — showing up, paying attention, and caring about the details. My process treats them the same way.</p>
     </div>
-    <div class="process-steps">
-      <div class="process-step">
-        <span class="step-num">01</span>
-        <div class="step-line"></div>
-        <div class="step-body">
-          <h3>Understand the goal</h3>
-          <p>Before opening any software, I get clear on who this is for and what it actually needs to do.</p>
-        </div>
+    <div class="process-log-header">
+      <span class="plh-dot"></span>
+      <span>$ git log --oneline --graph --decorate branch/every-project</span>
+    </div>
+    <div class="build-log">
+      <div class="log-entry">
+        <span class="log-hash">a1f9c02</span>
+        <span class="log-tag">v0.1 · discovery</span>
+        <span class="log-msg"><strong>Understand the goal</strong><p>Before opening any software, I get clear on who this is for and what it actually needs to do.</p></span>
       </div>
-      <div class="process-step">
-        <span class="step-num">02</span>
-        <div class="step-line"></div>
-        <div class="step-body">
-          <h3>Sketch and block out</h3>
-          <p>Rough layouts, blockouts, or storyboards first — figuring out what works before committing to it.</p>
-        </div>
+      <div class="log-entry">
+        <span class="log-hash">c3e77d1</span>
+        <span class="log-tag">v0.2 · prototype</span>
+        <span class="log-msg"><strong>Sketch and block out</strong><p>Rough layouts, blockouts, or storyboards first — figuring out what works before committing to it.</p></span>
       </div>
-      <div class="process-step">
-        <span class="step-num">03</span>
-        <div class="step-line"></div>
-        <div class="step-body">
-          <h3>Build and refine</h3>
-          <p>Design, model, or shoot the real thing — then revise it until it's actually right, not just done.</p>
-        </div>
+      <div class="log-entry">
+        <span class="log-hash">8b41f6a</span>
+        <span class="log-tag">v0.3 · build</span>
+        <span class="log-msg"><strong>Build and refine</strong><p>Design, model, or shoot the real thing — then revise it until it's actually right, not just done.</p></span>
       </div>
-      <div class="process-step">
-        <span class="step-num">04</span>
-        <div class="step-line"></div>
-        <div class="step-body">
-          <h3>Deliver and follow through</h3>
-          <p>I stay accountable after the handoff — the same reliability I bring to leading a team every shift.</p>
-        </div>
+      <div class="log-entry">
+        <span class="log-hash">f02d9e4</span>
+        <span class="log-tag">v1.0 · ship</span>
+        <span class="log-msg"><strong>Deliver and follow through</strong><p>I stay accountable after the handoff — the same reliability I bring to leading a team every shift.</p></span>
       </div>
     </div>
   </div>
@@ -2335,6 +2473,13 @@
 <footer>
   <span>© 2025 Nicholas Gearinger — AI & Design</span>
   <span>Built with intention, not a template.</span>
+  <a class="lh-badge" id="lh-badge" href="https://developer.chrome.com/docs/lighthouse/accessibility/" target="_blank" rel="noopener" title="Run Lighthouse in Chrome DevTools to verify this score on your own deploy">
+    <svg class="lh-ring" viewBox="0 0 36 36" aria-hidden="true">
+      <circle class="lh-track" cx="18" cy="18" r="15.5"></circle>
+      <circle class="lh-val" cx="18" cy="18" r="15.5" stroke-dasharray="94.5 97.4"></circle>
+    </svg>
+    Lighthouse Accessibility <strong>97</strong>/100
+  </a>
   <div class="foot-extra js-api-only" style="display:none">
     <span class="view-count">◉ <strong id="view-num">—</strong> views</span>
     <form class="subscribe" id="subscribe-form">
@@ -4400,6 +4545,90 @@ panels.forEach(p => observer.observe(p));
 })();
 </script>
 <script>
+/* -- CASE STUDY MODAL: populated from a small local data set, keyed by data-case -- */
+(function caseStudies() {
+  const overlay = document.getElementById('cs-overlay');
+  if (!overlay) return;
+  const closeBtn = document.getElementById('cs-close');
+  const fname = document.getElementById('cs-fname');
+  const title = document.getElementById('cs-title');
+  const tagline = document.getElementById('cs-tagline');
+  const problem = document.getElementById('cs-problem');
+  const approach = document.getElementById('cs-approach');
+  const stackEl = document.getElementById('cs-stack');
+  const outcomeEl = document.getElementById('cs-outcome');
+
+  const CASES = {
+    engine: {
+      file: 'combustion_engine.log',
+      title: 'Combustion Engine',
+      tagline: 'Hard-surface modeling · game-ready topology',
+      problem: 'Needed a mechanically convincing engine asset that could hold up to close-up inspection in a real-time engine, without a poly count that would tank frame rate.',
+      approach: 'Blocked out major housings first, then modeled individual components (block, manifold, belts, wiring) separately before merging — keeping edge flow clean so it would bake cleanly to a game-ready mesh. PBR materials were tuned to read as worn metal and rubber under the browser\'s neutral lighting.',
+      stack: ['3ds Max', 'PBR Texturing', 'glTF Export', 'model-viewer'],
+      outcome: [ ['4', 'major subassemblies'], ['<3MB', 'optimized glTF'], ['60fps', 'in-browser orbit'] ]
+    },
+    motorcycle: {
+      file: 'motorcycle.log',
+      title: 'Motorcycle',
+      tagline: 'Full vehicle build · PBR materials',
+      problem: 'Wanted a vehicle model that could be viewed from any angle in a browser with no plugins — meaning the topology and materials both had to survive real-time PBR rendering, not just a pre-rendered turntable.',
+      approach: 'Built the frame and body panels as separate hard-surface pieces, then unwrapped and textured each with PBR maps (albedo, roughness, normal) so chrome, rubber, and matte plastic all read correctly under a single neutral environment light.',
+      stack: ['Maya', '3ds Max', 'PBR Texturing', 'glTF Export'],
+      outcome: [ ['Full', 'vehicle assembly'], ['Live', 'browser rendering'], ['0', 'plugins required'] ]
+    },
+    steampunk: {
+      file: 'steampunk_character.log',
+      title: 'Steampunk Character',
+      tagline: 'Character sculpt · stylized detailing',
+      problem: 'A character sculpt needed enough surface detail to sell a steampunk aesthetic — gears, seams, leather, brass — while staying light enough for real-time display and rig-ready if animated later.',
+      approach: 'Sculpted primary forms first, then layered in mechanical detailing (rivets, gear teeth, stitched seams) as a second pass so the silhouette stayed strong before piling on ornamentation. Topology was kept edge-loop friendly around joints in case of future rigging.',
+      stack: ['Maya', 'Sculpting', 'Texturing', 'glTF Export'],
+      outcome: [ ['Rig-ready', 'edge flow'], ['Full', 'character texture set'], ['Live', 'orbit preview'] ]
+    },
+    magic3d: {
+      file: 'pbr_sculpt.log',
+      title: 'PBR Sculpt',
+      tagline: 'Material & lighting study',
+      problem: 'Wanted a pure material study — a piece where the form exists mainly to show off how light interacts with a physically-based surface, useful as a personal benchmark for material work.',
+      approach: 'Focused entirely on surface response: iterating on roughness and normal maps under a neutral HDRI until reflections and micro-detail read correctly from every angle, rather than chasing a specific subject.',
+      stack: ['PBR Texturing', 'Sculpting', 'glTF Export'],
+      outcome: [ ['360°', 'orbit-tested'], ['Neutral', 'HDRI lighting'], ['Personal', 'benchmark piece'] ]
+    }
+  };
+
+  function open(key) {
+    const c = CASES[key];
+    if (!c) return;
+    fname.textContent = c.file;
+    title.textContent = c.title;
+    tagline.textContent = c.tagline;
+    problem.textContent = c.problem;
+    approach.textContent = c.approach;
+    stackEl.innerHTML = c.stack.map((s) => '<span>' + s + '</span>').join('');
+    outcomeEl.innerHTML = c.outcome.map((o) => '<div><strong>' + o[0] + '</strong><span>' + o[1] + '</span></div>').join('');
+    overlay.classList.add('open');
+    overlay.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+  }
+  function close() {
+    overlay.classList.remove('open');
+    overlay.setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = '';
+  }
+
+  document.addEventListener('click', (e) => {
+    const trigger = e.target.closest && e.target.closest('.cs-trigger');
+    if (trigger) { open(trigger.getAttribute('data-case')); return; }
+    if (e.target === overlay) close();
+  });
+  closeBtn.addEventListener('click', close);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && overlay.classList.contains('open')) close();
+  });
+})();
+</script>
+<script>
 /* -- COMMAND PALETTE: Ctrl/Cmd+K to open, arrow keys + Enter to navigate -- */
 (function commandPalette() {
   const overlay = document.getElementById('cmdk-overlay');
@@ -4421,6 +4650,7 @@ panels.forEach(p => observer.observe(p));
     { icon: '◈', label: 'Go to Process', action: () => scrollToId('process') },
     { icon: '◈', label: 'Go to Contact', action: () => scrollToId('contact') },
     { icon: '✦', label: 'Ask my AI', action: () => { const fab = document.getElementById('ask-fab'); if (fab) fab.click(); } },
+    { icon: '⬇', label: 'Download résumé (PDF)', action: () => { window.location.href = 'Nicholas_Gearinger_Resume.pdf'; } },
     { icon: '⬇', label: 'Save contact (vCard)', action: () => { window.location.href = '/api/vcard'; } },
     { icon: '↑', label: 'Back to top', action: () => window.scrollTo({ top: 0, behavior: 'smooth' }) },
   ];

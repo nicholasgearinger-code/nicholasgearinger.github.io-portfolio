@@ -56,6 +56,7 @@ const projects = require('./routes/projects');
 const download = require('./routes/download');
 const ask = require('./routes/ask');
 const activityRoute = require('./routes/activity');
+const statsRoute = require('./routes/stats');
 
 /* ── Route table. Patterns support :params. ── */
 const routes = [
@@ -75,6 +76,7 @@ const routes = [
   ['POST', '/api/track', analytics.track],
   ['GET', '/api/analytics', analytics.summary],
   ['GET', '/api/activity', activityRoute.activity],
+  ['GET', '/api/stats', statsRoute.stats],
 
   ['GET', '/api/guestbook', guestbook.list],
   ['POST', '/api/guestbook', guestbook.create],

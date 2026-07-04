@@ -549,7 +549,7 @@
 
   .resume-stage {
     perspective: 1700px; perspective-origin: 50% 42%;
-    display: flex; justify-content: center;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
     position: relative;
   }
   .resume-prism {
@@ -1622,52 +1622,6 @@
   .lh-ring circle.lh-val { stroke: var(--cyan); fill: none; stroke-width: 3; stroke-linecap: round; transform: rotate(-90deg); transform-origin: 50% 50%; }
   .lh-badge strong { color: var(--cyan); font-weight: 700; }
 
-  /* ── GITHUB LIVE ACTIVITY ── */
-  .gh-card {
-    background: #060D18;
-    border: 1px solid rgba(59,130,246,.18);
-    border-radius: .9rem;
-    overflow: hidden;
-    box-shadow: 0 0 48px rgba(59,130,246,.1), 0 0 100px rgba(34,211,238,.05);
-    font-family: 'JetBrains Mono','Courier New',monospace;
-    max-width: 900px; margin: 0 auto;
-    text-align: left;
-  }
-  .gh-body { padding: 1.4rem 1.3rem 1.6rem; display: flex; flex-direction: column; gap: 1.4rem; }
-  .gh-sub-label {
-    font-size: .62rem; letter-spacing: .1em; text-transform: uppercase;
-    color: #1e3a5f; margin-bottom: .6rem; display: block;
-  }
-  .gh-calendar { display: flex; flex-direction: column; gap: .55rem; }
-  .gh-grid {
-    display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 1fr);
-    gap: 3px; overflow-x: auto; padding-bottom: .3rem;
-  }
-  .gh-cell { width: 10px; height: 10px; border-radius: 2px; background: rgba(255,255,255,.05); flex-shrink: 0; }
-  .gh-cell[data-level="1"] { background: rgba(59,130,246,.35); }
-  .gh-cell[data-level="2"] { background: rgba(59,130,246,.6); }
-  .gh-cell[data-level="3"] { background: rgba(34,211,238,.75); }
-  .gh-cell[data-level="4"] { background: var(--cyan); box-shadow: 0 0 5px rgba(34,211,238,.7); }
-  .gh-legend { display: flex; align-items: center; gap: .4rem; font-size: .62rem; color: #334155; }
-  .gh-legend .gh-cell { width: 9px; height: 9px; }
-  .gh-total { font-size: .68rem; color: #60A5FA; }
-  .gh-total strong { color: var(--white); }
-  .gh-now {
-    display: flex; align-items: flex-start; gap: .7rem;
-    padding: .9rem 1rem; border-radius: .6rem;
-    background: rgba(59,130,246,.05); border: 1px solid rgba(59,130,246,.15);
-  }
-  .gh-now-dot {
-    width: 8px; height: 8px; border-radius: 50%; margin-top: .3em; flex-shrink: 0;
-    background: #34D399; box-shadow: 0 0 6px #34D399; animation: hudPulse 2s infinite;
-  }
-  .gh-now-text { font-size: .76rem; line-height: 1.6; color: var(--muted); }
-  .gh-now-text .gh-repo { color: var(--cyan); font-weight: 600; }
-  .gh-now-text .gh-time { color: #334155; font-size: .68rem; margin-left: .4rem; }
-  .gh-now-text p { font-family: 'Inter', sans-serif; color: var(--slate); margin-top: .2rem; }
-  .gh-error { font-size: .72rem; color: #334155; padding: .5rem 0; }
-  @media (max-width: 640px) { .gh-body { padding: 1.1rem .9rem 1.3rem; } }
-
   /* ── DEEP LEARNING VISUALIZER ── */
   .algo-card {
     background: #060D18;
@@ -1698,6 +1652,68 @@
   .algo-stat { font-size: .68rem; color: #60A5FA; }
   .algo-stat strong { color: var(--white); }
   .algo-hint { font-size: .68rem; color: #334155; margin-top: .6rem; font-family: 'JetBrains Mono', monospace; }
+
+  /* ── PROCEDURAL WORLD GENERATOR ── */
+  .procgen-controls {
+    display: flex; flex-wrap: wrap; gap: 1rem 1.8rem; align-items: flex-end;
+    padding: 1.1rem 1.2rem 0;
+  }
+  .procgen-field { display: flex; flex-direction: column; gap: .4rem; font-family: 'JetBrains Mono', monospace; }
+  .procgen-field label {
+    font-size: .62rem; letter-spacing: .08em; text-transform: uppercase; color: #60A5FA;
+    display: flex; justify-content: space-between; gap: .7rem;
+  }
+  .procgen-field label .val { color: var(--white); }
+  .procgen-field input[type="range"] {
+    -webkit-appearance: none; appearance: none; width: 150px; height: 4px; border-radius: 100px;
+    background: rgba(59,130,246,.18); outline: none; cursor: pointer;
+  }
+  .procgen-field input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+    background: var(--cyan); box-shadow: 0 0 8px rgba(34,211,238,.8); cursor: pointer;
+    border: 2px solid #030811;
+  }
+  .procgen-field input[type="range"]::-moz-range-thumb {
+    width: 14px; height: 14px; border-radius: 50%; background: var(--cyan);
+    box-shadow: 0 0 8px rgba(34,211,238,.8); cursor: pointer; border: 2px solid #030811;
+  }
+  .procgen-field select {
+    background: rgba(59,130,246,.08); border: 1px solid rgba(59,130,246,.3); color: var(--white);
+    font-family: 'JetBrains Mono', monospace; font-size: .72rem; padding: .4rem .6rem; border-radius: .4rem; cursor: pointer;
+  }
+  #procgen-canvas { width: 100%; height: auto; display: block; border-radius: .5rem; background: #030811; image-rendering: pixelated; }
+
+  /* ── LIVE IMAGE CLASSIFIER ── */
+  .classify-body { padding: 1.2rem; display: flex; flex-direction: column; gap: 1rem; }
+  .classify-drop {
+    border: 1.5px dashed rgba(59,130,246,.32); border-radius: .7rem;
+    padding: 2.4rem 1.5rem; text-align: center; cursor: pointer;
+    color: var(--muted); font-size: .85rem; transition: border-color .2s, background .2s;
+    display: flex; flex-direction: column; align-items: center; gap: .7rem;
+  }
+  .classify-drop:hover, .classify-drop:focus-visible, .classify-drop.drag-over {
+    border-color: var(--cyan); background: rgba(34,211,238,.05);
+  }
+  .classify-drop svg { width: 2rem; height: 2rem; color: #60A5FA; }
+  .classify-stage { display: none; gap: 1.4rem; align-items: flex-start; flex-wrap: wrap; }
+  .classify-stage.active { display: flex; }
+  .classify-preview {
+    flex: 0 0 auto; width: 180px; height: 180px; border-radius: .7rem; overflow: hidden;
+    border: 1px solid rgba(59,130,246,.25); background: #030811;
+  }
+  .classify-preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .classify-results { flex: 1 1 220px; min-width: 220px; display: flex; flex-direction: column; gap: .8rem; }
+  .pred-row { display: flex; flex-direction: column; gap: .28rem; }
+  .pred-label { display: flex; justify-content: space-between; gap: .6rem; font-size: .8rem; color: var(--white); }
+  .pred-label .pred-pct { color: #60A5FA; font-family: 'JetBrains Mono', monospace; flex-shrink: 0; }
+  .pred-track { height: 6px; border-radius: 100px; background: rgba(255,255,255,.06); overflow: hidden; }
+  .pred-fill {
+    height: 100%; width: 0; border-radius: 100px;
+    background: linear-gradient(90deg, var(--cyan), var(--blue));
+    box-shadow: 0 0 12px rgba(34,211,238,.5);
+    transition: width 1s cubic-bezier(.4,0,.2,1);
+  }
+  .classify-note { font-size: .68rem; color: #334155; font-family: 'JetBrains Mono', monospace; }
 
   /* ── EXPLAIN THIS (inline AI explainer) ── */
   .explain-btn {
@@ -1767,10 +1783,11 @@
   <ul id="nav-menu">
     <li><a href="#resume">Résumé</a></li>
     <li><a href="#tools">Toolkit</a></li>
-    <li><a href="#github">GitHub</a></li>
     <li><a href="#skills">Skills</a></li>
     <li><a href="#build">In Motion</a></li>
     <li><a href="#algorithm">Deep Learning</a></li>
+    <li><a href="#procgen">World Gen</a></li>
+    <li><a href="#classifier">Classify</a></li>
     <li><a href="#models">3D Work</a></li>
     <li><a href="#photography">Photography</a></li>
     <li><a href="#process">Process</a></li>
@@ -2042,6 +2059,7 @@
       </div>
       <div class="resume-hint">◀ drag to rotate ▶</div>
       <a href="Nicholas_Gearinger_Resume.pdf" download class="cs-trigger" style="margin-top:1.4rem;">Download résumé (PDF)</a>
+    </div>
   </div>
 </section>
 
@@ -2070,55 +2088,6 @@
       <div class="tool-badge" data-years="1 yr"><span class="tool-icon">◫</span><span class="tool-name">Google Suite</span></div>
       <div class="tool-badge" data-years="familiar"><span class="tool-icon">▦</span><span class="tool-name">Microsoft Office</span></div>
       <div class="tool-badge" data-years="3 yr"><span class="tool-icon tool-icon-img"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13v-1a8 8 0 0 1 16 0v1"/><rect x="2" y="13" width="4" height="6" rx="1.5"/><rect x="18" y="13" width="4" height="6" rx="1.5"/><path d="M20 19v1a3 3 0 0 1-3 3h-3"/></svg></span><span class="tool-name">Customer Service</span></div>
-    </div>
-  </div>
-</section>
-
-
-<!-- GITHUB LIVE ACTIVITY -->
-<section id="github" class="panel">
-  <div class="panel-inner">
-    <span class="section-label">Live from GitHub</span>
-    <h2>Code in<br>the wild</h2>
-    <p class="lead" style="margin:0 auto 1.4rem;">Pulled live from my GitHub account — real commits, not a static screenshot.</p>
-    <div class="explain-row" style="margin-bottom:1.6rem;">
-      <button type="button" class="explain-btn" id="explain-github"
-        data-question="In 2-3 short sentences, explain what a GitHub contribution graph tells a visitor about a developer's activity."
-        data-fallback="This graph is built directly from the GitHub API, so it reflects real commit activity rather than a curated screenshot. Each cell represents a day, and the shade shows how much was shipped that day, which gives a rough but honest sense of consistency over time. It's less about any single green square and more about the overall rhythm of work.">
-        <span class="explain-spin">↻</span>✦ Explain this
-      </button>
-    </div>
-    <div class="explain-body" id="explain-github-body" style="margin:0 auto 1.8rem;">
-      <span class="explain-tag">✦ AI-generated explanation</span>
-      <p id="explain-github-text"></p>
-    </div>
-    <div class="gh-card">
-      <div class="cc-titlebar">
-        <div class="cc-dots">
-          <span class="cc-dot" style="background:#FF5F57"></span>
-          <span class="cc-dot" style="background:#FFBD2E"></span>
-          <span class="cc-dot" style="background:#28C840"></span>
-        </div>
-        <span class="cc-filename">github_activity.sh</span>
-        <div class="cc-status-pill" id="gh-pill">
-          <span class="cc-pill-dot"></span><span id="gh-pill-text">SYNCING</span>
-        </div>
-      </div>
-      <div class="gh-body">
-        <div>
-          <span class="gh-sub-label">Contribution history — last 12 months</span>
-          <div class="gh-calendar" id="gh-calendar">
-            <div class="gh-error">Connecting to github.com/nicholasgearinger-code…</div>
-          </div>
-        </div>
-        <div>
-          <span class="gh-sub-label">Now building</span>
-          <div class="gh-now" id="gh-now">
-            <span class="gh-now-dot"></span>
-            <div class="gh-now-text">Checking latest activity…</div>
-          </div>
-        </div>
-      </div>
     </div>
   </div>
 </section>
@@ -2276,6 +2245,121 @@
     <div class="explain-body" id="explain-attention-body">
       <span class="explain-tag">✦ AI-generated explanation</span>
       <p id="explain-attention-text"></p>
+    </div>
+  </div>
+</section>
+
+
+<!-- PROCEDURAL WORLD GENERATOR -->
+<section id="procgen" class="panel">
+  <div class="panel-inner">
+    <span class="section-label">Procedural Generation</span>
+    <h2>Worlds built<br>from noise</h2>
+    <p class="lead" style="margin:0 auto 2.2rem;">Fractal value noise, layered octave by octave into a heightmap, then colored by elevation into a tiny procedural landscape — the same technique behind terrain generation in games.</p>
+    <div class="algo-card">
+      <div class="cc-titlebar">
+        <div class="cc-dots">
+          <span class="cc-dot" style="background:#FF5F57"></span>
+          <span class="cc-dot" style="background:#FFBD2E"></span>
+          <span class="cc-dot" style="background:#28C840"></span>
+        </div>
+        <span class="cc-filename">terrain_gen.py</span>
+        <div class="cc-status-pill" id="procgen-pill">
+          <span class="cc-pill-dot"></span><span id="procgen-pill-text">READY</span>
+        </div>
+      </div>
+      <div class="procgen-controls">
+        <div class="procgen-field">
+          <label>Scale <span class="val" id="procgen-scale-val">4.5</span></label>
+          <input type="range" id="procgen-scale" min="1.5" max="9" step="0.1" value="4.5">
+        </div>
+        <div class="procgen-field">
+          <label>Octaves <span class="val" id="procgen-octaves-val">5</span></label>
+          <input type="range" id="procgen-octaves" min="1" max="7" step="1" value="5">
+        </div>
+        <div class="procgen-field">
+          <label for="procgen-biome">Biome</label>
+          <select id="procgen-biome">
+            <option value="island">Island</option>
+            <option value="alpine">Alpine</option>
+            <option value="alien">Alien</option>
+            <option value="mono">Heightmap (mono)</option>
+          </select>
+        </div>
+      </div>
+      <div class="algo-body">
+        <canvas id="procgen-canvas" width="720" height="360" aria-label="Procedurally generated terrain map colored by elevation"></canvas>
+      </div>
+      <div class="algo-footer">
+        <div class="algo-legend" id="procgen-legend">
+          <span><span class="algo-swatch" style="background:#1c6ea4"></span>water</span>
+          <span><span class="algo-swatch" style="background:#d9c58a"></span>sand</span>
+          <span><span class="algo-swatch" style="background:#3f8f4f"></span>grass</span>
+          <span><span class="algo-swatch" style="background:#6b6558"></span>rock</span>
+          <span><span class="algo-swatch" style="background:#eef2f5"></span>snow</span>
+        </div>
+        <div class="algo-stat" id="procgen-stat">seed: <strong>—</strong></div>
+        <button type="button" class="algo-run-btn" id="procgen-run">↻ Generate new world</button>
+      </div>
+    </div>
+    <p class="algo-hint">layered Perlin noise (fractal Brownian motion) → normalized heightmap → elevation-banded color ramp (no external assets — generated fresh every click)</p>
+    <div class="explain-row">
+      <button type="button" class="explain-btn" id="explain-procgen"
+        data-question="In 2-3 short sentences, explain how layered noise functions (fractal/Perlin noise) are used to procedurally generate game terrain."
+        data-fallback="Procedural terrain usually starts with a noise function that produces smooth, random-looking values across a 2D grid. Layering several octaves of that noise at different scales and blending them adds both large landmasses and small-scale roughness, which is called fractal noise. Coloring the result by elevation — water below a threshold, then sand, grass, rock, and snow moving up — turns raw numbers into a landscape that never repeats.">
+        <span class="explain-spin">↻</span>✦ Explain this
+      </button>
+    </div>
+    <div class="explain-body" id="explain-procgen-body">
+      <span class="explain-tag">✦ AI-generated explanation</span>
+      <p id="explain-procgen-text"></p>
+    </div>
+  </div>
+</section>
+
+
+<!-- LIVE IMAGE CLASSIFIER -->
+<section id="classifier" class="panel">
+  <div class="panel-inner">
+    <span class="section-label">Vision, in the Browser</span>
+    <h2>Show it a photo,<br>it'll take a guess</h2>
+    <p class="lead" style="margin:0 auto 2.2rem;">A real MobileNet model, pretrained on over a million images, runs entirely on your device — nothing you upload here is ever sent to a server.</p>
+    <div class="algo-card">
+      <div class="cc-titlebar">
+        <div class="cc-dots">
+          <span class="cc-dot" style="background:#FF5F57"></span>
+          <span class="cc-dot" style="background:#FFBD2E"></span>
+          <span class="cc-dot" style="background:#28C840"></span>
+        </div>
+        <span class="cc-filename">vision_classifier.js</span>
+        <div class="cc-status-pill" id="classify-pill">
+          <span class="cc-pill-dot"></span><span id="classify-pill-text">IDLE</span>
+        </div>
+      </div>
+      <div class="classify-body">
+        <label class="classify-drop" id="classify-drop" for="classify-input" tabindex="0">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M12 4l-4 4M12 4l4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+          <span id="classify-drop-text">Drop an image here, or click to choose one</span>
+        </label>
+        <input type="file" id="classify-input" accept="image/*" hidden>
+        <div class="classify-stage" id="classify-stage">
+          <div class="classify-preview"><img id="classify-img" alt="Uploaded image preview"></div>
+          <div class="classify-results" id="classify-results"></div>
+        </div>
+        <button type="button" class="algo-run-btn classify-again" id="classify-again" style="display:none;">↻ Try another image</button>
+        <p class="classify-note">Model: MobileNet v2 (TensorFlow.js) — inference runs locally in your browser.</p>
+      </div>
+    </div>
+    <div class="explain-row">
+      <button type="button" class="explain-btn" id="explain-classifier"
+        data-question="In 2-3 short sentences, explain what a pretrained image classifier like MobileNet is doing when it labels a photo, for a non-technical visitor."
+        data-fallback="MobileNet is a neural network that was already trained on more than a million labeled photos, so it has learned general visual patterns — edges, textures, shapes — that add up to recognizable objects. When you give it a new photo, it doesn't 'search' anywhere; it runs the image through those learned patterns once and reports which labels its training makes most likely, with a confidence score for each. Running it in the browser means your photo is processed on your own device and never has to leave it.">
+        <span class="explain-spin">↻</span>✦ Explain this
+      </button>
+    </div>
+    <div class="explain-body" id="explain-classifier-body">
+      <span class="explain-tag">✦ AI-generated explanation</span>
+      <p id="explain-classifier-text"></p>
     </div>
   </div>
 </section>
@@ -4858,105 +4942,6 @@ panels.forEach(p => observer.observe(p));
 })();
 </script>
 <script>
-/* -- GITHUB LIVE ACTIVITY: fetches real contribution history + latest public
-      push from GitHub's own APIs. No auth, no build step — just fetch on load.
-      Fails gracefully to a quiet message if the network or API is unavailable. -- */
-(function githubActivity() {
-  const USERNAME = 'nicholasgearinger-code';
-  const calendarEl = document.getElementById('gh-calendar');
-  const nowEl = document.getElementById('gh-now');
-  const pillText = document.getElementById('gh-pill-text');
-  const pillDot = document.querySelector('#gh-pill .cc-pill-dot');
-  if (!calendarEl || !nowEl) return;
-
-  function timeAgo(dateStr) {
-    const diffMs = Date.now() - new Date(dateStr).getTime();
-    const mins = Math.floor(diffMs / 60000);
-    if (mins < 60) return mins + 'm ago';
-    const hrs = Math.floor(mins / 60);
-    if (hrs < 24) return hrs + 'h ago';
-    const days = Math.floor(hrs / 24);
-    if (days < 30) return days + 'd ago';
-    return new Date(dateStr).toLocaleDateString();
-  }
-
-  function setPill(text, ok) {
-    if (pillText) pillText.textContent = text;
-    if (pillDot) pillDot.style.background = ok ? '#34D399' : '#FB7185';
-  }
-
-  async function loadCalendar() {
-    try {
-      const res = await fetch('https://github-contributions-api.jogruber.de/v4/' + USERNAME + '?y=last');
-      if (!res.ok) throw new Error('bad response');
-      const data = await res.json();
-      const days = data.contributions || [];
-      const totalKey = Object.keys(data.total || {}).pop();
-      const total = totalKey ? data.total[totalKey] : days.reduce((s, d) => s + d.count, 0);
-
-      const grid = document.createElement('div');
-      grid.className = 'gh-grid';
-      days.slice(-364).forEach((d) => {
-        const cell = document.createElement('div');
-        cell.className = 'gh-cell';
-        cell.setAttribute('data-level', d.level || 0);
-        cell.title = d.count + ' contribution' + (d.count === 1 ? '' : 's') + ' on ' + d.date;
-        grid.appendChild(cell);
-      });
-
-      const legend = document.createElement('div');
-      legend.className = 'gh-legend';
-      legend.innerHTML = '<span>Less</span>' +
-        [0, 1, 2, 3, 4].map((l) => '<span class="gh-cell" data-level="' + l + '"></span>').join('') +
-        '<span>More</span><span class="gh-total" style="margin-left:auto;"><strong>' + total + '</strong> contributions in the last year</span>';
-
-      calendarEl.innerHTML = '';
-      calendarEl.appendChild(grid);
-      calendarEl.appendChild(legend);
-      return true;
-    } catch (e) {
-      calendarEl.innerHTML = '<div class="gh-error">Couldn\'t load contribution history right now — <a href="https://github.com/' + USERNAME + '" target="_blank" rel="noopener" style="color:#60A5FA;">view on GitHub →</a></div>';
-      return false;
-    }
-  }
-
-  async function loadNowBuilding() {
-    try {
-      const res = await fetch('https://api.github.com/users/' + USERNAME + '/events/public');
-      if (!res.ok) throw new Error('bad response');
-      const events = await res.json();
-      const push = Array.isArray(events) ? events.find((e) => e.type === 'PushEvent') : null;
-      const anyEvent = Array.isArray(events) ? events[0] : null;
-
-      if (push) {
-        const repo = push.repo && push.repo.name ? push.repo.name.split('/').pop() : 'a repo';
-        const commit = push.payload && push.payload.commits && push.payload.commits.length
-          ? push.payload.commits[push.payload.commits.length - 1].message
-          : null;
-        nowEl.innerHTML = '<span class="gh-now-dot"></span><div class="gh-now-text">' +
-          'Pushed to <span class="gh-repo">' + repo + '</span><span class="gh-time">' + timeAgo(push.created_at) + '</span>' +
-          (commit ? '<p>“' + commit.replace(/</g, '&lt;').slice(0, 90) + '”</p>' : '') +
-          '</div>';
-      } else if (anyEvent) {
-        const repo = anyEvent.repo && anyEvent.repo.name ? anyEvent.repo.name.split('/').pop() : 'a repo';
-        nowEl.innerHTML = '<span class="gh-now-dot"></span><div class="gh-now-text">' +
-          'Active on <span class="gh-repo">' + repo + '</span><span class="gh-time">' + timeAgo(anyEvent.created_at) + '</span></div>';
-      } else {
-        nowEl.innerHTML = '<span class="gh-now-dot" style="background:#334155;box-shadow:none;animation:none;"></span><div class="gh-now-text">No public activity yet — <a href="https://github.com/' + USERNAME + '" target="_blank" rel="noopener" style="color:#60A5FA;">see full profile →</a></div>';
-      }
-      return true;
-    } catch (e) {
-      nowEl.innerHTML = '<span class="gh-now-dot" style="background:#334155;box-shadow:none;animation:none;"></span><div class="gh-now-text">Couldn\'t reach GitHub right now — <a href="https://github.com/' + USERNAME + '" target="_blank" rel="noopener" style="color:#60A5FA;">view profile →</a></div>';
-      return false;
-    }
-  }
-
-  Promise.all([loadCalendar(), loadNowBuilding()]).then((results) => {
-    setPill(results.every(Boolean) ? 'LIVE' : 'PARTIAL', results.some(Boolean));
-  });
-})();
-</script>
-<script>
 /* -- DEEP LEARNING VISUALIZER: a real (simplified) feedforward pass through
       a small multi-layer neural network — random weights and biases, a
       weighted sum at each neuron, a ReLU/sigmoid-style activation — animated
@@ -4973,10 +4958,10 @@ panels.forEach(p => observer.observe(p));
   const ctx = canvas.getContext('2d');
   const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  // Layer sizes: input, two hidden layers, output
-  const LAYER_SIZES = [4, 6, 5, 2];
+  // Layer sizes: input, three hidden layers, output
+  const LAYER_SIZES = [6, 9, 9, 7, 3];
   const PAD_X = 60, PAD_Y = 30;
-  const NODE_R = 13;
+  const NODE_R = Math.max(6, Math.min(13, 130 / Math.max(...LAYER_SIZES)));
   let layers, weights, biases, activations, maxOut, timer = null;
 
   function rand(a, b) { return a + Math.random() * (b - a); }
@@ -5071,7 +5056,7 @@ panels.forEach(p => observer.observe(p));
     ctx.font = '10px "JetBrains Mono", monospace';
     ctx.textAlign = 'center'; ctx.textBaseline = 'top';
     ctx.fillStyle = '#64748B';
-    const labels = ['input', 'hidden', 'hidden', 'output'];
+    const labels = layers.map((_, l) => l === 0 ? 'input' : l === layers.length - 1 ? 'output' : 'hidden');
     for (let l = 0; l < layers.length; l++) {
       ctx.fillText(labels[l], layerX(l), canvas.height - 16);
     }
@@ -5125,6 +5110,290 @@ panels.forEach(p => observer.observe(p));
 })();
 </script>
 <script>
+/* -- PROCEDURAL WORLD GENERATOR: hand-rolled 2D Perlin noise, summed across
+      several octaves (fractal Brownian motion) into a heightmap, then
+      colored by elevation band. Everything here — noise, falloff, palette —
+      is generated on the fly; no external assets or libraries. -- */
+(function proceduralTerrain() {
+  const canvas = document.getElementById('procgen-canvas');
+  const runBtn = document.getElementById('procgen-run');
+  const scaleInput = document.getElementById('procgen-scale');
+  const octavesInput = document.getElementById('procgen-octaves');
+  const biomeSelect = document.getElementById('procgen-biome');
+  const scaleVal = document.getElementById('procgen-scale-val');
+  const octavesVal = document.getElementById('procgen-octaves-val');
+  const statEl = document.getElementById('procgen-stat');
+  const pillText = document.getElementById('procgen-pill-text');
+  const legendEl = document.getElementById('procgen-legend');
+  if (!canvas || !runBtn) return;
+  const ctx = canvas.getContext('2d');
+
+  const COLS = 120, ROWS = 60;
+  const CELL = canvas.width / COLS;
+  let seed = Math.floor(Math.random() * 1e9);
+
+  // Small seeded PRNG (mulberry32) so a given seed always reproduces the same gradients
+  function makeRng(s) {
+    let a = s >>> 0;
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function buildNoise(s) {
+    const rng = makeRng(s);
+    const GRID = 64;
+    const grads = [];
+    for (let i = 0; i < GRID * GRID; i++) {
+      const a = rng() * Math.PI * 2;
+      grads.push([Math.cos(a), Math.sin(a)]);
+    }
+    function gradAt(ix, iy) {
+      const x = ((ix % GRID) + GRID) % GRID;
+      const y = ((iy % GRID) + GRID) % GRID;
+      return grads[y * GRID + x];
+    }
+    function fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
+    function lerp(a, b, t) { return a + t * (b - a); }
+    function dot(ix, iy, dx, dy) { const g = gradAt(ix, iy); return g[0] * dx + g[1] * dy; }
+    return function perlin(x, y) {
+      const x0 = Math.floor(x), y0 = Math.floor(y);
+      const x1 = x0 + 1, y1 = y0 + 1;
+      const sx = x - x0, sy = y - y0;
+      const n00 = dot(x0, y0, x - x0, y - y0);
+      const n10 = dot(x1, y0, x - x1, y - y0);
+      const n01 = dot(x0, y1, x - x0, y - y1);
+      const n11 = dot(x1, y1, x - x1, y - y1);
+      const u = fade(sx), v = fade(sy);
+      return lerp(lerp(n00, n10, u), lerp(n01, n11, u), v);
+    };
+  }
+
+  function fbm(perlin, x, y, octaves) {
+    let total = 0, amp = 0.55, freq = 1, maxAmp = 0;
+    for (let o = 0; o < octaves; o++) {
+      total += perlin(x * freq, y * freq) * amp;
+      maxAmp += amp;
+      amp *= 0.52;
+      freq *= 2.02;
+    }
+    return total / maxAmp;
+  }
+
+  const PALETTES = {
+    island: [[0,'#0b2f52'],[.34,'#1c6ea4'],[.42,'#3d97c9'],[.46,'#d9c58a'],[.52,'#7fb356'],[.62,'#3f8f4f'],[.74,'#2f6b3c'],[.85,'#6b6558'],[.93,'#8b8378'],[1,'#eef2f5']],
+    alpine: [[0,'#14213d'],[.30,'#274472'],[.45,'#3a5a78'],[.55,'#5c6b57'],[.68,'#4c5a44'],[.80,'#7c7568'],[.90,'#c9cdd3'],[1,'#ffffff']],
+    alien:  [[0,'#1a0533'],[.30,'#3b0a5c'],[.45,'#6b1a8c'],[.55,'#9b3fb0'],[.66,'#c65fae'],[.78,'#e88a5e'],[.90,'#f4c14b'],[1,'#fff6d6']],
+    mono:   [[0,'#050a12'],[.5,'#5c7a9e'],[1,'#f0f8ff']]
+  };
+  const LEGENDS = {
+    island: [['water','#1c6ea4'],['sand','#d9c58a'],['grass','#3f8f4f'],['rock','#6b6558'],['snow','#eef2f5']],
+    alpine: [['deep water','#274472'],['scrub','#4c5a44'],['stone','#7c7568'],['snow','#ffffff']],
+    alien:  [['void','#3b0a5c'],['flora','#9b3fb0'],['dust','#e88a5e'],['glow','#fff6d6']],
+    mono:   [['low','#050a12'],['mid','#5c7a9e'],['high','#f0f8ff']]
+  };
+
+  function mixHex(a, b, t) {
+    const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
+    const ar = (pa >> 16) & 255, ag = (pa >> 8) & 255, ab = pa & 255;
+    const br = (pb >> 16) & 255, bg = (pb >> 8) & 255, bb = pb & 255;
+    const r = Math.round(ar + (br - ar) * t), g = Math.round(ag + (bg - ag) * t), bl = Math.round(ab + (bb - ab) * t);
+    return 'rgb(' + r + ',' + g + ',' + bl + ')';
+  }
+  function colorFor(t, palette) {
+    for (let i = 1; i < palette.length; i++) {
+      if (t <= palette[i][0]) {
+        const [t0, c0] = palette[i - 1], [t1, c1] = palette[i];
+        return mixHex(c0, c1, (t - t0) / Math.max(1e-6, t1 - t0));
+      }
+    }
+    return palette[palette.length - 1][1];
+  }
+
+  function updateLegend() {
+    if (!legendEl) return;
+    const set = LEGENDS[biomeSelect.value] || LEGENDS.island;
+    legendEl.innerHTML = set.map(([label, color]) =>
+      '<span><span class="algo-swatch" style="background:' + color + '"></span>' + label + '</span>').join('');
+  }
+
+  function render() {
+    const scale = parseFloat(scaleInput.value);
+    const octaves = parseInt(octavesInput.value, 10);
+    const paletteName = biomeSelect.value;
+    const palette = PALETTES[paletteName] || PALETTES.island;
+    const perlin = buildNoise(seed);
+
+    const heights = new Float32Array(COLS * ROWS);
+    let min = Infinity, max = -Infinity;
+    for (let y = 0; y < ROWS; y++) {
+      for (let x = 0; x < COLS; x++) {
+        const nx = (x / COLS) * scale;
+        const ny = (y / ROWS) * scale * (ROWS / COLS);
+        let h = fbm(perlin, nx, ny, octaves);
+        if (paletteName !== 'mono') {
+          const dx = (x / COLS) * 2 - 1, dy = (y / ROWS) * 2 - 1;
+          h -= Math.pow(Math.sqrt(dx * dx + dy * dy), 3) * 0.9; // island falloff toward edges
+        }
+        heights[y * COLS + x] = h;
+        if (h < min) min = h;
+        if (h > max) max = h;
+      }
+    }
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for (let y = 0; y < ROWS; y++) {
+      for (let x = 0; x < COLS; x++) {
+        const t = (heights[y * COLS + x] - min) / Math.max(1e-6, max - min);
+        ctx.fillStyle = colorFor(t, palette);
+        ctx.fillRect(x * CELL, y * CELL, CELL + 0.5, CELL + 0.5);
+      }
+    }
+    if (statEl) statEl.innerHTML = 'seed: <strong>' + seed + '</strong>';
+    if (pillText) pillText.textContent = 'GENERATED';
+  }
+
+  function regenerate() { seed = Math.floor(Math.random() * 1e9); render(); }
+
+  scaleInput.addEventListener('input', () => { scaleVal.textContent = parseFloat(scaleInput.value).toFixed(1); render(); });
+  octavesInput.addEventListener('input', () => { octavesVal.textContent = octavesInput.value; render(); });
+  biomeSelect.addEventListener('change', () => { updateLegend(); render(); });
+  runBtn.addEventListener('click', regenerate);
+
+  updateLegend();
+  render();
+})();
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.1"></script>
+<script>
+/* -- LIVE IMAGE CLASSIFIER: a real pretrained MobileNet v2 model (TensorFlow.js),
+      loaded lazily once this section scrolls into view. Classification runs
+      fully client-side — the uploaded image never leaves the browser. -- */
+(function imageClassifier() {
+  const drop = document.getElementById('classify-drop');
+  const input = document.getElementById('classify-input');
+  const stage = document.getElementById('classify-stage');
+  const imgEl = document.getElementById('classify-img');
+  const resultsEl = document.getElementById('classify-results');
+  const againBtn = document.getElementById('classify-again');
+  const pillText = document.getElementById('classify-pill-text');
+  const pillDot = document.querySelector('#classify-pill .cc-pill-dot');
+  const dropText = document.getElementById('classify-drop-text');
+  if (!drop || !input || !stage || !imgEl || !resultsEl) return;
+
+  let model = null, modelPromise = null, loadFailed = false;
+
+  function setPill(text, ok) {
+    if (pillText) pillText.textContent = text;
+    if (pillDot) pillDot.style.background = ok === null ? '#60A5FA' : (ok ? '#34D399' : '#FB7185');
+  }
+
+  function ensureModel() {
+    if (modelPromise) return modelPromise;
+    if (typeof tf === 'undefined' || typeof mobilenet === 'undefined') {
+      loadFailed = true;
+      setPill('UNAVAILABLE', false);
+      if (dropText) dropText.textContent = "Couldn't load the vision model — check your connection and reload.";
+      modelPromise = Promise.reject(new Error('tfjs/mobilenet not loaded'));
+      return modelPromise;
+    }
+    setPill('LOADING MODEL', null);
+    modelPromise = mobilenet.load({ version: 2, alpha: 1.0 }).then((m) => {
+      model = m;
+      setPill('READY', true);
+      return m;
+    }).catch((e) => {
+      loadFailed = true;
+      setPill('UNAVAILABLE', false);
+      if (dropText) dropText.textContent = "Couldn't load the vision model — check your connection and reload.";
+      throw e;
+    });
+    return modelPromise;
+  }
+
+  // Lazy-load the (multi-MB) model only once this section actually scrolls into view
+  if ('IntersectionObserver' in window) {
+    const io = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) { ensureModel(); io.disconnect(); }
+    }, { threshold: 0.3 });
+    io.observe(drop);
+  } else {
+    ensureModel();
+  }
+
+  function humanizeLabel(name) { return name.split(',')[0].replace(/_/g, ' '); }
+
+  function renderPredictions(preds) {
+    resultsEl.innerHTML = preds.map((p) => {
+      const pct = Math.round(p.probability * 100);
+      const label = humanizeLabel(p.className).replace(/</g, '&lt;');
+      return '<div class="pred-row"><div class="pred-label"><span>' + label + '</span><span class="pred-pct">' + pct + '%</span></div>' +
+        '<div class="pred-track"><div class="pred-fill"></div></div></div>';
+    }).join('');
+    requestAnimationFrame(() => {
+      resultsEl.querySelectorAll('.pred-fill').forEach((fill, i) => {
+        const pct = preds[i] ? Math.round(preds[i].probability * 100) : 0;
+        setTimeout(() => { fill.style.width = pct + '%'; }, i * 90);
+      });
+    });
+  }
+
+  async function classifyCurrentImage() {
+    setPill('CLASSIFYING', null);
+    try {
+      const m = await ensureModel();
+      const preds = await m.classify(imgEl, 3);
+      renderPredictions(preds);
+      setPill('DONE', true);
+    } catch (e) {
+      resultsEl.innerHTML = '<p class="classify-note" style="color:#FB7185;">' +
+        (loadFailed ? "The vision model failed to load — check your connection and reload." : 'Could not classify this image — try a different photo.') +
+        '</p>';
+      setPill('ERROR', false);
+    }
+  }
+
+  function handleFile(file) {
+    if (!file || !file.type || !file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      imgEl.onload = classifyCurrentImage;
+      imgEl.src = e.target.result;
+      stage.classList.add('active');
+      drop.style.display = 'none';
+      if (againBtn) againBtn.style.display = 'inline-flex';
+    };
+    reader.readAsDataURL(file);
+  }
+
+  input.addEventListener('change', () => { if (input.files && input.files[0]) handleFile(input.files[0]); });
+  drop.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); }
+  });
+  ['dragover', 'dragenter'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('drag-over'); }));
+  ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('drag-over'); }));
+  drop.addEventListener('drop', (e) => {
+    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (file) handleFile(file);
+  });
+
+  if (againBtn) {
+    againBtn.addEventListener('click', () => {
+      stage.classList.remove('active');
+      drop.style.display = '';
+      againBtn.style.display = 'none';
+      input.value = '';
+      resultsEl.innerHTML = '';
+      setPill(model ? 'READY' : 'LOADING MODEL', model ? true : null);
+    });
+  }
+})();
+</script>
+<script>
 /* -- NAV SCROLL-SPY: highlights the current section's nav link, mirrors resume-tab.active -- */
 (function navScrollSpy() {
   const links = Array.from(document.querySelectorAll('nav ul li a[href^="#"]'));
@@ -5166,10 +5435,11 @@ panels.forEach(p => observer.observe(p));
 
   const COMMANDS = [
     { icon: '◈', label: 'Go to About / Résumé', action: () => scrollToId('resume') },
-    { icon: '◈', label: 'Go to GitHub Activity', action: () => scrollToId('github') },
     { icon: '◈', label: 'Go to Skills', action: () => scrollToId('skills') },
     { icon: '◈', label: 'Go to In Motion', action: () => scrollToId('build') },
     { icon: '◈', label: 'Go to Deep Learning Visualizer', action: () => scrollToId('algorithm') },
+    { icon: '◈', label: 'Go to World Generator', action: () => scrollToId('procgen') },
+    { icon: '◈', label: 'Go to Image Classifier', action: () => scrollToId('classifier') },
     { icon: '◈', label: 'Go to 3D Work', action: () => scrollToId('models') },
     { icon: '◈', label: 'Go to Photography', action: () => scrollToId('photography') },
     { icon: '◈', label: 'Go to Process', action: () => scrollToId('process') },

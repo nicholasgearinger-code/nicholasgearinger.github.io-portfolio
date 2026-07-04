@@ -1728,7 +1728,7 @@
   .gh-error { font-size: .72rem; color: #334155; padding: .5rem 0; }
   @media (max-width: 640px) { .gh-body { padding: 1.1rem .9rem 1.3rem; } }
 
-  /* ── PATHFINDING ALGORITHM VISUALIZER ── */
+  /* ── SELF-ATTENTION VISUALIZER ── */
   .algo-card {
     background: #060D18;
     border: 1px solid rgba(59,130,246,.18);
@@ -1757,6 +1757,49 @@
   .algo-run-btn:hover { background: rgba(34,211,238,.15); border-color: var(--cyan); color: var(--white); }
   .algo-stat { font-size: .68rem; color: #60A5FA; }
   .algo-stat strong { color: var(--white); }
+  .algo-hint { font-size: .68rem; color: #334155; margin-top: .6rem; font-family: 'JetBrains Mono', monospace; }
+
+  /* ── EXPLAIN THIS (inline AI explainer) ── */
+  .explain-btn {
+    display: inline-flex; align-items: center; gap: .4rem;
+    padding: .4rem .85rem; border-radius: 100px; cursor: pointer;
+    background: rgba(129,140,248,.1); border: 1px solid rgba(129,140,248,.35);
+    color: var(--violet); font-family: 'JetBrains Mono', monospace; font-size: .66rem; font-weight: 600;
+    letter-spacing: .04em; transition: background .2s, color .2s, border-color .2s;
+  }
+  .explain-btn:hover { background: rgba(129,140,248,.2); border-color: var(--violet); color: var(--white); }
+  .explain-btn[aria-expanded="true"] { background: var(--violet); color: var(--navy); border-color: var(--violet); }
+  .explain-btn .explain-spin { display: none; }
+  .explain-btn.loading .explain-spin { display: inline-block; animation: explainSpin .8s linear infinite; }
+  @keyframes explainSpin { to { transform: rotate(360deg); } }
+  .explain-body {
+    display: none; margin: .9rem auto 0; padding: .95rem 1.15rem;
+    background: rgba(129,140,248,.06); border: 1px solid rgba(129,140,248,.22);
+    border-radius: .7rem; font-size: .84rem; line-height: 1.65; color: var(--muted);
+    text-align: left; max-width: 620px;
+  }
+  .explain-body.open { display: block; }
+  .explain-tag {
+    display: flex; align-items: center; gap: .4rem;
+    font-family: 'JetBrains Mono', monospace; font-size: .62rem; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--violet); margin-bottom: .5rem;
+  }
+  .explain-row { display: flex; justify-content: center; margin-top: 1rem; }
+
+  /* ── TL;DR (AI-generated summary) ── */
+  .tldr-card {
+    margin: 1.6rem auto 0; max-width: 560px;
+    padding: .95rem 1.2rem; border-radius: .8rem;
+    background: rgba(245,158,11,.06); border: 1px solid rgba(245,158,11,.22);
+    text-align: left; font-size: .85rem; line-height: 1.6; color: var(--muted);
+  }
+  .tldr-tag {
+    display: inline-flex; align-items: center; gap: .4rem;
+    font-family: 'JetBrains Mono', monospace; font-size: .62rem; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--amber); margin-bottom: .45rem;
+  }
+  .tldr-tag .tldr-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 8px var(--amber); flex-shrink: 0; }
+  #tldr-text.loading { opacity: .55; }
 </style>
 </head>
 <body>
@@ -1789,7 +1832,7 @@
     <li><a href="#github">GitHub</a></li>
     <li><a href="#skills">Skills</a></li>
     <li><a href="#build">In Motion</a></li>
-    <li><a href="#algorithm">Algorithms</a></li>
+    <li><a href="#algorithm">Attention</a></li>
     <li><a href="#models">3D Work</a></li>
     <li><a href="#photography">Photography</a></li>
     <li><a href="#process">Process</a></li>
@@ -1814,6 +1857,10 @@
     <div class="hero-btns">
       <a href="#models" class="btn-primary">View My Work</a>
       <a href="#contact" class="btn-ghost">Get In Touch</a>
+    </div>
+    <div class="tldr-card" id="tldr-card">
+      <span class="tldr-tag"><span class="tldr-dot"></span>TL;DR — AI-generated summary</span>
+      <p id="tldr-text">Nicholas is a creative generalist working across design, 3D, and game development, and this site itself doubles as a demo of applied AI — from a live self-attention visualizer to on-page assistants that answer questions and summarize content for you.</p>
     </div>
   </div>
 
@@ -2095,7 +2142,18 @@
   <div class="panel-inner">
     <span class="section-label">Live from GitHub</span>
     <h2>Code in<br>the wild</h2>
-    <p class="lead" style="margin:0 auto 2.5rem;">Pulled live from my GitHub account — real commits, not a static screenshot.</p>
+    <p class="lead" style="margin:0 auto 1.4rem;">Pulled live from my GitHub account — real commits, not a static screenshot.</p>
+    <div class="explain-row" style="margin-bottom:1.6rem;">
+      <button type="button" class="explain-btn" id="explain-github"
+        data-question="In 2-3 short sentences, explain what a GitHub contribution graph tells a visitor about a developer's activity."
+        data-fallback="This graph is built directly from the GitHub API, so it reflects real commit activity rather than a curated screenshot. Each cell represents a day, and the shade shows how much was shipped that day, which gives a rough but honest sense of consistency over time. It's less about any single green square and more about the overall rhythm of work.">
+        <span class="explain-spin">↻</span>✦ Explain this
+      </button>
+    </div>
+    <div class="explain-body" id="explain-github-body" style="margin:0 auto 1.8rem;">
+      <span class="explain-tag">✦ AI-generated explanation</span>
+      <p id="explain-github-text"></p>
+    </div>
     <div class="gh-card">
       <div class="cc-titlebar">
         <div class="cc-dots">
@@ -2133,6 +2191,17 @@
   <div class="panel-inner">
     <span class="section-label">Capabilities</span>
     <h2>What I bring<br>to the table</h2>
+    <div class="explain-row" style="margin-bottom:1.8rem;">
+      <button type="button" class="explain-btn" id="explain-skills"
+        data-question="In 2-3 short sentences, explain how design skills and AI/technical skills complement each other for someone building digital products."
+        data-fallback="Design and technical skills reinforce each other: design instincts shape what's worth building and how it should feel to use, while technical fluency — including working with AI tools — determines how quickly and well that vision can actually ship. Someone who can do both tends to make fewer costly hand-off mistakes, because they understand the constraints on each side. It's the combination, not either skill alone, that speeds things up.">
+        <span class="explain-spin">↻</span>✦ Explain this
+      </button>
+    </div>
+    <div class="explain-body" id="explain-skills-body" style="margin:0 auto 1.8rem;">
+      <span class="explain-tag">✦ AI-generated explanation</span>
+      <p id="explain-skills-text"></p>
+    </div>
     <div class="skills-grid">
 
       <div class="skill-card">
@@ -2231,8 +2300,8 @@
 <section id="algorithm" class="panel">
   <div class="panel-inner">
     <span class="section-label">Under the Hood</span>
-    <h2>How I think<br>through a problem</h2>
-    <p class="lead" style="margin:0 auto 2.5rem;">A* pathfinding, running live in your browser — the same break-it-down-and-search approach I bring to design and code problems.</p>
+    <h2>How a model<br>reads a sentence</h2>
+    <p class="lead" style="margin:0 auto 2.5rem;">A simplified self-attention pass, computed live in your browser — the real dot-product-softmax math behind how LLMs decide which words matter to each other.</p>
     <div class="algo-card">
       <div class="cc-titlebar">
         <div class="cc-dots">
@@ -2240,23 +2309,35 @@
           <span class="cc-dot" style="background:#FFBD2E"></span>
           <span class="cc-dot" style="background:#28C840"></span>
         </div>
-        <span class="cc-filename">pathfind.py</span>
+        <span class="cc-filename">attention.py</span>
         <div class="cc-status-pill" id="algo-pill">
-          <span class="cc-pill-dot"></span><span id="algo-pill-text">SEARCHING</span>
+          <span class="cc-pill-dot"></span><span id="algo-pill-text">ENCODING</span>
         </div>
       </div>
       <div class="algo-body">
-        <canvas id="algo-canvas" width="720" height="360" aria-label="A* pathfinding visualization on a grid"></canvas>
+        <canvas id="algo-canvas" width="720" height="360" aria-label="Self-attention visualization: tokens across the top, an attention-weight heatmap below"></canvas>
       </div>
       <div class="algo-footer">
         <div class="algo-legend">
-          <span><span class="algo-swatch" style="background:rgba(59,130,246,.4)"></span>explored</span>
-          <span><span class="algo-swatch" style="background:var(--violet)"></span>frontier</span>
-          <span><span class="algo-swatch" style="background:var(--amber)"></span>shortest path</span>
+          <span><span class="algo-swatch" style="background:var(--violet)"></span>current token</span>
+          <span><span class="algo-swatch" style="background:rgba(125,211,252,.7)"></span>attends to</span>
+          <span><span class="algo-swatch" style="background:var(--amber)"></span>attention weight</span>
         </div>
-        <div class="algo-stat" id="algo-stat">nodes visited: <strong>0</strong></div>
+        <div class="algo-stat" id="algo-stat">tokens encoded: <strong>0</strong></div>
         <button type="button" class="algo-run-btn" id="algo-run">↻ Run again</button>
       </div>
+    </div>
+    <p class="algo-hint">random token embeddings → Q·Kᵀ / √d → softmax = attention weights (no training involved — it's the mechanism, not a trained model)</p>
+    <div class="explain-row">
+      <button type="button" class="explain-btn" id="explain-attention"
+        data-question="In 3 short sentences, explain what self-attention is doing in a transformer/LLM and why it matters, for a visitor who isn't technical."
+        data-fallback="Self-attention lets a model weigh how much every word in a sentence should influence its understanding of every other word — not just the words next to it. For each word, it computes a relevance score against all the others, turns those scores into weights that add up to 1, and blends the words together using those weights. Stack many of these layers and the model builds up rich context, which is a big part of why LLMs handle long-range meaning so well.">
+        <span class="explain-spin">↻</span>✦ Explain this
+      </button>
+    </div>
+    <div class="explain-body" id="explain-attention-body">
+      <span class="explain-tag">✦ AI-generated explanation</span>
+      <p id="explain-attention-text"></p>
     </div>
   </div>
 </section>
@@ -4331,16 +4412,64 @@ panels.forEach(p => observer.observe(p));
     });
   }
 
+  /* ── Inline "Explain this" buttons ──
+     Each button carries data-question (sent to /api/ask) and data-fallback
+     (a hand-written explanation shown if the API is unreachable or errors —
+     the button always works, live or static). Answer is fetched once per
+     button and cached in the panel afterward. */
+  function wireExplain() {
+    document.querySelectorAll('.explain-btn').forEach((btn) => {
+      const body = document.getElementById(btn.id + '-body');
+      const textEl = body ? body.querySelector('p') : null;
+      if (!body || !textEl) return;
+      let loaded = false;
+      btn.addEventListener('click', async () => {
+        const nowOpen = !body.classList.contains('open');
+        body.classList.toggle('open', nowOpen);
+        btn.setAttribute('aria-expanded', String(nowOpen));
+        if (!nowOpen || loaded) return;
+        loaded = true;
+        btn.classList.add('loading');
+        textEl.textContent = 'Thinking…';
+        try {
+          const r = await api('/api/ask', { method: 'POST', body: JSON.stringify({ question: btn.dataset.question }) });
+          textEl.textContent = (r && r.answer) ? r.answer : btn.dataset.fallback;
+        } catch (_) {
+          textEl.textContent = btn.dataset.fallback;
+        }
+        btn.classList.remove('loading');
+      });
+    });
+  }
+
+  /* ── TL;DR ──
+     Hero copy ships with a hand-written fallback baked into the HTML so it
+     reads fine with no backend. If the API is up, we quietly swap in a
+     freshly generated summary. */
+  function wireTLDR() {
+    const el = document.getElementById('tldr-text');
+    if (!el) return;
+    el.classList.add('loading');
+    api('/api/ask', {
+      method: 'POST',
+      body: JSON.stringify({ question: "In exactly 2 sentences, summarize this portfolio for a first-time visitor: what Nicholas does, and what makes the site itself worth exploring." }),
+    })
+      .then((r) => { if (r && r.answer) el.textContent = r.answer; })
+      .catch(() => {})
+      .finally(() => el.classList.remove('loading'));
+  }
+
   async function boot() {
     let up = false;
     try { const r = await fetch('/api/health', { cache: 'no-store' }); up = r.ok; } catch (_) { up = false; }
     document.body.classList.toggle('api-up', up);
 
     wireContact(up); // always, so the form works via mailto even offline
+    wireExplain(); // always — falls back to static copy if the API is down
     if (up) {
       document.querySelectorAll('.js-api-only').forEach((el) => { el.style.display = ''; });
       wireViews(); wireStatus(); wireSubscribe(); wireClaps();
-      wireGuestbook(); wireAsk(); wireAnalytics();
+      wireGuestbook(); wireAsk(); wireAnalytics(); wireTLDR();
       wireVoiceInput(); wireActivityTicker();
     }
   }
@@ -4996,10 +5125,13 @@ panels.forEach(p => observer.observe(p));
 })();
 </script>
 <script>
-/* -- PATHFINDING VISUALIZER: real A* search over a randomly generated grid,
-      animated step by step. Re-runs on demand and once when first scrolled
-      into view. Respects prefers-reduced-motion by skipping straight to the result. -- */
-(function pathfindViz() {
+/* -- SELF-ATTENTION VISUALIZER: a real (simplified) scaled dot-product
+      self-attention pass — random token embeddings, Q·Kᵀ/√d, row-wise
+      softmax — animated one query token at a time. No trained model or
+      network call involved; this shows the mechanism, not a prediction.
+      Re-runs on demand and once when first scrolled into view. Respects
+      prefers-reduced-motion by skipping straight to the final heatmap. -- */
+(function attentionViz() {
   const canvas = document.getElementById('algo-canvas');
   const runBtn = document.getElementById('algo-run');
   const statEl = document.getElementById('algo-stat');
@@ -5008,138 +5140,135 @@ panels.forEach(p => observer.observe(p));
   const ctx = canvas.getContext('2d');
   const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  const COLS = 30, ROWS = 15;
-  const CW = canvas.width / COLS, CH = canvas.height / ROWS;
-  let grid, start, goal, timer = null;
+  const SENTENCES = [
+    'the model reads context before it predicts',
+    'attention lets each token look at every other',
+    'claude weighs relevance before writing a reply',
+    'self attention finds which words matter most',
+    'every token asks the others for context',
+  ];
+  const DIM = 8;
+  const TOKEN_H = 32, TOKEN_TOP = 8;
+  const GRID_TOP = TOKEN_TOP + TOKEN_H + 22;
+  let tokens, attn, maxPair, N, CW, RH, timer = null;
 
-  function key(r, c) { return r + ',' + c; }
+  function dot(a, b) { let s = 0; for (let k = 0; k < DIM; k++) s += a[k] * b[k]; return s; }
 
-  function makeGrid() {
-    grid = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
-    start = { r: 1, c: 1 };
-    goal = { r: ROWS - 2, c: COLS - 2 };
-    for (let r = 0; r < ROWS; r++) {
-      for (let c = 0; c < COLS; c++) {
-        if ((r === start.r && c === start.c) || (r === goal.r && c === goal.c)) continue;
-        if (Math.random() < 0.24) grid[r][c] = 1;
+  function buildAttention() {
+    const sentence = SENTENCES[Math.floor(Math.random() * SENTENCES.length)];
+    tokens = sentence.split(' ');
+    N = tokens.length;
+    CW = canvas.width / N;
+    RH = (canvas.height - GRID_TOP - 8) / N;
+
+    const emb = Array.from({ length: N }, () => Array.from({ length: DIM }, () => Math.random() * 2 - 1));
+    const scale = Math.sqrt(DIM);
+    attn = [];
+    maxPair = { i: 0, j: 0, w: 0 };
+    for (let i = 0; i < N; i++) {
+      const raw = emb.map((k) => dot(emb[i], k) / scale);
+      const m = Math.max(...raw);
+      const exps = raw.map((v) => Math.exp(v - m));
+      const sum = exps.reduce((a, b) => a + b, 0);
+      const row = exps.map((v) => v / sum);
+      attn.push(row);
+      row.forEach((w, j) => { if (i !== j && w > maxPair.w) maxPair = { i, j, w }; });
+    }
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function tokenX(i) { return i * CW + CW / 2; }
+
+  function drawTokens(activeI, pinnedI) {
+    ctx.font = '12px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    tokens.forEach((t, i) => {
+      const isActive = i === activeI || i === pinnedI;
+      const x = i * CW + 3, w = CW - 6;
+      ctx.fillStyle = isActive ? 'rgba(129,140,248,.3)' : 'rgba(255,255,255,.05)';
+      ctx.strokeStyle = isActive ? '#818CF8' : 'rgba(255,255,255,.14)';
+      ctx.lineWidth = 1.4;
+      roundRect(x, TOKEN_TOP, w, TOKEN_H, 6); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = isActive ? '#F0F8FF' : '#94A3B8';
+      ctx.fillText(t.length > 9 ? t.slice(0, 8) + '…' : t, x + w / 2, TOKEN_TOP + TOKEN_H / 2 + 1);
+    });
+  }
+
+  function drawHeatmap(uptoRow) {
+    for (let i = 0; i <= uptoRow && i < N; i++) {
+      for (let j = 0; j < N; j++) {
+        const w = attn[i][j];
+        ctx.fillStyle = 'rgba(245,158,11,' + (0.06 + w * 0.85).toFixed(3) + ')';
+        ctx.fillRect(j * CW + 1, GRID_TOP + i * RH + 1, CW - 2, RH - 2);
       }
+      ctx.strokeStyle = 'rgba(255,255,255,.06)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(0.5, GRID_TOP + i * RH + 0.5, N * CW - 1, RH - 1);
     }
   }
 
-  function neighbors(node) {
-    const { r, c } = node;
-    return [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]]
-      .filter(([nr, nc]) => nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && grid[nr][nc] === 0)
-      .map(([nr, nc]) => ({ r: nr, c: nc }));
-  }
-
-  function reachable() {
-    const seen = new Set([key(start.r, start.c)]);
-    const q = [start];
-    while (q.length) {
-      const cur = q.shift();
-      if (cur.r === goal.r && cur.c === goal.c) return true;
-      neighbors(cur).forEach((n) => {
-        const k = key(n.r, n.c);
-        if (!seen.has(k)) { seen.add(k); q.push(n); }
-      });
+  function drawConnectors(i) {
+    const row = attn[i];
+    const fromX = tokenX(i), fromY = TOKEN_TOP + TOKEN_H;
+    for (let j = 0; j < N; j++) {
+      const w = row[j];
+      if (w < 0.035) continue;
+      ctx.strokeStyle = 'rgba(125,211,252,' + Math.min(w * 1.5, 0.85).toFixed(3) + ')';
+      ctx.lineWidth = Math.max(0.6, w * 3.2);
+      ctx.beginPath();
+      ctx.moveTo(fromX, fromY);
+      ctx.lineTo(tokenX(j), GRID_TOP);
+      ctx.stroke();
     }
-    return false;
   }
 
-  function astar() {
-    const h = (n) => Math.abs(n.r - goal.r) + Math.abs(n.c - goal.c);
-    const open = [{ node: start, f: h(start) }];
-    const gScore = { [key(start.r, start.c)]: 0 };
-    const cameFrom = {};
-    const visitedOrder = [];
-    const inOpen = new Set([key(start.r, start.c)]);
-
-    while (open.length) {
-      open.sort((a, b) => a.f - b.f);
-      const current = open.shift().node;
-      const ck = key(current.r, current.c);
-      inOpen.delete(ck);
-      visitedOrder.push(current);
-
-      if (current.r === goal.r && current.c === goal.c) {
-        const path = [current];
-        let k = ck;
-        while (cameFrom[k]) { path.unshift(cameFrom[k]); k = key(cameFrom[k].r, cameFrom[k].c); }
-        return { visitedOrder, path };
-      }
-
-      neighbors(current).forEach((n) => {
-        const nk = key(n.r, n.c);
-        const tentative = gScore[ck] + 1;
-        if (gScore[nk] === undefined || tentative < gScore[nk]) {
-          cameFrom[nk] = current;
-          gScore[nk] = tentative;
-          const f = tentative + h(n);
-          if (!inOpen.has(nk)) { open.push({ node: n, f }); inOpen.add(nk); }
-        }
-      });
-    }
-    return { visitedOrder, path: [] };
-  }
-
-  function drawBase() {
+  function draw(activeI, pinnedI) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    for (let r = 0; r < ROWS; r++) {
-      for (let c = 0; c < COLS; c++) {
-        ctx.fillStyle = grid[r][c] === 1 ? 'rgba(255,255,255,.07)' : 'rgba(255,255,255,.015)';
-        ctx.fillRect(c * CW + 1, r * CH + 1, CW - 2, CH - 2);
-      }
-    }
-    ctx.fillStyle = '#34D399';
-    ctx.fillRect(start.c * CW + 1, start.r * CH + 1, CW - 2, CH - 2);
-    ctx.fillStyle = '#F59E0B';
-    ctx.fillRect(goal.c * CW + 1, goal.r * CH + 1, CW - 2, CH - 2);
+    drawHeatmap(activeI);
+    if (activeI >= 0 && activeI < N) drawConnectors(activeI);
+    drawTokens(activeI, pinnedI);
   }
 
-  function fillCell(node, color) {
-    ctx.fillStyle = color;
-    ctx.fillRect(node.c * CW + 1, node.r * CH + 1, CW - 2, CH - 2);
+  function finish() {
+    draw(-1, maxPair.i);
+    drawConnectors(maxPair.i);
+    if (statEl) {
+      statEl.innerHTML = 'peak: <strong>"' + tokens[maxPair.i] + '" → "' + tokens[maxPair.j] + '"</strong> (' + maxPair.w.toFixed(2) + ')';
+    }
+    if (pillText) pillText.textContent = 'ATTENTION MAPPED';
   }
 
   function run() {
     if (timer) { clearInterval(timer); timer = null; }
-    let attempts = 0;
-    do { makeGrid(); attempts++; } while (!reachable() && attempts < 25);
-    if (pillText) pillText.textContent = 'SEARCHING';
+    buildAttention();
+    if (pillText) pillText.textContent = 'ENCODING';
+    if (statEl) statEl.innerHTML = 'tokens encoded: <strong>' + N + '</strong>';
+    draw(-1, -1);
 
-    const { visitedOrder, path } = astar();
-    drawBase();
-
-    if (reduceMotion) {
-      visitedOrder.forEach((n) => fillCell(n, 'rgba(59,130,246,.35)'));
-      path.forEach((n) => fillCell(n, '#F59E0B'));
-      fillCell(start, '#34D399'); fillCell(goal, '#F59E0B');
-      if (statEl) statEl.innerHTML = 'nodes visited: <strong>' + visitedOrder.length + '</strong>';
-      if (pillText) pillText.textContent = 'PATH FOUND';
-      return;
-    }
+    if (reduceMotion) { finish(); return; }
 
     let i = 0;
+    if (pillText) pillText.textContent = 'ATTENDING';
     timer = setInterval(() => {
-      if (i < visitedOrder.length) {
-        if (i > 0) fillCell(visitedOrder[i - 1], 'rgba(59,130,246,.35)');
-        fillCell(visitedOrder[i], '#818CF8');
-        fillCell(start, '#34D399'); fillCell(goal, '#F59E0B');
-        if (statEl) statEl.innerHTML = 'nodes visited: <strong>' + (i + 1) + '</strong>';
+      if (i < N) {
+        draw(i, -1);
+        if (statEl) statEl.innerHTML = 'attending token <strong>' + (i + 1) + ' / ' + N + '</strong>';
         i++;
       } else {
         clearInterval(timer);
         timer = null;
-        if (visitedOrder.length) fillCell(visitedOrder[visitedOrder.length - 1], 'rgba(59,130,246,.35)');
-        fillCell(start, '#34D399'); fillCell(goal, '#F59E0B');
-        let p = 0;
-        const pathTimer = setInterval(() => {
-          if (p < path.length) { fillCell(path[p], '#F59E0B'); p++; }
-          else { clearInterval(pathTimer); fillCell(start, '#34D399'); fillCell(goal, '#F59E0B'); if (pillText) pillText.textContent = path.length ? 'PATH FOUND' : 'NO PATH'; }
-        }, 22);
+        finish();
       }
-    }, 14);
+    }, 480);
   }
 
   runBtn.addEventListener('click', run);
@@ -5195,7 +5324,7 @@ panels.forEach(p => observer.observe(p));
     { icon: '◈', label: 'Go to GitHub Activity', action: () => scrollToId('github') },
     { icon: '◈', label: 'Go to Skills', action: () => scrollToId('skills') },
     { icon: '◈', label: 'Go to In Motion', action: () => scrollToId('build') },
-    { icon: '◈', label: 'Go to Algorithm Visualizer', action: () => scrollToId('algorithm') },
+    { icon: '◈', label: 'Go to Attention Visualizer', action: () => scrollToId('algorithm') },
     { icon: '◈', label: 'Go to 3D Work', action: () => scrollToId('models') },
     { icon: '◈', label: 'Go to Photography', action: () => scrollToId('photography') },
     { icon: '◈', label: 'Go to Process', action: () => scrollToId('process') },

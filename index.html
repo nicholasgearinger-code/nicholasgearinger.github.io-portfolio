@@ -61,10 +61,10 @@
     text-decoration: none; color: var(--white); font-size: .84rem; font-weight: 500;
     letter-spacing: .02em;
     padding: .5rem 1.05rem; border-radius: 100px;
-    border: 1px solid transparent; background: transparent;
+    border: 1px solid var(--card-border); background: var(--card-bg);
     transition: color .2s, border-color .2s, background .2s;
   }
-  nav a:hover { color: var(--white); border-color: var(--cyan); background: rgba(34,211,238,.08); }
+  nav a:hover { color: var(--white); border-color: var(--cyan); background: rgba(34,211,238,.14); }
   .nav-cta {
     padding: .5rem 1.25rem;
     border: 1px solid var(--violet) !important;
@@ -1532,32 +1532,12 @@
     border-color: #E879F9; background: rgba(232,121,249,.08);
   }
   #custom-cursor.cc-hover::before, #custom-cursor.cc-hover::after { background: #E879F9; }
-
-  /* ── SECTION TRANSITION GLITCH-WIPE ── */
-  #glitch-wipe {
-    position: fixed; inset: 0; z-index: 8500; pointer-events: none;
-    opacity: 0;
-  }
-  #glitch-wipe.wipe-active { animation: glitchWipe .45s steps(2, end); }
-  #glitch-wipe .gw-band {
-    position: absolute; left: 0; width: 100%; background: var(--cyan);
-    mix-blend-mode: difference;
-  }
-  @keyframes glitchWipe {
-    0%   { opacity: 0; }
-    10%  { opacity: .85; }
-    30%  { opacity: .5; }
-    50%  { opacity: .85; }
-    70%  { opacity: .3; }
-    100% { opacity: 0; }
-  }
 </style>
 </head>
 <body>
 
 <div class="cursor-glow" id="glow"></div>
 <div id="custom-cursor" aria-hidden="true"></div>
-<div id="glitch-wipe" aria-hidden="true"></div>
 
 <!-- BOOT SEQUENCE (shown once per session, before the page reveals) -->
 <div id="boot-seq" aria-hidden="true">
@@ -4363,35 +4343,6 @@ panels.forEach(p => observer.observe(p));
 })();
 </script>
 <script>
-/* -- SECTION TRANSITION GLITCH-WIPE: brief flash on any in-page nav jump -- */
-(function glitchWipeSetup() {
-  const wipeEl = document.getElementById('glitch-wipe');
-  if (!wipeEl) return;
-  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-
-  function trigger() {
-    wipeEl.innerHTML = '';
-    const bandCount = 3 + Math.floor(Math.random() * 3);
-    for (let i = 0; i < bandCount; i++) {
-      const band = document.createElement('div');
-      band.className = 'gw-band';
-      band.style.top = (Math.random() * 100) + '%';
-      band.style.height = (4 + Math.random() * 30) + 'px';
-      band.style.transform = 'translateX(' + (Math.random() * 16 - 8) + 'px)';
-      wipeEl.appendChild(band);
-    }
-    wipeEl.classList.remove('wipe-active');
-    void wipeEl.offsetHeight; // reflow so the animation restarts every time
-    wipeEl.classList.add('wipe-active');
-  }
-  window.__triggerGlitchWipe = trigger;
-
-  document.querySelectorAll('a[href^="#"]').forEach((a) => {
-    a.addEventListener('click', trigger);
-  });
-})();
-</script>
-<script>
 /* -- HUD CORNER WIDGET: live clock (always runs, no backend needed) -- */
 (function hudClock() {
   const timeEl = document.getElementById('hud-time');
@@ -4454,7 +4405,6 @@ panels.forEach(p => observer.observe(p));
   if (!overlay || !input || !list) return;
 
   function scrollToId(id) {
-    if (window.__triggerGlitchWipe) window.__triggerGlitchWipe();
     const el = document.getElementById(id);
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }

@@ -35,6 +35,20 @@
 
   html { scroll-behavior: smooth; background: #020810; color-scheme: dark; }
 
+  /* ── ACCESSIBILITY: skip link + consistent keyboard focus ── */
+  .skip-link {
+    position: fixed; top: -100px; left: 1rem; z-index: 10001;
+    background: var(--cyan); color: #041018; font-weight: 700;
+    padding: .8rem 1.3rem; border-radius: .5rem; text-decoration: none;
+    transition: top .2s ease;
+  }
+  .skip-link:focus { top: 1rem; }
+  :focus-visible {
+    outline: 2px solid var(--cyan); outline-offset: 2px;
+    border-radius: 2px;
+  }
+  .custom-cursor-active :focus-visible { outline-width: 2.5px; }
+
   body {
     background: #020810;
     background: var(--navy);
@@ -1694,6 +1708,45 @@
   }
   #boids-canvas { width: 100%; height: auto; display: block; border-radius: .5rem; background: #030811; }
 
+  /* ── LIVE SITE TELEMETRY ── */
+  .telemetry-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1rem; max-width: 780px; margin: 0 auto 2rem;
+  }
+  .telemetry-stat {
+    padding: 1.3rem 1rem; border-radius: .9rem; text-align: center;
+    background: var(--card-bg); border: 1px solid var(--card-border);
+  }
+  .telemetry-num {
+    display: block; font-family: 'JetBrains Mono', monospace;
+    font-size: clamp(1.6rem, 3.5vw, 2.1rem); font-weight: 700; color: var(--cyan);
+    text-shadow: 0 0 14px rgba(34,211,238,.5);
+    font-variant-numeric: tabular-nums;
+  }
+  .telemetry-label {
+    display: block; margin-top: .4rem; font-size: .68rem; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .telemetry-heading {
+    font-family: 'Syne', sans-serif; font-size: .95rem; color: var(--white);
+    margin-bottom: 1rem;
+  }
+  .telemetry-bars { display: flex; flex-direction: column; gap: .8rem; }
+  .telemetry-bar-row { display: flex; flex-direction: column; gap: .3rem; }
+  .telemetry-bar-row .tb-label {
+    display: flex; justify-content: space-between; font-size: .74rem; color: var(--muted);
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .telemetry-bar-row .tb-label strong { color: var(--white); }
+  .telemetry-bar-track { height: 7px; border-radius: 100px; background: rgba(255,255,255,.06); overflow: hidden; }
+  .telemetry-bar-fill {
+    height: 100%; width: 0; border-radius: 100px;
+    background: linear-gradient(90deg, var(--cyan), var(--blue));
+    box-shadow: 0 0 10px rgba(34,211,238,.5);
+    transition: width .8s cubic-bezier(.22,1,.36,1);
+  }
+  .telemetry-empty { color: var(--muted); font-size: .82rem; text-align: center; padding: 1rem 0; }
+
   /* ── LIVE IMAGE CLASSIFIER ── */
   .classify-body { padding: 1.2rem; display: flex; flex-direction: column; gap: 1rem; }
   .classify-drop {
@@ -1771,6 +1824,8 @@
 </head>
 <body>
 
+<a href="#main-content" class="skip-link">Skip to main content</a>
+
 <div class="cursor-glow" id="glow"></div>
 <div id="custom-cursor" aria-hidden="true"></div>
 <!-- BOOT SEQUENCE (shown once per session, before the page reveals) -->
@@ -1786,7 +1841,7 @@
 </div>
 
 <!-- NAV -->
-<nav>
+<nav aria-label="Primary">
   <div class="nav-logo">AR<span>.</span></div>
   <button class="nav-toggle" id="nav-toggle" aria-label="Toggle navigation menu" aria-expanded="false" aria-controls="nav-menu">
     <span></span><span></span><span></span>
@@ -1801,10 +1856,13 @@
     <li><a href="#classifier">Classify</a></li>
     <li><a href="#models">3D Work</a></li>
     <li><a href="#photography">Photography</a></li>
+    <li><a href="#telemetry">Telemetry</a></li>
     <li><a href="#process">Process</a></li>
     <li><a href="#contact" class="nav-cta">Let's Talk</a></li>
   </ul>
 </nav>
+
+<main id="main-content">
 
 <section id="hero">
   <canvas id="particle-canvas"></canvas>
@@ -2613,6 +2671,56 @@
 
 
 
+<!-- LIVE SITE TELEMETRY (real backend data, no mock numbers) -->
+<section id="telemetry" class="panel js-api-only" style="display:none">
+  <div class="panel-inner">
+    <span class="section-label">Live Telemetry</span>
+    <h2>This site is<br>watching itself</h2>
+    <p class="lead" style="margin:0 auto 2.2rem;">Real numbers from the actual backend running this page — no mock data, refreshed every few seconds.</p>
+
+    <div class="telemetry-grid">
+      <div class="telemetry-stat">
+        <span class="telemetry-num" id="tel-views">—</span>
+        <span class="telemetry-label">Total Views</span>
+      </div>
+      <div class="telemetry-stat">
+        <span class="telemetry-num" id="tel-today">—</span>
+        <span class="telemetry-label">Views Today</span>
+      </div>
+      <div class="telemetry-stat">
+        <span class="telemetry-num" id="tel-guestbook">—</span>
+        <span class="telemetry-label">Guestbook Signatures</span>
+      </div>
+      <div class="telemetry-stat">
+        <span class="telemetry-num" id="tel-uptime">—</span>
+        <span class="telemetry-label">Server Uptime</span>
+      </div>
+    </div>
+
+    <div class="algo-card">
+      <div class="cc-titlebar">
+        <div class="cc-dots">
+          <span class="cc-dot" style="background:#FF5F57"></span>
+          <span class="cc-dot" style="background:#FFBD2E"></span>
+          <span class="cc-dot" style="background:#28C840"></span>
+        </div>
+        <span class="cc-filename">telemetry.json</span>
+        <div class="cc-status-pill" id="tel-pill">
+          <span class="cc-pill-dot"></span><span id="tel-pill-text">LIVE</span>
+        </div>
+      </div>
+      <div class="algo-body">
+        <h4 class="telemetry-heading">Most-viewed sections</h4>
+        <div class="telemetry-bars" id="tel-bars">
+          <p class="telemetry-empty" id="tel-empty">Not enough data yet — browse the site a bit and check back.</p>
+        </div>
+      </div>
+    </div>
+    <p class="algo-hint" id="tel-updated">Connecting…</p>
+  </div>
+</section>
+
+
 <!-- PROCESS -->
 <section id="process" class="panel">
   <div class="panel-inner">
@@ -2735,6 +2843,8 @@
     <button type="submit">Send</button>
   </form>
 </div>
+
+</main>
 
 <!-- HUD CORNER WIDGET -->
 <div id="hud-widget">
@@ -4392,6 +4502,62 @@ panels.forEach(p => observer.observe(p));
     setInterval(fetchActivity, 25000);
   }
 
+  /* ── Live site telemetry dashboard (real backend numbers) ── */
+  function wireTelemetry() {
+    const viewsEl = $('#tel-views'), todayEl = $('#tel-today'),
+      guestbookEl = $('#tel-guestbook'), uptimeEl = $('#tel-uptime'),
+      barsEl = $('#tel-bars'), emptyEl = $('#tel-empty'),
+      updatedEl = $('#tel-updated'), pillText = $('#tel-pill-text');
+    if (!viewsEl || !barsEl) return;
+
+    function fmtUptime(sec) {
+      const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+      if (h > 0) return h + 'h ' + m + 'm';
+      if (m > 0) return m + 'm ' + s + 's';
+      return s + 's';
+    }
+    function countUp(el, target) {
+      const start = parseInt(el.dataset.val || '0', 10);
+      if (start === target) return;
+      el.dataset.val = target;
+      const dur = 600, t0 = performance.now();
+      function tick(now) {
+        const p = Math.min(1, (now - t0) / dur);
+        el.textContent = Math.round(start + (target - start) * (1 - Math.pow(1 - p, 3))).toLocaleString();
+        if (p < 1) requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    }
+
+    async function refresh() {
+      try {
+        const r = await api('/api/stats');
+        countUp(viewsEl, r.totalViews || 0);
+        countUp(todayEl, r.viewsToday || 0);
+        countUp(guestbookEl, r.guestbookEntries || 0);
+        if (uptimeEl) uptimeEl.textContent = fmtUptime(r.uptimeSeconds || 0);
+
+        if (r.topSections && r.topSections.length) {
+          if (emptyEl) emptyEl.hidden = true;
+          const max = r.topSections[0].count || 1;
+          barsEl.innerHTML = r.topSections.map((s) =>
+            '<div class="telemetry-bar-row">' +
+              '<span class="tb-label">' + s.label + '<strong>' + s.count + '</strong></span>' +
+              '<div class="telemetry-bar-track"><div class="telemetry-bar-fill" style="width:' + Math.round((s.count / max) * 100) + '%"></div></div>' +
+            '</div>'
+          ).join('');
+        }
+        if (updatedEl) updatedEl.textContent = 'Live — updated ' + new Date(r.generatedAt).toLocaleTimeString();
+        if (pillText) pillText.textContent = 'LIVE';
+      } catch (_) {
+        if (pillText) pillText.textContent = 'OFFLINE';
+        if (updatedEl) updatedEl.textContent = 'Couldn\u2019t reach the backend just now.';
+      }
+    }
+    refresh();
+    setInterval(refresh, 8000);
+  }
+
   /* ── Voice input for Ask-AI (Web Speech API — client-side only) ── */
   function wireVoiceInput() {
     const mic = $('#ask-mic'), input = $('#ask-input'), form = $('#ask-form');
@@ -4486,7 +4652,7 @@ panels.forEach(p => observer.observe(p));
       document.querySelectorAll('.js-api-only').forEach((el) => { el.style.display = ''; });
       wireViews(); wireStatus(); wireSubscribe(); wireClaps();
       wireGuestbook(); wireAsk(); wireAnalytics(); wireTLDR();
-      wireVoiceInput(); wireActivityTicker();
+      wireVoiceInput(); wireActivityTicker(); wireTelemetry();
     }
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
@@ -5413,6 +5579,7 @@ panels.forEach(p => observer.observe(p));
     { icon: '◈', label: 'Go to Image Classifier', action: () => scrollToId('classifier') },
     { icon: '◈', label: 'Go to 3D Work', action: () => scrollToId('models') },
     { icon: '◈', label: 'Go to Photography', action: () => scrollToId('photography') },
+    { icon: '◈', label: 'Go to Live Telemetry', action: () => scrollToId('telemetry') },
     { icon: '◈', label: 'Go to Process', action: () => scrollToId('process') },
     { icon: '◈', label: 'Go to Contact', action: () => scrollToId('contact') },
     { icon: '✦', label: 'Ask my AI', action: () => { const fab = document.getElementById('ask-fab'); if (fab) fab.click(); } },

@@ -1492,66 +1492,6 @@
   .ask-mic.listening { color: #F87171; border-color: #F87171; animation: micPulse 1.1s infinite; }
   @keyframes micPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(248,113,113,.5); } 50% { box-shadow: 0 0 0 6px rgba(248,113,113,0); } }
 
-  /* ── CRT SCANLINE OVERLAY (toggleable) ── */
-  #crt-overlay {
-    position: fixed; inset: 0; z-index: 8000; pointer-events: none;
-    background-image: repeating-linear-gradient(
-      to bottom, rgba(0,0,0,0) 0px, rgba(0,0,0,0) 1px, rgba(0,0,0,.16) 2px, rgba(0,0,0,0) 3px
-    );
-    mix-blend-mode: overlay;
-    opacity: 0; transition: opacity .3s ease;
-  }
-  #crt-overlay.on { opacity: 1; }
-  #crt-overlay::after {
-    content: ''; position: absolute; inset: 0;
-    background: radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,.35) 100%);
-  }
-  #crt-overlay .crt-flicker {
-    position: absolute; inset: 0; background: rgba(255,255,255,.02);
-    animation: crtFlicker 6s infinite;
-  }
-  @keyframes crtFlicker {
-    0%, 96%, 100% { opacity: 0; }
-    97% { opacity: 1; }
-    98% { opacity: 0; }
-  }
-  #crt-toggle {
-    pointer-events: auto;
-    display: flex; align-items: center; gap: .35rem;
-    margin-top: .2rem; background: none; border: none; cursor: pointer;
-    font-family: 'JetBrains Mono', 'Courier New', monospace;
-    font-size: .65rem; color: var(--slate); padding: 0;
-  }
-  #crt-toggle:hover { color: var(--cyan); }
-  #crt-toggle .crt-sw {
-    width: 20px; height: 11px; border-radius: 6px; border: 1px solid var(--card-border);
-    position: relative; flex-shrink: 0;
-  }
-  #crt-toggle .crt-sw::after {
-    content: ''; position: absolute; top: 1px; left: 1px; width: 7px; height: 7px;
-    border-radius: 50%; background: var(--slate); transition: transform .2s, background .2s;
-  }
-  #crt-toggle.on .crt-sw::after { transform: translateX(9px); background: var(--cyan); }
-  #crt-toggle.on .crt-sw { border-color: var(--cyan); }
-
-  /* ── MATRIX CODE-RAIN OVERLAY (toggleable) ── */
-  #matrix-canvas {
-    position: fixed; inset: 0; z-index: 7999; pointer-events: none;
-    opacity: 0; transition: opacity .4s ease;
-    mix-blend-mode: screen;
-  }
-  #matrix-canvas.on { opacity: .5; }
-  #matrix-toggle {
-    pointer-events: auto;
-    display: flex; align-items: center; gap: .35rem;
-    margin-top: .2rem; background: none; border: none; cursor: pointer;
-    font-family: 'JetBrains Mono', 'Courier New', monospace;
-    font-size: .65rem; color: var(--slate); padding: 0;
-  }
-  #matrix-toggle:hover { color: var(--cyan); }
-  #matrix-toggle.on .crt-sw::after { transform: translateX(9px); background: var(--cyan); }
-  #matrix-toggle.on .crt-sw { border-color: var(--cyan); }
-
   /* ── CUSTOM CURSOR (fine-pointer devices only) ── */
   .custom-cursor-active, .custom-cursor-active * { cursor: none !important; }
   #custom-cursor {
@@ -1728,7 +1668,7 @@
   .gh-error { font-size: .72rem; color: #334155; padding: .5rem 0; }
   @media (max-width: 640px) { .gh-body { padding: 1.1rem .9rem 1.3rem; } }
 
-  /* ── SELF-ATTENTION VISUALIZER ── */
+  /* ── DEEP LEARNING VISUALIZER ── */
   .algo-card {
     background: #060D18;
     border: 1px solid rgba(59,130,246,.18);
@@ -1806,8 +1746,6 @@
 
 <div class="cursor-glow" id="glow"></div>
 <div id="custom-cursor" aria-hidden="true"></div>
-<canvas id="matrix-canvas" aria-hidden="true"></canvas>
-
 <!-- BOOT SEQUENCE (shown once per session, before the page reveals) -->
 <div id="boot-seq" aria-hidden="true">
   <pre class="boot-ascii" id="boot-ascii"> _   _  _____ 
@@ -1832,7 +1770,7 @@
     <li><a href="#github">GitHub</a></li>
     <li><a href="#skills">Skills</a></li>
     <li><a href="#build">In Motion</a></li>
-    <li><a href="#algorithm">Attention</a></li>
+    <li><a href="#algorithm">Deep Learning</a></li>
     <li><a href="#models">3D Work</a></li>
     <li><a href="#photography">Photography</a></li>
     <li><a href="#process">Process</a></li>
@@ -1860,7 +1798,7 @@
     </div>
     <div class="tldr-card" id="tldr-card">
       <span class="tldr-tag"><span class="tldr-dot"></span>TL;DR — AI-generated summary</span>
-      <p id="tldr-text">Nicholas is a creative generalist working across design, 3D, and game development, and this site itself doubles as a demo of applied AI — from a live self-attention visualizer to on-page assistants that answer questions and summarize content for you.</p>
+      <p id="tldr-text">Nicholas is a creative generalist working across design, 3D, and game development, and this site itself doubles as a demo of applied AI — from a live deep learning visualizer to on-page assistants that answer questions and summarize content for you.</p>
     </div>
   </div>
 
@@ -2300,8 +2238,8 @@
 <section id="algorithm" class="panel">
   <div class="panel-inner">
     <span class="section-label">Under the Hood</span>
-    <h2>How a model<br>reads a sentence</h2>
-    <p class="lead" style="margin:0 auto 2.5rem;">A simplified self-attention pass, computed live in your browser — the real dot-product-softmax math behind how LLMs decide which words matter to each other.</p>
+    <h2>How a deep<br>net makes a call</h2>
+    <p class="lead" style="margin:0 auto 2.5rem;">A feedforward pass through a small neural network, computed live in your browser — inputs propagating layer by layer through weighted connections and activations to an output.</p>
     <div class="algo-card">
       <div class="cc-titlebar">
         <div class="cc-dots">
@@ -2309,29 +2247,29 @@
           <span class="cc-dot" style="background:#FFBD2E"></span>
           <span class="cc-dot" style="background:#28C840"></span>
         </div>
-        <span class="cc-filename">attention.py</span>
+        <span class="cc-filename">neural_net.py</span>
         <div class="cc-status-pill" id="algo-pill">
-          <span class="cc-pill-dot"></span><span id="algo-pill-text">ENCODING</span>
+          <span class="cc-pill-dot"></span><span id="algo-pill-text">INITIALIZING</span>
         </div>
       </div>
       <div class="algo-body">
-        <canvas id="algo-canvas" width="720" height="360" aria-label="Self-attention visualization: tokens across the top, an attention-weight heatmap below"></canvas>
+        <canvas id="algo-canvas" width="720" height="360" aria-label="Deep learning visualization: a multi-layer neural network with neurons and weighted connections lighting up during a forward pass"></canvas>
       </div>
       <div class="algo-footer">
         <div class="algo-legend">
-          <span><span class="algo-swatch" style="background:var(--violet)"></span>current token</span>
-          <span><span class="algo-swatch" style="background:rgba(125,211,252,.7)"></span>attends to</span>
-          <span><span class="algo-swatch" style="background:var(--amber)"></span>attention weight</span>
+          <span><span class="algo-swatch" style="background:var(--violet)"></span>active neuron</span>
+          <span><span class="algo-swatch" style="background:rgba(125,211,252,.7)"></span>weighted connection</span>
+          <span><span class="algo-swatch" style="background:var(--amber)"></span>output</span>
         </div>
-        <div class="algo-stat" id="algo-stat">tokens encoded: <strong>0</strong></div>
+        <div class="algo-stat" id="algo-stat">layers built: <strong>0</strong></div>
         <button type="button" class="algo-run-btn" id="algo-run">↻ Run again</button>
       </div>
     </div>
-    <p class="algo-hint">random token embeddings → Q·Kᵀ / √d → softmax = attention weights (no training involved — it's the mechanism, not a trained model)</p>
+    <p class="algo-hint">random weights → weighted sum + bias → activation, layer by layer → output (no training involved — it's the mechanism, not a trained model)</p>
     <div class="explain-row">
       <button type="button" class="explain-btn" id="explain-attention"
-        data-question="In 3 short sentences, explain what self-attention is doing in a transformer/LLM and why it matters, for a visitor who isn't technical."
-        data-fallback="Self-attention lets a model weigh how much every word in a sentence should influence its understanding of every other word — not just the words next to it. For each word, it computes a relevance score against all the others, turns those scores into weights that add up to 1, and blends the words together using those weights. Stack many of these layers and the model builds up rich context, which is a big part of why LLMs handle long-range meaning so well.">
+        data-question="In 3 short sentences, explain what a feedforward pass through a deep neural network is doing and why it matters, for a visitor who isn't technical."
+        data-fallback="A neural network is made of layers of simple units called neurons, each connected to the next layer by a weight that says how strongly they influence one another. To make a prediction, data flows forward through the network: each neuron adds up its weighted inputs, applies a small nonlinear function, and passes the result along. Stack enough of these layers together and the network can learn to represent very complex patterns, which is the basic idea behind most of today's deep learning.">
         <span class="explain-spin">↻</span>✦ Explain this
       </button>
     </div>
@@ -2716,16 +2654,7 @@
   <div class="hud-row"><span class="hud-dot"></span><span>SYSTEM ONLINE</span></div>
   <div class="hud-row" id="hud-time">--:--:--</div>
   <div class="hud-row js-api-only" id="hud-views-row" style="display:none">◉ <span id="hud-views"><strong>—</strong> views</span></div>
-  <button type="button" id="crt-toggle" aria-pressed="false">
-    <span class="crt-sw"></span><span>CRT FX</span>
-  </button>
-  <button type="button" id="matrix-toggle" aria-pressed="false">
-    <span class="crt-sw"></span><span>MATRIX FX</span>
-  </button>
 </div>
-
-<!-- CRT SCANLINE OVERLAY -->
-<div id="crt-overlay" aria-hidden="true"><div class="crt-flicker"></div></div>
 
 <!-- LIVE ACTIVITY TICKER -->
 <div id="activity-ticker" role="status" aria-live="polite">
@@ -4845,103 +4774,6 @@ panels.forEach(p => observer.observe(p));
 })();
 </script>
 <script>
-/* -- CRT SCANLINE OVERLAY: toggleable, preference remembered -- */
-(function crtToggle() {
-  const overlay = document.getElementById('crt-overlay');
-  const btn = document.getElementById('crt-toggle');
-  if (!overlay || !btn) return;
-  const KEY = 'crtFxOn';
-
-  function apply(on) {
-    overlay.classList.toggle('on', on);
-    btn.classList.toggle('on', on);
-    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-  }
-  const saved = localStorage.getItem(KEY);
-  apply(saved === '1');
-
-  btn.addEventListener('click', () => {
-    const on = !overlay.classList.contains('on');
-    apply(on);
-    localStorage.setItem(KEY, on ? '1' : '0');
-  });
-})();
-</script>
-<script>
-/* -- MATRIX CODE-RAIN: toggleable ambient overlay, tinted to the site's own
-      cyan/blue/violet accents rather than classic green. Preference remembered.
-      Loop only runs while visible, to avoid burning CPU in the background. -- */
-(function matrixRain() {
-  const canvas = document.getElementById('matrix-canvas');
-  const btn = document.getElementById('matrix-toggle');
-  if (!canvas || !btn) return;
-  const ctx = canvas.getContext('2d');
-  const KEY = 'matrixFxOn';
-  const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-  const GLYPHS = '01アイウエオカキクケコサシスセソ0123456789<>{}[]/*+-=;'.split('');
-  const COLORS = ['rgba(125,211,252,.9)', 'rgba(34,211,238,.9)', 'rgba(59,130,246,.85)', 'rgba(129,140,248,.75)'];
-  const FONT_SIZE = 16;
-  let cols = [];
-  let raf = null;
-  let running = false;
-
-  function resize() {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-    const n = Math.ceil(canvas.width / FONT_SIZE);
-    cols = new Array(n).fill(0).map(() => Math.random() * -canvas.height / FONT_SIZE);
-  }
-
-  function frame() {
-    ctx.fillStyle = 'rgba(2,8,16,.14)';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.font = FONT_SIZE + 'px "JetBrains Mono", monospace';
-    for (let i = 0; i < cols.length; i++) {
-      const x = i * FONT_SIZE;
-      const y = cols[i] * FONT_SIZE;
-      ctx.fillStyle = COLORS[i % COLORS.length];
-      ctx.fillText(GLYPHS[Math.floor(Math.random() * GLYPHS.length)], x, y);
-      if (y > canvas.height && Math.random() > 0.975) cols[i] = 0;
-      cols[i]++;
-    }
-    if (running) raf = requestAnimationFrame(frame);
-  }
-
-  function start() {
-    if (running) return;
-    running = true;
-    resize();
-    ctx.fillStyle = 'rgba(2,8,16,1)';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    raf = requestAnimationFrame(frame);
-    window.addEventListener('resize', resize);
-  }
-  function stop() {
-    running = false;
-    if (raf) cancelAnimationFrame(raf);
-    window.removeEventListener('resize', resize);
-  }
-
-  function apply(on) {
-    canvas.classList.toggle('on', on);
-    btn.classList.toggle('on', on);
-    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-    if (on && !reduceMotion) start(); else stop();
-  }
-
-  const saved = localStorage.getItem(KEY);
-  apply(saved === '1' && !reduceMotion);
-
-  btn.addEventListener('click', () => {
-    if (reduceMotion) return; // respect the preference silently
-    const on = !canvas.classList.contains('on');
-    apply(on);
-    localStorage.setItem(KEY, on ? '1' : '0');
-  });
-})();
-</script>
-<script>
 /* -- CASE STUDY MODAL: populated from a small local data set, keyed by data-case -- */
 (function caseStudies() {
   const overlay = document.getElementById('cs-overlay');
@@ -5125,13 +4957,14 @@ panels.forEach(p => observer.observe(p));
 })();
 </script>
 <script>
-/* -- SELF-ATTENTION VISUALIZER: a real (simplified) scaled dot-product
-      self-attention pass — random token embeddings, Q·Kᵀ/√d, row-wise
-      softmax — animated one query token at a time. No trained model or
-      network call involved; this shows the mechanism, not a prediction.
-      Re-runs on demand and once when first scrolled into view. Respects
-      prefers-reduced-motion by skipping straight to the final heatmap. -- */
-(function attentionViz() {
+/* -- DEEP LEARNING VISUALIZER: a real (simplified) feedforward pass through
+      a small multi-layer neural network — random weights and biases, a
+      weighted sum at each neuron, a ReLU/sigmoid-style activation — animated
+      layer by layer. No trained model or network call involved; this shows
+      the mechanism, not a prediction. Re-runs on demand and once when first
+      scrolled into view. Respects prefers-reduced-motion by skipping
+      straight to the final activated network. -- */
+(function deepLearningViz() {
   const canvas = document.getElementById('algo-canvas');
   const runBtn = document.getElementById('algo-run');
   const statEl = document.getElementById('algo-stat');
@@ -5140,135 +4973,147 @@ panels.forEach(p => observer.observe(p));
   const ctx = canvas.getContext('2d');
   const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  const SENTENCES = [
-    'the model reads context before it predicts',
-    'attention lets each token look at every other',
-    'claude weighs relevance before writing a reply',
-    'self attention finds which words matter most',
-    'every token asks the others for context',
-  ];
-  const DIM = 8;
-  const TOKEN_H = 32, TOKEN_TOP = 8;
-  const GRID_TOP = TOKEN_TOP + TOKEN_H + 22;
-  let tokens, attn, maxPair, N, CW, RH, timer = null;
+  // Layer sizes: input, two hidden layers, output
+  const LAYER_SIZES = [4, 6, 5, 2];
+  const PAD_X = 60, PAD_Y = 30;
+  const NODE_R = 13;
+  let layers, weights, biases, activations, maxOut, timer = null;
 
-  function dot(a, b) { let s = 0; for (let k = 0; k < DIM; k++) s += a[k] * b[k]; return s; }
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function sigmoid(x) { return 1 / (1 + Math.exp(-x)); }
+  function relu(x) { return Math.max(0, x); }
 
-  function buildAttention() {
-    const sentence = SENTENCES[Math.floor(Math.random() * SENTENCES.length)];
-    tokens = sentence.split(' ');
-    N = tokens.length;
-    CW = canvas.width / N;
-    RH = (canvas.height - GRID_TOP - 8) / N;
+  function layerX(l) {
+    const usable = canvas.width - PAD_X * 2;
+    return PAD_X + (usable * l) / (LAYER_SIZES.length - 1);
+  }
+  function nodeY(l, i) {
+    const n = LAYER_SIZES[l];
+    const usable = canvas.height - PAD_Y * 2;
+    return PAD_Y + (usable * (i + 0.5)) / n;
+  }
 
-    const emb = Array.from({ length: N }, () => Array.from({ length: DIM }, () => Math.random() * 2 - 1));
-    const scale = Math.sqrt(DIM);
-    attn = [];
-    maxPair = { i: 0, j: 0, w: 0 };
-    for (let i = 0; i < N; i++) {
-      const raw = emb.map((k) => dot(emb[i], k) / scale);
-      const m = Math.max(...raw);
-      const exps = raw.map((v) => Math.exp(v - m));
-      const sum = exps.reduce((a, b) => a + b, 0);
-      const row = exps.map((v) => v / sum);
-      attn.push(row);
-      row.forEach((w, j) => { if (i !== j && w > maxPair.w) maxPair = { i, j, w }; });
+  function buildNetwork() {
+    layers = LAYER_SIZES;
+    weights = []; biases = []; activations = [];
+
+    // input layer activations: random "pixel"/feature values 0..1
+    activations.push(Array.from({ length: layers[0] }, () => rand(0.05, 1)));
+
+    for (let l = 1; l < layers.length; l++) {
+      const wMat = Array.from({ length: layers[l] }, () =>
+        Array.from({ length: layers[l - 1] }, () => rand(-1, 1)));
+      const bVec = Array.from({ length: layers[l] }, () => rand(-0.4, 0.4));
+      weights.push(wMat);
+      biases.push(bVec);
+
+      const isOutput = l === layers.length - 1;
+      const prevAct = activations[l - 1];
+      const act = wMat.map((row, i) => {
+        const sum = row.reduce((s, w, j) => s + w * prevAct[j], 0) + bVec[i];
+        return isOutput ? sigmoid(sum) : relu(sum);
+      });
+      activations.push(act);
     }
+
+    const out = activations[activations.length - 1];
+    maxOut = out.reduce((best, v, i) => (v > best.v ? { i, v } : best), { i: 0, v: -Infinity });
   }
 
-  function roundRect(x, y, w, h, r) {
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.arcTo(x + w, y, x + w, y + h, r);
-    ctx.arcTo(x + w, y + h, x, y + h, r);
-    ctx.arcTo(x, y + h, x, y, r);
-    ctx.arcTo(x, y, x + w, y, r);
-    ctx.closePath();
-  }
-
-  function tokenX(i) { return i * CW + CW / 2; }
-
-  function drawTokens(activeI, pinnedI) {
-    ctx.font = '12px "JetBrains Mono", monospace';
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    tokens.forEach((t, i) => {
-      const isActive = i === activeI || i === pinnedI;
-      const x = i * CW + 3, w = CW - 6;
-      ctx.fillStyle = isActive ? 'rgba(129,140,248,.3)' : 'rgba(255,255,255,.05)';
-      ctx.strokeStyle = isActive ? '#818CF8' : 'rgba(255,255,255,.14)';
-      ctx.lineWidth = 1.4;
-      roundRect(x, TOKEN_TOP, w, TOKEN_H, 6); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = isActive ? '#F0F8FF' : '#94A3B8';
-      ctx.fillText(t.length > 9 ? t.slice(0, 8) + '…' : t, x + w / 2, TOKEN_TOP + TOKEN_H / 2 + 1);
-    });
-  }
-
-  function drawHeatmap(uptoRow) {
-    for (let i = 0; i <= uptoRow && i < N; i++) {
-      for (let j = 0; j < N; j++) {
-        const w = attn[i][j];
-        ctx.fillStyle = 'rgba(245,158,11,' + (0.06 + w * 0.85).toFixed(3) + ')';
-        ctx.fillRect(j * CW + 1, GRID_TOP + i * RH + 1, CW - 2, RH - 2);
+  function drawConnections(uptoLayer, glowLayer) {
+    for (let l = 1; l < layers.length; l++) {
+      if (l > uptoLayer) break;
+      const isGlow = l === glowLayer;
+      for (let i = 0; i < layers[l]; i++) {
+        for (let j = 0; j < layers[l - 1]; j++) {
+          const w = weights[l - 1][i][j];
+          const strength = Math.min(Math.abs(w), 1);
+          const alpha = isGlow ? 0.15 + strength * 0.7 : 0.06 + strength * 0.18;
+          ctx.strokeStyle = w >= 0
+            ? 'rgba(125,211,252,' + alpha.toFixed(3) + ')'
+            : 'rgba(129,140,248,' + alpha.toFixed(3) + ')';
+          ctx.lineWidth = isGlow ? Math.max(0.6, strength * 2.6) : 0.7;
+          ctx.beginPath();
+          ctx.moveTo(layerX(l - 1), nodeY(l - 1, j));
+          ctx.lineTo(layerX(l), nodeY(l, i));
+          ctx.stroke();
+        }
       }
-      ctx.strokeStyle = 'rgba(255,255,255,.06)';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(0.5, GRID_TOP + i * RH + 0.5, N * CW - 1, RH - 1);
     }
   }
 
-  function drawConnectors(i) {
-    const row = attn[i];
-    const fromX = tokenX(i), fromY = TOKEN_TOP + TOKEN_H;
-    for (let j = 0; j < N; j++) {
-      const w = row[j];
-      if (w < 0.035) continue;
-      ctx.strokeStyle = 'rgba(125,211,252,' + Math.min(w * 1.5, 0.85).toFixed(3) + ')';
-      ctx.lineWidth = Math.max(0.6, w * 3.2);
-      ctx.beginPath();
-      ctx.moveTo(fromX, fromY);
-      ctx.lineTo(tokenX(j), GRID_TOP);
-      ctx.stroke();
+  function drawNodes(activeLayer) {
+    for (let l = 0; l < layers.length; l++) {
+      const isOutput = l === layers.length - 1;
+      const isActive = l <= activeLayer;
+      for (let i = 0; i < layers[l]; i++) {
+        const x = layerX(l), y = nodeY(l, i);
+        const a = activations[l][i];
+        const glow = isActive ? Math.min(0.25 + a * 0.75, 1) : 0.18;
+
+        if (isOutput && isActive && i === maxOut.i) {
+          ctx.fillStyle = 'rgba(245,158,11,' + glow.toFixed(3) + ')';
+          ctx.strokeStyle = '#F59E0B';
+        } else if (isActive) {
+          ctx.fillStyle = 'rgba(129,140,248,' + glow.toFixed(3) + ')';
+          ctx.strokeStyle = '#818CF8';
+        } else {
+          ctx.fillStyle = 'rgba(255,255,255,.05)';
+          ctx.strokeStyle = 'rgba(255,255,255,.16)';
+        }
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.arc(x, y, NODE_R, 0, Math.PI * 2);
+        ctx.fill(); ctx.stroke();
+      }
+    }
+
+    ctx.font = '10px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    ctx.fillStyle = '#64748B';
+    const labels = ['input', 'hidden', 'hidden', 'output'];
+    for (let l = 0; l < layers.length; l++) {
+      ctx.fillText(labels[l], layerX(l), canvas.height - 16);
     }
   }
 
-  function draw(activeI, pinnedI) {
+  function draw(activeLayer, glowLayer) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    drawHeatmap(activeI);
-    if (activeI >= 0 && activeI < N) drawConnectors(activeI);
-    drawTokens(activeI, pinnedI);
+    drawConnections(activeLayer, glowLayer);
+    drawNodes(activeLayer);
   }
 
   function finish() {
-    draw(-1, maxPair.i);
-    drawConnectors(maxPair.i);
+    draw(layers.length - 1, -1);
     if (statEl) {
-      statEl.innerHTML = 'peak: <strong>"' + tokens[maxPair.i] + '" → "' + tokens[maxPair.j] + '"</strong> (' + maxPair.w.toFixed(2) + ')';
+      const pct = (maxOut.v * 100).toFixed(0);
+      statEl.innerHTML = 'output: <strong>neuron ' + (maxOut.i + 1) + '</strong> (' + pct + '%)';
     }
-    if (pillText) pillText.textContent = 'ATTENTION MAPPED';
+    if (pillText) pillText.textContent = 'FORWARD PASS COMPLETE';
   }
 
   function run() {
     if (timer) { clearInterval(timer); timer = null; }
-    buildAttention();
-    if (pillText) pillText.textContent = 'ENCODING';
-    if (statEl) statEl.innerHTML = 'tokens encoded: <strong>' + N + '</strong>';
-    draw(-1, -1);
+    buildNetwork();
+    if (pillText) pillText.textContent = 'INITIALIZING';
+    if (statEl) statEl.innerHTML = 'layers built: <strong>' + layers.length + '</strong>';
+    draw(0, -1);
 
     if (reduceMotion) { finish(); return; }
 
-    let i = 0;
-    if (pillText) pillText.textContent = 'ATTENDING';
+    let l = 1;
+    if (pillText) pillText.textContent = 'PROPAGATING';
     timer = setInterval(() => {
-      if (i < N) {
-        draw(i, -1);
-        if (statEl) statEl.innerHTML = 'attending token <strong>' + (i + 1) + ' / ' + N + '</strong>';
-        i++;
+      if (l < layers.length) {
+        draw(l, l);
+        if (statEl) statEl.innerHTML = 'propagating to layer <strong>' + (l + 1) + ' / ' + layers.length + '</strong>';
+        l++;
       } else {
         clearInterval(timer);
         timer = null;
         finish();
       }
-    }, 480);
+    }, 550);
   }
 
   runBtn.addEventListener('click', run);
@@ -5324,7 +5169,7 @@ panels.forEach(p => observer.observe(p));
     { icon: '◈', label: 'Go to GitHub Activity', action: () => scrollToId('github') },
     { icon: '◈', label: 'Go to Skills', action: () => scrollToId('skills') },
     { icon: '◈', label: 'Go to In Motion', action: () => scrollToId('build') },
-    { icon: '◈', label: 'Go to Attention Visualizer', action: () => scrollToId('algorithm') },
+    { icon: '◈', label: 'Go to Deep Learning Visualizer', action: () => scrollToId('algorithm') },
     { icon: '◈', label: 'Go to 3D Work', action: () => scrollToId('models') },
     { icon: '◈', label: 'Go to Photography', action: () => scrollToId('photography') },
     { icon: '◈', label: 'Go to Process', action: () => scrollToId('process') },

@@ -599,7 +599,7 @@
     background: var(--cyan); box-shadow: 0 0 12px rgba(34,211,238,.9);
   }
   .ritem-body h4 { font-family: 'Syne', sans-serif; font-size: 1rem; font-weight: 700; color: var(--white); margin-bottom: .15rem; display: flex; align-items: center; gap: .4em; }
-  .ritem-icon { width: 1.15em; height: 1.15em; object-fit: contain; filter: drop-shadow(0 0 3px rgba(34,211,238,.7)); }
+  .ritem-icon { width: 1.7em; height: 1.7em; object-fit: contain; filter: drop-shadow(0 0 3px rgba(34,211,238,.7)); }
   .ritem-org { font-size: .82rem; color: var(--sky); font-weight: 600; margin-bottom: .3rem; }
   .ritem-note { font-size: .8rem; color: var(--muted); line-height: 1.55; }
 
@@ -660,13 +660,13 @@
   }
   .rbar { margin-bottom: .45rem; }
   .rbar > span {
-    display: flex; align-items: baseline; gap: .35em;
+    display: flex; align-items: center; gap: .5em;
     font-size: .8rem; color: var(--white); margin-bottom: .28rem;
   }
   .rskill-ico { color: var(--cyan); font-weight: 600; flex-shrink: 0; }
   .rskill-img { display: inline-flex; align-items: center; }
   .rskill-img img {
-    width: 1.1em; height: 1.1em; object-fit: contain;
+    width: 1.8em; height: 1.8em; object-fit: contain;
     filter: drop-shadow(0 0 3px rgba(34,211,238,.7));
     transition: filter .2s;
   }
@@ -722,7 +722,7 @@
   .tool-icon { font-size: 1.8rem; color: var(--cyan); transition: color .2s; }
   .tool-badge:hover .tool-icon { color: #E879F9; }
   .tool-icon-img img {
-    width: 1.8rem; height: 1.8rem; object-fit: contain;
+    width: 2.6rem; height: 2.6rem; object-fit: contain;
     filter: drop-shadow(0 0 4px rgba(34,211,238,.7));
     transition: filter .2s;
   }
@@ -774,6 +774,7 @@
     display: flex; align-items: center; justify-content: center;
     font-size: 1.3rem; margin-bottom: 1rem;
   }
+  .skill-icon-img img { width: 1.7rem; height: 1.7rem; object-fit: contain; filter: drop-shadow(0 0 3px rgba(34,211,238,.6)); }
   .skill-card h3 { font-family: 'Syne', sans-serif; font-size: 1rem; font-weight: 700; margin-bottom: .4rem; color: var(--white); }
   .skill-card p { font-size: .82rem; color: var(--muted); line-height: 1.6; }
   .pill-list { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: 1rem; }
@@ -966,7 +967,7 @@
   }
   .craft-error[hidden] { display: none; }
   .craft-error-icon { font-size: 1.4rem; color: var(--amber); }
-  .craft-error-icon img { width: 1.4rem; height: 1.4rem; object-fit: contain; filter: hue-rotate(180deg) saturate(3) brightness(1.05) drop-shadow(0 0 4px rgba(245,158,11,.6)); }
+  .craft-error-icon img { width: 2.2rem; height: 2.2rem; object-fit: contain; filter: hue-rotate(180deg) saturate(3) brightness(1.05) drop-shadow(0 0 4px rgba(245,158,11,.6)); }
   .craft-error p { color: var(--slate); font-size: .78rem; line-height: 1.6; max-width: 260px; }
   .craft-error code { color: var(--sky); background: rgba(255,255,255,.06); padding: .08rem .35rem; border-radius: .3rem; }
   .craft-caption { padding: 1.2rem 1.35rem 1.4rem; }
@@ -1365,7 +1366,7 @@
   .boot-line { opacity: 0; white-space: nowrap; overflow: hidden; }
   .boot-line.boot-show { opacity: 1; }
   .boot-line .boot-ok { display: inline-flex; align-items: center; margin-left: .5em; }
-  .boot-line .boot-ok img { width: 14px; height: 14px; filter: drop-shadow(0 0 3px rgba(52,211,153,.8)) hue-rotate(70deg) saturate(2); }
+  .boot-line .boot-ok img { width: 22px; height: 22px; filter: drop-shadow(0 0 3px rgba(52,211,153,.8)) hue-rotate(70deg) saturate(2); }
   .boot-bar-track {
     width: min(420px, 82vw); height: 3px; border-radius: 2px;
     background: rgba(255,255,255,.08); overflow: hidden;
@@ -1586,7 +1587,7 @@
       </h1>
     </div>
     <noscript><style>h1 .line-1, h1 .line-2 { opacity: 1 !important; } .hero-pulse-line { visibility: hidden !important; }</style></noscript>
-    <p class="hero-sub">I build products at the intersection of artificial intelligence and human-centred design — from generative systems to interfaces people actually want to use.</p>
+    <p class="hero-sub">A creative generalist building a career in design, 3D, and game development — bringing the same hands-on craft and leadership to every role, on screen or off.</p>
     <div class="hero-btns">
       <a href="#models" class="btn-primary">View My Work</a>
       <a href="#contact" class="btn-ghost">Get In Touch</a>
@@ -1616,7 +1617,7 @@
           <span class="cc-dot" style="background:#FFBD2E"></span>
           <span class="cc-dot" style="background:#28C840"></span>
         </div>
-        <span class="cc-filename" id="cc-filename">nicholas_gearinger.ts</span>
+        <span class="cc-filename" id="cc-filename">pickup_component.cpp</span>
         <div class="cc-status-pill" id="cc-pill">
           <span class="cc-pill-dot" id="cc-pill-dot"></span>
           <span id="cc-pill-text">BUILDING</span>
@@ -1875,71 +1876,71 @@
     <div class="skills-grid">
 
       <div class="skill-card">
-        <div class="skill-icon" style="background:rgba(59,130,246,.15);">⌬</div>
-        <h3>AI & Machine Learning</h3>
-        <p>Building intelligent features — from LLM-powered workflows to fine-tuned models and RAG pipelines.</p>
+        <div class="skill-icon" style="background:rgba(59,130,246,.15);">◈</div>
+        <h3>Graphic Design &amp; Branding</h3>
+        <p>Visual identity, layout, and illustration work — 3+ years turning ideas into clean, on-brand designs.</p>
         <div class="pill-list">
-          <span class="pill">LLMs</span>
-          <span class="pill">RAG</span>
-          <span class="pill">Fine-tuning</span>
-          <span class="pill">Agents</span>
+          <span class="pill">Branding</span>
+          <span class="pill">Illustration</span>
+          <span class="pill">Web Design</span>
+          <span class="pill">Layout</span>
         </div>
       </div>
 
       <div class="skill-card">
-        <div class="skill-icon" style="background:rgba(34,211,238,.1);">✦</div>
-        <h3>Product Design</h3>
-        <p>End-to-end UX from research and wireframes to high-fidelity prototypes and design systems.</p>
+        <div class="skill-icon skill-icon-img" style="background:rgba(34,211,238,.1);"><img src="icons/bionic_arm.png" alt=""></div>
+        <h3>3D Modeling &amp; Animation</h3>
+        <p>Modeling and animating in Maya and 3ds Max — from static assets to rigged, moving scenes.</p>
         <div class="pill-list">
-          <span class="pill">Figma</span>
-          <span class="pill">Systems</span>
-          <span class="pill">Prototyping</span>
-          <span class="pill">UX Research</span>
+          <span class="pill">Maya</span>
+          <span class="pill">3ds Max</span>
+          <span class="pill">3D Animation</span>
+          <span class="pill">Texturing</span>
         </div>
       </div>
 
       <div class="skill-card">
-        <div class="skill-icon" style="background:rgba(255,180,50,.1);">⚡</div>
-        <h3>Frontend Engineering</h3>
-        <p>Shipping production interfaces with modern frameworks, motion, and performant rendering.</p>
+        <div class="skill-icon skill-icon-img" style="background:rgba(255,180,50,.1);"><img src="icons/robot_helmet.png" alt=""></div>
+        <h3>Game Development</h3>
+        <p>Trained in game development at Full Sail University — building playable worlds in Unreal Engine.</p>
         <div class="pill-list">
-          <span class="pill">React</span>
-          <span class="pill">TypeScript</span>
-          <span class="pill">Three.js</span>
-          <span class="pill">CSS</span>
+          <span class="pill">Unreal Engine</span>
+          <span class="pill">C++</span>
+          <span class="pill">Game Design</span>
         </div>
       </div>
 
       <div class="skill-card">
-        <div class="skill-icon" style="background:rgba(255,100,150,.1);">◈</div>
-        <h3>Generative Design</h3>
-        <p>Using AI image, video, and 3D generation as a creative medium — not just a shortcut.</p>
+        <div class="skill-icon" style="background:rgba(255,100,150,.1);">⬢</div>
+        <h3>Adobe Creative Suite</h3>
+        <p>Full production pipeline across the Adobe apps — design, layout, video, and audio in one workflow.</p>
         <div class="pill-list">
-          <span class="pill">Midjourney</span>
-          <span class="pill">Stable Diffusion</span>
-          <span class="pill">ControlNet</span>
+          <span class="pill">Photoshop</span>
+          <span class="pill">Illustrator</span>
+          <span class="pill">Premiere</span>
+          <span class="pill">Audition</span>
         </div>
       </div>
 
       <div class="skill-card">
-        <div class="skill-icon" style="background:rgba(80,200,255,.1);">⬡</div>
-        <h3>Data Visualisation</h3>
-        <p>Turning dense model outputs and datasets into clear, interactive visual narratives.</p>
+        <div class="skill-icon skill-icon-img" style="background:rgba(80,200,255,.1);"><img src="icons/eye_orb.png" alt=""></div>
+        <h3>Photography &amp; Video</h3>
+        <p>Behind the camera and behind the timeline — shooting, editing, and producing finished video work.</p>
         <div class="pill-list">
-          <span class="pill">D3.js</span>
-          <span class="pill">Observable</span>
-          <span class="pill">Vega-Lite</span>
+          <span class="pill">Photography</span>
+          <span class="pill">Video Production</span>
+          <span class="pill">Editing</span>
         </div>
       </div>
 
       <div class="skill-card">
-        <div class="skill-icon" style="background:rgba(150,255,100,.1);">⧫</div>
-        <h3>Strategy & Research</h3>
-        <p>Defining the right problem before building the solution — user interviews, competitive audits, AI ethics review.</p>
+        <div class="skill-icon skill-icon-img" style="background:rgba(150,255,100,.1);"><img src="icons/data_transfer.png" alt=""></div>
+        <h3>Leadership &amp; Customer Service</h3>
+        <p>3+ years leading a team and managing inventory in a fast-paced retail environment — real accountability, every shift.</p>
         <div class="pill-list">
-          <span class="pill">User Testing</span>
-          <span class="pill">Workshops</span>
-          <span class="pill">AI Ethics</span>
+          <span class="pill">Team Leadership</span>
+          <span class="pill">Customer Service</span>
+          <span class="pill">Inventory Management</span>
         </div>
       </div>
 
@@ -2182,40 +2183,40 @@
   <div class="panel-inner">
     <div class="process-intro">
       <span class="section-label">How I Work</span>
-      <h2>A process built for<br>intelligent products</h2>
-      <p class="lead">AI projects fail when engineering and design work in separate rooms. My process treats them as the same discipline from day one.</p>
+      <h2>A process built<br>on real craft</h2>
+      <p class="lead">Good creative work and good teamwork come from the same place — showing up, paying attention, and caring about the details. My process treats them the same way.</p>
     </div>
     <div class="process-steps">
       <div class="process-step">
         <span class="step-num">01</span>
         <div class="step-line"></div>
         <div class="step-body">
-          <h3>Discover the real problem</h3>
-          <p>User interviews, technical audits, and AI opportunity mapping — before any wireframe exists.</p>
+          <h3>Understand the goal</h3>
+          <p>Before opening any software, I get clear on who this is for and what it actually needs to do.</p>
         </div>
       </div>
       <div class="process-step">
         <span class="step-num">02</span>
         <div class="step-line"></div>
         <div class="step-body">
-          <h3>Define the AI's role</h3>
-          <p>Not every feature needs a model. I map where AI adds genuine value versus where it adds friction.</p>
+          <h3>Sketch and block out</h3>
+          <p>Rough layouts, blockouts, or storyboards first — figuring out what works before committing to it.</p>
         </div>
       </div>
       <div class="process-step">
         <span class="step-num">03</span>
         <div class="step-line"></div>
         <div class="step-body">
-          <h3>Design and prototype in tandem</h3>
-          <p>Figma prototypes and live model outputs evolve side-by-side so design assumptions get tested early.</p>
+          <h3>Build and refine</h3>
+          <p>Design, model, or shoot the real thing — then revise it until it's actually right, not just done.</p>
         </div>
       </div>
       <div class="process-step">
         <span class="step-num">04</span>
         <div class="step-line"></div>
         <div class="step-body">
-          <h3>Ship, measure, iterate</h3>
-          <p>I stay through launch and beyond — tracking behaviour, retraining where needed, and closing the loop.</p>
+          <h3>Deliver and follow through</h3>
+          <p>I stay accountable after the handoff — the same reliability I bring to leading a team every shift.</p>
         </div>
       </div>
     </div>
@@ -2255,7 +2256,7 @@
       <div class="status-pill js-api-only" id="status-pill" style="display:none">
         <span class="dot"></span><span id="status-text">Open to work</span>
       </div>
-      <p>I'm currently open to senior design and AI product roles, as well as select freelance projects. If you're building something that sits at the edge of human and machine intelligence, I'd love to hear from it.</p>
+      <p>I'm currently open to design, 3D, and creative roles, as well as select freelance projects. If you're building something that needs real craft and a hard-working teammate, I'd love to hear from it.</p>
 
       <form class="contact-form" id="contact-form" novalidate>
         <div class="cf-row">
@@ -2997,78 +2998,60 @@ panels.forEach(p => observer.observe(p));
 
   /* ── Source snippets ── */
   const SNIPPETS = [
-    { lang: 'TypeScript', file: 'neural_net.ts', lines: [
-      [['sy-cmt','// Nicholas Gearinger — AI & Design']],
-      [['sy-kw','import '],['sy-cls','{ Transformer, Tokenizer }'],['sy-kw',' from '],['sy-str','"@ng/llm-core"']],
-      [['sy-kw','import '],['sy-cls','{ Dataset, DataLoader }'],['sy-kw',' from '],['sy-str','"@ng/data"']],
+    { lang: 'C++', file: 'pickup_component.cpp', lines: [
+      [['sy-cmt','// Nicholas Gearinger — Game Dev']],
+      [['sy-kw','#include '],['sy-str','"PickupComponent.h"']],
       [[]],
-      [['sy-cmt','// Configure transformer architecture']],
-      [['sy-kw','const '],['sy-var','config '],['sy-op','= '],['','{ ']],
-      [['','  '],['sy-var','layers'],['sy-op',':  '],['sy-num','24'],['','  ,']],
-      [['','  '],['sy-var','heads'],['sy-op','  :  '],['sy-num','16'],['','  ,']],
-      [['','  '],['sy-var','dModel'],['sy-op',': '],['sy-num','1024'],['','  ,']],
-      [['','  '],['sy-var','dropout'],['sy-op',':'],['sy-num',' 0.1'],['','']],
-      [['','};']],
+      [['sy-cmt','// Simple interact-range pickup, exposed to Blueprints']],
+      [['sy-kw','class '],['sy-cls','UPickupComponent '],['',': '],['sy-kw','public '],['sy-cls','UActorComponent'],['',' {']],
+      [['','public:']],
+      [['','  '],['sy-kw','float '],['sy-var','InteractRange '],['sy-op','= '],['sy-num','200.0f'],['',';']],
       [[]],
-      [['sy-kw','const '],['sy-var','model '],['sy-op','= '],['sy-kw','new '],['sy-cls','Transformer'],['','(config)']],
-      [['sy-kw','const '],['sy-var','tok   '],['sy-op','= '],['sy-kw','new '],['sy-cls','Tokenizer'],['','({ vocab: '],['sy-num','50257'],['','})']],
-      [[]],
-      [['sy-kw','async function '],['sy-fn','train'],['','('],['sy-var','ds'],['sy-op',': '],['sy-cls','Dataset'],['','): '],['sy-cls','Promise'],['','<void> {']],
-      [['','  '],['sy-kw','const '],['sy-var','loader '],['sy-op','= '],['sy-kw','new '],['sy-cls','DataLoader'],['','(ds, { batch: '],['sy-num','32'],['','})']],
-      [['','  '],['sy-kw','for await '],['','('],['sy-kw','const '],['sy-var','batch '],['sy-kw','of '],['sy-var','loader'],['',')'],[' {','']],
-      [['','    '],['sy-kw','const '],['sy-var','logits '],['sy-op','= '],['sy-var','model'],['sy-op','.'],['sy-fn','forward'],['','(batch.tokens)']],
-      [['','    '],['sy-kw','const '],['sy-var','loss   '],['sy-op','= '],['sy-fn','crossEntropy'],['','(logits, batch.labels)']],
-      [['','    '],['sy-var','loss'],['sy-op','.'],['sy-fn','backward'],['','()']],
-      [['','    '],['sy-var','optimizer'],['sy-op','.'],['sy-fn','step'],['','()']],
-      [['','  }']],
-      [['','}']],
-    ]},
-    { lang: 'Python', file: 'attention.py', lines: [
-      [['sy-cmt','# Scaled dot-product attention — N. Gearinger']],
-      [['sy-kw','import '],['sy-var','torch']],
-      [['sy-kw','import '],['sy-var','torch.nn '],['sy-kw','as '],['sy-var','nn']],
-      [['sy-kw','from '],['sy-var','torch.nn.functional '],['sy-kw','import '],['sy-var','softmax']],
-      [[]],
-      [['sy-kw','class '],['sy-cls','MultiHeadAttention'],['','('],['sy-cls','nn.Module'],['','): ']],
-      [['','  '],['sy-kw','def '],['sy-fn','__init__'],['','(self, '],['sy-var','d '],['sy-op','='],['sy-num',' 512'],['',', '],['sy-var','h '],['sy-op','='],['sy-num',' 8'],['','): ']],
-      [['','    '],['sy-fn','super'],['','().__init__()']],
-      [['','    '],['sy-var','self'],['sy-op','.'],['sy-var','scale '],['sy-op','= '],['sy-var','d '],['sy-op','** '],['sy-num','-0.5']],
-      [['','    '],['sy-var','self'],['sy-op','.'],['sy-var','W_q  '],['sy-op','= '],['sy-cls','nn.Linear'],['','(d, d)']],
-      [['','    '],['sy-var','self'],['sy-op','.'],['sy-var','W_k  '],['sy-op','= '],['sy-cls','nn.Linear'],['','(d, d)']],
-      [['','    '],['sy-var','self'],['sy-op','.'],['sy-var','W_v  '],['sy-op','= '],['sy-cls','nn.Linear'],['','(d, d)']],
-      [['','    '],['sy-var','self'],['sy-op','.'],['sy-var','W_o  '],['sy-op','= '],['sy-cls','nn.Linear'],['','(d, d)']],
-      [[]],
-      [['','  '],['sy-kw','def '],['sy-fn','forward'],['','(self, '],['sy-var','x'],['','): ']],
-      [['','    '],['sy-var','Q '],['sy-op','= '],['sy-var','self.W_q'],['','(x)']],
-      [['','    '],['sy-var','K '],['sy-op','= '],['sy-var','self.W_k'],['','(x)']],
-      [['','    '],['sy-var','V '],['sy-op','= '],['sy-var','self.W_v'],['','(x)']],
-      [['','    '],['sy-var','scores '],['sy-op','= '],['sy-var','Q '],['sy-op','@ '],['sy-var','K.T '],['sy-op','* '],['sy-var','self.scale']],
-      [['','    '],['sy-var','attn   '],['sy-op','= '],['sy-fn','softmax'],['','(scores, dim='],['sy-num','-1'],['',')']],
-      [['','    '],['sy-kw','return '],['sy-var','self.W_o'],['','(attn '],['sy-op','@ '],['sy-var','V'],['',')']],
-    ]},
-    { lang: 'Rust', file: 'inference.rs', lines: [
-      [['sy-cmt','// Real-time inference engine — N. Gearinger']],
-      [['sy-kw','use '],['sy-cls','std::collections::HashMap']],
-      [['sy-kw','use '],['sy-cls','rayon::prelude::*']],
-      [[]],
-      [['sy-kw','pub struct '],['sy-cls','Engine'],['','  { ']],
-      [['','  '],['sy-var','weights'],['sy-op',': '],['sy-cls','Vec'],['','<'],['sy-cls','f32'],['','>,']],
-      [['','  '],['sy-var','cache  '],['sy-op',': '],['sy-cls','HashMap'],['','<'],['sy-cls','u64'],['',', '],['sy-cls','Vec'],['','<'],['sy-cls','f32'],['','>>,']],
-      [['','}']],
-      [[]],
-      [['sy-kw','impl '],['sy-cls','Engine '],['','{']],
-      [['','  '],['sy-kw','pub fn '],['sy-fn','infer'],['','(&'],['sy-kw','mut '],['sy-var','self'],['',', '],['sy-var','toks'],['sy-op',': &['],['sy-cls','u32'],['',']) -> '],['sy-cls','Vec'],['','<'],['sy-cls','f32'],['','> {']],
-      [['','    '],['sy-kw','let '],['sy-var','key '],['sy-op','= '],['sy-fn','hash'],['','(toks)']],
-      [['','    '],['sy-kw','if let '],['sy-cls','Some'],['','(hit) '],['sy-op','= '],['sy-var','self.cache'],['','.',],['sy-fn','get'],['','(&key) {']],
-      [['','      '],['sy-kw','return '],['sy-var','hit'],['','.',],['sy-fn','clone'],['','()']],
+      [['','  '],['sy-kw','void '],['sy-fn','TryPickup'],['','('],['sy-cls','AActor'],['','* '],['sy-var','Player'],['',') {']],
+      [['','    '],['sy-kw','float '],['sy-var','Dist '],['sy-op','= '],['sy-fn','GetOwner'],['','()->'],['sy-fn','GetDistanceTo'],['','(Player);']],
+      [['','    '],['sy-kw','if '],['','('],['sy-var','Dist '],['sy-op','<= '],['sy-var','InteractRange'],['',') {']],
+      [['','      '],['sy-var','OnPickedUp'],['sy-op','.'],['sy-fn','Broadcast'],['','(Player);']],
+      [['','      '],['sy-fn','GetOwner'],['','()->'],['sy-fn','Destroy'],['','();']],
       [['','    }']],
-      [['','    '],['sy-kw','let '],['sy-var','out '],['sy-op','= '],['sy-var','toks'],['','.',],['sy-fn','par_iter'],['','()']],
-      [['','        '],['','.',],['sy-fn','map'],['','(|&t| '],['sy-var','self'],['','.',],['sy-fn','embed'],['','(t))']],
-      [['','        '],['','.',],['sy-fn','reduce'],['','(|| vec![], |a, b| '],['sy-fn','merge'],['','(a, b))']],
-      [['','    '],['sy-var','self.cache'],['','.',],['sy-fn','insert'],['','(key, out.',],['sy-fn','clone'],['','())']],
-      [['','    '],['sy-var','out']],
       [['','  }']],
+      [['','};']],
+    ]},
+    { lang: 'JavaScript', file: 'gallery.js', lines: [
+      [['sy-cmt','// Nicholas Gearinger — Web & WordPress']],
+      [[]],
+      [['sy-cmt','// Lightweight lightbox for a WordPress photo gallery']],
+      [['sy-kw','function '],['sy-fn','initGallery'],['','('],['sy-var','selector'],['',') {']],
+      [['','  '],['sy-kw','const '],['sy-var','items '],['sy-op','= '],['sy-var','document'],['sy-op','.'],['sy-fn','querySelectorAll'],['','(selector);']],
+      [[]],
+      [['','  '],['sy-var','items'],['sy-op','.'],['sy-fn','forEach'],['','((img) => {']],
+      [['','    '],['sy-var','img'],['sy-op','.'],['sy-fn','addEventListener'],['','('],['sy-str',"'click'"],['',', () => {']],
+      [['','      '],['sy-fn','openLightbox'],['','(img.src, img.alt);']],
+      [['','    });']],
+      [['','  });']],
       [['','}']],
+      [[]],
+      [['sy-kw','function '],['sy-fn','openLightbox'],['','('],['sy-var','src'],['',', '],['sy-var','caption'],['',') {']],
+      [['','  '],['sy-kw','const '],['sy-var','modal '],['sy-op','= '],['sy-var','document'],['sy-op','.'],['sy-fn','getElementById'],['','('],['sy-str',"'lightbox'"],['',');']],
+      [['','  '],['sy-var','modal'],['sy-op','.'],['sy-fn','querySelector'],['','('],['sy-str',"'img'"],['',').src '],['sy-op','= '],['sy-var','src'],['',';']],
+      [['','  '],['sy-var','modal'],['sy-op','.'],['sy-var','classList'],['sy-op','.'],['sy-fn','add'],['','('],['sy-str',"'is-open'"],['',');']],
+      [['','}']],
+    ]},
+    { lang: 'Python', file: 'auto_rig.py', lines: [
+      [['sy-cmt','# Nicholas Gearinger — Maya Pipeline']],
+      [['sy-kw','import '],['sy-var','maya.cmds '],['sy-kw','as '],['sy-var','cmds']],
+      [[]],
+      [['sy-cmt','# Build a simple FK joint chain from selected locators']],
+      [['sy-kw','def '],['sy-fn','build_joint_chain'],['','('],['sy-var','locators'],['',', '],['sy-var','name'],['sy-op','='],['sy-str','"rig"'],['','):']],
+      [['','    '],['sy-var','cmds'],['sy-op','.'],['sy-fn','select'],['','(clear='],['sy-cls','True'],['',')']],
+      [['','    '],['sy-var','joints '],['sy-op','= '],['','[]']],
+      [[]],
+      [['','    '],['sy-kw','for '],['sy-var','i, loc '],['sy-kw','in '],['sy-fn','enumerate'],['','(locators):']],
+      [['','        '],['sy-var','pos '],['sy-op','= '],['sy-var','cmds'],['sy-op','.'],['sy-fn','xform'],['','(loc, q='],['sy-cls','True'],['',', ws='],['sy-cls','True'],['',', t='],['sy-cls','True'],['',')']],
+      [['','        '],['sy-var','jnt '],['sy-op','= '],['sy-var','cmds'],['sy-op','.'],['sy-fn','joint'],['','(p=pos, name=f'],['sy-str','"{name}_{i:02d}"'],['',')']],
+      [['','        '],['sy-var','joints'],['sy-op','.'],['sy-fn','append'],['','(jnt)']],
+      [[]],
+      [['','    '],['sy-var','cmds'],['sy-op','.'],['sy-fn','joint'],['','(joints[0], e='],['sy-cls','True'],['',', oj='],['sy-str','"xyz"'],['',')']],
+      [['','    '],['sy-kw','return '],['sy-var','joints']],
     ]},
   ];
 

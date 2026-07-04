@@ -19,14 +19,14 @@
     --amber: #F59E0B;           /* warm gold — contrast pop */
     --amber-dim: rgba(245,158,11,.12);
     --white: #F0F8FF;           /* alice blue-white — headings */
-    --muted: #94A3B8;           /* slate grey — body copy */
+    --muted: #CBD5E1;           /* brightened slate — body copy, higher contrast */
     --card-bg: rgba(59,130,246,0.06);
     --card-border: rgba(125,211,252,0.12);
     /* legacy aliases */
     --green: #3B82F6;
     --green-dim: #1E3A8A;
     --mint: #7DD3FC;
-    --slate: #94A3B8;
+    --slate: #CBD5E1;
     --teal: #22D3EE;
     --violet-dim: #1E3A8A;
     --sky-dim: rgba(34,211,238,.12);
@@ -56,18 +56,26 @@
     color: var(--white);
   }
   .nav-logo span { color: var(--teal); }
-  nav ul { list-style: none; display: flex; gap: 2.5rem; }
-  nav a { text-decoration: none; color: var(--slate); font-size: .875rem; letter-spacing: .04em; transition: color .2s; }
-  nav a:hover { color: var(--white); }
+  nav ul { list-style: none; display: flex; gap: .6rem; align-items: center; }
+  nav a {
+    text-decoration: none; color: var(--white); font-size: .84rem; font-weight: 500;
+    letter-spacing: .02em;
+    padding: .5rem 1.05rem; border-radius: 100px;
+    border: 1px solid transparent; background: transparent;
+    transition: color .2s, border-color .2s, background .2s;
+  }
+  nav a:hover { color: var(--white); border-color: var(--cyan); background: rgba(34,211,238,.08); }
   .nav-cta {
     padding: .5rem 1.25rem;
-    border: 1px solid var(--violet);
+    border: 1px solid var(--violet) !important;
+    background: var(--violet) !important;
     border-radius: 100px;
-    color: var(--white) !important;
+    color: var(--navy) !important;
+    font-weight: 700 !important;
     font-size: .8rem !important;
-    transition: background .2s !important;
+    transition: background .2s, filter .2s !important;
   }
-  .nav-cta:hover { background: var(--violet) !important; color: var(--white) !important; }
+  .nav-cta:hover { filter: brightness(1.15); }
   .nav-toggle {
     display: none;
     flex-direction: column; justify-content: center; align-items: center; gap: 5px;
@@ -101,6 +109,7 @@
     nav ul li a {
       display: block; width: 100%; padding: .7rem 0;
       font-size: 1.02rem; border-bottom: 1px solid rgba(255,255,255,.06);
+      border-radius: 0; border-left: none; border-right: none; border-top: none;
     }
     nav ul li a.nav-cta { display: inline-block; width: auto; margin-top: 1rem; border-bottom: none; }
   }

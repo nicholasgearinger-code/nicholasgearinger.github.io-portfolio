@@ -1376,6 +1376,19 @@
     transition: opacity .5s ease;
   }
   #boot-seq.boot-done { opacity: 0; pointer-events: none; }
+  .boot-ascii {
+    width: min(420px, 82vw);
+    font-size: clamp(.5rem, 2.6vw, .78rem);
+    line-height: 1.15;
+    white-space: pre;
+    text-align: center;
+    background: linear-gradient(120deg, var(--cyan), var(--blue) 60%, var(--violet));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    filter: drop-shadow(0 0 14px rgba(34,211,238,.35));
+    opacity: 0; transform: translateY(-6px);
+    animation: bootAsciiIn .6s ease forwards;
+  }
+  @keyframes bootAsciiIn { to { opacity: 1; transform: translateY(0); } }
   .boot-lines {
     display: flex; flex-direction: column; gap: .5rem;
     min-height: 8em; width: min(420px, 82vw);
@@ -1521,6 +1534,24 @@
   #crt-toggle.on .crt-sw::after { transform: translateX(9px); background: var(--cyan); }
   #crt-toggle.on .crt-sw { border-color: var(--cyan); }
 
+  /* ── MATRIX CODE-RAIN OVERLAY (toggleable) ── */
+  #matrix-canvas {
+    position: fixed; inset: 0; z-index: 7999; pointer-events: none;
+    opacity: 0; transition: opacity .4s ease;
+    mix-blend-mode: screen;
+  }
+  #matrix-canvas.on { opacity: .5; }
+  #matrix-toggle {
+    pointer-events: auto;
+    display: flex; align-items: center; gap: .35rem;
+    margin-top: .2rem; background: none; border: none; cursor: pointer;
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-size: .65rem; color: var(--slate); padding: 0;
+  }
+  #matrix-toggle:hover { color: var(--cyan); }
+  #matrix-toggle.on .crt-sw::after { transform: translateX(9px); background: var(--cyan); }
+  #matrix-toggle.on .crt-sw { border-color: var(--cyan); }
+
   /* ── CUSTOM CURSOR (fine-pointer devices only) ── */
   .custom-cursor-active, .custom-cursor-active * { cursor: none !important; }
   #custom-cursor {
@@ -1650,15 +1681,98 @@
   .lh-ring circle.lh-track { stroke: rgba(255,255,255,.12); fill: none; stroke-width: 3; }
   .lh-ring circle.lh-val { stroke: var(--cyan); fill: none; stroke-width: 3; stroke-linecap: round; transform: rotate(-90deg); transform-origin: 50% 50%; }
   .lh-badge strong { color: var(--cyan); font-weight: 700; }
+
+  /* ── GITHUB LIVE ACTIVITY ── */
+  .gh-card {
+    background: #060D18;
+    border: 1px solid rgba(59,130,246,.18);
+    border-radius: .9rem;
+    overflow: hidden;
+    box-shadow: 0 0 48px rgba(59,130,246,.1), 0 0 100px rgba(34,211,238,.05);
+    font-family: 'JetBrains Mono','Courier New',monospace;
+    max-width: 900px; margin: 0 auto;
+    text-align: left;
+  }
+  .gh-body { padding: 1.4rem 1.3rem 1.6rem; display: flex; flex-direction: column; gap: 1.4rem; }
+  .gh-sub-label {
+    font-size: .62rem; letter-spacing: .1em; text-transform: uppercase;
+    color: #1e3a5f; margin-bottom: .6rem; display: block;
+  }
+  .gh-calendar { display: flex; flex-direction: column; gap: .55rem; }
+  .gh-grid {
+    display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 1fr);
+    gap: 3px; overflow-x: auto; padding-bottom: .3rem;
+  }
+  .gh-cell { width: 10px; height: 10px; border-radius: 2px; background: rgba(255,255,255,.05); flex-shrink: 0; }
+  .gh-cell[data-level="1"] { background: rgba(59,130,246,.35); }
+  .gh-cell[data-level="2"] { background: rgba(59,130,246,.6); }
+  .gh-cell[data-level="3"] { background: rgba(34,211,238,.75); }
+  .gh-cell[data-level="4"] { background: var(--cyan); box-shadow: 0 0 5px rgba(34,211,238,.7); }
+  .gh-legend { display: flex; align-items: center; gap: .4rem; font-size: .62rem; color: #334155; }
+  .gh-legend .gh-cell { width: 9px; height: 9px; }
+  .gh-total { font-size: .68rem; color: #60A5FA; }
+  .gh-total strong { color: var(--white); }
+  .gh-now {
+    display: flex; align-items: flex-start; gap: .7rem;
+    padding: .9rem 1rem; border-radius: .6rem;
+    background: rgba(59,130,246,.05); border: 1px solid rgba(59,130,246,.15);
+  }
+  .gh-now-dot {
+    width: 8px; height: 8px; border-radius: 50%; margin-top: .3em; flex-shrink: 0;
+    background: #34D399; box-shadow: 0 0 6px #34D399; animation: hudPulse 2s infinite;
+  }
+  .gh-now-text { font-size: .76rem; line-height: 1.6; color: var(--muted); }
+  .gh-now-text .gh-repo { color: var(--cyan); font-weight: 600; }
+  .gh-now-text .gh-time { color: #334155; font-size: .68rem; margin-left: .4rem; }
+  .gh-now-text p { font-family: 'Inter', sans-serif; color: var(--slate); margin-top: .2rem; }
+  .gh-error { font-size: .72rem; color: #334155; padding: .5rem 0; }
+  @media (max-width: 640px) { .gh-body { padding: 1.1rem .9rem 1.3rem; } }
+
+  /* ── PATHFINDING ALGORITHM VISUALIZER ── */
+  .algo-card {
+    background: #060D18;
+    border: 1px solid rgba(59,130,246,.18);
+    border-radius: .9rem;
+    overflow: hidden;
+    box-shadow: 0 0 48px rgba(59,130,246,.1), 0 0 100px rgba(34,211,238,.05);
+    font-family: 'JetBrains Mono','Courier New',monospace;
+    max-width: 780px; margin: 0 auto;
+  }
+  .algo-body { padding: 1.2rem; }
+  #algo-canvas { width: 100%; height: auto; display: block; border-radius: .5rem; background: #030811; }
+  .algo-footer {
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .8rem;
+    padding: .8rem 1.2rem 1.2rem;
+  }
+  .algo-legend { display: flex; gap: 1rem; flex-wrap: wrap; font-size: .66rem; color: #334155; }
+  .algo-legend span { display: inline-flex; align-items: center; gap: .35rem; }
+  .algo-swatch { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+  .algo-run-btn {
+    display: inline-flex; align-items: center; gap: .4rem;
+    padding: .45rem 1rem; border-radius: 100px; cursor: pointer;
+    background: rgba(59,130,246,.1); border: 1px solid rgba(59,130,246,.3);
+    color: #60A5FA; font-family: 'JetBrains Mono', monospace; font-size: .68rem; font-weight: 600;
+    letter-spacing: .04em; transition: background .2s, color .2s, border-color .2s;
+  }
+  .algo-run-btn:hover { background: rgba(34,211,238,.15); border-color: var(--cyan); color: var(--white); }
+  .algo-stat { font-size: .68rem; color: #60A5FA; }
+  .algo-stat strong { color: var(--white); }
 </style>
 </head>
 <body>
 
 <div class="cursor-glow" id="glow"></div>
 <div id="custom-cursor" aria-hidden="true"></div>
+<canvas id="matrix-canvas" aria-hidden="true"></canvas>
 
 <!-- BOOT SEQUENCE (shown once per session, before the page reveals) -->
 <div id="boot-seq" aria-hidden="true">
+  <pre class="boot-ascii" id="boot-ascii"> _   _  _____ 
+| \ | |/ ____|
+|  \| | |  __ 
+| . ` | | |_ |
+| |\  | |__| |
+|_| \_|\_____|</pre>
   <div class="boot-lines" id="boot-lines"></div>
   <div class="boot-bar-track"><div class="boot-bar-fill" id="boot-bar-fill"></div></div>
 </div>
@@ -1672,8 +1786,10 @@
   <ul id="nav-menu">
     <li><a href="#resume">Résumé</a></li>
     <li><a href="#tools">Toolkit</a></li>
+    <li><a href="#github">GitHub</a></li>
     <li><a href="#skills">Skills</a></li>
     <li><a href="#build">In Motion</a></li>
+    <li><a href="#algorithm">Algorithms</a></li>
     <li><a href="#models">3D Work</a></li>
     <li><a href="#photography">Photography</a></li>
     <li><a href="#process">Process</a></li>
@@ -1974,6 +2090,42 @@
 </section>
 
 
+<!-- GITHUB LIVE ACTIVITY -->
+<section id="github" class="panel">
+  <div class="panel-inner">
+    <span class="section-label">Live from GitHub</span>
+    <h2>Code in<br>the wild</h2>
+    <p class="lead" style="margin:0 auto 2.5rem;">Pulled live from my GitHub account — real commits, not a static screenshot.</p>
+    <div class="gh-card">
+      <div class="cc-titlebar">
+        <div class="cc-dots">
+          <span class="cc-dot" style="background:#FF5F57"></span>
+          <span class="cc-dot" style="background:#FFBD2E"></span>
+          <span class="cc-dot" style="background:#28C840"></span>
+        </div>
+        <span class="cc-filename">github_activity.sh</span>
+        <div class="cc-status-pill" id="gh-pill">
+          <span class="cc-pill-dot"></span><span id="gh-pill-text">SYNCING</span>
+        </div>
+      </div>
+      <div class="gh-body">
+        <div>
+          <span class="gh-sub-label">Contribution history — last 12 months</span>
+          <div class="gh-calendar" id="gh-calendar">
+            <div class="gh-error">Connecting to github.com/nicholasgearinger-code…</div>
+          </div>
+        </div>
+        <div>
+          <span class="gh-sub-label">Now building</span>
+          <div class="gh-now" id="gh-now">
+            <span class="gh-now-dot"></span>
+            <div class="gh-now-text">Checking latest activity…</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
 
 
 <!-- SKILLS -->
@@ -2069,6 +2221,41 @@
       </div>
       <div class="build-video-card">
         <video id="phone-video" muted loop playsinline webkit-playsinline preload="auto" src="smartphone.mp4"></video>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ALGORITHM VISUALIZER -->
+<section id="algorithm" class="panel">
+  <div class="panel-inner">
+    <span class="section-label">Under the Hood</span>
+    <h2>How I think<br>through a problem</h2>
+    <p class="lead" style="margin:0 auto 2.5rem;">A* pathfinding, running live in your browser — the same break-it-down-and-search approach I bring to design and code problems.</p>
+    <div class="algo-card">
+      <div class="cc-titlebar">
+        <div class="cc-dots">
+          <span class="cc-dot" style="background:#FF5F57"></span>
+          <span class="cc-dot" style="background:#FFBD2E"></span>
+          <span class="cc-dot" style="background:#28C840"></span>
+        </div>
+        <span class="cc-filename">pathfind.py</span>
+        <div class="cc-status-pill" id="algo-pill">
+          <span class="cc-pill-dot"></span><span id="algo-pill-text">SEARCHING</span>
+        </div>
+      </div>
+      <div class="algo-body">
+        <canvas id="algo-canvas" width="720" height="360" aria-label="A* pathfinding visualization on a grid"></canvas>
+      </div>
+      <div class="algo-footer">
+        <div class="algo-legend">
+          <span><span class="algo-swatch" style="background:rgba(59,130,246,.4)"></span>explored</span>
+          <span><span class="algo-swatch" style="background:var(--violet)"></span>frontier</span>
+          <span><span class="algo-swatch" style="background:var(--amber)"></span>shortest path</span>
+        </div>
+        <div class="algo-stat" id="algo-stat">nodes visited: <strong>0</strong></div>
+        <button type="button" class="algo-run-btn" id="algo-run">↻ Run again</button>
       </div>
     </div>
   </div>
@@ -2450,6 +2637,9 @@
   <div class="hud-row js-api-only" id="hud-views-row" style="display:none">◉ <span id="hud-views"><strong>—</strong> views</span></div>
   <button type="button" id="crt-toggle" aria-pressed="false">
     <span class="crt-sw"></span><span>CRT FX</span>
+  </button>
+  <button type="button" id="matrix-toggle" aria-pressed="false">
+    <span class="crt-sw"></span><span>MATRIX FX</span>
   </button>
 </div>
 
@@ -4549,6 +4739,80 @@ panels.forEach(p => observer.observe(p));
 })();
 </script>
 <script>
+/* -- MATRIX CODE-RAIN: toggleable ambient overlay, tinted to the site's own
+      cyan/blue/violet accents rather than classic green. Preference remembered.
+      Loop only runs while visible, to avoid burning CPU in the background. -- */
+(function matrixRain() {
+  const canvas = document.getElementById('matrix-canvas');
+  const btn = document.getElementById('matrix-toggle');
+  if (!canvas || !btn) return;
+  const ctx = canvas.getContext('2d');
+  const KEY = 'matrixFxOn';
+  const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const GLYPHS = '01アイウエオカキクケコサシスセソ0123456789<>{}[]/*+-=;'.split('');
+  const COLORS = ['rgba(125,211,252,.9)', 'rgba(34,211,238,.9)', 'rgba(59,130,246,.85)', 'rgba(129,140,248,.75)'];
+  const FONT_SIZE = 16;
+  let cols = [];
+  let raf = null;
+  let running = false;
+
+  function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    const n = Math.ceil(canvas.width / FONT_SIZE);
+    cols = new Array(n).fill(0).map(() => Math.random() * -canvas.height / FONT_SIZE);
+  }
+
+  function frame() {
+    ctx.fillStyle = 'rgba(2,8,16,.14)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.font = FONT_SIZE + 'px "JetBrains Mono", monospace';
+    for (let i = 0; i < cols.length; i++) {
+      const x = i * FONT_SIZE;
+      const y = cols[i] * FONT_SIZE;
+      ctx.fillStyle = COLORS[i % COLORS.length];
+      ctx.fillText(GLYPHS[Math.floor(Math.random() * GLYPHS.length)], x, y);
+      if (y > canvas.height && Math.random() > 0.975) cols[i] = 0;
+      cols[i]++;
+    }
+    if (running) raf = requestAnimationFrame(frame);
+  }
+
+  function start() {
+    if (running) return;
+    running = true;
+    resize();
+    ctx.fillStyle = 'rgba(2,8,16,1)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    raf = requestAnimationFrame(frame);
+    window.addEventListener('resize', resize);
+  }
+  function stop() {
+    running = false;
+    if (raf) cancelAnimationFrame(raf);
+    window.removeEventListener('resize', resize);
+  }
+
+  function apply(on) {
+    canvas.classList.toggle('on', on);
+    btn.classList.toggle('on', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    if (on && !reduceMotion) start(); else stop();
+  }
+
+  const saved = localStorage.getItem(KEY);
+  apply(saved === '1' && !reduceMotion);
+
+  btn.addEventListener('click', () => {
+    if (reduceMotion) return; // respect the preference silently
+    const on = !canvas.classList.contains('on');
+    apply(on);
+    localStorage.setItem(KEY, on ? '1' : '0');
+  });
+})();
+</script>
+<script>
 /* -- CASE STUDY MODAL: populated from a small local data set, keyed by data-case -- */
 (function caseStudies() {
   const overlay = document.getElementById('cs-overlay');
@@ -4633,6 +4897,260 @@ panels.forEach(p => observer.observe(p));
 })();
 </script>
 <script>
+/* -- GITHUB LIVE ACTIVITY: fetches real contribution history + latest public
+      push from GitHub's own APIs. No auth, no build step — just fetch on load.
+      Fails gracefully to a quiet message if the network or API is unavailable. -- */
+(function githubActivity() {
+  const USERNAME = 'nicholasgearinger-code';
+  const calendarEl = document.getElementById('gh-calendar');
+  const nowEl = document.getElementById('gh-now');
+  const pillText = document.getElementById('gh-pill-text');
+  const pillDot = document.querySelector('#gh-pill .cc-pill-dot');
+  if (!calendarEl || !nowEl) return;
+
+  function timeAgo(dateStr) {
+    const diffMs = Date.now() - new Date(dateStr).getTime();
+    const mins = Math.floor(diffMs / 60000);
+    if (mins < 60) return mins + 'm ago';
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return hrs + 'h ago';
+    const days = Math.floor(hrs / 24);
+    if (days < 30) return days + 'd ago';
+    return new Date(dateStr).toLocaleDateString();
+  }
+
+  function setPill(text, ok) {
+    if (pillText) pillText.textContent = text;
+    if (pillDot) pillDot.style.background = ok ? '#34D399' : '#FB7185';
+  }
+
+  async function loadCalendar() {
+    try {
+      const res = await fetch('https://github-contributions-api.jogruber.de/v4/' + USERNAME + '?y=last');
+      if (!res.ok) throw new Error('bad response');
+      const data = await res.json();
+      const days = data.contributions || [];
+      const totalKey = Object.keys(data.total || {}).pop();
+      const total = totalKey ? data.total[totalKey] : days.reduce((s, d) => s + d.count, 0);
+
+      const grid = document.createElement('div');
+      grid.className = 'gh-grid';
+      days.slice(-364).forEach((d) => {
+        const cell = document.createElement('div');
+        cell.className = 'gh-cell';
+        cell.setAttribute('data-level', d.level || 0);
+        cell.title = d.count + ' contribution' + (d.count === 1 ? '' : 's') + ' on ' + d.date;
+        grid.appendChild(cell);
+      });
+
+      const legend = document.createElement('div');
+      legend.className = 'gh-legend';
+      legend.innerHTML = '<span>Less</span>' +
+        [0, 1, 2, 3, 4].map((l) => '<span class="gh-cell" data-level="' + l + '"></span>').join('') +
+        '<span>More</span><span class="gh-total" style="margin-left:auto;"><strong>' + total + '</strong> contributions in the last year</span>';
+
+      calendarEl.innerHTML = '';
+      calendarEl.appendChild(grid);
+      calendarEl.appendChild(legend);
+      return true;
+    } catch (e) {
+      calendarEl.innerHTML = '<div class="gh-error">Couldn\'t load contribution history right now — <a href="https://github.com/' + USERNAME + '" target="_blank" rel="noopener" style="color:#60A5FA;">view on GitHub →</a></div>';
+      return false;
+    }
+  }
+
+  async function loadNowBuilding() {
+    try {
+      const res = await fetch('https://api.github.com/users/' + USERNAME + '/events/public');
+      if (!res.ok) throw new Error('bad response');
+      const events = await res.json();
+      const push = Array.isArray(events) ? events.find((e) => e.type === 'PushEvent') : null;
+      const anyEvent = Array.isArray(events) ? events[0] : null;
+
+      if (push) {
+        const repo = push.repo && push.repo.name ? push.repo.name.split('/').pop() : 'a repo';
+        const commit = push.payload && push.payload.commits && push.payload.commits.length
+          ? push.payload.commits[push.payload.commits.length - 1].message
+          : null;
+        nowEl.innerHTML = '<span class="gh-now-dot"></span><div class="gh-now-text">' +
+          'Pushed to <span class="gh-repo">' + repo + '</span><span class="gh-time">' + timeAgo(push.created_at) + '</span>' +
+          (commit ? '<p>“' + commit.replace(/</g, '&lt;').slice(0, 90) + '”</p>' : '') +
+          '</div>';
+      } else if (anyEvent) {
+        const repo = anyEvent.repo && anyEvent.repo.name ? anyEvent.repo.name.split('/').pop() : 'a repo';
+        nowEl.innerHTML = '<span class="gh-now-dot"></span><div class="gh-now-text">' +
+          'Active on <span class="gh-repo">' + repo + '</span><span class="gh-time">' + timeAgo(anyEvent.created_at) + '</span></div>';
+      } else {
+        nowEl.innerHTML = '<span class="gh-now-dot" style="background:#334155;box-shadow:none;animation:none;"></span><div class="gh-now-text">No public activity yet — <a href="https://github.com/' + USERNAME + '" target="_blank" rel="noopener" style="color:#60A5FA;">see full profile →</a></div>';
+      }
+      return true;
+    } catch (e) {
+      nowEl.innerHTML = '<span class="gh-now-dot" style="background:#334155;box-shadow:none;animation:none;"></span><div class="gh-now-text">Couldn\'t reach GitHub right now — <a href="https://github.com/' + USERNAME + '" target="_blank" rel="noopener" style="color:#60A5FA;">view profile →</a></div>';
+      return false;
+    }
+  }
+
+  Promise.all([loadCalendar(), loadNowBuilding()]).then((results) => {
+    setPill(results.every(Boolean) ? 'LIVE' : 'PARTIAL', results.some(Boolean));
+  });
+})();
+</script>
+<script>
+/* -- PATHFINDING VISUALIZER: real A* search over a randomly generated grid,
+      animated step by step. Re-runs on demand and once when first scrolled
+      into view. Respects prefers-reduced-motion by skipping straight to the result. -- */
+(function pathfindViz() {
+  const canvas = document.getElementById('algo-canvas');
+  const runBtn = document.getElementById('algo-run');
+  const statEl = document.getElementById('algo-stat');
+  const pillText = document.getElementById('algo-pill-text');
+  if (!canvas || !runBtn) return;
+  const ctx = canvas.getContext('2d');
+  const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const COLS = 30, ROWS = 15;
+  const CW = canvas.width / COLS, CH = canvas.height / ROWS;
+  let grid, start, goal, timer = null;
+
+  function key(r, c) { return r + ',' + c; }
+
+  function makeGrid() {
+    grid = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+    start = { r: 1, c: 1 };
+    goal = { r: ROWS - 2, c: COLS - 2 };
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        if ((r === start.r && c === start.c) || (r === goal.r && c === goal.c)) continue;
+        if (Math.random() < 0.24) grid[r][c] = 1;
+      }
+    }
+  }
+
+  function neighbors(node) {
+    const { r, c } = node;
+    return [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]]
+      .filter(([nr, nc]) => nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && grid[nr][nc] === 0)
+      .map(([nr, nc]) => ({ r: nr, c: nc }));
+  }
+
+  function reachable() {
+    const seen = new Set([key(start.r, start.c)]);
+    const q = [start];
+    while (q.length) {
+      const cur = q.shift();
+      if (cur.r === goal.r && cur.c === goal.c) return true;
+      neighbors(cur).forEach((n) => {
+        const k = key(n.r, n.c);
+        if (!seen.has(k)) { seen.add(k); q.push(n); }
+      });
+    }
+    return false;
+  }
+
+  function astar() {
+    const h = (n) => Math.abs(n.r - goal.r) + Math.abs(n.c - goal.c);
+    const open = [{ node: start, f: h(start) }];
+    const gScore = { [key(start.r, start.c)]: 0 };
+    const cameFrom = {};
+    const visitedOrder = [];
+    const inOpen = new Set([key(start.r, start.c)]);
+
+    while (open.length) {
+      open.sort((a, b) => a.f - b.f);
+      const current = open.shift().node;
+      const ck = key(current.r, current.c);
+      inOpen.delete(ck);
+      visitedOrder.push(current);
+
+      if (current.r === goal.r && current.c === goal.c) {
+        const path = [current];
+        let k = ck;
+        while (cameFrom[k]) { path.unshift(cameFrom[k]); k = key(cameFrom[k].r, cameFrom[k].c); }
+        return { visitedOrder, path };
+      }
+
+      neighbors(current).forEach((n) => {
+        const nk = key(n.r, n.c);
+        const tentative = gScore[ck] + 1;
+        if (gScore[nk] === undefined || tentative < gScore[nk]) {
+          cameFrom[nk] = current;
+          gScore[nk] = tentative;
+          const f = tentative + h(n);
+          if (!inOpen.has(nk)) { open.push({ node: n, f }); inOpen.add(nk); }
+        }
+      });
+    }
+    return { visitedOrder, path: [] };
+  }
+
+  function drawBase() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        ctx.fillStyle = grid[r][c] === 1 ? 'rgba(255,255,255,.07)' : 'rgba(255,255,255,.015)';
+        ctx.fillRect(c * CW + 1, r * CH + 1, CW - 2, CH - 2);
+      }
+    }
+    ctx.fillStyle = '#34D399';
+    ctx.fillRect(start.c * CW + 1, start.r * CH + 1, CW - 2, CH - 2);
+    ctx.fillStyle = '#F59E0B';
+    ctx.fillRect(goal.c * CW + 1, goal.r * CH + 1, CW - 2, CH - 2);
+  }
+
+  function fillCell(node, color) {
+    ctx.fillStyle = color;
+    ctx.fillRect(node.c * CW + 1, node.r * CH + 1, CW - 2, CH - 2);
+  }
+
+  function run() {
+    if (timer) { clearInterval(timer); timer = null; }
+    let attempts = 0;
+    do { makeGrid(); attempts++; } while (!reachable() && attempts < 25);
+    if (pillText) pillText.textContent = 'SEARCHING';
+
+    const { visitedOrder, path } = astar();
+    drawBase();
+
+    if (reduceMotion) {
+      visitedOrder.forEach((n) => fillCell(n, 'rgba(59,130,246,.35)'));
+      path.forEach((n) => fillCell(n, '#F59E0B'));
+      fillCell(start, '#34D399'); fillCell(goal, '#F59E0B');
+      if (statEl) statEl.innerHTML = 'nodes visited: <strong>' + visitedOrder.length + '</strong>';
+      if (pillText) pillText.textContent = 'PATH FOUND';
+      return;
+    }
+
+    let i = 0;
+    timer = setInterval(() => {
+      if (i < visitedOrder.length) {
+        if (i > 0) fillCell(visitedOrder[i - 1], 'rgba(59,130,246,.35)');
+        fillCell(visitedOrder[i], '#818CF8');
+        fillCell(start, '#34D399'); fillCell(goal, '#F59E0B');
+        if (statEl) statEl.innerHTML = 'nodes visited: <strong>' + (i + 1) + '</strong>';
+        i++;
+      } else {
+        clearInterval(timer);
+        timer = null;
+        if (visitedOrder.length) fillCell(visitedOrder[visitedOrder.length - 1], 'rgba(59,130,246,.35)');
+        fillCell(start, '#34D399'); fillCell(goal, '#F59E0B');
+        let p = 0;
+        const pathTimer = setInterval(() => {
+          if (p < path.length) { fillCell(path[p], '#F59E0B'); p++; }
+          else { clearInterval(pathTimer); fillCell(start, '#34D399'); fillCell(goal, '#F59E0B'); if (pillText) pillText.textContent = path.length ? 'PATH FOUND' : 'NO PATH'; }
+        }, 22);
+      }
+    }, 14);
+  }
+
+  runBtn.addEventListener('click', run);
+
+  const io = new IntersectionObserver((entries) => {
+    if (entries[0].isIntersecting) { run(); io.disconnect(); }
+  }, { threshold: 0.4 });
+  io.observe(canvas);
+})();
+</script>
+<script>
 /* -- NAV SCROLL-SPY: highlights the current section's nav link, mirrors resume-tab.active -- */
 (function navScrollSpy() {
   const links = Array.from(document.querySelectorAll('nav ul li a[href^="#"]'));
@@ -4674,8 +5192,10 @@ panels.forEach(p => observer.observe(p));
 
   const COMMANDS = [
     { icon: '◈', label: 'Go to About / Résumé', action: () => scrollToId('resume') },
+    { icon: '◈', label: 'Go to GitHub Activity', action: () => scrollToId('github') },
     { icon: '◈', label: 'Go to Skills', action: () => scrollToId('skills') },
     { icon: '◈', label: 'Go to In Motion', action: () => scrollToId('build') },
+    { icon: '◈', label: 'Go to Algorithm Visualizer', action: () => scrollToId('algorithm') },
     { icon: '◈', label: 'Go to 3D Work', action: () => scrollToId('models') },
     { icon: '◈', label: 'Go to Photography', action: () => scrollToId('photography') },
     { icon: '◈', label: 'Go to Process', action: () => scrollToId('process') },

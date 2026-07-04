@@ -1496,22 +1496,33 @@
   .custom-cursor-active, .custom-cursor-active * { cursor: none !important; }
   #custom-cursor {
     position: fixed; top: 0; left: 0; z-index: 9998; pointer-events: none;
-    width: 22px; height: 22px; margin: -11px 0 0 -11px;
-    border: 1.5px solid var(--cyan); border-radius: 50%;
+    width: 26px; height: 26px; margin: -13px 0 0 -13px;
     transform: translate(var(--cx, -100px), var(--cy, -100px));
-    transition: width .18s ease, height .18s ease, margin .18s ease, border-color .18s ease, background .18s ease;
+    transition: width .18s ease, height .18s ease, margin .18s ease;
     will-change: transform;
   }
-  #custom-cursor::before, #custom-cursor::after {
-    content: ''; position: absolute; background: var(--cyan);
+  #custom-cursor::before {
+    content: ''; position: absolute; top: 50%; left: 50%;
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--cyan); box-shadow: 0 0 6px var(--cyan);
+    transform: translate(-50%, -50%);
+    transition: background .18s ease, box-shadow .18s ease;
   }
-  #custom-cursor::before { top: 50%; left: -5px; width: 4px; height: 1.5px; transform: translateY(-50%); }
-  #custom-cursor::after { left: 50%; top: -5px; height: 4px; width: 1.5px; transform: translateX(-50%); }
+  #custom-cursor::after {
+    content: ''; position: absolute; inset: 0;
+    border-radius: 50%;
+    border: 1.5px solid transparent;
+    border-top-color: var(--cyan);
+    border-right-color: var(--cyan);
+    animation: cursorSpin 2.2s linear infinite;
+    transition: border-color .18s ease;
+  }
+  @keyframes cursorSpin { to { transform: rotate(360deg); } }
   #custom-cursor.cc-hover {
-    width: 44px; height: 44px; margin: -22px 0 0 -22px;
-    border-color: #E879F9; background: rgba(232,121,249,.08);
+    width: 42px; height: 42px; margin: -21px 0 0 -21px;
   }
-  #custom-cursor.cc-hover::before, #custom-cursor.cc-hover::after { background: #E879F9; }
+  #custom-cursor.cc-hover::before { background: #E879F9; box-shadow: 0 0 9px #E879F9; }
+  #custom-cursor.cc-hover::after { border-top-color: #E879F9; border-right-color: #E879F9; animation-duration: .9s; }
 
   /* ── CASE STUDY MODAL ── */
   .cs-trigger {
@@ -1681,7 +1692,7 @@
     background: rgba(59,130,246,.08); border: 1px solid rgba(59,130,246,.3); color: var(--white);
     font-family: 'JetBrains Mono', monospace; font-size: .72rem; padding: .4rem .6rem; border-radius: .4rem; cursor: pointer;
   }
-  #procgen-canvas { width: 100%; height: auto; display: block; border-radius: .5rem; background: #030811; image-rendering: pixelated; }
+  #boids-canvas { width: 100%; height: auto; display: block; border-radius: .5rem; background: #030811; }
 
   /* ── LIVE IMAGE CLASSIFIER ── */
   .classify-body { padding: 1.2rem; display: flex; flex-direction: column; gap: 1rem; }
@@ -1786,7 +1797,7 @@
     <li><a href="#skills">Skills</a></li>
     <li><a href="#build">In Motion</a></li>
     <li><a href="#algorithm">Deep Learning</a></li>
-    <li><a href="#procgen">World Gen</a></li>
+    <li><a href="#boids">Simulation</a></li>
     <li><a href="#classifier">Classify</a></li>
     <li><a href="#models">3D Work</a></li>
     <li><a href="#photography">Photography</a></li>
@@ -2250,12 +2261,12 @@
 </section>
 
 
-<!-- PROCEDURAL WORLD GENERATOR -->
-<section id="procgen" class="panel">
+<!-- BOIDS FLOCKING SIMULATION -->
+<section id="boids" class="panel">
   <div class="panel-inner">
-    <span class="section-label">Procedural Generation</span>
-    <h2>Worlds built<br>from noise</h2>
-    <p class="lead" style="margin:0 auto 2.2rem;">Fractal value noise, layered octave by octave into a heightmap, then colored by elevation into a tiny procedural landscape — the same technique behind terrain generation in games.</p>
+    <span class="section-label">Simulation</span>
+    <h2>Flocking from<br>three simple rules</h2>
+    <p class="lead" style="margin:0 auto 2.2rem;">Each boid only reacts to its nearest neighbors — separation, alignment, and cohesion are the only rules, yet the group moves like a living flock.</p>
     <div class="algo-card">
       <div class="cc-titlebar">
         <div class="cc-dots">
@@ -2263,56 +2274,48 @@
           <span class="cc-dot" style="background:#FFBD2E"></span>
           <span class="cc-dot" style="background:#28C840"></span>
         </div>
-        <span class="cc-filename">terrain_gen.py</span>
-        <div class="cc-status-pill" id="procgen-pill">
-          <span class="cc-pill-dot"></span><span id="procgen-pill-text">READY</span>
+        <span class="cc-filename">boids.js</span>
+        <div class="cc-status-pill" id="boids-pill">
+          <span class="cc-pill-dot"></span><span id="boids-pill-text">RUNNING</span>
         </div>
       </div>
       <div class="procgen-controls">
         <div class="procgen-field">
-          <label>Scale <span class="val" id="procgen-scale-val">4.5</span></label>
-          <input type="range" id="procgen-scale" min="1.5" max="9" step="0.1" value="4.5">
+          <label>Boids <span class="val" id="boids-count-val">80</span></label>
+          <input type="range" id="boids-count" min="10" max="200" step="10" value="80">
         </div>
         <div class="procgen-field">
-          <label>Octaves <span class="val" id="procgen-octaves-val">5</span></label>
-          <input type="range" id="procgen-octaves" min="1" max="7" step="1" value="5">
+          <label>Cohesion <span class="val" id="boids-cohesion-val">1.0</span></label>
+          <input type="range" id="boids-cohesion" min="0" max="2" step="0.1" value="1.0">
         </div>
         <div class="procgen-field">
-          <label for="procgen-biome">Biome</label>
-          <select id="procgen-biome">
-            <option value="island">Island</option>
-            <option value="alpine">Alpine</option>
-            <option value="alien">Alien</option>
-            <option value="mono">Heightmap (mono)</option>
-          </select>
+          <label>Speed <span class="val" id="boids-speed-val">2.5</span></label>
+          <input type="range" id="boids-speed" min="1" max="6" step="0.1" value="2.5">
         </div>
       </div>
       <div class="algo-body">
-        <canvas id="procgen-canvas" width="720" height="360" aria-label="Procedurally generated terrain map colored by elevation"></canvas>
+        <canvas id="boids-canvas" width="720" height="360" aria-label="Animated flocking simulation of triangular boids"></canvas>
       </div>
       <div class="algo-footer">
-        <div class="algo-legend" id="procgen-legend">
-          <span><span class="algo-swatch" style="background:#1c6ea4"></span>water</span>
-          <span><span class="algo-swatch" style="background:#d9c58a"></span>sand</span>
-          <span><span class="algo-swatch" style="background:#3f8f4f"></span>grass</span>
-          <span><span class="algo-swatch" style="background:#6b6558"></span>rock</span>
-          <span><span class="algo-swatch" style="background:#eef2f5"></span>snow</span>
+        <div class="algo-legend" id="boids-legend">
+          <span><span class="algo-swatch" style="background:#22D3EE"></span>boid</span>
+          <span><span class="algo-swatch" style="background:#E879F9"></span>nearby neighbor</span>
         </div>
-        <div class="algo-stat" id="procgen-stat">seed: <strong>—</strong></div>
-        <button type="button" class="algo-run-btn" id="procgen-run">↻ Generate new world</button>
+        <div class="algo-stat" id="boids-stat">avg speed: <strong>—</strong></div>
+        <button type="button" class="algo-run-btn" id="boids-run">↻ Scatter flock</button>
       </div>
     </div>
-    <p class="algo-hint">layered Perlin noise (fractal Brownian motion) → normalized heightmap → elevation-banded color ramp (no external assets — generated fresh every click)</p>
+    <p class="algo-hint">Craig Reynolds' 1986 boids model — separation, alignment, cohesion — no leader, no script, just three local rules re-evaluated every frame</p>
     <div class="explain-row">
-      <button type="button" class="explain-btn" id="explain-procgen"
-        data-question="In 2-3 short sentences, explain how layered noise functions (fractal/Perlin noise) are used to procedurally generate game terrain."
-        data-fallback="Procedural terrain usually starts with a noise function that produces smooth, random-looking values across a 2D grid. Layering several octaves of that noise at different scales and blending them adds both large landmasses and small-scale roughness, which is called fractal noise. Coloring the result by elevation — water below a threshold, then sand, grass, rock, and snow moving up — turns raw numbers into a landscape that never repeats.">
+      <button type="button" class="explain-btn" id="explain-boids"
+        data-question="In 2-3 short sentences, explain how the three boids rules (separation, alignment, cohesion) create realistic flocking behavior with no central controller."
+        data-fallback="Boids simulate flocking with three simple local rules each boid follows based only on its nearest neighbors: separation steers it away from crowding too close, alignment matches its heading to the average direction of nearby boids, and cohesion steers it toward the group's average position. No boid knows about the whole flock or follows a leader — the lifelike group movement emerges purely from these three local rules running independently for every individual, every frame.">
         <span class="explain-spin">↻</span>✦ Explain this
       </button>
     </div>
-    <div class="explain-body" id="explain-procgen-body">
+    <div class="explain-body" id="explain-boids-body">
       <span class="explain-tag">✦ AI-generated explanation</span>
-      <p id="explain-procgen-text"></p>
+      <p id="explain-boids-text"></p>
     </div>
   </div>
 </section>
@@ -5110,161 +5113,129 @@ panels.forEach(p => observer.observe(p));
 })();
 </script>
 <script>
-/* -- PROCEDURAL WORLD GENERATOR: hand-rolled 2D Perlin noise, summed across
-      several octaves (fractal Brownian motion) into a heightmap, then
-      colored by elevation band. Everything here — noise, falloff, palette —
-      is generated on the fly; no external assets or libraries. -- */
-(function proceduralTerrain() {
-  const canvas = document.getElementById('procgen-canvas');
-  const runBtn = document.getElementById('procgen-run');
-  const scaleInput = document.getElementById('procgen-scale');
-  const octavesInput = document.getElementById('procgen-octaves');
-  const biomeSelect = document.getElementById('procgen-biome');
-  const scaleVal = document.getElementById('procgen-scale-val');
-  const octavesVal = document.getElementById('procgen-octaves-val');
-  const statEl = document.getElementById('procgen-stat');
-  const pillText = document.getElementById('procgen-pill-text');
-  const legendEl = document.getElementById('procgen-legend');
+/* -- BOIDS FLOCKING SIMULATION: Craig Reynolds' classic model — separation,
+      alignment, cohesion — running live every frame. Pauses when scrolled
+      out of view, respects prefers-reduced-motion. -- */
+(function boidsSimulation() {
+  const canvas = document.getElementById('boids-canvas');
+  const runBtn = document.getElementById('boids-run');
+  const countInput = document.getElementById('boids-count');
+  const cohesionInput = document.getElementById('boids-cohesion');
+  const speedInput = document.getElementById('boids-speed');
+  const countVal = document.getElementById('boids-count-val');
+  const cohesionVal = document.getElementById('boids-cohesion-val');
+  const speedVal = document.getElementById('boids-speed-val');
+  const statEl = document.getElementById('boids-stat');
+  const pillText = document.getElementById('boids-pill-text');
   if (!canvas || !runBtn) return;
   const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
 
-  const COLS = 120, ROWS = 60;
-  const CELL = canvas.width / COLS;
-  let seed = Math.floor(Math.random() * 1e9);
+  const PERCEPTION = 46;      // how far a boid "sees" its neighbors
+  const MAX_FORCE = 0.09;
+  let boids = [];
 
-  // Small seeded PRNG (mulberry32) so a given seed always reproduces the same gradients
-  function makeRng(s) {
-    let a = s >>> 0;
-    return function () {
-      a |= 0; a = (a + 0x6D2B79F5) | 0;
-      let t = Math.imul(a ^ (a >>> 15), 1 | a);
-      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  function rand(min, max) { return min + Math.random() * (max - min); }
+
+  function makeBoid() {
+    const angle = rand(0, Math.PI * 2);
+    return {
+      x: rand(0, W), y: rand(0, H),
+      vx: Math.cos(angle) * 1.5, vy: Math.sin(angle) * 1.5,
     };
   }
 
-  function buildNoise(s) {
-    const rng = makeRng(s);
-    const GRID = 64;
-    const grads = [];
-    for (let i = 0; i < GRID * GRID; i++) {
-      const a = rng() * Math.PI * 2;
-      grads.push([Math.cos(a), Math.sin(a)]);
-    }
-    function gradAt(ix, iy) {
-      const x = ((ix % GRID) + GRID) % GRID;
-      const y = ((iy % GRID) + GRID) % GRID;
-      return grads[y * GRID + x];
-    }
-    function fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
-    function lerp(a, b, t) { return a + t * (b - a); }
-    function dot(ix, iy, dx, dy) { const g = gradAt(ix, iy); return g[0] * dx + g[1] * dy; }
-    return function perlin(x, y) {
-      const x0 = Math.floor(x), y0 = Math.floor(y);
-      const x1 = x0 + 1, y1 = y0 + 1;
-      const sx = x - x0, sy = y - y0;
-      const n00 = dot(x0, y0, x - x0, y - y0);
-      const n10 = dot(x1, y0, x - x1, y - y0);
-      const n01 = dot(x0, y1, x - x0, y - y1);
-      const n11 = dot(x1, y1, x - x1, y - y1);
-      const u = fade(sx), v = fade(sy);
-      return lerp(lerp(n00, n10, u), lerp(n01, n11, u), v);
-    };
+  function rebuild() {
+    const n = parseInt(countInput.value, 10);
+    boids = Array.from({ length: n }, makeBoid);
   }
 
-  function fbm(perlin, x, y, octaves) {
-    let total = 0, amp = 0.55, freq = 1, maxAmp = 0;
-    for (let o = 0; o < octaves; o++) {
-      total += perlin(x * freq, y * freq) * amp;
-      maxAmp += amp;
-      amp *= 0.52;
-      freq *= 2.02;
-    }
-    return total / maxAmp;
-  }
+  function step() {
+    const cohesionW = parseFloat(cohesionInput.value);
+    const maxSpeed = parseFloat(speedInput.value);
 
-  const PALETTES = {
-    island: [[0,'#0b2f52'],[.34,'#1c6ea4'],[.42,'#3d97c9'],[.46,'#d9c58a'],[.52,'#7fb356'],[.62,'#3f8f4f'],[.74,'#2f6b3c'],[.85,'#6b6558'],[.93,'#8b8378'],[1,'#eef2f5']],
-    alpine: [[0,'#14213d'],[.30,'#274472'],[.45,'#3a5a78'],[.55,'#5c6b57'],[.68,'#4c5a44'],[.80,'#7c7568'],[.90,'#c9cdd3'],[1,'#ffffff']],
-    alien:  [[0,'#1a0533'],[.30,'#3b0a5c'],[.45,'#6b1a8c'],[.55,'#9b3fb0'],[.66,'#c65fae'],[.78,'#e88a5e'],[.90,'#f4c14b'],[1,'#fff6d6']],
-    mono:   [[0,'#050a12'],[.5,'#5c7a9e'],[1,'#f0f8ff']]
-  };
-  const LEGENDS = {
-    island: [['water','#1c6ea4'],['sand','#d9c58a'],['grass','#3f8f4f'],['rock','#6b6558'],['snow','#eef2f5']],
-    alpine: [['deep water','#274472'],['scrub','#4c5a44'],['stone','#7c7568'],['snow','#ffffff']],
-    alien:  [['void','#3b0a5c'],['flora','#9b3fb0'],['dust','#e88a5e'],['glow','#fff6d6']],
-    mono:   [['low','#050a12'],['mid','#5c7a9e'],['high','#f0f8ff']]
-  };
-
-  function mixHex(a, b, t) {
-    const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
-    const ar = (pa >> 16) & 255, ag = (pa >> 8) & 255, ab = pa & 255;
-    const br = (pb >> 16) & 255, bg = (pb >> 8) & 255, bb = pb & 255;
-    const r = Math.round(ar + (br - ar) * t), g = Math.round(ag + (bg - ag) * t), bl = Math.round(ab + (bb - ab) * t);
-    return 'rgb(' + r + ',' + g + ',' + bl + ')';
-  }
-  function colorFor(t, palette) {
-    for (let i = 1; i < palette.length; i++) {
-      if (t <= palette[i][0]) {
-        const [t0, c0] = palette[i - 1], [t1, c1] = palette[i];
-        return mixHex(c0, c1, (t - t0) / Math.max(1e-6, t1 - t0));
+    for (const b of boids) {
+      let sepX = 0, sepY = 0, aliX = 0, aliY = 0, cohX = 0, cohY = 0, count = 0;
+      for (const o of boids) {
+        if (o === b) continue;
+        const dx = b.x - o.x, dy = b.y - o.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 > PERCEPTION * PERCEPTION || d2 === 0) continue;
+        count++;
+        const d = Math.sqrt(d2);
+        sepX += dx / d; sepY += dy / d;
+        aliX += o.vx; aliY += o.vy;
+        cohX += o.x; cohY += o.y;
       }
-    }
-    return palette[palette.length - 1][1];
-  }
+      if (count > 0) {
+        aliX /= count; aliY /= count;
+        cohX = (cohX / count) - b.x; cohY = (cohY / count) - b.y;
 
-  function updateLegend() {
-    if (!legendEl) return;
-    const set = LEGENDS[biomeSelect.value] || LEGENDS.island;
-    legendEl.innerHTML = set.map(([label, color]) =>
-      '<span><span class="algo-swatch" style="background:' + color + '"></span>' + label + '</span>').join('');
-  }
-
-  function render() {
-    const scale = parseFloat(scaleInput.value);
-    const octaves = parseInt(octavesInput.value, 10);
-    const paletteName = biomeSelect.value;
-    const palette = PALETTES[paletteName] || PALETTES.island;
-    const perlin = buildNoise(seed);
-
-    const heights = new Float32Array(COLS * ROWS);
-    let min = Infinity, max = -Infinity;
-    for (let y = 0; y < ROWS; y++) {
-      for (let x = 0; x < COLS; x++) {
-        const nx = (x / COLS) * scale;
-        const ny = (y / ROWS) * scale * (ROWS / COLS);
-        let h = fbm(perlin, nx, ny, octaves);
-        if (paletteName !== 'mono') {
-          const dx = (x / COLS) * 2 - 1, dy = (y / ROWS) * 2 - 1;
-          h -= Math.pow(Math.sqrt(dx * dx + dy * dy), 3) * 0.9; // island falloff toward edges
-        }
-        heights[y * COLS + x] = h;
-        if (h < min) min = h;
-        if (h > max) max = h;
+        b.vx += sepX * 0.05 + aliX * 0.02 + cohX * 0.0012 * cohesionW;
+        b.vy += sepY * 0.05 + aliY * 0.02 + cohY * 0.0012 * cohesionW;
       }
-    }
+      // Clamp steering force implicitly via speed clamp below
+      const speed = Math.hypot(b.vx, b.vy) || 0.0001;
+      const clamped = Math.min(speed, maxSpeed);
+      b.vx = (b.vx / speed) * clamped;
+      b.vy = (b.vy / speed) * clamped;
+      if (speed < 0.6) { b.vx += rand(-MAX_FORCE, MAX_FORCE); b.vy += rand(-MAX_FORCE, MAX_FORCE); }
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    for (let y = 0; y < ROWS; y++) {
-      for (let x = 0; x < COLS; x++) {
-        const t = (heights[y * COLS + x] - min) / Math.max(1e-6, max - min);
-        ctx.fillStyle = colorFor(t, palette);
-        ctx.fillRect(x * CELL, y * CELL, CELL + 0.5, CELL + 0.5);
-      }
+      b.x += b.vx; b.y += b.vy;
+      if (b.x < -10) b.x = W + 10; if (b.x > W + 10) b.x = -10;
+      if (b.y < -10) b.y = H + 10; if (b.y > H + 10) b.y = -10;
     }
-    if (statEl) statEl.innerHTML = 'seed: <strong>' + seed + '</strong>';
-    if (pillText) pillText.textContent = 'GENERATED';
   }
 
-  function regenerate() { seed = Math.floor(Math.random() * 1e9); render(); }
+  function draw() {
+    ctx.fillStyle = '#030811';
+    ctx.fillRect(0, 0, W, H);
+    let totalSpeed = 0;
+    for (const b of boids) {
+      const angle = Math.atan2(b.vy, b.vx);
+      totalSpeed += Math.hypot(b.vx, b.vy);
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      ctx.rotate(angle);
+      ctx.beginPath();
+      ctx.moveTo(7, 0);
+      ctx.lineTo(-5, 4);
+      ctx.lineTo(-5, -4);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(34,211,238,.85)';
+      ctx.shadowColor = 'rgba(34,211,238,.6)';
+      ctx.shadowBlur = 5;
+      ctx.fill();
+      ctx.restore();
+    }
+    if (statEl && boids.length) {
+      statEl.innerHTML = 'avg speed: <strong>' + (totalSpeed / boids.length).toFixed(2) + '</strong>';
+    }
+  }
 
-  scaleInput.addEventListener('input', () => { scaleVal.textContent = parseFloat(scaleInput.value).toFixed(1); render(); });
-  octavesInput.addEventListener('input', () => { octavesVal.textContent = octavesInput.value; render(); });
-  biomeSelect.addEventListener('change', () => { updateLegend(); render(); });
-  runBtn.addEventListener('click', regenerate);
+  const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const isVisible = window.__onScreen ? window.__onScreen(canvas, 80) : () => true;
+  let raf = null;
 
-  updateLegend();
-  render();
+  function loop() {
+    raf = requestAnimationFrame(loop);
+    if (!isVisible() || !window.__tabVisible) return;
+    step();
+    draw();
+  }
+
+  countInput.addEventListener('input', () => { countVal.textContent = countInput.value; rebuild(); });
+  cohesionInput.addEventListener('input', () => { cohesionVal.textContent = parseFloat(cohesionInput.value).toFixed(1); });
+  speedInput.addEventListener('input', () => { speedVal.textContent = parseFloat(speedInput.value).toFixed(1); });
+  runBtn.addEventListener('click', () => { rebuild(); if (pillText) pillText.textContent = 'SCATTERED'; setTimeout(() => { if (pillText) pillText.textContent = 'RUNNING'; }, 900); });
+
+  rebuild();
+  if (reduceMotion) {
+    draw(); // render a single static frame, no continuous animation
+    if (pillText) pillText.textContent = 'STATIC';
+  } else {
+    loop();
+  }
 })();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
@@ -5438,7 +5409,7 @@ panels.forEach(p => observer.observe(p));
     { icon: '◈', label: 'Go to Skills', action: () => scrollToId('skills') },
     { icon: '◈', label: 'Go to In Motion', action: () => scrollToId('build') },
     { icon: '◈', label: 'Go to Deep Learning Visualizer', action: () => scrollToId('algorithm') },
-    { icon: '◈', label: 'Go to World Generator', action: () => scrollToId('procgen') },
+    { icon: '◈', label: 'Go to Flocking Simulation', action: () => scrollToId('boids') },
     { icon: '◈', label: 'Go to Image Classifier', action: () => scrollToId('classifier') },
     { icon: '◈', label: 'Go to 3D Work', action: () => scrollToId('models') },
     { icon: '◈', label: 'Go to Photography', action: () => scrollToId('photography') },

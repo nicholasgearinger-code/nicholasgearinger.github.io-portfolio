@@ -1731,6 +1731,8 @@
     font-family: 'Syne', sans-serif; font-size: .95rem; color: var(--white);
     margin-bottom: 1rem;
   }
+  .telemetry-heading-sub { font-family: 'JetBrains Mono', monospace; font-size: .68rem; color: var(--muted); font-weight: 400; }
+  #tel-sparkline { width: 100%; height: 70px; display: block; border-radius: .5rem; background: #030811; }
   .telemetry-bars { display: flex; flex-direction: column; gap: .8rem; }
   .telemetry-bar-row { display: flex; flex-direction: column; gap: .3rem; }
   .telemetry-bar-row .tb-label {
@@ -2720,7 +2722,9 @@
         </div>
       </div>
       <div class="algo-body">
-        <h4 class="telemetry-heading">Most-viewed sections</h4>
+        <h4 class="telemetry-heading">Live activity <span class="telemetry-heading-sub">(events per 2s, last 60s)</span></h4>
+        <canvas id="tel-sparkline" width="700" height="70" aria-label="Live chart of site activity over the last minute"></canvas>
+        <h4 class="telemetry-heading" style="margin-top:1.4rem;">Most-viewed sections</h4>
         <div class="telemetry-bars" id="tel-bars">
           <p class="telemetry-empty" id="tel-empty">Not enough data yet — browse the site a bit and check back.</p>
         </div>
@@ -4521,7 +4525,8 @@ panels.forEach(p => observer.observe(p));
     const viewsEl = $('#tel-views'), todayEl = $('#tel-today'),
       guestbookEl = $('#tel-guestbook'), uptimeEl = $('#tel-uptime'),
       barsEl = $('#tel-bars'), emptyEl = $('#tel-empty'),
-      updatedEl = $('#tel-updated'), pillText = $('#tel-pill-text');
+      updatedEl = $('#tel-updated'), pillText = $('#tel-pill-text'),
+      sparkCanvas = $('#tel-sparkline');
     if (!viewsEl || !barsEl) return;
 
     function fmtUptime(sec) {
@@ -4543,33 +4548,110 @@ panels.forEach(p => observer.observe(p));
       requestAnimationFrame(tick);
     }
 
-    async function refresh() {
-      try {
-        const r = await api('/api/stats');
-        countUp(viewsEl, r.totalViews || 0);
-        countUp(todayEl, r.viewsToday || 0);
-        countUp(guestbookEl, r.guestbookEntries || 0);
-        if (uptimeEl) uptimeEl.textContent = fmtUptime(r.uptimeSeconds || 0);
+    /* ── Live sparkline: a rolling 60s window, bucketed every 2s. Each
+       incoming stream message means "something just happened", so it
+       increments the current bucket — a genuine live activity chart, not
+       just numbers changing. ── */
+    const BUCKET_MS = 2000, BUCKET_COUNT = 30;
+    const buckets = new Array(BUCKET_COUNT).fill(0);
+    let bucketStart = Date.now();
+    const sparkCtx = sparkCanvas ? sparkCanvas.getContext('2d') : null;
 
-        if (r.topSections && r.topSections.length) {
-          if (emptyEl) emptyEl.hidden = true;
-          const max = r.topSections[0].count || 1;
-          barsEl.innerHTML = r.topSections.map((s) =>
-            '<div class="telemetry-bar-row">' +
-              '<span class="tb-label">' + s.label + '<strong>' + s.count + '</strong></span>' +
-              '<div class="telemetry-bar-track"><div class="telemetry-bar-fill" style="width:' + Math.round((s.count / max) * 100) + '%"></div></div>' +
-            '</div>'
-          ).join('');
+    function rollBuckets() {
+      const elapsed = Date.now() - bucketStart;
+      const steps = Math.floor(elapsed / BUCKET_MS);
+      if (steps > 0) {
+        for (let i = 0; i < Math.min(steps, BUCKET_COUNT); i++) {
+          buckets.shift();
+          buckets.push(0);
         }
-        if (updatedEl) updatedEl.textContent = 'Live — updated ' + new Date(r.generatedAt).toLocaleTimeString();
-        if (pillText) pillText.textContent = 'LIVE';
+        bucketStart += steps * BUCKET_MS;
+      }
+    }
+    function bumpSpark() {
+      rollBuckets();
+      buckets[BUCKET_COUNT - 1]++;
+      drawSpark();
+    }
+    function drawSpark() {
+      if (!sparkCtx) return;
+      rollBuckets();
+      const W = sparkCanvas.width, H = sparkCanvas.height;
+      sparkCtx.clearRect(0, 0, W, H);
+      const max = Math.max(1, ...buckets);
+      const barW = W / BUCKET_COUNT;
+      buckets.forEach((v, i) => {
+        const h = (v / max) * (H - 8);
+        const x = i * barW, y = H - h;
+        const grad = sparkCtx.createLinearGradient(0, y, 0, H);
+        grad.addColorStop(0, 'rgba(34,211,238,.95)');
+        grad.addColorStop(1, 'rgba(59,130,246,.35)');
+        sparkCtx.fillStyle = v > 0 ? grad : 'rgba(255,255,255,.04)';
+        sparkCtx.fillRect(x + 1, y, Math.max(1, barW - 2), Math.max(1, h) || 1);
+      });
+    }
+    setInterval(drawSpark, 1000); // keep the chart scrolling even between events
+    drawSpark();
+
+    function applyStats(r) {
+      countUp(viewsEl, r.totalViews || 0);
+      countUp(todayEl, r.viewsToday || 0);
+      countUp(guestbookEl, r.guestbookEntries || 0);
+      if (uptimeEl) uptimeEl.textContent = fmtUptime(r.uptimeSeconds || 0);
+
+      if (r.topSections && r.topSections.length) {
+        if (emptyEl) emptyEl.hidden = true;
+        const max = r.topSections[0].count || 1;
+        barsEl.innerHTML = r.topSections.map((s) =>
+          '<div class="telemetry-bar-row">' +
+            '<span class="tb-label">' + s.label + '<strong>' + s.count + '</strong></span>' +
+            '<div class="telemetry-bar-track"><div class="telemetry-bar-fill" style="width:' + Math.round((s.count / max) * 100) + '%"></div></div>' +
+          '</div>'
+        ).join('');
+      }
+      if (updatedEl) updatedEl.textContent = 'Updated ' + new Date(r.generatedAt).toLocaleTimeString();
+    }
+
+    async function pollOnce() {
+      try {
+        applyStats(await api('/api/stats'));
+        if (pillText) pillText.textContent = 'LIVE (polling)';
       } catch (_) {
         if (pillText) pillText.textContent = 'OFFLINE';
         if (updatedEl) updatedEl.textContent = 'Couldn\u2019t reach the backend just now.';
       }
     }
-    refresh();
-    setInterval(refresh, 8000);
+
+    function startPollingFallback() {
+      pollOnce();
+      setInterval(pollOnce, 8000);
+    }
+
+    // Prefer a genuine real-time push connection; fall back to polling if
+    // this browser/proxy doesn't support it or the stream fails to open.
+    if (window.EventSource) {
+      let receivedAny = false;
+      const es = new EventSource(window.__API_BASE + '/api/stream');
+      const fallbackTimer = setTimeout(() => { if (!receivedAny) { es.close(); startPollingFallback(); } }, 6000);
+
+      es.onopen = () => { if (pillText) pillText.textContent = 'LIVE'; };
+      es.onmessage = (ev) => {
+        receivedAny = true;
+        clearTimeout(fallbackTimer);
+        try {
+          const r = JSON.parse(ev.data);
+          applyStats(r);
+          bumpSpark();
+          if (pillText) pillText.textContent = 'LIVE';
+        } catch (_) {}
+      };
+      es.onerror = () => {
+        if (pillText) pillText.textContent = 'RECONNECTING…';
+        // EventSource auto-reconnects on its own; no manual retry needed.
+      };
+    } else {
+      startPollingFallback();
+    }
   }
 
   /* ── Voice input for Ask-AI (Web Speech API — client-side only) ── */

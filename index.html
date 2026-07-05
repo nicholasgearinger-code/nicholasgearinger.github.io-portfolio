@@ -1824,6 +1824,16 @@
 </head>
 <body>
 
+<script>
+  // ── If your backend is hosted separately from this HTML (e.g., this page
+  //    lives on GitHub Pages but the Node backend runs on Render/Railway),
+  //    set this to that backend's full URL, no trailing slash:
+  //      window.__API_BASE = 'https://your-service.onrender.com';
+  //    Leave it as '' if the backend serves this HTML itself (same origin).
+  //    This is the ONLY line on the whole page you need to edit. ──
+  window.__API_BASE = '';
+</script>
+
 <a href="#main-content" class="skip-link">Skip to main content</a>
 
 <div class="cursor-glow" id="glow"></div>
@@ -4276,11 +4286,15 @@ panels.forEach(p => observer.observe(p));
    form falls back to a mailto: link.
    ═══════════════════════════════════════════════════════════════ */
 (function backend() {
+  // API_BASE is declared once, globally, near the top of <body> — see there
+  // if you need to point this site at a separately-hosted backend.
+  const API_BASE = window.__API_BASE || '';
+
   const H = { 'Content-Type': 'application/json' };
   const $ = (s) => document.querySelector(s);
 
   async function api(path, opts) {
-    const r = await fetch(path, Object.assign({ headers: H }, opts || {}));
+    const r = await fetch(API_BASE + path, Object.assign({ headers: H }, opts || {}));
     let data = {};
     try { data = await r.json(); } catch (_) {}
     if (!r.ok) throw Object.assign(new Error(data.error || ('HTTP ' + r.status)), { status: r.status, data });
@@ -4643,13 +4657,15 @@ panels.forEach(p => observer.observe(p));
 
   async function boot() {
     let up = false;
-    try { const r = await fetch('/api/health', { cache: 'no-store' }); up = r.ok; } catch (_) { up = false; }
+    try { const r = await fetch(window.__API_BASE + '/api/health', { cache: 'no-store' }); up = r.ok; } catch (_) { up = false; }
     document.body.classList.toggle('api-up', up);
 
     wireContact(up); // always, so the form works via mailto even offline
     wireExplain(); // always — falls back to static copy if the API is down
     if (up) {
       document.querySelectorAll('.js-api-only').forEach((el) => { el.style.display = ''; });
+      const vcardBtn = $('#vcard-btn');
+      if (vcardBtn) vcardBtn.href = window.__API_BASE + '/api/vcard';
       wireViews(); wireStatus(); wireSubscribe(); wireClaps();
       wireGuestbook(); wireAsk(); wireAnalytics(); wireTLDR();
       wireVoiceInput(); wireActivityTicker(); wireTelemetry();
@@ -5584,7 +5600,7 @@ panels.forEach(p => observer.observe(p));
     { icon: '◈', label: 'Go to Contact', action: () => scrollToId('contact') },
     { icon: '✦', label: 'Ask my AI', action: () => { const fab = document.getElementById('ask-fab'); if (fab) fab.click(); } },
     { icon: '⬇', label: 'Download résumé (PDF)', action: () => { window.location.href = 'Nicholas_Gearinger_Resume.pdf'; } },
-    { icon: '⬇', label: 'Save contact (vCard)', action: () => { window.location.href = '/api/vcard'; } },
+    { icon: '⬇', label: 'Save contact (vCard)', action: () => { window.location.href = window.__API_BASE + '/api/vcard'; } },
     { icon: '↑', label: 'Back to top', action: () => window.scrollTo({ top: 0, behavior: 'smooth' }) },
   ];
 

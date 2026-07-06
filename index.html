@@ -1793,8 +1793,14 @@
   #webcam-video, #webcam-overlay {
     position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
   }
-  #webcam-video.is-mirrored { transform: scaleX(-1); } /* only mirror front-facing cams — mirroring the rear camera looks wrong */
-  #webcam-overlay { pointer-events: none; }
+  /* z-index + a forced GPU layer on both elements. Without this, <video> can
+     get promoted to its own hardware-composited layer (common on mobile
+     Safari/Android Chrome) that paints above the canvas regardless of DOM
+     order — the detection loop runs and draws fine, it just never becomes
+     visible on top of the live feed. */
+  #webcam-video { z-index: 0; transform: translateZ(0); }
+  #webcam-overlay { z-index: 1; pointer-events: none; transform: translateZ(0); }
+  #webcam-video.is-mirrored { transform: scaleX(-1) translateZ(0); } /* only mirror front-facing cams — mirroring the rear camera looks wrong */
   .webcam-switch-btn {
     position: absolute; top: .6rem; right: .6rem; z-index: 3;
     width: 40px; height: 40px; border-radius: 50%;

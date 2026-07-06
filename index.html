@@ -1711,6 +1711,9 @@
     background: rgba(59,130,246,.08); border: 1px solid rgba(59,130,246,.3); color: var(--white);
     font-family: 'JetBrains Mono', monospace; font-size: .72rem; padding: .4rem .6rem; border-radius: .4rem; cursor: pointer;
   }
+  .procgen-field select option {
+    background: #0A1220; color: var(--white);
+  }
   #voice-canvas { width: 100%; height: auto; display: block; border-radius: .5rem; background: #030811; margin-bottom: 1rem; }
   .voice-textarea {
     width: 100%; resize: vertical; min-height: 4.5rem;
@@ -2336,8 +2339,8 @@
         <textarea id="voice-text" class="voice-textarea" maxlength="400" rows="3" placeholder="Type something for your browser to say out loud…">The future of design is where creativity meets code.</textarea>
         <div class="procgen-controls" style="margin-top:1rem;">
           <div class="procgen-field">
-            <label for="voice-select">Voice <span class="val" id="voice-count-val"></span></label>
-            <select id="voice-select"></select>
+            <label for="voice-select">Voice <span class="val" id="voice-count-val">(loading…)</span></label>
+            <select id="voice-select"><option>Loading voices…</option></select>
           </div>
           <div class="procgen-field">
             <label>Pitch <span class="val" id="voice-pitch-val">1.0</span></label>

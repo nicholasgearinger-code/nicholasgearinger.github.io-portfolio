@@ -1793,8 +1793,26 @@
   #webcam-video, #webcam-overlay {
     position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
   }
-  #webcam-video { transform: scaleX(-1); } /* mirror, feels natural for a "look at yourself" demo */
+  #webcam-video.is-mirrored { transform: scaleX(-1); } /* only mirror front-facing cams — mirroring the rear camera looks wrong */
   #webcam-overlay { pointer-events: none; }
+  .webcam-switch-btn {
+    position: absolute; top: .6rem; right: .6rem; z-index: 3;
+    width: 40px; height: 40px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(3,8,17,.72); border: 1px solid rgba(34,211,238,.4);
+    color: var(--cyan); font-size: 1.1rem; cursor: pointer;
+    backdrop-filter: blur(4px); transition: background .2s, transform .15s;
+  }
+  .webcam-switch-btn:hover { background: rgba(34,211,238,.18); }
+  .webcam-switch-btn:active { transform: scale(0.92); }
+  .webcam-switch-btn[hidden] { display: none; }
+  .webcam-hud-label {
+    position: absolute; top: .6rem; left: .6rem; z-index: 3;
+    font: 11px/1 'JetBrains Mono', monospace; letter-spacing: .06em;
+    color: var(--cyan); background: rgba(3,8,17,.72); border: 1px solid rgba(34,211,238,.4);
+    padding: .35rem .55rem; border-radius: .3rem; pointer-events: none;
+  }
+  .webcam-hud-label[hidden] { display: none; }
   .webcam-placeholder {
     position: absolute; inset: 0; z-index: 2;
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem;
@@ -2541,6 +2559,8 @@
         <div class="webcam-wrap" id="webcam-wrap">
           <video id="webcam-video" autoplay muted playsinline></video>
           <canvas id="webcam-overlay"></canvas>
+          <div class="webcam-hud-label" id="webcam-hud-label" hidden>SCANNING</div>
+          <button type="button" class="webcam-switch-btn" id="webcam-switch" title="Switch camera" hidden>⟲</button>
           <div class="webcam-placeholder" id="webcam-placeholder">
             <button type="button" class="btn-primary" id="webcam-start">▶ Start Camera</button>
             <p class="webcam-note">Requires camera access. Nothing is recorded or sent anywhere — detection runs 100% locally in your browser.</p>
@@ -5690,6 +5710,8 @@ panels.forEach(p => observer.observe(p));
   const pillText = document.getElementById('webcam-pill-text');
   const hintEl = document.getElementById('webcam-hint');
   const toggleStatus = document.getElementById('webcam-toggle-status');
+  const switchBtn = document.getElementById('webcam-switch');
+  const hudLabel = document.getElementById('webcam-hud-label');
   const toggles = {
     face: document.getElementById('toggle-face'),
     landmarks: document.getElementById('toggle-landmarks'),
@@ -5720,6 +5742,15 @@ panels.forEach(p => observer.observe(p));
   let faceApiReady = false, landmarksReady = false;
   let cocoModel = null, handDetector = null, poseDetector = null;
   const loadPromises = {};
+
+  // Camera enumeration/switching state. `videoDevices` is populated after the
+  // first getUserMedia grant (device labels/ids are blank pre-permission on
+  // most browsers). `currentDeviceIndex` tracks which one is active so the
+  // switch button can cycle through every camera the device exposes, not
+  // just a front/back pair.
+  let videoDevices = [];
+  let currentDeviceIndex = 0;
+  let switching = false;
 
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     startBtn.disabled = true;
@@ -5817,11 +5848,52 @@ panels.forEach(p => observer.observe(p));
     });
   });
 
+  // These are shared between start(), switchCamera() and the detect loop, so
+  // they live at IIFE scope rather than being re-created (and orphaning the
+  // running rAF loop) every time the camera source changes.
+  const ctx = overlay.getContext('2d');
+  let mirrored = true;
+  let cache = { face: [], objects: [], hands: [], pose: [] };
+
+  function syncSize() { overlay.width = video.videoWidth || 480; overlay.height = video.videoHeight || 360; }
+  function mirrorX(x, w) { return mirrored ? overlay.width - x - w : x; }
+
+  function applyMirror(track) {
+    // Prefer the actual facingMode reported by the track; fall back to
+    // reading the device label (some browsers, notably iOS Safari, don't
+    // always expose facingMode in getSettings()).
+    const settings = track && track.getSettings ? track.getSettings() : {};
+    const label = (track && track.label || '').toLowerCase();
+    const isRear = settings.facingMode === 'environment' || /back|rear|environment/.test(label);
+    mirrored = !isRear;
+    video.classList.toggle('is-mirrored', mirrored);
+  }
+
+  async function refreshDeviceList() {
+    try {
+      const all = await navigator.mediaDevices.enumerateDevices();
+      videoDevices = all.filter((d) => d.kind === 'videoinput');
+    } catch (err) {
+      videoDevices = [];
+    }
+    if (switchBtn) switchBtn.hidden = videoDevices.length < 2;
+  }
+
+  async function openStream(constraints) {
+    const newStream = await navigator.mediaDevices.getUserMedia(constraints);
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    stream = newStream;
+    video.srcObject = stream;
+    await video.play();
+    applyMirror(stream.getVideoTracks()[0]);
+    syncSize();
+  }
+
   async function start() {
     startBtn.disabled = true;
     if (pillText) pillText.textContent = 'STARTING\u2026';
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ video: { width: 480, height: 360 }, audio: false });
+      await openStream({ video: { width: 480, height: 360, facingMode: 'user' }, audio: false });
     } catch (err) {
       if (pillText) pillText.textContent = 'CAMERA DENIED';
       if (hintEl) hintEl.textContent = 'Camera access was denied or unavailable \u2014 this demo needs it to work.';
@@ -5829,16 +5901,17 @@ panels.forEach(p => observer.observe(p));
       return;
     }
 
-    video.srcObject = stream;
-    await video.play();
     placeholder.hidden = true;
     stopBtn.hidden = false;
     running = true;
+    if (hudLabel) hudLabel.hidden = false;
 
-    const ctx = overlay.getContext('2d');
-    function syncSize() { overlay.width = video.videoWidth || 480; overlay.height = video.videoHeight || 360; }
-    video.addEventListener('loadedmetadata', syncSize, { once: true });
-    syncSize();
+    await refreshDeviceList();
+    currentDeviceIndex = videoDevices.findIndex((d) => {
+      const track = stream.getVideoTracks()[0];
+      return track && d.deviceId === track.getSettings().deviceId;
+    });
+    if (currentDeviceIndex < 0) currentDeviceIndex = 0;
 
     // Face + expression (and optionally landmarks) is on by default — load it now.
     if (toggles.face && toggles.face.checked) {
@@ -5848,145 +5921,202 @@ panels.forEach(p => observer.observe(p));
     }
     if (pillText) pillText.textContent = 'DETECTING';
 
-    function mirrorX(x, w) { return overlay.width - x - w; }
+    detectLoop();
+  }
 
-    // Detections are cached and drawn every frame regardless of whether a
-    // *new* detection has finished yet — inference is comparatively slow,
-    // so without this, each result would only be on-screen for the instant
-    // between finishing and the next clear, easy to miss entirely.
-    let cache = { face: [], objects: [], hands: [], pose: [] };
-
-    function drawFace() {
-      let faceCount = 0;
-      cache.face.forEach((d) => {
-        const { x: rawX, y, width, height } = d.detection.box;
-        const x = mirrorX(rawX, width);
-        faceCount++;
-        ctx.strokeStyle = '#22D3EE'; ctx.lineWidth = 2;
-        ctx.strokeRect(x, y, width, height);
-
-        const top = Object.entries(d.expressions).sort((a, b) => b[1] - a[1])[0];
-        const label = top[0] + ' ' + Math.round(top[1] * 100) + '%';
-        ctx.font = '14px monospace';
-        const textW = ctx.measureText(label).width;
-        ctx.fillStyle = 'rgba(3,8,17,.85)';
-        ctx.fillRect(x, Math.max(0, y - 20), textW + 10, 20);
-        ctx.fillStyle = '#22D3EE';
-        ctx.fillText(label, x + 5, Math.max(14, y - 5));
-
-        if (d.landmarks) {
-          ctx.fillStyle = '#E879F9';
-          d.landmarks.positions.forEach((p) => {
-            ctx.beginPath();
-            ctx.arc(mirrorX(p.x, 0), p.y, 1.6, 0, Math.PI * 2);
-            ctx.fill();
-          });
-        }
-      });
-      if (statEl) statEl.innerHTML = 'faces detected: <strong>' + faceCount + '</strong>';
+  async function switchCamera() {
+    if (switching || videoDevices.length < 2) return;
+    switching = true;
+    switchBtn.disabled = true;
+    const prevDeviceId = stream && stream.getVideoTracks()[0] && stream.getVideoTracks()[0].getSettings().deviceId;
+    // Cycle to the next distinct device rather than blindly toggling
+    // facingMode — this also covers laptops/desktops with 2+ webcams and no
+    // concept of "front/back" at all.
+    let nextIndex = (currentDeviceIndex + 1) % videoDevices.length;
+    const nextDevice = videoDevices[nextIndex];
+    try {
+      await openStream({ video: { deviceId: { exact: nextDevice.deviceId }, width: 480, height: 360 }, audio: false });
+      currentDeviceIndex = nextIndex;
+      await refreshDeviceList(); // labels can appear/change after a fresh grant
+    } catch (err) {
+      console.error('[webcam-ai] camera switch failed:', err);
+      announce('Couldn\u2019t switch cameras \u2014 your device may only expose one at a time.');
+      // Try to recover the previous camera so the demo doesn't die mid-switch.
+      if (prevDeviceId) {
+        try { await openStream({ video: { deviceId: { exact: prevDeviceId } }, audio: false }); }
+        catch (err2) { /* nothing more we can do */ }
+      }
+    } finally {
+      switching = false;
+      switchBtn.disabled = false;
     }
+  }
 
-    function drawObjects() {
-      cache.objects.forEach((p) => {
-        const [rawX, y, w, h] = p.bbox;
-        const x = mirrorX(rawX, w);
-        ctx.strokeStyle = '#F59E0B'; ctx.lineWidth = 2;
-        ctx.strokeRect(x, y, w, h);
-        const label = p.class + ' ' + Math.round(p.score * 100) + '%';
-        ctx.font = '13px monospace';
-        const textW = ctx.measureText(label).width;
-        ctx.fillStyle = 'rgba(3,8,17,.85)';
-        ctx.fillRect(x, Math.max(0, y - 18), textW + 8, 18);
-        ctx.fillStyle = '#F59E0B';
-        ctx.fillText(label, x + 4, Math.max(13, y - 5));
-      });
-    }
-    function drawHands() {
-      cache.hands.forEach((hand) => {
-        const pts = hand.keypoints.map((k) => ({ x: mirrorX(k.x, 0), y: k.y }));
-        ctx.strokeStyle = '#7DD3FC'; ctx.lineWidth = 2;
-        HAND_CONNECTIONS.forEach(([a, b]) => {
-          if (!pts[a] || !pts[b]) return;
-          ctx.beginPath(); ctx.moveTo(pts[a].x, pts[a].y); ctx.lineTo(pts[b].x, pts[b].y); ctx.stroke();
-        });
-        ctx.fillStyle = '#7DD3FC';
-        pts.forEach((p) => { ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2); ctx.fill(); });
-      });
-    }
-    function drawPose() {
-      cache.pose.forEach((pose) => {
-        const byName = {};
-        pose.keypoints.forEach((k) => { byName[k.name] = k; });
-        ctx.strokeStyle = '#818CF8'; ctx.lineWidth = 2;
-        POSE_CONNECTIONS.forEach(([a, b]) => {
-          const ka = byName[a], kb = byName[b];
-          if (!ka || !kb || ka.score < 0.3 || kb.score < 0.3) return;
+  function drawFace() {
+    let faceCount = 0;
+    cache.face.forEach((d) => {
+      const { x: rawX, y, width, height } = d.detection.box;
+      const x = mirrorX(rawX, width);
+      faceCount++;
+
+      // Iron-Man-style targeting reticle: corner brackets rather than a
+      // plain rectangle, plus a small crosshair — this is the visual proof
+      // the model is actually tracking, not just a static outline.
+      const bw = Math.min(18, width * 0.28), bh = Math.min(18, height * 0.28);
+      ctx.strokeStyle = '#22D3EE'; ctx.lineWidth = 2;
+      [[x, y, bw, bh, 1, 1], [x + width, y, -bw, bh, -1, 1], [x, y + height, bw, -bh, 1, -1], [x + width, y + height, -bw, -bh, -1, -1]]
+        .forEach(([cx, cy, dw, dh]) => {
           ctx.beginPath();
-          ctx.moveTo(mirrorX(ka.x, 0), ka.y);
-          ctx.lineTo(mirrorX(kb.x, 0), kb.y);
+          ctx.moveTo(cx, cy + dh); ctx.lineTo(cx, cy); ctx.lineTo(cx + dw, cy);
           ctx.stroke();
         });
-        ctx.fillStyle = '#818CF8';
-        pose.keypoints.forEach((k) => {
-          if (k.score < 0.3) return;
-          ctx.beginPath(); ctx.arc(mirrorX(k.x, 0), k.y, 3, 0, Math.PI * 2); ctx.fill();
+      const midX = x + width / 2, midY = y + height / 2;
+      ctx.beginPath();
+      ctx.moveTo(midX - 6, midY); ctx.lineTo(midX + 6, midY);
+      ctx.moveTo(midX, midY - 6); ctx.lineTo(midX, midY + 6);
+      ctx.stroke();
+
+      const top = Object.entries(d.expressions).sort((a, b) => b[1] - a[1])[0];
+      const label = 'TARGET \u00b7 ' + top[0].toUpperCase() + ' ' + Math.round(top[1] * 100) + '%';
+      ctx.font = '13px monospace';
+      const textW = ctx.measureText(label).width;
+      ctx.fillStyle = 'rgba(3,8,17,.85)';
+      ctx.fillRect(x, Math.max(0, y - 20), textW + 10, 20);
+      ctx.fillStyle = '#22D3EE';
+      ctx.fillText(label, x + 5, Math.max(14, y - 5));
+
+      if (d.landmarks) {
+        ctx.fillStyle = '#E879F9';
+        d.landmarks.positions.forEach((p) => {
+          ctx.beginPath();
+          ctx.arc(mirrorX(p.x, 0), p.y, 1.6, 0, Math.PI * 2);
+          ctx.fill();
         });
+      }
+    });
+    if (statEl) statEl.innerHTML = 'faces detected: <strong>' + faceCount + '</strong>';
+    if (hudLabel) hudLabel.textContent = faceCount > 0 ? 'TARGET ACQUIRED' : 'SCANNING';
+  }
+
+  function drawObjects() {
+    cache.objects.forEach((p) => {
+      const [rawX, y, w, h] = p.bbox;
+      const x = mirrorX(rawX, w);
+      ctx.strokeStyle = '#F59E0B'; ctx.lineWidth = 2;
+      ctx.strokeRect(x, y, w, h);
+      const label = p.class + ' ' + Math.round(p.score * 100) + '%';
+      ctx.font = '13px monospace';
+      const textW = ctx.measureText(label).width;
+      ctx.fillStyle = 'rgba(3,8,17,.85)';
+      ctx.fillRect(x, Math.max(0, y - 18), textW + 8, 18);
+      ctx.fillStyle = '#F59E0B';
+      ctx.fillText(label, x + 4, Math.max(13, y - 5));
+    });
+  }
+  function drawHands() {
+    cache.hands.forEach((hand) => {
+      const pts = hand.keypoints.map((k) => ({ x: mirrorX(k.x, 0), y: k.y }));
+      ctx.strokeStyle = '#7DD3FC'; ctx.lineWidth = 2;
+      HAND_CONNECTIONS.forEach(([a, b]) => {
+        if (!pts[a] || !pts[b]) return;
+        ctx.beginPath(); ctx.moveTo(pts[a].x, pts[a].y); ctx.lineTo(pts[b].x, pts[b].y); ctx.stroke();
       });
+      ctx.fillStyle = '#7DD3FC';
+      pts.forEach((p) => { ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2); ctx.fill(); });
+    });
+  }
+  function drawPose() {
+    cache.pose.forEach((pose) => {
+      const byName = {};
+      pose.keypoints.forEach((k) => { byName[k.name] = k; });
+      ctx.strokeStyle = '#818CF8'; ctx.lineWidth = 2;
+      POSE_CONNECTIONS.forEach(([a, b]) => {
+        const ka = byName[a], kb = byName[b];
+        if (!ka || !kb || ka.score < 0.3 || kb.score < 0.3) return;
+        ctx.beginPath();
+        ctx.moveTo(mirrorX(ka.x, 0), ka.y);
+        ctx.lineTo(mirrorX(kb.x, 0), kb.y);
+        ctx.stroke();
+      });
+      ctx.fillStyle = '#818CF8';
+      pose.keypoints.forEach((k) => {
+        if (k.score < 0.3) return;
+        ctx.beginPath(); ctx.arc(mirrorX(k.x, 0), k.y, 3, 0, Math.PI * 2); ctx.fill();
+      });
+    });
+  }
+
+  // Faint animated corner-frame + scanline drawn every single frame,
+  // independent of whether anything is detected. This is the "yes, the HUD
+  // is alive" tell: if this isn't moving, the loop has stalled; if it is,
+  // the camera + canvas pipeline is working even with zero faces in view.
+  function drawScanFrame(t) {
+    const w = overlay.width, h = overlay.height, m = 14;
+    ctx.strokeStyle = 'rgba(34,211,238,.55)'; ctx.lineWidth = 1.5;
+    [[m, m, 1, 1], [w - m, m, -1, 1], [m, h - m, 1, -1], [w - m, h - m, -1, -1]].forEach(([cx, cy, dx, dy]) => {
+      ctx.beginPath();
+      ctx.moveTo(cx, cy + dy * 20); ctx.lineTo(cx, cy); ctx.lineTo(cx + dx * 20, cy);
+      ctx.stroke();
+    });
+    const sy = (t / 14) % h;
+    const grad = ctx.createLinearGradient(0, sy - 18, 0, sy + 18);
+    grad.addColorStop(0, 'rgba(34,211,238,0)');
+    grad.addColorStop(0.5, 'rgba(34,211,238,.16)');
+    grad.addColorStop(1, 'rgba(34,211,238,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, sy - 18, w, 36);
+  }
+
+  async function detectLoop(t) {
+    if (!running) return;
+    if (video.readyState < 2) { rafId = requestAnimationFrame(detectLoop); return; }
+
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
+    drawScanFrame(t || 0);
+
+    const faceWanted = (toggles.face && toggles.face.checked) || (toggles.landmarks && toggles.landmarks.checked);
+    if (faceWanted && faceApiReady) {
+      try {
+        let query = faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 224 }));
+        if (toggles.landmarks && toggles.landmarks.checked && landmarksReady) query = query.withFaceLandmarks();
+        query = query.withFaceExpressions();
+        cache.face = await query;
+      } catch (err) { console.error('[webcam-ai] face detection failed:', err); }
+    } else {
+      cache.face = [];
+      if (hudLabel) hudLabel.textContent = 'SCANNING';
     }
 
-    async function detectLoop() {
-      if (!running) return;
-      if (video.readyState < 2) { rafId = requestAnimationFrame(detectLoop); return; }
-
-      ctx.clearRect(0, 0, overlay.width, overlay.height);
-      ctx.fillStyle = 'red';
-      ctx.fillRect(10, 10, 60, 60); // TEMP diagnostic marker — remove once confirmed fixed
-
-      const faceWanted = (toggles.face && toggles.face.checked) || (toggles.landmarks && toggles.landmarks.checked);
-      if (faceWanted && faceApiReady) {
-        try {
-          let query = faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 224 }));
-          if (toggles.landmarks && toggles.landmarks.checked && landmarksReady) query = query.withFaceLandmarks();
-          query = query.withFaceExpressions();
-          cache.face = await query;
-        } catch (err) { console.error('[webcam-ai] face detection failed:', err); }
-      } else {
-        cache.face = [];
-      }
-
-      if (toggles.objects && toggles.objects.checked && cocoModel) {
-        try {
-          cache.objects = await cocoModel.detect(video);
-        } catch (err) { console.error('[webcam-ai] objects detection failed:', err); }
-      } else {
-        cache.objects = [];
-      }
-
-      if (toggles.hands && toggles.hands.checked && handDetector) {
-        try {
-          cache.hands = await handDetector.estimateHands(video);
-          if (cache.hands.length) console.log('[webcam-ai] hands detected:', cache.hands.length, cache.hands[0]);
-        } catch (err) { console.error('[webcam-ai] hands detection failed:', err); }
-      } else {
-        cache.hands = [];
-      }
-
-      if (toggles.pose && toggles.pose.checked && poseDetector) {
-        try {
-          cache.pose = await poseDetector.estimatePoses(video);
-        } catch (err) { console.error('[webcam-ai] pose detection failed:', err); }
-      } else {
-        cache.pose = [];
-      }
-
-      drawFace();
-      drawObjects();
-      drawHands();
-      drawPose();
-
-      rafId = requestAnimationFrame(detectLoop);
+    if (toggles.objects && toggles.objects.checked && cocoModel) {
+      try {
+        cache.objects = await cocoModel.detect(video);
+      } catch (err) { console.error('[webcam-ai] objects detection failed:', err); }
+    } else {
+      cache.objects = [];
     }
-    detectLoop();
+
+    if (toggles.hands && toggles.hands.checked && handDetector) {
+      try {
+        cache.hands = await handDetector.estimateHands(video);
+      } catch (err) { console.error('[webcam-ai] hands detection failed:', err); }
+    } else {
+      cache.hands = [];
+    }
+
+    if (toggles.pose && toggles.pose.checked && poseDetector) {
+      try {
+        cache.pose = await poseDetector.estimatePoses(video);
+      } catch (err) { console.error('[webcam-ai] pose detection failed:', err); }
+    } else {
+      cache.pose = [];
+    }
+
+    drawFace();
+    drawObjects();
+    drawHands();
+    drawPose();
+
+    rafId = requestAnimationFrame(detectLoop);
   }
 
   function stop() {
@@ -5997,6 +6127,8 @@ panels.forEach(p => observer.observe(p));
     placeholder.hidden = false;
     stopBtn.hidden = true;
     startBtn.disabled = false;
+    if (switchBtn) switchBtn.hidden = true;
+    if (hudLabel) hudLabel.hidden = true;
     if (pillText) pillText.textContent = 'IDLE';
     if (statEl) statEl.innerHTML = 'faces detected: <strong>0</strong>';
     announce('');
@@ -6004,6 +6136,8 @@ panels.forEach(p => observer.observe(p));
 
   startBtn.addEventListener('click', start);
   stopBtn.addEventListener('click', stop);
+  if (switchBtn) switchBtn.addEventListener('click', switchCamera);
+  video.addEventListener('loadedmetadata', syncSize);
   document.addEventListener('visibilitychange', () => { if (document.hidden && running) stop(); });
 })();
 </script>

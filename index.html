@@ -5751,52 +5751,61 @@ panels.forEach(p => observer.observe(p));
 
     function mirrorX(x, w) { return overlay.width - x - w; }
 
+    // Detections are cached and drawn every frame regardless of whether a
+    // *new* detection has finished yet — inference is comparatively slow,
+    // so without this, each result would only be on-screen for the instant
+    // between finishing and the next clear, easy to miss entirely.
+    let cache = { face: [], objects: [], hands: [], pose: [] };
+
+    function drawFace() {
+      let faceCount = 0;
+      cache.face.forEach((d) => {
+        const { x: rawX, y, width, height } = d.detection.box;
+        const x = mirrorX(rawX, width);
+        faceCount++;
+        ctx.strokeStyle = '#22D3EE'; ctx.lineWidth = 2;
+        ctx.strokeRect(x, y, width, height);
+
+        const top = Object.entries(d.expressions).sort((a, b) => b[1] - a[1])[0];
+        const label = top[0] + ' ' + Math.round(top[1] * 100) + '%';
+        ctx.font = '14px monospace';
+        const textW = ctx.measureText(label).width;
+        ctx.fillStyle = 'rgba(3,8,17,.85)';
+        ctx.fillRect(x, Math.max(0, y - 20), textW + 10, 20);
+        ctx.fillStyle = '#22D3EE';
+        ctx.fillText(label, x + 5, Math.max(14, y - 5));
+
+        if (d.landmarks) {
+          ctx.fillStyle = '#E879F9';
+          d.landmarks.positions.forEach((p) => {
+            ctx.beginPath();
+            ctx.arc(mirrorX(p.x, 0), p.y, 1.6, 0, Math.PI * 2);
+            ctx.fill();
+          });
+        }
+      });
+      if (statEl) statEl.innerHTML = 'faces detected: <strong>' + faceCount + '</strong>';
+    }
+
     async function detectLoop() {
       if (!running) return;
       if (video.readyState < 2) { rafId = requestAnimationFrame(detectLoop); return; }
 
       ctx.clearRect(0, 0, overlay.width, overlay.height);
       ctx.fillStyle = 'red';
-      ctx.fillRect(10, 10, 60, 60); // TEMP diagnostic marker — should always be visible top-left if drawn at all
-      let faceCount = 0;
+      ctx.fillRect(10, 10, 60, 60); // TEMP diagnostic marker — remove once confirmed fixed
+      drawFace();
 
       if (toggles.face && toggles.face.checked && faceApiReady) {
         try {
           let query = faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 224 }));
           if (toggles.landmarks && toggles.landmarks.checked && landmarksReady) query = query.withFaceLandmarks();
           query = query.withFaceExpressions();
-          const detections = await query;
-          faceCount = detections.length;
-          detections.forEach((d) => {
-            const { x: rawX, y, width, height } = d.detection.box;
-            const x = mirrorX(rawX, width);
-            console.log('[webcam-ai] drawing box at', { x, y, width, height, canvasW: overlay.width, canvasH: overlay.height, cssW: overlay.clientWidth, cssH: overlay.clientHeight });
-            ctx.fillStyle = 'rgba(232,121,249,.35)';
-            ctx.fillRect(x, y, width, height);
-            ctx.strokeStyle = '#22D3EE'; ctx.lineWidth = 6;
-            ctx.strokeRect(x, y, width, height);
-
-            const top = Object.entries(d.expressions).sort((a, b) => b[1] - a[1])[0];
-            const label = top[0] + ' ' + Math.round(top[1] * 100) + '%';
-            ctx.font = '14px monospace';
-            const textW = ctx.measureText(label).width;
-            ctx.fillStyle = 'rgba(3,8,17,.85)';
-            ctx.fillRect(x, Math.max(0, y - 20), textW + 10, 20);
-            ctx.fillStyle = '#22D3EE';
-            ctx.fillText(label, x + 5, Math.max(14, y - 5));
-
-            if (d.landmarks) {
-              ctx.fillStyle = '#E879F9';
-              d.landmarks.positions.forEach((p) => {
-                ctx.beginPath();
-                ctx.arc(mirrorX(p.x, 0), p.y, 1.6, 0, Math.PI * 2);
-                ctx.fill();
-              });
-            }
-          });
+          cache.face = await query;
         } catch (err) { console.error('[webcam-ai] face detection failed:', err); }
+      } else {
+        cache.face = [];
       }
-      if (statEl) statEl.innerHTML = 'faces detected: <strong>' + faceCount + '</strong>';
 
       if (toggles.objects && toggles.objects.checked && cocoModel) {
         try {

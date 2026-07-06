@@ -6025,8 +6025,33 @@ panels.forEach(p => observer.observe(p));
     return cache.objects.length;
   }
   function drawHands() {
+    let handCount = 0;
     cache.hands.forEach((hand) => {
+      if (!hand.keypoints || !hand.keypoints.length) return;
+      handCount++;
       const pts = hand.keypoints.map((k) => ({ x: mirrorX(k.x, 0), y: k.y }));
+
+      // Targeting bracket + label around the whole hand, so hands speak the
+      // same "target acquired" HUD language as faces, objects and poses
+      // (previously hands drew only a bare skeleton and never registered in
+      // the HUD at all).
+      const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
+      const minX = Math.min(...xs), maxX = Math.max(...xs);
+      const minY = Math.min(...ys), maxY = Math.max(...ys);
+      const pad = 10;
+      drawBracket(minX - pad, minY - pad, (maxX - minX) + pad * 2, (maxY - minY) + pad * 2, '#7DD3FC');
+
+      const side = (hand.handedness || hand.label || 'HAND').toString().toUpperCase();
+      const label = 'HAND \u00b7 ' + side;
+      ctx.font = '13px monospace';
+      const textW = ctx.measureText(label).width;
+      const ly = Math.max(0, minY - pad - 18);
+      ctx.fillStyle = 'rgba(3,8,17,.85)';
+      ctx.fillRect(minX - pad, ly, textW + 10, 18);
+      ctx.fillStyle = '#7DD3FC';
+      ctx.fillText(label, minX - pad + 5, ly + 13);
+
+      // Skeleton
       ctx.strokeStyle = '#7DD3FC'; ctx.lineWidth = 2;
       HAND_CONNECTIONS.forEach(([a, b]) => {
         if (!pts[a] || !pts[b]) return;
@@ -6035,6 +6060,7 @@ panels.forEach(p => observer.observe(p));
       ctx.fillStyle = '#7DD3FC';
       pts.forEach((p) => { ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2); ctx.fill(); });
     });
+    return handCount;
   }
   function drawPose() {
     let poseCount = 0;
@@ -6139,13 +6165,13 @@ panels.forEach(p => observer.observe(p));
 
     const faceCount = drawFace();
     const objectCount = drawObjects();
-    drawHands();
+    const handCount = drawHands();
     const poseCount = drawPose();
 
     // A single "TARGET ACQUIRED" / "SCANNING" HUD state driven by whichever
-    // detectors are active — a face, an object, or a pose all count as a
-    // lock, not just faces.
-    const totalTargets = faceCount + objectCount + poseCount;
+    // detectors are active — a face, an object, a hand, or a pose all count
+    // as a lock, not just faces.
+    const totalTargets = faceCount + objectCount + handCount + poseCount;
     if (statEl) statEl.innerHTML = 'targets detected: <strong>' + totalTargets + '</strong>';
     if (hudLabel) hudLabel.textContent = totalTargets > 0 ? 'TARGET ACQUIRED' : 'SCANNING';
 

@@ -55,6 +55,7 @@ const guestbook = require('./routes/guestbook');
 const projects = require('./routes/projects');
 const download = require('./routes/download');
 const ask = require('./routes/ask');
+const translateRoute = require('./routes/translate');
 const activityRoute = require('./routes/activity');
 const statsRoute = require('./routes/stats');
 const streamRoute = require('./routes/stream');
@@ -90,6 +91,7 @@ const routes = [
   ['POST', '/api/projects/:id/clap', projects.clap],
 
   ['POST', '/api/ask', ask.ask],
+  ['POST', '/api/translate', translateRoute.translate],
 
   ['GET', '/api/vcard', download.vcard],
   ['GET', '/api/resume', download.resume],

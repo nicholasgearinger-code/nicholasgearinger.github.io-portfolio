@@ -1664,7 +1664,6 @@
     max-width: 780px; margin: 0 auto;
   }
   .algo-body { padding: 1.2rem; }
-  #algo-canvas { width: 100%; height: auto; display: block; border-radius: .5rem; background: #030811; }
   .algo-footer {
     display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .8rem;
     padding: .8rem 1.2rem 1.2rem;
@@ -1712,7 +1711,30 @@
     background: rgba(59,130,246,.08); border: 1px solid rgba(59,130,246,.3); color: var(--white);
     font-family: 'JetBrains Mono', monospace; font-size: .72rem; padding: .4rem .6rem; border-radius: .4rem; cursor: pointer;
   }
-  #boids-canvas { width: 100%; height: auto; display: block; border-radius: .5rem; background: #030811; }
+  #voice-canvas { width: 100%; height: auto; display: block; border-radius: .5rem; background: #030811; margin-bottom: 1rem; }
+  .voice-textarea {
+    width: 100%; resize: vertical; min-height: 4.5rem;
+    background: rgba(255,255,255,.03); border: 1px solid var(--card-border); border-radius: .6rem;
+    padding: .8rem 1rem; color: var(--white); font: inherit; font-size: .9rem; line-height: 1.5;
+  }
+  .voice-textarea:focus { outline: none; border-color: var(--cyan); }
+
+  .webcam-wrap {
+    position: relative; width: 100%; max-width: 480px; aspect-ratio: 4/3;
+    margin: 0 auto; border-radius: .6rem; overflow: hidden; background: #030811;
+  }
+  #webcam-video, #webcam-overlay {
+    position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+  }
+  #webcam-video { transform: scaleX(-1); } /* mirror, feels natural for a "look at yourself" demo */
+  #webcam-overlay { transform: scaleX(-1); pointer-events: none; }
+  .webcam-placeholder {
+    position: absolute; inset: 0; z-index: 2;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem;
+    background: rgba(3,8,17,.88); text-align: center; padding: 1.5rem;
+  }
+  .webcam-placeholder[hidden] { display: none; }
+  .webcam-note { font-size: .78rem; color: var(--muted); max-width: 320px; }
 
   /* ── LIVE SITE TELEMETRY ── */
   .telemetry-grid {
@@ -1869,8 +1891,8 @@
     <li><a href="#tools">Toolkit</a></li>
     <li><a href="#skills">Skills</a></li>
     <li><a href="#build">In Motion</a></li>
-    <li><a href="#algorithm">Deep Learning</a></li>
-    <li><a href="#boids">Simulation</a></li>
+    <li><a href="#voice">Voice AI</a></li>
+    <li><a href="#webcam-ai">Face AI</a></li>
     <li><a href="#classifier">Classify</a></li>
     <li><a href="#models">3D Work</a></li>
     <li><a href="#photography">Photography</a></li>
@@ -2291,11 +2313,12 @@
 
 
 <!-- ALGORITHM VISUALIZER -->
-<section id="algorithm" class="panel">
+<!-- AI VOICE VISUALIZER -->
+<section id="voice" class="panel">
   <div class="panel-inner">
-    <span class="section-label">Under the Hood</span>
-    <h2>How a deep<br>net makes a call</h2>
-    <p class="lead" style="margin:0 auto 2.5rem;">A feedforward pass through a small neural network, computed live in your browser — inputs propagating layer by layer through weighted connections and activations to an output.</p>
+    <span class="section-label">Try It</span>
+    <h2>Give your words<br>a voice</h2>
+    <p class="lead" style="margin:0 auto 2.2rem;">Type anything below — your browser's own speech engine reads it aloud, and the bars pulse in sync with each word as it's actually spoken.</p>
     <div class="algo-card">
       <div class="cc-titlebar">
         <div class="cc-dots">
@@ -2303,46 +2326,45 @@
           <span class="cc-dot" style="background:#FFBD2E"></span>
           <span class="cc-dot" style="background:#28C840"></span>
         </div>
-        <span class="cc-filename">neural_net.py</span>
-        <div class="cc-status-pill" id="algo-pill">
-          <span class="cc-pill-dot"></span><span id="algo-pill-text">INITIALIZING</span>
+        <span class="cc-filename">voice.js</span>
+        <div class="cc-status-pill" id="voice-pill">
+          <span class="cc-pill-dot"></span><span id="voice-pill-text">READY</span>
         </div>
       </div>
       <div class="algo-body">
-        <canvas id="algo-canvas" width="720" height="360" aria-label="Deep learning visualization: a multi-layer neural network with neurons and weighted connections lighting up during a forward pass"></canvas>
+        <canvas id="voice-canvas" width="720" height="160" aria-label="Live animated visualization reacting to synthesized speech, word by word"></canvas>
+        <textarea id="voice-text" class="voice-textarea" maxlength="400" rows="3" placeholder="Type something for your browser to say out loud…">The future of design is where creativity meets code.</textarea>
+        <div class="procgen-controls" style="margin-top:1rem;">
+          <div class="procgen-field">
+            <label for="voice-select">Voice</label>
+            <select id="voice-select"></select>
+          </div>
+          <div class="procgen-field">
+            <label>Pitch <span class="val" id="voice-pitch-val">1.0</span></label>
+            <input type="range" id="voice-pitch" min="0.5" max="2" step="0.1" value="1">
+          </div>
+          <div class="procgen-field">
+            <label>Rate <span class="val" id="voice-rate-val">1.0</span></label>
+            <input type="range" id="voice-rate" min="0.5" max="2" step="0.1" value="1">
+          </div>
+        </div>
       </div>
       <div class="algo-footer">
-        <div class="algo-legend">
-          <span><span class="algo-swatch" style="background:var(--violet)"></span>active neuron</span>
-          <span><span class="algo-swatch" style="background:rgba(125,211,252,.7)"></span>weighted connection</span>
-          <span><span class="algo-swatch" style="background:var(--amber)"></span>output</span>
-        </div>
-        <div class="algo-stat" id="algo-stat">layers built: <strong>0</strong></div>
-        <button type="button" class="algo-run-btn" id="algo-run">↻ Run again</button>
+        <div class="algo-stat" id="voice-stat">words spoken: <strong>0</strong></div>
+        <button type="button" class="algo-run-btn" id="voice-speak-btn">▶ Speak</button>
       </div>
     </div>
-    <p class="algo-hint">random weights → weighted sum + bias → activation, layer by layer → output (no training involved — it's the mechanism, not a trained model)</p>
-    <div class="explain-row">
-      <button type="button" class="explain-btn" id="explain-attention"
-        data-question="In 3 short sentences, explain what a feedforward pass through a deep neural network is doing and why it matters, for a visitor who isn't technical."
-        data-fallback="A neural network is made of layers of simple units called neurons, each connected to the next layer by a weight that says how strongly they influence one another. To make a prediction, data flows forward through the network: each neuron adds up its weighted inputs, applies a small nonlinear function, and passes the result along. Stack enough of these layers together and the network can learn to represent very complex patterns, which is the basic idea behind most of today's deep learning.">
-        <span class="explain-spin">↻</span>✦ Explain this
-      </button>
-    </div>
-    <div class="explain-body" id="explain-attention-body">
-      <span class="explain-tag">✦ AI-generated explanation</span>
-      <p id="explain-attention-text"></p>
-    </div>
+    <p class="algo-hint" id="voice-hint">Runs entirely on your browser's built-in speech engine (Web Speech API) — nothing is recorded, uploaded, or stored. The visualization is driven by real word-timing events from the speech engine itself, not a simulated waveform.</p>
   </div>
 </section>
 
 
-<!-- BOIDS FLOCKING SIMULATION -->
-<section id="boids" class="panel">
+<!-- LIVE WEBCAM AI: FACE & EXPRESSION DETECTION -->
+<section id="webcam-ai" class="panel">
   <div class="panel-inner">
-    <span class="section-label">Simulation</span>
-    <h2>Flocking from<br>three simple rules</h2>
-    <p class="lead" style="margin:0 auto 2.2rem;">Each boid only reacts to its nearest neighbors — separation, alignment, and cohesion are the only rules, yet the group moves like a living flock.</p>
+    <span class="section-label">Try It</span>
+    <h2>Can a model read<br>your expression?</h2>
+    <p class="lead" style="margin:0 auto 2.2rem;">A real face-detection and expression-recognition model, running live in your browser. Nothing is uploaded — the model downloads once, then runs entirely on your device.</p>
     <div class="algo-card">
       <div class="cc-titlebar">
         <div class="cc-dots">
@@ -2350,49 +2372,27 @@
           <span class="cc-dot" style="background:#FFBD2E"></span>
           <span class="cc-dot" style="background:#28C840"></span>
         </div>
-        <span class="cc-filename">boids.js</span>
-        <div class="cc-status-pill" id="boids-pill">
-          <span class="cc-pill-dot"></span><span id="boids-pill-text">RUNNING</span>
-        </div>
-      </div>
-      <div class="procgen-controls">
-        <div class="procgen-field">
-          <label>Boids <span class="val" id="boids-count-val">80</span></label>
-          <input type="range" id="boids-count" min="10" max="200" step="10" value="80">
-        </div>
-        <div class="procgen-field">
-          <label>Cohesion <span class="val" id="boids-cohesion-val">1.0</span></label>
-          <input type="range" id="boids-cohesion" min="0" max="2" step="0.1" value="1.0">
-        </div>
-        <div class="procgen-field">
-          <label>Speed <span class="val" id="boids-speed-val">2.5</span></label>
-          <input type="range" id="boids-speed" min="1" max="6" step="0.1" value="2.5">
+        <span class="cc-filename">face_detect.js</span>
+        <div class="cc-status-pill" id="webcam-pill">
+          <span class="cc-pill-dot"></span><span id="webcam-pill-text">IDLE</span>
         </div>
       </div>
       <div class="algo-body">
-        <canvas id="boids-canvas" width="720" height="360" aria-label="Animated flocking simulation of triangular boids"></canvas>
+        <div class="webcam-wrap" id="webcam-wrap">
+          <video id="webcam-video" autoplay muted playsinline></video>
+          <canvas id="webcam-overlay"></canvas>
+          <div class="webcam-placeholder" id="webcam-placeholder">
+            <button type="button" class="btn-primary" id="webcam-start">▶ Start Camera</button>
+            <p class="webcam-note">Requires camera access. Nothing is recorded or sent anywhere — detection runs 100% locally in your browser.</p>
+          </div>
+        </div>
       </div>
       <div class="algo-footer">
-        <div class="algo-legend" id="boids-legend">
-          <span><span class="algo-swatch" style="background:#22D3EE"></span>boid</span>
-          <span><span class="algo-swatch" style="background:#E879F9"></span>nearby neighbor</span>
-        </div>
-        <div class="algo-stat" id="boids-stat">avg speed: <strong>—</strong></div>
-        <button type="button" class="algo-run-btn" id="boids-run">↻ Scatter flock</button>
+        <div class="algo-stat" id="webcam-stat">faces detected: <strong>0</strong></div>
+        <button type="button" class="algo-run-btn" id="webcam-stop" hidden>■ Stop Camera</button>
       </div>
     </div>
-    <p class="algo-hint">Craig Reynolds' 1986 boids model — separation, alignment, cohesion — no leader, no script, just three local rules re-evaluated every frame</p>
-    <div class="explain-row">
-      <button type="button" class="explain-btn" id="explain-boids"
-        data-question="In 2-3 short sentences, explain how the three boids rules (separation, alignment, cohesion) create realistic flocking behavior with no central controller."
-        data-fallback="Boids simulate flocking with three simple local rules each boid follows based only on its nearest neighbors: separation steers it away from crowding too close, alignment matches its heading to the average direction of nearby boids, and cohesion steers it toward the group's average position. No boid knows about the whole flock or follows a leader — the lifelike group movement emerges purely from these three local rules running independently for every individual, every frame.">
-        <span class="explain-spin">↻</span>✦ Explain this
-      </button>
-    </div>
-    <div class="explain-body" id="explain-boids-body">
-      <span class="explain-tag">✦ AI-generated explanation</span>
-      <p id="explain-boids-text"></p>
-    </div>
+    <p class="algo-hint" id="webcam-hint">Tiny Face Detector + expression classifier (face-api.js, MIT licensed, ~500KB of model weights) — loaded from a CDN once, then inference runs fully client-side via TensorFlow.js</p>
   </div>
 </section>
 
@@ -5215,297 +5215,258 @@ panels.forEach(p => observer.observe(p));
 })();
 </script>
 <script>
-/* -- DEEP LEARNING VISUALIZER: a real (simplified) feedforward pass through
-      a small multi-layer neural network — random weights and biases, a
-      weighted sum at each neuron, a ReLU/sigmoid-style activation — animated
-      layer by layer. No trained model or network call involved; this shows
-      the mechanism, not a prediction. Re-runs on demand and once when first
-      scrolled into view. Respects prefers-reduced-motion by skipping
-      straight to the final activated network. -- */
-(function deepLearningViz() {
-  const canvas = document.getElementById('algo-canvas');
-  const runBtn = document.getElementById('algo-run');
-  const statEl = document.getElementById('algo-stat');
-  const pillText = document.getElementById('algo-pill-text');
-  if (!canvas || !runBtn) return;
-  const ctx = canvas.getContext('2d');
-  const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+/* -- AI VOICE VISUALIZER: uses the browser's native Web Speech API
+      (SpeechSynthesis) to read typed text aloud. Note on honesty: browsers
+      do not expose synthesized speech audio to the Web Audio API for real
+      waveform analysis, so this visualization is driven by the speech
+      engine's own real word-boundary timing events (onboundary) rather than
+      a raw audio FFT — genuinely reactive to the actual words being spoken
+      as they're spoken, just not a literal waveform. -- */
+(function voiceVisualizer() {
+  const canvas = document.getElementById('voice-canvas');
+  const textEl = document.getElementById('voice-text');
+  const speakBtn = document.getElementById('voice-speak-btn');
+  const voiceSelect = document.getElementById('voice-select');
+  const pitchInput = document.getElementById('voice-pitch');
+  const rateInput = document.getElementById('voice-rate');
+  const pitchVal = document.getElementById('voice-pitch-val');
+  const rateVal = document.getElementById('voice-rate-val');
+  const statEl = document.getElementById('voice-stat');
+  const pillText = document.getElementById('voice-pill-text');
+  const hintEl = document.getElementById('voice-hint');
+  if (!canvas || !speakBtn) return;
 
-  // Layer sizes: input, three hidden layers, output
-  const LAYER_SIZES = [6, 9, 9, 7, 3];
-  const PAD_X = 60, PAD_Y = 30;
-  const NODE_R = Math.max(6, Math.min(13, 130 / Math.max(...LAYER_SIZES)));
-  let layers, weights, biases, activations, maxOut, timer = null;
-
-  function rand(a, b) { return a + Math.random() * (b - a); }
-  function sigmoid(x) { return 1 / (1 + Math.exp(-x)); }
-  function relu(x) { return Math.max(0, x); }
-
-  function layerX(l) {
-    const usable = canvas.width - PAD_X * 2;
-    return PAD_X + (usable * l) / (LAYER_SIZES.length - 1);
-  }
-  function nodeY(l, i) {
-    const n = LAYER_SIZES[l];
-    const usable = canvas.height - PAD_Y * 2;
-    return PAD_Y + (usable * (i + 0.5)) / n;
+  if (!('speechSynthesis' in window)) {
+    if (pillText) pillText.textContent = 'UNSUPPORTED';
+    speakBtn.disabled = true;
+    if (hintEl) hintEl.textContent = 'Your browser doesn\u2019t support the Web Speech API, so this demo can\u2019t run here \u2014 try Chrome, Edge, or Safari.';
+    return;
   }
 
-  function buildNetwork() {
-    layers = LAYER_SIZES;
-    weights = []; biases = []; activations = [];
-
-    // input layer activations: random "pixel"/feature values 0..1
-    activations.push(Array.from({ length: layers[0] }, () => rand(0.05, 1)));
-
-    for (let l = 1; l < layers.length; l++) {
-      const wMat = Array.from({ length: layers[l] }, () =>
-        Array.from({ length: layers[l - 1] }, () => rand(-1, 1)));
-      const bVec = Array.from({ length: layers[l] }, () => rand(-0.4, 0.4));
-      weights.push(wMat);
-      biases.push(bVec);
-
-      const isOutput = l === layers.length - 1;
-      const prevAct = activations[l - 1];
-      const act = wMat.map((row, i) => {
-        const sum = row.reduce((s, w, j) => s + w * prevAct[j], 0) + bVec[i];
-        return isOutput ? sigmoid(sum) : relu(sum);
-      });
-      activations.push(act);
-    }
-
-    const out = activations[activations.length - 1];
-    maxOut = out.reduce((best, v, i) => (v > best.v ? { i, v } : best), { i: 0, v: -Infinity });
-  }
-
-  function drawConnections(uptoLayer, glowLayer) {
-    for (let l = 1; l < layers.length; l++) {
-      if (l > uptoLayer) break;
-      const isGlow = l === glowLayer;
-      for (let i = 0; i < layers[l]; i++) {
-        for (let j = 0; j < layers[l - 1]; j++) {
-          const w = weights[l - 1][i][j];
-          const strength = Math.min(Math.abs(w), 1);
-          const alpha = isGlow ? 0.15 + strength * 0.7 : 0.06 + strength * 0.18;
-          ctx.strokeStyle = w >= 0
-            ? 'rgba(125,211,252,' + alpha.toFixed(3) + ')'
-            : 'rgba(129,140,248,' + alpha.toFixed(3) + ')';
-          ctx.lineWidth = isGlow ? Math.max(0.6, strength * 2.6) : 0.7;
-          ctx.beginPath();
-          ctx.moveTo(layerX(l - 1), nodeY(l - 1, j));
-          ctx.lineTo(layerX(l), nodeY(l, i));
-          ctx.stroke();
-        }
-      }
-    }
-  }
-
-  function drawNodes(activeLayer) {
-    for (let l = 0; l < layers.length; l++) {
-      const isOutput = l === layers.length - 1;
-      const isActive = l <= activeLayer;
-      for (let i = 0; i < layers[l]; i++) {
-        const x = layerX(l), y = nodeY(l, i);
-        const a = activations[l][i];
-        const glow = isActive ? Math.min(0.25 + a * 0.75, 1) : 0.18;
-
-        if (isOutput && isActive && i === maxOut.i) {
-          ctx.fillStyle = 'rgba(245,158,11,' + glow.toFixed(3) + ')';
-          ctx.strokeStyle = '#F59E0B';
-        } else if (isActive) {
-          ctx.fillStyle = 'rgba(129,140,248,' + glow.toFixed(3) + ')';
-          ctx.strokeStyle = '#818CF8';
-        } else {
-          ctx.fillStyle = 'rgba(255,255,255,.05)';
-          ctx.strokeStyle = 'rgba(255,255,255,.16)';
-        }
-        ctx.lineWidth = 1.4;
-        ctx.beginPath();
-        ctx.arc(x, y, NODE_R, 0, Math.PI * 2);
-        ctx.fill(); ctx.stroke();
-      }
-    }
-
-    ctx.font = '10px "JetBrains Mono", monospace';
-    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-    ctx.fillStyle = '#64748B';
-    const labels = layers.map((_, l) => l === 0 ? 'input' : l === layers.length - 1 ? 'output' : 'hidden');
-    for (let l = 0; l < layers.length; l++) {
-      ctx.fillText(labels[l], layerX(l), canvas.height - 16);
-    }
-  }
-
-  function draw(activeLayer, glowLayer) {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    drawConnections(activeLayer, glowLayer);
-    drawNodes(activeLayer);
-  }
-
-  function finish() {
-    draw(layers.length - 1, -1);
-    if (statEl) {
-      const pct = (maxOut.v * 100).toFixed(0);
-      statEl.innerHTML = 'output: <strong>neuron ' + (maxOut.i + 1) + '</strong> (' + pct + '%)';
-    }
-    if (pillText) pillText.textContent = 'FORWARD PASS COMPLETE';
-  }
-
-  function run() {
-    if (timer) { clearInterval(timer); timer = null; }
-    buildNetwork();
-    if (pillText) pillText.textContent = 'INITIALIZING';
-    if (statEl) statEl.innerHTML = 'layers built: <strong>' + layers.length + '</strong>';
-    draw(0, -1);
-
-    if (reduceMotion) { finish(); return; }
-
-    let l = 1;
-    if (pillText) pillText.textContent = 'PROPAGATING';
-    timer = setInterval(() => {
-      if (l < layers.length) {
-        draw(l, l);
-        if (statEl) statEl.innerHTML = 'propagating to layer <strong>' + (l + 1) + ' / ' + layers.length + '</strong>';
-        l++;
-      } else {
-        clearInterval(timer);
-        timer = null;
-        finish();
-      }
-    }, 550);
-  }
-
-  runBtn.addEventListener('click', run);
-
-  const io = new IntersectionObserver((entries) => {
-    if (entries[0].isIntersecting) { run(); io.disconnect(); }
-  }, { threshold: 0.4 });
-  io.observe(canvas);
-})();
-</script>
-<script>
-/* -- BOIDS FLOCKING SIMULATION: Craig Reynolds' classic model — separation,
-      alignment, cohesion — running live every frame. Pauses when scrolled
-      out of view, respects prefers-reduced-motion. -- */
-(function boidsSimulation() {
-  const canvas = document.getElementById('boids-canvas');
-  const runBtn = document.getElementById('boids-run');
-  const countInput = document.getElementById('boids-count');
-  const cohesionInput = document.getElementById('boids-cohesion');
-  const speedInput = document.getElementById('boids-speed');
-  const countVal = document.getElementById('boids-count-val');
-  const cohesionVal = document.getElementById('boids-cohesion-val');
-  const speedVal = document.getElementById('boids-speed-val');
-  const statEl = document.getElementById('boids-stat');
-  const pillText = document.getElementById('boids-pill-text');
-  if (!canvas || !runBtn) return;
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
+  const BAR_COUNT = 48;
+  const bars = new Array(BAR_COUNT).fill(0);
+  let wordCount = 0;
+  let speaking = false;
 
-  const PERCEPTION = 46;      // how far a boid "sees" its neighbors
-  const MAX_FORCE = 0.09;
-  let boids = [];
-
-  function rand(min, max) { return min + Math.random() * (max - min); }
-
-  function makeBoid() {
-    const angle = rand(0, Math.PI * 2);
-    return {
-      x: rand(0, W), y: rand(0, H),
-      vx: Math.cos(angle) * 1.5, vy: Math.sin(angle) * 1.5,
-    };
+  function populateVoices() {
+    const voices = speechSynthesis.getVoices();
+    if (!voices.length) return;
+    voiceSelect.innerHTML = voices.map((v, i) => '<option value="' + i + '">' + v.name + ' (' + v.lang + ')</option>').join('');
+    const enIdx = voices.findIndex((v) => v.lang.startsWith('en'));
+    if (enIdx >= 0) voiceSelect.value = enIdx;
   }
+  populateVoices();
+  if ('onvoiceschanged' in speechSynthesis) speechSynthesis.onvoiceschanged = populateVoices;
 
-  function rebuild() {
-    const n = parseInt(countInput.value, 10);
-    boids = Array.from({ length: n }, makeBoid);
-  }
+  pitchInput.addEventListener('input', () => { pitchVal.textContent = parseFloat(pitchInput.value).toFixed(1); });
+  rateInput.addEventListener('input', () => { rateVal.textContent = parseFloat(rateInput.value).toFixed(1); });
 
-  function step() {
-    const cohesionW = parseFloat(cohesionInput.value);
-    const maxSpeed = parseFloat(speedInput.value);
-
-    for (const b of boids) {
-      let sepX = 0, sepY = 0, aliX = 0, aliY = 0, cohX = 0, cohY = 0, count = 0;
-      for (const o of boids) {
-        if (o === b) continue;
-        const dx = b.x - o.x, dy = b.y - o.y;
-        const d2 = dx * dx + dy * dy;
-        if (d2 > PERCEPTION * PERCEPTION || d2 === 0) continue;
-        count++;
-        const d = Math.sqrt(d2);
-        sepX += dx / d; sepY += dy / d;
-        aliX += o.vx; aliY += o.vy;
-        cohX += o.x; cohY += o.y;
-      }
-      if (count > 0) {
-        aliX /= count; aliY /= count;
-        cohX = (cohX / count) - b.x; cohY = (cohY / count) - b.y;
-
-        b.vx += sepX * 0.05 + aliX * 0.02 + cohX * 0.0012 * cohesionW;
-        b.vy += sepY * 0.05 + aliY * 0.02 + cohY * 0.0012 * cohesionW;
-      }
-      // Clamp steering force implicitly via speed clamp below
-      const speed = Math.hypot(b.vx, b.vy) || 0.0001;
-      const clamped = Math.min(speed, maxSpeed);
-      b.vx = (b.vx / speed) * clamped;
-      b.vy = (b.vy / speed) * clamped;
-      if (speed < 0.6) { b.vx += rand(-MAX_FORCE, MAX_FORCE); b.vy += rand(-MAX_FORCE, MAX_FORCE); }
-
-      b.x += b.vx; b.y += b.vy;
-      if (b.x < -10) b.x = W + 10; if (b.x > W + 10) b.x = -10;
-      if (b.y < -10) b.y = H + 10; if (b.y > H + 10) b.y = -10;
+  function pulseAt(fraction, strength) {
+    const center = Math.floor(fraction * BAR_COUNT);
+    for (let i = -2; i <= 2; i++) {
+      const idx = center + i;
+      if (idx < 0 || idx >= BAR_COUNT) continue;
+      const falloff = 1 - Math.abs(i) / 3;
+      bars[idx] = Math.min(1, bars[idx] + strength * falloff);
     }
   }
 
   function draw() {
-    ctx.fillStyle = '#030811';
-    ctx.fillRect(0, 0, W, H);
-    let totalSpeed = 0;
-    for (const b of boids) {
-      const angle = Math.atan2(b.vy, b.vx);
-      totalSpeed += Math.hypot(b.vx, b.vy);
-      ctx.save();
-      ctx.translate(b.x, b.y);
-      ctx.rotate(angle);
-      ctx.beginPath();
-      ctx.moveTo(7, 0);
-      ctx.lineTo(-5, 4);
-      ctx.lineTo(-5, -4);
-      ctx.closePath();
-      ctx.fillStyle = 'rgba(34,211,238,.85)';
-      ctx.shadowColor = 'rgba(34,211,238,.6)';
-      ctx.shadowBlur = 5;
-      ctx.fill();
-      ctx.restore();
-    }
-    if (statEl && boids.length) {
-      statEl.innerHTML = 'avg speed: <strong>' + (totalSpeed / boids.length).toFixed(2) + '</strong>';
+    ctx.clearRect(0, 0, W, H);
+    const barW = W / BAR_COUNT;
+    for (let i = 0; i < BAR_COUNT; i++) {
+      const v = bars[i];
+      const h = 6 + v * (H - 16);
+      const x = i * barW, y = (H - h) / 2;
+      const grad = ctx.createLinearGradient(0, y, 0, y + h);
+      grad.addColorStop(0, 'rgba(34,211,238,.95)');
+      grad.addColorStop(1, 'rgba(232,121,249,.55)');
+      ctx.fillStyle = v > 0.03 ? grad : 'rgba(255,255,255,.05)';
+      const rw = Math.max(2, barW - 3);
+      if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(x + 1.5, y, rw, h, 3); ctx.fill(); }
+      else { ctx.fillRect(x + 1.5, y, rw, h); }
+      bars[i] *= 0.90;
     }
   }
+  (function loop() { requestAnimationFrame(loop); draw(); })();
 
-  const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const isVisible = window.__onScreen ? window.__onScreen(canvas, 80) : () => true;
-  let raf = null;
+  speakBtn.addEventListener('click', () => {
+    if (speaking) {
+      speechSynthesis.cancel();
+      speaking = false;
+      if (pillText) pillText.textContent = 'READY';
+      speakBtn.textContent = '\u25B6 Speak';
+      return;
+    }
+    const text = (textEl.value || '').trim();
+    if (!text) { textEl.focus(); return; }
+    speechSynthesis.cancel();
 
-  function loop() {
-    raf = requestAnimationFrame(loop);
-    if (!isVisible() || !window.__tabVisible) return;
-    step();
-    draw();
+    const utter = new SpeechSynthesisUtterance(text);
+    const voices = speechSynthesis.getVoices();
+    const chosen = voices[parseInt(voiceSelect.value, 10)];
+    if (chosen) utter.voice = chosen;
+    utter.pitch = parseFloat(pitchInput.value);
+    utter.rate = parseFloat(rateInput.value);
+
+    wordCount = 0;
+    speaking = true;
+    if (pillText) pillText.textContent = 'SPEAKING';
+    speakBtn.textContent = '\u25A0 Stop';
+
+    utter.onboundary = (event) => {
+      if (event.name === 'word' || event.name === undefined) {
+        wordCount++;
+        if (statEl) statEl.innerHTML = 'words spoken: <strong>' + wordCount + '</strong>';
+        const frac = Math.min(1, event.charIndex / Math.max(1, text.length));
+        pulseAt(frac, 0.85 + Math.random() * 0.15);
+      }
+    };
+    utter.onend = () => {
+      speaking = false;
+      if (pillText) pillText.textContent = 'READY';
+      speakBtn.textContent = '\u25B6 Speak';
+    };
+    utter.onerror = () => {
+      speaking = false;
+      if (pillText) pillText.textContent = 'ERROR';
+      speakBtn.textContent = '\u25B6 Speak';
+    };
+    speechSynthesis.speak(utter);
+  });
+})();
+</script>
+<script>
+/* -- LIVE WEBCAM AI: real face detection + expression recognition, running
+      entirely client-side via face-api.js (TensorFlow.js under the hood).
+      Lazy-loaded only when the visitor clicks "Start Camera" — unlike the
+      image classifier below, this needs a camera permission prompt, which
+      is a bigger ask, so nothing downloads until they opt in. -- */
+(function webcamAI() {
+  const video = document.getElementById('webcam-video');
+  const overlay = document.getElementById('webcam-overlay');
+  const placeholder = document.getElementById('webcam-placeholder');
+  const startBtn = document.getElementById('webcam-start');
+  const stopBtn = document.getElementById('webcam-stop');
+  const statEl = document.getElementById('webcam-stat');
+  const pillText = document.getElementById('webcam-pill-text');
+  const hintEl = document.getElementById('webcam-hint');
+  if (!video || !startBtn) return;
+
+  const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
+  const LIB_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js';
+
+  let stream = null, running = false, modelsReady = false, rafId = null;
+
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    startBtn.disabled = true;
+    if (pillText) pillText.textContent = 'UNSUPPORTED';
+    if (hintEl) hintEl.textContent = 'Your browser doesn\u2019t support camera access, so this demo can\u2019t run here.';
+    return;
   }
 
-  countInput.addEventListener('input', () => { countVal.textContent = countInput.value; rebuild(); });
-  cohesionInput.addEventListener('input', () => { cohesionVal.textContent = parseFloat(cohesionInput.value).toFixed(1); });
-  speedInput.addEventListener('input', () => { speedVal.textContent = parseFloat(speedInput.value).toFixed(1); });
-  runBtn.addEventListener('click', () => { rebuild(); if (pillText) pillText.textContent = 'SCATTERED'; setTimeout(() => { if (pillText) pillText.textContent = 'RUNNING'; }, 900); });
-
-  rebuild();
-  if (reduceMotion) {
-    draw(); // render a single static frame, no continuous animation
-    if (pillText) pillText.textContent = 'STATIC';
-  } else {
-    loop();
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = resolve;
+      s.onerror = () => reject(new Error('failed to load ' + src));
+      document.head.appendChild(s);
+    });
   }
+
+  async function ensureModels() {
+    if (modelsReady) return;
+    if (pillText) pillText.textContent = 'LOADING MODEL\u2026';
+    if (typeof faceapi === 'undefined') await loadScript(LIB_URL);
+    await Promise.all([
+      faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+      faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL),
+    ]);
+    modelsReady = true;
+  }
+
+  async function start() {
+    startBtn.disabled = true;
+    try {
+      await ensureModels();
+    } catch (err) {
+      if (pillText) pillText.textContent = 'MODEL FAILED';
+      if (hintEl) hintEl.textContent = 'Couldn\u2019t load the AI model just now \u2014 check your connection and try again.';
+      startBtn.disabled = false;
+      return;
+    }
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { width: 480, height: 360 }, audio: false });
+    } catch (err) {
+      if (pillText) pillText.textContent = 'CAMERA DENIED';
+      if (hintEl) hintEl.textContent = 'Camera access was denied or unavailable \u2014 this demo needs it to work.';
+      startBtn.disabled = false;
+      return;
+    }
+
+    video.srcObject = stream;
+    await video.play();
+    placeholder.hidden = true;
+    stopBtn.hidden = false;
+    running = true;
+    if (pillText) pillText.textContent = 'DETECTING';
+
+    const ctx = overlay.getContext('2d');
+    function syncSize() { overlay.width = video.videoWidth || 480; overlay.height = video.videoHeight || 360; }
+    video.addEventListener('loadedmetadata', syncSize, { once: true });
+    syncSize();
+
+    async function detectLoop() {
+      if (!running) return;
+      rafId = requestAnimationFrame(detectLoop);
+      if (video.readyState < 2) return;
+      let detections = [];
+      try {
+        detections = await faceapi
+          .detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 224 }))
+          .withFaceExpressions();
+      } catch (_) { return; }
+
+      ctx.clearRect(0, 0, overlay.width, overlay.height);
+      if (statEl) statEl.innerHTML = 'faces detected: <strong>' + detections.length + '</strong>';
+
+      detections.forEach((d) => {
+        const { x, y, width, height } = d.detection.box;
+        ctx.strokeStyle = '#22D3EE';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x, y, width, height);
+
+        const top = Object.entries(d.expressions).sort((a, b) => b[1] - a[1])[0];
+        const label = top[0] + ' ' + Math.round(top[1] * 100) + '%';
+        ctx.font = '14px monospace';
+        const textW = ctx.measureText(label).width;
+        ctx.fillStyle = 'rgba(3,8,17,.85)';
+        ctx.fillRect(x, Math.max(0, y - 20), textW + 10, 20);
+        ctx.fillStyle = '#22D3EE';
+        ctx.fillText(label, x + 5, Math.max(14, y - 5));
+      });
+    }
+    detectLoop();
+  }
+
+  function stop() {
+    running = false;
+    if (rafId) cancelAnimationFrame(rafId);
+    if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
+    video.srcObject = null;
+    placeholder.hidden = false;
+    stopBtn.hidden = true;
+    startBtn.disabled = false;
+    if (pillText) pillText.textContent = 'IDLE';
+    if (statEl) statEl.innerHTML = 'faces detected: <strong>0</strong>';
+  }
+
+  startBtn.addEventListener('click', start);
+  stopBtn.addEventListener('click', stop);
+  document.addEventListener('visibilitychange', () => { if (document.hidden && running) stop(); });
 })();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
@@ -5678,8 +5639,8 @@ panels.forEach(p => observer.observe(p));
     { icon: '◈', label: 'Go to About / Résumé', action: () => scrollToId('resume') },
     { icon: '◈', label: 'Go to Skills', action: () => scrollToId('skills') },
     { icon: '◈', label: 'Go to In Motion', action: () => scrollToId('build') },
-    { icon: '◈', label: 'Go to Deep Learning Visualizer', action: () => scrollToId('algorithm') },
-    { icon: '◈', label: 'Go to Flocking Simulation', action: () => scrollToId('boids') },
+    { icon: '◈', label: 'Go to Voice AI', action: () => scrollToId('voice') },
+    { icon: '◈', label: 'Go to Face AI', action: () => scrollToId('webcam-ai') },
     { icon: '◈', label: 'Go to Image Classifier', action: () => scrollToId('classifier') },
     { icon: '◈', label: 'Go to 3D Work', action: () => scrollToId('models') },
     { icon: '◈', label: 'Go to Photography', action: () => scrollToId('photography') },

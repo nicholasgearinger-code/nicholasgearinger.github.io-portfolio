@@ -5769,6 +5769,7 @@ panels.forEach(p => observer.observe(p));
           detections.forEach((d) => {
             const { x: rawX, y, width, height } = d.detection.box;
             const x = mirrorX(rawX, width);
+            console.log('[webcam-ai debug]', { rawX, x, y, width, height, overlayW: overlay.width, overlayH: overlay.height, videoW: video.videoWidth, videoH: video.videoHeight });
             ctx.strokeStyle = '#22D3EE'; ctx.lineWidth = 2;
             ctx.strokeRect(x, y, width, height);
 

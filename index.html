@@ -1727,7 +1727,7 @@
     position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
   }
   #webcam-video { transform: scaleX(-1); } /* mirror, feels natural for a "look at yourself" demo */
-  #webcam-overlay { transform: scaleX(-1); pointer-events: none; }
+  #webcam-overlay { pointer-events: none; }
   .webcam-placeholder {
     position: absolute; inset: 0; z-index: 2;
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem;
@@ -2336,7 +2336,7 @@
         <textarea id="voice-text" class="voice-textarea" maxlength="400" rows="3" placeholder="Type something for your browser to say out loud…">The future of design is where creativity meets code.</textarea>
         <div class="procgen-controls" style="margin-top:1rem;">
           <div class="procgen-field">
-            <label for="voice-select">Voice</label>
+            <label for="voice-select">Voice <span class="val" id="voice-count-val"></span></label>
             <select id="voice-select"></select>
           </div>
           <div class="procgen-field">
@@ -2354,7 +2354,7 @@
         <button type="button" class="algo-run-btn" id="voice-speak-btn">▶ Speak</button>
       </div>
     </div>
-    <p class="algo-hint" id="voice-hint">Runs entirely on your browser's built-in speech engine (Web Speech API) — nothing is recorded, uploaded, or stored. The visualization is driven by real word-timing events from the speech engine itself, not a simulated waveform.</p>
+    <p class="algo-hint" id="voice-hint">Runs entirely on your browser's built-in speech engine (Web Speech API) — nothing is recorded, uploaded, or stored. The visualization is driven by real word-timing events from the speech engine itself, not a simulated waveform. The list of available voices comes from your browser/OS — Chrome and Edge usually offer the most variety; Safari and mobile browsers may show fewer.</p>
   </div>
 </section>
 
@@ -5254,6 +5254,8 @@ panels.forEach(p => observer.observe(p));
     const voices = speechSynthesis.getVoices();
     if (!voices.length) return;
     voiceSelect.innerHTML = voices.map((v, i) => '<option value="' + i + '">' + v.name + ' (' + v.lang + ')</option>').join('');
+    const countEl = document.getElementById('voice-count-val');
+    if (countEl) countEl.textContent = '(' + voices.length + ' available)';
     const enIdx = voices.findIndex((v) => v.lang.startsWith('en'));
     if (enIdx >= 0) voiceSelect.value = enIdx;
   }
@@ -5434,7 +5436,12 @@ panels.forEach(p => observer.observe(p));
       if (statEl) statEl.innerHTML = 'faces detected: <strong>' + detections.length + '</strong>';
 
       detections.forEach((d) => {
-        const { x, y, width, height } = d.detection.box;
+        const { x: rawX, y, width, height } = d.detection.box;
+        // Manually mirror the X coordinate to match the mirrored video feed
+        // (video is CSS-mirrored for a natural "look at yourself" feel; the
+        // overlay canvas itself is NOT mirrored, so text draws right-reading
+        // instead of backwards).
+        const x = overlay.width - rawX - width;
         ctx.strokeStyle = '#22D3EE';
         ctx.lineWidth = 2;
         ctx.strokeRect(x, y, width, height);

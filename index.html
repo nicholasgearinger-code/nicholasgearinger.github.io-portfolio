@@ -1751,6 +1751,32 @@
   }
   .webcam-placeholder[hidden] { display: none; }
   .webcam-note { font-size: .78rem; color: var(--muted); max-width: 320px; }
+  .webcam-toggles {
+    display: flex; flex-wrap: wrap; justify-content: center; gap: .6rem;
+    margin-top: 1.1rem;
+  }
+  .webcam-toggle {
+    display: flex; align-items: center; gap: .5rem;
+    padding: .5rem .9rem; border-radius: 100px; cursor: pointer;
+    border: 1px solid var(--card-border); background: var(--card-bg);
+    font-size: .78rem; color: var(--muted);
+    transition: border-color .2s, color .2s, background .2s;
+  }
+  .webcam-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .webcam-toggle-dot {
+    width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,.15);
+    transition: background .2s, box-shadow .2s; flex-shrink: 0;
+  }
+  .webcam-toggle:has(input:checked), .webcam-toggle.checked {
+    color: var(--white); border-color: var(--cyan); background: rgba(34,211,238,.08);
+  }
+  .webcam-toggle:has(input:checked) .webcam-toggle-dot, .webcam-toggle.checked .webcam-toggle-dot {
+    background: var(--cyan); box-shadow: 0 0 6px var(--cyan);
+  }
+  .webcam-toggle.loading .webcam-toggle-dot { background: var(--amber); animation: hudPulse 1s infinite; }
+  .webcam-toggle.errored { border-color: #F87171; }
+  .webcam-toggle.errored .webcam-toggle-dot { background: #F87171; }
+  .webcam-toggle-status { text-align: center; font-size: .74rem; color: var(--muted); margin-top: .6rem; min-height: 1.2em; }
 
   /* ── LIVE SITE TELEMETRY ── */
   .telemetry-grid {
@@ -2424,8 +2450,8 @@
 <section id="webcam-ai" class="panel">
   <div class="panel-inner">
     <span class="section-label">Try It</span>
-    <h2>Can a model read<br>your expression?</h2>
-    <p class="lead" style="margin:0 auto 2.2rem;">A real face-detection and expression-recognition model, running live in your browser. Nothing is uploaded — the model downloads once, then runs entirely on your device.</p>
+    <h2>Five real models,<br>watching live</h2>
+    <p class="lead" style="margin:0 auto 2.2rem;">Real computer-vision models running entirely in your browser — toggle each on to see what it detects. Nothing is ever uploaded; everything runs on your device.</p>
     <div class="algo-card">
       <div class="cc-titlebar">
         <div class="cc-dots">
@@ -2433,7 +2459,7 @@
           <span class="cc-dot" style="background:#FFBD2E"></span>
           <span class="cc-dot" style="background:#28C840"></span>
         </div>
-        <span class="cc-filename">face_detect.js</span>
+        <span class="cc-filename">vision.js</span>
         <div class="cc-status-pill" id="webcam-pill">
           <span class="cc-pill-dot"></span><span id="webcam-pill-text">IDLE</span>
         </div>
@@ -2447,13 +2473,37 @@
             <p class="webcam-note">Requires camera access. Nothing is recorded or sent anywhere — detection runs 100% locally in your browser.</p>
           </div>
         </div>
+        <div class="webcam-toggles" id="webcam-toggles">
+          <label class="webcam-toggle" data-model="face">
+            <input type="checkbox" id="toggle-face" checked>
+            <span class="webcam-toggle-dot"></span> Face + Expression
+          </label>
+          <label class="webcam-toggle" data-model="landmarks">
+            <input type="checkbox" id="toggle-landmarks">
+            <span class="webcam-toggle-dot"></span> Facial Landmarks
+          </label>
+          <label class="webcam-toggle" data-model="objects">
+            <input type="checkbox" id="toggle-objects">
+            <span class="webcam-toggle-dot"></span> Objects
+          </label>
+          <label class="webcam-toggle" data-model="hands">
+            <input type="checkbox" id="toggle-hands">
+            <span class="webcam-toggle-dot"></span> Hands
+          </label>
+          <label class="webcam-toggle" data-model="pose">
+            <input type="checkbox" id="toggle-pose">
+            <span class="webcam-toggle-dot"></span> Body Pose
+          </label>
+        </div>
+        <p class="webcam-toggle-status" id="webcam-toggle-status"></p>
       </div>
       <div class="algo-footer">
         <div class="algo-stat" id="webcam-stat">faces detected: <strong>0</strong></div>
         <button type="button" class="algo-run-btn" id="webcam-stop" hidden>■ Stop Camera</button>
       </div>
     </div>
-    <p class="algo-hint" id="webcam-hint">Tiny Face Detector + expression classifier (face-api.js, MIT licensed, ~500KB of model weights) — loaded from a CDN once, then inference runs fully client-side via TensorFlow.js</p>
+    <p class="algo-hint" id="webcam-hint">Each toggle loads its own model on demand, the first time you switch it on — nothing downloads until you ask for it. Running several at once is more demanding on your device, so if things feel sluggish, try enabling fewer at a time.</p>
+    <p class="algo-hint">Face + expression + landmarks: face-api.js. Objects: COCO-SSD. Hands &amp; body pose: TensorFlow.js's official MediaPipe-based models. All MIT/Apache licensed, all inference client-side.</p>
   </div>
 </section>
 
@@ -5502,11 +5552,13 @@ panels.forEach(p => observer.observe(p));
 })();
 </script>
 <script>
-/* -- LIVE WEBCAM AI: real face detection + expression recognition, running
-      entirely client-side via face-api.js (TensorFlow.js under the hood).
-      Lazy-loaded only when the visitor clicks "Start Camera" — unlike the
-      image classifier below, this needs a camera permission prompt, which
-      is a bigger ask, so nothing downloads until they opt in. -- */
+/* -- LIVE WEBCAM AI: five real computer-vision models, each independently
+      toggleable, running entirely client-side. Every model lazy-loads only
+      the first time its toggle is switched on, so nothing downloads until
+      asked for. All active models run within the same detection loop and
+      draw onto the same overlay canvas. Coordinates are manually mirrored
+      in code (not via CSS transform) so text labels stay readable instead
+      of rendering backwards, same fix as the original single-model build. -- */
 (function webcamAI() {
   const video = document.getElementById('webcam-video');
   const overlay = document.getElementById('webcam-overlay');
@@ -5516,12 +5568,37 @@ panels.forEach(p => observer.observe(p));
   const statEl = document.getElementById('webcam-stat');
   const pillText = document.getElementById('webcam-pill-text');
   const hintEl = document.getElementById('webcam-hint');
+  const toggleStatus = document.getElementById('webcam-toggle-status');
+  const toggles = {
+    face: document.getElementById('toggle-face'),
+    landmarks: document.getElementById('toggle-landmarks'),
+    objects: document.getElementById('toggle-objects'),
+    hands: document.getElementById('toggle-hands'),
+    pose: document.getElementById('toggle-pose'),
+  };
   if (!video || !startBtn) return;
 
-  const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
-  const LIB_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js';
+  const FACE_MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
+  const FACE_LIB_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js';
+  const COCO_LIB_URL = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd/dist/coco-ssd.min.js';
+  const HAND_LIB_URL = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/hand-pose-detection/dist/hand-pose-detection.min.js';
+  const POSE_LIB_URL = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection/dist/pose-detection.min.js';
 
-  let stream = null, running = false, modelsReady = false, rafId = null;
+  const HAND_CONNECTIONS = [
+    [0,1],[1,2],[2,3],[3,4], [0,5],[5,6],[6,7],[7,8], [0,9],[9,10],[10,11],[11,12],
+    [0,13],[13,14],[14,15],[15,16], [0,17],[17,18],[18,19],[19,20], [5,9],[9,13],[13,17],
+  ];
+  const POSE_CONNECTIONS = [
+    ['left_shoulder','right_shoulder'],['left_shoulder','left_elbow'],['left_elbow','left_wrist'],
+    ['right_shoulder','right_elbow'],['right_elbow','right_wrist'],['left_shoulder','left_hip'],
+    ['right_shoulder','right_hip'],['left_hip','right_hip'],['left_hip','left_knee'],
+    ['left_knee','left_ankle'],['right_hip','right_knee'],['right_knee','right_ankle'],
+  ];
+
+  let stream = null, running = false, rafId = null;
+  let faceApiReady = false, landmarksReady = false;
+  let cocoModel = null, handDetector = null, poseDetector = null;
+  const loadPromises = {};
 
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     startBtn.disabled = true;
@@ -5539,28 +5616,79 @@ panels.forEach(p => observer.observe(p));
       document.head.appendChild(s);
     });
   }
-
-  async function ensureModels() {
-    if (modelsReady) return;
-    if (pillText) pillText.textContent = 'LOADING MODEL\u2026';
-    if (typeof faceapi === 'undefined') await loadScript(LIB_URL);
-    await Promise.all([
-      faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-      faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL),
-    ]);
-    modelsReady = true;
+  function setToggleState(name, state) {
+    const input = toggles[name];
+    if (!input) return;
+    const label = input.closest('.webcam-toggle');
+    if (!label) return;
+    label.classList.remove('loading', 'errored', 'checked');
+    if (state === 'loading') label.classList.add('loading');
+    else if (state === 'error') label.classList.add('errored');
+    else if (input.checked) label.classList.add('checked');
   }
+  function announce(msg) { if (toggleStatus) toggleStatus.textContent = msg; }
+
+  async function ensureFace() {
+    if (faceApiReady) return;
+    if (typeof faceapi === 'undefined') await loadScript(FACE_LIB_URL);
+    await Promise.all([
+      faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODEL_URL),
+      faceapi.nets.faceExpressionNet.loadFromUri(FACE_MODEL_URL),
+    ]);
+    faceApiReady = true;
+  }
+  async function ensureLandmarks() {
+    await ensureFace();
+    if (landmarksReady) return;
+    await faceapi.nets.faceLandmark68Net.loadFromUri(FACE_MODEL_URL);
+    landmarksReady = true;
+  }
+  async function ensureObjects() {
+    if (cocoModel) return;
+    if (typeof cocoSsd === 'undefined') await loadScript(COCO_LIB_URL);
+    cocoModel = await cocoSsd.load();
+  }
+  async function ensureHands() {
+    if (handDetector) return;
+    if (typeof handPoseDetection === 'undefined') await loadScript(HAND_LIB_URL);
+    handDetector = await handPoseDetection.createDetector(
+      handPoseDetection.SupportedModels.MediaPipeHands,
+      { runtime: 'tfjs', modelType: 'lite', maxHands: 2 }
+    );
+  }
+  async function ensurePose() {
+    if (poseDetector) return;
+    if (typeof poseDetection === 'undefined') await loadScript(POSE_LIB_URL);
+    poseDetector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet);
+  }
+
+  const ENSURERS = { face: ensureFace, landmarks: ensureLandmarks, objects: ensureObjects, hands: ensureHands, pose: ensurePose };
+  const LABELS = { face: 'Face + Expression', landmarks: 'Facial Landmarks', objects: 'Objects', hands: 'Hands', pose: 'Body Pose' };
+
+  Object.keys(toggles).forEach((name) => {
+    const input = toggles[name];
+    if (!input) return;
+    input.addEventListener('change', async () => {
+      if (!input.checked) { setToggleState(name, 'idle'); announce(''); return; }
+      if (!running) { announce('Start the camera first.'); input.checked = false; return; }
+      setToggleState(name, 'loading');
+      announce('Loading ' + LABELS[name] + '\u2026');
+      try {
+        await ENSURERS[name]();
+        setToggleState(name, 'ready');
+        announce(LABELS[name] + ' ready.');
+      } catch (err) {
+        console.error('[webcam-ai]', name, err.message);
+        input.checked = false;
+        setToggleState(name, 'error');
+        announce('Couldn\u2019t load ' + LABELS[name] + ' \u2014 check your connection and try again.');
+      }
+    });
+  });
 
   async function start() {
     startBtn.disabled = true;
-    try {
-      await ensureModels();
-    } catch (err) {
-      if (pillText) pillText.textContent = 'MODEL FAILED';
-      if (hintEl) hintEl.textContent = 'Couldn\u2019t load the AI model just now \u2014 check your connection and try again.';
-      startBtn.disabled = false;
-      return;
-    }
+    if (pillText) pillText.textContent = 'STARTING\u2026';
     try {
       stream = await navigator.mediaDevices.getUserMedia({ video: { width: 480, height: 360 }, audio: false });
     } catch (err) {
@@ -5575,47 +5703,122 @@ panels.forEach(p => observer.observe(p));
     placeholder.hidden = true;
     stopBtn.hidden = false;
     running = true;
-    if (pillText) pillText.textContent = 'DETECTING';
 
     const ctx = overlay.getContext('2d');
     function syncSize() { overlay.width = video.videoWidth || 480; overlay.height = video.videoHeight || 360; }
     video.addEventListener('loadedmetadata', syncSize, { once: true });
     syncSize();
 
+    // Face + expression (and optionally landmarks) is on by default — load it now.
+    if (toggles.face && toggles.face.checked) {
+      setToggleState('face', 'loading');
+      try { await ensureFace(); setToggleState('face', 'ready'); }
+      catch (err) { toggles.face.checked = false; setToggleState('face', 'error'); }
+    }
+    if (pillText) pillText.textContent = 'DETECTING';
+
+    function mirrorX(x, w) { return overlay.width - x - w; }
+
     async function detectLoop() {
       if (!running) return;
       rafId = requestAnimationFrame(detectLoop);
       if (video.readyState < 2) return;
-      let detections = [];
-      try {
-        detections = await faceapi
-          .detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 224 }))
-          .withFaceExpressions();
-      } catch (_) { return; }
 
       ctx.clearRect(0, 0, overlay.width, overlay.height);
-      if (statEl) statEl.innerHTML = 'faces detected: <strong>' + detections.length + '</strong>';
+      let faceCount = 0;
 
-      detections.forEach((d) => {
-        const { x: rawX, y, width, height } = d.detection.box;
-        // Manually mirror the X coordinate to match the mirrored video feed
-        // (video is CSS-mirrored for a natural "look at yourself" feel; the
-        // overlay canvas itself is NOT mirrored, so text draws right-reading
-        // instead of backwards).
-        const x = overlay.width - rawX - width;
-        ctx.strokeStyle = '#22D3EE';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(x, y, width, height);
+      if (toggles.face && toggles.face.checked && faceApiReady) {
+        try {
+          let query = faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 224 })).withFaceExpressions();
+          if (toggles.landmarks && toggles.landmarks.checked && landmarksReady) query = query.withFaceLandmarks();
+          const detections = await query;
+          faceCount = detections.length;
+          detections.forEach((d) => {
+            const { x: rawX, y, width, height } = d.detection.box;
+            const x = mirrorX(rawX, width);
+            ctx.strokeStyle = '#22D3EE'; ctx.lineWidth = 2;
+            ctx.strokeRect(x, y, width, height);
 
-        const top = Object.entries(d.expressions).sort((a, b) => b[1] - a[1])[0];
-        const label = top[0] + ' ' + Math.round(top[1] * 100) + '%';
-        ctx.font = '14px monospace';
-        const textW = ctx.measureText(label).width;
-        ctx.fillStyle = 'rgba(3,8,17,.85)';
-        ctx.fillRect(x, Math.max(0, y - 20), textW + 10, 20);
-        ctx.fillStyle = '#22D3EE';
-        ctx.fillText(label, x + 5, Math.max(14, y - 5));
-      });
+            const top = Object.entries(d.expressions).sort((a, b) => b[1] - a[1])[0];
+            const label = top[0] + ' ' + Math.round(top[1] * 100) + '%';
+            ctx.font = '14px monospace';
+            const textW = ctx.measureText(label).width;
+            ctx.fillStyle = 'rgba(3,8,17,.85)';
+            ctx.fillRect(x, Math.max(0, y - 20), textW + 10, 20);
+            ctx.fillStyle = '#22D3EE';
+            ctx.fillText(label, x + 5, Math.max(14, y - 5));
+
+            if (d.landmarks) {
+              ctx.fillStyle = '#E879F9';
+              d.landmarks.positions.forEach((p) => {
+                ctx.beginPath();
+                ctx.arc(mirrorX(p.x, 0), p.y, 1.6, 0, Math.PI * 2);
+                ctx.fill();
+              });
+            }
+          });
+        } catch (_) {}
+      }
+      if (statEl) statEl.innerHTML = 'faces detected: <strong>' + faceCount + '</strong>';
+
+      if (toggles.objects && toggles.objects.checked && cocoModel) {
+        try {
+          const preds = await cocoModel.detect(video);
+          preds.forEach((p) => {
+            const [rawX, y, w, h] = p.bbox;
+            const x = mirrorX(rawX, w);
+            ctx.strokeStyle = '#F59E0B'; ctx.lineWidth = 2;
+            ctx.strokeRect(x, y, w, h);
+            const label = p.class + ' ' + Math.round(p.score * 100) + '%';
+            ctx.font = '13px monospace';
+            const textW = ctx.measureText(label).width;
+            ctx.fillStyle = 'rgba(3,8,17,.85)';
+            ctx.fillRect(x, Math.max(0, y - 18), textW + 8, 18);
+            ctx.fillStyle = '#F59E0B';
+            ctx.fillText(label, x + 4, Math.max(13, y - 5));
+          });
+        } catch (_) {}
+      }
+
+      if (toggles.hands && toggles.hands.checked && handDetector) {
+        try {
+          const hands = await handDetector.estimateHands(video);
+          hands.forEach((hand) => {
+            const pts = hand.keypoints.map((k) => ({ x: mirrorX(k.x, 0), y: k.y }));
+            ctx.strokeStyle = '#7DD3FC'; ctx.lineWidth = 2;
+            HAND_CONNECTIONS.forEach(([a, b]) => {
+              if (!pts[a] || !pts[b]) return;
+              ctx.beginPath(); ctx.moveTo(pts[a].x, pts[a].y); ctx.lineTo(pts[b].x, pts[b].y); ctx.stroke();
+            });
+            ctx.fillStyle = '#7DD3FC';
+            pts.forEach((p) => { ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2); ctx.fill(); });
+          });
+        } catch (_) {}
+      }
+
+      if (toggles.pose && toggles.pose.checked && poseDetector) {
+        try {
+          const poses = await poseDetector.estimatePoses(video);
+          poses.forEach((pose) => {
+            const byName = {};
+            pose.keypoints.forEach((k) => { byName[k.name] = k; });
+            ctx.strokeStyle = '#818CF8'; ctx.lineWidth = 2;
+            POSE_CONNECTIONS.forEach(([a, b]) => {
+              const ka = byName[a], kb = byName[b];
+              if (!ka || !kb || ka.score < 0.3 || kb.score < 0.3) return;
+              ctx.beginPath();
+              ctx.moveTo(mirrorX(ka.x, 0), ka.y);
+              ctx.lineTo(mirrorX(kb.x, 0), kb.y);
+              ctx.stroke();
+            });
+            ctx.fillStyle = '#818CF8';
+            pose.keypoints.forEach((k) => {
+              if (k.score < 0.3) return;
+              ctx.beginPath(); ctx.arc(mirrorX(k.x, 0), k.y, 3, 0, Math.PI * 2); ctx.fill();
+            });
+          });
+        } catch (_) {}
+      }
     }
     detectLoop();
   }
@@ -5630,6 +5833,7 @@ panels.forEach(p => observer.observe(p));
     startBtn.disabled = false;
     if (pillText) pillText.textContent = 'IDLE';
     if (statEl) statEl.innerHTML = 'faces detected: <strong>0</strong>';
+    announce('');
   }
 
   startBtn.addEventListener('click', start);

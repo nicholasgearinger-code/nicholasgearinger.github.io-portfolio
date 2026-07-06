@@ -5787,6 +5787,54 @@ panels.forEach(p => observer.observe(p));
       if (statEl) statEl.innerHTML = 'faces detected: <strong>' + faceCount + '</strong>';
     }
 
+    function drawObjects() {
+      cache.objects.forEach((p) => {
+        const [rawX, y, w, h] = p.bbox;
+        const x = mirrorX(rawX, w);
+        ctx.strokeStyle = '#F59E0B'; ctx.lineWidth = 2;
+        ctx.strokeRect(x, y, w, h);
+        const label = p.class + ' ' + Math.round(p.score * 100) + '%';
+        ctx.font = '13px monospace';
+        const textW = ctx.measureText(label).width;
+        ctx.fillStyle = 'rgba(3,8,17,.85)';
+        ctx.fillRect(x, Math.max(0, y - 18), textW + 8, 18);
+        ctx.fillStyle = '#F59E0B';
+        ctx.fillText(label, x + 4, Math.max(13, y - 5));
+      });
+    }
+    function drawHands() {
+      cache.hands.forEach((hand) => {
+        const pts = hand.keypoints.map((k) => ({ x: mirrorX(k.x, 0), y: k.y }));
+        ctx.strokeStyle = '#7DD3FC'; ctx.lineWidth = 2;
+        HAND_CONNECTIONS.forEach(([a, b]) => {
+          if (!pts[a] || !pts[b]) return;
+          ctx.beginPath(); ctx.moveTo(pts[a].x, pts[a].y); ctx.lineTo(pts[b].x, pts[b].y); ctx.stroke();
+        });
+        ctx.fillStyle = '#7DD3FC';
+        pts.forEach((p) => { ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2); ctx.fill(); });
+      });
+    }
+    function drawPose() {
+      cache.pose.forEach((pose) => {
+        const byName = {};
+        pose.keypoints.forEach((k) => { byName[k.name] = k; });
+        ctx.strokeStyle = '#818CF8'; ctx.lineWidth = 2;
+        POSE_CONNECTIONS.forEach(([a, b]) => {
+          const ka = byName[a], kb = byName[b];
+          if (!ka || !kb || ka.score < 0.3 || kb.score < 0.3) return;
+          ctx.beginPath();
+          ctx.moveTo(mirrorX(ka.x, 0), ka.y);
+          ctx.lineTo(mirrorX(kb.x, 0), kb.y);
+          ctx.stroke();
+        });
+        ctx.fillStyle = '#818CF8';
+        pose.keypoints.forEach((k) => {
+          if (k.score < 0.3) return;
+          ctx.beginPath(); ctx.arc(mirrorX(k.x, 0), k.y, 3, 0, Math.PI * 2); ctx.fill();
+        });
+      });
+    }
+
     async function detectLoop() {
       if (!running) return;
       if (video.readyState < 2) { rafId = requestAnimationFrame(detectLoop); return; }
@@ -5794,9 +5842,9 @@ panels.forEach(p => observer.observe(p));
       ctx.clearRect(0, 0, overlay.width, overlay.height);
       ctx.fillStyle = 'red';
       ctx.fillRect(10, 10, 60, 60); // TEMP diagnostic marker — remove once confirmed fixed
-      drawFace();
 
-      if (toggles.face && toggles.face.checked && faceApiReady) {
+      const faceWanted = (toggles.face && toggles.face.checked) || (toggles.landmarks && toggles.landmarks.checked);
+      if (faceWanted && faceApiReady) {
         try {
           let query = faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 224 }));
           if (toggles.landmarks && toggles.landmarks.checked && landmarksReady) query = query.withFaceLandmarks();
@@ -5809,62 +5857,34 @@ panels.forEach(p => observer.observe(p));
 
       if (toggles.objects && toggles.objects.checked && cocoModel) {
         try {
-          const preds = await cocoModel.detect(video);
-          preds.forEach((p) => {
-            const [rawX, y, w, h] = p.bbox;
-            const x = mirrorX(rawX, w);
-            ctx.strokeStyle = '#F59E0B'; ctx.lineWidth = 2;
-            ctx.strokeRect(x, y, w, h);
-            const label = p.class + ' ' + Math.round(p.score * 100) + '%';
-            ctx.font = '13px monospace';
-            const textW = ctx.measureText(label).width;
-            ctx.fillStyle = 'rgba(3,8,17,.85)';
-            ctx.fillRect(x, Math.max(0, y - 18), textW + 8, 18);
-            ctx.fillStyle = '#F59E0B';
-            ctx.fillText(label, x + 4, Math.max(13, y - 5));
-          });
+          cache.objects = await cocoModel.detect(video);
         } catch (err) { console.error('[webcam-ai] objects detection failed:', err); }
+      } else {
+        cache.objects = [];
       }
 
       if (toggles.hands && toggles.hands.checked && handDetector) {
         try {
-          const hands = await handDetector.estimateHands(video);
-          hands.forEach((hand) => {
-            const pts = hand.keypoints.map((k) => ({ x: mirrorX(k.x, 0), y: k.y }));
-            ctx.strokeStyle = '#7DD3FC'; ctx.lineWidth = 2;
-            HAND_CONNECTIONS.forEach(([a, b]) => {
-              if (!pts[a] || !pts[b]) return;
-              ctx.beginPath(); ctx.moveTo(pts[a].x, pts[a].y); ctx.lineTo(pts[b].x, pts[b].y); ctx.stroke();
-            });
-            ctx.fillStyle = '#7DD3FC';
-            pts.forEach((p) => { ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2); ctx.fill(); });
-          });
+          cache.hands = await handDetector.estimateHands(video);
+          if (cache.hands.length) console.log('[webcam-ai] hands detected:', cache.hands.length, cache.hands[0]);
         } catch (err) { console.error('[webcam-ai] hands detection failed:', err); }
+      } else {
+        cache.hands = [];
       }
 
       if (toggles.pose && toggles.pose.checked && poseDetector) {
         try {
-          const poses = await poseDetector.estimatePoses(video);
-          poses.forEach((pose) => {
-            const byName = {};
-            pose.keypoints.forEach((k) => { byName[k.name] = k; });
-            ctx.strokeStyle = '#818CF8'; ctx.lineWidth = 2;
-            POSE_CONNECTIONS.forEach(([a, b]) => {
-              const ka = byName[a], kb = byName[b];
-              if (!ka || !kb || ka.score < 0.3 || kb.score < 0.3) return;
-              ctx.beginPath();
-              ctx.moveTo(mirrorX(ka.x, 0), ka.y);
-              ctx.lineTo(mirrorX(kb.x, 0), kb.y);
-              ctx.stroke();
-            });
-            ctx.fillStyle = '#818CF8';
-            pose.keypoints.forEach((k) => {
-              if (k.score < 0.3) return;
-              ctx.beginPath(); ctx.arc(mirrorX(k.x, 0), k.y, 3, 0, Math.PI * 2); ctx.fill();
-            });
-          });
+          cache.pose = await poseDetector.estimatePoses(video);
         } catch (err) { console.error('[webcam-ai] pose detection failed:', err); }
+      } else {
+        cache.pose = [];
       }
+
+      drawFace();
+      drawObjects();
+      drawHands();
+      drawPose();
+
       rafId = requestAnimationFrame(detectLoop);
     }
     detectLoop();

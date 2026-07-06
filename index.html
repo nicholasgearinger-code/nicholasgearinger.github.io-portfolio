@@ -5770,7 +5770,7 @@ panels.forEach(p => observer.observe(p));
           detections.forEach((d) => {
             const { x: rawX, y, width, height } = d.detection.box;
             const x = mirrorX(rawX, width);
-            console.log('[webcam-ai] drawing box at', { x, y, width, height });
+            console.log('[webcam-ai] drawing box at', { x, y, width, height, canvasW: overlay.width, canvasH: overlay.height, cssW: overlay.clientWidth, cssH: overlay.clientHeight });
             ctx.fillStyle = 'rgba(232,121,249,.35)';
             ctx.fillRect(x, y, width, height);
             ctx.strokeStyle = '#22D3EE'; ctx.lineWidth = 6;

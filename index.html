@@ -5756,6 +5756,8 @@ panels.forEach(p => observer.observe(p));
       if (video.readyState < 2) { rafId = requestAnimationFrame(detectLoop); return; }
 
       ctx.clearRect(0, 0, overlay.width, overlay.height);
+      ctx.fillStyle = 'red';
+      ctx.fillRect(10, 10, 60, 60); // TEMP diagnostic marker — should always be visible top-left if drawn at all
       let faceCount = 0;
 
       if (toggles.face && toggles.face.checked && faceApiReady) {

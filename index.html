@@ -5789,7 +5789,7 @@ panels.forEach(p => observer.observe(p));
               });
             }
           });
-        } catch (_) {}
+        } catch (err) { console.error('[webcam-ai] face detection failed:', err); }
       }
       if (statEl) statEl.innerHTML = 'faces detected: <strong>' + faceCount + '</strong>';
 
@@ -5809,7 +5809,7 @@ panels.forEach(p => observer.observe(p));
             ctx.fillStyle = '#F59E0B';
             ctx.fillText(label, x + 4, Math.max(13, y - 5));
           });
-        } catch (_) {}
+        } catch (err) { console.error('[webcam-ai] objects detection failed:', err); }
       }
 
       if (toggles.hands && toggles.hands.checked && handDetector) {
@@ -5825,7 +5825,7 @@ panels.forEach(p => observer.observe(p));
             ctx.fillStyle = '#7DD3FC';
             pts.forEach((p) => { ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2); ctx.fill(); });
           });
-        } catch (_) {}
+        } catch (err) { console.error('[webcam-ai] hands detection failed:', err); }
       }
 
       if (toggles.pose && toggles.pose.checked && poseDetector) {
@@ -5849,7 +5849,7 @@ panels.forEach(p => observer.observe(p));
               ctx.beginPath(); ctx.arc(mirrorX(k.x, 0), k.y, 3, 0, Math.PI * 2); ctx.fill();
             });
           });
-        } catch (_) {}
+        } catch (err) { console.error('[webcam-ai] pose detection failed:', err); }
       }
     }
     detectLoop();

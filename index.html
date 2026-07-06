@@ -5761,8 +5761,9 @@ panels.forEach(p => observer.observe(p));
 
       if (toggles.face && toggles.face.checked && faceApiReady) {
         try {
-          let query = faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 224 })).withFaceExpressions();
+          let query = faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 224 }));
           if (toggles.landmarks && toggles.landmarks.checked && landmarksReady) query = query.withFaceLandmarks();
+          query = query.withFaceExpressions();
           const detections = await query;
           faceCount = detections.length;
           detections.forEach((d) => {

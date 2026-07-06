@@ -2591,7 +2591,7 @@
         <p class="webcam-toggle-status" id="webcam-toggle-status"></p>
       </div>
       <div class="algo-footer">
-        <div class="algo-stat" id="webcam-stat">faces detected: <strong>0</strong></div>
+        <div class="algo-stat" id="webcam-stat">targets detected: <strong>0</strong></div>
         <button type="button" class="algo-run-btn" id="webcam-stop" hidden>■ Stop Camera</button>
       </div>
     </div>
@@ -5952,6 +5952,27 @@ panels.forEach(p => observer.observe(p));
     }
   }
 
+  // Shared Iron-Man-style targeting reticle: corner brackets rather than a
+  // plain rectangle, plus a small crosshair — this is the visual proof
+  // the model is actually tracking, not just a static outline. Used by
+  // faces, objects, and poses alike so every detector shows the same
+  // "target acquired" language.
+  function drawBracket(x, y, width, height, color) {
+    const bw = Math.min(18, width * 0.28), bh = Math.min(18, height * 0.28);
+    ctx.strokeStyle = color; ctx.lineWidth = 2;
+    [[x, y, bw, bh, 1, 1], [x + width, y, -bw, bh, -1, 1], [x, y + height, bw, -bh, 1, -1], [x + width, y + height, -bw, -bh, -1, -1]]
+      .forEach(([cx, cy, dw, dh]) => {
+        ctx.beginPath();
+        ctx.moveTo(cx, cy + dh); ctx.lineTo(cx, cy); ctx.lineTo(cx + dw, cy);
+        ctx.stroke();
+      });
+    const midX = x + width / 2, midY = y + height / 2;
+    ctx.beginPath();
+    ctx.moveTo(midX - 6, midY); ctx.lineTo(midX + 6, midY);
+    ctx.moveTo(midX, midY - 6); ctx.lineTo(midX, midY + 6);
+    ctx.stroke();
+  }
+
   function drawFace() {
     let faceCount = 0;
     cache.face.forEach((d) => {
@@ -5959,22 +5980,7 @@ panels.forEach(p => observer.observe(p));
       const x = mirrorX(rawX, width);
       faceCount++;
 
-      // Iron-Man-style targeting reticle: corner brackets rather than a
-      // plain rectangle, plus a small crosshair — this is the visual proof
-      // the model is actually tracking, not just a static outline.
-      const bw = Math.min(18, width * 0.28), bh = Math.min(18, height * 0.28);
-      ctx.strokeStyle = '#22D3EE'; ctx.lineWidth = 2;
-      [[x, y, bw, bh, 1, 1], [x + width, y, -bw, bh, -1, 1], [x, y + height, bw, -bh, 1, -1], [x + width, y + height, -bw, -bh, -1, -1]]
-        .forEach(([cx, cy, dw, dh]) => {
-          ctx.beginPath();
-          ctx.moveTo(cx, cy + dh); ctx.lineTo(cx, cy); ctx.lineTo(cx + dw, cy);
-          ctx.stroke();
-        });
-      const midX = x + width / 2, midY = y + height / 2;
-      ctx.beginPath();
-      ctx.moveTo(midX - 6, midY); ctx.lineTo(midX + 6, midY);
-      ctx.moveTo(midX, midY - 6); ctx.lineTo(midX, midY + 6);
-      ctx.stroke();
+      drawBracket(x, y, width, height, '#22D3EE');
 
       const top = Object.entries(d.expressions).sort((a, b) => b[1] - a[1])[0];
       const label = 'TARGET \u00b7 ' + top[0].toUpperCase() + ' ' + Math.round(top[1] * 100) + '%';
@@ -5994,16 +6000,14 @@ panels.forEach(p => observer.observe(p));
         });
       }
     });
-    if (statEl) statEl.innerHTML = 'faces detected: <strong>' + faceCount + '</strong>';
-    if (hudLabel) hudLabel.textContent = faceCount > 0 ? 'TARGET ACQUIRED' : 'SCANNING';
+    return faceCount;
   }
 
   function drawObjects() {
     cache.objects.forEach((p) => {
       const [rawX, y, w, h] = p.bbox;
       const x = mirrorX(rawX, w);
-      ctx.strokeStyle = '#F59E0B'; ctx.lineWidth = 2;
-      ctx.strokeRect(x, y, w, h);
+      drawBracket(x, y, w, h, '#F59E0B');
       const label = p.class + ' ' + Math.round(p.score * 100) + '%';
       ctx.font = '13px monospace';
       const textW = ctx.measureText(label).width;
@@ -6012,6 +6016,7 @@ panels.forEach(p => observer.observe(p));
       ctx.fillStyle = '#F59E0B';
       ctx.fillText(label, x + 4, Math.max(13, y - 5));
     });
+    return cache.objects.length;
   }
   function drawHands() {
     cache.hands.forEach((hand) => {
@@ -6026,9 +6031,24 @@ panels.forEach(p => observer.observe(p));
     });
   }
   function drawPose() {
+    let poseCount = 0;
     cache.pose.forEach((pose) => {
       const byName = {};
       pose.keypoints.forEach((k) => { byName[k.name] = k; });
+
+      // Bounding box from the confidently-visible keypoints, so the pose
+      // gets the same targeting bracket as faces and objects.
+      const visible = pose.keypoints.filter((k) => k.score >= 0.3);
+      if (visible.length) {
+        poseCount++;
+        const xs = visible.map((k) => mirrorX(k.x, 0));
+        const ys = visible.map((k) => k.y);
+        const minX = Math.min(...xs), maxX = Math.max(...xs);
+        const minY = Math.min(...ys), maxY = Math.max(...ys);
+        const pad = 12;
+        drawBracket(minX - pad, minY - pad, (maxX - minX) + pad * 2, (maxY - minY) + pad * 2, '#818CF8');
+      }
+
       ctx.strokeStyle = '#818CF8'; ctx.lineWidth = 2;
       POSE_CONNECTIONS.forEach(([a, b]) => {
         const ka = byName[a], kb = byName[b];
@@ -6044,6 +6064,7 @@ panels.forEach(p => observer.observe(p));
         ctx.beginPath(); ctx.arc(mirrorX(k.x, 0), k.y, 3, 0, Math.PI * 2); ctx.fill();
       });
     });
+    return poseCount;
   }
 
   // Faint animated corner-frame + scanline drawn every single frame,
@@ -6084,7 +6105,6 @@ panels.forEach(p => observer.observe(p));
       } catch (err) { console.error('[webcam-ai] face detection failed:', err); }
     } else {
       cache.face = [];
-      if (hudLabel) hudLabel.textContent = 'SCANNING';
     }
 
     if (toggles.objects && toggles.objects.checked && cocoModel) {
@@ -6111,10 +6131,17 @@ panels.forEach(p => observer.observe(p));
       cache.pose = [];
     }
 
-    drawFace();
-    drawObjects();
+    const faceCount = drawFace();
+    const objectCount = drawObjects();
     drawHands();
-    drawPose();
+    const poseCount = drawPose();
+
+    // A single "TARGET ACQUIRED" / "SCANNING" HUD state driven by whichever
+    // detectors are active — a face, an object, or a pose all count as a
+    // lock, not just faces.
+    const totalTargets = faceCount + objectCount + poseCount;
+    if (statEl) statEl.innerHTML = 'targets detected: <strong>' + totalTargets + '</strong>';
+    if (hudLabel) hudLabel.textContent = totalTargets > 0 ? 'TARGET ACQUIRED' : 'SCANNING';
 
     rafId = requestAnimationFrame(detectLoop);
   }
@@ -6130,7 +6157,7 @@ panels.forEach(p => observer.observe(p));
     if (switchBtn) switchBtn.hidden = true;
     if (hudLabel) hudLabel.hidden = true;
     if (pillText) pillText.textContent = 'IDLE';
-    if (statEl) statEl.innerHTML = 'faces detected: <strong>0</strong>';
+    if (statEl) statEl.innerHTML = 'targets detected: <strong>0</strong>';
     announce('');
   }
 

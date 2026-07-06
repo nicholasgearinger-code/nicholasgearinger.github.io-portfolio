@@ -1,1 +1,14 @@
-
+{
+  "name": "portfolio-backend",
+  "version": "1.1.0",
+  "description": "Dependency-free Node.js backend for the Nicholas Gearinger portfolio: contact form, view counter, newsletter, analytics, guestbook, projects/claps, vCard/résumé, an AI Q&A proxy, and SEO.",
+  "type": "commonjs",
+  "main": "server.js",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": ["portfolio", "backend", "node", "zero-dependency", "api"],
+  "license": "MIT"
+}

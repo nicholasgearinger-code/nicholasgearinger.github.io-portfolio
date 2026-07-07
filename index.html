@@ -1012,57 +1012,6 @@
   .craft-caption h3 { font-family: 'Syne', sans-serif; font-size: 1.15rem; font-weight: 700; color: var(--white); margin-bottom: .4rem; }
   .craft-caption p { color: var(--muted); font-size: .85rem; line-height: 1.6; margin-bottom: .8rem; }
   .craft-caption .model-pills { margin-top: .2rem; }
-
-  /* -- mobile: AR "view in your space" + hand-gesture model control -- */
-  .craft-actions {
-    position: absolute; top: .6rem; right: .6rem; z-index: 4;
-    display: flex; flex-direction: column; align-items: flex-end; gap: .4rem;
-  }
-  .craft-ar-btn, .craft-hand-btn {
-    display: inline-flex; align-items: center; gap: .35rem;
-    font-family: 'JetBrains Mono', monospace; font-size: .66rem; font-weight: 500;
-    letter-spacing: .02em; white-space: nowrap;
-    padding: .4rem .7rem; border-radius: 100px;
-    cursor: pointer; backdrop-filter: blur(6px);
-    transition: background .2s, border-color .2s, opacity .2s;
-  }
-  .craft-ar-btn {
-    color: var(--violet); background: rgba(129,140,248,.10);
-    border: 1px solid rgba(129,140,248,.4);
-  }
-  .craft-ar-btn:hover { background: rgba(129,140,248,.2); border-color: var(--violet); }
-  .craft-hand-btn {
-    color: var(--sky); background: rgba(3,8,16,.7);
-    border: 1px solid var(--card-border);
-  }
-  .craft-hand-btn:hover { background: rgba(125,211,252,.14); border-color: var(--sky); }
-  .craft-hand-btn.active { color: var(--navy); background: var(--sky); border-color: var(--sky); }
-  .craft-hand-btn:disabled { opacity: .55; cursor: wait; }
-  .hand-orbit-pip {
-    position: absolute; bottom: .6rem; right: .6rem; z-index: 5;
-    width: 118px; aspect-ratio: 4 / 3;
-    border-radius: .6rem; overflow: hidden;
-    border: 1px solid rgba(125,211,252,.45);
-    background: var(--navy);
-    box-shadow: 0 8px 20px rgba(0,0,0,.5);
-  }
-  .hand-orbit-pip[hidden] { display: none; }
-  .hand-orbit-pip .hand-orbit-video,
-  .hand-orbit-pip .hand-orbit-canvas {
-    position: absolute; inset: 0; width: 100%; height: 100%;
-    object-fit: cover; transform: scaleX(-1); /* mirror video + drawn skeleton as one unit */
-  }
-  .hand-orbit-hint {
-    position: absolute; left: 0; right: 0; bottom: 0; margin: 0; z-index: 1;
-    padding: .22rem .35rem; text-align: center;
-    font-size: .58rem; line-height: 1.25; color: var(--white);
-    background: rgba(2,8,16,.8);
-  }
-  @media (max-width: 640px) {
-    .craft-actions { top: .5rem; right: .5rem; }
-    .craft-ar-btn, .craft-hand-btn { font-size: .62rem; padding: .35rem .6rem; }
-    .hand-orbit-pip { width: 96px; }
-  }
   /* "space for more" placeholder tile */
   .craft-more {
     align-items: center; justify-content: center; text-align: center;
@@ -1793,32 +1742,8 @@
   #webcam-video, #webcam-overlay {
     position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
   }
-  /* z-index + a forced GPU layer on both elements. Without this, <video> can
-     get promoted to its own hardware-composited layer (common on mobile
-     Safari/Android Chrome) that paints above the canvas regardless of DOM
-     order — the detection loop runs and draws fine, it just never becomes
-     visible on top of the live feed. */
-  #webcam-video { z-index: 0; transform: translateZ(0); }
-  #webcam-overlay { z-index: 1; pointer-events: none; transform: translateZ(0); }
-  #webcam-video.is-mirrored { transform: scaleX(-1) translateZ(0); } /* only mirror front-facing cams — mirroring the rear camera looks wrong */
-  .webcam-switch-btn {
-    position: absolute; top: .6rem; right: .6rem; z-index: 3;
-    width: 40px; height: 40px; border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
-    background: rgba(3,8,17,.72); border: 1px solid rgba(34,211,238,.4);
-    color: var(--cyan); font-size: 1.1rem; cursor: pointer;
-    backdrop-filter: blur(4px); transition: background .2s, transform .15s;
-  }
-  .webcam-switch-btn:hover { background: rgba(34,211,238,.18); }
-  .webcam-switch-btn:active { transform: scale(0.92); }
-  .webcam-switch-btn[hidden] { display: none; }
-  .webcam-hud-label {
-    position: absolute; top: .6rem; left: .6rem; z-index: 3;
-    font: 11px/1 'JetBrains Mono', monospace; letter-spacing: .06em;
-    color: var(--cyan); background: rgba(3,8,17,.72); border: 1px solid rgba(34,211,238,.4);
-    padding: .35rem .55rem; border-radius: .3rem; pointer-events: none;
-  }
-  .webcam-hud-label[hidden] { display: none; }
+  #webcam-video { transform: scaleX(-1); } /* mirror, feels natural for a "look at yourself" demo */
+  #webcam-overlay { pointer-events: none; }
   .webcam-placeholder {
     position: absolute; inset: 0; z-index: 2;
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem;
@@ -2565,8 +2490,6 @@
         <div class="webcam-wrap" id="webcam-wrap">
           <video id="webcam-video" autoplay muted playsinline></video>
           <canvas id="webcam-overlay"></canvas>
-          <div class="webcam-hud-label" id="webcam-hud-label" hidden>SCANNING</div>
-          <button type="button" class="webcam-switch-btn" id="webcam-switch" title="Switch camera" hidden>⟲</button>
           <div class="webcam-placeholder" id="webcam-placeholder">
             <button type="button" class="btn-primary" id="webcam-start">▶ Start Camera</button>
             <p class="webcam-note">Requires camera access. Nothing is recorded or sent anywhere — detection runs 100% locally in your browser.</p>
@@ -2597,7 +2520,7 @@
         <p class="webcam-toggle-status" id="webcam-toggle-status"></p>
       </div>
       <div class="algo-footer">
-        <div class="algo-stat" id="webcam-stat">targets detected: <strong>0</strong></div>
+        <div class="algo-stat" id="webcam-stat">faces detected: <strong>0</strong></div>
         <button type="button" class="algo-run-btn" id="webcam-stop" hidden>■ Stop Camera</button>
       </div>
     </div>
@@ -2684,29 +2607,17 @@
             exposure="1.05"
             environment-image="neutral"
             loading="eager"
-            reveal="auto"
-            ar
-            ar-modes="webxr scene-viewer quick-look"
-            ar-scale="auto">
+            reveal="auto">
             <div class="craft-loading" slot="progress-bar">
               <div class="craft-loading-bar"><div class="craft-loading-fill"></div></div>
               <span class="craft-loading-pct">Loading model…</span>
             </div>
-            <button slot="ar-button" type="button" class="craft-ar-btn">⛶ View in your space</button>
           </model-viewer>
           <div class="craft-error" hidden>
             <span class="craft-error-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3L2 20h20L12 3z"/><path d="M12 10v4"/><circle cx="12" cy="17" r="0.6" fill="currentColor" stroke="none"/></svg></span>
             <p>This model couldn't load after several attempts. Make sure <code>carengine-optimized.glb</code> is in the same folder as this page and the page is served over http(s) (not opened as a local file).</p>
           </div>
           <span class="craft-badge">⟳ auto-rotate · drag to orbit</span>
-          <div class="craft-actions">
-            <button type="button" class="craft-hand-btn" data-hand-target="engine-viewer">✋ Hand Control</button>
-          </div>
-          <div class="hand-orbit-pip" id="engine-hand-pip" hidden>
-            <video class="hand-orbit-video" autoplay muted playsinline></video>
-            <canvas class="hand-orbit-canvas"></canvas>
-            <p class="hand-orbit-hint">Pinch &amp; drag to rotate · two hands to zoom</p>
-          </div>
         </div>
         <div class="craft-caption">
           <h3>Combustion Engine</h3>
@@ -2734,29 +2645,17 @@
             exposure="1.05"
             environment-image="neutral"
             loading="eager"
-            reveal="auto"
-            ar
-            ar-modes="webxr scene-viewer quick-look"
-            ar-scale="auto">
+            reveal="auto">
             <div class="craft-loading" slot="progress-bar">
               <div class="craft-loading-bar"><div class="craft-loading-fill"></div></div>
               <span class="craft-loading-pct">Loading model…</span>
             </div>
-            <button slot="ar-button" type="button" class="craft-ar-btn">⛶ View in your space</button>
           </model-viewer>
           <div class="craft-error" hidden>
             <span class="craft-error-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3L2 20h20L12 3z"/><path d="M12 10v4"/><circle cx="12" cy="17" r="0.6" fill="currentColor" stroke="none"/></svg></span>
             <p>This model couldn't load after several attempts. Make sure <code>motorcycle-optimized.glb</code> is in the same folder as this page and the page is served over http(s) (not opened as a local file).</p>
           </div>
           <span class="craft-badge">⟳ auto-rotate · drag to orbit</span>
-          <div class="craft-actions">
-            <button type="button" class="craft-hand-btn" data-hand-target="motorcycle-viewer">✋ Hand Control</button>
-          </div>
-          <div class="hand-orbit-pip" id="motorcycle-hand-pip" hidden>
-            <video class="hand-orbit-video" autoplay muted playsinline></video>
-            <canvas class="hand-orbit-canvas"></canvas>
-            <p class="hand-orbit-hint">Pinch &amp; drag to rotate · two hands to zoom</p>
-          </div>
         </div>
         <div class="craft-caption">
           <h3>Motorcycle</h3>
@@ -2784,29 +2683,17 @@
             exposure="1.05"
             environment-image="neutral"
             loading="eager"
-            reveal="auto"
-            ar
-            ar-modes="webxr scene-viewer quick-look"
-            ar-scale="auto">
+            reveal="auto">
             <div class="craft-loading" slot="progress-bar">
               <div class="craft-loading-bar"><div class="craft-loading-fill"></div></div>
               <span class="craft-loading-pct">Loading model…</span>
             </div>
-            <button slot="ar-button" type="button" class="craft-ar-btn">⛶ View in your space</button>
           </model-viewer>
           <div class="craft-error" hidden>
             <span class="craft-error-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3L2 20h20L12 3z"/><path d="M12 10v4"/><circle cx="12" cy="17" r="0.6" fill="currentColor" stroke="none"/></svg></span>
             <p>This model couldn't load after several attempts. Make sure <code>steampunk_girl-optimized.glb</code> is in the same folder as this page and the page is served over http(s) (not opened as a local file).</p>
           </div>
           <span class="craft-badge">⟳ auto-rotate · drag to orbit</span>
-          <div class="craft-actions">
-            <button type="button" class="craft-hand-btn" data-hand-target="steampunk-viewer">✋ Hand Control</button>
-          </div>
-          <div class="hand-orbit-pip" id="steampunk-hand-pip" hidden>
-            <video class="hand-orbit-video" autoplay muted playsinline></video>
-            <canvas class="hand-orbit-canvas"></canvas>
-            <p class="hand-orbit-hint">Pinch &amp; drag to rotate · two hands to zoom</p>
-          </div>
         </div>
         <div class="craft-caption">
           <h3>Steampunk Character</h3>
@@ -2834,29 +2721,17 @@
             exposure="1.05"
             environment-image="neutral"
             loading="eager"
-            reveal="auto"
-            ar
-            ar-modes="webxr scene-viewer quick-look"
-            ar-scale="auto">
+            reveal="auto">
             <div class="craft-loading" slot="progress-bar">
               <div class="craft-loading-bar"><div class="craft-loading-fill"></div></div>
               <span class="craft-loading-pct">Loading model…</span>
             </div>
-            <button slot="ar-button" type="button" class="craft-ar-btn">⛶ View in your space</button>
           </model-viewer>
           <div class="craft-error" hidden>
             <span class="craft-error-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3L2 20h20L12 3z"/><path d="M12 10v4"/><circle cx="12" cy="17" r="0.6" fill="currentColor" stroke="none"/></svg></span>
             <p>This model couldn't load after several attempts. Make sure <code>magic3d_pbr_model_8699477b-63a4-41c1-a4a5-aec6701a7f8e-optimized.glb</code> is in the same folder as this page and the page is served over http(s) (not opened as a local file).</p>
           </div>
           <span class="craft-badge">⟳ auto-rotate · drag to orbit</span>
-          <div class="craft-actions">
-            <button type="button" class="craft-hand-btn" data-hand-target="magic3d-viewer">✋ Hand Control</button>
-          </div>
-          <div class="hand-orbit-pip" id="magic3d-hand-pip" hidden>
-            <video class="hand-orbit-video" autoplay muted playsinline></video>
-            <canvas class="hand-orbit-canvas"></canvas>
-            <p class="hand-orbit-hint">Pinch &amp; drag to rotate · two hands to zoom</p>
-          </div>
         </div>
         <div class="craft-caption">
           <h3>PBR Sculpt</h3>
@@ -5716,8 +5591,6 @@ panels.forEach(p => observer.observe(p));
   const pillText = document.getElementById('webcam-pill-text');
   const hintEl = document.getElementById('webcam-hint');
   const toggleStatus = document.getElementById('webcam-toggle-status');
-  const switchBtn = document.getElementById('webcam-switch');
-  const hudLabel = document.getElementById('webcam-hud-label');
   const toggles = {
     face: document.getElementById('toggle-face'),
     landmarks: document.getElementById('toggle-landmarks'),
@@ -5748,15 +5621,6 @@ panels.forEach(p => observer.observe(p));
   let faceApiReady = false, landmarksReady = false;
   let cocoModel = null, handDetector = null, poseDetector = null;
   const loadPromises = {};
-
-  // Camera enumeration/switching state. `videoDevices` is populated after the
-  // first getUserMedia grant (device labels/ids are blank pre-permission on
-  // most browsers). `currentDeviceIndex` tracks which one is active so the
-  // switch button can cycle through every camera the device exposes, not
-  // just a front/back pair.
-  let videoDevices = [];
-  let currentDeviceIndex = 0;
-  let switching = false;
 
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     startBtn.disabled = true;
@@ -5854,52 +5718,11 @@ panels.forEach(p => observer.observe(p));
     });
   });
 
-  // These are shared between start(), switchCamera() and the detect loop, so
-  // they live at IIFE scope rather than being re-created (and orphaning the
-  // running rAF loop) every time the camera source changes.
-  const ctx = overlay.getContext('2d');
-  let mirrored = true;
-  let cache = { face: [], objects: [], hands: [], pose: [] };
-
-  function syncSize() { overlay.width = video.videoWidth || 480; overlay.height = video.videoHeight || 360; }
-  function mirrorX(x, w) { return mirrored ? overlay.width - x - w : x; }
-
-  function applyMirror(track) {
-    // Prefer the actual facingMode reported by the track; fall back to
-    // reading the device label (some browsers, notably iOS Safari, don't
-    // always expose facingMode in getSettings()).
-    const settings = track && track.getSettings ? track.getSettings() : {};
-    const label = (track && track.label || '').toLowerCase();
-    const isRear = settings.facingMode === 'environment' || /back|rear|environment/.test(label);
-    mirrored = !isRear;
-    video.classList.toggle('is-mirrored', mirrored);
-  }
-
-  async function refreshDeviceList() {
-    try {
-      const all = await navigator.mediaDevices.enumerateDevices();
-      videoDevices = all.filter((d) => d.kind === 'videoinput');
-    } catch (err) {
-      videoDevices = [];
-    }
-    if (switchBtn) switchBtn.hidden = videoDevices.length < 2;
-  }
-
-  async function openStream(constraints) {
-    const newStream = await navigator.mediaDevices.getUserMedia(constraints);
-    if (stream) stream.getTracks().forEach((t) => t.stop());
-    stream = newStream;
-    video.srcObject = stream;
-    await video.play();
-    applyMirror(stream.getVideoTracks()[0]);
-    syncSize();
-  }
-
   async function start() {
     startBtn.disabled = true;
     if (pillText) pillText.textContent = 'STARTING\u2026';
     try {
-      await openStream({ video: { width: 480, height: 360, facingMode: 'user' }, audio: false });
+      stream = await navigator.mediaDevices.getUserMedia({ video: { width: 480, height: 360 }, audio: false });
     } catch (err) {
       if (pillText) pillText.textContent = 'CAMERA DENIED';
       if (hintEl) hintEl.textContent = 'Camera access was denied or unavailable \u2014 this demo needs it to work.';
@@ -5907,17 +5730,16 @@ panels.forEach(p => observer.observe(p));
       return;
     }
 
+    video.srcObject = stream;
+    await video.play();
     placeholder.hidden = true;
     stopBtn.hidden = false;
     running = true;
-    if (hudLabel) hudLabel.hidden = false;
 
-    await refreshDeviceList();
-    currentDeviceIndex = videoDevices.findIndex((d) => {
-      const track = stream.getVideoTracks()[0];
-      return track && d.deviceId === track.getSettings().deviceId;
-    });
-    if (currentDeviceIndex < 0) currentDeviceIndex = 0;
+    const ctx = overlay.getContext('2d');
+    function syncSize() { overlay.width = video.videoWidth || 480; overlay.height = video.videoHeight || 360; }
+    video.addEventListener('loadedmetadata', syncSize, { once: true });
+    syncSize();
 
     // Face + expression (and optionally landmarks) is on by default — load it now.
     if (toggles.face && toggles.face.checked) {
@@ -5927,255 +5749,145 @@ panels.forEach(p => observer.observe(p));
     }
     if (pillText) pillText.textContent = 'DETECTING';
 
-    detectLoop();
-  }
+    function mirrorX(x, w) { return overlay.width - x - w; }
 
-  async function switchCamera() {
-    if (switching || videoDevices.length < 2) return;
-    switching = true;
-    switchBtn.disabled = true;
-    const prevDeviceId = stream && stream.getVideoTracks()[0] && stream.getVideoTracks()[0].getSettings().deviceId;
-    // Cycle to the next distinct device rather than blindly toggling
-    // facingMode — this also covers laptops/desktops with 2+ webcams and no
-    // concept of "front/back" at all.
-    let nextIndex = (currentDeviceIndex + 1) % videoDevices.length;
-    const nextDevice = videoDevices[nextIndex];
-    try {
-      await openStream({ video: { deviceId: { exact: nextDevice.deviceId }, width: 480, height: 360 }, audio: false });
-      currentDeviceIndex = nextIndex;
-      await refreshDeviceList(); // labels can appear/change after a fresh grant
-    } catch (err) {
-      console.error('[webcam-ai] camera switch failed:', err);
-      announce('Couldn\u2019t switch cameras \u2014 your device may only expose one at a time.');
-      // Try to recover the previous camera so the demo doesn't die mid-switch.
-      if (prevDeviceId) {
-        try { await openStream({ video: { deviceId: { exact: prevDeviceId } }, audio: false }); }
-        catch (err2) { /* nothing more we can do */ }
-      }
-    } finally {
-      switching = false;
-      switchBtn.disabled = false;
-    }
-  }
+    // Detections are cached and drawn every frame regardless of whether a
+    // *new* detection has finished yet — inference is comparatively slow,
+    // so without this, each result would only be on-screen for the instant
+    // between finishing and the next clear, easy to miss entirely.
+    let cache = { face: [], objects: [], hands: [], pose: [] };
 
-  // Shared Iron-Man-style targeting reticle: corner brackets rather than a
-  // plain rectangle, plus a small crosshair — this is the visual proof
-  // the model is actually tracking, not just a static outline. Used by
-  // faces, objects, and poses alike so every detector shows the same
-  // "target acquired" language.
-  function drawBracket(x, y, width, height, color) {
-    const bw = Math.min(18, width * 0.28), bh = Math.min(18, height * 0.28);
-    ctx.strokeStyle = color; ctx.lineWidth = 2;
-    [[x, y, bw, bh, 1, 1], [x + width, y, -bw, bh, -1, 1], [x, y + height, bw, -bh, 1, -1], [x + width, y + height, -bw, -bh, -1, -1]]
-      .forEach(([cx, cy, dw, dh]) => {
-        ctx.beginPath();
-        ctx.moveTo(cx, cy + dh); ctx.lineTo(cx, cy); ctx.lineTo(cx + dw, cy);
-        ctx.stroke();
+    function drawFace() {
+      let faceCount = 0;
+      cache.face.forEach((d) => {
+        const { x: rawX, y, width, height } = d.detection.box;
+        const x = mirrorX(rawX, width);
+        faceCount++;
+        ctx.strokeStyle = '#22D3EE'; ctx.lineWidth = 2;
+        ctx.strokeRect(x, y, width, height);
+
+        const top = Object.entries(d.expressions).sort((a, b) => b[1] - a[1])[0];
+        const label = top[0] + ' ' + Math.round(top[1] * 100) + '%';
+        ctx.font = '14px monospace';
+        const textW = ctx.measureText(label).width;
+        ctx.fillStyle = 'rgba(3,8,17,.85)';
+        ctx.fillRect(x, Math.max(0, y - 20), textW + 10, 20);
+        ctx.fillStyle = '#22D3EE';
+        ctx.fillText(label, x + 5, Math.max(14, y - 5));
+
+        if (d.landmarks) {
+          ctx.fillStyle = '#E879F9';
+          d.landmarks.positions.forEach((p) => {
+            ctx.beginPath();
+            ctx.arc(mirrorX(p.x, 0), p.y, 1.6, 0, Math.PI * 2);
+            ctx.fill();
+          });
+        }
       });
-    const midX = x + width / 2, midY = y + height / 2;
-    ctx.beginPath();
-    ctx.moveTo(midX - 6, midY); ctx.lineTo(midX + 6, midY);
-    ctx.moveTo(midX, midY - 6); ctx.lineTo(midX, midY + 6);
-    ctx.stroke();
-  }
+      if (statEl) statEl.innerHTML = 'faces detected: <strong>' + faceCount + '</strong>';
+    }
 
-  function drawFace() {
-    let faceCount = 0;
-    cache.face.forEach((d) => {
-      const { x: rawX, y, width, height } = d.detection.box;
-      const x = mirrorX(rawX, width);
-      faceCount++;
-
-      drawBracket(x, y, width, height, '#22D3EE');
-
-      const top = Object.entries(d.expressions).sort((a, b) => b[1] - a[1])[0];
-      const label = 'TARGET \u00b7 ' + top[0].toUpperCase() + ' ' + Math.round(top[1] * 100) + '%';
-      ctx.font = '13px monospace';
-      const textW = ctx.measureText(label).width;
-      ctx.fillStyle = 'rgba(3,8,17,.85)';
-      ctx.fillRect(x, Math.max(0, y - 20), textW + 10, 20);
-      ctx.fillStyle = '#22D3EE';
-      ctx.fillText(label, x + 5, Math.max(14, y - 5));
-
-      if (d.landmarks) {
-        ctx.fillStyle = '#E879F9';
-        d.landmarks.positions.forEach((p) => {
-          ctx.beginPath();
-          ctx.arc(mirrorX(p.x, 0), p.y, 1.6, 0, Math.PI * 2);
-          ctx.fill();
+    function drawObjects() {
+      cache.objects.forEach((p) => {
+        const [rawX, y, w, h] = p.bbox;
+        const x = mirrorX(rawX, w);
+        ctx.strokeStyle = '#F59E0B'; ctx.lineWidth = 2;
+        ctx.strokeRect(x, y, w, h);
+        const label = p.class + ' ' + Math.round(p.score * 100) + '%';
+        ctx.font = '13px monospace';
+        const textW = ctx.measureText(label).width;
+        ctx.fillStyle = 'rgba(3,8,17,.85)';
+        ctx.fillRect(x, Math.max(0, y - 18), textW + 8, 18);
+        ctx.fillStyle = '#F59E0B';
+        ctx.fillText(label, x + 4, Math.max(13, y - 5));
+      });
+    }
+    function drawHands() {
+      cache.hands.forEach((hand) => {
+        const pts = hand.keypoints.map((k) => ({ x: mirrorX(k.x, 0), y: k.y }));
+        ctx.strokeStyle = '#7DD3FC'; ctx.lineWidth = 2;
+        HAND_CONNECTIONS.forEach(([a, b]) => {
+          if (!pts[a] || !pts[b]) return;
+          ctx.beginPath(); ctx.moveTo(pts[a].x, pts[a].y); ctx.lineTo(pts[b].x, pts[b].y); ctx.stroke();
         });
-      }
-    });
-    return faceCount;
-  }
-
-  function drawObjects() {
-    cache.objects.forEach((p) => {
-      const [rawX, y, w, h] = p.bbox;
-      const x = mirrorX(rawX, w);
-      drawBracket(x, y, w, h, '#F59E0B');
-      const label = p.class + ' ' + Math.round(p.score * 100) + '%';
-      ctx.font = '13px monospace';
-      const textW = ctx.measureText(label).width;
-      ctx.fillStyle = 'rgba(3,8,17,.85)';
-      ctx.fillRect(x, Math.max(0, y - 18), textW + 8, 18);
-      ctx.fillStyle = '#F59E0B';
-      ctx.fillText(label, x + 4, Math.max(13, y - 5));
-    });
-    return cache.objects.length;
-  }
-  function drawHands() {
-    let handCount = 0;
-    cache.hands.forEach((hand) => {
-      if (!hand.keypoints || !hand.keypoints.length) return;
-      handCount++;
-      const pts = hand.keypoints.map((k) => ({ x: mirrorX(k.x, 0), y: k.y }));
-
-      // Targeting bracket + label around the whole hand, so hands speak the
-      // same "target acquired" HUD language as faces, objects and poses
-      // (previously hands drew only a bare skeleton and never registered in
-      // the HUD at all).
-      const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
-      const minX = Math.min(...xs), maxX = Math.max(...xs);
-      const minY = Math.min(...ys), maxY = Math.max(...ys);
-      const pad = 10;
-      drawBracket(minX - pad, minY - pad, (maxX - minX) + pad * 2, (maxY - minY) + pad * 2, '#7DD3FC');
-
-      const side = (hand.handedness || hand.label || 'HAND').toString().toUpperCase();
-      const label = 'HAND \u00b7 ' + side;
-      ctx.font = '13px monospace';
-      const textW = ctx.measureText(label).width;
-      const ly = Math.max(0, minY - pad - 18);
-      ctx.fillStyle = 'rgba(3,8,17,.85)';
-      ctx.fillRect(minX - pad, ly, textW + 10, 18);
-      ctx.fillStyle = '#7DD3FC';
-      ctx.fillText(label, minX - pad + 5, ly + 13);
-
-      // Skeleton
-      ctx.strokeStyle = '#7DD3FC'; ctx.lineWidth = 2;
-      HAND_CONNECTIONS.forEach(([a, b]) => {
-        if (!pts[a] || !pts[b]) return;
-        ctx.beginPath(); ctx.moveTo(pts[a].x, pts[a].y); ctx.lineTo(pts[b].x, pts[b].y); ctx.stroke();
+        ctx.fillStyle = '#7DD3FC';
+        pts.forEach((p) => { ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2); ctx.fill(); });
       });
-      ctx.fillStyle = '#7DD3FC';
-      pts.forEach((p) => { ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2); ctx.fill(); });
-    });
-    return handCount;
-  }
-  function drawPose() {
-    let poseCount = 0;
-    cache.pose.forEach((pose) => {
-      const byName = {};
-      pose.keypoints.forEach((k) => { byName[k.name] = k; });
+    }
+    function drawPose() {
+      cache.pose.forEach((pose) => {
+        const byName = {};
+        pose.keypoints.forEach((k) => { byName[k.name] = k; });
+        ctx.strokeStyle = '#818CF8'; ctx.lineWidth = 2;
+        POSE_CONNECTIONS.forEach(([a, b]) => {
+          const ka = byName[a], kb = byName[b];
+          if (!ka || !kb || ka.score < 0.3 || kb.score < 0.3) return;
+          ctx.beginPath();
+          ctx.moveTo(mirrorX(ka.x, 0), ka.y);
+          ctx.lineTo(mirrorX(kb.x, 0), kb.y);
+          ctx.stroke();
+        });
+        ctx.fillStyle = '#818CF8';
+        pose.keypoints.forEach((k) => {
+          if (k.score < 0.3) return;
+          ctx.beginPath(); ctx.arc(mirrorX(k.x, 0), k.y, 3, 0, Math.PI * 2); ctx.fill();
+        });
+      });
+    }
 
-      // Bounding box from the confidently-visible keypoints, so the pose
-      // gets the same targeting bracket as faces and objects.
-      const visible = pose.keypoints.filter((k) => k.score >= 0.3);
-      if (visible.length) {
-        poseCount++;
-        const xs = visible.map((k) => mirrorX(k.x, 0));
-        const ys = visible.map((k) => k.y);
-        const minX = Math.min(...xs), maxX = Math.max(...xs);
-        const minY = Math.min(...ys), maxY = Math.max(...ys);
-        const pad = 12;
-        drawBracket(minX - pad, minY - pad, (maxX - minX) + pad * 2, (maxY - minY) + pad * 2, '#818CF8');
+    async function detectLoop() {
+      if (!running) return;
+      if (video.readyState < 2) { rafId = requestAnimationFrame(detectLoop); return; }
+
+      ctx.clearRect(0, 0, overlay.width, overlay.height);
+      ctx.fillStyle = 'red';
+      ctx.fillRect(10, 10, 60, 60); // TEMP diagnostic marker — remove once confirmed fixed
+
+      const faceWanted = (toggles.face && toggles.face.checked) || (toggles.landmarks && toggles.landmarks.checked);
+      if (faceWanted && faceApiReady) {
+        try {
+          let query = faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 224 }));
+          if (toggles.landmarks && toggles.landmarks.checked && landmarksReady) query = query.withFaceLandmarks();
+          query = query.withFaceExpressions();
+          cache.face = await query;
+        } catch (err) { console.error('[webcam-ai] face detection failed:', err); }
+      } else {
+        cache.face = [];
       }
 
-      ctx.strokeStyle = '#818CF8'; ctx.lineWidth = 2;
-      POSE_CONNECTIONS.forEach(([a, b]) => {
-        const ka = byName[a], kb = byName[b];
-        if (!ka || !kb || ka.score < 0.3 || kb.score < 0.3) return;
-        ctx.beginPath();
-        ctx.moveTo(mirrorX(ka.x, 0), ka.y);
-        ctx.lineTo(mirrorX(kb.x, 0), kb.y);
-        ctx.stroke();
-      });
-      ctx.fillStyle = '#818CF8';
-      pose.keypoints.forEach((k) => {
-        if (k.score < 0.3) return;
-        ctx.beginPath(); ctx.arc(mirrorX(k.x, 0), k.y, 3, 0, Math.PI * 2); ctx.fill();
-      });
-    });
-    return poseCount;
-  }
+      if (toggles.objects && toggles.objects.checked && cocoModel) {
+        try {
+          cache.objects = await cocoModel.detect(video);
+        } catch (err) { console.error('[webcam-ai] objects detection failed:', err); }
+      } else {
+        cache.objects = [];
+      }
 
-  // Faint animated corner-frame + scanline drawn every single frame,
-  // independent of whether anything is detected. This is the "yes, the HUD
-  // is alive" tell: if this isn't moving, the loop has stalled; if it is,
-  // the camera + canvas pipeline is working even with zero faces in view.
-  function drawScanFrame(t) {
-    const w = overlay.width, h = overlay.height, m = 14;
-    ctx.strokeStyle = 'rgba(34,211,238,.55)'; ctx.lineWidth = 1.5;
-    [[m, m, 1, 1], [w - m, m, -1, 1], [m, h - m, 1, -1], [w - m, h - m, -1, -1]].forEach(([cx, cy, dx, dy]) => {
-      ctx.beginPath();
-      ctx.moveTo(cx, cy + dy * 20); ctx.lineTo(cx, cy); ctx.lineTo(cx + dx * 20, cy);
-      ctx.stroke();
-    });
-    const sy = (t / 14) % h;
-    const grad = ctx.createLinearGradient(0, sy - 18, 0, sy + 18);
-    grad.addColorStop(0, 'rgba(34,211,238,0)');
-    grad.addColorStop(0.5, 'rgba(34,211,238,.16)');
-    grad.addColorStop(1, 'rgba(34,211,238,0)');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, sy - 18, w, 36);
-  }
+      if (toggles.hands && toggles.hands.checked && handDetector) {
+        try {
+          cache.hands = await handDetector.estimateHands(video);
+          if (cache.hands.length) console.log('[webcam-ai] hands detected:', cache.hands.length, cache.hands[0]);
+        } catch (err) { console.error('[webcam-ai] hands detection failed:', err); }
+      } else {
+        cache.hands = [];
+      }
 
-  async function detectLoop(t) {
-    if (!running) return;
-    if (video.readyState < 2) { rafId = requestAnimationFrame(detectLoop); return; }
+      if (toggles.pose && toggles.pose.checked && poseDetector) {
+        try {
+          cache.pose = await poseDetector.estimatePoses(video);
+        } catch (err) { console.error('[webcam-ai] pose detection failed:', err); }
+      } else {
+        cache.pose = [];
+      }
 
-    ctx.clearRect(0, 0, overlay.width, overlay.height);
-    drawScanFrame(t || 0);
+      drawFace();
+      drawObjects();
+      drawHands();
+      drawPose();
 
-    const faceWanted = (toggles.face && toggles.face.checked) || (toggles.landmarks && toggles.landmarks.checked);
-    if (faceWanted && faceApiReady) {
-      try {
-        let query = faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 224 }));
-        if (toggles.landmarks && toggles.landmarks.checked && landmarksReady) query = query.withFaceLandmarks();
-        query = query.withFaceExpressions();
-        cache.face = await query;
-      } catch (err) { console.error('[webcam-ai] face detection failed:', err); }
-    } else {
-      cache.face = [];
+      rafId = requestAnimationFrame(detectLoop);
     }
-
-    if (toggles.objects && toggles.objects.checked && cocoModel) {
-      try {
-        cache.objects = await cocoModel.detect(video);
-      } catch (err) { console.error('[webcam-ai] objects detection failed:', err); }
-    } else {
-      cache.objects = [];
-    }
-
-    if (toggles.hands && toggles.hands.checked && handDetector) {
-      try {
-        cache.hands = await handDetector.estimateHands(video);
-      } catch (err) { console.error('[webcam-ai] hands detection failed:', err); }
-    } else {
-      cache.hands = [];
-    }
-
-    if (toggles.pose && toggles.pose.checked && poseDetector) {
-      try {
-        cache.pose = await poseDetector.estimatePoses(video);
-      } catch (err) { console.error('[webcam-ai] pose detection failed:', err); }
-    } else {
-      cache.pose = [];
-    }
-
-    const faceCount = drawFace();
-    const objectCount = drawObjects();
-    const handCount = drawHands();
-    const poseCount = drawPose();
-
-    // A single "TARGET ACQUIRED" / "SCANNING" HUD state driven by whichever
-    // detectors are active — a face, an object, a hand, or a pose all count
-    // as a lock, not just faces.
-    const totalTargets = faceCount + objectCount + handCount + poseCount;
-    if (statEl) statEl.innerHTML = 'targets detected: <strong>' + totalTargets + '</strong>';
-    if (hudLabel) hudLabel.textContent = totalTargets > 0 ? 'TARGET ACQUIRED' : 'SCANNING';
-
-    rafId = requestAnimationFrame(detectLoop);
+    detectLoop();
   }
 
   function stop() {
@@ -6186,17 +5898,13 @@ panels.forEach(p => observer.observe(p));
     placeholder.hidden = false;
     stopBtn.hidden = true;
     startBtn.disabled = false;
-    if (switchBtn) switchBtn.hidden = true;
-    if (hudLabel) hudLabel.hidden = true;
     if (pillText) pillText.textContent = 'IDLE';
-    if (statEl) statEl.innerHTML = 'targets detected: <strong>0</strong>';
+    if (statEl) statEl.innerHTML = 'faces detected: <strong>0</strong>';
     announce('');
   }
 
   startBtn.addEventListener('click', start);
   stopBtn.addEventListener('click', stop);
-  if (switchBtn) switchBtn.addEventListener('click', switchCamera);
-  video.addEventListener('loadedmetadata', syncSize);
   document.addEventListener('visibilitychange', () => { if (document.hidden && running) stop(); });
 })();
 </script>
@@ -6324,208 +6032,6 @@ panels.forEach(p => observer.observe(p));
       setPill(model ? 'READY' : 'LOADING MODEL', model ? true : null);
     });
   }
-})();
-</script>
-<script>
-/* -- HAND-GESTURE 3D MODEL CONTROL: per-card front-camera hand tracking that
-      orbits and zooms a <model-viewer>. Independent of the Face AI webcam
-      demo above — its own camera session and its own lazily-loaded
-      MediaPipe Hands detector (shared once loaded, since it's cheap to
-      reuse across cards). Only one card's session runs at a time, since a
-      phone can only expose one live camera stream per tab: starting a new
-      card's hand control stops whichever one was previously active.
-      Gestures: pinch with one hand and drag to orbit; pinch with both
-      hands and change the distance between them to zoom in/out. -- */
-(function handOrbitControl() {
-  const CARD_IDS = ['engine-viewer', 'motorcycle-viewer', 'steampunk-viewer', 'magic3d-viewer'];
-  const HAND_LIB_URL = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/hand-pose-detection/dist/hand-pose-detection.min.js';
-  const HAND_CONNECTIONS = [
-    [0,1],[1,2],[2,3],[3,4], [0,5],[5,6],[6,7],[7,8], [0,9],[9,10],[10,11],[11,12],
-    [0,13],[13,14],[14,15],[15,16], [0,17],[17,18],[18,19],[19,20], [5,9],[9,13],[13,17],
-  ];
-
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
-
-  let detector = null, detectorPromise = null;
-  function loadScript(src) {
-    return new Promise((resolve, reject) => {
-      const s = document.createElement('script');
-      s.src = src;
-      s.onload = resolve;
-      s.onerror = () => reject(new Error('failed to load ' + src));
-      document.head.appendChild(s);
-    });
-  }
-  async function ensureDetector() {
-    if (detector) return detector;
-    if (detectorPromise) return detectorPromise;
-    detectorPromise = (async () => {
-      if (typeof window.tf === 'undefined') {
-        throw new Error('TensorFlow.js core has not loaded yet');
-      }
-      if (typeof handPoseDetection === 'undefined') await loadScript(HAND_LIB_URL);
-      detector = await handPoseDetection.createDetector(
-        handPoseDetection.SupportedModels.MediaPipeHands,
-        { runtime: 'tfjs', modelType: 'lite', maxHands: 2 }
-      );
-      return detector;
-    })();
-    return detectorPromise;
-  }
-
-  function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
-
-  // Normalizes pinch distance by hand size (wrist-to-middle-knuckle) so the
-  // pinch threshold works regardless of how close the hand is to the camera.
-  function pinchInfo(hand) {
-    const kp = hand.keypoints;
-    const thumb = kp[4], index = kp[8], wrist = kp[0], midMcp = kp[9];
-    if (!thumb || !index || !wrist || !midMcp) return null;
-    const handSize = dist(wrist, midMcp) || 1;
-    return {
-      isPinching: (dist(thumb, index) / handSize) < 0.55,
-      mid: { x: (thumb.x + index.x) / 2, y: (thumb.y + index.y) / 2 },
-    };
-  }
-
-  let activeSession = null;
-
-  function makeSession(viewerId) {
-    const viewer = document.getElementById(viewerId);
-    const pip = document.getElementById(viewerId.replace('-viewer', '-hand-pip'));
-    const btn = document.querySelector('[data-hand-target="' + viewerId + '"]');
-    if (!viewer || !pip || !btn) return null;
-    const video = pip.querySelector('.hand-orbit-video');
-    const canvas = pip.querySelector('.hand-orbit-canvas');
-    const hint = pip.querySelector('.hand-orbit-hint');
-
-    let stream = null, rafId = null, running = false, wasAutoRotate = false;
-    let dragState = null, zoomState = null;
-
-    function setHint(text) { if (hint) hint.textContent = text; }
-    function setBtn(label, disabled, isActive) {
-      btn.textContent = label;
-      btn.disabled = !!disabled;
-      btn.classList.toggle('active', !!isActive);
-    }
-
-    async function start() {
-      if (activeSession && activeSession !== session) activeSession.stop();
-      setBtn('Starting camera…', true, false);
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'user', width: { ideal: 320 }, height: { ideal: 240 } },
-          audio: false,
-        });
-      } catch (err) {
-        setHint('Camera access was denied or unavailable.');
-        setBtn('✋ Hand Control', false, false);
-        return;
-      }
-      video.srcObject = stream;
-      try { await video.play(); } catch (err) { /* autoplay quirks on some mobile browsers — ignore */ }
-      pip.hidden = false;
-      running = true;
-      activeSession = session;
-      wasAutoRotate = viewer.hasAttribute('auto-rotate');
-      viewer.removeAttribute('auto-rotate'); // hand control shouldn't fight the auto-spin
-      setBtn('✋ Stop Hand Control', false, true);
-      setHint('Loading hand tracking…');
-      try {
-        await ensureDetector();
-      } catch (err) {
-        setHint('Couldn\u2019t load hand tracking — check your connection.');
-        stop();
-        return;
-      }
-      setHint('Pinch & drag to rotate · two hands to zoom');
-
-      function syncCanvas() { canvas.width = video.videoWidth || 320; canvas.height = video.videoHeight || 240; }
-      video.addEventListener('loadedmetadata', syncCanvas, { once: true });
-      syncCanvas();
-
-      async function loop() {
-        if (!running) return;
-        if (video.readyState < 2) { rafId = requestAnimationFrame(loop); return; }
-
-        let hands = [];
-        try { hands = await detector.estimateHands(video); } catch (err) { /* skip this frame */ }
-
-        const ctx = canvas.getContext('2d');
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.strokeStyle = '#7DD3FC'; ctx.fillStyle = '#7DD3FC'; ctx.lineWidth = 2;
-        hands.forEach((hand) => {
-          const pts = hand.keypoints;
-          HAND_CONNECTIONS.forEach(([a, b]) => {
-            if (!pts[a] || !pts[b]) return;
-            ctx.beginPath(); ctx.moveTo(pts[a].x, pts[a].y); ctx.lineTo(pts[b].x, pts[b].y); ctx.stroke();
-          });
-          pts.forEach((p) => { ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2); ctx.fill(); });
-        });
-
-        const pinches = hands.map(pinchInfo).filter((p) => p && p.isPinching);
-
-        if (pinches.length >= 2) {
-          dragState = null;
-          const d = dist(pinches[0].mid, pinches[1].mid);
-          const orbit = viewer.getCameraOrbit();
-          if (!zoomState) {
-            zoomState = { lastDist: d, startRadius: orbit.radius };
-          } else {
-            const scale = zoomState.lastDist / (d || 1);
-            const newRadius = Math.max(0.05, zoomState.startRadius * scale);
-            viewer.cameraOrbit = orbit.theta + 'rad ' + orbit.phi + 'rad ' + newRadius + 'm';
-            viewer.jumpCameraToGoal();
-          }
-        } else if (pinches.length === 1) {
-          zoomState = null;
-          const p = pinches[0].mid;
-          const orbit = viewer.getCameraOrbit();
-          if (!dragState) {
-            dragState = { lastX: p.x, lastY: p.y };
-          } else {
-            const dx = p.x - dragState.lastX;
-            const dy = p.y - dragState.lastY;
-            const newTheta = orbit.theta - dx * 0.012;
-            const newPhi = Math.min(Math.PI - 0.05, Math.max(0.05, orbit.phi - dy * 0.012));
-            viewer.cameraOrbit = newTheta + 'rad ' + newPhi + 'rad ' + orbit.radius + 'm';
-            viewer.jumpCameraToGoal();
-            dragState = { lastX: p.x, lastY: p.y };
-          }
-        } else {
-          dragState = null;
-          zoomState = null;
-        }
-
-        rafId = requestAnimationFrame(loop);
-      }
-      loop();
-    }
-
-    function stop() {
-      running = false;
-      if (rafId) cancelAnimationFrame(rafId);
-      if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
-      video.srcObject = null;
-      pip.hidden = true;
-      dragState = null; zoomState = null;
-      if (wasAutoRotate) viewer.setAttribute('auto-rotate', '');
-      setBtn('✋ Hand Control', false, false);
-      if (activeSession === session) activeSession = null;
-    }
-
-    const session = {
-      start, stop,
-      get running() { return running; },
-    };
-    btn.addEventListener('click', () => { session.running ? stop() : start(); });
-    return session;
-  }
-
-  const sessions = CARD_IDS.map(makeSession).filter(Boolean);
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden && activeSession) activeSession.stop();
-  });
 })();
 </script>
 <script>

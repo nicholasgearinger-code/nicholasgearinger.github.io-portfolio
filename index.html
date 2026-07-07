@@ -6215,11 +6215,12 @@ panels.forEach(p => observer.observe(p));
       ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
       const now = new Date();
       const timeStr = now.toLocaleTimeString([], { hour12: false });
+      const timeW = ctx.measureText(timeStr).width; // measured while this font is still active
       ctx.fillStyle = '#67E8F9';
       ctx.fillText(timeStr, pad, midY);
       ctx.font = (12 * dpr) + 'px monospace';
       ctx.fillStyle = 'rgba(203,213,225,.95)';
-      ctx.fillText(now.toISOString().slice(0, 10), pad + ctx.measureText(timeStr).width + 12 * dpr, midY);
+      ctx.fillText(now.toISOString().slice(0, 10), pad + timeW + 12 * dpr, midY);
 
       const fpsColor = fps >= 24 ? '#4ADE80' : fps >= 15 ? '#F59E0B' : '#F87171';
       let cursor = drawPill(W - pad, midY, Math.round(fps) + ' FPS', fpsColor, dpr);
@@ -6288,7 +6289,7 @@ panels.forEach(p => observer.observe(p));
       const hasGeo = toggles.geo && toggles.geo.checked && geoInfo;
       if (!hasHeading && !hasGeo) return;
 
-      const r = 32 * dpr;
+      const r = 34 * dpr;
       const margin = 14 * dpr;
       const cx = W - margin - r, cy = H - margin - r;
 
@@ -6309,32 +6310,58 @@ panels.forEach(p => observer.observe(p));
 
       if (!hasHeading) return;
 
-      ctx.fillStyle = 'rgba(3,8,17,.78)';
+      // Backing disc + outer ring — no cardinal letters, just tick marks
+      // every 30°, closer to a targeting radar than a boy-scout compass.
+      ctx.fillStyle = 'rgba(3,8,17,.8)';
       ctx.beginPath(); ctx.arc(cx, cy, r + 8 * dpr, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = 'rgba(226,232,240,.85)'; ctx.lineWidth = 2 * dpr;
+      ctx.strokeStyle = 'rgba(34,211,238,.55)'; ctx.lineWidth = 1.5 * dpr;
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
-
-      ctx.font = 'bold ' + (12 * dpr) + 'px monospace';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      const cardinals = [['N', 0, '#F87171'], ['E', 90, 'rgba(226,232,240,.85)'], ['S', 180, 'rgba(226,232,240,.85)'], ['W', 270, 'rgba(226,232,240,.85)']];
-      cardinals.forEach(([letter, deg, color]) => {
+      for (let deg = 0; deg < 360; deg += 30) {
         const rad = (deg * Math.PI) / 180;
-        ctx.fillStyle = color;
-        ctx.fillText(letter, cx + Math.sin(rad) * (r - 11 * dpr), cy - Math.cos(rad) * (r - 11 * dpr));
-      });
+        const isMajor = deg % 90 === 0;
+        const inner = r - (isMajor ? 8 : 5) * dpr;
+        ctx.strokeStyle = isMajor ? 'rgba(103,232,249,.8)' : 'rgba(103,232,249,.4)';
+        ctx.lineWidth = (isMajor ? 2 : 1) * dpr;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.sin(rad) * inner, cy - Math.cos(rad) * inner);
+        ctx.lineTo(cx + Math.sin(rad) * r, cy - Math.cos(rad) * r);
+        ctx.stroke();
+      }
 
+      // Slow radar sweep, purely decorative and tied to wall-clock time so
+      // it animates smoothly regardless of detection/orientation cadence —
+      // same trick as the face reticle's scan line.
+      const sweep = ((Date.now() % 4000) / 4000) * Math.PI * 2;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(sweep);
+      ctx.fillStyle = 'rgba(34,211,238,.16)';
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.arc(0, 0, r, -Math.PI / 2 - 0.45, -Math.PI / 2, false);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+
+      // Heading spoke + glowing blip on the ring — direction reads at a
+      // glance from the spoke's angle, with the exact number spelled out
+      // big in the center rather than needing to eyeball a needle.
       const rad = (orientationInfo.heading * Math.PI) / 180;
-      const tipX = cx + Math.sin(rad) * (r - 16 * dpr), tipY = cy - Math.cos(rad) * (r - 16 * dpr);
-      const tailX = cx - Math.sin(rad) * (r * 0.4), tailY = cy + Math.cos(rad) * (r * 0.4);
-      ctx.strokeStyle = '#22D3EE'; ctx.lineWidth = 2.5 * dpr;
-      ctx.beginPath(); ctx.moveTo(tailX, tailY); ctx.lineTo(tipX, tipY); ctx.stroke();
+      const bx = cx + Math.sin(rad) * r, by = cy - Math.cos(rad) * r;
+      ctx.strokeStyle = 'rgba(34,211,238,.7)'; ctx.lineWidth = 1.5 * dpr;
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(bx, by); ctx.stroke();
+      ctx.strokeStyle = 'rgba(34,211,238,.35)'; ctx.lineWidth = 2 * dpr;
+      ctx.beginPath(); ctx.arc(bx, by, 7 * dpr, 0, Math.PI * 2); ctx.stroke();
       ctx.fillStyle = '#22D3EE';
-      ctx.beginPath(); ctx.arc(tipX, tipY, 3 * dpr, 0, Math.PI * 2); ctx.fill();
-      ctx.beginPath(); ctx.arc(cx, cy, 2.5 * dpr, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(bx, by, 3.5 * dpr, 0, Math.PI * 2); ctx.fill();
 
-      ctx.font = 'bold ' + (11 * dpr) + 'px monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = 'bold ' + (15 * dpr) + 'px monospace';
       ctx.fillStyle = '#67E8F9';
-      ctx.fillText(Math.round(orientationInfo.heading) + '\u00b0', cx, cy + r + 16 * dpr);
+      ctx.fillText(Math.round(orientationInfo.heading) + '\u00b0', cx, cy - 3 * dpr);
+      ctx.font = (8 * dpr) + 'px monospace';
+      ctx.fillStyle = 'rgba(148,163,184,.85)';
+      ctx.fillText('HDG', cx, cy + 10 * dpr);
     }
 
     // Rendering and detection are two independent loops now. Previously a

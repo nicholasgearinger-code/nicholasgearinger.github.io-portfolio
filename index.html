@@ -6143,39 +6143,159 @@ panels.forEach(p => observer.observe(p));
     // the same physical size regardless of the device's pixel ratio.
     function drawTelemetry() {
       if (!(toggles.telemetry && toggles.telemetry.checked)) return;
-      const pad = 8 * PERF_DPR;
-      const lineH = 14 * PERF_DPR;
-      const now = new Date();
-      const lines = [
-        now.toLocaleTimeString([], { hour12: false }),
-        now.toISOString().slice(0, 10),
-        'FPS ' + Math.round(fps),
-      ];
-      if (batteryInfo) {
-        lines.push('BATT ' + Math.round(batteryInfo.level * 100) + '%' + (batteryInfo.charging ? ' CHG' : ''));
-      }
-      const netType = networkInfo && networkInfo.effectiveType ? networkInfo.effectiveType.toUpperCase() : null;
-      lines.push('NET ' + (navigator.onLine === false ? 'OFFLINE' : (netType || 'ONLINE')));
-      if (orientationInfo && orientationInfo.beta != null) {
-        lines.push('TILT b' + Math.round(orientationInfo.beta) + ' g' + Math.round(orientationInfo.gamma));
-      }
-      if (toggles.geo && toggles.geo.checked && geoInfo) {
-        lines.push('GEO ' + geoInfo.latitude.toFixed(3) + ', ' + geoInfo.longitude.toFixed(3));
-      }
-      lines.push('RES ' + videoW + '\u00d7' + videoH);
-
+      const dpr = PERF_DPR;
+      const W = overlay.width, H = overlay.height;
+      drawTelemetryTopBar(W, dpr);
+      if (batteryInfo) drawBatteryGauge(H, dpr);
+      drawRightCluster(W, H, dpr);
       ctx.textAlign = 'left';
-      ctx.font = (11 * PERF_DPR) + 'px monospace';
-      const panelW = Math.max(...lines.map((l) => ctx.measureText(l).width)) + pad * 2;
-      const panelH = lines.length * lineH + pad;
-      const left = pad, top = pad;
-      ctx.fillStyle = 'rgba(3,8,17,.72)';
-      ctx.strokeStyle = 'rgba(34,211,238,.35)'; ctx.lineWidth = 1;
-      ctx.fillRect(left, top, panelW, panelH);
-      ctx.strokeRect(left, top, panelW, panelH);
-      ctx.fillStyle = '#22D3EE';
-      lines.forEach((l, i) => ctx.fillText(l, left + pad, top + pad * 0.7 + (i + 1) * lineH - lineH * 0.3));
+      ctx.textBaseline = 'alphabetic';
     }
+
+    // Rounded-rect path, used by the pill badges below.
+    function roundRectPath(x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    }
+
+    // Draws a small filled/outlined pill with its RIGHT edge fixed at
+    // rightEdgeX (so a row of pills can be built right-to-left just by
+    // chaining the returned left edge into the next call) and returns that
+    // left edge.
+    function drawPill(rightEdgeX, midY, label, color, dpr) {
+      const padX = 7 * dpr, h = 17 * dpr;
+      ctx.font = (10 * dpr) + 'px monospace';
+      ctx.textAlign = 'left';
+      const textW = ctx.measureText(label).width;
+      const w = textW + padX * 2;
+      const x = rightEdgeX - w, y = midY - h / 2;
+      ctx.fillStyle = color + '26'; // ~15% alpha fill, same hue as the border/text
+      roundRectPath(x, y, w, h, h / 2);
+      ctx.fill();
+      ctx.strokeStyle = color; ctx.lineWidth = 1;
+      roundRectPath(x, y, w, h, h / 2);
+      ctx.stroke();
+      ctx.fillStyle = color;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, x + w / 2, midY + 0.5);
+      return x;
+    }
+
+    // Full-width strip across the top: clock + date on the left, FPS and
+    // network status as color-coded pills on the right — a glance at color
+    // alone should tell you "system healthy" without reading a single word.
+    function drawTelemetryTopBar(W, dpr) {
+      const barH = 24 * dpr;
+      ctx.fillStyle = 'rgba(3,8,17,.78)';
+      ctx.fillRect(0, 0, W, barH);
+      ctx.strokeStyle = 'rgba(34,211,238,.4)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, barH + 0.5); ctx.lineTo(W, barH + 0.5); ctx.stroke();
+
+      const midY = barH / 2, pad = 8 * dpr;
+      ctx.font = (12 * dpr) + 'px monospace';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString([], { hour12: false });
+      ctx.fillStyle = '#22D3EE';
+      ctx.fillText(timeStr, pad, midY);
+      ctx.font = (10 * dpr) + 'px monospace';
+      ctx.fillStyle = 'rgba(148,163,184,.85)';
+      ctx.fillText(now.toISOString().slice(0, 10), pad + ctx.measureText(timeStr).width + 10 * dpr, midY);
+
+      const fpsColor = fps >= 24 ? '#4ADE80' : fps >= 15 ? '#F59E0B' : '#F87171';
+      let cursor = drawPill(W - pad, midY, Math.round(fps) + ' FPS', fpsColor, dpr);
+      const netOnline = navigator.onLine !== false;
+      const netType = networkInfo && networkInfo.effectiveType ? networkInfo.effectiveType.toUpperCase() : null;
+      const netLabel = netOnline ? (netType || 'ONLINE') : 'OFFLINE';
+      drawPill(cursor - 6 * dpr, midY, netLabel, netOnline ? '#4ADE80' : '#F87171', dpr);
+    }
+
+    // Small hand-drawn bolt so a "charging" cue matches the rest of this
+    // HUD's thin vector-line look instead of relying on an emoji glyph.
+    function drawBoltIcon(cx, cy, size, color) {
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.scale(size / 10, size / 10);
+      ctx.beginPath();
+      ctx.moveTo(1, -5); ctx.lineTo(-3, 1); ctx.lineTo(0, 1);
+      ctx.lineTo(-1, 5); ctx.lineTo(3, -1); ctx.lineTo(0, -1);
+      ctx.closePath();
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Vertical fuel-gauge along the left edge — fills bottom-up, colored by
+    // level, with a small nub cap (the classic battery-icon silhouette)
+    // and a bolt above it when charging.
+    function drawBatteryGauge(H, dpr) {
+      const gw = 14 * dpr, gh = Math.min(120 * dpr, H * 0.4);
+      const x = 10 * dpr, y = H / 2 - gh / 2;
+      const level = Math.max(0, Math.min(1, batteryInfo.level));
+      const color = level > 0.5 ? '#4ADE80' : level > 0.2 ? '#F59E0B' : '#F87171';
+      const nubW = gw * 0.5, nubH = 4 * dpr;
+
+      ctx.fillStyle = 'rgba(148,163,184,.5)';
+      ctx.fillRect(x + (gw - nubW) / 2, y - nubH, nubW, nubH);
+      ctx.strokeStyle = 'rgba(148,163,184,.6)'; ctx.lineWidth = 1.5 * dpr;
+      ctx.strokeRect(x, y, gw, gh);
+      const fillH = (gh - 4 * dpr) * level;
+      ctx.fillStyle = color;
+      ctx.fillRect(x + 2 * dpr, y + gh - 2 * dpr - fillH, gw - 4 * dpr, fillH);
+
+      if (batteryInfo.charging) drawBoltIcon(x + gw / 2, y - nubH - 8 * dpr, 12 * dpr, '#FDE68A');
+
+      ctx.font = (10 * dpr) + 'px monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.fillStyle = color;
+      ctx.fillText(Math.round(level * 100) + '%', x + gw / 2, y + gh + 6 * dpr);
+    }
+
+    // Right-edge cluster: a small artificial-horizon-style tilt widget
+    // (dot position = gamma/beta, clamped to the circle) stacked above the
+    // live coordinates when Location is also on.
+    function drawRightCluster(W, H, dpr) {
+      const hasTilt = orientationInfo && orientationInfo.beta != null;
+      const hasGeo = toggles.geo && toggles.geo.checked && geoInfo;
+      if (!hasTilt && !hasGeo) return;
+
+      const r = 20 * dpr;
+      const cx = W - 10 * dpr - r, cy = H / 2 - (hasGeo ? 16 * dpr : 0);
+
+      if (hasTilt) {
+        ctx.strokeStyle = 'rgba(148,163,184,.5)'; ctx.lineWidth = 1 * dpr;
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(cx - r, cy); ctx.lineTo(cx + r, cy);
+        ctx.moveTo(cx, cy - r); ctx.lineTo(cx, cy + r);
+        ctx.stroke();
+        const gx = Math.max(-45, Math.min(45, orientationInfo.gamma || 0)) / 45 * r;
+        const gy = Math.max(-45, Math.min(45, orientationInfo.beta || 0)) / 45 * r;
+        ctx.fillStyle = '#22D3EE';
+        ctx.beginPath(); ctx.arc(cx + gx, cy + gy, 3.5 * dpr, 0, Math.PI * 2); ctx.fill();
+        ctx.font = (9 * dpr) + 'px monospace';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+        ctx.fillStyle = 'rgba(148,163,184,.8)';
+        ctx.fillText('TILT', cx, cy - r - 6 * dpr);
+      }
+
+      if (hasGeo) {
+        const geoY = cy + (hasTilt ? r + 14 * dpr : 0);
+        ctx.font = (9 * dpr) + 'px monospace';
+        ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
+        ctx.fillStyle = '#22D3EE';
+        ctx.fillText('LAT ' + geoInfo.latitude.toFixed(3), W - 8 * dpr, geoY);
+        ctx.fillText('LON ' + geoInfo.longitude.toFixed(3), W - 8 * dpr, geoY + 12 * dpr);
+      }
+    }
+
+    // Rendering and detection are two independent loops now. Previously a
     // single loop cleared the canvas, *awaited* every enabled model's
     // inference, and only drew afterward — so the canvas sat blank for the
     // entire inference time each frame and only showed a box for the brief
@@ -6191,6 +6311,8 @@ panels.forEach(p => observer.observe(p));
       if (dt > 0) fps = fps ? fps * 0.9 + (1000 / dt) * 0.1 : 1000 / dt;
       syncSize();
       ctx.clearRect(0, 0, overlay.width, overlay.height);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'alphabetic';
       drawFace();
       drawObjects();
       drawHands();

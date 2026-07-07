@@ -1749,6 +1749,18 @@
     background: rgba(3,8,17,.88); text-align: center; padding: 1.5rem;
   }
   .webcam-placeholder[hidden] { display: none; }
+  .webcam-flip-btn {
+    position: absolute; top: .6rem; right: .6rem; z-index: 4;
+    width: 40px; height: 40px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(3,8,17,.6); border: 1px solid rgba(255,255,255,.16);
+    color: var(--white); font-size: 1.15rem; line-height: 1;
+    cursor: pointer; backdrop-filter: blur(4px);
+    transition: background .2s, transform .15s;
+  }
+  .webcam-flip-btn:hover { background: rgba(3,8,17,.85); border-color: rgba(34,211,238,.4); }
+  .webcam-flip-btn:active { transform: scale(.9); }
+  .webcam-flip-btn[hidden] { display: none; }
   .webcam-note { font-size: .78rem; color: var(--muted); max-width: 320px; }
   .webcam-toggles {
     display: flex; flex-wrap: wrap; justify-content: center; gap: .6rem;
@@ -1760,6 +1772,9 @@
     border: 1px solid var(--card-border); background: var(--card-bg);
     font-size: .78rem; color: var(--muted);
     transition: border-color .2s, color .2s, background .2s;
+  }
+  @media (pointer: coarse) {
+    .webcam-toggle { padding: .68rem 1.05rem; }
   }
   .webcam-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
   .webcam-toggle-dot {
@@ -2501,6 +2516,7 @@
         <div class="webcam-wrap" id="webcam-wrap">
           <video id="webcam-video" autoplay muted playsinline></video>
           <canvas id="webcam-overlay"></canvas>
+          <button type="button" class="webcam-flip-btn" id="webcam-flip" hidden aria-label="Switch camera">⟲</button>
           <div class="webcam-placeholder" id="webcam-placeholder">
             <button type="button" class="btn-primary" id="webcam-start">▶ Start Camera</button>
             <p class="webcam-note">Requires camera access. Nothing is recorded or sent anywhere — detection runs 100% locally in your browser.</p>
@@ -3276,8 +3292,16 @@ class Particle {
 
 function initParticles() {
   // ~1 node per 3500px² — cap raised since the field now spans the full
-  // hero + circuit-bridge height, not just the top screen.
-  const count = Math.min(850, Math.max(220, Math.floor((W * H) / 3500)));
+  // hero + circuit-bridge height, not just the top screen. Connection
+  // lines between nearby particles are checked pairwise (O(n²)), so on
+  // narrow/coarse-pointer (mobile) devices the count is trimmed harder —
+  // that quadratic cost is the actual performance risk, not the particles
+  // themselves.
+  const isMobile = W < 700 || (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+  const divisor = isMobile ? 4600 : 3500;
+  const minCount = isMobile ? 90 : 220;
+  const maxCount = isMobile ? 360 : 850;
+  const count = Math.min(maxCount, Math.max(minCount, Math.floor((W * H) / divisor)));
   particles = Array.from({ length: count }, (_, i) => new Particle(i));
 }
 
@@ -5677,6 +5701,7 @@ panels.forEach(p => observer.observe(p));
   const placeholder = document.getElementById('webcam-placeholder');
   const startBtn = document.getElementById('webcam-start');
   const stopBtn = document.getElementById('webcam-stop');
+  const flipBtn = document.getElementById('webcam-flip');
   const statEl = document.getElementById('webcam-stat');
   const pillText = document.getElementById('webcam-pill-text');
   const hintEl = document.getElementById('webcam-hint');
@@ -5708,6 +5733,7 @@ panels.forEach(p => observer.observe(p));
   ];
 
   let stream = null, running = false, rafId = null;
+  let facingMode = 'user', mirrored = true;
   let faceApiReady = false, landmarksReady = false;
   let cocoModel = null, handDetector = null, poseDetector = null;
   const loadPromises = {};
@@ -5823,12 +5849,15 @@ panels.forEach(p => observer.observe(p));
     });
   });
 
+  function syncSize() { overlay.width = video.videoWidth || 480; overlay.height = video.videoHeight || 360; }
+  function mirrorX(x, w) { return mirrored ? overlay.width - x - w : x; }
+
   async function start() {
     startBtn.disabled = true;
     if (pillText) pillText.textContent = 'STARTING\u2026';
     if (window.setCursorBusy) window.setCursorBusy(true);
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ video: { width: 480, height: 360 }, audio: false });
+      stream = await navigator.mediaDevices.getUserMedia({ video: { width: 480, height: 360, facingMode: { ideal: facingMode } }, audio: false });
     } catch (err) {
       if (pillText) pillText.textContent = 'CAMERA DENIED';
       if (hintEl) hintEl.textContent = 'Camera access was denied or unavailable \u2014 this demo needs it to work.';
@@ -5844,9 +5873,18 @@ panels.forEach(p => observer.observe(p));
     running = true;
 
     const ctx = overlay.getContext('2d');
-    function syncSize() { overlay.width = video.videoWidth || 480; overlay.height = video.videoHeight || 360; }
     video.addEventListener('loadedmetadata', syncSize, { once: true });
     syncSize();
+
+    // Phones with a front + back camera get a flip button; anything with
+    // just one camera (or a browser that can't enumerate before permission)
+    // never sees it. Device labels/count are only reliable after
+    // getUserMedia has already been granted, so this has to run here.
+    if (flipBtn && navigator.mediaDevices.enumerateDevices) {
+      navigator.mediaDevices.enumerateDevices()
+        .then((devices) => { flipBtn.hidden = devices.filter((d) => d.kind === 'videoinput').length < 2; })
+        .catch(() => {});
+    }
 
     // Face + expression (and optionally landmarks) is on by default — load it now.
     if (toggles.face && toggles.face.checked) {
@@ -5856,8 +5894,6 @@ panels.forEach(p => observer.observe(p));
     }
     if (pillText) pillText.textContent = 'DETECTING';
     if (window.setCursorBusy) window.setCursorBusy(false);
-
-    function mirrorX(x, w) { return overlay.width - x - w; }
 
     // Detections are cached and drawn every frame regardless of whether a
     // *new* detection has finished yet — inference is comparatively slow,
@@ -6025,13 +6061,43 @@ panels.forEach(p => observer.observe(p));
     placeholder.hidden = false;
     stopBtn.hidden = true;
     startBtn.disabled = false;
+    if (flipBtn) flipBtn.hidden = true;
     if (pillText) pillText.textContent = 'IDLE';
     if (statEl) statEl.innerHTML = 'faces detected: <strong>0</strong>';
     announce('');
   }
 
+  async function flipCamera() {
+    if (!running) return;
+    facingMode = facingMode === 'user' ? 'environment' : 'user';
+    // The back camera isn't mirrored — mirroring only makes sense for a
+    // "look at yourself" front-facing feed, and detection boxes need to
+    // track whichever way the raw frame actually reads.
+    mirrored = facingMode === 'user';
+    video.style.transform = mirrored ? '' : 'none';
+    if (window.setCursorBusy) window.setCursorBusy(true);
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { width: 480, height: 360, facingMode: { ideal: facingMode } }, audio: false });
+      video.srcObject = stream;
+      video.addEventListener('loadedmetadata', syncSize, { once: true });
+      await video.play();
+      syncSize();
+    } catch (err) {
+      console.error('[webcam-ai] camera flip failed:', err);
+      // Couldn't get the other camera — flip the state back so the UI
+      // stays consistent with whatever's actually still running.
+      facingMode = facingMode === 'user' ? 'environment' : 'user';
+      mirrored = facingMode === 'user';
+      video.style.transform = mirrored ? '' : 'none';
+    } finally {
+      if (window.setCursorBusy) window.setCursorBusy(false);
+    }
+  }
+
   startBtn.addEventListener('click', start);
   stopBtn.addEventListener('click', stop);
+  if (flipBtn) flipBtn.addEventListener('click', flipCamera);
   document.addEventListener('visibilitychange', () => { if (document.hidden && running) stop(); });
 })();
 </script>

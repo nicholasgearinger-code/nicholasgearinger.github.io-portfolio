@@ -5868,6 +5868,15 @@ panels.forEach(p => observer.observe(p));
 
       ctx.clearRect(0, 0, overlay.width, overlay.height);
 
+      // TEMP DIAGNOSTIC: unconditional canary border, independent of any
+      // model's output. If this magenta border isn't visible, the problem
+      // is canvas rendering/stacking, not face-api's coordinates — remove
+      // this block once the real box is confirmed visible.
+      ctx.save();
+      ctx.strokeStyle = '#FF00FF'; ctx.lineWidth = 6;
+      ctx.strokeRect(3, 3, overlay.width - 6, overlay.height - 6);
+      ctx.restore();
+
       const faceWanted = (toggles.face && toggles.face.checked) || (toggles.landmarks && toggles.landmarks.checked);
       if (faceWanted && faceApiReady) {
         try {

@@ -5208,7 +5208,7 @@ panels.forEach(p => observer.observe(p));
   // and readable rather than racing ahead of a slow page load, or (on a
   // very fast device) finishing and vanishing too quickly to read.
   const bootStart = Date.now();
-  const MIN_DISPLAY_MS = 3000;
+  const MIN_DISPLAY_MS = 3600;
 
   function finish() {
     barFill.style.width = '100%';
@@ -5220,7 +5220,7 @@ panels.forEach(p => observer.observe(p));
     linesEl.appendChild(promptLine);
     sessionStorage.setItem('bootSeqShown', '1');
     const elapsed = Date.now() - bootStart;
-    const lingerWait = Math.max(650, MIN_DISPLAY_MS - elapsed);
+    const lingerWait = Math.max(400, MIN_DISPLAY_MS - elapsed);
     setTimeout(() => {
       overlay.classList.add('boot-done');
       setTimeout(() => overlay.remove(), 550);
@@ -5245,7 +5245,7 @@ panels.forEach(p => observer.observe(p));
       textSpan.textContent = full.slice(0, charI + 1);
       charI++;
       if (charI < full.length) {
-        setTimeout(typeChar, 20 + Math.random() * 16);
+        setTimeout(typeChar, 6 + Math.random() * 8);
       } else {
         cursorSpan.remove();
         if (entry.type === 'step') {
@@ -5257,7 +5257,7 @@ panels.forEach(p => observer.observe(p));
           barFill.style.width = Math.round((stepsDone / totalSteps) * 100) + '%';
         }
         entryIndex++;
-        setTimeout(typeEntry, entry.type === 'cmd' ? 240 : 170);
+        setTimeout(typeEntry, entry.type === 'cmd' ? 90 : 60);
       }
     }
     typeChar();

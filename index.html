@@ -5792,6 +5792,7 @@ panels.forEach(p => observer.observe(p));
         faceCount++;
         ctx.strokeStyle = '#22D3EE'; ctx.lineWidth = 2;
         ctx.strokeRect(x, y, width, height);
+        console.log('[webcam-ai] box stroked ok');
 
         const top = Object.entries(d.expressions).sort((a, b) => b[1] - a[1])[0];
         const label = top[0] + ' ' + Math.round(top[1] * 100) + '%';
@@ -5913,7 +5914,7 @@ panels.forEach(p => observer.observe(p));
         cache.pose = [];
       }
 
-      drawFace();
+      try { drawFace(); } catch (err) { console.error('[webcam-ai] drawFace threw:', err); }
       drawObjects();
       drawHands();
       drawPose();

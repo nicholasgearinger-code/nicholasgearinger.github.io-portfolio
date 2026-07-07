@@ -2516,6 +2516,14 @@
             <input type="checkbox" id="toggle-pose">
             <span class="webcam-toggle-dot"></span> Body Pose
           </label>
+          <label class="webcam-toggle" data-model="telemetry">
+            <input type="checkbox" id="toggle-telemetry">
+            <span class="webcam-toggle-dot"></span> Telemetry HUD
+          </label>
+          <label class="webcam-toggle" data-model="geo">
+            <input type="checkbox" id="toggle-geo">
+            <span class="webcam-toggle-dot"></span> Location
+          </label>
         </div>
         <p class="webcam-toggle-status" id="webcam-toggle-status"></p>
       </div>
@@ -2526,6 +2534,7 @@
     </div>
     <p class="algo-hint" id="webcam-hint">Each toggle loads its own model on demand, the first time you switch it on — nothing downloads until you ask for it. Running several at once is more demanding on your device, so if things feel sluggish, try enabling fewer at a time.</p>
     <p class="algo-hint">Turn on "Hands &amp; Play" and pinch your thumb and index finger together over one of the floating orbs to grab it — drag it around and let go to toss it.</p>
+    <p class="algo-hint">"Telemetry HUD" adds a live readout of clock, FPS, battery, network, and device tilt (where your browser exposes them) — all read locally, nothing sent anywhere. "Location" is kept separate and opt-in on purpose: it asks your browser's normal permission prompt and only ever draws your coordinates on your own screen.</p>
     <p class="algo-hint">Face + expression + landmarks: face-api.js. Objects: COCO-SSD. Hands &amp; body pose: TensorFlow.js's official MediaPipe-based models. All MIT/Apache licensed, all inference client-side.</p>
   </div>
 </section>
@@ -5598,6 +5607,8 @@ panels.forEach(p => observer.observe(p));
     objects: document.getElementById('toggle-objects'),
     hands: document.getElementById('toggle-hands'),
     pose: document.getElementById('toggle-pose'),
+    telemetry: document.getElementById('toggle-telemetry'),
+    geo: document.getElementById('toggle-geo'),
   };
   if (!video || !startBtn) return;
 
@@ -5627,8 +5638,9 @@ panels.forEach(p => observer.observe(p));
   ];
 
   let stream = null, running = false, rafId = null, resizeListener = null;
-  let faceApiReady = false, landmarksReady = false;
+  let faceApiReady = false, landmarksReady = false, telemetryReady = false;
   let cocoModel = null, handDetector = null, poseDetector = null;
+  let batteryInfo = null, networkInfo = null, orientationInfo = null, geoInfo = null, geoWatchId = null;
   const loadPromises = {};
 
   // Same "coarse pointer" heuristic already used elsewhere on this page to
@@ -5731,14 +5743,77 @@ panels.forEach(p => observer.observe(p));
     poseDetector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet);
   }
 
-  const ENSURERS = { face: ensureFace, landmarks: ensureLandmarks, objects: ensureObjects, hands: ensureHands, pose: ensurePose };
-  const LABELS = { face: 'Face + Expression', landmarks: 'Facial Landmarks', objects: 'Objects', hands: 'Hands & Play', pose: 'Body Pose' };
+  // ── TELEMETRY HUD: no ML model involved, just a few browser sensor/status
+  // APIs feature-detected and read live. Battery and Network Information
+  // objects update their own properties in place, so we only need to grab
+  // a reference once rather than polling or re-subscribing.
+  function onOrientation(e) { orientationInfo = { beta: e.beta, gamma: e.gamma }; }
+  async function ensureTelemetry() {
+    if (telemetryReady) return;
+    if (navigator.getBattery) {
+      try { batteryInfo = await navigator.getBattery(); } catch (e) { batteryInfo = null; }
+    }
+    networkInfo = navigator.connection || navigator.mozConnection || navigator.webkitConnection || null;
+    if (window.DeviceOrientationEvent) {
+      // iOS 13+ requires this to be requested from a user gesture — the
+      // checkbox click itself counts, which is exactly why this call
+      // happens inside the toggle handler rather than at camera start.
+      if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+        try {
+          const state = await DeviceOrientationEvent.requestPermission();
+          if (state === 'granted') window.addEventListener('deviceorientation', onOrientation);
+        } catch (e) { /* denied or unsupported — telemetry panel just omits tilt */ }
+      } else {
+        window.addEventListener('deviceorientation', onOrientation);
+      }
+    }
+    telemetryReady = true;
+  }
+
+  // Location is kept separate from the rest of the telemetry HUD and
+  // requires its own explicit opt-in — a lat/long is meaningfully more
+  // sensitive than a battery percentage or a clock, and this page is
+  // otherwise built around "nothing leaves your device," so it shouldn't
+  // get requested as a side effect of turning on a decorative HUD.
+  async function ensureGeo() {
+    if (!navigator.geolocation) throw new Error('Geolocation not supported in this browser.');
+    await new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => { geoInfo = pos.coords; resolve(); },
+        (err) => reject(new Error(err.message || 'Location permission denied.')),
+        { enableHighAccuracy: false, timeout: 8000 }
+      );
+    });
+    geoWatchId = navigator.geolocation.watchPosition(
+      (pos) => { geoInfo = pos.coords; },
+      () => {},
+      { enableHighAccuracy: false, maximumAge: 5000 }
+    );
+  }
+
+  const ENSURERS = { face: ensureFace, landmarks: ensureLandmarks, objects: ensureObjects, hands: ensureHands, pose: ensurePose, telemetry: ensureTelemetry, geo: ensureGeo };
+  const LABELS = { face: 'Face + Expression', landmarks: 'Facial Landmarks', objects: 'Objects', hands: 'Hands & Play', pose: 'Body Pose', telemetry: 'Telemetry HUD', geo: 'Location' };
+  // Only Location needs active cleanup when switched off — it's the one
+  // toggle here backed by a live, continuously-updating subscription
+  // (watchPosition) rather than a one-time load or a passive listener.
+  const TEARDOWN = {
+    geo: () => {
+      if (geoWatchId != null && navigator.geolocation) navigator.geolocation.clearWatch(geoWatchId);
+      geoWatchId = null;
+      geoInfo = null;
+    },
+  };
 
   Object.keys(toggles).forEach((name) => {
     const input = toggles[name];
     if (!input) return;
     input.addEventListener('change', async () => {
-      if (!input.checked) { setToggleState(name, 'idle'); announce(''); return; }
+      if (!input.checked) {
+        if (TEARDOWN[name]) TEARDOWN[name]();
+        setToggleState(name, 'idle');
+        announce('');
+        return;
+      }
       if (!running) { announce('Start the camera first.'); input.checked = false; return; }
       setToggleState(name, 'loading');
       announce('Loading ' + LABELS[name] + '\u2026');
@@ -5750,7 +5825,7 @@ panels.forEach(p => observer.observe(p));
         console.error('[webcam-ai]', name, err.message);
         input.checked = false;
         setToggleState(name, 'error');
-        announce('Couldn\u2019t load ' + LABELS[name] + ' \u2014 check your connection and try again.');
+        announce('Couldn\u2019t enable ' + LABELS[name] + ' \u2014 check your connection/permissions and try again.');
       }
     });
   });
@@ -5810,6 +5885,19 @@ panels.forEach(p => observer.observe(p));
         announce('Couldn\u2019t load Face + Expression \u2014 check your connection and try again.');
       }
     }
+    // stop() deliberately clears the location watch every time (see there
+    // for why), so restarting the camera with the toggle still checked
+    // needs to re-arm it rather than silently leaving it dead.
+    if (toggles.geo && toggles.geo.checked) {
+      setToggleState('geo', 'loading');
+      try { await ensureGeo(); setToggleState('geo', 'ready'); }
+      catch (err) {
+        console.error('[webcam-ai] geo', err.message);
+        toggles.geo.checked = false;
+        setToggleState('geo', 'error');
+        announce('Couldn\u2019t enable Location \u2014 check your connection/permissions and try again.');
+      }
+    }
     if (pillText) pillText.textContent = 'DETECTING';
 
     // Maps a box in raw video-pixel space (as returned by every detector
@@ -5829,6 +5917,7 @@ panels.forEach(p => observer.observe(p));
     // so without this, each result would only be on-screen for the instant
     // between finishing and the next clear, easy to miss entirely.
     let cache = { face: [], objects: [], hands: [], pose: [] };
+    let fps = 0, lastFrameTs = performance.now();
 
     // Small helper used only by the HUD-styled face reticle below: draws
     // four L-shaped corner brackets instead of a plain rectangle, the
@@ -6046,7 +6135,47 @@ panels.forEach(p => observer.observe(p));
       });
     }
 
-    // Rendering and detection are two independent loops now. Previously a
+    // ── TELEMETRY HUD PANEL: a fixed corner readout, independent of any
+    // detection — unlike everything else on this canvas it isn't mapped
+    // through the video's cover transform at all, since it's UI chrome
+    // anchored to the canvas itself rather than something tracking a
+    // point in the camera feed. Sizes scale with PERF_DPR so it reads as
+    // the same physical size regardless of the device's pixel ratio.
+    function drawTelemetry() {
+      if (!(toggles.telemetry && toggles.telemetry.checked)) return;
+      const pad = 8 * PERF_DPR;
+      const lineH = 14 * PERF_DPR;
+      const now = new Date();
+      const lines = [
+        now.toLocaleTimeString([], { hour12: false }),
+        now.toISOString().slice(0, 10),
+        'FPS ' + Math.round(fps),
+      ];
+      if (batteryInfo) {
+        lines.push('BATT ' + Math.round(batteryInfo.level * 100) + '%' + (batteryInfo.charging ? ' CHG' : ''));
+      }
+      const netType = networkInfo && networkInfo.effectiveType ? networkInfo.effectiveType.toUpperCase() : null;
+      lines.push('NET ' + (navigator.onLine === false ? 'OFFLINE' : (netType || 'ONLINE')));
+      if (orientationInfo && orientationInfo.beta != null) {
+        lines.push('TILT b' + Math.round(orientationInfo.beta) + ' g' + Math.round(orientationInfo.gamma));
+      }
+      if (toggles.geo && toggles.geo.checked && geoInfo) {
+        lines.push('GEO ' + geoInfo.latitude.toFixed(3) + ', ' + geoInfo.longitude.toFixed(3));
+      }
+      lines.push('RES ' + videoW + '\u00d7' + videoH);
+
+      ctx.textAlign = 'left';
+      ctx.font = (11 * PERF_DPR) + 'px monospace';
+      const panelW = Math.max(...lines.map((l) => ctx.measureText(l).width)) + pad * 2;
+      const panelH = lines.length * lineH + pad;
+      const left = pad, top = pad;
+      ctx.fillStyle = 'rgba(3,8,17,.72)';
+      ctx.strokeStyle = 'rgba(34,211,238,.35)'; ctx.lineWidth = 1;
+      ctx.fillRect(left, top, panelW, panelH);
+      ctx.strokeRect(left, top, panelW, panelH);
+      ctx.fillStyle = '#22D3EE';
+      lines.forEach((l, i) => ctx.fillText(l, left + pad, top + pad * 0.7 + (i + 1) * lineH - lineH * 0.3));
+    }
     // single loop cleared the canvas, *awaited* every enabled model's
     // inference, and only drew afterward — so the canvas sat blank for the
     // entire inference time each frame and only showed a box for the brief
@@ -6056,6 +6185,10 @@ panels.forEach(p => observer.observe(p));
     // background and only ever updates `cache`.
     function renderLoop() {
       if (!running) return;
+      const now = performance.now();
+      const dt = now - lastFrameTs;
+      lastFrameTs = now;
+      if (dt > 0) fps = fps ? fps * 0.9 + (1000 / dt) * 0.1 : 1000 / dt;
       syncSize();
       ctx.clearRect(0, 0, overlay.width, overlay.height);
       drawFace();
@@ -6064,6 +6197,7 @@ panels.forEach(p => observer.observe(p));
       updatePlayObjects();
       drawPlayObjects();
       drawPose();
+      drawTelemetry();
       rafId = requestAnimationFrame(renderLoop);
     }
 
@@ -6127,6 +6261,7 @@ panels.forEach(p => observer.observe(p));
     if (rafId) cancelAnimationFrame(rafId);
     if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
     if (resizeListener) { window.removeEventListener('resize', resizeListener); resizeListener = null; }
+    if (geoWatchId != null && navigator.geolocation) { navigator.geolocation.clearWatch(geoWatchId); geoWatchId = null; }
     video.srcObject = null;
     placeholder.hidden = false;
     stopBtn.hidden = true;

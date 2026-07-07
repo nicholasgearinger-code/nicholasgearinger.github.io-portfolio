@@ -1394,6 +1394,10 @@
   }
   .boot-line { color: var(--sky); white-space: pre-wrap; word-break: break-word; }
   .boot-line.boot-cmd-line { color: var(--cyan); }
+  .boot-line.boot-code-line { color: var(--slate); padding-left: 1.1rem; }
+  .boot-code-kw { color: #E879F9; }
+  .boot-code-str { color: #F59E0B; }
+  .boot-code-num { color: #7DD3FC; }
   .boot-line .boot-ok { display: inline-flex; align-items: center; margin-left: .5em; }
   .boot-line .boot-ok svg { width: 18px; height: 18px; color: #34D399; filter: drop-shadow(0 0 3px rgba(52,211,153,.6)); }
   .boot-cursor {
@@ -5352,12 +5356,26 @@ panels.forEach(p => observer.observe(p));
   // progress bar; "cmd"/"out" entries are just flavor typing.
   const ENTRIES = [
     { text: '$ ./init_interface.sh', type: 'cmd' },
+    { text: '$ cat vision.js | head -3', type: 'cmd' },
+    { text: 'function mirrorX(x, w) {', type: 'code' },
+    { text: '  return mirrored', type: 'code' },
+    { text: '    ? overlay.width-x-w : x;', type: 'code' },
+    { text: '}', type: 'code' },
     { text: 'checking node dependencies', type: 'step' },
     { text: 'verifying webgl context', type: 'step' },
     { text: 'linking tensorflow.js runtime', type: 'step' },
     { text: 'loading face-api.js models', type: 'step' },
+    { text: '$ cat vision.js | grep ratio', type: 'cmd' },
+    { text: 'ratio: dist(thumb, index)', type: 'code' },
+    { text: '  / palmSize,', type: 'code' },
     { text: 'mounting three.js renderer', type: 'step' },
+    { text: '$ cat vision.js | grep -A1 elbow', type: 'cmd' },
+    { text: 'elbowPivot.rotation.z =', type: 'code' },
+    { text: '  lowerAngle - upperAngle;', type: 'code' },
     { text: 'loading design tokens', type: 'step' },
+    { text: '$ cat particles.js | head -2', type: 'cmd' },
+    { text: 'const count = Math.min(maxCount,', type: 'code' },
+    { text: '  Math.max(minCount, W*H/divisor));', type: 'code' },
     { text: 'establishing secure channel', type: 'step' },
     { text: 'connecting to api', type: 'step' },
     { text: 'syncing telemetry stream', type: 'step' },
@@ -5373,7 +5391,18 @@ panels.forEach(p => observer.observe(p));
   // and readable rather than racing ahead of a slow page load, or (on a
   // very fast device) finishing and vanishing too quickly to read.
   const bootStart = Date.now();
-  const MIN_DISPLAY_MS = 3600;
+  const MIN_DISPLAY_MS = 2000;
+
+  // Light syntax highlighting for the 'code' entries — just enough to read
+  // as real source rather than plain text: keywords, string literals, and
+  // numbers each get their own color, matching how an editor would show it.
+  function highlightCode(text) {
+    return text
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/\b(function|return|const|let)\b/g, '<span class="boot-code-kw">$1</span>')
+      .replace(/('[^']*'|"[^"]*")/g, '<span class="boot-code-str">$1</span>')
+      .replace(/\b(\d+)\b/g, '<span class="boot-code-num">$1</span>');
+  }
 
   function finish() {
     barFill.style.width = '100%';
@@ -5385,7 +5414,7 @@ panels.forEach(p => observer.observe(p));
     linesEl.appendChild(promptLine);
     sessionStorage.setItem('bootSeqShown', '1');
     const elapsed = Date.now() - bootStart;
-    const lingerWait = Math.max(400, MIN_DISPLAY_MS - elapsed);
+    const lingerWait = Math.max(250, MIN_DISPLAY_MS - elapsed);
     setTimeout(() => {
       overlay.classList.add('boot-done');
       setTimeout(() => { overlay.remove(); done(); }, 550);
@@ -5396,7 +5425,7 @@ panels.forEach(p => observer.observe(p));
     if (entryIndex >= ENTRIES.length) { finish(); return; }
     const entry = ENTRIES[entryIndex];
     const el = document.createElement('div');
-    el.className = 'boot-line' + (entry.type === 'cmd' ? ' boot-cmd-line' : '');
+    el.className = 'boot-line' + (entry.type === 'cmd' ? ' boot-cmd-line' : '') + (entry.type === 'code' ? ' boot-code-line' : '');
     const textSpan = document.createElement('span');
     const cursorSpan = document.createElement('span');
     cursorSpan.className = 'boot-cursor';
@@ -5410,9 +5439,10 @@ panels.forEach(p => observer.observe(p));
       textSpan.textContent = full.slice(0, charI + 1);
       charI++;
       if (charI < full.length) {
-        setTimeout(typeChar, 6 + Math.random() * 8);
+        setTimeout(typeChar, 3 + Math.random() * 5);
       } else {
         cursorSpan.remove();
+        if (entry.type === 'code') textSpan.innerHTML = highlightCode(full);
         if (entry.type === 'step') {
           stepsDone++;
           const ok = document.createElement('span');
@@ -5422,7 +5452,7 @@ panels.forEach(p => observer.observe(p));
           barFill.style.width = Math.round((stepsDone / totalSteps) * 100) + '%';
         }
         entryIndex++;
-        setTimeout(typeEntry, entry.type === 'cmd' ? 90 : 60);
+        setTimeout(typeEntry, entry.type === 'cmd' ? 50 : 30);
       }
     }
     typeChar();
@@ -6395,7 +6425,11 @@ panels.forEach(p => observer.observe(p));
       if (!pt) return;
       const normX = Math.min(1, Math.max(0, pt.x / overlay.width));
       const normY = Math.min(1, Math.max(0, pt.y / overlay.height));
-      const theta = (normX - 0.5) * 360;
+      // Flipped from (normX - 0.5): moving your hand toward one side of
+      // the frame now orbits the camera the other way around, which
+      // matches how it's meant to feel — reverse this back if it now
+      // feels backwards instead.
+      const theta = (0.5 - normX) * 360;
       const phi = Math.min(115, Math.max(45, 70 + (normY - 0.5) * 70));
 
       let radiusStr = 'auto';
@@ -6472,11 +6506,10 @@ panels.forEach(p => observer.observe(p));
     // motion toward/away from the camera, since a single 2D camera view
     // can't recover that on its own.
     //
-    // Left/right are deliberately swapped: the webcam view mirrors you
-    // (like a mirror), so MoveNet's "right_*" keypoints are what appears
-    // on the LEFT side of the video — mapping them to the rig's left-side
-    // limbs keeps the rig moving the same visual direction as your
-    // reflection, instead of the opposite one.
+    // No left/right swap needed here: the webcam view is already
+    // CSS-mirrored (scaleX(-1)) to feel like a normal selfie mirror, and
+    // mirrorX() re-projects MoveNet's raw coordinates to match that —
+    // so "right_wrist" already lands on the right side of the screen.
     function updateRig() {
       if (!rigReady || !rigChar || !rigRenderer || !rigEl || rigEl.hidden) return;
       const pose = cache.pose && cache.pose[0];
@@ -6496,14 +6529,19 @@ panels.forEach(p => observer.observe(p));
           const lowerAngle = angleOf(elbowPt, wristPt);
           if (upperAngle !== null && lowerAngle !== null) elbowPivot.rotation.z = lowerAngle - upperAngle;
         }
-        // Swapped: rig's "left" limbs read MoveNet's "right_*" keypoints, and vice versa.
-        applyLimb(rigChar.leftArm.shoulderPivot, rigChar.leftArm.elbowPivot,
-          pt('right_shoulder'), pt('right_elbow'), pt('right_wrist'));
+        // Direct mapping, no swap: the video is already CSS-mirrored
+        // (scaleX(-1)) to feel like a normal selfie mirror, and mirrorX()
+        // re-projects MoveNet's raw coordinates to match that already-
+        // mirrored display. That means "right_wrist" already lands on the
+        // right side of the screen — swapping it here would just cancel
+        // that back out and put controls on the wrong side.
         applyLimb(rigChar.rightArm.shoulderPivot, rigChar.rightArm.elbowPivot,
+          pt('right_shoulder'), pt('right_elbow'), pt('right_wrist'));
+        applyLimb(rigChar.leftArm.shoulderPivot, rigChar.leftArm.elbowPivot,
           pt('left_shoulder'), pt('left_elbow'), pt('left_wrist'));
-        applyLimb(rigChar.leftLeg.hipPivot, rigChar.leftLeg.kneePivot,
-          pt('right_hip'), pt('right_knee'), pt('right_ankle'));
         applyLimb(rigChar.rightLeg.hipPivot, rigChar.rightLeg.kneePivot,
+          pt('right_hip'), pt('right_knee'), pt('right_ankle'));
+        applyLimb(rigChar.leftLeg.hipPivot, rigChar.leftLeg.kneePivot,
           pt('left_hip'), pt('left_knee'), pt('left_ankle'));
       }
       rigRenderer.render(rigScene, rigCamera);

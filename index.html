@@ -5888,7 +5888,17 @@ panels.forEach(p => observer.observe(p));
 
     async function detectLoop() {
       if (!running) return;
-      if (video.readyState < 2) { rafId = requestAnimationFrame(detectLoop); return; }
+      if (video.readyState < 2 || !video.videoWidth) { rafId = requestAnimationFrame(detectLoop); return; }
+
+      // Recomputed every frame rather than once: relying on the
+      // 'loadedmetadata' event to fire the *first* size calculation is a
+      // race — by the time a listener can be attached, the event has often
+      // already fired, silently leaving videoW/videoH stuck at a guessed
+      // fallback while the camera is actually running at a different
+      // resolution. Reading video.videoWidth/videoHeight directly here,
+      // now that readyState guarantees a real frame exists, is what
+      // actually keeps the drawn boxes lined up with detections.
+      syncSize();
 
       ctx.clearRect(0, 0, overlay.width, overlay.height);
 

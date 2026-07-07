@@ -5630,6 +5630,29 @@ panels.forEach(p => observer.observe(p));
   let cocoModel = null, handDetector = null, poseDetector = null;
   const loadPromises = {};
 
+  // Same "coarse pointer" heuristic already used elsewhere on this page to
+  // gate hover-only interactions — phones and most tablets report coarse,
+  // laptops/desktops report fine. Everything below that scales with device
+  // power reads from this single flag rather than guessing from viewport
+  // width, which fools easily on tablets and resized desktop windows.
+  const isMobile = !!(window.matchMedia && !window.matchMedia('(pointer: fine)').matches);
+  // Reuses the same capped DPR the rest of the site already computes
+  // (window.__PERF.dpr) so the canvas doesn't render at a phone's raw
+  // 3x/4x pixel ratio for no visible benefit — that alone can multiply
+  // fill-rate cost several times over on an already weaker GPU.
+  const PERF_DPR = (window.__PERF && window.__PERF.dpr) || Math.min(window.devicePixelRatio || 1, 2);
+  // Smaller capture resolution and detector input size on mobile: both
+  // scale inference cost roughly quadratically, so halving them is a large
+  // real-world win and still plenty for a face filling a phone's front
+  // camera at selfie distance.
+  const CAM_CONSTRAINTS = isMobile ? { width: 320, height: 240 } : { width: 480, height: 360 };
+  const FACE_INPUT_SIZE = isMobile ? 160 : 224;
+  const MAX_HANDS = isMobile ? 1 : 2;
+  // Detection cadence: mobile gets a longer pause between inference passes
+  // so it isn't running flat-out on a phone's SoC — kinder to battery and
+  // heat, and reduces the odds of the whole page feeling laggy while it runs.
+  const DETECT_INTERVAL_MS = isMobile ? 90 : 40;
+
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     startBtn.disabled = true;
     if (pillText) pillText.textContent = 'UNSUPPORTED';
@@ -5698,7 +5721,7 @@ panels.forEach(p => observer.observe(p));
     // sharing the page's TF.js backend, which sidesteps the bug entirely.
     handDetector = await handPoseDetection.createDetector(
       handPoseDetection.SupportedModels.MediaPipeHands,
-      { runtime: 'mediapipe', solutionPath: MEDIAPIPE_HANDS_URL, modelType: 'lite', maxHands: 2 }
+      { runtime: 'mediapipe', solutionPath: MEDIAPIPE_HANDS_URL, modelType: 'lite', maxHands: MAX_HANDS }
     );
   }
   async function ensurePose() {
@@ -5735,7 +5758,7 @@ panels.forEach(p => observer.observe(p));
     startBtn.disabled = true;
     if (pillText) pillText.textContent = 'STARTING\u2026';
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ video: { width: 480, height: 360 }, audio: false });
+      stream = await navigator.mediaDevices.getUserMedia({ video: CAM_CONSTRAINTS, audio: false });
     } catch (err) {
       if (pillText) pillText.textContent = 'CAMERA DENIED';
       if (hintEl) hintEl.textContent = 'Camera access was denied or unavailable \u2014 this demo needs it to work.';
@@ -5764,9 +5787,8 @@ panels.forEach(p => observer.observe(p));
       videoW = video.videoWidth || 480;
       videoH = video.videoHeight || 360;
       const rect = overlay.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
-      overlay.width = Math.max(1, Math.round(rect.width * dpr));
-      overlay.height = Math.max(1, Math.round(rect.height * dpr));
+      overlay.width = Math.max(1, Math.round(rect.width * PERF_DPR));
+      overlay.height = Math.max(1, Math.round(rect.height * PERF_DPR));
       scale = Math.max(overlay.width / videoW, overlay.height / videoH);
       offX = (overlay.width - videoW * scale) / 2;
       offY = (overlay.height - videoH * scale) / 2;
@@ -5915,7 +5937,7 @@ panels.forEach(p => observer.observe(p));
         const faceWanted = (toggles.face && toggles.face.checked) || (toggles.landmarks && toggles.landmarks.checked);
         if (faceWanted && faceApiReady) {
           try {
-            let query = faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 224 }));
+            let query = faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: FACE_INPUT_SIZE }));
             if (toggles.landmarks && toggles.landmarks.checked && landmarksReady) query = query.withFaceLandmarks();
             query = query.withFaceExpressions();
             cache.face = await query;
@@ -5952,7 +5974,7 @@ panels.forEach(p => observer.observe(p));
         // chain doesn't guarantee the browser gets a full turn to breathe,
         // but a setTimeout does. This also caps detection at a sane ~24fps
         // regardless of how fast the hardware is.
-        await new Promise((r) => setTimeout(r, 40));
+        await new Promise((r) => setTimeout(r, DETECT_INTERVAL_MS));
       }
     }
 
@@ -5977,6 +5999,18 @@ panels.forEach(p => observer.observe(p));
   startBtn.addEventListener('click', start);
   stopBtn.addEventListener('click', stop);
   document.addEventListener('visibilitychange', () => { if (document.hidden && running) stop(); });
+
+  // Scrolling away from this section is just as worth stopping for as
+  // switching tabs — a running camera + continuous inference left behind
+  // on a page a visitor has scrolled past is pure wasted battery/heat,
+  // which matters most on the mobile hardware this is now tuned for.
+  const section = document.getElementById('webcam-ai');
+  if (section && 'IntersectionObserver' in window) {
+    const io = new IntersectionObserver((entries) => {
+      if (!entries[0].isIntersecting && running) stop();
+    }, { threshold: 0 });
+    io.observe(section);
+  }
 })();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>

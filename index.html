@@ -5757,12 +5757,6 @@ panels.forEach(p => observer.observe(p));
     running = true;
 
     const ctx = overlay.getContext('2d');
-    const vStyle = getComputedStyle(video), oStyle = getComputedStyle(overlay);
-    console.log('[webcam-ai] stacking check', {
-      videoZ: vStyle.zIndex, videoOpacity: vStyle.opacity,
-      overlayZ: oStyle.zIndex, overlayOpacity: oStyle.opacity,
-      overlayRect: overlay.getBoundingClientRect(), videoRect: video.getBoundingClientRect(),
-    });
     function syncSize() { overlay.width = video.videoWidth || 480; overlay.height = video.videoHeight || 360; }
     video.addEventListener('loadedmetadata', syncSize, { once: true });
     syncSize();
@@ -5788,13 +5782,11 @@ panels.forEach(p => observer.observe(p));
       cache.face.forEach((d) => {
         const { x: rawX, y, width, height } = d.detection.box;
         const x = mirrorX(rawX, width);
-        console.log('[webcam-ai] face box', { x, y, width, height, canvasW: overlay.width, canvasH: overlay.height });
         faceCount++;
-        ctx.strokeStyle = '#22D3EE'; ctx.lineWidth = 6;
-        ctx.fillStyle = 'rgba(34,211,238,.25)';
+        ctx.strokeStyle = '#22D3EE'; ctx.lineWidth = 2;
+        ctx.fillStyle = 'rgba(34,211,238,.12)';
         ctx.fillRect(x, y, width, height);
         ctx.strokeRect(x, y, width, height);
-        console.log('[webcam-ai] box stroked ok');
 
         const top = Object.entries(d.expressions).sort((a, b) => b[1] - a[1])[0];
         const label = top[0] + ' ' + Math.round(top[1] * 100) + '%';
@@ -5865,65 +5857,76 @@ panels.forEach(p => observer.observe(p));
       });
     }
 
-    async function detectLoop() {
+    // Rendering and inference are deliberately decoupled. Inference (face,
+    // objects, hands, pose) is comparatively slow — tens to hundreds of ms
+    // per cycle — and running clearRect+draw only after each slow await
+    // resolved meant every result was only actually painted for about one
+    // frame before being cleared again, making it flicker in and out far
+    // too fast to reliably see. The render loop below repaints the latest
+    // cached results on every animation frame regardless of whether
+    // inference has produced anything new since the last paint; the
+    // inference loop below that just keeps `cache` updated in the
+    // background at whatever pace the models can manage.
+    function renderLoop() {
       if (!running) return;
-      if (video.readyState < 2) { rafId = requestAnimationFrame(detectLoop); return; }
-
       ctx.clearRect(0, 0, overlay.width, overlay.height);
-
-      // TEMP DIAGNOSTIC: unconditional canary border, independent of any
-      // model's output. If this magenta border isn't visible, the problem
-      // is canvas rendering/stacking, not face-api's coordinates — remove
-      // this block once the real box is confirmed visible.
-      ctx.save();
-      ctx.strokeStyle = '#FF00FF'; ctx.lineWidth = 6;
-      ctx.strokeRect(3, 3, overlay.width - 6, overlay.height - 6);
-      ctx.restore();
-
-      const faceWanted = (toggles.face && toggles.face.checked) || (toggles.landmarks && toggles.landmarks.checked);
-      if (faceWanted && faceApiReady) {
-        try {
-          let query = faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 224 }));
-          if (toggles.landmarks && toggles.landmarks.checked && landmarksReady) query = query.withFaceLandmarks();
-          query = query.withFaceExpressions();
-          cache.face = await query;
-        } catch (err) { console.error('[webcam-ai] face detection failed:', err); }
-      } else {
-        cache.face = [];
-      }
-
-      if (toggles.objects && toggles.objects.checked && cocoModel) {
-        try {
-          cache.objects = await cocoModel.detect(video);
-        } catch (err) { console.error('[webcam-ai] objects detection failed:', err); }
-      } else {
-        cache.objects = [];
-      }
-
-      if (toggles.hands && toggles.hands.checked && handDetector) {
-        try {
-          cache.hands = await handDetector.estimateHands(video);
-        } catch (err) { console.error('[webcam-ai] hands detection failed:', err); }
-      } else {
-        cache.hands = [];
-      }
-
-      if (toggles.pose && toggles.pose.checked && poseDetector) {
-        try {
-          cache.pose = await poseDetector.estimatePoses(video);
-        } catch (err) { console.error('[webcam-ai] pose detection failed:', err); }
-      } else {
-        cache.pose = [];
-      }
-
-      try { drawFace(); } catch (err) { console.error('[webcam-ai] drawFace threw:', err); }
+      try { drawFace(); } catch (err) { console.error('[webcam-ai] drawFace failed:', err); }
       drawObjects();
       drawHands();
       drawPose();
-
-      rafId = requestAnimationFrame(detectLoop);
+      rafId = requestAnimationFrame(renderLoop);
     }
-    detectLoop();
+
+    function nextFrame() { return new Promise((resolve) => requestAnimationFrame(resolve)); }
+
+    async function inferenceLoop() {
+      while (running) {
+        if (video.readyState < 2) { await nextFrame(); continue; }
+
+        const faceWanted = (toggles.face && toggles.face.checked) || (toggles.landmarks && toggles.landmarks.checked);
+        if (faceWanted && faceApiReady) {
+          try {
+            let query = faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 224 }));
+            if (toggles.landmarks && toggles.landmarks.checked && landmarksReady) query = query.withFaceLandmarks();
+            query = query.withFaceExpressions();
+            cache.face = await query;
+          } catch (err) { console.error('[webcam-ai] face detection failed:', err); }
+        } else {
+          cache.face = [];
+        }
+
+        if (toggles.objects && toggles.objects.checked && cocoModel) {
+          try {
+            cache.objects = await cocoModel.detect(video);
+          } catch (err) { console.error('[webcam-ai] objects detection failed:', err); }
+        } else {
+          cache.objects = [];
+        }
+
+        if (toggles.hands && toggles.hands.checked && handDetector) {
+          try {
+            cache.hands = await handDetector.estimateHands(video);
+          } catch (err) { console.error('[webcam-ai] hands detection failed:', err); }
+        } else {
+          cache.hands = [];
+        }
+
+        if (toggles.pose && toggles.pose.checked && poseDetector) {
+          try {
+            cache.pose = await poseDetector.estimatePoses(video);
+          } catch (err) { console.error('[webcam-ai] pose detection failed:', err); }
+        } else {
+          cache.pose = [];
+        }
+
+        // Yield to the browser between inference cycles instead of hammering
+        // it back-to-back with zero gap.
+        await nextFrame();
+      }
+    }
+
+    renderLoop();
+    inferenceLoop();
   }
 
   function stop() {

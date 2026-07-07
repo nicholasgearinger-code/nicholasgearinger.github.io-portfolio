@@ -5685,6 +5685,11 @@ panels.forEach(p => observer.observe(p));
   async function ensureHands() {
     if (handDetector) return;
     if (typeof handPoseDetection === 'undefined') await loadScript(HAND_LIB_URL);
+    // The 'mediapipe' runtime needs @mediapipe/hands/hands.js loaded
+    // separately first — it exposes a global `Hands` constructor that
+    // hand-pose-detection instantiates internally. solutionPath alone only
+    // tells it where to fetch the WASM/model binaries from, not the JS glue.
+    if (typeof Hands === 'undefined') await loadScript(MEDIAPIPE_HANDS_URL + '/hands.js');
     // Deliberately NOT using runtime:'tfjs' here — it has a known, documented
     // bug (tensorflow/tfjs#7204) where it returns NaN for every x/y
     // coordinate while still reporting a plausible hand structure. The

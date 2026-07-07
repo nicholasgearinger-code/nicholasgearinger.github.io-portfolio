@@ -2534,7 +2534,7 @@
     </div>
     <p class="algo-hint" id="webcam-hint">Each toggle loads its own model on demand, the first time you switch it on — nothing downloads until you ask for it. Running several at once is more demanding on your device, so if things feel sluggish, try enabling fewer at a time.</p>
     <p class="algo-hint">Turn on "Hands &amp; Play" and pinch your thumb and index finger together over one of the floating orbs to grab it — drag it around and let go to toss it.</p>
-    <p class="algo-hint">"Telemetry HUD" adds a live readout of clock, FPS, battery, network, and device tilt (where your browser exposes them) — all read locally, nothing sent anywhere. "Location" is kept separate and opt-in on purpose: it asks your browser's normal permission prompt and only ever draws your coordinates on your own screen.</p>
+    <p class="algo-hint">"Telemetry HUD" adds a live readout of clock, FPS, battery, network, and a heading compass (where your browser exposes them) — all read locally, nothing sent anywhere. "Location" is kept separate and opt-in on purpose: it asks your browser's normal permission prompt and only ever draws your coordinates on your own screen.</p>
     <p class="algo-hint">Face + expression + landmarks: face-api.js. Objects: COCO-SSD. Hands &amp; body pose: TensorFlow.js's official MediaPipe-based models. All MIT/Apache licensed, all inference client-side.</p>
   </div>
 </section>
@@ -5747,7 +5747,15 @@ panels.forEach(p => observer.observe(p));
   // APIs feature-detected and read live. Battery and Network Information
   // objects update their own properties in place, so we only need to grab
   // a reference once rather than polling or re-subscribing.
-  function onOrientation(e) { orientationInfo = { beta: e.beta, gamma: e.gamma }; }
+  // iOS exposes a true compass heading directly; elsewhere it's
+  // approximated from `alpha`, preferring the 'absolute' event variant
+  // when the browser fires it since that's anchored to magnetic north
+  // rather than an arbitrary starting orientation.
+  function onOrientation(e) {
+    const heading = (typeof e.webkitCompassHeading === 'number') ? e.webkitCompassHeading
+      : (typeof e.alpha === 'number') ? (360 - e.alpha) : null;
+    orientationInfo = { beta: e.beta, gamma: e.gamma, heading };
+  }
   async function ensureTelemetry() {
     if (telemetryReady) return;
     if (navigator.getBattery) {
@@ -5762,9 +5770,14 @@ panels.forEach(p => observer.observe(p));
         try {
           const state = await DeviceOrientationEvent.requestPermission();
           if (state === 'granted') window.addEventListener('deviceorientation', onOrientation);
-        } catch (e) { /* denied or unsupported — telemetry panel just omits tilt */ }
+        } catch (e) { /* denied or unsupported — telemetry panel just omits tilt/compass */ }
       } else {
         window.addEventListener('deviceorientation', onOrientation);
+        // Fires in addition to the plain event on browsers that support
+        // it (mainly Chrome/Android) with alpha already anchored to
+        // magnetic north — listened to separately since it's a distinct
+        // event type, not a flag on the one above.
+        window.addEventListener('deviceorientationabsolute', onOrientation);
       }
     }
     telemetryReady = true;
@@ -6147,7 +6160,7 @@ panels.forEach(p => observer.observe(p));
       const W = overlay.width, H = overlay.height;
       drawTelemetryTopBar(W, dpr);
       if (batteryInfo) drawBatteryGauge(H, dpr);
-      drawRightCluster(W, H, dpr);
+      drawCompass(W, H, dpr);
       ctx.textAlign = 'left';
       ctx.textBaseline = 'alphabetic';
     }
@@ -6168,16 +6181,16 @@ panels.forEach(p => observer.observe(p));
     // chaining the returned left edge into the next call) and returns that
     // left edge.
     function drawPill(rightEdgeX, midY, label, color, dpr) {
-      const padX = 7 * dpr, h = 17 * dpr;
-      ctx.font = (10 * dpr) + 'px monospace';
+      const padX = 9 * dpr, h = 22 * dpr;
+      ctx.font = 'bold ' + (12 * dpr) + 'px monospace';
       ctx.textAlign = 'left';
       const textW = ctx.measureText(label).width;
       const w = textW + padX * 2;
       const x = rightEdgeX - w, y = midY - h / 2;
-      ctx.fillStyle = color + '26'; // ~15% alpha fill, same hue as the border/text
+      ctx.fillStyle = color + '33'; // ~20% alpha fill, same hue as the border/text
       roundRectPath(x, y, w, h, h / 2);
       ctx.fill();
-      ctx.strokeStyle = color; ctx.lineWidth = 1;
+      ctx.strokeStyle = color; ctx.lineWidth = 1.5 * dpr;
       roundRectPath(x, y, w, h, h / 2);
       ctx.stroke();
       ctx.fillStyle = color;
@@ -6191,29 +6204,29 @@ panels.forEach(p => observer.observe(p));
     // network status as color-coded pills on the right — a glance at color
     // alone should tell you "system healthy" without reading a single word.
     function drawTelemetryTopBar(W, dpr) {
-      const barH = 24 * dpr;
-      ctx.fillStyle = 'rgba(3,8,17,.78)';
+      const barH = 30 * dpr;
+      ctx.fillStyle = 'rgba(3,8,17,.85)';
       ctx.fillRect(0, 0, W, barH);
-      ctx.strokeStyle = 'rgba(34,211,238,.4)'; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(0, barH + 0.5); ctx.lineTo(W, barH + 0.5); ctx.stroke();
+      ctx.strokeStyle = 'rgba(34,211,238,.55)'; ctx.lineWidth = 1.5 * dpr;
+      ctx.beginPath(); ctx.moveTo(0, barH); ctx.lineTo(W, barH); ctx.stroke();
 
-      const midY = barH / 2, pad = 8 * dpr;
-      ctx.font = (12 * dpr) + 'px monospace';
+      const midY = barH / 2, pad = 10 * dpr;
+      ctx.font = 'bold ' + (15 * dpr) + 'px monospace';
       ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
       const now = new Date();
       const timeStr = now.toLocaleTimeString([], { hour12: false });
-      ctx.fillStyle = '#22D3EE';
+      ctx.fillStyle = '#67E8F9';
       ctx.fillText(timeStr, pad, midY);
-      ctx.font = (10 * dpr) + 'px monospace';
-      ctx.fillStyle = 'rgba(148,163,184,.85)';
-      ctx.fillText(now.toISOString().slice(0, 10), pad + ctx.measureText(timeStr).width + 10 * dpr, midY);
+      ctx.font = (12 * dpr) + 'px monospace';
+      ctx.fillStyle = 'rgba(203,213,225,.95)';
+      ctx.fillText(now.toISOString().slice(0, 10), pad + ctx.measureText(timeStr).width + 12 * dpr, midY);
 
       const fpsColor = fps >= 24 ? '#4ADE80' : fps >= 15 ? '#F59E0B' : '#F87171';
       let cursor = drawPill(W - pad, midY, Math.round(fps) + ' FPS', fpsColor, dpr);
       const netOnline = navigator.onLine !== false;
       const netType = networkInfo && networkInfo.effectiveType ? networkInfo.effectiveType.toUpperCase() : null;
       const netLabel = netOnline ? (netType || 'ONLINE') : 'OFFLINE';
-      drawPill(cursor - 6 * dpr, midY, netLabel, netOnline ? '#4ADE80' : '#F87171', dpr);
+      drawPill(cursor - 8 * dpr, midY, netLabel, netOnline ? '#4ADE80' : '#F87171', dpr);
     }
 
     // Small hand-drawn bolt so a "charging" cue matches the rest of this
@@ -6231,68 +6244,97 @@ panels.forEach(p => observer.observe(p));
       ctx.restore();
     }
 
-    // Vertical fuel-gauge along the left edge — fills bottom-up, colored by
-    // level, with a small nub cap (the classic battery-icon silhouette)
-    // and a bolt above it when charging.
+    // Vertical fuel-gauge along the left edge, on its own backing card for
+    // contrast against whatever's behind it in the video — fills bottom-up,
+    // colored by level, with a nub cap and a bolt above it when charging.
     function drawBatteryGauge(H, dpr) {
-      const gw = 14 * dpr, gh = Math.min(120 * dpr, H * 0.4);
-      const x = 10 * dpr, y = H / 2 - gh / 2;
+      const gw = 20 * dpr, gh = Math.min(140 * dpr, H * 0.42);
+      const cardPad = 10 * dpr;
+      const cardW = gw + cardPad * 2, cardH = gh + cardPad * 2 + 22 * dpr;
+      const cardX = 8 * dpr, cardY = H / 2 - cardH / 2;
+      ctx.fillStyle = 'rgba(3,8,17,.78)';
+      ctx.strokeStyle = 'rgba(34,211,238,.4)'; ctx.lineWidth = 1 * dpr;
+      roundRectPath(cardX, cardY, cardW, cardH, 6 * dpr);
+      ctx.fill(); ctx.stroke();
+
+      const x = cardX + cardPad, y = cardY + cardPad + 10 * dpr;
       const level = Math.max(0, Math.min(1, batteryInfo.level));
       const color = level > 0.5 ? '#4ADE80' : level > 0.2 ? '#F59E0B' : '#F87171';
-      const nubW = gw * 0.5, nubH = 4 * dpr;
+      const nubW = gw * 0.5, nubH = 5 * dpr;
 
-      ctx.fillStyle = 'rgba(148,163,184,.5)';
+      ctx.fillStyle = 'rgba(226,232,240,.7)';
       ctx.fillRect(x + (gw - nubW) / 2, y - nubH, nubW, nubH);
-      ctx.strokeStyle = 'rgba(148,163,184,.6)'; ctx.lineWidth = 1.5 * dpr;
+      ctx.strokeStyle = 'rgba(226,232,240,.8)'; ctx.lineWidth = 2 * dpr;
       ctx.strokeRect(x, y, gw, gh);
-      const fillH = (gh - 4 * dpr) * level;
+      const fillH = (gh - 5 * dpr) * level;
       ctx.fillStyle = color;
-      ctx.fillRect(x + 2 * dpr, y + gh - 2 * dpr - fillH, gw - 4 * dpr, fillH);
+      ctx.fillRect(x + 2.5 * dpr, y + gh - 2.5 * dpr - fillH, gw - 5 * dpr, fillH);
 
-      if (batteryInfo.charging) drawBoltIcon(x + gw / 2, y - nubH - 8 * dpr, 12 * dpr, '#FDE68A');
+      if (batteryInfo.charging) drawBoltIcon(x + gw / 2, y - nubH - 9 * dpr, 14 * dpr, '#FDE68A');
 
-      ctx.font = (10 * dpr) + 'px monospace';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.font = 'bold ' + (13 * dpr) + 'px monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
       ctx.fillStyle = color;
-      ctx.fillText(Math.round(level * 100) + '%', x + gw / 2, y + gh + 6 * dpr);
+      ctx.fillText(Math.round(level * 100) + '%', x + gw / 2, y + gh + 18 * dpr);
     }
 
-    // Right-edge cluster: a small artificial-horizon-style tilt widget
-    // (dot position = gamma/beta, clamped to the circle) stacked above the
-    // live coordinates when Location is also on.
-    function drawRightCluster(W, H, dpr) {
-      const hasTilt = orientationInfo && orientationInfo.beta != null;
+    // Bottom-right compass rose: a fixed ring with N/E/S/W marked and a
+    // needle that rotates to the live heading (see onOrientation for where
+    // that heading comes from) — a needle-and-letters compass reads at a
+    // glance in a way an abstract dot-in-a-circle tilt gauge doesn't.
+    // Live coordinates, if Location is also on, stack just above it.
+    function drawCompass(W, H, dpr) {
+      const hasHeading = orientationInfo && typeof orientationInfo.heading === 'number';
       const hasGeo = toggles.geo && toggles.geo.checked && geoInfo;
-      if (!hasTilt && !hasGeo) return;
+      if (!hasHeading && !hasGeo) return;
 
-      const r = 20 * dpr;
-      const cx = W - 10 * dpr - r, cy = H / 2 - (hasGeo ? 16 * dpr : 0);
-
-      if (hasTilt) {
-        ctx.strokeStyle = 'rgba(148,163,184,.5)'; ctx.lineWidth = 1 * dpr;
-        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(cx - r, cy); ctx.lineTo(cx + r, cy);
-        ctx.moveTo(cx, cy - r); ctx.lineTo(cx, cy + r);
-        ctx.stroke();
-        const gx = Math.max(-45, Math.min(45, orientationInfo.gamma || 0)) / 45 * r;
-        const gy = Math.max(-45, Math.min(45, orientationInfo.beta || 0)) / 45 * r;
-        ctx.fillStyle = '#22D3EE';
-        ctx.beginPath(); ctx.arc(cx + gx, cy + gy, 3.5 * dpr, 0, Math.PI * 2); ctx.fill();
-        ctx.font = (9 * dpr) + 'px monospace';
-        ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-        ctx.fillStyle = 'rgba(148,163,184,.8)';
-        ctx.fillText('TILT', cx, cy - r - 6 * dpr);
-      }
+      const r = 32 * dpr;
+      const margin = 14 * dpr;
+      const cx = W - margin - r, cy = H - margin - r;
 
       if (hasGeo) {
-        const geoY = cy + (hasTilt ? r + 14 * dpr : 0);
-        ctx.font = (9 * dpr) + 'px monospace';
+        ctx.font = (11 * dpr) + 'px monospace';
         ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
-        ctx.fillStyle = '#22D3EE';
-        ctx.fillText('LAT ' + geoInfo.latitude.toFixed(3), W - 8 * dpr, geoY);
-        ctx.fillText('LON ' + geoInfo.longitude.toFixed(3), W - 8 * dpr, geoY + 12 * dpr);
+        const geoY = hasHeading ? cy - r - 22 * dpr : cy;
+        const line1 = 'LAT ' + geoInfo.latitude.toFixed(3), line2 = 'LON ' + geoInfo.longitude.toFixed(3);
+        const gw = Math.max(ctx.measureText(line1).width, ctx.measureText(line2).width) + 16 * dpr;
+        ctx.fillStyle = 'rgba(3,8,17,.78)';
+        ctx.strokeStyle = 'rgba(34,211,238,.4)'; ctx.lineWidth = 1 * dpr;
+        roundRectPath(W - margin - gw, geoY - 24 * dpr, gw, 32 * dpr, 5 * dpr);
+        ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#67E8F9';
+        ctx.fillText(line1, W - margin - 8 * dpr, geoY - 8 * dpr);
+        ctx.fillText(line2, W - margin - 8 * dpr, geoY + 6 * dpr);
       }
+
+      if (!hasHeading) return;
+
+      ctx.fillStyle = 'rgba(3,8,17,.78)';
+      ctx.beginPath(); ctx.arc(cx, cy, r + 8 * dpr, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(226,232,240,.85)'; ctx.lineWidth = 2 * dpr;
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+
+      ctx.font = 'bold ' + (12 * dpr) + 'px monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      const cardinals = [['N', 0, '#F87171'], ['E', 90, 'rgba(226,232,240,.85)'], ['S', 180, 'rgba(226,232,240,.85)'], ['W', 270, 'rgba(226,232,240,.85)']];
+      cardinals.forEach(([letter, deg, color]) => {
+        const rad = (deg * Math.PI) / 180;
+        ctx.fillStyle = color;
+        ctx.fillText(letter, cx + Math.sin(rad) * (r - 11 * dpr), cy - Math.cos(rad) * (r - 11 * dpr));
+      });
+
+      const rad = (orientationInfo.heading * Math.PI) / 180;
+      const tipX = cx + Math.sin(rad) * (r - 16 * dpr), tipY = cy - Math.cos(rad) * (r - 16 * dpr);
+      const tailX = cx - Math.sin(rad) * (r * 0.4), tailY = cy + Math.cos(rad) * (r * 0.4);
+      ctx.strokeStyle = '#22D3EE'; ctx.lineWidth = 2.5 * dpr;
+      ctx.beginPath(); ctx.moveTo(tailX, tailY); ctx.lineTo(tipX, tipY); ctx.stroke();
+      ctx.fillStyle = '#22D3EE';
+      ctx.beginPath(); ctx.arc(tipX, tipY, 3 * dpr, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx, cy, 2.5 * dpr, 0, Math.PI * 2); ctx.fill();
+
+      ctx.font = 'bold ' + (11 * dpr) + 'px monospace';
+      ctx.fillStyle = '#67E8F9';
+      ctx.fillText(Math.round(orientationInfo.heading) + '\u00b0', cx, cy + r + 16 * dpr);
     }
 
     // Rendering and detection are two independent loops now. Previously a

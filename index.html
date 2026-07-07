@@ -5203,6 +5203,13 @@ panels.forEach(p => observer.observe(p));
   let stepsDone = 0;
   let entryIndex = 0;
 
+  // Hard floor on how long the terminal stays on screen, independent of how
+  // fast the typing itself runs — guarantees the whole sequence is visible
+  // and readable rather than racing ahead of a slow page load, or (on a
+  // very fast device) finishing and vanishing too quickly to read.
+  const bootStart = Date.now();
+  const MIN_DISPLAY_MS = 4200;
+
   function finish() {
     barFill.style.width = '100%';
     // Leave a bare blinking prompt on screen for a beat before revealing
@@ -5212,10 +5219,12 @@ panels.forEach(p => observer.observe(p));
     promptLine.innerHTML = '$ <span class="boot-cursor"></span>';
     linesEl.appendChild(promptLine);
     sessionStorage.setItem('bootSeqShown', '1');
+    const elapsed = Date.now() - bootStart;
+    const lingerWait = Math.max(900, MIN_DISPLAY_MS - elapsed);
     setTimeout(() => {
       overlay.classList.add('boot-done');
       setTimeout(() => overlay.remove(), 550);
-    }, 550);
+    }, lingerWait);
   }
 
   function typeEntry() {
@@ -5236,7 +5245,7 @@ panels.forEach(p => observer.observe(p));
       textSpan.textContent = full.slice(0, charI + 1);
       charI++;
       if (charI < full.length) {
-        setTimeout(typeChar, 16 + Math.random() * 12);
+        setTimeout(typeChar, 32 + Math.random() * 22);
       } else {
         cursorSpan.remove();
         if (entry.type === 'step') {
@@ -5248,7 +5257,7 @@ panels.forEach(p => observer.observe(p));
           barFill.style.width = Math.round((stepsDone / totalSteps) * 100) + '%';
         }
         entryIndex++;
-        setTimeout(typeEntry, entry.type === 'cmd' ? 220 : 160);
+        setTimeout(typeEntry, entry.type === 'cmd' ? 340 : 260);
       }
     }
     typeChar();

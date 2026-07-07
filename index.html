@@ -2534,7 +2534,7 @@
     </div>
     <p class="algo-hint" id="webcam-hint">Each toggle loads its own model on demand, the first time you switch it on — nothing downloads until you ask for it. Running several at once is more demanding on your device, so if things feel sluggish, try enabling fewer at a time.</p>
     <p class="algo-hint">Turn on "Hands &amp; Play" and pinch your thumb and index finger together over one of the floating orbs to grab it — drag it around and let go to toss it.</p>
-    <p class="algo-hint">"Telemetry HUD" adds a live readout of clock, FPS, battery, network, and a heading compass (where your browser exposes them) — all read locally, nothing sent anywhere. "Location" is kept separate and opt-in on purpose: it asks your browser's normal permission prompt and only ever draws your coordinates on your own screen.</p>
+    <p class="algo-hint">"Telemetry HUD" adds a live readout of clock, FPS, battery, a network diagnostics panel (connection type, downlink, latency, and a rolling bar graph), and a heading compass (where your browser exposes them) — all read locally, nothing sent anywhere. "Location" is kept separate and opt-in on purpose: it asks your browser's normal permission prompt and only ever draws your coordinates on your own screen.</p>
     <p class="algo-hint">Face + expression + landmarks: face-api.js. Objects: COCO-SSD. Hands &amp; body pose: TensorFlow.js's official MediaPipe-based models. All MIT/Apache licensed, all inference client-side.</p>
   </div>
 </section>
@@ -5641,6 +5641,7 @@ panels.forEach(p => observer.observe(p));
   let faceApiReady = false, landmarksReady = false, telemetryReady = false;
   let cocoModel = null, handDetector = null, poseDetector = null;
   let batteryInfo = null, networkInfo = null, orientationInfo = null, geoInfo = null, geoWatchId = null;
+  let downlinkHistory = [], lastNetSampleTs = 0;
   const loadPromises = {};
 
   // Same "coarse pointer" heuristic already used elsewhere on this page to
@@ -5978,20 +5979,39 @@ panels.forEach(p => observer.observe(p));
         // Telemetry readout with a leader line off the top-right corner —
         // a fixed per-face ID plus a live confidence score sells the
         // "targeting computer" read a lot more than a label ever would.
+        // Sized off PERF_DPR like the rest of the HUD (this was previously
+        // a fixed 10px regardless of device pixel ratio, which read as
+        // tiny on higher-density screens) and backed by a solid panel for
+        // contrast instead of floating bare over whatever's in the video.
+        const dpr = PERF_DPR;
         const id = 'TGT-' + String(i + 1).padStart(2, '0');
+        const lockLabel = 'LOCK ' + Math.round(d.detection.score * 100) + '%';
         const leaderX = b.x + b.w, leaderY = b.y;
-        const panelX = leaderX + 26, panelY = Math.max(10, leaderY - 24);
-        ctx.strokeStyle = 'rgba(34,211,238,.5)'; ctx.lineWidth = 1;
+        const panelX = leaderX + 22 * dpr, panelY = Math.max(10 * dpr, leaderY - 30 * dpr);
+        ctx.strokeStyle = 'rgba(34,211,238,.6)'; ctx.lineWidth = 1.5 * dpr;
         ctx.beginPath();
         ctx.moveTo(leaderX, leaderY);
-        ctx.lineTo(leaderX + 16, leaderY - 10);
-        ctx.lineTo(panelX, panelY + 10);
+        ctx.lineTo(leaderX + 14 * dpr, leaderY - 9 * dpr);
+        ctx.lineTo(panelX, panelY + 13 * dpr);
         ctx.stroke();
-        ctx.font = '10px monospace';
-        ctx.fillStyle = '#22D3EE';
-        ctx.fillText(id, panelX, panelY);
-        ctx.fillStyle = 'rgba(125,211,252,.85)';
-        ctx.fillText('LOCK ' + Math.round(d.detection.score * 100) + '%', panelX, panelY + 13);
+
+        ctx.font = 'bold ' + (13 * dpr) + 'px monospace';
+        const idW = ctx.measureText(id).width;
+        ctx.font = (12 * dpr) + 'px monospace';
+        const lockW = ctx.measureText(lockLabel).width;
+        const panelPad = 8 * dpr, lineH = 16 * dpr;
+        const panelW = Math.max(idW, lockW) + panelPad * 2;
+        ctx.fillStyle = 'rgba(3,8,17,.82)';
+        ctx.strokeStyle = 'rgba(34,211,238,.5)'; ctx.lineWidth = 1 * dpr;
+        ctx.fillRect(panelX, panelY, panelW, lineH * 2 + panelPad * 0.6);
+        ctx.strokeRect(panelX, panelY, panelW, lineH * 2 + panelPad * 0.6);
+        ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+        ctx.font = 'bold ' + (13 * dpr) + 'px monospace';
+        ctx.fillStyle = '#67E8F9';
+        ctx.fillText(id, panelX + panelPad, panelY + lineH - 3 * dpr);
+        ctx.font = (12 * dpr) + 'px monospace';
+        ctx.fillStyle = '#A5F3FC';
+        ctx.fillText(lockLabel, panelX + panelPad, panelY + lineH * 2 - 4 * dpr);
 
         if (d.landmarks) {
           ctx.fillStyle = '#E879F9';
@@ -6158,14 +6178,18 @@ panels.forEach(p => observer.observe(p));
       if (!(toggles.telemetry && toggles.telemetry.checked)) return;
       const dpr = PERF_DPR;
       const W = overlay.width, H = overlay.height;
+      drawFrameCorners(W, H, dpr);
       drawTelemetryTopBar(W, dpr);
+      drawNetworkPanel(W, dpr);
       if (batteryInfo) drawBatteryGauge(H, dpr);
       drawCompass(W, H, dpr);
       ctx.textAlign = 'left';
       ctx.textBaseline = 'alphabetic';
     }
 
-    // Rounded-rect path, used by the pill badges below.
+    // Rounded-rect path, still used by the pill badges (a pill reads as a
+    // pill either way at that size — chamfering only pays off on the
+    // bigger structural panels below).
     function roundRectPath(x, y, w, h, r) {
       ctx.beginPath();
       ctx.moveTo(x + r, y);
@@ -6173,6 +6197,22 @@ panels.forEach(p => observer.observe(p));
       ctx.arcTo(x + w, y + h, x, y + h, r);
       ctx.arcTo(x, y + h, x, y, r);
       ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    }
+
+    // Chamfered (corner-cut) rect — the panel shape borrowed from classic
+    // sci-fi HUD mockups, used for every structural panel below instead
+    // of the softer rounded corners a plain dashboard would use.
+    function chamferRectPath(x, y, w, h, c) {
+      ctx.beginPath();
+      ctx.moveTo(x + c, y);
+      ctx.lineTo(x + w - c, y);
+      ctx.lineTo(x + w, y + c);
+      ctx.lineTo(x + w, y + h - c);
+      ctx.lineTo(x + w - c, y + h);
+      ctx.lineTo(x + c, y + h);
+      ctx.lineTo(x, y + h - c);
+      ctx.lineTo(x, y + c);
       ctx.closePath();
     }
 
@@ -6198,6 +6238,26 @@ panels.forEach(p => observer.observe(p));
       ctx.textBaseline = 'middle';
       ctx.fillText(label, x + w / 2, midY + 0.5);
       return x;
+    }
+
+    // Cockpit-style corner brackets framing the whole feed — an L-shaped
+    // bracket meeting a small hollow ring at each of the four extreme
+    // corners, the classic "HUD frame" signature borrowed straight from
+    // the reference mockup rather than anything tied to a detection.
+    function drawFrameCorners(W, H, dpr) {
+      const len = 22 * dpr, inset = 10 * dpr, ringR = 5 * dpr;
+      const corners = [[inset, inset, 1, 1], [W - inset, inset, -1, 1], [inset, H - inset, 1, -1], [W - inset, H - inset, -1, -1]];
+      ctx.strokeStyle = 'rgba(34,211,238,.55)'; ctx.lineWidth = 1.5 * dpr;
+      corners.forEach(([x, y, dx, dy]) => {
+        ctx.beginPath();
+        ctx.moveTo(x, y + len * dy);
+        ctx.lineTo(x, y);
+        ctx.lineTo(x + len * dx, y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(x, y, ringR, 0, Math.PI * 2);
+        ctx.stroke();
+      });
     }
 
     // Full-width strip across the top: clock + date on the left, FPS and
@@ -6230,6 +6290,64 @@ panels.forEach(p => observer.observe(p));
       drawPill(cursor - 8 * dpr, midY, netLabel, netOnline ? '#4ADE80' : '#F87171', dpr);
     }
 
+    // Network diagnostics panel, top-left under the status bar — the
+    // top-bar pill only says "online or not"; this is the detail version:
+    // connection type, downlink, round-trip time where the browser exposes
+    // them (Network Information API — mainly Chrome/Android), plus a
+    // rolling bar-graph sampled once a second so there's something to
+    // actually watch move rather than a static readout.
+    function drawNetworkPanel(W, dpr) {
+      const nowTs = Date.now();
+      if (nowTs - lastNetSampleTs > 1000) {
+        lastNetSampleTs = nowTs;
+        const online = navigator.onLine !== false;
+        const sample = !online ? 0 : (networkInfo && typeof networkInfo.downlink === 'number' ? networkInfo.downlink : 2.5);
+        downlinkHistory.push(sample);
+        if (downlinkHistory.length > 14) downlinkHistory.shift();
+      }
+
+      const panelX = 8 * dpr, panelY = 30 * dpr + 8 * dpr;
+      const panelW = 190 * dpr, panelH = 78 * dpr, c = 8 * dpr;
+      ctx.fillStyle = 'rgba(3,8,17,.82)';
+      ctx.strokeStyle = 'rgba(34,211,238,.5)'; ctx.lineWidth = 1 * dpr;
+      chamferRectPath(panelX, panelY, panelW, panelH, c);
+      ctx.fill(); ctx.stroke();
+
+      const netOnline = navigator.onLine !== false;
+      const netColor = netOnline ? '#4ADE80' : '#F87171';
+      const padX = 10 * dpr;
+
+      ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      ctx.font = 'bold ' + (9 * dpr) + 'px monospace';
+      ctx.fillStyle = 'rgba(148,163,184,.85)';
+      ctx.fillText('NETWORK', panelX + padX, panelY + 15 * dpr);
+      ctx.fillStyle = netColor;
+      ctx.beginPath(); ctx.arc(panelX + panelW - 14 * dpr, panelY + 12 * dpr, 3.5 * dpr, 0, Math.PI * 2); ctx.fill();
+
+      const netType = networkInfo && networkInfo.effectiveType ? networkInfo.effectiveType.toUpperCase() : null;
+      ctx.font = 'bold ' + (13 * dpr) + 'px monospace';
+      ctx.fillStyle = netColor;
+      ctx.fillText(netOnline ? (netType || 'ONLINE') : 'OFFLINE', panelX + padX, panelY + 32 * dpr);
+
+      const details = [];
+      if (networkInfo && typeof networkInfo.downlink === 'number') details.push(networkInfo.downlink.toFixed(1) + ' MBPS');
+      if (networkInfo && typeof networkInfo.rtt === 'number') details.push(networkInfo.rtt + ' MS');
+      ctx.font = (10 * dpr) + 'px monospace';
+      ctx.fillStyle = 'rgba(203,213,225,.85)';
+      ctx.fillText(details.length ? details.join('  \u00b7  ') : '\u2014', panelX + padX, panelY + 46 * dpr);
+
+      const bars = downlinkHistory.length ? downlinkHistory : [0];
+      const maxV = Math.max(4, ...bars);
+      const graphH = 16 * dpr, baselineY = panelY + panelH - 8 * dpr;
+      const availW = panelW - padX * 2;
+      const bw = availW / 14 * 0.62, gap = availW / 14 * 0.38;
+      bars.forEach((v, idx) => {
+        const h = Math.max(1.5 * dpr, (v / maxV) * graphH);
+        ctx.fillStyle = netOnline ? 'rgba(74,222,128,.85)' : 'rgba(248,113,113,.85)';
+        ctx.fillRect(panelX + padX + idx * (bw + gap), baselineY - h, bw, h);
+      });
+    }
+
     // Small hand-drawn bolt so a "charging" cue matches the rest of this
     // HUD's thin vector-line look instead of relying on an emoji glyph.
     function drawBoltIcon(cx, cy, size, color) {
@@ -6245,17 +6363,18 @@ panels.forEach(p => observer.observe(p));
       ctx.restore();
     }
 
-    // Vertical fuel-gauge along the left edge, on its own backing card for
-    // contrast against whatever's behind it in the video — fills bottom-up,
-    // colored by level, with a nub cap and a bolt above it when charging.
+    // Vertical gauge along the left edge, below the network panel — now
+    // segmented into discrete blocks (10, lit bottom-up by level) rather
+    // than a smooth fill, matching the striped "LOADING" bar look sci-fi
+    // HUD mockups use instead of a plain progress bar.
     function drawBatteryGauge(H, dpr) {
-      const gw = 20 * dpr, gh = Math.min(140 * dpr, H * 0.42);
+      const gw = 20 * dpr, gh = Math.min(140 * dpr, H * 0.4);
       const cardPad = 10 * dpr;
       const cardW = gw + cardPad * 2, cardH = gh + cardPad * 2 + 22 * dpr;
-      const cardX = 8 * dpr, cardY = H / 2 - cardH / 2;
-      ctx.fillStyle = 'rgba(3,8,17,.78)';
-      ctx.strokeStyle = 'rgba(34,211,238,.4)'; ctx.lineWidth = 1 * dpr;
-      roundRectPath(cardX, cardY, cardW, cardH, 6 * dpr);
+      const cardX = 8 * dpr, cardY = 30 * dpr + 78 * dpr + 16 * dpr;
+      ctx.fillStyle = 'rgba(3,8,17,.82)';
+      ctx.strokeStyle = 'rgba(34,211,238,.5)'; ctx.lineWidth = 1 * dpr;
+      chamferRectPath(cardX, cardY, cardW, cardH, 8 * dpr);
       ctx.fill(); ctx.stroke();
 
       const x = cardX + cardPad, y = cardY + cardPad + 10 * dpr;
@@ -6267,9 +6386,15 @@ panels.forEach(p => observer.observe(p));
       ctx.fillRect(x + (gw - nubW) / 2, y - nubH, nubW, nubH);
       ctx.strokeStyle = 'rgba(226,232,240,.8)'; ctx.lineWidth = 2 * dpr;
       ctx.strokeRect(x, y, gw, gh);
-      const fillH = (gh - 5 * dpr) * level;
-      ctx.fillStyle = color;
-      ctx.fillRect(x + 2.5 * dpr, y + gh - 2.5 * dpr - fillH, gw - 5 * dpr, fillH);
+
+      const segments = 10, segGap = 2 * dpr;
+      const segH = (gh - 4 * dpr - segGap * (segments - 1)) / segments;
+      const lit = Math.round(level * segments);
+      for (let s = 0; s < segments; s++) {
+        const segY = y + gh - 2 * dpr - (s + 1) * segH - s * segGap;
+        ctx.fillStyle = s < lit ? color : 'rgba(226,232,240,.12)';
+        ctx.fillRect(x + 2.5 * dpr, segY, gw - 5 * dpr, segH);
+      }
 
       if (batteryInfo.charging) drawBoltIcon(x + gw / 2, y - nubH - 9 * dpr, 14 * dpr, '#FDE68A');
 
@@ -6279,11 +6404,10 @@ panels.forEach(p => observer.observe(p));
       ctx.fillText(Math.round(level * 100) + '%', x + gw / 2, y + gh + 18 * dpr);
     }
 
-    // Bottom-right compass rose: a fixed ring with N/E/S/W marked and a
-    // needle that rotates to the live heading (see onOrientation for where
-    // that heading comes from) — a needle-and-letters compass reads at a
-    // glance in a way an abstract dot-in-a-circle tilt gauge doesn't.
-    // Live coordinates, if Location is also on, stack just above it.
+    // Bottom-right radar-style compass: a fixed ring (tick marks, no
+    // cardinal letters — see the redesign note below) with a needle-free
+    // heading spoke, plus live coordinates stacked above it when Location
+    // is also on.
     function drawCompass(W, H, dpr) {
       const hasHeading = orientationInfo && typeof orientationInfo.heading === 'number';
       const hasGeo = toggles.geo && toggles.geo.checked && geoInfo;
@@ -6301,7 +6425,7 @@ panels.forEach(p => observer.observe(p));
         const gw = Math.max(ctx.measureText(line1).width, ctx.measureText(line2).width) + 16 * dpr;
         ctx.fillStyle = 'rgba(3,8,17,.78)';
         ctx.strokeStyle = 'rgba(34,211,238,.4)'; ctx.lineWidth = 1 * dpr;
-        roundRectPath(W - margin - gw, geoY - 24 * dpr, gw, 32 * dpr, 5 * dpr);
+        chamferRectPath(W - margin - gw, geoY - 24 * dpr, gw, 32 * dpr, 6 * dpr);
         ctx.fill(); ctx.stroke();
         ctx.fillStyle = '#67E8F9';
         ctx.fillText(line1, W - margin - 8 * dpr, geoY - 8 * dpr);
@@ -6316,6 +6440,17 @@ panels.forEach(p => observer.observe(p));
       ctx.beginPath(); ctx.arc(cx, cy, r + 8 * dpr, 0, Math.PI * 2); ctx.fill();
       ctx.strokeStyle = 'rgba(34,211,238,.55)'; ctx.lineWidth = 1.5 * dpr;
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+      // A second, smaller segmented ring just inside the outer one for
+      // depth — a single ring reads as a plain circle, two concentric
+      // ones read as an instrument.
+      const innerR = r * 0.62;
+      for (let deg = 0; deg < 360; deg += 12) {
+        const rad = (deg * Math.PI) / 180;
+        ctx.strokeStyle = 'rgba(103,232,249,.3)'; ctx.lineWidth = 1.5 * dpr;
+        ctx.beginPath();
+        ctx.arc(cx, cy, innerR, rad, rad + 0.18);
+        ctx.stroke();
+      }
       for (let deg = 0; deg < 360; deg += 30) {
         const rad = (deg * Math.PI) / 180;
         const isMajor = deg % 90 === 0;

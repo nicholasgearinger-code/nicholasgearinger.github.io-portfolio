@@ -1742,10 +1742,15 @@
   #webcam-video, #webcam-overlay {
     position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
   }
-  #webcam-video { transform: scaleX(-1); } /* mirror, feels natural for a "look at yourself" demo */
-  #webcam-overlay { pointer-events: none; }
+  /* z-index is set explicitly (not left to DOM order) because #webcam-video's
+     transform below promotes it to its own GPU compositing layer, and
+     hardware video layers are notorious for painting above same-level
+     siblings regardless of source order. translateZ(0) forces the canvas
+     onto its own compositing layer too, so it reliably wins the stack. */
+  #webcam-video { transform: scaleX(-1); z-index: 1; } /* mirror, feels natural for a "look at yourself" demo */
+  #webcam-overlay { pointer-events: none; z-index: 2; transform: translateZ(0); }
   .webcam-placeholder {
-    position: absolute; inset: 0; z-index: 2;
+    position: absolute; inset: 0; z-index: 3;
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem;
     background: rgba(3,8,17,.88); text-align: center; padding: 1.5rem;
   }

@@ -1778,6 +1778,76 @@
   .webcam-hud-label { color: var(--cyan); font-weight: 600; min-width: 2.6em; }
   .webcam-hud-count { color: var(--white); font-variant-numeric: tabular-nums; }
   .webcam-hud-detail { color: var(--slate); opacity: .85; overflow: hidden; text-overflow: ellipsis; max-width: 11em; }
+
+  .webcam-filters {
+    display: flex; align-items: center; flex-wrap: wrap; gap: .5rem;
+    margin-top: .9rem; font-size: .78rem;
+  }
+  .webcam-filters[hidden] { display: none; }
+  .webcam-filter-label { color: var(--muted); font-size: .74rem; }
+  .webcam-filter-chip {
+    padding: .4rem .8rem; border-radius: 100px; cursor: pointer;
+    border: 1px solid var(--card-border); background: var(--card-bg);
+    font-size: .76rem; color: var(--muted);
+    transition: border-color .2s, color .2s, background .2s;
+  }
+  .webcam-filter-chip.active {
+    border-color: rgba(232,121,249,.5); color: var(--white); background: rgba(232,121,249,.12);
+  }
+  @media (pointer: coarse) { .webcam-filter-chip { padding: .58rem 1rem; } }
+
+  .webcam-puppet-pip {
+    position: absolute; z-index: 4;
+    bottom: .6rem; right: .6rem;
+    width: 40%; max-width: 160px; aspect-ratio: 1/1;
+    border-radius: .5rem; overflow: hidden;
+    border: 1px solid rgba(232,121,249,.45);
+    box-shadow: 0 10px 28px -8px rgba(0,0,0,.7);
+    background: #030811;
+  }
+  .webcam-puppet-pip[hidden] { display: none; }
+  .webcam-puppet-pip-label {
+    position: absolute; top: 0; left: 0; right: 0; z-index: 2;
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-size: .58rem; letter-spacing: .03em; text-transform: uppercase;
+    color: #E879F9; background: rgba(3,8,17,.75);
+    padding: .3rem .4rem; text-align: center;
+    pointer-events: none;
+  }
+  .webcam-puppet-viewer {
+    width: 100%; height: 100%; display: block;
+    --poster-color: transparent;
+  }
+  .webcam-puppet-model-select {
+    position: absolute; bottom: 0; left: 0; right: 0; z-index: 3;
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-size: .55rem; letter-spacing: .01em;
+    background: rgba(3,8,17,.88); color: var(--cyan);
+    border: none; border-top: 1px solid rgba(232,121,249,.3);
+    padding: .28rem .2rem; text-align: center; text-align-last: center;
+    cursor: pointer; appearance: none; -webkit-appearance: none;
+  }
+  .webcam-puppet-model-select option { background: #0A1220; color: var(--white); }
+
+  .webcam-rig-pip {
+    position: absolute; z-index: 4;
+    bottom: .6rem; left: .6rem;
+    width: 40%; max-width: 150px; aspect-ratio: 1/1;
+    border-radius: .5rem; overflow: hidden;
+    border: 1px solid rgba(34,211,238,.45);
+    box-shadow: 0 10px 28px -8px rgba(0,0,0,.7);
+    background: #030811;
+  }
+  .webcam-rig-pip[hidden] { display: none; }
+  .webcam-rig-pip-label {
+    position: absolute; top: 0; left: 0; right: 0; z-index: 2;
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-size: .58rem; letter-spacing: .03em; text-transform: uppercase;
+    color: var(--cyan); background: rgba(3,8,17,.75);
+    padding: .3rem .4rem; text-align: center;
+    pointer-events: none;
+  }
+  #rig-canvas { width: 100%; height: 100%; display: block; }
   .webcam-note { font-size: .78rem; color: var(--muted); max-width: 320px; }
   .webcam-toggles {
     display: flex; flex-wrap: wrap; justify-content: center; gap: .6rem;
@@ -2538,6 +2608,27 @@
             <div class="webcam-hud-row webcam-hud-fps"><span class="webcam-hud-dot"></span>FPS <span id="webcam-hud-fps">--</span></div>
             <div class="webcam-hud-rows" id="webcam-hud-rows"></div>
           </div>
+          <div class="webcam-puppet-pip" id="webcam-puppet" hidden>
+            <div class="webcam-puppet-pip-label">🎮 live puppet</div>
+            <model-viewer
+              id="puppet-viewer"
+              class="webcam-puppet-viewer"
+              src="steampunk_girl-optimized.glb"
+              alt="Puppeteered 3D character"
+              shadow-intensity="1"
+              exposure="1"
+            ></model-viewer>
+            <select class="webcam-puppet-model-select" id="puppet-model-select" aria-label="Choose puppet model">
+              <option value="steampunk_girl-optimized.glb">Steampunk Girl</option>
+              <option value="carengine-optimized.glb">Engine</option>
+              <option value="motorcycle-optimized.glb">Motorcycle</option>
+              <option value="magic3d_pbr_model_8699477b-63a4-41c1-a4a5-aec6701a7f8e-optimized.glb">PBR Sculpt</option>
+            </select>
+          </div>
+          <div class="webcam-rig-pip" id="webcam-rig" hidden>
+            <div class="webcam-rig-pip-label">🕺 live rig</div>
+            <canvas id="rig-canvas"></canvas>
+          </div>
           <div class="webcam-placeholder" id="webcam-placeholder">
             <button type="button" class="btn-primary" id="webcam-start">▶ Start Camera</button>
             <p class="webcam-note">Requires camera access. Nothing is recorded or sent anywhere — detection runs 100% locally in your browser.</p>
@@ -2565,6 +2656,13 @@
             <span class="webcam-toggle-dot"></span> Body Pose
           </label>
         </div>
+        <div class="webcam-filters" id="webcam-filters" hidden>
+          <span class="webcam-filter-label">AR Filter:</span>
+          <button type="button" class="webcam-filter-chip active" data-filter="none">None</button>
+          <button type="button" class="webcam-filter-chip" data-filter="sunglasses">🕶️ Sunglasses</button>
+          <button type="button" class="webcam-filter-chip" data-filter="hat">🎩 Top Hat</button>
+          <button type="button" class="webcam-filter-chip" data-filter="mustache">🥸 Mustache</button>
+        </div>
         <p class="webcam-toggle-status" id="webcam-toggle-status"></p>
       </div>
       <div class="algo-footer">
@@ -2573,6 +2671,8 @@
       </div>
     </div>
     <p class="algo-hint" id="webcam-hint">Each toggle loads its own model on demand, the first time you switch it on — nothing downloads until you ask for it. Running several at once is more demanding on your device, so if things feel sluggish, try enabling fewer at a time.</p>
+    <p class="algo-hint">Turn on Hands and a small 3D model appears in the corner — pick which one from the dropdown, move your hand to orbit it, and pinch your thumb and index finger together to zoom in and out.</p>
+    <p class="algo-hint">Turn on Body Pose and a jointed character appears in the opposite corner, built live in Three.js — its shoulders, elbows, hips, and knees are driven directly by your own joint angles. It tracks motion across the camera's view (raise an arm, bend a knee) but not toward/away from the camera, since a single 2D camera can't recover that depth on its own.</p>
     <p class="algo-hint">Face + expression + landmarks: face-api.js. Objects: COCO-SSD. Hands &amp; body pose: TensorFlow.js's official MediaPipe-based models. All MIT/Apache licensed, all inference client-side.</p>
   </div>
 </section>
@@ -5735,6 +5835,13 @@ panels.forEach(p => observer.observe(p));
   const hudPanel = document.getElementById('webcam-hud');
   const hudRows = document.getElementById('webcam-hud-rows');
   const hudFps = document.getElementById('webcam-hud-fps');
+  const filtersEl = document.getElementById('webcam-filters');
+  const filterChips = Array.from(document.querySelectorAll('.webcam-filter-chip'));
+  const puppetEl = document.getElementById('webcam-puppet');
+  const rigEl = document.getElementById('webcam-rig');
+  const puppetViewer = document.getElementById('puppet-viewer');
+  const puppetModelSelect = document.getElementById('puppet-model-select');
+  let puppetDefaultRadius = null;
   const statEl = document.getElementById('webcam-stat');
   const pillText = document.getElementById('webcam-pill-text');
   const hintEl = document.getElementById('webcam-hint');
@@ -5753,6 +5860,7 @@ panels.forEach(p => observer.observe(p));
   const COCO_LIB_URL = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd/dist/coco-ssd.min.js';
   const HAND_LIB_URL = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/hand-pose-detection/dist/hand-pose-detection.min.js';
   const POSE_LIB_URL = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection/dist/pose-detection.min.js';
+  const THREE_LIB_URL = 'https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js';
 
   const HAND_CONNECTIONS = [
     [0,1],[1,2],[2,3],[3,4], [0,5],[5,6],[6,7],[7,8], [0,9],[9,10],[10,11],[11,12],
@@ -5766,9 +5874,11 @@ panels.forEach(p => observer.observe(p));
   ];
 
   let stream = null, running = false, rafId = null;
+  let activeFilter = 'none';
   let facingMode = 'user', mirrored = true;
   let faceApiReady = false, landmarksReady = false;
   let cocoModel = null, handDetector = null, poseDetector = null;
+  let rigReady = false, rigScene = null, rigCamera = null, rigRenderer = null, rigChar = null;
   const loadPromises = {};
 
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -5849,10 +5959,100 @@ panels.forEach(p => observer.observe(p));
       { runtime: 'mediapipe', solutionPath: MEDIAPIPE_HANDS_URL, modelType: 'lite', maxHands: 2 }
     );
   }
+  // Builds a simple jointed humanoid from primitive shapes — no skinning,
+  // just a hierarchy of THREE.Group "joints" each holding a mesh, so
+  // rotating a joint group rigidly carries everything below it (a real
+  // parent/child rig, just built from boxes instead of a skinned model).
+  function buildRigCharacter(T) {
+    const cyan = 0x22D3EE, magenta = 0xE879F9, white = 0xF0F8FF, slate = 0x64748B;
+    const mat = (color) => new T.MeshStandardMaterial({ color, roughness: .55, metalness: .1 });
+    const root = new T.Group();
+
+    const torso = new T.Mesh(new T.BoxGeometry(0.9, 1.3, 0.45), mat(slate));
+    torso.position.y = 0.65;
+    root.add(torso);
+
+    const head = new T.Mesh(new T.SphereGeometry(0.32, 16, 16), mat(white));
+    head.position.y = 1.3 + 0.4;
+    root.add(head);
+
+    // A limb segment is itself a pivot group containing the visible mesh
+    // offset downward by half its length — that offset is what makes
+    // rotating the *pivot* swing the mesh like a real hinge instead of
+    // spinning it in place around its own center.
+    function buildSegment(length, thickness, color) {
+      const pivot = new T.Group();
+      const mesh = new T.Mesh(new T.BoxGeometry(thickness, length, thickness), mat(color));
+      mesh.position.y = -length / 2;
+      pivot.add(mesh);
+      return pivot;
+    }
+
+    function buildArm(side) {
+      const shoulderPivot = new T.Group();
+      shoulderPivot.position.set(side * 0.52, 1.15, 0);
+      const upperArm = buildSegment(0.55, 0.16, cyan);
+      shoulderPivot.add(upperArm);
+      const elbowPivot = new T.Group();
+      elbowPivot.position.y = -0.55;
+      upperArm.add(elbowPivot);
+      const lowerArm = buildSegment(0.5, 0.13, cyan);
+      elbowPivot.add(lowerArm);
+      root.add(shoulderPivot);
+      return { shoulderPivot, elbowPivot };
+    }
+    function buildLeg(side) {
+      const hipPivot = new T.Group();
+      hipPivot.position.set(side * 0.22, 0, 0);
+      const upperLeg = buildSegment(0.62, 0.19, magenta);
+      hipPivot.add(upperLeg);
+      const kneePivot = new T.Group();
+      kneePivot.position.y = -0.62;
+      upperLeg.add(kneePivot);
+      const lowerLeg = buildSegment(0.58, 0.16, magenta);
+      kneePivot.add(lowerLeg);
+      root.add(hipPivot);
+      return { hipPivot, kneePivot };
+    }
+
+    return {
+      root,
+      leftArm: buildArm(-1), rightArm: buildArm(1),
+      leftLeg: buildLeg(-1), rightLeg: buildLeg(1),
+    };
+  }
+
+  async function ensureRig() {
+    if (rigReady) return;
+    if (typeof THREE === 'undefined') await loadScript(THREE_LIB_URL);
+    const canvas = document.getElementById('rig-canvas');
+    if (!canvas) return;
+    const w = canvas.clientWidth || 150, h = canvas.clientHeight || 150;
+    rigRenderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    rigRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    rigRenderer.setSize(w, h, false);
+
+    rigScene = new THREE.Scene();
+    rigCamera = new THREE.PerspectiveCamera(38, w / h, 0.1, 20);
+    rigCamera.position.set(0, 1.05, 3.4);
+    rigCamera.lookAt(0, 0.85, 0);
+
+    rigScene.add(new THREE.AmbientLight(0xffffff, 0.65));
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
+    dirLight.position.set(1.5, 3, 2);
+    rigScene.add(dirLight);
+
+    rigChar = buildRigCharacter(THREE);
+    rigScene.add(rigChar.root);
+    rigRenderer.render(rigScene, rigCamera);
+    rigReady = true;
+  }
+
   async function ensurePose() {
     if (poseDetector) return;
     if (typeof poseDetection === 'undefined') await loadScript(POSE_LIB_URL);
     poseDetector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet);
+    await ensureRig();
   }
 
   const ENSURERS = { face: ensureFace, landmarks: ensureLandmarks, objects: ensureObjects, hands: ensureHands, pose: ensurePose };
@@ -5881,6 +6081,33 @@ panels.forEach(p => observer.observe(p));
       }
     });
   });
+
+  filterChips.forEach((chip) => {
+    chip.addEventListener('click', () => {
+      activeFilter = chip.getAttribute('data-filter');
+      filterChips.forEach((c) => c.classList.toggle('active', c === chip));
+    });
+  });
+
+  if (puppetViewer) {
+    // Each model has its own natural scale (a tiny sculpt vs. a car
+    // engine), so "zoomed all the way out" has to mean something
+    // different per model. Rather than hardcoding a distance, capture
+    // model-viewer's own ideal auto-computed radius once each model
+    // finishes loading, and scale zoom as a multiplier of *that*.
+    puppetViewer.addEventListener('load', () => {
+      try {
+        const orbit = puppetViewer.getCameraOrbit ? puppetViewer.getCameraOrbit() : null;
+        puppetDefaultRadius = orbit && orbit.radius ? orbit.radius : null;
+      } catch (_) { puppetDefaultRadius = null; }
+    });
+  }
+  if (puppetModelSelect) {
+    puppetModelSelect.addEventListener('change', () => {
+      puppetDefaultRadius = null;
+      if (puppetViewer) puppetViewer.src = puppetModelSelect.value;
+    });
+  }
 
   function syncSize() { overlay.width = video.videoWidth || 480; overlay.height = video.videoHeight || 360; }
   function mirrorX(x, w) { return mirrored ? overlay.width - x - w : x; }
@@ -5934,6 +6161,66 @@ panels.forEach(p => observer.observe(p));
     // between finishing and the next clear, easy to miss entirely.
     let cache = { face: [], objects: [], hands: [], pose: [] };
 
+    // Draws the currently-selected AR filter over one detected face, using
+    // whichever landmark regions it needs. Deliberately simple shapes
+    // (ellipses/curves) rather than image assets — no extra downloads,
+    // and they track the face's scale and rotation-in-plane reasonably
+    // well just from eye/mouth span.
+    function drawFaceFilter(d) {
+      if (activeFilter === 'none' || !d.landmarks) return;
+      const mirrorPt = (p) => ({ x: mirrorX(p.x, 0), y: p.y });
+      const avg = (pts) => ({
+        x: pts.reduce((s, p) => s + p.x, 0) / pts.length,
+        y: pts.reduce((s, p) => s + p.y, 0) / pts.length,
+      });
+      const spanX = (pts) => Math.max(...pts.map((p) => p.x)) - Math.min(...pts.map((p) => p.x));
+
+      if (activeFilter === 'sunglasses') {
+        const leftEye = d.landmarks.getLeftEye().map(mirrorPt);
+        const rightEye = d.landmarks.getRightEye().map(mirrorPt);
+        const lc = avg(leftEye), rc = avg(rightEye);
+        const lensW = Math.max(spanX(leftEye), spanX(rightEye)) * 2.1;
+        const lensH = lensW * 0.62;
+        ctx.fillStyle = 'rgba(8,12,20,.94)';
+        [lc, rc].forEach((c) => {
+          ctx.beginPath();
+          ctx.ellipse(c.x, c.y, lensW / 2, lensH / 2, 0, 0, Math.PI * 2);
+          ctx.fill();
+        });
+        ctx.strokeStyle = 'rgba(8,12,20,.94)'; ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.moveTo(lc.x, lc.y); ctx.lineTo(rc.x, rc.y); ctx.stroke();
+      } else if (activeFilter === 'hat') {
+        const box = d.detection.box;
+        const boxCenterX = mirrorX(box.x, box.width) + box.width / 2;
+        const hatW = box.width * 1.25;
+        const brimY = box.y - hatW * 0.05;
+        const crownH = hatW * 0.55;
+        ctx.fillStyle = 'rgba(15,15,18,.96)';
+        ctx.beginPath();
+        ctx.ellipse(boxCenterX, brimY, hatW / 2, hatW * 0.09, 0, 0, Math.PI * 2);
+        ctx.fill();
+        const crownX = boxCenterX - hatW * 0.32, crownY = brimY - crownH, crownW = hatW * 0.64;
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(crownX, crownY, crownW, crownH, 6);
+        else ctx.rect(crownX, crownY, crownW, crownH);
+        ctx.fill();
+      } else if (activeFilter === 'mustache') {
+        const mouth = d.landmarks.getMouth().map(mirrorPt);
+        const mc = avg(mouth);
+        const w = spanX(mouth) * 1.3;
+        const topY = mc.y - spanX(mouth) * 0.5;
+        ctx.fillStyle = 'rgba(28,18,12,.95)';
+        ctx.beginPath();
+        ctx.moveTo(mc.x - w / 2, topY + w * 0.12);
+        ctx.quadraticCurveTo(mc.x - w / 4, topY - w * 0.14, mc.x, topY + w * 0.04);
+        ctx.quadraticCurveTo(mc.x + w / 4, topY - w * 0.14, mc.x + w / 2, topY + w * 0.12);
+        ctx.quadraticCurveTo(mc.x + w / 4, topY + w * 0.2, mc.x, topY + w * 0.12);
+        ctx.quadraticCurveTo(mc.x - w / 4, topY + w * 0.2, mc.x - w / 2, topY + w * 0.12);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+
     function drawFace() {
       let faceCount = 0;
       cache.face.forEach((d) => {
@@ -5962,6 +6249,7 @@ panels.forEach(p => observer.observe(p));
             ctx.fill();
           });
         }
+        drawFaceFilter(d);
       });
       if (statEl) statEl.innerHTML = 'faces detected: <strong>' + faceCount + '</strong>';
     }
@@ -6057,6 +6345,170 @@ panels.forEach(p => observer.observe(p));
       if (hudRows) hudRows.innerHTML = rows.join('');
     }
 
+    // Shows/hides the filter picker and the two puppeteering panels to
+    // match whichever toggles are actually on right now — checked every
+    // frame (like updateHud) so it stays correct no matter what changed
+    // the toggle state (user click, a load error un-checking it, etc).
+    // Hands drives the 3D model-viewer puppet; Body Pose drives the
+    // jointed rig instead — two different characters, two different
+    // tracking sources, two different panels.
+    function updatePanels() {
+      if (filtersEl) filtersEl.hidden = !(toggles.landmarks && toggles.landmarks.checked);
+      if (puppetEl) puppetEl.hidden = !(toggles.hands && toggles.hands.checked);
+      if (rigEl) rigEl.hidden = !(toggles.pose && toggles.pose.checked);
+    }
+
+    // Whichever hand keypoint is driving the model-viewer puppet's camera
+    // right now. Shared by updatePuppet() (moves the camera) and
+    // drawPuppetIndicator() (marks it visibly in the webcam view) so the
+    // two can never disagree about where "the control point" actually is.
+    function getPuppetControlPoint() {
+      if (!puppetEl || puppetEl.hidden || !cache.hands || !cache.hands.length) return null;
+      const hand = cache.hands[0];
+      const rawX = hand.keypoints.reduce((s, k) => s + k.x, 0) / hand.keypoints.length;
+      const py = hand.keypoints.reduce((s, k) => s + k.y, 0) / hand.keypoints.length;
+      return { x: mirrorX(rawX, 0), y: py };
+    }
+
+    // Pinch (thumb tip to index fingertip) drives zoom — only available
+    // from hand tracking, not pose, since pose doesn't resolve individual
+    // fingers. Distance is normalized against the hand's own palm length
+    // (wrist to middle-finger knuckle) so it stays meaningful regardless
+    // of how close the hand is to the camera.
+    function getPuppetPinch() {
+      if (!puppetEl || puppetEl.hidden || !cache.hands || !cache.hands.length) return null;
+      const kp = cache.hands[0].keypoints;
+      const thumb = kp[4], index = kp[8], wrist = kp[0], palmRef = kp[9];
+      if (!thumb || !index || !wrist || !palmRef) return null;
+      const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+      const palmSize = dist(wrist, palmRef) || 1;
+      return {
+        thumb: { x: mirrorX(thumb.x, 0), y: thumb.y },
+        index: { x: mirrorX(index.x, 0), y: index.y },
+        ratio: dist(thumb, index) / palmSize,
+      };
+    }
+
+    function updatePuppet() {
+      if (!puppetViewer) return;
+      const pt = getPuppetControlPoint();
+      if (!pt) return;
+      const normX = Math.min(1, Math.max(0, pt.x / overlay.width));
+      const normY = Math.min(1, Math.max(0, pt.y / overlay.height));
+      const theta = (normX - 0.5) * 360;
+      const phi = Math.min(115, Math.max(45, 70 + (normY - 0.5) * 70));
+
+      let radiusStr = 'auto';
+      const pinch = getPuppetPinch();
+      if (pinch && puppetDefaultRadius) {
+        const zoom = Math.min(1.6, Math.max(0.4, pinch.ratio));
+        radiusStr = (puppetDefaultRadius * zoom).toFixed(2) + 'm';
+      }
+      puppetViewer.cameraOrbit = theta.toFixed(1) + 'deg ' + phi.toFixed(1) + 'deg ' + radiusStr;
+    }
+
+    // A pulsing crosshair + label right on the tracked point, so it's
+    // obvious in the webcam view itself which hand/wrist is actually
+    // steering the 3D model rather than that connection being invisible.
+    // When hands are on, also draws the thumb–index pinch line so the
+    // zoom gesture itself is visible, not just its effect on the model.
+    function drawPuppetIndicator() {
+      const pt = getPuppetControlPoint();
+      if (!pt) return;
+      const pulse = 2 * Math.sin(performance.now() / 260);
+      const r = 16 + pulse;
+      ctx.save();
+      ctx.strokeStyle = '#E879F9'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(pt.x - r - 8, pt.y); ctx.lineTo(pt.x - r + 4, pt.y);
+      ctx.moveTo(pt.x + r - 4, pt.y); ctx.lineTo(pt.x + r + 8, pt.y);
+      ctx.moveTo(pt.x, pt.y - r - 8); ctx.lineTo(pt.x, pt.y - r + 4);
+      ctx.moveTo(pt.x, pt.y + r - 4); ctx.lineTo(pt.x, pt.y + r + 8);
+      ctx.stroke();
+
+      const label = '🎮 controlling model';
+      ctx.font = '11px monospace';
+      const textW = ctx.measureText(label).width;
+      ctx.fillStyle = 'rgba(3,8,17,.85)';
+      ctx.fillRect(pt.x - textW / 2 - 5, pt.y + r + 10, textW + 10, 18);
+      ctx.fillStyle = '#E879F9';
+      ctx.textAlign = 'center';
+      ctx.fillText(label, pt.x, pt.y + r + 23);
+      ctx.textAlign = 'left';
+      ctx.restore();
+
+      const pinch = getPuppetPinch();
+      if (pinch) {
+        ctx.save();
+        ctx.strokeStyle = '#7DD3FC'; ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(pinch.thumb.x, pinch.thumb.y);
+        ctx.lineTo(pinch.index.x, pinch.index.y);
+        ctx.stroke();
+        ctx.fillStyle = '#7DD3FC';
+        [pinch.thumb, pinch.index].forEach((p) => {
+          ctx.beginPath(); ctx.arc(p.x, p.y, 3.5, 0, Math.PI * 2); ctx.fill();
+        });
+        const midX = (pinch.thumb.x + pinch.index.x) / 2;
+        const midY = (pinch.thumb.y + pinch.index.y) / 2;
+        ctx.font = '10px monospace';
+        ctx.fillStyle = 'rgba(3,8,17,.85)';
+        ctx.fillRect(midX - 18, midY - 20, 36, 15);
+        ctx.fillStyle = '#7DD3FC';
+        ctx.textAlign = 'center';
+        ctx.fillText('zoom', midX, midY - 9);
+        ctx.textAlign = 'left';
+        ctx.restore();
+      }
+    }
+
+    // Drives the rig's actual joint rotations from MoveNet's 2D keypoints
+    // and renders the scene. MoveNet only reports x/y (no depth), so this
+    // is honestly a 2D-plane retargeting — each limb's rotation is the
+    // angle it makes in the camera image, applied as a single rotation
+    // around the screen-facing axis. That's enough to genuinely track
+    // "arm raised, elbow bent, leg lifted" in real time; it won't capture
+    // motion toward/away from the camera, since a single 2D camera view
+    // can't recover that on its own.
+    //
+    // Left/right are deliberately swapped: the webcam view mirrors you
+    // (like a mirror), so MoveNet's "right_*" keypoints are what appears
+    // on the LEFT side of the video — mapping them to the rig's left-side
+    // limbs keeps the rig moving the same visual direction as your
+    // reflection, instead of the opposite one.
+    function updateRig() {
+      if (!rigReady || !rigChar || !rigRenderer || !rigEl || rigEl.hidden) return;
+      const pose = cache.pose && cache.pose[0];
+      if (pose) {
+        const byName = {};
+        pose.keypoints.forEach((k) => { byName[k.name] = k; });
+        const pt = (name) => {
+          const k = byName[name];
+          if (!k || (k.score || 0) < 0.3) return null;
+          return { x: mirrorX(k.x, 0), y: k.y };
+        };
+        const angleOf = (a, b) => (a && b) ? Math.atan2(b.x - a.x, b.y - a.y) : null;
+
+        function applyLimb(shoulderPivot, elbowPivot, shoulderPt, elbowPt, wristPt) {
+          const upperAngle = angleOf(shoulderPt, elbowPt);
+          if (upperAngle !== null) shoulderPivot.rotation.z = upperAngle;
+          const lowerAngle = angleOf(elbowPt, wristPt);
+          if (upperAngle !== null && lowerAngle !== null) elbowPivot.rotation.z = lowerAngle - upperAngle;
+        }
+        // Swapped: rig's "left" limbs read MoveNet's "right_*" keypoints, and vice versa.
+        applyLimb(rigChar.leftArm.shoulderPivot, rigChar.leftArm.elbowPivot,
+          pt('right_shoulder'), pt('right_elbow'), pt('right_wrist'));
+        applyLimb(rigChar.rightArm.shoulderPivot, rigChar.rightArm.elbowPivot,
+          pt('left_shoulder'), pt('left_elbow'), pt('left_wrist'));
+        applyLimb(rigChar.leftLeg.hipPivot, rigChar.leftLeg.kneePivot,
+          pt('right_hip'), pt('right_knee'), pt('right_ankle'));
+        applyLimb(rigChar.rightLeg.hipPivot, rigChar.rightLeg.kneePivot,
+          pt('left_hip'), pt('left_knee'), pt('left_ankle'));
+      }
+      rigRenderer.render(rigScene, rigCamera);
+    }
+
     // Rendering and inference are deliberately decoupled. Inference (face,
     // objects, hands, pose) is comparatively slow — tens to hundreds of ms
     // per cycle — and running clearRect+draw only after each slow await
@@ -6074,6 +6526,7 @@ panels.forEach(p => observer.observe(p));
       drawObjects();
       drawHands();
       drawPose();
+      try { drawPuppetIndicator(); } catch (err) { console.error('[webcam-ai] drawPuppetIndicator failed:', err); }
 
       fpsFrameCount++;
       const now = performance.now();
@@ -6083,6 +6536,9 @@ panels.forEach(p => observer.observe(p));
         fpsLastUpdate = now;
       }
       updateHud();
+      updatePanels();
+      updatePuppet();
+      try { updateRig(); } catch (err) { console.error('[webcam-ai] updateRig failed:', err); }
 
       rafId = requestAnimationFrame(renderLoop);
     }
@@ -6150,6 +6606,9 @@ panels.forEach(p => observer.observe(p));
     if (flipBtn) flipBtn.hidden = true;
     if (hudPanel) hudPanel.hidden = true;
     if (hudFps) hudFps.textContent = '--';
+    if (filtersEl) filtersEl.hidden = true;
+    if (puppetEl) puppetEl.hidden = true;
+    if (rigEl) rigEl.hidden = true;
     if (pillText) pillText.textContent = 'IDLE';
     if (statEl) statEl.innerHTML = 'faces detected: <strong>0</strong>';
     announce('');

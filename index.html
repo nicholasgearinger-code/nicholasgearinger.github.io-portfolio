@@ -5763,85 +5763,6 @@ panels.forEach(p => observer.observe(p));
 
     function mirrorX(x, w) { return overlay.width - x - w; }
 
-    /* ── Shared HUD drawing primitives ── */
-    function drawCornerBracket(x, y, w, h, color, lenOverride) {
-      const L = lenOverride || Math.max(10, Math.min(w, h) * 0.22);
-      ctx.save();
-      ctx.strokeStyle = color; ctx.lineWidth = 2;
-      ctx.shadowColor = color; ctx.shadowBlur = 6;
-      ctx.beginPath(); ctx.moveTo(x, y + L); ctx.lineTo(x, y); ctx.lineTo(x + L, y); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(x + w - L, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + L); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(x + w, y + h - L); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w - L, y + h); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(x + L, y + h); ctx.lineTo(x, y + h); ctx.lineTo(x, y + h - L); ctx.stroke();
-      ctx.restore();
-    }
-    function drawCrosshair(cx, cy, size, color) {
-      ctx.save();
-      ctx.strokeStyle = color; ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(cx - size, cy); ctx.lineTo(cx - size / 3, cy);
-      ctx.moveTo(cx + size / 3, cy); ctx.lineTo(cx + size, cy);
-      ctx.moveTo(cx, cy - size); ctx.lineTo(cx, cy - size / 3);
-      ctx.moveTo(cx, cy + size / 3); ctx.lineTo(cx, cy + size);
-      ctx.stroke();
-      ctx.restore();
-    }
-    function drawHudLabel(x, y, lines, color) {
-      ctx.save();
-      ctx.font = '600 11px "JetBrains Mono", monospace';
-      const padX = 8, lineH = 14;
-      const textW = Math.max(...lines.map((l) => ctx.measureText(l.toUpperCase()).width));
-      const boxW = textW + padX * 2, boxH = lines.length * lineH + 6;
-      const boxY = Math.max(0, y - boxH - 6);
-      ctx.fillStyle = 'rgba(3,8,17,.82)';
-      ctx.fillRect(x, boxY, boxW, boxH);
-      ctx.strokeStyle = color; ctx.lineWidth = 1;
-      ctx.strokeRect(x, boxY, boxW, boxH);
-      ctx.fillStyle = color;
-      ctx.fillRect(x, boxY, 3, boxH);
-      ctx.shadowColor = color; ctx.shadowBlur = 3;
-      lines.forEach((line, i) => {
-        ctx.fillText(line.toUpperCase(), x + padX, boxY + lineH * (i + 1) - 2);
-      });
-      ctx.restore();
-    }
-    function drawHudNode(px, py, r, color) {
-      ctx.save();
-      ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2);
-      ctx.globalAlpha = 0.25;
-      ctx.fillStyle = color;
-      ctx.fill();
-      ctx.globalAlpha = 1;
-      ctx.strokeStyle = color; ctx.lineWidth = 1;
-      ctx.shadowColor = color; ctx.shadowBlur = 3;
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    /* ── Persistent targeting-viewport frame — always visible while the
-       camera is on, independent of any specific detection, for that
-       "looking through a HUD" feel. ── */
-    function drawViewportFrame() {
-      const L = 26, pad = 6, w = overlay.width, h = overlay.height;
-      ctx.save();
-      ctx.strokeStyle = 'rgba(34,211,238,.45)'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(pad, pad + L); ctx.lineTo(pad, pad); ctx.lineTo(pad + L, pad); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(w - pad - L, pad); ctx.lineTo(w - pad, pad); ctx.lineTo(w - pad, pad + L); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(w - pad, h - pad - L); ctx.lineTo(w - pad, h - pad); ctx.lineTo(w - pad - L, h - pad); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(pad + L, h - pad); ctx.lineTo(pad, h - pad); ctx.lineTo(pad, h - pad - L); ctx.stroke();
-      ctx.restore();
-    }
-    let scanY = 0;
-    function drawScanline() {
-      scanY = (scanY + 1.4) % (overlay.height + 40);
-      const grad = ctx.createLinearGradient(0, scanY - 20, 0, scanY + 20);
-      grad.addColorStop(0, 'rgba(34,211,238,0)');
-      grad.addColorStop(.5, 'rgba(34,211,238,.10)');
-      grad.addColorStop(1, 'rgba(34,211,238,0)');
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, scanY - 20, overlay.width, 40);
-    }
-
     // Detections are cached and drawn every frame regardless of whether a
     // *new* detection has finished yet — inference is comparatively slow,
     // so without this, each result would only be on-screen for the instant
@@ -5854,22 +5775,25 @@ panels.forEach(p => observer.observe(p));
         const { x: rawX, y, width, height } = d.detection.box;
         const x = mirrorX(rawX, width);
         faceCount++;
-        drawCornerBracket(x, y, width, height, '#22D3EE');
-        drawCrosshair(x + width / 2, y + height / 2, 9, 'rgba(34,211,238,.55)');
+        ctx.strokeStyle = '#22D3EE'; ctx.lineWidth = 2;
+        ctx.strokeRect(x, y, width, height);
 
         const top = Object.entries(d.expressions).sort((a, b) => b[1] - a[1])[0];
-        drawHudLabel(x, y, ['FACE LOCK', top[0] + ' ' + Math.round(top[1] * 100) + '%'], '#22D3EE');
+        const label = top[0] + ' ' + Math.round(top[1] * 100) + '%';
+        ctx.font = '14px monospace';
+        const textW = ctx.measureText(label).width;
+        ctx.fillStyle = 'rgba(3,8,17,.85)';
+        ctx.fillRect(x, Math.max(0, y - 20), textW + 10, 20);
+        ctx.fillStyle = '#22D3EE';
+        ctx.fillText(label, x + 5, Math.max(14, y - 5));
 
         if (d.landmarks) {
-          ctx.save();
           ctx.fillStyle = '#E879F9';
-          ctx.shadowColor = '#E879F9'; ctx.shadowBlur = 3;
           d.landmarks.positions.forEach((p) => {
             ctx.beginPath();
-            ctx.arc(mirrorX(p.x, 0), p.y, 1.1, 0, Math.PI * 2);
+            ctx.arc(mirrorX(p.x, 0), p.y, 1.6, 0, Math.PI * 2);
             ctx.fill();
           });
-          ctx.restore();
         }
       });
       if (statEl) statEl.innerHTML = 'faces detected: <strong>' + faceCount + '</strong>';
@@ -5879,32 +5803,34 @@ panels.forEach(p => observer.observe(p));
       cache.objects.forEach((p) => {
         const [rawX, y, w, h] = p.bbox;
         const x = mirrorX(rawX, w);
-        drawCornerBracket(x, y, w, h, '#F59E0B');
-        drawHudLabel(x, y, [p.class, Math.round(p.score * 100) + '% MATCH'], '#F59E0B');
+        ctx.strokeStyle = '#F59E0B'; ctx.lineWidth = 2;
+        ctx.strokeRect(x, y, w, h);
+        const label = p.class + ' ' + Math.round(p.score * 100) + '%';
+        ctx.font = '13px monospace';
+        const textW = ctx.measureText(label).width;
+        ctx.fillStyle = 'rgba(3,8,17,.85)';
+        ctx.fillRect(x, Math.max(0, y - 18), textW + 8, 18);
+        ctx.fillStyle = '#F59E0B';
+        ctx.fillText(label, x + 4, Math.max(13, y - 5));
       });
     }
     function drawHands() {
       cache.hands.forEach((hand) => {
         const pts = hand.keypoints.map((k) => ({ x: mirrorX(k.x, 0), y: k.y }));
-        ctx.save();
-        ctx.strokeStyle = '#7DD3FC'; ctx.lineWidth = 1.5;
-        ctx.shadowColor = '#7DD3FC'; ctx.shadowBlur = 4;
+        ctx.strokeStyle = '#7DD3FC'; ctx.lineWidth = 2;
         HAND_CONNECTIONS.forEach(([a, b]) => {
           if (!pts[a] || !pts[b]) return;
           ctx.beginPath(); ctx.moveTo(pts[a].x, pts[a].y); ctx.lineTo(pts[b].x, pts[b].y); ctx.stroke();
         });
-        ctx.restore();
-        pts.forEach((p, i) => drawHudNode(p.x, p.y, i === 0 ? 4 : 2.5, '#7DD3FC'));
-        if (pts[0] && hand.handedness) drawHudLabel(pts[0].x, pts[0].y + 14, [hand.handedness + ' HAND'], '#7DD3FC');
+        ctx.fillStyle = '#7DD3FC';
+        pts.forEach((p) => { ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2); ctx.fill(); });
       });
     }
     function drawPose() {
       cache.pose.forEach((pose) => {
         const byName = {};
         pose.keypoints.forEach((k) => { byName[k.name] = k; });
-        ctx.save();
-        ctx.strokeStyle = '#818CF8'; ctx.lineWidth = 1.5;
-        ctx.shadowColor = '#818CF8'; ctx.shadowBlur = 4;
+        ctx.strokeStyle = '#818CF8'; ctx.lineWidth = 2;
         POSE_CONNECTIONS.forEach(([a, b]) => {
           const ka = byName[a], kb = byName[b];
           if (!ka || !kb || ka.score < 0.3 || kb.score < 0.3) return;
@@ -5913,10 +5839,10 @@ panels.forEach(p => observer.observe(p));
           ctx.lineTo(mirrorX(kb.x, 0), kb.y);
           ctx.stroke();
         });
-        ctx.restore();
+        ctx.fillStyle = '#818CF8';
         pose.keypoints.forEach((k) => {
           if (k.score < 0.3) return;
-          drawHudNode(mirrorX(k.x, 0), k.y, 3, '#818CF8');
+          ctx.beginPath(); ctx.arc(mirrorX(k.x, 0), k.y, 3, 0, Math.PI * 2); ctx.fill();
         });
       });
     }
@@ -5926,8 +5852,6 @@ panels.forEach(p => observer.observe(p));
       if (video.readyState < 2) { rafId = requestAnimationFrame(detectLoop); return; }
 
       ctx.clearRect(0, 0, overlay.width, overlay.height);
-      drawScanline();
-      drawViewportFrame();
 
       const faceWanted = (toggles.face && toggles.face.checked) || (toggles.landmarks && toggles.landmarks.checked);
       if (faceWanted && faceApiReady) {

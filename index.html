@@ -5641,7 +5641,6 @@ panels.forEach(p => observer.observe(p));
   let faceApiReady = false, landmarksReady = false, telemetryReady = false;
   let cocoModel = null, handDetector = null, poseDetector = null;
   let batteryInfo = null, networkInfo = null, orientationInfo = null, geoInfo = null, geoWatchId = null;
-  let downlinkHistory = [], lastNetSampleTs = 0;
   const loadPromises = {};
 
   // Same "coarse pointer" heuristic already used elsewhere on this page to
@@ -6178,7 +6177,8 @@ panels.forEach(p => observer.observe(p));
       if (!(toggles.telemetry && toggles.telemetry.checked)) return;
       const dpr = PERF_DPR;
       const W = overlay.width, H = overlay.height;
-      drawFrameCorners(W, H, dpr);
+      drawGridBackdrop(W, H, dpr);
+      drawFrameBorder(W, H, dpr);
       drawTelemetryTopBar(W, dpr);
       drawNetworkPanel(W, dpr);
       if (batteryInfo) drawBatteryGauge(H, dpr);
@@ -6240,24 +6240,33 @@ panels.forEach(p => observer.observe(p));
       return x;
     }
 
-    // Cockpit-style corner brackets framing the whole feed — an L-shaped
-    // bracket meeting a small hollow ring at each of the four extreme
-    // corners, the classic "HUD frame" signature borrowed straight from
-    // the reference mockup rather than anything tied to a detection.
-    function drawFrameCorners(W, H, dpr) {
-      const len = 22 * dpr, inset = 10 * dpr, ringR = 5 * dpr;
-      const corners = [[inset, inset, 1, 1], [W - inset, inset, -1, 1], [inset, H - inset, 1, -1], [W - inset, H - inset, -1, -1]];
-      ctx.strokeStyle = 'rgba(34,211,238,.55)'; ctx.lineWidth = 1.5 * dpr;
-      corners.forEach(([x, y, dx, dy]) => {
-        ctx.beginPath();
-        ctx.moveTo(x, y + len * dy);
-        ctx.lineTo(x, y);
-        ctx.lineTo(x + len * dx, y);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.arc(x, y, ringR, 0, Math.PI * 2);
-        ctx.stroke();
-      });
+    // Faint full-canvas grid — the graph-paper backdrop the new reference
+    // mockup uses behind every panel. Kept low-alpha so it reads as
+    // texture rather than competing with the video underneath it.
+    function drawGridBackdrop(W, H, dpr) {
+      const step = 26 * dpr;
+      ctx.strokeStyle = 'rgba(103,232,249,.08)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let x = step; x < W; x += step) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+      for (let y = step; y < H; y += step) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+      ctx.stroke();
+    }
+
+    // A single bright, glowing border around the whole feed instead of
+    // just corner brackets — the strongest single cue in the new
+    // reference is that solid, saturated frame, so this replaces the
+    // more subtle L-bracket-and-ring corners from the previous pass.
+    function drawFrameBorder(W, H, dpr) {
+      const inset = 4 * dpr;
+      ctx.save();
+      ctx.shadowColor = 'rgba(34,211,238,.85)';
+      ctx.shadowBlur = 8 * dpr;
+      ctx.strokeStyle = '#22D3EE';
+      ctx.lineWidth = 3 * dpr;
+      roundRectPath(inset, inset, W - inset * 2, H - inset * 2, 10 * dpr);
+      ctx.stroke();
+      ctx.restore(); // save/restore rather than a manual shadowBlur=0 reset — cheaper to get wrong otherwise
     }
 
     // Full-width strip across the top: clock + date on the left, FPS and
@@ -6296,18 +6305,32 @@ panels.forEach(p => observer.observe(p));
     // them (Network Information API — mainly Chrome/Android), plus a
     // rolling bar-graph sampled once a second so there's something to
     // actually watch move rather than a static readout.
-    function drawNetworkPanel(W, dpr) {
-      const nowTs = Date.now();
-      if (nowTs - lastNetSampleTs > 1000) {
-        lastNetSampleTs = nowTs;
-        const online = navigator.onLine !== false;
-        const sample = !online ? 0 : (networkInfo && typeof networkInfo.downlink === 'number' ? networkInfo.downlink : 2.5);
-        downlinkHistory.push(sample);
-        if (downlinkHistory.length > 14) downlinkHistory.shift();
-      }
+    // Thin segmented progress bar under a label+value row — the "value
+    // plus a row of completion dashes" pattern the new reference mockup
+    // uses repeatedly, reused here for downlink and latency.
+    function drawStatRow(x, y, w, label, valueLabel, frac, color, dpr) {
+      ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      ctx.font = 'bold ' + (9 * dpr) + 'px monospace';
+      ctx.fillStyle = 'rgba(148,163,184,.85)';
+      ctx.fillText(label, x, y);
+      ctx.textAlign = 'right';
+      ctx.fillStyle = color;
+      ctx.fillText(valueLabel, x + w, y);
+      ctx.textAlign = 'left';
 
+      const barY = y + 5 * dpr, barH = 4 * dpr, segments = 16, gap = 1.5 * dpr;
+      const segW = (w - (segments - 1) * gap) / segments;
+      const lit = Math.max(0, Math.min(segments, Math.round(frac * segments)));
+      for (let i = 0; i < segments; i++) {
+        ctx.fillStyle = i < lit ? color : 'rgba(226,232,240,.15)';
+        ctx.fillRect(x + i * (segW + gap), barY, segW, barH);
+      }
+      return barY + barH;
+    }
+
+    function drawNetworkPanel(W, dpr) {
       const panelX = 8 * dpr, panelY = 30 * dpr + 8 * dpr;
-      const panelW = 190 * dpr, panelH = 78 * dpr, c = 8 * dpr;
+      const panelW = 190 * dpr, panelH = 86 * dpr, c = 8 * dpr;
       ctx.fillStyle = 'rgba(3,8,17,.82)';
       ctx.strokeStyle = 'rgba(34,211,238,.5)'; ctx.lineWidth = 1 * dpr;
       chamferRectPath(panelX, panelY, panelW, panelH, c);
@@ -6315,7 +6338,7 @@ panels.forEach(p => observer.observe(p));
 
       const netOnline = navigator.onLine !== false;
       const netColor = netOnline ? '#4ADE80' : '#F87171';
-      const padX = 10 * dpr;
+      const padX = 10 * dpr, rowW = panelW - padX * 2;
 
       ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
       ctx.font = 'bold ' + (9 * dpr) + 'px monospace';
@@ -6329,23 +6352,20 @@ panels.forEach(p => observer.observe(p));
       ctx.fillStyle = netColor;
       ctx.fillText(netOnline ? (netType || 'ONLINE') : 'OFFLINE', panelX + padX, panelY + 32 * dpr);
 
-      const details = [];
-      if (networkInfo && typeof networkInfo.downlink === 'number') details.push(networkInfo.downlink.toFixed(1) + ' MBPS');
-      if (networkInfo && typeof networkInfo.rtt === 'number') details.push(networkInfo.rtt + ' MS');
-      ctx.font = (10 * dpr) + 'px monospace';
-      ctx.fillStyle = 'rgba(203,213,225,.85)';
-      ctx.fillText(details.length ? details.join('  \u00b7  ') : '\u2014', panelX + padX, panelY + 46 * dpr);
+      // Downlink: fraction of an assumed-comfortable 10 Mbps ceiling.
+      // Latency: inverted against a 300ms ceiling, since lower is better.
+      // Where the Network Information API isn't exposed (Safari/Firefox),
+      // both fall back to a dim, neutral half-fill rather than looking
+      // broken or empty.
+      const hasNet = !!networkInfo;
+      const downlinkVal = hasNet && typeof networkInfo.downlink === 'number' ? networkInfo.downlink : null;
+      const rttVal = hasNet && typeof networkInfo.rtt === 'number' ? networkInfo.rtt : null;
+      const downlinkFrac = !netOnline ? 0 : downlinkVal != null ? Math.min(1, downlinkVal / 10) : 0.5;
+      const rttFrac = !netOnline ? 0 : rttVal != null ? Math.max(0, 1 - rttVal / 300) : 0.5;
 
-      const bars = downlinkHistory.length ? downlinkHistory : [0];
-      const maxV = Math.max(4, ...bars);
-      const graphH = 16 * dpr, baselineY = panelY + panelH - 8 * dpr;
-      const availW = panelW - padX * 2;
-      const bw = availW / 14 * 0.62, gap = availW / 14 * 0.38;
-      bars.forEach((v, idx) => {
-        const h = Math.max(1.5 * dpr, (v / maxV) * graphH);
-        ctx.fillStyle = netOnline ? 'rgba(74,222,128,.85)' : 'rgba(248,113,113,.85)';
-        ctx.fillRect(panelX + padX + idx * (bw + gap), baselineY - h, bw, h);
-      });
+      let rowY = panelY + 48 * dpr;
+      rowY = drawStatRow(panelX + padX, rowY, rowW, 'DOWNLINK', downlinkVal != null ? downlinkVal.toFixed(1) + ' MBPS' : 'N/A', downlinkFrac, netColor, dpr) + 16 * dpr;
+      drawStatRow(panelX + padX, rowY, rowW, 'LATENCY', rttVal != null ? rttVal + ' MS' : 'N/A', rttFrac, netColor, dpr);
     }
 
     // Small hand-drawn bolt so a "charging" cue matches the rest of this
@@ -6371,7 +6391,7 @@ panels.forEach(p => observer.observe(p));
       const gw = 20 * dpr, gh = Math.min(140 * dpr, H * 0.4);
       const cardPad = 10 * dpr;
       const cardW = gw + cardPad * 2, cardH = gh + cardPad * 2 + 22 * dpr;
-      const cardX = 8 * dpr, cardY = 30 * dpr + 78 * dpr + 16 * dpr;
+      const cardX = 8 * dpr, cardY = 30 * dpr + 86 * dpr + 16 * dpr;
       ctx.fillStyle = 'rgba(3,8,17,.82)';
       ctx.strokeStyle = 'rgba(34,211,238,.5)'; ctx.lineWidth = 1 * dpr;
       chamferRectPath(cardX, cardY, cardW, cardH, 8 * dpr);
@@ -6440,13 +6460,24 @@ panels.forEach(p => observer.observe(p));
       ctx.beginPath(); ctx.arc(cx, cy, r + 8 * dpr, 0, Math.PI * 2); ctx.fill();
       ctx.strokeStyle = 'rgba(34,211,238,.55)'; ctx.lineWidth = 1.5 * dpr;
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
-      // A second, smaller segmented ring just inside the outer one for
-      // depth — a single ring reads as a plain circle, two concentric
-      // ones read as an instrument.
-      const innerR = r * 0.62;
+
+      // Thick alternating white/cyan banded ring — the "barcode ring"
+      // look from the new reference, purely decorative texture rather
+      // than tied to any value, sitting between the outer tick ring and
+      // a smaller dashed ring for depth.
+      const bandMid = r * 0.72, bandWidth = r * 0.24, bandSegments = 20;
+      ctx.lineWidth = bandWidth;
+      for (let i = 0; i < bandSegments; i++) {
+        const a0 = (i / bandSegments) * Math.PI * 2, a1 = ((i + 0.78) / bandSegments) * Math.PI * 2;
+        ctx.strokeStyle = i % 2 === 0 ? 'rgba(226,232,240,.92)' : 'rgba(34,211,238,.55)';
+        ctx.beginPath();
+        ctx.arc(cx, cy, bandMid, a0, a1);
+        ctx.stroke();
+      }
+      const innerR = r * 0.34;
       for (let deg = 0; deg < 360; deg += 12) {
         const rad = (deg * Math.PI) / 180;
-        ctx.strokeStyle = 'rgba(103,232,249,.3)'; ctx.lineWidth = 1.5 * dpr;
+        ctx.strokeStyle = 'rgba(103,232,249,.4)'; ctx.lineWidth = 1.5 * dpr;
         ctx.beginPath();
         ctx.arc(cx, cy, innerR, rad, rad + 0.18);
         ctx.stroke();

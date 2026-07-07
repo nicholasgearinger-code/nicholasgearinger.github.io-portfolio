@@ -1761,6 +1761,23 @@
   .webcam-flip-btn:hover { background: rgba(3,8,17,.85); border-color: rgba(34,211,238,.4); }
   .webcam-flip-btn:active { transform: scale(.9); }
   .webcam-flip-btn[hidden] { display: none; }
+  .webcam-hud {
+    position: absolute; top: .6rem; left: .6rem; z-index: 4;
+    display: flex; flex-direction: column; gap: .3rem;
+    padding: .55rem .7rem; border-radius: .6rem;
+    background: rgba(3,8,16,.72); border: 1px solid var(--card-border);
+    backdrop-filter: blur(6px);
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-size: .64rem; color: var(--slate);
+    pointer-events: none; user-select: none;
+  }
+  .webcam-hud[hidden] { display: none; }
+  .webcam-hud-row { display: flex; align-items: center; gap: .4rem; white-space: nowrap; }
+  .webcam-hud-fps { color: var(--sky); font-variant-numeric: tabular-nums; }
+  .webcam-hud-dot { width: 5px; height: 5px; border-radius: 50%; background: #34D399; box-shadow: 0 0 6px #34D399; animation: hudPulse 2s infinite; flex-shrink: 0; }
+  .webcam-hud-label { color: var(--cyan); font-weight: 600; min-width: 2.6em; }
+  .webcam-hud-count { color: var(--white); font-variant-numeric: tabular-nums; }
+  .webcam-hud-detail { color: var(--slate); opacity: .85; overflow: hidden; text-overflow: ellipsis; max-width: 11em; }
   .webcam-note { font-size: .78rem; color: var(--muted); max-width: 320px; }
   .webcam-toggles {
     display: flex; flex-wrap: wrap; justify-content: center; gap: .6rem;
@@ -2517,6 +2534,10 @@
           <video id="webcam-video" autoplay muted playsinline></video>
           <canvas id="webcam-overlay"></canvas>
           <button type="button" class="webcam-flip-btn" id="webcam-flip" hidden aria-label="Switch camera">⟲</button>
+          <div class="webcam-hud" id="webcam-hud" hidden>
+            <div class="webcam-hud-row webcam-hud-fps"><span class="webcam-hud-dot"></span>FPS <span id="webcam-hud-fps">--</span></div>
+            <div class="webcam-hud-rows" id="webcam-hud-rows"></div>
+          </div>
           <div class="webcam-placeholder" id="webcam-placeholder">
             <button type="button" class="btn-primary" id="webcam-start">▶ Start Camera</button>
             <p class="webcam-note">Requires camera access. Nothing is recorded or sent anywhere — detection runs 100% locally in your browser.</p>
@@ -5022,8 +5043,16 @@ panels.forEach(p => observer.observe(p));
     }
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
-  else run();
+  // The boot sequence dispatches 'bootSeqDone' once it's actually off
+  // screen (immediately, if it was skipped — already seen this session,
+  // or reduced motion). Waiting for that instead of firing on our own
+  // DOMContentLoaded means the hero typing is never racing the boot
+  // overlay's fade — it only ever starts once boot is truly done.
+  function waitForBoot() {
+    document.addEventListener('bootSeqDone', run, { once: true });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', waitForBoot);
+  else waitForBoot();
 })();
 </script>
 <script>
@@ -5204,9 +5233,10 @@ panels.forEach(p => observer.observe(p));
   const overlay = document.getElementById('boot-seq');
   const linesEl = document.getElementById('boot-lines');
   const barFill = document.getElementById('boot-bar-fill');
-  if (!overlay || !linesEl || !barFill) return;
+  const done = () => document.dispatchEvent(new Event('bootSeqDone'));
+  if (!overlay || !linesEl || !barFill) { done(); return; }
 
-  const skip = () => { overlay.remove(); };
+  const skip = () => { overlay.remove(); done(); };
 
   if (sessionStorage.getItem('bootSeqShown') === '1') { skip(); return; }
   if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -5258,7 +5288,7 @@ panels.forEach(p => observer.observe(p));
     const lingerWait = Math.max(400, MIN_DISPLAY_MS - elapsed);
     setTimeout(() => {
       overlay.classList.add('boot-done');
-      setTimeout(() => overlay.remove(), 550);
+      setTimeout(() => { overlay.remove(); done(); }, 550);
     }, lingerWait);
   }
 
@@ -5702,6 +5732,9 @@ panels.forEach(p => observer.observe(p));
   const startBtn = document.getElementById('webcam-start');
   const stopBtn = document.getElementById('webcam-stop');
   const flipBtn = document.getElementById('webcam-flip');
+  const hudPanel = document.getElementById('webcam-hud');
+  const hudRows = document.getElementById('webcam-hud-rows');
+  const hudFps = document.getElementById('webcam-hud-fps');
   const statEl = document.getElementById('webcam-stat');
   const pillText = document.getElementById('webcam-pill-text');
   const hintEl = document.getElementById('webcam-hint');
@@ -5981,6 +6014,49 @@ panels.forEach(p => observer.observe(p));
       });
     }
 
+    let fpsFrameCount = 0, fpsLastUpdate = performance.now();
+
+    function updateHud() {
+      if (!hudPanel) return;
+      const faceOn = (toggles.face && toggles.face.checked) || (toggles.landmarks && toggles.landmarks.checked);
+      const objOn = toggles.objects && toggles.objects.checked;
+      const handOn = toggles.hands && toggles.hands.checked;
+      const poseOn = toggles.pose && toggles.pose.checked;
+      if (!faceOn && !objOn && !handOn && !poseOn) { hudPanel.hidden = true; return; }
+      hudPanel.hidden = false;
+
+      const rows = [];
+      if (faceOn) {
+        const n = cache.face.length;
+        let detail = '\u2014';
+        if (n && cache.face[0].expressions) {
+          const top = Object.entries(cache.face[0].expressions).sort((a, b) => b[1] - a[1])[0];
+          detail = top[0] + ' ' + Math.round(top[1] * 100) + '%';
+        }
+        rows.push('<div class="webcam-hud-row"><span class="webcam-hud-label">FACE</span><span class="webcam-hud-count">' + n + '</span><span class="webcam-hud-detail">' + detail + '</span></div>');
+      }
+      if (objOn) {
+        const n = cache.objects.length;
+        const labels = Array.from(new Set(cache.objects.map((o) => o.class))).slice(0, 3).join(', ') || '\u2014';
+        rows.push('<div class="webcam-hud-row"><span class="webcam-hud-label">OBJ</span><span class="webcam-hud-count">' + n + '</span><span class="webcam-hud-detail">' + labels + '</span></div>');
+      }
+      if (handOn) {
+        const n = cache.hands.length;
+        const sides = cache.hands.map((h) => h.handedness || '').filter(Boolean).join('/') || '\u2014';
+        rows.push('<div class="webcam-hud-row"><span class="webcam-hud-label">HAND</span><span class="webcam-hud-count">' + n + '</span><span class="webcam-hud-detail">' + sides + '</span></div>');
+      }
+      if (poseOn) {
+        const n = cache.pose.length;
+        let conf = '\u2014';
+        if (n) {
+          const scores = cache.pose[0].keypoints.map((k) => k.score || 0);
+          conf = Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 100) + '%';
+        }
+        rows.push('<div class="webcam-hud-row"><span class="webcam-hud-label">POSE</span><span class="webcam-hud-count">' + n + '</span><span class="webcam-hud-detail">' + conf + '</span></div>');
+      }
+      if (hudRows) hudRows.innerHTML = rows.join('');
+    }
+
     // Rendering and inference are deliberately decoupled. Inference (face,
     // objects, hands, pose) is comparatively slow — tens to hundreds of ms
     // per cycle — and running clearRect+draw only after each slow await
@@ -5998,6 +6074,16 @@ panels.forEach(p => observer.observe(p));
       drawObjects();
       drawHands();
       drawPose();
+
+      fpsFrameCount++;
+      const now = performance.now();
+      if (now - fpsLastUpdate >= 500) {
+        if (hudFps) hudFps.textContent = Math.round((fpsFrameCount * 1000) / (now - fpsLastUpdate));
+        fpsFrameCount = 0;
+        fpsLastUpdate = now;
+      }
+      updateHud();
+
       rafId = requestAnimationFrame(renderLoop);
     }
 
@@ -6062,6 +6148,8 @@ panels.forEach(p => observer.observe(p));
     stopBtn.hidden = true;
     startBtn.disabled = false;
     if (flipBtn) flipBtn.hidden = true;
+    if (hudPanel) hudPanel.hidden = true;
+    if (hudFps) hudFps.textContent = '--';
     if (pillText) pillText.textContent = 'IDLE';
     if (statEl) statEl.innerHTML = 'faces detected: <strong>0</strong>';
     announce('');

@@ -5625,7 +5625,7 @@ panels.forEach(p => observer.observe(p));
     ['left_knee','left_ankle'],['right_hip','right_knee'],['right_knee','right_ankle'],
   ];
 
-  let stream = null, running = false, rafId = null;
+  let stream = null, running = false, rafId = null, resizeListener = null;
   let faceApiReady = false, landmarksReady = false;
   let cocoModel = null, handDetector = null, poseDetector = null;
   const loadPromises = {};
@@ -5750,8 +5750,30 @@ panels.forEach(p => observer.observe(p));
     running = true;
 
     const ctx = overlay.getContext('2d');
-    function syncSize() { overlay.width = video.videoWidth || 480; overlay.height = video.videoHeight || 360; }
+    // The canvas's own backing-store resolution is set to match its actual
+    // displayed pixel size (not the camera's native resolution). We then
+    // manually replicate the video's `object-fit: cover` crop-and-scale as
+    // a transform applied to every drawn coordinate. Canvas support for
+    // object-fit is inconsistent across browsers/versions, and relying on
+    // it silently produced correctly-computed boxes that landed off-screen
+    // or scaled down to invisibility whenever the camera's native aspect
+    // ratio didn't exactly match the container — this is what made
+    // detection *count* faces correctly while never actually drawing one.
+    let videoW = 480, videoH = 360, scale = 1, offX = 0, offY = 0;
+    function syncSize() {
+      videoW = video.videoWidth || 480;
+      videoH = video.videoHeight || 360;
+      const rect = overlay.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      overlay.width = Math.max(1, Math.round(rect.width * dpr));
+      overlay.height = Math.max(1, Math.round(rect.height * dpr));
+      scale = Math.max(overlay.width / videoW, overlay.height / videoH);
+      offX = (overlay.width - videoW * scale) / 2;
+      offY = (overlay.height - videoH * scale) / 2;
+    }
     video.addEventListener('loadedmetadata', syncSize, { once: true });
+    resizeListener = syncSize;
+    window.addEventListener('resize', resizeListener);
     syncSize();
 
     // Face + expression (and optionally landmarks) is on by default — load it now.
@@ -5767,7 +5789,17 @@ panels.forEach(p => observer.observe(p));
     }
     if (pillText) pillText.textContent = 'DETECTING';
 
-    function mirrorX(x, w) { return overlay.width - x - w; }
+    // Maps a box in raw video-pixel space (as returned by every detector
+    // below) to canvas space, mirroring it horizontally to match the
+    // visually-flipped video and applying the cover transform above.
+    function mapBox(x, y, w, h) {
+      const mirroredX = videoW - x - w;
+      return { x: mirroredX * scale + offX, y: y * scale + offY, w: w * scale, h: h * scale };
+    }
+    // Same, for a single point (landmarks, hand/pose keypoints).
+    function mapPoint(x, y) {
+      return { x: (videoW - x) * scale + offX, y: y * scale + offY };
+    }
 
     // Detections are cached and drawn every frame regardless of whether a
     // *new* detection has finished yet — inference is comparatively slow,
@@ -5778,26 +5810,26 @@ panels.forEach(p => observer.observe(p));
     function drawFace() {
       let faceCount = 0;
       cache.face.forEach((d) => {
-        const { x: rawX, y, width, height } = d.detection.box;
-        const x = mirrorX(rawX, width);
+        const b = mapBox(d.detection.box.x, d.detection.box.y, d.detection.box.width, d.detection.box.height);
         faceCount++;
         ctx.strokeStyle = '#22D3EE'; ctx.lineWidth = 2;
-        ctx.strokeRect(x, y, width, height);
+        ctx.strokeRect(b.x, b.y, b.w, b.h);
 
         const top = Object.entries(d.expressions).sort((a, b) => b[1] - a[1])[0];
         const label = top[0] + ' ' + Math.round(top[1] * 100) + '%';
         ctx.font = '14px monospace';
         const textW = ctx.measureText(label).width;
         ctx.fillStyle = 'rgba(3,8,17,.85)';
-        ctx.fillRect(x, Math.max(0, y - 20), textW + 10, 20);
+        ctx.fillRect(b.x, Math.max(0, b.y - 20), textW + 10, 20);
         ctx.fillStyle = '#22D3EE';
-        ctx.fillText(label, x + 5, Math.max(14, y - 5));
+        ctx.fillText(label, b.x + 5, Math.max(14, b.y - 5));
 
         if (d.landmarks) {
           ctx.fillStyle = '#E879F9';
           d.landmarks.positions.forEach((p) => {
+            const mp = mapPoint(p.x, p.y);
             ctx.beginPath();
-            ctx.arc(mirrorX(p.x, 0), p.y, 1.6, 0, Math.PI * 2);
+            ctx.arc(mp.x, mp.y, 1.6, 0, Math.PI * 2);
             ctx.fill();
           });
         }
@@ -5807,22 +5839,21 @@ panels.forEach(p => observer.observe(p));
 
     function drawObjects() {
       cache.objects.forEach((p) => {
-        const [rawX, y, w, h] = p.bbox;
-        const x = mirrorX(rawX, w);
+        const b = mapBox(p.bbox[0], p.bbox[1], p.bbox[2], p.bbox[3]);
         ctx.strokeStyle = '#F59E0B'; ctx.lineWidth = 2;
-        ctx.strokeRect(x, y, w, h);
+        ctx.strokeRect(b.x, b.y, b.w, b.h);
         const label = p.class + ' ' + Math.round(p.score * 100) + '%';
         ctx.font = '13px monospace';
         const textW = ctx.measureText(label).width;
         ctx.fillStyle = 'rgba(3,8,17,.85)';
-        ctx.fillRect(x, Math.max(0, y - 18), textW + 8, 18);
+        ctx.fillRect(b.x, Math.max(0, b.y - 18), textW + 8, 18);
         ctx.fillStyle = '#F59E0B';
-        ctx.fillText(label, x + 4, Math.max(13, y - 5));
+        ctx.fillText(label, b.x + 4, Math.max(13, b.y - 5));
       });
     }
     function drawHands() {
       cache.hands.forEach((hand) => {
-        const pts = hand.keypoints.map((k) => ({ x: mirrorX(k.x, 0), y: k.y }));
+        const pts = hand.keypoints.map((k) => mapPoint(k.x, k.y));
         ctx.strokeStyle = '#7DD3FC'; ctx.lineWidth = 2;
         HAND_CONNECTIONS.forEach(([a, b]) => {
           if (!pts[a] || !pts[b]) return;
@@ -5840,15 +5871,17 @@ panels.forEach(p => observer.observe(p));
         POSE_CONNECTIONS.forEach(([a, b]) => {
           const ka = byName[a], kb = byName[b];
           if (!ka || !kb || ka.score < 0.3 || kb.score < 0.3) return;
+          const pa = mapPoint(ka.x, ka.y), pb = mapPoint(kb.x, kb.y);
           ctx.beginPath();
-          ctx.moveTo(mirrorX(ka.x, 0), ka.y);
-          ctx.lineTo(mirrorX(kb.x, 0), kb.y);
+          ctx.moveTo(pa.x, pa.y);
+          ctx.lineTo(pb.x, pb.y);
           ctx.stroke();
         });
         ctx.fillStyle = '#818CF8';
         pose.keypoints.forEach((k) => {
           if (k.score < 0.3) return;
-          ctx.beginPath(); ctx.arc(mirrorX(k.x, 0), k.y, 3, 0, Math.PI * 2); ctx.fill();
+          const p = mapPoint(k.x, k.y);
+          ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fill();
         });
       });
     }
@@ -5909,6 +5942,7 @@ panels.forEach(p => observer.observe(p));
     running = false;
     if (rafId) cancelAnimationFrame(rafId);
     if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
+    if (resizeListener) { window.removeEventListener('resize', resizeListener); resizeListener = null; }
     video.srcObject = null;
     placeholder.hidden = false;
     stopBtn.hidden = true;

@@ -1407,7 +1407,7 @@
   }
   .boot-lines {
     display: flex; flex-direction: column; gap: .4rem;
-    min-height: 8.5em; width: 100%;
+    min-height: 10.5em; width: 100%;
     font-size: .78rem;
   }
   .boot-line { color: var(--sky); white-space: pre-wrap; word-break: break-word; }
@@ -5187,9 +5187,15 @@ panels.forEach(p => observer.observe(p));
   // progress bar; "cmd"/"out" entries are just flavor typing.
   const ENTRIES = [
     { text: '$ ./init_interface.sh', type: 'cmd' },
-    { text: 'loading design system', type: 'step' },
+    { text: 'checking node dependencies', type: 'step' },
+    { text: 'verifying webgl context', type: 'step' },
+    { text: 'linking tensorflow.js runtime', type: 'step' },
+    { text: 'loading face-api.js models', type: 'step' },
+    { text: 'mounting three.js renderer', type: 'step' },
+    { text: 'loading design tokens', type: 'step' },
+    { text: 'establishing secure channel', type: 'step' },
     { text: 'connecting to api', type: 'step' },
-    { text: 'calibrating render engine', type: 'step' },
+    { text: 'syncing telemetry stream', type: 'step' },
     { text: '$ echo "ready"', type: 'cmd' },
     { text: 'welcome, you\u2019re in', type: 'out' },
   ];

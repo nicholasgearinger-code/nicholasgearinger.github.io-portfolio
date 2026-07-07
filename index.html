@@ -5944,6 +5944,15 @@ panels.forEach(p => observer.observe(p));
         } else {
           cache.pose = [];
         }
+
+        // Explicit pause between iterations. Without this, whenever
+        // inference resolves quickly the loop just hammers the main thread
+        // back-to-back with no real yield, which is what made the tab
+        // become unresponsive — a plain `await` on an already-fast promise
+        // chain doesn't guarantee the browser gets a full turn to breathe,
+        // but a setTimeout does. This also caps detection at a sane ~24fps
+        // regardless of how fast the hardware is.
+        await new Promise((r) => setTimeout(r, 40));
       }
     }
 

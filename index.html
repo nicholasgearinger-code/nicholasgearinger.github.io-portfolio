@@ -208,56 +208,30 @@
   h1 .line-1 { display: block; }
   h1 .line-1, h1 .line-2 { opacity: 0; }
 
-  /* HUD scan-line (left of the title), then blur-to-focus word reveal */
+  /* Terminal-style reveal: a small monospace "$ whoami" prompt types out
+     first (echoing the boot sequence's terminal identity), then the name
+     and title themselves type out character-by-character in place, each
+     with a blinking cursor block. currentColor keeps the cursor matching
+     whichever line it's currently in (white for the name, cyan for the
+     title) without needing separate rules. */
   .hero-title-row {
-    display: flex; align-items: center; justify-content: center;
-    gap: 1.1rem;
+    display: flex; flex-direction: column; align-items: center;
+    gap: .6rem;
   }
-  .hero-pulse-line {
-    display: block; flex-shrink: 0;
-    position: relative;
-    width: 42px; height: 3px;
-    border-radius: 1px;
-    background: linear-gradient(90deg, var(--cyan), #E879F9);
-    transform: scaleX(0); opacity: 0; transform-origin: left center;
-    animation: heroLinePulse .68s cubic-bezier(.4,0,.2,1) 1;
-    box-shadow: 0 0 12px rgba(34,211,238,.6);
+  .hero-prompt-line {
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-size: .82rem; color: var(--cyan); letter-spacing: .02em;
+    min-height: 1.3em;
   }
-  .hero-pulse-line::after {
-    content: ''; position: absolute; top: -1px; right: 0;
-    width: 6px; height: 5px;
-    background: #fff; box-shadow: 0 0 8px 2px #fff;
-    opacity: 0;
-    animation: heroScanTip .68s cubic-bezier(.4,0,.2,1) 1;
-  }
-  @keyframes heroLinePulse {
-    0%   { transform: scaleX(0); opacity: 0; }
-    35%  { transform: scaleX(1); opacity: 1; }
-    65%  { transform: scaleX(1); opacity: 1; }
-    100% { transform: scaleX(0); opacity: 0; }
-  }
-  @keyframes heroScanTip {
-    0%, 100% { opacity: 0; }
-    35%, 65% { opacity: 1; }
-  }
-
-  /* Blur-to-focus word reveal: each word rises, sharpens from a soft
-     blur, and fades in — staggered per word rather than per character,
-     for a calmer, more premium feel than a typewriter or glitch effect.
-     Colors are set inline per line (white for the name, cyan for the
-     title) rather than per-word, since every word in a line shares it. */
-  .hero-word {
+  .hero-cursor {
     display: inline-block;
-    opacity: 0;
-    filter: blur(9px);
-    transform: translateY(16px);
-    transition: opacity .65s cubic-bezier(.22,1,.36,1), transform .65s cubic-bezier(.22,1,.36,1), filter .65s cubic-bezier(.22,1,.36,1);
+    width: .12em; height: .85em;
+    background: currentColor;
+    vertical-align: text-bottom;
+    margin-left: .05em;
+    animation: heroCursorBlink .9s steps(1) infinite;
   }
-  .hero-word.word-in {
-    opacity: 1;
-    filter: blur(0);
-    transform: translateY(0);
-  }
+  @keyframes heroCursorBlink { 50% { opacity: 0; } }
   @media (max-width: 560px) {
     .hero-title-row { flex-direction: column; gap: .8rem; }
   }
@@ -2002,14 +1976,14 @@
   <div class="hero-content">
     <div class="hero-eyebrow">Available for work · 2025</div>
     <div class="hero-title-row">
-      <span class="hero-pulse-line" id="hero-pulse-line"></span>
+      <div class="hero-prompt-line" id="hero-prompt-line"><span id="hero-prompt-text"></span></div>
       <h1>
         <span class="line-1">Nicholas Gearinger</span>
         <span class="line-2">AI & Design</span>
         <span class="line-3">Engineering Intelligent Experiences</span>
       </h1>
     </div>
-    <noscript><style>h1 .line-1, h1 .line-2 { opacity: 1 !important; } .hero-pulse-line { visibility: hidden !important; }</style></noscript>
+    <noscript><style>h1 .line-1, h1 .line-2 { opacity: 1 !important; } .hero-prompt-line { display: none !important; }</style></noscript>
     <p class="hero-sub">A creative generalist building a career in design, 3D, and game development — bringing the same hands-on craft and leadership to every role, on screen or off.</p>
     <div class="hero-btns">
       <a href="#models" class="btn-primary">View My Work</a>
@@ -4936,13 +4910,14 @@ panels.forEach(p => observer.observe(p));
       place rather than a per-character glitch, for a calmer, more
       premium feel. ── */
 (function heroDecode() {
+  const promptLine = document.getElementById('hero-prompt-line');
+  const promptText = document.getElementById('hero-prompt-text');
   const els = document.querySelectorAll('.line-1, h1 .line-2');
-  const pulseLine = document.getElementById('hero-pulse-line');
   if (!els.length) return;
 
-  // Honor reduced-motion: just show the text, skip the pulse + reveal.
+  // Honor reduced-motion: just show the text, skip the prompt + typing.
   if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    if (pulseLine) pulseLine.style.visibility = 'hidden';
+    if (promptLine) promptLine.style.visibility = 'hidden';
     els.forEach((el) => { el.style.opacity = '1'; });
     const line3 = document.querySelector('h1 .line-3');
     const sub = document.querySelector('.hero-sub');
@@ -4951,20 +4926,29 @@ panels.forEach(p => observer.observe(p));
     return;
   }
 
-  function revealWords(el, onDone) {
-    const text = el.getAttribute('data-text') || el.textContent;
-    const words = text.split(' ');
-    el.innerHTML = words.map((w) => '<span class="hero-word">' + w + '</span>').join(' ');
+  // Types `text` into `el` one character at a time with a trailing blinking
+  // cursor (sized via em, so it scales with whatever font-size the line
+  // it's typing into happens to have — tiny for the prompt, huge for the
+  // name/title).
+  function typeInto(el, text, charDelay, onDone) {
     el.style.opacity = '1';
-    const spans = Array.from(el.querySelectorAll('.hero-word'));
-    if (!spans.length) { if (onDone) onDone(); return; }
-
-    const STAGGER_MS = 90;
-    spans.forEach((span, i) => {
-      setTimeout(() => span.classList.add('word-in'), i * STAGGER_MS);
-    });
-    const totalMs = (spans.length - 1) * STAGGER_MS + 650; // last word's own transition duration
-    setTimeout(() => { if (onDone) onDone(); }, totalMs);
+    el.textContent = '';
+    const cursor = document.createElement('span');
+    cursor.className = 'hero-cursor';
+    el.appendChild(cursor);
+    let i = 0;
+    function step() {
+      cursor.remove();
+      i++;
+      el.textContent = text.slice(0, i);
+      el.appendChild(cursor);
+      if (i < text.length) {
+        setTimeout(step, charDelay + Math.random() * (charDelay * 0.7));
+      } else {
+        setTimeout(() => { cursor.remove(); if (onDone) onDone(); }, 300);
+      }
+    }
+    step();
   }
 
   function run() {
@@ -4972,19 +4956,27 @@ panels.forEach(p => observer.observe(p));
     const name = document.querySelector('.line-1');
     const title = document.querySelector('h1 .line-2');
 
-    // One pulse of the scan-line (.68s), then the word reveal.
-    const PULSE_MS = 680;
-    setTimeout(() => {
-      if (pulseLine) pulseLine.style.visibility = 'hidden';
-      if (name) revealWords(name, () => {
-        if (title) setTimeout(() => revealWords(title, () => {
-          const line3 = document.querySelector('h1 .line-3');
-          const sub = document.querySelector('.hero-sub');
-          if (line3) line3.classList.add('reveal-in');
-          if (sub) setTimeout(() => sub.classList.add('reveal-in'), 180);
-        }), 150);
-      });
-    }, pulseLine ? PULSE_MS : 0);
+    function typeName() {
+      if (!name) { typeTitle(); return; }
+      typeInto(name, name.getAttribute('data-text'), 22, () => setTimeout(typeTitle, 200));
+    }
+    function typeTitle() {
+      if (!title) { finishUp(); return; }
+      typeInto(title, title.getAttribute('data-text'), 22, finishUp);
+    }
+    function finishUp() {
+      const line3 = document.querySelector('h1 .line-3');
+      const sub = document.querySelector('.hero-sub');
+      if (line3) line3.classList.add('reveal-in');
+      if (sub) setTimeout(() => sub.classList.add('reveal-in'), 180);
+    }
+
+    if (promptLine && promptText) {
+      promptLine.style.opacity = '1';
+      typeInto(promptText, '$ whoami', 26, () => setTimeout(typeName, 250));
+    } else {
+      typeName();
+    }
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);

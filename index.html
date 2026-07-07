@@ -1925,7 +1925,7 @@
   //      window.__API_BASE = 'https://your-service.onrender.com';
   //    Leave it as '' if the backend serves this HTML itself (same origin).
   //    This is the ONLY line on the whole page you need to edit. ──
-  window.__API_BASE = '';
+  window.__API_BASE = 'https://nicholasgearinger-github-io-portfolio-1.onrender.com';
 </script>
 
 <a href="#main-content" class="skip-link">Skip to main content</a>
@@ -5774,6 +5774,7 @@ panels.forEach(p => observer.observe(p));
       cache.face.forEach((d) => {
         const { x: rawX, y, width, height } = d.detection.box;
         const x = mirrorX(rawX, width);
+        console.log('[webcam-ai] face box', { x, y, width, height, canvasW: overlay.width, canvasH: overlay.height });
         faceCount++;
         ctx.strokeStyle = '#22D3EE'; ctx.lineWidth = 2;
         ctx.strokeRect(x, y, width, height);

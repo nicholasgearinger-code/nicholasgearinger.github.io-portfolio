@@ -5680,12 +5680,19 @@ panels.forEach(p => observer.observe(p));
     if (typeof cocoSsd === 'undefined') await loadScript(COCO_LIB_URL);
     cocoModel = await cocoSsd.load();
   }
+  const MEDIAPIPE_HANDS_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/hands';
+
   async function ensureHands() {
     if (handDetector) return;
     if (typeof handPoseDetection === 'undefined') await loadScript(HAND_LIB_URL);
+    // Deliberately NOT using runtime:'tfjs' here — it has a known, documented
+    // bug (tensorflow/tfjs#7204) where it returns NaN for every x/y
+    // coordinate while still reporting a plausible hand structure. The
+    // 'mediapipe' runtime runs its own separate WASM pipeline instead of
+    // sharing the page's TF.js backend, which sidesteps the bug entirely.
     handDetector = await handPoseDetection.createDetector(
       handPoseDetection.SupportedModels.MediaPipeHands,
-      { runtime: 'tfjs', modelType: 'lite', maxHands: 2 }
+      { runtime: 'mediapipe', solutionPath: MEDIAPIPE_HANDS_URL, modelType: 'lite', maxHands: 2 }
     );
   }
   async function ensurePose() {
@@ -5840,8 +5847,6 @@ panels.forEach(p => observer.observe(p));
       if (video.readyState < 2) { rafId = requestAnimationFrame(detectLoop); return; }
 
       ctx.clearRect(0, 0, overlay.width, overlay.height);
-      ctx.fillStyle = 'red';
-      ctx.fillRect(10, 10, 60, 60); // TEMP diagnostic marker — remove once confirmed fixed
 
       const faceWanted = (toggles.face && toggles.face.checked) || (toggles.landmarks && toggles.landmarks.checked);
       if (faceWanted && faceApiReady) {
@@ -5866,7 +5871,6 @@ panels.forEach(p => observer.observe(p));
       if (toggles.hands && toggles.hands.checked && handDetector) {
         try {
           cache.hands = await handDetector.estimateHands(video);
-          if (cache.hands.length) console.log('[webcam-ai] hands detected:', cache.hands.length, cache.hands[0]);
         } catch (err) { console.error('[webcam-ai] hands detection failed:', err); }
       } else {
         cache.hands = [];

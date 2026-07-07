@@ -2510,19 +2510,11 @@
           </label>
           <label class="webcam-toggle" data-model="hands">
             <input type="checkbox" id="toggle-hands">
-            <span class="webcam-toggle-dot"></span> Hands &amp; Play
+            <span class="webcam-toggle-dot"></span> Hands
           </label>
           <label class="webcam-toggle" data-model="pose">
             <input type="checkbox" id="toggle-pose">
             <span class="webcam-toggle-dot"></span> Body Pose
-          </label>
-          <label class="webcam-toggle" data-model="telemetry">
-            <input type="checkbox" id="toggle-telemetry">
-            <span class="webcam-toggle-dot"></span> Telemetry HUD
-          </label>
-          <label class="webcam-toggle" data-model="geo">
-            <input type="checkbox" id="toggle-geo">
-            <span class="webcam-toggle-dot"></span> Location
           </label>
         </div>
         <p class="webcam-toggle-status" id="webcam-toggle-status"></p>
@@ -2533,8 +2525,6 @@
       </div>
     </div>
     <p class="algo-hint" id="webcam-hint">Each toggle loads its own model on demand, the first time you switch it on — nothing downloads until you ask for it. Running several at once is more demanding on your device, so if things feel sluggish, try enabling fewer at a time.</p>
-    <p class="algo-hint">Turn on "Hands &amp; Play" and pinch your thumb and index finger together over one of the floating orbs to grab it — drag it around and let go to toss it.</p>
-    <p class="algo-hint">"Telemetry HUD" adds a live readout of clock, FPS, battery, a network diagnostics panel (connection type, downlink, latency, and a rolling bar graph), and a heading compass (where your browser exposes them) — all read locally, nothing sent anywhere. "Location" is kept separate and opt-in on purpose: it asks your browser's normal permission prompt and only ever draws your coordinates on your own screen.</p>
     <p class="algo-hint">Face + expression + landmarks: face-api.js. Objects: COCO-SSD. Hands &amp; body pose: TensorFlow.js's official MediaPipe-based models. All MIT/Apache licensed, all inference client-side.</p>
   </div>
 </section>
@@ -5607,21 +5597,11 @@ panels.forEach(p => observer.observe(p));
     objects: document.getElementById('toggle-objects'),
     hands: document.getElementById('toggle-hands'),
     pose: document.getElementById('toggle-pose'),
-    telemetry: document.getElementById('toggle-telemetry'),
-    geo: document.getElementById('toggle-geo'),
   };
   if (!video || !startBtn) return;
 
   const FACE_MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
-  // Classic IIFE build, loaded the same lazy way as the other models below
-  // (coco-ssd, hand-pose, pose-detection): a plain <script> tag appended on
-  // first use. This bundles its own internal copy of TFJS under face-api's
-  // own namespace instead of importing '@tensorflow/tfjs' as an ES module,
-  // which previously resolved (via this page's import map) to a second,
-  // separately-fetched TFJS instance and could throw while registering
-  // WebGL kernels a second time -- silently killing face detection before
-  // a single frame was ever processed.
-  const FACE_LIB_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js';
+  const FACE_LIB_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.esm-nobundle.js';
   const COCO_LIB_URL = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd/dist/coco-ssd.min.js';
   const HAND_LIB_URL = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/hand-pose-detection/dist/hand-pose-detection.min.js';
   const POSE_LIB_URL = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection/dist/pose-detection.min.js';
@@ -5637,34 +5617,10 @@ panels.forEach(p => observer.observe(p));
     ['left_knee','left_ankle'],['right_hip','right_knee'],['right_knee','right_ankle'],
   ];
 
-  let stream = null, running = false, rafId = null, resizeListener = null;
-  let faceApiReady = false, landmarksReady = false, telemetryReady = false;
+  let stream = null, running = false, rafId = null;
+  let faceApiReady = false, landmarksReady = false;
   let cocoModel = null, handDetector = null, poseDetector = null;
-  let batteryInfo = null, networkInfo = null, orientationInfo = null, geoInfo = null, geoWatchId = null;
   const loadPromises = {};
-
-  // Same "coarse pointer" heuristic already used elsewhere on this page to
-  // gate hover-only interactions — phones and most tablets report coarse,
-  // laptops/desktops report fine. Everything below that scales with device
-  // power reads from this single flag rather than guessing from viewport
-  // width, which fools easily on tablets and resized desktop windows.
-  const isMobile = !!(window.matchMedia && !window.matchMedia('(pointer: fine)').matches);
-  // Reuses the same capped DPR the rest of the site already computes
-  // (window.__PERF.dpr) so the canvas doesn't render at a phone's raw
-  // 3x/4x pixel ratio for no visible benefit — that alone can multiply
-  // fill-rate cost several times over on an already weaker GPU.
-  const PERF_DPR = (window.__PERF && window.__PERF.dpr) || Math.min(window.devicePixelRatio || 1, 2);
-  // Smaller capture resolution and detector input size on mobile: both
-  // scale inference cost roughly quadratically, so halving them is a large
-  // real-world win and still plenty for a face filling a phone's front
-  // camera at selfie distance.
-  const CAM_CONSTRAINTS = isMobile ? { width: 320, height: 240 } : { width: 480, height: 360 };
-  const FACE_INPUT_SIZE = isMobile ? 160 : 224;
-  const MAX_HANDS = isMobile ? 1 : 2;
-  // Detection cadence: mobile gets a longer pause between inference passes
-  // so it isn't running flat-out on a phone's SoC — kinder to battery and
-  // heat, and reduces the odds of the whole page feeling laggy while it runs.
-  const DETECT_INTERVAL_MS = isMobile ? 90 : 40;
 
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     startBtn.disabled = true;
@@ -5696,10 +5652,17 @@ panels.forEach(p => observer.observe(p));
 
   async function ensureFace() {
     if (faceApiReady) return;
-    // Plain <script> tag load — bundles its own internal TFJS copy inside
-    // face-api's own namespace, so it can't collide with the globally
-    // loaded tf used by the other models on this page.
-    if (typeof faceapi === 'undefined') await loadScript(FACE_LIB_URL);
+    // The nobundle build expects a global `tf` to already exist rather than
+    // importing its own copy — this is what actually avoids the duplicate
+    // WebGL-kernel-registration conflict seen when combining face-api.js
+    // with the separately-loaded official TF.js models. Guarantee that
+    // ordering explicitly rather than relying on script placement.
+    if (typeof window.tf === 'undefined') {
+      throw new Error('TensorFlow.js core did not load — cannot start face detection.');
+    }
+    if (typeof faceapi === 'undefined') {
+      window.faceapi = await import(FACE_LIB_URL);
+    }
     await Promise.all([
       faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODEL_URL),
       faceapi.nets.faceExpressionNet.loadFromUri(FACE_MODEL_URL),
@@ -5734,7 +5697,7 @@ panels.forEach(p => observer.observe(p));
     // sharing the page's TF.js backend, which sidesteps the bug entirely.
     handDetector = await handPoseDetection.createDetector(
       handPoseDetection.SupportedModels.MediaPipeHands,
-      { runtime: 'mediapipe', solutionPath: MEDIAPIPE_HANDS_URL, modelType: 'lite', maxHands: MAX_HANDS }
+      { runtime: 'mediapipe', solutionPath: MEDIAPIPE_HANDS_URL, modelType: 'lite', maxHands: 2 }
     );
   }
   async function ensurePose() {
@@ -5743,90 +5706,14 @@ panels.forEach(p => observer.observe(p));
     poseDetector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet);
   }
 
-  // ── TELEMETRY HUD: no ML model involved, just a few browser sensor/status
-  // APIs feature-detected and read live. Battery and Network Information
-  // objects update their own properties in place, so we only need to grab
-  // a reference once rather than polling or re-subscribing.
-  // iOS exposes a true compass heading directly; elsewhere it's
-  // approximated from `alpha`, preferring the 'absolute' event variant
-  // when the browser fires it since that's anchored to magnetic north
-  // rather than an arbitrary starting orientation.
-  function onOrientation(e) {
-    const heading = (typeof e.webkitCompassHeading === 'number') ? e.webkitCompassHeading
-      : (typeof e.alpha === 'number') ? (360 - e.alpha) : null;
-    orientationInfo = { beta: e.beta, gamma: e.gamma, heading };
-  }
-  async function ensureTelemetry() {
-    if (telemetryReady) return;
-    if (navigator.getBattery) {
-      try { batteryInfo = await navigator.getBattery(); } catch (e) { batteryInfo = null; }
-    }
-    networkInfo = navigator.connection || navigator.mozConnection || navigator.webkitConnection || null;
-    if (window.DeviceOrientationEvent) {
-      // iOS 13+ requires this to be requested from a user gesture — the
-      // checkbox click itself counts, which is exactly why this call
-      // happens inside the toggle handler rather than at camera start.
-      if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-        try {
-          const state = await DeviceOrientationEvent.requestPermission();
-          if (state === 'granted') window.addEventListener('deviceorientation', onOrientation);
-        } catch (e) { /* denied or unsupported — telemetry panel just omits tilt/compass */ }
-      } else {
-        window.addEventListener('deviceorientation', onOrientation);
-        // Fires in addition to the plain event on browsers that support
-        // it (mainly Chrome/Android) with alpha already anchored to
-        // magnetic north — listened to separately since it's a distinct
-        // event type, not a flag on the one above.
-        window.addEventListener('deviceorientationabsolute', onOrientation);
-      }
-    }
-    telemetryReady = true;
-  }
-
-  // Location is kept separate from the rest of the telemetry HUD and
-  // requires its own explicit opt-in — a lat/long is meaningfully more
-  // sensitive than a battery percentage or a clock, and this page is
-  // otherwise built around "nothing leaves your device," so it shouldn't
-  // get requested as a side effect of turning on a decorative HUD.
-  async function ensureGeo() {
-    if (!navigator.geolocation) throw new Error('Geolocation not supported in this browser.');
-    await new Promise((resolve, reject) => {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => { geoInfo = pos.coords; resolve(); },
-        (err) => reject(new Error(err.message || 'Location permission denied.')),
-        { enableHighAccuracy: false, timeout: 8000 }
-      );
-    });
-    geoWatchId = navigator.geolocation.watchPosition(
-      (pos) => { geoInfo = pos.coords; },
-      () => {},
-      { enableHighAccuracy: false, maximumAge: 5000 }
-    );
-  }
-
-  const ENSURERS = { face: ensureFace, landmarks: ensureLandmarks, objects: ensureObjects, hands: ensureHands, pose: ensurePose, telemetry: ensureTelemetry, geo: ensureGeo };
-  const LABELS = { face: 'Face + Expression', landmarks: 'Facial Landmarks', objects: 'Objects', hands: 'Hands & Play', pose: 'Body Pose', telemetry: 'Telemetry HUD', geo: 'Location' };
-  // Only Location needs active cleanup when switched off — it's the one
-  // toggle here backed by a live, continuously-updating subscription
-  // (watchPosition) rather than a one-time load or a passive listener.
-  const TEARDOWN = {
-    geo: () => {
-      if (geoWatchId != null && navigator.geolocation) navigator.geolocation.clearWatch(geoWatchId);
-      geoWatchId = null;
-      geoInfo = null;
-    },
-  };
+  const ENSURERS = { face: ensureFace, landmarks: ensureLandmarks, objects: ensureObjects, hands: ensureHands, pose: ensurePose };
+  const LABELS = { face: 'Face + Expression', landmarks: 'Facial Landmarks', objects: 'Objects', hands: 'Hands', pose: 'Body Pose' };
 
   Object.keys(toggles).forEach((name) => {
     const input = toggles[name];
     if (!input) return;
     input.addEventListener('change', async () => {
-      if (!input.checked) {
-        if (TEARDOWN[name]) TEARDOWN[name]();
-        setToggleState(name, 'idle');
-        announce('');
-        return;
-      }
+      if (!input.checked) { setToggleState(name, 'idle'); announce(''); return; }
       if (!running) { announce('Start the camera first.'); input.checked = false; return; }
       setToggleState(name, 'loading');
       announce('Loading ' + LABELS[name] + '\u2026');
@@ -5838,7 +5725,7 @@ panels.forEach(p => observer.observe(p));
         console.error('[webcam-ai]', name, err.message);
         input.checked = false;
         setToggleState(name, 'error');
-        announce('Couldn\u2019t enable ' + LABELS[name] + ' \u2014 check your connection/permissions and try again.');
+        announce('Couldn\u2019t load ' + LABELS[name] + ' \u2014 check your connection and try again.');
       }
     });
   });
@@ -5847,7 +5734,7 @@ panels.forEach(p => observer.observe(p));
     startBtn.disabled = true;
     if (pillText) pillText.textContent = 'STARTING\u2026';
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ video: CAM_CONSTRAINTS, audio: false });
+      stream = await navigator.mediaDevices.getUserMedia({ video: { width: 480, height: 360 }, audio: false });
     } catch (err) {
       if (pillText) pillText.textContent = 'CAMERA DENIED';
       if (hintEl) hintEl.textContent = 'Camera access was denied or unavailable \u2014 this demo needs it to work.';
@@ -5862,67 +5749,97 @@ panels.forEach(p => observer.observe(p));
     running = true;
 
     const ctx = overlay.getContext('2d');
-    // The canvas's own backing-store resolution is set to match its actual
-    // displayed pixel size (not the camera's native resolution). We then
-    // manually replicate the video's `object-fit: cover` crop-and-scale as
-    // a transform applied to every drawn coordinate. Canvas support for
-    // object-fit is inconsistent across browsers/versions, and relying on
-    // it silently produced correctly-computed boxes that landed off-screen
-    // or scaled down to invisibility whenever the camera's native aspect
-    // ratio didn't exactly match the container — this is what made
-    // detection *count* faces correctly while never actually drawing one.
-    let videoW = 480, videoH = 360, scale = 1, offX = 0, offY = 0;
-    function syncSize() {
-      videoW = video.videoWidth || 480;
-      videoH = video.videoHeight || 360;
-      const rect = overlay.getBoundingClientRect();
-      overlay.width = Math.max(1, Math.round(rect.width * PERF_DPR));
-      overlay.height = Math.max(1, Math.round(rect.height * PERF_DPR));
-      scale = Math.max(overlay.width / videoW, overlay.height / videoH);
-      offX = (overlay.width - videoW * scale) / 2;
-      offY = (overlay.height - videoH * scale) / 2;
-    }
+    function syncSize() { overlay.width = video.videoWidth || 480; overlay.height = video.videoHeight || 360; }
     video.addEventListener('loadedmetadata', syncSize, { once: true });
-    resizeListener = syncSize;
-    window.addEventListener('resize', resizeListener);
     syncSize();
 
     // Face + expression (and optionally landmarks) is on by default — load it now.
     if (toggles.face && toggles.face.checked) {
       setToggleState('face', 'loading');
       try { await ensureFace(); setToggleState('face', 'ready'); }
-      catch (err) {
-        console.error('[webcam-ai] face', err.message);
-        toggles.face.checked = false;
-        setToggleState('face', 'error');
-        announce('Couldn\u2019t load Face + Expression \u2014 check your connection and try again.');
-      }
-    }
-    // stop() deliberately clears the location watch every time (see there
-    // for why), so restarting the camera with the toggle still checked
-    // needs to re-arm it rather than silently leaving it dead.
-    if (toggles.geo && toggles.geo.checked) {
-      setToggleState('geo', 'loading');
-      try { await ensureGeo(); setToggleState('geo', 'ready'); }
-      catch (err) {
-        console.error('[webcam-ai] geo', err.message);
-        toggles.geo.checked = false;
-        setToggleState('geo', 'error');
-        announce('Couldn\u2019t enable Location \u2014 check your connection/permissions and try again.');
-      }
+      catch (err) { toggles.face.checked = false; setToggleState('face', 'error'); }
     }
     if (pillText) pillText.textContent = 'DETECTING';
 
-    // Maps a box in raw video-pixel space (as returned by every detector
-    // below) to canvas space, mirroring it horizontally to match the
-    // visually-flipped video and applying the cover transform above.
-    function mapBox(x, y, w, h) {
-      const mirroredX = videoW - x - w;
-      return { x: mirroredX * scale + offX, y: y * scale + offY, w: w * scale, h: h * scale };
+    function mirrorX(x, w) { return overlay.width - x - w; }
+
+    /* ── Shared HUD drawing primitives ── */
+    function drawCornerBracket(x, y, w, h, color, lenOverride) {
+      const L = lenOverride || Math.max(10, Math.min(w, h) * 0.22);
+      ctx.save();
+      ctx.strokeStyle = color; ctx.lineWidth = 2;
+      ctx.shadowColor = color; ctx.shadowBlur = 6;
+      ctx.beginPath(); ctx.moveTo(x, y + L); ctx.lineTo(x, y); ctx.lineTo(x + L, y); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x + w - L, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + L); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x + w, y + h - L); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w - L, y + h); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x + L, y + h); ctx.lineTo(x, y + h); ctx.lineTo(x, y + h - L); ctx.stroke();
+      ctx.restore();
     }
-    // Same, for a single point (landmarks, hand/pose keypoints).
-    function mapPoint(x, y) {
-      return { x: (videoW - x) * scale + offX, y: y * scale + offY };
+    function drawCrosshair(cx, cy, size, color) {
+      ctx.save();
+      ctx.strokeStyle = color; ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(cx - size, cy); ctx.lineTo(cx - size / 3, cy);
+      ctx.moveTo(cx + size / 3, cy); ctx.lineTo(cx + size, cy);
+      ctx.moveTo(cx, cy - size); ctx.lineTo(cx, cy - size / 3);
+      ctx.moveTo(cx, cy + size / 3); ctx.lineTo(cx, cy + size);
+      ctx.stroke();
+      ctx.restore();
+    }
+    function drawHudLabel(x, y, lines, color) {
+      ctx.save();
+      ctx.font = '600 11px "JetBrains Mono", monospace';
+      const padX = 8, lineH = 14;
+      const textW = Math.max(...lines.map((l) => ctx.measureText(l.toUpperCase()).width));
+      const boxW = textW + padX * 2, boxH = lines.length * lineH + 6;
+      const boxY = Math.max(0, y - boxH - 6);
+      ctx.fillStyle = 'rgba(3,8,17,.82)';
+      ctx.fillRect(x, boxY, boxW, boxH);
+      ctx.strokeStyle = color; ctx.lineWidth = 1;
+      ctx.strokeRect(x, boxY, boxW, boxH);
+      ctx.fillStyle = color;
+      ctx.fillRect(x, boxY, 3, boxH);
+      ctx.shadowColor = color; ctx.shadowBlur = 3;
+      lines.forEach((line, i) => {
+        ctx.fillText(line.toUpperCase(), x + padX, boxY + lineH * (i + 1) - 2);
+      });
+      ctx.restore();
+    }
+    function drawHudNode(px, py, r, color) {
+      ctx.save();
+      ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2);
+      ctx.globalAlpha = 0.25;
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = color; ctx.lineWidth = 1;
+      ctx.shadowColor = color; ctx.shadowBlur = 3;
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    /* ── Persistent targeting-viewport frame — always visible while the
+       camera is on, independent of any specific detection, for that
+       "looking through a HUD" feel. ── */
+    function drawViewportFrame() {
+      const L = 26, pad = 6, w = overlay.width, h = overlay.height;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(34,211,238,.45)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(pad, pad + L); ctx.lineTo(pad, pad); ctx.lineTo(pad + L, pad); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(w - pad - L, pad); ctx.lineTo(w - pad, pad); ctx.lineTo(w - pad, pad + L); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(w - pad, h - pad - L); ctx.lineTo(w - pad, h - pad); ctx.lineTo(w - pad - L, h - pad); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(pad + L, h - pad); ctx.lineTo(pad, h - pad); ctx.lineTo(pad, h - pad - L); ctx.stroke();
+      ctx.restore();
+    }
+    let scanY = 0;
+    function drawScanline() {
+      scanY = (scanY + 1.4) % (overlay.height + 40);
+      const grad = ctx.createLinearGradient(0, scanY - 20, 0, scanY + 20);
+      grad.addColorStop(0, 'rgba(34,211,238,0)');
+      grad.addColorStop(.5, 'rgba(34,211,238,.10)');
+      grad.addColorStop(1, 'rgba(34,211,238,0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, scanY - 20, overlay.width, 40);
     }
 
     // Detections are cached and drawn every frame regardless of whether a
@@ -5930,96 +5847,29 @@ panels.forEach(p => observer.observe(p));
     // so without this, each result would only be on-screen for the instant
     // between finishing and the next clear, easy to miss entirely.
     let cache = { face: [], objects: [], hands: [], pose: [] };
-    let fps = 0, lastFrameTs = performance.now();
-
-    // Small helper used only by the HUD-styled face reticle below: draws
-    // four L-shaped corner brackets instead of a plain rectangle, the
-    // classic "targeting reticle" look.
-    function strokeCornerBrackets(x, y, w, h, len, color, lineWidth) {
-      ctx.strokeStyle = color; ctx.lineWidth = lineWidth;
-      [[x, y, 1, 1], [x + w, y, -1, 1], [x, y + h, 1, -1], [x + w, y + h, -1, -1]].forEach(([cx, cy, dx, dy]) => {
-        ctx.beginPath();
-        ctx.moveTo(cx, cy + len * dy);
-        ctx.lineTo(cx, cy);
-        ctx.lineTo(cx + len * dx, cy);
-        ctx.stroke();
-      });
-    }
 
     function drawFace() {
       let faceCount = 0;
-      cache.face.forEach((d, i) => {
-        const b = mapBox(d.detection.box.x, d.detection.box.y, d.detection.box.width, d.detection.box.height);
+      cache.face.forEach((d) => {
+        const { x: rawX, y, width, height } = d.detection.box;
+        const x = mirrorX(rawX, width);
         faceCount++;
-
-        // Faint full outline for structure, corner brackets for the
-        // targeting-reticle look, and a scan line sweeping the box —
-        // driven by wall-clock time so it animates smoothly every render
-        // frame regardless of how often a fresh detection actually lands.
-        ctx.strokeStyle = 'rgba(34,211,238,.25)'; ctx.lineWidth = 1;
-        ctx.strokeRect(b.x, b.y, b.w, b.h);
-        strokeCornerBrackets(b.x, b.y, b.w, b.h, Math.min(b.w, b.h) * 0.22, '#22D3EE', 2);
-        const scanT = (Date.now() % 1800) / 1800;
-        ctx.strokeStyle = 'rgba(34,211,238,.6)'; ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(b.x, b.y + scanT * b.h);
-        ctx.lineTo(b.x + b.w, b.y + scanT * b.h);
-        ctx.stroke();
+        drawCornerBracket(x, y, width, height, '#22D3EE');
+        drawCrosshair(x + width / 2, y + height / 2, 9, 'rgba(34,211,238,.55)');
 
         const top = Object.entries(d.expressions).sort((a, b) => b[1] - a[1])[0];
-        const label = top[0] + ' ' + Math.round(top[1] * 100) + '%';
-        ctx.font = '14px monospace';
-        const textW = ctx.measureText(label).width;
-        ctx.fillStyle = 'rgba(3,8,17,.85)';
-        ctx.fillRect(b.x, Math.max(0, b.y - 20), textW + 10, 20);
-        ctx.fillStyle = '#22D3EE';
-        ctx.fillText(label, b.x + 5, Math.max(14, b.y - 5));
-
-        // Telemetry readout with a leader line off the top-right corner —
-        // a fixed per-face ID plus a live confidence score sells the
-        // "targeting computer" read a lot more than a label ever would.
-        // Sized off PERF_DPR like the rest of the HUD (this was previously
-        // a fixed 10px regardless of device pixel ratio, which read as
-        // tiny on higher-density screens) and backed by a solid panel for
-        // contrast instead of floating bare over whatever's in the video.
-        const dpr = PERF_DPR;
-        const id = 'TGT-' + String(i + 1).padStart(2, '0');
-        const lockLabel = 'LOCK ' + Math.round(d.detection.score * 100) + '%';
-        const leaderX = b.x + b.w, leaderY = b.y;
-        const panelX = leaderX + 22 * dpr, panelY = Math.max(10 * dpr, leaderY - 30 * dpr);
-        ctx.strokeStyle = 'rgba(34,211,238,.6)'; ctx.lineWidth = 1.5 * dpr;
-        ctx.beginPath();
-        ctx.moveTo(leaderX, leaderY);
-        ctx.lineTo(leaderX + 14 * dpr, leaderY - 9 * dpr);
-        ctx.lineTo(panelX, panelY + 13 * dpr);
-        ctx.stroke();
-
-        ctx.font = 'bold ' + (13 * dpr) + 'px monospace';
-        const idW = ctx.measureText(id).width;
-        ctx.font = (12 * dpr) + 'px monospace';
-        const lockW = ctx.measureText(lockLabel).width;
-        const panelPad = 8 * dpr, lineH = 16 * dpr;
-        const panelW = Math.max(idW, lockW) + panelPad * 2;
-        ctx.fillStyle = 'rgba(3,8,17,.82)';
-        ctx.strokeStyle = 'rgba(34,211,238,.5)'; ctx.lineWidth = 1 * dpr;
-        ctx.fillRect(panelX, panelY, panelW, lineH * 2 + panelPad * 0.6);
-        ctx.strokeRect(panelX, panelY, panelW, lineH * 2 + panelPad * 0.6);
-        ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-        ctx.font = 'bold ' + (13 * dpr) + 'px monospace';
-        ctx.fillStyle = '#67E8F9';
-        ctx.fillText(id, panelX + panelPad, panelY + lineH - 3 * dpr);
-        ctx.font = (12 * dpr) + 'px monospace';
-        ctx.fillStyle = '#A5F3FC';
-        ctx.fillText(lockLabel, panelX + panelPad, panelY + lineH * 2 - 4 * dpr);
+        drawHudLabel(x, y, ['FACE LOCK', top[0] + ' ' + Math.round(top[1] * 100) + '%'], '#22D3EE');
 
         if (d.landmarks) {
+          ctx.save();
           ctx.fillStyle = '#E879F9';
+          ctx.shadowColor = '#E879F9'; ctx.shadowBlur = 3;
           d.landmarks.positions.forEach((p) => {
-            const mp = mapPoint(p.x, p.y);
             ctx.beginPath();
-            ctx.arc(mp.x, mp.y, 1.6, 0, Math.PI * 2);
+            ctx.arc(mirrorX(p.x, 0), p.y, 1.1, 0, Math.PI * 2);
             ctx.fill();
           });
+          ctx.restore();
         }
       });
       if (statEl) statEl.innerHTML = 'faces detected: <strong>' + faceCount + '</strong>';
@@ -6027,598 +5877,108 @@ panels.forEach(p => observer.observe(p));
 
     function drawObjects() {
       cache.objects.forEach((p) => {
-        const b = mapBox(p.bbox[0], p.bbox[1], p.bbox[2], p.bbox[3]);
-        ctx.strokeStyle = '#F59E0B'; ctx.lineWidth = 2;
-        ctx.strokeRect(b.x, b.y, b.w, b.h);
-        const label = p.class + ' ' + Math.round(p.score * 100) + '%';
-        ctx.font = '13px monospace';
-        const textW = ctx.measureText(label).width;
-        ctx.fillStyle = 'rgba(3,8,17,.85)';
-        ctx.fillRect(b.x, Math.max(0, b.y - 18), textW + 8, 18);
-        ctx.fillStyle = '#F59E0B';
-        ctx.fillText(label, b.x + 4, Math.max(13, b.y - 5));
+        const [rawX, y, w, h] = p.bbox;
+        const x = mirrorX(rawX, w);
+        drawCornerBracket(x, y, w, h, '#F59E0B');
+        drawHudLabel(x, y, [p.class, Math.round(p.score * 100) + '% MATCH'], '#F59E0B');
       });
     }
     function drawHands() {
       cache.hands.forEach((hand) => {
-        const pts = hand.keypoints.map((k) => mapPoint(k.x, k.y));
-        ctx.strokeStyle = '#7DD3FC'; ctx.lineWidth = 2;
+        const pts = hand.keypoints.map((k) => ({ x: mirrorX(k.x, 0), y: k.y }));
+        ctx.save();
+        ctx.strokeStyle = '#7DD3FC'; ctx.lineWidth = 1.5;
+        ctx.shadowColor = '#7DD3FC'; ctx.shadowBlur = 4;
         HAND_CONNECTIONS.forEach(([a, b]) => {
           if (!pts[a] || !pts[b]) return;
           ctx.beginPath(); ctx.moveTo(pts[a].x, pts[a].y); ctx.lineTo(pts[b].x, pts[b].y); ctx.stroke();
         });
-        ctx.fillStyle = '#7DD3FC';
-        pts.forEach((p) => { ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2); ctx.fill(); });
+        ctx.restore();
+        pts.forEach((p, i) => drawHudNode(p.x, p.y, i === 0 ? 4 : 2.5, '#7DD3FC'));
+        if (pts[0] && hand.handedness) drawHudLabel(pts[0].x, pts[0].y + 14, [hand.handedness + ' HAND'], '#7DD3FC');
       });
     }
-
-    // ── PLAY WITH OBJECTS: pinch (thumb tip to index tip) to grab one of a
-    // few floating orbs and toss it around. Object positions/velocities are
-    // stored in the same raw, unmirrored video-pixel space the hand
-    // keypoints already come in, so hit-testing against the pinch point
-    // needs no coordinate conversion — only the final draw goes through
-    // mapPoint, exactly like everything else on this canvas.
-    let playObjects = [];
-    function resetPlayObjects() {
-      playObjects = [
-        { id: 'ORB-1', x: videoW * 0.28, y: videoH * 0.4, vx: 0, vy: 0, r: 24, color: '#22D3EE', held: false },
-        { id: 'ORB-2', x: videoW * 0.62, y: videoH * 0.3, vx: 0, vy: 0, r: 20, color: '#F59E0B', held: false },
-        { id: 'ORB-3', x: videoW * 0.48, y: videoH * 0.68, vx: 0, vy: 0, r: 27, color: '#E879F9', held: false },
-      ];
-    }
-
-    // Distance between thumb tip (keypoint 4) and index tip (keypoint 8),
-    // compared against wrist-to-index-knuckle distance (0 to 5) as a
-    // stand-in for "how big is this hand in frame right now" — using a
-    // fixed pixel threshold would only work at one specific distance from
-    // the camera, so it's scaled by the hand itself instead.
-    function handPinch(hand) {
-      const kp = hand.keypoints;
-      const thumbTip = kp[4], indexTip = kp[8], wrist = kp[0], indexMcp = kp[5];
-      if (!thumbTip || !indexTip) return null;
-      const dist = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y);
-      const handScale = (wrist && indexMcp) ? Math.hypot(wrist.x - indexMcp.x, wrist.y - indexMcp.y) : 60;
-      return { pinching: dist < handScale * 0.55, x: (thumbTip.x + indexTip.x) / 2, y: (thumbTip.y + indexTip.y) / 2, handScale };
-    }
-
-    function updatePlayObjects() {
-      if (!playObjects.length) resetPlayObjects();
-      const handsOn = toggles.hands && toggles.hands.checked;
-      const hand = handsOn ? cache.hands[0] : null;
-      const pinch = hand ? handPinch(hand) : null;
-
-      if (pinch && pinch.pinching) {
-        let held = playObjects.find((o) => o.held);
-        if (!held) {
-          let best = null, bestDist = Infinity;
-          playObjects.forEach((o) => {
-            const d = Math.hypot(o.x - pinch.x, o.y - pinch.y);
-            if (d < o.r + pinch.handScale * 0.5 && d < bestDist) { best = o; bestDist = d; }
-          });
-          if (best) best.held = true;
-          held = best;
-        }
-        if (held) {
-          held.vx = pinch.x - held.x;
-          held.vy = pinch.y - held.y;
-          held.x = pinch.x;
-          held.y = pinch.y;
-        }
-      } else {
-        playObjects.forEach((o) => { o.held = false; });
-      }
-
-      playObjects.forEach((o) => {
-        if (o.held) return;
-        o.vx *= 0.92; o.vy *= 0.92;
-        o.x += o.vx; o.y += o.vy;
-        if (o.x - o.r < 0) { o.x = o.r; o.vx *= -0.6; }
-        if (o.x + o.r > videoW) { o.x = videoW - o.r; o.vx *= -0.6; }
-        if (o.y - o.r < 0) { o.y = o.r; o.vy *= -0.6; }
-        if (o.y + o.r > videoH) { o.y = videoH - o.r; o.vy *= -0.6; }
-      });
-    }
-
-    function drawPlayObjects() {
-      if (!(toggles.hands && toggles.hands.checked)) return;
-      playObjects.forEach((o) => {
-        const p = mapPoint(o.x, o.y);
-        const rr = o.r * scale;
-        const grad = ctx.createRadialGradient(p.x, p.y, rr * 0.15, p.x, p.y, rr);
-        grad.addColorStop(0, o.color);
-        grad.addColorStop(1, 'rgba(0,0,0,0)');
-        ctx.beginPath();
-        ctx.fillStyle = grad;
-        ctx.arc(p.x, p.y, rr, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = o.held ? '#ffffff' : o.color;
-        ctx.lineWidth = o.held ? 3 : 1.5;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, rr, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.font = '10px monospace';
-        ctx.textAlign = 'center';
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText(o.id, p.x, p.y - rr - 6);
-        ctx.textAlign = 'left';
-      });
-    }
-
     function drawPose() {
       cache.pose.forEach((pose) => {
         const byName = {};
         pose.keypoints.forEach((k) => { byName[k.name] = k; });
-        ctx.strokeStyle = '#818CF8'; ctx.lineWidth = 2;
+        ctx.save();
+        ctx.strokeStyle = '#818CF8'; ctx.lineWidth = 1.5;
+        ctx.shadowColor = '#818CF8'; ctx.shadowBlur = 4;
         POSE_CONNECTIONS.forEach(([a, b]) => {
           const ka = byName[a], kb = byName[b];
           if (!ka || !kb || ka.score < 0.3 || kb.score < 0.3) return;
-          const pa = mapPoint(ka.x, ka.y), pb = mapPoint(kb.x, kb.y);
           ctx.beginPath();
-          ctx.moveTo(pa.x, pa.y);
-          ctx.lineTo(pb.x, pb.y);
+          ctx.moveTo(mirrorX(ka.x, 0), ka.y);
+          ctx.lineTo(mirrorX(kb.x, 0), kb.y);
           ctx.stroke();
         });
-        ctx.fillStyle = '#818CF8';
+        ctx.restore();
         pose.keypoints.forEach((k) => {
           if (k.score < 0.3) return;
-          const p = mapPoint(k.x, k.y);
-          ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fill();
+          drawHudNode(mirrorX(k.x, 0), k.y, 3, '#818CF8');
         });
       });
     }
 
-    // ── TELEMETRY HUD PANEL: a fixed corner readout, independent of any
-    // detection — unlike everything else on this canvas it isn't mapped
-    // through the video's cover transform at all, since it's UI chrome
-    // anchored to the canvas itself rather than something tracking a
-    // point in the camera feed. Sizes scale with PERF_DPR so it reads as
-    // the same physical size regardless of the device's pixel ratio.
-    function drawTelemetry() {
-      if (!(toggles.telemetry && toggles.telemetry.checked)) return;
-      const dpr = PERF_DPR;
-      const W = overlay.width, H = overlay.height;
-      drawGridBackdrop(W, H, dpr);
-      drawFrameBorder(W, H, dpr);
-      drawTelemetryTopBar(W, dpr);
-      drawNetworkPanel(W, dpr);
-      if (batteryInfo) drawBatteryGauge(H, dpr);
-      drawCompass(W, H, dpr);
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'alphabetic';
-    }
-
-    // Rounded-rect path, still used by the pill badges (a pill reads as a
-    // pill either way at that size — chamfering only pays off on the
-    // bigger structural panels below).
-    function roundRectPath(x, y, w, h, r) {
-      ctx.beginPath();
-      ctx.moveTo(x + r, y);
-      ctx.arcTo(x + w, y, x + w, y + h, r);
-      ctx.arcTo(x + w, y + h, x, y + h, r);
-      ctx.arcTo(x, y + h, x, y, r);
-      ctx.arcTo(x, y, x + w, y, r);
-      ctx.closePath();
-    }
-
-    // Chamfered (corner-cut) rect — the panel shape borrowed from classic
-    // sci-fi HUD mockups, used for every structural panel below instead
-    // of the softer rounded corners a plain dashboard would use.
-    function chamferRectPath(x, y, w, h, c) {
-      ctx.beginPath();
-      ctx.moveTo(x + c, y);
-      ctx.lineTo(x + w - c, y);
-      ctx.lineTo(x + w, y + c);
-      ctx.lineTo(x + w, y + h - c);
-      ctx.lineTo(x + w - c, y + h);
-      ctx.lineTo(x + c, y + h);
-      ctx.lineTo(x, y + h - c);
-      ctx.lineTo(x, y + c);
-      ctx.closePath();
-    }
-
-    // Draws a small filled/outlined pill with its RIGHT edge fixed at
-    // rightEdgeX (so a row of pills can be built right-to-left just by
-    // chaining the returned left edge into the next call) and returns that
-    // left edge.
-    function drawPill(rightEdgeX, midY, label, color, dpr) {
-      const padX = 9 * dpr, h = 22 * dpr;
-      ctx.font = 'bold ' + (12 * dpr) + 'px monospace';
-      ctx.textAlign = 'left';
-      const textW = ctx.measureText(label).width;
-      const w = textW + padX * 2;
-      const x = rightEdgeX - w, y = midY - h / 2;
-      ctx.fillStyle = color + '33'; // ~20% alpha fill, same hue as the border/text
-      roundRectPath(x, y, w, h, h / 2);
-      ctx.fill();
-      ctx.strokeStyle = color; ctx.lineWidth = 1.5 * dpr;
-      roundRectPath(x, y, w, h, h / 2);
-      ctx.stroke();
-      ctx.fillStyle = color;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(label, x + w / 2, midY + 0.5);
-      return x;
-    }
-
-    // Faint full-canvas grid — the graph-paper backdrop the new reference
-    // mockup uses behind every panel. Kept low-alpha so it reads as
-    // texture rather than competing with the video underneath it.
-    function drawGridBackdrop(W, H, dpr) {
-      const step = 26 * dpr;
-      ctx.strokeStyle = 'rgba(103,232,249,.08)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      for (let x = step; x < W; x += step) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
-      for (let y = step; y < H; y += step) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
-      ctx.stroke();
-    }
-
-    // A single bright, glowing border around the whole feed instead of
-    // just corner brackets — the strongest single cue in the new
-    // reference is that solid, saturated frame, so this replaces the
-    // more subtle L-bracket-and-ring corners from the previous pass.
-    function drawFrameBorder(W, H, dpr) {
-      const inset = 4 * dpr;
-      ctx.save();
-      ctx.shadowColor = 'rgba(34,211,238,.85)';
-      ctx.shadowBlur = 8 * dpr;
-      ctx.strokeStyle = '#22D3EE';
-      ctx.lineWidth = 3 * dpr;
-      roundRectPath(inset, inset, W - inset * 2, H - inset * 2, 10 * dpr);
-      ctx.stroke();
-      ctx.restore(); // save/restore rather than a manual shadowBlur=0 reset — cheaper to get wrong otherwise
-    }
-
-    // Full-width strip across the top: clock + date on the left, FPS and
-    // network status as color-coded pills on the right — a glance at color
-    // alone should tell you "system healthy" without reading a single word.
-    function drawTelemetryTopBar(W, dpr) {
-      const barH = 30 * dpr;
-      ctx.fillStyle = 'rgba(3,8,17,.85)';
-      ctx.fillRect(0, 0, W, barH);
-      ctx.strokeStyle = 'rgba(34,211,238,.55)'; ctx.lineWidth = 1.5 * dpr;
-      ctx.beginPath(); ctx.moveTo(0, barH); ctx.lineTo(W, barH); ctx.stroke();
-
-      const midY = barH / 2, pad = 10 * dpr;
-      ctx.font = 'bold ' + (15 * dpr) + 'px monospace';
-      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      const now = new Date();
-      const timeStr = now.toLocaleTimeString([], { hour12: false });
-      const timeW = ctx.measureText(timeStr).width; // measured while this font is still active
-      ctx.fillStyle = '#67E8F9';
-      ctx.fillText(timeStr, pad, midY);
-      ctx.font = (12 * dpr) + 'px monospace';
-      ctx.fillStyle = 'rgba(203,213,225,.95)';
-      ctx.fillText(now.toISOString().slice(0, 10), pad + timeW + 12 * dpr, midY);
-
-      const fpsColor = fps >= 24 ? '#4ADE80' : fps >= 15 ? '#F59E0B' : '#F87171';
-      let cursor = drawPill(W - pad, midY, Math.round(fps) + ' FPS', fpsColor, dpr);
-      const netOnline = navigator.onLine !== false;
-      const netType = networkInfo && networkInfo.effectiveType ? networkInfo.effectiveType.toUpperCase() : null;
-      const netLabel = netOnline ? (netType || 'ONLINE') : 'OFFLINE';
-      drawPill(cursor - 8 * dpr, midY, netLabel, netOnline ? '#4ADE80' : '#F87171', dpr);
-    }
-
-    // Network diagnostics panel, top-left under the status bar — the
-    // top-bar pill only says "online or not"; this is the detail version:
-    // connection type, downlink, round-trip time where the browser exposes
-    // them (Network Information API — mainly Chrome/Android), plus a
-    // rolling bar-graph sampled once a second so there's something to
-    // actually watch move rather than a static readout.
-    // Thin segmented progress bar under a label+value row — the "value
-    // plus a row of completion dashes" pattern the new reference mockup
-    // uses repeatedly, reused here for downlink and latency.
-    function drawStatRow(x, y, w, label, valueLabel, frac, color, dpr) {
-      ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-      ctx.font = 'bold ' + (9 * dpr) + 'px monospace';
-      ctx.fillStyle = 'rgba(148,163,184,.85)';
-      ctx.fillText(label, x, y);
-      ctx.textAlign = 'right';
-      ctx.fillStyle = color;
-      ctx.fillText(valueLabel, x + w, y);
-      ctx.textAlign = 'left';
-
-      const barY = y + 5 * dpr, barH = 4 * dpr, segments = 16, gap = 1.5 * dpr;
-      const segW = (w - (segments - 1) * gap) / segments;
-      const lit = Math.max(0, Math.min(segments, Math.round(frac * segments)));
-      for (let i = 0; i < segments; i++) {
-        ctx.fillStyle = i < lit ? color : 'rgba(226,232,240,.15)';
-        ctx.fillRect(x + i * (segW + gap), barY, segW, barH);
-      }
-      return barY + barH;
-    }
-
-    function drawNetworkPanel(W, dpr) {
-      const panelX = 8 * dpr, panelY = 30 * dpr + 8 * dpr;
-      const panelW = 190 * dpr, panelH = 86 * dpr, c = 8 * dpr;
-      ctx.fillStyle = 'rgba(3,8,17,.82)';
-      ctx.strokeStyle = 'rgba(34,211,238,.5)'; ctx.lineWidth = 1 * dpr;
-      chamferRectPath(panelX, panelY, panelW, panelH, c);
-      ctx.fill(); ctx.stroke();
-
-      const netOnline = navigator.onLine !== false;
-      const netColor = netOnline ? '#4ADE80' : '#F87171';
-      const padX = 10 * dpr, rowW = panelW - padX * 2;
-
-      ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-      ctx.font = 'bold ' + (9 * dpr) + 'px monospace';
-      ctx.fillStyle = 'rgba(148,163,184,.85)';
-      ctx.fillText('NETWORK', panelX + padX, panelY + 15 * dpr);
-      ctx.fillStyle = netColor;
-      ctx.beginPath(); ctx.arc(panelX + panelW - 14 * dpr, panelY + 12 * dpr, 3.5 * dpr, 0, Math.PI * 2); ctx.fill();
-
-      const netType = networkInfo && networkInfo.effectiveType ? networkInfo.effectiveType.toUpperCase() : null;
-      ctx.font = 'bold ' + (13 * dpr) + 'px monospace';
-      ctx.fillStyle = netColor;
-      ctx.fillText(netOnline ? (netType || 'ONLINE') : 'OFFLINE', panelX + padX, panelY + 32 * dpr);
-
-      // Downlink: fraction of an assumed-comfortable 10 Mbps ceiling.
-      // Latency: inverted against a 300ms ceiling, since lower is better.
-      // Where the Network Information API isn't exposed (Safari/Firefox),
-      // both fall back to a dim, neutral half-fill rather than looking
-      // broken or empty.
-      const hasNet = !!networkInfo;
-      const downlinkVal = hasNet && typeof networkInfo.downlink === 'number' ? networkInfo.downlink : null;
-      const rttVal = hasNet && typeof networkInfo.rtt === 'number' ? networkInfo.rtt : null;
-      const downlinkFrac = !netOnline ? 0 : downlinkVal != null ? Math.min(1, downlinkVal / 10) : 0.5;
-      const rttFrac = !netOnline ? 0 : rttVal != null ? Math.max(0, 1 - rttVal / 300) : 0.5;
-
-      let rowY = panelY + 48 * dpr;
-      rowY = drawStatRow(panelX + padX, rowY, rowW, 'DOWNLINK', downlinkVal != null ? downlinkVal.toFixed(1) + ' MBPS' : 'N/A', downlinkFrac, netColor, dpr) + 16 * dpr;
-      drawStatRow(panelX + padX, rowY, rowW, 'LATENCY', rttVal != null ? rttVal + ' MS' : 'N/A', rttFrac, netColor, dpr);
-    }
-
-    // Small hand-drawn bolt so a "charging" cue matches the rest of this
-    // HUD's thin vector-line look instead of relying on an emoji glyph.
-    function drawBoltIcon(cx, cy, size, color) {
-      ctx.save();
-      ctx.translate(cx, cy);
-      ctx.scale(size / 10, size / 10);
-      ctx.beginPath();
-      ctx.moveTo(1, -5); ctx.lineTo(-3, 1); ctx.lineTo(0, 1);
-      ctx.lineTo(-1, 5); ctx.lineTo(3, -1); ctx.lineTo(0, -1);
-      ctx.closePath();
-      ctx.fillStyle = color;
-      ctx.fill();
-      ctx.restore();
-    }
-
-    // Vertical gauge along the left edge, below the network panel — now
-    // segmented into discrete blocks (10, lit bottom-up by level) rather
-    // than a smooth fill, matching the striped "LOADING" bar look sci-fi
-    // HUD mockups use instead of a plain progress bar.
-    function drawBatteryGauge(H, dpr) {
-      const gw = 20 * dpr, gh = Math.min(140 * dpr, H * 0.4);
-      const cardPad = 10 * dpr;
-      const cardW = gw + cardPad * 2, cardH = gh + cardPad * 2 + 22 * dpr;
-      const cardX = 8 * dpr, cardY = 30 * dpr + 86 * dpr + 16 * dpr;
-      ctx.fillStyle = 'rgba(3,8,17,.82)';
-      ctx.strokeStyle = 'rgba(34,211,238,.5)'; ctx.lineWidth = 1 * dpr;
-      chamferRectPath(cardX, cardY, cardW, cardH, 8 * dpr);
-      ctx.fill(); ctx.stroke();
-
-      const x = cardX + cardPad, y = cardY + cardPad + 10 * dpr;
-      const level = Math.max(0, Math.min(1, batteryInfo.level));
-      const color = level > 0.5 ? '#4ADE80' : level > 0.2 ? '#F59E0B' : '#F87171';
-      const nubW = gw * 0.5, nubH = 5 * dpr;
-
-      ctx.fillStyle = 'rgba(226,232,240,.7)';
-      ctx.fillRect(x + (gw - nubW) / 2, y - nubH, nubW, nubH);
-      ctx.strokeStyle = 'rgba(226,232,240,.8)'; ctx.lineWidth = 2 * dpr;
-      ctx.strokeRect(x, y, gw, gh);
-
-      const segments = 10, segGap = 2 * dpr;
-      const segH = (gh - 4 * dpr - segGap * (segments - 1)) / segments;
-      const lit = Math.round(level * segments);
-      for (let s = 0; s < segments; s++) {
-        const segY = y + gh - 2 * dpr - (s + 1) * segH - s * segGap;
-        ctx.fillStyle = s < lit ? color : 'rgba(226,232,240,.12)';
-        ctx.fillRect(x + 2.5 * dpr, segY, gw - 5 * dpr, segH);
-      }
-
-      if (batteryInfo.charging) drawBoltIcon(x + gw / 2, y - nubH - 9 * dpr, 14 * dpr, '#FDE68A');
-
-      ctx.font = 'bold ' + (13 * dpr) + 'px monospace';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-      ctx.fillStyle = color;
-      ctx.fillText(Math.round(level * 100) + '%', x + gw / 2, y + gh + 18 * dpr);
-    }
-
-    // Bottom-right radar-style compass: a fixed ring (tick marks, no
-    // cardinal letters — see the redesign note below) with a needle-free
-    // heading spoke, plus live coordinates stacked above it when Location
-    // is also on.
-    function drawCompass(W, H, dpr) {
-      const hasHeading = orientationInfo && typeof orientationInfo.heading === 'number';
-      const hasGeo = toggles.geo && toggles.geo.checked && geoInfo;
-      if (!hasHeading && !hasGeo) return;
-
-      const r = 34 * dpr;
-      const margin = 14 * dpr;
-      const cx = W - margin - r, cy = H - margin - r;
-
-      if (hasGeo) {
-        ctx.font = (11 * dpr) + 'px monospace';
-        ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
-        const geoY = hasHeading ? cy - r - 22 * dpr : cy;
-        const line1 = 'LAT ' + geoInfo.latitude.toFixed(3), line2 = 'LON ' + geoInfo.longitude.toFixed(3);
-        const gw = Math.max(ctx.measureText(line1).width, ctx.measureText(line2).width) + 16 * dpr;
-        ctx.fillStyle = 'rgba(3,8,17,.78)';
-        ctx.strokeStyle = 'rgba(34,211,238,.4)'; ctx.lineWidth = 1 * dpr;
-        chamferRectPath(W - margin - gw, geoY - 24 * dpr, gw, 32 * dpr, 6 * dpr);
-        ctx.fill(); ctx.stroke();
-        ctx.fillStyle = '#67E8F9';
-        ctx.fillText(line1, W - margin - 8 * dpr, geoY - 8 * dpr);
-        ctx.fillText(line2, W - margin - 8 * dpr, geoY + 6 * dpr);
-      }
-
-      if (!hasHeading) return;
-
-      // Backing disc + outer ring — no cardinal letters, just tick marks
-      // every 30°, closer to a targeting radar than a boy-scout compass.
-      ctx.fillStyle = 'rgba(3,8,17,.8)';
-      ctx.beginPath(); ctx.arc(cx, cy, r + 8 * dpr, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = 'rgba(34,211,238,.55)'; ctx.lineWidth = 1.5 * dpr;
-      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
-
-      // Thick alternating white/cyan banded ring — the "barcode ring"
-      // look from the new reference, purely decorative texture rather
-      // than tied to any value, sitting between the outer tick ring and
-      // a smaller dashed ring for depth.
-      const bandMid = r * 0.72, bandWidth = r * 0.24, bandSegments = 20;
-      ctx.lineWidth = bandWidth;
-      for (let i = 0; i < bandSegments; i++) {
-        const a0 = (i / bandSegments) * Math.PI * 2, a1 = ((i + 0.78) / bandSegments) * Math.PI * 2;
-        ctx.strokeStyle = i % 2 === 0 ? 'rgba(226,232,240,.92)' : 'rgba(34,211,238,.55)';
-        ctx.beginPath();
-        ctx.arc(cx, cy, bandMid, a0, a1);
-        ctx.stroke();
-      }
-      const innerR = r * 0.34;
-      for (let deg = 0; deg < 360; deg += 12) {
-        const rad = (deg * Math.PI) / 180;
-        ctx.strokeStyle = 'rgba(103,232,249,.4)'; ctx.lineWidth = 1.5 * dpr;
-        ctx.beginPath();
-        ctx.arc(cx, cy, innerR, rad, rad + 0.18);
-        ctx.stroke();
-      }
-      for (let deg = 0; deg < 360; deg += 30) {
-        const rad = (deg * Math.PI) / 180;
-        const isMajor = deg % 90 === 0;
-        const inner = r - (isMajor ? 8 : 5) * dpr;
-        ctx.strokeStyle = isMajor ? 'rgba(103,232,249,.8)' : 'rgba(103,232,249,.4)';
-        ctx.lineWidth = (isMajor ? 2 : 1) * dpr;
-        ctx.beginPath();
-        ctx.moveTo(cx + Math.sin(rad) * inner, cy - Math.cos(rad) * inner);
-        ctx.lineTo(cx + Math.sin(rad) * r, cy - Math.cos(rad) * r);
-        ctx.stroke();
-      }
-
-      // Slow radar sweep, purely decorative and tied to wall-clock time so
-      // it animates smoothly regardless of detection/orientation cadence —
-      // same trick as the face reticle's scan line.
-      const sweep = ((Date.now() % 4000) / 4000) * Math.PI * 2;
-      ctx.save();
-      ctx.translate(cx, cy);
-      ctx.rotate(sweep);
-      ctx.fillStyle = 'rgba(34,211,238,.16)';
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.arc(0, 0, r, -Math.PI / 2 - 0.45, -Math.PI / 2, false);
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
-
-      // Heading spoke + glowing blip on the ring — direction reads at a
-      // glance from the spoke's angle, with the exact number spelled out
-      // big in the center rather than needing to eyeball a needle.
-      const rad = (orientationInfo.heading * Math.PI) / 180;
-      const bx = cx + Math.sin(rad) * r, by = cy - Math.cos(rad) * r;
-      ctx.strokeStyle = 'rgba(34,211,238,.7)'; ctx.lineWidth = 1.5 * dpr;
-      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(bx, by); ctx.stroke();
-      ctx.strokeStyle = 'rgba(34,211,238,.35)'; ctx.lineWidth = 2 * dpr;
-      ctx.beginPath(); ctx.arc(bx, by, 7 * dpr, 0, Math.PI * 2); ctx.stroke();
-      ctx.fillStyle = '#22D3EE';
-      ctx.beginPath(); ctx.arc(bx, by, 3.5 * dpr, 0, Math.PI * 2); ctx.fill();
-
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.font = 'bold ' + (15 * dpr) + 'px monospace';
-      ctx.fillStyle = '#67E8F9';
-      ctx.fillText(Math.round(orientationInfo.heading) + '\u00b0', cx, cy - 3 * dpr);
-      ctx.font = (8 * dpr) + 'px monospace';
-      ctx.fillStyle = 'rgba(148,163,184,.85)';
-      ctx.fillText('HDG', cx, cy + 10 * dpr);
-    }
-
-    // Rendering and detection are two independent loops now. Previously a
-    // single loop cleared the canvas, *awaited* every enabled model's
-    // inference, and only drew afterward — so the canvas sat blank for the
-    // entire inference time each frame and only showed a box for the brief
-    // instant before the next clear. The render loop below just paints
-    // whatever is currently in `cache` on every animation frame (fast,
-    // never blocked); the detection loop runs continuously in the
-    // background and only ever updates `cache`.
-    function renderLoop() {
+    async function detectLoop() {
       if (!running) return;
-      const now = performance.now();
-      const dt = now - lastFrameTs;
-      lastFrameTs = now;
-      if (dt > 0) fps = fps ? fps * 0.9 + (1000 / dt) * 0.1 : 1000 / dt;
-      syncSize();
+      if (video.readyState < 2) { rafId = requestAnimationFrame(detectLoop); return; }
+
       ctx.clearRect(0, 0, overlay.width, overlay.height);
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'alphabetic';
+      drawScanline();
+      drawViewportFrame();
+
+      const faceWanted = (toggles.face && toggles.face.checked) || (toggles.landmarks && toggles.landmarks.checked);
+      if (faceWanted && faceApiReady) {
+        try {
+          let query = faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 224 }));
+          if (toggles.landmarks && toggles.landmarks.checked && landmarksReady) query = query.withFaceLandmarks();
+          query = query.withFaceExpressions();
+          cache.face = await query;
+        } catch (err) { console.error('[webcam-ai] face detection failed:', err); }
+      } else {
+        cache.face = [];
+      }
+
+      if (toggles.objects && toggles.objects.checked && cocoModel) {
+        try {
+          cache.objects = await cocoModel.detect(video);
+        } catch (err) { console.error('[webcam-ai] objects detection failed:', err); }
+      } else {
+        cache.objects = [];
+      }
+
+      if (toggles.hands && toggles.hands.checked && handDetector) {
+        try {
+          cache.hands = await handDetector.estimateHands(video);
+        } catch (err) { console.error('[webcam-ai] hands detection failed:', err); }
+      } else {
+        cache.hands = [];
+      }
+
+      if (toggles.pose && toggles.pose.checked && poseDetector) {
+        try {
+          cache.pose = await poseDetector.estimatePoses(video);
+        } catch (err) { console.error('[webcam-ai] pose detection failed:', err); }
+      } else {
+        cache.pose = [];
+      }
+
       drawFace();
       drawObjects();
       drawHands();
-      updatePlayObjects();
-      drawPlayObjects();
       drawPose();
-      drawTelemetry();
-      rafId = requestAnimationFrame(renderLoop);
+
+      rafId = requestAnimationFrame(detectLoop);
     }
-
-    async function runDetections() {
-      while (running) {
-        if (video.readyState < 2 || !video.videoWidth) {
-          await new Promise((r) => setTimeout(r, 50));
-          continue;
-        }
-
-        const faceWanted = (toggles.face && toggles.face.checked) || (toggles.landmarks && toggles.landmarks.checked);
-        if (faceWanted && faceApiReady) {
-          try {
-            let query = faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: FACE_INPUT_SIZE }));
-            if (toggles.landmarks && toggles.landmarks.checked && landmarksReady) query = query.withFaceLandmarks();
-            query = query.withFaceExpressions();
-            cache.face = await query;
-          } catch (err) { console.error('[webcam-ai] face detection failed:', err); }
-        } else {
-          cache.face = [];
-        }
-
-        if (toggles.objects && toggles.objects.checked && cocoModel) {
-          try { cache.objects = await cocoModel.detect(video); }
-          catch (err) { console.error('[webcam-ai] objects detection failed:', err); }
-        } else {
-          cache.objects = [];
-        }
-
-        if (toggles.hands && toggles.hands.checked && handDetector) {
-          try { cache.hands = await handDetector.estimateHands(video); }
-          catch (err) { console.error('[webcam-ai] hands detection failed:', err); }
-        } else {
-          cache.hands = [];
-        }
-
-        if (toggles.pose && toggles.pose.checked && poseDetector) {
-          try { cache.pose = await poseDetector.estimatePoses(video); }
-          catch (err) { console.error('[webcam-ai] pose detection failed:', err); }
-        } else {
-          cache.pose = [];
-        }
-
-        // Explicit pause between iterations. Without this, whenever
-        // inference resolves quickly the loop just hammers the main thread
-        // back-to-back with no real yield, which is what made the tab
-        // become unresponsive — a plain `await` on an already-fast promise
-        // chain doesn't guarantee the browser gets a full turn to breathe,
-        // but a setTimeout does. This also caps detection at a sane ~24fps
-        // regardless of how fast the hardware is.
-        await new Promise((r) => setTimeout(r, DETECT_INTERVAL_MS));
-      }
-    }
-
-    renderLoop();
-    runDetections();
+    detectLoop();
   }
 
   function stop() {
     running = false;
     if (rafId) cancelAnimationFrame(rafId);
     if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
-    if (resizeListener) { window.removeEventListener('resize', resizeListener); resizeListener = null; }
-    if (geoWatchId != null && navigator.geolocation) { navigator.geolocation.clearWatch(geoWatchId); geoWatchId = null; }
     video.srcObject = null;
     placeholder.hidden = false;
     stopBtn.hidden = true;
@@ -6631,18 +5991,6 @@ panels.forEach(p => observer.observe(p));
   startBtn.addEventListener('click', start);
   stopBtn.addEventListener('click', stop);
   document.addEventListener('visibilitychange', () => { if (document.hidden && running) stop(); });
-
-  // Scrolling away from this section is just as worth stopping for as
-  // switching tabs — a running camera + continuous inference left behind
-  // on a page a visitor has scrolled past is pure wasted battery/heat,
-  // which matters most on the mobile hardware this is now tuned for.
-  const section = document.getElementById('webcam-ai');
-  if (section && 'IntersectionObserver' in window) {
-    const io = new IntersectionObserver((entries) => {
-      if (!entries[0].isIntersecting && running) stop();
-    }, { threshold: 0 });
-    io.observe(section);
-  }
 })();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>

@@ -5790,7 +5790,9 @@ panels.forEach(p => observer.observe(p));
         const x = mirrorX(rawX, width);
         console.log('[webcam-ai] face box', { x, y, width, height, canvasW: overlay.width, canvasH: overlay.height });
         faceCount++;
-        ctx.strokeStyle = '#22D3EE'; ctx.lineWidth = 2;
+        ctx.strokeStyle = '#22D3EE'; ctx.lineWidth = 6;
+        ctx.fillStyle = 'rgba(34,211,238,.25)';
+        ctx.fillRect(x, y, width, height);
         ctx.strokeRect(x, y, width, height);
         console.log('[webcam-ai] box stroked ok');
 

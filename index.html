@@ -1738,16 +1738,19 @@
   .webcam-wrap {
     position: relative; width: 100%; max-width: 480px; aspect-ratio: 4/3;
     margin: 0 auto; border-radius: .6rem; overflow: hidden; background: #030811;
+    isolation: isolate; /* guarantees a real stacking context for the z-indexes below */
   }
   #webcam-video, #webcam-overlay {
     position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
   }
-  /* z-index is set explicitly (not left to DOM order) because #webcam-video's
-     transform below promotes it to its own GPU compositing layer, and
-     hardware video layers are notorious for painting above same-level
-     siblings regardless of source order. translateZ(0) forces the canvas
-     onto its own compositing layer too, so it reliably wins the stack. */
-  #webcam-video { transform: scaleX(-1); z-index: 1; } /* mirror, feels natural for a "look at yourself" demo */
+  /* z-index alone isn't enough: Chrome can promote an opacity:1 <video> with
+     no other effects to a hardware overlay plane, a direct GPU scanout
+     surface composited by the OS outside the browser's normal layer stack.
+     Nothing drawn in a canvas — no matter its z-index — can appear above
+     that plane once it's active. Nudging opacity a hair below 1 disqualifies
+     the video from that fast path and forces normal compositing, where
+     z-index is actually honored. */
+  #webcam-video { transform: scaleX(-1); z-index: 1; opacity: .9999; } /* mirror, feels natural for a "look at yourself" demo */
   #webcam-overlay { pointer-events: none; z-index: 2; transform: translateZ(0); }
   .webcam-placeholder {
     position: absolute; inset: 0; z-index: 3;
@@ -5754,6 +5757,12 @@ panels.forEach(p => observer.observe(p));
     running = true;
 
     const ctx = overlay.getContext('2d');
+    const vStyle = getComputedStyle(video), oStyle = getComputedStyle(overlay);
+    console.log('[webcam-ai] stacking check', {
+      videoZ: vStyle.zIndex, videoOpacity: vStyle.opacity,
+      overlayZ: oStyle.zIndex, overlayOpacity: oStyle.opacity,
+      overlayRect: overlay.getBoundingClientRect(), videoRect: video.getBoundingClientRect(),
+    });
     function syncSize() { overlay.width = video.videoWidth || 480; overlay.height = video.videoHeight || 360; }
     video.addEventListener('loadedmetadata', syncSize, { once: true });
     syncSize();

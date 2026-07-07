@@ -5886,66 +5886,69 @@ panels.forEach(p => observer.observe(p));
       });
     }
 
-    async function detectLoop() {
+    // Rendering and detection are two independent loops now. Previously a
+    // single loop cleared the canvas, *awaited* every enabled model's
+    // inference, and only drew afterward — so the canvas sat blank for the
+    // entire inference time each frame and only showed a box for the brief
+    // instant before the next clear. The render loop below just paints
+    // whatever is currently in `cache` on every animation frame (fast,
+    // never blocked); the detection loop runs continuously in the
+    // background and only ever updates `cache`.
+    function renderLoop() {
       if (!running) return;
-      if (video.readyState < 2 || !video.videoWidth) { rafId = requestAnimationFrame(detectLoop); return; }
-
-      // Recomputed every frame rather than once: relying on the
-      // 'loadedmetadata' event to fire the *first* size calculation is a
-      // race — by the time a listener can be attached, the event has often
-      // already fired, silently leaving videoW/videoH stuck at a guessed
-      // fallback while the camera is actually running at a different
-      // resolution. Reading video.videoWidth/videoHeight directly here,
-      // now that readyState guarantees a real frame exists, is what
-      // actually keeps the drawn boxes lined up with detections.
       syncSize();
-
       ctx.clearRect(0, 0, overlay.width, overlay.height);
-
-      const faceWanted = (toggles.face && toggles.face.checked) || (toggles.landmarks && toggles.landmarks.checked);
-      if (faceWanted && faceApiReady) {
-        try {
-          let query = faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 224 }));
-          if (toggles.landmarks && toggles.landmarks.checked && landmarksReady) query = query.withFaceLandmarks();
-          query = query.withFaceExpressions();
-          cache.face = await query;
-        } catch (err) { console.error('[webcam-ai] face detection failed:', err); }
-      } else {
-        cache.face = [];
-      }
-
-      if (toggles.objects && toggles.objects.checked && cocoModel) {
-        try {
-          cache.objects = await cocoModel.detect(video);
-        } catch (err) { console.error('[webcam-ai] objects detection failed:', err); }
-      } else {
-        cache.objects = [];
-      }
-
-      if (toggles.hands && toggles.hands.checked && handDetector) {
-        try {
-          cache.hands = await handDetector.estimateHands(video);
-        } catch (err) { console.error('[webcam-ai] hands detection failed:', err); }
-      } else {
-        cache.hands = [];
-      }
-
-      if (toggles.pose && toggles.pose.checked && poseDetector) {
-        try {
-          cache.pose = await poseDetector.estimatePoses(video);
-        } catch (err) { console.error('[webcam-ai] pose detection failed:', err); }
-      } else {
-        cache.pose = [];
-      }
-
       drawFace();
       drawObjects();
       drawHands();
       drawPose();
-
-      rafId = requestAnimationFrame(detectLoop);
+      rafId = requestAnimationFrame(renderLoop);
     }
-    detectLoop();
+
+    async function runDetections() {
+      while (running) {
+        if (video.readyState < 2 || !video.videoWidth) {
+          await new Promise((r) => setTimeout(r, 50));
+          continue;
+        }
+
+        const faceWanted = (toggles.face && toggles.face.checked) || (toggles.landmarks && toggles.landmarks.checked);
+        if (faceWanted && faceApiReady) {
+          try {
+            let query = faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 224 }));
+            if (toggles.landmarks && toggles.landmarks.checked && landmarksReady) query = query.withFaceLandmarks();
+            query = query.withFaceExpressions();
+            cache.face = await query;
+          } catch (err) { console.error('[webcam-ai] face detection failed:', err); }
+        } else {
+          cache.face = [];
+        }
+
+        if (toggles.objects && toggles.objects.checked && cocoModel) {
+          try { cache.objects = await cocoModel.detect(video); }
+          catch (err) { console.error('[webcam-ai] objects detection failed:', err); }
+        } else {
+          cache.objects = [];
+        }
+
+        if (toggles.hands && toggles.hands.checked && handDetector) {
+          try { cache.hands = await handDetector.estimateHands(video); }
+          catch (err) { console.error('[webcam-ai] hands detection failed:', err); }
+        } else {
+          cache.hands = [];
+        }
+
+        if (toggles.pose && toggles.pose.checked && poseDetector) {
+          try { cache.pose = await poseDetector.estimatePoses(video); }
+          catch (err) { console.error('[webcam-ai] pose detection failed:', err); }
+        } else {
+          cache.pose = [];
+        }
+      }
+    }
+
+    renderLoop();
+    runDetections();
   }
 
   function stop() {

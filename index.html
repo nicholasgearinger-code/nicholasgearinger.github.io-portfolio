@@ -2510,7 +2510,7 @@
           </label>
           <label class="webcam-toggle" data-model="hands">
             <input type="checkbox" id="toggle-hands">
-            <span class="webcam-toggle-dot"></span> Hands
+            <span class="webcam-toggle-dot"></span> Hands &amp; Play
           </label>
           <label class="webcam-toggle" data-model="pose">
             <input type="checkbox" id="toggle-pose">
@@ -2525,6 +2525,7 @@
       </div>
     </div>
     <p class="algo-hint" id="webcam-hint">Each toggle loads its own model on demand, the first time you switch it on — nothing downloads until you ask for it. Running several at once is more demanding on your device, so if things feel sluggish, try enabling fewer at a time.</p>
+    <p class="algo-hint">Turn on "Hands &amp; Play" and pinch your thumb and index finger together over one of the floating orbs to grab it — drag it around and let go to toss it.</p>
     <p class="algo-hint">Face + expression + landmarks: face-api.js. Objects: COCO-SSD. Hands &amp; body pose: TensorFlow.js's official MediaPipe-based models. All MIT/Apache licensed, all inference client-side.</p>
   </div>
 </section>
@@ -5731,7 +5732,7 @@ panels.forEach(p => observer.observe(p));
   }
 
   const ENSURERS = { face: ensureFace, landmarks: ensureLandmarks, objects: ensureObjects, hands: ensureHands, pose: ensurePose };
-  const LABELS = { face: 'Face + Expression', landmarks: 'Facial Landmarks', objects: 'Objects', hands: 'Hands', pose: 'Body Pose' };
+  const LABELS = { face: 'Face + Expression', landmarks: 'Facial Landmarks', objects: 'Objects', hands: 'Hands & Play', pose: 'Body Pose' };
 
   Object.keys(toggles).forEach((name) => {
     const input = toggles[name];
@@ -5829,13 +5830,39 @@ panels.forEach(p => observer.observe(p));
     // between finishing and the next clear, easy to miss entirely.
     let cache = { face: [], objects: [], hands: [], pose: [] };
 
+    // Small helper used only by the HUD-styled face reticle below: draws
+    // four L-shaped corner brackets instead of a plain rectangle, the
+    // classic "targeting reticle" look.
+    function strokeCornerBrackets(x, y, w, h, len, color, lineWidth) {
+      ctx.strokeStyle = color; ctx.lineWidth = lineWidth;
+      [[x, y, 1, 1], [x + w, y, -1, 1], [x, y + h, 1, -1], [x + w, y + h, -1, -1]].forEach(([cx, cy, dx, dy]) => {
+        ctx.beginPath();
+        ctx.moveTo(cx, cy + len * dy);
+        ctx.lineTo(cx, cy);
+        ctx.lineTo(cx + len * dx, cy);
+        ctx.stroke();
+      });
+    }
+
     function drawFace() {
       let faceCount = 0;
-      cache.face.forEach((d) => {
+      cache.face.forEach((d, i) => {
         const b = mapBox(d.detection.box.x, d.detection.box.y, d.detection.box.width, d.detection.box.height);
         faceCount++;
-        ctx.strokeStyle = '#22D3EE'; ctx.lineWidth = 2;
+
+        // Faint full outline for structure, corner brackets for the
+        // targeting-reticle look, and a scan line sweeping the box —
+        // driven by wall-clock time so it animates smoothly every render
+        // frame regardless of how often a fresh detection actually lands.
+        ctx.strokeStyle = 'rgba(34,211,238,.25)'; ctx.lineWidth = 1;
         ctx.strokeRect(b.x, b.y, b.w, b.h);
+        strokeCornerBrackets(b.x, b.y, b.w, b.h, Math.min(b.w, b.h) * 0.22, '#22D3EE', 2);
+        const scanT = (Date.now() % 1800) / 1800;
+        ctx.strokeStyle = 'rgba(34,211,238,.6)'; ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(b.x, b.y + scanT * b.h);
+        ctx.lineTo(b.x + b.w, b.y + scanT * b.h);
+        ctx.stroke();
 
         const top = Object.entries(d.expressions).sort((a, b) => b[1] - a[1])[0];
         const label = top[0] + ' ' + Math.round(top[1] * 100) + '%';
@@ -5845,6 +5872,24 @@ panels.forEach(p => observer.observe(p));
         ctx.fillRect(b.x, Math.max(0, b.y - 20), textW + 10, 20);
         ctx.fillStyle = '#22D3EE';
         ctx.fillText(label, b.x + 5, Math.max(14, b.y - 5));
+
+        // Telemetry readout with a leader line off the top-right corner —
+        // a fixed per-face ID plus a live confidence score sells the
+        // "targeting computer" read a lot more than a label ever would.
+        const id = 'TGT-' + String(i + 1).padStart(2, '0');
+        const leaderX = b.x + b.w, leaderY = b.y;
+        const panelX = leaderX + 26, panelY = Math.max(10, leaderY - 24);
+        ctx.strokeStyle = 'rgba(34,211,238,.5)'; ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(leaderX, leaderY);
+        ctx.lineTo(leaderX + 16, leaderY - 10);
+        ctx.lineTo(panelX, panelY + 10);
+        ctx.stroke();
+        ctx.font = '10px monospace';
+        ctx.fillStyle = '#22D3EE';
+        ctx.fillText(id, panelX, panelY);
+        ctx.fillStyle = 'rgba(125,211,252,.85)';
+        ctx.fillText('LOCK ' + Math.round(d.detection.score * 100) + '%', panelX, panelY + 13);
 
         if (d.landmarks) {
           ctx.fillStyle = '#E879F9';
@@ -5885,6 +5930,99 @@ panels.forEach(p => observer.observe(p));
         pts.forEach((p) => { ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2); ctx.fill(); });
       });
     }
+
+    // ── PLAY WITH OBJECTS: pinch (thumb tip to index tip) to grab one of a
+    // few floating orbs and toss it around. Object positions/velocities are
+    // stored in the same raw, unmirrored video-pixel space the hand
+    // keypoints already come in, so hit-testing against the pinch point
+    // needs no coordinate conversion — only the final draw goes through
+    // mapPoint, exactly like everything else on this canvas.
+    let playObjects = [];
+    function resetPlayObjects() {
+      playObjects = [
+        { id: 'ORB-1', x: videoW * 0.28, y: videoH * 0.4, vx: 0, vy: 0, r: 24, color: '#22D3EE', held: false },
+        { id: 'ORB-2', x: videoW * 0.62, y: videoH * 0.3, vx: 0, vy: 0, r: 20, color: '#F59E0B', held: false },
+        { id: 'ORB-3', x: videoW * 0.48, y: videoH * 0.68, vx: 0, vy: 0, r: 27, color: '#E879F9', held: false },
+      ];
+    }
+
+    // Distance between thumb tip (keypoint 4) and index tip (keypoint 8),
+    // compared against wrist-to-index-knuckle distance (0 to 5) as a
+    // stand-in for "how big is this hand in frame right now" — using a
+    // fixed pixel threshold would only work at one specific distance from
+    // the camera, so it's scaled by the hand itself instead.
+    function handPinch(hand) {
+      const kp = hand.keypoints;
+      const thumbTip = kp[4], indexTip = kp[8], wrist = kp[0], indexMcp = kp[5];
+      if (!thumbTip || !indexTip) return null;
+      const dist = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y);
+      const handScale = (wrist && indexMcp) ? Math.hypot(wrist.x - indexMcp.x, wrist.y - indexMcp.y) : 60;
+      return { pinching: dist < handScale * 0.55, x: (thumbTip.x + indexTip.x) / 2, y: (thumbTip.y + indexTip.y) / 2, handScale };
+    }
+
+    function updatePlayObjects() {
+      if (!playObjects.length) resetPlayObjects();
+      const handsOn = toggles.hands && toggles.hands.checked;
+      const hand = handsOn ? cache.hands[0] : null;
+      const pinch = hand ? handPinch(hand) : null;
+
+      if (pinch && pinch.pinching) {
+        let held = playObjects.find((o) => o.held);
+        if (!held) {
+          let best = null, bestDist = Infinity;
+          playObjects.forEach((o) => {
+            const d = Math.hypot(o.x - pinch.x, o.y - pinch.y);
+            if (d < o.r + pinch.handScale * 0.5 && d < bestDist) { best = o; bestDist = d; }
+          });
+          if (best) best.held = true;
+          held = best;
+        }
+        if (held) {
+          held.vx = pinch.x - held.x;
+          held.vy = pinch.y - held.y;
+          held.x = pinch.x;
+          held.y = pinch.y;
+        }
+      } else {
+        playObjects.forEach((o) => { o.held = false; });
+      }
+
+      playObjects.forEach((o) => {
+        if (o.held) return;
+        o.vx *= 0.92; o.vy *= 0.92;
+        o.x += o.vx; o.y += o.vy;
+        if (o.x - o.r < 0) { o.x = o.r; o.vx *= -0.6; }
+        if (o.x + o.r > videoW) { o.x = videoW - o.r; o.vx *= -0.6; }
+        if (o.y - o.r < 0) { o.y = o.r; o.vy *= -0.6; }
+        if (o.y + o.r > videoH) { o.y = videoH - o.r; o.vy *= -0.6; }
+      });
+    }
+
+    function drawPlayObjects() {
+      if (!(toggles.hands && toggles.hands.checked)) return;
+      playObjects.forEach((o) => {
+        const p = mapPoint(o.x, o.y);
+        const rr = o.r * scale;
+        const grad = ctx.createRadialGradient(p.x, p.y, rr * 0.15, p.x, p.y, rr);
+        grad.addColorStop(0, o.color);
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.beginPath();
+        ctx.fillStyle = grad;
+        ctx.arc(p.x, p.y, rr, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = o.held ? '#ffffff' : o.color;
+        ctx.lineWidth = o.held ? 3 : 1.5;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, rr, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(o.id, p.x, p.y - rr - 6);
+        ctx.textAlign = 'left';
+      });
+    }
+
     function drawPose() {
       cache.pose.forEach((pose) => {
         const byName = {};
@@ -5923,6 +6061,8 @@ panels.forEach(p => observer.observe(p));
       drawFace();
       drawObjects();
       drawHands();
+      updatePlayObjects();
+      drawPlayObjects();
       drawPose();
       rafId = requestAnimationFrame(renderLoop);
     }

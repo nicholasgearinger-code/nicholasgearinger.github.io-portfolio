@@ -5601,7 +5601,15 @@ panels.forEach(p => observer.observe(p));
   if (!video || !startBtn) return;
 
   const FACE_MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
-  const FACE_LIB_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.esm-nobundle.js';
+  // Classic IIFE build, loaded the same lazy way as the other models below
+  // (coco-ssd, hand-pose, pose-detection): a plain <script> tag appended on
+  // first use. This bundles its own internal copy of TFJS under face-api's
+  // own namespace instead of importing '@tensorflow/tfjs' as an ES module,
+  // which previously resolved (via this page's import map) to a second,
+  // separately-fetched TFJS instance and could throw while registering
+  // WebGL kernels a second time -- silently killing face detection before
+  // a single frame was ever processed.
+  const FACE_LIB_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js';
   const COCO_LIB_URL = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd/dist/coco-ssd.min.js';
   const HAND_LIB_URL = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/hand-pose-detection/dist/hand-pose-detection.min.js';
   const POSE_LIB_URL = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection/dist/pose-detection.min.js';
@@ -5652,17 +5660,10 @@ panels.forEach(p => observer.observe(p));
 
   async function ensureFace() {
     if (faceApiReady) return;
-    // The nobundle build expects a global `tf` to already exist rather than
-    // importing its own copy — this is what actually avoids the duplicate
-    // WebGL-kernel-registration conflict seen when combining face-api.js
-    // with the separately-loaded official TF.js models. Guarantee that
-    // ordering explicitly rather than relying on script placement.
-    if (typeof window.tf === 'undefined') {
-      throw new Error('TensorFlow.js core did not load — cannot start face detection.');
-    }
-    if (typeof faceapi === 'undefined') {
-      window.faceapi = await import(FACE_LIB_URL);
-    }
+    // Plain <script> tag load — bundles its own internal TFJS copy inside
+    // face-api's own namespace, so it can't collide with the globally
+    // loaded tf used by the other models on this page.
+    if (typeof faceapi === 'undefined') await loadScript(FACE_LIB_URL);
     await Promise.all([
       faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODEL_URL),
       faceapi.nets.faceExpressionNet.loadFromUri(FACE_MODEL_URL),
@@ -5757,7 +5758,12 @@ panels.forEach(p => observer.observe(p));
     if (toggles.face && toggles.face.checked) {
       setToggleState('face', 'loading');
       try { await ensureFace(); setToggleState('face', 'ready'); }
-      catch (err) { toggles.face.checked = false; setToggleState('face', 'error'); }
+      catch (err) {
+        console.error('[webcam-ai] face', err.message);
+        toggles.face.checked = false;
+        setToggleState('face', 'error');
+        announce('Couldn\u2019t load Face + Expression \u2014 check your connection and try again.');
+      }
     }
     if (pillText) pillText.textContent = 'DETECTING';
 

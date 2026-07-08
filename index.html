@@ -1366,8 +1366,25 @@
     box-shadow: 0 0 60px rgba(34,211,238,.08), 0 30px 80px -20px rgba(0,0,0,.85);
     opacity: 0; transform: translateY(10px) scale(.98);
     animation: bootTermIn .5s cubic-bezier(.22,1,.36,1) forwards;
+    transition: opacity .3s ease;
   }
   @keyframes bootTermIn { to { opacity: 1; transform: translateY(0) scale(1); } }
+  .boot-statement {
+    text-align: center;
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: clamp(1.15rem, 3.6vw, 1.9rem);
+    line-height: 1.4;
+    color: var(--white);
+    max-width: 560px;
+    padding: 0 1.5rem;
+    opacity: 0;
+    transform: translateY(14px);
+    transition: opacity .55s cubic-bezier(.22,1,.36,1), transform .55s cubic-bezier(.22,1,.36,1);
+  }
+  .boot-statement.stmt-in { opacity: 1; transform: translateY(0); }
+  .boot-statement[hidden] { display: none; }
+  .boot-statement .stmt-accent { color: var(--cyan); }
   .boot-term-bar {
     display: flex; align-items: center; gap: .7rem;
     padding: .6rem .9rem;
@@ -2039,7 +2056,7 @@
 <div id="custom-cursor" aria-hidden="true"></div>
 <!-- BOOT SEQUENCE (shown once per session, before the page reveals) -->
 <div id="boot-seq" aria-hidden="true">
-  <div class="boot-term">
+  <div class="boot-term" id="boot-term" hidden>
     <div class="boot-term-bar">
       <div class="cc-dots">
         <span class="cc-dot" style="background:#FF5F57"></span>
@@ -2058,6 +2075,9 @@
       <div class="boot-lines" id="boot-lines"></div>
       <div class="boot-bar-track"><div class="boot-bar-fill" id="boot-bar-fill"></div></div>
     </div>
+  </div>
+  <div class="boot-statement" id="boot-statement">
+    <p>Every intelligent system, every interface, every idea on screen —<br>it all starts with <span class="stmt-accent">a single line of code.</span></p>
   </div>
 </div>
 
@@ -5337,6 +5357,8 @@ panels.forEach(p => observer.observe(p));
   const overlay = document.getElementById('boot-seq');
   const linesEl = document.getElementById('boot-lines');
   const barFill = document.getElementById('boot-bar-fill');
+  const termEl = document.getElementById('boot-term');
+  const stmtEl = document.getElementById('boot-statement');
   const done = () => document.dispatchEvent(new Event('bootSeqDone'));
   if (!overlay || !linesEl || !barFill) { done(); return; }
 
@@ -5360,9 +5382,7 @@ panels.forEach(p => observer.observe(p));
     { text: 'function mirrorX(x,w){return', type: 'code' },
     { text: '  mirrored?W-x-w:x}', type: 'code' },
     { text: 'checking dependencies', type: 'step' },
-    { text: 'verifying webgl', type: 'step' },
     { text: 'linking tensorflow.js', type: 'step' },
-    { text: 'mounting three.js', type: 'step' },
     { text: 'connecting to api', type: 'step' },
     { text: '$ echo "ready"', type: 'cmd' },
     { text: 'welcome, you\u2019re in', type: 'out' },
@@ -5374,8 +5394,10 @@ panels.forEach(p => observer.observe(p));
   // Hard floor on how long the terminal stays on screen, independent of how
   // fast the typing itself runs — guarantees the whole sequence is visible
   // and readable rather than racing ahead of a slow page load, or (on a
-  // very fast device) finishing and vanishing too quickly to read.
-  const bootStart = Date.now();
+  // very fast device) finishing and vanishing too quickly to read. Reset
+  // right when the terminal phase actually begins (after the statement
+  // card), so the statement's own on-screen time doesn't eat into it.
+  let bootStart = Date.now();
   const MIN_DISPLAY_MS = 1200;
 
   // Light syntax highlighting for the 'code' entries — just enough to read
@@ -5404,6 +5426,20 @@ panels.forEach(p => observer.observe(p));
       overlay.classList.add('boot-done');
       setTimeout(() => { overlay.remove(); done(); }, 550);
     }, lingerWait);
+  }
+
+  // Statement card plays first: fade in, hold, fade out — then the
+  // terminal appears and the typing sequence begins.
+  function showStatement(onDone) {
+    if (!stmtEl) { onDone(); return; }
+    requestAnimationFrame(() => requestAnimationFrame(() => stmtEl.classList.add('stmt-in')));
+    setTimeout(() => {
+      stmtEl.classList.remove('stmt-in');
+      setTimeout(() => {
+        stmtEl.hidden = true;
+        onDone();
+      }, 550);
+    }, 1300);
   }
 
   function typeEntry() {
@@ -5442,7 +5478,11 @@ panels.forEach(p => observer.observe(p));
     }
     typeChar();
   }
-  typeEntry();
+  showStatement(() => {
+    if (termEl) termEl.hidden = false;
+    bootStart = Date.now();
+    typeEntry();
+  });
 })();
 </script>
 <script>

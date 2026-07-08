@@ -656,10 +656,14 @@
 
   /* Skills bars (grouped by real category, icons swappable) */
   .rskills {
-    display: grid; grid-template-columns: 1fr 1fr; gap: .9rem 1.6rem;
-    margin-top: .3rem; overflow-y: auto; align-content: start;
+    display: flex; gap: .9rem 1.6rem;
+    margin-top: .3rem; overflow-y: auto;
   }
   .rskills::-webkit-scrollbar { width: 0; }
+  .rskill-col {
+    flex: 1; min-width: 0;
+    display: flex; flex-direction: column; gap: .9rem;
+  }
   .rskill-cat {
     display: block; font-size: .66rem; letter-spacing: .18em; text-transform: uppercase;
     color: var(--violet); margin-bottom: .45rem;
@@ -694,7 +698,7 @@
     .rface-facts { grid-template-columns: 1fr; }
     .ritem { grid-template-columns: 74px 1fr; gap: .7rem; }
     .rface-title { font-size: 1.4rem; }
-    .rskills { grid-template-columns: 1fr; }
+    .rskills { flex-direction: column; }
   }
   .about-grid {
     display: grid; grid-template-columns: 1fr 1fr; gap: 6rem; align-items: center;
@@ -2372,22 +2376,13 @@
           <h3 class="rface-title">What I bring</h3>
 
           <div class="rskills">
+            <div class="rskill-col">
             <div class="rskill-group">
               <span class="rskill-cat">Design & Branding</span>
               <div class="rbar" data-level="92"><span><span class="rskill-ico">◈</span>Graphic Design<span class="rbar-years">3 yr</span></span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
               <div class="rbar" data-level="65"><span><span class="rskill-ico">✎</span>Illustration<span class="rbar-years">familiar</span></span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
               <div class="rbar" data-level="65"><span><span class="rskill-ico">⬡</span>Branding<span class="rbar-years">familiar</span></span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
               <div class="rbar" data-level="65"><span><span class="rskill-ico">⊕</span>Web Design<span class="rbar-years">familiar</span></span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
-            </div>
-            <div class="rskill-group">
-              <span class="rskill-cat">Adobe Suite</span>
-              <div class="rbar" data-level="65"><span><span class="rskill-ico">◐</span>Photoshop<span class="rbar-years">familiar</span></span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
-              <div class="rbar" data-level="65"><span><span class="rskill-ico">◑</span>Illustrator<span class="rbar-years">familiar</span></span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
-              <div class="rbar" data-level="74"><span><span class="rskill-ico">▤</span>InDesign<span class="rbar-years">1 yr</span></span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
-              <div class="rbar" data-level="65"><span><span class="rskill-ico">▶</span>Premiere<span class="rbar-years">familiar</span></span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
-              <div class="rbar" data-level="74"><span><span class="rskill-ico">◉</span>Audition<span class="rbar-years">1 yr</span></span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
-              <div class="rbar" data-level="65"><span><span class="rskill-ico">⬢</span>Creative Suite<span class="rbar-years">familiar</span></span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
-              <div class="rbar" data-level="65"><span><span class="rskill-ico">▣</span>Video Production<span class="rbar-years">familiar</span></span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
             </div>
             <div class="rskill-group">
               <span class="rskill-cat">3D & Animation</span>
@@ -2405,6 +2400,18 @@
               <div class="rbar" data-level="74"><span><span class="rskill-ico">⧉</span>Object-Oriented Programming<span class="rbar-years">1 yr</span></span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
               <div class="rbar" data-level="74"><span><span class="rskill-ico">⊞</span>WordPress<span class="rbar-years">1 yr</span></span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
             </div>
+            </div>
+            <div class="rskill-col">
+            <div class="rskill-group">
+              <span class="rskill-cat">Adobe Suite</span>
+              <div class="rbar" data-level="65"><span><span class="rskill-ico">◐</span>Photoshop<span class="rbar-years">familiar</span></span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
+              <div class="rbar" data-level="65"><span><span class="rskill-ico">◑</span>Illustrator<span class="rbar-years">familiar</span></span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
+              <div class="rbar" data-level="74"><span><span class="rskill-ico">▤</span>InDesign<span class="rbar-years">1 yr</span></span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
+              <div class="rbar" data-level="65"><span><span class="rskill-ico">▶</span>Premiere<span class="rbar-years">familiar</span></span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
+              <div class="rbar" data-level="74"><span><span class="rskill-ico">◉</span>Audition<span class="rbar-years">1 yr</span></span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
+              <div class="rbar" data-level="65"><span><span class="rskill-ico">⬢</span>Creative Suite<span class="rbar-years">familiar</span></span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
+              <div class="rbar" data-level="65"><span><span class="rskill-ico">▣</span>Video Production<span class="rbar-years">familiar</span></span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
+            </div>
             <div class="rskill-group">
               <span class="rskill-cat">Professional Skills</span>
               <div class="rbar" data-level="92"><span><span class="rskill-ico rskill-img"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13v-1a8 8 0 0 1 16 0v1"/><rect x="2" y="13" width="4" height="6" rx="1.5"/><rect x="18" y="13" width="4" height="6" rx="1.5"/><path d="M20 19v1a3 3 0 0 1-3 3h-3"/></svg></span>Customer Service<span class="rbar-years">3 yr</span></span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
@@ -2412,6 +2419,7 @@
               <div class="rbar" data-level="65"><span><span class="rskill-ico">▷</span>PowerPoint<span class="rbar-years">familiar</span></span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
               <div class="rbar" data-level="74"><span><span class="rskill-ico">◫</span>Google Suite<span class="rbar-years">1 yr</span></span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
               <div class="rbar" data-level="65"><span><span class="rskill-ico rskill-img"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.5"/></svg></span>Photography<span class="rbar-years">familiar</span></span><div class="rbar-track"><div class="rbar-fill"></div></div></div>
+            </div>
             </div>
           </div>
         </article>
@@ -3656,17 +3664,25 @@ panels.forEach(p => observer.observe(p));
   const faces = Array.from(prism.querySelectorAll('.resume-face'));
   // Containers whose own children should stagger individually rather than
   // the whole container appearing as one flat block (facts, tags, timeline
-  // entries, skill groups all cascade in one-by-one).
-  const LIST_CONTAINERS = ['.rface-facts', '.rface-tags', '.rtimeline', '.rskills'];
+  // entries, skill groups all cascade in one-by-one). Checked recursively,
+  // since .rskills now wraps two .rskill-col columns which themselves wrap
+  // the actual .rskill-group entries — the columns exist purely for layout
+  // and shouldn't collapse the animation down to 2 chunks instead of 5.
+  const LIST_CONTAINERS = ['.rface-facts', '.rface-tags', '.rtimeline', '.rskills', '.rskill-col'];
+
+  function collectStaggerUnits(container) {
+    let out = [];
+    Array.from(container.children).forEach((child) => {
+      const isList = LIST_CONTAINERS.some((sel) => child.matches(sel));
+      if (isList && child.children.length) out.push(...collectStaggerUnits(child));
+      else out.push(child);
+    });
+    return out;
+  }
 
   function animateFaceText(faceEl) {
     if (!faceEl || window.__reduceMotion) return;
-    let units = [];
-    Array.from(faceEl.children).forEach((child) => {
-      const isList = LIST_CONTAINERS.some((sel) => child.matches(sel));
-      if (isList && child.children.length) units.push(...Array.from(child.children));
-      else units.push(child);
-    });
+    const units = collectStaggerUnits(faceEl);
     if (!units.length) return;
     units.forEach((el) => {
       el.style.transition = 'none';

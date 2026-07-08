@@ -1088,6 +1088,7 @@
     display: none; flex-direction: column; overflow: hidden; border-radius: 1.1rem;
     background: linear-gradient(165deg, rgba(13,24,42,.98), rgba(6,12,24,.99));
     border: 1px solid rgba(56,189,248,.22); box-shadow: 0 30px 80px -20px rgba(0,0,0,.85);
+    transition: transform .3s ease;
   }
   .ask-panel.open { display: flex; }
   .ask-head { padding: .9rem 1.1rem; border-bottom: 1px solid var(--card-border); display: flex; align-items: center; justify-content: space-between; }
@@ -1521,6 +1522,20 @@
   #activity-ticker .act-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 6px var(--cyan); flex-shrink: 0; }
   #activity-ticker span.act-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   @media (max-width: 700px) { #activity-ticker { display: none !important; } }
+  /* The HUD widgets fade out near the footer since they're purely
+     decorative and the footer has its own status info. The Ask my AI
+     button is a real feature though, so it lifts clear of the footer
+     instead of disappearing — shifted up by the footer's actual measured
+     height (set as --footer-h via JS) plus a little breathing room. */
+  body.footer-visible #hud-widget,
+  body.footer-visible #activity-ticker {
+    opacity: 0; pointer-events: none;
+    transition: opacity .3s ease;
+  }
+  body.footer-visible .ask-fab,
+  body.footer-visible .ask-panel {
+    transform: translateY(calc(-1 * var(--footer-h, 0px) - 1rem));
+  }
 
   /* ── VOICE INPUT (Ask-AI) ── */
   .ask-mic {
@@ -5589,6 +5604,21 @@ panels.forEach(p => observer.observe(p));
   function tick() { timeEl.textContent = new Date().toLocaleTimeString([], { hour12: false }); }
   tick();
   setInterval(tick, 1000);
+})();
+(function hideFixedWidgetsNearFooter() {
+  const footer = document.querySelector('footer');
+  if (!footer) return;
+  function updateFooterHeight() {
+    document.documentElement.style.setProperty('--footer-h', footer.getBoundingClientRect().height + 'px');
+  }
+  updateFooterHeight();
+  window.addEventListener('resize', window.__debounce ? window.__debounce(updateFooterHeight, 160) : updateFooterHeight);
+  if (!('IntersectionObserver' in window)) return;
+  const io = new IntersectionObserver((entries) => {
+    if (entries[0].isIntersecting) updateFooterHeight();
+    document.body.classList.toggle('footer-visible', entries[0].isIntersecting);
+  }, { threshold: 0.01 });
+  io.observe(footer);
 })();
 </script>
 <script>

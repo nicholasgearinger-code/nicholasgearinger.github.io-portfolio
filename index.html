@@ -5941,6 +5941,7 @@ panels.forEach(p => observer.observe(p));
   const FACE_MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
   const FACE_LIB_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.esm-nobundle.js';
   const COCO_LIB_URL = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd/dist/coco-ssd.min.js';
+  const TFJS_CORE_URL = 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js';
   const HAND_LIB_URL = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/hand-pose-detection/dist/hand-pose-detection.min.js';
   const POSE_LIB_URL = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection/dist/pose-detection.min.js';
   const THREE_LIB_URL = 'https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js';
@@ -5997,11 +5998,11 @@ panels.forEach(p => observer.observe(p));
     // The nobundle build expects a global `tf` to already exist rather than
     // importing its own copy — this is what actually avoids the duplicate
     // WebGL-kernel-registration conflict seen when combining face-api.js
-    // with the separately-loaded official TF.js models. Guarantee that
-    // ordering explicitly rather than relying on script placement.
-    if (typeof window.tf === 'undefined') {
-      throw new Error('TensorFlow.js core did not load — cannot start face detection.');
-    }
+    // with the separately-loaded official TF.js models. Loading it
+    // explicitly here (rather than relying on some other feature to have
+    // loaded it first) guarantees the ordering regardless of which model
+    // toggle the person happens to turn on first.
+    if (typeof window.tf === 'undefined') await loadScript(TFJS_CORE_URL);
     if (typeof faceapi === 'undefined') {
       window.faceapi = await import(FACE_LIB_URL);
     }
@@ -6019,6 +6020,10 @@ panels.forEach(p => observer.observe(p));
   }
   async function ensureObjects() {
     if (cocoModel) return;
+    // coco-ssd's standard dist build expects a pre-loaded `tf` global
+    // (it's a peer dependency, not bundled in) — load it explicitly
+    // rather than relying on some other feature happening to load it first.
+    if (typeof tf === 'undefined') await loadScript(TFJS_CORE_URL);
     if (typeof cocoSsd === 'undefined') await loadScript(COCO_LIB_URL);
     cocoModel = await cocoSsd.load();
   }
@@ -6153,6 +6158,9 @@ panels.forEach(p => observer.observe(p));
 
   async function ensurePose() {
     if (poseDetector) return;
+    // MoveNet's default runtime is 'tfjs', which — like coco-ssd — expects
+    // the tf global to already exist rather than bundling it.
+    if (typeof tf === 'undefined') await loadScript(TFJS_CORE_URL);
     if (typeof poseDetection === 'undefined') await loadScript(POSE_LIB_URL);
     poseDetector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet);
     await ensureRig();
@@ -6759,8 +6767,6 @@ panels.forEach(p => observer.observe(p));
   document.addEventListener('visibilitychange', () => { if (document.hidden && running) stop(); });
 })();
 </script>
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.1"></script>
 <script>
 /* -- LIVE IMAGE CLASSIFIER: a real pretrained MobileNet v2 model (TensorFlow.js),
       loaded lazily once this section scrolls into view. Classification runs
@@ -6778,27 +6784,42 @@ panels.forEach(p => observer.observe(p));
   if (!drop || !input || !stage || !imgEl || !resultsEl) return;
 
   let model = null, modelPromise = null, loadFailed = false;
+  const TFJS_URL = 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js';
+  const MOBILENET_URL = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.1';
+
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = resolve;
+      s.onerror = () => reject(new Error('Failed to load ' + src));
+      document.head.appendChild(s);
+    });
+  }
 
   function setPill(text, ok) {
     if (pillText) pillText.textContent = text;
     if (pillDot) pillDot.style.background = ok === null ? '#60A5FA' : (ok ? '#34D399' : '#FB7185');
   }
 
-  function ensureModel() {
+  async function ensureModel() {
     if (modelPromise) return modelPromise;
-    if (typeof tf === 'undefined' || typeof mobilenet === 'undefined') {
-      loadFailed = true;
-      setPill('UNAVAILABLE', false);
-      if (dropText) dropText.textContent = "Couldn't load the vision model — check your connection and reload.";
-      modelPromise = Promise.reject(new Error('tfjs/mobilenet not loaded'));
-      return modelPromise;
-    }
     setPill('LOADING MODEL', null);
-    modelPromise = mobilenet.load({ version: 2, alpha: 1.0 }).then((m) => {
+    modelPromise = (async () => {
+      try {
+        if (typeof tf === 'undefined') await loadScript(TFJS_URL);
+        if (typeof mobilenet === 'undefined') await loadScript(MOBILENET_URL);
+      } catch (e) {
+        loadFailed = true;
+        setPill('UNAVAILABLE', false);
+        if (dropText) dropText.textContent = "Couldn't load the vision model — check your connection and reload.";
+        throw e;
+      }
+      const m = await mobilenet.load({ version: 2, alpha: 1.0 });
       model = m;
       setPill('READY', true);
       return m;
-    }).catch((e) => {
+    })().catch((e) => {
       loadFailed = true;
       setPill('UNAVAILABLE', false);
       if (dropText) dropText.textContent = "Couldn't load the vision model — check your connection and reload.";

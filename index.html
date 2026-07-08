@@ -1353,14 +1353,17 @@
     background: #030811;
     display: flex; align-items: center; justify-content: center;
     padding: 1.5rem;
+    overflow-y: auto;
     font-family: 'JetBrains Mono', 'Courier New', monospace;
     transition: opacity .5s ease;
   }
   #boot-seq.boot-done { opacity: 0; pointer-events: none; }
   .boot-term {
     width: min(480px, 92vw);
+    max-height: 92dvh;
     border-radius: .7rem;
     overflow: hidden;
+    overflow-y: auto;
     background: rgba(6,12,22,.92);
     border: 1px solid rgba(34,211,238,.18);
     box-shadow: 0 0 60px rgba(34,211,238,.08), 0 30px 80px -20px rgba(0,0,0,.85);
@@ -1369,6 +1372,12 @@
     transition: opacity .3s ease;
   }
   @keyframes bootTermIn { to { opacity: 1; transform: translateY(0) scale(1); } }
+  @media (max-height: 480px) {
+    .boot-ascii { font-size: clamp(.3rem, 1.6vw, .46rem); margin-bottom: .6rem; }
+    .boot-term-body { padding: 1rem 1.2rem .9rem; }
+    .boot-lines { min-height: 5.5em; }
+    .boot-statement { font-size: clamp(.95rem, 3.2vw, 1.4rem); }
+  }
   .boot-statement {
     text-align: center;
     font-family: 'Syne', sans-serif;
@@ -1847,6 +1856,9 @@
     border: none; border-top: 1px solid rgba(232,121,249,.3);
     padding: .28rem .2rem; text-align: center; text-align-last: center;
     cursor: pointer; appearance: none; -webkit-appearance: none;
+  }
+  @media (pointer: coarse) {
+    .webcam-puppet-model-select { padding: .45rem .2rem; }
   }
   .webcam-puppet-model-select option { background: #0A1220; color: var(--white); }
 
@@ -6102,6 +6114,25 @@ panels.forEach(p => observer.observe(p));
     rigRenderer.render(rigScene, rigCamera);
     rigReady = true;
   }
+
+  // The PIP's on-screen size can change after setup — rotating the phone,
+  // or resizing a desktop window — but the WebGL renderer's internal
+  // resolution and the camera's aspect ratio don't update on their own.
+  // Without this, the rig would render stretched/squashed after an
+  // orientation change instead of just re-fitting to the new box.
+  function resizeRig() {
+    if (!rigReady || !rigRenderer || !rigCamera) return;
+    const canvas = document.getElementById('rig-canvas');
+    if (!canvas) return;
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    if (!w || !h) return; // panel currently hidden — nothing to resize
+    rigRenderer.setSize(w, h, false);
+    rigCamera.aspect = w / h;
+    rigCamera.updateProjectionMatrix();
+    rigRenderer.render(rigScene, rigCamera);
+  }
+  window.addEventListener('resize', resizeRig);
+  window.addEventListener('orientationchange', () => setTimeout(resizeRig, 250));
 
   async function ensurePose() {
     if (poseDetector) return;

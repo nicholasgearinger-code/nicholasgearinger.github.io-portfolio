@@ -2649,8 +2649,8 @@
             <model-viewer
               id="puppet-viewer"
               class="webcam-puppet-viewer"
-              src="steampunk_girl-optimized.glb"
               alt="Puppeteered 3D character"
+              loading="lazy"
               shadow-intensity="1"
               exposure="1"
             ></model-viewer>
@@ -2790,7 +2790,7 @@
             shadow-intensity="1"
             exposure="1.05"
             environment-image="neutral"
-            loading="eager"
+            loading="lazy"
             reveal="auto">
             <div class="craft-loading" slot="progress-bar">
               <div class="craft-loading-bar"><div class="craft-loading-fill"></div></div>
@@ -2828,7 +2828,7 @@
             shadow-intensity="1"
             exposure="1.05"
             environment-image="neutral"
-            loading="eager"
+            loading="lazy"
             reveal="auto">
             <div class="craft-loading" slot="progress-bar">
               <div class="craft-loading-bar"><div class="craft-loading-fill"></div></div>
@@ -2866,7 +2866,7 @@
             shadow-intensity="1"
             exposure="1.05"
             environment-image="neutral"
-            loading="eager"
+            loading="lazy"
             reveal="auto">
             <div class="craft-loading" slot="progress-bar">
               <div class="craft-loading-bar"><div class="craft-loading-fill"></div></div>
@@ -2904,7 +2904,7 @@
             shadow-intensity="1"
             exposure="1.05"
             environment-image="neutral"
-            loading="eager"
+            loading="lazy"
             reveal="auto">
             <div class="craft-loading" slot="progress-bar">
               <div class="craft-loading-bar"><div class="craft-loading-fill"></div></div>
@@ -5180,15 +5180,14 @@ panels.forEach(p => observer.observe(p));
   }
 
   // The boot sequence dispatches 'bootSeqDone' once it's actually off
-  // screen (immediately, if it was skipped — already seen this session,
-  // or reduced motion). Waiting for that instead of firing on our own
-  // DOMContentLoaded means the hero typing is never racing the boot
-  // overlay's fade — it only ever starts once boot is truly done.
-  function waitForBoot() {
-    document.addEventListener('bootSeqDone', run, { once: true });
-  }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', waitForBoot);
-  else waitForBoot();
+  // screen — either after playing out fully, or immediately if it was
+  // skipped (already shown this session, or reduced motion). That skip
+  // path fires synchronously, during initial page parsing, potentially
+  // *before* DOMContentLoaded — so this listener has to be registered
+  // right now, not deferred to DOMContentLoaded, or a skipped boot's
+  // event fires into the void before anything is listening for it and
+  // the hero never gets triggered at all.
+  document.addEventListener('bootSeqDone', run, { once: true });
 })();
 </script>
 <script>
@@ -5236,7 +5235,15 @@ panels.forEach(p => observer.observe(p));
       armStallTimeout();
     }
 
+    let watchdogArmed = false;
+
     mv.addEventListener('progress', (e) => {
+      // With loading="lazy" the fetch doesn't begin until the model is
+      // about to scroll into view, so the stall watchdog starts counting
+      // from the first real progress event instead of from page load —
+      // otherwise it'd fire false retries for a model the user hasn't
+      // even scrolled to yet.
+      if (!watchdogArmed) { watchdogArmed = true; armStallTimeout(); }
       const p = Math.round((e.detail.totalProgress || 0) * 100);
       if (fill) fill.style.width = p + '%';
       if (pct) pct.textContent = p < 100 ? ('Loading model… ' + p + '%') : 'Preparing scene…';
@@ -5248,11 +5255,20 @@ panels.forEach(p => observer.observe(p));
       if (errorEl) errorEl.hidden = true;
     });
     mv.addEventListener('error', retry);
-
-    // Kick off the stall watchdog immediately — loading="eager" means the
-    // fetch starts right away, before the section is ever scrolled to.
-    armStallTimeout();
   });
+
+  // Loaded models with auto-rotate render continuously, forever — that's
+  // fine for the one currently in view, but wasteful for the other three
+  // sitting scrolled off-screen still spinning. Pausing/resuming based on
+  // actual visibility keeps the GPU cost to roughly "one model's worth"
+  // at any given time instead of up to four simultaneously.
+  const rotateObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) entry.target.setAttribute('auto-rotate', '');
+      else entry.target.removeAttribute('auto-rotate');
+    });
+  }, { threshold: 0.1 });
+  viewers.forEach((mv) => rotateObserver.observe(mv));
 })();
 </script>
 <script>
@@ -6010,6 +6026,7 @@ panels.forEach(p => observer.observe(p));
 
   async function ensureHands() {
     if (handDetector) return;
+    if (puppetViewer && !puppetViewer.src) puppetViewer.src = puppetModelSelect ? puppetModelSelect.value : 'steampunk_girl-optimized.glb';
     if (typeof handPoseDetection === 'undefined') await loadScript(HAND_LIB_URL);
     // The 'mediapipe' runtime needs @mediapipe/hands/hands.js loaded
     // separately first — it exposes a global `Hands` constructor that

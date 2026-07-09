@@ -4486,6 +4486,11 @@ panels.forEach(p => observer.observe(p));
   /* ══════════════════════════════════════════════════════════════
      CIRCUITBRIDGE CLASS
   ══════════════════════════════════════════════════════════════ */
+  // Shared by both the visual reveal and the guided auto-scroll below —
+  // one duration driving both means they can never drift out of sync with
+  // each other, however either gets tuned later.
+  const BRIDGE_PLAY_MS = 3400;
+
   class CircuitBridge {
     constructor(div, index) {
       this.div    = div;
@@ -4504,21 +4509,59 @@ panels.forEach(p => observer.observe(p));
       this.fibers = [];
       this.resize();
 
-      // Plays once, on its own timeline, the first time the bridge
-      // scrolls into view — no longer scrubbed back and forth by scroll
-      // position. Threshold is deliberately small (starts as soon as a
-      // sliver is visible) so the reveal feels like it's greeting the
-      // scroll rather than lagging behind it.
+      // Replays every time the bridge is entered — scrolling down through
+      // it from above, or back up through it from below — and drives the
+      // page's scroll position itself at the animation's own pace, rather
+      // than being scrubbed by (and fighting against) the user's actual
+      // scroll input. Respects prefers-reduced-motion (no auto-scroll,
+      // animation just plays once statically) and immediately hands
+      // control back the instant the person scrolls or touches manually,
+      // so it's a guided moment rather than a trap.
       this.playStarted = false;
       this.playStartTime = 0;
+      this.autoScrolling = false;
+      const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
       if ('IntersectionObserver' in window) {
+        let prevY = window.scrollY;
         this._io = new IntersectionObserver((entries) => {
-          if (entries[0].isIntersecting && !this.playStarted) {
-            this.playStarted = true;
-            this.playStartTime = performance.now();
-            this._io.disconnect();
-          }
-        }, { threshold: 0.08 });
+          const entry = entries[0];
+          if (!entry.isIntersecting) { prevY = window.scrollY; return; }
+          if (this.autoScrolling) return; // already mid-sequence — ignore re-entry noise
+          const goingDown = window.scrollY >= prevY;
+          prevY = window.scrollY;
+
+          this.playStarted = true;
+          this.playStartTime = performance.now();
+          if (reduceMotion) return; // play the visual once, statically; skip the scroll takeover entirely
+
+          const rect = this.div.getBoundingClientRect();
+          const startY = window.scrollY;
+          // Down: carry the scroll until the bridge's bottom edge reaches
+          // the viewport's bottom. Up: carry it back until the bridge's
+          // top edge reaches the viewport's top (i.e., fully out the top).
+          const targetY = goingDown
+            ? window.scrollY + (rect.bottom - window.innerHeight)
+            : window.scrollY + rect.top;
+          if (Math.abs(targetY - startY) < 40) return; // already basically there
+
+          this.autoScrolling = true;
+          let cancelled = false;
+          const cancel = () => { cancelled = true; };
+          window.addEventListener('wheel', cancel, { passive: true, once: true });
+          window.addEventListener('touchstart', cancel, { passive: true, once: true });
+          const t0 = performance.now();
+          const step = () => {
+            if (cancelled) { this.autoScrolling = false; return; }
+            const p = Math.min(1, (performance.now() - t0) / BRIDGE_PLAY_MS);
+            window.scrollTo({ top: startY + (targetY - startY) * p, left: 0, behavior: 'instant' });
+            if (p < 1) { requestAnimationFrame(step); return; }
+            this.autoScrolling = false;
+            window.removeEventListener('wheel', cancel);
+            window.removeEventListener('touchstart', cancel);
+          };
+          requestAnimationFrame(step);
+        }, { threshold: 0.05 });
         this._io.observe(div);
       } else {
         // No IntersectionObserver support — just play immediately rather
@@ -4538,14 +4581,13 @@ panels.forEach(p => observer.observe(p));
     }
 
     updateReveal() {
-      const PLAY_MS = 3400;
       if (!this.playStarted) {
         this.scroll = 0;
         this.canvas.style.opacity = '0';
         return;
       }
       const elapsed = performance.now() - this.playStartTime;
-      this.scroll = Math.max(0, Math.min(1, elapsed / PLAY_MS));
+      this.scroll = Math.max(0, Math.min(1, elapsed / BRIDGE_PLAY_MS));
       // Smooth entrance: fade the whole canvas in over the first 10% of the
       // bridge's own play duration, instead of the strands/bloom just
       // appearing the instant playback starts.

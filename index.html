@@ -1822,7 +1822,7 @@
     box-shadow: 0 6px 16px -6px rgba(0,0,0,.7);
     transition: background .2s, transform .15s;
   }
-  .webcam-flip-btn:hover { background: rgba(3,8,17,.85); border-color: rgba(34,211,238,.4); }
+  .webcam-flip-btn:hover { background: rgba(3,8,17,.85); border-color: rgba(34,211,238,.4); transform: translateY(-2px); }
   .webcam-flip-btn:active { transform: scale(.9); }
   .webcam-flip-btn[hidden] { display: none; }
   .webcam-hud {
@@ -1854,8 +1854,9 @@
     padding: .4rem .8rem; border-radius: 100px; cursor: pointer;
     border: 1px solid var(--card-border); background: var(--card-bg);
     font-size: .76rem; color: var(--muted);
-    transition: border-color .2s, color .2s, background .2s;
+    transition: color .2s, border-color .2s, background .2s, transform .2s;
   }
+  .webcam-filter-chip:hover { color: var(--white); border-color: var(--cyan); background: rgba(34,211,238,.08); transform: translateY(-2px); }
   .webcam-filter-chip.active {
     border-color: rgba(232,121,249,.5); color: var(--white); background: rgba(232,121,249,.12);
   }
@@ -1940,8 +1941,9 @@
     padding: .5rem .9rem; border-radius: 100px; cursor: pointer;
     border: 1px solid var(--card-border); background: var(--card-bg);
     font-size: .78rem; color: var(--muted);
-    transition: border-color .2s, color .2s, background .2s;
+    transition: color .2s, border-color .2s, background .2s, transform .2s;
   }
+  .webcam-toggle:hover { color: var(--white); border-color: var(--cyan); background: rgba(34,211,238,.08); transform: translateY(-2px); }
   @media (pointer: coarse) {
     .webcam-toggle { padding: .68rem 1.05rem; }
   }

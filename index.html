@@ -4524,8 +4524,17 @@ panels.forEach(p => observer.observe(p));
 
       if ('IntersectionObserver' in window) {
         let prevY = window.scrollY;
+        let firstCallback = true;
         this._io = new IntersectionObserver((entries) => {
           const entry = entries[0];
+          // IntersectionObserver always fires once immediately on
+          // observe() reporting the current state, before any actual
+          // scrolling has happened — without this guard, a bridge that's
+          // already partly visible on page load would trigger the whole
+          // sequence instantly, and (since the observer would then
+          // already consider it "intersecting") never fire again for the
+          // person's real scroll into it.
+          if (firstCallback) { firstCallback = false; prevY = window.scrollY; return; }
           if (!entry.isIntersecting) { prevY = window.scrollY; return; }
           if (this.autoScrolling) return; // already mid-sequence — ignore re-entry noise
           const goingDown = window.scrollY >= prevY;

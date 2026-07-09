@@ -45,7 +45,6 @@
   .skip-link:focus { top: 1rem; }
   :focus-visible {
     outline: 2px solid var(--cyan); outline-offset: 2px;
-    border-radius: 2px;
   }
   .custom-cursor-active :focus-visible { outline-width: 2.5px; }
 
@@ -1399,13 +1398,21 @@
     color: var(--white);
     max-width: 560px;
     padding: 0 1.5rem;
-    opacity: 0;
-    transform: translateY(14px);
-    transition: opacity .55s cubic-bezier(.22,1,.36,1), transform .55s cubic-bezier(.22,1,.36,1);
   }
-  .boot-statement.stmt-in { opacity: 1; transform: translateY(0); }
   .boot-statement[hidden] { display: none; }
-  .boot-statement .stmt-accent { color: var(--cyan); }
+  .boot-statement.stmt-out { opacity: 0; transition: opacity .5s ease; }
+  .stmt-word {
+    display: inline-block;
+    opacity: 0;
+    filter: blur(10px);
+    transform: translateY(16px) scale(.96);
+    transition: opacity .6s cubic-bezier(.22,1,.36,1), transform .6s cubic-bezier(.22,1,.36,1), filter .6s cubic-bezier(.22,1,.36,1);
+  }
+  .stmt-word.word-in {
+    opacity: 1; filter: blur(0); transform: translateY(0) scale(1);
+  }
+  .stmt-accent { color: var(--cyan); }
+  .stmt-accent.word-in { text-shadow: 0 0 18px rgba(34,211,238,.55); }
   .boot-term-bar {
     display: flex; align-items: center; gap: .7rem;
     padding: .6rem .9rem;
@@ -2131,7 +2138,7 @@
     </div>
   </div>
   <div class="boot-statement" id="boot-statement">
-    <p>Every intelligent system, every interface, every idea on screen —<br>it all starts with <span class="stmt-accent">a single line of code.</span></p>
+    <p><span class="stmt-word">Every</span> <span class="stmt-word">intelligent</span> <span class="stmt-word">system,</span> <span class="stmt-word">every</span> <span class="stmt-word">interface,</span> <span class="stmt-word">every</span> <span class="stmt-word">idea</span> <span class="stmt-word">on</span> <span class="stmt-word">screen</span> <span class="stmt-word">—</span><br><span class="stmt-word">it</span> <span class="stmt-word">all</span> <span class="stmt-word">starts</span> <span class="stmt-word">with</span> <span class="stmt-word stmt-accent">a</span> <span class="stmt-word stmt-accent">single</span> <span class="stmt-word stmt-accent">line</span> <span class="stmt-word stmt-accent">of</span> <span class="stmt-word stmt-accent">code.</span></p>
   </div>
 </div>
 
@@ -5512,18 +5519,27 @@ panels.forEach(p => observer.observe(p));
     }, lingerWait);
   }
 
-  // Statement card plays first: fade in, hold, fade out — then the
-  // terminal appears and the typing sequence begins.
+  // Statement card plays first: each word rises and sharpens into focus
+  // individually (staggered), then the fully-revealed text holds for a
+  // beat before fading out — then the terminal appears and the typing
+  // sequence begins.
   function showStatement(onDone) {
     if (!stmtEl) { onDone(); return; }
-    requestAnimationFrame(() => requestAnimationFrame(() => stmtEl.classList.add('stmt-in')));
+    const words = Array.from(stmtEl.querySelectorAll('.stmt-word'));
+    if (!words.length) { onDone(); return; }
+    const STAGGER_MS = 80;
+    words.forEach((w, i) => {
+      setTimeout(() => w.classList.add('word-in'), i * STAGGER_MS);
+    });
+    const revealDoneMs = (words.length - 1) * STAGGER_MS + 650; // last word's own transition duration
+    const HOLD_MS = 1400;
     setTimeout(() => {
-      stmtEl.classList.remove('stmt-in');
+      stmtEl.classList.add('stmt-out');
       setTimeout(() => {
         stmtEl.hidden = true;
         onDone();
       }, 550);
-    }, 1300);
+    }, revealDoneMs + HOLD_MS);
   }
 
   function typeEntry() {

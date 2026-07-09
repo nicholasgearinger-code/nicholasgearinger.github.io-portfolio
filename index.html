@@ -2102,6 +2102,23 @@
 <body>
 
 <script>
+  // ── Global error resilience ──
+  // With this many concurrent async/WebGL/ML features running, a single
+  // uncaught error or unhandled rejection could otherwise fail completely
+  // silently — no console trace a user would ever see, and depending on
+  // where it happened, a broken loop (render/inference) could keep firing
+  // every single frame forever with no way to recover. This surfaces every
+  // such failure clearly and, for the two things most likely to actually
+  // destabilize the page over time (the webcam AI's render/inference loops),
+  // stops them outright rather than let a bad frame repeat indefinitely.
+  window.addEventListener('error', (e) => {
+    console.error('[global] uncaught error:', e.error || e.message, e.filename ? ('@ ' + e.filename + ':' + e.lineno) : '');
+  });
+  window.addEventListener('unhandledrejection', (e) => {
+    console.error('[global] unhandled promise rejection:', e.reason);
+  });
+</script>
+<script>
   // ── If your backend is hosted separately from this HTML (e.g., this page
   //    lives on GitHub Pages but the Node backend runs on Render/Railway),
   //    set this to that backend's full URL, no trailing slash:
@@ -6083,60 +6100,81 @@ panels.forEach(p => observer.observe(p));
   }
   function announce(msg) { if (toggleStatus) toggleStatus.textContent = msg; }
 
+  let faceApiPromise = null, landmarksPromise = null, objectsPromise = null, handsPromise = null, posePromise = null;
+
   async function ensureFace() {
     if (faceApiReady) return;
-    // The nobundle build expects a global `tf` to already exist rather than
-    // importing its own copy — this is what actually avoids the duplicate
-    // WebGL-kernel-registration conflict seen when combining face-api.js
-    // with the separately-loaded official TF.js models. Loading it
-    // explicitly here (rather than relying on some other feature to have
-    // loaded it first) guarantees the ordering regardless of which model
-    // toggle the person happens to turn on first.
-    if (typeof window.tf === 'undefined') await loadScript(TFJS_CORE_URL);
-    if (typeof faceapi === 'undefined') {
-      window.faceapi = await import(FACE_LIB_URL);
+    if (!faceApiPromise) {
+      faceApiPromise = (async () => {
+        // The nobundle build expects a global `tf` to already exist rather than
+        // importing its own copy — this is what actually avoids the duplicate
+        // WebGL-kernel-registration conflict seen when combining face-api.js
+        // with the separately-loaded official TF.js models. Loading it
+        // explicitly here (rather than relying on some other feature to have
+        // loaded it first) guarantees the ordering regardless of which model
+        // toggle the person happens to turn on first.
+        if (typeof window.tf === 'undefined') await loadScript(TFJS_CORE_URL);
+        if (typeof faceapi === 'undefined') {
+          window.faceapi = await import(FACE_LIB_URL);
+        }
+        await Promise.all([
+          faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODEL_URL),
+          faceapi.nets.faceExpressionNet.loadFromUri(FACE_MODEL_URL),
+        ]);
+        faceApiReady = true;
+      })().finally(() => { faceApiPromise = null; });
     }
-    await Promise.all([
-      faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODEL_URL),
-      faceapi.nets.faceExpressionNet.loadFromUri(FACE_MODEL_URL),
-    ]);
-    faceApiReady = true;
+    return faceApiPromise;
   }
   async function ensureLandmarks() {
     await ensureFace();
     if (landmarksReady) return;
-    await faceapi.nets.faceLandmark68Net.loadFromUri(FACE_MODEL_URL);
-    landmarksReady = true;
+    if (!landmarksPromise) {
+      landmarksPromise = faceapi.nets.faceLandmark68Net.loadFromUri(FACE_MODEL_URL)
+        .then(() => { landmarksReady = true; })
+        .finally(() => { landmarksPromise = null; });
+    }
+    return landmarksPromise;
   }
   async function ensureObjects() {
     if (cocoModel) return;
-    // coco-ssd's standard dist build expects a pre-loaded `tf` global
-    // (it's a peer dependency, not bundled in) — load it explicitly
-    // rather than relying on some other feature happening to load it first.
-    if (typeof tf === 'undefined') await loadScript(TFJS_CORE_URL);
-    if (typeof cocoSsd === 'undefined') await loadScript(COCO_LIB_URL);
-    cocoModel = await cocoSsd.load();
+    if (!objectsPromise) {
+      objectsPromise = (async () => {
+        // coco-ssd's standard dist build expects a pre-loaded `tf` global
+        // (it's a peer dependency, not bundled in) — load it explicitly
+        // rather than relying on some other feature happening to load it first.
+        if (typeof tf === 'undefined') await loadScript(TFJS_CORE_URL);
+        if (typeof cocoSsd === 'undefined') await loadScript(COCO_LIB_URL);
+        cocoModel = await cocoSsd.load();
+      })().finally(() => { objectsPromise = null; });
+    }
+    return objectsPromise;
   }
   const MEDIAPIPE_HANDS_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/hands';
 
   async function ensureHands() {
     if (handDetector) return;
-    if (puppetViewer && !puppetViewer.src) puppetViewer.src = puppetModelSelect ? puppetModelSelect.value : 'steampunk_girl-optimized.glb';
-    if (typeof handPoseDetection === 'undefined') await loadScript(HAND_LIB_URL);
-    // The 'mediapipe' runtime needs @mediapipe/hands/hands.js loaded
-    // separately first — it exposes a global `Hands` constructor that
-    // hand-pose-detection instantiates internally. solutionPath alone only
-    // tells it where to fetch the WASM/model binaries from, not the JS glue.
-    if (typeof Hands === 'undefined') await loadScript(MEDIAPIPE_HANDS_URL + '/hands.js');
-    // Deliberately NOT using runtime:'tfjs' here — it has a known, documented
-    // bug (tensorflow/tfjs#7204) where it returns NaN for every x/y
-    // coordinate while still reporting a plausible hand structure. The
-    // 'mediapipe' runtime runs its own separate WASM pipeline instead of
-    // sharing the page's TF.js backend, which sidesteps the bug entirely.
-    handDetector = await handPoseDetection.createDetector(
-      handPoseDetection.SupportedModels.MediaPipeHands,
-      { runtime: 'mediapipe', solutionPath: MEDIAPIPE_HANDS_URL, modelType: 'lite', maxHands: 2 }
-    );
+    if (!handsPromise) {
+      handsPromise = (async () => {
+        if (puppetViewer && !puppetViewer.src) puppetViewer.src = puppetModelSelect ? puppetModelSelect.value : 'steampunk_girl-optimized.glb';
+        if (typeof handPoseDetection === 'undefined') await loadScript(HAND_LIB_URL);
+        // The 'mediapipe' runtime needs @mediapipe/hands/hands.js loaded
+        // separately first — it exposes a global `Hands` constructor that
+        // hand-pose-detection instantiates internally. solutionPath alone only
+        // tells it where to fetch the WASM/model binaries from, not the JS glue.
+        if (typeof Hands === 'undefined') await loadScript(MEDIAPIPE_HANDS_URL + '/hands.js');
+        // Deliberately NOT using runtime:'tfjs' here — it has a known, documented
+        // bug (tensorflow/tfjs#7204) where it returns NaN for every x/y
+        // coordinate while still reporting a plausible hand structure. The
+        // 'mediapipe' runtime runs its own separate WASM pipeline instead of
+        // sharing the page's TF.js backend, which sidesteps the bug entirely.
+        handDetector = await handPoseDetection.createDetector(
+          handPoseDetection.SupportedModels.MediaPipeHands,
+          { runtime: 'mediapipe', solutionPath: MEDIAPIPE_HANDS_URL, modelType: 'lite', maxHands: 2 }
+        );
+      })().finally(() => { handsPromise = null; });
+    }
+    return handsPromise;
   }
   // Builds a simple jointed humanoid from primitive shapes — no skinning,
   // just a hierarchy of THREE.Group "joints" each holding a mesh, so
@@ -6248,12 +6286,17 @@ panels.forEach(p => observer.observe(p));
 
   async function ensurePose() {
     if (poseDetector) return;
-    // MoveNet's default runtime is 'tfjs', which — like coco-ssd — expects
-    // the tf global to already exist rather than bundling it.
-    if (typeof tf === 'undefined') await loadScript(TFJS_CORE_URL);
-    if (typeof poseDetection === 'undefined') await loadScript(POSE_LIB_URL);
-    poseDetector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet);
-    await ensureRig();
+    if (!posePromise) {
+      posePromise = (async () => {
+        // MoveNet's default runtime is 'tfjs', which — like coco-ssd — expects
+        // the tf global to already exist rather than bundling it.
+        if (typeof tf === 'undefined') await loadScript(TFJS_CORE_URL);
+        if (typeof poseDetection === 'undefined') await loadScript(POSE_LIB_URL);
+        poseDetector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet);
+        await ensureRig();
+      })().finally(() => { posePromise = null; });
+    }
+    return posePromise;
   }
 
   const ENSURERS = { face: ensureFace, landmarks: ensureLandmarks, objects: ensureObjects, hands: ensureHands, pose: ensurePose };
@@ -6736,9 +6779,9 @@ panels.forEach(p => observer.observe(p));
       if (!running) return;
       ctx.clearRect(0, 0, overlay.width, overlay.height);
       try { drawFace(); } catch (err) { console.error('[webcam-ai] drawFace failed:', err); }
-      drawObjects();
-      drawHands();
-      drawPose();
+      try { drawObjects(); } catch (err) { console.error('[webcam-ai] drawObjects failed:', err); }
+      try { drawHands(); } catch (err) { console.error('[webcam-ai] drawHands failed:', err); }
+      try { drawPose(); } catch (err) { console.error('[webcam-ai] drawPose failed:', err); }
       try { drawPuppetIndicator(); } catch (err) { console.error('[webcam-ai] drawPuppetIndicator failed:', err); }
 
       fpsFrameCount++;
@@ -6748,11 +6791,13 @@ panels.forEach(p => observer.observe(p));
         fpsFrameCount = 0;
         fpsLastUpdate = now;
       }
-      updateHud();
-      updatePanels();
-      updatePuppet();
+      try { updateHud(); } catch (err) { console.error('[webcam-ai] updateHud failed:', err); }
+      try { updatePanels(); } catch (err) { console.error('[webcam-ai] updatePanels failed:', err); }
+      try { updatePuppet(); } catch (err) { console.error('[webcam-ai] updatePuppet failed:', err); }
       try { updateRig(); } catch (err) { console.error('[webcam-ai] updateRig failed:', err); }
 
+      // However bad this frame was, there's always a next one — the loop
+      // itself must never die from a single frame's failure.
       rafId = requestAnimationFrame(renderLoop);
     }
 

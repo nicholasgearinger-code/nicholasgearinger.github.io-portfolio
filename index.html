@@ -33,7 +33,7 @@
     --sky-dim: rgba(34,211,238,.12);
   }
 
-  html { scroll-behavior: smooth; background: #020810; color-scheme: dark; scroll-padding-top: 5.6rem; }
+  html { scroll-behavior: smooth; background: #020810; color-scheme: dark; scroll-padding-top: 5.6rem; scroll-snap-type: y proximity; }
 
   /* ── ACCESSIBILITY: skip link + consistent keyboard focus ── */
   .skip-link {
@@ -149,6 +149,7 @@
     display: flex; flex-direction: column;
     align-items: center; text-align: center;
     padding-top: 6.2rem;
+    scroll-snap-align: start;
   }
   #particle-canvas {
     position: absolute;
@@ -474,6 +475,7 @@
     position: relative; z-index: 1;
     background: rgba(2,8,16,0.58);
     backdrop-filter: blur(2px);
+    scroll-snap-align: start;
   }
   .panel.visible {
     opacity: 1;
@@ -4631,6 +4633,29 @@ panels.forEach(p => observer.observe(p));
       this.cfg    = BRIDGE_CONFIGS[index % BRIDGE_CONFIGS.length];
       this.fibers = [];
       this.resize();
+
+      // Plays once, on its own timeline, the first time the bridge
+      // scrolls into view — no longer scrubbed back and forth by scroll
+      // position. Threshold is deliberately small (starts as soon as a
+      // sliver is visible) so the reveal feels like it's greeting the
+      // scroll rather than lagging behind it.
+      this.playStarted = false;
+      this.playStartTime = 0;
+      if ('IntersectionObserver' in window) {
+        this._io = new IntersectionObserver((entries) => {
+          if (entries[0].isIntersecting && !this.playStarted) {
+            this.playStarted = true;
+            this.playStartTime = performance.now();
+            this._io.disconnect();
+          }
+        }, { threshold: 0.08 });
+        this._io.observe(div);
+      } else {
+        // No IntersectionObserver support — just play immediately rather
+        // than never playing at all.
+        this.playStarted = true;
+        this.playStartTime = performance.now();
+      }
     }
 
     resize() {
@@ -4643,17 +4668,17 @@ panels.forEach(p => observer.observe(p));
     }
 
     updateReveal() {
-      const rect = this.div.getBoundingClientRect();
-      const p    = (window.innerHeight - rect.top) / (window.innerHeight + rect.height);
-      // Force fully dormant at the very top of the page. The hero title is
-      // shorter than most viewports, so part of the bridge already sits
-      // inside the initial viewport before any scrolling — without this
-      // check it would show some bloom/activity immediately on load,
-      // breaking the illusion of an animation waiting to be scrolled into.
-      this.scroll = window.scrollY <= 2 ? 0 : Math.max(0, Math.min(1, p));
+      const PLAY_MS = 3400;
+      if (!this.playStarted) {
+        this.scroll = 0;
+        this.canvas.style.opacity = '0';
+        return;
+      }
+      const elapsed = performance.now() - this.playStartTime;
+      this.scroll = Math.max(0, Math.min(1, elapsed / PLAY_MS));
       // Smooth entrance: fade the whole canvas in over the first 10% of the
-      // bridge's own reveal range, instead of the strands/bloom just
-      // appearing the instant scrolling starts.
+      // bridge's own play duration, instead of the strands/bloom just
+      // appearing the instant playback starts.
       const entranceFade = Math.max(0, Math.min(1, this.scroll / 0.1));
       this.canvas.style.opacity = entranceFade.toFixed(3);
     }

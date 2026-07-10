@@ -35,26 +35,43 @@
   // *combination* of live backdrop-filter/filter, preserve-3d/
   // perspective, and will-change layers all rebuilding at once during
   // the viewport-dimension jump, not any single one of them alone.
-  // Since we can't just run permanently flat (the résumé prism and
-  // other 3D bits need to actually render the rest of the time), this
-  // applies the exact same "kill all three" CSS the ?nofx flag does,
-  // but only for the ~650ms burst window around an orientation change,
-  // toggled via the .gpu-burst-flatten class on <html> (see main
-  // stylesheet). Everything restores to normal — 3D included — once
-  // the burst settles.
+  // First attempt at this triggered off 'orientationchange' alone —
+  // didn't help, because that event fires once, AFTER the rotation
+  // animation has already played out. The actual layer-rebuild storm
+  // happens DURING the animated transition, which iOS reports as a
+  // rapid burst of 'resize' events, not a single discrete jump. So:
+  // flatten on the very first resize tick, and keep it flattened
+  // through a rolling quiet-window — only un-flatten once resize
+  // events actually stop for a beat — instead of switching on late
+  // off a single end-of-rotation event.
   (function () {
     var root = document.documentElement;
-    var burstTimer = null;
-    function startBurst() {
-      root.classList.add('gpu-burst-flatten');
-      clearTimeout(burstTimer);
-      burstTimer = setTimeout(function () {
+    var quietTimer = null;
+    var active = false;
+    var lastWidth = window.innerWidth;
+    function onResize() {
+      // Toolbar show/hide during ordinary scrolling fires plain 'resize'
+      // too, but only changes height. Gate on width so that doesn't
+      // needlessly flicker the whole page flat — only an actual
+      // rotation (or similar real viewport-width change) should.
+      var w = window.innerWidth;
+      var widthChanged = w !== lastWidth;
+      lastWidth = w;
+      if (!widthChanged && !active) return;
+      if (!active) {
+        active = true;
+        root.classList.add('gpu-burst-flatten');
+      }
+      clearTimeout(quietTimer);
+      quietTimer = setTimeout(function () {
+        active = false;
         root.classList.remove('gpu-burst-flatten');
-      }, 650);
+      }, 400);
     }
-    window.addEventListener('orientationchange', startBurst);
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
     if (window.screen && window.screen.orientation) {
-      window.screen.orientation.addEventListener('change', startBurst);
+      window.screen.orientation.addEventListener('change', onResize);
     }
   })();
 </script>

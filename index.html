@@ -45,10 +45,27 @@
   // events actually stop for a beat — instead of switching on late
   // off a single end-of-rotation event.
   (function () {
+    var p = new URLSearchParams(location.search);
+    if (p.has('noburst')) {
+      console.warn('[noburst] gpu-burst-flatten mechanism disabled entirely');
+      return;
+    }
     var root = document.documentElement;
     var quietTimer = null;
     var active = false;
     var lastWidth = window.innerWidth;
+    var activeSince = 0;
+    // Hard ceiling regardless of how many resize ticks keep coming in.
+    // Without this, anything that keeps nudging the viewport size while
+    // active (including our own content swapping height as it shows/
+    // hides) could keep resetting the quiet-timer indefinitely, leaving
+    // the page stuck flattened — cube hidden, fallback showing — with
+    // no path back to normal.
+    var MAX_ACTIVE_MS = 1500;
+    function end() {
+      active = false;
+      root.classList.remove('gpu-burst-flatten');
+    }
     function onResize() {
       // Toolbar show/hide during ordinary scrolling fires plain 'resize'
       // too, but only changes height. Gate on width so that doesn't
@@ -60,13 +77,15 @@
       if (!widthChanged && !active) return;
       if (!active) {
         active = true;
+        activeSince = Date.now();
         root.classList.add('gpu-burst-flatten');
       }
+      if (Date.now() - activeSince > MAX_ACTIVE_MS) {
+        end();
+        return;
+      }
       clearTimeout(quietTimer);
-      quietTimer = setTimeout(function () {
-        active = false;
-        root.classList.remove('gpu-burst-flatten');
-      }, 400);
+      quietTimer = setTimeout(end, 400);
     }
     window.addEventListener('resize', onResize);
     window.addEventListener('orientationchange', onResize);

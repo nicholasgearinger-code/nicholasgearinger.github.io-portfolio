@@ -3599,6 +3599,7 @@ panels.forEach(p => observer.observe(p));
 
 /* ── INTERACTIVE 3D RÉSUMÉ PRISM ── */
 (function initResume() {
+  try {
   const stage = document.getElementById('resume-stage');
   const prism = document.getElementById('resume-prism');
   const tabs  = Array.from(document.querySelectorAll('#resume-tabs .resume-tab'));
@@ -3634,6 +3635,25 @@ panels.forEach(p => observer.observe(p));
       el.style.filter = 'blur(6px)';
     });
     void faceEl.offsetHeight; // force reflow so the hidden state commits before animating
+
+    // Safety net: the animation below depends on a nested
+    // requestAnimationFrame callback actually firing to bring these
+    // elements back to visible. If that ever fails to complete cleanly —
+    // the tab gets backgrounded mid-animation, rAF gets throttled under
+    // mobile power-saving, anything else on the page interrupts it — the
+    // content must never be able to get stuck at opacity:0 with no way
+    // back. This forces the same resting state unconditionally after a
+    // beat, whether or not the animation already got there on its own;
+    // since it lands on the identical final values, it's invisible when
+    // the animation succeeded and a lifesaver when it didn't.
+    setTimeout(() => {
+      units.forEach((el) => {
+        el.style.opacity = '1';
+        el.style.transform = 'translateY(0) scale(1)';
+        el.style.filter = 'blur(0)';
+      });
+    }, 1600);
+
     units.forEach((el, i) => {
       requestAnimationFrame(() => {
         el.style.transition =
@@ -3745,6 +3765,9 @@ panels.forEach(p => observer.observe(p));
     firstReveal.observe(stage);
   } else {
     animateFaceText(faces[0]);
+  }
+  } catch (err) {
+    console.error('[resume] initialization failed:', err);
   }
 })();
 

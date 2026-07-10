@@ -3683,15 +3683,33 @@ panels.forEach(p => observer.observe(p));
     return out;
   }
 
+  // Tracks whichever animateFaceText call is the "current" one, so a
+  // second call (fast tab-tapping, quick drags) can make the first call's
+  // pending rAF/timeout callbacks into no-ops instead of letting both run
+  // at once. Without this, rapid switching could stack up multiple
+  // simultaneous filter:blur() animations on elements nested inside the
+  // prism's preserve-3d context.
+  let faceAnimToken = 0;
+
+  // Coarse-pointer (touch) devices skip the blur step entirely. Every
+  // element that gets both `filter` and a transform while nested inside a
+  // preserve-3d ancestor is promoted to its own GPU compositing layer --
+  // with facts/tags/timeline/skills all staggering at once that's 15-30
+  // layers stacking simultaneously, which is what was exhausting the GPU
+  // process and crashing the tab on mobile Chrome/Safari. The opacity +
+  // translateY stagger still reads fine without the blur on top.
+  const SKIP_BLUR = window.matchMedia('(pointer: coarse)').matches;
+
   function animateFaceText(faceEl) {
     if (!faceEl || window.__reduceMotion) return;
+    const myToken = ++faceAnimToken;
     const units = collectStaggerUnits(faceEl);
     if (!units.length) return;
     units.forEach((el) => {
       el.style.transition = 'none';
       el.style.opacity = '0';
       el.style.transform = 'translateY(38px) scale(.93)';
-      el.style.filter = 'blur(6px)';
+      if (!SKIP_BLUR) el.style.filter = 'blur(6px)';
     });
     void faceEl.offsetHeight; // force reflow so the hidden state commits before animating
 
@@ -3706,6 +3724,7 @@ panels.forEach(p => observer.observe(p));
     // since it lands on the identical final values, it's invisible when
     // the animation succeeded and a lifesaver when it didn't.
     setTimeout(() => {
+      if (myToken !== faceAnimToken) return; // superseded by a later call
       units.forEach((el) => {
         el.style.opacity = '1';
         el.style.transform = 'translateY(0) scale(1)';
@@ -3715,6 +3734,7 @@ panels.forEach(p => observer.observe(p));
 
     units.forEach((el, i) => {
       requestAnimationFrame(() => {
+        if (myToken !== faceAnimToken) return; // superseded by a later call
         el.style.transition =
           'opacity .75s cubic-bezier(.16,1,.3,1), transform .75s cubic-bezier(.16,1,.3,1), filter .75s cubic-bezier(.16,1,.3,1)';
         el.style.transitionDelay = (i * 90) + 'ms';
@@ -3724,6 +3744,7 @@ panels.forEach(p => observer.observe(p));
       });
     });
   }
+
 
   let current = 0;      // active face 0..3
   let ry = 0;           // current rotateY in degrees

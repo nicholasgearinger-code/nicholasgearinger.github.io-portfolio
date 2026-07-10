@@ -3561,14 +3561,28 @@ function animate() {
   }
 }
 
-resize();
-initParticles();
-animate();
-window.addEventListener('resize', window.__debounce(() => { resize(); initParticles(); }, 160));
-// Web fonts loading can reflow hero-content's height after first paint —
-// re-measure once they're ready so the canvas still spans the full bridge.
-if (document.fonts && document.fonts.ready) {
-  document.fonts.ready.then(() => { resize(); initParticles(); });
+// However this initializes, the panel-reveal observer and résumé init
+// right after it in this same script block must still run — a failure
+// here used to be able to silently take down every .panel on the page
+// (they'd never receive the .visible class that makes them appear at
+// all) with zero indication anything had gone wrong. Now it degrades to
+// "no particle background" instead of "the entire page is blank."
+try {
+  resize();
+  initParticles();
+  animate();
+  window.addEventListener('resize', window.__debounce(() => {
+    try { resize(); initParticles(); } catch (err) { console.error('[particles] resize failed:', err); }
+  }, 160));
+  // Web fonts loading can reflow hero-content's height after first paint —
+  // re-measure once they're ready so the canvas still spans the full bridge.
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(() => {
+      try { resize(); initParticles(); } catch (err) { console.error('[particles] font-ready resize failed:', err); }
+    });
+  }
+} catch (err) {
+  console.error('[particles] initialization failed — continuing without the particle background:', err);
 }
 
 /* ── 3D SCROLL REVEAL ── */

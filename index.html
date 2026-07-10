@@ -1060,6 +1060,23 @@
   @media (max-width: 768px) {
     .build-grid { grid-template-columns: 1fr; gap: 2.5rem; text-align: center; }
   }
+  @media (pointer: coarse) {
+    /* .build-video-card is the one card in the shared 3D-tilt family above
+       that wraps a live decoding <video> instead of plain content. A
+       permanent will-change:transform layer plus a continuous scroll-driven
+       transform recalculation on top of video decode is the same GPU-load
+       pattern that was crashing/blanking the résumé prism on mobile — here
+       it was taking out the whole #build section instead. Dropping the tilt
+       transform and will-change just for this card (not the rest of the
+       family, which don't carry the video-decode cost) removes that layer
+       stack; the card just sits static, which reads fine since it's a
+       single video, not a grid of tilting cards. */
+    .build-video-card {
+      transform: none !important;
+      will-change: auto !important;
+      transition: border-color .3s, box-shadow .3s;
+    }
+  }
 
   /* Cursor-following radial spotlight */
   .skill-card::before, .work-card::before,
@@ -3942,6 +3959,7 @@ panels.forEach(p => observer.observe(p));
   let current = 0;      // active face 0..3
   let ry = 0;           // current rotateY in degrees
   let barsShown = false;
+  let barsShownFallback = false;
 
   function apply() {
     const depth = prism.offsetWidth / 2;
@@ -3963,19 +3981,34 @@ panels.forEach(p => observer.observe(p));
   // reveal mobile gets on the (invisible-to-it) cube; leave it false for
   // silent syncs, like the initial setup or a mid-burst resync, where the
   // content should just be correct with no extra motion.
+  //
+  // The clone is a fresh set of DOM nodes each time — it does NOT share
+  // .rbar-fill elements with the prism's own Skills face, so filling the
+  // prism's bars (animateBars, below) has zero effect on this copy. Skills
+  // gets synced in here on every visit, but its bars should only fill once
+  // (barsShownFallback), same "animate the first time only" rule the prism
+  // follows via barsShown.
   function syncBurstFallback(animate) {
     if (!burstFallback || !faces[current]) return;
     burstFallback.innerHTML = faces[current].innerHTML;
     if (animate) animateFallbackText();
+    if (current === 3 && !barsShownFallback) {
+      barsShownFallback = true;
+      fillBars(burstFallback);
+    }
   }
-  function animateBars() {
-    if (barsShown) return;
-    barsShown = true;
-    prism.querySelectorAll('.rbar').forEach((bar, i) => {
+  function fillBars(container) {
+    if (!container) return;
+    container.querySelectorAll('.rbar').forEach((bar, i) => {
       const lvl = bar.getAttribute('data-level') || 0;
       const fill = bar.querySelector('.rbar-fill');
       if (fill) setTimeout(() => { fill.style.width = lvl + '%'; }, i * 45);
     });
+  }
+  function animateBars() {
+    if (barsShown) return;
+    barsShown = true;
+    fillBars(prism);
   }
 
   // will-change is only reserved for the duration of an actual rotation —
@@ -4167,7 +4200,13 @@ panels.forEach(p => observer.observe(p));
     { sel: '.work-card',    maxRy: 16, maxRx: 7,  pop: 0.05, alt: true  },
     { sel: '.dash-card',    maxRy: 12, maxRx: 6,  pop: 0.03, alt: true  },
     { sel: '.process-step', maxRy: 18, maxRx: 5,  pop: 0.04, alt: false, biasY: -1 },
-    { sel: '.build-video-card', maxRy: 16, maxRx: 8, pop: 0.05, alt: false },
+    // Skipped on coarse-pointer (touch) devices — see the .build-video-card
+    // coarse-pointer CSS override above; this card wraps a live decoding
+    // <video>, and stacking a scroll-driven transform + will-change layer
+    // on top of that was crashing/blanking the #build section on mobile.
+    ...(window.matchMedia('(pointer: coarse)').matches
+      ? []
+      : [{ sel: '.build-video-card', maxRy: 16, maxRx: 8, pop: 0.05, alt: false }]),
   ];
 
   const items = [];

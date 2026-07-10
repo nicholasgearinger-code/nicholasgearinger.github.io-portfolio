@@ -564,7 +564,6 @@
   .resume-prism {
     --rw: min(660px, 90vw);
     --rh: min(520px, 78vh);
-    --rh: min(520px, 78dvh);
     --depth: calc(var(--rw) / 2);
     position: relative;
     width: var(--rw); height: var(--rh);
@@ -575,6 +574,9 @@
     will-change: transform;
   }
   .resume-prism.dragging { transition: none; cursor: grabbing; }
+  @supports (height: 100dvh) {
+    .resume-prism { --rh: min(520px, 78dvh); }
+  }
   @media (pointer: coarse) {
     .resume-face {
       background: linear-gradient(165deg, rgba(13,24,42,.97), rgba(6,12,24,.99));

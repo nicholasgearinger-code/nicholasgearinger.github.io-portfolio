@@ -671,17 +671,40 @@
   }
   .resume-prism.dragging { transition: none; cursor: grabbing; }
   .resume-prism.will-lift { will-change: transform; }
-  /* During an orientation change we flatten the cube to a normal 2D
-     layer instead of asking the compositor to rebuild a live preserve-3d
-     GPU layer while dimensions are still changing. Restored once the
-     resize burst settles — see initResume(). */
+  /* During an orientation change (or the wider gpu-burst-flatten window
+     from the head script) we flatten the cube to a normal 2D layer
+     instead of asking the compositor to rebuild a live preserve-3d GPU
+     layer while dimensions are still changing. This used to just hide
+     the whole prism for the duration — safe, but the résumé content
+     disappeared mid-rotation. Instead: collapse the prism's own
+     rotation and each face's individual rotateY/translateZ, and show
+     only the currently-selected face (tracked via .rface-current, set
+     in initResume()) as a plain flat card. Restored to a real rotating
+     cube once the burst settles — see initResume(). */
   .resume-prism.reflowing,
-  .resume-prism.reflowing .resume-face {
+  .resume-prism.reflowing .resume-face,
+  html.gpu-burst-flatten .resume-prism,
+  html.gpu-burst-flatten .resume-face {
     transform-style: flat !important;
     transition: none !important;
   }
-  .resume-stage.reflowing { perspective: none !important; }
-  .resume-prism.reflowing { visibility: hidden; }
+  .resume-prism.reflowing,
+  html.gpu-burst-flatten .resume-prism {
+    transform: none !important;
+  }
+  .resume-prism.reflowing .resume-face,
+  html.gpu-burst-flatten .resume-face {
+    transform: none !important;
+    opacity: 0;
+  }
+  .resume-prism.reflowing .resume-face.rface-current,
+  html.gpu-burst-flatten .resume-face.rface-current {
+    opacity: 1;
+  }
+  .resume-stage.reflowing,
+  html.gpu-burst-flatten .resume-stage {
+    perspective: none !important;
+  }
   @supports (height: 100svh) {
     /* svh (small viewport height) instead of dvh: dvh recalculates
        continuously while Safari's toolbar animates in/out during an
@@ -3837,6 +3860,11 @@ panels.forEach(p => observer.observe(p));
   }
   function updateTabs() {
     tabs.forEach((t, i) => t.classList.toggle('active', i === current));
+    // Kept in sync here (rather than a separate call) since updateTabs()
+    // already runs at every point `current` changes — used by the
+    // flattened-cube reflow/burst state to show only this face instead
+    // of hiding the whole prism. See .rface-current in the stylesheet.
+    faces.forEach((f, i) => f.classList.toggle('rface-current', i === current));
   }
   function animateBars() {
     if (barsShown) return;

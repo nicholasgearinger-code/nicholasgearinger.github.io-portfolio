@@ -1,6 +1,18 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script>
+  // Temporary bisection switch: add ?nofx to the URL to strip every
+  // backdrop-filter, filter:blur, and 3D transform/preserve-3d on the
+  // page. This trades away most of the visual polish but tests whether
+  // the rotation crash is a GPU-compositing-layer problem (many blurred/
+  // 3D layers all needing re-rasterization at once on resize) rather
+  // than anything JS is doing.
+  if (new URLSearchParams(location.search).has('nofx')) {
+    document.write('<style>*,*::before,*::after{backdrop-filter:none!important;-webkit-backdrop-filter:none!important;filter:none!important;transform-style:flat!important;perspective:none!important;will-change:auto!important;}</style>');
+    console.warn('[nofx] GPU compositing effects stripped for diagnostic testing');
+  }
+</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#020810">
@@ -4928,7 +4940,20 @@ panels.forEach(p => observer.observe(p));
 
 <!-- GSAP -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
-<script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js"></script>
+<script>
+  // Temporary bisection switch: add ?nomodels to the URL to skip loading
+  // the <model-viewer> library entirely (it upgrades all 6 <model-viewer>
+  // elements the moment it loads, regardless of scroll position — this
+  // tests whether that eager upgrade is involved in the rotation crash).
+  if (!new URLSearchParams(location.search).has('nomodels')) {
+    const mv = document.createElement('script');
+    mv.type = 'module';
+    mv.src = 'https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js';
+    document.currentScript.after(mv);
+  } else {
+    console.warn('[model-viewer] disabled via ?nomodels');
+  }
+</script>
 
 
 <script>

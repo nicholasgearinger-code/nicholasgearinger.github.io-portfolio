@@ -3864,6 +3864,7 @@ panels.forEach(p => observer.observe(p));
   // simultaneous filter:blur() animations on elements nested inside the
   // prism's preserve-3d context.
   let faceAnimToken = 0;
+  let fallbackAnimToken = 0;
 
   // Coarse-pointer (touch) devices skip the blur step entirely. Every
   // element that gets both `filter` and a transform while nested inside a
@@ -3874,18 +3875,23 @@ panels.forEach(p => observer.observe(p));
   // translateY stagger still reads fine without the blur on top.
   const SKIP_BLUR = window.matchMedia('(pointer: coarse)').matches;
 
-  function animateFaceText(faceEl) {
-    if (!faceEl || window.__reduceMotion) return;
-    const myToken = ++faceAnimToken;
-    const units = collectStaggerUnits(faceEl);
+  // Shared stagger driver behind both animateFaceText (desktop cube face,
+  // inside the preserve-3d prism) and animateFallbackText (mobile's plain
+  // 2D burst-fallback content). Each caller supplies its own token
+  // get/set pair so a second call on one track (fast tab-tapping) only
+  // supersedes pending callbacks on that same track, not the other.
+  function runStagger(container, getToken, bumpToken, skipBlur) {
+    if (!container || window.__reduceMotion) return;
+    const myToken = bumpToken();
+    const units = collectStaggerUnits(container);
     if (!units.length) return;
     units.forEach((el) => {
       el.style.transition = 'none';
       el.style.opacity = '0';
       el.style.transform = 'translateY(38px) scale(.93)';
-      if (!SKIP_BLUR) el.style.filter = 'blur(6px)';
+      if (!skipBlur) el.style.filter = 'blur(6px)';
     });
-    void faceEl.offsetHeight; // force reflow so the hidden state commits before animating
+    void container.offsetHeight; // force reflow so the hidden state commits before animating
 
     // Safety net: the animation below depends on a nested
     // requestAnimationFrame callback actually firing to bring these
@@ -3898,7 +3904,7 @@ panels.forEach(p => observer.observe(p));
     // since it lands on the identical final values, it's invisible when
     // the animation succeeded and a lifesaver when it didn't.
     setTimeout(() => {
-      if (myToken !== faceAnimToken) return; // superseded by a later call
+      if (getToken() !== myToken) return; // superseded by a later call
       units.forEach((el) => {
         el.style.opacity = '1';
         el.style.transform = 'translateY(0) scale(1)';
@@ -3908,7 +3914,7 @@ panels.forEach(p => observer.observe(p));
 
     units.forEach((el, i) => {
       requestAnimationFrame(() => {
-        if (myToken !== faceAnimToken) return; // superseded by a later call
+        if (getToken() !== myToken) return; // superseded by a later call
         el.style.transition =
           'opacity .75s cubic-bezier(.16,1,.3,1), transform .75s cubic-bezier(.16,1,.3,1), filter .75s cubic-bezier(.16,1,.3,1)';
         el.style.transitionDelay = (i * 90) + 'ms';
@@ -3919,6 +3925,19 @@ panels.forEach(p => observer.observe(p));
     });
   }
 
+  function animateFaceText(faceEl) {
+    runStagger(faceEl, () => faceAnimToken, () => (++faceAnimToken), SKIP_BLUR);
+  }
+
+  // Same stagger, applied to the mobile burst-fallback content instead of
+  // the (invisible-on-touch) cube face. Always skips blur — this only ever
+  // runs on coarse-pointer devices or mid-burst, both cases SKIP_BLUR
+  // already covers, so there's no live matchMedia check to repeat here.
+  function animateFallbackText() {
+    runStagger(burstFallback, () => fallbackAnimToken, () => (++fallbackAnimToken), true);
+  }
+
+
 
   let current = 0;      // active face 0..3
   let ry = 0;           // current rotateY in degrees
@@ -3928,21 +3947,26 @@ panels.forEach(p => observer.observe(p));
     const depth = prism.offsetWidth / 2;
     prism.style.transform = 'translateZ(' + (-depth) + 'px) rotateY(' + ry + 'deg)';
   }
-  function updateTabs() {
+  function updateTabs(animateFallback) {
     tabs.forEach((t, i) => t.classList.toggle('active', i === current));
     // Kept in sync here (rather than a separate call) since updateTabs()
     // already runs at every point `current` changes.
     faces.forEach((f, i) => f.classList.toggle('rface-current', i === current));
-    syncBurstFallback();
+    syncBurstFallback(animateFallback);
   }
   // Copies the current face's markup into the plain 2D fallback element
   // (a sibling of the prism, not inside its preserve-3d context — see
   // stylesheet). It's shown/hidden purely by CSS during a reflow/burst,
   // so this just needs to always hold the right content, cheaply, with
-  // no effect on the cube's own compositing layer.
-  function syncBurstFallback() {
+  // no effect on the cube's own compositing layer. Pass animate=true on
+  // a real face change (tab click, drag snap) to run the same stagger
+  // reveal mobile gets on the (invisible-to-it) cube; leave it false for
+  // silent syncs, like the initial setup or a mid-burst resync, where the
+  // content should just be correct with no extra motion.
+  function syncBurstFallback(animate) {
     if (!burstFallback || !faces[current]) return;
     burstFallback.innerHTML = faces[current].innerHTML;
+    if (animate) animateFallbackText();
   }
   function animateBars() {
     if (barsShown) return;
@@ -3977,7 +4001,7 @@ panels.forEach(p => observer.observe(p));
     apply();
     if (!animate) requestAnimationFrame(() => prism.classList.remove('dragging'));
     dropLiftSoon(animate ? 900 : 100); // covers the .85s snap transition
-    updateTabs();
+    updateTabs(!skipTextAnim);
     if (!skipTextAnim) animateFaceText(faces[current]);
     if (current === 3) animateBars();
   }
@@ -4010,9 +4034,10 @@ panels.forEach(p => observer.observe(p));
     apply();
     dropLiftSoon(900); // covers the .85s snap-back transition
     const next = (((-snapped / 90) % 4) + 4) % 4;
-    if (next !== current) animateFaceText(faces[next]);
+    const changed = next !== current;
+    if (changed) animateFaceText(faces[next]);
     current = next;
-    updateTabs();
+    updateTabs(changed);
     if (current === 3) animateBars();
   }
   prism.addEventListener('pointerup', endDrag);
@@ -4072,12 +4097,14 @@ panels.forEach(p => observer.observe(p));
     const firstReveal = new IntersectionObserver((entries) => {
       if (entries[0].isIntersecting) {
         animateFaceText(faces[current]);
+        animateFallbackText();
         firstReveal.disconnect();
       }
     }, { threshold: 0.55 });
     firstReveal.observe(stage);
   } else {
     animateFaceText(faces[0]);
+    animateFallbackText();
   }
   } catch (err) {
     console.error('[resume] initialization failed:', err);

@@ -332,6 +332,57 @@
     mask-composite: intersect, intersect;
     transition: opacity .15s linear;
   }
+  /* Arc-reactor ambient glow — sits between the particle field and the
+     hero text, idling as a slow pulse once "armed" by the JS reveal
+     sequence, giving the whole hero a powered-up JARVIS-HUD backdrop. */
+  .arc-reactor {
+    position: absolute; top: 50%; left: 50%; width: 0; height: 0;
+    z-index: 1; pointer-events: none;
+  }
+  .arc-reactor-glow {
+    position: absolute; top: 0; left: 0; transform: translate(-50%,-50%);
+    width: min(70vw, 820px); height: min(70vw, 820px); border-radius: 50%;
+    background: radial-gradient(circle, rgba(34,211,238,.16) 0%, rgba(34,211,238,.07) 32%, transparent 64%);
+    opacity: 0; transition: opacity 1.4s ease;
+    animation: arcReactorPulse 5.5s ease-in-out infinite;
+    animation-play-state: paused;
+  }
+  .arc-reactor-ring {
+    position: absolute; top: 0; left: 0; transform: translate(-50%,-50%);
+    width: min(46vw, 540px); height: min(46vw, 540px); border-radius: 50%;
+    border: 1px solid rgba(34,211,238,.22);
+    opacity: 0; transition: opacity 1.4s ease;
+  }
+  .arc-reactor-ring--outer {
+    width: min(58vw, 660px); height: min(58vw, 660px);
+    border: 1px dashed rgba(245,158,11,.16);
+  }
+  .arc-reactor.armed .arc-reactor-glow { opacity: 1; animation-play-state: running; }
+  .arc-reactor.armed .arc-reactor-ring { opacity: 1; animation: arcReactorSpin 44s linear infinite; }
+  .arc-reactor.armed .arc-reactor-ring--outer { animation-duration: 64s; animation-direction: reverse; }
+  @keyframes arcReactorPulse { 0%, 100% { opacity: .35; } 50% { opacity: .6; } }
+  @keyframes arcReactorSpin { from { transform: translate(-50%,-50%) rotate(0deg); } to { transform: translate(-50%,-50%) rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    .arc-reactor-glow, .arc-reactor-ring { transition: none; animation: none !important; }
+    .arc-reactor.armed .arc-reactor-glow, .arc-reactor.armed .arc-reactor-ring { opacity: .4; }
+  }
+  /* HUD boot-log — a quick "systems online" readout that flickers in
+     line-by-line ahead of the identity scan, then clears. */
+  .hero-boot-log {
+    display: flex; flex-direction: column; gap: .3rem;
+    margin-bottom: 1.1rem; min-height: 3.5em;
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-size: .66rem; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--muted);
+    transition: opacity .5s ease;
+  }
+  .hero-boot-log.boot-fade { opacity: 0; }
+  .boot-line {
+    opacity: 0; transform: translateY(4px);
+    transition: opacity .35s ease, transform .35s ease;
+  }
+  .boot-line.boot-in { opacity: 1; transform: translateY(0); }
+  .boot-line .boot-ok { color: #34D399; text-shadow: 0 0 6px rgba(52,211,153,.7); margin: 0 .35em; }
   .hero-content {
     position: relative; z-index: 2;
     text-shadow: 0 0 80px rgba(0,0,0,.7);
@@ -1755,7 +1806,6 @@
   .hud-dot { width: 6px; height: 6px; border-radius: 50%; background: #34D399; box-shadow: 0 0 6px #34D399; animation: hudPulse 2s infinite; flex-shrink: 0; }
   @keyframes hudPulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
   #hud-time { color: var(--sky); font-variant-numeric: tabular-nums; }
-  #hud-weather { color: var(--amber); }
   #hud-online strong { color: #34D399; }
   #hud-views strong { color: var(--white); }
   @media (max-width: 700px) { #hud-widget { display: none; } }
@@ -2348,7 +2398,17 @@
 
 <section id="hero">
   <canvas id="particle-canvas"></canvas>
+  <div class="arc-reactor" id="arc-reactor" aria-hidden="true">
+    <div class="arc-reactor-glow"></div>
+    <div class="arc-reactor-ring"></div>
+    <div class="arc-reactor-ring arc-reactor-ring--outer"></div>
+  </div>
   <div class="hero-content">
+    <div class="hero-boot-log" id="hero-boot-log" aria-hidden="true">
+      <div class="boot-line">POWER CORE <span class="boot-ok">●</span> ONLINE</div>
+      <div class="boot-line">DIAGNOSTICS <span class="boot-ok">●</span> NOMINAL</div>
+      <div class="boot-line">HUD <span class="boot-ok">●</span> LINKED</div>
+    </div>
     <div class="hero-eyebrow">Available for work · 2025</div>
     <div class="hero-title-row">
       <div class="hero-prompt-line" id="hero-prompt-line"><span class="hero-holo" id="hero-prompt-text">Scanning Identity</span></div>
@@ -3301,7 +3361,6 @@
 <div id="hud-widget">
   <div class="hud-row"><span class="hud-dot"></span><span>SYSTEM ONLINE</span></div>
   <div class="hud-row" id="hud-time">--:--:--</div>
-  <div class="hud-row" id="hud-weather-row" style="display:none">◐ <span id="hud-weather">—</span></div>
   <div class="hud-row" id="hud-online-row" style="display:none">◈ <span id="hud-online"><strong>—</strong> online now</span></div>
   <div class="hud-row js-api-only" id="hud-views-row" style="display:none">◉ <span id="hud-views"><strong>—</strong> views</span></div>
 </div>
@@ -5847,7 +5906,34 @@ panels.forEach(p => observer.observe(p));
     const sub = document.querySelector('.hero-sub');
     if (line3) line3.classList.add('reveal-in');
     if (sub) sub.classList.add('reveal-in');
+    const bootLog = document.getElementById('hero-boot-log');
+    if (bootLog) bootLog.style.display = 'none';
+    const arcReactor = document.getElementById('arc-reactor');
+    if (arcReactor) arcReactor.classList.add('armed');
     return;
+  }
+
+  // Arms the arc-reactor ambient glow (idle pulse + slow-spinning rings)
+  // so it's powering up behind the hero for the whole reveal sequence.
+  function armReactor() {
+    const arcReactor = document.getElementById('arc-reactor');
+    if (arcReactor) arcReactor.classList.add('armed');
+  }
+
+  // Flickers the "POWER CORE / DIAGNOSTICS / HUD" boot-log lines in one
+  // at a time, holds briefly, then fades the whole block out before the
+  // identity-scan label takes over.
+  function runBootLog(onDone) {
+    const log = document.getElementById('hero-boot-log');
+    if (!log) { onDone(); return; }
+    const lines = log.querySelectorAll('.boot-line');
+    if (!lines.length) { onDone(); return; }
+    lines.forEach((line, i) => setTimeout(() => line.classList.add('boot-in'), 120 + i * 170));
+    const totalIn = 120 + lines.length * 170 + 300;
+    setTimeout(() => {
+      log.classList.add('boot-fade');
+      setTimeout(onDone, 500);
+    }, totalIn);
   }
 
   // Materializes `el`'s existing text as a JARVIS-style hologram: a bright
@@ -5894,8 +5980,13 @@ panels.forEach(p => observer.observe(p));
     }
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
-  else run();
+  function start() {
+    armReactor();
+    runBootLog(run);
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+  else start();
 })();
 </script>
 <script>
@@ -6196,60 +6287,6 @@ panels.forEach(p => observer.observe(p));
   update();
 })();
 
-/* -- HUD WEATHER: purely client-side — browser geolocation (with the
-      user's permission) + Open-Meteo, which needs no API key and allows
-      direct browser calls. Independent of the portfolio's own backend, so
-      it still works even if that's offline. Silently stays hidden if
-      geolocation is denied/unavailable or the request fails, same
-      graceful-degradation pattern as the rest of the HUD. -- */
-(function hudWeather() {
-  const row = document.getElementById('hud-weather-row');
-  const el = document.getElementById('hud-weather');
-  if (!row || !el || !('geolocation' in navigator)) return;
-
-  // WMO weather codes (used by Open-Meteo) collapsed to a small glyph set —
-  // not exhaustive, just enough to read as "clear / cloudy / rain / snow /
-  // storm" at a glance in a 3-line HUD row.
-  function describe(code) {
-    if (code === 0) return ['☀', 'Clear'];
-    if (code <= 2) return ['🌤', 'Partly cloudy'];
-    if (code === 3) return ['☁', 'Overcast'];
-    if (code === 45 || code === 48) return ['🌫', 'Fog'];
-    if (code >= 51 && code <= 57) return ['🌦', 'Drizzle'];
-    if (code >= 61 && code <= 67) return ['🌧', 'Rain'];
-    if (code >= 71 && code <= 77) return ['🌨', 'Snow'];
-    if (code >= 80 && code <= 82) return ['🌧', 'Showers'];
-    if (code >= 85 && code <= 86) return ['🌨', 'Snow showers'];
-    if (code >= 95) return ['⛈', 'Storm'];
-    return ['—', 'Unknown'];
-  }
-
-  // Simple imperial-vs-metric heuristic off the browser's own locale
-  // rather than IP geolocation — no extra request, good enough for a
-  // decorative HUD reading (not a source of truth anyone's relying on).
-  const useF = /-US$|-BS$|-BZ$|-KY$|-LR$/i.test(navigator.language || '');
-
-  navigator.geolocation.getCurrentPosition(
-    async (pos) => {
-      try {
-        const { latitude, longitude } = pos.coords;
-        const url = 'https://api.open-meteo.com/v1/forecast?latitude=' + latitude +
-          '&longitude=' + longitude + '&current=temperature_2m,weather_code' +
-          '&temperature_unit=' + (useF ? 'fahrenheit' : 'celsius');
-        const r = await fetch(url);
-        if (!r.ok) return;
-        const data = await r.json();
-        const cur = data && data.current;
-        if (!cur || typeof cur.temperature_2m !== 'number') return;
-        const [icon, label] = describe(cur.weather_code);
-        el.textContent = Math.round(cur.temperature_2m) + '°' + (useF ? 'F' : 'C') + ' ' + icon + ' ' + label;
-        row.style.display = '';
-      } catch (_) { /* stays hidden */ }
-    },
-    () => { /* permission denied or unavailable — stays hidden, no prompt spam */ },
-    { timeout: 8000, maximumAge: 600000 }
-  );
-})();
 (function hideFixedWidgetsNearFooter() {
   const footer = document.querySelector('footer');
   if (!footer) return;

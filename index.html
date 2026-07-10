@@ -694,6 +694,25 @@
   html.gpu-burst-flatten .resume-prism {
     visibility: hidden;
   }
+  /* Plain, non-composited stand-in shown only during the burst — lives
+     directly in .resume-stage (not inside the preserve-3d prism), so
+     fading it in/out never touches the cube's own layer. Content is
+     synced from the current face's markup in JS (see syncBurstFallback
+     in initResume()). */
+  .resume-burst-fallback {
+    display: none;
+    position: absolute; inset: 0;
+    padding: 2.1rem 2rem;
+    border-radius: 1.5rem;
+    border: 1px solid rgba(56,189,248,.16);
+    background: linear-gradient(165deg, rgba(13,24,42,.97), rgba(6,12,24,.99));
+    overflow: auto;
+    z-index: 2;
+  }
+  .resume-prism.reflowing ~ .resume-burst-fallback,
+  html.gpu-burst-flatten .resume-burst-fallback {
+    display: block;
+  }
   .resume-stage.reflowing,
   html.gpu-burst-flatten .resume-stage {
     perspective: none !important;
@@ -2501,6 +2520,11 @@
         </article>
 
       </div>
+      <!-- Plain 2D fallback, deliberately NOT inside .resume-prism's
+           preserve-3d context — shown only during a reflow/burst so the
+           résumé stays readable without touching the live 3D layer's
+           own transform (see initResume() / stylesheet). -->
+      <div class="resume-burst-fallback" id="resume-burst-fallback" aria-hidden="true"></div>
       <div class="resume-hint">◀ drag to rotate ▶</div>
       <a href="Nicholas_Gearinger_Resume.pdf" download class="cs-trigger" style="margin-top:1.4rem;">Download résumé (PDF)</a>
     </div>
@@ -3759,6 +3783,7 @@ panels.forEach(p => observer.observe(p));
   const stage = document.getElementById('resume-stage');
   const prism = document.getElementById('resume-prism');
   const tabs  = Array.from(document.querySelectorAll('#resume-tabs .resume-tab'));
+  const burstFallback = document.getElementById('resume-burst-fallback');
   if (!stage || !prism || !tabs.length) return;
 
   const faces = Array.from(prism.querySelectorAll('.resume-face'));
@@ -3854,10 +3879,18 @@ panels.forEach(p => observer.observe(p));
   function updateTabs() {
     tabs.forEach((t, i) => t.classList.toggle('active', i === current));
     // Kept in sync here (rather than a separate call) since updateTabs()
-    // already runs at every point `current` changes — used by the
-    // flattened-cube reflow/burst state to show only this face instead
-    // of hiding the whole prism. See .rface-current in the stylesheet.
+    // already runs at every point `current` changes.
     faces.forEach((f, i) => f.classList.toggle('rface-current', i === current));
+    syncBurstFallback();
+  }
+  // Copies the current face's markup into the plain 2D fallback element
+  // (a sibling of the prism, not inside its preserve-3d context — see
+  // stylesheet). It's shown/hidden purely by CSS during a reflow/burst,
+  // so this just needs to always hold the right content, cheaply, with
+  // no effect on the cube's own compositing layer.
+  function syncBurstFallback() {
+    if (!burstFallback || !faces[current]) return;
+    burstFallback.innerHTML = faces[current].innerHTML;
   }
   function animateBars() {
     if (barsShown) return;

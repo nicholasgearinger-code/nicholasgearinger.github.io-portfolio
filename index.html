@@ -781,10 +781,15 @@
       transform-style: flat !important;
       visibility: hidden;
     }
-    .resume-burst-fallback { display: block; }
-    /* "drag to rotate ▶" doesn't apply once the cube is hidden here —
-       touch users switch faces with the tabs instead. */
-    .resume-hint { display: none; }
+    .resume-burst-fallback {
+      display: block;
+      touch-action: pan-y; /* horizontal swipe is handled by JS; vertical scroll passes through */
+    }
+    /* Swiping replaces dragging the cube here — hint text is swapped to
+       match via JS (see initResume). Kept visible now that there's a real
+       gesture behind it, rather than hidden like the old "drag to rotate"
+       copy which no longer applied once the cube was hidden. */
+    .resume-hint { bottom: -2rem; }
   }
 
   .resume-face {
@@ -3891,6 +3896,10 @@ panels.forEach(p => observer.observe(p));
   // process and crashing the tab on mobile Chrome/Safari. The opacity +
   // translateY stagger still reads fine without the blur on top.
   const SKIP_BLUR = window.matchMedia('(pointer: coarse)').matches;
+  if (SKIP_BLUR) {
+    const hint = document.querySelector('.resume-hint');
+    if (hint) hint.textContent = '‹ swipe to browse ›';
+  }
 
   // Shared stagger driver behind both animateFaceText (desktop cube face,
   // inside the preserve-3d prism) and animateFallbackText (mobile's plain
@@ -3960,27 +3969,37 @@ panels.forEach(p => observer.observe(p));
   let ry = 0;           // current rotateY in degrees
   let barsShown = false;
   let barsShownFallback = false;
+  let fallbackSwapToken = 0;
 
   function apply() {
     const depth = prism.offsetWidth / 2;
     prism.style.transform = 'translateZ(' + (-depth) + 'px) rotateY(' + ry + 'deg)';
   }
-  function updateTabs(animateFallback) {
+  function updateTabs(animateFallback, direction) {
     tabs.forEach((t, i) => t.classList.toggle('active', i === current));
     // Kept in sync here (rather than a separate call) since updateTabs()
     // already runs at every point `current` changes.
     faces.forEach((f, i) => f.classList.toggle('rface-current', i === current));
-    syncBurstFallback(animateFallback);
+    syncBurstFallback(animateFallback, direction);
   }
   // Copies the current face's markup into the plain 2D fallback element
   // (a sibling of the prism, not inside its preserve-3d context — see
   // stylesheet). It's shown/hidden purely by CSS during a reflow/burst,
   // so this just needs to always hold the right content, cheaply, with
   // no effect on the cube's own compositing layer. Pass animate=true on
-  // a real face change (tab click, drag snap) to run the same stagger
-  // reveal mobile gets on the (invisible-to-it) cube; leave it false for
-  // silent syncs, like the initial setup or a mid-burst resync, where the
-  // content should just be correct with no extra motion.
+  // a real face change (tab click, drag snap, swipe) to run a reveal
+  // instead of a silent swap — used for the initial setup and mid-burst
+  // resyncs, where the content should just be correct with no extra
+  // motion.
+  //
+  // On mobile there's no cube rotation to sell "moving between sections",
+  // so a real face change also slides the card horizontally (direction
+  // +1 = next, sliding toward the left like flipping a page forward; -1 =
+  // previous) on top of the existing per-element fade/stagger — a plain
+  // fade alone reads as content just changing under you, not as moving
+  // through an ordered set of sections. Token-gated the same way as
+  // runStagger, so fast tab-tapping or swiping can't leave two swaps
+  // fighting over the same element.
   //
   // The clone is a fresh set of DOM nodes each time — it does NOT share
   // .rbar-fill elements with the prism's own Skills face, so filling the
@@ -3988,14 +4007,47 @@ panels.forEach(p => observer.observe(p));
   // gets synced in here on every visit, but its bars should only fill once
   // (barsShownFallback), same "animate the first time only" rule the prism
   // follows via barsShown.
-  function syncBurstFallback(animate) {
+  function syncBurstFallback(animate, direction) {
     if (!burstFallback || !faces[current]) return;
-    burstFallback.innerHTML = faces[current].innerHTML;
-    if (animate) animateFallbackText();
-    if (current === 3 && !barsShownFallback) {
-      barsShownFallback = true;
-      fillBars(burstFallback);
+
+    function finishSync() {
+      burstFallback.innerHTML = faces[current].innerHTML;
+      if (current === 3 && !barsShownFallback) {
+        barsShownFallback = true;
+        fillBars(burstFallback);
+      }
     }
+
+    if (!animate || window.__reduceMotion) {
+      fallbackSwapToken++; // cancel any in-flight slide
+      burstFallback.style.transition = 'none';
+      burstFallback.style.transform = 'translateX(0)';
+      burstFallback.style.opacity = '1';
+      finishSync();
+      return;
+    }
+
+    const dir = direction < 0 ? -1 : 1;
+    const myToken = ++fallbackSwapToken;
+    const EXIT_MS = 220;
+    burstFallback.style.transition = 'transform .22s cubic-bezier(.4,0,.2,1), opacity .22s ease';
+    burstFallback.style.transform = 'translateX(' + (dir * -26) + 'px)';
+    burstFallback.style.opacity = '0';
+
+    setTimeout(() => {
+      if (myToken !== fallbackSwapToken) return; // superseded by a later swap
+      finishSync();
+      burstFallback.style.transition = 'none';
+      burstFallback.style.transform = 'translateX(' + (dir * 26) + 'px)';
+      void burstFallback.offsetHeight; // commit the entry position before animating
+      requestAnimationFrame(() => {
+        if (myToken !== fallbackSwapToken) return;
+        burstFallback.style.transition = 'transform .4s cubic-bezier(.16,1,.3,1), opacity .35s ease';
+        burstFallback.style.transform = 'translateX(0)';
+        burstFallback.style.opacity = '1';
+      });
+      animateFallbackText();
+    }, EXIT_MS);
   }
   function fillBars(container) {
     if (!container) return;
@@ -4026,21 +4078,56 @@ panels.forEach(p => observer.observe(p));
     liftDropTimer = setTimeout(() => prism.classList.remove('will-lift'), delay);
   }
 
-  function goTo(i, animate, skipTextAnim) {
+  function goTo(i, animate, skipTextAnim, dir) {
+    const prevCurrent = current;
     current = ((i % 4) + 4) % 4;
+    // Explicit dir (keyboard arrows, swipe) wins; tab clicks infer left/
+    // right from index order, which is the correct read for a linear row
+    // of tabs even though the cube itself wraps.
+    const direction = typeof dir === 'number' ? dir : (current >= prevCurrent ? 1 : -1);
     ry = -current * 90;
     lift();
     if (!animate) prism.classList.add('dragging');   // skip transition
     apply();
     if (!animate) requestAnimationFrame(() => prism.classList.remove('dragging'));
     dropLiftSoon(animate ? 900 : 100); // covers the .85s snap transition
-    updateTabs(!skipTextAnim);
+    updateTabs(!skipTextAnim, direction);
     if (!skipTextAnim) animateFaceText(faces[current]);
     if (current === 3) animateBars();
   }
 
   // Tabs
   tabs.forEach((t, i) => t.addEventListener('click', () => goTo(i, true)));
+
+  // Swipe through faces on the mobile fallback card — the cube's own
+  // drag-to-rotate doesn't apply here since the prism is visibility:hidden
+  // (and not hit-testable) on coarse-pointer devices, and "spinning" isn't
+  // a real gesture on a flat card anyway. Deliberately clamped rather than
+  // wrapping like the cube: this reads as a linear stack of sections
+  // (About → Skills), not a loop, so swiping past either end just does
+  // nothing rather than jumping around.
+  if (burstFallback) {
+    let fbStartX = 0, fbStartY = 0, fbDragging = false;
+    const SWIPE_MIN_PX = 40;
+    burstFallback.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse') return; // tabs/keyboard cover mouse; avoid hijacking text selection
+      fbDragging = true;
+      fbStartX = e.clientX;
+      fbStartY = e.clientY;
+    });
+    function endFbSwipe(e) {
+      if (!fbDragging) return;
+      fbDragging = false;
+      const dx = e.clientX - fbStartX;
+      const dy = e.clientY - fbStartY;
+      if (Math.abs(dx) < SWIPE_MIN_PX || Math.abs(dx) < Math.abs(dy) * 1.5) return; // too short, or more vertical than horizontal
+      if (dx < 0 && current < faces.length - 1) goTo(current + 1, true, false, 1);
+      else if (dx > 0 && current > 0) goTo(current - 1, true, false, -1);
+    }
+    burstFallback.addEventListener('pointerup', endFbSwipe);
+    burstFallback.addEventListener('pointercancel', () => { fbDragging = false; });
+  }
+
 
   // Drag to spin
   let dragging = false, startX = 0, startRy = 0, moved = 0;
@@ -4080,8 +4167,8 @@ panels.forEach(p => observer.observe(p));
   window.addEventListener('keydown', e => {
     const r = stage.getBoundingClientRect();
     if (r.top > window.innerHeight || r.bottom < 0) return;
-    if (e.key === 'ArrowRight') goTo(current + 1, true);
-    else if (e.key === 'ArrowLeft') goTo(current - 1, true);
+    if (e.key === 'ArrowRight') goTo(current + 1, true, false, 1);
+    else if (e.key === 'ArrowLeft') goTo(current - 1, true, false, -1);
   });
 
   window.addEventListener('resize', window.__debounce(apply, 160));

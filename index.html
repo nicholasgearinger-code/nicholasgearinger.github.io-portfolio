@@ -966,7 +966,14 @@
     gap: 1.5rem;
     margin-top: 2.5rem;
   }
-  @media (max-width: 420px) {
+  @media (max-width: 420px), (max-height: 500px) and (pointer: coarse) {
+    /* Second condition catches phones rotated to landscape: width alone
+       clears 420px there, which used to let 2+ model-viewer cards sit
+       in the viewport at once — each with its own live WebGL context and
+       auto-rotate render loop. On iOS that's enough concurrent GPU/canvas
+       memory to crash the WebContent process (repeated reload → "can't
+       open this page"). Forcing one column keeps only one card's worth
+       of WebGL cost active at a time on touch devices, same as portrait. */
     .craft-grid { grid-template-columns: 1fr; }
   }
   .craft-card {
@@ -5550,12 +5557,32 @@ panels.forEach(p => observer.observe(p));
   // sitting scrolled off-screen still spinning. Pausing/resuming based on
   // actual visibility keeps the GPU cost to roughly "one model's worth"
   // at any given time instead of up to four simultaneously.
+  // The naive version of this (toggle auto-rotate on every intersecting
+  // entry) assumes only one card is ever intersecting at once — true in
+  // a single-column portrait layout, false the moment the grid widens to
+  // 2+ columns (e.g. a phone rotated to landscape, or a tablet). Multiple
+  // simultaneously-spinning WebGL contexts is exactly the kind of GPU/
+  // memory load that crashes iOS's WebContent process, so this tracks
+  // intersection ratios and hard-caps active auto-rotate to the single
+  // most-visible card, no matter how many are technically on screen.
+  const intersectionRatios = new Map();
+  const MAX_ACTIVE_ROTATORS = 1;
+  function applyRotationCap() {
+    const ranked = viewers
+      .filter((mv) => (intersectionRatios.get(mv) || 0) > 0)
+      .sort((a, b) => (intersectionRatios.get(b) || 0) - (intersectionRatios.get(a) || 0));
+    viewers.forEach((mv) => {
+      const shouldRotate = ranked.indexOf(mv) > -1 && ranked.indexOf(mv) < MAX_ACTIVE_ROTATORS;
+      if (shouldRotate) mv.setAttribute('auto-rotate', '');
+      else mv.removeAttribute('auto-rotate');
+    });
+  }
   const rotateObserver = new IntersectionObserver((entries) => {
     entries.forEach((entry) => {
-      if (entry.isIntersecting) entry.target.setAttribute('auto-rotate', '');
-      else entry.target.removeAttribute('auto-rotate');
+      intersectionRatios.set(entry.target, entry.isIntersecting ? entry.intersectionRatio : 0);
     });
-  }, { threshold: 0.1 });
+    applyRotationCap();
+  }, { threshold: [0, 0.1, 0.25, 0.5, 0.75, 1] });
   viewers.forEach((mv) => rotateObserver.observe(mv));
 })();
 </script>

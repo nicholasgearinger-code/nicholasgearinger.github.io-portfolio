@@ -601,8 +601,16 @@
     will-change: transform;
   }
   .resume-prism.dragging { transition: none; cursor: grabbing; }
-  @supports (height: 100dvh) {
-    .resume-prism { --rh: min(520px, 78dvh); }
+  @supports (height: 100svh) {
+    /* svh (small viewport height) instead of dvh: dvh recalculates
+       continuously while Safari's toolbar animates in/out during an
+       orientation change, and this element is both preserve-3d AND
+       will-change:transform — every dvh tick forces the compositor to
+       rebuild its 3D GPU layer. That rapid-fire rebuild burst is what
+       was crashing the WebContent/GPU process on rotation. svh is a
+       fixed value (the smallest the viewport height ever gets), so the
+       cube's size stops scrubbing during the toolbar animation. */
+    .resume-prism { --rh: min(520px, 78svh); }
   }
   @media (pointer: coarse) {
     .resume-face {

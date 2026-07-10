@@ -5875,7 +5875,7 @@ panels.forEach(p => observer.observe(p));
   const intersectionRatios = new Map();
   const MAX_ACTIVE_ROTATORS = 1;
   function applyRotationCap() {
-    const ranked = viewers
+    const ranked = Array.from(viewers)
       .filter((mv) => (intersectionRatios.get(mv) || 0) > 0)
       .sort((a, b) => (intersectionRatios.get(b) || 0) - (intersectionRatios.get(a) || 0));
     viewers.forEach((mv) => {

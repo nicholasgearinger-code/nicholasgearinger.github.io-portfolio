@@ -249,6 +249,22 @@
     margin: .5rem auto 2.5rem; line-height: 1.65;
   }
   .hero-btns { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+  .hero-continue-btn {
+    margin-top: 2.4rem;
+    display: inline-flex; align-items: center; gap: .55rem;
+    padding: .6rem 1.4rem; border-radius: 100px; cursor: pointer;
+    background: transparent; border: 1px solid var(--card-border);
+    color: var(--muted); font-family: inherit; font-size: .82rem; font-weight: 600;
+    letter-spacing: .01em;
+    transition: color .25s, border-color .25s, background .25s, transform .2s, opacity .4s;
+  }
+  .hero-continue-btn:hover { color: var(--white); border-color: var(--cyan); background: rgba(34,211,238,.08); transform: translateY(-2px); }
+  .hero-continue-btn.used { opacity: 0; pointer-events: none; }
+  .hero-continue-arrow { display: inline-block; animation: heroContinueBounce 1.8s ease-in-out infinite; }
+  @keyframes heroContinueBounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(4px); }
+  }
   .btn-primary {
     padding: .85rem 2rem; border-radius: 100px;
     background: var(--violet); color: var(--white);
@@ -2079,9 +2095,13 @@
       <span class="tldr-tag"><span class="tldr-dot"></span>TL;DR — AI-generated summary</span>
       <p id="tldr-text">Nicholas is a creative generalist working across design, 3D, and game development, and this site itself doubles as a demo of applied AI — from a live deep learning visualizer to on-page assistants that answer questions and summarize content for you.</p>
     </div>
+    <button type="button" class="hero-continue-btn" id="hero-continue-btn">
+      Continue to Portfolio
+      <span class="hero-continue-arrow" aria-hidden="true">↓</span>
+    </button>
   </div>
 
-  <!-- CIRCUIT BRIDGE — hero centrepiece: strands reveal & electrons flow as you scroll -->
+  <!-- CIRCUIT BRIDGE — hero centrepiece: strands reveal & electrons flow when "Continue to Portfolio" is clicked -->
   <div class="circuit-bridge" id="hero-bridge" data-bridge="hero"></div>
 
 </section>
@@ -4509,75 +4529,18 @@ panels.forEach(p => observer.observe(p));
       this.fibers = [];
       this.resize();
 
-      // Replays every time the bridge is entered — scrolling down through
-      // it from above, or back up through it from below — and drives the
-      // page's scroll position itself at the animation's own pace, rather
-      // than being scrubbed by (and fighting against) the user's actual
-      // scroll input. Respects prefers-reduced-motion (no auto-scroll,
-      // animation just plays once statically) and immediately hands
-      // control back the instant the person scrolls or touches manually,
-      // so it's a guided moment rather than a trap.
+      // Plays once when explicitly triggered — by the "Continue to
+      // Portfolio" button, not guessed from scroll position/direction.
+      // A deliberate click is unambiguous, which sidesteps every edge
+      // case that came with trying to infer "did they just scroll into
+      // this on purpose?" from IntersectionObserver alone.
       this.playStarted = false;
       this.playStartTime = 0;
-      this.autoScrolling = false;
-      const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    }
 
-      if ('IntersectionObserver' in window) {
-        let prevY = window.scrollY;
-        let firstCallback = true;
-        this._io = new IntersectionObserver((entries) => {
-          const entry = entries[0];
-          // IntersectionObserver always fires once immediately on
-          // observe() reporting the current state, before any actual
-          // scrolling has happened — without this guard, a bridge that's
-          // already partly visible on page load would trigger the whole
-          // sequence instantly, and (since the observer would then
-          // already consider it "intersecting") never fire again for the
-          // person's real scroll into it.
-          if (firstCallback) { firstCallback = false; prevY = window.scrollY; return; }
-          if (!entry.isIntersecting) { prevY = window.scrollY; return; }
-          if (this.autoScrolling) return; // already mid-sequence — ignore re-entry noise
-          const goingDown = window.scrollY >= prevY;
-          prevY = window.scrollY;
-
-          this.playStarted = true;
-          this.playStartTime = performance.now();
-          if (reduceMotion) return; // play the visual once, statically; skip the scroll takeover entirely
-
-          const rect = this.div.getBoundingClientRect();
-          const startY = window.scrollY;
-          // Down: carry the scroll until the bridge's bottom edge reaches
-          // the viewport's bottom. Up: carry it back until the bridge's
-          // top edge reaches the viewport's top (i.e., fully out the top).
-          const targetY = goingDown
-            ? window.scrollY + (rect.bottom - window.innerHeight)
-            : window.scrollY + rect.top;
-          if (Math.abs(targetY - startY) < 40) return; // already basically there
-
-          this.autoScrolling = true;
-          let cancelled = false;
-          const cancel = () => { cancelled = true; };
-          window.addEventListener('wheel', cancel, { passive: true, once: true });
-          window.addEventListener('touchstart', cancel, { passive: true, once: true });
-          const t0 = performance.now();
-          const step = () => {
-            if (cancelled) { this.autoScrolling = false; return; }
-            const p = Math.min(1, (performance.now() - t0) / BRIDGE_PLAY_MS);
-            window.scrollTo({ top: startY + (targetY - startY) * p, left: 0, behavior: 'instant' });
-            if (p < 1) { requestAnimationFrame(step); return; }
-            this.autoScrolling = false;
-            window.removeEventListener('wheel', cancel);
-            window.removeEventListener('touchstart', cancel);
-          };
-          requestAnimationFrame(step);
-        }, { threshold: 0.05 });
-        this._io.observe(div);
-      } else {
-        // No IntersectionObserver support — just play immediately rather
-        // than never playing at all.
-        this.playStarted = true;
-        this.playStartTime = performance.now();
-      }
+    play() {
+      this.playStarted = true;
+      this.playStartTime = performance.now();
     }
 
     resize() {
@@ -4631,6 +4594,43 @@ panels.forEach(p => observer.observe(p));
     bridges.forEach(b => { b.updateReveal(); b.draw(t, dt); });
   }
   loop();
+
+  const continueBtn = document.getElementById('hero-continue-btn');
+  const heroBridgeEl = document.getElementById('hero-bridge');
+  if (continueBtn && heroBridgeEl) {
+    continueBtn.addEventListener('click', () => {
+      continueBtn.disabled = true;
+      continueBtn.classList.add('used');
+      bridges.forEach((b) => b.play());
+
+      const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (reduceMotion) {
+        // Skip the scroll takeover; just let the visual play in place.
+        heroBridgeEl.scrollIntoView({ behavior: 'auto', block: 'end' });
+        return;
+      }
+
+      const rect = heroBridgeEl.getBoundingClientRect();
+      const startY = window.scrollY;
+      const targetY = window.scrollY + (rect.bottom - window.innerHeight);
+      if (Math.abs(targetY - startY) < 10) return; // nothing meaningful to scroll
+
+      let cancelled = false;
+      const cancel = () => { cancelled = true; };
+      window.addEventListener('wheel', cancel, { passive: true, once: true });
+      window.addEventListener('touchstart', cancel, { passive: true, once: true });
+      const t0 = performance.now();
+      const step = () => {
+        if (cancelled) return;
+        const p = Math.min(1, (performance.now() - t0) / BRIDGE_PLAY_MS);
+        window.scrollTo({ top: startY + (targetY - startY) * p, left: 0, behavior: 'instant' });
+        if (p < 1) { requestAnimationFrame(step); return; }
+        window.removeEventListener('wheel', cancel);
+        window.removeEventListener('touchstart', cancel);
+      };
+      requestAnimationFrame(step);
+    });
+  }
 
 })();
 </script>

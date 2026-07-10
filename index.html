@@ -752,6 +752,27 @@
       background: linear-gradient(165deg, rgba(13,24,42,.97), rgba(6,12,24,.99));
       box-shadow: 0 20px 40px -20px rgba(0,0,0,.7);
     }
+    /* Touch devices default straight to the plain 2D fallback instead of
+       the preserve-3d cube. This isn't just about the drag gesture being
+       awkward on touch — a stack of preserve-3d + backdrop-filter +
+       will-change layers this deep (4 faces, each blurred) was crashing
+       WebKit's GPU process outright on load, not only during the
+       orientation-rotation burst the rest of this flattening machinery
+       was originally built for (confirmed via ?no3d fixing a blank,
+       unresponsive #resume on iOS Safari). Reusing that same
+       reflowing/fallback path here rather than inventing a second one —
+       .resume-burst-fallback is already kept in sync with the active
+       face on every tab click via syncBurstFallback() in initResume(),
+       so no JS changes are needed for its content to be correct. */
+    .resume-stage { perspective: none !important; }
+    .resume-prism {
+      transform-style: flat !important;
+      visibility: hidden;
+    }
+    .resume-burst-fallback { display: block; }
+    /* "drag to rotate ▶" doesn't apply once the cube is hidden here —
+       touch users switch faces with the tabs instead. */
+    .resume-hint { display: none; }
   }
 
   .resume-face {

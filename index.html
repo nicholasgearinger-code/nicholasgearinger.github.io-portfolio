@@ -9,17 +9,29 @@
   //   ?no3d          — kill transform-style:preserve-3d + perspective only
   //   ?nowillchange  — kill will-change only
   //   ?nofx          — all three at once (equivalent to the old combined flag)
+  //   ?force3d       — opt back into preserve-3d/perspective on a coarse-pointer
+  //                    device, overriding the automatic mobile no3d below
+  //
+  // no3d is now ALSO applied automatically on coarse-pointer (touch) devices.
+  // Confirmed via ?no3d/?nofx bisection: a still-live preserve-3d/perspective
+  // layer (the photo carousel embedded in the résumé's Skills face) keeps
+  // compositing even while sitting inside the visibility:hidden résumé prism
+  // on mobile — that's what was blanking/crashing the résumé section on
+  // phones. Flattening 3D globally on coarse-pointer devices removes that
+  // live layer instead of relying on everyone appending ?no3d by hand.
   (function () {
     const p = new URLSearchParams(location.search);
     const all = p.has('nofx');
+    const isCoarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+    const wantNo3d = all || p.has('no3d') || (isCoarse && !p.has('force3d'));
     let css = '';
     if (all || p.has('noblur')) {
       css += '*,*::before,*::after{backdrop-filter:none!important;-webkit-backdrop-filter:none!important;filter:none!important;}';
       console.warn('[noblur] backdrop-filter + filter:blur stripped');
     }
-    if (all || p.has('no3d')) {
+    if (wantNo3d) {
       css += '*,*::before,*::after{transform-style:flat!important;perspective:none!important;}';
-      console.warn('[no3d] preserve-3d + perspective stripped');
+      console.warn('[no3d] preserve-3d + perspective stripped' + (isCoarse && !p.has('no3d') && !all ? ' (auto, coarse pointer)' : ''));
     }
     if (all || p.has('nowillchange')) {
       css += '*,*::before,*::after{will-change:auto!important;}';

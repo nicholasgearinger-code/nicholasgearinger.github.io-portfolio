@@ -187,6 +187,34 @@
     max-width: 100vw;
   }
 
+  /* ── SCROLL PROGRESS: circuit-trace HUD strip ── */
+  #scroll-progress {
+    position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 101;
+    background: rgba(255,255,255,.05);
+    pointer-events: none;
+  }
+  #scroll-progress-fill {
+    position: relative;
+    height: 100%; width: 100%;
+    transform: scaleX(0); transform-origin: 0 50%;
+    background: linear-gradient(90deg, var(--blue), var(--cyan) 60%, var(--violet));
+    box-shadow: 0 0 8px rgba(34,211,238,.75), 0 0 18px rgba(34,211,238,.35);
+  }
+  /* will-change is only reserved while actively scrolling (see
+     initScrollProgress) — same reasoning as the résumé prism's will-lift:
+     a permanent GPU layer here is unnecessary cost for an element that's
+     static almost all the time. */
+  #scroll-progress-fill.tracking { will-change: transform; }
+  #scroll-progress-node {
+    position: absolute; top: 50%; right: -5px; transform: translateY(-50%);
+    width: 9px; height: 9px; border-radius: 50%;
+    background: var(--white);
+    box-shadow: 0 0 8px 2px var(--cyan), 0 0 18px 5px rgba(34,211,238,.55);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #scroll-progress-fill { transition: none; }
+  }
+
   /* ── NAV ── */
   nav {
     position: fixed; top: 0; left: 0; right: 0; z-index: 100;
@@ -1696,6 +1724,8 @@
   .hud-dot { width: 6px; height: 6px; border-radius: 50%; background: #34D399; box-shadow: 0 0 6px #34D399; animation: hudPulse 2s infinite; flex-shrink: 0; }
   @keyframes hudPulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
   #hud-time { color: var(--sky); font-variant-numeric: tabular-nums; }
+  #hud-weather { color: var(--amber); }
+  #hud-online strong { color: #34D399; }
   #hud-views strong { color: var(--white); }
   @media (max-width: 700px) { #hud-widget { display: none; } }
 
@@ -3058,6 +3088,10 @@
     <p class="lead" style="margin:0 auto 2.2rem;">Real numbers from the actual backend running this page — no mock data, refreshed every few seconds.</p>
 
     <div class="telemetry-grid">
+      <div class="telemetry-stat" id="tel-online-stat" style="display:none">
+        <span class="telemetry-num" id="tel-online">—</span>
+        <span class="telemetry-label">Online Now</span>
+      </div>
       <div class="telemetry-stat">
         <span class="telemetry-num" id="tel-views">—</span>
         <span class="telemetry-label">Total Views</span>
@@ -3227,10 +3261,17 @@
 
 </main>
 
+<!-- SCROLL PROGRESS: circuit-trace style HUD readout of position in page -->
+<div id="scroll-progress" aria-hidden="true">
+  <div id="scroll-progress-fill"><span id="scroll-progress-node"></span></div>
+</div>
+
 <!-- HUD CORNER WIDGET -->
 <div id="hud-widget">
   <div class="hud-row"><span class="hud-dot"></span><span>SYSTEM ONLINE</span></div>
   <div class="hud-row" id="hud-time">--:--:--</div>
+  <div class="hud-row" id="hud-weather-row" style="display:none">◐ <span id="hud-weather">—</span></div>
+  <div class="hud-row" id="hud-online-row" style="display:none">◈ <span id="hud-online"><strong>—</strong> online now</span></div>
   <div class="hud-row js-api-only" id="hud-views-row" style="display:none">◉ <span id="hud-views"><strong>—</strong> views</span></div>
 </div>
 
@@ -5583,6 +5624,21 @@ panels.forEach(p => observer.observe(p));
       countUp(guestbookEl, r.guestbookEntries || 0);
       if (uptimeEl) uptimeEl.textContent = fmtUptime(r.uptimeSeconds || 0);
 
+      // "Online now" — HUD row + telemetry dashboard stat card. Only
+      // shown once the backend actually sends a live count. Older backend
+      // deployments that predate this field just never trigger it, rather
+      // than showing a stuck placeholder.
+      if (typeof r.online === 'number') {
+        const onlineRow = document.getElementById('hud-online-row');
+        const onlineEl = document.getElementById('hud-online');
+        if (onlineEl) onlineEl.innerHTML = '<strong>' + r.online.toLocaleString() + '</strong> online now';
+        if (onlineRow) onlineRow.style.display = '';
+
+        const telOnlineStat = document.getElementById('tel-online-stat');
+        if (telOnlineStat) telOnlineStat.style.display = '';
+        countUp(document.getElementById('tel-online'), r.online);
+      }
+
       if (r.topSections && r.topSections.length) {
         if (emptyEl) emptyEl.hidden = true;
         const max = r.topSections[0].count || 1;
@@ -6089,6 +6145,99 @@ panels.forEach(p => observer.observe(p));
   function tick() { timeEl.textContent = new Date().toLocaleTimeString([], { hour12: false }); }
   tick();
   setInterval(tick, 1000);
+})();
+
+/* -- SCROLL PROGRESS: circuit-trace strip, filled by scale transform only
+      (no width/layout writes) so it's cheap to update on every scroll
+      tick. will-change is added/removed around active scrolling rather
+      than held permanently — same reasoning as the résumé prism's
+      will-lift: a live GPU layer sitting there 100% of the time is
+      wasted cost for something static almost all the time. -- */
+(function initScrollProgress() {
+  const fill = document.getElementById('scroll-progress-fill');
+  if (!fill) return;
+
+  let liftDropTimer = null;
+  function lift() {
+    clearTimeout(liftDropTimer);
+    fill.classList.add('tracking');
+  }
+  function dropSoon() {
+    clearTimeout(liftDropTimer);
+    liftDropTimer = setTimeout(() => fill.classList.remove('tracking'), 250);
+  }
+
+  let ticking = false;
+  function update() {
+    ticking = false;
+    const doc = document.documentElement;
+    const max = (doc.scrollHeight - doc.clientHeight) || 1;
+    const pct = Math.min(1, Math.max(0, (window.scrollY || doc.scrollTop) / max));
+    fill.style.transform = 'scaleX(' + pct + ')';
+  }
+  function onScroll() {
+    lift();
+    dropSoon();
+    if (!ticking) { ticking = true; requestAnimationFrame(update); }
+  }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', window.__debounce ? window.__debounce(update, 160) : update);
+  update();
+})();
+
+/* -- HUD WEATHER: purely client-side — browser geolocation (with the
+      user's permission) + Open-Meteo, which needs no API key and allows
+      direct browser calls. Independent of the portfolio's own backend, so
+      it still works even if that's offline. Silently stays hidden if
+      geolocation is denied/unavailable or the request fails, same
+      graceful-degradation pattern as the rest of the HUD. -- */
+(function hudWeather() {
+  const row = document.getElementById('hud-weather-row');
+  const el = document.getElementById('hud-weather');
+  if (!row || !el || !('geolocation' in navigator)) return;
+
+  // WMO weather codes (used by Open-Meteo) collapsed to a small glyph set —
+  // not exhaustive, just enough to read as "clear / cloudy / rain / snow /
+  // storm" at a glance in a 3-line HUD row.
+  function describe(code) {
+    if (code === 0) return ['☀', 'Clear'];
+    if (code <= 2) return ['🌤', 'Partly cloudy'];
+    if (code === 3) return ['☁', 'Overcast'];
+    if (code === 45 || code === 48) return ['🌫', 'Fog'];
+    if (code >= 51 && code <= 57) return ['🌦', 'Drizzle'];
+    if (code >= 61 && code <= 67) return ['🌧', 'Rain'];
+    if (code >= 71 && code <= 77) return ['🌨', 'Snow'];
+    if (code >= 80 && code <= 82) return ['🌧', 'Showers'];
+    if (code >= 85 && code <= 86) return ['🌨', 'Snow showers'];
+    if (code >= 95) return ['⛈', 'Storm'];
+    return ['—', 'Unknown'];
+  }
+
+  // Simple imperial-vs-metric heuristic off the browser's own locale
+  // rather than IP geolocation — no extra request, good enough for a
+  // decorative HUD reading (not a source of truth anyone's relying on).
+  const useF = /-US$|-BS$|-BZ$|-KY$|-LR$/i.test(navigator.language || '');
+
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      try {
+        const { latitude, longitude } = pos.coords;
+        const url = 'https://api.open-meteo.com/v1/forecast?latitude=' + latitude +
+          '&longitude=' + longitude + '&current=temperature_2m,weather_code' +
+          '&temperature_unit=' + (useF ? 'fahrenheit' : 'celsius');
+        const r = await fetch(url);
+        if (!r.ok) return;
+        const data = await r.json();
+        const cur = data && data.current;
+        if (!cur || typeof cur.temperature_2m !== 'number') return;
+        const [icon, label] = describe(cur.weather_code);
+        el.textContent = Math.round(cur.temperature_2m) + '°' + (useF ? 'F' : 'C') + ' ' + icon + ' ' + label;
+        row.style.display = '';
+      } catch (_) { /* stays hidden */ }
+    },
+    () => { /* permission denied or unavailable — stays hidden, no prompt spam */ },
+    { timeout: 8000, maximumAge: 600000 }
+  );
 })();
 (function hideFixedWidgetsNearFooter() {
   const footer = document.querySelector('footer');

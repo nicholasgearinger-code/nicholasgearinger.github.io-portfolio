@@ -27,6 +27,36 @@
     }
     if (css) document.write('<style>' + css + '</style>');
   })();
+
+  // AUTO GPU-LAYER FLATTEN DURING ROTATION BURSTS
+  // Bisection result: no single one of noblur/no3d/nowillchange alone
+  // stopped the WebContent/GPU crash on rotation — only killing all
+  // three together (?nofx) did. That means the crash needs the
+  // *combination* of live backdrop-filter/filter, preserve-3d/
+  // perspective, and will-change layers all rebuilding at once during
+  // the viewport-dimension jump, not any single one of them alone.
+  // Since we can't just run permanently flat (the résumé prism and
+  // other 3D bits need to actually render the rest of the time), this
+  // applies the exact same "kill all three" CSS the ?nofx flag does,
+  // but only for the ~650ms burst window around an orientation change,
+  // toggled via the .gpu-burst-flatten class on <html> (see main
+  // stylesheet). Everything restores to normal — 3D included — once
+  // the burst settles.
+  (function () {
+    var root = document.documentElement;
+    var burstTimer = null;
+    function startBurst() {
+      root.classList.add('gpu-burst-flatten');
+      clearTimeout(burstTimer);
+      burstTimer = setTimeout(function () {
+        root.classList.remove('gpu-burst-flatten');
+      }, 650);
+    }
+    window.addEventListener('orientationchange', startBurst);
+    if (window.screen && window.screen.orientation) {
+      window.screen.orientation.addEventListener('change', startBurst);
+    }
+  })();
 </script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -36,6 +66,25 @@
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Inter:wght@300;400;500&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  /* Toggled on <html> for ~650ms around an orientation change — see the
+     head script. Mirrors the ?nofx debug flag (kills backdrop-filter/
+     filter, preserve-3d/perspective, and will-change all at once, which
+     bisection showed is what it actually takes to stop the rotation
+     crash) but applied automatically and only for the burst window, so
+     the résumé prism and everything else still render in full 3D the
+     rest of the time. */
+  html.gpu-burst-flatten,
+  html.gpu-burst-flatten *,
+  html.gpu-burst-flatten *::before,
+  html.gpu-burst-flatten *::after {
+    transform-style: flat !important;
+    perspective: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    filter: none !important;
+    will-change: auto !important;
+  }
 
   :root {
     --navy: #020810;            /* deep space blue-black */

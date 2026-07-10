@@ -2,16 +2,31 @@
 <html lang="en">
 <head>
 <script>
-  // Temporary bisection switch: add ?nofx to the URL to strip every
-  // backdrop-filter, filter:blur, and 3D transform/preserve-3d on the
-  // page. This trades away most of the visual polish but tests whether
-  // the rotation crash is a GPU-compositing-layer problem (many blurred/
-  // 3D layers all needing re-rasterization at once on resize) rather
-  // than anything JS is doing.
-  if (new URLSearchParams(location.search).has('nofx')) {
-    document.write('<style>*,*::before,*::after{backdrop-filter:none!important;-webkit-backdrop-filter:none!important;filter:none!important;transform-style:flat!important;perspective:none!important;will-change:auto!important;}</style>');
-    console.warn('[nofx] GPU compositing effects stripped for diagnostic testing');
-  }
+  // Temporary bisection switches, now split so we can isolate which
+  // specific GPU-compositing property is behind the rotation crash
+  // (confirmed to be somewhere in this cluster, not in JS logic):
+  //   ?noblur        — kill backdrop-filter + filter:blur only
+  //   ?no3d          — kill transform-style:preserve-3d + perspective only
+  //   ?nowillchange  — kill will-change only
+  //   ?nofx          — all three at once (equivalent to the old combined flag)
+  (function () {
+    const p = new URLSearchParams(location.search);
+    const all = p.has('nofx');
+    let css = '';
+    if (all || p.has('noblur')) {
+      css += '*,*::before,*::after{backdrop-filter:none!important;-webkit-backdrop-filter:none!important;filter:none!important;}';
+      console.warn('[noblur] backdrop-filter + filter:blur stripped');
+    }
+    if (all || p.has('no3d')) {
+      css += '*,*::before,*::after{transform-style:flat!important;perspective:none!important;}';
+      console.warn('[no3d] preserve-3d + perspective stripped');
+    }
+    if (all || p.has('nowillchange')) {
+      css += '*,*::before,*::after{will-change:auto!important;}';
+      console.warn('[nowillchange] will-change stripped');
+    }
+    if (css) document.write('<style>' + css + '</style>');
+  })();
 </script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">

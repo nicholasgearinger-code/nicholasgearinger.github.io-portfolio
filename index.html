@@ -3266,6 +3266,10 @@ document.addEventListener('mousemove', e => {
 });
 
 /* ── PARTICLE NETWORK — high density, interactive blue ── */
+// Temporary bisection switch: add ?noparticles to the URL to skip this
+// whole subsystem (canvas alloc, particle array, animate loop) entirely,
+// to test whether it's involved in the landscape-rotation crash.
+window.__DEBUG_NO_PARTICLES = new URLSearchParams(location.search).has('noparticles');
 const canvas = document.getElementById('particle-canvas');
 const ctx = canvas.getContext('2d');
 let W, H, particles = [];
@@ -3583,6 +3587,10 @@ function animate() {
 // all) with zero indication anything had gone wrong. Now it degrades to
 // "no particle background" instead of "the entire page is blank."
 try {
+  if (window.__DEBUG_NO_PARTICLES) {
+    canvas.style.display = 'none';
+    console.warn('[particles] disabled via ?noparticles');
+  } else {
   resize();
   initParticles();
   animate();
@@ -3595,6 +3603,7 @@ try {
     document.fonts.ready.then(() => {
       try { resize(); initParticles(); } catch (err) { console.error('[particles] font-ready resize failed:', err); }
     });
+  }
   }
 } catch (err) {
   console.error('[particles] initialization failed — continuing without the particle background:', err);
@@ -4834,12 +4843,20 @@ panels.forEach(p => observer.observe(p));
   }
 
   /* ── Boot ── */
+  // Temporary bisection switch: add ?nobridge to the URL to skip building
+  // the circuit-bridge canvas(es) entirely, to test whether it's involved
+  // in the landscape-rotation crash.
+  const __debugNoBridge = new URLSearchParams(location.search).has('nobridge');
   const bridges = [];
-  requestAnimationFrame(() => {
-    document.querySelectorAll('.circuit-bridge').forEach((div, i) => {
-      bridges.push(new CircuitBridge(div, i));
+  if (!__debugNoBridge) {
+    requestAnimationFrame(() => {
+      document.querySelectorAll('.circuit-bridge').forEach((div, i) => {
+        bridges.push(new CircuitBridge(div, i));
+      });
     });
-  });
+  } else {
+    console.warn('[circuit-bridge] disabled via ?nobridge');
+  }
 
   window.addEventListener('resize', window.__debounce(() => bridges.forEach(b => b.resize()), 160));
 

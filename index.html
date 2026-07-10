@@ -598,9 +598,24 @@
     transform-style: preserve-3d;
     transition: transform .85s cubic-bezier(.55,.02,.1,1);
     cursor: grab; user-select: none; touch-action: pan-y;
-    will-change: transform;
+    /* will-change is applied/removed by JS, not standing here — see
+       initResume(). A permanent will-change:transform reserves a live
+       GPU layer at all times, which is expensive to tear down and rebuild
+       when the viewport dimensions jump on rotation. */
   }
   .resume-prism.dragging { transition: none; cursor: grabbing; }
+  .resume-prism.will-lift { will-change: transform; }
+  /* During an orientation change we flatten the cube to a normal 2D
+     layer instead of asking the compositor to rebuild a live preserve-3d
+     GPU layer while dimensions are still changing. Restored once the
+     resize burst settles — see initResume(). */
+  .resume-prism.reflowing,
+  .resume-prism.reflowing .resume-face {
+    transform-style: flat !important;
+    transition: none !important;
+  }
+  .resume-stage.reflowing { perspective: none !important; }
+  .resume-prism.reflowing { visibility: hidden; }
   @supports (height: 100svh) {
     /* svh (small viewport height) instead of dvh: dvh recalculates
        continuously while Safari's toolbar animates in/out during an
@@ -3766,12 +3781,30 @@ panels.forEach(p => observer.observe(p));
       if (fill) setTimeout(() => { fill.style.width = lvl + '%'; }, i * 45);
     });
   }
+
+  // will-change is only reserved for the duration of an actual rotation —
+  // added right before a transform change, dropped once the transition
+  // (or the drag) ends. Holding it permanently was keeping a live GPU
+  // layer allocated at all times, which made the layer-rebuild on
+  // orientation change far more expensive than it needed to be.
+  let liftDropTimer = null;
+  function lift() {
+    clearTimeout(liftDropTimer);
+    prism.classList.add('will-lift');
+  }
+  function dropLiftSoon(delay) {
+    clearTimeout(liftDropTimer);
+    liftDropTimer = setTimeout(() => prism.classList.remove('will-lift'), delay);
+  }
+
   function goTo(i, animate, skipTextAnim) {
     current = ((i % 4) + 4) % 4;
     ry = -current * 90;
+    lift();
     if (!animate) prism.classList.add('dragging');   // skip transition
     apply();
     if (!animate) requestAnimationFrame(() => prism.classList.remove('dragging'));
+    dropLiftSoon(animate ? 900 : 100); // covers the .85s snap transition
     updateTabs();
     if (!skipTextAnim) animateFaceText(faces[current]);
     if (current === 3) animateBars();
@@ -3785,6 +3818,7 @@ panels.forEach(p => observer.observe(p));
   prism.addEventListener('pointerdown', e => {
     dragging = true; moved = 0;
     startX = e.clientX; startRy = ry;
+    lift();
     prism.classList.add('dragging');
     try { prism.setPointerCapture(e.pointerId); } catch (err) { console.error('[resume] setPointerCapture failed:', err); }
   });
@@ -3802,6 +3836,7 @@ panels.forEach(p => observer.observe(p));
     const snapped = Math.round(ry / 90) * 90;
     ry = snapped;
     apply();
+    dropLiftSoon(900); // covers the .85s snap-back transition
     const next = (((-snapped / 90) % 4) + 4) % 4;
     if (next !== current) animateFaceText(faces[next]);
     current = next;
@@ -3820,6 +3855,32 @@ panels.forEach(p => observer.observe(p));
   });
 
   window.addEventListener('resize', window.__debounce(apply, 160));
+
+  // Orientation change (portrait <-> landscape) is a discrete, large jump
+  // in viewport dimensions — asking the compositor to rebuild a live
+  // preserve-3d GPU layer while width/height are still settling (and
+  // while other GPU-heavy subsystems on the page are reacting to the
+  // same resize burst) is what was crashing the tab. Instead: flatten
+  // the cube to a normal 2D layer and hide it for the duration of the
+  // burst, resize is computed against final settled dimensions, then
+  // restore the 3D layer once things are quiet. 500ms comfortably covers
+  // both the orientationchange event's own settle time and iOS Safari's
+  // toolbar show/hide animation that tends to follow it.
+  let reflowTimer = null;
+  function handleOrientationBurst() {
+    stage.classList.add('reflowing');
+    prism.classList.add('reflowing');
+    clearTimeout(reflowTimer);
+    reflowTimer = setTimeout(() => {
+      apply();
+      stage.classList.remove('reflowing');
+      prism.classList.remove('reflowing');
+    }, 500);
+  }
+  window.addEventListener('orientationchange', handleOrientationBurst);
+  if (window.screen && window.screen.orientation) {
+    window.screen.orientation.addEventListener('change', handleOrientationBurst);
+  }
 
   goTo(0, false, true); // silent setup — text reveal fires below, once actually in view
 

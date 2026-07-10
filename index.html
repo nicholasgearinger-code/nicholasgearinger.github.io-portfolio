@@ -253,13 +253,22 @@
     margin-top: 2.4rem;
     display: inline-flex; align-items: center; gap: .55rem;
     padding: .6rem 1.4rem; border-radius: 100px; cursor: pointer;
-    background: transparent; border: 1px solid var(--card-border);
+    background: rgba(34,211,238,.05); border: 1px solid rgba(34,211,238,.3);
     color: var(--muted); font-family: inherit; font-size: .82rem; font-weight: 600;
     letter-spacing: .01em;
-    transition: color .25s, border-color .25s, background .25s, transform .2s, opacity .4s;
+    transition: color .25s, border-color .25s, background .25s, transform .2s, opacity .4s, box-shadow .25s;
+    animation: heroContinuePulse 2.6s ease-in-out infinite;
   }
-  .hero-continue-btn:hover { color: var(--white); border-color: var(--cyan); background: rgba(34,211,238,.08); transform: translateY(-2px); }
-  .hero-continue-btn.used { opacity: 0; pointer-events: none; }
+  .hero-continue-btn:hover {
+    color: var(--white); border-color: var(--cyan); background: rgba(34,211,238,.14);
+    transform: translateY(-2px); box-shadow: 0 0 26px rgba(34,211,238,.45);
+    animation-play-state: paused;
+  }
+  .hero-continue-btn.used { opacity: 0; pointer-events: none; animation: none; }
+  @keyframes heroContinuePulse {
+    0%, 100% { box-shadow: 0 0 0 rgba(34,211,238,0); border-color: rgba(34,211,238,.3); }
+    50%      { box-shadow: 0 0 16px rgba(34,211,238,.3); border-color: rgba(34,211,238,.65); }
+  }
   .hero-continue-arrow { display: inline-block; animation: heroContinueBounce 1.8s ease-in-out infinite; }
   @keyframes heroContinueBounce {
     0%, 100% { transform: translateY(0); }
@@ -1374,6 +1383,8 @@
   @media (prefers-reduced-motion: reduce) {
     .panel { opacity: 1; transform: none; transition: none; }
     .cursor-glow { display: none; }
+    .hero-continue-btn { animation: none; }
+    .hero-continue-arrow { animation: none; }
   }
 
   /* ── COMMAND PALETTE ── */
@@ -4791,15 +4802,29 @@ panels.forEach(p => observer.observe(p));
       bridges.forEach((b) => b.play());
 
       const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const heroEl = document.getElementById('hero');
+      const nextSection = heroEl ? heroEl.nextElementSibling : null;
       if (reduceMotion) {
         // Skip the scroll takeover; just let the visual play in place.
-        heroBridgeEl.scrollIntoView({ behavior: 'auto', block: 'end' });
+        (nextSection || heroBridgeEl).scrollIntoView({ behavior: 'auto', block: 'start' });
         return;
       }
 
-      const rect = heroBridgeEl.getBoundingClientRect();
       const startY = window.scrollY;
-      const targetY = window.scrollY + (rect.bottom - window.innerHeight);
+      let targetY;
+      if (nextSection) {
+        // Land at the top of the next section, offset by the fixed nav's
+        // height — same offset scroll-padding-top already applies to
+        // ordinary anchor scrolling elsewhere on the page — rather than
+        // just clearing the bridge's bottom edge and leaving the section
+        // only partly settled into view.
+        const rootPx = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+        const navOffset = 5.6 * rootPx;
+        targetY = Math.max(0, nextSection.getBoundingClientRect().top + startY - navOffset);
+      } else {
+        const rect = heroBridgeEl.getBoundingClientRect();
+        targetY = startY + (rect.bottom - window.innerHeight);
+      }
       if (Math.abs(targetY - startY) < 10) return; // nothing meaningful to scroll
 
       let cancelled = false;

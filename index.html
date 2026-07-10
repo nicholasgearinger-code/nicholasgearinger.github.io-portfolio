@@ -363,42 +363,73 @@
   }
   h1 .line-3.reveal-in, .hero-sub.reveal-in {
     opacity: 1; transform: translateY(0);
+    animation: heroHoloFlicker .5s ease-out;
+  }
+  @keyframes heroHoloFlicker {
+    0%   { opacity: .25; }
+    28%  { opacity: .75; }
+    42%  { opacity: .35; }
+    100% { opacity: 1; }
   }
   h1 .line-1 { display: block; }
   h1 .line-1, h1 .line-2 { opacity: 0; }
 
-  /* Terminal-style reveal: a small monospace "$ whoami" prompt types out
-     first (echoing the boot sequence's terminal identity), then the name
-     and title themselves type out character-by-character in place, each
-     with a blinking cursor block. currentColor keeps the cursor matching
-     whichever line it's currently in (white for the name, cyan for the
-     title) without needing separate rules. */
+  /* Holographic-assembly reveal: a small HUD scan label materializes first
+     (echoing a JARVIS-style diagnostic readout), then the name and title
+     themselves materialize in place — a vertical scan bar sweeps across
+     each line while it resolves out of a chromatic-aberration glitch into
+     solid focus, rather than typing character by character. */
   .hero-title-row {
     display: flex; flex-direction: column; align-items: center;
     gap: .6rem;
   }
   .hero-prompt-line {
     font-family: 'JetBrains Mono', 'Courier New', monospace;
-    font-size: .82rem; color: var(--cyan); letter-spacing: .02em;
+    font-size: .78rem; color: var(--cyan); letter-spacing: .22em; text-transform: uppercase;
     min-height: 1.3em;
     transition: opacity .45s ease;
   }
-  .hero-char {
-    display: inline-block;
-    white-space: pre;
+  .hero-holo {
+    position: relative;
     opacity: 0;
-    transition: opacity .28s ease;
   }
-  .hero-char.hero-char-in { opacity: 1; }
-  .hero-cursor {
-    display: inline-block;
-    width: .12em; height: .85em;
-    background: currentColor;
-    vertical-align: text-bottom;
-    margin-left: .05em;
-    animation: heroCursorBlink 1.1s ease-in-out infinite;
+  .hero-prompt-line .hero-holo { display: inline-block; }
+  .hero-holo::after {
+    content: '';
+    position: absolute; top: -10%; bottom: -10%; left: 0; width: 2px;
+    background: linear-gradient(to bottom, transparent, var(--cyan) 20%, #fff 50%, var(--cyan) 80%, transparent);
+    box-shadow: 0 0 12px 2px rgba(34,211,238,.85), 0 0 26px 7px rgba(34,211,238,.3);
+    opacity: 0;
+    pointer-events: none;
   }
-  @keyframes heroCursorBlink { 0%, 100% { opacity: 1; } 50% { opacity: .15; } }
+  .hero-holo.holo-in {
+    animation: heroHoloAssemble 780ms cubic-bezier(.2,.85,.25,1) forwards;
+  }
+  .hero-holo.holo-in::after {
+    animation: heroHoloScanBar 780ms cubic-bezier(.2,.85,.25,1) forwards;
+  }
+  @keyframes heroHoloAssemble {
+    0%   { opacity: 0;   clip-path: inset(0 100% 0 0); -webkit-clip-path: inset(0 100% 0 0); filter: drop-shadow(3px 0 0 rgba(34,211,238,.85)) drop-shadow(-3px 0 0 rgba(245,158,11,.55)) blur(7px); }
+    6%   { opacity: .5; }
+    18%  { clip-path: inset(0 79% 0 0); -webkit-clip-path: inset(0 79% 0 0); opacity: .35; filter: drop-shadow(2px 0 0 rgba(34,211,238,.7)) drop-shadow(-2px 0 0 rgba(245,158,11,.5)) blur(4px); }
+    19%  { opacity: .8; }
+    34%  { clip-path: inset(0 57% 0 0); -webkit-clip-path: inset(0 57% 0 0); opacity: .45; }
+    35%  { opacity: .85; }
+    52%  { clip-path: inset(0 34% 0 0); -webkit-clip-path: inset(0 34% 0 0); filter: drop-shadow(1px 0 0 rgba(34,211,238,.55)) drop-shadow(-1px 0 0 rgba(245,158,11,.4)) blur(2px); }
+    70%  { clip-path: inset(0 14% 0 0); -webkit-clip-path: inset(0 14% 0 0); opacity: .95; }
+    86%  { clip-path: inset(0 3% 0 0);  -webkit-clip-path: inset(0 3% 0 0);  filter: drop-shadow(0 0 0 transparent) blur(.4px); }
+    100% { opacity: 1; clip-path: inset(0 0 0 0); -webkit-clip-path: inset(0 0 0 0); filter: none; }
+  }
+  @keyframes heroHoloScanBar {
+    0%   { left: 0%;   opacity: 0; }
+    4%   { opacity: 1; }
+    90%  { opacity: 1; }
+    100% { left: 100%; opacity: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hero-holo, .hero-holo.holo-in { animation: none !important; opacity: 1; clip-path: none; -webkit-clip-path: none; filter: none; }
+    .hero-holo::after, .hero-holo.holo-in::after { display: none; }
+  }
   @media (max-width: 560px) {
     .hero-title-row { flex-direction: column; gap: .8rem; }
   }
@@ -2320,10 +2351,10 @@
   <div class="hero-content">
     <div class="hero-eyebrow">Available for work · 2025</div>
     <div class="hero-title-row">
-      <div class="hero-prompt-line" id="hero-prompt-line"><span id="hero-prompt-text"></span></div>
+      <div class="hero-prompt-line" id="hero-prompt-line"><span class="hero-holo" id="hero-prompt-text">Scanning Identity</span></div>
       <h1>
-        <span class="line-1">Nicholas Gearinger</span>
-        <span class="line-2">AI & Design</span>
+        <span class="line-1 hero-holo">Nicholas Gearinger</span>
+        <span class="line-2 hero-holo">AI & Design</span>
         <span class="line-3">Engineering Intelligent Experiences</span>
       </h1>
     </div>
@@ -5798,11 +5829,10 @@ panels.forEach(p => observer.observe(p));
 })();
 </script>
 <script>
-/* ── HERO REVEAL: a small "$ whoami" terminal prompt types out first,
-      then the name and title type in beneath it — each character fades
-      in individually rather than snapping into place, and the prompt
-      line itself fades out before the name begins, so the whole
-      sequence reads as one smooth, continuous motion. ── */
+/* ── HERO REVEAL: a small HUD scan label ("Scanning Identity") materializes
+      first, fades out, then the name and title materialize in beneath it as
+      holograms — a scan bar sweeps across each line while it resolves out
+      of a chromatic-aberration glitch, JARVIS-boot style. ── */
 (function heroDecode() {
   const promptLine = document.getElementById('hero-prompt-line');
   const promptText = document.getElementById('hero-prompt-text');
@@ -5820,32 +5850,16 @@ panels.forEach(p => observer.observe(p));
     return;
   }
 
-  // Types `text` into `el` one character at a time, each character
-  // fading in on its own rather than the whole string snapping into
-  // place — plus a trailing blinking cursor sized in em, so it scales
-  // with whatever font-size the line it's typing into happens to have
-  // (tiny for the prompt, huge for the name/title).
-  function typeInto(el, text, charDelay, onDone) {
-    el.style.opacity = '1';
-    el.innerHTML = '';
-    const cursor = document.createElement('span');
-    cursor.className = 'hero-cursor';
-    el.appendChild(cursor);
-    let i = 0;
-    function step() {
-      const ch = document.createElement('span');
-      ch.className = 'hero-char';
-      ch.textContent = text[i];
-      el.insertBefore(ch, cursor);
-      requestAnimationFrame(() => requestAnimationFrame(() => ch.classList.add('hero-char-in')));
-      i++;
-      if (i < text.length) {
-        setTimeout(step, charDelay + Math.random() * (charDelay * 0.7));
-      } else {
-        setTimeout(() => { cursor.remove(); if (onDone) onDone(); }, 350);
-      }
-    }
-    step();
+  // Materializes `el`'s existing text as a JARVIS-style hologram: a bright
+  // scan bar sweeps left-to-right while the text resolves out of a
+  // chromatic-aberration glitch into solid focus (see .hero-holo /
+  // heroHoloAssemble). No typing — the content is already in the DOM,
+  // we just trigger the CSS animation and wait for it to finish.
+  const HOLO_MS = 780;
+  function assemble(el, onDone) {
+    if (!el) { if (onDone) onDone(); return; }
+    el.classList.add('holo-in');
+    setTimeout(() => { if (onDone) onDone(); }, HOLO_MS);
   }
 
   function fadeOut(el, ms, onDone) {
@@ -5854,17 +5868,14 @@ panels.forEach(p => observer.observe(p));
   }
 
   function run() {
-    els.forEach((el) => { if (!el.getAttribute('data-text')) el.setAttribute('data-text', el.textContent.trim()); });
     const name = document.querySelector('.line-1');
     const title = document.querySelector('h1 .line-2');
 
-    function typeName() {
-      if (!name) { typeTitle(); return; }
-      typeInto(name, name.getAttribute('data-text'), 22, () => setTimeout(typeTitle, 220));
+    function assembleName() {
+      assemble(name, () => setTimeout(assembleTitle, 160));
     }
-    function typeTitle() {
-      if (!title) { finishUp(); return; }
-      typeInto(title, title.getAttribute('data-text'), 22, finishUp);
+    function assembleTitle() {
+      assemble(title, finishUp);
     }
     function finishUp() {
       const line3 = document.querySelector('h1 .line-3');
@@ -5875,11 +5886,11 @@ panels.forEach(p => observer.observe(p));
 
     if (promptLine && promptText) {
       promptLine.style.opacity = '1';
-      typeInto(promptText, '$ whoami', 26, () => {
-        setTimeout(() => fadeOut(promptLine, 450, () => setTimeout(typeName, 150)), 350);
+      assemble(promptText, () => {
+        setTimeout(() => fadeOut(promptLine, 450, () => setTimeout(assembleName, 150)), 500);
       });
     } else {
-      typeName();
+      assembleName();
     }
   }
 

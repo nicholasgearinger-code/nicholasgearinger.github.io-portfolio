@@ -157,7 +157,12 @@
     --sky-dim: rgba(34,211,238,.12);
   }
 
-  html { scroll-behavior: smooth; background: #020810; color-scheme: dark; scroll-padding-top: 5.6rem; scroll-snap-type: y proximity; }
+  html {
+    scroll-behavior: smooth; background: #020810; color-scheme: dark;
+    scroll-padding-top: 5.6rem; scroll-snap-type: y proximity;
+    overflow-x: hidden;
+    overscroll-behavior-x: none;
+  }
 
   /* ── ACCESSIBILITY: skip link + consistent keyboard focus ── */
   .skip-link {
@@ -178,6 +183,8 @@
     color: var(--white);
     font-family: 'Inter', sans-serif;
     overflow-x: hidden;
+    overscroll-behavior-x: none;
+    max-width: 100vw;
   }
 
   /* ── NAV ── */
@@ -4106,15 +4113,33 @@ panels.forEach(p => observer.observe(p));
   // wrapping like the cube: this reads as a linear stack of sections
   // (About → Skills), not a loop, so swiping past either end just does
   // nothing rather than jumping around.
+  //
+  // touch-action:pan-y (stylesheet) + overscroll-behavior-x:none (html/body)
+  // are the primary defense against the page itself panning/bouncing
+  // sideways during this gesture. The preventDefault() below once
+  // horizontal intent is clear is a second line of defense for older
+  // WebKit that doesn't fully honor those on its own — without it, a fast
+  // swipe could still nudge the whole page horizontally for a frame before
+  // the CSS properties catch up.
   if (burstFallback) {
-    let fbStartX = 0, fbStartY = 0, fbDragging = false;
+    let fbStartX = 0, fbStartY = 0, fbDragging = false, fbHorizontal = false;
     const SWIPE_MIN_PX = 40;
     burstFallback.addEventListener('pointerdown', (e) => {
       if (e.pointerType === 'mouse') return; // tabs/keyboard cover mouse; avoid hijacking text selection
       fbDragging = true;
+      fbHorizontal = false;
       fbStartX = e.clientX;
       fbStartY = e.clientY;
     });
+    burstFallback.addEventListener('pointermove', (e) => {
+      if (!fbDragging) return;
+      const dx = e.clientX - fbStartX;
+      const dy = e.clientY - fbStartY;
+      if (!fbHorizontal && Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) {
+        fbHorizontal = true; // committed to a horizontal swipe — stop the page from panning/bouncing under it
+      }
+      if (fbHorizontal) e.preventDefault();
+    }, { passive: false });
     function endFbSwipe(e) {
       if (!fbDragging) return;
       fbDragging = false;
@@ -4125,8 +4150,9 @@ panels.forEach(p => observer.observe(p));
       else if (dx > 0 && current > 0) goTo(current - 1, true, false, -1);
     }
     burstFallback.addEventListener('pointerup', endFbSwipe);
-    burstFallback.addEventListener('pointercancel', () => { fbDragging = false; });
+    burstFallback.addEventListener('pointercancel', () => { fbDragging = false; fbHorizontal = false; });
   }
+
 
 
   // Drag to spin

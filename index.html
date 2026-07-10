@@ -674,13 +674,15 @@
   /* During an orientation change (or the wider gpu-burst-flatten window
      from the head script) we flatten the cube to a normal 2D layer
      instead of asking the compositor to rebuild a live preserve-3d GPU
-     layer while dimensions are still changing. This used to just hide
-     the whole prism for the duration — safe, but the résumé content
-     disappeared mid-rotation. Instead: collapse the prism's own
-     rotation and each face's individual rotateY/translateZ, and show
-     only the currently-selected face (tracked via .rface-current, set
-     in initResume()) as a plain flat card. Restored to a real rotating
-     cube once the burst settles — see initResume(). */
+     layer while dimensions are still changing.
+     A prior version of this also forced `transform: none` on the prism
+     itself so the current face stayed visible instead of the whole
+     thing disappearing — but that meant the compositor had to fully
+     tear down AND later rebuild this element's live 3D layer, which is
+     the exact expensive operation the crash comments blame, just now
+     happening twice, deliberately, right in the most vulnerable window.
+     That's back to a plain visibility:hidden swap — cheap, confirmed
+     not to crash. Restored once the burst settles — see initResume(). */
   .resume-prism.reflowing,
   .resume-prism.reflowing .resume-face,
   html.gpu-burst-flatten .resume-prism,
@@ -690,16 +692,7 @@
   }
   .resume-prism.reflowing,
   html.gpu-burst-flatten .resume-prism {
-    transform: none !important;
-  }
-  .resume-prism.reflowing .resume-face,
-  html.gpu-burst-flatten .resume-face {
-    transform: none !important;
-    opacity: 0;
-  }
-  .resume-prism.reflowing .resume-face.rface-current,
-  html.gpu-burst-flatten .resume-face.rface-current {
-    opacity: 1;
+    visibility: hidden;
   }
   .resume-stage.reflowing,
   html.gpu-burst-flatten .resume-stage {

@@ -695,7 +695,11 @@
   .resume-prism {
     --rw: min(660px, 90vw);
     --rh: min(520px, 78vh);
-    --depth: calc(var(--rw) / 2);
+    /* Apothem of a regular pentagon (5 faces, 72deg apart): depth =
+       (width/2) / tan(36deg) ≈ width * 0.68819. This used to be a plain
+       cube (depth = width/2, i.e. the n=4 case of the same formula) — see
+       the matching 72deg steps on .resume-face below. */
+    --depth: calc(var(--rw) * 0.68819);
     position: relative;
     width: var(--rw); height: var(--rh);
     -webkit-transform-style: preserve-3d;
@@ -814,9 +818,10 @@
     display: flex; flex-direction: column;
   }
   .resume-face:nth-child(1) { transform: rotateY(0deg)   translateZ(var(--depth)); }
-  .resume-face:nth-child(2) { transform: rotateY(90deg)  translateZ(var(--depth)); }
-  .resume-face:nth-child(3) { transform: rotateY(180deg) translateZ(var(--depth)); }
-  .resume-face:nth-child(4) { transform: rotateY(270deg) translateZ(var(--depth)); }
+  .resume-face:nth-child(2) { transform: rotateY(72deg)  translateZ(var(--depth)); }
+  .resume-face:nth-child(3) { transform: rotateY(144deg) translateZ(var(--depth)); }
+  .resume-face:nth-child(4) { transform: rotateY(216deg) translateZ(var(--depth)); }
+  .resume-face:nth-child(5) { transform: rotateY(288deg) translateZ(var(--depth)); }
 
   .rface-num {
     font-size: .68rem; letter-spacing: .22em; text-transform: uppercase;
@@ -959,6 +964,10 @@
   }
 
   /* ── TOOLS & SOFTWARE badge grid ── */
+  .rface-tools {
+    overflow-y: auto; margin-top: .2rem;
+  }
+  .rface-tools::-webkit-scrollbar { width: 0; }
   .tools-grid {
     display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
     gap: 1rem; max-width: 900px; margin: 0 auto;
@@ -2315,7 +2324,6 @@
   </button>
   <ul id="nav-menu">
     <li><a href="#resume">Résumé</a></li>
-    <li><a href="#tools">Toolkit</a></li>
     <li><a href="#skills">Skills</a></li>
     <li><a href="#build">In Motion</a></li>
     <li><a href="#voice">Voice AI</a></li>
@@ -2449,6 +2457,7 @@
       <button class="resume-tab" data-face="1">Education</button>
       <button class="resume-tab" data-face="2">Experience</button>
       <button class="resume-tab" data-face="3">Skills</button>
+      <button class="resume-tab" data-face="4">Toolkit</button>
     </div>
 
     <div class="resume-stage" id="resume-stage">
@@ -2600,6 +2609,32 @@
           </div>
         </article>
 
+        <article class="resume-face">
+          <span class="rface-num">05 — Toolkit</span>
+          <h3 class="rface-title">Software I actually use</h3>
+          <p class="rface-bio" style="margin-bottom:.9rem;">Pulled straight from my résumé — the real tools behind the work, not a buzzword list.</p>
+
+          <div class="rface-tools">
+            <div class="tools-grid" id="tools-grid">
+              <div class="tool-badge" data-years="3 yr"><span class="tool-icon">◈</span><span class="tool-name">Graphic Design</span></div>
+              <div class="tool-badge" data-years="familiar"><span class="tool-icon">◐</span><span class="tool-name">Photoshop</span></div>
+              <div class="tool-badge" data-years="familiar"><span class="tool-icon">◑</span><span class="tool-name">Illustrator</span></div>
+              <div class="tool-badge" data-years="1 yr"><span class="tool-icon">▤</span><span class="tool-name">InDesign</span></div>
+              <div class="tool-badge" data-years="familiar"><span class="tool-icon">▶</span><span class="tool-name">Premiere</span></div>
+              <div class="tool-badge" data-years="1 yr"><span class="tool-icon">◉</span><span class="tool-name">Audition</span></div>
+              <div class="tool-badge" data-years="2 yr"><span class="tool-icon tool-icon-img"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 L21 7 L21 17 L12 22 L3 17 L3 7 Z"/><path d="M12 2 L12 12 M12 12 L21 7 M12 12 L3 7 M12 12 L12 22"/></svg></span><span class="tool-name">Maya</span></div>
+              <div class="tool-badge" data-years="1 yr"><span class="tool-icon">▲</span><span class="tool-name">3ds Max</span></div>
+              <div class="tool-badge" data-years="familiar"><span class="tool-icon tool-icon-img"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="6" r="3"/><path d="M12 9v8"/><path d="M6 21h12a2 2 0 0 0 2-2v-1a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v1a2 2 0 0 0 2 2z"/></svg></span><span class="tool-name">Unreal Engine</span></div>
+              <div class="tool-badge" data-years="familiar"><span class="tool-icon tool-icon-img"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="1"/><rect x="9" y="9" width="6" height="6" rx="0.5"/><path d="M9 2v3M12 2v3M15 2v3M9 19v3M12 19v3M15 19v3M2 9h3M2 12h3M2 15h3M19 9h3M19 12h3M19 15h3"/></svg></span><span class="tool-name">C++</span></div>
+              <div class="tool-badge" data-years="familiar"><span class="tool-icon tool-icon-img"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M13 2L4 14h6l-1 8 9-12h-6z"/></svg></span><span class="tool-name">JavaScript</span></div>
+              <div class="tool-badge" data-years="1 yr"><span class="tool-icon">⊞</span><span class="tool-name">WordPress</span></div>
+              <div class="tool-badge" data-years="1 yr"><span class="tool-icon">◫</span><span class="tool-name">Google Suite</span></div>
+              <div class="tool-badge" data-years="familiar"><span class="tool-icon">▦</span><span class="tool-name">Microsoft Office</span></div>
+              <div class="tool-badge" data-years="3 yr"><span class="tool-icon tool-icon-img"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13v-1a8 8 0 0 1 16 0v1"/><rect x="2" y="13" width="4" height="6" rx="1.5"/><rect x="18" y="13" width="4" height="6" rx="1.5"/><path d="M20 19v1a3 3 0 0 1-3 3h-3"/></svg></span><span class="tool-name">Customer Service</span></div>
+            </div>
+          </div>
+        </article>
+
       </div>
       <!-- Plain 2D fallback, deliberately NOT inside .resume-prism's
            preserve-3d context — shown only during a reflow/burst so the
@@ -2613,33 +2648,6 @@
 </section>
 
 
-
-
-<!-- TOOLS & SOFTWARE (new component, built from real résumé data) -->
-<section id="tools" class="panel">
-  <div class="panel-inner">
-    <span class="section-label">Toolkit</span>
-    <h2>Software I<br>actually use</h2>
-    <p class="lead" style="margin:0 auto 2.5rem;">Pulled straight from my résumé — the real tools behind the work, not a buzzword list.</p>
-    <div class="tools-grid" id="tools-grid">
-      <div class="tool-badge" data-years="3 yr"><span class="tool-icon">◈</span><span class="tool-name">Graphic Design</span></div>
-      <div class="tool-badge" data-years="familiar"><span class="tool-icon">◐</span><span class="tool-name">Photoshop</span></div>
-      <div class="tool-badge" data-years="familiar"><span class="tool-icon">◑</span><span class="tool-name">Illustrator</span></div>
-      <div class="tool-badge" data-years="1 yr"><span class="tool-icon">▤</span><span class="tool-name">InDesign</span></div>
-      <div class="tool-badge" data-years="familiar"><span class="tool-icon">▶</span><span class="tool-name">Premiere</span></div>
-      <div class="tool-badge" data-years="1 yr"><span class="tool-icon">◉</span><span class="tool-name">Audition</span></div>
-      <div class="tool-badge" data-years="2 yr"><span class="tool-icon tool-icon-img"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 L21 7 L21 17 L12 22 L3 17 L3 7 Z"/><path d="M12 2 L12 12 M12 12 L21 7 M12 12 L3 7 M12 12 L12 22"/></svg></span><span class="tool-name">Maya</span></div>
-      <div class="tool-badge" data-years="1 yr"><span class="tool-icon">▲</span><span class="tool-name">3ds Max</span></div>
-      <div class="tool-badge" data-years="familiar"><span class="tool-icon tool-icon-img"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="6" r="3"/><path d="M12 9v8"/><path d="M6 21h12a2 2 0 0 0 2-2v-1a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v1a2 2 0 0 0 2 2z"/></svg></span><span class="tool-name">Unreal Engine</span></div>
-      <div class="tool-badge" data-years="familiar"><span class="tool-icon tool-icon-img"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="1"/><rect x="9" y="9" width="6" height="6" rx="0.5"/><path d="M9 2v3M12 2v3M15 2v3M9 19v3M12 19v3M15 19v3M2 9h3M2 12h3M2 15h3M19 9h3M19 12h3M19 15h3"/></svg></span><span class="tool-name">C++</span></div>
-      <div class="tool-badge" data-years="familiar"><span class="tool-icon tool-icon-img"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M13 2L4 14h6l-1 8 9-12h-6z"/></svg></span><span class="tool-name">JavaScript</span></div>
-      <div class="tool-badge" data-years="1 yr"><span class="tool-icon">⊞</span><span class="tool-name">WordPress</span></div>
-      <div class="tool-badge" data-years="1 yr"><span class="tool-icon">◫</span><span class="tool-name">Google Suite</span></div>
-      <div class="tool-badge" data-years="familiar"><span class="tool-icon">▦</span><span class="tool-name">Microsoft Office</span></div>
-      <div class="tool-badge" data-years="3 yr"><span class="tool-icon tool-icon-img"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13v-1a8 8 0 0 1 16 0v1"/><rect x="2" y="13" width="4" height="6" rx="1.5"/><rect x="18" y="13" width="4" height="6" rx="1.5"/><path d="M20 19v1a3 3 0 0 1-3 3h-3"/></svg></span><span class="tool-name">Customer Service</span></div>
-    </div>
-  </div>
-</section>
 
 
 <!-- SKILLS -->
@@ -3868,6 +3876,8 @@ panels.forEach(p => observer.observe(p));
   if (!stage || !prism || !tabs.length) return;
 
   const faces = Array.from(prism.querySelectorAll('.resume-face'));
+  const FACE_COUNT = faces.length;
+  const FACE_ANGLE = 360 / FACE_COUNT;
   // Containers whose own children should stagger individually rather than
   // the whole container appearing as one flat block (facts, tags, timeline
   // entries, skill groups all cascade in one-by-one). Checked recursively,
@@ -4023,6 +4033,10 @@ panels.forEach(p => observer.observe(p));
         barsShownFallback = true;
         fillBars(burstFallback);
       }
+      if (current === 4 && !toolsShownFallback) {
+        toolsShownFallback = true;
+        revealTools(burstFallback);
+      }
     }
 
     if (!animate || window.__reduceMotion) {
@@ -4070,6 +4084,31 @@ panels.forEach(p => observer.observe(p));
     fillBars(prism);
   }
 
+  // Toolkit face (index 4): the badge grid keeps its own CSS-class-based
+  // reveal (.tool-in) rather than joining the generic runStagger system —
+  // .tool-badge has its own :hover transform (a lift on hover), and
+  // runStagger's inline style would permanently pin that transform and
+  // silently break the hover effect afterward. Same shape as fillBars:
+  // reveal once on the prism's real face, and separately on the mobile
+  // fallback clone since it's an independent set of DOM nodes.
+  let toolsShown = false;
+  let toolsShownFallback = false;
+  function revealTools(container) {
+    if (!container) return;
+    const badges = container.querySelectorAll('.tool-badge');
+    if (!badges.length) return;
+    if (window.__reduceMotion) {
+      badges.forEach((b) => b.classList.add('tool-in'));
+      return;
+    }
+    badges.forEach((b, i) => setTimeout(() => b.classList.add('tool-in'), i * 55));
+  }
+  function animateTools() {
+    if (toolsShown) return;
+    toolsShown = true;
+    revealTools(prism);
+  }
+
   // will-change is only reserved for the duration of an actual rotation —
   // added right before a transform change, dropped once the transition
   // (or the drag) ends. Holding it permanently was keeping a live GPU
@@ -4087,12 +4126,12 @@ panels.forEach(p => observer.observe(p));
 
   function goTo(i, animate, skipTextAnim, dir) {
     const prevCurrent = current;
-    current = ((i % 4) + 4) % 4;
+    current = ((i % FACE_COUNT) + FACE_COUNT) % FACE_COUNT;
     // Explicit dir (keyboard arrows, swipe) wins; tab clicks infer left/
     // right from index order, which is the correct read for a linear row
     // of tabs even though the cube itself wraps.
     const direction = typeof dir === 'number' ? dir : (current >= prevCurrent ? 1 : -1);
-    ry = -current * 90;
+    ry = -current * FACE_ANGLE;
     lift();
     if (!animate) prism.classList.add('dragging');   // skip transition
     apply();
@@ -4101,6 +4140,7 @@ panels.forEach(p => observer.observe(p));
     updateTabs(!skipTextAnim, direction);
     if (!skipTextAnim) animateFaceText(faces[current]);
     if (current === 3) animateBars();
+    if (current === 4) animateTools();
   }
 
   // Tabs
@@ -4175,16 +4215,17 @@ panels.forEach(p => observer.observe(p));
     if (!dragging) return;
     dragging = false;
     prism.classList.remove('dragging');   // re-enable transition for the snap
-    const snapped = Math.round(ry / 90) * 90;
+    const snapped = Math.round(ry / FACE_ANGLE) * FACE_ANGLE;
     ry = snapped;
     apply();
     dropLiftSoon(900); // covers the .85s snap-back transition
-    const next = (((-snapped / 90) % 4) + 4) % 4;
+    const next = (((-snapped / FACE_ANGLE) % FACE_COUNT) + FACE_COUNT) % FACE_COUNT;
     const changed = next !== current;
     if (changed) animateFaceText(faces[next]);
     current = next;
     updateTabs(changed);
     if (current === 3) animateBars();
+    if (current === 4) animateTools();
   }
   prism.addEventListener('pointerup', endDrag);
   prism.addEventListener('pointercancel', endDrag);
@@ -6256,27 +6297,6 @@ panels.forEach(p => observer.observe(p));
     document.body.classList.toggle('footer-visible', entries[0].isIntersecting);
   }, { threshold: 0.01 });
   io.observe(footer);
-})();
-</script>
-<script>
-/* -- TOOLS & SOFTWARE: staggered reveal on scroll into view -- */
-(function toolsReveal() {
-  const grid = document.getElementById('tools-grid');
-  if (!grid) return;
-  const badges = Array.from(grid.querySelectorAll('.tool-badge'));
-  if (!badges.length) return;
-
-  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    badges.forEach((b) => b.classList.add('tool-in'));
-    return;
-  }
-  const io = new IntersectionObserver((entries) => {
-    if (entries[0].isIntersecting) {
-      badges.forEach((b, i) => setTimeout(() => b.classList.add('tool-in'), i * 55));
-      io.disconnect();
-    }
-  }, { threshold: 0.25 });
-  io.observe(grid);
 })();
 </script>
 <script>

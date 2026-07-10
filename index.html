@@ -3672,7 +3672,7 @@ panels.forEach(p => observer.observe(p));
     dragging = true; moved = 0;
     startX = e.clientX; startRy = ry;
     prism.classList.add('dragging');
-    prism.setPointerCapture(e.pointerId);
+    try { prism.setPointerCapture(e.pointerId); } catch (err) { console.error('[resume] setPointerCapture failed:', err); }
   });
   prism.addEventListener('pointermove', e => {
     if (!dragging) return;
@@ -3708,6 +3708,16 @@ panels.forEach(p => observer.observe(p));
   window.addEventListener('resize', window.__debounce(apply, 160));
 
   goTo(0, false, true); // silent setup — text reveal fires below, once actually in view
+
+  // The prism's depth is computed from its own rendered width — if web
+  // fonts are still loading when that first happens (more likely on a
+  // slower mobile connection), the box can be sized off fallback-font
+  // metrics and the depth ends up stale until something else happens to
+  // trigger a resize. Re-applying once fonts are actually ready avoids
+  // depending on that.
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(() => apply());
+  }
 
   // Reveal face 0's text the first time the résumé actually scrolls into
   // view, rather than animating it invisibly before the user ever sees it.

@@ -4243,9 +4243,11 @@ panels.forEach(p => observer.observe(p));
     const grid = 30;
     const count = Math.round((W * H) / 24000);
     tctx.lineWidth = 1.3;
+    const paths = [];
     for (let i = 0; i < count; i++) {
       let x = Math.round((rng() * W) / grid) * grid;
       let y = Math.round((rng() * H) / grid) * grid;
+      const pts = [{ x, y }];
       const segments = 2 + Math.floor(rng() * 3);
       tctx.strokeStyle = `hsla(195,75%,72%,${0.16 + rng() * 0.16})`;
       tctx.beginPath();
@@ -4255,6 +4257,7 @@ panels.forEach(p => observer.observe(p));
         if (rng() < 0.5) x += (rng() < 0.5 ? -1 : 1) * len;
         else y += (rng() < 0.5 ? -1 : 1) * len;
         tctx.lineTo(x, y);
+        pts.push({ x, y });
       }
       tctx.stroke();
       // A small glowing via/junction dot at the trace's end point.
@@ -4265,8 +4268,16 @@ panels.forEach(p => observer.observe(p));
       tctx.shadowBlur = 5;
       tctx.fill();
       tctx.shadowBlur = 0;
+
+      // A minority of traces carry an animated traveling signal pulse —
+      // storing total length up front avoids recomputing it every frame.
+      if (rng() < 0.3) {
+        let total = 0;
+        for (let p = 1; p < pts.length; p++) total += Math.hypot(pts[p].x - pts[p-1].x, pts[p].y - pts[p-1].y);
+        paths.push({ pts, len: total, t: rng() * total, speed: total * (0.35 + rng() * 0.35), phase: rng() * Math.PI * 2 });
+      }
     }
-    return canvas;
+    return { canvas, paths };
   }
 
   function buildFibers(W, H, cfg, seed) {
@@ -4327,7 +4338,7 @@ panels.forEach(p => observer.observe(p));
 
       // Data-glyph riders — literal 0/1/hex digits flowing along most
       // strands, alongside (not replacing) the glow particles.
-      const GLYPH_CHARS = '01010101010ABCDEF';
+      const GLYPH_CHARS = '01010101ABCDEF{}[]#/<>';
       const glyphCount = rng() < 0.7 ? (rng() < 0.3 ? 2 : 1) : 0;
       const glyphs = Array.from({ length: glyphCount }, () => ({
         t: rng() * len,
@@ -4393,6 +4404,26 @@ panels.forEach(p => observer.observe(p));
       ctx.globalAlpha = prevGA * Math.min(1, scroll / 0.5);
       ctx.drawImage(inst.tracesCanvas, 0, 0);
       ctx.globalAlpha = prevGA;
+    }
+
+    /* ── Traveling signal pulses along a subset of the circuit traces —
+       small glowing dots moving through the rigid PCB layer, same idea
+       as the electrons riding the organic fiber strands above it. ── */
+    if (inst && inst.tracePaths && scroll > 0.05) {
+      const traceFade = Math.min(1, scroll / 0.5);
+      inst.tracePaths.forEach((tp) => {
+        tp.t = (tp.t + tp.speed * dt) % tp.len;
+        const pos = ptAtDist(tp.pts, tp.t);
+        const pulse = 0.7 + 0.3 * Math.sin(frame * 0.06 + tp.phase);
+        const alpha = 0.55 * pulse * traceFade;
+        const gR = 5 * pulse;
+        const prevGA = ctx.globalAlpha;
+        ctx.globalAlpha = prevGA * alpha;
+        ctx.drawImage(dotSprite(195), pos.x - gR, pos.y - gR, gR * 2, gR * 2);
+        ctx.globalAlpha = prevGA;
+        ctx.beginPath(); ctx.arc(pos.x, pos.y, 1.3, 0, Math.PI * 2);
+        ctx.fillStyle = `hsla(195,30%,100%,${alpha})`; ctx.fill();
+      });
     }
 
     /* ── Bright vanish-point bloom ── */
@@ -4557,16 +4588,21 @@ panels.forEach(p => observer.observe(p));
         }
       });
 
-      // Data-glyph riders — literal 0/1/hex characters drifting along most
-      // strands, same reveal-gating and surge as the particles.
+      // Data-glyph riders — literal 0/1/hex/symbol characters drifting
+      // along most strands, same reveal-gating and surge as the
+      // particles. Fixed magenta hue (matching the site's #E879F9
+      // secondary accent) rather than each fiber's own cyan-ish hue, so
+      // they read as a distinct data layer instead of blending into the
+      // strand glow.
+      const GLYPH_HUE = 292;
       (glyphs || []).forEach(g => {
         g.t = (g.t + g.speed * dt * surge) % len;
         if (g.t > revLen) return;
         const pos = ptAtDist(pts, g.t);
         const pulse = 0.6 + 0.4 * Math.sin(frame * 0.05 + g.phase);
         const alpha = 0.9 * pulse * scrollGlow;
-        ctx.fillStyle = `hsla(${hue},60%,92%,${alpha})`;
-        ctx.shadowColor = `hsla(${hue},100%,80%,0.85)`;
+        ctx.fillStyle = `hsla(${GLYPH_HUE},85%,80%,${alpha})`;
+        ctx.shadowColor = `hsla(${GLYPH_HUE},100%,75%,0.85)`;
         ctx.shadowBlur = 7;
         ctx.fillText(g.char, pos.x, pos.y);
         ctx.shadowBlur = 0;
@@ -4698,7 +4734,9 @@ panels.forEach(p => observer.observe(p));
       this.canvas.width  = W;
       this.canvas.height = H;
       this.fibers = buildFibers(W, H, this.cfg, this.index * 9973 + 12345);
-      this.tracesCanvas = buildTraces(W, H, this.index * 5011 + 777);
+      const traces = buildTraces(W, H, this.index * 5011 + 777);
+      this.tracesCanvas = traces.canvas;
+      this.tracePaths = traces.paths;
     }
 
     updateReveal() {

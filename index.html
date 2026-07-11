@@ -107,9 +107,38 @@
   })();
 </script>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#020810">
 <title>Nicholas Gearinger — AI & Design</title>
+
+<!-- Primary SEO -->
+<meta name="description" content="Nicholas Gearinger is a creative generalist working across graphic design, 3D/WebGL, game development, and photography — portfolio featuring interactive AI demos, a 3D résumé, and shipped projects.">
+<meta name="author" content="Nicholas Gearinger">
+<link rel="canonical" href="https://nicholasgearinger-code.github.io/">
+
+<!-- Open Graph -->
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://nicholasgearinger-code.github.io/">
+<meta property="og:title" content="Nicholas Gearinger — AI & Design">
+<meta property="og:description" content="Creative generalist working across graphic design, 3D/WebGL, game development, and photography. Explore interactive AI demos and a 3D résumé.">
+<meta property="og:image" content="https://nicholasgearinger-code.github.io/assets/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Nicholas Gearinger — AI & Design">
+<meta name="twitter:description" content="Creative generalist working across graphic design, 3D/WebGL, game development, and photography.">
+<meta name="twitter:image" content="https://nicholasgearinger-code.github.io/assets/og-image.png">
+
+<!-- Favicons -->
+<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/icon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/assets/icon-16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/assets/icon-180.png">
+<link rel="icon" href="/assets/favicon.ico">
+<link rel="manifest" href="/assets/site.webmanifest">
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Inter:wght@300;400;500&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
@@ -1411,9 +1440,12 @@
   .cf-field label { font-size: .68rem; letter-spacing: .12em; text-transform: uppercase; color: var(--slate); }
   .cf-input, .cf-textarea {
     background: rgba(255,255,255,.03); border: 1px solid var(--card-border); border-radius: .6rem;
-    padding: .7rem .85rem; color: var(--white); font: inherit; font-size: .9rem;
+    padding: .7rem .85rem; color: var(--white); font: inherit; font-size: 1rem;
     transition: border-color .2s, box-shadow .2s;
   }
+  /* iOS Safari auto-zooms on focus for any input under 16px — 1rem keeps
+     the contact form (and guestbook, which shares this class) at the
+     zoom-safe threshold on phones. */
   .cf-input:focus, .cf-textarea:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 0 3px rgba(34,211,238,.12); }
   .cf-textarea { resize: vertical; min-height: 110px; }
   .cf-hp { position: absolute !important; left: -9999px; width: 1px; height: 1px; opacity: 0; }
@@ -1452,8 +1484,9 @@
   .subscribe { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
   .subscribe input[type=email] {
     background: rgba(255,255,255,.03); border: 1px solid var(--card-border); border-radius: 100px;
-    padding: .45rem .9rem; color: var(--white); font: inherit; font-size: .78rem; width: 190px;
+    padding: .4rem .9rem; color: var(--white); font: inherit; font-size: 1rem; width: 190px;
   }
+  /* 1rem, not the old .78rem — under 16px triggers iOS auto-zoom on focus */
   .subscribe input:focus { outline: none; border-color: var(--cyan); }
   .subscribe button {
     padding: .45rem 1rem; border-radius: 100px; border: none; cursor: pointer; font: inherit; font-size: .78rem;
@@ -1482,7 +1515,7 @@
   .gb-empty { color: var(--slate); font-size: .85rem; margin-top: 1rem; }
 
   .ask-fab {
-    position: fixed; bottom: 1.4rem; right: 1.4rem; z-index: 120;
+    position: fixed; bottom: calc(1.4rem + env(safe-area-inset-bottom)); right: calc(1.4rem + env(safe-area-inset-right)); z-index: 120;
     display: inline-flex; align-items: center; gap: .5rem; padding: .7rem 1.15rem; border-radius: 100px;
     border: none; cursor: pointer; font: inherit; font-weight: 700; font-size: .85rem; color: #041018;
     background: linear-gradient(120deg, var(--cyan), var(--blue)); box-shadow: 0 14px 40px -12px rgba(34,211,238,.7);
@@ -1490,7 +1523,7 @@
   }
   .ask-fab:hover { transform: translateY(-2px); }
   .ask-panel {
-    position: fixed; bottom: 5.2rem; right: 1.4rem; z-index: 120;
+    position: fixed; bottom: calc(5.2rem + env(safe-area-inset-bottom)); right: calc(1.4rem + env(safe-area-inset-right)); z-index: 120;
     width: min(370px, calc(100vw - 2.8rem)); height: 460px; max-height: 70vh;
     display: none; flex-direction: column; overflow: hidden; border-radius: 1.1rem;
     background: linear-gradient(165deg, rgba(13,24,42,.98), rgba(6,12,24,.99));
@@ -1515,7 +1548,7 @@
   .ask-chip { font-size: .72rem; padding: .35rem .7rem; border-radius: 100px; border: 1px solid var(--card-border); color: var(--slate); cursor: pointer; background: none; }
   .ask-chip:hover { border-color: var(--cyan); color: var(--cyan); }
   .ask-input-row { display: flex; gap: .5rem; padding: .8rem; border-top: 1px solid var(--card-border); }
-  .ask-input-row input { flex: 1; background: rgba(255,255,255,.03); border: 1px solid var(--card-border); border-radius: 100px; padding: .55rem .9rem; color: var(--white); font: inherit; font-size: .85rem; }
+  .ask-input-row input { flex: 1; background: rgba(255,255,255,.03); border: 1px solid var(--card-border); border-radius: 100px; padding: .55rem .9rem; color: var(--white); font: inherit; font-size: 1rem; }
   .ask-input-row input:focus { outline: none; border-color: var(--cyan); }
   .ask-input-row button { padding: .55rem 1rem; border-radius: 100px; border: none; cursor: pointer; font: inherit; font-weight: 700; color: #041018; background: linear-gradient(120deg, var(--cyan), var(--blue)); }
 
@@ -3305,9 +3338,7 @@
       </div>
       <div class="social-row">
         <a href="https://www.linkedin.com/in/nicholas-gearinger-070bba13b/" class="social-link" target="_blank" rel="noopener">LinkedIn</a>
-        <a href="#" class="social-link">GitHub</a>
-        <a href="#" class="social-link">Dribbble</a>
-        <a href="#" class="social-link">Read.cv</a>
+        <a href="https://github.com/nicholasgearinger-code" class="social-link" target="_blank" rel="noopener">GitHub</a>
       </div>
     </div>
   </div>

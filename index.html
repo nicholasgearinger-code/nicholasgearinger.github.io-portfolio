@@ -2490,6 +2490,7 @@
   //    independently of — and slightly ahead of — the hero's own reveal, so
   //    by the time it clears the hero is already mid-materialization. ──
   (function sitePreloader() {
+    function init() {
     const overlay = document.getElementById('site-preloader');
     if (!overlay) return;
     document.documentElement.classList.add('preload-lock');
@@ -2540,6 +2541,12 @@
     window.addEventListener('load', () => {
       setTimeout(() => { if (!overlay.classList.contains('preloader-hide')) hideOverlay(); }, bootDone + 2300);
     });
+    }
+
+    // The overlay markup sits later in the DOM than this script tag, so wait
+    // for the parser to reach it (or just run now if it already has).
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
   })();
 </script>
 

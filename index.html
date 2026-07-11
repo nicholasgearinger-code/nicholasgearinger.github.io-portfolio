@@ -255,11 +255,12 @@
     border-bottom: 1px solid var(--card-border);
   }
   .nav-logo {
-    font-family: 'Syne', sans-serif;
-    font-weight: 800; font-size: 1.1rem; letter-spacing: -.02em;
-    color: var(--white);
+    display: flex; align-items: center;
   }
-  .nav-logo span { color: var(--teal); }
+  .nav-logo-img {
+    height: 2.1rem; width: auto; display: block;
+    filter: drop-shadow(0 0 6px rgba(34,211,238,.35));
+  }
   nav ul {
     list-style: none; display: flex; gap: .6rem; align-items: center;
     overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none;
@@ -2408,7 +2409,7 @@
 <div id="custom-cursor" aria-hidden="true"></div>
 <!-- NAV -->
 <nav aria-label="Primary">
-  <div class="nav-logo">AR<span>.</span></div>
+  <div class="nav-logo"><img src="/assets/favicon.svg" alt="Nicholas Gearinger logo" class="nav-logo-img"></div>
   <button class="nav-toggle" id="nav-toggle" aria-label="Toggle navigation menu" aria-expanded="false" aria-controls="nav-menu">
     <span></span><span></span><span></span>
   </button>

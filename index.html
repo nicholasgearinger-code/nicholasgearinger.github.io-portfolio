@@ -4859,8 +4859,9 @@ panels.forEach(p => observer.observe(p));
 
       // Data-glyph riders — literal 0/1/hex/code-symbol characters
       // flowing along most strands, alongside (not replacing) the glow
-      // particles.
-      const GLYPH_CHARS = '01010101ABCDEF{}[]#/<>;=+-_|&!?%$@~^*';
+      // particles. Weighted toward bold, legible symbols ({ } [ ] < > etc.)
+      // over thin punctuation (., _, ;, ~) that disappears at this size.
+      const GLYPH_CHARS = '01{}[]<>/#@%&*+=|\\ABCDEF';
       const glyphCount = rng() < 0.7 ? (rng() < 0.3 ? 2 : 1) : 0;
       const glyphs = Array.from({ length: glyphCount }, () => ({
         t: rng() * len,

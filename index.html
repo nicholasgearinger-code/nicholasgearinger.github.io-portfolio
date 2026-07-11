@@ -4857,10 +4857,10 @@ panels.forEach(p => observer.observe(p));
         phase: rng() * Math.PI * 2,
       }));
 
-      // Data-glyph riders — literal characters flowing along most
-      // strands, drawn from the "View My Work" / "Let's Talk" CTAs so the
-      // bridge itself reads as data streaming toward those actions.
-      const GLYPH_CHARS = 'VIEWMYORKLTSA';
+      // Data-glyph riders — literal 0/1/hex/code-symbol characters
+      // flowing along most strands, alongside (not replacing) the glow
+      // particles.
+      const GLYPH_CHARS = '01010101ABCDEF{}[]#/<>;=+-_|&!?%$@~^*';
       const glyphCount = rng() < 0.7 ? (rng() < 0.3 ? 2 : 1) : 0;
       const glyphs = Array.from({ length: glyphCount }, () => ({
         t: rng() * len,
@@ -5110,13 +5110,13 @@ panels.forEach(p => observer.observe(p));
         }
       });
 
-      // Data-glyph riders — letters from "View My Work" / "Let's Talk"
-      // drifting along most strands, same reveal-gating and surge as the
-      // particles. Fixed magenta hue (matching the site's #E879F9
-      // secondary accent) rather than each fiber's own cyan-ish hue, so
-      // they read as a distinct data layer instead of blending into the
-      // strand glow.
-      const GLYPH_HUE = 292;
+      // Data-glyph riders — letters and code symbols drifting along most
+      // strands, same reveal-gating and surge as the particles. Fixed
+      // violet hue (matching the site's --violet #818CF8 used by the
+      // "View My Work" / "Let's Talk" buttons) rather than each fiber's
+      // own cyan-ish hue, so they read as a distinct data layer instead
+      // of blending into the strand glow.
+      const GLYPH_HUE = 234;
       (glyphs || []).forEach(g => {
         g.t = (g.t + g.speed * dt * surge) % len;
         if (g.t > revLen) return;

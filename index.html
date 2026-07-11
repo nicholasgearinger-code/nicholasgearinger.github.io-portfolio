@@ -930,6 +930,20 @@
   .resume-face:nth-child(4) { transform: rotateY(216deg) translateZ(var(--depth)); }
   .resume-face:nth-child(5) { transform: rotateY(288deg) translateZ(var(--depth)); }
 
+  /* Only the active face stays visible — the other 4 are still physically
+     rotating in 3D space (so the turn still feels like a real cube), but
+     fading them to invisible stops their edges/text from peeking into
+     view and competing with the face actually being read. */
+  .resume-face {
+    opacity: 0; pointer-events: none;
+    transition: opacity .5s ease;
+  }
+  .resume-face.rface-current { opacity: 1; pointer-events: auto; }
+  html.gpu-burst-flatten .resume-face,
+  .resume-prism.reflowing .resume-face {
+    transition: none !important;
+  }
+
   .rface-num {
     font-size: .68rem; letter-spacing: .22em; text-transform: uppercase;
     color: var(--cyan); margin-bottom: .7rem;
@@ -2302,20 +2316,6 @@
   }
   .explain-row { display: flex; justify-content: center; margin-top: 1rem; }
 
-  /* ── TL;DR (AI-generated summary) ── */
-  .tldr-card {
-    margin: 1.6rem auto 0; max-width: 560px;
-    padding: .95rem 1.2rem; border-radius: .8rem;
-    background: rgba(245,158,11,.06); border: 1px solid rgba(245,158,11,.22);
-    text-align: left; font-size: .85rem; line-height: 1.6; color: var(--muted);
-  }
-  .tldr-tag {
-    display: inline-flex; align-items: center; gap: .4rem;
-    font-family: 'JetBrains Mono', monospace; font-size: .62rem; letter-spacing: .08em; text-transform: uppercase;
-    color: var(--amber); margin-bottom: .45rem;
-  }
-  .tldr-tag .tldr-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 8px var(--amber); flex-shrink: 0; }
-  #tldr-text.loading { opacity: .55; }
 </style>
 <script type="importmap">
 {
@@ -2416,10 +2416,6 @@
     <div class="hero-btns">
       <a href="#models" class="btn-primary">View My Work</a>
       <a href="#contact" class="btn-ghost">Get In Touch</a>
-    </div>
-    <div class="tldr-card" id="tldr-card">
-      <span class="tldr-tag"><span class="tldr-dot"></span>TL;DR — AI-generated summary</span>
-      <p id="tldr-text">Nicholas is a creative generalist working across design, 3D, and game development, and this site itself doubles as a demo of applied AI — from a live deep learning visualizer to on-page assistants that answer questions and summarize content for you.</p>
     </div>
     <button type="button" class="hero-continue-btn" id="hero-continue-btn">
       <span>Continue to Portfolio</span>
@@ -5851,23 +5847,6 @@ panels.forEach(p => observer.observe(p));
     });
   }
 
-  /* ── TL;DR ──
-     Hero copy ships with a hand-written fallback baked into the HTML so it
-     reads fine with no backend. If the API is up, we quietly swap in a
-     freshly generated summary. */
-  function wireTLDR() {
-    const el = document.getElementById('tldr-text');
-    if (!el) return;
-    el.classList.add('loading');
-    api('/api/ask', {
-      method: 'POST',
-      body: JSON.stringify({ question: "In exactly 2 sentences, summarize this portfolio for a first-time visitor: what Nicholas does, and what makes the site itself worth exploring." }),
-    })
-      .then((r) => { if (r && r.answer) el.textContent = r.answer; })
-      .catch(() => {})
-      .finally(() => el.classList.remove('loading'));
-  }
-
   async function boot() {
     let up = false;
     try { const r = await fetch(window.__API_BASE + '/api/health', { cache: 'no-store' }); up = r.ok; } catch (_) { up = false; }
@@ -5880,7 +5859,7 @@ panels.forEach(p => observer.observe(p));
       const vcardBtn = $('#vcard-btn');
       if (vcardBtn) vcardBtn.href = window.__API_BASE + '/api/vcard';
       wireViews(); wireStatus(); wireSubscribe(); wireClaps();
-      wireGuestbook(); wireAsk(); wireAnalytics(); wireTLDR();
+      wireGuestbook(); wireAsk(); wireAnalytics();
       wireVoiceInput(); wireActivityTicker(); wireTelemetry();
     }
   }

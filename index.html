@@ -205,6 +205,11 @@
   :focus-visible {
     outline: 2px solid var(--cyan); outline-offset: 2px;
   }
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+  }
+  html.preload-lock, html.preload-lock body { overflow: hidden; height: 100%; }
   .custom-cursor-active :focus-visible { outline-width: 2.5px; }
 
   body {
@@ -480,6 +485,81 @@
   }
   @media (max-width: 560px) {
     .hero-title-row { flex-direction: column; gap: .8rem; }
+  }
+
+  /* ── SITE PRELOADER: a full-screen JARVIS-boot intro that plays the logo
+     assembling out of a chromatic-aberration glitch (echoing .hero-holo),
+     with a boot-log readout and progress bar, before dissolving to reveal
+     the site underneath. ── */
+  #site-preloader {
+    position: fixed; inset: 0; z-index: 9999;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--navy);
+    transition: opacity .7s cubic-bezier(.4,0,.2,1), visibility .7s;
+  }
+  #site-preloader::before {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    background:
+      radial-gradient(ellipse 60% 50% at 50% 45%, rgba(34,211,238,.10), transparent 70%);
+  }
+  #site-preloader.preloader-hide { opacity: 0; visibility: hidden; }
+  .preloader-inner {
+    position: relative; z-index: 1;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 0 1.5rem;
+  }
+  .preloader-logo-wrap { position: relative; margin-bottom: 2rem; }
+  .preloader-logo {
+    height: 4.6rem; width: auto; display: block;
+    opacity: 0;
+  }
+  .preloader-logo::after { content: none; }
+  .preloader-logo.holo-in {
+    animation: heroHoloAssemble 900ms cubic-bezier(.2,.85,.25,1) forwards;
+  }
+  .preloader-scanbar {
+    position: absolute; top: -14%; bottom: -14%; left: 0; width: 2px;
+    background: linear-gradient(to bottom, transparent, var(--cyan) 20%, #fff 50%, var(--cyan) 80%, transparent);
+    box-shadow: 0 0 14px 3px rgba(34,211,238,.9), 0 0 30px 8px rgba(34,211,238,.35);
+    opacity: 0; pointer-events: none;
+  }
+  .preloader-scanbar.scan-in {
+    animation: heroHoloScanBar 900ms cubic-bezier(.2,.85,.25,1) forwards;
+  }
+  .preloader-boot {
+    display: flex; flex-direction: column; gap: .3rem;
+    margin-bottom: 1.4rem; min-height: 3.4em;
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-size: .68rem; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--muted); text-align: center;
+  }
+  .pboot-line {
+    opacity: 0; transform: translateY(4px);
+    transition: opacity .35s ease, transform .35s ease;
+  }
+  .pboot-line.pboot-in { opacity: 1; transform: translateY(0); }
+  .pboot-line .pboot-ok { color: #34D399; text-shadow: 0 0 6px rgba(52,211,153,.7); margin: 0 .35em; }
+  .preloader-bar-track {
+    width: 200px; height: 2px; border-radius: 2px; overflow: hidden;
+    background: rgba(34,211,238,.14); margin-bottom: 1rem;
+  }
+  .preloader-bar-fill {
+    width: 0%; height: 100%;
+    background: linear-gradient(90deg, var(--cyan), var(--sky));
+    box-shadow: 0 0 8px 1px rgba(34,211,238,.7);
+    transition: width 1.9s cubic-bezier(.4,0,.2,1);
+  }
+  .preloader-label {
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-size: .72rem; letter-spacing: .22em; text-transform: uppercase;
+    color: var(--cyan); opacity: .85;
+    min-height: 1.2em;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #site-preloader { transition: opacity .3s ease, visibility .3s; }
+    .preloader-logo, .preloader-logo.holo-in { animation: none !important; opacity: 1; }
+    .preloader-scanbar { display: none; }
+    .preloader-bar-fill { transition: width .3s ease; }
   }
 
   .hero-sub {
@@ -2402,6 +2482,83 @@
   //    This is the ONLY line on the whole page you need to edit. ──
   window.__API_BASE = 'https://nicholasgearinger-github-io-portfolio-1.onrender.com';
 </script>
+<script>
+  // ── SITE PRELOADER: boot-log lines flicker in, the logo assembles out of
+  //    a chromatic-aberration glitch with a scan-bar sweep (same visual
+  //    language as the hero's identity-scan reveal), the progress bar fills,
+  //    then the whole overlay dissolves to reveal the site underneath. Runs
+  //    independently of — and slightly ahead of — the hero's own reveal, so
+  //    by the time it clears the hero is already mid-materialization. ──
+  (function sitePreloader() {
+    const overlay = document.getElementById('site-preloader');
+    if (!overlay) return;
+    document.documentElement.classList.add('preload-lock');
+
+    const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    function hideOverlay() {
+      overlay.classList.add('preloader-hide');
+      document.documentElement.classList.remove('preload-lock');
+      setTimeout(() => { overlay.style.display = 'none'; }, 750);
+    }
+
+    if (reduceMotion) {
+      // Skip the theatrics entirely — show a brief, static moment then clear.
+      const fill = document.getElementById('preloader-bar-fill');
+      if (fill) fill.style.width = '100%';
+      setTimeout(hideOverlay, 300);
+      return;
+    }
+
+    const logo = document.getElementById('preloader-logo');
+    const scanbar = document.getElementById('preloader-scanbar');
+    const boot = document.getElementById('preloader-boot');
+    const fill = document.getElementById('preloader-bar-fill');
+    const label = document.getElementById('preloader-label');
+
+    // 1. Boot-log lines flicker in one at a time.
+    const lines = boot ? boot.querySelectorAll('.pboot-line') : [];
+    lines.forEach((line, i) => setTimeout(() => line.classList.add('pboot-in'), 100 + i * 160));
+    const bootDone = 100 + lines.length * 160 + 250;
+
+    // 2. Logo assembles (glitch → clip-path reveal) with scan-bar sweep.
+    setTimeout(() => {
+      if (logo) logo.classList.add('holo-in');
+      if (scanbar) scanbar.classList.add('scan-in');
+      if (label) label.textContent = 'CALIBRATING';
+    }, bootDone);
+
+    // 3. Progress bar fills toward completion.
+    setTimeout(() => { if (fill) fill.style.width = '100%'; }, bootDone + 150);
+    setTimeout(() => { if (label) label.textContent = 'READY'; }, bootDone + 1900);
+
+    // 4. Hold briefly on "READY", then dissolve the overlay.
+    setTimeout(hideOverlay, bootDone + 2300);
+
+    // Safety net: never let the preloader block the site — force it away
+    // once everything has actually finished loading, if that's later.
+    window.addEventListener('load', () => {
+      setTimeout(() => { if (!overlay.classList.contains('preloader-hide')) hideOverlay(); }, bootDone + 2300);
+    });
+  })();
+</script>
+
+<div id="site-preloader" role="status" aria-live="polite">
+  <span class="sr-only">Loading site</span>
+  <div class="preloader-inner" aria-hidden="true">
+    <div class="preloader-logo-wrap">
+      <img src="/assets/favicon.svg" alt="" class="preloader-logo" id="preloader-logo">
+      <div class="preloader-scanbar" id="preloader-scanbar"></div>
+    </div>
+    <div class="preloader-boot" id="preloader-boot">
+      <div class="pboot-line">POWER CORE <span class="pboot-ok">●</span> ONLINE</div>
+      <div class="pboot-line">RENDER PIPELINE <span class="pboot-ok">●</span> LINKED</div>
+      <div class="pboot-line">ASSETS <span class="pboot-ok">●</span> LOADED</div>
+    </div>
+    <div class="preloader-bar-track"><div class="preloader-bar-fill" id="preloader-bar-fill"></div></div>
+    <div class="preloader-label" id="preloader-label">INITIALIZING</div>
+  </div>
+</div>
 
 <a href="#main-content" class="skip-link">Skip to main content</a>
 

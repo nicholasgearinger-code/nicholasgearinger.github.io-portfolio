@@ -141,6 +141,7 @@
     --sky: #7DD3FC;             /* soft sky blue — highlights & tags */
     --cyan: #22D3EE;            /* vivid cyan — secondary accent */
     --violet: #818CF8;          /* indigo-violet — tertiary accent */
+    --magenta: #E879F9;         /* fuchsia-magenta — CTA / glyph accent */
     --amber: #F59E0B;           /* warm gold — contrast pop */
     --amber-dim: rgba(245,158,11,.12);
     --white: #F0F8FF;           /* alice blue-white — headings */
@@ -254,8 +255,8 @@
   }
   .nav-cta {
     padding: .62rem 1.3rem;
-    border: 1px solid var(--violet) !important;
-    background: var(--violet) !important;
+    border: 1px solid var(--magenta) !important;
+    background: var(--magenta) !important;
     border-radius: 100px;
     color: var(--navy) !important;
     font-weight: 700 !important;
@@ -513,12 +514,12 @@
   }
   .btn-primary {
     padding: .85rem 2rem; border-radius: 100px;
-    background: var(--violet); color: var(--white);
+    background: var(--magenta); color: var(--navy);
     font-size: .9rem; font-weight: 500; text-decoration: none;
     transition: transform .2s, box-shadow .2s;
-    box-shadow: 0 0 0 0 rgba(59,130,246,0);
+    box-shadow: 0 0 0 0 rgba(232,121,249,0);
   }
-  .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(59,130,246,.5); }
+  .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(232,121,249,.5); }
   .btn-ghost {
     padding: .85rem 2rem; border-radius: 100px;
     border: 1px solid var(--card-border); color: var(--white);
@@ -5113,12 +5114,12 @@ panels.forEach(p => observer.observe(p));
 
       // Data-glyph riders — letters and code symbols drifting along most
       // strands, same reveal-gating and surge as the particles. Fixed
-      // amber hue (matching the site's --amber #F59E0B accent) — warm and
+      // magenta hue (matching the site's --magenta #E879F9 accent) —
       // near-complementary to the circuit's cyan, so it reads as a
       // distinct data layer instead of blending into the strand glow. A
       // dark halo behind each glyph (stroked before the fill) keeps it
       // legible where it crosses the circuit's own cyan glow.
-      const GLYPH_HUE = 38;
+      const GLYPH_HUE = 292;
       ctx.font = '14px "JetBrains Mono", "Courier New", monospace';
       (glyphs || []).forEach(g => {
         g.t = (g.t + g.speed * dt * surge) % len;

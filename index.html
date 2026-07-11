@@ -509,6 +509,22 @@
     display: flex; flex-direction: column; align-items: center;
     padding: 0 1.5rem;
   }
+  /* Decoding "Nicholas Gearinger" — each character scrambles through random
+     glyphs then locks into place with a quick glitch flash, left to right. */
+  .preloader-name {
+    display: flex; justify-content: center; flex-wrap: wrap;
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-size: clamp(1rem, 4.4vw, 1.55rem);
+    letter-spacing: .03em;
+    color: var(--white);
+    text-shadow: 0 0 10px rgba(34,211,238,.3);
+    margin-bottom: 1.8rem;
+    min-height: 1.6em;
+    opacity: 1; transition: opacity .4s ease;
+  }
+  .preloader-name.name-out { opacity: 0; }
+  .nchar { display: inline-block; min-width: .32em; text-align: center; }
+  .nchar.nchar-lock { animation: dcharGlitchLock 260ms cubic-bezier(.2,.85,.25,1); }
   .preloader-logo-wrap {
     position: relative; margin-bottom: 2rem;
     display: flex; align-items: center; justify-content: center;
@@ -544,21 +560,6 @@
     opacity: 0; transition: opacity .5s ease;
   }
   .preloader-logo.logo-in { opacity: 1; }
-  .preloader-scanbar {
-    position: absolute; top: -14%; bottom: -14%; left: 0; width: 2px;
-    background: linear-gradient(to bottom, transparent, var(--cyan) 20%, #fff 45%, var(--violet) 70%, #E879F9 90%, transparent);
-    box-shadow: 0 0 14px 3px rgba(34,211,238,.9), 0 0 30px 8px rgba(232,121,249,.35);
-    opacity: 0; pointer-events: none;
-  }
-  .preloader-scanbar.scan-in {
-    animation: preloaderScanSweep 550ms cubic-bezier(.2,.85,.25,1) forwards;
-  }
-  @keyframes preloaderScanSweep {
-    0%   { left: 0%;   opacity: 0; }
-    6%   { opacity: 1; }
-    92%  { opacity: 1; }
-    100% { left: 100%; opacity: 0; }
-  }
   .preloader-boot {
     display: flex; flex-direction: column; gap: .3rem;
     margin-bottom: 1.4rem; min-height: 3.4em;
@@ -580,7 +581,7 @@
     width: 0%; height: 100%;
     background: linear-gradient(90deg, var(--cyan), var(--violet), #E879F9);
     box-shadow: 0 0 8px 1px rgba(34,211,238,.7);
-    transition: width 1.6s cubic-bezier(.4,0,.2,1);
+    transition: width 3.3s cubic-bezier(.4,0,.2,1);
   }
   .preloader-label {
     font-family: 'JetBrains Mono', 'Courier New', monospace;
@@ -590,9 +591,9 @@
   }
   @media (prefers-reduced-motion: reduce) {
     #site-preloader { transition: opacity .3s ease, visibility .3s; }
+    .preloader-name { display: none; }
     .preloader-decode { display: none; }
     .preloader-logo { opacity: 1; transition: none; }
-    .preloader-scanbar { display: none; }
     .preloader-bar-fill { transition: width .3s ease; }
   }
 
@@ -2546,14 +2547,16 @@
     }
 
     const logo = document.getElementById('preloader-logo');
-    const scanbar = document.getElementById('preloader-scanbar');
     const boot = document.getElementById('preloader-boot');
     const fill = document.getElementById('preloader-bar-fill');
     const label = document.getElementById('preloader-label');
+    const nameWrap = document.getElementById('preloader-name');
     const decodeWrap = document.getElementById('preloader-decode');
     const dchars = decodeWrap ? Array.from(decodeWrap.querySelectorAll('.dchar')) : [];
     const finals = ['<', '/', '>'];
     const scramblePool = '<>/\\|{}[]#%$&*+=01~^!?';
+    const NAME = 'Nicholas Gearinger';
+    const nameLetterPool = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz#%$&*+=<>/';
 
     // 1. Boot-log lines flicker in one at a time.
     const lines = boot ? boot.querySelectorAll('.pboot-line') : [];
@@ -2562,68 +2565,99 @@
 
     // Rapidly cycles `el` through random glyphs, then locks it to `finalChar`
     // with a quick glitch flash — a hacker-terminal "decode" effect.
-    function scrambleChar(el, finalChar, duration, startDelay, onLock) {
+    function scrambleChar(el, finalChar, duration, startDelay, pool, lockClass, onLock) {
       setTimeout(() => {
         const t0 = performance.now();
         function tick(now) {
           const elapsed = now - t0;
           if (elapsed >= duration) {
             el.textContent = finalChar;
-            el.classList.add('dchar-lock');
+            el.classList.add(lockClass);
             if (onLock) onLock();
             return;
           }
           const progress = elapsed / duration;
           el.textContent = (progress > 0.75 && Math.random() < 0.35)
             ? finalChar
-            : scramblePool[Math.floor(Math.random() * scramblePool.length)];
+            : pool[Math.floor(Math.random() * pool.length)];
           requestAnimationFrame(tick);
         }
         requestAnimationFrame(tick);
       }, startDelay);
     }
 
-    // 2. Decode "</>" character by character (cyan, violet, magenta),
-    //    staggered left to right, each locking with a glitch flash.
-    function runDecode(onDone) {
-      if (!dchars.length) { onDone(); return; }
-      const perCharDuration = 480;
-      const stagger = 130;
+    // 2. Decode "Nicholas Gearinger" letter by letter, left to right.
+    function runNameDecode(onDone) {
+      if (!nameWrap) { onDone(); return; }
+      const chars = NAME.split('');
+      const spans = chars.map((ch) => {
+        const span = document.createElement('span');
+        span.className = 'nchar';
+        span.textContent = ch === ' ' ? '\u00A0' : ch;
+        nameWrap.appendChild(span);
+        return span;
+      });
+      const stagger = 42;
+      const duration = 300;
       let locked = 0;
-      dchars.forEach((el, i) => {
-        scrambleChar(el, finals[i], perCharDuration, i * stagger, () => {
+      spans.forEach((span, i) => {
+        if (chars[i] === ' ') { locked++; return; }
+        scrambleChar(span, chars[i], duration, i * stagger, nameLetterPool, 'nchar-lock', () => {
           locked++;
-          if (locked === dchars.length) setTimeout(onDone, 280);
+          if (locked === spans.length) setTimeout(onDone, 550);
         });
       });
     }
 
-    // 3. Crossfade the decoded text into the real logo mark, in the same
-    //    spot, with a scan-bar sweep bridging the two.
+    // 3. Decode "</>" character by character (cyan, violet, magenta),
+    //    staggered left to right, each locking with a glitch flash.
+    function runGlyphDecode(onDone) {
+      if (!dchars.length) { onDone(); return; }
+      const perCharDuration = 420;
+      const stagger = 110;
+      let locked = 0;
+      dchars.forEach((el, i) => {
+        scrambleChar(el, finals[i], perCharDuration, i * stagger, scramblePool, 'dchar-lock', () => {
+          locked++;
+          if (locked === dchars.length) setTimeout(onDone, 260);
+        });
+      });
+    }
+
+    // 4. Crossfade the decoded glyph into the real logo mark, in the same spot.
     function crossfadeToLogo(onDone) {
-      if (scanbar) scanbar.classList.add('scan-in');
       if (decodeWrap) decodeWrap.classList.add('decode-out');
       if (logo) logo.classList.add('logo-in');
-      setTimeout(onDone, 500);
+      setTimeout(onDone, 450);
     }
 
     setTimeout(() => {
-      if (label) label.textContent = 'DECODING';
+      if (label) label.textContent = 'IDENTIFYING';
       if (fill) fill.style.width = '100%';
-      runDecode(() => {
-        crossfadeToLogo(() => {
-          if (label) label.textContent = 'READY';
-        });
+      runNameDecode(() => {
+        if (nameWrap) nameWrap.classList.add('name-out');
+        setTimeout(() => {
+          if (label) label.textContent = 'DECODING';
+          runGlyphDecode(() => {
+            crossfadeToLogo(() => {
+              if (label) label.textContent = 'READY';
+            });
+          });
+        }, 300);
       });
     }, bootDone);
 
-    // 4. Hold briefly on "READY", then dissolve the overlay.
-    setTimeout(hideOverlay, bootDone + 2000);
+    // Total active runtime ≈ bootDone + name decode/hold + fade + glyph
+    // decode + crossfade + a short hold on "READY" — about 5 seconds.
+    const TOTAL_MS = 4550;
+
+    // 5. Hold briefly on "READY", then dissolve the overlay.
+    setTimeout(hideOverlay, TOTAL_MS);
 
     // Safety net: never let the preloader block the site — force it away
     // once everything has actually finished loading, if that's later.
     window.addEventListener('load', () => {
-      setTimeout(() => { if (!overlay.classList.contains('preloader-hide')) hideOverlay(); }, bootDone + 2000);
+      setTimeout(() => { if (!overlay.classList.contains('preloader-hide')) hideOverlay(); }, TOTAL_MS);
     });
     }
 
@@ -2637,12 +2671,12 @@
 <div id="site-preloader" role="status" aria-live="polite">
   <span class="sr-only">Loading site</span>
   <div class="preloader-inner" aria-hidden="true">
+    <div class="preloader-name" id="preloader-name"></div>
     <div class="preloader-logo-wrap">
       <div class="preloader-decode" id="preloader-decode">
         <span class="dchar dchar-1" id="dchar-1">&lt;</span><span class="dchar dchar-2" id="dchar-2">/</span><span class="dchar dchar-3" id="dchar-3">&gt;</span>
       </div>
       <img src="/assets/favicon.svg" alt="" class="preloader-logo" id="preloader-logo">
-      <div class="preloader-scanbar" id="preloader-scanbar"></div>
     </div>
     <div class="preloader-boot" id="preloader-boot">
       <div class="pboot-line">POWER CORE <span class="pboot-ok">●</span> ONLINE</div>

@@ -509,42 +509,40 @@
     display: flex; flex-direction: column; align-items: center;
     padding: 0 1.5rem;
   }
-  /* Decoding "Nicholas Gearinger" — each character scrambles through random
-     glyphs then locks into place with a quick glitch flash, left to right. */
-  .preloader-name {
-    display: flex; justify-content: center; flex-wrap: wrap;
-    font-family: 'JetBrains Mono', 'Courier New', monospace;
-    font-size: clamp(1rem, 4.4vw, 1.55rem);
-    letter-spacing: .03em;
-    color: var(--white);
-    text-shadow: 0 0 10px rgba(34,211,238,.3);
-    margin-bottom: 1.8rem;
-    min-height: 1.6em;
-    opacity: 1; transition: opacity .4s ease;
-  }
-  .preloader-name.name-out { opacity: 0; }
-  .nchar { display: inline-block; min-width: .32em; text-align: center; }
-  .nchar.nchar-lock { animation: dcharGlitchLock 260ms cubic-bezier(.2,.85,.25,1); }
   .preloader-logo-wrap {
     position: relative; margin-bottom: 2rem;
     display: flex; align-items: center; justify-content: center;
-    min-height: 4.6rem; min-width: 4.6rem;
+    min-height: 4.6rem; width: 100%; max-width: 100%;
   }
-  /* Decoding "</>" — three independently-scrambling characters that settle
-     into place and lock with a quick glitch flash. */
-  .preloader-decode {
-    position: absolute; inset: 0;
-    display: flex; align-items: center; justify-content: center; gap: .1em;
+  /* One continuous line: "Nicholas Gearinger" decodes character by
+     character out of scrambled glyphs, holds, then every letter except
+     three anchor characters glitches and collapses away while those three
+     lock into "<", "/", ">" (cyan, violet, magenta) — the name literally
+     resolves down into the mark, in place, before crossfading to the
+     real logo image. */
+  .preloader-decode-line {
+    display: flex; align-items: center; justify-content: center;
     font-family: 'JetBrains Mono', 'Courier New', monospace;
-    font-weight: 700; font-size: 3rem; line-height: 1;
-    opacity: 1; transition: opacity .45s ease;
+    font-weight: 700;
+    font-size: clamp(.92rem, 4.6vw, 1.6rem);
+    letter-spacing: .01em;
+    color: var(--white);
+    text-shadow: 0 0 8px rgba(34,211,238,.25);
+    opacity: 1; transition: opacity .4s ease;
+    white-space: nowrap;
   }
-  .preloader-decode.decode-out { opacity: 0; }
-  .dchar { display: inline-block; min-width: .7em; text-align: center; }
-  .dchar-1 { color: var(--cyan); text-shadow: 0 0 10px rgba(34,211,238,.6); }
-  .dchar-2 { color: var(--violet); text-shadow: 0 0 10px rgba(129,140,248,.6); }
-  .dchar-3 { color: #E879F9; text-shadow: 0 0 10px rgba(232,121,249,.6); }
-  .dchar.dchar-lock { animation: dcharGlitchLock 340ms cubic-bezier(.2,.85,.25,1); }
+  .preloader-decode-line.decode-out { opacity: 0; }
+  .lchar {
+    display: inline-block; min-width: .05em; text-align: center; overflow: hidden;
+    transition: width .4s cubic-bezier(.4,0,.2,1), margin .4s cubic-bezier(.4,0,.2,1),
+      opacity .32s ease, transform .32s ease, font-size .4s cubic-bezier(.4,0,.2,1);
+  }
+  .lchar.lchar-collapse { width: 0 !important; opacity: 0; transform: scale(.3); margin: 0 !important; }
+  .lchar.lchar-anchor-1 { color: var(--cyan); text-shadow: 0 0 10px rgba(34,211,238,.6); }
+  .lchar.lchar-anchor-2 { color: var(--violet); text-shadow: 0 0 10px rgba(129,140,248,.6); }
+  .lchar.lchar-anchor-3 { color: #E879F9; text-shadow: 0 0 10px rgba(232,121,249,.6); }
+  .lchar.lchar-lock { animation: dcharGlitchLock 320ms cubic-bezier(.2,.85,.25,1); }
+  .lchar.lchar-anchor-grown { font-size: 1.9em; }
   @keyframes dcharGlitchLock {
     0%   { transform: translateX(0) skewX(0deg); filter: drop-shadow(2px 0 0 rgba(34,211,238,.8)) drop-shadow(-2px 0 0 rgba(232,121,249,.6)); }
     20%  { transform: translateX(-2px) skewX(-6deg); }
@@ -552,8 +550,8 @@
     60%  { transform: translateX(-1px) skewX(-2deg); }
     100% { transform: translateX(0) skewX(0deg); filter: none; }
   }
-  /* Real logo mark — fades in on top of the same spot as the decode text
-     resolves, so the swap reads as one continuous reveal. */
+  /* Real logo mark — fades in on top of the same spot the glyph resolves
+     to, so the swap reads as one continuous reveal. */
   .preloader-logo {
     position: absolute; inset: 0; margin: auto;
     height: 4.6rem; width: auto; display: block;
@@ -591,8 +589,7 @@
   }
   @media (prefers-reduced-motion: reduce) {
     #site-preloader { transition: opacity .3s ease, visibility .3s; }
-    .preloader-name { display: none; }
-    .preloader-decode { display: none; }
+    .preloader-decode-line { display: none; }
     .preloader-logo { opacity: 1; transition: none; }
     .preloader-bar-fill { transition: width .3s ease; }
   }
@@ -2550,13 +2547,15 @@
     const boot = document.getElementById('preloader-boot');
     const fill = document.getElementById('preloader-bar-fill');
     const label = document.getElementById('preloader-label');
-    const nameWrap = document.getElementById('preloader-name');
-    const decodeWrap = document.getElementById('preloader-decode');
-    const dchars = decodeWrap ? Array.from(decodeWrap.querySelectorAll('.dchar')) : [];
-    const finals = ['<', '/', '>'];
-    const scramblePool = '<>/\\|{}[]#%$&*+=01~^!?';
+    const lineWrap = document.getElementById('preloader-decode-line');
     const NAME = 'Nicholas Gearinger';
     const nameLetterPool = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz#%$&*+=<>/';
+    const glyphPool = '<>/\\|{}[]#%$&*+=01~^!?';
+    // Three character positions in the name that become "<", "/", ">" —
+    // everything else glitches and collapses away around them.
+    const anchorIndices = [0, 9, NAME.length - 1];
+    const anchorFinals = ['<', '/', '>'];
+    const anchorClasses = ['lchar-anchor-1', 'lchar-anchor-2', 'lchar-anchor-3'];
 
     // 1. Boot-log lines flicker in one at a time.
     const lines = boot ? boot.querySelectorAll('.pboot-line') : [];
@@ -2572,7 +2571,7 @@
           const elapsed = now - t0;
           if (elapsed >= duration) {
             el.textContent = finalChar;
-            el.classList.add(lockClass);
+            if (lockClass) el.classList.add(lockClass);
             if (onLock) onLock();
             return;
           }
@@ -2586,15 +2585,17 @@
       }, startDelay);
     }
 
-    // 2. Decode "Nicholas Gearinger" letter by letter, left to right.
+    // 2. Decode "Nicholas Gearinger" letter by letter, left to right, all
+    //    within one line — this is the same element the glyph collapse
+    //    below operates on.
     function runNameDecode(onDone) {
-      if (!nameWrap) { onDone(); return; }
+      if (!lineWrap) { onDone(); return; }
       const chars = NAME.split('');
       const spans = chars.map((ch) => {
         const span = document.createElement('span');
-        span.className = 'nchar';
+        span.className = 'lchar';
         span.textContent = ch === ' ' ? '\u00A0' : ch;
-        nameWrap.appendChild(span);
+        lineWrap.appendChild(span);
         return span;
       });
       const stagger = 42;
@@ -2602,54 +2603,66 @@
       let locked = 0;
       spans.forEach((span, i) => {
         if (chars[i] === ' ') { locked++; return; }
-        scrambleChar(span, chars[i], duration, i * stagger, nameLetterPool, 'nchar-lock', () => {
+        scrambleChar(span, chars[i], duration, i * stagger, nameLetterPool, 'lchar-lock', () => {
           locked++;
-          if (locked === spans.length) setTimeout(onDone, 550);
+          if (locked === spans.length) setTimeout(() => onDone(spans), 550);
         });
       });
     }
 
-    // 3. Decode "</>" character by character (cyan, violet, magenta),
-    //    staggered left to right, each locking with a glitch flash.
-    function runGlyphDecode(onDone) {
-      if (!dchars.length) { onDone(); return; }
-      const perCharDuration = 420;
-      const stagger = 110;
-      let locked = 0;
-      dchars.forEach((el, i) => {
-        scrambleChar(el, finals[i], perCharDuration, i * stagger, scramblePool, 'dchar-lock', () => {
-          locked++;
-          if (locked === dchars.length) setTimeout(onDone, 260);
-        });
+    // 3. Collapse the name down to "</>" in place: the three anchor
+    //    characters scramble-lock into cyan/violet/magenta glyphs while
+    //    every other character glitches briefly then shrinks away, so the
+    //    line itself contracts from the full name to just the mark.
+    function runGlyphCollapse(spans, onDone) {
+      const total = spans.length;
+      let settled = 0;
+      function checkDone() { settled++; if (settled === total) setTimeout(onDone, 320); }
+      spans.forEach((span, i) => {
+        const anchorPos = anchorIndices.indexOf(i);
+        if (anchorPos !== -1) {
+          scrambleChar(span, anchorFinals[anchorPos], 380, anchorPos * 110, glyphPool, 'lchar-lock', () => {
+            span.classList.add(anchorClasses[anchorPos]);
+            checkDone();
+          });
+        } else {
+          // Brief scramble burst for glitch flavor, then collapse away.
+          const burst = 160 + Math.random() * 140;
+          scrambleChar(span, span.textContent, burst, Math.random() * 180, glyphPool, null, () => {
+            span.classList.add('lchar-collapse');
+            checkDone();
+          });
+        }
       });
     }
 
-    // 4. Crossfade the decoded glyph into the real logo mark, in the same spot.
-    function crossfadeToLogo(onDone) {
-      if (decodeWrap) decodeWrap.classList.add('decode-out');
-      if (logo) logo.classList.add('logo-in');
-      setTimeout(onDone, 450);
+    // 4. Crossfade the collapsed glyph into the real logo mark, same spot.
+    function crossfadeToLogo(spans, onDone) {
+      const anchors = anchorIndices.map((i) => spans[i]);
+      anchors.forEach((el) => el.classList.add('lchar-anchor-grown'));
+      setTimeout(() => {
+        if (lineWrap) lineWrap.classList.add('decode-out');
+        if (logo) logo.classList.add('logo-in');
+        setTimeout(onDone, 450);
+      }, 200);
     }
 
     setTimeout(() => {
       if (label) label.textContent = 'IDENTIFYING';
       if (fill) fill.style.width = '100%';
-      runNameDecode(() => {
-        if (nameWrap) nameWrap.classList.add('name-out');
-        setTimeout(() => {
-          if (label) label.textContent = 'DECODING';
-          runGlyphDecode(() => {
-            crossfadeToLogo(() => {
-              if (label) label.textContent = 'READY';
-            });
+      runNameDecode((spans) => {
+        if (label) label.textContent = 'DECODING';
+        runGlyphCollapse(spans, () => {
+          crossfadeToLogo(spans, () => {
+            if (label) label.textContent = 'READY';
           });
-        }, 300);
+        });
       });
     }, bootDone);
 
-    // Total active runtime ≈ bootDone + name decode/hold + fade + glyph
-    // decode + crossfade + a short hold on "READY" — about 5 seconds.
-    const TOTAL_MS = 4550;
+    // Total active runtime ≈ bootDone + name decode/hold + glyph collapse
+    // + crossfade + a short hold on "READY" — about 5 seconds.
+    const TOTAL_MS = 4600;
 
     // 5. Hold briefly on "READY", then dissolve the overlay.
     setTimeout(hideOverlay, TOTAL_MS);
@@ -2671,11 +2684,8 @@
 <div id="site-preloader" role="status" aria-live="polite">
   <span class="sr-only">Loading site</span>
   <div class="preloader-inner" aria-hidden="true">
-    <div class="preloader-name" id="preloader-name"></div>
     <div class="preloader-logo-wrap">
-      <div class="preloader-decode" id="preloader-decode">
-        <span class="dchar dchar-1" id="dchar-1">&lt;</span><span class="dchar dchar-2" id="dchar-2">/</span><span class="dchar dchar-3" id="dchar-3">&gt;</span>
-      </div>
+      <div class="preloader-decode-line" id="preloader-decode-line"></div>
       <img src="/assets/favicon.svg" alt="" class="preloader-logo" id="preloader-logo">
     </div>
     <div class="preloader-boot" id="preloader-boot">

@@ -2402,7 +2402,7 @@
       <div class="boot-line">DIAGNOSTICS <span class="boot-ok">●</span> NOMINAL</div>
       <div class="boot-line">HUD <span class="boot-ok">●</span> LINKED</div>
     </div>
-    <div class="hero-eyebrow">Available for work · 2025</div>
+    <div class="hero-eyebrow">Available for work · 2026</div>
     <div class="hero-title-row">
       <div class="hero-prompt-line" id="hero-prompt-line"><span class="hero-holo" id="hero-prompt-text">Scanning Identity</span></div>
       <h1>
@@ -5905,7 +5905,10 @@ panels.forEach(p => observer.observe(p));
     const totalIn = 120 + lines.length * 170 + 300;
     setTimeout(() => {
       log.classList.add('boot-fade');
-      setTimeout(onDone, 500);
+      setTimeout(() => {
+        log.style.display = 'none';
+        onDone();
+      }, 500);
     }, totalIn);
   }
 

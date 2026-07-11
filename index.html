@@ -332,27 +332,6 @@
     mask-composite: intersect, intersect;
     transition: opacity .15s linear;
   }
-  /* Arc-reactor ambient glow — sits between the particle field and the
-     hero text, idling as a slow radial pulse once "armed" by the JS
-     reveal sequence, giving the hero a powered-up JARVIS-HUD backdrop. */
-  .arc-reactor {
-    position: absolute; top: 50%; left: 50%; width: 0; height: 0;
-    z-index: 1; pointer-events: none;
-  }
-  .arc-reactor-glow {
-    position: absolute; top: 0; left: 0; transform: translate(-50%,-50%);
-    width: min(70vw, 820px); height: min(70vw, 820px); border-radius: 50%;
-    background: radial-gradient(circle, rgba(34,211,238,.16) 0%, rgba(34,211,238,.07) 32%, transparent 64%);
-    opacity: 0; transition: opacity 1.4s ease;
-    animation: arcReactorPulse 5.5s ease-in-out infinite;
-    animation-play-state: paused;
-  }
-  .arc-reactor.armed .arc-reactor-glow { opacity: 1; animation-play-state: running; }
-  @keyframes arcReactorPulse { 0%, 100% { opacity: .35; } 50% { opacity: .6; } }
-  @media (prefers-reduced-motion: reduce) {
-    .arc-reactor-glow { transition: none; animation: none !important; }
-    .arc-reactor.armed .arc-reactor-glow { opacity: .4; }
-  }
   /* HUD boot-log — a quick "systems online" readout that flickers in
      line-by-line ahead of the identity scan, then clears. */
   .hero-boot-log {
@@ -2416,9 +2395,6 @@
 
 <section id="hero">
   <canvas id="particle-canvas"></canvas>
-  <div class="arc-reactor" id="arc-reactor" aria-hidden="true">
-    <div class="arc-reactor-glow"></div>
-  </div>
   <div class="hero-content">
     <div class="hero-boot-log" id="hero-boot-log" aria-hidden="true">
       <div class="boot-line">POWER CORE <span class="boot-ok">●</span> ONLINE</div>
@@ -4881,9 +4857,10 @@ panels.forEach(p => observer.observe(p));
         phase: rng() * Math.PI * 2,
       }));
 
-      // Data-glyph riders — literal 0/1/hex digits flowing along most
-      // strands, alongside (not replacing) the glow particles.
-      const GLYPH_CHARS = '01010101ABCDEF{}[]#/<>';
+      // Data-glyph riders — literal characters flowing along most
+      // strands, drawn from the "View My Work" / "Let's Talk" CTAs so the
+      // bridge itself reads as data streaming toward those actions.
+      const GLYPH_CHARS = 'VIEWMYORKLTSA';
       const glyphCount = rng() < 0.7 ? (rng() < 0.3 ? 2 : 1) : 0;
       const glyphs = Array.from({ length: glyphCount }, () => ({
         t: rng() * len,
@@ -5133,8 +5110,8 @@ panels.forEach(p => observer.observe(p));
         }
       });
 
-      // Data-glyph riders — literal 0/1/hex/symbol characters drifting
-      // along most strands, same reveal-gating and surge as the
+      // Data-glyph riders — letters from "View My Work" / "Let's Talk"
+      // drifting along most strands, same reveal-gating and surge as the
       // particles. Fixed magenta hue (matching the site's #E879F9
       // secondary accent) rather than each fiber's own cyan-ish hue, so
       // they read as a distinct data layer instead of blending into the
@@ -5924,18 +5901,9 @@ panels.forEach(p => observer.observe(p));
     if (sub) sub.classList.add('reveal-in');
     const bootLog = document.getElementById('hero-boot-log');
     if (bootLog) bootLog.style.display = 'none';
-    const arcReactor = document.getElementById('arc-reactor');
-    if (arcReactor) arcReactor.classList.add('armed');
     const continueBtn = document.getElementById('hero-continue-btn');
     if (continueBtn) continueBtn.style.opacity = '1';
     return;
-  }
-
-  // Arms the arc-reactor ambient glow (idle pulse + slow-spinning rings)
-  // so it's powering up behind the hero for the whole reveal sequence.
-  function armReactor() {
-    const arcReactor = document.getElementById('arc-reactor');
-    if (arcReactor) arcReactor.classList.add('armed');
   }
 
   // Flickers the "POWER CORE / DIAGNOSTICS / HUD" boot-log lines in one
@@ -6001,7 +5969,6 @@ panels.forEach(p => observer.observe(p));
   }
 
   function start() {
-    armReactor();
     runBootLog(run);
   }
 

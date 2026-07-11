@@ -5113,13 +5113,12 @@ panels.forEach(p => observer.observe(p));
 
       // Data-glyph riders — letters and code symbols drifting along most
       // strands, same reveal-gating and surge as the particles. Fixed
-      // violet hue (matching the site's --violet #818CF8 used by the
-      // "View My Work" / "Let's Talk" buttons) rather than each fiber's
-      // own cyan-ish hue, so they read as a distinct data layer instead
-      // of blending into the strand glow. A dark halo behind each glyph
-      // (stroked before the fill) keeps it legible where it crosses the
-      // circuit's own cyan glow, rather than washing out into it.
-      const GLYPH_HUE = 234;
+      // amber hue (matching the site's --amber #F59E0B accent) — warm and
+      // near-complementary to the circuit's cyan, so it reads as a
+      // distinct data layer instead of blending into the strand glow. A
+      // dark halo behind each glyph (stroked before the fill) keeps it
+      // legible where it crosses the circuit's own cyan glow.
+      const GLYPH_HUE = 38;
       ctx.font = '14px "JetBrains Mono", "Courier New", monospace';
       (glyphs || []).forEach(g => {
         g.t = (g.t + g.speed * dt * surge) % len;
@@ -5130,8 +5129,8 @@ panels.forEach(p => observer.observe(p));
         ctx.lineWidth = 3;
         ctx.strokeStyle = `hsla(230,55%,6%,${alpha * 0.85})`;
         ctx.strokeText(g.char, pos.x, pos.y);
-        ctx.fillStyle = `hsla(${GLYPH_HUE},95%,88%,${alpha})`;
-        ctx.shadowColor = `hsla(${GLYPH_HUE},100%,78%,0.95)`;
+        ctx.fillStyle = `hsla(${GLYPH_HUE},95%,65%,${alpha})`;
+        ctx.shadowColor = `hsla(${GLYPH_HUE},100%,60%,0.95)`;
         ctx.shadowBlur = 11;
         ctx.fillText(g.char, pos.x, pos.y);
         ctx.shadowBlur = 0;

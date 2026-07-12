@@ -3337,7 +3337,7 @@
           <button type="button" class="game-mute-btn" id="game-mute-btn" aria-label="Toggle sound">🔊</button>
           <button type="button" class="game-fire-btn" id="game-fire-btn" aria-label="Fire" hidden>◎</button>
           <div class="game-overlay" id="game-overlay">
-            <div class="game-title-seq" id="game-title-seq">
+            <div class="game-title-seq" id="game-title-seq" hidden>
               <div class="game-title-icon" id="game-title-icon">&lt;/&gt;</div>
               <div class="game-title-status" id="game-title-status"></div>
               <div class="game-title-word" id="game-title-word"></div>
@@ -6990,6 +6990,8 @@ panels.forEach(p => observer.observe(p));
 (function ghostwire() {
   const canvas = document.getElementById('game-canvas');
   const overlay = document.getElementById('game-overlay');
+  const titleSeqEl = document.getElementById('game-title-seq');
+  const overlayMainEl = document.getElementById('game-overlay-main');
   const overlayTitle = document.getElementById('game-overlay-title');
   const overlaySub = document.getElementById('game-overlay-sub');
   const startBtn = document.getElementById('game-start-btn');
@@ -8046,7 +8048,8 @@ panels.forEach(p => observer.observe(p));
     scoreEntry.hidden = true;
     submitNote.textContent = '';
     if (pillText) pillText.textContent = 'READY';
-    replayTitleSeq();
+    if (titleSeqEl) titleSeqEl.hidden = true;
+    if (overlayMainEl) overlayMainEl.hidden = false;
   }
 
   async function loadLeaderboard() {
@@ -8062,15 +8065,19 @@ panels.forEach(p => observer.observe(p));
     } catch (_) {}
   }
 
-  let hasEverPlayed = false;
   function handlePlayClick() {
-    if (hasEverPlayed) { start(); return; }
-    hasEverPlayed = true;
     const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     startBtn.disabled = true;
-    startBtn.textContent = 'Initializing\u2026';
-    runTitleSeq();
-    setTimeout(() => { startBtn.disabled = false; startBtn.textContent = '\u25B6 Play'; start(); }, reduceMotion ? 0 : 2000);
+    if (overlayMainEl) overlayMainEl.hidden = true;
+    if (titleSeqEl) titleSeqEl.hidden = false;
+    replayTitleSeq();
+    setTimeout(() => {
+      if (titleSeqEl) titleSeqEl.hidden = true;
+      if (overlayMainEl) overlayMainEl.hidden = false;
+      startBtn.disabled = false;
+      startBtn.textContent = '\u25B6 Play';
+      start();
+    }, reduceMotion ? 0 : 2000);
   }
   startBtn.addEventListener('click', handlePlayClick);
   if (quitBtn) quitBtn.addEventListener('click', quitGame);

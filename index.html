@@ -3208,7 +3208,7 @@
   <div class="panel-inner">
     <span class="section-label">Try It</span>
     <h2>Dive the datastream,<br>purge the corruption</h2>
-    <p class="lead" style="margin:0 auto 2.2rem;">A small arcade game built from scratch — you're a hunter-process diving through a live data tunnel. Arrow keys, A/D, or drag to steer, dodge the corrupted fragments tearing in from the depths, and pull in verified data shards for points. The tunnel accelerates — and destabilizes — the longer you survive.</p>
+    <p class="lead" style="margin:0 auto 2.2rem;">A small arcade game built from scratch — you're a hunter-process diving through a live data tunnel. Arrow keys, A/D, or drag to steer, dodge the corrupted fragments tearing in from the depths, and pull in verified data shards for points. Early hits just cost you points — once the THREAT meter goes red, one hit ends the run.</p>
     <div class="algo-card">
       <div class="cc-titlebar">
         <div class="cc-dots">
@@ -3226,7 +3226,7 @@
           <canvas id="game-canvas" width="480" height="360" aria-label="Ghostwire arcade game — a hunter-process diving a perspective data tunnel, dodging corrupted fragments and collecting verified data shards"></canvas>
           <div class="game-overlay" id="game-overlay">
             <h3 id="game-overlay-title">Ghostwire</h3>
-            <p id="game-overlay-sub">Arrow keys, A/D, or drag to steer. Dodge red corruption, pull in cyan data.</p>
+            <p id="game-overlay-sub">Arrow keys, A/D, or drag to steer. Hits cost points until THREAT goes red — then one hit ends it.</p>
             <button type="button" class="btn-primary" id="game-start-btn">▶ Play</button>
             <div class="game-score-entry" id="game-score-entry" hidden>
               <input type="text" id="game-name-input" maxlength="12" placeholder="YOUR NAME">
@@ -6890,6 +6890,8 @@ panels.forEach(p => observer.observe(p));
   const MOVE_SPEED = 460;
   const MIN_SCALE = 0.1;                        // how small items are right at the vanishing point
   const REMOVE_P = 1.35;                        // progress past which a missed item is culled
+  const RED_THREAT = 0.78;                      // threat level (0-1) at which the meter goes red and hits become lethal
+  const HIT_INVULN = 0.9;                        // seconds of invulnerability after a non-lethal hit
 
   const CODE_TOKENS_BAD = ['0xFF', 'NaN', 'SEGV', 'ERR', 'null', '!=', 'undef', '0x00', 'panic!'];
   const CODE_TOKENS_GOOD = ['OK', '{ }', '=>', '200', 'ACK', '0x1A', 'sync', 'true'];
@@ -6942,7 +6944,8 @@ panels.forEach(p => observer.observe(p));
   let items = [], particles = [], codeBits = [];
   let score = 0, running = false, dying = false, deathTimer = 0, rafId = null, lastTime = 0;
   let spawnTimer = 0, codeBitTimer = 0, elapsed = 0, difficulty = 1;
-  let shakeMag = 0, flash = 0, tunnelHue = 0;
+  let shakeMag = 0, flash = 0, tunnelHue = 0, threat = 0;
+  let streak = 0, invulnTimer = 0;
   let circuitTraces = generateCircuitTraces();
   let best = parseInt(localStorage.getItem('ghostwireBest') || '0', 10);
   bestStatEl.innerHTML = 'best: <strong>' + best + '</strong>';
@@ -6956,6 +6959,7 @@ panels.forEach(p => observer.observe(p));
     spawnTimer = 0; codeBitTimer = 0;
     playerX = W / 2; targetX = playerX; playerVX = 0;
     shakeMag = 0; flash = 0; dying = false; deathTimer = 0;
+    streak = 0; invulnTimer = 0;
     circuitTraces = generateCircuitTraces();
     statEl.innerHTML = 'score: <strong>0</strong>';
   }
@@ -7034,6 +7038,18 @@ panels.forEach(p => observer.observe(p));
     spawnParticles(playerX, PLAYER_Y, '#F87171', 16, 20, 160);
   }
 
+  function triggerHit(hitItem) {
+    // a glancing hit while the system isn't critical yet — costs points and a
+    // brief invulnerability window, but doesn't end the run
+    invulnTimer = HIT_INVULN;
+    streak = 0;
+    score = Math.max(0, score - 5);
+    statEl.innerHTML = 'score: <strong>' + score + '</strong>';
+    shakeMag = 9;
+    flash = 0.5;
+    spawnParticles(hitItem.x, hitItem.y, '#F87171', 12, 20, 130);
+  }
+
   function updateParticles(dt) {
     for (let i = particles.length - 1; i >= 0; i--) {
       const p = particles[i];
@@ -7066,6 +7082,8 @@ panels.forEach(p => observer.observe(p));
 
     elapsed += dt;
     difficulty = 1 + elapsed / 20;
+    threat = Math.max(0, Math.min(1, (difficulty - 1) / 3));
+    invulnTimer = Math.max(0, invulnTimer - dt);
     spawnTimer -= dt;
     const spawnInterval = Math.max(0.24, 0.82 - elapsed / 38);
     if (spawnTimer <= 0) { spawnItem(); spawnTimer = spawnInterval; }
@@ -7097,13 +7115,19 @@ panels.forEach(p => observer.observe(p));
       if (p > 0 && rectCircleCollide(px, py, PLAYER_W, PLAYER_H, it.x, it.y, it.r)) {
         if (it.type === 'good') {
           score += 10;
+          streak += 1;
           statEl.innerHTML = 'score: <strong>' + score + '</strong>';
           spawnParticles(it.x, it.y, '#22D3EE', 14, 30, 150);
           items.splice(i, 1);
-        } else {
+        } else if (invulnTimer > 0) {
+          items.splice(i, 1); // still invulnerable from the last hit — pass through harmlessly
+        } else if (threat >= RED_THREAT) {
           triggerDeath(it);
           items.splice(i, 1);
           return;
+        } else {
+          triggerHit(it);
+          items.splice(i, 1);
         }
       } else if (p > REMOVE_P) {
         items.splice(i, 1);
@@ -7246,19 +7270,24 @@ panels.forEach(p => observer.observe(p));
 
   function drawPlayer() {
     const lean = Math.max(-0.5, Math.min(0.5, -playerVX * 0.0016));
+    const flickering = invulnTimer > 0 && Math.floor(invulnTimer * 16) % 2 === 0;
+    if (flickering) return; // brief hit-flicker to signal temporary invulnerability
+    const critical = !dying && threat >= RED_THREAT;
     ctx.save();
     ctx.translate(playerX, PLAYER_Y);
     ctx.rotate(lean);
     ctx.beginPath();
     ctx.fillStyle = dying ? '#F87171' : '#F0F8FF';
-    ctx.shadowColor = dying ? '#F87171' : '#7DD3FC'; ctx.shadowBlur = 12;
+    ctx.shadowColor = dying ? '#F87171' : (critical ? '#F87171' : '#7DD3FC');
+    ctx.shadowBlur = critical ? 12 + Math.sin(tunnelHue * 10) * 5 : 12;
     ctx.moveTo(0, -PLAYER_H / 2);
     ctx.lineTo(PLAYER_W / 2, PLAYER_H / 2 - 4);
     ctx.lineTo(PLAYER_W * 0.18, PLAYER_H / 2);
     ctx.lineTo(-PLAYER_W * 0.18, PLAYER_H / 2);
     ctx.lineTo(-PLAYER_W / 2, PLAYER_H / 2 - 4);
     ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = 'rgba(34,211,238,.9)'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.strokeStyle = critical ? 'rgba(248,113,113,.9)' : 'rgba(34,211,238,.9)';
+    ctx.lineWidth = 1.5; ctx.stroke();
     ctx.shadowBlur = 0;
     ctx.restore();
   }
@@ -7285,30 +7314,80 @@ panels.forEach(p => observer.observe(p));
 
   function drawHUD() {
     const m = 10, bl = 15;
+
+    // corner targeting brackets with a small accent dot at each vertex
     ctx.strokeStyle = 'rgba(232,121,249,.6)';
     ctx.lineWidth = 1.5;
     [[m, m, 1, 1], [W - m, m, -1, 1], [m, H - m, 1, -1], [W - m, H - m, -1, -1]].forEach(([x, y, dx, dy]) => {
       ctx.beginPath();
       ctx.moveTo(x, y + bl * dy); ctx.lineTo(x, y); ctx.lineTo(x + bl * dx, y);
       ctx.stroke();
+      ctx.beginPath();
+      ctx.fillStyle = 'rgba(232,121,249,.85)';
+      ctx.arc(x + dx * 3, y + dy * 3, 1.3, 0, Math.PI * 2);
+      ctx.fill();
     });
+
+    // scanline sweep — a soft magenta band drifting down the whole frame, CRT-style
+    const scanY = ((elapsed * 34) % (H + 30)) - 15;
+    const sg = ctx.createLinearGradient(0, scanY - 7, 0, scanY + 7);
+    sg.addColorStop(0, 'rgba(232,121,249,0)');
+    sg.addColorStop(0.5, 'rgba(232,121,249,.10)');
+    sg.addColorStop(1, 'rgba(232,121,249,0)');
+    ctx.fillStyle = sg;
+    ctx.fillRect(0, scanY - 7, W, 14);
 
     ctx.font = '10px "JetBrains Mono", monospace';
     ctx.textAlign = 'left';
     ctx.fillStyle = 'rgba(125,211,252,.8)';
     ctx.fillText('SECTOR ' + Math.floor(elapsed).toString().padStart(3, '0'), m + bl + 6, m + 12);
 
+    // system status readout — mirrors the same threat tiers as the meter below
+    let sysLabel = 'SYS: NOMINAL', sysColor = 'rgba(34,211,238,.8)';
+    if (threat >= RED_THREAT) {
+      const blink = Math.sin(tunnelHue * 9) > 0;
+      sysLabel = 'SYS: CRITICAL';
+      sysColor = blink ? 'rgba(248,113,113,.95)' : 'rgba(248,113,113,.35)';
+    } else if (threat >= 0.4) {
+      sysLabel = 'SYS: ELEVATED';
+      sysColor = 'rgba(232,121,249,.8)';
+    }
+    ctx.textAlign = 'center';
+    ctx.fillStyle = sysColor;
+    ctx.fillText(sysLabel, W / 2, m + 12);
+
+    // streak — consecutive clean catches since the last hit
+    ctx.textAlign = 'left';
+    ctx.fillStyle = 'rgba(196,181,253,.75)';
+    ctx.fillText('STREAK ' + streak, m + bl + 6, H - m - 6);
+
+    // invulnerability readout, only while it's active
+    if (invulnTimer > 0) {
+      ctx.textAlign = 'right';
+      ctx.fillStyle = 'rgba(125,211,252,' + (0.4 + Math.sin(tunnelHue * 14) * 0.3).toFixed(3) + ')';
+      ctx.fillText('SHIELDED', W - m - bl - 6, H - m - 6);
+    }
+
     const segs = 10, segW = 7, segH = 8, gap = 2;
     const totalW = segs * segW + (segs - 1) * gap;
     const startX = W - m - bl - 6 - totalW;
-    const threat = Math.max(0, Math.min(1, (difficulty - 1) / 3));
     const filled = Math.round(threat * segs);
     ctx.textAlign = 'right';
     ctx.fillStyle = 'rgba(232,121,249,.75)';
     ctx.fillText('THREAT', startX - 6, m + 12);
     for (let i = 0; i < segs; i++) {
       const x = startX + i * (segW + gap);
-      ctx.fillStyle = i < filled ? mixCyanMagenta(i / segs) : 'rgba(148,163,184,.12)';
+      const segT = i / segs;
+      let color = 'rgba(148,163,184,.12)';
+      if (i < filled) {
+        if (segT >= RED_THREAT) {
+          const pulse = 0.6 + Math.sin(tunnelHue * 12 + i) * 0.4;
+          color = 'rgba(248,113,113,' + pulse.toFixed(3) + ')';
+        } else {
+          color = mixCyanMagenta(Math.min(1, segT / RED_THREAT));
+        }
+      }
+      ctx.fillStyle = color;
       ctx.fillRect(x, m + 4, segW, segH);
     }
     ctx.textAlign = 'left';

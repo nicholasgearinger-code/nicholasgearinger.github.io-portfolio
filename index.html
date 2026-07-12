@@ -206,7 +206,7 @@
     transform: scale(.55) scaleY(-1);
     margin-top: -.3em;
     opacity: .65;
-    filter: blur(1px);
+    filter: blur(2.2px);
     -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,.95), transparent 78%);
             mask-image: linear-gradient(to bottom, rgba(0,0,0,.95), transparent 78%);
     pointer-events: none;
@@ -216,7 +216,7 @@
   .boot-icon-reflection.boot-icon-grown {
     transform: scale(1.18) scaleY(-1);
     animation: bootIconReflectionPulse 1.6s ease-in-out .7s infinite,
-               bootIconFlicker 2.6s linear .7s infinite;
+               bootIconReflectionFlicker 2.6s linear .7s infinite;
   }
   .boot-icon-reflection .boot-icon-scramble { color: var(--muted); opacity: .65; }
   @keyframes bootIconReflectionPulse {
@@ -261,6 +261,23 @@
     72% { filter: brightness(1); }
     74% { filter: brightness(.5) drop-shadow(1.5px 0 0 rgba(239,68,68,.5)) drop-shadow(-1.5px 0 0 rgba(34,211,238,.5)); }
     76% { filter: brightness(1); }
+  }
+  /* Same timing/percentages as bootIconFlicker, kept as a separate
+     animation so every step can re-include blur() — animating `filter`
+     replaces the whole property, so without this the reflection's
+     static blur would vanish for the entire duration of the flicker. */
+  @keyframes bootIconReflectionFlicker {
+    0%, 100% { filter: blur(2.2px) brightness(1); }
+    3% { filter: blur(2.2px) brightness(.35) drop-shadow(2px 0 0 rgba(239,68,68,.65)) drop-shadow(-2px 0 0 rgba(34,211,238,.65)); }
+    5% { filter: blur(2.2px) brightness(1.12); }
+    6% { filter: blur(2.2px) brightness(1); }
+    39% { filter: blur(2.2px) brightness(1); }
+    41% { filter: blur(2.2px) brightness(.3) drop-shadow(2.5px 0 0 rgba(239,68,68,.7)) drop-shadow(-2.5px 0 0 rgba(34,211,238,.7)); }
+    43% { filter: blur(2.2px) brightness(1.15); }
+    44% { filter: blur(2.2px) brightness(1); }
+    72% { filter: blur(2.2px) brightness(1); }
+    74% { filter: blur(2.2px) brightness(.5) drop-shadow(1.5px 0 0 rgba(239,68,68,.5)) drop-shadow(-1.5px 0 0 rgba(34,211,238,.5)); }
+    76% { filter: blur(2.2px) brightness(1); }
   }
   .boot-decode {
     font-family: 'JetBrains Mono', 'Courier New', monospace;

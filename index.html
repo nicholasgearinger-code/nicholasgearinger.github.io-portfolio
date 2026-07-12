@@ -2317,7 +2317,7 @@
   .game-wrap { position: relative; width: 100%; max-width: 480px; margin: 0 auto; border-radius: .5rem; overflow: hidden; touch-action: none; }
   #game-canvas { width: 100%; height: auto; display: block; background: #030811; }
   .game-fire-btn {
-    position: absolute; right: .7rem; bottom: .7rem; z-index: 3;
+    position: absolute; right: .7rem; bottom: .7rem; z-index: 1;
     width: 3.2rem; height: 3.2rem; border-radius: 50%;
     background: rgba(232,121,249,.14); border: 1px solid rgba(232,121,249,.55);
     color: var(--magenta); font-size: 1.2rem; line-height: 1;
@@ -2327,7 +2327,7 @@
   .game-fire-btn:active { background: rgba(232,121,249,.35); transform: scale(.94); }
   .game-fire-btn[hidden] { display: none; }
   .game-gyro-btn {
-    position: absolute; left: .7rem; top: .7rem; z-index: 3;
+    position: absolute; left: .7rem; top: .7rem; z-index: 1;
     padding: .3rem .55rem; border-radius: .35rem;
     background: rgba(34,211,238,.1); border: 1px solid rgba(34,211,238,.45);
     color: var(--cyan); font-family: 'JetBrains Mono', monospace; font-size: .66rem;
@@ -2336,7 +2336,7 @@
   .game-gyro-btn.is-active { background: rgba(232,121,249,.16); border-color: rgba(232,121,249,.55); color: var(--magenta); }
   .game-gyro-btn[hidden] { display: none; }
   .game-mute-btn {
-    position: absolute; right: .7rem; top: .7rem; z-index: 3;
+    position: absolute; right: .7rem; top: .7rem; z-index: 1;
     padding: .3rem .5rem; border-radius: .35rem;
     background: rgba(232,121,249,.1); border: 1px solid rgba(232,121,249,.4);
     color: var(--magenta); font-size: .78rem; line-height: 1;
@@ -2346,7 +2346,7 @@
   .game-quit-btn { font-size: .78rem; padding: .4rem .9rem; }
   .game-quit-btn:hover { border-color: rgba(248,113,113,.5); color: #F87171; }
   .game-overlay {
-    position: absolute; inset: 0; z-index: 2;
+    position: absolute; inset: 0; z-index: 4;
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .8rem;
     background: rgba(3,8,17,.9); text-align: center; padding: 1.5rem;
   }

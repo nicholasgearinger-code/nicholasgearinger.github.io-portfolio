@@ -6922,7 +6922,7 @@ panels.forEach(p => observer.observe(p));
       }
       traces.push({
         pts, phase: Math.random(), speed: 0.15 + Math.random() * 0.18,
-        hue: Math.random() < 0.5 ? 'cyan' : 'violet',
+        hue: Math.random() < 0.5 ? 'violet' : 'magenta',
       });
     }
     return traces;
@@ -6981,7 +6981,7 @@ panels.forEach(p => observer.observe(p));
       p: 0,
       vp: 0.16 + Math.random() * 0.1,
       token: pick(CODE_DRIFT_TOKENS),
-      hue: Math.random() < 0.5 ? 'cyan' : 'violet',
+      hue: Math.random() < 0.5 ? 'violet' : 'magenta',
     });
   }
 
@@ -7114,8 +7114,9 @@ panels.forEach(p => observer.observe(p));
   function drawTunnel() {
     const g = ctx.createRadialGradient(VP_X, VP_Y, 4, VP_X, VP_Y, H * 0.95);
     g.addColorStop(0, 'rgba(34,211,238,.16)');
-    g.addColorStop(0.35, 'rgba(9,16,28,1)');
-    g.addColorStop(1, '#030811');
+    g.addColorStop(0.35, 'rgba(88,28,135,.14)');
+    g.addColorStop(0.7, 'rgba(9,16,28,1)');
+    g.addColorStop(1, '#030308');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, H);
 
@@ -7150,8 +7151,8 @@ panels.forEach(p => observer.observe(p));
     ctx.lineJoin = 'round'; ctx.lineCap = 'round';
     circuitTraces.forEach((t) => {
       const nearP = t.pts[t.pts.length - 1].p;
-      const fade = 0.14 + nearP * 0.16;
-      const color = t.hue === 'cyan' ? '34,211,238' : '167,139,250';
+      const fade = 0.09 + nearP * 0.12;
+      const color = t.hue === 'violet' ? '167,139,250' : '232,121,249';
 
       ctx.beginPath();
       t.pts.forEach((pt, i) => {
@@ -7159,25 +7160,26 @@ panels.forEach(p => observer.observe(p));
         if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y);
       });
       ctx.strokeStyle = 'rgba(' + color + ',' + fade.toFixed(3) + ')';
-      ctx.lineWidth = 1.3;
+      ctx.lineWidth = 1.2;
       ctx.stroke();
 
       // solder-pad vias at each waypoint, bigger where the trace is closer
       t.pts.forEach((pt) => {
         const s = projectPoint(pt.lane, pt.p);
-        const r = 1.1 + pt.p * 2.4;
+        const r = 1 + pt.p * 2.1;
         ctx.beginPath();
-        ctx.fillStyle = 'rgba(' + color + ',' + (fade + 0.15).toFixed(3) + ')';
+        ctx.fillStyle = 'rgba(' + color + ',' + (fade + 0.12).toFixed(3) + ')';
         ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
         ctx.fill();
       });
 
-      // a pulse of "current" traveling along the trace toward the player
+      // a pulse of "current" traveling along the trace toward the player — always
+      // magenta, so it never gets confused for a cyan/red gameplay token
       const pulse = pointAlongTrace(t, t.phase);
-      const pulseR = 1.5 + nearP * 2.4;
+      const pulseR = 1.4 + nearP * 2.1;
       ctx.beginPath();
-      ctx.fillStyle = '#FBBF24';
-      ctx.shadowColor = '#FBBF24'; ctx.shadowBlur = 8;
+      ctx.fillStyle = '#E879F9';
+      ctx.shadowColor = '#E879F9'; ctx.shadowBlur = 7;
       ctx.arc(pulse.x, pulse.y, pulseR, 0, Math.PI * 2);
       ctx.fill();
       ctx.shadowBlur = 0;
@@ -7185,14 +7187,15 @@ panels.forEach(p => observer.observe(p));
   }
 
   function drawCodeBits() {
-    ctx.font = '10px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
     codeBits.forEach((c) => {
       const s = projectPoint(c.lane, Math.min(1, c.p));
       const fade = Math.sin(Math.min(1, c.p) * Math.PI); // fades in, peaks mid-tunnel, fades out
-      const size = 8 + Math.min(1, c.p) * 7;
+      const size = 8 + Math.min(1, c.p) * 6;
       ctx.font = size.toFixed(1) + 'px "JetBrains Mono", monospace';
-      ctx.fillStyle = (c.hue === 'cyan' ? 'rgba(125,211,252,' : 'rgba(196,181,253,') + (fade * 0.4).toFixed(3) + ')';
+      // kept strictly in the violet/magenta family — cyan and red stay reserved for
+      // the actual pickups/hazards so the background never competes with them
+      ctx.fillStyle = (c.hue === 'violet' ? 'rgba(167,139,250,' : 'rgba(232,121,249,') + (fade * 0.22).toFixed(3) + ')';
       ctx.fillText(c.token, s.x, s.y);
     });
     ctx.textAlign = 'left';
@@ -7272,6 +7275,45 @@ panels.forEach(p => observer.observe(p));
     ctx.globalAlpha = 1;
   }
 
+  function mixCyanMagenta(t) {
+    const c1 = [34, 211, 238], c2 = [232, 121, 249];
+    const r = Math.round(c1[0] + (c2[0] - c1[0]) * t);
+    const gg = Math.round(c1[1] + (c2[1] - c1[1]) * t);
+    const b = Math.round(c1[2] + (c2[2] - c1[2]) * t);
+    return 'rgb(' + r + ',' + gg + ',' + b + ')';
+  }
+
+  function drawHUD() {
+    const m = 10, bl = 15;
+    ctx.strokeStyle = 'rgba(232,121,249,.6)';
+    ctx.lineWidth = 1.5;
+    [[m, m, 1, 1], [W - m, m, -1, 1], [m, H - m, 1, -1], [W - m, H - m, -1, -1]].forEach(([x, y, dx, dy]) => {
+      ctx.beginPath();
+      ctx.moveTo(x, y + bl * dy); ctx.lineTo(x, y); ctx.lineTo(x + bl * dx, y);
+      ctx.stroke();
+    });
+
+    ctx.font = '10px "JetBrains Mono", monospace';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = 'rgba(125,211,252,.8)';
+    ctx.fillText('SECTOR ' + Math.floor(elapsed).toString().padStart(3, '0'), m + bl + 6, m + 12);
+
+    const segs = 10, segW = 7, segH = 8, gap = 2;
+    const totalW = segs * segW + (segs - 1) * gap;
+    const startX = W - m - bl - 6 - totalW;
+    const threat = Math.max(0, Math.min(1, (difficulty - 1) / 3));
+    const filled = Math.round(threat * segs);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = 'rgba(232,121,249,.75)';
+    ctx.fillText('THREAT', startX - 6, m + 12);
+    for (let i = 0; i < segs; i++) {
+      const x = startX + i * (segW + gap);
+      ctx.fillStyle = i < filled ? mixCyanMagenta(i / segs) : 'rgba(148,163,184,.12)';
+      ctx.fillRect(x, m + 4, segW, segH);
+    }
+    ctx.textAlign = 'left';
+  }
+
   function draw() {
     ctx.save();
     if (shakeMag > 0.3) {
@@ -7286,11 +7328,6 @@ panels.forEach(p => observer.observe(p));
     drawParticles();
     drawPlayer();
 
-    // thin depth-readout strip, top-left — decorative HUD
-    ctx.font = '10px "JetBrains Mono", monospace';
-    ctx.fillStyle = 'rgba(125,211,252,.55)';
-    ctx.fillText('SECTOR ' + Math.floor(elapsed).toString().padStart(3, '0'), 10, 16);
-
     // vignette
     const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.85);
     vg.addColorStop(0, 'rgba(0,0,0,0)');
@@ -7303,6 +7340,8 @@ panels.forEach(p => observer.observe(p));
       ctx.fillRect(0, 0, W, H);
     }
     ctx.restore();
+
+    drawHUD(); // fixed instrument overlay — stays steady even while the world shakes
   }
 
   function loop(ts) {

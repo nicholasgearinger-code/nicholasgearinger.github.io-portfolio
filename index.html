@@ -2310,7 +2310,7 @@
   }
   .telemetry-empty { color: var(--muted); font-size: .82rem; text-align: center; padding: 1rem 0; }
 
-  /* ── SIGNAL RUNNER GAME ── */
+  /* ── PURGE RUNNER GAME ── */
   .game-wrap { position: relative; width: 100%; max-width: 480px; margin: 0 auto; border-radius: .5rem; overflow: hidden; touch-action: none; }
   #game-canvas { width: 100%; height: auto; display: block; background: #030811; }
   .game-overlay {
@@ -3203,12 +3203,12 @@
 </div>
 
 
-<!-- SIGNAL RUNNER GAME -->
+<!-- PURGE RUNNER GAME -->
 <section id="game" class="panel">
   <div class="panel-inner">
     <span class="section-label">Try It</span>
-    <h2>Dodge the noise,<br>catch the signal</h2>
-    <p class="lead" style="margin:0 auto 2.2rem;">A small arcade game built from scratch — arrow keys or drag to move, dodge the red corrupted packets, catch the cyan signal for points. Gets faster the longer you survive.</p>
+    <h2>Dive the datastream,<br>purge the corruption</h2>
+    <p class="lead" style="margin:0 auto 2.2rem;">A small arcade game built from scratch — you're a hunter-process diving through a live data tunnel. Arrow keys, A/D, or drag to steer, dodge the corrupted fragments tearing in from the depths, and pull in verified data shards for points. The tunnel accelerates — and destabilizes — the longer you survive.</p>
     <div class="algo-card">
       <div class="cc-titlebar">
         <div class="cc-dots">
@@ -3216,17 +3216,17 @@
           <span class="cc-dot" style="background:#FFBD2E"></span>
           <span class="cc-dot" style="background:#28C840"></span>
         </div>
-        <span class="cc-filename">signal_runner.js</span>
+        <span class="cc-filename">purge_runner.js</span>
         <div class="cc-status-pill" id="game-pill">
           <span class="cc-pill-dot"></span><span id="game-pill-text">READY</span>
         </div>
       </div>
       <div class="algo-body">
         <div class="game-wrap" id="game-wrap">
-          <canvas id="game-canvas" width="480" height="360" aria-label="Signal Runner arcade game — dodge red obstacles, catch cyan signals"></canvas>
+          <canvas id="game-canvas" width="480" height="360" aria-label="Purge Runner arcade game — a hunter-process diving a perspective data tunnel, dodging corrupted fragments and collecting verified data shards"></canvas>
           <div class="game-overlay" id="game-overlay">
-            <h3 id="game-overlay-title">Signal Runner</h3>
-            <p id="game-overlay-sub">Arrow keys, A/D, or drag to move. Dodge red, catch cyan.</p>
+            <h3 id="game-overlay-title">Purge Runner</h3>
+            <p id="game-overlay-sub">Arrow keys, A/D, or drag to steer. Dodge red corruption, pull in cyan data.</p>
             <button type="button" class="btn-primary" id="game-start-btn">▶ Play</button>
             <div class="game-score-entry" id="game-score-entry" hidden>
               <input type="text" id="game-name-input" maxlength="12" placeholder="YOUR NAME">
@@ -3252,13 +3252,13 @@
         <span class="cc-filename">leaderboard.json</span>
       </div>
       <div class="algo-body">
-        <h4 class="telemetry-heading">Top Signals</h4>
+        <h4 class="telemetry-heading">Top Hunters</h4>
         <ol class="game-leaderboard" id="game-leaderboard-list">
           <li class="telemetry-empty">No scores yet — be the first.</li>
         </ol>
       </div>
     </div>
-    <p class="algo-hint">Built with plain Canvas 2D — no game engine, just a requestAnimationFrame loop, AABB/circle collision, and difficulty scaling over time. Scores are real and saved to a live backend — honor-system, like most browser games without a full server-authoritative architecture behind them.</p>
+    <p class="algo-hint">Built with plain Canvas 2D — no game engine, just a requestAnimationFrame loop, a perspective projection for the depth illusion, circle/rect collision at the near plane, and difficulty scaling over time. Scores are real and saved to a live backend — honor-system, like most browser games without a full server-authoritative architecture behind them.</p>
   </div>
 </section>
 
@@ -6794,7 +6794,7 @@ panels.forEach(p => observer.observe(p));
     { icon: '◈', label: 'Go to In Motion', action: () => scrollToId('build') },
     { icon: '◈', label: 'Go to Face AI', action: () => scrollToId('webcam-ai') },
     { icon: '◈', label: 'Go to 3D Work', action: () => scrollToId('models') },
-    { icon: '◈', label: 'Play Signal Runner', action: () => scrollToId('game') },
+    { icon: '◈', label: 'Play Purge Runner', action: () => scrollToId('game') },
     { icon: '◈', label: 'Go to Photography', action: () => scrollToId('photography') },
     { icon: '◈', label: 'Go to Live Telemetry', action: () => scrollToId('telemetry') },
     { icon: '◈', label: 'Go to Process', action: () => scrollToId('process') },
@@ -6858,13 +6858,16 @@ panels.forEach(p => observer.observe(p));
 })();
 </script>
 <script>
-/* -- SIGNAL RUNNER: a small arcade game built with plain Canvas 2D — no
-      engine, no external library. Player drags/steers a ship left-right to
-      dodge falling "corrupted packet" obstacles and catch "signal"
-      collectibles. Difficulty (fall speed + spawn rate) ramps up the
-      longer you survive. Fully playable offline — only score submission
-      and the leaderboard display need the backend. -- */
-(function signalRunner() {
+/* -- PURGE RUNNER: a small arcade game built with plain Canvas 2D — no
+      engine, no external library. You're a hunter-process diving through a
+      perspective data tunnel: obstacles and pickups spawn near a vanishing
+      point and grow as they close in, rather than sliding down a flat 2D
+      plane. Steer left-right to dodge "corrupted fragment" hazards and pull
+      in "verified data" pickups. Difficulty (dive speed + spawn rate) ramps
+      up the longer you survive, and the tunnel itself gets glitchier.
+      Fully playable offline — only score submission and the leaderboard
+      display need the backend. -- */
+(function purgeRunner() {
   const canvas = document.getElementById('game-canvas');
   const overlay = document.getElementById('game-overlay');
   const overlayTitle = document.getElementById('game-overlay-title');
@@ -6882,13 +6885,18 @@ panels.forEach(p => observer.observe(p));
 
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
-  const PLAYER_W = 36, PLAYER_H = 22, PLAYER_Y = H - 40;
-  const MOVE_SPEED = 420;
+  const VP_X = W / 2, VP_Y = H * 0.24;         // vanishing point the tunnel dives from
+  const PLAYER_W = 40, PLAYER_H = 24, PLAYER_Y = H - 40;   // near plane, where the player sits
+  const MOVE_SPEED = 460;
+  const MIN_SCALE = 0.1;                        // how small items are right at the vanishing point
+  const REMOVE_P = 1.35;                        // progress past which a missed item is culled
 
-  let playerX = W / 2, targetX = playerX;
-  let items = [], score = 0, running = false, rafId = null, lastTime = 0;
+  let playerX = W / 2, targetX = playerX, playerVX = 0;
+  let items = [], particles = [];
+  let score = 0, running = false, dying = false, deathTimer = 0, rafId = null, lastTime = 0;
   let spawnTimer = 0, elapsed = 0, difficulty = 1;
-  let best = parseInt(localStorage.getItem('signalRunnerBest') || '0', 10);
+  let shakeMag = 0, flash = 0, tunnelHue = 0;
+  let best = parseInt(localStorage.getItem('purgeRunnerBest') || '0', 10);
   bestStatEl.innerHTML = 'best: <strong>' + best + '</strong>';
 
   function escapeHtml(s) {
@@ -6896,20 +6904,36 @@ panels.forEach(p => observer.observe(p));
   }
 
   function reset() {
-    items = []; score = 0; elapsed = 0; difficulty = 1; spawnTimer = 0;
-    playerX = W / 2; targetX = playerX;
+    items = []; particles = []; score = 0; elapsed = 0; difficulty = 1; spawnTimer = 0;
+    playerX = W / 2; targetX = playerX; playerVX = 0;
+    shakeMag = 0; flash = 0; dying = false; deathTimer = 0;
     statEl.innerHTML = 'score: <strong>0</strong>';
   }
 
   function spawnItem() {
     const isGood = Math.random() < 0.55;
     items.push({
-      x: 24 + Math.random() * (W - 48),
-      y: -20,
-      r: isGood ? 9 : 14,
+      lane: 24 + Math.random() * (W - 48),   // x position once it reaches the near plane
+      z: 1,                                   // 1 = at the vanishing point, 0 = at the player
+      baseR: isGood ? 10 : 15,
       type: isGood ? 'good' : 'bad',
-      speed: (isGood ? 2.1 : 2.5) * difficulty,
+      vz: (isGood ? 0.46 : 0.54) * difficulty,
+      spin: (Math.random() - 0.5) * 3,
+      seed: Math.random() * 1000,
+      x: VP_X, y: VP_Y, r: 1, glitchT: 0,
     });
+  }
+
+  function spawnParticles(x, y, color, n, spread, speed) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = speed * (0.4 + Math.random() * 0.8);
+      particles.push({
+        x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - spread,
+        life: 0.4 + Math.random() * 0.4, maxLife: 0.4 + Math.random() * 0.4,
+        color, size: 1.5 + Math.random() * 2.5,
+      });
+    }
   }
 
   function rectCircleCollide(px, py, pw, ph, cx, cy, cr) {
@@ -6935,69 +6959,213 @@ panels.forEach(p => observer.observe(p));
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     return (clientX - rect.left) * (W / rect.width);
   }
-  canvas.addEventListener('pointerdown', (e) => { if (running) { dragging = true; targetX = pointerToCanvasX(e); } });
+  canvas.addEventListener('pointerdown', (e) => { if (running && !dying) { dragging = true; targetX = pointerToCanvasX(e); } });
   canvas.addEventListener('pointermove', (e) => { if (dragging) targetX = pointerToCanvasX(e); });
   window.addEventListener('pointerup', () => { dragging = false; });
 
+  function triggerDeath(hitItem) {
+    dying = true;
+    deathTimer = 0.42;
+    shakeMag = 20;
+    flash = 1;
+    if (pillText) pillText.textContent = 'BREACH DETECTED';
+    spawnParticles(hitItem.x, hitItem.y, '#F87171', 26, 40, 220);
+    spawnParticles(playerX, PLAYER_Y, '#F87171', 16, 20, 160);
+  }
+
+  function updateParticles(dt) {
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 260 * dt; p.life -= dt;
+      if (p.life <= 0) particles.splice(i, 1);
+    }
+  }
+
   function update(dt) {
+    updateParticles(dt);
+    shakeMag = Math.max(0, shakeMag - dt * 70);
+    flash = Math.max(0, flash - dt * 3.2);
+    tunnelHue += dt;
+
+    if (dying) {
+      deathTimer -= dt;
+      if (deathTimer <= 0) gameOver();
+      return;
+    }
+
     elapsed += dt;
-    difficulty = 1 + elapsed / 22;
+    difficulty = 1 + elapsed / 20;
     spawnTimer -= dt;
-    const spawnInterval = Math.max(0.28, 0.85 - elapsed / 40);
+    const spawnInterval = Math.max(0.24, 0.82 - elapsed / 38);
     if (spawnTimer <= 0) { spawnItem(); spawnTimer = spawnInterval; }
 
     if (keyState.left) targetX -= MOVE_SPEED * dt;
     if (keyState.right) targetX += MOVE_SPEED * dt;
     targetX = Math.max(0, Math.min(W, targetX));
 
+    const prevX = playerX;
     playerX += (targetX - playerX) * Math.min(1, dt * 14);
     playerX = Math.max(PLAYER_W / 2, Math.min(W - PLAYER_W / 2, playerX));
+    playerVX = dt > 0 ? (playerX - prevX) / dt : 0;
 
-    const px = playerX - PLAYER_W / 2, py = PLAYER_Y - PLAYER_H / 2;
+    if (Math.random() < 0.6) {
+      spawnParticles(playerX, PLAYER_Y + 8, '#7DD3FC', 1, -30, 30);
+    }
+
+    const py = PLAYER_Y - PLAYER_H / 2;
     for (let i = items.length - 1; i >= 0; i--) {
       const it = items[i];
-      it.y += it.speed;
-      if (rectCircleCollide(px, py, PLAYER_W, PLAYER_H, it.x, it.y, it.r)) {
+      it.z -= it.vz * dt;
+      const p = 1 - it.z;                        // progress toward the player: 0 = far, 1 = arrived
+      it.x = VP_X + (it.lane - VP_X) * p;
+      it.y = VP_Y + (PLAYER_Y - VP_Y) * p;
+      it.r = it.baseR * (MIN_SCALE + (1 - MIN_SCALE) * p);
+      if (it.type === 'bad') it.glitchT += dt;
+
+      const px = playerX - PLAYER_W / 2;
+      if (p > 0 && rectCircleCollide(px, py, PLAYER_W, PLAYER_H, it.x, it.y, it.r)) {
         if (it.type === 'good') {
           score += 10;
           statEl.innerHTML = 'score: <strong>' + score + '</strong>';
+          spawnParticles(it.x, it.y, '#22D3EE', 14, 30, 150);
           items.splice(i, 1);
         } else {
-          gameOver();
+          triggerDeath(it);
+          items.splice(i, 1);
           return;
         }
-      } else if (it.y - it.r > H) {
+      } else if (p > REMOVE_P) {
         items.splice(i, 1);
       }
     }
   }
 
-  function draw() {
-    ctx.clearRect(0, 0, W, H);
-    ctx.strokeStyle = 'rgba(34,211,238,.06)';
+  function drawTunnel() {
+    const g = ctx.createRadialGradient(VP_X, VP_Y, 4, VP_X, VP_Y, H * 0.95);
+    g.addColorStop(0, 'rgba(34,211,238,.16)');
+    g.addColorStop(0.35, 'rgba(9,16,28,1)');
+    g.addColorStop(1, '#030811');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    // radiating lanes from the vanishing point to the bottom edge
+    ctx.strokeStyle = 'rgba(34,211,238,.10)';
     ctx.lineWidth = 1;
-    for (let gx = 0; gx < W; gx += 40) { ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke(); }
+    for (let k = -4; k <= 4; k++) {
+      const bx = VP_X + k * (W / 8);
+      ctx.beginPath(); ctx.moveTo(VP_X, VP_Y); ctx.lineTo(bx, H); ctx.stroke();
+    }
 
-    items.forEach((it) => {
-      ctx.beginPath();
-      if (it.type === 'good') {
-        ctx.fillStyle = '#22D3EE'; ctx.shadowColor = '#22D3EE'; ctx.shadowBlur = 8;
-        ctx.moveTo(it.x, it.y - it.r); ctx.lineTo(it.x + it.r, it.y); ctx.lineTo(it.x, it.y + it.r); ctx.lineTo(it.x - it.r, it.y);
-        ctx.closePath(); ctx.fill();
-      } else {
-        ctx.fillStyle = '#F87171'; ctx.shadowColor = '#F87171'; ctx.shadowBlur = 8;
-        ctx.fillRect(it.x - it.r, it.y - it.r, it.r * 2, it.r * 2);
-      }
-      ctx.shadowBlur = 0;
-    });
+    // scrolling depth rings, closing in toward the viewer
+    const ringSpeed = 0.32 * Math.min(2.2, difficulty);
+    for (let k = 0; k < 6; k++) {
+      const rp = ((tunnelHue * ringSpeed) + k / 6) % 1;
+      const lx = VP_X + (0 - VP_X) * rp, rx = VP_X + (W - VP_X) * rp;
+      const ry = VP_Y + (PLAYER_Y - VP_Y) * rp;
+      ctx.strokeStyle = 'rgba(34,211,238,' + (0.05 + rp * 0.22).toFixed(3) + ')';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(lx, ry); ctx.lineTo(rx, ry); ctx.stroke();
+    }
 
-    ctx.fillStyle = '#F0F8FF'; ctx.shadowColor = '#7DD3FC'; ctx.shadowBlur = 10;
+    // vanishing-point core glow
     ctx.beginPath();
-    ctx.moveTo(playerX, PLAYER_Y - PLAYER_H / 2);
-    ctx.lineTo(playerX - PLAYER_W / 2, PLAYER_Y + PLAYER_H / 2);
-    ctx.lineTo(playerX + PLAYER_W / 2, PLAYER_Y + PLAYER_H / 2);
-    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(125,211,252,.5)';
+    ctx.shadowColor = '#7DD3FC'; ctx.shadowBlur = 16;
+    ctx.arc(VP_X, VP_Y, 3, 0, Math.PI * 2); ctx.fill();
     ctx.shadowBlur = 0;
+  }
+
+  function drawItem(it) {
+    if (it.type === 'good') {
+      const wobble = Math.sin(tunnelHue * 4 + it.seed) * 0.15;
+      ctx.save();
+      ctx.translate(it.x, it.y);
+      ctx.rotate(tunnelHue * it.spin * 0.4 + wobble);
+      ctx.beginPath();
+      ctx.fillStyle = '#22D3EE'; ctx.shadowColor = '#22D3EE'; ctx.shadowBlur = 10 * (it.r / it.baseR + 0.3);
+      ctx.moveTo(0, -it.r); ctx.lineTo(it.r * 0.72, 0); ctx.lineTo(0, it.r); ctx.lineTo(-it.r * 0.72, 0);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = 'rgba(240,255,255,.7)'; ctx.lineWidth = Math.max(0.6, it.r * 0.06);
+      ctx.stroke();
+      ctx.restore();
+      ctx.shadowBlur = 0;
+    } else {
+      // corrupted fragment: jittery glitch-square with a flickering fault line through it
+      const jitter = (Math.sin(it.glitchT * 40 + it.seed) > 0.7) ? (Math.random() - 0.5) * it.r * 0.5 : 0;
+      ctx.save();
+      ctx.translate(it.x + jitter, it.y);
+      ctx.rotate(Math.PI / 4 + Math.sin(tunnelHue * 2 + it.seed) * 0.08);
+      ctx.fillStyle = '#F87171'; ctx.shadowColor = '#F87171'; ctx.shadowBlur = 10 * (it.r / it.baseR + 0.3);
+      ctx.fillRect(-it.r, -it.r, it.r * 2, it.r * 2);
+      ctx.shadowBlur = 0;
+      if (Math.sin(it.glitchT * 30 + it.seed) > 0.4) {
+        ctx.fillStyle = 'rgba(3,8,17,.65)';
+        ctx.fillRect(-it.r, -it.r * 0.2, it.r * 2, it.r * 0.3);
+      }
+      ctx.restore();
+    }
+  }
+
+  function drawPlayer() {
+    const lean = Math.max(-0.5, Math.min(0.5, -playerVX * 0.0016));
+    ctx.save();
+    ctx.translate(playerX, PLAYER_Y);
+    ctx.rotate(lean);
+    ctx.beginPath();
+    ctx.fillStyle = dying ? '#F87171' : '#F0F8FF';
+    ctx.shadowColor = dying ? '#F87171' : '#7DD3FC'; ctx.shadowBlur = 12;
+    ctx.moveTo(0, -PLAYER_H / 2);
+    ctx.lineTo(PLAYER_W / 2, PLAYER_H / 2 - 4);
+    ctx.lineTo(PLAYER_W * 0.18, PLAYER_H / 2);
+    ctx.lineTo(-PLAYER_W * 0.18, PLAYER_H / 2);
+    ctx.lineTo(-PLAYER_W / 2, PLAYER_H / 2 - 4);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(34,211,238,.9)'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.restore();
+  }
+
+  function drawParticles() {
+    particles.forEach((p) => {
+      const a = Math.max(0, p.life / p.maxLife);
+      ctx.globalAlpha = a;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+  }
+
+  function draw() {
+    ctx.save();
+    if (shakeMag > 0.3) {
+      ctx.translate((Math.random() - 0.5) * shakeMag, (Math.random() - 0.5) * shakeMag);
+    }
+
+    drawTunnel();
+
+    items.slice().sort((a, b) => a.z - b.z).reverse().forEach(drawItem);
+    drawParticles();
+    drawPlayer();
+
+    // thin depth-readout strip, top-left — decorative HUD
+    ctx.font = '10px "JetBrains Mono", monospace';
+    ctx.fillStyle = 'rgba(125,211,252,.55)';
+    ctx.fillText('SECTOR ' + Math.floor(elapsed).toString().padStart(3, '0'), 10, 16);
+
+    // vignette
+    const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.85);
+    vg.addColorStop(0, 'rgba(0,0,0,0)');
+    vg.addColorStop(1, 'rgba(0,0,0,.55)');
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, 0, W, H);
+
+    if (flash > 0) {
+      ctx.fillStyle = 'rgba(248,113,113,' + (flash * 0.45).toFixed(3) + ')';
+      ctx.fillRect(0, 0, W, H);
+    }
+    ctx.restore();
   }
 
   function loop(ts) {
@@ -7016,24 +7184,25 @@ panels.forEach(p => observer.observe(p));
     submitNote.textContent = '';
     running = true;
     lastTime = performance.now();
-    if (pillText) pillText.textContent = 'RUNNING';
+    if (pillText) pillText.textContent = 'HUNTING';
     rafId = requestAnimationFrame(loop);
   }
 
   function gameOver() {
     running = false;
+    dying = false;
     if (rafId) cancelAnimationFrame(rafId);
     if (score > best) {
       best = score;
-      localStorage.setItem('signalRunnerBest', String(best));
+      localStorage.setItem('purgeRunnerBest', String(best));
       bestStatEl.innerHTML = 'best: <strong>' + best + '</strong>';
     }
     overlay.hidden = false;
-    overlayTitle.textContent = 'Signal Lost';
-    overlaySub.textContent = 'Final score: ' + score;
+    overlayTitle.textContent = 'Connection Corrupted';
+    overlaySub.textContent = 'Purge failed — final score: ' + score;
     startBtn.textContent = '\u21BB Try Again';
     scoreEntry.hidden = false;
-    if (pillText) pillText.textContent = 'GAME OVER';
+    if (pillText) pillText.textContent = 'CORRUPTED';
   }
 
   async function loadLeaderboard() {

@@ -183,7 +183,8 @@
   .boot-icon.boot-icon-grown {
     transform: scale(1.18);
     opacity: 1;
-    animation: bootIconPulse 1.6s ease-in-out .7s infinite;
+    animation: bootIconPulse 1.6s ease-in-out .7s infinite,
+               bootIconFlicker 2.6s linear .7s infinite;
   }
   .boot-icon .boot-icon-scramble { color: var(--muted); opacity: .65; }
   @keyframes bootIconPulse {
@@ -193,29 +194,73 @@
   /* ── Glowing reflection: a mirrored, masked-out, blurred copy of the
      glyph sitting directly beneath it, like a glossy-floor reflection.
      JS keeps its innerHTML and grown/pulse state in sync with the real
-     glyph (see decodeIcon) — this element never runs its own decode. ── */
+     glyph (see decodeIcon) — this element never runs its own decode.
+     bootIconFlicker runs on BOTH the icon and the reflection with
+     identical duration/delay so the two stay perfectly synced without
+     any JS coordination — pure CSS timing does the work. ── */
   .boot-icon-reflection {
+    position: relative;
     font-family: 'JetBrains Mono', 'Courier New', monospace;
     font-size: clamp(2.6rem, 8vw, 4.2rem); font-weight: 700;
     text-shadow: 0 0 12px rgba(34,211,238,.85), 0 0 34px rgba(232,121,249,.5), 0 0 60px rgba(34,211,238,.3);
     transform: scale(.55) scaleY(-1);
     margin-top: -.3em;
-    opacity: .45;
-    filter: blur(1.5px);
-    -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,.85), transparent 65%);
-            mask-image: linear-gradient(to bottom, rgba(0,0,0,.85), transparent 65%);
+    opacity: .65;
+    filter: blur(1px);
+    -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,.95), transparent 78%);
+            mask-image: linear-gradient(to bottom, rgba(0,0,0,.95), transparent 78%);
     pointer-events: none;
     user-select: none;
     transition: transform .7s cubic-bezier(.34,1.56,.64,1), opacity .7s ease;
   }
   .boot-icon-reflection.boot-icon-grown {
     transform: scale(1.18) scaleY(-1);
-    animation: bootIconReflectionPulse 1.6s ease-in-out .7s infinite;
+    animation: bootIconReflectionPulse 1.6s ease-in-out .7s infinite,
+               bootIconFlicker 2.6s linear .7s infinite;
   }
   .boot-icon-reflection .boot-icon-scramble { color: var(--muted); opacity: .65; }
   @keyframes bootIconReflectionPulse {
     0%, 100% { transform: scale(1.18) scaleY(-1); }
     50% { transform: scale(1.26) scaleY(-1); }
+  }
+  /* Shimmer: a soft diagonal highlight band sweeping through the
+     reflection, like light catching a glossy surface. Masked to the
+     same fade as the reflection itself so it never appears past the
+     point where the reflection has already faded out. */
+  .boot-icon-reflection::after {
+    content: '';
+    position: absolute; inset: -10% -30%;
+    background: linear-gradient(115deg, transparent 40%, rgba(240,248,255,.65) 50%, transparent 60%);
+    background-size: 300% 300%;
+    background-position: -100% -100%;
+    mix-blend-mode: screen;
+    -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,.95), transparent 78%);
+            mask-image: linear-gradient(to bottom, rgba(0,0,0,.95), transparent 78%);
+    opacity: 0;
+    pointer-events: none;
+  }
+  .boot-icon-reflection.boot-icon-grown::after {
+    animation: reflectionShimmer 3.4s ease-in-out 1s infinite;
+  }
+  @keyframes reflectionShimmer {
+    0%, 18% { background-position: -100% -100%; opacity: 0; }
+    30% { opacity: .9; }
+    48%, 100% { background-position: 200% 200%; opacity: 0; }
+  }
+  /* Irregular neon flicker + chromatic glitch dip, shared by the icon
+     and its reflection so both dim/split at the exact same instants. */
+  @keyframes bootIconFlicker {
+    0%, 100% { filter: brightness(1); }
+    3% { filter: brightness(.35) drop-shadow(2px 0 0 rgba(239,68,68,.65)) drop-shadow(-2px 0 0 rgba(34,211,238,.65)); }
+    5% { filter: brightness(1.12); }
+    6% { filter: brightness(1); }
+    39% { filter: brightness(1); }
+    41% { filter: brightness(.3) drop-shadow(2.5px 0 0 rgba(239,68,68,.7)) drop-shadow(-2.5px 0 0 rgba(34,211,238,.7)); }
+    43% { filter: brightness(1.15); }
+    44% { filter: brightness(1); }
+    72% { filter: brightness(1); }
+    74% { filter: brightness(.5) drop-shadow(1.5px 0 0 rgba(239,68,68,.5)) drop-shadow(-1.5px 0 0 rgba(34,211,238,.5)); }
+    76% { filter: brightness(1); }
   }
   .boot-decode {
     font-family: 'JetBrains Mono', 'Courier New', monospace;

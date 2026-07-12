@@ -2847,6 +2847,10 @@
       }, 280);
     }
 
+    // Kick off the name-decode/glyph sequence right alongside the boot log
+    // (same start offset) instead of waiting for the boot log to finish —
+    // they now play concurrently rather than back-to-back.
+    const glyphStart = 100;
     setTimeout(() => {
       if (label) label.textContent = 'IDENTIFYING';
       if (fill) fill.style.width = '100%';
@@ -2864,14 +2868,16 @@
           });
         });
       });
-    }, bootDone);
+    }, glyphStart);
 
-    // Total active runtime = bootDone (now the full terminal-typed boot
-    // log, which varies with the label/status text) + a fixed tail for
-    // name decode/hold + glyph collapse + a hold, the grow-punch, a hold
-    // on "READY", then the power-down flicker-out — that tail was tuned
-    // at ~5.3s when the old fixed 6.3s total assumed a ~1s boot log.
-    const TOTAL_MS = bootDone + 5310;
+    // Total active runtime = whichever sequence finishes later — the
+    // terminal-typed boot log (bootDone, which varies with the label/status
+    // text) or the name-decode/glyph-collapse/hold/power-down sequence
+    // (glyphStart + a fixed 5310ms tail, tuned for that sequence's own
+    // length). Previously these ran back-to-back so it was just a sum;
+    // now that they run in parallel, the overlay should wait for the
+    // longer of the two rather than adding them together.
+    const TOTAL_MS = Math.max(bootDone, glyphStart + 5310);
 
     // 5. Hold briefly on "READY", then dissolve the overlay.
     setTimeout(hideOverlay, TOTAL_MS);

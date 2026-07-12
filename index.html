@@ -158,6 +158,56 @@
     --sky-dim: rgba(34,211,238,.12);
   }
 
+  /* ── BOOT SEQUENCE — full-screen, shown once per session ── */
+  #boot-seq {
+    position: fixed; inset: 0; z-index: 10000;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 1.6rem;
+    background: var(--navy);
+    transition: opacity .5s ease;
+  }
+  #boot-seq.boot-hide { opacity: 0; pointer-events: none; }
+  #boot-seq[hidden] { display: none; }
+  .boot-icon {
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-size: clamp(2.6rem, 8vw, 4.2rem); font-weight: 700;
+    text-shadow: 0 0 12px rgba(34,211,238,.85), 0 0 34px rgba(232,121,249,.5), 0 0 60px rgba(34,211,238,.3);
+    transform: scale(.55);
+    opacity: .5;
+    transition: transform .7s cubic-bezier(.34,1.56,.64,1), opacity .7s ease;
+  }
+  .boot-icon.boot-icon-grown {
+    transform: scale(1.18);
+    opacity: 1;
+    animation: bootIconPulse 1.6s ease-in-out .7s infinite;
+  }
+  .boot-icon .boot-icon-scramble { color: var(--muted); opacity: .65; }
+  @keyframes bootIconPulse {
+    0%, 100% { transform: scale(1.18); }
+    50% { transform: scale(1.26); }
+  }
+  .boot-decode {
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-size: clamp(.8rem, 2vw, 1rem); letter-spacing: .18em; text-transform: uppercase;
+    color: var(--white);
+    text-shadow: 0 0 8px rgba(34,211,238,.5);
+    min-height: 1.4em;
+  }
+  .boot-decode .boot-char-locked { color: var(--cyan); }
+  .boot-bar-track {
+    width: min(220px, 60vw); height: 3px; border-radius: 100px;
+    background: rgba(255,255,255,.08); overflow: hidden;
+  }
+  .boot-bar-fill {
+    height: 100%; width: 0%; border-radius: 100px;
+    background: linear-gradient(90deg, var(--cyan), var(--magenta));
+    box-shadow: 0 0 10px rgba(34,211,238,.7);
+    transition: width .1s linear;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .boot-icon { animation: none; }
+  }
+
   html {
     scroll-behavior: smooth; background: #020810; color-scheme: dark;
     scroll-padding-top: 5.6rem; scroll-snap-type: y proximity;
@@ -2248,6 +2298,29 @@
 </script>
 </head>
 <body>
+
+<!-- BOOT SEQUENCE — full-screen, shown once per session, before the hero
+     reveals. See runBootSequence() near the hero glitch-decrypt script. -->
+<div id="boot-seq" aria-hidden="true">
+  <div class="boot-icon" id="boot-icon">&lt;/&gt;</div>
+  <div class="boot-decode" id="boot-decode-text"></div>
+  <div class="boot-bar-track"><div class="boot-bar-fill" id="boot-bar-fill"></div></div>
+</div>
+<script>
+  // Runs synchronously, immediately after the element above, before the
+  // browser paints anything — so a repeat page load within the same
+  // session (or a reduced-motion visitor) never shows even a flash of
+  // the overlay before the real logic (further down the page) would
+  // otherwise have hidden it on DOMContentLoaded.
+  (function () {
+    var seq = document.getElementById('boot-seq');
+    if (!seq) return;
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var shown = false;
+    try { shown = sessionStorage.getItem('bootSeqShown') === '1'; } catch (e) {}
+    if (shown || reduce) seq.hidden = true;
+  })();
+</script>
 
 <script>
   // ── Global error resilience ──
@@ -5148,8 +5221,109 @@ panels.forEach(p => observer.observe(p));
     }
   }
 
+  /* ── Character-decode effect for the boot sequence: the full-length
+     string appears immediately as scrambled glyphs, then each position
+     locks into its real character at a staggered time, left to right,
+     while still-unlocked positions keep cycling — the classic "decoding"
+     look, distinct from the hologram-assemble effect used on the title. ── */
+  const BOOT_GLYPHS = '!<>-_\\/[]{}=+*^?#';
+  function decodeText(el, finalText, duration, onDone) {
+    const stagger = duration / finalText.length;
+    const startTime = performance.now();
+    function tick(now) {
+      const elapsed = now - startTime;
+      let out = '';
+      for (let i = 0; i < finalText.length; i++) {
+        const ch = finalText[i];
+        if (ch === ' ') { out += ' '; continue; }
+        if (elapsed >= i * stagger) {
+          out += '<span class="boot-char-locked">' + ch + '</span>';
+        } else {
+          out += BOOT_GLYPHS[Math.floor(Math.random() * BOOT_GLYPHS.length)];
+        }
+      }
+      el.innerHTML = out;
+      if (elapsed < duration) {
+        requestAnimationFrame(tick);
+      } else {
+        el.innerHTML = finalText.split('').map((c) => c === ' ' ? ' ' : '<span class="boot-char-locked">' + c + '</span>').join('');
+        if (onDone) onDone();
+      }
+    }
+    requestAnimationFrame(tick);
+  }
+
+  /* ── Same decode effect for the "</>" icon, but each of the 3 characters
+     locks into its own color (cyan / violet / magenta) instead of one
+     uniform color, and triggers the grow-in transition once fully
+     resolved (see .boot-icon-grown, CSS). ── */
+  const BOOT_ICON_CHARS = ['<', '/', '>'];
+  const BOOT_ICON_COLORS = ['var(--cyan)', 'var(--violet)', 'var(--magenta)'];
+  function decodeIcon(el, duration, onDone) {
+    const stagger = duration / BOOT_ICON_CHARS.length;
+    const startTime = performance.now();
+    function tick(now) {
+      const elapsed = now - startTime;
+      let out = '';
+      for (let i = 0; i < BOOT_ICON_CHARS.length; i++) {
+        if (elapsed >= i * stagger) {
+          out += '<span style="color:' + BOOT_ICON_COLORS[i] + '">' + BOOT_ICON_CHARS[i] + '</span>';
+        } else {
+          out += '<span class="boot-icon-scramble">' + BOOT_GLYPHS[Math.floor(Math.random() * BOOT_GLYPHS.length)] + '</span>';
+        }
+      }
+      el.innerHTML = out;
+      if (elapsed < duration) {
+        requestAnimationFrame(tick);
+      } else {
+        el.innerHTML = BOOT_ICON_CHARS.map((c, i) => '<span style="color:' + BOOT_ICON_COLORS[i] + '">' + c + '</span>').join('');
+        el.classList.add('boot-icon-grown');
+        if (onDone) onDone();
+      }
+    }
+    requestAnimationFrame(tick);
+  }
+
+  /* ── Full-screen boot sequence — shown once per browser session (not
+     once per page load), before the hero content reveals. Skipped
+     entirely under prefers-reduced-motion, same as the rest of the hero
+     reveal sequence. ── */
+  function runBootSequence(onDone) {
+    const seq = document.getElementById('boot-seq');
+    const iconEl = document.getElementById('boot-icon');
+    const decodeEl = document.getElementById('boot-decode-text');
+    const barFill = document.getElementById('boot-bar-fill');
+    if (!seq) { onDone(); return; }
+
+    const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let alreadyShown = false;
+    try { alreadyShown = sessionStorage.getItem('bootSeqShown') === '1'; } catch (_) {}
+
+    if (alreadyShown || reduceMotion) {
+      seq.hidden = true;
+      onDone();
+      return;
+    }
+    try { sessionStorage.setItem('bootSeqShown', '1'); } catch (_) {}
+
+    const MESSAGE = 'INITIALIZING PORTFOLIO';
+    const DECODE_MS = 1400, HOLD_MS = 400;
+
+    if (iconEl) decodeIcon(iconEl, DECODE_MS * 0.6); // resolves a little ahead of the text
+    if (decodeEl) decodeText(decodeEl, MESSAGE, DECODE_MS);
+    if (barFill) {
+      barFill.style.transition = 'width ' + (DECODE_MS + HOLD_MS) + 'ms linear';
+      requestAnimationFrame(() => { barFill.style.width = '100%'; });
+    }
+
+    setTimeout(() => {
+      seq.classList.add('boot-hide');
+      setTimeout(() => { seq.hidden = true; onDone(); }, 520);
+    }, DECODE_MS + HOLD_MS);
+  }
+
   function start() {
-    run();
+    runBootSequence(run);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);

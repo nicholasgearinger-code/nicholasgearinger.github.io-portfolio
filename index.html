@@ -2610,7 +2610,7 @@
   (function sitePreloader() {
     function init() {
     const overlay = document.getElementById('site-preloader');
-    if (!overlay) return;
+    if (!overlay) { window.dispatchEvent(new Event('preloaderDone')); return; }
     document.documentElement.classList.add('preload-lock');
 
     const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -2618,6 +2618,11 @@
     function hideOverlay() {
       overlay.classList.add('preloader-hide');
       document.documentElement.classList.remove('preload-lock');
+      // Signal the hero (and anything else waiting) that the intro is
+      // actually done, rather than making other scripts guess at a fixed
+      // delay that drifts out of sync whenever this timeline changes.
+      window.__preloaderDone = true;
+      window.dispatchEvent(new Event('preloaderDone'));
       setTimeout(() => { overlay.style.display = 'none'; }, 750);
     }
 
@@ -6381,20 +6386,34 @@ panels.forEach(p => observer.observe(p));
     runBootLog(run);
   }
 
-  // The preloader now runs ~6.3s (boot lines, name decode, glyph collapse,
-  // grow-punch, hold, power-down flicker-out) before it starts fading out.
-  // The hero's own reveal used to start immediately at page load and ran
-  // independently — fine when the preloader was shorter, but now the hero
-  // finished materializing well before the overlay even began lifting,
-  // leaving a static page underneath the fade. Delay the hero's start so
-  // its own ~5.5s reveal chain lands its final beats right as the overlay
-  // dissolves, instead of finishing in the dark under it.
-  const HERO_START_DELAY = 1500;
+  let heroStarted = false;
+  function startOnce() {
+    if (heroStarted) return;
+    heroStarted = true;
+    start();
+  }
+
+  // The hero's own reveal used to start immediately at page load and run
+  // independently of the preloader on a fixed timeline — fine while both
+  // were short, but every time the preloader's animation grew (glyph
+  // grow-punch, flicker-out, etc.) the hero kept finishing early and sat
+  // there fully materialized under the fading overlay. Rather than guess
+  // another fixed delay that will drift out of sync the next time the
+  // preloader changes, wait for the preloader to actually signal it's
+  // done (see the `preloaderDone` event dispatched from its hideOverlay()),
+  // so the hero always starts the instant the curtain begins lifting.
+  function beginHeroWhenReady() {
+    if (window.__preloaderDone) { startOnce(); return; }
+    window.addEventListener('preloaderDone', startOnce, { once: true });
+    // Safety net: if the preloader script never ran or never fired its
+    // event for some reason, don't leave the hero blank forever.
+    setTimeout(() => { if (!window.__preloaderDone) startOnce(); }, 15000);
+  }
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => setTimeout(start, HERO_START_DELAY));
+    document.addEventListener('DOMContentLoaded', beginHeroWhenReady);
   } else {
-    setTimeout(start, HERO_START_DELAY);
+    beginHeroWhenReady();
   }
 })();
 </script>

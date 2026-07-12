@@ -677,9 +677,26 @@
   .pboot-line {
     opacity: 0; transform: translateY(4px);
     transition: opacity .35s ease, transform .35s ease;
+    font-variant-ligatures: none;
   }
   .pboot-line.pboot-in { opacity: 1; transform: translateY(0); }
-  .pboot-line .pboot-ok { color: #34D399; text-shadow: 0 0 6px rgba(52,211,153,.7); margin: 0 .35em; }
+  .pboot-line .pboot-ok {
+    color: var(--amber); text-shadow: 0 0 6px rgba(245,158,11,.7); margin: 0 .35em;
+    opacity: 0; transition: opacity .25s ease, color .3s ease, text-shadow .3s ease;
+  }
+  .pboot-line .pboot-ok.pboot-visible { opacity: 1; }
+  .pboot-line .pboot-ok.pboot-online {
+    color: #34D399; text-shadow: 0 0 6px rgba(52,211,153,.7);
+    animation: pbootFlash .4s ease;
+  }
+  @keyframes pbootFlash {
+    0%   { filter: brightness(1); }
+    35%  { filter: brightness(2.4); }
+    100% { filter: brightness(1); }
+  }
+  .pboot-cursor { display: inline-block; color: var(--cyan); opacity: 0; margin-left: .05em; }
+  .pboot-cursor.pboot-cursor-active { animation: pbootBlink .9s steps(1) infinite; }
+  @keyframes pbootBlink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
   .preloader-bar-track {
     width: 200px; height: 2px; border-radius: 2px; overflow: hidden;
     background: rgba(34,211,238,.14); margin-bottom: 1rem;
@@ -2694,10 +2711,55 @@
     const anchorFinals = ['<', '/', '>'];
     const anchorClasses = ['lchar-anchor-1', 'lchar-anchor-2', 'lchar-anchor-3'];
 
-    // 1. Boot-log lines flicker in one at a time.
-    const lines = boot ? boot.querySelectorAll('.pboot-line') : [];
-    lines.forEach((line, i) => setTimeout(() => line.classList.add('pboot-in'), 100 + i * 160));
-    const bootDone = 100 + lines.length * 160 + 250;
+    // 1. Boot-log lines type in one at a time, terminal-style — each
+    //    label ("POWER CORE" etc.) types out char by char behind a
+    //    blinking cursor, then its status dot appears amber ("checking"),
+    //    the status word ("ONLINE" etc.) appears at once, and the dot
+    //    flips to green ("online") — before the next line starts.
+    const lines = boot ? Array.from(boot.querySelectorAll('.pboot-line')) : [];
+    const LABEL_CHAR_MS = 26;
+    const GAP_LABEL_TO_DOT = 90;
+    const GAP_DOT_TO_STATUS = 130;
+    const GAP_STATUS_TO_ONLINE = 220;
+    const GAP_LINE_TO_LINE = 160;
+
+    function typeInto(el, text, startDelay, charDelay) {
+      for (let i = 0; i < text.length; i++) {
+        setTimeout(() => { el.textContent += text[i]; }, startDelay + i * charDelay);
+      }
+    }
+
+    let cursor = 100; // running schedule offset, ms from boot-log start
+    lines.forEach((line) => {
+      const labelText = line.dataset.label || '';
+      const statusText = line.dataset.status || '';
+      const labelEl = line.querySelector('.pboot-label');
+      const statusEl = line.querySelector('.pboot-status');
+      const dot = line.querySelector('.pboot-ok');
+      const caret = line.querySelector('.pboot-cursor');
+
+      const lineStart = cursor;
+      setTimeout(() => {
+        line.classList.add('pboot-in');
+        if (caret) caret.classList.add('pboot-cursor-active');
+      }, lineStart);
+      if (labelEl) typeInto(labelEl, labelText, lineStart, LABEL_CHAR_MS);
+
+      const labelDone = lineStart + labelText.length * LABEL_CHAR_MS;
+      setTimeout(() => { if (caret) caret.classList.remove('pboot-cursor-active'); }, labelDone);
+
+      const dotVisible = labelDone + GAP_LABEL_TO_DOT;
+      if (dot) setTimeout(() => dot.classList.add('pboot-visible'), dotVisible);
+
+      const statusStart = dotVisible + GAP_DOT_TO_STATUS;
+      if (statusEl) setTimeout(() => { statusEl.textContent = statusText; }, statusStart);
+
+      const dotOnline = statusStart + GAP_STATUS_TO_ONLINE;
+      if (dot) setTimeout(() => dot.classList.add('pboot-online'), dotOnline);
+
+      cursor = dotOnline + GAP_LINE_TO_LINE;
+    });
+    const bootDone = cursor + 250;
 
     // Rapidly cycles `el` through random glyphs, then locks it to `finalChar`
     // with a quick glitch flash — a hacker-terminal "decode" effect.
@@ -2804,10 +2866,12 @@
       });
     }, bootDone);
 
-    // Total active runtime ≈ bootDone + name decode/hold + glyph collapse
-    // + a hold, the dramatic grow-punch, a hold on "READY", then the
-    // power-down flicker-out — about 6.5 seconds.
-    const TOTAL_MS = 6300;
+    // Total active runtime = bootDone (now the full terminal-typed boot
+    // log, which varies with the label/status text) + a fixed tail for
+    // name decode/hold + glyph collapse + a hold, the grow-punch, a hold
+    // on "READY", then the power-down flicker-out — that tail was tuned
+    // at ~5.3s when the old fixed 6.3s total assumed a ~1s boot log.
+    const TOTAL_MS = bootDone + 5310;
 
     // 5. Hold briefly on "READY", then dissolve the overlay.
     setTimeout(hideOverlay, TOTAL_MS);
@@ -2833,9 +2897,9 @@
       <div class="preloader-decode-line" id="preloader-decode-line"></div>
     </div>
     <div class="preloader-boot" id="preloader-boot">
-      <div class="pboot-line">POWER CORE <span class="pboot-ok">●</span> ONLINE</div>
-      <div class="pboot-line">RENDER PIPELINE <span class="pboot-ok">●</span> LINKED</div>
-      <div class="pboot-line">ASSETS <span class="pboot-ok">●</span> LOADED</div>
+      <div class="pboot-line" data-label="POWER CORE" data-status="ONLINE"><span class="pboot-label"></span> <span class="pboot-ok">●</span> <span class="pboot-status"></span><span class="pboot-cursor">▍</span></div>
+      <div class="pboot-line" data-label="RENDER PIPELINE" data-status="LINKED"><span class="pboot-label"></span> <span class="pboot-ok">●</span> <span class="pboot-status"></span><span class="pboot-cursor">▍</span></div>
+      <div class="pboot-line" data-label="ASSETS" data-status="LOADED"><span class="pboot-label"></span> <span class="pboot-ok">●</span> <span class="pboot-status"></span><span class="pboot-cursor">▍</span></div>
     </div>
     <div class="preloader-bar-track"><div class="preloader-bar-fill" id="preloader-bar-fill"></div></div>
     <div class="preloader-label" id="preloader-label">INITIALIZING</div>

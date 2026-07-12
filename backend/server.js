@@ -52,6 +52,7 @@ const contact = require('./routes/contact');
 const engagement = require('./routes/engagement');
 const analytics = require('./routes/analytics');
 const guestbook = require('./routes/guestbook');
+const leaderboard = require('./routes/leaderboard');
 const projects = require('./routes/projects');
 const download = require('./routes/download');
 const ask = require('./routes/ask');
@@ -83,6 +84,8 @@ const routes = [
 
   ['GET', '/api/guestbook', guestbook.list],
   ['POST', '/api/guestbook', guestbook.create],
+  ['GET', '/api/leaderboard', leaderboard.list],
+  ['POST', '/api/leaderboard', leaderboard.create],
   ['PATCH', '/api/guestbook/:id', guestbook.approve],
   ['DELETE', '/api/guestbook/:id', guestbook.remove],
 

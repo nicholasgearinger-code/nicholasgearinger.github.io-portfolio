@@ -2310,7 +2310,7 @@
   }
   .telemetry-empty { color: var(--muted); font-size: .82rem; text-align: center; padding: 1rem 0; }
 
-  /* ── PURGE RUNNER GAME ── */
+  /* ── GHOSTWIRE GAME ── */
   .game-wrap { position: relative; width: 100%; max-width: 480px; margin: 0 auto; border-radius: .5rem; overflow: hidden; touch-action: none; }
   #game-canvas { width: 100%; height: auto; display: block; background: #030811; }
   .game-overlay {
@@ -3203,7 +3203,7 @@
 </div>
 
 
-<!-- PURGE RUNNER GAME -->
+<!-- GHOSTWIRE GAME -->
 <section id="game" class="panel">
   <div class="panel-inner">
     <span class="section-label">Try It</span>
@@ -3216,16 +3216,16 @@
           <span class="cc-dot" style="background:#FFBD2E"></span>
           <span class="cc-dot" style="background:#28C840"></span>
         </div>
-        <span class="cc-filename">purge_runner.js</span>
+        <span class="cc-filename">ghostwire.js</span>
         <div class="cc-status-pill" id="game-pill">
           <span class="cc-pill-dot"></span><span id="game-pill-text">READY</span>
         </div>
       </div>
       <div class="algo-body">
         <div class="game-wrap" id="game-wrap">
-          <canvas id="game-canvas" width="480" height="360" aria-label="Purge Runner arcade game — a hunter-process diving a perspective data tunnel, dodging corrupted fragments and collecting verified data shards"></canvas>
+          <canvas id="game-canvas" width="480" height="360" aria-label="Ghostwire arcade game — a hunter-process diving a perspective data tunnel, dodging corrupted fragments and collecting verified data shards"></canvas>
           <div class="game-overlay" id="game-overlay">
-            <h3 id="game-overlay-title">Purge Runner</h3>
+            <h3 id="game-overlay-title">Ghostwire</h3>
             <p id="game-overlay-sub">Arrow keys, A/D, or drag to steer. Dodge red corruption, pull in cyan data.</p>
             <button type="button" class="btn-primary" id="game-start-btn">▶ Play</button>
             <div class="game-score-entry" id="game-score-entry" hidden>
@@ -6794,7 +6794,7 @@ panels.forEach(p => observer.observe(p));
     { icon: '◈', label: 'Go to In Motion', action: () => scrollToId('build') },
     { icon: '◈', label: 'Go to Face AI', action: () => scrollToId('webcam-ai') },
     { icon: '◈', label: 'Go to 3D Work', action: () => scrollToId('models') },
-    { icon: '◈', label: 'Play Purge Runner', action: () => scrollToId('game') },
+    { icon: '◈', label: 'Play Ghostwire', action: () => scrollToId('game') },
     { icon: '◈', label: 'Go to Photography', action: () => scrollToId('photography') },
     { icon: '◈', label: 'Go to Live Telemetry', action: () => scrollToId('telemetry') },
     { icon: '◈', label: 'Go to Process', action: () => scrollToId('process') },
@@ -6858,7 +6858,7 @@ panels.forEach(p => observer.observe(p));
 })();
 </script>
 <script>
-/* -- PURGE RUNNER: a small arcade game built with plain Canvas 2D — no
+/* -- GHOSTWIRE: a small arcade game built with plain Canvas 2D — no
       engine, no external library. You're a hunter-process diving through a
       perspective data tunnel: obstacles and pickups spawn near a vanishing
       point and grow as they close in, rather than sliding down a flat 2D
@@ -6867,7 +6867,7 @@ panels.forEach(p => observer.observe(p));
       up the longer you survive, and the tunnel itself gets glitchier.
       Fully playable offline — only score submission and the leaderboard
       display need the backend. -- */
-(function purgeRunner() {
+(function ghostwire() {
   const canvas = document.getElementById('game-canvas');
   const overlay = document.getElementById('game-overlay');
   const overlayTitle = document.getElementById('game-overlay-title');
@@ -6891,12 +6891,60 @@ panels.forEach(p => observer.observe(p));
   const MIN_SCALE = 0.1;                        // how small items are right at the vanishing point
   const REMOVE_P = 1.35;                        // progress past which a missed item is culled
 
+  const CODE_TOKENS_BAD = ['0xFF', 'NaN', 'SEGV', 'ERR', 'null', '!=', 'undef', '0x00', 'panic!'];
+  const CODE_TOKENS_GOOD = ['OK', '{ }', '=>', '200', 'ACK', '0x1A', 'sync', 'true'];
+  const CODE_DRIFT_TOKENS = [
+    'function scan()', 'const ptr =', 'while(true){', '} catch(e)', 'GC.mark()', 'ptr++;',
+    '0b1010_1101', 'if (err)', 'return null;', 'async () =>', 'await fetch', 'heap[i] =',
+    'stack.pop()', 'yield*', '0xC0FFEE', 'try {', 'segfault', 'let corrupt =', '!== undefined',
+  ];
+  function pick(arr) { return arr[(Math.random() * arr.length) | 0]; }
+
+  function projectPoint(lane, p) {
+    return { x: VP_X + (lane - VP_X) * p, y: VP_Y + (PLAYER_Y - VP_Y) * p };
+  }
+
+  function generateCircuitTraces() {
+    const traces = [];
+    const count = 9;
+    for (let i = 0; i < count; i++) {
+      let lane = ((i + 0.5) / count) * W + (Math.random() - 0.5) * 30;
+      let p = 0.04 + Math.random() * 0.08;
+      const pts = [{ lane, p }];
+      const segs = 3 + Math.floor(Math.random() * 3);
+      for (let s = 0; s < segs; s++) {
+        if (s % 2 === 0) {
+          p = Math.min(0.98, p + 0.14 + Math.random() * 0.22);
+        } else {
+          lane = Math.max(20, Math.min(W - 20, lane + (Math.random() - 0.5) * 90));
+        }
+        pts.push({ lane, p });
+      }
+      traces.push({
+        pts, phase: Math.random(), speed: 0.15 + Math.random() * 0.18,
+        hue: Math.random() < 0.5 ? 'cyan' : 'violet',
+      });
+    }
+    return traces;
+  }
+
+  function pointAlongTrace(trace, t) {
+    const segCount = trace.pts.length - 1;
+    const segT = Math.max(0, Math.min(0.9999, t)) * segCount;
+    const idx = Math.min(segCount - 1, Math.floor(segT));
+    const localT = segT - idx;
+    const a = trace.pts[idx], b = trace.pts[idx + 1];
+    return projectPoint(a.lane + (b.lane - a.lane) * localT, a.p + (b.p - a.p) * localT);
+  }
+
+
   let playerX = W / 2, targetX = playerX, playerVX = 0;
-  let items = [], particles = [];
+  let items = [], particles = [], codeBits = [];
   let score = 0, running = false, dying = false, deathTimer = 0, rafId = null, lastTime = 0;
-  let spawnTimer = 0, elapsed = 0, difficulty = 1;
+  let spawnTimer = 0, codeBitTimer = 0, elapsed = 0, difficulty = 1;
   let shakeMag = 0, flash = 0, tunnelHue = 0;
-  let best = parseInt(localStorage.getItem('purgeRunnerBest') || '0', 10);
+  let circuitTraces = generateCircuitTraces();
+  let best = parseInt(localStorage.getItem('ghostwireBest') || '0', 10);
   bestStatEl.innerHTML = 'best: <strong>' + best + '</strong>';
 
   function escapeHtml(s) {
@@ -6904,9 +6952,11 @@ panels.forEach(p => observer.observe(p));
   }
 
   function reset() {
-    items = []; particles = []; score = 0; elapsed = 0; difficulty = 1; spawnTimer = 0;
+    items = []; particles = []; codeBits = []; score = 0; elapsed = 0; difficulty = 1;
+    spawnTimer = 0; codeBitTimer = 0;
     playerX = W / 2; targetX = playerX; playerVX = 0;
     shakeMag = 0; flash = 0; dying = false; deathTimer = 0;
+    circuitTraces = generateCircuitTraces();
     statEl.innerHTML = 'score: <strong>0</strong>';
   }
 
@@ -6917,10 +6967,21 @@ panels.forEach(p => observer.observe(p));
       z: 1,                                   // 1 = at the vanishing point, 0 = at the player
       baseR: isGood ? 10 : 15,
       type: isGood ? 'good' : 'bad',
+      token: isGood ? pick(CODE_TOKENS_GOOD) : pick(CODE_TOKENS_BAD),
       vz: (isGood ? 0.46 : 0.54) * difficulty,
       spin: (Math.random() - 0.5) * 3,
       seed: Math.random() * 1000,
       x: VP_X, y: VP_Y, r: 1, glitchT: 0,
+    });
+  }
+
+  function spawnCodeBit() {
+    codeBits.push({
+      lane: 10 + Math.random() * (W - 20),
+      p: 0,
+      vp: 0.16 + Math.random() * 0.1,
+      token: pick(CODE_DRIFT_TOKENS),
+      hue: Math.random() < 0.5 ? 'cyan' : 'violet',
     });
   }
 
@@ -6986,6 +7047,16 @@ panels.forEach(p => observer.observe(p));
     shakeMag = Math.max(0, shakeMag - dt * 70);
     flash = Math.max(0, flash - dt * 3.2);
     tunnelHue += dt;
+
+    circuitTraces.forEach((t) => { t.phase = (t.phase + t.speed * dt) % 1; });
+
+    codeBitTimer -= dt;
+    if (codeBitTimer <= 0) { spawnCodeBit(); codeBitTimer = 0.4 + Math.random() * 0.35; }
+    for (let i = codeBits.length - 1; i >= 0; i--) {
+      const c = codeBits[i];
+      c.p += c.vp * dt * Math.min(1.6, difficulty);
+      if (c.p > 1.05) codeBits.splice(i, 1);
+    }
 
     if (dying) {
       deathTimer -= dt;
@@ -7075,7 +7146,60 @@ panels.forEach(p => observer.observe(p));
     ctx.shadowBlur = 0;
   }
 
+  function drawCircuitFloor() {
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    circuitTraces.forEach((t) => {
+      const nearP = t.pts[t.pts.length - 1].p;
+      const fade = 0.14 + nearP * 0.16;
+      const color = t.hue === 'cyan' ? '34,211,238' : '167,139,250';
+
+      ctx.beginPath();
+      t.pts.forEach((pt, i) => {
+        const s = projectPoint(pt.lane, pt.p);
+        if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y);
+      });
+      ctx.strokeStyle = 'rgba(' + color + ',' + fade.toFixed(3) + ')';
+      ctx.lineWidth = 1.3;
+      ctx.stroke();
+
+      // solder-pad vias at each waypoint, bigger where the trace is closer
+      t.pts.forEach((pt) => {
+        const s = projectPoint(pt.lane, pt.p);
+        const r = 1.1 + pt.p * 2.4;
+        ctx.beginPath();
+        ctx.fillStyle = 'rgba(' + color + ',' + (fade + 0.15).toFixed(3) + ')';
+        ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      // a pulse of "current" traveling along the trace toward the player
+      const pulse = pointAlongTrace(t, t.phase);
+      const pulseR = 1.5 + nearP * 2.4;
+      ctx.beginPath();
+      ctx.fillStyle = '#FBBF24';
+      ctx.shadowColor = '#FBBF24'; ctx.shadowBlur = 8;
+      ctx.arc(pulse.x, pulse.y, pulseR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    });
+  }
+
+  function drawCodeBits() {
+    ctx.font = '10px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    codeBits.forEach((c) => {
+      const s = projectPoint(c.lane, Math.min(1, c.p));
+      const fade = Math.sin(Math.min(1, c.p) * Math.PI); // fades in, peaks mid-tunnel, fades out
+      const size = 8 + Math.min(1, c.p) * 7;
+      ctx.font = size.toFixed(1) + 'px "JetBrains Mono", monospace';
+      ctx.fillStyle = (c.hue === 'cyan' ? 'rgba(125,211,252,' : 'rgba(196,181,253,') + (fade * 0.4).toFixed(3) + ')';
+      ctx.fillText(c.token, s.x, s.y);
+    });
+    ctx.textAlign = 'left';
+  }
+
   function drawItem(it) {
+    const p = 1 - it.z;
     if (it.type === 'good') {
       const wobble = Math.sin(tunnelHue * 4 + it.seed) * 0.15;
       ctx.save();
@@ -7103,6 +7227,17 @@ panels.forEach(p => observer.observe(p));
         ctx.fillRect(-it.r, -it.r * 0.2, it.r * 2, it.r * 0.3);
       }
       ctx.restore();
+    }
+    // a code-token tag riding just above the item once it's close enough to read
+    if (p > 0.3 && it.token) {
+      const jag = it.type === 'bad' && Math.sin(it.glitchT * 50 + it.seed) > 0.75;
+      ctx.font = Math.max(8, 8 + p * 5).toFixed(1) + 'px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = it.type === 'good'
+        ? 'rgba(34,211,238,' + (0.5 + p * 0.4).toFixed(3) + ')'
+        : 'rgba(248,113,113,' + (0.5 + p * 0.4).toFixed(3) + ')';
+      ctx.fillText(it.token, it.x + (jag ? (Math.random() - 0.5) * 3 : 0), it.y - it.r - 5);
+      ctx.textAlign = 'left';
     }
   }
 
@@ -7144,6 +7279,8 @@ panels.forEach(p => observer.observe(p));
     }
 
     drawTunnel();
+    drawCircuitFloor();
+    drawCodeBits();
 
     items.slice().sort((a, b) => a.z - b.z).reverse().forEach(drawItem);
     drawParticles();
@@ -7194,7 +7331,7 @@ panels.forEach(p => observer.observe(p));
     if (rafId) cancelAnimationFrame(rafId);
     if (score > best) {
       best = score;
-      localStorage.setItem('purgeRunnerBest', String(best));
+      localStorage.setItem('ghostwireBest', String(best));
       bestStatEl.innerHTML = 'best: <strong>' + best + '</strong>';
     }
     overlay.hidden = false;

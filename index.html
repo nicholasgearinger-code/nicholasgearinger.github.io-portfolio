@@ -388,23 +388,6 @@
     mask-composite: intersect, intersect;
     transition: opacity .15s linear;
   }
-  /* HUD boot-log — a quick "systems online" readout that flickers in
-     line-by-line ahead of the identity scan, then clears. */
-  .hero-boot-log {
-    display: flex; flex-direction: column; gap: .3rem;
-    margin-bottom: 1.1rem; min-height: 3.5em;
-    font-family: 'JetBrains Mono', 'Courier New', monospace;
-    font-size: .66rem; letter-spacing: .12em; text-transform: uppercase;
-    color: var(--muted);
-    transition: opacity .5s ease;
-  }
-  .hero-boot-log.boot-fade { opacity: 0; }
-  .boot-line {
-    opacity: 0; transform: translateY(4px);
-    transition: opacity .35s ease, transform .35s ease;
-  }
-  .boot-line.boot-in { opacity: 1; transform: translateY(0); }
-  .boot-line .boot-ok { color: #34D399; text-shadow: 0 0 6px rgba(52,211,153,.7); margin: 0 .35em; }
   .hero-content {
     position: relative; z-index: 2;
     text-shadow: 0 0 80px rgba(0,0,0,.7);
@@ -2831,11 +2814,6 @@
 <section id="hero">
   <canvas id="particle-canvas"></canvas>
   <div class="hero-content">
-    <div class="hero-boot-log" id="hero-boot-log" aria-hidden="true">
-      <div class="boot-line">POWER CORE <span class="boot-ok">●</span> ONLINE</div>
-      <div class="boot-line">DIAGNOSTICS <span class="boot-ok">●</span> NOMINAL</div>
-      <div class="boot-line">HUD <span class="boot-ok">●</span> LINKED</div>
-    </div>
     <div class="hero-eyebrow">Available for work · 2026</div>
     <div class="hero-title-row">
       <div class="hero-prompt-line" id="hero-prompt-line"><span class="hero-holo" id="hero-prompt-text">Scanning Identity</span></div>
@@ -5569,28 +5547,7 @@ panels.forEach(p => observer.observe(p));
     const sub = document.querySelector('.hero-sub');
     if (line3) line3.classList.add('reveal-in');
     if (sub) sub.classList.add('reveal-in');
-    const bootLog = document.getElementById('hero-boot-log');
-    if (bootLog) bootLog.style.display = 'none';
     return;
-  }
-
-  // Flickers the "POWER CORE / DIAGNOSTICS / HUD" boot-log lines in one
-  // at a time, holds briefly, then fades the whole block out before the
-  // identity-scan label takes over.
-  function runBootLog(onDone) {
-    const log = document.getElementById('hero-boot-log');
-    if (!log) { onDone(); return; }
-    const lines = log.querySelectorAll('.boot-line');
-    if (!lines.length) { onDone(); return; }
-    lines.forEach((line, i) => setTimeout(() => line.classList.add('boot-in'), 120 + i * 170));
-    const totalIn = 120 + lines.length * 170 + 300;
-    setTimeout(() => {
-      log.classList.add('boot-fade');
-      setTimeout(() => {
-        log.style.display = 'none';
-        onDone();
-      }, 500);
-    }, totalIn);
   }
 
   // Materializes `el`'s existing text as a JARVIS-style hologram: a bright
@@ -5638,7 +5595,7 @@ panels.forEach(p => observer.observe(p));
   }
 
   function start() {
-    runBootLog(run);
+    run();
   }
 
   let heroStarted = false;

@@ -168,6 +168,10 @@
   }
   #boot-seq.boot-hide { opacity: 0; pointer-events: none; }
   #boot-seq[hidden] { display: none; }
+  .boot-icon-wrap {
+    position: relative;
+    display: flex; flex-direction: column; align-items: center;
+  }
   .boot-icon {
     font-family: 'JetBrains Mono', 'Courier New', monospace;
     font-size: clamp(2.6rem, 8vw, 4.2rem); font-weight: 700;
@@ -185,6 +189,34 @@
   @keyframes bootIconPulse {
     0%, 100% { transform: scale(1.18); }
     50% { transform: scale(1.26); }
+  }
+  /* ── Glowing reflection: a mirrored, masked-out, blurred copy of the
+     glyph sitting directly beneath it, like a glossy-floor reflection.
+     JS keeps its innerHTML and grown/pulse state in sync with the real
+     glyph (see decodeIcon) — this element never runs its own decode. ── */
+  .boot-icon-reflection {
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-size: clamp(2.6rem, 8vw, 4.2rem); font-weight: 700;
+    text-shadow: 0 0 12px rgba(34,211,238,.85), 0 0 34px rgba(232,121,249,.5), 0 0 60px rgba(34,211,238,.3);
+    transform: scale(.55) scaleY(-1);
+    transform-origin: top center;
+    margin-top: -.12em;
+    opacity: .38;
+    filter: blur(1.5px);
+    -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,.6), transparent 70%);
+            mask-image: linear-gradient(to bottom, rgba(0,0,0,.6), transparent 70%);
+    pointer-events: none;
+    user-select: none;
+    transition: transform .7s cubic-bezier(.34,1.56,.64,1), opacity .7s ease;
+  }
+  .boot-icon-reflection.boot-icon-grown {
+    transform: scale(1.18) scaleY(-1);
+    animation: bootIconReflectionPulse 1.6s ease-in-out .7s infinite;
+  }
+  .boot-icon-reflection .boot-icon-scramble { color: var(--muted); opacity: .65; }
+  @keyframes bootIconReflectionPulse {
+    0%, 100% { transform: scale(1.18) scaleY(-1); }
+    50% { transform: scale(1.26) scaleY(-1); }
   }
   .boot-decode {
     font-family: 'JetBrains Mono', 'Courier New', monospace;
@@ -205,7 +237,7 @@
     transition: width .1s linear;
   }
   @media (prefers-reduced-motion: reduce) {
-    .boot-icon { animation: none; }
+    .boot-icon, .boot-icon-reflection { animation: none; }
   }
 
   html {
@@ -2302,7 +2334,10 @@
 <!-- BOOT SEQUENCE — full-screen, shown once per session, before the hero
      reveals. See runBootSequence() near the hero glitch-decrypt script. -->
 <div id="boot-seq" aria-hidden="true">
-  <div class="boot-icon" id="boot-icon">&lt;/&gt;</div>
+  <div class="boot-icon-wrap">
+    <div class="boot-icon" id="boot-icon">&lt;/&gt;</div>
+    <div class="boot-icon-reflection" id="boot-icon-reflection" aria-hidden="true">&lt;/&gt;</div>
+  </div>
   <div class="boot-decode" id="boot-decode-text"></div>
   <div class="boot-bar-track"><div class="boot-bar-fill" id="boot-bar-fill"></div></div>
 </div>
@@ -5260,6 +5295,7 @@ panels.forEach(p => observer.observe(p));
   const BOOT_ICON_CHARS = ['<', '/', '>'];
   const BOOT_ICON_COLORS = ['var(--cyan)', 'var(--violet)', 'var(--magenta)'];
   function decodeIcon(el, duration, onDone) {
+    const reflEl = document.getElementById('boot-icon-reflection');
     const stagger = duration / BOOT_ICON_CHARS.length;
     const startTime = performance.now();
     function tick(now) {
@@ -5273,11 +5309,17 @@ panels.forEach(p => observer.observe(p));
         }
       }
       el.innerHTML = out;
+      if (reflEl) reflEl.innerHTML = out;
       if (elapsed < duration) {
         requestAnimationFrame(tick);
       } else {
-        el.innerHTML = BOOT_ICON_CHARS.map((c, i) => '<span style="color:' + BOOT_ICON_COLORS[i] + '">' + c + '</span>').join('');
+        const finalHTML = BOOT_ICON_CHARS.map((c, i) => '<span style="color:' + BOOT_ICON_COLORS[i] + '">' + c + '</span>').join('');
+        el.innerHTML = finalHTML;
         el.classList.add('boot-icon-grown');
+        if (reflEl) {
+          reflEl.innerHTML = finalHTML;
+          reflEl.classList.add('boot-icon-grown');
+        }
         if (onDone) onDone();
       }
     }

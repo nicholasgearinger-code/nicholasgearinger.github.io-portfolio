@@ -107,38 +107,9 @@
   })();
 </script>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#020810">
 <title>Nicholas Gearinger — AI & Design</title>
-
-<!-- Primary SEO -->
-<meta name="description" content="Nicholas Gearinger is a creative generalist working across graphic design, 3D/WebGL, game development, and photography — portfolio featuring interactive AI demos, a 3D résumé, and shipped projects.">
-<meta name="author" content="Nicholas Gearinger">
-<link rel="canonical" href="https://nicholasgearinger-code.github.io/">
-
-<!-- Open Graph -->
-<meta property="og:type" content="website">
-<meta property="og:url" content="https://nicholasgearinger-code.github.io/">
-<meta property="og:title" content="Nicholas Gearinger — AI & Design">
-<meta property="og:description" content="Creative generalist working across graphic design, 3D/WebGL, game development, and photography. Explore interactive AI demos and a 3D résumé.">
-<meta property="og:image" content="https://nicholasgearinger-code.github.io/assets/og-image.png">
-<meta property="og:image:width" content="1200">
-<meta property="og:image:height" content="630">
-
-<!-- Twitter Card -->
-<meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Nicholas Gearinger — AI & Design">
-<meta name="twitter:description" content="Creative generalist working across graphic design, 3D/WebGL, game development, and photography.">
-<meta name="twitter:image" content="https://nicholasgearinger-code.github.io/assets/og-image.png">
-
-<!-- Favicons -->
-<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
-<link rel="icon" type="image/png" sizes="32x32" href="assets/icon-32.png">
-<link rel="icon" type="image/png" sizes="16x16" href="assets/icon-16.png">
-<link rel="apple-touch-icon" sizes="180x180" href="assets/icon-180.png">
-<link rel="icon" href="assets/favicon.ico">
-<link rel="manifest" href="assets/site.webmanifest">
-
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Inter:wght@300;400;500&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
@@ -205,11 +176,6 @@
   :focus-visible {
     outline: 2px solid var(--cyan); outline-offset: 2px;
   }
-  .sr-only {
-    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-    overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
-  }
-  html.preload-lock, html.preload-lock body { overflow: hidden; height: 100%; }
   .custom-cursor-active :focus-visible { outline-width: 2.5px; }
 
   body {
@@ -260,35 +226,18 @@
     border-bottom: 1px solid var(--card-border);
   }
   .nav-logo {
-    display: flex; align-items: center;
+    font-family: 'Syne', sans-serif;
+    font-weight: 800; font-size: 1.1rem; letter-spacing: -.02em;
+    color: var(--white);
   }
-  .nav-logo-img {
-    height: 2.1rem; width: auto; display: block;
-    filter: drop-shadow(0 0 6px rgba(34,211,238,.35));
-  }
+  .nav-logo span { color: var(--teal); }
   nav ul {
-    position: relative;
     list-style: none; display: flex; gap: .6rem; align-items: center;
     overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none;
     max-width: 100%;
   }
   nav ul::-webkit-scrollbar { display: none; }
-  /* Sliding pill that glides beneath the active nav link as you scroll
-     between sections, instead of the highlight just snapping from one
-     link to the next. */
-  .nav-indicator {
-    position: absolute; top: 0; left: 0; height: 100%;
-    border-radius: 100px;
-    background: linear-gradient(120deg, var(--cyan), var(--blue));
-    box-shadow: 0 10px 28px -10px rgba(34,211,238,.65);
-    opacity: 0; pointer-events: none; z-index: 0;
-    transition: transform .45s cubic-bezier(.22,1,.36,1),
-                width .45s cubic-bezier(.22,1,.36,1),
-                opacity .3s ease;
-  }
-  .nav-indicator.visible { opacity: 1; }
   nav a {
-    position: relative; z-index: 1;
     text-decoration: none; font-size: .84rem; font-weight: 600;
     letter-spacing: .01em;
     padding: .62rem 1.1rem; border-radius: 100px;
@@ -300,8 +249,9 @@
   nav a:hover { color: var(--white); border-color: var(--cyan); background: rgba(34,211,238,.08); transform: translateY(-2px); }
   nav a.nav-active {
     color: #041018;
+    background: linear-gradient(120deg, var(--cyan), var(--blue));
     border-color: transparent;
-    background: transparent;
+    box-shadow: 0 10px 28px -10px rgba(34,211,238,.65);
   }
   .nav-cta {
     padding: .62rem 1.3rem;
@@ -350,13 +300,6 @@
       border-radius: 100px; text-align: center;
     }
     nav ul li a.nav-cta { display: block; width: 100%; margin-top: .4rem; }
-    /* The sliding pill only makes sense against the desktop's single-row
-       nav; in the stacked mobile drawer, fall back to a solid fill. */
-    .nav-indicator { display: none; }
-    nav ul li a.nav-active {
-      background: linear-gradient(120deg, var(--cyan), var(--blue));
-      box-shadow: 0 10px 28px -10px rgba(34,211,238,.65);
-    }
   }
 
 
@@ -371,10 +314,12 @@
   #particle-canvas {
     position: absolute;
     top: 0; left: 0;
-    width: 100%; height: 170vh;   /* JS resizes this to span the hero content */
+    width: 100%; height: 170vh;   /* JS resizes this to span the full hero + bridge */
     z-index: 0;
     pointer-events: none;
-    /* Fade the node field on all sides so it reads as an open depth
+    /* Fade the node field on all sides — bottom fades into the compiler
+       section below (right at the very end of the bridge), and the
+       left/right/top edges soften so the field reads as an open depth
        of space, not a bounded rectangle. */
     -webkit-mask-image:
       linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 80%, rgba(0,0,0,0) 99%),
@@ -388,6 +333,23 @@
     mask-composite: intersect, intersect;
     transition: opacity .15s linear;
   }
+  /* HUD boot-log — a quick "systems online" readout that flickers in
+     line-by-line ahead of the identity scan, then clears. */
+  .hero-boot-log {
+    display: flex; flex-direction: column; gap: .3rem;
+    margin-bottom: 1.1rem; min-height: 3.5em;
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-size: .66rem; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--muted);
+    transition: opacity .5s ease;
+  }
+  .hero-boot-log.boot-fade { opacity: 0; }
+  .boot-line {
+    opacity: 0; transform: translateY(4px);
+    transition: opacity .35s ease, transform .35s ease;
+  }
+  .boot-line.boot-in { opacity: 1; transform: translateY(0); }
+  .boot-line .boot-ok { color: #34D399; text-shadow: 0 0 6px rgba(52,211,153,.7); margin: 0 .35em; }
   .hero-content {
     position: relative; z-index: 2;
     text-shadow: 0 0 80px rgba(0,0,0,.7);
@@ -490,221 +452,66 @@
     .hero-title-row { flex-direction: column; gap: .8rem; }
   }
 
-  /* ── SITE PRELOADER: a full-screen JARVIS-boot intro. Boot-log lines
-     flicker in, then "</>" decodes character-by-character out of scrambled
-     glyphs (hacker-terminal style) in cyan / violet / magenta, glitches
-     once locked, then crossfades seamlessly into the real logo mark before
-     the whole overlay dissolves to reveal the site underneath. ── */
-  #site-preloader {
-    position: fixed; inset: 0; z-index: 9999;
-    display: flex; align-items: center; justify-content: center;
-    background: var(--navy);
-    transition: opacity .7s cubic-bezier(.4,0,.2,1), visibility .7s;
-  }
-  #site-preloader::before {
-    content: ''; position: absolute; inset: 0; pointer-events: none;
-    background:
-      radial-gradient(ellipse 60% 50% at 50% 45%, rgba(34,211,238,.10), transparent 70%);
-  }
-  #site-preloader.preloader-hide { opacity: 0; visibility: hidden; }
-  .preloader-inner {
-    position: relative; z-index: 1;
-    display: flex; flex-direction: column; align-items: center;
-    padding: 0 1.5rem;
-  }
-  .preloader-logo-wrap {
-    position: relative; margin-bottom: 2rem;
-    display: flex; align-items: center; justify-content: center;
-    min-height: 9rem; width: 100%; max-width: 100%;
-  }
-  /* Soft ambient light pooling beneath the glyph, like a neon sign's floor
-     reflection — fades in once the glyph grows, then breathes in sync with
-     its glow pulse rather than flashing all at once. */
-  .preloader-logo-wrap::after {
-    content: '';
-    position: absolute; left: 0; right: 0; bottom: -.6rem; margin: 0 auto;
-    width: 68%; height: 3rem;
-    background: radial-gradient(ellipse 50% 100% at 50% 100%,
-      rgba(232,121,249,.30), rgba(129,140,248,.24) 40%, rgba(34,211,238,.16) 65%, transparent 80%);
-    filter: blur(7px);
-    opacity: 0; transform: scaleX(.7);
-    transition: opacity .6s ease, transform .6s ease;
-    pointer-events: none;
-  }
-  .preloader-logo-wrap:has(.lchar-anchor-grown)::after {
-    opacity: 1; transform: scaleX(1);
-    animation: groundGlowPulse 2.65s ease-in-out 1.7s infinite;
-  }
-  .preloader-logo-wrap:has(.lchar-anchor-out)::after {
-    animation: none;
-    opacity: 0; transform: scaleX(.7);
-    transition: opacity .5s ease .1s, transform .5s ease .1s;
-  }
-  @keyframes groundGlowPulse {
-    0%   { opacity: 1;  filter: blur(7px); }
-    50%  { opacity: .55; filter: blur(11px); }
-    100% { opacity: 1;  filter: blur(7px); }
-  }
-  /* One continuous line: "Nicholas Gearinger" decodes character by
-     character out of scrambled glyphs, holds, then every letter except
-     three anchor characters glitches and collapses away while those three
-     lock into "<", "/", ">" (cyan, violet, magenta) — the name literally
-     resolves down into the mark, in place. */
-  .preloader-decode-line {
-    display: flex; align-items: center; justify-content: center;
-    font-family: 'JetBrains Mono', 'Courier New', monospace;
-    font-weight: 700;
-    font-size: clamp(.92rem, 4.6vw, 1.6rem);
-    letter-spacing: .01em;
-    opacity: 1; transition: opacity .4s ease;
-    white-space: nowrap;
-    animation: preloaderColorCycle 1.6s linear infinite;
-  }
-  .preloader-decode-line.decode-out { opacity: 0; }
-  @keyframes preloaderColorCycle {
-    0%   { color: var(--cyan);   text-shadow: 0 0 9px rgba(34,211,238,.5); }
-    33%  { color: var(--violet); text-shadow: 0 0 9px rgba(129,140,248,.5); }
-    66%  { color: #E879F9;       text-shadow: 0 0 9px rgba(232,121,249,.5); }
-    100% { color: var(--cyan);   text-shadow: 0 0 9px rgba(34,211,238,.5); }
-  }
-  .lchar {
-    display: inline-block; min-width: .05em; text-align: center; overflow: hidden;
-    transition: width .4s cubic-bezier(.4,0,.2,1), margin .4s cubic-bezier(.4,0,.2,1),
-      opacity .32s ease, transform .32s ease, font-size .4s cubic-bezier(.4,0,.2,1), color .3s ease;
-  }
-  .lchar.lchar-collapse { width: 0 !important; opacity: 0; transform: scale(.3); margin: 0 !important; }
-  .lchar.lchar-anchor-1 { color: var(--cyan); text-shadow: 0 0 10px rgba(34,211,238,.6); }
-  .lchar.lchar-anchor-2 { color: var(--violet); text-shadow: 0 0 10px rgba(129,140,248,.6); }
-  .lchar.lchar-anchor-3 { color: #E879F9; text-shadow: 0 0 10px rgba(232,121,249,.6); }
-  .lchar.lchar-lock { animation: dcharGlitchLock 320ms cubic-bezier(.2,.85,.25,1); }
-  .lchar.lchar-anchor-grown {
-    font-size: 3.6em;
-    overflow: visible;
-  }
-  .lchar.lchar-anchor-1.lchar-anchor-grown {
-    text-shadow: 0 0 3px #fff, 0 0 8px rgba(34,211,238,.95), 0 0 18px rgba(34,211,238,.85), 0 0 34px rgba(34,211,238,.6), 0 0 58px rgba(34,211,238,.35);
-    animation: anchorGrowPunch .65s cubic-bezier(.34,1.56,.64,1) forwards,
-      neonFlicker 1s ease-in-out .65s both,
-      neonPulse 2.6s ease-in-out 1.65s infinite;
-  }
-  .lchar.lchar-anchor-2.lchar-anchor-grown {
-    text-shadow: 0 0 3px #fff, 0 0 8px rgba(129,140,248,.95), 0 0 18px rgba(129,140,248,.85), 0 0 34px rgba(129,140,248,.6), 0 0 58px rgba(129,140,248,.35);
-    animation: anchorGrowPunch .65s cubic-bezier(.34,1.56,.64,1) forwards,
-      neonFlicker 1s ease-in-out .71s both,
-      neonPulse 2.8s ease-in-out 1.71s infinite;
-  }
-  .lchar.lchar-anchor-3.lchar-anchor-grown {
-    text-shadow: 0 0 3px #fff, 0 0 8px rgba(232,121,249,.95), 0 0 18px rgba(232,121,249,.85), 0 0 34px rgba(232,121,249,.6), 0 0 58px rgba(232,121,249,.35);
-    animation: anchorGrowPunch .65s cubic-bezier(.34,1.56,.64,1) forwards,
-      neonFlicker 1s ease-in-out .77s both,
-      neonPulse 2.5s ease-in-out 1.77s infinite;
-  }
-  .lchar.lchar-anchor-1.lchar-anchor-grown.lchar-anchor-out,
-  .lchar.lchar-anchor-2.lchar-anchor-grown.lchar-anchor-out,
-  .lchar.lchar-anchor-3.lchar-anchor-grown.lchar-anchor-out {
-    animation: neonFlickerOut .6s ease-in-out forwards;
-  }
-  @keyframes anchorGrowPunch {
-    0%   { transform: scale(1); }
-    55%  { transform: scale(1.22); }
-    75%  { transform: scale(.92); }
-    100% { transform: scale(1); }
-  }
-  /* Classic neon-tube power-on stutter right after the punch settles,
-     before it holds a steady glow — each dip gets a quick chromatic
-     split, like the sign's transformer is still settling in. */
-  @keyframes neonFlicker {
-    0%   { opacity: 1; filter: none; transform: translateX(0); }
-    6%   { opacity: .35; filter: drop-shadow(2px 0 0 rgba(255,70,90,.75)) drop-shadow(-2px 0 0 rgba(70,220,255,.75)); transform: translateX(-1px); }
-    9%   { opacity: 1; filter: none; transform: translateX(0); }
-    12%  { opacity: .25; filter: drop-shadow(3px 0 0 rgba(255,70,90,.8)) drop-shadow(-3px 0 0 rgba(70,220,255,.8)); transform: translateX(1px); }
-    16%  { opacity: 1; filter: none; transform: translateX(0); }
-    24%  { opacity: 1; filter: none; transform: translateX(0); }
-    27%  { opacity: .5; filter: drop-shadow(2px 0 0 rgba(255,70,90,.7)) drop-shadow(-2px 0 0 rgba(70,220,255,.7)); transform: translateX(-1px); }
-    31%  { opacity: 1; filter: none; transform: translateX(0); }
-    100% { opacity: 1; filter: none; transform: translateX(0); }
-  }
-  /* Power-down: the sign stutters harder and harder, glitching apart
-     chromatically, before finally cutting out. */
-  @keyframes neonFlickerOut {
-    0%   { opacity: 1; filter: none; transform: translateX(0); }
-    12%  { opacity: .25; filter: drop-shadow(2px 0 0 rgba(255,70,90,.8)) drop-shadow(-2px 0 0 rgba(70,220,255,.8)); transform: translateX(1px); }
-    22%  { opacity: 1; filter: none; transform: translateX(0); }
-    38%  { opacity: .15; filter: drop-shadow(3px 0 0 rgba(255,70,90,.85)) drop-shadow(-3px 0 0 rgba(70,220,255,.85)); transform: translateX(-2px); }
-    50%  { opacity: .85; filter: none; transform: translateX(0); }
-    64%  { opacity: .1; filter: drop-shadow(4px 0 0 rgba(255,70,90,.9)) drop-shadow(-4px 0 0 rgba(70,220,255,.9)); transform: translateX(2px); }
-    78%  { opacity: .6; filter: drop-shadow(2px 0 0 rgba(255,70,90,.6)) drop-shadow(-2px 0 0 rgba(70,220,255,.6)); transform: translateX(-1px); }
-    100% { opacity: 0; filter: none; transform: translateX(0); }
-  }
-  /* Slow breathing glow while the glyph holds on screen. */
-  @keyframes neonPulse {
-    0%, 100% { filter: brightness(1); }
-    50%      { filter: brightness(1.22); }
-  }
-  @keyframes dcharGlitchLock {
-    0%   { transform: translateX(0) skewX(0deg); filter: drop-shadow(2px 0 0 rgba(34,211,238,.8)) drop-shadow(-2px 0 0 rgba(232,121,249,.6)); }
-    20%  { transform: translateX(-2px) skewX(-6deg); }
-    40%  { transform: translateX(2px) skewX(4deg);   filter: drop-shadow(1px 0 0 rgba(34,211,238,.6)) drop-shadow(-1px 0 0 rgba(232,121,249,.4)); }
-    60%  { transform: translateX(-1px) skewX(-2deg); }
-    100% { transform: translateX(0) skewX(0deg); filter: none; }
-  }
-  .preloader-boot {
-    display: flex; flex-direction: column; gap: .3rem;
-    margin-bottom: 1.4rem; min-height: 3.4em;
-    font-family: 'JetBrains Mono', 'Courier New', monospace;
-    font-size: .68rem; letter-spacing: .12em; text-transform: uppercase;
-    color: var(--muted); text-align: center;
-  }
-  .pboot-line {
-    opacity: 0; transform: translateY(4px);
-    transition: opacity .35s ease, transform .35s ease;
-    font-variant-ligatures: none;
-  }
-  .pboot-line.pboot-in { opacity: 1; transform: translateY(0); }
-  .pboot-line .pboot-ok {
-    color: var(--amber); text-shadow: 0 0 6px rgba(245,158,11,.7); margin: 0 .35em;
-    opacity: 0; transition: opacity .25s ease, color .3s ease, text-shadow .3s ease;
-  }
-  .pboot-line .pboot-ok.pboot-visible { opacity: 1; }
-  .pboot-line .pboot-ok.pboot-online {
-    color: #34D399; text-shadow: 0 0 6px rgba(52,211,153,.7);
-    animation: pbootFlash .4s ease;
-  }
-  @keyframes pbootFlash {
-    0%   { filter: brightness(1); }
-    35%  { filter: brightness(2.4); }
-    100% { filter: brightness(1); }
-  }
-  .pboot-cursor { display: inline-block; color: var(--cyan); opacity: 0; margin-left: .05em; }
-  .pboot-cursor.pboot-cursor-active { animation: pbootBlink .9s steps(1) infinite; }
-  @keyframes pbootBlink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
-  .preloader-bar-track {
-    width: 200px; height: 2px; border-radius: 2px; overflow: hidden;
-    background: rgba(34,211,238,.14); margin-bottom: 1rem;
-  }
-  .preloader-bar-fill {
-    width: 0%; height: 100%;
-    background: linear-gradient(90deg, var(--cyan), var(--violet), #E879F9);
-    box-shadow: 0 0 8px 1px rgba(34,211,238,.7);
-    transition: width 3.3s cubic-bezier(.4,0,.2,1);
-  }
-  .preloader-label {
-    font-family: 'JetBrains Mono', 'Courier New', monospace;
-    font-size: .72rem; letter-spacing: .22em; text-transform: uppercase;
-    color: var(--cyan); opacity: .85;
-    min-height: 1.2em;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    #site-preloader { transition: opacity .3s ease, visibility .3s; }
-    .preloader-decode-line { display: none; }
-    .preloader-bar-fill { transition: width .3s ease; }
-  }
-
   .hero-sub {
     color: var(--muted); font-size: 1.05rem; max-width: 480px;
     margin: .5rem auto 2.5rem; line-height: 1.65;
   }
   .hero-btns { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+  .hero-continue-btn {
+    position: relative;
+    margin-top: 2.6rem;
+    display: inline-flex; align-items: center; gap: .6rem;
+    padding: .78rem 1.85rem; border-radius: 100px; cursor: pointer;
+    overflow: hidden;
+    border: 1px solid rgba(34,211,238,.2);
+    background: rgba(34,211,238,.04);
+    color: var(--muted);
+    opacity: .4;
+    font-family: inherit; font-size: .85rem; font-weight: 700;
+    letter-spacing: .09em; text-transform: uppercase;
+    transition: transform .2s, color 1.1s ease, border-color 1.1s ease, opacity 1.1s ease;
+  }
+  .hero-continue-btn.engaged {
+    transition: transform .2s;
+    animation: heroContinueText 2.6s ease-in-out infinite;
+  }
+  .hero-continue-btn::before {
+    content: '';
+    position: absolute; inset: 0; border-radius: inherit;
+    background: linear-gradient(135deg, var(--cyan), #67e8f9);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 1.1s ease, box-shadow 1.1s ease;
+  }
+  .hero-continue-btn.engaged::before {
+    transition: none;
+    animation: heroContinueFill 2.6s ease-in-out infinite;
+  }
+  .hero-continue-btn span { position: relative; z-index: 1; }
+  .hero-continue-btn:hover {
+    color: var(--navy); opacity: 1;
+    border-color: var(--cyan); transform: translateY(-2px) scale(1.03);
+    animation-play-state: paused;
+  }
+  .hero-continue-btn:hover::before {
+    opacity: 1; box-shadow: inset 0 0 26px rgba(255,255,255,.4);
+    animation-play-state: paused;
+  }
+  .hero-continue-btn.used { opacity: 0; pointer-events: none; animation: none; }
+  .hero-continue-btn.used::before { animation: none; opacity: 0; }
+  @keyframes heroContinueText {
+    0%, 100% { opacity: .4; color: var(--muted); border-color: rgba(34,211,238,.2); }
+    50%      { opacity: 1;  color: var(--navy);  border-color: rgba(34,211,238,.9); }
+  }
+  @keyframes heroContinueFill {
+    0%, 100% { opacity: 0; box-shadow: inset 0 0 0 rgba(255,255,255,0); }
+    50%      { opacity: 1; box-shadow: inset 0 0 22px rgba(255,255,255,.35); }
+  }
+  .hero-continue-arrow { display: inline-block; animation: heroContinueBounce 1.6s ease-in-out infinite; }
+  @keyframes heroContinueBounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(5px); }
+  }
   .btn-primary {
     padding: .85rem 2rem; border-radius: 100px;
     background: var(--magenta); color: var(--navy);
@@ -744,7 +551,6 @@
     margin: 5rem auto 0;
     padding: 0 1.5rem;
     text-align: center;
-    scroll-snap-align: start;
   }
   .compiler-intro h2 { margin: .4rem 0 .9rem; }
   .compiler-intro .lead { max-width: 600px; margin: 0 auto; }
@@ -857,6 +663,55 @@
     .cc-right { height: 180px; }
   }
 
+  /* ── HERO CIRCUIT VIDEO (plays on scroll, auto-advances on end) ── */
+  /* ── CIRCUIT BRIDGES (in-flow between sections) ── */
+  .circuit-bridge {
+    position: relative;
+    width: 100%;
+    height: 680px;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 10;
+    margin: 0;
+  }
+  /* Hero centrepiece: full-bleed and extra-tall so the strands reveal and
+     the electrons flow over a long, unhurried stretch of scrolling. */
+  #hero-bridge {
+    align-self: stretch;   /* override the hero's align-items:center */
+    width: 100%;
+    height: 165vh;
+    min-height: 1100px;
+    margin-top: 0;          /* no gap — the particle field must read as continuous into the bridge */
+    z-index: 1;            /* below hero text (z-index:2), above particle bg */
+  }
+  @media (max-width: 768px) {
+    #hero-bridge { height: 100vh; min-height: 620px; }
+  }
+  #hero-bridge::before { height: 22%; }   /* soften top fade into hero */
+  #hero-bridge::after  { height: 22%; }
+  .circuit-bridge canvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+  }
+  .circuit-bridge::before,
+  .circuit-bridge::after {
+    content: '';
+    position: absolute;
+    left: 0; right: 0;
+    height: 35%;
+    z-index: 20;
+    pointer-events: none;
+  }
+  .circuit-bridge::before {
+    top: 0;
+    background: linear-gradient(to bottom, var(--navy) 0%, transparent 100%);
+  }
+  .circuit-bridge::after {
+    bottom: 0;
+    background: linear-gradient(to top, var(--navy) 0%, transparent 100%);
+  }
+
   .scroll-hint {
     position: absolute; bottom: 2.5rem; left: 50%; transform: translateX(-50%);
     display: flex; flex-direction: column; align-items: center; gap: .5rem;
@@ -893,32 +748,9 @@
 
   .panel-inner { max-width: 1100px; width: 100%; }
 
-  /* Content inside each panel cascades in a beat after the panel itself
-     pops into view, instead of the label/heading/body/content all
-     appearing as one flat block. */
-  .panel-inner > * {
-    opacity: 0;
-    transform: translateY(18px);
-    transition: opacity .6s cubic-bezier(.22,1,.36,1), transform .6s cubic-bezier(.22,1,.36,1);
-  }
-  .panel.visible .panel-inner > * { opacity: 1; transform: translateY(0); }
-  .panel.visible .panel-inner > *:nth-child(1) { transition-delay: .05s; }
-  .panel.visible .panel-inner > *:nth-child(2) { transition-delay: .16s; }
-  .panel.visible .panel-inner > *:nth-child(3) { transition-delay: .27s; }
-  .panel.visible .panel-inner > *:nth-child(4) { transition-delay: .38s; }
-  .panel.visible .panel-inner > *:nth-child(n+5) { transition-delay: .45s; }
-
   .section-label {
     font-size: .7rem; letter-spacing: .15em; text-transform: uppercase;
-    color: var(--mint); margin-bottom: 1rem;
-    display: inline-flex; align-items: center; gap: .6em;
-  }
-  .section-label::before {
-    content: '';
-    width: 1.5em; height: 2px; flex-shrink: 0;
-    background: currentColor;
-    box-shadow: 0 0 6px currentColor, 0 0 2px currentColor;
-    border-radius: 2px;
+    color: var(--mint); margin-bottom: 1rem; display: block;
   }
   .section-label.amber { color: var(--amber); }
   .section-label.sky   { color: var(--sky); }
@@ -1579,12 +1411,9 @@
   .cf-field label { font-size: .68rem; letter-spacing: .12em; text-transform: uppercase; color: var(--slate); }
   .cf-input, .cf-textarea {
     background: rgba(255,255,255,.03); border: 1px solid var(--card-border); border-radius: .6rem;
-    padding: .7rem .85rem; color: var(--white); font: inherit; font-size: 1rem;
+    padding: .7rem .85rem; color: var(--white); font: inherit; font-size: .9rem;
     transition: border-color .2s, box-shadow .2s;
   }
-  /* iOS Safari auto-zooms on focus for any input under 16px — 1rem keeps
-     the contact form (and guestbook, which shares this class) at the
-     zoom-safe threshold on phones. */
   .cf-input:focus, .cf-textarea:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 0 3px rgba(34,211,238,.12); }
   .cf-textarea { resize: vertical; min-height: 110px; }
   .cf-hp { position: absolute !important; left: -9999px; width: 1px; height: 1px; opacity: 0; }
@@ -1623,9 +1452,8 @@
   .subscribe { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
   .subscribe input[type=email] {
     background: rgba(255,255,255,.03); border: 1px solid var(--card-border); border-radius: 100px;
-    padding: .4rem .9rem; color: var(--white); font: inherit; font-size: 1rem; width: 190px;
+    padding: .45rem .9rem; color: var(--white); font: inherit; font-size: .78rem; width: 190px;
   }
-  /* 1rem, not the old .78rem — under 16px triggers iOS auto-zoom on focus */
   .subscribe input:focus { outline: none; border-color: var(--cyan); }
   .subscribe button {
     padding: .45rem 1rem; border-radius: 100px; border: none; cursor: pointer; font: inherit; font-size: .78rem;
@@ -1654,7 +1482,7 @@
   .gb-empty { color: var(--slate); font-size: .85rem; margin-top: 1rem; }
 
   .ask-fab {
-    position: fixed; bottom: calc(1.4rem + env(safe-area-inset-bottom)); right: calc(1.4rem + env(safe-area-inset-right)); z-index: 120;
+    position: fixed; bottom: 1.4rem; right: 1.4rem; z-index: 120;
     display: inline-flex; align-items: center; gap: .5rem; padding: .7rem 1.15rem; border-radius: 100px;
     border: none; cursor: pointer; font: inherit; font-weight: 700; font-size: .85rem; color: #041018;
     background: linear-gradient(120deg, var(--cyan), var(--blue)); box-shadow: 0 14px 40px -12px rgba(34,211,238,.7);
@@ -1662,7 +1490,7 @@
   }
   .ask-fab:hover { transform: translateY(-2px); }
   .ask-panel {
-    position: fixed; bottom: calc(5.2rem + env(safe-area-inset-bottom)); right: calc(1.4rem + env(safe-area-inset-right)); z-index: 120;
+    position: fixed; bottom: 5.2rem; right: 1.4rem; z-index: 120;
     width: min(370px, calc(100vw - 2.8rem)); height: 460px; max-height: 70vh;
     display: none; flex-direction: column; overflow: hidden; border-radius: 1.1rem;
     background: linear-gradient(165deg, rgba(13,24,42,.98), rgba(6,12,24,.99));
@@ -1687,7 +1515,7 @@
   .ask-chip { font-size: .72rem; padding: .35rem .7rem; border-radius: 100px; border: 1px solid var(--card-border); color: var(--slate); cursor: pointer; background: none; }
   .ask-chip:hover { border-color: var(--cyan); color: var(--cyan); }
   .ask-input-row { display: flex; gap: .5rem; padding: .8rem; border-top: 1px solid var(--card-border); }
-  .ask-input-row input { flex: 1; background: rgba(255,255,255,.03); border: 1px solid var(--card-border); border-radius: 100px; padding: .55rem .9rem; color: var(--white); font: inherit; font-size: 1rem; }
+  .ask-input-row input { flex: 1; background: rgba(255,255,255,.03); border: 1px solid var(--card-border); border-radius: 100px; padding: .55rem .9rem; color: var(--white); font: inherit; font-size: .85rem; }
   .ask-input-row input:focus { outline: none; border-color: var(--cyan); }
   .ask-input-row button { padding: .55rem 1rem; border-radius: 100px; border: none; cursor: pointer; font: inherit; font-weight: 700; color: #041018; background: linear-gradient(120deg, var(--cyan), var(--blue)); }
 
@@ -1931,8 +1759,10 @@
 
   @media (prefers-reduced-motion: reduce) {
     .panel { opacity: 1; transform: none; transition: none; }
-    .panel-inner > * { opacity: 1; transform: none; transition: none; }
     .cursor-glow { display: none; }
+    .hero-continue-btn { animation: none; }
+    .hero-continue-btn::before { animation: none; opacity: 0; }
+    .hero-continue-arrow { animation: none; }
   }
 
   /* ── COMMAND PALETTE ── */
@@ -2459,6 +2289,36 @@
   }
   .telemetry-empty { color: var(--muted); font-size: .82rem; text-align: center; padding: 1rem 0; }
 
+  /* ── SIGNAL RUNNER GAME ── */
+  .game-wrap { position: relative; width: 100%; max-width: 480px; margin: 0 auto; border-radius: .5rem; overflow: hidden; touch-action: none; }
+  #game-canvas { width: 100%; height: auto; display: block; background: #030811; }
+  .game-overlay {
+    position: absolute; inset: 0; z-index: 2;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .8rem;
+    background: rgba(3,8,17,.9); text-align: center; padding: 1.5rem;
+  }
+  .game-overlay[hidden] { display: none; }
+  .game-overlay h3 { font-family: 'Syne', sans-serif; font-size: 1.3rem; color: var(--white); margin: 0; }
+  .game-overlay p { font-size: .82rem; color: var(--muted); max-width: 300px; margin: 0; }
+  .game-score-entry { display: flex; gap: .5rem; margin-top: .3rem; }
+  .game-score-entry[hidden] { display: none; }
+  .game-score-entry input {
+    background: rgba(255,255,255,.05); border: 1px solid var(--card-border); border-radius: .4rem;
+    padding: .5rem .7rem; color: var(--white); font-family: 'JetBrains Mono', monospace; text-transform: uppercase;
+    width: 130px; text-align: center; font-size: .85rem;
+  }
+  .game-score-entry input:focus { outline: none; border-color: var(--cyan); }
+  .game-submit-note { font-size: .74rem; color: var(--cyan); min-height: 1.1em; }
+  .game-leaderboard { list-style: none; display: flex; flex-direction: column; gap: .5rem; margin: 0; padding: 0; }
+  .game-leaderboard li {
+    display: flex; align-items: center; gap: .3rem;
+    padding: .5rem .8rem; border-radius: .4rem; background: rgba(255,255,255,.02);
+    font-family: 'JetBrains Mono', monospace; font-size: .85rem;
+  }
+  .game-leaderboard .glb-rank { color: var(--amber); font-weight: 700; width: 2rem; flex-shrink: 0; }
+  .game-leaderboard .glb-name { flex: 1; color: var(--white); text-align: left; }
+  .game-leaderboard .glb-score { color: var(--cyan); font-weight: 700; }
+
   /* ── EXPLAIN THIS (inline AI explainer) ── */
   .explain-btn {
     display: inline-flex; align-items: center; gap: .4rem;
@@ -2538,253 +2398,6 @@
   //    This is the ONLY line on the whole page you need to edit. ──
   window.__API_BASE = 'https://nicholasgearinger-github-io-portfolio-1.onrender.com';
 </script>
-<script>
-  // ── SITE PRELOADER: boot-log lines flicker in, the logo assembles out of
-  //    a chromatic-aberration glitch with a scan-bar sweep (same visual
-  //    language as the hero's identity-scan reveal), the progress bar fills,
-  //    then the whole overlay dissolves to reveal the site underneath. Runs
-  //    independently of — and slightly ahead of — the hero's own reveal, so
-  //    by the time it clears the hero is already mid-materialization. ──
-  (function sitePreloader() {
-    function init() {
-    const overlay = document.getElementById('site-preloader');
-    if (!overlay) { window.dispatchEvent(new Event('preloaderDone')); return; }
-    document.documentElement.classList.add('preload-lock');
-
-    const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-    function hideOverlay() {
-      overlay.classList.add('preloader-hide');
-      document.documentElement.classList.remove('preload-lock');
-      // Signal the hero (and anything else waiting) that the intro is
-      // actually done, rather than making other scripts guess at a fixed
-      // delay that drifts out of sync whenever this timeline changes.
-      window.__preloaderDone = true;
-      window.dispatchEvent(new Event('preloaderDone'));
-      setTimeout(() => { overlay.style.display = 'none'; }, 750);
-    }
-
-    if (reduceMotion) {
-      // Skip the theatrics entirely — show a brief, static moment then clear.
-      const fill = document.getElementById('preloader-bar-fill');
-      if (fill) fill.style.width = '100%';
-      setTimeout(hideOverlay, 300);
-      return;
-    }
-
-    const boot = document.getElementById('preloader-boot');
-    const fill = document.getElementById('preloader-bar-fill');
-    const label = document.getElementById('preloader-label');
-    const lineWrap = document.getElementById('preloader-decode-line');
-    const NAME = 'Nicholas Gearinger';
-    const nameLetterPool = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz#%$&*+=<>/';
-    const glyphPool = '<>/\\|{}[]#%$&*+=01~^!?';
-    // Three character positions in the name that become "<", "/", ">" —
-    // everything else glitches and collapses away around them.
-    const anchorIndices = [0, 9, NAME.length - 1];
-    const anchorFinals = ['<', '/', '>'];
-    const anchorClasses = ['lchar-anchor-1', 'lchar-anchor-2', 'lchar-anchor-3'];
-
-    // 1. Boot-log lines type in one at a time, terminal-style — each
-    //    label ("POWER CORE" etc.) types out char by char behind a
-    //    blinking cursor, then its status dot appears amber ("checking"),
-    //    the status word ("ONLINE" etc.) appears at once, and the dot
-    //    flips to green ("online") — before the next line starts.
-    const lines = boot ? Array.from(boot.querySelectorAll('.pboot-line')) : [];
-    const LABEL_CHAR_MS = 26;
-    const GAP_LABEL_TO_DOT = 90;
-    const GAP_DOT_TO_STATUS = 130;
-    const GAP_STATUS_TO_ONLINE = 220;
-    const GAP_LINE_TO_LINE = 160;
-
-    function typeInto(el, text, startDelay, charDelay) {
-      for (let i = 0; i < text.length; i++) {
-        setTimeout(() => { el.textContent += text[i]; }, startDelay + i * charDelay);
-      }
-    }
-
-    let cursor = 100; // running schedule offset, ms from boot-log start
-    lines.forEach((line) => {
-      const labelText = line.dataset.label || '';
-      const statusText = line.dataset.status || '';
-      const labelEl = line.querySelector('.pboot-label');
-      const statusEl = line.querySelector('.pboot-status');
-      const dot = line.querySelector('.pboot-ok');
-      const caret = line.querySelector('.pboot-cursor');
-
-      const lineStart = cursor;
-      setTimeout(() => {
-        line.classList.add('pboot-in');
-        if (caret) caret.classList.add('pboot-cursor-active');
-      }, lineStart);
-      if (labelEl) typeInto(labelEl, labelText, lineStart, LABEL_CHAR_MS);
-
-      const labelDone = lineStart + labelText.length * LABEL_CHAR_MS;
-      setTimeout(() => { if (caret) caret.classList.remove('pboot-cursor-active'); }, labelDone);
-
-      const dotVisible = labelDone + GAP_LABEL_TO_DOT;
-      if (dot) setTimeout(() => dot.classList.add('pboot-visible'), dotVisible);
-
-      const statusStart = dotVisible + GAP_DOT_TO_STATUS;
-      if (statusEl) setTimeout(() => { statusEl.textContent = statusText; }, statusStart);
-
-      const dotOnline = statusStart + GAP_STATUS_TO_ONLINE;
-      if (dot) setTimeout(() => dot.classList.add('pboot-online'), dotOnline);
-
-      cursor = dotOnline + GAP_LINE_TO_LINE;
-    });
-    const bootDone = cursor + 250;
-
-    // Rapidly cycles `el` through random glyphs, then locks it to `finalChar`
-    // with a quick glitch flash — a hacker-terminal "decode" effect.
-    function scrambleChar(el, finalChar, duration, startDelay, pool, lockClass, onLock) {
-      setTimeout(() => {
-        const t0 = performance.now();
-        function tick(now) {
-          const elapsed = now - t0;
-          if (elapsed >= duration) {
-            el.textContent = finalChar;
-            if (lockClass) el.classList.add(lockClass);
-            if (onLock) onLock();
-            return;
-          }
-          const progress = elapsed / duration;
-          el.textContent = (progress > 0.75 && Math.random() < 0.35)
-            ? finalChar
-            : pool[Math.floor(Math.random() * pool.length)];
-          requestAnimationFrame(tick);
-        }
-        requestAnimationFrame(tick);
-      }, startDelay);
-    }
-
-    // 2. Decode "Nicholas Gearinger" letter by letter, left to right, all
-    //    within one line — this is the same element the glyph collapse
-    //    below operates on.
-    function runNameDecode(onDone) {
-      if (!lineWrap) { onDone(); return; }
-      const chars = NAME.split('');
-      const spans = chars.map((ch) => {
-        const span = document.createElement('span');
-        span.className = 'lchar';
-        span.textContent = ch === ' ' ? '\u00A0' : ch;
-        lineWrap.appendChild(span);
-        return span;
-      });
-      const stagger = 42;
-      const duration = 300;
-      let locked = 0;
-      spans.forEach((span, i) => {
-        if (chars[i] === ' ') { locked++; return; }
-        scrambleChar(span, chars[i], duration, i * stagger, nameLetterPool, 'lchar-lock', () => {
-          locked++;
-          if (locked === spans.length) setTimeout(() => onDone(spans), 550);
-        });
-      });
-    }
-
-    // 3. Collapse the name down to "</>" in place: the three anchor
-    //    characters scramble-lock into cyan/violet/magenta glyphs while
-    //    every other character glitches briefly then shrinks away, so the
-    //    line itself contracts from the full name to just the mark, then
-    //    the anchors grow slightly to settle as the final glyph.
-    function runGlyphCollapse(spans, onDone) {
-      const total = spans.length;
-      let settled = 0;
-      function checkDone() { settled++; if (settled === total) setTimeout(onDone, 320); }
-      spans.forEach((span, i) => {
-        const anchorPos = anchorIndices.indexOf(i);
-        if (anchorPos !== -1) {
-          scrambleChar(span, anchorFinals[anchorPos], 380, anchorPos * 110, glyphPool, 'lchar-lock', () => {
-            span.classList.add(anchorClasses[anchorPos]);
-            checkDone();
-          });
-        } else {
-          // Brief scramble burst for glitch flavor, then collapse away.
-          const burst = 160 + Math.random() * 140;
-          scrambleChar(span, span.textContent, burst, Math.random() * 180, glyphPool, null, () => {
-            span.classList.add('lchar-collapse');
-            checkDone();
-          });
-        }
-      });
-    }
-
-    function settleGlyph(spans, onDone) {
-      const anchors = anchorIndices.map((i) => spans[i]);
-      // Hold briefly at normal size once collapse has fully resolved, then
-      // grow — so the grow reads as a distinct beat after decoding is done,
-      // not part of the collapse itself.
-      setTimeout(() => {
-        anchors.forEach((el) => el.classList.add('lchar-anchor-grown'));
-        setTimeout(onDone, 700);
-      }, 280);
-    }
-
-    // Kick off the name-decode/glyph sequence right alongside the boot log
-    // (same start offset) instead of waiting for the boot log to finish —
-    // they now play concurrently rather than back-to-back.
-    const glyphStart = 100;
-    setTimeout(() => {
-      if (label) label.textContent = 'IDENTIFYING';
-      if (fill) fill.style.width = '100%';
-      runNameDecode((spans) => {
-        if (label) label.textContent = 'DECODING';
-        runGlyphCollapse(spans, () => {
-          settleGlyph(spans, () => {
-            if (label) label.textContent = 'READY';
-            // Let it hold and breathe a moment, then power the sign down
-            // before the overlay itself starts to dissolve.
-            setTimeout(() => {
-              if (label) label.textContent = '';
-              anchorIndices.forEach((i) => { if (spans[i]) spans[i].classList.add('lchar-anchor-out'); });
-            }, 850);
-          });
-        });
-      });
-    }, glyphStart);
-
-    // Total active runtime = whichever sequence finishes later — the
-    // terminal-typed boot log (bootDone, which varies with the label/status
-    // text) or the name-decode/glyph-collapse/hold/power-down sequence
-    // (glyphStart + a fixed 5310ms tail, tuned for that sequence's own
-    // length). Previously these ran back-to-back so it was just a sum;
-    // now that they run in parallel, the overlay should wait for the
-    // longer of the two rather than adding them together.
-    const TOTAL_MS = Math.max(bootDone, glyphStart + 5310);
-
-    // 5. Hold briefly on "READY", then dissolve the overlay.
-    setTimeout(hideOverlay, TOTAL_MS);
-
-    // Safety net: never let the preloader block the site — force it away
-    // once everything has actually finished loading, if that's later.
-    window.addEventListener('load', () => {
-      setTimeout(() => { if (!overlay.classList.contains('preloader-hide')) hideOverlay(); }, TOTAL_MS);
-    });
-    }
-
-    // The overlay markup sits later in the DOM than this script tag, so wait
-    // for the parser to reach it (or just run now if it already has).
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
-    else init();
-  })();
-</script>
-
-<div id="site-preloader" role="status" aria-live="polite">
-  <span class="sr-only">Loading site</span>
-  <div class="preloader-inner" aria-hidden="true">
-    <div class="preloader-logo-wrap">
-      <div class="preloader-decode-line" id="preloader-decode-line"></div>
-    </div>
-    <div class="preloader-boot" id="preloader-boot">
-      <div class="pboot-line" data-label="POWER CORE" data-status="ONLINE"><span class="pboot-label"></span> <span class="pboot-ok">●</span> <span class="pboot-status"></span><span class="pboot-cursor">▍</span></div>
-      <div class="pboot-line" data-label="RENDER PIPELINE" data-status="LINKED"><span class="pboot-label"></span> <span class="pboot-ok">●</span> <span class="pboot-status"></span><span class="pboot-cursor">▍</span></div>
-      <div class="pboot-line" data-label="ASSETS" data-status="LOADED"><span class="pboot-label"></span> <span class="pboot-ok">●</span> <span class="pboot-status"></span><span class="pboot-cursor">▍</span></div>
-    </div>
-    <div class="preloader-bar-track"><div class="preloader-bar-fill" id="preloader-bar-fill"></div></div>
-    <div class="preloader-label" id="preloader-label">INITIALIZING</div>
-  </div>
-</div>
 
 <a href="#main-content" class="skip-link">Skip to main content</a>
 
@@ -2792,7 +2405,7 @@
 <div id="custom-cursor" aria-hidden="true"></div>
 <!-- NAV -->
 <nav aria-label="Primary">
-  <div class="nav-logo"><img src="assets/favicon.svg" alt="Nicholas Gearinger logo" class="nav-logo-img"></div>
+  <div class="nav-logo">AR<span>.</span></div>
   <button class="nav-toggle" id="nav-toggle" aria-label="Toggle navigation menu" aria-expanded="false" aria-controls="nav-menu">
     <span></span><span></span><span></span>
   </button>
@@ -2802,6 +2415,7 @@
     <li><a href="#build">In Motion</a></li>
     <li><a href="#webcam-ai">Face AI</a></li>
     <li><a href="#models">3D Work</a></li>
+    <li><a href="#game">Play</a></li>
     <li><a href="#photography">Photography</a></li>
     <li><a href="#telemetry">Telemetry</a></li>
     <li><a href="#process">Process</a></li>
@@ -2814,7 +2428,12 @@
 <section id="hero">
   <canvas id="particle-canvas"></canvas>
   <div class="hero-content">
-    <div class="hero-eyebrow">Available for work · 2026</div>
+    <div class="hero-boot-log" id="hero-boot-log" aria-hidden="true">
+      <div class="boot-line">POWER CORE <span class="boot-ok">●</span> ONLINE</div>
+      <div class="boot-line">DIAGNOSTICS <span class="boot-ok">●</span> NOMINAL</div>
+      <div class="boot-line">HUD <span class="boot-ok">●</span> LINKED</div>
+    </div>
+    <div class="hero-eyebrow">Available for work · 2025</div>
     <div class="hero-title-row">
       <div class="hero-prompt-line" id="hero-prompt-line"><span class="hero-holo" id="hero-prompt-text">Scanning Identity</span></div>
       <h1>
@@ -2829,7 +2448,14 @@
       <a href="#models" class="btn-primary">View My Work</a>
       <a href="#contact" class="btn-ghost">Get In Touch</a>
     </div>
+    <button type="button" class="hero-continue-btn" id="hero-continue-btn">
+      <span>Continue to Portfolio</span>
+      <span class="hero-continue-arrow" aria-hidden="true">↓</span>
+    </button>
   </div>
+
+  <!-- CIRCUIT BRIDGE — hero centrepiece: strands reveal & electrons flow when "Continue to Portfolio" is clicked -->
+  <div class="circuit-bridge" id="hero-bridge" data-bridge="hero"></div>
 
 </section>
 
@@ -3528,6 +3154,66 @@
 </div>
 
 
+<!-- SIGNAL RUNNER GAME -->
+<section id="game" class="panel">
+  <div class="panel-inner">
+    <span class="section-label">Try It</span>
+    <h2>Dodge the noise,<br>catch the signal</h2>
+    <p class="lead" style="margin:0 auto 2.2rem;">A small arcade game built from scratch — arrow keys or drag to move, dodge the red corrupted packets, catch the cyan signal for points. Gets faster the longer you survive.</p>
+    <div class="algo-card">
+      <div class="cc-titlebar">
+        <div class="cc-dots">
+          <span class="cc-dot" style="background:#FF5F57"></span>
+          <span class="cc-dot" style="background:#FFBD2E"></span>
+          <span class="cc-dot" style="background:#28C840"></span>
+        </div>
+        <span class="cc-filename">signal_runner.js</span>
+        <div class="cc-status-pill" id="game-pill">
+          <span class="cc-pill-dot"></span><span id="game-pill-text">READY</span>
+        </div>
+      </div>
+      <div class="algo-body">
+        <div class="game-wrap" id="game-wrap">
+          <canvas id="game-canvas" width="480" height="360" aria-label="Signal Runner arcade game — dodge red obstacles, catch cyan signals"></canvas>
+          <div class="game-overlay" id="game-overlay">
+            <h3 id="game-overlay-title">Signal Runner</h3>
+            <p id="game-overlay-sub">Arrow keys, A/D, or drag to move. Dodge red, catch cyan.</p>
+            <button type="button" class="btn-primary" id="game-start-btn">▶ Play</button>
+            <div class="game-score-entry" id="game-score-entry" hidden>
+              <input type="text" id="game-name-input" maxlength="12" placeholder="YOUR NAME">
+              <button type="button" class="btn-ghost" id="game-submit-btn">Submit Score</button>
+            </div>
+            <p class="game-submit-note" id="game-submit-note"></p>
+          </div>
+        </div>
+      </div>
+      <div class="algo-footer">
+        <div class="algo-stat" id="game-stat">score: <strong>0</strong></div>
+        <div class="algo-stat" id="game-best-stat">best: <strong>0</strong></div>
+      </div>
+    </div>
+
+    <div class="algo-card js-api-only" id="leaderboard-card" style="display:none; margin-top:1.5rem;">
+      <div class="cc-titlebar">
+        <div class="cc-dots">
+          <span class="cc-dot" style="background:#FF5F57"></span>
+          <span class="cc-dot" style="background:#FFBD2E"></span>
+          <span class="cc-dot" style="background:#28C840"></span>
+        </div>
+        <span class="cc-filename">leaderboard.json</span>
+      </div>
+      <div class="algo-body">
+        <h4 class="telemetry-heading">Top Signals</h4>
+        <ol class="game-leaderboard" id="game-leaderboard-list">
+          <li class="telemetry-empty">No scores yet — be the first.</li>
+        </ol>
+      </div>
+    </div>
+    <p class="algo-hint">Built with plain Canvas 2D — no game engine, just a requestAnimationFrame loop, AABB/circle collision, and difficulty scaling over time. Scores are real and saved to a live backend — honor-system, like most browser games without a full server-authoritative architecture behind them.</p>
+  </div>
+</section>
+
+
 <!-- PHOTOGRAPHY -->
 <section id="photography" class="panel">
   <div class="panel-inner">
@@ -3710,7 +3396,9 @@
       </div>
       <div class="social-row">
         <a href="https://www.linkedin.com/in/nicholas-gearinger-070bba13b/" class="social-link" target="_blank" rel="noopener">LinkedIn</a>
-        <a href="https://github.com/nicholasgearinger-code" class="social-link" target="_blank" rel="noopener">GitHub</a>
+        <a href="#" class="social-link">GitHub</a>
+        <a href="#" class="social-link">Dribbble</a>
+        <a href="#" class="social-link">Read.cv</a>
       </div>
     </div>
   </div>
@@ -3857,7 +3545,9 @@ let gravityMode = false; // toggle: repel vs attract
 const HUES = [225, 210, 200, 195, 185, 248, 220, 205];
 
 function resize() {
-  // Contained to the hero title/subtitle block only.
+  // Contained to the hero title/subtitle block only — no longer spans into
+  // the circuit bridge, so the bridge reads as its own standalone piece
+  // against the plain page background instead of showing nodes through it.
   const heroContentEl = document.querySelector('.hero-content');
   const targetH = heroContentEl ? heroContentEl.offsetHeight + 80 : window.innerHeight;
   W = canvas.width  = window.innerWidth;
@@ -4017,8 +3707,8 @@ class Particle {
 }
 
 function initParticles() {
-  // ~1 node per 3500px² — cap raised since the field spans the full
-  // hero content height, not just the top screen. Connection
+  // ~1 node per 3500px² — cap raised since the field now spans the full
+  // hero + circuit-bridge height, not just the top screen. Connection
   // lines between nearby particles are checked pairwise (O(n²)), so on
   // narrow/coarse-pointer (mobile) devices the count is trimmed harder —
   // that quadratic cost is the actual performance risk, not the particles
@@ -4112,7 +3802,8 @@ function animate() {
   requestAnimationFrame(animate);
   // Skip heavy drawing when the node field is scrolled away or tab hidden
   if (!__heroVisible() || !window.__tabVisible) return;
-  // Fade the whole field out as you scroll past the hero title block.
+  // Fade the whole field out as you scroll past the hero title block —
+  // it's contained to that area now, not the circuit bridge below.
   const sf = 1 - window.scrollY / (H * 0.9);
   canvas.style.opacity = Math.max(0, Math.min(1, sf)).toFixed(3);
   frameT++;
@@ -4170,7 +3861,7 @@ try {
     try { resize(); initParticles(); } catch (err) { console.error('[particles] resize failed:', err); }
   }, 160));
   // Web fonts loading can reflow hero-content's height after first paint —
-  // re-measure once they're ready so the canvas still spans it correctly.
+  // re-measure once they're ready so the canvas still spans the full bridge.
   if (document.fonts && document.fonts.ready) {
     document.fonts.ready.then(() => {
       try { resize(); initParticles(); } catch (err) { console.error('[particles] font-ready resize failed:', err); }
@@ -5030,6 +4721,745 @@ panels.forEach(p => observer.observe(p));
 
 })();
 </script>
+<script>
+/* ══════════════════════════════════════════════════════
+   FIBER BRIDGE ANIMATION
+   Flowing fiber-optic lines that converge to a central
+   vertical spine then fan out in sweeping arcs —
+   matching the reference image aesthetic.
+   ══════════════════════════════════════════════════════ */
+(function () {
+
+  /* ── Seeded PRNG ── */
+  function makeRng(seed) {
+    let s = seed >>> 0;
+    return function(a, b) {
+      s = (s * 1664525 + 1013904223) >>> 0;
+      const r = s / 0xffffffff;
+      return a === undefined ? r : a + r * (b - a);
+    };
+  }
+
+
+
+  /* ═══════════════════════════════════════════════════════════════
+     CIRCUIT BRIDGE  —  Reference: fiber streams converging from
+     a bright vanishing point, fanning wide at the bottom.
+     Each of 6 bridges is a unique variation. Scroll drives zoom.
+     ═══════════════════════════════════════════════════════════════ */
+
+  /* ── Seeded RNG ── */
+  function mkRng(seed) {
+    let s = seed >>> 0;
+    return (lo, hi) => {
+      s = (Math.imul(1664525, s) + 1013904223) >>> 0;
+      const r = s / 4294967295;
+      return lo === undefined ? r : lo + r * (hi - lo);
+    };
+  }
+
+  /* ── Catmull-Rom for smooth fiber curves ── */
+  function catRom(pts, segs) {
+    const out = [];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[Math.max(0, i-1)], p1 = pts[i];
+      const p2 = pts[i+1], p3 = pts[Math.min(pts.length-1, i+2)];
+      for (let t = 0; t < segs; t++) {
+        const u = t/segs, u2=u*u, u3=u2*u;
+        out.push({
+          x: 0.5*((2*p1.x)+(-p0.x+p2.x)*u+(2*p0.x-5*p1.x+4*p2.x-p3.x)*u2+(-p0.x+3*p1.x-3*p2.x+p3.x)*u3),
+          y: 0.5*((2*p1.y)+(-p0.y+p2.y)*u+(2*p0.y-5*p1.y+4*p2.y-p3.y)*u2+(-p0.y+3*p1.y-3*p2.y+p3.y)*u3),
+        });
+      }
+    }
+    out.push(pts[pts.length-1]);
+    return out;
+  }
+
+  function arcLen(pts) {
+    let l=0;
+    for(let i=1;i<pts.length;i++){const dx=pts[i].x-pts[i-1].x,dy=pts[i].y-pts[i-1].y;l+=Math.hypot(dx,dy);}
+    return l;
+  }
+
+  function ptAtDist(pts, dist) {
+    let rem = dist;
+    for(let i=1;i<pts.length;i++){
+      const dx=pts[i].x-pts[i-1].x,dy=pts[i].y-pts[i-1].y,len=Math.hypot(dx,dy);
+      if(rem<=len||i===pts.length-1){const f=Math.min(1,rem/(len||1));return{x:pts[i-1].x+dx*f,y:pts[i-1].y+dy*f};}
+      rem-=len;
+    }
+    return pts[pts.length-1];
+  }
+
+  /* ══════════════════════════════════════════════════════════════
+     6 BRIDGE CONFIGS — each variant tweaks the geometry, colors
+     spread, brightness, and particle style so no two are alike.
+  ══════════════════════════════════════════════════════════════ */
+
+  // Short packet/hex-style fragments cycled near the vanish point —
+  // reads like a terminal quietly echoing traffic passing through.
+  const HUD_PHRASES = [
+    'SYN', 'ACK', 'SYN-ACK', '0x4F2A91', '0xFF00A3', '0x1C7E',
+    'PACKET_OK', 'TLS 1.3', 'NEURAL://sync', 'LATENCY 4ms', '200 OK',
+  ];
+
+  const BRIDGE_CONFIGS = [
+    /* 0: Classic fan — mirror of reference image, pure cyan */
+    { count:55, spreadMul:1.0, entrySpread:0.12, coreHue:185, wideHue:195,
+      particleStyle:'dot', particleDensity:1.0, glowScale:1.0,
+      vanishY:0.04, fanBottom:1.05, tiltBias:0, dualColor:false },
+
+    /* 1: Tight spine → wide explosion, hints of violet */
+    { count:48, spreadMul:1.3, entrySpread:0.06, coreHue:220, wideHue:260,
+      particleStyle:'dash', particleDensity:0.8, glowScale:1.2,
+      vanishY:0.06, fanBottom:1.1, tiltBias:0, dualColor:true },
+
+    /* 2: Asymmetric left-biased sweep, electric blue */
+    { count:50, spreadMul:0.9, entrySpread:0.1, coreHue:200, wideHue:210,
+      particleStyle:'ring', particleDensity:1.1, glowScale:0.9,
+      vanishY:0.05, fanBottom:1.0, tiltBias:-0.18, dualColor:false },
+
+    /* 3: Dense, almost parallel then explosive fan, warm cyan-white */
+    { count:65, spreadMul:1.5, entrySpread:0.04, coreHue:175, wideHue:190,
+      particleStyle:'dot', particleDensity:1.4, glowScale:1.4,
+      vanishY:0.02, fanBottom:1.15, tiltBias:0, dualColor:false },
+
+    /* 4: Right-biased sweep, indigo accent */
+    { count:45, spreadMul:1.0, entrySpread:0.1, coreHue:210, wideHue:240,
+      particleStyle:'dash', particleDensity:0.9, glowScale:1.1,
+      vanishY:0.07, fanBottom:1.0, tiltBias:0.22, dualColor:true },
+
+    /* 5: Widest fan, bi-directional from top two points, aurora feel */
+    { count:60, spreadMul:1.2, entrySpread:0.16, coreHue:180, wideHue:200,
+      particleStyle:'ring', particleDensity:1.2, glowScale:1.3,
+      vanishY:0.03, fanBottom:1.12, tiltBias:0, dualColor:true },
+  ];
+
+  /* ══════════════════════════════════════════════════════════════
+     FIBER BUILDER — generates the lines for one bridge
+  ══════════════════════════════════════════════════════════════ */
+  /* ══════════════════════════════════════════════════════════════
+     CIRCUIT-TRACE BACKGROUND — static PCB-style right-angle traces,
+     pre-rendered once to an offscreen canvas (regenerated on resize)
+     rather than redrawn every frame, since nothing about it animates.
+  ══════════════════════════════════════════════════════════════ */
+  function buildTraces(W, H, seed) {
+    const rng = mkRng(seed);
+    const canvas = document.createElement('canvas');
+    canvas.width = W; canvas.height = H;
+    const tctx = canvas.getContext('2d');
+    const grid = 30;
+    const count = Math.round((W * H) / 24000);
+    tctx.lineWidth = 1.3;
+    const paths = [];
+    for (let i = 0; i < count; i++) {
+      let x = Math.round((rng() * W) / grid) * grid;
+      let y = Math.round((rng() * H) / grid) * grid;
+      const pts = [{ x, y }];
+      const segments = 2 + Math.floor(rng() * 3);
+      tctx.strokeStyle = `hsla(195,75%,72%,${0.16 + rng() * 0.16})`;
+      tctx.beginPath();
+      tctx.moveTo(x, y);
+      for (let s = 0; s < segments; s++) {
+        const len = (1 + Math.floor(rng() * 3)) * grid;
+        if (rng() < 0.5) x += (rng() < 0.5 ? -1 : 1) * len;
+        else y += (rng() < 0.5 ? -1 : 1) * len;
+        tctx.lineTo(x, y);
+        pts.push({ x, y });
+      }
+      tctx.stroke();
+      // A small glowing via/junction dot at the trace's end point.
+      tctx.beginPath();
+      tctx.arc(x, y, 2.6, 0, Math.PI * 2);
+      tctx.fillStyle = `hsla(195,85%,80%,${0.26 + rng() * 0.18})`;
+      tctx.shadowColor = 'hsla(195,90%,75%,0.8)';
+      tctx.shadowBlur = 5;
+      tctx.fill();
+      tctx.shadowBlur = 0;
+
+      // A minority of traces carry an animated traveling signal pulse —
+      // storing total length up front avoids recomputing it every frame.
+      if (rng() < 0.3) {
+        let total = 0;
+        for (let p = 1; p < pts.length; p++) total += Math.hypot(pts[p].x - pts[p-1].x, pts[p].y - pts[p-1].y);
+        paths.push({ pts, len: total, t: rng() * total, speed: total * (0.35 + rng() * 0.35), phase: rng() * Math.PI * 2 });
+      }
+    }
+    return { canvas, paths };
+  }
+
+  function buildFibers(W, H, cfg, seed) {
+    const rng = mkRng(seed);
+    const fibers = [];
+
+    const vanishX = W * (0.5 + cfg.tiltBias);
+    const vanishY = H * cfg.vanishY;
+
+    for (let i = 0; i < cfg.count; i++) {
+      // Top entry: clustered near vanish point
+      const entryX = vanishX + (rng() - 0.5) * W * cfg.entrySpread;
+      const entryY = vanishY + rng() * H * 0.06;
+
+      // Bottom exit: spread wide across canvas (and slightly off-canvas)
+      const fanAngle = (i / cfg.count) * Math.PI * cfg.spreadMul - (Math.PI * cfg.spreadMul * 0.5);
+      const fanRadius = W * (0.55 + rng() * 0.25);
+      const exitX = W * 0.5 + cfg.tiltBias * W * 0.4 + Math.sin(fanAngle) * fanRadius + (rng()-0.5)*W*0.08;
+      const exitY = H * cfg.fanBottom + rng() * H * 0.08;
+
+      // Two interior control points create the characteristic S-curve drape
+      const midY1 = H * rng(0.25, 0.45);
+      const midX1 = entryX * rng(0.7, 1.0) + exitX * rng(0.0, 0.3);
+      const midY2 = H * rng(0.55, 0.75);
+      const midX2 = entryX * rng(0.1, 0.35) + exitX * rng(0.5, 0.85);
+
+      const ctrlPts = [
+        { x: entryX, y: entryY },
+        { x: midX1,  y: midY1  },
+        { x: midX2,  y: midY2  },
+        { x: exitX,  y: exitY  },
+      ];
+
+      const pts = catRom(ctrlPts, 48);
+      const len = arcLen(pts);
+      // Pre-build an immutable Path2D so the render loop can re-stroke it
+      // cheaply under the zoom transform (no per-frame moveTo/lineTo).
+      const path = new Path2D();
+      path.moveTo(pts[0].x, pts[0].y);
+      for (let pi = 1; pi < pts.length; pi++) path.lineTo(pts[pi].x, pts[pi].y);
+
+      // Visual weight: fibers near the centre vanish point are brighter
+      const centrality = 1 - Math.abs((exitX - W*0.5) / (W*0.55));
+      const brightness = 0.4 + centrality * 0.6 + rng() * 0.1;
+      const lineW = 0.5 + centrality * 1.6 + rng() * 0.6;
+      // Hue shifts from core to edge
+      const hue = cfg.coreHue + (1 - centrality) * (cfg.wideHue - cfg.coreHue) + (rng()-0.5)*8;
+      const isBright = brightness > 0.75;
+
+      // Particles riding the fiber
+      const pCount = Math.round((2 + rng()*4) * cfg.particleDensity);
+      const particles = Array.from({ length: pCount }, () => ({
+        t:     rng() * len,
+        speed: len * (0.08 + rng() * 0.14),
+        r:     0.8 + rng() * (isBright ? 3.5 : 1.8),
+        phase: rng() * Math.PI * 2,
+      }));
+
+      // Data-glyph riders — literal 0/1/hex/code-symbol characters
+      // flowing along most strands, alongside (not replacing) the glow
+      // particles. Weighted toward bold, legible symbols ({ } [ ] < > etc.)
+      // over thin punctuation (., _, ;, ~) that disappears at this size.
+      const GLYPH_CHARS = '01{}[]<>/#@%&*+=|\\ABCDEF';
+      const glyphCount = rng() < 0.7 ? (rng() < 0.3 ? 2 : 1) : 0;
+      const glyphs = Array.from({ length: glyphCount }, () => ({
+        t: rng() * len,
+        speed: len * (0.05 + rng() * 0.07),
+        char: GLYPH_CHARS[Math.floor(rng() * GLYPH_CHARS.length)],
+        phase: rng() * Math.PI * 2,
+      }));
+
+      // Draw offset for the "zoom from vanish" effect — fibers closer to
+      // vanish start at a higher t-offset and draw shorter at low zoom
+      const vanishProximity = 1 - Math.min(1, Math.hypot(entryX - vanishX, entryY - vanishY) / (W*0.15));
+
+      // Reveal cascade order: central/bright strands draw in first, edges last
+      const revealOffset = (1 - centrality) * 0.7 + rng() * 0.3;
+
+      fibers.push({ pts, path, len, brightness, lineW, hue, isBright, particles, glyphs,
+                    vanishProximity, centrality, revealOffset, _reveal: 0, _revLen: 0 });
+    }
+
+    // Sort dim-to-bright so bright fibers paint on top
+    fibers.sort((a, b) => a.brightness - b.brightness);
+    return fibers;
+  }
+
+  /* ── Cached glow-dot sprites (avoid per-particle radial gradients) ── */
+  const __dotSprites = new Map();
+  function dotSprite(hue) {
+    const key = Math.round(hue / 8) * 8;
+    let s = __dotSprites.get(key);
+    if (!s) {
+      const size = 64;
+      s = document.createElement('canvas');
+      s.width = s.height = size;
+      const g = s.getContext('2d');
+      const grad = g.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
+      grad.addColorStop(0,   `hsla(${key},100%,95%,0.95)`);
+      grad.addColorStop(0.3, `hsla(${key},90%,72%,0.35)`);
+      grad.addColorStop(1,   'transparent');
+      g.fillStyle = grad; g.fillRect(0, 0, size, size);
+      __dotSprites.set(key, s);
+    }
+    return s;
+  }
+
+  /* ══════════════════════════════════════════════════════════════
+     DRAW ONE BRIDGE FRAME
+     scroll 0..1 drives the zoom (fibres appear to stream out of
+     the vanish point as you scroll into the bridge).
+  ══════════════════════════════════════════════════════════════ */
+  function drawBridge(ctx, W, H, fibers, cfg, scroll, frame, dt, inst, t) {
+    ctx.clearRect(0, 0, W, H);
+
+    /* No independent background wash here — the interactive particle
+       canvas behind the bridge (now spanning the full hero height) is the
+       single shared backdrop for both animations. Painting a second
+       background layer here, even at reduced alpha, created a visible
+       seam at the bridge's own boundary. The fiber streams, bloom, and
+       electrons below draw directly onto a transparent surface instead. */
+
+    /* ── Static PCB circuit-trace texture, faded in with the reveal ── */
+    if (inst && inst.tracesCanvas) {
+      const prevGA = ctx.globalAlpha;
+      ctx.globalAlpha = prevGA * Math.min(1, scroll / 0.5);
+      ctx.drawImage(inst.tracesCanvas, 0, 0);
+      ctx.globalAlpha = prevGA;
+    }
+
+    /* ── Traveling signal pulses along a subset of the circuit traces —
+       small glowing dots moving through the rigid PCB layer, same idea
+       as the electrons riding the organic fiber strands above it. ── */
+    if (inst && inst.tracePaths && scroll > 0.05) {
+      const traceFade = Math.min(1, scroll / 0.5);
+      inst.tracePaths.forEach((tp) => {
+        tp.t = (tp.t + tp.speed * dt) % tp.len;
+        const pos = ptAtDist(tp.pts, tp.t);
+        const pulse = 0.7 + 0.3 * Math.sin(frame * 0.06 + tp.phase);
+        const alpha = 0.55 * pulse * traceFade;
+        const gR = 5 * pulse;
+        const prevGA = ctx.globalAlpha;
+        ctx.globalAlpha = prevGA * alpha;
+        ctx.drawImage(dotSprite(195), pos.x - gR, pos.y - gR, gR * 2, gR * 2);
+        ctx.globalAlpha = prevGA;
+        ctx.beginPath(); ctx.arc(pos.x, pos.y, 1.3, 0, Math.PI * 2);
+        ctx.fillStyle = `hsla(195,30%,100%,${alpha})`; ctx.fill();
+      });
+    }
+
+    /* ── Bright vanish-point bloom ── */
+    const vanishX = W * (0.5 + cfg.tiltBias);
+    const vanishY = H * cfg.vanishY;
+    const bloomR  = W * (0.18 + scroll * 0.12);
+    const bloom   = ctx.createRadialGradient(vanishX, vanishY, 0, vanishX, vanishY, bloomR);
+    // Baseline alpha lowered from 0.28/0.14 to near-zero — the bloom used to
+    // appear at nearly full brightness immediately (even at scroll=0), which
+    // created a bright halo sitting right at the seam with the particle
+    // field above. Now it fades in as you scroll, matching how the strands
+    // themselves grow in, instead of popping in already-lit.
+    bloom.addColorStop(0,   `hsla(${cfg.coreHue},100%,90%,${0.04 + scroll*0.34})`);
+    bloom.addColorStop(0.3, `hsla(${cfg.coreHue},90%,60%,${0.02 + scroll*0.19})`);
+    bloom.addColorStop(1,   'transparent');
+    ctx.fillStyle = bloom;
+    ctx.fillRect(vanishX - bloomR, vanishY - bloomR, bloomR*2, bloomR*2);
+
+    /* ── Zoom: scroll 0→1 maps scale 1.65→1.0 (stronger) with ease-out.
+       As you scroll, the scene zooms OUT from the vanish bloom, so the
+       fibers appear to stream down and the canvas "extends" further. ── */
+    const zoomEased = 1 - Math.pow(1 - scroll, 2.2);
+    const zoomScale = 1.65 - 0.65 * zoomEased;
+    const zoomAlpha = Math.min(1, scroll / 0.4);
+    // Downward drift: pushes the whole field down a touch as you scroll in,
+    // reinforcing the feeling that the circuits flow toward you and extend.
+    const flowY = (1 - zoomEased) * H * 0.12;
+
+    /* ── Draw fibers ── */
+    ctx.save();
+    // Scale from vanish point so lines appear to stream outward as you scroll
+    ctx.translate(vanishX, vanishY + flowY);
+    ctx.scale(zoomScale, zoomScale);
+    ctx.translate(-vanishX, -vanishY);
+    ctx.globalAlpha = zoomAlpha;
+
+    ctx.shadowBlur = 0;
+    ctx.lineCap = 'round';
+    const revealFront = [];  // bright "electron" sparks at each strand's growing tip
+    fibers.forEach(fiber => {
+      const { path, pts, len, brightness, lineW, hue, isBright, revealOffset } = fiber;
+
+      // ── Progressive reveal: each strand grows out from the vanish point as
+      //    you scroll. revealOffset staggers them into a cascade. Starts
+      //    growing immediately at scroll=0 (no flat delay) so there's no
+      //    empty gap between the particle field above and the first visible
+      //    strands — the two animations should read as continuous. ──
+      const reveal = Math.max(0, Math.min(1, (scroll - revealOffset * 0.25) / 0.5));
+      fiber._reveal = reveal;
+      fiber._revLen = len * reveal;
+      if (reveal <= 0) return;
+
+      const revLen = fiber._revLen;
+      const dashed = reveal < 0.999;
+      // Dash trick: draw only the first `revLen` of the path, hide the rest
+      if (dashed) ctx.setLineDash([revLen, len]); else ctx.setLineDash([]);
+
+      // Layer 1 — widest outer glow
+      ctx.strokeStyle = `hsla(${hue},90%,65%,${0.05 * brightness})`;
+      ctx.lineWidth   = lineW * 18;
+      ctx.stroke(path);
+
+      // Layer 2 — mid glow
+      ctx.strokeStyle = `hsla(${hue},85%,72%,${0.14 * brightness})`;
+      ctx.lineWidth   = lineW * 7;
+      ctx.stroke(path);
+
+      // Layer 3 — inner halo
+      ctx.strokeStyle = `hsla(${hue},80%,82%,${0.35 * brightness})`;
+      ctx.lineWidth   = lineW * 2.8;
+      ctx.stroke(path);
+
+      // Layer 4 — crisp bright core (only bright fibers get a light bloom)
+      const coreAlpha = isBright ? 0.95 * brightness : 0.65 * brightness;
+      ctx.strokeStyle = isBright
+        ? `hsla(${hue},40%,98%,${coreAlpha})`
+        : `hsla(${hue},65%,88%,${coreAlpha})`;
+      ctx.lineWidth = lineW * 0.9;
+      if (isBright) {
+        ctx.shadowColor = `hsla(${hue},100%,80%,0.8)`;
+        ctx.shadowBlur  = lineW * 5;
+        ctx.stroke(path);
+        ctx.shadowBlur = 0;
+      } else {
+        ctx.stroke(path);
+      }
+
+      // Collect the tip spark — a bright electron leading the reveal front
+      if (dashed && reveal > 0.02) {
+        const tip = ptAtDist(pts, revLen);
+        revealFront.push({ x: tip.x, y: tip.y, hue, r: lineW });
+      }
+    });
+    ctx.setLineDash([]);
+
+    // ── Draw the reveal-front sparks (the electron drawing each strand) ──
+    revealFront.forEach(s => {
+      const gR = (2 + s.r) * 3.4;
+      ctx.drawImage(dotSprite(s.hue), s.x - gR, s.y - gR, gR * 2, gR * 2);
+      ctx.beginPath(); ctx.arc(s.x, s.y, Math.max(1, s.r * 0.9), 0, Math.PI * 2);
+      ctx.fillStyle = `hsla(${s.hue},25%,100%,0.95)`; ctx.fill();
+    });
+
+    /* ── Draw electrons — they flow only along the revealed portion of each
+       strand and SURGE forward with scroll velocity, so scrolling visibly
+       drives the data down the wires. ── */
+    const scrollGlow = 0.30 + 0.70 * scroll;                       // fade in with reveal
+    const surge = 1 + Math.min(4, Math.abs(window.__scrollVel || 0) * 0.12) * scroll;
+    ctx.font = '13px "JetBrains Mono", "Courier New", monospace';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    fibers.forEach(fiber => {
+      const { pts, len, hue, isBright, particles, glyphs } = fiber;
+      const reveal = fiber._reveal || 0;
+      if (reveal <= 0) return;
+      const revLen = fiber._revLen;
+
+      particles.forEach(p => {
+        // Baseline time flow + scroll-velocity surge
+        p.t = (p.t + p.speed * dt * surge) % len;
+        // Electron only visible once the strand has been drawn past it
+        if (p.t > revLen) return;
+        const pos = ptAtDist(pts, p.t);
+        const pulse = 0.7 + 0.3 * Math.sin(frame * 0.04 + p.phase);
+        const r     = p.r * pulse;
+        const alpha = (isBright ? 0.95 : 0.65) * pulse * scrollGlow;
+
+        if (cfg.particleStyle === 'dot') {
+          // Bloom via cached sprite (drawImage is far cheaper than a
+          // fresh radial gradient per particle each frame)
+          const gR = r * 7;
+          const prevGA = ctx.globalAlpha;
+          ctx.globalAlpha = prevGA * alpha;
+          const sp = dotSprite(hue);
+          ctx.drawImage(sp, pos.x - gR, pos.y - gR, gR * 2, gR * 2);
+          ctx.globalAlpha = prevGA;
+          ctx.beginPath(); ctx.arc(pos.x, pos.y, Math.max(0.6, r*0.55), 0, Math.PI*2);
+          ctx.fillStyle = `hsla(${hue},20%,100%,${alpha})`; ctx.fill();
+
+        } else if (cfg.particleStyle === 'dash') {
+          // Short dash along the fiber direction
+          const nxt  = ptAtDist(pts, Math.min(p.t + 4, len));
+          const dx   = nxt.x - pos.x, dy = nxt.y - pos.y;
+          const ang  = Math.atan2(dy, dx);
+          const dashL = r * 5;
+          ctx.save();
+          ctx.translate(pos.x, pos.y); ctx.rotate(ang);
+          ctx.beginPath(); ctx.rect(-dashL*0.5, -r*0.4, dashL, r*0.8);
+          ctx.fillStyle = `hsla(${hue},90%,88%,${alpha})`;
+          ctx.shadowColor = `hsla(${hue},100%,80%,0.7)`; ctx.shadowBlur = r*4;
+          ctx.fill();
+          ctx.restore();
+
+        } else {
+          // Ring with inner dot
+          ctx.beginPath(); ctx.arc(pos.x, pos.y, r * 1.4, 0, Math.PI*2);
+          ctx.strokeStyle = `hsla(${hue},90%,82%,${alpha * 0.7})`;
+          ctx.lineWidth   = 0.7;
+          ctx.shadowColor = `hsla(${hue},100%,80%,0.6)`; ctx.shadowBlur = r*3;
+          ctx.stroke(); ctx.shadowBlur = 0;
+          ctx.beginPath(); ctx.arc(pos.x, pos.y, r * 0.4, 0, Math.PI*2);
+          ctx.fillStyle = `hsla(${hue},30%,100%,${alpha})`; ctx.fill();
+        }
+      });
+
+      // Data-glyph riders — letters and code symbols drifting along most
+      // strands, same reveal-gating and surge as the particles. Fixed
+      // magenta hue (matching the site's --magenta #E879F9 accent) —
+      // near-complementary to the circuit's cyan, so it reads as a
+      // distinct data layer instead of blending into the strand glow. A
+      // dark halo behind each glyph (stroked before the fill) keeps it
+      // legible where it crosses the circuit's own cyan glow.
+      const GLYPH_HUE = 292;
+      ctx.font = '14px "JetBrains Mono", "Courier New", monospace';
+      (glyphs || []).forEach(g => {
+        g.t = (g.t + g.speed * dt * surge) % len;
+        if (g.t > revLen) return;
+        const pos = ptAtDist(pts, g.t);
+        const pulse = 0.6 + 0.4 * Math.sin(frame * 0.05 + g.phase);
+        const alpha = 0.9 * pulse * scrollGlow;
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = `hsla(230,55%,6%,${alpha * 0.85})`;
+        ctx.strokeText(g.char, pos.x, pos.y);
+        ctx.fillStyle = `hsla(${GLYPH_HUE},95%,65%,${alpha})`;
+        ctx.shadowColor = `hsla(${GLYPH_HUE},100%,60%,0.95)`;
+        ctx.shadowBlur = 11;
+        ctx.fillText(g.char, pos.x, pos.y);
+        ctx.shadowBlur = 0;
+      });
+      ctx.font = '13px "JetBrains Mono", "Courier New", monospace';
+    });
+
+    ctx.restore(); // end zoom transform
+
+    /* ── HUD readout fragments — five independent stations spread across
+       the bridge's full length (not just near the source), each cycling
+       through short packet/hex-style phrases on its own timer. ── */
+    if (inst && scroll > 0.08) {
+      if (!inst.hudStations) {
+        inst.hudStations = [
+          { xf: 0.50, yf: 0.06 },
+          { xf: 0.20, yf: 0.30 },
+          { xf: 0.78, yf: 0.40 },
+          { xf: 0.32, yf: 0.62 },
+          { xf: 0.68, yf: 0.80 },
+        ].map((s) => ({ ...s, phrase: '', bornAt: 0, changeAt: 0 }));
+      }
+      const tms = t * 1000;
+      ctx.font = '12px "JetBrains Mono", "Courier New", monospace';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      inst.hudStations.forEach((st, i) => {
+        if (!st.changeAt || tms > st.changeAt) {
+          st.phrase = HUD_PHRASES[Math.floor(Math.random() * HUD_PHRASES.length)];
+          st.bornAt = tms;
+          st.changeAt = tms + 900 + Math.random() * 900 + i * 220;
+        }
+        const age = tms - st.bornAt;
+        const life = st.changeAt - st.bornAt;
+        const a = Math.min(1, age / 150) * Math.min(1, Math.max(0, life - age) / 150) * 0.9;
+        if (a > 0.01 && st.phrase) {
+          ctx.fillStyle = `hsla(${cfg.coreHue},85%,90%,${a})`;
+          ctx.shadowColor = `hsla(${cfg.coreHue},100%,80%,0.65)`;
+          ctx.shadowBlur = 5;
+          ctx.fillText(st.phrase, W * st.xf, H * st.yf);
+          ctx.shadowBlur = 0;
+        }
+      });
+    }
+
+    /* ── Radar-ping pulses — four origins spread across the bridge's
+       length, each firing independently, reading as a network of
+       activity rather than a single heartbeat at the source. ── */
+    if (inst) {
+      if (!inst.pingOrigins) {
+        inst.pingOrigins = [
+          { xf: 0.50, yf: 0.05, nextAt: 0, pings: [] },
+        ];
+      }
+      const tms = t * 1000;
+      inst.pingOrigins.forEach((o) => {
+        if (scroll > 0.15 && tms > o.nextAt) {
+          o.pings.push({ start: tms });
+          o.nextAt = tms + 2200 + Math.random() * 1400;
+        }
+        o.pings = o.pings.filter((p) => tms - p.start < 1300);
+        o.pings.forEach((p) => {
+          const p01 = (tms - p.start) / 1300;
+          const r = bloomR * (0.25 + p01 * 1.6);
+          ctx.beginPath();
+          ctx.arc(W * o.xf, H * o.yf, r, 0, Math.PI * 2);
+          ctx.strokeStyle = `hsla(${cfg.coreHue},90%,78%,${(1 - p01) * 0.5})`;
+          ctx.lineWidth = 1.6;
+          ctx.shadowColor = `hsla(${cfg.coreHue},100%,80%,0.5)`;
+          ctx.shadowBlur = 6;
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+        });
+      });
+    }
+
+    /* ── Top/bottom fade ── */
+    const gTop = ctx.createLinearGradient(0,0,0,H*0.3);
+    gTop.addColorStop(0,'#020810'); gTop.addColorStop(1,'rgba(2,8,16,0)');
+    ctx.fillStyle = gTop; ctx.fillRect(0,0,W,H*0.3);
+
+    const gBot = ctx.createLinearGradient(0,H*0.7,0,H);
+    gBot.addColorStop(0,'rgba(2,8,16,0)'); gBot.addColorStop(1,'#020810');
+    ctx.fillStyle = gBot; ctx.fillRect(0,H*0.7,W,H*0.3);
+  }
+
+  /* ══════════════════════════════════════════════════════════════
+     CIRCUITBRIDGE CLASS
+  ══════════════════════════════════════════════════════════════ */
+  // Shared by both the visual reveal and the guided auto-scroll below —
+  // one duration driving both means they can never drift out of sync with
+  // each other, however either gets tuned later.
+  const BRIDGE_PLAY_MS = 3400;
+
+  class CircuitBridge {
+    constructor(div, index) {
+      this.div    = div;
+      this.index  = index;
+      this.canvas = document.createElement('canvas');
+      this.ctx    = this.canvas.getContext('2d');
+      div.appendChild(this.canvas);
+      this.canvas.style.position = 'absolute';
+      this.canvas.style.inset    = '0';
+      this.canvas.style.width    = '100%';
+      this.canvas.style.height   = '100%';
+      this.canvas.style.transition = 'opacity .15s linear';
+      this.frame  = 0;
+      this.scroll = 0;
+      this.cfg    = BRIDGE_CONFIGS[index % BRIDGE_CONFIGS.length];
+      this.fibers = [];
+      this.resize();
+
+      // Plays once when explicitly triggered — by the "Continue to
+      // Portfolio" button, not guessed from scroll position/direction.
+      // A deliberate click is unambiguous, which sidesteps every edge
+      // case that came with trying to infer "did they just scroll into
+      // this on purpose?" from IntersectionObserver alone.
+      this.playStarted = false;
+      this.playStartTime = 0;
+    }
+
+    play() {
+      this.playStarted = true;
+      this.playStartTime = performance.now();
+    }
+
+    resize() {
+      const W = this.div.offsetWidth  || window.innerWidth;
+      const H = this.div.offsetHeight || 520;
+      this.W = W; this.H = H;
+      this.canvas.width  = W;
+      this.canvas.height = H;
+      this.fibers = buildFibers(W, H, this.cfg, this.index * 9973 + 12345);
+      const traces = buildTraces(W, H, this.index * 5011 + 777);
+      this.tracesCanvas = traces.canvas;
+      this.tracePaths = traces.paths;
+    }
+
+    updateReveal() {
+      if (!this.playStarted) {
+        this.scroll = 0;
+        this.canvas.style.opacity = '0';
+        return;
+      }
+      const elapsed = performance.now() - this.playStartTime;
+      this.scroll = Math.max(0, Math.min(1, elapsed / BRIDGE_PLAY_MS));
+      // Smooth entrance: fade the whole canvas in over the first 10% of the
+      // bridge's own play duration, instead of the strands/bloom just
+      // appearing the instant playback starts.
+      const entranceFade = Math.max(0, Math.min(1, this.scroll / 0.1));
+      this.canvas.style.opacity = entranceFade.toFixed(3);
+    }
+
+    draw(t, dt) {
+      drawBridge(this.ctx, this.W, this.H, this.fibers, this.cfg, this.scroll, this.frame, dt, this, t);
+      this.frame++;
+    }
+  }
+
+  /* ── Boot ── */
+  // Temporary bisection switch: add ?nobridge to the URL to skip building
+  // the circuit-bridge canvas(es) entirely, to test whether it's involved
+  // in the landscape-rotation crash.
+  const __debugNoBridge = new URLSearchParams(location.search).has('nobridge');
+  const bridges = [];
+  if (!__debugNoBridge) {
+    requestAnimationFrame(() => {
+      document.querySelectorAll('.circuit-bridge').forEach((div, i) => {
+        bridges.push(new CircuitBridge(div, i));
+      });
+    });
+  } else {
+    console.warn('[circuit-bridge] disabled via ?nobridge');
+  }
+
+  window.addEventListener('resize', window.__debounce(() => bridges.forEach(b => b.resize()), 160));
+
+  let lastT = performance.now(), t = 0;
+  const __bridgeVis = window.__onScreen(document.querySelector('.circuit-bridge'), 200);
+  function loop() {
+    requestAnimationFrame(loop);
+    if (!__bridgeVis() || !window.__tabVisible) { lastT = performance.now(); return; }
+    const now = performance.now();
+    const dt  = Math.min((now - lastT) / 1000, 0.05);
+    lastT = now; t += dt;
+    bridges.forEach(b => { b.updateReveal(); b.draw(t, dt); });
+  }
+  loop();
+
+  const continueBtn = document.getElementById('hero-continue-btn');
+  const heroBridgeEl = document.getElementById('hero-bridge');
+  if (continueBtn && heroBridgeEl) {
+    continueBtn.addEventListener('click', () => {
+      continueBtn.disabled = true;
+      continueBtn.classList.add('used');
+      bridges.forEach((b) => b.play());
+
+      const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const heroEl = document.getElementById('hero');
+      const nextSection = heroEl ? heroEl.nextElementSibling : null;
+      if (reduceMotion) {
+        // Skip the scroll takeover; just let the visual play in place.
+        (nextSection || heroBridgeEl).scrollIntoView({ behavior: 'auto', block: 'start' });
+        return;
+      }
+
+      const startY = window.scrollY;
+      let targetY;
+      if (nextSection) {
+        // Land at the top of the next section, offset by the fixed nav's
+        // height — same offset scroll-padding-top already applies to
+        // ordinary anchor scrolling elsewhere on the page — rather than
+        // just clearing the bridge's bottom edge and leaving the section
+        // only partly settled into view.
+        const rootPx = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+        const navOffset = 5.6 * rootPx;
+        targetY = Math.max(0, nextSection.getBoundingClientRect().top + startY - navOffset);
+      } else {
+        const rect = heroBridgeEl.getBoundingClientRect();
+        targetY = startY + (rect.bottom - window.innerHeight);
+      }
+      if (Math.abs(targetY - startY) < 10) return; // nothing meaningful to scroll
+
+      let cancelled = false;
+      const cancel = () => { cancelled = true; };
+      window.addEventListener('wheel', cancel, { passive: true, once: true });
+      window.addEventListener('touchstart', cancel, { passive: true, once: true });
+      const t0 = performance.now();
+      const step = () => {
+        if (cancelled) return;
+        const p = Math.min(1, (performance.now() - t0) / BRIDGE_PLAY_MS);
+        window.scrollTo({ top: startY + (targetY - startY) * p, left: 0, behavior: 'instant' });
+        if (p < 1) { requestAnimationFrame(step); return; }
+        window.removeEventListener('wheel', cancel);
+        window.removeEventListener('touchstart', cancel);
+      };
+      requestAnimationFrame(step);
+    });
+  }
+
+})();
+</script>
 
 <!-- GSAP -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
@@ -5547,7 +5977,27 @@ panels.forEach(p => observer.observe(p));
     const sub = document.querySelector('.hero-sub');
     if (line3) line3.classList.add('reveal-in');
     if (sub) sub.classList.add('reveal-in');
+    const bootLog = document.getElementById('hero-boot-log');
+    if (bootLog) bootLog.style.display = 'none';
+    const continueBtn = document.getElementById('hero-continue-btn');
+    if (continueBtn) continueBtn.style.opacity = '1';
     return;
+  }
+
+  // Flickers the "POWER CORE / DIAGNOSTICS / HUD" boot-log lines in one
+  // at a time, holds briefly, then fades the whole block out before the
+  // identity-scan label takes over.
+  function runBootLog(onDone) {
+    const log = document.getElementById('hero-boot-log');
+    if (!log) { onDone(); return; }
+    const lines = log.querySelectorAll('.boot-line');
+    if (!lines.length) { onDone(); return; }
+    lines.forEach((line, i) => setTimeout(() => line.classList.add('boot-in'), 120 + i * 170));
+    const totalIn = 120 + lines.length * 170 + 300;
+    setTimeout(() => {
+      log.classList.add('boot-fade');
+      setTimeout(onDone, 500);
+    }, totalIn);
   }
 
   // Materializes `el`'s existing text as a JARVIS-style hologram: a bright
@@ -5582,6 +6032,8 @@ panels.forEach(p => observer.observe(p));
       const sub = document.querySelector('.hero-sub');
       if (line3) line3.classList.add('reveal-in');
       if (sub) setTimeout(() => sub.classList.add('reveal-in'), 180);
+      const continueBtn = document.getElementById('hero-continue-btn');
+      if (continueBtn) setTimeout(() => continueBtn.classList.add('engaged'), 500);
     }
 
     if (promptLine && promptText) {
@@ -5595,38 +6047,11 @@ panels.forEach(p => observer.observe(p));
   }
 
   function start() {
-    run();
+    runBootLog(run);
   }
 
-  let heroStarted = false;
-  function startOnce() {
-    if (heroStarted) return;
-    heroStarted = true;
-    start();
-  }
-
-  // The hero's own reveal used to start immediately at page load and run
-  // independently of the preloader on a fixed timeline — fine while both
-  // were short, but every time the preloader's animation grew (glyph
-  // grow-punch, flicker-out, etc.) the hero kept finishing early and sat
-  // there fully materialized under the fading overlay. Rather than guess
-  // another fixed delay that will drift out of sync the next time the
-  // preloader changes, wait for the preloader to actually signal it's
-  // done (see the `preloaderDone` event dispatched from its hideOverlay()),
-  // so the hero always starts the instant the curtain begins lifting.
-  function beginHeroWhenReady() {
-    if (window.__preloaderDone) { startOnce(); return; }
-    window.addEventListener('preloaderDone', startOnce, { once: true });
-    // Safety net: if the preloader script never ran or never fired its
-    // event for some reason, don't leave the hero blank forever.
-    setTimeout(() => { if (!window.__preloaderDone) startOnce(); }, 15000);
-  }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', beginHeroWhenReady);
-  } else {
-    beginHeroWhenReady();
-  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+  else start();
 })();
 </script>
 <script>
@@ -6932,7 +7357,6 @@ panels.forEach(p => observer.observe(p));
 <script>
 /* -- NAV SCROLL-SPY: highlights the current section's nav link, mirrors resume-tab.active -- */
 (function navScrollSpy() {
-  const navUl = document.getElementById('nav-menu');
   const links = Array.from(document.querySelectorAll('nav ul li a[href^="#"]'));
   if (!links.length) return;
   const map = new Map();
@@ -6943,44 +7367,18 @@ panels.forEach(p => observer.observe(p));
   });
   if (!map.size) return;
 
-  // Sliding pill that glides beneath the active link instead of the
-  // highlight just snapping straight from one link to the next.
-  let indicator = null;
-  if (navUl) {
-    indicator = document.createElement('span');
-    indicator.className = 'nav-indicator';
-    indicator.setAttribute('aria-hidden', 'true');
-    navUl.insertBefore(indicator, navUl.firstChild);
-  }
-
-  function moveIndicator(a) {
-    if (!indicator) return;
-    indicator.style.width = a.offsetWidth + 'px';
-    indicator.style.transform = `translateX(${a.offsetLeft}px)`;
-    indicator.classList.add('visible');
-  }
-
   function clearActive() { links.forEach((a) => a.classList.remove('nav-active')); }
 
   const io = new IntersectionObserver((entries) => {
     entries.forEach((entry) => {
       if (entry.isIntersecting) {
         clearActive();
-        const a = map.get(entry.target);
-        a.classList.add('nav-active');
-        moveIndicator(a);
+        map.get(entry.target).classList.add('nav-active');
       }
     });
   }, { rootMargin: '-45% 0px -50% 0px', threshold: 0 });
 
   map.forEach((_, section) => io.observe(section));
-
-  // Keep the pill aligned with its link if the layout reflows (resize,
-  // orientation change, nav switching between desktop/mobile layouts).
-  window.addEventListener('resize', () => {
-    const current = links.find((a) => a.classList.contains('nav-active'));
-    if (current) moveIndicator(current);
-  });
 })();
 </script>
 <script>
@@ -7002,6 +7400,7 @@ panels.forEach(p => observer.observe(p));
     { icon: '◈', label: 'Go to In Motion', action: () => scrollToId('build') },
     { icon: '◈', label: 'Go to Face AI', action: () => scrollToId('webcam-ai') },
     { icon: '◈', label: 'Go to 3D Work', action: () => scrollToId('models') },
+    { icon: '◈', label: 'Play Signal Runner', action: () => scrollToId('game') },
     { icon: '◈', label: 'Go to Photography', action: () => scrollToId('photography') },
     { icon: '◈', label: 'Go to Live Telemetry', action: () => scrollToId('telemetry') },
     { icon: '◈', label: 'Go to Process', action: () => scrollToId('process') },
@@ -7062,6 +7461,228 @@ panels.forEach(p => observer.observe(p));
     else if (e.key === 'Enter') { e.preventDefault(); if (filtered[activeIdx]) run(filtered[activeIdx]); }
   });
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+})();
+</script>
+<script>
+/* -- SIGNAL RUNNER: a small arcade game built with plain Canvas 2D — no
+      engine, no external library. Player drags/steers a ship left-right to
+      dodge falling "corrupted packet" obstacles and catch "signal"
+      collectibles. Difficulty (fall speed + spawn rate) ramps up the
+      longer you survive. Fully playable offline — only score submission
+      and the leaderboard display need the backend. -- */
+(function signalRunner() {
+  const canvas = document.getElementById('game-canvas');
+  const overlay = document.getElementById('game-overlay');
+  const overlayTitle = document.getElementById('game-overlay-title');
+  const overlaySub = document.getElementById('game-overlay-sub');
+  const startBtn = document.getElementById('game-start-btn');
+  const scoreEntry = document.getElementById('game-score-entry');
+  const nameInput = document.getElementById('game-name-input');
+  const submitBtn = document.getElementById('game-submit-btn');
+  const submitNote = document.getElementById('game-submit-note');
+  const statEl = document.getElementById('game-stat');
+  const bestStatEl = document.getElementById('game-best-stat');
+  const pillText = document.getElementById('game-pill-text');
+  const leaderboardList = document.getElementById('game-leaderboard-list');
+  if (!canvas || !startBtn) return;
+
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const PLAYER_W = 36, PLAYER_H = 22, PLAYER_Y = H - 40;
+  const MOVE_SPEED = 420;
+
+  let playerX = W / 2, targetX = playerX;
+  let items = [], score = 0, running = false, rafId = null, lastTime = 0;
+  let spawnTimer = 0, elapsed = 0, difficulty = 1;
+  let best = parseInt(localStorage.getItem('signalRunnerBest') || '0', 10);
+  bestStatEl.innerHTML = 'best: <strong>' + best + '</strong>';
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  function reset() {
+    items = []; score = 0; elapsed = 0; difficulty = 1; spawnTimer = 0;
+    playerX = W / 2; targetX = playerX;
+    statEl.innerHTML = 'score: <strong>0</strong>';
+  }
+
+  function spawnItem() {
+    const isGood = Math.random() < 0.55;
+    items.push({
+      x: 24 + Math.random() * (W - 48),
+      y: -20,
+      r: isGood ? 9 : 14,
+      type: isGood ? 'good' : 'bad',
+      speed: (isGood ? 2.1 : 2.5) * difficulty,
+    });
+  }
+
+  function rectCircleCollide(px, py, pw, ph, cx, cy, cr) {
+    const closestX = Math.max(px, Math.min(cx, px + pw));
+    const closestY = Math.max(py, Math.min(cy, py + ph));
+    const dx = cx - closestX, dy = cy - closestY;
+    return (dx * dx + dy * dy) < (cr * cr);
+  }
+
+  const keyState = { left: false, right: false };
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') keyState.left = true;
+    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') keyState.right = true;
+  });
+  window.addEventListener('keyup', (e) => {
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') keyState.left = false;
+    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') keyState.right = false;
+  });
+
+  let dragging = false;
+  function pointerToCanvasX(e) {
+    const rect = canvas.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    return (clientX - rect.left) * (W / rect.width);
+  }
+  canvas.addEventListener('pointerdown', (e) => { if (running) { dragging = true; targetX = pointerToCanvasX(e); } });
+  canvas.addEventListener('pointermove', (e) => { if (dragging) targetX = pointerToCanvasX(e); });
+  window.addEventListener('pointerup', () => { dragging = false; });
+
+  function update(dt) {
+    elapsed += dt;
+    difficulty = 1 + elapsed / 22;
+    spawnTimer -= dt;
+    const spawnInterval = Math.max(0.28, 0.85 - elapsed / 40);
+    if (spawnTimer <= 0) { spawnItem(); spawnTimer = spawnInterval; }
+
+    if (keyState.left) targetX -= MOVE_SPEED * dt;
+    if (keyState.right) targetX += MOVE_SPEED * dt;
+    targetX = Math.max(0, Math.min(W, targetX));
+
+    playerX += (targetX - playerX) * Math.min(1, dt * 14);
+    playerX = Math.max(PLAYER_W / 2, Math.min(W - PLAYER_W / 2, playerX));
+
+    const px = playerX - PLAYER_W / 2, py = PLAYER_Y - PLAYER_H / 2;
+    for (let i = items.length - 1; i >= 0; i--) {
+      const it = items[i];
+      it.y += it.speed;
+      if (rectCircleCollide(px, py, PLAYER_W, PLAYER_H, it.x, it.y, it.r)) {
+        if (it.type === 'good') {
+          score += 10;
+          statEl.innerHTML = 'score: <strong>' + score + '</strong>';
+          items.splice(i, 1);
+        } else {
+          gameOver();
+          return;
+        }
+      } else if (it.y - it.r > H) {
+        items.splice(i, 1);
+      }
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    ctx.strokeStyle = 'rgba(34,211,238,.06)';
+    ctx.lineWidth = 1;
+    for (let gx = 0; gx < W; gx += 40) { ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke(); }
+
+    items.forEach((it) => {
+      ctx.beginPath();
+      if (it.type === 'good') {
+        ctx.fillStyle = '#22D3EE'; ctx.shadowColor = '#22D3EE'; ctx.shadowBlur = 8;
+        ctx.moveTo(it.x, it.y - it.r); ctx.lineTo(it.x + it.r, it.y); ctx.lineTo(it.x, it.y + it.r); ctx.lineTo(it.x - it.r, it.y);
+        ctx.closePath(); ctx.fill();
+      } else {
+        ctx.fillStyle = '#F87171'; ctx.shadowColor = '#F87171'; ctx.shadowBlur = 8;
+        ctx.fillRect(it.x - it.r, it.y - it.r, it.r * 2, it.r * 2);
+      }
+      ctx.shadowBlur = 0;
+    });
+
+    ctx.fillStyle = '#F0F8FF'; ctx.shadowColor = '#7DD3FC'; ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.moveTo(playerX, PLAYER_Y - PLAYER_H / 2);
+    ctx.lineTo(playerX - PLAYER_W / 2, PLAYER_Y + PLAYER_H / 2);
+    ctx.lineTo(playerX + PLAYER_W / 2, PLAYER_Y + PLAYER_H / 2);
+    ctx.closePath(); ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
+  function loop(ts) {
+    if (!running) return;
+    const dt = Math.min(0.05, (ts - lastTime) / 1000 || 0);
+    lastTime = ts;
+    update(dt);
+    if (running) draw();
+    rafId = requestAnimationFrame(loop);
+  }
+
+  function start() {
+    reset();
+    overlay.hidden = true;
+    scoreEntry.hidden = true;
+    submitNote.textContent = '';
+    running = true;
+    lastTime = performance.now();
+    if (pillText) pillText.textContent = 'RUNNING';
+    rafId = requestAnimationFrame(loop);
+  }
+
+  function gameOver() {
+    running = false;
+    if (rafId) cancelAnimationFrame(rafId);
+    if (score > best) {
+      best = score;
+      localStorage.setItem('signalRunnerBest', String(best));
+      bestStatEl.innerHTML = 'best: <strong>' + best + '</strong>';
+    }
+    overlay.hidden = false;
+    overlayTitle.textContent = 'Signal Lost';
+    overlaySub.textContent = 'Final score: ' + score;
+    startBtn.textContent = '\u21BB Try Again';
+    scoreEntry.hidden = false;
+    if (pillText) pillText.textContent = 'GAME OVER';
+  }
+
+  async function loadLeaderboard() {
+    if (!leaderboardList) return;
+    try {
+      const r = await fetch(window.__API_BASE + '/api/leaderboard');
+      const data = await r.json();
+      if (data.ok && data.entries && data.entries.length) {
+        leaderboardList.innerHTML = data.entries.map((e, i) =>
+          '<li><span class="glb-rank">#' + (i + 1) + '</span><span class="glb-name">' + escapeHtml(e.name) + '</span><span class="glb-score">' + e.score + '</span></li>'
+        ).join('');
+      }
+    } catch (_) {}
+  }
+
+  startBtn.addEventListener('click', start);
+  submitBtn.addEventListener('click', async () => {
+    const name = (nameInput.value || 'ANON').trim().toUpperCase().slice(0, 12) || 'ANON';
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Submitting\u2026';
+    try {
+      const r = await fetch(window.__API_BASE + '/api/leaderboard', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, score }),
+      });
+      const data = await r.json();
+      if (data.ok) {
+        scoreEntry.hidden = true;
+        submitNote.textContent = data.madeTop10 ? 'Made the top 10!' : 'Score saved.';
+        loadLeaderboard();
+      } else {
+        submitNote.textContent = data.error || 'Couldn\u2019t save that score.';
+      }
+    } catch (_) {
+      submitNote.textContent = 'Couldn\u2019t reach the leaderboard just now.';
+    }
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Submit Score';
+  });
+
+  draw(); // idle frame so the canvas isn't blank before the first Play
+  loadLeaderboard();
 })();
 </script>
 </body></html>

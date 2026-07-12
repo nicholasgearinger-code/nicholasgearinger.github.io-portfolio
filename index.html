@@ -6381,8 +6381,21 @@ panels.forEach(p => observer.observe(p));
     runBootLog(run);
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
-  else start();
+  // The preloader now runs ~6.3s (boot lines, name decode, glyph collapse,
+  // grow-punch, hold, power-down flicker-out) before it starts fading out.
+  // The hero's own reveal used to start immediately at page load and ran
+  // independently — fine when the preloader was shorter, but now the hero
+  // finished materializing well before the overlay even began lifting,
+  // leaving a static page underneath the fade. Delay the hero's start so
+  // its own ~5.5s reveal chain lands its final beats right as the overlay
+  // dissolves, instead of finishing in the dark under it.
+  const HERO_START_DELAY = 1500;
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => setTimeout(start, HERO_START_DELAY));
+  } else {
+    setTimeout(start, HERO_START_DELAY);
+  }
 })();
 </script>
 <script>

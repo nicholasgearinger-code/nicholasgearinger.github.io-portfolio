@@ -594,6 +594,7 @@
     box-shadow: 0 0 0 0 rgba(232,121,249,0);
   }
   .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(232,121,249,.5); }
+  .btn-primary:disabled { opacity: .6; cursor: default; transform: none; box-shadow: none; }
   .btn-ghost {
     padding: .85rem 2rem; border-radius: 100px;
     border: 1px solid var(--card-border); color: var(--white);
@@ -8061,7 +8062,17 @@ panels.forEach(p => observer.observe(p));
     } catch (_) {}
   }
 
-  startBtn.addEventListener('click', start);
+  let hasEverPlayed = false;
+  function handlePlayClick() {
+    if (hasEverPlayed) { start(); return; }
+    hasEverPlayed = true;
+    const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    startBtn.disabled = true;
+    startBtn.textContent = 'Initializing\u2026';
+    runTitleSeq();
+    setTimeout(() => { startBtn.disabled = false; startBtn.textContent = '\u25B6 Play'; start(); }, reduceMotion ? 0 : 2000);
+  }
+  startBtn.addEventListener('click', handlePlayClick);
   if (quitBtn) quitBtn.addEventListener('click', quitGame);
   submitBtn.addEventListener('click', async () => {
     const name = (nameInput.value || 'ANON').trim().toUpperCase().slice(0, 12) || 'ANON';
@@ -8192,19 +8203,6 @@ panels.forEach(p => observer.observe(p));
 
   draw(); // idle frame so the canvas isn't blank before the first Play
   loadLeaderboard();
-  if ('IntersectionObserver' in window) {
-    const titleSeqObserver = new IntersectionObserver((entries) => {
-      entries.forEach((entry) => {
-        if (entry.isIntersecting) {
-          runTitleSeq();
-          titleSeqObserver.disconnect();
-        }
-      });
-    }, { threshold: 0.35 });
-    titleSeqObserver.observe(document.getElementById('game-wrap'));
-  } else {
-    runTitleSeq();
-  }
 })();
 </script>
 </body></html>

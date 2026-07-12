@@ -370,11 +370,12 @@
     border-bottom: 1px solid var(--card-border);
   }
   .nav-logo {
-    font-family: 'Syne', sans-serif;
-    font-weight: 800; font-size: 1.1rem; letter-spacing: -.02em;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700; font-size: 1.25rem; letter-spacing: -.02em;
     color: var(--white);
+    text-shadow: 0 0 10px rgba(34,211,238,.5), 0 0 20px rgba(34,211,238,.22);
   }
-  .nav-logo span { color: var(--teal); }
+  .nav-logo span { color: var(--magenta); }
   nav ul {
     list-style: none; display: flex; gap: .6rem; align-items: center;
     overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none;
@@ -2332,6 +2333,14 @@
   }
   .game-gyro-btn.is-active { background: rgba(232,121,249,.16); border-color: rgba(232,121,249,.55); color: var(--magenta); }
   .game-gyro-btn[hidden] { display: none; }
+  .game-mute-btn {
+    position: absolute; right: .7rem; top: .7rem; z-index: 3;
+    padding: .3rem .5rem; border-radius: .35rem;
+    background: rgba(232,121,249,.1); border: 1px solid rgba(232,121,249,.4);
+    color: var(--magenta); font-size: .78rem; line-height: 1;
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+  }
+  .game-mute-btn.is-muted { color: rgba(148,163,184,.7); border-color: rgba(148,163,184,.35); background: rgba(148,163,184,.08); }
   .game-overlay {
     position: absolute; inset: 0; z-index: 2;
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .8rem;
@@ -2340,6 +2349,38 @@
   .game-overlay[hidden] { display: none; }
   .game-overlay h3 { font-family: 'Syne', sans-serif; font-size: 1.3rem; color: var(--white); margin: 0; }
   .game-overlay p { font-size: .82rem; color: var(--muted); max-width: 300px; margin: 0; }
+  .game-overlay-main {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .8rem;
+  }
+  .game-overlay-main.gt-hidden { display: none; }
+  @keyframes gtFadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+  .game-title-seq {
+    display: flex; flex-direction: column; align-items: center; gap: .5rem;
+  }
+  .game-title-seq[hidden] { display: none; }
+  .game-title-icon {
+    font-family: 'JetBrains Mono', 'Courier New', monospace; font-weight: 700;
+    font-size: clamp(2.2rem, 13vw, 3.4rem); color: var(--white);
+    text-shadow: 0 0 12px rgba(34,211,238,.8), 0 0 30px rgba(232,121,249,.45);
+    transform: scale(.5); opacity: .4;
+    transition: transform .6s cubic-bezier(.34,1.56,.64,1), opacity .6s ease;
+  }
+  .game-title-icon.gt-grown { transform: scale(1.05); opacity: 1; animation: gtIconFlicker 1.1s linear .55s 2; }
+  @keyframes gtIconFlicker {
+    0%, 100% { filter: brightness(1); }
+    15% { filter: brightness(.3) drop-shadow(2px 0 0 rgba(239,68,68,.7)) drop-shadow(-2px 0 0 rgba(34,211,238,.7)); }
+    22% { filter: brightness(1.15); }
+    28% { filter: brightness(1); }
+  }
+  .game-title-word {
+    font-family: 'JetBrains Mono', 'Courier New', monospace; font-weight: 700;
+    letter-spacing: .22em; text-transform: uppercase; font-size: clamp(1rem, 4vw, 1.4rem);
+    color: var(--white); min-height: 1.3em;
+  }
+  .gt-char-locked { color: var(--cyan); }
+  @media (prefers-reduced-motion: reduce) {
+    .game-title-icon { transition: none; animation: none; }
+  }
   .game-score-entry { display: flex; gap: .5rem; margin-top: .3rem; }
   .game-score-entry[hidden] { display: none; }
   .game-score-entry input {
@@ -2486,7 +2527,7 @@
 <div id="custom-cursor" aria-hidden="true"></div>
 <!-- NAV -->
 <nav aria-label="Primary">
-  <div class="nav-logo">AR<span>.</span></div>
+  <div class="nav-logo" aria-label="Nicholas Gearinger — home">&lt;<span>/</span>&gt;</div>
   <button class="nav-toggle" id="nav-toggle" aria-label="Toggle navigation menu" aria-expanded="false" aria-controls="nav-menu">
     <span></span><span></span><span></span>
   </button>
@@ -3228,7 +3269,7 @@
   <div class="panel-inner">
     <span class="section-label">Try It</span>
     <h2>Dive the datastream,<br>purge the corruption</h2>
-    <p class="lead" style="margin:0 auto 2.2rem;">A small arcade game built from scratch — you're a hunter-process diving through a live data tunnel. Steer with arrow keys, A/D, drag, or phone tilt, pull in verified data shards for points — and the more you collect, the lower your THREAT runs. Fire on the corrupted fragments to fizzle them out of existence, or just dodge them. Early hits just cost points; once THREAT goes red, one hit ends the run.</p>
+    <p class="lead" style="margin:0 auto 2.2rem;">A small arcade game built from scratch — you're a hunter-process diving through a live data tunnel. Steer with arrow keys, A/D, drag, or phone tilt, pull in verified data shards for points — and the more you collect, the lower your THREAT runs, plus your streak builds a score multiplier. Fire on corrupted fragments to fizzle them out of existence, grab the rare prismatic power-ups, and survive the occasional breach surge. Early hits just cost points; once THREAT goes red, one hit ends the run.</p>
     <div class="algo-card">
       <div class="cc-titlebar">
         <div class="cc-dots">
@@ -3245,16 +3286,23 @@
         <div class="game-wrap" id="game-wrap">
           <canvas id="game-canvas" width="480" height="360" aria-label="Ghostwire arcade game — a hunter-process diving a perspective data tunnel, dodging corrupted fragments and collecting verified data shards"></canvas>
           <button type="button" class="game-gyro-btn" id="game-gyro-btn" hidden>⟲ TILT: OFF</button>
+          <button type="button" class="game-mute-btn" id="game-mute-btn" aria-label="Toggle sound">🔊</button>
           <button type="button" class="game-fire-btn" id="game-fire-btn" aria-label="Fire" hidden>◎</button>
           <div class="game-overlay" id="game-overlay">
-            <h3 id="game-overlay-title">Ghostwire</h3>
-            <p id="game-overlay-sub">Arrow keys, A/D, drag, or tilt to steer. Space or ◎ to fire — shots fizzle corrupted fragments. Hits cost points until THREAT goes red — then one hit ends it.</p>
-            <button type="button" class="btn-primary" id="game-start-btn">▶ Play</button>
-            <div class="game-score-entry" id="game-score-entry" hidden>
-              <input type="text" id="game-name-input" maxlength="12" placeholder="YOUR NAME">
-              <button type="button" class="btn-ghost" id="game-submit-btn">Submit Score</button>
+            <div class="game-title-seq" id="game-title-seq">
+              <div class="game-title-icon" id="game-title-icon">&lt;/&gt;</div>
+              <div class="game-title-word" id="game-title-word"></div>
             </div>
-            <p class="game-submit-note" id="game-submit-note"></p>
+            <div class="game-overlay-main gt-hidden" id="game-overlay-main">
+              <h3 id="game-overlay-title">Ghostwire</h3>
+              <p id="game-overlay-sub">Arrow keys, A/D, drag, or tilt to steer. Space or ◎ to fire — shots fizzle corrupted fragments. Hits cost points until THREAT goes red — then one hit ends it.</p>
+              <button type="button" class="btn-primary" id="game-start-btn">▶ Play</button>
+              <div class="game-score-entry" id="game-score-entry" hidden>
+                <input type="text" id="game-name-input" maxlength="12" placeholder="YOUR NAME">
+                <button type="button" class="btn-ghost" id="game-submit-btn">Submit Score</button>
+              </div>
+              <p class="game-submit-note" id="game-submit-note"></p>
+            </div>
           </div>
         </div>
       </div>
@@ -6905,6 +6953,7 @@ panels.forEach(p => observer.observe(p));
   const leaderboardList = document.getElementById('game-leaderboard-list');
   const fireBtn = document.getElementById('game-fire-btn');
   const gyroBtn = document.getElementById('game-gyro-btn');
+  const muteBtn = document.getElementById('game-mute-btn');
   if (!canvas || !startBtn) return;
   if (fireBtn) fireBtn.hidden = false;
 
@@ -6923,6 +6972,13 @@ panels.forEach(p => observer.observe(p));
   const PROJECTILE_SPEED = 2.0;                  // depth units/sec the shot travels toward the vanishing point
   const FIZZLE_DUR = 0.4;
   const GYRO_SENSITIVITY = 6.5;                  // px of steering per degree of tilt from the calibrated center
+
+  const POWERUP_TYPES = ['rapid', 'magnet', 'shield'];
+  const POWERUP_MIN = 9, POWERUP_MAX = 16;       // seconds between power-up spawns
+  const RAPID_DURATION = 6, MAGNET_DURATION = 6, SHIELD_DURATION = 4.5;
+  const MAGNET_PULL = 3.2;
+  const COMBO_STEP = 5, COMBO_MAX_MULT = 4;      // every 5-streak bumps the score multiplier, up to x4
+  const SURGE_MIN = 22, SURGE_MAX = 32, SURGE_DURATION = 4;
 
   const CODE_TOKENS_BAD = ['0xFF', 'NaN', 'SEGV', 'ERR', 'null', '!=', 'undef', '0x00', 'panic!'];
   const CODE_TOKENS_GOOD = ['OK', '{ }', '=>', '200', 'ACK', '0x1A', 'sync', 'true'];
@@ -6971,13 +7027,19 @@ panels.forEach(p => observer.observe(p));
   }
 
 
+  function randRange(a, b) { return a + Math.random() * (b - a); }
+
   let playerX = W / 2, targetX = playerX, playerVX = 0;
   let items = [], particles = [], codeBits = [], projectiles = [], fizzles = [];
+  let powerups = [], floatTexts = [], shockwaves = [];
   let score = 0, running = false, dying = false, deathTimer = 0, rafId = null, lastTime = 0;
   let spawnTimer = 0, codeBitTimer = 0, elapsed = 0, difficulty = 1;
   let shakeMag = 0, flash = 0, tunnelHue = 0, threat = 0;
   let streak = 0, invulnTimer = 0, fireTimer = 0;
+  let rapidTimer = 0, magnetTimer = 0, shieldTimer = 0, powerupTimer = randRange(POWERUP_MIN, POWERUP_MAX);
+  let surging = false, surgeCountdown = randRange(SURGE_MIN, SURGE_MAX), surgeElapsed = 0;
   let gyroEnabled = false, gyroNeutral = null, gyroX = null;
+  let soundOn = true;
   let circuitTraces = generateCircuitTraces();
   let best = parseInt(localStorage.getItem('ghostwireBest') || '0', 10);
   bestStatEl.innerHTML = 'best: <strong>' + best + '</strong>';
@@ -6988,11 +7050,14 @@ panels.forEach(p => observer.observe(p));
 
   function reset() {
     items = []; particles = []; codeBits = []; projectiles = []; fizzles = [];
+    powerups = []; floatTexts = []; shockwaves = [];
     score = 0; elapsed = 0; difficulty = 1; threat = 0;
     spawnTimer = 0; codeBitTimer = 0; fireTimer = 0;
     playerX = W / 2; targetX = playerX; playerVX = 0;
     shakeMag = 0; flash = 0; dying = false; deathTimer = 0;
     streak = 0; invulnTimer = 0;
+    rapidTimer = 0; magnetTimer = 0; shieldTimer = 0; powerupTimer = randRange(POWERUP_MIN, POWERUP_MAX);
+    surging = false; surgeCountdown = randRange(SURGE_MIN, SURGE_MAX); surgeElapsed = 0;
     circuitTraces = generateCircuitTraces();
     statEl.innerHTML = 'score: <strong>0</strong>';
   }
@@ -7005,7 +7070,7 @@ panels.forEach(p => observer.observe(p));
       baseR: isGood ? 10 : 15,
       type: isGood ? 'good' : 'bad',
       token: isGood ? pick(CODE_TOKENS_GOOD) : pick(CODE_TOKENS_BAD),
-      vz: (isGood ? 0.46 : 0.54) * difficulty,
+      vz: (isGood ? 0.46 : 0.54) * difficulty * (surging ? 1.18 : 1),
       spin: (Math.random() - 0.5) * 3,
       seed: Math.random() * 1000,
       x: VP_X, y: VP_Y, r: 1, glitchT: 0,
@@ -7022,6 +7087,26 @@ panels.forEach(p => observer.observe(p));
     });
   }
 
+  function spawnPowerup(forceType) {
+    powerups.push({
+      lane: 40 + Math.random() * (W - 80),
+      z: 1,
+      baseR: 13,
+      type: forceType || pick(POWERUP_TYPES),
+      vz: 0.4 * difficulty,
+      seed: Math.random() * 1000,
+      x: VP_X, y: VP_Y, r: 1,
+    });
+  }
+
+  function spawnFloatText(x, y, text, color) {
+    floatTexts.push({ x, y, text, color, life: 0.9, maxLife: 0.9 });
+  }
+
+  function spawnShockwave(x, y, color, maxR) {
+    shockwaves.push({ x, y, r: 0, maxR: maxR || 100, life: 0, maxLife: 0.55, color });
+  }
+
   function spawnParticles(x, y, color, n, spread, speed) {
     for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI * 2;
@@ -7032,6 +7117,73 @@ panels.forEach(p => observer.observe(p));
         color, size: 1.5 + Math.random() * 2.5,
       });
     }
+  }
+
+  // -- synthesized audio: oscillators/noise, no sample assets, consistent
+  //    with the rest of this zero-dependency build -----------------------
+  let audioCtx = null, ambientOsc = null, ambientGain = null;
+  function ensureAudio() {
+    if (audioCtx) { if (audioCtx.state === 'suspended') audioCtx.resume(); return; }
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (_) { audioCtx = null; }
+  }
+  function playTone(freq, dur, type, vol, slideTo, delay) {
+    if (!audioCtx || !soundOn) return;
+    const t0 = audioCtx.currentTime + (delay || 0);
+    const osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
+    osc.type = type || 'sine';
+    osc.frequency.setValueAtTime(freq, t0);
+    if (slideTo) osc.frequency.exponentialRampToValueAtTime(Math.max(20, slideTo), t0 + dur);
+    gain.gain.setValueAtTime(vol || 0.15, t0);
+    gain.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(t0); osc.stop(t0 + dur + 0.03);
+  }
+  function playNoise(dur, vol) {
+    if (!audioCtx || !soundOn) return;
+    const n = Math.max(1, Math.floor(audioCtx.sampleRate * dur));
+    const buffer = audioCtx.createBuffer(1, n, audioCtx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < n; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / n);
+    const src = audioCtx.createBufferSource(), gain = audioCtx.createGain();
+    src.buffer = buffer;
+    gain.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    src.connect(gain); gain.connect(audioCtx.destination);
+    src.start();
+  }
+  function sfxShoot() { playTone(760, 0.08, 'square', 0.07, 1300); }
+  function sfxCatch(mult) { playTone(560 + mult * 60, 0.12, 'sine', 0.14, 900 + mult * 80); }
+  function sfxFizzle() { playNoise(0.12, 0.12); playTone(220, 0.1, 'sawtooth', 0.06, 60); }
+  function sfxHit() { playTone(180, 0.18, 'sawtooth', 0.18, 55); playNoise(0.1, 0.1); }
+  function sfxDeath() { playNoise(0.5, 0.22); playTone(280, 0.6, 'sawtooth', 0.16, 35); }
+  function sfxPowerup() {
+    playTone(520, 0.1, 'triangle', 0.12, null, 0);
+    playTone(680, 0.1, 'triangle', 0.12, null, 0.08);
+    playTone(880, 0.14, 'triangle', 0.13, null, 0.16);
+  }
+  function sfxSurge() { playTone(120, 0.4, 'sawtooth', 0.14, 90); }
+  function startAmbient() {
+    if (!audioCtx) return;
+    ambientOsc = audioCtx.createOscillator();
+    ambientGain = audioCtx.createGain();
+    ambientOsc.type = 'sine';
+    ambientOsc.frequency.value = 48;
+    ambientGain.gain.value = 0.0001;
+    ambientOsc.connect(ambientGain); ambientGain.connect(audioCtx.destination);
+    ambientOsc.start();
+  }
+  function stopAmbient() {
+    if (ambientOsc) { try { ambientOsc.stop(); } catch (_) {} ambientOsc = null; }
+    ambientGain = null;
+  }
+  function updateAmbient() {
+    if (!audioCtx || !ambientOsc || !ambientGain) return;
+    if (!soundOn) { ambientGain.gain.setTargetAtTime(0.0001, audioCtx.currentTime, 0.1); return; }
+    const freq = 46 + threat * 46;
+    ambientOsc.frequency.setTargetAtTime(freq, audioCtx.currentTime, 0.25);
+    const pulseRate = 1.3 + threat * 3.4;
+    const g = 0.012 + (0.5 + 0.5 * Math.sin(tunnelHue * pulseRate * Math.PI * 2)) * (0.01 + threat * 0.026);
+    ambientGain.gain.setTargetAtTime(g, audioCtx.currentTime, 0.05);
   }
 
   function rectCircleCollide(px, py, pw, ph, cx, cy, cr) {
@@ -7053,6 +7205,14 @@ panels.forEach(p => observer.observe(p));
   });
   if (fireBtn) {
     fireBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); fireWeapon(); });
+  }
+  if (muteBtn) {
+    muteBtn.addEventListener('click', () => {
+      soundOn = !soundOn;
+      muteBtn.textContent = soundOn ? '🔊' : '🔇';
+      muteBtn.classList.toggle('is-muted', !soundOn);
+      if (soundOn) ensureAudio();
+    });
   }
 
   let dragging = false;
@@ -7098,15 +7258,18 @@ panels.forEach(p => observer.observe(p));
 
   function fireWeapon() {
     if (!running || dying || fireTimer > 0) return;
-    fireTimer = FIRE_COOLDOWN;
+    fireTimer = rapidTimer > 0 ? FIRE_COOLDOWN * 0.3 : FIRE_COOLDOWN;
     projectiles.push({ lane: playerX, p: 1, x: playerX, y: PLAYER_Y });
     spawnParticles(playerX, PLAYER_Y - PLAYER_H / 2, '#E879F9', 6, 40, 140);
+    sfxShoot();
   }
 
   function fizzleItem(it) {
     fizzles.push({ x: it.x, y: it.y, r: it.r, t: 0, seed: it.seed });
     spawnParticles(it.x, it.y, '#F87171', 10, 20, 140);
     spawnParticles(it.x, it.y, '#E879F9', 6, 12, 110);
+    spawnFloatText(it.x, it.y, 'FIZZLED', '#E879F9');
+    sfxFizzle();
   }
 
 
@@ -7118,6 +7281,8 @@ panels.forEach(p => observer.observe(p));
     if (pillText) pillText.textContent = 'BREACH DETECTED';
     spawnParticles(hitItem.x, hitItem.y, '#F87171', 26, 40, 220);
     spawnParticles(playerX, PLAYER_Y, '#F87171', 16, 20, 160);
+    spawnShockwave(playerX, PLAYER_Y, '#F87171', 160);
+    sfxDeath();
   }
 
   function triggerHit(hitItem) {
@@ -7130,6 +7295,17 @@ panels.forEach(p => observer.observe(p));
     shakeMag = 9;
     flash = 0.5;
     spawnParticles(hitItem.x, hitItem.y, '#F87171', 12, 20, 130);
+    spawnFloatText(playerX, PLAYER_Y - 30, '-5', '#F87171');
+    sfxHit();
+  }
+
+  function activatePowerup(type) {
+    let label = 'POWER-UP', color = '#E879F9';
+    if (type === 'rapid') { rapidTimer = RAPID_DURATION; label = 'RAPID FIRE'; color = '#E879F9'; }
+    else if (type === 'magnet') { magnetTimer = MAGNET_DURATION; label = 'MAGNET'; color = '#22D3EE'; }
+    else if (type === 'shield') { shieldTimer = SHIELD_DURATION; label = 'SHIELD'; color = '#818CF8'; }
+    spawnFloatText(playerX, PLAYER_Y - 30, label, color);
+    sfxPowerup();
   }
 
   function updateParticles(dt) {
@@ -7140,8 +7316,28 @@ panels.forEach(p => observer.observe(p));
     }
   }
 
+  function updateFloatTexts(dt) {
+    for (let i = floatTexts.length - 1; i >= 0; i--) {
+      const f = floatTexts[i];
+      f.y -= 26 * dt; f.life -= dt;
+      if (f.life <= 0) floatTexts.splice(i, 1);
+    }
+  }
+
+  function updateShockwaves(dt) {
+    for (let i = shockwaves.length - 1; i >= 0; i--) {
+      const s = shockwaves[i];
+      s.life += dt;
+      if (s.life >= s.maxLife) { shockwaves.splice(i, 1); continue; }
+      s.r = (s.life / s.maxLife) * s.maxR;
+    }
+  }
+
   function update(dt) {
     updateParticles(dt);
+    updateFloatTexts(dt);
+    updateShockwaves(dt);
+    updateAmbient();
     shakeMag = Math.max(0, shakeMag - dt * 70);
     flash = Math.max(0, flash - dt * 3.2);
     tunnelHue += dt;
@@ -7167,9 +7363,34 @@ panels.forEach(p => observer.observe(p));
     threat = Math.max(0, Math.min(1, threat + dt * THREAT_RISE_PER_SEC));
     invulnTimer = Math.max(0, invulnTimer - dt);
     fireTimer = Math.max(0, fireTimer - dt);
+    rapidTimer = Math.max(0, rapidTimer - dt);
+    magnetTimer = Math.max(0, magnetTimer - dt);
+    shieldTimer = Math.max(0, shieldTimer - dt);
+
+    // -- surge events: a periodic denser, faster burst that rewards a guaranteed power-up if survived
+    if (surging) {
+      surgeElapsed += dt;
+      if (surgeElapsed >= SURGE_DURATION) {
+        surging = false;
+        surgeCountdown = randRange(SURGE_MIN, SURGE_MAX);
+        spawnPowerup();
+        spawnFloatText(W / 2, PLAYER_Y - 60, 'SURGE CLEARED', '#E879F9');
+      }
+    } else {
+      surgeCountdown -= dt;
+      if (surgeCountdown <= 0) {
+        surging = true; surgeElapsed = 0;
+        spawnFloatText(W / 2, VP_Y + 40, 'BREACH SURGE', '#F87171');
+        sfxSurge();
+      }
+    }
+
     spawnTimer -= dt;
-    const spawnInterval = Math.max(0.24, 0.82 - elapsed / 38);
+    const spawnInterval = Math.max(0.24, 0.82 - elapsed / 38) / (surging ? 2.2 : 1);
     if (spawnTimer <= 0) { spawnItem(); spawnTimer = spawnInterval; }
+
+    powerupTimer -= dt;
+    if (powerupTimer <= 0) { spawnPowerup(); powerupTimer = randRange(POWERUP_MIN, POWERUP_MAX); }
 
     for (let i = fizzles.length - 1; i >= 0; i--) {
       fizzles[i].t += dt;
@@ -7217,9 +7438,30 @@ panels.forEach(p => observer.observe(p));
       spawnParticles(playerX, PLAYER_Y + 8, '#7DD3FC', 1, -30, 30);
     }
 
+    // power-ups: drift down the tunnel exactly like items, but pure pickup
+    for (let i = powerups.length - 1; i >= 0; i--) {
+      const pu = powerups[i];
+      pu.z -= pu.vz * dt;
+      const p = 1 - pu.z;
+      pu.x = VP_X + (pu.lane - VP_X) * p;
+      pu.y = VP_Y + (PLAYER_Y - VP_Y) * p;
+      pu.r = pu.baseR * (MIN_SCALE + (1 - MIN_SCALE) * p);
+      const px2 = playerX - PLAYER_W / 2;
+      if (p > 0 && rectCircleCollide(px2, PLAYER_Y - PLAYER_H / 2, PLAYER_W, PLAYER_H, pu.x, pu.y, pu.r)) {
+        activatePowerup(pu.type);
+        powerups.splice(i, 1);
+      } else if (p > REMOVE_P) {
+        powerups.splice(i, 1);
+      }
+    }
+
     const py = PLAYER_Y - PLAYER_H / 2;
     for (let i = items.length - 1; i >= 0; i--) {
       const it = items[i];
+      // the magnet power-up gently curves nearby clean data toward the player
+      if (it.type === 'good' && magnetTimer > 0 && it.z < 0.75) {
+        it.lane += (playerX - it.lane) * Math.min(1, dt * MAGNET_PULL);
+      }
       it.z -= it.vz * dt;
       const p = 1 - it.z;                        // progress toward the player: 0 = far, 1 = arrived
       it.x = VP_X + (it.lane - VP_X) * p;
@@ -7230,12 +7472,19 @@ panels.forEach(p => observer.observe(p));
       const px = playerX - PLAYER_W / 2;
       if (p > 0 && rectCircleCollide(px, py, PLAYER_W, PLAYER_H, it.x, it.y, it.r)) {
         if (it.type === 'good') {
-          score += 10;
+          const mult = 1 + Math.min(COMBO_MAX_MULT - 1, Math.floor(streak / COMBO_STEP));
+          const gained = 10 * mult;
+          score += gained;
           streak += 1;
           threat = Math.max(0, threat - THREAT_RELIEF_PER_CATCH);
           statEl.innerHTML = 'score: <strong>' + score + '</strong>';
           spawnParticles(it.x, it.y, '#22D3EE', 14, 30, 150);
+          spawnFloatText(it.x, it.y, '+' + gained + (mult > 1 ? ' ×' + mult : ''), '#22D3EE');
+          sfxCatch(mult);
           items.splice(i, 1);
+        } else if (shieldTimer > 0) {
+          spawnParticles(it.x, it.y, '#818CF8', 10, 15, 120);
+          items.splice(i, 1); // shielded — the hit just deflects off harmlessly
         } else if (invulnTimer > 0) {
           items.splice(i, 1); // still invulnerable from the last hit — pass through harmlessly
         } else if (threat >= RED_THREAT) {
@@ -7286,6 +7535,26 @@ panels.forEach(p => observer.observe(p));
     ctx.shadowColor = '#7DD3FC'; ctx.shadowBlur = 16;
     ctx.arc(VP_X, VP_Y, 3, 0, Math.PI * 2); ctx.fill();
     ctx.shadowBlur = 0;
+
+    if (surging) {
+      ctx.fillStyle = 'rgba(248,113,113,.08)';
+      ctx.fillRect(0, 0, W, H);
+    }
+  }
+
+  function drawWarpStreaks() {
+    const count = 5 + Math.floor(threat * 9) + (surging ? 5 : 0);
+    const speedMul = 0.5 + threat * 1.1 + (surging ? 0.6 : 0);
+    for (let i = 0; i < count; i++) {
+      const laneK = (i % 9) - 4;
+      const bx = VP_X + laneK * (W / 8);
+      const rp = ((tunnelHue * speedMul * 0.5) + i * 0.61803) % 1;
+      const p1 = rp, p2 = Math.max(0, rp - 0.06);
+      const a = projectPoint(bx, p1), b = projectPoint(bx, p2);
+      ctx.strokeStyle = 'rgba(232,121,249,' + (0.12 + rp * 0.32).toFixed(3) + ')';
+      ctx.lineWidth = 1.1;
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    }
   }
 
   function drawCircuitFloor() {
@@ -7406,6 +7675,13 @@ panels.forEach(p => observer.observe(p));
     ctx.strokeStyle = critical ? 'rgba(248,113,113,.9)' : 'rgba(34,211,238,.9)';
     ctx.lineWidth = 1.5; ctx.stroke();
     ctx.shadowBlur = 0;
+    if (shieldTimer > 0) {
+      ctx.beginPath();
+      ctx.strokeStyle = 'rgba(129,140,248,' + (0.5 + Math.sin(tunnelHue * 6) * 0.25).toFixed(3) + ')';
+      ctx.lineWidth = 1.4;
+      ctx.arc(0, -2, PLAYER_W * 0.62, tunnelHue * 2, tunnelHue * 2 + Math.PI * 1.5);
+      ctx.stroke();
+    }
     ctx.restore();
   }
 
@@ -7453,6 +7729,57 @@ panels.forEach(p => observer.observe(p));
       ctx.shadowBlur = 0;
       ctx.restore();
     });
+  }
+
+  const POWERUP_GLYPH = { rapid: 'R', magnet: 'M', shield: 'S' };
+  const POWERUP_COLOR = { rapid: '#E879F9', magnet: '#22D3EE', shield: '#818CF8' };
+  function drawPowerups() {
+    powerups.forEach((pu) => {
+      const hue = (tunnelHue * 90 + pu.seed) % 360;
+      ctx.save();
+      ctx.translate(pu.x, pu.y);
+      ctx.rotate(tunnelHue * 1.4);
+      ctx.beginPath();
+      ctx.strokeStyle = 'hsl(' + hue.toFixed(0) + ',90%,68%)';
+      ctx.lineWidth = 1.6;
+      ctx.shadowColor = POWERUP_COLOR[pu.type]; ctx.shadowBlur = 10;
+      const r = pu.r;
+      ctx.moveTo(0, -r); ctx.lineTo(r, 0); ctx.lineTo(0, r); ctx.lineTo(-r, 0); ctx.closePath();
+      ctx.fillStyle = POWERUP_COLOR[pu.type] + '33';
+      ctx.fill(); ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.restore();
+      if (pu.r > 5) {
+        ctx.font = Math.max(8, pu.r).toFixed(1) + 'px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#F0F8FF';
+        ctx.fillText(POWERUP_GLYPH[pu.type], pu.x, pu.y + 0.5);
+        ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      }
+    });
+  }
+
+  function drawFloatTexts() {
+    ctx.font = '11px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    floatTexts.forEach((f) => {
+      ctx.globalAlpha = Math.max(0, f.life / f.maxLife);
+      ctx.fillStyle = f.color;
+      ctx.fillText(f.text, f.x, f.y);
+    });
+    ctx.globalAlpha = 1;
+    ctx.textAlign = 'left';
+  }
+
+  function drawShockwaves() {
+    shockwaves.forEach((s) => {
+      const a = Math.max(0, 1 - s.life / s.maxLife);
+      ctx.beginPath();
+      ctx.strokeStyle = s.color; ctx.globalAlpha = a * 0.7; ctx.lineWidth = 2.2;
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.stroke();
+    });
+    ctx.globalAlpha = 1;
   }
 
   function mixCyanMagenta(t) {
@@ -7507,16 +7834,34 @@ panels.forEach(p => observer.observe(p));
     ctx.fillStyle = sysColor;
     ctx.fillText(sysLabel, W / 2, m + 12);
 
-    // streak — consecutive clean catches since the last hit
+    // streak — consecutive clean catches since the last hit, with its combo multiplier
+    const comboMult = 1 + Math.min(COMBO_MAX_MULT - 1, Math.floor(streak / COMBO_STEP));
     ctx.textAlign = 'left';
     ctx.fillStyle = 'rgba(196,181,253,.75)';
-    ctx.fillText('STREAK ' + streak, m + bl + 6, H - m - 6);
+    ctx.fillText('STREAK ' + streak + (comboMult > 1 ? '  ×' + comboMult : ''), m + bl + 6, H - m - 6);
 
-    // invulnerability readout, only while it's active
+    // invulnerability readout, only while it's active (distinct from the SHIELD power-up)
     if (invulnTimer > 0) {
       ctx.textAlign = 'right';
       ctx.fillStyle = 'rgba(125,211,252,' + (0.4 + Math.sin(tunnelHue * 14) * 0.3).toFixed(3) + ')';
-      ctx.fillText('SHIELDED', W - m - bl - 6, H - m - 6);
+      ctx.fillText('INVULN', W - m - bl - 6, H - m - 6);
+    }
+
+    // surge warning takes priority over the power-up readout on the same line
+    if (surging) {
+      ctx.textAlign = 'center';
+      ctx.fillStyle = Math.sin(tunnelHue * 10) > 0 ? 'rgba(248,113,113,.95)' : 'rgba(248,113,113,.4)';
+      ctx.fillText('⚠ BREACH SURGE', W / 2, m + 25);
+    } else {
+      const puParts = [];
+      if (rapidTimer > 0) puParts.push('RAPID ' + rapidTimer.toFixed(1));
+      if (magnetTimer > 0) puParts.push('MAGNET ' + magnetTimer.toFixed(1));
+      if (shieldTimer > 0) puParts.push('SHIELD ' + shieldTimer.toFixed(1));
+      if (puParts.length) {
+        ctx.textAlign = 'center';
+        ctx.fillStyle = 'rgba(232,121,249,.75)';
+        ctx.fillText(puParts.join('   '), W / 2, m + 25);
+      }
     }
 
     const segs = 10, segW = 7, segH = 8, gap = 2;
@@ -7551,14 +7896,18 @@ panels.forEach(p => observer.observe(p));
     }
 
     drawTunnel();
+    drawWarpStreaks();
     drawCircuitFloor();
     drawCodeBits();
 
     items.slice().sort((a, b) => a.z - b.z).reverse().forEach(drawItem);
+    drawPowerups();
     drawFizzles();
+    drawShockwaves();
     drawProjectiles();
     drawParticles();
     drawPlayer();
+    drawFloatTexts();
 
     // vignette
     const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.85);
@@ -7570,6 +7919,15 @@ panels.forEach(p => observer.observe(p));
     if (flash > 0) {
       ctx.fillStyle = 'rgba(248,113,113,' + (flash * 0.45).toFixed(3) + ')';
       ctx.fillRect(0, 0, W, H);
+    }
+
+    // a cheap chromatic-fringe edge glitch once things get critical
+    if (!dying && threat >= RED_THREAT) {
+      const fringe = 0.1 + Math.sin(tunnelHue * 8) * 0.05;
+      ctx.fillStyle = 'rgba(248,113,113,' + fringe.toFixed(3) + ')';
+      ctx.fillRect(0, 0, 4, H);
+      ctx.fillStyle = 'rgba(34,211,238,' + fringe.toFixed(3) + ')';
+      ctx.fillRect(W - 4, 0, 4, H);
     }
     ctx.restore();
 
@@ -7593,6 +7951,8 @@ panels.forEach(p => observer.observe(p));
     running = true;
     lastTime = performance.now();
     if (pillText) pillText.textContent = 'HUNTING';
+    ensureAudio();
+    startAmbient();
     rafId = requestAnimationFrame(loop);
   }
 
@@ -7600,6 +7960,7 @@ panels.forEach(p => observer.observe(p));
     running = false;
     dying = false;
     if (rafId) cancelAnimationFrame(rafId);
+    stopAmbient();
     if (score > best) {
       best = score;
       localStorage.setItem('ghostwireBest', String(best));
@@ -7652,8 +8013,63 @@ panels.forEach(p => observer.observe(p));
     submitBtn.textContent = 'Submit Score';
   });
 
+  // -- animated title sequence: a condensed version of the site's own
+  //    boot-glyph intro, scoped to this card — decodes "GHOSTWIRE" in after
+  //    the </> glyph grows/flickers, then hands off to the normal Play screen.
+  //    Runs once per page load; later "Try Again" screens skip straight to
+  //    the normal overlay content since it's already revealed. --------------
+  function runTitleSeq() {
+    const seq = document.getElementById('game-title-seq');
+    const iconEl = document.getElementById('game-title-icon');
+    const wordEl = document.getElementById('game-title-word');
+    const mainEl = document.getElementById('game-overlay-main');
+    if (!seq || !iconEl || !wordEl || !mainEl) return;
+    const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduceMotion) {
+      seq.hidden = true;
+      mainEl.classList.remove('gt-hidden');
+      return;
+    }
+    const GT_GLYPHS = '!<>-_\\/[]{}=+*^?#';
+    function decode(el, text, dur, onDone) {
+      const stagger = dur / text.length;
+      const t0 = performance.now();
+      function tick(now) {
+        const e = now - t0;
+        let out = '';
+        for (let i = 0; i < text.length; i++) {
+          out += e >= i * stagger
+            ? '<span class="gt-char-locked">' + text[i] + '</span>'
+            : GT_GLYPHS[(Math.random() * GT_GLYPHS.length) | 0];
+        }
+        el.innerHTML = out;
+        if (e < dur) requestAnimationFrame(tick);
+        else {
+          el.innerHTML = text.split('').map((c) => '<span class="gt-char-locked">' + c + '</span>').join('');
+          if (onDone) onDone();
+        }
+      }
+      requestAnimationFrame(tick);
+    }
+    setTimeout(() => iconEl.classList.add('gt-grown'), 120);
+    setTimeout(() => {
+      decode(wordEl, 'GHOSTWIRE', 700, () => {
+        setTimeout(() => {
+          seq.style.transition = 'opacity .5s ease';
+          seq.style.opacity = '0';
+          setTimeout(() => {
+            seq.hidden = true;
+            mainEl.classList.remove('gt-hidden');
+            mainEl.style.animation = 'gtFadeIn .5s ease';
+          }, 500);
+        }, 450);
+      });
+    }, 500);
+  }
+
   draw(); // idle frame so the canvas isn't blank before the first Play
   loadLeaderboard();
+  runTitleSeq();
 })();
 </script>
 </body></html>

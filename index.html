@@ -2374,6 +2374,8 @@
   .game-title-seq::before {
     content: ''; position: absolute; inset: -10% -25%; z-index: 1; pointer-events: none;
     background: repeating-linear-gradient(0deg, rgba(232,121,249,.5) 0 1px, transparent 1px 3px);
+    -webkit-mask-image: radial-gradient(ellipse 60% 55% at center, #000 35%, transparent 78%);
+    mask-image: radial-gradient(ellipse 60% 55% at center, #000 35%, transparent 78%);
     opacity: 0;
   }
   .game-title-seq.gt-noise::before { animation: gtNoiseBurst .3s steps(1, end); }
@@ -3317,7 +3319,7 @@
 <section id="game" class="panel">
   <div class="panel-inner">
     <span class="section-label">Try It</span>
-    <h2>Dive the datastream,<br>purge the corruption</h2>
+    <h2>Dive into the data stream,<br>purge the corruption</h2>
     <p class="lead" style="margin:0 auto 2.2rem;">A small arcade game built from scratch — you're a hunter-process diving through a live data tunnel. Steer with arrow keys, A/D, drag, or phone tilt, pull in verified data shards for points — and the more you collect, the lower your THREAT runs, plus your streak builds a score multiplier. Fire on corrupted fragments to fizzle them out of existence, grab the rare prismatic power-ups, and survive the occasional breach surge. Early hits just cost points; once THREAT goes red, one hit ends the run.</p>
     <div class="algo-card">
       <div class="cc-titlebar">
@@ -7176,23 +7178,42 @@ panels.forEach(p => observer.observe(p));
   }
 
   // -- synthesized audio: oscillators/noise, no sample assets, consistent
-  //    with the rest of this zero-dependency build -----------------------
-  let audioCtx = null, ambientOsc = null, ambientGain = null;
+  //    with the rest of this zero-dependency build. Filtered sweeps +
+  //    detuned unison layers are what give these that cyberpunk/synth
+  //    edge instead of plain beeps. ---------------------------------
+  let audioCtx = null, ambientOsc = null, ambientGain = null, ambientFilter = null;
   function ensureAudio() {
     if (audioCtx) { if (audioCtx.state === 'suspended') audioCtx.resume(); return; }
     try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (_) { audioCtx = null; }
   }
-  function playTone(freq, dur, type, vol, slideTo, delay) {
+  function playTone(freq, dur, type, vol, slideTo, delay, opts) {
     if (!audioCtx || !soundOn) return;
+    opts = opts || {};
     const t0 = audioCtx.currentTime + (delay || 0);
-    const osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
-    osc.type = type || 'sine';
-    osc.frequency.setValueAtTime(freq, t0);
-    if (slideTo) osc.frequency.exponentialRampToValueAtTime(Math.max(20, slideTo), t0 + dur);
-    gain.gain.setValueAtTime(vol || 0.15, t0);
-    gain.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
-    osc.connect(gain); gain.connect(audioCtx.destination);
-    osc.start(t0); osc.stop(t0 + dur + 0.03);
+    function voice(detuneCents, voiceVol) {
+      const osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
+      osc.type = type || 'sine';
+      osc.frequency.setValueAtTime(freq, t0);
+      if (detuneCents) osc.detune.setValueAtTime(detuneCents, t0);
+      if (slideTo) osc.frequency.exponentialRampToValueAtTime(Math.max(20, slideTo), t0 + dur);
+      let lastNode = osc;
+      if (opts.filterFreq) {
+        const filt = audioCtx.createBiquadFilter();
+        filt.type = 'lowpass';
+        filt.frequency.setValueAtTime(opts.filterFreq, t0);
+        filt.Q.value = opts.filterQ || 7;
+        if (opts.filterSlideTo) filt.frequency.exponentialRampToValueAtTime(Math.max(80, opts.filterSlideTo), t0 + dur);
+        lastNode.connect(filt);
+        lastNode = filt;
+      }
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.exponentialRampToValueAtTime(voiceVol, t0 + Math.min(0.01, dur * 0.2));
+      gain.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+      lastNode.connect(gain); gain.connect(audioCtx.destination);
+      osc.start(t0); osc.stop(t0 + dur + 0.03);
+    }
+    voice(0, vol || 0.15);
+    if (opts.detune) voice(opts.detune, (vol || 0.15) * 0.55);
   }
   function playNoise(dur, vol) {
     if (!audioCtx || !soundOn) return;
@@ -7207,38 +7228,44 @@ panels.forEach(p => observer.observe(p));
     src.connect(gain); gain.connect(audioCtx.destination);
     src.start();
   }
-  function sfxShoot() { playTone(760, 0.08, 'square', 0.07, 1300); }
-  function sfxCatch(mult) { playTone(560 + mult * 60, 0.12, 'sine', 0.14, 900 + mult * 80); }
-  function sfxFizzle() { playNoise(0.12, 0.12); playTone(220, 0.1, 'sawtooth', 0.06, 60); }
-  function sfxHit() { playTone(180, 0.18, 'sawtooth', 0.18, 55); playNoise(0.1, 0.1); }
-  function sfxDeath() { playNoise(0.5, 0.22); playTone(280, 0.6, 'sawtooth', 0.16, 35); }
+  function sfxShoot() { playTone(1500, 0.09, 'square', 0.065, 260, 0, { filterFreq: 3400, filterSlideTo: 500, filterQ: 6 }); }
+  function sfxCatch(mult) { playTone(660 + mult * 70, 0.11, 'triangle', 0.13, 1150 + mult * 90, 0, { detune: 16 }); }
+  function sfxFizzle() { playNoise(0.1, 0.12); playTone(340, 0.12, 'sawtooth', 0.07, 70, 0, { filterFreq: 2100, filterSlideTo: 220, filterQ: 5 }); }
+  function sfxHit() { playTone(170, 0.2, 'sawtooth', 0.19, 45, 0, { filterFreq: 1300, filterSlideTo: 150, filterQ: 10 }); playNoise(0.12, 0.11); }
+  function sfxDeath() { playNoise(0.55, 0.22); playTone(240, 0.65, 'sawtooth', 0.17, 26, 0, { filterFreq: 900, filterSlideTo: 55, filterQ: 6 }); }
   function sfxPowerup() {
-    playTone(520, 0.1, 'triangle', 0.12, null, 0);
-    playTone(680, 0.1, 'triangle', 0.12, null, 0.08);
-    playTone(880, 0.14, 'triangle', 0.13, null, 0.16);
+    playTone(540, 0.1, 'square', 0.1, null, 0, { detune: 11 });
+    playTone(720, 0.1, 'square', 0.1, null, 0.07, { detune: 11 });
+    playTone(960, 0.15, 'square', 0.11, null, 0.14, { detune: 11 });
   }
-  function sfxSurge() { playTone(120, 0.4, 'sawtooth', 0.14, 90); }
+  function sfxSurge() { playTone(90, 0.45, 'sawtooth', 0.15, 140, 0, { filterFreq: 650, filterSlideTo: 2400, filterQ: 12 }); }
   function startAmbient() {
     if (!audioCtx) return;
     ambientOsc = audioCtx.createOscillator();
     ambientGain = audioCtx.createGain();
-    ambientOsc.type = 'sine';
-    ambientOsc.frequency.value = 48;
+    ambientFilter = audioCtx.createBiquadFilter();
+    ambientOsc.type = 'sawtooth';
+    ambientOsc.frequency.value = 46;
+    ambientFilter.type = 'lowpass';
+    ambientFilter.frequency.value = 180;
+    ambientFilter.Q.value = 5;
     ambientGain.gain.value = 0.0001;
-    ambientOsc.connect(ambientGain); ambientGain.connect(audioCtx.destination);
+    ambientOsc.connect(ambientFilter); ambientFilter.connect(ambientGain); ambientGain.connect(audioCtx.destination);
     ambientOsc.start();
   }
   function stopAmbient() {
     if (ambientOsc) { try { ambientOsc.stop(); } catch (_) {} ambientOsc = null; }
     ambientGain = null;
+    ambientFilter = null;
   }
   function updateAmbient() {
     if (!audioCtx || !ambientOsc || !ambientGain) return;
     if (!soundOn) { ambientGain.gain.setTargetAtTime(0.0001, audioCtx.currentTime, 0.1); return; }
-    const freq = 46 + threat * 46;
+    const freq = 44 + threat * 42;
     ambientOsc.frequency.setTargetAtTime(freq, audioCtx.currentTime, 0.25);
+    if (ambientFilter) ambientFilter.frequency.setTargetAtTime(160 + threat * 950, audioCtx.currentTime, 0.3);
     const pulseRate = 1.3 + threat * 3.4;
-    const g = 0.012 + (0.5 + 0.5 * Math.sin(tunnelHue * pulseRate * Math.PI * 2)) * (0.01 + threat * 0.026);
+    const g = 0.009 + (0.5 + 0.5 * Math.sin(tunnelHue * pulseRate * Math.PI * 2)) * (0.007 + threat * 0.02);
     ambientGain.gain.setTargetAtTime(g, audioCtx.currentTime, 0.05);
   }
 

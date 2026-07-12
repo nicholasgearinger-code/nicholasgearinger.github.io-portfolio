@@ -267,12 +267,28 @@
     filter: drop-shadow(0 0 6px rgba(34,211,238,.35));
   }
   nav ul {
+    position: relative;
     list-style: none; display: flex; gap: .6rem; align-items: center;
     overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none;
     max-width: 100%;
   }
   nav ul::-webkit-scrollbar { display: none; }
+  /* Sliding pill that glides beneath the active nav link as you scroll
+     between sections, instead of the highlight just snapping from one
+     link to the next. */
+  .nav-indicator {
+    position: absolute; top: 0; left: 0; height: 100%;
+    border-radius: 100px;
+    background: linear-gradient(120deg, var(--cyan), var(--blue));
+    box-shadow: 0 10px 28px -10px rgba(34,211,238,.65);
+    opacity: 0; pointer-events: none; z-index: 0;
+    transition: transform .45s cubic-bezier(.22,1,.36,1),
+                width .45s cubic-bezier(.22,1,.36,1),
+                opacity .3s ease;
+  }
+  .nav-indicator.visible { opacity: 1; }
   nav a {
+    position: relative; z-index: 1;
     text-decoration: none; font-size: .84rem; font-weight: 600;
     letter-spacing: .01em;
     padding: .62rem 1.1rem; border-radius: 100px;
@@ -284,9 +300,8 @@
   nav a:hover { color: var(--white); border-color: var(--cyan); background: rgba(34,211,238,.08); transform: translateY(-2px); }
   nav a.nav-active {
     color: #041018;
-    background: linear-gradient(120deg, var(--cyan), var(--blue));
     border-color: transparent;
-    box-shadow: 0 10px 28px -10px rgba(34,211,238,.65);
+    background: transparent;
   }
   .nav-cta {
     padding: .62rem 1.3rem;
@@ -335,6 +350,13 @@
       border-radius: 100px; text-align: center;
     }
     nav ul li a.nav-cta { display: block; width: 100%; margin-top: .4rem; }
+    /* The sliding pill only makes sense against the desktop's single-row
+       nav; in the stacked mobile drawer, fall back to a solid fill. */
+    .nav-indicator { display: none; }
+    nav ul li a.nav-active {
+      background: linear-gradient(120deg, var(--cyan), var(--blue));
+      box-shadow: 0 10px 28px -10px rgba(34,211,238,.65);
+    }
   }
 
 
@@ -976,9 +998,32 @@
 
   .panel-inner { max-width: 1100px; width: 100%; }
 
+  /* Content inside each panel cascades in a beat after the panel itself
+     pops into view, instead of the label/heading/body/content all
+     appearing as one flat block. */
+  .panel-inner > * {
+    opacity: 0;
+    transform: translateY(18px);
+    transition: opacity .6s cubic-bezier(.22,1,.36,1), transform .6s cubic-bezier(.22,1,.36,1);
+  }
+  .panel.visible .panel-inner > * { opacity: 1; transform: translateY(0); }
+  .panel.visible .panel-inner > *:nth-child(1) { transition-delay: .05s; }
+  .panel.visible .panel-inner > *:nth-child(2) { transition-delay: .16s; }
+  .panel.visible .panel-inner > *:nth-child(3) { transition-delay: .27s; }
+  .panel.visible .panel-inner > *:nth-child(4) { transition-delay: .38s; }
+  .panel.visible .panel-inner > *:nth-child(n+5) { transition-delay: .45s; }
+
   .section-label {
     font-size: .7rem; letter-spacing: .15em; text-transform: uppercase;
-    color: var(--mint); margin-bottom: 1rem; display: block;
+    color: var(--mint); margin-bottom: 1rem;
+    display: inline-flex; align-items: center; gap: .6em;
+  }
+  .section-label::before {
+    content: '';
+    width: 1.5em; height: 2px; flex-shrink: 0;
+    background: currentColor;
+    box-shadow: 0 0 6px currentColor, 0 0 2px currentColor;
+    border-radius: 2px;
   }
   .section-label.amber { color: var(--amber); }
   .section-label.sky   { color: var(--sky); }
@@ -1991,6 +2036,7 @@
 
   @media (prefers-reduced-motion: reduce) {
     .panel { opacity: 1; transform: none; transition: none; }
+    .panel-inner > * { opacity: 1; transform: none; transition: none; }
     .cursor-glow { display: none; }
     .hero-continue-btn { animation: none; }
     .hero-continue-btn::before { animation: none; opacity: 0; }
@@ -7720,6 +7766,7 @@ panels.forEach(p => observer.observe(p));
 <script>
 /* -- NAV SCROLL-SPY: highlights the current section's nav link, mirrors resume-tab.active -- */
 (function navScrollSpy() {
+  const navUl = document.getElementById('nav-menu');
   const links = Array.from(document.querySelectorAll('nav ul li a[href^="#"]'));
   if (!links.length) return;
   const map = new Map();
@@ -7730,18 +7777,44 @@ panels.forEach(p => observer.observe(p));
   });
   if (!map.size) return;
 
+  // Sliding pill that glides beneath the active link instead of the
+  // highlight just snapping straight from one link to the next.
+  let indicator = null;
+  if (navUl) {
+    indicator = document.createElement('span');
+    indicator.className = 'nav-indicator';
+    indicator.setAttribute('aria-hidden', 'true');
+    navUl.insertBefore(indicator, navUl.firstChild);
+  }
+
+  function moveIndicator(a) {
+    if (!indicator) return;
+    indicator.style.width = a.offsetWidth + 'px';
+    indicator.style.transform = `translateX(${a.offsetLeft}px)`;
+    indicator.classList.add('visible');
+  }
+
   function clearActive() { links.forEach((a) => a.classList.remove('nav-active')); }
 
   const io = new IntersectionObserver((entries) => {
     entries.forEach((entry) => {
       if (entry.isIntersecting) {
         clearActive();
-        map.get(entry.target).classList.add('nav-active');
+        const a = map.get(entry.target);
+        a.classList.add('nav-active');
+        moveIndicator(a);
       }
     });
   }, { rootMargin: '-45% 0px -50% 0px', threshold: 0 });
 
   map.forEach((_, section) => io.observe(section));
+
+  // Keep the pill aligned with its link if the layout reflows (resize,
+  // orientation change, nav switching between desktop/mobile layouts).
+  window.addEventListener('resize', () => {
+    const current = links.find((a) => a.classList.contains('nav-active'));
+    if (current) moveIndicator(current);
+  });
 })();
 </script>
 <script>

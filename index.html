@@ -372,10 +372,11 @@
   .nav-logo {
     font-family: 'JetBrains Mono', monospace;
     font-weight: 700; font-size: 1.25rem; letter-spacing: -.02em;
-    color: var(--white);
-    text-shadow: 0 0 10px rgba(34,211,238,.5), 0 0 20px rgba(34,211,238,.22);
+    text-shadow: 0 0 10px rgba(34,211,238,.4), 0 0 18px rgba(232,121,249,.2);
   }
-  .nav-logo span { color: var(--magenta); }
+  .nav-logo-lt { color: var(--cyan); }
+  .nav-logo-slash { color: var(--violet); }
+  .nav-logo-gt { color: var(--magenta); }
   nav ul {
     list-style: none; display: flex; gap: .6rem; align-items: center;
     overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none;
@@ -2341,6 +2342,8 @@
     touch-action: manipulation; -webkit-tap-highlight-color: transparent;
   }
   .game-mute-btn.is-muted { color: rgba(148,163,184,.7); border-color: rgba(148,163,184,.35); background: rgba(148,163,184,.08); }
+  .game-quit-btn { font-size: .78rem; padding: .4rem .9rem; }
+  .game-quit-btn:hover { border-color: rgba(248,113,113,.5); color: #F87171; }
   .game-overlay {
     position: absolute; inset: 0; z-index: 2;
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .8rem;
@@ -2527,7 +2530,7 @@
 <div id="custom-cursor" aria-hidden="true"></div>
 <!-- NAV -->
 <nav aria-label="Primary">
-  <div class="nav-logo" aria-label="Nicholas Gearinger — home">&lt;<span>/</span>&gt;</div>
+  <div class="nav-logo" aria-label="Nicholas Gearinger — home"><span class="nav-logo-lt">&lt;</span><span class="nav-logo-slash">/</span><span class="nav-logo-gt">&gt;</span></div>
   <button class="nav-toggle" id="nav-toggle" aria-label="Toggle navigation menu" aria-expanded="false" aria-controls="nav-menu">
     <span></span><span></span><span></span>
   </button>
@@ -3309,6 +3312,7 @@
       <div class="algo-footer">
         <div class="algo-stat" id="game-stat">score: <strong>0</strong></div>
         <div class="algo-stat" id="game-best-stat">best: <strong>0</strong></div>
+        <button type="button" class="btn-ghost game-quit-btn" id="game-quit-btn" hidden>✕ Quit</button>
       </div>
     </div>
 
@@ -6954,8 +6958,11 @@ panels.forEach(p => observer.observe(p));
   const fireBtn = document.getElementById('game-fire-btn');
   const gyroBtn = document.getElementById('game-gyro-btn');
   const muteBtn = document.getElementById('game-mute-btn');
+  const quitBtn = document.getElementById('game-quit-btn');
   if (!canvas || !startBtn) return;
   if (fireBtn) fireBtn.hidden = false;
+  const DEFAULT_TITLE = overlayTitle.textContent;
+  const DEFAULT_SUB = overlaySub.textContent;
 
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
@@ -7951,6 +7958,7 @@ panels.forEach(p => observer.observe(p));
     running = true;
     lastTime = performance.now();
     if (pillText) pillText.textContent = 'HUNTING';
+    if (quitBtn) quitBtn.hidden = false;
     ensureAudio();
     startAmbient();
     rafId = requestAnimationFrame(loop);
@@ -7961,6 +7969,7 @@ panels.forEach(p => observer.observe(p));
     dying = false;
     if (rafId) cancelAnimationFrame(rafId);
     stopAmbient();
+    if (quitBtn) quitBtn.hidden = true;
     if (score > best) {
       best = score;
       localStorage.setItem('ghostwireBest', String(best));
@@ -7972,6 +7981,22 @@ panels.forEach(p => observer.observe(p));
     startBtn.textContent = '\u21BB Try Again';
     scoreEntry.hidden = false;
     if (pillText) pillText.textContent = 'CORRUPTED';
+  }
+
+  function quitGame() {
+    if (!running && !dying) return;
+    running = false;
+    dying = false;
+    if (rafId) cancelAnimationFrame(rafId);
+    stopAmbient();
+    if (quitBtn) quitBtn.hidden = true;
+    overlay.hidden = false;
+    overlayTitle.textContent = DEFAULT_TITLE;
+    overlaySub.textContent = DEFAULT_SUB;
+    startBtn.textContent = '\u25B6 Play';
+    scoreEntry.hidden = true;
+    submitNote.textContent = '';
+    if (pillText) pillText.textContent = 'READY';
   }
 
   async function loadLeaderboard() {
@@ -7988,6 +8013,7 @@ panels.forEach(p => observer.observe(p));
   }
 
   startBtn.addEventListener('click', start);
+  if (quitBtn) quitBtn.addEventListener('click', quitGame);
   submitBtn.addEventListener('click', async () => {
     const name = (nameInput.value || 'ANON').trim().toUpperCase().slice(0, 12) || 'ANON';
     submitBtn.disabled = true;
@@ -8069,7 +8095,19 @@ panels.forEach(p => observer.observe(p));
 
   draw(); // idle frame so the canvas isn't blank before the first Play
   loadLeaderboard();
-  runTitleSeq();
+  if ('IntersectionObserver' in window) {
+    const titleSeqObserver = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          runTitleSeq();
+          titleSeqObserver.disconnect();
+        }
+      });
+    }, { threshold: 0.35 });
+    titleSeqObserver.observe(document.getElementById('game-wrap'));
+  } else {
+    runTitleSeq();
+  }
 })();
 </script>
 </body></html>

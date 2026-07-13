@@ -7151,23 +7151,29 @@ panels.forEach(p => observer.observe(p));
   ];
   function pick(arr) { return arr[(Math.random() * arr.length) | 0]; }
 
-  const SKYLINE_KINDS = ['chip', 'capacitor', 'diode', 'resistor', 'antenna', 'tower'];
+  const SKYLINE_KINDS = ['chip', 'capacitor', 'diode', 'resistor', 'antenna', 'tower', 'rack', 'girder'];
   // Each level era (violet/blue/green/yellow/orange/red, looping every 5
   // levels) now gets its own skyline silhouette mix, ring shape, and a
   // distinct backdrop overlay — not just a hue-rotate of the same shapes —
   // so the tunnel actually reads as a different "zone" per era, not just a
-  // different color of the same zone.
+  // different color of the same zone. 'rack' (blinking server rack) and
+  // 'girder' (industrial cross-braced beam) are dedicated to the server-farm
+  // and hazard-zone eras so those two also get a shape found nowhere else.
   const ERA_SKYLINE_KINDS = [
     ['chip', 'capacitor', 'diode', 'resistor'],   // 0 violet — circuit board (original look)
     ['chip', 'antenna', 'tower'],                  // 1 blue — network/relay zone
-    ['tower', 'antenna', 'capacitor'],              // 2 green — server farm
-    ['resistor', 'diode', 'chip'],                  // 3 yellow — industrial/hazard zone
+    ['tower', 'antenna', 'rack'],                   // 2 green — server farm
+    ['resistor', 'diode', 'girder'],                // 3 yellow — industrial/hazard zone
     ['tower', 'resistor', 'antenna'],               // 4 orange — reactor zone
     ['antenna', 'tower', 'diode'],                  // 5 red — critical/breach zone
   ];
   const ERA_RING_SHAPES = ['line', 'dashed', 'double', 'zigzag', 'dashed', 'double'];
   const ERA_OVERLAYS = ['none', 'grid', 'rain', 'stripes', 'embers', 'scanlines'];
+  // Human-readable zone names shown on the HUD and flashed on transition —
+  // gives each 5-level era an identity beyond just a color shift.
+  const ERA_NAMES = ['GRID SECTOR', 'RELAY NETWORK', 'SERVER FARM', 'HAZARD ZONE', 'REACTOR CORE', 'BREACH ZONE'];
   function currentEraIdx() { return Math.floor(level / 5) % LEVEL_ERA_HUES.length; }
+  function currentEraName() { return ERA_NAMES[currentEraIdx()]; }
   // The tunnel/skyline/circuit palette steps through a fixed 6-color era
   // every 5 levels — violet, blue, green, yellow, orange, red — then loops.
   // Each value is a hue-rotate offset (deg) from the scene's native violet
@@ -8000,7 +8006,7 @@ panels.forEach(p => observer.observe(p));
         currentEra = era;
         eraFlashTimer = 0.6;
         shakeMag = Math.max(shakeMag, 10);
-        spawnFloatText(W / 2, VP_Y + 80, '// COLOR SHIFT', '#F0F8FF');
+        spawnFloatText(W / 2, VP_Y + 80, '// ENTERING ' + ERA_NAMES[era], '#F0F8FF');
       }
       checkWeaponUnlocks();
       // a milestone boss (alternating FIREWALL/WORM) greets every new color
@@ -8344,6 +8350,98 @@ panels.forEach(p => observer.observe(p));
     }
   }
 
+  // One bespoke set-piece per era, on top of the generic overlay above —
+  // these are the elements that make each zone feel like an actual different
+  // place (a network relay, a reactor core, a breach in progress) rather than
+  // just a different palette on the same grid/rain/stripes/embers/scanlines.
+  function drawEraAccent() {
+    const idx = currentEraIdx();
+    if (idx === 0) {
+      // GRID SECTOR — drifting holographic data-node blips, diamonds slowly
+      // rising and pulsing, like a circuit board's own telemetry made visible
+      const c = eraRGB([125, 211, 252]);
+      for (let i = 0; i < 10; i++) {
+        const seed = i * 71.3;
+        const x = (seed * 41) % W;
+        const speed = 10 + (i % 4) * 6;
+        const y = H - ((tunnelHue * speed + seed * 19) % (H + 20));
+        const pulse = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(tunnelHue * 2.6 + seed));
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(Math.PI / 4);
+        const r = 2 + (i % 3);
+        ctx.fillStyle = 'rgba(' + c.join(',') + ',' + (0.1 + pulse * 0.14).toFixed(3) + ')';
+        ctx.fillRect(-r, -r, r * 2, r * 2);
+        ctx.restore();
+      }
+    } else if (idx === 1) {
+      // RELAY NETWORK — signal pulse rings expanding outward from a couple
+      // of fixed relay points flanking the tunnel, like ping sweeps
+      const c = eraRGB([232, 121, 249]);
+      const relays = [{ lane: VP_X - W * 0.32, p: 0.12 }, { lane: VP_X + W * 0.32, p: 0.12 }];
+      relays.forEach((r, ri) => {
+        const pos = projectPoint(r.lane, r.p);
+        for (let k = 0; k < 3; k++) {
+          const rp = ((tunnelHue * 0.45 + k / 3 + ri * 0.4) % 1);
+          const rad = 3 + rp * 26;
+          ctx.beginPath();
+          ctx.strokeStyle = 'rgba(' + c.join(',') + ',' + ((1 - rp) * 0.22).toFixed(3) + ')';
+          ctx.lineWidth = 1;
+          ctx.arc(pos.x, pos.y, rad, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      });
+    } else if (idx === 2) {
+      // SERVER FARM — a soft rising data-flow bar near each edge, like
+      // activity graphs climbing on a rack readout, on top of the rack silhouettes
+      const c = eraRGB([110, 231, 183]);
+      [24, W - 24].forEach((x, i) => {
+        const barH = 20 + 14 * (0.5 + 0.5 * Math.sin(tunnelHue * (2 + i) + i * 3));
+        const g = ctx.createLinearGradient(0, H - barH, 0, H);
+        g.addColorStop(0, 'rgba(' + c.join(',') + ',0)');
+        g.addColorStop(1, 'rgba(' + c.join(',') + ',.10)');
+        ctx.fillStyle = g;
+        ctx.fillRect(x - 5, H - barH, 10, barH);
+      });
+    } else if (idx === 3) {
+      // HAZARD ZONE — a slow amber warning strobe sweeping across the frame,
+      // layered with the existing hazard-stripe overlay
+      const c = eraRGB([253, 224, 71]);
+      const sweep = 0.5 + 0.5 * Math.sin(tunnelHue * 1.6);
+      if (sweep > 0.82) {
+        ctx.fillStyle = 'rgba(' + c.join(',') + ',' + ((sweep - 0.82) * 0.6).toFixed(3) + ')';
+        ctx.fillRect(0, 0, W, H);
+      }
+    } else if (idx === 4) {
+      // REACTOR CORE — pulsing concentric rings breathing out from the
+      // vanishing point, like a containment field cycling
+      const c = eraRGB([251, 146, 60]);
+      for (let k = 0; k < 3; k++) {
+        const rp = (tunnelHue * 0.3 + k / 3) % 1;
+        const rad = 6 + rp * 70;
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(' + c.join(',') + ',' + ((1 - rp) * 0.18).toFixed(3) + ')';
+        ctx.lineWidth = 1.4;
+        ctx.arc(VP_X, VP_Y, rad, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    } else if (idx === 5) {
+      // BREACH ZONE — short-lived glitch-tear slices: thin horizontal bands
+      // of the frame get yanked sideways with a chromatic split, on top of
+      // the scanline sweep, selling active system corruption
+      if (Math.sin(tunnelHue * 7.3) > 0.75) {
+        const c1 = eraRGB([248, 113, 113]), c2 = eraRGB([34, 211, 238]);
+        const y = ((tunnelHue * 130) % H) | 0;
+        const th = 3 + (Math.sin(tunnelHue * 30) > 0 ? 3 : 0);
+        const shift = 4 + Math.sin(tunnelHue * 40) * 4;
+        ctx.fillStyle = 'rgba(' + c1.join(',') + ',.10)';
+        ctx.fillRect(shift, y, W, th);
+        ctx.fillStyle = 'rgba(' + c2.join(',') + ',.10)';
+        ctx.fillRect(-shift, y + th, W, th);
+      }
+    }
+  }
+
   function drawStarfield() {
     // faint parallax stars for extra depth, tinted with the level era
     const c = eraRGB([224, 242, 254]);
@@ -8379,6 +8477,7 @@ panels.forEach(p => observer.observe(p));
       chip: eraRGB([125, 211, 252]).join(','), capacitor: eraRGB([196, 181, 253]).join(','),
       diode: eraRGB([110, 231, 183]).join(','), resistor: eraRGB([253, 224, 71]).join(','),
       antenna: eraRGB([232, 121, 249]).join(','), tower: eraRGB([148, 163, 184]).join(','),
+      rack: eraRGB([148, 163, 184]).join(','), girder: eraRGB([253, 224, 71]).join(','),
     };
     skylineParts.slice().sort((a, b) => a.p - b.p).forEach((s) => {
       if (s.p < 0 || s.p > 1) return;
@@ -8435,6 +8534,43 @@ panels.forEach(p => observer.observe(p));
           const ww = (w / 2) * (1 - i / 3.4);
           ctx.beginPath(); ctx.moveTo(-ww, yy); ctx.lineTo(ww, yy); ctx.stroke();
         }
+      } else if (s.kind === 'rack') {
+        // a server rack — stacked blade units, each with its own asynchronously
+        // blinking status LED so the "server farm" era reads as actual machines
+        // idling out there, not just another silhouette shape
+        ctx.fillRect(-w / 2, -h, w, h);
+        ctx.strokeRect(-w / 2, -h, w, h);
+        const blades = 5;
+        for (let i = 0; i < blades; i++) {
+          const by = -h + (h / blades) * (i + 0.15);
+          const bh = (h / blades) * 0.7;
+          ctx.strokeStyle = 'rgba(' + color + ',' + (alpha + 0.1).toFixed(3) + ')';
+          ctx.strokeRect(-w / 2 + w * 0.08, by, w * 0.84, bh);
+          const blink = 0.5 + 0.5 * Math.sin(tunnelHue * (3 + i * 1.7) + s.seed + i);
+          const ledColor = blink > 0.55 ? eraRGB([110, 231, 183]) : eraRGB([248, 113, 113]);
+          ctx.beginPath();
+          ctx.fillStyle = 'rgba(' + ledColor.join(',') + ',' + Math.min(1, alpha + 0.5).toFixed(3) + ')';
+          ctx.arc(w / 2 - w * 0.18, by + bh / 2, Math.max(0.6, w * 0.05), 0, Math.PI * 2);
+          ctx.fill();
+        }
+      } else if (s.kind === 'girder') {
+        // an industrial cross-braced support beam — two uprights with a
+        // zigzagging lattice of diagonal braces between them, hazard-zone flavor
+        ctx.beginPath(); ctx.moveTo(-w / 2, 0); ctx.lineTo(-w / 2, -h); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(w / 2, 0); ctx.lineTo(w / 2, -h); ctx.stroke();
+        const braces = 4;
+        for (let i = 0; i < braces; i++) {
+          const y0 = -h * (i / braces), y1 = -h * ((i + 1) / braces);
+          ctx.beginPath();
+          if (i % 2 === 0) { ctx.moveTo(-w / 2, y0); ctx.lineTo(w / 2, y1); }
+          else { ctx.moveTo(w / 2, y0); ctx.lineTo(-w / 2, y1); }
+          ctx.stroke();
+        }
+        // a slow amber warning light at the top, same cadence as the era's strobe
+        const warn = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(tunnelHue * 2.4 + s.seed));
+        ctx.beginPath();
+        ctx.fillStyle = 'rgba(' + color + ',' + Math.min(1, warn).toFixed(3) + ')';
+        ctx.arc(0, -h, Math.max(1, w * 0.12), 0, Math.PI * 2); ctx.fill();
       } else {
         ctx.fillRect(-w / 2, -h, w, h);
         ctx.strokeRect(-w / 2, -h, w, h);
@@ -8791,7 +8927,7 @@ panels.forEach(p => observer.observe(p));
     ctx.font = '10px "JetBrains Mono", monospace';
     ctx.textAlign = 'left';
     ctx.fillStyle = 'rgba(125,211,252,.8)';
-    ctx.fillText('SECTOR ' + Math.floor(elapsed).toString().padStart(3, '0') + '  ·  LVL ' + level, m + bl + 6, clearY);
+    ctx.fillText('SECTOR ' + Math.floor(elapsed).toString().padStart(3, '0') + '  ·  LVL ' + level + '  ·  ' + currentEraName(), m + bl + 6, clearY);
 
     // system status readout — mirrors the same threat tiers as the meter below
     let sysLabel = 'SYS: NOMINAL', sysColor = 'rgba(34,211,238,.8)';
@@ -8876,6 +9012,7 @@ panels.forEach(p => observer.observe(p));
 
     drawTunnel();
     drawEraOverlay();
+    drawEraAccent();
     drawStarfield();
     drawSkyline();
     drawWarpStreaks();

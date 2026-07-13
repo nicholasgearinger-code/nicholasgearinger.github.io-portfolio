@@ -110,6 +110,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#020810">
 <title>Nicholas Gearinger — AI & Design</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Inter:wght@300;400;500&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
@@ -2353,6 +2356,70 @@
     transition: opacity .15s ease, background .15s ease;
   }
   .game-fullscreen-btn:active { background: rgba(34,211,238,.28); opacity: 1; }
+  .game-settings-btn {
+    position: absolute; left: .7rem; top: .7rem; z-index: 15;
+    width: 2.3rem; height: 2.3rem; border-radius: 50%;
+    background: rgba(148,163,184,.08); border: 1px solid rgba(148,163,184,.35);
+    color: #CBD5E1; font-size: 1.05rem; line-height: 1; opacity: .82;
+    display: flex; align-items: center; justify-content: center;
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    transition: opacity .15s ease, background .15s ease, transform .3s ease;
+  }
+  .game-settings-btn:active { background: rgba(148,163,184,.24); opacity: 1; transform: rotate(45deg); }
+  .game-wrap.gw-fullscreen .game-settings-btn { top: calc(.7rem + env(safe-area-inset-top)); left: calc(.7rem + env(safe-area-inset-left)); }
+  .game-panel {
+    position: absolute; inset: 0; z-index: 25;
+    background: rgba(3,8,17,.96); display: flex; align-items: center; justify-content: center; padding: 1rem;
+  }
+  .game-panel[hidden] { display: none; }
+  .game-panel-inner {
+    width: 100%; max-width: 360px; max-height: 100%; overflow-y: auto;
+    border: 1px solid rgba(34,211,238,.3); border-radius: .6rem; background: #060D18;
+  }
+  .game-panel-tabs {
+    display: flex; align-items: center; border-bottom: 1px solid rgba(148,163,184,.18);
+    position: sticky; top: 0; background: #060D18; z-index: 1;
+  }
+  .game-panel-tab {
+    flex: 1; padding: .7rem .5rem; background: none; border: none; cursor: pointer;
+    font-family: 'JetBrains Mono', monospace; font-size: .7rem; letter-spacing: .04em;
+    color: var(--muted); border-bottom: 2px solid transparent;
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+  }
+  .game-panel-tab.active { color: var(--cyan); border-bottom-color: var(--cyan); }
+  .game-panel-close {
+    padding: .7rem .8rem; background: none; border: none; cursor: pointer;
+    color: var(--muted); font-size: .85rem; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+  }
+  .game-panel-close:hover { color: #F0F8FF; }
+  .game-panel-body { padding: 1rem .9rem 1.2rem; }
+  .game-panel-body[hidden] { display: none; }
+  .gp-row {
+    display: flex; align-items: center; justify-content: space-between; gap: .8rem;
+    padding: .55rem 0; font-size: .82rem; color: #E0F2FE; border-bottom: 1px solid rgba(148,163,184,.1);
+    cursor: pointer;
+  }
+  .gp-row input[type="checkbox"] { width: 1.15rem; height: 1.15rem; accent-color: var(--cyan); cursor: pointer; flex-shrink: 0; }
+  .gp-row-col { flex-direction: column; align-items: flex-start; gap: .5rem; cursor: default; }
+  .gp-seg { display: flex; gap: .4rem; width: 100%; }
+  .gp-seg-btn {
+    flex: 1; padding: .4rem .3rem; border-radius: .35rem; cursor: pointer;
+    background: rgba(34,211,238,.06); border: 1px solid rgba(34,211,238,.28); color: var(--muted);
+    font-family: 'JetBrains Mono', monospace; font-size: .68rem;
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+  }
+  .gp-seg-btn.active { background: rgba(34,211,238,.22); border-color: rgba(34,211,238,.7); color: var(--cyan); }
+  .gp-achv-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .6rem; }
+  .gp-achv {
+    display: flex; align-items: flex-start; gap: .6rem; padding: .55rem .6rem; border-radius: .4rem;
+    background: rgba(148,163,184,.05); border: 1px solid rgba(148,163,184,.15); opacity: .55;
+  }
+  .gp-achv.unlocked { opacity: 1; background: rgba(251,191,36,.08); border-color: rgba(251,191,36,.4); }
+  .gp-achv-ico { font-size: 1rem; color: #FBBF24; line-height: 1.3; flex-shrink: 0; }
+  .gp-achv-text { font-size: .74rem; color: var(--muted); line-height: 1.35; }
+  .gp-achv-text strong { display: block; color: #E0F2FE; font-size: .8rem; margin-bottom: .1rem; }
+  .gp-achv.unlocked .gp-achv-text strong { color: #FBBF24; }
+  .game-wrap.cb-safe .game-overlay h3.gt-over { color: #FB923C; }
   .game-play-row { display: flex; align-items: center; justify-content: center; gap: .6rem; }
   .game-wrap.gw-fullscreen .game-fullscreen-btn { top: calc(.7rem + env(safe-area-inset-top)); right: calc(3.2rem + env(safe-area-inset-right)); }
   .game-wrap.gw-fullscreen .game-pause-btn { top: calc(.7rem + env(safe-area-inset-top)); right: calc(5.7rem + env(safe-area-inset-right)); }
@@ -3443,6 +3510,37 @@
           <button type="button" class="game-fire-btn" id="game-fire-btn" aria-label="Hold to charge, release to fire" hidden>◎</button>
           <button type="button" class="game-quit-fs-btn" id="game-quit-fs-btn" aria-label="Quit run" hidden>✕ Quit</button>
           <button type="button" class="game-fullscreen-btn" id="game-fullscreen-btn" aria-label="Enter fullscreen">⛶</button>
+          <button type="button" class="game-settings-btn" id="game-settings-btn" aria-label="Settings and achievements">⚙</button>
+          <div class="game-panel" id="game-settings-panel" hidden>
+            <div class="game-panel-inner">
+              <div class="game-panel-tabs">
+                <button type="button" class="game-panel-tab active" id="gp-tab-settings">Settings</button>
+                <button type="button" class="game-panel-tab" id="gp-tab-achv">Achievements <span id="gp-achv-count"></span></button>
+                <button type="button" class="game-panel-close" id="game-panel-close" aria-label="Close settings">✕</button>
+              </div>
+              <div class="game-panel-body" id="gp-body-settings">
+                <label class="gp-row">
+                  <span>Haptic feedback</span>
+                  <input type="checkbox" id="gp-haptics">
+                </label>
+                <label class="gp-row">
+                  <span>Colorblind-safe colors</span>
+                  <input type="checkbox" id="gp-colorblind">
+                </label>
+                <div class="gp-row gp-row-col">
+                  <span>Graphics quality</span>
+                  <div class="gp-seg" id="gp-graphics">
+                    <button type="button" class="gp-seg-btn" data-val="auto">Auto</button>
+                    <button type="button" class="gp-seg-btn" data-val="high">High</button>
+                    <button type="button" class="gp-seg-btn" data-val="low">Low</button>
+                  </div>
+                </div>
+              </div>
+              <div class="game-panel-body" id="gp-body-achv" hidden>
+                <ul class="gp-achv-list" id="gp-achv-list"></ul>
+              </div>
+            </div>
+          </div>
           <div class="game-overlay" id="game-overlay">
             <div class="game-title-seq" id="game-title-seq" hidden>
               <div class="game-title-icon" id="game-title-icon">&lt;/&gt;</div>
@@ -7150,6 +7248,18 @@ panels.forEach(p => observer.observe(p));
   const statsDetailEl = document.getElementById('game-stats-detail');
   const quitBtn = document.getElementById('game-quit-btn');
   const quitBtnFs = document.getElementById('game-quit-fs-btn');
+  const settingsBtn = document.getElementById('game-settings-btn');
+  const settingsPanel = document.getElementById('game-settings-panel');
+  const panelCloseBtn = document.getElementById('game-panel-close');
+  const tabSettingsBtn = document.getElementById('gp-tab-settings');
+  const tabAchvBtn = document.getElementById('gp-tab-achv');
+  const settingsBody = document.getElementById('gp-body-settings');
+  const achvBody = document.getElementById('gp-body-achv');
+  const hapticsCheck = document.getElementById('gp-haptics');
+  const colorblindCheck = document.getElementById('gp-colorblind');
+  const graphicsSeg = document.getElementById('gp-graphics');
+  const achvListEl = document.getElementById('gp-achv-list');
+  const achvCountEl = document.getElementById('gp-achv-count');
   if (!canvas || !startBtn) return;
   if (fireBtn) fireBtn.hidden = false;
   const DEFAULT_TITLE = overlayTitle.textContent;
@@ -7415,7 +7525,9 @@ panels.forEach(p => observer.observe(p));
         saveUnlocks();
         spawnFloatText(W / 2, VP_Y + 100, '\u2605 ' + WEAPON_UNLOCK_LABEL[key], '#F59E0B');
         shakeMag = Math.max(shakeMag, 8);
+        haptic([20, 40, 20]);
         sfxPowerup();
+        if (unlocks.spread && unlocks.homing && unlocks.overcharge) unlockAchievement('fully_loaded');
       }
     });
   }
@@ -7429,11 +7541,150 @@ panels.forEach(p => observer.observe(p));
   let formationTimer = randRange(FORMATION_MIN, FORMATION_MAX);
   let playerTrail = [];
   let stars = generateStarfield();
-  let longestStreak = 0, shotsFired = 0, shotsHit = 0;
+  let longestStreak = 0, shotsFired = 0, shotsHit = 0, hitsThisRun = 0;
   let circuitTraces = generateCircuitTraces();
   let skylineParts = generateSkyline();
   let best = parseInt(localStorage.getItem('ghostwireBest') || '0', 10);
   bestStatEl.innerHTML = 'best: <strong>' + best + '</strong>';
+
+  // -- settings: haptics / colorblind-safe palette / graphics quality —
+  //    persisted alongside the existing ghostwireBest/ghostwireUnlocks keys.
+  let settings = { haptics: true, colorblind: false, graphics: 'auto' };
+  try {
+    const savedSettings = JSON.parse(localStorage.getItem('ghostwireSettings') || '{}');
+    if (typeof savedSettings.haptics === 'boolean') settings.haptics = savedSettings.haptics;
+    if (typeof savedSettings.colorblind === 'boolean') settings.colorblind = savedSettings.colorblind;
+    if (['auto', 'high', 'low'].includes(savedSettings.graphics)) settings.graphics = savedSettings.graphics;
+  } catch (_) { /* corrupt/missing storage — defaults above stand */ }
+  function saveSettings() { try { localStorage.setItem('ghostwireSettings', JSON.stringify(settings)); } catch (_) {} }
+
+  function haptic(pattern) {
+    if (!settings.haptics || !navigator.vibrate) return;
+    try { navigator.vibrate(pattern); } catch (_) {}
+  }
+
+  // "bad" red swaps to an amber that reads more distinctly than red/cyan
+  // does under protanopia/deuteranopia; "good" cyan is left alone since
+  // it's already a safe pairing against red.
+  let COL_BAD = '#F87171';
+  function applyColorblind() {
+    COL_BAD = settings.colorblind ? '#FB923C' : '#F87171';
+    if (gameWrap) gameWrap.classList.toggle('cb-safe', settings.colorblind);
+  }
+
+  // 'auto' guesses low-end from core count / reduced-motion; particle count
+  // and screen-shake magnitude both scale off this single multiplier so any
+  // future effect can opt in by reading PARTICLE_SCALE / SHAKE_SCALE.
+  let PARTICLE_SCALE = 1, SHAKE_SCALE = 1;
+  function effectiveGraphics() {
+    if (settings.graphics !== 'auto') return settings.graphics;
+    const lowEnd = (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4)
+      || (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    return lowEnd ? 'low' : 'high';
+  }
+  function applyGraphics() {
+    const g = effectiveGraphics();
+    PARTICLE_SCALE = g === 'low' ? 0.35 : 1;
+    SHAKE_SCALE = g === 'low' ? 0.4 : 1;
+  }
+  applyColorblind();
+  applyGraphics();
+
+  // -- achievements: persisted unlock map + definitions used by both the
+  //    in-canvas unlock toast and the achievements tab in the settings panel.
+  const ACHIEVEMENT_DEFS = [
+    { id: 'first_purge', label: 'First Purge', desc: 'Fizzle your first corrupted fragment.' },
+    { id: 'boss_slayer', label: 'Boss Slayer', desc: 'Take down a FIREWALL or WORM mini-boss.' },
+    { id: 'clean_run', label: 'Clean Sweep', desc: 'Reach level 5 without taking a hit.' },
+    { id: 'streak_20', label: 'On a Roll', desc: 'Build a 20-catch streak in one run.' },
+    { id: 'fully_loaded', label: 'Fully Loaded', desc: 'Unlock all three weapon upgrades.' },
+    { id: 'deep_diver', label: 'Deep Diver', desc: 'Reach level 20 in a single run.' },
+    { id: 'sharpshooter', label: 'Sharpshooter', desc: 'Finish a run with 90%+ accuracy (20+ shots fired).' },
+    { id: 'six_zones', label: 'Zone Explorer', desc: 'Start a run from all six zones at least once.' },
+  ];
+  let achievements = {};
+  try { achievements = JSON.parse(localStorage.getItem('ghostwireAchievements') || '{}'); } catch (_) {}
+  function saveAchievements() { try { localStorage.setItem('ghostwireAchievements', JSON.stringify(achievements)); } catch (_) {} }
+  let visitedZones = [];
+  try { visitedZones = JSON.parse(localStorage.getItem('ghostwireZones') || '[]'); } catch (_) {}
+  function saveVisitedZones() { try { localStorage.setItem('ghostwireZones', JSON.stringify(visitedZones)); } catch (_) {} }
+  function unlockAchievement(id) {
+    if (achievements[id]) return;
+    achievements[id] = true;
+    saveAchievements();
+    const def = ACHIEVEMENT_DEFS.find((d) => d.id === id);
+    if (def) {
+      spawnFloatText(W / 2, VP_Y + 130, '\u2605 ACHIEVEMENT: ' + def.label.toUpperCase(), '#FBBF24');
+      haptic([20, 40, 20, 40, 20]);
+      sfxPowerup();
+    }
+    if (achvBody && !achvBody.hidden) renderAchievements();
+  }
+  function renderAchievements() {
+    if (!achvListEl) return;
+    const unlockedCount = ACHIEVEMENT_DEFS.filter((d) => achievements[d.id]).length;
+    if (achvCountEl) achvCountEl.textContent = unlockedCount + '/' + ACHIEVEMENT_DEFS.length;
+    achvListEl.innerHTML = ACHIEVEMENT_DEFS.map((d) => {
+      const unlocked = !!achievements[d.id];
+      return '<li class="gp-achv' + (unlocked ? ' unlocked' : '') + '">'
+        + '<span class="gp-achv-ico">' + (unlocked ? '\u2605' : '\u25CB') + '</span>'
+        + '<span class="gp-achv-text"><strong>' + escapeHtml(d.label) + '</strong><br>' + escapeHtml(d.desc) + '</span>'
+        + '</li>';
+    }).join('');
+  }
+
+  function syncSettingsUI() {
+    if (hapticsCheck) hapticsCheck.checked = settings.haptics;
+    if (colorblindCheck) colorblindCheck.checked = settings.colorblind;
+    if (graphicsSeg) {
+      graphicsSeg.querySelectorAll('.gp-seg-btn').forEach((b) => {
+        b.classList.toggle('active', b.dataset.val === settings.graphics);
+      });
+    }
+  }
+  function showSettingsTab(tab) {
+    if (tabSettingsBtn) tabSettingsBtn.classList.toggle('active', tab === 'settings');
+    if (tabAchvBtn) tabAchvBtn.classList.toggle('active', tab === 'achv');
+    if (settingsBody) settingsBody.hidden = tab !== 'settings';
+    if (achvBody) achvBody.hidden = tab !== 'achv';
+    if (tab === 'achv') renderAchievements();
+  }
+  function openSettingsPanel(tab) {
+    if (!settingsPanel) return;
+    settingsPanel.hidden = false;
+    showSettingsTab(tab || 'settings');
+    if (running && !paused) togglePause();
+  }
+  function closeSettingsPanel() { if (settingsPanel) settingsPanel.hidden = true; }
+  if (settingsBtn) settingsBtn.addEventListener('click', () => openSettingsPanel('settings'));
+  if (panelCloseBtn) panelCloseBtn.addEventListener('click', closeSettingsPanel);
+  if (tabSettingsBtn) tabSettingsBtn.addEventListener('click', () => showSettingsTab('settings'));
+  if (tabAchvBtn) tabAchvBtn.addEventListener('click', () => showSettingsTab('achv'));
+  if (hapticsCheck) {
+    hapticsCheck.addEventListener('change', () => {
+      settings.haptics = hapticsCheck.checked;
+      saveSettings();
+      if (settings.haptics) haptic(15);
+    });
+  }
+  if (colorblindCheck) {
+    colorblindCheck.addEventListener('change', () => {
+      settings.colorblind = colorblindCheck.checked;
+      saveSettings();
+      applyColorblind();
+    });
+  }
+  if (graphicsSeg) {
+    graphicsSeg.querySelectorAll('.gp-seg-btn').forEach((b) => {
+      b.addEventListener('click', () => {
+        settings.graphics = b.dataset.val;
+        saveSettings();
+        applyGraphics();
+        syncSettingsUI();
+      });
+    });
+  }
+  syncSettingsUI();
 
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -7451,7 +7702,12 @@ panels.forEach(p => observer.observe(p));
     spawnTimer = 0; codeBitTimer = 0; fireTimer = 0;
     playerX = W / 2; targetX = playerX; playerVX = 0;
     shakeMag = 0; flash = 0; dying = false; deathTimer = 0;
-    streak = 0; invulnTimer = 0;
+    streak = 0; invulnTimer = 0; hitsThisRun = 0;
+    if (!visitedZones.includes(pendingZone)) {
+      visitedZones.push(pendingZone);
+      saveVisitedZones();
+      if (visitedZones.length >= 6) unlockAchievement('six_zones');
+    }
     rapidTimer = 0; magnetTimer = 0; shieldTimer = 0; slowTimer = 0; powerupTimer = randRange(POWERUP_MIN, POWERUP_MAX);
     overloadReady = false; bossTierSpawned = -1; wormToggle = false;
     surging = false; surgeCountdown = randRange(SURGE_MIN, SURGE_MAX); surgeElapsed = 0; surgeCount = 0;
@@ -7536,7 +7792,7 @@ panels.forEach(p => observer.observe(p));
         x: VP_X, y: VP_Y, r: 1, glitchT: 0,
       });
     }
-    spawnFloatText(W / 2, VP_Y + 50, 'WALL DETECTED', '#F87171');
+    spawnFloatText(W / 2, VP_Y + 50, 'WALL DETECTED', COL_BAD);
   }
 
   function spawnBoss() {
@@ -7548,7 +7804,7 @@ panels.forEach(p => observer.observe(p));
       hp, maxHp: hp, token: 'FIREWALL', vz: 0.26 * difficulty, spin: 0, seed: Math.random() * 1000,
       x: VP_X, y: VP_Y, r: 1, glitchT: 0, drift: false, driftAmp: 0, driftFreq: 0, splitter: false, mini: false,
     });
-    spawnFloatText(W / 2, VP_Y + 70, '\u26A0 FIREWALL', '#F87171');
+    spawnFloatText(W / 2, VP_Y + 70, '\u26A0 FIREWALL', COL_BAD);
     shakeMag = Math.max(shakeMag, 6);
   }
 
@@ -7577,7 +7833,8 @@ panels.forEach(p => observer.observe(p));
   }
 
   function spawnParticles(x, y, color, n, spread, speed) {
-    for (let i = 0; i < n; i++) {
+    const count = Math.max(1, Math.round(n * PARTICLE_SCALE));
+    for (let i = 0; i < count; i++) {
       const a = Math.random() * Math.PI * 2;
       const s = speed * (0.4 + Math.random() * 0.8);
       particles.push({
@@ -7945,10 +8202,11 @@ panels.forEach(p => observer.observe(p));
 
   function fizzleItem(it) {
     fizzles.push({ x: it.x, y: it.y, r: it.r, t: 0, seed: it.seed });
-    spawnParticles(it.x, it.y, '#F87171', 10, 20, 140);
+    spawnParticles(it.x, it.y, COL_BAD, 10, 20, 140);
     spawnParticles(it.x, it.y, '#E879F9', 6, 12, 110);
     spawnFloatText(it.x, it.y, 'FIZZLED', '#E879F9');
     sfxFizzle();
+    unlockAchievement('first_purge');
   }
 
 
@@ -7958,9 +8216,10 @@ panels.forEach(p => observer.observe(p));
     shakeMag = 20;
     flash = 1;
     if (pillText) pillText.textContent = 'BREACH DETECTED';
-    spawnParticles(hitItem.x, hitItem.y, '#F87171', 26, 40, 220);
-    spawnParticles(playerX, PLAYER_Y, '#F87171', 16, 20, 160);
-    spawnShockwave(playerX, PLAYER_Y, '#F87171', 160);
+    spawnParticles(hitItem.x, hitItem.y, COL_BAD, 26, 40, 220);
+    spawnParticles(playerX, PLAYER_Y, COL_BAD, 16, 20, 160);
+    spawnShockwave(playerX, PLAYER_Y, COL_BAD, 160);
+    haptic([40, 30, 80]);
     sfxDeath();
   }
 
@@ -7969,12 +8228,14 @@ panels.forEach(p => observer.observe(p));
     // brief invulnerability window, but doesn't end the run
     invulnTimer = HIT_INVULN;
     streak = 0;
+    hitsThisRun += 1;
     score = Math.max(0, score - 5);
     statEl.innerHTML = 'score: <strong>' + score + '</strong>';
     shakeMag = 9;
     flash = 0.5;
-    spawnParticles(hitItem.x, hitItem.y, '#F87171', 12, 20, 130);
-    spawnFloatText(playerX, PLAYER_Y - 30, '-5', '#F87171');
+    spawnParticles(hitItem.x, hitItem.y, COL_BAD, 12, 20, 130);
+    spawnFloatText(playerX, PLAYER_Y - 30, '-5', COL_BAD);
+    haptic(30);
     sfxHit();
   }
 
@@ -7989,6 +8250,7 @@ panels.forEach(p => observer.observe(p));
       statEl.innerHTML = 'score: <strong>' + score + '</strong>';
     } else if (type === 'overload') { overloadReady = true; label = 'OVERLOAD READY'; color = '#F59E0B'; }
     spawnFloatText(playerX, PLAYER_Y - 30, label, color);
+    haptic(15);
     sfxPowerup();
   }
 
@@ -8077,6 +8339,8 @@ panels.forEach(p => observer.observe(p));
     const newLevel = 1 + Math.floor(elapsed / 20);
     if (newLevel > level) {
       level = newLevel;
+      if (level >= 20) unlockAchievement('deep_diver');
+      if (level >= 5 && hitsThisRun === 0) unlockAchievement('clean_run');
       spawnFloatText(W / 2, VP_Y + 60, 'LEVEL ' + level, '#7DD3FC');
       shakeMag = Math.max(shakeMag, 4);
       sfxLevelUp();
@@ -8125,7 +8389,7 @@ panels.forEach(p => observer.observe(p));
       surgeCountdown -= dt;
       if (surgeCountdown <= 0) {
         surging = true; surgeElapsed = 0;
-        spawnFloatText(W / 2, VP_Y + 40, 'BREACH SURGE', '#F87171');
+        spawnFloatText(W / 2, VP_Y + 40, 'BREACH SURGE', COL_BAD);
         sfxSurge();
       }
     }
@@ -8169,12 +8433,14 @@ panels.forEach(p => observer.observe(p));
         if (dx * dx + dy * dy < rr * rr) {
           if (it.boss) {
             it.hp -= 1;
-            spawnParticles(it.x, it.y, '#F87171', 8, 15, 100);
+            spawnParticles(it.x, it.y, COL_BAD, 8, 15, 100);
             if (it.hp <= 0) {
               fizzleItem(it);
               items.splice(j, 1);
               score += 40;
               statEl.innerHTML = 'score: <strong>' + score + '</strong>';
+              haptic([25, 50, 25, 50, 60]);
+              unlockAchievement('boss_slayer');
             }
           } else if (it.splitter && !it.mini) {
             // splits into 2-3 smaller, faster fragments instead of just fizzling
@@ -8277,6 +8543,7 @@ panels.forEach(p => observer.observe(p));
           score += gained;
           streak += 1;
           if (streak > longestStreak) longestStreak = streak;
+          if (streak >= 20) unlockAchievement('streak_20');
           threat = Math.max(0, threat - THREAT_RELIEF_PER_CATCH);
           statEl.innerHTML = 'score: <strong>' + score + '</strong>';
           spawnParticles(it.x, it.y, '#22D3EE', 14, 30, 150);
@@ -8742,7 +9009,7 @@ panels.forEach(p => observer.observe(p));
       // mini-boss: FIREWALL is a static hexagonal shield; WORM is a softer
       // snaking blob (drawn as a rounded diamond) in violet to read as a
       // different threat type while it weaves across lanes
-      const bossColor = it.worm ? '#818CF8' : '#F87171';
+      const bossColor = it.worm ? '#818CF8' : COL_BAD;
       ctx.save();
       ctx.translate(it.x, it.y);
       ctx.rotate(Math.sin(tunnelHue * 1.5 + it.seed) * 0.06);
@@ -8783,7 +9050,7 @@ panels.forEach(p => observer.observe(p));
       ctx.save();
       ctx.translate(it.x + jitter, it.y);
       ctx.rotate(Math.PI / 4 + Math.sin(tunnelHue * 2 + it.seed) * 0.08);
-      ctx.fillStyle = '#F87171'; ctx.shadowColor = '#F87171'; ctx.shadowBlur = 10 * (it.r / it.baseR + 0.3);
+      ctx.fillStyle = COL_BAD; ctx.shadowColor = COL_BAD; ctx.shadowBlur = 10 * (it.r / it.baseR + 0.3);
       ctx.fillRect(-it.r, -it.r, it.r * 2, it.r * 2);
       ctx.shadowBlur = 0;
       if (Math.sin(it.glitchT * 30 + it.seed) > 0.4) {
@@ -8827,8 +9094,8 @@ panels.forEach(p => observer.observe(p));
     ctx.translate(playerX, PLAYER_Y);
     ctx.rotate(lean);
     ctx.beginPath();
-    ctx.fillStyle = dying ? '#F87171' : '#F0F8FF';
-    ctx.shadowColor = dying ? '#F87171' : (critical ? '#F87171' : '#7DD3FC');
+    ctx.fillStyle = dying ? COL_BAD : '#F0F8FF';
+    ctx.shadowColor = dying ? COL_BAD : (critical ? COL_BAD : '#7DD3FC');
     ctx.shadowBlur = critical ? 12 + Math.sin(tunnelHue * 10) * 5 : 12;
     ctx.moveTo(0, -PLAYER_H / 2);
     ctx.lineTo(PLAYER_W / 2, PLAYER_H / 2 - 4);
@@ -8882,7 +9149,7 @@ panels.forEach(p => observer.observe(p));
         const sy = -r + (s / slices) * r * 2;
         const sh = (r * 2) / slices;
         const drift = Math.sin(f.seed + s * 3 + k * 18) * k * r * 0.9;
-        ctx.fillStyle = '#F87171';
+        ctx.fillStyle = COL_BAD;
         ctx.fillRect(-r + drift, sy, r * 2, sh * 0.65);
       }
       ctx.restore();
@@ -9086,8 +9353,9 @@ panels.forEach(p => observer.observe(p));
 
   function draw() {
     ctx.save();
-    if (shakeMag > 0.3) {
-      ctx.translate((Math.random() - 0.5) * shakeMag, (Math.random() - 0.5) * shakeMag);
+    const shakeAmt = shakeMag * SHAKE_SCALE;
+    if (shakeAmt > 0.3) {
+      ctx.translate((Math.random() - 0.5) * shakeAmt, (Math.random() - 0.5) * shakeAmt);
     }
 
     drawTunnel();
@@ -9215,6 +9483,7 @@ panels.forEach(p => observer.observe(p));
       const eraName = currentEraName();
       statsDetailEl.textContent = 'Longest streak: ' + longestStreak + '  ·  Accuracy: ' + accuracy + '%  ·  Era: ' + eraName;
       statsDetailEl.hidden = false;
+      if (shotsFired >= 20 && accuracy >= 90) unlockAchievement('sharpshooter');
     }
     if (shareBtn) { shareBtn.hidden = false; shareBtn.textContent = '\u21EA Share Score'; }
     if (pillText) pillText.textContent = 'CORRUPTED';
@@ -9432,5 +9701,17 @@ panels.forEach(p => observer.observe(p));
   draw(); // idle frame so the canvas isn't blank before the first Play
   loadLeaderboard();
 })();
+</script>
+<script>
+  // PWA install support — registers after load so it never competes with
+  // initial page-render work. Same-origin only; the leaderboard API on a
+  // different origin is untouched (see sw.js's fetch handler).
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch((err) => {
+        console.warn('[sw] registration failed:', err);
+      });
+    });
+  }
 </script>
 </body></html>

@@ -2359,13 +2359,25 @@
   .game-settings-btn {
     position: absolute; left: .7rem; top: .7rem; z-index: 15;
     width: 2.3rem; height: 2.3rem; border-radius: 50%;
-    background: rgba(148,163,184,.08); border: 1px solid rgba(148,163,184,.35);
-    color: #CBD5E1; font-size: 1.05rem; line-height: 1; opacity: .82;
+    border: 1.5px solid transparent; background-clip: padding-box, border-box;
+    background-image: linear-gradient(#050912, #050912),
+      conic-gradient(from var(--ring-angle, 0deg), var(--cyan), var(--violet), var(--magenta), var(--cyan));
+    background-origin: padding-box, border-box;
+    color: var(--violet); font-size: 1.05rem; line-height: 1; opacity: .88;
     display: flex; align-items: center; justify-content: center;
+    text-shadow: 0 0 8px rgba(129,140,248,.85);
+    box-shadow: 0 0 9px rgba(34,211,238,.3), 0 0 16px rgba(232,121,249,.18);
     touch-action: manipulation; -webkit-tap-highlight-color: transparent;
-    transition: opacity .15s ease, background .15s ease, transform .3s ease;
+    transition: opacity .15s ease, box-shadow .2s ease, transform .3s ease;
   }
-  .game-settings-btn:active { background: rgba(148,163,184,.24); opacity: 1; transform: rotate(45deg); }
+  .game-settings-btn:active { opacity: 1; transform: rotate(75deg); box-shadow: 0 0 14px rgba(34,211,238,.55), 0 0 22px rgba(232,121,249,.3); }
+  @property --ring-angle {
+    syntax: '<angle>'; inherits: false; initial-value: 0deg;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .game-settings-btn { animation: neonRingSpin 7s linear infinite; }
+  }
+  @keyframes neonRingSpin { to { --ring-angle: 360deg; } }
   .game-wrap.gw-fullscreen .game-settings-btn { top: calc(.7rem + env(safe-area-inset-top)); left: calc(.7rem + env(safe-area-inset-left)); }
   .game-panel {
     position: absolute; inset: 0; z-index: 25;
@@ -2463,13 +2475,18 @@
   .game-pause-btn {
     position: absolute; right: 5.7rem; top: .7rem; z-index: 1;
     width: 2.3rem; height: 2.3rem; border-radius: 50%;
-    background: rgba(125,211,252,.06); border: 1px solid rgba(125,211,252,.3);
-    color: #7DD3FC; font-size: .95rem; line-height: 1; opacity: .82;
+    border: 1.5px solid transparent; background-clip: padding-box, border-box;
+    background-image: linear-gradient(#050912, #050912),
+      linear-gradient(135deg, var(--cyan), var(--violet) 55%, var(--magenta));
+    background-origin: padding-box, border-box;
+    color: var(--magenta); font-size: .95rem; line-height: 1; opacity: .88;
     display: flex; align-items: center; justify-content: center;
+    text-shadow: 0 0 8px rgba(232,121,249,.85);
+    box-shadow: 0 0 9px rgba(232,121,249,.28), 0 0 16px rgba(34,211,238,.16);
     touch-action: manipulation; -webkit-tap-highlight-color: transparent;
-    transition: opacity .15s ease, background .15s ease;
+    transition: opacity .15s ease, box-shadow .2s ease, transform .12s ease;
   }
-  .game-pause-btn:active { background: rgba(125,211,252,.28); opacity: 1; }
+  .game-pause-btn:active { opacity: 1; transform: scale(.92); box-shadow: 0 0 14px rgba(232,121,249,.55), 0 0 22px rgba(34,211,238,.32); }
   .game-pause-btn[hidden] { display: none; }
   .game-stats-detail { font-size: .74rem; color: var(--muted); }
   .game-stats-detail[hidden] { display: none; }

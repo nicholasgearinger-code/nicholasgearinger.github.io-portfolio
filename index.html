@@ -680,6 +680,32 @@
   }
   .btn-ghost:hover { border-color: var(--slate); background: rgba(255,255,255,.04); }
 
+  /* Hero's secondary CTA gets its own treatment — same neon cyan/violet/
+     magenta language as the Ghostwire HUD, but a slow rotating gradient
+     ring instead of a flat border, so it reads as "the interesting one"
+     without competing with the solid magenta primary button. Scoped to
+     .hero-btns specifically so it never leaks into the many other
+     .btn-ghost buttons elsewhere on the site (quit buttons, panels, etc).
+     Reuses the --ring-angle custom property + neonRingSpin keyframe
+     already registered for the game's settings button. */
+  .hero-btns .btn-ghost {
+    position: relative;
+    border: 1.5px solid transparent; background-clip: padding-box, border-box;
+    background-image: linear-gradient(rgba(2,8,16,.55), rgba(2,8,16,.55)),
+      conic-gradient(from var(--ring-angle, 0deg), var(--cyan), var(--violet), var(--magenta), var(--cyan));
+    background-origin: padding-box, border-box;
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    color: var(--white);
+    transition: transform .2s ease, box-shadow .3s ease, color .2s ease;
+  }
+  .hero-btns .btn-ghost:hover {
+    transform: translateY(-2px); color: var(--cyan);
+    box-shadow: 0 10px 30px -10px rgba(34,211,238,.45), 0 10px 30px -10px rgba(232,121,249,.3);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .hero-btns .btn-ghost { animation: neonRingSpin 6s linear infinite; }
+  }
+
 
   /* ── ANIMATED CODE COMPILER ── */
   #compiler-section {

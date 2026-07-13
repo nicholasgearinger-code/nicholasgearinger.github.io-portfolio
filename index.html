@@ -8106,9 +8106,10 @@ panels.forEach(p => observer.observe(p));
     const totalW = segs * segW + (segs - 1) * gap;
     const startX = W - m - bl - 6 - totalW;
     const filled = Math.round(threat * segs);
+    const threatClear = cornerClear + 14 * dispScale;
     ctx.textAlign = 'right';
     ctx.fillStyle = 'rgba(232,121,249,.75)';
-    ctx.fillText('THREAT', startX - 6, cornerClear);
+    ctx.fillText('THREAT', startX - 6, threatClear);
     for (let i = 0; i < segs; i++) {
       const x = startX + i * (segW + gap);
       const segT = i / segs;
@@ -8122,7 +8123,7 @@ panels.forEach(p => observer.observe(p));
         }
       }
       ctx.fillStyle = color;
-      ctx.fillRect(x, cornerClear - 8, segW, segH);
+      ctx.fillRect(x, threatClear - 8, segW, segH);
     }
     ctx.textAlign = 'left';
   }

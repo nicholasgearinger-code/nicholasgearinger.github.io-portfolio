@@ -107,7 +107,7 @@
   })();
 </script>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#020810">
 <title>Nicholas Gearinger — AI & Design</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -2317,8 +2317,8 @@
   .game-wrap { position: relative; width: 100%; max-width: 480px; margin: 0 auto; border-radius: .5rem; overflow: hidden; touch-action: none; }
   .game-wrap.gw-fullscreen {
     position: fixed; inset: 0; z-index: 9999; margin: auto; max-width: none; border-radius: 0;
-    width: min(100vw, calc(100dvh * 4 / 3));
-    height: min(100dvh, calc(100vw * 3 / 4));
+    width: min(100svw, calc(100svh * 4 / 3));
+    height: min(100svh, calc(100svw * 3 / 4));
     background: #000;
   }
   .game-wrap.gw-fullscreen::before {
@@ -2370,6 +2370,18 @@
     transition: opacity .15s ease, background .15s ease;
   }
   .game-mute-btn.is-muted { color: rgba(148,163,184,.7); border-color: rgba(148,163,184,.35); background: rgba(148,163,184,.08); }
+  .game-quit-fs-btn {
+    position: absolute; left: .7rem; bottom: .7rem; z-index: 1; display: none;
+    padding: .3rem .55rem; border-radius: .35rem;
+    background: rgba(248,113,113,.08); border: 1px solid rgba(248,113,113,.35);
+    color: #F87171; font-family: 'JetBrains Mono', monospace; font-size: .66rem; opacity: .82;
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    transition: opacity .15s ease, background .15s ease;
+  }
+  .game-quit-fs-btn:active { background: rgba(248,113,113,.32); opacity: 1; }
+  .game-quit-fs-btn[hidden] { display: none; }
+  .game-wrap.gw-fullscreen .game-quit-fs-btn:not([hidden]) { display: block; }
+  .game-wrap.gw-fullscreen .game-quit-fs-btn { bottom: calc(.7rem + env(safe-area-inset-bottom)); left: calc(.7rem + env(safe-area-inset-left)); }
   .game-quit-btn { font-size: .78rem; padding: .4rem .9rem; }
   .game-quit-btn:hover { border-color: rgba(248,113,113,.5); color: #F87171; }
   .game-overlay {
@@ -3367,6 +3379,7 @@
           <button type="button" class="game-fullscreen-btn" id="game-fullscreen-btn" aria-label="Enter fullscreen">⛶</button>
           <button type="button" class="game-mute-btn" id="game-mute-btn" aria-label="Toggle sound">🔊</button>
           <button type="button" class="game-fire-btn" id="game-fire-btn" aria-label="Fire" hidden>◎</button>
+          <button type="button" class="game-quit-fs-btn" id="game-quit-fs-btn" aria-label="Quit run" hidden>✕ Quit</button>
           <div class="game-overlay" id="game-overlay">
             <div class="game-title-seq" id="game-title-seq" hidden>
               <div class="game-title-icon" id="game-title-icon">&lt;/&gt;</div>
@@ -7040,6 +7053,7 @@ panels.forEach(p => observer.observe(p));
   const muteBtn = document.getElementById('game-mute-btn');
   const fullscreenBtn = document.getElementById('game-fullscreen-btn');
   const quitBtn = document.getElementById('game-quit-btn');
+  const quitBtnFs = document.getElementById('game-quit-fs-btn');
   if (!canvas || !startBtn) return;
   if (fireBtn) fireBtn.hidden = false;
   const DEFAULT_TITLE = overlayTitle.textContent;
@@ -8142,6 +8156,7 @@ panels.forEach(p => observer.observe(p));
     lastTime = performance.now();
     if (pillText) pillText.textContent = 'HUNTING';
     if (quitBtn) quitBtn.hidden = false;
+    if (quitBtnFs) quitBtnFs.hidden = false;
     ensureAudio();
     startAmbient();
     rafId = requestAnimationFrame(loop);
@@ -8153,6 +8168,7 @@ panels.forEach(p => observer.observe(p));
     if (rafId) cancelAnimationFrame(rafId);
     stopAmbient();
     if (quitBtn) quitBtn.hidden = true;
+    if (quitBtnFs) quitBtnFs.hidden = true;
     if (score > best) {
       best = score;
       localStorage.setItem('ghostwireBest', String(best));
@@ -8174,6 +8190,7 @@ panels.forEach(p => observer.observe(p));
     if (rafId) cancelAnimationFrame(rafId);
     stopAmbient();
     if (quitBtn) quitBtn.hidden = true;
+    if (quitBtnFs) quitBtnFs.hidden = true;
     overlay.hidden = false;
     overlayTitle.textContent = DEFAULT_TITLE;
     overlayTitle.classList.remove('gt-over');
@@ -8215,6 +8232,7 @@ panels.forEach(p => observer.observe(p));
   }
   startBtn.addEventListener('click', handlePlayClick);
   if (quitBtn) quitBtn.addEventListener('click', quitGame);
+  if (quitBtnFs) quitBtnFs.addEventListener('click', quitGame);
   submitBtn.addEventListener('click', async () => {
     const name = (nameInput.value || 'ANON').trim().toUpperCase().slice(0, 12) || 'ANON';
     submitBtn.disabled = true;

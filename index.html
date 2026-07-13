@@ -2335,7 +2335,7 @@
   html.gw-fs-lock, body.gw-fs-lock { overflow: hidden; height: 100%; }
   body.gw-fs-lock { width: 100%; }
   .game-fullscreen-btn {
-    position: absolute; right: 3.2rem; top: .7rem; z-index: 1;
+    position: absolute; right: 3.2rem; top: .7rem; z-index: 5;
     width: 2.3rem; height: 2.3rem; border-radius: 50%;
     background: rgba(34,211,238,.06); border: 1px solid rgba(34,211,238,.3);
     color: var(--cyan); font-size: 1.05rem; line-height: 1; opacity: .82;
@@ -7101,6 +7101,11 @@ panels.forEach(p => observer.observe(p));
   ];
   function pick(arr) { return arr[(Math.random() * arr.length) | 0]; }
 
+  const SKYLINE_KINDS = ['chip', 'capacitor', 'diode', 'resistor'];
+  // The tunnel/skyline palette slowly rotates through the color wheel as
+  // levels climb — "the digital landscape changes colors" as progress is made.
+  function levelHueDeg() { return ((level - 1) * 27) % 360; }
+
   function projectPoint(lane, p) {
     return { x: VP_X + (lane - VP_X) * p, y: VP_Y + (PLAYER_Y - VP_Y) * p };
   }
@@ -7129,6 +7134,26 @@ panels.forEach(p => observer.observe(p));
     return traces;
   }
 
+  function generateSkyline() {
+    // A distant "skyline" flanking the tunnel — silhouettes shaped like
+    // circuit components (chip packages, capacitors, diodes, resistors)
+    // instead of buildings, drifting past slowly on both sides.
+    const parts = [];
+    const count = 16;
+    for (let i = 0; i < count; i++) {
+      parts.push({
+        side: i % 2 === 0 ? -1 : 1,
+        laneOffset: 1.4 + Math.random() * 2.6,   // lane-widths out from center beyond the play field
+        p: Math.random(),                          // depth, 0 = far near vanishing point, 1 = near player
+        speed: 0.035 + Math.random() * 0.045,
+        kind: pick(SKYLINE_KINDS),
+        scale: 0.7 + Math.random() * 0.9,
+        seed: Math.random() * 1000,
+      });
+    }
+    return parts;
+  }
+
   function pointAlongTrace(trace, t) {
     const segCount = trace.pts.length - 1;
     const segT = Math.max(0, Math.min(0.9999, t)) * segCount;
@@ -7145,7 +7170,7 @@ panels.forEach(p => observer.observe(p));
   let items = [], particles = [], codeBits = [], projectiles = [], fizzles = [];
   let powerups = [], floatTexts = [], shockwaves = [];
   let score = 0, running = false, dying = false, deathTimer = 0, rafId = null, lastTime = 0;
-  let spawnTimer = 0, codeBitTimer = 0, elapsed = 0, difficulty = 1;
+  let spawnTimer = 0, codeBitTimer = 0, elapsed = 0, difficulty = 1, level = 1;
   let shakeMag = 0, flash = 0, tunnelHue = 0, threat = 0;
   let streak = 0, invulnTimer = 0, fireTimer = 0;
   let rapidTimer = 0, magnetTimer = 0, shieldTimer = 0, powerupTimer = randRange(POWERUP_MIN, POWERUP_MAX);
@@ -7154,6 +7179,7 @@ panels.forEach(p => observer.observe(p));
   window.__TILT_DEBUG = false; // diagnostic done — normal compact "TILT" label restored
   let soundOn = true;
   let circuitTraces = generateCircuitTraces();
+  let skylineParts = generateSkyline();
   let best = parseInt(localStorage.getItem('ghostwireBest') || '0', 10);
   bestStatEl.innerHTML = 'best: <strong>' + best + '</strong>';
 
@@ -7164,7 +7190,7 @@ panels.forEach(p => observer.observe(p));
   function reset() {
     items = []; particles = []; codeBits = []; projectiles = []; fizzles = [];
     powerups = []; floatTexts = []; shockwaves = [];
-    score = 0; elapsed = 0; difficulty = 1; threat = 0;
+    score = 0; elapsed = 0; difficulty = 1; level = 1; threat = 0;
     spawnTimer = 0; codeBitTimer = 0; fireTimer = 0;
     playerX = W / 2; targetX = playerX; playerVX = 0;
     shakeMag = 0; flash = 0; dying = false; deathTimer = 0;
@@ -7172,18 +7198,24 @@ panels.forEach(p => observer.observe(p));
     rapidTimer = 0; magnetTimer = 0; shieldTimer = 0; powerupTimer = randRange(POWERUP_MIN, POWERUP_MAX);
     surging = false; surgeCountdown = randRange(SURGE_MIN, SURGE_MAX); surgeElapsed = 0;
     circuitTraces = generateCircuitTraces();
+    skylineParts = generateSkyline();
     statEl.innerHTML = 'score: <strong>0</strong>';
   }
 
   function spawnItem() {
     const isGood = Math.random() < 0.55;
+    // Bad (red/corrupted) items ease in even slower than the general
+    // difficulty ramp — starts at 30% speed, full speed by ~16s — so new
+    // players get more reaction time on hazards specifically, while good
+    // items are dodging/collecting practice from the start.
+    const badRamp = isGood ? 1 : Math.min(1, 0.3 + elapsed / 16);
     items.push({
       lane: 24 + Math.random() * (W - 48),   // x position once it reaches the near plane
       z: 1,                                   // 1 = at the vanishing point, 0 = at the player
       baseR: isGood ? 10 : 15,
       type: isGood ? 'good' : 'bad',
       token: isGood ? pick(CODE_TOKENS_GOOD) : pick(CODE_TOKENS_BAD),
-      vz: (isGood ? 0.46 : 0.54) * difficulty * (surging ? 1.18 : 1),
+      vz: (isGood ? 0.46 : 0.54 * badRamp) * difficulty * (surging ? 1.18 : 1),
       spin: (Math.random() - 0.5) * 3,
       seed: Math.random() * 1000,
       x: VP_X, y: VP_Y, r: 1, glitchT: 0,
@@ -7294,6 +7326,11 @@ panels.forEach(p => observer.observe(p));
     playTone(960, 0.15, 'square', 0.11, null, 0.14, { detune: 11 });
   }
   function sfxSurge() { playTone(90, 0.45, 'sawtooth', 0.15, 140, 0, { filterFreq: 650, filterSlideTo: 2400, filterQ: 12 }); }
+  function sfxLevelUp() {
+    playTone(440, 0.09, 'triangle', 0.11, null, 0, { detune: 8 });
+    playTone(660, 0.09, 'triangle', 0.11, null, 0.08, { detune: 8 });
+    playTone(880, 0.16, 'triangle', 0.13, null, 0.16, { detune: 8 });
+  }
   function startAmbient() {
     if (!audioCtx) return;
     ambientOsc = audioCtx.createOscillator();
@@ -7603,6 +7640,15 @@ panels.forEach(p => observer.observe(p));
     tunnelHue += dt;
 
     circuitTraces.forEach((t) => { t.phase = (t.phase + t.speed * dt) % 1; });
+    skylineParts.forEach((s) => {
+      s.p += s.speed * dt * Math.min(1.5, difficulty);
+      if (s.p > 1.05) {
+        s.p = -0.05 - Math.random() * 0.2;
+        s.laneOffset = 1.4 + Math.random() * 2.6;
+        s.kind = pick(SKYLINE_KINDS);
+        s.scale = 0.7 + Math.random() * 0.9;
+      }
+    });
 
     codeBitTimer -= dt;
     if (codeBitTimer <= 0) { spawnCodeBit(); codeBitTimer = 0.4 + Math.random() * 0.35; }
@@ -7625,6 +7671,16 @@ panels.forEach(p => observer.observe(p));
     const RAMP_START = 0.4, RAMP_TIME = 8;
     const rampFactor = Math.min(1, RAMP_START + (1 - RAMP_START) * (elapsed / RAMP_TIME));
     difficulty = (1 + elapsed / 20) * rampFactor;
+
+    // levels — one every 20s, mirroring the difficulty ramp's own pacing,
+    // so "LEVEL n" is a legible progress marker for the same slow→fast climb
+    const newLevel = 1 + Math.floor(elapsed / 20);
+    if (newLevel > level) {
+      level = newLevel;
+      spawnFloatText(W / 2, VP_Y + 60, 'LEVEL ' + level, '#7DD3FC');
+      shakeMag = Math.max(shakeMag, 4);
+      sfxLevelUp();
+    }
     threat = Math.max(0, Math.min(1, threat + dt * THREAT_RISE_PER_SEC));
     invulnTimer = Math.max(0, invulnTimer - dt);
     fireTimer = Math.max(0, fireTimer - dt);
@@ -7820,6 +7876,64 @@ panels.forEach(p => observer.observe(p));
       ctx.lineWidth = 1.1;
       ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
     }
+  }
+
+  function drawSkyline() {
+    // City-skyline silhouettes flanking the tunnel — but shaped like circuit
+    // components (chip packages, capacitors, diodes, resistors) instead of
+    // buildings, drifting past on both sides as the run progresses.
+    const colorSets = {
+      chip: '125,211,252', capacitor: '196,181,253',
+      diode: '110,231,183', resistor: '253,224,71',
+    };
+    skylineParts.slice().sort((a, b) => a.p - b.p).forEach((s) => {
+      if (s.p < 0 || s.p > 1) return;
+      const lane = VP_X + s.side * s.laneOffset * (W / 8);
+      const pos = projectPoint(lane, s.p);
+      const depthScale = 0.12 + s.p * 0.95;
+      const h = 30 * s.scale * depthScale;
+      const w = 16 * s.scale * depthScale;
+      const alpha = 0.08 + s.p * 0.2;
+      const color = colorSets[s.kind] || '148,163,184';
+      ctx.save();
+      ctx.translate(pos.x, pos.y);
+      ctx.fillStyle = 'rgba(' + color + ',' + alpha.toFixed(3) + ')';
+      ctx.strokeStyle = 'rgba(' + color + ',' + (alpha + 0.16).toFixed(3) + ')';
+      ctx.lineWidth = Math.max(0.6, depthScale);
+      if (s.kind === 'chip') {
+        ctx.fillRect(-w / 2, -h, w, h);
+        ctx.strokeRect(-w / 2, -h, w, h);
+        const pins = 4;
+        for (let i = 0; i < pins; i++) {
+          const px = -w / 2 + (i + 0.5) * (w / pins);
+          ctx.beginPath(); ctx.moveTo(px, -h); ctx.lineTo(px, -h - 3 * depthScale); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, 3 * depthScale); ctx.stroke();
+        }
+      } else if (s.kind === 'capacitor') {
+        const r = w / 2;
+        ctx.beginPath();
+        ctx.moveTo(-r, 0);
+        ctx.lineTo(-r, -h + r);
+        ctx.arc(0, -h + r, r, Math.PI, 0);
+        ctx.lineTo(r, 0);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+      } else if (s.kind === 'diode') {
+        ctx.fillRect(-w / 2, -h, w, h);
+        ctx.strokeRect(-w / 2, -h, w, h);
+        ctx.fillStyle = 'rgba(' + color + ',' + (alpha + 0.3).toFixed(3) + ')';
+        ctx.fillRect(-w / 2, -h + h * 0.2, w, Math.max(1, h * 0.08));
+      } else {
+        ctx.fillRect(-w / 2, -h, w, h);
+        ctx.strokeRect(-w / 2, -h, w, h);
+        const stripes = ['248,113,113', '232,121,249', '34,211,238'];
+        for (let i = 0; i < 3; i++) {
+          ctx.fillStyle = 'rgba(' + stripes[i] + ',' + (alpha + 0.25).toFixed(3) + ')';
+          ctx.fillRect(-w / 2, -h + h * (0.25 + i * 0.2), w, Math.max(1, h * 0.08));
+        }
+      }
+      ctx.restore();
+    });
   }
 
   function drawCircuitFloor() {
@@ -8099,7 +8213,7 @@ panels.forEach(p => observer.observe(p));
     ctx.font = '10px "JetBrains Mono", monospace';
     ctx.textAlign = 'left';
     ctx.fillStyle = 'rgba(125,211,252,.8)';
-    ctx.fillText('SECTOR ' + Math.floor(elapsed).toString().padStart(3, '0'), m + bl + 6, clearY);
+    ctx.fillText('SECTOR ' + Math.floor(elapsed).toString().padStart(3, '0') + '  ·  LVL ' + level, m + bl + 6, clearY);
 
     // system status readout — mirrors the same threat tiers as the meter below
     let sysLabel = 'SYS: NOMINAL', sysColor = 'rgba(34,211,238,.8)';
@@ -8180,9 +8294,13 @@ panels.forEach(p => observer.observe(p));
       ctx.translate((Math.random() - 0.5) * shakeMag, (Math.random() - 0.5) * shakeMag);
     }
 
+    ctx.save();
+    ctx.filter = 'hue-rotate(' + levelHueDeg() + 'deg)'; // "digital landscape" recolors as levels climb
     drawTunnel();
+    drawSkyline();
     drawWarpStreaks();
     drawCircuitFloor();
+    ctx.restore(); // back to filter: none — gameplay colors (items/player/HUD) stay true so good/bad stay readable
     drawCodeBits();
 
     items.slice().sort((a, b) => a.z - b.z).reverse().forEach(drawItem);
@@ -8259,7 +8377,7 @@ panels.forEach(p => observer.observe(p));
     overlay.hidden = false;
     overlayTitle.textContent = 'Connection Corrupted';
     overlayTitle.classList.add('gt-over');
-    overlaySub.textContent = 'Purge failed — final score: ' + score;
+    overlaySub.textContent = 'Purge failed — final score: ' + score + '  ·  reached level ' + level;
     startBtn.textContent = '\u25B6 Play Again';
     scoreEntry.hidden = false;
     if (pillText) pillText.textContent = 'CORRUPTED';

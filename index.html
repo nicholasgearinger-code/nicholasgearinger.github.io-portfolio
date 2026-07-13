@@ -7181,6 +7181,18 @@ panels.forEach(p => observer.observe(p));
 
   function randRange(a, b) { return a + Math.random() * (b - a); }
 
+  // Interpolates an "r,g,b" string between a calm/cool color and a
+  // danger/warm color, driven by threat (0 = safe, 1 = critical) — used to
+  // shift the tunnel background and circuit traces from violet/blue/cyan
+  // toward orange/red as speed and difficulty ramp up.
+  function lerpColorStr(cool, warm, t) {
+    t = Math.max(0, Math.min(1, t));
+    const r = Math.round(cool[0] + (warm[0] - cool[0]) * t);
+    const g = Math.round(cool[1] + (warm[1] - cool[1]) * t);
+    const b = Math.round(cool[2] + (warm[2] - cool[2]) * t);
+    return r + ',' + g + ',' + b;
+  }
+
   let playerX = W / 2, targetX = playerX, playerVX = 0;
   let items = [], particles = [], codeBits = [], projectiles = [], fizzles = [];
   let powerups = [], floatTexts = [], shockwaves = [];
@@ -7838,16 +7850,22 @@ panels.forEach(p => observer.observe(p));
   }
 
   function drawTunnel() {
+    // threat (0 → 1) drives the whole tunnel from a cool cyan/violet palette
+    // at low danger toward a hot orange/red palette as speed/difficulty climb
+    const coreColor = lerpColorStr([34, 211, 238], [251, 146, 60], threat);   // cyan -> orange
+    const midColor = lerpColorStr([88, 28, 135], [153, 27, 27], threat);      // violet -> deep red
+    const glowColor = lerpColorStr([125, 211, 252], [251, 191, 36], threat);  // sky blue -> amber
+
     const g = ctx.createRadialGradient(VP_X, VP_Y, 4, VP_X, VP_Y, H * 0.95);
-    g.addColorStop(0, 'rgba(34,211,238,.16)');
-    g.addColorStop(0.35, 'rgba(88,28,135,.14)');
+    g.addColorStop(0, 'rgba(' + coreColor + ',.16)');
+    g.addColorStop(0.35, 'rgba(' + midColor + ',.14)');
     g.addColorStop(0.7, 'rgba(9,16,28,1)');
     g.addColorStop(1, '#030308');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, H);
 
     // radiating lanes from the vanishing point to the bottom edge
-    ctx.strokeStyle = 'rgba(34,211,238,.10)';
+    ctx.strokeStyle = 'rgba(' + coreColor + ',.10)';
     ctx.lineWidth = 1;
     for (let k = -4; k <= 4; k++) {
       const bx = VP_X + k * (W / 8);
@@ -7860,15 +7878,15 @@ panels.forEach(p => observer.observe(p));
       const rp = ((tunnelHue * ringSpeed) + k / 6) % 1;
       const lx = VP_X + (0 - VP_X) * rp, rx = VP_X + (W - VP_X) * rp;
       const ry = VP_Y + (PLAYER_Y - VP_Y) * rp;
-      ctx.strokeStyle = 'rgba(34,211,238,' + (0.05 + rp * 0.22).toFixed(3) + ')';
+      ctx.strokeStyle = 'rgba(' + coreColor + ',' + (0.05 + rp * 0.22).toFixed(3) + ')';
       ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(lx, ry); ctx.lineTo(rx, ry); ctx.stroke();
     }
 
     // vanishing-point core glow
     ctx.beginPath();
-    ctx.fillStyle = 'rgba(125,211,252,.5)';
-    ctx.shadowColor = '#7DD3FC'; ctx.shadowBlur = 16;
+    ctx.fillStyle = 'rgba(' + glowColor + ',.5)';
+    ctx.shadowColor = 'rgb(' + glowColor + ')'; ctx.shadowBlur = 16;
     ctx.arc(VP_X, VP_Y, 3, 0, Math.PI * 2); ctx.fill();
     ctx.shadowBlur = 0;
 
@@ -7956,7 +7974,11 @@ panels.forEach(p => observer.observe(p));
     circuitTraces.forEach((t) => {
       const nearP = t.pts[t.pts.length - 1].p;
       const fade = 0.09 + nearP * 0.12;
-      const color = t.hue === 'violet' ? '167,139,250' : '232,121,249';
+      // each trace's cool base hue (violet or magenta) shifts toward
+      // orange/red as threat rises, matching the tunnel background
+      const cool = t.hue === 'violet' ? [167, 139, 250] : [232, 121, 249];
+      const warm = t.hue === 'violet' ? [249, 115, 22] : [239, 68, 68];
+      const color = lerpColorStr(cool, warm, threat);
 
       ctx.beginPath();
       t.pts.forEach((pt, i) => {

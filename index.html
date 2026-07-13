@@ -2350,8 +2350,9 @@
     transition: opacity .15s ease, background .15s ease;
   }
   .game-fullscreen-btn:active { background: rgba(34,211,238,.28); opacity: 1; }
+  .game-play-row { display: flex; align-items: center; justify-content: center; gap: .6rem; }
   @media (orientation: portrait) and (max-width: 700px) {
-    .game-wrap:not(.gw-fullscreen) .game-fullscreen-btn { top: 3.3rem; }
+    .game-wrap:not(.gw-fullscreen) .game-fullscreen-btn { position: static; margin: 0; }
   }
   .game-wrap.gw-fullscreen .game-fullscreen-btn { top: calc(.7rem + env(safe-area-inset-top)); right: calc(3.2rem + env(safe-area-inset-right)); }
   .game-wrap.gw-fullscreen .game-pause-btn { top: calc(.7rem + env(safe-area-inset-top)); right: calc(5.7rem + env(safe-area-inset-right)); }
@@ -3436,7 +3437,6 @@
         <div class="game-wrap" id="game-wrap">
           <canvas id="game-canvas" width="480" height="360" aria-label="Ghostwire arcade game — a hunter-process diving a perspective data tunnel, dodging corrupted fragments and collecting verified data shards"></canvas>
           <button type="button" class="game-gyro-btn" id="game-gyro-btn" hidden>⟲ TILT: OFF</button>
-          <button type="button" class="game-fullscreen-btn" id="game-fullscreen-btn" aria-label="Enter fullscreen">⛶</button>
           <button type="button" class="game-pause-btn" id="game-pause-btn" aria-label="Pause" hidden>⏸</button>
           <button type="button" class="game-mute-btn" id="game-mute-btn" aria-label="Toggle sound">🔊</button>
           <button type="button" class="game-fire-btn" id="game-fire-btn" aria-label="Hold to charge, release to fire" hidden>◎</button>
@@ -3461,7 +3461,10 @@
                   <button type="button" class="game-zone-btn" data-zone="5" style="--zc:241,85,85">BREACH<span class="gz-lv">Lv 26</span></button>
                 </div>
               </div>
-              <button type="button" class="btn-primary" id="game-start-btn">▶ Play</button>
+              <div class="game-play-row">
+                <button type="button" class="btn-primary" id="game-start-btn">▶ Play</button>
+                <button type="button" class="game-fullscreen-btn" id="game-fullscreen-btn" aria-label="Enter fullscreen">⛶</button>
+              </div>
               <div class="game-score-entry" id="game-score-entry" hidden>
                 <input type="text" id="game-name-input" maxlength="12" placeholder="YOUR NAME">
                 <button type="button" class="btn-ghost" id="game-submit-btn">Submit Score</button>

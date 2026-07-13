@@ -497,7 +497,7 @@
 
   /* ── HERO ── */
   #hero {
-    position: relative; min-height: 100vh;
+    position: relative; min-height: 100vh; min-height: 100svh;
     display: flex; flex-direction: column;
     align-items: center; text-align: center;
     padding-top: 6.2rem;
@@ -529,7 +529,7 @@
     position: relative; z-index: 2;
     text-shadow: 0 0 80px rgba(0,0,0,.7);
     padding: 0 1.5rem;
-    min-height: 82vh;
+    min-height: 70vh; min-height: 70svh;
     display: flex; flex-direction: column;
     align-items: center; justify-content: center;
   }
@@ -786,12 +786,16 @@
 
   /* ── HERO CIRCUIT VIDEO (plays on scroll, auto-advances on end) ── */
   .scroll-hint {
-    position: absolute; bottom: 2.5rem; left: 50%; transform: translateX(-50%);
+    position: absolute; bottom: 2.5rem; left: 50%; transform: translateX(-50%); z-index: 2;
     display: flex; flex-direction: column; align-items: center; gap: .5rem;
     color: var(--slate); font-size: .7rem; letter-spacing: .1em; text-transform: uppercase;
-    animation: bob 2s ease-in-out infinite;
+    text-decoration: none; opacity: .75; transition: opacity .2s ease;
   }
+  .scroll-hint:hover { opacity: 1; color: var(--cyan); }
   .scroll-hint svg { opacity: .5; }
+  @media (prefers-reduced-motion: no-preference) {
+    .scroll-hint { animation: bob 2s ease-in-out infinite; }
+  }
   @keyframes bob { 0%,100%{transform:translateX(-50%) translateY(0)} 50%{transform:translateX(-50%) translateY(6px)} }
 
   /* ── 3D SCROLL SECTIONS ── */
@@ -2875,7 +2879,10 @@
       <a href="#contact" class="btn-ghost">Get In Touch</a>
     </div>
   </div>
-
+  <a href="#compiler-section" class="scroll-hint" aria-label="Scroll to explore">
+    Scroll
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v15M5 12l7 7 7-7"/></svg>
+  </a>
 </section>
 
 <!-- ABOUT ME — lead-in to the animated code compiler -->

@@ -7437,16 +7437,21 @@ panels.forEach(p => observer.observe(p));
   // the phone's own front-back tilt instead — the axis that now tracks
   // left-right on screen is beta (sign flips depending on which way it's
   // rotated). Pick the right axis from the current screen orientation.
+  // Empirically (tested on-device), gamma stays the responsive left-right
+  // steering axis even in landscape — beta barely moves during the normal
+  // tilt-steer gesture. Only the sign convention flips between the two
+  // landscape rotations (screen left/right swap), so keep gamma but flip
+  // sign for the "other" landscape orientation.
   function currentOrientationAngle() {
     if (window.screen && window.screen.orientation && typeof window.screen.orientation.angle === 'number') return window.screen.orientation.angle;
     if (typeof window.orientation === 'number') return window.orientation;
     return 0;
   }
   function steerAxisValue(e) {
+    if (e.gamma === null || e.gamma === undefined) return null;
     const angle = currentOrientationAngle();
-    if (angle === 90) return (e.beta === null || e.beta === undefined) ? null : -e.beta;
-    if (angle === -90 || angle === 270) return (e.beta === null || e.beta === undefined) ? null : e.beta;
-    return (e.gamma === null || e.gamma === undefined) ? null : e.gamma;
+    if (angle === -90 || angle === 270) return -e.gamma;
+    return e.gamma;
   }
   function handleOrientation(e) {
     const v = steerAxisValue(e);

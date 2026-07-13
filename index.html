@@ -2315,6 +2315,24 @@
 
   /* ── GHOSTWIRE GAME ── */
   .game-wrap { position: relative; width: 100%; max-width: 480px; margin: 0 auto; border-radius: .5rem; overflow: hidden; touch-action: none; }
+  .game-wrap.gw-fullscreen {
+    position: fixed; inset: 0; z-index: 9999; margin: auto; max-width: none; border-radius: 0;
+    width: min(100vw, calc(100dvh * 4 / 3));
+    height: min(100dvh, calc(100vw * 3 / 4));
+    background: #000;
+  }
+  html.gw-fs-lock, body.gw-fs-lock { overflow: hidden; height: 100%; }
+  .game-fullscreen-btn {
+    position: absolute; right: 3.05rem; top: .7rem; z-index: 1;
+    padding: .3rem .5rem; border-radius: .35rem;
+    background: rgba(34,211,238,.1); border: 1px solid rgba(34,211,238,.45);
+    color: var(--cyan); font-size: .78rem; line-height: 1;
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+  }
+  .game-wrap.gw-fullscreen .game-fullscreen-btn { top: calc(.7rem + env(safe-area-inset-top)); right: calc(3.05rem + env(safe-area-inset-right)); }
+  .game-wrap.gw-fullscreen .game-mute-btn { top: calc(.7rem + env(safe-area-inset-top)); right: calc(.7rem + env(safe-area-inset-right)); }
+  .game-wrap.gw-fullscreen .game-gyro-btn { top: calc(.7rem + env(safe-area-inset-top)); left: calc(.7rem + env(safe-area-inset-left)); }
+  .game-wrap.gw-fullscreen .game-fire-btn { bottom: calc(.7rem + env(safe-area-inset-bottom)); right: calc(.7rem + env(safe-area-inset-right)); }
   #game-canvas { width: 100%; height: auto; display: block; background: #030811; }
   .game-fire-btn {
     position: absolute; right: .7rem; bottom: .7rem; z-index: 1;
@@ -3337,6 +3355,7 @@
         <div class="game-wrap" id="game-wrap">
           <canvas id="game-canvas" width="480" height="360" aria-label="Ghostwire arcade game — a hunter-process diving a perspective data tunnel, dodging corrupted fragments and collecting verified data shards"></canvas>
           <button type="button" class="game-gyro-btn" id="game-gyro-btn" hidden>⟲ TILT: OFF</button>
+          <button type="button" class="game-fullscreen-btn" id="game-fullscreen-btn" aria-label="Enter fullscreen">⛶</button>
           <button type="button" class="game-mute-btn" id="game-mute-btn" aria-label="Toggle sound">🔊</button>
           <button type="button" class="game-fire-btn" id="game-fire-btn" aria-label="Fire" hidden>◎</button>
           <div class="game-overlay" id="game-overlay">
@@ -6992,6 +7011,7 @@ panels.forEach(p => observer.observe(p));
       display need the backend. -- */
 (function ghostwire() {
   const canvas = document.getElementById('game-canvas');
+  const gameWrap = document.getElementById('game-wrap');
   const overlay = document.getElementById('game-overlay');
   const titleSeqEl = document.getElementById('game-title-seq');
   const overlayMainEl = document.getElementById('game-overlay-main');
@@ -7009,6 +7029,7 @@ panels.forEach(p => observer.observe(p));
   const fireBtn = document.getElementById('game-fire-btn');
   const gyroBtn = document.getElementById('game-gyro-btn');
   const muteBtn = document.getElementById('game-mute-btn');
+  const fullscreenBtn = document.getElementById('game-fullscreen-btn');
   const quitBtn = document.getElementById('game-quit-btn');
   if (!canvas || !startBtn) return;
   if (fireBtn) fireBtn.hidden = false;
@@ -7295,6 +7316,52 @@ panels.forEach(p => observer.observe(p));
       muteBtn.textContent = soundOn ? '🔊' : '🔇';
       muteBtn.classList.toggle('is-muted', !soundOn);
       if (soundOn) ensureAudio();
+    });
+  }
+
+  // -- fullscreen: the native Fullscreen API isn't available for arbitrary
+  //    elements in mobile Safari outside a home-screen PWA, so the actual
+  //    "fullscreen" here is a fixed, full-viewport CSS layout that
+  //    letterboxes the 4:3 canvas to fit either portrait or landscape via
+  //    min()/calc() — no JS resize math needed, it just recalculates on
+  //    rotation. requestFullscreen() is still attempted as a bonus on
+  //    browsers that do support it. --------------------------------------
+  function isNativeFullscreen() {
+    return !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
+  }
+  function enterFullscreenMode() {
+    if (!gameWrap) return;
+    gameWrap.classList.add('gw-fullscreen');
+    document.documentElement.classList.add('gw-fs-lock');
+    document.body.classList.add('gw-fs-lock');
+    if (fullscreenBtn) { fullscreenBtn.textContent = '\u2715'; fullscreenBtn.setAttribute('aria-label', 'Exit fullscreen'); }
+    const reqFs = gameWrap.requestFullscreen || gameWrap.webkitRequestFullscreen || gameWrap.mozRequestFullScreen || gameWrap.msRequestFullscreen;
+    if (reqFs) { try { const p = reqFs.call(gameWrap); if (p && p.catch) p.catch(() => {}); } catch (_) {} }
+    try { if (screen.orientation && screen.orientation.lock) screen.orientation.lock('any').catch(() => {}); } catch (_) {}
+  }
+  function exitFullscreenMode(skipNativeExit) {
+    if (!gameWrap) return;
+    gameWrap.classList.remove('gw-fullscreen');
+    document.documentElement.classList.remove('gw-fs-lock');
+    document.body.classList.remove('gw-fs-lock');
+    if (fullscreenBtn) { fullscreenBtn.textContent = '\u26F6'; fullscreenBtn.setAttribute('aria-label', 'Enter fullscreen'); }
+    if (!skipNativeExit && isNativeFullscreen()) {
+      const exitFs = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen || document.msExitFullscreen;
+      if (exitFs) { try { const p = exitFs.call(document); if (p && p.catch) p.catch(() => {}); } catch (_) {} }
+    }
+    try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch (_) {}
+  }
+  if (fullscreenBtn && gameWrap) {
+    fullscreenBtn.addEventListener('click', () => {
+      if (gameWrap.classList.contains('gw-fullscreen')) exitFullscreenMode(); else enterFullscreenMode();
+    });
+    ['fullscreenchange', 'webkitfullscreenchange', 'mozfullscreenchange', 'MSFullscreenChange'].forEach((evt) => {
+      document.addEventListener(evt, () => {
+        if (!isNativeFullscreen() && gameWrap.classList.contains('gw-fullscreen')) exitFullscreenMode(true);
+      });
+    });
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && gameWrap.classList.contains('gw-fullscreen')) exitFullscreenMode();
     });
   }
 

@@ -470,8 +470,25 @@
   .nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
   .nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
 
+  .nav-status {
+    display: none;
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    align-items: center; gap: .45rem;
+    font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: .72rem; letter-spacing: .03em;
+    color: var(--slate); pointer-events: none; user-select: none; white-space: nowrap;
+  }
+  .nav-status-dot {
+    width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+    background: #34D399; box-shadow: 0 0 6px #34D399;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .nav-status-dot { animation: hudPulse 2s infinite; }
+  }
+  #nav-status-time { color: var(--sky); font-variant-numeric: tabular-nums; }
+
   @media (max-width: 1150px), (max-height: 500px) and (orientation: landscape) {
     .nav-toggle { display: flex; }
+    .nav-status { display: flex; }
     nav ul {
       position: fixed; top: 0; right: 0;
       width: min(78vw, 320px); height: 100vh; height: 100dvh;
@@ -2843,6 +2860,9 @@
 <!-- NAV -->
 <nav aria-label="Primary">
   <div class="nav-logo" aria-label="Nicholas Gearinger — home"><span class="nav-logo-lt">&lt;</span><span class="nav-logo-slash">/</span><span class="nav-logo-gt">&gt;</span></div>
+  <div class="nav-status" aria-hidden="true">
+    <span class="nav-status-dot"></span><span id="nav-status-time">--:--:--</span>
+  </div>
   <button class="nav-toggle" id="nav-toggle" aria-label="Toggle navigation menu" aria-expanded="false" aria-controls="nav-menu">
     <span></span><span></span><span></span>
   </button>
@@ -6167,11 +6187,16 @@ panels.forEach(p => observer.observe(p));
 })();
 </script>
 <script>
-/* -- HUD CORNER WIDGET: live clock (always runs, no backend needed) -- */
+/* -- HUD CORNER WIDGET + NAV STATUS: live clock (always runs, no backend needed) -- */
 (function hudClock() {
   const timeEl = document.getElementById('hud-time');
-  if (!timeEl) return;
-  function tick() { timeEl.textContent = new Date().toLocaleTimeString([], { hour12: false }); }
+  const navTimeEl = document.getElementById('nav-status-time');
+  if (!timeEl && !navTimeEl) return;
+  function tick() {
+    const t = new Date().toLocaleTimeString([], { hour12: false });
+    if (timeEl) timeEl.textContent = t;
+    if (navTimeEl) navTimeEl.textContent = t;
+  }
   tick();
   setInterval(tick, 1000);
 })();

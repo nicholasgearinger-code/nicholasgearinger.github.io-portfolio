@@ -2322,6 +2322,7 @@
     background: #000;
   }
   html.gw-fs-lock, body.gw-fs-lock { overflow: hidden; height: 100%; }
+  body.gw-fs-lock { width: 100%; }
   .game-fullscreen-btn {
     position: absolute; right: 3.05rem; top: .7rem; z-index: 1;
     padding: .3rem .5rem; border-radius: .35rem;
@@ -7329,11 +7330,38 @@ panels.forEach(p => observer.observe(p));
   function isNativeFullscreen() {
     return !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
   }
-  function enterFullscreenMode() {
-    if (!gameWrap) return;
-    gameWrap.classList.add('gw-fullscreen');
+  // A `transform` (or `will-change: transform`) on any ancestor — which
+  // .panel has, for its scroll-reveal effect — re-anchors position:fixed
+  // descendants to that ancestor instead of the real viewport. So instead
+  // of fighting that, game-wrap is physically moved to be a direct child
+  // of <body> while fullscreen, then moved back to its original spot on
+  // exit.
+  const gwHomeParent = gameWrap ? gameWrap.parentNode : null;
+  const gwHomeNextSibling = gameWrap ? gameWrap.nextSibling : null;
+  let gwLockScrollY = 0;
+  function lockScroll() {
+    gwLockScrollY = window.scrollY || window.pageYOffset || 0;
+    document.body.style.position = 'fixed';
+    document.body.style.top = (-gwLockScrollY) + 'px';
+    document.body.style.left = '0';
+    document.body.style.right = '0';
     document.documentElement.classList.add('gw-fs-lock');
     document.body.classList.add('gw-fs-lock');
+  }
+  function unlockScroll() {
+    document.documentElement.classList.remove('gw-fs-lock');
+    document.body.classList.remove('gw-fs-lock');
+    document.body.style.position = '';
+    document.body.style.top = '';
+    document.body.style.left = '';
+    document.body.style.right = '';
+    window.scrollTo(0, gwLockScrollY);
+  }
+  function enterFullscreenMode() {
+    if (!gameWrap) return;
+    document.body.appendChild(gameWrap);
+    gameWrap.classList.add('gw-fullscreen');
+    lockScroll();
     if (fullscreenBtn) { fullscreenBtn.textContent = '\u2715'; fullscreenBtn.setAttribute('aria-label', 'Exit fullscreen'); }
     const reqFs = gameWrap.requestFullscreen || gameWrap.webkitRequestFullscreen || gameWrap.mozRequestFullScreen || gameWrap.msRequestFullscreen;
     if (reqFs) { try { const p = reqFs.call(gameWrap); if (p && p.catch) p.catch(() => {}); } catch (_) {} }
@@ -7342,8 +7370,11 @@ panels.forEach(p => observer.observe(p));
   function exitFullscreenMode(skipNativeExit) {
     if (!gameWrap) return;
     gameWrap.classList.remove('gw-fullscreen');
-    document.documentElement.classList.remove('gw-fs-lock');
-    document.body.classList.remove('gw-fs-lock');
+    unlockScroll();
+    if (gwHomeParent) {
+      if (gwHomeNextSibling) gwHomeParent.insertBefore(gameWrap, gwHomeNextSibling);
+      else gwHomeParent.appendChild(gameWrap);
+    }
     if (fullscreenBtn) { fullscreenBtn.textContent = '\u26F6'; fullscreenBtn.setAttribute('aria-label', 'Enter fullscreen'); }
     if (!skipNativeExit && isNativeFullscreen()) {
       const exitFs = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen || document.msExitFullscreen;

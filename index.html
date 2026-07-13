@@ -2400,6 +2400,8 @@
     cursor: pointer;
   }
   .gp-row input[type="checkbox"] { width: 1.15rem; height: 1.15rem; accent-color: var(--cyan); cursor: pointer; flex-shrink: 0; }
+  .gp-note { margin: -.3rem 0 .3rem; font-size: .68rem; line-height: 1.4; color: var(--muted); opacity: .8; }
+  .gp-note[hidden] { display: none; }
   .gp-row-col { flex-direction: column; align-items: flex-start; gap: .5rem; cursor: default; }
   .gp-seg { display: flex; gap: .4rem; width: 100%; }
   .gp-seg-btn {
@@ -3523,6 +3525,7 @@
                   <span>Haptic feedback</span>
                   <input type="checkbox" id="gp-haptics">
                 </label>
+                <p class="gp-note" id="gp-haptics-note" hidden>Not supported by this browser (iOS Safari has never implemented the Vibration API) — toggle has no effect here.</p>
                 <label class="gp-row">
                   <span>Colorblind-safe colors</span>
                   <input type="checkbox" id="gp-colorblind">
@@ -7256,6 +7259,7 @@ panels.forEach(p => observer.observe(p));
   const settingsBody = document.getElementById('gp-body-settings');
   const achvBody = document.getElementById('gp-body-achv');
   const hapticsCheck = document.getElementById('gp-haptics');
+  const hapticsNote = document.getElementById('gp-haptics-note');
   const colorblindCheck = document.getElementById('gp-colorblind');
   const graphicsSeg = document.getElementById('gp-graphics');
   const achvListEl = document.getElementById('gp-achv-list');
@@ -7635,6 +7639,10 @@ panels.forEach(p => observer.observe(p));
 
   function syncSettingsUI() {
     if (hapticsCheck) hapticsCheck.checked = settings.haptics;
+    if (hapticsNote && !navigator.vibrate) {
+      hapticsNote.hidden = false;
+      hapticsCheck.disabled = true;
+    }
     if (colorblindCheck) colorblindCheck.checked = settings.colorblind;
     if (graphicsSeg) {
       graphicsSeg.querySelectorAll('.gp-seg-btn').forEach((b) => {

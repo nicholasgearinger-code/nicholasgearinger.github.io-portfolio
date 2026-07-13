@@ -7117,9 +7117,16 @@ panels.forEach(p => observer.observe(p));
   function pick(arr) { return arr[(Math.random() * arr.length) | 0]; }
 
   const SKYLINE_KINDS = ['chip', 'capacitor', 'diode', 'resistor'];
-  // The tunnel/skyline palette slowly rotates through the color wheel as
-  // levels climb — "the digital landscape changes colors" as progress is made.
-  function levelHueDeg() { return ((level - 1) * 27) % 360; }
+  // The tunnel/skyline/circuit palette steps through a fixed 6-color era
+  // every 5 levels — violet, blue, green, yellow, orange, red — then loops.
+  // Each value is a hue-rotate offset (deg) from the scene's native violet
+  // base (~270°) to that era's target hue: violet 270, blue 220, green 130,
+  // yellow 55, orange 30, red 0.
+  const LEVEL_ERA_HUES = [0, -50, -140, -215, -240, -270];
+  function levelHueDeg() {
+    const era = Math.floor((level - 1) / 5) % LEVEL_ERA_HUES.length;
+    return LEVEL_ERA_HUES[era];
+  }
 
   function projectPoint(lane, p) {
     return { x: VP_X + (lane - VP_X) * p, y: VP_Y + (PLAYER_Y - VP_Y) * p };
@@ -8332,7 +8339,7 @@ panels.forEach(p => observer.observe(p));
     }
 
     ctx.save();
-    ctx.filter = 'hue-rotate(' + levelHueDeg() + 'deg)'; // "digital landscape" recolors as levels climb
+    ctx.filter = 'hue-rotate(' + levelHueDeg() + 'deg)'; // steps to the next color era every 5 levels
     drawTunnel();
     drawSkyline();
     drawWarpStreaks();

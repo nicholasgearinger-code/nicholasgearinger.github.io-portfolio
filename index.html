@@ -2343,19 +2343,18 @@
   .game-fullscreen-btn {
     position: absolute; right: 3.2rem; top: .7rem; z-index: 15;
     width: 2.3rem; height: 2.3rem; border-radius: 50%;
-    /* Solid-ish backdrop (was a near-transparent .06-alpha ring) so the
-       icon reads as a distinct floating control instead of getting
-       visually swallowed by whatever ready-screen/title-seq text glows
-       behind it in that same corner. */
-    background: rgba(3,8,17,.72); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
-    border: 1px solid rgba(34,211,238,.55);
-    box-shadow: 0 0 10px rgba(3,8,17,.5);
-    color: var(--cyan); font-size: 1.05rem; line-height: 1; opacity: 1;
+    border: 1.5px solid transparent; background-clip: padding-box, border-box;
+    background-image: linear-gradient(#050912, #050912),
+      linear-gradient(135deg, var(--cyan), var(--violet));
+    background-origin: padding-box, border-box;
+    color: var(--cyan); font-size: 1.05rem; line-height: 1; opacity: .88;
     display: flex; align-items: center; justify-content: center;
+    filter: drop-shadow(0 0 4px rgba(34,211,238,.85));
+    box-shadow: 0 0 9px rgba(34,211,238,.3), 0 0 16px rgba(129,140,248,.16);
     touch-action: manipulation; -webkit-tap-highlight-color: transparent;
-    transition: opacity .15s ease, background .15s ease;
+    transition: opacity .15s ease, box-shadow .2s ease, transform .12s ease;
   }
-  .game-fullscreen-btn:active { background: rgba(34,211,238,.28); opacity: 1; }
+  .game-fullscreen-btn:active { opacity: 1; transform: scale(.92); box-shadow: 0 0 14px rgba(34,211,238,.55), 0 0 22px rgba(129,140,248,.3); }
   .game-settings-btn {
     position: absolute; left: .7rem; top: .7rem; z-index: 15;
     width: 2.3rem; height: 2.3rem; border-radius: 50%;
@@ -2444,34 +2443,58 @@
   .game-fire-btn {
     position: absolute; right: .7rem; bottom: 2.1rem; z-index: 1;
     width: 2.9rem; height: 2.9rem; border-radius: 50%;
-    background: rgba(232,121,249,.08); border: 1px solid rgba(232,121,249,.35);
-    color: var(--magenta); font-size: 1.15rem; line-height: 1; opacity: .82;
+    border: 1.5px solid transparent; background-clip: padding-box, border-box;
+    background-image: linear-gradient(#050912, #050912),
+      linear-gradient(135deg, var(--magenta), var(--violet));
+    background-origin: padding-box, border-box;
+    color: var(--magenta); font-size: 1.15rem; line-height: 1; opacity: .85;
     display: flex; align-items: center; justify-content: center;
+    filter: drop-shadow(0 0 4px rgba(232,121,249,.8));
+    box-shadow: 0 0 9px rgba(232,121,249,.28), 0 0 16px rgba(129,140,248,.16);
     touch-action: manipulation; -webkit-tap-highlight-color: transparent;
-    transition: opacity .15s ease, background .15s ease;
+    transition: opacity .15s ease, box-shadow .2s ease, transform .12s ease;
   }
-  .game-fire-btn:active { background: rgba(232,121,249,.35); transform: scale(.94); opacity: 1; }
+  .game-fire-btn:active { opacity: 1; transform: scale(.94); box-shadow: 0 0 15px rgba(232,121,249,.55), 0 0 24px rgba(129,140,248,.32); }
   .game-fire-btn[hidden] { display: none; }
   .game-gyro-btn {
     position: absolute; left: .7rem; top: 3.4rem; z-index: 1;
-    padding: .3rem .55rem; border-radius: .35rem;
-    background: rgba(34,211,238,.06); border: 1px solid rgba(34,211,238,.3);
-    color: var(--cyan); font-family: 'JetBrains Mono', monospace; font-size: .66rem; opacity: .82;
+    padding: .3rem .6rem; border-radius: .4rem;
+    display: flex; align-items: center; gap: .32rem;
+    border: 1.5px solid transparent; background-clip: padding-box, border-box;
+    background-image: linear-gradient(#050912, #050912), linear-gradient(135deg, var(--cyan), var(--violet));
+    background-origin: padding-box, border-box;
+    color: var(--cyan); font-family: 'JetBrains Mono', monospace; font-size: .66rem; opacity: .85;
+    filter: drop-shadow(0 0 3px rgba(34,211,238,.6));
     touch-action: manipulation; -webkit-tap-highlight-color: transparent;
-    transition: opacity .15s ease, background .15s ease;
+    transition: opacity .15s ease, filter .2s ease;
   }
-  .game-gyro-btn.is-active { background: rgba(232,121,249,.16); border-color: rgba(232,121,249,.55); color: var(--magenta); opacity: 1; }
+  .game-gyro-btn.is-active {
+    color: var(--magenta); opacity: 1;
+    background-image: linear-gradient(#050912, #050912), linear-gradient(135deg, var(--magenta), var(--violet));
+    filter: drop-shadow(0 0 5px rgba(232,121,249,.75));
+  }
   .game-gyro-btn[hidden] { display: none; }
   .game-mute-btn {
     position: absolute; right: .7rem; top: .7rem; z-index: 1;
     width: 2.3rem; height: 2.3rem; border-radius: 50%;
-    background: rgba(232,121,249,.06); border: 1px solid rgba(232,121,249,.28);
-    color: var(--magenta); font-size: 1.05rem; line-height: 1; opacity: .82;
+    border: 1.5px solid transparent; background-clip: padding-box, border-box;
+    background-image: linear-gradient(#050912, #050912),
+      linear-gradient(135deg, var(--magenta), var(--cyan));
+    background-origin: padding-box, border-box;
+    color: var(--magenta); font-size: 1.05rem; line-height: 1; opacity: .88;
     display: flex; align-items: center; justify-content: center;
+    filter: drop-shadow(0 0 4px rgba(232,121,249,.8));
+    box-shadow: 0 0 9px rgba(232,121,249,.26), 0 0 16px rgba(34,211,238,.14);
     touch-action: manipulation; -webkit-tap-highlight-color: transparent;
-    transition: opacity .15s ease, background .15s ease;
+    transition: opacity .15s ease, box-shadow .2s ease, transform .12s ease;
   }
-  .game-mute-btn.is-muted { color: rgba(148,163,184,.7); border-color: rgba(148,163,184,.35); background: rgba(148,163,184,.08); }
+  .game-mute-btn:active { opacity: 1; transform: scale(.92); }
+  .game-mute-btn.is-muted {
+    color: rgba(148,163,184,.75);
+    background-image: linear-gradient(#050912, #050912), linear-gradient(135deg, rgba(148,163,184,.7), rgba(148,163,184,.35));
+    filter: drop-shadow(0 0 3px rgba(148,163,184,.6));
+    box-shadow: 0 0 6px rgba(148,163,184,.18);
+  }
   .game-pause-btn {
     position: absolute; right: 5.7rem; top: .7rem; z-index: 1;
     width: 2.3rem; height: 2.3rem; border-radius: 50%;
@@ -2493,18 +2516,23 @@
   #game-share-btn[hidden] { display: none; }
   .game-quit-fs-btn {
     position: absolute; left: .7rem; bottom: .7rem; z-index: 1; display: none;
-    padding: .3rem .55rem; border-radius: .35rem;
-    background: rgba(248,113,113,.08); border: 1px solid rgba(248,113,113,.35);
-    color: #F87171; font-family: 'JetBrains Mono', monospace; font-size: .66rem; opacity: .82;
+    padding: .3rem .6rem; border-radius: .4rem;
+    align-items: center; gap: .32rem;
+    border: 1.5px solid transparent; background-clip: padding-box, border-box;
+    background-image: linear-gradient(#050912, #050912), linear-gradient(135deg, #F87171, var(--magenta));
+    background-origin: padding-box, border-box;
+    color: #F87171; font-family: 'JetBrains Mono', monospace; font-size: .66rem; opacity: .85;
+    filter: drop-shadow(0 0 3px rgba(248,113,113,.6));
     touch-action: manipulation; -webkit-tap-highlight-color: transparent;
-    transition: opacity .15s ease, background .15s ease;
+    transition: opacity .15s ease, filter .2s ease, transform .12s ease;
   }
-  .game-quit-fs-btn:active { background: rgba(248,113,113,.32); opacity: 1; }
+  .game-quit-fs-btn:active { opacity: 1; transform: scale(.95); filter: drop-shadow(0 0 5px rgba(248,113,113,.85)); }
   .game-quit-fs-btn[hidden] { display: none; }
-  .game-wrap.gw-fullscreen .game-quit-fs-btn:not([hidden]) { display: block; }
+  .game-wrap.gw-fullscreen .game-quit-fs-btn:not([hidden]) { display: flex; }
   .game-wrap.gw-fullscreen .game-quit-fs-btn { bottom: calc(3rem + env(safe-area-inset-bottom)); left: calc(.7rem + env(safe-area-inset-left)); }
-  .game-quit-btn { font-size: .78rem; padding: .4rem .9rem; }
+  .game-quit-btn { font-size: .78rem; padding: .4rem .9rem; display: inline-flex; align-items: center; gap: .4rem; }
   .game-quit-btn:hover { border-color: rgba(248,113,113,.5); color: #F87171; }
+  .game-quit-btn:hover svg { filter: drop-shadow(0 0 3px rgba(248,113,113,.7)); }
   .game-overlay {
     position: absolute; inset: 0; z-index: 4;
     display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: .8rem;
@@ -3523,12 +3551,12 @@
       <div class="algo-body">
         <div class="game-wrap" id="game-wrap">
           <canvas id="game-canvas" width="480" height="360" aria-label="Ghostwire arcade game — a hunter-process diving a perspective data tunnel, dodging corrupted fragments and collecting verified data shards"></canvas>
-          <button type="button" class="game-gyro-btn" id="game-gyro-btn" hidden>⟲ TILT: OFF</button>
+          <button type="button" class="game-gyro-btn" id="game-gyro-btn" hidden><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6"><ellipse cx="12" cy="12" rx="8" ry="4.3" transform="rotate(-18 12 12)"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/></svg><span id="game-gyro-label">TILT: OFF</span></button>
           <button type="button" class="game-pause-btn" id="game-pause-btn" aria-label="Pause" hidden><svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><rect x="6" y="5" width="4.2" height="14" rx="1"/><rect x="13.8" y="5" width="4.2" height="14" rx="1"/></svg></button>
-          <button type="button" class="game-mute-btn" id="game-mute-btn" aria-label="Toggle sound">🔊</button>
-          <button type="button" class="game-fire-btn" id="game-fire-btn" aria-label="Hold to charge, release to fire" hidden>◎</button>
-          <button type="button" class="game-quit-fs-btn" id="game-quit-fs-btn" aria-label="Quit run" hidden>✕ Quit</button>
-          <button type="button" class="game-fullscreen-btn" id="game-fullscreen-btn" aria-label="Enter fullscreen">⛶</button>
+          <button type="button" class="game-mute-btn" id="game-mute-btn" aria-label="Toggle sound"><svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16.3 8.6a5 5 0 0 1 0 6.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M18.9 6.1a8.7 8.7 0 0 1 0 11.8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity=".65"/></svg></button>
+          <button type="button" class="game-fire-btn" id="game-fire-btn" aria-label="Hold to charge, release to fire" hidden><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="7.2"/><circle cx="12" cy="12" r="2.3" fill="currentColor" stroke="none"/></svg></button>
+          <button type="button" class="game-quit-fs-btn" id="game-quit-fs-btn" aria-label="Quit run" hidden><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg><span>Quit</span></button>
+          <button type="button" class="game-fullscreen-btn" id="game-fullscreen-btn" aria-label="Enter fullscreen"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg></button>
           <button type="button" class="game-settings-btn" id="game-settings-btn" aria-label="Settings and achievements"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="3.1"/><circle cx="12" cy="12" r="8" stroke-dasharray="2.6 3.4"/></svg></button>
           <div class="game-panel" id="game-settings-panel" hidden>
             <div class="game-panel-inner">
@@ -3598,7 +3626,7 @@
       <div class="algo-footer">
         <div class="algo-stat" id="game-stat">score: <strong>0</strong></div>
         <div class="algo-stat" id="game-best-stat">best: <strong>0</strong></div>
-        <button type="button" class="btn-ghost game-quit-btn" id="game-quit-btn" hidden>✕ Quit</button>
+        <button type="button" class="btn-ghost game-quit-btn" id="game-quit-btn" hidden><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg><span>Quit</span></button>
       </div>
     </div>
 
@@ -7261,6 +7289,7 @@ panels.forEach(p => observer.observe(p));
   const leaderboardList = document.getElementById('game-leaderboard-list');
   const fireBtn = document.getElementById('game-fire-btn');
   const gyroBtn = document.getElementById('game-gyro-btn');
+  const gyroLabel = document.getElementById('game-gyro-label');
   const muteBtn = document.getElementById('game-mute-btn');
   const fullscreenBtn = document.getElementById('game-fullscreen-btn');
   const pauseBtn = document.getElementById('game-pause-btn');
@@ -7269,6 +7298,17 @@ panels.forEach(p => observer.observe(p));
   function setPauseIcon(showPlay) {
     if (pauseBtn) pauseBtn.innerHTML = showPlay ? ICON_PLAY_SVG : ICON_PAUSE_SVG;
   }
+  const ICON_EXPAND_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>';
+  const ICON_COLLAPSE_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v5H4M15 4v5h5M15 20v-5h5M9 20v-5H4"/></svg>';
+  function setFullscreenIcon(isFullscreen) {
+    if (fullscreenBtn) fullscreenBtn.innerHTML = isFullscreen ? ICON_COLLAPSE_SVG : ICON_EXPAND_SVG;
+  }
+  const ICON_SOUND_ON_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16.3 8.6a5 5 0 0 1 0 6.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M18.9 6.1a8.7 8.7 0 0 1 0 11.8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity=".65"/></svg>';
+  const ICON_SOUND_OFF_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M15.3 9.3l5 5.4M20.3 9.3l-5 5.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+  function setMuteIcon(muted) {
+    if (muteBtn) muteBtn.innerHTML = muted ? ICON_SOUND_OFF_SVG : ICON_SOUND_ON_SVG;
+  }
+  const ICON_X_SVG = '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
   const shareBtn = document.getElementById('game-share-btn');
   const statsDetailEl = document.getElementById('game-stats-detail');
   const quitBtn = document.getElementById('game-quit-btn');
@@ -8001,7 +8041,7 @@ panels.forEach(p => observer.observe(p));
   if (muteBtn) {
     muteBtn.addEventListener('click', () => {
       soundOn = !soundOn;
-      muteBtn.textContent = soundOn ? '🔊' : '🔇';
+      setMuteIcon(!soundOn);
       muteBtn.classList.toggle('is-muted', !soundOn);
       if (soundOn) ensureAudio();
     });
@@ -8064,7 +8104,7 @@ panels.forEach(p => observer.observe(p));
     gameWrap.classList.add('gw-fullscreen');
     lockScroll();
     lockViewportZoom();
-    if (fullscreenBtn) { fullscreenBtn.textContent = '\u2715'; fullscreenBtn.setAttribute('aria-label', 'Exit fullscreen'); }
+    if (fullscreenBtn) { setFullscreenIcon(true); fullscreenBtn.setAttribute('aria-label', 'Exit fullscreen'); }
     const reqFs = gameWrap.requestFullscreen || gameWrap.webkitRequestFullscreen || gameWrap.mozRequestFullScreen || gameWrap.msRequestFullscreen;
     if (reqFs) { try { const p = reqFs.call(gameWrap); if (p && p.catch) p.catch(() => {}); } catch (_) {} }
     try { if (screen.orientation && screen.orientation.lock) screen.orientation.lock('any').catch(() => {}); } catch (_) {}
@@ -8078,7 +8118,7 @@ panels.forEach(p => observer.observe(p));
       if (gwHomeNextSibling) gwHomeParent.insertBefore(gameWrap, gwHomeNextSibling);
       else gwHomeParent.appendChild(gameWrap);
     }
-    if (fullscreenBtn) { fullscreenBtn.textContent = '\u26F6'; fullscreenBtn.setAttribute('aria-label', 'Enter fullscreen'); }
+    if (fullscreenBtn) { setFullscreenIcon(false); fullscreenBtn.setAttribute('aria-label', 'Enter fullscreen'); }
     if (!skipNativeExit && isNativeFullscreen()) {
       const exitFs = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen || document.msExitFullscreen;
       if (exitFs) { try { const p = exitFs.call(document); if (p && p.catch) p.catch(() => {}); } catch (_) {} }
@@ -8144,7 +8184,7 @@ panels.forEach(p => observer.observe(p));
   function setGyroActive(active) {
     gyroEnabled = active;
     if (gyroBtn) {
-      gyroBtn.textContent = active ? '⟲ TILT: ON' : '⟲ TILT: OFF';
+      if (gyroLabel) gyroLabel.textContent = active ? 'TILT: ON' : 'TILT: OFF';
       gyroBtn.classList.toggle('is-active', active);
     }
     if (active) { gyroNeutral = null; gyroX = null; }
@@ -9456,7 +9496,7 @@ panels.forEach(p => observer.observe(p));
     ctx.shadowBlur = 0;
     ctx.font = '11px "JetBrains Mono", monospace';
     ctx.fillStyle = 'rgba(224,242,254,.7)';
-    ctx.fillText('tap \u23F8 or press P to resume', W / 2, H / 2 + 18);
+    ctx.fillText('tap pause or press P to resume', W / 2, H / 2 + 18);
     ctx.textAlign = 'left';
     ctx.restore();
   }

@@ -7600,7 +7600,7 @@ panels.forEach(p => observer.observe(p));
     const v = r.v;
     if (gyroNeutral === null) gyroNeutral = v; // calibrate to however they're holding the phone
     const sens = r.landscape ? GYRO_SENSITIVITY_LANDSCAPE : GYRO_SENSITIVITY;
-    gyroX = W / 2 + (v - gyroNeutral) * sens;
+    gyroX = W / 2 - (v - gyroNeutral) * sens; // inverted: tilt right now steers right
   }
   function setGyroActive(active) {
     gyroEnabled = active;
@@ -8050,13 +8050,14 @@ panels.forEach(p => observer.observe(p));
         ctx.fill();
       });
 
-      // a pulse of "current" traveling along the trace toward the player — always
-      // magenta, so it never gets confused for a cyan/red gameplay token
+      // a pulse of "current" traveling along the trace toward the player —
+      // shifts with the level era like the rest of the circuit floor
       const pulse = pointAlongTrace(t, t.phase);
       const pulseR = 1.4 + nearP * 2.1;
+      const pulseColor = 'rgb(' + eraRGB([232, 121, 249]).join(',') + ')';
       ctx.beginPath();
-      ctx.fillStyle = '#E879F9';
-      ctx.shadowColor = '#E879F9'; ctx.shadowBlur = 7;
+      ctx.fillStyle = pulseColor;
+      ctx.shadowColor = pulseColor; ctx.shadowBlur = 7;
       ctx.arc(pulse.x, pulse.y, pulseR, 0, Math.PI * 2);
       ctx.fill();
       ctx.shadowBlur = 0;

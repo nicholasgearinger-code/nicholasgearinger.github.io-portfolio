@@ -550,12 +550,14 @@
   }
   h1 .line-2 { color: var(--cyan); display: block; font-weight: 700; }
   h1 .line-3 { color: var(--muted); font-weight: 400; font-size: .5em; letter-spacing: .01em; display: block; margin-top: 1.4em; }
-  h1 .line-3, .hero-sub {
+  h1 .line-3, .hero-sub, .hero-btns, .scroll-hint {
     opacity: 0; transform: translateY(18px);
     transition: opacity .8s cubic-bezier(.22,1,.36,1), transform .8s cubic-bezier(.22,1,.36,1);
   }
-  h1 .line-3.reveal-in, .hero-sub.reveal-in {
+  h1 .line-3.reveal-in, .hero-sub.reveal-in, .hero-btns.reveal-in, .scroll-hint.reveal-in {
     opacity: 1; transform: translateY(0);
+  }
+  h1 .line-3.reveal-in, .hero-sub.reveal-in, .hero-btns.reveal-in {
     animation: heroHoloFlicker .5s ease-out;
   }
   @keyframes heroHoloFlicker {
@@ -786,17 +788,17 @@
 
   /* ── HERO CIRCUIT VIDEO (plays on scroll, auto-advances on end) ── */
   .scroll-hint {
-    position: absolute; bottom: 2.5rem; left: 50%; transform: translateX(-50%); z-index: 2;
-    display: flex; flex-direction: column; align-items: center; gap: .5rem;
-    color: var(--slate); font-size: .7rem; letter-spacing: .1em; text-transform: uppercase;
-    text-decoration: none; opacity: .75; transition: opacity .2s ease;
+    display: flex; flex-direction: column; align-items: center; gap: .6rem; z-index: 2;
+    margin-top: 3.2rem;
+    color: var(--slate); font-size: .85rem; letter-spacing: .14em; text-transform: uppercase;
+    text-decoration: none;
   }
-  .scroll-hint:hover { opacity: 1; color: var(--cyan); }
-  .scroll-hint svg { opacity: .5; }
+  .scroll-hint:hover { color: var(--cyan); }
+  .scroll-hint svg { opacity: .8; }
   @media (prefers-reduced-motion: no-preference) {
-    .scroll-hint { animation: bob 2s ease-in-out infinite; }
+    .scroll-hint.reveal-in { animation: bob 2s ease-in-out infinite; }
   }
-  @keyframes bob { 0%,100%{transform:translateX(-50%) translateY(0)} 50%{transform:translateX(-50%) translateY(6px)} }
+  @keyframes bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(7px); } }
 
   /* ── 3D SCROLL SECTIONS ── */
   .perspective-root {
@@ -2872,17 +2874,17 @@
         <span class="line-3">Engineering Intelligent Experiences</span>
       </h1>
     </div>
-    <noscript><style>h1 .line-1, h1 .line-2 { opacity: 1 !important; } .hero-prompt-line { display: none !important; }</style></noscript>
+    <noscript><style>h1 .line-1, h1 .line-2 { opacity: 1 !important; } .hero-prompt-line { display: none !important; } h1 .line-3, .hero-sub, .hero-btns, .scroll-hint { opacity: 1 !important; transform: none !important; }</style></noscript>
     <p class="hero-sub">A creative generalist building a career in design, 3D, and game development — bringing the same hands-on craft and leadership to every role, on screen or off.</p>
     <div class="hero-btns">
       <a href="#models" class="btn-primary">View My Work</a>
       <a href="#contact" class="btn-ghost">Get In Touch</a>
     </div>
+    <a href="#compiler-section" class="scroll-hint" aria-label="Scroll to explore">
+      Scroll
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v15M5 12l7 7 7-7"/></svg>
+    </a>
   </div>
-  <a href="#compiler-section" class="scroll-hint" aria-label="Scroll to explore">
-    Scroll
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v15M5 12l7 7 7-7"/></svg>
-  </a>
 </section>
 
 <!-- ABOUT ME — lead-in to the animated code compiler -->
@@ -5721,8 +5723,12 @@ panels.forEach(p => observer.observe(p));
     els.forEach((el) => { el.style.opacity = '1'; });
     const line3 = document.querySelector('h1 .line-3');
     const sub = document.querySelector('.hero-sub');
+    const btns = document.querySelector('.hero-btns');
+    const hint = document.querySelector('.scroll-hint');
     if (line3) line3.classList.add('reveal-in');
     if (sub) sub.classList.add('reveal-in');
+    if (btns) btns.classList.add('reveal-in');
+    if (hint) hint.classList.add('reveal-in');
     return;
   }
 
@@ -5756,8 +5762,12 @@ panels.forEach(p => observer.observe(p));
     function finishUp() {
       const line3 = document.querySelector('h1 .line-3');
       const sub = document.querySelector('.hero-sub');
+      const btns = document.querySelector('.hero-btns');
+      const hint = document.querySelector('.scroll-hint');
       if (line3) line3.classList.add('reveal-in');
       if (sub) setTimeout(() => sub.classList.add('reveal-in'), 180);
+      if (btns) setTimeout(() => btns.classList.add('reveal-in'), 420);
+      if (hint) setTimeout(() => hint.classList.add('reveal-in'), 620);
     }
 
     if (promptLine && promptText) {

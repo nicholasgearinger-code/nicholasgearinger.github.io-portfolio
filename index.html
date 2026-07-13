@@ -7124,7 +7124,7 @@ panels.forEach(p => observer.observe(p));
   // yellow 55, orange 30, red 0.
   const LEVEL_ERA_HUES = [0, -50, -140, -215, -240, -270];
   function levelHueDeg() {
-    const era = Math.floor((level - 1) / 5) % LEVEL_ERA_HUES.length;
+    const era = Math.floor(level / 5) % LEVEL_ERA_HUES.length;
     return LEVEL_ERA_HUES[era];
   }
 

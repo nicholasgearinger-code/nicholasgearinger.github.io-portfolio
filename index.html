@@ -7431,10 +7431,27 @@ panels.forEach(p => observer.observe(p));
   // -- gyro/tilt steering (mobile only) --------------------------------
   const hasOrientation = typeof window.DeviceOrientationEvent !== 'undefined'
     && ('ontouchstart' in window || navigator.maxTouchPoints > 0);
+  // gamma (left-right tilt) only maps to actual left-right screen
+  // movement in portrait. Rotate the phone to landscape and gamma becomes
+  // the phone's own front-back tilt instead — the axis that now tracks
+  // left-right on screen is beta (sign flips depending on which way it's
+  // rotated). Pick the right axis from the current screen orientation.
+  function currentOrientationAngle() {
+    if (window.screen && window.screen.orientation && typeof window.screen.orientation.angle === 'number') return window.screen.orientation.angle;
+    if (typeof window.orientation === 'number') return window.orientation;
+    return 0;
+  }
+  function steerAxisValue(e) {
+    const angle = currentOrientationAngle();
+    if (angle === 90) return (e.beta === null || e.beta === undefined) ? null : -e.beta;
+    if (angle === -90 || angle === 270) return (e.beta === null || e.beta === undefined) ? null : e.beta;
+    return (e.gamma === null || e.gamma === undefined) ? null : e.gamma;
+  }
   function handleOrientation(e) {
-    if (e.gamma === null || e.gamma === undefined) return;
-    if (gyroNeutral === null) gyroNeutral = e.gamma; // calibrate to however they're holding the phone
-    gyroX = W / 2 + (e.gamma - gyroNeutral) * GYRO_SENSITIVITY;
+    const v = steerAxisValue(e);
+    if (v === null) return;
+    if (gyroNeutral === null) gyroNeutral = v; // calibrate to however they're holding the phone
+    gyroX = W / 2 + (v - gyroNeutral) * GYRO_SENSITIVITY;
   }
   function setGyroActive(active) {
     gyroEnabled = active;
@@ -7457,6 +7474,12 @@ panels.forEach(p => observer.observe(p));
         setGyroActive(true);
       } catch (_) { /* permission denied or unsupported — stay in manual steering */ }
     });
+    // recalibrate on rotation — the axis mapping above changes, and the
+    // old neutral value belongs to the previous orientation's axis
+    window.addEventListener('orientationchange', () => { if (gyroEnabled) gyroNeutral = null; });
+    if (window.screen && window.screen.orientation) {
+      window.screen.orientation.addEventListener('change', () => { if (gyroEnabled) gyroNeutral = null; });
+    }
   }
 
   function fireWeapon() {

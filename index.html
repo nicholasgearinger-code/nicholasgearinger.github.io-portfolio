@@ -2321,15 +2321,20 @@
     height: min(100dvh, calc(100vw * 3 / 4));
     background: #000;
   }
+  .game-wrap.gw-fullscreen::before {
+    content: ''; position: fixed; inset: 0; z-index: -1; background: #000;
+  }
   html.gw-fs-lock, body.gw-fs-lock { overflow: hidden; height: 100%; }
   body.gw-fs-lock { width: 100%; }
   .game-fullscreen-btn {
     position: absolute; right: 3.05rem; top: .7rem; z-index: 1;
     padding: .3rem .5rem; border-radius: .35rem;
-    background: rgba(34,211,238,.1); border: 1px solid rgba(34,211,238,.45);
-    color: var(--cyan); font-size: .78rem; line-height: 1;
+    background: rgba(34,211,238,.06); border: 1px solid rgba(34,211,238,.3);
+    color: var(--cyan); font-size: .78rem; line-height: 1; opacity: .82;
     touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    transition: opacity .15s ease, background .15s ease;
   }
+  .game-fullscreen-btn:active { background: rgba(34,211,238,.28); opacity: 1; }
   .game-wrap.gw-fullscreen .game-fullscreen-btn { top: calc(.7rem + env(safe-area-inset-top)); right: calc(3.05rem + env(safe-area-inset-right)); }
   .game-wrap.gw-fullscreen .game-mute-btn { top: calc(.7rem + env(safe-area-inset-top)); right: calc(.7rem + env(safe-area-inset-right)); }
   .game-wrap.gw-fullscreen .game-gyro-btn { top: calc(.7rem + env(safe-area-inset-top)); left: calc(.7rem + env(safe-area-inset-left)); }
@@ -2337,29 +2342,32 @@
   #game-canvas { width: 100%; height: auto; display: block; background: #030811; }
   .game-fire-btn {
     position: absolute; right: .7rem; bottom: .7rem; z-index: 1;
-    width: 3.2rem; height: 3.2rem; border-radius: 50%;
-    background: rgba(232,121,249,.14); border: 1px solid rgba(232,121,249,.55);
-    color: var(--magenta); font-size: 1.2rem; line-height: 1;
+    width: 2.9rem; height: 2.9rem; border-radius: 50%;
+    background: rgba(232,121,249,.08); border: 1px solid rgba(232,121,249,.35);
+    color: var(--magenta); font-size: 1.15rem; line-height: 1; opacity: .82;
     display: flex; align-items: center; justify-content: center;
     touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    transition: opacity .15s ease, background .15s ease;
   }
-  .game-fire-btn:active { background: rgba(232,121,249,.35); transform: scale(.94); }
+  .game-fire-btn:active { background: rgba(232,121,249,.35); transform: scale(.94); opacity: 1; }
   .game-fire-btn[hidden] { display: none; }
   .game-gyro-btn {
     position: absolute; left: .7rem; top: .7rem; z-index: 1;
     padding: .3rem .55rem; border-radius: .35rem;
-    background: rgba(34,211,238,.1); border: 1px solid rgba(34,211,238,.45);
-    color: var(--cyan); font-family: 'JetBrains Mono', monospace; font-size: .66rem;
+    background: rgba(34,211,238,.06); border: 1px solid rgba(34,211,238,.3);
+    color: var(--cyan); font-family: 'JetBrains Mono', monospace; font-size: .66rem; opacity: .82;
     touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    transition: opacity .15s ease, background .15s ease;
   }
-  .game-gyro-btn.is-active { background: rgba(232,121,249,.16); border-color: rgba(232,121,249,.55); color: var(--magenta); }
+  .game-gyro-btn.is-active { background: rgba(232,121,249,.16); border-color: rgba(232,121,249,.55); color: var(--magenta); opacity: 1; }
   .game-gyro-btn[hidden] { display: none; }
   .game-mute-btn {
     position: absolute; right: .7rem; top: .7rem; z-index: 1;
     padding: .3rem .5rem; border-radius: .35rem;
-    background: rgba(232,121,249,.1); border: 1px solid rgba(232,121,249,.4);
-    color: var(--magenta); font-size: .78rem; line-height: 1;
+    background: rgba(232,121,249,.06); border: 1px solid rgba(232,121,249,.28);
+    color: var(--magenta); font-size: .78rem; line-height: 1; opacity: .82;
     touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    transition: opacity .15s ease, background .15s ease;
   }
   .game-mute-btn.is-muted { color: rgba(148,163,184,.7); border-color: rgba(148,163,184,.35); background: rgba(148,163,184,.08); }
   .game-quit-btn { font-size: .78rem; padding: .4rem .9rem; }
@@ -7309,7 +7317,7 @@ panels.forEach(p => observer.observe(p));
     if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') keyState.right = false;
   });
   if (fireBtn) {
-    fireBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); fireWeapon(); });
+    fireBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); fireWeapon(); });
   }
   if (muteBtn) {
     muteBtn.addEventListener('click', () => {
@@ -7402,8 +7410,8 @@ panels.forEach(p => observer.observe(p));
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     return (clientX - rect.left) * (W / rect.width);
   }
-  canvas.addEventListener('pointerdown', (e) => { if (running && !dying && !gyroEnabled) { dragging = true; targetX = pointerToCanvasX(e); } });
-  canvas.addEventListener('pointermove', (e) => { if (dragging) targetX = pointerToCanvasX(e); });
+  canvas.addEventListener('pointerdown', (e) => { if (e.target === canvas && running && !dying && !gyroEnabled) { dragging = true; targetX = pointerToCanvasX(e); } });
+  canvas.addEventListener('pointermove', (e) => { if (dragging && e.target === canvas) targetX = pointerToCanvasX(e); });
   window.addEventListener('pointerup', () => { dragging = false; });
 
   // -- gyro/tilt steering (mobile only) --------------------------------
@@ -7999,7 +8007,7 @@ panels.forEach(p => observer.observe(p));
     ctx.font = '10px "JetBrains Mono", monospace';
     ctx.textAlign = 'left';
     ctx.fillStyle = 'rgba(125,211,252,.8)';
-    ctx.fillText('SECTOR ' + Math.floor(elapsed).toString().padStart(3, '0'), m + bl + 6, m + 12);
+    ctx.fillText('SECTOR ' + Math.floor(elapsed).toString().padStart(3, '0'), m + bl + 6, m + 30);
 
     // system status readout — mirrors the same threat tiers as the meter below
     let sysLabel = 'SYS: NOMINAL', sysColor = 'rgba(34,211,238,.8)';
@@ -8019,20 +8027,20 @@ panels.forEach(p => observer.observe(p));
     const comboMult = 1 + Math.min(COMBO_MAX_MULT - 1, Math.floor(streak / COMBO_STEP));
     ctx.textAlign = 'left';
     ctx.fillStyle = 'rgba(196,181,253,.75)';
-    ctx.fillText('STREAK ' + streak + (comboMult > 1 ? '  ×' + comboMult : ''), m + bl + 6, H - m - 6);
+    ctx.fillText('STREAK ' + streak + (comboMult > 1 ? '  ×' + comboMult : ''), m + bl + 6, H - m - 24);
 
     // invulnerability readout, only while it's active (distinct from the SHIELD power-up)
     if (invulnTimer > 0) {
       ctx.textAlign = 'right';
       ctx.fillStyle = 'rgba(125,211,252,' + (0.4 + Math.sin(tunnelHue * 14) * 0.3).toFixed(3) + ')';
-      ctx.fillText('INVULN', W - m - bl - 6, H - m - 6);
+      ctx.fillText('INVULN', W - m - bl - 6, H - m - 24);
     }
 
     // surge warning takes priority over the power-up readout on the same line
     if (surging) {
       ctx.textAlign = 'center';
       ctx.fillStyle = Math.sin(tunnelHue * 10) > 0 ? 'rgba(248,113,113,.95)' : 'rgba(248,113,113,.4)';
-      ctx.fillText('⚠ BREACH SURGE', W / 2, m + 25);
+      ctx.fillText('⚠ BREACH SURGE', W / 2, m + 43);
     } else {
       const puParts = [];
       if (rapidTimer > 0) puParts.push('RAPID ' + rapidTimer.toFixed(1));
@@ -8041,7 +8049,7 @@ panels.forEach(p => observer.observe(p));
       if (puParts.length) {
         ctx.textAlign = 'center';
         ctx.fillStyle = 'rgba(232,121,249,.75)';
-        ctx.fillText(puParts.join('   '), W / 2, m + 25);
+        ctx.fillText(puParts.join('   '), W / 2, m + 43);
       }
     }
 
@@ -8051,7 +8059,7 @@ panels.forEach(p => observer.observe(p));
     const filled = Math.round(threat * segs);
     ctx.textAlign = 'right';
     ctx.fillStyle = 'rgba(232,121,249,.75)';
-    ctx.fillText('THREAT', startX - 6, m + 12);
+    ctx.fillText('THREAT', startX - 6, m + 30);
     for (let i = 0; i < segs; i++) {
       const x = startX + i * (segW + gap);
       const segT = i / segs;
@@ -8065,7 +8073,7 @@ panels.forEach(p => observer.observe(p));
         }
       }
       ctx.fillStyle = color;
-      ctx.fillRect(x, m + 4, segW, segH);
+      ctx.fillRect(x, m + 22, segW, segH);
     }
     ctx.textAlign = 'left';
   }

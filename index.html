@@ -2315,6 +2315,9 @@
 
   /* ── GHOSTWIRE GAME ── */
   .game-wrap { position: relative; width: 100%; max-width: 480px; margin: 0 auto; border-radius: .5rem; overflow: hidden; touch-action: none; }
+  @media (max-width: 640px) {
+    .game-wrap:not(.gw-fullscreen):has(#game-overlay:not([hidden])) { min-height: 440px; }
+  }
   .game-wrap.gw-fullscreen {
     position: fixed; inset: 0; z-index: 9999; margin: auto; max-width: none; border-radius: 0;
     width: min(100svw, calc(100svh * 4 / 3));
@@ -2351,9 +2354,6 @@
   }
   .game-fullscreen-btn:active { background: rgba(34,211,238,.28); opacity: 1; }
   .game-play-row { display: flex; align-items: center; justify-content: center; gap: .6rem; }
-  @media (orientation: portrait) and (max-width: 700px) {
-    .game-wrap:not(.gw-fullscreen) .game-fullscreen-btn { position: static; margin: 0; }
-  }
   .game-wrap.gw-fullscreen .game-fullscreen-btn { top: calc(.7rem + env(safe-area-inset-top)); right: calc(3.2rem + env(safe-area-inset-right)); }
   .game-wrap.gw-fullscreen .game-pause-btn { top: calc(.7rem + env(safe-area-inset-top)); right: calc(5.7rem + env(safe-area-inset-right)); }
   .game-wrap.gw-fullscreen .game-mute-btn { top: calc(.7rem + env(safe-area-inset-top)); right: calc(.7rem + env(safe-area-inset-right)); }
@@ -2421,8 +2421,9 @@
   .game-quit-btn:hover { border-color: rgba(248,113,113,.5); color: #F87171; }
   .game-overlay {
     position: absolute; inset: 0; z-index: 4;
-    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .8rem;
-    background: rgba(3,8,17,.9); text-align: center; padding: 1.5rem;
+    display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: .8rem;
+    background: rgba(3,8,17,.9); text-align: center; padding: 3.6rem 1.5rem 1.5rem;
+    overflow-y: auto;
   }
   .game-overlay[hidden] { display: none; }
   .game-overlay h3 { font-family: 'Syne', sans-serif; font-size: 1.3rem; color: var(--white); margin: 0; min-height: 0; }
@@ -3441,6 +3442,7 @@
           <button type="button" class="game-mute-btn" id="game-mute-btn" aria-label="Toggle sound">🔊</button>
           <button type="button" class="game-fire-btn" id="game-fire-btn" aria-label="Hold to charge, release to fire" hidden>◎</button>
           <button type="button" class="game-quit-fs-btn" id="game-quit-fs-btn" aria-label="Quit run" hidden>✕ Quit</button>
+          <button type="button" class="game-fullscreen-btn" id="game-fullscreen-btn" aria-label="Enter fullscreen">⛶</button>
           <div class="game-overlay" id="game-overlay">
             <div class="game-title-seq" id="game-title-seq" hidden>
               <div class="game-title-icon" id="game-title-icon">&lt;/&gt;</div>
@@ -3463,7 +3465,6 @@
               </div>
               <div class="game-play-row">
                 <button type="button" class="btn-primary" id="game-start-btn">▶ Play</button>
-                <button type="button" class="game-fullscreen-btn" id="game-fullscreen-btn" aria-label="Enter fullscreen">⛶</button>
               </div>
               <div class="game-score-entry" id="game-score-entry" hidden>
                 <input type="text" id="game-name-input" maxlength="12" placeholder="YOUR NAME">

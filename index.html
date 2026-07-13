@@ -7995,6 +7995,18 @@ panels.forEach(p => observer.observe(p));
 
   function drawHUD() {
     const m = 10, bl = 15;
+    // The corner DOM buttons (TILT/mute/fullscreen/fire) are a fixed ~30
+    // CSS px tall regardless of how big the canvas is drawn on screen, but
+    // this HUD text lives in the canvas's fixed 480x360 logical coordinate
+    // space, which gets stretched to fit whatever size the canvas is
+    // displayed at (anywhere from ~300px embedded up to a full letterboxed
+    // screen in fullscreen). So a fixed logical-unit offset only clears the
+    // buttons at one particular display size — convert the ~30px real
+    // button footprint into logical units at the *current* display scale
+    // instead, so the corner-adjacent readouts clear the buttons at any size.
+    const rect = canvas.getBoundingClientRect();
+    const dispScale = rect.width > 0 ? (W / rect.width) : 1;
+    const cornerClear = m + 30 * dispScale;
 
     // corner targeting brackets with a small accent dot at each vertex
     ctx.strokeStyle = 'rgba(232,121,249,.6)';
@@ -8021,7 +8033,7 @@ panels.forEach(p => observer.observe(p));
     ctx.font = '10px "JetBrains Mono", monospace';
     ctx.textAlign = 'left';
     ctx.fillStyle = 'rgba(125,211,252,.8)';
-    ctx.fillText('SECTOR ' + Math.floor(elapsed).toString().padStart(3, '0'), m + bl + 6, m + 30);
+    ctx.fillText('SECTOR ' + Math.floor(elapsed).toString().padStart(3, '0'), m + bl + 6, cornerClear);
 
     // system status readout — mirrors the same threat tiers as the meter below
     let sysLabel = 'SYS: NOMINAL', sysColor = 'rgba(34,211,238,.8)';
@@ -8041,20 +8053,20 @@ panels.forEach(p => observer.observe(p));
     const comboMult = 1 + Math.min(COMBO_MAX_MULT - 1, Math.floor(streak / COMBO_STEP));
     ctx.textAlign = 'left';
     ctx.fillStyle = 'rgba(196,181,253,.75)';
-    ctx.fillText('STREAK ' + streak + (comboMult > 1 ? '  ×' + comboMult : ''), m + bl + 6, H - m - 24);
+    ctx.fillText('STREAK ' + streak + (comboMult > 1 ? '  ×' + comboMult : ''), m + bl + 6, H - cornerClear + m);
 
     // invulnerability readout, only while it's active (distinct from the SHIELD power-up)
     if (invulnTimer > 0) {
       ctx.textAlign = 'right';
       ctx.fillStyle = 'rgba(125,211,252,' + (0.4 + Math.sin(tunnelHue * 14) * 0.3).toFixed(3) + ')';
-      ctx.fillText('INVULN', W - m - bl - 6, H - m - 24);
+      ctx.fillText('INVULN', W - m - bl - 6, H - cornerClear + m);
     }
 
     // surge warning takes priority over the power-up readout on the same line
     if (surging) {
       ctx.textAlign = 'center';
       ctx.fillStyle = Math.sin(tunnelHue * 10) > 0 ? 'rgba(248,113,113,.95)' : 'rgba(248,113,113,.4)';
-      ctx.fillText('⚠ BREACH SURGE', W / 2, m + 43);
+      ctx.fillText('⚠ BREACH SURGE', W / 2, cornerClear + 13);
     } else {
       const puParts = [];
       if (rapidTimer > 0) puParts.push('RAPID ' + rapidTimer.toFixed(1));
@@ -8063,7 +8075,7 @@ panels.forEach(p => observer.observe(p));
       if (puParts.length) {
         ctx.textAlign = 'center';
         ctx.fillStyle = 'rgba(232,121,249,.75)';
-        ctx.fillText(puParts.join('   '), W / 2, m + 43);
+        ctx.fillText(puParts.join('   '), W / 2, cornerClear + 13);
       }
     }
 
@@ -8073,7 +8085,7 @@ panels.forEach(p => observer.observe(p));
     const filled = Math.round(threat * segs);
     ctx.textAlign = 'right';
     ctx.fillStyle = 'rgba(232,121,249,.75)';
-    ctx.fillText('THREAT', startX - 6, m + 30);
+    ctx.fillText('THREAT', startX - 6, cornerClear);
     for (let i = 0; i < segs; i++) {
       const x = startX + i * (segW + gap);
       const segT = i / segs;
@@ -8087,7 +8099,7 @@ panels.forEach(p => observer.observe(p));
         }
       }
       ctx.fillStyle = color;
-      ctx.fillRect(x, m + 22, segW, segH);
+      ctx.fillRect(x, cornerClear - 8, segW, segH);
     }
     ctx.textAlign = 'left';
   }

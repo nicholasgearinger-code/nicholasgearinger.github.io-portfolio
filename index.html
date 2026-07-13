@@ -2423,6 +2423,32 @@
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .8rem;
   }
   .game-overlay-main[hidden] { display: none; }
+  .game-zone-select {
+    display: flex; flex-direction: column; align-items: center; gap: .4rem;
+  }
+  .game-zone-label {
+    font-family: 'JetBrains Mono', monospace; font-size: .62rem; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--muted); opacity: .75;
+  }
+  .game-zone-row {
+    display: flex; flex-wrap: wrap; justify-content: center; gap: .38rem; max-width: 320px;
+  }
+  .game-zone-btn {
+    font-family: 'JetBrains Mono', monospace; font-size: .6rem; font-weight: 700; letter-spacing: .04em;
+    display: flex; flex-direction: column; align-items: center; gap: .1rem;
+    min-width: 4.1rem; padding: .32rem .4rem .28rem;
+    border-radius: .4rem; cursor: pointer;
+    background: rgba(var(--zc), .08); border: 1px solid rgba(var(--zc), .4); color: rgb(var(--zc));
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    transition: background .15s ease, box-shadow .18s ease, transform .1s ease, border-color .15s ease;
+  }
+  .game-zone-btn .gz-lv { font-size: .54rem; font-weight: 400; opacity: .72; letter-spacing: .02em; }
+  .game-zone-btn:hover { background: rgba(var(--zc), .16); }
+  .game-zone-btn:active { transform: scale(.94); }
+  .game-zone-btn.gz-active {
+    background: rgba(var(--zc), .28); border-color: rgba(var(--zc), .85);
+    box-shadow: 0 0 14px rgba(var(--zc), .55);
+  }
   .game-title-seq {
     position: relative;
     display: flex; flex-direction: column; align-items: center; gap: .45rem;
@@ -3415,6 +3441,17 @@
             <div class="game-overlay-main" id="game-overlay-main">
               <h3 id="game-overlay-title"></h3>
               <p id="game-overlay-sub">Arrow keys, A/D, drag, or tilt to steer. Tap ◎ or Space to fire — hold to charge a piercing shot. Hits cost points until THREAT goes red — then one hit ends it.</p>
+              <div class="game-zone-select" id="game-zone-select">
+                <span class="game-zone-label">Jump to zone</span>
+                <div class="game-zone-row">
+                  <button type="button" class="game-zone-btn" data-zone="0" style="--zc:163,85,241">GRID<span class="gz-lv">Lv 1</span></button>
+                  <button type="button" class="game-zone-btn" data-zone="1" style="--zc:85,137,241">RELAY<span class="gz-lv">Lv 6</span></button>
+                  <button type="button" class="game-zone-btn" data-zone="2" style="--zc:85,241,111">SERVER<span class="gz-lv">Lv 11</span></button>
+                  <button type="button" class="game-zone-btn" data-zone="3" style="--zc:241,228,85">HAZARD<span class="gz-lv">Lv 16</span></button>
+                  <button type="button" class="game-zone-btn" data-zone="4" style="--zc:241,163,85">REACTOR<span class="gz-lv">Lv 21</span></button>
+                  <button type="button" class="game-zone-btn" data-zone="5" style="--zc:241,85,85">BREACH<span class="gz-lv">Lv 26</span></button>
+                </div>
+              </div>
               <button type="button" class="btn-primary" id="game-start-btn">▶ Play</button>
               <div class="game-score-entry" id="game-score-entry" hidden>
                 <input type="text" id="game-name-input" maxlength="12" placeholder="YOUR NAME">
@@ -7355,6 +7392,7 @@ panels.forEach(p => observer.observe(p));
   let paused = false;
   let charging = false, chargeTimer = 0;
   let eraFlashTimer = 0, currentEra = 0;
+  let pendingZone = 0;   // which of the 6 level-eras the next run should start in — set by the zone-select buttons
   let formationTimer = randRange(FORMATION_MIN, FORMATION_MAX);
   let playerTrail = [];
   let stars = generateStarfield();
@@ -7371,7 +7409,12 @@ panels.forEach(p => observer.observe(p));
   function reset() {
     items = []; particles = []; codeBits = []; projectiles = []; fizzles = [];
     powerups = []; floatTexts = []; shockwaves = [];
-    score = 0; elapsed = 0; difficulty = 1; level = 1; threat = 0;
+    // Starting point follows the zone-select buttons: zone 0 is the normal
+    // level-1 start, zones 1-5 drop the player straight into that era (each
+    // era spans 5 levels / ~100s of elapsed time, mirroring the level/era
+    // formulas used during normal play) so difficulty and hue land correctly
+    // from frame one instead of needing to be played up to.
+    score = 0; elapsed = pendingZone * 100; difficulty = 1; level = 1 + pendingZone * 5; threat = 0;
     spawnTimer = 0; codeBitTimer = 0; fireTimer = 0;
     playerX = W / 2; targetX = playerX; playerVX = 0;
     shakeMag = 0; flash = 0; dying = false; deathTimer = 0;
@@ -7380,7 +7423,7 @@ panels.forEach(p => observer.observe(p));
     overloadReady = false; bossTierSpawned = -1; wormToggle = false;
     surging = false; surgeCountdown = randRange(SURGE_MIN, SURGE_MAX); surgeElapsed = 0; surgeCount = 0;
     paused = false; charging = false; chargeTimer = 0;
-    eraFlashTimer = 0; currentEra = 0;
+    eraFlashTimer = 0; currentEra = pendingZone;
     formationTimer = randRange(FORMATION_MIN, FORMATION_MAX);
     playerTrail = [];
     longestStreak = 0; shotsFired = 0; shotsHit = 0;
@@ -9132,8 +9175,7 @@ panels.forEach(p => observer.observe(p));
     scoreEntry.hidden = false;
     if (statsDetailEl) {
       const accuracy = shotsFired > 0 ? Math.round((shotsHit / shotsFired) * 100) : 0;
-      const eraNames = ['Violet', 'Blue', 'Green', 'Yellow', 'Orange', 'Red'];
-      const eraName = eraNames[Math.floor(level / 5) % eraNames.length];
+      const eraName = currentEraName();
       statsDetailEl.textContent = 'Longest streak: ' + longestStreak + '  ·  Accuracy: ' + accuracy + '%  ·  Era: ' + eraName;
       statsDetailEl.hidden = false;
     }
@@ -9193,6 +9235,18 @@ panels.forEach(p => observer.observe(p));
     }, reduceMotion ? 0 : 2000);
   }
   startBtn.addEventListener('click', handlePlayClick);
+  const zoneBtns = document.querySelectorAll('.game-zone-btn');
+  function setActiveZoneBtn(idx) {
+    zoneBtns.forEach((b) => b.classList.toggle('gz-active', Number(b.dataset.zone) === idx));
+  }
+  zoneBtns.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      pendingZone = Number(btn.dataset.zone);
+      setActiveZoneBtn(pendingZone);
+      handlePlayClick();
+    });
+  });
+  setActiveZoneBtn(pendingZone);
   if (quitBtn) quitBtn.addEventListener('click', quitGame);
   if (quitBtnFs) quitBtnFs.addEventListener('click', quitGame);
   submitBtn.addEventListener('click', async () => {

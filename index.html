@@ -2391,7 +2391,7 @@
   .game-quit-fs-btn:active { background: rgba(248,113,113,.32); opacity: 1; }
   .game-quit-fs-btn[hidden] { display: none; }
   .game-wrap.gw-fullscreen .game-quit-fs-btn:not([hidden]) { display: block; }
-  .game-wrap.gw-fullscreen .game-quit-fs-btn { bottom: calc(.7rem + env(safe-area-inset-bottom)); left: calc(.7rem + env(safe-area-inset-left)); }
+  .game-wrap.gw-fullscreen .game-quit-fs-btn { bottom: calc(3rem + env(safe-area-inset-bottom)); left: calc(.7rem + env(safe-area-inset-left)); }
   .game-quit-btn { font-size: .78rem; padding: .4rem .9rem; }
   .game-quit-btn:hover { border-color: rgba(248,113,113,.5); color: #F87171; }
   .game-overlay {
@@ -7619,7 +7619,12 @@ panels.forEach(p => observer.observe(p));
     }
 
     elapsed += dt;
-    difficulty = 1 + elapsed / 20;
+    // Difficulty now eases up from a slower start instead of hitting full
+    // base speed immediately: starts at 40% speed, ramps to 100% over the
+    // first 8s, then continues the original long-term climb from there.
+    const RAMP_START = 0.4, RAMP_TIME = 8;
+    const rampFactor = Math.min(1, RAMP_START + (1 - RAMP_START) * (elapsed / RAMP_TIME));
+    difficulty = (1 + elapsed / 20) * rampFactor;
     threat = Math.max(0, Math.min(1, threat + dt * THREAT_RISE_PER_SEC));
     invulnTimer = Math.max(0, invulnTimer - dt);
     fireTimer = Math.max(0, fireTimer - dt);

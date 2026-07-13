@@ -7200,6 +7200,50 @@ panels.forEach(p => observer.observe(p));
     return r + ',' + g + ',' + b;
   }
 
+  // Manual RGB->HSL->RGB hue rotation. We used to lean on ctx.filter =
+  // 'hue-rotate(...)' for the level-era color shift, but canvas 2D `filter`
+  // support is flaky on iOS Safari (silently does nothing on some versions
+  // rather than throwing), so the effect was invisible on a real iPhone even
+  // though the level/era math was correct. Rotating the actual RGB values
+  // ourselves works everywhere.
+  function rotateHueRGB(rgb, deg) {
+    if (!deg) return rgb;
+    let [r, g, b] = [rgb[0] / 255, rgb[1] / 255, rgb[2] / 255];
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    let h, s, l = (max + min) / 2;
+    if (max === min) { h = s = 0; }
+    else {
+      const d = max - min;
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      switch (max) {
+        case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+        case g: h = (b - r) / d + 2; break;
+        default: h = (r - g) / d + 4; break;
+      }
+      h /= 6;
+    }
+    h = ((h * 360 + deg) % 360 + 360) % 360 / 360;
+    function hue2rgb(p, q, t) {
+      if (t < 0) t += 1; if (t > 1) t -= 1;
+      if (t < 1 / 6) return p + (q - p) * 6 * t;
+      if (t < 1 / 2) return q;
+      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+      return p;
+    }
+    let r2, g2, b2;
+    if (s === 0) { r2 = g2 = b2 = l; }
+    else {
+      const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+      const p = 2 * l - q;
+      r2 = hue2rgb(p, q, h + 1 / 3);
+      g2 = hue2rgb(p, q, h);
+      b2 = hue2rgb(p, q, h - 1 / 3);
+    }
+    return [Math.round(r2 * 255), Math.round(g2 * 255), Math.round(b2 * 255)];
+  }
+  // Rotates a base RGB triple by the current level era's hue offset.
+  function eraRGB(rgb) { return rotateHueRGB(rgb, levelHueDeg()); }
+
   let playerX = W / 2, targetX = playerX, playerVX = 0;
   let items = [], particles = [], codeBits = [], projectiles = [], fizzles = [];
   let powerups = [], floatTexts = [], shockwaves = [];
@@ -7859,9 +7903,9 @@ panels.forEach(p => observer.observe(p));
   function drawTunnel() {
     // threat (0 → 1) drives the whole tunnel from a cool cyan/violet palette
     // at low danger toward a hot orange/red palette as speed/difficulty climb
-    const coreColor = lerpColorStr([34, 211, 238], [251, 146, 60], threat);   // cyan -> orange
-    const midColor = lerpColorStr([88, 28, 135], [153, 27, 27], threat);      // violet -> deep red
-    const glowColor = lerpColorStr([125, 211, 252], [251, 191, 36], threat);  // sky blue -> amber
+    const coreColor = lerpColorStr(eraRGB([34, 211, 238]), eraRGB([251, 146, 60]), threat);   // cyan -> orange
+    const midColor = lerpColorStr(eraRGB([88, 28, 135]), eraRGB([153, 27, 27]), threat);      // violet -> deep red
+    const glowColor = lerpColorStr(eraRGB([125, 211, 252]), eraRGB([251, 191, 36]), threat);  // sky blue -> amber
 
     const g = ctx.createRadialGradient(VP_X, VP_Y, 4, VP_X, VP_Y, H * 0.95);
     g.addColorStop(0, 'rgba(' + coreColor + ',.16)');
@@ -7912,7 +7956,7 @@ panels.forEach(p => observer.observe(p));
       const rp = ((tunnelHue * speedMul * 0.5) + i * 0.61803) % 1;
       const p1 = rp, p2 = Math.max(0, rp - 0.06);
       const a = projectPoint(bx, p1), b = projectPoint(bx, p2);
-      ctx.strokeStyle = 'rgba(232,121,249,' + (0.12 + rp * 0.32).toFixed(3) + ')';
+      ctx.strokeStyle = 'rgba(' + eraRGB([232, 121, 249]).join(',') + ',' + (0.12 + rp * 0.32).toFixed(3) + ')';
       ctx.lineWidth = 1.1;
       ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
     }
@@ -7923,8 +7967,8 @@ panels.forEach(p => observer.observe(p));
     // components (chip packages, capacitors, diodes, resistors) instead of
     // buildings, drifting past on both sides as the run progresses.
     const colorSets = {
-      chip: '125,211,252', capacitor: '196,181,253',
-      diode: '110,231,183', resistor: '253,224,71',
+      chip: eraRGB([125, 211, 252]).join(','), capacitor: eraRGB([196, 181, 253]).join(','),
+      diode: eraRGB([110, 231, 183]).join(','), resistor: eraRGB([253, 224, 71]).join(','),
     };
     skylineParts.slice().sort((a, b) => a.p - b.p).forEach((s) => {
       if (s.p < 0 || s.p > 1) return;
@@ -7966,7 +8010,7 @@ panels.forEach(p => observer.observe(p));
       } else {
         ctx.fillRect(-w / 2, -h, w, h);
         ctx.strokeRect(-w / 2, -h, w, h);
-        const stripes = ['248,113,113', '232,121,249', '34,211,238'];
+        const stripes = [eraRGB([248, 113, 113]).join(','), eraRGB([232, 121, 249]).join(','), eraRGB([34, 211, 238]).join(',')];
         for (let i = 0; i < 3; i++) {
           ctx.fillStyle = 'rgba(' + stripes[i] + ',' + (alpha + 0.25).toFixed(3) + ')';
           ctx.fillRect(-w / 2, -h + h * (0.25 + i * 0.2), w, Math.max(1, h * 0.08));
@@ -7983,8 +8027,8 @@ panels.forEach(p => observer.observe(p));
       const fade = 0.09 + nearP * 0.12;
       // each trace's cool base hue (violet or magenta) shifts toward
       // orange/red as threat rises, matching the tunnel background
-      const cool = t.hue === 'violet' ? [167, 139, 250] : [232, 121, 249];
-      const warm = t.hue === 'violet' ? [249, 115, 22] : [239, 68, 68];
+      const cool = eraRGB(t.hue === 'violet' ? [167, 139, 250] : [232, 121, 249]);
+      const warm = eraRGB(t.hue === 'violet' ? [249, 115, 22] : [239, 68, 68]);
       const color = lerpColorStr(cool, warm, threat);
 
       ctx.beginPath();
@@ -8338,13 +8382,10 @@ panels.forEach(p => observer.observe(p));
       ctx.translate((Math.random() - 0.5) * shakeMag, (Math.random() - 0.5) * shakeMag);
     }
 
-    ctx.save();
-    ctx.filter = 'hue-rotate(' + levelHueDeg() + 'deg)'; // steps to the next color era every 5 levels
     drawTunnel();
     drawSkyline();
     drawWarpStreaks();
     drawCircuitFloor();
-    ctx.restore(); // back to filter: none — gameplay colors (items/player/HUD) stay true so good/bad stay readable
     drawCodeBits();
 
     items.slice().sort((a, b) => a.z - b.z).reverse().forEach(drawItem);

@@ -2335,10 +2335,16 @@
   html.gw-fs-lock, body.gw-fs-lock { overflow: hidden; height: 100%; }
   body.gw-fs-lock { width: 100%; }
   .game-fullscreen-btn {
-    position: absolute; right: 3.2rem; top: .7rem; z-index: 5;
+    position: absolute; right: 3.2rem; top: .7rem; z-index: 15;
     width: 2.3rem; height: 2.3rem; border-radius: 50%;
-    background: rgba(34,211,238,.06); border: 1px solid rgba(34,211,238,.3);
-    color: var(--cyan); font-size: 1.05rem; line-height: 1; opacity: .82;
+    /* Solid-ish backdrop (was a near-transparent .06-alpha ring) so the
+       icon reads as a distinct floating control instead of getting
+       visually swallowed by whatever ready-screen/title-seq text glows
+       behind it in that same corner. */
+    background: rgba(3,8,17,.72); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+    border: 1px solid rgba(34,211,238,.55);
+    box-shadow: 0 0 10px rgba(3,8,17,.5);
+    color: var(--cyan); font-size: 1.05rem; line-height: 1; opacity: 1;
     display: flex; align-items: center; justify-content: center;
     touch-action: manipulation; -webkit-tap-highlight-color: transparent;
     transition: opacity .15s ease, background .15s ease;
@@ -7250,18 +7256,38 @@ panels.forEach(p => observer.observe(p));
     return traces;
   }
 
+  // Perspective depth constant for the skyline: converts a true world-space
+  // distance (z) into the tunnel's 0-1 screen-lerp parameter (p) using the
+  // standard perspective divide p = D/(D+z), same shape as a real camera
+  // projection. z shrinks at a CONSTANT rate (constant forward velocity),
+  // so p — and therefore on-screen size/position — grows slowly while a
+  // part is far out near the vanishing point and accelerates sharply as it
+  // nears the player. That's what actually reads as "we're flying forward
+  // into the skyline" rather than "the skyline is being fired at us": the
+  // old system incremented p itself at a constant rate, which is constant
+  // *apparent screen speed* the whole way — visually closer to objects
+  // being conveyor-belted toward the camera than to forward motion through
+  // a scene.
+  const SKYLINE_PERSPECTIVE_D = 1.6;
+  const SKYLINE_Z_FAR = 10;   // spawn distance
+  const SKYLINE_Z_NEAR = 0.1; // despawn distance (right at the player plane)
+  function skylineZtoP(z) { return SKYLINE_PERSPECTIVE_D / (SKYLINE_PERSPECTIVE_D + z); }
+
   function generateSkyline() {
     // A distant "skyline" flanking the tunnel — silhouettes shaped like
     // circuit components (chip packages, capacitors, diodes, resistors)
-    // instead of buildings, drifting past slowly on both sides.
+    // instead of buildings, drifting past on both sides. Density roughly
+    // doubled (16 -> 34) so the backdrop reads as a dense, layered scene
+    // instead of a handful of sparse shapes — makes each era's silhouette
+    // mix (rack/girder/tower/etc) actually register as a skyline.
     const parts = [];
-    const count = 16;
+    const count = 34;
     for (let i = 0; i < count; i++) {
       parts.push({
         side: i % 2 === 0 ? -1 : 1,
         laneOffset: 1.4 + Math.random() * 2.6,   // lane-widths out from center beyond the play field
-        p: Math.random(),                          // depth, 0 = far near vanishing point, 1 = near player
-        speed: 0.035 + Math.random() * 0.045,
+        z: SKYLINE_Z_NEAR + Math.random() * (SKYLINE_Z_FAR - SKYLINE_Z_NEAR), // true depth, staggered so parts aren't all in lockstep
+        speed: 0.55 + Math.random() * 0.5,        // world-space closing speed (z units/sec, scaled by difficulty at update time)
         kind: pick(ERA_SKYLINE_KINDS[currentEraIdx()]),
         scale: 0.7 + Math.random() * 0.9,
         seed: Math.random() * 1000,
@@ -8003,9 +8029,12 @@ panels.forEach(p => observer.observe(p));
 
     circuitTraces.forEach((t) => { t.phase = (t.phase + t.speed * dt) % 1; });
     skylineParts.forEach((s) => {
-      s.p += s.speed * dt * Math.min(1.5, difficulty);
-      if (s.p > 1.05) {
-        s.p = -0.05 - Math.random() * 0.2;
+      // Constant closing speed in true depth-space (see skylineZtoP above) —
+      // this is what actually produces forward-motion-style acceleration
+      // near the player instead of a flat, constant on-screen speed.
+      s.z -= s.speed * dt * Math.min(1.5, difficulty);
+      if (s.z <= SKYLINE_Z_NEAR) {
+        s.z = SKYLINE_Z_FAR + Math.random() * 3;
         s.laneOffset = 1.4 + Math.random() * 2.6;
         s.kind = pick(ERA_SKYLINE_KINDS[currentEraIdx()]);
         s.scale = 0.7 + Math.random() * 0.9;
@@ -8522,14 +8551,15 @@ panels.forEach(p => observer.observe(p));
       antenna: eraRGB([232, 121, 249]).join(','), tower: eraRGB([148, 163, 184]).join(','),
       rack: eraRGB([148, 163, 184]).join(','), girder: eraRGB([253, 224, 71]).join(','),
     };
-    skylineParts.slice().sort((a, b) => a.p - b.p).forEach((s) => {
-      if (s.p < 0 || s.p > 1) return;
+    skylineParts.slice().sort((a, b) => b.z - a.z).forEach((s) => {
+      const p = skylineZtoP(s.z);
+      if (p < 0 || p > 1) return;
       const lane = VP_X + s.side * s.laneOffset * (W / 8);
-      const pos = projectPoint(lane, s.p);
-      const depthScale = 0.12 + s.p * 0.95;
+      const pos = projectPoint(lane, p);
+      const depthScale = 0.12 + p * 0.95;
       const h = 30 * s.scale * depthScale;
       const w = 16 * s.scale * depthScale;
-      const alpha = 0.08 + s.p * 0.2;
+      const alpha = 0.08 + p * 0.2;
       const color = colorSets[s.kind] || '148,163,184';
       ctx.save();
       ctx.translate(pos.x, pos.y);

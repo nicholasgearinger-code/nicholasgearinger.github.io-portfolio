@@ -7151,7 +7151,23 @@ panels.forEach(p => observer.observe(p));
   ];
   function pick(arr) { return arr[(Math.random() * arr.length) | 0]; }
 
-  const SKYLINE_KINDS = ['chip', 'capacitor', 'diode', 'resistor'];
+  const SKYLINE_KINDS = ['chip', 'capacitor', 'diode', 'resistor', 'antenna', 'tower'];
+  // Each level era (violet/blue/green/yellow/orange/red, looping every 5
+  // levels) now gets its own skyline silhouette mix, ring shape, and a
+  // distinct backdrop overlay — not just a hue-rotate of the same shapes —
+  // so the tunnel actually reads as a different "zone" per era, not just a
+  // different color of the same zone.
+  const ERA_SKYLINE_KINDS = [
+    ['chip', 'capacitor', 'diode', 'resistor'],   // 0 violet — circuit board (original look)
+    ['chip', 'antenna', 'tower'],                  // 1 blue — network/relay zone
+    ['tower', 'antenna', 'capacitor'],              // 2 green — server farm
+    ['resistor', 'diode', 'chip'],                  // 3 yellow — industrial/hazard zone
+    ['tower', 'resistor', 'antenna'],               // 4 orange — reactor zone
+    ['antenna', 'tower', 'diode'],                  // 5 red — critical/breach zone
+  ];
+  const ERA_RING_SHAPES = ['line', 'dashed', 'double', 'zigzag', 'dashed', 'double'];
+  const ERA_OVERLAYS = ['none', 'grid', 'rain', 'stripes', 'embers', 'scanlines'];
+  function currentEraIdx() { return Math.floor(level / 5) % LEVEL_ERA_HUES.length; }
   // The tunnel/skyline/circuit palette steps through a fixed 6-color era
   // every 5 levels — violet, blue, green, yellow, orange, red — then loops.
   // Each value is a hue-rotate offset (deg) from the scene's native violet
@@ -7203,7 +7219,7 @@ panels.forEach(p => observer.observe(p));
         laneOffset: 1.4 + Math.random() * 2.6,   // lane-widths out from center beyond the play field
         p: Math.random(),                          // depth, 0 = far near vanishing point, 1 = near player
         speed: 0.035 + Math.random() * 0.045,
-        kind: pick(SKYLINE_KINDS),
+        kind: pick(ERA_SKYLINE_KINDS[currentEraIdx()]),
         scale: 0.7 + Math.random() * 0.9,
         seed: Math.random() * 1000,
       });
@@ -7942,7 +7958,7 @@ panels.forEach(p => observer.observe(p));
       if (s.p > 1.05) {
         s.p = -0.05 - Math.random() * 0.2;
         s.laneOffset = 1.4 + Math.random() * 2.6;
-        s.kind = pick(SKYLINE_KINDS);
+        s.kind = pick(ERA_SKYLINE_KINDS[currentEraIdx()]);
         s.scale = 0.7 + Math.random() * 0.9;
       }
     });
@@ -8224,15 +8240,36 @@ panels.forEach(p => observer.observe(p));
       ctx.beginPath(); ctx.moveTo(VP_X, VP_Y); ctx.lineTo(bx, H); ctx.stroke();
     }
 
-    // scrolling depth rings, closing in toward the viewer
+    // scrolling depth rings, closing in toward the viewer — style (solid,
+    // dashed, doubled, or zigzag) varies per level era so each zone reads
+    // structurally different, not just differently colored
     const ringSpeed = 0.32 * Math.min(2.2, difficulty);
+    const ringShape = ERA_RING_SHAPES[currentEraIdx()];
     for (let k = 0; k < 6; k++) {
       const rp = ((tunnelHue * ringSpeed) + k / 6) % 1;
       const lx = VP_X + (0 - VP_X) * rp, rx = VP_X + (W - VP_X) * rp;
       const ry = VP_Y + (PLAYER_Y - VP_Y) * rp;
-      ctx.strokeStyle = 'rgba(' + coreColor + ',' + (0.05 + rp * 0.22).toFixed(3) + ')';
+      const ringAlpha = (0.05 + rp * 0.22).toFixed(3);
+      ctx.strokeStyle = 'rgba(' + coreColor + ',' + ringAlpha + ')';
       ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(lx, ry); ctx.lineTo(rx, ry); ctx.stroke();
+      if (ringShape === 'dashed') {
+        ctx.save(); ctx.setLineDash([6, 5]);
+        ctx.beginPath(); ctx.moveTo(lx, ry); ctx.lineTo(rx, ry); ctx.stroke();
+        ctx.restore();
+      } else if (ringShape === 'double') {
+        ctx.beginPath(); ctx.moveTo(lx, ry - 2); ctx.lineTo(rx, ry - 2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(lx, ry + 2); ctx.lineTo(rx, ry + 2); ctx.stroke();
+      } else if (ringShape === 'zigzag') {
+        const teeth = 10;
+        ctx.beginPath(); ctx.moveTo(lx, ry);
+        for (let t = 1; t <= teeth; t++) {
+          const tx = lx + (rx - lx) * (t / teeth);
+          ctx.lineTo(tx, ry + (t % 2 === 0 ? -3 : 3));
+        }
+        ctx.stroke();
+      } else {
+        ctx.beginPath(); ctx.moveTo(lx, ry); ctx.lineTo(rx, ry); ctx.stroke();
+      }
     }
 
     // vanishing-point core glow
@@ -8245,6 +8282,65 @@ panels.forEach(p => observer.observe(p));
     if (surging) {
       ctx.fillStyle = 'rgba(248,113,113,.08)';
       ctx.fillRect(0, 0, W, H);
+    }
+  }
+
+  function drawHazardStripes(color, y0) {
+    const bandH = 14, step = 16;
+    ctx.fillStyle = 'rgba(' + color + ',.07)';
+    for (let x = -bandH; x < W + bandH; x += step) {
+      ctx.beginPath();
+      ctx.moveTo(x, y0 + bandH); ctx.lineTo(x + bandH, y0); ctx.lineTo(x + bandH + 6, y0); ctx.lineTo(x + 6, y0 + bandH);
+      ctx.closePath(); ctx.fill();
+    }
+  }
+
+  function drawEraOverlay() {
+    // A structural backdrop layer unique to each level era — grid lines,
+    // falling code-rain, hazard stripes, rising embers, or scanlines —
+    // layered under the gameplay so each zone feels like a different place,
+    // not just a hue-shift of the same one. All positions are derived from
+    // tunnelHue + a per-item index so nothing needs its own persisted state.
+    const overlay = ERA_OVERLAYS[currentEraIdx()];
+    if (overlay === 'none') return;
+    if (overlay === 'grid') {
+      const c = eraRGB([125, 211, 252]).join(',');
+      ctx.strokeStyle = 'rgba(' + c + ',.05)'; ctx.lineWidth = 1;
+      const cols = 8, rows = 5;
+      for (let i = 1; i < cols; i++) { const x = (W / cols) * i; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+      for (let j = 1; j < rows; j++) { const y = (H / rows) * j; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+    } else if (overlay === 'rain') {
+      const c = eraRGB([110, 231, 183]).join(',');
+      for (let i = 0; i < 14; i++) {
+        const seed = i * 97.13;
+        const x = (seed * 37) % W;
+        const speed = 40 + (i % 5) * 18;
+        const y = ((tunnelHue * speed + seed * 13) % (H + 40)) - 20;
+        const len = 14 + (i % 4) * 8;
+        ctx.strokeStyle = 'rgba(' + c + ',' + (0.1 + (i % 3) * 0.04).toFixed(3) + ')'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + len); ctx.stroke();
+      }
+    } else if (overlay === 'stripes') {
+      const c = eraRGB([253, 224, 71]).join(',');
+      ctx.save(); ctx.beginPath(); ctx.rect(0, 0, W, 14); ctx.clip(); drawHazardStripes(c, 0); ctx.restore();
+      ctx.save(); ctx.beginPath(); ctx.rect(0, H - 14, W, 14); ctx.clip(); drawHazardStripes(c, H - 14); ctx.restore();
+    } else if (overlay === 'embers') {
+      const c = eraRGB([251, 146, 60]).join(',');
+      for (let i = 0; i < 16; i++) {
+        const seed = i * 53.7;
+        const x = (seed * 31) % W + Math.sin(tunnelHue * 2 + seed) * 10;
+        const speed = 20 + (i % 5) * 10;
+        const y = H - ((tunnelHue * speed + seed * 17) % (H + 30));
+        ctx.beginPath();
+        ctx.fillStyle = 'rgba(' + c + ',' + (0.18 + (i % 4) * 0.05).toFixed(3) + ')';
+        ctx.arc(x, y, 1 + (i % 3), 0, Math.PI * 2); ctx.fill();
+      }
+    } else if (overlay === 'scanlines') {
+      const c = eraRGB([248, 113, 113]).join(',');
+      const sweepY = (tunnelHue * 60) % (H + 60) - 30;
+      ctx.fillStyle = 'rgba(' + c + ',.05)'; ctx.fillRect(0, sweepY, W, 3);
+      ctx.strokeStyle = 'rgba(' + c + ',.02)';
+      for (let y = 0; y < H; y += 6) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
     }
   }
 
@@ -8282,6 +8378,7 @@ panels.forEach(p => observer.observe(p));
     const colorSets = {
       chip: eraRGB([125, 211, 252]).join(','), capacitor: eraRGB([196, 181, 253]).join(','),
       diode: eraRGB([110, 231, 183]).join(','), resistor: eraRGB([253, 224, 71]).join(','),
+      antenna: eraRGB([232, 121, 249]).join(','), tower: eraRGB([148, 163, 184]).join(','),
     };
     skylineParts.slice().sort((a, b) => a.p - b.p).forEach((s) => {
       if (s.p < 0 || s.p > 1) return;
@@ -8320,6 +8417,24 @@ panels.forEach(p => observer.observe(p));
         ctx.strokeRect(-w / 2, -h, w, h);
         ctx.fillStyle = 'rgba(' + color + ',' + (alpha + 0.3).toFixed(3) + ')';
         ctx.fillRect(-w / 2, -h + h * 0.2, w, Math.max(1, h * 0.08));
+      } else if (s.kind === 'antenna') {
+        // a thin mast with a small dish and a blinking tip light
+        ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -h); ctx.lineWidth = Math.max(0.6, depthScale * 0.8); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(-w * 0.35, -h * 0.55); ctx.lineTo(w * 0.35, -h * 0.55); ctx.stroke();
+        const blink = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(tunnelHue * 6 + s.seed));
+        ctx.beginPath();
+        ctx.fillStyle = 'rgba(' + color + ',' + Math.min(1, alpha + blink * 0.6).toFixed(3) + ')';
+        ctx.arc(0, -h, Math.max(1, w * 0.14), 0, Math.PI * 2); ctx.fill();
+      } else if (s.kind === 'tower') {
+        // a tapered lattice tower — a couple of crossbars between two slanted legs
+        ctx.beginPath();
+        ctx.moveTo(-w / 2, 0); ctx.lineTo(-w * 0.14, -h); ctx.lineTo(w * 0.14, -h); ctx.lineTo(w / 2, 0);
+        ctx.stroke();
+        for (let i = 1; i <= 2; i++) {
+          const yy = -h * (i / 3);
+          const ww = (w / 2) * (1 - i / 3.4);
+          ctx.beginPath(); ctx.moveTo(-ww, yy); ctx.lineTo(ww, yy); ctx.stroke();
+        }
       } else {
         ctx.fillRect(-w / 2, -h, w, h);
         ctx.strokeRect(-w / 2, -h, w, h);
@@ -8760,6 +8875,7 @@ panels.forEach(p => observer.observe(p));
     }
 
     drawTunnel();
+    drawEraOverlay();
     drawStarfield();
     drawSkyline();
     drawWarpStreaks();

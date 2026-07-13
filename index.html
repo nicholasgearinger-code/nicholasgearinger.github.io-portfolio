@@ -7141,6 +7141,7 @@ panels.forEach(p => observer.observe(p));
   let rapidTimer = 0, magnetTimer = 0, shieldTimer = 0, powerupTimer = randRange(POWERUP_MIN, POWERUP_MAX);
   let surging = false, surgeCountdown = randRange(SURGE_MIN, SURGE_MAX), surgeElapsed = 0;
   let gyroEnabled = false, gyroNeutral = null, gyroX = null;
+  window.__TILT_DEBUG = true; // TEMP: shows live angle/beta/gamma on the TILT button for debugging
   let soundOn = true;
   let circuitTraces = generateCircuitTraces();
   let best = parseInt(localStorage.getItem('ghostwireBest') || '0', 10);
@@ -7449,6 +7450,9 @@ panels.forEach(p => observer.observe(p));
   }
   function handleOrientation(e) {
     const v = steerAxisValue(e);
+    if (window.__TILT_DEBUG && gyroBtn) {
+      gyroBtn.textContent = `∠${currentOrientationAngle()} β${e.beta==null?'-':e.beta.toFixed(0)} γ${e.gamma==null?'-':e.gamma.toFixed(0)} v${v==null?'-':v.toFixed(0)} n${gyroNeutral==null?'-':gyroNeutral.toFixed(0)}`;
+    }
     if (v === null) return;
     if (gyroNeutral === null) gyroNeutral = v; // calibrate to however they're holding the phone
     gyroX = W / 2 + (v - gyroNeutral) * GYRO_SENSITIVITY;

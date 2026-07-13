@@ -7877,12 +7877,14 @@ panels.forEach(p => observer.observe(p));
     }
 
     elapsed += dt;
-    // Difficulty now eases up from a slower start instead of hitting full
-    // base speed immediately: starts at 40% speed, ramps to 100% over the
-    // first 8s, then continues the original long-term climb from there.
+    // Difficulty now starts at half speed and only steps up every 5 levels
+    // (one tier per color era), instead of climbing continuously with time.
+    // A short in-run ramp still smooths the very start of each attempt.
     const RAMP_START = 0.4, RAMP_TIME = 8;
     const rampFactor = Math.min(1, RAMP_START + (1 - RAMP_START) * (elapsed / RAMP_TIME));
-    difficulty = (1 + elapsed / 20) * rampFactor;
+    const levelTier = Math.floor((level - 1) / 5);
+    const baseDifficulty = 0.5 + levelTier * 0.3;
+    difficulty = baseDifficulty * rampFactor;
 
     // levels — one every 20s, mirroring the difficulty ramp's own pacing,
     // so "LEVEL n" is a legible progress marker for the same slow→fast climb

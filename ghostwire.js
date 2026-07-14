@@ -69,9 +69,7 @@
   const gameMenuRoot = document.getElementById('game-menu-root');
   const gameMenuPlay = document.getElementById('game-menu-play');
   const gameMenuPlayBtn = document.getElementById('game-menu-play-btn');
-  const gameMenuSettingsBtn = document.getElementById('game-menu-settings-btn');
-  const gameMenuAchvBtn = document.getElementById('game-menu-achv-btn');
-  const gameMenuStatsBtn = document.getElementById('game-menu-stats-btn');
+  const gameMenuMenuBtn = document.getElementById('game-menu-menu-btn');
   const gameMenuBackBtn = document.getElementById('game-menu-back-btn');
   const achvCountEl = document.getElementById('gp-achv-count');
   if (!canvas || !startBtn) return;
@@ -520,9 +518,7 @@
       if (gameMenuRoot) gameMenuRoot.hidden = false;
     });
   }
-  if (gameMenuSettingsBtn) gameMenuSettingsBtn.addEventListener('click', () => openSettingsPanel('settings'));
-  if (gameMenuAchvBtn) gameMenuAchvBtn.addEventListener('click', () => openSettingsPanel('achv'));
-  if (gameMenuStatsBtn) gameMenuStatsBtn.addEventListener('click', () => openSettingsPanel('stats'));
+  if (gameMenuMenuBtn) gameMenuMenuBtn.addEventListener('click', () => openSettingsPanel('settings'));
   if (hapticsCheck) {
     hapticsCheck.addEventListener('change', () => {
       settings.haptics = hapticsCheck.checked;
@@ -2726,11 +2722,13 @@
   function playInitialTitleCard() {
     if (!titleSeqEl || !overlayMainEl) return;
     const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    overlayMainEl.hidden = true;
     titleSeqEl.hidden = false;
     runTitleSeq();
     setTimeout(() => {
-      titleSeqEl.hidden = true;
+      // titleSeqEl stays visible here (unlike handlePlayClick's transition
+      // use of the same sequence) — it settles into its idle glow state
+      // and serves as the title screen's backdrop, with the 2-button menu
+      // appearing right after it rather than replacing it.
       overlayMainEl.hidden = false;
     }, reduceMotion ? 0 : 2000);
   }

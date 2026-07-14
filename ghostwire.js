@@ -13,10 +13,12 @@
   const gameWrap = document.getElementById('game-wrap');
   // one listener covers every current and future button in the game
   // (settings, tabs, zone select, play/menu, pause, mute, fullscreen,
-  // radio skip, quit...) rather than wiring each individually
+  // radio skip, quit, the gate button...) rather than wiring each
+  // individually — all synthesized; the real success.mp3 sting is
+  // reserved for achievement unlocks, see unlockAchievement()
   if (gameWrap) {
     gameWrap.addEventListener('click', (e) => {
-      if (e.target.closest('button')) playClickSfx();
+      if (e.target.closest('button')) sfxUiClick();
     });
   }
   const overlay = document.getElementById('game-overlay');
@@ -451,7 +453,7 @@
     if (def) {
       spawnFloatText(W / 2, VP_Y + 130, '\u2605 ACHIEVEMENT: ' + def.label.toUpperCase(), '#FBBF24');
       haptic([20, 40, 20, 40, 20]);
-      sfxPowerup();
+      playClickSfx();
     }
     const newTracks = tracksUnlockedByAchievement(id);
     if (newTracks.length) {
@@ -865,6 +867,7 @@
     src.start(t0);
   }
   function sfxShoot() { playTone(1500, 0.09, 'square', 0.065, 260, 0, { filterFreq: 3400, filterSlideTo: 500, filterQ: 6 }); }
+  function sfxUiClick() { ensureAudio(); playTone(880, 0.05, 'sine', 0.05, 1300, 0, { filterFreq: 3000, filterQ: 4 }); }
   function sfxCatch(mult) { playTone(660 + mult * 70, 0.11, 'triangle', 0.13, 1150 + mult * 90, 0, { detune: 16 }); }
   function sfxFizzle() { playNoise(0.1, 0.12); playTone(340, 0.12, 'sawtooth', 0.07, 70, 0, { filterFreq: 2100, filterSlideTo: 220, filterQ: 5 }); }
   function sfxHit() { playTone(170, 0.2, 'sawtooth', 0.19, 45, 0, { filterFreq: 1300, filterSlideTo: 150, filterQ: 10 }); playNoise(0.12, 0.11); }

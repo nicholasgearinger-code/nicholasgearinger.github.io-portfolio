@@ -2916,7 +2916,6 @@
     }
     // corner brackets finish their snap-in around .9s; network traces
     // draw themselves out to each one right after
-    setTimeout(() => boot.classList.add('gwb-traces'), 950);
     startHexReadouts();
     // a couple of screen-tear glitches at points that don't collide with
     // a decode already being mid-flight, so they read as interference
@@ -2956,7 +2955,7 @@
       if (boot) boot.classList.add('gw-boot-collapse');
       if (gameMenuRoot) fadeReveal(gameMenuRoot);
       setTimeout(() => {
-        if (boot) { boot.hidden = true; boot.classList.remove('gw-boot-active', 'gw-boot-collapse', 'gwb-traces'); }
+        if (boot) { boot.hidden = true; boot.classList.remove('gw-boot-active', 'gw-boot-collapse'); }
       }, 520);
     });
   }

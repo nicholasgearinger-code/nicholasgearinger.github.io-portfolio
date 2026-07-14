@@ -436,23 +436,6 @@
     mix-blend-mode: screen; opacity: 0; pointer-events: none;
   }
   .gw-boot-tearbar.gwb-tear-show { opacity: .9; transition: opacity .06s ease; }
-  /* network trace lines — thin diagonal beams growing from the glyph
-     out toward each corner bracket once they've snapped into place */
-  .gw-boot-trace {
-    position: absolute; top: 50%; left: 50%; height: 1px; width: 42vmax; z-index: 1;
-    background: linear-gradient(90deg, rgba(34,211,238,.55), transparent);
-    transform-origin: left center; transform: scaleX(0); opacity: 0; pointer-events: none;
-    transition: transform .7s cubic-bezier(.16,1,.3,1), opacity .3s ease;
-  }
-  #gw-boot.gwb-traces .gw-boot-trace { transform: scaleX(1); opacity: 1; }
-  .gw-boot-trace-tl { transform: rotate(200deg) scaleX(0); }
-  #gw-boot.gwb-traces .gw-boot-trace-tl { transform: rotate(200deg) scaleX(1); }
-  .gw-boot-trace-tr { transform: rotate(-20deg) scaleX(0); }
-  #gw-boot.gwb-traces .gw-boot-trace-tr { transform: rotate(-20deg) scaleX(1); }
-  .gw-boot-trace-bl { transform: rotate(160deg) scaleX(0); }
-  #gw-boot.gwb-traces .gw-boot-trace-bl { transform: rotate(160deg) scaleX(1); }
-  .gw-boot-trace-br { transform: rotate(20deg) scaleX(0); }
-  #gw-boot.gwb-traces .gw-boot-trace-br { transform: rotate(20deg) scaleX(1); }
   /* hex/coordinate readouts flickering near each corner, diagnostic-panel flavor */
   .gw-boot-hex {
     position: absolute; z-index: 1;
@@ -4050,10 +4033,6 @@
             <div class="gw-boot-scanline"></div>
             <div class="gw-boot-tearbar" id="gw-boot-tearbar-1"></div>
             <div class="gw-boot-tearbar" id="gw-boot-tearbar-2"></div>
-            <div class="gw-boot-trace gw-boot-trace-tl"></div>
-            <div class="gw-boot-trace gw-boot-trace-tr"></div>
-            <div class="gw-boot-trace gw-boot-trace-bl"></div>
-            <div class="gw-boot-trace gw-boot-trace-br"></div>
             <div class="gw-boot-corner gw-boot-corner-tl"></div>
             <div class="gw-boot-corner gw-boot-corner-tr"></div>
             <div class="gw-boot-corner gw-boot-corner-bl"></div>

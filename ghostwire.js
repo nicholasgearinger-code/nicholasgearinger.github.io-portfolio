@@ -422,6 +422,19 @@
   let visitedZones = [];
   try { visitedZones = JSON.parse(localStorage.getItem('ghostwireZones') || '[]'); } catch (_) {}
   function saveVisitedZones() { try { localStorage.setItem('ghostwireZones', JSON.stringify(visitedZones)); } catch (_) {} }
+  // -- STORY MODE: zones unlock in order as the player actually reaches
+  //    them, rather than all being selectable from the start. A zone's
+  //    "start level" (1/6/11/16/21/26) doubles as its unlock threshold.
+  const ZONE_START_LEVELS = [1, 6, 11, 16, 21, 26];
+  let highestLevelReached = 1;
+  try { highestLevelReached = parseInt(localStorage.getItem('ghostwireProgress') || '1', 10) || 1; } catch (_) {}
+  function saveProgress() { try { localStorage.setItem('ghostwireProgress', String(highestLevelReached)); } catch (_) {} }
+  function isZoneUnlocked(zoneIdx) { return highestLevelReached >= ZONE_START_LEVELS[zoneIdx]; }
+  function frontierZoneIdx() {
+    let idx = 0;
+    for (let i = 0; i < ZONE_START_LEVELS.length; i++) if (isZoneUnlocked(i)) idx = i;
+    return idx;
+  }
   function unlockAchievement(id) {
     if (achievements[id]) return;
     achievements[id] = true;
@@ -594,8 +607,13 @@
     // level-1 start, zones 1-5 drop the player straight into that era (each
     // era spans 5 levels / ~100s of elapsed time, mirroring the level/era
     // formulas used during normal play) so difficulty and hue land correctly
-    // from frame one instead of needing to be played up to.
-    score = 0; elapsed = pendingZone * 100; difficulty = 1; level = 1 + pendingZone * 5; threat = 0;
+    // from frame one instead of needing to be played up to. Story mode:
+    // selecting your current frontier zone continues exactly from your
+    // furthest level reached rather than restarting that zone from level 1.
+    const isContinuing = pendingZone === frontierZoneIdx() && highestLevelReached > ZONE_START_LEVELS[pendingZone];
+    level = isContinuing ? highestLevelReached : 1 + pendingZone * 5;
+    elapsed = (level - 1) * 20;
+    score = 0; difficulty = 1; threat = 0;
     spawnTimer = 0; codeBitTimer = 0; fireTimer = 0;
     playerX = W / 2; targetX = playerX; playerVX = 0;
     shakeMag = 0; flash = 0; dying = false; deathTimer = 0;
@@ -1395,6 +1413,7 @@
     const newLevel = 1 + Math.floor(elapsed / 20);
     if (newLevel > level) {
       level = newLevel;
+      if (level > highestLevelReached) { highestLevelReached = level; saveProgress(); }
       if (level >= 20) unlockAchievement('deep_diver');
       if (level >= 5 && hitsThisRun === 0) unlockAchievement('clean_run');
       spawnFloatText(W / 2, VP_Y + 60, 'LEVEL ' + level, '#7DD3FC');
@@ -2534,7 +2553,7 @@
     overlayTitle.textContent = 'Connection Corrupted';
     overlayTitle.classList.add('gt-over');
     overlaySub.textContent = 'Purge failed — final score: ' + score + '  ·  reached level ' + level;
-    startBtn.textContent = '\u25B6 Play Again';
+    updateZoneLocks();
     scoreEntry.hidden = false;
     if (statsDetailEl) {
       const accuracy = shotsFired > 0 ? Math.round((shotsHit / shotsFired) * 100) : 0;
@@ -2569,6 +2588,7 @@
     submitNote.textContent = '';
     if (pillText) pillText.textContent = 'READY';
     if (titleSeqEl) titleSeqEl.hidden = true;
+    updateZoneLocks();
     fadeReveal(overlayMainEl);
     fadeReveal(gameMenuPlay);
     if (gameWrap && gameWrap.classList.contains('gw-fullscreen')) exitFullscreenMode();
@@ -2608,14 +2628,37 @@
   function setActiveZoneBtn(idx) {
     zoneBtns.forEach((b) => b.classList.toggle('gz-active', Number(b.dataset.zone) === idx));
   }
+  function updatePlayButtonLabel() {
+    const isContinuing = pendingZone === frontierZoneIdx() && highestLevelReached > ZONE_START_LEVELS[pendingZone];
+    startBtn.textContent = isContinuing ? '\u25B6 Continue (Lv ' + highestLevelReached + ')' : '\u25B6 Play';
+  }
+  function updateZoneLocks() {
+    const frontier = frontierZoneIdx();
+    zoneBtns.forEach((btn) => {
+      const idx = Number(btn.dataset.zone);
+      const unlocked = isZoneUnlocked(idx);
+      btn.classList.toggle('gz-locked', !unlocked);
+      btn.disabled = !unlocked;
+      const lvEl = btn.querySelector('.gz-lv');
+      if (lvEl) lvEl.textContent = unlocked ? 'Lv ' + ZONE_START_LEVELS[idx] : '\u{1F512} Locked';
+    });
+    // if the previously-selected zone is somehow locked (e.g. storage was
+    // cleared), fall back to the current frontier so selection is never
+    // stuck on an unreachable zone
+    if (!isZoneUnlocked(pendingZone)) pendingZone = frontier;
+    setActiveZoneBtn(pendingZone);
+    updatePlayButtonLabel();
+  }
   zoneBtns.forEach((btn) => {
     btn.addEventListener('click', () => {
-      pendingZone = Number(btn.dataset.zone);
+      const idx = Number(btn.dataset.zone);
+      if (!isZoneUnlocked(idx)) return;
+      pendingZone = idx;
       setActiveZoneBtn(pendingZone);
-      handlePlayClick();
+      updatePlayButtonLabel();
     });
   });
-  setActiveZoneBtn(pendingZone);
+  updateZoneLocks();
   if (quitBtn) quitBtn.addEventListener('click', quitGame);
   if (quitBtnFs) quitBtnFs.addEventListener('click', quitGame);
   submitBtn.addEventListener('click', async () => {

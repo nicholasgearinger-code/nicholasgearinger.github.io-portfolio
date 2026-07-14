@@ -2737,6 +2737,12 @@
     background: rgba(var(--zc), .28); border-color: rgba(var(--zc), .85);
     box-shadow: 0 0 14px rgba(var(--zc), .55);
   }
+  .game-zone-btn.gz-locked {
+    cursor: default; color: var(--muted); background: rgba(148,163,184,.04); border-color: rgba(148,163,184,.2);
+    opacity: .55;
+  }
+  .game-zone-btn.gz-locked:hover { background: rgba(148,163,184,.04); }
+  .game-zone-btn.gz-locked .gz-lv { opacity: .6; }
   .game-title-seq {
     position: relative;
     display: flex; flex-direction: column; align-items: center; gap: .45rem;

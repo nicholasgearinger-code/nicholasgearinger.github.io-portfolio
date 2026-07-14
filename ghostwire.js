@@ -778,16 +778,23 @@
     radioAudioEl.preload = 'auto';
     radioAudioEl.volume = 0.5;
     radioAudioEl.addEventListener('ended', nextRadioTrack);
-    // Web Audio graph is optional flourish for the waveform — if the
-    // browser refuses (e.g. cross-origin file with no CORS headers),
-    // playback still works fine without a visualizer.
+    // createMediaElementSource() permanently reroutes this element's audio
+    // output through the Web Audio graph the instant it's called — if
+    // anything after that throws, the element is left connected to
+    // nothing (silently "playing" with zero sound) unless we explicitly
+    // patch it straight to destination as a fallback. The analyser/
+    // visualizer is optional flourish; audible playback is not.
     try {
       radioSource = audioCtx.createMediaElementSource(radioAudioEl);
       radioAnalyser = audioCtx.createAnalyser();
       radioAnalyser.fftSize = 64;
       radioSource.connect(radioAnalyser);
       radioAnalyser.connect(audioCtx.destination);
-    } catch (_) { radioAnalyser = null; }
+    } catch (err) {
+      console.warn('[ghostwire radio] waveform tap failed, falling back to direct playback:', err);
+      radioAnalyser = null;
+      try { if (radioSource) radioSource.connect(audioCtx.destination); } catch (_) {}
+    }
   }
   function pickRadioIdx(excludeIdx) {
     if (RADIO_TRACKS.length <= 1) return 0;
@@ -801,7 +808,7 @@
     const track = RADIO_TRACKS[idx];
     radioAudioEl.src = 'music/' + track.file;
     radioAudioEl.muted = !soundOn;
-    radioAudioEl.play().catch(() => {}); // blocked-autoplay retries happen naturally on the next call from a real click
+    radioAudioEl.play().catch((err) => console.warn('[ghostwire radio] play() failed:', err));
     if (radioTrackEl) radioTrackEl.textContent = track.title + (track.artist ? ' — ' + track.artist : '');
     if (radioWidget) radioWidget.hidden = false;
   }
@@ -811,7 +818,7 @@
     ensureRadioGraph();
     if (!radioAudioEl) return;
     if (!radioStarted) { radioStarted = true; playRadioTrack(pickRadioIdx(-1)); }
-    else if (radioAudioEl.paused) { radioAudioEl.play().catch(() => {}); }
+    else if (radioAudioEl.paused) { radioAudioEl.play().catch((err) => console.warn('[ghostwire radio] play() failed:', err)); }
   }
   function stopRadio() {
     if (radioAudioEl) radioAudioEl.pause();

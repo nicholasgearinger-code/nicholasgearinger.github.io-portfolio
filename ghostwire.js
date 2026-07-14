@@ -510,15 +510,27 @@
   }
   if (titleGateBtn) {
     titleGateBtn.addEventListener('click', () => {
-      if (titleGateEl) titleGateEl.hidden = true;
+      if (titleGateEl) {
+        titleGateEl.classList.add('fading-out');
+        setTimeout(() => { titleGateEl.hidden = true; }, 350);
+      }
       playInitialTitleCard();
     });
   }
   if (gameMenuPlayBtn) {
     gameMenuPlayBtn.addEventListener('click', () => {
-      if (titleSeqEl) titleSeqEl.hidden = true;
-      if (overlayMainEl) overlayMainEl.hidden = false;
-      if (gameMenuPlay) gameMenuPlay.hidden = false;
+      if (titleSeqEl) {
+        titleSeqEl.classList.add('fading-out');
+        setTimeout(() => {
+          titleSeqEl.hidden = true;
+          titleSeqEl.classList.remove('fading-out');
+          if (overlayMainEl) overlayMainEl.hidden = false;
+          if (gameMenuPlay) gameMenuPlay.hidden = false;
+        }, 350);
+      } else {
+        if (overlayMainEl) overlayMainEl.hidden = false;
+        if (gameMenuPlay) gameMenuPlay.hidden = false;
+      }
     });
   }
   if (gameMenuBackBtn) {

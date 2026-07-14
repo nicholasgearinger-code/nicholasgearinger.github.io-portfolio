@@ -2507,6 +2507,7 @@
     transition: opacity .15s ease, box-shadow .2s ease, transform .3s ease;
   }
   .game-settings-btn:active { opacity: 1; transform: rotate(75deg); box-shadow: 0 0 14px rgba(34,211,238,.55), 0 0 22px rgba(232,121,249,.3); }
+  .game-settings-btn[hidden] { display: none; }
   @property --ring-angle {
     syntax: '<angle>'; inherits: false; initial-value: 0deg;
   }
@@ -2573,7 +2574,9 @@
   .gp-achv-unlock { display: block; margin-top: .2rem; font-style: italic; color: var(--cyan); opacity: .8; font-size: .7rem; }
   .game-wrap.cb-safe .game-overlay h3.gt-over { color: #FB923C; }
   .game-play-row { display: flex; align-items: center; justify-content: center; gap: .6rem; }
-  .game-title-gate { display: flex; align-items: center; justify-content: center; min-height: 8rem; }
+  .game-title-gate { display: flex; align-items: center; justify-content: center; min-height: 8rem; transition: opacity .35s ease; }
+  .game-title-gate.fading-out { opacity: 0; pointer-events: none; }
+  .game-title-seq.fading-out { opacity: 0; pointer-events: none; }
   .game-menu-root {
     position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
     margin-top: 1.3rem; width: max-content; max-width: 90vw;
@@ -2726,6 +2729,7 @@
   .game-title-seq {
     position: relative;
     display: flex; flex-direction: column; align-items: center; gap: .45rem;
+    transition: opacity .35s ease;
   }
   .game-title-seq[hidden] { display: none; }
   .game-title-seq.gt-jump { animation: gtGlitchJump .34s steps(2, end); }

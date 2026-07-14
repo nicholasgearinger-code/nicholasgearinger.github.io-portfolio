@@ -2706,9 +2706,10 @@
   const ICON_CHARS = ['<', '/', '>'];
   const ICON_CLASSES = ['gt-lt', 'gt-slash', 'gt-gt'];
   const GT_GLYPHS = '!<>-_\\/[]{}=+*^?#';
-  function decodeText(el, text, dur, onDone) {
+  function decodeText(el, text, dur, onDone, onChar) {
     const stagger = dur / text.length;
     const t0 = performance.now();
+    let lockedCount = 0;
     function tick(now) {
       const e = now - t0;
       let out = '';
@@ -2718,6 +2719,8 @@
           : GT_GLYPHS[(Math.random() * GT_GLYPHS.length) | 0];
       }
       el.innerHTML = out;
+      const newlyLocked = Math.min(text.length, Math.floor(e / stagger) + 1);
+      if (onChar) { while (lockedCount < newlyLocked) { onChar(lockedCount); lockedCount++; } }
       if (e < dur) requestAnimationFrame(tick);
       else {
         el.innerHTML = text.split('').map((c) => '<span class="gt-char-locked">' + c + '</span>').join('');
@@ -2760,12 +2763,71 @@
     wordEl.innerHTML = 'GHOSTWIRE'.split('').map((c) => '<span class="gt-char-locked">' + c + '</span>').join('');
   }
 
+  // quiet per-character typing blip — tiny pitch variance so a whole line
+  // decoding doesn't sound like one note repeated
+  function typingBlip() {
+    ensureAudio();
+    const f = 1800 + Math.random() * 900;
+    playTone(f, 0.025, 'square', 0.012, null, 0, { filterFreq: 3400 });
+  }
+  function rgbSplitBlip(el) {
+    if (!el) return;
+    el.classList.remove('gwb-rgbsplit'); void el.offsetWidth;
+    el.classList.add('gwb-rgbsplit');
+    setTimeout(() => el.classList.remove('gwb-rgbsplit'), 320);
+  }
+  // sparse falling-character background stream, density ramping up with
+  // the boot's own progress (0-1) rather than running at full density
+  // the whole time
+  let gwStreamRaf = null;
+  function startGwStream(getProgress) {
+    const canvas = document.getElementById('gw-boot-stream');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const DPR = Math.min(2, window.devicePixelRatio || 1);
+    function resize() {
+      canvas.width = window.innerWidth * DPR;
+      canvas.height = window.innerHeight * DPR;
+    }
+    resize();
+    const cols = Math.floor(window.innerWidth / 22);
+    const drops = Array.from({ length: cols }, () => Math.random() * -40);
+    const chars = '01<>{}[]/\\+=-_#?';
+    function draw() {
+      const p = getProgress();
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      ctx.fillStyle = 'rgba(2,8,16,.16)';
+      ctx.fillRect(0, 0, canvas.width / DPR, canvas.height / DPR);
+      ctx.font = '14px "JetBrains Mono", monospace';
+      const activeCols = Math.max(1, Math.floor(cols * Math.min(1, p * 1.3)));
+      for (let i = 0; i < activeCols; i++) {
+        const ch = chars[(Math.random() * chars.length) | 0];
+        const x = i * 22;
+        const y = drops[i] * 18;
+        ctx.fillStyle = i % 5 === 0 ? 'rgba(232,121,249,' + (0.12 + p * 0.1) + ')' : 'rgba(34,211,238,' + (0.1 + p * 0.09) + ')';
+        ctx.fillText(ch, x, y);
+        drops[i] += 0.55 + Math.random() * 0.4;
+        if (y > window.innerHeight && Math.random() > 0.975) drops[i] = Math.random() * -20;
+      }
+      gwStreamRaf = requestAnimationFrame(draw);
+    }
+    window.addEventListener('resize', resize);
+    gwStreamRaf = requestAnimationFrame(draw);
+  }
+  function stopGwStream() {
+    if (gwStreamRaf) cancelAnimationFrame(gwStreamRaf);
+    gwStreamRaf = null;
+    const canvas = document.getElementById('gw-boot-stream');
+    if (canvas) { const ctx = canvas.getContext('2d'); ctx && ctx.clearRect(0, 0, canvas.width, canvas.height); }
+  }
+
   // -- GHOSTWIRE BOOT: the actual animated decode, full-page and centered
   //    regardless of portrait/landscape, matching the site's own boot
   //    sequence (#boot-seq) — same glyph-decode/status-decode/progress-bar
   //    recipe, just triggered on demand instead of once per session. Once
   //    done, it collapses (scale + fade) to make room for the compact
   //    in-card title + Play/Menu buttons.
+  const BOOT_LOG_LINES = ['SYS CHECK... OK', 'UPLINK: STABLE', 'LOADING ZONE DATA...'];
   function runGwBoot(onDone) {
     const boot = document.getElementById('gw-boot');
     const iconEl = document.getElementById('gw-boot-icon');
@@ -2787,32 +2849,49 @@
       setTimeout(() => { if (onDone) onDone(); }, 200);
       return;
     }
-    const DECODE_MS = 1400, HOLD_MS = 400, TOTAL_MS = DECODE_MS + HOLD_MS;
-    if (iconEl) decodeIconInto(iconEl, DECODE_MS * 0.5);
-    setTimeout(() => { if (statusEl) decodeText(statusEl, 'LINK ESTABLISHED', 500); }, 250);
-    setTimeout(() => { if (wordEl) decodeText(wordEl, 'GHOSTWIRE', 650); }, 750);
+    // boot-log lines decode one after another in the status slot before
+    // settling on "LINK ESTABLISHED" — real extra content rather than a
+    // padded delay, each with its own quiet per-character typing blip
+    const LOG_LINE_MS = 320, LOG_HOLD_MS = 220;
+    const LOG_TOTAL_MS = BOOT_LOG_LINES.length * (LOG_LINE_MS + LOG_HOLD_MS);
+    const ICON_MS = 320, STATUS_MS = 420, WORD_MS = 650, HOLD_MS = 400;
+    const TOTAL_MS = LOG_TOTAL_MS + ICON_MS + 150 + STATUS_MS + 200 + WORD_MS + HOLD_MS;
+
+    if (iconEl) {
+      decodeIconInto(iconEl, ICON_MS, () => rgbSplitBlip(iconEl));
+    }
+    let logDelay = 180;
+    BOOT_LOG_LINES.forEach((line) => {
+      const atDelay = logDelay;
+      setTimeout(() => { if (statusEl) decodeText(statusEl, line, LOG_LINE_MS, null, typingBlip); }, atDelay);
+      logDelay += LOG_LINE_MS + LOG_HOLD_MS;
+    });
+    setTimeout(() => { if (statusEl) decodeText(statusEl, 'LINK ESTABLISHED', STATUS_MS, null, typingBlip); }, logDelay + 100);
+    const wordDelay = logDelay + 100 + STATUS_MS + 200;
+    setTimeout(() => { if (wordEl) decodeText(wordEl, 'GHOSTWIRE', WORD_MS, () => rgbSplitBlip(iconEl), typingBlip); }, wordDelay);
     if (barFill) {
       barFill.style.transition = 'width ' + TOTAL_MS + 'ms linear';
       requestAnimationFrame(() => { barFill.style.width = '100%'; });
     }
-    // live percentage readout, ticking alongside the bar fill
+    // live percentage readout, ticking alongside the bar fill — also
+    // drives the background stream's density via the same progress value
+    const t0 = performance.now();
+    function currentProgress() { return Math.min(1, (performance.now() - t0) / TOTAL_MS); }
+    startGwStream(currentProgress);
     if (pctEl) {
-      const t0 = performance.now();
       (function tickPct() {
-        const pct = Math.min(100, Math.round(((performance.now() - t0) / TOTAL_MS) * 100));
+        const pct = Math.round(currentProgress() * 100);
         pctEl.textContent = pct + '%';
         if (pct < 100) requestAnimationFrame(tickPct);
       })();
     }
-    // short synthesized boot chime, reusing the same oscillator SFX
-    // system as the rest of the game rather than an audio file — a quick
-    // rising blip on the icon lock-in, then a short ascending chord once
-    // the whole sequence completes
+    // synthesized boot chime, reusing the same oscillator SFX system as
+    // the rest of the game rather than an audio file
     ensureAudio();
-    playTone(220, 0.08, 'square', 0.05, 440, DECODE_MS * 0.5 / 1000, { filterFreq: 1600 });
+    playTone(220, 0.08, 'square', 0.05, 440, ICON_MS / 1000, { filterFreq: 1600 });
     playTone(440, 0.12, 'triangle', 0.045, null, TOTAL_MS / 1000 - 0.05, { filterFreq: 2200 });
     playTone(660, 0.16, 'triangle', 0.04, null, TOTAL_MS / 1000, { filterFreq: 2600 });
-    setTimeout(() => { if (onDone) onDone(); }, TOTAL_MS);
+    setTimeout(() => { stopGwStream(); if (onDone) onDone(); }, TOTAL_MS);
   }
 
   function playInitialTitleCard() {

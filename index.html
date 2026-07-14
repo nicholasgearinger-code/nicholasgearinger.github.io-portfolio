@@ -392,13 +392,33 @@
   .gw-boot-corner {
     position: absolute; width: 26px; height: 26px; z-index: 1;
     border-color: var(--violet); opacity: 0; pointer-events: none;
-    transition: opacity .8s ease .2s;
+    transform: scale(.4);
+    transition: opacity .3s ease, transform .55s cubic-bezier(.34,1.56,.64,1);
   }
-  #gw-boot.gw-boot-active .gw-boot-corner { opacity: .6; }
-  .gw-boot-corner-tl { top: 5vh; left: 5vw; border-top: 2px solid; border-left: 2px solid; }
-  .gw-boot-corner-tr { top: 5vh; right: 5vw; border-top: 2px solid; border-right: 2px solid; }
-  .gw-boot-corner-bl { bottom: 5vh; left: 5vw; border-bottom: 2px solid; border-left: 2px solid; }
-  .gw-boot-corner-br { bottom: 5vh; right: 5vw; border-bottom: 2px solid; border-right: 2px solid; }
+  #gw-boot.gw-boot-active .gw-boot-corner { opacity: .6; transform: scale(1); }
+  .gw-boot-corner-tl { top: 5vh; left: 5vw; border-top: 2px solid; border-left: 2px solid; transition-delay: .1s; }
+  .gw-boot-corner-tr { top: 5vh; right: 5vw; border-top: 2px solid; border-right: 2px solid; transition-delay: .18s; }
+  .gw-boot-corner-bl { bottom: 5vh; left: 5vw; border-bottom: 2px solid; border-left: 2px solid; transition-delay: .26s; }
+  .gw-boot-corner-br { bottom: 5vh; right: 5vw; border-bottom: 2px solid; border-right: 2px solid; transition-delay: .34s; }
+  /* one-shot chromatic aberration flicker — separate from the existing
+     amber/cyan corruption-blip on the in-card version, triggered at
+     specific decode beats (icon lock-in, final collapse) */
+  @keyframes gwbRgbSplit {
+    0%, 100% { text-shadow: 0 0 20px rgba(34,211,238,.4); transform: translate(0, 0); }
+    20% { text-shadow: -2px 0 0 rgba(255,70,90,.85), 2px 0 0 rgba(34,211,238,.85); transform: translate(-1px, 0); }
+    40% { text-shadow: 2px 0 0 rgba(255,70,90,.85), -2px 0 0 rgba(34,211,238,.85); transform: translate(1px, 0); }
+    60% { text-shadow: -1px 0 0 rgba(255,70,90,.6), 1px 0 0 rgba(34,211,238,.6); transform: translate(0, 0); }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .gw-boot-icon.gwb-rgbsplit { animation: gwbRgbSplit .3s steps(4, end); }
+  }
+  /* background data-stream — sparse falling monospace characters behind
+     the glyph, density/opacity ramping up with the boot's own progress */
+  .gw-boot-stream {
+    position: absolute; inset: 0; z-index: 0; pointer-events: none;
+    opacity: 0; transition: opacity 1.2s ease;
+  }
+  #gw-boot.gw-boot-active .gw-boot-stream { opacity: 1; }
   .gw-boot-icon {
     position: relative; z-index: 2;
     font-family: 'JetBrains Mono', 'Courier New', monospace; font-weight: 700;
@@ -3971,6 +3991,7 @@
                runGwBoot() in ghostwire.js. -->
           <div id="gw-boot" hidden aria-hidden="true">
             <div class="gw-boot-glow"></div>
+            <canvas class="gw-boot-stream" id="gw-boot-stream" aria-hidden="true"></canvas>
             <div class="gw-boot-scanline"></div>
             <div class="gw-boot-corner gw-boot-corner-tl"></div>
             <div class="gw-boot-corner gw-boot-corner-tr"></div>

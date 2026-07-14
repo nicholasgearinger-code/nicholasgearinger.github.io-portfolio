@@ -2592,7 +2592,23 @@
     font-family: 'JetBrains Mono', monospace; font-weight: 700; letter-spacing: .28em;
     font-size: .95rem; color: var(--cyan); text-shadow: 0 0 12px rgba(34,211,238,.5);
   }
-  .game-title-gate-btn { width: min(220px, 70vw); }
+  .game-title-gate .game-title-gate-btn {
+    width: min(220px, 70vw);
+    background: none; border: 1.5px solid transparent; background-clip: padding-box, border-box;
+    background-image: linear-gradient(rgba(2,8,16,.55), rgba(2,8,16,.55)),
+      conic-gradient(from var(--ring-angle, 0deg), var(--cyan), var(--violet), var(--magenta), var(--cyan));
+    background-origin: padding-box, border-box;
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    color: var(--white); box-shadow: none;
+    transition: transform .2s ease, box-shadow .3s ease, color .2s ease;
+  }
+  .game-title-gate .game-title-gate-btn:hover {
+    transform: translateY(-2px); color: var(--cyan);
+    box-shadow: 0 10px 30px -10px rgba(34,211,238,.45), 0 10px 30px -10px rgba(232,121,249,.3);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .game-title-gate .game-title-gate-btn { animation: neonRingSpin 6s linear infinite; }
+  }
   .game-title-seq.fading-out { opacity: 0; pointer-events: none; }
   .game-menu-root.fade-target, .game-menu-play.fade-target, .game-overlay-main.fade-target {
     opacity: 0; transition: opacity .35s ease;

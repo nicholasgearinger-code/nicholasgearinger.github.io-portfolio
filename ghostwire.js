@@ -422,6 +422,12 @@
       haptic([20, 40, 20, 40, 20]);
       sfxPowerup();
     }
+    const newTracks = tracksUnlockedByAchievement(id);
+    if (newTracks.length) {
+      setTimeout(() => {
+        spawnFloatText(W / 2, VP_Y + 155, '\u266A UNLOCKED: ' + newTracks.map((t) => t.title).join(', '), '#22D3EE');
+      }, 260); // stagger after the achievement toast so they don't overlap
+    }
     if (achvBody && !achvBody.hidden) renderAchievements();
   }
   function renderAchievements() {
@@ -430,9 +436,13 @@
     if (achvCountEl) achvCountEl.textContent = unlockedCount + '/' + ACHIEVEMENT_DEFS.length;
     achvListEl.innerHTML = ACHIEVEMENT_DEFS.map((d) => {
       const unlocked = !!achievements[d.id];
+      const tracks = tracksUnlockedByAchievement(d.id);
+      const trackNote = tracks.length
+        ? '<span class="gp-achv-unlock">\u266A Unlocks: ' + tracks.map((t) => escapeHtml(t.title)).join(', ') + '</span>'
+        : '';
       return '<li class="gp-achv' + (unlocked ? ' unlocked' : '') + '">'
         + '<span class="gp-achv-ico">' + (unlocked ? '\u2605' : '\u25CB') + '</span>'
-        + '<span class="gp-achv-text"><strong>' + escapeHtml(d.label) + '</strong><br>' + escapeHtml(d.desc) + '</span>'
+        + '<span class="gp-achv-text"><strong>' + escapeHtml(d.label) + '</strong><br>' + escapeHtml(d.desc) + trackNote + '</span>'
         + '</li>';
     }).join('');
   }
@@ -660,7 +670,10 @@
   let audioCtx = null, ambientOsc = null, ambientGain = null, ambientFilter = null;
   function ensureAudio() {
     if (audioCtx) { if (audioCtx.state === 'suspended') audioCtx.resume(); return; }
-    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (_) { audioCtx = null; }
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    } catch (_) { audioCtx = null; }
   }
   function playTone(freq, dur, type, vol, slideTo, delay, opts) {
     if (!audioCtx || !soundOn) return;
@@ -764,6 +777,40 @@
       + '(window.GHOSTWIRE_TRACKS is ' + (window.GHOSTWIRE_TRACKS === undefined ? 'undefined, so tracks.js likely 404\'d or didn\'t load' : 'an empty array — add entries to music/tracks.js') + '). '
       + 'Also check the Network tab for 404s on the .mp3 files themselves.');
   }
+  // -- RADIO UNLOCKS: only the first few tracks are available from the
+  //    start; the rest unlock in slices as achievements are earned. Reuses
+  //    the existing achievement system rather than a separate progress
+  //    mechanic — no new persistence needed, since achievement completion
+  //    already persists to localStorage. The remaining (non-default)
+  //    tracks are split as evenly as possible across ACHIEVEMENT_DEFS, in
+  //    that array's order, so this scales automatically if tracks or
+  //    achievements are added/removed later rather than relying on
+  //    hardcoded filenames.
+  const RADIO_DEFAULT_UNLOCKED = Math.min(4, RADIO_TRACKS.length);
+  function tracksUnlockedByAchievement(achId) {
+    const bonusCount = RADIO_TRACKS.length - RADIO_DEFAULT_UNLOCKED;
+    if (bonusCount <= 0 || !ACHIEVEMENT_DEFS.length) return [];
+    const perAchievement = bonusCount / ACHIEVEMENT_DEFS.length;
+    const achIdx = ACHIEVEMENT_DEFS.findIndex((d) => d.id === achId);
+    if (achIdx < 0) return [];
+    const start = RADIO_DEFAULT_UNLOCKED + Math.round(achIdx * perAchievement);
+    const end = RADIO_DEFAULT_UNLOCKED + Math.round((achIdx + 1) * perAchievement);
+    return RADIO_TRACKS.slice(start, end);
+  }
+  function isTrackUnlocked(idx) {
+    if (idx < RADIO_DEFAULT_UNLOCKED) return true;
+    const bonusCount = RADIO_TRACKS.length - RADIO_DEFAULT_UNLOCKED;
+    if (bonusCount <= 0 || !ACHIEVEMENT_DEFS.length) return false;
+    const perAchievement = bonusCount / ACHIEVEMENT_DEFS.length;
+    const achIdx = Math.floor((idx - RADIO_DEFAULT_UNLOCKED) / perAchievement);
+    const def = ACHIEVEMENT_DEFS[achIdx];
+    return !!(def && achievements[def.id]);
+  }
+  function unlockedTrackIndices() {
+    const out = [];
+    for (let i = 0; i < RADIO_TRACKS.length; i++) if (isTrackUnlocked(i)) out.push(i);
+    return out;
+  }
   const radioWidget = document.getElementById('game-radio');
   const radioWaveEl = document.getElementById('game-radio-wave');
   const radioTrackEl = document.getElementById('game-radio-track');
@@ -797,9 +844,11 @@
     }
   }
   function pickRadioIdx(excludeIdx) {
-    if (RADIO_TRACKS.length <= 1) return 0;
+    const pool = unlockedTrackIndices();
+    if (!pool.length) return -1;
+    if (pool.length === 1) return pool[0];
     let i;
-    do { i = Math.floor(Math.random() * RADIO_TRACKS.length); } while (i === excludeIdx);
+    do { i = pool[Math.floor(Math.random() * pool.length)]; } while (i === excludeIdx);
     return i;
   }
   function playRadioTrack(idx) {
@@ -816,6 +865,19 @@
   function startRadio() {
     if (!RADIO_TRACKS.length) { if (radioWidget) radioWidget.hidden = true; return; }
     ensureRadioGraph();
+    if (!radioAudioEl) return;
+    if (audioCtx && audioCtx.state === 'suspended') {
+      // Belt-and-suspenders: don't fire the very first play() until the
+      // context has actually confirmed it's running — on iOS a freshly
+      // resumed context can report success asynchronously, and playing
+      // through it before that settles is exactly what produced silent
+      // "it's playing but no sound" first attempts.
+      audioCtx.resume().then(beginRadioPlayback).catch(beginRadioPlayback);
+    } else {
+      beginRadioPlayback();
+    }
+  }
+  function beginRadioPlayback() {
     if (!radioAudioEl) return;
     if (!radioStarted) { radioStarted = true; playRadioTrack(pickRadioIdx(-1)); }
     else if (radioAudioEl.paused) { radioAudioEl.play().catch((err) => console.warn('[ghostwire radio] play() failed:', err)); }

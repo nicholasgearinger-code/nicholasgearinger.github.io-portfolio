@@ -2560,6 +2560,7 @@
   }
   .gp-seg-btn.active { background: rgba(34,211,238,.22); border-color: rgba(34,211,238,.7); color: var(--cyan); }
   .gp-achv-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .6rem; }
+  .gp-achv-intro { font-size: .7rem; color: var(--muted); margin: 0 0 .8rem; line-height: 1.4; }
   .gp-achv {
     display: flex; align-items: flex-start; gap: .6rem; padding: .55rem .6rem; border-radius: .4rem;
     background: rgba(148,163,184,.05); border: 1px solid rgba(148,163,184,.15); opacity: .55;
@@ -2569,6 +2570,7 @@
   .gp-achv-text { font-size: .74rem; color: var(--muted); line-height: 1.35; }
   .gp-achv-text strong { display: block; color: #E0F2FE; font-size: .8rem; margin-bottom: .1rem; }
   .gp-achv.unlocked .gp-achv-text strong { color: #FBBF24; }
+  .gp-achv-unlock { display: block; margin-top: .2rem; font-style: italic; color: var(--cyan); opacity: .8; font-size: .7rem; }
   .game-wrap.cb-safe .game-overlay h3.gt-over { color: #FB923C; }
   .game-play-row { display: flex; align-items: center; justify-content: center; gap: .6rem; }
   .game-wrap.gw-fullscreen .game-fullscreen-btn { top: calc(.7rem + env(safe-area-inset-top)); right: calc(3.6rem + env(safe-area-inset-right)); }
@@ -3711,6 +3713,7 @@
                 </div>
               </div>
               <div class="game-panel-body" id="gp-body-achv" hidden>
+                <p class="gp-achv-intro">A handful of tracks play from the start — the rest unlock as you earn achievements below.</p>
                 <ul class="gp-achv-list" id="gp-achv-list"></ul>
               </div>
             </div>

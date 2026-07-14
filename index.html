@@ -2996,18 +2996,6 @@
   <div class="boot-decode" id="boot-decode-text"><span class="boot-idle-label">Loading…</span></div>
   <div class="boot-bar-track"><div class="boot-bar-fill" id="boot-bar-fill"></div></div>
 </div>
-<!-- GHOSTWIRE BOOT — full-page takeover, same visual recipe as #boot-seq
-     above (decode glyph, status/word decode, progress bar) but triggered
-     on demand when "Initialize" is pressed in the game rather than once
-     per session. Collapses (scale + fade) into the compact in-card title
-     once done, revealing the Play/Menu buttons. See runGwBoot() in
-     ghostwire.js. -->
-<div id="gw-boot" hidden aria-hidden="true">
-  <div class="gw-boot-icon" id="gw-boot-icon">&lt;/&gt;</div>
-  <div class="gw-boot-status" id="gw-boot-status"></div>
-  <div class="gw-boot-word" id="gw-boot-word"></div>
-  <div class="gw-boot-bar-track"><div class="gw-boot-bar-fill" id="gw-boot-bar-fill"></div></div>
-</div>
 <script>
   // Runs synchronously, immediately after the element above, before the
   // browser paints anything — so a repeat page load within the same
@@ -3920,6 +3908,21 @@
             <button type="button" class="game-radio-skip" id="game-radio-skip" aria-label="Skip to next track">
               <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M6 5v14l10-7z"/><rect x="17" y="5" width="2.6" height="14"/></svg>
             </button>
+          </div>
+          <!-- GHOSTWIRE BOOT — full-page takeover, same visual recipe as
+               #boot-seq (decode glyph, status/word decode, progress bar)
+               but triggered on demand when "Initialize" is pressed rather
+               than once per session. Lives inside #game-wrap (not at the
+               body level) so it stays visible during native fullscreen —
+               anything outside the fullscreened element's own subtree is
+               invisible while fullscreen is active. Collapses (scale +
+               fade) into the compact in-card title once done. See
+               runGwBoot() in ghostwire.js. -->
+          <div id="gw-boot" hidden aria-hidden="true">
+            <div class="gw-boot-icon" id="gw-boot-icon">&lt;/&gt;</div>
+            <div class="gw-boot-status" id="gw-boot-status"></div>
+            <div class="gw-boot-word" id="gw-boot-word"></div>
+            <div class="gw-boot-bar-track"><div class="gw-boot-bar-fill" id="gw-boot-bar-fill"></div></div>
           </div>
         </div>
       </div>

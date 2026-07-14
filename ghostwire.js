@@ -2776,6 +2776,45 @@
     el.classList.add('gwb-rgbsplit');
     setTimeout(() => el.classList.remove('gwb-rgbsplit'), 320);
   }
+  // screen-tear: a thin colored band flashes at a random height while the
+  // content wrapper jumps sideways for a couple frames
+  function triggerScreenTear() {
+    const content = document.getElementById('gw-boot-content');
+    const bars = [document.getElementById('gw-boot-tearbar-1'), document.getElementById('gw-boot-tearbar-2')];
+    const bar = bars[(Math.random() * bars.length) | 0];
+    if (bar) {
+      bar.style.top = (10 + Math.random() * 80) + '%';
+      bar.classList.add('gwb-tear-show');
+      setTimeout(() => bar.classList.remove('gwb-tear-show'), 90);
+    }
+    if (content) {
+      content.classList.remove('gwb-tear'); void content.offsetWidth;
+      content.classList.add('gwb-tear');
+      setTimeout(() => content.classList.remove('gwb-tear'), 130);
+    }
+  }
+  // hex/coordinate readouts near each corner — flicker through random
+  // values while active, purely atmospheric (no "correct" value to lock)
+  const HEX_CHARS = '0123456789ABCDEF';
+  function randomHex(len) {
+    let out = '0x';
+    for (let i = 0; i < len; i++) out += HEX_CHARS[(Math.random() * 16) | 0];
+    return out;
+  }
+  let hexReadoutTimer = null;
+  function startHexReadouts() {
+    const els = ['gw-boot-hex-tl', 'gw-boot-hex-tr', 'gw-boot-hex-bl', 'gw-boot-hex-br'].map((id) => document.getElementById(id));
+    const labels = ['SEC://', 'MEM::', 'SYNC#', 'NODE::'];
+    function tick() {
+      els.forEach((el, i) => { if (el) el.textContent = labels[i] + randomHex(4); });
+    }
+    tick();
+    hexReadoutTimer = setInterval(tick, 180);
+  }
+  function stopHexReadouts() {
+    if (hexReadoutTimer) clearInterval(hexReadoutTimer);
+    hexReadoutTimer = null;
+  }
   // sparse falling-character background stream, density ramping up with
   // the boot's own progress (0-1) rather than running at full density
   // the whole time
@@ -2860,6 +2899,7 @@
     if (iconEl) {
       decodeIconInto(iconEl, ICON_MS, () => rgbSplitBlip(iconEl));
     }
+    if (statusEl) statusEl.classList.add('gwb-typing');
     let logDelay = 180;
     BOOT_LOG_LINES.forEach((line) => {
       const atDelay = logDelay;
@@ -2868,11 +2908,21 @@
     });
     setTimeout(() => { if (statusEl) decodeText(statusEl, 'LINK ESTABLISHED', STATUS_MS, null, typingBlip); }, logDelay + 100);
     const wordDelay = logDelay + 100 + STATUS_MS + 200;
+    setTimeout(() => { if (statusEl) statusEl.classList.remove('gwb-typing'); }, wordDelay);
     setTimeout(() => { if (wordEl) decodeText(wordEl, 'GHOSTWIRE', WORD_MS, () => rgbSplitBlip(iconEl), typingBlip); }, wordDelay);
     if (barFill) {
       barFill.style.transition = 'width ' + TOTAL_MS + 'ms linear';
       requestAnimationFrame(() => { barFill.style.width = '100%'; });
     }
+    // corner brackets finish their snap-in around .9s; network traces
+    // draw themselves out to each one right after
+    setTimeout(() => boot.classList.add('gwb-traces'), 950);
+    startHexReadouts();
+    // a couple of screen-tear glitches at points that don't collide with
+    // a decode already being mid-flight, so they read as interference
+    // rather than covering up the text
+    setTimeout(triggerScreenTear, 120);
+    setTimeout(triggerScreenTear, wordDelay + WORD_MS + 80);
     // live percentage readout, ticking alongside the bar fill — also
     // drives the background stream's density via the same progress value
     const t0 = performance.now();
@@ -2891,7 +2941,7 @@
     playTone(220, 0.08, 'square', 0.05, 440, ICON_MS / 1000, { filterFreq: 1600 });
     playTone(440, 0.12, 'triangle', 0.045, null, TOTAL_MS / 1000 - 0.05, { filterFreq: 2200 });
     playTone(660, 0.16, 'triangle', 0.04, null, TOTAL_MS / 1000, { filterFreq: 2600 });
-    setTimeout(() => { stopGwStream(); if (onDone) onDone(); }, TOTAL_MS);
+    setTimeout(() => { stopGwStream(); stopHexReadouts(); if (onDone) onDone(); }, TOTAL_MS);
   }
 
   function playInitialTitleCard() {
@@ -2906,7 +2956,7 @@
       if (boot) boot.classList.add('gw-boot-collapse');
       if (gameMenuRoot) fadeReveal(gameMenuRoot);
       setTimeout(() => {
-        if (boot) { boot.hidden = true; boot.classList.remove('gw-boot-active', 'gw-boot-collapse'); }
+        if (boot) { boot.hidden = true; boot.classList.remove('gw-boot-active', 'gw-boot-collapse', 'gwb-traces'); }
       }, 520);
     });
   }

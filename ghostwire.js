@@ -772,6 +772,21 @@
       if (audioCtx.state === 'suspended') audioCtx.resume();
     } catch (_) { audioCtx = null; }
   }
+  // real sound effect for the boot sequence's glitch beat, replacing the
+  // synthesized chime that used to play there — plain <audio> rather than
+  // routed through the Web Audio graph, since it's a one-shot sting with
+  // nothing (like the radio's waveform) needing to tap its output
+  let gwBootSfxEl = null;
+  function playBootGlitchSfx() {
+    if (!soundOn) return;
+    if (!gwBootSfxEl) {
+      gwBootSfxEl = new Audio('sfx/boot-glitch.mp3');
+      gwBootSfxEl.preload = 'auto';
+      gwBootSfxEl.volume = 0.55;
+    }
+    try { gwBootSfxEl.currentTime = 0; } catch (_) {}
+    gwBootSfxEl.play().catch((err) => console.warn('[ghostwire boot] sfx play() failed:', err));
+  }
   function playTone(freq, dur, type, vol, slideTo, delay, opts) {
     if (!audioCtx || !soundOn) return;
     opts = opts || {};
@@ -2934,12 +2949,11 @@
         if (pct < 100) requestAnimationFrame(tickPct);
       })();
     }
-    // synthesized boot chime, reusing the same oscillator SFX system as
-    // the rest of the game rather than an audio file
+    // real sound effect instead of the synthesized chime — timed to start
+    // alongside the icon decode so its glitch/interference character
+    // plays out under the visual decode rather than as a separate sting
     ensureAudio();
-    playTone(220, 0.08, 'square', 0.05, 440, ICON_MS / 1000, { filterFreq: 1600 });
-    playTone(440, 0.12, 'triangle', 0.045, null, TOTAL_MS / 1000 - 0.05, { filterFreq: 2200 });
-    playTone(660, 0.16, 'triangle', 0.04, null, TOTAL_MS / 1000, { filterFreq: 2600 });
+    playBootGlitchSfx();
     setTimeout(() => { stopGwStream(); stopHexReadouts(); if (onDone) onDone(); }, TOTAL_MS);
   }
 

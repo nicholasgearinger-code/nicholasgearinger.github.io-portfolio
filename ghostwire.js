@@ -691,7 +691,7 @@
     voice(0, vol || 0.15);
     if (opts.detune) voice(opts.detune, (vol || 0.15) * 0.55);
   }
-  function playNoise(dur, vol) {
+  function playNoise(dur, vol, delay) {
     if (!audioCtx || !soundOn) return;
     const n = Math.max(1, Math.floor(audioCtx.sampleRate * dur));
     const buffer = audioCtx.createBuffer(1, n, audioCtx.sampleRate);
@@ -699,10 +699,11 @@
     for (let i = 0; i < n; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / n);
     const src = audioCtx.createBufferSource(), gain = audioCtx.createGain();
     src.buffer = buffer;
-    gain.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    const t0 = audioCtx.currentTime + (delay || 0);
+    gain.gain.setValueAtTime(vol || 0.15, t0);
+    gain.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
     src.connect(gain); gain.connect(audioCtx.destination);
-    src.start();
+    src.start(t0);
   }
   function sfxShoot() { playTone(1500, 0.09, 'square', 0.065, 260, 0, { filterFreq: 3400, filterSlideTo: 500, filterQ: 6 }); }
   function sfxCatch(mult) { playTone(660 + mult * 70, 0.11, 'triangle', 0.13, 1150 + mult * 90, 0, { detune: 16 }); }
@@ -749,6 +750,97 @@
     const pulseRate = 1.3 + threat * 3.4;
     const g = 0.009 + (0.5 + 0.5 * Math.sin(tunnelHue * pulseRate * Math.PI * 2)) * (0.007 + threat * 0.02);
     ambientGain.gain.setTargetAtTime(g, audioCtx.currentTime, 0.05);
+  }
+
+  // -- MUSIC: procedurally generated background tracks, synthesized with
+  //    the same oscillator/noise techniques as the SFX above — no audio
+  //    files. Each track is a 16-step pattern (degree indices into its own
+  //    scale, null = rest) rather than fixed frequencies, so bass/arp notes
+  //    are always in-key. A random track starts each run, and the game
+  //    advances to a new random one every time you cross into a new zone
+  //    (see the era-change block in the level-up logic below).
+  const MUSIC_TRACKS = [
+    { name: 'Undertow', bpm: 92, scale: [0, 2, 3, 5, 7, 8, 10], bassRoot: 33, arpRoot: 57,
+      bassType: 'sawtooth', arpType: 'triangle', filterBase: 700,
+      bass: [0, null, null, null, 4, null, null, null, 3, null, null, null, 4, null, null, null],
+      arp:  [null, null, 7, null, null, null, 5, null, null, null, 7, 9, null, null, 5, null],
+      hat:  [0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1] },
+    { name: 'Voltage', bpm: 132, scale: [0, 2, 3, 5, 7, 8, 10], bassRoot: 31, arpRoot: 55,
+      bassType: 'square', arpType: 'square', filterBase: 1400,
+      bass: [0, 0, null, 0, 3, 0, null, 0, 0, 0, null, 0, 4, 0, null, 0],
+      arp:  [7, null, 5, 7, null, 9, 7, null, 5, 7, null, 9, 10, null, 7, null],
+      hat:  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1] },
+    { name: 'Afterglow', bpm: 80, scale: [0, 2, 4, 5, 7, 9, 11], bassRoot: 36, arpRoot: 60,
+      bassType: 'triangle', arpType: 'triangle', filterBase: 500,
+      bass: [0, null, null, null, null, null, 4, null, 0, null, null, null, null, null, 3, null],
+      arp:  [null, 7, null, 9, null, 7, null, 4, null, 7, null, 9, null, 11, null, 9],
+      hat:  [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0] },
+    { name: 'Overclock', bpm: 142, scale: [0, 2, 3, 5, 7, 8, 11], bassRoot: 33, arpRoot: 57,
+      bassType: 'sawtooth', arpType: 'square', filterBase: 1800,
+      bass: [0, null, 0, null, 0, null, 0, null, 3, null, 3, null, 4, null, 4, null],
+      arp:  [7, 8, 7, 6, 7, 8, 10, 8, 7, 6, 7, 8, 11, 10, 8, 7],
+      hat:  [1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1] },
+    { name: 'Static Bloom', bpm: 110, scale: [0, 2, 3, 5, 7, 9, 10], bassRoot: 38, arpRoot: 62,
+      bassType: 'triangle', arpType: 'square', filterBase: 1000,
+      bass: [0, null, null, 3, null, null, 0, null, null, 4, null, null, 0, null, 3, null],
+      arp:  [null, 5, 7, null, 9, 7, null, 5, null, 7, 9, null, 7, 5, null, 9],
+      hat:  [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1] },
+  ];
+  let musicTrackIdx = -1, lastMusicTrackIdx = -1, musicStep = 0, musicNextStepTime = 0, musicStepDur = 0;
+  function midiToFreq(n) { return 440 * Math.pow(2, (n - 69) / 12); }
+  function degreeToNote(root, scale, deg) {
+    return root + scale[deg % scale.length] + 12 * Math.floor(deg / scale.length);
+  }
+  function pickMusicTrack(excludeIdx) {
+    if (MUSIC_TRACKS.length <= 1) return 0;
+    let idx;
+    do { idx = Math.floor(Math.random() * MUSIC_TRACKS.length); } while (idx === excludeIdx);
+    return idx;
+  }
+  function scheduleMusicStep() {
+    const track = MUSIC_TRACKS[musicTrackIdx];
+    if (!track || !audioCtx) return;
+    const i = musicStep % 16;
+    const delay = Math.max(0, musicNextStepTime - audioCtx.currentTime);
+    const bassDeg = track.bass[i];
+    if (bassDeg !== null) {
+      const freq = midiToFreq(degreeToNote(track.bassRoot, track.scale, bassDeg));
+      playTone(freq, track.stepDur * 1.7, track.bassType, 0.085, null, delay, { filterFreq: track.filterBase, filterQ: 4 });
+    }
+    const arpDeg = track.arp[i];
+    if (arpDeg !== null) {
+      const freq = midiToFreq(degreeToNote(track.arpRoot, track.scale, arpDeg));
+      playTone(freq, track.stepDur * 0.85, track.arpType, 0.05, null, delay, { filterFreq: track.filterBase * 2.4, filterQ: 3 });
+    }
+    if (track.hat[i]) playNoise(0.035, 0.028, delay);
+    musicStep++;
+    musicNextStepTime += track.stepDur;
+  }
+  function updateMusic() {
+    if (musicTrackIdx < 0 || !audioCtx) return;
+    // schedule up to 200ms ahead of the audio clock — decoupled from frame
+    // rate, so a stray dropped frame never causes a late/skipped note
+    while (musicNextStepTime < audioCtx.currentTime + 0.2) scheduleMusicStep();
+  }
+  function startMusic() {
+    if (!audioCtx) return;
+    musicTrackIdx = pickMusicTrack(lastMusicTrackIdx);
+    lastMusicTrackIdx = musicTrackIdx;
+    const track = MUSIC_TRACKS[musicTrackIdx];
+    track.stepDur = 60 / track.bpm / 4;
+    musicStep = 0;
+    musicNextStepTime = audioCtx.currentTime + 0.1;
+    spawnFloatText(W / 2, VP_Y + 100, '\u266A ' + track.name, '#E879F9');
+  }
+  function stopMusic() { musicTrackIdx = -1; }
+  function advanceMusicTrack() {
+    if (musicTrackIdx < 0 || !audioCtx) return;
+    musicTrackIdx = pickMusicTrack(musicTrackIdx);
+    lastMusicTrackIdx = musicTrackIdx;
+    const track = MUSIC_TRACKS[musicTrackIdx];
+    track.stepDur = 60 / track.bpm / 4;
+    musicStep = 0; // fresh bar for the new track, starting on the next scheduled step
+    spawnFloatText(W / 2, VP_Y + 100, '\u266A ' + track.name, '#E879F9');
   }
 
   function rectCircleCollide(px, py, pw, ph, cx, cy, cr) {
@@ -1092,6 +1184,7 @@
     updateFloatTexts(dt);
     updateShockwaves(dt);
     updateAmbient();
+    updateMusic();
     shakeMag = Math.max(0, shakeMag - dt * 70);
     flash = Math.max(0, flash - dt * 3.2);
     eraFlashTimer = Math.max(0, eraFlashTimer - dt * 2);
@@ -1158,6 +1251,7 @@
         eraFlashTimer = 0.6;
         shakeMag = Math.max(shakeMag, 10);
         spawnFloatText(W / 2, VP_Y + 80, '// ENTERING ' + ERA_NAMES[era], '#F0F8FF');
+        advanceMusicTrack();
       }
       checkWeaponUnlocks();
       // a milestone boss (alternating FIREWALL/WORM) greets every new color
@@ -2264,6 +2358,7 @@
     if (statsDetailEl) statsDetailEl.hidden = true;
     ensureAudio();
     startAmbient();
+    startMusic();
     rafId = requestAnimationFrame(loop);
   }
 
@@ -2272,6 +2367,7 @@
     dying = false;
     if (rafId) cancelAnimationFrame(rafId);
     stopAmbient();
+    stopMusic();
     if (quitBtn) quitBtn.hidden = true;
     if (quitBtnFs) quitBtnFs.hidden = true;
     if (pauseBtn) pauseBtn.hidden = true;
@@ -2303,6 +2399,7 @@
     dying = false;
     if (rafId) cancelAnimationFrame(rafId);
     stopAmbient();
+    stopMusic();
     if (quitBtn) quitBtn.hidden = true;
     if (quitBtnFs) quitBtnFs.hidden = true;
     if (pauseBtn) pauseBtn.hidden = true;

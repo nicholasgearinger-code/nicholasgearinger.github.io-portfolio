@@ -2772,27 +2772,47 @@
     const statusEl = document.getElementById('gw-boot-status');
     const wordEl = document.getElementById('gw-boot-word');
     const barFill = document.getElementById('gw-boot-bar-fill');
+    const pctEl = document.getElementById('gw-boot-pct');
     if (!boot) { if (onDone) onDone(); return; }
     const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     boot.hidden = false;
     boot.classList.remove('gw-boot-collapse');
+    requestAnimationFrame(() => boot.classList.add('gw-boot-active'));
     if (reduceMotion) {
       if (iconEl) iconEl.innerHTML = ICON_CHARS.map((c, i) => '<span class="' + ICON_CLASSES[i] + '">' + c + '</span>').join('');
       if (statusEl) statusEl.innerHTML = 'LINK ESTABLISHED';
       if (wordEl) wordEl.innerHTML = 'GHOSTWIRE'.split('').map((c) => '<span class="gt-char-locked">' + c + '</span>').join('');
       if (barFill) barFill.style.width = '100%';
+      if (pctEl) pctEl.textContent = '100%';
       setTimeout(() => { if (onDone) onDone(); }, 200);
       return;
     }
-    const DECODE_MS = 1400, HOLD_MS = 400;
+    const DECODE_MS = 1400, HOLD_MS = 400, TOTAL_MS = DECODE_MS + HOLD_MS;
     if (iconEl) decodeIconInto(iconEl, DECODE_MS * 0.5);
     setTimeout(() => { if (statusEl) decodeText(statusEl, 'LINK ESTABLISHED', 500); }, 250);
     setTimeout(() => { if (wordEl) decodeText(wordEl, 'GHOSTWIRE', 650); }, 750);
     if (barFill) {
-      barFill.style.transition = 'width ' + (DECODE_MS + HOLD_MS) + 'ms linear';
+      barFill.style.transition = 'width ' + TOTAL_MS + 'ms linear';
       requestAnimationFrame(() => { barFill.style.width = '100%'; });
     }
-    setTimeout(() => { if (onDone) onDone(); }, DECODE_MS + HOLD_MS);
+    // live percentage readout, ticking alongside the bar fill
+    if (pctEl) {
+      const t0 = performance.now();
+      (function tickPct() {
+        const pct = Math.min(100, Math.round(((performance.now() - t0) / TOTAL_MS) * 100));
+        pctEl.textContent = pct + '%';
+        if (pct < 100) requestAnimationFrame(tickPct);
+      })();
+    }
+    // short synthesized boot chime, reusing the same oscillator SFX
+    // system as the rest of the game rather than an audio file — a quick
+    // rising blip on the icon lock-in, then a short ascending chord once
+    // the whole sequence completes
+    ensureAudio();
+    playTone(220, 0.08, 'square', 0.05, 440, DECODE_MS * 0.5 / 1000, { filterFreq: 1600 });
+    playTone(440, 0.12, 'triangle', 0.045, null, TOTAL_MS / 1000 - 0.05, { filterFreq: 2200 });
+    playTone(660, 0.16, 'triangle', 0.04, null, TOTAL_MS / 1000, { filterFreq: 2600 });
+    setTimeout(() => { if (onDone) onDone(); }, TOTAL_MS);
   }
 
   function playInitialTitleCard() {
@@ -2806,7 +2826,9 @@
       titleSeqEl.hidden = false;
       if (boot) boot.classList.add('gw-boot-collapse');
       if (gameMenuRoot) fadeReveal(gameMenuRoot);
-      setTimeout(() => { if (boot) boot.hidden = true; }, 520);
+      setTimeout(() => {
+        if (boot) { boot.hidden = true; boot.classList.remove('gw-boot-active', 'gw-boot-collapse'); }
+      }, 520);
     });
   }
 

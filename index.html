@@ -354,24 +354,69 @@
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 1.3rem;
     background: rgba(2,8,16,.97);
+    overflow: hidden;
     transition: opacity .5s cubic-bezier(.4,0,.2,1), transform .5s cubic-bezier(.4,0,.2,1);
   }
   #gw-boot[hidden] { display: none; }
   #gw-boot.gw-boot-collapse { opacity: 0; transform: scale(.32); pointer-events: none; }
+  /* faint CRT-style scanline texture across the whole overlay */
+  #gw-boot::before {
+    content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+    background: repeating-linear-gradient(0deg, rgba(255,255,255,.025) 0px, rgba(255,255,255,.025) 1px, transparent 1px, transparent 3px);
+  }
+  /* radial pulse glow behind the glyph, eases in once the sequence starts */
+  .gw-boot-glow {
+    position: absolute; width: 60vmin; height: 60vmin; border-radius: 50%; z-index: 0;
+    background: radial-gradient(circle, rgba(34,211,238,.18), rgba(129,140,248,.08) 45%, transparent 72%);
+    opacity: 0; transform: scale(.6); pointer-events: none;
+    transition: opacity 1.6s ease, transform 1.6s ease;
+  }
+  #gw-boot.gw-boot-active .gw-boot-glow { opacity: 1; transform: scale(1); }
+  /* one-shot bright scanline sweeping top to bottom */
+  .gw-boot-scanline {
+    position: absolute; left: 0; right: 0; top: 0; height: 2px; z-index: 1;
+    background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+    box-shadow: 0 0 14px 2px rgba(34,211,238,.85);
+    opacity: 0; pointer-events: none;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    #gw-boot.gw-boot-active .gw-boot-scanline { animation: gwBootScan 1.8s ease-in-out 1; }
+  }
+  @keyframes gwBootScan {
+    0% { top: 0%; opacity: 0; }
+    8% { opacity: .9; }
+    92% { opacity: .9; }
+    100% { top: 100%; opacity: 0; }
+  }
+  /* corner HUD brackets, same targeting-bracket language as the game's own HUD */
+  .gw-boot-corner {
+    position: absolute; width: 26px; height: 26px; z-index: 1;
+    border-color: var(--violet); opacity: 0; pointer-events: none;
+    transition: opacity .8s ease .2s;
+  }
+  #gw-boot.gw-boot-active .gw-boot-corner { opacity: .6; }
+  .gw-boot-corner-tl { top: 5vh; left: 5vw; border-top: 2px solid; border-left: 2px solid; }
+  .gw-boot-corner-tr { top: 5vh; right: 5vw; border-top: 2px solid; border-right: 2px solid; }
+  .gw-boot-corner-bl { bottom: 5vh; left: 5vw; border-bottom: 2px solid; border-left: 2px solid; }
+  .gw-boot-corner-br { bottom: 5vh; right: 5vw; border-bottom: 2px solid; border-right: 2px solid; }
   .gw-boot-icon {
+    position: relative; z-index: 2;
     font-family: 'JetBrains Mono', 'Courier New', monospace; font-weight: 700;
     font-size: clamp(3.4rem, 14vw, 6.5rem); text-shadow: 0 0 20px rgba(34,211,238,.4);
   }
   .gw-boot-status {
+    position: relative; z-index: 2;
     font-family: 'JetBrains Mono', monospace; letter-spacing: .18em; text-transform: uppercase;
     font-size: clamp(.8rem, 2.4vw, 1.05rem); color: var(--cyan); min-height: 1.4em;
     text-shadow: 0 0 8px rgba(34,211,238,.5);
   }
   .gw-boot-word {
+    position: relative; z-index: 2;
     font-family: 'JetBrains Mono', monospace; font-weight: 700; letter-spacing: .3em;
     font-size: clamp(1.3rem, 4.8vw, 2.3rem); min-height: 1.3em;
   }
   .gw-boot-bar-track {
+    position: relative; z-index: 2;
     width: min(260px, 60vw); height: 3px; border-radius: 100px;
     background: rgba(255,255,255,.08); overflow: hidden; margin-top: .3rem;
   }
@@ -380,9 +425,15 @@
     background: linear-gradient(90deg, var(--cyan), var(--magenta));
     box-shadow: 0 0 10px rgba(34,211,238,.7);
   }
+  .gw-boot-pct {
+    position: relative; z-index: 2;
+    font-family: 'JetBrains Mono', monospace; font-size: .66rem; color: var(--muted);
+    letter-spacing: .05em; margin-top: -.5rem;
+  }
   @media (prefers-reduced-motion: reduce) {
     #gw-boot { transition: opacity .3s ease; }
     #gw-boot.gw-boot-collapse { transform: none; }
+    .gw-boot-glow, .gw-boot-corner { transition: none; }
   }
 
   html {
@@ -3919,10 +3970,17 @@
                fade) into the compact in-card title once done. See
                runGwBoot() in ghostwire.js. -->
           <div id="gw-boot" hidden aria-hidden="true">
+            <div class="gw-boot-glow"></div>
+            <div class="gw-boot-scanline"></div>
+            <div class="gw-boot-corner gw-boot-corner-tl"></div>
+            <div class="gw-boot-corner gw-boot-corner-tr"></div>
+            <div class="gw-boot-corner gw-boot-corner-bl"></div>
+            <div class="gw-boot-corner gw-boot-corner-br"></div>
             <div class="gw-boot-icon" id="gw-boot-icon">&lt;/&gt;</div>
             <div class="gw-boot-status" id="gw-boot-status"></div>
             <div class="gw-boot-word" id="gw-boot-word"></div>
             <div class="gw-boot-bar-track"><div class="gw-boot-bar-fill" id="gw-boot-bar-fill"></div></div>
+            <div class="gw-boot-pct" id="gw-boot-pct">0%</div>
           </div>
         </div>
       </div>

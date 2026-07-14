@@ -2575,25 +2575,8 @@
   .game-wrap.gw-fullscreen .game-pause-btn { top: calc(.7rem + env(safe-area-inset-top)); right: calc(5.7rem + env(safe-area-inset-right)); }
   .game-wrap.gw-fullscreen .game-mute-btn { top: calc(.7rem + env(safe-area-inset-top)); right: calc(.7rem + env(safe-area-inset-right)); }
   .game-wrap.gw-fullscreen .game-gyro-btn { top: calc(3.4rem + env(safe-area-inset-top)); left: calc(.7rem + env(safe-area-inset-left)); }
-  .game-wrap.gw-fullscreen .game-fire-btn { bottom: calc(2.3rem + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); }
   .game-wrap.gw-fullscreen .game-radio { bottom: calc(2.3rem + env(safe-area-inset-bottom)); right: calc(.6rem + env(safe-area-inset-right)); }
-  #game-canvas { width: 100%; height: auto; display: block; background: #030811; }
-  .game-fire-btn {
-    position: absolute; left: 50%; bottom: .7rem; transform: translateX(-50%); z-index: 1;
-    width: 2.9rem; height: 2.9rem; border-radius: 50%;
-    border: 1.5px solid transparent; background-clip: padding-box, border-box;
-    background-image: linear-gradient(#050912, #050912),
-      linear-gradient(135deg, var(--magenta), var(--violet));
-    background-origin: padding-box, border-box;
-    color: var(--magenta); font-size: 1.15rem; line-height: 1; opacity: .85;
-    display: flex; align-items: center; justify-content: center;
-    filter: drop-shadow(0 0 4px rgba(232,121,249,.8));
-    box-shadow: 0 0 9px rgba(232,121,249,.28), 0 0 16px rgba(129,140,248,.16);
-    touch-action: manipulation; -webkit-tap-highlight-color: transparent;
-    transition: opacity .15s ease, box-shadow .2s ease, transform .12s ease;
-  }
-  .game-fire-btn:active { opacity: 1; transform: translateX(-50%) scale(.94); box-shadow: 0 0 15px rgba(232,121,249,.55), 0 0 24px rgba(129,140,248,.32); }
-  .game-fire-btn[hidden] { display: none; }
+  #game-canvas { width: 100%; height: auto; display: block; background: #030811; touch-action: none; }
   .game-gyro-btn {
     position: absolute; left: .7rem; top: 3.4rem; z-index: 1;
     padding: .3rem .6rem; border-radius: .4rem;
@@ -3698,7 +3681,6 @@
           <button type="button" class="game-gyro-btn" id="game-gyro-btn" hidden><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6"><ellipse cx="12" cy="12" rx="8" ry="4.3" transform="rotate(-18 12 12)"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/></svg><span id="game-gyro-label">TILT: OFF</span></button>
           <button type="button" class="game-pause-btn" id="game-pause-btn" aria-label="Pause" hidden><svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><rect x="6" y="5" width="4.2" height="14" rx="1"/><rect x="13.8" y="5" width="4.2" height="14" rx="1"/></svg></button>
           <button type="button" class="game-mute-btn" id="game-mute-btn" aria-label="Toggle sound"><svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16.3 8.6a5 5 0 0 1 0 6.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M18.9 6.1a8.7 8.7 0 0 1 0 11.8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity=".65"/></svg></button>
-          <button type="button" class="game-fire-btn" id="game-fire-btn" aria-label="Hold to charge, release to fire" hidden><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="7.2"/><circle cx="12" cy="12" r="2.3" fill="currentColor" stroke="none"/></svg></button>
           <button type="button" class="game-quit-fs-btn" id="game-quit-fs-btn" aria-label="Quit run" hidden><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg><span>Quit</span></button>
           <button type="button" class="game-fullscreen-btn" id="game-fullscreen-btn" aria-label="Enter fullscreen"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg></button>
           <button type="button" class="game-settings-btn" id="game-settings-btn" aria-label="Settings and achievements"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="3.1"/><circle cx="12" cy="12" r="8" stroke-dasharray="2.6 3.4"/></svg></button>
@@ -3741,7 +3723,7 @@
             </div>
             <div class="game-overlay-main" id="game-overlay-main">
               <h3 id="game-overlay-title"></h3>
-              <p id="game-overlay-sub">Arrow keys, A/D, drag, or tilt to steer. Tap ◎ or Space to fire — hold to charge a piercing shot. Hits cost points until THREAT goes red — then one hit ends it.</p>
+              <p id="game-overlay-sub">Arrow keys, A/D, drag, or tilt to steer. Tap and hold anywhere to charge a piercing shot, release to fire — or hold Space on desktop. Hits cost points until THREAT goes red — then one hit ends it.</p>
               <div class="game-zone-select" id="game-zone-select">
                 <span class="game-zone-label">Jump to zone</span>
                 <div class="game-zone-row">

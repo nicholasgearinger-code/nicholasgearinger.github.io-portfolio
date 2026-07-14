@@ -973,9 +973,14 @@
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     return (clientX - rect.left) * (W / rect.width);
   }
-  canvas.addEventListener('pointerdown', (e) => { if (e.target === canvas && running && !dying && !paused && !gyroEnabled) { dragging = true; targetX = pointerToCanvasX(e); } });
+  canvas.addEventListener('pointerdown', (e) => {
+    if (e.target !== canvas || !running || dying || paused) return;
+    if (!gyroEnabled) { dragging = true; targetX = pointerToCanvasX(e); }
+    startCharge();
+  });
   canvas.addEventListener('pointermove', (e) => { if (dragging && e.target === canvas) targetX = pointerToCanvasX(e); });
-  window.addEventListener('pointerup', () => { dragging = false; });
+  window.addEventListener('pointerup', () => { dragging = false; if (charging) releaseCharge(); });
+  window.addEventListener('pointercancel', () => { dragging = false; if (charging) releaseCharge(); });
 
   // -- gyro/tilt steering (mobile only) --------------------------------
   const hasOrientation = typeof window.DeviceOrientationEvent !== 'undefined'

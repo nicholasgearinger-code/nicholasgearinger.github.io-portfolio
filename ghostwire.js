@@ -2082,7 +2082,7 @@
     ctx.font = '10px "JetBrains Mono", monospace';
     ctx.textAlign = 'left';
     ctx.fillStyle = 'rgba(125,211,252,.8)';
-    ctx.fillText('LVL ' + level + '  ·  ' + currentEraName(), m + bl + 6, clearY);
+    ctx.fillText('LVL ' + level + '  ·  ' + currentEraName(), clearX + 6, clearY);
 
     // system status readout — mirrors the same threat tiers as the meter below
     let sysLabel = 'SYS: NOMINAL', sysColor = 'rgba(34,211,238,.8)';

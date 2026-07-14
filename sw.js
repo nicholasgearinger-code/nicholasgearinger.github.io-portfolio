@@ -2,7 +2,7 @@
 // (including the Ghostwire game) loads offline or on a flaky connection.
 // Bump CACHE_NAME on any deploy that changes cached files to invalidate old
 // caches; the activate handler below sweeps everything not in the new list.
-const CACHE_NAME = 'ngearinger-shell-v4';
+const CACHE_NAME = 'ngearinger-shell-v5';
 const APP_SHELL = [
   './',
   './index.html',

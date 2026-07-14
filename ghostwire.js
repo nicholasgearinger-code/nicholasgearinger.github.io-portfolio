@@ -508,6 +508,17 @@
       '<li class="gp-stat-row"><span>' + escapeHtml(label) + '</span><strong>' + escapeHtml(String(val)) + '</strong></li>'
     ).join('');
   }
+  function fadeReveal(el) {
+    if (!el) return;
+    el.hidden = false;
+    el.classList.remove('is-visible');
+    requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('is-visible')));
+  }
+  function fadeHide(el, andThen) {
+    if (!el) { if (andThen) andThen(); return; }
+    el.classList.remove('is-visible');
+    setTimeout(() => { el.hidden = true; if (andThen) andThen(); }, 350);
+  }
   if (titleGateBtn) {
     titleGateBtn.addEventListener('click', () => {
       if (titleGateEl) {
@@ -524,21 +535,25 @@
         setTimeout(() => {
           titleSeqEl.hidden = true;
           titleSeqEl.classList.remove('fading-out');
-          if (overlayMainEl) overlayMainEl.hidden = false;
-          if (gameMenuPlay) gameMenuPlay.hidden = false;
+          fadeReveal(overlayMainEl);
+          fadeReveal(gameMenuPlay);
         }, 350);
       } else {
-        if (overlayMainEl) overlayMainEl.hidden = false;
-        if (gameMenuPlay) gameMenuPlay.hidden = false;
+        fadeReveal(overlayMainEl);
+        fadeReveal(gameMenuPlay);
       }
     });
   }
   if (gameMenuBackBtn) {
     gameMenuBackBtn.addEventListener('click', () => {
-      if (overlayMainEl) overlayMainEl.hidden = true;
-      if (gameMenuPlay) gameMenuPlay.hidden = true;
-      if (titleSeqEl) titleSeqEl.hidden = false;
-      if (gameMenuRoot) gameMenuRoot.hidden = false;
+      overlayMainEl && overlayMainEl.classList.remove('is-visible');
+      gameMenuPlay && gameMenuPlay.classList.remove('is-visible');
+      setTimeout(() => {
+        if (overlayMainEl) overlayMainEl.hidden = true;
+        if (gameMenuPlay) gameMenuPlay.hidden = true;
+        if (titleSeqEl) titleSeqEl.hidden = false;
+        fadeReveal(gameMenuRoot);
+      }, 350);
     });
   }
   if (gameMenuMenuBtn) gameMenuMenuBtn.addEventListener('click', () => openSettingsPanel('settings'));
@@ -2554,7 +2569,8 @@
     submitNote.textContent = '';
     if (pillText) pillText.textContent = 'READY';
     if (titleSeqEl) titleSeqEl.hidden = true;
-    if (overlayMainEl) overlayMainEl.hidden = false;
+    fadeReveal(overlayMainEl);
+    fadeReveal(gameMenuPlay);
     if (gameWrap && gameWrap.classList.contains('gw-fullscreen')) exitFullscreenMode();
   }
 
@@ -2581,7 +2597,7 @@
     replayTitleSeq();
     setTimeout(() => {
       if (titleSeqEl) titleSeqEl.hidden = true;
-      if (overlayMainEl) overlayMainEl.hidden = false;
+      fadeReveal(overlayMainEl);
       startBtn.disabled = false;
       startBtn.textContent = '\u25B6 Play';
       start();
@@ -2756,7 +2772,7 @@
       // and serves as the title screen's backdrop. gameMenuRoot is
       // absolutely positioned over/below it (see CSS) so revealing it
       // doesn't add to the flow height that drove the earlier scroll bug.
-      if (gameMenuRoot) gameMenuRoot.hidden = false;
+      if (gameMenuRoot) fadeReveal(gameMenuRoot);
     }, reduceMotion ? 0 : 2000);
   }
 

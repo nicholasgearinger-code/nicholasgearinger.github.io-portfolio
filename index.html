@@ -2573,6 +2573,26 @@
   .gp-achv-unlock { display: block; margin-top: .2rem; font-style: italic; color: var(--cyan); opacity: .8; font-size: .7rem; }
   .game-wrap.cb-safe .game-overlay h3.gt-over { color: #FB923C; }
   .game-play-row { display: flex; align-items: center; justify-content: center; gap: .6rem; }
+  .game-menu-root { display: flex; flex-direction: column; align-items: center; gap: 1.1rem; }
+  .game-menu-tagline { font-size: .82rem; color: var(--muted); line-height: 1.5; max-width: 320px; margin: 0; }
+  .game-menu-btns { display: flex; flex-direction: column; align-items: stretch; gap: .6rem; width: min(240px, 80vw); }
+  .game-menu-btn { width: 100%; text-align: center; }
+  .game-menu-play { display: flex; flex-direction: column; align-items: center; gap: 1rem; position: relative; width: 100%; }
+  .game-menu-back {
+    align-self: flex-start;
+    background: none; border: none; color: var(--muted); font-size: .75rem;
+    display: flex; align-items: center; gap: .3rem; padding: .2rem 0; cursor: pointer;
+    transition: color .15s ease;
+  }
+  .game-menu-back:hover { color: var(--cyan); }
+  .gp-stats-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .55rem; }
+  .gp-stat-row {
+    display: flex; align-items: center; justify-content: space-between; gap: .8rem;
+    padding: .5rem .6rem; border-radius: .4rem;
+    background: rgba(148,163,184,.05); border: 1px solid rgba(148,163,184,.15);
+    font-size: .76rem; color: var(--muted);
+  }
+  .gp-stat-row strong { color: #E0F2FE; font-size: .82rem; }
   .game-wrap.gw-fullscreen .game-fullscreen-btn { top: calc(.7rem + env(safe-area-inset-top)); right: calc(3.6rem + env(safe-area-inset-right)); }
   .game-wrap.gw-fullscreen .game-pause-btn { top: calc(.7rem + env(safe-area-inset-top)); right: calc(6.5rem + env(safe-area-inset-right)); }
   .game-wrap.gw-fullscreen .game-mute-btn { top: calc(.7rem + env(safe-area-inset-top)); right: calc(.7rem + env(safe-area-inset-right)); }
@@ -3691,6 +3711,7 @@
               <div class="game-panel-tabs">
                 <button type="button" class="game-panel-tab active" id="gp-tab-settings">Settings</button>
                 <button type="button" class="game-panel-tab" id="gp-tab-achv">Achievements <span id="gp-achv-count"></span></button>
+                <button type="button" class="game-panel-tab" id="gp-tab-stats">Stats</button>
                 <button type="button" class="game-panel-close" id="game-panel-close" aria-label="Close settings">✕</button>
               </div>
               <div class="game-panel-body" id="gp-body-settings">
@@ -3716,6 +3737,9 @@
                 <p class="gp-achv-intro">A handful of tracks play from the start — the rest unlock as you earn achievements below.</p>
                 <ul class="gp-achv-list" id="gp-achv-list"></ul>
               </div>
+              <div class="game-panel-body" id="gp-body-stats" hidden>
+                <ul class="gp-stats-list" id="gp-stats-list"></ul>
+              </div>
             </div>
           </div>
           <div class="game-overlay" id="game-overlay">
@@ -3726,20 +3750,32 @@
             </div>
             <div class="game-overlay-main" id="game-overlay-main">
               <h3 id="game-overlay-title"></h3>
-              <p id="game-overlay-sub">Arrow keys, A/D, drag, or tilt to steer. Tap and hold anywhere to charge a piercing shot, release to fire — or hold Space on desktop. Hits cost points until THREAT goes red — then one hit ends it.</p>
-              <div class="game-zone-select" id="game-zone-select">
-                <span class="game-zone-label">Jump to zone</span>
-                <div class="game-zone-row">
-                  <button type="button" class="game-zone-btn" data-zone="0" style="--zc:163,85,241">GRID<span class="gz-lv">Lv 1</span></button>
-                  <button type="button" class="game-zone-btn" data-zone="1" style="--zc:85,137,241">RELAY<span class="gz-lv">Lv 6</span></button>
-                  <button type="button" class="game-zone-btn" data-zone="2" style="--zc:85,241,111">SERVER<span class="gz-lv">Lv 11</span></button>
-                  <button type="button" class="game-zone-btn" data-zone="3" style="--zc:241,228,85">HAZARD<span class="gz-lv">Lv 16</span></button>
-                  <button type="button" class="game-zone-btn" data-zone="4" style="--zc:241,163,85">REACTOR<span class="gz-lv">Lv 21</span></button>
-                  <button type="button" class="game-zone-btn" data-zone="5" style="--zc:241,85,85">BREACH<span class="gz-lv">Lv 26</span></button>
+              <div class="game-menu-root" id="game-menu-root">
+                <p class="game-menu-tagline">A hunter-process diving the data tunnel — dodge corrupted fragments, charge a piercing shot, survive the breach.</p>
+                <div class="game-menu-btns">
+                  <button type="button" class="btn-primary game-menu-btn" id="game-menu-play-btn">▶ Play</button>
+                  <button type="button" class="btn-ghost game-menu-btn" id="game-menu-settings-btn">⚙ Settings</button>
+                  <button type="button" class="btn-ghost game-menu-btn" id="game-menu-achv-btn">★ Achievements</button>
+                  <button type="button" class="btn-ghost game-menu-btn" id="game-menu-stats-btn">▤ Stats</button>
                 </div>
               </div>
-              <div class="game-play-row">
-                <button type="button" class="btn-primary" id="game-start-btn">▶ Play</button>
+              <div class="game-menu-play" id="game-menu-play" hidden>
+                <button type="button" class="game-menu-back" id="game-menu-back-btn">← Menu</button>
+                <p id="game-overlay-sub">Arrow keys, A/D, drag, or tilt to steer. Tap and hold anywhere to charge a piercing shot, release to fire — or hold Space on desktop. Hits cost points until THREAT goes red — then one hit ends it.</p>
+                <div class="game-zone-select" id="game-zone-select">
+                  <span class="game-zone-label">Jump to zone</span>
+                  <div class="game-zone-row">
+                    <button type="button" class="game-zone-btn" data-zone="0" style="--zc:163,85,241">GRID<span class="gz-lv">Lv 1</span></button>
+                    <button type="button" class="game-zone-btn" data-zone="1" style="--zc:85,137,241">RELAY<span class="gz-lv">Lv 6</span></button>
+                    <button type="button" class="game-zone-btn" data-zone="2" style="--zc:85,241,111">SERVER<span class="gz-lv">Lv 11</span></button>
+                    <button type="button" class="game-zone-btn" data-zone="3" style="--zc:241,228,85">HAZARD<span class="gz-lv">Lv 16</span></button>
+                    <button type="button" class="game-zone-btn" data-zone="4" style="--zc:241,163,85">REACTOR<span class="gz-lv">Lv 21</span></button>
+                    <button type="button" class="game-zone-btn" data-zone="5" style="--zc:241,85,85">BREACH<span class="gz-lv">Lv 26</span></button>
+                  </div>
+                </div>
+                <div class="game-play-row">
+                  <button type="button" class="btn-primary" id="game-start-btn">▶ Play</button>
+                </div>
               </div>
               <div class="game-score-entry" id="game-score-entry" hidden>
                 <input type="text" id="game-name-input" maxlength="12" placeholder="YOUR NAME">

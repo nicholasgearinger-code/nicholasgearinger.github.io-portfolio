@@ -56,13 +56,23 @@
   const panelCloseBtn = document.getElementById('game-panel-close');
   const tabSettingsBtn = document.getElementById('gp-tab-settings');
   const tabAchvBtn = document.getElementById('gp-tab-achv');
+  const tabStatsBtn = document.getElementById('gp-tab-stats');
   const settingsBody = document.getElementById('gp-body-settings');
   const achvBody = document.getElementById('gp-body-achv');
+  const statsBody = document.getElementById('gp-body-stats');
+  const statsListEl = document.getElementById('gp-stats-list');
   const hapticsCheck = document.getElementById('gp-haptics');
   const hapticsNote = document.getElementById('gp-haptics-note');
   const colorblindCheck = document.getElementById('gp-colorblind');
   const graphicsSeg = document.getElementById('gp-graphics');
   const achvListEl = document.getElementById('gp-achv-list');
+  const gameMenuRoot = document.getElementById('game-menu-root');
+  const gameMenuPlay = document.getElementById('game-menu-play');
+  const gameMenuPlayBtn = document.getElementById('game-menu-play-btn');
+  const gameMenuSettingsBtn = document.getElementById('game-menu-settings-btn');
+  const gameMenuAchvBtn = document.getElementById('game-menu-achv-btn');
+  const gameMenuStatsBtn = document.getElementById('game-menu-stats-btn');
+  const gameMenuBackBtn = document.getElementById('game-menu-back-btn');
   const achvCountEl = document.getElementById('gp-achv-count');
   if (!canvas || !startBtn) return;
   if (fireBtn) fireBtn.hidden = false;
@@ -463,9 +473,12 @@
   function showSettingsTab(tab) {
     if (tabSettingsBtn) tabSettingsBtn.classList.toggle('active', tab === 'settings');
     if (tabAchvBtn) tabAchvBtn.classList.toggle('active', tab === 'achv');
+    if (tabStatsBtn) tabStatsBtn.classList.toggle('active', tab === 'stats');
     if (settingsBody) settingsBody.hidden = tab !== 'settings';
     if (achvBody) achvBody.hidden = tab !== 'achv';
+    if (statsBody) statsBody.hidden = tab !== 'stats';
     if (tab === 'achv') renderAchievements();
+    if (tab === 'stats') renderStats();
   }
   function openSettingsPanel(tab) {
     if (!settingsPanel) return;
@@ -478,6 +491,38 @@
   if (panelCloseBtn) panelCloseBtn.addEventListener('click', closeSettingsPanel);
   if (tabSettingsBtn) tabSettingsBtn.addEventListener('click', () => showSettingsTab('settings'));
   if (tabAchvBtn) tabAchvBtn.addEventListener('click', () => showSettingsTab('achv'));
+  if (tabStatsBtn) tabStatsBtn.addEventListener('click', () => showSettingsTab('stats'));
+  function renderStats() {
+    if (!statsListEl) return;
+    const achvCount = ACHIEVEMENT_DEFS.filter((d) => achievements[d.id]).length;
+    const weaponCount = Object.values(unlocks).filter(Boolean).length;
+    const trackCount = unlockedTrackIndices().length;
+    const rows = [
+      ['Best score', best.toLocaleString()],
+      ['Achievements', achvCount + ' / ' + ACHIEVEMENT_DEFS.length],
+      ['Weapons unlocked', weaponCount + ' / 3'],
+      ['Tracks unlocked', trackCount + ' / ' + RADIO_TRACKS.length],
+      ['Zones visited', visitedZones.length + ' / 6'],
+    ];
+    statsListEl.innerHTML = rows.map(([label, val]) =>
+      '<li class="gp-stat-row"><span>' + escapeHtml(label) + '</span><strong>' + escapeHtml(String(val)) + '</strong></li>'
+    ).join('');
+  }
+  if (gameMenuPlayBtn) {
+    gameMenuPlayBtn.addEventListener('click', () => {
+      if (gameMenuRoot) gameMenuRoot.hidden = true;
+      if (gameMenuPlay) gameMenuPlay.hidden = false;
+    });
+  }
+  if (gameMenuBackBtn) {
+    gameMenuBackBtn.addEventListener('click', () => {
+      if (gameMenuPlay) gameMenuPlay.hidden = true;
+      if (gameMenuRoot) gameMenuRoot.hidden = false;
+    });
+  }
+  if (gameMenuSettingsBtn) gameMenuSettingsBtn.addEventListener('click', () => openSettingsPanel('settings'));
+  if (gameMenuAchvBtn) gameMenuAchvBtn.addEventListener('click', () => openSettingsPanel('achv'));
+  if (gameMenuStatsBtn) gameMenuStatsBtn.addEventListener('click', () => openSettingsPanel('stats'));
   if (hapticsCheck) {
     hapticsCheck.addEventListener('change', () => {
       settings.haptics = hapticsCheck.checked;
@@ -2678,6 +2723,19 @@
     runTitleSeq();
   }
 
+  function playInitialTitleCard() {
+    if (!titleSeqEl || !overlayMainEl) return;
+    const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    overlayMainEl.hidden = true;
+    titleSeqEl.hidden = false;
+    runTitleSeq();
+    setTimeout(() => {
+      titleSeqEl.hidden = true;
+      overlayMainEl.hidden = false;
+    }, reduceMotion ? 0 : 2000);
+  }
+
   draw(); // idle frame so the canvas isn't blank before the first Play
   loadLeaderboard();
+  playInitialTitleCard();
 })();

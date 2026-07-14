@@ -2608,20 +2608,12 @@
   }
 
   function handlePlayClick() {
-    const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     ensureAudio();
     startRadio();
     startBtn.disabled = true;
-    if (overlayMainEl) overlayMainEl.hidden = true;
-    if (titleSeqEl) titleSeqEl.hidden = false;
-    replayTitleSeq();
-    setTimeout(() => {
-      if (titleSeqEl) titleSeqEl.hidden = true;
-      fadeReveal(overlayMainEl);
-      startBtn.disabled = false;
-      startBtn.textContent = '\u25B6 Play';
-      start();
-    }, reduceMotion ? 0 : 2000);
+    startBtn.textContent = '\u25B6 Play';
+    start();
+    startBtn.disabled = false;
   }
   startBtn.addEventListener('click', handlePlayClick);
   const zoneBtns = document.querySelectorAll('.game-zone-btn');
@@ -2792,16 +2784,6 @@
         setTimeout(() => wordEl.classList.remove('gt-corrupt'), 320);
       });
     }, 950);
-  }
-
-  function replayTitleSeq() {
-    const iconEl = document.getElementById('game-title-icon');
-    const statusEl = document.getElementById('game-title-status');
-    const wordEl = document.getElementById('game-title-word');
-    if (iconEl) { iconEl.classList.remove('gt-grown', 'gt-idle'); iconEl.innerHTML = '&lt;/&gt;'; }
-    if (statusEl) statusEl.innerHTML = '';
-    if (wordEl) { wordEl.innerHTML = ''; wordEl.classList.remove('gt-corrupt'); }
-    runTitleSeq();
   }
 
   function playInitialTitleCard() {

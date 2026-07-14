@@ -813,6 +813,11 @@
     if (!radioStarted) { radioStarted = true; playRadioTrack(pickRadioIdx(-1)); }
     else if (radioAudioEl.paused) { radioAudioEl.play().catch(() => {}); }
   }
+  function stopRadio() {
+    if (radioAudioEl) radioAudioEl.pause();
+    radioStarted = false; // next startRadio() picks a fresh random track rather than resuming
+    if (radioWidget) radioWidget.hidden = true;
+  }
   if (radioSkipBtn) radioSkipBtn.addEventListener('click', nextRadioTrack);
 
   function drawRadioWave() {
@@ -2359,7 +2364,6 @@
     if (statsDetailEl) statsDetailEl.hidden = true;
     ensureAudio();
     startAmbient();
-    startRadio();
     rafId = requestAnimationFrame(loop);
   }
 
@@ -2399,6 +2403,7 @@
     dying = false;
     if (rafId) cancelAnimationFrame(rafId);
     stopAmbient();
+    stopRadio();
     if (quitBtn) quitBtn.hidden = true;
     if (quitBtnFs) quitBtnFs.hidden = true;
     if (pauseBtn) pauseBtn.hidden = true;
@@ -2432,6 +2437,8 @@
 
   function handlePlayClick() {
     const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    ensureAudio();
+    startRadio();
     startBtn.disabled = true;
     if (overlayMainEl) overlayMainEl.hidden = true;
     if (titleSeqEl) titleSeqEl.hidden = false;

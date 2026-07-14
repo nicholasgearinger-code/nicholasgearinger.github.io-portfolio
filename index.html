@@ -2158,6 +2158,35 @@
     display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .8rem;
     padding: .8rem 1.2rem 1.2rem;
   }
+  .game-radio {
+    display: flex; align-items: center; gap: .7rem;
+    margin: 0 1.2rem 1.2rem;
+    padding: .55rem .8rem;
+    border-radius: .6rem;
+    border: 1px solid transparent; background-clip: padding-box, border-box;
+    background-image: linear-gradient(#050912, #050912),
+      linear-gradient(100deg, var(--cyan), var(--violet) 55%, var(--magenta));
+    background-origin: padding-box, border-box;
+  }
+  .game-radio[hidden] { display: none; }
+  .game-radio-wave { flex-shrink: 0; border-radius: .25rem; background: rgba(255,255,255,.03); }
+  .game-radio-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .1rem; }
+  .game-radio-label {
+    font-family: 'JetBrains Mono', monospace; font-size: .6rem; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--magenta); opacity: .85;
+  }
+  .game-radio-track {
+    font-size: .78rem; color: #E0F2FE;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .game-radio-skip {
+    flex-shrink: 0; width: 1.9rem; height: 1.9rem; border-radius: 50%;
+    background: rgba(232,121,249,.08); border: 1px solid rgba(232,121,249,.3);
+    color: var(--magenta); display: flex; align-items: center; justify-content: center;
+    opacity: .85; transition: opacity .15s ease, background .15s ease, transform .12s ease;
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+  }
+  .game-radio-skip:active { opacity: 1; background: rgba(232,121,249,.28); transform: scale(.92); }
   .algo-legend { display: flex; gap: 1rem; flex-wrap: wrap; font-size: .66rem; color: #334155; }
   .algo-legend span { display: inline-flex; align-items: center; gap: .35rem; }
   .algo-swatch { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
@@ -3737,6 +3766,16 @@
         <div class="algo-stat" id="game-stat">score: <strong>0</strong></div>
         <div class="algo-stat" id="game-best-stat">best: <strong>0</strong></div>
         <button type="button" class="btn-ghost game-quit-btn" id="game-quit-btn" hidden><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg><span>Quit</span></button>
+      </div>
+      <div class="game-radio" id="game-radio" hidden title="Music: Sci-Fi Music Pack Vol. 3 by Alkakrab (alkakrab.itch.io)">
+        <canvas class="game-radio-wave" id="game-radio-wave" width="72" height="24" aria-hidden="true"></canvas>
+        <div class="game-radio-info">
+          <span class="game-radio-label">On Air</span>
+          <span class="game-radio-track" id="game-radio-track">—</span>
+        </div>
+        <button type="button" class="game-radio-skip" id="game-radio-skip" aria-label="Skip to next track">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M6 5v14l10-7z"/><rect x="17" y="5" width="2.6" height="14"/></svg>
+        </button>
       </div>
     </div>
 
@@ -6510,6 +6549,7 @@ panels.forEach(p => observer.observe(p));
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
 })();
 </script>
+<script defer src="music/tracks.js"></script>
 <script defer src="ghostwire.js"></script>
 <script>
   // PWA install support — registers after load so it never competes with

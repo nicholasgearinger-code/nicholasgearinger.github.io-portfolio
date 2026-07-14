@@ -2698,107 +2698,116 @@
   //    boot-glyph intro, scoped to this card — the </> glyph decodes in
   //    character-by-character (same cyan/violet/magenta mapping as the
   //    nav logo), a status line decodes, "GHOSTWIRE" glitch-decodes with a
-  //    corruption blip before settling into a slow idle glow. The Play
-  //    button sits alongside it the whole time — it's clickable immediately,
-  //    and the title only stops "playing" once Play is actually pressed
-  //    (which hides the whole overlay). Runs once when the card first
-  //    scrolls into view, and replays after Quit → Play. --------------
+  //    corruption blip before settling into a slow idle glow. The animated
+  //    version of this now plays full-screen (see runGwBoot below) the
+  //    moment "Initialize" is pressed; the in-card copy here just shows
+  //    the already-settled final state once that collapses, rather than
+  //    re-running the decode a second time at a smaller size. --------------
   const ICON_CHARS = ['<', '/', '>'];
   const ICON_CLASSES = ['gt-lt', 'gt-slash', 'gt-gt'];
   const GT_GLYPHS = '!<>-_\\/[]{}=+*^?#';
+  function decodeText(el, text, dur, onDone) {
+    const stagger = dur / text.length;
+    const t0 = performance.now();
+    function tick(now) {
+      const e = now - t0;
+      let out = '';
+      for (let i = 0; i < text.length; i++) {
+        out += e >= i * stagger
+          ? '<span class="gt-char-locked">' + text[i] + '</span>'
+          : GT_GLYPHS[(Math.random() * GT_GLYPHS.length) | 0];
+      }
+      el.innerHTML = out;
+      if (e < dur) requestAnimationFrame(tick);
+      else {
+        el.innerHTML = text.split('').map((c) => '<span class="gt-char-locked">' + c + '</span>').join('');
+        if (onDone) onDone();
+      }
+    }
+    requestAnimationFrame(tick);
+  }
+  // the glyph decodes each of its 3 characters into its own color, same
+  // mapping as the nav logo, instead of just appearing pre-formed
+  function decodeIconInto(el, dur, onDone) {
+    const stagger = dur / ICON_CHARS.length;
+    const t0 = performance.now();
+    function tick(now) {
+      const e = now - t0;
+      let out = '';
+      for (let i = 0; i < ICON_CHARS.length; i++) {
+        out += e >= i * stagger
+          ? '<span class="' + ICON_CLASSES[i] + '">' + ICON_CHARS[i] + '</span>'
+          : '<span class="gt-scramble">' + GT_GLYPHS[(Math.random() * GT_GLYPHS.length) | 0] + '</span>';
+      }
+      el.innerHTML = out;
+      if (e < dur) requestAnimationFrame(tick);
+      else {
+        el.innerHTML = ICON_CHARS.map((c, i) => '<span class="' + ICON_CLASSES[i] + '">' + c + '</span>').join('');
+        if (onDone) onDone();
+      }
+    }
+    requestAnimationFrame(tick);
+  }
   function runTitleSeq() {
-    const seq = document.getElementById('game-title-seq');
+    // No animation here anymore — just the final settled state, instantly.
     const iconEl = document.getElementById('game-title-icon');
     const statusEl = document.getElementById('game-title-status');
     const wordEl = document.getElementById('game-title-word');
-    if (!seq || !iconEl || !statusEl || !wordEl) return;
+    if (!iconEl || !statusEl || !wordEl) return;
+    iconEl.innerHTML = ICON_CHARS.map((c, i) => '<span class="' + ICON_CLASSES[i] + '">' + c + '</span>').join('');
+    iconEl.classList.add('gt-grown', 'gt-idle');
+    statusEl.innerHTML = 'LINK ESTABLISHED';
+    wordEl.innerHTML = 'GHOSTWIRE'.split('').map((c) => '<span class="gt-char-locked">' + c + '</span>').join('');
+  }
+
+  // -- GHOSTWIRE BOOT: the actual animated decode, full-page and centered
+  //    regardless of portrait/landscape, matching the site's own boot
+  //    sequence (#boot-seq) — same glyph-decode/status-decode/progress-bar
+  //    recipe, just triggered on demand instead of once per session. Once
+  //    done, it collapses (scale + fade) to make room for the compact
+  //    in-card title + Play/Menu buttons.
+  function runGwBoot(onDone) {
+    const boot = document.getElementById('gw-boot');
+    const iconEl = document.getElementById('gw-boot-icon');
+    const statusEl = document.getElementById('gw-boot-status');
+    const wordEl = document.getElementById('gw-boot-word');
+    const barFill = document.getElementById('gw-boot-bar-fill');
+    if (!boot) { if (onDone) onDone(); return; }
     const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    boot.hidden = false;
+    boot.classList.remove('gw-boot-collapse');
     if (reduceMotion) {
-      iconEl.innerHTML = ICON_CHARS.map((c, i) => '<span class="' + ICON_CLASSES[i] + '">' + c + '</span>').join('');
-      iconEl.classList.add('gt-grown');
-      statusEl.innerHTML = 'LINK ESTABLISHED';
-      wordEl.innerHTML = 'GHOSTWIRE'.split('').map((c) => '<span class="gt-char-locked">' + c + '</span>').join('');
+      if (iconEl) iconEl.innerHTML = ICON_CHARS.map((c, i) => '<span class="' + ICON_CLASSES[i] + '">' + c + '</span>').join('');
+      if (statusEl) statusEl.innerHTML = 'LINK ESTABLISHED';
+      if (wordEl) wordEl.innerHTML = 'GHOSTWIRE'.split('').map((c) => '<span class="gt-char-locked">' + c + '</span>').join('');
+      if (barFill) barFill.style.width = '100%';
+      setTimeout(() => { if (onDone) onDone(); }, 200);
       return;
     }
-    function decode(el, text, dur, onDone) {
-      const stagger = dur / text.length;
-      const t0 = performance.now();
-      function tick(now) {
-        const e = now - t0;
-        let out = '';
-        for (let i = 0; i < text.length; i++) {
-          out += e >= i * stagger
-            ? '<span class="gt-char-locked">' + text[i] + '</span>'
-            : GT_GLYPHS[(Math.random() * GT_GLYPHS.length) | 0];
-        }
-        el.innerHTML = out;
-        if (e < dur) requestAnimationFrame(tick);
-        else {
-          el.innerHTML = text.split('').map((c) => '<span class="gt-char-locked">' + c + '</span>').join('');
-          if (onDone) onDone();
-        }
-      }
-      requestAnimationFrame(tick);
+    const DECODE_MS = 1400, HOLD_MS = 400;
+    if (iconEl) decodeIconInto(iconEl, DECODE_MS * 0.5);
+    setTimeout(() => { if (statusEl) decodeText(statusEl, 'LINK ESTABLISHED', 500); }, 250);
+    setTimeout(() => { if (wordEl) decodeText(wordEl, 'GHOSTWIRE', 650); }, 750);
+    if (barFill) {
+      barFill.style.transition = 'width ' + (DECODE_MS + HOLD_MS) + 'ms linear';
+      requestAnimationFrame(() => { barFill.style.width = '100%'; });
     }
-    // the glyph decodes each of its 3 characters into its own color, same
-    // mapping as the nav logo, instead of just appearing pre-formed
-    function decodeIcon(el, dur, onDone) {
-      const stagger = dur / ICON_CHARS.length;
-      const t0 = performance.now();
-      function tick(now) {
-        const e = now - t0;
-        let out = '';
-        for (let i = 0; i < ICON_CHARS.length; i++) {
-          out += e >= i * stagger
-            ? '<span class="' + ICON_CLASSES[i] + '">' + ICON_CHARS[i] + '</span>'
-            : '<span class="gt-scramble">' + GT_GLYPHS[(Math.random() * GT_GLYPHS.length) | 0] + '</span>';
-        }
-        el.innerHTML = out;
-        if (e < dur) requestAnimationFrame(tick);
-        else {
-          el.innerHTML = ICON_CHARS.map((c, i) => '<span class="' + ICON_CLASSES[i] + '">' + c + '</span>').join('');
-          if (onDone) onDone();
-        }
-      }
-      requestAnimationFrame(tick);
-    }
-    function glitchBlip() {
-      seq.classList.remove('gt-jump', 'gt-noise'); void seq.offsetWidth;
-      seq.classList.add('gt-jump', 'gt-noise');
-      setTimeout(() => seq.classList.remove('gt-jump', 'gt-noise'), 340);
-    }
-
-    decodeIcon(iconEl, 320, () => {
-      iconEl.classList.add('gt-grown');
-      glitchBlip();
-      setTimeout(() => { decode(statusEl, 'LINK ESTABLISHED', 380); }, 150);
-      // once the one-shot flicker (2 x 1.1s + .1s delay) naturally finishes,
-      // hand off to a gentle infinite idle pulse so the icon keeps breathing
-      // on screen rather than going static while it waits for Play
-      setTimeout(() => iconEl.classList.add('gt-idle'), 2400);
-    });
-    setTimeout(() => {
-      decode(wordEl, 'GHOSTWIRE', 650, () => {
-        wordEl.classList.add('gt-corrupt');
-        glitchBlip();
-        setTimeout(() => wordEl.classList.remove('gt-corrupt'), 320);
-      });
-    }, 950);
+    setTimeout(() => { if (onDone) onDone(); }, DECODE_MS + HOLD_MS);
   }
 
   function playInitialTitleCard() {
     if (!titleSeqEl) return;
-    const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    titleSeqEl.hidden = false;
-    runTitleSeq();
-    setTimeout(() => {
-      // titleSeqEl stays visible here (unlike handlePlayClick's transition
-      // use of the same sequence) — it settles into its idle glow state
-      // and serves as the title screen's backdrop. gameMenuRoot is
-      // absolutely positioned over/below it (see CSS) so revealing it
-      // doesn't add to the flow height that drove the earlier scroll bug.
+    const boot = document.getElementById('gw-boot');
+    runGwBoot(() => {
+      // settle the compact in-card title first, then collapse the
+      // full-screen boot away to reveal it + the Play/Menu buttons —
+      // the two happen together so there's no bare gap in between
+      runTitleSeq();
+      titleSeqEl.hidden = false;
+      if (boot) boot.classList.add('gw-boot-collapse');
       if (gameMenuRoot) fadeReveal(gameMenuRoot);
-    }, reduceMotion ? 0 : 2000);
+      setTimeout(() => { if (boot) boot.hidden = true; }, 520);
+    });
   }
 
   draw(); // idle frame so the canvas isn't blank before the first Play

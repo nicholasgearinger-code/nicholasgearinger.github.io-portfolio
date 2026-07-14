@@ -348,6 +348,43 @@
     .boot-icon-reflection { filter: blur(2.2px); }
   }
 
+  /* ── GHOSTWIRE BOOT — full-page takeover on "Initialize" ── */
+  #gw-boot {
+    position: fixed; inset: 0; z-index: 9999;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 1.3rem;
+    background: rgba(2,8,16,.97);
+    transition: opacity .5s cubic-bezier(.4,0,.2,1), transform .5s cubic-bezier(.4,0,.2,1);
+  }
+  #gw-boot[hidden] { display: none; }
+  #gw-boot.gw-boot-collapse { opacity: 0; transform: scale(.32); pointer-events: none; }
+  .gw-boot-icon {
+    font-family: 'JetBrains Mono', 'Courier New', monospace; font-weight: 700;
+    font-size: clamp(3.4rem, 14vw, 6.5rem); text-shadow: 0 0 20px rgba(34,211,238,.4);
+  }
+  .gw-boot-status {
+    font-family: 'JetBrains Mono', monospace; letter-spacing: .18em; text-transform: uppercase;
+    font-size: clamp(.8rem, 2.4vw, 1.05rem); color: var(--cyan); min-height: 1.4em;
+    text-shadow: 0 0 8px rgba(34,211,238,.5);
+  }
+  .gw-boot-word {
+    font-family: 'JetBrains Mono', monospace; font-weight: 700; letter-spacing: .3em;
+    font-size: clamp(1.3rem, 4.8vw, 2.3rem); min-height: 1.3em;
+  }
+  .gw-boot-bar-track {
+    width: min(260px, 60vw); height: 3px; border-radius: 100px;
+    background: rgba(255,255,255,.08); overflow: hidden; margin-top: .3rem;
+  }
+  .gw-boot-bar-fill {
+    height: 100%; width: 0%; border-radius: 100px;
+    background: linear-gradient(90deg, var(--cyan), var(--magenta));
+    box-shadow: 0 0 10px rgba(34,211,238,.7);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #gw-boot { transition: opacity .3s ease; }
+    #gw-boot.gw-boot-collapse { transform: none; }
+  }
+
   html {
     scroll-behavior: smooth; background: #020810; color-scheme: dark;
     scroll-padding-top: 5.6rem; scroll-snap-type: y proximity;
@@ -2958,6 +2995,18 @@
   </div>
   <div class="boot-decode" id="boot-decode-text"><span class="boot-idle-label">Loading…</span></div>
   <div class="boot-bar-track"><div class="boot-bar-fill" id="boot-bar-fill"></div></div>
+</div>
+<!-- GHOSTWIRE BOOT — full-page takeover, same visual recipe as #boot-seq
+     above (decode glyph, status/word decode, progress bar) but triggered
+     on demand when "Initialize" is pressed in the game rather than once
+     per session. Collapses (scale + fade) into the compact in-card title
+     once done, revealing the Play/Menu buttons. See runGwBoot() in
+     ghostwire.js. -->
+<div id="gw-boot" hidden aria-hidden="true">
+  <div class="gw-boot-icon" id="gw-boot-icon">&lt;/&gt;</div>
+  <div class="gw-boot-status" id="gw-boot-status"></div>
+  <div class="gw-boot-word" id="gw-boot-word"></div>
+  <div class="gw-boot-bar-track"><div class="gw-boot-bar-fill" id="gw-boot-bar-fill"></div></div>
 </div>
 <script>
   // Runs synchronously, immediately after the element above, before the

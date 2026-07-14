@@ -2481,6 +2481,7 @@
     if (quitBtn) quitBtn.hidden = false;
     if (quitBtnFs) quitBtnFs.hidden = false;
     if (pauseBtn) { pauseBtn.hidden = false; setPauseIcon(false); pauseBtn.setAttribute('aria-label', 'Pause'); }
+    if (settingsBtn) settingsBtn.hidden = false;
     if (shareBtn) shareBtn.hidden = true;
     if (statsDetailEl) statsDetailEl.hidden = true;
     ensureAudio();
@@ -2496,6 +2497,7 @@
     if (quitBtn) quitBtn.hidden = true;
     if (quitBtnFs) quitBtnFs.hidden = true;
     if (pauseBtn) pauseBtn.hidden = true;
+    if (settingsBtn) settingsBtn.hidden = true;
     if (score > best) {
       best = score;
       localStorage.setItem('ghostwireBest', String(best));
@@ -2528,6 +2530,7 @@
     if (quitBtn) quitBtn.hidden = true;
     if (quitBtnFs) quitBtnFs.hidden = true;
     if (pauseBtn) pauseBtn.hidden = true;
+    if (settingsBtn) settingsBtn.hidden = true;
     if (shareBtn) shareBtn.hidden = true;
     if (statsDetailEl) statsDetailEl.hidden = true;
     overlay.hidden = false;

@@ -11,6 +11,14 @@
 (function ghostwire() {
   const canvas = document.getElementById('game-canvas');
   const gameWrap = document.getElementById('game-wrap');
+  // one listener covers every current and future button in the game
+  // (settings, tabs, zone select, play/menu, pause, mute, fullscreen,
+  // radio skip, quit...) rather than wiring each individually
+  if (gameWrap) {
+    gameWrap.addEventListener('click', (e) => {
+      if (e.target.closest('button')) playClickSfx();
+    });
+  }
   const overlay = document.getElementById('game-overlay');
   const titleSeqEl = document.getElementById('game-title-seq');
   const overlayMainEl = document.getElementById('game-overlay-main');
@@ -786,6 +794,32 @@
     }
     try { gwBootSfxEl.currentTime = 0; } catch (_) {}
     gwBootSfxEl.play().catch((err) => console.warn('[ghostwire boot] sfx play() failed:', err));
+  }
+  let gwCrashSfxEl = null;
+  function playComputerCrashSfx() {
+    if (!soundOn) return;
+    if (!gwCrashSfxEl) {
+      gwCrashSfxEl = new Audio('sfx/computer-crash.mp3');
+      gwCrashSfxEl.preload = 'auto';
+      gwCrashSfxEl.volume = 0.55;
+    }
+    try { gwCrashSfxEl.currentTime = 0; } catch (_) {}
+    gwCrashSfxEl.play().catch((err) => console.warn('[ghostwire boot] crash sfx play() failed:', err));
+  }
+  // one shared click sound for every button in the game — settings,
+  // achievements/stats tabs, zone select, play/menu, pause, mute,
+  // fullscreen, skip, quit, everything. currentTime resets on each call
+  // so rapid taps restart it instead of queueing/piling up.
+  let gwClickSfxEl = null;
+  function playClickSfx() {
+    if (!soundOn) return;
+    if (!gwClickSfxEl) {
+      gwClickSfxEl = new Audio('sfx/success.mp3');
+      gwClickSfxEl.preload = 'auto';
+      gwClickSfxEl.volume = 0.45;
+    }
+    try { gwClickSfxEl.currentTime = 0; } catch (_) {}
+    gwClickSfxEl.play().catch((err) => console.warn('[ghostwire] click sfx play() failed:', err));
   }
   function playTone(freq, dur, type, vol, slideTo, delay, opts) {
     if (!audioCtx || !soundOn) return;
@@ -2954,6 +2988,13 @@
     // plays out under the visual decode rather than as a separate sting
     ensureAudio();
     playBootGlitchSfx();
+    // near the end: computer-crash overlapping with a second play of the
+    // glitch sound. Their clip lengths (2.4s / 1.3s) cap the maximum
+    // possible overlap at computer-crash's own ~1.3s — starting them
+    // together right before collapse gets as close to that as physically
+    // possible rather than a literal 3s (neither clip is that long).
+    const crashDelay = Math.max(0, TOTAL_MS - 1300);
+    setTimeout(() => { playBootGlitchSfx(); playComputerCrashSfx(); }, crashDelay);
     setTimeout(() => { stopGwStream(); stopHexReadouts(); if (onDone) onDone(); }, TOTAL_MS);
   }
 

@@ -14,6 +14,8 @@
   const overlay = document.getElementById('game-overlay');
   const titleSeqEl = document.getElementById('game-title-seq');
   const overlayMainEl = document.getElementById('game-overlay-main');
+  const titleGateEl = document.getElementById('game-title-gate');
+  const titleGateBtn = document.getElementById('game-title-gate-btn');
   const overlayTitle = document.getElementById('game-overlay-title');
   const overlaySub = document.getElementById('game-overlay-sub');
   const startBtn = document.getElementById('game-start-btn');
@@ -506,15 +508,24 @@
       '<li class="gp-stat-row"><span>' + escapeHtml(label) + '</span><strong>' + escapeHtml(String(val)) + '</strong></li>'
     ).join('');
   }
+  if (titleGateBtn) {
+    titleGateBtn.addEventListener('click', () => {
+      if (titleGateEl) titleGateEl.hidden = true;
+      playInitialTitleCard();
+    });
+  }
   if (gameMenuPlayBtn) {
     gameMenuPlayBtn.addEventListener('click', () => {
-      if (gameMenuRoot) gameMenuRoot.hidden = true;
+      if (titleSeqEl) titleSeqEl.hidden = true;
+      if (overlayMainEl) overlayMainEl.hidden = false;
       if (gameMenuPlay) gameMenuPlay.hidden = false;
     });
   }
   if (gameMenuBackBtn) {
     gameMenuBackBtn.addEventListener('click', () => {
+      if (overlayMainEl) overlayMainEl.hidden = true;
       if (gameMenuPlay) gameMenuPlay.hidden = true;
+      if (titleSeqEl) titleSeqEl.hidden = false;
       if (gameMenuRoot) gameMenuRoot.hidden = false;
     });
   }
@@ -2720,20 +2731,20 @@
   }
 
   function playInitialTitleCard() {
-    if (!titleSeqEl || !overlayMainEl) return;
+    if (!titleSeqEl) return;
     const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     titleSeqEl.hidden = false;
     runTitleSeq();
     setTimeout(() => {
       // titleSeqEl stays visible here (unlike handlePlayClick's transition
       // use of the same sequence) — it settles into its idle glow state
-      // and serves as the title screen's backdrop, with the 2-button menu
-      // appearing right after it rather than replacing it.
-      overlayMainEl.hidden = false;
+      // and serves as the title screen's backdrop. gameMenuRoot is
+      // absolutely positioned over/below it (see CSS) so revealing it
+      // doesn't add to the flow height that drove the earlier scroll bug.
+      if (gameMenuRoot) gameMenuRoot.hidden = false;
     }, reduceMotion ? 0 : 2000);
   }
 
   draw(); // idle frame so the canvas isn't blank before the first Play
   loadLeaderboard();
-  playInitialTitleCard();
 })();

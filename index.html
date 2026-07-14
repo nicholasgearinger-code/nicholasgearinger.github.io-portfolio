@@ -2573,7 +2573,13 @@
   .gp-achv-unlock { display: block; margin-top: .2rem; font-style: italic; color: var(--cyan); opacity: .8; font-size: .7rem; }
   .game-wrap.cb-safe .game-overlay h3.gt-over { color: #FB923C; }
   .game-play-row { display: flex; align-items: center; justify-content: center; gap: .6rem; }
-  .game-menu-root { display: flex; flex-direction: column; align-items: center; gap: 1.1rem; }
+  .game-title-gate { display: flex; align-items: center; justify-content: center; min-height: 8rem; }
+  .game-menu-root {
+    position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+    margin-top: 1.3rem; width: max-content; max-width: 90vw;
+    display: flex; flex-direction: column; align-items: center; gap: 1.1rem;
+  }
+  .game-menu-root[hidden] { display: none; }
   .game-menu-tagline { font-size: .82rem; color: var(--muted); line-height: 1.5; max-width: 320px; margin: 0; }
   .game-menu-btns { display: flex; flex-direction: column; align-items: stretch; gap: .6rem; width: min(240px, 80vw); }
   .game-menu-btn { width: 100%; text-align: center; }
@@ -3743,19 +3749,22 @@
             </div>
           </div>
           <div class="game-overlay" id="game-overlay">
+            <div class="game-title-gate" id="game-title-gate">
+              <button type="button" class="btn-primary game-menu-btn" id="game-title-gate-btn">▶ Play</button>
+            </div>
             <div class="game-title-seq" id="game-title-seq" hidden>
               <div class="game-title-icon" id="game-title-icon">&lt;/&gt;</div>
               <div class="game-title-status" id="game-title-status"></div>
               <div class="game-title-word" id="game-title-word"></div>
-            </div>
-            <div class="game-overlay-main" id="game-overlay-main">
-              <h3 id="game-overlay-title"></h3>
-              <div class="game-menu-root" id="game-menu-root">
+              <div class="game-menu-root" id="game-menu-root" hidden>
                 <div class="game-menu-btns">
                   <button type="button" class="btn-primary game-menu-btn" id="game-menu-play-btn">▶ Play</button>
                   <button type="button" class="btn-ghost game-menu-btn" id="game-menu-menu-btn">☰ Menu</button>
                 </div>
               </div>
+            </div>
+            <div class="game-overlay-main" id="game-overlay-main" hidden>
+              <h3 id="game-overlay-title"></h3>
               <div class="game-menu-play" id="game-menu-play" hidden>
                 <button type="button" class="game-menu-back" id="game-menu-back-btn">← Menu</button>
                 <p id="game-overlay-sub">Arrow keys, A/D, drag, or tilt to steer. Tap and hold anywhere to charge a piercing shot, release to fire — or hold Space on desktop. Hits cost points until THREAT goes red — then one hit ends it.</p>

@@ -2,7 +2,7 @@
 // (including the Ghostwire game) loads offline or on a flaky connection.
 // Bump CACHE_NAME on any deploy that changes cached files to invalidate old
 // caches; the activate handler below sweeps everything not in the new list.
-const CACHE_NAME = 'ngearinger-shell-v2';
+const CACHE_NAME = 'ngearinger-shell-v4';
 const APP_SHELL = [
   './',
   './index.html',
@@ -11,6 +11,14 @@ const APP_SHELL = [
   './icon-512.png',
   './ghostwire.js',
   './webcam-ai.js',
+  './music/tracks.js',
+  // Note: actual audio files are NOT pre-cached here — cache.addAll()
+  // fails its whole install step if any single listed file 404s, and
+  // there aren't any tracks yet. Once real files are added to music/tracks.js,
+  // they'll still get cached automatically by the fetch handler below on
+  // first play (cache-first-with-background-refresh, same as everything
+  // else); add them here too if you want them available before that first
+  // play (e.g. for full offline support from a cold install).
 ];
 
 self.addEventListener('install', (event) => {

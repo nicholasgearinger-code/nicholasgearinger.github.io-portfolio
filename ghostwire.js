@@ -752,96 +752,93 @@
     ambientGain.gain.setTargetAtTime(g, audioCtx.currentTime, 0.05);
   }
 
-  // -- MUSIC: procedurally generated background tracks, synthesized with
-  //    the same oscillator/noise techniques as the SFX above — no audio
-  //    files. Each track is a 16-step pattern (degree indices into its own
-  //    scale, null = rest) rather than fixed frequencies, so bass/arp notes
-  //    are always in-key. A random track starts each run, and the game
-  //    advances to a new random one every time you cross into a new zone
-  //    (see the era-change block in the level-up logic below).
-  const MUSIC_TRACKS = [
-    { name: 'Undertow', bpm: 92, scale: [0, 2, 3, 5, 7, 8, 10], bassRoot: 33, arpRoot: 57,
-      bassType: 'sawtooth', arpType: 'triangle', filterBase: 700,
-      bass: [0, null, null, null, 4, null, null, null, 3, null, null, null, 4, null, null, null],
-      arp:  [null, null, 7, null, null, null, 5, null, null, null, 7, 9, null, null, 5, null],
-      hat:  [0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1] },
-    { name: 'Voltage', bpm: 132, scale: [0, 2, 3, 5, 7, 8, 10], bassRoot: 31, arpRoot: 55,
-      bassType: 'square', arpType: 'square', filterBase: 1400,
-      bass: [0, 0, null, 0, 3, 0, null, 0, 0, 0, null, 0, 4, 0, null, 0],
-      arp:  [7, null, 5, 7, null, 9, 7, null, 5, 7, null, 9, 10, null, 7, null],
-      hat:  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1] },
-    { name: 'Afterglow', bpm: 80, scale: [0, 2, 4, 5, 7, 9, 11], bassRoot: 36, arpRoot: 60,
-      bassType: 'triangle', arpType: 'triangle', filterBase: 500,
-      bass: [0, null, null, null, null, null, 4, null, 0, null, null, null, null, null, 3, null],
-      arp:  [null, 7, null, 9, null, 7, null, 4, null, 7, null, 9, null, 11, null, 9],
-      hat:  [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0] },
-    { name: 'Overclock', bpm: 142, scale: [0, 2, 3, 5, 7, 8, 11], bassRoot: 33, arpRoot: 57,
-      bassType: 'sawtooth', arpType: 'square', filterBase: 1800,
-      bass: [0, null, 0, null, 0, null, 0, null, 3, null, 3, null, 4, null, 4, null],
-      arp:  [7, 8, 7, 6, 7, 8, 10, 8, 7, 6, 7, 8, 11, 10, 8, 7],
-      hat:  [1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1] },
-    { name: 'Static Bloom', bpm: 110, scale: [0, 2, 3, 5, 7, 9, 10], bassRoot: 38, arpRoot: 62,
-      bassType: 'triangle', arpType: 'square', filterBase: 1000,
-      bass: [0, null, null, 3, null, null, 0, null, null, 4, null, null, 0, null, 3, null],
-      arp:  [null, 5, 7, null, 9, 7, null, 5, null, 7, 9, null, 7, 5, null, 9],
-      hat:  [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1] },
-  ];
-  let musicTrackIdx = -1, lastMusicTrackIdx = -1, musicStep = 0, musicNextStepTime = 0, musicStepDur = 0;
-  function midiToFreq(n) { return 440 * Math.pow(2, (n - 69) / 12); }
-  function degreeToNote(root, scale, deg) {
-    return root + scale[deg % scale.length] + 12 * Math.floor(deg / scale.length);
+  // -- RADIO: plays real audio files listed in music/tracks.js
+  //    (window.GHOSTWIRE_TRACKS) — no procedural synthesis here, just
+  //    playback + a waveform tap. A random track starts on first
+  //    interaction, auto-advances when one ends, and is skippable via the
+  //    radio widget's button. Gracefully hides itself if no tracks are
+  //    configured yet.
+  const RADIO_TRACKS = (window.GHOSTWIRE_TRACKS || []).filter((t) => t && t.file);
+  if (!RADIO_TRACKS.length) {
+    console.warn('[ghostwire radio] No tracks found — check that music/tracks.js loaded '
+      + '(window.GHOSTWIRE_TRACKS is ' + (window.GHOSTWIRE_TRACKS === undefined ? 'undefined, so tracks.js likely 404\'d or didn\'t load' : 'an empty array — add entries to music/tracks.js') + '). '
+      + 'Also check the Network tab for 404s on the .mp3 files themselves.');
   }
-  function pickMusicTrack(excludeIdx) {
-    if (MUSIC_TRACKS.length <= 1) return 0;
-    let idx;
-    do { idx = Math.floor(Math.random() * MUSIC_TRACKS.length); } while (idx === excludeIdx);
-    return idx;
+  const radioWidget = document.getElementById('game-radio');
+  const radioWaveEl = document.getElementById('game-radio-wave');
+  const radioTrackEl = document.getElementById('game-radio-track');
+  const radioSkipBtn = document.getElementById('game-radio-skip');
+  const radioWaveCtx = radioWaveEl ? radioWaveEl.getContext('2d') : null;
+  let radioAudioEl = null, radioAnalyser = null, radioSource = null;
+  let radioIdx = -1, radioStarted = false;
+
+  function ensureRadioGraph() {
+    if (radioAudioEl || !audioCtx) return;
+    radioAudioEl = new Audio();
+    radioAudioEl.preload = 'auto';
+    radioAudioEl.volume = 0.5;
+    radioAudioEl.addEventListener('ended', nextRadioTrack);
+    // Web Audio graph is optional flourish for the waveform — if the
+    // browser refuses (e.g. cross-origin file with no CORS headers),
+    // playback still works fine without a visualizer.
+    try {
+      radioSource = audioCtx.createMediaElementSource(radioAudioEl);
+      radioAnalyser = audioCtx.createAnalyser();
+      radioAnalyser.fftSize = 64;
+      radioSource.connect(radioAnalyser);
+      radioAnalyser.connect(audioCtx.destination);
+    } catch (_) { radioAnalyser = null; }
   }
-  function scheduleMusicStep() {
-    const track = MUSIC_TRACKS[musicTrackIdx];
-    if (!track || !audioCtx) return;
-    const i = musicStep % 16;
-    const delay = Math.max(0, musicNextStepTime - audioCtx.currentTime);
-    const bassDeg = track.bass[i];
-    if (bassDeg !== null) {
-      const freq = midiToFreq(degreeToNote(track.bassRoot, track.scale, bassDeg));
-      playTone(freq, track.stepDur * 1.7, track.bassType, 0.085, null, delay, { filterFreq: track.filterBase, filterQ: 4 });
+  function pickRadioIdx(excludeIdx) {
+    if (RADIO_TRACKS.length <= 1) return 0;
+    let i;
+    do { i = Math.floor(Math.random() * RADIO_TRACKS.length); } while (i === excludeIdx);
+    return i;
+  }
+  function playRadioTrack(idx) {
+    if (!radioAudioEl || !RADIO_TRACKS[idx]) return;
+    radioIdx = idx;
+    const track = RADIO_TRACKS[idx];
+    radioAudioEl.src = 'music/' + track.file;
+    radioAudioEl.muted = !soundOn;
+    radioAudioEl.play().catch(() => {}); // blocked-autoplay retries happen naturally on the next call from a real click
+    if (radioTrackEl) radioTrackEl.textContent = track.title + (track.artist ? ' — ' + track.artist : '');
+    if (radioWidget) radioWidget.hidden = false;
+  }
+  function nextRadioTrack() { playRadioTrack(pickRadioIdx(radioIdx)); }
+  function startRadio() {
+    if (!RADIO_TRACKS.length) { if (radioWidget) radioWidget.hidden = true; return; }
+    ensureRadioGraph();
+    if (!radioAudioEl) return;
+    if (!radioStarted) { radioStarted = true; playRadioTrack(pickRadioIdx(-1)); }
+    else if (radioAudioEl.paused) { radioAudioEl.play().catch(() => {}); }
+  }
+  if (radioSkipBtn) radioSkipBtn.addEventListener('click', nextRadioTrack);
+
+  function drawRadioWave() {
+    if (!radioWaveCtx || !radioWaveEl) return;
+    const w = radioWaveEl.width, h = radioWaveEl.height;
+    radioWaveCtx.clearRect(0, 0, w, h);
+    if (!radioAnalyser || !radioAudioEl || radioAudioEl.paused) {
+      radioWaveCtx.strokeStyle = 'rgba(148,163,184,.35)';
+      radioWaveCtx.lineWidth = 1.5;
+      radioWaveCtx.beginPath(); radioWaveCtx.moveTo(0, h / 2); radioWaveCtx.lineTo(w, h / 2); radioWaveCtx.stroke();
+      return;
     }
-    const arpDeg = track.arp[i];
-    if (arpDeg !== null) {
-      const freq = midiToFreq(degreeToNote(track.arpRoot, track.scale, arpDeg));
-      playTone(freq, track.stepDur * 0.85, track.arpType, 0.05, null, delay, { filterFreq: track.filterBase * 2.4, filterQ: 3 });
+    const data = new Uint8Array(radioAnalyser.frequencyBinCount);
+    radioAnalyser.getByteFrequencyData(data);
+    const barW = w / data.length;
+    for (let i = 0; i < data.length; i++) {
+      const barH = Math.max(2, (data[i] / 255) * h);
+      // hue cycles with the game's own tunnel-hue clock so the waveform's
+      // color drifts through the same cyan/violet/magenta palette as
+      // everything else, in sync rather than an unrelated random cycle
+      const hue = (tunnelHue * 40 + i * (360 / data.length)) % 360;
+      radioWaveCtx.fillStyle = 'hsl(' + hue + ', 90%, 60%)';
+      radioWaveCtx.fillRect(i * barW, h - barH, Math.max(1, barW - 1), barH);
     }
-    if (track.hat[i]) playNoise(0.035, 0.028, delay);
-    musicStep++;
-    musicNextStepTime += track.stepDur;
   }
-  function updateMusic() {
-    if (musicTrackIdx < 0 || !audioCtx) return;
-    // schedule up to 200ms ahead of the audio clock — decoupled from frame
-    // rate, so a stray dropped frame never causes a late/skipped note
-    while (musicNextStepTime < audioCtx.currentTime + 0.2) scheduleMusicStep();
-  }
-  function startMusic() {
-    if (!audioCtx) return;
-    musicTrackIdx = pickMusicTrack(lastMusicTrackIdx);
-    lastMusicTrackIdx = musicTrackIdx;
-    const track = MUSIC_TRACKS[musicTrackIdx];
-    track.stepDur = 60 / track.bpm / 4;
-    musicStep = 0;
-    musicNextStepTime = audioCtx.currentTime + 0.1;
-    spawnFloatText(W / 2, VP_Y + 100, '\u266A ' + track.name, '#E879F9');
-  }
-  function stopMusic() { musicTrackIdx = -1; }
-  function advanceMusicTrack() {
-    if (musicTrackIdx < 0 || !audioCtx) return;
-    musicTrackIdx = pickMusicTrack(musicTrackIdx);
-    lastMusicTrackIdx = musicTrackIdx;
-    const track = MUSIC_TRACKS[musicTrackIdx];
-    track.stepDur = 60 / track.bpm / 4;
-    musicStep = 0; // fresh bar for the new track, starting on the next scheduled step
-    spawnFloatText(W / 2, VP_Y + 100, '\u266A ' + track.name, '#E879F9');
-  }
+  (function radioLoop() { drawRadioWave(); requestAnimationFrame(radioLoop); })();
 
   function rectCircleCollide(px, py, pw, ph, cx, cy, cr) {
     const closestX = Math.max(px, Math.min(cx, px + pw));
@@ -873,7 +870,8 @@
       soundOn = !soundOn;
       setMuteIcon(!soundOn);
       muteBtn.classList.toggle('is-muted', !soundOn);
-      if (soundOn) ensureAudio();
+      if (radioAudioEl) radioAudioEl.muted = !soundOn;
+      if (soundOn) { ensureAudio(); startRadio(); }
     });
   }
 
@@ -1184,7 +1182,6 @@
     updateFloatTexts(dt);
     updateShockwaves(dt);
     updateAmbient();
-    updateMusic();
     shakeMag = Math.max(0, shakeMag - dt * 70);
     flash = Math.max(0, flash - dt * 3.2);
     eraFlashTimer = Math.max(0, eraFlashTimer - dt * 2);
@@ -1251,7 +1248,6 @@
         eraFlashTimer = 0.6;
         shakeMag = Math.max(shakeMag, 10);
         spawnFloatText(W / 2, VP_Y + 80, '// ENTERING ' + ERA_NAMES[era], '#F0F8FF');
-        advanceMusicTrack();
       }
       checkWeaponUnlocks();
       // a milestone boss (alternating FIREWALL/WORM) greets every new color
@@ -2358,7 +2354,7 @@
     if (statsDetailEl) statsDetailEl.hidden = true;
     ensureAudio();
     startAmbient();
-    startMusic();
+    startRadio();
     rafId = requestAnimationFrame(loop);
   }
 
@@ -2367,7 +2363,6 @@
     dying = false;
     if (rafId) cancelAnimationFrame(rafId);
     stopAmbient();
-    stopMusic();
     if (quitBtn) quitBtn.hidden = true;
     if (quitBtnFs) quitBtnFs.hidden = true;
     if (pauseBtn) pauseBtn.hidden = true;
@@ -2399,7 +2394,6 @@
     dying = false;
     if (rafId) cancelAnimationFrame(rafId);
     stopAmbient();
-    stopMusic();
     if (quitBtn) quitBtn.hidden = true;
     if (quitBtnFs) quitBtnFs.hidden = true;
     if (pauseBtn) pauseBtn.hidden = true;

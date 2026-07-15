@@ -62,6 +62,7 @@
   // already established by the time someone's mid-game.
   function syncFullscreenLabel() {
     if (fullscreenBtn) fullscreenBtn.classList.toggle('gfs-labeled', !running);
+    if (gameWrap) gameWrap.classList.toggle('gw-fs-menu', !running);
   }
   const ICON_SOUND_ON_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16.3 8.6a5 5 0 0 1 0 6.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M18.9 6.1a8.7 8.7 0 0 1 0 11.8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity=".65"/></svg>';
   const ICON_SOUND_OFF_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M15.3 9.3l5 5.4M20.3 9.3l-5 5.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';

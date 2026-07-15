@@ -2617,6 +2617,15 @@
        slightly with it. */
     .game-wrap.gw-fullscreen { width: 100dvw; height: 100dvh; }
   }
+  /* The 4:3 letterbox above is tuned for actual gameplay (the canvas
+     itself). On the title/level-select/menu screens — which have taller
+     content than the game view and aren't gameplay-critical about their
+     exact aspect ratio — that same narrow letterbox on a tall portrait
+     phone squeezes the menu into a short box with huge black bars above
+     and below, forcing a scroll to reach Play. Use the full screen there
+     instead, same treatment landscape already gets. Toggled via JS
+     (syncFullscreenLabel) based on whether a run is actually in progress. */
+  .game-wrap.gw-fullscreen.gw-fs-menu { width: 100dvw; height: 100dvh; }
   .game-wrap.gw-fullscreen #game-canvas { height: 100%; }
   .game-wrap.gw-fullscreen::before {
     content: ''; position: fixed; inset: 0; z-index: -1; background: #000;

@@ -2614,8 +2614,10 @@
     /* Stretch to fill landscape instead of letterboxing to a strict 4:3 —
        canvas hit-testing already scales off getBoundingClientRect(), so
        this is display-only; only the canvas-drawn HUD text stretches
-       slightly with it. */
-    .game-wrap.gw-fullscreen { width: 100dvw; height: 100dvh; }
+       slightly with it. Small-viewport units (not dvw/dvh) — this project
+       has repeatedly hit dvh/dvw miscalculating during Safari toolbar
+       transitions, so svh/svw is the proven-reliable choice here. */
+    .game-wrap.gw-fullscreen { width: 100svw; height: 100svh; }
   }
   /* The 4:3 letterbox above is tuned for actual gameplay (the canvas
      itself). On the title/level-select/menu screens — which have taller
@@ -2624,8 +2626,9 @@
      phone squeezes the menu into a short box with huge black bars above
      and below, forcing a scroll to reach Play. Use the full screen there
      instead, same treatment landscape already gets. Toggled via JS
-     (syncFullscreenLabel) based on whether a run is actually in progress. */
-  .game-wrap.gw-fullscreen.gw-fs-menu { width: 100dvw; height: 100dvh; }
+     (syncFullscreenLabel) based on whether a run is actually in progress.
+     svw/svh, not dvw/dvh — see note above. */
+  .game-wrap.gw-fullscreen.gw-fs-menu { width: 100svw; height: 100svh; }
   .game-wrap.gw-fullscreen #game-canvas { height: 100%; }
   .game-wrap.gw-fullscreen::before {
     content: ''; position: fixed; inset: 0; z-index: -1; background: #000;
@@ -2647,6 +2650,13 @@
     transition: opacity .15s ease, box-shadow .2s ease, transform .12s ease;
   }
   .game-fullscreen-btn:active { opacity: 1; transform: scale(.92); box-shadow: 0 0 14px rgba(34,211,238,.55), 0 0 22px rgba(129,140,248,.3); }
+  .game-fullscreen-btn.gfs-active {
+    color: #F87171;
+    background-image: linear-gradient(#050912, #050912), linear-gradient(135deg, #F87171, var(--magenta));
+    filter: drop-shadow(0 0 4px rgba(248,113,113,.85));
+    box-shadow: 0 0 9px rgba(248,113,113,.3), 0 0 16px rgba(232,121,249,.16);
+  }
+  .game-fullscreen-btn.gfs-active:active { box-shadow: 0 0 14px rgba(248,113,113,.55), 0 0 22px rgba(232,121,249,.3); }
   .game-fullscreen-btn .gfs-label { display: none; }
   .game-fullscreen-btn.gfs-labeled {
     left: 50%; right: auto; transform: translateX(-50%);

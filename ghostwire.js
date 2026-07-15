@@ -56,6 +56,17 @@
     const iconEl = fullscreenBtn && fullscreenBtn.querySelector('.gfs-icon');
     if (iconEl) iconEl.innerHTML = isFullscreen ? ICON_COLLAPSE_SVG : ICON_EXPAND_SVG;
   }
+  // Keeps the icon, the "Full Screen"/"Exit Full Screen" label text, the
+  // aria-label, and the red gfs-active styling all in lockstep so none of
+  // them can drift out of sync with each other.
+  function setFullscreenActiveState(isFullscreen) {
+    setFullscreenIcon(isFullscreen);
+    if (!fullscreenBtn) return;
+    fullscreenBtn.classList.toggle('gfs-active', isFullscreen);
+    fullscreenBtn.setAttribute('aria-label', isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen');
+    const labelEl = fullscreenBtn.querySelector('.gfs-label');
+    if (labelEl) labelEl.textContent = isFullscreen ? 'Exit Full Screen' : 'Full Screen';
+  }
   // labeled ("Full Screen") on the title screen / level-select / any other
   // pre- or post-run menu state; icon-only once a run is actually active,
   // since screen space matters more there and the icon's meaning is
@@ -1405,7 +1416,7 @@
     gameWrap.classList.add('gw-fullscreen');
     lockScroll();
     lockViewportZoom();
-    if (fullscreenBtn) { setFullscreenIcon(true); fullscreenBtn.setAttribute('aria-label', 'Exit fullscreen'); syncFullscreenLabel(); }
+    if (fullscreenBtn) { setFullscreenActiveState(true); syncFullscreenLabel(); }
     const reqFs = gameWrap.requestFullscreen || gameWrap.webkitRequestFullscreen || gameWrap.mozRequestFullScreen || gameWrap.msRequestFullscreen;
     if (reqFs) { try { const p = reqFs.call(gameWrap); if (p && p.catch) p.catch(() => {}); } catch (_) {} }
     // requestFullscreen() isn't available for arbitrary elements on
@@ -1425,7 +1436,7 @@
       if (gwHomeNextSibling) gwHomeParent.insertBefore(gameWrap, gwHomeNextSibling);
       else gwHomeParent.appendChild(gameWrap);
     }
-    if (fullscreenBtn) { setFullscreenIcon(false); fullscreenBtn.setAttribute('aria-label', 'Enter fullscreen'); }
+    if (fullscreenBtn) setFullscreenActiveState(false);
     if (!skipNativeExit && isNativeFullscreen()) {
       const exitFs = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen || document.msExitFullscreen;
       if (exitFs) { try { const p = exitFs.call(document); if (p && p.catch) p.catch(() => {}); } catch (_) {} }

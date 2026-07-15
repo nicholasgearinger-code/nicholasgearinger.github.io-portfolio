@@ -828,6 +828,21 @@
   // the instant a level is actually chosen (handlePlayClick), and resumes
   // when the player's back at level-select after quitting or a run ending
   let gwMenuMusicEl = null;
+  const MENU_MUSIC_VOL = 0.35, MENU_MUSIC_FADE_MS = 1200;
+  let menuMusicFadeRaf = null;
+  function fadeMenuMusic(targetVol, durMs, onDone) {
+    if (!gwMenuMusicEl) { if (onDone) onDone(); return; }
+    if (menuMusicFadeRaf) cancelAnimationFrame(menuMusicFadeRaf);
+    const startVol = gwMenuMusicEl.volume;
+    const t0 = performance.now();
+    function tick(now) {
+      const t = Math.min(1, (now - t0) / durMs);
+      gwMenuMusicEl.volume = startVol + (targetVol - startVol) * t;
+      if (t < 1) { menuMusicFadeRaf = requestAnimationFrame(tick); }
+      else { menuMusicFadeRaf = null; if (onDone) onDone(); }
+    }
+    menuMusicFadeRaf = requestAnimationFrame(tick);
+  }
   // browsers only grant unprompted play() to a real user-gesture window —
   // starting this several seconds into the boot sequence (deep inside a
   // setTimeout chain from the original click) falls well outside that
@@ -839,7 +854,7 @@
     gwMenuMusicEl = new Audio('sfx/menu-music.mp3');
     gwMenuMusicEl.preload = 'auto';
     gwMenuMusicEl.loop = true;
-    gwMenuMusicEl.volume = 0.35;
+    gwMenuMusicEl.volume = MENU_MUSIC_VOL;
     gwMenuMusicEl.play().then(() => gwMenuMusicEl.pause()).catch((err) => console.warn('[ghostwire] menu music unlock failed:', err));
   }
   function startMenuMusic() {
@@ -847,11 +862,16 @@
     if (!gwMenuMusicEl) unlockMenuMusic();
     if (!gwMenuMusicEl) return;
     if (gwMenuMusicEl.paused) {
+      gwMenuMusicEl.volume = 0;
       gwMenuMusicEl.play().catch((err) => console.warn('[ghostwire] menu music play() failed:', err));
+      fadeMenuMusic(MENU_MUSIC_VOL, MENU_MUSIC_FADE_MS);
+    } else {
+      fadeMenuMusic(MENU_MUSIC_VOL, MENU_MUSIC_FADE_MS);
     }
   }
   function stopMenuMusic() {
-    if (gwMenuMusicEl) gwMenuMusicEl.pause();
+    if (!gwMenuMusicEl || gwMenuMusicEl.paused) return;
+    fadeMenuMusic(0, MENU_MUSIC_FADE_MS, () => { if (gwMenuMusicEl) gwMenuMusicEl.pause(); });
   }
   function playTone(freq, dur, type, vol, slideTo, delay, opts) {
     if (!audioCtx || !soundOn) return;
@@ -3025,13 +3045,10 @@
     // plays out under the visual decode rather than as a separate sting
     ensureAudio();
     playBootGlitchSfx();
-    // near the end: computer-crash overlapping with a second play of the
-    // glitch sound. Their clip lengths (2.4s / 1.3s) cap the maximum
-    // possible overlap at computer-crash's own ~1.3s — starting them
-    // together right before collapse gets as close to that as physically
-    // possible rather than a literal 3s (neither clip is that long).
+    // near the end: computer-crash plays alone, timed to finish right as
+    // the sequence collapses
     const crashDelay = Math.max(0, TOTAL_MS - 1300);
-    setTimeout(() => { playBootGlitchSfx(); playComputerCrashSfx(); }, crashDelay);
+    setTimeout(() => { playComputerCrashSfx(); }, crashDelay);
     setTimeout(() => { stopGwStream(); stopHexReadouts(); if (onDone) onDone(); }, TOTAL_MS);
   }
 

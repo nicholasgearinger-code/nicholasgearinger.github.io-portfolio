@@ -1058,7 +1058,7 @@
   const radioTrackEl = document.getElementById('game-radio-track');
   const radioSkipBtn = document.getElementById('game-radio-skip');
   const radioWaveCtx = radioWaveEl ? radioWaveEl.getContext('2d') : null;
-  let radioAudioEl = null, radioAnalyser = null, radioSource = null;
+  let radioAudioEl = null, radioAnalyser = null, radioSource = null, radioMuteGain = null;
   let radioIdx = -1, radioStarted = false;
 
   function ensureRadioGraph() {
@@ -1077,12 +1077,22 @@
       radioSource = audioCtx.createMediaElementSource(radioAudioEl);
       radioAnalyser = audioCtx.createAnalyser();
       radioAnalyser.fftSize = 64;
+      radioMuteGain = audioCtx.createGain();
+      radioMuteGain.gain.value = soundOn ? 1 : 0;
       radioSource.connect(radioAnalyser);
-      radioAnalyser.connect(audioCtx.destination);
+      radioAnalyser.connect(radioMuteGain);
+      radioMuteGain.connect(audioCtx.destination);
     } catch (err) {
       console.warn('[ghostwire radio] waveform tap failed, falling back to direct playback:', err);
       radioAnalyser = null;
-      try { if (radioSource) radioSource.connect(audioCtx.destination); } catch (_) {}
+      try {
+        if (radioSource) {
+          radioMuteGain = audioCtx.createGain();
+          radioMuteGain.gain.value = soundOn ? 1 : 0;
+          radioSource.connect(radioMuteGain);
+          radioMuteGain.connect(audioCtx.destination);
+        }
+      } catch (_) {}
     }
   }
   function pickRadioIdx(excludeIdx) {
@@ -1187,6 +1197,7 @@
       setMuteIcon(!soundOn);
       muteBtn.classList.toggle('is-muted', !soundOn);
       if (radioAudioEl) radioAudioEl.muted = !soundOn;
+      if (radioMuteGain) radioMuteGain.gain.value = soundOn ? 1 : 0;
       updateMenuMusicPlayback();
       if (soundOn) { ensureAudio(); startRadio(); }
     });

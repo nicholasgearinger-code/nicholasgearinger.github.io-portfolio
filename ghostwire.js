@@ -385,6 +385,7 @@
   let items = [], particles = [], codeBits = [], projectiles = [], fizzles = [];
   let powerups = [], floatTexts = [], shockwaves = [];
   let score = 0, running = false, dying = false, deathTimer = 0, rafId = null, lastTime = 0;
+  let idleRafId = null, idleLastTime = 0; // "attract mode" loop — keeps the tunnel drifting behind the title/menu screens instead of sitting on one static frame
   let spawnTimer = 0, codeBitTimer = 0, elapsed = 0, difficulty = 1, level = 1;
   let shakeMag = 0, flash = 0, tunnelHue = 0, threat = 0;
   let streak = 0, invulnTimer = 0, fireTimer = 0;
@@ -2762,6 +2763,46 @@
     ctx.textAlign = 'left';
   }
 
+  // Background-only render used for the "attract mode" loop that plays
+  // behind the title gate / menu / game-over screens — same tunnel,
+  // skyline, and circuit-floor layers as live gameplay, just without the
+  // player, items, projectiles, or HUD on top.
+  function drawAmbientBackground() {
+    drawTunnel();
+    drawEraOverlay();
+    drawEraAccent();
+    drawStarfield();
+    drawSkyline();
+    drawWarpStreaks();
+    drawCircuitFloor();
+    drawCodeBits();
+    const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.85);
+    vg.addColorStop(0, 'rgba(0,0,0,0)');
+    vg.addColorStop(1, 'rgba(0,0,0,.6)');
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  function idleLoop(ts) {
+    if (running) { idleRafId = null; return; }
+    const dt = Math.min(0.05, (ts - idleLastTime) / 1000 || 0);
+    idleLastTime = ts;
+    tunnelHue += dt * 0.4; // slower than live-gameplay drift — calmer, ambient feel
+    ctx.clearRect(0, 0, W, H);
+    drawAmbientBackground();
+    idleRafId = requestAnimationFrame(idleLoop);
+  }
+
+  function startIdleAnim() {
+    if (running || idleRafId) return;
+    idleLastTime = performance.now();
+    idleRafId = requestAnimationFrame(idleLoop);
+  }
+
+  function stopIdleAnim() {
+    if (idleRafId) { cancelAnimationFrame(idleRafId); idleRafId = null; }
+  }
+
   function draw() {
     ctx.save();
     const shakeAmt = shakeMag * SHAKE_SCALE;
@@ -2853,6 +2894,7 @@
   }
 
   function start() {
+    stopIdleAnim();
     reset();
     overlay.hidden = true;
     scoreEntry.hidden = true;
@@ -2910,6 +2952,7 @@
     }
     if (shareBtn) { shareBtn.hidden = false; shareBtn.textContent = '\u21EA Share Score'; }
     if (pillText) pillText.textContent = 'CORRUPTED';
+    startIdleAnim();
   }
 
   function quitGame() {
@@ -2942,6 +2985,7 @@
     fadeReveal(overlayMainEl);
     fadeReveal(gameMenuPlay);
     if (gameWrap && gameWrap.classList.contains('gw-fullscreen')) exitFullscreenMode();
+    startIdleAnim();
   }
 
   async function loadLeaderboard() {
@@ -3420,6 +3464,6 @@
   }
 
   syncFullscreenLabel();
-  draw(); // idle frame so the canvas isn't blank before the first Play
+  startIdleAnim(); // tunnel keeps drifting behind the title/menu screens instead of one static frame
   loadLeaderboard();
 })();

@@ -2508,19 +2508,10 @@
     ctx.fillStyle = 'rgba(125,211,252,.8)';
     ctx.fillText('LVL ' + level + '  ·  ' + currentEraName(), clearX + 6, clearY);
 
-    // system status readout — mirrors the same threat tiers as the meter below
-    let sysLabel = 'SYS: NOMINAL', sysColor = 'rgba(34,211,238,.8)';
-    if (threat >= RED_THREAT) {
-      const blink = Math.sin(tunnelHue * 9) > 0;
-      sysLabel = 'SYS: CRITICAL';
-      sysColor = blink ? 'rgba(248,113,113,.95)' : 'rgba(248,113,113,.35)';
-    } else if (threat >= 0.4) {
-      sysLabel = 'SYS: ELEVATED';
-      sysColor = 'rgba(232,121,249,.8)';
-    }
+    // live score readout, top-center — replaces the old SYS status text
     ctx.textAlign = 'center';
-    ctx.fillStyle = sysColor;
-    ctx.fillText(sysLabel, W / 2, m + 12);
+    ctx.fillStyle = 'rgba(34,211,238,.85)';
+    ctx.fillText('SCORE: ' + score, W / 2, m + 12);
 
     // streak — consecutive clean catches since the last hit, with its combo multiplier
     const comboMult = 1 + Math.min(COMBO_MAX_MULT - 1, Math.floor(streak / COMBO_STEP));
@@ -2558,10 +2549,10 @@
     const totalW = segs * segW + (segs - 1) * gap;
     const startX = W - m - bl - 6 - totalW;
     const filled = Math.round(threat * segs);
-    // THREAT sits under two side-by-side buttons (mute + fullscreen-exit)
-    // in that corner, so it needs extra vertical clearance beyond the
-    // single-button baseline.
-    const threatClear = clearY + 14 * dispScaleY;
+    // THREAT sits under three side-by-side buttons (pause, fullscreen,
+    // mute) in that corner, so it needs real extra vertical clearance
+    // beyond the single-button baseline, not just a small nudge.
+    const threatClear = clearY + 26 * dispScaleY;
     ctx.textAlign = 'right';
     ctx.fillStyle = 'rgba(232,121,249,.75)';
     ctx.fillText('THREAT', startX - 6, threatClear);

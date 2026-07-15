@@ -790,7 +790,7 @@
   function playBootGlitchSfx() {
     if (!soundOn) return;
     if (!gwBootSfxEl) {
-      gwBootSfxEl = new Audio('sfx/boot-glitch.mp3');
+      gwBootSfxEl = new Audio('sfx/boot-glitch.wav');
       gwBootSfxEl.preload = 'auto';
       gwBootSfxEl.volume = 0.55;
     }

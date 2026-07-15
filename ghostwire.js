@@ -823,6 +823,25 @@
     try { gwClickSfxEl.currentTime = 0; } catch (_) {}
     gwClickSfxEl.play().catch((err) => console.warn('[ghostwire] click sfx play() failed:', err));
   }
+  // menu music — plays through the title screen and level-select, stops
+  // the instant a level is actually chosen (handlePlayClick), and resumes
+  // when the player's back at level-select after quitting or a run ending
+  let gwMenuMusicEl = null;
+  function startMenuMusic() {
+    if (!soundOn) return;
+    if (!gwMenuMusicEl) {
+      gwMenuMusicEl = new Audio('sfx/menu-music.mp3');
+      gwMenuMusicEl.preload = 'auto';
+      gwMenuMusicEl.loop = true;
+      gwMenuMusicEl.volume = 0.35;
+    }
+    if (gwMenuMusicEl.paused) {
+      gwMenuMusicEl.play().catch((err) => console.warn('[ghostwire] menu music play() failed:', err));
+    }
+  }
+  function stopMenuMusic() {
+    if (gwMenuMusicEl) gwMenuMusicEl.pause();
+  }
   function playTone(freq, dur, type, vol, slideTo, delay, opts) {
     if (!audioCtx || !soundOn) return;
     opts = opts || {};
@@ -1094,7 +1113,8 @@
       setMuteIcon(!soundOn);
       muteBtn.classList.toggle('is-muted', !soundOn);
       if (radioAudioEl) radioAudioEl.muted = !soundOn;
-      if (soundOn) { ensureAudio(); startRadio(); }
+      if (gwMenuMusicEl) gwMenuMusicEl.muted = !soundOn;
+      if (soundOn) { ensureAudio(); startRadio(); startMenuMusic(); }
     });
   }
 
@@ -2592,6 +2612,7 @@
     dying = false;
     if (rafId) cancelAnimationFrame(rafId);
     stopAmbient();
+    startMenuMusic();
     if (quitBtn) quitBtn.hidden = true;
     if (quitBtnFs) quitBtnFs.hidden = true;
     if (pauseBtn) pauseBtn.hidden = true;
@@ -2625,6 +2646,7 @@
     if (rafId) cancelAnimationFrame(rafId);
     stopAmbient();
     stopRadio();
+    startMenuMusic();
     if (quitBtn) quitBtn.hidden = true;
     if (quitBtnFs) quitBtnFs.hidden = true;
     if (pauseBtn) pauseBtn.hidden = true;
@@ -2660,6 +2682,7 @@
   }
 
   function handlePlayClick() {
+    stopMenuMusic();
     ensureAudio();
     startRadio();
     startBtn.disabled = true;
@@ -3012,6 +3035,7 @@
       titleSeqEl.hidden = false;
       if (boot) boot.classList.add('gw-boot-collapse');
       if (gameMenuRoot) fadeReveal(gameMenuRoot);
+      startMenuMusic();
       setTimeout(() => {
         if (boot) { boot.hidden = true; boot.classList.remove('gw-boot-active', 'gw-boot-collapse'); }
       }, 520);

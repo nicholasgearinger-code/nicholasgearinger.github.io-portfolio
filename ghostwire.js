@@ -3294,6 +3294,8 @@
   //    done, it collapses (scale + fade) to make room for the compact
   //    in-card title + Play/Menu buttons.
   const BOOT_LOG_LINES = ['SYS CHECK... OK', 'UPLINK: STABLE', 'LOADING ZONE DATA...'];
+  const gwBootHomeParent = document.getElementById('gw-boot') ? document.getElementById('gw-boot').parentNode : null;
+  const gwBootHomeNextSibling = document.getElementById('gw-boot') ? document.getElementById('gw-boot').nextSibling : null;
   function runGwBoot(onDone) {
     const boot = document.getElementById('gw-boot');
     const iconEl = document.getElementById('gw-boot-icon');
@@ -3302,6 +3304,13 @@
     const barFill = document.getElementById('gw-boot-bar-fill');
     const pctEl = document.getElementById('gw-boot-pct');
     if (!boot) { if (onDone) onDone(); return; }
+    // .panel (an ancestor at this point, before any fullscreen has been
+    // engaged) has a transform for its scroll-reveal effect, which
+    // creates a containing block for position:fixed descendants — so
+    // without this, gw-boot's "inset:0" resolves against .panel's own
+    // box instead of the true viewport, compressing it into whatever
+    // space .panel happens to occupy instead of centering on the page.
+    document.body.appendChild(boot);
     const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     boot.hidden = false;
     boot.classList.remove('gw-boot-collapse');
@@ -3386,7 +3395,14 @@
       if (gameMenuRoot) fadeReveal(gameMenuRoot);
       startMenuMusic();
       setTimeout(() => {
-        if (boot) { boot.hidden = true; boot.classList.remove('gw-boot-active', 'gw-boot-collapse'); }
+        if (boot) {
+          boot.hidden = true;
+          boot.classList.remove('gw-boot-active', 'gw-boot-collapse');
+          if (gwBootHomeParent) {
+            if (gwBootHomeNextSibling) gwBootHomeParent.insertBefore(boot, gwBootHomeNextSibling);
+            else gwBootHomeParent.appendChild(boot);
+          }
+        }
       }, 520);
     });
   }

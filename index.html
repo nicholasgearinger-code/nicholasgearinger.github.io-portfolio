@@ -2602,7 +2602,7 @@
   /* ── GHOSTWIRE GAME ── */
   .game-wrap { position: relative; width: 100%; max-width: 480px; margin: 0 auto; border-radius: .5rem; overflow: hidden; touch-action: none; }
   @media (max-width: 640px) {
-    .game-wrap:not(.gw-fullscreen):has(#game-overlay:not([hidden])) { min-height: 440px; }
+    .game-wrap:not(.gw-fullscreen):has(#game-overlay:not([hidden])) { min-height: 640px; }
   }
   .game-wrap.gw-fullscreen {
     position: fixed; inset: 0; z-index: 9999; margin: auto; max-width: none; border-radius: 0;
@@ -2943,7 +2943,16 @@
     color: rgba(148,163,184,.45); opacity: .6;
   }
   .game-loadout-item.gl-unlocked { color: var(--cyan); opacity: 1; text-shadow: 0 0 6px rgba(34,211,238,.5); }
-  .game-zone-select {
+  @media (orientation: landscape) and (max-height: 500px) {
+    /* Landscape phones are short on height but have plenty of width —
+       trade the extra width for saved vertical space instead of forcing
+       the same portrait-tuned stack to scroll to reach Play. */
+    .game-wrap:not(.gw-fullscreen) { max-width: 640px; }
+    .game-overlay { padding: 1.6rem 1.5rem 1rem; gap: .5rem; }
+    .game-overlay p { font-size: .74rem; max-width: 420px; }
+    .game-zone-row { max-width: 460px; gap: .3rem; }
+    .game-loadout { margin-top: 0; }
+  }
     display: flex; flex-direction: column; align-items: center; gap: .4rem;
   }
   .game-zone-label {

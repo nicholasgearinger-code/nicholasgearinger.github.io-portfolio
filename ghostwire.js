@@ -53,7 +53,15 @@
   const ICON_EXPAND_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>';
   const ICON_COLLAPSE_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v5H4M15 4v5h5M15 20v-5h5M9 20v-5H4"/></svg>';
   function setFullscreenIcon(isFullscreen) {
-    if (fullscreenBtn) fullscreenBtn.innerHTML = isFullscreen ? ICON_COLLAPSE_SVG : ICON_EXPAND_SVG;
+    const iconEl = fullscreenBtn && fullscreenBtn.querySelector('.gfs-icon');
+    if (iconEl) iconEl.innerHTML = isFullscreen ? ICON_COLLAPSE_SVG : ICON_EXPAND_SVG;
+  }
+  // labeled ("Full Screen") on the title screen / level-select / any other
+  // pre- or post-run menu state; icon-only once a run is actually active,
+  // since screen space matters more there and the icon's meaning is
+  // already established by the time someone's mid-game.
+  function syncFullscreenLabel() {
+    if (fullscreenBtn) fullscreenBtn.classList.toggle('gfs-labeled', !running);
   }
   const ICON_SOUND_ON_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16.3 8.6a5 5 0 0 1 0 6.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M18.9 6.1a8.7 8.7 0 0 1 0 11.8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity=".65"/></svg>';
   const ICON_SOUND_OFF_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M15.3 9.3l5 5.4M20.3 9.3l-5 5.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
@@ -1396,9 +1404,15 @@
     gameWrap.classList.add('gw-fullscreen');
     lockScroll();
     lockViewportZoom();
-    if (fullscreenBtn) { setFullscreenIcon(true); fullscreenBtn.setAttribute('aria-label', 'Exit fullscreen'); }
+    if (fullscreenBtn) { setFullscreenIcon(true); fullscreenBtn.setAttribute('aria-label', 'Exit fullscreen'); syncFullscreenLabel(); }
     const reqFs = gameWrap.requestFullscreen || gameWrap.webkitRequestFullscreen || gameWrap.mozRequestFullScreen || gameWrap.msRequestFullscreen;
     if (reqFs) { try { const p = reqFs.call(gameWrap); if (p && p.catch) p.catch(() => {}); } catch (_) {} }
+    // requestFullscreen() isn't available for arbitrary elements on
+    // mobile Safari — this nudge (the classic "hide the URL bar" trick)
+    // is the closest that context gets to true fullscreen, since the
+    // layout above now uses dvh/dvw and will actually expand into
+    // whatever space Safari reclaims once its chrome collapses.
+    setTimeout(() => window.scrollTo(0, 1), 50);
     try { if (screen.orientation && screen.orientation.lock) screen.orientation.lock('any').catch(() => {}); } catch (_) {}
   }
   function exitFullscreenMode(skipNativeExit) {
@@ -2833,6 +2847,7 @@
     submitNote.textContent = '';
     overlayTitle.classList.remove('gt-over');
     running = true;
+    syncFullscreenLabel();
     lastTime = performance.now();
     if (pillText) pillText.textContent = 'HUNTING';
     if (quitBtn) quitBtn.hidden = false;
@@ -2848,6 +2863,7 @@
 
   function gameOver() {
     running = false;
+    syncFullscreenLabel();
     dying = false;
     if (rafId) cancelAnimationFrame(rafId);
     stopAmbient();
@@ -2887,6 +2903,7 @@
   function quitGame() {
     if (!running && !dying) return;
     running = false;
+    syncFullscreenLabel();
     dying = false;
     if (rafId) cancelAnimationFrame(rafId);
     stopAmbient();
@@ -3374,6 +3391,7 @@
     });
   }
 
+  syncFullscreenLabel();
   draw(); // idle frame so the canvas isn't blank before the first Play
   loadLeaderboard();
 })();

@@ -2606,8 +2606,8 @@
   }
   .game-wrap.gw-fullscreen {
     position: fixed; inset: 0; z-index: 9999; margin: auto; max-width: none; border-radius: 0;
-    width: min(100svw, calc(100svh * 4 / 3));
-    height: min(100svh, calc(100svw * 3 / 4));
+    width: min(100dvw, calc(100dvh * 4 / 3));
+    height: min(100dvh, calc(100dvw * 3 / 4));
     background: #000;
   }
   @media (orientation: landscape) {
@@ -2615,7 +2615,7 @@
        canvas hit-testing already scales off getBoundingClientRect(), so
        this is display-only; only the canvas-drawn HUD text stretches
        slightly with it. */
-    .game-wrap.gw-fullscreen { width: 100svw; height: 100svh; }
+    .game-wrap.gw-fullscreen { width: 100dvw; height: 100dvh; }
   }
   .game-wrap.gw-fullscreen #game-canvas { height: 100%; }
   .game-wrap.gw-fullscreen::before {
@@ -2638,6 +2638,14 @@
     transition: opacity .15s ease, box-shadow .2s ease, transform .12s ease;
   }
   .game-fullscreen-btn:active { opacity: 1; transform: scale(.92); box-shadow: 0 0 14px rgba(34,211,238,.55), 0 0 22px rgba(129,140,248,.3); }
+  .game-fullscreen-btn .gfs-label { display: none; }
+  .game-fullscreen-btn.gfs-labeled {
+    width: auto; height: 2.1rem; border-radius: 100px; padding: 0 .9rem; gap: .4rem;
+  }
+  .game-fullscreen-btn.gfs-labeled .gfs-label {
+    display: inline; font-family: 'JetBrains Mono', monospace; font-size: .7rem;
+    font-weight: 600; letter-spacing: .02em; white-space: nowrap;
+  }
   .game-settings-btn {
     position: absolute; left: .7rem; top: .7rem; z-index: 15;
     width: 2.3rem; height: 2.3rem; border-radius: 50%;
@@ -3952,7 +3960,7 @@
           <button type="button" class="game-pause-btn" id="game-pause-btn" aria-label="Pause" hidden><svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><rect x="6" y="5" width="4.2" height="14" rx="1"/><rect x="13.8" y="5" width="4.2" height="14" rx="1"/></svg></button>
           <button type="button" class="game-mute-btn" id="game-mute-btn" aria-label="Toggle sound"><svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16.3 8.6a5 5 0 0 1 0 6.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M18.9 6.1a8.7 8.7 0 0 1 0 11.8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity=".65"/></svg></button>
           <button type="button" class="game-quit-fs-btn" id="game-quit-fs-btn" aria-label="Quit run" hidden><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg><span>Quit</span></button>
-          <button type="button" class="game-fullscreen-btn" id="game-fullscreen-btn" aria-label="Enter fullscreen"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg></button>
+          <button type="button" class="game-fullscreen-btn" id="game-fullscreen-btn" aria-label="Enter fullscreen"><span class="gfs-icon"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg></span><span class="gfs-label">Full Screen</span></button>
           <button type="button" class="game-settings-btn" id="game-settings-btn" aria-label="Settings and achievements" hidden><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="3.1"/><circle cx="12" cy="12" r="8" stroke-dasharray="2.6 3.4"/></svg></button>
           <div class="game-panel" id="game-settings-panel" hidden>
             <div class="game-panel-inner">

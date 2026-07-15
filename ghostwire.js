@@ -82,6 +82,7 @@
   const gameMenuPlay = document.getElementById('game-menu-play');
   const gameMenuPlayBtn = document.getElementById('game-menu-play-btn');
   const gameMenuMenuBtn = document.getElementById('game-menu-menu-btn');
+  const gameMenuRebootBtn = document.getElementById('game-menu-reboot-btn');
   const gameMenuBackBtn = document.getElementById('game-menu-back-btn');
   const achvCountEl = document.getElementById('gp-achv-count');
   if (!canvas || !startBtn) return;
@@ -581,6 +582,21 @@
     });
   }
   if (gameMenuMenuBtn) gameMenuMenuBtn.addEventListener('click', () => openSettingsPanel('settings'));
+  if (gameMenuRebootBtn) {
+    gameMenuRebootBtn.addEventListener('click', () => {
+      stopMenuMusic();
+      titleSeqEl && titleSeqEl.classList.add('fading-out');
+      gameMenuRoot && gameMenuRoot.classList.remove('is-visible');
+      setTimeout(() => {
+        if (titleSeqEl) { titleSeqEl.hidden = true; titleSeqEl.classList.remove('fading-out'); }
+        if (gameMenuRoot) gameMenuRoot.hidden = true;
+        if (titleGateEl) {
+          titleGateEl.hidden = false;
+          titleGateEl.classList.remove('fading-out');
+        }
+      }, 350);
+    });
+  }
   if (hapticsCheck) {
     hapticsCheck.addEventListener('change', () => {
       settings.haptics = hapticsCheck.checked;
@@ -857,8 +873,7 @@
     gwMenuMusicEl.volume = MENU_MUSIC_VOL;
     gwMenuMusicEl.play().then(() => gwMenuMusicEl.pause()).catch((err) => console.warn('[ghostwire] menu music unlock failed:', err));
   }
-  function startMenuMusic() {
-    if (!soundOn) return;
+  function startMenuMusicInternal() {
     if (!gwMenuMusicEl) unlockMenuMusic();
     if (!gwMenuMusicEl) return;
     if (gwMenuMusicEl.paused) {
@@ -869,9 +884,37 @@
       fadeMenuMusic(MENU_MUSIC_VOL, MENU_MUSIC_FADE_MS);
     }
   }
-  function stopMenuMusic() {
+  function stopMenuMusicInternal() {
     if (!gwMenuMusicEl || gwMenuMusicEl.paused) return;
     fadeMenuMusic(0, MENU_MUSIC_FADE_MS, () => { if (gwMenuMusicEl) gwMenuMusicEl.pause(); });
+  }
+  let menuMusicWanted = false;
+  function startMenuMusic() {
+    menuMusicWanted = true;
+    updateMenuMusicPlayback();
+  }
+  function stopMenuMusic() {
+    menuMusicWanted = false;
+    updateMenuMusicPlayback();
+  }
+  // menu music has no dedicated on-screen control once the player has
+  // scrolled away from the game to browse the rest of the site — rather
+  // than requiring them to scroll back down to find the mute button,
+  // it auto-pauses (with the same fade) the moment the game section
+  // leaves the viewport, and resumes if they scroll back while still on
+  // a menu/level-select screen (not mid-run).
+  let gwSectionVisible = true;
+  function updateMenuMusicPlayback() {
+    const shouldPlay = soundOn && menuMusicWanted && gwSectionVisible;
+    if (shouldPlay) startMenuMusicInternal();
+    else stopMenuMusicInternal();
+  }
+  if (gameWrap && 'IntersectionObserver' in window) {
+    const gwVisibilityObserver = new IntersectionObserver((entries) => {
+      gwSectionVisible = entries[0].isIntersecting;
+      updateMenuMusicPlayback();
+    }, { threshold: 0.15 });
+    gwVisibilityObserver.observe(gameWrap);
   }
   function playTone(freq, dur, type, vol, slideTo, delay, opts) {
     if (!audioCtx || !soundOn) return;
@@ -1144,8 +1187,8 @@
       setMuteIcon(!soundOn);
       muteBtn.classList.toggle('is-muted', !soundOn);
       if (radioAudioEl) radioAudioEl.muted = !soundOn;
-      if (gwMenuMusicEl) gwMenuMusicEl.muted = !soundOn;
-      if (soundOn) { ensureAudio(); startRadio(); startMenuMusic(); }
+      updateMenuMusicPlayback();
+      if (soundOn) { ensureAudio(); startRadio(); }
     });
   }
 

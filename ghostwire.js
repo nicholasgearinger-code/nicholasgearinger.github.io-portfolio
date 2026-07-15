@@ -544,6 +544,7 @@
   }
   if (titleGateBtn) {
     titleGateBtn.addEventListener('click', () => {
+      unlockMenuMusic();
       if (titleGateEl) {
         titleGateEl.classList.add('fading-out');
         setTimeout(() => { titleGateEl.hidden = true; }, 350);
@@ -827,14 +828,24 @@
   // the instant a level is actually chosen (handlePlayClick), and resumes
   // when the player's back at level-select after quitting or a run ending
   let gwMenuMusicEl = null;
+  // browsers only grant unprompted play() to a real user-gesture window —
+  // starting this several seconds into the boot sequence (deep inside a
+  // setTimeout chain from the original click) falls well outside that
+  // window and gets silently blocked. Priming the element synchronously
+  // inside the actual click handler (play, then instantly pause) "unlocks"
+  // it, so the later async play() call from startMenuMusic succeeds.
+  function unlockMenuMusic() {
+    if (gwMenuMusicEl) return;
+    gwMenuMusicEl = new Audio('sfx/menu-music.mp3');
+    gwMenuMusicEl.preload = 'auto';
+    gwMenuMusicEl.loop = true;
+    gwMenuMusicEl.volume = 0.35;
+    gwMenuMusicEl.play().then(() => gwMenuMusicEl.pause()).catch((err) => console.warn('[ghostwire] menu music unlock failed:', err));
+  }
   function startMenuMusic() {
     if (!soundOn) return;
-    if (!gwMenuMusicEl) {
-      gwMenuMusicEl = new Audio('sfx/menu-music.mp3');
-      gwMenuMusicEl.preload = 'auto';
-      gwMenuMusicEl.loop = true;
-      gwMenuMusicEl.volume = 0.35;
-    }
+    if (!gwMenuMusicEl) unlockMenuMusic();
+    if (!gwMenuMusicEl) return;
     if (gwMenuMusicEl.paused) {
       gwMenuMusicEl.play().catch((err) => console.warn('[ghostwire] menu music play() failed:', err));
     }

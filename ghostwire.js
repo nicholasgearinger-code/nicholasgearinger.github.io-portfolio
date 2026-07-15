@@ -29,6 +29,8 @@
   const overlayTitle = document.getElementById('game-overlay-title');
   const overlaySub = document.getElementById('game-overlay-sub');
   const startBtn = document.getElementById('game-start-btn');
+  const dailyBtn = document.getElementById('game-daily-btn');
+  const dailyNoteEl = document.getElementById('game-daily-note');
   const scoreEntry = document.getElementById('game-score-entry');
   const nameInput = document.getElementById('game-name-input');
   const submitBtn = document.getElementById('game-submit-btn');
@@ -77,6 +79,9 @@
   const hapticsNote = document.getElementById('gp-haptics-note');
   const colorblindCheck = document.getElementById('gp-colorblind');
   const graphicsSeg = document.getElementById('gp-graphics');
+  const difficultySeg = document.getElementById('gp-difficulty');
+  const sfxVolSlider = document.getElementById('gp-sfx-vol');
+  const musicVolSlider = document.getElementById('gp-music-vol');
   const achvListEl = document.getElementById('gp-achv-list');
   const gameMenuRoot = document.getElementById('game-menu-root');
   const gameMenuPlay = document.getElementById('game-menu-play');
@@ -265,6 +270,40 @@
 
 
   function randRange(a, b) { return a + Math.random() * (b - a); }
+  // -- DAILY CHALLENGE: same obstacle sequence for every player on a given
+  //    day. Rather than threading a seeded generator through every one of
+  //    the ~66 existing Math.random() call sites, this temporarily swaps
+  //    out Math.random itself for a seeded one for the run's duration —
+  //    every spawn/particle/drift call already in the codebase becomes
+  //    deterministic for free, and normal (non-daily) runs are completely
+  //    unaffected since the swap is reverted the moment the run ends.
+  const _nativeMathRandom = Math.random.bind(Math);
+  function mulberry32(seed) {
+    return function () {
+      seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function seedFromString(str) {
+    let h = 0;
+    for (let i = 0; i < str.length; i++) h = (Math.imul(31, h) + str.charCodeAt(i)) | 0;
+    return h;
+  }
+  function todaySeedString() {
+    const d = new Date();
+    return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate();
+  }
+  let isDailyChallenge = false;
+  function enableDailySeed() { Math.random = mulberry32(seedFromString(todaySeedString())); }
+  function disableDailySeed() { Math.random = _nativeMathRandom; }
+  let dailyBest = 0;
+  try { dailyBest = parseInt(localStorage.getItem('ghostwireDailyBest_' + todaySeedString()) || '0', 10) || 0; } catch (_) {}
+  function saveDailyBest(s) {
+    dailyBest = s;
+    try { localStorage.setItem('ghostwireDailyBest_' + todaySeedString(), String(s)); } catch (_) {}
+  }
 
   // Interpolates an "r,g,b" string between a calm/cool color and a
   // danger/warm color, driven by threat (0 = safe, 1 = critical) — used to
@@ -367,21 +406,69 @@
   let playerTrail = [];
   let stars = generateStarfield();
   let longestStreak = 0, shotsFired = 0, shotsHit = 0, hitsThisRun = 0;
+  // -- GHOST REPLAY: samples steering position every 100ms through a run;
+  //    if it beats the saved best for that zone, it's persisted and
+  //    played back (as a translucent echo, not a full simulation) the
+  //    next time that zone is played.
+  let ghostRecording = [], ghostRecordTimer = 0;
+  let ghostPlayback = null, ghostPlaybackScore = 0;
+  function loadGhostForZone(zoneIdx) {
+    try {
+      const raw = localStorage.getItem('ghostwireGhost_' + zoneIdx);
+      if (!raw) { ghostPlayback = null; return; }
+      const parsed = JSON.parse(raw);
+      ghostPlayback = parsed.samples || null;
+      ghostPlaybackScore = parsed.score || 0;
+    } catch (_) { ghostPlayback = null; }
+  }
+  function saveGhostIfBest(zoneIdx, finalScore, samples) {
+    try {
+      const raw = localStorage.getItem('ghostwireGhost_' + zoneIdx);
+      const prevScore = raw ? (JSON.parse(raw).score || 0) : 0;
+      if (finalScore > prevScore && samples.length > 2) {
+        localStorage.setItem('ghostwireGhost_' + zoneIdx, JSON.stringify({ score: finalScore, samples }));
+      }
+    } catch (_) {}
+  }
+  function ghostXAtElapsed(t) {
+    if (!ghostPlayback || !ghostPlayback.length) return null;
+    if (t <= ghostPlayback[0][0]) return ghostPlayback[0][1];
+    const last = ghostPlayback[ghostPlayback.length - 1];
+    if (t >= last[0]) return null; // ghost run ended before this point — fade out
+    for (let i = 1; i < ghostPlayback.length; i++) {
+      if (ghostPlayback[i][0] >= t) {
+        const a = ghostPlayback[i - 1], b = ghostPlayback[i];
+        const span = b[0] - a[0];
+        const f = span > 0 ? (t - a[0]) / span : 0;
+        return a[1] + (b[1] - a[1]) * f;
+      }
+    }
+    return null;
+  }
   let circuitTraces = generateCircuitTraces();
   let skylineParts = generateSkyline();
   let best = parseInt(localStorage.getItem('ghostwireBest') || '0', 10);
   bestStatEl.innerHTML = 'best: <strong>' + best + '</strong>';
 
-  // -- settings: haptics / colorblind-safe palette / graphics quality —
-  //    persisted alongside the existing ghostwireBest/ghostwireUnlocks keys.
-  let settings = { haptics: true, colorblind: false, graphics: 'auto' };
+  // -- settings: haptics / colorblind-safe palette / graphics quality /
+  //    difficulty / volume — persisted alongside the existing
+  //    ghostwireBest/ghostwireUnlocks keys.
+  let settings = { haptics: true, colorblind: false, graphics: 'auto', difficulty: 'normal', sfxVolume: 1, musicVolume: 1 };
   try {
     const savedSettings = JSON.parse(localStorage.getItem('ghostwireSettings') || '{}');
     if (typeof savedSettings.haptics === 'boolean') settings.haptics = savedSettings.haptics;
     if (typeof savedSettings.colorblind === 'boolean') settings.colorblind = savedSettings.colorblind;
     if (['auto', 'high', 'low'].includes(savedSettings.graphics)) settings.graphics = savedSettings.graphics;
+    if (['easy', 'normal', 'hard'].includes(savedSettings.difficulty)) settings.difficulty = savedSettings.difficulty;
+    if (typeof savedSettings.sfxVolume === 'number') settings.sfxVolume = Math.min(1, Math.max(0, savedSettings.sfxVolume));
+    if (typeof savedSettings.musicVolume === 'number') settings.musicVolume = Math.min(1, Math.max(0, savedSettings.musicVolume));
   } catch (_) { /* corrupt/missing storage — defaults above stand */ }
   function saveSettings() { try { localStorage.setItem('ghostwireSettings', JSON.stringify(settings)); } catch (_) {} }
+  // difficulty scales the threat-rise rate and spawn cadence — applied at
+  // the two single choke points that already drive that pacing
+  const DIFFICULTY_MULT = { easy: 0.7, normal: 1, hard: 1.4 };
+  function difficultyThreatMult() { return DIFFICULTY_MULT[settings.difficulty] || 1; }
+  function difficultySpawnMult() { return DIFFICULTY_MULT[settings.difficulty] || 1; }
 
   function haptic(pattern) {
     if (!settings.haptics || !navigator.vibrate) return;
@@ -493,6 +580,13 @@
         b.classList.toggle('active', b.dataset.val === settings.graphics);
       });
     }
+    if (difficultySeg) {
+      difficultySeg.querySelectorAll('.gp-seg-btn').forEach((b) => {
+        b.classList.toggle('active', b.dataset.val === settings.difficulty);
+      });
+    }
+    if (sfxVolSlider) sfxVolSlider.value = Math.round(settings.sfxVolume * 100);
+    if (musicVolSlider) musicVolSlider.value = Math.round(settings.musicVolume * 100);
   }
   function showSettingsTab(tab) {
     if (tabSettingsBtn) tabSettingsBtn.classList.toggle('active', tab === 'settings');
@@ -621,6 +715,29 @@
       });
     });
   }
+  if (difficultySeg) {
+    difficultySeg.querySelectorAll('.gp-seg-btn').forEach((b) => {
+      b.addEventListener('click', () => {
+        settings.difficulty = b.dataset.val;
+        saveSettings();
+        syncSettingsUI();
+      });
+    });
+  }
+  if (sfxVolSlider) {
+    sfxVolSlider.addEventListener('input', () => {
+      settings.sfxVolume = Number(sfxVolSlider.value) / 100;
+      saveSettings();
+    });
+  }
+  if (musicVolSlider) {
+    musicVolSlider.addEventListener('input', () => {
+      settings.musicVolume = Number(musicVolSlider.value) / 100;
+      saveSettings();
+      if (gwMenuMusicEl) gwMenuMusicEl.volume = MENU_MUSIC_VOL * settings.musicVolume;
+      if (radioAudioEl) radioAudioEl.volume = 0.5 * settings.musicVolume;
+    });
+  }
   syncSettingsUI();
 
   function escapeHtml(s) {
@@ -645,6 +762,8 @@
     playerX = W / 2; targetX = playerX; playerVX = 0;
     shakeMag = 0; flash = 0; dying = false; deathTimer = 0;
     streak = 0; invulnTimer = 0; hitsThisRun = 0;
+    ghostRecording = []; ghostRecordTimer = 0;
+    loadGhostForZone(pendingZone);
     if (!visitedZones.includes(pendingZone)) {
       visitedZones.push(pendingZone);
       saveVisitedZones();
@@ -766,6 +885,23 @@
     shakeMag = Math.max(shakeMag, 6);
   }
 
+  function spawnSentinel() {
+    // A third mini-boss reserved for the later zones (Reactor/Breach) —
+    // higher HP than either FIREWALL or WORM, and drifts faster/wider
+    // than WORM so those zones get their own distinct encounter instead
+    // of just reusing the same two bosses at higher difficulty.
+    const hp = 5;
+    const lane = W / 2;
+    items.push({
+      lane, baseLane: lane, z: 1, baseR: 24, type: 'bad', boss: true, worm: true,
+      hp, maxHp: hp, token: 'SENTINEL', vz: 0.3 * difficulty, spin: 0, seed: Math.random() * 1000,
+      x: VP_X, y: VP_Y, r: 1, glitchT: 0,
+      drift: true, driftAmp: W * 0.42, driftFreq: 0.85 + Math.random() * 0.25, splitter: false, mini: false,
+    });
+    spawnFloatText(W / 2, VP_Y + 70, '\u26A0 SENTINEL ONLINE', '#F59E0B');
+    shakeMag = Math.max(shakeMag, 7);
+  }
+
   function spawnFloatText(x, y, text, color) {
     floatTexts.push({ x, y, text, color, life: 0.9, maxLife: 0.9 });
   }
@@ -809,8 +945,8 @@
     if (!gwBootSfxEl) {
       gwBootSfxEl = new Audio('sfx/boot-glitch.wav');
       gwBootSfxEl.preload = 'auto';
-      gwBootSfxEl.volume = 0.55;
     }
+    gwBootSfxEl.volume = 0.55 * settings.sfxVolume;
     try { gwBootSfxEl.currentTime = 0; } catch (_) {}
     gwBootSfxEl.play().catch((err) => console.warn('[ghostwire boot] sfx play() failed:', err));
   }
@@ -820,8 +956,8 @@
     if (!gwCrashSfxEl) {
       gwCrashSfxEl = new Audio('sfx/computer-crash.mp3');
       gwCrashSfxEl.preload = 'auto';
-      gwCrashSfxEl.volume = 0.55;
     }
+    gwCrashSfxEl.volume = 0.55 * settings.sfxVolume;
     try { gwCrashSfxEl.currentTime = 0; } catch (_) {}
     gwCrashSfxEl.play().catch((err) => console.warn('[ghostwire boot] crash sfx play() failed:', err));
   }
@@ -835,8 +971,8 @@
     if (!gwClickSfxEl) {
       gwClickSfxEl = new Audio('sfx/success.mp3');
       gwClickSfxEl.preload = 'auto';
-      gwClickSfxEl.volume = 0.45;
     }
+    gwClickSfxEl.volume = 0.45 * settings.sfxVolume;
     try { gwClickSfxEl.currentTime = 0; } catch (_) {}
     gwClickSfxEl.play().catch((err) => console.warn('[ghostwire] click sfx play() failed:', err));
   }
@@ -870,7 +1006,7 @@
     gwMenuMusicEl = new Audio('sfx/menu-music.mp3');
     gwMenuMusicEl.preload = 'auto';
     gwMenuMusicEl.loop = true;
-    gwMenuMusicEl.volume = MENU_MUSIC_VOL;
+    gwMenuMusicEl.volume = MENU_MUSIC_VOL * settings.musicVolume;
     gwMenuMusicEl.play().then(() => gwMenuMusicEl.pause()).catch((err) => console.warn('[ghostwire] menu music unlock failed:', err));
   }
   function startMenuMusicInternal() {
@@ -879,9 +1015,9 @@
     if (gwMenuMusicEl.paused) {
       gwMenuMusicEl.volume = 0;
       gwMenuMusicEl.play().catch((err) => console.warn('[ghostwire] menu music play() failed:', err));
-      fadeMenuMusic(MENU_MUSIC_VOL, MENU_MUSIC_FADE_MS);
+      fadeMenuMusic(MENU_MUSIC_VOL * settings.musicVolume, MENU_MUSIC_FADE_MS);
     } else {
-      fadeMenuMusic(MENU_MUSIC_VOL, MENU_MUSIC_FADE_MS);
+      fadeMenuMusic(MENU_MUSIC_VOL * settings.musicVolume, MENU_MUSIC_FADE_MS);
     }
   }
   function stopMenuMusicInternal() {
@@ -942,8 +1078,8 @@
       lastNode.connect(gain); gain.connect(audioCtx.destination);
       osc.start(t0); osc.stop(t0 + dur + 0.03);
     }
-    voice(0, vol || 0.15);
-    if (opts.detune) voice(opts.detune, (vol || 0.15) * 0.55);
+    voice(0, (vol || 0.15) * settings.sfxVolume);
+    if (opts.detune) voice(opts.detune, (vol || 0.15) * 0.55 * settings.sfxVolume);
   }
   function playNoise(dur, vol, delay) {
     if (!audioCtx || !soundOn) return;
@@ -954,7 +1090,7 @@
     const src = audioCtx.createBufferSource(), gain = audioCtx.createGain();
     src.buffer = buffer;
     const t0 = audioCtx.currentTime + (delay || 0);
-    gain.gain.setValueAtTime(vol || 0.15, t0);
+    gain.gain.setValueAtTime((vol || 0.15) * settings.sfxVolume, t0);
     gain.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
     src.connect(gain); gain.connect(audioCtx.destination);
     src.start(t0);
@@ -1065,7 +1201,7 @@
     if (radioAudioEl || !audioCtx) return;
     radioAudioEl = new Audio();
     radioAudioEl.preload = 'auto';
-    radioAudioEl.volume = 0.5;
+    radioAudioEl.volume = 0.5 * settings.musicVolume;
     radioAudioEl.addEventListener('ended', nextRadioTrack);
     // createMediaElementSource() permanently reroutes this element's audio
     // output through the Web Audio graph the instant it's called — if
@@ -1515,6 +1651,11 @@
     updateFloatTexts(dt);
     updateShockwaves(dt);
     updateAmbient();
+    ghostRecordTimer += dt;
+    if (ghostRecordTimer >= 0.1) {
+      ghostRecordTimer = 0;
+      ghostRecording.push([elapsed, targetX]);
+    }
     shakeMag = Math.max(0, shakeMag - dt * 70);
     flash = Math.max(0, flash - dt * 3.2);
     eraFlashTimer = Math.max(0, eraFlashTimer - dt * 2);
@@ -1590,11 +1731,14 @@
       const tier = Math.floor((level - 1) / 5);
       if (tier > 0 && tier !== bossTierSpawned) {
         bossTierSpawned = tier;
-        if (wormToggle) spawnWorm(); else spawnBoss();
+        if (tier >= 4) {
+          const pick = tier % 3;
+          if (pick === 0) spawnBoss(); else if (pick === 1) spawnWorm(); else spawnSentinel();
+        } else if (wormToggle) spawnWorm(); else spawnBoss();
         wormToggle = !wormToggle;
       }
     }
-    threat = Math.max(0, Math.min(1, threat + dt * THREAT_RISE_PER_SEC));
+    threat = Math.max(0, Math.min(1, threat + dt * THREAT_RISE_PER_SEC * difficultyThreatMult()));
     invulnTimer = Math.max(0, invulnTimer - dt);
     fireTimer = Math.max(0, fireTimer - dt);
     rapidTimer = Math.max(0, rapidTimer - dt);
@@ -1627,7 +1771,7 @@
     }
 
     spawnTimer -= dt;
-    const spawnInterval = Math.max(0.24, 0.82 - elapsed / 38) / (surging ? 2.2 : 1);
+    const spawnInterval = Math.max(0.24, 0.82 - elapsed / 38) / (surging ? 2.2 : 1) / difficultySpawnMult();
     if (spawnTimer <= 0) { spawnItem(); spawnTimer = spawnInterval; }
 
     powerupTimer -= dt;
@@ -2317,6 +2461,24 @@
     });
   }
 
+  function drawGhost() {
+    if (!ghostPlayback) return;
+    const gx = ghostXAtElapsed(elapsed);
+    if (gx === null) return;
+    ctx.save();
+    ctx.translate(gx, PLAYER_Y);
+    ctx.globalAlpha = 0.35;
+    ctx.beginPath();
+    ctx.strokeStyle = 'rgba(232,121,249,.8)';
+    ctx.lineWidth = 1.4;
+    ctx.moveTo(0, -PLAYER_H / 2);
+    ctx.lineTo(PLAYER_W / 2, PLAYER_H / 2 - 4);
+    ctx.lineTo(PLAYER_W * 0.18, PLAYER_H / 2);
+    ctx.lineTo(-PLAYER_W * 0.18, PLAYER_H / 2);
+    ctx.lineTo(-PLAYER_W / 2, PLAYER_H / 2 - 4);
+    ctx.closePath(); ctx.stroke();
+    ctx.restore();
+  }
   function drawPlayer() {
     const lean = Math.max(-0.5, Math.min(0.5, -playerVX * 0.0016));
     const flickering = invulnTimer > 0 && Math.floor(invulnTimer * 16) % 2 === 0;
@@ -2597,6 +2759,7 @@
     drawShockwaves();
     drawProjectiles();
     drawParticles();
+    drawGhost();
     drawPlayer();
     drawFloatTexts();
 
@@ -2698,6 +2861,12 @@
       localStorage.setItem('ghostwireBest', String(best));
       bestStatEl.innerHTML = 'best: <strong>' + best + '</strong>';
     }
+    saveGhostIfBest(pendingZone, score, ghostRecording);
+    if (isDailyChallenge) {
+      if (score > dailyBest) saveDailyBest(score);
+      disableDailySeed();
+      isDailyChallenge = false;
+    }
     overlay.hidden = false;
     overlayTitle.textContent = 'Connection Corrupted';
     overlayTitle.classList.add('gt-over');
@@ -2723,6 +2892,8 @@
     stopAmbient();
     stopRadio();
     startMenuMusic();
+    saveGhostIfBest(pendingZone, score, ghostRecording);
+    if (isDailyChallenge) { disableDailySeed(); isDailyChallenge = false; }
     if (quitBtn) quitBtn.hidden = true;
     if (quitBtnFs) quitBtnFs.hidden = true;
     if (pauseBtn) pauseBtn.hidden = true;
@@ -2767,6 +2938,14 @@
     startBtn.disabled = false;
   }
   startBtn.addEventListener('click', handlePlayClick);
+  if (dailyBtn) {
+    dailyBtn.addEventListener('click', () => {
+      pendingZone = 0;
+      isDailyChallenge = true;
+      enableDailySeed();
+      handlePlayClick();
+    });
+  }
   const zoneBtns = document.querySelectorAll('.game-zone-btn');
   function setActiveZoneBtn(idx) {
     zoneBtns.forEach((b) => b.classList.toggle('gz-active', Number(b.dataset.zone) === idx));
@@ -2791,6 +2970,19 @@
     if (!isZoneUnlocked(pendingZone)) pendingZone = frontier;
     setActiveZoneBtn(pendingZone);
     updatePlayButtonLabel();
+    updateLoadoutPreview();
+    if (dailyNoteEl) {
+      dailyNoteEl.hidden = false;
+      dailyNoteEl.textContent = dailyBest > 0 ? "Today's best: " + dailyBest : 'No daily run yet today';
+    }
+  }
+  function updateLoadoutPreview() {
+    const spreadEl = document.getElementById('game-loadout-spread');
+    const homingEl = document.getElementById('game-loadout-homing');
+    const overchargeEl = document.getElementById('game-loadout-overcharge');
+    if (spreadEl) spreadEl.classList.toggle('gl-unlocked', !!unlocks.spread);
+    if (homingEl) homingEl.classList.toggle('gl-unlocked', !!unlocks.homing);
+    if (overchargeEl) overchargeEl.classList.toggle('gl-unlocked', !!unlocks.overcharge);
   }
   zoneBtns.forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -2829,12 +3021,79 @@
     submitBtn.textContent = 'Submit Score';
   });
 
+  function generateShareCardBlob() {
+    return new Promise((resolve) => {
+      const w = 800, h = 420;
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      const g = c.getContext('2d');
+      const bgGrad = g.createLinearGradient(0, 0, w, h);
+      bgGrad.addColorStop(0, '#050912'); bgGrad.addColorStop(1, '#0a0f1e');
+      g.fillStyle = bgGrad; g.fillRect(0, 0, w, h);
+      g.strokeStyle = 'rgba(34,211,238,.15)'; g.lineWidth = 1;
+      for (let x = 0; x < w; x += 40) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, h); g.stroke(); }
+      for (let y = 0; y < h; y += 40) { g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke(); }
+      g.strokeStyle = 'rgba(232,121,249,.6)'; g.lineWidth = 2;
+      g.strokeRect(12, 12, w - 24, h - 24);
+      g.textAlign = 'left';
+      g.font = '700 34px "JetBrains Mono", monospace';
+      g.fillStyle = '#22D3EE'; g.shadowColor = 'rgba(34,211,238,.7)'; g.shadowBlur = 14;
+      g.fillText('</> GHOSTWIRE', 48, 80);
+      g.shadowBlur = 0;
+      g.font = '400 15px "JetBrains Mono", monospace';
+      g.fillStyle = 'rgba(148,163,184,.85)';
+      g.fillText('SYSTEM BREACH REPORT', 48, 110);
+      g.font = '700 92px "JetBrains Mono", monospace';
+      g.fillStyle = '#F0F8FF'; g.shadowColor = 'rgba(232,121,249,.5)'; g.shadowBlur = 18;
+      g.fillText(String(score), 48, 225);
+      g.shadowBlur = 0;
+      g.font = '400 16px "JetBrains Mono", monospace';
+      g.fillStyle = 'rgba(148,163,184,.85)';
+      g.fillText('POINTS', 50, 250);
+      const stats = [
+        ['LEVEL REACHED', String(level)],
+        ['ZONE', currentEraName()],
+        ['LONGEST STREAK', String(longestStreak)],
+      ];
+      let sx = 48;
+      stats.forEach(([label, val]) => {
+        g.font = '400 12px "JetBrains Mono", monospace';
+        g.fillStyle = 'rgba(148,163,184,.7)';
+        g.fillText(label, sx, 310);
+        g.font = '700 22px "JetBrains Mono", monospace';
+        g.fillStyle = '#E879F9';
+        g.fillText(val, sx, 340);
+        sx += 230;
+      });
+      g.font = '400 13px "JetBrains Mono", monospace';
+      g.fillStyle = 'rgba(148,163,184,.5)';
+      g.textAlign = 'right';
+      g.fillText(window.location.hostname || 'ghostwire', w - 40, h - 32);
+      c.toBlob((blob) => resolve(blob), 'image/png');
+    });
+  }
   if (shareBtn) {
     shareBtn.addEventListener('click', async () => {
       const text = 'I scored ' + score + ' on GHOSTWIRE (reached level ' + level + '). Beat me:';
       const url = window.location.href.split('#')[0];
+      const blob = await generateShareCardBlob();
+      const file = blob ? new File([blob], 'ghostwire-score.png', { type: 'image/png' }) : null;
+      if (navigator.share && file && navigator.canShare && navigator.canShare({ files: [file] })) {
+        try { await navigator.share({ title: 'GHOSTWIRE', text, url, files: [file] }); return; } catch (_) { /* user cancelled */ return; }
+      }
       if (navigator.share) {
-        try { await navigator.share({ title: 'GHOSTWIRE', text, url }); } catch (_) { /* user cancelled or unsupported */ }
+        try { await navigator.share({ title: 'GHOSTWIRE', text, url }); return; } catch (_) { /* user cancelled */ return; }
+      }
+      // no Web Share API — download the image directly instead of just
+      // copying text, so there's still something visual to actually post
+      if (blob) {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'ghostwire-score.png';
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+        shareBtn.textContent = 'Saved!';
+        setTimeout(() => { shareBtn.textContent = '\u21EA Share Score'; }, 1800);
       } else if (navigator.clipboard) {
         try {
           await navigator.clipboard.writeText(text + ' ' + url);

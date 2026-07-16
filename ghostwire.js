@@ -498,6 +498,11 @@
     }
     return null;
   }
+  // Hoisted above generateCircuitTraces()'s first call below — it reads
+  // CIRCUIT_SCALE immediately, so the declaration must exist before this
+  // point. (The full applyGraphics()/effectiveGraphics() logic that sets
+  // the real values still lives further down with the rest of settings.)
+  let PARTICLE_SCALE = 1, SHAKE_SCALE = 1, CIRCUIT_SCALE = 1, RIM_GLOW_SCALE = 1;
   let circuitTraces = generateCircuitTraces();
   let skylineParts = generateSkyline();
   let best = parseInt(localStorage.getItem('ghostwireBest') || '0', 10);
@@ -540,7 +545,8 @@
   // 'auto' guesses low-end from core count / reduced-motion; particle count
   // and screen-shake magnitude both scale off this single multiplier so any
   // future effect can opt in by reading PARTICLE_SCALE / SHAKE_SCALE.
-  let PARTICLE_SCALE = 1, SHAKE_SCALE = 1, CIRCUIT_SCALE = 1, RIM_GLOW_SCALE = 1;
+  // (declared earlier, right before generateCircuitTraces()'s first call,
+  // since it reads CIRCUIT_SCALE immediately — see that comment for why)
   function effectiveGraphics() {
     if (settings.graphics !== 'auto') return settings.graphics;
     const lowEnd = (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4)

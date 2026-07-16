@@ -2772,21 +2772,6 @@
   }
   .game-title-gate.fading-out { opacity: 0; pointer-events: none; }
   .game-title-gate[hidden] { display: none; }
-  /* A faint red/cyan chromatic split right at the edges — reads as
-     signal interference rather than a hard vignette, breathing very
-     slowly so it doesn't compete with everything else already animating */
-  .game-title-gate::before {
-    content: ''; position: absolute; inset: 0; pointer-events: none;
-    box-shadow: inset 4px 0 14px rgba(239,68,68,.16), inset -4px 0 14px rgba(34,211,238,.16),
-      inset 0 4px 14px rgba(239,68,68,.08), inset 0 -4px 14px rgba(34,211,238,.08);
-  }
-  @media (prefers-reduced-motion: no-preference) {
-    .game-title-gate::before { animation: gateFringeBreathe 9s ease-in-out infinite; }
-  }
-  @keyframes gateFringeBreathe {
-    0%, 100% { opacity: .7; }
-    50% { opacity: 1; }
-  }
   .game-title-gate-logo {
     display: flex; flex-direction: column; align-items: center; gap: .6rem; opacity: 1;
   }

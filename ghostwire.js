@@ -683,11 +683,16 @@
     titleGateBtn.addEventListener('click', () => {
       unlockMenuMusic();
       spawnButtonBurst(titleGateBtn);
-      if (titleGateEl) {
-        titleGateEl.classList.add('fading-out');
-        setTimeout(() => { titleGateEl.hidden = true; }, 350);
-      }
-      playInitialTitleCard();
+      // wait for the burst to fully play out (last particle can start up
+      // to .05s late and animates for .6s) before the gate starts fading
+      // and the boot sequence takes over, instead of both happening at once
+      setTimeout(() => {
+        if (titleGateEl) {
+          titleGateEl.classList.add('fading-out');
+          setTimeout(() => { titleGateEl.hidden = true; }, 350);
+        }
+        playInitialTitleCard();
+      }, 650);
     });
   }
   if (gameMenuPlayBtn) {

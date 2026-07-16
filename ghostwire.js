@@ -2335,47 +2335,69 @@
     });
   }
 
+  // Eased perspective scale shared by every circuit-floor element: tiny at
+  // the vanishing point (p=0), growing to `regular` up close (p=1). The
+  // >1 exponent keeps things small for most of the distance and only
+  // grows quickly right near the front — reads as actual distance rather
+  // than a flat near-to-far ramp.
+  function perspSize(p, regular) {
+    return regular * 0.15 + Math.pow(p, 1.6) * regular * 0.85;
+  }
   function drawCircuitFloor(boost) {
     boost = boost || 1;
     ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    // a slow, shared breathing pulse on every glow below — ties the whole
+    // circuit floor together instead of each element glowing at one flat,
+    // static intensity the whole time
+    const glowPulse = 0.6 + 0.4 * Math.sin(tunnelHue * 1.6);
     circuitTraces.forEach((t) => {
       const nearP = t.pts[t.pts.length - 1].p;
-      const fade = Math.min(1, (0.09 + nearP * 0.12) * boost);
       // each trace's cool base hue (violet or magenta) shifts toward
       // orange/red as threat rises, matching the tunnel background
       const cool = eraRGB(t.hue === 'violet' ? [167, 139, 250] : [232, 121, 249]);
       const warm = eraRGB(t.hue === 'violet' ? [249, 115, 22] : [239, 68, 68]);
       const color = lerpColorStr(cool, warm, threat);
 
-      ctx.beginPath();
-      t.pts.forEach((pt, i) => {
-        const s = projectPoint(pt.lane, pt.p);
-        if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y);
-      });
-      ctx.strokeStyle = 'rgba(' + color + ',' + fade.toFixed(3) + ')';
-      ctx.lineWidth = 1.2;
-      if (boost > 1) { ctx.shadowColor = 'rgb(' + color + ')'; ctx.shadowBlur = 4 * boost; }
-      ctx.stroke();
-      ctx.shadowBlur = 0;
+      // each segment drawn (and tapered) separately, rather than one
+      // constant-width stroke for the whole trace — about half the old
+      // regular width up close (0.6px vs 1.2px), thinning to barely-there
+      // near the vanishing point
+      for (let i = 0; i < t.pts.length - 1; i++) {
+        const a = t.pts[i], b = t.pts[i + 1];
+        const segP = (a.p + b.p) / 2;
+        const sa = projectPoint(a.lane, a.p), sb = projectPoint(b.lane, b.p);
+        const fade = Math.min(1, (0.06 + Math.pow(segP, 1.6) * 0.15) * boost);
+        ctx.beginPath();
+        ctx.moveTo(sa.x, sa.y); ctx.lineTo(sb.x, sb.y);
+        ctx.strokeStyle = 'rgba(' + color + ',' + fade.toFixed(3) + ')';
+        ctx.lineWidth = perspSize(segP, 0.6) * boost;
+        ctx.shadowColor = 'rgb(' + color + ')'; ctx.shadowBlur = 3 * boost * glowPulse;
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+      }
 
-      // solder-pad vias at each waypoint, bigger where the trace is closer
+      // solder-pad vias at each waypoint — tiny out near the vanishing
+      // point, growing to about half their old size up close
       t.pts.forEach((pt) => {
         const s = projectPoint(pt.lane, pt.p);
-        const r = 1 + pt.p * 2.1;
+        const r = perspSize(pt.p, 1.55) * boost;
+        const fade = Math.min(1, (0.09 + Math.pow(pt.p, 1.6) * 0.12) * boost + 0.12 * boost);
         ctx.beginPath();
-        ctx.fillStyle = 'rgba(' + color + ',' + Math.min(1, fade + 0.12 * boost).toFixed(3) + ')';
+        ctx.fillStyle = 'rgba(' + color + ',' + fade.toFixed(3) + ')';
+        ctx.shadowColor = 'rgb(' + color + ')'; ctx.shadowBlur = 5 * boost * glowPulse;
         ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
         ctx.fill();
+        ctx.shadowBlur = 0;
       });
 
       // a pulse of "current" traveling along the trace toward the player —
       // shifts with the level era like the rest of the circuit floor
       const pulse = pointAlongTrace(t, t.phase);
-      const pulseR = (1.4 + nearP * 2.1) * Math.min(1.6, boost);
+      const pulseR = perspSize(nearP, 1.75) * Math.min(1.6, boost);
       const pulseColor = 'rgb(' + eraRGB([232, 121, 249]).join(',') + ')';
       ctx.beginPath();
       ctx.fillStyle = pulseColor;
-      ctx.shadowColor = pulseColor; ctx.shadowBlur = 7 * boost;
+      ctx.shadowColor = pulseColor; ctx.shadowBlur = 8 * boost * glowPulse;
       ctx.arc(pulse.x, pulse.y, pulseR, 0, Math.PI * 2);
       ctx.fill();
       ctx.shadowBlur = 0;

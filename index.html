@@ -2785,27 +2785,25 @@
     font-size: clamp(2.8rem, 13vw, 4.8rem); letter-spacing: .02em;
   }
   @media (prefers-reduced-motion: no-preference) {
-    .game-title-gate-icon { animation: gateLogoLive 7s ease-in-out infinite; }
+    .game-title-gate-icon { animation: gateLogoLive 8s ease-in-out infinite; }
     .game-title-gate-icon::after { animation: gateLogoScanline 3.4s linear infinite; }
   }
-  /* A neon-sign treatment rather than a fade: mostly steady at full glow,
-     with a few irregular quick stutter-dips (chromatic split, like a tube
-     briefly losing/regaining current) at uneven points in the cycle, plus
-     one dedicated bright "surge" moment where the glow pumps up rather
-     than dips — reads as a buzzing sign rather than a breathing fade. */
+  /* A clear arc rather than scattered flat-with-dips: the glow slowly
+     builds to a bright peak, flickers (chromatic-split stutter dips,
+     like a tube buzzing at full power) while up there, then slowly dims
+     back down to baseline before repeating — reads as a neon sign cycling
+     through a power surge rather than a constant idle hum. */
   @keyframes gateLogoLive {
-    0%, 100% { filter: brightness(1); transform: scale(1) translate(0, 0); }
-    4% { filter: brightness(.25) drop-shadow(2px 0 0 rgba(239,68,68,.75)) drop-shadow(-2px 0 0 rgba(34,211,238,.75)); transform: scale(1) translate(-1px, 0); }
-    5% { filter: brightness(1.3); transform: scale(1) translate(1px, 0); }
-    6%, 32% { filter: brightness(1); transform: scale(1) translate(0, 0); }
-    34% { filter: brightness(.2) drop-shadow(-2.5px 0 0 rgba(232,121,249,.8)) drop-shadow(2.5px 0 0 rgba(34,211,238,.8)); transform: scale(1) translate(1px, 0); }
-    34.6% { filter: brightness(1.4); transform: scale(1) translate(-1px, 0); }
-    35.4%, 55% { filter: brightness(1); transform: scale(1) translate(0, 0); }
-    58% { filter: brightness(1.45) drop-shadow(0 0 10px rgba(232,121,249,.9)); transform: scale(1.015) translate(0, 0); }
-    62%, 80% { filter: brightness(1); transform: scale(1) translate(0, 0); }
-    83% { filter: brightness(.3) drop-shadow(2px 0 0 rgba(239,68,68,.7)) drop-shadow(-2px 0 0 rgba(34,211,238,.7)); transform: scale(1) translate(-1px, 0); }
-    83.6% { filter: brightness(1.2); transform: scale(1) translate(0, 0); }
-    84.4%, 100% { filter: brightness(1); transform: scale(1) translate(0, 0); }
+    0% { filter: brightness(1); transform: scale(1) translate(0, 0); }
+    30% { filter: brightness(1.55) drop-shadow(0 0 8px rgba(232,121,249,.6)); transform: scale(1.02) translate(0, 0); }
+    33% { filter: brightness(.3) drop-shadow(2px 0 0 rgba(239,68,68,.75)) drop-shadow(-2px 0 0 rgba(34,211,238,.75)); transform: scale(1.02) translate(-1px, 0); }
+    34.5% { filter: brightness(1.6) drop-shadow(0 0 8px rgba(232,121,249,.6)); transform: scale(1.02) translate(1px, 0); }
+    37% { filter: brightness(1.5) drop-shadow(0 0 8px rgba(232,121,249,.6)); transform: scale(1.02) translate(0, 0); }
+    40% { filter: brightness(.25) drop-shadow(-2.5px 0 0 rgba(232,121,249,.8)) drop-shadow(2.5px 0 0 rgba(34,211,238,.8)); transform: scale(1.02) translate(1px, 0); }
+    41.5% { filter: brightness(1.6) drop-shadow(0 0 8px rgba(232,121,249,.6)); transform: scale(1.02) translate(-1px, 0); }
+    45% { filter: brightness(.4) drop-shadow(2px 0 0 rgba(239,68,68,.6)) drop-shadow(-2px 0 0 rgba(34,211,238,.6)); transform: scale(1.02) translate(0, 0); }
+    47% { filter: brightness(1.5) drop-shadow(0 0 8px rgba(232,121,249,.6)); transform: scale(1.02) translate(0, 0); }
+    100% { filter: brightness(1); transform: scale(1) translate(0, 0); }
   }
   /* A thin tricolor scanline (cyan → violet → magenta, the game's own
      brand gradient) sweeping down through the icon on a loop — a third,

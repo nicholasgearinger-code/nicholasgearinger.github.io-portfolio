@@ -1998,11 +1998,22 @@
     }
   }
 
-  function drawTunnel() {
+  function drawTunnel(idleCycle) {
     // threat (0 → 1) drives the whole tunnel from a cool cyan/violet palette
-    // at low danger toward a hot orange/red palette as speed/difficulty climb
-    const coreColor = lerpColorStr(eraRGB([34, 211, 238]), eraRGB([251, 146, 60]), threat);   // cyan -> orange
-    const midColor = lerpColorStr(eraRGB([88, 28, 135]), eraRGB([153, 27, 27]), threat);      // violet -> deep red
+    // at low danger toward a hot orange/red palette as speed/difficulty climb.
+    // On the idle title screen there's no run in progress (level/threat never
+    // move), so that same per-era color would just sit locked on zone 1's
+    // violet forever — idleCycle instead rotates continuously through the
+    // full hue spectrum over time, independent of level/threat.
+    let coreColor, midColor;
+    if (idleCycle) {
+      const hueDeg = (tunnelHue * 9) % 360; // slow continuous rotation, full loop roughly every ~40s at idle's slowed tunnelHue rate
+      coreColor = rotateHueRGB([34, 211, 238], hueDeg).join(',');
+      midColor = rotateHueRGB([88, 28, 135], hueDeg).join(',');
+    } else {
+      coreColor = lerpColorStr(eraRGB([34, 211, 238]), eraRGB([251, 146, 60]), threat);   // cyan -> orange
+      midColor = lerpColorStr(eraRGB([88, 28, 135]), eraRGB([153, 27, 27]), threat);      // violet -> deep red
+    }
 
     const g = ctx.createRadialGradient(VP_X, VP_Y, 4, VP_X, VP_Y, H * 0.95);
     g.addColorStop(0, 'rgba(' + coreColor + ',.16)');
@@ -2967,7 +2978,7 @@
   }
 
   function drawAmbientBackground() {
-    drawTunnel();
+    drawTunnel(true);
     drawEraOverlay();
     drawEraAccent();
     drawStarfield();

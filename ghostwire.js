@@ -755,6 +755,7 @@
         if (titleGateEl) {
           titleGateEl.hidden = false;
           titleGateEl.classList.remove('fading-out');
+          if (titleGateBtn) titleGateBtn.classList.remove('gt-dissolving');
           loopGateWordDecode();
         }
       }, 350);

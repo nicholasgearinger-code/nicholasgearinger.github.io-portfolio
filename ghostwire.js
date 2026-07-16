@@ -2058,12 +2058,13 @@
     // a shadowBlur halo) plus a bright core, rather than tracking the
     // tunnel's threat-driven color.
     const corePulse = 0.5 + 0.5 * Math.sin(tunnelHue * 0.9);
-    const coreR = (3.6 + corePulse * 13.5) * 0.7; // 30% smaller than before
+    const coreR = (3.6 + corePulse * 13.5) * 0.7 * 0.5; // 30% smaller, then another 50% on top
     const coreAlpha = 0.22 + corePulse * 0.68;
-    const haloR = coreR * 3.2;
+    const haloR = coreR * 5.5; // much wider soft falloff — reads as more radial blur
     const halo = ctx.createRadialGradient(VP_X, VP_Y, 0, VP_X, VP_Y, haloR);
     halo.addColorStop(0, 'rgba(255,255,255,' + (coreAlpha * 0.9).toFixed(3) + ')');
-    halo.addColorStop(0.4, 'rgba(255,255,255,' + (coreAlpha * 0.35).toFixed(3) + ')');
+    halo.addColorStop(0.22, 'rgba(255,255,255,' + (coreAlpha * 0.5).toFixed(3) + ')');
+    halo.addColorStop(0.5, 'rgba(255,255,255,' + (coreAlpha * 0.2).toFixed(3) + ')');
     halo.addColorStop(1, 'rgba(255,255,255,0)');
     ctx.beginPath();
     ctx.fillStyle = halo;

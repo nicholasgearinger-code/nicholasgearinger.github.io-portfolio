@@ -243,6 +243,10 @@
         }
         pts.push({ lane, p });
       }
+      // extend the final stretch all the way to the front (p=1) — the
+      // random walk above could otherwise leave a trace stopping well
+      // short of the player, especially on eras with fewer/bigger steps
+      pts.push({ lane, p: 1 });
       traces.push({
         pts, phase: Math.random(), speed: 0.15 + Math.random() * 0.18,
         hue: Math.random() < 0.5 ? 'violet' : 'magenta',

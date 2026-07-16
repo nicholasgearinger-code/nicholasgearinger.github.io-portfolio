@@ -2611,13 +2611,13 @@
     background: #000;
   }
   @media (orientation: landscape) {
-    /* Stretch to fill landscape instead of letterboxing to a strict 4:3 —
-       canvas hit-testing already scales off getBoundingClientRect(), so
-       this is display-only; only the canvas-drawn HUD text stretches
-       slightly with it. Small-viewport units (not dvw/dvh) — this project
-       has repeatedly hit dvh/dvw miscalculating during Safari toolbar
-       transitions, so svh/svw is the proven-reliable choice here. */
-    .game-wrap.gw-fullscreen { width: 100svw; height: 100svh; }
+    /* Was stretching to fill the full landscape viewport regardless of
+       aspect ratio, which distorted the whole scene (circles into
+       ellipses, etc). Letterboxed to the same 4:3 the portrait rule
+       above already uses instead — svw/svh, not dvw/dvh, since this
+       project has repeatedly hit dvh/dvw miscalculating during Safari
+       toolbar transitions. */
+    .game-wrap.gw-fullscreen { width: min(100svw, calc(100svh * 4 / 3)); height: min(100svh, calc(100svw * 3 / 4)); }
   }
   /* The 4:3 letterbox above is tuned for actual gameplay (the canvas
      itself). On the title/level-select/menu screens — which have taller

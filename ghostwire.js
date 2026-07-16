@@ -2077,64 +2077,71 @@
       }
     }
 
-    // vanishing-point core glow — now a giant sun rather than a small
-    // point, colored per the current level era (same LEVEL_ERA_HUES
-    // rotation the circuit floor and tunnel background already use, so
-    // it shifts in step with everything else as the level progresses).
-    // Its edge is a wobbly polygon built from two overlaid sine waves at
-    // different frequencies/phases rather than a perfect circle, which
-    // reads as a simmering heat-haze distortion rather than a smooth
-    // pulsing disc.
-    const sunRGB = rotateHueRGB([255, 244, 214], levelHueDeg()).join(',');
-    const SUN_R = 46;
+    // vanishing-point light — small, steady, and a fixed warm color
+    // rather than era-cycling, since a real distant light source doesn't
+    // change color or size. The "light at the end of a tunnel" read comes
+    // less from the light itself and more from three supporting layers:
+    // a ring of extra darkness surrounding it (contrast against the
+    // tunnel's own ambient glow), a soft multi-stop bloom, and faint
+    // outward rays — rather than one dramatic animated centerpiece.
+    const SUN_RGB = '255,244,214';
+    const SUN_R = 8;
+    const haloR = SUN_R * 6;
 
-    // wide soft halo bloom behind the disc
-    const haloR = SUN_R * 3.4;
-    const halo = ctx.createRadialGradient(VP_X, VP_Y, SUN_R * 0.5, VP_X, VP_Y, haloR);
-    halo.addColorStop(0, 'rgba(' + sunRGB + ',.4)');
-    halo.addColorStop(0.5, 'rgba(' + sunRGB + ',.14)');
-    halo.addColorStop(1, 'rgba(' + sunRGB + ',0)');
+    // dark contrast ring, drawn before the bloom so the bloom paints
+    // over its inner portion — only the ring's outer band (beyond the
+    // bloom's own falloff) stays visible, reading as darkness the light
+    // is piercing through
+    const ringInner = haloR * 0.9, ringOuter = haloR * 2.6;
+    const darkRing = ctx.createRadialGradient(VP_X, VP_Y, ringInner, VP_X, VP_Y, ringOuter);
+    darkRing.addColorStop(0, 'rgba(0,0,0,0)');
+    darkRing.addColorStop(0.4, 'rgba(0,0,0,.35)');
+    darkRing.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.beginPath();
+    ctx.fillStyle = darkRing;
+    ctx.arc(VP_X, VP_Y, ringOuter, 0, Math.PI * 2); ctx.fill();
+
+    // soft bloom
+    const halo = ctx.createRadialGradient(VP_X, VP_Y, 0, VP_X, VP_Y, haloR);
+    halo.addColorStop(0, 'rgba(' + SUN_RGB + ',.85)');
+    halo.addColorStop(0.25, 'rgba(' + SUN_RGB + ',.4)');
+    halo.addColorStop(0.55, 'rgba(' + SUN_RGB + ',.15)');
+    halo.addColorStop(1, 'rgba(' + SUN_RGB + ',0)');
     ctx.beginPath();
     ctx.fillStyle = halo;
     ctx.arc(VP_X, VP_Y, haloR, 0, Math.PI * 2); ctx.fill();
 
-    // a couple of extra faint wobble rings between the halo and the disc,
-    // each on its own wobble phase, for a layered haze/shimmer texture
-    for (let ring = 0; ring < 2; ring++) {
-      const ringBaseR = SUN_R * (1.3 + ring * 0.5);
+    // faint outward rays — barely visible, additive so they only really
+    // show where they'd catch haze, not bold beams
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const rayN = 6;
+    for (let i = 0; i < rayN; i++) {
+      const angle = (i / rayN) * Math.PI * 2 + tunnelHue * 0.03;
+      const len = H * 1.1;
+      ctx.save();
+      ctx.translate(VP_X, VP_Y);
+      ctx.rotate(angle);
+      const grad = ctx.createLinearGradient(0, 0, 0, len);
+      grad.addColorStop(0, 'rgba(' + SUN_RGB + ',.05)');
+      grad.addColorStop(0.5, 'rgba(' + SUN_RGB + ',.015)');
+      grad.addColorStop(1, 'rgba(' + SUN_RGB + ',0)');
+      ctx.fillStyle = grad;
       ctx.beginPath();
-      const pts = 40;
-      for (let i = 0; i <= pts; i++) {
-        const ang = (i / pts) * Math.PI * 2;
-        const wob = Math.sin(ang * 4 + tunnelHue * (1.1 + ring * 0.4) + ring * 2) * (5 + ring * 3);
-        const r = ringBaseR + wob;
-        const x = VP_X + Math.cos(ang) * r, y = VP_Y + Math.sin(ang) * r * 0.9;
-        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-      }
+      ctx.moveTo(0, 0);
+      ctx.lineTo(-len * Math.tan(0.035), len);
+      ctx.lineTo(len * Math.tan(0.035), len);
       ctx.closePath();
-      ctx.fillStyle = 'rgba(' + sunRGB + ',' + (0.05 - ring * 0.015).toFixed(3) + ')';
       ctx.fill();
+      ctx.restore();
     }
+    ctx.restore();
 
-    // the sun disc itself — wobbly heat-shimmer edge, bright white-hot
-    // center fading out to the era color at the rim
+    // small, crisp, steady core
     ctx.beginPath();
-    const discPts = 48;
-    for (let i = 0; i <= discPts; i++) {
-      const ang = (i / discPts) * Math.PI * 2;
-      const wobble = Math.sin(ang * 5 + tunnelHue * 1.3) * 3.2 + Math.sin(ang * 9 - tunnelHue * 2.1) * 1.8;
-      const r = SUN_R + wobble;
-      const x = VP_X + Math.cos(ang) * r, y = VP_Y + Math.sin(ang) * r * 0.9;
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    }
-    ctx.closePath();
-    const coreGrad = ctx.createRadialGradient(VP_X, VP_Y, 0, VP_X, VP_Y, SUN_R * 1.1);
-    coreGrad.addColorStop(0, 'rgba(255,255,255,.95)');
-    coreGrad.addColorStop(0.55, 'rgba(' + sunRGB + ',.9)');
-    coreGrad.addColorStop(1, 'rgba(' + sunRGB + ',.55)');
-    ctx.fillStyle = coreGrad;
-    ctx.shadowColor = 'rgb(' + sunRGB + ')'; ctx.shadowBlur = 42;
-    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,.95)';
+    ctx.shadowColor = 'rgb(' + SUN_RGB + ')'; ctx.shadowBlur = 18;
+    ctx.arc(VP_X, VP_Y, SUN_R, 0, Math.PI * 2); ctx.fill();
     ctx.shadowBlur = 0;
 
     if (surging) {

@@ -2942,10 +2942,12 @@
   .game-wrap:has(#game-title-gate:not([hidden])) #game-canvas {
     position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
   }
-  /* Tilt steering and mute aren't relevant yet on the title gate — the
-     game hasn't started, so these just clutter the first impression */
+  /* Tilt, mute, and fullscreen aren't relevant yet on the title gate — the
+     game hasn't started, so these just clutter the first impression;
+     Initialize should be the only interactive control visible */
   .game-wrap:has(#game-title-gate:not([hidden])) .game-gyro-btn,
-  .game-wrap:has(#game-title-gate:not([hidden])) .game-mute-btn {
+  .game-wrap:has(#game-title-gate:not([hidden])) .game-mute-btn,
+  .game-wrap:has(#game-title-gate:not([hidden])) .game-fullscreen-btn {
     display: none;
   }
   .game-gyro-btn {

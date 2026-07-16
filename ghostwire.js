@@ -223,46 +223,6 @@
     return traces;
   }
 
-  // Slow drifting motes for the idle title screen — plain screen-space
-  // (not tunnel-projected, unlike everything else) so they read as a thin
-  // layer of dust floating between the viewer and the tunnel, adding
-  // depth behind the logo rather than being part of the scene itself.
-  function generateEmbers() {
-    const embers = [];
-    const count = 22;
-    const HUES = ['34,211,238', '167,139,250', '232,121,249']; // cyan, violet, magenta
-    for (let i = 0; i < count; i++) {
-      embers.push({
-        x: Math.random() * W, y: Math.random() * H,
-        vy: -(5 + Math.random() * 12), vx: (Math.random() - 0.5) * 5,
-        r: 0.6 + Math.random() * 1.5,
-        color: HUES[(Math.random() * HUES.length) | 0],
-        baseAlpha: 0.15 + Math.random() * 0.3,
-        phase: Math.random() * Math.PI * 2,
-      });
-    }
-    return embers;
-  }
-
-  // Soft horizontal mist bands drifting slowly at different tunnel
-  // depths — layered atmosphere between the circuit floor and the
-  // viewer, idle title screen only.
-  function generateFogBands() {
-    const bands = [];
-    const n = 4;
-    for (let i = 0; i < n; i++) {
-      bands.push({
-        depthP: 0.15 + (i / (n - 1)) * 0.7,
-        xOff: Math.random() * W,
-        speed: (Math.random() < 0.5 ? -1 : 1) * (4 + Math.random() * 6),
-        height: 40 + Math.random() * 50,
-        alpha: 0.05 + Math.random() * 0.05,
-        sway: Math.random() * Math.PI * 2,
-      });
-    }
-    return bands;
-  }
-
   // Perspective depth constant for the skyline: converts a true world-space
   // distance (z) into the tunnel's 0-1 screen-lerp parameter (p) using the
   // standard perspective divide p = D/(D+z), same shape as a real camera
@@ -426,9 +386,6 @@
   let powerups = [], floatTexts = [], shockwaves = [];
   let score = 0, running = false, dying = false, deathTimer = 0, rafId = null, lastTime = 0;
   let idleRafId = null, idleLastTime = 0; // "attract mode" loop — keeps the tunnel drifting behind the title/menu screens instead of sitting on one static frame
-  let circuitSparks = [], circuitSparkTimer = 1 + Math.random() * 2; // occasional white spark bursts at circuit-floor nodes, idle screen only
-  let dataPackets = [], dataPacketTimer = 0.4; // small packets traveling along circuit traces, idle screen only
-  let idleSurgeTimer = 14 + Math.random() * 6, idleSurgeActive = false, idleSurgeProgress = 0; // periodic full-tunnel power-surge ripple, idle screen only
   let spawnTimer = 0, codeBitTimer = 0, elapsed = 0, difficulty = 1, level = 1;
   let shakeMag = 0, flash = 0, tunnelHue = 0, threat = 0;
   let streak = 0, invulnTimer = 0, fireTimer = 0;
@@ -510,8 +467,6 @@
     return null;
   }
   let circuitTraces = generateCircuitTraces();
-  let embers = generateEmbers();
-  let fogBands = generateFogBands();
   let skylineParts = generateSkyline();
   let best = parseInt(localStorage.getItem('ghostwireBest') || '0', 10);
   bestStatEl.innerHTML = 'best: <strong>' + best + '</strong>';
@@ -2018,22 +1973,11 @@
     }
   }
 
-  function drawTunnel(idleCycle) {
+  function drawTunnel() {
     // threat (0 → 1) drives the whole tunnel from a cool cyan/violet palette
-    // at low danger toward a hot orange/red palette as speed/difficulty climb.
-    // On the idle title screen there's no run in progress (level/threat never
-    // move), so that same per-era color would just sit locked on zone 1's
-    // violet forever — idleCycle instead rotates continuously through the
-    // full hue spectrum over time, independent of level/threat.
-    let coreColor, midColor;
-    if (idleCycle) {
-      const hueDeg = (tunnelHue * 9) % 360; // slow continuous rotation, full loop roughly every ~40s at idle's slowed tunnelHue rate
-      coreColor = rotateHueRGB([34, 211, 238], hueDeg).join(',');
-      midColor = rotateHueRGB([88, 28, 135], hueDeg).join(',');
-    } else {
-      coreColor = lerpColorStr(eraRGB([34, 211, 238]), eraRGB([251, 146, 60]), threat);   // cyan -> orange
-      midColor = lerpColorStr(eraRGB([88, 28, 135]), eraRGB([153, 27, 27]), threat);      // violet -> deep red
-    }
+    // at low danger toward a hot orange/red palette as speed/difficulty climb
+    const coreColor = lerpColorStr(eraRGB([34, 211, 238]), eraRGB([251, 146, 60]), threat);   // cyan -> orange
+    const midColor = lerpColorStr(eraRGB([88, 28, 135]), eraRGB([153, 27, 27]), threat);      // violet -> deep red
 
     const g = ctx.createRadialGradient(VP_X, VP_Y, 4, VP_X, VP_Y, H * 0.95);
     g.addColorStop(0, 'rgba(' + coreColor + ',.16)');
@@ -2861,243 +2805,36 @@
   }
 
   // Background-only render used for the "attract mode" loop that plays
-  // behind the title gate / menu / game-over screens — same tunnel,
-  // skyline, and circuit-floor layers as live gameplay, just without the
-  // player, items, projectiles, or HUD on top.
-  // Occasional white spark burst at a random circuit-floor node — a few
-  // tiny particles kicking outward and fading fast, reading as a
-  // connection briefly firing. Deliberately separate from the main
-  // gameplay particle system (which is wired to update()/collision events)
-  // since this only ever runs on the idle title screen.
-  function maybeSpawnCircuitSpark(dt) {
-    circuitSparkTimer -= dt;
-    if (circuitSparkTimer > 0) return;
-    circuitSparkTimer = 1.3 + Math.random() * 2.4;
-    const t = circuitTraces[(Math.random() * circuitTraces.length) | 0];
-    const pt = t.pts[(Math.random() * t.pts.length) | 0];
-    const s = projectPoint(pt.lane, pt.p);
-    const n = 4 + ((Math.random() * 4) | 0);
-    for (let i = 0; i < n; i++) {
-      const ang = Math.random() * Math.PI * 2;
-      const spd = 24 + Math.random() * 55;
-      circuitSparks.push({
-        x: s.x, y: s.y, vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
-        age: 0, life: 0.3 + Math.random() * 0.25, r: 0.8 + Math.random() * 1.1,
-      });
-    }
-  }
-  function updateCircuitSparks(dt) {
-    for (let i = circuitSparks.length - 1; i >= 0; i--) {
-      const p = circuitSparks[i];
-      p.age += dt;
-      if (p.age >= p.life) { circuitSparks.splice(i, 1); continue; }
-      p.x += p.vx * dt; p.y += p.vy * dt;
-      p.vx *= 0.9; p.vy *= 0.9;
-    }
-  }
-  function drawCircuitSparks() {
-    circuitSparks.forEach((p) => {
-      const k = 1 - p.age / p.life;
-      ctx.beginPath();
-      ctx.fillStyle = 'rgba(255,255,255,' + (k * 0.9).toFixed(3) + ')';
-      ctx.shadowColor = '#fff'; ctx.shadowBlur = 6 * k;
-      ctx.arc(p.x, p.y, p.r * k, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.shadowBlur = 0;
-    });
-  }
-
-  function updateEmbers(dt) {
-    embers.forEach((e) => {
-      e.y += e.vy * dt; e.x += e.vx * dt; e.phase += dt * 1.3;
-      if (e.y < -10) { e.y = H + 10; e.x = Math.random() * W; }
-      if (e.x < -10) e.x = W + 10; else if (e.x > W + 10) e.x = -10;
-    });
-  }
-  function drawEmbers() {
-    embers.forEach((e) => {
-      const twinkle = 0.6 + 0.4 * Math.sin(e.phase);
-      ctx.beginPath();
-      ctx.fillStyle = 'rgba(' + e.color + ',' + (e.baseAlpha * twinkle).toFixed(3) + ')';
-      ctx.shadowColor = 'rgb(' + e.color + ')'; ctx.shadowBlur = 4;
-      ctx.arc(e.x, e.y, e.r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.shadowBlur = 0;
-    });
-  }
-
-  // Small packets of "data" traveling along circuit-trace segments — a
-  // bright, fast-moving accent distinct from the slower single "current"
-  // pulse each trace already carries, reading as active traffic on the
-  // wire rather than one lone signal.
-  function maybeSpawnDataPacket(dt) {
-    dataPacketTimer -= dt;
-    if (dataPacketTimer > 0) return;
-    dataPacketTimer = 0.12 + Math.random() * 0.16;
-    const spawnCount = 1 + ((Math.random() * 2) | 0); // 1-2 packets per spawn, on top of the faster interval
-    for (let n = 0; n < spawnCount; n++) {
-      const t = circuitTraces[(Math.random() * circuitTraces.length) | 0];
-      if (t.pts.length < 2) continue;
-      const segIdx = (Math.random() * (t.pts.length - 1)) | 0;
-      dataPackets.push({ t, segIdx, prog: 0, speed: 1.8 + Math.random() * 1.6 });
-    }
-  }
-  function updateDataPackets(dt) {
-    for (let i = dataPackets.length - 1; i >= 0; i--) {
-      const dp = dataPackets[i];
-      dp.prog += dp.speed * dt;
-      if (dp.prog >= 1) dataPackets.splice(i, 1);
-    }
-  }
-  function drawDataPackets() {
-    dataPackets.forEach((dp) => {
-      const a = dp.t.pts[dp.segIdx], b = dp.t.pts[dp.segIdx + 1];
-      const lane = a.lane + (b.lane - a.lane) * dp.prog;
-      const p = a.p + (b.p - a.p) * dp.prog;
-      const s = projectPoint(lane, p);
-      const size = perspSize(p, 3.2);
-      ctx.save();
-      ctx.translate(s.x, s.y); ctx.rotate(Math.PI / 4);
-      ctx.fillStyle = 'rgba(224,242,254,.95)';
-      ctx.shadowColor = 'rgb(34,211,238)'; ctx.shadowBlur = 6;
-      ctx.fillRect(-size / 2, -size / 2, size, size);
-      ctx.restore();
-      ctx.shadowBlur = 0;
-    });
-  }
-
-  // A full-tunnel power-surge ripple every 15-20s — an expanding ring
-  // washing outward from the vanishing point with a brief brightness
-  // flash at its start, distinct from the constant smaller-scale glow
-  // pulse everything else already breathes with.
-  function updateIdleSurge(dt) {
-    if (!idleSurgeActive) {
-      idleSurgeTimer -= dt;
-      if (idleSurgeTimer <= 0) { idleSurgeActive = true; idleSurgeProgress = 0; }
-    } else {
-      idleSurgeProgress += dt / 1.1;
-      if (idleSurgeProgress >= 1) { idleSurgeActive = false; idleSurgeTimer = 15 + Math.random() * 7; }
-    }
-  }
-  function drawIdleSurge() {
-    if (!idleSurgeActive) return;
-    const k = idleSurgeProgress;
-    const r = k * H * 1.05;
-    ctx.beginPath();
-    ctx.strokeStyle = 'rgba(224,242,254,' + ((1 - k) * 0.5).toFixed(3) + ')';
-    ctx.lineWidth = 2 + (1 - k) * 3;
-    ctx.shadowColor = 'rgba(232,121,249,1)'; ctx.shadowBlur = 14 * (1 - k);
-    ctx.arc(VP_X, VP_Y, r, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.shadowBlur = 0;
-    const flash = Math.max(0, 1 - k * 4) * 0.12;
-    if (flash > 0) {
-      ctx.fillStyle = 'rgba(232,121,249,' + flash.toFixed(3) + ')';
-      ctx.fillRect(0, 0, W, H);
-    }
-  }
-
-  // Soft volumetric light shafts radiating outward from the sun — several
-  // rotating, swaying wedge gradients blended additively so overlapping
-  // beams brighten instead of muddying. Tied to the same pulse the sun
-  // itself breathes with, so brighter sun = brighter shafts.
-  function drawLightShafts() {
-    const corePulse = 0.5 + 0.5 * Math.sin(tunnelHue * 0.9);
-    const n = 7;
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    for (let i = 0; i < n; i++) {
-      const baseAngle = (i / n) * Math.PI * 2;
-      const sway = Math.sin(tunnelHue * 0.3 + i * 1.7) * 0.15;
-      const angle = baseAngle + sway + tunnelHue * 0.05;
-      const len = H * 1.3;
-      const halfWidth = 0.05 + 0.025 * Math.sin(tunnelHue * 0.5 + i);
-      const alpha = (0.05 + corePulse * 0.06);
-      ctx.save();
-      ctx.translate(VP_X, VP_Y);
-      ctx.rotate(angle);
-      const grad = ctx.createLinearGradient(0, 0, 0, len);
-      grad.addColorStop(0, 'rgba(255,255,255,' + alpha.toFixed(3) + ')');
-      grad.addColorStop(0.4, 'rgba(200,230,255,' + (alpha * 0.4).toFixed(3) + ')');
-      grad.addColorStop(1, 'rgba(200,230,255,0)');
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.lineTo(-len * Math.tan(halfWidth), len);
-      ctx.lineTo(len * Math.tan(halfWidth), len);
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
-    }
-    ctx.restore();
-  }
-
-  // Soft horizontal mist bands drifting slowly at different tunnel
-  // depths, swaying side to side — a layered haze between the circuit
-  // floor and the viewer, rather than the scene reading as a flat plane.
-  function updateFogBands(dt) {
-    fogBands.forEach((f) => {
-      f.xOff += f.speed * dt;
-      f.sway += dt * 0.15;
-    });
-  }
-  function drawFogBands() {
-    fogBands.forEach((f) => {
-      const y = VP_Y + (PLAYER_Y - VP_Y) * f.depthP;
-      const bandW = W * 1.6;
-      const swayX = Math.sin(f.sway) * 20;
-      const x = ((f.xOff + swayX) % (W * 2)) - W * 0.5;
-      const grad = ctx.createLinearGradient(0, y - f.height / 2, 0, y + f.height / 2);
-      grad.addColorStop(0, 'rgba(200,210,255,0)');
-      grad.addColorStop(0.5, 'rgba(200,210,255,' + f.alpha.toFixed(3) + ')');
-      grad.addColorStop(1, 'rgba(200,210,255,0)');
-      ctx.fillStyle = grad;
-      ctx.fillRect(x - bandW / 2, y - f.height / 2, bandW, f.height);
-    });
-  }
-
+  // behind the title gate / menu / game-over screens — the exact same
+  // background layers real gameplay's draw() uses (same functions, same
+  // arguments, no idle-specific boosts or extra effects), just without
+  // the player, items, projectiles, particles, or HUD on top.
   function drawAmbientBackground() {
-    drawTunnel(true);
-    drawLightShafts();
+    drawTunnel();
     drawEraOverlay();
     drawEraAccent();
     drawStarfield();
     drawSkyline();
     drawWarpStreaks();
-    drawCircuitFloor(2.4); // brighter/glowier here than in actual gameplay, where it needs to stay a quiet backdrop
-    drawCircuitSparks();
-    drawDataPackets();
-    drawFogBands();
+    drawCircuitFloor();
     drawCodeBits();
     const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.85);
     vg.addColorStop(0, 'rgba(0,0,0,0)');
     vg.addColorStop(1, 'rgba(0,0,0,.6)');
     ctx.fillStyle = vg;
     ctx.fillRect(0, 0, W, H);
-    // the surge and embers are both drawn after the vignette so they read
-    // as unobscured foreground moments rather than getting dimmed with
-    // the rest of the scene behind them
-    drawIdleSurge();
-    drawEmbers();
   }
 
   function idleLoop(ts) {
     if (running) { idleRafId = null; return; }
     const dt = Math.min(0.05, (ts - idleLastTime) / 1000 || 0);
     idleLastTime = ts;
-    tunnelHue += dt * 0.4; // slower than live-gameplay drift — calmer, ambient feel
+    tunnelHue += dt; // same rate real gameplay runs at, for an exact visual match
     // the circuit floor's "current" pulses only ever advanced inside real
     // gameplay's update() loop, so without this they sat completely frozen
     // on the title screen the whole time — this is the same line update()
     // runs, just driven off the idle loop's own dt instead
     circuitTraces.forEach((t) => { t.phase = (t.phase + t.speed * dt) % 1; });
-    maybeSpawnCircuitSpark(dt);
-    updateCircuitSparks(dt);
-    maybeSpawnDataPacket(dt);
-    updateDataPackets(dt);
-    updateIdleSurge(dt);
-    updateEmbers(dt);
-    updateFogBands(dt);
     ctx.clearRect(0, 0, W, H);
     drawAmbientBackground();
     idleRafId = requestAnimationFrame(idleLoop);

@@ -204,14 +204,16 @@
     const count = 15;
     for (let i = 0; i < count; i++) {
       let lane = ((i + 0.5) / count) * W + (Math.random() - 0.5) * 30;
-      let p = 0.04 + Math.random() * 0.08;
+      let p = 0.04 + Math.random() * 0.06;
       const pts = [{ lane, p }];
-      const segs = 3 + Math.floor(Math.random() * 3);
+      const segs = 6 + Math.floor(Math.random() * 5); // 6-10 segments (was 3-5) — more turns, reads more like real PCB routing
       for (let s = 0; s < segs; s++) {
         if (s % 2 === 0) {
-          p = Math.min(0.98, p + 0.14 + Math.random() * 0.22);
+          p = Math.min(0.98, p + 0.07 + Math.random() * 0.09); // smaller depth hops, since there are more of them now
         } else {
-          lane = Math.max(20, Math.min(W - 20, lane + (Math.random() - 0.5) * 90));
+          const jump = (Math.random() - 0.5) * 70;
+          // snapped to a coarse grid rather than a free-form random offset — deliberate right-angle bends instead of soft zigzags
+          lane = Math.max(20, Math.min(W - 20, Math.round((lane + jump) / 12) * 12));
         }
         pts.push({ lane, p });
       }
@@ -2406,6 +2408,10 @@
   function perspSize(p, regular) {
     return regular * 0.15 + Math.pow(p, 1.6) * regular * 0.85;
   }
+  function circularDist(a, b) {
+    const d = Math.abs(a - b) % 1;
+    return Math.min(d, 1 - d);
+  }
   function drawCircuitFloor(boost) {
     boost = boost || 1;
     ctx.lineJoin = 'round'; ctx.lineCap = 'round';
@@ -2420,21 +2426,37 @@
       const cool = eraRGB(t.hue === 'violet' ? [167, 139, 250] : [232, 121, 249]);
       const warm = eraRGB(t.hue === 'violet' ? [249, 115, 22] : [239, 68, 68]);
       const color = lerpColorStr(cool, warm, threat);
+      const segCount = t.pts.length - 1;
 
       // each segment drawn (and tapered) separately, rather than one
-      // constant-width stroke for the whole trace — thicker and brighter
-      // than before, still thinning to barely-there near the vanishing
-      // point for the distance read
-      for (let i = 0; i < t.pts.length - 1; i++) {
+      // constant-width stroke for the whole trace — dim at rest, and
+      // brightening toward white-hot as one of the two traveling energy
+      // pulses actually passes through that specific segment, fading
+      // back down afterward until the next pulse arrives. Reads as
+      // current genuinely flowing through the wire, not a static line
+      // with a dot drawn on top of it.
+      const glowWindow = 2.2 / segCount;
+      for (let i = 0; i < segCount; i++) {
         const a = t.pts[i], b = t.pts[i + 1];
         const segP = (a.p + b.p) / 2;
+        const segMidPhase = (i + 0.5) / segCount;
         const sa = projectPoint(a.lane, a.p), sb = projectPoint(b.lane, b.p);
-        const fade = Math.min(1, (0.11 + Math.pow(segP, 1.6) * 0.24) * boost);
+
+        let illum = 0;
+        for (let pulseIdx = 0; pulseIdx < 2; pulseIdx++) {
+          const basePhase = (t.phase + pulseIdx * 0.5) % 1;
+          const local = Math.max(0, 1 - circularDist(segMidPhase, basePhase) / glowWindow);
+          illum = Math.max(illum, local * local);
+        }
+
+        const baseFade = (0.11 + Math.pow(segP, 1.6) * 0.24) * boost;
+        const fade = Math.min(1, baseFade + illum * 0.85);
+        const litColor = illum > 0.5 ? '255,255,255' : color;
         ctx.beginPath();
         ctx.moveTo(sa.x, sa.y); ctx.lineTo(sb.x, sb.y);
-        ctx.strokeStyle = 'rgba(' + color + ',' + fade.toFixed(3) + ')';
-        ctx.lineWidth = perspSize(segP, 0.95) * boost;
-        ctx.shadowColor = 'rgb(' + color + ')'; ctx.shadowBlur = 5 * boost * glowPulse;
+        ctx.strokeStyle = 'rgba(' + litColor + ',' + fade.toFixed(3) + ')';
+        ctx.lineWidth = perspSize(segP, 0.95) * boost * (1 + illum * 0.9);
+        ctx.shadowColor = 'rgb(' + color + ')'; ctx.shadowBlur = (5 + illum * 16) * boost * glowPulse;
         ctx.stroke();
         ctx.shadowBlur = 0;
       }
@@ -2453,30 +2475,19 @@
         ctx.shadowBlur = 0;
       });
 
-      // bright energy flowing along the trace toward the player — two
-      // pulses per trace (offset half a lap apart), each rendered as a
-      // short comet trail of shrinking, fading dots behind a white-hot
-      // head, instead of one flat single dot. Reads as current actually
-      // moving through the wire rather than a static blip drifting along.
-      const tailRGB = eraRGB([232, 121, 249]);
-      const TAIL_N = 5;
+      // a single bright white-hot head at each of the two traveling
+      // pulses — the segments themselves now carry the trailing fade, so
+      // this is just the leading point rather than a whole comet tail
       for (let pulseIdx = 0; pulseIdx < 2; pulseIdx++) {
         const basePhase = (t.phase + pulseIdx * 0.5) % 1;
-        for (let k = TAIL_N; k >= 0; k--) {
-          const trailPhase = (basePhase - k * 0.02 + 1) % 1;
-          const pt = pointAlongTrace(t, trailPhase);
-          const kFrac = 1 - k / TAIL_N; // 1 at the bright head, 0 at the tail's end
-          const r = perspSize(nearP, 2.1) * Math.min(1.6, boost) * (0.35 + kFrac * 0.65);
-          const alpha = kFrac * kFrac;
-          const rgb = k === 0 ? '255,255,255' : tailRGB.join(',');
-          ctx.beginPath();
-          ctx.fillStyle = 'rgba(' + rgb + ',' + alpha.toFixed(3) + ')';
-          ctx.shadowColor = 'rgb(' + tailRGB.join(',') + ')';
-          ctx.shadowBlur = (k === 0 ? 16 : 7) * boost * glowPulse;
-          ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.shadowBlur = 0;
-        }
+        const headPt = pointAlongTrace(t, basePhase);
+        const r = perspSize(nearP, 2.0) * Math.min(1.6, boost);
+        ctx.beginPath();
+        ctx.fillStyle = 'rgba(255,255,255,.95)';
+        ctx.shadowColor = 'rgb(' + color + ')'; ctx.shadowBlur = 16 * boost * glowPulse;
+        ctx.arc(headPt.x, headPt.y, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
       }
     });
   }

@@ -2335,11 +2335,12 @@
     });
   }
 
-  function drawCircuitFloor() {
+  function drawCircuitFloor(boost) {
+    boost = boost || 1;
     ctx.lineJoin = 'round'; ctx.lineCap = 'round';
     circuitTraces.forEach((t) => {
       const nearP = t.pts[t.pts.length - 1].p;
-      const fade = 0.09 + nearP * 0.12;
+      const fade = Math.min(1, (0.09 + nearP * 0.12) * boost);
       // each trace's cool base hue (violet or magenta) shifts toward
       // orange/red as threat rises, matching the tunnel background
       const cool = eraRGB(t.hue === 'violet' ? [167, 139, 250] : [232, 121, 249]);
@@ -2353,14 +2354,16 @@
       });
       ctx.strokeStyle = 'rgba(' + color + ',' + fade.toFixed(3) + ')';
       ctx.lineWidth = 1.2;
+      if (boost > 1) { ctx.shadowColor = 'rgb(' + color + ')'; ctx.shadowBlur = 4 * boost; }
       ctx.stroke();
+      ctx.shadowBlur = 0;
 
       // solder-pad vias at each waypoint, bigger where the trace is closer
       t.pts.forEach((pt) => {
         const s = projectPoint(pt.lane, pt.p);
         const r = 1 + pt.p * 2.1;
         ctx.beginPath();
-        ctx.fillStyle = 'rgba(' + color + ',' + (fade + 0.12).toFixed(3) + ')';
+        ctx.fillStyle = 'rgba(' + color + ',' + Math.min(1, fade + 0.12 * boost).toFixed(3) + ')';
         ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
         ctx.fill();
       });
@@ -2368,11 +2371,11 @@
       // a pulse of "current" traveling along the trace toward the player —
       // shifts with the level era like the rest of the circuit floor
       const pulse = pointAlongTrace(t, t.phase);
-      const pulseR = 1.4 + nearP * 2.1;
+      const pulseR = (1.4 + nearP * 2.1) * Math.min(1.6, boost);
       const pulseColor = 'rgb(' + eraRGB([232, 121, 249]).join(',') + ')';
       ctx.beginPath();
       ctx.fillStyle = pulseColor;
-      ctx.shadowColor = pulseColor; ctx.shadowBlur = 7;
+      ctx.shadowColor = pulseColor; ctx.shadowBlur = 7 * boost;
       ctx.arc(pulse.x, pulse.y, pulseR, 0, Math.PI * 2);
       ctx.fill();
       ctx.shadowBlur = 0;
@@ -2775,7 +2778,7 @@
     drawStarfield();
     drawSkyline();
     drawWarpStreaks();
-    drawCircuitFloor();
+    drawCircuitFloor(2.4); // brighter/glowier here than in actual gameplay, where it needs to stay a quiet backdrop
     drawCodeBits();
     const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.85);
     vg.addColorStop(0, 'rgba(0,0,0,0)');
@@ -2789,6 +2792,11 @@
     const dt = Math.min(0.05, (ts - idleLastTime) / 1000 || 0);
     idleLastTime = ts;
     tunnelHue += dt * 0.4; // slower than live-gameplay drift — calmer, ambient feel
+    // the circuit floor's "current" pulses only ever advanced inside real
+    // gameplay's update() loop, so without this they sat completely frozen
+    // on the title screen the whole time — this is the same line update()
+    // runs, just driven off the idle loop's own dt instead
+    circuitTraces.forEach((t) => { t.phase = (t.phase + t.speed * dt) % 1; });
     ctx.clearRect(0, 0, W, H);
     drawAmbientBackground();
     idleRafId = requestAnimationFrame(idleLoop);

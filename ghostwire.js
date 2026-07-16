@@ -2079,33 +2079,15 @@
 
     // vanishing-point light — small, steady, and a fixed warm color
     // rather than era-cycling, since a real distant light source doesn't
-    // change color or size. The "light at the end of a tunnel" read comes
-    // less from the light itself and more from three supporting layers:
-    // a ring of extra darkness surrounding it (contrast against the
-    // tunnel's own ambient glow), a soft multi-stop bloom, and faint
-    // outward rays — rather than one dramatic animated centerpiece.
+    // change color or size.
     const SUN_RGB = '255,244,214';
     const SUN_R = 8;
-    const haloR = SUN_R * 6;
+    const haloR = SUN_R * 3.2; // was 6 — much less spread
 
-    // dark contrast ring, drawn before the bloom so the bloom paints
-    // over its inner portion — only the ring's outer band (beyond the
-    // bloom's own falloff) stays visible, reading as darkness the light
-    // is piercing through
-    const ringInner = haloR * 0.9, ringOuter = haloR * 2.6;
-    const darkRing = ctx.createRadialGradient(VP_X, VP_Y, ringInner, VP_X, VP_Y, ringOuter);
-    darkRing.addColorStop(0, 'rgba(0,0,0,0)');
-    darkRing.addColorStop(0.4, 'rgba(0,0,0,.35)');
-    darkRing.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.beginPath();
-    ctx.fillStyle = darkRing;
-    ctx.arc(VP_X, VP_Y, ringOuter, 0, Math.PI * 2); ctx.fill();
-
-    // soft bloom
+    // soft bloom, noticeably dimmer/tighter than before
     const halo = ctx.createRadialGradient(VP_X, VP_Y, 0, VP_X, VP_Y, haloR);
-    halo.addColorStop(0, 'rgba(' + SUN_RGB + ',.85)');
-    halo.addColorStop(0.25, 'rgba(' + SUN_RGB + ',.4)');
-    halo.addColorStop(0.55, 'rgba(' + SUN_RGB + ',.15)');
+    halo.addColorStop(0, 'rgba(' + SUN_RGB + ',.5)');
+    halo.addColorStop(0.4, 'rgba(' + SUN_RGB + ',.16)');
     halo.addColorStop(1, 'rgba(' + SUN_RGB + ',0)');
     ctx.beginPath();
     ctx.fillStyle = halo;
@@ -2140,7 +2122,7 @@
     // small, crisp, steady core
     ctx.beginPath();
     ctx.fillStyle = 'rgba(255,255,255,.95)';
-    ctx.shadowColor = 'rgb(' + SUN_RGB + ')'; ctx.shadowBlur = 18;
+    ctx.shadowColor = 'rgb(' + SUN_RGB + ')'; ctx.shadowBlur = 9;
     ctx.arc(VP_X, VP_Y, SUN_R, 0, Math.PI * 2); ctx.fill();
     ctx.shadowBlur = 0;
 

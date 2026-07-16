@@ -227,7 +227,7 @@
   function generateCircuitTraces(eraIdx) {
     const prof = ERA_CIRCUIT_PROFILES[eraIdx || 0];
     const traces = [];
-    const count = prof.count;
+    const count = Math.max(5, Math.round(prof.count * CIRCUIT_SCALE));
     for (let i = 0; i < count; i++) {
       let lane = ((i + 0.5) / count) * W + (Math.random() - 0.5) * 30;
       let p = 0.04 + Math.random() * 0.06;
@@ -540,7 +540,7 @@
   // 'auto' guesses low-end from core count / reduced-motion; particle count
   // and screen-shake magnitude both scale off this single multiplier so any
   // future effect can opt in by reading PARTICLE_SCALE / SHAKE_SCALE.
-  let PARTICLE_SCALE = 1, SHAKE_SCALE = 1;
+  let PARTICLE_SCALE = 1, SHAKE_SCALE = 1, CIRCUIT_SCALE = 1, RIM_GLOW_SCALE = 1;
   function effectiveGraphics() {
     if (settings.graphics !== 'auto') return settings.graphics;
     const lowEnd = (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4)
@@ -551,6 +551,8 @@
     const g = effectiveGraphics();
     PARTICLE_SCALE = g === 'low' ? 0.35 : 1;
     SHAKE_SCALE = g === 'low' ? 0.4 : 1;
+    CIRCUIT_SCALE = g === 'low' ? 0.55 : 1;  // fewer circuit-floor traces — baked in at generation time, so a mid-run quality change needs a new run/zone to take effect, same as everything else here
+    RIM_GLOW_SCALE = g === 'low' ? 0 : 1;    // skip the extra shadowBlur-heavy rim-light passes — shadowBlur is one of canvas's pricier ops, and this is a per-frame cost across every trace/via/pulse
   }
   applyColorblind();
   applyGraphics();
@@ -2385,7 +2387,7 @@
       // rim-lit edge: brighter and thicker than a plain outline would be,
       // as if catching light from the environment's own glow
       ctx.strokeStyle = 'rgba(' + color + ',' + Math.min(1, alpha + 0.4).toFixed(3) + ')';
-      ctx.shadowColor = 'rgb(' + color + ')'; ctx.shadowBlur = 4 * depthScale;
+      ctx.shadowColor = 'rgb(' + color + ')'; ctx.shadowBlur = 4 * depthScale * RIM_GLOW_SCALE;
       ctx.lineWidth = Math.max(0.9, depthScale * 1.4);
       if (s.kind === 'chip') {
         ctx.fillRect(-w / 2, -h, w, h);
@@ -2490,8 +2492,7 @@
     const d = Math.abs(a - b) % 1;
     return Math.min(d, 1 - d);
   }
-  function drawCircuitFloor(boost) {
-    boost = boost || 1;
+  function drawCircuitFloor() {
     ctx.lineJoin = 'round'; ctx.lineCap = 'round';
     // a slow, shared breathing pulse on every glow below — ties the whole
     // circuit floor together instead of each element glowing at one flat,
@@ -2527,14 +2528,14 @@
           illum = Math.max(illum, local * local);
         }
 
-        const baseFade = (0.11 + Math.pow(segP, 1.6) * 0.24) * boost;
+        const baseFade = 0.11 + Math.pow(segP, 1.6) * 0.24;
         const fade = Math.min(1, baseFade + illum * 0.85);
         const litColor = illum > 0.5 ? '255,255,255' : color;
         ctx.beginPath();
         ctx.moveTo(sa.x, sa.y); ctx.lineTo(sb.x, sb.y);
         ctx.strokeStyle = 'rgba(' + litColor + ',' + fade.toFixed(3) + ')';
-        ctx.lineWidth = perspSize(segP, 0.95) * boost * (1 + illum * 0.9);
-        ctx.shadowColor = 'rgb(' + color + ')'; ctx.shadowBlur = (5 + illum * 16) * boost * glowPulse;
+        ctx.lineWidth = perspSize(segP, 0.95) * (1 + illum * 0.9);
+        ctx.shadowColor = 'rgb(' + color + ')'; ctx.shadowBlur = (5 + illum * 16) * glowPulse * RIM_GLOW_SCALE;
         ctx.stroke();
         ctx.shadowBlur = 0;
       }
@@ -2543,11 +2544,11 @@
       // point, growing toward the front; bigger/brighter than before
       t.pts.forEach((pt) => {
         const s = projectPoint(pt.lane, pt.p);
-        const r = perspSize(pt.p, 2.1) * boost;
-        const fade = Math.min(1, (0.13 + Math.pow(pt.p, 1.6) * 0.18) * boost + 0.14 * boost);
+        const r = perspSize(pt.p, 2.1);
+        const fade = Math.min(1, 0.13 + Math.pow(pt.p, 1.6) * 0.18 + 0.14);
         ctx.beginPath();
         ctx.fillStyle = 'rgba(' + color + ',' + fade.toFixed(3) + ')';
-        ctx.shadowColor = 'rgb(' + color + ')'; ctx.shadowBlur = 7 * boost * glowPulse;
+        ctx.shadowColor = 'rgb(' + color + ')'; ctx.shadowBlur = 7 * glowPulse * RIM_GLOW_SCALE;
         ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
         ctx.fill();
         ctx.shadowBlur = 0;
@@ -2559,10 +2560,10 @@
       for (let pulseIdx = 0; pulseIdx < 2; pulseIdx++) {
         const basePhase = (t.phase + pulseIdx * 0.5) % 1;
         const headPt = pointAlongTrace(t, basePhase);
-        const r = perspSize(nearP, 2.0) * Math.min(1.6, boost);
+        const r = perspSize(nearP, 2.0);
         ctx.beginPath();
         ctx.fillStyle = 'rgba(255,255,255,.95)';
-        ctx.shadowColor = 'rgb(' + color + ')'; ctx.shadowBlur = 16 * boost * glowPulse;
+        ctx.shadowColor = 'rgb(' + color + ')'; ctx.shadowBlur = 16 * glowPulse * RIM_GLOW_SCALE;
         ctx.arc(headPt.x, headPt.y, r, 0, Math.PI * 2);
         ctx.fill();
         ctx.shadowBlur = 0;
@@ -2598,8 +2599,10 @@
       ctx.closePath(); ctx.fill();
       ctx.strokeStyle = 'rgba(240,255,255,.7)'; ctx.lineWidth = Math.max(0.6, it.r * 0.06);
       ctx.stroke();
-      ctx.strokeStyle = 'rgba(' + eraRGB([125, 211, 252]).join(',') + ',.35)'; ctx.lineWidth = Math.max(0.4, it.r * 0.03);
-      ctx.stroke();
+      if (RIM_GLOW_SCALE > 0) {
+        ctx.strokeStyle = 'rgba(' + eraRGB([125, 211, 252]).join(',') + ',.35)'; ctx.lineWidth = Math.max(0.4, it.r * 0.03);
+        ctx.stroke();
+      }
       ctx.restore();
       ctx.shadowBlur = 0;
     } else if (it.boss) {
@@ -2650,8 +2653,10 @@
       ctx.fillStyle = COL_BAD; ctx.shadowColor = COL_BAD; ctx.shadowBlur = 10 * (it.r / it.baseR + 0.3);
       ctx.fillRect(-it.r, -it.r, it.r * 2, it.r * 2);
       ctx.shadowBlur = 0;
-      ctx.strokeStyle = 'rgba(' + eraRGB([125, 211, 252]).join(',') + ',.3)'; ctx.lineWidth = Math.max(0.4, it.r * 0.035);
-      ctx.strokeRect(-it.r, -it.r, it.r * 2, it.r * 2);
+      if (RIM_GLOW_SCALE > 0) {
+        ctx.strokeStyle = 'rgba(' + eraRGB([125, 211, 252]).join(',') + ',.3)'; ctx.lineWidth = Math.max(0.4, it.r * 0.035);
+        ctx.strokeRect(-it.r, -it.r, it.r * 2, it.r * 2);
+      }
       if (Math.sin(it.glitchT * 30 + it.seed) > 0.4) {
         ctx.fillStyle = 'rgba(3,8,17,.65)';
         ctx.fillRect(-it.r, -it.r * 0.2, it.r * 2, it.r * 0.3);

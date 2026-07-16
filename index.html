@@ -2772,6 +2772,21 @@
   }
   .game-title-gate.fading-out { opacity: 0; pointer-events: none; }
   .game-title-gate[hidden] { display: none; }
+  /* A faint red/cyan chromatic split right at the edges — reads as
+     signal interference rather than a hard vignette, breathing very
+     slowly so it doesn't compete with everything else already animating */
+  .game-title-gate::before {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    box-shadow: inset 4px 0 14px rgba(239,68,68,.16), inset -4px 0 14px rgba(34,211,238,.16),
+      inset 0 4px 14px rgba(239,68,68,.08), inset 0 -4px 14px rgba(34,211,238,.08);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .game-title-gate::before { animation: gateFringeBreathe 9s ease-in-out infinite; }
+  }
+  @keyframes gateFringeBreathe {
+    0%, 100% { opacity: .7; }
+    50% { opacity: 1; }
+  }
   .game-title-gate-logo {
     display: flex; flex-direction: column; align-items: center; gap: .6rem; opacity: 1;
   }
@@ -2855,6 +2870,7 @@
     to { opacity: 1; transform: translateY(0); }
   }
   .game-title-gate .game-title-gate-btn {
+    position: relative; overflow: visible;
     width: min(220px, 70vw);
     background: none; border: 1.5px solid transparent; background-clip: padding-box, border-box;
     background-image: linear-gradient(rgba(2,8,16,.55), rgba(2,8,16,.55)),
@@ -2870,6 +2886,19 @@
   }
   @media (prefers-reduced-motion: no-preference) {
     .game-title-gate .game-title-gate-btn { animation: neonRingSpin 6s linear infinite; }
+  }
+  /* Burst particles spawned on Initialize press — small dots flung
+     outward from the button center and faded/shrunk via CSS custom
+     properties set per-particle in JS, rather than a fixed direction. */
+  .gt-burst-particle {
+    position: absolute; left: 50%; top: 50%; z-index: 5;
+    width: 5px; height: 5px; border-radius: 50%;
+    pointer-events: none;
+    animation: gtBurstFly .6s ease-out forwards;
+  }
+  @keyframes gtBurstFly {
+    0% { transform: translate(-50%, -50%) translate(0, 0) scale(1); opacity: 1; }
+    100% { transform: translate(-50%, -50%) translate(var(--tx), var(--ty)) scale(.25); opacity: 0; }
   }
   .game-title-seq.fading-out { opacity: 0; pointer-events: none; }
   .game-menu-root.fade-target, .game-menu-play.fade-target, .game-overlay-main.fade-target {

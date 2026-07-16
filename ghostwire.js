@@ -658,9 +658,31 @@
     el.classList.remove('is-visible');
     setTimeout(() => { el.hidden = true; if (andThen) andThen(); }, 350);
   }
+  // Small dots flung outward from the button center on Initialize press —
+  // a quick flourish before the boot sequence takes over. Skipped under
+  // reduced motion, same as the button's own idle ring-spin animation.
+  function spawnButtonBurst(el) {
+    if (!el) return;
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const colors = ['#22D3EE', '#818CF8', '#E879F9', '#F0F8FF'];
+    const n = 14;
+    for (let i = 0; i < n; i++) {
+      const p = document.createElement('span');
+      p.className = 'gt-burst-particle';
+      const ang = (i / n) * Math.PI * 2 + Math.random() * 0.3;
+      const dist = 40 + Math.random() * 55;
+      p.style.setProperty('--tx', (Math.cos(ang) * dist).toFixed(1) + 'px');
+      p.style.setProperty('--ty', (Math.sin(ang) * dist).toFixed(1) + 'px');
+      p.style.background = colors[(Math.random() * colors.length) | 0];
+      p.style.animationDelay = (Math.random() * 0.05).toFixed(2) + 's';
+      el.appendChild(p);
+      setTimeout(() => p.remove(), 700);
+    }
+  }
   if (titleGateBtn) {
     titleGateBtn.addEventListener('click', () => {
       unlockMenuMusic();
+      spawnButtonBurst(titleGateBtn);
       if (titleGateEl) {
         titleGateEl.classList.add('fading-out');
         setTimeout(() => { titleGateEl.hidden = true; }, 350);

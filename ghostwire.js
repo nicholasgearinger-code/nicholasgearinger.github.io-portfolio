@@ -3249,17 +3249,58 @@
 
   // Continuous idle decode on the title-gate wordmark — re-scrambles and
   // re-locks "GHOSTWIRE" on a loop for as long as the gate is on screen,
-  // instead of decoding once and sitting static. Self-schedules its next
-  // pass in decodeText's onDone callback, and stops scheduling as soon as
-  // the gate is hidden (Initialize pressed) so it's not running for
-  // nothing behind the menu/game. Skipped entirely under reduced motion.
-  const GATE_WORD_DECODE_MS = 900, GATE_WORD_HOLD_MS = 3200;
+  // instead of decoding once and sitting static. Each letter fades in
+  // individually the moment it locks, then once the whole word is settled
+  // and has held for a beat, the whole word fades out and the cycle
+  // restarts. Stops scheduling as soon as the gate is hidden (Initialize
+  // pressed) so it's not running for nothing behind the menu/game.
+  // Skipped entirely under reduced motion.
+  //
+  // Uses its own decode routine rather than the shared decodeText() —
+  // decodeText rewrites the element's entire innerHTML every frame, which
+  // is fine for a one-shot decode but would recreate every already-locked
+  // character's <span> on every subsequent frame here, retriggering its
+  // fade-in CSS animation from scratch each time instead of playing once.
+  // This keeps one persistent span per character and only touches a
+  // span's content/class when that character actually locks.
+  const GATE_WORD_DECODE_MS = 900, GATE_WORD_HOLD_MS = 1800, GATE_WORD_FADE_MS = 500;
+  function decodeGateWord(el, text, dur, onDone) {
+    const chars = text.split('');
+    el.innerHTML = chars.map(() => '<span class="gt-char-locked"></span>').join('');
+    const spans = el.querySelectorAll('span');
+    const stagger = dur / chars.length;
+    const t0 = performance.now();
+    function lockChar(i) {
+      const span = spans[i];
+      span.textContent = chars[i];
+      span.classList.remove('gt-char-in'); void span.offsetWidth; span.classList.add('gt-char-in');
+      span.dataset.locked = '1';
+    }
+    function tick(now) {
+      const e = now - t0;
+      for (let i = 0; i < chars.length; i++) {
+        if (spans[i].dataset.locked === '1') continue;
+        if (e >= i * stagger) lockChar(i);
+        else spans[i].textContent = GT_GLYPHS[(Math.random() * GT_GLYPHS.length) | 0];
+      }
+      if (e < dur) requestAnimationFrame(tick);
+      else {
+        for (let i = 0; i < chars.length; i++) { if (spans[i].dataset.locked !== '1') lockChar(i); }
+        if (onDone) onDone();
+      }
+    }
+    requestAnimationFrame(tick);
+  }
   function loopGateWordDecode() {
     if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     const wordEl = document.getElementById('game-title-gate-word');
     if (!wordEl || !titleGateEl || titleGateEl.hidden) return;
-    decodeText(wordEl, 'GHOSTWIRE', GATE_WORD_DECODE_MS, () => {
-      setTimeout(loopGateWordDecode, GATE_WORD_HOLD_MS);
+    wordEl.classList.remove('gt-word-fade-out');
+    decodeGateWord(wordEl, 'GHOSTWIRE', GATE_WORD_DECODE_MS, () => {
+      setTimeout(() => {
+        wordEl.classList.add('gt-word-fade-out');
+        setTimeout(loopGateWordDecode, GATE_WORD_FADE_MS);
+      }, GATE_WORD_HOLD_MS);
     });
   }
 

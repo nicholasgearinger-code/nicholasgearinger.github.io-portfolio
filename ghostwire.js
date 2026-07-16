@@ -125,10 +125,34 @@
   // letterboxed. 640x360 keeps the same vertical extent as the 480x360
   // default and only widens the field, so HUD elements anchored to H
   // don't need separate positioning per aspect mode.
+  // Fixed presets, plus 'auto' which is computed below from the device's
+  // own screen shape instead of a lookup — the only way to actually match
+  // arbitrary devices instead of approximating with a handful of presets.
   const ASPECT_RES = { '4:3': [480, 360], '16:9': [640, 360], '19.5:9': [780, 360] };
+  function computeAspectRes(mode) {
+    if (mode === 'auto') {
+      try {
+        // screen.width/height (not innerWidth/innerHeight) describe the
+        // physical device shape and don't change with browser chrome or
+        // current orientation — take the long:short ratio so this reads
+        // the same whether the phone is currently portrait or landscape.
+        const longSide = Math.max(window.screen.width, window.screen.height);
+        const shortSide = Math.min(window.screen.width, window.screen.height);
+        const rawRatio = longSide / shortSide;
+        // Clamped to [4:3, ~2.8:1] — wider than any real phone (21:9 is
+        // ~2.33:1) — so a bogus/unavailable screen reading can't produce
+        // a degenerate play field.
+        const ratio = Math.min(2.8, Math.max(4 / 3, rawRatio));
+        return [Math.round(360 * ratio), 360];
+      } catch (_) { return ASPECT_RES['4:3']; }
+    }
+    return ASPECT_RES[mode] || ASPECT_RES['4:3'];
+  }
+  var LOADED_ASPECT_MODE = '4:3';
   try {
     const savedAspect = JSON.parse(localStorage.getItem('ghostwireSettings') || '{}').aspect;
-    const res = ASPECT_RES[savedAspect] || ASPECT_RES['4:3'];
+    LOADED_ASPECT_MODE = ['4:3', '16:9', '19.5:9', 'auto'].includes(savedAspect) ? savedAspect : '4:3';
+    const res = computeAspectRes(LOADED_ASPECT_MODE);
     canvas.width = res[0];
     canvas.height = res[1];
     if (gameWrap) {
@@ -542,7 +566,7 @@
     if (['easy', 'normal', 'hard'].includes(savedSettings.difficulty)) settings.difficulty = savedSettings.difficulty;
     if (typeof savedSettings.sfxVolume === 'number') settings.sfxVolume = Math.min(1, Math.max(0, savedSettings.sfxVolume));
     if (typeof savedSettings.musicVolume === 'number') settings.musicVolume = Math.min(1, Math.max(0, savedSettings.musicVolume));
-    if (['4:3', '16:9', '19.5:9'].includes(savedSettings.aspect)) settings.aspect = savedSettings.aspect;
+    if (['4:3', '16:9', '19.5:9', 'auto'].includes(savedSettings.aspect)) settings.aspect = savedSettings.aspect;
   } catch (_) { /* corrupt/missing storage — defaults above stand */ }
   function saveSettings() { try { localStorage.setItem('ghostwireSettings', JSON.stringify(settings)); } catch (_) {} }
   // difficulty scales the threat-rise rate and spawn cadence — applied at
@@ -675,12 +699,12 @@
       });
     }
     if (aspectNote) {
-      // W reflects whatever resolution is actually loaded on canvas right
-      // now (set once at script init, above) — comparing it against the
-      // currently-selected setting is how we know a reload is actually
-      // needed rather than just always showing the note.
-      const loadedAspect = Object.keys(ASPECT_RES).find((k) => ASPECT_RES[k][0] === W) || '4:3';
-      aspectNote.hidden = settings.aspect === loadedAspect;
+      // LOADED_ASPECT_MODE is whichever setting value was actually used to
+      // size the canvas at script init (see top of file) — comparing
+      // directly against it (rather than reverse-engineering a mode from
+      // W) is what makes this work for 'auto' too, since its resolution
+      // varies per device instead of mapping to one fixed W.
+      aspectNote.hidden = settings.aspect === LOADED_ASPECT_MODE;
     }
     if (sfxVolSlider) sfxVolSlider.value = Math.round(settings.sfxVolume * 100);
     if (musicVolSlider) musicVolSlider.value = Math.round(settings.musicVolume * 100);

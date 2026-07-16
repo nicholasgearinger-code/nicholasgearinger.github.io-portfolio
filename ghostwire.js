@@ -2136,16 +2136,23 @@
       }
     }
 
-    // vanishing-point light — small, steady, and a fixed warm color
-    // rather than era-cycling, since a real distant light source doesn't
-    // change color or size. Just the core itself now — no bloom halo,
-    // no rays.
-    const SUN_RGB = '255,244,214';
+    // vanishing-point light — small and steady, but now colored per the
+    // current level era (same rotation the circuit floor/tunnel/rim
+    // lighting all use), with a small halo back — modest this time, not
+    // the wide bloom that got removed earlier.
+    const SUN_RGB = rotateHueRGB([255, 244, 214], levelHueDeg()).join(',');
     const SUN_R = 8;
+    const haloR = SUN_R * 2.4;
+    const halo = ctx.createRadialGradient(VP_X, VP_Y, 0, VP_X, VP_Y, haloR);
+    halo.addColorStop(0, 'rgba(' + SUN_RGB + ',.4)');
+    halo.addColorStop(1, 'rgba(' + SUN_RGB + ',0)');
+    ctx.beginPath();
+    ctx.fillStyle = halo;
+    ctx.arc(VP_X, VP_Y, haloR, 0, Math.PI * 2); ctx.fill();
 
     ctx.beginPath();
     ctx.fillStyle = 'rgba(255,255,255,.95)';
-    ctx.shadowColor = 'rgb(' + SUN_RGB + ')'; ctx.shadowBlur = 9;
+    ctx.shadowColor = 'rgb(' + SUN_RGB + ')'; ctx.shadowBlur = 12;
     ctx.arc(VP_X, VP_Y, SUN_R, 0, Math.PI * 2); ctx.fill();
     ctx.shadowBlur = 0;
 
@@ -2165,53 +2172,68 @@
     }
   }
 
+  // A second, complementary overlay layered under the primary one per
+  // era — Grid Sector finally gets actual grid lines as its accent (its
+  // primary slot was 'none'), Server Farm gets a rack-grid under its code
+  // rain, Breach Zone gets warning stripes under its scanline distortion,
+  // etc. Drawn at reduced intensity relative to the primary so it reads
+  // as texture, not a second competing effect.
+  const ERA_OVERLAYS_2 = ['grid', 'scanlines', 'grid', 'embers', 'scanlines', 'stripes'];
+
+  function drawOverlayKind(overlay, boost) {
+    if (overlay === 'none') return;
+    if (overlay === 'grid') {
+      const c = eraRGB([125, 211, 252]).join(',');
+      ctx.strokeStyle = 'rgba(' + c + ',' + (0.09 * boost).toFixed(3) + ')'; ctx.lineWidth = 1;
+      const cols = 8, rows = 5;
+      for (let i = 1; i < cols; i++) { const x = (W / cols) * i; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+      for (let j = 1; j < rows; j++) { const y = (H / rows) * j; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+    } else if (overlay === 'rain') {
+      const c = eraRGB([110, 231, 183]).join(',');
+      for (let i = 0; i < 18; i++) {
+        const seed = i * 97.13;
+        const x = (seed * 37) % W;
+        const speed = 40 + (i % 5) * 18;
+        const y = ((tunnelHue * speed + seed * 13) % (H + 40)) - 20;
+        const len = 14 + (i % 4) * 8;
+        ctx.strokeStyle = 'rgba(' + c + ',' + ((0.18 + (i % 3) * 0.07) * boost).toFixed(3) + ')'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + len); ctx.stroke();
+      }
+    } else if (overlay === 'stripes') {
+      const c = eraRGB([253, 224, 71]).join(',');
+      ctx.save(); ctx.globalAlpha = Math.min(1, boost); ctx.beginPath(); ctx.rect(0, 0, W, 14); ctx.clip(); drawHazardStripes(c, 0); ctx.restore();
+      ctx.save(); ctx.globalAlpha = Math.min(1, boost); ctx.beginPath(); ctx.rect(0, H - 14, W, 14); ctx.clip(); drawHazardStripes(c, H - 14); ctx.restore();
+    } else if (overlay === 'embers') {
+      const c = eraRGB([251, 146, 60]).join(',');
+      for (let i = 0; i < 20; i++) {
+        const seed = i * 53.7;
+        const x = (seed * 31) % W + Math.sin(tunnelHue * 2 + seed) * 10;
+        const speed = 20 + (i % 5) * 10;
+        const y = H - ((tunnelHue * speed + seed * 17) % (H + 30));
+        ctx.beginPath();
+        ctx.fillStyle = 'rgba(' + c + ',' + ((0.3 + (i % 4) * 0.08) * boost).toFixed(3) + ')';
+        ctx.arc(x, y, 1 + (i % 3), 0, Math.PI * 2); ctx.fill();
+      }
+    } else if (overlay === 'scanlines') {
+      const c = eraRGB([248, 113, 113]).join(',');
+      const sweepY = (tunnelHue * 60) % (H + 60) - 30;
+      ctx.fillStyle = 'rgba(' + c + ',' + (0.09 * boost).toFixed(3) + ')'; ctx.fillRect(0, sweepY, W, 3);
+      ctx.strokeStyle = 'rgba(' + c + ',' + (0.035 * boost).toFixed(3) + ')';
+      for (let y = 0; y < H; y += 6) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+    }
+  }
   function drawEraOverlay() {
     // A structural backdrop layer unique to each level era — grid lines,
     // falling code-rain, hazard stripes, rising embers, or scanlines —
     // layered under the gameplay so each zone feels like a different place,
     // not just a hue-shift of the same one. All positions are derived from
     // tunnelHue + a per-item index so nothing needs its own persisted state.
-    const overlay = ERA_OVERLAYS[currentEraIdx()];
-    if (overlay === 'none') return;
-    if (overlay === 'grid') {
-      const c = eraRGB([125, 211, 252]).join(',');
-      ctx.strokeStyle = 'rgba(' + c + ',.05)'; ctx.lineWidth = 1;
-      const cols = 8, rows = 5;
-      for (let i = 1; i < cols; i++) { const x = (W / cols) * i; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
-      for (let j = 1; j < rows; j++) { const y = (H / rows) * j; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
-    } else if (overlay === 'rain') {
-      const c = eraRGB([110, 231, 183]).join(',');
-      for (let i = 0; i < 14; i++) {
-        const seed = i * 97.13;
-        const x = (seed * 37) % W;
-        const speed = 40 + (i % 5) * 18;
-        const y = ((tunnelHue * speed + seed * 13) % (H + 40)) - 20;
-        const len = 14 + (i % 4) * 8;
-        ctx.strokeStyle = 'rgba(' + c + ',' + (0.1 + (i % 3) * 0.04).toFixed(3) + ')'; ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + len); ctx.stroke();
-      }
-    } else if (overlay === 'stripes') {
-      const c = eraRGB([253, 224, 71]).join(',');
-      ctx.save(); ctx.beginPath(); ctx.rect(0, 0, W, 14); ctx.clip(); drawHazardStripes(c, 0); ctx.restore();
-      ctx.save(); ctx.beginPath(); ctx.rect(0, H - 14, W, 14); ctx.clip(); drawHazardStripes(c, H - 14); ctx.restore();
-    } else if (overlay === 'embers') {
-      const c = eraRGB([251, 146, 60]).join(',');
-      for (let i = 0; i < 16; i++) {
-        const seed = i * 53.7;
-        const x = (seed * 31) % W + Math.sin(tunnelHue * 2 + seed) * 10;
-        const speed = 20 + (i % 5) * 10;
-        const y = H - ((tunnelHue * speed + seed * 17) % (H + 30));
-        ctx.beginPath();
-        ctx.fillStyle = 'rgba(' + c + ',' + (0.18 + (i % 4) * 0.05).toFixed(3) + ')';
-        ctx.arc(x, y, 1 + (i % 3), 0, Math.PI * 2); ctx.fill();
-      }
-    } else if (overlay === 'scanlines') {
-      const c = eraRGB([248, 113, 113]).join(',');
-      const sweepY = (tunnelHue * 60) % (H + 60) - 30;
-      ctx.fillStyle = 'rgba(' + c + ',.05)'; ctx.fillRect(0, sweepY, W, 3);
-      ctx.strokeStyle = 'rgba(' + c + ',.02)';
-      for (let y = 0; y < H; y += 6) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
-    }
+    // Two layers now (primary + a quieter secondary), both intensifying as
+    // threat climbs within the level rather than sitting at one flat level.
+    const idx = currentEraIdx();
+    const threatBoost = 1 + threat * 0.9;
+    drawOverlayKind(ERA_OVERLAYS[idx], threatBoost);
+    drawOverlayKind(ERA_OVERLAYS_2[idx], threatBoost * 0.65);
   }
 
   // One bespoke set-piece per era, on top of the generic overlay above —
@@ -2356,8 +2378,11 @@
       ctx.save();
       ctx.translate(pos.x, pos.y);
       ctx.fillStyle = 'rgba(' + color + ',' + alpha.toFixed(3) + ')';
-      ctx.strokeStyle = 'rgba(' + color + ',' + (alpha + 0.16).toFixed(3) + ')';
-      ctx.lineWidth = Math.max(0.6, depthScale);
+      // rim-lit edge: brighter and thicker than a plain outline would be,
+      // as if catching light from the environment's own glow
+      ctx.strokeStyle = 'rgba(' + color + ',' + Math.min(1, alpha + 0.4).toFixed(3) + ')';
+      ctx.shadowColor = 'rgb(' + color + ')'; ctx.shadowBlur = 4 * depthScale;
+      ctx.lineWidth = Math.max(0.9, depthScale * 1.4);
       if (s.kind === 'chip') {
         ctx.fillRect(-w / 2, -h, w, h);
         ctx.strokeRect(-w / 2, -h, w, h);
@@ -2569,6 +2594,8 @@
       ctx.closePath(); ctx.fill();
       ctx.strokeStyle = 'rgba(240,255,255,.7)'; ctx.lineWidth = Math.max(0.6, it.r * 0.06);
       ctx.stroke();
+      ctx.strokeStyle = 'rgba(' + eraRGB([125, 211, 252]).join(',') + ',.35)'; ctx.lineWidth = Math.max(0.4, it.r * 0.03);
+      ctx.stroke();
       ctx.restore();
       ctx.shadowBlur = 0;
     } else if (it.boss) {
@@ -2619,6 +2646,8 @@
       ctx.fillStyle = COL_BAD; ctx.shadowColor = COL_BAD; ctx.shadowBlur = 10 * (it.r / it.baseR + 0.3);
       ctx.fillRect(-it.r, -it.r, it.r * 2, it.r * 2);
       ctx.shadowBlur = 0;
+      ctx.strokeStyle = 'rgba(' + eraRGB([125, 211, 252]).join(',') + ',.3)'; ctx.lineWidth = Math.max(0.4, it.r * 0.035);
+      ctx.strokeRect(-it.r, -it.r, it.r * 2, it.r * 2);
       if (Math.sin(it.glitchT * 30 + it.seed) > 0.4) {
         ctx.fillStyle = 'rgba(3,8,17,.65)';
         ctx.fillRect(-it.r, -it.r * 0.2, it.r * 2, it.r * 0.3);

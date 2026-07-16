@@ -708,6 +708,7 @@
         if (titleGateEl) {
           titleGateEl.hidden = false;
           titleGateEl.classList.remove('fading-out');
+          loopGateWordDecode();
         }
       }, 350);
     });
@@ -3246,6 +3247,22 @@
     wordEl.innerHTML = 'GHOSTWIRE'.split('').map((c) => '<span class="gt-char-locked">' + c + '</span>').join('');
   }
 
+  // Continuous idle decode on the title-gate wordmark — re-scrambles and
+  // re-locks "GHOSTWIRE" on a loop for as long as the gate is on screen,
+  // instead of decoding once and sitting static. Self-schedules its next
+  // pass in decodeText's onDone callback, and stops scheduling as soon as
+  // the gate is hidden (Initialize pressed) so it's not running for
+  // nothing behind the menu/game. Skipped entirely under reduced motion.
+  const GATE_WORD_DECODE_MS = 900, GATE_WORD_HOLD_MS = 3200;
+  function loopGateWordDecode() {
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const wordEl = document.getElementById('game-title-gate-word');
+    if (!wordEl || !titleGateEl || titleGateEl.hidden) return;
+    decodeText(wordEl, 'GHOSTWIRE', GATE_WORD_DECODE_MS, () => {
+      setTimeout(loopGateWordDecode, GATE_WORD_HOLD_MS);
+    });
+  }
+
   // quiet per-character typing blip — tiny pitch variance so a whole line
   // decoding doesn't sound like one note repeated
   function typingBlip() {
@@ -3465,5 +3482,6 @@
 
   syncFullscreenLabel();
   startIdleAnim(); // tunnel keeps drifting behind the title/menu screens instead of one static frame
+  loopGateWordDecode();
   loadLeaderboard();
 })();

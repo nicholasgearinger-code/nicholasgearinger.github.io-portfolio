@@ -2773,10 +2773,12 @@
   .game-title-gate.fading-out { opacity: 0; pointer-events: none; }
   .game-title-gate[hidden] { display: none; }
   .game-title-gate-logo {
+    position: relative;
     display: flex; flex-direction: column; align-items: center; gap: .6rem; opacity: 1;
   }
   @media (prefers-reduced-motion: no-preference) {
     .game-title-gate-logo { animation: gateLogoLive 7s ease-in-out infinite; }
+    .game-title-gate-logo::after { animation: gateLogoScanline 3.4s linear infinite; }
   }
   /* A continuous idle loop rather than a static glow: a gentle brightness
      breathe early in the cycle, then a quick chromatic-split glitch blip
@@ -2791,12 +2793,30 @@
     59% { filter: brightness(.55) drop-shadow(-2px 0 0 rgba(232,121,249,.7)) drop-shadow(2px 0 0 rgba(34,211,238,.7)); transform: scale(1) translate(0, 0); }
     61%, 100% { filter: brightness(1); transform: scale(1) translate(0, 0); }
   }
+  /* A thin tricolor scanline (cyan → violet → magenta, the game's own
+     brand gradient) sweeping down through the logo on a loop — a third,
+     independent animation layer distinct from the breathing glow above
+     and the wordmark's own decode loop, reading as a CRT-style scan
+     pass rather than another glow/glitch variant. */
+  .game-title-gate-logo::after {
+    content: ''; position: absolute; left: -12%; right: -12%; top: -6%; height: 3px;
+    background: linear-gradient(90deg, transparent, var(--cyan), var(--violet), var(--magenta), transparent);
+    opacity: 0; filter: blur(1px); mix-blend-mode: screen; pointer-events: none;
+  }
+  @keyframes gateLogoScanline {
+    0% { top: -6%; opacity: 0; }
+    10% { opacity: .65; }
+    50% { top: 104%; opacity: .55; }
+    62% { opacity: 0; }
+    100% { top: 104%; opacity: 0; }
+  }
   .game-title-gate-icon {
     font-family: 'JetBrains Mono', 'Courier New', monospace; font-weight: 700;
     font-size: clamp(2.8rem, 13vw, 4.8rem); letter-spacing: .02em;
   }
-  .game-title-gate-icon .gt-lt, .game-title-gate-icon .gt-gt { color: var(--cyan); text-shadow: 0 0 18px rgba(34,211,238,.65), 0 0 40px rgba(34,211,238,.25); }
+  .game-title-gate-icon .gt-lt { color: var(--cyan); text-shadow: 0 0 18px rgba(34,211,238,.65), 0 0 40px rgba(34,211,238,.25); }
   .game-title-gate-icon .gt-slash { color: var(--violet); text-shadow: 0 0 18px rgba(129,140,248,.65), 0 0 40px rgba(129,140,248,.25); margin: 0 .05em; }
+  .game-title-gate-icon .gt-gt { color: var(--magenta); text-shadow: 0 0 18px rgba(232,121,249,.65), 0 0 40px rgba(232,121,249,.25); }
   .game-title-gate-word {
     font-family: 'JetBrains Mono', monospace; font-weight: 700; letter-spacing: .3em;
     font-size: clamp(1.15rem, 5.5vw, 1.9rem); color: var(--cyan); text-shadow: 0 0 16px rgba(34,211,238,.6), 0 0 34px rgba(34,211,238,.2);
@@ -3119,6 +3139,12 @@
     40% { color: #F87171; filter: drop-shadow(2px 0 0 rgba(34,211,238,.7)) drop-shadow(-2px 0 0 rgba(232,121,249,.7)); }
   }
   .gt-char-locked { color: var(--cyan); }
+  /* The title-gate wordmark specifically cycles through the full brand
+     trio per letter (cyan/violet/magenta), rather than the solid cyan
+     the in-game title sequence elsewhere still uses. */
+  .game-title-gate-word .gt-char-locked:nth-child(3n+1) { color: var(--cyan); text-shadow: 0 0 14px rgba(34,211,238,.7); }
+  .game-title-gate-word .gt-char-locked:nth-child(3n+2) { color: var(--violet); text-shadow: 0 0 14px rgba(129,140,248,.7); }
+  .game-title-gate-word .gt-char-locked:nth-child(3n+3) { color: var(--magenta); text-shadow: 0 0 14px rgba(232,121,249,.7); }
   @media (prefers-reduced-motion: reduce) {
     .game-title-icon { transition: none; animation: none; }
     .game-title-seq.gt-jump, .game-title-seq.gt-noise::before, .game-title-word.gt-corrupt { animation: none; }

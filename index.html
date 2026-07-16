@@ -2855,7 +2855,28 @@
   .game-wrap.gw-fullscreen .game-mute-btn { top: calc(.7rem + env(safe-area-inset-top)); right: calc(.7rem + env(safe-area-inset-right)); }
   .game-wrap.gw-fullscreen .game-gyro-btn { top: calc(3.7rem + env(safe-area-inset-top)); left: calc(.7rem + env(safe-area-inset-left)); }
   .game-wrap.gw-fullscreen .game-radio { bottom: calc(2.3rem + env(safe-area-inset-bottom)); right: calc(.6rem + env(safe-area-inset-right)); }
+  /* Canvas becomes position:absolute below for the title-gate state,
+     removing it from normal flow — on viewports above 640px there's no
+     other rule giving .game-wrap a height, so without this it would
+     collapse to 0px there. 640px matches the existing mobile min-height
+     so the box reads consistently at any width. */
+  .game-wrap:has(#game-title-gate:not([hidden])) { min-height: 640px; }
   #game-canvas { width: 100%; height: auto; display: block; background: #030811; touch-action: none; }
+  /* On the title gate specifically (before Initialize is even pressed),
+     stretch the canvas to fill the whole portrait card instead of sitting
+     in its normal 4:3 letterboxed box — the ambient tunnel loop is purely
+     decorative here, no gameplay/hit-testing depends on its size yet.
+     object-fit: cover keeps the tunnel's circular rings from stretching
+     into ellipses, cropping the sides instead of distorting them. */
+  .game-wrap:has(#game-title-gate:not([hidden])) #game-canvas {
+    position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+  }
+  /* Tilt steering and mute aren't relevant yet on the title gate — the
+     game hasn't started, so these just clutter the first impression */
+  .game-wrap:has(#game-title-gate:not([hidden])) .game-gyro-btn,
+  .game-wrap:has(#game-title-gate:not([hidden])) .game-mute-btn {
+    display: none;
+  }
   .game-gyro-btn {
     position: absolute; left: .7rem; top: 3.7rem; z-index: 1;
     padding: .3rem .6rem; border-radius: .4rem;

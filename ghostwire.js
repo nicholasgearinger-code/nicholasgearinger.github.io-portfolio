@@ -125,7 +125,7 @@
   // letterboxed. 640x360 keeps the same vertical extent as the 480x360
   // default and only widens the field, so HUD elements anchored to H
   // don't need separate positioning per aspect mode.
-  const ASPECT_RES = { '4:3': [480, 360], '16:9': [640, 360] };
+  const ASPECT_RES = { '4:3': [480, 360], '16:9': [640, 360], '19.5:9': [780, 360] };
   try {
     const savedAspect = JSON.parse(localStorage.getItem('ghostwireSettings') || '{}').aspect;
     const res = ASPECT_RES[savedAspect] || ASPECT_RES['4:3'];
@@ -542,7 +542,7 @@
     if (['easy', 'normal', 'hard'].includes(savedSettings.difficulty)) settings.difficulty = savedSettings.difficulty;
     if (typeof savedSettings.sfxVolume === 'number') settings.sfxVolume = Math.min(1, Math.max(0, savedSettings.sfxVolume));
     if (typeof savedSettings.musicVolume === 'number') settings.musicVolume = Math.min(1, Math.max(0, savedSettings.musicVolume));
-    if (['4:3', '16:9'].includes(savedSettings.aspect)) settings.aspect = savedSettings.aspect;
+    if (['4:3', '16:9', '19.5:9'].includes(savedSettings.aspect)) settings.aspect = savedSettings.aspect;
   } catch (_) { /* corrupt/missing storage — defaults above stand */ }
   function saveSettings() { try { localStorage.setItem('ghostwireSettings', JSON.stringify(settings)); } catch (_) {} }
   // difficulty scales the threat-rise rate and spawn cadence — applied at
@@ -679,7 +679,7 @@
       // now (set once at script init, above) — comparing it against the
       // currently-selected setting is how we know a reload is actually
       // needed rather than just always showing the note.
-      const loadedAspect = W === 640 ? '16:9' : '4:3';
+      const loadedAspect = Object.keys(ASPECT_RES).find((k) => ASPECT_RES[k][0] === W) || '4:3';
       aspectNote.hidden = settings.aspect === loadedAspect;
     }
     if (sfxVolSlider) sfxVolSlider.value = Math.round(settings.sfxVolume * 100);

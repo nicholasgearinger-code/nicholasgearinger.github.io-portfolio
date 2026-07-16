@@ -100,6 +100,8 @@
   const colorblindCheck = document.getElementById('gp-colorblind');
   const graphicsSeg = document.getElementById('gp-graphics');
   const difficultySeg = document.getElementById('gp-difficulty');
+  const aspectSeg = document.getElementById('gp-aspect');
+  const aspectNote = document.getElementById('gp-aspect-note');
   const sfxVolSlider = document.getElementById('gp-sfx-vol');
   const musicVolSlider = document.getElementById('gp-music-vol');
   const achvListEl = document.getElementById('gp-achv-list');
@@ -114,6 +116,26 @@
   if (fireBtn) fireBtn.hidden = false;
   const DEFAULT_TITLE = overlayTitle.textContent;
   const DEFAULT_SUB = overlaySub.textContent;
+
+  // Aspect ratio (Settings → Fullscreen aspect) has to be applied here,
+  // before canvas.width/height are read into the W/H consts below —
+  // everything in the file (vanishing point, HUD layout, hit-testing)
+  // derives its positions from W/H, so this is the one place that can
+  // change the actual play-field shape rather than just how it's
+  // letterboxed. 640x360 keeps the same vertical extent as the 480x360
+  // default and only widens the field, so HUD elements anchored to H
+  // don't need separate positioning per aspect mode.
+  const ASPECT_RES = { '4:3': [480, 360], '16:9': [640, 360] };
+  try {
+    const savedAspect = JSON.parse(localStorage.getItem('ghostwireSettings') || '{}').aspect;
+    const res = ASPECT_RES[savedAspect] || ASPECT_RES['4:3'];
+    canvas.width = res[0];
+    canvas.height = res[1];
+    if (gameWrap) {
+      gameWrap.style.setProperty('--gw-ar-w', String(res[0]));
+      gameWrap.style.setProperty('--gw-ar-h', String(res[1]));
+    }
+  } catch (_) { /* corrupt/missing storage — canvas keeps its HTML-attribute default (480x360) */ }
 
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
@@ -511,7 +533,7 @@
   // -- settings: haptics / colorblind-safe palette / graphics quality /
   //    difficulty / volume — persisted alongside the existing
   //    ghostwireBest/ghostwireUnlocks keys.
-  let settings = { haptics: true, colorblind: false, graphics: 'auto', difficulty: 'normal', sfxVolume: 1, musicVolume: 1 };
+  let settings = { haptics: true, colorblind: false, graphics: 'auto', difficulty: 'normal', sfxVolume: 1, musicVolume: 1, aspect: '4:3' };
   try {
     const savedSettings = JSON.parse(localStorage.getItem('ghostwireSettings') || '{}');
     if (typeof savedSettings.haptics === 'boolean') settings.haptics = savedSettings.haptics;
@@ -520,6 +542,7 @@
     if (['easy', 'normal', 'hard'].includes(savedSettings.difficulty)) settings.difficulty = savedSettings.difficulty;
     if (typeof savedSettings.sfxVolume === 'number') settings.sfxVolume = Math.min(1, Math.max(0, savedSettings.sfxVolume));
     if (typeof savedSettings.musicVolume === 'number') settings.musicVolume = Math.min(1, Math.max(0, savedSettings.musicVolume));
+    if (['4:3', '16:9'].includes(savedSettings.aspect)) settings.aspect = savedSettings.aspect;
   } catch (_) { /* corrupt/missing storage — defaults above stand */ }
   function saveSettings() { try { localStorage.setItem('ghostwireSettings', JSON.stringify(settings)); } catch (_) {} }
   // difficulty scales the threat-rise rate and spawn cadence — applied at
@@ -645,6 +668,19 @@
       difficultySeg.querySelectorAll('.gp-seg-btn').forEach((b) => {
         b.classList.toggle('active', b.dataset.val === settings.difficulty);
       });
+    }
+    if (aspectSeg) {
+      aspectSeg.querySelectorAll('.gp-seg-btn').forEach((b) => {
+        b.classList.toggle('active', b.dataset.val === settings.aspect);
+      });
+    }
+    if (aspectNote) {
+      // W reflects whatever resolution is actually loaded on canvas right
+      // now (set once at script init, above) — comparing it against the
+      // currently-selected setting is how we know a reload is actually
+      // needed rather than just always showing the note.
+      const loadedAspect = W === 640 ? '16:9' : '4:3';
+      aspectNote.hidden = settings.aspect === loadedAspect;
     }
     if (sfxVolSlider) sfxVolSlider.value = Math.round(settings.sfxVolume * 100);
     if (musicVolSlider) musicVolSlider.value = Math.round(settings.musicVolume * 100);
@@ -833,6 +869,21 @@
         syncSettingsUI();
       });
     });
+  }
+  if (aspectSeg) {
+    aspectSeg.querySelectorAll('.gp-seg-btn').forEach((b) => {
+      b.addEventListener('click', () => {
+        settings.aspect = b.dataset.val;
+        saveSettings();
+        syncSettingsUI(); // only flips the note on/off — actually resizing
+                           // the play field needs the fresh script-init
+                           // read above, hence the reload button below
+      });
+    });
+  }
+  const aspectReloadBtn = document.getElementById('gp-aspect-reload');
+  if (aspectReloadBtn) {
+    aspectReloadBtn.addEventListener('click', () => location.reload());
   }
   if (sfxVolSlider) {
     sfxVolSlider.addEventListener('input', () => {

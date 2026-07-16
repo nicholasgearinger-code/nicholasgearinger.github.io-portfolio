@@ -2606,18 +2606,23 @@
   }
   .game-wrap.gw-fullscreen {
     position: fixed; inset: 0; z-index: 9999; margin: auto; max-width: none; border-radius: 0;
-    width: min(100dvw, calc(100dvh * 4 / 3));
-    height: min(100dvh, calc(100dvw * 3 / 4));
+    /* --gw-ar-w/--gw-ar-h default to the 4:3 canvas; set inline by JS to
+       match whichever resolution (Settings → Aspect Ratio) is actually
+       loaded on canvas, so this box always matches the real canvas shape
+       instead of assuming 4:3. */
+    --gw-ar-w: 4; --gw-ar-h: 3;
+    width: min(100dvw, calc(100dvh * var(--gw-ar-w) / var(--gw-ar-h)));
+    height: min(100dvh, calc(100dvw * var(--gw-ar-h) / var(--gw-ar-w)));
     background: #000;
   }
   @media (orientation: landscape) {
     /* Was stretching to fill the full landscape viewport regardless of
        aspect ratio, which distorted the whole scene (circles into
-       ellipses, etc). Letterboxed to the same 4:3 the portrait rule
+       ellipses, etc). Letterboxed to the same ratio the portrait rule
        above already uses instead — svw/svh, not dvw/dvh, since this
        project has repeatedly hit dvh/dvw miscalculating during Safari
        toolbar transitions. */
-    .game-wrap.gw-fullscreen { width: min(100svw, calc(100svh * 4 / 3)); height: min(100svh, calc(100svw * 3 / 4)); }
+    .game-wrap.gw-fullscreen { width: min(100svw, calc(100svh * var(--gw-ar-w) / var(--gw-ar-h))); height: min(100svh, calc(100svw * var(--gw-ar-h) / var(--gw-ar-w))); }
   }
   /* The 4:3 letterbox above is tuned for actual gameplay (the canvas
      itself). On the title/level-select/menu screens — which have taller
@@ -2726,6 +2731,11 @@
   .gp-row input[type="checkbox"] { width: 1.15rem; height: 1.15rem; accent-color: var(--cyan); cursor: pointer; flex-shrink: 0; }
   .gp-note { margin: -.3rem 0 .3rem; font-size: .68rem; line-height: 1.4; color: var(--muted); opacity: .8; }
   .gp-note[hidden] { display: none; }
+  .gp-note-action {
+    display: inline; padding: 0; margin: 0; border: none; background: none;
+    font: inherit; font-size: .68rem; color: var(--cyan); text-decoration: underline;
+    text-underline-offset: 2px; cursor: pointer; touch-action: manipulation;
+  }
   .gp-row-col { flex-direction: column; align-items: flex-start; gap: .5rem; cursor: default; }
   .gp-seg { display: flex; gap: .4rem; width: 100%; }
   .gp-seg-btn {
@@ -4156,6 +4166,14 @@
                     <button type="button" class="gp-seg-btn" data-val="hard">Hard</button>
                   </div>
                 </div>
+                <div class="gp-row gp-row-col">
+                  <span>Fullscreen aspect</span>
+                  <div class="gp-seg" id="gp-aspect">
+                    <button type="button" class="gp-seg-btn" data-val="4:3">4:3</button>
+                    <button type="button" class="gp-seg-btn" data-val="16:9">16:9</button>
+                  </div>
+                </div>
+                <p class="gp-note" id="gp-aspect-note" hidden>Changes the actual play field width, not just the letterbox. <button type="button" class="gp-note-action" id="gp-aspect-reload">Reload to apply</button></p>
                 <div class="gp-row gp-row-col">
                   <span>SFX volume</span>
                   <input type="range" class="gp-slider" id="gp-sfx-vol" min="0" max="100" value="100">

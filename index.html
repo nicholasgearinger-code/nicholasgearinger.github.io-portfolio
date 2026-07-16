@@ -3033,11 +3033,12 @@
     transition: background .4s ease;
   }
   .game-overlay[hidden] { display: none; }
-  /* the title gate is just a logo + one button — let the live tunnel
-     show through behind it instead of hiding it under the same opaque
-     scrim the text-dense menu/game-over screens need for readability */
+  /* the title gate is just a logo + one button — no scrim at all here, so
+     the live tunnel shows through at full brightness; the text-dense
+     menu/game-over screens keep the base opaque background above for
+     their own readability */
   .game-overlay:has(#game-title-gate:not([hidden])) {
-    background: rgba(3,8,17,.42);
+    background: transparent;
   }
   .game-overlay h3 { font-family: 'Syne', sans-serif; font-size: 1.3rem; color: var(--white); margin: 0; min-height: 0; }
   .game-overlay h3:empty { display: none; }

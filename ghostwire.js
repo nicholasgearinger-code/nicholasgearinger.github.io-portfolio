@@ -2053,14 +2053,16 @@
       }
     }
 
-    // vanishing-point core glow — breathes gently rather than sitting at
-    // one static intensity, same sine rhythm as the circuit floor's glow
-    // pulse so the two feel like part of the same living scene
-    const corePulse = 0.7 + 0.3 * Math.sin(tunnelHue * 1.6);
+    // vanishing-point core glow — grows bigger and brighter, then dims
+    // back down to a small point and repeats, rather than a subtle
+    // breathing wobble. Slower and much wider range than the circuit
+    // floor's own glow pulse, since this is meant to read as a distinct
+    // "charging up" moment rather than a constant background hum.
+    const corePulse = 0.5 + 0.5 * Math.sin(tunnelHue * 0.9);
     ctx.beginPath();
-    ctx.fillStyle = 'rgba(' + glowColor + ',' + (0.5 * corePulse).toFixed(3) + ')';
-    ctx.shadowColor = 'rgb(' + glowColor + ')'; ctx.shadowBlur = 16 * corePulse;
-    ctx.arc(VP_X, VP_Y, 2.6 + corePulse * 0.8, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(' + glowColor + ',' + (0.22 + corePulse * 0.68).toFixed(3) + ')';
+    ctx.shadowColor = 'rgb(' + glowColor + ')'; ctx.shadowBlur = 12 + corePulse * 54;
+    ctx.arc(VP_X, VP_Y, 3.6 + corePulse * 13.5, 0, Math.PI * 2); ctx.fill();
     ctx.shadowBlur = 0;
 
     if (surging) {

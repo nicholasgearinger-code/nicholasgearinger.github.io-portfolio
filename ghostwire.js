@@ -408,6 +408,8 @@
   let score = 0, running = false, dying = false, deathTimer = 0, rafId = null, lastTime = 0;
   let idleRafId = null, idleLastTime = 0; // "attract mode" loop — keeps the tunnel drifting behind the title/menu screens instead of sitting on one static frame
   let circuitSparks = [], circuitSparkTimer = 1 + Math.random() * 2; // occasional white spark bursts at circuit-floor nodes, idle screen only
+  let dataPackets = [], dataPacketTimer = 0.4; // small packets traveling along circuit traces, idle screen only
+  let idleSurgeTimer = 14 + Math.random() * 6, idleSurgeActive = false, idleSurgeProgress = 0; // periodic full-tunnel power-surge ripple, idle screen only
   let spawnTimer = 0, codeBitTimer = 0, elapsed = 0, difficulty = 1, level = 1;
   let shakeMag = 0, flash = 0, tunnelHue = 0, threat = 0;
   let streak = 0, invulnTimer = 0, fireTimer = 0;
@@ -2051,11 +2053,14 @@
       }
     }
 
-    // vanishing-point core glow
+    // vanishing-point core glow — breathes gently rather than sitting at
+    // one static intensity, same sine rhythm as the circuit floor's glow
+    // pulse so the two feel like part of the same living scene
+    const corePulse = 0.7 + 0.3 * Math.sin(tunnelHue * 1.6);
     ctx.beginPath();
-    ctx.fillStyle = 'rgba(' + glowColor + ',.5)';
-    ctx.shadowColor = 'rgb(' + glowColor + ')'; ctx.shadowBlur = 16;
-    ctx.arc(VP_X, VP_Y, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(' + glowColor + ',' + (0.5 * corePulse).toFixed(3) + ')';
+    ctx.shadowColor = 'rgb(' + glowColor + ')'; ctx.shadowBlur = 16 * corePulse;
+    ctx.arc(VP_X, VP_Y, 2.6 + corePulse * 0.8, 0, Math.PI * 2); ctx.fill();
     ctx.shadowBlur = 0;
 
     if (surging) {
@@ -2878,6 +2883,74 @@
     });
   }
 
+  // Small packets of "data" traveling along circuit-trace segments — a
+  // bright, fast-moving accent distinct from the slower single "current"
+  // pulse each trace already carries, reading as active traffic on the
+  // wire rather than one lone signal.
+  function maybeSpawnDataPacket(dt) {
+    dataPacketTimer -= dt;
+    if (dataPacketTimer > 0) return;
+    dataPacketTimer = 0.35 + Math.random() * 0.5;
+    const t = circuitTraces[(Math.random() * circuitTraces.length) | 0];
+    if (t.pts.length < 2) return;
+    const segIdx = (Math.random() * (t.pts.length - 1)) | 0;
+    dataPackets.push({ t, segIdx, prog: 0, speed: 0.8 + Math.random() * 0.7 });
+  }
+  function updateDataPackets(dt) {
+    for (let i = dataPackets.length - 1; i >= 0; i--) {
+      const dp = dataPackets[i];
+      dp.prog += dp.speed * dt;
+      if (dp.prog >= 1) dataPackets.splice(i, 1);
+    }
+  }
+  function drawDataPackets() {
+    dataPackets.forEach((dp) => {
+      const a = dp.t.pts[dp.segIdx], b = dp.t.pts[dp.segIdx + 1];
+      const lane = a.lane + (b.lane - a.lane) * dp.prog;
+      const p = a.p + (b.p - a.p) * dp.prog;
+      const s = projectPoint(lane, p);
+      const size = perspSize(p, 3.2);
+      ctx.save();
+      ctx.translate(s.x, s.y); ctx.rotate(Math.PI / 4);
+      ctx.fillStyle = 'rgba(224,242,254,.95)';
+      ctx.shadowColor = 'rgb(34,211,238)'; ctx.shadowBlur = 6;
+      ctx.fillRect(-size / 2, -size / 2, size, size);
+      ctx.restore();
+      ctx.shadowBlur = 0;
+    });
+  }
+
+  // A full-tunnel power-surge ripple every 15-20s — an expanding ring
+  // washing outward from the vanishing point with a brief brightness
+  // flash at its start, distinct from the constant smaller-scale glow
+  // pulse everything else already breathes with.
+  function updateIdleSurge(dt) {
+    if (!idleSurgeActive) {
+      idleSurgeTimer -= dt;
+      if (idleSurgeTimer <= 0) { idleSurgeActive = true; idleSurgeProgress = 0; }
+    } else {
+      idleSurgeProgress += dt / 1.1;
+      if (idleSurgeProgress >= 1) { idleSurgeActive = false; idleSurgeTimer = 15 + Math.random() * 7; }
+    }
+  }
+  function drawIdleSurge() {
+    if (!idleSurgeActive) return;
+    const k = idleSurgeProgress;
+    const r = k * H * 1.05;
+    ctx.beginPath();
+    ctx.strokeStyle = 'rgba(224,242,254,' + ((1 - k) * 0.5).toFixed(3) + ')';
+    ctx.lineWidth = 2 + (1 - k) * 3;
+    ctx.shadowColor = 'rgba(232,121,249,1)'; ctx.shadowBlur = 14 * (1 - k);
+    ctx.arc(VP_X, VP_Y, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    const flash = Math.max(0, 1 - k * 4) * 0.12;
+    if (flash > 0) {
+      ctx.fillStyle = 'rgba(232,121,249,' + flash.toFixed(3) + ')';
+      ctx.fillRect(0, 0, W, H);
+    }
+  }
+
   function drawAmbientBackground() {
     drawTunnel();
     drawEraOverlay();
@@ -2887,15 +2960,17 @@
     drawWarpStreaks();
     drawCircuitFloor(2.4); // brighter/glowier here than in actual gameplay, where it needs to stay a quiet backdrop
     drawCircuitSparks();
+    drawDataPackets();
     drawCodeBits();
     const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.85);
     vg.addColorStop(0, 'rgba(0,0,0,0)');
     vg.addColorStop(1, 'rgba(0,0,0,.6)');
     ctx.fillStyle = vg;
     ctx.fillRect(0, 0, W, H);
-    // embers drawn after the vignette so they read as a foreground layer
-    // of dust floating between the viewer and the tunnel, unaffected by
-    // the edge-darkening behind them
+    // the surge and embers are both drawn after the vignette so they read
+    // as unobscured foreground moments rather than getting dimmed with
+    // the rest of the scene behind them
+    drawIdleSurge();
     drawEmbers();
   }
 
@@ -2911,6 +2986,9 @@
     circuitTraces.forEach((t) => { t.phase = (t.phase + t.speed * dt) % 1; });
     maybeSpawnCircuitSpark(dt);
     updateCircuitSparks(dt);
+    maybeSpawnDataPacket(dt);
+    updateDataPackets(dt);
+    updateIdleSurge(dt);
     updateEmbers(dt);
     ctx.clearRect(0, 0, W, H);
     drawAmbientBackground();

@@ -2077,27 +2077,64 @@
       }
     }
 
-    // vanishing-point core glow — grows bigger and brighter, then dims
-    // back down to a small point and repeats. Rendered as a soft white
-    // "sun": a radial-gradient bloom (genuinely blurred falloff, not just
-    // a shadowBlur halo) plus a bright core, rather than tracking the
-    // tunnel's threat-driven color.
-    const corePulse = 0.5 + 0.5 * Math.sin(tunnelHue * 0.9);
-    const coreR = (3.6 + corePulse * 13.5) * 0.7 * 0.5; // 30% smaller, then another 50% on top
-    const coreAlpha = 0.22 + corePulse * 0.68;
-    const haloR = coreR * 5.5; // much wider soft falloff — reads as more radial blur
-    const halo = ctx.createRadialGradient(VP_X, VP_Y, 0, VP_X, VP_Y, haloR);
-    halo.addColorStop(0, 'rgba(255,255,255,' + (coreAlpha * 0.9).toFixed(3) + ')');
-    halo.addColorStop(0.22, 'rgba(255,255,255,' + (coreAlpha * 0.5).toFixed(3) + ')');
-    halo.addColorStop(0.5, 'rgba(255,255,255,' + (coreAlpha * 0.2).toFixed(3) + ')');
-    halo.addColorStop(1, 'rgba(255,255,255,0)');
+    // vanishing-point core glow — now a giant sun rather than a small
+    // point, colored per the current level era (same LEVEL_ERA_HUES
+    // rotation the circuit floor and tunnel background already use, so
+    // it shifts in step with everything else as the level progresses).
+    // Its edge is a wobbly polygon built from two overlaid sine waves at
+    // different frequencies/phases rather than a perfect circle, which
+    // reads as a simmering heat-haze distortion rather than a smooth
+    // pulsing disc.
+    const sunRGB = rotateHueRGB([255, 244, 214], levelHueDeg()).join(',');
+    const SUN_R = 46;
+
+    // wide soft halo bloom behind the disc
+    const haloR = SUN_R * 3.4;
+    const halo = ctx.createRadialGradient(VP_X, VP_Y, SUN_R * 0.5, VP_X, VP_Y, haloR);
+    halo.addColorStop(0, 'rgba(' + sunRGB + ',.4)');
+    halo.addColorStop(0.5, 'rgba(' + sunRGB + ',.14)');
+    halo.addColorStop(1, 'rgba(' + sunRGB + ',0)');
     ctx.beginPath();
     ctx.fillStyle = halo;
     ctx.arc(VP_X, VP_Y, haloR, 0, Math.PI * 2); ctx.fill();
+
+    // a couple of extra faint wobble rings between the halo and the disc,
+    // each on its own wobble phase, for a layered haze/shimmer texture
+    for (let ring = 0; ring < 2; ring++) {
+      const ringBaseR = SUN_R * (1.3 + ring * 0.5);
+      ctx.beginPath();
+      const pts = 40;
+      for (let i = 0; i <= pts; i++) {
+        const ang = (i / pts) * Math.PI * 2;
+        const wob = Math.sin(ang * 4 + tunnelHue * (1.1 + ring * 0.4) + ring * 2) * (5 + ring * 3);
+        const r = ringBaseR + wob;
+        const x = VP_X + Math.cos(ang) * r, y = VP_Y + Math.sin(ang) * r * 0.9;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(' + sunRGB + ',' + (0.05 - ring * 0.015).toFixed(3) + ')';
+      ctx.fill();
+    }
+
+    // the sun disc itself — wobbly heat-shimmer edge, bright white-hot
+    // center fading out to the era color at the rim
     ctx.beginPath();
-    ctx.fillStyle = 'rgba(255,255,255,' + Math.min(1, coreAlpha + 0.2).toFixed(3) + ')';
-    ctx.shadowColor = '#fff'; ctx.shadowBlur = (12 + corePulse * 54) * 0.7;
-    ctx.arc(VP_X, VP_Y, coreR, 0, Math.PI * 2); ctx.fill();
+    const discPts = 48;
+    for (let i = 0; i <= discPts; i++) {
+      const ang = (i / discPts) * Math.PI * 2;
+      const wobble = Math.sin(ang * 5 + tunnelHue * 1.3) * 3.2 + Math.sin(ang * 9 - tunnelHue * 2.1) * 1.8;
+      const r = SUN_R + wobble;
+      const x = VP_X + Math.cos(ang) * r, y = VP_Y + Math.sin(ang) * r * 0.9;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    const coreGrad = ctx.createRadialGradient(VP_X, VP_Y, 0, VP_X, VP_Y, SUN_R * 1.1);
+    coreGrad.addColorStop(0, 'rgba(255,255,255,.95)');
+    coreGrad.addColorStop(0.55, 'rgba(' + sunRGB + ',.9)');
+    coreGrad.addColorStop(1, 'rgba(' + sunRGB + ',.55)');
+    ctx.fillStyle = coreGrad;
+    ctx.shadowColor = 'rgb(' + sunRGB + ')'; ctx.shadowBlur = 42;
+    ctx.fill();
     ctx.shadowBlur = 0;
 
     if (surging) {

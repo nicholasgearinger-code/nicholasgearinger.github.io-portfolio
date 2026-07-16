@@ -223,6 +223,27 @@
     return traces;
   }
 
+  // Slow drifting motes for the idle title screen — plain screen-space
+  // (not tunnel-projected, unlike everything else) so they read as a thin
+  // layer of dust floating between the viewer and the tunnel, adding
+  // depth behind the logo rather than being part of the scene itself.
+  function generateEmbers() {
+    const embers = [];
+    const count = 22;
+    const HUES = ['34,211,238', '167,139,250', '232,121,249']; // cyan, violet, magenta
+    for (let i = 0; i < count; i++) {
+      embers.push({
+        x: Math.random() * W, y: Math.random() * H,
+        vy: -(5 + Math.random() * 12), vx: (Math.random() - 0.5) * 5,
+        r: 0.6 + Math.random() * 1.5,
+        color: HUES[(Math.random() * HUES.length) | 0],
+        baseAlpha: 0.15 + Math.random() * 0.3,
+        phase: Math.random() * Math.PI * 2,
+      });
+    }
+    return embers;
+  }
+
   // Perspective depth constant for the skyline: converts a true world-space
   // distance (z) into the tunnel's 0-1 screen-lerp parameter (p) using the
   // standard perspective divide p = D/(D+z), same shape as a real camera
@@ -386,6 +407,7 @@
   let powerups = [], floatTexts = [], shockwaves = [];
   let score = 0, running = false, dying = false, deathTimer = 0, rafId = null, lastTime = 0;
   let idleRafId = null, idleLastTime = 0; // "attract mode" loop — keeps the tunnel drifting behind the title/menu screens instead of sitting on one static frame
+  let circuitSparks = [], circuitSparkTimer = 1 + Math.random() * 2; // occasional white spark bursts at circuit-floor nodes, idle screen only
   let spawnTimer = 0, codeBitTimer = 0, elapsed = 0, difficulty = 1, level = 1;
   let shakeMag = 0, flash = 0, tunnelHue = 0, threat = 0;
   let streak = 0, invulnTimer = 0, fireTimer = 0;
@@ -467,6 +489,7 @@
     return null;
   }
   let circuitTraces = generateCircuitTraces();
+  let embers = generateEmbers();
   let skylineParts = generateSkyline();
   let best = parseInt(localStorage.getItem('ghostwireBest') || '0', 10);
   bestStatEl.innerHTML = 'best: <strong>' + best + '</strong>';
@@ -2793,6 +2816,68 @@
   // behind the title gate / menu / game-over screens — same tunnel,
   // skyline, and circuit-floor layers as live gameplay, just without the
   // player, items, projectiles, or HUD on top.
+  // Occasional white spark burst at a random circuit-floor node — a few
+  // tiny particles kicking outward and fading fast, reading as a
+  // connection briefly firing. Deliberately separate from the main
+  // gameplay particle system (which is wired to update()/collision events)
+  // since this only ever runs on the idle title screen.
+  function maybeSpawnCircuitSpark(dt) {
+    circuitSparkTimer -= dt;
+    if (circuitSparkTimer > 0) return;
+    circuitSparkTimer = 1.3 + Math.random() * 2.4;
+    const t = circuitTraces[(Math.random() * circuitTraces.length) | 0];
+    const pt = t.pts[(Math.random() * t.pts.length) | 0];
+    const s = projectPoint(pt.lane, pt.p);
+    const n = 4 + ((Math.random() * 4) | 0);
+    for (let i = 0; i < n; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const spd = 24 + Math.random() * 55;
+      circuitSparks.push({
+        x: s.x, y: s.y, vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+        age: 0, life: 0.3 + Math.random() * 0.25, r: 0.8 + Math.random() * 1.1,
+      });
+    }
+  }
+  function updateCircuitSparks(dt) {
+    for (let i = circuitSparks.length - 1; i >= 0; i--) {
+      const p = circuitSparks[i];
+      p.age += dt;
+      if (p.age >= p.life) { circuitSparks.splice(i, 1); continue; }
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.vx *= 0.9; p.vy *= 0.9;
+    }
+  }
+  function drawCircuitSparks() {
+    circuitSparks.forEach((p) => {
+      const k = 1 - p.age / p.life;
+      ctx.beginPath();
+      ctx.fillStyle = 'rgba(255,255,255,' + (k * 0.9).toFixed(3) + ')';
+      ctx.shadowColor = '#fff'; ctx.shadowBlur = 6 * k;
+      ctx.arc(p.x, p.y, p.r * k, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    });
+  }
+
+  function updateEmbers(dt) {
+    embers.forEach((e) => {
+      e.y += e.vy * dt; e.x += e.vx * dt; e.phase += dt * 1.3;
+      if (e.y < -10) { e.y = H + 10; e.x = Math.random() * W; }
+      if (e.x < -10) e.x = W + 10; else if (e.x > W + 10) e.x = -10;
+    });
+  }
+  function drawEmbers() {
+    embers.forEach((e) => {
+      const twinkle = 0.6 + 0.4 * Math.sin(e.phase);
+      ctx.beginPath();
+      ctx.fillStyle = 'rgba(' + e.color + ',' + (e.baseAlpha * twinkle).toFixed(3) + ')';
+      ctx.shadowColor = 'rgb(' + e.color + ')'; ctx.shadowBlur = 4;
+      ctx.arc(e.x, e.y, e.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    });
+  }
+
   function drawAmbientBackground() {
     drawTunnel();
     drawEraOverlay();
@@ -2801,12 +2886,17 @@
     drawSkyline();
     drawWarpStreaks();
     drawCircuitFloor(2.4); // brighter/glowier here than in actual gameplay, where it needs to stay a quiet backdrop
+    drawCircuitSparks();
     drawCodeBits();
     const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.85);
     vg.addColorStop(0, 'rgba(0,0,0,0)');
     vg.addColorStop(1, 'rgba(0,0,0,.6)');
     ctx.fillStyle = vg;
     ctx.fillRect(0, 0, W, H);
+    // embers drawn after the vignette so they read as a foreground layer
+    // of dust floating between the viewer and the tunnel, unaffected by
+    // the edge-darkening behind them
+    drawEmbers();
   }
 
   function idleLoop(ts) {
@@ -2819,6 +2909,9 @@
     // on the title screen the whole time — this is the same line update()
     // runs, just driven off the idle loop's own dt instead
     circuitTraces.forEach((t) => { t.phase = (t.phase + t.speed * dt) % 1; });
+    maybeSpawnCircuitSpark(dt);
+    updateCircuitSparks(dt);
+    updateEmbers(dt);
     ctx.clearRect(0, 0, W, H);
     drawAmbientBackground();
     idleRafId = requestAnimationFrame(idleLoop);

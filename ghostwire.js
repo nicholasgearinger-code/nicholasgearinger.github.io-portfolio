@@ -658,33 +658,53 @@
     el.classList.remove('is-visible');
     setTimeout(() => { el.hidden = true; if (andThen) andThen(); }, 350);
   }
-  // Small dots flung outward from the button center on Initialize press —
-  // a quick flourish before the boot sequence takes over. Skipped under
-  // reduced motion, same as the button's own idle ring-spin animation.
-  function spawnButtonBurst(el) {
+  // Particles sampled across the button's whole surface on Initialize
+  // press, each flying outward from wherever on the button it started —
+  // reads as the button breaking apart into a spray rather than sparks
+  // flung from one center point. Appended to the button's parent (not the
+  // button itself) so the button's own quick dissolve-fade doesn't take
+  // the particles down with it — they're independent siblings, positioned
+  // via the button's measured screen rect. Skipped under reduced motion,
+  // same as the button's own idle ring-spin animation.
+  function spawnButtonDissolve(el) {
     if (!el) return;
     if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const parent = el.parentElement;
+    if (!parent) return;
+    const btnRect = el.getBoundingClientRect();
+    const parentRect = parent.getBoundingClientRect();
+    const originX = btnRect.left - parentRect.left, originY = btnRect.top - parentRect.top;
+    const w = btnRect.width, h = btnRect.height, cx = w / 2, cy = h / 2;
     const colors = ['#22D3EE', '#818CF8', '#E879F9', '#F0F8FF'];
-    const n = 14;
+    const n = 34;
     for (let i = 0; i < n; i++) {
+      const px = Math.random() * w, py = Math.random() * h;
+      const dx = px - cx, dy = py - cy;
+      const dist = Math.hypot(dx, dy) || 1;
+      const flyDist = 35 + Math.random() * 70;
+      const tx = (dx / dist) * flyDist + (Math.random() - 0.5) * 24;
+      const ty = (dy / dist) * flyDist + (Math.random() - 0.5) * 24;
       const p = document.createElement('span');
       p.className = 'gt-burst-particle';
-      const ang = (i / n) * Math.PI * 2 + Math.random() * 0.3;
-      const dist = 40 + Math.random() * 55;
-      p.style.setProperty('--tx', (Math.cos(ang) * dist).toFixed(1) + 'px');
-      p.style.setProperty('--ty', (Math.sin(ang) * dist).toFixed(1) + 'px');
+      p.style.left = (originX + px).toFixed(1) + 'px';
+      p.style.top = (originY + py).toFixed(1) + 'px';
+      p.style.setProperty('--tx', tx.toFixed(1) + 'px');
+      p.style.setProperty('--ty', ty.toFixed(1) + 'px');
+      const size = 3 + Math.random() * 4;
+      p.style.width = size + 'px'; p.style.height = size + 'px';
       p.style.background = colors[(Math.random() * colors.length) | 0];
-      p.style.animationDelay = (Math.random() * 0.05).toFixed(2) + 's';
-      el.appendChild(p);
-      setTimeout(() => p.remove(), 700);
+      p.style.animationDelay = (Math.random() * 0.06).toFixed(2) + 's';
+      parent.appendChild(p);
+      setTimeout(() => p.remove(), 750);
     }
   }
   if (titleGateBtn) {
     titleGateBtn.addEventListener('click', () => {
       unlockMenuMusic();
-      spawnButtonBurst(titleGateBtn);
-      // wait for the burst to fully play out (last particle can start up
-      // to .05s late and animates for .6s) before the gate starts fading
+      spawnButtonDissolve(titleGateBtn);
+      titleGateBtn.classList.add('gt-dissolving'); // the button itself vanishes quickly, letting the particle spray carry the moment
+      // wait for the spray to fully play out (last particle can start up
+      // to .06s late and animates for .7s) before the gate starts fading
       // and the boot sequence takes over, instead of both happening at once
       setTimeout(() => {
         if (titleGateEl) {
@@ -692,7 +712,7 @@
           setTimeout(() => { titleGateEl.hidden = true; }, 350);
         }
         playInitialTitleCard();
-      }, 650);
+      }, 700);
     });
   }
   if (gameMenuPlayBtn) {

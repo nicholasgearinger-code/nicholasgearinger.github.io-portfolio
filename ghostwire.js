@@ -2003,7 +2003,6 @@
     // at low danger toward a hot orange/red palette as speed/difficulty climb
     const coreColor = lerpColorStr(eraRGB([34, 211, 238]), eraRGB([251, 146, 60]), threat);   // cyan -> orange
     const midColor = lerpColorStr(eraRGB([88, 28, 135]), eraRGB([153, 27, 27]), threat);      // violet -> deep red
-    const glowColor = lerpColorStr(eraRGB([125, 211, 252]), eraRGB([251, 191, 36]), threat);  // sky blue -> amber
 
     const g = ctx.createRadialGradient(VP_X, VP_Y, 4, VP_X, VP_Y, H * 0.95);
     g.addColorStop(0, 'rgba(' + coreColor + ',.16)');
@@ -2054,15 +2053,25 @@
     }
 
     // vanishing-point core glow — grows bigger and brighter, then dims
-    // back down to a small point and repeats, rather than a subtle
-    // breathing wobble. Slower and much wider range than the circuit
-    // floor's own glow pulse, since this is meant to read as a distinct
-    // "charging up" moment rather than a constant background hum.
+    // back down to a small point and repeats. Rendered as a soft white
+    // "sun": a radial-gradient bloom (genuinely blurred falloff, not just
+    // a shadowBlur halo) plus a bright core, rather than tracking the
+    // tunnel's threat-driven color.
     const corePulse = 0.5 + 0.5 * Math.sin(tunnelHue * 0.9);
+    const coreR = (3.6 + corePulse * 13.5) * 0.7; // 30% smaller than before
+    const coreAlpha = 0.22 + corePulse * 0.68;
+    const haloR = coreR * 3.2;
+    const halo = ctx.createRadialGradient(VP_X, VP_Y, 0, VP_X, VP_Y, haloR);
+    halo.addColorStop(0, 'rgba(255,255,255,' + (coreAlpha * 0.9).toFixed(3) + ')');
+    halo.addColorStop(0.4, 'rgba(255,255,255,' + (coreAlpha * 0.35).toFixed(3) + ')');
+    halo.addColorStop(1, 'rgba(255,255,255,0)');
     ctx.beginPath();
-    ctx.fillStyle = 'rgba(' + glowColor + ',' + (0.22 + corePulse * 0.68).toFixed(3) + ')';
-    ctx.shadowColor = 'rgb(' + glowColor + ')'; ctx.shadowBlur = 12 + corePulse * 54;
-    ctx.arc(VP_X, VP_Y, 3.6 + corePulse * 13.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = halo;
+    ctx.arc(VP_X, VP_Y, haloR, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.fillStyle = 'rgba(255,255,255,' + Math.min(1, coreAlpha + 0.2).toFixed(3) + ')';
+    ctx.shadowColor = '#fff'; ctx.shadowBlur = (12 + corePulse * 54) * 0.7;
+    ctx.arc(VP_X, VP_Y, coreR, 0, Math.PI * 2); ctx.fill();
     ctx.shadowBlur = 0;
 
     if (surging) {
@@ -2892,11 +2901,14 @@
   function maybeSpawnDataPacket(dt) {
     dataPacketTimer -= dt;
     if (dataPacketTimer > 0) return;
-    dataPacketTimer = 0.35 + Math.random() * 0.5;
-    const t = circuitTraces[(Math.random() * circuitTraces.length) | 0];
-    if (t.pts.length < 2) return;
-    const segIdx = (Math.random() * (t.pts.length - 1)) | 0;
-    dataPackets.push({ t, segIdx, prog: 0, speed: 0.8 + Math.random() * 0.7 });
+    dataPacketTimer = 0.12 + Math.random() * 0.16;
+    const spawnCount = 1 + ((Math.random() * 2) | 0); // 1-2 packets per spawn, on top of the faster interval
+    for (let n = 0; n < spawnCount; n++) {
+      const t = circuitTraces[(Math.random() * circuitTraces.length) | 0];
+      if (t.pts.length < 2) continue;
+      const segIdx = (Math.random() * (t.pts.length - 1)) | 0;
+      dataPackets.push({ t, segIdx, prog: 0, speed: 1.8 + Math.random() * 1.6 });
+    }
   }
   function updateDataPackets(dt) {
     for (let i = dataPackets.length - 1; i >= 0; i--) {

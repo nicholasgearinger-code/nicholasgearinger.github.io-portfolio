@@ -244,6 +244,25 @@
     return embers;
   }
 
+  // Soft horizontal mist bands drifting slowly at different tunnel
+  // depths — layered atmosphere between the circuit floor and the
+  // viewer, idle title screen only.
+  function generateFogBands() {
+    const bands = [];
+    const n = 4;
+    for (let i = 0; i < n; i++) {
+      bands.push({
+        depthP: 0.15 + (i / (n - 1)) * 0.7,
+        xOff: Math.random() * W,
+        speed: (Math.random() < 0.5 ? -1 : 1) * (4 + Math.random() * 6),
+        height: 40 + Math.random() * 50,
+        alpha: 0.05 + Math.random() * 0.05,
+        sway: Math.random() * Math.PI * 2,
+      });
+    }
+    return bands;
+  }
+
   // Perspective depth constant for the skyline: converts a true world-space
   // distance (z) into the tunnel's 0-1 screen-lerp parameter (p) using the
   // standard perspective divide p = D/(D+z), same shape as a real camera
@@ -492,6 +511,7 @@
   }
   let circuitTraces = generateCircuitTraces();
   let embers = generateEmbers();
+  let fogBands = generateFogBands();
   let skylineParts = generateSkyline();
   let best = parseInt(localStorage.getItem('ghostwireBest') || '0', 10);
   bestStatEl.innerHTML = 'best: <strong>' + best + '</strong>';
@@ -2977,8 +2997,68 @@
     }
   }
 
+  // Soft volumetric light shafts radiating outward from the sun — several
+  // rotating, swaying wedge gradients blended additively so overlapping
+  // beams brighten instead of muddying. Tied to the same pulse the sun
+  // itself breathes with, so brighter sun = brighter shafts.
+  function drawLightShafts() {
+    const corePulse = 0.5 + 0.5 * Math.sin(tunnelHue * 0.9);
+    const n = 7;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < n; i++) {
+      const baseAngle = (i / n) * Math.PI * 2;
+      const sway = Math.sin(tunnelHue * 0.3 + i * 1.7) * 0.15;
+      const angle = baseAngle + sway + tunnelHue * 0.05;
+      const len = H * 1.3;
+      const halfWidth = 0.05 + 0.025 * Math.sin(tunnelHue * 0.5 + i);
+      const alpha = (0.05 + corePulse * 0.06);
+      ctx.save();
+      ctx.translate(VP_X, VP_Y);
+      ctx.rotate(angle);
+      const grad = ctx.createLinearGradient(0, 0, 0, len);
+      grad.addColorStop(0, 'rgba(255,255,255,' + alpha.toFixed(3) + ')');
+      grad.addColorStop(0.4, 'rgba(200,230,255,' + (alpha * 0.4).toFixed(3) + ')');
+      grad.addColorStop(1, 'rgba(200,230,255,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(-len * Math.tan(halfWidth), len);
+      ctx.lineTo(len * Math.tan(halfWidth), len);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  // Soft horizontal mist bands drifting slowly at different tunnel
+  // depths, swaying side to side — a layered haze between the circuit
+  // floor and the viewer, rather than the scene reading as a flat plane.
+  function updateFogBands(dt) {
+    fogBands.forEach((f) => {
+      f.xOff += f.speed * dt;
+      f.sway += dt * 0.15;
+    });
+  }
+  function drawFogBands() {
+    fogBands.forEach((f) => {
+      const y = VP_Y + (PLAYER_Y - VP_Y) * f.depthP;
+      const bandW = W * 1.6;
+      const swayX = Math.sin(f.sway) * 20;
+      const x = ((f.xOff + swayX) % (W * 2)) - W * 0.5;
+      const grad = ctx.createLinearGradient(0, y - f.height / 2, 0, y + f.height / 2);
+      grad.addColorStop(0, 'rgba(200,210,255,0)');
+      grad.addColorStop(0.5, 'rgba(200,210,255,' + f.alpha.toFixed(3) + ')');
+      grad.addColorStop(1, 'rgba(200,210,255,0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(x - bandW / 2, y - f.height / 2, bandW, f.height);
+    });
+  }
+
   function drawAmbientBackground() {
     drawTunnel(true);
+    drawLightShafts();
     drawEraOverlay();
     drawEraAccent();
     drawStarfield();
@@ -2987,6 +3067,7 @@
     drawCircuitFloor(2.4); // brighter/glowier here than in actual gameplay, where it needs to stay a quiet backdrop
     drawCircuitSparks();
     drawDataPackets();
+    drawFogBands();
     drawCodeBits();
     const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.85);
     vg.addColorStop(0, 'rgba(0,0,0,0)');
@@ -3016,6 +3097,7 @@
     updateDataPackets(dt);
     updateIdleSurge(dt);
     updateEmbers(dt);
+    updateFogBands(dt);
     ctx.clearRect(0, 0, W, H);
     drawAmbientBackground();
     idleRafId = requestAnimationFrame(idleLoop);

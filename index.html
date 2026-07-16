@@ -2785,8 +2785,16 @@
     font-size: clamp(2.8rem, 13vw, 4.8rem); letter-spacing: .02em;
   }
   @media (prefers-reduced-motion: no-preference) {
-    .game-title-gate-icon { animation: gateLogoLive 7s ease-in-out infinite; }
+    .game-title-gate-icon { animation: gateLogoLive 7s ease-in-out infinite, gateIconFade 6s ease-in-out infinite; }
     .game-title-gate-icon::after { animation: gateLogoScanline 3.4s linear infinite; }
+  }
+  /* A slow, continuous fade in and out — independent of (and slower than)
+     the breathing/glitch cycle above, since it targets opacity only.
+     Fading the icon itself takes its ::after scanline down with it too,
+     since opacity applies to the whole rendered element. */
+  @keyframes gateIconFade {
+    0%, 100% { opacity: 1; }
+    50% { opacity: .1; }
   }
   /* A continuous idle loop rather than a static glow: a gentle brightness
      breathe early in the cycle, then a quick chromatic-split glitch blip

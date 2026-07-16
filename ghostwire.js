@@ -318,6 +318,75 @@
   const SKYLINE_Z_NEAR = 0.1; // despawn distance (right at the player plane)
   function skylineZtoP(z) { return SKYLINE_PERSPECTIVE_D / (SKYLINE_PERSPECTIVE_D + z); }
 
+  // Weather (rain/embers) used to be a flat, screen-space-only overlay
+  // drawn once behind everything (see the old drawOverlayKind rain/embers
+  // branches). Reworked to be real depth-sorted particles using the same
+  // true perspective divide as the skyline above — each drop/ember has a
+  // world-space z that closes at a constant rate (so it accelerates on
+  // screen as it nears, same "flying forward" read the skyline already
+  // has), and gets merged into the same z-sort as gameplay items in
+  // draw() below, so weather can now pass in front of or behind obstacles
+  // instead of always sitting under the whole scene.
+  const WEATHER_Z_FAR = 6, WEATHER_Z_NEAR = 0.08;
+  function generateWeatherParticles(kind, count) {
+    const arr = [];
+    for (let i = 0; i < count; i++) {
+      arr.push({
+        kind, // 'rain' | 'ember'
+        lane: 24 + Math.random() * (W - 48),   // x position once it reaches the near plane, same convention items use
+        z: WEATHER_Z_NEAR + Math.random() * (WEATHER_Z_FAR - WEATHER_Z_NEAR),
+        speed: kind === 'rain' ? (2.4 + Math.random() * 1.8) : (1.1 + Math.random() * 1.3),
+        drift: kind === 'ember' ? (Math.random() - 0.5) * 14 : 0, // gentle lateral wander as embers rise/close in
+        seed: Math.random() * 1000,
+      });
+    }
+    return arr;
+  }
+  function updateWeatherParticle(w, dt) {
+    w.z -= w.speed * dt * Math.min(1.5, difficulty);
+    if (w.kind === 'ember') w.lane += w.drift * dt;
+    if (w.z <= WEATHER_Z_NEAR || w.lane < -40 || w.lane > W + 40) {
+      w.z = WEATHER_Z_FAR + Math.random() * 1.5;
+      w.lane = 24 + Math.random() * (W - 48);
+    }
+  }
+  // Which persistent array is actually "live" this frame — driven by the
+  // same primary/secondary overlay assignment each era already had, so
+  // rain only closes in during Server Farm, embers only during Reactor
+  // Core / as Hazard Zone's secondary, etc.
+  function activeWeatherParticles() {
+    const idx = currentEraIdx();
+    let out = [];
+    if (ERA_OVERLAYS[idx] === 'rain' || ERA_OVERLAYS_2[idx] === 'rain') out = out.concat(rainParticles);
+    if (ERA_OVERLAYS[idx] === 'embers' || ERA_OVERLAYS_2[idx] === 'embers') out = out.concat(emberParticles);
+    return out;
+  }
+  function drawWeatherParticle(w) {
+    const p = skylineZtoP(w.z);
+    const pos = projectPoint(w.lane, p);
+    const depthScale = 0.15 + p * 1.6; // weather passes close by, so it grows more dramatically near-plane than the more-distant skyline does
+    if (w.kind === 'rain') {
+      const c = eraRGB([110, 231, 183]).join(',');
+      const len = (10 + (w.seed % 10)) * depthScale;
+      const alpha = Math.min(0.9, 0.18 + p * 0.55);
+      ctx.strokeStyle = 'rgba(' + c + ',' + alpha.toFixed(3) + ')';
+      ctx.lineWidth = Math.max(0.6, depthScale * 1.1);
+      ctx.beginPath();
+      ctx.moveTo(pos.x, pos.y - len / 2);
+      ctx.lineTo(pos.x, pos.y + len / 2);
+      ctx.stroke();
+    } else {
+      const c = eraRGB([251, 146, 60]).join(',');
+      const r = Math.max(0.6, 1.3 * depthScale);
+      const alpha = Math.min(0.95, 0.28 + p * 0.6);
+      ctx.beginPath();
+      ctx.fillStyle = 'rgba(' + c + ',' + alpha.toFixed(3) + ')';
+      ctx.shadowColor = 'rgb(' + c + ')'; ctx.shadowBlur = 4 * depthScale * RIM_GLOW_SCALE;
+      ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+  }
+
   function generateSkyline() {
     // A distant "skyline" flanking the tunnel — silhouettes shaped like
     // circuit components (chip packages, capacitors, diodes, resistors)
@@ -551,6 +620,8 @@
   let PARTICLE_SCALE = 1, SHAKE_SCALE = 1, CIRCUIT_SCALE = 1, RIM_GLOW_SCALE = 1;
   let circuitTraces = generateCircuitTraces();
   let skylineParts = generateSkyline();
+  let rainParticles = generateWeatherParticles('rain', 22);
+  let emberParticles = generateWeatherParticles('ember', 18);
   let best = parseInt(localStorage.getItem('ghostwireBest') || '0', 10);
   bestStatEl.innerHTML = 'best: <strong>' + best + '</strong>';
 
@@ -964,6 +1035,8 @@
     longestStreak = 0; shotsFired = 0; shotsHit = 0;
     circuitTraces = generateCircuitTraces(currentEra);
     skylineParts = generateSkyline();
+    rainParticles = generateWeatherParticles('rain', 22);
+    emberParticles = generateWeatherParticles('ember', 18);
     statEl.innerHTML = 'score: <strong>0</strong>';
   }
 
@@ -1893,6 +1966,8 @@
         s.scale = 0.7 + Math.random() * 0.9;
       }
     });
+    rainParticles.forEach((w) => updateWeatherParticle(w, dt));
+    emberParticles.forEach((w) => updateWeatherParticle(w, dt));
 
     codeBitTimer -= dt;
     if (codeBitTimer <= 0) { spawnCodeBit(); codeBitTimer = 0.4 + Math.random() * 0.35; }
@@ -2275,32 +2350,10 @@
       const cols = 8, rows = 5;
       for (let i = 1; i < cols; i++) { const x = (W / cols) * i; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
       for (let j = 1; j < rows; j++) { const y = (H / rows) * j; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
-    } else if (overlay === 'rain') {
-      const c = eraRGB([110, 231, 183]).join(',');
-      for (let i = 0; i < 18; i++) {
-        const seed = i * 97.13;
-        const x = (seed * 37) % W;
-        const speed = 40 + (i % 5) * 18;
-        const y = ((tunnelHue * speed + seed * 13) % (H + 40)) - 20;
-        const len = 14 + (i % 4) * 8;
-        ctx.strokeStyle = 'rgba(' + c + ',' + ((0.18 + (i % 3) * 0.07) * boost).toFixed(3) + ')'; ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + len); ctx.stroke();
-      }
     } else if (overlay === 'stripes') {
       const c = eraRGB([253, 224, 71]).join(',');
       ctx.save(); ctx.globalAlpha = Math.min(1, boost); ctx.beginPath(); ctx.rect(0, 0, W, 14); ctx.clip(); drawHazardStripes(c, 0); ctx.restore();
       ctx.save(); ctx.globalAlpha = Math.min(1, boost); ctx.beginPath(); ctx.rect(0, H - 14, W, 14); ctx.clip(); drawHazardStripes(c, H - 14); ctx.restore();
-    } else if (overlay === 'embers') {
-      const c = eraRGB([251, 146, 60]).join(',');
-      for (let i = 0; i < 20; i++) {
-        const seed = i * 53.7;
-        const x = (seed * 31) % W + Math.sin(tunnelHue * 2 + seed) * 10;
-        const speed = 20 + (i % 5) * 10;
-        const y = H - ((tunnelHue * speed + seed * 17) % (H + 30));
-        ctx.beginPath();
-        ctx.fillStyle = 'rgba(' + c + ',' + ((0.3 + (i % 4) * 0.08) * boost).toFixed(3) + ')';
-        ctx.arc(x, y, 1 + (i % 3), 0, Math.PI * 2); ctx.fill();
-      }
     } else if (overlay === 'scanlines') {
       const c = eraRGB([248, 113, 113]).join(',');
       const sweepY = (tunnelHue * 60) % (H + 60) - 30;
@@ -3056,6 +3109,7 @@
     drawEraAccent();
     drawStarfield();
     drawSkyline();
+    activeWeatherParticles().slice().sort((a, b) => b.z - a.z).forEach(drawWeatherParticle);
     drawWarpStreaks();
     drawCircuitFloor();
     drawCodeBits();
@@ -3108,7 +3162,9 @@
     drawCodeBits();
 
     drawPlayerTrail();
-    items.slice().sort((a, b) => a.z - b.z).reverse().forEach(drawItem);
+    const depthDraws = items.map((it) => ({ z: it.z, fn: () => drawItem(it) }))
+      .concat(activeWeatherParticles().map((w) => ({ z: 1 - skylineZtoP(w.z), fn: () => drawWeatherParticle(w) })));
+    depthDraws.sort((a, b) => a.z - b.z).reverse().forEach((d) => d.fn());
     drawPowerups();
     drawFizzles();
     drawShockwaves();

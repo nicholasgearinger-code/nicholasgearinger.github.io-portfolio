@@ -151,6 +151,19 @@
   const WEAPON_UNLOCK_LABEL = { spread: 'SPREAD SHOT UNLOCKED', homing: 'HOMING CHARGE UNLOCKED', overcharge: 'OVERCHARGE UNLOCKED' };
   const DRIFT_MIN_LEVEL = 3;                      // bad items start weaving laterally from this level on
   const SPLITTER_CHANCE_BASE = 0.12;              // chance a bad item (past DRIFT_MIN_LEVEL) is a splitter
+  // One signature movement pattern per era, so zones feel different to
+  // actually play, not just look different. 'sine' is the original clean
+  // weave; 'jitter' sums two mismatched sine waves for an irregular,
+  // jagged path; 'homing' slowly tracks toward the player's own position
+  // instead of oscillating around a fixed spawn lane.
+  const ERA_DRIFT_PROFILES = [
+    { chance: 0.15, ampMin: 15, ampMax: 30, freqMin: 0.8, freqMax: 1.4, type: 'sine' },   // GRID SECTOR — calm, orderly
+    { chance: 0.45, ampMin: 45, ampMax: 75, freqMin: 0.7, freqMax: 1.1, type: 'sine' },   // RELAY NETWORK — wide signal-like sweeps
+    { chance: 0.55, ampMin: 12, ampMax: 22, freqMin: 3.2, freqMax: 4.5, type: 'sine' },   // SERVER FARM — fast, tight zigzag
+    { chance: 0.55, ampMin: 25, ampMax: 45, freqMin: 1.5, freqMax: 2.5, type: 'jitter' }, // HAZARD ZONE — erratic, jagged
+    { chance: 0.35, ampMin: 0, ampMax: 0, freqMin: 0, freqMax: 0, type: 'homing' },       // REACTOR CORE — slow tracking pull
+    { chance: 0.6, ampMin: 20, ampMax: 40, freqMin: 2.5, freqMax: 4, type: 'jitter' },    // BREACH ZONE — most chaotic
+  ];
 
   const CODE_TOKENS_BAD = ['0xFF', 'NaN', 'SEGV', 'ERR', 'null', '!=', 'undef', '0x00', 'panic!'];
   const CODE_TOKENS_GOOD = ['OK', '{ }', '=>', '200', 'ACK', '0x1A', 'sync', 'true'];
@@ -199,21 +212,34 @@
     return { x: VP_X + (lane - VP_X) * p, y: VP_Y + (PLAYER_Y - VP_Y) * p };
   }
 
-  function generateCircuitTraces() {
+  // One circuit-board character per era — density, turn frequency, jump
+  // size, and grid-snap tightness all vary, so Server Farm reads as a
+  // dense wiring grid, Reactor Core as a few thick radiating lines,
+  // Hazard/Breach as rougher and unsnapped (broken-looking), etc.
+  const ERA_CIRCUIT_PROFILES = [
+    { count: 11, segMin: 6, segMax: 10, jump: 70, snap: 12, pStep: [0.07, 0.09] },  // GRID SECTOR — open, orderly
+    { count: 10, segMin: 4, segMax: 6, jump: 100, snap: 20, pStep: [0.12, 0.16] },  // RELAY NETWORK — fewer, longer sweeps
+    { count: 24, segMin: 8, segMax: 13, jump: 40, snap: 8, pStep: [0.045, 0.06] },  // SERVER FARM — dense rack wiring
+    { count: 14, segMin: 6, segMax: 10, jump: 90, snap: 0, pStep: [0.07, 0.1] },    // HAZARD ZONE — rougher, unsnapped
+    { count: 9, segMin: 3, segMax: 5, jump: 60, snap: 16, pStep: [0.16, 0.22] },    // REACTOR CORE — few, thick, radiating
+    { count: 20, segMin: 7, segMax: 12, jump: 110, snap: 0, pStep: [0.06, 0.09] },  // BREACH ZONE — dense and torn-looking
+  ];
+  function generateCircuitTraces(eraIdx) {
+    const prof = ERA_CIRCUIT_PROFILES[eraIdx || 0];
     const traces = [];
-    const count = 15;
+    const count = prof.count;
     for (let i = 0; i < count; i++) {
       let lane = ((i + 0.5) / count) * W + (Math.random() - 0.5) * 30;
       let p = 0.04 + Math.random() * 0.06;
       const pts = [{ lane, p }];
-      const segs = 6 + Math.floor(Math.random() * 5); // 6-10 segments (was 3-5) — more turns, reads more like real PCB routing
+      const segs = prof.segMin + Math.floor(Math.random() * (prof.segMax - prof.segMin + 1));
       for (let s = 0; s < segs; s++) {
         if (s % 2 === 0) {
-          p = Math.min(0.98, p + 0.07 + Math.random() * 0.09); // smaller depth hops, since there are more of them now
+          p = Math.min(0.98, p + prof.pStep[0] + Math.random() * (prof.pStep[1] - prof.pStep[0]));
         } else {
-          const jump = (Math.random() - 0.5) * 70;
-          // snapped to a coarse grid rather than a free-form random offset — deliberate right-angle bends instead of soft zigzags
-          lane = Math.max(20, Math.min(W - 20, Math.round((lane + jump) / 12) * 12));
+          const jump = (Math.random() - 0.5) * prof.jump;
+          // grid-snapped for the orderly eras, free-form for the rougher ones (snap 0)
+          lane = Math.max(20, Math.min(W - 20, prof.snap > 0 ? Math.round((lane + jump) / prof.snap) * prof.snap : lane + jump));
         }
         pts.push({ lane, p });
       }
@@ -849,7 +875,7 @@
     formationTimer = randRange(FORMATION_MIN, FORMATION_MAX);
     playerTrail = [];
     longestStreak = 0; shotsFired = 0; shotsHit = 0;
-    circuitTraces = generateCircuitTraces();
+    circuitTraces = generateCircuitTraces(currentEra);
     skylineParts = generateSkyline();
     statEl.innerHTML = 'score: <strong>0</strong>';
   }
@@ -864,8 +890,11 @@
     // From DRIFT_MIN_LEVEL on, some bad fragments weave laterally instead of
     // falling straight down their lane, and a slice of those are "splitters"
     // that fizzle into smaller fast fragments instead of just disappearing.
+    // Which ones drift, how far, how fast, and in what pattern all come
+    // from the current era's own movement profile.
+    const eraDrift = ERA_DRIFT_PROFILES[currentEraIdx()];
     const canDrift = !isGood && level >= DRIFT_MIN_LEVEL;
-    const drifting = canDrift && Math.random() < 0.35;
+    const drifting = canDrift && Math.random() < eraDrift.chance;
     const splitter = canDrift && !drifting && Math.random() < SPLITTER_CHANCE_BASE;
     items.push({
       lane: 24 + Math.random() * (W - 48),   // x position once it reaches the near plane
@@ -878,8 +907,9 @@
       spin: (Math.random() - 0.5) * 3,
       seed: Math.random() * 1000,
       x: VP_X, y: VP_Y, r: 1, glitchT: 0,
-      drift: drifting, driftAmp: drifting ? 30 + Math.random() * 40 : 0,
-      driftFreq: drifting ? 1.2 + Math.random() * 1.4 : 0,
+      drift: drifting, driftType: drifting ? eraDrift.type : 'sine',
+      driftAmp: drifting ? eraDrift.ampMin + Math.random() * (eraDrift.ampMax - eraDrift.ampMin) : 0,
+      driftFreq: drifting ? eraDrift.freqMin + Math.random() * (eraDrift.freqMax - eraDrift.freqMin) : 0,
       splitter, mini: false,
     });
     items[items.length - 1].baseLane = items[items.length - 1].lane;
@@ -1185,6 +1215,19 @@
     playTone(660, 0.09, 'triangle', 0.11, null, 0.08, { detune: 8 });
     playTone(880, 0.16, 'triangle', 0.13, null, 0.16, { detune: 8 });
   }
+  // Base pitch, filter cutoff, and resonance for the ambient drone in each
+  // era — Server Farm's tighter/more resonant filter reads as more
+  // electric, Reactor Core's low pitch and heavy lowpass as a deep rumble,
+  // Breach Zone's high pitch and high resonance as the most on-edge, etc.
+  // threat still escalates all of this on top, same as before.
+  const ERA_DRONE = [
+    { freqBase: 44, filterBase: 160, q: 5 },   // GRID SECTOR
+    { freqBase: 52, filterBase: 220, q: 6 },   // RELAY NETWORK
+    { freqBase: 58, filterBase: 260, q: 9 },   // SERVER FARM
+    { freqBase: 40, filterBase: 140, q: 12 },  // HAZARD ZONE
+    { freqBase: 34, filterBase: 110, q: 4 },   // REACTOR CORE
+    { freqBase: 63, filterBase: 300, q: 14 },  // BREACH ZONE
+  ];
   function startAmbient() {
     if (!audioCtx) return;
     ambientOsc = audioCtx.createOscillator();
@@ -1207,9 +1250,13 @@
   function updateAmbient() {
     if (!audioCtx || !ambientOsc || !ambientGain) return;
     if (!soundOn) { ambientGain.gain.setTargetAtTime(0.0001, audioCtx.currentTime, 0.1); return; }
-    const freq = 44 + threat * 42;
+    const eraDrone = ERA_DRONE[currentEraIdx()];
+    const freq = eraDrone.freqBase + threat * 42;
     ambientOsc.frequency.setTargetAtTime(freq, audioCtx.currentTime, 0.25);
-    if (ambientFilter) ambientFilter.frequency.setTargetAtTime(160 + threat * 950, audioCtx.currentTime, 0.3);
+    if (ambientFilter) {
+      ambientFilter.frequency.setTargetAtTime(eraDrone.filterBase + threat * 950, audioCtx.currentTime, 0.3);
+      ambientFilter.Q.setTargetAtTime(eraDrone.q, audioCtx.currentTime, 0.4);
+    }
     const pulseRate = 1.3 + threat * 3.4;
     const g = 0.009 + (0.5 + 0.5 * Math.sin(tunnelHue * pulseRate * Math.PI * 2)) * (0.007 + threat * 0.02);
     ambientGain.gain.setTargetAtTime(g, audioCtx.currentTime, 0.05);
@@ -1801,6 +1848,7 @@
         eraFlashTimer = 0.6;
         shakeMag = Math.max(shakeMag, 10);
         spawnFloatText(W / 2, VP_Y + 80, '// ENTERING ' + ERA_NAMES[era], '#F0F8FF');
+        circuitTraces = generateCircuitTraces(era);
       }
       checkWeaponUnlocks();
       // a milestone boss (alternating FIREWALL/WORM) greets every new color
@@ -1979,10 +2027,21 @@
       it.z -= it.vz * dt * slowFactor;
       const p = 1 - it.z;                        // progress toward the player: 0 = far, 1 = arrived
       if (it.drift) {
-        // weave the lane sinusoidally around its spawn position; the worm
-        // boss uses a much wider amplitude so it reads as "snaking" rather
-        // than just jittering in place
-        it.lane = Math.max(20, Math.min(W - 20, it.baseLane + Math.sin(elapsed * it.driftFreq + it.seed) * it.driftAmp));
+        if (it.driftType === 'jitter') {
+          // two mismatched sine waves summed together — irregular, jagged
+          // path rather than one clean wave, for the more hostile eras
+          const w = Math.sin(elapsed * it.driftFreq + it.seed) * 0.7 + Math.sin(elapsed * it.driftFreq * 2.7 + it.seed * 1.3) * 0.3;
+          it.lane = Math.max(20, Math.min(W - 20, it.baseLane + w * it.driftAmp));
+        } else if (it.driftType === 'homing') {
+          // slowly tracks toward the player's current lane instead of
+          // weaving around a fixed spawn point
+          it.lane += (playerX - it.lane) * Math.min(1, dt * 0.6);
+        } else {
+          // weave the lane sinusoidally around its spawn position; the worm
+          // boss uses a much wider amplitude so it reads as "snaking" rather
+          // than just jittering in place
+          it.lane = Math.max(20, Math.min(W - 20, it.baseLane + Math.sin(elapsed * it.driftFreq + it.seed) * it.driftAmp));
+        }
       }
       it.x = VP_X + (it.lane - VP_X) * p;
       it.y = VP_Y + (PLAYER_Y - VP_Y) * p;
@@ -2079,47 +2138,11 @@
 
     // vanishing-point light — small, steady, and a fixed warm color
     // rather than era-cycling, since a real distant light source doesn't
-    // change color or size.
+    // change color or size. Just the core itself now — no bloom halo,
+    // no rays.
     const SUN_RGB = '255,244,214';
     const SUN_R = 8;
-    const haloR = SUN_R * 3.2; // was 6 — much less spread
 
-    // soft bloom, noticeably dimmer/tighter than before
-    const halo = ctx.createRadialGradient(VP_X, VP_Y, 0, VP_X, VP_Y, haloR);
-    halo.addColorStop(0, 'rgba(' + SUN_RGB + ',.5)');
-    halo.addColorStop(0.4, 'rgba(' + SUN_RGB + ',.16)');
-    halo.addColorStop(1, 'rgba(' + SUN_RGB + ',0)');
-    ctx.beginPath();
-    ctx.fillStyle = halo;
-    ctx.arc(VP_X, VP_Y, haloR, 0, Math.PI * 2); ctx.fill();
-
-    // faint outward rays — barely visible, additive so they only really
-    // show where they'd catch haze, not bold beams
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    const rayN = 6;
-    for (let i = 0; i < rayN; i++) {
-      const angle = (i / rayN) * Math.PI * 2 + tunnelHue * 0.03;
-      const len = H * 1.1;
-      ctx.save();
-      ctx.translate(VP_X, VP_Y);
-      ctx.rotate(angle);
-      const grad = ctx.createLinearGradient(0, 0, 0, len);
-      grad.addColorStop(0, 'rgba(' + SUN_RGB + ',.05)');
-      grad.addColorStop(0.5, 'rgba(' + SUN_RGB + ',.015)');
-      grad.addColorStop(1, 'rgba(' + SUN_RGB + ',0)');
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.lineTo(-len * Math.tan(0.035), len);
-      ctx.lineTo(len * Math.tan(0.035), len);
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
-    }
-    ctx.restore();
-
-    // small, crisp, steady core
     ctx.beginPath();
     ctx.fillStyle = 'rgba(255,255,255,.95)';
     ctx.shadowColor = 'rgb(' + SUN_RGB + ')'; ctx.shadowBlur = 9;

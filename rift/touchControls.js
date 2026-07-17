@@ -34,17 +34,19 @@ function pointInRect(x, y, rect) {
 
 /**
  * @param {THREE.PerspectiveCamera} camera
- * @param {{forward,back,left,right,up,down}} keys  same object main.js reads every frame
+ * @param {{forward,back,left,right}} keys  same object main.js reads every frame
  * @param {() => void} onFire
+ * @param {() => void} onJump  called once per tap, not held — main.js edge-triggers a jump from this the same way it does for the Space key
+ * @param {HTMLElement} viewport
+ * @param {() => boolean} isActive
  */
-function createTouchControls({ camera, keys, onFire, viewport, isActive }) {
+function createTouchControls({ camera, keys, onFire, onJump, viewport, isActive }) {
   const joystickBase = document.getElementById("rift-touch-joystick");
   const joystickKnob = document.getElementById("rift-touch-joystick-knob");
   const fireButton = document.getElementById("rift-touch-fire");
-  const upButton = document.getElementById("rift-touch-up");
-  const downButton = document.getElementById("rift-touch-down");
+  const jumpButton = document.getElementById("rift-touch-up");
 
-  if (!joystickBase || !joystickKnob || !fireButton || !upButton || !downButton) {
+  if (!joystickBase || !joystickKnob || !fireButton || !jumpButton) {
     return; // touch HUD not present — nothing to wire up
   }
 
@@ -146,18 +148,14 @@ function createTouchControls({ camera, keys, onFire, viewport, isActive }) {
   document.addEventListener("touchend", handleTouchEnd, { passive: true });
   document.addEventListener("touchcancel", handleTouchEnd, { passive: true });
 
-  // Vertical movement buttons are simple hold-while-touching controls.
-  // Touch events keep targeting their original element even if the finger
-  // drags off it, so a plain touchstart/touchend pair per button is reliable.
-  function bindHoldButton(button, key) {
-    const start = (e) => { e.preventDefault(); keys[key] = true; };
-    const end = (e) => { e.preventDefault(); keys[key] = false; };
+  // Jump is a discrete tap, not a hold — matches how Space is edge-triggered
+  // on desktop (see main.js), rather than the old hold-to-ascend flight
+  // behavior this button used to have.
+  function bindTapButton(button, onTap) {
+    const start = (e) => { e.preventDefault(); onTap(); };
     button.addEventListener("touchstart", start, { passive: false });
-    button.addEventListener("touchend", end, { passive: false });
-    button.addEventListener("touchcancel", end, { passive: false });
   }
-  bindHoldButton(upButton, "up");
-  bindHoldButton(downButton, "down");
+  bindTapButton(jumpButton, onJump);
 }
 
 export { createTouchControls };

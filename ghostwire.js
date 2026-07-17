@@ -3096,7 +3096,7 @@
       const k = 1 - pt.t / 0.35;
       if (k <= 0) return;
       ctx.beginPath();
-      ctx.fillStyle = 'rgba(' + c.join(',') + ',' + (k * 0.35).toFixed(3) + ')';
+      ctx.fillStyle = 'rgba(' + c.join(',') + ',' + (k * 0.42).toFixed(3) + ')';
       ctx.arc(pt.x, pt.y, PLAYER_W * 0.18 * k, 0, Math.PI * 2);
       ctx.fill();
     });
@@ -3126,22 +3126,47 @@
     if (flickering) return; // brief hit-flicker to signal temporary invulnerability
     const critical = !dying && threat >= RED_THREAT;
     const shipColor = playerColorOption();
+    const shipRGB = shipColor.rgb.join(',');
     ctx.save();
     ctx.translate(playerX, PLAYER_Y);
     ctx.rotate(lean);
     ctx.beginPath();
-    ctx.fillStyle = dying ? COL_BAD : '#F0F8FF';
+    if (dying) {
+      ctx.fillStyle = COL_BAD;
+    } else {
+      // Bright white nose fading into the chosen color toward the tail —
+      // a thin stroke alone barely read as "colored" against the mostly-
+      // white body; this puts the color across most of the ship's actual
+      // area instead of just its fringe.
+      const grad = ctx.createLinearGradient(0, -PLAYER_H / 2, 0, PLAYER_H / 2);
+      grad.addColorStop(0, '#F0F8FF');
+      grad.addColorStop(0.5, 'rgb(' + shipRGB + ')');
+      grad.addColorStop(1, 'rgba(' + shipRGB + ',.75)');
+      ctx.fillStyle = grad;
+    }
     ctx.shadowColor = dying ? COL_BAD : (critical ? COL_BAD : shipColor.hex);
-    ctx.shadowBlur = critical ? 12 + Math.sin(tunnelHue * 10) * 5 : 12;
+    ctx.shadowBlur = critical ? 12 + Math.sin(tunnelHue * 10) * 5 : 14;
     ctx.moveTo(0, -PLAYER_H / 2);
     ctx.lineTo(PLAYER_W / 2, PLAYER_H / 2 - 4);
     ctx.lineTo(PLAYER_W * 0.18, PLAYER_H / 2);
     ctx.lineTo(-PLAYER_W * 0.18, PLAYER_H / 2);
     ctx.lineTo(-PLAYER_W / 2, PLAYER_H / 2 - 4);
     ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = critical ? 'rgba(248,113,113,.9)' : 'rgba(' + shipColor.rgb.join(',') + ',.9)';
-    ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.strokeStyle = critical ? 'rgba(248,113,113,.9)' : 'rgba(' + shipRGB + ',1)';
+    ctx.lineWidth = 2; ctx.stroke();
     ctx.shadowBlur = 0;
+    if (!dying) {
+      // Small engine-core accent at full color intensity — reads as a
+      // focal detail even at the ship's small on-screen size, where a
+      // gradient alone can be subtle.
+      ctx.beginPath();
+      ctx.fillStyle = critical ? 'rgba(248,113,113,.95)' : 'rgb(' + shipRGB + ')';
+      ctx.shadowColor = critical ? COL_BAD : shipColor.hex;
+      ctx.shadowBlur = 8;
+      ctx.arc(0, PLAYER_H * 0.22, 2.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
     if (shieldTimer > 0) {
       ctx.beginPath();
       ctx.strokeStyle = 'rgba(129,140,248,' + (0.5 + Math.sin(tunnelHue * 6) * 0.25).toFixed(3) + ')';

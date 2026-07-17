@@ -1,16 +1,18 @@
 import * as THREE from "three";
 
 // -----------------------------------------------------------------------------
-// SWAP POINT: this is the entire terrain-shaping algorithm for islands. It
-// takes a smooth icosahedron and displaces each vertex with deterministic 3D
-// noise so every client renders the exact same rugged shape for a given
-// island — no extra network traffic needed, since the noise is a pure
-// function of the island's own id/radius (already sent by the server).
-//
-// Swap buildIslandGeometry() for anything else (a heightmap, an actual
-// digital-elevation dataset, wave-function-collapse chunks, hand sculpted
-// meshes) as long as it keeps returning a THREE.BufferGeometry.
+// SWAP POINT: this is the entire terrain-shaping algorithm. It builds one
+// large heightfield landmass per biome (a subdivided plane with per-vertex
+// noise displacement) instead of the old small floating-island shapes —
+// "a whole planet to explore" rather than a chain of separate platforms.
+// Swap buildPlanetTerrain() for a different algorithm (a real heightmap
+// texture, domain-warped noise, hydraulic erosion, hand-sculpted chunks)
+// as long as it keeps returning a THREE.BufferGeometry sized to
+// TERRAIN_SIZE x TERRAIN_SIZE in the XZ plane.
 // -----------------------------------------------------------------------------
+
+const TERRAIN_SIZE = 240;      // full width/depth of the landmass, in world units
+const TERRAIN_SEGMENTS = 140;  // resolution — higher reads smoother but costs more vertices
 
 function hashStringToSeed(str) {
   let h = 1779033703 ^ str.length;
@@ -21,135 +23,135 @@ function hashStringToSeed(str) {
   return (h >>> 0) / 4294967296; // 0..1
 }
 
-// Deterministic hash of a 3D lattice point + seed -> pseudo-random [0,1).
-// Standard "sin/fract" shader hash. Not cryptographic — just needs to be
-// cheap, deterministic, and look reasonably random for terrain purposes.
-function hash3(x, y, z, seed) {
-  const n = x * 127.1 + y * 311.7 + z * 74.7 + seed * 999.9;
+// Deterministic 2D hash -> pseudo-random [0,1). Cheap, deterministic, good
+// enough for terrain (not cryptographic).
+function hash2(x, y, seed) {
+  const n = x * 127.1 + y * 311.7 + seed * 999.9;
   const s = Math.sin(n) * 43758.5453123;
   return s - Math.floor(s);
 }
 
-function lerp(a, b, t) {
-  return a + (b - a) * t;
-}
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(t) { return t * t * (3 - 2 * t); }
 
-function smooth(t) {
-  return t * t * (3 - 2 * t); // smoothstep, avoids visible lattice creases
-}
-
-// Trilinear-interpolated 3D value noise, returns roughly [-1, 1].
-function valueNoise3(x, y, z, seed) {
+function valueNoise2(x, y, seed) {
   const x0 = Math.floor(x), x1 = x0 + 1;
   const y0 = Math.floor(y), y1 = y0 + 1;
-  const z0 = Math.floor(z), z1 = z0 + 1;
-  const tx = smooth(x - x0);
-  const ty = smooth(y - y0);
-  const tz = smooth(z - z0);
-
-  const c000 = hash3(x0, y0, z0, seed);
-  const c100 = hash3(x1, y0, z0, seed);
-  const c010 = hash3(x0, y1, z0, seed);
-  const c110 = hash3(x1, y1, z0, seed);
-  const c001 = hash3(x0, y0, z1, seed);
-  const c101 = hash3(x1, y0, z1, seed);
-  const c011 = hash3(x0, y1, z1, seed);
-  const c111 = hash3(x1, y1, z1, seed);
-
-  const x00 = lerp(c000, c100, tx);
-  const x10 = lerp(c010, c110, tx);
-  const x01 = lerp(c001, c101, tx);
-  const x11 = lerp(c011, c111, tx);
-  const y0i = lerp(x00, x10, ty);
-  const y1i = lerp(x01, x11, ty);
-  const value = lerp(y0i, y1i, tz); // 0..1
-
-  return value * 2 - 1; // -1..1
+  const tx = smooth(x - x0), ty = smooth(y - y0);
+  const c00 = hash2(x0, y0, seed), c10 = hash2(x1, y0, seed);
+  const c01 = hash2(x0, y1, seed), c11 = hash2(x1, y1, seed);
+  const top = lerp(c00, c10, tx), bot = lerp(c01, c11, tx);
+  return lerp(top, bot, ty) * 2 - 1; // -1..1
 }
 
-// Fractal sum (fBm) — a few octaves of the noise above for more natural,
-// less lattice-y bumps than a single frequency would give.
-function fbm3(x, y, z, seed, octaves = 3) {
-  let amplitude = 1;
-  let frequency = 1;
-  let sum = 0;
-  let max = 0;
+function fbm2(x, y, seed, octaves, lacunarity, gain) {
+  let amplitude = 1, frequency = 1, sum = 0, max = 0;
   for (let i = 0; i < octaves; i++) {
-    sum += valueNoise3(x * frequency, y * frequency, z * frequency, seed + i * 17.13) * amplitude;
+    sum += valueNoise2(x * frequency, y * frequency, seed + i * 17.13) * amplitude;
     max += amplitude;
-    amplitude *= 0.5;
-    frequency *= 2;
+    amplitude *= gain;
+    frequency *= lacunarity;
   }
   return sum / max;
 }
 
-const NOISE_FREQUENCY = 1.6; // how many bumps wrap around the island
-const ROUGHNESS = 0.32; // displacement as a fraction of radius
+// -----------------------------------------------------------------------------
+// Per-biome shaping. Each returns a height (in world units) for a given
+// normalized (u,v) position in [-1,1] — u/v map linearly onto the
+// TERRAIN_SIZE plane. Distinct octave counts/frequencies/post-processing
+// per biome, not just a color swap, so each landmass actually reads as a
+// different kind of place.
+// -----------------------------------------------------------------------------
+const BIOME_SHAPERS = {
+  // Jagged volcanic ground with narrow carved lava-crack channels.
+  ember(u, v, seed) {
+    const base = fbm2(u * 2.2, v * 2.2, seed, 5, 2.1, 0.55);
+    const jagged = Math.abs(base) * 1.6; // ridged noise — sharp peaks instead of rolling hills
+    const crackNoise = fbm2(u * 5 + 100, v * 5 + 100, seed + 40, 3, 2.0, 0.5);
+    const crack = Math.abs(crackNoise) < 0.035 ? -3.5 : 0; // narrow deep grooves
+    return jagged * 9 + crack;
+  },
+  // Gentle rolling hills.
+  verdant(u, v, seed) {
+    return fbm2(u * 1.3, v * 1.3, seed, 4, 2.0, 0.5) * 6.5;
+  },
+  // Mostly flat/angular ground with sparse sharp spikes.
+  crystal(u, v, seed) {
+    const flat = fbm2(u * 1.6, v * 1.6, seed, 3, 2.0, 0.45) * 3;
+    const spike = fbm2(u * 3 + 200, v * 3 + 200, seed + 80, 2, 2.0, 0.5);
+    const spikeBoost = spike > 0.62 ? (spike - 0.62) * 26 : 0; // sparse tall spires
+    return flat + spikeBoost;
+  },
+  // Deep chasms cut through otherwise moderate terrain.
+  abyssal(u, v, seed) {
+    const base = fbm2(u * 1.6, v * 1.6, seed, 4, 2.0, 0.5) * 6;
+    const chasmNoise = fbm2(u * 1.8 + 300, v * 1.8 + 300, seed + 120, 3, 2.0, 0.5);
+    const chasm = chasmNoise > 0.3 ? -(chasmNoise - 0.3) * 22 : 0;
+    return base + chasm;
+  },
+  // Cracked dry lakebed — very low relief with fine dune ripples.
+  ashen(u, v, seed) {
+    const dunes = fbm2(u * 4, v * 4, seed, 2, 2.0, 0.5) * 1.1;
+    const swell = fbm2(u * 0.8, v * 0.8, seed + 60, 3, 2.0, 0.5) * 2.2;
+    return dunes + swell;
+  },
+};
 
 /**
- * Builds a rugged, deterministic island shape from an icosahedron base.
- * @param {{id:string, radius:number, height:number}} island
- * @returns {THREE.BufferGeometry} geometry with position + color attributes
+ * Samples this biome's terrain height at an arbitrary world XZ position —
+ * used both to build the mesh and (via terrainHeightAt, below) to place
+ * decorations/crystals/spawn points consistently with the actual surface.
  */
-function buildIslandGeometry(island) {
-  const geo = new THREE.IcosahedronGeometry(island.radius, 3);
-  // Squash into a rough island silhouette before adding surface detail.
-  geo.scale(1, island.height / island.radius / 1.6, 1);
-
-  const seed = hashStringToSeed(island.id) * 1000;
-  const posAttr = geo.attributes.position;
-  const displaced = new Float32Array(posAttr.count * 3);
-  const dir = new THREE.Vector3();
-
-  for (let i = 0; i < posAttr.count; i++) {
-    dir.set(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i));
-    const radial = dir.clone().normalize();
-
-    const noise = fbm3(
-      radial.x * NOISE_FREQUENCY,
-      radial.y * NOISE_FREQUENCY,
-      radial.z * NOISE_FREQUENCY,
-      seed
-    );
-    const displacement = 1 + noise * ROUGHNESS;
-
-    displaced[i * 3] = dir.x * displacement;
-    displaced[i * 3 + 1] = dir.y * displacement;
-    displaced[i * 3 + 2] = dir.z * displacement;
-  }
-
-  geo.setAttribute("position", new THREE.BufferAttribute(displaced, 3));
-  geo.computeVertexNormals();
-
-  applyHeightShading(geo, island.color);
-
-  return geo;
+function biomeHeight(biome, worldX, worldZ, seed) {
+  const u = worldX / (TERRAIN_SIZE / 2);
+  const v = worldZ / (TERRAIN_SIZE / 2);
+  const shaper = BIOME_SHAPERS[biome] || BIOME_SHAPERS.verdant;
+  let h = shaper(u, v, seed);
+  // Soft falloff toward the edges so the landmass doesn't end in an abrupt
+  // cliff at the boundary — it settles toward a flat rim instead.
+  const edge = Math.max(Math.abs(u), Math.abs(v));
+  const falloff = edge > 0.78 ? Math.max(0, 1 - (edge - 0.78) / 0.22) : 1;
+  return h * falloff;
 }
 
-function applyHeightShading(geo, colorHex) {
+function applyHeightShading(geo, colorHex, minY, maxY) {
   const posAttr = geo.attributes.position;
-  let minY = Infinity;
-  let maxY = -Infinity;
-  for (let i = 0; i < posAttr.count; i++) {
-    const y = posAttr.getY(i);
-    if (y < minY) minY = y;
-    if (y > maxY) maxY = y;
-  }
   const range = Math.max(maxY - minY, 1e-6);
-
-  const base = new THREE.Color(colorHex).multiplyScalar(0.32);
-  const highlight = new THREE.Color(colorHex).lerp(new THREE.Color(0xffffff), 0.35);
-
+  const base = new THREE.Color(colorHex).multiplyScalar(0.3);
+  const highlight = new THREE.Color(colorHex).lerp(new THREE.Color(0xffffff), 0.4);
   const colors = new Float32Array(posAttr.count * 3);
   const tmp = new THREE.Color();
   for (let i = 0; i < posAttr.count; i++) {
     const t = (posAttr.getY(i) - minY) / range;
     tmp.copy(base).lerp(highlight, t);
-    colors[i * 3] = tmp.r;
-    colors[i * 3 + 1] = tmp.g;
-    colors[i * 3 + 2] = tmp.b;
+    colors[i * 3] = tmp.r; colors[i * 3 + 1] = tmp.g; colors[i * 3 + 2] = tmp.b;
   }
   geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
 }
 
-export { buildIslandGeometry };
+/**
+ * @param {{biome:string, color:string}} level
+ * @param {string} seedStr
+ * @returns {THREE.BufferGeometry}
+ */
+function buildPlanetTerrain(level, seedStr) {
+  const seed = hashStringToSeed(seedStr + "::" + level.biome) * 1000;
+  const geo = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, TERRAIN_SEGMENTS, TERRAIN_SEGMENTS);
+  geo.rotateX(-Math.PI / 2); // lie flat in the XZ plane, +Y up
+
+  const posAttr = geo.attributes.position;
+  let minY = Infinity, maxY = -Infinity;
+  for (let i = 0; i < posAttr.count; i++) {
+    const x = posAttr.getX(i), z = posAttr.getZ(i);
+    const y = biomeHeight(level.biome, x, z, seed);
+    posAttr.setY(i, y);
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  geo.computeVertexNormals();
+  applyHeightShading(geo, level.color, minY, maxY);
+
+  return geo;
+}
+
+export { buildPlanetTerrain, biomeHeight, TERRAIN_SIZE, TERRAIN_SEGMENTS };

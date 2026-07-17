@@ -1,8 +1,9 @@
 import * as THREE from "three";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
-import { buildIslandGeometry } from "./terrain.js";
-import { LEVELS, generateLevelIslands } from "./levels.js";
-import { generateCrystalsForIsland, createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
+import { buildPlanetTerrain, TERRAIN_SIZE } from "./terrain.js";
+import { LEVELS, generateLevelLayout } from "./levels.js";
+import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
+import { createDecoration, updateDecoration } from "./decorations.js";
 import {
   createBolt, updateBolt, disposeBolt,
   createMuzzleFlash, updateMuzzleFlash, disposeMuzzleFlash,
@@ -12,16 +13,18 @@ import { initAudio, toggleMuted, playShoot, playShatter, playLoreChime } from ".
 import { getIslandLore } from "./lore.js";
 import { findClosestHit } from "./hitPrediction.js";
 import { createTouchControls } from "./touchControls.js";
-import { createPlayerPhysicsState, updatePlayerPhysics, WALK_SPEED, AIR_CONTROL } from "./physics.js";
+import { createPlayerPhysicsState, updatePlayerPhysics, sampleGroundHeight, WALK_SPEED, AIR_CONTROL } from "./physics.js";
 
 // ---------------------------------------------------------------------------
 // World seed — fixed by default so every visitor explores the same curated
-// levels rather than different random layouts each load. Change WORLD_SEED
-// to grow different levels; nothing else needs to change since generation
-// is a pure function of this string.
+// levels rather than different random layouts each load.
 // ---------------------------------------------------------------------------
 const WORLD_SEED = "rift-islands-prime";
 const PLAYER_EYE_HEIGHT = 1.6;
+// Player can't walk past this radius from the terrain's center — keeps
+// them off the soft falloff rim (see terrain.js) and away from the finite
+// plane's actual edge, where there'd be no ground to sample at all.
+const WORLD_BOUND_RADIUS = TERRAIN_SIZE / 2 * 0.93;
 
 // ---------------------------------------------------------------------------
 // DOM refs
@@ -38,45 +41,27 @@ const discoveryLogEl = document.getElementById("rift-discovery-log");
 const menuBtn = document.getElementById("rift-menu-btn");
 
 // ---------------------------------------------------------------------------
-// Input mode detection — desktop (Pointer Lock + keyboard/mouse) vs. touch
-// (virtual joystick + drag-look + tap-fire/jump, see touchControls.js).
-// Pointer Lock isn't supported on iOS Safari at all and is unreliable on
-// mobile Chrome, so touch devices get a completely separate control scheme
-// rather than a degraded version of the desktop one.
+// Input mode detection
 // ---------------------------------------------------------------------------
 const isTouchDevice = "ontouchstart" in window || navigator.maxTouchPoints > 0;
 if (isTouchDevice) document.body.classList.add("rift-touch-mode");
-let touchGameActive = false; // set true once a touch player taps a level to enter it
+let touchGameActive = false;
 
 function isGameActive() {
   return isTouchDevice ? touchGameActive : controls.isLocked;
 }
 
 // ---------------------------------------------------------------------------
-// Three.js scene
-//
-// Sized off #rift-viewport rather than window.innerWidth/innerHeight — this
-// used to be a standalone full-page app, but now lives inside a bounded
-// section of the portfolio page (full window size only when the fullscreen
-// toggle below is active, which is exactly when the viewport element itself
-// expands to cover the window).
+// Three.js scene — sized off #rift-viewport, see earlier notes in this file
+// history; unchanged from the island-chain version.
 // ---------------------------------------------------------------------------
 const viewport = document.getElementById("rift-viewport");
 const fullscreenBtn = document.getElementById("rift-fullscreen-btn");
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0x0a0e14, 0.0035);
+scene.fog = new THREE.FogExp2(0x0a0e14, 0.0032);
 
-const camera = new THREE.PerspectiveCamera(
-  70,
-  viewport.clientWidth / viewport.clientHeight,
-  0.1,
-  2000
-);
-// YXZ order keeps rotation.y a clean, pitch-independent yaw value no matter
-// how the camera's orientation is driven (PointerLockControls' internal
-// quaternion math on desktop, or direct rotation.x/y assignment for touch
-// look-drag).
+const camera = new THREE.PerspectiveCamera(70, viewport.clientWidth / viewport.clientHeight, 0.1, 2000);
 camera.rotation.order = "YXZ";
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -90,9 +75,6 @@ function resizeToViewport() {
   camera.updateProjectionMatrix();
   renderer.setSize(w, h);
 }
-// Covers both real window resizes and the viewport element's own size
-// changing (e.g. the fullscreen toggle below) — a plain window "resize"
-// listener alone would miss the latter.
 new ResizeObserver(resizeToViewport).observe(viewport);
 
 if (fullscreenBtn) {
@@ -110,20 +92,18 @@ window.addEventListener("keydown", (e) => {
   }
 });
 
-// Lighting
-scene.add(new THREE.AmbientLight(0x8899bb, 0.6));
+scene.add(new THREE.AmbientLight(0x8899bb, 0.65));
 const sun = new THREE.DirectionalLight(0xffffff, 1.1);
 sun.position.set(60, 100, 40);
 scene.add(sun);
 
-// Starfield
 {
   const starGeo = new THREE.BufferGeometry();
   const starCount = 1500;
   const positions = new Float32Array(starCount * 3);
   for (let i = 0; i < starCount; i++) {
     positions[i * 3] = (Math.random() - 0.5) * 1200;
-    positions[i * 3 + 1] = (Math.random() - 0.5) * 1200;
+    positions[i * 3 + 1] = 80 + Math.random() * 500; // kept above the terrain, no reason for stars underfoot
     positions[i * 3 + 2] = (Math.random() - 0.5) * 1200;
   }
   starGeo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
@@ -132,11 +112,7 @@ scene.add(sun);
 }
 
 // ---------------------------------------------------------------------------
-// Controls — Pointer Lock still owns mouse-look; horizontal WASD movement
-// still goes through controls.moveRight/moveForward exactly as before.
-// Vertical movement no longer comes from Space/Shift directly — that's
-// gravity + jump now (see physics.js), triggered by an edge-detected jump
-// request below instead of a held key.
+// Controls
 // ---------------------------------------------------------------------------
 const controls = new PointerLockControls(camera, document.body);
 
@@ -145,7 +121,6 @@ function showLevelSelect() {
   levelSelectEl.hidden = false;
   touchGameActive = false;
 }
-
 controls.addEventListener("unlock", showLevelSelect);
 
 if (menuBtn) {
@@ -160,9 +135,6 @@ let jumpQueued = false;
 const MOVE_KEYS = new Set(["KeyW", "KeyS", "KeyA", "KeyD", "Space"]);
 
 window.addEventListener("keydown", (e) => {
-  // Space in particular scrolls the page by default — only steal it (and
-  // the other movement keys) while the game actually has control, so
-  // normal page scrolling/keyboard use elsewhere on the site is untouched.
   if (isGameActive() && MOVE_KEYS.has(e.code)) e.preventDefault();
   if (e.code === "Space" && !e.repeat) jumpQueued = true;
   setKey(e.code, true);
@@ -191,138 +163,103 @@ function updateMovement(dt, grounded) {
   const speed = WALK_SPEED * (grounded ? 1 : AIR_CONTROL);
   controls.moveRight(velocity.x * speed * dt);
   controls.moveForward(-velocity.z * speed * dt);
-}
 
-// ---------------------------------------------------------------------------
-// Wall collision — horizontal-only now (vertical "standing on top" is
-// handled by physics.js's ground raycast instead). Height-aware so it only
-// pushes the player away from an island's side, not while they're standing
-// on top of it or passing well above/below it.
-// ---------------------------------------------------------------------------
-const PLAYER_RADIUS = 1.2;
-// Terrain displacement (terrain.js: ROUGHNESS) can push the surface up to
-// ~32% beyond the base ellipsoid — pad collision bounds to match so players
-// don't clip into jagged outcroppings.
-const TERRAIN_BULGE = 1.32;
-
-function resolveWallCollision() {
-  let x = camera.position.x, z = camera.position.z;
-  const feetY = camera.position.y - PLAYER_EYE_HEIGHT;
-
-  for (const [, entry] of islandMeshes) {
-    const island = entry.data;
-    const topY = island.position.y + (island.height / 1.6) * TERRAIN_BULGE;
-    const bottomY = island.position.y - (island.height / 1.6) * TERRAIN_BULGE;
-    // Only collide with the island's side — above its top is "standing on
-    // it" (physics.js's job) and well below its bottom is just open air
-    // underneath it.
-    if (feetY > topY - 0.5 || feetY < bottomY - 2) continue;
-
-    const dx = x - island.position.x, dz = z - island.position.z;
-    const r = island.radius * TERRAIN_BULGE + PLAYER_RADIUS;
-    const distSq = dx * dx + dz * dz;
-    if (distSq < r * r && distSq > 1e-6) {
-      const dist = Math.sqrt(distSq);
-      const push = r / dist;
-      x = island.position.x + dx * push;
-      z = island.position.z + dz * push;
-    }
+  // Soft world bounds — keeps the player off the terrain's falloff rim and
+  // away from the finite plane's actual edge (see terrain.js/WORLD_BOUND_RADIUS
+  // above), rather than needing to fall off into empty space to find out
+  // there's a limit.
+  const distFromCenter = Math.hypot(camera.position.x, camera.position.z);
+  if (distFromCenter > WORLD_BOUND_RADIUS) {
+    const scale = WORLD_BOUND_RADIUS / distFromCenter;
+    camera.position.x *= scale;
+    camera.position.z *= scale;
   }
-
-  camera.position.x = x;
-  camera.position.z = z;
 }
 
 // ---------------------------------------------------------------------------
-// Level building — one biome at a time. Tearing down the previous level's
-// meshes on every switch (including re-entering the same level, which
-// always regenerates fresh) keeps this simple instead of trying to diff
-// old vs new state.
+// Level building — one continuous terrain per biome. Tearing down the
+// previous level's terrain/decorations/crystals on every switch (including
+// re-entering the same level, which always regenerates fresh) keeps this
+// simple instead of diffing old vs new state.
 // ---------------------------------------------------------------------------
-const islandMeshes = new Map(); // islandId -> { mesh, ring, data, loreShown }
-const crystalHandles = new Map(); // crystalId -> mesh handle (from crystals.js)
-let allCrystals = []; // flat list of { id, islandId, position, color } — still-uncollected only
+let terrainMesh = null;
+const crystalHandles = new Map();
+let allCrystals = [];
 let crystalsTotal = 0;
 let crystalsCollected = 0;
-let groundMeshes = []; // flat array mirror of islandMeshes' meshes, for physics.js's raycaster
+const decorationHandles = [];
+let loreMarkers = []; // {id, x, z, y, shown}
 let currentLevelIdx = -1;
 let spawnPosition = { x: 0, y: 5, z: 0 };
 const playerPhysics = createPlayerPhysicsState();
 
 function teardownLevel() {
-  for (const [, entry] of islandMeshes) {
-    scene.remove(entry.mesh);
-    entry.mesh.geometry.dispose();
-    entry.mesh.material.dispose();
-    if (entry.ring) {
-      scene.remove(entry.ring);
-      entry.ring.geometry.dispose();
-      entry.ring.material.dispose();
-    }
+  if (terrainMesh) {
+    scene.remove(terrainMesh);
+    terrainMesh.geometry.dispose();
+    terrainMesh.material.dispose();
+    terrainMesh = null;
   }
-  islandMeshes.clear();
   for (const [, handle] of crystalHandles) disposeCrystalMesh(scene, handle);
   crystalHandles.clear();
   allCrystals = [];
-  groundMeshes = [];
+  for (const handle of decorationHandles) {
+    scene.remove(handle.group);
+    handle.group.traverse((obj) => {
+      if (obj.geometry) obj.geometry.dispose();
+      if (obj.material) obj.material.dispose();
+    });
+  }
+  decorationHandles.length = 0;
+  loreMarkers = [];
 }
 
 function buildLevel(levelIdx) {
   teardownLevel();
   currentLevelIdx = levelIdx;
   const level = LEVELS[levelIdx];
-  const islands = generateLevelIslands(level.biome, WORLD_SEED);
+
+  terrainMesh = new THREE.Mesh(
+    buildPlanetTerrain(level, WORLD_SEED),
+    new THREE.MeshStandardMaterial({
+      vertexColors: true, flatShading: true, roughness: 0.9, metalness: 0.05,
+      emissive: level.color, emissiveIntensity: 0.04,
+    })
+  );
+  scene.add(terrainMesh);
+
+  const layout = generateLevelLayout(level.biome, WORLD_SEED);
 
   seedValueEl.textContent = WORLD_SEED;
   levelNameEl.textContent = level.name;
 
-  islands.forEach((island) => {
-    const geo = buildIslandGeometry(island);
-    const mat = new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      flatShading: true,
-      roughness: 0.85,
-      metalness: 0.05,
-      emissive: island.color,
-      emissiveIntensity: 0.05,
-    });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(island.position.x, island.position.y, island.position.z);
-    scene.add(mesh);
-
-    const ringGeo = new THREE.RingGeometry(island.radius * 0.9, island.radius * 1.4, 32);
-    const ringMat = new THREE.MeshBasicMaterial({
-      color: island.color,
-      transparent: true,
-      opacity: 0.15,
-      side: THREE.DoubleSide,
-    });
-    const ring = new THREE.Mesh(ringGeo, ringMat);
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.set(island.position.x, island.position.y - island.height * 0.5, island.position.z);
-    scene.add(ring);
-
-    islandMeshes.set(island.id, { mesh, ring, data: island, loreShown: false });
-    groundMeshes.push(mesh);
-
-    generateCrystalsForIsland(island).forEach((crystal) => {
-      allCrystals.push(crystal);
-      crystalHandles.set(crystal.id, createCrystalMesh(scene, crystal));
-    });
-
-    if (island.isStart) {
-      spawnPosition = {
-        x: island.position.x,
-        y: island.position.y + (island.height / 1.6) * 1.3 + PLAYER_EYE_HEIGHT,
-        z: island.position.z,
-      };
-    }
+  layout.crystalSeeds.forEach((seed) => {
+    const groundY = sampleGroundHeight(seed.x, seed.z, terrainMesh) ?? 0;
+    const crystal = { id: seed.id, position: { x: seed.x, y: groundY + 1.1, z: seed.z }, color: level.color };
+    allCrystals.push(crystal);
+    crystalHandles.set(crystal.id, createCrystalMesh(scene, crystal));
   });
+
+  layout.decorationSeeds.forEach((seed) => {
+    const groundY = sampleGroundHeight(seed.x, seed.z, terrainMesh) ?? 0;
+    const handle = createDecoration(level.biome, level.color, seed.rand);
+    handle.group.position.set(seed.x, groundY, seed.z);
+    handle.group.rotation.y = seed.rand() * Math.PI * 2;
+    handle.baseY = groundY;
+    scene.add(handle.group);
+    decorationHandles.push(handle);
+  });
+
+  loreMarkers = layout.loreMarkers.map((m) => ({
+    ...m, y: sampleGroundHeight(m.x, m.z, terrainMesh) ?? 0, shown: false,
+  }));
 
   crystalsTotal = allCrystals.length;
   crystalsCollected = 0;
   updateResonanceUI();
 
+  const spawnGroundY = sampleGroundHeight(layout.spawn.x, layout.spawn.z, terrainMesh) ?? 0;
+  spawnPosition = { x: layout.spawn.x, y: spawnGroundY + PLAYER_EYE_HEIGHT + 2, z: layout.spawn.z };
   camera.position.set(spawnPosition.x, spawnPosition.y, spawnPosition.z);
   playerPhysics.verticalVelocity = 0;
   playerPhysics.grounded = false;
@@ -364,14 +301,9 @@ function buildLevelSelectButtons() {
 buildLevelSelectButtons();
 
 // ---------------------------------------------------------------------------
-// Resonance Crystals — the repurposed goal for what used to be
-// player-vs-player combat, now the reason to actually platform your way
-// across a level. Shooting one shatters it: an impact burst in the
-// crystal's own color, a chime, a log line, and a tick toward the level
-// total. Once every crystal in the level is gone, its islands pulse
-// brighter for a few seconds as a completion beat.
+// Resonance Crystals
 // ---------------------------------------------------------------------------
-let worldPulseElapsed = null; // null when inactive, else seconds since triggered
+let worldPulseElapsed = null;
 const WORLD_PULSE_DURATION = 4;
 
 function updateResonanceUI() {
@@ -398,19 +330,16 @@ function shatterCrystal(id) {
 
   if (crystalsCollected >= crystalsTotal && crystalsTotal > 0) {
     worldPulseElapsed = 0;
-    logDiscovery("Every crystal in this level has been shattered.");
+    logDiscovery("Every crystal on this landmass has been shattered.");
     setTimeout(() => playShatter(), 150);
   }
 }
 
 function updateWorldPulse(dt) {
-  if (worldPulseElapsed === null) return;
+  if (worldPulseElapsed === null || !terrainMesh) return;
   worldPulseElapsed += dt;
   const t = Math.min(1, worldPulseElapsed / WORLD_PULSE_DURATION);
-  const intensity = 0.05 + Math.sin(t * Math.PI) * 0.7; // rises then falls back to baseline
-  for (const [, entry] of islandMeshes) {
-    entry.mesh.material.emissiveIntensity = intensity;
-  }
+  terrainMesh.material.emissiveIntensity = 0.04 + Math.sin(t * Math.PI) * 0.55;
   if (worldPulseElapsed >= WORLD_PULSE_DURATION) worldPulseElapsed = null;
 }
 
@@ -424,9 +353,7 @@ function logDiscovery(text) {
 }
 
 // ---------------------------------------------------------------------------
-// Shooting — resolves instantly and locally against Resonance Crystals.
-// There's no server here, so this hit test IS the authoritative result the
-// moment it runs.
+// Shooting
 // ---------------------------------------------------------------------------
 const MAX_SHOT_RANGE = 400;
 const PROJECTILE_SPEED = 140;
@@ -438,37 +365,22 @@ const impactBursts = [];
 function spawnProjectile(origin, direction, colorHex = 0x4fd1c5) {
   bolts.push(createBolt(scene, origin, direction, colorHex, PROJECTILE_SPEED));
 }
-
 function spawnImpact(position, colorHex = 0xff6b4a, options = {}) {
   impactBursts.push(createImpactBurst(scene, position, colorHex, options));
 }
 
 function updateProjectiles(dt) {
   for (let i = bolts.length - 1; i >= 0; i--) {
-    const b = bolts[i];
-    updateBolt(b, dt);
-    if (b.life > PROJECTILE_LIFETIME) {
-      disposeBolt(scene, b);
-      bolts.splice(i, 1);
-    }
+    const b = bolts[i]; updateBolt(b, dt);
+    if (b.life > PROJECTILE_LIFETIME) { disposeBolt(scene, b); bolts.splice(i, 1); }
   }
-
   for (let i = muzzleFlashes.length - 1; i >= 0; i--) {
-    const f = muzzleFlashes[i];
-    updateMuzzleFlash(f, dt);
-    if (f.life > f.duration) {
-      disposeMuzzleFlash(scene, f);
-      muzzleFlashes.splice(i, 1);
-    }
+    const f = muzzleFlashes[i]; updateMuzzleFlash(f, dt);
+    if (f.life > f.duration) { disposeMuzzleFlash(scene, f); muzzleFlashes.splice(i, 1); }
   }
-
   for (let i = impactBursts.length - 1; i >= 0; i--) {
-    const b = impactBursts[i];
-    updateImpactBurst(b, dt);
-    if (b.life > b.duration) {
-      disposeImpactBurst(scene, b);
-      impactBursts.splice(i, 1);
-    }
+    const b = impactBursts[i]; updateImpactBurst(b, dt);
+    if (b.life > b.duration) { disposeImpactBurst(scene, b); impactBursts.splice(i, 1); }
   }
 }
 
@@ -511,21 +423,21 @@ window.addEventListener("keydown", (e) => {
 });
 
 // ---------------------------------------------------------------------------
-// Lore proximity trigger — reads from the static local pool (lore.js)
-// instead of an API call, so this is fully synchronous.
+// Lore proximity trigger — a handful of fixed points scattered across the
+// landmass now, rather than one trigger per island.
 // ---------------------------------------------------------------------------
 let loreTickerTimeout = null;
+const LORE_TRIGGER_RADIUS = 14;
 
-function checkIslandProximity() {
-  for (const [id, entry] of islandMeshes) {
-    const dist = camera.position.distanceTo(entry.mesh.position);
-    const triggerRadius = entry.data.radius * 2.2;
-
-    if (dist < triggerRadius && !entry.loreShown) {
-      entry.loreShown = true;
-      showLore(getIslandLore(entry.data));
-    } else if (dist > triggerRadius * 1.5 && entry.loreShown) {
-      entry.loreShown = false; // allow re-trigger on a later pass
+function checkLoreProximity() {
+  for (const marker of loreMarkers) {
+    const dx = camera.position.x - marker.x, dz = camera.position.z - marker.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist < LORE_TRIGGER_RADIUS && !marker.shown) {
+      marker.shown = true;
+      showLore(getIslandLore({ id: marker.id, biome: LEVELS[currentLevelIdx].biome }));
+    } else if (dist > LORE_TRIGGER_RADIUS * 1.6 && marker.shown) {
+      marker.shown = false;
     }
   }
 }
@@ -550,7 +462,7 @@ showLevelSelect();
 // ---------------------------------------------------------------------------
 const clock = new THREE.Clock();
 let elapsedTime = 0;
-const FALL_RESPAWN_OFFSET = 55; // how far below spawn height triggers a respawn
+const FALL_RESPAWN_OFFSET = 80; // generous — the world-bounds clamp above should make this a rare last-resort safety net, not the primary way players learn there's an edge
 
 function animate() {
   requestAnimationFrame(animate);
@@ -559,14 +471,14 @@ function animate() {
 
   if (isGameActive() && currentLevelIdx >= 0) {
     updateMovement(dt, playerPhysics.grounded);
-    resolveWallCollision();
-    updatePlayerPhysics(camera, groundMeshes, playerPhysics, dt, PLAYER_EYE_HEIGHT, jumpQueued);
+    updatePlayerPhysics(camera, terrainMesh, playerPhysics, dt, PLAYER_EYE_HEIGHT, jumpQueued);
     jumpQueued = false;
     if (camera.position.y < spawnPosition.y - FALL_RESPAWN_OFFSET) respawnInLevel();
-    checkIslandProximity();
+    checkLoreProximity();
   }
 
   for (const [, handle] of crystalHandles) updateCrystalMesh(handle, elapsedTime);
+  for (const handle of decorationHandles) updateDecoration(handle, elapsedTime);
   updateWorldPulse(dt);
   updateProjectiles(dt);
   renderer.render(scene, camera);

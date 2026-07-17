@@ -1,99 +1,80 @@
 import { mulberry32, hashStringToSeed, biomeColor } from "./worldgen.js";
-import { GRAVITY, JUMP_VELOCITY, WALK_SPEED, AIR_CONTROL } from "./physics.js";
+import { TERRAIN_SIZE } from "./terrain.js";
 
 // -----------------------------------------------------------------------------
-// SWAP POINT: level layout. Each biome is now its own short platforming
-// course instead of a handful of islands scattered through a huge
-// free-flight volume — a winding chain where each island sits within
-// actual jump range of the one before it. Swap generateLevelIslands() for
-// a different course-generation rule (branching paths, hand-placed
-// islands, etc.) as long as it keeps returning the same island shape
-// terrain.js and crystals.js already expect.
-//
-// Reachability isn't just "keep the gap under some fixed number" — a jump
-// that's also climbing has less usable horizontal range than a flat one,
-// so gap and climb are generated together against the real projectile
-// math below (imported straight from physics.js so the two can't drift
-// out of sync with each other).
+// SWAP POINT: level layout. Each biome is one continuous landmass (see
+// terrain.js) instead of a chain of separate islands — this only decides
+// *where* on that landmass things go (crystals, lore markers, decorative
+// props), all as XZ coordinates. Heights aren't computed here at all:
+// main.js samples the real terrain mesh's height at each of these points
+// once it's built, so placement can never drift out of sync with the
+// actual rendered surface the way a parallel analytic height guess could.
 // -----------------------------------------------------------------------------
 
 const LEVELS = [
-  { biome: "ember", name: "Ember Reach", tagline: "Islands still warm from a fire that lifted them into the sky." },
-  { biome: "verdant", name: "Verdant Hollow", tagline: "Green that grew here without ever touching soil." },
-  { biome: "crystal", name: "Crystal Spire", tagline: "Formations that hum at a frequency only visitors notice." },
-  { biome: "abyssal", name: "Abyssal Drift", tagline: "Islands that never quite finished falling." },
-  { biome: "ashen", name: "Ashen Expanse", tagline: "A place that ended once and never got around to admitting it." },
+  { biome: "ember", name: "Ember Reach", tagline: "Jagged volcanic ground, cracked through with old fire." },
+  { biome: "verdant", name: "Verdant Hollow", tagline: "Rolling hills, bioluminescent and overgrown." },
+  { biome: "crystal", name: "Crystal Spire", tagline: "Flat, angular ground broken by sudden crystal spires." },
+  { biome: "abyssal", name: "Abyssal Drift", tagline: "Solid ground cut through with chasms that never end." },
+  { biome: "ashen", name: "Ashen Expanse", tagline: "A cracked, wind-swept lakebed that forgot how to be full." },
 ];
+LEVELS.forEach((l) => { l.color = biomeColor(l.biome); });
 
-const ISLANDS_PER_LEVEL = 8;
-const MIN_GAP = 4, MAX_GAP = 9;   // island-edge to island-edge, before reachability clamping below
-const MAX_DESCEND = 6;             // descending isn't reachability-constrained the way climbing is, just kept sane for feel
+const CRYSTAL_COUNT = 12;
+const LORE_MARKER_COUNT = 5;
+const DECORATION_COUNT = 22;
 
-// Height a jump has actually reached after covering horizontal distance dx
-// at the given horizontal speed — the real constraint on how much a gap can
-// also climb, not just an independent "max climb" number.
-const H_SPEED = WALK_SPEED * AIR_CONTROL;
-function heightAtDistance(dx) {
-  const t = dx / H_SPEED;
-  return JUMP_VELOCITY * t - 0.5 * GRAVITY * t * t;
+// Both crystals and decorations stay within this fraction of the terrain's
+// half-size — keeps everything off the soft falloff rim at the edge (see
+// terrain.js) where the ground is flattening out toward the boundary.
+const PLACEMENT_RADIUS_FRAC = 0.7;
+
+function randomPointOnTerrain(rand) {
+  const r = rand() * (TERRAIN_SIZE / 2) * PLACEMENT_RADIUS_FRAC;
+  const angle = rand() * Math.PI * 2;
+  return { x: Math.cos(angle) * r, z: Math.sin(angle) * r };
 }
-const CLIMB_SAFETY_MARGIN = 0.7; // use at most 70% of the theoretical max height at that distance, leaving room for player timing error
 
 /**
  * @param {string} biome
  * @param {string} seed
- * @returns {Array<{id, position:{x,y,z}, radius, height, biome, color, isStart:boolean}>}
+ * @returns {{
+ *   spawn: {x:number, z:number},
+ *   crystalSeeds: Array<{id:string, x:number, z:number}>,
+ *   loreMarkers: Array<{id:string, x:number, z:number}>,
+ *   decorationSeeds: Array<{id:string, x:number, z:number, rand:() => number}>,
+ * }}
  */
-function generateLevelIslands(biome, seed) {
+function generateLevelLayout(biome, seed) {
   const rand = mulberry32(hashStringToSeed(seed + "::level::" + biome));
-  const islands = [];
-  let pos = { x: 0, y: 0, z: 0 };
-  let heading = rand() * Math.PI * 2;
-  let prevRadius = 10;
 
-  for (let i = 0; i < ISLANDS_PER_LEVEL; i++) {
-    const isStart = i === 0;
-    const radius = isStart ? 10 : 4.5 + rand() * 4.5;
-    const height = 4 + rand() * 5;
+  const spawn = { x: 0, z: 0 }; // terrain center — every biome's falloff/shaping keeps this area gentle
 
-    islands.push({
-      id: `${biome}-${i}`,
-      position: { x: pos.x, y: pos.y, z: pos.z },
-      radius,
-      height,
-      biome,
-      color: biomeColor(biome),
-      isStart,
-    });
-
-    // Wind the path left/right rather than a straight line.
-    heading += (rand() - 0.5) * 1.3;
-    const gap = MIN_GAP + rand() * (MAX_GAP - MIN_GAP);
-    const nextRadius = 4.5 + rand() * 4.5;
-    const centerDist = prevRadius + nextRadius + gap;
-
-    const climbing = rand() < 0.5;
-    let vertical;
-    if (climbing) {
-      // Reachability is about the edge-to-edge gap the player actually has
-      // to clear in open air — not the center-to-center distance, which
-      // also includes both islands' radii and would wildly overstate how
-      // far the jump itself needs to travel.
-      const safeMaxClimb = Math.max(0, heightAtDistance(gap) * CLIMB_SAFETY_MARGIN);
-      vertical = rand() * safeMaxClimb;
-    } else {
-      vertical = -rand() * MAX_DESCEND;
-    }
-
-    pos = {
-      x: pos.x + Math.cos(heading) * centerDist,
-      y: pos.y + vertical,
-      z: pos.z + Math.sin(heading) * centerDist,
-    };
-    prevRadius = nextRadius;
+  const crystalSeeds = [];
+  for (let i = 0; i < CRYSTAL_COUNT; i++) {
+    const p = randomPointOnTerrain(rand);
+    crystalSeeds.push({ id: `${biome}-crystal-${i}`, x: p.x, z: p.z });
   }
 
-  return islands;
+  const loreMarkers = [];
+  for (let i = 0; i < LORE_MARKER_COUNT; i++) {
+    const p = randomPointOnTerrain(rand);
+    loreMarkers.push({ id: `${biome}-lore-${i}`, x: p.x, z: p.z });
+  }
+
+  const decorationSeeds = [];
+  for (let i = 0; i < DECORATION_COUNT; i++) {
+    const p = randomPointOnTerrain(rand);
+    // Each decoration gets its own derived PRNG stream (seeded off its own
+    // index) so createDecoration()'s internal randomness — branch counts,
+    // crystal-shard counts, scale variation — stays deterministic and
+    // reproducible per placement without decorations affecting each
+    // other's random draws.
+    const localRand = mulberry32(hashStringToSeed(seed + "::decoration::" + biome + "::" + i));
+    decorationSeeds.push({ id: `${biome}-deco-${i}`, x: p.x, z: p.z, rand: localRand });
+  }
+
+  return { spawn, crystalSeeds, loreMarkers, decorationSeeds };
 }
 
-export { LEVELS, generateLevelIslands, ISLANDS_PER_LEVEL };
+export { LEVELS, generateLevelLayout, CRYSTAL_COUNT, LORE_MARKER_COUNT };

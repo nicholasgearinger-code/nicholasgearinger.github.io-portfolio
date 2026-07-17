@@ -1673,31 +1673,48 @@
       + 'Also check the Network tab for 404s on the .mp3 files themselves.');
   }
   // -- RADIO UNLOCKS: only the first few tracks are available from the
-  //    start; the rest unlock in slices as achievements are earned. Reuses
-  //    the existing achievement system rather than a separate progress
-  //    mechanic — no new persistence needed, since achievement completion
-  //    already persists to localStorage. The remaining (non-default)
-  //    tracks are split as evenly as possible across ACHIEVEMENT_DEFS, in
-  //    that array's order, so this scales automatically if tracks or
-  //    achievements are added/removed later rather than relying on
-  //    hardcoded filenames.
-  const RADIO_DEFAULT_UNLOCKED = Math.min(4, RADIO_TRACKS.length);
-  function tracksUnlockedByAchievement(achId) {
-    const bonusCount = RADIO_TRACKS.length - RADIO_DEFAULT_UNLOCKED;
+  //    start; most of the rest unlock in slices as achievements are earned
+  //    (the legacy behavior — still applies automatically to any track
+  //    that doesn't set its own `unlock` field, so it scales on its own as
+  //    tracks/achievements are added/removed). Newer tracks can instead
+  //    set an explicit `unlock: {type:'level', value:N}` or
+  //    `{type:'achievement', id:'...'}` to tie them to something specific
+  //    (a particular zone, a particular skill achievement) rather than
+  //    wherever they happen to land positionally.
+  const LEGACY_TRACKS = RADIO_TRACKS.filter((t) => !t.unlock);
+  const RADIO_DEFAULT_UNLOCKED = Math.min(4, LEGACY_TRACKS.length);
+  function legacyBonusSlice(achId) {
+    const bonusCount = LEGACY_TRACKS.length - RADIO_DEFAULT_UNLOCKED;
     if (bonusCount <= 0 || !ACHIEVEMENT_DEFS.length) return [];
     const perAchievement = bonusCount / ACHIEVEMENT_DEFS.length;
     const achIdx = ACHIEVEMENT_DEFS.findIndex((d) => d.id === achId);
     if (achIdx < 0) return [];
     const start = RADIO_DEFAULT_UNLOCKED + Math.round(achIdx * perAchievement);
     const end = RADIO_DEFAULT_UNLOCKED + Math.round((achIdx + 1) * perAchievement);
-    return RADIO_TRACKS.slice(start, end);
+    return LEGACY_TRACKS.slice(start, end);
+  }
+  function tracksUnlockedByAchievement(achId) {
+    const explicit = RADIO_TRACKS.filter((t) => t.unlock && t.unlock.type === 'achievement' && t.unlock.id === achId);
+    return legacyBonusSlice(achId).concat(explicit);
+  }
+  function tracksUnlockedByLevel(fromLevelExclusive, toLevelInclusive) {
+    return RADIO_TRACKS.filter((t) => t.unlock && t.unlock.type === 'level'
+      && t.unlock.value > fromLevelExclusive && t.unlock.value <= toLevelInclusive);
   }
   function isTrackUnlocked(idx) {
-    if (idx < RADIO_DEFAULT_UNLOCKED) return true;
-    const bonusCount = RADIO_TRACKS.length - RADIO_DEFAULT_UNLOCKED;
+    const track = RADIO_TRACKS[idx];
+    if (track && track.unlock) {
+      if (track.unlock.type === 'level') return highestLevelReached >= track.unlock.value;
+      if (track.unlock.type === 'achievement') return !!achievements[track.unlock.id];
+      return true; // unrecognized unlock shape — fail open rather than hide a track forever
+    }
+    const legacyIdx = LEGACY_TRACKS.indexOf(track);
+    if (legacyIdx < 0) return true; // shouldn't happen, but never hide a track over a bookkeeping mismatch
+    if (legacyIdx < RADIO_DEFAULT_UNLOCKED) return true;
+    const bonusCount = LEGACY_TRACKS.length - RADIO_DEFAULT_UNLOCKED;
     if (bonusCount <= 0 || !ACHIEVEMENT_DEFS.length) return false;
     const perAchievement = bonusCount / ACHIEVEMENT_DEFS.length;
-    const achIdx = Math.floor((idx - RADIO_DEFAULT_UNLOCKED) / perAchievement);
+    const achIdx = Math.floor((legacyIdx - RADIO_DEFAULT_UNLOCKED) / perAchievement);
     const def = ACHIEVEMENT_DEFS[achIdx];
     return !!(def && achievements[def.id]);
   }
@@ -2288,7 +2305,17 @@
     const newLevel = 1 + Math.floor(elapsed / 20);
     if (newLevel > level) {
       level = newLevel;
-      if (level > highestLevelReached) { highestLevelReached = level; saveProgress(); }
+      if (level > highestLevelReached) {
+        const oldHighest = highestLevelReached;
+        highestLevelReached = level;
+        saveProgress();
+        const newLevelTracks = tracksUnlockedByLevel(oldHighest, level);
+        if (newLevelTracks.length) {
+          setTimeout(() => {
+            spawnFloatText(W / 2, VP_Y + 105, '\u266A UNLOCKED: ' + newLevelTracks.map((t) => t.title).join(', '), '#22D3EE');
+          }, 300); // after the "LEVEL n" toast below so they don't overlap
+        }
+      }
       if (level >= 20) unlockAchievement('deep_diver');
       if (level >= 50) unlockAchievement('ascendant');
       if (level >= 5 && hitsThisRun === 0) unlockAchievement('clean_run');

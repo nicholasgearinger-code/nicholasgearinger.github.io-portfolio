@@ -147,7 +147,14 @@ controls.addEventListener("lock", () => (startOverlay.style.display = "none"));
 controls.addEventListener("unlock", () => (startOverlay.style.display = "flex"));
 
 const keys = { forward: false, back: false, left: false, right: false, up: false, down: false };
-window.addEventListener("keydown", (e) => setKey(e.code, true));
+const GAME_KEYS = new Set(["KeyW", "KeyS", "KeyA", "KeyD", "Space", "ShiftLeft", "ShiftRight"]);
+window.addEventListener("keydown", (e) => {
+  // Space in particular scrolls the page by default — only steal it (and
+  // the other movement keys) while the game actually has control, so
+  // normal page scrolling/keyboard use elsewhere on the site is untouched.
+  if (isGameActive() && GAME_KEYS.has(e.code)) e.preventDefault();
+  setKey(e.code, true);
+});
 window.addEventListener("keyup", (e) => setKey(e.code, false));
 
 function setKey(code, value) {
@@ -422,7 +429,7 @@ document.addEventListener("mousedown", (e) => {
   if (e.button === 0 && controls.isLocked) fireShot();
 });
 
-createTouchControls({ camera, keys, onFire: fireShot });
+createTouchControls({ camera, keys, onFire: fireShot, viewport, isActive: isGameActive });
 
 window.addEventListener("keydown", (e) => {
   if (e.code === "KeyM") {

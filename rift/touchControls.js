@@ -37,7 +37,7 @@ function pointInRect(x, y, rect) {
  * @param {{forward,back,left,right,up,down}} keys  same object main.js reads every frame
  * @param {() => void} onFire
  */
-function createTouchControls({ camera, keys, onFire }) {
+function createTouchControls({ camera, keys, onFire, viewport, isActive }) {
   const joystickBase = document.getElementById("rift-touch-joystick");
   const joystickKnob = document.getElementById("rift-touch-joystick-knob");
   const fireButton = document.getElementById("rift-touch-fire");
@@ -83,9 +83,19 @@ function createTouchControls({ camera, keys, onFire }) {
   }
 
   function handleTouchStart(e) {
+    // This is a document-level listener (see the bottom of this function) —
+    // it used to be safe to claim any touch anywhere as a "look" drag
+    // because this game WAS the whole page. Now that it's embedded in a
+    // larger scrollable portfolio, an unguarded catch-all here would grab
+    // every touch on the entire site (including normal scrolling) and
+    // preventDefault() it in handleTouchMove below. Gate on both the game
+    // actually being active and the touch actually starting inside the
+    // game's own viewport, so scrolling the rest of the page is untouched.
+    if (!isActive()) return;
     for (const touch of e.changedTouches) {
       const joyRect = expandRect(joystickBase.getBoundingClientRect(), TOUCH_CAPTURE_MARGIN);
       const fireRect = expandRect(fireButton.getBoundingClientRect(), TOUCH_CAPTURE_MARGIN);
+      const viewportRect = viewport.getBoundingClientRect();
 
       if (joystickTouchId === null && pointInRect(touch.clientX, touch.clientY, joyRect)) {
         joystickTouchId = touch.identifier;
@@ -94,7 +104,7 @@ function createTouchControls({ camera, keys, onFire }) {
         setJoystickVector(touch.clientX - joystickOrigin.x, touch.clientY - joystickOrigin.y);
       } else if (pointInRect(touch.clientX, touch.clientY, fireRect)) {
         onFire();
-      } else if (lookTouchId === null) {
+      } else if (lookTouchId === null && pointInRect(touch.clientX, touch.clientY, viewportRect)) {
         lookTouchId = touch.identifier;
         lastLook = { x: touch.clientX, y: touch.clientY };
       }
@@ -102,6 +112,7 @@ function createTouchControls({ camera, keys, onFire }) {
   }
 
   function handleTouchMove(e) {
+    if (!isActive()) return;
     for (const touch of e.changedTouches) {
       if (touch.identifier === joystickTouchId) {
         e.preventDefault();

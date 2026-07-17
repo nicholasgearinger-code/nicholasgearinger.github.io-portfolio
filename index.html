@@ -3263,6 +3263,95 @@
   }
   .explain-row { display: flex; justify-content: center; margin-top: 1rem; }
 
+  /* ── RIFT ISLANDS (direct embed) ── */
+  .rift-card { max-width: 960px; }
+  #rift-viewport {
+    position: relative; width: 100%; aspect-ratio: 16 / 9;
+    background: #0a0e14; border-radius: 0 0 .4rem .4rem; overflow: hidden;
+    font-family: 'Space Grotesk', sans-serif; color: #e8ecf1;
+  }
+  #rift-viewport.rift-fullscreen {
+    position: fixed; inset: 0; z-index: 9999; aspect-ratio: auto; border-radius: 0;
+  }
+  #rift-scene { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+  .rift-mono { font-family: 'IBM Plex Mono', monospace; }
+
+  #rift-hud { position: absolute; inset: 0; pointer-events: none; z-index: 10; }
+  #rift-hud-topleft { position: absolute; top: 16px; left: 16px; line-height: 1.3; }
+  .rift-hud-label { font-size: 9px; letter-spacing: .16em; color: rgba(232,236,241,.55); }
+  .rift-hud-value { font-size: 13px; color: #4fd1c5; margin-bottom: 8px; text-shadow: 0 0 8px rgba(79,209,197,.5); }
+  #rift-hud-topright {
+    position: absolute; top: 16px; right: 16px; font-size: 11px;
+    display: flex; align-items: center; gap: 7px; color: rgba(232,236,241,.55);
+  }
+  #rift-resonance-dot {
+    width: 7px; height: 7px; border-radius: 50%; background: #4fd1c5; display: inline-block;
+    box-shadow: 0 0 6px #4fd1c5; transition: background .3s ease, box-shadow .3s ease;
+  }
+  #rift-resonance-dot.complete { background: #ffd166; box-shadow: 0 0 10px #ffd166; }
+  #rift-lore-ticker {
+    position: absolute; bottom: 56px; left: 50%; transform: translateX(-50%);
+    max-width: 90%; width: 460px; text-align: center; font-size: 12px; color: #e8ecf1;
+    opacity: 0; transition: opacity .6s ease; padding: 8px 14px;
+    border-top: 1px solid rgba(79,209,197,.35); border-bottom: 1px solid rgba(79,209,197,.35);
+  }
+  #rift-lore-ticker.visible { opacity: 1; }
+  #rift-crosshair {
+    position: absolute; top: 50%; left: 50%; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px;
+    border-radius: 50%; background: #e8ecf1; opacity: .65; box-shadow: 0 0 4px rgba(232,236,241,.6);
+  }
+  #rift-discovery-log {
+    position: absolute; top: 56px; left: 16px; font-size: 10px; color: #4fd1c5;
+    display: flex; flex-direction: column; gap: 3px; max-width: 260px;
+  }
+  #rift-discovery-log div { opacity: 0; animation: rift-discovery-fade 5s ease forwards; }
+  @keyframes rift-discovery-fade { 0% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
+  #rift-hud-bottomleft { position: absolute; bottom: 16px; left: 16px; font-size: 10px; color: rgba(232,236,241,.55); }
+  #rift-hint-touch { display: none; }
+  body.rift-touch-mode #rift-hint-desktop { display: none; }
+  body.rift-touch-mode #rift-hint-touch { display: inline; }
+
+  #rift-touch-controls { display: none; position: absolute; inset: 0; z-index: 15; pointer-events: none; }
+  body.rift-touch-mode #rift-touch-controls { display: block; }
+  #rift-touch-joystick {
+    position: absolute; left: 20px; bottom: 20px; width: 92px; height: 92px; border-radius: 50%;
+    background: rgba(20,27,45,.5); border: 1px solid rgba(79,209,197,.35); pointer-events: auto; touch-action: none;
+  }
+  #rift-touch-joystick-knob {
+    position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; margin: -20px 0 0 -20px;
+    border-radius: 50%; background: rgba(79,209,197,.5); border: 1px solid rgba(79,209,197,.8);
+    transition: transform .03s linear;
+  }
+  #rift-touch-vertical { position: absolute; right: 92px; bottom: 20px; display: flex; flex-direction: column; gap: 7px; pointer-events: auto; }
+  #rift-touch-up, #rift-touch-down {
+    width: 40px; height: 40px; border-radius: 7px; background: rgba(20,27,45,.5);
+    border: 1px solid rgba(79,209,197,.35); color: #e8ecf1; font-size: 14px; touch-action: none;
+  }
+  #rift-touch-up:active, #rift-touch-down:active { background: rgba(79,209,197,.3); }
+  #rift-touch-fire {
+    position: absolute; right: 20px; bottom: 20px; width: 64px; height: 64px; border-radius: 50%;
+    background: rgba(255,107,74,.25); border: 2px solid rgba(255,107,74,.7); pointer-events: auto; touch-action: none;
+  }
+  #rift-touch-fire:active { background: rgba(255,107,74,.5); }
+
+  #rift-start-overlay {
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at center, #141b2d 0%, #0a0e14 70%);
+    display: flex; align-items: center; justify-content: center; z-index: 20;
+  }
+  #rift-start-panel { text-align: center; max-width: 420px; padding: 24px; }
+  #rift-start-panel h3 {
+    font-size: 26px; font-weight: 700; letter-spacing: .05em; margin: 0 0 12px; color: #e8ecf1;
+    text-shadow: 0 0 20px rgba(79,209,197,.4);
+  }
+  #rift-start-panel p { font-size: 12.5px; line-height: 1.55; color: rgba(232,236,241,.55); margin-bottom: 20px; }
+  #rift-start-button {
+    font-family: 'IBM Plex Mono', monospace; background: transparent; border: 1px solid #4fd1c5; color: #4fd1c5;
+    padding: 10px 22px; font-size: 12px; letter-spacing: .1em; cursor: pointer;
+    transition: background .2s ease, color .2s ease;
+  }
+  #rift-start-button:hover { background: #4fd1c5; color: #0a0e14; }
+
 </style>
 <script type="importmap">
 {
@@ -3282,7 +3371,9 @@
     "@tensorflow/tfjs-data": "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-data@4.20.0/+esm",
     "@tensorflow/tfjs-data/dist/index.js": "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-data@4.20.0/+esm",
     "@tensorflow/tfjs-backend-wasm": "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@4.20.0/+esm",
-    "@tensorflow/tfjs-backend-wasm/dist/index.js": "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@4.20.0/+esm"
+    "@tensorflow/tfjs-backend-wasm/dist/index.js": "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@4.20.0/+esm",
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
   }
 }
 </script>
@@ -3376,6 +3467,7 @@
     <li><a href="#webcam-ai">Face AI</a></li>
     <li><a href="#models">3D Work</a></li>
     <li><a href="#game">Play</a></li>
+    <li><a href="#rift">Rift Islands</a></li>
     <li><a href="#photography">Photography</a></li>
     <li><a href="#telemetry">Telemetry</a></li>
     <li><a href="#process">Process</a></li>
@@ -4320,6 +4412,73 @@
       </div>
     </div>
     <p class="algo-hint">Built with plain Canvas 2D — no game engine, just a requestAnimationFrame loop, a perspective projection for the depth illusion, circle/rect collision at the near plane, and difficulty scaling over time. Scores are real and saved to a live backend — honor-system, like most browser games without a full server-authoritative architecture behind them.</p>
+  </div>
+</section>
+
+
+<!-- RIFT ISLANDS -->
+<section id="rift" class="panel">
+  <div class="panel-inner">
+    <span class="section-label">Explore It</span>
+    <h2>A scattered archipelago,<br>humming with its own memory</h2>
+    <p class="lead" style="margin:0 auto 2.2rem;">A full-flight 3D exploration game built from scratch with Three.js. Fly freely between procedurally-generated floating islands — each with its own biome, terrain noise, and buried lore that surfaces the moment you drift close enough to hear it. Shoot the glowing Resonance Crystals scattered around each island to shatter them; collect every one in the world and the islands themselves pulse brighter as a finale.</p>
+    <div class="algo-card rift-card">
+      <div class="cc-titlebar">
+        <div class="cc-dots">
+          <span class="cc-dot" style="background:#FF5F57"></span>
+          <span class="cc-dot" style="background:#FFBD2E"></span>
+          <span class="cc-dot" style="background:#28C840"></span>
+        </div>
+        <span class="cc-filename">rift-islands</span>
+      </div>
+      <div class="algo-body" style="padding:0;">
+        <div id="rift-viewport">
+          <canvas id="rift-scene"></canvas>
+
+          <div id="rift-hud">
+            <div id="rift-hud-topleft">
+              <div class="rift-hud-label rift-mono">WORLD SEED</div>
+              <div class="rift-hud-value rift-mono" id="rift-seed-value">—</div>
+            </div>
+            <div id="rift-hud-topright" class="rift-mono">
+              <span id="rift-resonance-dot"></span>
+              <span>RESONANCE <span id="rift-resonance-value">0 / 0</span></span>
+            </div>
+            <div id="rift-crosshair"></div>
+            <div id="rift-lore-ticker" class="rift-mono"></div>
+            <div id="rift-discovery-log" class="rift-mono"></div>
+            <div id="rift-hud-bottomleft" class="rift-mono">
+              <span id="rift-hint-desktop">WASD to fly · Space / Shift up-down · Click to shoot · M to mute</span>
+              <span id="rift-hint-touch">Left stick to fly · ▲▼ up-down · Drag to look · Fire to shoot</span>
+            </div>
+          </div>
+
+          <div id="rift-touch-controls">
+            <div id="rift-touch-joystick"><div id="rift-touch-joystick-knob"></div></div>
+            <div id="rift-touch-vertical">
+              <button id="rift-touch-up" type="button">▲</button>
+              <button id="rift-touch-down" type="button">▼</button>
+            </div>
+            <div id="rift-touch-fire"></div>
+          </div>
+
+          <button type="button" class="game-fullscreen-btn" id="rift-fullscreen-btn" aria-label="Enter fullscreen"><span class="gfs-icon"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg></span><span class="gfs-label">Full Screen</span></button>
+
+          <div id="rift-start-overlay">
+            <div id="rift-start-panel">
+              <h3 class="rift-mono">RIFT ISLANDS</h3>
+              <p>
+                A scattered archipelago drifts in the dark, each island humming with its own
+                biome and buried lore. Fly between them, listen for what they remember, and
+                shatter the Resonance Crystals that mark the ones worth exploring.
+              </p>
+              <button id="rift-start-button" type="button">ENTER THE RIFT</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="algo-hint">Built with Three.js — procedural terrain via displaced icosahedra with deterministic 3D value noise, pointer-lock flight controls with a parallel touch/joystick scheme for mobile, synthesized Web Audio (no sound files), and island lore drawn from a curated local pool, deterministically picked per island so it's consistent across visits with zero network dependency. Started as a real-time multiplayer game with server-authoritative combat and client-side prediction; rebuilt single-player, with combat repurposed into shattering static Resonance Crystals instead of other players.</p>
   </div>
 </section>
 
@@ -7087,4 +7246,5 @@ panels.forEach(p => observer.observe(p));
     });
   }
 </script>
+<script type="module" src="rift/main.js"></script>
 </body></html>

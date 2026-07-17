@@ -237,20 +237,26 @@
     ['resistor', 'diode', 'girder'],                // 3 yellow — industrial/hazard zone
     ['tower', 'resistor', 'antenna'],               // 4 orange — reactor zone
     ['antenna', 'tower', 'diode'],                  // 5 red — critical/breach zone
+    ['chip', 'rack', 'capacitor'],                  // 6 teal — kernel depths
+    ['girder', 'resistor', 'diode'],                // 7 pink — quarantine zone
+    ['antenna', 'diode', 'chip'],                   // 8 indigo — void sector (sparser mix, fits the empty-space theme)
+    ['tower', 'antenna', 'rack'],                    // 9 gold — singularity (everything, converging)
   ];
-  const ERA_RING_SHAPES = ['line', 'dashed', 'double', 'zigzag', 'dashed', 'double'];
-  const ERA_OVERLAYS = ['none', 'grid', 'rain', 'stripes', 'embers', 'scanlines'];
+  const ERA_RING_SHAPES = ['line', 'dashed', 'double', 'zigzag', 'dashed', 'double', 'zigzag', 'dashed', 'line', 'double'];
+  const ERA_OVERLAYS = ['none', 'grid', 'rain', 'stripes', 'embers', 'scanlines', 'grid', 'stripes', 'embers', 'scanlines'];
   // Human-readable zone names shown on the HUD and flashed on transition —
-  // gives each 5-level era an identity beyond just a color shift.
-  const ERA_NAMES = ['GRID SECTOR', 'RELAY NETWORK', 'SERVER FARM', 'HAZARD ZONE', 'REACTOR CORE', 'BREACH ZONE'];
+  // gives each 5-level era an identity beyond just a color shift. The last
+  // four (31-50) bridge the gap up to the level-50 Ascendant achievement,
+  // which used to just loop back through the first six zones' visuals.
+  const ERA_NAMES = ['GRID SECTOR', 'RELAY NETWORK', 'SERVER FARM', 'HAZARD ZONE', 'REACTOR CORE', 'BREACH ZONE', 'KERNEL DEPTHS', 'QUARANTINE ZONE', 'VOID SECTOR', 'SINGULARITY'];
   function currentEraIdx() { return Math.floor(level / 5) % LEVEL_ERA_HUES.length; }
   function currentEraName() { return ERA_NAMES[currentEraIdx()]; }
-  // The tunnel/skyline/circuit palette steps through a fixed 6-color era
-  // every 5 levels — violet, blue, green, yellow, orange, red — then loops.
-  // Each value is a hue-rotate offset (deg) from the scene's native violet
-  // base (~270°) to that era's target hue: violet 270, blue 220, green 130,
-  // yellow 55, orange 30, red 0.
-  const LEVEL_ERA_HUES = [0, -50, -140, -215, -240, -270];
+  // The tunnel/skyline/circuit palette steps through a fixed-color era
+  // every 5 levels, then loops. Each value is a hue-rotate offset (deg)
+  // from the scene's native violet base (~270°) to that era's target hue:
+  // violet 270, blue 220, green 130, yellow 55, orange 30, red 0, then the
+  // four new zones — teal 175, pink 315, indigo 250, gold 90.
+  const LEVEL_ERA_HUES = [0, -50, -140, -215, -240, -270, -95, 45, -20, -180];
   function levelHueDeg() {
     const era = Math.floor(level / 5) % LEVEL_ERA_HUES.length;
     return LEVEL_ERA_HUES[era];
@@ -765,7 +771,7 @@
   // -- STORY MODE: zones unlock in order as the player actually reaches
   //    them, rather than all being selectable from the start. A zone's
   //    "start level" (1/6/11/16/21/26) doubles as its unlock threshold.
-  const ZONE_START_LEVELS = [1, 6, 11, 16, 21, 26];
+  const ZONE_START_LEVELS = [1, 6, 11, 16, 21, 26, 31, 36, 41, 46];
   let highestLevelReached = 1;
   try { highestLevelReached = parseInt(localStorage.getItem('ghostwireProgress') || '1', 10) || 1; } catch (_) {}
   function saveProgress() { try { localStorage.setItem('ghostwireProgress', String(highestLevelReached)); } catch (_) {} }
@@ -2602,7 +2608,7 @@
   // rain, Breach Zone gets warning stripes under its scanline distortion,
   // etc. Drawn at reduced intensity relative to the primary so it reads
   // as texture, not a second competing effect.
-  const ERA_OVERLAYS_2 = ['grid', 'scanlines', 'grid', 'embers', 'scanlines', 'stripes'];
+  const ERA_OVERLAYS_2 = ['grid', 'scanlines', 'grid', 'embers', 'scanlines', 'stripes', 'scanlines', 'grid', 'none', 'rain'];
 
   function drawOverlayKind(overlay, boost) {
     if (overlay === 'none') return;
@@ -2726,6 +2732,71 @@
         ctx.fillRect(shift, y, W, th);
         ctx.fillStyle = 'rgba(' + c2.join(',') + ',.10)';
         ctx.fillRect(-shift, y + th, W, th);
+      }
+    } else if (idx === 6) {
+      // KERNEL DEPTHS — thin data-veins pulsing outward from the vanishing
+      // point on a slow rhythm, like a heartbeat monitor tracing the
+      // system's own core
+      const c = eraRGB([45, 212, 191]);
+      const beat = Math.max(0, Math.sin(tunnelHue * 2.2));
+      const veins = 5;
+      for (let i = 0; i < veins; i++) {
+        const angle = (i / veins) * Math.PI * 2 + tunnelHue * 0.15;
+        const len = 40 + beat * 50;
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(' + c.join(',') + ',' + (0.08 + beat * 0.16).toFixed(3) + ')';
+        ctx.lineWidth = 1.2;
+        ctx.moveTo(VP_X, VP_Y);
+        ctx.lineTo(VP_X + Math.cos(angle) * len, VP_Y + Math.sin(angle) * len * 0.6);
+        ctx.stroke();
+      }
+    } else if (idx === 7) {
+      // QUARANTINE ZONE — a rotating containment-beacon sweep circling the
+      // frame, distinct from Hazard Zone's flat strobe flash
+      const c = eraRGB([244, 63, 148]);
+      const angle = (tunnelHue * 1.1) % (Math.PI * 2);
+      ctx.save();
+      ctx.translate(VP_X, VP_Y);
+      ctx.rotate(angle);
+      const beamGrad = ctx.createLinearGradient(0, 0, W * 0.7, 0);
+      beamGrad.addColorStop(0, 'rgba(' + c.join(',') + ',.16)');
+      beamGrad.addColorStop(1, 'rgba(' + c.join(',') + ',0)');
+      ctx.fillStyle = beamGrad;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.arc(0, 0, W * 0.7, -0.12, 0.12);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    } else if (idx === 8) {
+      // VOID SECTOR — sparse glitch-fragments flickering in and out, like
+      // static caught in otherwise empty space
+      const c = eraRGB([99, 102, 241]);
+      for (let i = 0; i < 6; i++) {
+        const seed = i * 53.1;
+        if (Math.sin(tunnelHue * 4 + seed) <= 0.6) continue;
+        const x = (seed * 37) % W;
+        const y = (seed * 61 + tunnelHue * 8) % H;
+        const w2 = 3 + (i % 3) * 3;
+        ctx.fillStyle = 'rgba(' + c.join(',') + ',.18)';
+        ctx.fillRect(x, y, w2, 1.5);
+      }
+    } else if (idx === 9) {
+      // SINGULARITY — light rays converging hard into the vanishing point,
+      // like the tunnel is being pulled toward one bright core — the
+      // climactic zone right before the level-50 Ascendant achievement
+      const c = eraRGB([250, 250, 210]);
+      const pulse = 0.5 + 0.5 * Math.sin(tunnelHue * 3.5);
+      const rays = 8;
+      for (let i = 0; i < rays; i++) {
+        const angle = (i / rays) * Math.PI * 2 + tunnelHue * 0.4;
+        const len = 90 + pulse * 40;
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(' + c.join(',') + ',' + (0.05 + pulse * 0.09).toFixed(3) + ')';
+        ctx.lineWidth = 1;
+        ctx.moveTo(VP_X + Math.cos(angle) * len, VP_Y + Math.sin(angle) * len * 0.6);
+        ctx.lineTo(VP_X, VP_Y);
+        ctx.stroke();
       }
     }
   }

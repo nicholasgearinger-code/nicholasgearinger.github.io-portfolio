@@ -536,6 +536,7 @@
   let powerups = [], floatTexts = [], shockwaves = [];
   let score = 0, running = false, dying = false, deathTimer = 0, rafId = null, lastTime = 0;
   let idleRafId = null, idleLastTime = 0; // "attract mode" loop — keeps the tunnel drifting behind the title/menu screens instead of sitting on one static frame
+  let idleItems = []; // decorative-only flythrough items for the title screen — never touches real scoring/collision, just makes it read as "the same tunnel" rather than a calmer standalone scene
   let spawnTimer = 0, codeBitTimer = 0, elapsed = 0, difficulty = 1, level = 1;
   let shakeMag = 0, flash = 0, tunnelHue = 0, threat = 0;
   let streak = 0, invulnTimer = 0, fireTimer = 0;
@@ -3472,6 +3473,7 @@
     drawStarfield();
     drawSkyline();
     activeWeatherParticles().slice().sort((a, b) => b.z - a.z).forEach(drawWeatherParticle);
+    idleItems.slice().sort((a, b) => a.z - b.z).reverse().forEach(drawItem);
     drawWarpStreaks();
     drawCircuitFloor();
     drawCodeBits();
@@ -3482,16 +3484,54 @@
     ctx.fillRect(0, 0, W, H);
   }
 
+  function spawnIdleItem() {
+    const isGood = Math.random() < 0.4;
+    const lane = 24 + Math.random() * (W - 48);
+    idleItems.push({
+      lane, baseLane: lane, z: 1 + Math.random() * 0.6, baseR: isGood ? 12 : (16 + Math.random() * 10),
+      type: isGood ? 'good' : 'bad', token: isGood ? pick(CODE_TOKENS_GOOD) : pick(CODE_TOKENS_BAD),
+      vz: 0.16 + Math.random() * 0.1, spin: (Math.random() - 0.5) * 3, seed: Math.random() * 1000,
+      x: VP_X, y: VP_Y, r: 1, glitchT: 0,
+    });
+  }
+  function updateIdleItems(dt) {
+    while (idleItems.length < 4) spawnIdleItem();
+    for (let i = idleItems.length - 1; i >= 0; i--) {
+      const it = idleItems[i];
+      it.z -= it.vz * dt;
+      if (it.type === 'bad') it.glitchT += dt;
+      if (it.z <= 0) { idleItems.splice(i, 1); continue; }
+      const p = 1 - it.z;
+      it.x = VP_X + (it.lane - VP_X) * p;
+      it.y = VP_Y + (PLAYER_Y - VP_Y) * p;
+      it.r = it.baseR * (MIN_SCALE + (1 - MIN_SCALE) * p);
+    }
+  }
+
   function idleLoop(ts) {
     if (running) { idleRafId = null; return; }
     const dt = Math.min(0.05, (ts - idleLastTime) / 1000 || 0);
     idleLastTime = ts;
     tunnelHue += dt; // same rate real gameplay runs at, for an exact visual match
-    // the circuit floor's "current" pulses only ever advanced inside real
-    // gameplay's update() loop, so without this they sat completely frozen
-    // on the title screen the whole time — this is the same line update()
-    // runs, just driven off the idle loop's own dt instead
+    // The circuit floor's "current" pulses, skyline, and weather all only
+    // ever advanced inside real gameplay's update() loop, so without this
+    // they sat completely frozen/static on the title screen — these are
+    // the same lines update() runs, just driven off the idle loop's own
+    // dt instead, so the title screen actually reads as "the same tunnel,
+    // just paused on Initialize" instead of a flatter standalone scene.
     circuitTraces.forEach((t) => { t.phase = (t.phase + t.speed * dt) % 1; });
+    skylineParts.forEach((s) => {
+      s.z -= s.speed * dt * Math.min(1.5, difficulty);
+      if (s.z <= SKYLINE_Z_NEAR) {
+        s.z = SKYLINE_Z_FAR + Math.random() * 3;
+        s.laneOffset = 1.4 + Math.random() * 2.6;
+        s.kind = pick(ERA_SKYLINE_KINDS[currentEraIdx()]);
+        s.scale = 0.7 + Math.random() * 0.9;
+      }
+    });
+    rainParticles.forEach((w) => updateWeatherParticle(w, dt));
+    emberParticles.forEach((w) => updateWeatherParticle(w, dt));
+    updateIdleItems(dt);
     ctx.clearRect(0, 0, W, H);
     drawAmbientBackground();
     idleRafId = requestAnimationFrame(idleLoop);

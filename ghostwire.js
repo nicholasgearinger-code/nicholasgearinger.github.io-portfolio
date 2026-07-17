@@ -2487,6 +2487,25 @@
     ctx.fillRect(0, 0, W, H);
   }
 
+  // A soft, slowly breathing light source right at the vanishing point —
+  // additive blending so it reads as an actual glint of light at the far
+  // end of the tunnel, rather than more atmospheric haze (that's what
+  // drawDepthFog above already covers). ~4.8s full pulse cycle.
+  function drawVanishingPointGlow() {
+    const pulse = 0.5 + Math.sin(tunnelHue * 1.3) * 0.5; // 0..1 breathing
+    const c = eraRGB([224, 242, 254]).join(',');
+    const r = Math.min(W, H) * (0.1 + pulse * 0.05);
+    const glow = ctx.createRadialGradient(VP_X, VP_Y, 0, VP_X, VP_Y, r);
+    glow.addColorStop(0, 'rgba(' + c + ',' + (0.35 + pulse * 0.25).toFixed(3) + ')');
+    glow.addColorStop(0.5, 'rgba(' + c + ',' + (0.1 + pulse * 0.1).toFixed(3) + ')');
+    glow.addColorStop(1, 'rgba(' + c + ',0)');
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+
   function drawTunnel() {
     // threat (0 → 1) drives the whole tunnel from a cool cyan/violet palette
     // at low danger toward a hot orange/red palette as speed/difficulty climb
@@ -3468,6 +3487,7 @@
   function drawAmbientBackground() {
     drawTunnel();
     drawDepthFog();
+    drawVanishingPointGlow();
     drawEraOverlay();
     drawEraAccent();
     drawStarfield();
@@ -3482,6 +3502,13 @@
     vg.addColorStop(1, 'rgba(0,0,0,.6)');
     ctx.fillStyle = vg;
     ctx.fillRect(0, 0, W, H);
+    if (lightningFlash > 0) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = 'rgba(232,121,249,' + (lightningFlash * 0.55).toFixed(3) + ')';
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    }
   }
 
   function spawnIdleItem() {
@@ -3532,6 +3559,15 @@
     rainParticles.forEach((w) => updateWeatherParticle(w, dt));
     emberParticles.forEach((w) => updateWeatherParticle(w, dt));
     updateIdleItems(dt);
+    lightningFlash = Math.max(0, lightningFlash - dt * 2.2);
+    if (currentEraIdx() === 5) { // BREACH ZONE only — same trigger gameplay uses
+      lightningTimer -= dt;
+      if (lightningTimer <= 0) {
+        lightningFlash = 1;
+        lightningTimer = randRange(5, 11);
+        sfxThunder();
+      }
+    }
     ctx.clearRect(0, 0, W, H);
     drawAmbientBackground();
     idleRafId = requestAnimationFrame(idleLoop);
@@ -3556,6 +3592,7 @@
 
     drawTunnel();
     drawDepthFog();
+    drawVanishingPointGlow();
     drawEraOverlay();
     drawEraAccent();
     drawStarfield();

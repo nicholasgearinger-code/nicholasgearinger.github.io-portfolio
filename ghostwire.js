@@ -100,6 +100,7 @@
   const colorblindCheck = document.getElementById('gp-colorblind');
   const graphicsSeg = document.getElementById('gp-graphics');
   const difficultySeg = document.getElementById('gp-difficulty');
+  const shipColorRow = document.getElementById('gp-ship-color');
   const aspectSeg = document.getElementById('gp-aspect');
   const aspectNote = document.getElementById('gp-aspect-note');
   const sfxVolSlider = document.getElementById('gp-sfx-vol');
@@ -631,7 +632,30 @@
   // -- settings: haptics / colorblind-safe palette / graphics quality /
   //    difficulty / volume — persisted alongside the existing
   //    ghostwireBest/ghostwireUnlocks keys.
-  let settings = { haptics: true, colorblind: false, graphics: 'auto', difficulty: 'normal', sfxVolume: 1, musicVolume: 1, aspect: '4:3' };
+  // Red is deliberately excluded — it's reserved for the critical/dying
+  // danger state, and a custom ship color needs to stay visually distinct
+  // from that functional warning signal, not compete with it.
+  //
+  // Sky is the default/always-unlocked look; the rest gate behind specific
+  // achievements (reuses the existing achievement system rather than a
+  // separate unlock mechanic — same approach as tracksUnlockedByAchievement
+  // above). Ordered roughly easiest-to-hardest achievement so later colors
+  // feel like a payoff for real progress.
+  const PLAYER_COLOR_OPTIONS = [
+    { id: 'sky', name: 'Sky', hex: '#7DD3FC', rgb: [125, 211, 252], unlockAch: null },
+    { id: 'cyan', name: 'Cyan', hex: '#22D3EE', rgb: [34, 211, 238], unlockAch: 'first_purge' },
+    { id: 'magenta', name: 'Magenta', hex: '#E879F9', rgb: [232, 121, 249], unlockAch: 'streak_20' },
+    { id: 'violet', name: 'Violet', hex: '#818CF8', rgb: [129, 140, 248], unlockAch: 'boss_slayer' },
+    { id: 'amber', name: 'Amber', hex: '#FBBF24', rgb: [251, 191, 36], unlockAch: 'six_zones' },
+    { id: 'lime', name: 'Lime', hex: '#A3E635', rgb: [163, 230, 53], unlockAch: 'deep_diver' },
+  ];
+  function isColorUnlocked(option) { return !option.unlockAch || !!achievements[option.unlockAch]; }
+  function playerColorOption() {
+    const saved = PLAYER_COLOR_OPTIONS.find((c) => c.id === settings.shipColor);
+    return (saved && isColorUnlocked(saved)) ? saved : PLAYER_COLOR_OPTIONS[0];
+  }
+
+  let settings = { haptics: true, colorblind: false, graphics: 'auto', difficulty: 'normal', sfxVolume: 1, musicVolume: 1, aspect: '4:3', shipColor: 'sky' };
   try {
     const savedSettings = JSON.parse(localStorage.getItem('ghostwireSettings') || '{}');
     if (typeof savedSettings.haptics === 'boolean') settings.haptics = savedSettings.haptics;
@@ -641,6 +665,7 @@
     if (typeof savedSettings.sfxVolume === 'number') settings.sfxVolume = Math.min(1, Math.max(0, savedSettings.sfxVolume));
     if (typeof savedSettings.musicVolume === 'number') settings.musicVolume = Math.min(1, Math.max(0, savedSettings.musicVolume));
     if (['4:3', '16:9', '19.5:9', 'auto'].includes(savedSettings.aspect)) settings.aspect = savedSettings.aspect;
+    if (PLAYER_COLOR_OPTIONS.some((c) => c.id === savedSettings.shipColor)) settings.shipColor = savedSettings.shipColor;
   } catch (_) { /* corrupt/missing storage — defaults above stand */ }
   function saveSettings() { try { localStorage.setItem('ghostwireSettings', JSON.stringify(settings)); } catch (_) {} }
   // difficulty scales the threat-rise rate and spawn cadence — applied at
@@ -731,7 +756,14 @@
         spawnFloatText(W / 2, VP_Y + 155, '\u266A UNLOCKED: ' + newTracks.map((t) => t.title).join(', '), '#22D3EE');
       }, 260); // stagger after the achievement toast so they don't overlap
     }
+    const newColor = PLAYER_COLOR_OPTIONS.find((c) => c.unlockAch === id);
+    if (newColor) {
+      setTimeout(() => {
+        spawnFloatText(W / 2, VP_Y + (newTracks.length ? 180 : 155), '\u2726 SHIP COLOR UNLOCKED: ' + newColor.name.toUpperCase(), newColor.hex);
+      }, newTracks.length ? 520 : 260); // further staggered if a track toast is also queued this same tick
+    }
     if (achvBody && !achvBody.hidden) renderAchievements();
+    if (shipColorRow) syncSettingsUI(); // refresh swatch lock states if the settings panel happens to be open
   }
   function renderAchievements() {
     if (!achvListEl) return;
@@ -765,6 +797,20 @@
     if (difficultySeg) {
       difficultySeg.querySelectorAll('.gp-seg-btn').forEach((b) => {
         b.classList.toggle('active', b.dataset.val === settings.difficulty);
+      });
+    }
+    if (shipColorRow) {
+      shipColorRow.querySelectorAll('.gp-swatch').forEach((b) => {
+        const option = PLAYER_COLOR_OPTIONS.find((c) => c.id === b.dataset.val);
+        const unlocked = option && isColorUnlocked(option);
+        b.classList.toggle('active', b.dataset.val === settings.shipColor && unlocked);
+        b.classList.toggle('locked', !unlocked);
+        if (!unlocked && option) {
+          const def = ACHIEVEMENT_DEFS.find((d) => d.id === option.unlockAch);
+          b.title = def ? 'Locked — ' + def.desc : 'Locked';
+        } else {
+          b.title = option ? option.name : '';
+        }
       });
     }
     if (aspectSeg) {
@@ -979,6 +1025,17 @@
     difficultySeg.querySelectorAll('.gp-seg-btn').forEach((b) => {
       b.addEventListener('click', () => {
         settings.difficulty = b.dataset.val;
+        saveSettings();
+        syncSettingsUI();
+      });
+    });
+  }
+  if (shipColorRow) {
+    shipColorRow.querySelectorAll('.gp-swatch').forEach((b) => {
+      b.addEventListener('click', () => {
+        const option = PLAYER_COLOR_OPTIONS.find((c) => c.id === b.dataset.val);
+        if (!option || !isColorUnlocked(option)) return; // locked — ignore the tap rather than let it select an unearned color
+        settings.shipColor = b.dataset.val;
         saveSettings();
         syncSettingsUI();
       });
@@ -3034,7 +3091,7 @@
 
   function drawPlayerTrail() {
     if (playerTrail.length < 2) return;
-    const c = eraRGB([232, 121, 249]);
+    const c = playerColorOption().rgb;
     playerTrail.forEach((pt) => {
       const k = 1 - pt.t / 0.35;
       if (k <= 0) return;
@@ -3068,12 +3125,13 @@
     const flickering = invulnTimer > 0 && Math.floor(invulnTimer * 16) % 2 === 0;
     if (flickering) return; // brief hit-flicker to signal temporary invulnerability
     const critical = !dying && threat >= RED_THREAT;
+    const shipColor = playerColorOption();
     ctx.save();
     ctx.translate(playerX, PLAYER_Y);
     ctx.rotate(lean);
     ctx.beginPath();
     ctx.fillStyle = dying ? COL_BAD : '#F0F8FF';
-    ctx.shadowColor = dying ? COL_BAD : (critical ? COL_BAD : '#7DD3FC');
+    ctx.shadowColor = dying ? COL_BAD : (critical ? COL_BAD : shipColor.hex);
     ctx.shadowBlur = critical ? 12 + Math.sin(tunnelHue * 10) * 5 : 12;
     ctx.moveTo(0, -PLAYER_H / 2);
     ctx.lineTo(PLAYER_W / 2, PLAYER_H / 2 - 4);
@@ -3081,7 +3139,7 @@
     ctx.lineTo(-PLAYER_W * 0.18, PLAYER_H / 2);
     ctx.lineTo(-PLAYER_W / 2, PLAYER_H / 2 - 4);
     ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = critical ? 'rgba(248,113,113,.9)' : 'rgba(34,211,238,.9)';
+    ctx.strokeStyle = critical ? 'rgba(248,113,113,.9)' : 'rgba(' + shipColor.rgb.join(',') + ',.9)';
     ctx.lineWidth = 1.5; ctx.stroke();
     ctx.shadowBlur = 0;
     if (shieldTimer > 0) {

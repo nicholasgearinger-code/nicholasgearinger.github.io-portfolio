@@ -643,9 +643,9 @@
   // feel like a payoff for real progress.
   const PLAYER_COLOR_OPTIONS = [
     { id: 'sky', name: 'Sky', hex: '#7DD3FC', rgb: [125, 211, 252], unlockAch: null },
-    { id: 'cyan', name: 'Cyan', hex: '#22D3EE', rgb: [34, 211, 238], unlockAch: 'first_purge' },
+    { id: 'cyan', name: 'Emerald', hex: '#34D399', rgb: [52, 211, 153], unlockAch: 'first_purge' },
     { id: 'magenta', name: 'Magenta', hex: '#E879F9', rgb: [232, 121, 249], unlockAch: 'streak_20' },
-    { id: 'violet', name: 'Violet', hex: '#818CF8', rgb: [129, 140, 248], unlockAch: 'boss_slayer' },
+    { id: 'violet', name: 'Indigo', hex: '#6366F1', rgb: [99, 102, 241], unlockAch: 'boss_slayer' },
     { id: 'amber', name: 'Amber', hex: '#FBBF24', rgb: [251, 191, 36], unlockAch: 'six_zones' },
     { id: 'lime', name: 'Lime', hex: '#A3E635', rgb: [163, 230, 53], unlockAch: 'deep_diver' },
   ];

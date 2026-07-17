@@ -3125,6 +3125,7 @@
     .game-zone-row { max-width: 460px; gap: .3rem; }
     .game-loadout { margin-top: 0; }
   }
+  .game-zone-select {
     display: flex; flex-direction: column; align-items: center; gap: .4rem;
   }
   .game-zone-label {
@@ -3294,6 +3295,33 @@
   #rift-viewport.rift-fullscreen #rift-menu-btn { top: calc(16px + env(safe-area-inset-top)); }
   #rift-viewport.rift-fullscreen .game-fullscreen-btn {
     top: calc(.7rem + env(safe-area-inset-top)); right: calc(3.6rem + env(safe-area-inset-right));
+  }
+  /* Landscape fullscreen on a phone can put a notch/Dynamic Island on
+     either side and a home-indicator bar along the bottom — every other
+     edge-anchored HUD element and touch control needs the same inset
+     treatment as the two buttons above, or they end up genuinely
+     unreachable/invisible under those, not just visually tight. */
+  #rift-viewport.rift-fullscreen #rift-hud-topleft {
+    top: calc(16px + env(safe-area-inset-top)); left: calc(16px + env(safe-area-inset-left));
+  }
+  #rift-viewport.rift-fullscreen #rift-hud-topright {
+    top: calc(16px + env(safe-area-inset-top)); right: calc(16px + env(safe-area-inset-right));
+  }
+  #rift-viewport.rift-fullscreen #rift-discovery-log {
+    top: calc(56px + env(safe-area-inset-top)); left: calc(16px + env(safe-area-inset-left));
+  }
+  #rift-viewport.rift-fullscreen #rift-hud-bottomleft {
+    bottom: calc(16px + env(safe-area-inset-bottom)); left: calc(16px + env(safe-area-inset-left));
+  }
+  #rift-viewport.rift-fullscreen #rift-lore-ticker { bottom: calc(56px + env(safe-area-inset-bottom)); }
+  #rift-viewport.rift-fullscreen #rift-touch-joystick {
+    left: calc(20px + env(safe-area-inset-left)); bottom: calc(20px + env(safe-area-inset-bottom));
+  }
+  #rift-viewport.rift-fullscreen #rift-touch-up {
+    right: calc(92px + env(safe-area-inset-right)); bottom: calc(20px + env(safe-area-inset-bottom));
+  }
+  #rift-viewport.rift-fullscreen #rift-touch-fire {
+    right: calc(20px + env(safe-area-inset-right)); bottom: calc(20px + env(safe-area-inset-bottom));
   }
   #rift-scene { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
   .rift-mono { font-family: 'IBM Plex Mono', monospace; }

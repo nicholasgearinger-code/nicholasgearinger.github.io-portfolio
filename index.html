@@ -2752,6 +2752,12 @@
     touch-action: manipulation; -webkit-tap-highlight-color: transparent;
   }
   .gp-swatch.active { border-color: #F0F8FF; box-shadow: 0 0 8px var(--gp-swatch-color); }
+  .gp-swatch-prism {
+    background: conic-gradient(from 0deg, #ffbb3b, #e9ff3b, #3bff6a, #3bffc8, #3bd4ff, #3b6aff, #a13bff, #ff3bd4, #ffbb3b);
+    animation: gpPrismSpin 4s linear infinite;
+  }
+  .gp-swatch-prism.active { border-color: #F0F8FF; box-shadow: 0 0 10px rgba(255,255,255,.7); }
+  @keyframes gpPrismSpin { to { filter: hue-rotate(360deg); } }
   .gp-swatch.locked { opacity: .28; cursor: not-allowed; position: relative; }
   .gp-swatch.locked::after {
     content: '\1F512'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
@@ -4291,12 +4297,13 @@
                 <div class="gp-row gp-row-col">
                   <span>Ship color</span>
                   <div class="gp-swatch-row" id="gp-ship-color">
-                    <button type="button" class="gp-swatch" data-val="sky" style="--gp-swatch-color:#7DD3FC" aria-label="Sky"></button>
+                    <button type="button" class="gp-swatch" data-val="white" style="--gp-swatch-color:#FFFFFF" aria-label="White"></button>
                     <button type="button" class="gp-swatch" data-val="cyan" style="--gp-swatch-color:#34D399" aria-label="Emerald"></button>
                     <button type="button" class="gp-swatch" data-val="magenta" style="--gp-swatch-color:#E879F9" aria-label="Magenta"></button>
                     <button type="button" class="gp-swatch" data-val="violet" style="--gp-swatch-color:#6366F1" aria-label="Indigo"></button>
                     <button type="button" class="gp-swatch" data-val="amber" style="--gp-swatch-color:#FBBF24" aria-label="Amber"></button>
                     <button type="button" class="gp-swatch" data-val="lime" style="--gp-swatch-color:#A3E635" aria-label="Lime"></button>
+                    <button type="button" class="gp-swatch gp-swatch-prism" data-val="prism" aria-label="Prism"></button>
                   </div>
                 </div>
                 <div class="gp-row gp-row-col">

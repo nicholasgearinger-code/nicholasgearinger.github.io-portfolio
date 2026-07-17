@@ -636,26 +636,59 @@
   // danger state, and a custom ship color needs to stay visually distinct
   // from that functional warning signal, not compete with it.
   //
-  // Sky is the default/always-unlocked look; the rest gate behind specific
-  // achievements (reuses the existing achievement system rather than a
-  // separate unlock mechanic — same approach as tracksUnlockedByAchievement
-  // above). Ordered roughly easiest-to-hardest achievement so later colors
-  // feel like a payoff for real progress.
+  // White is the default/always-unlocked look; the rest gate behind
+  // specific achievements (reuses the existing achievement system rather
+  // than a separate unlock mechanic — same approach as
+  // tracksUnlockedByAchievement above). Ordered roughly easiest-to-hardest
+  // achievement so later colors feel like a payoff for real progress.
+  // Prism is the one exception — no fixed rgb/hex at all, since its color
+  // is computed live from the clock each frame (see playerColorOption
+  // below) rather than being a single chosen hue, reserved for the
+  // hardest unlock as something the other six options can't offer at any
+  // price: a color that isn't just a different pick, but never sits still.
   const PLAYER_COLOR_OPTIONS = [
-    { id: 'sky', name: 'Sky', hex: '#7DD3FC', rgb: [125, 211, 252], unlockAch: null },
+    { id: 'white', name: 'White', hex: '#FFFFFF', rgb: [255, 255, 255], unlockAch: null },
     { id: 'cyan', name: 'Emerald', hex: '#34D399', rgb: [52, 211, 153], unlockAch: 'first_purge' },
     { id: 'magenta', name: 'Magenta', hex: '#E879F9', rgb: [232, 121, 249], unlockAch: 'streak_20' },
     { id: 'violet', name: 'Indigo', hex: '#6366F1', rgb: [99, 102, 241], unlockAch: 'boss_slayer' },
     { id: 'amber', name: 'Amber', hex: '#FBBF24', rgb: [251, 191, 36], unlockAch: 'six_zones' },
     { id: 'lime', name: 'Lime', hex: '#A3E635', rgb: [163, 230, 53], unlockAch: 'deep_diver' },
+    { id: 'prism', name: 'Prism', special: true, unlockAch: 'ascendant' },
   ];
   function isColorUnlocked(option) { return !option.unlockAch || !!achievements[option.unlockAch]; }
+  // Standard HSL->RGB (h in degrees, s/l in 0..1) — only needed for Prism's
+  // live hue cycle, everything else already stores its rgb directly.
+  function hslToRgb(h, s, l) {
+    h = ((h % 360) + 360) % 360;
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+    const m = l - c / 2;
+    let r, g, b;
+    if (h < 60) [r, g, b] = [c, x, 0];
+    else if (h < 120) [r, g, b] = [x, c, 0];
+    else if (h < 180) [r, g, b] = [0, c, x];
+    else if (h < 240) [r, g, b] = [0, x, c];
+    else if (h < 300) [r, g, b] = [x, 0, c];
+    else [r, g, b] = [c, 0, x];
+    return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
+  }
+  function rgbToHex(rgb) { return '#' + rgb.map((v) => v.toString(16).padStart(2, '0')).join(''); }
   function playerColorOption() {
     const saved = PLAYER_COLOR_OPTIONS.find((c) => c.id === settings.shipColor);
-    return (saved && isColorUnlocked(saved)) ? saved : PLAYER_COLOR_OPTIONS[0];
+    const option = (saved && isColorUnlocked(saved)) ? saved : PLAYER_COLOR_OPTIONS[0];
+    if (!option.special) return option;
+    // Full cycle roughly every 7 seconds — tunnelHue already ticks at
+    // exactly one unit per second (see its "+= dt" update), same clock
+    // every other player-adjacent animation in this file rides on. Mapped
+    // across a 320° range starting at 25° (not the full 360°) so the
+    // rotation never actually passes through the reserved danger-red arc
+    // the way a naive full hue cycle would.
+    const hue = 25 + ((tunnelHue * 45) % 320);
+    const rgb = hslToRgb(hue, 0.85, 0.62);
+    return { id: option.id, name: option.name, hex: rgbToHex(rgb), rgb };
   }
 
-  let settings = { haptics: true, colorblind: false, graphics: 'auto', difficulty: 'normal', sfxVolume: 1, musicVolume: 1, aspect: '4:3', shipColor: 'sky' };
+  let settings = { haptics: true, colorblind: false, graphics: 'auto', difficulty: 'normal', sfxVolume: 1, musicVolume: 1, aspect: '4:3', shipColor: 'white' };
   try {
     const savedSettings = JSON.parse(localStorage.getItem('ghostwireSettings') || '{}');
     if (typeof savedSettings.haptics === 'boolean') settings.haptics = savedSettings.haptics;
@@ -720,6 +753,7 @@
     { id: 'deep_diver', label: 'Deep Diver', desc: 'Reach level 20 in a single run.' },
     { id: 'sharpshooter', label: 'Sharpshooter', desc: 'Finish a run with 90%+ accuracy (20+ shots fired).' },
     { id: 'six_zones', label: 'Zone Explorer', desc: 'Start a run from all six zones at least once.' },
+    { id: 'ascendant', label: 'Ascendant', desc: 'Reach level 50 in a single run.' },
   ];
   let achievements = {};
   try { achievements = JSON.parse(localStorage.getItem('ghostwireAchievements') || '{}'); } catch (_) {}
@@ -758,8 +792,9 @@
     }
     const newColor = PLAYER_COLOR_OPTIONS.find((c) => c.unlockAch === id);
     if (newColor) {
+      const toastColor = newColor.special ? '#FBBF24' : newColor.hex; // Prism has no fixed hex — a warm gold reads better for a toast than a snapshot of one passing hue
       setTimeout(() => {
-        spawnFloatText(W / 2, VP_Y + (newTracks.length ? 180 : 155), '\u2726 SHIP COLOR UNLOCKED: ' + newColor.name.toUpperCase(), newColor.hex);
+        spawnFloatText(W / 2, VP_Y + (newTracks.length ? 180 : 155), '\u2726 SHIP COLOR UNLOCKED: ' + newColor.name.toUpperCase(), toastColor);
       }, newTracks.length ? 520 : 260); // further staggered if a track toast is also queued this same tick
     }
     if (achvBody && !achvBody.hidden) renderAchievements();
@@ -2175,6 +2210,7 @@
       level = newLevel;
       if (level > highestLevelReached) { highestLevelReached = level; saveProgress(); }
       if (level >= 20) unlockAchievement('deep_diver');
+      if (level >= 50) unlockAchievement('ascendant');
       if (level >= 5 && hitsThisRun === 0) unlockAchievement('clean_run');
       spawnFloatText(W / 2, VP_Y + 60, 'LEVEL ' + level, '#7DD3FC');
       shakeMag = Math.max(shakeMag, 4);

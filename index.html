@@ -4468,8 +4468,8 @@
 <section id="rift" class="panel">
   <div class="panel-inner">
     <span class="section-label">Explore It</span>
-    <h2>Five biomes,<br>five courses to climb</h2>
-    <p class="lead" style="margin:0 auto 2.2rem;">A first-person 3D platformer built from scratch with Three.js. Pick a biome and jump your way across a winding chain of procedurally-generated floating islands — each with its own terrain noise and buried lore that surfaces the moment you land close enough to hear it. Shoot the glowing Resonance Crystals along the way to shatter them; collect every one in a level and its islands pulse brighter as a finale.</p>
+    <h2>Five biomes,<br>five landscapes to explore</h2>
+    <p class="lead" style="margin:0 auto 2.2rem;">A first-person 3D platformer built from scratch with Three.js. Pick a biome and explore its own procedurally-generated landscape — jagged volcanic ground, rolling bioluminescent hills, crystal spires, drift-cut chasms, a cracked ashen lakebed — each with buried lore that surfaces as you get close. Shoot the glowing Resonance Crystals scattered across the terrain to shatter them; collect every one in a level and the ground itself pulses brighter as a finale.</p>
     <div class="algo-card rift-card">
       <div class="cc-titlebar">
         <div class="cc-dots">
@@ -4515,9 +4515,9 @@
             <div id="rift-start-panel">
               <h3 class="rift-mono">RIFT ISLANDS</h3>
               <p>
-                Five biomes drift in the dark, each a chain of islands humming with its
-                own buried lore. Pick one, jump your way across, and shatter the
-                Resonance Crystals that mark the platforms worth reaching.
+                Five biomes drift in the dark, each its own landscape to walk and explore.
+                Pick one, and shatter the Resonance Crystals scattered across the ground —
+                and listen for the buried lore along the way.
               </p>
               <div id="rift-level-select"></div>
             </div>
@@ -4525,7 +4525,7 @@
         </div>
       </div>
     </div>
-    <p class="algo-hint">Built with Three.js — procedural terrain via displaced icosahedra with deterministic 3D value noise, gravity/jump platforming physics with raycast-based ground detection (rather than a full physics engine), a parallel touch/joystick scheme for mobile, synthesized Web Audio (no sound files), and island lore drawn from a curated local pool, deterministically picked per island so it's consistent across visits with zero network dependency. Started as a real-time multiplayer free-flight game with server-authoritative combat and client-side prediction; rebuilt single-player as a platformer, with combat repurposed into shattering static Resonance Crystals instead of other players.</p>
+    <p class="algo-hint">Built with Three.js — each biome is one large heightfield landmass shaped by layered value noise (distinct octave counts/frequencies per biome, not just a color swap: ridged/jagged for Ember's volcanic ground, gentle rolling for Verdant's hills, threshold-spiked for Crystal's spires, carved chasms for Abyssal Drift, fine dune ripples for Ashen's lakebed), walked with gravity/jump physics that stick to the sampled terrain height every frame rather than a fixed tolerance — the fix for an earlier bug where any real slope could drop you through the ground. A parallel touch/joystick scheme for mobile, synthesized Web Audio (no sound files), and lore drawn from a curated local pool, deterministically picked per location so it's consistent across visits with zero network dependency. Started as a real-time multiplayer free-flight game with server-authoritative combat and client-side prediction; rebuilt single-player as a platformer, with combat repurposed into shattering static Resonance Crystals instead of other players.</p>
   </div>
 </section>
 

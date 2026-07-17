@@ -100,6 +100,7 @@
   const colorblindCheck = document.getElementById('gp-colorblind');
   const graphicsSeg = document.getElementById('gp-graphics');
   const difficultySeg = document.getElementById('gp-difficulty');
+  const steerSeg = document.getElementById('gp-steer');
   const shipColorRow = document.getElementById('gp-ship-color');
   const aspectSeg = document.getElementById('gp-aspect');
   const aspectNote = document.getElementById('gp-aspect-note');
@@ -178,9 +179,9 @@
   const FIZZLE_DUR = 0.4;
   const GYRO_SENSITIVITY = 6.5;                  // px of steering per degree of tilt from the calibrated center
 
-  const POWERUP_TYPES = ['rapid', 'magnet', 'shield', 'slow', 'score', 'overload', 'nova'];
+  const POWERUP_TYPES = ['rapid', 'magnet', 'shield', 'slow', 'score', 'overload', 'nova', 'echo'];
   const POWERUP_MIN = 9, POWERUP_MAX = 16;       // seconds between power-up spawns
-  const RAPID_DURATION = 6, MAGNET_DURATION = 6, SHIELD_DURATION = 4.5;
+  const RAPID_DURATION = 6, MAGNET_DURATION = 6, SHIELD_DURATION = 4.5, ECHO_DURATION = 7;
   const SLOW_DURATION = 5, SLOW_FACTOR = 0.5;    // time-dilation power-up: halves fall speed of everything in-flight
   const SCORE_ORB_BONUS = 75;                     // instant score power-up payout
   const MAGNET_PULL = 3.2;
@@ -554,7 +555,7 @@
   let spawnTimer = 0, codeBitTimer = 0, elapsed = 0, difficulty = 1, level = 1;
   let shakeMag = 0, flash = 0, tunnelHue = 0, threat = 0;
   let streak = 0, invulnTimer = 0, fireTimer = 0;
-  let rapidTimer = 0, magnetTimer = 0, shieldTimer = 0, slowTimer = 0, powerupTimer = randRange(POWERUP_MIN, POWERUP_MAX);
+  let rapidTimer = 0, magnetTimer = 0, shieldTimer = 0, slowTimer = 0, echoTimer = 0, powerupTimer = randRange(POWERUP_MIN, POWERUP_MAX);
   let overloadReady = false;
   let surging = false, surgeCountdown = randRange(SURGE_MIN, SURGE_MAX), surgeElapsed = 0, surgeCount = 0;
   let bossTierSpawned = -1;   // last level-tier (floor(level/5)) a milestone boss was already spawned for
@@ -703,7 +704,7 @@
     return { id: option.id, name: option.name, hex: rgbToHex(rgb), rgb };
   }
 
-  let settings = { haptics: true, colorblind: false, graphics: 'auto', difficulty: 'normal', sfxVolume: 1, musicVolume: 1, aspect: '4:3', shipColor: 'white' };
+  let settings = { haptics: true, colorblind: false, graphics: 'auto', difficulty: 'normal', sfxVolume: 1, musicVolume: 1, aspect: '4:3', shipColor: 'white', steerSensitivity: 'normal' };
   try {
     const savedSettings = JSON.parse(localStorage.getItem('ghostwireSettings') || '{}');
     if (typeof savedSettings.haptics === 'boolean') settings.haptics = savedSettings.haptics;
@@ -714,8 +715,16 @@
     if (typeof savedSettings.musicVolume === 'number') settings.musicVolume = Math.min(1, Math.max(0, savedSettings.musicVolume));
     if (['4:3', '16:9', '19.5:9', 'auto'].includes(savedSettings.aspect)) settings.aspect = savedSettings.aspect;
     if (PLAYER_COLOR_OPTIONS.some((c) => c.id === savedSettings.shipColor)) settings.shipColor = savedSettings.shipColor;
+    if (['low', 'normal', 'high'].includes(savedSettings.steerSensitivity)) settings.steerSensitivity = savedSettings.steerSensitivity;
   } catch (_) { /* corrupt/missing storage — defaults above stand */ }
   function saveSettings() { try { localStorage.setItem('ghostwireSettings', JSON.stringify(settings)); } catch (_) {} }
+  // Scales both the target-tracking lerp rate (how snappily the ship
+  // catches up to wherever drag/tilt/keyboard last set targetX — this is
+  // what actually defines "handling feel" regardless of input method) and
+  // keyboard's own MOVE_SPEED. Drag/tilt already map directly to an
+  // absolute canvas position, so there's no equivalent "speed" to scale
+  // for them beyond the shared catch-up rate.
+  function steerSensitivityMult() { return { low: 0.7, normal: 1, high: 1.4 }[settings.steerSensitivity] || 1; }
   // difficulty scales the threat-rise rate and spawn cadence — applied at
   // the two single choke points that already drive that pacing
   const DIFFICULTY_MULT = { easy: 0.7, normal: 1, hard: 1.4 };
@@ -847,6 +856,11 @@
     if (difficultySeg) {
       difficultySeg.querySelectorAll('.gp-seg-btn').forEach((b) => {
         b.classList.toggle('active', b.dataset.val === settings.difficulty);
+      });
+    }
+    if (steerSeg) {
+      steerSeg.querySelectorAll('.gp-seg-btn').forEach((b) => {
+        b.classList.toggle('active', b.dataset.val === settings.steerSensitivity);
       });
     }
     if (shipColorRow) {
@@ -1080,6 +1094,15 @@
       });
     });
   }
+  if (steerSeg) {
+    steerSeg.querySelectorAll('.gp-seg-btn').forEach((b) => {
+      b.addEventListener('click', () => {
+        settings.steerSensitivity = b.dataset.val;
+        saveSettings();
+        syncSettingsUI();
+      });
+    });
+  }
   if (shipColorRow) {
     shipColorRow.querySelectorAll('.gp-swatch').forEach((b) => {
       b.addEventListener('click', () => {
@@ -1151,7 +1174,7 @@
       saveVisitedZones();
       if (visitedZones.length >= 6) unlockAchievement('six_zones');
     }
-    rapidTimer = 0; magnetTimer = 0; shieldTimer = 0; slowTimer = 0; powerupTimer = randRange(POWERUP_MIN, POWERUP_MAX);
+    rapidTimer = 0; magnetTimer = 0; shieldTimer = 0; slowTimer = 0; echoTimer = 0; powerupTimer = randRange(POWERUP_MIN, POWERUP_MAX);
     overloadReady = false; bossTierSpawned = -1; wormToggle = false;
     surging = false; surgeCountdown = randRange(SURGE_MIN, SURGE_MAX); surgeElapsed = 0; surgeCount = 0;
     paused = false; charging = false; chargeTimer = 0;
@@ -1247,14 +1270,15 @@
   }
 
   function spawnZoneHazard() {
-    // Foreground set-piece obstacles for Server Farm (rack shelving) and
-    // Hazard Zone (girders) — reuses the standard item system (movement,
-    // collision, scoring) so it's proven-safe, just with a much larger
-    // body, a slow wide swing instead of the usual drift patterns, and a
-    // distinct hazardShape flag that switches drawItem to render it as an
-    // actual girder/rack silhouette instead of a small code-fragment token.
+    // Foreground set-piece obstacles — reuses the standard item system
+    // (movement, collision, scoring) so it's proven-safe, just with a
+    // much larger body, a slow wide swing instead of the usual drift
+    // patterns, and a distinct hazardShape flag that switches drawItem to
+    // render it as an actual silhouette instead of a small code-fragment
+    // token. One shape per zone that has one; Void Sector deliberately
+    // doesn't (see drawItem's hazardShape branch for why).
     const idx = currentEraIdx();
-    const shape = idx === 2 ? 'rack' : 'girder';
+    const shape = idx === 2 ? 'rack' : idx === 3 ? 'girder' : idx === 6 ? 'gate' : idx === 7 ? 'barrier' : 'beam';
     const lane = 60 + Math.random() * (W - 120);
     items.push({
       lane, baseLane: lane, z: 1, baseR: 34, type: 'bad', token: shape.toUpperCase(),
@@ -1263,7 +1287,7 @@
       drift: true, driftType: 'sine', driftAmp: W * 0.22, driftFreq: 0.22 + Math.random() * 0.08,
       splitter: false, mini: false, hazardShape: shape,
     });
-    spawnFloatText(W / 2, VP_Y + 55, shape === 'rack' ? 'RACK SWING' : 'GIRDER SWING', '#FDE047');
+    spawnFloatText(W / 2, VP_Y + 55, shape.toUpperCase() + ' SWING', '#FDE047');
   }
 
   function spawnBoss() {
@@ -1329,6 +1353,26 @@
       pulseTimer: 1.6,
     });
     spawnFloatText(W / 2, VP_Y + 70, '\u26A0 PULSE ONLINE', '#F87171');
+    shakeMag = Math.max(shakeMag, 6);
+  }
+
+  function spawnPhantom() {
+    // A fifth mini-boss reserved for the deepest zones (Kernel Depths
+    // onward) — cycles between solid (targetable, can hit you) and phased
+    // (semi-transparent, shots and its own body both pass through
+    // harmlessly) instead of always being hittable like the other four,
+    // so the challenge is timing shots to its solid windows rather than
+    // tracking movement or dodging bursts.
+    const hp = 6;
+    const lane = W / 2;
+    items.push({
+      lane, baseLane: lane, z: 1, baseR: 25, type: 'bad', boss: true, phantom: true,
+      hp, maxHp: hp, token: 'PHANTOM', vz: 0.25 * difficulty, spin: 0, seed: Math.random() * 1000,
+      x: VP_X, y: VP_Y, r: 1, glitchT: 0,
+      drift: true, driftType: 'sine', driftAmp: W * 0.2, driftFreq: 0.4, splitter: false, mini: false,
+      phaseTimer: 2.4, solid: true,
+    });
+    spawnFloatText(W / 2, VP_Y + 70, '\u26A0 PHANTOM DETECTED', '#A78BFA');
     shakeMag = Math.max(shakeMag, 6);
   }
 
@@ -2006,7 +2050,23 @@
     } else {
       projectiles.push({ lane: playerX, p: 1, x: playerX, y: PLAYER_Y, power, homing });
     }
+    if (echoTimer > 0) {
+      // ECHO power-up: a phantom drone mirrors your shot from the
+      // opposite side of the tunnel for the duration — genuine extra
+      // firepower, not just a visual flourish. Always a plain shot
+      // regardless of power/spread state, so it doesn't compound into a
+      // much bigger combinatorial firing pattern.
+      const echoLane = Math.max(10, Math.min(W - 10, W - playerX));
+      projectiles.push({ lane: echoLane, p: 1, x: echoLane, y: PLAYER_Y, power: 0, homing: false, echo: true });
+    }
     spawnParticles(playerX, PLAYER_Y - PLAYER_H / 2, overloadedShot ? '#F59E0B' : '#E879F9', 6 + Math.round(power * 10), 40 + power * 30, 140 + power * 60);
+    if (power > 0.75) {
+      // A near/full-charge release used to feel identical to a light tap
+      // beyond just "more particles" — a small kick of screen shake gives
+      // the moment actual weight, scaled so max charge reads noticeably
+      // punchier than a merely-strong one.
+      shakeMag = Math.max(shakeMag, 3 + power * 4);
+    }
     shotsFired++;
     if (power > 0.35) sfxCharged(); else sfxShoot();
   }
@@ -2091,6 +2151,7 @@
     else if (type === 'magnet') { magnetTimer = MAGNET_DURATION; label = 'MAGNET'; color = '#22D3EE'; }
     else if (type === 'shield') { shieldTimer = SHIELD_DURATION; label = 'SHIELD'; color = '#818CF8'; }
     else if (type === 'slow') { slowTimer = SLOW_DURATION; label = 'TIME DILATION'; color = '#7DD3FC'; }
+    else if (type === 'echo') { echoTimer = ECHO_DURATION; label = 'ECHO DRONE'; color = '#A78BFA'; }
     else if (type === 'score') {
       score += SCORE_ORB_BONUS; label = '+' + SCORE_ORB_BONUS + ' ORB'; color = '#F59E0B';
       statEl.innerHTML = 'score: <strong>' + score + '</strong>';
@@ -2249,7 +2310,14 @@
       const tier = Math.floor((level - 1) / 5);
       if (tier > 0 && tier !== bossTierSpawned) {
         bossTierSpawned = tier;
-        if (tier >= 4) {
+        if (tier >= 6) {
+          // Kernel Depths and beyond get a fifth boss in the rotation —
+          // the original four zones (5-6) keep exactly the same 4-boss
+          // rotation as before, unchanged.
+          const pick = tier % 5;
+          if (pick === 0) spawnBoss(); else if (pick === 1) spawnWorm(); else if (pick === 2) spawnSentinel();
+          else if (pick === 3) spawnPulseBoss(); else spawnPhantom();
+        } else if (tier >= 4) {
           const pick = tier % 4;
           if (pick === 0) spawnBoss(); else if (pick === 1) spawnWorm(); else if (pick === 2) spawnSentinel(); else spawnPulseBoss();
         } else if (wormToggle) spawnWorm(); else spawnBoss();
@@ -2263,12 +2331,13 @@
     magnetTimer = Math.max(0, magnetTimer - dt);
     shieldTimer = Math.max(0, shieldTimer - dt);
     slowTimer = Math.max(0, slowTimer - dt);
+    echoTimer = Math.max(0, echoTimer - dt);
     const slowFactor = slowTimer > 0 ? SLOW_FACTOR : 1;
 
     formationTimer -= dt;
     if (formationTimer <= 0 && !surging) { spawnFormation(); formationTimer = randRange(FORMATION_MIN, FORMATION_MAX); }
 
-    if (currentEraIdx() === 2 || currentEraIdx() === 3) { // SERVER FARM / HAZARD ZONE
+    if ([2, 3, 6, 7, 9].includes(currentEraIdx())) { // SERVER FARM / HAZARD ZONE / KERNEL DEPTHS / QUARANTINE ZONE / SINGULARITY
       hazardSwingTimer -= dt;
       if (hazardSwingTimer <= 0 && !surging) {
         spawnZoneHazard();
@@ -2332,7 +2401,7 @@
         if (it.type !== 'bad') continue;
         const dx = it.x - pr.x, dy = it.y - pr.y;
         const rr = it.r + 6 + power * 30;
-        if (dx * dx + dy * dy < rr * rr) {
+        if (!(it.phantom && !it.solid) && dx * dx + dy * dy < rr * rr) {
           if (it.boss) {
             it.hp -= 1;
             spawnParticles(it.x, it.y, COL_BAD, 8, 15, 100);
@@ -2377,13 +2446,14 @@
     if (gyroEnabled && gyroX !== null) {
       targetX = gyroX;
     } else if (keyState.left || keyState.right) {
-      if (keyState.left) targetX -= MOVE_SPEED * dt;
-      if (keyState.right) targetX += MOVE_SPEED * dt;
+      const moveSpeed = MOVE_SPEED * steerSensitivityMult();
+      if (keyState.left) targetX -= moveSpeed * dt;
+      if (keyState.right) targetX += moveSpeed * dt;
     }
     targetX = Math.max(0, Math.min(W, targetX));
 
     const prevX = playerX;
-    playerX += (targetX - playerX) * Math.min(1, dt * 14);
+    playerX += (targetX - playerX) * Math.min(1, dt * 14 * steerSensitivityMult());
     playerX = Math.max(PLAYER_W / 2, Math.min(W - PLAYER_W / 2, playerX));
     playerVX = dt > 0 ? (playerX - prevX) / dt : 0;
 
@@ -2454,9 +2524,17 @@
           it.pulseTimer = 2.4 + Math.random() * 0.6;
         }
       }
+      if (it.phantom) {
+        it.phaseTimer -= dt;
+        if (it.phaseTimer <= 0) {
+          it.solid = !it.solid;
+          it.phaseTimer = it.solid ? 2.4 + Math.random() * 0.6 : 1.1 + Math.random() * 0.4;
+          if (it.solid) sfxSurge(); // audible cue for "targetable again" — the visual fade alone is easy to miss mid-dodge
+        }
+      }
 
       const px = playerX - PLAYER_W / 2;
-      if (p > 0 && rectCircleCollide(px, py, PLAYER_W, PLAYER_H, it.x, it.y, it.r)) {
+      if (p > 0 && !(it.phantom && !it.solid) && rectCircleCollide(px, py, PLAYER_W, PLAYER_H, it.x, it.y, it.r)) {
         if (it.type === 'good') {
           const mult = 1 + Math.min(COMBO_MAX_MULT - 1, Math.floor(streak / COMBO_STEP));
           const gained = 10 * mult;
@@ -3109,11 +3187,14 @@
       ctx.restore();
       ctx.shadowBlur = 0;
     } else if (it.hazardShape) {
-      // Foreground set-piece hazards for Server Farm (rack) / Hazard Zone
-      // (girder) — same silhouette language the skyline already uses for
-      // these zones, just scaled up into an actual dodgeable obstacle
-      // instead of pure backdrop.
-      const c = it.hazardShape === 'rack' ? eraRGB([148, 163, 184]).join(',') : eraRGB([253, 224, 71]).join(',');
+      // Foreground set-piece hazards, one look per zone that has them —
+      // same silhouette language the skyline already uses for these
+      // zones, just scaled up into an actual dodgeable obstacle instead
+      // of pure backdrop. Void Sector deliberately has none of these —
+      // "sparse and empty" is its whole identity, adding a hazard there
+      // would undercut that.
+      const HAZARD_COLORS = { rack: [148, 163, 184], girder: [253, 224, 71], gate: [45, 212, 191], barrier: [244, 63, 148], beam: [250, 250, 210] };
+      const c = eraRGB(HAZARD_COLORS[it.hazardShape] || HAZARD_COLORS.girder).join(',');
       ctx.save();
       ctx.translate(it.x, it.y);
       ctx.strokeStyle = 'rgba(' + c + ',.9)';
@@ -3132,7 +3213,7 @@
           ctx.fillStyle = 'rgba(' + c + ',' + blink.toFixed(2) + ')';
           ctx.fillRect(w / 2 - w * 0.16, y - h / shelves * 0.5, w * 0.08, h / shelves * 0.22);
         }
-      } else {
+      } else if (it.hazardShape === 'girder') {
         const w = it.r * 2.1, h = it.r * 1.1;
         ctx.strokeRect(-w / 2, -h / 2, w, h);
         ctx.fillRect(-w / 2, -h / 2, w, h);
@@ -3142,20 +3223,67 @@
           ctx.beginPath(); ctx.moveTo(x0, -h / 2); ctx.lineTo(x1, h / 2); ctx.stroke();
           ctx.beginPath(); ctx.moveTo(x1, -h / 2); ctx.lineTo(x0, h / 2); ctx.stroke();
         }
+      } else if (it.hazardShape === 'gate') {
+        // KERNEL DEPTHS — a vertical-barred access gate, like a firewall
+        // checkpoint blocking the lane
+        const w = it.r * 1.8, h = it.r * 2.0;
+        ctx.strokeRect(-w / 2, -h / 2, w, h);
+        ctx.fillRect(-w / 2, -h / 2, w, h);
+        const bars = 4;
+        for (let k = 1; k < bars; k++) {
+          const x = -w / 2 + (w / bars) * k;
+          ctx.beginPath(); ctx.moveTo(x, -h / 2); ctx.lineTo(x, h / 2); ctx.stroke();
+        }
+      } else if (it.hazardShape === 'barrier') {
+        // QUARANTINE ZONE — a cross-hatched containment barrier with
+        // blinking alert corners
+        const w = it.r * 2.0, h = it.r * 1.4;
+        ctx.strokeRect(-w / 2, -h / 2, w, h);
+        ctx.fillRect(-w / 2, -h / 2, w, h);
+        const lines = 3;
+        for (let k = 0; k < lines; k++) {
+          const x0 = -w / 2 + (w / lines) * k, x1 = -w / 2 + (w / lines) * (k + 1);
+          ctx.beginPath(); ctx.moveTo(x0, -h / 2); ctx.lineTo(x1, h / 2); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(x0, h / 2); ctx.lineTo(x1, -h / 2); ctx.stroke();
+        }
+        const blink = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(tunnelHue * 8 + it.seed));
+        ctx.fillStyle = 'rgba(' + c + ',' + blink.toFixed(2) + ')';
+        ctx.beginPath(); ctx.arc(-w / 2 + 4, -h / 2 + 4, 2.5, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(w / 2 - 4, h / 2 - 4, 2.5, 0, Math.PI * 2); ctx.fill();
+      } else if (it.hazardShape === 'beam') {
+        // SINGULARITY — a converging vertical energy column, brightest at
+        // its center
+        const w = it.r * 0.9, h = it.r * 2.6;
+        const grad = ctx.createLinearGradient(0, -h / 2, 0, h / 2);
+        grad.addColorStop(0, 'rgba(' + c + ',0)');
+        grad.addColorStop(0.5, 'rgba(' + c + ',.5)');
+        grad.addColorStop(1, 'rgba(' + c + ',0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(-w / 2, -h / 2, w, h);
+        ctx.strokeRect(-w / 2, -h / 2, w, h);
       }
       ctx.shadowBlur = 0;
       ctx.restore();
     } else if (it.boss) {
       // mini-boss: FIREWALL is a static hexagonal shield; WORM/SENTINEL are
       // a softer snaking blob (drawn as a rounded diamond) in violet; PULSE
-      // is a pulsing concentric ring to read as a different threat type
-      // again — area-denial via periodic bursts rather than a body to dodge
-      const bossColor = it.pulse ? '#F87171' : (it.worm ? '#818CF8' : COL_BAD);
+      // is a pulsing concentric ring; PHANTOM is a wavering ghost-blob that
+      // nearly vanishes while phased — its transparency IS the gameplay
+      // signal for "don't bother shooting yet", not just flavor
+      const bossColor = it.phantom ? '#A78BFA' : (it.pulse ? '#F87171' : (it.worm ? '#818CF8' : COL_BAD));
       ctx.save();
       ctx.translate(it.x, it.y);
       ctx.rotate(Math.sin(tunnelHue * 1.5 + it.seed) * 0.06);
       ctx.beginPath();
-      if (it.pulse) {
+      if (it.phantom) {
+        const sides = 9;
+        for (let k = 0; k < sides; k++) {
+          const a = (Math.PI * 2 / sides) * k;
+          const wob = 1 + Math.sin(tunnelHue * 3.4 + it.seed + k * 1.7) * 0.1;
+          const px = Math.cos(a) * it.r * wob, py = Math.sin(a) * it.r * wob;
+          if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+      } else if (it.pulse) {
         const pulseR = it.r * (0.82 + 0.18 * Math.sin(tunnelHue * 3 + it.seed));
         ctx.arc(0, 0, pulseR, 0, Math.PI * 2);
       } else if (it.worm) {
@@ -3176,10 +3304,11 @@
       ctx.closePath();
       ctx.fillStyle = bossColor; ctx.shadowColor = bossColor; ctx.shadowBlur = 14 * (it.r / it.baseR + 0.3);
       if (it.pulse) ctx.globalAlpha = 0.55; // ring reads as containment energy, not a solid body
+      if (it.phantom) ctx.globalAlpha = it.solid ? 0.9 : 0.2; // the actual "can I hit this right now" signal
       ctx.fill();
       ctx.globalAlpha = 1;
       ctx.shadowBlur = 0;
-      ctx.strokeStyle = 'rgba(240,248,255,.85)'; ctx.lineWidth = Math.max(1, it.r * 0.08);
+      ctx.strokeStyle = 'rgba(240,248,255,' + (it.phantom && !it.solid ? 0.35 : 0.85) + ')'; ctx.lineWidth = Math.max(1, it.r * 0.08);
       ctx.stroke();
       if (it.pulse) {
         ctx.beginPath();
@@ -3314,12 +3443,36 @@
       ctx.stroke();
     }
     if (charging && chargeTimer > CHARGE_TAP_MAX) {
-      const k = Math.min(1, chargeTimer / (unlocks.overcharge ? CHARGE_MAX_OVERCHARGED : CHARGE_MAX));
+      const chargeCap = unlocks.overcharge ? CHARGE_MAX_OVERCHARGED : CHARGE_MAX;
+      const k = Math.min(1, chargeTimer / chargeCap);
+      const cx = 0, cy = -PLAYER_H * 0.3;
+      // Soft fill glow behind the ring, growing with charge — the ring
+      // alone read as thin/subtle right up until release; this gives the
+      // buildup actual visual weight instead of just a brightening outline.
+      const glowR = PLAYER_W * (0.4 + k * 0.5);
+      const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR);
+      glow.addColorStop(0, 'rgba(232,121,249,' + (0.12 + k * 0.22).toFixed(3) + ')');
+      glow.addColorStop(1, 'rgba(232,121,249,0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(cx - glowR, cy - glowR, glowR * 2, glowR * 2);
+
       ctx.beginPath();
       ctx.strokeStyle = 'rgba(232,121,249,' + (0.3 + k * 0.5).toFixed(3) + ')';
       ctx.lineWidth = 1.5 + k * 2;
-      ctx.arc(0, -PLAYER_H * 0.3, PLAYER_W * 0.5 + k * 10, 0, Math.PI * 2);
+      ctx.arc(cx, cy, PLAYER_W * 0.5 + k * 10, 0, Math.PI * 2);
       ctx.stroke();
+
+      if (k >= 0.98) {
+        // Fully charged — a distinct fast-pulsing highlight ring so "ready
+        // to release" is unambiguous, not just "the buildup finished
+        // growing" (which otherwise looks identical to being at ~90%).
+        const pulse = 0.5 + 0.5 * Math.sin(tunnelHue * 14);
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(240,248,255,' + (0.4 + pulse * 0.4).toFixed(3) + ')';
+        ctx.lineWidth = 1.2;
+        ctx.arc(cx, cy, PLAYER_W * 0.6 + k * 10 + pulse * 3, 0, Math.PI * 2);
+        ctx.stroke();
+      }
     }
     ctx.restore();
   }
@@ -3362,8 +3515,8 @@
       const power = pr.power || 0;
       ctx.save();
       ctx.beginPath();
-      ctx.fillStyle = '#F0F8FF';
-      ctx.shadowColor = '#E879F9'; ctx.shadowBlur = 10 + power * 10;
+      ctx.fillStyle = pr.echo ? '#DDD6FE' : '#F0F8FF';
+      ctx.shadowColor = pr.echo ? '#A78BFA' : '#E879F9'; ctx.shadowBlur = 10 + power * 10;
       ctx.arc(pr.x, pr.y, 3.2 + power * 6, 0, Math.PI * 2);
       ctx.fill();
       ctx.shadowBlur = 0;
@@ -3371,8 +3524,8 @@
     });
   }
 
-  const POWERUP_GLYPH = { rapid: 'R', magnet: 'M', shield: 'S', slow: 'T', score: '$', overload: 'O', nova: 'N' };
-  const POWERUP_COLOR = { rapid: '#E879F9', magnet: '#22D3EE', shield: '#818CF8', slow: '#7DD3FC', score: '#F59E0B', overload: '#F59E0B', nova: '#FB923C' };
+  const POWERUP_GLYPH = { rapid: 'R', magnet: 'M', shield: 'S', slow: 'T', score: '$', overload: 'O', nova: 'N', echo: 'E' };
+  const POWERUP_COLOR = { rapid: '#E879F9', magnet: '#22D3EE', shield: '#818CF8', slow: '#7DD3FC', score: '#F59E0B', overload: '#F59E0B', nova: '#FB923C', echo: '#A78BFA' };
   function drawPowerups() {
     powerups.forEach((pu) => {
       const hue = (tunnelHue * 90 + pu.seed) % 360;
@@ -3525,6 +3678,7 @@
       if (magnetTimer > 0) puParts.push('MAGNET ' + magnetTimer.toFixed(1));
       if (shieldTimer > 0) puParts.push('SHIELD ' + shieldTimer.toFixed(1));
       if (slowTimer > 0) puParts.push('DILATION ' + slowTimer.toFixed(1));
+      if (echoTimer > 0) puParts.push('ECHO ' + echoTimer.toFixed(1));
       if (overloadReady) puParts.push('OVERLOAD READY');
       if (puParts.length) {
         ctx.textAlign = 'center';

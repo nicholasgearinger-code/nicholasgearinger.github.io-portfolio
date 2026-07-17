@@ -2384,10 +2384,10 @@
   // "far away". Drawn first, under everything else.
   function drawDepthFog() {
     const c = eraRGB([148, 197, 255]).join(',');
-    const r = Math.max(W, H) * 0.62;
+    const r = Math.max(W, H) * 0.4;
     const fog = ctx.createRadialGradient(VP_X, VP_Y, 0, VP_X, VP_Y, r);
-    fog.addColorStop(0, 'rgba(' + c + ',.35)');
-    fog.addColorStop(0.35, 'rgba(' + c + ',.14)');
+    fog.addColorStop(0, 'rgba(' + c + ',.12)');
+    fog.addColorStop(0.4, 'rgba(' + c + ',.035)');
     fog.addColorStop(1, 'rgba(' + c + ',0)');
     ctx.fillStyle = fog;
     ctx.fillRect(0, 0, W, H);

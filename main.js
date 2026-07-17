@@ -93,9 +93,13 @@ let lockedScrollY = 0;
 function enterFullscreen() {
   lockedScrollY = window.scrollY;
   document.body.appendChild(viewport);
+  document.documentElement.style.overflow = "hidden";
   document.body.style.position = "fixed";
   document.body.style.top = `-${lockedScrollY}px`;
+  document.body.style.left = "0";
   document.body.style.width = "100%";
+  document.body.style.height = "100%";
+  document.body.style.overflow = "hidden";
   viewport.classList.add("rift-fullscreen");
   fullscreenBtn?.classList.add("gfs-active");
   resizeToViewport();
@@ -109,9 +113,13 @@ function exitFullscreen() {
   } else {
     viewportHome.parent.appendChild(viewport);
   }
+  document.documentElement.style.overflow = "";
   document.body.style.position = "";
   document.body.style.top = "";
+  document.body.style.left = "";
   document.body.style.width = "";
+  document.body.style.height = "";
+  document.body.style.overflow = "";
   window.scrollTo(0, lockedScrollY);
   resizeToViewport();
 }

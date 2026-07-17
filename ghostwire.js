@@ -417,7 +417,7 @@
     // A faint parallax star layer behind the tunnel for extra depth —
     // drifts slowly downward and wraps, twinkling with tunnelHue.
     const arr = [];
-    const count = 34;
+    const count = 90;
     for (let i = 0; i < count; i++) {
       arr.push({
         x: Math.random() * W, y: Math.random() * H * 0.9,
@@ -3857,6 +3857,12 @@
       pendingZone = idx;
       setActiveZoneBtn(pendingZone);
       updatePlayButtonLabel();
+      // Same formula reset() uses to derive a fresh run's starting level —
+      // applied here too so the idle title-screen background (its color,
+      // overlay, skyline silhouette, and Breach Zone's lightning) actually
+      // previews the zone you just picked instead of always rendering
+      // Grid Sector until a run starts.
+      if (!running) level = 1 + pendingZone * 5;
     });
   });
   updateZoneLocks();

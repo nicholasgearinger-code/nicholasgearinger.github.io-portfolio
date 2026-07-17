@@ -210,7 +210,11 @@
     { chance: 0.55, ampMin: 12, ampMax: 22, freqMin: 3.2, freqMax: 4.5, type: 'sine' },   // SERVER FARM — fast, tight zigzag
     { chance: 0.55, ampMin: 25, ampMax: 45, freqMin: 1.5, freqMax: 2.5, type: 'jitter' }, // HAZARD ZONE — erratic, jagged
     { chance: 0.35, ampMin: 0, ampMax: 0, freqMin: 0, freqMax: 0, type: 'homing' },       // REACTOR CORE — slow tracking pull
-    { chance: 0.6, ampMin: 20, ampMax: 40, freqMin: 2.5, freqMax: 4, type: 'jitter' },    // BREACH ZONE — most chaotic
+    { chance: 0.6, ampMin: 20, ampMax: 40, freqMin: 2.5, freqMax: 4, type: 'jitter' },    // BREACH ZONE — most chaotic (of the original six)
+    { chance: 0.4, ampMin: 20, ampMax: 35, freqMin: 1.2, freqMax: 2.0, type: 'sine' },    // KERNEL DEPTHS — deliberate, controlled
+    { chance: 0.6, ampMin: 30, ampMax: 50, freqMin: 2.0, freqMax: 3.2, type: 'jitter' },  // QUARANTINE ZONE — alert, urgent
+    { chance: 0.3, ampMin: 0, ampMax: 0, freqMin: 0, freqMax: 0, type: 'homing' },        // VOID SECTOR — sparse, the void pulling at you
+    { chance: 0.65, ampMin: 25, ampMax: 50, freqMin: 3.0, freqMax: 4.8, type: 'jitter' }, // SINGULARITY — most chaotic overall
   ];
 
   const CODE_TOKENS_BAD = ['0xFF', 'NaN', 'SEGV', 'ERR', 'null', '!=', 'undef', '0x00', 'panic!'];
@@ -277,6 +281,10 @@
     { count: 14, segMin: 6, segMax: 10, jump: 90, snap: 0, pStep: [0.07, 0.1] },    // HAZARD ZONE — rougher, unsnapped
     { count: 9, segMin: 3, segMax: 5, jump: 60, snap: 16, pStep: [0.16, 0.22] },    // REACTOR CORE — few, thick, radiating
     { count: 20, segMin: 7, segMax: 12, jump: 110, snap: 0, pStep: [0.06, 0.09] },  // BREACH ZONE — dense and torn-looking
+    { count: 16, segMin: 6, segMax: 10, jump: 55, snap: 14, pStep: [0.08, 0.11] },  // KERNEL DEPTHS — dense but orderly, core-memory-like
+    { count: 15, segMin: 5, segMax: 8, jump: 75, snap: 6, pStep: [0.09, 0.13] },    // QUARANTINE ZONE — sharper turns, containment-grid feel
+    { count: 6, segMin: 3, segMax: 5, jump: 130, snap: 0, pStep: [0.18, 0.25] },    // VOID SECTOR — sparse, broken, mostly empty
+    { count: 26, segMin: 8, segMax: 14, jump: 45, snap: 10, pStep: [0.05, 0.07] },  // SINGULARITY — densest and most converged
   ];
   function generateCircuitTraces(eraIdx) {
     const prof = ERA_CIRCUIT_PROFILES[eraIdx || 0];
@@ -1569,6 +1577,10 @@
     { freqBase: 40, filterBase: 140, q: 12 },  // HAZARD ZONE
     { freqBase: 34, filterBase: 110, q: 4 },   // REACTOR CORE
     { freqBase: 63, filterBase: 300, q: 14 },  // BREACH ZONE
+    { freqBase: 30, filterBase: 100, q: 8 },   // KERNEL DEPTHS — low, resonant
+    { freqBase: 55, filterBase: 280, q: 16 },  // QUARANTINE ZONE — sharp, tense
+    { freqBase: 26, filterBase: 90, q: 3 },    // VOID SECTOR — very low, sparse
+    { freqBase: 68, filterBase: 340, q: 18 },  // SINGULARITY — most intense overall
   ];
   function startAmbient() {
     if (!audioCtx) return;

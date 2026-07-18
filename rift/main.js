@@ -7,7 +7,7 @@ import { createDecoration, updateDecoration } from "./decorations.js";
 import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane } from "./liquid.js";
 import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
-import { createGrass, updateGrass, disposeGrass } from "./vegetation.js";
+import { createGrass, updateGrass, disposeGrass, createFlowers, disposeFlowers } from "./vegetation.js";
 import { createHorizonSilhouettes, disposeHorizonSilhouettes } from "./horizonSilhouettes.js";
 import { createWildlife, updateWildlife, disposeWildlife } from "./wildlife.js";
 import { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers } from "./graphicsSettings.js";
@@ -275,6 +275,7 @@ let terrainMesh = null;
 let liquidHandle = null;
 let atmosphereHandle = null;
 let grassHandle = null;
+let flowersHandle = null;
 let weatherHandle = null;
 let cloudsHandle = null;
 let horizonHandle = null;
@@ -302,6 +303,8 @@ function teardownLevel() {
   atmosphereHandle = null;
   disposeGrass(scene, grassHandle);
   grassHandle = null;
+  disposeFlowers(scene, flowersHandle);
+  flowersHandle = null;
   disposeWeatherSystem(scene, weatherHandle);
   weatherHandle = null;
   disposeClouds(scene, cloudsHandle);
@@ -346,6 +349,7 @@ function buildLevel(levelIdx) {
 
   atmosphereHandle = createAtmosphericParticles(scene, level.biome);
   grassHandle = createGrass(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), TERRAIN_SIZE * 0.46);
+  flowersHandle = createFlowers(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), TERRAIN_SIZE * 0.46);
   weatherHandle = createWeatherSystem(scene, level.biome);
   cloudsHandle = createClouds(scene, level.biome);
   horizonHandle = createHorizonSilhouettes(scene, level.biome);

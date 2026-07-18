@@ -84,7 +84,21 @@ const BIOME_SHAPERS = {
   // Gentle rolling hills, cut through by a winding river channel.
   verdant(u, v, seed) {
     const worldX = u * (TERRAIN_SIZE / 2), worldZ = v * (TERRAIN_SIZE / 2);
-    const base = fbm2(u * 1.3, v * 1.3, seed, 4, 2.0, 0.5) * 6.5;
+    // Two noise scales layered together — big sweeping hill formations
+    // with finer rolling detail riding on top, rather than one
+    // uniform-frequency bump field just scaled taller (which reads as
+    // spikier, not hillier).
+    // The primary noise field's amplitude is scaled up directly (a
+    // guaranteed increase regardless of seed, since it's literally the
+    // same field just amplified) — a second, lower-frequency layer adds
+    // supplementary big-hill variety on top, rather than being relied on
+    // for the increase itself (two independent noise fields don't add
+    // their amplitudes predictably; their peaks rarely line up at the
+    // same point, so how much extra range that alone provides varies a
+    // lot by seed luck).
+    const detail = fbm2(u * 1.3, v * 1.3, seed, 4, 2.0, 0.5) * 8.5;
+    const macro = fbm2(u * 0.5, v * 0.5, seed + 300, 3, 2.0, 0.5) * 3;
+    const base = detail + macro;
     // Meandering path built from two different-frequency sine waves rather
     // than one — a single sine reads as too regular/mechanical for a
     // river; layering a slow bend with a faster wobble looks natural.

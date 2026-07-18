@@ -107,6 +107,49 @@ function createMoonTexture() {
   return new THREE.CanvasTexture(canvas);
 }
 
+// A linear gradient — bright/opaque at one end fading to fully transparent
+// at the other — for sun-beam sprites, versus the radial gradient the
+// glow bodies use.
+function createBeamTexture() {
+  const w = 32, h = 256;
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, "rgba(255,255,255,0.9)");
+  grad.addColorStop(0.5, "rgba(255,255,255,0.25)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+  return new THREE.CanvasTexture(canvas);
+}
+
+// A fan of long, thin, camera-facing sprites anchored to the sun —
+// SpriteMaterial's own `rotation` (independent of the sprite's 3D
+// transform) is what lets several of these fan out at different angles
+// while every one of them still always faces the camera, the same way
+// the sprite itself always does. This is the actual reason to use
+// sprites here instead of fixed-orientation planes: a plane-based fan
+// would go edge-on and vanish from most viewing angles.
+function createSunBeams(scene, beamTexture) {
+  const group = new THREE.Group();
+  const count = 6;
+  const sprites = [];
+  for (let i = 0; i < count; i++) {
+    const mat = new THREE.SpriteMaterial({
+      map: beamTexture, color: 0xfff2c4, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+      rotation: (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.4,
+    });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(18, 140, 1);
+    group.add(sprite);
+    sprites.push(sprite);
+  }
+  scene.add(group);
+  return { group, sprites };
+}
+
 function createBody(scene, glowTexture, map, coreRadius, glowColor, glowRadius, glowOpacity) {
   const group = new THREE.Group();
 
@@ -164,8 +207,9 @@ function createDayNightCycle(scene, sun, ambient, starfield) {
   const glowTexture = createGlowTexture();
   const sunBody = createBody(scene, glowTexture, createSunTexture(), 14, 0xffcf80, 40, 0.6);
   const moonBody = createBody(scene, glowTexture, createMoonTexture(), 9, 0xaebedd, 22, 0.32);
+  const sunBeams = createSunBeams(scene, createBeamTexture());
   const sky = createSkyDome(scene);
-  return { scene, sun, ambient, starfield, sunBody, moonBody, sky, elapsed: 0 };
+  return { scene, sun, ambient, starfield, sunBody, moonBody, sunBeams, sky, elapsed: 0 };
 }
 
 function updateDayNightCycle(cycle, dt) {
@@ -184,6 +228,7 @@ function updateDayNightCycle(cycle, dt) {
   cycle.sun.position.set(sunOrbit.x, Math.max(sunOrbit.y, -20), 80);
   cycle.sunBody.group.position.set(sunOrbit.x, sunOrbit.y, 80);
   cycle.moonBody.group.position.set(moonOrbit.x, moonOrbit.y, 80);
+  cycle.sunBeams.group.position.set(sunOrbit.x, sunOrbit.y, 80);
 
   // Blend NIGHT -> DAWN_DUSK -> DAY -> DAWN_DUSK -> NIGHT across elevation.
   const dayAmount = Math.max(0, elevation);       // 0 at/below horizon, 1 at noon
@@ -227,13 +272,20 @@ function updateDayNightCycle(cycle, dt) {
   cycle.moonBody.core.material.opacity = moonVisibility;
   cycle.moonBody.glow.material.opacity = cycle.moonBody.baseGlowOpacity * moonVisibility;
 
+  // Rays peak just above the horizon (the classic crepuscular-ray moment)
+  // and taper off toward both full night and flat overhead noon light,
+  // rather than being equally strong all day.
+  const beamEmphasis = Math.max(0, 1 - Math.abs(sunOrbit.elevation - 0.25) / 0.5);
+  const beamOpacity = sunVisibility * beamEmphasis * 0.22;
+  for (const sprite of cycle.sunBeams.sprites) sprite.material.opacity = beamOpacity;
+
   // Stars fade in as the sun drops toward/below the horizon, fully hidden
   // by mid-morning.
   if (cycle.starfield) {
     cycle.starfield.material.opacity = THREE.MathUtils.clamp(1 - dayAmount / 0.25, 0, 1);
   }
 
-  return t;
+  return { t, dayAmount };
 }
 
 export { createDayNightCycle, updateDayNightCycle, CYCLE_SECONDS };

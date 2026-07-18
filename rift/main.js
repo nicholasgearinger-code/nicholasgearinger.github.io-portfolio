@@ -9,6 +9,7 @@ import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
 import { createGrass, updateGrass, disposeGrass } from "./vegetation.js";
 import { createWeatherSystem, updateWeatherSystem, disposeWeatherSystem } from "./weather.js";
+import { createClouds, updateClouds, disposeClouds } from "./clouds.js";
 import {
   createBolt, updateBolt, disposeBolt,
   createMuzzleFlash, updateMuzzleFlash, disposeMuzzleFlash,
@@ -257,6 +258,7 @@ let liquidHandle = null;
 let atmosphereHandle = null;
 let grassHandle = null;
 let weatherHandle = null;
+let cloudsHandle = null;
 const crystalHandles = new Map();
 let allCrystals = [];
 let crystalsTotal = 0;
@@ -282,6 +284,8 @@ function teardownLevel() {
   grassHandle = null;
   disposeWeatherSystem(scene, weatherHandle);
   weatherHandle = null;
+  disposeClouds(scene, cloudsHandle);
+  cloudsHandle = null;
   for (const [, handle] of crystalHandles) disposeCrystalMesh(scene, handle);
   crystalHandles.clear();
   allCrystals = [];
@@ -319,6 +323,7 @@ function buildLevel(levelIdx) {
   atmosphereHandle = createAtmosphericParticles(scene, level.biome);
   grassHandle = createGrass(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), TERRAIN_SIZE * 0.46);
   weatherHandle = createWeatherSystem(scene, level.biome);
+  cloudsHandle = createClouds(scene, level.biome);
 
   const layout = generateLevelLayout(level.biome, WORLD_SEED);
 
@@ -564,7 +569,7 @@ function animate() {
   const dt = Math.min(clock.getDelta(), 0.1);
   elapsedTime += dt;
 
-  updateDayNightCycle(dayNightCycle, dt);
+  const dayNight = updateDayNightCycle(dayNightCycle, dt);
 
   if (isGameActive() && currentLevelIdx >= 0) {
     updateMovement(dt, playerPhysics.grounded);
@@ -580,6 +585,7 @@ function animate() {
   const wind = updateWeatherSystem(weatherHandle, dt);
   updateAtmosphericParticles(atmosphereHandle, elapsedTime, dt, wind.windX, wind.windZ);
   updateGrass(grassHandle, elapsedTime, wind.windX, wind.windZ);
+  updateClouds(cloudsHandle, dt, wind, dayNight.dayAmount, wind.rainIntensity);
   updateWorldPulse(dt);
   updateProjectiles(dt);
   renderer.render(scene, camera);

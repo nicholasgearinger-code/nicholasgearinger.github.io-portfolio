@@ -92,7 +92,7 @@ function createWeatherSystem(scene, biome) {
 }
 
 function updateWeatherSystem(handle, dt) {
-  if (!handle) return { windX: 0, windZ: 0, windStrength: 0 };
+  if (!handle) return { windX: 0, windZ: 0, windStrength: 0, rainIntensity: 0 };
   const { profile } = handle;
   handle.elapsed += dt;
 
@@ -153,7 +153,7 @@ function updateWeatherSystem(handle, dt) {
   const flashPeak = lp.dim ? 3 : 9;
   handle.lightningLight.intensity = handle.lightningFlash * handle.lightningFlash * flashPeak; // squared falloff — a sharp pop rather than a linear fade
 
-  return { windX, windZ, windStrength };
+  return { windX, windZ, windStrength, rainIntensity: handle.rainIntensity };
 }
 
 function disposeWeatherSystem(scene, handle) {

@@ -50,10 +50,17 @@ function createAtmosphericParticles(scene, biome) {
   return { points, seeds, basePositions: positions.slice(), style, biome };
 }
 
-function updateAtmosphericParticles(handle, elapsed, dt) {
+function updateAtmosphericParticles(handle, elapsed, dt, windX = 0, windZ = 0) {
   if (!handle) return;
   const { points, seeds, basePositions, style } = handle;
   const posAttr = points.geometry.attributes.position;
+  // Wind accumulates as a genuine directional push over time (not just an
+  // instantaneous offset, which wouldn't visibly "blow" anything) — wraps
+  // at the volume's edges the same way the height rise already does, so
+  // particles keep drifting with the wind indefinitely instead of
+  // eventually flying off to infinity.
+  handle.windOffsetX = ((handle.windOffsetX || 0) + windX * dt * 2 + SPREAD) % (SPREAD * 2) - SPREAD;
+  handle.windOffsetZ = ((handle.windOffsetZ || 0) + windZ * dt * 2 + SPREAD) % (SPREAD * 2) - SPREAD;
   for (let i = 0; i < seeds.length; i++) {
     const seed = seeds[i];
     let y = posAttr.getY(i) + style.riseSpeed * dt;
@@ -65,8 +72,10 @@ function updateAtmosphericParticles(handle, elapsed, dt) {
     posAttr.setY(i, y);
 
     const bx = basePositions[i * 3], bz = basePositions[i * 3 + 2];
-    posAttr.setX(i, bx + Math.sin(elapsed * 0.3 + seed) * style.drift * 3);
-    posAttr.setZ(i, bz + Math.cos(elapsed * 0.25 + seed) * style.drift * 3);
+    const x = bx + Math.sin(elapsed * 0.3 + seed) * style.drift * 3 + handle.windOffsetX;
+    const z = bz + Math.cos(elapsed * 0.25 + seed) * style.drift * 3 + handle.windOffsetZ;
+    posAttr.setX(i, ((x + SPREAD) % (SPREAD * 2) + SPREAD * 2) % (SPREAD * 2) - SPREAD);
+    posAttr.setZ(i, ((z + SPREAD) % (SPREAD * 2) + SPREAD * 2) % (SPREAD * 2) - SPREAD);
   }
   posAttr.needsUpdate = true;
 }

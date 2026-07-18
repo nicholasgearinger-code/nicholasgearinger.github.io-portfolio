@@ -8,6 +8,7 @@ import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane } from "./liqu
 import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
 import { createGrass, updateGrass, disposeGrass } from "./vegetation.js";
+import { createWeatherSystem, updateWeatherSystem, disposeWeatherSystem } from "./weather.js";
 import {
   createBolt, updateBolt, disposeBolt,
   createMuzzleFlash, updateMuzzleFlash, disposeMuzzleFlash,
@@ -255,6 +256,7 @@ let terrainMesh = null;
 let liquidHandle = null;
 let atmosphereHandle = null;
 let grassHandle = null;
+let weatherHandle = null;
 const crystalHandles = new Map();
 let allCrystals = [];
 let crystalsTotal = 0;
@@ -278,6 +280,8 @@ function teardownLevel() {
   atmosphereHandle = null;
   disposeGrass(scene, grassHandle);
   grassHandle = null;
+  disposeWeatherSystem(scene, weatherHandle);
+  weatherHandle = null;
   for (const [, handle] of crystalHandles) disposeCrystalMesh(scene, handle);
   crystalHandles.clear();
   allCrystals = [];
@@ -314,6 +318,7 @@ function buildLevel(levelIdx) {
 
   atmosphereHandle = createAtmosphericParticles(scene, level.biome);
   grassHandle = createGrass(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), TERRAIN_SIZE * 0.46);
+  weatherHandle = createWeatherSystem(scene, level.biome);
 
   const layout = generateLevelLayout(level.biome, WORLD_SEED);
 
@@ -572,8 +577,9 @@ function animate() {
   for (const [, handle] of crystalHandles) updateCrystalMesh(handle, elapsedTime);
   for (const handle of decorationHandles) updateDecoration(handle, elapsedTime);
   updateLiquidPlane(liquidHandle, elapsedTime);
-  updateAtmosphericParticles(atmosphereHandle, elapsedTime, dt);
-  updateGrass(grassHandle, elapsedTime);
+  const wind = updateWeatherSystem(weatherHandle, dt);
+  updateAtmosphericParticles(atmosphereHandle, elapsedTime, dt, wind.windX, wind.windZ);
+  updateGrass(grassHandle, elapsedTime, wind.windX, wind.windZ);
   updateWorldPulse(dt);
   updateProjectiles(dt);
   renderer.render(scene, camera);

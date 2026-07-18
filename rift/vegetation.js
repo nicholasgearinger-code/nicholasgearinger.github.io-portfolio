@@ -92,14 +92,20 @@ function extractBaseTransforms(mesh, count) {
   return transforms;
 }
 
-function updateGrass(handle, elapsed) {
+function updateGrass(handle, elapsed, windX = 0, windZ = 0) {
   if (!handle) return;
   const { mesh, swaySeeds, count, baseMatrices } = handle;
+  const windLean = Math.min(0.5, Math.hypot(windX, windZ) * 0.15); // caps how far wind alone can bend a blade, idle sway still layers on top
+  const windAngle = Math.atan2(windZ, windX);
   for (let i = 0; i < count; i++) {
     const t = baseMatrices[i];
-    const sway = Math.sin(elapsed * 1.6 + swaySeeds[i]) * 0.12;
+    const idleSway = Math.sin(elapsed * 1.6 + swaySeeds[i]) * 0.12;
     dummy.position.copy(t.pos);
-    dummy.rotation.set(sway, swaySeeds[i], 0);
+    dummy.rotation.set(
+      idleSway + Math.sin(windAngle) * windLean,
+      swaySeeds[i],
+      Math.cos(windAngle) * windLean
+    );
     dummy.scale.copy(t.scale);
     dummy.updateMatrix();
     mesh.setMatrixAt(i, dummy.matrix);

@@ -17,8 +17,9 @@ import * as THREE from "three";
 
 const LIQUID_STYLE = {
   ember: {
-    baseColor: new THREE.Color(0xcc2200), hotColor: new THREE.Color(0xffdd66),
-    emissive: 0xff5522, emissiveIntensity: 1.3, opacity: 0.92, roughness: 0.55,
+    crustColor: new THREE.Color(0x1a0800), baseColor: new THREE.Color(0xdd2c00), hotColor: new THREE.Color(0xffd23f),
+    emissive: 0xff5522, emissiveIntensity: 2.2, opacity: 0.96, roughness: 0.55,
+    glowColor: 0xff8a1a, glowOpacity: 0.35,
   },
   verdant: {
     baseColor: new THREE.Color(0x1f6fb0), frothColor: new THREE.Color(0xf2fbff),
@@ -53,13 +54,31 @@ function createLiquidPlane(scene, biome, y, size) {
   mesh.position.y = y;
   scene.add(mesh);
 
+  // A separate unlit, additively-blended plane just above the surface —
+  // gives lava genuine luminous "glow" the way MeshStandardMaterial's own
+  // emissive can't on its own once it's subject to the renderer's
+  // lighting/tone mapping alongside the day/night cycle. Water doesn't
+  // get one — it isn't meant to look lit from within.
+  let glow = null;
+  if (style.glowColor !== undefined) {
+    const glowGeo = new THREE.PlaneGeometry(size, size, 1, 1);
+    glowGeo.rotateX(-Math.PI / 2);
+    const glowMat = new THREE.MeshBasicMaterial({
+      color: style.glowColor, transparent: true, opacity: style.glowOpacity,
+      blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+    });
+    glow = new THREE.Mesh(glowGeo, glowMat);
+    glow.position.y = y + 0.05;
+    scene.add(glow);
+  }
+
   const basePositions = new Float32Array(posAttr.array); // original Y per vertex, for the ripple to animate around
-  return { mesh, basePositions, biome, style };
+  return { mesh, glow, basePositions, biome, style };
 }
 
 function updateLiquidPlane(handle, elapsed) {
   if (!handle) return;
-  const { mesh, basePositions, biome, style } = handle;
+  const { mesh, glow, basePositions, biome, style } = handle;
   const posAttr = mesh.geometry.attributes.position;
   const colorAttr = mesh.geometry.attributes.color;
   // Cheap per-vertex ripple — lava churns slower/heavier, water ripples
@@ -77,14 +96,22 @@ function updateLiquidPlane(handle, elapsed) {
     const ripple = swell + chop;
     posAttr.setY(i, ripple);
 
-    // Normalize ripple to 0..1 and use it to blend toward the "disturbed"
-    // color — frothy crests for water, brighter glowing patches for lava
-    // — rather than a flat, uniform surface. Range widened slightly to
-    // account for the added chop term.
+    // Normalize ripple to 0..1.
     const range = (amp + chopAmp) * 2;
     const disturbance = THREE.MathUtils.clamp((ripple + range / 2) / range, 0, 1);
-    const accent = biome === "ember" ? style.hotColor : style.frothColor;
-    tmpColor.copy(style.baseColor).lerp(accent, Math.pow(disturbance, 3)); // pow(3) keeps the accent rare/at true crests, not smeared across the whole surface
+
+    if (biome === "ember" && style.crustColor) {
+      // Real lava is dark cooled crust laced with glowing cracks, not a
+      // uniform orange — a genuine 3-band gradient (dark crust -> molten
+      // red -> white-hot glow) instead of a 2-color lerp gives that
+      // texture. Crust dominates at rest, glow only right at true crests,
+      // with a full red band carrying most of the surface in between.
+      if (disturbance < 0.55) tmpColor.copy(style.crustColor).lerp(style.baseColor, disturbance / 0.55);
+      else tmpColor.copy(style.baseColor).lerp(style.hotColor, (disturbance - 0.55) / 0.45);
+    } else {
+      const accent = style.frothColor;
+      tmpColor.copy(style.baseColor).lerp(accent, Math.pow(disturbance, 3)); // pow(3) keeps froth rare/at true crests, not smeared across the whole surface
+    }
     tmpColor.toArray(colorAttr.array, i * 3);
   }
   posAttr.needsUpdate = true;
@@ -94,9 +121,12 @@ function updateLiquidPlane(handle, elapsed) {
   // Lava also gets a slow overall "breathing" pulse in its base emissive
   // intensity, independent of the spatial hot-spot pattern above — reads
   // as the whole surface swelling with heat, not just individual crests
-  // glinting.
+  // glinting. The separate glow overlay pulses in sync, a touch more
+  // strongly, since it's what actually sells "this is a light source."
   if (biome === "ember") {
-    mesh.material.emissiveIntensity = style.emissiveIntensity * (0.85 + 0.25 * Math.sin(elapsed * 0.9));
+    const pulse = 0.85 + 0.25 * Math.sin(elapsed * 0.9);
+    mesh.material.emissiveIntensity = style.emissiveIntensity * pulse;
+    if (glow) glow.material.opacity = style.glowOpacity * (0.75 + 0.4 * Math.sin(elapsed * 0.9));
   }
 }
 
@@ -105,6 +135,11 @@ function disposeLiquidPlane(scene, handle) {
   scene.remove(handle.mesh);
   handle.mesh.geometry.dispose();
   handle.mesh.material.dispose();
+  if (handle.glow) {
+    scene.remove(handle.glow);
+    handle.glow.geometry.dispose();
+    handle.glow.material.dispose();
+  }
 }
 
 export { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane };

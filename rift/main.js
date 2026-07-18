@@ -313,7 +313,7 @@ function buildLevel(levelIdx) {
   }
 
   atmosphereHandle = createAtmosphericParticles(scene, level.biome);
-  grassHandle = createGrass(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), TERRAIN_SIZE * 0.4);
+  grassHandle = createGrass(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), TERRAIN_SIZE * 0.46);
 
   const layout = generateLevelLayout(level.biome, WORLD_SEED);
 

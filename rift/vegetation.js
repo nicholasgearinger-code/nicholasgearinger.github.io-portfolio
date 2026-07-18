@@ -10,8 +10,8 @@ import * as THREE from "three";
 // -----------------------------------------------------------------------------
 
 const GRASS_STYLE = {
-  verdant: { count: 3500, colorA: 0x3a8f4a, colorB: 0x6fc76a, height: 0.9 },
-  ashen: { count: 900, colorA: 0x7a7261, colorB: 0x9a917c, height: 0.5 }, // sparse, dry, low — scrub clinging on in a dead lakebed, not a lawn
+  verdant: { count: 7000, colorA: 0x3a8f4a, colorB: 0x6fc76a, height: 1.1, bladeRadius: 0.16 },
+  ashen: { count: 1400, colorA: 0x7a7261, colorB: 0x9a917c, height: 0.55, bladeRadius: 0.11 }, // sparse, dry, low — scrub clinging on in a dead lakebed, not a lawn
 };
 
 const dummy = new THREE.Object3D();
@@ -30,7 +30,11 @@ function createGrass(scene, biome, sampleHeight, radius) {
   const style = GRASS_STYLE[biome];
   if (!style) return null;
 
-  const bladeGeo = new THREE.ConeGeometry(0.05, 1, 3); // cheap single-triangle-ish taper reads fine at grass scale/distance
+  // 0.05 previously — thin enough to be sub-pixel at normal viewing
+  // distance, which is why grass wasn't actually reading as ground cover
+  // despite thousands of instances existing. Width matters far more than
+  // raw count for how "filled in" the ground looks.
+  const bladeGeo = new THREE.ConeGeometry(style.bladeRadius, 1, 3);
   bladeGeo.translate(0, 0.5, 0);
   const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, flatShading: true, side: THREE.DoubleSide });
 

@@ -146,8 +146,8 @@ function biomeHeight(biome, worldX, worldZ, seed) {
 function applyHeightShading(geo, colorHex, minY, maxY) {
   const posAttr = geo.attributes.position;
   const range = Math.max(maxY - minY, 1e-6);
-  const base = new THREE.Color(colorHex).multiplyScalar(0.3);
-  const highlight = new THREE.Color(colorHex).lerp(new THREE.Color(0xffffff), 0.4);
+  const base = new THREE.Color(colorHex).multiplyScalar(0.44); // was 0.3 — read as muddy/dark at low elevations rather than showing the actual biome color
+  const highlight = new THREE.Color(colorHex).lerp(new THREE.Color(0xffffff), 0.22); // was 0.4 — less washed toward white, keeps more color saturation at peaks instead of desaturating them
   const colors = new Float32Array(posAttr.count * 3);
   const tmp = new THREE.Color();
   for (let i = 0; i < posAttr.count; i++) {

@@ -1,9 +1,10 @@
 import * as THREE from "three";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
-import { buildPlanetTerrain, TERRAIN_SIZE } from "./terrain.js";
+import { buildPlanetTerrain, TERRAIN_SIZE, LIQUID_LEVEL } from "./terrain.js";
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
 import { createDecoration, updateDecoration } from "./decorations.js";
+import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane } from "./liquid.js";
 import {
   createBolt, updateBolt, disposeBolt,
   createMuzzleFlash, updateMuzzleFlash, disposeMuzzleFlash,
@@ -77,19 +78,61 @@ function resizeToViewport() {
 }
 new ResizeObserver(resizeToViewport).observe(viewport);
 
+// #rift-viewport's ancestor `.panel` uses a `transform` for its scroll-reveal
+// animation — and CSS position:fixed resolves relative to the nearest
+// transformed ancestor, not the real browser viewport, if one exists in the
+// chain. Left alone, "fullscreen" would size itself against the .panel's
+// own box instead of the screen (the canvas still fills 100% of whatever
+// box it's given so it can look fine at a glance, but small
+// absolutely-positioned UI like the menu/fullscreen buttons end up
+// positioned against the wrong box entirely and can land off-screen).
+// Reparenting to <body> while fullscreen sidesteps the whole problem —
+// same fix already proven for Ghostwire's identical bug.
+const viewportHome = { parent: viewport.parentNode, nextSibling: viewport.nextSibling };
+let lockedScrollY = 0;
+
+function enterFullscreen() {
+  lockedScrollY = window.scrollY;
+  document.body.appendChild(viewport);
+  document.documentElement.style.overflow = "hidden";
+  document.body.style.position = "fixed";
+  document.body.style.top = `-${lockedScrollY}px`;
+  document.body.style.left = "0";
+  document.body.style.width = "100%";
+  document.body.style.height = "100%";
+  document.body.style.overflow = "hidden";
+  viewport.classList.add("rift-fullscreen");
+  fullscreenBtn?.classList.add("gfs-active");
+  resizeToViewport();
+}
+
+function exitFullscreen() {
+  viewport.classList.remove("rift-fullscreen");
+  fullscreenBtn?.classList.remove("gfs-active");
+  if (viewportHome.nextSibling) {
+    viewportHome.parent.insertBefore(viewport, viewportHome.nextSibling);
+  } else {
+    viewportHome.parent.appendChild(viewport);
+  }
+  document.documentElement.style.overflow = "";
+  document.body.style.position = "";
+  document.body.style.top = "";
+  document.body.style.left = "";
+  document.body.style.width = "";
+  document.body.style.height = "";
+  document.body.style.overflow = "";
+  window.scrollTo(0, lockedScrollY);
+  resizeToViewport();
+}
+
 if (fullscreenBtn) {
   fullscreenBtn.addEventListener("click", () => {
-    viewport.classList.toggle("rift-fullscreen");
-    fullscreenBtn.classList.toggle("gfs-active", viewport.classList.contains("rift-fullscreen"));
-    resizeToViewport();
+    if (viewport.classList.contains("rift-fullscreen")) exitFullscreen();
+    else enterFullscreen();
   });
 }
 window.addEventListener("keydown", (e) => {
-  if (e.code === "Escape" && viewport.classList.contains("rift-fullscreen")) {
-    viewport.classList.remove("rift-fullscreen");
-    fullscreenBtn?.classList.remove("gfs-active");
-    resizeToViewport();
-  }
+  if (e.code === "Escape" && viewport.classList.contains("rift-fullscreen")) exitFullscreen();
 });
 
 scene.add(new THREE.AmbientLight(0x8899bb, 0.65));
@@ -183,6 +226,7 @@ function updateMovement(dt, grounded) {
 // simple instead of diffing old vs new state.
 // ---------------------------------------------------------------------------
 let terrainMesh = null;
+let liquidHandle = null;
 const crystalHandles = new Map();
 let allCrystals = [];
 let crystalsTotal = 0;
@@ -200,6 +244,8 @@ function teardownLevel() {
     terrainMesh.material.dispose();
     terrainMesh = null;
   }
+  disposeLiquidPlane(scene, liquidHandle);
+  liquidHandle = null;
   for (const [, handle] of crystalHandles) disposeCrystalMesh(scene, handle);
   crystalHandles.clear();
   allCrystals = [];
@@ -227,6 +273,10 @@ function buildLevel(levelIdx) {
     })
   );
   scene.add(terrainMesh);
+
+  if (LIQUID_LEVEL[level.biome] !== undefined) {
+    liquidHandle = createLiquidPlane(scene, level.biome, LIQUID_LEVEL[level.biome], TERRAIN_SIZE);
+  }
 
   const layout = generateLevelLayout(level.biome, WORLD_SEED);
 
@@ -479,6 +529,7 @@ function animate() {
 
   for (const [, handle] of crystalHandles) updateCrystalMesh(handle, elapsedTime);
   for (const handle of decorationHandles) updateDecoration(handle, elapsedTime);
+  updateLiquidPlane(liquidHandle, elapsedTime);
   updateWorldPulse(dt);
   updateProjectiles(dt);
   renderer.render(scene, camera);

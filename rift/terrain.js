@@ -13,6 +13,14 @@ import * as THREE from "three";
 
 const TERRAIN_SIZE = 240;      // full width/depth of the landmass, in world units
 const TERRAIN_SEGMENTS = 140;  // resolution — higher reads smoother but costs more vertices
+const RIVER_WIDTH = 7;         // Verdant Hollow's river channel, half-width in world units
+const RIVER_DEPTH = 5;         // how far the channel carves below the surrounding local terrain
+
+// Where the liquid plane (see liquid.js) sits for biomes that have one.
+// Tuned against each biome's own height range so it floods only the
+// carved channel/cracks it belongs to, not the surrounding hills — see
+// the per-biome comments in BIOME_SHAPERS below for why each value works.
+const LIQUID_LEVEL = { ember: -1.5, verdant: -1 };
 
 function hashStringToSeed(str) {
   let h = 1779033703 ^ str.length;
@@ -71,9 +79,20 @@ const BIOME_SHAPERS = {
     const crack = Math.abs(crackNoise) < 0.035 ? -3.5 : 0; // narrow deep grooves
     return jagged * 9 + crack;
   },
-  // Gentle rolling hills.
+  // Gentle rolling hills, cut through by a winding river channel.
   verdant(u, v, seed) {
-    return fbm2(u * 1.3, v * 1.3, seed, 4, 2.0, 0.5) * 6.5;
+    const worldX = u * (TERRAIN_SIZE / 2), worldZ = v * (TERRAIN_SIZE / 2);
+    const base = fbm2(u * 1.3, v * 1.3, seed, 4, 2.0, 0.5) * 6.5;
+    // Meandering path built from two different-frequency sine waves rather
+    // than one — a single sine reads as too regular/mechanical for a
+    // river; layering a slow bend with a faster wobble looks natural.
+    const riverCenterX = Math.sin(worldZ * 0.035 + seed * 0.01) * 28 + Math.sin(worldZ * 0.013 + seed * 0.02) * 14;
+    const distFromRiver = Math.abs(worldX - riverCenterX);
+    if (distFromRiver < RIVER_WIDTH) {
+      const t = 1 - distFromRiver / RIVER_WIDTH; // 0 at the bank, 1 at the center
+      return base - t * t * RIVER_DEPTH;
+    }
+    return base;
   },
   // Mostly flat/angular ground with sparse sharp spikes.
   crystal(u, v, seed) {
@@ -89,11 +108,19 @@ const BIOME_SHAPERS = {
     const chasm = chasmNoise > 0.3 ? -(chasmNoise - 0.3) * 22 : 0;
     return base + chasm;
   },
-  // Cracked dry lakebed — very low relief with fine dune ripples.
+  // Cracked dry lakebed — very low relief with fine dune ripples, plus a
+  // shallow winding scar where a river evidently used to run (visual
+  // crack only, no water — fits the zone's "ended once" lore rather than
+  // contradicting it with an actual river).
   ashen(u, v, seed) {
+    const worldX = u * (TERRAIN_SIZE / 2), worldZ = v * (TERRAIN_SIZE / 2);
     const dunes = fbm2(u * 4, v * 4, seed, 2, 2.0, 0.5) * 1.1;
     const swell = fbm2(u * 0.8, v * 0.8, seed + 60, 3, 2.0, 0.5) * 2.2;
-    return dunes + swell;
+    const scarCenterX = Math.sin(worldZ * 0.03 + seed * 0.015) * 30;
+    const distFromScar = Math.abs(worldX - scarCenterX);
+    const scarWidth = 5;
+    const scar = distFromScar < scarWidth ? -(1 - distFromScar / scarWidth) * 0.7 : 0;
+    return dunes + swell + scar;
   },
 };
 
@@ -154,4 +181,4 @@ function buildPlanetTerrain(level, seedStr) {
   return geo;
 }
 
-export { buildPlanetTerrain, biomeHeight, TERRAIN_SIZE, TERRAIN_SEGMENTS };
+export { buildPlanetTerrain, biomeHeight, TERRAIN_SIZE, TERRAIN_SEGMENTS, LIQUID_LEVEL };

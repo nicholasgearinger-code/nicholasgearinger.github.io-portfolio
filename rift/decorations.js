@@ -13,9 +13,9 @@ import * as THREE from "three";
 function createDecoration(biome, colorHex, seedRand) {
   switch (biome) {
     case "ember": return createSpire(colorHex, seedRand);
-    case "verdant": return createFloraStalk(colorHex, seedRand);
+    case "verdant": return seedRand() < 0.45 ? createLivingTree(colorHex, seedRand) : createFloraStalk(colorHex, seedRand);
     case "crystal": return createCrystalCluster(colorHex, seedRand);
-    case "abyssal": return createDebris(colorHex, seedRand);
+    case "abyssal": return seedRand() < 0.3 ? createCaveMouth(colorHex, seedRand) : createDebris(colorHex, seedRand);
     case "ashen": return createDeadTree(colorHex, seedRand);
     default: return createSpire(colorHex, seedRand);
   }
@@ -99,6 +99,57 @@ function createDebris(colorHex, rand) {
   return { group, kind: "debris", hoverHeight: 1.2 + rand() * 1.5, bobAmplitude: 0.3 + rand() * 0.3, bobSeed: rand() * Math.PI * 2, spinRate: (rand() - 0.5) * 0.3 };
 }
 
+// An actual tree — trunk plus a cluster of overlapping foliage spheres —
+// distinct from the bioluminescent flora stalk: ordinary green canopy,
+// not glowing, so Verdant Hollow reads as a mix of alien flora and
+// familiar-looking trees rather than one repeated motif.
+function createLivingTree(colorHex, rand) {
+  const group = new THREE.Group();
+  const h = 4 + rand() * 4;
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x4a3524, roughness: 0.9, flatShading: true });
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.3, h, 6), trunkMat);
+  trunk.position.y = h / 2;
+  group.add(trunk);
+
+  const leafBase = new THREE.Color(0x2f7a3a);
+  const leafMat = new THREE.MeshStandardMaterial({ color: leafBase, roughness: 0.85, flatShading: true });
+  const clumps = 3 + Math.floor(rand() * 3);
+  for (let i = 0; i < clumps; i++) {
+    const scale = 1.1 + rand() * 1.1;
+    const foliage = new THREE.Mesh(new THREE.IcosahedronGeometry(scale, 0), leafMat);
+    const angle = rand() * Math.PI * 2, dist = rand() * 0.9;
+    foliage.position.set(Math.cos(angle) * dist, h * (0.78 + rand() * 0.22), Math.sin(angle) * dist);
+    group.add(foliage);
+  }
+  return { group, kind: "tree", bobAmplitude: 0.02, bobSeed: rand() * Math.PI * 2 };
+}
+
+// A dark opening set into a rock outcrop, implying a cave system beneath
+// Abyssal Drift's chasms without needing actual walkable interior
+// geometry — the rock silhouette plus an unlit dark "hole" mesh in front
+// of it is the standard cheap way to sell a cave mouth.
+function createCaveMouth(colorHex, rand) {
+  const group = new THREE.Group();
+  const rockMat = new THREE.MeshStandardMaterial({ color: 0x2e2b38, roughness: 0.9, flatShading: true });
+  const rock = new THREE.Mesh(new THREE.IcosahedronGeometry(2.4 + rand() * 1.2, 0), rockMat);
+  rock.scale.set(1.3, 0.9, 1);
+  rock.position.y = 1.4;
+  group.add(rock);
+
+  const mouthMat = new THREE.MeshBasicMaterial({ color: 0x040308 });
+  const mouth = new THREE.Mesh(new THREE.CircleGeometry(0.9 + rand() * 0.4, 12), mouthMat);
+  mouth.position.set(0, 1.1, rock.geometry.parameters.radius * 0.75);
+  group.add(mouth);
+
+  // A faint colored glow just inside the opening — something down there,
+  // never explained, matching the zone's general "never finished falling"
+  // unease rather than lighting the mouth up like an invitation.
+  const light = new THREE.PointLight(colorHex, 0.35, 5);
+  light.position.copy(mouth.position);
+  group.add(light);
+  return { group, kind: "caveMouth" };
+}
+
 // Bare, branching skeletal tree silhouette.
 function createDeadTree(colorHex, rand) {
   const group = new THREE.Group();
@@ -124,6 +175,8 @@ function createDeadTree(colorHex, rand) {
 function updateDecoration(handle, elapsed) {
   if (handle.kind === "stalk") {
     handle.group.scale.setScalar(1 + Math.sin(elapsed * 1.4 + handle.bobSeed) * handle.bobAmplitude * 0.06);
+  } else if (handle.kind === "tree") {
+    handle.group.rotation.z = Math.sin(elapsed * 0.5 + handle.bobSeed) * handle.bobAmplitude;
   } else if (handle.kind === "debris") {
     handle.group.position.y = handle.baseY + handle.hoverHeight + Math.sin(elapsed * 0.6 + handle.bobSeed) * handle.bobAmplitude;
     handle.group.rotation.y += handle.spinRate * 0.016;

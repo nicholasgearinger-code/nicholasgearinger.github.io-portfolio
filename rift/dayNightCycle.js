@@ -178,7 +178,60 @@ function createSunBeams(scene, beamTexture) {
   return { group, sprites };
 }
 
-function createBody(scene, glowTexture, map, coreRadius, glowColor, glowRadius, glowOpacity) {
+// A distant "gas giant" — soft horizontal banding, unlike the sun's
+// turbulent granulation or the moon's scattered craters. Reads as a
+// planet, not a star or moon.
+function createDistantPlanetTexture() {
+  const size = 256;
+  const canvas = document.createElement("canvas");
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const bands = ["#c98a5a", "#d9a06e", "#b9754a", "#e0ac7d", "#c17a4e"];
+  const bandHeight = size / bands.length;
+  bands.forEach((color, i) => {
+    ctx.fillStyle = color;
+    ctx.fillRect(0, i * bandHeight, size, bandHeight + 1);
+  });
+  // Soft horizontal blur to blend the hard band edges into gradients.
+  ctx.filter = "blur(6px)";
+  ctx.drawImage(canvas, 0, 0);
+  return new THREE.CanvasTexture(canvas);
+}
+
+// A tall vertical strip with a soft multi-color gradient (the classic
+// green/cyan/violet aurora palette) — stretched thin and tiled sideways
+// to build the curtain, rather than one huge texture.
+function createAuroraTexture() {
+  const w = 64, h = 256;
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, "rgba(120,255,180,0)");
+  grad.addColorStop(0.25, "rgba(120,255,180,0.55)");
+  grad.addColorStop(0.55, "rgba(140,220,255,0.4)");
+  grad.addColorStop(0.8, "rgba(190,140,255,0.25)");
+  grad.addColorStop(1, "rgba(190,140,255,0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+  return new THREE.CanvasTexture(canvas);
+}
+
+// A short bright streak fading to nothing at one end — a shooting star's
+// whole visible lifetime is just this drawn once and moved fast.
+function createStreakTexture() {
+  const w = 256, h = 16;
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  const grad = ctx.createLinearGradient(0, 0, w, 0);
+  grad.addColorStop(0, "rgba(255,255,255,0)");
+  grad.addColorStop(0.85, "rgba(255,255,255,0.85)");
+  grad.addColorStop(1, "rgba(255,255,255,1)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, h * 0.3, w, h * 0.4);
+  return new THREE.CanvasTexture(canvas);
+}
   const group = new THREE.Group();
 
   const coreMat = new THREE.MeshBasicMaterial({ map, fog: false, transparent: true });
@@ -200,6 +253,70 @@ function createBody(scene, glowTexture, map, coreRadius, glowColor, glowRadius, 
 // A large inverted sphere with a vertical vertex-color gradient — replaces
 // the old flat scene.background color. Recomputed every frame (cheap:
 // ~500 vertices) since the gradient's two colors shift with the cycle.
+// A permanent fixture of the sky — unlike the sun/moon it doesn't cycle
+// with day/night, it's just always out there (fading only with fog/haze
+// like anything distant would), which is what actually sells "this is a
+// different sky" rather than "Earth's moon reskinned."
+function createDistantPlanet(scene) {
+  const mat = new THREE.MeshBasicMaterial({ map: createDistantPlanetTexture(), fog: true, transparent: true, opacity: 0.85 });
+  const core = new THREE.Mesh(new THREE.SphereGeometry(26, 20, 20), mat);
+  core.position.set(-420, 180, -520);
+  core.rotation.z = 0.4;
+  const ringMat = new THREE.MeshBasicMaterial({
+    color: 0xd9b48a, transparent: true, opacity: 0.35, side: THREE.DoubleSide, fog: true, depthWrite: false,
+  });
+  const ring = new THREE.Mesh(new THREE.RingGeometry(34, 46, 48), ringMat);
+  ring.rotation.x = Math.PI / 2.4;
+  core.add(ring);
+  scene.add(core);
+  return { core, driftSeed: Math.random() * Math.PI * 2 };
+}
+
+// A handful of tall vertical strips clustered together and given a slow
+// horizontal wave, rather than one flat plane — real auroras ripple
+// unevenly along their length, a single static strip would read as a
+// green banner, not a curtain of light.
+function createAurora(scene) {
+  const texture = createAuroraTexture();
+  const group = new THREE.Group();
+  const stripCount = 10;
+  const strips = [];
+  for (let i = 0; i < stripCount; i++) {
+    const mat = new THREE.SpriteMaterial({
+      map: texture, transparent: true, opacity: 0, blending: THREE.AdditiveBlending,
+      depthWrite: false, fog: false,
+    });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(30, 160, 1);
+    sprite.position.set((i - stripCount / 2) * 22, 260, -400);
+    group.add(sprite);
+    strips.push({ sprite, seed: Math.random() * Math.PI * 2 });
+  }
+  scene.add(group);
+  return { group, strips };
+}
+
+// Shooting stars are a small pool of reusable streaks rather than
+// spawning/destroying objects — one is "inactive" (parked, invisible)
+// until its turn, then animates across a chord of sky and goes back to
+// waiting. Avoids any create/dispose churn for something this frequent.
+function createShootingStars(scene) {
+  const texture = createStreakTexture();
+  const pool = [];
+  for (let i = 0; i < 3; i++) {
+    const mat = new THREE.SpriteMaterial({
+      map: texture, transparent: true, opacity: 0, blending: THREE.AdditiveBlending,
+      depthWrite: false, fog: false, rotation: 0,
+    });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(40, 3, 1);
+    scene.add(sprite);
+    pool.push({ sprite, active: false, life: 0, duration: 0, start: new THREE.Vector3(), end: new THREE.Vector3() });
+  }
+  return { pool, timer: randRangeLocal(4, 12) };
+}
+function randRangeLocal(min, max) { return min + Math.random() * (max - min); }
+
 function createSkyDome(scene) {
   const geo = new THREE.SphereGeometry(SKY_DOME_RADIUS, 32, 16);
   const colors = new Float32Array(geo.attributes.position.count * 3);
@@ -237,7 +354,13 @@ function createDayNightCycle(scene, sun, ambient, starfield) {
   const moonBody = createBody(scene, glowTexture, createMoonTexture(), 9, 0xaebedd, 22, 0.32);
   const sunBeams = createSunBeams(scene, createBeamTexture());
   const sky = createSkyDome(scene);
-  return { scene, sun, ambient, starfield, sunBody, moonBody, sunBeams, sky, elapsed: 0 };
+  const distantPlanet = createDistantPlanet(scene);
+  const aurora = createAurora(scene);
+  const shootingStars = createShootingStars(scene);
+  return {
+    scene, sun, ambient, starfield, sunBody, moonBody, sunBeams, sky,
+    distantPlanet, aurora, shootingStars, elapsed: 0,
+  };
 }
 
 function updateDayNightCycle(cycle, dt) {
@@ -311,6 +434,49 @@ function updateDayNightCycle(cycle, dt) {
   // by mid-morning.
   if (cycle.starfield) {
     cycle.starfield.material.opacity = THREE.MathUtils.clamp(1 - dayAmount / 0.25, 0, 1);
+  }
+
+  // The distant planet barely moves — a slow, tiny drift and spin is
+  // enough to read as "real" without it visibly crossing the sky the way
+  // the sun/moon do. It's a fixture, not a light source.
+  cycle.distantPlanet.core.rotation.y += dt * 0.01;
+  cycle.distantPlanet.core.position.x += Math.sin(cycle.elapsed * 0.01 + cycle.distantPlanet.driftSeed) * dt * 0.03;
+
+  // Aurora only shows at night, brightening as full darkness sets in, and
+  // each strip ripples on its own offset so the curtain shimmers unevenly
+  // along its length rather than pulsing as one flat sheet.
+  const auroraVisibility = THREE.MathUtils.clamp(1 - dayAmount / 0.15, 0, 1);
+  for (const strip of cycle.aurora.strips) {
+    const shimmer = 0.4 + 0.6 * Math.max(0, Math.sin(cycle.elapsed * 0.35 + strip.seed));
+    strip.sprite.material.opacity = auroraVisibility * shimmer * 0.5;
+    strip.sprite.position.x += Math.sin(cycle.elapsed * 0.15 + strip.seed) * dt * 0.4;
+  }
+
+  // Shooting stars: a pool of reusable streaks, one spawned at a time on a
+  // random timer, only during actual night — arcs across a random chord
+  // of sky and fades out over its short lifetime.
+  cycle.shootingStars.timer -= dt;
+  if (dayAmount < 0.05 && cycle.shootingStars.timer <= 0) {
+    const idle = cycle.shootingStars.pool.find((s) => !s.active);
+    if (idle) {
+      idle.active = true;
+      idle.life = 0;
+      idle.duration = 0.5 + Math.random() * 0.4;
+      const startX = (Math.random() - 0.5) * 500, startY = 200 + Math.random() * 200;
+      idle.start.set(startX, startY, -300 - Math.random() * 200);
+      idle.end.set(startX + 200 + Math.random() * 150, startY - 150 - Math.random() * 100, idle.start.z);
+      const dx = idle.end.x - idle.start.x, dy = idle.end.y - idle.start.y;
+      idle.sprite.material.rotation = Math.atan2(dy, dx);
+    }
+    cycle.shootingStars.timer = randRangeLocal(5, 18);
+  }
+  for (const s of cycle.shootingStars.pool) {
+    if (!s.active) continue;
+    s.life += dt;
+    const k = s.life / s.duration;
+    if (k >= 1) { s.active = false; s.sprite.material.opacity = 0; continue; }
+    s.sprite.position.lerpVectors(s.start, s.end, k);
+    s.sprite.material.opacity = Math.sin(k * Math.PI); // fades in, peaks mid-flight, fades out — not a hard cut at either end
   }
 
   return { t, dayAmount };

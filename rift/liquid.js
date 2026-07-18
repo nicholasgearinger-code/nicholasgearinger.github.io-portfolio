@@ -27,6 +27,30 @@ const LIQUID_STYLE = {
   },
 };
 
+// A soft mottled noise pattern, tiled — real distortion needs a
+// post-process shader this project doesn't have, so instead this scrolls
+// upward and wobbles sideways on a mostly-transparent overlay just above
+// the lava, which is enough to read as rising heat haze without needing
+// actual screen-space refraction.
+function createShimmerTexture() {
+  const size = 128;
+  const canvas = document.createElement("canvas");
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  for (let i = 0; i < 40; i++) {
+    const x = Math.random() * size, y = Math.random() * size, r = 6 + Math.random() * 16;
+    const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
+    grad.addColorStop(0, "rgba(255,220,180,0.35)");
+    grad.addColorStop(1, "rgba(255,220,180,0)");
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(3, 3);
+  return texture;
+}
+
 /**
  * @param {THREE.Scene} scene
  * @param {string} biome
@@ -60,6 +84,7 @@ function createLiquidPlane(scene, biome, y, size) {
   // lighting/tone mapping alongside the day/night cycle. Water doesn't
   // get one — it isn't meant to look lit from within.
   let glow = null;
+  let shimmer = null;
   if (style.glowColor !== undefined) {
     const glowGeo = new THREE.PlaneGeometry(size, size, 1, 1);
     glowGeo.rotateX(-Math.PI / 2);
@@ -70,15 +95,28 @@ function createLiquidPlane(scene, biome, y, size) {
     glow = new THREE.Mesh(glowGeo, glowMat);
     glow.position.y = y + 0.05;
     scene.add(glow);
+
+    // Heat shimmer sits a few units above the surface (not on it) so it
+    // reads as haze rising off the lava rather than another lava-colored
+    // layer — subtle and additive, meant to be almost subliminal up close.
+    const shimmerGeo = new THREE.PlaneGeometry(size, size, 1, 1);
+    shimmerGeo.rotateX(-Math.PI / 2);
+    const shimmerMat = new THREE.MeshBasicMaterial({
+      map: createShimmerTexture(), transparent: true, opacity: 0.18,
+      blending: THREE.AdditiveBlending, depthWrite: false, fog: true,
+    });
+    shimmer = new THREE.Mesh(shimmerGeo, shimmerMat);
+    shimmer.position.y = y + 3.5;
+    scene.add(shimmer);
   }
 
   const basePositions = new Float32Array(posAttr.array); // original Y per vertex, for the ripple to animate around
-  return { mesh, glow, basePositions, biome, style };
+  return { mesh, glow, shimmer, basePositions, biome, style };
 }
 
 function updateLiquidPlane(handle, elapsed) {
   if (!handle) return;
-  const { mesh, glow, basePositions, biome, style } = handle;
+  const { mesh, glow, shimmer, basePositions, biome, style } = handle;
   const posAttr = mesh.geometry.attributes.position;
   const colorAttr = mesh.geometry.attributes.color;
   // Cheap per-vertex ripple — lava churns slower/heavier, water ripples
@@ -127,6 +165,9 @@ function updateLiquidPlane(handle, elapsed) {
     const pulse = 0.85 + 0.25 * Math.sin(elapsed * 0.9);
     mesh.material.emissiveIntensity = style.emissiveIntensity * pulse;
     if (glow) glow.material.opacity = style.glowOpacity * (0.75 + 0.4 * Math.sin(elapsed * 0.9));
+    if (shimmer) {
+      shimmer.material.map.offset.set(Math.sin(elapsed * 0.25) * 0.3, (elapsed * 0.12) % 1); // upward scroll + gentle sideways wobble, not a static texture
+    }
   }
 }
 
@@ -139,6 +180,12 @@ function disposeLiquidPlane(scene, handle) {
     scene.remove(handle.glow);
     handle.glow.geometry.dispose();
     handle.glow.material.dispose();
+  }
+  if (handle.shimmer) {
+    scene.remove(handle.shimmer);
+    handle.shimmer.geometry.dispose();
+    handle.shimmer.material.map.dispose();
+    handle.shimmer.material.dispose();
   }
 }
 

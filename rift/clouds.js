@@ -18,6 +18,18 @@ const CLOUD_STYLE = {
   ashen: { count: 3, altitude: 110, spread: 150, puffColor: 0xd6cdb8, opacity: 0.35, scale: 10 },   // thin, wispy, dust-pale — barely enough moisture in the air to call these clouds
 };
 
+// Same cluster-of-billboards technique as sky clouds, just low, wide, and
+// flattened (small vertical spread, big horizontal spread) instead of
+// puffy — a visible drifting mist layer at ground level, distinct from
+// the ambient fog density that already breathes in weather.js.
+const GROUND_FOG_STYLE = {
+  ember: { count: 4, altitude: 2, spread: 90, puffColor: 0x6b5d52, opacity: 0.3, scale: 22 },
+  verdant: { count: 5, altitude: 1.5, spread: 100, puffColor: 0xe8eef0, opacity: 0.35, scale: 24 },
+  crystal: { count: 3, altitude: 2, spread: 90, puffColor: 0xcfe6ee, opacity: 0.25, scale: 20 },
+  abyssal: { count: 7, altitude: 1, spread: 100, puffColor: 0x342f42, opacity: 0.45, scale: 26 }, // the thickest, heaviest ground fog — rolls right through the chasms
+  ashen: { count: 4, altitude: 1.5, spread: 100, puffColor: 0xb8ab90, opacity: 0.28, scale: 22 },
+};
+
 let sharedPuffTexture = null;
 function getPuffTexture() {
   if (sharedPuffTexture) return sharedPuffTexture;
@@ -35,7 +47,7 @@ function getPuffTexture() {
   return sharedPuffTexture;
 }
 
-function createCloud(scene, style) {
+function createCloud(scene, style, flatten = 1) {
   const group = new THREE.Group();
   const puffCount = 4 + Math.floor(Math.random() * 4);
   const sprites = [];
@@ -46,12 +58,12 @@ function createCloud(scene, style) {
     });
     const sprite = new THREE.Sprite(mat);
     const s = style.scale * (0.6 + Math.random() * 0.7);
-    sprite.scale.setScalar(s);
-    sprite.position.set((Math.random() - 0.5) * style.scale * 1.4, (Math.random() - 0.5) * style.scale * 0.35, (Math.random() - 0.5) * style.scale * 1.4);
+    sprite.scale.set(s, s * flatten, 1); // flatten<1 spreads wide and low instead of puffy — this is what turns the same technique into a ground fog bank
+    sprite.position.set((Math.random() - 0.5) * style.scale * 1.4, (Math.random() - 0.5) * style.scale * 0.35 * flatten, (Math.random() - 0.5) * style.scale * 1.4);
     group.add(sprite);
     sprites.push(sprite);
   }
-  group.position.set((Math.random() - 0.5) * style.spread * 2, style.altitude + (Math.random() - 0.5) * 12, (Math.random() - 0.5) * style.spread * 2);
+  group.position.set((Math.random() - 0.5) * style.spread * 2, style.altitude + (Math.random() - 0.5) * 12 * flatten, (Math.random() - 0.5) * style.spread * 2);
   scene.add(group);
   return { group, sprites, baseOpacity: style.opacity };
 }
@@ -64,7 +76,12 @@ function createClouds(scene, biome) {
   const style = CLOUD_STYLE[biome] || CLOUD_STYLE.verdant;
   const clouds = [];
   for (let i = 0; i < style.count; i++) clouds.push(createCloud(scene, style));
-  return { clouds, style, windOffsetX: 0, windOffsetZ: 0 };
+
+  const fogStyle = GROUND_FOG_STYLE[biome] || GROUND_FOG_STYLE.verdant;
+  const groundFog = [];
+  for (let i = 0; i < fogStyle.count; i++) groundFog.push(createCloud(scene, fogStyle, 0.18));
+
+  return { clouds, style, groundFog, fogStyle, windOffsetX: 0, windOffsetZ: 0 };
 }
 
 /**
@@ -76,7 +93,7 @@ function createClouds(scene, biome) {
  */
 function updateClouds(handle, dt, wind, dayAmount, rainIntensity) {
   if (!handle) return;
-  const { clouds, style } = handle;
+  const { clouds, style, groundFog, fogStyle } = handle;
   const lightFactor = 0.55 + dayAmount * 0.45; // dimmer/moodier at dawn/dusk/night, brightest at noon
   const stormDarken = 1 - (rainIntensity || 0) * 0.4;
   for (const cloud of clouds) {
@@ -91,6 +108,20 @@ function updateClouds(handle, dt, wind, dayAmount, rainIntensity) {
       sprite.material.opacity = cloud.baseOpacity * lightFactor * stormDarken;
     }
   }
+
+  // Ground fog drifts at full wind speed (it's right there at head height,
+  // not far off like sky clouds) and isn't storm-darkened — it's mist,
+  // not a rain cloud, so it stays the same regardless of whether it's
+  // raining.
+  for (const bank of groundFog) {
+    bank.group.position.x += (wind?.windX || 0) * dt;
+    bank.group.position.z += (wind?.windZ || 0) * dt;
+    if (Math.abs(bank.group.position.x) > fogStyle.spread) bank.group.position.x = -Math.sign(bank.group.position.x) * fogStyle.spread;
+    if (Math.abs(bank.group.position.z) > fogStyle.spread) bank.group.position.z = -Math.sign(bank.group.position.z) * fogStyle.spread;
+    for (const sprite of bank.sprites) {
+      sprite.material.opacity = bank.baseOpacity * lightFactor;
+    }
+  }
 }
 
 function disposeClouds(scene, handle) {
@@ -98,6 +129,10 @@ function disposeClouds(scene, handle) {
   for (const cloud of handle.clouds) {
     scene.remove(cloud.group);
     for (const sprite of cloud.sprites) sprite.material.dispose();
+  }
+  for (const bank of handle.groundFog) {
+    scene.remove(bank.group);
+    for (const sprite of bank.sprites) sprite.material.dispose();
   }
 }
 

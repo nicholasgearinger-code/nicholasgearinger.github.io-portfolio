@@ -45,6 +45,106 @@ const WEATHER_PROFILE = {
 
 function randRange(min, max) { return min + Math.random() * (max - min); }
 
+let sharedFlashTexture = null;
+function getFlashTexture() {
+  if (sharedFlashTexture) return sharedFlashTexture;
+  const size = 128;
+  const canvas = document.createElement("canvas");
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, "rgba(255,255,255,1)");
+  grad.addColorStop(0.4, "rgba(255,255,255,0.5)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  sharedFlashTexture = new THREE.CanvasTexture(canvas);
+  return sharedFlashTexture;
+}
+
+let sharedDustTexture = null;
+function getDustTexture() {
+  if (sharedDustTexture) return sharedDustTexture;
+  const size = 32;
+  const canvas = document.createElement("canvas");
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, "rgba(216,199,166,0.9)");
+  grad.addColorStop(1, "rgba(216,199,166,0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  sharedDustTexture = new THREE.CanvasTexture(canvas);
+  return sharedDustTexture;
+}
+
+// Crystal-only — a brief rainbow arc, as if light caught one of the
+// spires just right for a moment. A real rainbow texture (hue sweep
+// across the strip), not a single tinted glow.
+let sharedRainbowTexture = null;
+function getRainbowTexture() {
+  if (sharedRainbowTexture) return sharedRainbowTexture;
+  const w = 256, h = 32;
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  const grad = ctx.createLinearGradient(0, 0, w, 0);
+  const hues = [0, 40, 90, 170, 220, 270, 320];
+  hues.forEach((hue, i) => grad.addColorStop(i / (hues.length - 1), `hsla(${hue},85%,65%,0.8)`));
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+  // Fade the strip's own top/bottom edges so it reads as an arc slice,
+  // not a hard-edged bar.
+  const fade = ctx.createLinearGradient(0, 0, 0, h);
+  fade.addColorStop(0, "rgba(0,0,0,1)");
+  fade.addColorStop(0.5, "rgba(0,0,0,0)");
+  fade.addColorStop(1, "rgba(0,0,0,1)");
+  ctx.globalCompositeOperation = "destination-out";
+  ctx.fillStyle = fade;
+  ctx.fillRect(0, 0, w, h);
+  sharedRainbowTexture = new THREE.CanvasTexture(canvas);
+  return sharedRainbowTexture;
+}
+
+function createCrystalRefraction(scene) {
+  const mat = new THREE.SpriteMaterial({
+    map: getRainbowTexture(), transparent: true, opacity: 0,
+    blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+  });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(26, 4, 1);
+  scene.add(sprite);
+  return { sprite, flash: 0, timer: randRange(10, 25) };
+}
+function createDustDevil(scene) {
+  const count = 40;
+  const positions = new Float32Array(count * 3);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const mat = new THREE.PointsMaterial({
+    map: getDustTexture(), size: 1.1, transparent: true, opacity: 0,
+    depthWrite: false, sizeAttenuation: true,
+  });
+  const points = new THREE.Points(geo, mat);
+  scene.add(points);
+  return { points, count, active: false, life: 0, duration: 0, x: 0, z: 0, spin: 0 };
+}
+
+// A storm happening somewhere else entirely — a silent glow low on the
+// horizon rather than another point light (something 300+ units away
+// wouldn't meaningfully light the scene regardless), present in every
+// biome as a shared sense of "the world is bigger than just here."
+function createDistantLightning(scene) {
+  const mat = new THREE.SpriteMaterial({
+    map: getFlashTexture(), color: 0xdfe8ff, transparent: true, opacity: 0,
+    blending: THREE.AdditiveBlending, depthWrite: false, fog: true,
+  });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(90, 55, 1);
+  scene.add(sprite);
+  return { sprite, flash: 0, timer: randRange(15, 40) };
+}
+
 function createRain(scene) {
   const count = 1400;
   const positions = new Float32Array(count * 3);
@@ -78,15 +178,19 @@ function createWeatherSystem(scene, biome) {
   scene.add(lightningLight);
 
   const rain = profile.rain ? createRain(scene) : null;
+  const distantLightning = createDistantLightning(scene);
+  const dustDevil = biome === "ashen" ? createDustDevil(scene) : null;
+  const crystalRefraction = biome === "crystal" ? createCrystalRefraction(scene) : null;
 
   return {
-    scene, biome, profile, lightningLight, rain,
+    scene, biome, profile, lightningLight, rain, distantLightning, dustDevil, crystalRefraction,
     windAngle: Math.random() * Math.PI * 2,
     lightningTimer: randRange(profile.lightning.intervalMin, profile.lightning.intervalMax),
     lightningFlash: 0,
     rainActive: false,
     rainTimer: profile.rain ? randRange(2, profile.rainCycleMin) : Infinity, // first rain shouldn't take the full cycle to arrive
     rainIntensity: 0,
+    dustDevilTimer: randRange(8, 20),
     elapsed: 0,
   };
 }
@@ -153,6 +257,73 @@ function updateWeatherSystem(handle, dt) {
   const flashPeak = lp.dim ? 3 : 9;
   handle.lightningLight.intensity = handle.lightningFlash * handle.lightningFlash * flashPeak; // squared falloff — a sharp pop rather than a linear fade
 
+  // Distant horizon lightning — its own independent timer, unrelated to
+  // this biome's own weather, just something visible far off.
+  const dl = handle.distantLightning;
+  dl.timer -= dt;
+  if (dl.timer <= 0) {
+    dl.flash = 1;
+    const angle = Math.random() * Math.PI * 2;
+    dl.sprite.position.set(Math.cos(angle) * 480, 25 + Math.random() * 20, Math.sin(angle) * 480);
+    dl.timer = randRange(15, 40);
+  }
+  dl.flash = Math.max(0, dl.flash - dt * 3);
+  dl.sprite.material.opacity = dl.flash * dl.flash * 0.6;
+
+  // Dust devils — Ashen only. Spawns at a random ground spot, spins up
+  // dust in a rising spiral, drifts a little with the wind, then
+  // dissipates.
+  if (handle.dustDevil) {
+    const dd = handle.dustDevil;
+    handle.dustDevilTimer -= dt;
+    if (!dd.active && handle.dustDevilTimer <= 0) {
+      dd.active = true;
+      dd.life = 0;
+      dd.duration = 6 + Math.random() * 8;
+      dd.x = (Math.random() - 0.5) * 140;
+      dd.z = (Math.random() - 0.5) * 140;
+      handle.dustDevilTimer = randRange(15, 35);
+    }
+    if (dd.active) {
+      dd.life += dt;
+      const k = dd.life / dd.duration;
+      if (k >= 1) {
+        dd.active = false;
+        dd.points.material.opacity = 0;
+      } else {
+        dd.x += windX * dt * 0.5;
+        dd.z += windZ * dt * 0.5;
+        const posAttr = dd.points.geometry.attributes.position;
+        for (let i = 0; i < dd.count; i++) {
+          const t = i / dd.count;
+          const spinAngle = handle.elapsed * 4 + t * Math.PI * 8;
+          const radius = 0.5 + t * 2.5;
+          posAttr.setX(i, dd.x + Math.cos(spinAngle) * radius);
+          posAttr.setY(i, t * 9);
+          posAttr.setZ(i, dd.z + Math.sin(spinAngle) * radius);
+        }
+        posAttr.needsUpdate = true;
+        dd.points.material.opacity = Math.sin(k * Math.PI) * 0.5; // fades in, peaks mid-life, fades out
+      }
+    }
+  }
+
+  // Crystal light refraction — Crystal Spire only. A brief rainbow arc
+  // near one of the spires, as if the light caught it just right.
+  if (handle.crystalRefraction) {
+    const cr = handle.crystalRefraction;
+    cr.timer -= dt;
+    if (cr.timer <= 0) {
+      cr.flash = 1;
+      const angle = Math.random() * Math.PI * 2, dist = 15 + Math.random() * 30;
+      cr.sprite.position.set(Math.cos(angle) * dist, 6 + Math.random() * 8, Math.sin(angle) * dist);
+      cr.sprite.material.rotation = Math.random() * Math.PI * 2;
+      cr.timer = randRange(10, 25);
+    }
+    cr.flash = Math.max(0, cr.flash - dt * 0.6); // lingers a couple seconds rather than a sharp lightning-style pop
+    cr.sprite.material.opacity = Math.sin(Math.min(1, cr.flash) * Math.PI) * 0.55;
+  }
+
   return { windX, windZ, windStrength, rainIntensity: handle.rainIntensity };
 }
 
@@ -163,6 +334,19 @@ function disposeWeatherSystem(scene, handle) {
     scene.remove(handle.rain.points);
     handle.rain.points.geometry.dispose();
     handle.rain.points.material.dispose();
+  }
+  if (handle.distantLightning) {
+    scene.remove(handle.distantLightning.sprite);
+    handle.distantLightning.sprite.material.dispose();
+  }
+  if (handle.dustDevil) {
+    scene.remove(handle.dustDevil.points);
+    handle.dustDevil.points.geometry.dispose();
+    handle.dustDevil.points.material.dispose();
+  }
+  if (handle.crystalRefraction) {
+    scene.remove(handle.crystalRefraction.sprite);
+    handle.crystalRefraction.sprite.material.dispose();
   }
 }
 

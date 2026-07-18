@@ -5,6 +5,8 @@ import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
 import { createDecoration, updateDecoration } from "./decorations.js";
 import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane } from "./liquid.js";
+import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
+import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
 import {
   createBolt, updateBolt, disposeBolt,
   createMuzzleFlash, updateMuzzleFlash, disposeMuzzleFlash,
@@ -68,6 +70,8 @@ camera.rotation.order = "YXZ";
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setSize(viewport.clientWidth, viewport.clientHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 function resizeToViewport() {
   const w = viewport.clientWidth, h = viewport.clientHeight;
@@ -135,11 +139,29 @@ window.addEventListener("keydown", (e) => {
   if (e.code === "Escape" && viewport.classList.contains("rift-fullscreen")) exitFullscreen();
 });
 
-scene.add(new THREE.AmbientLight(0x8899bb, 0.65));
+const ambientLight = new THREE.AmbientLight(0x8899bb, 0.65);
+scene.add(ambientLight);
 const sun = new THREE.DirectionalLight(0xffffff, 1.1);
 sun.position.set(60, 100, 40);
+sun.castShadow = true;
+// Shadow frustum sized to the terrain's own extent (see terrain.js's
+// TERRAIN_SIZE) rather than Three.js's small default — otherwise most of
+// the level would fall outside the shadow camera entirely. Resolution
+// kept moderate; this is a single directional light so the cost is one
+// shadow pass regardless, but a bigger map is still real GPU/memory cost
+// on lower-end devices.
+const SHADOW_EXTENT = 140;
+sun.shadow.camera.left = -SHADOW_EXTENT;
+sun.shadow.camera.right = SHADOW_EXTENT;
+sun.shadow.camera.top = SHADOW_EXTENT;
+sun.shadow.camera.bottom = -SHADOW_EXTENT;
+sun.shadow.camera.near = 1;
+sun.shadow.camera.far = 500;
+sun.shadow.mapSize.set(1536, 1536);
+sun.shadow.bias = -0.0015;
 scene.add(sun);
 
+let starfieldPoints = null;
 {
   const starGeo = new THREE.BufferGeometry();
   const starCount = 1500;
@@ -150,9 +172,12 @@ scene.add(sun);
     positions[i * 3 + 2] = (Math.random() - 0.5) * 1200;
   }
   starGeo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-  const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.8, sizeAttenuation: true });
-  scene.add(new THREE.Points(starGeo, starMat));
+  const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.8, sizeAttenuation: true, transparent: true, opacity: 1 });
+  starfieldPoints = new THREE.Points(starGeo, starMat);
+  scene.add(starfieldPoints);
 }
+
+const dayNightCycle = createDayNightCycle(scene, sun, ambientLight, starfieldPoints);
 
 // ---------------------------------------------------------------------------
 // Controls
@@ -227,6 +252,7 @@ function updateMovement(dt, grounded) {
 // ---------------------------------------------------------------------------
 let terrainMesh = null;
 let liquidHandle = null;
+let atmosphereHandle = null;
 const crystalHandles = new Map();
 let allCrystals = [];
 let crystalsTotal = 0;
@@ -246,6 +272,8 @@ function teardownLevel() {
   }
   disposeLiquidPlane(scene, liquidHandle);
   liquidHandle = null;
+  disposeAtmosphericParticles(scene, atmosphereHandle);
+  atmosphereHandle = null;
   for (const [, handle] of crystalHandles) disposeCrystalMesh(scene, handle);
   crystalHandles.clear();
   allCrystals = [];
@@ -272,11 +300,15 @@ function buildLevel(levelIdx) {
       emissive: level.color, emissiveIntensity: 0.04,
     })
   );
+  terrainMesh.receiveShadow = true;
+  terrainMesh.castShadow = true; // the terrain's own elevation (spires, ridges) can shadow other parts of itself
   scene.add(terrainMesh);
 
   if (LIQUID_LEVEL[level.biome] !== undefined) {
     liquidHandle = createLiquidPlane(scene, level.biome, LIQUID_LEVEL[level.biome], TERRAIN_SIZE);
   }
+
+  atmosphereHandle = createAtmosphericParticles(scene, level.biome);
 
   const layout = generateLevelLayout(level.biome, WORLD_SEED);
 
@@ -296,6 +328,9 @@ function buildLevel(levelIdx) {
     handle.group.position.set(seed.x, groundY, seed.z);
     handle.group.rotation.y = seed.rand() * Math.PI * 2;
     handle.baseY = groundY;
+    handle.group.traverse((obj) => {
+      if (obj.isMesh) { obj.castShadow = true; obj.receiveShadow = true; }
+    });
     scene.add(handle.group);
     decorationHandles.push(handle);
   });
@@ -519,6 +554,8 @@ function animate() {
   const dt = Math.min(clock.getDelta(), 0.1);
   elapsedTime += dt;
 
+  updateDayNightCycle(dayNightCycle, dt);
+
   if (isGameActive() && currentLevelIdx >= 0) {
     updateMovement(dt, playerPhysics.grounded);
     updatePlayerPhysics(camera, terrainMesh, playerPhysics, dt, PLAYER_EYE_HEIGHT, jumpQueued);
@@ -530,6 +567,7 @@ function animate() {
   for (const [, handle] of crystalHandles) updateCrystalMesh(handle, elapsedTime);
   for (const handle of decorationHandles) updateDecoration(handle, elapsedTime);
   updateLiquidPlane(liquidHandle, elapsedTime);
+  updateAtmosphericParticles(atmosphereHandle, elapsedTime, dt);
   updateWorldPulse(dt);
   updateProjectiles(dt);
   renderer.render(scene, camera);

@@ -11,12 +11,19 @@ import * as THREE from "three";
 // -----------------------------------------------------------------------------
 
 function createDecoration(biome, colorHex, seedRand) {
+  const roll = seedRand();
   switch (biome) {
-    case "ember": return createSpire(colorHex, seedRand);
-    case "verdant": return seedRand() < 0.45 ? createLivingTree(colorHex, seedRand) : createFloraStalk(colorHex, seedRand);
-    case "crystal": return createCrystalCluster(colorHex, seedRand);
-    case "abyssal": return seedRand() < 0.3 ? createCaveMouth(colorHex, seedRand) : createDebris(colorHex, seedRand);
-    case "ashen": return createDeadTree(colorHex, seedRand);
+    case "ember": return roll < 0.72 ? createSpire(colorHex, seedRand) : createRockCluster(biome, colorHex, seedRand);
+    case "verdant":
+      if (roll < 0.35) return createLivingTree(colorHex, seedRand);
+      if (roll < 0.78) return createFloraStalk(colorHex, seedRand);
+      return createRockCluster(biome, colorHex, seedRand);
+    case "crystal": return roll < 0.72 ? createCrystalCluster(colorHex, seedRand) : createRockCluster(biome, colorHex, seedRand);
+    case "abyssal":
+      if (roll < 0.25) return createCaveMouth(colorHex, seedRand);
+      if (roll < 0.72) return createDebris(colorHex, seedRand);
+      return createRockCluster(biome, colorHex, seedRand);
+    case "ashen": return roll < 0.62 ? createDeadTree(colorHex, seedRand) : createRockCluster(biome, colorHex, seedRand);
     default: return createSpire(colorHex, seedRand);
   }
 }
@@ -97,6 +104,35 @@ function createDebris(colorHex, rand) {
   const rock = new THREE.Mesh(geo, mat);
   group.add(rock);
   return { group, kind: "debris", hoverHeight: 1.2 + rand() * 1.5, bobAmplitude: 0.3 + rand() * 0.3, bobSeed: rand() * Math.PI * 2, spinRate: (rand() - 0.5) * 0.3 };
+}
+
+// A small cluster of irregular ground-sitting rocks — usable across every
+// biome as plain ground texture, distinct from Abyssal's hovering debris
+// (this sits still and low) and from the more vivid focal decorations
+// (spires, crystal clusters). Color is a muted blend toward gray rather
+// than the biome's full accent color, so these read as background texture
+// and don't compete with the actual focal points.
+function createRockCluster(biome, colorHex, rand) {
+  const group = new THREE.Group();
+  const tint = new THREE.Color(colorHex).lerp(new THREE.Color(0x555248), 0.65);
+  const mat = new THREE.MeshStandardMaterial({ color: tint, roughness: 0.95, flatShading: true });
+  const count = 2 + Math.floor(rand() * 3);
+  for (let i = 0; i < count; i++) {
+    const scale = 0.4 + rand() * 0.9;
+    const geo = new THREE.IcosahedronGeometry(scale, 0);
+    const pos = geo.attributes.position;
+    for (let v = 0; v < pos.count; v++) {
+      const k = 0.8 + rand() * 0.4;
+      pos.setXYZ(v, pos.getX(v) * k, pos.getY(v) * k * 0.7, pos.getZ(v) * k); // squashed vertically — reads as a settled rock, not a floating boulder
+    }
+    geo.computeVertexNormals();
+    const rock = new THREE.Mesh(geo, mat);
+    const angle = rand() * Math.PI * 2, dist = rand() * 1.3;
+    rock.position.set(Math.cos(angle) * dist, scale * 0.35, Math.sin(angle) * dist);
+    rock.rotation.set(rand() * 0.4, rand() * Math.PI * 2, rand() * 0.4);
+    group.add(rock);
+  }
+  return { group, kind: "rockCluster" };
 }
 
 // An actual tree — trunk plus a cluster of overlapping foliage spheres —

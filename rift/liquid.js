@@ -35,7 +35,7 @@ const LIQUID_STYLE = {
 function createLiquidPlane(scene, biome, y, size) {
   const style = LIQUID_STYLE[biome];
   if (!style) return null;
-  const geo = new THREE.PlaneGeometry(size, size, 24, 24);
+  const geo = new THREE.PlaneGeometry(size, size, 40, 40);
   geo.rotateX(-Math.PI / 2);
 
   const posAttr = geo.attributes.position;
@@ -63,19 +63,26 @@ function updateLiquidPlane(handle, elapsed) {
   const posAttr = mesh.geometry.attributes.position;
   const colorAttr = mesh.geometry.attributes.color;
   // Cheap per-vertex ripple — lava churns slower/heavier, water ripples
-  // lighter and faster.
+  // lighter and faster. A second, higher-frequency/lower-amplitude term
+  // layered on top of the main swell adds finer chop instead of one
+  // smooth wave shape everywhere.
   const speed = biome === "ember" ? 0.6 : 1.4;
   const amp = biome === "ember" ? 0.18 : 0.1;
+  const chopAmp = amp * 0.35;
   const tmpColor = new THREE.Color();
   for (let i = 0; i < posAttr.count; i++) {
     const bx = basePositions[i * 3], bz = basePositions[i * 3 + 2];
-    const ripple = Math.sin(bx * 0.15 + elapsed * speed) * amp + Math.cos(bz * 0.12 + elapsed * speed * 0.8) * amp;
+    const swell = Math.sin(bx * 0.15 + elapsed * speed) * amp + Math.cos(bz * 0.12 + elapsed * speed * 0.8) * amp;
+    const chop = Math.sin(bx * 0.55 + bz * 0.4 + elapsed * speed * 2.3) * chopAmp;
+    const ripple = swell + chop;
     posAttr.setY(i, ripple);
 
-    // Normalize ripple (-2*amp..2*amp) to 0..1 and use it to blend toward
-    // the "disturbed" color — frothy crests for water, brighter glowing
-    // patches for lava — rather than a flat, uniform surface.
-    const disturbance = THREE.MathUtils.clamp((ripple + amp * 2) / (amp * 4), 0, 1);
+    // Normalize ripple to 0..1 and use it to blend toward the "disturbed"
+    // color — frothy crests for water, brighter glowing patches for lava
+    // — rather than a flat, uniform surface. Range widened slightly to
+    // account for the added chop term.
+    const range = (amp + chopAmp) * 2;
+    const disturbance = THREE.MathUtils.clamp((ripple + range / 2) / range, 0, 1);
     const accent = biome === "ember" ? style.hotColor : style.frothColor;
     tmpColor.copy(style.baseColor).lerp(accent, Math.pow(disturbance, 3)); // pow(3) keeps the accent rare/at true crests, not smeared across the whole surface
     tmpColor.toArray(colorAttr.array, i * 3);
@@ -83,6 +90,14 @@ function updateLiquidPlane(handle, elapsed) {
   posAttr.needsUpdate = true;
   colorAttr.needsUpdate = true;
   mesh.geometry.computeVertexNormals();
+
+  // Lava also gets a slow overall "breathing" pulse in its base emissive
+  // intensity, independent of the spatial hot-spot pattern above — reads
+  // as the whole surface swelling with heat, not just individual crests
+  // glinting.
+  if (biome === "ember") {
+    mesh.material.emissiveIntensity = style.emissiveIntensity * (0.85 + 0.25 * Math.sin(elapsed * 0.9));
+  }
 }
 
 function disposeLiquidPlane(scene, handle) {

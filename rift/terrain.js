@@ -181,4 +181,17 @@ function buildPlanetTerrain(level, seedStr) {
   return geo;
 }
 
-export { buildPlanetTerrain, biomeHeight, TERRAIN_SIZE, TERRAIN_SEGMENTS, LIQUID_LEVEL };
+/**
+ * Same height biomeHeight() would give, but handles the seed derivation
+ * internally so callers just pass the same (level, seedStr) they'd pass to
+ * buildPlanetTerrain() — meant for callers needing many cheap height
+ * samples (e.g. scattering grass) where raycasting against the built mesh
+ * per-sample would be far more expensive for no accuracy benefit, since
+ * this *is* the exact function the mesh itself was built from.
+ */
+function terrainHeightAt(level, worldX, worldZ, seedStr) {
+  const seed = hashStringToSeed(seedStr + "::" + level.biome) * 1000;
+  return biomeHeight(level.biome, worldX, worldZ, seed);
+}
+
+export { buildPlanetTerrain, biomeHeight, terrainHeightAt, TERRAIN_SIZE, TERRAIN_SEGMENTS, LIQUID_LEVEL };

@@ -1,12 +1,13 @@
 import * as THREE from "three";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
-import { buildPlanetTerrain, TERRAIN_SIZE, LIQUID_LEVEL } from "./terrain.js";
+import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL } from "./terrain.js";
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
 import { createDecoration, updateDecoration } from "./decorations.js";
 import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane } from "./liquid.js";
 import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
+import { createGrass, updateGrass, disposeGrass } from "./vegetation.js";
 import {
   createBolt, updateBolt, disposeBolt,
   createMuzzleFlash, updateMuzzleFlash, disposeMuzzleFlash,
@@ -253,6 +254,7 @@ function updateMovement(dt, grounded) {
 let terrainMesh = null;
 let liquidHandle = null;
 let atmosphereHandle = null;
+let grassHandle = null;
 const crystalHandles = new Map();
 let allCrystals = [];
 let crystalsTotal = 0;
@@ -274,6 +276,8 @@ function teardownLevel() {
   liquidHandle = null;
   disposeAtmosphericParticles(scene, atmosphereHandle);
   atmosphereHandle = null;
+  disposeGrass(scene, grassHandle);
+  grassHandle = null;
   for (const [, handle] of crystalHandles) disposeCrystalMesh(scene, handle);
   crystalHandles.clear();
   allCrystals = [];
@@ -309,6 +313,7 @@ function buildLevel(levelIdx) {
   }
 
   atmosphereHandle = createAtmosphericParticles(scene, level.biome);
+  grassHandle = createGrass(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), TERRAIN_SIZE * 0.4);
 
   const layout = generateLevelLayout(level.biome, WORLD_SEED);
 
@@ -568,6 +573,7 @@ function animate() {
   for (const handle of decorationHandles) updateDecoration(handle, elapsedTime);
   updateLiquidPlane(liquidHandle, elapsedTime);
   updateAtmosphericParticles(atmosphereHandle, elapsedTime, dt);
+  updateGrass(grassHandle, elapsedTime);
   updateWorldPulse(dt);
   updateProjectiles(dt);
   renderer.render(scene, camera);

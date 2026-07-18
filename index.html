@@ -3297,6 +3297,12 @@
   #rift-viewport.rift-fullscreen .game-fullscreen-btn {
     top: calc(.7rem + env(safe-area-inset-top)); right: calc(3.6rem + env(safe-area-inset-right));
   }
+  #rift-viewport.rift-fullscreen #rift-graphics-btn {
+    top: calc(.7rem + env(safe-area-inset-top)); right: calc(8.6rem + env(safe-area-inset-right));
+  }
+  #rift-viewport.rift-fullscreen #rift-graphics-panel {
+    top: calc(2.6rem + env(safe-area-inset-top)); right: calc(.7rem + env(safe-area-inset-right));
+  }
   /* Landscape fullscreen on a phone can put a notch/Dynamic Island on
      either side and a home-indicator bar along the bottom — every other
      edge-anchored HUD element and touch control needs the same inset
@@ -3392,6 +3398,30 @@
     padding: 4px 10px; pointer-events: auto; touch-action: manipulation; cursor: pointer;
   }
   #rift-menu-btn:hover, #rift-menu-btn:active { color: #e8ecf1; border-color: rgba(232,236,241,.4); }
+
+  #rift-graphics-btn {
+    position: absolute; top: .7rem; right: 8.6rem;
+    font-size: 9px; letter-spacing: .1em; color: rgba(232,236,241,.55);
+    background: rgba(20,27,45,.5); border: 1px solid rgba(232,236,241,.2); border-radius: 100px;
+    padding: 4px 10px; pointer-events: auto; touch-action: manipulation; cursor: pointer; z-index: 16;
+  }
+  #rift-graphics-btn:hover, #rift-graphics-btn.gfx-open { color: #e8ecf1; border-color: rgba(232,236,241,.4); }
+  #rift-graphics-panel {
+    position: absolute; top: 2.6rem; right: .7rem; z-index: 20; pointer-events: auto;
+    background: rgba(10,14,24,.92); border: 1px solid rgba(232,236,241,.2); border-radius: .5rem;
+    padding: .7rem .8rem; display: flex; flex-direction: column; gap: .5rem; min-width: 210px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.4);
+  }
+  #rift-graphics-label { font-size: 10px; letter-spacing: .08em; color: rgba(232,236,241,.7); }
+  #rift-graphics-seg { display: flex; gap: .3rem; }
+  .rift-graphics-opt {
+    flex: 1; font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: .06em;
+    color: rgba(232,236,241,.6); background: rgba(232,236,241,.06); border: 1px solid rgba(232,236,241,.18);
+    border-radius: .3rem; padding: .35rem 0; cursor: pointer; touch-action: manipulation;
+  }
+  .rift-graphics-opt:hover { color: #e8ecf1; border-color: rgba(232,236,241,.4); }
+  .rift-graphics-opt.active { color: #0a0e14; background: #7dd3fc; border-color: #7dd3fc; }
+  #rift-graphics-hint { font-size: 8px; color: rgba(232,236,241,.4); line-height: 1.4; }
 
   .rift-level-label {
     margin-left: auto; font-size: 10px; letter-spacing: .1em; color: rgba(232,236,241,.5);
@@ -4555,6 +4585,17 @@
           </div>
 
           <button type="button" class="game-fullscreen-btn" id="rift-fullscreen-btn" aria-label="Enter fullscreen"><span class="gfs-icon"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg></span><span class="gfs-label">Full Screen</span></button>
+
+          <button type="button" id="rift-graphics-btn" class="rift-mono" aria-label="Graphics settings">⚙ GRAPHICS</button>
+          <div id="rift-graphics-panel" class="rift-mono" hidden>
+            <span id="rift-graphics-label">Graphics quality</span>
+            <div id="rift-graphics-seg">
+              <button type="button" class="rift-graphics-opt" data-tier="low">Low</button>
+              <button type="button" class="rift-graphics-opt" data-tier="medium">Medium</button>
+              <button type="button" class="rift-graphics-opt" data-tier="high">High</button>
+            </div>
+            <span id="rift-graphics-hint">Applies immediately — rebuilds the current landmass</span>
+          </div>
 
           <div id="rift-start-overlay">
             <div id="rift-start-panel">

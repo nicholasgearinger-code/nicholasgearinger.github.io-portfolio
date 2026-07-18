@@ -232,6 +232,8 @@ function createStreakTexture() {
   ctx.fillRect(0, h * 0.3, w, h * 0.4);
   return new THREE.CanvasTexture(canvas);
 }
+
+function createBody(scene, glowTexture, map, coreRadius, glowColor, glowRadius, glowOpacity) {
   const group = new THREE.Group();
 
   const coreMat = new THREE.MeshBasicMaterial({ map, fog: false, transparent: true });

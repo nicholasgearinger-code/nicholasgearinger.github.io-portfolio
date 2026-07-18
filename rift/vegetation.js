@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { getGraphicsSettings } from "./graphicsSettings.js";
 
 // -----------------------------------------------------------------------------
 // SWAP POINT: ground-cover vegetation. Grass specifically uses
@@ -29,6 +30,7 @@ const dummy = new THREE.Object3D();
 function createGrass(scene, biome, sampleHeight, radius) {
   const style = GRASS_STYLE[biome];
   if (!style) return null;
+  const count = Math.max(1, Math.round(style.count * getGraphicsSettings().grassMultiplier));
 
   // 0.05 previously — thin enough to be sub-pixel at normal viewing
   // distance, which is why grass wasn't actually reading as ground cover
@@ -38,18 +40,18 @@ function createGrass(scene, biome, sampleHeight, radius) {
   bladeGeo.translate(0, 0.5, 0);
   const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, flatShading: true, side: THREE.DoubleSide });
 
-  const mesh = new THREE.InstancedMesh(bladeGeo, mat, style.count);
-  mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(style.count * 3), 3);
+  const mesh = new THREE.InstancedMesh(bladeGeo, mat, count);
+  mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(count * 3), 3);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
 
   const baseColorA = new THREE.Color(style.colorA), baseColorB = new THREE.Color(style.colorB);
   const tmpColor = new THREE.Color();
-  const swaySeeds = new Float32Array(style.count);
+  const swaySeeds = new Float32Array(count);
   let placed = 0;
   let attempts = 0;
-  const maxAttempts = style.count * 3; // terrain height can return null near the very edge — retry a bounded number of times rather than looping forever
-  while (placed < style.count && attempts < maxAttempts) {
+  const maxAttempts = count * 3; // terrain height can return null near the very edge — retry a bounded number of times rather than looping forever
+  while (placed < count && attempts < maxAttempts) {
     attempts++;
     const angle = Math.random() * Math.PI * 2, dist = Math.sqrt(Math.random()) * radius;
     const x = Math.cos(angle) * dist, z = Math.sin(angle) * dist;

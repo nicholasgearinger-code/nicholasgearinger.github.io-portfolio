@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { getGraphicsSettings } from "./graphicsSettings.js";
 
 // -----------------------------------------------------------------------------
 // SWAP POINT: the entire day/night cycle — sun/moon position, sun/ambient
@@ -159,7 +160,7 @@ function createBeamTexture() {
 // both directions.
 function createSunBeams(scene, beamTexture) {
   const group = new THREE.Group();
-  const count = 6;
+  const count = getGraphicsSettings().sunBeams;
   const sprites = [];
   for (let i = 0; i < count; i++) {
     const mat = new THREE.SpriteMaterial({
@@ -281,7 +282,7 @@ function createDistantPlanet(scene) {
 function createAurora(scene) {
   const texture = createAuroraTexture();
   const group = new THREE.Group();
-  const stripCount = 10;
+  const stripCount = getGraphicsSettings().auroraStrips;
   const strips = [];
   for (let i = 0; i < stripCount; i++) {
     const mat = new THREE.SpriteMaterial({
@@ -305,7 +306,8 @@ function createAurora(scene) {
 function createShootingStars(scene) {
   const texture = createStreakTexture();
   const pool = [];
-  for (let i = 0; i < 3; i++) {
+  const poolSize = getGraphicsSettings().shootingStarPoolSize;
+  for (let i = 0; i < poolSize; i++) {
     const mat = new THREE.SpriteMaterial({
       map: texture, transparent: true, opacity: 0, blending: THREE.AdditiveBlending,
       depthWrite: false, fog: false, rotation: 0,

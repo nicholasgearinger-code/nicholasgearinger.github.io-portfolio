@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { getGraphicsSettings } from "./graphicsSettings.js";
 
 // -----------------------------------------------------------------------------
 // SWAP POINT: ambient atmosphere, one look per biome. Deliberately built as
@@ -28,10 +29,11 @@ const HEIGHT_MIN = -2, HEIGHT_MAX = 40;
 function createAtmosphericParticles(scene, biome) {
   const style = PARTICLE_STYLES[biome];
   if (!style) return null;
+  const count = Math.max(1, Math.round(style.count * getGraphicsSettings().particleMultiplier));
 
-  const positions = new Float32Array(style.count * 3);
-  const seeds = new Float32Array(style.count); // per-particle phase offset so they don't all drift in lockstep
-  for (let i = 0; i < style.count; i++) {
+  const positions = new Float32Array(count * 3);
+  const seeds = new Float32Array(count); // per-particle phase offset so they don't all drift in lockstep
+  for (let i = 0; i < count; i++) {
     positions[i * 3] = (Math.random() - 0.5) * SPREAD * 2;
     positions[i * 3 + 1] = HEIGHT_MIN + Math.random() * (HEIGHT_MAX - HEIGHT_MIN);
     positions[i * 3 + 2] = (Math.random() - 0.5) * SPREAD * 2;

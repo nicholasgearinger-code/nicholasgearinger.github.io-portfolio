@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { getGraphicsSettings } from "./graphicsSettings.js";
 
 // -----------------------------------------------------------------------------
 // SWAP POINT: clouds. Each cloud is a small cluster of soft circular
@@ -74,12 +75,15 @@ function createCloud(scene, style, flatten = 1) {
  */
 function createClouds(scene, biome) {
   const style = CLOUD_STYLE[biome] || CLOUD_STYLE.verdant;
+  const mult = getGraphicsSettings().cloudMultiplier;
   const clouds = [];
-  for (let i = 0; i < style.count; i++) clouds.push(createCloud(scene, style));
+  const cloudCount = Math.max(1, Math.round(style.count * mult));
+  for (let i = 0; i < cloudCount; i++) clouds.push(createCloud(scene, style));
 
   const fogStyle = GROUND_FOG_STYLE[biome] || GROUND_FOG_STYLE.verdant;
   const groundFog = [];
-  for (let i = 0; i < fogStyle.count; i++) groundFog.push(createCloud(scene, fogStyle, 0.18));
+  const fogCount = Math.max(1, Math.round(fogStyle.count * mult));
+  for (let i = 0; i < fogCount; i++) groundFog.push(createCloud(scene, fogStyle, 0.18));
 
   return { clouds, style, groundFog, fogStyle, windOffsetX: 0, windOffsetZ: 0 };
 }

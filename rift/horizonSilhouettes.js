@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { getGraphicsSettings } from "./graphicsSettings.js";
 
 // -----------------------------------------------------------------------------
 // SWAP POINT: distant horizon silhouettes — large faceted shapes scattered
@@ -38,9 +39,10 @@ function createSilhouetteShape(color, height, jagged) {
  */
 function createHorizonSilhouettes(scene, biome) {
   const style = SILHOUETTE_STYLE[biome] || SILHOUETTE_STYLE.ember;
+  const count = Math.max(1, Math.round(style.count * getGraphicsSettings().silhouetteMultiplier));
   const group = new THREE.Group();
-  for (let i = 0; i < style.count; i++) {
-    const angle = (i / style.count) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
+  for (let i = 0; i < count; i++) {
+    const angle = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
     const radius = RING_RADIUS + (Math.random() - 0.5) * 60;
     const height = style.minH + Math.random() * (style.maxH - style.minH);
     const shape = createSilhouetteShape(style.color, height, style.jagged);

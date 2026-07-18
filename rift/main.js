@@ -10,6 +10,7 @@ import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphe
 import { createGrass, updateGrass, disposeGrass } from "./vegetation.js";
 import { createHorizonSilhouettes, disposeHorizonSilhouettes } from "./horizonSilhouettes.js";
 import { createWildlife, updateWildlife, disposeWildlife } from "./wildlife.js";
+import { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers } from "./graphicsSettings.js";
 import { createWeatherSystem, updateWeatherSystem, disposeWeatherSystem } from "./weather.js";
 import { createClouds, updateClouds, disposeClouds } from "./clouds.js";
 import {
@@ -65,6 +66,8 @@ function isGameActive() {
 // ---------------------------------------------------------------------------
 const viewport = document.getElementById("rift-viewport");
 const fullscreenBtn = document.getElementById("rift-fullscreen-btn");
+const graphicsBtn = document.getElementById("rift-graphics-btn");
+const graphicsPanel = document.getElementById("rift-graphics-panel");
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x0a0e14, 0.0032);
@@ -74,8 +77,8 @@ camera.rotation.order = "YXZ";
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setSize(viewport.clientWidth, viewport.clientHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.shadowMap.enabled = true;
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, getGraphicsSettings().pixelRatioCap));
+renderer.shadowMap.enabled = getGraphicsSettings().shadowsEnabled;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 function resizeToViewport() {
@@ -162,7 +165,7 @@ sun.shadow.camera.top = SHADOW_EXTENT;
 sun.shadow.camera.bottom = -SHADOW_EXTENT;
 sun.shadow.camera.near = 1;
 sun.shadow.camera.far = 500;
-sun.shadow.mapSize.set(1536, 1536);
+sun.shadow.mapSize.set(getGraphicsSettings().shadowMapSize, getGraphicsSettings().shadowMapSize);
 sun.shadow.bias = -0.0015;
 scene.add(sun);
 
@@ -393,6 +396,54 @@ function respawnInLevel() {
   playerPhysics.verticalVelocity = 0;
   playerPhysics.grounded = false;
   logDiscovery("Fell — back to the start.");
+}
+
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Graphics settings — applying a tier change updates the renderer/shadow
+// state immediately, then rebuilds the current level (if one is active) so
+// tier-dependent counts baked in at build time (terrain resolution, grass,
+// particles, decoration detail, cloud/wildlife counts) actually take
+// effect right away instead of only on the next level entry.
+// ---------------------------------------------------------------------------
+function applyGraphicsSettings() {
+  const s = getGraphicsSettings();
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, s.pixelRatioCap));
+  renderer.shadowMap.enabled = s.shadowsEnabled;
+  if (sun.shadow.mapSize.width !== s.shadowMapSize) {
+    sun.shadow.mapSize.set(s.shadowMapSize, s.shadowMapSize);
+    // Three.js only regenerates the shadow map texture at the new
+    // resolution once the old one is disposed — changing mapSize alone
+    // has no effect on an already-rendered light.
+    if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
+  }
+  resizeToViewport();
+  if (currentLevelIdx >= 0) buildLevel(currentLevelIdx);
+}
+
+function changeGraphicsTier(tier) {
+  if (!setGraphicsTier(tier)) return;
+  applyGraphicsSettings();
+  syncGraphicsUI();
+}
+
+function syncGraphicsUI() {
+  const active = getGraphicsTier();
+  graphicsPanel?.querySelectorAll(".rift-graphics-opt").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.tier === active);
+  });
+}
+
+if (graphicsBtn && graphicsPanel) {
+  graphicsBtn.addEventListener("click", () => {
+    const open = graphicsPanel.hidden;
+    graphicsPanel.hidden = !open;
+    graphicsBtn.classList.toggle("gfx-open", open);
+  });
+  graphicsPanel.querySelectorAll(".rift-graphics-opt").forEach((btn) => {
+    btn.addEventListener("click", () => changeGraphicsTier(btn.dataset.tier));
+  });
+  syncGraphicsUI();
 }
 
 // ---------------------------------------------------------------------------

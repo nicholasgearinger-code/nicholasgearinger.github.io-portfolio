@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { getGraphicsSettings } from "./graphicsSettings.js";
 
 // -----------------------------------------------------------------------------
 // SWAP POINT: this is the entire terrain-shaping algorithm. It builds one
@@ -12,7 +13,8 @@ import * as THREE from "three";
 // -----------------------------------------------------------------------------
 
 const TERRAIN_SIZE = 240;      // full width/depth of the landmass, in world units
-const TERRAIN_SEGMENTS = 140;  // resolution — higher reads smoother but costs more vertices
+
+const TERRAIN_SEGMENTS_DEFAULT = 140;  // fallback only — actual resolution comes from graphicsSettings' current tier
 const RIVER_WIDTH = 7;         // Verdant Hollow's river channel, half-width in world units
 const RIVER_DEPTH = 5;         // how far the channel carves below the surrounding local terrain
 
@@ -163,7 +165,8 @@ function applyHeightShading(geo, colorHex, minY, maxY) {
  */
 function buildPlanetTerrain(level, seedStr) {
   const seed = hashStringToSeed(seedStr + "::" + level.biome) * 1000;
-  const geo = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, TERRAIN_SEGMENTS, TERRAIN_SEGMENTS);
+  const segments = getGraphicsSettings().terrainSegments || TERRAIN_SEGMENTS_DEFAULT;
+  const geo = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, segments, segments);
   geo.rotateX(-Math.PI / 2); // lie flat in the XZ plane, +Y up
 
   const posAttr = geo.attributes.position;
@@ -194,4 +197,4 @@ function terrainHeightAt(level, worldX, worldZ, seedStr) {
   return biomeHeight(level.biome, worldX, worldZ, seed);
 }
 
-export { buildPlanetTerrain, biomeHeight, terrainHeightAt, TERRAIN_SIZE, TERRAIN_SEGMENTS, LIQUID_LEVEL };
+export { buildPlanetTerrain, biomeHeight, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL };

@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { getGraphicsSettings } from "./graphicsSettings.js";
 
 // -----------------------------------------------------------------------------
 // SWAP POINT: ambient wildlife — small non-interactive creatures that just
@@ -94,10 +95,13 @@ function createGlowmote(scene, color, baseHeight) {
  */
 function createWildlife(scene, biome) {
   const profile = WILDLIFE_PROFILE[biome] || WILDLIFE_PROFILE.verdant;
+  const mult = getGraphicsSettings().wildlifeMultiplier;
+  const flyerCount = Math.round(profile.flyers * mult);
+  const moteCount = Math.round(profile.motes * mult);
   const flyers = [];
-  for (let i = 0; i < profile.flyers; i++) flyers.push(createFlyer(scene, profile.flyerColor));
+  for (let i = 0; i < flyerCount; i++) flyers.push(createFlyer(scene, profile.flyerColor));
   const motes = [];
-  for (let i = 0; i < profile.motes; i++) motes.push(createGlowmote(scene, profile.moteColor, profile.moteHeight));
+  for (let i = 0; i < moteCount; i++) motes.push(createGlowmote(scene, profile.moteColor, profile.moteHeight));
   return { flyers, motes };
 }
 

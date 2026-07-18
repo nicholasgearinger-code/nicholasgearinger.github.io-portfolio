@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { getGraphicsSettings } from "./graphicsSettings.js";
 
 // -----------------------------------------------------------------------------
 // SWAP POINT: purely cosmetic scattered props, one distinct type per biome,
@@ -40,7 +41,8 @@ function createSpire(colorHex, rand) {
   group.add(cone);
 
   const tipMat = new THREE.MeshBasicMaterial({ color: colorHex });
-  const tip = new THREE.Mesh(new THREE.SphereGeometry(0.35, 6, 6), tipMat);
+  const sphereSeg = 6 + getGraphicsSettings().decorationDetail * 4;
+  const tip = new THREE.Mesh(new THREE.SphereGeometry(0.35, sphereSeg, sphereSeg), tipMat);
   tip.position.y = h * 0.92;
   group.add(tip);
   const light = new THREE.PointLight(colorHex, 0.5, 6);
@@ -61,7 +63,8 @@ function createFloraStalk(colorHex, rand) {
   group.add(stem);
 
   const capMat = new THREE.MeshStandardMaterial({ color: colorHex, emissive: colorHex, emissiveIntensity: 0.8, roughness: 0.4 });
-  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.32 + rand() * 0.2, 8, 8), capMat);
+  const capSeg = 8 + getGraphicsSettings().decorationDetail * 4;
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.32 + rand() * 0.2, capSeg, capSeg), capMat);
   cap.position.y = h;
   group.add(cap);
   return { group, kind: "stalk", bobAmplitude: 0.15 + rand() * 0.1, bobSeed: rand() * Math.PI * 2 };
@@ -73,7 +76,7 @@ function createCrystalCluster(colorHex, rand) {
   const count = 3 + Math.floor(rand() * 3);
   for (let i = 0; i < count; i++) {
     const scale = 0.8 + rand() * 1.8;
-    const geo = new THREE.OctahedronGeometry(scale, 0);
+    const geo = new THREE.OctahedronGeometry(scale, getGraphicsSettings().decorationDetail);
     const mat = new THREE.MeshStandardMaterial({
       color: colorHex, emissive: colorHex, emissiveIntensity: 0.35,
       roughness: 0.2, metalness: 0.1, transparent: true, opacity: 0.9,
@@ -91,7 +94,7 @@ function createCrystalCluster(colorHex, rand) {
 // — reads as unstable/anti-gravity, fitting the Abyssal Drift theme.
 function createDebris(colorHex, rand) {
   const group = new THREE.Group();
-  const geo = new THREE.IcosahedronGeometry(0.8 + rand() * 1.1, 0);
+  const geo = new THREE.IcosahedronGeometry(0.8 + rand() * 1.1, getGraphicsSettings().decorationDetail);
   // Irregular shape: nudge vertices outward randomly so it doesn't read as
   // a perfect icosahedron.
   const pos = geo.attributes.position;
@@ -119,7 +122,7 @@ function createRockCluster(biome, colorHex, rand) {
   const count = 2 + Math.floor(rand() * 3);
   for (let i = 0; i < count; i++) {
     const scale = 0.4 + rand() * 0.9;
-    const geo = new THREE.IcosahedronGeometry(scale, 0);
+    const geo = new THREE.IcosahedronGeometry(scale, getGraphicsSettings().decorationDetail);
     const pos = geo.attributes.position;
     for (let v = 0; v < pos.count; v++) {
       const k = 0.8 + rand() * 0.4;
@@ -152,7 +155,7 @@ function createLivingTree(colorHex, rand) {
   const clumps = 3 + Math.floor(rand() * 3);
   for (let i = 0; i < clumps; i++) {
     const scale = 1.1 + rand() * 1.1;
-    const foliage = new THREE.Mesh(new THREE.IcosahedronGeometry(scale, 0), leafMat);
+    const foliage = new THREE.Mesh(new THREE.IcosahedronGeometry(scale, getGraphicsSettings().decorationDetail), leafMat);
     const angle = rand() * Math.PI * 2, dist = rand() * 0.9;
     foliage.position.set(Math.cos(angle) * dist, h * (0.78 + rand() * 0.22), Math.sin(angle) * dist);
     group.add(foliage);
@@ -167,7 +170,7 @@ function createLivingTree(colorHex, rand) {
 function createCaveMouth(colorHex, rand) {
   const group = new THREE.Group();
   const rockMat = new THREE.MeshStandardMaterial({ color: 0x2e2b38, roughness: 0.9, flatShading: true });
-  const rock = new THREE.Mesh(new THREE.IcosahedronGeometry(2.4 + rand() * 1.2, 0), rockMat);
+  const rock = new THREE.Mesh(new THREE.IcosahedronGeometry(2.4 + rand() * 1.2, getGraphicsSettings().decorationDetail), rockMat);
   rock.scale.set(1.3, 0.9, 1);
   rock.position.y = 1.4;
   group.add(rock);

@@ -8,6 +8,8 @@ import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane } from "./liqu
 import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
 import { createGrass, updateGrass, disposeGrass } from "./vegetation.js";
+import { createHorizonSilhouettes, disposeHorizonSilhouettes } from "./horizonSilhouettes.js";
+import { createWildlife, updateWildlife, disposeWildlife } from "./wildlife.js";
 import { createWeatherSystem, updateWeatherSystem, disposeWeatherSystem } from "./weather.js";
 import { createClouds, updateClouds, disposeClouds } from "./clouds.js";
 import {
@@ -15,7 +17,7 @@ import {
   createMuzzleFlash, updateMuzzleFlash, disposeMuzzleFlash,
   createImpactBurst, updateImpactBurst, disposeImpactBurst,
 } from "./effects.js";
-import { initAudio, toggleMuted, playShoot, playShatter, playLoreChime } from "./audio.js";
+import { initAudio, toggleMuted, playShoot, playShatter, playLoreChime, startAmbient, playFootstep } from "./audio.js";
 import { getIslandLore } from "./lore.js";
 import { findClosestHit } from "./hitPrediction.js";
 import { createTouchControls } from "./touchControls.js";
@@ -222,6 +224,8 @@ function setKey(code, value) {
 }
 
 const velocity = new THREE.Vector3();
+let footstepDistance = 0;
+const FOOTSTEP_STRIDE = 2.4; // world units between footstep sounds — tied to distance actually covered, not a fixed timer, so sprinting/slow movement both sound right
 
 function updateMovement(dt, grounded) {
   velocity.set(0, 0, 0);
@@ -229,11 +233,22 @@ function updateMovement(dt, grounded) {
   if (keys.back) velocity.z += 1;
   if (keys.left) velocity.x -= 1;
   if (keys.right) velocity.x += 1;
-  if (velocity.lengthSq() > 0) velocity.normalize();
+  const moving = velocity.lengthSq() > 0;
+  if (moving) velocity.normalize();
 
   const speed = WALK_SPEED * (grounded ? 1 : AIR_CONTROL);
   controls.moveRight(velocity.x * speed * dt);
   controls.moveForward(-velocity.z * speed * dt);
+
+  if (moving && grounded) {
+    footstepDistance += speed * dt;
+    if (footstepDistance >= FOOTSTEP_STRIDE) {
+      footstepDistance = 0;
+      playFootstep(currentLevelIdx >= 0 ? LEVELS[currentLevelIdx].biome : "ember");
+    }
+  } else {
+    footstepDistance = 0; // reset mid-stride rather than carrying a partial step into the next movement burst
+  }
 
   // Soft world bounds — keeps the player off the terrain's falloff rim and
   // away from the finite plane's actual edge (see terrain.js/WORLD_BOUND_RADIUS
@@ -259,6 +274,8 @@ let atmosphereHandle = null;
 let grassHandle = null;
 let weatherHandle = null;
 let cloudsHandle = null;
+let horizonHandle = null;
+let wildlifeHandle = null;
 const crystalHandles = new Map();
 let allCrystals = [];
 let crystalsTotal = 0;
@@ -286,6 +303,10 @@ function teardownLevel() {
   weatherHandle = null;
   disposeClouds(scene, cloudsHandle);
   cloudsHandle = null;
+  disposeHorizonSilhouettes(scene, horizonHandle);
+  horizonHandle = null;
+  disposeWildlife(scene, wildlifeHandle);
+  wildlifeHandle = null;
   for (const [, handle] of crystalHandles) disposeCrystalMesh(scene, handle);
   crystalHandles.clear();
   allCrystals = [];
@@ -324,6 +345,8 @@ function buildLevel(levelIdx) {
   grassHandle = createGrass(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), TERRAIN_SIZE * 0.46);
   weatherHandle = createWeatherSystem(scene, level.biome);
   cloudsHandle = createClouds(scene, level.biome);
+  horizonHandle = createHorizonSilhouettes(scene, level.biome);
+  wildlifeHandle = createWildlife(scene, level.biome);
 
   const layout = generateLevelLayout(level.biome, WORLD_SEED);
 
@@ -378,6 +401,7 @@ function respawnInLevel() {
 function enterLevel(levelIdx) {
   buildLevel(levelIdx);
   initAudio();
+  startAmbient(LEVELS[levelIdx].biome);
   if (isTouchDevice) {
     touchGameActive = true;
     startOverlay.style.display = "none";
@@ -581,10 +605,11 @@ function animate() {
 
   for (const [, handle] of crystalHandles) updateCrystalMesh(handle, elapsedTime);
   for (const handle of decorationHandles) updateDecoration(handle, elapsedTime);
-  updateLiquidPlane(liquidHandle, elapsedTime);
+  updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y);
   const wind = updateWeatherSystem(weatherHandle, dt);
   updateAtmosphericParticles(atmosphereHandle, elapsedTime, dt, wind.windX, wind.windZ);
   updateGrass(grassHandle, elapsedTime, wind.windX, wind.windZ);
+  updateWildlife(wildlifeHandle, elapsedTime, dt);
   updateClouds(cloudsHandle, dt, wind, dayNight.dayAmount, wind.rainIntensity);
   updateWorldPulse(dt);
   updateProjectiles(dt);

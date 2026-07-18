@@ -481,7 +481,7 @@ function updateDayNightCycle(cycle, dt) {
     s.sprite.material.opacity = Math.sin(k * Math.PI); // fades in, peaks mid-flight, fades out — not a hard cut at either end
   }
 
-  return { t, dayAmount };
+  return { t, dayAmount, skyZenith };
 }
 
 export { createDayNightCycle, updateDayNightCycle, CYCLE_SECONDS };

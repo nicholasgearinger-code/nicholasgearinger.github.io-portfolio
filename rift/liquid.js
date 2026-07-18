@@ -114,7 +114,7 @@ function createLiquidPlane(scene, biome, y, size) {
   return { mesh, glow, shimmer, basePositions, biome, style };
 }
 
-function updateLiquidPlane(handle, elapsed) {
+function updateLiquidPlane(handle, elapsed, skyColor, cameraY) {
   if (!handle) return;
   const { mesh, glow, shimmer, basePositions, biome, style } = handle;
   const posAttr = mesh.geometry.attributes.position;
@@ -127,6 +127,16 @@ function updateLiquidPlane(handle, elapsed) {
   const amp = biome === "ember" ? 0.18 : 0.1;
   const chopAmp = amp * 0.35;
   const tmpColor = new THREE.Color();
+  // Water tints toward the current sky color each frame (recomputed fresh,
+  // not stored — otherwise it'd drift further every frame instead of
+  // tracking the actual sky) — real reflection needs a render-to-texture
+  // pass this project doesn't have, but a lake visibly bluer at noon and
+  // darker at night reads as "reflective" even without a literal mirror
+  // image in it. Lava doesn't get this — it's not reflective, it's lit
+  // from within.
+  const baseColor = (biome === "verdant" && skyColor)
+    ? style.baseColor.clone().lerp(skyColor, 0.4)
+    : style.baseColor;
   for (let i = 0; i < posAttr.count; i++) {
     const bx = basePositions[i * 3], bz = basePositions[i * 3 + 2];
     const swell = Math.sin(bx * 0.15 + elapsed * speed) * amp + Math.cos(bz * 0.12 + elapsed * speed * 0.8) * amp;
@@ -144,11 +154,11 @@ function updateLiquidPlane(handle, elapsed) {
       // red -> white-hot glow) instead of a 2-color lerp gives that
       // texture. Crust dominates at rest, glow only right at true crests,
       // with a full red band carrying most of the surface in between.
-      if (disturbance < 0.55) tmpColor.copy(style.crustColor).lerp(style.baseColor, disturbance / 0.55);
-      else tmpColor.copy(style.baseColor).lerp(style.hotColor, (disturbance - 0.55) / 0.45);
+      if (disturbance < 0.55) tmpColor.copy(style.crustColor).lerp(baseColor, disturbance / 0.55);
+      else tmpColor.copy(baseColor).lerp(style.hotColor, (disturbance - 0.55) / 0.45);
     } else {
       const accent = style.frothColor;
-      tmpColor.copy(style.baseColor).lerp(accent, Math.pow(disturbance, 3)); // pow(3) keeps froth rare/at true crests, not smeared across the whole surface
+      tmpColor.copy(baseColor).lerp(accent, Math.pow(disturbance, 3)); // pow(3) keeps froth rare/at true crests, not smeared across the whole surface
     }
     tmpColor.toArray(colorAttr.array, i * 3);
   }
@@ -164,9 +174,17 @@ function updateLiquidPlane(handle, elapsed) {
   if (biome === "ember") {
     const pulse = 0.85 + 0.25 * Math.sin(elapsed * 0.9);
     mesh.material.emissiveIntensity = style.emissiveIntensity * pulse;
-    if (glow) glow.material.opacity = style.glowOpacity * (0.75 + 0.4 * Math.sin(elapsed * 0.9));
+    // Proximity — standing right at a crack's edge should feel hotter
+    // than glancing at lava from across the terrain. cameraY vs. the
+    // lava plane's own Y is a cheap but effective proxy: the closer the
+    // player's actual height is to the lava's level, the more likely
+    // they're standing right at (or leaning over) a crack.
+    const heightDiff = cameraY !== undefined ? Math.abs(cameraY - mesh.position.y) : 20;
+    const proximity = THREE.MathUtils.clamp(1 - heightDiff / 10, 0, 1);
+    if (glow) glow.material.opacity = style.glowOpacity * (0.75 + 0.4 * Math.sin(elapsed * 0.9)) * (1 + proximity * 0.8);
     if (shimmer) {
       shimmer.material.map.offset.set(Math.sin(elapsed * 0.25) * 0.3, (elapsed * 0.12) % 1); // upward scroll + gentle sideways wobble, not a static texture
+      shimmer.material.opacity = 0.18 + proximity * 0.35;
     }
   }
 }

@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { getGraphicsSettings } from "./graphicsSettings.js";
 
 // -----------------------------------------------------------------------------
 // SWAP POINT: lava/water rendering. A single large flat plane at a fixed
@@ -60,7 +61,8 @@ function createShimmerTexture() {
 function createLiquidPlane(scene, biome, y, size) {
   const style = LIQUID_STYLE[biome];
   if (!style) return null;
-  const geo = new THREE.PlaneGeometry(size, size, 40, 40);
+  const segs = getGraphicsSettings().liquidSegments;
+  const geo = new THREE.PlaneGeometry(size, size, segs, segs);
   geo.rotateX(-Math.PI / 2);
 
   const posAttr = geo.attributes.position;

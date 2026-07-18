@@ -322,7 +322,8 @@ function createShootingStars(scene) {
 function randRangeLocal(min, max) { return min + Math.random() * (max - min); }
 
 function createSkyDome(scene) {
-  const geo = new THREE.SphereGeometry(SKY_DOME_RADIUS, 32, 16);
+  const [widthSeg, heightSeg] = getGraphicsSettings().skyDomeSegments;
+  const geo = new THREE.SphereGeometry(SKY_DOME_RADIUS, widthSeg, heightSeg);
   const colors = new Float32Array(geo.attributes.position.count * 3);
   geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   const mat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false });

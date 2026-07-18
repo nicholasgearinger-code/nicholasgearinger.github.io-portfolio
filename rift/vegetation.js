@@ -36,7 +36,7 @@ function createGrass(scene, biome, sampleHeight, radius) {
   // distance, which is why grass wasn't actually reading as ground cover
   // despite thousands of instances existing. Width matters far more than
   // raw count for how "filled in" the ground looks.
-  const bladeGeo = new THREE.ConeGeometry(style.bladeRadius, 1, 3);
+  const bladeGeo = new THREE.ConeGeometry(style.bladeRadius, 1, getGraphicsSettings().grassBladeSegments);
   bladeGeo.translate(0, 0.5, 0);
   const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, flatShading: true, side: THREE.DoubleSide });
 

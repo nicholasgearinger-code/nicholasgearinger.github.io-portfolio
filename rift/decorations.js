@@ -13,6 +13,20 @@ import { getGraphicsSettings } from "./graphicsSettings.js";
 
 function createDecoration(biome, colorHex, seedRand) {
   const roll = seedRand();
+  const highDetail = getGraphicsSettings().decorationDetail >= 2;
+  // High-tier-exclusive signature piece per biome — not just "more
+  // polygons of the same prop," a genuinely different shape that only
+  // High actually renders. Rolled first so it doesn't skew the existing
+  // biome's usual prop-mix odds when High isn't active.
+  if (highDetail && seedRand() < 0.22) {
+    switch (biome) {
+      case "ember": return createObsidianFormation(colorHex, seedRand);
+      case "verdant": return createBloomingVine(colorHex, seedRand);
+      case "crystal": return createGeode(colorHex, seedRand);
+      case "abyssal": return createStalagmite(colorHex, seedRand);
+      case "ashen": return createFossilRemains(colorHex, seedRand);
+    }
+  }
   switch (biome) {
     case "ember": return roll < 0.72 ? createSpire(colorHex, seedRand) : createRockCluster(biome, colorHex, seedRand);
     case "verdant":
@@ -220,6 +234,152 @@ function updateDecoration(handle, elapsed) {
     handle.group.position.y = handle.baseY + handle.hoverHeight + Math.sin(elapsed * 0.6 + handle.bobSeed) * handle.bobAmplitude;
     handle.group.rotation.y += handle.spinRate * 0.016;
   }
+}
+
+// -----------------------------------------------------------------------------
+// High-tier-exclusive signature pieces — one genuinely distinct shape per
+// biome, not a denser version of an existing prop. Gated behind
+// getGraphicsSettings().decorationDetail in createDecoration() above.
+// -----------------------------------------------------------------------------
+
+// Ember: glassy black obsidian with thin glowing crack-veins running
+// across its facets — reads as freshly-cooled volcanic glass, distinct
+// from the spire's rough basalt.
+function createObsidianFormation(colorHex, rand) {
+  const group = new THREE.Group();
+  const rockMat = new THREE.MeshStandardMaterial({ color: 0x0d0a12, roughness: 0.15, metalness: 0.3, flatShading: true });
+  const h = 3 + rand() * 4;
+  const rock = new THREE.Mesh(new THREE.ConeGeometry(0.7 + rand() * 0.5, h, 6), rockMat);
+  rock.position.y = h / 2;
+  rock.rotation.y = rand() * Math.PI * 2;
+  rock.rotation.z = (rand() - 0.5) * 0.25;
+  group.add(rock);
+
+  // Thin glowing crack lines up the surface — a few short emissive
+  // cylinders standing in for veins, not a real crack-texture map.
+  const veinMat = new THREE.MeshBasicMaterial({ color: colorHex });
+  const veinCount = 2 + Math.floor(rand() * 3);
+  for (let i = 0; i < veinCount; i++) {
+    const veinH = h * (0.3 + rand() * 0.4);
+    const vein = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, veinH, 4), veinMat);
+    const angle = rand() * Math.PI * 2;
+    const along = rand() * h * 0.6;
+    vein.position.set(Math.sin(angle) * 0.3, along + veinH / 2, Math.cos(angle) * 0.3);
+    vein.rotation.z = (rand() - 0.5) * 0.5;
+    group.add(vein);
+  }
+  const light = new THREE.PointLight(colorHex, 0.3, 4);
+  light.position.y = h * 0.4;
+  group.add(light);
+  return { group, kind: "obsidian" };
+}
+
+// Verdant: a drooping flowering vine strung between low arcing segments,
+// with small colored flower buds along its length — ground-level color
+// and detail the flora stalk/tree don't provide on their own.
+function createBloomingVine(colorHex, rand) {
+  const group = new THREE.Group();
+  const vineMat = new THREE.MeshStandardMaterial({ color: 0x2d5a2a, roughness: 0.8, flatShading: true });
+  const segCount = 5 + Math.floor(rand() * 3);
+  const arcHeight = 1.2 + rand() * 1.2;
+  const arcWidth = 2 + rand() * 1.5;
+  const flowerColors = [0xff8fd6, 0xffd36e, 0xff6b6b, 0xb28fff];
+  for (let i = 0; i < segCount; i++) {
+    const t0 = i / segCount, t1 = (i + 1) / segCount;
+    const y0 = Math.sin(t0 * Math.PI) * arcHeight, y1 = Math.sin(t1 * Math.PI) * arcHeight;
+    const x0 = (t0 - 0.5) * arcWidth, x1 = (t1 - 0.5) * arcWidth;
+    const segLen = Math.hypot(x1 - x0, y1 - y0);
+    const seg = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.04, segLen, 4), vineMat);
+    seg.position.set((x0 + x1) / 2, (y0 + y1) / 2, 0);
+    seg.rotation.z = Math.atan2(x1 - x0, y1 - y0);
+    group.add(seg);
+
+    if (rand() < 0.6) {
+      const flowerMat = new THREE.MeshStandardMaterial({
+        color: flowerColors[Math.floor(rand() * flowerColors.length)],
+        emissive: colorHex, emissiveIntensity: 0.15, roughness: 0.5,
+      });
+      const flower = new THREE.Mesh(new THREE.OctahedronGeometry(0.13 + rand() * 0.08, 0), flowerMat);
+      flower.position.set(x1, y1 - 0.1, (rand() - 0.5) * 0.3);
+      group.add(flower);
+    }
+  }
+  return { group, kind: "bloomingVine" };
+}
+
+// Crystal: a split rock shell with a cluster of small crystal shards
+// nested in the opening — a geode, distinct from the crystal cluster's
+// bare jutting shards with no rock context at all.
+function createGeode(colorHex, rand) {
+  const group = new THREE.Group();
+  const shellMat = new THREE.MeshStandardMaterial({ color: 0x3a3540, roughness: 0.9, flatShading: true, side: THREE.DoubleSide });
+  const shellR = 1.1 + rand() * 0.7;
+  const shell = new THREE.Mesh(new THREE.SphereGeometry(shellR, 8, 6, 0, Math.PI * 1.5), shellMat);
+  shell.rotation.x = Math.PI * 0.15;
+  shell.rotation.y = rand() * Math.PI * 2;
+  shell.position.y = shellR * 0.4;
+  group.add(shell);
+
+  const crystalMat = new THREE.MeshStandardMaterial({
+    color: colorHex, emissive: colorHex, emissiveIntensity: 0.5, roughness: 0.15, metalness: 0.1, transparent: true, opacity: 0.9,
+  });
+  const shardCount = 4 + Math.floor(rand() * 4);
+  for (let i = 0; i < shardCount; i++) {
+    const s = shellR * (0.25 + rand() * 0.35);
+    const shard = new THREE.Mesh(new THREE.OctahedronGeometry(s, 0), crystalMat);
+    const angle = rand() * Math.PI * 2, dist = rand() * shellR * 0.5;
+    shard.position.set(Math.cos(angle) * dist, shellR * 0.3 + rand() * shellR * 0.4, Math.sin(angle) * dist);
+    shard.rotation.set(rand() * Math.PI, rand() * Math.PI, rand() * Math.PI);
+    group.add(shard);
+  }
+  const light = new THREE.PointLight(colorHex, 0.4, 5);
+  light.position.y = shellR * 0.6;
+  group.add(light);
+  return { group, kind: "geode" };
+}
+
+// Abyssal: a tall, dramatically tapered ground spike suggesting a
+// stalagmite grown up from the chasm floor over a long time — thinner
+// and more elongated than the general rock cluster/debris.
+function createStalagmite(colorHex, rand) {
+  const group = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color: 0x241f30, roughness: 0.85, flatShading: true, emissive: colorHex, emissiveIntensity: 0.06 });
+  const tiers = 2 + Math.floor(rand() * 2);
+  let y = 0;
+  for (let i = 0; i < tiers; i++) {
+    const h = (2.5 + rand() * 2.5) * (1 - i * 0.2);
+    const rBottom = (0.5 + rand() * 0.3) * (1 - i * 0.15);
+    const cone = new THREE.Mesh(new THREE.CylinderGeometry(rBottom * 0.3, rBottom, h, 6), mat);
+    cone.position.y = y + h / 2;
+    cone.rotation.y = rand() * Math.PI * 2;
+    group.add(cone);
+    y += h * 0.85; // tiers overlap slightly rather than stacking with a visible seam
+  }
+  return { group, kind: "stalagmite" };
+}
+
+// Ashen: pale, half-buried bone-like fragments arranged loosely like a
+// ribcage — fits the zone's "ended once" lore directly rather than just
+// being another rock, without spelling out whose remains they are.
+function createFossilRemains(colorHex, rand) {
+  const group = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color: 0xd8cdb8, roughness: 0.9, flatShading: true });
+  const ribCount = 4 + Math.floor(rand() * 4);
+  const spineLen = 2 + rand() * 1.5;
+  for (let i = 0; i < ribCount; i++) {
+    const t = i / (ribCount - 1);
+    const rib = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.06, 0.8 + rand() * 0.6, 4), mat);
+    rib.position.set(0, 0.15, (t - 0.5) * spineLen);
+    rib.rotation.z = Math.PI / 2.3 * (rand() < 0.5 ? 1 : -1);
+    rib.rotation.y = (rand() - 0.5) * 0.3;
+    group.add(rib);
+  }
+  const spine = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, spineLen, 5), mat);
+  spine.rotation.x = Math.PI / 2;
+  spine.position.y = 0.15;
+  group.add(spine);
+  group.rotation.y = rand() * Math.PI * 2;
+  return { group, kind: "fossilRemains" };
 }
 
 export { createDecoration, updateDecoration };

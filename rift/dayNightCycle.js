@@ -110,17 +110,35 @@ function createMoonTexture() {
 // A linear gradient — bright/opaque at one end fading to fully transparent
 // at the other — for sun-beam sprites, versus the radial gradient the
 // glow bodies use.
+// The old version was a plain gradient fillRect — a rectangle with a
+// top-to-bottom fade but hard, straight left/right edges the whole way
+// down, which is exactly why it read as a flat gray slab instead of
+// light. Real light shafts taper (narrow near the source, widening as
+// they travel) and have soft edges on every side, not just top/bottom.
+// This draws a tapered wedge shape and then blurs it, rather than filling
+// a uniform-width rectangle.
 function createBeamTexture() {
-  const w = 32, h = 256;
+  const w = 128, h = 512;
   const canvas = document.createElement("canvas");
   canvas.width = w; canvas.height = h;
   const ctx = canvas.getContext("2d");
+  const cx = w / 2;
+  const narrowHalf = w * 0.06;  // near the sun (top of texture) — a thin core, not a fat rectangle
+  const wideHalf = w * 0.42;    // near the ground (bottom) — spread wide, like a real ray fanning out
+
+  ctx.filter = "blur(10px)"; // this is what actually makes the edges read as soft light instead of a cut shape
   const grad = ctx.createLinearGradient(0, 0, 0, h);
-  grad.addColorStop(0, "rgba(255,255,255,0.9)");
-  grad.addColorStop(0.5, "rgba(255,255,255,0.25)");
+  grad.addColorStop(0, "rgba(255,255,255,0.95)");
+  grad.addColorStop(0.4, "rgba(255,255,255,0.4)");
   grad.addColorStop(1, "rgba(255,255,255,0)");
   ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, w, h);
+  ctx.beginPath();
+  ctx.moveTo(cx - narrowHalf, 0);
+  ctx.lineTo(cx + narrowHalf, 0);
+  ctx.lineTo(cx + wideHalf, h);
+  ctx.lineTo(cx - wideHalf, h);
+  ctx.closePath();
+  ctx.fill();
   return new THREE.CanvasTexture(canvas);
 }
 
@@ -131,18 +149,28 @@ function createBeamTexture() {
 // the sprite itself always does. This is the actual reason to use
 // sprites here instead of fixed-orientation planes: a plane-based fan
 // would go edge-on and vanish from most viewing angles.
+// Anchored at the sun and extending downward toward the ground — the
+// previous version centered small fixed-size sprites ON the sun, which
+// read as a halo pattern rather than beams reaching anywhere. Sprite's
+// own `center` property (not the usual 0.5,0.5 middle-anchor) is what
+// makes a sprite extend away from its position instead of surrounding it:
+// center.y=1 pins the sprite's top edge at `position`, so scaling it
+// taller stretches it downward from the sun rather than growing evenly in
+// both directions.
 function createSunBeams(scene, beamTexture) {
   const group = new THREE.Group();
   const count = 6;
   const sprites = [];
   for (let i = 0; i < count; i++) {
     const mat = new THREE.SpriteMaterial({
-      map: beamTexture, color: 0xfff2c4, transparent: true, opacity: 0,
-      blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
-      rotation: (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.4,
+      map: beamTexture, color: 0xffdfa0, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false, fog: true, // fog ON this time — these need to fade into the haze as they reach toward the ground, not stay artificially crisp at any distance
+      rotation: (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.5,
     });
     const sprite = new THREE.Sprite(mat);
-    sprite.scale.set(18, 140, 1);
+    sprite.center.set(0.5, 1);
+    const length = 260 + Math.random() * 120;
+    sprite.scale.set(length * 0.32, length, 1); // texture is already tapered narrow->wide, so scale just sets overall size/length, not the taper itself
     group.add(sprite);
     sprites.push(sprite);
   }
@@ -276,7 +304,7 @@ function updateDayNightCycle(cycle, dt) {
   // and taper off toward both full night and flat overhead noon light,
   // rather than being equally strong all day.
   const beamEmphasis = Math.max(0, 1 - Math.abs(sunOrbit.elevation - 0.25) / 0.5);
-  const beamOpacity = sunVisibility * beamEmphasis * 0.22;
+  const beamOpacity = sunVisibility * beamEmphasis * 0.32;
   for (const sprite of cycle.sunBeams.sprites) sprite.material.opacity = beamOpacity;
 
   // Stars fade in as the sun drops toward/below the horizon, fully hidden

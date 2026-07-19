@@ -378,7 +378,7 @@ function createSurfaceCracks(group, coneH, baseR, craterR, count) {
   const slopeAngle = Math.atan2(baseR - craterR, coneH);
   for (let i = 0; i < count; i++) {
     const angle = Math.random() * Math.PI * 2;
-    const heightT = 0.08 + Math.random() * 0.8; // keep clear of the crowded base branch-fan and the very crater rim
+    const heightT = 0.08 + Math.random() * 0.89; // was 0.08-0.88, now extends to 0.97 — nearly the full height, just short of the crater pool disc itself
     const y = heightT * coneH;
     const idealR = baseR + (craterR - baseR) * (y / coneH);
     const r = idealR + 0.6;

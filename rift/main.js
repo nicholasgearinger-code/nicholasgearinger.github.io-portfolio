@@ -10,6 +10,7 @@ import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphe
 import { createGrass, updateGrass, disposeGrass, createFlowers, disposeFlowers } from "./vegetation.js";
 import { createHorizonSilhouettes, disposeHorizonSilhouettes } from "./horizonSilhouettes.js";
 import { createWildlife, updateWildlife, disposeWildlife } from "./wildlife.js";
+import { createLandmark, updateLandmark, disposeLandmark } from "./landmarks.js";
 import { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers } from "./graphicsSettings.js";
 import { createWeatherSystem, updateWeatherSystem, disposeWeatherSystem } from "./weather.js";
 import { createClouds, updateClouds, disposeClouds } from "./clouds.js";
@@ -68,6 +69,8 @@ const viewport = document.getElementById("rift-viewport");
 const fullscreenBtn = document.getElementById("rift-fullscreen-btn");
 const graphicsBtn = document.getElementById("rift-graphics-btn");
 const graphicsPanel = document.getElementById("rift-graphics-panel");
+const arrivalOverlay = document.getElementById("rift-arrival");
+const arrivalNameEl = document.getElementById("rift-arrival-name");
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x0a0e14, 0.0032);
@@ -280,6 +283,7 @@ let weatherHandle = null;
 let cloudsHandle = null;
 let horizonHandle = null;
 let wildlifeHandle = null;
+let landmarkHandle = null;
 const crystalHandles = new Map();
 let allCrystals = [];
 let crystalsTotal = 0;
@@ -313,6 +317,8 @@ function teardownLevel() {
   horizonHandle = null;
   disposeWildlife(scene, wildlifeHandle);
   wildlifeHandle = null;
+  disposeLandmark(scene, landmarkHandle);
+  landmarkHandle = null;
   for (const [, handle] of crystalHandles) disposeCrystalMesh(scene, handle);
   crystalHandles.clear();
   allCrystals = [];
@@ -354,6 +360,7 @@ function buildLevel(levelIdx) {
   cloudsHandle = createClouds(scene, level.biome);
   horizonHandle = createHorizonSilhouettes(scene, level.biome);
   wildlifeHandle = createWildlife(scene, level.biome);
+  landmarkHandle = createLandmark(scene, level.biome, level.color, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
 
   const layout = generateLevelLayout(level.biome, WORLD_SEED);
 
@@ -453,10 +460,34 @@ if (graphicsBtn && graphicsPanel) {
 // ---------------------------------------------------------------------------
 // Level select UI
 // ---------------------------------------------------------------------------
+// A brief "you've just landed" beat on entering any level — fades from
+// black, holds on the biome name, then fades into gameplay, instead of
+// snapping straight from the level-select menu into full control.
+function playArrivalSequence(levelName) {
+  if (!arrivalOverlay || !arrivalNameEl) return;
+  arrivalOverlay.classList.remove("rift-arrival-fade", "rift-arrival-name-in");
+  // Suppress the transition just long enough to snap fully opaque again —
+  // otherwise, re-entering a level while a previous arrival's fade-out was
+  // still mid-flight would smoothly transition back to opaque instead of
+  // resetting instantly, and worse, leaving an inline opacity value set
+  // here would permanently override the CSS class-based fade on every
+  // arrival after this one.
+  arrivalOverlay.style.transition = "none";
+  arrivalOverlay.style.opacity = "1";
+  arrivalOverlay.offsetHeight; // force a reflow so the transition:none + opacity reset above actually apply before it's cleared below
+  arrivalOverlay.style.transition = "";
+  arrivalNameEl.textContent = levelName;
+  requestAnimationFrame(() => {
+    arrivalOverlay.classList.add("rift-arrival-name-in");
+  });
+  setTimeout(() => arrivalOverlay.classList.add("rift-arrival-fade"), 1900);
+}
+
 function enterLevel(levelIdx) {
   buildLevel(levelIdx);
   initAudio();
   startAmbient(LEVELS[levelIdx].biome);
+  playArrivalSequence(LEVELS[levelIdx].name);
   if (isTouchDevice) {
     touchGameActive = true;
     startOverlay.style.display = "none";
@@ -664,7 +695,8 @@ function animate() {
   const wind = updateWeatherSystem(weatherHandle, dt);
   updateAtmosphericParticles(atmosphereHandle, elapsedTime, dt, wind.windX, wind.windZ);
   updateGrass(grassHandle, elapsedTime, wind.windX, wind.windZ);
-  updateWildlife(wildlifeHandle, elapsedTime, dt);
+  updateWildlife(wildlifeHandle, elapsedTime, dt, camera.position.x, camera.position.z);
+  updateLandmark(landmarkHandle, elapsedTime);
   updateClouds(cloudsHandle, dt, wind, dayNight.dayAmount, wind.rainIntensity);
   updateWorldPulse(dt);
   updateProjectiles(dt);

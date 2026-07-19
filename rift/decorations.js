@@ -27,6 +27,11 @@ function createDecoration(biome, colorHex, seedRand) {
       case "ashen": return createFossilRemains(colorHex, seedRand);
     }
   }
+  // A small flat marker etched with glowing alien glyphs — "something
+  // else was here" environmental storytelling, universal across every
+  // biome rather than being its own per-biome variant, since the point is
+  // that these show up in unexpected/inconsistent places.
+  if (seedRand() < 0.1) return createGlyphMarker(colorHex, seedRand);
   switch (biome) {
     case "ember": return roll < 0.72 ? createSpire(colorHex, seedRand) : createRockCluster(biome, colorHex, seedRand);
     case "verdant":
@@ -90,7 +95,7 @@ function createCrystalCluster(colorHex, rand) {
   const count = 3 + Math.floor(rand() * 3);
   for (let i = 0; i < count; i++) {
     const scale = 0.8 + rand() * 1.8;
-    const geo = new THREE.OctahedronGeometry(scale, getGraphicsSettings().decorationDetail);
+    const geo = new THREE.OctahedronGeometry(scale, 0); // rocks/crystals deliberately stay at their sharpest/blockiest form at every tier — smoothing them fights the low-poly art style and wastes polygon budget on something that looks worse rounded
     const mat = new THREE.MeshStandardMaterial({
       color: colorHex, emissive: colorHex, emissiveIntensity: 0.35,
       roughness: 0.2, metalness: 0.1, transparent: true, opacity: 0.9,
@@ -108,7 +113,7 @@ function createCrystalCluster(colorHex, rand) {
 // — reads as unstable/anti-gravity, fitting the Abyssal Drift theme.
 function createDebris(colorHex, rand) {
   const group = new THREE.Group();
-  const geo = new THREE.IcosahedronGeometry(0.8 + rand() * 1.1, getGraphicsSettings().decorationDetail);
+  const geo = new THREE.IcosahedronGeometry(0.8 + rand() * 1.1, 0); // rock — stays blocky, see note on the crystal cluster above
   // Irregular shape: nudge vertices outward randomly so it doesn't read as
   // a perfect icosahedron.
   const pos = geo.attributes.position;
@@ -136,7 +141,7 @@ function createRockCluster(biome, colorHex, rand) {
   const count = 2 + Math.floor(rand() * 3);
   for (let i = 0; i < count; i++) {
     const scale = 0.4 + rand() * 0.9;
-    const geo = new THREE.IcosahedronGeometry(scale, getGraphicsSettings().decorationDetail);
+    const geo = new THREE.IcosahedronGeometry(scale, 0); // rock — stays blocky, see note on the crystal cluster above
     const pos = geo.attributes.position;
     for (let v = 0; v < pos.count; v++) {
       const k = 0.8 + rand() * 0.4;
@@ -184,7 +189,7 @@ function createLivingTree(colorHex, rand) {
 function createCaveMouth(colorHex, rand) {
   const group = new THREE.Group();
   const rockMat = new THREE.MeshStandardMaterial({ color: 0x2e2b38, roughness: 0.9, flatShading: true });
-  const rock = new THREE.Mesh(new THREE.IcosahedronGeometry(2.4 + rand() * 1.2, getGraphicsSettings().decorationDetail), rockMat);
+  const rock = new THREE.Mesh(new THREE.IcosahedronGeometry(2.4 + rand() * 1.2, 0), rockMat); // rock — stays blocky, see note on the crystal cluster above
   rock.scale.set(1.3, 0.9, 1);
   rock.position.y = 1.4;
   group.add(rock);
@@ -380,6 +385,42 @@ function createFossilRemains(colorHex, rand) {
   group.add(spine);
   group.rotation.y = rand() * Math.PI * 2;
   return { group, kind: "fossilRemains" };
+}
+
+// A small flat stone slab etched with glowing glyph marks — "something
+// else was here," without spelling out who or what. The slab stays
+// angular/blocky (a BoxGeometry, no smoothing) per the same rock-art-style
+// rule as every other mineral decoration; the glyphs are what carry the
+// "ancient and alien" read, not the rock shape itself.
+function createGlyphMarker(colorHex, rand) {
+  const group = new THREE.Group();
+  const slabMat = new THREE.MeshStandardMaterial({ color: 0x353030, roughness: 0.9, flatShading: true });
+  const w = 1.1 + rand() * 0.6, d = 0.9 + rand() * 0.5, t = 0.15 + rand() * 0.1;
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(w, t, d), slabMat);
+  slab.position.y = t / 2;
+  slab.rotation.y = rand() * Math.PI * 2;
+  slab.rotation.z = (rand() - 0.5) * 0.12; // slightly tilted, not perfectly flat — reads as settled/ancient rather than placed
+  group.add(slab);
+
+  const glyphMat = new THREE.MeshBasicMaterial({ color: colorHex });
+  const glyphCount = 3 + Math.floor(rand() * 4);
+  for (let i = 0; i < glyphCount; i++) {
+    const isLine = rand() < 0.5;
+    const gx = (rand() - 0.5) * w * 0.7, gz = (rand() - 0.5) * d * 0.7;
+    let glyph;
+    if (isLine) {
+      glyph = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.02, 0.15 + rand() * 0.2), glyphMat);
+      glyph.rotation.y = rand() * Math.PI;
+    } else {
+      glyph = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.02, 0.06), glyphMat);
+    }
+    glyph.position.set(gx, t + 0.01, gz);
+    group.add(glyph);
+  }
+  const light = new THREE.PointLight(colorHex, 0.2, 2.5);
+  light.position.y = t + 0.3;
+  group.add(light);
+  return { group, kind: "glyphMarker" };
 }
 
 export { createDecoration, updateDecoration };

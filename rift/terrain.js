@@ -157,16 +157,38 @@ function biomeHeight(biome, worldX, worldZ, seed) {
   return h * falloff;
 }
 
-function applyHeightShading(geo, colorHex, minY, maxY) {
+// A second color patches into the ground at scattered spots, independent
+// of elevation — scorched ash, mineral veins, sun-bleached cracks — so the
+// terrain reads with more variety than a pure height gradient. Threshold
+// controls how much of the surface shows the patch (lower = rarer).
+const SURFACE_PATCH_STYLE = {
+  ember: { color: 0x120806, threshold: 0.62, freq: 3.2 },   // scorched/ash-dark patches
+  verdant: { color: 0x2a1f12, threshold: 0.68, freq: 2.2 }, // rich dark soil in low spots
+  crystal: { color: 0xcfeaff, threshold: 0.7, freq: 2.8 },  // pale mineral-vein streaks
+  abyssal: { color: 0x050308, threshold: 0.6, freq: 2.5 },  // near-black void patches
+  ashen: { color: 0xe8dfc8, threshold: 0.65, freq: 3.6 },   // sun-bleached, cracked-pale patches
+};
+
+function applyHeightShading(geo, colorHex, minY, maxY, biome, seed) {
   const posAttr = geo.attributes.position;
   const range = Math.max(maxY - minY, 1e-6);
   const base = new THREE.Color(colorHex).multiplyScalar(0.44); // was 0.3 — read as muddy/dark at low elevations rather than showing the actual biome color
   const highlight = new THREE.Color(colorHex).lerp(new THREE.Color(0xffffff), 0.22); // was 0.4 — less washed toward white, keeps more color saturation at peaks instead of desaturating them
+  const patchStyle = SURFACE_PATCH_STYLE[biome];
+  const patchColor = patchStyle ? new THREE.Color(patchStyle.color) : null;
   const colors = new Float32Array(posAttr.count * 3);
   const tmp = new THREE.Color();
   for (let i = 0; i < posAttr.count; i++) {
     const t = (posAttr.getY(i) - minY) / range;
     tmp.copy(base).lerp(highlight, t);
+    if (patchStyle) {
+      const x = posAttr.getX(i), z = posAttr.getZ(i);
+      const n = fbm2(x * 0.01 * patchStyle.freq, z * 0.01 * patchStyle.freq, seed + 500, 3, 2.0, 0.5);
+      if (n > patchStyle.threshold) {
+        const patchStrength = Math.min(1, (n - patchStyle.threshold) / (1 - patchStyle.threshold)) * 0.75; // never fully overrides the base shading, just blends toward the patch
+        tmp.lerp(patchColor, patchStrength);
+      }
+    }
     colors[i * 3] = tmp.r; colors[i * 3 + 1] = tmp.g; colors[i * 3 + 2] = tmp.b;
   }
   geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
@@ -193,7 +215,7 @@ function buildPlanetTerrain(level, seedStr) {
     if (y > maxY) maxY = y;
   }
   geo.computeVertexNormals();
-  applyHeightShading(geo, level.color, minY, maxY);
+  applyHeightShading(geo, level.color, minY, maxY, level.biome, seed);
 
   return geo;
 }

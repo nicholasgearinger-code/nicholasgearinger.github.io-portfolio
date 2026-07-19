@@ -105,30 +105,48 @@ function createWildlife(scene, biome) {
   return { flyers, motes };
 }
 
-function updateWildlife(handle, elapsed, dt) {
+function updateWildlife(handle, elapsed, dt, playerX = 0, playerZ = 0) {
   if (!handle) return;
+  const FLEE_RADIUS = 9; // motes start reacting once the player is this close
+  const STARTLE_RADIUS = 14; // flyers notice from a bit further out — they're airborne, more visible range
   for (const f of handle.flyers) {
     f.orbitAngle += f.orbitSpeed * dt;
+    const fx = f.orbitCenterX + Math.cos(f.orbitAngle) * f.orbitRadius;
+    const fz = f.orbitCenterZ + Math.sin(f.orbitAngle) * f.orbitRadius;
     f.sprite.position.set(
-      f.orbitCenterX + Math.cos(f.orbitAngle) * f.orbitRadius,
+      fx,
       f.height + Math.sin(elapsed * 0.3 + f.flapSeed) * 2, // gentle altitude bob, not a flat circular track
-      f.orbitCenterZ + Math.sin(f.orbitAngle) * f.orbitRadius
+      fz
     );
     // Wing-flap via scale pulse rather than an actual animated wing mesh —
-    // cheap, and at circling-bird distance it reads fine.
-    const flap = 1 + Math.sin(elapsed * 8 + f.flapSeed) * 0.35;
+    // cheap, and at circling-bird distance it reads fine. Startled birds
+    // flap faster, not just "notice" invisibly.
+    const startled = Math.hypot(fx - playerX, fz - playerZ) < STARTLE_RADIUS;
+    const flapRate = startled ? 16 : 8;
+    const flap = 1 + Math.sin(elapsed * flapRate + f.flapSeed) * 0.35;
     f.sprite.scale.set(2.2, 1.3 * flap, 1);
   }
   for (const m of handle.motes) {
-    m.wanderAngle += (Math.random() - 0.5) * dt * 2;
-    m.x += Math.cos(m.wanderAngle) * dt * 1.5;
-    m.z += Math.sin(m.wanderAngle) * dt * 1.5;
+    const distToPlayer = Math.hypot(m.x - playerX, m.z - playerZ);
+    if (distToPlayer < FLEE_RADIUS) {
+      // Flee directly away from the player rather than continuing its own
+      // wander — this is what actually reads as "noticed you," not just
+      // brightening in place.
+      m.wanderAngle = Math.atan2(m.z - playerZ, m.x - playerX);
+      m.x += Math.cos(m.wanderAngle) * dt * 5;
+      m.z += Math.sin(m.wanderAngle) * dt * 5;
+    } else {
+      m.wanderAngle += (Math.random() - 0.5) * dt * 2;
+      m.x += Math.cos(m.wanderAngle) * dt * 1.5;
+      m.z += Math.sin(m.wanderAngle) * dt * 1.5;
+    }
     // Keep wandering within a bounded area rather than drifting off
     // forever — gently steer back toward center once far out.
     if (Math.hypot(m.x, m.z) > 100) m.wanderAngle = Math.atan2(-m.z, -m.x);
     const y = m.baseY + Math.sin(elapsed * 1.2 + m.seed) * 0.6;
     m.sprite.position.set(m.x, y, m.z);
-    m.sprite.material.opacity = 0.55 + 0.35 * Math.sin(elapsed * 2 + m.seed);
+    const fleeGlow = distToPlayer < FLEE_RADIUS ? (1 - distToPlayer / FLEE_RADIUS) * 0.4 : 0;
+    m.sprite.material.opacity = 0.55 + 0.35 * Math.sin(elapsed * 2 + m.seed) + fleeGlow;
   }
 }
 

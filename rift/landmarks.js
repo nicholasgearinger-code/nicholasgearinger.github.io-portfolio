@@ -2,6 +2,108 @@ import * as THREE from "three";
 import { getGraphicsSettings } from "./graphicsSettings.js";
 
 // -----------------------------------------------------------------------------
+// Lava vein rendering — a cached gradient texture (dark cooled crust at
+// the edges, bright molten core down the middle, plus a scatter of
+// brighter heat pockets) replaces the old flat single-color fill. Cloning
+// it per-segment (cheap — clones share the canvas source, just get their
+// own offset/repeat) lets each segment's texture scroll independently,
+// which is what actually reads as "flowing downhill" instead of the
+// whole rectangle fading in and out as a block.
+// -----------------------------------------------------------------------------
+
+let _lavaGradientTexture = null;
+function getLavaGradientTexture() {
+  if (_lavaGradientTexture) return _lavaGradientTexture;
+  const w = 64, h = 256;
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d");
+
+  // Cross-channel gradient — same down the whole length, so one
+  // horizontal pass covers it. Dark crust at both edges, molten core
+  // in the middle, matching a real lava channel's cross-section rather
+  // than a flat tint.
+  const grad = ctx.createLinearGradient(0, 0, w, 0);
+  grad.addColorStop(0, "#150700");
+  grad.addColorStop(0.22, "#5c1400");
+  grad.addColorStop(0.5, "#ff5a1f");
+  grad.addColorStop(0.78, "#ffb238");
+  grad.addColorStop(1, "#150700");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+
+  // Bright heat pockets scattered down the length. Tiling this
+  // vertically and scrolling the texture's offset over time is what
+  // makes brightness travel down the vein continuously.
+  for (let i = 0; i < 22; i++) {
+    const x = w * 0.5 + (Math.random() - 0.5) * w * 0.6;
+    const y = Math.random() * h;
+    const r = 10 + Math.random() * 22;
+    const glow = ctx.createRadialGradient(x, y, 0, x, y, r);
+    glow.addColorStop(0, "rgba(255,230,160,0.9)");
+    glow.addColorStop(1, "rgba(255,230,160,0)");
+    ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  }
+
+  _lavaGradientTexture = new THREE.CanvasTexture(canvas);
+  _lavaGradientTexture.wrapS = THREE.ClampToEdgeWrapping;
+  _lavaGradientTexture.wrapT = THREE.RepeatWrapping;
+  return _lavaGradientTexture;
+}
+
+// A soft, blurry radial-falloff texture for the ambient glow halo behind
+// each vein — same cached-once/reused-everywhere pattern as the gradient
+// above.
+let _softGlowTexture = null;
+function getSoftGlowTexture() {
+  if (_softGlowTexture) return _softGlowTexture;
+  const size = 128;
+  const canvas = document.createElement("canvas");
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, "rgba(255,140,50,0.9)");
+  grad.addColorStop(0.6, "rgba(255,90,30,0.35)");
+  grad.addColorStop(1, "rgba(255,90,30,0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  _softGlowTexture = new THREE.CanvasTexture(canvas);
+  return _softGlowTexture;
+}
+
+// Builds a tapered ribbon strip with wavy, organic edges instead of a
+// straight-sided rectangle — the single biggest fix for the "glowing
+// squares" look, since a plain PlaneGeometry reads as a hard-edged box
+// no matter what's drawn on it. `seed` staggers the wobble per-segment so
+// consecutive segments in a chain don't wave in obvious lockstep.
+function createVeinRibbonGeometry(width, length, seed) {
+  const crossSections = 8;
+  const positions = [];
+  const uvs = [];
+  const indices = [];
+  for (let i = 0; i <= crossSections; i++) {
+    const t = i / crossSections;
+    const wobble = (Math.sin(t * 7 + seed * 3) * 0.5 + Math.sin(t * 13 + seed * 5) * 0.3) * width * 0.18;
+    const w = width * (0.75 + 0.25 * Math.sin(t * Math.PI)); // slight bulge mid-length, not a uniform strip
+    const halfW = w / 2;
+    const y = (t - 0.5) * length;
+    positions.push(-halfW + wobble, y, 0, halfW + wobble, y, 0);
+    uvs.push(0, t, 1, t);
+  }
+  for (let i = 0; i < crossSections; i++) {
+    const a = i * 2, b = a + 1, c = a + 2, d = a + 3;
+    indices.push(a, b, c, b, d, c);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+// -----------------------------------------------------------------------------
 // SWAP POINT: landmarks — exactly one massive, hand-crafted structure per
 // biome, placed at a fixed position rather than scattered randomly like
 // every other decoration. This is the one thing in each biome that isn't
@@ -46,26 +148,52 @@ function createEnergyCore(colorHex, radius, coreHeight) {
 // ground — real lava doesn't stop in a single point at the base, it
 // spreads into a shallow braided delta. Returns the flat list of segment
 // records (main chain + branches) for updateVolcano to animate uniformly.
-function createLavaVeinChain(group, angle, coneH, baseR, craterR) {
+function createLavaVeinChain(group, angle, coneH, baseR, craterR, glowsOut) {
   const segCount = 7;
   const segments = [];
   const slopeAngle = Math.atan2(baseR - craterR, coneH);
+
+  // One big soft glow halo behind the whole vein, roughly centered on
+  // its midpoint — the warm ambient bloom a real lava channel casts on
+  // the rock around it, which a hard-edged textured ribbon alone can't
+  // give. Additive + no depth write so it never competes with (or
+  // z-fights against) the sharp vein segments drawn on top of it.
+  const midT = 0.5;
+  const midY = coneH * (1 - midT) * 0.92;
+  const midR = baseR * midT * 0.98 + 0.6;
+  const glowMat = new THREE.MeshBasicMaterial({
+    map: getSoftGlowTexture(), color: 0xff8a3a, transparent: true, opacity: 0.3,
+    blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+  });
+  const glow = new THREE.Mesh(new THREE.PlaneGeometry(coneH * 0.7, coneH * 0.7), glowMat);
+  glow.position.set(Math.sin(angle) * midR, midY, Math.cos(angle) * midR);
+  glow.rotation.y = angle;
+  glow.rotation.x = -(Math.PI / 2 - slopeAngle);
+  group.add(glow);
+  if (glowsOut) glowsOut.push(glow);
+
   for (let i = 0; i < segCount; i++) {
     const t = i / (segCount - 1);
     const segY = coneH * (1 - t) * 0.92;
     const segR = baseR * t * 0.98 + 0.6;
     const w = 1.1 + t * 1.8;
-    // Each segment gets its own material instance, not a shared one —
-    // they need to pulse independently (staggered, reading as flow
-    // traveling downhill) rather than all changing in lockstep because
-    // they happened to reference the same object.
-    const segMat = new THREE.MeshBasicMaterial({ color: 0xff5522, transparent: true, opacity: 1 });
-    const seg = new THREE.Mesh(new THREE.PlaneGeometry(w, coneH / segCount * 1.3), segMat);
+    const seed = i * 0.7 + angle;
+    // Each segment gets its own texture clone (not a shared one) so its
+    // scroll offset can animate independently, staggered by seed —
+    // that's what reads as flow traveling downhill, rather than the
+    // whole segment fading in and out as a block.
+    const tex = getLavaGradientTexture().clone();
+    tex.needsUpdate = true;
+    tex.wrapS = THREE.ClampToEdgeWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(1, 1.6);
+    const segMat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 1 });
+    const seg = new THREE.Mesh(createVeinRibbonGeometry(w, coneH / segCount * 1.3, seed), segMat);
     seg.position.set(Math.sin(angle) * segR, segY, Math.cos(angle) * segR);
     seg.rotation.y = angle;
     seg.rotation.x = -(Math.PI / 2 - slopeAngle); // tilt to roughly follow the cone's slope at this height
     group.add(seg);
-    segments.push({ mesh: seg, seed: i * 0.7 });
+    segments.push({ mesh: seg, tex, seed });
   }
 
   // Braided fan at the base — 2 short offshoots peeling away from the
@@ -75,13 +203,19 @@ function createLavaVeinChain(group, angle, coneH, baseR, craterR) {
   for (const spread of [-0.4, 0.4]) {
     const branchAngle = angle + spread;
     const branchLen = 3 + Math.random() * 2;
-    const segMat = new THREE.MeshBasicMaterial({ color: 0xff5522, transparent: true, opacity: 1 });
-    const branch = new THREE.Mesh(new THREE.PlaneGeometry(1.2, branchLen), segMat);
+    const branchSeed = segCount * 0.7 + Math.random();
+    const tex = getLavaGradientTexture().clone();
+    tex.needsUpdate = true;
+    tex.wrapS = THREE.ClampToEdgeWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(1, 1.6);
+    const segMat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 1 });
+    const branch = new THREE.Mesh(createVeinRibbonGeometry(1.2, branchLen, branchSeed), segMat);
     branch.position.set(baseX + Math.sin(branchAngle) * branchLen * 0.4, 0.4, baseZ + Math.cos(branchAngle) * branchLen * 0.4);
     branch.rotation.x = -Math.PI / 2 + 0.08;
     branch.rotation.z = branchAngle;
     group.add(branch);
-    segments.push({ mesh: branch, seed: segCount * 0.7 + Math.random() });
+    segments.push({ mesh: branch, tex, seed: branchSeed });
   }
   return segments;
 }
@@ -156,8 +290,9 @@ function createEmberLandmark(colorHex) {
   // stripe down one side.
   const veinAngles = [0.35, 1.9, 3.4, 5.1]; // deliberately uneven spacing, not a perfect cross — real fracture patterns aren't symmetric
   const riverSegments = [];
+  const veinGlows = [];
   for (const veinAngle of veinAngles) {
-    const built = createLavaVeinChain(group, veinAngle, coneH, baseR, craterR);
+    const built = createLavaVeinChain(group, veinAngle, coneH, baseR, craterR, veinGlows);
     riverSegments.push(...built);
   }
 
@@ -178,7 +313,7 @@ function createEmberLandmark(colorHex) {
   return {
     group, energy, baseY: 0, biome: "ember",
     volcano: {
-      pool, poolMat, poolBaseColor, poolHotColor, craterLight, riverSegments, craterY: coneH,
+      pool, poolMat, poolBaseColor, poolHotColor, craterLight, riverSegments, veinGlows, craterY: coneH,
       baseR, craterR, // needed by the chunk sliding phase to follow the cone's actual surface, not fall through open air
       eruptionTimer: 8 + Math.random() * 12, // first eruption arrives reasonably soon rather than making the player wait a full cycle
       eruptionPhase: 0, // 0 = dormant, ramps to 1 during an active eruption and back down
@@ -370,14 +505,30 @@ function updateLandmark(handle, elapsed, dt) {
 // currently happening — a volcano's slopes are hot all the time, the
 // eruption itself is the separate, rarer event layered on top.
 function updateVolcano(v, elapsed, dt) {
-  for (const seg of v.riverSegments) {
-    const flow = 0.55 + 0.45 * Math.sin(elapsed * 1.8 - seg.seed * 1.5); // negative sign on the seed term makes the brightness peak travel down the chain over time, reading as downhill flow rather than segments pulsing independently
-    seg.arrivalFlare = Math.max(0, (seg.arrivalFlare || 0) - dt * 1.2); // fades out over ~0.8s rather than cutting off instantly
-    seg.mesh.material.opacity = Math.min(1, flow + seg.arrivalFlare);
-  }
   // Crater pool breathes gently between eruptions, same as ground lava's
   // own idle pulse.
   const idlePulse = 0.8 + 0.2 * Math.sin(elapsed * 0.9);
+
+  for (const seg of v.riverSegments) {
+    // The texture's own gradient/heat-pocket pattern scrolls down the
+    // segment's length (staggered per-segment by seed) — THIS is what
+    // reads as flow now, not the segment's overall visibility. Opacity
+    // only gets a small idle wobble, so a vein never dips toward
+    // invisible and "blinks off" the way a full 0.1-1.0 opacity swing
+    // used to.
+    seg.tex.offset.y = (elapsed * 0.35 + seg.seed * 0.4) % 1;
+    const idle = 0.88 + 0.12 * Math.sin(elapsed * 1.3 - seg.seed * 1.2);
+    seg.arrivalFlare = Math.max(0, (seg.arrivalFlare || 0) - dt * 1.2); // fades out over ~0.8s rather than cutting off instantly
+    seg.mesh.material.opacity = Math.min(1, idle + seg.arrivalFlare);
+  }
+
+  // Glow halos pulse gently in sync with the crater's own idle breathing
+  // — a volcano's slopes radiate heat all the time, this is the same
+  // "lit from within" ambience liquid.js's lava glow overlay uses.
+  for (const g of v.veinGlows) {
+    g.material.opacity = 0.22 + 0.15 * idlePulse;
+  }
+
   v.craterLight.intensity = v.erupting ? v.craterLight.intensity : 1.2 * idlePulse;
 
   v.eruptionTimer -= dt;
@@ -492,7 +643,16 @@ function disposeLandmark(scene, handle) {
   scene.remove(handle.group);
   handle.group.traverse((obj) => {
     if (obj.geometry) obj.geometry.dispose();
-    if (obj.material) obj.material.dispose();
+    if (obj.material) {
+      // Vein segments/branches each carry a cloned texture (independent
+      // scroll offset) — the shared cached base texture (getLavaGradientTexture/
+      // getSoftGlowTexture) is intentionally left alone since other
+      // landmarks/rebuilds still reference it.
+      if (obj.material.map && obj.material.map !== _lavaGradientTexture && obj.material.map !== _softGlowTexture) {
+        obj.material.map.dispose();
+      }
+      obj.material.dispose();
+    }
   });
 }
 

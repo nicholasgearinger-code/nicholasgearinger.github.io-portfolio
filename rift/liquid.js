@@ -52,14 +52,65 @@ function createShimmerTexture() {
   return texture;
 }
 
+// -----------------------------------------------------------------------------
+// Flow noise — cheap value-noise fbm evaluated per-vertex per-frame, used
+// only by Ember's lava. Replaces the old per-vertex-index bubble cycle
+// (`(i * 12.9898) % 1`), which had no spatial correlation between
+// neighboring vertices — each one popped/faded on its own independent
+// clock, which is what read as "glowing squares that fade out" rather
+// than a liquid surface. Sampling a continuous 2D noise field and
+// scrolling the sample coordinates over time in a fixed direction makes
+// brightness move ACROSS the surface, like something is actually flowing
+// downhill, instead of blinking in place. Still no shader/GPU work — this
+// is the same CPU per-vertex-loop approach the rest of the file already
+// uses, just fed a spatially coherent field instead of an index hash.
+// -----------------------------------------------------------------------------
+
+function hash2(x, y) {
+  const n = Math.sin(x * 127.1 + y * 311.7) * 43758.5453123;
+  return n - Math.floor(n);
+}
+
+function valueNoise2D(x, y) {
+  const xi = Math.floor(x), yi = Math.floor(y);
+  const xf = x - xi, yf = y - yi;
+  const u = xf * xf * (3 - 2 * xf);
+  const v = yf * yf * (3 - 2 * yf);
+  const a = hash2(xi, yi), b = hash2(xi + 1, yi);
+  const c = hash2(xi, yi + 1), d = hash2(xi + 1, yi + 1);
+  return THREE.MathUtils.lerp(THREE.MathUtils.lerp(a, b, u), THREE.MathUtils.lerp(c, d, u), v);
+}
+
+function fbm(x, y, octaves) {
+  let total = 0, amp = 0.5, freq = 1, max = 0;
+  for (let o = 0; o < octaves; o++) {
+    total += valueNoise2D(x * freq, y * freq) * amp;
+    max += amp;
+    amp *= 0.5;
+    freq *= 2;
+  }
+  return total / max;
+}
+
+function smoothstep(edge0, edge1, x) {
+  const t = THREE.MathUtils.clamp((x - edge0) / (edge1 - edge0), 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
+function normalizeFlow(dir) {
+  const len = Math.hypot(dir.x, dir.z) || 1;
+  return { x: dir.x / len, z: dir.z / len };
+}
+
 /**
  * @param {THREE.Scene} scene
  * @param {string} biome
  * @param {number} y  world-space height to place the plane at
  * @param {number} size  full width/depth to cover (should match/exceed the terrain size)
  * @param {(x:number, z:number) => number|null} [sampleHeight]  used only for Ember's floating cooled-rock chunks, to place them in genuine lava channels rather than scattering blindly across the whole plane
+ * @param {{x:number, z:number}} [flowDir]  Ember only — world-space direction the lava's crust/crack pattern drifts in. Defaults to a fixed diagonal; pass a real downhill direction (e.g. sampled from terrain.js's heightfield gradient) for a more physically-grounded flow per landmark/channel.
  */
-function createLiquidPlane(scene, biome, y, size, sampleHeight) {
+function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0.6, z: 0.35 }) {
   const style = LIQUID_STYLE[biome];
   if (!style) return null;
   const segs = getGraphicsSettings().liquidSegments;
@@ -146,13 +197,25 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight) {
     rocks = { mesh: rockMesh, data: rockData, baseY: y };
   }
 
+  // Flow-noise octave counts scale with segment density (itself already
+  // tier-gated by graphicsSettings) rather than reading a tier name
+  // directly — fewer segments already means coarser geometry, so this
+  // just keeps the noise detail proportionate instead of spending 3
+  // octaves of fbm per vertex on a Low-tier mesh that has few vertices
+  // to show it on anyway.
+  const crustOctaves = segs >= 40 ? 2 : 1;
+  const crackOctaves = segs >= 40 ? 3 : (segs >= 24 ? 2 : 1);
+
   const basePositions = new Float32Array(posAttr.array); // original Y per vertex, for the ripple to animate around
-  return { mesh, glow, shimmer, rocks, basePositions, biome, style };
+  return {
+    mesh, glow, shimmer, rocks, basePositions, biome, style,
+    flowDir: normalizeFlow(flowDir), crustOctaves, crackOctaves,
+  };
 }
 
 function updateLiquidPlane(handle, elapsed, skyColor, cameraY) {
   if (!handle) return;
-  const { mesh, glow, shimmer, rocks, basePositions, biome, style } = handle;
+  const { mesh, glow, shimmer, rocks, basePositions, biome, style, flowDir, crustOctaves, crackOctaves } = handle;
   const posAttr = mesh.geometry.attributes.position;
   const colorAttr = mesh.geometry.attributes.color;
   // Cheap per-vertex ripple — lava churns slower/heavier, water ripples
@@ -162,6 +225,7 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY) {
   const speed = biome === "ember" ? 0.6 : 1.4;
   const amp = biome === "ember" ? 0.18 : 0.1;
   const chopAmp = amp * 0.35;
+  const flowSpeed = 0.12; // noise-space units/sec the crust/crack field drifts along flowDir
   const tmpColor = new THREE.Color();
   // Water tints toward the current sky color each frame (recomputed fresh,
   // not stored — otherwise it'd drift further every frame instead of
@@ -178,37 +242,55 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY) {
     const swell = Math.sin(bx * 0.15 + elapsed * speed) * amp + Math.cos(bz * 0.12 + elapsed * speed * 0.8) * amp;
     const chop = Math.sin(bx * 0.55 + bz * 0.4 + elapsed * speed * 2.3) * chopAmp;
     const ripple = swell + chop;
-    posAttr.setY(i, ripple);
 
     // Normalize ripple to 0..1.
     const range = (amp + chopAmp) * 2;
     const disturbance = THREE.MathUtils.clamp((ripple + range / 2) / range, 0, 1);
 
     if (biome === "ember" && style.crustColor) {
-      // Real lava is dark cooled crust laced with glowing cracks, not a
-      // uniform orange — a genuine 3-band gradient (dark crust -> molten
-      // red -> white-hot glow) instead of a 2-color lerp gives that
-      // texture. Crust dominates at rest, glow only right at true crests,
-      // with a full red band carrying most of the surface in between.
-      if (disturbance < 0.55) tmpColor.copy(style.crustColor).lerp(baseColor, disturbance / 0.55);
-      else tmpColor.copy(baseColor).lerp(style.hotColor, (disturbance - 0.55) / 0.45);
+      // Sample coordinates drift over time along flowDir — this is what
+      // makes the pattern actually flow instead of animating in place.
+      const fx = bx * 0.045 - elapsed * flowSpeed * flowDir.x;
+      const fz = bz * 0.045 - elapsed * flowSpeed * flowDir.z;
 
-      // Bubbling — each vertex runs its own pop cycle on a deterministic
-      // per-vertex offset (derived from the index, not random-per-frame),
-      // so a given spot on the lava pops on a consistent rhythm rather
-      // than flickering randomly every frame. Layering this into the
-      // existing per-vertex color pass means a bubble can only ever
-      // appear where the lava mesh is already visibly showing through
-      // the terrain — no risk of placing one somewhere hidden.
-      const bubbleOffset = (i * 12.9898) % 1;
-      const bubblePhase = (elapsed * 0.12 + bubbleOffset) % 1;
-      if (bubblePhase < 0.07) {
-        const pop = Math.sin((bubblePhase / 0.07) * Math.PI); // smooth rise-and-fall within the pop window, not a hard on/off flicker
-        tmpColor.lerp(style.hotColor, pop * 0.85);
+      // Low-frequency layer = cooled dark crust. High-frequency layer,
+      // warped by the crust value itself (fx*2.6 + crust*1.6), = the
+      // molten cracks running through it — the warp is what keeps the
+      // cracks from looking like a generic tiled pattern and gives them
+      // the branching, uneven look real fracture networks have.
+      const crust = fbm(fx, fz, crustOctaves);
+      const cracks = fbm(fx * 2.6 + crust * 1.6, fz * 2.6, crackOctaves);
+      let heat = smoothstep(0.4, 0.62, cracks) * (1 - THREE.MathUtils.clamp(crust * 0.8, 0, 1));
+      // A touch of the physical ripple folded back in keeps the surface
+      // feeling like it's genuinely churning, not just a static crack
+      // pattern sliding past.
+      heat = THREE.MathUtils.clamp(heat + disturbance * 0.12, 0, 1);
+
+      // 3-band gradient, now driven by heat instead of ripple-disturbance:
+      // dark crust -> molten red -> white-hot, with crust dominating at
+      // rest and the hot band reserved for genuinely open cracks.
+      tmpColor.copy(style.crustColor).lerp(baseColor, THREE.MathUtils.clamp(heat * 1.4, 0, 1));
+      if (heat > 0.55) tmpColor.lerp(style.hotColor, (heat - 0.55) / 0.45);
+
+      // Bubbling — a faster, higher-frequency noise layer that also
+      // evolves in time (elapsed*0.4 inside the sample), so pockets of
+      // extra brightness well up and pop as they drift along with the
+      // flow, correlated with their neighbors, instead of each vertex
+      // flickering on its own independent clock like before.
+      const bubblePulse = fbm(fx * 6 + elapsed * 0.4, fz * 6, 2);
+      if (bubblePulse > 0.66) {
+        const pop = (bubblePulse - 0.66) / 0.34;
+        tmpColor.lerp(style.hotColor, pop * 0.9);
       }
+
+      // Hot cracks bulge very slightly — thinner crust over rising
+      // pressure reads as a subtle raised ridge, not just a flat color
+      // change.
+      posAttr.setY(i, ripple + heat * 0.15);
     } else {
       const accent = style.frothColor;
       tmpColor.copy(baseColor).lerp(accent, Math.pow(disturbance, 3)); // pow(3) keeps froth rare/at true crests, not smeared across the whole surface
+      posAttr.setY(i, ripple);
     }
     tmpColor.toArray(colorAttr.array, i * 3);
   }

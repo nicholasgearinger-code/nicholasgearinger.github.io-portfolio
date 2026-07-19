@@ -49,6 +49,10 @@ function createVeinIllustrationTexture(seed) {
   // channel shape cheaply, without hand-authoring a polygon outline.
   // Crust layer first (wider, dark), hot core layer on top (narrower,
   // bright) — the same dark-edge/bright-center read as the ground lava.
+  // Base radius factor and hot-core widthScale both bumped up (0.24->0.32,
+  // 0.55->0.72) for a visibly thicker, bolder channel — was reading too
+  // thin/wispy compared to the newer small surface cracks using the same
+  // texture at a smaller physical scale.
   const stampLayer = (color, widthScale) => {
     ctx.fillStyle = color;
     for (let i = 0; i < points.length - 1; i++) {
@@ -59,13 +63,18 @@ function createVeinIllustrationTexture(seed) {
         const x = THREE.MathUtils.lerp(a.x, b.x, u);
         const y = THREE.MathUtils.lerp(a.y, b.y, u);
         const wMul = THREE.MathUtils.lerp(a.widthMul, b.widthMul, u);
-        const r = w * 0.24 * wMul * widthScale;
+        const r = w * 0.32 * wMul * widthScale;
         ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
       }
     }
   };
-  stampLayer("#3a0d00", 1.0);
-  stampLayer("#ff5a1f", 0.55);
+  // Crust darkened further (was #3a0d00) to hold contrast against the
+  // cone's new near-black violet body; core pushed toward a purer,
+  // more saturated orange (was #ff5a1f, slightly muddy/brownish) — the
+  // reference's lava reads as a clean, poster-flat hot orange, not a
+  // naturalistic warm-brown blend.
+  stampLayer("#220400", 1.0);
+  stampLayer("#ff6a14", 0.72);
 
   // A handful of bright pooled highlights along the channel — the small
   // near-white spots the reference uses to sell "molten," not a uniform
@@ -122,6 +131,27 @@ function getSoftGlowTexture() {
   _softGlowTexture = new THREE.CanvasTexture(canvas);
   _softGlowTexture.colorSpace = THREE.SRGBColorSpace;
   return _softGlowTexture;
+}
+
+// A soft gray-warm haze puff for crater smoke — deliberately NOT additive
+// (that would make it read as glowing light, not murky ash/smoke). Cached
+// once like the glow texture above.
+let _smokeTexture = null;
+function getSmokeTexture() {
+  if (_smokeTexture) return _smokeTexture;
+  const size = 128;
+  const canvas = document.createElement("canvas");
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, "rgba(95,82,76,0.55)");
+  grad.addColorStop(0.55, "rgba(70,60,58,0.28)");
+  grad.addColorStop(1, "rgba(60,55,55,0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  _smokeTexture = new THREE.CanvasTexture(canvas);
+  _smokeTexture.colorSpace = THREE.SRGBColorSpace;
+  return _smokeTexture;
 }
 
 // -----------------------------------------------------------------------------
@@ -212,7 +242,7 @@ function addFlowBeads(group, topPos, bottomPos, count, beadsOut) {
 function createLavaVeinChain(group, angle, coneH, baseR, craterR, glowsOut, beadsOut) {
   const slopeAngle = Math.atan2(baseR - craterR, coneH);
   const length = coneH * 0.9;
-  const width = 3.2;
+  const width = 4.8; // was 3.2 — thicker flow, matches the bolder channel proportion above
   const midY = coneH * 0.5;
   // Padding increased from an earlier 0.25 -> 0.6. The cone's surface
   // isn't perfectly smooth — per-vertex jitter (see the jitter loop
@@ -297,7 +327,7 @@ function createLavaVeinChain(group, angle, coneH, baseR, craterR, glowsOut, bead
     // single plain yaw on the mesh sidesteps the ordering issue entirely
     // — there's only one rotation left on the mesh, so there's no
     // composition order to get wrong.
-    const branchGeo = new THREE.PlaneGeometry(1.8, branchLen);
+    const branchGeo = new THREE.PlaneGeometry(2.8, branchLen); // was 1.8 — matches the main vein's thicker proportions
     branchGeo.rotateX(Math.PI / 2 - 0.08);
     const branch = new THREE.Mesh(branchGeo, branchMat);
     branch.position.set(baseX + Math.sin(branchAngle) * branchLen * 0.4, 0.4, baseZ + Math.cos(branchAngle) * branchLen * 0.4);
@@ -314,25 +344,187 @@ function createLavaVeinChain(group, angle, coneH, baseR, craterR, glowsOut, bead
   return segments;
 }
 
-// A tight vertical spray of thin bright streaks shooting up out of the
-// crater during an eruption — layered on top of the arcing chunks, this
-// is what actually reads as a continuous fountain rather than a few
-// discrete flying rocks, matching how a real eruption's plume looks.
+// A single irregular triangle — not a rectangle — with its own
+// randomized base width and tip offset so each instance reads as a
+// distinct jagged fragment rather than a uniform stamped-out shape.
+// Vertex-colored bright yellow-white at the base fading to hot
+// red-orange at the tip, the same "white-hot core, cooling to red at
+// the edges" read the reference's explosion burst uses.
+function createShardGeometry(length) {
+  const geo = new THREE.BufferGeometry();
+  const baseW = 0.16 + Math.random() * 0.14;
+  const tipOffset = (Math.random() - 0.5) * length * 0.35;
+  const positions = new Float32Array([
+    -baseW, 0, 0,
+    baseW, 0, 0,
+    tipOffset, length, 0,
+  ]);
+  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const colors = new Float32Array([
+    1.0, 0.95, 0.78,
+    1.0, 0.95, 0.78,
+    1.0, 0.33, 0.08,
+  ]);
+  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+  return geo;
+}
+
+// A radiating burst of jagged shard fragments exploding out of the
+// crater during an eruption — replaces the old tight column of thin
+// vertical streaks, which read as a fountain/sparkler rather than the
+// reference's wide, explosive radial burst. Each shard now launches at
+// its own outward tilt (not just straight up) and tumbles as it flies,
+// layered on top of the arcing debris chunks below.
 function createEruptionFountain(coneH) {
   const group = new THREE.Group();
-  const mat = new THREE.MeshBasicMaterial({ color: 0xffcf6e, transparent: true, opacity: 0 });
   const streaks = [];
-  for (let i = 0; i < 10; i++) {
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.25, 2.5), mat.clone());
+  for (let i = 0; i < 14; i++) { // was 10 thin streaks; more + jagged + wider-radiating reads closer to an actual explosive burst
+    const length = 2 + Math.random() * 3.5;
+    const geo = createShardGeometry(length);
+    const mat = new THREE.MeshBasicMaterial({
+      vertexColors: true, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false, fog: false, side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(0, coneH, 0);
     group.add(mesh);
     streaks.push({
       mesh, seed: Math.random() * Math.PI * 2,
       angle: Math.random() * Math.PI * 2, radius: Math.random() * 0.8,
+      tilt: Math.random() * 0.7, // radians off vertical — most shards launch steep but a good spread kicks out toward ~40deg, giving the burst real width instead of a tidy column
+      spin: (Math.random() - 0.5) * 6,
       speed: 7 + Math.random() * 5, phase: Math.random(),
     });
   }
   return { group, streaks, craterY: coneH };
+}
+
+// Scatters small secondary glowing cracks across the cone's surface —
+// distinct from the 4 big flowing veins, these are static (no scroll/flow
+// animation) fine fissures reading as old, settled fracture lines rather
+// than active channels, giving the "cracked through with old fire" look
+// real volcanic rock has beyond just the main flow paths. At this small
+// physical scale, the same thickened channel texture (bumped up when the
+// main veins got thicker) reads as a bold solid color-block shape rather
+// than a thin crack — turned out to look great and matches the flat-
+// illustration reference's bold color-block style closely, so count and
+// size were both bumped up to lean into it rather than dial it back.
+// Reuses the EXACT surface-placement math the main veins use (same +0.6
+// padding past the cone's jitter) — the vein-hiding bug earlier this
+// session was caused by getting this wrong, so it's worth reusing
+// verbatim rather than re-deriving a similar-but-not-identical formula.
+function createSurfaceCracks(group, coneH, baseR, craterR, count) {
+  const slopeAngle = Math.atan2(baseR - craterR, coneH);
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const heightT = 0.08 + Math.random() * 0.89; // was 0.08-0.88, now extends to 0.97 — nearly the full height, just short of the crater pool disc itself
+    const y = heightT * coneH;
+    const idealR = baseR + (craterR - baseR) * (y / coneH);
+    const r = idealR + 0.6;
+    const len = 2.2 + Math.random() * 3.2; // was 1.8-4.4, now 2.2-5.4 — more presence
+    const width = 0.5 + Math.random() * 0.45; // was 0.4-0.75, now 0.5-0.95
+    const tex = createVeinIllustrationTexture(angle * 3.1 + i * 7.3);
+    tex.repeat.set(1, 1.4);
+    const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.75 + Math.random() * 0.2, side: THREE.DoubleSide });
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, len), mat);
+    mesh.position.set(Math.sin(angle) * r, y, Math.cos(angle) * r);
+    mesh.rotation.y = angle;
+    mesh.rotateX(-slopeAngle);
+    group.add(mesh);
+  }
+}
+
+// Soft smoke puffs that rise from the crater and disperse — the volcano
+// glows but had no atmosphere around it. Each puff independently loops
+// through rise -> grow -> fade -> reset, staggered so it reads as a
+// continuous drift rather than a single repeating cloud. Each puff gets
+// its OWN cloned material (not a shared one) — a shared material across
+// "independent" puffs would defeat their individual opacity animation,
+// the same class of bug that broke this volcano's lava-river flow the
+// first time it was built.
+function createCraterSmoke(coneH, count) {
+  const group = new THREE.Group();
+  const puffs = [];
+  for (let i = 0; i < count; i++) {
+    const mat = new THREE.MeshBasicMaterial({
+      map: getSmokeTexture(), transparent: true, opacity: 0,
+      depthWrite: false, fog: true, side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(3, 3), mat);
+    group.add(mesh);
+    puffs.push({
+      mesh,
+      phase: i / count,
+      speed: 0.09 + Math.random() * 0.03,
+      driftX: (Math.random() - 0.5) * 1.6,
+      driftZ: (Math.random() - 0.5) * 1.6,
+    });
+  }
+  return { group, puffs, baseY: coneH };
+}
+
+function updateCraterSmoke(smoke, elapsed) {
+  for (const p of smoke.puffs) {
+    const t = (elapsed * p.speed + p.phase) % 1;
+    const riseHeight = 1 + t * 6;
+    p.mesh.position.set(p.driftX * t, smoke.baseY + riseHeight, p.driftZ * t);
+    p.mesh.scale.setScalar(1 + t * 2.2);
+    const fadeIn = Math.min(1, t / 0.15);
+    const fadeOut = 1 - Math.pow(t, 1.5);
+    p.mesh.material.opacity = fadeIn * fadeOut * 0.5;
+  }
+}
+
+// Small ember sparks arcing up from the crater rim between eruptions —
+// ambient "spitting" life independent of the big eruption sequence, which
+// only fires every 22-40s. Each spark loops its own short ballistic arc
+// (launch -> peak -> fall/fade -> pause -> relaunch) on a fixed per-spark
+// angle/distance, staggered by an initial delay. Uses a positive-safe
+// modulo (`((x % m) + m) % m`) rather than raw `%` — this project has hit
+// a real bug before from JS's sign-preserving modulo on an
+// elapsed-minus-delay term that can go negative early on.
+function createEmberSparks(craterR, coneH, count) {
+  const group = new THREE.Group();
+  const sparks = [];
+  for (let i = 0; i < count; i++) {
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xffb35a, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+    });
+    const mesh = new THREE.Mesh(new THREE.OctahedronGeometry(0.18, 0), mat);
+    group.add(mesh);
+    sparks.push({
+      mesh,
+      angle: Math.random() * Math.PI * 2,
+      distFactor: 0.6 + Math.random() * 1.8, // was 0.6-1.8, now 0.6-2.4 — reads closer to the reference's sparks scattered well beyond the crater rim, not clustered tight to it
+      arcHeight: 2 + Math.random() * 4, // was 2-5, now 2-6
+      duration: 1.1 + Math.random() * 0.9,
+      pause: 1.5 + Math.random() * 2.5,
+      delay: Math.random() * 5,
+    });
+  }
+  return { group, sparks, craterR, coneH };
+}
+
+function updateEmberSparks(emberSparks, elapsed) {
+  for (const s of emberSparks.sparks) {
+    const cycle = s.duration + s.pause;
+    const raw = elapsed - s.delay;
+    const localT = ((raw % cycle) + cycle) % cycle; // positive-safe modulo
+    if (localT > s.duration) {
+      s.mesh.material.opacity = 0;
+      continue;
+    }
+    const t = localT / s.duration;
+    const dist = emberSparks.craterR * s.distFactor;
+    s.mesh.position.set(
+      Math.cos(s.angle) * dist * t,
+      emberSparks.coneH + Math.sin(t * Math.PI) * s.arcHeight,
+      Math.sin(s.angle) * dist * t
+    );
+    s.mesh.material.opacity = Math.sin(t * Math.PI) * 0.9;
+  }
 }
 
 function createEmberLandmark(colorHex) {
@@ -346,6 +538,12 @@ function createEmberLandmark(colorHex) {
   // material color.
   const rockMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, flatShading: true });
   const coneH = 27, baseR = 18, craterR = 2.2;
+  // Moved up from further below so the cone-carving loop right below and
+  // the actual vein/crack placement code later in this function share
+  // this exact array — the channels carved into the rock and the lava
+  // painted into them need to line up, not two separately-tuned copies
+  // that could drift apart.
+  const veinAngles = [0.35, 1.9, 3.4, 5.1]; // deliberately uneven spacing, not a perfect cross — real fracture patterns aren't symmetric
   const coneGeo = new THREE.CylinderGeometry(craterR, baseR, coneH, 9, 4);
   // Push each ring of vertices in/out slightly at random — a perfectly
   // smooth tapered cylinder reads as a traffic cone, not a rocky
@@ -355,14 +553,42 @@ function createEmberLandmark(colorHex) {
   // a little irregularity sells "mountain," a lot of it just looks noisy.
   // Vertices nearer the very top (the crater rim) get less jitter so the
   // crater opening itself stays roughly circular.
+  //
+  // On top of that general jitter, real channels are now carved into the
+  // geometry at the same 4 angles the lava veins sit at — a painted plane
+  // floating over an otherwise-smooth cone read as a decal stuck on top;
+  // an actual groove in the rock is what makes the lava look like it's
+  // running THROUGH the mountain. The cone only has 9 radial segments
+  // (deliberately low-poly, matching the rest of this project's blocky
+  // rock aesthetic), so a vein's exact angle can sit up to ~20 degrees
+  // from the nearest vertex column (verified numerically) — the falloff
+  // width below (0.5 rad ≈ 28.6 degrees) is chosen wide enough to
+  // reliably reach at least that nearest column in every case, not just
+  // the lucky ones where a vein happens to land close to a column.
+  const channelHalfWidth = 0.5; // radians
+  const channelDepth = 1.6; // world units, at full strength before height-tapering
   const conePos = coneGeo.attributes.position;
   for (let i = 0; i < conePos.count; i++) {
     const x = conePos.getX(i), y = conePos.getY(i), z = conePos.getZ(i);
     const heightT = (y + coneH / 2) / coneH; // 0 at base, 1 at crater rim
-    const jitterAmount = (1 - heightT * 0.6) * 0.32;
+    const heightTaper = 1 - heightT * 0.6; // shared by jitter and channel depth — both ease off near the crater so its opening stays roughly circular
+    const jitterAmount = heightTaper * 0.32;
     const angle = Math.atan2(z, x);
     const r = Math.hypot(x, z);
-    const jitter = 1 + (Math.sin(angle * 5 + y * 0.7) * 0.5 + Math.sin(angle * 11 - y * 0.3) * 0.5) * (jitterAmount / Math.max(r, 0.5));
+    const jitterDeviation = (Math.sin(angle * 5 + y * 0.7) * 0.5 + Math.sin(angle * 11 - y * 0.3) * 0.5) * (jitterAmount / Math.max(r, 0.5));
+
+    let channelStrength = 0;
+    for (const va of veinAngles) {
+      const diff = Math.atan2(Math.sin(angle - va), Math.cos(angle - va)); // wrapped angular distance, [-pi, pi]
+      const absDiff = Math.abs(diff);
+      if (absDiff < channelHalfWidth) {
+        const s = Math.cos((absDiff / channelHalfWidth) * (Math.PI / 2)); // 1 at the vein's exact angle, smoothly down to 0 at the falloff edge
+        if (s > channelStrength) channelStrength = s;
+      }
+    }
+    const channelPull = (channelStrength * channelDepth * heightTaper) / Math.max(r, 0.5); // always inward (a groove), unlike the bidirectional jitter above
+
+    const jitter = 1 + jitterDeviation - channelPull;
     conePos.setX(i, x * jitter);
     conePos.setZ(i, z * jitter);
   }
@@ -377,14 +603,28 @@ function createEmberLandmark(colorHex) {
   // highlight streak" look here, the same technique the reference itself
   // appears to use, so we don't need to fight it the way the obsidian
   // formation's glossy metalness did.
+  // 3-stop gradient, not 2 — the flat-vector reference's cone reads as
+  // near-black violet overall (far darker/more saturated than the old
+  // 0x22213a->0x8f8fae pair, which was closer to a lit gray-purple rock
+  // than the reference's ink-dark silhouette), with a warm dark
+  // maroon-brown flush low on the slopes where it blends into the
+  // reddish background mountain silhouettes, rising through deep violet
+  // and staying a cool, only slightly lighter violet near the rim
+  // (the crater glow does the actual brightening up there, not the rock
+  // itself lightening toward gray).
   const coneColors = new Float32Array(conePos.count * 3);
-  const shadowColor = new THREE.Color(0x22213a);
-  const rimColor = new THREE.Color(0x8f8fae);
+  const groundColor = new THREE.Color(0x3a2030);
+  const bodyColor = new THREE.Color(0x241833);
+  const rimColor = new THREE.Color(0x453a5e);
   const tmpConeColor = new THREE.Color();
   for (let i = 0; i < conePos.count; i++) {
     const y = conePos.getY(i);
     const heightT = (y + coneH / 2) / coneH;
-    tmpConeColor.copy(shadowColor).lerp(rimColor, heightT);
+    if (heightT < 0.4) {
+      tmpConeColor.copy(groundColor).lerp(bodyColor, heightT / 0.4);
+    } else {
+      tmpConeColor.copy(bodyColor).lerp(rimColor, (heightT - 0.4) / 0.6);
+    }
     coneColors[i * 3] = tmpConeColor.r; coneColors[i * 3 + 1] = tmpConeColor.g; coneColors[i * 3 + 2] = tmpConeColor.b;
   }
   coneGeo.setAttribute("color", new THREE.BufferAttribute(coneColors, 3));
@@ -414,8 +654,9 @@ function createEmberLandmark(colorHex) {
   // reads as actively flowing, not a painted stripe. Several of these at
   // different angles (not just one) is what actually gives the "cracked
   // open, glowing from within" look rather than a single decorative
-  // stripe down one side.
-  const veinAngles = [0.35, 1.9, 3.4, 5.1]; // deliberately uneven spacing, not a perfect cross — real fracture patterns aren't symmetric
+  // stripe down one side. `veinAngles` itself is declared earlier now,
+  // right before the cone-carving loop, and reused here unchanged — the
+  // carved channels and the painted lava need to share the same angles.
   const riverSegments = [];
   const veinGlows = [];
   const flowBeads = [];
@@ -423,6 +664,11 @@ function createEmberLandmark(colorHex) {
     const built = createLavaVeinChain(group, veinAngle, coneH, baseR, craterR, veinGlows, flowBeads);
     riverSegments.push(...built);
   }
+
+  // Secondary fine cracks scattered across the whole cone — see the note
+  // above createSurfaceCracks for why these are static and distinct from
+  // the 4 main flowing veins.
+  createSurfaceCracks(group, coneH, baseR, craterR, 26); // was 14
 
   const energy = createEnergyCore(colorHex, 1.4, coneH * 0.5);
   energy.group.position.set(0, 0, baseR * 0.55); // offset toward one of the vein sides rather than dead-center in the cone
@@ -438,6 +684,12 @@ function createEmberLandmark(colorHex) {
   const fountain = createEruptionFountain(coneH);
   group.add(fountain.group);
 
+  const smoke = createCraterSmoke(coneH, 5);
+  group.add(smoke.group);
+
+  const emberSparks = createEmberSparks(craterR, coneH, 12); // was 7
+  group.add(emberSparks.group);
+
   return {
     group, energy, baseY: 0, biome: "ember",
     volcano: {
@@ -448,6 +700,8 @@ function createEmberLandmark(colorHex) {
       erupting: false,
       chunks,
       fountain,
+      smoke,
+      emberSparks,
     },
   };
 }
@@ -637,6 +891,9 @@ function updateVolcano(v, elapsed, dt) {
   // own idle pulse.
   const idlePulse = 0.8 + 0.2 * Math.sin(elapsed * 0.9);
 
+  updateCraterSmoke(v.smoke, elapsed);
+  updateEmberSparks(v.emberSparks, elapsed);
+
   for (const seg of v.riverSegments) {
     // The texture's own gradient/heat-pocket pattern scrolls down the
     // segment's length (staggered per-segment by seed) — THIS is what
@@ -711,8 +968,14 @@ function updateVolcano(v, elapsed, dt) {
       const cycle = ((elapsed * s.speed + s.phase * 3) % 1.4); // most of the cycle is the rise, a short reset gap after
       const rising = cycle < 1;
       const height = rising ? cycle * 9 : 0;
-      const r = s.radius * (1 + height * 0.15); // streaks drift slightly outward as they rise, not a perfectly straight column
-      s.mesh.position.set(Math.cos(s.angle) * r, v.fountain.craterY + height, Math.sin(s.angle) * r);
+      // Outward radius now grows from the shard's own launch tilt (real
+      // radial spread), not just the old small drift term — this is what
+      // makes the burst read as exploding outward from the crater rather
+      // than a straight column with a slight lean.
+      const outward = height * Math.sin(s.tilt) * 1.5;
+      const r = s.radius * (1 + height * 0.15) + outward;
+      s.mesh.position.set(Math.cos(s.angle) * r, v.fountain.craterY + height * Math.cos(s.tilt), Math.sin(s.angle) * r);
+      s.mesh.rotation.z = s.seed + elapsed * s.spin; // tumble, so a flat triangle still reads as a chunky fragment rather than a flat card
       s.mesh.material.opacity = rising ? flare * (1 - height / 9) * 0.9 : 0;
     }
 

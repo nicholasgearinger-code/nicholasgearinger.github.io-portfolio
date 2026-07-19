@@ -102,6 +102,48 @@ function normalizeFlow(dir) {
   return { x: dir.x / len, z: dir.z / len };
 }
 
+// Small glowing droplets drifting across the lava's surface in the flow
+// direction, same technique used for the volcano's veins (landmarks.js) —
+// a physically-moving bright point is a much stronger "this is flowing"
+// cue than the per-vertex color animation alone, which is continuous but
+// subtle. Loops each bead along the flow direction across the plane's
+// full span, with a randomized perpendicular offset so they don't all
+// trace the same line, fading in/out near both ends of their loop.
+function createLavaFlowBeads(flowDir, size, count) {
+  const perp = { x: -flowDir.z, z: flowDir.x };
+  const group = new THREE.Group();
+  const beads = [];
+  for (let i = 0; i < count; i++) {
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xfff3c8, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+    });
+    const mesh = new THREE.Mesh(new THREE.OctahedronGeometry(0.55, 0), mat);
+    group.add(mesh);
+    beads.push({
+      mesh,
+      phase: i / count + Math.random() * 0.1,
+      speed: 0.018 + Math.random() * 0.012,
+      perpOffset: (Math.random() - 0.5) * size * 0.7,
+    });
+  }
+  return { group, beads, flowDir, perp, size };
+}
+
+function updateLavaFlowBeads(flowBeads, elapsed, y) {
+  const span = flowBeads.size * 1.3;
+  for (const b of flowBeads.beads) {
+    const u = (elapsed * b.speed + b.phase) % 1;
+    const along = (u - 0.5) * span;
+    const x = flowBeads.flowDir.x * along + flowBeads.perp.x * b.perpOffset;
+    const z = flowBeads.flowDir.z * along + flowBeads.perp.z * b.perpOffset;
+    b.mesh.position.set(x, y + 0.15, z);
+    const fadeWindow = 0.08;
+    const fade = Math.max(0, Math.min(1, u / fadeWindow, (1 - u) / fadeWindow));
+    b.mesh.material.opacity = fade * 0.85;
+  }
+}
+
 /**
  * @param {THREE.Scene} scene
  * @param {string} biome
@@ -206,16 +248,26 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
   const crustOctaves = segs >= 40 ? 2 : 1;
   const crackOctaves = segs >= 40 ? 3 : (segs >= 24 ? 2 : 1);
 
+  // Traveling flow-bead droplets — Ember only, same visual language as
+  // the volcano's own vein beads for a consistent "the whole biome is
+  // alive" feel rather than the volcano being the only thing that
+  // visibly flows.
+  let flowBeads = null;
+  if (biome === "ember") {
+    flowBeads = createLavaFlowBeads(normalizeFlow(flowDir), size, 10);
+    scene.add(flowBeads.group);
+  }
+
   const basePositions = new Float32Array(posAttr.array); // original Y per vertex, for the ripple to animate around
   return {
     mesh, glow, shimmer, rocks, basePositions, biome, style,
-    flowDir: normalizeFlow(flowDir), crustOctaves, crackOctaves,
+    flowDir: normalizeFlow(flowDir), crustOctaves, crackOctaves, flowBeads,
   };
 }
 
 function updateLiquidPlane(handle, elapsed, skyColor, cameraY) {
   if (!handle) return;
-  const { mesh, glow, shimmer, rocks, basePositions, biome, style, flowDir, crustOctaves, crackOctaves } = handle;
+  const { mesh, glow, shimmer, rocks, basePositions, biome, style, flowDir, crustOctaves, crackOctaves, flowBeads } = handle;
   const posAttr = mesh.geometry.attributes.position;
   const colorAttr = mesh.geometry.attributes.color;
   // Cheap per-vertex ripple — lava churns slower/heavier, water ripples
@@ -318,6 +370,7 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY) {
       shimmer.material.map.offset.set(Math.sin(elapsed * 0.25) * 0.3, (elapsed * 0.12) % 1); // upward scroll + gentle sideways wobble, not a static texture
       shimmer.material.opacity = 0.18 + proximity * 0.35;
     }
+    if (flowBeads) updateLavaFlowBeads(flowBeads, elapsed, mesh.position.y);
   }
 
   // Cooled rock chunks bob gently with the same ripple rhythm the lava
@@ -360,6 +413,13 @@ function disposeLiquidPlane(scene, handle) {
     scene.remove(handle.rocks.mesh);
     handle.rocks.mesh.geometry.dispose();
     handle.rocks.mesh.material.dispose();
+  }
+  if (handle.flowBeads) {
+    scene.remove(handle.flowBeads.group);
+    for (const b of handle.flowBeads.beads) {
+      b.mesh.geometry.dispose();
+      b.mesh.material.dispose();
+    }
   }
 }
 

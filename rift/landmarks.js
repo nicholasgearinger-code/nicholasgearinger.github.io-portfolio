@@ -70,11 +70,25 @@ function createVeinIllustrationTexture(seed) {
   // A handful of bright pooled highlights along the channel — the small
   // near-white spots the reference uses to sell "molten," not a uniform
   // glow.
+  //
+  // BUG FIX: `seed` can be negative here (branch veins get seed + spread*10
+  // with spread as low as -0.4, e.g. angle 0.35 -> branchSeed -3.65).
+  // JS's `%` returns a NEGATIVE result for a negative left operand (unlike
+  // most languages' modulo) — `t` and `r` below were computed straight off
+  // raw `seed % ...` without accounting for that, which could push `r`
+  // negative. A negative radius throws a real DOMException/IndexSizeError
+  // from createRadialGradient/arc in an actual browser (Node's canvas
+  // stub used for verification didn't validate this, which is how it got
+  // through testing) — this was the actual cause of Ember Reach failing
+  // to load, not the terrain/decoration/volcano-cone work reported
+  // clean earlier. Math.abs() on the seed-derived terms keeps every
+  // vein's visual variety while guaranteeing non-negative math; the
+  // Math.max floor on `r` is a second, redundant safety net.
   for (let i = 0; i < 5; i++) {
-    const t = 0.12 + ((i + (seed % 1)) / 5) * 0.8;
-    const idx = Math.min(points.length - 1, Math.floor(t * points.length));
+    const t = 0.12 + ((i + Math.abs(seed % 1)) / 5) * 0.8;
+    const idx = Math.max(0, Math.min(points.length - 1, Math.floor(t * points.length)));
     const p = points[idx];
-    const r = w * 0.1 * (0.7 + ((i * 37 + seed * 13) % 10) / 10);
+    const r = Math.max(0.5, w * 0.1 * (0.7 + Math.abs((i * 37 + seed * 13) % 10) / 10));
     const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
     grad.addColorStop(0, "#fff3c8");
     grad.addColorStop(1, "rgba(255,243,200,0)");

@@ -211,8 +211,18 @@ function createLavaVeinChain(group, angle, coneH, baseR, craterR, glowsOut, bead
   });
   const glow = new THREE.Mesh(new THREE.PlaneGeometry(coneH * 0.7, coneH * 0.7), glowMat);
   glow.position.set(Math.sin(angle) * midR, midY, Math.cos(angle) * midR);
+  // BUG FIX: setting .rotation.x and .rotation.y as properties composes
+  // them via THREE's default Euler 'XYZ' order, which applies the X-tilt
+  // AROUND THE FIXED WORLD X AXIS regardless of the yaw — so the tilt
+  // came out wrong (and identical) for every vein regardless of its
+  // angle, which is why they all rendered as parallel horizontal ribbons
+  // instead of radiating down the slope at their own angles. Setting the
+  // yaw first, then calling the incremental .rotateX() METHOD (not the
+  // .rotation.x property) applies the tilt around the mesh's OWN current
+  // local X axis — which, after the yaw, correctly points tangentially
+  // at this vein's specific angle.
   glow.rotation.y = angle;
-  glow.rotation.x = -(Math.PI / 2 - slopeAngle);
+  glow.rotateX(-slopeAngle);
   group.add(glow);
   if (glowsOut) glowsOut.push(glow);
 
@@ -225,8 +235,8 @@ function createLavaVeinChain(group, angle, coneH, baseR, craterR, glowsOut, bead
   const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 1, side: THREE.DoubleSide });
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, length), mat);
   mesh.position.set(Math.sin(angle) * midR, midY, Math.cos(angle) * midR);
-  mesh.rotation.y = angle;
-  mesh.rotation.x = -(Math.PI / 2 - slopeAngle);
+  mesh.rotation.y = angle; // same fix as the glow halo above
+  mesh.rotateX(-slopeAngle);
   group.add(mesh);
   segments.push({ mesh, tex, seed });
 
@@ -253,10 +263,19 @@ function createLavaVeinChain(group, angle, coneH, baseR, craterR, glowsOut, bead
     const branchTex = createVeinIllustrationTexture(branchSeed);
     branchTex.repeat.set(1, 1.4);
     const branchMat = new THREE.MeshBasicMaterial({ map: branchTex, transparent: true, opacity: 1, side: THREE.DoubleSide });
-    const branch = new THREE.Mesh(new THREE.PlaneGeometry(1.8, branchLen), branchMat);
+    // BUG FIX: same Euler-order pitfall as the main vein/glow above, plus
+    // this specific combination also had its sign inverted (pointed the
+    // branch backward from its intended direction). Baking the "lie
+    // flat" tilt into the GEOMETRY itself (the same pattern terrain.js
+    // and liquid.js already use for their ground planes) then applying a
+    // single plain yaw on the mesh sidesteps the ordering issue entirely
+    // — there's only one rotation left on the mesh, so there's no
+    // composition order to get wrong.
+    const branchGeo = new THREE.PlaneGeometry(1.8, branchLen);
+    branchGeo.rotateX(Math.PI / 2 - 0.08);
+    const branch = new THREE.Mesh(branchGeo, branchMat);
     branch.position.set(baseX + Math.sin(branchAngle) * branchLen * 0.4, 0.4, baseZ + Math.cos(branchAngle) * branchLen * 0.4);
-    branch.rotation.x = -Math.PI / 2 + 0.08;
-    branch.rotation.z = branchAngle;
+    branch.rotation.y = branchAngle;
     group.add(branch);
     segments.push({ mesh: branch, tex: branchTex, seed: branchSeed });
 

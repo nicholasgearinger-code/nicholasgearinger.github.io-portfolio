@@ -364,11 +364,16 @@ function createEruptionFountain(coneH) {
 // distinct from the 4 big flowing veins, these are static (no scroll/flow
 // animation) fine fissures reading as old, settled fracture lines rather
 // than active channels, giving the "cracked through with old fire" look
-// real volcanic rock has beyond just the main flow paths. Reuses the
-// EXACT surface-placement math the main veins use (same +0.6 padding
-// past the cone's jitter) — the vein-hiding bug earlier this session was
-// caused by getting this wrong, so it's worth reusing verbatim rather
-// than re-deriving a similar-but-not-identical formula here.
+// real volcanic rock has beyond just the main flow paths. At this small
+// physical scale, the same thickened channel texture (bumped up when the
+// main veins got thicker) reads as a bold solid color-block shape rather
+// than a thin crack — turned out to look great and matches the flat-
+// illustration reference's bold color-block style closely, so count and
+// size were both bumped up to lean into it rather than dial it back.
+// Reuses the EXACT surface-placement math the main veins use (same +0.6
+// padding past the cone's jitter) — the vein-hiding bug earlier this
+// session was caused by getting this wrong, so it's worth reusing
+// verbatim rather than re-deriving a similar-but-not-identical formula.
 function createSurfaceCracks(group, coneH, baseR, craterR, count) {
   const slopeAngle = Math.atan2(baseR - craterR, coneH);
   for (let i = 0; i < count; i++) {
@@ -377,8 +382,8 @@ function createSurfaceCracks(group, coneH, baseR, craterR, count) {
     const y = heightT * coneH;
     const idealR = baseR + (craterR - baseR) * (y / coneH);
     const r = idealR + 0.6;
-    const len = 1.8 + Math.random() * 2.6;
-    const width = 0.4 + Math.random() * 0.35;
+    const len = 2.2 + Math.random() * 3.2; // was 1.8-4.4, now 2.2-5.4 — more presence
+    const width = 0.5 + Math.random() * 0.45; // was 0.4-0.75, now 0.5-0.95
     const tex = createVeinIllustrationTexture(angle * 3.1 + i * 7.3);
     tex.repeat.set(1, 1.4);
     const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.75 + Math.random() * 0.2, side: THREE.DoubleSide });
@@ -574,7 +579,7 @@ function createEmberLandmark(colorHex) {
   // Secondary fine cracks scattered across the whole cone — see the note
   // above createSurfaceCracks for why these are static and distinct from
   // the 4 main flowing veins.
-  createSurfaceCracks(group, coneH, baseR, craterR, 14);
+  createSurfaceCracks(group, coneH, baseR, craterR, 26); // was 14
 
   const energy = createEnergyCore(colorHex, 1.4, coneH * 0.5);
   energy.group.position.set(0, 0, baseR * 0.55); // offset toward one of the vein sides rather than dead-center in the cone

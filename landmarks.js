@@ -498,6 +498,12 @@ function createEmberLandmark(colorHex) {
   // material color.
   const rockMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, flatShading: true });
   const coneH = 27, baseR = 18, craterR = 2.2;
+  // Moved up from further below so the cone-carving loop right below and
+  // the actual vein/crack placement code later in this function share
+  // this exact array — the channels carved into the rock and the lava
+  // painted into them need to line up, not two separately-tuned copies
+  // that could drift apart.
+  const veinAngles = [0.35, 1.9, 3.4, 5.1]; // deliberately uneven spacing, not a perfect cross — real fracture patterns aren't symmetric
   const coneGeo = new THREE.CylinderGeometry(craterR, baseR, coneH, 9, 4);
   // Push each ring of vertices in/out slightly at random — a perfectly
   // smooth tapered cylinder reads as a traffic cone, not a rocky
@@ -507,14 +513,42 @@ function createEmberLandmark(colorHex) {
   // a little irregularity sells "mountain," a lot of it just looks noisy.
   // Vertices nearer the very top (the crater rim) get less jitter so the
   // crater opening itself stays roughly circular.
+  //
+  // On top of that general jitter, real channels are now carved into the
+  // geometry at the same 4 angles the lava veins sit at — a painted plane
+  // floating over an otherwise-smooth cone read as a decal stuck on top;
+  // an actual groove in the rock is what makes the lava look like it's
+  // running THROUGH the mountain. The cone only has 9 radial segments
+  // (deliberately low-poly, matching the rest of this project's blocky
+  // rock aesthetic), so a vein's exact angle can sit up to ~20 degrees
+  // from the nearest vertex column (verified numerically) — the falloff
+  // width below (0.5 rad ≈ 28.6 degrees) is chosen wide enough to
+  // reliably reach at least that nearest column in every case, not just
+  // the lucky ones where a vein happens to land close to a column.
+  const channelHalfWidth = 0.5; // radians
+  const channelDepth = 1.6; // world units, at full strength before height-tapering
   const conePos = coneGeo.attributes.position;
   for (let i = 0; i < conePos.count; i++) {
     const x = conePos.getX(i), y = conePos.getY(i), z = conePos.getZ(i);
     const heightT = (y + coneH / 2) / coneH; // 0 at base, 1 at crater rim
-    const jitterAmount = (1 - heightT * 0.6) * 0.32;
+    const heightTaper = 1 - heightT * 0.6; // shared by jitter and channel depth — both ease off near the crater so its opening stays roughly circular
+    const jitterAmount = heightTaper * 0.32;
     const angle = Math.atan2(z, x);
     const r = Math.hypot(x, z);
-    const jitter = 1 + (Math.sin(angle * 5 + y * 0.7) * 0.5 + Math.sin(angle * 11 - y * 0.3) * 0.5) * (jitterAmount / Math.max(r, 0.5));
+    const jitterDeviation = (Math.sin(angle * 5 + y * 0.7) * 0.5 + Math.sin(angle * 11 - y * 0.3) * 0.5) * (jitterAmount / Math.max(r, 0.5));
+
+    let channelStrength = 0;
+    for (const va of veinAngles) {
+      const diff = Math.atan2(Math.sin(angle - va), Math.cos(angle - va)); // wrapped angular distance, [-pi, pi]
+      const absDiff = Math.abs(diff);
+      if (absDiff < channelHalfWidth) {
+        const s = Math.cos((absDiff / channelHalfWidth) * (Math.PI / 2)); // 1 at the vein's exact angle, smoothly down to 0 at the falloff edge
+        if (s > channelStrength) channelStrength = s;
+      }
+    }
+    const channelPull = (channelStrength * channelDepth * heightTaper) / Math.max(r, 0.5); // always inward (a groove), unlike the bidirectional jitter above
+
+    const jitter = 1 + jitterDeviation - channelPull;
     conePos.setX(i, x * jitter);
     conePos.setZ(i, z * jitter);
   }
@@ -566,8 +600,9 @@ function createEmberLandmark(colorHex) {
   // reads as actively flowing, not a painted stripe. Several of these at
   // different angles (not just one) is what actually gives the "cracked
   // open, glowing from within" look rather than a single decorative
-  // stripe down one side.
-  const veinAngles = [0.35, 1.9, 3.4, 5.1]; // deliberately uneven spacing, not a perfect cross — real fracture patterns aren't symmetric
+  // stripe down one side. `veinAngles` itself is declared earlier now,
+  // right before the cone-carving loop, and reused here unchanged — the
+  // carved channels and the painted lava need to share the same angles.
   const riverSegments = [];
   const veinGlows = [];
   const flowBeads = [];

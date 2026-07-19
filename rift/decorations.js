@@ -285,7 +285,13 @@ function createFlameTexture(seed) {
 // of small embers drifting up out of the flame on their own looping arc
 // (same idea as landmarks.js's ember sparks, scaled down for a ground
 // prop). All animation happens in updateDecoration below.
-function createEmberFire(colorHex, rand) {
+// `spawnElapsed`/`lifespan` are optional — level-placed fires (via
+// buildBaseDecoration below) leave lifespan at the Infinity default and
+// burn forever, same as before. Dynamically runtime-spawned fires (see
+// main.js's fire spawner) pass a real spawnElapsed/lifespan pair so
+// updateDecoration can fade them out and flag them expired once their
+// time is up.
+function createEmberFire(colorHex, rand, spawnElapsed = 0, lifespan = Infinity) {
   const group = new THREE.Group();
   const tex = createFlameTexture(rand() * 100);
   const baseHeight = 0.9 + rand() * 0.7;
@@ -336,6 +342,7 @@ function createEmberFire(colorHex, rand) {
   return {
     group, kind: "emberFire", flames, light, embers,
     baseLightIntensity: light.intensity, flickerSeed: rand() * Math.PI * 2,
+    spawnElapsed, lifespan, expired: false,
   };
 }
 
@@ -565,14 +572,27 @@ function updateDecoration(handle, elapsed) {
   } else if (handle.kind === "emberVent") {
     handle.light.intensity = 0.2 + 0.25 * (0.5 + 0.5 * Math.sin(elapsed * 1.6 + handle.pulseSeed));
   } else if (handle.kind === "emberFire") {
+    // Fires with a finite lifespan (dynamically spawned, see main.js's
+    // fire spawner) fade out over their last few seconds instead of
+    // vanishing abruptly, then flag themselves expired so main.js's
+    // animate loop can remove+dispose them. Static level-placed fires
+    // (lifespan left at the createEmberFire default of Infinity) never
+    // reach fadeOut < 1 and burn indefinitely, same as before this
+    // feature existed.
+    const age = elapsed - handle.spawnElapsed;
+    const fadeWindow = 4;
+    const remaining = handle.lifespan - age;
+    const fadeOut = handle.lifespan === Infinity ? 1 : THREE.MathUtils.clamp(remaining / fadeWindow, 0, 1);
+    if (handle.lifespan !== Infinity && remaining <= 0) handle.expired = true;
+
     // Layered sine waves (not raw per-frame randomness) approximate real
     // fire's irregular-but-smooth flicker without looking like static.
-    const flicker = 0.82 + 0.12 * Math.sin(elapsed * 9 + handle.flickerSeed) + 0.06 * Math.sin(elapsed * 23 + handle.flickerSeed * 1.7);
+    const flicker = (0.82 + 0.12 * Math.sin(elapsed * 9 + handle.flickerSeed) + 0.06 * Math.sin(elapsed * 23 + handle.flickerSeed * 1.7)) * fadeOut;
     for (const f of handle.flames) {
       const sway = Math.sin(elapsed * 4 + f.phase) * 0.06 + Math.sin(elapsed * 11 + f.phase2) * 0.03;
       f.sprite.scale.set(f.baseW * (flicker + sway), f.baseH * flicker, 1);
       f.sprite.material.rotation = sway * 0.4;
-      f.sprite.material.opacity = 0.75 + 0.2 * flicker;
+      f.sprite.material.opacity = (0.75 + 0.2 * flicker) * fadeOut;
     }
     handle.light.intensity = handle.baseLightIntensity * flicker;
 
@@ -589,7 +609,7 @@ function updateDecoration(handle, elapsed) {
       }
       const t = localT / e.duration;
       e.mesh.position.set(Math.cos(e.angle) * e.dist, t * e.riseHeight, Math.sin(e.angle) * e.dist);
-      e.mesh.material.opacity = Math.sin(t * Math.PI) * 0.85;
+      e.mesh.material.opacity = Math.sin(t * Math.PI) * 0.85 * fadeOut;
     }
   }
 }
@@ -779,4 +799,4 @@ function createGlyphMarker(colorHex, rand) {
   return { group, kind: "glyphMarker" };
 }
 
-export { createDecoration, updateDecoration };
+export { createDecoration, updateDecoration, createEmberFire };

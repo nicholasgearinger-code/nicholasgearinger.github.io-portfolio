@@ -41,12 +41,30 @@ const DAY = {
 // correctly everywhere, this just leans each biome's sky toward its own
 // accent color rather than replacing the mood outright.
 const BIOME_SKY_TINT = {
-  ember: { zenith: 0x3a1210, horizon: 0xff6a30, fog: 0x2a1210, amount: 0.14 },
+  // Ember's amount is much higher than the others (0.5 vs ~0.1-0.14) —
+  // a biome choked with volcanic ash/smoke and lit by its own fire
+  // shouldn't read as a normal blue sky at any time of day, even subtly.
+  // zenith/fog both pulled toward a desaturated ash-brown-gray (not the
+  // earlier reddish-violet, which leaned too close to the volcano cone's
+  // own accent rather than actual smoke) while horizon stays the vivid
+  // lava-glow orange — the "fire glowing through haze near the ground"
+  // read, fading up into smoke rather than sky blue overhead.
+  ember: { zenith: 0x2e2620, horizon: 0xff6a30, fog: 0x241e18, amount: 0.5 },
   verdant: { zenith: 0x0a2a34, horizon: 0x6fd0d8, fog: 0x0f2a28, amount: 0.10 },
   crystal: { zenith: 0x1a1a3e, horizon: 0x9a8fff, fog: 0x181832, amount: 0.12 },
   abyssal: { zenith: 0x140a1e, horizon: 0x5a2a6a, fog: 0x120a1a, amount: 0.14 },
   ashen: { zenith: 0x2a2210, horizon: 0xd8b878, fog: 0x261e10, amount: 0.10 },
 };
+
+// How much darker a biome's night gets, on top of the shared NIGHT preset
+// above — 1 = no change (the default for any biome not listed). Ember gets
+// crushed down hard: a biome lit mainly by its own fire/lava/embers at
+// night shouldn't have the same ambient moonlit brightness as anywhere
+// else — the only light should genuinely feel like it's coming from the
+// glow sources themselves (fires/embers/lava/faint moon), not a
+// generically-lit night sky. Only affects true night (see the elevation-
+// based fade in updateDayNightCycle below) — dawn/day stay normal.
+const BIOME_NIGHT_DARKEN = { ember: 0.35 };
 
 function lerpColor(a, b, t) {
   return new THREE.Color(a).lerp(new THREE.Color(b), t);
@@ -479,6 +497,17 @@ function updateDayNightCycle(cycle, dt) {
   cycle.sun.intensity = sunIntensity;
   cycle.ambient.color.copy(ambientColor);
   cycle.ambient.intensity = ambientIntensity;
+
+  // Per-biome night darkening — fades in as dayAmount drops toward true
+  // night and back out toward dawn, so only actual nighttime gets crushed
+  // down, never dawn/day.
+  const nightDarken = BIOME_NIGHT_DARKEN[cycle.biome];
+  if (nightDarken !== undefined) {
+    const darkenAmount = THREE.MathUtils.clamp(1 - dayAmount / 0.15, 0, 1);
+    const factor = THREE.MathUtils.lerp(1, nightDarken, darkenAmount);
+    cycle.sun.intensity *= factor;
+    cycle.ambient.intensity *= factor;
+  }
 
   // Per-biome push, layered on top of the shared day/night blend above —
   // see BIOME_SKY_TINT's comment for why this is a small lerp rather than

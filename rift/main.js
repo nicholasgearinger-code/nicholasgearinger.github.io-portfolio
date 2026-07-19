@@ -3,7 +3,7 @@ import { PointerLockControls } from "three/addons/controls/PointerLockControls.j
 import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL } from "./terrain.js";
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
-import { createDecoration, updateDecoration } from "./decorations.js";
+import { createDecoration, updateDecoration, createEmberFire } from "./decorations.js";
 import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane } from "./liquid.js";
 import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
@@ -294,6 +294,15 @@ let currentLevelIdx = -1;
 let spawnPosition = { x: 0, y: 5, z: 0 };
 const playerPhysics = createPlayerPhysicsState();
 
+// ---------------------------------------------------------------------------
+// Ember fire spawner — Ember Reach only. Fires that were placed as part of
+// the fixed level layout (via decorations.js's buildBaseDecoration) burn
+// forever; these are separate, dynamically spawned/despawned at runtime so
+// the biome keeps feeling alive rather than a static one-time layout.
+// ---------------------------------------------------------------------------
+let fireSpawnTimer = 0;
+const MAX_DYNAMIC_FIRES = 10; // defensive cap so spawns can never outpace burnouts and pile up indefinitely
+
 function teardownLevel() {
   if (terrainMesh) {
     scene.remove(terrainMesh);
@@ -421,6 +430,7 @@ function buildLevel(levelIdx) {
   faceAwayFromLandmark(spawnPosition.x, spawnPosition.z);
   playerPhysics.verticalVelocity = 0;
   playerPhysics.grounded = false;
+  fireSpawnTimer = 3 + Math.random() * 5; // harmless on non-Ember biomes, the spawner below gates on biome anyway
 }
 
 function respawnInLevel() {
@@ -689,6 +699,39 @@ function showLore(text) {
 showLevelSelect();
 
 // ---------------------------------------------------------------------------
+// Ember fire spawner — state (fireSpawnTimer, MAX_DYNAMIC_FIRES) declared
+// earlier alongside the other level vars.
+// ---------------------------------------------------------------------------
+function spawnEmberFire() {
+  const level = LEVELS[currentLevelIdx];
+  const angle = Math.random() * Math.PI * 2;
+  const dist = Math.random() * WORLD_BOUND_RADIUS * 0.9; // stay within the player's actual reachable area, not right at the falloff rim
+  const x = Math.cos(angle) * dist, z = Math.sin(angle) * dist;
+  const groundY = sampleGroundHeight(x, z, terrainMesh) ?? 0;
+  const lifespan = 15 + Math.random() * 20; // 15-35s — "burns out after a while"
+  // Math.random is a drop-in for the seedRand()-style function
+  // createEmberFire normally receives from a decoration's deterministic
+  // per-instance RNG — it only needs the same () => [0,1) interface,
+  // which a runtime-spawned fire has no deterministic seed for anyway.
+  const handle = createEmberFire(level.color, Math.random, elapsedTime, lifespan);
+  handle.group.position.set(x, groundY, z);
+  handle.group.traverse((obj) => {
+    if (obj.isMesh) { obj.castShadow = true; obj.receiveShadow = true; }
+  });
+  scene.add(handle.group);
+  decorationHandles.push(handle);
+}
+
+function updateEmberFireSpawner(dt) {
+  if (currentLevelIdx < 0 || !terrainMesh || LEVELS[currentLevelIdx].biome !== "ember") return;
+  fireSpawnTimer -= dt;
+  if (fireSpawnTimer > 0) return;
+  fireSpawnTimer = 3 + Math.random() * 5; // next fire in 3-8s
+  const activeFireCount = decorationHandles.reduce((n, h) => n + (h.kind === "emberFire" ? 1 : 0), 0);
+  if (activeFireCount < MAX_DYNAMIC_FIRES) spawnEmberFire();
+}
+
+// ---------------------------------------------------------------------------
 // Main loop
 // ---------------------------------------------------------------------------
 const clock = new THREE.Clock();
@@ -711,7 +754,19 @@ function animate() {
   }
 
   for (const [, handle] of crystalHandles) updateCrystalMesh(handle, elapsedTime);
-  for (const handle of decorationHandles) updateDecoration(handle, elapsedTime);
+  for (let i = decorationHandles.length - 1; i >= 0; i--) {
+    const handle = decorationHandles[i];
+    updateDecoration(handle, elapsedTime);
+    if (handle.expired) {
+      scene.remove(handle.group);
+      handle.group.traverse((obj) => {
+        if (obj.geometry) obj.geometry.dispose();
+        if (obj.material) obj.material.dispose();
+      });
+      decorationHandles.splice(i, 1);
+    }
+  }
+  updateEmberFireSpawner(dt);
   updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y);
   const wind = updateWeatherSystem(weatherHandle, dt);
   updateAtmosphericParticles(atmosphereHandle, elapsedTime, dt, wind.windX, wind.windZ);

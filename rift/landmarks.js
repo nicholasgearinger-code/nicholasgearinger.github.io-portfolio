@@ -164,12 +164,37 @@ function createEnergyCore(colorHex, radius, coreHeight) {
 // periodic timer (handled in updateLandmark below), so this function just
 // builds the static structure and returns the state the eruption logic
 // needs.
-// One lava vein running from just below the crater down to the base at a
-// given angle, plus 2 short branches fanning out where it reaches the
-// ground — real lava doesn't stop in a single point at the base, it
-// spreads into a shallow braided delta. Returns the flat list of segment
-// records (main chain + branches) for updateVolcano to animate uniformly.
-function createLavaVeinChain(group, angle, coneH, baseR, craterR, glowsOut) {
+// A small glowing droplet that travels down a vein's actual path —
+// unlike the texture-scroll flow (subtle, easy to miss), a bright point
+// physically moving down the slope is an unambiguous "this is flowing"
+// cue, which is what the photoreal reference's glowing streaks and the
+// flat-illustration reference's bright pooled highlights are both really
+// selling. Built as a 3D blob (not a flat plane) so it reads as a glowing
+// droplet from any viewing angle without needing to face the camera.
+function createFlowBead() {
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0xfff3c8, transparent: true, opacity: 0,
+    blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+  });
+  return new THREE.Mesh(new THREE.OctahedronGeometry(0.32, 0), mat);
+}
+
+// Spawns `count` beads that loop continuously from `topPos` to `bottomPos`
+// (world-space points), each with a staggered phase so they read as a
+// steady stream rather than all traveling in lockstep. Pushes descriptor
+// records onto `beadsOut` for updateVolcano to animate every frame.
+function addFlowBeads(group, topPos, bottomPos, count, beadsOut) {
+  for (let i = 0; i < count; i++) {
+    const bead = createFlowBead();
+    group.add(bead);
+    beadsOut.push({
+      mesh: bead, topPos, bottomPos,
+      phase: i / count + Math.random() * 0.15,
+      speed: 0.16 + Math.random() * 0.07,
+    });
+  }
+}
+function createLavaVeinChain(group, angle, coneH, baseR, craterR, glowsOut, beadsOut) {
   const slopeAngle = Math.atan2(baseR - craterR, coneH);
   const length = coneH * 0.9;
   const width = 3.2;
@@ -205,6 +230,18 @@ function createLavaVeinChain(group, angle, coneH, baseR, craterR, glowsOut) {
   group.add(mesh);
   segments.push({ mesh, tex, seed });
 
+  // Real world-space endpoints of the vein, derived from the same
+  // slope/midpoint math used to place the plane above (not a
+  // transform-matrix readback) — moving `halfLen` up the slope from the
+  // midpoint shrinks the radius by halfLen*sin(slopeAngle) and raises the
+  // height by halfLen*cos(slopeAngle); moving down does the opposite.
+  const halfLen = length / 2;
+  const topR = midR - halfLen * Math.sin(slopeAngle), topY = midY + halfLen * Math.cos(slopeAngle);
+  const botR = midR + halfLen * Math.sin(slopeAngle), botY = midY - halfLen * Math.cos(slopeAngle);
+  const topPos = { x: Math.sin(angle) * topR, y: topY, z: Math.cos(angle) * topR };
+  const botPos = { x: Math.sin(angle) * botR, y: botY, z: Math.cos(angle) * botR };
+  if (beadsOut) addFlowBeads(group, topPos, botPos, 2, beadsOut);
+
   // Braided fan at the base — 2 short painted offshoots peeling away
   // from where the main vein meets the ground, reading as the flow
   // spreading out once it hits flatter ground.
@@ -222,6 +259,12 @@ function createLavaVeinChain(group, angle, coneH, baseR, craterR, glowsOut) {
     branch.rotation.z = branchAngle;
     group.add(branch);
     segments.push({ mesh: branch, tex: branchTex, seed: branchSeed });
+
+    if (beadsOut) {
+      const branchStart = { x: baseX, y: 0.4, z: baseZ };
+      const branchEnd = { x: baseX + Math.sin(branchAngle) * branchLen, y: 0.4, z: baseZ + Math.cos(branchAngle) * branchLen };
+      addFlowBeads(group, branchStart, branchEnd, 1, beadsOut);
+    }
   }
   return segments;
 }
@@ -330,8 +373,9 @@ function createEmberLandmark(colorHex) {
   const veinAngles = [0.35, 1.9, 3.4, 5.1]; // deliberately uneven spacing, not a perfect cross — real fracture patterns aren't symmetric
   const riverSegments = [];
   const veinGlows = [];
+  const flowBeads = [];
   for (const veinAngle of veinAngles) {
-    const built = createLavaVeinChain(group, veinAngle, coneH, baseR, craterR, veinGlows);
+    const built = createLavaVeinChain(group, veinAngle, coneH, baseR, craterR, veinGlows, flowBeads);
     riverSegments.push(...built);
   }
 
@@ -352,7 +396,7 @@ function createEmberLandmark(colorHex) {
   return {
     group, energy, baseY: 0, biome: "ember",
     volcano: {
-      pool, poolMat, poolBaseColor, poolHotColor, craterLight, riverSegments, veinGlows, craterY: coneH,
+      pool, poolMat, poolBaseColor, poolHotColor, craterLight, riverSegments, veinGlows, flowBeads, craterY: coneH,
       baseR, craterR, // needed by the chunk sliding phase to follow the cone's actual surface, not fall through open air
       eruptionTimer: 8 + Math.random() * 12, // first eruption arrives reasonably soon rather than making the player wait a full cycle
       eruptionPhase: 0, // 0 = dormant, ramps to 1 during an active eruption and back down
@@ -566,6 +610,22 @@ function updateVolcano(v, elapsed, dt) {
   // "lit from within" ambience liquid.js's lava glow overlay uses.
   for (const g of v.veinGlows) {
     g.material.opacity = 0.22 + 0.15 * idlePulse;
+  }
+
+  // Flow beads — small glowing droplets physically traveling down each
+  // vein/branch's real path, looping continuously. This is the main
+  // "lava is actually flowing" cue; the texture-scroll on the vein
+  // segments above is a subtler supporting layer underneath it.
+  for (const b of v.flowBeads) {
+    const t = (elapsed * b.speed + b.phase) % 1;
+    b.mesh.position.set(
+      THREE.MathUtils.lerp(b.topPos.x, b.bottomPos.x, t),
+      THREE.MathUtils.lerp(b.topPos.y, b.bottomPos.y, t),
+      THREE.MathUtils.lerp(b.topPos.z, b.bottomPos.z, t)
+    );
+    const fadeWindow = 0.12;
+    const fade = Math.min(1, t / fadeWindow, (1 - t) / fadeWindow);
+    b.mesh.material.opacity = Math.max(0, fade) * 0.9;
   }
 
   v.craterLight.intensity = v.erupting ? v.craterLight.intensity : 1.2 * idlePulse;

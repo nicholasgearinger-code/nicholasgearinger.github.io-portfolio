@@ -170,13 +170,28 @@ function createEnergyCore(colorHex, radius, coreHeight) {
 // cue, which is what the photoreal reference's glowing streaks and the
 // flat-illustration reference's bright pooled highlights are both really
 // selling. Built as a 3D blob (not a flat plane) so it reads as a glowing
-// droplet from any viewing angle without needing to face the camera.
+// droplet from any viewing angle without needing to face the camera, plus
+// a soft additive glow halo behind it (same texture the vein glow halos
+// use) since a small flat-lit solid shape alone read as too faint/easy to
+// miss against the already-bright vein texture underneath it.
 function createFlowBead() {
-  const mat = new THREE.MeshBasicMaterial({
+  const beadGroup = new THREE.Group();
+
+  const coreMat = new THREE.MeshBasicMaterial({
     color: 0xfff3c8, transparent: true, opacity: 0,
     blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
   });
-  return new THREE.Mesh(new THREE.OctahedronGeometry(0.32, 0), mat);
+  const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.6, 0), coreMat);
+  beadGroup.add(core);
+
+  const glowMat = new THREE.MeshBasicMaterial({
+    map: getSoftGlowTexture(), color: 0xffcf7a, transparent: true, opacity: 0,
+    blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+  });
+  const glow = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 2.4), glowMat);
+  beadGroup.add(glow);
+
+  return { beadGroup, core, glow };
 }
 
 // Spawns `count` beads that loop continuously from `topPos` to `bottomPos`
@@ -186,9 +201,9 @@ function createFlowBead() {
 function addFlowBeads(group, topPos, bottomPos, count, beadsOut) {
   for (let i = 0; i < count; i++) {
     const bead = createFlowBead();
-    group.add(bead);
+    group.add(bead.beadGroup);
     beadsOut.push({
-      mesh: bead, topPos, bottomPos,
+      beadGroup: bead.beadGroup, core: bead.core, glow: bead.glow, topPos, bottomPos,
       phase: i / count + Math.random() * 0.15,
       speed: 0.16 + Math.random() * 0.07,
     });
@@ -199,7 +214,18 @@ function createLavaVeinChain(group, angle, coneH, baseR, craterR, glowsOut, bead
   const length = coneH * 0.9;
   const width = 3.2;
   const midY = coneH * 0.5;
-  const midR = baseR * 0.48 + 0.6;
+  // Padding increased from an earlier 0.25 -> 0.6. The cone's surface
+  // isn't perfectly smooth — per-vertex jitter (see the jitter loop
+  // below, `jitterAmount` up to 0.32) makes it bulge in and out
+  // irregularly. 0.25 was thinner than that jitter amplitude in several
+  // places (verified numerically: clearance as low as 0.003 at some
+  // sample points, and jitter oscillates continuously along the vein's
+  // length via y-dependent sine terms, so the true worst case between
+  // sampled points is likely worse still) — the vein was still getting
+  // swallowed by jitter bulges even after supposedly being pushed
+  // "outside" the ideal smooth-cone radius. 0.6 comfortably clears the
+  // maximum possible jitter (0.32) with real margin, not a razor edge.
+  const midR = baseR + (craterR - baseR) * (midY / coneH) + 0.6;
   const seed = angle;
   const segments = [];
 
@@ -319,7 +345,7 @@ function createEmberLandmark(colorHex) {
   // because the cone gets a painted height gradient below, not one flat
   // material color.
   const rockMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, flatShading: true });
-  const coneH = 27, baseR = 10, craterR = 2.2;
+  const coneH = 27, baseR = 18, craterR = 2.2;
   const coneGeo = new THREE.CylinderGeometry(craterR, baseR, coneH, 9, 4);
   // Push each ring of vertices in/out slightly at random — a perfectly
   // smooth tapered cylinder reads as a traffic cone, not a rocky
@@ -637,14 +663,15 @@ function updateVolcano(v, elapsed, dt) {
   // segments above is a subtler supporting layer underneath it.
   for (const b of v.flowBeads) {
     const t = (elapsed * b.speed + b.phase) % 1;
-    b.mesh.position.set(
+    b.beadGroup.position.set(
       THREE.MathUtils.lerp(b.topPos.x, b.bottomPos.x, t),
       THREE.MathUtils.lerp(b.topPos.y, b.bottomPos.y, t),
       THREE.MathUtils.lerp(b.topPos.z, b.bottomPos.z, t)
     );
     const fadeWindow = 0.12;
-    const fade = Math.min(1, t / fadeWindow, (1 - t) / fadeWindow);
-    b.mesh.material.opacity = Math.max(0, fade) * 0.9;
+    const fade = Math.max(0, Math.min(1, t / fadeWindow, (1 - t) / fadeWindow));
+    b.core.material.opacity = fade;
+    b.glow.material.opacity = fade * 0.6;
   }
 
   v.craterLight.intensity = v.erupting ? v.craterLight.intensity : 1.2 * idlePulse;

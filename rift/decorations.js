@@ -152,9 +152,10 @@ function buildBaseDecoration(biome, colorHex, seedRand) {
   if (seedRand() < 0.1) return createGlyphMarker(colorHex, seedRand);
   switch (biome) {
     case "ember":
-      if (roll < 0.58) return createSpire(biome, colorHex, seedRand);
-      if (roll < 0.82) return createRockCluster(biome, colorHex, seedRand);
-      return createEmberVent(colorHex, seedRand);
+      if (roll < 0.5) return createSpire(biome, colorHex, seedRand);
+      if (roll < 0.72) return createRockCluster(biome, colorHex, seedRand);
+      if (roll < 0.88) return createEmberVent(colorHex, seedRand);
+      return createEmberFire(colorHex, seedRand);
     case "verdant":
       if (roll < 0.35) return createLivingTree(colorHex, seedRand);
       if (roll < 0.78) return createFloraStalk(colorHex, seedRand);
@@ -229,6 +230,113 @@ function createEmberVent(colorHex, rand) {
   group.add(light);
 
   return { group, kind: "emberVent", light, pulseSeed: rand() * Math.PI * 2 };
+}
+
+// Paints a flame silhouette — tapers to a point at the top with a wobbly
+// irregular outline (not a smooth teardrop), widest a little above the
+// base, same wobble-along-a-path technique createEmberVentTexture uses
+// for its crack line. Warm gradient from a bright near-white core low
+// down to a redder edge higher up, since real flame is hottest/whitest
+// at its base and cools toward the tip.
+function createFlameTexture(seed) {
+  const w = 64, h = 96;
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d");
+
+  const steps = 10;
+  const points = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const wob = Math.sin(t * 5 + seed * 3) * 0.5 + Math.sin(t * 9 + seed * 1.7) * 0.25;
+    const envelope = Math.pow(1 - t, 0.7) * (1 - 0.15 * Math.sin(t * Math.PI));
+    points.push({
+      x: w / 2 + wob * w * 0.16 * (1 - t * 0.6),
+      halfWidth: w * 0.33 * envelope,
+      y: h * (1 - t),
+    });
+  }
+  ctx.beginPath();
+  ctx.moveTo(points[0].x - points[0].halfWidth, points[0].y);
+  for (const p of points) ctx.lineTo(p.x - p.halfWidth, p.y);
+  for (let i = points.length - 1; i >= 0; i--) ctx.lineTo(points[i].x + points[i].halfWidth, points[i].y);
+  ctx.closePath();
+
+  const grad = ctx.createLinearGradient(0, h, 0, 0);
+  grad.addColorStop(0, "rgba(255,150,40,0.95)");
+  grad.addColorStop(0.4, "rgba(255,190,60,0.92)");
+  grad.addColorStop(0.72, "rgba(255,235,150,0.88)");
+  grad.addColorStop(1, "rgba(255,252,225,0.65)");
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// Small glowing animated fire — Ember Reach's namesake element, scattered
+// as ambient ground decoration rather than just the volcano's own
+// eruption/veins. 2-3 camera-facing flame sprites (true THREE.Sprite,
+// like the sun/moon/aurora sprites in dayNightCycle.js — a real billboard
+// is the right tool here, not the crossed-planes trick the rock
+// silhouettes use, since fire benefits from always facing the camera
+// exactly) sharing one painted texture, a warm PointLight, and a handful
+// of small embers drifting up out of the flame on their own looping arc
+// (same idea as landmarks.js's ember sparks, scaled down for a ground
+// prop). All animation happens in updateDecoration below.
+function createEmberFire(colorHex, rand) {
+  const group = new THREE.Group();
+  const tex = createFlameTexture(rand() * 100);
+  const baseHeight = 0.9 + rand() * 0.7;
+  const flames = [];
+  const flameCount = 2 + Math.floor(rand() * 2); // 2-3 overlapping sprites for a fuller silhouette from any angle
+  for (let i = 0; i < flameCount; i++) {
+    const mat = new THREE.SpriteMaterial({
+      map: tex, transparent: true, opacity: 0.9,
+      blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+    });
+    const sprite = new THREE.Sprite(mat);
+    const h = baseHeight * (0.75 + rand() * 0.5);
+    sprite.center.set(0.5, 0); // anchored at its base so scaling grows upward from the ground, not from the sprite's middle
+    sprite.scale.set(h * 0.6, h, 1);
+    sprite.position.set((rand() - 0.5) * 0.3, 0, (rand() - 0.5) * 0.3);
+    group.add(sprite);
+    flames.push({ sprite, baseW: h * 0.6, baseH: h, phase: rand() * Math.PI * 2, phase2: rand() * Math.PI * 2 });
+  }
+
+  const light = new THREE.PointLight(0xff7a28, 1.1, 6);
+  light.position.y = baseHeight * 0.5;
+  group.add(light);
+
+  // Each ember gets its OWN cloned material — a shared material across
+  // "independent" embers would defeat their individual opacity animation
+  // (the same class of bug that broke this project's lava-river flow the
+  // first time it was built; see landmarks.js/liquid.js notes).
+  const embers = [];
+  const emberCount = 3 + Math.floor(rand() * 3);
+  for (let i = 0; i < emberCount; i++) {
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xffb35a, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+    });
+    const mesh = new THREE.Mesh(new THREE.OctahedronGeometry(0.05, 0), mat);
+    group.add(mesh);
+    embers.push({
+      mesh,
+      angle: rand() * Math.PI * 2,
+      dist: rand() * 0.2,
+      riseHeight: baseHeight * (1.2 + rand() * 1.2),
+      duration: 1.4 + rand() * 1.2,
+      pause: 0.8 + rand() * 1.6,
+      delay: rand() * 3,
+    });
+  }
+
+  return {
+    group, kind: "emberFire", flames, light, embers,
+    baseLightIntensity: light.intensity, flickerSeed: rand() * Math.PI * 2,
+  };
 }
 
 // Jagged basalt spire with a glowing tip crack. Ember gets a flat 2D
@@ -456,6 +564,33 @@ function updateDecoration(handle, elapsed) {
     handle.group.rotation.y += handle.spinRate * 0.016;
   } else if (handle.kind === "emberVent") {
     handle.light.intensity = 0.2 + 0.25 * (0.5 + 0.5 * Math.sin(elapsed * 1.6 + handle.pulseSeed));
+  } else if (handle.kind === "emberFire") {
+    // Layered sine waves (not raw per-frame randomness) approximate real
+    // fire's irregular-but-smooth flicker without looking like static.
+    const flicker = 0.82 + 0.12 * Math.sin(elapsed * 9 + handle.flickerSeed) + 0.06 * Math.sin(elapsed * 23 + handle.flickerSeed * 1.7);
+    for (const f of handle.flames) {
+      const sway = Math.sin(elapsed * 4 + f.phase) * 0.06 + Math.sin(elapsed * 11 + f.phase2) * 0.03;
+      f.sprite.scale.set(f.baseW * (flicker + sway), f.baseH * flicker, 1);
+      f.sprite.material.rotation = sway * 0.4;
+      f.sprite.material.opacity = 0.75 + 0.2 * flicker;
+    }
+    handle.light.intensity = handle.baseLightIntensity * flicker;
+
+    for (const e of handle.embers) {
+      // Positive-safe modulo — elapsed-minus-delay can go negative early
+      // on, and JS's `%` preserves the sign of the dividend (see the
+      // project-wide note on this in landmarks.js/liquid.js).
+      const cycle = e.duration + e.pause;
+      const raw = elapsed - e.delay;
+      const localT = ((raw % cycle) + cycle) % cycle;
+      if (localT > e.duration) {
+        e.mesh.material.opacity = 0;
+        continue;
+      }
+      const t = localT / e.duration;
+      e.mesh.position.set(Math.cos(e.angle) * e.dist, t * e.riseHeight, Math.sin(e.angle) * e.dist);
+      e.mesh.material.opacity = Math.sin(t * Math.PI) * 0.85;
+    }
   }
 }
 

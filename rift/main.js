@@ -10,7 +10,7 @@ import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphe
 import { createGrass, updateGrass, disposeGrass, createFlowers, disposeFlowers } from "./vegetation.js";
 import { createHorizonSilhouettes, disposeHorizonSilhouettes } from "./horizonSilhouettes.js";
 import { createWildlife, updateWildlife, disposeWildlife } from "./wildlife.js";
-import { createLandmark, updateLandmark, disposeLandmark } from "./landmarks.js";
+import { createLandmark, updateLandmark, disposeLandmark, LANDMARK_POSITION } from "./landmarks.js";
 import { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers } from "./graphicsSettings.js";
 import { createWeatherSystem, updateWeatherSystem, disposeWeatherSystem } from "./weather.js";
 import { createClouds, updateClouds, disposeClouds } from "./clouds.js";
@@ -333,6 +333,22 @@ function teardownLevel() {
   loreMarkers = [];
 }
 
+// Orients the camera to face AWAY from the biome's landmark — that's the
+// single biggest nearby structure (a full-size volcano/spire/arch/etc,
+// see landmarks.js), so it's the most likely thing to fill the player's
+// view immediately on spawn if they happen to be facing toward it. Facing
+// away instead means they open their eyes looking out at open terrain and
+// the horizon silhouettes in the distance. Three.js's camera looks down
+// -Z by default; rotating that vector by rotation.y=theta gives
+// (-sin(theta), 0, -cos(theta)), so solving for theta such that this
+// points along (x - LANDMARK_POSITION.x, z - LANDMARK_POSITION.z) — i.e.
+// away from the landmark — gives atan2(-dx, -dz) below.
+function faceAwayFromLandmark(x, z) {
+  const dx = x - LANDMARK_POSITION.x;
+  const dz = z - LANDMARK_POSITION.z;
+  camera.rotation.y = Math.atan2(-dx, -dz);
+}
+
 function buildLevel(levelIdx) {
   teardownLevel();
   currentLevelIdx = levelIdx;
@@ -402,12 +418,14 @@ function buildLevel(levelIdx) {
   const spawnGroundY = sampleGroundHeight(layout.spawn.x, layout.spawn.z, terrainMesh) ?? 0;
   spawnPosition = { x: layout.spawn.x, y: spawnGroundY + PLAYER_EYE_HEIGHT + 2, z: layout.spawn.z };
   camera.position.set(spawnPosition.x, spawnPosition.y, spawnPosition.z);
+  faceAwayFromLandmark(spawnPosition.x, spawnPosition.z);
   playerPhysics.verticalVelocity = 0;
   playerPhysics.grounded = false;
 }
 
 function respawnInLevel() {
   camera.position.set(spawnPosition.x, spawnPosition.y, spawnPosition.z);
+  faceAwayFromLandmark(spawnPosition.x, spawnPosition.z);
   playerPhysics.verticalVelocity = 0;
   playerPhysics.grounded = false;
   logDiscovery("Fell — back to the start.");

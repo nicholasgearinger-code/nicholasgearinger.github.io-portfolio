@@ -49,6 +49,10 @@ function createVeinIllustrationTexture(seed) {
   // channel shape cheaply, without hand-authoring a polygon outline.
   // Crust layer first (wider, dark), hot core layer on top (narrower,
   // bright) — the same dark-edge/bright-center read as the ground lava.
+  // Base radius factor and hot-core widthScale both bumped up (0.24->0.32,
+  // 0.55->0.72) for a visibly thicker, bolder channel — was reading too
+  // thin/wispy compared to the newer small surface cracks using the same
+  // texture at a smaller physical scale.
   const stampLayer = (color, widthScale) => {
     ctx.fillStyle = color;
     for (let i = 0; i < points.length - 1; i++) {
@@ -59,13 +63,13 @@ function createVeinIllustrationTexture(seed) {
         const x = THREE.MathUtils.lerp(a.x, b.x, u);
         const y = THREE.MathUtils.lerp(a.y, b.y, u);
         const wMul = THREE.MathUtils.lerp(a.widthMul, b.widthMul, u);
-        const r = w * 0.24 * wMul * widthScale;
+        const r = w * 0.32 * wMul * widthScale;
         ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
       }
     }
   };
   stampLayer("#3a0d00", 1.0);
-  stampLayer("#ff5a1f", 0.55);
+  stampLayer("#ff5a1f", 0.72);
 
   // A handful of bright pooled highlights along the channel — the small
   // near-white spots the reference uses to sell "molten," not a uniform
@@ -212,7 +216,7 @@ function addFlowBeads(group, topPos, bottomPos, count, beadsOut) {
 function createLavaVeinChain(group, angle, coneH, baseR, craterR, glowsOut, beadsOut) {
   const slopeAngle = Math.atan2(baseR - craterR, coneH);
   const length = coneH * 0.9;
-  const width = 3.2;
+  const width = 4.8; // was 3.2 — thicker flow, matches the bolder channel proportion above
   const midY = coneH * 0.5;
   // Padding increased from an earlier 0.25 -> 0.6. The cone's surface
   // isn't perfectly smooth — per-vertex jitter (see the jitter loop
@@ -297,7 +301,7 @@ function createLavaVeinChain(group, angle, coneH, baseR, craterR, glowsOut, bead
     // single plain yaw on the mesh sidesteps the ordering issue entirely
     // — there's only one rotation left on the mesh, so there's no
     // composition order to get wrong.
-    const branchGeo = new THREE.PlaneGeometry(1.8, branchLen);
+    const branchGeo = new THREE.PlaneGeometry(2.8, branchLen); // was 1.8 — matches the main vein's thicker proportions
     branchGeo.rotateX(Math.PI / 2 - 0.08);
     const branch = new THREE.Mesh(branchGeo, branchMat);
     branch.position.set(baseX + Math.sin(branchAngle) * branchLen * 0.4, 0.4, baseZ + Math.cos(branchAngle) * branchLen * 0.4);
@@ -333,6 +337,36 @@ function createEruptionFountain(coneH) {
     });
   }
   return { group, streaks, craterY: coneH };
+}
+
+// Scatters small secondary glowing cracks across the cone's surface —
+// distinct from the 4 big flowing veins, these are static (no scroll/flow
+// animation) fine fissures reading as old, settled fracture lines rather
+// than active channels, giving the "cracked through with old fire" look
+// real volcanic rock has beyond just the main flow paths. Reuses the
+// EXACT surface-placement math the main veins use (same +0.6 padding
+// past the cone's jitter) — the vein-hiding bug earlier this session was
+// caused by getting this wrong, so it's worth reusing verbatim rather
+// than re-deriving a similar-but-not-identical formula here.
+function createSurfaceCracks(group, coneH, baseR, craterR, count) {
+  const slopeAngle = Math.atan2(baseR - craterR, coneH);
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const heightT = 0.08 + Math.random() * 0.8; // keep clear of the crowded base branch-fan and the very crater rim
+    const y = heightT * coneH;
+    const idealR = baseR + (craterR - baseR) * (y / coneH);
+    const r = idealR + 0.6;
+    const len = 1.8 + Math.random() * 2.6;
+    const width = 0.4 + Math.random() * 0.35;
+    const tex = createVeinIllustrationTexture(angle * 3.1 + i * 7.3);
+    tex.repeat.set(1, 1.4);
+    const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.75 + Math.random() * 0.2, side: THREE.DoubleSide });
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, len), mat);
+    mesh.position.set(Math.sin(angle) * r, y, Math.cos(angle) * r);
+    mesh.rotation.y = angle;
+    mesh.rotateX(-slopeAngle);
+    group.add(mesh);
+  }
 }
 
 function createEmberLandmark(colorHex) {
@@ -423,6 +457,11 @@ function createEmberLandmark(colorHex) {
     const built = createLavaVeinChain(group, veinAngle, coneH, baseR, craterR, veinGlows, flowBeads);
     riverSegments.push(...built);
   }
+
+  // Secondary fine cracks scattered across the whole cone — see the note
+  // above createSurfaceCracks for why these are static and distinct from
+  // the 4 main flowing veins.
+  createSurfaceCracks(group, coneH, baseR, craterR, 14);
 
   const energy = createEnergyCore(colorHex, 1.4, coneH * 0.5);
   energy.group.position.set(0, 0, baseR * 0.55); // offset toward one of the vein sides rather than dead-center in the cone

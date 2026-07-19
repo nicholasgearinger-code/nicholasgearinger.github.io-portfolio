@@ -78,7 +78,7 @@ const BIOME_SHAPERS = {
     const base = fbm2(u * 2.2, v * 2.2, seed, 5, 2.1, 0.55);
     const jagged = Math.abs(base) * 1.6; // ridged noise — sharp peaks instead of rolling hills
     const crackNoise = fbm2(u * 5 + 100, v * 5 + 100, seed + 40, 3, 2.0, 0.5);
-    const crack = Math.abs(crackNoise) < 0.035 ? -3.5 : 0; // narrow deep grooves
+    const crack = Math.abs(crackNoise) < 0.09 ? -3.5 : 0; // wider grooves than before — larger, more connected lava flows instead of thin cracks
     return jagged * 9 + crack;
   },
   // Gentle rolling hills, cut through by a winding river channel.

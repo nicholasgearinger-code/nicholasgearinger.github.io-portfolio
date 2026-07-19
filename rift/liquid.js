@@ -57,8 +57,9 @@ function createShimmerTexture() {
  * @param {string} biome
  * @param {number} y  world-space height to place the plane at
  * @param {number} size  full width/depth to cover (should match/exceed the terrain size)
+ * @param {(x:number, z:number) => number|null} [sampleHeight]  used only for Ember's floating cooled-rock chunks, to place them in genuine lava channels rather than scattering blindly across the whole plane
  */
-function createLiquidPlane(scene, biome, y, size) {
+function createLiquidPlane(scene, biome, y, size, sampleHeight) {
   const style = LIQUID_STYLE[biome];
   if (!style) return null;
   const segs = getGraphicsSettings().liquidSegments;
@@ -112,13 +113,46 @@ function createLiquidPlane(scene, biome, y, size) {
     scene.add(shimmer);
   }
 
+  // Small cooled-obsidian chunks drifting on the lava's surface — placed
+  // by sampling real terrain height (like grass/flowers/landmarks already
+  // do), so they only ever land in spots genuinely low enough to be
+  // covered by the lava plane, never floating visibly over solid ground.
+  let rocks = null;
+  if (biome === "ember" && sampleHeight) {
+    const rockMat = new THREE.MeshStandardMaterial({ color: 0x120a08, roughness: 0.6, flatShading: true, emissive: 0xff5522, emissiveIntensity: 0.15 });
+    const rockGeo = new THREE.IcosahedronGeometry(1, 0); // unit size — actual scale applied per-instance
+    const maxRocks = 26;
+    const rockMesh = new THREE.InstancedMesh(rockGeo, rockMat, maxRocks);
+    const dummy = new THREE.Object3D();
+    const rockData = [];
+    let attempts = 0, placed = 0;
+    while (placed < maxRocks && attempts < maxRocks * 12) {
+      attempts++;
+      const rx = (Math.random() - 0.5) * size * 0.42, rz = (Math.random() - 0.5) * size * 0.42;
+      const groundY = sampleHeight(rx, rz);
+      if (groundY === null || groundY >= y - 0.3) continue; // only genuinely submerged spots, not right at the lava's edge
+      const s = 0.3 + Math.random() * 0.5;
+      dummy.position.set(rx, y + 0.05, rz);
+      dummy.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+      dummy.scale.setScalar(s);
+      dummy.updateMatrix();
+      rockMesh.setMatrixAt(placed, dummy.matrix);
+      rockData.push({ x: rx, z: rz, seed: Math.random() * Math.PI * 2, bobAmp: 0.03 + Math.random() * 0.04, scale: s });
+      placed++;
+    }
+    rockMesh.count = placed;
+    rockMesh.instanceMatrix.needsUpdate = true;
+    scene.add(rockMesh);
+    rocks = { mesh: rockMesh, data: rockData, baseY: y };
+  }
+
   const basePositions = new Float32Array(posAttr.array); // original Y per vertex, for the ripple to animate around
-  return { mesh, glow, shimmer, basePositions, biome, style };
+  return { mesh, glow, shimmer, rocks, basePositions, biome, style };
 }
 
 function updateLiquidPlane(handle, elapsed, skyColor, cameraY) {
   if (!handle) return;
-  const { mesh, glow, shimmer, basePositions, biome, style } = handle;
+  const { mesh, glow, shimmer, rocks, basePositions, biome, style } = handle;
   const posAttr = mesh.geometry.attributes.position;
   const colorAttr = mesh.geometry.attributes.color;
   // Cheap per-vertex ripple — lava churns slower/heavier, water ripples
@@ -158,6 +192,20 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY) {
       // with a full red band carrying most of the surface in between.
       if (disturbance < 0.55) tmpColor.copy(style.crustColor).lerp(baseColor, disturbance / 0.55);
       else tmpColor.copy(baseColor).lerp(style.hotColor, (disturbance - 0.55) / 0.45);
+
+      // Bubbling — each vertex runs its own pop cycle on a deterministic
+      // per-vertex offset (derived from the index, not random-per-frame),
+      // so a given spot on the lava pops on a consistent rhythm rather
+      // than flickering randomly every frame. Layering this into the
+      // existing per-vertex color pass means a bubble can only ever
+      // appear where the lava mesh is already visibly showing through
+      // the terrain — no risk of placing one somewhere hidden.
+      const bubbleOffset = (i * 12.9898) % 1;
+      const bubblePhase = (elapsed * 0.12 + bubbleOffset) % 1;
+      if (bubblePhase < 0.07) {
+        const pop = Math.sin((bubblePhase / 0.07) * Math.PI); // smooth rise-and-fall within the pop window, not a hard on/off flicker
+        tmpColor.lerp(style.hotColor, pop * 0.85);
+      }
     } else {
       const accent = style.frothColor;
       tmpColor.copy(baseColor).lerp(accent, Math.pow(disturbance, 3)); // pow(3) keeps froth rare/at true crests, not smeared across the whole surface
@@ -189,6 +237,25 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY) {
       shimmer.material.opacity = 0.18 + proximity * 0.35;
     }
   }
+
+  // Cooled rock chunks bob gently with the same ripple rhythm the lava
+  // itself uses, plus a slow lazy drift — floating debris, not glued to
+  // a fixed point.
+  if (rocks) {
+    const dummy = new THREE.Object3D();
+    for (let i = 0; i < rocks.data.length; i++) {
+      const r = rocks.data[i];
+      const bob = Math.sin(elapsed * 0.7 + r.seed) * r.bobAmp;
+      const driftX = r.x + Math.sin(elapsed * 0.08 + r.seed) * 0.6;
+      const driftZ = r.z + Math.cos(elapsed * 0.08 + r.seed) * 0.6;
+      dummy.position.set(driftX, rocks.baseY + 0.05 + bob, driftZ);
+      dummy.rotation.set(r.seed, elapsed * 0.15 + r.seed, r.seed * 0.5);
+      dummy.scale.setScalar(r.scale);
+      dummy.updateMatrix();
+      rocks.mesh.setMatrixAt(i, dummy.matrix);
+    }
+    rocks.mesh.instanceMatrix.needsUpdate = true;
+  }
 }
 
 function disposeLiquidPlane(scene, handle) {
@@ -206,6 +273,11 @@ function disposeLiquidPlane(scene, handle) {
     handle.shimmer.geometry.dispose();
     handle.shimmer.material.map.dispose();
     handle.shimmer.material.dispose();
+  }
+  if (handle.rocks) {
+    scene.remove(handle.rocks.mesh);
+    handle.rocks.mesh.geometry.dispose();
+    handle.rocks.mesh.material.dispose();
   }
 }
 

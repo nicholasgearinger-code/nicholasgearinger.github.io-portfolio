@@ -350,7 +350,7 @@ function buildLevel(levelIdx) {
   scene.add(terrainMesh);
 
   if (LIQUID_LEVEL[level.biome] !== undefined) {
-    liquidHandle = createLiquidPlane(scene, level.biome, LIQUID_LEVEL[level.biome], TERRAIN_SIZE);
+    liquidHandle = createLiquidPlane(scene, level.biome, LIQUID_LEVEL[level.biome], TERRAIN_SIZE, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
   }
 
   atmosphereHandle = createAtmosphericParticles(scene, level.biome);
@@ -695,7 +695,7 @@ function animate() {
   updateAtmosphericParticles(atmosphereHandle, elapsedTime, dt, wind.windX, wind.windZ);
   updateGrass(grassHandle, elapsedTime, wind.windX, wind.windZ);
   updateWildlife(wildlifeHandle, elapsedTime, dt, camera.position.x, camera.position.z);
-  updateLandmark(landmarkHandle, elapsedTime);
+  updateLandmark(landmarkHandle, elapsedTime, dt);
   updateClouds(cloudsHandle, dt, wind, dayNight.dayAmount, wind.rainIntensity);
   updateWorldPulse(dt);
   updateProjectiles(dt);

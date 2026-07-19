@@ -16,13 +16,14 @@ import { getGraphicsSettings } from "./graphicsSettings.js";
 // -----------------------------------------------------------------------------
 
 const SILHOUETTE_STYLE = {
-  // Ember Reach's own established palette (see landmarks.js's volcano cone
-  // gradient and terrain.js's HEIGHT_PALETTE.ember): near-black violet rock
-  // darkening further into the distance, warming toward the same rust/amber
-  // family the terrain and lava already use, capped with the exact amber
-  // (0xffb35a) already used for the ember vent highlight stroke elsewhere
-  // in this project — not an invented peachy tone.
-  ember: { count: 10, color: 0x1c1220, minH: 30, maxH: 70, jagged: true, capColor: 0xffb35a, farTint: 0x120a10 },
+  // Ember Reach's own established palette (see landmarks.js's lava vein
+  // core color #ff6a14 and terrain.js's HEIGHT_PALETTE.ember valley/rust
+  // tones): true near-black background, warming through a dark red
+  // midground into a vivid orange-red foreground and highlight — pulled
+  // off the violet undertone from the previous pass, which leaned too
+  // close to the volcano cone's own accent rather than the biome's
+  // dominant black/red/orange lava-and-ash color story.
+  ember: { count: 10, color: 0x1a0806, minH: 30, maxH: 70, jagged: true, capColor: 0xff6a14, farTint: 0x0d0403 },
   verdant: { count: 8, color: 0x0e1a14, minH: 18, maxH: 38, jagged: false, capColor: 0xbfe0c8, farTint: 0x0a2430 },
   crystal: { count: 9, color: 0x10161e, minH: 25, maxH: 55, jagged: true, capColor: 0xcfe8ff, farTint: 0x1a1a3a },
   abyssal: { count: 7, color: 0x0a0810, minH: 20, maxH: 45, jagged: true, capColor: 0x9a7ab0, farTint: 0x140a1e },
@@ -182,11 +183,11 @@ function createHorizonSilhouettes(scene, biome) {
   const style = SILHOUETTE_STYLE[biome] || SILHOUETTE_STYLE.ember;
   const group = new THREE.Group();
 
-  // Far layer: darkest, pulled toward this biome's own farTint (NOT a
-  // universal cool/blue shift — that read wrong on Ember, whose palette
-  // has no blue in it at all).
+  // Far layer: darkest, pulled toward this biome's own farTint. Cluster
+  // count doubled (1.15 -> 2.3) per request — more mountains in the
+  // background.
   const farColor = lerpHexColor(style.color, style.farTint, 0.55);
-  group.add(buildSilhouetteRing(style, RING_RADIUS, 1.15, 1, farColor, style.capColor));
+  group.add(buildSilhouetteRing(style, RING_RADIUS, 2.3, 1, farColor, style.capColor));
 
   // Mid layer: warmer, leaning toward the biome's own capColor rather
   // than staying near-black or (as before) toward an unrelated hue.
@@ -194,13 +195,14 @@ function createHorizonSilhouettes(scene, biome) {
   group.add(buildSilhouetteRing(style, MID_RING_RADIUS, 0.75, 0.8, midColor, style.capColor));
 
   // Near layer: warm low foreground hills, closest and lowest of the
-  // three. Always rounded regardless of the biome's usual jagged/rounded
-  // profile — this is meant to read as gentle foreground land, not more
-  // peaks; no highlight cap either, that drama belongs to the peaks
-  // behind it.
+  // three. Cluster count doubled (0.5 -> 1.0) per request — more
+  // mountains in the foreground. Always rounded regardless of the
+  // biome's usual jagged/rounded profile — this is meant to read as
+  // gentle foreground land, not more peaks; no highlight cap either,
+  // that drama belongs to the peaks behind it.
   const nearStyle = { ...style, jagged: false };
   const nearColor = lerpHexColor(style.color, style.capColor, 0.5);
-  group.add(buildSilhouetteRing(nearStyle, NEAR_RING_RADIUS, 0.5, 0.45, nearColor, null));
+  group.add(buildSilhouetteRing(nearStyle, NEAR_RING_RADIUS, 1.0, 0.45, nearColor, null));
 
   scene.add(group);
   return { group };

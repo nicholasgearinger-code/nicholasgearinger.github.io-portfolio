@@ -68,8 +68,13 @@ function createVeinIllustrationTexture(seed) {
       }
     }
   };
-  stampLayer("#3a0d00", 1.0);
-  stampLayer("#ff5a1f", 0.72);
+  // Crust darkened further (was #3a0d00) to hold contrast against the
+  // cone's new near-black violet body; core pushed toward a purer,
+  // more saturated orange (was #ff5a1f, slightly muddy/brownish) — the
+  // reference's lava reads as a clean, poster-flat hot orange, not a
+  // naturalistic warm-brown blend.
+  stampLayer("#220400", 1.0);
+  stampLayer("#ff6a14", 0.72);
 
   // A handful of bright pooled highlights along the channel — the small
   // near-white spots the reference uses to sell "molten," not a uniform
@@ -339,21 +344,56 @@ function createLavaVeinChain(group, angle, coneH, baseR, craterR, glowsOut, bead
   return segments;
 }
 
-// A tight vertical spray of thin bright streaks shooting up out of the
-// crater during an eruption — layered on top of the arcing chunks, this
-// is what actually reads as a continuous fountain rather than a few
-// discrete flying rocks, matching how a real eruption's plume looks.
+// A single irregular triangle — not a rectangle — with its own
+// randomized base width and tip offset so each instance reads as a
+// distinct jagged fragment rather than a uniform stamped-out shape.
+// Vertex-colored bright yellow-white at the base fading to hot
+// red-orange at the tip, the same "white-hot core, cooling to red at
+// the edges" read the reference's explosion burst uses.
+function createShardGeometry(length) {
+  const geo = new THREE.BufferGeometry();
+  const baseW = 0.16 + Math.random() * 0.14;
+  const tipOffset = (Math.random() - 0.5) * length * 0.35;
+  const positions = new Float32Array([
+    -baseW, 0, 0,
+    baseW, 0, 0,
+    tipOffset, length, 0,
+  ]);
+  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const colors = new Float32Array([
+    1.0, 0.95, 0.78,
+    1.0, 0.95, 0.78,
+    1.0, 0.33, 0.08,
+  ]);
+  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+  return geo;
+}
+
+// A radiating burst of jagged shard fragments exploding out of the
+// crater during an eruption — replaces the old tight column of thin
+// vertical streaks, which read as a fountain/sparkler rather than the
+// reference's wide, explosive radial burst. Each shard now launches at
+// its own outward tilt (not just straight up) and tumbles as it flies,
+// layered on top of the arcing debris chunks below.
 function createEruptionFountain(coneH) {
   const group = new THREE.Group();
-  const mat = new THREE.MeshBasicMaterial({ color: 0xffcf6e, transparent: true, opacity: 0 });
   const streaks = [];
-  for (let i = 0; i < 10; i++) {
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.25, 2.5), mat.clone());
+  for (let i = 0; i < 14; i++) { // was 10 thin streaks; more + jagged + wider-radiating reads closer to an actual explosive burst
+    const length = 2 + Math.random() * 3.5;
+    const geo = createShardGeometry(length);
+    const mat = new THREE.MeshBasicMaterial({
+      vertexColors: true, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false, fog: false, side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(0, coneH, 0);
     group.add(mesh);
     streaks.push({
       mesh, seed: Math.random() * Math.PI * 2,
       angle: Math.random() * Math.PI * 2, radius: Math.random() * 0.8,
+      tilt: Math.random() * 0.7, // radians off vertical — most shards launch steep but a good spread kicks out toward ~40deg, giving the burst real width instead of a tidy column
+      spin: (Math.random() - 0.5) * 6,
       speed: 7 + Math.random() * 5, phase: Math.random(),
     });
   }
@@ -457,8 +497,8 @@ function createEmberSparks(craterR, coneH, count) {
     sparks.push({
       mesh,
       angle: Math.random() * Math.PI * 2,
-      distFactor: 0.6 + Math.random() * 1.2,
-      arcHeight: 2 + Math.random() * 3,
+      distFactor: 0.6 + Math.random() * 1.8, // was 0.6-1.8, now 0.6-2.4 — reads closer to the reference's sparks scattered well beyond the crater rim, not clustered tight to it
+      arcHeight: 2 + Math.random() * 4, // was 2-5, now 2-6
       duration: 1.1 + Math.random() * 0.9,
       pause: 1.5 + Math.random() * 2.5,
       delay: Math.random() * 5,
@@ -563,14 +603,28 @@ function createEmberLandmark(colorHex) {
   // highlight streak" look here, the same technique the reference itself
   // appears to use, so we don't need to fight it the way the obsidian
   // formation's glossy metalness did.
+  // 3-stop gradient, not 2 — the flat-vector reference's cone reads as
+  // near-black violet overall (far darker/more saturated than the old
+  // 0x22213a->0x8f8fae pair, which was closer to a lit gray-purple rock
+  // than the reference's ink-dark silhouette), with a warm dark
+  // maroon-brown flush low on the slopes where it blends into the
+  // reddish background mountain silhouettes, rising through deep violet
+  // and staying a cool, only slightly lighter violet near the rim
+  // (the crater glow does the actual brightening up there, not the rock
+  // itself lightening toward gray).
   const coneColors = new Float32Array(conePos.count * 3);
-  const shadowColor = new THREE.Color(0x22213a);
-  const rimColor = new THREE.Color(0x8f8fae);
+  const groundColor = new THREE.Color(0x3a2030);
+  const bodyColor = new THREE.Color(0x241833);
+  const rimColor = new THREE.Color(0x453a5e);
   const tmpConeColor = new THREE.Color();
   for (let i = 0; i < conePos.count; i++) {
     const y = conePos.getY(i);
     const heightT = (y + coneH / 2) / coneH;
-    tmpConeColor.copy(shadowColor).lerp(rimColor, heightT);
+    if (heightT < 0.4) {
+      tmpConeColor.copy(groundColor).lerp(bodyColor, heightT / 0.4);
+    } else {
+      tmpConeColor.copy(bodyColor).lerp(rimColor, (heightT - 0.4) / 0.6);
+    }
     coneColors[i * 3] = tmpConeColor.r; coneColors[i * 3 + 1] = tmpConeColor.g; coneColors[i * 3 + 2] = tmpConeColor.b;
   }
   coneGeo.setAttribute("color", new THREE.BufferAttribute(coneColors, 3));
@@ -633,7 +687,7 @@ function createEmberLandmark(colorHex) {
   const smoke = createCraterSmoke(coneH, 5);
   group.add(smoke.group);
 
-  const emberSparks = createEmberSparks(craterR, coneH, 7);
+  const emberSparks = createEmberSparks(craterR, coneH, 12); // was 7
   group.add(emberSparks.group);
 
   return {
@@ -914,8 +968,14 @@ function updateVolcano(v, elapsed, dt) {
       const cycle = ((elapsed * s.speed + s.phase * 3) % 1.4); // most of the cycle is the rise, a short reset gap after
       const rising = cycle < 1;
       const height = rising ? cycle * 9 : 0;
-      const r = s.radius * (1 + height * 0.15); // streaks drift slightly outward as they rise, not a perfectly straight column
-      s.mesh.position.set(Math.cos(s.angle) * r, v.fountain.craterY + height, Math.sin(s.angle) * r);
+      // Outward radius now grows from the shard's own launch tilt (real
+      // radial spread), not just the old small drift term — this is what
+      // makes the burst read as exploding outward from the crater rather
+      // than a straight column with a slight lean.
+      const outward = height * Math.sin(s.tilt) * 1.5;
+      const r = s.radius * (1 + height * 0.15) + outward;
+      s.mesh.position.set(Math.cos(s.angle) * r, v.fountain.craterY + height * Math.cos(s.tilt), Math.sin(s.angle) * r);
+      s.mesh.rotation.z = s.seed + elapsed * s.spin; // tumble, so a flat triangle still reads as a chunky fragment rather than a flat card
       s.mesh.material.opacity = rising ? flare * (1 - height / 9) * 0.9 : 0;
     }
 

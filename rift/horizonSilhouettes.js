@@ -45,13 +45,28 @@ function lerpHexColor(hexA, hexB, t) {
   return new THREE.Color(hexA).lerp(new THREE.Color(hexB), t).getHex();
 }
 
-// Paints a two-tone vertical gradient onto a cone's own vertex colors —
-// dark body rising to a pale/warm highlight near the tip, the same "flat
-// illustration" per-vertex-gradient technique used elsewhere in this
-// project (terrain.js's height palette, decorations.js's rock rim tint).
-// `capStrength` controls how far down from the tip the highlight reaches.
-function paintPeakGradient(geo, bodyColorHex, capColorHex, capStrength) {
-  const pos = geo.attributes.position;
+// A fixed, not-tied-to-day/night light direction for the facet shading
+// below — the reference's dramatic light/shadow facets stay consistent
+// at any time of day this way, rather than the whole horizon going flat
+// black at night if this were coupled to the real sun.
+const SILHOUETTE_LIGHT_DIR = new THREE.Vector3(0.45, 0.75, 0.35).normalize();
+
+// Bakes real hard-edged faceted shading into a peak's vertex colors —
+// dark shadow facets vs lighter sun-facing facets, the "jagged details
+// and shading" look of low-poly illustrated mountains, instead of one
+// flat silhouette color. The trick: geo.toNonIndexed() duplicates each
+// face's vertices so they're no longer shared with neighboring faces,
+// so a subsequent computeVertexNormals() gives each vertex its OWN face's
+// normal instead of an average blended across adjacent faces — that's
+// what produces genuinely hard facet edges rather than a smooth gradient.
+// `capStrength` > 0 additionally blends the biome's capColor in near the
+// tip (only passed for the one hero peak per cluster); 0 means a plain
+// faceted peak with no highlight.
+function computeFacetShading(geo, bodyColorHex, capColorHex, capStrength) {
+  const nonIndexed = geo.toNonIndexed();
+  nonIndexed.computeVertexNormals();
+  const pos = nonIndexed.attributes.position;
+  const norm = nonIndexed.attributes.normal;
   let minY = Infinity, maxY = -Infinity;
   for (let i = 0; i < pos.count; i++) {
     const y = pos.getY(i);
@@ -59,17 +74,45 @@ function paintPeakGradient(geo, bodyColorHex, capColorHex, capStrength) {
     if (y > maxY) maxY = y;
   }
   const range = Math.max(maxY - minY, 1e-6);
-  const bodyColor = new THREE.Color(bodyColorHex);
-  const capColor = new THREE.Color(capColorHex);
+  const baseColor = new THREE.Color(bodyColorHex);
+  const shadowColor = baseColor.clone().multiplyScalar(0.5);
+  const litColor = baseColor.clone().lerp(new THREE.Color(0xffffff), 0.22);
+  const capColor = capStrength > 0 && capColorHex != null ? new THREE.Color(capColorHex) : null;
   const colors = new Float32Array(pos.count * 3);
   const tmp = new THREE.Color();
   for (let i = 0; i < pos.count; i++) {
-    const t = (pos.getY(i) - minY) / range;
-    const capT = Math.max(0, (t - (1 - capStrength)) / capStrength);
-    tmp.copy(bodyColor).lerp(capColor, capT);
+    const litAmount = THREE.MathUtils.clamp(
+      norm.getX(i) * SILHOUETTE_LIGHT_DIR.x + norm.getY(i) * SILHOUETTE_LIGHT_DIR.y + norm.getZ(i) * SILHOUETTE_LIGHT_DIR.z,
+      -1, 1
+    );
+    tmp.copy(shadowColor).lerp(litColor, (litAmount + 1) / 2);
+    if (capColor) {
+      const heightT = (pos.getY(i) - minY) / range;
+      const capT = Math.max(0, (heightT - (1 - capStrength)) / capStrength);
+      tmp.lerp(capColor, capT);
+    }
     colors[i * 3] = tmp.r; colors[i * 3 + 1] = tmp.g; colors[i * 3 + 2] = tmp.b;
   }
-  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  nonIndexed.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  return nonIndexed;
+}
+
+// Pushes each vertex's radius in/out slightly at random — the same
+// "rugged, not perfectly conical" trick landmarks.js's volcano cone uses.
+// Adds real irregularity to the silhouette EDGE itself, on top of the
+// baseRadius/segment-count variety already covered elsewhere. Eases off
+// near the very tip so it doesn't reopen the collapsed apex point.
+function jitterConeSilhouette(geo, height, amount) {
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    const heightT = (y + height / 2) / height;
+    const taper = 1 - heightT * 0.7;
+    const jitter = 1 + (Math.random() - 0.5) * amount * taper;
+    pos.setX(i, x * jitter);
+    pos.setZ(i, z * jitter);
+  }
+  pos.needsUpdate = true;
 }
 
 // Leans a peak's summit off-center instead of leaving it perfectly
@@ -90,12 +133,13 @@ function skewApex(geo, height, maxOffset) {
     }
   }
   pos.needsUpdate = true;
-  geo.computeVertexNormals();
 }
 
 // `capColorHex` + `isCenterPeak` are optional — pass null/false for a
-// plain flat-colored peak (every shoulder/companion peak, and the whole
-// near/foreground layer, which isn't meant to have dramatic lit peaks).
+// plain faceted peak with no highlight (every shoulder/companion peak,
+// and the whole near/foreground layer, which isn't meant to have
+// dramatic lit peaks — every peak still gets real facet shading either
+// way, just not the extra cap tint).
 function createSilhouetteShape(colorHex, height, jagged, capColorHex, isCenterPeak) {
   // Was a narrow 0.5-0.9 range and a fixed 5-7/flat-8 segment count —
   // every peak came out with nearly identical proportions. Widening both
@@ -106,18 +150,11 @@ function createSilhouetteShape(colorHex, height, jagged, capColorHex, isCenterPe
   const geo = jagged
     ? new THREE.ConeGeometry(baseRadius, height, radialSegments)
     : new THREE.ConeGeometry(baseRadius * 1.4, height, radialSegments, 1, false); // wider base, rounder-feeling silhouette for gentle hills
+  jitterConeSilhouette(geo, height, jagged ? 0.22 : 0.1); // rugged jagged edge on sharp peaks, gentler ripple on rounded hills
   skewApex(geo, height, baseRadius * 0.5);
-  let mat;
-  if (isCenterPeak && capColorHex != null) {
-    // Only the tallest peak in each cluster gets the highlight — the
-    // drama comes from ONE lit peak standing out among darker
-    // silhouettes around it, not every peak glowing equally.
-    paintPeakGradient(geo, colorHex, capColorHex, 0.4 + Math.random() * 0.2);
-    mat = new THREE.MeshBasicMaterial({ vertexColors: true, fog: true });
-  } else {
-    mat = new THREE.MeshBasicMaterial({ color: colorHex, fog: true });
-  }
-  const mesh = new THREE.Mesh(geo, mat);
+  const shadedGeo = computeFacetShading(geo, colorHex, capColorHex, isCenterPeak ? 0.4 + Math.random() * 0.2 : 0);
+  const mat = new THREE.MeshBasicMaterial({ vertexColors: true, fog: true });
+  const mesh = new THREE.Mesh(shadedGeo, mat);
   mesh.position.y = height / 2 - 4; // sunk slightly so the base isn't a visible flat cut line against the terrain
   mesh.rotation.y = Math.random() * Math.PI * 2;
   return mesh;

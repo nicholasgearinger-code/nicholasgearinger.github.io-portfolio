@@ -41,11 +41,94 @@ function createEnergyCore(colorHex, radius, coreHeight) {
 // periodic timer (handled in updateLandmark below), so this function just
 // builds the static structure and returns the state the eruption logic
 // needs.
+// One lava vein running from just below the crater down to the base at a
+// given angle, plus 2 short branches fanning out where it reaches the
+// ground — real lava doesn't stop in a single point at the base, it
+// spreads into a shallow braided delta. Returns the flat list of segment
+// records (main chain + branches) for updateVolcano to animate uniformly.
+function createLavaVeinChain(group, angle, coneH, baseR, craterR) {
+  const segCount = 7;
+  const segments = [];
+  const slopeAngle = Math.atan2(baseR - craterR, coneH);
+  for (let i = 0; i < segCount; i++) {
+    const t = i / (segCount - 1);
+    const segY = coneH * (1 - t) * 0.92;
+    const segR = baseR * t * 0.98 + 0.6;
+    const w = 1.1 + t * 1.8;
+    // Each segment gets its own material instance, not a shared one —
+    // they need to pulse independently (staggered, reading as flow
+    // traveling downhill) rather than all changing in lockstep because
+    // they happened to reference the same object.
+    const segMat = new THREE.MeshBasicMaterial({ color: 0xff5522, transparent: true, opacity: 1 });
+    const seg = new THREE.Mesh(new THREE.PlaneGeometry(w, coneH / segCount * 1.3), segMat);
+    seg.position.set(Math.sin(angle) * segR, segY, Math.cos(angle) * segR);
+    seg.rotation.y = angle;
+    seg.rotation.x = -(Math.PI / 2 - slopeAngle); // tilt to roughly follow the cone's slope at this height
+    group.add(seg);
+    segments.push({ mesh: seg, seed: i * 0.7 });
+  }
+
+  // Braided fan at the base — 2 short offshoots peeling away from the
+  // final segment's position at shallow angles, reading as the flow
+  // spreading out once it hits flatter ground.
+  const baseX = Math.sin(angle) * baseR, baseZ = Math.cos(angle) * baseR;
+  for (const spread of [-0.4, 0.4]) {
+    const branchAngle = angle + spread;
+    const branchLen = 3 + Math.random() * 2;
+    const segMat = new THREE.MeshBasicMaterial({ color: 0xff5522, transparent: true, opacity: 1 });
+    const branch = new THREE.Mesh(new THREE.PlaneGeometry(1.2, branchLen), segMat);
+    branch.position.set(baseX + Math.sin(branchAngle) * branchLen * 0.4, 0.4, baseZ + Math.cos(branchAngle) * branchLen * 0.4);
+    branch.rotation.x = -Math.PI / 2 + 0.08;
+    branch.rotation.z = branchAngle;
+    group.add(branch);
+    segments.push({ mesh: branch, seed: segCount * 0.7 + Math.random() });
+  }
+  return segments;
+}
+
+// A tight vertical spray of thin bright streaks shooting up out of the
+// crater during an eruption — layered on top of the arcing chunks, this
+// is what actually reads as a continuous fountain rather than a few
+// discrete flying rocks, matching how a real eruption's plume looks.
+function createEruptionFountain(coneH) {
+  const group = new THREE.Group();
+  const mat = new THREE.MeshBasicMaterial({ color: 0xffcf6e, transparent: true, opacity: 0 });
+  const streaks = [];
+  for (let i = 0; i < 10; i++) {
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.25, 2.5), mat.clone());
+    mesh.position.set(0, coneH, 0);
+    group.add(mesh);
+    streaks.push({
+      mesh, seed: Math.random() * Math.PI * 2,
+      angle: Math.random() * Math.PI * 2, radius: Math.random() * 0.8,
+      speed: 7 + Math.random() * 5, phase: Math.random(),
+    });
+  }
+  return { group, streaks, craterY: coneH };
+}
+
 function createEmberLandmark(colorHex) {
   const group = new THREE.Group();
   const rockMat = new THREE.MeshStandardMaterial({ color: 0x1c130f, roughness: 0.85, flatShading: true });
   const coneH = 27, baseR = 10, craterR = 2.2;
-  const cone = new THREE.Mesh(new THREE.CylinderGeometry(craterR, baseR, coneH, 9), rockMat);
+  const coneGeo = new THREE.CylinderGeometry(craterR, baseR, coneH, 9, 4);
+  // Push each ring of vertices in/out slightly at random — a perfectly
+  // smooth tapered cylinder reads as a traffic cone, not a rocky
+  // mountain. Vertices nearer the very top (the crater rim) get less
+  // jitter so the crater opening itself stays roughly circular.
+  const conePos = coneGeo.attributes.position;
+  for (let i = 0; i < conePos.count; i++) {
+    const x = conePos.getX(i), y = conePos.getY(i), z = conePos.getZ(i);
+    const heightT = (y + coneH / 2) / coneH; // 0 at base, 1 at crater rim
+    const jitterAmount = (1 - heightT * 0.6) * 0.9; // less jitter up near the crater
+    const angle = Math.atan2(z, x);
+    const r = Math.hypot(x, z);
+    const jitter = 1 + (Math.sin(angle * 5 + y * 0.7) * 0.5 + Math.sin(angle * 11 - y * 0.3) * 0.5) * (jitterAmount / Math.max(r, 0.5));
+    conePos.setX(i, x * jitter);
+    conePos.setZ(i, z * jitter);
+  }
+  coneGeo.computeVertexNormals();
+  const cone = new THREE.Mesh(coneGeo, rockMat);
   cone.position.y = coneH / 2;
   group.add(cone);
 
@@ -64,39 +147,33 @@ function createEmberLandmark(colorHex) {
   craterLight.position.y = coneH + 1;
   group.add(craterLight);
 
-  // Lava river — a chain of tapered segments running down one slope from
+  // Lava veins — a chain of tapered segments running down the slope from
   // just below the crater to the base, colored with the same hot gradient
-  // as the ground-level lava and animated with a similar scrolling glow
-  // so it reads as actively flowing, not a painted stripe.
-  const riverSegCount = 7;
+  // as the ground-level lava and animated with a scrolling glow so each
+  // reads as actively flowing, not a painted stripe. Several of these at
+  // different angles (not just one) is what actually gives the "cracked
+  // open, glowing from within" look rather than a single decorative
+  // stripe down one side.
+  const veinAngles = [0.35, 1.9, 3.4, 5.1]; // deliberately uneven spacing, not a perfect cross — real fracture patterns aren't symmetric
   const riverSegments = [];
-  for (let i = 0; i < riverSegCount; i++) {
-    const t = i / (riverSegCount - 1);
-    const segY = coneH * (1 - t) * 0.92;
-    const segR = baseR * t * 0.98 + 0.6; // widens as it nears the base, like real lava does spreading out
-    const w = 1.4 + t * 2.2;
-    // Each segment gets its own material instance, not a shared one —
-    // they need to pulse independently (staggered, reading as flow
-    // traveling downhill) rather than all changing in lockstep because
-    // they happened to reference the same object.
-    const segMat = new THREE.MeshBasicMaterial({ color: 0xff5522, transparent: true, opacity: 1 });
-    const seg = new THREE.Mesh(new THREE.PlaneGeometry(w, coneH / riverSegCount * 1.3), segMat);
-    seg.position.set(0, segY, segR);
-    seg.rotation.x = -0.25;
-    // Tilt the segment to roughly follow the cone's slope at this height
-    // rather than standing perfectly vertical.
-    const slopeAngle = Math.atan2(baseR - craterR, coneH);
-    seg.rotation.x = -(Math.PI / 2 - slopeAngle);
-    group.add(seg);
-    riverSegments.push({ mesh: seg, seed: i * 0.7 });
+  for (const veinAngle of veinAngles) {
+    const built = createLavaVeinChain(group, veinAngle, coneH, baseR, craterR);
+    riverSegments.push(...built);
   }
 
   const energy = createEnergyCore(colorHex, 1.4, coneH * 0.5);
-  energy.group.position.set(0, 0, baseR * 0.55); // offset toward the river side rather than dead-center in the cone
+  energy.group.position.set(0, 0, baseR * 0.55); // offset toward one of the vein sides rather than dead-center in the cone
   group.add(energy.group);
 
   const chunks = createEruptionChunks(colorHex);
   for (const chunk of chunks) group.add(chunk.mesh);
+
+  // A tighter, taller vertical fountain layered on top of the arcing
+  // chunks — thin bright streaks shooting straight up out of the crater
+  // and falling back, giving the continuous "spray" a real eruption has
+  // instead of just a handful of discrete flying rocks.
+  const fountain = createEruptionFountain(coneH);
+  group.add(fountain.group);
 
   return {
     group, energy, baseY: 0, biome: "ember",
@@ -107,6 +184,7 @@ function createEmberLandmark(colorHex) {
       eruptionPhase: 0, // 0 = dormant, ramps to 1 during an active eruption and back down
       erupting: false,
       chunks,
+      fountain,
     },
   };
 }
@@ -332,6 +410,15 @@ function updateVolcano(v, elapsed, dt) {
       : Math.max(0, 1 - (v.eruptionPhase - 0.15) / 0.85);
     v.craterLight.intensity = 1.2 + flare * 6;
     v.poolMat.color.copy(v.poolBaseColor).lerp(v.poolHotColor, flare);
+
+    for (const s of v.fountain.streaks) {
+      const cycle = ((elapsed * s.speed + s.phase * 3) % 1.4); // most of the cycle is the rise, a short reset gap after
+      const rising = cycle < 1;
+      const height = rising ? cycle * 9 : 0;
+      const r = s.radius * (1 + height * 0.15); // streaks drift slightly outward as they rise, not a perfectly straight column
+      s.mesh.position.set(Math.cos(s.angle) * r, v.fountain.craterY + height, Math.sin(s.angle) * r);
+      s.mesh.material.opacity = rising ? flare * (1 - height / 9) * 0.9 : 0;
+    }
 
     if (v.eruptionPhase >= 1) {
       v.erupting = false;

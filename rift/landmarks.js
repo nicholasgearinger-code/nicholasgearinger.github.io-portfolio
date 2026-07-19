@@ -2,59 +2,96 @@ import * as THREE from "three";
 import { getGraphicsSettings } from "./graphicsSettings.js";
 
 // -----------------------------------------------------------------------------
-// Lava vein rendering — a cached gradient texture (dark cooled crust at
-// the edges, bright molten core down the middle, plus a scatter of
-// brighter heat pockets) replaces the old flat single-color fill. Cloning
-// it per-segment (cheap — clones share the canvas source, just get their
-// own offset/repeat) lets each segment's texture scroll independently,
-// which is what actually reads as "flowing downhill" instead of the
-// whole rectangle fading in and out as a block.
+// Lava vein rendering — flat 2D painted illustrations on simple planes,
+// not 3D geometry. Earlier attempts built actual wavy 3D ribbon meshes
+// to avoid a "flat rectangle" look, but that's solving the wrong
+// problem: real flat-vector reference art (bold color bands, a winding
+// channel silhouette, a few bright pooled highlights) is a *drawing*,
+// not a mesh shape. A canvas-painted texture on a plain plane gets the
+// actual reference style directly, is far cheaper to render (one quad
+// instead of a multi-segment tri-strip per vein), and is trivial to
+// re-paint/re-animate since it's 2D canvas drawing, not vertex math.
+//
+// NOTE: the previous version's washed-out/pale look (cream instead of
+// deep red/orange) was CanvasTexture's default colorSpace — without
+// `texture.colorSpace = THREE.SRGBColorSpace`, the renderer treats the
+// canvas's sRGB pixel data as linear, which blows out warm colors
+// toward pale yellow. Every texture below sets this explicitly.
 // -----------------------------------------------------------------------------
 
-let _lavaGradientTexture = null;
-function getLavaGradientTexture() {
-  if (_lavaGradientTexture) return _lavaGradientTexture;
-  const w = 64, h = 256;
+// Paints one vein's full channel — dark crust edge, hot core, and a
+// scatter of bright pooled highlights — as a single tall illustration,
+// snaking left-right down the canvas so it reads as a real winding
+// channel rather than a straight stripe. `seed` varies the snake shape
+// and highlight placement per-vein so the four veins don't look
+// identical.
+function createVeinIllustrationTexture(seed) {
+  const w = 96, h = 512;
   const canvas = document.createElement("canvas");
   canvas.width = w; canvas.height = h;
   const ctx = canvas.getContext("2d");
+  // Left fully transparent — only the painted channel itself should be
+  // opaque, so the cone's black rock shows through everywhere else.
 
-  // Cross-channel gradient — same down the whole length, so one
-  // horizontal pass covers it. Dark crust at both edges, molten core
-  // in the middle, matching a real lava channel's cross-section rather
-  // than a flat tint.
-  const grad = ctx.createLinearGradient(0, 0, w, 0);
-  grad.addColorStop(0, "#150700");
-  grad.addColorStop(0.22, "#5c1400");
-  grad.addColorStop(0.5, "#ff5a1f");
-  grad.addColorStop(0.78, "#ffb238");
-  grad.addColorStop(1, "#150700");
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, w, h);
-
-  // Bright heat pockets scattered down the length. Tiling this
-  // vertically and scrolling the texture's offset over time is what
-  // makes brightness travel down the vein continuously.
-  for (let i = 0; i < 22; i++) {
-    const x = w * 0.5 + (Math.random() - 0.5) * w * 0.6;
-    const y = Math.random() * h;
-    const r = 10 + Math.random() * 22;
-    const glow = ctx.createRadialGradient(x, y, 0, x, y, r);
-    glow.addColorStop(0, "rgba(255,230,160,0.9)");
-    glow.addColorStop(1, "rgba(255,230,160,0)");
-    ctx.fillStyle = glow;
-    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  const points = [];
+  const pointCount = 10;
+  for (let i = 0; i <= pointCount; i++) {
+    const t = i / pointCount;
+    const wob = Math.sin(t * 5 + seed * 4) * 0.5 + Math.sin(t * 9 + seed * 2.3) * 0.3;
+    points.push({
+      x: w / 2 + wob * w * 0.24,
+      y: t * h,
+      widthMul: 0.55 + 0.45 * Math.sin(t * Math.PI * 0.85 + seed),
+    });
   }
 
-  _lavaGradientTexture = new THREE.CanvasTexture(canvas);
-  _lavaGradientTexture.wrapS = THREE.ClampToEdgeWrapping;
-  _lavaGradientTexture.wrapT = THREE.RepeatWrapping;
-  return _lavaGradientTexture;
+  // Stamp overlapping circles along the path to build a tapered organic
+  // channel shape cheaply, without hand-authoring a polygon outline.
+  // Crust layer first (wider, dark), hot core layer on top (narrower,
+  // bright) — the same dark-edge/bright-center read as the ground lava.
+  const stampLayer = (color, widthScale) => {
+    ctx.fillStyle = color;
+    for (let i = 0; i < points.length - 1; i++) {
+      const a = points[i], b = points[i + 1];
+      const steps = 8;
+      for (let s = 0; s <= steps; s++) {
+        const u = s / steps;
+        const x = THREE.MathUtils.lerp(a.x, b.x, u);
+        const y = THREE.MathUtils.lerp(a.y, b.y, u);
+        const wMul = THREE.MathUtils.lerp(a.widthMul, b.widthMul, u);
+        const r = w * 0.24 * wMul * widthScale;
+        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+  };
+  stampLayer("#3a0d00", 1.0);
+  stampLayer("#ff5a1f", 0.55);
+
+  // A handful of bright pooled highlights along the channel — the small
+  // near-white spots the reference uses to sell "molten," not a uniform
+  // glow.
+  for (let i = 0; i < 5; i++) {
+    const t = 0.12 + ((i + (seed % 1)) / 5) * 0.8;
+    const idx = Math.min(points.length - 1, Math.floor(t * points.length));
+    const p = points[idx];
+    const r = w * 0.1 * (0.7 + ((i * 37 + seed * 13) % 10) / 10);
+    const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+    grad.addColorStop(0, "#fff3c8");
+    grad.addColorStop(1, "rgba(255,243,200,0)");
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill();
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  return tex;
 }
 
 // A soft, blurry radial-falloff texture for the ambient glow halo behind
-// each vein — same cached-once/reused-everywhere pattern as the gradient
-// above.
+// each vein — cached once, reused everywhere, since it's identical for
+// every instance.
 let _softGlowTexture = null;
 function getSoftGlowTexture() {
   if (_softGlowTexture) return _softGlowTexture;
@@ -69,38 +106,8 @@ function getSoftGlowTexture() {
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, size, size);
   _softGlowTexture = new THREE.CanvasTexture(canvas);
+  _softGlowTexture.colorSpace = THREE.SRGBColorSpace;
   return _softGlowTexture;
-}
-
-// Builds a tapered ribbon strip with wavy, organic edges instead of a
-// straight-sided rectangle — the single biggest fix for the "glowing
-// squares" look, since a plain PlaneGeometry reads as a hard-edged box
-// no matter what's drawn on it. `seed` staggers the wobble per-segment so
-// consecutive segments in a chain don't wave in obvious lockstep.
-function createVeinRibbonGeometry(width, length, seed) {
-  const crossSections = 8;
-  const positions = [];
-  const uvs = [];
-  const indices = [];
-  for (let i = 0; i <= crossSections; i++) {
-    const t = i / crossSections;
-    const wobble = (Math.sin(t * 7 + seed * 3) * 0.5 + Math.sin(t * 13 + seed * 5) * 0.3) * width * 0.18;
-    const w = width * (0.75 + 0.25 * Math.sin(t * Math.PI)); // slight bulge mid-length, not a uniform strip
-    const halfW = w / 2;
-    const y = (t - 0.5) * length;
-    positions.push(-halfW + wobble, y, 0, halfW + wobble, y, 0);
-    uvs.push(0, t, 1, t);
-  }
-  for (let i = 0; i < crossSections; i++) {
-    const a = i * 2, b = a + 1, c = a + 2, d = a + 3;
-    indices.push(a, b, c, b, d, c);
-  }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-  geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
-  geo.setIndex(indices);
-  geo.computeVertexNormals();
-  return geo;
 }
 
 // -----------------------------------------------------------------------------
@@ -149,18 +156,16 @@ function createEnergyCore(colorHex, radius, coreHeight) {
 // spreads into a shallow braided delta. Returns the flat list of segment
 // records (main chain + branches) for updateVolcano to animate uniformly.
 function createLavaVeinChain(group, angle, coneH, baseR, craterR, glowsOut) {
-  const segCount = 7;
-  const segments = [];
   const slopeAngle = Math.atan2(baseR - craterR, coneH);
+  const length = coneH * 0.9;
+  const width = 3.2;
+  const midY = coneH * 0.5;
+  const midR = baseR * 0.48 + 0.6;
+  const seed = angle;
+  const segments = [];
 
-  // One big soft glow halo behind the whole vein, roughly centered on
-  // its midpoint — the warm ambient bloom a real lava channel casts on
-  // the rock around it, which a hard-edged textured ribbon alone can't
-  // give. Additive + no depth write so it never competes with (or
-  // z-fights against) the sharp vein segments drawn on top of it.
-  const midT = 0.5;
-  const midY = coneH * (1 - midT) * 0.92;
-  const midR = baseR * midT * 0.98 + 0.6;
+  // Ambient glow halo behind the vein — additive + no depth write so it
+  // never competes with the sharp painted channel drawn on top of it.
   const glowMat = new THREE.MeshBasicMaterial({
     map: getSoftGlowTexture(), color: 0xff8a3a, transparent: true, opacity: 0.3,
     blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
@@ -172,50 +177,37 @@ function createLavaVeinChain(group, angle, coneH, baseR, craterR, glowsOut) {
   group.add(glow);
   if (glowsOut) glowsOut.push(glow);
 
-  for (let i = 0; i < segCount; i++) {
-    const t = i / (segCount - 1);
-    const segY = coneH * (1 - t) * 0.92;
-    const segR = baseR * t * 0.98 + 0.6;
-    const w = 1.1 + t * 1.8;
-    const seed = i * 0.7 + angle;
-    // Each segment gets its own texture clone (not a shared one) so its
-    // scroll offset can animate independently, staggered by seed —
-    // that's what reads as flow traveling downhill, rather than the
-    // whole segment fading in and out as a block.
-    const tex = getLavaGradientTexture().clone();
-    tex.needsUpdate = true;
-    tex.wrapS = THREE.ClampToEdgeWrapping;
-    tex.wrapT = THREE.RepeatWrapping;
-    tex.repeat.set(1, 1.6);
-    const segMat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 1 });
-    const seg = new THREE.Mesh(createVeinRibbonGeometry(w, coneH / segCount * 1.3, seed), segMat);
-    seg.position.set(Math.sin(angle) * segR, segY, Math.cos(angle) * segR);
-    seg.rotation.y = angle;
-    seg.rotation.x = -(Math.PI / 2 - slopeAngle); // tilt to roughly follow the cone's slope at this height
-    group.add(seg);
-    segments.push({ mesh: seg, tex, seed });
-  }
+  // The vein itself — a single flat plane carrying the whole painted
+  // channel illustration, tilted to lie against the cone's slope. One
+  // quad instead of a multi-segment mesh: cheaper to draw and the
+  // "shape" now comes entirely from the 2D painting, not vertex math.
+  const tex = createVeinIllustrationTexture(seed);
+  tex.repeat.set(1, 1.4); // slight vertical tiling headroom for the scroll animation in updateVolcano
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 1, side: THREE.DoubleSide });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, length), mat);
+  mesh.position.set(Math.sin(angle) * midR, midY, Math.cos(angle) * midR);
+  mesh.rotation.y = angle;
+  mesh.rotation.x = -(Math.PI / 2 - slopeAngle);
+  group.add(mesh);
+  segments.push({ mesh, tex, seed });
 
-  // Braided fan at the base — 2 short offshoots peeling away from the
-  // final segment's position at shallow angles, reading as the flow
+  // Braided fan at the base — 2 short painted offshoots peeling away
+  // from where the main vein meets the ground, reading as the flow
   // spreading out once it hits flatter ground.
   const baseX = Math.sin(angle) * baseR, baseZ = Math.cos(angle) * baseR;
   for (const spread of [-0.4, 0.4]) {
     const branchAngle = angle + spread;
-    const branchLen = 3 + Math.random() * 2;
-    const branchSeed = segCount * 0.7 + Math.random();
-    const tex = getLavaGradientTexture().clone();
-    tex.needsUpdate = true;
-    tex.wrapS = THREE.ClampToEdgeWrapping;
-    tex.wrapT = THREE.RepeatWrapping;
-    tex.repeat.set(1, 1.6);
-    const segMat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 1 });
-    const branch = new THREE.Mesh(createVeinRibbonGeometry(1.2, branchLen, branchSeed), segMat);
+    const branchLen = 4 + Math.random() * 2;
+    const branchSeed = seed + spread * 10;
+    const branchTex = createVeinIllustrationTexture(branchSeed);
+    branchTex.repeat.set(1, 1.4);
+    const branchMat = new THREE.MeshBasicMaterial({ map: branchTex, transparent: true, opacity: 1, side: THREE.DoubleSide });
+    const branch = new THREE.Mesh(new THREE.PlaneGeometry(1.8, branchLen), branchMat);
     branch.position.set(baseX + Math.sin(branchAngle) * branchLen * 0.4, 0.4, baseZ + Math.cos(branchAngle) * branchLen * 0.4);
     branch.rotation.x = -Math.PI / 2 + 0.08;
     branch.rotation.z = branchAngle;
     group.add(branch);
-    segments.push({ mesh: branch, tex, seed: branchSeed });
+    segments.push({ mesh: branch, tex: branchTex, seed: branchSeed });
   }
   return segments;
 }
@@ -243,18 +235,29 @@ function createEruptionFountain(coneH) {
 
 function createEmberLandmark(colorHex) {
   const group = new THREE.Group();
-  const rockMat = new THREE.MeshStandardMaterial({ color: 0x1c130f, roughness: 0.85, flatShading: true });
+  // The reference volcano reads as a COOL blue-violet silhouette against
+  // the hot orange sky — high-contrast complementary colors are a big
+  // part of why it pops. The old warm rock-brown (0x1c130f) fought that
+  // directly, since it sat in the same warm family as everything else in
+  // the biome instead of contrasting with it. vertexColors:true here
+  // because the cone gets a painted height gradient below, not one flat
+  // material color.
+  const rockMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, flatShading: true });
   const coneH = 27, baseR = 10, craterR = 2.2;
   const coneGeo = new THREE.CylinderGeometry(craterR, baseR, coneH, 9, 4);
   // Push each ring of vertices in/out slightly at random — a perfectly
   // smooth tapered cylinder reads as a traffic cone, not a rocky
-  // mountain. Vertices nearer the very top (the crater rim) get less
-  // jitter so the crater opening itself stays roughly circular.
+  // mountain. Scaled well down from earlier passes (0.9 -> 0.32): the
+  // reference's cone silhouette is clean and deliberate with only a few
+  // sharp facets/highlight streaks, not an all-over bumpy noise surface —
+  // a little irregularity sells "mountain," a lot of it just looks noisy.
+  // Vertices nearer the very top (the crater rim) get less jitter so the
+  // crater opening itself stays roughly circular.
   const conePos = coneGeo.attributes.position;
   for (let i = 0; i < conePos.count; i++) {
     const x = conePos.getX(i), y = conePos.getY(i), z = conePos.getZ(i);
     const heightT = (y + coneH / 2) / coneH; // 0 at base, 1 at crater rim
-    const jitterAmount = (1 - heightT * 0.6) * 0.9; // less jitter up near the crater
+    const jitterAmount = (1 - heightT * 0.6) * 0.32;
     const angle = Math.atan2(z, x);
     const r = Math.hypot(x, z);
     const jitter = 1 + (Math.sin(angle * 5 + y * 0.7) * 0.5 + Math.sin(angle * 11 - y * 0.3) * 0.5) * (jitterAmount / Math.max(r, 0.5));
@@ -262,6 +265,28 @@ function createEmberLandmark(colorHex) {
     conePos.setZ(i, z * jitter);
   }
   coneGeo.computeVertexNormals();
+
+  // Painted height gradient — deep blue-violet shadowed base rising to a
+  // pale lavender-gray near the crater rim, the same "flat illustration"
+  // banding idea as terrain.js's HEIGHT_PALETTE, applied here as a
+  // continuous gradient rather than hard bands since the cone's own
+  // faceted flatShading normals already break the surface into distinct
+  // flat-lit panels — real per-facet lighting response IS the "painted
+  // highlight streak" look here, the same technique the reference itself
+  // appears to use, so we don't need to fight it the way the obsidian
+  // formation's glossy metalness did.
+  const coneColors = new Float32Array(conePos.count * 3);
+  const shadowColor = new THREE.Color(0x22213a);
+  const rimColor = new THREE.Color(0x8f8fae);
+  const tmpConeColor = new THREE.Color();
+  for (let i = 0; i < conePos.count; i++) {
+    const y = conePos.getY(i);
+    const heightT = (y + coneH / 2) / coneH;
+    tmpConeColor.copy(shadowColor).lerp(rimColor, heightT);
+    coneColors[i * 3] = tmpConeColor.r; coneColors[i * 3 + 1] = tmpConeColor.g; coneColors[i * 3 + 2] = tmpConeColor.b;
+  }
+  coneGeo.setAttribute("color", new THREE.BufferAttribute(coneColors, 3));
+
   const cone = new THREE.Mesh(coneGeo, rockMat);
   cone.position.y = coneH / 2;
   group.add(cone);
@@ -644,11 +669,10 @@ function disposeLandmark(scene, handle) {
   handle.group.traverse((obj) => {
     if (obj.geometry) obj.geometry.dispose();
     if (obj.material) {
-      // Vein segments/branches each carry a cloned texture (independent
-      // scroll offset) — the shared cached base texture (getLavaGradientTexture/
-      // getSoftGlowTexture) is intentionally left alone since other
-      // landmarks/rebuilds still reference it.
-      if (obj.material.map && obj.material.map !== _lavaGradientTexture && obj.material.map !== _softGlowTexture) {
+      // Each vein/branch now owns a unique painted texture (no longer a
+      // clone of a shared base) — dispose it, but leave the cached soft
+      // glow texture alone since other landmarks/rebuilds still use it.
+      if (obj.material.map && obj.material.map !== _softGlowTexture) {
         obj.material.map.dispose();
       }
       obj.material.dispose();

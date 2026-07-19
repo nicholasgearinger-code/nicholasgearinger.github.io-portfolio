@@ -35,6 +35,83 @@ function applyVerticalGradient(geo, colorLow, colorHigh) {
   geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
 }
 
+// -----------------------------------------------------------------------------
+// Flat 2D painted rock silhouettes — used for Ember's rocks/spires instead
+// of 3D geometry. Nothing here is collidable (see the file header above),
+// so there's no gameplay reason to keep them as real meshes, and a painted
+// jagged silhouette matches the reference's bold flat rock shapes far more
+// directly than any amount of low-poly faceting could.
+// -----------------------------------------------------------------------------
+
+// Paints a jagged rock silhouette — near-black/deep-violet fill (the
+// reference's foreground rocks read almost as pure dark shapes against
+// the bright sky/lava) with a couple of thin warm rim-light streaks along
+// one edge, which is what keeps a flat silhouette from reading as an
+// inert cutout. `style` is "spire" (one tall narrow peak) or "cluster"
+// (a wider, lower, multi-bump profile).
+function createPaintedRockTexture(seed, style) {
+  const w = 128, h = style === "spire" ? 224 : 144;
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d");
+
+  const peakCount = style === "spire" ? 1 : 2 + Math.floor((seed % 1) * 2);
+  const edgeSteps = 14;
+  const points = [];
+  for (let i = 0; i <= edgeSteps; i++) {
+    const t = i / edgeSteps;
+    const n = Math.sin(t * Math.PI * peakCount * 2 + seed * 5) * 0.5 + Math.sin(t * 17 + seed * 3) * 0.15;
+    const peak = Math.pow(Math.sin(t * Math.PI), 0.6); // taller in the middle, tapering toward the ground at both edges
+    const yTop = h * (1 - peak * (0.55 + n * 0.4));
+    points.push({ x: t * w, y: Math.max(h * 0.08, yTop) });
+  }
+
+  ctx.beginPath();
+  ctx.moveTo(0, h);
+  for (const p of points) ctx.lineTo(p.x, p.y);
+  ctx.lineTo(w, h);
+  ctx.closePath();
+  ctx.fillStyle = "#170d0a";
+  ctx.fill();
+
+  // Warm rim-light streaks along the upper-left edge, clipped to the
+  // silhouette so they only ever fall inside the rock shape itself.
+  ctx.save();
+  ctx.clip();
+  ctx.strokeStyle = "rgba(255,150,70,0.55)";
+  ctx.lineWidth = w * 0.02;
+  for (let i = 0; i < 3; i++) {
+    const sx = w * (0.1 + i * 0.28 + ((seed * 7 + i) % 1) * 0.1);
+    ctx.beginPath();
+    ctx.moveTo(sx, h * 0.05);
+    ctx.lineTo(sx - w * 0.06, h);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace; // without this, canvas colors render washed-out/pale — see liquid.js/landmarks.js for the same fix
+  return tex;
+}
+
+// Two planes crossed at 90°, sharing one painted texture — gives
+// reasonable silhouette coverage from any horizontal approach angle
+// without needing a true camera-facing billboard (that requires per-frame
+// rotation from the render loop in main.js, outside this file's reach).
+function createRockSprite(tex, width, height) {
+  const group = new THREE.Group();
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide });
+  const geo = new THREE.PlaneGeometry(width, height);
+  const planeA = new THREE.Mesh(geo, mat);
+  planeA.position.y = height / 2;
+  group.add(planeA);
+  const planeB = new THREE.Mesh(geo, mat);
+  planeB.position.y = height / 2;
+  planeB.rotation.y = Math.PI / 2;
+  group.add(planeB);
+  return group;
+}
+
 function createDecoration(biome, colorHex, seedRand) {
   const roll = seedRand();
   const highDetail = getGraphicsSettings().decorationDetail >= 2;
@@ -57,7 +134,7 @@ function createDecoration(biome, colorHex, seedRand) {
   // that these show up in unexpected/inconsistent places.
   if (seedRand() < 0.1) return createGlyphMarker(colorHex, seedRand);
   switch (biome) {
-    case "ember": return roll < 0.72 ? createSpire(colorHex, seedRand) : createRockCluster(biome, colorHex, seedRand);
+    case "ember": return roll < 0.72 ? createSpire(biome, colorHex, seedRand) : createRockCluster(biome, colorHex, seedRand);
     case "verdant":
       if (roll < 0.35) return createLivingTree(colorHex, seedRand);
       if (roll < 0.78) return createFloraStalk(colorHex, seedRand);
@@ -68,24 +145,33 @@ function createDecoration(biome, colorHex, seedRand) {
       if (roll < 0.72) return createDebris(colorHex, seedRand);
       return createRockCluster(biome, colorHex, seedRand);
     case "ashen": return roll < 0.62 ? createDeadTree(colorHex, seedRand) : createRockCluster(biome, colorHex, seedRand);
-    default: return createSpire(colorHex, seedRand);
+    default: return createSpire(biome, colorHex, seedRand);
   }
 }
 
-// Jagged basalt spire with a glowing tip crack.
-function createSpire(colorHex, rand) {
+// Jagged basalt spire with a glowing tip crack. Ember gets a flat 2D
+// painted silhouette (see the note above createPaintedRockTexture); other
+// biomes that fall back to this shape keep the original 3D cone.
+function createSpire(biome, colorHex, rand) {
   const group = new THREE.Group();
   const h = 5 + rand() * 6;
-  const geo = new THREE.ConeGeometry(0.9 + rand() * 0.6, h, 5);
-  // Painted gradient instead of one flat rock color — dark base rising to
-  // a warm rust tone near the top, echoing terrain.js's Ember palette
-  // rather than looking like a separately-lit prop dropped onto it.
-  applyVerticalGradient(geo, new THREE.Color(0x1c0f0a), new THREE.Color(0x6a2a14));
-  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, flatShading: true });
-  const cone = new THREE.Mesh(geo, mat);
-  cone.position.y = h / 2;
-  cone.rotation.y = rand() * Math.PI;
-  group.add(cone);
+
+  if (biome === "ember") {
+    const tex = createPaintedRockTexture(rand() * 100, "spire");
+    const width = 1.6 + rand() * 1.0;
+    group.add(createRockSprite(tex, width, h));
+  } else {
+    const geo = new THREE.ConeGeometry(0.9 + rand() * 0.6, h, 5);
+    // Painted gradient instead of one flat rock color — dark base rising to
+    // a warm rust tone near the top, echoing terrain.js's Ember palette
+    // rather than looking like a separately-lit prop dropped onto it.
+    applyVerticalGradient(geo, new THREE.Color(0x1c0f0a), new THREE.Color(0x6a2a14));
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, flatShading: true });
+    const cone = new THREE.Mesh(geo, mat);
+    cone.position.y = h / 2;
+    cone.rotation.y = rand() * Math.PI;
+    group.add(cone);
+  }
 
   const tipMat = new THREE.MeshBasicMaterial({ color: colorHex });
   const sphereSeg = 6 + getGraphicsSettings().decorationDetail * 4;
@@ -159,17 +245,21 @@ function createDebris(colorHex, rand) {
 // A small cluster of irregular ground-sitting rocks — usable across every
 // biome as plain ground texture, distinct from Abyssal's hovering debris
 // (this sits still and low) and from the more vivid focal decorations
-// (spires, crystal clusters). Color is a muted blend toward gray rather
-// than the biome's full accent color, so these read as background texture
-// and don't compete with the actual focal points.
+// (spires, crystal clusters). Ember gets a flat 2D painted silhouette
+// (see the note above createPaintedRockTexture); other biomes keep the
+// original 3D cluster, muted toward gray so it reads as background
+// texture rather than competing with actual focal points.
 function createRockCluster(biome, colorHex, rand) {
   const group = new THREE.Group();
-  // Ember rocks bias toward the terrain palette's warm dark-rock tone
-  // instead of a neutral gray blend, so background rocks read as part of
-  // the same painted world instead of a separately-lit gray filler prop.
-  const tint = biome === "ember"
-    ? new THREE.Color(0x3a1208).lerp(new THREE.Color(colorHex), 0.18)
-    : new THREE.Color(colorHex).lerp(new THREE.Color(0x555248), 0.65);
+
+  if (biome === "ember") {
+    const tex = createPaintedRockTexture(rand() * 100, "cluster");
+    const width = 1.6 + rand() * 1.4, height = 0.9 + rand() * 0.8;
+    group.add(createRockSprite(tex, width, height));
+    return { group, kind: "rockCluster" };
+  }
+
+  const tint = new THREE.Color(colorHex).lerp(new THREE.Color(0x555248), 0.65);
   const mat = new THREE.MeshStandardMaterial({ color: tint, roughness: 0.95, flatShading: true });
   const count = 2 + Math.floor(rand() * 3);
   for (let i = 0; i < count; i++) {
@@ -285,20 +375,19 @@ function updateDecoration(handle, elapsed) {
 // from the spire's rough basalt.
 function createObsidianFormation(colorHex, rand) {
   const group = new THREE.Group();
-  // Metalness dropped (was 0.3) — a metallic PBR surface catches moving
-  // specular highlights as the day/night sun crosses it, which reads as
-  // "realistically lit" rather than "flat painted." A matte near-black
-  // silhouette matches the reference's dark foreground rock shapes better.
-  const rockMat = new THREE.MeshStandardMaterial({ color: 0x0d0a12, roughness: 0.55, flatShading: true });
   const h = 3 + rand() * 4;
-  const rock = new THREE.Mesh(new THREE.ConeGeometry(0.7 + rand() * 0.5, h, 6), rockMat);
-  rock.position.y = h / 2;
-  rock.rotation.y = rand() * Math.PI * 2;
-  rock.rotation.z = (rand() - 0.5) * 0.25;
-  group.add(rock);
+  // Flat 2D painted body, same as the regular spire/rock cluster — offset
+  // seed (+50) so obsidian's silhouettes don't roll the same shapes as
+  // regular spires nearby.
+  const tex = createPaintedRockTexture(rand() * 100 + 50, "spire");
+  const width = 1.1 + rand() * 0.7;
+  group.add(createRockSprite(tex, width, h));
 
   // Thin glowing crack lines up the surface — a few short emissive
   // cylinders standing in for veins, not a real crack-texture map.
+  // Already flat/unlit (MeshBasicMaterial), so these carry over unchanged
+  // from the 3D version; radial offset pulled in slightly (0.3 -> 0.12)
+  // since there's no real volume to wrap around anymore.
   const veinMat = new THREE.MeshBasicMaterial({ color: colorHex });
   const veinCount = 2 + Math.floor(rand() * 3);
   for (let i = 0; i < veinCount; i++) {
@@ -306,7 +395,7 @@ function createObsidianFormation(colorHex, rand) {
     const vein = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, veinH, 4), veinMat);
     const angle = rand() * Math.PI * 2;
     const along = rand() * h * 0.6;
-    vein.position.set(Math.sin(angle) * 0.3, along + veinH / 2, Math.cos(angle) * 0.3);
+    vein.position.set(Math.sin(angle) * 0.12, along + veinH / 2, Math.cos(angle) * 0.12);
     vein.rotation.z = (rand() - 0.5) * 0.5;
     group.add(vein);
   }

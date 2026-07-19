@@ -128,6 +128,27 @@ function getSoftGlowTexture() {
   return _softGlowTexture;
 }
 
+// A soft gray-warm haze puff for crater smoke — deliberately NOT additive
+// (that would make it read as glowing light, not murky ash/smoke). Cached
+// once like the glow texture above.
+let _smokeTexture = null;
+function getSmokeTexture() {
+  if (_smokeTexture) return _smokeTexture;
+  const size = 128;
+  const canvas = document.createElement("canvas");
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, "rgba(95,82,76,0.55)");
+  grad.addColorStop(0.55, "rgba(70,60,58,0.28)");
+  grad.addColorStop(1, "rgba(60,55,55,0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  _smokeTexture = new THREE.CanvasTexture(canvas);
+  _smokeTexture.colorSpace = THREE.SRGBColorSpace;
+  return _smokeTexture;
+}
+
 // -----------------------------------------------------------------------------
 // SWAP POINT: landmarks — exactly one massive, hand-crafted structure per
 // biome, placed at a fixed position rather than scattered randomly like
@@ -369,6 +390,98 @@ function createSurfaceCracks(group, coneH, baseR, craterR, count) {
   }
 }
 
+// Soft smoke puffs that rise from the crater and disperse — the volcano
+// glows but had no atmosphere around it. Each puff independently loops
+// through rise -> grow -> fade -> reset, staggered so it reads as a
+// continuous drift rather than a single repeating cloud. Each puff gets
+// its OWN cloned material (not a shared one) — a shared material across
+// "independent" puffs would defeat their individual opacity animation,
+// the same class of bug that broke this volcano's lava-river flow the
+// first time it was built.
+function createCraterSmoke(coneH, count) {
+  const group = new THREE.Group();
+  const puffs = [];
+  for (let i = 0; i < count; i++) {
+    const mat = new THREE.MeshBasicMaterial({
+      map: getSmokeTexture(), transparent: true, opacity: 0,
+      depthWrite: false, fog: true, side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(3, 3), mat);
+    group.add(mesh);
+    puffs.push({
+      mesh,
+      phase: i / count,
+      speed: 0.09 + Math.random() * 0.03,
+      driftX: (Math.random() - 0.5) * 1.6,
+      driftZ: (Math.random() - 0.5) * 1.6,
+    });
+  }
+  return { group, puffs, baseY: coneH };
+}
+
+function updateCraterSmoke(smoke, elapsed) {
+  for (const p of smoke.puffs) {
+    const t = (elapsed * p.speed + p.phase) % 1;
+    const riseHeight = 1 + t * 6;
+    p.mesh.position.set(p.driftX * t, smoke.baseY + riseHeight, p.driftZ * t);
+    p.mesh.scale.setScalar(1 + t * 2.2);
+    const fadeIn = Math.min(1, t / 0.15);
+    const fadeOut = 1 - Math.pow(t, 1.5);
+    p.mesh.material.opacity = fadeIn * fadeOut * 0.5;
+  }
+}
+
+// Small ember sparks arcing up from the crater rim between eruptions —
+// ambient "spitting" life independent of the big eruption sequence, which
+// only fires every 22-40s. Each spark loops its own short ballistic arc
+// (launch -> peak -> fall/fade -> pause -> relaunch) on a fixed per-spark
+// angle/distance, staggered by an initial delay. Uses a positive-safe
+// modulo (`((x % m) + m) % m`) rather than raw `%` — this project has hit
+// a real bug before from JS's sign-preserving modulo on an
+// elapsed-minus-delay term that can go negative early on.
+function createEmberSparks(craterR, coneH, count) {
+  const group = new THREE.Group();
+  const sparks = [];
+  for (let i = 0; i < count; i++) {
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xffb35a, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+    });
+    const mesh = new THREE.Mesh(new THREE.OctahedronGeometry(0.18, 0), mat);
+    group.add(mesh);
+    sparks.push({
+      mesh,
+      angle: Math.random() * Math.PI * 2,
+      distFactor: 0.6 + Math.random() * 1.2,
+      arcHeight: 2 + Math.random() * 3,
+      duration: 1.1 + Math.random() * 0.9,
+      pause: 1.5 + Math.random() * 2.5,
+      delay: Math.random() * 5,
+    });
+  }
+  return { group, sparks, craterR, coneH };
+}
+
+function updateEmberSparks(emberSparks, elapsed) {
+  for (const s of emberSparks.sparks) {
+    const cycle = s.duration + s.pause;
+    const raw = elapsed - s.delay;
+    const localT = ((raw % cycle) + cycle) % cycle; // positive-safe modulo
+    if (localT > s.duration) {
+      s.mesh.material.opacity = 0;
+      continue;
+    }
+    const t = localT / s.duration;
+    const dist = emberSparks.craterR * s.distFactor;
+    s.mesh.position.set(
+      Math.cos(s.angle) * dist * t,
+      emberSparks.coneH + Math.sin(t * Math.PI) * s.arcHeight,
+      Math.sin(s.angle) * dist * t
+    );
+    s.mesh.material.opacity = Math.sin(t * Math.PI) * 0.9;
+  }
+}
+
 function createEmberLandmark(colorHex) {
   const group = new THREE.Group();
   // The reference volcano reads as a COOL blue-violet silhouette against
@@ -477,6 +590,12 @@ function createEmberLandmark(colorHex) {
   const fountain = createEruptionFountain(coneH);
   group.add(fountain.group);
 
+  const smoke = createCraterSmoke(coneH, 5);
+  group.add(smoke.group);
+
+  const emberSparks = createEmberSparks(craterR, coneH, 7);
+  group.add(emberSparks.group);
+
   return {
     group, energy, baseY: 0, biome: "ember",
     volcano: {
@@ -487,6 +606,8 @@ function createEmberLandmark(colorHex) {
       erupting: false,
       chunks,
       fountain,
+      smoke,
+      emberSparks,
     },
   };
 }
@@ -675,6 +796,9 @@ function updateVolcano(v, elapsed, dt) {
   // Crater pool breathes gently between eruptions, same as ground lava's
   // own idle pulse.
   const idlePulse = 0.8 + 0.2 * Math.sin(elapsed * 0.9);
+
+  updateCraterSmoke(v.smoke, elapsed);
+  updateEmberSparks(v.emberSparks, elapsed);
 
   for (const seg of v.riverSegments) {
     // The texture's own gradient/heat-pocket pattern scrolls down the

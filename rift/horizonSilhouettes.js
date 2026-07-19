@@ -43,21 +43,39 @@ function createSilhouetteShape(color, height, jagged) {
   return mesh;
 }
 
-// Builds one ring of shapes at a given radius — factored out so the far
-// and mid rings share identical shape/placement logic and only differ in
-// radius, count, and size, rather than risking two subtly-different
+// Builds one ring of ridge CLUSTERS at a given radius — factored out so
+// the far and mid rings share identical placement logic and only differ
+// in radius, count, and size, rather than risking two subtly-different
 // copies of the same loop drifting apart over time.
+//
+// Each cluster is several peaks packed into a tight angular span (tight
+// enough that their cone bases genuinely overlap at this radius), tallest
+// near the cluster's center and tapering to lower shoulder peaks at its
+// edges — a real mountain range reads as a handful of connected ridges
+// with one or two standout peaks each, not a row of identical evenly-
+// spaced standalone triangles with open sky between every single one.
+// Gaps are left between CLUSTERS instead, which is what actually looks
+// like separate ranges on the horizon rather than one solid wall.
 function buildSilhouetteRing(style, radius, countScale, heightScale) {
-  const count = Math.max(1, Math.round(style.count * countScale * getGraphicsSettings().silhouetteMultiplier));
+  const clusterCount = Math.max(1, Math.round((style.count / 4) * countScale * getGraphicsSettings().silhouetteMultiplier));
   const group = new THREE.Group();
-  for (let i = 0; i < count; i++) {
-    const angle = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
-    const r = radius + (Math.random() - 0.5) * 60;
-    const height = (style.minH + Math.random() * (style.maxH - style.minH)) * heightScale;
-    const shape = createSilhouetteShape(style.color, height, style.jagged);
-    shape.position.x += Math.cos(angle) * r;
-    shape.position.z += Math.sin(angle) * r;
-    group.add(shape);
+  for (let c = 0; c < clusterCount; c++) {
+    const clusterAngle = (c / clusterCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.3;
+    const peaksInCluster = 3 + Math.floor(Math.random() * 3); // 3-5 peaks per ridge
+    const clusterSpread = 0.14 + Math.random() * 0.06; // tight — this is what makes bases overlap
+    for (let p = 0; p < peaksInCluster; p++) {
+      const pt = peaksInCluster > 1 ? p / (peaksInCluster - 1) : 0.5;
+      const angle = clusterAngle + (pt - 0.5) * clusterSpread;
+      const r = radius + (Math.random() - 0.5) * 40;
+      // 1 (dead center of the cluster) down to ~0.4 at the shoulders — a
+      // real tall peak or two flanked by lower ridge, not uniform height.
+      const centerBias = 1 - Math.abs(pt - 0.5) * 1.2;
+      const height = (style.minH + Math.random() * (style.maxH - style.minH)) * heightScale * (0.55 + centerBias * 0.6);
+      const shape = createSilhouetteShape(style.color, height, style.jagged);
+      shape.position.x = Math.cos(angle) * r;
+      shape.position.z = Math.sin(angle) * r;
+      group.add(shape);
+    }
   }
   return group;
 }

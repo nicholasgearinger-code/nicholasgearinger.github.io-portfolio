@@ -11,6 +11,30 @@ import { getGraphicsSettings } from "./graphicsSettings.js";
 // variety within a biome, without touching terrain or placement logic.
 // -----------------------------------------------------------------------------
 
+// Paints a simple two-tone vertical gradient across a geometry's own local
+// Y extent via vertex colors — same "flat illustration" idea as terrain.js's
+// height palette, applied at prop scale. A shape using this needs
+// `vertexColors: true` on its material (and a plain white material.color,
+// so nothing multiplies the gradient down) rather than a fixed color.
+function applyVerticalGradient(geo, colorLow, colorHigh) {
+  const pos = geo.attributes.position;
+  let minY = Infinity, maxY = -Infinity;
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i);
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  const range = Math.max(maxY - minY, 1e-6);
+  const colors = new Float32Array(pos.count * 3);
+  const tmp = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const t = (pos.getY(i) - minY) / range;
+    tmp.copy(colorLow).lerp(colorHigh, t);
+    colors[i * 3] = tmp.r; colors[i * 3 + 1] = tmp.g; colors[i * 3 + 2] = tmp.b;
+  }
+  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+}
+
 function createDecoration(biome, colorHex, seedRand) {
   const roll = seedRand();
   const highDetail = getGraphicsSettings().decorationDetail >= 2;
@@ -53,7 +77,11 @@ function createSpire(colorHex, rand) {
   const group = new THREE.Group();
   const h = 5 + rand() * 6;
   const geo = new THREE.ConeGeometry(0.9 + rand() * 0.6, h, 5);
-  const mat = new THREE.MeshStandardMaterial({ color: 0x2a1a16, roughness: 0.9, flatShading: true });
+  // Painted gradient instead of one flat rock color — dark base rising to
+  // a warm rust tone near the top, echoing terrain.js's Ember palette
+  // rather than looking like a separately-lit prop dropped onto it.
+  applyVerticalGradient(geo, new THREE.Color(0x1c0f0a), new THREE.Color(0x6a2a14));
+  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, flatShading: true });
   const cone = new THREE.Mesh(geo, mat);
   cone.position.y = h / 2;
   cone.rotation.y = rand() * Math.PI;
@@ -136,7 +164,12 @@ function createDebris(colorHex, rand) {
 // and don't compete with the actual focal points.
 function createRockCluster(biome, colorHex, rand) {
   const group = new THREE.Group();
-  const tint = new THREE.Color(colorHex).lerp(new THREE.Color(0x555248), 0.65);
+  // Ember rocks bias toward the terrain palette's warm dark-rock tone
+  // instead of a neutral gray blend, so background rocks read as part of
+  // the same painted world instead of a separately-lit gray filler prop.
+  const tint = biome === "ember"
+    ? new THREE.Color(0x3a1208).lerp(new THREE.Color(colorHex), 0.18)
+    : new THREE.Color(colorHex).lerp(new THREE.Color(0x555248), 0.65);
   const mat = new THREE.MeshStandardMaterial({ color: tint, roughness: 0.95, flatShading: true });
   const count = 2 + Math.floor(rand() * 3);
   for (let i = 0; i < count; i++) {
@@ -252,7 +285,11 @@ function updateDecoration(handle, elapsed) {
 // from the spire's rough basalt.
 function createObsidianFormation(colorHex, rand) {
   const group = new THREE.Group();
-  const rockMat = new THREE.MeshStandardMaterial({ color: 0x0d0a12, roughness: 0.15, metalness: 0.3, flatShading: true });
+  // Metalness dropped (was 0.3) — a metallic PBR surface catches moving
+  // specular highlights as the day/night sun crosses it, which reads as
+  // "realistically lit" rather than "flat painted." A matte near-black
+  // silhouette matches the reference's dark foreground rock shapes better.
+  const rockMat = new THREE.MeshStandardMaterial({ color: 0x0d0a12, roughness: 0.55, flatShading: true });
   const h = 3 + rand() * 4;
   const rock = new THREE.Mesh(new THREE.ConeGeometry(0.7 + rand() * 0.5, h, 6), rockMat);
   rock.position.y = h / 2;

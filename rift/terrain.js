@@ -169,15 +169,75 @@ const SURFACE_PATCH_STYLE = {
   ashen: { color: 0xe8dfc8, threshold: 0.65, freq: 3.6 },   // sun-bleached, cracked-pale patches
 };
 
+// -----------------------------------------------------------------------------
+// Flat-illustration height palettes — a small ordered list of bold colors
+// posterized across the height range, instead of one smooth base->highlight
+// gradient. This is the terrain half of the art-direction pass toward the
+// reference's flat-vector look: a handful of confident color bands (like
+// strata) rather than a continuous shaded gradient. Only Ember is defined
+// so far — biomes without an entry here keep the original smooth-gradient
+// look untouched until their own pass.
+//
+// NOTE: this only controls per-vertex color. If the mesh's material still
+// responds to the day/night scene lighting with smooth Phong/PBR shading,
+// that lighting will still paint a continuous brightness gradient across
+// these bands and soften the flat look this is going for. Worth checking
+// in main.js whether Ember's terrain material can go flatShading:true /
+// a lower-lit material — that's outside this file's reach.
+// -----------------------------------------------------------------------------
+const HEIGHT_PALETTE = {
+  ember: [0x120a08, 0x3a1208, 0x7a2410, 0xc8471c, 0xef8a34, 0xffd9a0], // shadowed valley -> deep rock -> mid rock -> molten-adjacent rust -> warm highlight -> pale sunlit rim
+};
+
+function bandedColorAt(t, palette, out) {
+  const bandCount = palette.length - 1;
+  const scaled = THREE.MathUtils.clamp(t, 0, 1) * bandCount;
+  const idx = Math.min(bandCount - 1, Math.floor(scaled));
+  out.copy(palette[idx]);
+  // A thin darkened seam right at each INTERNAL band boundary — an
+  // approximation of the crisp ink-line/contour edge flat illustration
+  // uses between color fields. Excludes the outer edges of the whole
+  // height range (t=0 / t=1), which aren't boundaries between two bands.
+  const localT = scaled - idx;
+  const nearLowerSeam = localT < 0.05 && idx > 0;
+  const nearUpperSeam = localT > 0.95 && idx < bandCount - 1;
+  if (nearLowerSeam || nearUpperSeam) out.multiplyScalar(0.6);
+  return out;
+}
+
 function applyHeightShading(geo, colorHex, minY, maxY, biome, seed) {
   const posAttr = geo.attributes.position;
   const range = Math.max(maxY - minY, 1e-6);
-  const base = new THREE.Color(colorHex).multiplyScalar(0.44); // was 0.3 — read as muddy/dark at low elevations rather than showing the actual biome color
-  const highlight = new THREE.Color(colorHex).lerp(new THREE.Color(0xffffff), 0.22); // was 0.4 — less washed toward white, keeps more color saturation at peaks instead of desaturating them
   const patchStyle = SURFACE_PATCH_STYLE[biome];
   const patchColor = patchStyle ? new THREE.Color(patchStyle.color) : null;
   const colors = new Float32Array(posAttr.count * 3);
   const tmp = new THREE.Color();
+
+  const paletteHex = HEIGHT_PALETTE[biome];
+  if (paletteHex) {
+    const palette = paletteHex.map((h) => new THREE.Color(h));
+    for (let i = 0; i < posAttr.count; i++) {
+      const t = (posAttr.getY(i) - minY) / range;
+      bandedColorAt(t, palette, tmp);
+      if (patchStyle) {
+        const x = posAttr.getX(i), z = posAttr.getZ(i);
+        const n = fbm2(x * 0.01 * patchStyle.freq, z * 0.01 * patchStyle.freq, seed + 500, 3, 2.0, 0.5);
+        // Flat illustration reads as distinct painted splatter shapes, not
+        // a soft airbrushed bloom — once a spot crosses the threshold it
+        // gets close to full patch strength immediately, rather than
+        // ramping gradually across the excess.
+        if (n > patchStyle.threshold) tmp.lerp(patchColor, 0.82);
+      }
+      colors[i * 3] = tmp.r; colors[i * 3 + 1] = tmp.g; colors[i * 3 + 2] = tmp.b;
+    }
+    geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    return;
+  }
+
+  // Original smooth two-color gradient — still used by every biome that
+  // hasn't had its own flat-illustration pass yet.
+  const base = new THREE.Color(colorHex).multiplyScalar(0.44); // was 0.3 — read as muddy/dark at low elevations rather than showing the actual biome color
+  const highlight = new THREE.Color(colorHex).lerp(new THREE.Color(0xffffff), 0.22); // was 0.4 — less washed toward white, keeps more color saturation at peaks instead of desaturating them
   for (let i = 0; i < posAttr.count; i++) {
     const t = (posAttr.getY(i) - minY) / range;
     tmp.copy(base).lerp(highlight, t);

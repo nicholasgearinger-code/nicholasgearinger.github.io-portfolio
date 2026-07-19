@@ -17,6 +17,16 @@ const TERRAIN_SIZE = 240;      // full width/depth of the landmass, in world uni
 const TERRAIN_SEGMENTS_DEFAULT = 140;  // fallback only — actual resolution comes from graphicsSettings' current tier
 const RIVER_WIDTH = 7;         // Verdant Hollow's river channel, half-width in world units
 const RIVER_DEPTH = 5;         // how far the channel carves below the surrounding local terrain
+const LAVA_CHANNEL_WIDTH = 9;  // Ember's main winding lava channel, half-width in world units — separate constant since it's deliberately wider/deeper than Verdant's river
+const EMBER_PATH_INNER = LAVA_CHANNEL_WIDTH + 0.5; // small gap between the channel's edge and the path so they don't visually run together
+const EMBER_PATH_OUTER = LAVA_CHANNEL_WIDTH + 3.5;
+
+// Shared by BIOME_SHAPERS.ember (to carve the channel) and
+// applyHeightShading (to paint a sandy path alongside it) — one formula,
+// not two copies that could drift apart over future edits.
+function emberChannelCenterX(worldZ, seed) {
+  return Math.sin(worldZ * 0.03 + seed * 0.012) * 30 + Math.sin(worldZ * 0.011 + seed * 0.02) * 15;
+}
 
 // Where the liquid plane (see liquid.js) sits for biomes that have one.
 // Tuned against each biome's own height range so it floods only the
@@ -73,13 +83,42 @@ function fbm2(x, y, seed, octaves, lacunarity, gain) {
 // different kind of place.
 // -----------------------------------------------------------------------------
 const BIOME_SHAPERS = {
-  // Jagged volcanic ground with narrow carved lava-crack channels.
+  // Jagged volcanic ground with narrow carved lava-crack channels, plus
+  // one main winding lava channel (same meandering-sine technique as
+  // Verdant's river) — gives Ember one clear signature flow line instead
+  // of only scattered noise-based cracks, matching the reference
+  // composition of one continuous lava river rather than a diffuse field
+  // of small cracks.
   ember(u, v, seed) {
+    const worldX = u * (TERRAIN_SIZE / 2), worldZ = v * (TERRAIN_SIZE / 2);
     const base = fbm2(u * 2.2, v * 2.2, seed, 5, 2.1, 0.55);
     const jagged = Math.abs(base) * 1.6; // ridged noise — sharp peaks instead of rolling hills
     const crackNoise = fbm2(u * 5 + 100, v * 5 + 100, seed + 40, 3, 2.0, 0.5);
     const crack = Math.abs(crackNoise) < 0.09 ? -3.5 : 0; // wider grooves than before — larger, more connected lava flows instead of thin cracks
-    return jagged * 9 + crack;
+
+    const channelCenterX = emberChannelCenterX(worldZ, seed);
+    const distFromChannel = Math.abs(worldX - channelCenterX);
+    let channel = 0;
+    if (distFromChannel < LAVA_CHANNEL_WIDTH) {
+      const t = 1 - distFromChannel / LAVA_CHANNEL_WIDTH;
+      channel = -t * t * 6; // deeper than the scattered cracks — ensures the ground lava plane (liquid.js, LIQUID_LEVEL.ember) reliably floods this whole winding line, not just isolated low points
+    }
+
+    // Flatten the jagged/cracked terrain within the path band alongside
+    // the channel — a real smooth trail, not just jagged rock painted
+    // tan by applyHeightShading's matching path-color band below. Never
+    // overlaps `channel` itself (the path starts just past the channel's
+    // own width), so no interaction between the two.
+    const offsetFromChannel = worldX - channelCenterX;
+    let flattenT = 0;
+    if (offsetFromChannel > EMBER_PATH_INNER && offsetFromChannel < EMBER_PATH_OUTER) {
+      const mid = (EMBER_PATH_INNER + EMBER_PATH_OUTER) / 2, half = (EMBER_PATH_OUTER - EMBER_PATH_INNER) / 2;
+      flattenT = Math.max(0, 1 - Math.abs((offsetFromChannel - mid) / half));
+    }
+    const jaggedFlattened = jagged * (1 - flattenT * 0.85);
+    const crackFlattened = crack * (1 - flattenT); // suppress any scattered crack that happens to fall inside the path so it doesn't trench through the trail
+
+    return jaggedFlattened * 9 + crackFlattened + channel;
   },
   // Gentle rolling hills, cut through by a winding river channel.
   verdant(u, v, seed) {
@@ -216,6 +255,11 @@ function applyHeightShading(geo, colorHex, minY, maxY, biome, seed) {
   const paletteHex = HEIGHT_PALETTE[biome];
   if (paletteHex) {
     const palette = paletteHex.map((h) => new THREE.Color(h));
+    // Sandy path alongside the lava channel — Ember only, one side of the
+    // channel (not both), matching the reference's single winding trail
+    // rather than symmetric banks. Small gap between the channel's edge
+    // and the path itself so they don't visually run together.
+    const pathColor = biome === "ember" ? new THREE.Color(0xc99a5e) : null;
     for (let i = 0; i < posAttr.count; i++) {
       const t = (posAttr.getY(i) - minY) / range;
       bandedColorAt(t, palette, tmp);
@@ -227,6 +271,15 @@ function applyHeightShading(geo, colorHex, minY, maxY, biome, seed) {
         // gets close to full patch strength immediately, rather than
         // ramping gradually across the excess.
         if (n > patchStyle.threshold) tmp.lerp(patchColor, 0.82);
+      }
+      if (pathColor) {
+        const x = posAttr.getX(i), z = posAttr.getZ(i);
+        const offsetFromChannel = x - emberChannelCenterX(z, seed);
+        if (offsetFromChannel > EMBER_PATH_INNER && offsetFromChannel < EMBER_PATH_OUTER) {
+          const mid = (EMBER_PATH_INNER + EMBER_PATH_OUTER) / 2, half = (EMBER_PATH_OUTER - EMBER_PATH_INNER) / 2;
+          const pathT = Math.max(0, 1 - Math.abs((offsetFromChannel - mid) / half));
+          tmp.lerp(pathColor, pathT * 0.85);
+        }
       }
       colors[i * 3] = tmp.r; colors[i * 3 + 1] = tmp.g; colors[i * 3 + 2] = tmp.b;
     }

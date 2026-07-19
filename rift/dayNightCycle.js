@@ -37,6 +37,20 @@ function lerpColor(a, b, t) {
   return new THREE.Color(a).lerp(new THREE.Color(b), t);
 }
 
+// Small self-contained value-noise, same technique terrain.js/landmarks.js
+// already use — each module owns its own rather than cross-importing.
+function hashSky(x, y) {
+  const n = Math.sin(x * 127.1 + y * 311.7) * 43758.5453123;
+  return n - Math.floor(n);
+}
+function skyNoise2D(x, y) {
+  const xi = Math.floor(x), yi = Math.floor(y);
+  const xf = x - xi, yf = y - yi;
+  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  const a = hashSky(xi, yi), b = hashSky(xi + 1, yi), c = hashSky(xi, yi + 1), d = hashSky(xi + 1, yi + 1);
+  return THREE.MathUtils.lerp(THREE.MathUtils.lerp(a, b, u), THREE.MathUtils.lerp(c, d, u), v);
+}
+
 // Position + elevation for anything on the shared day/night arc — the sun
 // uses phaseAngle directly, the moon uses phaseAngle + PI (opposite side
 // of the same circle), everything else about them is identical.
@@ -332,16 +346,50 @@ function createSkyDome(scene) {
   return { mesh, posAttr: geo.attributes.position, colorAttr: geo.attributes.color };
 }
 
-function updateSkyDome(sky, zenithColor, horizonColor) {
+// A handful of bold, discrete bands instead of one smooth continuous
+// gradient — the reference's sky is 3-4 confident stripes (deep red ->
+// orange -> cream), not a soft blend. Same posterize-with-a-seam-line
+// technique terrain.js's HEIGHT_PALETTE already uses, applied here to the
+// horizon->zenith gradient instead of a height gradient.
+const SKY_BANDS = 4;
+function bandedSkyColor(t, horizonColor, zenithColor, out) {
+  const scaled = THREE.MathUtils.clamp(t, 0, 1) * SKY_BANDS;
+  const idx = Math.min(SKY_BANDS - 1, Math.floor(scaled));
+  const bandT = SKY_BANDS > 1 ? idx / (SKY_BANDS - 1) : 0; // evenly-spaced representative t for this band, not the raw continuous t
+  out.copy(horizonColor).lerp(zenithColor, bandT);
+  const localT = scaled - idx;
+  const nearLowerSeam = localT < 0.06 && idx > 0;
+  const nearUpperSeam = localT > 0.94 && idx < SKY_BANDS - 1;
+  if (nearLowerSeam || nearUpperSeam) out.multiplyScalar(0.82); // subtler than terrain's rock-strata seams — this is sky, not stone
+  return out;
+}
+
+function updateSkyDome(sky, zenithColor, horizonColor, elapsed) {
   const { posAttr, colorAttr } = sky;
   const tmp = new THREE.Color();
   for (let i = 0; i < posAttr.count; i++) {
-    const yFrac = posAttr.getY(i) / SKY_DOME_RADIUS; // -1 (bottom) to 1 (top)
+    const x = posAttr.getX(i), y = posAttr.getY(i), z = posAttr.getZ(i);
+    const yFrac = y / SKY_DOME_RADIUS; // -1 (bottom) to 1 (top)
     // Concentrates the gradient near the horizon band rather than
     // spreading it evenly top-to-bottom — real skies change fastest right
     // at the horizon, not uniformly toward the zenith.
     const t = THREE.MathUtils.clamp((yFrac + 0.1) / 0.45, 0, 1);
-    tmp.copy(horizonColor).lerp(zenithColor, t);
+    bandedSkyColor(t, horizonColor, zenithColor, tmp);
+
+    // Jagged dark streaks cutting across the bands — the reference's
+    // cloud/ridge silhouettes. Low frequency around the dome's longitude
+    // (broad streaks, not vertical stripes) combined with a higher
+    // frequency in latitude for jagged rather than perfectly smooth
+    // edges. Slow elapsed-based drift in the longitude coordinate so they
+    // creep across the sky like real cloud bands instead of being welded
+    // to fixed positions forever.
+    const angle = Math.atan2(z, x);
+    const streak = skyNoise2D(angle * 2.4 + elapsed * 0.006, yFrac * 7 + 100);
+    if (streak > 0.58) {
+      const s = Math.min(1, (streak - 0.58) / 0.35);
+      tmp.multiplyScalar(1 - s * 0.42);
+    }
+
     tmp.toArray(colorAttr.array, i * 3);
   }
   colorAttr.needsUpdate = true;
@@ -416,7 +464,7 @@ function updateDayNightCycle(cycle, dt) {
   cycle.ambient.color.copy(ambientColor);
   cycle.ambient.intensity = ambientIntensity;
   cycle.scene.fog.color.copy(fogColor);
-  updateSkyDome(cycle.sky, skyZenith, skyHorizon);
+  updateSkyDome(cycle.sky, skyZenith, skyHorizon, cycle.elapsed);
 
   // Each body fades out once it's below the horizon rather than just
   // disappearing at exactly elevation=0, so setting/rising reads as a

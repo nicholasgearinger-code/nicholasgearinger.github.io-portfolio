@@ -3,36 +3,43 @@ import { getGraphicsSettings } from "./graphicsSettings.js";
 
 // -----------------------------------------------------------------------------
 // SWAP POINT: distant horizon silhouettes — large faceted shapes clustered
-// into ridges at three depths beyond the playable terrain. Was originally
-// one flat near-black silhouette color per biome; now a layered
-// flat-illustration mountain-range look matching the reference (a cool
-// slate peak behind, a warm sunlit peak in front, warm low foreground
-// hills closest of all, and a pale two-tone highlight on just the tallest
-// peak in each ridge) instead of pure dark cutouts. Swap SILHOUETTE_STYLE
-// for a different profile/color per biome. No update function needed —
-// these are static, purely a backdrop.
+// into ridges at three depths beyond the playable terrain. Layered
+// flat-illustration mountain-range look: a dark distant ridge, a warmer
+// mid ridge, warm low foreground hills closest of all, and a pale
+// two-tone highlight on just the tallest peak in each ridge. Each biome's
+// three depth colors and highlight color are pulled toward that biome's
+// OWN established palette (see farTint/capColor below) rather than a
+// single universal tint — Ember's mountains should stay dark violet/rust
+// leaning amber, not drift cool/blue the way a shared tint would.
+// Swap SILHOUETTE_STYLE for a different profile/color per biome. No
+// update function needed — these are static, purely a backdrop.
 // -----------------------------------------------------------------------------
 
 const SILHOUETTE_STYLE = {
-  ember: { count: 10, color: 0x1a0e0c, minH: 30, maxH: 70, jagged: true, capColor: 0xe8b98a },   // sharp volcanic peaks, warm sunlit cap
-  verdant: { count: 8, color: 0x0e1a14, minH: 18, maxH: 38, jagged: false, capColor: 0xbfe0c8 }, // soft rolling hills, pale green cap
-  crystal: { count: 9, color: 0x10161e, minH: 25, maxH: 55, jagged: true, capColor: 0xcfe8ff },  // angular crystal formations, icy cap
-  abyssal: { count: 7, color: 0x0a0810, minH: 20, maxH: 45, jagged: true, capColor: 0x9a7ab0 },  // broken, uneven, pale violet cap
-  ashen: { count: 6, color: 0x161310, minH: 12, maxH: 28, jagged: false, capColor: 0xe8d8ae },   // low, worn-down dunes, sandy cap
+  // Ember Reach's own established palette (see landmarks.js's volcano cone
+  // gradient and terrain.js's HEIGHT_PALETTE.ember): near-black violet rock
+  // darkening further into the distance, warming toward the same rust/amber
+  // family the terrain and lava already use, capped with the exact amber
+  // (0xffb35a) already used for the ember vent highlight stroke elsewhere
+  // in this project — not an invented peachy tone.
+  ember: { count: 10, color: 0x1c1220, minH: 30, maxH: 70, jagged: true, capColor: 0xffb35a, farTint: 0x120a10 },
+  verdant: { count: 8, color: 0x0e1a14, minH: 18, maxH: 38, jagged: false, capColor: 0xbfe0c8, farTint: 0x0a2430 },
+  crystal: { count: 9, color: 0x10161e, minH: 25, maxH: 55, jagged: true, capColor: 0xcfe8ff, farTint: 0x1a1a3a },
+  abyssal: { count: 7, color: 0x0a0810, minH: 20, maxH: 45, jagged: true, capColor: 0x9a7ab0, farTint: 0x140a1e },
+  ashen: { count: 6, color: 0x161310, minH: 12, maxH: 28, jagged: false, capColor: 0xe8d8ae, farTint: 0x2a2010 },
 };
 
 const RING_RADIUS = 340; // well beyond WORLD_BOUND_RADIUS and the terrain's own falloff rim, inside the fog's effective range so it fades in rather than popping
 const MID_RING_RADIUS = 230; // closer ring for real parallax depth
-// A third, closest layer — low warm foreground hills, the way the
-// reference's front-most tan ridge sits well in front of the two peaks
-// behind it. WORLD_BOUND_RADIUS (the player's actual movement limit) is
-// TERRAIN_SIZE/2*0.93 = ~112 — 165 clears that with real margin (~48%
-// more) while still reading as noticeably closer than the mid ring.
+// A third, closest layer — low warm foreground hills. WORLD_BOUND_RADIUS
+// (the player's actual movement limit) is TERRAIN_SIZE/2*0.93 = ~112 — 165
+// clears that with real margin (~48% more) while still reading as
+// noticeably closer than the mid ring.
 const NEAR_RING_RADIUS = 165;
 
 // Returns a plain hex number (not a THREE.Color instance) so it stays a
 // drop-in replacement anywhere a style color is normally used elsewhere
-// in this file/project.
+// in this file.
 function lerpHexColor(hexA, hexB, t) {
   return new THREE.Color(hexA).lerp(new THREE.Color(hexB), t).getHex();
 }
@@ -64,19 +71,46 @@ function paintPeakGradient(geo, bodyColorHex, capColorHex, capStrength) {
   geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
 }
 
+// Leans a peak's summit off-center instead of leaving it perfectly
+// symmetric. Every ConeGeometry's "tip" is actually a ring of coincident
+// vertices sitting at y=height/2 (radiusTop=0 collapses them all to the
+// same point) — nudging all of them by the same offset tilts the whole
+// peak's axis, which is what real mountains look like far more often
+// than a perfectly centered summit.
+function skewApex(geo, height, maxOffset) {
+  const pos = geo.attributes.position;
+  const dx = (Math.random() - 0.5) * maxOffset;
+  const dz = (Math.random() - 0.5) * maxOffset;
+  const topY = height / 2;
+  for (let i = 0; i < pos.count; i++) {
+    if (Math.abs(pos.getY(i) - topY) < 1e-4) {
+      pos.setX(i, pos.getX(i) + dx);
+      pos.setZ(i, pos.getZ(i) + dz);
+    }
+  }
+  pos.needsUpdate = true;
+  geo.computeVertexNormals();
+}
+
 // `capColorHex` + `isCenterPeak` are optional — pass null/false for a
-// plain flat-colored peak (every shoulder peak, and the whole near/
-// foreground layer, which isn't meant to have dramatic lit peaks).
+// plain flat-colored peak (every shoulder/companion peak, and the whole
+// near/foreground layer, which isn't meant to have dramatic lit peaks).
 function createSilhouetteShape(colorHex, height, jagged, capColorHex, isCenterPeak) {
-  const baseRadius = height * (0.5 + Math.random() * 0.4);
+  // Was a narrow 0.5-0.9 range and a fixed 5-7/flat-8 segment count —
+  // every peak came out with nearly identical proportions. Widening both
+  // ranges gives real variety: some peaks spiky and narrow, others
+  // broad-shouldered, some sharply faceted, others smoother.
+  const baseRadius = height * (0.3 + Math.random() * 1.1);
+  const radialSegments = jagged ? 4 + Math.floor(Math.random() * 6) : 7 + Math.floor(Math.random() * 4);
   const geo = jagged
-    ? new THREE.ConeGeometry(baseRadius, height, 5 + Math.floor(Math.random() * 3))
-    : new THREE.ConeGeometry(baseRadius * 1.4, height, 8, 1, false); // wider base, rounder-feeling silhouette for gentle hills
+    ? new THREE.ConeGeometry(baseRadius, height, radialSegments)
+    : new THREE.ConeGeometry(baseRadius * 1.4, height, radialSegments, 1, false); // wider base, rounder-feeling silhouette for gentle hills
+  skewApex(geo, height, baseRadius * 0.5);
   let mat;
   if (isCenterPeak && capColorHex != null) {
     // Only the tallest peak in each cluster gets the highlight — the
-    // reference's drama comes from ONE lit peak standing out among
-    // darker silhouettes around it, not every peak glowing equally.
+    // drama comes from ONE lit peak standing out among darker
+    // silhouettes around it, not every peak glowing equally.
     paintPeakGradient(geo, colorHex, capColorHex, 0.4 + Math.random() * 0.2);
     mat = new THREE.MeshBasicMaterial({ vertexColors: true, fog: true });
   } else {
@@ -121,6 +155,20 @@ function buildSilhouetteRing(style, radius, countScale, heightScale, colorHex, c
       shape.position.x = Math.cos(angle) * r;
       shape.position.z = Math.sin(angle) * r;
       group.add(shape);
+
+      // Twin companion sub-peak — real ridgelines often have a smaller
+      // shoulder summit fused right against a bigger one. Occasionally
+      // adding one here is cheap extra silhouette variety on top of the
+      // shape variance above, without needing a second geometry system.
+      if (Math.random() < 0.28) {
+        const companionHeight = height * (0.35 + Math.random() * 0.35);
+        const companionAngle = angle + (Math.random() - 0.5) * 0.05;
+        const companionR = r + (Math.random() - 0.5) * 10;
+        const companion = createSilhouetteShape(colorHex, companionHeight, style.jagged, null, false);
+        companion.position.x = Math.cos(companionAngle) * companionR;
+        companion.position.z = Math.sin(companionAngle) * companionR;
+        group.add(companion);
+      }
     }
   }
   return group;
@@ -134,23 +182,24 @@ function createHorizonSilhouettes(scene, biome) {
   const style = SILHOUETTE_STYLE[biome] || SILHOUETTE_STYLE.ember;
   const group = new THREE.Group();
 
-  // Far layer: cool and dark — the reference's back-most slate-blue peak.
-  // Slightly more clusters than before ("more of those").
-  const farColor = lerpHexColor(style.color, 0x1c2a3a, 0.18);
+  // Far layer: darkest, pulled toward this biome's own farTint (NOT a
+  // universal cool/blue shift — that read wrong on Ember, whose palette
+  // has no blue in it at all).
+  const farColor = lerpHexColor(style.color, style.farTint, 0.55);
   group.add(buildSilhouetteRing(style, RING_RADIUS, 1.15, 1, farColor, style.capColor));
 
-  // Mid layer: noticeably warmer, leaning toward the cap color itself
-  // rather than staying near-black — the reference's sunlit front peak.
+  // Mid layer: warmer, leaning toward the biome's own capColor rather
+  // than staying near-black or (as before) toward an unrelated hue.
   const midColor = lerpHexColor(style.color, style.capColor, 0.28);
   group.add(buildSilhouetteRing(style, MID_RING_RADIUS, 0.75, 0.8, midColor, style.capColor));
 
-  // Near layer (new): warm low foreground hills, closest and lowest of
-  // the three — the reference's front-most tan/olive ridge. Always
-  // rounded regardless of the biome's usual jagged/rounded profile, since
-  // this is meant to read as gentle foreground land, not more peaks; no
-  // highlight cap either, that drama belongs to the peaks behind it.
+  // Near layer: warm low foreground hills, closest and lowest of the
+  // three. Always rounded regardless of the biome's usual jagged/rounded
+  // profile — this is meant to read as gentle foreground land, not more
+  // peaks; no highlight cap either, that drama belongs to the peaks
+  // behind it.
   const nearStyle = { ...style, jagged: false };
-  const nearColor = lerpHexColor(style.color, style.capColor, 0.45);
+  const nearColor = lerpHexColor(style.color, style.capColor, 0.5);
   group.add(buildSilhouetteRing(nearStyle, NEAR_RING_RADIUS, 0.5, 0.45, nearColor, null));
 
   scene.add(group);

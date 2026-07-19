@@ -38,10 +38,16 @@ function createVeinIllustrationTexture(seed) {
   for (let i = 0; i <= pointCount; i++) {
     const t = i / pointCount;
     const wob = Math.sin(t * 5 + seed * 4) * 0.5 + Math.sin(t * 9 + seed * 2.3) * 0.3;
+    // Overall taper on top of the wobble: t=0 is the crater end (see
+    // topPos/botPos derivation below — smaller radius = higher on the
+    // cone = nearer the crater), t=1 is the base. A real flow is fed wide
+    // at the source and narrows/forks as it runs out, rather than staying
+    // a uniform-width stripe top to bottom.
+    const taper = 1.25 - 0.6 * t;
     points.push({
       x: w / 2 + wob * w * 0.24,
       y: t * h,
-      widthMul: 0.55 + 0.45 * Math.sin(t * Math.PI * 0.85 + seed),
+      widthMul: (0.55 + 0.45 * Math.sin(t * Math.PI * 0.85 + seed)) * taper,
     });
   }
 
@@ -68,11 +74,8 @@ function createVeinIllustrationTexture(seed) {
       }
     }
   };
-  // Crust darkened further (was #3a0d00) to hold contrast against the
-  // cone's new near-black violet body; core pushed toward a purer,
-  // more saturated orange (was #ff5a1f, slightly muddy/brownish) — the
-  // reference's lava reads as a clean, poster-flat hot orange, not a
-  // naturalistic warm-brown blend.
+  // Crust darkened for contrast against the cone's new near-black violet
+  // body; core pushed toward a purer, more saturated orange.
   stampLayer("#220400", 1.0);
   stampLayer("#ff6a14", 0.72);
 
@@ -100,6 +103,7 @@ function createVeinIllustrationTexture(seed) {
     const r = Math.max(0.5, w * 0.1 * (0.7 + Math.abs((i * 37 + seed * 13) % 10) / 10));
     const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
     grad.addColorStop(0, "#fff3c8");
+    grad.addColorStop(0.45, "#fff3c8");
     grad.addColorStop(1, "rgba(255,243,200,0)");
     ctx.fillStyle = grad;
     ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill();
@@ -239,142 +243,105 @@ function addFlowBeads(group, topPos, bottomPos, count, beadsOut) {
     });
   }
 }
-// -----------------------------------------------------------------------------
-// Ember volcano — now a single huge flat 2D backdrop (a painted
-// silhouette on one big plane), not real 3D cone geometry, per explicit
-// request to make it "fully 2D." Individual veins/cracks/glow/flow-beads
-// below are still their own small planes laid against the backdrop's
-// face — their texture/scroll/flare machinery is untouched — only HOW
-// they're positioned/oriented changed: everything here only ever sets
-// rotation.y = yaw (the same single rotation the backdrop plane itself
-// uses), since a flat, coplanar face never needs a second rotation axis
-// at all. That structurally removes the whole Euler-composition-order
-// bug class the old cone veins needed a rotateX() workaround for.
-// -----------------------------------------------------------------------------
-
-// Maps a fractional point on the backdrop's face (u: 0=left..1=right,
-// v: 0=top..1=bottom) to a position in the landmark group's local space.
-// `forwardOffset` nudges the point slightly toward the viewer (along the
-// backdrop's own facing direction) so foreground effects don't z-fight
-// with the painted texture behind them. This is the single Y-axis
-// rotation matrix applied directly as plain algebra — not a THREE
-// rotation call — so it can't accidentally compose with anything else.
-function planePointToWorld(u, v, width, height, yaw, forwardOffset = 0) {
-  const lx = (u - 0.5) * width;
-  const ly = height * (1 - v);
-  const lz = forwardOffset;
-  return {
-    x: lx * Math.cos(yaw) + lz * Math.sin(yaw),
-    y: ly,
-    z: -lx * Math.sin(yaw) + lz * Math.cos(yaw),
-  };
-}
-
-// A vein running down the backdrop's face from just below the crater
-// notch to the ground, plus two short braided forks near the base.
-// Built as a chain of several shorter segments that random-walk
-// sideways (in u) as they descend, each tilted in-plane to lean toward
-// its own direction — this is what actually reads as organic winding
-// flow at a distance, not just the texture's own internal wobble on one
-// long straight quad (the earlier version).
-function createBackdropVein(group, u, backdropW, backdropH, craterVFrac, yaw, glowsOut, beadsOut) {
-  const topV = craterVFrac + 0.03, botV = 0.97;
-  const segCount = 4;
-  const totalLen = (botV - topV) * backdropH;
-  const segLen = totalLen / segCount;
-  const width = 5.6;
-  const baseSeed = u * 17;
+function createLavaVeinChain(group, angle, coneH, baseR, craterR, glowsOut, beadsOut) {
+  const slopeAngle = Math.atan2(baseR - craterR, coneH);
+  const length = coneH * 0.9;
+  const width = 4.8; // was 3.2 — thicker flow, matches the bolder channel proportion above
+  const midY = coneH * 0.5;
+  // Padding increased from an earlier 0.25 -> 0.6. The cone's surface
+  // isn't perfectly smooth — per-vertex jitter (see the jitter loop
+  // below, `jitterAmount` up to 0.32) makes it bulge in and out
+  // irregularly. 0.25 was thinner than that jitter amplitude in several
+  // places (verified numerically: clearance as low as 0.003 at some
+  // sample points, and jitter oscillates continuously along the vein's
+  // length via y-dependent sine terms, so the true worst case between
+  // sampled points is likely worse still) — the vein was still getting
+  // swallowed by jitter bulges even after supposedly being pushed
+  // "outside" the ideal smooth-cone radius. 0.6 comfortably clears the
+  // maximum possible jitter (0.32) with real margin, not a razor edge.
+  const midR = baseR + (craterR - baseR) * (midY / coneH) + 0.6;
+  const seed = angle;
   const segments = [];
 
-  // Random-walk the u position segment by segment, clamped to a max
-  // total drift from the vein's base column so it still reads as
-  // "roughly this vein" rather than wandering into its neighbors.
-  const uPoints = [u];
-  for (let i = 1; i <= segCount; i++) {
-    const prev = uPoints[i - 1];
-    const step = (Math.sin(baseSeed * 3.1 + i * 2.7) * 0.5 + (Math.random() - 0.5) * 0.5) * 0.045;
-    uPoints.push(THREE.MathUtils.clamp(prev + step, u - 0.09, u + 0.09));
-  }
-
-  // One shared ambient glow halo over the vein's full run, rather than
-  // per-segment — reads as one continuous warm channel.
-  const midV = (topV + botV) / 2;
-  const midU = uPoints[Math.floor(segCount / 2)];
-  const midPos = planePointToWorld(midU, midV, backdropW, backdropH, yaw, 0.35);
+  // Ambient glow halo behind the vein — additive + no depth write so it
+  // never competes with the sharp painted channel drawn on top of it.
   const glowMat = new THREE.MeshBasicMaterial({
-    map: getSoftGlowTexture(), color: 0xff8a3a, transparent: true, opacity: 0.32,
+    map: getSoftGlowTexture(), color: 0xff8a3a, transparent: true, opacity: 0.3,
     blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
   });
-  const glow = new THREE.Mesh(new THREE.PlaneGeometry(totalLen * 0.6, totalLen * 0.6), glowMat);
-  glow.position.set(midPos.x, midPos.y, midPos.z);
-  glow.rotation.y = yaw;
+  const glow = new THREE.Mesh(new THREE.PlaneGeometry(coneH * 0.7, coneH * 0.7), glowMat);
+  glow.position.set(Math.sin(angle) * midR, midY, Math.cos(angle) * midR);
+  // BUG FIX: setting .rotation.x and .rotation.y as properties composes
+  // them via THREE's default Euler 'XYZ' order, which applies the X-tilt
+  // AROUND THE FIXED WORLD X AXIS regardless of the yaw — so the tilt
+  // came out wrong (and identical) for every vein regardless of its
+  // angle, which is why they all rendered as parallel horizontal ribbons
+  // instead of radiating down the slope at their own angles. Setting the
+  // yaw first, then calling the incremental .rotateX() METHOD (not the
+  // .rotation.x property) applies the tilt around the mesh's OWN current
+  // local X axis — which, after the yaw, correctly points tangentially
+  // at this vein's specific angle.
+  glow.rotation.y = angle;
+  glow.rotateX(-slopeAngle);
   group.add(glow);
   if (glowsOut) glowsOut.push(glow);
 
-  for (let i = 0; i < segCount; i++) {
-    const v0 = topV + i * (botV - topV) / segCount;
-    const v1 = topV + (i + 1) * (botV - topV) / segCount;
-    const vMid = (v0 + v1) / 2;
-    const u0 = uPoints[i], u1 = uPoints[i + 1];
-    const uMid = (u0 + u1) / 2;
-    const segSeed = baseSeed + i * 3.3;
+  // The vein itself — a single flat plane carrying the whole painted
+  // channel illustration, tilted to lie against the cone's slope. One
+  // quad instead of a multi-segment mesh: cheaper to draw and the
+  // "shape" now comes entirely from the 2D painting, not vertex math.
+  const tex = createVeinIllustrationTexture(seed);
+  tex.repeat.set(1, 1.4); // slight vertical tiling headroom for the scroll animation in updateVolcano
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 1, side: THREE.DoubleSide });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, length), mat);
+  mesh.position.set(Math.sin(angle) * midR, midY, Math.cos(angle) * midR);
+  mesh.rotation.y = angle; // same fix as the glow halo above
+  mesh.rotateX(-slopeAngle);
+  group.add(mesh);
+  segments.push({ mesh, tex, seed });
 
-    const tex = createVeinIllustrationTexture(segSeed);
-    tex.repeat.set(1, 1.4);
-    const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 1, side: THREE.DoubleSide });
-    // Slightly longer than its exact v-slice so consecutive segments'
-    // painted channels visually overlap at the bend instead of leaving
-    // a gap.
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, segLen * 1.15), mat);
-    const p = planePointToWorld(uMid, vMid, backdropW, backdropH, yaw, 0.35);
-    mesh.position.set(p.x, p.y, p.z);
-    // Tilt this segment toward its own direction, worked out directly
-    // in the backdrop's own LOCAL (u, v) coordinates — the horizontal
-    // run over the vertical rise between this segment's endpoints.
-    // Applied via the incremental .rotateZ() METHOD (not the
-    // .rotation.z property) after yaw is set as a property, so the
-    // twist happens around the plane's own current local normal axis
-    // rather than the fixed world Z axis — the same safe pattern this
-    // file already established for the old cone veins' slope tilt
-    // (yaw property, then .rotateX() method), just swapped to
-    // .rotateZ() for an in-plane lean instead of an out-of-plane one.
-    // Cosmetic-only — an approximate lean, not exact — so a wrong-way
-    // sign here is a one-line flip, not a functional bug.
-    const dxLocal = (u1 - u0) * backdropW;
-    const dyLocal = (v0 - v1) * backdropH;
-    const tilt = Math.atan2(dxLocal, dyLocal);
-    mesh.rotation.y = yaw;
-    mesh.rotateZ(-tilt);
-    group.add(mesh);
-    segments.push({ mesh, tex, seed: segSeed });
-  }
+  // Real world-space endpoints of the vein, derived from the same
+  // slope/midpoint math used to place the plane above (not a
+  // transform-matrix readback) — moving `halfLen` up the slope from the
+  // midpoint shrinks the radius by halfLen*sin(slopeAngle) and raises the
+  // height by halfLen*cos(slopeAngle); moving down does the opposite.
+  const halfLen = length / 2;
+  const topR = midR - halfLen * Math.sin(slopeAngle), topY = midY + halfLen * Math.cos(slopeAngle);
+  const botR = midR + halfLen * Math.sin(slopeAngle), botY = midY - halfLen * Math.cos(slopeAngle);
+  const topPos = { x: Math.sin(angle) * topR, y: topY, z: Math.cos(angle) * topR };
+  const botPos = { x: Math.sin(angle) * botR, y: botY, z: Math.cos(angle) * botR };
+  if (beadsOut) addFlowBeads(group, topPos, botPos, 2, beadsOut);
 
-  const topPos = planePointToWorld(uPoints[0], topV, backdropW, backdropH, yaw, 0.35);
-  const botPos = planePointToWorld(uPoints[segCount], botV, backdropW, backdropH, yaw, 0.35);
-  if (beadsOut) addFlowBeads(group, topPos, botPos, 3, beadsOut); // one more than before — the meander adds real path length
-
-  // Braided fan at the base — 2 short offshoots peeling sideways from
-  // wherever the meander actually ended up.
-  const baseU = uPoints[segCount];
-  for (const spread of [-0.06, 0.06]) {
-    const branchU = baseU + spread;
-    const branchV = botV - 0.05;
+  // Braided fan at the base — 2 short painted offshoots peeling away
+  // from where the main vein meets the ground, reading as the flow
+  // spreading out once it hits flatter ground.
+  const baseX = Math.sin(angle) * baseR, baseZ = Math.cos(angle) * baseR;
+  for (const spread of [-0.4, 0.4]) {
+    const branchAngle = angle + spread;
     const branchLen = 4 + Math.random() * 2;
-    const branchSeed = baseSeed + spread * 100;
+    const branchSeed = seed + spread * 10;
     const branchTex = createVeinIllustrationTexture(branchSeed);
     branchTex.repeat.set(1, 1.4);
     const branchMat = new THREE.MeshBasicMaterial({ map: branchTex, transparent: true, opacity: 1, side: THREE.DoubleSide });
-    const branch = new THREE.Mesh(new THREE.PlaneGeometry(2.8, branchLen), branchMat);
-    const bp = planePointToWorld(branchU, branchV, backdropW, backdropH, yaw, 0.35);
-    branch.position.set(bp.x, bp.y, bp.z);
-    branch.rotation.y = yaw;
-    branch.rotateZ(spread * 4); // small outward splay, same safe in-plane-twist pattern as the main segments above
+    // BUG FIX: same Euler-order pitfall as the main vein/glow above, plus
+    // this specific combination also had its sign inverted (pointed the
+    // branch backward from its intended direction). Baking the "lie
+    // flat" tilt into the GEOMETRY itself (the same pattern terrain.js
+    // and liquid.js already use for their ground planes) then applying a
+    // single plain yaw on the mesh sidesteps the ordering issue entirely
+    // — there's only one rotation left on the mesh, so there's no
+    // composition order to get wrong.
+    const branchGeo = new THREE.PlaneGeometry(2.8, branchLen); // was 1.8 — matches the main vein's thicker proportions
+    branchGeo.rotateX(Math.PI / 2 - 0.08);
+    const branch = new THREE.Mesh(branchGeo, branchMat);
+    branch.position.set(baseX + Math.sin(branchAngle) * branchLen * 0.4, 0.4, baseZ + Math.cos(branchAngle) * branchLen * 0.4);
+    branch.rotation.y = branchAngle;
     group.add(branch);
     segments.push({ mesh: branch, tex: branchTex, seed: branchSeed });
 
     if (beadsOut) {
-      const branchStart = planePointToWorld(baseU, botV, backdropW, backdropH, yaw, 0.35);
-      const branchEnd = planePointToWorld(branchU, botV, backdropW, backdropH, yaw, 0.35);
+      const branchStart = { x: baseX, y: 0.4, z: baseZ };
+      const branchEnd = { x: baseX + Math.sin(branchAngle) * branchLen, y: 0.4, z: baseZ + Math.cos(branchAngle) * branchLen };
       addFlowBeads(group, branchStart, branchEnd, 1, beadsOut);
     }
   }
@@ -385,8 +352,7 @@ function createBackdropVein(group, u, backdropW, backdropH, craterVFrac, yaw, gl
 // randomized base width and tip offset so each instance reads as a
 // distinct jagged fragment rather than a uniform stamped-out shape.
 // Vertex-colored bright yellow-white at the base fading to hot
-// red-orange at the tip, the same "white-hot core, cooling to red at
-// the edges" read the reference's explosion burst uses.
+// red-orange at the tip.
 function createShardGeometry(length) {
   const geo = new THREE.BufferGeometry();
   const baseW = 0.16 + Math.random() * 0.14;
@@ -409,30 +375,29 @@ function createShardGeometry(length) {
 
 // A radiating burst of jagged shard fragments AND bigger rounded molten
 // blobs exploding out of the crater during an eruption — replaces the
-// old tight column of thin vertical streaks. The blobs are new: bigger,
-// rounder, and slower-tumbling than the shards, which is what actually
-// reads as real LIQUID lava being thrown, not just fire debris — the
-// shards alone (however many) still read as sparks/embers, not molten
-// mass. Each particle launches at its own outward tilt (not just
-// straight up) and tumbles as it flies, layered on top of the arcing
-// debris chunks below.
+// old tight column of thin vertical streaks (which read as a
+// fountain/sparkler, not an explosion). The blobs are bigger, rounder,
+// and tumble more lazily than the shards, which is what actually reads
+// as real LIQUID lava being thrown, not just fire debris. Each particle
+// launches at its own outward tilt (not just straight up) and tumbles
+// as it flies, layered on top of the arcing debris chunks below.
 function createEruptionFountain(coneH) {
   const group = new THREE.Group();
   const streaks = [];
-  const totalCount = 26; // was 22
-  const blobCount = 9; // new
+  const totalCount = 28;
+  const blobCount = 5; // was 9 — the reference burst reads as sharp radiating shards with only a few molten masses mixed in, not a near-even split
   for (let i = 0; i < totalCount; i++) {
     const isBlob = i < blobCount;
     let geo, mat;
     if (isBlob) {
-      const size = 0.55 + Math.random() * 0.9; // genuinely large compared to the old shards — real molten chunks, not sparks
+      const size = 0.55 + Math.random() * 0.9;
       geo = new THREE.IcosahedronGeometry(size, 0);
       mat = new THREE.MeshBasicMaterial({
         color: 0xff7a28, transparent: true, opacity: 0,
         blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
       });
     } else {
-      const length = 2.5 + Math.random() * 5; // some genuinely large shards now, not just fine spray
+      const length = 2.5 + Math.random() * 5;
       geo = createShardGeometry(length);
       mat = new THREE.MeshBasicMaterial({
         vertexColors: true, transparent: true, opacity: 0,
@@ -440,167 +405,59 @@ function createEruptionFountain(coneH) {
       });
     }
     const mesh = new THREE.Mesh(geo, mat);
+    if (isBlob) {
+      // Non-uniform stretch so the remaining blobs read as irregular
+      // molten chunks, not perfectly round faceted balls, matching the
+      // reference's all-angular fragment look more closely.
+      mesh.scale.set(0.75 + Math.random() * 0.6, 0.75 + Math.random() * 0.6, 0.75 + Math.random() * 0.6);
+    }
     mesh.position.set(0, coneH, 0);
     group.add(mesh);
     streaks.push({
       mesh, isBlob, seed: Math.random() * Math.PI * 2,
       angle: Math.random() * Math.PI * 2, radius: Math.random() * 0.8,
-      tilt: Math.random() * 0.95, // was 0.7 (~40deg) — now up to ~54deg, a genuinely wide explosive fan rather than a tight column
-      spin: (Math.random() - 0.5) * (isBlob ? 3 : 8), // blobs tumble lazily, like real molten mass — the shards' fast tumble is what makes THEM read as light fire debris by contrast
-      speed: (isBlob ? 4.5 : 6) + Math.random() * (isBlob ? 3 : 5), // blobs arc slower/heavier
+      tilt: Math.random() * 0.95, // radians off vertical — most launch steep but a good spread kicks out toward ~54deg, giving the burst real width
+      spin: (Math.random() - 0.5) * (isBlob ? 3 : 8), // blobs tumble lazily like real molten mass; shards tumble fast like light debris
+      speed: (isBlob ? 4.5 : 6) + Math.random() * (isBlob ? 3 : 5),
       phase: Math.random(),
     });
   }
   return { group, streaks, craterY: coneH };
 }
 
-// Scatters small secondary glowing cracks across the backdrop's face —
-// distinct from the 4 big flowing veins, these are static (no
-// scroll/flow animation) fine fissures reading as old, settled fracture
-// lines. Placed by random (u, v) on the flat face — the old cone's
-// "+0.6 padding past the jitter" clearance math is gone entirely along
-// with the irregular 3D surface it existed to clear.
-function createBackdropCracks(group, backdropW, backdropH, craterVFrac, yaw, count) {
+// Scatters small secondary glowing cracks across the cone's surface —
+// distinct from the 4 big flowing veins, these are static (no scroll/flow
+// animation) fine fissures reading as old, settled fracture lines rather
+// than active channels, giving the "cracked through with old fire" look
+// real volcanic rock has beyond just the main flow paths. At this small
+// physical scale, the same thickened channel texture (bumped up when the
+// main veins got thicker) reads as a bold solid color-block shape rather
+// than a thin crack — turned out to look great and matches the flat-
+// illustration reference's bold color-block style closely, so count and
+// size were both bumped up to lean into it rather than dial it back.
+// Reuses the EXACT surface-placement math the main veins use (same +0.6
+// padding past the cone's jitter) — the vein-hiding bug earlier this
+// session was caused by getting this wrong, so it's worth reusing
+// verbatim rather than re-deriving a similar-but-not-identical formula.
+function createSurfaceCracks(group, coneH, baseR, craterR, count) {
+  const slopeAngle = Math.atan2(baseR - craterR, coneH);
   for (let i = 0; i < count; i++) {
-    const u = 0.08 + Math.random() * 0.84;
-    const v = craterVFrac + 0.08 + Math.random() * (0.85 - craterVFrac);
-    const len = 2.2 + Math.random() * 3.2;
-    const width = 0.5 + Math.random() * 0.45;
-    const tex = createVeinIllustrationTexture(u * 31 + i * 7.3);
+    const angle = Math.random() * Math.PI * 2;
+    const heightT = 0.08 + Math.random() * 0.89; // was 0.08-0.88, now extends to 0.97 — nearly the full height, just short of the crater pool disc itself
+    const y = heightT * coneH;
+    const idealR = baseR + (craterR - baseR) * (y / coneH);
+    const r = idealR + 0.6;
+    const len = 2.2 + Math.random() * 3.2; // was 1.8-4.4, now 2.2-5.4 — more presence
+    const width = 0.5 + Math.random() * 0.45; // was 0.4-0.75, now 0.5-0.95
+    const tex = createVeinIllustrationTexture(angle * 3.1 + i * 7.3);
     tex.repeat.set(1, 1.4);
     const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.75 + Math.random() * 0.2, side: THREE.DoubleSide });
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, len), mat);
-    const p = planePointToWorld(u, v, backdropW, backdropH, yaw, 0.3);
-    mesh.position.set(p.x, p.y, p.z);
-    mesh.rotation.y = yaw;
+    mesh.position.set(Math.sin(angle) * r, y, Math.cos(angle) * r);
+    mesh.rotation.y = angle;
+    mesh.rotateX(-slopeAngle);
     group.add(mesh);
   }
-}
-
-// Paints the entire mountain as one big silhouette illustration: a
-// jagged low-poly peak with a crater notch cut into it, a dark-to-light
-// vertical gradient body (the same ground/body/rim palette the old 3D
-// cone used), faceted highlight/shadow triangles overlaid for an angular
-// low-poly read, and a bright crater burst glow painted LAST and
-// unclipped so it can spill slightly above the silhouette itself, the
-// way the reference's flare does. This one texture is now the entire
-// "shape" of the volcano — there's no more 3D geometry underneath it at
-// all, just this plus the small foreground planes (veins/cracks/FX)
-// layered in front of it.
-function createVolcanoBackdropTexture(craterVFrac) {
-  const w = 640, h = 800;
-  const canvas = document.createElement("canvas");
-  canvas.width = w; canvas.height = h;
-  const ctx = canvas.getContext("2d");
-
-  // More edge steps (20 -> 28) plus a second, finer noise layer on top
-  // of the old single broad wave — the old single-layer noise was too
-  // low-amplitude/low-frequency to read as jagged at real viewing
-  // distance and came across as a nearly clean two-line triangle.
-  const edgeSteps = 28;
-  const craterStep = Math.round(edgeSteps * 0.5);
-  const points = [];
-  for (let i = 0; i <= edgeSteps; i++) {
-    const t = i / edgeSteps;
-    const nBroad = Math.sin(t * Math.PI * 3 + 1.7) * 0.5 + Math.sin(t * 7 + 4.2) * 0.28;
-    const nFine = Math.sin(t * 23 + 2.1) * 0.09 + Math.sin(t * 37 - 1.4) * 0.06;
-    const n = nBroad + nFine;
-    // Exponent lowered (0.55 -> 0.38) broadens the hump into a wide-
-    // shouldered mass instead of a tall narrow point, and the floor
-    // (Math.max(0.22, ...)) keeps real foothill height across the FULL
-    // width rather than pinching to a clean point at the very edges —
-    // together this is most of what was reading as "boxy."
-    const peak = Math.max(0.22, Math.pow(Math.sin(t * Math.PI), 0.38));
-    let yTop = h * (1 - peak * (0.7 + n * 0.26));
-    // Crater notch: a sharp V dip right at the peak, not a smooth summit.
-    const distFromCrater = Math.abs(i - craterStep);
-    if (distFromCrater <= 2) {
-      yTop += h * craterVFrac * 0.5 * (1 - distFromCrater / 2);
-    }
-    points.push({ x: t * w, y: Math.max(h * 0.04, yTop) });
-  }
-
-  const tracePath = () => {
-    ctx.beginPath();
-    ctx.moveTo(0, h);
-    for (const p of points) ctx.lineTo(p.x, p.y);
-    ctx.lineTo(w, h);
-    ctx.closePath();
-  };
-
-  tracePath();
-  const grad = ctx.createLinearGradient(0, h, 0, 0);
-  grad.addColorStop(0, "#3a2030");
-  grad.addColorStop(0.4, "#241833");
-  grad.addColorStop(1, "#453a5e");
-  ctx.fillStyle = grad;
-  ctx.fill();
-
-  // Faceted highlight/shadow overlay — more triangles, stronger
-  // contrast, and now a thin dark stroke on each so the panels read as
-  // crisp graphic-novel facets rather than a soft blend (was 16
-  // triangles capped at 0.12 opacity with no outline — too subtle to
-  // break up the smooth gradient at real viewing size).
-  ctx.save();
-  tracePath();
-  ctx.clip();
-  for (let i = 0; i < 30; i++) {
-    const cx = Math.random() * w, cy = h * (0.08 + Math.random() * 0.87);
-    const size = w * (0.07 + Math.random() * 0.16);
-    const rot = Math.random() * Math.PI * 2;
-    ctx.beginPath();
-    for (let k = 0; k < 3; k++) {
-      const a = rot + (k / 3) * Math.PI * 2;
-      const px = cx + Math.cos(a) * size, py = cy + Math.sin(a) * size * 1.3;
-      if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-    }
-    ctx.closePath();
-    ctx.fillStyle = Math.random() < 0.5 ? "rgba(255,255,255,0.09)" : "rgba(0,0,0,0.18)";
-    ctx.fill();
-    ctx.strokeStyle = "rgba(0,0,0,0.22)";
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-  }
-  ctx.restore();
-
-  // Crater burst — a jagged radiating starburst instead of a plain soft
-  // circle, painted LAST and unclipped so its spikes shoot up past the
-  // silhouette itself. Angle is parameterized around "straight up in
-  // canvas space" (-Y) rather than a full circle, so the burst fans
-  // upward/outward the way an eruption plume actually would, not evenly
-  // in every direction including back down into the rock.
-  const craterX = w / 2, craterY = h * craterVFrac;
-  const burstR = Math.max(1, w * 0.3); // was 0.22 — bigger, more dramatic
-
-  const glowGrad = ctx.createRadialGradient(craterX, craterY, 0, craterX, craterY, burstR);
-  glowGrad.addColorStop(0, "#fff3c8");
-  glowGrad.addColorStop(0.35, "#ff8a3a");
-  glowGrad.addColorStop(1, "rgba(255,90,30,0)");
-  ctx.fillStyle = glowGrad;
-  ctx.beginPath(); ctx.arc(craterX, craterY, burstR, 0, Math.PI * 2); ctx.fill();
-
-  const spikeCount = 14;
-  const sweep = Math.PI * 1.15; // ~207 degrees — a wide upward fan, not a full circle
-  ctx.beginPath();
-  for (let i = 0; i <= spikeCount; i++) {
-    const t2 = i / spikeCount;
-    const a = -Math.PI / 2 + (t2 - 0.5) * sweep; // centered on straight-up
-    const r = burstR * (0.5 + Math.random() * 0.85);
-    const px = craterX + Math.cos(a) * r;
-    const py = craterY + Math.sin(a) * r;
-    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-  }
-  ctx.closePath();
-  const spikeGrad = ctx.createRadialGradient(craterX, craterY, 0, craterX, craterY, burstR * 1.6);
-  spikeGrad.addColorStop(0, "#fff3c8");
-  spikeGrad.addColorStop(0.4, "#ff6a2a");
-  spikeGrad.addColorStop(1, "rgba(255,60,20,0)");
-  ctx.fillStyle = spikeGrad;
-  ctx.fill();
-
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
 }
 
 // Soft smoke puffs that rise from the crater and disperse — the volcano
@@ -617,9 +474,7 @@ function createCraterSmoke(coneH, count) {
   for (let i = 0; i < count; i++) {
     // A mix of big billowing "trunk" puffs and smaller trailing wisps —
     // a real plume is dominated by a few large rolling masses with
-    // finer wisps around them, not one repeated size drifting up thinly
-    // (the old version: 5 puffs, fixed 1-unit base size, capped at
-    // ~0.5 opacity — reads as light haze, not a real plume).
+    // finer wisps around them, not one repeated size drifting up thinly.
     const isBig = Math.random() < 0.4;
     const baseSize = isBig ? 4.5 + Math.random() * 3.5 : 1.8 + Math.random() * 1.8;
     const gray = 0.16 + Math.random() * 0.22; // dark ash to lighter smoke, not one flat gray
@@ -633,11 +488,11 @@ function createCraterSmoke(coneH, count) {
     puffs.push({
       mesh,
       phase: i / count,
-      speed: 0.045 + Math.random() * 0.035, // was 0.09-0.12 — slower: a huge plume billows upward, it doesn't zip
-      driftX: (Math.random() - 0.5) * 4.5, // was 1.6 — spreads much wider as it climbs
+      speed: 0.045 + Math.random() * 0.035, // slower than before — a huge plume billows, it doesn't zip up
+      driftX: (Math.random() - 0.5) * 4.5,
       driftZ: (Math.random() - 0.5) * 4.5,
       baseSize,
-      riseMax: isBig ? 24 + Math.random() * 16 : 11 + Math.random() * 11, // was a flat "1 + t*6" (max ~7 units) — now towers well above the crater
+      riseMax: isBig ? 24 + Math.random() * 16 : 11 + Math.random() * 11, // was a flat ~7-unit cap — now towers well above the crater
       maxOpacity: isBig ? 0.62 : 0.4,
     });
   }
@@ -646,9 +501,7 @@ function createCraterSmoke(coneH, count) {
 
 // `eruptBoost` (0 normally, 1 while erupting) thickens and brightens the
 // plume during an actual eruption on top of its constant ambient
-// presence — a volcano this size should look like it's *always* venting
-// smoke, with the eruption adding to that rather than being the only
-// time smoke exists.
+// presence.
 function updateCraterSmoke(smoke, elapsed, eruptBoost = 0) {
   for (const p of smoke.puffs) {
     const t = (elapsed * p.speed + p.phase) % 1;
@@ -682,8 +535,8 @@ function createEmberSparks(craterR, coneH, count) {
     sparks.push({
       mesh,
       angle: Math.random() * Math.PI * 2,
-      distFactor: 0.6 + Math.random() * 1.8, // was 0.6-1.8, now 0.6-2.4 — reads closer to the reference's sparks scattered well beyond the crater rim, not clustered tight to it
-      arcHeight: 2 + Math.random() * 4, // was 2-5, now 2-6
+      distFactor: 0.6 + Math.random() * 1.8, // was 0.6-1.8 — wider scatter, less clustered right at the rim
+      arcHeight: 2 + Math.random() * 4,
       duration: 1.1 + Math.random() * 0.9,
       pause: 1.5 + Math.random() * 2.5,
       delay: Math.random() * 5,
@@ -714,86 +567,169 @@ function updateEmberSparks(emberSparks, elapsed) {
 
 function createEmberLandmark(colorHex) {
   const group = new THREE.Group();
+  // The reference volcano reads as a COOL blue-violet silhouette against
+  // the hot orange sky — high-contrast complementary colors are a big
+  // part of why it pops. The old warm rock-brown (0x1c130f) fought that
+  // directly, since it sat in the same warm family as everything else in
+  // the biome instead of contrasting with it. vertexColors:true here
+  // because the cone gets a painted height gradient below, not one flat
+  // material color.
+  const rockMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, flatShading: true });
+  const coneH = 27, baseR = 18, craterR = 2.2;
+  // Moved up from further below so the cone-carving loop right below and
+  // the actual vein/crack placement code later in this function share
+  // this exact array — the channels carved into the rock and the lava
+  // painted into them need to line up, not two separately-tuned copies
+  // that could drift apart.
+  const veinAngles = [0.35, 1.9, 3.4, 5.1]; // deliberately uneven spacing, not a perfect cross — real fracture patterns aren't symmetric
+  const coneGeo = new THREE.CylinderGeometry(craterR, baseR, coneH, 9, 4);
+  // Push each ring of vertices in/out slightly at random — a perfectly
+  // smooth tapered cylinder reads as a traffic cone, not a rocky
+  // mountain. Scaled well down from earlier passes (0.9 -> 0.32): the
+  // reference's cone silhouette is clean and deliberate with only a few
+  // sharp facets/highlight streaks, not an all-over bumpy noise surface —
+  // a little irregularity sells "mountain," a lot of it just looks noisy.
+  // Vertices nearer the very top (the crater rim) get less jitter so the
+  // crater opening itself stays roughly circular.
+  //
+  // On top of that general jitter, real channels are now carved into the
+  // geometry at the same 4 angles the lava veins sit at — a painted plane
+  // floating over an otherwise-smooth cone read as a decal stuck on top;
+  // an actual groove in the rock is what makes the lava look like it's
+  // running THROUGH the mountain. The cone only has 9 radial segments
+  // (deliberately low-poly, matching the rest of this project's blocky
+  // rock aesthetic), so a vein's exact angle can sit up to ~20 degrees
+  // from the nearest vertex column (verified numerically) — the falloff
+  // width below (0.5 rad ≈ 28.6 degrees) is chosen wide enough to
+  // reliably reach at least that nearest column in every case, not just
+  // the lucky ones where a vein happens to land close to a column.
+  const channelHalfWidth = 0.5; // radians
+  const channelDepth = 1.6; // world units, at full strength before height-tapering
+  const conePos = coneGeo.attributes.position;
+  for (let i = 0; i < conePos.count; i++) {
+    const x = conePos.getX(i), y = conePos.getY(i), z = conePos.getZ(i);
+    const heightT = (y + coneH / 2) / coneH; // 0 at base, 1 at crater rim
+    const heightTaper = 1 - heightT * 0.6; // shared by jitter and channel depth — both ease off near the crater so its opening stays roughly circular
+    const jitterAmount = heightTaper * 0.32;
+    const angle = Math.atan2(z, x);
+    const r = Math.hypot(x, z);
+    const jitterDeviation = (Math.sin(angle * 5 + y * 0.7) * 0.5 + Math.sin(angle * 11 - y * 0.3) * 0.5) * (jitterAmount / Math.max(r, 0.5));
 
-  // Fully 2D now, per explicit request: no cone geometry at all, just one
-  // huge painted plane facing the map's center from the landmark's fixed
-  // position — whichever direction the player approaches from, this is
-  // the face they'll see, since the whole thing is meaningless from
-  // behind (there's nothing back there but a blank plane edge).
-  const yaw = Math.atan2(-LANDMARK_POSITION.x, -LANDMARK_POSITION.z);
-  const backdropW = 95, backdropH = 118; // huge — this single plane IS the landmark now
-  const craterVFrac = 0.14; // near the top of the painted silhouette
+    let channelStrength = 0;
+    for (const va of veinAngles) {
+      const diff = Math.atan2(Math.sin(angle - va), Math.cos(angle - va)); // wrapped angular distance, [-pi, pi]
+      const absDiff = Math.abs(diff);
+      if (absDiff < channelHalfWidth) {
+        const s = Math.cos((absDiff / channelHalfWidth) * (Math.PI / 2)); // 1 at the vein's exact angle, smoothly down to 0 at the falloff edge
+        if (s > channelStrength) channelStrength = s;
+      }
+    }
+    const channelPull = (channelStrength * channelDepth * heightTaper) / Math.max(r, 0.5); // always inward (a groove), unlike the bidirectional jitter above
 
-  const backdropTex = createVolcanoBackdropTexture(craterVFrac);
-  const backdropMat = new THREE.MeshBasicMaterial({ map: backdropTex, transparent: true, side: THREE.DoubleSide });
-  const backdrop = new THREE.Mesh(new THREE.PlaneGeometry(backdropW, backdropH), backdropMat);
-  backdrop.position.y = backdropH / 2;
-  backdrop.rotation.y = yaw;
-  group.add(backdrop);
+    const jitter = 1 + jitterDeviation - channelPull;
+    conePos.setX(i, x * jitter);
+    conePos.setZ(i, z * jitter);
+  }
+  coneGeo.computeVertexNormals();
 
-  const craterPos = planePointToWorld(0.5, craterVFrac, backdropW, backdropH, yaw, 0.4);
+  // Painted height gradient — deep blue-violet shadowed base rising to a
+  // pale lavender-gray near the crater rim, the same "flat illustration"
+  // banding idea as terrain.js's HEIGHT_PALETTE, applied here as a
+  // continuous gradient rather than hard bands since the cone's own
+  // faceted flatShading normals already break the surface into distinct
+  // flat-lit panels — real per-facet lighting response IS the "painted
+  // highlight streak" look here, the same technique the reference itself
+  // appears to use, so we don't need to fight it the way the obsidian
+  // formation's glossy metalness did.
+  // 3-stop gradient, not 2 — reads as near-black violet overall with a
+  // warm dark maroon-brown flush low on the slopes (blending toward the
+  // reddish background silhouettes), rising through deep violet and
+  // staying a cool, only slightly lighter violet near the rim — the
+  // crater glow does the actual brightening up there, not the rock
+  // itself lightening toward gray.
+  const coneColors = new Float32Array(conePos.count * 3);
+  const groundColor = new THREE.Color(0x2a1526);
+  const bodyColor = new THREE.Color(0x160e1f);
+  const rimColor = new THREE.Color(0x342a48);
+  const tmpConeColor = new THREE.Color();
+  for (let i = 0; i < conePos.count; i++) {
+    const y = conePos.getY(i);
+    const heightT = (y + coneH / 2) / coneH;
+    if (heightT < 0.4) {
+      tmpConeColor.copy(groundColor).lerp(bodyColor, heightT / 0.4);
+    } else {
+      tmpConeColor.copy(bodyColor).lerp(rimColor, (heightT - 0.4) / 0.6);
+    }
+    coneColors[i * 3] = tmpConeColor.r; coneColors[i * 3 + 1] = tmpConeColor.g; coneColors[i * 3 + 2] = tmpConeColor.b;
+  }
+  coneGeo.setAttribute("color", new THREE.BufferAttribute(coneColors, 3));
 
-  // Crater glow — a small additive halo plane sitting just in front of
-  // the painted burst, animated (idle breathing + eruption flare) since
-  // the baked texture itself is static. Replaces the old flat disc that
-  // used to sit on the cone's real flattened top.
+  const cone = new THREE.Mesh(coneGeo, rockMat);
+  cone.position.y = coneH / 2;
+  group.add(cone);
+
+  // The crater pool — a small glowing disc sitting in the flattened top
+  // the tapered cylinder naturally leaves, always lit (an active volcano
+  // glows even between eruptions) and flaring dramatically brighter —
+  // and visibly larger — when one actually happens.
+  const poolMat = new THREE.MeshBasicMaterial({ color: 0xffd23f });
   const poolBaseColor = new THREE.Color(0xffd23f);
   const poolHotColor = new THREE.Color(0xffffff);
-  const poolMat = new THREE.MeshBasicMaterial({
-    map: getSoftGlowTexture(), color: poolBaseColor, transparent: true, opacity: 0.9,
-    blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
-  });
-  const pool = new THREE.Mesh(new THREE.PlaneGeometry(backdropW * 0.16, backdropW * 0.16), poolMat);
-  pool.position.set(craterPos.x, craterPos.y, craterPos.z);
-  pool.rotation.y = yaw;
+  const pool = new THREE.Mesh(new THREE.CircleGeometry(craterR * 0.75, 10), poolMat);
+  pool.rotation.x = -Math.PI / 2;
+  pool.position.y = coneH + 0.05;
   group.add(pool);
-  const craterLight = new THREE.PointLight(0xff6a2a, 1.2, 42); // was 30 — bigger falloff radius to match the larger eruption
-  craterLight.position.set(craterPos.x, craterPos.y, craterPos.z);
+  const craterLight = new THREE.PointLight(0xff6a2a, 1.2, 42); // was 24 — bigger falloff radius to match the larger eruption
+  craterLight.position.y = coneH + 1;
   group.add(craterLight);
 
-  // 4 lava veins running straight down the face, plus scattered
-  // secondary cracks — same overall composition as before, just placed
-  // by (u, v) on the flat face instead of by angle around a cone.
-  const veinUs = [0.3, 0.41, 0.59, 0.7]; // deliberately uneven spacing, not a perfect cross
+  // Lava veins — a chain of tapered segments running down the slope from
+  // just below the crater to the base, colored with the same hot gradient
+  // as the ground-level lava and animated with a scrolling glow so each
+  // reads as actively flowing, not a painted stripe. Several of these at
+  // different angles (not just one) is what actually gives the "cracked
+  // open, glowing from within" look rather than a single decorative
+  // stripe down one side. `veinAngles` itself is declared earlier now,
+  // right before the cone-carving loop, and reused here unchanged — the
+  // carved channels and the painted lava need to share the same angles.
   const riverSegments = [];
   const veinGlows = [];
   const flowBeads = [];
-  for (const u of veinUs) {
-    const built = createBackdropVein(group, u, backdropW, backdropH, craterVFrac, yaw, veinGlows, flowBeads);
+  for (const veinAngle of veinAngles) {
+    const built = createLavaVeinChain(group, veinAngle, coneH, baseR, craterR, veinGlows, flowBeads);
     riverSegments.push(...built);
   }
-  createBackdropCracks(group, backdropW, backdropH, craterVFrac, yaw, 26);
 
-  const energyPos = planePointToWorld(0.32, 0.42, backdropW, backdropH, yaw, 2.5);
-  const energy = createEnergyCore(colorHex, 1.4, 0);
-  energy.group.position.set(energyPos.x, energyPos.y, energyPos.z);
+  // Secondary fine cracks scattered across the whole cone — see the note
+  // above createSurfaceCracks for why these are static and distinct from
+  // the 4 main flowing veins.
+  createSurfaceCracks(group, coneH, baseR, craterR, 26); // was 14
+
+  const energy = createEnergyCore(colorHex, 1.4, coneH * 0.5);
+  energy.group.position.set(0, 0, baseR * 0.55); // offset toward one of the vein sides rather than dead-center in the cone
   group.add(energy.group);
 
   const chunks = createEruptionChunks(colorHex);
   for (const chunk of chunks) group.add(chunk.mesh);
 
-  // Fountain/smoke/ember-sparks all build their internal geometry
-  // relative to their OWN group-local origin — unchanged from before —
-  // so passing 0 for their old "coneH" origin and offsetting the whole
-  // sub-group's position to the crater's new world point reproduces the
-  // exact same local behavior at the new location.
-  const fountain = createEruptionFountain(0);
-  fountain.group.position.set(craterPos.x, craterPos.y, craterPos.z);
+  // A tighter, taller vertical fountain layered on top of the arcing
+  // chunks — thin bright streaks shooting straight up out of the crater
+  // and falling back, giving the continuous "spray" a real eruption has
+  // instead of just a handful of discrete flying rocks.
+  const fountain = createEruptionFountain(coneH);
   group.add(fountain.group);
 
-  const smoke = createCraterSmoke(0, 20); // was 5 — a real towering plume, not a light haze
-  smoke.group.position.set(craterPos.x, craterPos.y, craterPos.z);
+  const smoke = createCraterSmoke(coneH, 20); // was 5 — a real towering plume, not a light haze
   group.add(smoke.group);
 
-  const emberSparks = createEmberSparks(2.4, 0, 12);
-  emberSparks.group.position.set(craterPos.x, craterPos.y, craterPos.z);
+  const emberSparks = createEmberSparks(craterR, coneH, 12); // was 7
   group.add(emberSparks.group);
 
   return {
     group, energy, baseY: 0, biome: "ember",
     volcano: {
-      pool, poolMat, poolBaseColor, poolHotColor, craterLight, riverSegments, veinGlows, flowBeads,
-      craterPos, backdropW, backdropH, craterVFrac, yaw, // needed by the chunk slide phase to move across the flat face
+      pool, poolMat, poolBaseColor, poolHotColor, craterLight, riverSegments, veinGlows, flowBeads, craterY: coneH,
+      baseR, craterR, // needed by the chunk sliding phase to follow the cone's actual surface, not fall through open air
       eruptionTimer: 8 + Math.random() * 12, // first eruption arrives reasonably soon rather than making the player wait a full cycle
       eruptionPhase: 0, // 0 = dormant, ramps to 1 during an active eruption and back down
       erupting: false,
@@ -1040,17 +976,14 @@ function updateVolcano(v, elapsed, dt) {
       chunk.active = true;
       chunk.phase = "ballistic";
       chunk.t = 0;
-      // Launch direction constrained to a forward arc around the
-      // backdrop's own facing angle (yaw), not a full circle — a chunk
-      // launched "backward" would fly out behind a flat plane with
-      // nothing there to land on.
-      const angle = v.yaw + (Math.random() - 0.5) * Math.PI * 0.75;
-      chunk.dirX = Math.sin(angle);
-      chunk.dirZ = Math.cos(angle);
+      const angle = Math.random() * Math.PI * 2;
+      chunk.dirX = Math.cos(angle); // fixed slide direction for this chunk's whole journey — the ballistic hop just picks which way down the slope it'll travel
+      chunk.dirZ = Math.sin(angle);
       chunk.vx = chunk.dirX * (2.5 + Math.random() * 4);
       chunk.vz = chunk.dirZ * (2.5 + Math.random() * 4);
       chunk.launchSpeed = 10 + Math.random() * 6;
-      chunk.mesh.position.set(v.craterPos.x, v.craterPos.y, v.craterPos.z);
+      chunk.slideY = v.craterY;
+      chunk.mesh.position.set(0, v.craterY, 0);
       chunk.baseScale = 0.8 + Math.random() * 1.1; // was 0.5-1.1 — noticeably larger molten chunks
       chunk.mesh.scale.setScalar(chunk.baseScale);
     }
@@ -1072,10 +1005,10 @@ function updateVolcano(v, elapsed, dt) {
       const rising = cycle < 1;
       const riseSpan = s.isBlob ? 12 : 9; // blobs are heavier/slower but launch further, arcing higher before falling back
       const height = rising ? cycle * riseSpan : 0;
-      // Outward radius now grows from the shard's own launch tilt (real
-      // radial spread), not just the old small drift term — this is what
-      // makes the burst read as exploding outward from the crater rather
-      // than a straight column with a slight lean.
+      // Outward radius grows from the particle's own launch tilt (real
+      // radial spread), not just a small drift term — this is what makes
+      // the burst read as exploding outward from the crater rather than
+      // a straight column with a slight lean.
       const outward = height * Math.sin(s.tilt) * 1.5;
       const r = s.radius * (1 + height * 0.15) + outward;
       s.mesh.position.set(Math.cos(s.angle) * r, v.fountain.craterY + height * Math.cos(s.tilt), Math.sin(s.angle) * r);
@@ -1101,46 +1034,40 @@ function updateVolcano(v, elapsed, dt) {
     const gravity = 9;
 
     if (chunk.phase === "ballistic") {
-      chunk.mesh.position.x = v.craterPos.x + chunk.vx * chunk.t;
-      chunk.mesh.position.z = v.craterPos.z + chunk.vz * chunk.t;
-      const y = v.craterPos.y + chunk.launchSpeed * chunk.t - 0.5 * gravity * chunk.t * chunk.t;
+      chunk.mesh.position.x = chunk.vx * chunk.t;
+      chunk.mesh.position.z = chunk.vz * chunk.t;
+      const y = v.craterY + chunk.launchSpeed * chunk.t - 0.5 * gravity * chunk.t * chunk.t;
       chunk.mesh.position.y = y;
       chunk.mesh.rotation.x += dt * 4;
       chunk.mesh.rotation.z += dt * 3;
       // Switch to sliding once the arc brings it back down to roughly
-      // crater height — from here it rides the flat backdrop's face
-      // down to the base instead of continuing to fall through open air.
-      if (y <= v.craterPos.y) {
+      // crater height, rather than continuing to fall through open air
+      // — from here it rides the actual slope down instead.
+      if (y <= v.craterY) {
         chunk.phase = "sliding";
-        // Project the landing point onto the backdrop's own (unrotated)
-        // local u-axis — the inverse of the single rotation
-        // planePointToWorld applies — so the slide starts wherever the
-        // ballistic arc actually landed rather than snapping to
-        // dead-center.
-        const lx = chunk.mesh.position.x * Math.cos(v.yaw) - chunk.mesh.position.z * Math.sin(v.yaw);
-        chunk.slideStartU = THREE.MathUtils.clamp(lx / v.backdropW + 0.5, 0.05, 0.95);
-        chunk.slideEndU = THREE.MathUtils.clamp(chunk.slideStartU + (Math.random() - 0.5) * 0.4, 0.05, 0.95);
-        chunk.slideV = v.craterVFrac;
+        chunk.slideY = v.craterY;
+        chunk.slideDist = Math.hypot(chunk.mesh.position.x, chunk.mesh.position.z);
       }
     } else if (chunk.phase === "sliding") {
-      // Descend at a steady rate across the face (in v-fraction/sec,
-      // tuned to roughly match the old 3D slide's pacing) while drifting
-      // sideways in u from where it landed toward its random end point.
-      const slideVSpeed = 0.17;
-      const endV = 0.97;
-      chunk.slideV += slideVSpeed * dt;
-      const t = THREE.MathUtils.clamp((chunk.slideV - v.craterVFrac) / (endV - v.craterVFrac), 0, 1);
-      const u = THREE.MathUtils.lerp(chunk.slideStartU, chunk.slideEndU, t);
-      const p = planePointToWorld(u, chunk.slideV, v.backdropW, v.backdropH, v.yaw, 0.4);
-      chunk.mesh.position.set(p.x, p.y, p.z);
+      // Descend at a steady rate, following the cone's actual
+      // radius-at-height so the chunk visibly rides the slope's surface
+      // all the way to the base instead of just dropping straight down.
+      const slideSpeed = 5.5;
+      chunk.slideY -= slideSpeed * dt;
+      chunk.slideDist += slideSpeed * dt * 0.6; // drifts outward as it descends, following the cone widening toward its base
+      const clampedY = Math.max(0, chunk.slideY);
+      const t = clampedY / v.craterY;
+      const surfaceR = v.baseR + (v.craterR - v.baseR) * t;
+      const r = Math.max(chunk.slideDist, surfaceR); // never sink inside the cone's own surface
+      chunk.mesh.position.set(chunk.dirX * r, clampedY, chunk.dirZ * r);
       chunk.mesh.rotation.x += dt * 2;
-      // Shrinks only in the final stretch — reads as the chunk breaking
-      // apart and merging into the flow rather than simply switching off
-      // partway down.
-      const shrink = t < 0.7 ? 1 : THREE.MathUtils.clamp(1 - (t - 0.7) / 0.3, 0, 1);
+      // Shrinks as it nears the base — reads as the chunk breaking apart
+      // and merging into the general lava flow rather than simply
+      // switching off.
+      const shrink = THREE.MathUtils.clamp(chunk.slideY / (v.craterY * 0.3), 0, 1);
       chunk.mesh.scale.setScalar(chunk.baseScale * shrink);
 
-      if (t >= 1) {
+      if (chunk.slideY <= 0.5) {
         chunk.active = false;
         chunk.mesh.scale.setScalar(0);
         // Arriving at the base flares the nearest river segment bright

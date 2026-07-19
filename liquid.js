@@ -312,7 +312,7 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY) {
       // the branching, uneven look real fracture networks have.
       const crust = fbm(fx, fz, crustOctaves);
       const cracks = fbm(fx * 2.6 + crust * 1.6, fz * 2.6, crackOctaves);
-      let heat = smoothstep(0.4, 0.62, cracks) * (1 - THREE.MathUtils.clamp(crust * 0.8, 0, 1));
+      let heat = smoothstep(0.46, 0.58, cracks) * (1 - THREE.MathUtils.clamp(crust * 0.8, 0, 1));
       // A touch of the physical ripple folded back in keeps the surface
       // feeling like it's genuinely churning, not just a static crack
       // pattern sliding past.

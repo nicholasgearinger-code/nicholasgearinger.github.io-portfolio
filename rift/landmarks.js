@@ -38,10 +38,16 @@ function createVeinIllustrationTexture(seed) {
   for (let i = 0; i <= pointCount; i++) {
     const t = i / pointCount;
     const wob = Math.sin(t * 5 + seed * 4) * 0.5 + Math.sin(t * 9 + seed * 2.3) * 0.3;
+    // Overall taper on top of the wobble: t=0 is the crater end (see
+    // topPos/botPos derivation below — smaller radius = higher on the
+    // cone = nearer the crater), t=1 is the base. A real flow is fed wide
+    // at the source and narrows/forks as it runs out, rather than staying
+    // a uniform-width stripe top to bottom.
+    const taper = 1.25 - 0.6 * t;
     points.push({
       x: w / 2 + wob * w * 0.24,
       y: t * h,
-      widthMul: 0.55 + 0.45 * Math.sin(t * Math.PI * 0.85 + seed),
+      widthMul: (0.55 + 0.45 * Math.sin(t * Math.PI * 0.85 + seed)) * taper,
     });
   }
 
@@ -97,6 +103,7 @@ function createVeinIllustrationTexture(seed) {
     const r = Math.max(0.5, w * 0.1 * (0.7 + Math.abs((i * 37 + seed * 13) % 10) / 10));
     const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
     grad.addColorStop(0, "#fff3c8");
+    grad.addColorStop(0.45, "#fff3c8");
     grad.addColorStop(1, "rgba(255,243,200,0)");
     ctx.fillStyle = grad;
     ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill();
@@ -377,8 +384,8 @@ function createShardGeometry(length) {
 function createEruptionFountain(coneH) {
   const group = new THREE.Group();
   const streaks = [];
-  const totalCount = 26;
-  const blobCount = 9;
+  const totalCount = 28;
+  const blobCount = 5; // was 9 — the reference burst reads as sharp radiating shards with only a few molten masses mixed in, not a near-even split
   for (let i = 0; i < totalCount; i++) {
     const isBlob = i < blobCount;
     let geo, mat;
@@ -398,6 +405,12 @@ function createEruptionFountain(coneH) {
       });
     }
     const mesh = new THREE.Mesh(geo, mat);
+    if (isBlob) {
+      // Non-uniform stretch so the remaining blobs read as irregular
+      // molten chunks, not perfectly round faceted balls, matching the
+      // reference's all-angular fragment look more closely.
+      mesh.scale.set(0.75 + Math.random() * 0.6, 0.75 + Math.random() * 0.6, 0.75 + Math.random() * 0.6);
+    }
     mesh.position.set(0, coneH, 0);
     group.add(mesh);
     streaks.push({
@@ -635,9 +648,9 @@ function createEmberLandmark(colorHex) {
   // crater glow does the actual brightening up there, not the rock
   // itself lightening toward gray.
   const coneColors = new Float32Array(conePos.count * 3);
-  const groundColor = new THREE.Color(0x3a2030);
-  const bodyColor = new THREE.Color(0x241833);
-  const rimColor = new THREE.Color(0x453a5e);
+  const groundColor = new THREE.Color(0x2a1526);
+  const bodyColor = new THREE.Color(0x160e1f);
+  const rimColor = new THREE.Color(0x342a48);
   const tmpConeColor = new THREE.Color();
   for (let i = 0; i < conePos.count; i++) {
     const y = conePos.getY(i);

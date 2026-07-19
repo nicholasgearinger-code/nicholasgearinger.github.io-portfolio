@@ -214,16 +214,18 @@ function createLavaVeinChain(group, angle, coneH, baseR, craterR, glowsOut, bead
   const length = coneH * 0.9;
   const width = 3.2;
   const midY = coneH * 0.5;
-  // BUG FIX: the old fixed formula (baseR*0.48+0.6) placed veins ~0.7
-  // units INSIDE the solid cone's surface at their midpoint (verified
-  // numerically), hiding them from any normal outside viewing angle —
-  // "hiding on the inside of the volcano." The cone's surface radius at
-  // a given height is a straight linear taper from baseR at y=0 to
-  // craterR at y=coneH (same formula the eruption-chunk sliding phase
-  // already uses correctly below, in updateVolcano) — matching that
-  // exactly, plus a small +0.25 outward push so the vein renders just
-  // outside the surface instead of z-fighting against it.
-  const midR = baseR + (craterR - baseR) * (midY / coneH) + 0.25;
+  // Padding increased from an earlier 0.25 -> 0.6. The cone's surface
+  // isn't perfectly smooth — per-vertex jitter (see the jitter loop
+  // below, `jitterAmount` up to 0.32) makes it bulge in and out
+  // irregularly. 0.25 was thinner than that jitter amplitude in several
+  // places (verified numerically: clearance as low as 0.003 at some
+  // sample points, and jitter oscillates continuously along the vein's
+  // length via y-dependent sine terms, so the true worst case between
+  // sampled points is likely worse still) — the vein was still getting
+  // swallowed by jitter bulges even after supposedly being pushed
+  // "outside" the ideal smooth-cone radius. 0.6 comfortably clears the
+  // maximum possible jitter (0.32) with real margin, not a razor edge.
+  const midR = baseR + (craterR - baseR) * (midY / coneH) + 0.6;
   const seed = angle;
   const segments = [];
 

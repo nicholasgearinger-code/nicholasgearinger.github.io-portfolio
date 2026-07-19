@@ -465,22 +465,21 @@ if (graphicsBtn && graphicsPanel) {
 // snapping straight from the level-select menu into full control.
 function playArrivalSequence(levelName) {
   if (!arrivalOverlay || !arrivalNameEl) return;
-  arrivalOverlay.classList.remove("rift-arrival-fade", "rift-arrival-name-in");
-  // Suppress the transition just long enough to snap fully opaque again —
-  // otherwise, re-entering a level while a previous arrival's fade-out was
-  // still mid-flight would smoothly transition back to opaque instead of
-  // resetting instantly, and worse, leaving an inline opacity value set
-  // here would permanently override the CSS class-based fade on every
-  // arrival after this one.
+  arrivalOverlay.classList.remove("rift-arrival-name-in");
+  // Snap instantly to fully opaque (bypassing the transition) right as the
+  // level starts building, then let the CSS transition fade it back out
+  // after the hold below — invisible is the default state (see the CSS),
+  // so there's no leftover state to reset between arrivals the way an
+  // "opaque by default" design would require.
   arrivalOverlay.style.transition = "none";
-  arrivalOverlay.style.opacity = "1";
-  arrivalOverlay.offsetHeight; // force a reflow so the transition:none + opacity reset above actually apply before it's cleared below
+  arrivalOverlay.classList.add("rift-arrival-active");
+  arrivalOverlay.offsetHeight; // force a reflow so the instant opacity jump above actually applies before the transition is restored below
   arrivalOverlay.style.transition = "";
   arrivalNameEl.textContent = levelName;
   requestAnimationFrame(() => {
     arrivalOverlay.classList.add("rift-arrival-name-in");
   });
-  setTimeout(() => arrivalOverlay.classList.add("rift-arrival-fade"), 1900);
+  setTimeout(() => arrivalOverlay.classList.remove("rift-arrival-active"), 1900);
 }
 
 function enterLevel(levelIdx) {

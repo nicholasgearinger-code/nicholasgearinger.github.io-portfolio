@@ -337,6 +337,10 @@ function buildLevel(levelIdx) {
   teardownLevel();
   currentLevelIdx = levelIdx;
   const level = LEVELS[levelIdx];
+  // dayNightCycle is created once at boot (before any level/biome is known)
+  // and persists across level switches, so its per-biome sky tint has to be
+  // set here on each level load rather than passed once at construction.
+  dayNightCycle.biome = level.biome;
 
   terrainMesh = new THREE.Mesh(
     buildPlanetTerrain(level, WORLD_SEED),

@@ -20,6 +20,16 @@ const SILHOUETTE_STYLE = {
 };
 
 const RING_RADIUS = 340; // well beyond WORLD_BOUND_RADIUS and the terrain's own falloff rim, inside the fog's effective range so it fades in rather than popping
+// A second, closer ring for real parallax depth — same per-biome
+// silhouette style, fewer/smaller shapes at a nearer radius. With only
+// one ring, the whole horizon reads as one flat painted backdrop no
+// matter how the player moves; a second layer at a different distance
+// visibly slides past the far ring at a different rate as the player
+// walks/turns, which is what actually sells depth. 230 sits comfortably
+// beyond the ~240-unit landmass's own edge (well over half again its
+// radius of clearance) while still being noticeably nearer than the far
+// ring at 340.
+const MID_RING_RADIUS = 230;
 
 function createSilhouetteShape(color, height, jagged) {
   const baseRadius = height * (0.5 + Math.random() * 0.4);
@@ -33,23 +43,36 @@ function createSilhouetteShape(color, height, jagged) {
   return mesh;
 }
 
+// Builds one ring of shapes at a given radius — factored out so the far
+// and mid rings share identical shape/placement logic and only differ in
+// radius, count, and size, rather than risking two subtly-different
+// copies of the same loop drifting apart over time.
+function buildSilhouetteRing(style, radius, countScale, heightScale) {
+  const count = Math.max(1, Math.round(style.count * countScale * getGraphicsSettings().silhouetteMultiplier));
+  const group = new THREE.Group();
+  for (let i = 0; i < count; i++) {
+    const angle = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
+    const r = radius + (Math.random() - 0.5) * 60;
+    const height = (style.minH + Math.random() * (style.maxH - style.minH)) * heightScale;
+    const shape = createSilhouetteShape(style.color, height, style.jagged);
+    shape.position.x += Math.cos(angle) * r;
+    shape.position.z += Math.sin(angle) * r;
+    group.add(shape);
+  }
+  return group;
+}
+
 /**
  * @param {THREE.Scene} scene
  * @param {string} biome
  */
 function createHorizonSilhouettes(scene, biome) {
   const style = SILHOUETTE_STYLE[biome] || SILHOUETTE_STYLE.ember;
-  const count = Math.max(1, Math.round(style.count * getGraphicsSettings().silhouetteMultiplier));
   const group = new THREE.Group();
-  for (let i = 0; i < count; i++) {
-    const angle = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
-    const radius = RING_RADIUS + (Math.random() - 0.5) * 60;
-    const height = style.minH + Math.random() * (style.maxH - style.minH);
-    const shape = createSilhouetteShape(style.color, height, style.jagged);
-    shape.position.x += Math.cos(angle) * radius;
-    shape.position.z += Math.sin(angle) * radius;
-    group.add(shape);
-  }
+  group.add(buildSilhouetteRing(style, RING_RADIUS, 1, 1));
+  // Mid ring: ~60% as many shapes, ~75% the height — a lighter foothill
+  // layer in front of the big far peaks, not a second identical wall.
+  group.add(buildSilhouetteRing(style, MID_RING_RADIUS, 0.6, 0.75));
   scene.add(group);
   return { group };
 }

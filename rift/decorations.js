@@ -113,6 +113,23 @@ function createRockSprite(tex, width, height) {
 }
 
 function createDecoration(biome, colorHex, seedRand) {
+  // Rare oversized "foreground framing" variant — rolled BEFORE anything
+  // else below so it doesn't skew the existing per-biome prop-mix odds.
+  // Every decoration currently sits at roughly the same on-screen scale
+  // no matter how close the player walks up to it; occasionally letting
+  // one loom far larger means passing near it fills the frame the way a
+  // real foreground element would, a classic illustrated-environment
+  // depth cue that costs nothing extra to build (same geometry, just
+  // scaled up on the group).
+  const isGiant = seedRand() < 0.035;
+  const handle = buildBaseDecoration(biome, colorHex, seedRand);
+  if (isGiant) {
+    handle.group.scale.setScalar(2.4 + seedRand() * 1.4);
+  }
+  return handle;
+}
+
+function buildBaseDecoration(biome, colorHex, seedRand) {
   const roll = seedRand();
   const highDetail = getGraphicsSettings().decorationDetail >= 2;
   // High-tier-exclusive signature piece per biome — not just "more
@@ -134,7 +151,10 @@ function createDecoration(biome, colorHex, seedRand) {
   // that these show up in unexpected/inconsistent places.
   if (seedRand() < 0.1) return createGlyphMarker(colorHex, seedRand);
   switch (biome) {
-    case "ember": return roll < 0.72 ? createSpire(biome, colorHex, seedRand) : createRockCluster(biome, colorHex, seedRand);
+    case "ember":
+      if (roll < 0.58) return createSpire(biome, colorHex, seedRand);
+      if (roll < 0.82) return createRockCluster(biome, colorHex, seedRand);
+      return createEmberVent(colorHex, seedRand);
     case "verdant":
       if (roll < 0.35) return createLivingTree(colorHex, seedRand);
       if (roll < 0.78) return createFloraStalk(colorHex, seedRand);
@@ -147,6 +167,68 @@ function createDecoration(biome, colorHex, seedRand) {
     case "ashen": return roll < 0.62 ? createDeadTree(colorHex, seedRand) : createRockCluster(biome, colorHex, seedRand);
     default: return createSpire(biome, colorHex, seedRand);
   }
+}
+
+// Paints a small jagged glowing ground crack — dark scorched edges with a
+// bright molten line down the center, same visual language as the
+// volcano's own veins/cracks but tiny and ground-level, scattered across
+// the surrounding terrain rather than on the cone itself.
+function createEmberVentTexture(seed) {
+  const w = 48, h = 108;
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d");
+
+  const points = [];
+  const steps = 7;
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const wob = Math.sin(t * 6 + seed * 4) * 0.5 + Math.sin(t * 11 + seed * 2.4) * 0.3;
+    points.push({ x: w / 2 + wob * w * 0.22, y: t * h });
+  }
+
+  ctx.strokeStyle = "#4a1204";
+  ctx.lineWidth = 5;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (const p of points.slice(1)) ctx.lineTo(p.x, p.y);
+  ctx.stroke();
+
+  ctx.strokeStyle = "#ffb35a";
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (const p of points.slice(1)) ctx.lineTo(p.x, p.y);
+  ctx.stroke();
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// A small ground-level glowing crack, scattered across the terrain around
+// the volcano — gives the surrounding ground some of the same "cracked
+// through with old fire" texture the cone itself has, instead of the
+// area immediately around the landmark being visually quieter than the
+// volcano it surrounds.
+function createEmberVent(colorHex, rand) {
+  const group = new THREE.Group();
+  const tex = createEmberVentTexture(rand() * 100);
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.85, side: THREE.DoubleSide });
+  const w = 0.7 + rand() * 0.5, len = 1.4 + rand() * 1.1;
+  const geo = new THREE.PlaneGeometry(w, len);
+  geo.rotateX(-Math.PI / 2); // lie flat — same established ground-plane pattern terrain.js/liquid.js use
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.rotation.y = rand() * Math.PI * 2; // single clean yaw, no rotation-order ambiguity since it's the only mesh-level rotation
+  mesh.position.y = 0.02;
+  group.add(mesh);
+
+  const light = new THREE.PointLight(colorHex, 0.3, 3);
+  light.position.y = 0.3;
+  group.add(light);
+
+  return { group, kind: "emberVent", light, pulseSeed: rand() * Math.PI * 2 };
 }
 
 // Jagged basalt spire with a glowing tip crack. Ember gets a flat 2D
@@ -259,8 +341,17 @@ function createRockCluster(biome, colorHex, rand) {
     return { group, kind: "rockCluster" };
   }
 
-  const tint = new THREE.Color(colorHex).lerp(new THREE.Color(0x555248), 0.65);
-  const mat = new THREE.MeshStandardMaterial({ color: tint, roughness: 0.95, flatShading: true });
+  // Non-Ember: real 3D rocks. A single flat tinted-gray color read as an
+  // inert lump next to Ember's painted rim-light streaks — the closest
+  // safe equivalent for a real MeshStandardMaterial prop (no per-frame
+  // sun-facing calc available in this file) is a per-rock vertical
+  // gradient from a dark base up to the biome's own accent color, the
+  // same "flat illustration" vertex-color technique the non-Ember spire
+  // already uses above. Each rock gets its own fresh gradient rather than
+  // one shared material/geometry so the highlight isn't identical on
+  // every rock in the cluster.
+  const rockLow = new THREE.Color(0x2a2620);
+  const rockHigh = new THREE.Color(colorHex).lerp(new THREE.Color(0xffffff), 0.15);
   const count = 2 + Math.floor(rand() * 3);
   for (let i = 0; i < count; i++) {
     const scale = 0.4 + rand() * 0.9;
@@ -271,6 +362,8 @@ function createRockCluster(biome, colorHex, rand) {
       pos.setXYZ(v, pos.getX(v) * k, pos.getY(v) * k * 0.7, pos.getZ(v) * k); // squashed vertically — reads as a settled rock, not a floating boulder
     }
     geo.computeVertexNormals();
+    applyVerticalGradient(geo, rockLow, rockHigh);
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true });
     const rock = new THREE.Mesh(geo, mat);
     const angle = rand() * Math.PI * 2, dist = rand() * 1.3;
     rock.position.set(Math.cos(angle) * dist, scale * 0.35, Math.sin(angle) * dist);
@@ -361,6 +454,8 @@ function updateDecoration(handle, elapsed) {
   } else if (handle.kind === "debris") {
     handle.group.position.y = handle.baseY + handle.hoverHeight + Math.sin(elapsed * 0.6 + handle.bobSeed) * handle.bobAmplitude;
     handle.group.rotation.y += handle.spinRate * 0.016;
+  } else if (handle.kind === "emberVent") {
+    handle.light.intensity = 0.2 + 0.25 * (0.5 + 0.5 * Math.sin(elapsed * 1.6 + handle.pulseSeed));
   }
 }
 

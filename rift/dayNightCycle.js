@@ -33,6 +33,21 @@ const DAY = {
   fog: 0x1c2436, skyZenith: 0x1c3a5e, skyHorizon: 0x8fb8d6,
 };
 
+// A subtle per-biome push on top of the shared day/night colors above —
+// this file was previously entirely biome-unaware (every biome saw the
+// identical sky), which meant biomes only differed up close, not from a
+// distance or from orbit. `amount` is deliberately small (0.10-0.14): the
+// day/night mood (warm dawn, blue noon, deep night) still has to read
+// correctly everywhere, this just leans each biome's sky toward its own
+// accent color rather than replacing the mood outright.
+const BIOME_SKY_TINT = {
+  ember: { zenith: 0x3a1210, horizon: 0xff6a30, fog: 0x2a1210, amount: 0.14 },
+  verdant: { zenith: 0x0a2a34, horizon: 0x6fd0d8, fog: 0x0f2a28, amount: 0.10 },
+  crystal: { zenith: 0x1a1a3e, horizon: 0x9a8fff, fog: 0x181832, amount: 0.12 },
+  abyssal: { zenith: 0x140a1e, horizon: 0x5a2a6a, fog: 0x120a1a, amount: 0.14 },
+  ashen: { zenith: 0x2a2210, horizon: 0xd8b878, fog: 0x261e10, amount: 0.10 },
+};
+
 function lerpColor(a, b, t) {
   return new THREE.Color(a).lerp(new THREE.Color(b), t);
 }
@@ -400,8 +415,9 @@ function updateSkyDome(sky, zenithColor, horizonColor, elapsed) {
  * @param {THREE.DirectionalLight} sun
  * @param {THREE.AmbientLight} ambient
  * @param {THREE.Points} starfield
+ * @param {string} [biome]  optional — enables the per-biome sky tint (BIOME_SKY_TINT above). Falls back to the plain shared sky if omitted, so this stays a non-breaking addition for any existing call site not yet passing it.
  */
-function createDayNightCycle(scene, sun, ambient, starfield) {
+function createDayNightCycle(scene, sun, ambient, starfield, biome) {
   const glowTexture = createGlowTexture();
   const sunBody = createBody(scene, glowTexture, createSunTexture(), 14, 0xffcf80, 40, 0.6);
   const moonBody = createBody(scene, glowTexture, createMoonTexture(), 9, 0xaebedd, 22, 0.32);
@@ -412,7 +428,7 @@ function createDayNightCycle(scene, sun, ambient, starfield) {
   const shootingStars = createShootingStars(scene);
   return {
     scene, sun, ambient, starfield, sunBody, moonBody, sunBeams, sky,
-    distantPlanet, aurora, shootingStars, elapsed: 0,
+    distantPlanet, aurora, shootingStars, elapsed: 0, biome,
   };
 }
 
@@ -463,6 +479,17 @@ function updateDayNightCycle(cycle, dt) {
   cycle.sun.intensity = sunIntensity;
   cycle.ambient.color.copy(ambientColor);
   cycle.ambient.intensity = ambientIntensity;
+
+  // Per-biome push, layered on top of the shared day/night blend above —
+  // see BIOME_SKY_TINT's comment for why this is a small lerp rather than
+  // an outright color swap.
+  const tint = BIOME_SKY_TINT[cycle.biome];
+  if (tint) {
+    skyZenith = lerpColor(skyZenith, tint.zenith, tint.amount);
+    skyHorizon = lerpColor(skyHorizon, tint.horizon, tint.amount);
+    fogColor = lerpColor(fogColor, tint.fog, tint.amount);
+  }
+
   cycle.scene.fog.color.copy(fogColor);
   updateSkyDome(cycle.sky, skyZenith, skyHorizon, cycle.elapsed);
 

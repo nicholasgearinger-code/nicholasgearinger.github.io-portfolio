@@ -208,6 +208,22 @@ const SURFACE_PATCH_STYLE = {
   ashen: { color: 0xe8dfc8, threshold: 0.65, freq: 3.6 },   // sun-bleached, cracked-pale patches
 };
 
+// A much finer, higher-frequency speckle layered on top of the patches
+// above — small pebble/grit/crack flecks rather than broad splatter
+// shapes. SURFACE_PATCH_STYLE reads at a distance (big patches you notice
+// from across the terrain); this reads up close, right at your feet,
+// which is exactly the scale that was missing — bare ground currently has
+// nothing between "smooth height gradient" and "occasional big patch."
+// Deliberately subtle (low strength, small lerp) so it stays a texture
+// cue, not a second layer of blotches competing with the patches.
+const SURFACE_DETAIL_STYLE = {
+  ember: { color: 0x000000, freq: 15, threshold: 0.6, strength: 0.16 },   // dark grit/cinder speckle
+  verdant: { color: 0x14300f, freq: 17, threshold: 0.62, strength: 0.13 }, // dirt flecks/grass tufts
+  crystal: { color: 0xffffff, freq: 13, threshold: 0.6, strength: 0.15 }, // pale mineral speckle
+  abyssal: { color: 0x000000, freq: 16, threshold: 0.58, strength: 0.18 }, // dark grit
+  ashen: { color: 0x33291a, freq: 19, threshold: 0.62, strength: 0.12 },  // fine dry cracks
+};
+
 // -----------------------------------------------------------------------------
 // Flat-illustration height palettes — a small ordered list of bold colors
 // posterized across the height range, instead of one smooth base->highlight
@@ -228,19 +244,18 @@ const HEIGHT_PALETTE = {
   ember: [0x120a08, 0x3a1208, 0x7a2410, 0xc8471c, 0xef8a34, 0xffd9a0], // shadowed valley -> deep rock -> mid rock -> molten-adjacent rust -> warm highlight -> pale sunlit rim
 };
 
-function bandedColorAt(t, palette, out) {
+// Smooth multi-stop gradient across the palette — was a posterized,
+// hard-seamed version (matching flat-vector illustration strata), reverted
+// per direction to blend both styles: bold flat color for the lava itself
+// stays, but the rock surface reads with soft continuous shading instead
+// of discrete color-block bands, closer to a hand-drawn gradient dune face
+// than a stepped contour map.
+function smoothPaletteColorAt(t, palette, out) {
   const bandCount = palette.length - 1;
   const scaled = THREE.MathUtils.clamp(t, 0, 1) * bandCount;
   const idx = Math.min(bandCount - 1, Math.floor(scaled));
-  out.copy(palette[idx]);
-  // A thin darkened seam right at each INTERNAL band boundary — an
-  // approximation of the crisp ink-line/contour edge flat illustration
-  // uses between color fields. Excludes the outer edges of the whole
-  // height range (t=0 / t=1), which aren't boundaries between two bands.
   const localT = scaled - idx;
-  const nearLowerSeam = localT < 0.05 && idx > 0;
-  const nearUpperSeam = localT > 0.95 && idx < bandCount - 1;
-  if (nearLowerSeam || nearUpperSeam) out.multiplyScalar(0.6);
+  out.copy(palette[idx]).lerp(palette[Math.min(bandCount, idx + 1)], localT);
   return out;
 }
 
@@ -249,8 +264,23 @@ function applyHeightShading(geo, colorHex, minY, maxY, biome, seed) {
   const range = Math.max(maxY - minY, 1e-6);
   const patchStyle = SURFACE_PATCH_STYLE[biome];
   const patchColor = patchStyle ? new THREE.Color(patchStyle.color) : null;
+  const detailStyle = SURFACE_DETAIL_STYLE[biome];
+  const detailColor = detailStyle ? new THREE.Color(detailStyle.color) : null;
   const colors = new Float32Array(posAttr.count * 3);
   const tmp = new THREE.Color();
+
+  // Shared by both shading branches below — samples the fine speckle
+  // noise at (x,z) and lerps `tmp` toward detailColor if it clears the
+  // threshold. Kept as one function rather than two copies so the two
+  // branches can't quietly drift apart on this.
+  function applySpeckle(x, z) {
+    if (!detailStyle) return;
+    const n = fbm2(x * 0.01 * detailStyle.freq, z * 0.01 * detailStyle.freq, seed + 900, 2, 2.0, 0.5);
+    if (n > detailStyle.threshold) {
+      const t = Math.min(1, (n - detailStyle.threshold) / (1 - detailStyle.threshold));
+      tmp.lerp(detailColor, t * detailStyle.strength);
+    }
+  }
 
   const paletteHex = HEIGHT_PALETTE[biome];
   if (paletteHex) {
@@ -262,18 +292,21 @@ function applyHeightShading(geo, colorHex, minY, maxY, biome, seed) {
     const pathColor = biome === "ember" ? new THREE.Color(0xc99a5e) : null;
     for (let i = 0; i < posAttr.count; i++) {
       const t = (posAttr.getY(i) - minY) / range;
-      bandedColorAt(t, palette, tmp);
+      const x = posAttr.getX(i), z = posAttr.getZ(i);
+      smoothPaletteColorAt(t, palette, tmp);
       if (patchStyle) {
-        const x = posAttr.getX(i), z = posAttr.getZ(i);
         const n = fbm2(x * 0.01 * patchStyle.freq, z * 0.01 * patchStyle.freq, seed + 500, 3, 2.0, 0.5);
-        // Flat illustration reads as distinct painted splatter shapes, not
-        // a soft airbrushed bloom — once a spot crosses the threshold it
-        // gets close to full patch strength immediately, rather than
-        // ramping gradually across the excess.
-        if (n > patchStyle.threshold) tmp.lerp(patchColor, 0.82);
+        // Softened back to a gradual ramp (was near-full-strength
+        // immediately past the threshold, matching flat-illustration
+        // splatter shapes) — the rock surface now reads with soft
+        // continuous shading throughout, patches included, rather than
+        // hard-edged color blocks.
+        if (n > patchStyle.threshold) {
+          const patchStrength = Math.min(1, (n - patchStyle.threshold) / (1 - patchStyle.threshold)) * 0.75;
+          tmp.lerp(patchColor, patchStrength);
+        }
       }
       if (pathColor) {
-        const x = posAttr.getX(i), z = posAttr.getZ(i);
         const offsetFromChannel = x - emberChannelCenterX(z, seed);
         if (offsetFromChannel > EMBER_PATH_INNER && offsetFromChannel < EMBER_PATH_OUTER) {
           const mid = (EMBER_PATH_INNER + EMBER_PATH_OUTER) / 2, half = (EMBER_PATH_OUTER - EMBER_PATH_INNER) / 2;
@@ -281,6 +314,7 @@ function applyHeightShading(geo, colorHex, minY, maxY, biome, seed) {
           tmp.lerp(pathColor, pathT * 0.85);
         }
       }
+      applySpeckle(x, z);
       colors[i * 3] = tmp.r; colors[i * 3 + 1] = tmp.g; colors[i * 3 + 2] = tmp.b;
     }
     geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
@@ -293,15 +327,16 @@ function applyHeightShading(geo, colorHex, minY, maxY, biome, seed) {
   const highlight = new THREE.Color(colorHex).lerp(new THREE.Color(0xffffff), 0.22); // was 0.4 — less washed toward white, keeps more color saturation at peaks instead of desaturating them
   for (let i = 0; i < posAttr.count; i++) {
     const t = (posAttr.getY(i) - minY) / range;
+    const x = posAttr.getX(i), z = posAttr.getZ(i);
     tmp.copy(base).lerp(highlight, t);
     if (patchStyle) {
-      const x = posAttr.getX(i), z = posAttr.getZ(i);
       const n = fbm2(x * 0.01 * patchStyle.freq, z * 0.01 * patchStyle.freq, seed + 500, 3, 2.0, 0.5);
       if (n > patchStyle.threshold) {
         const patchStrength = Math.min(1, (n - patchStyle.threshold) / (1 - patchStyle.threshold)) * 0.75; // never fully overrides the base shading, just blends toward the patch
         tmp.lerp(patchColor, patchStrength);
       }
     }
+    applySpeckle(x, z);
     colors[i * 3] = tmp.r; colors[i * 3 + 1] = tmp.g; colors[i * 3 + 2] = tmp.b;
   }
   geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));

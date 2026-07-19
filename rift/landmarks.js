@@ -69,14 +69,18 @@ function createEmberLandmark(colorHex) {
   // as the ground-level lava and animated with a similar scrolling glow
   // so it reads as actively flowing, not a painted stripe.
   const riverSegCount = 7;
-  const riverMat = new THREE.MeshBasicMaterial({ color: 0xff5522 });
   const riverSegments = [];
   for (let i = 0; i < riverSegCount; i++) {
     const t = i / (riverSegCount - 1);
     const segY = coneH * (1 - t) * 0.92;
     const segR = baseR * t * 0.98 + 0.6; // widens as it nears the base, like real lava does spreading out
     const w = 1.4 + t * 2.2;
-    const seg = new THREE.Mesh(new THREE.PlaneGeometry(w, coneH / riverSegCount * 1.3), riverMat);
+    // Each segment gets its own material instance, not a shared one —
+    // they need to pulse independently (staggered, reading as flow
+    // traveling downhill) rather than all changing in lockstep because
+    // they happened to reference the same object.
+    const segMat = new THREE.MeshBasicMaterial({ color: 0xff5522, transparent: true, opacity: 1 });
+    const seg = new THREE.Mesh(new THREE.PlaneGeometry(w, coneH / riverSegCount * 1.3), segMat);
     seg.position.set(0, segY, segR);
     seg.rotation.x = -0.25;
     // Tilt the segment to roughly follow the cone's slope at this height
@@ -98,6 +102,7 @@ function createEmberLandmark(colorHex) {
     group, energy, baseY: 0, biome: "ember",
     volcano: {
       pool, poolMat, poolBaseColor, poolHotColor, craterLight, riverSegments, craterY: coneH,
+      baseR, craterR, // needed by the chunk sliding phase to follow the cone's actual surface, not fall through open air
       eruptionTimer: 8 + Math.random() * 12, // first eruption arrives reasonably soon rather than making the player wait a full cycle
       eruptionPhase: 0, // 0 = dormant, ramps to 1 during an active eruption and back down
       erupting: false,
@@ -289,7 +294,8 @@ function updateLandmark(handle, elapsed, dt) {
 function updateVolcano(v, elapsed, dt) {
   for (const seg of v.riverSegments) {
     const flow = 0.55 + 0.45 * Math.sin(elapsed * 1.8 - seg.seed * 1.5); // negative sign on the seed term makes the brightness peak travel down the chain over time, reading as downhill flow rather than segments pulsing independently
-    seg.mesh.material.opacity = flow;
+    seg.arrivalFlare = Math.max(0, (seg.arrivalFlare || 0) - dt * 1.2); // fades out over ~0.8s rather than cutting off instantly
+    seg.mesh.material.opacity = Math.min(1, flow + seg.arrivalFlare);
   }
   // Crater pool breathes gently between eruptions, same as ground lava's
   // own idle pulse.
@@ -302,13 +308,18 @@ function updateVolcano(v, elapsed, dt) {
     v.eruptionPhase = 0;
     for (const chunk of v.chunks) {
       chunk.active = true;
+      chunk.phase = "ballistic";
       chunk.t = 0;
       const angle = Math.random() * Math.PI * 2;
-      chunk.vx = Math.cos(angle) * (2 + Math.random() * 3);
-      chunk.vz = Math.sin(angle) * (2 + Math.random() * 3);
+      chunk.dirX = Math.cos(angle); // fixed slide direction for this chunk's whole journey — the ballistic hop just picks which way down the slope it'll travel
+      chunk.dirZ = Math.sin(angle);
+      chunk.vx = chunk.dirX * (2 + Math.random() * 3);
+      chunk.vz = chunk.dirZ * (2 + Math.random() * 3);
       chunk.launchSpeed = 9 + Math.random() * 5;
+      chunk.slideY = v.craterY;
       chunk.mesh.position.set(0, v.craterY, 0);
-      chunk.mesh.scale.setScalar(0.5 + Math.random() * 0.6);
+      chunk.baseScale = 0.5 + Math.random() * 0.6;
+      chunk.mesh.scale.setScalar(chunk.baseScale);
     }
   }
 
@@ -322,24 +333,69 @@ function updateVolcano(v, elapsed, dt) {
     v.craterLight.intensity = 1.2 + flare * 6;
     v.poolMat.color.copy(v.poolBaseColor).lerp(v.poolHotColor, flare);
 
-    for (const chunk of v.chunks) {
-      if (!chunk.active) continue;
-      chunk.t += dt;
-      const gravity = 9;
-      chunk.mesh.position.x = chunk.vx * chunk.t;
-      chunk.mesh.position.z = chunk.vz * chunk.t;
-      chunk.mesh.position.y = v.craterY + chunk.launchSpeed * chunk.t - 0.5 * gravity * chunk.t * chunk.t;
-      chunk.mesh.rotation.x += dt * 4;
-      chunk.mesh.rotation.z += dt * 3;
-      if (chunk.mesh.position.y < v.craterY - 2) {
-        chunk.active = false;
-        chunk.mesh.scale.setScalar(0); // park it invisibly rather than removing/re-adding the mesh each eruption
-      }
-    }
-
     if (v.eruptionPhase >= 1) {
       v.erupting = false;
       v.eruptionTimer = 22 + Math.random() * 18; // next eruption 22-40s out
+    }
+  }
+
+  // Chunk flight runs independently of the flare above — the flare itself
+  // is brief (~1.5s), but a chunk's full ballistic-arc-then-slide-down
+  // journey takes several seconds longer than that, so it needs to keep
+  // animating well after "erupting" itself has already gone back to
+  // false, not freeze in place the moment the flare ends.
+  for (const chunk of v.chunks) {
+    if (!chunk.active) continue;
+    chunk.t += dt;
+    const gravity = 9;
+
+    if (chunk.phase === "ballistic") {
+      chunk.mesh.position.x = chunk.vx * chunk.t;
+      chunk.mesh.position.z = chunk.vz * chunk.t;
+      const y = v.craterY + chunk.launchSpeed * chunk.t - 0.5 * gravity * chunk.t * chunk.t;
+      chunk.mesh.position.y = y;
+      chunk.mesh.rotation.x += dt * 4;
+      chunk.mesh.rotation.z += dt * 3;
+      // Switch to sliding once the arc brings it back down to roughly
+      // crater height, rather than continuing to fall through open air
+      // — from here it rides the actual slope down instead.
+      if (y <= v.craterY) {
+        chunk.phase = "sliding";
+        chunk.slideY = v.craterY;
+        chunk.slideDist = Math.hypot(chunk.mesh.position.x, chunk.mesh.position.z);
+      }
+    } else if (chunk.phase === "sliding") {
+      // Descend at a steady rate, following the cone's actual
+      // radius-at-height so the chunk visibly rides the slope's surface
+      // all the way to the base instead of just dropping straight down.
+      const slideSpeed = 5.5;
+      chunk.slideY -= slideSpeed * dt;
+      chunk.slideDist += slideSpeed * dt * 0.6; // drifts outward as it descends, following the cone widening toward its base
+      const clampedY = Math.max(0, chunk.slideY);
+      const t = clampedY / v.craterY;
+      const surfaceR = v.baseR + (v.craterR - v.baseR) * t;
+      const r = Math.max(chunk.slideDist, surfaceR); // never sink inside the cone's own surface
+      chunk.mesh.position.set(chunk.dirX * r, clampedY, chunk.dirZ * r);
+      chunk.mesh.rotation.x += dt * 2;
+      // Shrinks as it nears the base — reads as the chunk breaking apart
+      // and merging into the general lava flow rather than simply
+      // switching off.
+      const shrink = THREE.MathUtils.clamp(chunk.slideY / (v.craterY * 0.3), 0, 1);
+      chunk.mesh.scale.setScalar(chunk.baseScale * shrink);
+
+      if (chunk.slideY <= 0.5) {
+        chunk.active = false;
+        chunk.mesh.scale.setScalar(0);
+        // Arriving at the base flares the nearest river segment bright
+        // for a moment — the chunk visibly becomes part of the flow
+        // rather than just disappearing.
+        let nearest = null, nearestDist = Infinity;
+        for (const seg of v.riverSegments) {
+          const d = Math.hypot(seg.mesh.position.x - chunk.mesh.position.x, seg.mesh.position.z - chunk.mesh.position.z);
+          if (d < nearestDist) { nearestDist = d; nearest = seg; }
+        }
+        if (nearest) nearest.arrivalFlare = 1;
+      }
     }
   }
 }

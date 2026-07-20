@@ -11,6 +11,8 @@
 // app relies on.
 // -----------------------------------------------------------------------------
 
+import { LANDMARK_POSITION } from "./landmarks.js";
+
 let ctx = null;
 let masterGain = null;
 let ambientNodes = null;
@@ -283,17 +285,33 @@ function buildAmbientGraph(biome) {
       fireCracklePanner = panner;
     }
     if (soundBuffers.eruptionRumble) {
-      // Always playing at a quiet baseline — a volcano should feel like
-      // it's constantly grumbling in the background, not silent except
-      // during full eruptions. setEruptionIntensity below just pushes
-      // this gain up further while an eruption is actually active,
-      // rather than starting the sound from nothing.
+      // Positioned once at the volcano's own location (it doesn't move,
+      // unlike the fire panner which retargets every frame) — genuinely
+      // louder approaching the volcano via the PannerNode's own distance
+      // model, not a flat everywhere-the-same volume. Baseline vs.
+      // eruption-active gain (set below) still controls how loud it gets
+      // AT the volcano; setEruptionIntensity pushes that up further while
+      // an eruption is actually active, rather than starting the sound
+      // from nothing.
       const source = ctx.createBufferSource();
       source.buffer = soundBuffers.eruptionRumble;
       source.loop = true;
       const gain = ctx.createGain();
-      gain.gain.value = 0.12; // quiet always-on presence — worth a by-ear pass once live
-      source.connect(gain).connect(masterGain);
+      gain.gain.value = 0.12; // quiet baseline AT the volcano itself — worth a by-ear pass once live
+      const panner = ctx.createPanner();
+      panner.panningModel = "HRTF";
+      panner.distanceModel = "inverse";
+      panner.refDistance = 18; // the volcano is a massive landmark — should start attenuating much further out than a small ground fire
+      panner.maxDistance = 220; // covers the whole playable radius (~112) with real falloff room beyond it
+      panner.rolloffFactor = 1.1;
+      if (panner.positionX) {
+        panner.positionX.value = LANDMARK_POSITION.x;
+        panner.positionY.value = 0;
+        panner.positionZ.value = LANDMARK_POSITION.z;
+      } else if (panner.setPosition) {
+        panner.setPosition(LANDMARK_POSITION.x, 0, LANDMARK_POSITION.z);
+      }
+      source.connect(gain).connect(panner).connect(masterGain);
       source.start();
       stopOnSwitch.push(source, gain);
       eruptionRumbleGain = gain;

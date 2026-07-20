@@ -36,22 +36,31 @@ const SOUND_FILES = {
   eruptionBurst: "eruption-burst.mp3",    // one-shot, fired once when an eruption starts
 };
 const soundBuffers = {}; // key -> decoded AudioBuffer, once ready
-const soundLoadStarted = {}; // key -> true once a fetch has been kicked off, so repeated calls don't re-fetch
+const soundLoadPromises = {}; // key -> in-flight/settled Promise<AudioBuffer|null>, so repeated calls share one fetch
 
+// Returns a Promise resolving to the decoded AudioBuffer, or null if it
+// failed to load/decode. Safe to call repeatedly — the first call kicks
+// off the fetch, every later call (before or after it settles) gets the
+// same cached Promise rather than re-fetching.
 function loadSoundBuffer(key) {
-  if (!ctx || soundBuffers[key] || soundLoadStarted[key]) return;
-  soundLoadStarted[key] = true;
+  if (soundBuffers[key]) return Promise.resolve(soundBuffers[key]);
+  if (soundLoadPromises[key]) return soundLoadPromises[key];
+  if (!ctx) return Promise.resolve(null);
   const url = new URL(encodeURIComponent(SOUND_FILES[key]), SOUND_BASE_URL);
-  fetch(url)
+  soundLoadPromises[key] = fetch(url)
     .then((res) => res.arrayBuffer())
     .then((arr) => ctx.decodeAudioData(arr))
-    .then((buffer) => { soundBuffers[key] = buffer; })
+    .then((buffer) => { soundBuffers[key] = buffer; return buffer; })
     .catch((err) => {
-      // Missing/blocked file, bad path, decode failure, etc. — every use
-      // site below already falls back to the synthesized version when a
-      // key never lands in soundBuffers, so this is a soft failure.
-      console.warn(`Rift audio: couldn't load ${SOUND_FILES[key]}, using the synthesized fallback instead.`, err);
+      // Missing/blocked file, bad path, decode failure, etc. Whoever
+      // called this handles a null result — there's no synthesized
+      // fallback anymore (removed per an earlier request that Ember play
+      // only the uploaded recordings), so a failed load here just means
+      // that sound stays silent rather than something else standing in.
+      console.warn(`Rift audio: couldn't load ${SOUND_FILES[key]}.`, err);
+      return null;
     });
+  return soundLoadPromises[key];
 }
 
 function preloadRealSounds() {
@@ -209,8 +218,15 @@ function stopAmbient() {
 // drone recolored — matches the same "distinct per biome, not a palette
 // swap" approach used throughout the visual systems.
 function buildAmbientGraph(biome) {
-  const stopOnSwitch = []; // anything that needs an explicit stop()/fade when switching biomes
-  let intervalId = null;
+  // Built up front (not just at the return statement) so the async
+  // .then() callbacks in the ember branch below can close over THIS
+  // exact object and check `ambientNodes !== handle` once their sound
+  // finishes loading — biome-switching away before that happens is a
+  // real possibility (loads take a moment), and without this check a
+  // late-arriving sound would attach itself to a graph nobody's using
+  // anymore.
+  const handle = { stopOnSwitch: [], intervalId: null };
+  const stopOnSwitch = handle.stopOnSwitch;
 
   function drone(freq, type, gainVal) {
     const osc = ctx.createOscillator();
@@ -259,17 +275,24 @@ function buildAmbientGraph(biome) {
     // Ember plays ONLY the real recordings — no synthesized fallback
     // texture layered underneath (an earlier version's synthesized
     // crackle interval running "regardless" of the real recording read
-    // as an unwanted mechanical chugging, not an enhancement). If a
-    // buffer hasn't finished loading yet, that sound is simply silent
-    // for that brief window.
-    if (soundBuffers.fireLoop) {
+    // as an unwanted mechanical chugging, not an enhancement). Both
+    // sounds attach themselves via loadSoundBuffer's Promise rather than
+    // a synchronous check here — loading takes real time (network +
+    // decode), so checking `soundBuffers.fireLoop` just once at this
+    // exact moment would very often find it not ready yet and then never
+    // try again for the rest of the level. Attaching on the Promise
+    // instead means the sound starts the instant it's actually decoded,
+    // whether that's before this function even returns or several
+    // seconds later.
+    loadSoundBuffer("fireLoop").then((buffer) => {
+      if (!buffer || ambientNodes !== handle) return;
       // Positional — repositioned every frame (main.js calls
       // updateFirePosition with whichever fire is currently nearest the
       // player) so this is audibly louder standing next to an actual
       // fire and fades with real distance via the PannerNode's own
       // rolloff model, not a flat always-the-same-volume loop.
       const source = ctx.createBufferSource();
-      source.buffer = soundBuffers.fireLoop;
+      source.buffer = buffer;
       source.loop = true;
       const gain = ctx.createGain();
       gain.gain.value = 0.7; // feeds the panner's distance falloff, not the final loudness by itself — worth a by-ear pass once live
@@ -283,8 +306,10 @@ function buildAmbientGraph(biome) {
       source.start();
       stopOnSwitch.push(source, gain);
       fireCracklePanner = panner;
-    }
-    if (soundBuffers.eruptionRumble) {
+    });
+
+    loadSoundBuffer("eruptionRumble").then((buffer) => {
+      if (!buffer || ambientNodes !== handle) return;
       // Positioned once at the volcano's own location (it doesn't move,
       // unlike the fire panner which retargets every frame) — genuinely
       // louder approaching the volcano via the PannerNode's own distance
@@ -294,7 +319,7 @@ function buildAmbientGraph(biome) {
       // an eruption is actually active, rather than starting the sound
       // from nothing.
       const source = ctx.createBufferSource();
-      source.buffer = soundBuffers.eruptionRumble;
+      source.buffer = buffer;
       source.loop = true;
       const gain = ctx.createGain();
       gain.gain.value = 0.12; // quiet baseline AT the volcano itself — worth a by-ear pass once live
@@ -315,7 +340,7 @@ function buildAmbientGraph(biome) {
       source.start();
       stopOnSwitch.push(source, gain);
       eruptionRumbleGain = gain;
-    }
+    });
   } else if (biome === "verdant") {
     drone(60, "sine", 0.02);
     noiseBed("bandpass", 900, 0.5, 0.03, 0.15, 0.012); // wind through foliage, gustier
@@ -324,7 +349,7 @@ function buildAmbientGraph(biome) {
     drone(50, "sine", 0.018);
     noiseBed("highpass", 3000, 0.8, 0.006, 0.06, 0.004);
     // Sparse resonant chime pings — crystals settling.
-    intervalId = setInterval(() => {
+    handle.intervalId = setInterval(() => {
       if (Math.random() < 0.4) playCrystalPing();
     }, 3500);
   } else if (biome === "abyssal") {
@@ -332,7 +357,7 @@ function buildAmbientGraph(biome) {
     drone(29.5, "sine", 0.02); // slightly detuned against the first — an uneasy beat frequency, not a clean chord
     noiseBed("lowpass", 200, 1.5, 0.015, 0.04, 0.006);
     // Occasional distant echoey rumble from the depths.
-    intervalId = setInterval(() => {
+    handle.intervalId = setInterval(() => {
       if (Math.random() < 0.35) playDeepRumble();
     }, 6000);
   } else { // ashen
@@ -340,7 +365,7 @@ function buildAmbientGraph(biome) {
     drone(45, "sine", 0.012);
   }
 
-  return { stopOnSwitch, intervalId };
+  return handle;
 }
 
 // Ramps the (silent-until-now) eruption rumble bed up or down — called

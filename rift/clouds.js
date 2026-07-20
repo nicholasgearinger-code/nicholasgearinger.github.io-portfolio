@@ -12,8 +12,8 @@ import { getGraphicsSettings } from "./graphicsSettings.js";
 // -----------------------------------------------------------------------------
 
 const CLOUD_STYLE = {
-  ember: { count: 5, altitude: 85, spread: 140, puffColor: 0x4a3830, opacity: 0.5, scale: 12 },   // low, ashy, smoke-dark rather than fluffy-white
-  verdant: { count: 9, altitude: 95, spread: 160, puffColor: 0xf4f7fb, opacity: 0.7, scale: 15 },  // classic fluffy white, the most cloud-heavy sky
+  ember: { count: 10, altitude: 88, spread: 170, puffColor: 0x4a3830, opacity: 0.55, scale: 20 },   // low, ashy, smoke-dark rather than fluffy-white — count/scale/spread bumped up for a heavier, more dramatic sky per request, still keeps the dark ashy character rather than fluffy-white
+  verdant: { count: 11, altitude: 95, spread: 160, puffColor: 0xf4f7fb, opacity: 0.85, scale: 24 },  // big, bold, dominant puffy-white clouds per the flat-illustration reference — was scale 15/opacity 0.7, read as too small/subtle to match
   crystal: { count: 4, altitude: 100, spread: 150, puffColor: 0xdcecf5, opacity: 0.45, scale: 11 }, // sparse, thin, icy-pale
   abyssal: { count: 7, altitude: 80, spread: 140, puffColor: 0x2e2a3a, opacity: 0.6, scale: 14 },   // heavy, dark, low — presses down on the chasms
   ashen: { count: 3, altitude: 110, spread: 150, puffColor: 0xd6cdb8, opacity: 0.35, scale: 10 },   // thin, wispy, dust-pale — barely enough moisture in the air to call these clouds
@@ -39,8 +39,8 @@ function getPuffTexture() {
   canvas.width = size; canvas.height = size;
   const ctx = canvas.getContext("2d");
   const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  grad.addColorStop(0, "rgba(255,255,255,0.9)");
-  grad.addColorStop(0.5, "rgba(255,255,255,0.4)");
+  grad.addColorStop(0, "rgba(255,255,255,0.95)");
+  grad.addColorStop(0.62, "rgba(255,255,255,0.7)"); // was a single 0.5-stop at 0.4 — held higher/further out so the puff reads as a bold, fairly solid rounded shape instead of a soft diffuse smudge, matching this project's flat-illustration direction
   grad.addColorStop(1, "rgba(255,255,255,0)");
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, size, size);
@@ -50,7 +50,7 @@ function getPuffTexture() {
 
 function createCloud(scene, style, flatten = 1) {
   const group = new THREE.Group();
-  const puffCount = 4 + Math.floor(Math.random() * 4);
+  const puffCount = 5 + Math.floor(Math.random() * 5); // was 4-7, now 5-9 — fuller, chunkier cloud shapes
   const sprites = [];
   for (let i = 0; i < puffCount; i++) {
     const mat = new THREE.SpriteMaterial({

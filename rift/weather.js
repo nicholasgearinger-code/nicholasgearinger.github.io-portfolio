@@ -191,6 +191,30 @@ function createDistantLightning(scene) {
   return { sprite, flash: 0, timer: randRange(15, 40) };
 }
 
+// A thin vertical streak, not a round dot — painted within a square
+// canvas (points always render as camera-facing squares) so most of the
+// square stays transparent except a narrow fading strip down the middle.
+// This is the actual fix for rain reading as snow: a round point sprite
+// falling through the air looks exactly like a snowflake regardless of
+// fall speed, since points don't stretch with motion on their own.
+let sharedRainStreakTexture = null;
+function getRainStreakTexture() {
+  if (sharedRainStreakTexture) return sharedRainStreakTexture;
+  const size = 32;
+  const canvas = document.createElement("canvas");
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const grad = ctx.createLinearGradient(0, 0, 0, size);
+  grad.addColorStop(0, "rgba(255,255,255,0)");
+  grad.addColorStop(0.15, "rgba(255,255,255,0.85)");
+  grad.addColorStop(0.85, "rgba(255,255,255,0.85)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(size * 0.42, 0, size * 0.16, size);
+  sharedRainStreakTexture = new THREE.CanvasTexture(canvas);
+  return sharedRainStreakTexture;
+}
+
 function createRain(scene) {
   const count = 1400;
   const positions = new Float32Array(count * 3);
@@ -204,7 +228,7 @@ function createRain(scene) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   const mat = new THREE.PointsMaterial({
-    color: 0xcfe0f0, size: 0.35, transparent: true, opacity: 0,
+    map: getRainStreakTexture(), color: 0xcfe0f0, size: 1.2, transparent: true, opacity: 0,
     blending: THREE.AdditiveBlending, depthWrite: false,
   });
   const points = new THREE.Points(geo, mat);

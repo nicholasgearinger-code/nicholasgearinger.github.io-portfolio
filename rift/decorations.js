@@ -157,8 +157,8 @@ function buildBaseDecoration(biome, colorHex, seedRand) {
       if (roll < 0.88) return createEmberVent(colorHex, seedRand);
       return createEmberFire(colorHex, seedRand);
     case "verdant":
-      if (roll < 0.35) return createLivingTree(colorHex, seedRand);
-      if (roll < 0.78) return createFloraStalk(colorHex, seedRand);
+      if (roll < 0.65) return createLivingTree(colorHex, seedRand); // was 0.35 — "enough to look like a forest" needs trees as the dominant decoration, not a minority
+      if (roll < 0.9) return createFloraStalk(colorHex, seedRand);
       return createRockCluster(biome, colorHex, seedRand);
     case "crystal": return roll < 0.72 ? createCrystalCluster(colorHex, seedRand) : createRockCluster(biome, colorHex, seedRand);
     case "abyssal":
@@ -580,16 +580,29 @@ function createLivingTree(colorHex, rand) {
     const startPos = new THREE.Vector3(0, startHeight, 0);
     const branchAngle = rand() * Math.PI * 2;
     const branchTilt = tiltRange[0] + rand() * (tiltRange[1] - tiltRange[0]);
-    const branchLen = h * (0.26 + rand() * 0.28);
+    const branchLen = h * (0.3 + rand() * 0.34); // slightly longer than before so the limb itself has room to read as a limb
     const dir = new THREE.Vector3(
       Math.sin(branchTilt) * Math.cos(branchAngle),
       Math.cos(branchTilt),
       Math.sin(branchTilt) * Math.sin(branchAngle)
     );
     const endPos = startPos.clone().addScaledVector(dir, branchLen);
-    const branchRadius = 0.05 + rand() * 0.05;
-    addBranchMesh(startPos, endPos, branchRadius, branchRadius * 0.45);
-    addFoliageClump(endPos, 0.55 + rand() * 0.55, 0.75 + rand() * 0.35);
+    const branchRadius = 0.06 + rand() * 0.05; // slightly thicker so it doesn't visually vanish under its own leaves
+    addBranchMesh(startPos, endPos, branchRadius, branchRadius * 0.5);
+
+    // Several SMALLER leaf clusters staggered along the branch's outer
+    // half rather than one big blob swallowing the tip — this is what
+    // actually reads as "leaves growing on a branch" instead of a
+    // lollipop. Each is small enough that the branch underneath it stays
+    // visible between clusters.
+    const leafClusters = 2 + Math.floor(rand() * 2);
+    for (let c = 0; c < leafClusters; c++) {
+      const t = THREE.MathUtils.clamp(0.55 + (c / Math.max(1, leafClusters - 1)) * 0.45 + (rand() - 0.5) * 0.12, 0.4, 1.05);
+      const clumpPos = startPos.clone().lerp(endPos, t);
+      clumpPos.x += (rand() - 0.5) * 0.3;
+      clumpPos.z += (rand() - 0.5) * 0.3;
+      addFoliageClump(clumpPos, 0.28 + rand() * 0.28, 0.8 + rand() * 0.3);
+    }
 
     // About a third of branches fork a smaller secondary branch partway
     // along their length — real branching complexity instead of one
@@ -607,21 +620,22 @@ function createLivingTree(colorHex, rand) {
       );
       const forkEnd = forkStart.clone().addScaledVector(forkDir, forkLen);
       addBranchMesh(forkStart, forkEnd, branchRadius * 0.5, branchRadius * 0.2);
-      addFoliageClump(forkEnd, 0.4 + rand() * 0.4, 0.75 + rand() * 0.3);
+      addFoliageClump(forkEnd, 0.24 + rand() * 0.24, 0.8 + rand() * 0.25);
     }
   }
 
   // A few extra clumps near the crown center so the canopy reads as one
   // continuous mass rather than isolated pom-poms at each branch tip —
   // count/shape still archetype-biased (conical stays apex-heavy,
-  // spreading stays flatter and wider).
+  // spreading stays flatter and wider). Kept smaller than before too, for
+  // the same reason as the branch clusters above.
   const crownClumps = archetype === "conical" ? 1 : archetype === "spreading" ? 2 : 3;
   const crownSquash = archetype === "spreading" ? 0.55 : 0.85;
   for (let i = 0; i < crownClumps; i++) {
     const angle = rand() * Math.PI * 2, dist = rand() * h * 0.16;
     addFoliageClump(
       new THREE.Vector3(Math.cos(angle) * dist, h * (0.76 + rand() * 0.18), Math.sin(angle) * dist),
-      0.6 + rand() * 0.7,
+      0.35 + rand() * 0.4,
       crownSquash
     );
   }

@@ -492,24 +492,91 @@ function createRockCluster(biome, colorHex, rand) {
 // distinct from the bioluminescent flora stalk: ordinary green canopy,
 // not glowing, so Verdant Hollow reads as a mix of alien flora and
 // familiar-looking trees rather than one repeated motif.
+// Real forests aren't one uniform green — a handful of distinct leaf
+// tones (picked per-tree, not per-leaf) plus a couple of bark tones so
+// trees actually read as different from each other at a glance, not
+// just different sizes of the same silhouette.
+const VERDANT_LEAF_PALETTE = [0x2f7a3a, 0x3f8f3a, 0x5a9a3a, 0x2f6a52, 0x4a7a2a];
+const VERDANT_BARK_PALETTE = [0x4a3524, 0x5a4030, 0x3a2a1c];
+
+// Living tree, one of three archetypes picked per-instance so a cluster
+// of them reads as a real varied grove instead of the same silhouette
+// copy-pasted at different scales: "round" (bushy clumps, the original
+// look), "conical" (stacked pine/fir tiers), "spreading" (wide, flatter,
+// offset canopy). Each foliage piece gets its own vertex-color gradient
+// (applyVerticalGradient, same flat-illustration rim-light technique used
+// elsewhere in this file) from the tree's own leaf color up to a lighter/
+// warmer tone, rather than one flat foliage color.
 function createLivingTree(colorHex, rand) {
   const group = new THREE.Group();
-  const h = 4 + rand() * 4;
-  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x4a3524, roughness: 0.9, flatShading: true });
-  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.3, h, 6), trunkMat);
+  const archetypeRoll = rand();
+  const archetype = archetypeRoll < 0.4 ? "round" : archetypeRoll < 0.75 ? "conical" : "spreading";
+
+  const h = 4 + rand() * 5;
+  const bark = new THREE.Color(VERDANT_BARK_PALETTE[Math.floor(rand() * VERDANT_BARK_PALETTE.length)]);
+  const trunkMat = new THREE.MeshStandardMaterial({ color: bark, roughness: 0.9, flatShading: true });
+  const trunkRadiusTop = 0.12 + rand() * 0.1;
+  const trunkRadiusBottom = trunkRadiusTop + 0.1 + rand() * 0.12;
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(trunkRadiusTop, trunkRadiusBottom, h, 6), trunkMat);
   trunk.position.y = h / 2;
+  // A slight lean rather than perfectly vertical — real trees rarely grow
+  // arrow-straight, and a whole grove standing bolt upright is part of
+  // why they all looked identical.
+  trunk.rotation.z = (rand() - 0.5) * 0.12;
+  trunk.rotation.x = (rand() - 0.5) * 0.12;
   group.add(trunk);
 
-  const leafBase = new THREE.Color(0x2f7a3a);
-  const leafMat = new THREE.MeshStandardMaterial({ color: leafBase, roughness: 0.85, flatShading: true });
-  const clumps = 3 + Math.floor(rand() * 3);
-  for (let i = 0; i < clumps; i++) {
-    const scale = 1.1 + rand() * 1.1;
-    const foliage = new THREE.Mesh(new THREE.IcosahedronGeometry(scale, getGraphicsSettings().decorationDetail), leafMat);
-    const angle = rand() * Math.PI * 2, dist = rand() * 0.9;
-    foliage.position.set(Math.cos(angle) * dist, h * (0.78 + rand() * 0.22), Math.sin(angle) * dist);
-    group.add(foliage);
+  const leafLow = new THREE.Color(VERDANT_LEAF_PALETTE[Math.floor(rand() * VERDANT_LEAF_PALETTE.length)]);
+  const leafHigh = leafLow.clone().lerp(new THREE.Color(0xffffff), 0.22);
+  const leafMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, flatShading: true });
+
+  if (archetype === "conical") {
+    let baseY = h * 0.55;
+    const tiers = 2 + Math.floor(rand() * 2);
+    for (let i = 0; i < tiers; i++) {
+      const tierT = i / tiers;
+      const tierRadius = (1.3 - tierT * 0.7) * (0.9 + rand() * 0.3);
+      const tierHeight = h * (0.32 - tierT * 0.06);
+      const geo = new THREE.ConeGeometry(tierRadius, tierHeight, 6 + Math.floor(rand() * 3));
+      applyVerticalGradient(geo, leafLow, leafHigh);
+      const cone = new THREE.Mesh(geo, leafMat);
+      cone.position.y = baseY + tierHeight * 0.4;
+      group.add(cone);
+      baseY += tierHeight * 0.62;
+    }
+  } else if (archetype === "spreading") {
+    const clumps = 3 + Math.floor(rand() * 2);
+    for (let i = 0; i < clumps; i++) {
+      const scale = 1.4 + rand() * 1.0;
+      const geo = new THREE.IcosahedronGeometry(scale, getGraphicsSettings().decorationDetail);
+      // Squash vertically for a flatter, wider canopy silhouette than the
+      // round archetype's ball-shaped clumps.
+      const pos = geo.attributes.position;
+      for (let v = 0; v < pos.count; v++) pos.setY(v, pos.getY(v) * 0.55);
+      pos.needsUpdate = true;
+      geo.computeVertexNormals();
+      applyVerticalGradient(geo, leafLow, leafHigh);
+      const foliage = new THREE.Mesh(geo, leafMat);
+      const angle = rand() * Math.PI * 2, dist = 0.5 + rand() * 1.3;
+      foliage.position.set(Math.cos(angle) * dist, h * (0.8 + rand() * 0.15), Math.sin(angle) * dist);
+      group.add(foliage);
+    }
+  } else {
+    // "round" — the original bushy-clump look, now one of three options
+    // instead of the only one, and with the per-tree color + gradient
+    // applied like the other two archetypes.
+    const clumps = 3 + Math.floor(rand() * 3);
+    for (let i = 0; i < clumps; i++) {
+      const scale = 1.1 + rand() * 1.1;
+      const geo = new THREE.IcosahedronGeometry(scale, getGraphicsSettings().decorationDetail);
+      applyVerticalGradient(geo, leafLow, leafHigh);
+      const foliage = new THREE.Mesh(geo, leafMat);
+      const angle = rand() * Math.PI * 2, dist = rand() * 0.9;
+      foliage.position.set(Math.cos(angle) * dist, h * (0.78 + rand() * 0.22), Math.sin(angle) * dist);
+      group.add(foliage);
+    }
   }
+
   return { group, kind: "tree", bobAmplitude: 0.02, bobSeed: rand() * Math.PI * 2 };
 }
 

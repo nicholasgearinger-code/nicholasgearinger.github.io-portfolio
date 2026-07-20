@@ -21,7 +21,7 @@ const GRASS_STYLE = {
   // clusters several blades per sampled ground point so it reads as a
   // dense clump rather than one lonely blade per patch of dirt.
   verdant: {
-    tuftCount: 3600, tuftSize: 5, baseColor: 0x2f7a3a, tipColor: 0x9ee86b,
+    tuftCount: 6000, tuftSize: 5, baseColor: 0x2f7a3a, tipColor: 0x9ee86b,
     height: 0.42, heightVariance: 0.24, bladeRadius: 0.05, bladeWidth: 0.36,
   },
   ashen: {
@@ -68,14 +68,15 @@ function buildBladeGeometry(radialSegments, baseColor, tipColor) {
 
 /**
  * Scatters an InstancedMesh of grass blades, clustered into small tufts
- * around sampled ground points rather than one blade per point, across a
- * disc around the origin. Samples the real terrain height at each tuft so
- * it actually sits on the ground rather than floating/clipping.
+ * around sampled ground points rather than one blade per point, across
+ * the landmass's actual square footprint. Samples the real terrain
+ * height at each tuft so it actually sits on the ground rather than
+ * floating/clipping.
  *
  * @param {THREE.Scene} scene
  * @param {string} biome
  * @param {(x:number, z:number) => number|null} sampleHeight
- * @param {number} radius  how far from center to scatter tufts
+ * @param {number} radius  half the side length of the square area to cover (was a circular radius — the landmass itself is square, so a circular disc always left the corners bare no matter how dense the grass was)
  */
 function createGrass(scene, biome, sampleHeight, radius) {
   const style = GRASS_STYLE[biome];
@@ -98,8 +99,9 @@ function createGrass(scene, biome, sampleHeight, radius) {
   let tuftsPlaced = 0;
   while (tuftsPlaced < tuftCount && attempts < maxAttempts) {
     attempts++;
-    const angle = Math.random() * Math.PI * 2, dist = Math.sqrt(Math.random()) * radius;
-    const tuftX = Math.cos(angle) * dist, tuftZ = Math.sin(angle) * dist;
+    // Uniform over the square, not a circular disc — see the radius
+    // param's doc comment above for why.
+    const tuftX = (Math.random() * 2 - 1) * radius, tuftZ = (Math.random() * 2 - 1) * radius;
     const tuftY = sampleHeight(tuftX, tuftZ);
     if (tuftY === null) continue;
     tuftsPlaced++;
@@ -137,7 +139,7 @@ function createGrass(scene, biome, sampleHeight, radius) {
  * @param {THREE.Scene} scene
  * @param {string} biome
  * @param {(x:number, z:number) => number|null} sampleHeight
- * @param {number} radius
+ * @param {number} radius  half the side length of the square area to cover (see createGrass's matching doc comment)
  */
 function createFlowers(scene, biome, sampleHeight, radius) {
   const style = FLOWER_STYLE[biome];
@@ -160,8 +162,7 @@ function createFlowers(scene, biome, sampleHeight, radius) {
   let placedTotal = 0;
   while (placedTotal < totalCount && attempts < maxAttempts) {
     attempts++;
-    const angle = Math.random() * Math.PI * 2, dist = Math.sqrt(Math.random()) * radius;
-    const x = Math.cos(angle) * dist, z = Math.sin(angle) * dist;
+    const x = (Math.random() * 2 - 1) * radius, z = (Math.random() * 2 - 1) * radius;
     const y = sampleHeight(x, z);
     if (y === null) continue;
 

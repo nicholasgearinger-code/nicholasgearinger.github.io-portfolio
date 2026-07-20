@@ -208,21 +208,11 @@ const SURFACE_PATCH_STYLE = {
   ashen: { color: 0xe8dfc8, threshold: 0.65, freq: 3.6 },   // sun-bleached, cracked-pale patches
 };
 
-// A much finer, higher-frequency speckle layered on top of the patches
-// above — small pebble/grit/crack flecks rather than broad splatter
-// shapes. SURFACE_PATCH_STYLE reads at a distance (big patches you notice
-// from across the terrain); this reads up close, right at your feet,
-// which is exactly the scale that was missing — bare ground currently has
-// nothing between "smooth height gradient" and "occasional big patch."
-// Deliberately subtle (low strength, small lerp) so it stays a texture
-// cue, not a second layer of blotches competing with the patches.
-const SURFACE_DETAIL_STYLE = {
-  ember: { color: 0x000000, freq: 15, threshold: 0.6, strength: 0.16 },   // dark grit/cinder speckle
-  verdant: { color: 0x14300f, freq: 17, threshold: 0.62, strength: 0.13 }, // dirt flecks/grass tufts
-  crystal: { color: 0xffffff, freq: 13, threshold: 0.6, strength: 0.15 }, // pale mineral speckle
-  abyssal: { color: 0x000000, freq: 16, threshold: 0.58, strength: 0.18 }, // dark grit
-  ashen: { color: 0x33291a, freq: 19, threshold: 0.62, strength: 0.12 },  // fine dry cracks
-};
+// A much finer, higher-frequency speckle used to be layered on top of the
+// patches above (small pebble/grit flecks). Removed — at this project's
+// flat-illustration art direction it read as grainy noise rather than
+// deliberate texture, working against the bold-flat-color look rather
+// than supporting it.
 
 // -----------------------------------------------------------------------------
 // Flat-illustration height palettes — a small ordered list of bold colors
@@ -264,23 +254,8 @@ function applyHeightShading(geo, colorHex, minY, maxY, biome, seed) {
   const range = Math.max(maxY - minY, 1e-6);
   const patchStyle = SURFACE_PATCH_STYLE[biome];
   const patchColor = patchStyle ? new THREE.Color(patchStyle.color) : null;
-  const detailStyle = SURFACE_DETAIL_STYLE[biome];
-  const detailColor = detailStyle ? new THREE.Color(detailStyle.color) : null;
   const colors = new Float32Array(posAttr.count * 3);
   const tmp = new THREE.Color();
-
-  // Shared by both shading branches below — samples the fine speckle
-  // noise at (x,z) and lerps `tmp` toward detailColor if it clears the
-  // threshold. Kept as one function rather than two copies so the two
-  // branches can't quietly drift apart on this.
-  function applySpeckle(x, z) {
-    if (!detailStyle) return;
-    const n = fbm2(x * 0.01 * detailStyle.freq, z * 0.01 * detailStyle.freq, seed + 900, 2, 2.0, 0.5);
-    if (n > detailStyle.threshold) {
-      const t = Math.min(1, (n - detailStyle.threshold) / (1 - detailStyle.threshold));
-      tmp.lerp(detailColor, t * detailStyle.strength);
-    }
-  }
 
   const paletteHex = HEIGHT_PALETTE[biome];
   if (paletteHex) {
@@ -314,7 +289,6 @@ function applyHeightShading(geo, colorHex, minY, maxY, biome, seed) {
           tmp.lerp(pathColor, pathT * 0.85);
         }
       }
-      applySpeckle(x, z);
       colors[i * 3] = tmp.r; colors[i * 3 + 1] = tmp.g; colors[i * 3 + 2] = tmp.b;
     }
     geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
@@ -336,7 +310,6 @@ function applyHeightShading(geo, colorHex, minY, maxY, biome, seed) {
         tmp.lerp(patchColor, patchStrength);
       }
     }
-    applySpeckle(x, z);
     colors[i * 3] = tmp.r; colors[i * 3 + 1] = tmp.g; colors[i * 3 + 2] = tmp.b;
   }
   geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));

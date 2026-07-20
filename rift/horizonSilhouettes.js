@@ -212,6 +212,27 @@ function buildSilhouetteRing(style, radius, countScale, heightScale, colorHex, c
   return group;
 }
 
+// A gap was opening up between where the playable terrain actually ends
+// (WORLD_BOUND_RADIUS, ~112) and where the mountain rings begin
+// (NEAR_RING_RADIUS, 165) — nothing filled that space, so the mountains
+// read as floating/rising out of nothing rather than standing in a
+// landscape. This is a single large flat disc bridging that gap and
+// continuing out past the far ring, using the same near-mountain color so
+// it reads as a continuous valley floor the peaks rise out of, and
+// `fog: true` so the built-in scene fog fades it into the horizon color
+// at distance rather than needing a second manual gradient.
+function createValleyFloor(style) {
+  const innerRadius = 90; // tucks in just under the terrain's own falloff rim so there's no visible seam
+  const outerRadius = 380; // past the far ring
+  const geo = new THREE.RingGeometry(innerRadius, outerRadius, 48, 1);
+  geo.rotateX(-Math.PI / 2);
+  const floorColor = lerpHexColor(style.color, style.capColor, 0.5); // matches the near ring's own color exactly, so the peaks look planted in it
+  const mat = new THREE.MeshBasicMaterial({ color: floorColor, fog: true, side: THREE.DoubleSide });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.y = -6; // just below the peaks' own sunk base (height/2 - 4) so they read as rising OUT of the floor, not sitting on top of it
+  return mesh;
+}
+
 /**
  * @param {THREE.Scene} scene
  * @param {string} biome
@@ -219,6 +240,8 @@ function buildSilhouetteRing(style, radius, countScale, heightScale, colorHex, c
 function createHorizonSilhouettes(scene, biome) {
   const style = SILHOUETTE_STYLE[biome] || SILHOUETTE_STYLE.ember;
   const group = new THREE.Group();
+
+  group.add(createValleyFloor(style));
 
   // Far layer: darkest, pulled toward this biome's own farTint. Cluster
   // count doubled (1.15 -> 2.3) per request — more mountains in the

@@ -113,6 +113,23 @@ function createRockSprite(tex, width, height) {
 }
 
 function createDecoration(biome, colorHex, seedRand) {
+  // Rare oversized "foreground framing" variant — rolled BEFORE anything
+  // else below so it doesn't skew the existing per-biome prop-mix odds.
+  // Every decoration currently sits at roughly the same on-screen scale
+  // no matter how close the player walks up to it; occasionally letting
+  // one loom far larger means passing near it fills the frame the way a
+  // real foreground element would, a classic illustrated-environment
+  // depth cue that costs nothing extra to build (same geometry, just
+  // scaled up on the group).
+  const isGiant = seedRand() < 0.035;
+  const handle = buildBaseDecoration(biome, colorHex, seedRand);
+  if (isGiant) {
+    handle.group.scale.setScalar(2.4 + seedRand() * 1.4);
+  }
+  return handle;
+}
+
+function buildBaseDecoration(biome, colorHex, seedRand) {
   const roll = seedRand();
   const highDetail = getGraphicsSettings().decorationDetail >= 2;
   // High-tier-exclusive signature piece per biome — not just "more
@@ -135,9 +152,10 @@ function createDecoration(biome, colorHex, seedRand) {
   if (seedRand() < 0.1) return createGlyphMarker(colorHex, seedRand);
   switch (biome) {
     case "ember":
-      if (roll < 0.58) return createSpire(biome, colorHex, seedRand);
-      if (roll < 0.82) return createRockCluster(biome, colorHex, seedRand);
-      return createEmberVent(colorHex, seedRand);
+      if (roll < 0.5) return createSpire(biome, colorHex, seedRand);
+      if (roll < 0.72) return createRockCluster(biome, colorHex, seedRand);
+      if (roll < 0.88) return createEmberVent(colorHex, seedRand);
+      return createEmberFire(colorHex, seedRand);
     case "verdant":
       if (roll < 0.35) return createLivingTree(colorHex, seedRand);
       if (roll < 0.78) return createFloraStalk(colorHex, seedRand);
@@ -212,6 +230,120 @@ function createEmberVent(colorHex, rand) {
   group.add(light);
 
   return { group, kind: "emberVent", light, pulseSeed: rand() * Math.PI * 2 };
+}
+
+// Paints a flame silhouette — tapers to a point at the top with a wobbly
+// irregular outline (not a smooth teardrop), widest a little above the
+// base, same wobble-along-a-path technique createEmberVentTexture uses
+// for its crack line. Warm gradient from a bright near-white core low
+// down to a redder edge higher up, since real flame is hottest/whitest
+// at its base and cools toward the tip.
+function createFlameTexture(seed) {
+  const w = 64, h = 96;
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d");
+
+  const steps = 10;
+  const points = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const wob = Math.sin(t * 5 + seed * 3) * 0.5 + Math.sin(t * 9 + seed * 1.7) * 0.25;
+    const envelope = Math.pow(1 - t, 0.7) * (1 - 0.15 * Math.sin(t * Math.PI));
+    points.push({
+      x: w / 2 + wob * w * 0.16 * (1 - t * 0.6),
+      halfWidth: w * 0.33 * envelope,
+      y: h * (1 - t),
+    });
+  }
+  ctx.beginPath();
+  ctx.moveTo(points[0].x - points[0].halfWidth, points[0].y);
+  for (const p of points) ctx.lineTo(p.x - p.halfWidth, p.y);
+  for (let i = points.length - 1; i >= 0; i--) ctx.lineTo(points[i].x + points[i].halfWidth, points[i].y);
+  ctx.closePath();
+
+  const grad = ctx.createLinearGradient(0, h, 0, 0);
+  grad.addColorStop(0, "rgba(255,150,40,0.95)");
+  grad.addColorStop(0.4, "rgba(255,190,60,0.92)");
+  grad.addColorStop(0.72, "rgba(255,235,150,0.88)");
+  grad.addColorStop(1, "rgba(255,252,225,0.65)");
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// Small glowing animated fire — Ember Reach's namesake element, scattered
+// as ambient ground decoration rather than just the volcano's own
+// eruption/veins. 2-3 camera-facing flame sprites (true THREE.Sprite,
+// like the sun/moon/aurora sprites in dayNightCycle.js — a real billboard
+// is the right tool here, not the crossed-planes trick the rock
+// silhouettes use, since fire benefits from always facing the camera
+// exactly) sharing one painted texture, a warm PointLight, and a handful
+// of small embers drifting up out of the flame on their own looping arc
+// (same idea as landmarks.js's ember sparks, scaled down for a ground
+// prop). All animation happens in updateDecoration below.
+// `spawnElapsed`/`lifespan` are optional — level-placed fires (via
+// buildBaseDecoration below) leave lifespan at the Infinity default and
+// burn forever, same as before. Dynamically runtime-spawned fires (see
+// main.js's fire spawner) pass a real spawnElapsed/lifespan pair so
+// updateDecoration can fade them out and flag them expired once their
+// time is up.
+function createEmberFire(colorHex, rand, spawnElapsed = 0, lifespan = Infinity) {
+  const group = new THREE.Group();
+  const tex = createFlameTexture(rand() * 100);
+  const baseHeight = 0.9 + rand() * 0.7;
+  const flames = [];
+  const flameCount = 2 + Math.floor(rand() * 2); // 2-3 overlapping sprites for a fuller silhouette from any angle
+  for (let i = 0; i < flameCount; i++) {
+    const mat = new THREE.SpriteMaterial({
+      map: tex, transparent: true, opacity: 0.9,
+      blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+    });
+    const sprite = new THREE.Sprite(mat);
+    const h = baseHeight * (0.75 + rand() * 0.5);
+    sprite.center.set(0.5, 0); // anchored at its base so scaling grows upward from the ground, not from the sprite's middle
+    sprite.scale.set(h * 0.6, h, 1);
+    sprite.position.set((rand() - 0.5) * 0.3, 0, (rand() - 0.5) * 0.3);
+    group.add(sprite);
+    flames.push({ sprite, baseW: h * 0.6, baseH: h, phase: rand() * Math.PI * 2, phase2: rand() * Math.PI * 2 });
+  }
+
+  const light = new THREE.PointLight(0xff7a28, 1.1, 6);
+  light.position.y = baseHeight * 0.5;
+  group.add(light);
+
+  // Each ember gets its OWN cloned material — a shared material across
+  // "independent" embers would defeat their individual opacity animation
+  // (the same class of bug that broke this project's lava-river flow the
+  // first time it was built; see landmarks.js/liquid.js notes).
+  const embers = [];
+  const emberCount = 3 + Math.floor(rand() * 3);
+  for (let i = 0; i < emberCount; i++) {
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xffb35a, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+    });
+    const mesh = new THREE.Mesh(new THREE.OctahedronGeometry(0.05, 0), mat);
+    group.add(mesh);
+    embers.push({
+      mesh,
+      angle: rand() * Math.PI * 2,
+      dist: rand() * 0.2,
+      riseHeight: baseHeight * (1.2 + rand() * 1.2),
+      duration: 1.4 + rand() * 1.2,
+      pause: 0.8 + rand() * 1.6,
+      delay: rand() * 3,
+    });
+  }
+
+  return {
+    group, kind: "emberFire", flames, light, embers,
+    baseLightIntensity: light.intensity, flickerSeed: rand() * Math.PI * 2,
+    spawnElapsed, lifespan, expired: false,
+  };
 }
 
 // Jagged basalt spire with a glowing tip crack. Ember gets a flat 2D
@@ -324,8 +456,17 @@ function createRockCluster(biome, colorHex, rand) {
     return { group, kind: "rockCluster" };
   }
 
-  const tint = new THREE.Color(colorHex).lerp(new THREE.Color(0x555248), 0.65);
-  const mat = new THREE.MeshStandardMaterial({ color: tint, roughness: 0.95, flatShading: true });
+  // Non-Ember: real 3D rocks. A single flat tinted-gray color read as an
+  // inert lump next to Ember's painted rim-light streaks — the closest
+  // safe equivalent for a real MeshStandardMaterial prop (no per-frame
+  // sun-facing calc available in this file) is a per-rock vertical
+  // gradient from a dark base up to the biome's own accent color, the
+  // same "flat illustration" vertex-color technique the non-Ember spire
+  // already uses above. Each rock gets its own fresh gradient rather than
+  // one shared material/geometry so the highlight isn't identical on
+  // every rock in the cluster.
+  const rockLow = new THREE.Color(0x2a2620);
+  const rockHigh = new THREE.Color(colorHex).lerp(new THREE.Color(0xffffff), 0.15);
   const count = 2 + Math.floor(rand() * 3);
   for (let i = 0; i < count; i++) {
     const scale = 0.4 + rand() * 0.9;
@@ -336,6 +477,8 @@ function createRockCluster(biome, colorHex, rand) {
       pos.setXYZ(v, pos.getX(v) * k, pos.getY(v) * k * 0.7, pos.getZ(v) * k); // squashed vertically — reads as a settled rock, not a floating boulder
     }
     geo.computeVertexNormals();
+    applyVerticalGradient(geo, rockLow, rockHigh);
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true });
     const rock = new THREE.Mesh(geo, mat);
     const angle = rand() * Math.PI * 2, dist = rand() * 1.3;
     rock.position.set(Math.cos(angle) * dist, scale * 0.35, Math.sin(angle) * dist);
@@ -349,24 +492,91 @@ function createRockCluster(biome, colorHex, rand) {
 // distinct from the bioluminescent flora stalk: ordinary green canopy,
 // not glowing, so Verdant Hollow reads as a mix of alien flora and
 // familiar-looking trees rather than one repeated motif.
+// Real forests aren't one uniform green — a handful of distinct leaf
+// tones (picked per-tree, not per-leaf) plus a couple of bark tones so
+// trees actually read as different from each other at a glance, not
+// just different sizes of the same silhouette.
+const VERDANT_LEAF_PALETTE = [0x2f7a3a, 0x3f8f3a, 0x5a9a3a, 0x2f6a52, 0x4a7a2a];
+const VERDANT_BARK_PALETTE = [0x4a3524, 0x5a4030, 0x3a2a1c];
+
+// Living tree, one of three archetypes picked per-instance so a cluster
+// of them reads as a real varied grove instead of the same silhouette
+// copy-pasted at different scales: "round" (bushy clumps, the original
+// look), "conical" (stacked pine/fir tiers), "spreading" (wide, flatter,
+// offset canopy). Each foliage piece gets its own vertex-color gradient
+// (applyVerticalGradient, same flat-illustration rim-light technique used
+// elsewhere in this file) from the tree's own leaf color up to a lighter/
+// warmer tone, rather than one flat foliage color.
 function createLivingTree(colorHex, rand) {
   const group = new THREE.Group();
-  const h = 4 + rand() * 4;
-  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x4a3524, roughness: 0.9, flatShading: true });
-  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.3, h, 6), trunkMat);
+  const archetypeRoll = rand();
+  const archetype = archetypeRoll < 0.4 ? "round" : archetypeRoll < 0.75 ? "conical" : "spreading";
+
+  const h = 4 + rand() * 5;
+  const bark = new THREE.Color(VERDANT_BARK_PALETTE[Math.floor(rand() * VERDANT_BARK_PALETTE.length)]);
+  const trunkMat = new THREE.MeshStandardMaterial({ color: bark, roughness: 0.9, flatShading: true });
+  const trunkRadiusTop = 0.12 + rand() * 0.1;
+  const trunkRadiusBottom = trunkRadiusTop + 0.1 + rand() * 0.12;
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(trunkRadiusTop, trunkRadiusBottom, h, 6), trunkMat);
   trunk.position.y = h / 2;
+  // A slight lean rather than perfectly vertical — real trees rarely grow
+  // arrow-straight, and a whole grove standing bolt upright is part of
+  // why they all looked identical.
+  trunk.rotation.z = (rand() - 0.5) * 0.12;
+  trunk.rotation.x = (rand() - 0.5) * 0.12;
   group.add(trunk);
 
-  const leafBase = new THREE.Color(0x2f7a3a);
-  const leafMat = new THREE.MeshStandardMaterial({ color: leafBase, roughness: 0.85, flatShading: true });
-  const clumps = 3 + Math.floor(rand() * 3);
-  for (let i = 0; i < clumps; i++) {
-    const scale = 1.1 + rand() * 1.1;
-    const foliage = new THREE.Mesh(new THREE.IcosahedronGeometry(scale, getGraphicsSettings().decorationDetail), leafMat);
-    const angle = rand() * Math.PI * 2, dist = rand() * 0.9;
-    foliage.position.set(Math.cos(angle) * dist, h * (0.78 + rand() * 0.22), Math.sin(angle) * dist);
-    group.add(foliage);
+  const leafLow = new THREE.Color(VERDANT_LEAF_PALETTE[Math.floor(rand() * VERDANT_LEAF_PALETTE.length)]);
+  const leafHigh = leafLow.clone().lerp(new THREE.Color(0xffffff), 0.22);
+  const leafMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, flatShading: true });
+
+  if (archetype === "conical") {
+    let baseY = h * 0.55;
+    const tiers = 2 + Math.floor(rand() * 2);
+    for (let i = 0; i < tiers; i++) {
+      const tierT = i / tiers;
+      const tierRadius = (1.3 - tierT * 0.7) * (0.9 + rand() * 0.3);
+      const tierHeight = h * (0.32 - tierT * 0.06);
+      const geo = new THREE.ConeGeometry(tierRadius, tierHeight, 6 + Math.floor(rand() * 3));
+      applyVerticalGradient(geo, leafLow, leafHigh);
+      const cone = new THREE.Mesh(geo, leafMat);
+      cone.position.y = baseY + tierHeight * 0.4;
+      group.add(cone);
+      baseY += tierHeight * 0.62;
+    }
+  } else if (archetype === "spreading") {
+    const clumps = 3 + Math.floor(rand() * 2);
+    for (let i = 0; i < clumps; i++) {
+      const scale = 1.4 + rand() * 1.0;
+      const geo = new THREE.IcosahedronGeometry(scale, getGraphicsSettings().decorationDetail);
+      // Squash vertically for a flatter, wider canopy silhouette than the
+      // round archetype's ball-shaped clumps.
+      const pos = geo.attributes.position;
+      for (let v = 0; v < pos.count; v++) pos.setY(v, pos.getY(v) * 0.55);
+      pos.needsUpdate = true;
+      geo.computeVertexNormals();
+      applyVerticalGradient(geo, leafLow, leafHigh);
+      const foliage = new THREE.Mesh(geo, leafMat);
+      const angle = rand() * Math.PI * 2, dist = 0.5 + rand() * 1.3;
+      foliage.position.set(Math.cos(angle) * dist, h * (0.8 + rand() * 0.15), Math.sin(angle) * dist);
+      group.add(foliage);
+    }
+  } else {
+    // "round" — the original bushy-clump look, now one of three options
+    // instead of the only one, and with the per-tree color + gradient
+    // applied like the other two archetypes.
+    const clumps = 3 + Math.floor(rand() * 3);
+    for (let i = 0; i < clumps; i++) {
+      const scale = 1.1 + rand() * 1.1;
+      const geo = new THREE.IcosahedronGeometry(scale, getGraphicsSettings().decorationDetail);
+      applyVerticalGradient(geo, leafLow, leafHigh);
+      const foliage = new THREE.Mesh(geo, leafMat);
+      const angle = rand() * Math.PI * 2, dist = rand() * 0.9;
+      foliage.position.set(Math.cos(angle) * dist, h * (0.78 + rand() * 0.22), Math.sin(angle) * dist);
+      group.add(foliage);
+    }
   }
+
   return { group, kind: "tree", bobAmplitude: 0.02, bobSeed: rand() * Math.PI * 2 };
 }
 
@@ -428,6 +638,46 @@ function updateDecoration(handle, elapsed) {
     handle.group.rotation.y += handle.spinRate * 0.016;
   } else if (handle.kind === "emberVent") {
     handle.light.intensity = 0.2 + 0.25 * (0.5 + 0.5 * Math.sin(elapsed * 1.6 + handle.pulseSeed));
+  } else if (handle.kind === "emberFire") {
+    // Fires with a finite lifespan (dynamically spawned, see main.js's
+    // fire spawner) fade out over their last few seconds instead of
+    // vanishing abruptly, then flag themselves expired so main.js's
+    // animate loop can remove+dispose them. Static level-placed fires
+    // (lifespan left at the createEmberFire default of Infinity) never
+    // reach fadeOut < 1 and burn indefinitely, same as before this
+    // feature existed.
+    const age = elapsed - handle.spawnElapsed;
+    const fadeWindow = 4;
+    const remaining = handle.lifespan - age;
+    const fadeOut = handle.lifespan === Infinity ? 1 : THREE.MathUtils.clamp(remaining / fadeWindow, 0, 1);
+    if (handle.lifespan !== Infinity && remaining <= 0) handle.expired = true;
+
+    // Layered sine waves (not raw per-frame randomness) approximate real
+    // fire's irregular-but-smooth flicker without looking like static.
+    const flicker = (0.82 + 0.12 * Math.sin(elapsed * 9 + handle.flickerSeed) + 0.06 * Math.sin(elapsed * 23 + handle.flickerSeed * 1.7)) * fadeOut;
+    for (const f of handle.flames) {
+      const sway = Math.sin(elapsed * 4 + f.phase) * 0.06 + Math.sin(elapsed * 11 + f.phase2) * 0.03;
+      f.sprite.scale.set(f.baseW * (flicker + sway), f.baseH * flicker, 1);
+      f.sprite.material.rotation = sway * 0.4;
+      f.sprite.material.opacity = (0.75 + 0.2 * flicker) * fadeOut;
+    }
+    handle.light.intensity = handle.baseLightIntensity * flicker;
+
+    for (const e of handle.embers) {
+      // Positive-safe modulo — elapsed-minus-delay can go negative early
+      // on, and JS's `%` preserves the sign of the dividend (see the
+      // project-wide note on this in landmarks.js/liquid.js).
+      const cycle = e.duration + e.pause;
+      const raw = elapsed - e.delay;
+      const localT = ((raw % cycle) + cycle) % cycle;
+      if (localT > e.duration) {
+        e.mesh.material.opacity = 0;
+        continue;
+      }
+      const t = localT / e.duration;
+      e.mesh.position.set(Math.cos(e.angle) * e.dist, t * e.riseHeight, Math.sin(e.angle) * e.dist);
+      e.mesh.material.opacity = Math.sin(t * Math.PI) * 0.85 * fadeOut;
+    }
   }
 }
 
@@ -616,4 +866,4 @@ function createGlyphMarker(colorHex, rand) {
   return { group, kind: "glyphMarker" };
 }
 
-export { createDecoration, updateDecoration };
+export { createDecoration, updateDecoration, createEmberFire };

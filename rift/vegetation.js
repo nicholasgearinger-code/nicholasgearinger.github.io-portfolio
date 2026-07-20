@@ -21,7 +21,7 @@ const GRASS_STYLE = {
   // clusters several blades per sampled ground point so it reads as a
   // dense clump rather than one lonely blade per patch of dirt.
   verdant: {
-    tuftCount: 6000, tuftSize: 5, baseColor: 0x2f7a3a, tipColor: 0x9ee86b,
+    tuftCount: 9500, tuftSize: 6, baseColor: 0x2f7a3a, tipColor: 0x9ee86b,
     height: 0.42, heightVariance: 0.24, bladeRadius: 0.05, bladeWidth: 0.36,
   },
   ashen: {

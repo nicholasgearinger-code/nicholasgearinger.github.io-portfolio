@@ -495,9 +495,12 @@ function createRockCluster(biome, colorHex, rand) {
 // Real forests aren't one uniform green — a handful of distinct leaf
 // tones (picked per-tree, not per-leaf) plus a couple of bark tones so
 // trees actually read as different from each other at a glance, not
-// just different sizes of the same silhouette.
-const VERDANT_LEAF_PALETTE = [0x2f7a3a, 0x3f8f3a, 0x5a9a3a, 0x2f6a52, 0x4a7a2a];
-const VERDANT_BARK_PALETTE = [0x4a3524, 0x5a4030, 0x3a2a1c];
+// just different sizes of the same silhouette. Pushed bolder/more
+// saturated than a naturalistic palette — the reference is a flat
+// illustration with vivid, punchy color blocks, not a muted realistic
+// woodland.
+const VERDANT_LEAF_PALETTE = [0x3d9a42, 0x4fc24f, 0x6bcc4a, 0x2f9a68, 0x5ab83a];
+const VERDANT_BARK_PALETTE = [0x6b4423, 0x7a4f2a, 0x5a3a1e];
 
 // Living tree, one of three archetypes picked per-instance so a cluster
 // of them reads as a real varied grove instead of the same silhouette
@@ -514,10 +517,10 @@ function createLivingTree(colorHex, rand) {
 
   const h = 4 + rand() * 5;
   const bark = new THREE.Color(VERDANT_BARK_PALETTE[Math.floor(rand() * VERDANT_BARK_PALETTE.length)]);
-  const trunkMat = new THREE.MeshStandardMaterial({ color: bark, roughness: 0.9, flatShading: true });
+  const barkMat = new THREE.MeshStandardMaterial({ color: bark, roughness: 0.9, flatShading: true });
   const trunkRadiusTop = 0.12 + rand() * 0.1;
   const trunkRadiusBottom = trunkRadiusTop + 0.1 + rand() * 0.12;
-  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(trunkRadiusTop, trunkRadiusBottom, h, 6), trunkMat);
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(trunkRadiusTop, trunkRadiusBottom, h, 6), barkMat);
   trunk.position.y = h / 2;
   // A slight lean rather than perfectly vertical — real trees rarely grow
   // arrow-straight, and a whole grove standing bolt upright is part of
@@ -527,54 +530,100 @@ function createLivingTree(colorHex, rand) {
   group.add(trunk);
 
   const leafLow = new THREE.Color(VERDANT_LEAF_PALETTE[Math.floor(rand() * VERDANT_LEAF_PALETTE.length)]);
-  const leafHigh = leafLow.clone().lerp(new THREE.Color(0xffffff), 0.22);
+  const leafHigh = leafLow.clone().lerp(new THREE.Color(0xd8f06a), 0.4); // a vivid yellow-green highlight rather than washing toward plain white — bolder, more illustration-flat contrast
   const leafMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, flatShading: true });
 
-  if (archetype === "conical") {
-    let baseY = h * 0.55;
-    const tiers = 2 + Math.floor(rand() * 2);
-    for (let i = 0; i < tiers; i++) {
-      const tierT = i / tiers;
-      const tierRadius = (1.3 - tierT * 0.7) * (0.9 + rand() * 0.3);
-      const tierHeight = h * (0.32 - tierT * 0.06);
-      const geo = new THREE.ConeGeometry(tierRadius, tierHeight, 6 + Math.floor(rand() * 3));
-      applyVerticalGradient(geo, leafLow, leafHigh);
-      const cone = new THREE.Mesh(geo, leafMat);
-      cone.position.y = baseY + tierHeight * 0.4;
-      group.add(cone);
-      baseY += tierHeight * 0.62;
-    }
-  } else if (archetype === "spreading") {
-    const clumps = 3 + Math.floor(rand() * 2);
-    for (let i = 0; i < clumps; i++) {
-      const scale = 1.4 + rand() * 1.0;
-      const geo = new THREE.IcosahedronGeometry(scale, getGraphicsSettings().decorationDetail);
-      // Squash vertically for a flatter, wider canopy silhouette than the
-      // round archetype's ball-shaped clumps.
-      const pos = geo.attributes.position;
-      for (let v = 0; v < pos.count; v++) pos.setY(v, pos.getY(v) * 0.55);
-      pos.needsUpdate = true;
+  // A rounded (optionally squashed) foliage clump at a given local
+  // position — shared by both the branch tips below and the crown
+  // clumps, so every leaf mass in the tree uses the exact same gradient
+  // technique rather than two different-looking systems.
+  function addFoliageClump(pos, scale, squash) {
+    const geo = new THREE.IcosahedronGeometry(scale, getGraphicsSettings().decorationDetail);
+    if (squash !== 1) {
+      const gp = geo.attributes.position;
+      for (let v = 0; v < gp.count; v++) gp.setY(v, gp.getY(v) * squash);
+      gp.needsUpdate = true;
       geo.computeVertexNormals();
-      applyVerticalGradient(geo, leafLow, leafHigh);
-      const foliage = new THREE.Mesh(geo, leafMat);
-      const angle = rand() * Math.PI * 2, dist = 0.5 + rand() * 1.3;
-      foliage.position.set(Math.cos(angle) * dist, h * (0.8 + rand() * 0.15), Math.sin(angle) * dist);
-      group.add(foliage);
     }
-  } else {
-    // "round" — the original bushy-clump look, now one of three options
-    // instead of the only one, and with the per-tree color + gradient
-    // applied like the other two archetypes.
-    const clumps = 3 + Math.floor(rand() * 3);
-    for (let i = 0; i < clumps; i++) {
-      const scale = 1.1 + rand() * 1.1;
-      const geo = new THREE.IcosahedronGeometry(scale, getGraphicsSettings().decorationDetail);
-      applyVerticalGradient(geo, leafLow, leafHigh);
-      const foliage = new THREE.Mesh(geo, leafMat);
-      const angle = rand() * Math.PI * 2, dist = rand() * 0.9;
-      foliage.position.set(Math.cos(angle) * dist, h * (0.78 + rand() * 0.22), Math.sin(angle) * dist);
-      group.add(foliage);
+    applyVerticalGradient(geo, leafLow, leafHigh);
+    const foliage = new THREE.Mesh(geo, leafMat);
+    foliage.position.copy(pos);
+    group.add(foliage);
+  }
+
+  // A real oriented branch segment (a tapered cylinder actually pointing
+  // from `start` to `end`, not just a foliage blob floating above the
+  // trunk) — reused for both primary branches and the smaller forks off
+  // them.
+  function addBranchMesh(start, end, radiusStart, radiusEnd) {
+    const dir = new THREE.Vector3().subVectors(end, start);
+    const len = dir.length();
+    dir.normalize();
+    const geo = new THREE.CylinderGeometry(radiusEnd, radiusStart, len, 5);
+    const mesh = new THREE.Mesh(geo, barkMat);
+    mesh.position.copy(start).addScaledVector(dir, len / 2);
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+    group.add(mesh);
+  }
+
+  // Archetype biases how the branches themselves grow, rather than
+  // picking a completely different foliage system per type — "conical"
+  // branches stay closer to vertical for a tighter pine-like profile,
+  // "spreading" branches lean much more horizontal for a wide canopy,
+  // "round" sits in between. This is what actually makes each archetype
+  // read as organically different once real branches are involved.
+  const tiltRange = archetype === "conical" ? [0.12, 0.42] : archetype === "spreading" ? [0.55, 1.05] : [0.3, 0.75];
+  const branchCount = archetype === "conical" ? 6 + Math.floor(rand() * 4) : 4 + Math.floor(rand() * 4);
+
+  for (let i = 0; i < branchCount; i++) {
+    const startHeight = h * (0.4 + rand() * 0.42); // emerges from the upper ~55% of the trunk, not down near the roots
+    const startPos = new THREE.Vector3(0, startHeight, 0);
+    const branchAngle = rand() * Math.PI * 2;
+    const branchTilt = tiltRange[0] + rand() * (tiltRange[1] - tiltRange[0]);
+    const branchLen = h * (0.26 + rand() * 0.28);
+    const dir = new THREE.Vector3(
+      Math.sin(branchTilt) * Math.cos(branchAngle),
+      Math.cos(branchTilt),
+      Math.sin(branchTilt) * Math.sin(branchAngle)
+    );
+    const endPos = startPos.clone().addScaledVector(dir, branchLen);
+    const branchRadius = 0.05 + rand() * 0.05;
+    addBranchMesh(startPos, endPos, branchRadius, branchRadius * 0.45);
+    addFoliageClump(endPos, 0.55 + rand() * 0.55, 0.75 + rand() * 0.35);
+
+    // About a third of branches fork a smaller secondary branch partway
+    // along their length — real branching complexity instead of one
+    // clean stick per limb.
+    if (rand() < 0.35) {
+      const forkT = 0.4 + rand() * 0.35;
+      const forkStart = startPos.clone().lerp(endPos, forkT);
+      const forkAngle = branchAngle + (rand() - 0.5) * 2.2;
+      const forkTilt = branchTilt + (rand() - 0.5) * 0.5;
+      const forkLen = branchLen * (0.4 + rand() * 0.3);
+      const forkDir = new THREE.Vector3(
+        Math.sin(forkTilt) * Math.cos(forkAngle),
+        Math.cos(forkTilt),
+        Math.sin(forkTilt) * Math.sin(forkAngle)
+      );
+      const forkEnd = forkStart.clone().addScaledVector(forkDir, forkLen);
+      addBranchMesh(forkStart, forkEnd, branchRadius * 0.5, branchRadius * 0.2);
+      addFoliageClump(forkEnd, 0.4 + rand() * 0.4, 0.75 + rand() * 0.3);
     }
+  }
+
+  // A few extra clumps near the crown center so the canopy reads as one
+  // continuous mass rather than isolated pom-poms at each branch tip —
+  // count/shape still archetype-biased (conical stays apex-heavy,
+  // spreading stays flatter and wider).
+  const crownClumps = archetype === "conical" ? 1 : archetype === "spreading" ? 2 : 3;
+  const crownSquash = archetype === "spreading" ? 0.55 : 0.85;
+  for (let i = 0; i < crownClumps; i++) {
+    const angle = rand() * Math.PI * 2, dist = rand() * h * 0.16;
+    addFoliageClump(
+      new THREE.Vector3(Math.cos(angle) * dist, h * (0.76 + rand() * 0.18), Math.sin(angle) * dist),
+      0.6 + rand() * 0.7,
+      crownSquash
+    );
   }
 
   return { group, kind: "tree", bobAmplitude: 0.02, bobSeed: rand() * Math.PI * 2 };

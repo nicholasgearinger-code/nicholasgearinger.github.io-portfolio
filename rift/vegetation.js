@@ -49,20 +49,47 @@ const dummy = new THREE.Object3D();
 // real color gradient (dark base -> bright tip, baked once here) is what
 // actually guarantees the grass reads as green regardless of how the
 // renderer handles per-instance color.
-function buildBladeGeometry(radialSegments, baseColor, tipColor) {
-  const geo = new THREE.ConeGeometry(1, 1, radialSegments); // unit cone — actual radius/height applied per-instance via the transform matrix instead of baked into the geometry, so one shared geometry serves every blade size variant
-  geo.translate(0, 0.5, 0); // base at y=0, tip at y=1, matching how the placement loop below expects to scale it
-  geo.scale(1, 1, 0.35); // flatten one axis — a blade-like sliver instead of a perfectly round spike
+// A painted 2D blade shape — a real tapered blade silhouette (narrow
+// point at the tip, slightly wider base) with the base->tip color
+// gradient baked directly into the pixels, rather than a 3D cone with a
+// vertex-color gradient. This is what "2D grass" actually means in
+// practice: a flat billboard card cut out via alpha instead of solid
+// geometry — the same painted-canvas-texture technique already used
+// throughout this project (landmarks.js's flame/vein textures,
+// decorations.js's createFlameTexture) rather than a new one-off.
+function buildBladeTexture(baseColorHex, tipColorHex) {
+  const w = 28, h = 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d");
 
-  const pos = geo.attributes.position;
-  const colors = new Float32Array(pos.count * 3);
-  const base = new THREE.Color(baseColor), tip = new THREE.Color(tipColor), tmp = new THREE.Color();
-  for (let i = 0; i < pos.count; i++) {
-    const t = THREE.MathUtils.clamp(pos.getY(i), 0, 1); // 0 at base, 1 at tip
-    tmp.copy(base).lerp(tip, t);
-    colors[i * 3] = tmp.r; colors[i * 3 + 1] = tmp.g; colors[i * 3 + 2] = tmp.b;
-  }
-  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  // A gentle curve rather than a perfectly straight blade — real grass
+  // blades bow slightly, and a dead-straight silhouette reads as plastic.
+  const bend = w * 0.22;
+  ctx.beginPath();
+  ctx.moveTo(w * 0.32, h);
+  ctx.quadraticCurveTo(w * 0.5 + bend * 0.5, h * 0.45, w * 0.5 + bend, 0);
+  ctx.lineTo(w * 0.5 + bend * 0.75, h * 0.06);
+  ctx.quadraticCurveTo(w * 0.5 + bend * 0.35, h * 0.5, w * 0.68, h);
+  ctx.closePath();
+
+  const grad = ctx.createLinearGradient(0, h, 0, 0);
+  grad.addColorStop(0, `#${new THREE.Color(baseColorHex).getHexString()}`);
+  grad.addColorStop(1, `#${new THREE.Color(tipColorHex).getHexString()}`);
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace; // required for painted canvas textures in this project or they render washed-out/pale
+  return tex;
+}
+
+// Unit flat card — base at y=0, tip at y=1 (matching how the placement
+// loop below scales it), centered on X so per-instance width scaling
+// stays centered on the tuft point the way the old cone did.
+function buildBladeGeometry() {
+  const geo = new THREE.PlaneGeometry(1, 1);
+  geo.translate(0, 0.5, 0);
   return geo;
 }
 
@@ -85,8 +112,16 @@ function createGrass(scene, biome, sampleHeight, radius) {
   const tuftCount = Math.max(1, Math.round(style.tuftCount * gfx.grassMultiplier));
   const bladeCount = tuftCount * style.tuftSize;
 
-  const bladeGeo = buildBladeGeometry(gfx.grassBladeSegments, style.baseColor, style.tipColor);
-  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, flatShading: true, side: THREE.DoubleSide });
+  const bladeGeo = buildBladeGeometry();
+  const bladeTex = buildBladeTexture(style.baseColor, style.tipColor);
+  // alphaTest (not just transparent blending) cuts the blade shape out
+  // hard rather than soft-blending it — avoids the sorting artifacts
+  // InstancedMesh + alpha-blended transparency is prone to, and (unlike
+  // pure alpha blending) still shadow-casts correctly to the cutout
+  // shape rather than a full rectangular card.
+  const mat = new THREE.MeshStandardMaterial({
+    map: bladeTex, transparent: true, alphaTest: 0.4, side: THREE.DoubleSide, roughness: 0.85,
+  });
 
   const mesh = new THREE.InstancedMesh(bladeGeo, mat, bladeCount);
   mesh.castShadow = true;
@@ -116,7 +151,7 @@ function createGrass(scene, biome, sampleHeight, radius) {
 
       dummy.position.set(x, tuftY, z);
       dummy.rotation.y = Math.random() * Math.PI * 2;
-      dummy.scale.set(w, h, w);
+      dummy.scale.set(w, h, 1);
       dummy.updateMatrix();
       mesh.setMatrixAt(placedBlades, dummy.matrix);
       swaySeeds[placedBlades] = Math.random() * Math.PI * 2;

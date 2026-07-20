@@ -322,7 +322,7 @@ function buildAmbientGraph(biome) {
       source.buffer = buffer;
       source.loop = true;
       const gain = ctx.createGain();
-      gain.gain.value = 0.4; // loud AT the volcano itself, per explicit request — was 0.12, nearly 6x quieter than fire's 0.7, effectively inaudible; worth a further by-ear pass once live
+      gain.gain.value = 0.65; // even louder AT the volcano itself, per explicit follow-up request — worth a further by-ear pass once live
       const panner = ctx.createPanner();
       panner.panningModel = "HRTF";
       panner.distanceModel = "inverse";
@@ -383,7 +383,7 @@ function setEruptionIntensity(active) {
   // node is created — ramps in fast (an eruption starts abruptly) and
   // back down slower (the rumble lingers as things settle), never all
   // the way to silent either way.
-  gainParam.linearRampToValueAtTime(active ? 0.8 : 0.4, now + (active ? 1.2 : 2.5));
+  gainParam.linearRampToValueAtTime(active ? 1.1 : 0.65, now + (active ? 1.2 : 2.5));
 }
 
 // Repositions the fire-crackle PannerNode — called every frame from

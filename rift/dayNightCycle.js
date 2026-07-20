@@ -21,15 +21,15 @@ const SKY_DOME_RADIUS = 900;
 // colors, not one). Interpolated smoothly between neighbors by elevation,
 // not a hard switch, so sunrise/sunset reads as its own moment.
 const NIGHT = {
-  sun: 0x22304a, sunIntensity: 0.12, ambient: 0x1a2438, ambientIntensity: 0.32,
+  sun: 0x22304a, sunIntensity: 0.05, ambient: 0x1a2438, ambientIntensity: 0.13,
   fog: 0x0a0e14, skyZenith: 0x05070f, skyHorizon: 0x141a2c,
 };
 const DAWN_DUSK = {
-  sun: 0xff9d5c, sunIntensity: 0.75, ambient: 0x4a3550, ambientIntensity: 0.45,
-  fog: 0x2a1f2e, skyZenith: 0x2a2138, skyHorizon: 0xff8f5c,
+  sun: 0xff7a3a, sunIntensity: 0.75, ambient: 0x4a3550, ambientIntensity: 0.45,
+  fog: 0x2a1f2e, skyZenith: 0x2a2138, skyHorizon: 0xff6a42,
 };
 const DAY = {
-  sun: 0xfff4e0, sunIntensity: 1.15, ambient: 0x8899bb, ambientIntensity: 0.65,
+  sun: 0xfff4e0, sunIntensity: 2.0, ambient: 0x8899bb, ambientIntensity: 0.5,
   fog: 0x1c2436, skyZenith: 0x1c3a5e, skyHorizon: 0x8fb8d6,
 };
 
@@ -437,8 +437,12 @@ function updateSkyDome(sky, zenithColor, horizonColor, elapsed) {
  */
 function createDayNightCycle(scene, sun, ambient, starfield, biome) {
   const glowTexture = createGlowTexture();
-  const sunBody = createBody(scene, glowTexture, createSunTexture(), 14, 0xffcf80, 40, 0.6);
-  const moonBody = createBody(scene, glowTexture, createMoonTexture(), 9, 0xaebedd, 22, 0.32);
+  // Sun bigger, warmer, and noticeably more radiant than the moon (was
+  // 14/40/0.6 vs 9/22/0.32 — pushed further apart) — the sun should read
+  // as the dominant light source at a glance, not just via the actual
+  // DirectionalLight intensity numbers below.
+  const sunBody = createBody(scene, glowTexture, createSunTexture(), 15, 0xffcf80, 48, 0.75);
+  const moonBody = createBody(scene, glowTexture, createMoonTexture(), 8, 0xaebedd, 18, 0.22);
   const sunBeams = createSunBeams(scene, createBeamTexture());
   const sky = createSkyDome(scene);
   const distantPlanet = createDistantPlanet(scene);
@@ -472,8 +476,11 @@ function updateDayNightCycle(cycle, dt) {
   const dayAmount = Math.max(0, elevation);       // 0 at/below horizon, 1 at noon
   let sunColor, ambientColor, fogColor, skyZenith, skyHorizon, sunIntensity, ambientIntensity;
   if (elevation <= 0) {
-    // night -> dawn/dusk as the sun approaches the horizon from below
-    const k = Math.max(0, 1 - Math.abs(elevation) / 0.35);
+    // night -> dawn/dusk as the sun approaches the horizon from below.
+    // Widened from 0.35 to 0.4 — sunrise/sunset should read as a real
+    // occasion the player can actually watch happen, not a blink-and-
+    // miss-it blend.
+    const k = Math.max(0, 1 - Math.abs(elevation) / 0.4);
     sunColor = lerpColor(NIGHT.sun, DAWN_DUSK.sun, k);
     ambientColor = lerpColor(NIGHT.ambient, DAWN_DUSK.ambient, k);
     fogColor = lerpColor(NIGHT.fog, DAWN_DUSK.fog, k);
@@ -482,8 +489,8 @@ function updateDayNightCycle(cycle, dt) {
     sunIntensity = THREE.MathUtils.lerp(NIGHT.sunIntensity, DAWN_DUSK.sunIntensity, k);
     ambientIntensity = THREE.MathUtils.lerp(NIGHT.ambientIntensity, DAWN_DUSK.ambientIntensity, k);
   } else {
-    // dawn/dusk -> day as the sun climbs, using the same dayAmount blend
-    const k = Math.min(1, dayAmount / 0.35);
+    // dawn/dusk -> day as the sun climbs, using the same widened window.
+    const k = Math.min(1, dayAmount / 0.4);
     sunColor = lerpColor(DAWN_DUSK.sun, DAY.sun, k);
     ambientColor = lerpColor(DAWN_DUSK.ambient, DAY.ambient, k);
     fogColor = lerpColor(DAWN_DUSK.fog, DAY.fog, k);
@@ -536,7 +543,7 @@ function updateDayNightCycle(cycle, dt) {
   // and taper off toward both full night and flat overhead noon light,
   // rather than being equally strong all day.
   const beamEmphasis = Math.max(0, 1 - Math.abs(sunOrbit.elevation - 0.25) / 0.5);
-  const beamOpacity = sunVisibility * beamEmphasis * 0.32;
+  const beamOpacity = sunVisibility * beamEmphasis * 0.42; // was 0.32 — a real sunrise/sunset should have visibly dramatic rays, not a faint hint
   for (const sprite of cycle.sunBeams.sprites) sprite.material.opacity = beamOpacity;
 
   // Stars fade in as the sun drops toward/below the horizon, fully hidden

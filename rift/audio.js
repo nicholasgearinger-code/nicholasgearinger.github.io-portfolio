@@ -193,14 +193,32 @@ function buildAmbientGraph(biome) {
     return { source, filter, gain };
   }
 
+  let eruptionBed = null; // ember only — silent until an eruption starts, see setEruptionIntensity below
+
   if (biome === "ember") {
-    drone(42, "sawtooth", 0.03);
-    drone(84, "sine", 0.015);
-    noiseBed("lowpass", 400, 0.7, 0.02, 0.08, 0.008); // low rumble, slow swell
-    // Random crackle/pop bursts — lava spitting.
+    // The old continuous low rumble (a slow-swelling lowpass noise bed)
+    // read as background engine hum, not fire — removed per request.
+    // Fire's actual character is a FAST, irregular flicker, not a slow
+    // swell, so this uses a much quicker gust rate plus a second,
+    // independent faster LFO layered on top of it — one clean pulse
+    // reads as "breathing," two overlapping uneven ones read as flicker.
+    const flameFlicker = noiseBed("bandpass", 1200, 1.5, 0.018, 5.5, 0.006);
+    lfoModulate(flameFlicker.gain.gain, 11, 0.004);
+    // Random crackle/pop bursts — lava spitting/flames popping. Slightly
+    // more frequent now that this is the ambient's main textural voice
+    // rather than a garnish on top of a rumble bed.
     intervalId = setInterval(() => {
-      if (Math.random() < 0.5) playCrackle();
-    }, 1800);
+      if (Math.random() < 0.6) playCrackle();
+    }, 1500);
+
+    // Volcanic eruption rumble — a SEPARATE deep bed rather than reusing
+    // the flame-flicker bed above, since an eruption should sound like
+    // something new starting, not the ambient fire simply getting
+    // louder. Gain starts at 0 (silent, but the node is already running
+    // so ramping it up later has no start-up click) and only gets raised
+    // by setEruptionIntensity() below, driven from main.js reading the
+    // volcano's own erupting state.
+    eruptionBed = noiseBed("lowpass", 110, 1.2, 0, 0, 0);
   } else if (biome === "verdant") {
     drone(60, "sine", 0.02);
     noiseBed("bandpass", 900, 0.5, 0.03, 0.15, 0.012); // wind through foliage, gustier
@@ -225,7 +243,51 @@ function buildAmbientGraph(biome) {
     drone(45, "sine", 0.012);
   }
 
-  return { stopOnSwitch, intervalId };
+  return { stopOnSwitch, intervalId, eruptionBed };
+}
+
+// Ramps the (silent-until-now) eruption rumble bed up or down — called
+// from main.js whenever the volcano's own erupting flag changes, not
+// every frame, so the ramp isn't repeatedly cancelled/restarted. Ramps in
+// fast (an eruption starts abruptly) and fades out slower (the rumble
+// lingers a bit as things settle).
+function setEruptionIntensity(active) {
+  if (!ambientNodes || !ambientNodes.eruptionBed || !ctx) return;
+  const now = ctx.currentTime;
+  const gainParam = ambientNodes.eruptionBed.gain.gain;
+  gainParam.cancelScheduledValues(now);
+  gainParam.setValueAtTime(gainParam.value, now);
+  gainParam.linearRampToValueAtTime(active ? 0.05 : 0, now + (active ? 1.2 : 2.5));
+}
+
+// One-shot deep boom + whoosh — fired once on the RISING edge of an
+// eruption (main.js detects the transition), distinct from the
+// continuous eruptionBed rumble above which is the sustained roar for as
+// long as the eruption lasts.
+function playEruptionBurst() {
+  if (!ctx) return;
+  const t = ctx.currentTime;
+
+  const osc = ctx.createOscillator();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(70, t);
+  osc.frequency.exponentialRampToValueAtTime(28, t + 0.6);
+  const oscGain = ctx.createGain();
+  envelope(oscGain, 0.01, 0.9, 0.22, t);
+  osc.connect(oscGain).connect(masterGain);
+  osc.start(t);
+  osc.stop(t + 1);
+
+  const source = ctx.createBufferSource();
+  source.buffer = noiseBuffer(0.5);
+  const filter = ctx.createBiquadFilter();
+  filter.type = "lowpass";
+  filter.frequency.setValueAtTime(2400, t);
+  filter.frequency.exponentialRampToValueAtTime(300, t + 0.5);
+  const noiseGain = ctx.createGain();
+  envelope(noiseGain, 0.005, 0.45, 0.18, t);
+  source.connect(filter).connect(noiseGain).connect(masterGain);
+  source.start(t);
 }
 
 function playCrackle() {
@@ -296,4 +358,4 @@ function playFootstep(biome) {
   source.start(t);
 }
 
-export { initAudio, toggleMuted, playShoot, playShatter, playLoreChime, startAmbient, playFootstep };
+export { initAudio, toggleMuted, playShoot, playShatter, playLoreChime, startAmbient, playFootstep, setEruptionIntensity, playEruptionBurst };

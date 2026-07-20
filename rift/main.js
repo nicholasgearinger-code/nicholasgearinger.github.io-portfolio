@@ -19,7 +19,7 @@ import {
   createMuzzleFlash, updateMuzzleFlash, disposeMuzzleFlash,
   createImpactBurst, updateImpactBurst, disposeImpactBurst,
 } from "./effects.js";
-import { initAudio, toggleMuted, playShoot, playShatter, playLoreChime, startAmbient, playFootstep } from "./audio.js";
+import { initAudio, toggleMuted, playShoot, playShatter, playLoreChime, startAmbient, playFootstep, setEruptionIntensity, playEruptionBurst } from "./audio.js";
 import { getIslandLore } from "./lore.js";
 import { findClosestHit } from "./hitPrediction.js";
 import { createTouchControls } from "./touchControls.js";
@@ -301,6 +301,7 @@ const playerPhysics = createPlayerPhysicsState();
 // the biome keeps feeling alive rather than a static one-time layout.
 // ---------------------------------------------------------------------------
 let fireSpawnTimer = 0;
+let wasErupting = false; // edge-detects eruption start/stop for audio — see the animate loop
 const MAX_DYNAMIC_FIRES = 10; // defensive cap so spawns can never outpace burnouts and pile up indefinitely
 
 function teardownLevel() {
@@ -771,6 +772,11 @@ function animate() {
   // lines below this frame (one-frame lag, imperceptible for ambient
   // reactions like these) rather than reordering the whole loop for it.
   const eruptionActive = !!(landmarkHandle && landmarkHandle.volcano && landmarkHandle.volcano.erupting);
+  if (eruptionActive !== wasErupting) {
+    setEruptionIntensity(eruptionActive);
+    if (eruptionActive) playEruptionBurst();
+    wasErupting = eruptionActive;
+  }
   updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y);
   const wind = updateWeatherSystem(weatherHandle, dt, eruptionActive);
   updateAtmosphericParticles(atmosphereHandle, elapsedTime, dt, wind.windX, wind.windZ);

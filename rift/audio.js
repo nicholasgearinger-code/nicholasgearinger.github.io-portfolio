@@ -27,11 +27,11 @@ const BASE_VOLUME = 0.6;
 // well before the player has picked a level, but this guarantees there's
 // never dead silence while waiting.
 // -----------------------------------------------------------------------------
-const SOUND_BASE_PATH = "sounds/";
+const SOUND_BASE_URL = new URL("sounds/", import.meta.url);
 const SOUND_FILES = {
-  fireLoop: "engyclick_firewood_burning_sound.mp3",     // continuous ambient bed — Ember's flame flicker
-  eruptionRumble: "rumble-of-thunder-1.mp3",             // loops for as long as an eruption lasts
-  eruptionBurst: "cannonroundwav-14480.mp3",             // one-shot, fired once when an eruption starts
+  fireLoop: "fire-crackle-loop.mp3",      // continuous ambient bed — Ember's flame flicker
+  eruptionRumble: "eruption-rumble.mp3",  // loops for as long as an eruption lasts
+  eruptionBurst: "eruption-burst.mp3",    // one-shot, fired once when an eruption starts
 };
 const soundBuffers = {}; // key -> decoded AudioBuffer, once ready
 const soundLoadStarted = {}; // key -> true once a fetch has been kicked off, so repeated calls don't re-fetch
@@ -39,7 +39,8 @@ const soundLoadStarted = {}; // key -> true once a fetch has been kicked off, so
 function loadSoundBuffer(key) {
   if (!ctx || soundBuffers[key] || soundLoadStarted[key]) return;
   soundLoadStarted[key] = true;
-  fetch(SOUND_BASE_PATH + SOUND_FILES[key])
+  const url = new URL(encodeURIComponent(SOUND_FILES[key]), SOUND_BASE_URL);
+  fetch(url)
     .then((res) => res.arrayBuffer())
     .then((arr) => ctx.decodeAudioData(arr))
     .then((buffer) => { soundBuffers[key] = buffer; })

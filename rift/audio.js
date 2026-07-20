@@ -29,8 +29,8 @@ const BASE_VOLUME = 0.6;
 // -----------------------------------------------------------------------------
 const SOUND_BASE_URL = new URL("sounds/", import.meta.url);
 const SOUND_FILES = {
-  fireLoop: "fire-crackle-loop.mp3",      // continuous ambient bed — Ember's flame flicker
-  eruptionRumble: "eruption-rumble.mp3",  // loops for as long as an eruption lasts
+  fireLoop: "fire-crackle-loop.mp3",      // positional — loudest near an actual fire, see updateFirePosition below
+  eruptionRumble: "eruption-rumble.mp3",  // always playing at a quiet baseline, boosted while an eruption is active
   eruptionBurst: "eruption-burst.mp3",    // one-shot, fired once when an eruption starts
 };
 const soundBuffers = {}; // key -> decoded AudioBuffer, once ready
@@ -58,10 +58,17 @@ function preloadRealSounds() {
   loadSoundBuffer("eruptionBurst");
 }
 
-// The real eruption-rumble recording (when loaded) is played as a
-// start/stop loop, not a persistent node — this tracks the live instance
-// so setEruptionIntensity/stopAmbient can find and stop it.
-let eruptionRumbleSource = null;
+// Ember-only state, both reset in stopAmbient() when leaving the biome so
+// they never point at disposed/stale nodes:
+// - eruptionRumbleGain: the persistent gain node feeding the always-on
+//   rumble loop — setEruptionIntensity ramps this up/down rather than
+//   starting/stopping the source itself, since the rumble is never fully
+//   silent anymore.
+// - fireCracklePanner: the PannerNode carrying the fire-crackle loop,
+//   repositioned every frame (from main.js, via updateFirePosition) to
+//   whichever fire is currently nearest the player.
+let eruptionRumbleGain = null;
+let fireCracklePanner = null;
 
 function ensureContext() {
   if (ctx) return ctx;
@@ -179,14 +186,8 @@ function startAmbient(biome) {
 }
 
 function stopAmbient() {
-  if (eruptionRumbleSource) {
-    const now = ctx ? ctx.currentTime : 0;
-    try {
-      eruptionRumbleSource.gain.gain.linearRampToValueAtTime(0.0001, now + 0.15);
-      eruptionRumbleSource.source.stop(now + 0.2);
-    } catch (_) { /* already stopped — ignore */ }
-    eruptionRumbleSource = null;
-  }
+  eruptionRumbleGain = null;
+  fireCracklePanner = null;
   if (!ambientNodes) return;
   const now = ctx ? ctx.currentTime : 0;
   // Fade out fast rather than an abrupt stop, then actually stop the
@@ -253,24 +254,49 @@ function buildAmbientGraph(biome) {
   }
 
   if (biome === "ember") {
-    // Ember plays ONLY the real recordings now — no synthesized crackle
-    // interval, no flicker/rumble fallback beds layered underneath. The
-    // earlier version kept a synthesized crackle-pop interval running
-    // "regardless" of whether the real recording was active, plus a
-    // silent-until-needed eruption fallback bed — together those read as
-    // an unwanted mechanical chugging texture under the real recording,
-    // not an enhancement. If the real fireLoop hasn't finished loading
-    // yet, Ember is simply quiet for that brief window rather than
-    // filling the gap with synthesized sound.
+    // Ember plays ONLY the real recordings — no synthesized fallback
+    // texture layered underneath (an earlier version's synthesized
+    // crackle interval running "regardless" of the real recording read
+    // as an unwanted mechanical chugging, not an enhancement). If a
+    // buffer hasn't finished loading yet, that sound is simply silent
+    // for that brief window.
     if (soundBuffers.fireLoop) {
+      // Positional — repositioned every frame (main.js calls
+      // updateFirePosition with whichever fire is currently nearest the
+      // player) so this is audibly louder standing next to an actual
+      // fire and fades with real distance via the PannerNode's own
+      // rolloff model, not a flat always-the-same-volume loop.
       const source = ctx.createBufferSource();
       source.buffer = soundBuffers.fireLoop;
       source.loop = true;
       const gain = ctx.createGain();
-      gain.gain.value = 0.3; // rough level match against this file's other (much quieter, synthesized) ambient gains for the other biomes — worth a by-ear pass once this is actually live
+      gain.gain.value = 0.7; // feeds the panner's distance falloff, not the final loudness by itself — worth a by-ear pass once live
+      const panner = ctx.createPanner();
+      panner.panningModel = "HRTF";
+      panner.distanceModel = "inverse";
+      panner.refDistance = 4; // full volume within ~4 units of a fire
+      panner.maxDistance = 45; // effectively inaudible past this
+      panner.rolloffFactor = 1.4;
+      source.connect(gain).connect(panner).connect(masterGain);
+      source.start();
+      stopOnSwitch.push(source, gain);
+      fireCracklePanner = panner;
+    }
+    if (soundBuffers.eruptionRumble) {
+      // Always playing at a quiet baseline — a volcano should feel like
+      // it's constantly grumbling in the background, not silent except
+      // during full eruptions. setEruptionIntensity below just pushes
+      // this gain up further while an eruption is actually active,
+      // rather than starting the sound from nothing.
+      const source = ctx.createBufferSource();
+      source.buffer = soundBuffers.eruptionRumble;
+      source.loop = true;
+      const gain = ctx.createGain();
+      gain.gain.value = 0.12; // quiet always-on presence — worth a by-ear pass once live
       source.connect(gain).connect(masterGain);
       source.start();
       stopOnSwitch.push(source, gain);
+      eruptionRumbleGain = gain;
     }
   } else if (biome === "verdant") {
     drone(60, "sine", 0.02);
@@ -305,26 +331,55 @@ function buildAmbientGraph(biome) {
 // fast (an eruption starts abruptly) and fades out slower (the rumble
 // lingers a bit as things settle).
 function setEruptionIntensity(active) {
-  if (!ambientNodes || !ctx || !soundBuffers.eruptionRumble) return;
+  if (!eruptionRumbleGain || !ctx) return;
   const now = ctx.currentTime;
+  const gainParam = eruptionRumbleGain.gain;
+  gainParam.cancelScheduledValues(now);
+  gainParam.setValueAtTime(gainParam.value, now);
+  // 0.45 during an eruption vs. the 0.12 quiet baseline set where this
+  // gain node is created — ramps in fast (an eruption starts abruptly)
+  // and back down slower (the rumble lingers as things settle), never
+  // all the way to silent either way.
+  gainParam.linearRampToValueAtTime(active ? 0.45 : 0.12, now + (active ? 1.2 : 2.5));
+}
 
-  if (active && !eruptionRumbleSource) {
-    const source = ctx.createBufferSource();
-    source.buffer = soundBuffers.eruptionRumble;
-    source.loop = true;
-    const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0, now);
-    gain.gain.linearRampToValueAtTime(0.4, now + 1.2); // rough level, worth a by-ear pass once live
-    source.connect(gain).connect(masterGain);
-    source.start(now);
-    eruptionRumbleSource = { source, gain };
-  } else if (!active && eruptionRumbleSource) {
-    const { source, gain } = eruptionRumbleSource;
-    gain.gain.cancelScheduledValues(now);
-    gain.gain.setValueAtTime(gain.gain.value, now);
-    gain.gain.linearRampToValueAtTime(0.0001, now + 2.5);
-    source.stop(now + 2.6);
-    eruptionRumbleSource = null;
+// Repositions the fire-crackle PannerNode — called every frame from
+// main.js with whichever fire is currently nearest the player. No-ops if
+// there's no active panner (non-Ember biome, or the recording hasn't
+// loaded yet).
+function updateFirePosition(x, y, z) {
+  if (!fireCracklePanner || !ctx) return;
+  const now = ctx.currentTime;
+  if (fireCracklePanner.positionX) {
+    fireCracklePanner.positionX.setValueAtTime(x, now);
+    fireCracklePanner.positionY.setValueAtTime(y, now);
+    fireCracklePanner.positionZ.setValueAtTime(z, now);
+  } else if (fireCracklePanner.setPosition) {
+    fireCracklePanner.setPosition(x, y, z); // older browsers without the AudioParam-based positioning API
+  }
+}
+
+// Keeps the AudioListener (the "ears" all positional audio is measured
+// against) matched to the camera every frame — called from main.js
+// regardless of biome, harmless when nothing positional is currently
+// playing.
+function updateListenerPosition(x, y, z, forwardX, forwardY, forwardZ) {
+  if (!ctx) return;
+  const listener = ctx.listener;
+  const now = ctx.currentTime;
+  if (listener.positionX) {
+    listener.positionX.setValueAtTime(x, now);
+    listener.positionY.setValueAtTime(y, now);
+    listener.positionZ.setValueAtTime(z, now);
+    listener.forwardX.setValueAtTime(forwardX, now);
+    listener.forwardY.setValueAtTime(forwardY, now);
+    listener.forwardZ.setValueAtTime(forwardZ, now);
+    listener.upX.setValueAtTime(0, now);
+    listener.upY.setValueAtTime(1, now);
+    listener.upZ.setValueAtTime(0, now);
+  } else if (listener.setPosition) {
+    listener.setPosition(x, y, z);
+    if (listener.setOrientation) listener.setOrientation(forwardX, forwardY, forwardZ, 0, 1, 0);
   }
 }
 
@@ -396,4 +451,4 @@ function playFootstep(biome) {
   source.start(t);
 }
 
-export { initAudio, toggleMuted, playShoot, playShatter, playLoreChime, startAmbient, playFootstep, setEruptionIntensity, playEruptionBurst };
+export { initAudio, toggleMuted, playShoot, playShatter, playLoreChime, startAmbient, playFootstep, setEruptionIntensity, playEruptionBurst, updateFirePosition, updateListenerPosition };

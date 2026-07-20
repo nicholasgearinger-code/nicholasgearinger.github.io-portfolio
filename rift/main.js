@@ -19,7 +19,7 @@ import {
   createMuzzleFlash, updateMuzzleFlash, disposeMuzzleFlash,
   createImpactBurst, updateImpactBurst, disposeImpactBurst,
 } from "./effects.js";
-import { initAudio, toggleMuted, playShoot, playShatter, playLoreChime, startAmbient, playFootstep, setEruptionIntensity, playEruptionBurst } from "./audio.js";
+import { initAudio, toggleMuted, playShoot, playShatter, playLoreChime, startAmbient, playFootstep, setEruptionIntensity, playEruptionBurst, updateFirePosition, updateListenerPosition } from "./audio.js";
 import { getIslandLore } from "./lore.js";
 import { findClosestHit } from "./hitPrediction.js";
 import { createTouchControls } from "./touchControls.js";
@@ -732,6 +732,29 @@ function updateEmberFireSpawner(dt) {
   if (activeFireCount < MAX_DYNAMIC_FIRES) spawnEmberFire();
 }
 
+// Finds whichever "emberFire" decoration is currently closest to the
+// player (there can be several — static level-placed ones plus whatever
+// the spawner above has going) and hands its position to audio.js's
+// single positional fire-crackle panner. Cheap even with MAX_DYNAMIC_FIRES
+// dynamic fires plus the level's static ones, since this is a flat scan
+// over decorationHandles that's already being iterated once per frame
+// anyway for updateDecoration above.
+const cameraForward = new THREE.Vector3();
+function updateFireAudio() {
+  let nearest = null;
+  let nearestDistSq = Infinity;
+  for (const handle of decorationHandles) {
+    if (handle.kind !== "emberFire") continue;
+    const dx = handle.group.position.x - camera.position.x;
+    const dz = handle.group.position.z - camera.position.z;
+    const distSq = dx * dx + dz * dz;
+    if (distSq < nearestDistSq) { nearestDistSq = distSq; nearest = handle.group.position; }
+  }
+  if (nearest) updateFirePosition(nearest.x, nearest.y, nearest.z);
+  camera.getWorldDirection(cameraForward);
+  updateListenerPosition(camera.position.x, camera.position.y, camera.position.z, cameraForward.x, cameraForward.y, cameraForward.z);
+}
+
 // ---------------------------------------------------------------------------
 // Main loop
 // ---------------------------------------------------------------------------
@@ -768,6 +791,7 @@ function animate() {
     }
   }
   updateEmberFireSpawner(dt);
+  updateFireAudio();
   // Read from whatever updateLandmark last set — that call happens a few
   // lines below this frame (one-frame lag, imperceptible for ambient
   // reactions like these) rather than reordering the whole loop for it.

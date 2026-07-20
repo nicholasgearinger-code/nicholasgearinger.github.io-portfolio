@@ -78,6 +78,52 @@ function getDustTexture() {
   return sharedDustTexture;
 }
 
+// Neutral white-alpha (not pre-colored like getDustTexture above) so
+// material.color actually tints it — same convention wildlife.js's
+// getMoteTexture uses, for the same reason.
+let sharedAshTexture = null;
+function getAshTexture() {
+  if (sharedAshTexture) return sharedAshTexture;
+  const size = 24;
+  const canvas = document.createElement("canvas");
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, "rgba(255,255,255,0.85)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  sharedAshTexture = new THREE.CanvasTexture(canvas);
+  return sharedAshTexture;
+}
+
+// Ember-only ambient ash, always lightly present (not cyclic like rain —
+// a biome full of smoke/fire should never read as clear-aired) and
+// thickening further during an eruption (see the eruptBoost param on
+// updateWeatherSystem). Falls much slower than rain — light drifting
+// flecks, not droplets — and drifts sideways with the wind more than
+// rain does since it's so light.
+function createAshfall(scene) {
+  const count = 260;
+  const positions = new Float32Array(count * 3);
+  const fallSpeeds = new Float32Array(count);
+  for (let i = 0; i < count; i++) {
+    positions[i * 3] = (Math.random() - 0.5) * 220;
+    positions[i * 3 + 1] = Math.random() * 50;
+    positions[i * 3 + 2] = (Math.random() - 0.5) * 220;
+    fallSpeeds[i] = 1.2 + Math.random() * 1.6;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const mat = new THREE.PointsMaterial({
+    map: getAshTexture(), color: 0x8a7a6a, size: 0.5, transparent: true, opacity: 0.28,
+    depthWrite: false, sizeAttenuation: true,
+  });
+  const points = new THREE.Points(geo, mat);
+  scene.add(points);
+  return { points, fallSpeeds };
+}
+
 // Crystal-only — a brief rainbow arc, as if light caught one of the
 // spires just right for a moment. A real rainbow texture (hue sweep
 // across the strip), not a single tinted glow.
@@ -181,9 +227,10 @@ function createWeatherSystem(scene, biome) {
   const distantLightning = createDistantLightning(scene);
   const dustDevil = biome === "ashen" ? createDustDevil(scene) : null;
   const crystalRefraction = biome === "crystal" ? createCrystalRefraction(scene) : null;
+  const ashfall = biome === "ember" ? createAshfall(scene) : null;
 
   return {
-    scene, biome, profile, lightningLight, rain, distantLightning, dustDevil, crystalRefraction,
+    scene, biome, profile, lightningLight, rain, distantLightning, dustDevil, crystalRefraction, ashfall,
     windAngle: Math.random() * Math.PI * 2,
     lightningTimer: randRange(profile.lightning.intervalMin, profile.lightning.intervalMax),
     lightningFlash: 0,
@@ -195,7 +242,7 @@ function createWeatherSystem(scene, biome) {
   };
 }
 
-function updateWeatherSystem(handle, dt) {
+function updateWeatherSystem(handle, dt, erupting = false) {
   if (!handle) return { windX: 0, windZ: 0, windStrength: 0, rainIntensity: 0 };
   const { profile } = handle;
   handle.elapsed += dt;
@@ -308,6 +355,26 @@ function updateWeatherSystem(handle, dt) {
     }
   }
 
+  // Ambient ash — Ember only. Always lightly present, thickens further
+  // during an eruption (erupting param, driven from main.js reading the
+  // volcano's own eruption state).
+  if (handle.ashfall) {
+    const af = handle.ashfall;
+    const posAttr = af.points.geometry.attributes.position;
+    for (let i = 0; i < af.fallSpeeds.length; i++) {
+      let y = posAttr.getY(i) - af.fallSpeeds[i] * dt;
+      if (y < 0) y = 50;
+      posAttr.setY(i, y);
+      // Ash is light — it drifts sideways with the wind noticeably more
+      // than rain does.
+      posAttr.setX(i, posAttr.getX(i) + windX * dt * 0.6);
+      posAttr.setZ(i, posAttr.getZ(i) + windZ * dt * 0.6);
+    }
+    posAttr.needsUpdate = true;
+    const targetOpacity = erupting ? 0.68 : 0.28;
+    af.points.material.opacity += (targetOpacity - af.points.material.opacity) * Math.min(1, dt * 0.8); // eases toward the new density rather than snapping when an eruption starts/ends
+  }
+
   // Crystal light refraction — Crystal Spire only. A brief rainbow arc
   // near one of the spires, as if the light caught it just right.
   if (handle.crystalRefraction) {
@@ -347,6 +414,11 @@ function disposeWeatherSystem(scene, handle) {
   if (handle.crystalRefraction) {
     scene.remove(handle.crystalRefraction.sprite);
     handle.crystalRefraction.sprite.material.dispose();
+  }
+  if (handle.ashfall) {
+    scene.remove(handle.ashfall.points);
+    handle.ashfall.points.geometry.dispose();
+    handle.ashfall.points.material.dispose();
   }
 }
 

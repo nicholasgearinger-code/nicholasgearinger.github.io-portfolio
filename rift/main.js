@@ -388,7 +388,7 @@ function buildLevel(levelIdx) {
   weatherHandle = createWeatherSystem(scene, level.biome);
   cloudsHandle = createClouds(scene, level.biome);
   horizonHandle = createHorizonSilhouettes(scene, level.biome);
-  wildlifeHandle = createWildlife(scene, level.biome);
+  wildlifeHandle = createWildlife(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
   landmarkHandle = createLandmark(scene, level.biome, level.color, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
 
   const layout = generateLevelLayout(level.biome, WORLD_SEED);
@@ -767,11 +767,15 @@ function animate() {
     }
   }
   updateEmberFireSpawner(dt);
+  // Read from whatever updateLandmark last set — that call happens a few
+  // lines below this frame (one-frame lag, imperceptible for ambient
+  // reactions like these) rather than reordering the whole loop for it.
+  const eruptionActive = !!(landmarkHandle && landmarkHandle.volcano && landmarkHandle.volcano.erupting);
   updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y);
-  const wind = updateWeatherSystem(weatherHandle, dt);
+  const wind = updateWeatherSystem(weatherHandle, dt, eruptionActive);
   updateAtmosphericParticles(atmosphereHandle, elapsedTime, dt, wind.windX, wind.windZ);
   updateGrass(grassHandle, elapsedTime, wind.windX, wind.windZ);
-  updateWildlife(wildlifeHandle, elapsedTime, dt, camera.position.x, camera.position.z);
+  updateWildlife(wildlifeHandle, elapsedTime, dt, camera.position.x, camera.position.z, eruptionActive);
   updateLandmark(landmarkHandle, elapsedTime, dt);
   updateClouds(cloudsHandle, dt, wind, dayNight.dayAmount, wind.rainIntensity);
   updateWorldPulse(dt);

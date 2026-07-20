@@ -59,9 +59,8 @@ function preloadRealSounds() {
 }
 
 // The real eruption-rumble recording (when loaded) is played as a
-// start/stop loop rather than a persistent always-running gain-ramped
-// node the way the synthesized eruptionBed is — this tracks the live
-// instance so setEruptionIntensity/stopAmbient can find and stop it.
+// start/stop loop, not a persistent node — this tracks the live instance
+// so setEruptionIntensity/stopAmbient can find and stop it.
 let eruptionRumbleSource = null;
 
 function ensureContext() {
@@ -253,42 +252,26 @@ function buildAmbientGraph(biome) {
     return { source, filter, gain };
   }
 
-  let eruptionBed = null; // ember only — silent until an eruption starts, see setEruptionIntensity below
-
   if (biome === "ember") {
+    // Ember plays ONLY the real recordings now — no synthesized crackle
+    // interval, no flicker/rumble fallback beds layered underneath. The
+    // earlier version kept a synthesized crackle-pop interval running
+    // "regardless" of whether the real recording was active, plus a
+    // silent-until-needed eruption fallback bed — together those read as
+    // an unwanted mechanical chugging texture under the real recording,
+    // not an enhancement. If the real fireLoop hasn't finished loading
+    // yet, Ember is simply quiet for that brief window rather than
+    // filling the gap with synthesized sound.
     if (soundBuffers.fireLoop) {
-      // Real recorded firewood-burning loop — replaces the synthesized
-      // flicker texture entirely once it's decoded and ready.
       const source = ctx.createBufferSource();
       source.buffer = soundBuffers.fireLoop;
       source.loop = true;
       const gain = ctx.createGain();
-      gain.gain.value = 0.3; // rough level match against this file's other (much quieter, synthesized) ambient gains — real recordings don't share their scale, worth a by-ear pass once this is actually live
+      gain.gain.value = 0.3; // rough level match against this file's other (much quieter, synthesized) ambient gains for the other biomes — worth a by-ear pass once this is actually live
       source.connect(gain).connect(masterGain);
       source.start();
       stopOnSwitch.push(source, gain);
-    } else {
-      // Fallback while the real recording is still loading (or failed to
-      // load) — the old continuous low rumble (a slow-swelling lowpass
-      // noise bed) read as background engine hum, not fire, so it was
-      // replaced with a much quicker gust rate plus a second independent
-      // faster LFO layered on top: one clean pulse reads as "breathing,"
-      // two overlapping uneven ones read as flicker.
-      const flameFlicker = noiseBed("bandpass", 1200, 1.5, 0.018, 5.5, 0.006);
-      lfoModulate(flameFlicker.gain.gain, 11, 0.004);
     }
-    // Random crackle/pop bursts — lava spitting/flames popping. Kept
-    // regardless of which bed is playing above; the real recording
-    // already has its own crackle character, but occasional sharper pops
-    // on top still add punctuation.
-    intervalId = setInterval(() => {
-      if (Math.random() < 0.6) playCrackle();
-    }, 1500);
-
-    // Synthesized eruption-rumble fallback — only actually used if
-    // soundBuffers.eruptionRumble never loads; see setEruptionIntensity
-    // below for how the real recording is used instead when it's ready.
-    eruptionBed = noiseBed("lowpass", 110, 1.2, 0, 0, 0);
   } else if (biome === "verdant") {
     drone(60, "sine", 0.02);
     noiseBed("bandpass", 900, 0.5, 0.03, 0.15, 0.012); // wind through foliage, gustier
@@ -313,7 +296,7 @@ function buildAmbientGraph(biome) {
     drone(45, "sine", 0.012);
   }
 
-  return { stopOnSwitch, intervalId, eruptionBed };
+  return { stopOnSwitch, intervalId };
 }
 
 // Ramps the (silent-until-now) eruption rumble bed up or down — called
@@ -322,89 +305,40 @@ function buildAmbientGraph(biome) {
 // fast (an eruption starts abruptly) and fades out slower (the rumble
 // lingers a bit as things settle).
 function setEruptionIntensity(active) {
-  if (!ambientNodes || !ctx) return;
+  if (!ambientNodes || !ctx || !soundBuffers.eruptionRumble) return;
   const now = ctx.currentTime;
 
-  if (soundBuffers.eruptionRumble) {
-    if (active && !eruptionRumbleSource) {
-      const source = ctx.createBufferSource();
-      source.buffer = soundBuffers.eruptionRumble;
-      source.loop = true;
-      const gain = ctx.createGain();
-      gain.gain.setValueAtTime(0, now);
-      gain.gain.linearRampToValueAtTime(0.4, now + 1.2); // rough level, worth a by-ear pass once live
-      source.connect(gain).connect(masterGain);
-      source.start(now);
-      eruptionRumbleSource = { source, gain };
-    } else if (!active && eruptionRumbleSource) {
-      const { source, gain } = eruptionRumbleSource;
-      gain.gain.cancelScheduledValues(now);
-      gain.gain.setValueAtTime(gain.gain.value, now);
-      gain.gain.linearRampToValueAtTime(0.0001, now + 2.5);
-      source.stop(now + 2.6);
-      eruptionRumbleSource = null;
-    }
-    return;
+  if (active && !eruptionRumbleSource) {
+    const source = ctx.createBufferSource();
+    source.buffer = soundBuffers.eruptionRumble;
+    source.loop = true;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.4, now + 1.2); // rough level, worth a by-ear pass once live
+    source.connect(gain).connect(masterGain);
+    source.start(now);
+    eruptionRumbleSource = { source, gain };
+  } else if (!active && eruptionRumbleSource) {
+    const { source, gain } = eruptionRumbleSource;
+    gain.gain.cancelScheduledValues(now);
+    gain.gain.setValueAtTime(gain.gain.value, now);
+    gain.gain.linearRampToValueAtTime(0.0001, now + 2.5);
+    source.stop(now + 2.6);
+    eruptionRumbleSource = null;
   }
-
-  // Fallback: the synthesized eruptionBed noiseBed, ramped up/down.
-  if (!ambientNodes.eruptionBed) return;
-  const gainParam = ambientNodes.eruptionBed.gain.gain;
-  gainParam.cancelScheduledValues(now);
-  gainParam.setValueAtTime(gainParam.value, now);
-  gainParam.linearRampToValueAtTime(active ? 0.05 : 0, now + (active ? 1.2 : 2.5));
 }
 
 // One-shot impact — the real cannon-round recording when loaded, fired
 // once on the RISING edge of an eruption (main.js detects the
 // transition). Falls back to a synthesized deep boom + whoosh otherwise.
 function playEruptionBurst() {
-  if (!ctx) return;
-  const t = ctx.currentTime;
-
-  if (soundBuffers.eruptionBurst) {
-    const source = ctx.createBufferSource();
-    source.buffer = soundBuffers.eruptionBurst;
-    const gain = ctx.createGain();
-    gain.gain.value = 0.5; // rough level, worth a by-ear pass once live
-    source.connect(gain).connect(masterGain);
-    source.start(t);
-    return;
-  }
-
-  const osc = ctx.createOscillator();
-  osc.type = "sine";
-  osc.frequency.setValueAtTime(70, t);
-  osc.frequency.exponentialRampToValueAtTime(28, t + 0.6);
-  const oscGain = ctx.createGain();
-  envelope(oscGain, 0.01, 0.9, 0.22, t);
-  osc.connect(oscGain).connect(masterGain);
-  osc.start(t);
-  osc.stop(t + 1);
-
-  const source = ctx.createBufferSource();
-  source.buffer = noiseBuffer(0.5);
-  const filter = ctx.createBiquadFilter();
-  filter.type = "lowpass";
-  filter.frequency.setValueAtTime(2400, t);
-  filter.frequency.exponentialRampToValueAtTime(300, t + 0.5);
-  const noiseGain = ctx.createGain();
-  envelope(noiseGain, 0.005, 0.45, 0.18, t);
-  source.connect(filter).connect(noiseGain).connect(masterGain);
-  source.start(t);
-}
-
-function playCrackle() {
-  if (!ctx) return;
+  if (!ctx || !soundBuffers.eruptionBurst) return;
   const t = ctx.currentTime;
   const source = ctx.createBufferSource();
-  source.buffer = noiseBuffer(0.08);
-  const filter = ctx.createBiquadFilter();
-  filter.type = "bandpass";
-  filter.frequency.value = 1400 + Math.random() * 800;
+  source.buffer = soundBuffers.eruptionBurst;
   const gain = ctx.createGain();
-  envelope(gain, 0.002, 0.06, 0.06, t);
-  source.connect(filter).connect(gain).connect(masterGain);
+  gain.gain.value = 0.5; // rough level, worth a by-ear pass once live
+  source.connect(gain).connect(masterGain);
   source.start(t);
 }
 

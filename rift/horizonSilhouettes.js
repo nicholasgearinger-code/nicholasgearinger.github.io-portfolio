@@ -217,17 +217,61 @@ function buildSilhouetteRing(style, radius, countScale, heightScale, colorHex, c
 // (NEAR_RING_RADIUS, 165) — nothing filled that space, so the mountains
 // read as floating/rising out of nothing rather than standing in a
 // landscape. This is a single large flat disc bridging that gap and
-// continuing out past the far ring, using the same near-mountain color so
-// it reads as a continuous valley floor the peaks rise out of, and
-// `fog: true` so the built-in scene fog fades it into the horizon color
-// at distance rather than needing a second manual gradient.
+// continuing out past the far ring, with a winding paler wash threading
+// through it (the reference image's river-through-the-valley feature,
+// recolored per-biome rather than literal blue water — a warm pale
+// tan/peach wash fits Ember's ash-and-lava story better than a river
+// would). `fog: true` so the built-in scene fog still fades the whole
+// thing into the horizon color at distance.
 function createValleyFloor(style) {
   const innerRadius = 90; // tucks in just under the terrain's own falloff rim so there's no visible seam
   const outerRadius = 380; // past the far ring
-  const geo = new THREE.RingGeometry(innerRadius, outerRadius, 48, 1);
+  // Much higher resolution than a flat single-tone disc needs, on purpose
+  // — the winding wash below is computed per-vertex, so it can only
+  // actually read as "winding" (rather than a crude radial smear) with
+  // enough angular AND radial segments to capture the curve.
+  const geo = new THREE.RingGeometry(innerRadius, outerRadius, 64, 24);
   geo.rotateX(-Math.PI / 2);
-  const floorColor = lerpHexColor(style.color, style.capColor, 0.5); // matches the near ring's own color exactly, so the peaks look planted in it
-  const mat = new THREE.MeshBasicMaterial({ color: floorColor, fog: true, side: THREE.DoubleSide });
+
+  const floorColor = new THREE.Color(lerpHexColor(style.color, style.capColor, 0.5)); // matches the near ring's own color, so the peaks look planted in it
+  const washColor = new THREE.Color(lerpHexColor(style.capColor, 0xffffff, 0.55)); // a pale lightened version of the biome's OWN accent color, not an unrelated blue
+  const shoreColor = floorColor.clone().lerp(washColor, 0.5);
+
+  const washAngleOffset = Math.random() * Math.PI * 2;
+  const washWidth = 9; // half-width of the pale band itself
+  const shoreWidth = 24; // outer radius (from the band center) where the blend back to floorColor finishes
+
+  const pos = geo.attributes.position;
+  const colors = new Float32Array(pos.count * 3);
+  const tmp = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), z = pos.getZ(i);
+    const r = Math.hypot(x, z);
+    const angle = Math.atan2(z, x);
+    // The wash's angular position wobbles as radius increases — reads as
+    // a single band winding outward from near the player toward the
+    // mountains, the same wobble-along-an-axis idea terrain.js's lava
+    // channel and landmarks.js's veins already use elsewhere.
+    const washAngle = washAngleOffset + Math.sin(r * 0.02) * 0.4 + Math.sin(r * 0.007) * 0.25;
+    let angleDiff = angle - washAngle;
+    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+    const distFromWash = Math.abs(angleDiff) * r; // arc-length distance from the band's centerline at this radius
+
+    if (distFromWash >= shoreWidth) {
+      tmp.copy(floorColor);
+    } else if (distFromWash >= washWidth) {
+      const shoreT = 1 - (distFromWash - washWidth) / (shoreWidth - washWidth);
+      tmp.copy(floorColor).lerp(shoreColor, shoreT);
+    } else {
+      const washT = 1 - distFromWash / washWidth;
+      tmp.copy(shoreColor).lerp(washColor, washT);
+    }
+    colors[i * 3] = tmp.r; colors[i * 3 + 1] = tmp.g; colors[i * 3 + 2] = tmp.b;
+  }
+  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+
+  const mat = new THREE.MeshBasicMaterial({ vertexColors: true, fog: true, side: THREE.DoubleSide });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.y = -6; // just below the peaks' own sunk base (height/2 - 4) so they read as rising OUT of the floor, not sitting on top of it
   return mesh;

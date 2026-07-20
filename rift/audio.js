@@ -1,10 +1,14 @@
 // audio.js
 // -----------------------------------------------------------------------------
-// SWAP POINT: every sound here is synthesized on the fly with the Web Audio
-// API — no files to source, license, or host. Swap any function's body for
-// `new Audio('/sounds/whatever.mp3').play()` (or a buffer-based loader) to
-// use real recorded/composed audio instead; the exported function
-// signatures are the only contract the rest of the app relies on.
+// SWAP POINT: most sounds here are synthesized on the fly with the Web Audio
+// API — no files to source, license, or host for those. Ember's fire
+// ambience and volcano eruption are the exception: real recorded audio
+// files (see SOUND_FILES below), loaded async and with a synthesized
+// fallback for anything not yet decoded. To swap any of the still-
+// synthesized sounds for a file the same way, replace its body with a
+// buffer-based loader (see loadSoundBuffer) or `new Audio(...).play()`;
+// the exported function signatures are the only contract the rest of the
+// app relies on.
 // -----------------------------------------------------------------------------
 
 let ctx = null;
@@ -12,6 +16,52 @@ let masterGain = null;
 let ambientNodes = null;
 let muted = false;
 const BASE_VOLUME = 0.6;
+
+// -----------------------------------------------------------------------------
+// Real recorded audio, used for Ember's fire ambience and volcano eruption —
+// everything else in this file stays synthesized. Files live in rift/sounds/
+// alongside this module. Loading is async (fetch + decodeAudioData), so
+// every use site below checks whether the buffer has actually finished
+// decoding yet and falls back to the synthesized version if not — the
+// files are small enough that on any reasonable connection they're ready
+// well before the player has picked a level, but this guarantees there's
+// never dead silence while waiting.
+// -----------------------------------------------------------------------------
+const SOUND_BASE_PATH = "sounds/";
+const SOUND_FILES = {
+  fireLoop: "engyclick_firewood_burning_sound.mp3",     // continuous ambient bed — Ember's flame flicker
+  eruptionRumble: "rumble-of-thunder-1.mp3",             // loops for as long as an eruption lasts
+  eruptionBurst: "cannonroundwav-14480.mp3",             // one-shot, fired once when an eruption starts
+};
+const soundBuffers = {}; // key -> decoded AudioBuffer, once ready
+const soundLoadStarted = {}; // key -> true once a fetch has been kicked off, so repeated calls don't re-fetch
+
+function loadSoundBuffer(key) {
+  if (!ctx || soundBuffers[key] || soundLoadStarted[key]) return;
+  soundLoadStarted[key] = true;
+  fetch(SOUND_BASE_PATH + SOUND_FILES[key])
+    .then((res) => res.arrayBuffer())
+    .then((arr) => ctx.decodeAudioData(arr))
+    .then((buffer) => { soundBuffers[key] = buffer; })
+    .catch((err) => {
+      // Missing/blocked file, bad path, decode failure, etc. — every use
+      // site below already falls back to the synthesized version when a
+      // key never lands in soundBuffers, so this is a soft failure.
+      console.warn(`Rift audio: couldn't load ${SOUND_FILES[key]}, using the synthesized fallback instead.`, err);
+    });
+}
+
+function preloadRealSounds() {
+  loadSoundBuffer("fireLoop");
+  loadSoundBuffer("eruptionRumble");
+  loadSoundBuffer("eruptionBurst");
+}
+
+// The real eruption-rumble recording (when loaded) is played as a
+// start/stop loop rather than a persistent always-running gain-ramped
+// node the way the synthesized eruptionBed is — this tracks the live
+// instance so setEruptionIntensity/stopAmbient can find and stop it.
+let eruptionRumbleSource = null;
 
 function ensureContext() {
   if (ctx) return ctx;
@@ -29,6 +79,7 @@ function initAudio() {
   const c = ensureContext();
   if (!c) return;
   if (c.state === "suspended") c.resume();
+  preloadRealSounds();
 }
 
 function toggleMuted() {
@@ -128,6 +179,14 @@ function startAmbient(biome) {
 }
 
 function stopAmbient() {
+  if (eruptionRumbleSource) {
+    const now = ctx ? ctx.currentTime : 0;
+    try {
+      eruptionRumbleSource.gain.gain.linearRampToValueAtTime(0.0001, now + 0.15);
+      eruptionRumbleSource.source.stop(now + 0.2);
+    } catch (_) { /* already stopped — ignore */ }
+    eruptionRumbleSource = null;
+  }
   if (!ambientNodes) return;
   const now = ctx ? ctx.currentTime : 0;
   // Fade out fast rather than an abrupt stop, then actually stop the
@@ -196,28 +255,38 @@ function buildAmbientGraph(biome) {
   let eruptionBed = null; // ember only — silent until an eruption starts, see setEruptionIntensity below
 
   if (biome === "ember") {
-    // The old continuous low rumble (a slow-swelling lowpass noise bed)
-    // read as background engine hum, not fire — removed per request.
-    // Fire's actual character is a FAST, irregular flicker, not a slow
-    // swell, so this uses a much quicker gust rate plus a second,
-    // independent faster LFO layered on top of it — one clean pulse
-    // reads as "breathing," two overlapping uneven ones read as flicker.
-    const flameFlicker = noiseBed("bandpass", 1200, 1.5, 0.018, 5.5, 0.006);
-    lfoModulate(flameFlicker.gain.gain, 11, 0.004);
-    // Random crackle/pop bursts — lava spitting/flames popping. Slightly
-    // more frequent now that this is the ambient's main textural voice
-    // rather than a garnish on top of a rumble bed.
+    if (soundBuffers.fireLoop) {
+      // Real recorded firewood-burning loop — replaces the synthesized
+      // flicker texture entirely once it's decoded and ready.
+      const source = ctx.createBufferSource();
+      source.buffer = soundBuffers.fireLoop;
+      source.loop = true;
+      const gain = ctx.createGain();
+      gain.gain.value = 0.3; // rough level match against this file's other (much quieter, synthesized) ambient gains — real recordings don't share their scale, worth a by-ear pass once this is actually live
+      source.connect(gain).connect(masterGain);
+      source.start();
+      stopOnSwitch.push(source, gain);
+    } else {
+      // Fallback while the real recording is still loading (or failed to
+      // load) — the old continuous low rumble (a slow-swelling lowpass
+      // noise bed) read as background engine hum, not fire, so it was
+      // replaced with a much quicker gust rate plus a second independent
+      // faster LFO layered on top: one clean pulse reads as "breathing,"
+      // two overlapping uneven ones read as flicker.
+      const flameFlicker = noiseBed("bandpass", 1200, 1.5, 0.018, 5.5, 0.006);
+      lfoModulate(flameFlicker.gain.gain, 11, 0.004);
+    }
+    // Random crackle/pop bursts — lava spitting/flames popping. Kept
+    // regardless of which bed is playing above; the real recording
+    // already has its own crackle character, but occasional sharper pops
+    // on top still add punctuation.
     intervalId = setInterval(() => {
       if (Math.random() < 0.6) playCrackle();
     }, 1500);
 
-    // Volcanic eruption rumble — a SEPARATE deep bed rather than reusing
-    // the flame-flicker bed above, since an eruption should sound like
-    // something new starting, not the ambient fire simply getting
-    // louder. Gain starts at 0 (silent, but the node is already running
-    // so ramping it up later has no start-up click) and only gets raised
-    // by setEruptionIntensity() below, driven from main.js reading the
-    // volcano's own erupting state.
+    // Synthesized eruption-rumble fallback — only actually used if
+    // soundBuffers.eruptionRumble never loads; see setEruptionIntensity
+    // below for how the real recording is used instead when it's ready.
     eruptionBed = noiseBed("lowpass", 110, 1.2, 0, 0, 0);
   } else if (biome === "verdant") {
     drone(60, "sine", 0.02);
@@ -252,21 +321,55 @@ function buildAmbientGraph(biome) {
 // fast (an eruption starts abruptly) and fades out slower (the rumble
 // lingers a bit as things settle).
 function setEruptionIntensity(active) {
-  if (!ambientNodes || !ambientNodes.eruptionBed || !ctx) return;
+  if (!ambientNodes || !ctx) return;
   const now = ctx.currentTime;
+
+  if (soundBuffers.eruptionRumble) {
+    if (active && !eruptionRumbleSource) {
+      const source = ctx.createBufferSource();
+      source.buffer = soundBuffers.eruptionRumble;
+      source.loop = true;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.4, now + 1.2); // rough level, worth a by-ear pass once live
+      source.connect(gain).connect(masterGain);
+      source.start(now);
+      eruptionRumbleSource = { source, gain };
+    } else if (!active && eruptionRumbleSource) {
+      const { source, gain } = eruptionRumbleSource;
+      gain.gain.cancelScheduledValues(now);
+      gain.gain.setValueAtTime(gain.gain.value, now);
+      gain.gain.linearRampToValueAtTime(0.0001, now + 2.5);
+      source.stop(now + 2.6);
+      eruptionRumbleSource = null;
+    }
+    return;
+  }
+
+  // Fallback: the synthesized eruptionBed noiseBed, ramped up/down.
+  if (!ambientNodes.eruptionBed) return;
   const gainParam = ambientNodes.eruptionBed.gain.gain;
   gainParam.cancelScheduledValues(now);
   gainParam.setValueAtTime(gainParam.value, now);
   gainParam.linearRampToValueAtTime(active ? 0.05 : 0, now + (active ? 1.2 : 2.5));
 }
 
-// One-shot deep boom + whoosh — fired once on the RISING edge of an
-// eruption (main.js detects the transition), distinct from the
-// continuous eruptionBed rumble above which is the sustained roar for as
-// long as the eruption lasts.
+// One-shot impact — the real cannon-round recording when loaded, fired
+// once on the RISING edge of an eruption (main.js detects the
+// transition). Falls back to a synthesized deep boom + whoosh otherwise.
 function playEruptionBurst() {
   if (!ctx) return;
   const t = ctx.currentTime;
+
+  if (soundBuffers.eruptionBurst) {
+    const source = ctx.createBufferSource();
+    source.buffer = soundBuffers.eruptionBurst;
+    const gain = ctx.createGain();
+    gain.gain.value = 0.5; // rough level, worth a by-ear pass once live
+    source.connect(gain).connect(masterGain);
+    source.start(t);
+    return;
+  }
 
   const osc = ctx.createOscillator();
   osc.type = "sine";

@@ -1,19 +1,30 @@
 import * as THREE from "three";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
-import { buildPlanetTerrain, TERRAIN_SIZE } from "./terrain.js";
+import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL } from "./terrain.js";
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
-import { createDecoration, updateDecoration } from "./decorations.js";
+import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createBush, createLightShaft, updateLightShafts, disposeLightShafts } from "./decorations.js";
+import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane } from "./liquid.js";
+import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
+import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
+import { createGrass, updateGrass, disposeGrass, createFlowers, disposeFlowers } from "./vegetation.js";
+import { createHorizonSilhouettes, disposeHorizonSilhouettes } from "./horizonSilhouettes.js";
+import { createWildlife, updateWildlife, disposeWildlife } from "./wildlife.js";
+import { createLandmark, updateLandmark, disposeLandmark, LANDMARK_POSITION } from "./landmarks.js";
+import { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers } from "./graphicsSettings.js";
+import { createWeatherSystem, updateWeatherSystem, disposeWeatherSystem } from "./weather.js";
+import { createClouds, updateClouds, disposeClouds } from "./clouds.js";
 import {
   createBolt, updateBolt, disposeBolt,
   createMuzzleFlash, updateMuzzleFlash, disposeMuzzleFlash,
   createImpactBurst, updateImpactBurst, disposeImpactBurst,
 } from "./effects.js";
-import { initAudio, toggleMuted, playShoot, playShatter, playLoreChime } from "./audio.js";
+import { initAudio, toggleMuted, playShoot, playShatter, playLoreChime, startAmbient, playFootstep, setEruptionIntensity, playEruptionBurst, updateFirePosition, updateListenerPosition } from "./audio.js";
 import { getIslandLore } from "./lore.js";
 import { findClosestHit } from "./hitPrediction.js";
 import { createTouchControls } from "./touchControls.js";
 import { createPlayerPhysicsState, updatePlayerPhysics, sampleGroundHeight, WALK_SPEED, AIR_CONTROL } from "./physics.js";
+import { mulberry32, hashStringToSeed } from "./worldgen.js";
 
 // ---------------------------------------------------------------------------
 // World seed — fixed by default so every visitor explores the same curated
@@ -57,6 +68,10 @@ function isGameActive() {
 // ---------------------------------------------------------------------------
 const viewport = document.getElementById("rift-viewport");
 const fullscreenBtn = document.getElementById("rift-fullscreen-btn");
+const graphicsBtn = document.getElementById("rift-graphics-btn");
+const graphicsPanel = document.getElementById("rift-graphics-panel");
+const arrivalOverlay = document.getElementById("rift-arrival");
+const arrivalNameEl = document.getElementById("rift-arrival-name");
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x0a0e14, 0.0032);
@@ -66,7 +81,9 @@ camera.rotation.order = "YXZ";
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setSize(viewport.clientWidth, viewport.clientHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, getGraphicsSettings().pixelRatioCap));
+renderer.shadowMap.enabled = getGraphicsSettings().shadowsEnabled;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 function resizeToViewport() {
   const w = viewport.clientWidth, h = viewport.clientHeight;
@@ -134,11 +151,29 @@ window.addEventListener("keydown", (e) => {
   if (e.code === "Escape" && viewport.classList.contains("rift-fullscreen")) exitFullscreen();
 });
 
-scene.add(new THREE.AmbientLight(0x8899bb, 0.65));
+const ambientLight = new THREE.AmbientLight(0x8899bb, 0.65);
+scene.add(ambientLight);
 const sun = new THREE.DirectionalLight(0xffffff, 1.1);
 sun.position.set(60, 100, 40);
+sun.castShadow = true;
+// Shadow frustum sized to the terrain's own extent (see terrain.js's
+// TERRAIN_SIZE) rather than Three.js's small default — otherwise most of
+// the level would fall outside the shadow camera entirely. Resolution
+// kept moderate; this is a single directional light so the cost is one
+// shadow pass regardless, but a bigger map is still real GPU/memory cost
+// on lower-end devices.
+const SHADOW_EXTENT = 140;
+sun.shadow.camera.left = -SHADOW_EXTENT;
+sun.shadow.camera.right = SHADOW_EXTENT;
+sun.shadow.camera.top = SHADOW_EXTENT;
+sun.shadow.camera.bottom = -SHADOW_EXTENT;
+sun.shadow.camera.near = 1;
+sun.shadow.camera.far = 500;
+sun.shadow.mapSize.set(getGraphicsSettings().shadowMapSize, getGraphicsSettings().shadowMapSize);
+sun.shadow.bias = -0.0015;
 scene.add(sun);
 
+let starfieldPoints = null;
 {
   const starGeo = new THREE.BufferGeometry();
   const starCount = 1500;
@@ -149,9 +184,12 @@ scene.add(sun);
     positions[i * 3 + 2] = (Math.random() - 0.5) * 1200;
   }
   starGeo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-  const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.8, sizeAttenuation: true });
-  scene.add(new THREE.Points(starGeo, starMat));
+  const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.8, sizeAttenuation: true, transparent: true, opacity: 1 });
+  starfieldPoints = new THREE.Points(starGeo, starMat);
+  scene.add(starfieldPoints);
 }
+
+const dayNightCycle = createDayNightCycle(scene, sun, ambientLight, starfieldPoints);
 
 // ---------------------------------------------------------------------------
 // Controls
@@ -193,6 +231,8 @@ function setKey(code, value) {
 }
 
 const velocity = new THREE.Vector3();
+let footstepDistance = 0;
+const FOOTSTEP_STRIDE = 2.4; // world units between footstep sounds — tied to distance actually covered, not a fixed timer, so sprinting/slow movement both sound right
 
 function updateMovement(dt, grounded) {
   velocity.set(0, 0, 0);
@@ -200,11 +240,22 @@ function updateMovement(dt, grounded) {
   if (keys.back) velocity.z += 1;
   if (keys.left) velocity.x -= 1;
   if (keys.right) velocity.x += 1;
-  if (velocity.lengthSq() > 0) velocity.normalize();
+  const moving = velocity.lengthSq() > 0;
+  if (moving) velocity.normalize();
 
   const speed = WALK_SPEED * (grounded ? 1 : AIR_CONTROL);
   controls.moveRight(velocity.x * speed * dt);
   controls.moveForward(-velocity.z * speed * dt);
+
+  if (moving && grounded) {
+    footstepDistance += speed * dt;
+    if (footstepDistance >= FOOTSTEP_STRIDE) {
+      footstepDistance = 0;
+      playFootstep(currentLevelIdx >= 0 ? LEVELS[currentLevelIdx].biome : "ember");
+    }
+  } else {
+    footstepDistance = 0; // reset mid-stride rather than carrying a partial step into the next movement burst
+  }
 
   // Soft world bounds — keeps the player off the terrain's falloff rim and
   // away from the finite plane's actual edge (see terrain.js/WORLD_BOUND_RADIUS
@@ -225,15 +276,35 @@ function updateMovement(dt, grounded) {
 // simple instead of diffing old vs new state.
 // ---------------------------------------------------------------------------
 let terrainMesh = null;
+let liquidHandle = null;
+let atmosphereHandle = null;
+let grassHandle = null;
+let flowersHandle = null;
+let weatherHandle = null;
+let cloudsHandle = null;
+let horizonHandle = null;
+let wildlifeHandle = null;
+let landmarkHandle = null;
 const crystalHandles = new Map();
 let allCrystals = [];
 let crystalsTotal = 0;
 let crystalsCollected = 0;
 const decorationHandles = [];
+let lightShaftHandles = [];
 let loreMarkers = []; // {id, x, z, y, shown}
 let currentLevelIdx = -1;
 let spawnPosition = { x: 0, y: 5, z: 0 };
 const playerPhysics = createPlayerPhysicsState();
+
+// ---------------------------------------------------------------------------
+// Ember fire spawner — Ember Reach only. Fires that were placed as part of
+// the fixed level layout (via decorations.js's buildBaseDecoration) burn
+// forever; these are separate, dynamically spawned/despawned at runtime so
+// the biome keeps feeling alive rather than a static one-time layout.
+// ---------------------------------------------------------------------------
+let fireSpawnTimer = 0;
+let wasErupting = false; // edge-detects eruption start/stop for audio — see the animate loop
+const MAX_DYNAMIC_FIRES = 10; // defensive cap so spawns can never outpace burnouts and pile up indefinitely
 
 function teardownLevel() {
   if (terrainMesh) {
@@ -242,6 +313,24 @@ function teardownLevel() {
     terrainMesh.material.dispose();
     terrainMesh = null;
   }
+  disposeLiquidPlane(scene, liquidHandle);
+  liquidHandle = null;
+  disposeAtmosphericParticles(scene, atmosphereHandle);
+  atmosphereHandle = null;
+  disposeGrass(scene, grassHandle);
+  grassHandle = null;
+  disposeFlowers(scene, flowersHandle);
+  flowersHandle = null;
+  disposeWeatherSystem(scene, weatherHandle);
+  weatherHandle = null;
+  disposeClouds(scene, cloudsHandle);
+  cloudsHandle = null;
+  disposeHorizonSilhouettes(scene, horizonHandle);
+  horizonHandle = null;
+  disposeWildlife(scene, wildlifeHandle);
+  wildlifeHandle = null;
+  disposeLandmark(scene, landmarkHandle);
+  landmarkHandle = null;
   for (const [, handle] of crystalHandles) disposeCrystalMesh(scene, handle);
   crystalHandles.clear();
   allCrystals = [];
@@ -253,13 +342,35 @@ function teardownLevel() {
     });
   }
   decorationHandles.length = 0;
+  disposeLightShafts(scene, lightShaftHandles);
+  lightShaftHandles = [];
   loreMarkers = [];
+}
+
+// Orients the camera to face AWAY from the biome's landmark — that's the
+// single biggest nearby structure (a full-size volcano/spire/arch/etc,
+// see landmarks.js), so it's the most likely thing to fill the player's
+// view immediately on spawn if they happen to be facing toward it. Facing
+// away instead means they open their eyes looking out at open terrain and
+// the horizon silhouettes in the distance. Three.js's camera looks down
+// -Z by default; rotating that vector by rotation.y=theta gives
+// (-sin(theta), 0, -cos(theta)), so solving for theta such that this
+// points along (x - LANDMARK_POSITION.x, z - LANDMARK_POSITION.z) — i.e.
+// away from the landmark — gives atan2(-dx, -dz) below.
+function faceAwayFromLandmark(x, z) {
+  const dx = x - LANDMARK_POSITION.x;
+  const dz = z - LANDMARK_POSITION.z;
+  camera.rotation.y = Math.atan2(-dx, -dz);
 }
 
 function buildLevel(levelIdx) {
   teardownLevel();
   currentLevelIdx = levelIdx;
   const level = LEVELS[levelIdx];
+  // dayNightCycle is created once at boot (before any level/biome is known)
+  // and persists across level switches, so its per-biome sky tint has to be
+  // set here on each level load rather than passed once at construction.
+  dayNightCycle.biome = level.biome;
 
   terrainMesh = new THREE.Mesh(
     buildPlanetTerrain(level, WORLD_SEED),
@@ -268,7 +379,22 @@ function buildLevel(levelIdx) {
       emissive: level.color, emissiveIntensity: 0.04,
     })
   );
+  terrainMesh.receiveShadow = true;
+  terrainMesh.castShadow = true; // the terrain's own elevation (spires, ridges) can shadow other parts of itself
   scene.add(terrainMesh);
+
+  if (LIQUID_LEVEL[level.biome] !== undefined) {
+    liquidHandle = createLiquidPlane(scene, level.biome, LIQUID_LEVEL[level.biome], TERRAIN_SIZE, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
+  }
+
+  atmosphereHandle = createAtmosphericParticles(scene, level.biome);
+  grassHandle = createGrass(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), TERRAIN_SIZE * 0.46);
+  flowersHandle = createFlowers(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), TERRAIN_SIZE * 0.46);
+  weatherHandle = createWeatherSystem(scene, level.biome);
+  cloudsHandle = createClouds(scene, level.biome);
+  horizonHandle = createHorizonSilhouettes(scene, level.biome);
+  wildlifeHandle = createWildlife(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
+  landmarkHandle = createLandmark(scene, level.biome, level.color, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
 
   const layout = generateLevelLayout(level.biome, WORLD_SEED);
 
@@ -288,9 +414,68 @@ function buildLevel(levelIdx) {
     handle.group.position.set(seed.x, groundY, seed.z);
     handle.group.rotation.y = seed.rand() * Math.PI * 2;
     handle.baseY = groundY;
+    handle.group.traverse((obj) => {
+      if (obj.isMesh) { obj.castShadow = true; obj.receiveShadow = true; }
+    });
     scene.add(handle.group);
     decorationHandles.push(handle);
   });
+
+  // Extra forest fill — Verdant only. worldgen.js's own decoration seeds
+  // (the loop above) are sparse enough that the walkable middle of the
+  // map reads as open grass with trees only near the edges; this scatters
+  // additional trees/bushes across the whole walkable square directly,
+  // independent of worldgen's own placement, so density isn't limited by
+  // a file this session doesn't have access to. Real size grading gives
+  // an actual foreground/midground/background depth cue: bigger near the
+  // center (where the player spends most of their time), tapering smaller
+  // toward the edge so it blends into horizonSilhouettes.js's distant
+  // treeline instead of jumping straight from full-size to backdrop-tiny.
+  if (level.biome === "verdant") {
+    // Deterministic, like every other placement system in this game —
+    // was using raw Math.random() before, which meant the forest layout
+    // was different every single page load instead of reproducible from
+    // WORLD_SEED the way worldgen.js's own decoration/crystal seeds are.
+    const fillerRand = mulberry32(hashStringToSeed(WORLD_SEED + "-forest-filler-" + level.biome));
+    const fillerCount = 220; // trees are now flat 2D sprites (2 planes + a pooled, shared texture each — see getTreeTexture above), nowhere near as expensive as the old 3D branch-mesh trees this count was tuned against; the actual crash that prompted cutting it to 50 turned out to be an unrelated dropped-variable bug in createBush, since fixed, not a real performance ceiling
+    const fillerBound = WORLD_BOUND_RADIUS * 0.95;
+    for (let i = 0; i < fillerCount; i++) {
+      const x = (fillerRand() * 2 - 1) * fillerBound;
+      const z = (fillerRand() * 2 - 1) * fillerBound;
+      const distFromCenter = Math.hypot(x, z);
+      if (distFromCenter > fillerBound) continue; // keep this pass roughly circular within the walkable bound rather than filling the square's far corners too
+      if (Math.hypot(x - LANDMARK_POSITION.x, z - LANDMARK_POSITION.z) < 14) continue; // keep the landmark's own clearing free
+      if (Math.hypot(x - layout.spawn.x, z - layout.spawn.z) < 8) continue; // keep the immediate spawn area free
+      const groundY = sampleGroundHeight(x, z, terrainMesh) ?? 0;
+      const handle = fillerRand() < 0.3 ? createBush(level.color, fillerRand) : createLivingTree(level.color, fillerRand);
+      handle.group.position.set(x, groundY, z);
+      handle.group.rotation.y = fillerRand() * Math.PI * 2;
+      const depthT = Math.min(1, distFromCenter / fillerBound);
+      handle.group.scale.setScalar(1.15 - depthT * 0.55); // 1.15x near the center down to 0.6x near the edge
+      handle.baseY = groundY;
+      handle.group.traverse((obj) => {
+        if (obj.isMesh) { obj.castShadow = true; obj.receiveShadow = true; }
+      });
+      scene.add(handle.group);
+      decorationHandles.push(handle);
+    }
+
+    // Canopy light shafts — scattered near the forest, not tied to any
+    // individual tree's position (a fixed light-shaft-per-tree would look
+    // mechanical). Own deterministic PRNG stream, same pattern as the
+    // filler trees above.
+    const shaftRand = mulberry32(hashStringToSeed(WORLD_SEED + "-light-shafts-" + level.biome));
+    const shaftCount = 28;
+    for (let i = 0; i < shaftCount; i++) {
+      const x = (shaftRand() * 2 - 1) * fillerBound;
+      const z = (shaftRand() * 2 - 1) * fillerBound;
+      if (Math.hypot(x, z) > fillerBound) continue;
+      const groundY = sampleGroundHeight(x, z, terrainMesh) ?? 0;
+      const shaft = createLightShaft(x, z, groundY, shaftRand);
+      scene.add(shaft.sprite);
+      lightShaftHandles.push(shaft);
+    }
+  }
 
   loreMarkers = layout.loreMarkers.map((m) => ({
     ...m, y: sampleGroundHeight(m.x, m.z, terrainMesh) ?? 0, shown: false,
@@ -303,23 +488,98 @@ function buildLevel(levelIdx) {
   const spawnGroundY = sampleGroundHeight(layout.spawn.x, layout.spawn.z, terrainMesh) ?? 0;
   spawnPosition = { x: layout.spawn.x, y: spawnGroundY + PLAYER_EYE_HEIGHT + 2, z: layout.spawn.z };
   camera.position.set(spawnPosition.x, spawnPosition.y, spawnPosition.z);
+  faceAwayFromLandmark(spawnPosition.x, spawnPosition.z);
   playerPhysics.verticalVelocity = 0;
   playerPhysics.grounded = false;
+  fireSpawnTimer = 3 + Math.random() * 5; // harmless on non-Ember biomes, the spawner below gates on biome anyway
 }
 
 function respawnInLevel() {
   camera.position.set(spawnPosition.x, spawnPosition.y, spawnPosition.z);
+  faceAwayFromLandmark(spawnPosition.x, spawnPosition.z);
   playerPhysics.verticalVelocity = 0;
   playerPhysics.grounded = false;
   logDiscovery("Fell — back to the start.");
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Graphics settings — applying a tier change updates the renderer/shadow
+// state immediately, then rebuilds the current level (if one is active) so
+// tier-dependent counts baked in at build time (terrain resolution, grass,
+// particles, decoration detail, cloud/wildlife counts) actually take
+// effect right away instead of only on the next level entry.
+// ---------------------------------------------------------------------------
+function applyGraphicsSettings() {
+  const s = getGraphicsSettings();
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, s.pixelRatioCap));
+  renderer.shadowMap.enabled = s.shadowsEnabled;
+  if (sun.shadow.mapSize.width !== s.shadowMapSize) {
+    sun.shadow.mapSize.set(s.shadowMapSize, s.shadowMapSize);
+    // Three.js only regenerates the shadow map texture at the new
+    // resolution once the old one is disposed — changing mapSize alone
+    // has no effect on an already-rendered light.
+    if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
+  }
+  resizeToViewport();
+  if (currentLevelIdx >= 0) buildLevel(currentLevelIdx);
+}
+
+function changeGraphicsTier(tier) {
+  if (!setGraphicsTier(tier)) return;
+  applyGraphicsSettings();
+  syncGraphicsUI();
+}
+
+function syncGraphicsUI() {
+  const active = getGraphicsTier();
+  graphicsPanel?.querySelectorAll(".rift-graphics-opt").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.tier === active);
+  });
+}
+
+if (graphicsBtn && graphicsPanel) {
+  graphicsBtn.addEventListener("click", () => {
+    const open = graphicsPanel.hidden;
+    graphicsPanel.hidden = !open;
+    graphicsBtn.classList.toggle("gfx-open", open);
+  });
+  graphicsPanel.querySelectorAll(".rift-graphics-opt").forEach((btn) => {
+    btn.addEventListener("click", () => changeGraphicsTier(btn.dataset.tier));
+  });
+  syncGraphicsUI();
+}
+
+// ---------------------------------------------------------------------------
 // Level select UI
 // ---------------------------------------------------------------------------
+// A brief "you've just landed" beat on entering any level — fades from
+// black, holds on the biome name, then fades into gameplay, instead of
+// snapping straight from the level-select menu into full control.
+function playArrivalSequence(levelName) {
+  if (!arrivalOverlay || !arrivalNameEl) return;
+  arrivalOverlay.classList.remove("rift-arrival-name-in");
+  // Snap instantly to fully opaque (bypassing the transition) right as the
+  // level starts building, then let the CSS transition fade it back out
+  // after the hold below — invisible is the default state (see the CSS),
+  // so there's no leftover state to reset between arrivals the way an
+  // "opaque by default" design would require.
+  arrivalOverlay.style.transition = "none";
+  arrivalOverlay.classList.add("rift-arrival-active");
+  arrivalOverlay.offsetHeight; // force a reflow so the instant opacity jump above actually applies before the transition is restored below
+  arrivalOverlay.style.transition = "";
+  arrivalNameEl.textContent = levelName;
+  requestAnimationFrame(() => {
+    arrivalOverlay.classList.add("rift-arrival-name-in");
+  });
+  setTimeout(() => arrivalOverlay.classList.remove("rift-arrival-active"), 1900);
+}
+
 function enterLevel(levelIdx) {
   buildLevel(levelIdx);
   initAudio();
+  startAmbient(LEVELS[levelIdx].biome);
+  playArrivalSequence(LEVELS[levelIdx].name);
   if (isTouchDevice) {
     touchGameActive = true;
     startOverlay.style.display = "none";
@@ -500,6 +760,62 @@ function showLore(text) {
 showLevelSelect();
 
 // ---------------------------------------------------------------------------
+// Ember fire spawner — state (fireSpawnTimer, MAX_DYNAMIC_FIRES) declared
+// earlier alongside the other level vars.
+// ---------------------------------------------------------------------------
+function spawnEmberFire() {
+  const level = LEVELS[currentLevelIdx];
+  const angle = Math.random() * Math.PI * 2;
+  const dist = Math.random() * WORLD_BOUND_RADIUS * 0.9; // stay within the player's actual reachable area, not right at the falloff rim
+  const x = Math.cos(angle) * dist, z = Math.sin(angle) * dist;
+  const groundY = sampleGroundHeight(x, z, terrainMesh) ?? 0;
+  const lifespan = 15 + Math.random() * 20; // 15-35s — "burns out after a while"
+  // Math.random is a drop-in for the seedRand()-style function
+  // createEmberFire normally receives from a decoration's deterministic
+  // per-instance RNG — it only needs the same () => [0,1) interface,
+  // which a runtime-spawned fire has no deterministic seed for anyway.
+  const handle = createEmberFire(level.color, Math.random, elapsedTime, lifespan);
+  handle.group.position.set(x, groundY, z);
+  handle.group.traverse((obj) => {
+    if (obj.isMesh) { obj.castShadow = true; obj.receiveShadow = true; }
+  });
+  scene.add(handle.group);
+  decorationHandles.push(handle);
+}
+
+function updateEmberFireSpawner(dt) {
+  if (currentLevelIdx < 0 || !terrainMesh || LEVELS[currentLevelIdx].biome !== "ember") return;
+  fireSpawnTimer -= dt;
+  if (fireSpawnTimer > 0) return;
+  fireSpawnTimer = 3 + Math.random() * 5; // next fire in 3-8s
+  const activeFireCount = decorationHandles.reduce((n, h) => n + (h.kind === "emberFire" ? 1 : 0), 0);
+  if (activeFireCount < MAX_DYNAMIC_FIRES) spawnEmberFire();
+}
+
+// Finds whichever "emberFire" decoration is currently closest to the
+// player (there can be several — static level-placed ones plus whatever
+// the spawner above has going) and hands its position to audio.js's
+// single positional fire-crackle panner. Cheap even with MAX_DYNAMIC_FIRES
+// dynamic fires plus the level's static ones, since this is a flat scan
+// over decorationHandles that's already being iterated once per frame
+// anyway for updateDecoration above.
+const cameraForward = new THREE.Vector3();
+function updateFireAudio() {
+  let nearest = null;
+  let nearestDistSq = Infinity;
+  for (const handle of decorationHandles) {
+    if (handle.kind !== "emberFire") continue;
+    const dx = handle.group.position.x - camera.position.x;
+    const dz = handle.group.position.z - camera.position.z;
+    const distSq = dx * dx + dz * dz;
+    if (distSq < nearestDistSq) { nearestDistSq = distSq; nearest = handle.group.position; }
+  }
+  if (nearest) updateFirePosition(nearest.x, nearest.y, nearest.z);
+  camera.getWorldDirection(cameraForward);
+  updateListenerPosition(camera.position.x, camera.position.y, camera.position.z, cameraForward.x, cameraForward.y, cameraForward.z);
+}
+
+// ---------------------------------------------------------------------------
 // Main loop
 // ---------------------------------------------------------------------------
 const clock = new THREE.Clock();
@@ -511,6 +827,8 @@ function animate() {
   const dt = Math.min(clock.getDelta(), 0.1);
   elapsedTime += dt;
 
+  const dayNight = updateDayNightCycle(dayNightCycle, dt);
+
   if (isGameActive() && currentLevelIdx >= 0) {
     updateMovement(dt, playerPhysics.grounded);
     updatePlayerPhysics(camera, terrainMesh, playerPhysics, dt, PLAYER_EYE_HEIGHT, jumpQueued);
@@ -520,7 +838,37 @@ function animate() {
   }
 
   for (const [, handle] of crystalHandles) updateCrystalMesh(handle, elapsedTime);
-  for (const handle of decorationHandles) updateDecoration(handle, elapsedTime);
+  for (let i = decorationHandles.length - 1; i >= 0; i--) {
+    const handle = decorationHandles[i];
+    updateDecoration(handle, elapsedTime);
+    if (handle.expired) {
+      scene.remove(handle.group);
+      handle.group.traverse((obj) => {
+        if (obj.geometry) obj.geometry.dispose();
+        if (obj.material) obj.material.dispose();
+      });
+      decorationHandles.splice(i, 1);
+    }
+  }
+  updateEmberFireSpawner(dt);
+  updateFireAudio();
+  // Read from whatever updateLandmark last set — that call happens a few
+  // lines below this frame (one-frame lag, imperceptible for ambient
+  // reactions like these) rather than reordering the whole loop for it.
+  const eruptionActive = !!(landmarkHandle && landmarkHandle.volcano && landmarkHandle.volcano.erupting);
+  if (eruptionActive !== wasErupting) {
+    setEruptionIntensity(eruptionActive);
+    if (eruptionActive) playEruptionBurst();
+    wasErupting = eruptionActive;
+  }
+  updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y);
+  const wind = updateWeatherSystem(weatherHandle, dt, eruptionActive);
+  updateAtmosphericParticles(atmosphereHandle, elapsedTime, dt, wind.windX, wind.windZ);
+  updateGrass(grassHandle, elapsedTime, wind.windX, wind.windZ);
+  updateWildlife(wildlifeHandle, elapsedTime, dt, camera.position.x, camera.position.z, eruptionActive);
+  updateLandmark(landmarkHandle, elapsedTime, dt);
+  updateClouds(cloudsHandle, dt, wind, dayNight.dayAmount, wind.rainIntensity);
+  updateLightShafts(lightShaftHandles, dayNight.dayAmount);
   updateWorldPulse(dt);
   updateProjectiles(dt);
   renderer.render(scene, camera);

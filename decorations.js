@@ -157,8 +157,9 @@ function buildBaseDecoration(biome, colorHex, seedRand) {
       if (roll < 0.88) return createEmberVent(colorHex, seedRand);
       return createEmberFire(colorHex, seedRand);
     case "verdant":
-      if (roll < 0.35) return createLivingTree(colorHex, seedRand);
-      if (roll < 0.78) return createFloraStalk(colorHex, seedRand);
+      if (roll < 0.55) return createLivingTree(colorHex, seedRand); // trees still dominant
+      if (roll < 0.75) return createBush(colorHex, seedRand); // real bush/shrub undergrowth variety, not just trees + flowers
+      if (roll < 0.9) return createFloraStalk(colorHex, seedRand);
       return createRockCluster(biome, colorHex, seedRand);
     case "crystal": return roll < 0.72 ? createCrystalCluster(colorHex, seedRand) : createRockCluster(biome, colorHex, seedRand);
     case "abyssal":
@@ -381,6 +382,37 @@ function createSpire(biome, colorHex, rand) {
   return { group, kind: "spire" };
 }
 
+// Small shrub/bush — several squashed-low foliage clumps, deliberately
+// tiny compared to createLivingTree, for real size variety in the
+// undergrowth rather than every piece of greenery being a full tree.
+// Reuses "tree" as its `kind` so updateDecoration's existing gentle sway
+// applies here too without needing a new branch there.
+function createBush(colorHex, rand) {
+  const group = new THREE.Group();
+  const leafLow = new THREE.Color(VERDANT_LEAF_PALETTE[Math.floor(rand() * VERDANT_LEAF_PALETTE.length)]);
+  const leafHigh = leafLow.clone().lerp(new THREE.Color(0xd8f06a), 0.35);
+  const leafMat = new THREE.MeshStandardMaterial({
+    vertexColors: true, roughness: 0.85, flatShading: true,
+    emissive: leafLow, emissiveIntensity: 0.22, // keeps a visible green tint even under this biome's darkened night lighting, instead of going to a featureless black blob — same fix as createLivingTree's foliage
+  });
+  const baseScale = 0.32 + rand() * 0.42; // small — this is undergrowth, not a tree
+  const clumpCount = 3 + Math.floor(rand() * 3);
+  for (let i = 0; i < clumpCount; i++) {
+    const scale = baseScale * (0.6 + rand() * 0.6);
+    const geo = new THREE.IcosahedronGeometry(scale, getGraphicsSettings().decorationDetail);
+    const gp = geo.attributes.position;
+    for (let v = 0; v < gp.count; v++) gp.setY(v, gp.getY(v) * 0.7); // squashed low and wide, shrub silhouette not a ball
+    gp.needsUpdate = true;
+    geo.computeVertexNormals();
+    applyVerticalGradient(geo, leafLow, leafHigh);
+    const clump = new THREE.Mesh(geo, leafMat);
+    const angle = rand() * Math.PI * 2, dist = rand() * baseScale * 0.7;
+    clump.position.set(Math.cos(angle) * dist, baseScale * (0.35 + rand() * 0.25), Math.sin(angle) * dist);
+    group.add(clump);
+  }
+  return { group, kind: "tree", bobAmplitude: 0.015, bobSeed: rand() * Math.PI * 2 };
+}
+
 // Bioluminescent flora stalk — tapered stem with a glowing cap.
 function createFloraStalk(colorHex, rand) {
   const group = new THREE.Group();
@@ -495,89 +527,151 @@ function createRockCluster(biome, colorHex, rand) {
 // Real forests aren't one uniform green — a handful of distinct leaf
 // tones (picked per-tree, not per-leaf) plus a couple of bark tones so
 // trees actually read as different from each other at a glance, not
-// just different sizes of the same silhouette.
-const VERDANT_LEAF_PALETTE = [0x2f7a3a, 0x3f8f3a, 0x5a9a3a, 0x2f6a52, 0x4a7a2a];
-const VERDANT_BARK_PALETTE = [0x4a3524, 0x5a4030, 0x3a2a1c];
+// just different sizes of the same silhouette. Pushed bolder/more
+// saturated than a naturalistic palette — the reference is a flat
+// illustration with vivid, punchy color blocks, not a muted realistic
+// woodland.
+const VERDANT_LEAF_PALETTE = [0x3d9a42, 0x4fc24f, 0x6bcc4a, 0x2f9a68, 0x5ab83a];
+const VERDANT_BARK_PALETTE = [0x6b4423, 0x7a4f2a, 0x5a3a1e];
 
-// Living tree, one of three archetypes picked per-instance so a cluster
-// of them reads as a real varied grove instead of the same silhouette
-// copy-pasted at different scales: "round" (bushy clumps, the original
-// look), "conical" (stacked pine/fir tiers), "spreading" (wide, flatter,
-// offset canopy). Each foliage piece gets its own vertex-color gradient
-// (applyVerticalGradient, same flat-illustration rim-light technique used
-// elsewhere in this file) from the tree's own leaf color up to a lighter/
-// warmer tone, rather than one flat foliage color.
-function createLivingTree(colorHex, rand) {
-  const group = new THREE.Group();
-  const archetypeRoll = rand();
-  const archetype = archetypeRoll < 0.4 ? "round" : archetypeRoll < 0.75 ? "conical" : "spreading";
+// -----------------------------------------------------------------------------
+// Flat 2D painted tree silhouettes — same technique as Ember's
+// createPaintedRockTexture/createRockSprite above, applied to Verdant's
+// trees. The reference this was built from is a flat illustration; a
+// painted silhouette matches it directly, where 3D branch geometry could
+// only ever approximate it (see git history — several rounds of 3D
+// branch/foliage-clump tuning never quite got there).
+// -----------------------------------------------------------------------------
 
-  const h = 4 + rand() * 5;
-  const bark = new THREE.Color(VERDANT_BARK_PALETTE[Math.floor(rand() * VERDANT_BARK_PALETTE.length)]);
-  const trunkMat = new THREE.MeshStandardMaterial({ color: bark, roughness: 0.9, flatShading: true });
-  const trunkRadiusTop = 0.12 + rand() * 0.1;
-  const trunkRadiusBottom = trunkRadiusTop + 0.1 + rand() * 0.12;
-  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(trunkRadiusTop, trunkRadiusBottom, h, 6), trunkMat);
-  trunk.position.y = h / 2;
-  // A slight lean rather than perfectly vertical — real trees rarely grow
-  // arrow-straight, and a whole grove standing bolt upright is part of
-  // why they all looked identical.
-  trunk.rotation.z = (rand() - 0.5) * 0.12;
-  trunk.rotation.x = (rand() - 0.5) * 0.12;
-  group.add(trunk);
+// Paints a tree silhouette. "conical" (pine, the dominant archetype) gets
+// several overlapping jagged-edged triangular tiers stacked tall and
+// narrow — a classic conifer profile, not one smooth cone. "round"/
+// "spreading" get a broader canopy built from overlapping rounded lobes
+// instead. A sliver of trunk peeks out at the very base either way — the
+// reference shows almost no bare trunk, foliage covers nearly the whole
+// tree.
+function createTreeTexture(seed, archetype, leafColorHex, capColorHex, barkColorHex) {
+  const w = 110;
+  const h = archetype === "conical" ? 340 : archetype === "spreading" ? 210 : 250;
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d");
 
-  const leafLow = new THREE.Color(VERDANT_LEAF_PALETTE[Math.floor(rand() * VERDANT_LEAF_PALETTE.length)]);
-  const leafHigh = leafLow.clone().lerp(new THREE.Color(0xffffff), 0.22);
-  const leafMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, flatShading: true });
+  // Wide and tall enough to stay visible from any angle — on a crossed-
+  // plane sprite, a thin trunk foreshortens down to almost nothing at
+  // oblique viewing angles even though the much wider canopy above it
+  // stays fully visible, which is exactly what reads as a canopy
+  // floating with no visible support. A properly wide/tall trunk doesn't
+  // vanish that way.
+  const trunkTop = h * 0.78;
+  ctx.fillStyle = `#${new THREE.Color(barkColorHex).getHexString()}`;
+  ctx.fillRect(w * 0.4, trunkTop, w * 0.2, h - trunkTop);
+
+  ctx.fillStyle = `#${new THREE.Color(leafColorHex).getHexString()}`;
 
   if (archetype === "conical") {
-    let baseY = h * 0.55;
-    const tiers = 2 + Math.floor(rand() * 2);
+    const tiers = 4 + Math.floor((seed % 1) * 3);
+    let tierTop = h * 0.03;
+    const tierBottomMax = h * 0.92;
     for (let i = 0; i < tiers; i++) {
-      const tierT = i / tiers;
-      const tierRadius = (1.3 - tierT * 0.7) * (0.9 + rand() * 0.3);
-      const tierHeight = h * (0.32 - tierT * 0.06);
-      const geo = new THREE.ConeGeometry(tierRadius, tierHeight, 6 + Math.floor(rand() * 3));
-      applyVerticalGradient(geo, leafLow, leafHigh);
-      const cone = new THREE.Mesh(geo, leafMat);
-      cone.position.y = baseY + tierHeight * 0.4;
-      group.add(cone);
-      baseY += tierHeight * 0.62;
-    }
-  } else if (archetype === "spreading") {
-    const clumps = 3 + Math.floor(rand() * 2);
-    for (let i = 0; i < clumps; i++) {
-      const scale = 1.4 + rand() * 1.0;
-      const geo = new THREE.IcosahedronGeometry(scale, getGraphicsSettings().decorationDetail);
-      // Squash vertically for a flatter, wider canopy silhouette than the
-      // round archetype's ball-shaped clumps.
-      const pos = geo.attributes.position;
-      for (let v = 0; v < pos.count; v++) pos.setY(v, pos.getY(v) * 0.55);
-      pos.needsUpdate = true;
-      geo.computeVertexNormals();
-      applyVerticalGradient(geo, leafLow, leafHigh);
-      const foliage = new THREE.Mesh(geo, leafMat);
-      const angle = rand() * Math.PI * 2, dist = 0.5 + rand() * 1.3;
-      foliage.position.set(Math.cos(angle) * dist, h * (0.8 + rand() * 0.15), Math.sin(angle) * dist);
-      group.add(foliage);
+      const t = i / (tiers - 1);
+      const tierBottom = tierTop + (tierBottomMax - tierTop) * (0.32 + 0.1 * (1 - t));
+      const halfWidth = (w * 0.5) * (0.28 + t * 0.62);
+      const jag = 5;
+      ctx.beginPath();
+      ctx.moveTo(w / 2, tierTop);
+      for (let j = 0; j <= jag; j++) {
+        const jt = j / jag;
+        const wob = Math.sin(jt * Math.PI * 5 + seed * 9 + i) * halfWidth * 0.12;
+        ctx.lineTo(w / 2 + jt * halfWidth + wob, tierTop + jt * jt * (tierBottom - tierTop));
+      }
+      for (let j = jag; j >= 0; j--) {
+        const jt = j / jag;
+        const wob = Math.sin(jt * Math.PI * 5 + seed * 9 + i + 3) * halfWidth * 0.12;
+        ctx.lineTo(w / 2 - jt * halfWidth - wob, tierTop + jt * jt * (tierBottom - tierTop));
+      }
+      ctx.closePath();
+      ctx.fill();
+      tierTop += (tierBottom - tierTop) * 0.62; // next tier starts partway down this one — overlapping tiers, not stacked edge-to-edge
     }
   } else {
-    // "round" — the original bushy-clump look, now one of three options
-    // instead of the only one, and with the per-tree color + gradient
-    // applied like the other two archetypes.
-    const clumps = 3 + Math.floor(rand() * 3);
-    for (let i = 0; i < clumps; i++) {
-      const scale = 1.1 + rand() * 1.1;
-      const geo = new THREE.IcosahedronGeometry(scale, getGraphicsSettings().decorationDetail);
-      applyVerticalGradient(geo, leafLow, leafHigh);
-      const foliage = new THREE.Mesh(geo, leafMat);
-      const angle = rand() * Math.PI * 2, dist = rand() * 0.9;
-      foliage.position.set(Math.cos(angle) * dist, h * (0.78 + rand() * 0.22), Math.sin(angle) * dist);
-      group.add(foliage);
+    const lobes = archetype === "spreading" ? 5 : 4;
+    const canopyTop = h * 0.06;
+    const canopyBottom = h * 0.86;
+    for (let i = 0; i < lobes; i++) {
+      const lt = i / (lobes - 1);
+      const cx = w * (0.5 + (lt - 0.5) * (archetype === "spreading" ? 0.9 : 0.55));
+      const cy = canopyTop + (canopyBottom - canopyTop) * (0.35 + 0.3 * Math.abs(lt - 0.5));
+      const r = (w * (archetype === "spreading" ? 0.42 : 0.36)) * (0.75 + ((seed * 13 + i) % 1) * 0.4);
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fill();
     }
   }
 
-  return { group, kind: "tree", bobAmplitude: 0.02, bobSeed: rand() * Math.PI * 2 };
+  // A warm highlight rim along one edge, composited only onto whatever's
+  // already painted — same flat-illustration rim-light trick as the rock
+  // silhouettes above, keeps a solid dark canopy from reading as an inert
+  // cutout. source-atop (not the rocks' clip()) since the canopy here is
+  // several separate shapes, not one continuous path.
+  ctx.save();
+  ctx.globalCompositeOperation = "source-atop";
+  const cap = new THREE.Color(capColorHex);
+  const rim = ctx.createLinearGradient(w * 0.2, 0, w * 0.8, 0);
+  rim.addColorStop(0, "rgba(0,0,0,0)");
+  rim.addColorStop(0.65, "rgba(0,0,0,0)");
+  rim.addColorStop(1, `rgba(${Math.round(cap.r * 255)},${Math.round(cap.g * 255)},${Math.round(cap.b * 255)},0.55)`);
+  ctx.fillStyle = rim;
+  ctx.fillRect(0, 0, w, h);
+  ctx.restore();
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// A small pool of pre-baked variants per archetype+color combo, reused
+// across every tree that rolls that combo, instead of one brand-new
+// canvas texture per tree instance. With hundreds of trees in a forest,
+// unique-per-tree textures would scale GPU memory linearly with tree
+// count; pooling bounds it by how much color/archetype variety exists
+// instead — this is what actually makes pushing tree count up safe.
+const TREE_TEXTURE_VARIANTS = 3;
+const treeTextureCache = new Map();
+function getTreeTexture(archetype, leafColorHex, capColorHex, barkColorHex, rand) {
+  const key = `${archetype}|${leafColorHex}|${barkColorHex}`;
+  let variants = treeTextureCache.get(key);
+  if (!variants) {
+    variants = [];
+    for (let i = 0; i < TREE_TEXTURE_VARIANTS; i++) {
+      variants.push(createTreeTexture((i + 1) / (TREE_TEXTURE_VARIANTS + 1), archetype, leafColorHex, capColorHex, barkColorHex));
+    }
+    treeTextureCache.set(key, variants);
+  }
+  return variants[Math.floor(rand() * variants.length)];
+}
+
+function createLivingTree(colorHex, rand) {
+  const archetypeRoll = rand();
+  // Conical (pine) dominant, matching a pine-forest reference — round
+  // (oak-like) and spreading fill in the rest for real variety.
+  const archetype = archetypeRoll < 0.55 ? "conical" : archetypeRoll < 0.8 ? "round" : "spreading";
+  const bark = VERDANT_BARK_PALETTE[Math.floor(rand() * VERDANT_BARK_PALETTE.length)];
+  const leaf = VERDANT_LEAF_PALETTE[Math.floor(rand() * VERDANT_LEAF_PALETTE.length)];
+  const cap = 0xd8f06a; // same vivid yellow-green highlight used elsewhere for Verdant foliage
+  const tex = getTreeTexture(archetype, leaf, cap, bark, rand);
+
+  const height = (3 + rand() * 9) * (archetype === "conical" ? 1.35 : 1); // taller overall, pines noticeably taller/narrower — matches the reference's tall slender conifers
+  // Width matches the canvas's own aspect ratio per archetype (see the w/h
+  // values in createTreeTexture) so the painted silhouette doesn't stretch.
+  const aspect = archetype === "conical" ? 110 / 340 : archetype === "spreading" ? 110 / 210 : 110 / 250;
+  const width = height * aspect;
+
+  const spriteGroup = createRockSprite(tex, width, height);
+  return {
+    group: spriteGroup, kind: "tree", bobAmplitude: 0.02, bobSeed: rand() * Math.PI * 2,
+    material: spriteGroup.children[0].material, // both crossed planes share one material — grabbing it here lets updateDecoration animate a subtle canopy shimmer without createRockSprite itself needing to expose it
+  };
 }
 
 // A dark opening set into a rock outcrop, implying a cave system beneath
@@ -633,6 +727,14 @@ function updateDecoration(handle, elapsed) {
     handle.group.scale.setScalar(1 + Math.sin(elapsed * 1.4 + handle.bobSeed) * handle.bobAmplitude * 0.06);
   } else if (handle.kind === "tree") {
     handle.group.rotation.z = Math.sin(elapsed * 0.5 + handle.bobSeed) * handle.bobAmplitude;
+    if (handle.material) {
+      // A subtle brightness shimmer on the same phase as the sway — reads
+      // as light catching the leaves as they move, not just a rigid
+      // rocking silhouette. Small enough it doesn't fight the painted
+      // texture's own gradient/rim-light.
+      const shimmer = 1 + Math.sin(elapsed * 0.5 + handle.bobSeed) * 0.08;
+      handle.material.color.setScalar(shimmer);
+    }
   } else if (handle.kind === "debris") {
     handle.group.position.y = handle.baseY + handle.hoverHeight + Math.sin(elapsed * 0.6 + handle.bobSeed) * handle.bobAmplitude;
     handle.group.rotation.y += handle.spinRate * 0.016;
@@ -866,4 +968,68 @@ function createGlyphMarker(colorHex, rand) {
   return { group, kind: "glyphMarker" };
 }
 
-export { createDecoration, updateDecoration, createEmberFire };
+// -----------------------------------------------------------------------------
+// Canopy light shafts — Verdant only. Scattered "god ray" sprites
+// reaching down from canopy height toward the ground. dayNightCycle.js's
+// existing sun beams use the same tapered-beam texture technique but
+// aren't exported and stay tightly bound to tracking the sun's own
+// position, so this is a small self-contained version rather than
+// importing that one. Brightness is driven by the day/night cycle's own
+// dayAmount, updated each frame from main.js — bright at midday, fading
+// toward nothing at night, since light can't shine through a canopy that
+// isn't lit in the first place.
+// -----------------------------------------------------------------------------
+
+let sharedLightShaftTexture = null;
+function getLightShaftTexture() {
+  if (sharedLightShaftTexture) return sharedLightShaftTexture;
+  const w = 48, h = 200;
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, "rgba(255,255,255,0.55)");
+  grad.addColorStop(0.6, "rgba(255,255,255,0.18)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.filter = "blur(6px)"; // soft edges, not a cut shape
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.moveTo(w * 0.42, 0);
+  ctx.lineTo(w * 0.58, 0);
+  ctx.lineTo(w * 0.85, h);
+  ctx.lineTo(w * 0.15, h);
+  ctx.closePath();
+  ctx.fill();
+  sharedLightShaftTexture = new THREE.CanvasTexture(canvas);
+  return sharedLightShaftTexture;
+}
+
+function createLightShaft(x, z, groundY, rand) {
+  const mat = new THREE.SpriteMaterial({
+    map: getLightShaftTexture(), color: 0xdcf0a0, transparent: true, opacity: 0,
+    blending: THREE.AdditiveBlending, depthWrite: false, fog: true,
+    rotation: (rand() - 0.5) * 0.25, // a slight tilt, not perfectly vertical
+  });
+  const sprite = new THREE.Sprite(mat);
+  sprite.center.set(0.5, 1); // anchored at the top (canopy height), extends downward — same convention dayNightCycle.js's sun beams use
+  const length = 7 + rand() * 8;
+  sprite.scale.set(length * 0.3, length, 1);
+  sprite.position.set(x, groundY + length, z);
+  return { sprite, baseOpacity: 0.3 + rand() * 0.25 };
+}
+
+function updateLightShafts(shafts, dayAmount) {
+  if (!shafts) return;
+  const t = Math.max(0, dayAmount);
+  for (const s of shafts) s.sprite.material.opacity = s.baseOpacity * t;
+}
+
+function disposeLightShafts(scene, shafts) {
+  if (!shafts) return;
+  for (const s of shafts) {
+    scene.remove(s.sprite);
+    s.sprite.material.dispose();
+  }
+}
+
+export { createDecoration, updateDecoration, createEmberFire, createLivingTree, createBush, createLightShaft, updateLightShafts, disposeLightShafts };

@@ -3,7 +3,7 @@ import { PointerLockControls } from "three/addons/controls/PointerLockControls.j
 import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL } from "./terrain.js";
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
-import { createDecoration, updateDecoration, createEmberFire } from "./decorations.js";
+import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createBush } from "./decorations.js";
 import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane } from "./liquid.js";
 import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
@@ -416,6 +416,41 @@ function buildLevel(levelIdx) {
     scene.add(handle.group);
     decorationHandles.push(handle);
   });
+
+  // Extra forest fill — Verdant only. worldgen.js's own decoration seeds
+  // (the loop above) are sparse enough that the walkable middle of the
+  // map reads as open grass with trees only near the edges; this scatters
+  // additional trees/bushes across the whole walkable square directly,
+  // independent of worldgen's own placement, so density isn't limited by
+  // a file this session doesn't have access to. Real size grading gives
+  // an actual foreground/midground/background depth cue: bigger near the
+  // center (where the player spends most of their time), tapering smaller
+  // toward the edge so it blends into horizonSilhouettes.js's distant
+  // treeline instead of jumping straight from full-size to backdrop-tiny.
+  if (level.biome === "verdant") {
+    const fillerCount = 150;
+    const fillerBound = WORLD_BOUND_RADIUS * 0.95;
+    for (let i = 0; i < fillerCount; i++) {
+      const x = (Math.random() * 2 - 1) * fillerBound;
+      const z = (Math.random() * 2 - 1) * fillerBound;
+      const distFromCenter = Math.hypot(x, z);
+      if (distFromCenter > fillerBound) continue; // keep this pass roughly circular within the walkable bound rather than filling the square's far corners too
+      if (Math.hypot(x - LANDMARK_POSITION.x, z - LANDMARK_POSITION.z) < 14) continue; // keep the landmark's own clearing free
+      if (Math.hypot(x - layout.spawn.x, z - layout.spawn.z) < 8) continue; // keep the immediate spawn area free
+      const groundY = sampleGroundHeight(x, z, terrainMesh) ?? 0;
+      const handle = Math.random() < 0.3 ? createBush(level.color, Math.random) : createLivingTree(level.color, Math.random);
+      handle.group.position.set(x, groundY, z);
+      handle.group.rotation.y = Math.random() * Math.PI * 2;
+      const depthT = Math.min(1, distFromCenter / fillerBound);
+      handle.group.scale.setScalar(1.15 - depthT * 0.55); // 1.15x near the center down to 0.6x near the edge
+      handle.baseY = groundY;
+      handle.group.traverse((obj) => {
+        if (obj.isMesh) { obj.castShadow = true; obj.receiveShadow = true; }
+      });
+      scene.add(handle.group);
+      decorationHandles.push(handle);
+    }
+  }
 
   loreMarkers = layout.loreMarkers.map((m) => ({
     ...m, y: sampleGroundHeight(m.x, m.z, terrainMesh) ?? 0, shown: false,

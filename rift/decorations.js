@@ -961,4 +961,4 @@ function createGlyphMarker(colorHex, rand) {
   return { group, kind: "glyphMarker" };
 }
 
-export { createDecoration, updateDecoration, createEmberFire };
+export { createDecoration, updateDecoration, createEmberFire, createLivingTree, createBush };

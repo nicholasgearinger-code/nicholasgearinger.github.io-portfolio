@@ -447,6 +447,14 @@ function buildLevel(levelIdx) {
     // forest instead of "mostly dense with big empty patches."
     const gridSize = Math.max(1, Math.round(Math.sqrt(targetCount)));
     const cellSize = (fillerBound * 2) / gridSize;
+    // levels.js's own base decorations (layout.decorationSeeds) are a
+    // completely separate, uncoordinated placement system — they know
+    // nothing about this grid, and this grid knows nothing about them.
+    // Without a mutual check, a base-decoration tree/rock can land right
+    // on top of a filler tree, which is exactly what kept showing up as
+    // "stacked" trees even after the filler's own internal jitter was
+    // fixed. Skip any filler cell that lands too close to one.
+    const seedMinDist = 10; // generous enough to also cover occasional oversized ("isGiant") base decorations, which can be visually 2-4x wider than a normal one
     for (let gx = 0; gx < gridSize; gx++) {
       for (let gz = 0; gz < gridSize; gz++) {
         const cellCenterX = -fillerBound + (gx + 0.5) * cellSize;
@@ -457,6 +465,7 @@ function buildLevel(levelIdx) {
         if (distFromCenter > fillerBound) continue; // keep this pass roughly circular within the walkable bound rather than filling the square's far corners too
         if (Math.hypot(x - LANDMARK_POSITION.x, z - LANDMARK_POSITION.z) < 14) continue; // keep the landmark's own clearing free
         if (Math.hypot(x - layout.spawn.x, z - layout.spawn.z) < 8) continue; // keep the immediate spawn area free
+        if (layout.decorationSeeds.some((seed) => Math.hypot(x - seed.x, z - seed.z) < seedMinDist)) continue; // keep clear of levels.js's own independently-placed decorations
         const groundY = sampleGroundHeight(x, z, terrainMesh) ?? 0;
         if (waterLevel !== undefined && groundY < waterLevel + 0.4) continue; // no trees growing in the lake
         const handle = fillerRand() < 0.3 ? createBush(level.color, fillerRand) : createLivingTree(level.color, fillerRand);

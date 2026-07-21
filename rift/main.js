@@ -437,27 +437,40 @@ function buildLevel(levelIdx) {
     // was different every single page load instead of reproducible from
     // WORLD_SEED the way worldgen.js's own decoration/crystal seeds are.
     const fillerRand = mulberry32(hashStringToSeed(WORLD_SEED + "-forest-filler-" + level.biome));
-    const fillerCount = 380; // pushed further still per explicit "large deep forest" request — texture pooling (getTreeTexture) means GPU memory stays bounded by variety, not by this count, so there's real room to keep pushing this if it still doesn't feel deep enough
     const fillerBound = WORLD_BOUND_RADIUS * 0.95;
-    for (let i = 0; i < fillerCount; i++) {
-      const x = (fillerRand() * 2 - 1) * fillerBound;
-      const z = (fillerRand() * 2 - 1) * fillerBound;
-      const distFromCenter = Math.hypot(x, z);
-      if (distFromCenter > fillerBound) continue; // keep this pass roughly circular within the walkable bound rather than filling the square's far corners too
-      if (Math.hypot(x - LANDMARK_POSITION.x, z - LANDMARK_POSITION.z) < 14) continue; // keep the landmark's own clearing free
-      if (Math.hypot(x - layout.spawn.x, z - layout.spawn.z) < 8) continue; // keep the immediate spawn area free
-      const groundY = sampleGroundHeight(x, z, terrainMesh) ?? 0;
-      const handle = fillerRand() < 0.3 ? createBush(level.color, fillerRand) : createLivingTree(level.color, fillerRand);
-      handle.group.position.set(x, groundY, z);
-      handle.group.rotation.y = fillerRand() * Math.PI * 2;
-      const depthT = Math.min(1, distFromCenter / fillerBound);
-      handle.group.scale.setScalar(1.15 - depthT * 0.55); // 1.15x near the center down to 0.6x near the edge
-      handle.baseY = groundY;
-      handle.group.traverse((obj) => {
-        if (obj.isMesh) { obj.castShadow = true; obj.receiveShadow = true; }
-      });
-      scene.add(handle.group);
-      decorationHandles.push(handle);
+    const waterLevel = LIQUID_LEVEL[level.biome]; // undefined for biomes without a liquid plane
+    const targetCount = 380;
+    // A jittered grid, not pure uniform-random sampling — random alone
+    // leaves noticeable gaps and clumps purely by chance at this
+    // density; one tree/bush per grid cell (nudged by a random offset
+    // within it) guarantees genuinely even coverage across the whole
+    // forest instead of "mostly dense with big empty patches."
+    const gridSize = Math.max(1, Math.round(Math.sqrt(targetCount)));
+    const cellSize = (fillerBound * 2) / gridSize;
+    for (let gx = 0; gx < gridSize; gx++) {
+      for (let gz = 0; gz < gridSize; gz++) {
+        const cellCenterX = -fillerBound + (gx + 0.5) * cellSize;
+        const cellCenterZ = -fillerBound + (gz + 0.5) * cellSize;
+        const x = cellCenterX + (fillerRand() - 0.5) * cellSize * 0.8;
+        const z = cellCenterZ + (fillerRand() - 0.5) * cellSize * 0.8;
+        const distFromCenter = Math.hypot(x, z);
+        if (distFromCenter > fillerBound) continue; // keep this pass roughly circular within the walkable bound rather than filling the square's far corners too
+        if (Math.hypot(x - LANDMARK_POSITION.x, z - LANDMARK_POSITION.z) < 14) continue; // keep the landmark's own clearing free
+        if (Math.hypot(x - layout.spawn.x, z - layout.spawn.z) < 8) continue; // keep the immediate spawn area free
+        const groundY = sampleGroundHeight(x, z, terrainMesh) ?? 0;
+        if (waterLevel !== undefined && groundY < waterLevel + 0.4) continue; // no trees growing in the lake
+        const handle = fillerRand() < 0.3 ? createBush(level.color, fillerRand) : createLivingTree(level.color, fillerRand);
+        handle.group.position.set(x, groundY, z);
+        handle.group.rotation.y = fillerRand() * Math.PI * 2;
+        const depthT = Math.min(1, distFromCenter / fillerBound);
+        handle.group.scale.setScalar(1.15 - depthT * 0.55); // 1.15x near the center down to 0.6x near the edge
+        handle.baseY = groundY;
+        handle.group.traverse((obj) => {
+          if (obj.isMesh) { obj.castShadow = true; obj.receiveShadow = true; }
+        });
+        scene.add(handle.group);
+        decorationHandles.push(handle);
+      }
     }
 
     // Canopy light shafts — scattered near the forest, not tied to any
@@ -471,6 +484,7 @@ function buildLevel(levelIdx) {
       const z = (shaftRand() * 2 - 1) * fillerBound;
       if (Math.hypot(x, z) > fillerBound) continue;
       const groundY = sampleGroundHeight(x, z, terrainMesh) ?? 0;
+      if (waterLevel !== undefined && groundY < waterLevel + 0.4) continue; // no light shafts shining out of the middle of the lake either
       const shaft = createLightShaft(x, z, groundY, shaftRand);
       scene.add(shaft.sprite);
       lightShaftHandles.push(shaft);

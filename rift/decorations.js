@@ -560,11 +560,11 @@ function createTreeTexture(seed, archetype, leafColorHex, capColorHex, barkColor
   // Wide enough to stay visible from any angle — on a crossed-plane
   // sprite, a thin trunk foreshortens down to almost nothing at oblique
   // viewing angles even though the much wider canopy above it stays
-  // fully visible, which reads as a canopy floating with no support. The
-  // foliage below (tierBottomMax/canopyBottom) now extends down over
-  // almost all of this trunk too, leaving only a thin sliver visible at
-  // the very base — matches the reference's near-total foliage coverage
-  // rather than a long bare trunk showing through.
+  // fully visible, which reads as a canopy floating with no support.
+  // Foliage below is guaranteed to reach down over almost all of this
+  // trunk via an explicit closing shape (see the base triangle/lobe in
+  // each archetype branch below) rather than relying on the tier/lobe
+  // placement math to reach far enough down on its own.
   const trunkTop = h * 0.78;
   ctx.fillStyle = `#${new THREE.Color(barkColorHex).getHexString()}`;
   ctx.fillRect(w * 0.4, trunkTop, w * 0.2, h - trunkTop);
@@ -574,7 +574,7 @@ function createTreeTexture(seed, archetype, leafColorHex, capColorHex, barkColor
   if (archetype === "conical") {
     const tiers = 4 + Math.floor((seed % 1) * 3);
     let tierTop = h * 0.03;
-    const tierBottomMax = h * 0.99;
+    const tierBottomMax = h * 0.92;
     for (let i = 0; i < tiers; i++) {
       const t = i / (tiers - 1);
       const tierBottom = tierTop + (tierBottomMax - tierTop) * (0.32 + 0.1 * (1 - t));
@@ -596,10 +596,24 @@ function createTreeTexture(seed, archetype, leafColorHex, capColorHex, barkColor
       ctx.fill();
       tierTop += (tierBottom - tierTop) * 0.62; // next tier starts partway down this one — overlapping tiers, not stacked edge-to-edge
     }
+    // A final wide triangle at the base, GUARANTEED to reach all the way
+    // down over the trunk regardless of where the tier loop above
+    // actually landed — that loop's own math only closes 62% of the
+    // remaining gap each iteration, so it approaches tierBottomMax
+    // asymptotically and falls noticeably short with only 4-6 tiers, no
+    // matter how high tierBottomMax itself is set. This shape doesn't
+    // depend on that math at all.
+    const baseHalfWidth = w * 0.48;
+    ctx.beginPath();
+    ctx.moveTo(w * 0.5, h * 0.58);
+    ctx.lineTo(w * 0.5 + baseHalfWidth, h * 0.98);
+    ctx.lineTo(w * 0.5 - baseHalfWidth, h * 0.98);
+    ctx.closePath();
+    ctx.fill();
   } else {
     const lobes = archetype === "spreading" ? 5 : 4;
     const canopyTop = h * 0.06;
-    const canopyBottom = h * 0.97;
+    const canopyBottom = h * 0.86;
     for (let i = 0; i < lobes; i++) {
       const lt = i / (lobes - 1);
       const cx = w * (0.5 + (lt - 0.5) * (archetype === "spreading" ? 0.9 : 0.55));
@@ -609,6 +623,16 @@ function createTreeTexture(seed, archetype, leafColorHex, capColorHex, barkColor
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.fill();
     }
+    // A wide low lobe specifically to close the gap down to the trunk —
+    // the scattered lobes above only ever reach about halfway down this
+    // canopy's own range by construction (their cy formula tops out at
+    // canopyTop+(canopyBottom-canopyTop)*0.5), so without this there's a
+    // real bare gap between the canopy and the trunk, not just an
+    // exposed trunk.
+    const closeR = w * (archetype === "spreading" ? 0.46 : 0.4);
+    ctx.beginPath();
+    ctx.arc(w * 0.5, h * 0.88, closeR, 0, Math.PI * 2);
+    ctx.fill();
   }
 
   // A warm highlight rim along one edge, composited only onto whatever's

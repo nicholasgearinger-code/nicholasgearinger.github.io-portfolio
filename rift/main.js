@@ -24,6 +24,7 @@ import { getIslandLore } from "./lore.js";
 import { findClosestHit } from "./hitPrediction.js";
 import { createTouchControls } from "./touchControls.js";
 import { createPlayerPhysicsState, updatePlayerPhysics, sampleGroundHeight, WALK_SPEED, AIR_CONTROL } from "./physics.js";
+import { mulberry32, hashStringToSeed } from "./worldgen.js";
 
 // ---------------------------------------------------------------------------
 // World seed — fixed by default so every visitor explores the same curated
@@ -428,19 +429,24 @@ function buildLevel(levelIdx) {
   // toward the edge so it blends into horizonSilhouettes.js's distant
   // treeline instead of jumping straight from full-size to backdrop-tiny.
   if (level.biome === "verdant") {
+    // Deterministic, like every other placement system in this game —
+    // was using raw Math.random() before, which meant the forest layout
+    // was different every single page load instead of reproducible from
+    // WORLD_SEED the way worldgen.js's own decoration/crystal seeds are.
+    const fillerRand = mulberry32(hashStringToSeed(WORLD_SEED + "-forest-filler-" + level.biome));
     const fillerCount = 150;
     const fillerBound = WORLD_BOUND_RADIUS * 0.95;
     for (let i = 0; i < fillerCount; i++) {
-      const x = (Math.random() * 2 - 1) * fillerBound;
-      const z = (Math.random() * 2 - 1) * fillerBound;
+      const x = (fillerRand() * 2 - 1) * fillerBound;
+      const z = (fillerRand() * 2 - 1) * fillerBound;
       const distFromCenter = Math.hypot(x, z);
       if (distFromCenter > fillerBound) continue; // keep this pass roughly circular within the walkable bound rather than filling the square's far corners too
       if (Math.hypot(x - LANDMARK_POSITION.x, z - LANDMARK_POSITION.z) < 14) continue; // keep the landmark's own clearing free
       if (Math.hypot(x - layout.spawn.x, z - layout.spawn.z) < 8) continue; // keep the immediate spawn area free
       const groundY = sampleGroundHeight(x, z, terrainMesh) ?? 0;
-      const handle = Math.random() < 0.3 ? createBush(level.color, Math.random) : createLivingTree(level.color, Math.random);
+      const handle = fillerRand() < 0.3 ? createBush(level.color, fillerRand) : createLivingTree(level.color, fillerRand);
       handle.group.position.set(x, groundY, z);
-      handle.group.rotation.y = Math.random() * Math.PI * 2;
+      handle.group.rotation.y = fillerRand() * Math.PI * 2;
       const depthT = Math.min(1, distFromCenter / fillerBound);
       handle.group.scale.setScalar(1.15 - depthT * 0.55); // 1.15x near the center down to 0.6x near the edge
       handle.baseY = groundY;

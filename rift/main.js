@@ -425,13 +425,26 @@ function buildLevel(levelIdx) {
     const handle = createDecoration(level.biome, level.color, seed.rand);
     handle.group.position.set(seed.x, groundY, seed.z);
     handle.group.rotation.y = seed.rand() * Math.PI * 2;
+    if (level.biome === "verdant") {
+      // Base decorations previously only ever got RECORDED into
+      // placedFootprints, never CHECKED against it — meaning two of
+      // levels.js's own 60 seeds could overlap each other directly with
+      // nothing preventing it, since that loop never had any mutual
+      // collision awareness at all (only the forest-filler pass checked
+      // against existing placements). This is what was still showing up
+      // as overlapping trees even after the filler pass itself became
+      // collision-safe.
+      const radius = footprintRadiusOf(handle.group);
+      const overlaps = placedFootprints.some((f) => Math.hypot(seed.x - f.x, seed.z - f.z) < radius + f.radius);
+      if (overlaps) return; // skip this decoration entirely — forEach's `return` just moves to the next seed
+      placedFootprints.push({ x: seed.x, z: seed.z, radius });
+    }
     handle.baseY = groundY;
     handle.group.traverse((obj) => {
       if (obj.isMesh) { obj.castShadow = true; obj.receiveShadow = true; }
     });
     scene.add(handle.group);
     decorationHandles.push(handle);
-    if (level.biome === "verdant") placedFootprints.push({ x: seed.x, z: seed.z, radius: footprintRadiusOf(handle.group) });
   });
 
   // Extra forest fill — Verdant only. worldgen.js's own decoration seeds

@@ -646,7 +646,11 @@ function createLivingTree(colorHex, rand) {
   const aspect = archetype === "conical" ? 110 / 340 : archetype === "spreading" ? 110 / 210 : 110 / 250;
   const width = height * aspect;
 
-  return { group: createRockSprite(tex, width, height), kind: "tree", bobAmplitude: 0.02, bobSeed: rand() * Math.PI * 2 };
+  const spriteGroup = createRockSprite(tex, width, height);
+  return {
+    group: spriteGroup, kind: "tree", bobAmplitude: 0.02, bobSeed: rand() * Math.PI * 2,
+    material: spriteGroup.children[0].material, // both crossed planes share one material — grabbing it here lets updateDecoration animate a subtle canopy shimmer without createRockSprite itself needing to expose it
+  };
 }
 
 // A dark opening set into a rock outcrop, implying a cave system beneath
@@ -702,6 +706,14 @@ function updateDecoration(handle, elapsed) {
     handle.group.scale.setScalar(1 + Math.sin(elapsed * 1.4 + handle.bobSeed) * handle.bobAmplitude * 0.06);
   } else if (handle.kind === "tree") {
     handle.group.rotation.z = Math.sin(elapsed * 0.5 + handle.bobSeed) * handle.bobAmplitude;
+    if (handle.material) {
+      // A subtle brightness shimmer on the same phase as the sway — reads
+      // as light catching the leaves as they move, not just a rigid
+      // rocking silhouette. Small enough it doesn't fight the painted
+      // texture's own gradient/rim-light.
+      const shimmer = 1 + Math.sin(elapsed * 0.5 + handle.bobSeed) * 0.08;
+      handle.material.color.setScalar(shimmer);
+    }
   } else if (handle.kind === "debris") {
     handle.group.position.y = handle.baseY + handle.hoverHeight + Math.sin(elapsed * 0.6 + handle.bobSeed) * handle.bobAmplitude;
     handle.group.rotation.y += handle.spinRate * 0.016;
@@ -935,4 +947,68 @@ function createGlyphMarker(colorHex, rand) {
   return { group, kind: "glyphMarker" };
 }
 
-export { createDecoration, updateDecoration, createEmberFire, createLivingTree, createBush };
+// -----------------------------------------------------------------------------
+// Canopy light shafts — Verdant only. Scattered "god ray" sprites
+// reaching down from canopy height toward the ground. dayNightCycle.js's
+// existing sun beams use the same tapered-beam texture technique but
+// aren't exported and stay tightly bound to tracking the sun's own
+// position, so this is a small self-contained version rather than
+// importing that one. Brightness is driven by the day/night cycle's own
+// dayAmount, updated each frame from main.js — bright at midday, fading
+// toward nothing at night, since light can't shine through a canopy that
+// isn't lit in the first place.
+// -----------------------------------------------------------------------------
+
+let sharedLightShaftTexture = null;
+function getLightShaftTexture() {
+  if (sharedLightShaftTexture) return sharedLightShaftTexture;
+  const w = 48, h = 200;
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, "rgba(255,255,255,0.55)");
+  grad.addColorStop(0.6, "rgba(255,255,255,0.18)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.filter = "blur(6px)"; // soft edges, not a cut shape
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.moveTo(w * 0.42, 0);
+  ctx.lineTo(w * 0.58, 0);
+  ctx.lineTo(w * 0.85, h);
+  ctx.lineTo(w * 0.15, h);
+  ctx.closePath();
+  ctx.fill();
+  sharedLightShaftTexture = new THREE.CanvasTexture(canvas);
+  return sharedLightShaftTexture;
+}
+
+function createLightShaft(x, z, groundY, rand) {
+  const mat = new THREE.SpriteMaterial({
+    map: getLightShaftTexture(), color: 0xdcf0a0, transparent: true, opacity: 0,
+    blending: THREE.AdditiveBlending, depthWrite: false, fog: true,
+    rotation: (rand() - 0.5) * 0.25, // a slight tilt, not perfectly vertical
+  });
+  const sprite = new THREE.Sprite(mat);
+  sprite.center.set(0.5, 1); // anchored at the top (canopy height), extends downward — same convention dayNightCycle.js's sun beams use
+  const length = 7 + rand() * 8;
+  sprite.scale.set(length * 0.3, length, 1);
+  sprite.position.set(x, groundY + length, z);
+  return { sprite, baseOpacity: 0.3 + rand() * 0.25 };
+}
+
+function updateLightShafts(shafts, dayAmount) {
+  if (!shafts) return;
+  const t = Math.max(0, dayAmount);
+  for (const s of shafts) s.sprite.material.opacity = s.baseOpacity * t;
+}
+
+function disposeLightShafts(scene, shafts) {
+  if (!shafts) return;
+  for (const s of shafts) {
+    scene.remove(s.sprite);
+    s.sprite.material.dispose();
+  }
+}
+
+export { createDecoration, updateDecoration, createEmberFire, createLivingTree, createBush, createLightShaft, updateLightShafts, disposeLightShafts };

@@ -345,6 +345,10 @@ function buildAmbientGraph(biome) {
     drone(60, "sine", 0.02);
     noiseBed("bandpass", 900, 0.5, 0.03, 0.15, 0.012); // wind through foliage, gustier
     noiseBed("bandpass", 2200, 1.2, 0.008, 0.3, 0.004); // thin high shimmer — water/leaves
+    // Ambient bird calls — a living forest, not just wind through leaves.
+    handle.intervalId = setInterval(() => {
+      if (Math.random() < 0.55) playBirdChirp();
+    }, 2200);
   } else if (biome === "crystal") {
     drone(50, "sine", 0.018);
     noiseBed("highpass", 3000, 0.8, 0.006, 0.06, 0.004);
@@ -438,6 +442,30 @@ function playEruptionBurst() {
   gain.gain.value = 0.5; // rough level, worth a by-ear pass once live
   source.connect(gain).connect(masterGain);
   source.start(t);
+}
+
+// A short 2-4 note trill with a real upward-then-down pitch warble per
+// note (not a flat tone — a flat tone reads as a beep, not a bird call),
+// randomized base pitch so successive calls don't sound identical.
+function playBirdChirp() {
+  if (!ctx) return;
+  const t = ctx.currentTime;
+  const chirps = 2 + Math.floor(Math.random() * 3);
+  const baseFreq = 1800 + Math.random() * 1400;
+  for (let i = 0; i < chirps; i++) {
+    const start = t + i * (0.09 + Math.random() * 0.05);
+    const f = baseFreq * (0.9 + Math.random() * 0.25);
+    const osc = ctx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(f, start);
+    osc.frequency.exponentialRampToValueAtTime(f * (1.3 + Math.random() * 0.4), start + 0.05);
+    osc.frequency.exponentialRampToValueAtTime(f * 0.85, start + 0.1);
+    const gain = ctx.createGain();
+    envelope(gain, 0.008, 0.09, 0.045, start);
+    osc.connect(gain).connect(masterGain);
+    osc.start(start);
+    osc.stop(start + 0.15);
+  }
 }
 
 function playCrystalPing() {

@@ -3,7 +3,7 @@ import { PointerLockControls } from "three/addons/controls/PointerLockControls.j
 import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL } from "./terrain.js";
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
-import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createBush } from "./decorations.js";
+import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createBush, createLightShaft, updateLightShafts, disposeLightShafts } from "./decorations.js";
 import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane } from "./liquid.js";
 import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
@@ -290,6 +290,7 @@ let allCrystals = [];
 let crystalsTotal = 0;
 let crystalsCollected = 0;
 const decorationHandles = [];
+let lightShaftHandles = [];
 let loreMarkers = []; // {id, x, z, y, shown}
 let currentLevelIdx = -1;
 let spawnPosition = { x: 0, y: 5, z: 0 };
@@ -341,6 +342,8 @@ function teardownLevel() {
     });
   }
   decorationHandles.length = 0;
+  disposeLightShafts(scene, lightShaftHandles);
+  lightShaftHandles = [];
   loreMarkers = [];
 }
 
@@ -455,6 +458,22 @@ function buildLevel(levelIdx) {
       });
       scene.add(handle.group);
       decorationHandles.push(handle);
+    }
+
+    // Canopy light shafts — scattered near the forest, not tied to any
+    // individual tree's position (a fixed light-shaft-per-tree would look
+    // mechanical). Own deterministic PRNG stream, same pattern as the
+    // filler trees above.
+    const shaftRand = mulberry32(hashStringToSeed(WORLD_SEED + "-light-shafts-" + level.biome));
+    const shaftCount = 28;
+    for (let i = 0; i < shaftCount; i++) {
+      const x = (shaftRand() * 2 - 1) * fillerBound;
+      const z = (shaftRand() * 2 - 1) * fillerBound;
+      if (Math.hypot(x, z) > fillerBound) continue;
+      const groundY = sampleGroundHeight(x, z, terrainMesh) ?? 0;
+      const shaft = createLightShaft(x, z, groundY, shaftRand);
+      scene.add(shaft.sprite);
+      lightShaftHandles.push(shaft);
     }
   }
 
@@ -849,6 +868,7 @@ function animate() {
   updateWildlife(wildlifeHandle, elapsedTime, dt, camera.position.x, camera.position.z, eruptionActive);
   updateLandmark(landmarkHandle, elapsedTime, dt);
   updateClouds(cloudsHandle, dt, wind, dayNight.dayAmount, wind.rainIntensity);
+  updateLightShafts(lightShaftHandles, dayNight.dayAmount);
   updateWorldPulse(dt);
   updateProjectiles(dt);
   renderer.render(scene, camera);

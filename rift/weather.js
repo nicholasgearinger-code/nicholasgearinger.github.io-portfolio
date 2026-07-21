@@ -124,6 +124,60 @@ function createAshfall(scene) {
   return { points, fallSpeeds };
 }
 
+// A painted leaf silhouette (not a round dot) — a simple pointed oval
+// with a thin center vein, neutral white-alpha so material.color tints
+// it the same way getAshTexture/getDustTexture do.
+let sharedLeafTexture = null;
+function getLeafTexture() {
+  if (sharedLeafTexture) return sharedLeafTexture;
+  const size = 32;
+  const canvas = document.createElement("canvas");
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "rgba(255,255,255,0.9)";
+  ctx.beginPath();
+  ctx.ellipse(size / 2, size / 2, size * 0.42, size * 0.22, Math.PI / 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(0,0,0,0.3)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(size * 0.2, size * 0.8);
+  ctx.lineTo(size * 0.8, size * 0.2);
+  ctx.stroke();
+  sharedLeafTexture = new THREE.CanvasTexture(canvas);
+  return sharedLeafTexture;
+}
+
+// Verdant-only — a slow drift of falling leaves under the canopy, always
+// lightly present (not cyclic like rain — a living forest constantly
+// sheds a little, this isn't a weather event). Stays low (drifts down
+// through/under the canopy rather than falling from high sky the way
+// rain does) and flutters side-to-side per-particle as it falls, rather
+// than just drifting straight with the wind the way ash does — leaves
+// tumble, ash doesn't.
+function createLeaffall(scene) {
+  const count = 180;
+  const positions = new Float32Array(count * 3);
+  const fallSpeeds = new Float32Array(count);
+  const driftSeeds = new Float32Array(count);
+  for (let i = 0; i < count; i++) {
+    positions[i * 3] = (Math.random() - 0.5) * 200;
+    positions[i * 3 + 1] = Math.random() * 22;
+    positions[i * 3 + 2] = (Math.random() - 0.5) * 200;
+    fallSpeeds[i] = 0.5 + Math.random() * 0.7;
+    driftSeeds[i] = Math.random() * Math.PI * 2;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const mat = new THREE.PointsMaterial({
+    map: getLeafTexture(), color: 0x8fbf4a, size: 0.6, transparent: true, opacity: 0.75,
+    depthWrite: false, sizeAttenuation: true,
+  });
+  const points = new THREE.Points(geo, mat);
+  scene.add(points);
+  return { points, fallSpeeds, driftSeeds, elapsed: 0 };
+}
+
 // Crystal-only — a brief rainbow arc, as if light caught one of the
 // spires just right for a moment. A real rainbow texture (hue sweep
 // across the strip), not a single tinted glow.
@@ -252,9 +306,10 @@ function createWeatherSystem(scene, biome) {
   const dustDevil = biome === "ashen" ? createDustDevil(scene) : null;
   const crystalRefraction = biome === "crystal" ? createCrystalRefraction(scene) : null;
   const ashfall = biome === "ember" ? createAshfall(scene) : null;
+  const leaffall = biome === "verdant" ? createLeaffall(scene) : null;
 
   return {
-    scene, biome, profile, lightningLight, rain, distantLightning, dustDevil, crystalRefraction, ashfall,
+    scene, biome, profile, lightningLight, rain, distantLightning, dustDevil, crystalRefraction, ashfall, leaffall,
     windAngle: Math.random() * Math.PI * 2,
     lightningTimer: randRange(profile.lightning.intervalMin, profile.lightning.intervalMax),
     lightningFlash: 0,
@@ -399,6 +454,24 @@ function updateWeatherSystem(handle, dt, erupting = false) {
     af.points.material.opacity += (targetOpacity - af.points.material.opacity) * Math.min(1, dt * 0.8); // eases toward the new density rather than snapping when an eruption starts/ends
   }
 
+  // Falling leaves — Verdant only. Flutters side-to-side per-particle as
+  // it falls (not just wind-drift like ash) and stays low, drifting down
+  // through/under the canopy rather than from high sky.
+  if (handle.leaffall) {
+    const lf = handle.leaffall;
+    lf.elapsed += dt;
+    const posAttr = lf.points.geometry.attributes.position;
+    for (let i = 0; i < lf.fallSpeeds.length; i++) {
+      let y = posAttr.getY(i) - lf.fallSpeeds[i] * dt;
+      if (y < 0) y = 22;
+      posAttr.setY(i, y);
+      const flutter = Math.sin(lf.elapsed * 1.4 + lf.driftSeeds[i]) * 0.35;
+      posAttr.setX(i, posAttr.getX(i) + (windX * 0.3 + flutter) * dt);
+      posAttr.setZ(i, posAttr.getZ(i) + (windZ * 0.3 + flutter) * dt);
+    }
+    posAttr.needsUpdate = true;
+  }
+
   // Crystal light refraction — Crystal Spire only. A brief rainbow arc
   // near one of the spires, as if the light caught it just right.
   if (handle.crystalRefraction) {
@@ -443,6 +516,11 @@ function disposeWeatherSystem(scene, handle) {
     scene.remove(handle.ashfall.points);
     handle.ashfall.points.geometry.dispose();
     handle.ashfall.points.material.dispose();
+  }
+  if (handle.leaffall) {
+    scene.remove(handle.leaffall.points);
+    handle.leaffall.points.geometry.dispose();
+    handle.leaffall.points.material.dispose();
   }
 }
 

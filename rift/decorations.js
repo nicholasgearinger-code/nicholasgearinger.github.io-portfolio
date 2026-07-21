@@ -395,6 +395,7 @@ function createBush(colorHex, rand) {
     vertexColors: true, roughness: 0.85, flatShading: true,
     emissive: leafLow, emissiveIntensity: 0.22, // keeps a visible green tint even under this biome's darkened night lighting, instead of going to a featureless black blob — same fix as createLivingTree's foliage
   });
+  const baseScale = 0.32 + rand() * 0.42; // small — this is undergrowth, not a tree
   const clumpCount = 3 + Math.floor(rand() * 3);
   for (let i = 0; i < clumpCount; i++) {
     const scale = baseScale * (0.6 + rand() * 0.6);

@@ -451,8 +451,8 @@ function buildLevel(levelIdx) {
       for (let gz = 0; gz < gridSize; gz++) {
         const cellCenterX = -fillerBound + (gx + 0.5) * cellSize;
         const cellCenterZ = -fillerBound + (gz + 0.5) * cellSize;
-        const x = cellCenterX + (fillerRand() - 0.5) * cellSize * 0.8;
-        const z = cellCenterZ + (fillerRand() - 0.5) * cellSize * 0.8;
+        const x = cellCenterX + (fillerRand() - 0.5) * cellSize * 0.4;
+        const z = cellCenterZ + (fillerRand() - 0.5) * cellSize * 0.4;
         const distFromCenter = Math.hypot(x, z);
         if (distFromCenter > fillerBound) continue; // keep this pass roughly circular within the walkable bound rather than filling the square's far corners too
         if (Math.hypot(x - LANDMARK_POSITION.x, z - LANDMARK_POSITION.z) < 14) continue; // keep the landmark's own clearing free

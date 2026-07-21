@@ -22,15 +22,19 @@ LEVELS.forEach((l) => { l.color = biomeColor(l.biome); });
 
 const CRYSTAL_COUNT = 12;
 const LORE_MARKER_COUNT = 5;
-const DECORATION_COUNT = 22;
+const DECORATION_COUNT = 60; // was 22 — the real bottleneck behind "the forest looks sparse everywhere, not just Verdant specifically" (main.js's forest-filler pass only ever supplemented whatever this produced, it never fixed the underlying scarcity)
 
 // Both crystals and decorations stay within this fraction of the terrain's
 // half-size — keeps everything off the soft falloff rim at the edge (see
 // terrain.js) where the ground is flattening out toward the boundary.
-const PLACEMENT_RADIUS_FRAC = 0.7;
+const PLACEMENT_RADIUS_FRAC = 0.78; // was 0.7 — a little more reach toward the edge, blending better into main.js's forest-filler pass (which covers out to ~0.95*WORLD_BOUND_RADIUS) and horizonSilhouettes.js's distant treeline just beyond that
 
 function randomPointOnTerrain(rand) {
-  const r = rand() * (TERRAIN_SIZE / 2) * PLACEMENT_RADIUS_FRAC;
+  // sqrt(rand()) rather than a bare rand() — a disc's AREA at radius r
+  // grows with r, so sampling r linearly over-concentrates points near
+  // the center; the sqrt correction is what actually makes points land
+  // uniformly per unit of ground area instead of clustering inward.
+  const r = Math.sqrt(rand()) * (TERRAIN_SIZE / 2) * PLACEMENT_RADIUS_FRAC;
   const angle = rand() * Math.PI * 2;
   return { x: Math.cos(angle) * r, z: Math.sin(angle) * r };
 }

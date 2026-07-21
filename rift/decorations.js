@@ -557,9 +557,15 @@ function createTreeTexture(seed, archetype, leafColorHex, capColorHex, barkColor
   canvas.width = w; canvas.height = h;
   const ctx = canvas.getContext("2d");
 
-  const trunkTop = h * 0.9;
+  // Wide and tall enough to stay visible from any angle — on a crossed-
+  // plane sprite, a thin trunk foreshortens down to almost nothing at
+  // oblique viewing angles even though the much wider canopy above it
+  // stays fully visible, which is exactly what reads as a canopy
+  // floating with no visible support. A properly wide/tall trunk doesn't
+  // vanish that way.
+  const trunkTop = h * 0.78;
   ctx.fillStyle = `#${new THREE.Color(barkColorHex).getHexString()}`;
-  ctx.fillRect(w * 0.46, trunkTop, w * 0.08, h - trunkTop);
+  ctx.fillRect(w * 0.4, trunkTop, w * 0.2, h - trunkTop);
 
   ctx.fillStyle = `#${new THREE.Color(leafColorHex).getHexString()}`;
 

@@ -534,121 +534,113 @@ function createRockCluster(biome, colorHex, rand) {
 const VERDANT_LEAF_PALETTE = [0x3d9a42, 0x4fc24f, 0x6bcc4a, 0x2f9a68, 0x5ab83a];
 const VERDANT_BARK_PALETTE = [0x6b4423, 0x7a4f2a, 0x5a3a1e];
 
-// Living tree, one of three archetypes picked per-instance so a cluster
-// of them reads as a real varied grove instead of the same silhouette
-// copy-pasted at different scales: "round" (bushy clumps, the original
-// look), "conical" (stacked pine/fir tiers), "spreading" (wide, flatter,
-// offset canopy). Each foliage piece gets its own vertex-color gradient
-// (applyVerticalGradient, same flat-illustration rim-light technique used
-// elsewhere in this file) from the tree's own leaf color up to a lighter/
-// warmer tone, rather than one flat foliage color.
+// -----------------------------------------------------------------------------
+// Flat 2D painted tree silhouettes — same technique as Ember's
+// createPaintedRockTexture/createRockSprite above, applied to Verdant's
+// trees. The reference this was built from is a flat illustration; a
+// painted silhouette matches it directly, where 3D branch geometry could
+// only ever approximate it (see git history — several rounds of 3D
+// branch/foliage-clump tuning never quite got there).
+// -----------------------------------------------------------------------------
+
+// Paints a tree silhouette. "conical" (pine, the dominant archetype) gets
+// several overlapping jagged-edged triangular tiers stacked tall and
+// narrow — a classic conifer profile, not one smooth cone. "round"/
+// "spreading" get a broader canopy built from overlapping rounded lobes
+// instead. A sliver of trunk peeks out at the very base either way — the
+// reference shows almost no bare trunk, foliage covers nearly the whole
+// tree.
+function createTreeTexture(seed, archetype, leafColorHex, capColorHex, barkColorHex) {
+  const w = 110;
+  const h = archetype === "conical" ? 340 : archetype === "spreading" ? 210 : 250;
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d");
+
+  const trunkTop = h * 0.9;
+  ctx.fillStyle = `#${new THREE.Color(barkColorHex).getHexString()}`;
+  ctx.fillRect(w * 0.46, trunkTop, w * 0.08, h - trunkTop);
+
+  ctx.fillStyle = `#${new THREE.Color(leafColorHex).getHexString()}`;
+
+  if (archetype === "conical") {
+    const tiers = 4 + Math.floor((seed % 1) * 3);
+    let tierTop = h * 0.03;
+    const tierBottomMax = h * 0.92;
+    for (let i = 0; i < tiers; i++) {
+      const t = i / (tiers - 1);
+      const tierBottom = tierTop + (tierBottomMax - tierTop) * (0.32 + 0.1 * (1 - t));
+      const halfWidth = (w * 0.5) * (0.28 + t * 0.62);
+      const jag = 5;
+      ctx.beginPath();
+      ctx.moveTo(w / 2, tierTop);
+      for (let j = 0; j <= jag; j++) {
+        const jt = j / jag;
+        const wob = Math.sin(jt * Math.PI * 5 + seed * 9 + i) * halfWidth * 0.12;
+        ctx.lineTo(w / 2 + jt * halfWidth + wob, tierTop + jt * jt * (tierBottom - tierTop));
+      }
+      for (let j = jag; j >= 0; j--) {
+        const jt = j / jag;
+        const wob = Math.sin(jt * Math.PI * 5 + seed * 9 + i + 3) * halfWidth * 0.12;
+        ctx.lineTo(w / 2 - jt * halfWidth - wob, tierTop + jt * jt * (tierBottom - tierTop));
+      }
+      ctx.closePath();
+      ctx.fill();
+      tierTop += (tierBottom - tierTop) * 0.62; // next tier starts partway down this one — overlapping tiers, not stacked edge-to-edge
+    }
+  } else {
+    const lobes = archetype === "spreading" ? 5 : 4;
+    const canopyTop = h * 0.06;
+    const canopyBottom = h * 0.86;
+    for (let i = 0; i < lobes; i++) {
+      const lt = i / (lobes - 1);
+      const cx = w * (0.5 + (lt - 0.5) * (archetype === "spreading" ? 0.9 : 0.55));
+      const cy = canopyTop + (canopyBottom - canopyTop) * (0.35 + 0.3 * Math.abs(lt - 0.5));
+      const r = (w * (archetype === "spreading" ? 0.42 : 0.36)) * (0.75 + ((seed * 13 + i) % 1) * 0.4);
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // A warm highlight rim along one edge, composited only onto whatever's
+  // already painted — same flat-illustration rim-light trick as the rock
+  // silhouettes above, keeps a solid dark canopy from reading as an inert
+  // cutout. source-atop (not the rocks' clip()) since the canopy here is
+  // several separate shapes, not one continuous path.
+  ctx.save();
+  ctx.globalCompositeOperation = "source-atop";
+  const cap = new THREE.Color(capColorHex);
+  const rim = ctx.createLinearGradient(w * 0.2, 0, w * 0.8, 0);
+  rim.addColorStop(0, "rgba(0,0,0,0)");
+  rim.addColorStop(0.65, "rgba(0,0,0,0)");
+  rim.addColorStop(1, `rgba(${Math.round(cap.r * 255)},${Math.round(cap.g * 255)},${Math.round(cap.b * 255)},0.55)`);
+  ctx.fillStyle = rim;
+  ctx.fillRect(0, 0, w, h);
+  ctx.restore();
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 function createLivingTree(colorHex, rand) {
-  const group = new THREE.Group();
   const archetypeRoll = rand();
-  // Conical (pine) now the dominant type, matching a pine-forest
-  // reference — round (oak-like) and spreading fill in the rest for
-  // real variety rather than a monoculture.
+  // Conical (pine) dominant, matching a pine-forest reference — round
+  // (oak-like) and spreading fill in the rest for real variety.
   const archetype = archetypeRoll < 0.55 ? "conical" : archetypeRoll < 0.8 ? "round" : "spreading";
+  const bark = VERDANT_BARK_PALETTE[Math.floor(rand() * VERDANT_BARK_PALETTE.length)];
+  const leaf = VERDANT_LEAF_PALETTE[Math.floor(rand() * VERDANT_LEAF_PALETTE.length)];
+  const cap = 0xd8f06a; // same vivid yellow-green highlight used elsewhere for Verdant foliage
+  const tex = createTreeTexture(rand(), archetype, leaf, cap, bark);
 
-  const h = (3 + rand() * 9) * (archetype === "conical" ? 1.35 : 1); // taller overall, and pines lean noticeably taller/narrower than round oak-like crowns — matches the reference's tall, slender conifer silhouettes
-  const bark = new THREE.Color(VERDANT_BARK_PALETTE[Math.floor(rand() * VERDANT_BARK_PALETTE.length)]);
-  const barkMat = new THREE.MeshStandardMaterial({ color: bark, roughness: 0.9, flatShading: true });
-  const trunkRadiusTop = 0.12 + rand() * 0.1;
-  const trunkRadiusBottom = trunkRadiusTop + 0.1 + rand() * 0.12;
-  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(trunkRadiusTop, trunkRadiusBottom, h, 6), barkMat);
-  trunk.position.y = h / 2;
-  // A slight lean rather than perfectly vertical — real trees rarely grow
-  // arrow-straight, and a whole grove standing bolt upright is part of
-  // why they all looked identical.
-  trunk.rotation.z = (rand() - 0.5) * 0.12;
-  trunk.rotation.x = (rand() - 0.5) * 0.12;
-  group.add(trunk);
+  const height = (3 + rand() * 9) * (archetype === "conical" ? 1.35 : 1); // taller overall, pines noticeably taller/narrower — matches the reference's tall slender conifers
+  // Width matches the canvas's own aspect ratio per archetype (see the w/h
+  // values in createTreeTexture) so the painted silhouette doesn't stretch.
+  const aspect = archetype === "conical" ? 110 / 340 : archetype === "spreading" ? 110 / 210 : 110 / 250;
+  const width = height * aspect;
 
-  const leafLow = new THREE.Color(VERDANT_LEAF_PALETTE[Math.floor(rand() * VERDANT_LEAF_PALETTE.length)]);
-  const leafHigh = leafLow.clone().lerp(new THREE.Color(0xd8f06a), 0.4); // a vivid yellow-green highlight rather than washing toward plain white — bolder, more illustration-flat contrast
-  const leafMat = new THREE.MeshStandardMaterial({
-    vertexColors: true, roughness: 0.85, flatShading: true,
-    emissive: leafLow, emissiveIntensity: 0.22, // a modest self-glow floor — was going near-black under this biome's darkened night ambient, making walkable trees unreadable and visually disconnected from horizonSilhouettes.js's always-green unlit treeline. Still a real lit/shaded material (branches still get proper day/shadow contrast), just never fully dark.
-  });
-  // A pointed foliage tuft at a given local position — shared by both
-  // the branch tips below and the crown clumps, so every leaf mass in
-  // the tree uses the exact same technique rather than two different-
-  // looking systems.
-  function addFoliageClump(pos, scale, squash) {
-    // A small pointed tuft, not a round ball — low, blocky segment count
-    // (matches this project's "rocks/crystals stay blocky at every
-    // quality tier" convention) for a crisp faceted point rather than a
-    // smooth cone. `squash` now scales height relative to width — under
-    // 1 gives a shorter, flatter tuft, over 1 a taller, spikier one.
-    const geo = new THREE.ConeGeometry(scale * 0.62, scale * 1.9 * squash, 6);
-    applyVerticalGradient(geo, leafLow, leafHigh);
-    const foliage = new THREE.Mesh(geo, leafMat);
-    foliage.position.copy(pos);
-    group.add(foliage);
-  }
-
-  // A real oriented branch segment (a tapered cylinder actually pointing
-  // from `start` to `end`, not just a foliage blob floating above the
-  // trunk).
-  function addBranchMesh(start, end, radiusStart, radiusEnd) {
-    const dir = new THREE.Vector3().subVectors(end, start);
-    const len = dir.length();
-    dir.normalize();
-    const geo = new THREE.CylinderGeometry(radiusEnd, radiusStart, len, 5);
-    const mesh = new THREE.Mesh(geo, barkMat);
-    mesh.position.copy(start).addScaledVector(dir, len / 2);
-    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
-    group.add(mesh);
-  }
-
-  // Every tree is built the exact same simple way — trunk, a small
-  // number of straight branches, one clean foliage clump per branch, a
-  // couple of clumps tying the crown together. Archetype only nudges a
-  // few numbers (branch tilt, height, crown shape), it doesn't run a
-  // different construction algorithm — that's what actually makes every
-  // tree read as the same minimalistic design language instead of three
-  // different systems that happen to share a trunk.
-  const tiltRange = archetype === "conical" ? [0.12, 0.42] : archetype === "spreading" ? [0.55, 1.05] : [0.3, 0.75];
-  const branchCount = 5 + Math.floor(rand() * 3); // one simple range for every archetype, was conical-specific before
-
-  for (let i = 0; i < branchCount; i++) {
-    const startHeight = h * (0.4 + rand() * 0.42); // emerges from the upper ~55% of the trunk, not down near the roots
-    const startPos = new THREE.Vector3(0, startHeight, 0);
-    const branchAngle = rand() * Math.PI * 2;
-    const branchTilt = tiltRange[0] + rand() * (tiltRange[1] - tiltRange[0]);
-    const branchLen = h * (archetype === "conical" ? 0.2 + rand() * 0.2 : 0.3 + rand() * 0.34); // pines stay proportionally narrower relative to their height — matches the reference's slender conifer silhouettes rather than a scaled-up wide crown
-    const dir = new THREE.Vector3(
-      Math.sin(branchTilt) * Math.cos(branchAngle),
-      Math.cos(branchTilt),
-      Math.sin(branchTilt) * Math.sin(branchAngle)
-    );
-    const endPos = startPos.clone().addScaledVector(dir, branchLen);
-    const branchRadius = 0.06 + rand() * 0.05;
-    addBranchMesh(startPos, endPos, branchRadius, branchRadius * 0.5);
-
-    // One clean foliage clump at the branch's tip — simple and
-    // consistent, not a variable number of staggered smaller clusters
-    // (that read as busy/inconsistent from tree to tree) and no
-    // secondary forking branch.
-    addFoliageClump(endPos, 0.4 + rand() * 0.3, 1.1 + rand() * 0.6);
-  }
-
-  // A couple of clumps near the crown center so the canopy reads as one
-  // continuous mass rather than isolated pom-poms at each branch tip —
-  // same simple count for every archetype, just squashed flatter for
-  // "spreading" and left taller/pointier for the other two.
-  const crownClumps = 2;
-  const crownSquash = archetype === "spreading" ? 0.55 : 1.2;
-  for (let i = 0; i < crownClumps; i++) {
-    const angle = rand() * Math.PI * 2, dist = rand() * h * 0.16;
-    addFoliageClump(
-      new THREE.Vector3(Math.cos(angle) * dist, h * (0.76 + rand() * 0.18), Math.sin(angle) * dist),
-      0.35 + rand() * 0.4,
-      crownSquash
-    );
-  }
-
-  return { group, kind: "tree", bobAmplitude: 0.02, bobSeed: rand() * Math.PI * 2 };
+  return { group: createRockSprite(tex, width, height), kind: "tree", bobAmplitude: 0.02, bobSeed: rand() * Math.PI * 2 };
 }
 
 // A dark opening set into a rock outcrop, implying a cave system beneath

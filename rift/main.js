@@ -435,7 +435,7 @@ function buildLevel(levelIdx) {
       // as overlapping trees even after the filler pass itself became
       // collision-safe.
       const radius = footprintRadiusOf(handle.group);
-      const overlaps = placedFootprints.some((f) => Math.hypot(seed.x - f.x, seed.z - f.z) < radius + f.radius);
+      const overlaps = placedFootprints.some((f) => Math.hypot(seed.x - f.x, seed.z - f.z) < (radius + f.radius) * 1.25);
       if (overlaps) return; // skip this decoration entirely — forEach's `return` just moves to the next seed
       placedFootprints.push({ x: seed.x, z: seed.z, radius });
     }
@@ -504,7 +504,7 @@ function buildLevel(levelIdx) {
         const depthT = Math.min(1, distFromCenter / fillerBound);
         handle.group.scale.setScalar(1.15 - depthT * 0.55); // 1.15x near the center down to 0.6x near the edge
         const radius = footprintRadiusOf(handle.group);
-        const overlaps = placedFootprints.some((f) => Math.hypot(x - f.x, z - f.z) < radius + f.radius);
+        const overlaps = placedFootprints.some((f) => Math.hypot(x - f.x, z - f.z) < (radius + f.radius) * 1.25);
         if (overlaps) continue; // discard this candidate entirely rather than force it in — the whole point is a real guarantee, not a best-effort fit
         placedFootprints.push({ x, z, radius });
         handle.baseY = groundY;
@@ -513,6 +513,24 @@ function buildLevel(levelIdx) {
         });
         scene.add(handle.group);
         decorationHandles.push(handle);
+      }
+    }
+
+    // Runtime self-check — if the collision logic above is somehow still
+    // letting two footprints through anyway, this logs exactly which
+    // ones and by how much, directly in the browser console. A
+    // standalone simulation of this same algorithm (same math, same
+    // order of operations) checked out with zero overlaps, so if this
+    // ever actually fires, it means something about the real in-browser
+    // execution differs from that simulation — and this gives concrete
+    // numbers to debug from instead of guessing again.
+    for (let i = 0; i < placedFootprints.length; i++) {
+      for (let j = i + 1; j < placedFootprints.length; j++) {
+        const a = placedFootprints[i], b = placedFootprints[j];
+        const dist = Math.hypot(a.x - b.x, a.z - b.z);
+        if (dist < a.radius + b.radius) {
+          console.warn(`Rift: overlapping Verdant footprints — a=(${a.x.toFixed(1)},${a.z.toFixed(1)},r=${a.radius.toFixed(2)}) b=(${b.x.toFixed(1)},${b.z.toFixed(1)},r=${b.radius.toFixed(2)}) dist=${dist.toFixed(2)}`);
+        }
       }
     }
 

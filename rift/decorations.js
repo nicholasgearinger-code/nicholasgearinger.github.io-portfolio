@@ -550,7 +550,7 @@ function createLivingTree(colorHex, rand) {
   // real variety rather than a monoculture.
   const archetype = archetypeRoll < 0.55 ? "conical" : archetypeRoll < 0.8 ? "round" : "spreading";
 
-  const h = (2.5 + rand() * 8) * (archetype === "conical" ? 1.15 : 1); // widened for real size variety (was a narrow 4-9 range); pines get a height bonus, they typically read taller/narrower than round oak-like crowns
+  const h = (3 + rand() * 9) * (archetype === "conical" ? 1.35 : 1); // taller overall, and pines lean noticeably taller/narrower than round oak-like crowns — matches the reference's tall, slender conifer silhouettes
   const bark = new THREE.Color(VERDANT_BARK_PALETTE[Math.floor(rand() * VERDANT_BARK_PALETTE.length)]);
   const barkMat = new THREE.MeshStandardMaterial({ color: bark, roughness: 0.9, flatShading: true });
   const trunkRadiusTop = 0.12 + rand() * 0.1;
@@ -570,18 +570,17 @@ function createLivingTree(colorHex, rand) {
     vertexColors: true, roughness: 0.85, flatShading: true,
     emissive: leafLow, emissiveIntensity: 0.22, // a modest self-glow floor — was going near-black under this biome's darkened night ambient, making walkable trees unreadable and visually disconnected from horizonSilhouettes.js's always-green unlit treeline. Still a real lit/shaded material (branches still get proper day/shadow contrast), just never fully dark.
   });
-  // A rounded (optionally squashed) foliage clump at a given local
-  // position — shared by both the branch tips below and the crown
-  // clumps, so every leaf mass in the tree uses the exact same gradient
-  // technique rather than two different-looking systems.
+  // A pointed foliage tuft at a given local position — shared by both
+  // the branch tips below and the crown clumps, so every leaf mass in
+  // the tree uses the exact same technique rather than two different-
+  // looking systems.
   function addFoliageClump(pos, scale, squash) {
-    const geo = new THREE.IcosahedronGeometry(scale, getGraphicsSettings().decorationDetail);
-    if (squash !== 1) {
-      const gp = geo.attributes.position;
-      for (let v = 0; v < gp.count; v++) gp.setY(v, gp.getY(v) * squash);
-      gp.needsUpdate = true;
-      geo.computeVertexNormals();
-    }
+    // A small pointed tuft, not a round ball — low, blocky segment count
+    // (matches this project's "rocks/crystals stay blocky at every
+    // quality tier" convention) for a crisp faceted point rather than a
+    // smooth cone. `squash` now scales height relative to width — under
+    // 1 gives a shorter, flatter tuft, over 1 a taller, spikier one.
+    const geo = new THREE.ConeGeometry(scale * 0.62, scale * 1.9 * squash, 6);
     applyVerticalGradient(geo, leafLow, leafHigh);
     const foliage = new THREE.Mesh(geo, leafMat);
     foliage.position.copy(pos);
@@ -617,7 +616,7 @@ function createLivingTree(colorHex, rand) {
     const startPos = new THREE.Vector3(0, startHeight, 0);
     const branchAngle = rand() * Math.PI * 2;
     const branchTilt = tiltRange[0] + rand() * (tiltRange[1] - tiltRange[0]);
-    const branchLen = h * (0.3 + rand() * 0.34);
+    const branchLen = h * (archetype === "conical" ? 0.2 + rand() * 0.2 : 0.3 + rand() * 0.34); // pines stay proportionally narrower relative to their height — matches the reference's slender conifer silhouettes rather than a scaled-up wide crown
     const dir = new THREE.Vector3(
       Math.sin(branchTilt) * Math.cos(branchAngle),
       Math.cos(branchTilt),
@@ -631,15 +630,15 @@ function createLivingTree(colorHex, rand) {
     // consistent, not a variable number of staggered smaller clusters
     // (that read as busy/inconsistent from tree to tree) and no
     // secondary forking branch.
-    addFoliageClump(endPos, 0.4 + rand() * 0.3, 0.8 + rand() * 0.3);
+    addFoliageClump(endPos, 0.4 + rand() * 0.3, 1.1 + rand() * 0.6);
   }
 
   // A couple of clumps near the crown center so the canopy reads as one
   // continuous mass rather than isolated pom-poms at each branch tip —
   // same simple count for every archetype, just squashed flatter for
-  // "spreading" and left rounder for the other two.
+  // "spreading" and left taller/pointier for the other two.
   const crownClumps = 2;
-  const crownSquash = archetype === "spreading" ? 0.55 : 0.85;
+  const crownSquash = archetype === "spreading" ? 0.55 : 1.2;
   for (let i = 0; i < crownClumps; i++) {
     const angle = rand() * Math.PI * 2, dist = rand() * h * 0.16;
     addFoliageClump(

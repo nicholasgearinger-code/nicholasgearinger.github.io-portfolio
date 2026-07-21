@@ -437,7 +437,7 @@ function buildLevel(levelIdx) {
     // was different every single page load instead of reproducible from
     // WORLD_SEED the way worldgen.js's own decoration/crystal seeds are.
     const fillerRand = mulberry32(hashStringToSeed(WORLD_SEED + "-forest-filler-" + level.biome));
-    const fillerCount = 50; // was 150 — each of these is a full tree (5-7 real branch meshes + foliage clumps), all built synchronously in one blocking pass before the level can render; 150 of them was very plausibly enough to hang/time out on mobile while every other, far lighter biome loaded fine
+    const fillerCount = 380; // pushed further still per explicit "large deep forest" request — texture pooling (getTreeTexture) means GPU memory stays bounded by variety, not by this count, so there's real room to keep pushing this if it still doesn't feel deep enough
     const fillerBound = WORLD_BOUND_RADIUS * 0.95;
     for (let i = 0; i < fillerCount; i++) {
       const x = (fillerRand() * 2 - 1) * fillerBound;

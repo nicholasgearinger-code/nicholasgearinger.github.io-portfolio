@@ -557,12 +557,14 @@ function createTreeTexture(seed, archetype, leafColorHex, capColorHex, barkColor
   canvas.width = w; canvas.height = h;
   const ctx = canvas.getContext("2d");
 
-  // Wide and tall enough to stay visible from any angle — on a crossed-
-  // plane sprite, a thin trunk foreshortens down to almost nothing at
-  // oblique viewing angles even though the much wider canopy above it
-  // stays fully visible, which is exactly what reads as a canopy
-  // floating with no visible support. A properly wide/tall trunk doesn't
-  // vanish that way.
+  // Wide enough to stay visible from any angle — on a crossed-plane
+  // sprite, a thin trunk foreshortens down to almost nothing at oblique
+  // viewing angles even though the much wider canopy above it stays
+  // fully visible, which reads as a canopy floating with no support. The
+  // foliage below (tierBottomMax/canopyBottom) now extends down over
+  // almost all of this trunk too, leaving only a thin sliver visible at
+  // the very base — matches the reference's near-total foliage coverage
+  // rather than a long bare trunk showing through.
   const trunkTop = h * 0.78;
   ctx.fillStyle = `#${new THREE.Color(barkColorHex).getHexString()}`;
   ctx.fillRect(w * 0.4, trunkTop, w * 0.2, h - trunkTop);
@@ -572,7 +574,7 @@ function createTreeTexture(seed, archetype, leafColorHex, capColorHex, barkColor
   if (archetype === "conical") {
     const tiers = 4 + Math.floor((seed % 1) * 3);
     let tierTop = h * 0.03;
-    const tierBottomMax = h * 0.92;
+    const tierBottomMax = h * 0.99;
     for (let i = 0; i < tiers; i++) {
       const t = i / (tiers - 1);
       const tierBottom = tierTop + (tierBottomMax - tierTop) * (0.32 + 0.1 * (1 - t));
@@ -597,7 +599,7 @@ function createTreeTexture(seed, archetype, leafColorHex, capColorHex, barkColor
   } else {
     const lobes = archetype === "spreading" ? 5 : 4;
     const canopyTop = h * 0.06;
-    const canopyBottom = h * 0.86;
+    const canopyBottom = h * 0.97;
     for (let i = 0; i < lobes; i++) {
       const lt = i / (lobes - 1);
       const cx = w * (0.5 + (lt - 0.5) * (archetype === "spreading" ? 0.9 : 0.55));
@@ -630,6 +632,27 @@ function createTreeTexture(seed, archetype, leafColorHex, capColorHex, barkColor
   return tex;
 }
 
+// A small pool of pre-baked variants per archetype+color combo, reused
+// across every tree that rolls that combo, instead of one brand-new
+// canvas texture per tree instance. With hundreds of trees in a forest,
+// unique-per-tree textures would scale GPU memory linearly with tree
+// count; pooling bounds it by how much color/archetype variety exists
+// instead — this is what actually makes pushing tree count up safe.
+const TREE_TEXTURE_VARIANTS = 3;
+const treeTextureCache = new Map();
+function getTreeTexture(archetype, leafColorHex, capColorHex, barkColorHex, rand) {
+  const key = `${archetype}|${leafColorHex}|${barkColorHex}`;
+  let variants = treeTextureCache.get(key);
+  if (!variants) {
+    variants = [];
+    for (let i = 0; i < TREE_TEXTURE_VARIANTS; i++) {
+      variants.push(createTreeTexture((i + 1) / (TREE_TEXTURE_VARIANTS + 1), archetype, leafColorHex, capColorHex, barkColorHex));
+    }
+    treeTextureCache.set(key, variants);
+  }
+  return variants[Math.floor(rand() * variants.length)];
+}
+
 function createLivingTree(colorHex, rand) {
   const archetypeRoll = rand();
   // Conical (pine) dominant, matching a pine-forest reference — round
@@ -638,7 +661,7 @@ function createLivingTree(colorHex, rand) {
   const bark = VERDANT_BARK_PALETTE[Math.floor(rand() * VERDANT_BARK_PALETTE.length)];
   const leaf = VERDANT_LEAF_PALETTE[Math.floor(rand() * VERDANT_LEAF_PALETTE.length)];
   const cap = 0xd8f06a; // same vivid yellow-green highlight used elsewhere for Verdant foliage
-  const tex = createTreeTexture(rand(), archetype, leaf, cap, bark);
+  const tex = getTreeTexture(archetype, leaf, cap, bark, rand);
 
   const height = (3 + rand() * 9) * (archetype === "conical" ? 1.35 : 1); // taller overall, pines noticeably taller/narrower — matches the reference's tall slender conifers
   // Width matches the canvas's own aspect ratio per archetype (see the w/h

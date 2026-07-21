@@ -157,7 +157,8 @@ function buildBaseDecoration(biome, colorHex, seedRand) {
       if (roll < 0.88) return createEmberVent(colorHex, seedRand);
       return createEmberFire(colorHex, seedRand);
     case "verdant":
-      if (roll < 0.65) return createLivingTree(colorHex, seedRand); // was 0.35 — "enough to look like a forest" needs trees as the dominant decoration, not a minority
+      if (roll < 0.55) return createLivingTree(colorHex, seedRand); // trees still dominant
+      if (roll < 0.75) return createBush(colorHex, seedRand); // real bush/shrub undergrowth variety, not just trees + flowers
       if (roll < 0.9) return createFloraStalk(colorHex, seedRand);
       return createRockCluster(biome, colorHex, seedRand);
     case "crystal": return roll < 0.72 ? createCrystalCluster(colorHex, seedRand) : createRockCluster(biome, colorHex, seedRand);
@@ -381,6 +382,34 @@ function createSpire(biome, colorHex, rand) {
   return { group, kind: "spire" };
 }
 
+// Small shrub/bush — several squashed-low foliage clumps, deliberately
+// tiny compared to createLivingTree, for real size variety in the
+// undergrowth rather than every piece of greenery being a full tree.
+// Reuses "tree" as its `kind` so updateDecoration's existing gentle sway
+// applies here too without needing a new branch there.
+function createBush(colorHex, rand) {
+  const group = new THREE.Group();
+  const leafLow = new THREE.Color(VERDANT_LEAF_PALETTE[Math.floor(rand() * VERDANT_LEAF_PALETTE.length)]);
+  const leafHigh = leafLow.clone().lerp(new THREE.Color(0xd8f06a), 0.35);
+  const leafMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, flatShading: true });
+  const baseScale = 0.32 + rand() * 0.42; // small — this is undergrowth, not a tree
+  const clumpCount = 3 + Math.floor(rand() * 3);
+  for (let i = 0; i < clumpCount; i++) {
+    const scale = baseScale * (0.6 + rand() * 0.6);
+    const geo = new THREE.IcosahedronGeometry(scale, getGraphicsSettings().decorationDetail);
+    const gp = geo.attributes.position;
+    for (let v = 0; v < gp.count; v++) gp.setY(v, gp.getY(v) * 0.7); // squashed low and wide, shrub silhouette not a ball
+    gp.needsUpdate = true;
+    geo.computeVertexNormals();
+    applyVerticalGradient(geo, leafLow, leafHigh);
+    const clump = new THREE.Mesh(geo, leafMat);
+    const angle = rand() * Math.PI * 2, dist = rand() * baseScale * 0.7;
+    clump.position.set(Math.cos(angle) * dist, baseScale * (0.35 + rand() * 0.25), Math.sin(angle) * dist);
+    group.add(clump);
+  }
+  return { group, kind: "tree", bobAmplitude: 0.015, bobSeed: rand() * Math.PI * 2 };
+}
+
 // Bioluminescent flora stalk — tapered stem with a glowing cap.
 function createFloraStalk(colorHex, rand) {
   const group = new THREE.Group();
@@ -513,9 +542,12 @@ const VERDANT_BARK_PALETTE = [0x6b4423, 0x7a4f2a, 0x5a3a1e];
 function createLivingTree(colorHex, rand) {
   const group = new THREE.Group();
   const archetypeRoll = rand();
-  const archetype = archetypeRoll < 0.4 ? "round" : archetypeRoll < 0.75 ? "conical" : "spreading";
+  // Conical (pine) now the dominant type, matching a pine-forest
+  // reference — round (oak-like) and spreading fill in the rest for
+  // real variety rather than a monoculture.
+  const archetype = archetypeRoll < 0.55 ? "conical" : archetypeRoll < 0.8 ? "round" : "spreading";
 
-  const h = 4 + rand() * 5;
+  const h = (2.5 + rand() * 8) * (archetype === "conical" ? 1.15 : 1); // widened for real size variety (was a narrow 4-9 range); pines get a height bonus, they typically read taller/narrower than round oak-like crowns
   const bark = new THREE.Color(VERDANT_BARK_PALETTE[Math.floor(rand() * VERDANT_BARK_PALETTE.length)]);
   const barkMat = new THREE.MeshStandardMaterial({ color: bark, roughness: 0.9, flatShading: true });
   const trunkRadiusTop = 0.12 + rand() * 0.1;

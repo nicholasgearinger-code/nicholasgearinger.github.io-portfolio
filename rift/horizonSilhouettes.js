@@ -37,6 +37,13 @@ const MID_RING_RADIUS = 230; // closer ring for real parallax depth
 // clears that with real margin (~48% more) while still reading as
 // noticeably closer than the mid ring.
 const NEAR_RING_RADIUS = 165;
+// A closer treeline layer, currently Verdant-only (see TREELINE_STYLE
+// below) — sits between WORLD_BOUND_RADIUS (~112, the player's real
+// reachable edge) and the near mountain ring, so distant trees fade into
+// the background ahead of the hills/mountains rather than the forest
+// abruptly stopping at a bare gap. Real depth cue: closer to the player
+// than any of the three mountain rings, but still purely backdrop.
+const TREELINE_RADIUS = 135;
 
 // Returns a plain hex number (not a THREE.Color instance) so it stays a
 // drop-in replacement anywhere a style color is normally used elsewhere
@@ -277,6 +284,52 @@ function createValleyFloor(style) {
   return mesh;
 }
 
+// Distant forest backdrop — currently Verdant-only. Simple flat-colored
+// pine-silhouette cones (no branch detail, no facet shading like the
+// mountain peaks get — this is meant to read as a hazy treeline behind
+// the real walkable trees, not compete with them for detail) scattered
+// densely around a ring, each tinted darker/cooler the further into the
+// band it happens to land, on top of the real scene fog doing its own
+// distance fade. This is the "further ones fade into the background"
+// depth cue from the reference image, applied to trees the same way the
+// mountain rings already apply it to peaks.
+const TREELINE_STYLE = {
+  verdant: { count: 110, nearColor: 0x3d9a42, farColor: 0x14301c, minH: 3.5, maxH: 9 },
+};
+
+function createTreelineShape(colorHex, height) {
+  const baseRadius = height * (0.22 + Math.random() * 0.12);
+  const geo = new THREE.ConeGeometry(baseRadius, height, 5);
+  const mat = new THREE.MeshBasicMaterial({ color: colorHex, fog: true });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.y = height / 2;
+  mesh.rotation.y = Math.random() * Math.PI * 2;
+  return mesh;
+}
+
+function createTreelineRing(biome) {
+  const style = TREELINE_STYLE[biome];
+  if (!style) return null; // biomes without their own treeline style just skip this layer entirely
+  const group = new THREE.Group();
+  const count = Math.max(1, Math.round(style.count * getGraphicsSettings().silhouetteMultiplier));
+  for (let i = 0; i < count; i++) {
+    const angle = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.09;
+    const r = TREELINE_RADIUS + (Math.random() - 0.5) * 26;
+    const height = style.minH + Math.random() * (style.maxH - style.minH);
+    // Depth-tint: trees landing further out in the band read darker and
+    // cooler, nearer ones stay closer to the real leaf color — same idea
+    // as the mountain rings' far/mid/near color progression, just
+    // continuous across one band instead of three discrete rings.
+    const depthT = Math.random();
+    const color = lerpHexColor(style.nearColor, style.farColor, depthT);
+    const shape = createTreelineShape(color, height);
+    shape.position.x = Math.cos(angle) * r;
+    shape.position.z = Math.sin(angle) * r;
+    group.add(shape);
+  }
+  return group;
+}
+
 /**
  * @param {THREE.Scene} scene
  * @param {string} biome
@@ -286,6 +339,9 @@ function createHorizonSilhouettes(scene, biome) {
   const group = new THREE.Group();
 
   group.add(createValleyFloor(style));
+
+  const treeline = createTreelineRing(biome);
+  if (treeline) group.add(treeline);
 
   // Far layer: darkest, pulled toward this biome's own farTint. Cluster
   // count doubled (1.15 -> 2.3) per request — more mountains in the

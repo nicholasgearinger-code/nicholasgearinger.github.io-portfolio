@@ -408,6 +408,18 @@ function buildLevel(levelIdx) {
     crystalHandles.set(crystal.id, createCrystalMesh(scene, crystal));
   });
 
+  // Real per-object footprints (actual bounding-box radius, not a guessed
+  // constant) for every decoration placed this level — Verdant only. The
+  // forest-filler pass below checks every candidate tree/bush against
+  // this list before committing to a position, which is what actually
+  // guarantees no overlap regardless of how large or small any given
+  // tree turns out to be, rather than assuming a fixed "safe" distance.
+  const placedFootprints = [];
+  function footprintRadiusOf(group) {
+    const box = new THREE.Box3().setFromObject(group);
+    return Math.max(box.max.x - box.min.x, box.max.z - box.min.z) / 2;
+  }
+
   layout.decorationSeeds.forEach((seed) => {
     const groundY = sampleGroundHeight(seed.x, seed.z, terrainMesh) ?? 0;
     const handle = createDecoration(level.biome, level.color, seed.rand);
@@ -419,6 +431,7 @@ function buildLevel(levelIdx) {
     });
     scene.add(handle.group);
     decorationHandles.push(handle);
+    if (level.biome === "verdant") placedFootprints.push({ x: seed.x, z: seed.z, radius: footprintRadiusOf(handle.group) });
   });
 
   // Extra forest fill — Verdant only. worldgen.js's own decoration seeds
@@ -450,11 +463,16 @@ function buildLevel(levelIdx) {
     // levels.js's own base decorations (layout.decorationSeeds) are a
     // completely separate, uncoordinated placement system — they know
     // nothing about this grid, and this grid knows nothing about them.
-    // Without a mutual check, a base-decoration tree/rock can land right
-    // on top of a filler tree, which is exactly what kept showing up as
-    // "stacked" trees even after the filler's own internal jitter was
-    // fixed. Skip any filler cell that lands too close to one.
-    const seedMinDist = 10; // generous enough to also cover occasional oversized ("isGiant") base decorations, which can be visually 2-4x wider than a normal one
+    // A fixed "safe distance" can never truly guarantee zero overlap
+    // either, since trees vary hugely in actual size (a small sapling vs.
+    // a wide spreading tree at max depth-scale) — so instead of a guessed
+    // constant, each candidate is built and positioned FIRST, its real
+    // bounding-box footprint is measured, and it's only added to the
+    // scene if that footprint doesn't overlap anything already placed
+    // (base decorations AND earlier filler trees alike). If it would
+    // overlap, it's discarded outright rather than shrunk or nudged —
+    // this is what actually guarantees no two trees/bushes ever touch,
+    // regardless of how big either one happens to be.
     for (let gx = 0; gx < gridSize; gx++) {
       for (let gz = 0; gz < gridSize; gz++) {
         const cellCenterX = -fillerBound + (gx + 0.5) * cellSize;
@@ -465,7 +483,6 @@ function buildLevel(levelIdx) {
         if (distFromCenter > fillerBound) continue; // keep this pass roughly circular within the walkable bound rather than filling the square's far corners too
         if (Math.hypot(x - LANDMARK_POSITION.x, z - LANDMARK_POSITION.z) < 14) continue; // keep the landmark's own clearing free
         if (Math.hypot(x - layout.spawn.x, z - layout.spawn.z) < 8) continue; // keep the immediate spawn area free
-        if (layout.decorationSeeds.some((seed) => Math.hypot(x - seed.x, z - seed.z) < seedMinDist)) continue; // keep clear of levels.js's own independently-placed decorations
         const groundY = sampleGroundHeight(x, z, terrainMesh) ?? 0;
         if (waterLevel !== undefined && groundY < waterLevel + 0.4) continue; // no trees growing in the lake
         const handle = fillerRand() < 0.3 ? createBush(level.color, fillerRand) : createLivingTree(level.color, fillerRand);
@@ -473,6 +490,10 @@ function buildLevel(levelIdx) {
         handle.group.rotation.y = fillerRand() * Math.PI * 2;
         const depthT = Math.min(1, distFromCenter / fillerBound);
         handle.group.scale.setScalar(1.15 - depthT * 0.55); // 1.15x near the center down to 0.6x near the edge
+        const radius = footprintRadiusOf(handle.group);
+        const overlaps = placedFootprints.some((f) => Math.hypot(x - f.x, z - f.z) < radius + f.radius);
+        if (overlaps) continue; // discard this candidate entirely rather than force it in — the whole point is a real guarantee, not a best-effort fit
+        placedFootprints.push({ x, z, radius });
         handle.baseY = groundY;
         handle.group.traverse((obj) => {
           if (obj.isMesh) { obj.castShadow = true; obj.receiveShadow = true; }

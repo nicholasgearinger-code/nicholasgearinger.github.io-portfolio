@@ -64,7 +64,7 @@ const BIOME_SKY_TINT = {
 // glow sources themselves (fires/embers/lava/faint moon), not a
 // generically-lit night sky. Only affects true night (see the elevation-
 // based fade in updateDayNightCycle below) — dawn/day stay normal.
-const BIOME_NIGHT_DARKEN = { ember: 0.35 };
+const BIOME_NIGHT_DARKEN = { ember: 0.35, verdant: 0.08 }; // verdant much more aggressive than ember — the forest should read as near-total darkness at night, lit only by the moon and whatever actually glows (bioluminescent flora/fauna), not by ambient moonlight alone
 
 function lerpColor(a, b, t) {
   return new THREE.Color(a).lerp(new THREE.Color(b), t);

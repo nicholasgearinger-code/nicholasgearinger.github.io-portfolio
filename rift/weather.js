@@ -178,6 +178,52 @@ function createLeaffall(scene) {
   return { points, fallSpeeds, driftSeeds, elapsed: 0 };
 }
 
+// Verdant-only — a low scatter of soft glowing motes hovering just above
+// the ground/undergrowth. Distinct from wildlife.js's firefly motes
+// (those are creatures; this is ambient bioluminescence from the plants
+// themselves) and from the leaffall particles above. Brightness is tied
+// to how dark it actually is — near-invisible in daylight, glowing
+// properly once night crushes the scene lighting down, so walking
+// through the forest after dark reads as genuinely lit by the
+// vegetation, not just by the moon.
+let sharedGroundGlowTexture = null;
+function getGroundGlowTexture() {
+  if (sharedGroundGlowTexture) return sharedGroundGlowTexture;
+  const size = 32;
+  const canvas = document.createElement("canvas");
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, "rgba(255,255,255,1)");
+  grad.addColorStop(0.4, "rgba(255,255,255,0.6)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  sharedGroundGlowTexture = new THREE.CanvasTexture(canvas);
+  return sharedGroundGlowTexture;
+}
+
+function createGroundGlow(scene) {
+  const count = 220;
+  const basePositions = new Float32Array(count * 3);
+  const seeds = new Float32Array(count);
+  for (let i = 0; i < count; i++) {
+    basePositions[i * 3] = (Math.random() - 0.5) * 200;
+    basePositions[i * 3 + 1] = 0.2 + Math.random() * 1.4; // low, close to the ground/undergrowth
+    basePositions[i * 3 + 2] = (Math.random() - 0.5) * 200;
+    seeds[i] = Math.random() * Math.PI * 2;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(basePositions.slice(), 3));
+  const mat = new THREE.PointsMaterial({
+    map: getGroundGlowTexture(), color: 0xa8ffcf, size: 0.5, transparent: true, opacity: 0,
+    blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
+  });
+  const points = new THREE.Points(geo, mat);
+  scene.add(points);
+  return { points, basePositions, seeds };
+}
+
 // Crystal-only — a brief rainbow arc, as if light caught one of the
 // spires just right for a moment. A real rainbow texture (hue sweep
 // across the strip), not a single tinted glow.
@@ -307,9 +353,10 @@ function createWeatherSystem(scene, biome) {
   const crystalRefraction = biome === "crystal" ? createCrystalRefraction(scene) : null;
   const ashfall = biome === "ember" ? createAshfall(scene) : null;
   const leaffall = biome === "verdant" ? createLeaffall(scene) : null;
+  const groundGlow = biome === "verdant" ? createGroundGlow(scene) : null;
 
   return {
-    scene, biome, profile, lightningLight, rain, distantLightning, dustDevil, crystalRefraction, ashfall, leaffall,
+    scene, biome, profile, lightningLight, rain, distantLightning, dustDevil, crystalRefraction, ashfall, leaffall, groundGlow,
     windAngle: Math.random() * Math.PI * 2,
     lightningTimer: randRange(profile.lightning.intervalMin, profile.lightning.intervalMax),
     lightningFlash: 0,
@@ -321,7 +368,7 @@ function createWeatherSystem(scene, biome) {
   };
 }
 
-function updateWeatherSystem(handle, dt, erupting = false) {
+function updateWeatherSystem(handle, dt, erupting = false, dayAmount = 0) {
   if (!handle) return { windX: 0, windZ: 0, windStrength: 0, rainIntensity: 0 };
   const { profile } = handle;
   handle.elapsed += dt;
@@ -472,6 +519,22 @@ function updateWeatherSystem(handle, dt, erupting = false) {
     posAttr.needsUpdate = true;
   }
 
+  if (handle.groundGlow) {
+    const gg = handle.groundGlow;
+    // 0 in full daylight, ramping up as it gets dark — near-invisible
+    // until the scene's own lighting actually crushes down, then reads
+    // as real ambient light coming from the forest floor itself.
+    const nightAmount = Math.max(0, Math.min(1, 1 - dayAmount / 0.2));
+    gg.points.material.opacity = nightAmount * 0.55;
+    const posAttr = gg.points.geometry.attributes.position;
+    for (let i = 0; i < gg.seeds.length; i++) {
+      const bx = gg.basePositions[i * 3], by = gg.basePositions[i * 3 + 1], bz = gg.basePositions[i * 3 + 2];
+      const t = handle.elapsed * 0.6 + gg.seeds[i];
+      posAttr.setXYZ(i, bx + Math.sin(t) * 0.4, by + Math.sin(t * 1.7) * 0.18, bz + Math.cos(t) * 0.4);
+    }
+    posAttr.needsUpdate = true;
+  }
+
   // Crystal light refraction — Crystal Spire only. A brief rainbow arc
   // near one of the spires, as if the light caught it just right.
   if (handle.crystalRefraction) {
@@ -521,6 +584,11 @@ function disposeWeatherSystem(scene, handle) {
     scene.remove(handle.leaffall.points);
     handle.leaffall.points.geometry.dispose();
     handle.leaffall.points.material.dispose();
+  }
+  if (handle.groundGlow) {
+    scene.remove(handle.groundGlow.points);
+    handle.groundGlow.points.geometry.dispose();
+    handle.groundGlow.points.material.dispose();
   }
 }
 

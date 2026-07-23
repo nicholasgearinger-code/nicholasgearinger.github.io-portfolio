@@ -937,7 +937,7 @@ function animate() {
     wasErupting = eruptionActive;
   }
   updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y);
-  const wind = updateWeatherSystem(weatherHandle, dt, eruptionActive);
+  const wind = updateWeatherSystem(weatherHandle, dt, eruptionActive, dayNight.dayAmount);
   updateAtmosphericParticles(atmosphereHandle, elapsedTime, dt, wind.windX, wind.windZ);
   updateGrass(grassHandle, elapsedTime, wind.windX, wind.windZ);
   updateWildlife(wildlifeHandle, elapsedTime, dt, camera.position.x, camera.position.z, eruptionActive);

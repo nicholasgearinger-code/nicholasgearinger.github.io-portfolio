@@ -15,8 +15,10 @@ import { getGraphicsSettings } from "./graphicsSettings.js";
 const TERRAIN_SIZE = 240;      // full width/depth of the landmass, in world units
 
 const TERRAIN_SEGMENTS_DEFAULT = 140;  // fallback only — actual resolution comes from graphicsSettings' current tier
-const RIVER_WIDTH = 7;         // Verdant Hollow's river channel, half-width in world units
-const RIVER_DEPTH = 5;         // how far the channel carves below the surrounding local terrain
+const RIVER_WIDTH = 10;        // Verdant Hollow's river channel, half-width in world units — widened from 7 for a more substantial "long river" presence
+const RIVER_DEPTH = 2.5;       // how far below the water surface the river's center floor sits — guarantees it always stays flooded regardless of the surrounding hill terrain (see the verdant shaper below)
+const WATERFALL_Z = -80;       // fixed world Z where the elevated upstream "source" terrain drops into the river — main.js positions the waterfall visual here too, by sampling the actual rendered terrain height rather than duplicating this file's noise math
+const WATERFALL_SOURCE_HEIGHT = 16; // how high the source area rises above the normal rolling-hills base at its peak, past the ramp-up zone
 const LAVA_CHANNEL_WIDTH = 9;  // Ember's main winding lava channel, half-width in world units — separate constant since it's deliberately wider/deeper than Verdant's river
 const EMBER_PATH_INNER = LAVA_CHANNEL_WIDTH + 0.5; // small gap between the channel's edge and the path so they don't visually run together
 const EMBER_PATH_OUTER = LAVA_CHANNEL_WIDTH + 3.5;
@@ -137,15 +139,42 @@ const BIOME_SHAPERS = {
     // lot by seed luck).
     const detail = fbm2(u * 1.3, v * 1.3, seed, 4, 2.0, 0.5) * 10.5; // was 8.5 — more pronounced hills per explicit request
     const macro = fbm2(u * 0.5, v * 0.5, seed + 300, 3, 2.0, 0.5) * 5; // was 3 — bigger, more separated hill formations, not just gentle rolling
-    const base = detail + macro;
+    let base = detail + macro;
+
+    // A fixed elevated "source" area upstream of the waterfall — terrain
+    // ramps up sharply past WATERFALL_Z, so the river genuinely descends
+    // from higher ground via a real cliff at the falls point, rather
+    // than winding across one continuous elevation the whole way. The
+    // waterfall visual (wired in main.js) samples the ACTUAL rendered
+    // terrain height on both sides of this same WATERFALL_Z to position
+    // itself, rather than duplicating this noise math elsewhere — so
+    // it's always correctly aligned regardless of the exact noise values
+    // at this point.
+    if (worldZ < WATERFALL_Z) {
+      const t = Math.min(1, (WATERFALL_Z - worldZ) / 4); // tight ramp — a real cliff, not a gradual slope, so the waterfall mesh (which assumes a sharp vertical drop) actually matches the terrain underneath it
+      base += t * t * WATERFALL_SOURCE_HEIGHT;
+    }
+
     // Meandering path built from two different-frequency sine waves rather
     // than one — a single sine reads as too regular/mechanical for a
     // river; layering a slow bend with a faster wobble looks natural.
     const riverCenterX = Math.sin(worldZ * 0.035 + seed * 0.01) * 28 + Math.sin(worldZ * 0.013 + seed * 0.02) * 14;
     const distFromRiver = Math.abs(worldX - riverCenterX);
-    if (distFromRiver < RIVER_WIDTH) {
+    // River channel only carves south of the falls — north of it is the
+    // elevated dry source area with no water feature, which is what
+    // actually creates the cliff face for the waterfall to fall down.
+    if (worldZ >= WATERFALL_Z && distFromRiver < RIVER_WIDTH) {
       const t = 1 - distFromRiver / RIVER_WIDTH; // 0 at the bank, 1 at the center
-      return base - t * t * RIVER_DEPTH;
+      // Blends toward a FIXED absolute floor at the center (well below
+      // the water surface) rather than just subtracting a fixed amount
+      // from the local hill height — a pure subtraction meant a tall
+      // enough hill under the river's path could push the channel back
+      // above water level there, breaking one long river into
+      // disconnected pond-like segments wherever that happened. Blending
+      // toward an absolute floor guarantees continuous flooding along
+      // the whole length regardless of the surrounding terrain.
+      const riverFloor = LIQUID_LEVEL.verdant - RIVER_DEPTH;
+      return base * (1 - t * t) + riverFloor * (t * t);
     }
     return base;
   },
@@ -354,4 +383,4 @@ function terrainHeightAt(level, worldX, worldZ, seedStr) {
   return biomeHeight(level.biome, worldX, worldZ, seed);
 }
 
-export { buildPlanetTerrain, biomeHeight, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL };
+export { buildPlanetTerrain, biomeHeight, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH };

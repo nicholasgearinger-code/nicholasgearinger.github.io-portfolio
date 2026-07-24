@@ -183,6 +183,93 @@ function getGlintTexture() {
   return tex;
 }
 
+// A tileable vertical-streak texture for the falling water sheet —
+// random-width bright streaks on a translucent pale-blue base, repeated
+// vertically so scrolling its offset each frame reads as continuously
+// falling water rather than one static image.
+let sharedWaterfallTexture = null;
+function getWaterfallTexture() {
+  if (sharedWaterfallTexture) return sharedWaterfallTexture;
+  const w = 32, h = 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "rgba(220,240,255,0.5)";
+  ctx.fillRect(0, 0, w, h);
+  for (let i = 0; i < 16; i++) {
+    const x = Math.random() * w;
+    const sw = 1 + Math.random() * 2.5;
+    ctx.fillStyle = `rgba(255,255,255,${(0.25 + Math.random() * 0.4).toFixed(2)})`;
+    ctx.fillRect(x, 0, sw, h);
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(1, 3);
+  sharedWaterfallTexture = tex;
+  return tex;
+}
+
+// A soft white foam-pool glow for where the falls hit the river below.
+let sharedFoamTexture = null;
+function getFoamTexture() {
+  if (sharedFoamTexture) return sharedFoamTexture;
+  const size = 96;
+  const canvas = document.createElement("canvas");
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, "rgba(255,255,255,0.9)");
+  grad.addColorStop(0.5, "rgba(255,255,255,0.4)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  sharedFoamTexture = new THREE.CanvasTexture(canvas);
+  return sharedFoamTexture;
+}
+
+// A cascading waterfall — Verdant only, one fixed feature at the river's
+// carved cliff. topY/bottomY/x/z come from SAMPLING the actual rendered
+// terrain height on both sides of that cliff (main.js does this via
+// terrainHeightAt/WATERFALL_Z from terrain.js) rather than this file
+// duplicating terrain.js's noise math — so it's always correctly aligned
+// regardless of the exact noise values at that point.
+function createWaterfall(scene, topY, bottomY, x, z, width) {
+  const height = topY - bottomY;
+  if (height < 2) return null; // not enough of a cliff here to bother with
+  const geo = new THREE.PlaneGeometry(width, height);
+  const mat = new THREE.MeshBasicMaterial({
+    map: getWaterfallTexture(), transparent: true, side: THREE.DoubleSide,
+    depthWrite: false, opacity: 0.85, fog: true,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(x, bottomY + height / 2, z);
+  scene.add(mesh);
+
+  const foamMat = new THREE.SpriteMaterial({ map: getFoamTexture(), transparent: true, opacity: 0.7, depthWrite: false, fog: true });
+  const foam = new THREE.Sprite(foamMat);
+  foam.scale.set(width * 1.5, width * 0.75, 1);
+  foam.position.set(x, bottomY + 0.15, z);
+  scene.add(foam);
+
+  return { mesh, foam };
+}
+
+function updateWaterfall(handle, dt, elapsed) {
+  if (!handle) return;
+  handle.mesh.material.map.offset.y -= dt * 1.4; // scrolls the streak texture downward for a continuously falling look
+  handle.foam.material.opacity = 0.55 + Math.sin(elapsed * 2.2) * 0.15; // gentle churn, not a static glow
+}
+
+function disposeWaterfall(scene, handle) {
+  if (!handle) return;
+  scene.remove(handle.mesh);
+  handle.mesh.geometry.dispose();
+  handle.mesh.material.dispose(); // shared pooled texture itself intentionally not disposed
+  scene.remove(handle.foam);
+  handle.foam.material.dispose();
+}
+
 function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0.6, z: 0.35 }) {
   const style = LIQUID_STYLE[biome];
   if (!style) return null;
@@ -521,4 +608,4 @@ function disposeLiquidPlane(scene, handle) {
   }
 }
 
-export { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane };
+export { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall };

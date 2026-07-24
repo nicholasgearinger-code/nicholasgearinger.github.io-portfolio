@@ -1,10 +1,10 @@
 import * as THREE from "three";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
-import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL } from "./terrain.js";
+import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH } from "./terrain.js";
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
 import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, updateLightShafts, disposeLightShafts } from "./decorations.js";
-import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane } from "./liquid.js";
+import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall } from "./liquid.js";
 import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
 import { createGrass, updateGrass, disposeGrass, createFlowers, disposeFlowers } from "./vegetation.js";
@@ -277,6 +277,7 @@ function updateMovement(dt, grounded) {
 // ---------------------------------------------------------------------------
 let terrainMesh = null;
 let liquidHandle = null;
+let waterfallHandle = null;
 let atmosphereHandle = null;
 let grassHandle = null;
 let flowersHandle = null;
@@ -315,6 +316,8 @@ function teardownLevel() {
   }
   disposeLiquidPlane(scene, liquidHandle);
   liquidHandle = null;
+  disposeWaterfall(scene, waterfallHandle);
+  waterfallHandle = null;
   disposeAtmosphericParticles(scene, atmosphereHandle);
   atmosphereHandle = null;
   disposeGrass(scene, grassHandle);
@@ -385,6 +388,19 @@ function buildLevel(levelIdx) {
 
   if (LIQUID_LEVEL[level.biome] !== undefined) {
     liquidHandle = createLiquidPlane(scene, level.biome, LIQUID_LEVEL[level.biome], TERRAIN_SIZE, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
+  }
+
+  if (level.biome === "verdant") {
+    // Replicates terrain.js's own riverCenterX formula exactly (same
+    // seed derivation as buildPlanetTerrain) rather than guessing a
+    // fixed X, so the waterfall lines up with the actual carved river
+    // regardless of where its winding path happens to be at this
+    // specific Z.
+    const terrainSeed = hashStringToSeed(WORLD_SEED + "::" + level.biome) * 1000;
+    const waterfallX = Math.sin(WATERFALL_Z * 0.035 + terrainSeed * 0.01) * 28 + Math.sin(WATERFALL_Z * 0.013 + terrainSeed * 0.02) * 14;
+    const topY = terrainHeightAt(level, waterfallX, WATERFALL_Z - 4, WORLD_SEED); // just upstream — elevated source side, right at the top of the now-tight 4-unit ramp
+    const bottomY = terrainHeightAt(level, waterfallX, WATERFALL_Z + 2, WORLD_SEED); // just downstream — river floor side
+    waterfallHandle = createWaterfall(scene, topY, bottomY, waterfallX, WATERFALL_Z, RIVER_WIDTH * 1.3);
   }
 
   atmosphereHandle = createAtmosphericParticles(scene, level.biome);
@@ -941,6 +957,7 @@ function animate() {
     sunStrength: dayNight.dayAmount, moonStrength: dayNightCycle.moonBody.core.material.opacity * (1 - dayNight.dayAmount),
   };
   updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, lightInfo);
+  updateWaterfall(waterfallHandle, dt, elapsedTime);
   const wind = updateWeatherSystem(weatherHandle, dt, eruptionActive, dayNight.dayAmount);
   updateAtmosphericParticles(atmosphereHandle, elapsedTime, dt, wind.windX, wind.windZ);
   updateGrass(grassHandle, elapsedTime, wind.windX, wind.windZ);

@@ -4,7 +4,7 @@ import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERF
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
 import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, updateLightShafts, disposeLightShafts } from "./decorations.js";
-import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent } from "./liquid.js";
+import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip } from "./liquid.js";
 import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
 import { createGrass, updateGrass, disposeGrass, createFlowers, disposeFlowers } from "./vegetation.js";
@@ -279,6 +279,7 @@ let terrainMesh = null;
 let liquidHandle = null;
 let waterfallHandle = null;
 let riverCurrentHandle = null;
+let riverFlowStripHandle = null;
 let atmosphereHandle = null;
 let grassHandle = null;
 let flowersHandle = null;
@@ -321,6 +322,8 @@ function teardownLevel() {
   waterfallHandle = null;
   disposeRiverCurrent(scene, riverCurrentHandle);
   riverCurrentHandle = null;
+  disposeRiverFlowStrip(scene, riverFlowStripHandle);
+  riverFlowStripHandle = null;
   disposeAtmosphericParticles(scene, atmosphereHandle);
   atmosphereHandle = null;
   disposeGrass(scene, grassHandle);
@@ -405,6 +408,7 @@ function buildLevel(levelIdx) {
     const bottomY = terrainHeightAt(level, waterfallX, WATERFALL_Z + 2, WORLD_SEED); // just downstream — river floor side
     waterfallHandle = createWaterfall(scene, topY, bottomY, waterfallX, WATERFALL_Z, RIVER_WIDTH * 1.3);
     riverCurrentHandle = createRiverCurrent(scene, terrainSeed, LIQUID_LEVEL.verdant, WATERFALL_Z, WORLD_BOUND_RADIUS * 0.95, 70);
+    riverFlowStripHandle = createRiverFlowStrip(scene, terrainSeed, LIQUID_LEVEL.verdant, WATERFALL_Z, WORLD_BOUND_RADIUS * 0.95, RIVER_WIDTH * 1.3, 18);
   }
 
   atmosphereHandle = createAtmosphericParticles(scene, level.biome);
@@ -963,16 +967,21 @@ function animate() {
   updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, lightInfo, camera.position);
   updateWaterfall(waterfallHandle, dt, elapsedTime);
   updateRiverCurrent(riverCurrentHandle, dt);
+  updateRiverFlowStrip(riverFlowStripHandle, dt);
   // Underwater effect — Verdant only. Overrides the fog dayNightCycle/
   // weather already set earlier this same frame with a dense, murky
-  // blue-green tint when the camera drops below the water surface, so
-  // being underwater actually looks different instead of rendering the
-  // normal scene with nothing indicating you're submerged. No explicit
-  // "restore" needed — every frame this check is false, the normal
-  // per-frame fog update from earlier stands unmodified.
+  // blue-green tint, AND darkens the actual sun/ambient light sources
+  // (also already set earlier this frame) on top of whatever the
+  // current time-of-day already put them at — fog alone reads as a
+  // colored haze over an otherwise normally-lit scene, not genuine
+  // underwater darkness. No explicit "restore" needed — every frame
+  // this check is false, the normal per-frame updates from earlier
+  // stand unmodified.
   if (currentLevelIdx >= 0 && LEVELS[currentLevelIdx].biome === "verdant" && camera.position.y < LIQUID_LEVEL.verdant - 0.1) {
     scene.fog.color.setHex(0x0d3a4a);
     scene.fog.density = 0.09;
+    sun.intensity *= 0.12;
+    ambientLight.intensity *= 0.2;
   }
   const wind = updateWeatherSystem(weatherHandle, dt, eruptionActive, dayNight.dayAmount);
   updateAtmosphericParticles(atmosphereHandle, elapsedTime, dt, wind.windX, wind.windZ);

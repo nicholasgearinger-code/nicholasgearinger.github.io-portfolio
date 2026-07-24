@@ -295,7 +295,7 @@ function updateWaterfall(handle, dt, elapsed) {
 
   const posAttr = handle.splash.geometry.attributes.position;
   for (let i = 0; i < handle.splashLife.length; i++) {
-    handle.splashLife[i] += dt * 0.9;
+    handle.splashLife[i] += dt * 0.45; // slowed from 0.9 — the boosted upward velocity needs more time to complete its arc before respawning
     if (handle.splashLife[i] >= 1) {
       // Respawn — a fresh outward-and-up burst from a random point along
       // the base of the falls.
@@ -308,7 +308,7 @@ function updateWaterfall(handle, dt, elapsed) {
         handle.baseZ + (Math.random() - 0.5) * handle.width * 0.4
       );
       handle.splashVel[i * 3] = Math.cos(angle) * speed * 0.35;
-      handle.splashVel[i * 3 + 1] = 1.6 + Math.random() * 1.6;
+      handle.splashVel[i * 3 + 1] = 4 + Math.random() * 3; // was 1.6-3.2 — much higher arc, visibly above the water surface per explicit request
       handle.splashVel[i * 3 + 2] = Math.sin(angle) * speed * 0.35;
     } else {
       // Simple ballistic arc — rises, gravity pulls it back down.
@@ -330,6 +330,87 @@ function updateWaterfall(handle, dt, elapsed) {
 // direction, since a straight direction wouldn't follow a winding
 // channel. This is what actually reads as "the river has a current,"
 // distinct from the ambient wave/ripple system.
+// Same formula terrain.js's verdant shaper uses for its river's
+// meandering centerline, replicated here (not imported — liquid.js
+// doesn't depend on terrain.js) so anything needing to follow the
+// river's actual path stays correctly aligned with the real carved
+// channel.
+function riverCenterXAt(z, terrainSeed) {
+  return Math.sin(z * 0.035 + terrainSeed * 0.01) * 28 + Math.sin(z * 0.013 + terrainSeed * 0.02) * 14;
+}
+
+// A horizontally-tiling streak texture for the river's surface — same
+// painting technique as the waterfall texture, but wrapped for a
+// sideways/downstream scroll instead of a vertical fall.
+let sharedRiverSurfaceTexture = null;
+function getRiverSurfaceTexture() {
+  if (sharedRiverSurfaceTexture) return sharedRiverSurfaceTexture;
+  const w = 128, h = 48;
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  for (let i = 0; i < 30; i++) {
+    const y = Math.random() * h;
+    const sh = 1 + Math.random() * 2.5;
+    const segW = w * (0.15 + Math.random() * 0.4);
+    const segX = Math.random() * (w - segW);
+    ctx.fillStyle = `rgba(255,255,255,${(0.2 + Math.random() * 0.35).toFixed(2)})`;
+    ctx.fillRect(segX, y, segW, sh);
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(3, 1);
+  sharedRiverSurfaceTexture = tex;
+  return tex;
+}
+
+// A series of flat textured segments laid along the river's actual
+// winding path (not one single straight mesh, which couldn't follow a
+// curve), each oriented to the local tangent direction so the seams
+// between segments stay reasonably aligned with the river's own bend —
+// gives the water's surface the same kind of visible "flowing texture"
+// look the waterfall already has, distinct from the current's particles.
+function createRiverFlowStrip(scene, terrainSeed, waterY, zMin, zMax, width, segmentCount) {
+  const group = new THREE.Group();
+  const tex = getRiverSurfaceTexture();
+  const segLength = (zMax - zMin) / segmentCount;
+  for (let i = 0; i < segmentCount; i++) {
+    const zStart = zMin + i * segLength;
+    const zEnd = zStart + segLength;
+    const zMid = (zStart + zEnd) / 2;
+    const xStart = riverCenterXAt(zStart, terrainSeed);
+    const xEnd = riverCenterXAt(zEnd, terrainSeed);
+    const xMid = riverCenterXAt(zMid, terrainSeed);
+    const geo = new THREE.PlaneGeometry(width, segLength * 1.15); // slight overlap between segments so bends don't leave a visible gap
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({
+      map: tex, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending,
+      depthWrite: false, side: THREE.DoubleSide, fog: true,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(xMid, waterY + 0.03, zMid);
+    mesh.rotation.y = Math.atan2(xEnd - xStart, zEnd - zStart); // aligns each segment with the river's local bend
+    group.add(mesh);
+  }
+  scene.add(group);
+  return { group, texture: tex };
+}
+
+function updateRiverFlowStrip(handle, dt) {
+  if (!handle) return;
+  handle.texture.offset.x -= dt * 0.5; // scrolls sideways across each segment for a flowing-surface look
+}
+
+function disposeRiverFlowStrip(scene, handle) {
+  if (!handle) return;
+  scene.remove(handle.group);
+  handle.group.traverse((obj) => {
+    if (obj.geometry) obj.geometry.dispose();
+    if (obj.material) obj.material.dispose(); // the shared pooled texture itself intentionally not disposed
+  });
+}
+
 function createRiverCurrent(scene, terrainSeed, waterY, zMin, zMax, count) {
   const mat = new THREE.PointsMaterial({
     map: getFoamTexture(), color: 0xffffff, size: 0.55, transparent: true, opacity: 0.65,
@@ -359,7 +440,7 @@ function updateRiverCurrent(handle, dt) {
     handle.zPositions[i] += handle.speeds[i] * dt;
     if (handle.zPositions[i] > handle.zMax) handle.zPositions[i] -= span; // wraps back to the upstream end, preserving overflow instead of snapping to a fixed value
     const z = handle.zPositions[i];
-    const riverX = Math.sin(z * 0.035 + handle.terrainSeed * 0.01) * 28 + Math.sin(z * 0.013 + handle.terrainSeed * 0.02) * 14;
+    const riverX = riverCenterXAt(z, handle.terrainSeed);
     posAttr.setXYZ(i, riverX + handle.perpOffsets[i], handle.waterY + 0.08, z);
   }
   posAttr.needsUpdate = true;
@@ -737,4 +818,4 @@ function disposeLiquidPlane(scene, handle) {
   }
 }
 
-export { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent };
+export { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip };

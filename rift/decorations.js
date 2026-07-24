@@ -112,6 +112,33 @@ function createRockSprite(tex, width, height) {
   return group;
 }
 
+// Same crossed-plane technique as createRockSprite above, but LIT
+// (MeshStandardMaterial, not MeshBasicMaterial) with an emissive glow
+// map layered on top. Kept as a separate function rather than changing
+// createRockSprite itself, which Ember's rocks also use and should stay
+// unlit. Trees need to actually darken with the scene's own lighting
+// now that Verdant's night is crushed near-black — an unlit material
+// would stay at full brightness regardless of time of day, directly
+// undermining that. The glowTex, painted on a black background with a
+// few bright bioluminescent spots, is what keeps specific accents
+// visible via emissive even when the rest of the tree goes dark.
+function createTreeSprite(tex, glowTex, width, height) {
+  const group = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({
+    map: tex, transparent: true, side: THREE.DoubleSide, roughness: 0.9,
+    emissiveMap: glowTex, emissive: 0xffffff, emissiveIntensity: 3.5,
+  });
+  const geo = new THREE.PlaneGeometry(width, height);
+  const planeA = new THREE.Mesh(geo, mat);
+  planeA.position.y = height / 2;
+  group.add(planeA);
+  const planeB = new THREE.Mesh(geo, mat);
+  planeB.position.y = height / 2;
+  planeB.rotation.y = Math.PI / 2;
+  group.add(planeB);
+  return group;
+}
+
 function createDecoration(biome, colorHex, seedRand) {
   // Rare oversized "foreground framing" variant — rolled BEFORE anything
   // else below so it doesn't skew the existing per-biome prop-mix odds.
@@ -160,6 +187,7 @@ function buildBaseDecoration(biome, colorHex, seedRand) {
       if (roll < 0.55) return createLivingTree(colorHex, seedRand); // trees still dominant
       if (roll < 0.75) return createBush(colorHex, seedRand); // real bush/shrub undergrowth variety, not just trees + flowers
       if (roll < 0.9) return createFloraStalk(colorHex, seedRand);
+      if (roll < 0.95) return createGlowFungus(colorHex, seedRand); // glowing bioluminescent ground clusters
       return createRockCluster(biome, colorHex, seedRand);
     case "crystal": return roll < 0.72 ? createCrystalCluster(colorHex, seedRand) : createRockCluster(biome, colorHex, seedRand);
     case "abyssal":
@@ -411,6 +439,42 @@ function createBush(colorHex, rand) {
     group.add(clump);
   }
   return { group, kind: "tree", bobAmplitude: 0.015, bobSeed: rand() * Math.PI * 2 };
+}
+
+// Small clusters of glowing bioluminescent mushroom caps — genuinely
+// emissive (not just a bright diffuse color), so they read as a real
+// light source scattered on the forest floor, especially once the night
+// itself goes near-black. A soft, dim PointLight adds a small halo of
+// actual light spilling onto the nearby ground, matching the same
+// "glowing prop lights its own surroundings a little" idea as Ember's
+// createEmberFire/emberVent.
+const FUNGUS_GLOW_COLORS = [0x7cffb2, 0x8fe3ff, 0xd8ff6a, 0xc98fff];
+function createGlowFungus(colorHex, rand) {
+  const group = new THREE.Group();
+  const glowColor = new THREE.Color(FUNGUS_GLOW_COLORS[Math.floor(rand() * FUNGUS_GLOW_COLORS.length)]);
+  const stemMat = new THREE.MeshStandardMaterial({ color: 0xd8d0c0, roughness: 0.8, flatShading: true });
+  const capMat = new THREE.MeshStandardMaterial({
+    color: glowColor, roughness: 0.6, flatShading: true,
+    emissive: glowColor, emissiveIntensity: 3.2,
+  });
+  const clusterCount = 2 + Math.floor(rand() * 3);
+  for (let i = 0; i < clusterCount; i++) {
+    const scale = 0.12 + rand() * 0.14;
+    const stemHeight = scale * (1.6 + rand() * 0.8);
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(scale * 0.18, scale * 0.26, stemHeight, 5), stemMat);
+    stem.position.y = stemHeight / 2;
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(scale, 6, 4, 0, Math.PI * 2, 0, Math.PI * 0.55), capMat);
+    cap.position.y = stemHeight;
+    const cluster = new THREE.Group();
+    cluster.add(stem, cap);
+    const angle = rand() * Math.PI * 2, dist = rand() * 0.4;
+    cluster.position.set(Math.cos(angle) * dist, 0, Math.sin(angle) * dist);
+    group.add(cluster);
+  }
+  const light = new THREE.PointLight(glowColor.getHex(), 1.1, 5);
+  light.position.y = 0.15;
+  group.add(light);
+  return { group, kind: "glowFungus", bobAmplitude: 0.4, bobSeed: rand() * Math.PI * 2, material: capMat, light };
 }
 
 // Bioluminescent flora stalk — tapered stem with a glowing cap.
@@ -677,6 +741,56 @@ function getTreeTexture(archetype, leafColorHex, capColorHex, barkColorHex, rand
   return variants[Math.floor(rand() * variants.length)];
 }
 
+// A handful of bright bioluminescent glow spots painted on a black
+// background, at the same canvas dimensions as createTreeTexture for the
+// given archetype so it lines up correctly as an emissive map on the
+// same UVs. Black pixels contribute nothing to emissive output, so only
+// the painted spots actually glow — everything else on the tree still
+// gets lit normally by the scene's own lighting. Pooled the same way as
+// the diffuse texture, keyed only by archetype (glow color/placement
+// doesn't need to vary by leaf/bark color the way the diffuse look does).
+const GLOW_TEXTURE_VARIANTS = 3;
+const GLOW_COLORS = ["#7cffb2", "#8fe3ff", "#d8ff6a"];
+const treeGlowTextureCache = new Map();
+function createTreeGlowTexture(seed, archetype) {
+  const w = 110;
+  const h = archetype === "conical" ? 340 : archetype === "spreading" ? 210 : 250;
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#000000";
+  ctx.fillRect(0, 0, w, h);
+  const spotCount = 8 + Math.floor((seed % 1) * 7);
+  for (let i = 0; i < spotCount; i++) {
+    const gx = w * (0.15 + ((seed * 7 + i * 13) % 1) * 0.7);
+    const gy = h * (0.12 + ((seed * 11 + i * 17) % 1) * 0.8); // spread across most of the canvas — reads fine whether it lands on trunk or canopy
+    const r = w * (0.045 + ((seed * 3 + i) % 1) * 0.035);
+    const grad = ctx.createRadialGradient(gx, gy, 0, gx, gy, r);
+    const color = GLOW_COLORS[i % GLOW_COLORS.length];
+    grad.addColorStop(0, color);
+    grad.addColorStop(0.5, color);
+    grad.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(gx, gy, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+function getTreeGlowTexture(archetype, rand) {
+  let variants = treeGlowTextureCache.get(archetype);
+  if (!variants) {
+    variants = [];
+    for (let i = 0; i < GLOW_TEXTURE_VARIANTS; i++) {
+      variants.push(createTreeGlowTexture((i + 1) / (GLOW_TEXTURE_VARIANTS + 1) + 0.37, archetype));
+    }
+    treeGlowTextureCache.set(archetype, variants);
+  }
+  return variants[Math.floor(rand() * variants.length)];
+}
+
 function createLivingTree(colorHex, rand) {
   const archetypeRoll = rand();
   // Conical (pine) dominant, matching a pine-forest reference — round
@@ -686,6 +800,7 @@ function createLivingTree(colorHex, rand) {
   const leaf = VERDANT_LEAF_PALETTE[Math.floor(rand() * VERDANT_LEAF_PALETTE.length)];
   const cap = 0xd8f06a; // same vivid yellow-green highlight used elsewhere for Verdant foliage
   const tex = getTreeTexture(archetype, leaf, cap, bark, rand);
+  const glowTex = getTreeGlowTexture(archetype, rand);
 
   const height = (3 + rand() * 9) * (archetype === "conical" ? 1.35 : 1); // taller overall, pines noticeably taller/narrower — matches the reference's tall slender conifers
   // Width matches the canvas's own aspect ratio per archetype (see the w/h
@@ -693,7 +808,7 @@ function createLivingTree(colorHex, rand) {
   const aspect = archetype === "conical" ? 110 / 340 : archetype === "spreading" ? 110 / 210 : 110 / 250;
   const width = height * aspect;
 
-  const spriteGroup = createRockSprite(tex, width, height);
+  const spriteGroup = createTreeSprite(tex, glowTex, width, height);
   return {
     group: spriteGroup, kind: "tree", bobAmplitude: 0.02, bobSeed: rand() * Math.PI * 2,
     material: spriteGroup.children[0].material, // both crossed planes share one material — grabbing it here lets updateDecoration animate a subtle canopy shimmer without createRockSprite itself needing to expose it
@@ -761,6 +876,10 @@ function updateDecoration(handle, elapsed) {
       const shimmer = 1 + Math.sin(elapsed * 0.5 + handle.bobSeed) * 0.08;
       handle.material.color.setScalar(shimmer);
     }
+  } else if (handle.kind === "glowFungus") {
+    const pulse = 0.6 + 0.4 * Math.sin(elapsed * 0.9 + handle.bobSeed) * Math.sin(elapsed * 0.37 + handle.bobSeed * 1.7);
+    if (handle.material) handle.material.emissiveIntensity = 2.2 + pulse * 2.2;
+    if (handle.light) handle.light.intensity = 0.5 + pulse * 0.9;
   } else if (handle.kind === "debris") {
     handle.group.position.y = handle.baseY + handle.hoverHeight + Math.sin(elapsed * 0.6 + handle.bobSeed) * handle.bobAmplitude;
     handle.group.rotation.y += handle.spinRate * 0.016;

@@ -64,7 +64,10 @@ const BIOME_SKY_TINT = {
 // glow sources themselves (fires/embers/lava/faint moon), not a
 // generically-lit night sky. Only affects true night (see the elevation-
 // based fade in updateDayNightCycle below) — dawn/day stay normal.
-const BIOME_NIGHT_DARKEN = { ember: 0.35, verdant: 0.08 }; // verdant much more aggressive than ember — the forest should read as near-total darkness at night, lit only by the moon and whatever actually glows (bioluminescent flora/fauna), not by ambient moonlight alone
+const BIOME_NIGHT_DARKEN = {
+  ember: { factor: 0.35, window: 0.15 },
+  verdant: { factor: 0.02, window: 0.3 }, // much wider activation window than ember's — the forest should read as dark well before the exact bottom of the cycle (true midnight), not just in the last sliver of it, since the sky itself already looks fully dark well before then
+};
 
 function lerpColor(a, b, t) {
   return new THREE.Color(a).lerp(new THREE.Color(b), t);
@@ -510,8 +513,8 @@ function updateDayNightCycle(cycle, dt) {
   // down, never dawn/day.
   const nightDarken = BIOME_NIGHT_DARKEN[cycle.biome];
   if (nightDarken !== undefined) {
-    const darkenAmount = THREE.MathUtils.clamp(1 - dayAmount / 0.15, 0, 1);
-    const factor = THREE.MathUtils.lerp(1, nightDarken, darkenAmount);
+    const darkenAmount = THREE.MathUtils.clamp(1 - dayAmount / nightDarken.window, 0, 1);
+    const factor = THREE.MathUtils.lerp(1, nightDarken.factor, darkenAmount);
     cycle.sun.intensity *= factor;
     cycle.ambient.intensity *= factor;
   }

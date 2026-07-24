@@ -39,6 +39,7 @@ const FLOWER_STYLE = {
   verdant: {
     tuftCount: 700, colors: [0xff8fd6, 0xffd36e, 0xc9a0ff, 0xfff6e0], stemColor: 0x2d5a2a,
     height: 0.22, heightVariance: 0.08, headSize: 0.075,
+    glowColors: [0xc9a0ff], // a subset that actually glow (bioluminescent) — the rest stay simple bright non-emissive color for variety, not every flower needs to be a light source
   },
 };
 
@@ -186,6 +187,10 @@ function createFlowers(scene, biome, sampleHeight, radius) {
   const headGeo = new THREE.OctahedronGeometry(style.headSize, 0);
   const batches = style.colors.map((colorHex) => {
     const mat = new THREE.MeshStandardMaterial({ color: colorHex, roughness: 0.5, flatShading: true });
+    if (style.glowColors && style.glowColors.includes(colorHex)) {
+      mat.emissive = new THREE.Color(colorHex);
+      mat.emissiveIntensity = 2.8;
+    }
     const mesh = new THREE.InstancedMesh(headGeo, mat, perColor);
     mesh.castShadow = true;
     scene.add(mesh);

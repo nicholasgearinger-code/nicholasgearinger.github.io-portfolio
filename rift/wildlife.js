@@ -14,11 +14,11 @@ import { LANDMARK_POSITION } from "./landmarks.js";
 // -----------------------------------------------------------------------------
 
 const WILDLIFE_PROFILE = {
-  ember: { flyers: 0, flyerColor: 0x000000, motes: 7, moteColor: 0xff8a4a, moteHeight: 3, moteBlink: true, salamanders: 4, salamanderColor: 0xff7a28 }, // too hostile for birds — fireflies-with-intent, plus fire salamanders scurrying near the lava
-  verdant: { flyers: 6, flyerColor: 0x1a1a1a, motes: 8, moteColor: 0xbdf27a, moteHeight: 1.5, moteBlink: true, salamanders: 0, salamanderColor: 0x000000 }, // birds circling + real fireflies low in the grass
-  crystal: { flyers: 3, flyerColor: 0x2a3a44, motes: 10, moteColor: 0x9fe8ff, moteHeight: 4, moteBlink: false, salamanders: 0, salamanderColor: 0x000000 }, // sparse crystal-moths drifting near the spires
-  abyssal: { flyers: 2, flyerColor: 0x14101c, motes: 4, moteColor: 0x8a86ff, moteHeight: 1, moteBlink: false, salamanders: 0, salamanderColor: 0x000000 }, // a couple of large slow shapes circling high, and eerie low lure-lights
-  ashen: { flyers: 4, flyerColor: 0x1c1712, motes: 0, moteColor: 0x000000, moteHeight: 0, moteBlink: false, salamanders: 0, salamanderColor: 0x000000 },   // scavengers circling over a dead lakebed, nothing bioluminescent down in the dust
+  ember: { flyers: 0, flyerColor: 0x000000, motes: 7, moteColor: 0xff8a4a, moteHeight: 3, moteBlink: true, salamanders: 4, salamanderColor: 0xff7a28, glowcrawlers: 0, glowcrawlerColor: 0x000000 }, // too hostile for birds — fireflies-with-intent, plus fire salamanders scurrying near the lava
+  verdant: { flyers: 6, flyerColor: 0x1a1a1a, motes: 8, moteColor: 0xbdf27a, moteHeight: 1.5, moteBlink: true, salamanders: 0, salamanderColor: 0x000000, glowcrawlers: 5, glowcrawlerColor: 0x8fe3ff }, // birds circling + real fireflies low in the grass + a second glowing ground creature, distinct from the motes — slower, always-lit, closer to the ground
+  crystal: { flyers: 3, flyerColor: 0x2a3a44, motes: 10, moteColor: 0x9fe8ff, moteHeight: 4, moteBlink: false, salamanders: 0, salamanderColor: 0x000000, glowcrawlers: 0, glowcrawlerColor: 0x000000 }, // sparse crystal-moths drifting near the spires
+  abyssal: { flyers: 2, flyerColor: 0x14101c, motes: 4, moteColor: 0x8a86ff, moteHeight: 1, moteBlink: false, salamanders: 0, salamanderColor: 0x000000, glowcrawlers: 0, glowcrawlerColor: 0x000000 }, // a couple of large slow shapes circling high, and eerie low lure-lights
+  ashen: { flyers: 4, flyerColor: 0x1c1712, motes: 0, moteColor: 0x000000, moteHeight: 0, moteBlink: false, salamanders: 0, salamanderColor: 0x000000, glowcrawlers: 0, glowcrawlerColor: 0x000000 },   // scavengers circling over a dead lakebed, nothing bioluminescent down in the dust
 };
 
 let sharedWingTexture = null;
@@ -95,6 +95,30 @@ function getSalamanderTexture() {
   return sharedSalamanderTexture;
 }
 
+// A small rounded snail/grub silhouette — genuinely additive-blended
+// (not just a tinted normal sprite like the salamander) so it actually
+// reads as glowing rather than merely colored, distinct from the
+// firefly motes' soft dot glow.
+let sharedGlowcrawlerTexture = null;
+function getGlowcrawlerTexture() {
+  if (sharedGlowcrawlerTexture) return sharedGlowcrawlerTexture;
+  const w = 48, h = 32;
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  // Rounded body/shell.
+  ctx.beginPath();
+  ctx.ellipse(w * 0.42, h * 0.5, w * 0.32, h * 0.34, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // A small head/foot trailing off one side.
+  ctx.beginPath();
+  ctx.ellipse(w * 0.82, h * 0.58, w * 0.14, h * 0.16, 0, 0, Math.PI * 2);
+  ctx.fill();
+  sharedGlowcrawlerTexture = new THREE.CanvasTexture(canvas);
+  return sharedGlowcrawlerTexture;
+}
+
 function createFlyer(scene, color) {
   const mat = new THREE.SpriteMaterial({ map: getWingTexture(), color, fog: true });
   const sprite = new THREE.Sprite(mat);
@@ -155,6 +179,31 @@ function createSalamander(scene, color, heightSampler) {
   };
 }
 
+// A slow, always-glowing ground creature — distinct from both the
+// firefly motes (which drift at a fixed hover height, no ground contact)
+// and the salamander (which is a normal-blended, eruption-fleeing
+// creature) — this one crawls along the actual terrain and uses additive
+// blending so it reads as a genuine small light source, dimmer and
+// steadier than a firefly's blink.
+function createGlowcrawler(scene, color, heightSampler) {
+  const mat = new THREE.SpriteMaterial({ map: getGlowcrawlerTexture(), color, fog: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+  const sprite = new THREE.Sprite(mat);
+  const scale = 0.75 + Math.random() * 0.35;
+  sprite.scale.set(scale, scale * 0.65, 1);
+  scene.add(sprite);
+  return {
+    sprite,
+    heightSampler,
+    x: (Math.random() - 0.5) * 140,
+    z: (Math.random() - 0.5) * 140,
+    wanderAngle: Math.random() * Math.PI * 2,
+    seed: Math.random() * Math.PI * 2,
+    speed: 0.35 + Math.random() * 0.3, // noticeably slower than a salamander's scurry — a crawl, not a scurry
+    paused: false,
+    pauseTimer: Math.random() * 3,
+  };
+}
+
 /**
  * @param {THREE.Scene} scene
  * @param {string} biome
@@ -172,7 +221,10 @@ function createWildlife(scene, biome, heightSampler) {
   for (let i = 0; i < moteCount; i++) motes.push(createGlowmote(scene, profile.moteColor, profile.moteHeight, !!profile.moteBlink));
   const salamanders = [];
   for (let i = 0; i < salamanderCount; i++) salamanders.push(createSalamander(scene, profile.salamanderColor, heightSampler));
-  return { flyers, motes, salamanders };
+  const glowcrawlerCount = Math.round((profile.glowcrawlers || 0) * mult);
+  const glowcrawlers = [];
+  for (let i = 0; i < glowcrawlerCount; i++) glowcrawlers.push(createGlowcrawler(scene, profile.glowcrawlerColor, heightSampler));
+  return { flyers, motes, salamanders, glowcrawlers };
 }
 
 function updateWildlife(handle, elapsed, dt, playerX = 0, playerZ = 0, erupting = false) {
@@ -260,6 +312,32 @@ function updateWildlife(handle, elapsed, dt, playerX = 0, playerZ = 0, erupting 
     const scurryBob = s.paused ? 0 : Math.abs(Math.sin(elapsed * 10 + s.seed)) * 0.06;
     s.sprite.position.set(s.x, groundY + 0.12 + scurryBob, s.z);
   }
+  for (const g of handle.glowcrawlers) {
+    const distToPlayer = Math.hypot(g.x - playerX, g.z - playerZ);
+    if (distToPlayer < FLEE_RADIUS) {
+      g.wanderAngle = Math.atan2(g.z - playerZ, g.x - playerX);
+      g.x += Math.cos(g.wanderAngle) * dt * g.speed * 2; // still slow even fleeing — this is a crawler, not something that can bolt
+      g.z += Math.sin(g.wanderAngle) * dt * g.speed * 2;
+      g.paused = false;
+    } else {
+      g.pauseTimer -= dt;
+      if (g.pauseTimer <= 0) {
+        g.paused = !g.paused;
+        g.pauseTimer = g.paused ? 1.5 + Math.random() * 2.5 : 2 + Math.random() * 3;
+        if (!g.paused) g.wanderAngle += (Math.random() - 0.5) * Math.PI;
+      }
+      if (!g.paused) {
+        g.x += Math.cos(g.wanderAngle) * dt * g.speed;
+        g.z += Math.sin(g.wanderAngle) * dt * g.speed;
+      }
+    }
+    if (Math.hypot(g.x, g.z) > 100) g.wanderAngle = Math.atan2(-g.z, -g.x);
+    const groundY2 = g.heightSampler ? (g.heightSampler(g.x, g.z) ?? 0) : 0;
+    g.sprite.position.set(g.x, groundY2 + 0.06, g.z);
+    // Slow steady pulse, not a firefly-style blink — a different,
+    // calmer glow character from the motes above.
+    g.sprite.material.opacity = 0.5 + 0.3 * Math.sin(elapsed * 0.8 + g.seed);
+  }
 }
 
 function disposeWildlife(scene, handle) {
@@ -267,6 +345,7 @@ function disposeWildlife(scene, handle) {
   for (const f of handle.flyers) { scene.remove(f.sprite); f.sprite.material.dispose(); }
   for (const m of handle.motes) { scene.remove(m.sprite); m.sprite.material.dispose(); }
   for (const s of handle.salamanders || []) { scene.remove(s.sprite); s.sprite.material.dispose(); }
+  for (const g of handle.glowcrawlers || []) { scene.remove(g.sprite); g.sprite.material.dispose(); }
 }
 
 export { createWildlife, updateWildlife, disposeWildlife };

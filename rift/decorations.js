@@ -1262,4 +1262,4 @@ function disposeLightShafts(scene, shafts) {
   }
 }
 
-export { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, updateLightShafts, disposeLightShafts };
+export { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, updateLightShafts, disposeLightShafts, createRockCluster, createCaveMouth };

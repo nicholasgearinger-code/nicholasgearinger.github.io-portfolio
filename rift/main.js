@@ -3,7 +3,7 @@ import { PointerLockControls } from "three/addons/controls/PointerLockControls.j
 import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH } from "./terrain.js";
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
-import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, updateLightShafts, disposeLightShafts } from "./decorations.js";
+import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, updateLightShafts, disposeLightShafts, createRockCluster, createCaveMouth } from "./decorations.js";
 import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip } from "./liquid.js";
 import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
@@ -409,6 +409,34 @@ function buildLevel(levelIdx) {
     waterfallHandle = createWaterfall(scene, topY, bottomY, waterfallX, WATERFALL_Z, RIVER_WIDTH * 1.3);
     riverCurrentHandle = createRiverCurrent(scene, terrainSeed, LIQUID_LEVEL.verdant, WATERFALL_Z, WORLD_BOUND_RADIUS * 0.95, 70);
     riverFlowStripHandle = createRiverFlowStrip(scene, terrainSeed, LIQUID_LEVEL.verdant, WATERFALL_Z, WORLD_BOUND_RADIUS * 0.95, RIVER_WIDTH * 1.3, 18);
+
+    // Craggy rocks scattered around the cliff, plus a cave mouth tucked
+    // behind the falls — reuses the existing rock-cluster/cave-mouth
+    // decoration builders directly (own deterministic PRNG stream) rather
+    // than a new one-off system, and folds into the same
+    // decorationHandles array everything else here already uses for
+    // cleanup, rather than tracking a separate handle list.
+    const cliffRand = mulberry32(hashStringToSeed(WORLD_SEED + "-waterfall-cliff-" + level.biome));
+    for (let i = 0; i < 6; i++) {
+      const angle = cliffRand() * Math.PI * 2;
+      const dist = 3 + cliffRand() * 8;
+      const rx = waterfallX + Math.cos(angle) * dist;
+      const rz = WATERFALL_Z + Math.sin(angle) * dist;
+      const ry = terrainHeightAt(level, rx, rz, WORLD_SEED) ?? 0;
+      const rockHandle = createRockCluster(level.biome, level.color, cliffRand);
+      rockHandle.group.position.set(rx, ry, rz);
+      rockHandle.group.rotation.y = cliffRand() * Math.PI * 2;
+      rockHandle.group.scale.setScalar(1.3 + cliffRand() * 0.8); // bigger than typical scattered rocks — craggy cliff formations, not small decorative ones
+      rockHandle.group.traverse((obj) => { if (obj.isMesh) { obj.castShadow = true; obj.receiveShadow = true; } });
+      scene.add(rockHandle.group);
+      decorationHandles.push(rockHandle);
+    }
+    const caveHandle = createCaveMouth(0x2a5c3a, cliffRand); // a mossy green-tinted glow instead of the purple this function otherwise defaults to for its color parameter, to fit Verdant
+    caveHandle.group.scale.setScalar(1.8);
+    caveHandle.group.position.set(waterfallX, bottomY, WATERFALL_Z - 1.5); // recessed slightly upstream of the falls' own Z, so it reads as behind the falling water; the mouth's default +Z-facing opening already points toward the player approaching from downstream, no extra rotation needed
+    caveHandle.group.traverse((obj) => { if (obj.isMesh) { obj.castShadow = true; obj.receiveShadow = true; } });
+    scene.add(caveHandle.group);
+    decorationHandles.push(caveHandle);
   }
 
   atmosphereHandle = createAtmosphericParticles(scene, level.biome);

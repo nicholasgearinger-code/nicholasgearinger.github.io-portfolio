@@ -4,7 +4,7 @@ import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERF
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
 import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, updateLightShafts, disposeLightShafts } from "./decorations.js";
-import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall } from "./liquid.js";
+import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent } from "./liquid.js";
 import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
 import { createGrass, updateGrass, disposeGrass, createFlowers, disposeFlowers } from "./vegetation.js";
@@ -278,6 +278,7 @@ function updateMovement(dt, grounded) {
 let terrainMesh = null;
 let liquidHandle = null;
 let waterfallHandle = null;
+let riverCurrentHandle = null;
 let atmosphereHandle = null;
 let grassHandle = null;
 let flowersHandle = null;
@@ -318,6 +319,8 @@ function teardownLevel() {
   liquidHandle = null;
   disposeWaterfall(scene, waterfallHandle);
   waterfallHandle = null;
+  disposeRiverCurrent(scene, riverCurrentHandle);
+  riverCurrentHandle = null;
   disposeAtmosphericParticles(scene, atmosphereHandle);
   atmosphereHandle = null;
   disposeGrass(scene, grassHandle);
@@ -401,6 +404,7 @@ function buildLevel(levelIdx) {
     const topY = terrainHeightAt(level, waterfallX, WATERFALL_Z - 4, WORLD_SEED); // just upstream — elevated source side, right at the top of the now-tight 4-unit ramp
     const bottomY = terrainHeightAt(level, waterfallX, WATERFALL_Z + 2, WORLD_SEED); // just downstream — river floor side
     waterfallHandle = createWaterfall(scene, topY, bottomY, waterfallX, WATERFALL_Z, RIVER_WIDTH * 1.3);
+    riverCurrentHandle = createRiverCurrent(scene, terrainSeed, LIQUID_LEVEL.verdant, WATERFALL_Z, WORLD_BOUND_RADIUS * 0.95, 70);
   }
 
   atmosphereHandle = createAtmosphericParticles(scene, level.biome);
@@ -958,6 +962,7 @@ function animate() {
   };
   updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, lightInfo, camera.position);
   updateWaterfall(waterfallHandle, dt, elapsedTime);
+  updateRiverCurrent(riverCurrentHandle, dt);
   const wind = updateWeatherSystem(weatherHandle, dt, eruptionActive, dayNight.dayAmount);
   updateAtmosphericParticles(atmosphereHandle, elapsedTime, dt, wind.windX, wind.windZ);
   updateGrass(grassHandle, elapsedTime, wind.windX, wind.windZ);

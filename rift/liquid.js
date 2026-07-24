@@ -190,17 +190,33 @@ function getGlintTexture() {
 let sharedWaterfallTexture = null;
 function getWaterfallTexture() {
   if (sharedWaterfallTexture) return sharedWaterfallTexture;
-  const w = 32, h = 64;
+  const w = 64, h = 128;
   const canvas = document.createElement("canvas");
   canvas.width = w; canvas.height = h;
   const ctx = canvas.getContext("2d");
-  ctx.fillStyle = "rgba(220,240,255,0.6)";
+  ctx.fillStyle = "rgba(210,235,255,0.55)";
   ctx.fillRect(0, 0, w, h);
-  for (let i = 0; i < 24; i++) {
+  // Broken, staggered streak segments — not full-height lines, which
+  // read as too clean/regular for turbulent falling water.
+  for (let i = 0; i < 40; i++) {
     const x = Math.random() * w;
-    const sw = 1 + Math.random() * 3;
-    ctx.fillStyle = `rgba(255,255,255,${(0.35 + Math.random() * 0.5).toFixed(2)})`;
-    ctx.fillRect(x, 0, sw, h);
+    const sw = 1 + Math.random() * 3.5;
+    const segH = h * (0.15 + Math.random() * 0.5);
+    const segY = Math.random() * (h - segH);
+    ctx.fillStyle = `rgba(255,255,255,${(0.3 + Math.random() * 0.5).toFixed(2)})`;
+    ctx.fillRect(x, segY, sw, segH);
+  }
+  // Scattered foam-white blob clusters throughout, not just a foam pool
+  // at the very bottom — real whitewater churns and breaks up along the
+  // whole fall, not just where it lands.
+  for (let i = 0; i < 22; i++) {
+    const x = Math.random() * w, y = Math.random() * h;
+    const r = 2 + Math.random() * 4;
+    const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
+    grad.addColorStop(0, "rgba(255,255,255,0.8)");
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
   }
   const tex = new THREE.CanvasTexture(canvas);
   tex.wrapS = THREE.RepeatWrapping;
@@ -305,6 +321,55 @@ function updateWaterfall(handle, dt, elapsed) {
   }
   posAttr.needsUpdate = true;
   handle.splash.material.opacity = 0.7 + Math.sin(elapsed * 3.1) * 0.15;
+}
+
+// A genuine flowing current along the river's actual winding path —
+// particles travel downstream (increasing Z) while tracking the river's
+// curve via the SAME riverCenterX formula terrain.js uses (replicated
+// here with the same seed derivation) rather than a straight flow
+// direction, since a straight direction wouldn't follow a winding
+// channel. This is what actually reads as "the river has a current,"
+// distinct from the ambient wave/ripple system.
+function createRiverCurrent(scene, terrainSeed, waterY, zMin, zMax, count) {
+  const mat = new THREE.PointsMaterial({
+    map: getFoamTexture(), color: 0xffffff, size: 0.55, transparent: true, opacity: 0.65,
+    blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
+  });
+  const positions = new Float32Array(count * 3);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const points = new THREE.Points(geo, mat);
+  scene.add(points);
+  const zPositions = new Float32Array(count);
+  const speeds = new Float32Array(count);
+  const perpOffsets = new Float32Array(count); // fixed sideways scatter within the channel width, set once (not re-randomized every frame, which would look like static)
+  for (let i = 0; i < count; i++) {
+    zPositions[i] = zMin + Math.random() * (zMax - zMin);
+    speeds[i] = 9 + Math.random() * 5;
+    perpOffsets[i] = (Math.random() - 0.5) * 7;
+  }
+  return { points, zPositions, speeds, perpOffsets, terrainSeed, waterY, zMin, zMax, count };
+}
+
+function updateRiverCurrent(handle, dt) {
+  if (!handle) return;
+  const posAttr = handle.points.geometry.attributes.position;
+  const span = handle.zMax - handle.zMin;
+  for (let i = 0; i < handle.count; i++) {
+    handle.zPositions[i] += handle.speeds[i] * dt;
+    if (handle.zPositions[i] > handle.zMax) handle.zPositions[i] -= span; // wraps back to the upstream end, preserving overflow instead of snapping to a fixed value
+    const z = handle.zPositions[i];
+    const riverX = Math.sin(z * 0.035 + handle.terrainSeed * 0.01) * 28 + Math.sin(z * 0.013 + handle.terrainSeed * 0.02) * 14;
+    posAttr.setXYZ(i, riverX + handle.perpOffsets[i], handle.waterY + 0.08, z);
+  }
+  posAttr.needsUpdate = true;
+}
+
+function disposeRiverCurrent(scene, handle) {
+  if (!handle) return;
+  scene.remove(handle.points);
+  handle.points.geometry.dispose();
+  handle.points.material.dispose();
 }
 
 function disposeWaterfall(scene, handle) {
@@ -672,4 +737,4 @@ function disposeLiquidPlane(scene, handle) {
   }
 }
 
-export { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall };
+export { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent };

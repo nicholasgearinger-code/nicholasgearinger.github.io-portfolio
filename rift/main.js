@@ -956,7 +956,7 @@ function animate() {
     cameraPos: camera.position, sunPos: sun.position, moonPos: dayNightCycle.moonBody.group.position,
     sunStrength: dayNight.dayAmount, moonStrength: dayNightCycle.moonBody.core.material.opacity * (1 - dayNight.dayAmount),
   };
-  updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, lightInfo);
+  updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, lightInfo, camera.position);
   updateWaterfall(waterfallHandle, dt, elapsedTime);
   const wind = updateWeatherSystem(weatherHandle, dt, eruptionActive, dayNight.dayAmount);
   updateAtmosphericParticles(atmosphereHandle, elapsedTime, dt, wind.windX, wind.windZ);

@@ -194,12 +194,12 @@ function getWaterfallTexture() {
   const canvas = document.createElement("canvas");
   canvas.width = w; canvas.height = h;
   const ctx = canvas.getContext("2d");
-  ctx.fillStyle = "rgba(220,240,255,0.5)";
+  ctx.fillStyle = "rgba(220,240,255,0.6)";
   ctx.fillRect(0, 0, w, h);
-  for (let i = 0; i < 16; i++) {
+  for (let i = 0; i < 24; i++) {
     const x = Math.random() * w;
-    const sw = 1 + Math.random() * 2.5;
-    ctx.fillStyle = `rgba(255,255,255,${(0.25 + Math.random() * 0.4).toFixed(2)})`;
+    const sw = 1 + Math.random() * 3;
+    ctx.fillStyle = `rgba(255,255,255,${(0.35 + Math.random() * 0.5).toFixed(2)})`;
     ctx.fillRect(x, 0, sw, h);
   }
   const tex = new THREE.CanvasTexture(canvas);
@@ -235,12 +235,12 @@ function getFoamTexture() {
 // duplicating terrain.js's noise math — so it's always correctly aligned
 // regardless of the exact noise values at that point.
 function createWaterfall(scene, topY, bottomY, x, z, width) {
-  const height = topY - bottomY;
+  const height = THREE.MathUtils.clamp(topY - bottomY, 0, 16); // clamped — an unlucky extreme terrain sample right at the cliff could otherwise produce a wildly oversized panel
   if (height < 2) return null; // not enough of a cliff here to bother with
   const geo = new THREE.PlaneGeometry(width, height);
   const mat = new THREE.MeshBasicMaterial({
-    map: getWaterfallTexture(), transparent: true, side: THREE.DoubleSide,
-    depthWrite: false, opacity: 0.85, fog: true,
+    map: getWaterfallTexture(), color: 0xdfeeff, transparent: true, side: THREE.DoubleSide,
+    depthWrite: false, opacity: 0.8, fog: true,
   });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.set(x, bottomY + height / 2, z);
@@ -252,13 +252,59 @@ function createWaterfall(scene, topY, bottomY, x, z, width) {
   foam.position.set(x, bottomY + 0.15, z);
   scene.add(foam);
 
-  return { mesh, foam };
+  // A burst of small splash particles at the base — arcing outward and
+  // falling back, continuously recycled, rather than a static foam glow
+  // standing in for actual splashing.
+  const splashCount = 36;
+  const splashPositions = new Float32Array(splashCount * 3);
+  const splashVel = new Float32Array(splashCount * 3);
+  const splashLife = new Float32Array(splashCount);
+  for (let i = 0; i < splashCount; i++) splashLife[i] = 1; // start "dead" so the update loop's reset logic spawns them staggered on the first few frames, not all at once
+  const splashGeo = new THREE.BufferGeometry();
+  splashGeo.setAttribute("position", new THREE.BufferAttribute(splashPositions, 3));
+  const splashMat = new THREE.PointsMaterial({
+    map: getFoamTexture(), color: 0xffffff, size: 0.4, transparent: true, opacity: 0.85,
+    blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
+  });
+  const splash = new THREE.Points(splashGeo, splashMat);
+  scene.add(splash);
+
+  return { mesh, foam, splash, splashVel, splashLife, baseX: x, baseY: bottomY, baseZ: z, width };
 }
 
 function updateWaterfall(handle, dt, elapsed) {
   if (!handle) return;
-  handle.mesh.material.map.offset.y -= dt * 1.4; // scrolls the streak texture downward for a continuously falling look
+  handle.mesh.material.map.offset.y -= dt * 2.2; // faster scroll — "moving rapidly" per explicit request, was 1.4
   handle.foam.material.opacity = 0.55 + Math.sin(elapsed * 2.2) * 0.15; // gentle churn, not a static glow
+
+  const posAttr = handle.splash.geometry.attributes.position;
+  for (let i = 0; i < handle.splashLife.length; i++) {
+    handle.splashLife[i] += dt * 0.9;
+    if (handle.splashLife[i] >= 1) {
+      // Respawn — a fresh outward-and-up burst from a random point along
+      // the base of the falls.
+      handle.splashLife[i] = 0;
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 0.8 + Math.random() * 1.8;
+      posAttr.setXYZ(i,
+        handle.baseX + (Math.random() - 0.5) * handle.width * 0.8,
+        handle.baseY + 0.1,
+        handle.baseZ + (Math.random() - 0.5) * handle.width * 0.4
+      );
+      handle.splashVel[i * 3] = Math.cos(angle) * speed * 0.35;
+      handle.splashVel[i * 3 + 1] = 1.6 + Math.random() * 1.6;
+      handle.splashVel[i * 3 + 2] = Math.sin(angle) * speed * 0.35;
+    } else {
+      // Simple ballistic arc — rises, gravity pulls it back down.
+      const t = handle.splashLife[i];
+      const gravity = 3.2;
+      posAttr.setX(i, posAttr.getX(i) + handle.splashVel[i * 3] * dt);
+      posAttr.setY(i, posAttr.getY(i) + (handle.splashVel[i * 3 + 1] - gravity * t) * dt);
+      posAttr.setZ(i, posAttr.getZ(i) + handle.splashVel[i * 3 + 2] * dt);
+    }
+  }
+  posAttr.needsUpdate = true;
+  handle.splash.material.opacity = 0.7 + Math.sin(elapsed * 3.1) * 0.15;
 }
 
 function disposeWaterfall(scene, handle) {
@@ -268,6 +314,9 @@ function disposeWaterfall(scene, handle) {
   handle.mesh.material.dispose(); // shared pooled texture itself intentionally not disposed
   scene.remove(handle.foam);
   handle.foam.material.dispose();
+  scene.remove(handle.splash);
+  handle.splash.geometry.dispose();
+  handle.splash.material.dispose();
 }
 
 function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0.6, z: 0.35 }) {
@@ -402,7 +451,7 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
   };
 }
 
-function updateLiquidPlane(handle, elapsed, skyColor, cameraY, lightInfo) {
+function updateLiquidPlane(handle, elapsed, skyColor, cameraY, lightInfo, playerPos) {
   if (!handle) return;
   const { mesh, glow, shimmer, rocks, basePositions, biome, style, flowDir, crustOctaves, crackOctaves, flowBeads } = handle;
   const posAttr = mesh.geometry.attributes.position;
@@ -438,7 +487,22 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, lightInfo) {
     // moving through the water rather than just a bigger version of the
     // same ripple.
     const swell2 = biome !== "ember" ? Math.sin((bx + bz) * 0.045 + elapsed * speed * 0.35) * swell2Amp : 0;
-    const ripple = swell + chop + swell2;
+    // A real reactive ripple around wherever the player currently is —
+    // water only, not ambient wave motion. Expanding concentric rings
+    // (dist*frequency - elapsed*speed) rather than one static bump, so
+    // it reads as a wake propagating outward from them as they move.
+    let playerRipple = 0;
+    if (playerPos && biome !== "ember") {
+      const pdx = bx - playerPos.x, pdz = bz - playerPos.z;
+      const pDistSq = pdx * pdx + pdz * pdz;
+      const RIPPLE_RADIUS = 4.5;
+      if (pDistSq < RIPPLE_RADIUS * RIPPLE_RADIUS) {
+        const pDist = Math.sqrt(pDistSq);
+        const wave = Math.sin(pDist * 2.4 - elapsed * 6.5) * (1 - pDist / RIPPLE_RADIUS);
+        playerRipple = wave * 0.14;
+      }
+    }
+    const ripple = swell + chop + swell2 + playerRipple;
 
     // Normalize ripple to 0..1.
     const range = (amp + chopAmp + (biome !== "ember" ? swell2Amp : 0)) * 2;

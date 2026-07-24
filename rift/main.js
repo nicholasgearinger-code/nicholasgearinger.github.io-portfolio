@@ -3,7 +3,7 @@ import { PointerLockControls } from "three/addons/controls/PointerLockControls.j
 import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL } from "./terrain.js";
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
-import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createBush, createLightShaft, updateLightShafts, disposeLightShafts } from "./decorations.js";
+import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, updateLightShafts, disposeLightShafts } from "./decorations.js";
 import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane } from "./liquid.js";
 import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
@@ -498,7 +498,7 @@ function buildLevel(levelIdx) {
         if (Math.hypot(x - layout.spawn.x, z - layout.spawn.z) < 8) continue; // keep the immediate spawn area free
         const groundY = sampleGroundHeight(x, z, terrainMesh) ?? 0;
         if (waterLevel !== undefined && groundY < waterLevel + 0.4) continue; // no trees growing in the lake
-        const handle = fillerRand() < 0.3 ? createBush(level.color, fillerRand) : createLivingTree(level.color, fillerRand);
+        const handle = createLivingTree(level.color, fillerRand); // bushes removed per explicit request — filler now trees only
         handle.group.position.set(x, groundY, z);
         handle.group.rotation.y = fillerRand() * Math.PI * 2;
         const depthT = Math.min(1, distFromCenter / fillerBound);

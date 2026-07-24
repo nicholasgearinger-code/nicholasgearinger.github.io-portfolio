@@ -184,8 +184,7 @@ function buildBaseDecoration(biome, colorHex, seedRand) {
       if (roll < 0.88) return createEmberVent(colorHex, seedRand);
       return createEmberFire(colorHex, seedRand);
     case "verdant":
-      if (roll < 0.55) return createLivingTree(colorHex, seedRand); // trees still dominant
-      if (roll < 0.75) return createBush(colorHex, seedRand); // real bush/shrub undergrowth variety, not just trees + flowers
+      if (roll < 0.7) return createLivingTree(colorHex, seedRand); // bushes removed per explicit request — share redistributed to trees
       if (roll < 0.9) return createFloraStalk(colorHex, seedRand);
       if (roll < 0.95) return createGlowFungus(colorHex, seedRand); // glowing bioluminescent ground clusters
       return createRockCluster(biome, colorHex, seedRand);
@@ -636,39 +635,75 @@ function createTreeTexture(seed, archetype, leafColorHex, capColorHex, barkColor
   // deliberate exception — a tall, mostly-bare trunk with fronds only at
   // the very top IS the palm silhouette, not something to hide.
   const trunkTop = archetype === "palm" ? h * 0.16 : archetype === "banana" ? h * 0.55 : h * 0.78;
+  // Computed once, shared by both the trunk curve and the frond crown
+  // below, so the crown actually sits at the curved trunk's real top
+  // point instead of the old fixed center.
+  const palmLean = archetype === "palm" ? w * (0.16 + (seed % 1) * 0.14) * (seed > 0.5 ? 1 : -1) : 0;
+  const palmCrownX = w * 0.5 + palmLean;
   ctx.fillStyle = `#${new THREE.Color(barkColorHex).getHexString()}`;
-  ctx.fillRect(w * 0.4, trunkTop, w * 0.2, h - trunkTop);
+  if (archetype === "palm") {
+    // A gently curved trunk, not a straight rectangle — this is what
+    // actually reads as a classic palm silhouette rather than a pole
+    // with fronds stuck on top.
+    const trunkW = w * 0.09;
+    ctx.beginPath();
+    ctx.moveTo(w * 0.5 - trunkW, h);
+    ctx.quadraticCurveTo(w * 0.5 + palmLean * 0.6, h * 0.55, palmCrownX, trunkTop);
+    ctx.lineTo(palmCrownX + trunkW * 1.6, trunkTop);
+    ctx.quadraticCurveTo(w * 0.5 + palmLean * 0.6 + trunkW * 1.6, h * 0.55, w * 0.5 + trunkW, h);
+    ctx.closePath();
+    ctx.fill();
+  } else {
+    ctx.fillRect(w * 0.4, trunkTop, w * 0.2, h - trunkTop);
+  }
 
   ctx.fillStyle = `#${new THREE.Color(leafColorHex).getHexString()}`;
 
   if (archetype === "palm") {
-    // A crown of long arcing frond blades radiating from a point near
-    // the top — the defining tropical silhouette, genuinely different
-    // in construction from the other three archetypes rather than a
-    // recolored variant of one of them.
+    // A fuller crown of long arcing, feathery fronds radiating from the
+    // curved trunk's actual top — more numerous and wider-spreading than
+    // before, with small serration notches along each frond's edge
+    // (real palm leaves are feathery, not smooth blades), matching the
+    // classic reference silhouette much more closely.
     const crownY = h * 0.1;
-    const frondCount = 6 + Math.floor((seed % 1) * 4);
+    const frondCount = 10 + Math.floor((seed % 1) * 6);
     for (let i = 0; i < frondCount; i++) {
       const angle = (i / frondCount) * Math.PI * 2 + seed * 6;
-      const droop = 0.35 + ((seed * 17 + i) % 1) * 0.45;
-      const length = w * (0.62 + ((seed * 23 + i) % 1) * 0.3);
-      const dirX = Math.cos(angle), dirY = Math.sin(angle) * 0.35 + droop * 0.65; // biased downward — fronds arc down and out, not straight sideways
-      const midX = w * 0.5 + dirX * length * 0.55;
-      const midY = crownY + dirY * length * 0.35;
-      const endX = w * 0.5 + dirX * length;
-      const endY = crownY + dirY * length * 0.85 + h * 0.06;
-      const frondWidth = w * 0.045;
+      const droop = 0.3 + ((seed * 17 + i) % 1) * 0.5;
+      const length = w * (0.75 + ((seed * 23 + i) % 1) * 0.35);
+      const dirX = Math.cos(angle), dirY = Math.sin(angle) * 0.3 + droop * 0.7; // biased downward — fronds arc down and out, not straight sideways
+      const frondWidth = w * 0.05;
       const perpX = -dirY, perpY = dirX;
+      // A feathery frond: a central rib (the arc from crown to tip) with
+      // small triangular leaflet notches stepping outward along its
+      // length on both sides, rather than one smooth solid blade.
+      const segments = 7;
       ctx.beginPath();
-      ctx.moveTo(w * 0.5, crownY);
-      ctx.quadraticCurveTo(midX + perpX * frondWidth, midY + perpY * frondWidth, endX, endY);
-      ctx.quadraticCurveTo(midX - perpX * frondWidth, midY - perpY * frondWidth, w * 0.5, crownY);
+      ctx.moveTo(palmCrownX, crownY);
+      for (let s = 1; s <= segments; s++) {
+        const t = s / segments;
+        const ribX = palmCrownX + dirX * length * t;
+        const ribY = crownY + dirY * length * t * t * 0.9 + dirY * length * t * 0.1;
+        const taper = 1 - t * 0.7; // leaflets shrink toward the tip
+        const notchOut = frondWidth * taper * (s % 2 === 0 ? 1 : 0.55); // alternating notch depth for a jagged feathery edge
+        ctx.lineTo(ribX + perpX * notchOut, ribY + perpY * notchOut);
+      }
+      const tipX = palmCrownX + dirX * length, tipY = crownY + dirY * length + h * 0.03;
+      ctx.lineTo(tipX, tipY);
+      for (let s = segments; s >= 1; s--) {
+        const t = s / segments;
+        const ribX = palmCrownX + dirX * length * t;
+        const ribY = crownY + dirY * length * t * t * 0.9 + dirY * length * t * 0.1;
+        const taper = 1 - t * 0.7;
+        const notchOut = frondWidth * taper * (s % 2 === 0 ? 0.55 : 1);
+        ctx.lineTo(ribX - perpX * notchOut, ribY - perpY * notchOut);
+      }
       ctx.closePath();
       ctx.fill();
     }
     // A small crown mass tying the fronds together at their shared base.
     ctx.beginPath();
-    ctx.arc(w * 0.5, crownY, w * 0.13, 0, Math.PI * 2);
+    ctx.arc(palmCrownX, crownY, w * 0.14, 0, Math.PI * 2);
     ctx.fill();
   } else if (archetype === "banana") {
     // A handful of huge drooping paddle-shaped leaves fanning out from a
@@ -1200,4 +1235,4 @@ function disposeLightShafts(scene, shafts) {
   }
 }
 
-export { createDecoration, updateDecoration, createEmberFire, createLivingTree, createBush, createLightShaft, updateLightShafts, disposeLightShafts };
+export { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, updateLightShafts, disposeLightShafts };

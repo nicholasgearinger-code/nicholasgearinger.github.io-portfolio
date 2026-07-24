@@ -152,6 +152,37 @@ function updateLavaFlowBeads(flowBeads, elapsed, y) {
  * @param {(x:number, z:number) => number|null} [sampleHeight]  used only for Ember's floating cooled-rock chunks, to place them in genuine lava channels rather than scattering blindly across the whole plane
  * @param {{x:number, z:number}} [flowDir]  Ember only — world-space direction the lava's crust/crack pattern drifts in. Defaults to a fixed diagonal; pass a real downhill direction (e.g. sampled from terrain.js's heightfield gradient) for a more physically-grounded flow per landmark/channel.
  */
+// A bright vertical streak with scattered flecks — real sunlight/
+// moonlight glitter on water is broken into many small glints rippling
+// with the surface, not one smooth gradient bar.
+let sharedGlintTexture = null;
+function getGlintTexture() {
+  if (sharedGlintTexture) return sharedGlintTexture;
+  const w = 64, h = 256;
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, "rgba(255,255,255,0.85)");
+  grad.addColorStop(0.55, "rgba(255,255,255,0.22)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(w * 0.28, 0, w * 0.44, h);
+  for (let i = 0; i < 70; i++) {
+    const gx = w * (0.12 + Math.random() * 0.76);
+    const gy = Math.random() * h;
+    const r = 1 + Math.random() * 2.5;
+    ctx.globalAlpha = 0.35 + Math.random() * 0.5;
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(gx, gy, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  const tex = new THREE.CanvasTexture(canvas);
+  return tex;
+}
+
 function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0.6, z: 0.35 }) {
   const style = LIQUID_STYLE[biome];
   if (!style) return null;
@@ -173,6 +204,25 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.y = y;
   scene.add(mesh);
+
+  // A bright, elongated "glitter path" streak toward whichever light
+  // source (sun or moon) is currently more prominent — real water
+  // reflection would need a render-to-texture pass this project doesn't
+  // have, but a moving, glinting streak that tracks the actual light
+  // direction each frame reads as genuinely reflective in a way the
+  // existing sky-color tint alone doesn't. Water only — lava isn't
+  // reflective, it's lit from within.
+  let glint = null;
+  if (biome === "verdant") {
+    const glintGeo = new THREE.PlaneGeometry(1, 1);
+    const glintMat = new THREE.MeshBasicMaterial({
+      map: getGlintTexture(), transparent: true, blending: THREE.AdditiveBlending,
+      depthWrite: false, side: THREE.DoubleSide, fog: false,
+    });
+    glint = new THREE.Mesh(glintGeo, glintMat);
+    glint.visible = false;
+    scene.add(glint);
+  }
 
   // A separate unlit, additively-blended plane just above the surface —
   // gives lava genuine luminous "glow" the way MeshStandardMaterial's own
@@ -260,12 +310,12 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
 
   const basePositions = new Float32Array(posAttr.array); // original Y per vertex, for the ripple to animate around
   return {
-    mesh, glow, shimmer, rocks, basePositions, biome, style,
+    mesh, glow, shimmer, rocks, glint, waterY: y, basePositions, biome, style,
     flowDir: normalizeFlow(flowDir), crustOctaves, crackOctaves, flowBeads,
   };
 }
 
-function updateLiquidPlane(handle, elapsed, skyColor, cameraY) {
+function updateLiquidPlane(handle, elapsed, skyColor, cameraY, lightInfo) {
   if (!handle) return;
   const { mesh, glow, shimmer, rocks, basePositions, biome, style, flowDir, crustOctaves, crackOctaves, flowBeads } = handle;
   const posAttr = mesh.geometry.attributes.position;
@@ -391,6 +441,39 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY) {
     }
     rocks.mesh.instanceMatrix.needsUpdate = true;
   }
+
+  if (handle.glint && lightInfo) {
+    const { cameraPos, sunPos, moonPos, sunStrength, moonStrength } = lightInfo;
+    const useSun = sunStrength >= moonStrength;
+    const lightPos = useSun ? sunPos : moonPos;
+    const strength = Math.max(sunStrength, moonStrength);
+    if (!lightPos || strength <= 0.02) {
+      handle.glint.visible = false;
+    } else {
+      const dx = lightPos.x - cameraPos.x, dz = lightPos.z - cameraPos.z;
+      const dist = Math.hypot(dx, dz) || 1;
+      const dir = new THREE.Vector3(dx / dist, 0, dz / dist);
+      const glintLength = 50;
+      handle.glint.position.set(
+        cameraPos.x + dir.x * glintLength * 0.5,
+        handle.waterY + 0.06,
+        cameraPos.z + dir.z * glintLength * 0.5
+      );
+      // Basis construction rather than Euler angles — local X becomes the
+      // streak's width, local Y becomes its length (pointed at the
+      // light), local Z becomes the surface normal (straight up), which
+      // is a more direct way to express "lie flat, point at the light"
+      // than composing rotation.x/y/z by hand.
+      const up = new THREE.Vector3(0, 1, 0);
+      const right = new THREE.Vector3().crossVectors(up, dir).normalize();
+      const basis = new THREE.Matrix4().makeBasis(right, dir, up);
+      handle.glint.quaternion.setFromRotationMatrix(basis);
+      const widthWobble = 2.2 + Math.sin(elapsed * 1.3) * 0.4; // gentle width breathing, mimics the streak narrowing/widening as the water ripples
+      handle.glint.scale.set(widthWobble, glintLength, 1);
+      handle.glint.material.opacity = strength * 0.75;
+      handle.glint.visible = true;
+    }
+  }
 }
 
 function disposeLiquidPlane(scene, handle) {
@@ -413,6 +496,11 @@ function disposeLiquidPlane(scene, handle) {
     scene.remove(handle.rocks.mesh);
     handle.rocks.mesh.geometry.dispose();
     handle.rocks.mesh.material.dispose();
+  }
+  if (handle.glint) {
+    scene.remove(handle.glint);
+    handle.glint.geometry.dispose();
+    handle.glint.material.dispose(); // the shared glint texture itself is pooled (getGlintTexture) and intentionally not disposed here
   }
   if (handle.flowBeads) {
     scene.remove(handle.flowBeads.group);

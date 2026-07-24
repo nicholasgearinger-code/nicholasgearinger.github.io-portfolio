@@ -423,22 +423,27 @@ function createBush(colorHex, rand) {
     vertexColors: true, roughness: 0.85, flatShading: true,
     emissive: leafLow, emissiveIntensity: 0.22, // keeps a visible green tint even under this biome's darkened night lighting, instead of going to a featureless black blob — same fix as createLivingTree's foliage
   });
-  const baseScale = 0.32 + rand() * 0.42; // small — this is undergrowth, not a tree
-  const clumpCount = 3 + Math.floor(rand() * 3);
-  for (let i = 0; i < clumpCount; i++) {
-    const scale = baseScale * (0.6 + rand() * 0.6);
-    const geo = new THREE.IcosahedronGeometry(scale, getGraphicsSettings().decorationDetail);
-    const gp = geo.attributes.position;
-    for (let v = 0; v < gp.count; v++) gp.setY(v, gp.getY(v) * 0.7); // squashed low and wide, shrub silhouette not a ball
-    gp.needsUpdate = true;
-    geo.computeVertexNormals();
+  const baseScale = 0.4 + rand() * 0.5;
+  const bladeCount = 5 + Math.floor(rand() * 4);
+  for (let i = 0; i < bladeCount; i++) {
+    // A flattened, elongated blade — a fern frond/broad tropical leaf,
+    // not a round clump — this is what actually reads as tropical
+    // undergrowth instead of a generic shrub ball.
+    const length = baseScale * (1.2 + rand() * 0.9);
+    const width = baseScale * (0.32 + rand() * 0.2);
+    const geo = new THREE.ConeGeometry(width, length, 4, 1);
+    geo.scale(1, 1, 0.22);
+    geo.translate(0, length / 2, 0); // base at origin, tip up, so the rotation below pivots it from its own root
     applyVerticalGradient(geo, leafLow, leafHigh);
-    const clump = new THREE.Mesh(geo, leafMat);
-    const angle = rand() * Math.PI * 2, dist = rand() * baseScale * 0.7;
-    clump.position.set(Math.cos(angle) * dist, baseScale * (0.35 + rand() * 0.25), Math.sin(angle) * dist);
-    group.add(clump);
+    const blade = new THREE.Mesh(geo, leafMat);
+    const angle = rand() * Math.PI * 2;
+    const outward = 0.35 + rand() * 0.55; // how far each blade leans outward from vertical, radiating from a shared base like a real fern cluster
+    blade.position.set(Math.cos(angle) * baseScale * 0.15, 0, Math.sin(angle) * baseScale * 0.15);
+    blade.rotation.y = angle; // yaw first
+    blade.rotateX(outward); // then tilt outward via the incremental method, not the rotation.x property, so it leans away from the cluster's own center rather than a fixed world axis
+    group.add(blade);
   }
-  return { group, kind: "tree", bobAmplitude: 0.015, bobSeed: rand() * Math.PI * 2 };
+  return { group, kind: "tree", bobAmplitude: 0.02, bobSeed: rand() * Math.PI * 2 };
 }
 
 // Small clusters of glowing bioluminescent mushroom caps — genuinely
@@ -607,16 +612,15 @@ const VERDANT_BARK_PALETTE = [0x6b4423, 0x7a4f2a, 0x5a3a1e];
 // branch/foliage-clump tuning never quite got there).
 // -----------------------------------------------------------------------------
 
-// Paints a tree silhouette. "conical" (pine, the dominant archetype) gets
-// several overlapping jagged-edged triangular tiers stacked tall and
-// narrow — a classic conifer profile, not one smooth cone. "round"/
-// "spreading" get a broader canopy built from overlapping rounded lobes
-// instead. A sliver of trunk peeks out at the very base either way — the
-// reference shows almost no bare trunk, foliage covers nearly the whole
-// tree.
+// Paints a tree silhouette. "palm" gets a crown of long arcing fronds atop
+// a tall bare trunk. "banana" gets huge drooping paddle leaves atop a
+// short stubby trunk. "round"/"spreading" get a broader canopy built
+// from overlapping rounded lobes. A sliver of trunk peeks out at the
+// base either way (more for palm/banana, whose bare-trunk look is part
+// of the silhouette) — foliage covers nearly the whole tree otherwise.
 function createTreeTexture(seed, archetype, leafColorHex, capColorHex, barkColorHex) {
   const w = 110;
-  const h = archetype === "conical" ? 340 : archetype === "spreading" ? 210 : archetype === "palm" ? 380 : 250;
+  const h = archetype === "banana" ? 180 : archetype === "spreading" ? 210 : archetype === "palm" ? 380 : 250;
   const canvas = document.createElement("canvas");
   canvas.width = w; canvas.height = h;
   const ctx = canvas.getContext("2d");
@@ -631,7 +635,7 @@ function createTreeTexture(seed, archetype, leafColorHex, capColorHex, barkColor
   // placement math to reach far enough down on its own. Palms are the
   // deliberate exception — a tall, mostly-bare trunk with fronds only at
   // the very top IS the palm silhouette, not something to hide.
-  const trunkTop = archetype === "palm" ? h * 0.16 : h * 0.78;
+  const trunkTop = archetype === "palm" ? h * 0.16 : archetype === "banana" ? h * 0.55 : h * 0.78;
   ctx.fillStyle = `#${new THREE.Color(barkColorHex).getHexString()}`;
   ctx.fillRect(w * 0.4, trunkTop, w * 0.2, h - trunkTop);
 
@@ -666,44 +670,32 @@ function createTreeTexture(seed, archetype, leafColorHex, capColorHex, barkColor
     ctx.beginPath();
     ctx.arc(w * 0.5, crownY, w * 0.13, 0, Math.PI * 2);
     ctx.fill();
-  } else if (archetype === "conical") {
-    const tiers = 4 + Math.floor((seed % 1) * 3);
-    let tierTop = h * 0.03;
-    const tierBottomMax = h * 0.92;
-    for (let i = 0; i < tiers; i++) {
-      const t = i / (tiers - 1);
-      const tierBottom = tierTop + (tierBottomMax - tierTop) * (0.32 + 0.1 * (1 - t));
-      const halfWidth = (w * 0.5) * (0.28 + t * 0.62);
-      const jag = 5;
+  } else if (archetype === "banana") {
+    // A handful of huge drooping paddle-shaped leaves fanning out from a
+    // short crown — the iconic broad-leaf tropical silhouette, distinct
+    // from palm's thin fronds and from round/spreading's rounded lobes.
+    const crownY = h * 0.22;
+    const leafCount = 5 + Math.floor((seed % 1) * 3);
+    for (let i = 0; i < leafCount; i++) {
+      const angle = (i / leafCount) * Math.PI * 2 + seed * 4;
+      const droop = 0.5 + ((seed * 19 + i) % 1) * 0.35; // how far each leaf arcs downward under its own weight
+      const length = w * (0.7 + ((seed * 29 + i) % 1) * 0.25);
+      const dirX = Math.cos(angle), dirY = Math.sin(angle) * 0.3 + droop * 0.7;
+      const midX = w * 0.5 + dirX * length * 0.5;
+      const midY = crownY + dirY * length * 0.28;
+      const endX = w * 0.5 + dirX * length * 0.92;
+      const endY = crownY + dirY * length * 0.75 + h * 0.04;
+      const bladeWidth = w * 0.16; // much wider than a palm frond — a paddle, not a blade
+      const perpX = -dirY, perpY = dirX;
       ctx.beginPath();
-      ctx.moveTo(w / 2, tierTop);
-      for (let j = 0; j <= jag; j++) {
-        const jt = j / jag;
-        const wob = Math.sin(jt * Math.PI * 5 + seed * 9 + i) * halfWidth * 0.12;
-        ctx.lineTo(w / 2 + jt * halfWidth + wob, tierTop + jt * jt * (tierBottom - tierTop));
-      }
-      for (let j = jag; j >= 0; j--) {
-        const jt = j / jag;
-        const wob = Math.sin(jt * Math.PI * 5 + seed * 9 + i + 3) * halfWidth * 0.12;
-        ctx.lineTo(w / 2 - jt * halfWidth - wob, tierTop + jt * jt * (tierBottom - tierTop));
-      }
+      ctx.moveTo(w * 0.5, crownY);
+      ctx.quadraticCurveTo(midX + perpX * bladeWidth, midY + perpY * bladeWidth, endX, endY);
+      ctx.quadraticCurveTo(midX - perpX * bladeWidth, midY - perpY * bladeWidth, w * 0.5, crownY);
       ctx.closePath();
       ctx.fill();
-      tierTop += (tierBottom - tierTop) * 0.62; // next tier starts partway down this one — overlapping tiers, not stacked edge-to-edge
     }
-    // A final wide triangle at the base, GUARANTEED to reach all the way
-    // down over the trunk regardless of where the tier loop above
-    // actually landed — that loop's own math only closes 62% of the
-    // remaining gap each iteration, so it approaches tierBottomMax
-    // asymptotically and falls noticeably short with only 4-6 tiers, no
-    // matter how high tierBottomMax itself is set. This shape doesn't
-    // depend on that math at all.
-    const baseHalfWidth = w * 0.48;
     ctx.beginPath();
-    ctx.moveTo(w * 0.5, h * 0.58);
-    ctx.lineTo(w * 0.5 + baseHalfWidth, h * 0.98);
-    ctx.lineTo(w * 0.5 - baseHalfWidth, h * 0.98);
-    ctx.closePath();
+    ctx.arc(w * 0.5, crownY, w * 0.15, 0, Math.PI * 2);
     ctx.fill();
   } else {
     const lobes = archetype === "spreading" ? 5 : 4;
@@ -785,7 +777,7 @@ const GLOW_COLORS = ["#7cffb2", "#8fe3ff", "#d8ff6a"];
 const treeGlowTextureCache = new Map();
 function createTreeGlowTexture(seed, archetype) {
   const w = 110;
-  const h = archetype === "conical" ? 340 : archetype === "spreading" ? 210 : archetype === "palm" ? 380 : 250;
+  const h = archetype === "banana" ? 180 : archetype === "spreading" ? 210 : archetype === "palm" ? 380 : 250;
   const canvas = document.createElement("canvas");
   canvas.width = w; canvas.height = h;
   const ctx = canvas.getContext("2d");
@@ -824,20 +816,19 @@ function getTreeGlowTexture(archetype, rand) {
 
 function createLivingTree(colorHex, rand) {
   const archetypeRoll = rand();
-  // Tropical rainforest weighting — palm and broad-leaf canopies (round/
-  // spreading) now dominant, conical (pine) reduced to a rare minority
-  // rather than the previous pine-forest-dominant mix.
-  const archetype = archetypeRoll < 0.35 ? "palm" : archetypeRoll < 0.65 ? "spreading" : archetypeRoll < 0.9 ? "round" : "conical";
+  // All-tropical mix per explicit request — palm/spreading/round/banana,
+  // conical (pine) removed entirely rather than just reduced.
+  const archetype = archetypeRoll < 0.3 ? "palm" : archetypeRoll < 0.55 ? "spreading" : archetypeRoll < 0.8 ? "round" : "banana";
   const bark = VERDANT_BARK_PALETTE[Math.floor(rand() * VERDANT_BARK_PALETTE.length)];
   const leaf = VERDANT_LEAF_PALETTE[Math.floor(rand() * VERDANT_LEAF_PALETTE.length)];
   const cap = 0xd8f06a; // same vivid yellow-green highlight used elsewhere for Verdant foliage
   const tex = getTreeTexture(archetype, leaf, cap, bark, rand);
   const glowTex = getTreeGlowTexture(archetype, rand);
 
-  const height = (3 + rand() * 9) * (archetype === "palm" ? 1.5 : archetype === "conical" ? 1.35 : 1); // palms read as tall canopy emergents, taller even than the (now rare) pines
+  const height = (3 + rand() * 9) * (archetype === "palm" ? 1.5 : archetype === "banana" ? 0.6 : 1); // palms read as tall canopy emergents; bananas are deliberately stubby, shorter than the baseline rather than just "no bonus"
   // Width matches the canvas's own aspect ratio per archetype (see the w/h
   // values in createTreeTexture) so the painted silhouette doesn't stretch.
-  const aspect = archetype === "conical" ? 110 / 340 : archetype === "spreading" ? 110 / 210 : archetype === "palm" ? 110 / 380 : 110 / 250;
+  const aspect = archetype === "banana" ? 110 / 180 : archetype === "spreading" ? 110 / 210 : archetype === "palm" ? 110 / 380 : 110 / 250;
   const width = height * aspect;
 
   const spriteGroup = createTreeSprite(tex, glowTex, width, height);

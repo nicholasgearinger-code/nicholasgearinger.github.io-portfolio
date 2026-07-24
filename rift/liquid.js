@@ -23,7 +23,7 @@ const LIQUID_STYLE = {
     glowColor: 0xff8a1a, glowOpacity: 0.35,
   },
   verdant: {
-    baseColor: new THREE.Color(0x1f6fb0), frothColor: new THREE.Color(0xf2fbff),
+    baseColor: new THREE.Color(0x0f4a78), frothColor: new THREE.Color(0xf2fbff),
     emissive: 0x2a8fd6, emissiveIntensity: 0.02, opacity: 0.78, roughness: 0.1, // pushed down further (was 0.06, originally 0.2) per explicit "make night more pronounced" follow-up
   },
 };
@@ -325,8 +325,9 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, lightInfo) {
   // layered on top of the main swell adds finer chop instead of one
   // smooth wave shape everywhere.
   const speed = biome === "ember" ? 0.6 : 1.4;
-  const amp = biome === "ember" ? 0.18 : 0.1;
+  const amp = biome === "ember" ? 0.18 : 0.16; // bumped 0.1->0.16 for water — more pronounced, genuinely visible wave motion
   const chopAmp = amp * 0.35;
+  const swell2Amp = amp * 0.55; // a third, slower, larger-scale layer at a different angle — real water has multiple overlapping wave frequencies, not just one swell direction plus fine chop
   const flowSpeed = 0.12; // noise-space units/sec the crust/crack field drifts along flowDir
   const tmpColor = new THREE.Color();
   // Water tints toward the current sky color each frame (recomputed fresh,
@@ -343,10 +344,17 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, lightInfo) {
     const bx = basePositions[i * 3], bz = basePositions[i * 3 + 2];
     const swell = Math.sin(bx * 0.15 + elapsed * speed) * amp + Math.cos(bz * 0.12 + elapsed * speed * 0.8) * amp;
     const chop = Math.sin(bx * 0.55 + bz * 0.4 + elapsed * speed * 2.3) * chopAmp;
-    const ripple = swell + chop;
+    // A slow, large-scale diagonal swell — water only (lava's existing
+    // 2-layer churn feeds its own crust/crack heat pattern and stays
+    // untouched). Different angle and much lower frequency than the
+    // other two layers, so it reads as a genuine second wave system
+    // moving through the water rather than just a bigger version of the
+    // same ripple.
+    const swell2 = biome !== "ember" ? Math.sin((bx + bz) * 0.045 + elapsed * speed * 0.35) * swell2Amp : 0;
+    const ripple = swell + chop + swell2;
 
     // Normalize ripple to 0..1.
-    const range = (amp + chopAmp) * 2;
+    const range = (amp + chopAmp + (biome !== "ember" ? swell2Amp : 0)) * 2;
     const disturbance = THREE.MathUtils.clamp((ripple + range / 2) / range, 0, 1);
 
     if (biome === "ember" && style.crustColor) {

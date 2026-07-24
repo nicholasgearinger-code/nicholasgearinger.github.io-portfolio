@@ -4,7 +4,7 @@ import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERF
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
 import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, updateLightShafts, disposeLightShafts, createRockCluster, createCaveMouth } from "./decorations.js";
-import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip } from "./liquid.js";
+import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall } from "./liquid.js";
 import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
 import { createGrass, updateGrass, disposeGrass, createFlowers, disposeFlowers } from "./vegetation.js";
@@ -280,6 +280,7 @@ let liquidHandle = null;
 let waterfallHandle = null;
 let riverCurrentHandle = null;
 let riverFlowStripHandle = null;
+let cliffWallHandle = null;
 let atmosphereHandle = null;
 let grassHandle = null;
 let flowersHandle = null;
@@ -324,6 +325,8 @@ function teardownLevel() {
   riverCurrentHandle = null;
   disposeRiverFlowStrip(scene, riverFlowStripHandle);
   riverFlowStripHandle = null;
+  disposeCliffWall(scene, cliffWallHandle);
+  cliffWallHandle = null;
   disposeAtmosphericParticles(scene, atmosphereHandle);
   atmosphereHandle = null;
   disposeGrass(scene, grassHandle);
@@ -407,8 +410,8 @@ function buildLevel(levelIdx) {
     const topY = terrainHeightAt(level, waterfallX, WATERFALL_Z - 4, WORLD_SEED); // just upstream — elevated source side, right at the top of the now-tight 4-unit ramp
     const bottomY = terrainHeightAt(level, waterfallX, WATERFALL_Z + 2, WORLD_SEED); // just downstream — river floor side
     waterfallHandle = createWaterfall(scene, topY, bottomY, waterfallX, WATERFALL_Z, RIVER_WIDTH * 1.3);
-    riverCurrentHandle = createRiverCurrent(scene, terrainSeed, LIQUID_LEVEL.verdant, WATERFALL_Z, WORLD_BOUND_RADIUS * 0.95, 70);
-    riverFlowStripHandle = createRiverFlowStrip(scene, terrainSeed, LIQUID_LEVEL.verdant, WATERFALL_Z, WORLD_BOUND_RADIUS * 0.95, RIVER_WIDTH * 1.3, 18);
+    riverCurrentHandle = createRiverCurrent(scene, terrainSeed, LIQUID_LEVEL.verdant, WATERFALL_Z, WORLD_BOUND_RADIUS * 0.95, 110);
+    riverFlowStripHandle = createRiverFlowStrip(scene, terrainSeed, LIQUID_LEVEL.verdant, WATERFALL_Z, WORLD_BOUND_RADIUS * 0.95, RIVER_WIDTH * 1.3, 40);
 
     // Craggy rocks scattered around the cliff, plus a cave mouth tucked
     // behind the falls — reuses the existing rock-cluster/cave-mouth
@@ -417,6 +420,7 @@ function buildLevel(levelIdx) {
     // decorationHandles array everything else here already uses for
     // cleanup, rather than tracking a separate handle list.
     const cliffRand = mulberry32(hashStringToSeed(WORLD_SEED + "-waterfall-cliff-" + level.biome));
+    cliffWallHandle = createCliffWall(scene, topY, bottomY, waterfallX, WATERFALL_Z, RIVER_WIDTH * 1.3, cliffRand);
     for (let i = 0; i < 6; i++) {
       const angle = cliffRand() * Math.PI * 2;
       const dist = 3 + cliffRand() * 8;
@@ -997,19 +1001,21 @@ function animate() {
   updateRiverCurrent(riverCurrentHandle, dt);
   updateRiverFlowStrip(riverFlowStripHandle, dt);
   // Underwater effect — Verdant only. Overrides the fog dayNightCycle/
-  // weather already set earlier this same frame with a dense, murky
-  // blue-green tint, AND darkens the actual sun/ambient light sources
-  // (also already set earlier this frame) on top of whatever the
-  // current time-of-day already put them at — fog alone reads as a
-  // colored haze over an otherwise normally-lit scene, not genuine
-  // underwater darkness. No explicit "restore" needed — every frame
-  // this check is false, the normal per-frame updates from earlier
-  // stand unmodified.
+  // weather already set earlier this same frame with a dense, vivid blue
+  // tint, darkens the sun/ambient intensity, AND tints the light COLORS
+  // themselves blue (both sun.color and ambientLight.color are also
+  // reset every frame by dayNightCycle, so this override is safe and
+  // self-corrects the moment the player surfaces). Tinting light color
+  // is what actually makes every surface in view read as blue regardless
+  // of distance — fog alone only visibly tints distant objects, nearby
+  // ones would still show their normal color.
   if (currentLevelIdx >= 0 && LEVELS[currentLevelIdx].biome === "verdant" && camera.position.y < LIQUID_LEVEL.verdant - 0.1) {
-    scene.fog.color.setHex(0x0d3a4a);
-    scene.fog.density = 0.09;
+    scene.fog.color.setHex(0x1a5f8f);
+    scene.fog.density = 0.11;
+    sun.color.setHex(0x3a8fc0);
     sun.intensity *= 0.12;
-    ambientLight.intensity *= 0.2;
+    ambientLight.color.setHex(0x2a6f9f);
+    ambientLight.intensity *= 0.35;
   }
   const wind = updateWeatherSystem(weatherHandle, dt, eruptionActive, dayNight.dayAmount);
   updateAtmosphericParticles(atmosphereHandle, elapsedTime, dt, wind.windX, wind.windZ);

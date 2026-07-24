@@ -453,6 +453,53 @@ function disposeRiverCurrent(scene, handle) {
   handle.points.material.dispose();
 }
 
+// A wide craggy rock wall spanning the whole cliff face the waterfall
+// falls from — the cliff itself is just terrain (grass-colored, matching
+// the rest of the hillside), so without this the "cliff" only reads as
+// a rock formation right where the small scattered boulders happen to
+// sit, not as a genuine rock FACE. A segmented plane with per-vertex
+// jitter (forward/back AND up/down) reads as a jagged rock surface
+// rather than a flat card, with a real vertex-color gradient (dark stone
+// low down, blending toward a mossy tint near the top where it meets
+// the grass) using the same technique this project's other rock props
+// already use.
+function createCliffWall(scene, topY, bottomY, x, z, width, seedRand) {
+  const height = THREE.MathUtils.clamp(topY - bottomY, 0, 16) + 3; // a bit taller than the falls itself so the rock face visibly extends past both edges of the water
+  const segsX = 10, segsY = 6;
+  const geo = new THREE.PlaneGeometry(width * 2.2, height, segsX, segsY);
+  const pos = geo.attributes.position;
+  const colors = new Float32Array(pos.count * 3);
+  const stoneLow = new THREE.Color(0x3a3a34);
+  const stoneHigh = new THREE.Color(0x5c6b4a);
+  for (let i = 0; i < pos.count; i++) {
+    const jitter = (seedRand() - 0.5) * 1.1;
+    pos.setZ(i, pos.getZ(i) + jitter); // forward/back — the actual jagged-rock read
+    pos.setY(i, pos.getY(i) + (seedRand() - 0.5) * 0.4);
+    const t = THREE.MathUtils.clamp((pos.getY(i) + height / 2) / height, 0, 1); // 0 at the base, 1 near the top
+    const c = stoneLow.clone().lerp(stoneHigh, t);
+    colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
+  }
+  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+  // Stays facing +Z by default (a standard PlaneGeometry's normal), which
+  // is the direction the player approaches from downstream — no rotation
+  // needed.
+  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true, side: THREE.DoubleSide });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(x, bottomY + height / 2 - 1.5, z + 0.3); // sits just behind the water's own plane
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+  return { mesh };
+}
+
+function disposeCliffWall(scene, handle) {
+  if (!handle) return;
+  scene.remove(handle.mesh);
+  handle.mesh.geometry.dispose();
+  handle.mesh.material.dispose();
+}
+
 function disposeWaterfall(scene, handle) {
   if (!handle) return;
   scene.remove(handle.mesh);
@@ -818,4 +865,4 @@ function disposeLiquidPlane(scene, handle) {
   }
 }
 
-export { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip };
+export { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall };

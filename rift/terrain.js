@@ -135,8 +135,8 @@ const BIOME_SHAPERS = {
     // their amplitudes predictably; their peaks rarely line up at the
     // same point, so how much extra range that alone provides varies a
     // lot by seed luck).
-    const detail = fbm2(u * 1.3, v * 1.3, seed, 4, 2.0, 0.5) * 8.5;
-    const macro = fbm2(u * 0.5, v * 0.5, seed + 300, 3, 2.0, 0.5) * 3;
+    const detail = fbm2(u * 1.3, v * 1.3, seed, 4, 2.0, 0.5) * 10.5; // was 8.5 — more pronounced hills per explicit request
+    const macro = fbm2(u * 0.5, v * 0.5, seed + 300, 3, 2.0, 0.5) * 5; // was 3 — bigger, more separated hill formations, not just gentle rolling
     const base = detail + macro;
     // Meandering path built from two different-frequency sine waves rather
     // than one — a single sine reads as too regular/mechanical for a
@@ -202,7 +202,7 @@ function biomeHeight(biome, worldX, worldZ, seed) {
 // controls how much of the surface shows the patch (lower = rarer).
 const SURFACE_PATCH_STYLE = {
   ember: { color: 0x120806, threshold: 0.62, freq: 3.2 },   // scorched/ash-dark patches
-  verdant: { color: 0x2a1f12, threshold: 0.68, freq: 2.2 }, // rich dark soil in low spots
+  verdant: { color: 0x1e5a2e, threshold: 0.6, freq: 1.8 }, // darker green shadow-blob patches, not brown soil — matches the reference's flat-illustration ground with a few rounded darker-green patches rather than dirt
   crystal: { color: 0xcfeaff, threshold: 0.7, freq: 2.8 },  // pale mineral-vein streaks
   abyssal: { color: 0x050308, threshold: 0.6, freq: 2.5 },  // near-black void patches
   ashen: { color: 0xe8dfc8, threshold: 0.65, freq: 3.6 },   // sun-bleached, cracked-pale patches

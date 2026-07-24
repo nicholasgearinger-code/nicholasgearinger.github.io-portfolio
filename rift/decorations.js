@@ -184,8 +184,9 @@ function buildBaseDecoration(biome, colorHex, seedRand) {
       if (roll < 0.88) return createEmberVent(colorHex, seedRand);
       return createEmberFire(colorHex, seedRand);
     case "verdant":
-      if (roll < 0.7) return createLivingTree(colorHex, seedRand); // bushes removed per explicit request — share redistributed to trees
-      if (roll < 0.9) return createFloraStalk(colorHex, seedRand);
+      if (roll < 0.62) return createLivingTree(colorHex, seedRand); // bushes removed per explicit request — share redistributed to trees
+      if (roll < 0.8) return createFloraStalk(colorHex, seedRand);
+      if (roll < 0.9) return createBloomingVine(colorHex, seedRand); // vines given a real presence at EVERY graphics tier now, not just the small High-tier-exclusive roll below — a jungle reference needs vines to actually show up
       if (roll < 0.95) return createGlowFungus(colorHex, seedRand); // glowing bioluminescent ground clusters
       return createRockCluster(biome, colorHex, seedRand);
     case "crystal": return roll < 0.72 ? createCrystalCluster(colorHex, seedRand) : createRockCluster(biome, colorHex, seedRand);
@@ -612,14 +613,16 @@ const VERDANT_BARK_PALETTE = [0x6b4423, 0x7a4f2a, 0x5a3a1e];
 // -----------------------------------------------------------------------------
 
 // Paints a tree silhouette. "palm" gets a crown of long arcing fronds atop
-// a tall bare trunk. "banana" gets huge drooping paddle leaves atop a
-// short stubby trunk. "round"/"spreading" get a broader canopy built
-// from overlapping rounded lobes. A sliver of trunk peeks out at the
-// base either way (more for palm/banana, whose bare-trunk look is part
-// of the silhouette) — foliage covers nearly the whole tree otherwise.
+// a tall bare trunk. "umbrella" gets a wide flat table-top canopy atop a
+// tall bare trunk — the savanna/acacia look. "banana" gets huge drooping
+// paddle leaves atop a short stubby trunk. "round"/"spreading" get a
+// broader canopy built from overlapping rounded lobes. A sliver of trunk
+// peeks out at the base either way (more for palm/umbrella/banana, whose
+// bare-trunk look is part of the silhouette) — foliage covers nearly the
+// whole tree otherwise.
 function createTreeTexture(seed, archetype, leafColorHex, capColorHex, barkColorHex) {
   const w = 110;
-  const h = archetype === "banana" ? 180 : archetype === "spreading" ? 210 : archetype === "palm" ? 380 : 250;
+  const h = archetype === "banana" ? 180 : archetype === "spreading" ? 210 : archetype === "palm" ? 380 : archetype === "umbrella" ? 340 : 250;
   const canvas = document.createElement("canvas");
   canvas.width = w; canvas.height = h;
   const ctx = canvas.getContext("2d");
@@ -634,7 +637,7 @@ function createTreeTexture(seed, archetype, leafColorHex, capColorHex, barkColor
   // placement math to reach far enough down on its own. Palms are the
   // deliberate exception — a tall, mostly-bare trunk with fronds only at
   // the very top IS the palm silhouette, not something to hide.
-  const trunkTop = archetype === "palm" ? h * 0.16 : archetype === "banana" ? h * 0.55 : h * 0.78;
+  const trunkTop = archetype === "palm" ? h * 0.16 : archetype === "umbrella" ? h * 0.18 : archetype === "banana" ? h * 0.55 : h * 0.78;
   // Computed once, shared by both the trunk curve and the frond crown
   // below, so the crown actually sits at the curved trunk's real top
   // point instead of the old fixed center.
@@ -732,6 +735,29 @@ function createTreeTexture(seed, archetype, leafColorHex, capColorHex, barkColor
     ctx.beginPath();
     ctx.arc(w * 0.5, crownY, w * 0.15, 0, Math.PI * 2);
     ctx.fill();
+  } else if (archetype === "umbrella") {
+    // A wide, flat, table-top canopy on a tall bare trunk — the classic
+    // savanna/acacia "umbrella tree" silhouette, built from several
+    // overlapping flattened lobes forming one continuous flat mass
+    // rather than a rounded dome like "round"/"spreading" use.
+    const crownY = h * 0.16;
+    const crownWidth = w * 0.92;
+    const lobeCount = 7;
+    for (let i = 0; i < lobeCount; i++) {
+      const t = i / (lobeCount - 1);
+      const lx = w * 0.5 + (t - 0.5) * crownWidth;
+      const ly = crownY - Math.sin(t * Math.PI) * h * 0.025; // a slight upward arch toward the center, not a perfectly flat line of circles
+      const r = h * (0.09 + ((seed * 13 + i) % 1) * 0.035);
+      ctx.beginPath();
+      ctx.ellipse(lx, ly, r * 1.5, r, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // A thin band UNDER the lobes to close any small gaps between them
+    // into one continuous flat canopy silhouette rather than a visible
+    // string of separate circles.
+    ctx.beginPath();
+    ctx.ellipse(w * 0.5, crownY + h * 0.03, crownWidth * 0.5, h * 0.05, 0, 0, Math.PI * 2);
+    ctx.fill();
   } else {
     const lobes = archetype === "spreading" ? 5 : 4;
     const canopyTop = h * 0.06;
@@ -812,7 +838,7 @@ const GLOW_COLORS = ["#7cffb2", "#8fe3ff", "#d8ff6a"];
 const treeGlowTextureCache = new Map();
 function createTreeGlowTexture(seed, archetype) {
   const w = 110;
-  const h = archetype === "banana" ? 180 : archetype === "spreading" ? 210 : archetype === "palm" ? 380 : 250;
+  const h = archetype === "banana" ? 180 : archetype === "spreading" ? 210 : archetype === "palm" ? 380 : archetype === "umbrella" ? 340 : 250;
   const canvas = document.createElement("canvas");
   canvas.width = w; canvas.height = h;
   const ctx = canvas.getContext("2d");
@@ -851,19 +877,20 @@ function getTreeGlowTexture(archetype, rand) {
 
 function createLivingTree(colorHex, rand) {
   const archetypeRoll = rand();
-  // All-tropical mix per explicit request — palm/spreading/round/banana,
-  // conical (pine) removed entirely rather than just reduced.
-  const archetype = archetypeRoll < 0.3 ? "palm" : archetypeRoll < 0.55 ? "spreading" : archetypeRoll < 0.8 ? "round" : "banana";
+  // All-tropical mix — palm/umbrella/spreading/round/banana, conical
+  // (pine) removed entirely rather than just reduced. Umbrella added for
+  // the savanna-canopy look from a jungle/hills reference.
+  const archetype = archetypeRoll < 0.25 ? "palm" : archetypeRoll < 0.45 ? "umbrella" : archetypeRoll < 0.65 ? "spreading" : archetypeRoll < 0.85 ? "round" : "banana";
   const bark = VERDANT_BARK_PALETTE[Math.floor(rand() * VERDANT_BARK_PALETTE.length)];
   const leaf = VERDANT_LEAF_PALETTE[Math.floor(rand() * VERDANT_LEAF_PALETTE.length)];
   const cap = 0xd8f06a; // same vivid yellow-green highlight used elsewhere for Verdant foliage
   const tex = getTreeTexture(archetype, leaf, cap, bark, rand);
   const glowTex = getTreeGlowTexture(archetype, rand);
 
-  const height = (4.5 + rand() * 8) * (archetype === "palm" ? 1.5 : archetype === "banana" ? 0.6 : 1); // floor raised from 3 to 4.5 — the old floor let banana/round trees shrink small enough to visually read as a bush, which is very likely what "bushes still there" was actually seeing (createBush itself is confirmed gone, not called anywhere)
+  const height = (4.5 + rand() * 8) * (archetype === "palm" ? 1.5 : archetype === "umbrella" ? 1.4 : archetype === "banana" ? 0.6 : 1); // floor raised from 3 to 4.5 — the old floor let banana/round trees shrink small enough to visually read as a bush, which is very likely what "bushes still there" was actually seeing (createBush itself is confirmed gone, not called anywhere)
   // Width matches the canvas's own aspect ratio per archetype (see the w/h
   // values in createTreeTexture) so the painted silhouette doesn't stretch.
-  const aspect = archetype === "banana" ? 110 / 180 : archetype === "spreading" ? 110 / 210 : archetype === "palm" ? 110 / 380 : 110 / 250;
+  const aspect = archetype === "banana" ? 110 / 180 : archetype === "spreading" ? 110 / 210 : archetype === "palm" ? 110 / 380 : archetype === "umbrella" ? 110 / 340 : 110 / 250;
   const width = height * aspect;
 
   const spriteGroup = createTreeSprite(tex, glowTex, width, height);

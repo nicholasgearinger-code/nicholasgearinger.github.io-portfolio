@@ -290,7 +290,7 @@ function createWaterfall(scene, topY, bottomY, x, z, width) {
 
 function updateWaterfall(handle, dt, elapsed) {
   if (!handle) return;
-  handle.mesh.material.map.offset.y -= dt * 2.2; // faster scroll — "moving rapidly" per explicit request, was 1.4
+  handle.mesh.material.map.offset.y += dt * 2.2; // was -= — that direction scrolled the texture upward instead of down, per direct observation
   handle.foam.material.opacity = 0.55 + Math.sin(elapsed * 2.2) * 0.15; // gentle churn, not a static glow
 
   const posAttr = handle.splash.geometry.attributes.position;

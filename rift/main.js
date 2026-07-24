@@ -963,6 +963,17 @@ function animate() {
   updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, lightInfo, camera.position);
   updateWaterfall(waterfallHandle, dt, elapsedTime);
   updateRiverCurrent(riverCurrentHandle, dt);
+  // Underwater effect — Verdant only. Overrides the fog dayNightCycle/
+  // weather already set earlier this same frame with a dense, murky
+  // blue-green tint when the camera drops below the water surface, so
+  // being underwater actually looks different instead of rendering the
+  // normal scene with nothing indicating you're submerged. No explicit
+  // "restore" needed — every frame this check is false, the normal
+  // per-frame fog update from earlier stands unmodified.
+  if (currentLevelIdx >= 0 && LEVELS[currentLevelIdx].biome === "verdant" && camera.position.y < LIQUID_LEVEL.verdant - 0.1) {
+    scene.fog.color.setHex(0x0d3a4a);
+    scene.fog.density = 0.09;
+  }
   const wind = updateWeatherSystem(weatherHandle, dt, eruptionActive, dayNight.dayAmount);
   updateAtmosphericParticles(atmosphereHandle, elapsedTime, dt, wind.windX, wind.windZ);
   updateGrass(grassHandle, elapsedTime, wind.windX, wind.windZ);

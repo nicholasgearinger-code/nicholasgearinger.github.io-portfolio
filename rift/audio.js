@@ -345,9 +345,14 @@ function buildAmbientGraph(biome) {
     drone(60, "sine", 0.02);
     noiseBed("bandpass", 900, 0.5, 0.03, 0.15, 0.012); // wind through foliage, gustier
     noiseBed("bandpass", 2200, 1.2, 0.008, 0.3, 0.004); // thin high shimmer — water/leaves
-    // Ambient bird calls — a living forest, not just wind through leaves.
+    // Ambient calls — a living forest, not just wind through leaves.
+    // Birds during the day, a genuinely different set of night creatures
+    // once it's actually dark, not the same birds just quieter.
     handle.intervalId = setInterval(() => {
-      if (Math.random() < 0.55) playBirdChirp();
+      if (Math.random() < 0.55) {
+        if (currentDayAmount > 0.3) playBirdChirp();
+        else playNightCreature();
+      }
     }, 2200);
   } else if (biome === "crystal") {
     drone(50, "sine", 0.018);
@@ -444,6 +449,51 @@ function playEruptionBurst() {
   source.start(t);
 }
 
+// Updated every frame from main.js — lets setInterval-based ambient
+// callbacks (which fire independently of the render loop) know whether
+// it's currently day or night when they go off, without needing a full
+// per-frame audio update loop of their own.
+let currentDayAmount = 1;
+function setAmbientDayAmount(dayAmount) {
+  currentDayAmount = dayAmount;
+}
+
+// Low croaks and rhythmic cricket-like ticks — insects/frogs waking up
+// once the birds go quiet, genuinely different in character (lower,
+// more percussive, less melodic) from the bright warbling bird call
+// rather than just a quieter version of the same sound.
+function playNightCreature() {
+  if (!ctx) return;
+  const t = ctx.currentTime;
+  if (Math.random() < 0.5) {
+    const osc = ctx.createOscillator();
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(180 + Math.random() * 40, t);
+    osc.frequency.exponentialRampToValueAtTime(90, t + 0.12);
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = 500;
+    const gain = ctx.createGain();
+    envelope(gain, 0.01, 0.14, 0.05, t);
+    osc.connect(filter).connect(gain).connect(masterGain);
+    osc.start(t);
+    osc.stop(t + 0.2);
+  } else {
+    const ticks = 3 + Math.floor(Math.random() * 4);
+    for (let i = 0; i < ticks; i++) {
+      const start = t + i * 0.09;
+      const osc = ctx.createOscillator();
+      osc.type = "square";
+      osc.frequency.value = 3800 + Math.random() * 400;
+      const gain = ctx.createGain();
+      envelope(gain, 0.002, 0.02, 0.01, start);
+      osc.connect(gain).connect(masterGain);
+      osc.start(start);
+      osc.stop(start + 0.04);
+    }
+  }
+}
+
 // A short 2-4 note trill with a real upward-then-down pitch warble per
 // note (not a flat tone — a flat tone reads as a beep, not a bird call),
 // randomized base pitch so successive calls don't sound identical.
@@ -522,4 +572,4 @@ function playFootstep(biome) {
   source.start(t);
 }
 
-export { initAudio, toggleMuted, playShoot, playShatter, playLoreChime, startAmbient, playFootstep, setEruptionIntensity, playEruptionBurst, updateFirePosition, updateListenerPosition };
+export { initAudio, toggleMuted, playShoot, playShatter, playLoreChime, startAmbient, playFootstep, setEruptionIntensity, playEruptionBurst, updateFirePosition, updateListenerPosition, setAmbientDayAmount };

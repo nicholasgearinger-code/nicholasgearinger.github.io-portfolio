@@ -85,7 +85,7 @@ function createClouds(scene, biome) {
   const fogCount = Math.max(1, Math.round(fogStyle.count * mult));
   for (let i = 0; i < fogCount; i++) groundFog.push(createCloud(scene, fogStyle, 0.18));
 
-  return { clouds, style, groundFog, fogStyle, windOffsetX: 0, windOffsetZ: 0 };
+  return { clouds, style, groundFog, fogStyle, biome, windOffsetX: 0, windOffsetZ: 0 };
 }
 
 /**
@@ -97,9 +97,14 @@ function createClouds(scene, biome) {
  */
 function updateClouds(handle, dt, wind, dayAmount, rainIntensity) {
   if (!handle) return;
-  const { clouds, style, groundFog, fogStyle } = handle;
+  const { clouds, style, groundFog, fogStyle, biome } = handle;
   const lightFactor = 0.55 + dayAmount * 0.45; // dimmer/moodier at dawn/dusk/night, brightest at noon
   const stormDarken = 1 - (rainIntensity || 0) * 0.4;
+  // Verdant-only — clouds fade out entirely as true night sets in, not
+  // just dim, since a sky full of visible clouds fights the "near-total
+  // darkness, lit only by the moon and bioluminescence" goal this biome
+  // is going for. Other biomes are untouched (nightFade stays 1).
+  const nightFade = biome === "verdant" ? Math.max(0, Math.min(1, (dayAmount - 0.05) / 0.25)) : 1;
   for (const cloud of clouds) {
     cloud.group.position.x += (wind?.windX || 0) * dt * 0.6;
     cloud.group.position.z += (wind?.windZ || 0) * dt * 0.6;
@@ -109,7 +114,7 @@ function updateClouds(handle, dt, wind, dayAmount, rainIntensity) {
     if (Math.abs(cloud.group.position.x) > style.spread) cloud.group.position.x = -Math.sign(cloud.group.position.x) * style.spread;
     if (Math.abs(cloud.group.position.z) > style.spread) cloud.group.position.z = -Math.sign(cloud.group.position.z) * style.spread;
     for (const sprite of cloud.sprites) {
-      sprite.material.opacity = cloud.baseOpacity * lightFactor * stormDarken;
+      sprite.material.opacity = cloud.baseOpacity * lightFactor * stormDarken * nightFade;
     }
   }
 

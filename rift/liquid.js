@@ -447,14 +447,14 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, lightInfo) {
     const useSun = sunStrength >= moonStrength;
     const lightPos = useSun ? sunPos : moonPos;
     const strength = Math.max(sunStrength, moonStrength);
-    if (!lightPos || strength <= 0.02) {
+    if (!lightPos || strength <= 0.02 || Math.abs(cameraPos.y - handle.waterY) > 12) {
       handle.glint.visible = false;
     } else {
       const dx = lightPos.x - cameraPos.x, dz = lightPos.z - cameraPos.z;
       const dist = Math.hypot(dx, dz) || 1;
       const dir = new THREE.Vector3(dx / dist, 0, dz / dist);
-      const nearOffset = 10; // keeps the near edge well clear of the camera itself — centering the whole streak ON the camera meant its near edge sat essentially AT the camera's own position, which produced extreme close-range foreshortening (this is what was rendering as a giant beam dominating the screen)
-      const glintLength = 34;
+      const nearOffset = 28; // pushed much further out than the last attempt (was 10) — that still wasn't enough margin against the same close-range foreshortening bug, so erring much more conservative this time
+      const glintLength = 16; // substantially shorter too (was 34) — a smaller, subtler glint that's far less likely to dominate the view even if the camera ends up closer to it than expected
       const midDist = nearOffset + glintLength * 0.5;
       handle.glint.position.set(
         cameraPos.x + dir.x * midDist,

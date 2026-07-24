@@ -860,7 +860,7 @@ function createLivingTree(colorHex, rand) {
   const tex = getTreeTexture(archetype, leaf, cap, bark, rand);
   const glowTex = getTreeGlowTexture(archetype, rand);
 
-  const height = (3 + rand() * 9) * (archetype === "palm" ? 1.5 : archetype === "banana" ? 0.6 : 1); // palms read as tall canopy emergents; bananas are deliberately stubby, shorter than the baseline rather than just "no bonus"
+  const height = (4.5 + rand() * 8) * (archetype === "palm" ? 1.5 : archetype === "banana" ? 0.6 : 1); // floor raised from 3 to 4.5 — the old floor let banana/round trees shrink small enough to visually read as a bush, which is very likely what "bushes still there" was actually seeing (createBush itself is confirmed gone, not called anywhere)
   // Width matches the canvas's own aspect ratio per archetype (see the w/h
   // values in createTreeTexture) so the painted silhouette doesn't stretch.
   const aspect = archetype === "banana" ? 110 / 180 : archetype === "spreading" ? 110 / 210 : archetype === "palm" ? 110 / 380 : 110 / 250;

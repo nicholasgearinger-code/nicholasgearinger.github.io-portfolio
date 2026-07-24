@@ -8,7 +8,7 @@ import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane } from "./liqu
 import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
 import { createGrass, updateGrass, disposeGrass, createFlowers, disposeFlowers } from "./vegetation.js";
-import { createHorizonSilhouettes, disposeHorizonSilhouettes } from "./horizonSilhouettes.js";
+import { createHorizonSilhouettes, updateHorizonSilhouettes, disposeHorizonSilhouettes } from "./horizonSilhouettes.js";
 import { createWildlife, updateWildlife, disposeWildlife } from "./wildlife.js";
 import { createLandmark, updateLandmark, disposeLandmark, LANDMARK_POSITION } from "./landmarks.js";
 import { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers } from "./graphicsSettings.js";
@@ -943,6 +943,7 @@ function animate() {
   updateWildlife(wildlifeHandle, elapsedTime, dt, camera.position.x, camera.position.z, eruptionActive);
   updateLandmark(landmarkHandle, elapsedTime, dt);
   updateClouds(cloudsHandle, dt, wind, dayNight.dayAmount, wind.rainIntensity);
+  if (currentLevelIdx >= 0) updateHorizonSilhouettes(horizonHandle, LEVELS[currentLevelIdx].biome, dayNight.dayAmount);
   updateLightShafts(lightShaftHandles, dayNight.dayAmount);
   updateWorldPulse(dt);
   updateProjectiles(dt);

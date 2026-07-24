@@ -24,7 +24,7 @@ const LIQUID_STYLE = {
   },
   verdant: {
     baseColor: new THREE.Color(0x1f6fb0), frothColor: new THREE.Color(0xf2fbff),
-    emissive: 0x2a8fd6, emissiveIntensity: 0.2, opacity: 0.78, roughness: 0.1,
+    emissive: 0x2a8fd6, emissiveIntensity: 0.06, opacity: 0.78, roughness: 0.1, // emissiveIntensity was 0.2 — that alone kept water visibly bright even with the scene's own light crushed near-zero, since emissive output isn't affected by ambient/sun intensity at all
   },
 };
 

@@ -365,7 +365,35 @@ function createHorizonSilhouettes(scene, biome) {
   group.add(buildSilhouetteRing(nearStyle, NEAR_RING_RADIUS, 1.0, 0.45, nearColor, null));
 
   scene.add(group);
-  return { group };
+
+  // Collected here rather than threading a materials array through every
+  // builder above — these are all MeshBasicMaterial (unlit), so they
+  // never respond to the scene's actual sun/ambient intensity the way
+  // dayNightCycle.js's BIOME_NIGHT_DARKEN assumes lit materials do.
+  // updateHorizonSilhouettes below darkens them directly via their own
+  // .color multiplier for biomes that need real night darkness.
+  const materials = [];
+  group.traverse((obj) => {
+    if (obj.material && !materials.includes(obj.material)) materials.push(obj.material);
+  });
+
+  return { group, materials };
+}
+
+// Same {factor, window} shape as dayNightCycle.js's BIOME_NIGHT_DARKEN,
+// kept local to this file rather than importing that table, since these
+// materials need a completely different mechanism to darken (multiplying
+// their own baked color, not responding to actual light intensity).
+// Biomes with no entry here are left exactly as they've always looked —
+// this only applies where night is meant to read as genuinely dark.
+const HORIZON_NIGHT_DARKEN = { verdant: { factor: 0.05, window: 0.3 } };
+function updateHorizonSilhouettes(handle, biome, dayAmount) {
+  if (!handle) return;
+  const darken = HORIZON_NIGHT_DARKEN[biome];
+  if (!darken) return;
+  const darkenAmount = THREE.MathUtils.clamp(1 - dayAmount / darken.window, 0, 1);
+  const factor = THREE.MathUtils.lerp(1, darken.factor, darkenAmount);
+  for (const mat of handle.materials) mat.color.setScalar(factor);
 }
 
 function disposeHorizonSilhouettes(scene, handle) {
@@ -377,4 +405,4 @@ function disposeHorizonSilhouettes(scene, handle) {
   });
 }
 
-export { createHorizonSilhouettes, disposeHorizonSilhouettes };
+export { createHorizonSilhouettes, updateHorizonSilhouettes, disposeHorizonSilhouettes };

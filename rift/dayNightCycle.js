@@ -117,6 +117,48 @@ function createGlowTexture() {
   return new THREE.CanvasTexture(canvas);
 }
 
+// A real radiating starburst — long bright spikes fanning out from a
+// soft core, not just a plain round glow. Sun-specific (the moon keeps
+// the shared createGlowTexture above) — this is what actually reads as
+// "sun" the way a lens-flare photo does, rather than "any bright circle
+// in the sky," which was the actual complaint: the sun and moon looked
+// too similar/close in character, not just position.
+function createSunStarburstTexture() {
+  const size = 256;
+  const canvas = document.createElement("canvas");
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const cx = size / 2, cy = size / 2;
+  const coreGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, size * 0.28);
+  coreGrad.addColorStop(0, "rgba(255,255,255,1)");
+  coreGrad.addColorStop(0.5, "rgba(255,255,255,0.55)");
+  coreGrad.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = coreGrad;
+  ctx.fillRect(0, 0, size, size);
+  const spikeCount = 12;
+  for (let i = 0; i < spikeCount; i++) {
+    const angle = (i / spikeCount) * Math.PI * 2;
+    const isLong = i % 2 === 0; // alternating long/short spikes, not a uniform starburst
+    const length = size * (isLong ? 0.5 : 0.34);
+    const halfWidth = size * (isLong ? 0.05 : 0.035);
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(angle);
+    const grad = ctx.createLinearGradient(0, 0, length, 0);
+    grad.addColorStop(0, "rgba(255,255,255,0.9)");
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(0, -halfWidth);
+    ctx.lineTo(length, 0);
+    ctx.lineTo(0, halfWidth);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+  return new THREE.CanvasTexture(canvas);
+}
+
 // Turbulent bright surface for the sun — mottled patches of a slightly
 // different warm tone over a bright base, loosely evoking granulation
 // rather than a flat disc.
@@ -440,11 +482,12 @@ function updateSkyDome(sky, zenithColor, horizonColor, elapsed) {
  */
 function createDayNightCycle(scene, sun, ambient, starfield, biome) {
   const glowTexture = createGlowTexture();
+  const sunStarburstTexture = createSunStarburstTexture();
   // Sun bigger, warmer, and noticeably more radiant than the moon (was
   // 14/40/0.6 vs 9/22/0.32 — pushed further apart) — the sun should read
   // as the dominant light source at a glance, not just via the actual
   // DirectionalLight intensity numbers below.
-  const sunBody = createBody(scene, glowTexture, createSunTexture(), 15, 0xffcf80, 48, 0.75);
+  const sunBody = createBody(scene, sunStarburstTexture, createSunTexture(), 15, 0xffcf80, 62, 0.8);
   const moonBody = createBody(scene, glowTexture, createMoonTexture(), 8, 0xaebedd, 18, 0.22);
   const sunBeams = createSunBeams(scene, createBeamTexture());
   const sky = createSkyDome(scene);

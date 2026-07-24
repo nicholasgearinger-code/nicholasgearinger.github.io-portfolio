@@ -66,7 +66,7 @@ const BIOME_SKY_TINT = {
 // based fade in updateDayNightCycle below) — dawn/day stay normal.
 const BIOME_NIGHT_DARKEN = {
   ember: { factor: 0.35, window: 0.15 },
-  verdant: { factor: 0.02, window: 0.3 }, // much wider activation window than ember's — the forest should read as dark well before the exact bottom of the cycle (true midnight), not just in the last sliver of it, since the sky itself already looks fully dark well before then
+  verdant: { factor: 0.008, window: 0.4 }, // pushed even further per explicit follow-up request — near-total darkness, engaging over an even wider window before true midnight
 };
 
 function lerpColor(a, b, t) {

@@ -386,7 +386,7 @@ function createHorizonSilhouettes(scene, biome) {
 // their own baked color, not responding to actual light intensity).
 // Biomes with no entry here are left exactly as they've always looked —
 // this only applies where night is meant to read as genuinely dark.
-const HORIZON_NIGHT_DARKEN = { verdant: { factor: 0.05, window: 0.3 } };
+const HORIZON_NIGHT_DARKEN = { verdant: { factor: 0.02, window: 0.4 } };
 function updateHorizonSilhouettes(handle, biome, dayAmount) {
   if (!handle) return;
   const darken = HORIZON_NIGHT_DARKEN[biome];

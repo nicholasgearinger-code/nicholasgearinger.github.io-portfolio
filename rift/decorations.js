@@ -616,7 +616,7 @@ const VERDANT_BARK_PALETTE = [0x6b4423, 0x7a4f2a, 0x5a3a1e];
 // tree.
 function createTreeTexture(seed, archetype, leafColorHex, capColorHex, barkColorHex) {
   const w = 110;
-  const h = archetype === "conical" ? 340 : archetype === "spreading" ? 210 : 250;
+  const h = archetype === "conical" ? 340 : archetype === "spreading" ? 210 : archetype === "palm" ? 380 : 250;
   const canvas = document.createElement("canvas");
   canvas.width = w; canvas.height = h;
   const ctx = canvas.getContext("2d");
@@ -628,14 +628,45 @@ function createTreeTexture(seed, archetype, leafColorHex, capColorHex, barkColor
   // Foliage below is guaranteed to reach down over almost all of this
   // trunk via an explicit closing shape (see the base triangle/lobe in
   // each archetype branch below) rather than relying on the tier/lobe
-  // placement math to reach far enough down on its own.
-  const trunkTop = h * 0.78;
+  // placement math to reach far enough down on its own. Palms are the
+  // deliberate exception — a tall, mostly-bare trunk with fronds only at
+  // the very top IS the palm silhouette, not something to hide.
+  const trunkTop = archetype === "palm" ? h * 0.16 : h * 0.78;
   ctx.fillStyle = `#${new THREE.Color(barkColorHex).getHexString()}`;
   ctx.fillRect(w * 0.4, trunkTop, w * 0.2, h - trunkTop);
 
   ctx.fillStyle = `#${new THREE.Color(leafColorHex).getHexString()}`;
 
-  if (archetype === "conical") {
+  if (archetype === "palm") {
+    // A crown of long arcing frond blades radiating from a point near
+    // the top — the defining tropical silhouette, genuinely different
+    // in construction from the other three archetypes rather than a
+    // recolored variant of one of them.
+    const crownY = h * 0.1;
+    const frondCount = 6 + Math.floor((seed % 1) * 4);
+    for (let i = 0; i < frondCount; i++) {
+      const angle = (i / frondCount) * Math.PI * 2 + seed * 6;
+      const droop = 0.35 + ((seed * 17 + i) % 1) * 0.45;
+      const length = w * (0.62 + ((seed * 23 + i) % 1) * 0.3);
+      const dirX = Math.cos(angle), dirY = Math.sin(angle) * 0.35 + droop * 0.65; // biased downward — fronds arc down and out, not straight sideways
+      const midX = w * 0.5 + dirX * length * 0.55;
+      const midY = crownY + dirY * length * 0.35;
+      const endX = w * 0.5 + dirX * length;
+      const endY = crownY + dirY * length * 0.85 + h * 0.06;
+      const frondWidth = w * 0.045;
+      const perpX = -dirY, perpY = dirX;
+      ctx.beginPath();
+      ctx.moveTo(w * 0.5, crownY);
+      ctx.quadraticCurveTo(midX + perpX * frondWidth, midY + perpY * frondWidth, endX, endY);
+      ctx.quadraticCurveTo(midX - perpX * frondWidth, midY - perpY * frondWidth, w * 0.5, crownY);
+      ctx.closePath();
+      ctx.fill();
+    }
+    // A small crown mass tying the fronds together at their shared base.
+    ctx.beginPath();
+    ctx.arc(w * 0.5, crownY, w * 0.13, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (archetype === "conical") {
     const tiers = 4 + Math.floor((seed % 1) * 3);
     let tierTop = h * 0.03;
     const tierBottomMax = h * 0.92;
@@ -754,7 +785,7 @@ const GLOW_COLORS = ["#7cffb2", "#8fe3ff", "#d8ff6a"];
 const treeGlowTextureCache = new Map();
 function createTreeGlowTexture(seed, archetype) {
   const w = 110;
-  const h = archetype === "conical" ? 340 : archetype === "spreading" ? 210 : 250;
+  const h = archetype === "conical" ? 340 : archetype === "spreading" ? 210 : archetype === "palm" ? 380 : 250;
   const canvas = document.createElement("canvas");
   canvas.width = w; canvas.height = h;
   const ctx = canvas.getContext("2d");
@@ -793,19 +824,20 @@ function getTreeGlowTexture(archetype, rand) {
 
 function createLivingTree(colorHex, rand) {
   const archetypeRoll = rand();
-  // Conical (pine) dominant, matching a pine-forest reference — round
-  // (oak-like) and spreading fill in the rest for real variety.
-  const archetype = archetypeRoll < 0.55 ? "conical" : archetypeRoll < 0.8 ? "round" : "spreading";
+  // Tropical rainforest weighting — palm and broad-leaf canopies (round/
+  // spreading) now dominant, conical (pine) reduced to a rare minority
+  // rather than the previous pine-forest-dominant mix.
+  const archetype = archetypeRoll < 0.35 ? "palm" : archetypeRoll < 0.65 ? "spreading" : archetypeRoll < 0.9 ? "round" : "conical";
   const bark = VERDANT_BARK_PALETTE[Math.floor(rand() * VERDANT_BARK_PALETTE.length)];
   const leaf = VERDANT_LEAF_PALETTE[Math.floor(rand() * VERDANT_LEAF_PALETTE.length)];
   const cap = 0xd8f06a; // same vivid yellow-green highlight used elsewhere for Verdant foliage
   const tex = getTreeTexture(archetype, leaf, cap, bark, rand);
   const glowTex = getTreeGlowTexture(archetype, rand);
 
-  const height = (3 + rand() * 9) * (archetype === "conical" ? 1.35 : 1); // taller overall, pines noticeably taller/narrower — matches the reference's tall slender conifers
+  const height = (3 + rand() * 9) * (archetype === "palm" ? 1.5 : archetype === "conical" ? 1.35 : 1); // palms read as tall canopy emergents, taller even than the (now rare) pines
   // Width matches the canvas's own aspect ratio per archetype (see the w/h
   // values in createTreeTexture) so the painted silhouette doesn't stretch.
-  const aspect = archetype === "conical" ? 110 / 340 : archetype === "spreading" ? 110 / 210 : 110 / 250;
+  const aspect = archetype === "conical" ? 110 / 340 : archetype === "spreading" ? 110 / 210 : archetype === "palm" ? 110 / 380 : 110 / 250;
   const width = height * aspect;
 
   const spriteGroup = createTreeSprite(tex, glowTex, width, height);

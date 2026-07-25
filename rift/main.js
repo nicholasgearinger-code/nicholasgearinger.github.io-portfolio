@@ -420,7 +420,7 @@ function buildLevel(levelIdx) {
     // decorationHandles array everything else here already uses for
     // cleanup, rather than tracking a separate handle list.
     const cliffRand = mulberry32(hashStringToSeed(WORLD_SEED + "-waterfall-cliff-" + level.biome));
-    cliffWallHandle = createCliffWall(scene, topY, bottomY, waterfallX, WATERFALL_Z, RIVER_WIDTH * 1.3, cliffRand);
+    cliffWallHandle = createCliffWall(scene, topY, bottomY, waterfallX, WATERFALL_Z, WORLD_BOUND_RADIUS * 1.5, cliffRand); // spans the WHOLE hillside now, not just a narrow strip around the falls — user clarified they meant the entire hill
     for (let i = 0; i < 6; i++) {
       const angle = cliffRand() * Math.PI * 2;
       const dist = 3 + cliffRand() * 8;
@@ -1001,7 +1001,7 @@ function animate() {
   updateRiverCurrent(riverCurrentHandle, dt);
   updateRiverFlowStrip(riverFlowStripHandle, dt);
   // Underwater effect — Verdant only. Overrides the fog dayNightCycle/
-  // weather already set earlier this same frame with a dense, vivid blue
+  // weather already set earlier this same frame with a dense, dark, murky
   // tint, darkens the sun/ambient intensity, AND tints the light COLORS
   // themselves blue (both sun.color and ambientLight.color are also
   // reset every frame by dayNightCycle, so this override is safe and
@@ -1010,12 +1010,12 @@ function animate() {
   // of distance — fog alone only visibly tints distant objects, nearby
   // ones would still show their normal color.
   if (currentLevelIdx >= 0 && LEVELS[currentLevelIdx].biome === "verdant" && camera.position.y < LIQUID_LEVEL.verdant - 0.1) {
-    scene.fog.color.setHex(0x1a5f8f);
-    scene.fog.density = 0.11;
-    sun.color.setHex(0x3a8fc0);
-    sun.intensity *= 0.12;
-    ambientLight.color.setHex(0x2a6f9f);
-    ambientLight.intensity *= 0.35;
+    scene.fog.color.setHex(0x0a2838);
+    scene.fog.density = 0.14;
+    sun.color.setHex(0x1a4560);
+    sun.intensity *= 0.08;
+    ambientLight.color.setHex(0x14384f);
+    ambientLight.intensity *= 0.22;
   }
   const wind = updateWeatherSystem(weatherHandle, dt, eruptionActive, dayNight.dayAmount);
   updateAtmosphericParticles(atmosphereHandle, elapsedTime, dt, wind.windX, wind.windZ);

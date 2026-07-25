@@ -465,8 +465,8 @@ function disposeRiverCurrent(scene, handle) {
 // already use.
 function createCliffWall(scene, topY, bottomY, x, z, width, seedRand) {
   const height = THREE.MathUtils.clamp(topY - bottomY, 0, 16) + 3; // a bit taller than the falls itself so the rock face visibly extends past both edges of the water
-  const segsX = 10, segsY = 6;
-  const geo = new THREE.PlaneGeometry(width * 2.2, height, segsX, segsY);
+  const segsX = 26, segsY = 6; // segsX raised from 10 — the wall spans the whole hillside now, far wider than before, and needs more segments across that span to keep the jagged-rock look from reading as smooth/blocky
+  const geo = new THREE.PlaneGeometry(width, height, segsX, segsY); // caller passes the exact total width directly now (no internal multiplier)
   const pos = geo.attributes.position;
   const colors = new Float32Array(pos.count * 3);
   const stoneLow = new THREE.Color(0x3a3a34);

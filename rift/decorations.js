@@ -478,7 +478,8 @@ function createGlowFungus(colorHex, rand) {
     color: glowColor, roughness: 0.6, flatShading: true,
     emissive: glowColor, emissiveIntensity: 3.2,
   });
-  const clusterCount = 2 + Math.floor(rand() * 3);
+  const highDetailFungus = getGraphicsSettings().decorationDetail >= 3;
+  const clusterCount = (highDetailFungus ? 4 : 2) + Math.floor(rand() * (highDetailFungus ? 5 : 3)); // denser clusters on High, matching the reference's thick mushroom growth
   for (let i = 0; i < clusterCount; i++) {
     const scale = 0.12 + rand() * 0.14;
     const stemHeight = scale * (1.6 + rand() * 0.8);
@@ -978,6 +979,46 @@ function getTreeGlowTexture(archetype, rand) {
   return variants[Math.floor(rand() * variants.length)];
 }
 
+// High-tier-exclusive real 3D branch geometry — the single most
+// identifiable feature of a "gnarled glowing tree" reference: actual
+// twisting branches reaching out from the trunk, not just a flat
+// painted card. Built from CatmullRomCurve3 paths (a few random offsets
+// per segment for an organic, non-mechanical wander) wrapped in
+// TubeGeometry, with a real emissive purple-pink glow. Kept as a
+// separate addition layered on TOP of the existing flat sprite (which
+// still provides the tree's overall leafy silhouette/volume) rather than
+// replacing it — true photorealistic branching/foliage (like a painted
+// reference image) isn't achievable in real-time WebGL at this
+// project's scale, but real glowing branch structure is, and it's the
+// detail that reads most strongly as "that reference."
+function createGnarledBranches(rand, height, leafColorHex) {
+  const group = new THREE.Group();
+  const branchColor = new THREE.Color(leafColorHex).lerp(new THREE.Color(0xff5fc8), 0.55);
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x2a1428, roughness: 0.85,
+    emissive: branchColor, emissiveIntensity: 2.2,
+  });
+  const branchCount = 5 + Math.floor(rand() * 4);
+  for (let i = 0; i < branchCount; i++) {
+    const angle = (i / branchCount) * Math.PI * 2 + rand() * 0.6;
+    const points = [];
+    let x = 0, z = 0;
+    const segs = 4 + Math.floor(rand() * 3);
+    for (let s = 0; s <= segs; s++) {
+      const t = s / segs;
+      x += Math.cos(angle) * height * (0.05 + rand() * 0.1);
+      z += Math.sin(angle) * height * (0.05 + rand() * 0.1);
+      const y = height * 0.3 + t * height * 0.6;
+      points.push(new THREE.Vector3(x, y, z));
+    }
+    const curve = new THREE.CatmullRomCurve3(points);
+    const radius = height * 0.018 * (0.6 + rand() * 0.5);
+    const tubeGeo = new THREE.TubeGeometry(curve, 14, radius, 6, false);
+    group.add(new THREE.Mesh(tubeGeo, mat));
+  }
+  return group;
+}
+
 function createLivingTree(colorHex, rand) {
   const archetypeRoll = rand();
   // All-tropical mix — palm/umbrella/spreading/round/banana, conical
@@ -997,6 +1038,12 @@ function createLivingTree(colorHex, rand) {
   const width = height * aspect;
 
   const spriteGroup = createTreeSprite(tex, glowTex, width, height, rand);
+  // High-tier-exclusive: real glowing 3D branches reaching out through
+  // the canopy — see createGnarledBranches above for why this stays
+  // gated to High rather than applying everywhere.
+  if (getGraphicsSettings().decorationDetail >= 3) {
+    spriteGroup.add(createGnarledBranches(rand, height, leaf));
+  }
   return {
     group: spriteGroup, kind: "tree", bobAmplitude: 0.02, bobSeed: rand() * Math.PI * 2,
     material: spriteGroup.children[0].material, // both crossed planes share one material — grabbing it here lets updateDecoration animate a subtle canopy shimmer without createRockSprite itself needing to expose it

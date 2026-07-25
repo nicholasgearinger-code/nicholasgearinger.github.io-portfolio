@@ -720,6 +720,14 @@ const VERDANT_BARK_PALETTE = [0x6b4423, 0x7a4f2a, 0x5a3a1e];
 // Each archetype has its own canvas width/height, trunk width, trunk
 // start and world-space height multiplier — see the tables in this
 // function and in createLivingTree, which must stay in agreement.
+// Cedar is the one archetype with deliberate AIR between its canopy
+// plates, so unlike the others its trunk has to be drawn all the way up
+// through the crown — otherwise the plates have nothing behind them and
+// read as separate discs floating in mid-air. Shared by both the
+// trunkTop table and the cedar canopy code below so the two can never
+// drift out of agreement.
+const CEDAR_CANOPY_TOP = 0.12;
+
 function createTreeTexture(seed, archetype, leafColorHex, capColorHex, barkColorHex) {
   const w = archetype === "columnar" ? 70 : archetype === "cedar" ? 180 : archetype === "yew" ? 140 : 150; // per-archetype canvas width — columnar is deliberately the narrowest and cedar the widest, since how broad each conifer is relative to its height IS its silhouette
   const h = archetype === "yew" ? 200 : archetype === "cedar" ? 360 : archetype === "columnar" ? 420 : archetype === "redwood" ? 560 : 460; // redwood tallest (sequoia/redwood are the giants of the chart), yew shortest (a low shrubby bush)
@@ -737,7 +745,11 @@ function createTreeTexture(seed, archetype, leafColorHex, capColorHex, barkColor
   // placement math to reach far enough down on its own. Palms are the
   // deliberate exception — a tall, mostly-bare trunk with fronds only at
   // the very top IS the palm silhouette, not something to hide.
-  const trunkTop = archetype === "redwood" ? h * 0.45 : archetype === "columnar" ? h * 0.85 : archetype === "cedar" ? h * 0.7 : archetype === "yew" ? h * 0.75 : h * 0.7; // redwood by far the lowest — its canopy stops near mid-height, leaving the huge bare bole that defines a sequoia
+  // Cedar deliberately starts ABOVE its own topmost plate so the trunk
+  // runs the full height of the open crown and visually connects every
+  // plate. The others enclose their trunk in one continuous overlapping
+  // canopy mass, so they only need a trunk below it.
+  const trunkTop = archetype === "redwood" ? h * 0.45 : archetype === "columnar" ? h * 0.85 : archetype === "cedar" ? h * (CEDAR_CANOPY_TOP - 0.04) : archetype === "yew" ? h * 0.75 : h * 0.7; // redwood by far the lowest — its canopy stops near mid-height, leaving the huge bare bole that defines a sequoia
   // Every archetype here is a conifer, and conifer trunks are straight —
   // the old curved-trunk special case existed only for the removed palm.
   // Redwood/sequoia gets a far thicker trunk because its massive exposed
@@ -822,8 +834,8 @@ function createTreeTexture(seed, archetype, leafColorHex, capColorHex, barkColor
     // solid mass. Deliberately the one conifer here that does NOT use
     // the overlap guarantee: the visible gaps between plates are the
     // defining feature, so closing them would destroy the silhouette.
-    const plates = 5 + Math.floor((seed % 1) * 3);
-    const topY = h * 0.12, bottomY = h * 0.78;
+    const plates = 7 + Math.floor((seed % 1) * 4); // more, closer plates — a few widely-spaced discs read as floating objects rather than one open crown
+    const topY = h * CEDAR_CANOPY_TOP, bottomY = h * 0.78;
     for (let i = 0; i < plates; i++) {
       const t = plates === 1 ? 0 : i / (plates - 1);
       const y = topY + (bottomY - topY) * t;
@@ -990,8 +1002,8 @@ function createTreeGlowTexture(seed, archetype) {
     const endX = x + Math.cos(angle) * length;
     const endY = y + Math.sin(angle) * length;
     const grad = ctx.createLinearGradient(x, y, endX, endY);
-    grad.addColorStop(0, "rgba(255,79,176,0.9)");
-    grad.addColorStop(1, "rgba(255,79,176,0.5)");
+    grad.addColorStop(0, "rgba(60,240,255,0.95)");
+    grad.addColorStop(1, "rgba(60,240,255,0.55)");
     ctx.strokeStyle = grad;
     ctx.lineWidth = width;
     ctx.beginPath();
@@ -1028,51 +1040,8 @@ function getTreeGlowTexture(archetype, rand) {
   return variants[Math.floor(rand() * variants.length)];
 }
 
-// High-tier-exclusive real 3D branch geometry — the single most
-// identifiable feature of a "gnarled glowing tree" reference: actual
-// twisting branches reaching out from the trunk, not just a flat
-// painted card. Built from CatmullRomCurve3 paths (a few random offsets
-// per segment for an organic, non-mechanical wander) wrapped in
-// TubeGeometry, with a real emissive purple-pink glow. Kept as a
-// separate addition layered on TOP of the existing flat sprite (which
-// still provides the tree's overall leafy silhouette/volume) rather than
-// replacing it — true photorealistic branching/foliage (like a painted
-// reference image) isn't achievable in real-time WebGL at this
-// project's scale, but real glowing branch structure is, and it's the
-// detail that reads most strongly as "that reference."
-function createGnarledBranches(rand, height, leafColorHex) {
-  const group = new THREE.Group();
-  const branchColor = new THREE.Color(leafColorHex).lerp(new THREE.Color(0xff5fc8), 0.55);
-  const mat = new THREE.MeshStandardMaterial({
-    color: 0x2a1428, roughness: 0.85,
-    emissive: branchColor, emissiveIntensity: 2.2,
-  });
-  const branchCount = 5 + Math.floor(rand() * 4);
-  for (let i = 0; i < branchCount; i++) {
-    const angle = (i / branchCount) * Math.PI * 2 + rand() * 0.6;
-    const points = [];
-    let x = 0, z = 0;
-    const segs = 4 + Math.floor(rand() * 3);
-    for (let s = 0; s <= segs; s++) {
-      const t = s / segs;
-      x += Math.cos(angle) * height * (0.05 + rand() * 0.1);
-      z += Math.sin(angle) * height * (0.05 + rand() * 0.1);
-      const y = height * 0.3 + t * height * 0.6;
-      points.push(new THREE.Vector3(x, y, z));
-    }
-    const curve = new THREE.CatmullRomCurve3(points);
-    const radius = height * 0.018 * (0.6 + rand() * 0.5);
-    const tubeGeo = new THREE.TubeGeometry(curve, 14, radius, 6, false);
-    group.add(new THREE.Mesh(tubeGeo, mat));
-  }
-  return group;
-}
-
 function createLivingTree(colorHex, rand) {
   const archetypeRoll = rand();
-  // All-tropical mix — palm/umbrella/spreading/round/banana, conical
-  // (pine) removed entirely rather than just reduced. Umbrella added for
-  // the savanna-canopy look from a jungle/hills reference.
   // ALL-CONIFER mix matching the reference chart. Every tropical
   // archetype (palm/umbrella/banana/round/spreading) has been removed
   // outright — this is now five distinct conifer silhouette families
@@ -1094,12 +1063,6 @@ function createLivingTree(colorHex, rand) {
   const width = height * aspect;
 
   const spriteGroup = createTreeSprite(tex, glowTex, width, height, rand);
-  // High-tier-exclusive: real glowing 3D branches reaching out through
-  // the canopy — see createGnarledBranches above for why this stays
-  // gated to High rather than applying everywhere.
-  if (getGraphicsSettings().decorationDetail >= 3) {
-    spriteGroup.add(createGnarledBranches(rand, height, leaf));
-  }
   return {
     group: spriteGroup, kind: "tree", bobAmplitude: 0.02, bobSeed: rand() * Math.PI * 2,
     material: spriteGroup.children[0].material, // both crossed planes share one material — grabbing it here lets updateDecoration animate a subtle canopy shimmer without createRockSprite itself needing to expose it
@@ -1154,7 +1117,7 @@ function createDeadTree(colorHex, rand) {
   return { group, kind: "deadTree" };
 }
 
-function updateDecoration(handle, elapsed) {
+function updateDecoration(handle, elapsed, dayAmount = 0) {
   if (handle.kind === "stalk") {
     handle.group.scale.setScalar(1 + Math.sin(elapsed * 1.4 + handle.bobSeed) * handle.bobAmplitude * 0.06);
   } else if (handle.kind === "tree") {
@@ -1170,7 +1133,19 @@ function updateDecoration(handle, elapsed) {
       // gradual in/out, not a sharp flash like the fireflies/moss/fungus
       // twinkle, so the whole tree reads as slowly "breathing" rather
       // than blinking.
-      handle.material.emissiveIntensity = 2.4 + (0.5 + 0.5 * Math.sin(elapsed * 0.6 + handle.bobSeed * 1.3)) * 2.4;
+      // Breathing was already here but shallow (a 2.4..4.8 swing, only 2:1),
+      // so it read as a steady glow rather than something alive. Widened to
+      // roughly 5:1 so the pulse is actually legible.
+      const breathe = 0.5 + 0.5 * Math.sin(elapsed * 0.6 + handle.bobSeed * 1.3);
+      // Glow is NIGHT-ONLY: fully off in daylight, ramping in as dusk falls.
+      // Multiplying the whole thing (rather than adding a floor) means it
+      // reaches genuine zero by day instead of leaving a faint always-on
+      // sheen. The glow map's near-black purple baseline rides the same
+      // multiplier, which is fine — by day the scene lights the tree
+      // normally, and at night the baseline returns to keep it from
+      // reading as pure black (the reason that baseline exists at all).
+      const nightAmount = 1 - Math.min(1, Math.max(0, dayAmount / 0.3));
+      handle.material.emissiveIntensity = nightAmount * (0.8 + breathe * 3.6);
     }
   } else if (handle.kind === "mossyProp") {
     // Same sharp on/off twinkle character as glowFungus — mostly dim,

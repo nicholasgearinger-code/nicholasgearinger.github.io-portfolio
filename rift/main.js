@@ -1033,7 +1033,7 @@ function animate() {
   for (const [, handle] of crystalHandles) updateCrystalMesh(handle, elapsedTime);
   for (let i = decorationHandles.length - 1; i >= 0; i--) {
     const handle = decorationHandles[i];
-    updateDecoration(handle, elapsedTime);
+    updateDecoration(handle, elapsedTime, dayNight.dayAmount);
     if (handle.expired) {
       scene.remove(handle.group);
       handle.group.traverse((obj) => {

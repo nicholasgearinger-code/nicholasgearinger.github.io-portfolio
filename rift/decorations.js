@@ -711,7 +711,7 @@ const VERDANT_BARK_PALETTE = [0x6b4423, 0x7a4f2a, 0x5a3a1e];
 // palm/umbrella/banana, whose bare-trunk look is part of the silhouette)
 // — foliage covers nearly the whole tree otherwise.
 function createTreeTexture(seed, archetype, leafColorHex, capColorHex, barkColorHex) {
-  const w = 110;
+  const w = archetype === "spruce" ? 150 : 110; // spruce gets a wider canvas so its base tiers can actually be broad relative to its height — every other archetype is unchanged at 110
   const h = archetype === "banana" ? 180 : archetype === "spreading" ? 210 : archetype === "palm" ? 380 : archetype === "umbrella" ? 340 : archetype === "spruce" ? 460 : 250;
   const canvas = document.createElement("canvas");
   canvas.width = w; canvas.height = h;
@@ -872,16 +872,25 @@ function createTreeTexture(seed, archetype, leafColorHex, capColorHex, barkColor
     // each tier as its own swept shape (peak at the trunk, sagging down
     // and out to a point at each side) rather than one smooth cone,
     // which would lose exactly the quality that makes them recognizable.
-    const tierCount = 11 + Math.floor((seed % 1) * 5);
+    const tierCount = 14 + Math.floor((seed % 1) * 6);
     const topY = h * 0.03;
     const bottomY = h * 0.86; // not lower — the lowest tier's own droop extends past this, and going further would bury the trunk base entirely, losing the visible bare trunk the reference clearly shows
+    const spacing = (bottomY - topY) / (tierCount - 1);
     for (let i = 0; i < tierCount; i++) {
       const t = i / (tierCount - 1); // 0 at the crown tip, 1 at the base
       const tierY = topY + (bottomY - topY) * t;
-      // Widens toward the base, but on a curve — a straight linear taper
-      // reads as a mechanical triangle rather than a grown tree.
-      const halfWidth = w * 0.5 * (0.08 + Math.pow(t, 0.85) * 0.92);
-      const droop = h * (0.018 + t * 0.035); // lower tiers sag further, as real conifer branches do under their own weight
+      // Strong taper: near-nothing at the crown widening to the full
+      // half-width at the base. The high exponent is what actually makes
+      // the upper tiers read as progressively SHORTER rather than merely
+      // slightly narrower — a gentler curve leaves the top looking almost
+      // as wide as the bottom.
+      const halfWidth = w * 0.5 * (0.03 + Math.pow(t, 1.6) * 0.97);
+      // Droop is DERIVED from the real tier spacing rather than being a
+      // hand-tuned constant — because it's always greater than spacing,
+      // each tier's drooping tip is guaranteed to reach past where the
+      // next tier begins, so consecutive tiers always overlap and no gap
+      // can open between them regardless of how tierCount happens to roll.
+      const droop = spacing * (1.15 + t * 0.35) + h * 0.008;
       const jitter = (((seed * 31 + i * 7) % 1) - 0.5) * w * 0.04;
       const cx = w * 0.5 + jitter;
       ctx.beginPath();
@@ -984,7 +993,7 @@ function getTreeTexture(archetype, leafColorHex, capColorHex, barkColorHex, rand
 const GLOW_TEXTURE_VARIANTS = 3;
 const treeGlowTextureCache = new Map();
 function createTreeGlowTexture(seed, archetype) {
-  const w = 110;
+  const w = archetype === "spruce" ? 150 : 110; // spruce gets a wider canvas so its base tiers can actually be broad relative to its height — every other archetype is unchanged at 110
   const h = archetype === "banana" ? 180 : archetype === "spreading" ? 210 : archetype === "palm" ? 380 : archetype === "umbrella" ? 340 : archetype === "spruce" ? 460 : 250;
   const canvas = document.createElement("canvas");
   canvas.width = w; canvas.height = h;
@@ -1113,7 +1122,7 @@ function createLivingTree(colorHex, rand) {
   const height = (4.5 + rand() * 8) * (archetype === "spruce" ? 1.75 : archetype === "palm" ? 1.5 : archetype === "umbrella" ? 1.4 : archetype === "banana" ? 0.6 : 1); // spruce tallest of all — the reference's conifers tower over everything else. Floor raised from 3 to 4.5 — the old floor let banana/round trees shrink small enough to visually read as a bush
   // Width matches the canvas's own aspect ratio per archetype (see the w/h
   // values in createTreeTexture) so the painted silhouette doesn't stretch.
-  const aspect = archetype === "banana" ? 110 / 180 : archetype === "spreading" ? 110 / 210 : archetype === "palm" ? 110 / 380 : archetype === "umbrella" ? 110 / 340 : archetype === "spruce" ? 110 / 460 : 110 / 250;
+  const aspect = archetype === "banana" ? 110 / 180 : archetype === "spreading" ? 110 / 210 : archetype === "palm" ? 110 / 380 : archetype === "umbrella" ? 110 / 340 : archetype === "spruce" ? 150 / 460 : 110 / 250; // spruce uses 150 to match its wider canvas (see createTreeTexture) — a mismatch here would squash the painted silhouette
   const width = height * aspect;
 
   const spriteGroup = createTreeSprite(tex, glowTex, width, height, rand);

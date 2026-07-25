@@ -218,11 +218,29 @@ function biomeHeight(biome, worldX, worldZ, seed) {
   const v = worldZ / (TERRAIN_SIZE / 2);
   const shaper = BIOME_SHAPERS[biome] || BIOME_SHAPERS.verdant;
   let h = shaper(u, v, seed);
-  // Soft falloff toward the edges so the landmass doesn't end in an abrupt
-  // cliff at the boundary — it settles toward a flat rim instead.
-  const edge = Math.max(Math.abs(u), Math.abs(v));
-  const falloff = edge > 0.78 ? Math.max(0, 1 - (edge - 0.78) / 0.22) : 1;
-  return h * falloff;
+  // RADIAL falloff toward the edges. This deliberately uses Euclidean
+  // distance (hypot) rather than the Chebyshev metric — max(|u|,|v|) —
+  // it used before: max() produces SQUARE-shaped contours, which is
+  // exactly why the landmass used to end in straight edges with clearly
+  // visible corners. hypot() makes the island genuinely round, so there
+  // are no corners to see from any viewing angle.
+  const edge = Math.hypot(u, v);
+  const FALLOFF_START = 0.76; // land is untouched inside this radius
+  const FALLOFF_END = 0.98;   // fully flattened to the base plane by here
+  let falloff = 1;
+  if (edge > FALLOFF_START) {
+    const t = Math.min(1, (edge - FALLOFF_START) / (FALLOFF_END - FALLOFF_START));
+    falloff = 1 - t * t; // eased rather than linear, so the coastline curves off instead of creasing
+  }
+  // Past the shoreline the ground actively sinks rather than just
+  // flattening — a flat rim at height 0 still sits ABOVE every biome's
+  // liquid level, so it would remain visible as a pale plate stretching
+  // to the map edge. Driving it well below the water line instead lets
+  // the rim disappear under water/fog, which is what actually hides the
+  // boundary. The square's far corners (edge up to ~1.41) sink hardest,
+  // so they submerge completely.
+  const sink = edge > FALLOFF_END ? (edge - FALLOFF_END) * 80 : 0;
+  return h * falloff - sink;
 }
 
 // A second color patches into the ground at scattered spots, independent

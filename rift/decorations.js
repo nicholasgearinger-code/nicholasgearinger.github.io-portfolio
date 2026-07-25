@@ -699,20 +699,30 @@ const VERDANT_BARK_PALETTE = [0x6b4423, 0x7a4f2a, 0x5a3a1e];
 // branch/foliage-clump tuning never quite got there).
 // -----------------------------------------------------------------------------
 
-// Paints a tree silhouette. "spruce" (the dominant archetype) gets many
-// individually-drawn drooping branch tiers widening toward the base plus
-// a thin leader spike on top — a tall narrow conifer whose separate
-// layers stay readable, rather than a smooth cone. "palm" gets a crown of
-// long arcing fronds atop a tall bare trunk. "umbrella" gets a wide flat
-// table-top canopy atop a tall bare trunk — the savanna/acacia look.
-// "banana" gets huge drooping paddle leaves atop a short stubby trunk.
-// "round"/"spreading" get a broader canopy built from overlapping rounded
-// lobes. A sliver of trunk peeks out at the base either way (more for
-// palm/umbrella/banana, whose bare-trunk look is part of the silhouette)
-// — foliage covers nearly the whole tree otherwise.
+// Paints a flat 2D conifer silhouette. All five archetypes are conifers
+// drawn from a species chart, each a genuinely distinct silhouette family
+// rather than a recolour of the same shape:
+//   "spruce"   — classic tiered cone, drooping layers widening to a broad
+//                base plus a thin leader spike (red/sitka spruce, noble
+//                fir, sugar pine, deodar cedar)
+//   "columnar" — tall narrow column that barely tapers; how LITTLE it
+//                narrows is the whole silhouette (spartan juniper,
+//                western larch)
+//   "redwood"  — canopy confined to the upper half above a massive bare
+//                trunk; that exposed bole is what reads as "giant"
+//                (giant sequoia, california redwood, bald cypress)
+//   "cedar"    — flat-topped and open, a few wide horizontal plates with
+//                real air between them, crown widest near the TOP
+//                (atlas cedar, red pine)
+//   "yew"      — low dense rounded shrub on a stubby trunk, the only
+//                archetype meant to read as undergrowth (hick's yew,
+//                japanese yew)
+// Each archetype has its own canvas width/height, trunk width, trunk
+// start and world-space height multiplier — see the tables in this
+// function and in createLivingTree, which must stay in agreement.
 function createTreeTexture(seed, archetype, leafColorHex, capColorHex, barkColorHex) {
-  const w = archetype === "spruce" ? 150 : 110; // spruce gets a wider canvas so its base tiers can actually be broad relative to its height — every other archetype is unchanged at 110
-  const h = archetype === "banana" ? 180 : archetype === "spreading" ? 210 : archetype === "palm" ? 380 : archetype === "umbrella" ? 340 : archetype === "spruce" ? 460 : 250;
+  const w = archetype === "columnar" ? 70 : archetype === "cedar" ? 180 : archetype === "yew" ? 140 : 150; // per-archetype canvas width — columnar is deliberately the narrowest and cedar the widest, since how broad each conifer is relative to its height IS its silhouette
+  const h = archetype === "yew" ? 200 : archetype === "cedar" ? 360 : archetype === "columnar" ? 420 : archetype === "redwood" ? 560 : 460; // redwood tallest (sequoia/redwood are the giants of the chart), yew shortest (a low shrubby bush)
   const canvas = document.createElement("canvas");
   canvas.width = w; canvas.height = h;
   const ctx = canvas.getContext("2d");
@@ -727,28 +737,14 @@ function createTreeTexture(seed, archetype, leafColorHex, capColorHex, barkColor
   // placement math to reach far enough down on its own. Palms are the
   // deliberate exception — a tall, mostly-bare trunk with fronds only at
   // the very top IS the palm silhouette, not something to hide.
-  const trunkTop = archetype === "palm" ? h * 0.16 : archetype === "umbrella" ? h * 0.18 : archetype === "banana" ? h * 0.55 : archetype === "spruce" ? h * 0.7 : h * 0.78;
-  // Computed once, shared by both the trunk curve and the frond crown
-  // below, so the crown actually sits at the curved trunk's real top
-  // point instead of the old fixed center.
-  const palmLean = archetype === "palm" ? w * (0.16 + (seed % 1) * 0.14) * (seed > 0.5 ? 1 : -1) : 0;
-  const palmCrownX = w * 0.5 + palmLean;
+  const trunkTop = archetype === "redwood" ? h * 0.45 : archetype === "columnar" ? h * 0.85 : archetype === "cedar" ? h * 0.7 : archetype === "yew" ? h * 0.75 : h * 0.7; // redwood by far the lowest — its canopy stops near mid-height, leaving the huge bare bole that defines a sequoia
+  // Every archetype here is a conifer, and conifer trunks are straight —
+  // the old curved-trunk special case existed only for the removed palm.
+  // Redwood/sequoia gets a far thicker trunk because its massive exposed
+  // bole is the defining part of that silhouette.
+  const trunkW = archetype === "redwood" ? w * 0.17 : archetype === "yew" ? w * 0.07 : w * 0.1;
   ctx.fillStyle = `#${new THREE.Color(barkColorHex).getHexString()}`;
-  if (archetype === "palm") {
-    // A gently curved trunk, not a straight rectangle — this is what
-    // actually reads as a classic palm silhouette rather than a pole
-    // with fronds stuck on top.
-    const trunkW = w * 0.09;
-    ctx.beginPath();
-    ctx.moveTo(w * 0.5 - trunkW, h);
-    ctx.quadraticCurveTo(w * 0.5 + palmLean * 0.6, h * 0.55, palmCrownX, trunkTop);
-    ctx.lineTo(palmCrownX + trunkW * 1.6, trunkTop);
-    ctx.quadraticCurveTo(w * 0.5 + palmLean * 0.6 + trunkW * 1.6, h * 0.55, w * 0.5 + trunkW, h);
-    ctx.closePath();
-    ctx.fill();
-  } else {
-    ctx.fillRect(w * 0.4, trunkTop, w * 0.2, h - trunkTop);
-  }
+  ctx.fillRect(w * 0.5 - trunkW, trunkTop, trunkW * 2, h - trunkTop);
 
   // Small moss patches on the lower trunk — real trees develop moss
   // near the base where it stays shaded/damp, and this is what actually
@@ -769,103 +765,97 @@ function createTreeTexture(seed, archetype, leafColorHex, capColorHex, barkColor
 
   ctx.fillStyle = `#${new THREE.Color(leafColorHex).getHexString()}`;
 
-  if (archetype === "palm") {
-    // A fuller crown of long arcing, feathery fronds radiating from the
-    // curved trunk's actual top — more numerous and wider-spreading than
-    // before, with small serration notches along each frond's edge
-    // (real palm leaves are feathery, not smooth blades), matching the
-    // classic reference silhouette much more closely.
-    const crownY = h * 0.1;
-    const frondCount = 10 + Math.floor((seed % 1) * 6);
-    for (let i = 0; i < frondCount; i++) {
-      const angle = (i / frondCount) * Math.PI * 2 + seed * 6;
-      const droop = 0.3 + ((seed * 17 + i) % 1) * 0.5;
-      const length = w * (0.75 + ((seed * 23 + i) % 1) * 0.35);
-      const dirX = Math.cos(angle), dirY = Math.sin(angle) * 0.3 + droop * 0.7; // biased downward — fronds arc down and out, not straight sideways
-      const frondWidth = w * 0.05;
-      const perpX = -dirY, perpY = dirX;
-      // A feathery frond: a central rib (the arc from crown to tip) with
-      // small triangular leaflet notches stepping outward along its
-      // length on both sides, rather than one smooth solid blade.
-      const segments = 7;
+  if (archetype === "columnar") {
+    // Spartan Juniper / Western Larch — a tall NARROW column of dense
+    // short branchlets that barely tapers at all. How little it narrows
+    // from base to tip is the entire silhouette; taper it like a spruce
+    // and it stops being this tree.
+    const tiers = 22;
+    const topY = h * 0.04, bottomY = h * 0.9;
+    const spacing = (bottomY - topY) / (tiers - 1);
+    for (let i = 0; i < tiers; i++) {
+      const t = i / (tiers - 1);
+      const y = topY + (bottomY - topY) * t;
+      const hw = w * 0.5 * (0.22 + Math.pow(t, 0.7) * 0.62);
+      const jx = (((seed * 17 + i * 5) % 1) - 0.5) * w * 0.05;
+      // Overlapping ellipses (radius derived from spacing, so they always
+      // overlap) rather than separate tiers — this tree reads as one
+      // continuous dense column, not stacked layers.
       ctx.beginPath();
-      ctx.moveTo(palmCrownX, crownY);
-      for (let s = 1; s <= segments; s++) {
-        const t = s / segments;
-        const ribX = palmCrownX + dirX * length * t;
-        const ribY = crownY + dirY * length * t * t * 0.9 + dirY * length * t * 0.1;
-        const taper = 1 - t * 0.7; // leaflets shrink toward the tip
-        const notchOut = frondWidth * taper * (s % 2 === 0 ? 1 : 0.55); // alternating notch depth for a jagged feathery edge
-        ctx.lineTo(ribX + perpX * notchOut, ribY + perpY * notchOut);
-      }
-      const tipX = palmCrownX + dirX * length, tipY = crownY + dirY * length + h * 0.03;
-      ctx.lineTo(tipX, tipY);
-      for (let s = segments; s >= 1; s--) {
-        const t = s / segments;
-        const ribX = palmCrownX + dirX * length * t;
-        const ribY = crownY + dirY * length * t * t * 0.9 + dirY * length * t * 0.1;
-        const taper = 1 - t * 0.7;
-        const notchOut = frondWidth * taper * (s % 2 === 0 ? 0.55 : 1);
-        ctx.lineTo(ribX - perpX * notchOut, ribY - perpY * notchOut);
-      }
+      ctx.ellipse(w * 0.5 + jx, y, hw, spacing * 1.3, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.beginPath();
+    ctx.moveTo(w * 0.5, 0);
+    ctx.lineTo(w * 0.5 + w * 0.07, topY + h * 0.06);
+    ctx.lineTo(w * 0.5 - w * 0.07, topY + h * 0.06);
+    ctx.closePath();
+    ctx.fill();
+  } else if (archetype === "redwood") {
+    // Giant Sequoia / California Redwood / Bald Cypress — foliage is
+    // confined to the UPPER portion above a massive bare trunk. That
+    // huge exposed bole is what makes these read as giants rather than
+    // just tall spruces, so the canopy deliberately stops around
+    // mid-height (see the matching low trunkTop for this archetype).
+    const topY = h * 0.05, bottomY = h * 0.55;
+    const tiers = 12;
+    const spacing = (bottomY - topY) / (tiers - 1);
+    for (let i = 0; i < tiers; i++) {
+      const t = i / (tiers - 1);
+      const y = topY + (bottomY - topY) * t;
+      const hw = w * 0.5 * (0.12 + Math.pow(t, 1.1) * 0.86);
+      const droop = spacing * (1.2 + t * 0.4) + h * 0.006; // > spacing, so tiers always overlap — same no-gap guarantee as spruce
+      const jx = (((seed * 23 + i * 11) % 1) - 0.5) * w * 0.05;
+      const cx = w * 0.5 + jx;
+      ctx.beginPath();
+      ctx.moveTo(cx, y - h * 0.008);
+      ctx.quadraticCurveTo(cx + hw * 0.6, y + droop * 0.35, cx + hw, y + droop);
+      ctx.quadraticCurveTo(cx + hw * 0.5, y + droop * 0.15, cx, y + h * 0.012);
+      ctx.quadraticCurveTo(cx - hw * 0.5, y + droop * 0.15, cx - hw, y + droop);
+      ctx.quadraticCurveTo(cx - hw * 0.6, y + droop * 0.35, cx, y - h * 0.008);
       ctx.closePath();
       ctx.fill();
     }
-    // A small crown mass tying the fronds together at their shared base.
-    ctx.beginPath();
-    ctx.arc(palmCrownX, crownY, w * 0.14, 0, Math.PI * 2);
-    ctx.fill();
-  } else if (archetype === "banana") {
-    // A handful of huge drooping paddle-shaped leaves fanning out from a
-    // short crown — the iconic broad-leaf tropical silhouette, distinct
-    // from palm's thin fronds and from round/spreading's rounded lobes.
-    const crownY = h * 0.22;
-    const leafCount = 5 + Math.floor((seed % 1) * 3);
-    for (let i = 0; i < leafCount; i++) {
-      const angle = (i / leafCount) * Math.PI * 2 + seed * 4;
-      const droop = 0.5 + ((seed * 19 + i) % 1) * 0.35; // how far each leaf arcs downward under its own weight
-      const length = w * (0.7 + ((seed * 29 + i) % 1) * 0.25);
-      const dirX = Math.cos(angle), dirY = Math.sin(angle) * 0.3 + droop * 0.7;
-      const midX = w * 0.5 + dirX * length * 0.5;
-      const midY = crownY + dirY * length * 0.28;
-      const endX = w * 0.5 + dirX * length * 0.92;
-      const endY = crownY + dirY * length * 0.75 + h * 0.04;
-      const bladeWidth = w * 0.16; // much wider than a palm frond — a paddle, not a blade
-      const perpX = -dirY, perpY = dirX;
+  } else if (archetype === "cedar") {
+    // Atlas Cedar / Red Pine — FLAT-topped and open, built from a few
+    // wide horizontal plates with real air between them rather than one
+    // solid mass. Deliberately the one conifer here that does NOT use
+    // the overlap guarantee: the visible gaps between plates are the
+    // defining feature, so closing them would destroy the silhouette.
+    const plates = 5 + Math.floor((seed % 1) * 3);
+    const topY = h * 0.12, bottomY = h * 0.78;
+    for (let i = 0; i < plates; i++) {
+      const t = plates === 1 ? 0 : i / (plates - 1);
+      const y = topY + (bottomY - topY) * t;
+      // Widest in the upper third, tapering back in below — a cedar
+      // crown spreads out on TOP, the opposite of a spruce's base-heavy
+      // triangle.
+      const hw = w * 0.5 * (0.35 + Math.sin((0.25 + t * 0.6) * Math.PI) * 0.63);
+      const thick = h * (0.018 + (1 - t) * 0.012);
+      const jx = (((seed * 29 + i * 13) % 1) - 0.5) * w * 0.06;
       ctx.beginPath();
-      ctx.moveTo(w * 0.5, crownY);
-      ctx.quadraticCurveTo(midX + perpX * bladeWidth, midY + perpY * bladeWidth, endX, endY);
-      ctx.quadraticCurveTo(midX - perpX * bladeWidth, midY - perpY * bladeWidth, w * 0.5, crownY);
-      ctx.closePath();
+      ctx.ellipse(w * 0.5 + jx, y, hw, thick, 0, 0, Math.PI * 2);
       ctx.fill();
     }
-    ctx.beginPath();
-    ctx.arc(w * 0.5, crownY, w * 0.15, 0, Math.PI * 2);
-    ctx.fill();
-  } else if (archetype === "umbrella") {
-    // A wide, flat, table-top canopy on a tall bare trunk — the classic
-    // savanna/acacia "umbrella tree" silhouette, built from several
-    // overlapping flattened lobes forming one continuous flat mass
-    // rather than a rounded dome like "round"/"spreading" use.
-    const crownY = h * 0.16;
-    const crownWidth = w * 0.92;
-    const lobeCount = 7;
-    for (let i = 0; i < lobeCount; i++) {
-      const t = i / (lobeCount - 1);
-      const lx = w * 0.5 + (t - 0.5) * crownWidth;
-      const ly = crownY - Math.sin(t * Math.PI) * h * 0.025; // a slight upward arch toward the center, not a perfectly flat line of circles
-      const r = h * (0.09 + ((seed * 13 + i) % 1) * 0.035);
+  } else if (archetype === "yew") {
+    // Hick's Yew / Japanese Yew — a dense, rounded, shrubby conifer on a
+    // very short trunk. Broad and bushy rather than conical.
+    const lobes = 6;
+    const cyBase = h * 0.5;
+    for (let i = 0; i < lobes; i++) {
+      const a = (i / lobes) * Math.PI * 2 + seed * 3;
+      const r = w * 0.26 * (0.8 + ((seed * 7 + i) % 1) * 0.5);
       ctx.beginPath();
-      ctx.ellipse(lx, ly, r * 1.5, r, 0, 0, Math.PI * 2);
+      ctx.ellipse(w * 0.5 + Math.cos(a) * w * 0.17, cyBase + Math.sin(a) * h * 0.2, r, r * 1.15, 0, 0, Math.PI * 2);
       ctx.fill();
     }
-    // A thin band UNDER the lobes to close any small gaps between them
-    // into one continuous flat canopy silhouette rather than a visible
-    // string of separate circles.
+    // A central mass so the ring of lobes reads as ONE dense bush rather
+    // than separate blobs — same "guaranteed closing shape" idea used
+    // across the other archetypes.
     ctx.beginPath();
-    ctx.ellipse(w * 0.5, crownY + h * 0.03, crownWidth * 0.5, h * 0.05, 0, 0, Math.PI * 2);
+    ctx.ellipse(w * 0.5, cyBase, w * 0.34, h * 0.3, 0, 0, Math.PI * 2);
     ctx.fill();
-  } else if (archetype === "spruce") {
+  } else {
     // Tall, narrow conifer built from many individually-drawn DROOPING
     // branch tiers — the defining detail of the reference's trees is
     // that you can read the separate layers, so this deliberately draws
@@ -914,29 +904,6 @@ function createTreeTexture(seed, archetype, leafColorHex, capColorHex, barkColor
     ctx.lineTo(w * 0.5 + w * 0.045, topY + h * 0.05);
     ctx.lineTo(w * 0.5 - w * 0.045, topY + h * 0.05);
     ctx.closePath();
-    ctx.fill();
-  } else {
-    const lobes = archetype === "spreading" ? 5 : 4;
-    const canopyTop = h * 0.06;
-    const canopyBottom = h * 0.86;
-    for (let i = 0; i < lobes; i++) {
-      const lt = i / (lobes - 1);
-      const cx = w * (0.5 + (lt - 0.5) * (archetype === "spreading" ? 0.9 : 0.55));
-      const cy = canopyTop + (canopyBottom - canopyTop) * (0.35 + 0.3 * Math.abs(lt - 0.5));
-      const r = (w * (archetype === "spreading" ? 0.42 : 0.36)) * (0.75 + ((seed * 13 + i) % 1) * 0.4);
-      ctx.beginPath();
-      ctx.arc(cx, cy, r, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    // A wide low lobe specifically to close the gap down to the trunk —
-    // the scattered lobes above only ever reach about halfway down this
-    // canopy's own range by construction (their cy formula tops out at
-    // canopyTop+(canopyBottom-canopyTop)*0.5), so without this there's a
-    // real bare gap between the canopy and the trunk, not just an
-    // exposed trunk.
-    const closeR = w * (archetype === "spreading" ? 0.46 : 0.4);
-    ctx.beginPath();
-    ctx.arc(w * 0.5, h * 0.88, closeR, 0, Math.PI * 2);
     ctx.fill();
   }
 
@@ -993,8 +960,8 @@ function getTreeTexture(archetype, leafColorHex, capColorHex, barkColorHex, rand
 const GLOW_TEXTURE_VARIANTS = 3;
 const treeGlowTextureCache = new Map();
 function createTreeGlowTexture(seed, archetype) {
-  const w = archetype === "spruce" ? 150 : 110; // spruce gets a wider canvas so its base tiers can actually be broad relative to its height — every other archetype is unchanged at 110
-  const h = archetype === "banana" ? 180 : archetype === "spreading" ? 210 : archetype === "palm" ? 380 : archetype === "umbrella" ? 340 : archetype === "spruce" ? 460 : 250;
+  const w = archetype === "columnar" ? 70 : archetype === "cedar" ? 180 : archetype === "yew" ? 140 : 150; // per-archetype canvas width — columnar is deliberately the narrowest and cedar the widest, since how broad each conifer is relative to its height IS its silhouette
+  const h = archetype === "yew" ? 200 : archetype === "cedar" ? 360 : archetype === "columnar" ? 420 : archetype === "redwood" ? 560 : 460; // redwood tallest (sequoia/redwood are the giants of the chart), yew shortest (a low shrubby bush)
   const canvas = document.createElement("canvas");
   canvas.width = w; canvas.height = h;
   const ctx = canvas.getContext("2d");
@@ -1106,23 +1073,24 @@ function createLivingTree(colorHex, rand) {
   // All-tropical mix — palm/umbrella/spreading/round/banana, conical
   // (pine) removed entirely rather than just reduced. Umbrella added for
   // the savanna-canopy look from a jungle/hills reference.
-  // Spruce-dominant to match the conifer forest reference. NOTE: this is
-  // a deliberate reversal — an earlier round removed the old "conical"
-  // pine archetype entirely in favour of an all-tropical mix. The
-  // tropical archetypes are kept on as a real minority rather than
-  // deleted, so the forest still has variety instead of being a single
-  // repeated silhouette.
-  const archetype = archetypeRoll < 0.62 ? "spruce" : archetypeRoll < 0.72 ? "palm" : archetypeRoll < 0.82 ? "umbrella" : archetypeRoll < 0.9 ? "spreading" : archetypeRoll < 0.96 ? "round" : "banana";
+  // ALL-CONIFER mix matching the reference chart. Every tropical
+  // archetype (palm/umbrella/banana/round/spreading) has been removed
+  // outright — this is now five distinct conifer silhouette families
+  // drawn from the chart: classic tiered cone (spruce/fir/sugar pine),
+  // narrow column (juniper/larch), giant bare-boled tree (sequoia/
+  // redwood/bald cypress), flat-topped open crown (atlas cedar/red
+  // pine), and low dense shrub (yew).
+  const archetype = archetypeRoll < 0.42 ? "spruce" : archetypeRoll < 0.62 ? "columnar" : archetypeRoll < 0.78 ? "cedar" : archetypeRoll < 0.92 ? "yew" : "redwood";
   const bark = VERDANT_BARK_PALETTE[Math.floor(rand() * VERDANT_BARK_PALETTE.length)];
   const leaf = VERDANT_LEAF_PALETTE[Math.floor(rand() * VERDANT_LEAF_PALETTE.length)];
   const cap = 0xd8f06a; // same vivid yellow-green highlight used elsewhere for Verdant foliage
   const tex = getTreeTexture(archetype, leaf, cap, bark, rand);
   const glowTex = getTreeGlowTexture(archetype, rand);
 
-  const height = (4.5 + rand() * 8) * (archetype === "spruce" ? 1.75 : archetype === "palm" ? 1.5 : archetype === "umbrella" ? 1.4 : archetype === "banana" ? 0.6 : 1); // spruce tallest of all — the reference's conifers tower over everything else. Floor raised from 3 to 4.5 — the old floor let banana/round trees shrink small enough to visually read as a bush
+  const height = (4.5 + rand() * 8) * (archetype === "redwood" ? 2.4 : archetype === "spruce" ? 1.75 : archetype === "columnar" ? 1.5 : archetype === "cedar" ? 1.3 : archetype === "yew" ? 0.55 : 1); // redwood towers over everything (it is the giant of the chart); yew is deliberately low and shrubby, the only archetype meant to read as undergrowth
   // Width matches the canvas's own aspect ratio per archetype (see the w/h
   // values in createTreeTexture) so the painted silhouette doesn't stretch.
-  const aspect = archetype === "banana" ? 110 / 180 : archetype === "spreading" ? 110 / 210 : archetype === "palm" ? 110 / 380 : archetype === "umbrella" ? 110 / 340 : archetype === "spruce" ? 150 / 460 : 110 / 250; // spruce uses 150 to match its wider canvas (see createTreeTexture) — a mismatch here would squash the painted silhouette
+  const aspect = archetype === "yew" ? 140 / 200 : archetype === "cedar" ? 180 / 360 : archetype === "columnar" ? 70 / 420 : archetype === "redwood" ? 150 / 560 : 150 / 460; // each entry MUST equal that archetype's own w/h from createTreeTexture — any mismatch stretches or squashes the painted silhouette
   const width = height * aspect;
 
   const spriteGroup = createTreeSprite(tex, glowTex, width, height, rand);

@@ -938,7 +938,6 @@ function getTreeTexture(archetype, leafColorHex, capColorHex, barkColorHex, rand
 // the diffuse texture, keyed only by archetype (glow color/placement
 // doesn't need to vary by leaf/bark color the way the diffuse look does).
 const GLOW_TEXTURE_VARIANTS = 3;
-const GLOW_COLORS = ["#ff8fd6", "#8fc9ff", "#c98fff"]; // pink/blue/purple — was green/cyan/yellow
 const treeGlowTextureCache = new Map();
 function createTreeGlowTexture(seed, archetype) {
   const w = 110;
@@ -946,23 +945,53 @@ function createTreeGlowTexture(seed, archetype) {
   const canvas = document.createElement("canvas");
   canvas.width = w; canvas.height = h;
   const ctx = canvas.getContext("2d");
-  ctx.fillStyle = "#0d0616"; // was pure black — this gets multiplied by emissiveIntensity (3.5) same as everything else on this map, so a near-black purple source becomes a visible dark-purple tint on the WHOLE tree at night instead of going fully black, while the much brighter accent spots below still read as clearly brighter by comparison
+  ctx.fillStyle = "#0d0616"; // near-black purple baseline — see the emissiveIntensity note where this material is built
   ctx.fillRect(0, 0, w, h);
-  const spotCount = 8 + Math.floor((seed % 1) * 7);
-  for (let i = 0; i < spotCount; i++) {
-    const gx = w * (0.15 + ((seed * 7 + i * 13) % 1) * 0.7);
-    const gy = h * (0.12 + ((seed * 11 + i * 17) % 1) * 0.8); // spread across most of the canvas — reads fine whether it lands on trunk or canopy
-    const r = w * (0.045 + ((seed * 3 + i) % 1) * 0.035);
-    const grad = ctx.createRadialGradient(gx, gy, 0, gx, gy, r);
-    const color = GLOW_COLORS[i % GLOW_COLORS.length];
-    grad.addColorStop(0, color);
-    grad.addColorStop(0.5, color);
-    grad.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.arc(gx, gy, r, 0, Math.PI * 2);
-    ctx.fill();
+
+  // A simple seeded pseudo-random helper, local to this function — the
+  // recursive branch pattern below needs more random decisions per tree
+  // than the old fixed spot-count loop did.
+  let s = seed * 1000;
+  function rnd() {
+    s = (s * 9301 + 49297) % 233280;
+    return s / 233280;
   }
+
+  // Glowing pink branch-like lines fanning up from the base into the
+  // canopy — real forking structure (each segment splits into 2, angle
+  // spread and length tapering with depth), not round dots. This is what
+  // actually reads as "glowing branches" the way the reference image
+  // does. Applies to every tree at every graphics tier — distinct from
+  // the separate, High-tier-only 3D gnarled branch geometry added
+  // earlier, which stays as-is alongside this.
+  ctx.lineCap = "round";
+  function drawBranch(x, y, angle, length, width, depth) {
+    if (depth <= 0 || length < h * 0.02) return;
+    const endX = x + Math.cos(angle) * length;
+    const endY = y + Math.sin(angle) * length;
+    const grad = ctx.createLinearGradient(x, y, endX, endY);
+    grad.addColorStop(0, "rgba(255,79,176,0.9)");
+    grad.addColorStop(1, "rgba(255,79,176,0.5)");
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(endX, endY);
+    ctx.stroke();
+    const forks = 2;
+    for (let i = 0; i < forks; i++) {
+      const spread = 0.35 + rnd() * 0.5;
+      const newAngle = angle + (i === 0 ? -spread : spread);
+      drawBranch(endX, endY, newAngle, length * (0.65 + rnd() * 0.15), width * 0.62, depth - 1);
+    }
+  }
+  const trunkCount = 1 + Math.floor(rnd() * 2);
+  for (let i = 0; i < trunkCount; i++) {
+    const startX = w * (0.5 + (rnd() - 0.5) * 0.3);
+    const startAngle = -Math.PI / 2 + (rnd() - 0.5) * 0.5; // roughly straight up (canvas Y grows downward), with some per-tree variance
+    drawBranch(startX, h * 0.96, startAngle, h * 0.28, w * 0.045, 4);
+  }
+
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;

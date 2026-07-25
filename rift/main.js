@@ -91,8 +91,62 @@ function resizeToViewport() {
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
   renderer.setSize(w, h);
+  const pixelRatio = renderer.getPixelRatio();
+  underwaterRenderTarget.setSize(w * pixelRatio, h * pixelRatio);
 }
 new ResizeObserver(resizeToViewport).observe(viewport);
+
+// Underwater screen-space distortion — a real post-process pass, only
+// ever used when the player is submerged. The scene renders to this
+// offscreen target instead of the screen; a full-screen quad then draws
+// that texture back out with a sine-distorted UV (the "wavy, looking
+// through water" look) plus a blue tint. When NOT underwater, none of
+// this is touched at all — the normal direct renderer.render(scene,
+// camera) call further down stays completely unchanged, so this adds
+// zero risk to the other ~99% of gameplay.
+const underwaterRenderTarget = new THREE.WebGLRenderTarget(
+  Math.max(1, viewport.clientWidth * renderer.getPixelRatio()),
+  Math.max(1, viewport.clientHeight * renderer.getPixelRatio())
+);
+const underwaterQuadScene = new THREE.Scene();
+const underwaterQuadCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const underwaterDistortionMaterial = new THREE.ShaderMaterial({
+  uniforms: { tDiffuse: { value: underwaterRenderTarget.texture }, time: { value: 0 } },
+  vertexShader: `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = vec4(position.xy, 0.0, 1.0);
+    }
+  `,
+  fragmentShader: `
+    uniform sampler2D tDiffuse;
+    uniform float time;
+    varying vec2 vUv;
+    void main() {
+      vec2 distortedUv = vUv + vec2(
+        sin(vUv.y * 14.0 + time * 1.6) * 0.01,
+        sin(vUv.x * 11.0 + time * 1.3) * 0.01
+      );
+      vec4 color = texture2D(tDiffuse, distortedUv);
+      color.rgb = mix(color.rgb, vec3(0.08, 0.28, 0.45), 0.18);
+      gl_FragColor = color;
+    }
+  `,
+});
+underwaterQuadScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), underwaterDistortionMaterial));
+
+// A large sphere enclosing the camera, rendered from the inside
+// (BackSide) with a translucent blue tint — the "volume that looks like
+// water" the player is inside of, distinct from the screen-space
+// distortion above. Follows the camera every frame; visibility toggled
+// on/off with the underwater state.
+const waterVolumeMesh = new THREE.Mesh(
+  new THREE.SphereGeometry(3, 16, 12),
+  new THREE.MeshBasicMaterial({ color: 0x1a5a7a, transparent: true, opacity: 0.12, side: THREE.BackSide, depthWrite: false, fog: false })
+);
+waterVolumeMesh.visible = false;
+scene.add(waterVolumeMesh);
 
 // #rift-viewport's ancestor `.panel` uses a `transform` for its scroll-reveal
 // animation — and CSS position:fixed resolves relative to the nearest
@@ -1029,7 +1083,8 @@ function animate() {
   // is what actually makes every surface in view read as blue regardless
   // of distance — fog alone only visibly tints distant objects, nearby
   // ones would still show their normal color.
-  if (currentLevelIdx >= 0 && LEVELS[currentLevelIdx].biome === "verdant" && camera.position.y < LIQUID_LEVEL.verdant + PLAYER_EYE_HEIGHT - 0.3) {
+  const isUnderwater = currentLevelIdx >= 0 && LEVELS[currentLevelIdx].biome === "verdant" && camera.position.y < LIQUID_LEVEL.verdant + PLAYER_EYE_HEIGHT - 0.3;
+  if (isUnderwater) {
     scene.fog.color.setHex(0x0a2838);
     scene.fog.density = 0.14;
     sun.color.setHex(0x1a4560);
@@ -1037,6 +1092,10 @@ function animate() {
     ambientLight.color.setHex(0x14384f);
     ambientLight.intensity *= 0.22;
   }
+  // The enclosing "water volume" sphere — follows the camera every
+  // frame, only visible while actually underwater.
+  waterVolumeMesh.visible = isUnderwater;
+  if (isUnderwater) waterVolumeMesh.position.copy(camera.position);
   const wind = updateWeatherSystem(weatherHandle, dt, eruptionActive, dayNight.dayAmount);
   updateAtmosphericParticles(atmosphereHandle, elapsedTime, dt, wind.windX, wind.windZ);
   updateGrass(grassHandle, elapsedTime, wind.windX, wind.windZ, dayNight.dayAmount);
@@ -1050,6 +1109,19 @@ function animate() {
   updateLightShafts(lightShaftHandles, dayNight.dayAmount);
   updateWorldPulse(dt);
   updateProjectiles(dt);
-  renderer.render(scene, camera);
+  if (isUnderwater) {
+    // Two-pass render: scene (including the water volume mesh above,
+    // which renders normally as part of it) to an offscreen target, then
+    // a full-screen quad draws that texture back out with a
+    // sine-distorted UV and a blue tint (see the setup near the
+    // renderer/resize code above).
+    renderer.setRenderTarget(underwaterRenderTarget);
+    renderer.render(scene, camera);
+    renderer.setRenderTarget(null);
+    underwaterDistortionMaterial.uniforms.time.value = elapsedTime;
+    renderer.render(underwaterQuadScene, underwaterQuadCamera);
+  } else {
+    renderer.render(scene, camera);
+  }
 }
 requestAnimationFrame(animate);

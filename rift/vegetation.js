@@ -122,6 +122,7 @@ function createGrass(scene, biome, sampleHeight, radius) {
   // shape rather than a full rectangular card.
   const mat = new THREE.MeshStandardMaterial({
     map: bladeTex, transparent: true, alphaTest: 0.4, side: THREE.DoubleSide, roughness: 0.85,
+    emissive: 0x000000, emissiveIntensity: 0, // starts off — updateGrass fades this in as a pink glow at night, since a diffuse color tint alone would be invisible under Verdant's crushed-dark night lighting
   });
 
   const mesh = new THREE.InstancedMesh(bladeGeo, mat, bladeCount);
@@ -163,7 +164,7 @@ function createGrass(scene, biome, sampleHeight, radius) {
   mesh.instanceMatrix.needsUpdate = true;
 
   scene.add(mesh);
-  return { mesh, swaySeeds, count: placedBlades, baseMatrices: extractBaseTransforms(mesh, placedBlades) };
+  return { mesh, swaySeeds, count: placedBlades, baseMatrices: extractBaseTransforms(mesh, placedBlades), material: mat };
 }
 
 /**
@@ -251,9 +252,20 @@ function extractBaseTransforms(mesh, count) {
   return transforms;
 }
 
-function updateGrass(handle, elapsed, windX = 0, windZ = 0) {
+function updateGrass(handle, elapsed, windX = 0, windZ = 0, dayAmount = 1) {
   if (!handle) return;
-  const { mesh, swaySeeds, count, baseMatrices } = handle;
+  const { mesh, swaySeeds, count, baseMatrices, material } = handle;
+  // Fades toward a pink bioluminescent tint/glow as night falls — both
+  // the diffuse color (so it visibly reads as pink even where some
+  // ambient light still reaches it) AND real emissive glow (so it stays
+  // visible at all under Verdant's crushed-dark night lighting, which
+  // would otherwise swallow a diffuse-only tint into blackness).
+  if (material) {
+    const nightAmount = Math.max(0, Math.min(1, 1 - dayAmount / 0.3));
+    material.color.setRGB(1, 1, 1).lerp(new THREE.Color(0xff8fd6), nightAmount * 0.7);
+    material.emissive.setHex(0xff5fb8);
+    material.emissiveIntensity = nightAmount * 0.9;
+  }
   const windLean = Math.min(0.5, Math.hypot(windX, windZ) * 0.15); // caps how far wind alone can bend a blade, idle sway still layers on top
   const windAngle = Math.atan2(windZ, windX);
   for (let i = 0; i < count; i++) {
@@ -294,4 +306,78 @@ function disposeGrass(scene, handle) {
   handle.mesh.material.dispose();
 }
 
-export { createGrass, updateGrass, disposeGrass, createFlowers, updateFlowers, disposeFlowers };
+// A soft round glow dot for the footstep points — without this, Points
+// render as hard squares.
+let sharedFootstepGlowTexture = null;
+function getFootstepGlowTexture() {
+  if (sharedFootstepGlowTexture) return sharedFootstepGlowTexture;
+  const size = 32;
+  const canvas = document.createElement("canvas");
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, "rgba(255,255,255,1)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  sharedFootstepGlowTexture = new THREE.CanvasTexture(canvas);
+  return sharedFootstepGlowTexture;
+}
+
+// A pooled ring buffer of glow points that appear at the player's feet
+// on each footstep and fade out — makes the ground/grass visibly react
+// to the player walking through it, not just glow ambiently on its own.
+// Uses per-VERTEX color rather than per-point opacity (PointsMaterial
+// only supports one opacity for the whole system) — with additive
+// blending, a point whose color has faded to black contributes nothing
+// to the final image, so it reads as fully invisible without needing a
+// custom shader to fade points independently.
+function createFootstepGlowSystem(scene, maxPoints) {
+  const positions = new Float32Array(maxPoints * 3);
+  const colors = new Float32Array(maxPoints * 3); // starts all black/invisible
+  const life = new Float32Array(maxPoints);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  const mat = new THREE.PointsMaterial({
+    map: getFootstepGlowTexture(), vertexColors: true, size: 0.7, transparent: true,
+    blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
+  });
+  const points = new THREE.Points(geo, mat);
+  scene.add(points);
+  return { points, life, maxPoints, nextIndex: 0 };
+}
+
+function spawnFootstepGlow(handle, x, y, z) {
+  if (!handle) return;
+  const i = handle.nextIndex;
+  handle.nextIndex = (handle.nextIndex + 1) % handle.maxPoints;
+  const posAttr = handle.points.geometry.attributes.position;
+  posAttr.setXYZ(i, x + (Math.random() - 0.5) * 0.5, y + 0.08, z + (Math.random() - 0.5) * 0.5);
+  posAttr.needsUpdate = true;
+  handle.life[i] = 1;
+}
+
+function updateFootstepGlowSystem(handle, dt) {
+  if (!handle) return;
+  const colorAttr = handle.points.geometry.attributes.color;
+  let changed = false;
+  for (let i = 0; i < handle.maxPoints; i++) {
+    if (handle.life[i] > 0) {
+      handle.life[i] = Math.max(0, handle.life[i] - dt * 1.1); // fades over roughly a second
+      const b = handle.life[i];
+      colorAttr.setXYZ(i, b * 1.0, b * 0.3, b * 0.75); // pink/magenta hue, dims to black (invisible under additive blending) as it fades
+      changed = true;
+    }
+  }
+  if (changed) colorAttr.needsUpdate = true;
+}
+
+function disposeFootstepGlowSystem(scene, handle) {
+  if (!handle) return;
+  scene.remove(handle.points);
+  handle.points.geometry.dispose();
+  handle.points.material.dispose();
+}
+
+export { createGrass, updateGrass, disposeGrass, createFlowers, updateFlowers, disposeFlowers, createFootstepGlowSystem, spawnFootstepGlow, updateFootstepGlowSystem, disposeFootstepGlowSystem };

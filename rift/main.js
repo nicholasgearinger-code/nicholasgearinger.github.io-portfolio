@@ -7,7 +7,7 @@ import { createDecoration, updateDecoration, createEmberFire, createLivingTree, 
 import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall } from "./liquid.js";
 import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
-import { createGrass, updateGrass, disposeGrass, createFlowers, updateFlowers, disposeFlowers } from "./vegetation.js";
+import { createGrass, updateGrass, disposeGrass, createFlowers, updateFlowers, disposeFlowers, createFootstepGlowSystem, spawnFootstepGlow, updateFootstepGlowSystem, disposeFootstepGlowSystem } from "./vegetation.js";
 import { createHorizonSilhouettes, updateHorizonSilhouettes, disposeHorizonSilhouettes } from "./horizonSilhouettes.js";
 import { createWildlife, updateWildlife, disposeWildlife } from "./wildlife.js";
 import { createLandmark, updateLandmark, disposeLandmark, LANDMARK_POSITION } from "./landmarks.js";
@@ -252,6 +252,10 @@ function updateMovement(dt, grounded) {
     if (footstepDistance >= FOOTSTEP_STRIDE) {
       footstepDistance = 0;
       playFootstep(currentLevelIdx >= 0 ? LEVELS[currentLevelIdx].biome : "ember");
+      if (footstepGlowHandle) {
+        const groundY = terrainMesh ? (terrainHeightAt(LEVELS[currentLevelIdx], camera.position.x, camera.position.z, WORLD_SEED) ?? camera.position.y - PLAYER_EYE_HEIGHT) : camera.position.y - PLAYER_EYE_HEIGHT;
+        spawnFootstepGlow(footstepGlowHandle, camera.position.x, groundY, camera.position.z);
+      }
     }
   } else {
     footstepDistance = 0; // reset mid-stride rather than carrying a partial step into the next movement burst
@@ -284,6 +288,7 @@ let cliffWallHandle = null;
 let atmosphereHandle = null;
 let grassHandle = null;
 let flowersHandle = null;
+let footstepGlowHandle = null;
 let weatherHandle = null;
 let cloudsHandle = null;
 let horizonHandle = null;
@@ -332,6 +337,8 @@ function teardownLevel() {
   disposeGrass(scene, grassHandle);
   grassHandle = null;
   disposeFlowers(scene, flowersHandle);
+  disposeFootstepGlowSystem(scene, footstepGlowHandle);
+  footstepGlowHandle = null;
   flowersHandle = null;
   disposeWeatherSystem(scene, weatherHandle);
   weatherHandle = null;
@@ -446,6 +453,7 @@ function buildLevel(levelIdx) {
   atmosphereHandle = createAtmosphericParticles(scene, level.biome);
   grassHandle = createGrass(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), TERRAIN_SIZE * 0.46);
   flowersHandle = createFlowers(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), TERRAIN_SIZE * 0.46);
+  footstepGlowHandle = level.biome === "verdant" ? createFootstepGlowSystem(scene, 40) : null;
   weatherHandle = createWeatherSystem(scene, level.biome);
   cloudsHandle = createClouds(scene, level.biome);
   horizonHandle = createHorizonSilhouettes(scene, level.biome);
@@ -1000,6 +1008,18 @@ function animate() {
   updateWaterfall(waterfallHandle, dt, elapsedTime);
   updateRiverCurrent(riverCurrentHandle, dt);
   updateRiverFlowStrip(riverFlowStripHandle, dt);
+  // Ground magenta night tint — Verdant only. The terrain mesh uses one
+  // shared vertex-colored material for the whole landmass, so tinting
+  // .color (multiplies with the baked-in vertex colors) plus boosting
+  // .emissive is the same technique used for grass — a diffuse tint
+  // alone would still go invisible under this biome's crushed-dark night
+  // lighting, so real emissive glow is what keeps it visibly magenta.
+  if (currentLevelIdx >= 0 && LEVELS[currentLevelIdx].biome === "verdant" && terrainMesh) {
+    const groundNightAmount = Math.max(0, Math.min(1, 1 - dayNight.dayAmount / 0.3));
+    terrainMesh.material.color.setRGB(1, 1, 1).lerp(new THREE.Color(0xe040c0), groundNightAmount * 0.6);
+    terrainMesh.material.emissive.setHex(0xd020a8);
+    terrainMesh.material.emissiveIntensity = 0.04 + groundNightAmount * 0.5;
+  }
   // Underwater effect — Verdant only. Overrides the fog dayNightCycle/
   // weather already set earlier this same frame with a dense, dark, murky
   // tint, darkens the sun/ambient intensity, AND tints the light COLORS
@@ -1019,8 +1039,9 @@ function animate() {
   }
   const wind = updateWeatherSystem(weatherHandle, dt, eruptionActive, dayNight.dayAmount);
   updateAtmosphericParticles(atmosphereHandle, elapsedTime, dt, wind.windX, wind.windZ);
-  updateGrass(grassHandle, elapsedTime, wind.windX, wind.windZ);
+  updateGrass(grassHandle, elapsedTime, wind.windX, wind.windZ, dayNight.dayAmount);
   updateFlowers(flowersHandle, elapsedTime);
+  updateFootstepGlowSystem(footstepGlowHandle, dt);
   updateWildlife(wildlifeHandle, elapsedTime, dt, camera.position.x, camera.position.z, eruptionActive);
   updateLandmark(landmarkHandle, elapsedTime, dt);
   updateClouds(cloudsHandle, dt, wind, dayNight.dayAmount, wind.rainIntensity);

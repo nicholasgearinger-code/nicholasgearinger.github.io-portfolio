@@ -14,11 +14,11 @@ import { LANDMARK_POSITION } from "./landmarks.js";
 // -----------------------------------------------------------------------------
 
 const WILDLIFE_PROFILE = {
-  ember: { flyers: 0, flyerColor: 0x000000, motes: 7, moteColor: 0xff8a4a, moteHeight: 3, moteBlink: true, salamanders: 4, salamanderColor: 0xff7a28, glowcrawlers: 0, glowcrawlerColor: 0x000000 }, // too hostile for birds — fireflies-with-intent, plus fire salamanders scurrying near the lava
-  verdant: { flyers: 6, flyerColor: 0x1a1a1a, motes: 8, moteColor: 0xbdf27a, moteHeight: 1.5, moteBlink: true, salamanders: 0, salamanderColor: 0x000000, glowcrawlers: 5, glowcrawlerColor: 0x8fe3ff }, // birds circling + real fireflies low in the grass + a second glowing ground creature, distinct from the motes — slower, always-lit, closer to the ground
-  crystal: { flyers: 3, flyerColor: 0x2a3a44, motes: 10, moteColor: 0x9fe8ff, moteHeight: 4, moteBlink: false, salamanders: 0, salamanderColor: 0x000000, glowcrawlers: 0, glowcrawlerColor: 0x000000 }, // sparse crystal-moths drifting near the spires
-  abyssal: { flyers: 2, flyerColor: 0x14101c, motes: 4, moteColor: 0x8a86ff, moteHeight: 1, moteBlink: false, salamanders: 0, salamanderColor: 0x000000, glowcrawlers: 0, glowcrawlerColor: 0x000000 }, // a couple of large slow shapes circling high, and eerie low lure-lights
-  ashen: { flyers: 4, flyerColor: 0x1c1712, motes: 0, moteColor: 0x000000, moteHeight: 0, moteBlink: false, salamanders: 0, salamanderColor: 0x000000, glowcrawlers: 0, glowcrawlerColor: 0x000000 },   // scavengers circling over a dead lakebed, nothing bioluminescent down in the dust
+  ember: { flyers: 0, flyerColor: 0x000000, motes: 7, moteColor: 0xff8a4a, moteHeight: 3, moteBlink: true, salamanders: 4, salamanderColor: 0xff7a28, glowcrawlers: 0, glowcrawlerColor: 0x000000, butterflies: 0, fish: 0 }, // too hostile for birds — fireflies-with-intent, plus fire salamanders scurrying near the lava
+  verdant: { flyers: 6, flyerColor: 0x1a1a1a, motes: 8, moteColor: 0xbdf27a, moteHeight: 1.5, moteBlink: true, salamanders: 0, salamanderColor: 0x000000, glowcrawlers: 5, glowcrawlerColor: 0x8fe3ff, butterflies: 10, fish: 12 }, // birds circling + real fireflies low in the grass + a second glowing ground creature + fluttering butterflies + fish in the water — a living jungle, not just a pretty one
+  crystal: { flyers: 3, flyerColor: 0x2a3a44, motes: 10, moteColor: 0x9fe8ff, moteHeight: 4, moteBlink: false, salamanders: 0, salamanderColor: 0x000000, glowcrawlers: 0, glowcrawlerColor: 0x000000, butterflies: 0, fish: 0 }, // sparse crystal-moths drifting near the spires
+  abyssal: { flyers: 2, flyerColor: 0x14101c, motes: 4, moteColor: 0x8a86ff, moteHeight: 1, moteBlink: false, salamanders: 0, salamanderColor: 0x000000, glowcrawlers: 0, glowcrawlerColor: 0x000000, butterflies: 0, fish: 0 }, // a couple of large slow shapes circling high, and eerie low lure-lights
+  ashen: { flyers: 4, flyerColor: 0x1c1712, motes: 0, moteColor: 0x000000, moteHeight: 0, moteBlink: false, salamanders: 0, salamanderColor: 0x000000, glowcrawlers: 0, glowcrawlerColor: 0x000000, butterflies: 0, fish: 0 },   // scavengers circling over a dead lakebed, nothing bioluminescent down in the dust
 };
 
 let sharedWingTexture = null;
@@ -119,6 +119,54 @@ function getGlowcrawlerTexture() {
   return sharedGlowcrawlerTexture;
 }
 
+// A pair of rounded wings around a thin body — painted white so it can
+// be tinted per-instance via material.color, matching every other
+// creature texture in this file.
+let sharedButterflyTexture = null;
+function getButterflyTexture() {
+  if (sharedButterflyTexture) return sharedButterflyTexture;
+  const w = 56, h = 40;
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.ellipse(w * 0.28, h * 0.36, w * 0.24, h * 0.32, -0.3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(w * 0.72, h * 0.36, w * 0.24, h * 0.32, 0.3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(w * 0.5, h * 0.55, w * 0.03, h * 0.35, 0, 0, Math.PI * 2);
+  ctx.fill();
+  sharedButterflyTexture = new THREE.CanvasTexture(canvas);
+  return sharedButterflyTexture;
+}
+
+// An elongated body tapering to a tail fin — simple but reads correctly
+// as a fish silhouette from above/the side, which is the only angle a
+// small underwater sprite is ever really seen from.
+let sharedFishTexture = null;
+function getFishTexture() {
+  if (sharedFishTexture) return sharedFishTexture;
+  const w = 48, h = 24;
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.ellipse(w * 0.4, h * 0.5, w * 0.32, h * 0.4, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(w * 0.68, h * 0.5);
+  ctx.lineTo(w * 0.98, h * 0.15);
+  ctx.lineTo(w * 0.98, h * 0.85);
+  ctx.closePath();
+  ctx.fill();
+  sharedFishTexture = new THREE.CanvasTexture(canvas);
+  return sharedFishTexture;
+}
+
 function createFlyer(scene, color) {
   const mat = new THREE.SpriteMaterial({ map: getWingTexture(), color, fog: true });
   const sprite = new THREE.Sprite(mat);
@@ -204,12 +252,52 @@ function createGlowcrawler(scene, color, heightSampler) {
   };
 }
 
+const BUTTERFLY_COLORS = [0xffcf5c, 0xff8fd6, 0xc9a0ff, 0xffffff];
+function createButterfly(scene, heightSampler) {
+  const color = BUTTERFLY_COLORS[Math.floor(Math.random() * BUTTERFLY_COLORS.length)];
+  const mat = new THREE.SpriteMaterial({ map: getButterflyTexture(), color, fog: true, transparent: true });
+  const sprite = new THREE.Sprite(mat);
+  const scale = 0.35 + Math.random() * 0.2;
+  sprite.scale.set(scale, scale * 0.7, 1);
+  scene.add(sprite);
+  return {
+    sprite,
+    heightSampler,
+    x: (Math.random() - 0.5) * 140,
+    z: (Math.random() - 0.5) * 140,
+    hoverHeight: 0.8 + Math.random() * 1.2, // stays low, near flower/grass height, not up with the birds
+    wanderAngle: Math.random() * Math.PI * 2,
+    seed: Math.random() * Math.PI * 2,
+    speed: 0.6 + Math.random() * 0.5,
+    turnTimer: Math.random() * 1.5, // butterflies change direction far more often than anything else here — genuinely erratic fluttering, not a smooth wander
+  };
+}
+
+function createFish(scene, color, waterLevel) {
+  const mat = new THREE.SpriteMaterial({ map: getFishTexture(), color, fog: true, transparent: true });
+  const sprite = new THREE.Sprite(mat);
+  const scale = 0.4 + Math.random() * 0.3;
+  sprite.scale.set(scale, scale * 0.5, 1);
+  scene.add(sprite);
+  return {
+    sprite,
+    x: (Math.random() - 0.5) * 100,
+    z: (Math.random() - 0.5) * 100,
+    baseY: waterLevel - (0.3 + Math.random() * 1.5), // swims at varying depths below the surface, not all lined up at one height
+    wanderAngle: Math.random() * Math.PI * 2,
+    seed: Math.random() * Math.PI * 2,
+    speed: 1.2 + Math.random() * 1.5,
+    turnTimer: Math.random() * 3,
+  };
+}
+
 /**
  * @param {THREE.Scene} scene
  * @param {string} biome
- * @param {(x: number, z: number) => number} [heightSampler] optional — only used by salamanders, which need to sit on the actual terrain rather than float at a fixed altitude like flyers/motes do
+ * @param {(x: number, z: number) => number} [heightSampler] optional — only used by salamanders/glowcrawlers/butterflies, which need to sit on the actual terrain rather than float at a fixed altitude like flyers/motes do
+ * @param {number} [waterLevel] optional — only used by fish, to swim at a depth relative to the actual water surface
  */
-function createWildlife(scene, biome, heightSampler) {
+function createWildlife(scene, biome, heightSampler, waterLevel) {
   const profile = WILDLIFE_PROFILE[biome] || WILDLIFE_PROFILE.verdant;
   const mult = getGraphicsSettings().wildlifeMultiplier;
   const flyerCount = Math.round(profile.flyers * mult);
@@ -224,7 +312,13 @@ function createWildlife(scene, biome, heightSampler) {
   const glowcrawlerCount = Math.round((profile.glowcrawlers || 0) * mult);
   const glowcrawlers = [];
   for (let i = 0; i < glowcrawlerCount; i++) glowcrawlers.push(createGlowcrawler(scene, profile.glowcrawlerColor, heightSampler));
-  return { flyers, motes, salamanders, glowcrawlers };
+  const butterflyCount = Math.round((profile.butterflies || 0) * mult);
+  const butterflies = [];
+  for (let i = 0; i < butterflyCount; i++) butterflies.push(createButterfly(scene, heightSampler));
+  const fishCount = waterLevel !== undefined ? Math.round((profile.fish || 0) * mult) : 0;
+  const fish = [];
+  for (let i = 0; i < fishCount; i++) fish.push(createFish(scene, 0x3a5a6a, waterLevel));
+  return { flyers, motes, salamanders, glowcrawlers, butterflies, fish };
 }
 
 function updateWildlife(handle, elapsed, dt, playerX = 0, playerZ = 0, erupting = false) {
@@ -338,6 +432,34 @@ function updateWildlife(handle, elapsed, dt, playerX = 0, playerZ = 0, erupting 
     // calmer glow character from the motes above.
     g.sprite.material.opacity = 0.5 + 0.3 * Math.sin(elapsed * 0.8 + g.seed);
   }
+
+  for (const b of handle.butterflies || []) {
+    b.turnTimer -= dt;
+    if (b.turnTimer <= 0) {
+      b.wanderAngle += (Math.random() - 0.5) * Math.PI * 1.4; // large, frequent direction changes — genuinely erratic, not a smooth curve
+      b.turnTimer = 0.4 + Math.random() * 1.2;
+    }
+    b.x += Math.cos(b.wanderAngle) * dt * b.speed;
+    b.z += Math.sin(b.wanderAngle) * dt * b.speed;
+    if (Math.hypot(b.x, b.z) > 100) b.wanderAngle = Math.atan2(-b.z, -b.x);
+    const groundY3 = b.heightSampler ? (b.heightSampler(b.x, b.z) ?? 0) : 0;
+    const flutter = Math.sin(elapsed * 9 + b.seed) * 0.12; // fast vertical bob — the actual "wing flutter" read
+    b.sprite.position.set(b.x, groundY3 + b.hoverHeight + flutter, b.z);
+    b.sprite.material.rotation = Math.sin(elapsed * 6 + b.seed) * 0.4; // wings tilting as it flies, not a flat billboard gliding smoothly
+  }
+
+  for (const f of handle.fish || []) {
+    f.turnTimer -= dt;
+    if (f.turnTimer <= 0) {
+      f.wanderAngle += (Math.random() - 0.5) * Math.PI * 0.9;
+      f.turnTimer = 1.5 + Math.random() * 2.5;
+    }
+    f.x += Math.cos(f.wanderAngle) * dt * f.speed;
+    f.z += Math.sin(f.wanderAngle) * dt * f.speed;
+    if (Math.hypot(f.x, f.z) > 90) f.wanderAngle = Math.atan2(-f.z, -f.x);
+    f.sprite.position.set(f.x, f.baseY + Math.sin(elapsed * 1.2 + f.seed) * 0.15, f.z);
+    f.sprite.material.rotation = f.wanderAngle; // orients to face its swim direction, seen from above
+  }
 }
 
 function disposeWildlife(scene, handle) {
@@ -346,6 +468,8 @@ function disposeWildlife(scene, handle) {
   for (const m of handle.motes) { scene.remove(m.sprite); m.sprite.material.dispose(); }
   for (const s of handle.salamanders || []) { scene.remove(s.sprite); s.sprite.material.dispose(); }
   for (const g of handle.glowcrawlers || []) { scene.remove(g.sprite); g.sprite.material.dispose(); }
+  for (const b of handle.butterflies || []) { scene.remove(b.sprite); b.sprite.material.dispose(); }
+  for (const f of handle.fish || []) { scene.remove(f.sprite); f.sprite.material.dispose(); }
 }
 
 export { createWildlife, updateWildlife, disposeWildlife };

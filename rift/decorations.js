@@ -184,10 +184,11 @@ function buildBaseDecoration(biome, colorHex, seedRand) {
       if (roll < 0.88) return createEmberVent(colorHex, seedRand);
       return createEmberFire(colorHex, seedRand);
     case "verdant":
-      if (roll < 0.62) return createLivingTree(colorHex, seedRand); // bushes removed per explicit request — share redistributed to trees
-      if (roll < 0.8) return createFloraStalk(colorHex, seedRand);
-      if (roll < 0.9) return createBloomingVine(colorHex, seedRand); // vines given a real presence at EVERY graphics tier now, not just the small High-tier-exclusive roll below — a jungle reference needs vines to actually show up
-      if (roll < 0.95) return createGlowFungus(colorHex, seedRand); // glowing bioluminescent ground clusters
+      if (roll < 0.6) return createLivingTree(colorHex, seedRand); // bushes removed per explicit request — share redistributed to trees
+      if (roll < 0.78) return createFloraStalk(colorHex, seedRand);
+      if (roll < 0.88) return createBloomingVine(colorHex, seedRand); // vines given a real presence at EVERY graphics tier now, not just the small High-tier-exclusive roll below — a jungle reference needs vines to actually show up
+      if (roll < 0.93) return createGlowFungus(colorHex, seedRand); // glowing bioluminescent ground clusters
+      if (roll < 0.97) return createFallenLog(colorHex, seedRand); // moss-covered logs/stumps — ground-floor variety and an "aged forest" signal
       return createRockCluster(biome, colorHex, seedRand);
     case "crystal": return roll < 0.72 ? createCrystalCluster(colorHex, seedRand) : createRockCluster(biome, colorHex, seedRand);
     case "abyssal":
@@ -482,6 +483,47 @@ function createGlowFungus(colorHex, rand) {
   return { group, kind: "glowFungus", bobAmplitude: 0.4, bobSeed: rand() * Math.PI * 2, material: capMat, light };
 }
 
+// A fallen, moss-covered log lying on the forest floor — ground-level
+// decoration variety distinct from standing trees/bushes, and a real
+// "aged forest" signal on its own (something died and is slowly being
+// reclaimed). Small chance of being a short upright stump instead of a
+// full lying log, for more variety from one function.
+function createFallenLog(colorHex, rand) {
+  const group = new THREE.Group();
+  const barkColor = new THREE.Color(VERDANT_BARK_PALETTE[Math.floor(rand() * VERDANT_BARK_PALETTE.length)]);
+  const isStump = rand() < 0.3;
+  const barkMat = new THREE.MeshStandardMaterial({ color: barkColor, roughness: 0.95, flatShading: true });
+  if (isStump) {
+    const height = 0.5 + rand() * 0.6;
+    const radius = 0.35 + rand() * 0.25;
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.85, radius, height, 7), barkMat);
+    trunk.position.y = height / 2;
+    group.add(trunk);
+  } else {
+    const length = 2.5 + rand() * 3;
+    const radius = 0.3 + rand() * 0.25;
+    const log = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius * 0.85, length, 7), barkMat);
+    log.rotation.z = Math.PI / 2; // lying on its side
+    log.rotation.y = rand() * Math.PI * 2;
+    log.position.y = radius * 0.8; // sunk slightly into the ground, not perfectly balanced on top
+    group.add(log);
+  }
+  // Moss patches — same technique as the rock clusters, since this is
+  // exactly the kind of surface real moss actually colonizes.
+  const mossColor = new THREE.Color(0x3a6b2a).lerp(new THREE.Color(0x5c9a3a), rand());
+  const mossMat = new THREE.MeshStandardMaterial({ color: mossColor, roughness: 1, flatShading: true });
+  const patchCount = 3 + Math.floor(rand() * 4);
+  const spread = isStump ? 0.4 : 1.6;
+  for (let p = 0; p < patchCount; p++) {
+    const patchGeo = new THREE.SphereGeometry(0.12 + rand() * 0.16, 5, 3, 0, Math.PI * 2, 0, Math.PI * 0.5);
+    const patch = new THREE.Mesh(patchGeo, mossMat);
+    patch.position.set((rand() - 0.5) * spread, isStump ? 0.4 + rand() * 0.3 : 0.25 + rand() * 0.15, (rand() - 0.5) * 0.5);
+    group.add(patch);
+  }
+  group.rotation.y = rand() * Math.PI * 2;
+  return { group, kind: "rockCluster" }; // reuses the static "rockCluster" update kind — no animation needed, matches how other inert props are treated
+}
+
 // Bioluminescent flora stalk — tapered stem with a glowing cap.
 function createFloraStalk(colorHex, rand) {
   const group = new THREE.Group();
@@ -585,6 +627,27 @@ function createRockCluster(biome, colorHex, rand) {
     rock.position.set(Math.cos(angle) * dist, scale * 0.35, Math.sin(angle) * dist);
     rock.rotation.set(rand() * 0.4, rand() * Math.PI * 2, rand() * 0.4);
     group.add(rock);
+
+    // Small moss patches on the rock's upper surface — Verdant only. A
+    // genuine distinct growth, not just an overall color tint, is what
+    // actually reads as "moss on a rock" rather than "greenish rock."
+    if (biome === "verdant") {
+      const mossColor = new THREE.Color(0x3a6b2a).lerp(new THREE.Color(0x5c9a3a), rand());
+      const mossMat = new THREE.MeshStandardMaterial({ color: mossColor, roughness: 1, flatShading: true });
+      const patchCount = 1 + Math.floor(rand() * 3);
+      for (let p = 0; p < patchCount; p++) {
+        const patchGeo = new THREE.SphereGeometry(scale * (0.15 + rand() * 0.18), 5, 3, 0, Math.PI * 2, 0, Math.PI * 0.5); // a flattened dome — a patch, not a full sphere growth
+        const patch = new THREE.Mesh(patchGeo, mossMat);
+        const pAngle = rand() * Math.PI * 2;
+        const pDist = rand() * scale * 0.7;
+        patch.position.set(
+          rock.position.x + Math.cos(pAngle) * pDist,
+          rock.position.y + scale * (0.35 + rand() * 0.3),
+          rock.position.z + Math.sin(pAngle) * pDist
+        );
+        group.add(patch);
+      }
+    }
   }
   return { group, kind: "rockCluster" };
 }
@@ -658,6 +721,23 @@ function createTreeTexture(seed, archetype, leafColorHex, capColorHex, barkColor
     ctx.fill();
   } else {
     ctx.fillRect(w * 0.4, trunkTop, w * 0.2, h - trunkTop);
+  }
+
+  // Small moss patches on the lower trunk — real trees develop moss
+  // near the base where it stays shaded/damp, and this is what actually
+  // sells "living forest" rather than a uniformly clean painted trunk.
+  const mossPatchCount = 2 + Math.floor((seed * 41) % 3);
+  for (let m = 0; m < mossPatchCount; m++) {
+    const my = h * (0.82 + ((seed * 17 + m) % 1) * 0.16);
+    const mx = w * 0.5 + (((seed * 29 + m) % 1) - 0.5) * w * 0.16;
+    const mr = w * (0.05 + ((seed * 13 + m) % 1) * 0.04);
+    const grad = ctx.createRadialGradient(mx, my, 0, mx, my, mr);
+    grad.addColorStop(0, "#5c9a3a");
+    grad.addColorStop(1, "rgba(92,154,58,0)");
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(mx, my, mr, 0, Math.PI * 2);
+    ctx.fill();
   }
 
   ctx.fillStyle = `#${new THREE.Color(leafColorHex).getHexString()}`;

@@ -449,7 +449,7 @@ function buildLevel(levelIdx) {
   weatherHandle = createWeatherSystem(scene, level.biome);
   cloudsHandle = createClouds(scene, level.biome);
   horizonHandle = createHorizonSilhouettes(scene, level.biome);
-  wildlifeHandle = createWildlife(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
+  wildlifeHandle = createWildlife(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), LIQUID_LEVEL[level.biome]);
   landmarkHandle = createLandmark(scene, level.biome, level.color, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
 
   const layout = generateLevelLayout(level.biome, WORLD_SEED);

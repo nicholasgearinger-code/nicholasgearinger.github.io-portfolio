@@ -345,6 +345,7 @@ function buildAmbientGraph(biome) {
     drone(60, "sine", 0.02);
     noiseBed("bandpass", 900, 0.5, 0.03, 0.15, 0.012); // wind through foliage, gustier
     noiseBed("bandpass", 2200, 1.2, 0.008, 0.3, 0.004); // thin high shimmer — water/leaves
+    noiseBed("bandpass", 4200, 3.5, 0.006, 0.4, 0.003); // a low, always-present insect-chorus hum — constant ambient texture between the periodic bird/night-creature calls below, not just wind and water
     // Ambient calls — a living forest, not just wind through leaves.
     // Birds during the day, a genuinely different set of night creatures
     // once it's actually dark, not the same birds just quieter.

@@ -454,7 +454,7 @@ function createBush(colorHex, rand) {
 // actual light spilling onto the nearby ground, matching the same
 // "glowing prop lights its own surroundings a little" idea as Ember's
 // createEmberFire/emberVent.
-const FUNGUS_GLOW_COLORS = [0x7cffb2, 0x8fe3ff, 0xd8ff6a, 0xc98fff];
+const FUNGUS_GLOW_COLORS = [0xb87cff, 0xc98fff, 0xa855f7, 0xd4a5ff]; // purple-dominant per explicit request — was green/cyan/yellow/purple
 function createGlowFungus(colorHex, rand) {
   const group = new THREE.Group();
   const glowColor = new THREE.Color(FUNGUS_GLOW_COLORS[Math.floor(rand() * FUNGUS_GLOW_COLORS.length)]);
@@ -509,9 +509,12 @@ function createFallenLog(colorHex, rand) {
     group.add(log);
   }
   // Moss patches — same technique as the rock clusters, since this is
-  // exactly the kind of surface real moss actually colonizes.
+  // exactly the kind of surface real moss actually colonizes. Genuinely
+  // emissive (purple) and twinkles, per explicit request — not just a
+  // colored surface.
   const mossColor = new THREE.Color(0x3a6b2a).lerp(new THREE.Color(0x5c9a3a), rand());
-  const mossMat = new THREE.MeshStandardMaterial({ color: mossColor, roughness: 1, flatShading: true });
+  const mossGlow = new THREE.Color(0xb87cff);
+  const mossMat = new THREE.MeshStandardMaterial({ color: mossColor, roughness: 1, flatShading: true, emissive: mossGlow, emissiveIntensity: 0.4 });
   const patchCount = 3 + Math.floor(rand() * 4);
   const spread = isStump ? 0.4 : 1.6;
   for (let p = 0; p < patchCount; p++) {
@@ -521,7 +524,7 @@ function createFallenLog(colorHex, rand) {
     group.add(patch);
   }
   group.rotation.y = rand() * Math.PI * 2;
-  return { group, kind: "rockCluster" }; // reuses the static "rockCluster" update kind — no animation needed, matches how other inert props are treated
+  return { group, kind: "mossyProp", materials: [mossMat], bobSeed: rand() * Math.PI * 2 }; // "mossyProp" kind twinkles the moss materials — see updateDecoration
 }
 
 // Bioluminescent flora stalk — tapered stem with a glowing cap.
@@ -611,6 +614,7 @@ function createRockCluster(biome, colorHex, rand) {
   const rockLow = new THREE.Color(0x2a2620);
   const rockHigh = new THREE.Color(colorHex).lerp(new THREE.Color(0xffffff), 0.15);
   const count = 2 + Math.floor(rand() * 3);
+  const mossMaterials = []; // collected across every rock in this cluster that gets moss — see the verdant branch below
   for (let i = 0; i < count; i++) {
     const scale = 0.4 + rand() * 0.9;
     const geo = new THREE.IcosahedronGeometry(scale, 0); // rock — stays blocky, see note on the crystal cluster above
@@ -631,9 +635,12 @@ function createRockCluster(biome, colorHex, rand) {
     // Small moss patches on the rock's upper surface — Verdant only. A
     // genuine distinct growth, not just an overall color tint, is what
     // actually reads as "moss on a rock" rather than "greenish rock."
+    // Genuinely emissive (purple) and twinkles, per explicit request.
     if (biome === "verdant") {
       const mossColor = new THREE.Color(0x3a6b2a).lerp(new THREE.Color(0x5c9a3a), rand());
-      const mossMat = new THREE.MeshStandardMaterial({ color: mossColor, roughness: 1, flatShading: true });
+      const mossGlow = new THREE.Color(0xb87cff);
+      const mossMat = new THREE.MeshStandardMaterial({ color: mossColor, roughness: 1, flatShading: true, emissive: mossGlow, emissiveIntensity: 0.4 });
+      mossMaterials.push(mossMat);
       const patchCount = 1 + Math.floor(rand() * 3);
       for (let p = 0; p < patchCount; p++) {
         const patchGeo = new THREE.SphereGeometry(scale * (0.15 + rand() * 0.18), 5, 3, 0, Math.PI * 2, 0, Math.PI * 0.5); // a flattened dome — a patch, not a full sphere growth
@@ -649,6 +656,7 @@ function createRockCluster(biome, colorHex, rand) {
       }
     }
   }
+  if (mossMaterials.length > 0) return { group, kind: "mossyProp", materials: mossMaterials, bobSeed: rand() * Math.PI * 2 }; // "mossyProp" kind twinkles the moss materials — see updateDecoration
   return { group, kind: "rockCluster" };
 }
 
@@ -1041,10 +1049,24 @@ function updateDecoration(handle, elapsed) {
       const shimmer = 1 + Math.sin(elapsed * 0.5 + handle.bobSeed) * 0.08;
       handle.material.color.setScalar(shimmer);
     }
+  } else if (handle.kind === "mossyProp") {
+    // Same sharp on/off twinkle character as glowFungus — mostly dim,
+    // briefly bright. All patches on one prop share a phase (so a given
+    // rock/log's moss twinkles together), but different props each get
+    // their own random bobSeed, so across the whole forest it reads as
+    // many independent points twinkling asynchronously, like fireflies.
+    const twinkle = Math.pow(Math.max(0, Math.sin(elapsed * 1.4 + handle.bobSeed)), 6);
+    const intensity = 0.15 + twinkle * 3.5;
+    for (const mat of handle.materials || []) mat.emissiveIntensity = intensity;
   } else if (handle.kind === "glowFungus") {
-    const pulse = 0.6 + 0.4 * Math.sin(elapsed * 0.9 + handle.bobSeed) * Math.sin(elapsed * 0.37 + handle.bobSeed * 1.7);
-    if (handle.material) handle.material.emissiveIntensity = 2.2 + pulse * 2.2;
-    if (handle.light) handle.light.intensity = 0.5 + pulse * 0.9;
+    // A genuine on/off TWINKLE — mostly dim, briefly bright — rather
+    // than a smooth continuous breathing pulse. Raising sine to a high
+    // power (clamped to positive first) produces sharp brief peaks with
+    // long dim valleys between them, which is what actually reads as
+    // "twinkling like fireflies" instead of slow organic glowing.
+    const twinkle = Math.pow(Math.max(0, Math.sin(elapsed * 1.6 + handle.bobSeed)), 6);
+    if (handle.material) handle.material.emissiveIntensity = 0.4 + twinkle * 4.2;
+    if (handle.light) handle.light.intensity = 0.08 + twinkle * 1.3;
   } else if (handle.kind === "debris") {
     handle.group.position.y = handle.baseY + handle.hoverHeight + Math.sin(elapsed * 0.6 + handle.bobSeed) * handle.bobAmplitude;
     handle.group.rotation.y += handle.spinRate * 0.016;

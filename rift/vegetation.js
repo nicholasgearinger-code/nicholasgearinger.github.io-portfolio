@@ -37,9 +37,9 @@ const GRASS_STYLE = {
 // handles the fancier per-instance-color paths.
 const FLOWER_STYLE = {
   verdant: {
-    tuftCount: 700, colors: [0xff8fd6, 0xffd36e, 0xc9a0ff, 0xfff6e0], stemColor: 0x2d5a2a,
+    tuftCount: 700, colors: [0xff8fd6, 0x8fc9ff, 0xc9a0ff, 0xffb3e6], stemColor: 0x2d5a2a, // pink/blue/purple — was pink/yellow/purple/cream
     height: 0.22, heightVariance: 0.08, headSize: 0.075,
-    glowColors: [0xc9a0ff], // a subset that actually glow (bioluminescent) — the rest stay simple bright non-emissive color for variety, not every flower needs to be a light source
+    glowColors: [0xff8fd6, 0x8fc9ff, 0xc9a0ff], // 3 of the 4 colors now glow (was just 1) — a real pink/blue/purple bioluminescent presence, not a single accent color
   },
 };
 
@@ -187,14 +187,15 @@ function createFlowers(scene, biome, sampleHeight, radius) {
   const headGeo = new THREE.OctahedronGeometry(style.headSize, 0);
   const batches = style.colors.map((colorHex) => {
     const mat = new THREE.MeshStandardMaterial({ color: colorHex, roughness: 0.5, flatShading: true });
-    if (style.glowColors && style.glowColors.includes(colorHex)) {
+    const isGlow = !!(style.glowColors && style.glowColors.includes(colorHex));
+    if (isGlow) {
       mat.emissive = new THREE.Color(colorHex);
       mat.emissiveIntensity = 2.8;
     }
     const mesh = new THREE.InstancedMesh(headGeo, mat, perColor);
     mesh.castShadow = true;
     scene.add(mesh);
-    return { mesh, placed: 0 };
+    return { mesh, placed: 0, material: mat, isGlow, phase: Math.random() * Math.PI * 2 };
   });
 
   let attempts = 0;
@@ -272,6 +273,20 @@ function updateGrass(handle, elapsed, windX = 0, windZ = 0) {
   mesh.instanceMatrix.needsUpdate = true;
 }
 
+// A slow, smooth breathing pulse on each glowing flower color batch —
+// gradual in/out, matching the same "breathing" character as the tree
+// canopy glow (distinct from the sharp firefly-style twinkle used for
+// moss/fungus/motes). Each color batch gets its own phase so pink/blue/
+// purple flowers don't all breathe in perfect unison across the field.
+function updateFlowers(handle, elapsed) {
+  if (!handle) return;
+  for (const batch of handle.batches) {
+    if (!batch.isGlow) continue;
+    const breathe = 0.5 + 0.5 * Math.sin(elapsed * 0.5 + batch.phase);
+    batch.material.emissiveIntensity = 1.4 + breathe * 2.2;
+  }
+}
+
 function disposeGrass(scene, handle) {
   if (!handle) return;
   scene.remove(handle.mesh);
@@ -279,4 +294,4 @@ function disposeGrass(scene, handle) {
   handle.mesh.material.dispose();
 }
 
-export { createGrass, updateGrass, disposeGrass, createFlowers, disposeFlowers };
+export { createGrass, updateGrass, disposeGrass, createFlowers, updateFlowers, disposeFlowers };

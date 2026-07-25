@@ -922,7 +922,7 @@ function getTreeTexture(archetype, leafColorHex, capColorHex, barkColorHex, rand
 // the diffuse texture, keyed only by archetype (glow color/placement
 // doesn't need to vary by leaf/bark color the way the diffuse look does).
 const GLOW_TEXTURE_VARIANTS = 3;
-const GLOW_COLORS = ["#7cffb2", "#8fe3ff", "#d8ff6a"];
+const GLOW_COLORS = ["#ff8fd6", "#8fc9ff", "#c98fff"]; // pink/blue/purple — was green/cyan/yellow
 const treeGlowTextureCache = new Map();
 function createTreeGlowTexture(seed, archetype) {
   const w = 110;
@@ -1048,6 +1048,11 @@ function updateDecoration(handle, elapsed) {
       // texture's own gradient/rim-light.
       const shimmer = 1 + Math.sin(elapsed * 0.5 + handle.bobSeed) * 0.08;
       handle.material.color.setScalar(shimmer);
+      // A slow, smooth breathing pulse on the canopy's own glow spots —
+      // gradual in/out, not a sharp flash like the fireflies/moss/fungus
+      // twinkle, so the whole tree reads as slowly "breathing" rather
+      // than blinking.
+      handle.material.emissiveIntensity = 2.4 + (0.5 + 0.5 * Math.sin(elapsed * 0.6 + handle.bobSeed * 1.3)) * 2.4;
     }
   } else if (handle.kind === "mossyProp") {
     // Same sharp on/off twinkle character as glowFungus — mostly dim,

@@ -216,7 +216,7 @@ function createGroundGlow(scene) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.BufferAttribute(basePositions.slice(), 3));
   const mat = new THREE.PointsMaterial({
-    map: getGroundGlowTexture(), color: 0xa8ffcf, size: 1.0, transparent: true, opacity: 0,
+    map: getGroundGlowTexture(), color: 0xd68fff, size: 1.0, transparent: true, opacity: 0, // was mint-green 0xa8ffcf
     blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
   });
   const points = new THREE.Points(geo, mat);
@@ -525,7 +525,7 @@ function updateWeatherSystem(handle, dt, erupting = false, dayAmount = 0) {
     // until the scene's own lighting actually crushes down, then reads
     // as real ambient light coming from the forest floor itself.
     const nightAmount = Math.max(0, Math.min(1, 1 - dayAmount / 0.35));
-    gg.points.material.opacity = nightAmount * 0.85;
+    gg.points.material.opacity = nightAmount * (0.6 + 0.25 * (0.5 + 0.5 * Math.sin(handle.elapsed * 0.7)));
     const posAttr = gg.points.geometry.attributes.position;
     for (let i = 0; i < gg.seeds.length; i++) {
       const bx = gg.basePositions[i * 3], by = gg.basePositions[i * 3 + 1], bz = gg.basePositions[i * 3 + 2];

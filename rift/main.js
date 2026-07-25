@@ -1074,17 +1074,17 @@ function animate() {
     terrainMesh.material.emissive.setHex(0xd020a8);
     terrainMesh.material.emissiveIntensity = 0.04 + groundNightAmount * 0.5;
   }
-  // Underwater effect — Verdant only. Overrides the fog dayNightCycle/
-  // weather already set earlier this same frame with a dense, dark, murky
-  // tint, darkens the sun/ambient intensity, AND tints the light COLORS
-  // themselves blue (both sun.color and ambientLight.color are also
-  // reset every frame by dayNightCycle, so this override is safe and
-  // self-corrects the moment the player surfaces). Tinting light color
-  // is what actually makes every surface in view read as blue regardless
-  // of distance — fog alone only visibly tints distant objects, nearby
-  // ones would still show their normal color.
-  const isUnderwater = currentLevelIdx >= 0 && LEVELS[currentLevelIdx].biome === "verdant" && camera.position.y < LIQUID_LEVEL.verdant + PLAYER_EYE_HEIGHT - 0.3;
-  if (isUnderwater) {
+  // Underwater effect — Verdant only. All of it (fog, lighting, water
+  // volume, screen distortion below) now gated on the SAME strict
+  // "fully submerged" condition — the camera/eyes themselves below the
+  // water surface, not just the player's feet in shallow water — per
+  // explicit request that the fog/distortion match lighting's threshold
+  // rather than triggering earlier. sun.color/ambientLight.color/
+  // scene.fog.color/.density are all confirmed reset every frame by
+  // dayNightCycle, so this override is safe and self-corrects the
+  // moment the player surfaces.
+  const isFullySubmerged = currentLevelIdx >= 0 && LEVELS[currentLevelIdx].biome === "verdant" && camera.position.y < LIQUID_LEVEL.verdant;
+  if (isFullySubmerged) {
     scene.fog.color.setHex(0x0a2838);
     scene.fog.density = 0.14;
     sun.color.setHex(0x1a4560);
@@ -1093,9 +1093,9 @@ function animate() {
     ambientLight.intensity *= 0.22;
   }
   // The enclosing "water volume" sphere — follows the camera every
-  // frame, only visible while actually underwater.
-  waterVolumeMesh.visible = isUnderwater;
-  if (isUnderwater) waterVolumeMesh.position.copy(camera.position);
+  // frame, only visible while actually fully submerged.
+  waterVolumeMesh.visible = isFullySubmerged;
+  if (isFullySubmerged) waterVolumeMesh.position.copy(camera.position);
   const wind = updateWeatherSystem(weatherHandle, dt, eruptionActive, dayNight.dayAmount);
   updateAtmosphericParticles(atmosphereHandle, elapsedTime, dt, wind.windX, wind.windZ);
   updateGrass(grassHandle, elapsedTime, wind.windX, wind.windZ, dayNight.dayAmount);
@@ -1109,7 +1109,7 @@ function animate() {
   updateLightShafts(lightShaftHandles, dayNight.dayAmount);
   updateWorldPulse(dt);
   updateProjectiles(dt);
-  if (isUnderwater) {
+  if (isFullySubmerged) {
     // Two-pass render: scene (including the water volume mesh above,
     // which renders normally as part of it) to an offscreen target, then
     // a full-screen quad draws that texture back out with a

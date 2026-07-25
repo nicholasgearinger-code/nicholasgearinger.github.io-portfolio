@@ -56,6 +56,14 @@ const BIOME_SKY_TINT = {
   ashen: { zenith: 0x2a2210, horizon: 0xd8b878, fog: 0x261e10, amount: 0.10 },
 };
 
+// A much stronger, Verdant-only sky shift that only kicks in as true
+// night falls — layered on top of the subtle all-day BIOME_SKY_TINT
+// above, which alone isn't enough to complement the magenta ground and
+// pink/blue/purple glowing creatures once night actually crushes down.
+// Daytime sky is unaffected (window gates this to the same kind of
+// night-only activation curve BIOME_NIGHT_DARKEN already uses).
+const VERDANT_NIGHT_SKY = { zenith: 0x2a0a3a, horizon: 0x7a1f7a, fog: 0x1a0a2a, maxAmount: 0.55, window: 0.35 };
+
 // How much darker a biome's night gets, on top of the shared NIGHT preset
 // above — 1 = no change (the default for any biome not listed). Ember gets
 // crushed down hard: a biome lit mainly by its own fire/lava/embers at
@@ -570,6 +578,12 @@ function updateDayNightCycle(cycle, dt) {
     skyZenith = lerpColor(skyZenith, tint.zenith, tint.amount);
     skyHorizon = lerpColor(skyHorizon, tint.horizon, tint.amount);
     fogColor = lerpColor(fogColor, tint.fog, tint.amount);
+  }
+  if (cycle.biome === "verdant") {
+    const nightSkyAmount = THREE.MathUtils.clamp(1 - dayAmount / VERDANT_NIGHT_SKY.window, 0, 1) * VERDANT_NIGHT_SKY.maxAmount;
+    skyZenith = lerpColor(skyZenith, VERDANT_NIGHT_SKY.zenith, nightSkyAmount);
+    skyHorizon = lerpColor(skyHorizon, VERDANT_NIGHT_SKY.horizon, nightSkyAmount);
+    fogColor = lerpColor(fogColor, VERDANT_NIGHT_SKY.fog, nightSkyAmount);
   }
 
   cycle.scene.fog.color.copy(fogColor);

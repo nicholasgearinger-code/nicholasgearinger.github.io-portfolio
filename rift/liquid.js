@@ -486,7 +486,7 @@ function createCliffWall(scene, topY, bottomY, x, z, width, seedRand) {
   // needed.
   const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true, side: THREE.DoubleSide });
   const mesh = new THREE.Mesh(geo, mat);
-  mesh.position.set(x, bottomY + height / 2 - 1.5, z + 0.3); // sits just behind the water's own plane
+  mesh.position.set(x, bottomY + height / 2 - 1.5, z - 2.5); // was z+0.3 — that positive offset actually placed it IN FRONT of the waterfall (closer to the player, who approaches from the south/higher Z), occluding it entirely; negative offset genuinely sits it behind, matching the cave mouth's convention
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   scene.add(mesh);

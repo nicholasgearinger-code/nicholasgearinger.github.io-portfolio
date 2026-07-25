@@ -16,7 +16,7 @@ const TERRAIN_SIZE = 240;      // full width/depth of the landmass, in world uni
 
 const TERRAIN_SEGMENTS_DEFAULT = 140;  // fallback only — actual resolution comes from graphicsSettings' current tier
 const RIVER_WIDTH = 10;        // Verdant Hollow's river channel, half-width in world units — widened from 7 for a more substantial "long river" presence
-const RIVER_DEPTH = 2.5;       // how far below the water surface the river's center floor sits — guarantees it always stays flooded regardless of the surrounding hill terrain (see the verdant shaper below)
+const RIVER_DEPTH = 7;         // was 2.5 — pushed much deeper per explicit request. Still guarantees a continuous flooded channel regardless of surrounding hill terrain (see the verdant shaper below)
 const WATERFALL_Z = -80;       // fixed world Z where the elevated upstream "source" terrain drops into the river — main.js positions the waterfall visual here too, by sampling the actual rendered terrain height rather than duplicating this file's noise math
 const WATERFALL_SOURCE_HEIGHT = 16; // how high the source area rises above the normal rolling-hills base at its peak, past the ramp-up zone
 const LAVA_CHANNEL_WIDTH = 9;  // Ember's main winding lava channel, half-width in world units — separate constant since it's deliberately wider/deeper than Verdant's river

@@ -422,7 +422,7 @@ function buildLevel(levelIdx) {
     const cliffRand = mulberry32(hashStringToSeed(WORLD_SEED + "-waterfall-cliff-" + level.biome));
     cliffWallHandle = createCliffWall(scene, topY, bottomY, waterfallX, WATERFALL_Z, WORLD_BOUND_RADIUS * 1.5, cliffRand); // spans the WHOLE hillside now, not just a narrow strip around the falls — user clarified they meant the entire hill
     for (let i = 0; i < 6; i++) {
-      const angle = cliffRand() * Math.PI * 2;
+      const angle = Math.PI + cliffRand() * Math.PI; // restricted to the northern semicircle (behind/beside the falls) — a full 360° spread could place a rock directly south, in the player's sightline toward the water
       const dist = 3 + cliffRand() * 8;
       const rx = waterfallX + Math.cos(angle) * dist;
       const rz = WATERFALL_Z + Math.sin(angle) * dist;
@@ -1009,7 +1009,7 @@ function animate() {
   // is what actually makes every surface in view read as blue regardless
   // of distance — fog alone only visibly tints distant objects, nearby
   // ones would still show their normal color.
-  if (currentLevelIdx >= 0 && LEVELS[currentLevelIdx].biome === "verdant" && camera.position.y < LIQUID_LEVEL.verdant - 0.1) {
+  if (currentLevelIdx >= 0 && LEVELS[currentLevelIdx].biome === "verdant" && camera.position.y < LIQUID_LEVEL.verdant + PLAYER_EYE_HEIGHT - 0.3) {
     scene.fog.color.setHex(0x0a2838);
     scene.fog.density = 0.14;
     sun.color.setHex(0x1a4560);

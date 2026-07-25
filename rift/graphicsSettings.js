@@ -8,6 +8,16 @@
 // where the game already sat before this system existed; "high" pushes
 // genuinely past that (more polygons/detail, not just the same look at a
 // higher cap) and "low" scales hard down for weak devices.
+//
+// IMPORTANT ART-STYLE RULE: decorationDetail (subdivision level for
+// Icosahedron/Octahedron geometry) applies to organic shapes — tree
+// foliage, flowers — where rounding out with more polygons genuinely
+// looks better. Rocks and crystals are deliberately excluded from this in
+// decorations.js and stay at their sharpest/blockiest form (detail=0) at
+// every tier, on purpose — smoothing a rock or crystal fights the
+// established low-poly art style and wastes polygon budget on something
+// that looks worse rounded, not better. If a future decoration is
+// mineral/rock in nature, keep its detail fixed at 0 regardless of tier.
 // -----------------------------------------------------------------------------
 
 const STORAGE_KEY = "riftGraphicsSettings";
@@ -15,29 +25,29 @@ const STORAGE_KEY = "riftGraphicsSettings";
 const TIERS = {
   low: {
     label: "Low",
-    terrainSegments: 50,
-    liquidSegments: 14,        // lava/water plane subdivision — was hardcoded at 40 regardless of tier before this
-    skyDomeSegments: [16, 8],  // [widthSegments, heightSegments]
-    grassBladeSegments: 3,     // radial segments per blade — 3 is the coarsest a cone can be
-    decorationDetail: 0,       // subdivision level passed to IcosahedronGeometry/OctahedronGeometry — 0 is their coarsest form
-    grassMultiplier: 0.22,
-    particleMultiplier: 0.35,
-    cloudMultiplier: 0.5,
-    wildlifeMultiplier: 0.4,
-    auroraStrips: 4,
-    sunBeams: 3,
+    terrainSegments: 40,       // pushed down — bare minimum, genuinely fast on weak devices
+    liquidSegments: 10,
+    skyDomeSegments: [12, 6],
+    grassBladeSegments: 3,     // radial segments per blade — 3 is the coarsest a cone can be, already floor
+    decorationDetail: 0,       // subdivision level passed to IcosahedronGeometry/OctahedronGeometry — 0 is their coarsest form, already floor
+    grassMultiplier: 0.12,
+    particleMultiplier: 0.2,
+    cloudMultiplier: 0.3,
+    wildlifeMultiplier: 0.25,
+    auroraStrips: 2,
+    sunBeams: 2,
     shootingStarPoolSize: 1,
-    silhouetteMultiplier: 0.6,
+    silhouetteMultiplier: 0.4,
     shadowsEnabled: false,
-    shadowMapSize: 512,
+    shadowMapSize: 256,
     pixelRatioCap: 1,
   },
   medium: {
     label: "Medium",
-    terrainSegments: 140,
-    liquidSegments: 40,
+    terrainSegments: 190,      // a real optimized balance — meaningfully more detail than Low without High's cost
+    liquidSegments: 55,
     skyDomeSegments: [32, 16],
-    grassBladeSegments: 3,
+    grassBladeSegments: 4,
     decorationDetail: 1,
     grassMultiplier: 1,
     particleMultiplier: 1,
@@ -53,30 +63,41 @@ const TIERS = {
   },
   high: {
     label: "High",
-    terrainSegments: 280,
-    liquidSegments: 90,
-    skyDomeSegments: [48, 24],
-    grassBladeSegments: 5,
-    decorationDetail: 2,       // real jump: roughly 4x the triangles per shape per +1 step on Icosahedron/Octahedron, so 2 vs 0 is a dramatic difference, not a subtle one
-    grassMultiplier: 1.6,
-    particleMultiplier: 1.5,
-    cloudMultiplier: 1.4,
-    wildlifeMultiplier: 1.4,
-    auroraStrips: 16,
-    sunBeams: 9,
-    shootingStarPoolSize: 5,
-    silhouetteMultiplier: 1.5,
+    terrainSegments: 600,      // pushed to the highest practical detail — the real ceiling this tier is meant to represent, not just "a bit more than Medium"
+    liquidSegments: 200,
+    skyDomeSegments: [64, 32],
+    grassBladeSegments: 7,
+    decorationDetail: 3,       // linear growth in practice (decorations.js uses it as sphereSeg=6+detail*4, capSeg=8+detail*4, and a >=2 threshold — not a direct exponential Icosahedron/Octahedron subdivision parameter, since rocks/crystals are hardcoded to stay at 0 regardless of this value per the art-style rule above)
+    grassMultiplier: 2.2,
+    particleMultiplier: 2,
+    cloudMultiplier: 1.8,
+    wildlifeMultiplier: 1.8,
+    auroraStrips: 22,
+    sunBeams: 12,
+    shootingStarPoolSize: 7,
+    silhouetteMultiplier: 2,
     shadowsEnabled: true,
-    shadowMapSize: 2048,
-    pixelRatioCap: 2,
+    shadowMapSize: 4096,
+    pixelRatioCap: 3,
   },
 };
 
-let currentTier = "medium";
+// No saved preference yet means this is a first visit — default touch
+// devices to "low" instead of "medium" (a phone's GPU generally can't
+// absorb Medium's shadow pass painlessly the way a laptop/desktop can),
+// so the out-of-box experience on mobile is actually smooth rather than
+// technically-available-but-choppy. Anyone can still bump it up via the
+// settings panel; this only decides the untouched default.
+function detectDefaultTier() {
+  const isTouch = typeof window !== "undefined" && ("ontouchstart" in window || (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0));
+  return isTouch ? "low" : "medium";
+}
+
+let currentTier = detectDefaultTier();
 try {
   const saved = localStorage.getItem(STORAGE_KEY);
   if (saved && TIERS[saved]) currentTier = saved;
-} catch (_) { /* localStorage unavailable — default tier stands */ }
+} catch (_) { /* localStorage unavailable — detected default stands */ }
 
 function getGraphicsSettings() {
   return TIERS[currentTier];

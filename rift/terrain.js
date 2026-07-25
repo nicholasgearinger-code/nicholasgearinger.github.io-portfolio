@@ -351,7 +351,7 @@ function applyHeightShading(geo, colorHex, minY, maxY, biome, seed) {
  */
 function buildPlanetTerrain(level, seedStr) {
   const seed = hashStringToSeed(seedStr + "::" + level.biome) * 1000;
-  const segments = getGraphicsSettings().terrainSegments || TERRAIN_SEGMENTS_DEFAULT;
+  const segments = getGraphicsSettings().terrainSegments || TERRAIN_SEGMENTS_DEFAULT; // reverted the earlier ×1.4 workaround — terrainSegments itself is now increased directly in graphicsSettings.js, which wasn't available to edit in the round that added the workaround
   const geo = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, segments, segments);
   geo.rotateX(-Math.PI / 2); // lie flat in the XZ plane, +Y up
 

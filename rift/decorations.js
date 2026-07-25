@@ -122,13 +122,28 @@ function createRockSprite(tex, width, height) {
 // undermining that. The glowTex, painted on a black background with a
 // few bright bioluminescent spots, is what keeps specific accents
 // visible via emissive even when the rest of the tree goes dark.
-function createTreeSprite(tex, glowTex, width, height) {
+function createTreeSprite(tex, glowTex, width, height, rand) {
   const group = new THREE.Group();
   const mat = new THREE.MeshStandardMaterial({
     map: tex, transparent: true, side: THREE.DoubleSide, roughness: 0.9,
     emissiveMap: glowTex, emissive: 0xffffff, emissiveIntensity: 3.5,
   });
-  const geo = new THREE.PlaneGeometry(width, height);
+  // Segmented plane (was a single flat quad, 2 triangles) with per-vertex
+  // forward/back jitter on the upper portion — substantially raises the
+  // poly count and gives the canopy genuine 3D bulk/depth instead of a
+  // perfectly flat card. Jitter strength fades toward the base (t*t) so
+  // the trunk stays straight and structurally clean rather than
+  // wobbling.
+  const segsX = 6, segsY = 10;
+  const geo = new THREE.PlaneGeometry(width, height, segsX, segsY);
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const localY = pos.getY(i) + height / 2; // 0 at base, height at top
+    const t = localY / height;
+    const jitterStrength = t * t;
+    pos.setZ(i, pos.getZ(i) + (rand() - 0.5) * width * 0.35 * jitterStrength);
+  }
+  geo.computeVertexNormals();
   const planeA = new THREE.Mesh(geo, mat);
   planeA.position.y = height / 2;
   group.add(planeA);
@@ -496,13 +511,13 @@ function createFallenLog(colorHex, rand) {
   if (isStump) {
     const height = 0.5 + rand() * 0.6;
     const radius = 0.35 + rand() * 0.25;
-    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.85, radius, height, 7), barkMat);
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.85, radius, height, 10), barkMat); // was 7 segments — bumped per explicit "higher poly count" request
     trunk.position.y = height / 2;
     group.add(trunk);
   } else {
     const length = 2.5 + rand() * 3;
     const radius = 0.3 + rand() * 0.25;
-    const log = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius * 0.85, length, 7), barkMat);
+    const log = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius * 0.85, length, 10), barkMat); // was 7 segments — bumped per explicit "higher poly count" request
     log.rotation.z = Math.PI / 2; // lying on its side
     log.rotation.y = rand() * Math.PI * 2;
     log.position.y = radius * 0.8; // sunk slightly into the ground, not perfectly balanced on top
@@ -518,7 +533,7 @@ function createFallenLog(colorHex, rand) {
   const patchCount = 3 + Math.floor(rand() * 4);
   const spread = isStump ? 0.4 : 1.6;
   for (let p = 0; p < patchCount; p++) {
-    const patchGeo = new THREE.SphereGeometry(0.12 + rand() * 0.16, 5, 3, 0, Math.PI * 2, 0, Math.PI * 0.5);
+    const patchGeo = new THREE.SphereGeometry(0.12 + rand() * 0.16, 8, 5, 0, Math.PI * 2, 0, Math.PI * 0.5); // was 5,3 segments — bumped per explicit "higher poly count" request
     const patch = new THREE.Mesh(patchGeo, mossMat);
     patch.position.set((rand() - 0.5) * spread, isStump ? 0.4 + rand() * 0.3 : 0.25 + rand() * 0.15, (rand() - 0.5) * 0.5);
     group.add(patch);
@@ -570,7 +585,7 @@ function createCrystalCluster(colorHex, rand) {
 // — reads as unstable/anti-gravity, fitting the Abyssal Drift theme.
 function createDebris(colorHex, rand) {
   const group = new THREE.Group();
-  const geo = new THREE.IcosahedronGeometry(0.8 + rand() * 1.1, 0); // rock — stays blocky, see note on the crystal cluster above
+  const geo = new THREE.IcosahedronGeometry(0.8 + rand() * 1.1, 0); // rock — stays blocky on purpose, per graphicsSettings.js's documented art-style rule (rocks/crystals excluded from decorationDetail smoothing at every tier) — reverted a previous round's mistaken bump to 1, made before that file's contents were available to check against
   // Irregular shape: nudge vertices outward randomly so it doesn't read as
   // a perfect icosahedron.
   const pos = geo.attributes.position;
@@ -617,7 +632,7 @@ function createRockCluster(biome, colorHex, rand) {
   const mossMaterials = []; // collected across every rock in this cluster that gets moss — see the verdant branch below
   for (let i = 0; i < count; i++) {
     const scale = 0.4 + rand() * 0.9;
-    const geo = new THREE.IcosahedronGeometry(scale, 0); // rock — stays blocky, see note on the crystal cluster above
+    const geo = new THREE.IcosahedronGeometry(scale, 0); // rock — stays blocky on purpose, per graphicsSettings.js's documented art-style rule — reverted from a previous round's mistaken bump
     const pos = geo.attributes.position;
     for (let v = 0; v < pos.count; v++) {
       const k = 0.8 + rand() * 0.4;
@@ -643,7 +658,7 @@ function createRockCluster(biome, colorHex, rand) {
       mossMaterials.push(mossMat);
       const patchCount = 1 + Math.floor(rand() * 3);
       for (let p = 0; p < patchCount; p++) {
-        const patchGeo = new THREE.SphereGeometry(scale * (0.15 + rand() * 0.18), 5, 3, 0, Math.PI * 2, 0, Math.PI * 0.5); // a flattened dome — a patch, not a full sphere growth
+        const patchGeo = new THREE.SphereGeometry(scale * (0.15 + rand() * 0.18), 8, 5, 0, Math.PI * 2, 0, Math.PI * 0.5); // a flattened dome — a patch, not a full sphere growth. Was 5,3 segments — bumped per explicit "higher poly count" request
         const patch = new THREE.Mesh(patchGeo, mossMat);
         const pAngle = rand() * Math.PI * 2;
         const pDist = rand() * scale * 0.7;
@@ -930,7 +945,7 @@ function createTreeGlowTexture(seed, archetype) {
   const canvas = document.createElement("canvas");
   canvas.width = w; canvas.height = h;
   const ctx = canvas.getContext("2d");
-  ctx.fillStyle = "#000000";
+  ctx.fillStyle = "#0d0616"; // was pure black — this gets multiplied by emissiveIntensity (3.5) same as everything else on this map, so a near-black purple source becomes a visible dark-purple tint on the WHOLE tree at night instead of going fully black, while the much brighter accent spots below still read as clearly brighter by comparison
   ctx.fillRect(0, 0, w, h);
   const spotCount = 8 + Math.floor((seed % 1) * 7);
   for (let i = 0; i < spotCount; i++) {
@@ -981,7 +996,7 @@ function createLivingTree(colorHex, rand) {
   const aspect = archetype === "banana" ? 110 / 180 : archetype === "spreading" ? 110 / 210 : archetype === "palm" ? 110 / 380 : archetype === "umbrella" ? 110 / 340 : 110 / 250;
   const width = height * aspect;
 
-  const spriteGroup = createTreeSprite(tex, glowTex, width, height);
+  const spriteGroup = createTreeSprite(tex, glowTex, width, height, rand);
   return {
     group: spriteGroup, kind: "tree", bobAmplitude: 0.02, bobSeed: rand() * Math.PI * 2,
     material: spriteGroup.children[0].material, // both crossed planes share one material — grabbing it here lets updateDecoration animate a subtle canopy shimmer without createRockSprite itself needing to expose it
@@ -995,7 +1010,7 @@ function createLivingTree(colorHex, rand) {
 function createCaveMouth(colorHex, rand) {
   const group = new THREE.Group();
   const rockMat = new THREE.MeshStandardMaterial({ color: 0x2e2b38, roughness: 0.9, flatShading: true });
-  const rock = new THREE.Mesh(new THREE.IcosahedronGeometry(2.4 + rand() * 1.2, 0), rockMat); // rock — stays blocky, see note on the crystal cluster above
+  const rock = new THREE.Mesh(new THREE.IcosahedronGeometry(2.4 + rand() * 1.2, 0), rockMat); // rock — stays blocky on purpose, per graphicsSettings.js's documented art-style rule — reverted from a previous round's mistaken bump
   rock.scale.set(1.3, 0.9, 1);
   rock.position.y = 1.4;
   group.add(rock);

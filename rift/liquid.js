@@ -465,7 +465,7 @@ function disposeRiverCurrent(scene, handle) {
 // already use.
 function createCliffWall(scene, topY, bottomY, x, z, width, seedRand) {
   const height = THREE.MathUtils.clamp(topY - bottomY, 0, 16) + 3; // a bit taller than the falls itself so the rock face visibly extends past both edges of the water
-  const segsX = 26, segsY = 6; // segsX raised from 10 — the wall spans the whole hillside now, far wider than before, and needs more segments across that span to keep the jagged-rock look from reading as smooth/blocky
+  const segsX = 40, segsY = 10; // was 26,6 — bumped further per explicit "higher poly count everywhere" request
   const geo = new THREE.PlaneGeometry(width, height, segsX, segsY); // caller passes the exact total width directly now (no internal multiplier)
   const pos = geo.attributes.position;
   const colors = new Float32Array(pos.count * 3);
@@ -515,7 +515,7 @@ function disposeWaterfall(scene, handle) {
 function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0.6, z: 0.35 }) {
   const style = LIQUID_STYLE[biome];
   if (!style) return null;
-  const segs = getGraphicsSettings().liquidSegments;
+  const segs = getGraphicsSettings().liquidSegments; // reverted the earlier ×1.4 workaround — liquidSegments itself is now increased directly in graphicsSettings.js
   const geo = new THREE.PlaneGeometry(size, size, segs, segs);
   geo.rotateX(-Math.PI / 2);
 

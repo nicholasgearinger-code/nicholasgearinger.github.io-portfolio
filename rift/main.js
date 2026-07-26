@@ -1058,16 +1058,16 @@ function animate() {
   updateWaterfall(waterfallHandle, dt, elapsedTime);
   updateRiverCurrent(riverCurrentHandle, dt);
   updateRiverFlowStrip(riverFlowStripHandle, dt);
-  // Ground magenta night tint — Verdant only. The terrain mesh uses one
-  // shared vertex-colored material for the whole landmass, so tinting
+  // Ground indigo/violet night tint — Verdant only. The terrain mesh uses
+  // one shared vertex-colored material for the whole landmass, so tinting
   // .color (multiplies with the baked-in vertex colors) plus boosting
   // .emissive is the same technique used for grass — a diffuse tint
   // alone would still go invisible under this biome's crushed-dark night
-  // lighting, so real emissive glow is what keeps it visibly magenta.
+  // lighting, so real emissive glow is what keeps it visibly colored.
   if (currentLevelIdx >= 0 && LEVELS[currentLevelIdx].biome === "verdant" && terrainMesh) {
     const groundNightAmount = Math.max(0, Math.min(1, 1 - dayNight.dayAmount / 0.3));
-    terrainMesh.material.color.setRGB(1, 1, 1).lerp(new THREE.Color(0xe040c0), groundNightAmount * 0.6);
-    terrainMesh.material.emissive.setHex(0xd020a8);
+    terrainMesh.material.color.setRGB(1, 1, 1).lerp(new THREE.Color(0x5a3ad8), groundNightAmount * 0.6);
+    terrainMesh.material.emissive.setHex(0x4a20c8);
     terrainMesh.material.emissiveIntensity = 0.04 + groundNightAmount * 0.5;
   }
   // Underwater effect — Verdant only. All of it (fog, lighting, water

@@ -58,8 +58,8 @@ const BIOME_SKY_TINT = {
 
 // A much stronger, Verdant-only sky shift that only kicks in as true
 // night falls — layered on top of the subtle all-day BIOME_SKY_TINT
-// above, which alone isn't enough to complement the magenta ground and
-// pink/blue/purple glowing creatures once night actually crushes down.
+// above, which alone isn't enough to complement the indigo/violet ground
+// and pink/blue/purple glowing creatures once night actually crushes down.
 // Daytime sky is unaffected (window gates this to the same kind of
 // night-only activation curve BIOME_NIGHT_DARKEN already uses).
 const VERDANT_NIGHT_SKY = { zenith: 0x2a0a3a, horizon: 0x7a1f7a, fog: 0x1a0a2a, maxAmount: 0.55, window: 0.35 };

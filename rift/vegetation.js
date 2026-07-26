@@ -255,15 +255,15 @@ function extractBaseTransforms(mesh, count) {
 function updateGrass(handle, elapsed, windX = 0, windZ = 0, dayAmount = 1) {
   if (!handle) return;
   const { mesh, swaySeeds, count, baseMatrices, material } = handle;
-  // Fades toward a pink bioluminescent tint/glow as night falls — both
-  // the diffuse color (so it visibly reads as pink even where some
+  // Fades toward a violet-blue bioluminescent tint/glow as night falls —
+  // both the diffuse color (so it visibly reads as tinted even where some
   // ambient light still reaches it) AND real emissive glow (so it stays
   // visible at all under Verdant's crushed-dark night lighting, which
   // would otherwise swallow a diffuse-only tint into blackness).
   if (material) {
     const nightAmount = Math.max(0, Math.min(1, 1 - dayAmount / 0.3));
-    material.color.setRGB(1, 1, 1).lerp(new THREE.Color(0xff8fd6), nightAmount * 0.7);
-    material.emissive.setHex(0xff5fb8);
+    material.color.setRGB(1, 1, 1).lerp(new THREE.Color(0x7050e8), nightAmount * 0.7);
+    material.emissive.setHex(0x5a30d0);
     material.emissiveIntensity = nightAmount * 0.9;
   }
   const windLean = Math.min(0.5, Math.hypot(windX, windZ) * 0.15); // caps how far wind alone can bend a blade, idle sway still layers on top

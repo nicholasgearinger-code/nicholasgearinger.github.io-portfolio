@@ -54,6 +54,14 @@ const BIOME_SKY_TINT = {
   crystal: { zenith: 0x1a1a3e, horizon: 0x9a8fff, fog: 0x181832, amount: 0.12 },
   abyssal: { zenith: 0x140a1e, horizon: 0x5a2a6a, fog: 0x120a1a, amount: 0.14 },
   ashen: { zenith: 0x2a2210, horizon: 0xd8b878, fog: 0x261e10, amount: 0.10 },
+  // Frost gets a high amount for the same reason Ember does — a biome
+  // locked in constant blizzard shouldn't read as a normal sky at any
+  // time of day either. Pale, desaturated ice-blue/white throughout
+  // (zenith/horizon/fog all close together in hue) rather than a
+  // distinct horizon glow, since the defining atmosphere here is a wall
+  // of driving snow, not a light source near the ground the way Ember's
+  // lava-glow horizon is.
+  frost: { zenith: 0x9fc8dc, horizon: 0xdcf0fa, fog: 0xb8dcec, amount: 0.42 },
 };
 
 // A much stronger, Verdant-only sky shift that only kicks in as true

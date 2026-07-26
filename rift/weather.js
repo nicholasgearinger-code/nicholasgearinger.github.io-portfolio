@@ -41,6 +41,12 @@ const WEATHER_PROFILE = {
     rain: false,
     lightning: { color: 0xd9a15c, intervalMin: 12, intervalMax: 24, height: 60 }, // dry lightning — the real meteorological phenomenon, storms with no rain reaching a parched ground
   },
+  frost: {
+    baseFogDensity: 0.0052, fogPulseAmp: 0.0016, fogPulseSpeed: 0.22, // highest base density of any biome — a blizzard means genuinely poor visibility, not just atmosphere
+    windBaseStrength: 2.4, windVariance: 1.4, windSpeed: 0.12, // strongest constant wind of any biome — this is what actually makes it read as a BLIZZARD rather than gentle falling snow
+    rain: false, // precipitation here is the always-on blizzardSnow system (see createBlizzardSnow), not the cycling rain system every other precipitation biome uses
+    lightning: { color: 0xdcf4ff, intervalMin: 14, intervalMax: 26, height: 50, dim: true }, // thundersnow — a real, if rare, phenomenon; pale ice-white and muted rather than a dramatic strike
+  },
 };
 
 function randRange(min, max) { return min + Math.random() * (max - min); }
@@ -95,6 +101,49 @@ function getAshTexture() {
   ctx.fillRect(0, 0, size, size);
   sharedAshTexture = new THREE.CanvasTexture(canvas);
   return sharedAshTexture;
+}
+
+let sharedSnowTexture = null;
+function getSnowTexture() {
+  if (sharedSnowTexture) return sharedSnowTexture;
+  const size = 24;
+  const canvas = document.createElement("canvas");
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, "rgba(255,255,255,0.95)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  sharedSnowTexture = new THREE.CanvasTexture(canvas);
+  return sharedSnowTexture;
+}
+
+// Frost-only blizzard snow — always present at full density (this biome
+// is defined by CONSTANT snow, not a cycling weather event the way
+// Verdant's rain is), falling much slower than rain/ash so individual
+// flakes are readable, with strong wind-driven horizontal drift added in
+// the update loop below — a blizzard is defined by snow being driven
+// sideways, not falling straight down.
+function createBlizzardSnow(scene) {
+  const count = 900;
+  const positions = new Float32Array(count * 3);
+  const fallSpeeds = new Float32Array(count);
+  for (let i = 0; i < count; i++) {
+    positions[i * 3] = (Math.random() - 0.5) * 220;
+    positions[i * 3 + 1] = Math.random() * 60;
+    positions[i * 3 + 2] = (Math.random() - 0.5) * 220;
+    fallSpeeds[i] = 1.5 + Math.random() * 2;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const mat = new THREE.PointsMaterial({
+    map: getSnowTexture(), color: 0xffffff, size: 0.65, transparent: true, opacity: 0.85,
+    depthWrite: false, sizeAttenuation: true,
+  });
+  const points = new THREE.Points(geo, mat);
+  scene.add(points);
+  return { points, fallSpeeds };
 }
 
 // Ember-only ambient ash, always lightly present (not cyclic like rain —
@@ -354,9 +403,10 @@ function createWeatherSystem(scene, biome) {
   const ashfall = biome === "ember" ? createAshfall(scene) : null;
   const leaffall = biome === "verdant" ? createLeaffall(scene) : null;
   const groundGlow = biome === "verdant" ? createGroundGlow(scene) : null;
+  const blizzardSnow = biome === "frost" ? createBlizzardSnow(scene) : null;
 
   return {
-    scene, biome, profile, lightningLight, rain, distantLightning, dustDevil, crystalRefraction, ashfall, leaffall, groundGlow,
+    scene, biome, profile, lightningLight, rain, distantLightning, dustDevil, crystalRefraction, ashfall, leaffall, groundGlow, blizzardSnow,
     windAngle: Math.random() * Math.PI * 2,
     lightningTimer: randRange(profile.lightning.intervalMin, profile.lightning.intervalMax),
     lightningFlash: 0,
@@ -501,6 +551,25 @@ function updateWeatherSystem(handle, dt, erupting = false, dayAmount = 0) {
     af.points.material.opacity += (targetOpacity - af.points.material.opacity) * Math.min(1, dt * 0.8); // eases toward the new density rather than snapping when an eruption starts/ends
   }
 
+  // Blizzard snow — Frost only, always active at full density (this
+  // biome is defined by CONSTANT snow, not something that cycles on and
+  // off). Falls much slower than rain/ash so individual flakes stay
+  // readable, but drifts sideways with the wind FAR more aggressively
+  // than ash's gentle 0.6 multiplier — a blizzard is fundamentally about
+  // snow being driven horizontally, not falling straight down.
+  if (handle.blizzardSnow) {
+    const sf = handle.blizzardSnow;
+    const posAttr = sf.points.geometry.attributes.position;
+    for (let i = 0; i < sf.fallSpeeds.length; i++) {
+      let y = posAttr.getY(i) - sf.fallSpeeds[i] * dt;
+      if (y < 0) y = 60;
+      posAttr.setY(i, y);
+      posAttr.setX(i, posAttr.getX(i) + windX * dt * 2.2);
+      posAttr.setZ(i, posAttr.getZ(i) + windZ * dt * 2.2);
+    }
+    posAttr.needsUpdate = true;
+  }
+
   // Falling leaves — Verdant only. Flutters side-to-side per-particle as
   // it falls (not just wind-drift like ash) and stays low, drifting down
   // through/under the canopy rather than from high sky.
@@ -589,6 +658,11 @@ function disposeWeatherSystem(scene, handle) {
     scene.remove(handle.groundGlow.points);
     handle.groundGlow.points.geometry.dispose();
     handle.groundGlow.points.material.dispose();
+  }
+  if (handle.blizzardSnow) {
+    scene.remove(handle.blizzardSnow.points);
+    handle.blizzardSnow.points.geometry.dispose();
+    handle.blizzardSnow.points.material.dispose();
   }
 }
 

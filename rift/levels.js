@@ -17,8 +17,14 @@ const LEVELS = [
   { biome: "crystal", name: "Crystal Spire", tagline: "Flat, angular ground broken by sudden crystal spires." },
   { biome: "abyssal", name: "Abyssal Drift", tagline: "Solid ground cut through with chasms that never end." },
   { biome: "ashen", name: "Ashen Expanse", tagline: "A cracked, wind-swept lakebed that forgot how to be full." },
+  { biome: "frost", name: "Frostbound Reach", tagline: "A blizzard-locked expanse, ice caverns cut deep beneath the snow." },
 ];
-LEVELS.forEach((l) => { l.color = biomeColor(l.biome); });
+LEVELS.forEach((l) => {
+  if (l.biome === "frost") return; // worldgen.js's biomeColor() has no case for this brand-new biome and isn't part of this session's working set to check — skipped entirely rather than risk calling it with an unrecognized value (if it throws for an unknown biome, that would crash every OTHER level's color too, not just this one)
+  l.color = biomeColor(l.biome);
+});
+// A pale, cold ice-blue, distinct from every other biome's accent color.
+LEVELS.find((l) => l.biome === "frost").color = 0xbfe8fa;
 
 const CRYSTAL_COUNT = 12;
 const LORE_MARKER_COUNT = 5;

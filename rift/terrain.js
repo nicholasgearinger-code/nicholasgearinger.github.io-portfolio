@@ -240,6 +240,23 @@ const BIOME_SHAPERS = {
     const scar = distFromScar < scarWidth ? -(1 - distFromScar / scarWidth) * 0.7 : 0;
     return dunes + swell + scar;
   },
+  // Frozen icy terrain — rolling snow-covered hills with a jagged
+  // ice-ridge texture riding on top, plus scattered deep ice caverns cut
+  // into the ground. The caverns reuse the exact same threshold-carved
+  // technique Abyssal's chasms already use above (a proven pattern for
+  // "the ground occasionally opens into a real pit" rather than a new
+  // one), just re-tuned for shallower, more frequent openings. Color
+  // identity comes from SURFACE_PATCH_STYLE.frost below plus the base
+  // color passed into applyHeightShading (set in levels.js), not from
+  // the carving math itself.
+  frost(u, v, seed) {
+    const worldX = u * (TERRAIN_SIZE / 2), worldZ = v * (TERRAIN_SIZE / 2);
+    const base = fbm2(u * 1.4, v * 1.4, seed, 4, 2.0, 0.5) * 7; // rolling snowdrift hills
+    const ridged = Math.abs(fbm2(u * 2.6, v * 2.6, seed + 80, 3, 2.0, 0.5)) * 3; // jagged wind-carved ice ridges
+    const cavernNoise = fbm2(u * 1.9 + 500, v * 1.9 + 500, seed + 200, 3, 2.0, 0.5);
+    const cavern = cavernNoise > 0.3 ? -(cavernNoise - 0.3) * 18 : 0; // real carved openings, not just texture
+    return base + ridged + cavern;
+  },
 };
 
 /**
@@ -287,6 +304,7 @@ const SURFACE_PATCH_STYLE = {
   crystal: { color: 0xcfeaff, threshold: 0.7, freq: 2.8 },  // pale mineral-vein streaks
   abyssal: { color: 0x050308, threshold: 0.6, freq: 2.5 },  // near-black void patches
   ashen: { color: 0xe8dfc8, threshold: 0.65, freq: 3.6 },   // sun-bleached, cracked-pale patches
+  frost: { color: 0xaee0f5, threshold: 0.6, freq: 2.4 },    // pale ice-blue shadow patches — cold light through snow, not brown/grey rock texture
 };
 
 // A much finer, higher-frequency speckle used to be layered on top of the

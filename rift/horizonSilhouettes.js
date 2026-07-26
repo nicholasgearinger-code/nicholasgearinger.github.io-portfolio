@@ -28,6 +28,12 @@ const SILHOUETTE_STYLE = {
   crystal: { count: 9, color: 0x10161e, minH: 25, maxH: 55, jagged: true, capColor: 0xcfe8ff, farTint: 0x1a1a3a },
   abyssal: { count: 7, color: 0x0a0810, minH: 20, maxH: 45, jagged: true, capColor: 0x9a7ab0, farTint: 0x140a1e },
   ashen: { count: 6, color: 0x161310, minH: 12, maxH: 28, jagged: false, capColor: 0xe8d8ae, farTint: 0x2a2010 },
+  // Deliberately much lighter base color than every other biome here —
+  // all the others are near-black (0x0a0810 to 0x1a0806) because bare
+  // rock/ash reads dark in silhouette even at a distance, but a
+  // snow-covered mountain genuinely doesn't: it stays pale, not a dark
+  // shape, which is the whole point of a biome defined by constant snow.
+  frost: { count: 9, color: 0x4a6478, minH: 22, maxH: 50, jagged: true, capColor: 0xf0faff, farTint: 0x7a9cb0 },
 };
 
 const RING_RADIUS = 340; // well beyond WORLD_BOUND_RADIUS and the terrain's own falloff rim, inside the fog's effective range so it fades in rather than popping

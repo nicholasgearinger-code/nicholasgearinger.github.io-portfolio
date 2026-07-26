@@ -207,12 +207,12 @@ function buildBaseDecoration(biome, colorHex, seedRand) {
       return createRockCluster(biome, colorHex, seedRand);
     case "crystal": return roll < 0.72 ? createCrystalCluster(colorHex, seedRand) : createRockCluster(biome, colorHex, seedRand);
     case "abyssal":
-      if (roll < 0.25) return createCaveMouth(colorHex, seedRand);
+      if (roll < 0.25) return createCaveMouth(colorHex, seedRand, biome);
       if (roll < 0.72) return createDebris(colorHex, seedRand);
       return createRockCluster(biome, colorHex, seedRand);
     case "ashen": return roll < 0.62 ? createDeadTree(colorHex, seedRand) : createRockCluster(biome, colorHex, seedRand);
     case "frost":
-      if (roll < 0.15) return createCaveMouth(colorHex, seedRand); // marks the terrain's carved ice-cavern pits with an actual visual opening, not just an unmarked dip in the ground
+      if (roll < 0.15) return createCaveMouth(colorHex, seedRand, biome); // marks the terrain's carved ice-cavern pits with an actual visual opening, not just an unmarked dip in the ground
       if (roll < 0.6) return createSpire(biome, colorHex, seedRand); // ice spikes — genuinely icy-colored now, was falling through to the rust-brown Ember gradient via the default case below
       return createRockCluster(biome, colorHex, seedRand); // frozen boulders
     default: return createSpire(biome, colorHex, seedRand);
@@ -1090,24 +1090,89 @@ function createLivingTree(colorHex, rand) {
 // Abyssal Drift's chasms without needing actual walkable interior
 // geometry — the rock silhouette plus an unlit dark "hole" mesh in front
 // of it is the standard cheap way to sell a cave mouth.
-function createCaveMouth(colorHex, rand) {
+// A rock/ice wall with a genuine recessed opening the player can walk
+// into — was previously a small round rock with a flat dark circle
+// painted on its face, which is exactly why it read as "just a black
+// rock" rather than a cave. Decorations have NO collision in this
+// engine (confirmed: main.js's physics call only ever references the
+// single terrain mesh, nothing decoration-related), so the player can
+// already walk straight into whatever interior space this builds —
+// this is a real explorable alcove, not an illusion, though it's a
+// fixed-depth alcove rather than a true winding underground tunnel
+// network, which would need a fundamentally different interior-level
+// system to build convincingly.
+function createCaveMouth(colorHex, rand, biome) {
   const group = new THREE.Group();
-  const rockMat = new THREE.MeshStandardMaterial({ color: 0x2e2b38, roughness: 0.9, flatShading: true });
-  const rock = new THREE.Mesh(new THREE.IcosahedronGeometry(2.4 + rand() * 1.2, 0), rockMat); // rock — stays blocky on purpose, per graphicsSettings.js's documented art-style rule — reverted from a previous round's mistaken bump
-  rock.scale.set(1.3, 0.9, 1);
-  rock.position.y = 1.4;
-  group.add(rock);
+  const isFrost = biome === "frost";
+  const wallColor = isFrost ? 0x3a5a68 : 0x2e2b38;
+  const wallMat = new THREE.MeshStandardMaterial({ color: wallColor, roughness: isFrost ? 0.3 : 0.9, metalness: isFrost ? 0.1 : 0, flatShading: true });
 
-  const mouthMat = new THREE.MeshBasicMaterial({ color: 0x040308 });
-  const mouth = new THREE.Mesh(new THREE.CircleGeometry(0.9 + rand() * 0.4, 12), mouthMat);
-  mouth.position.set(0, 1.1, rock.geometry.parameters.radius * 0.75);
-  group.add(mouth);
+  // The wall face itself, built from several irregular blocks with a gap
+  // left in the middle ones for the opening — reads as a genuine WALL
+  // with a hole in it, not a boulder with a smudge.
+  const wallWidth = 6 + rand() * 2, wallHeight = 5 + rand() * 1.5;
+  const blockCount = 5;
+  for (let i = 0; i < blockCount; i++) {
+    const bx = (i / (blockCount - 1) - 0.5) * wallWidth * 1.1;
+    if (Math.abs(bx) < wallWidth * 0.22) continue; // leave the middle blocks out for the opening
+    const bw = (wallWidth / blockCount) * 1.4, bh = wallHeight * (0.8 + rand() * 0.4);
+    const block = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, 1.4 + rand() * 0.6), wallMat);
+    block.position.set(bx, bh / 2, 0);
+    block.rotation.y = (rand() - 0.5) * 0.15;
+    group.add(block);
+  }
+  // A lintel spanning the top of the opening, so it reads as a proper
+  // archway rather than just missing blocks.
+  const lintel = new THREE.Mesh(new THREE.BoxGeometry(wallWidth * 0.5, wallHeight * 0.35, 1.6), wallMat);
+  lintel.position.set(0, wallHeight * 0.85, 0);
+  group.add(lintel);
 
-  // A faint colored glow just inside the opening — something down there,
-  // never explained, matching the zone's general "never finished falling"
-  // unease rather than lighting the mouth up like an invitation.
-  const light = new THREE.PointLight(colorHex, 0.35, 5);
-  light.position.copy(mouth.position);
+  // The actual recessed interior — real depth via a back wall several
+  // units in, plus a floor and side walls, not a flat dark circle.
+  const depth = 5 + rand() * 2;
+  const interiorMat = new THREE.MeshStandardMaterial({ color: isFrost ? 0x0a1a24 : 0x0a0810, roughness: 0.95, flatShading: true, side: THREE.DoubleSide });
+  const backWall = new THREE.Mesh(new THREE.PlaneGeometry(wallWidth * 0.6, wallHeight * 0.8), interiorMat);
+  backWall.position.set(0, wallHeight * 0.4, -depth);
+  group.add(backWall);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(wallWidth * 0.55, depth), interiorMat);
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.set(0, 0.02, -depth / 2);
+  group.add(floor);
+  const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(depth, wallHeight * 0.8), interiorMat);
+  leftWall.rotation.y = Math.PI / 2;
+  leftWall.position.set(-wallWidth * 0.28, wallHeight * 0.4, -depth / 2);
+  group.add(leftWall);
+  const rightWall = new THREE.Mesh(new THREE.PlaneGeometry(depth, wallHeight * 0.8), interiorMat);
+  rightWall.rotation.y = -Math.PI / 2;
+  rightWall.position.set(wallWidth * 0.28, wallHeight * 0.4, -depth / 2);
+  group.add(rightWall);
+
+  // Stalagmites (rock) scattered on the cave floor for every biome, plus
+  // hanging icicles from the entrance lintel for frost specifically —
+  // real geometry the player walks among, not just a texture detail.
+  const spikeMat = new THREE.MeshStandardMaterial({ color: isFrost ? 0xcfe8f2 : 0x4a4550, roughness: isFrost ? 0.15 : 0.85, metalness: isFrost ? 0.15 : 0, flatShading: true });
+  const spikeCount = 5 + Math.floor(rand() * 4);
+  for (let i = 0; i < spikeCount; i++) {
+    const sx = (rand() - 0.5) * wallWidth * 0.45;
+    const sz = -0.8 - rand() * (depth - 1.2);
+    const sh = 0.6 + rand() * 1.4;
+    const sr = 0.12 + rand() * 0.15;
+    const spike = new THREE.Mesh(new THREE.ConeGeometry(sr, sh, 6), spikeMat);
+    spike.position.set(sx, sh / 2, sz);
+    group.add(spike);
+    if (isFrost && rand() < 0.5) {
+      const ich = 0.5 + rand() * 1.0;
+      const icicle = new THREE.Mesh(new THREE.ConeGeometry(sr * 0.8, ich, 6), spikeMat);
+      icicle.position.set(sx, wallHeight * 0.85 - ich / 2, sz);
+      icicle.rotation.x = Math.PI; // points downward, hanging from the lintel
+      group.add(icicle);
+    }
+  }
+
+  // A colored glow further back in the cavity, drawing the eye into the
+  // depth rather than lighting the entrance itself.
+  const light = new THREE.PointLight(colorHex, 0.5, 8);
+  light.position.set(0, wallHeight * 0.4, -depth * 0.6);
   group.add(light);
   return { group, kind: "caveMouth" };
 }
@@ -1494,4 +1559,4 @@ function disposeLightShafts(scene, shafts) {
   }
 }
 
-export { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, updateLightShafts, disposeLightShafts, createRockCluster, createCaveMouth };
+export { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, updateLightShafts, disposeLightShafts, createRockCluster, createCaveMouth, applyVerticalGradient };

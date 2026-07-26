@@ -3,7 +3,7 @@ import { PointerLockControls } from "three/addons/controls/PointerLockControls.j
 import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH, POND_Z, POND_RADIUS, POND_LEVEL, RAMP_CENTER_X, RAMP_CENTER_Z, RAMP_LENGTH, RAMP_HALF_WIDTH, ROOM_FLOOR_Y } from "./terrain.js";
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
-import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, updateLightShafts, disposeLightShafts, createRockCluster, createCaveMouth } from "./decorations.js";
+import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, updateLightShafts, disposeLightShafts, createRockCluster, createCaveMouth, applyVerticalGradient } from "./decorations.js";
 import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond } from "./liquid.js";
 import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
@@ -607,11 +607,18 @@ function buildLevel(levelIdx) {
     // decoration, exactly like every other prop in this game. The front
     // side facing the ramp is deliberately left without a wall, matching
     // where the player actually walks in.
+    //
+    // Materials use real vertex-color gradients (dark shadowed base
+    // rising to a genuinely EMISSIVE teal glow near the top) rather than
+    // flat single colors, plus a warm amber accent light alongside the
+    // cool teal one — matching a reference image of a glowing ice
+    // cavern rather than the flat painted-on look flat colors gave it
+    // before.
     const roomWidth = 16, roomLength = 24;
     const roomCenterZ = RAMP_CENTER_Z + RAMP_LENGTH + roomLength / 2;
     const roomFloorGeo = new THREE.PlaneGeometry(roomWidth, roomLength + 4); // slightly longer than the room itself so it overlaps into the ramp's own end, avoiding any gap right at the seam
     roomFloorGeo.rotateX(-Math.PI / 2);
-    const roomFloorMat = new THREE.MeshStandardMaterial({ color: 0x1a2a34, roughness: 0.9, flatShading: true });
+    const roomFloorMat = new THREE.MeshStandardMaterial({ color: 0x0c1a22, roughness: 0.85, metalness: 0.1, emissive: 0x0a2a30, emissiveIntensity: 0.3, flatShading: true });
     const roomFloor = new THREE.Mesh(roomFloorGeo, roomFloorMat);
     roomFloor.position.set(RAMP_CENTER_X, ROOM_FLOOR_Y, roomCenterZ);
     roomFloor.receiveShadow = true;
@@ -619,51 +626,85 @@ function buildLevel(levelIdx) {
     caveRoomFloorMesh = roomFloor;
 
     const roomHeight = 9;
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0x2a4048, roughness: 0.85, flatShading: true });
-    const ceiling = new THREE.Mesh(new THREE.BoxGeometry(roomWidth + 1, 1.2, roomLength + 1), wallMat);
+    // Shared gradient geometry technique for every wall panel — dark near
+    // the floor (shadowed, matching the reference's deep black lower
+    // cave), rising to a bright teal glow near the ceiling. Genuinely
+    // emissive, not just a light diffuse color, so the walls actually
+    // read as glowing ice rather than painted rock.
+    function buildGlowWallMesh(geo) {
+      applyVerticalGradient(geo, new THREE.Color(0x050a10), new THREE.Color(0x3ad4c8));
+      const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.35, metalness: 0.15, emissive: 0x2ab8b0, emissiveIntensity: 0.55, flatShading: true });
+      return new THREE.Mesh(geo, mat);
+    }
+    const ceiling = buildGlowWallMesh(new THREE.BoxGeometry(roomWidth + 1, 1.2, roomLength + 1));
     ceiling.position.set(RAMP_CENTER_X, ROOM_FLOOR_Y + roomHeight, roomCenterZ);
     ceiling.castShadow = true;
     scene.add(ceiling);
     decorationHandles.push({ group: ceiling, kind: "rockCluster" });
 
-    const backWall = new THREE.Mesh(new THREE.BoxGeometry(roomWidth, roomHeight, 1.2), wallMat);
+    const backWall = buildGlowWallMesh(new THREE.BoxGeometry(roomWidth, roomHeight, 1.2));
     backWall.position.set(RAMP_CENTER_X, ROOM_FLOOR_Y + roomHeight / 2, roomCenterZ + roomLength / 2);
     scene.add(backWall);
     decorationHandles.push({ group: backWall, kind: "rockCluster" });
 
-    const leftWall = new THREE.Mesh(new THREE.BoxGeometry(1.2, roomHeight, roomLength), wallMat);
+    const leftWall = buildGlowWallMesh(new THREE.BoxGeometry(1.2, roomHeight, roomLength));
     leftWall.position.set(RAMP_CENTER_X - roomWidth / 2, ROOM_FLOOR_Y + roomHeight / 2, roomCenterZ);
     scene.add(leftWall);
     decorationHandles.push({ group: leftWall, kind: "rockCluster" });
 
-    const rightWall = new THREE.Mesh(new THREE.BoxGeometry(1.2, roomHeight, roomLength), wallMat);
+    const rightWall = buildGlowWallMesh(new THREE.BoxGeometry(1.2, roomHeight, roomLength));
     rightWall.position.set(RAMP_CENTER_X + roomWidth / 2, ROOM_FLOOR_Y + roomHeight / 2, roomCenterZ);
     scene.add(rightWall);
     decorationHandles.push({ group: rightWall, kind: "rockCluster" });
 
-    // Ice-spike stalagmites/icicles scattered on the room's own floor —
-    // real interior variety, not a bare box.
+    // Ice-spike stalagmites on the floor AND hanging icicles from the
+    // ceiling — the reference shows a dense, layered mix of both, not
+    // just floor spikes. Each spike gets the same dark-to-teal-glow
+    // gradient as the walls, so the whole room reads as one continuous
+    // glowing material rather than separately-lit props.
     const roomRand = mulberry32(hashStringToSeed(WORLD_SEED + "-frost-room-" + level.biome));
-    const roomSpikeMat = new THREE.MeshStandardMaterial({ color: 0xcfe8f2, roughness: 0.15, metalness: 0.15, flatShading: true });
-    for (let i = 0; i < 8; i++) {
+    function buildGlowSpike(sh, sr) {
+      const geo = new THREE.ConeGeometry(sr, sh, 6);
+      applyVerticalGradient(geo, new THREE.Color(0x0a1a20), new THREE.Color(0x4ae0d0));
+      const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.2, metalness: 0.2, emissive: 0x2ab8b0, emissiveIntensity: 0.6, flatShading: true });
+      return new THREE.Mesh(geo, mat);
+    }
+    for (let i = 0; i < 14; i++) {
       const sx = RAMP_CENTER_X + (roomRand() - 0.5) * (roomWidth - 3);
       const sz = roomCenterZ + (roomRand() - 0.5) * (roomLength - 3);
-      const sh = 1.4 + roomRand() * 2.5, sr = 0.22 + roomRand() * 0.28;
-      const spike = new THREE.Mesh(new THREE.ConeGeometry(sr, sh, 6), roomSpikeMat);
+      const sh = 1.4 + roomRand() * 2.8, sr = 0.22 + roomRand() * 0.3;
+      const spike = buildGlowSpike(sh, sr);
       spike.position.set(sx, ROOM_FLOOR_Y + sh / 2, sz);
       spike.rotation.y = roomRand() * Math.PI * 2;
       spike.castShadow = true;
       scene.add(spike);
       decorationHandles.push({ group: spike, kind: "rockCluster" });
+      // Roughly half also get a hanging icicle from directly overhead —
+      // the reference's most distinctive detail, and previously entirely
+      // missing from this room.
+      if (roomRand() < 0.5) {
+        const ich = 1.2 + roomRand() * 2.2, icr = 0.18 + roomRand() * 0.22;
+        const icicle = buildGlowSpike(ich, icr);
+        icicle.position.set(sx + (roomRand() - 0.5) * 1.5, ROOM_FLOOR_Y + roomHeight - ich / 2, sz + (roomRand() - 0.5) * 1.5);
+        icicle.rotation.x = Math.PI; // points downward, hanging from the ceiling
+        icicle.castShadow = true;
+        scene.add(icicle);
+        decorationHandles.push({ group: icicle, kind: "rockCluster" });
+      }
     }
 
-    // A soft glow inside — the ambient/sun lighting still reaches partway
-    // down through the ramp's open entrance, but the deeper parts of an
-    // enclosed room like this would otherwise read as pitch black.
-    const roomLight = new THREE.PointLight(0x8fd0f0, 0.6, 30);
-    roomLight.position.set(RAMP_CENTER_X, ROOM_FLOOR_Y + roomHeight * 0.6, roomCenterZ);
+    // Two-tone lighting matching the reference — a cool teal glow (the
+    // dominant ice-cavern light) plus a warmer amber accent off to one
+    // side, rather than a single flat light source.
+    const roomLight = new THREE.PointLight(0x4ae0d0, 0.9, 32);
+    roomLight.position.set(RAMP_CENTER_X, ROOM_FLOOR_Y + roomHeight * 0.7, roomCenterZ);
     scene.add(roomLight);
     decorationHandles.push({ group: roomLight, kind: "rockCluster" }); // PointLight has no geometry/material, so the generic disposal traverse is a harmless no-op on it — this just ensures scene.remove happens on teardown
+
+    const roomAmberLight = new THREE.PointLight(0xe8a860, 0.5, 18);
+    roomAmberLight.position.set(RAMP_CENTER_X + roomWidth * 0.3, ROOM_FLOOR_Y + 2.5, roomCenterZ - roomLength * 0.25);
+    scene.add(roomAmberLight);
+    decorationHandles.push({ group: roomAmberLight, kind: "rockCluster" });
   }
 
   atmosphereHandle = createAtmosphericParticles(scene, level.biome);

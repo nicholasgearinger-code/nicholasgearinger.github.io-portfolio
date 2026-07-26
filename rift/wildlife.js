@@ -19,6 +19,7 @@ const WILDLIFE_PROFILE = {
   crystal: { flyers: 3, flyerColor: 0x2a3a44, motes: 10, moteColor: 0x9fe8ff, moteHeight: 4, moteBlink: false, salamanders: 0, salamanderColor: 0x000000, glowcrawlers: 0, glowcrawlerColor: 0x000000, butterflies: 0, fish: 0 }, // sparse crystal-moths drifting near the spires
   abyssal: { flyers: 2, flyerColor: 0x14101c, motes: 4, moteColor: 0x8a86ff, moteHeight: 1, moteBlink: false, salamanders: 0, salamanderColor: 0x000000, glowcrawlers: 0, glowcrawlerColor: 0x000000, butterflies: 0, fish: 0 }, // a couple of large slow shapes circling high, and eerie low lure-lights
   ashen: { flyers: 4, flyerColor: 0x1c1712, motes: 0, moteColor: 0x000000, moteHeight: 0, moteBlink: false, salamanders: 0, salamanderColor: 0x000000, glowcrawlers: 0, glowcrawlerColor: 0x000000, butterflies: 0, fish: 0 },   // scavengers circling over a dead lakebed, nothing bioluminescent down in the dust
+  frost: { flyers: 5, flyerColor: 0x1a1e2a, motes: 9, moteColor: 0xcfeaff, moteHeight: 2.5, moteBlink: true, salamanders: 0, salamanderColor: 0x000000, glowcrawlers: 0, glowcrawlerColor: 0x000000, butterflies: 0, fish: 8 }, // dark arctic bird silhouettes circling above the blizzard + pale wind-blown ice crystals catching the light + fish under the new ocean surface — no fireflies/butterflies/salamanders, none of which fit a frozen biome
 };
 
 let sharedWingTexture = null;

@@ -43,7 +43,7 @@ const WEATHER_PROFILE = {
   },
   frost: {
     baseFogDensity: 0.0052, fogPulseAmp: 0.0016, fogPulseSpeed: 0.22, // highest base density of any biome — a blizzard means genuinely poor visibility, not just atmosphere
-    windBaseStrength: 2.4, windVariance: 1.4, windSpeed: 0.12, // strongest constant wind of any biome — this is what actually makes it read as a BLIZZARD rather than gentle falling snow
+    windBaseStrength: 3.6, windVariance: 2.2, windSpeed: 0.16, // pushed further per explicit "harsh winds" request — already the strongest of any biome, now more so
     rain: false, // precipitation here is the always-on blizzardSnow system (see createBlizzardSnow), not the cycling rain system every other precipitation biome uses
     lightning: { color: 0xdcf4ff, intervalMin: 14, intervalMax: 26, height: 50, dim: true }, // thundersnow — a real, if rare, phenomenon; pale ice-white and muted rather than a dramatic strike
   },
@@ -133,7 +133,7 @@ function createBlizzardSnow(scene) {
     positions[i * 3] = (Math.random() - 0.5) * 220;
     positions[i * 3 + 1] = Math.random() * 60;
     positions[i * 3 + 2] = (Math.random() - 0.5) * 220;
-    fallSpeeds[i] = 1.5 + Math.random() * 2;
+    fallSpeeds[i] = 6 + Math.random() * 4; // was 1.5-3.5 — much faster per explicit request, driving snow rather than gentle drift
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));

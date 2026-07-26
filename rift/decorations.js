@@ -211,6 +211,10 @@ function buildBaseDecoration(biome, colorHex, seedRand) {
       if (roll < 0.72) return createDebris(colorHex, seedRand);
       return createRockCluster(biome, colorHex, seedRand);
     case "ashen": return roll < 0.62 ? createDeadTree(colorHex, seedRand) : createRockCluster(biome, colorHex, seedRand);
+    case "frost":
+      if (roll < 0.15) return createCaveMouth(colorHex, seedRand); // marks the terrain's carved ice-cavern pits with an actual visual opening, not just an unmarked dip in the ground
+      if (roll < 0.6) return createSpire(biome, colorHex, seedRand); // ice spikes — genuinely icy-colored now, was falling through to the rust-brown Ember gradient via the default case below
+      return createRockCluster(biome, colorHex, seedRand); // frozen boulders
     default: return createSpire(biome, colorHex, seedRand);
   }
 }
@@ -402,6 +406,19 @@ function createSpire(biome, colorHex, rand) {
     const tex = createPaintedRockTexture(rand() * 100, "spire");
     const width = 1.6 + rand() * 1.0;
     group.add(createRockSprite(tex, width, h));
+  } else if (biome === "frost") {
+    const geo = new THREE.ConeGeometry(0.85 + rand() * 0.55, h, 6);
+    // A real icy gradient — deep shadowed blue-grey base rising to a
+    // near-white frosted tip — replacing what used to be Ember's
+    // hardcoded rust-brown gradient falling through to every other
+    // biome via the else-branch below. This is a genuine ice spike, not
+    // a rock.
+    applyVerticalGradient(geo, new THREE.Color(0x2a4a5e), new THREE.Color(0xe8f4fa));
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.25, metalness: 0.1, flatShading: true });
+    const spike = new THREE.Mesh(geo, mat);
+    spike.position.y = h / 2;
+    spike.rotation.y = rand() * Math.PI;
+    group.add(spike);
   } else {
     const geo = new THREE.ConeGeometry(0.9 + rand() * 0.6, h, 5);
     // Painted gradient instead of one flat rock color — dark base rising to

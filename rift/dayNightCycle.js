@@ -628,11 +628,16 @@ function updateDayNightCycle(cycle, dt) {
 
   // Aurora only shows at night, brightening as full darkness sets in, and
   // each strip ripples on its own offset so the curtain shimmers unevenly
-  // along its length rather than pulsing as one flat sheet.
+  // along its length rather than pulsing as one flat sheet. Frost gets a
+  // real vividness boost on top of the shared 0.5 cap every other biome
+  // uses — real arctic auroras are famously vivid, and this is the one
+  // biome where a strong aurora is the actual thing being depicted, not
+  // just atmospheric background dressing.
   const auroraVisibility = THREE.MathUtils.clamp(1 - dayAmount / 0.15, 0, 1);
+  const auroraBoost = cycle.biome === "frost" ? 1.7 : 1;
   for (const strip of cycle.aurora.strips) {
     const shimmer = 0.4 + 0.6 * Math.max(0, Math.sin(cycle.elapsed * 0.35 + strip.seed));
-    strip.sprite.material.opacity = auroraVisibility * shimmer * 0.5;
+    strip.sprite.material.opacity = auroraVisibility * shimmer * 0.5 * auroraBoost;
     strip.sprite.position.x += Math.sin(cycle.elapsed * 0.15 + strip.seed) * dt * 0.4;
   }
 

@@ -509,12 +509,87 @@ function buildLevel(levelIdx) {
       scene.add(rockHandle.group);
       decorationHandles.push(rockHandle);
     }
-    const caveHandle = createCaveMouth(0x2a5c3a, cliffRand); // a mossy green-tinted glow instead of the purple this function otherwise defaults to for its color parameter, to fit Verdant
-    caveHandle.group.scale.setScalar(1.8);
+    const caveHandle = createCaveMouth(0x2a5c3a, cliffRand, "verdant"); // a mossy green-tinted glow instead of the purple this function otherwise defaults to for its color parameter, to fit Verdant
+    // No extra scale applied — the rebuilt cave (real wall blocks +
+    // recessed interior) is already sized appropriately in its own
+    // dimensions; the old 1.8x multiplier here was tuned for the
+    // previous, much smaller single-rock version and would now
+    // compound into an oversized structure.
     caveHandle.group.position.set(waterfallX, bottomY, WATERFALL_Z - 1.5); // recessed slightly upstream of the falls' own Z, so it reads as behind the falling water; the mouth's default +Z-facing opening already points toward the player approaching from downstream, no extra rotation needed
     caveHandle.group.traverse((obj) => { if (obj.isMesh) { obj.castShadow = true; obj.receiveShadow = true; } });
     scene.add(caveHandle.group);
     decorationHandles.push(caveHandle);
+  }
+
+  if (level.biome === "frost") {
+    // Scatters ice spikes (stalagmites/icicles) along the winding
+    // tunnel's actual floor — general random decoration placement
+    // wouldn't reliably land inside this narrow carved corridor, so this
+    // walks the SAME centerline formula terrain.js's frost shaper
+    // carves (identical seed derivation to every other terrain-aligned
+    // placement in this file), sampling the real rendered terrain height
+    // at each point rather than duplicating the noise math.
+    const tunnelSeed = hashStringToSeed(WORLD_SEED + "::" + level.biome) * 1000;
+    const tunnelRand = mulberry32(hashStringToSeed(WORLD_SEED + "-frost-tunnel-" + level.biome));
+    const stepCount = 40;
+    for (let i = 0; i < stepCount; i++) {
+      const tz = -100 + (i / (stepCount - 1)) * 200; // walks the tunnel's length across most of the playable map
+      if (tunnelRand() < 0.4) continue; // not every step gets a spike — avoids a mechanically evenly-spaced row
+      const tx = Math.sin(tz * 0.028 + tunnelSeed * 0.021) * 26 + Math.sin(tz * 0.011 + tunnelSeed * 0.037) * 14;
+      const sx = tx + (tunnelRand() - 0.5) * 3; // scattered slightly off-center, not a perfectly straight line down the middle
+      const groundY = terrainHeightAt(level, sx, tz, WORLD_SEED) ?? 0;
+      const spikeMat = new THREE.MeshStandardMaterial({ color: 0xcfe8f2, roughness: 0.15, metalness: 0.15, flatShading: true });
+      const sh = 1.2 + tunnelRand() * 2.2, sr = 0.2 + tunnelRand() * 0.25;
+      const spike = new THREE.Mesh(new THREE.ConeGeometry(sr, sh, 6), spikeMat);
+      spike.position.set(sx, groundY + sh / 2, tz);
+      spike.rotation.y = tunnelRand() * Math.PI * 2;
+      spike.castShadow = true;
+      spike.receiveShadow = true;
+      scene.add(spike);
+      decorationHandles.push({ group: spike, kind: "rockCluster" }); // reuses the existing static-prop update kind — no animation needed, same convention as fallen logs
+    }
+
+    // Roof arches over SOME sections of the canyon, alternating with open
+    // stretches — this is what actually makes it feel like a cave system
+    // rather than an open trench the whole way. Deliberately kept as pure
+    // decoration (zero collision, exactly like every other prop in this
+    // game) rather than anything touching physics.js: sampleGroundHeight
+    // always resolves to the HIGHEST raycast hit at a given XZ, so a
+    // COLLIDABLE roof would make the player stand ON TOP of it rather
+    // than walk underneath it — the opposite of what a roof needs. Since
+    // decorations already have no collision at all, building the roof as
+    // one is the correct mechanism here, not a limitation-driven
+    // workaround. The player's footing stays governed entirely by the
+    // canyon floor already carved into the terrain.
+    const roofRand = mulberry32(hashStringToSeed(WORLD_SEED + "-frost-tunnel-roof-" + level.biome));
+    const roofMat = new THREE.MeshStandardMaterial({ color: 0x3a5a68, roughness: 0.3, metalness: 0.1, flatShading: true });
+    const roofSections = 16;
+    for (let i = 0; i < roofSections; i++) {
+      if (roofRand() < 0.5) continue; // roughly half the candidate spots get a roof — alternating open/covered along the tunnel's length
+      const rz = -95 + (i / (roofSections - 1)) * 190;
+      const rx = Math.sin(rz * 0.028 + tunnelSeed * 0.021) * 26 + Math.sin(rz * 0.011 + tunnelSeed * 0.037) * 14;
+      // Sample the ACTUAL rendered wall-top height on both sides of the
+      // canyon at this point (not a guessed constant), so the arch
+      // always sits correctly above the real terrain regardless of the
+      // surrounding hill noise.
+      const leftWallTop = terrainHeightAt(level, rx - 6, rz, WORLD_SEED) ?? 0;
+      const rightWallTop = terrainHeightAt(level, rx + 6, rz, WORLD_SEED) ?? 0;
+      const roofY = Math.max(leftWallTop, rightWallTop) + 1.2;
+      // Oriented along the canyon's own local tangent (same technique
+      // used for the river's flow-strip/cliff-wall segments elsewhere in
+      // this file), so the slab follows the winding path instead of
+      // sitting at a fixed world angle regardless of the curve underneath it.
+      const aheadZ = rz + 6;
+      const aheadX = Math.sin(aheadZ * 0.028 + tunnelSeed * 0.021) * 26 + Math.sin(aheadZ * 0.011 + tunnelSeed * 0.037) * 14;
+      const angle = Math.atan2(aheadX - rx, aheadZ - rz);
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(12, 1.6, 9 + roofRand() * 4), roofMat);
+      slab.position.set(rx, roofY, rz);
+      slab.rotation.y = angle;
+      slab.castShadow = true;
+      slab.receiveShadow = true;
+      scene.add(slab);
+      decorationHandles.push({ group: slab, kind: "rockCluster" });
+    }
   }
 
   atmosphereHandle = createAtmosphericParticles(scene, level.biome);

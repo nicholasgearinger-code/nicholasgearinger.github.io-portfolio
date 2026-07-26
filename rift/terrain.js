@@ -253,6 +253,39 @@ const BIOME_SHAPERS = {
     const worldX = u * (TERRAIN_SIZE / 2), worldZ = v * (TERRAIN_SIZE / 2);
     const base = fbm2(u * 1.4, v * 1.4, seed, 4, 2.0, 0.5) * 7; // rolling snowdrift hills
     const ridged = Math.abs(fbm2(u * 2.6, v * 2.6, seed + 80, 3, 2.0, 0.5)) * 3; // jagged wind-carved ice ridges
+
+    // A winding tunnel/canyon the player can actually walk through — this
+    // engine's player collision only ever checks the terrain heightfield
+    // itself (confirmed: physics.js's only geometry argument is the
+    // single terrain mesh, nothing decoration-related), so a genuinely
+    // explorable "tunnel" has to be carved directly into this height
+    // function, not built as a separate decorative interior. It's
+    // open-air (no roof) rather than a true enclosed underground space —
+    // that would need a fundamentally different interior-level system
+    // this project doesn't have. Meandering centerline built from two
+    // layered sine terms (same technique the river already uses) so it
+    // reads as grown/winding rather than a mechanically straight line.
+    const tunnelX = Math.sin(worldZ * 0.028 + seed * 0.021) * 26 + Math.sin(worldZ * 0.011 + seed * 0.037) * 14;
+    const distFromTunnel = Math.abs(worldX - tunnelX);
+    const TUNNEL_HALF_WIDTH = 5;
+    if (distFromTunnel < TUNNEL_HALF_WIDTH) {
+      // Same "fully-guaranteed inner core, independent of the surrounding
+      // noise entirely" technique proven on the source pond's basin —
+      // without this, the walls' actual height above the floor would
+      // vary with whatever the hill noise happens to be doing at each
+      // point along the path, occasionally leaving a stretch with barely
+      // any wall at all. TUNNEL_FLOOR=-9 against typical base+ridged
+      // values near 0 gives walls roughly 9 units tall (~5.6x the
+      // player's own eye height) — genuinely towering, not a shallow
+      // ditch, and the core guarantee holds even in the noise's absolute
+      // worst case.
+      const TUNNEL_FLOOR = -9;
+      const core = TUNNEL_HALF_WIDTH * 0.5;
+      if (distFromTunnel <= core) return TUNNEL_FLOOR;
+      const t = 1 - (distFromTunnel - core) / (TUNNEL_HALF_WIDTH - core);
+      return (base + ridged) * (1 - t * t) + TUNNEL_FLOOR * (t * t);
+    }
+
     const cavernNoise = fbm2(u * 1.9 + 500, v * 1.9 + 500, seed + 200, 3, 2.0, 0.5);
     const cavern = cavernNoise > 0.3 ? -(cavernNoise - 0.3) * 18 : 0; // real carved openings, not just texture
     return base + ridged + cavern;

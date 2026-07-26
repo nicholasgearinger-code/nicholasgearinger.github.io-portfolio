@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
-import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH, POND_Z, POND_RADIUS, POND_LEVEL, RAMP_CENTER_X, RAMP_CENTER_Z, RAMP_LENGTH, RAMP_HALF_WIDTH, ROOM_FLOOR_Y } from "./terrain.js";
+import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH, POND_Z, POND_RADIUS, POND_LEVEL, RAMP_CENTER_X, RAMP_CENTER_Z, RAMP_LENGTH, RAMP_HALF_WIDTH, ROOM_FLOOR_Y, ROOM_WIDTH, ROOM_LENGTH } from "./terrain.js";
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
 import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, updateLightShafts, disposeLightShafts, createRockCluster, createCaveMouth, applyVerticalGradient } from "./decorations.js";
@@ -614,7 +614,7 @@ function buildLevel(levelIdx) {
     // cool teal one — matching a reference image of a glowing ice
     // cavern rather than the flat painted-on look flat colors gave it
     // before.
-    const roomWidth = 16, roomLength = 24;
+    const roomWidth = ROOM_WIDTH, roomLength = ROOM_LENGTH; // aliased to the shared constants imported from terrain.js (which now also carves a matching roof-cover over this exact footprint) rather than local literals, so the two can never drift out of sync
     const roomCenterZ = RAMP_CENTER_Z + RAMP_LENGTH + roomLength / 2;
     const roomFloorGeo = new THREE.PlaneGeometry(roomWidth, roomLength + 4); // slightly longer than the room itself so it overlaps into the ramp's own end, avoiding any gap right at the seam
     roomFloorGeo.rotateX(-Math.PI / 2);

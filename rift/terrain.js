@@ -35,6 +35,11 @@ const POND_DEPTH = 4;          // how far below POND_LEVEL the basin's carved fl
 // meandering path can reach up to ±40 in X at its widest, so X=60 keeps
 // real margin regardless of the canyon's exact position at this Z).
 const RAMP_CENTER_X = 60, RAMP_CENTER_Z = 50, RAMP_LENGTH = 18, RAMP_HALF_WIDTH = 4;
+// The room itself is WIDER than the narrow ramp corridor above — these
+// two constants are shared with main.js's room-mesh construction so the
+// two can never drift out of sync, the same way ROOM_FLOOR_Y already is.
+const ROOM_WIDTH = 16, ROOM_LENGTH = 24;
+const ROOM_ROOF_Y = -7; // just above the room's own ceiling — verified numerically: the ceiling box's actual top surface sits at -8.4 (center -9 + half its 1.2 thickness), so -7 leaves a comfortable 1.4-unit buried margin rather than a razor-thin one
 const ROOM_FLOOR_Y = -18; // MUST match main.js's room-mesh floor placement — the ramp's floor at its far end and the room's own floor must meet at the same height for a seamless transition
 const LAVA_CHANNEL_WIDTH = 9;  // Ember's main winding lava channel, half-width in world units — separate constant since it's deliberately wider/deeper than Verdant's river
 const EMBER_PATH_INNER = LAVA_CHANNEL_WIDTH + 0.5; // small gap between the channel's edge and the path so they don't visually run together
@@ -316,6 +321,24 @@ const BIOME_SHAPERS = {
       const tx = 1 - (distFromRampX - coreX) / (RAMP_HALF_WIDTH - coreX);
       return (base + ridged) * (1 - tx * tx) + rampFloor * (tx * tx);
     }
+    // The room itself is WIDER than the narrow ramp corridor above (see
+    // ROOM_WIDTH) — this covers the room's ACTUAL footprint with a thin
+    // guaranteed-buried roof, so the room's walls/ceiling never poke up
+    // above the surface there. Without this, only the ramp's own narrow
+    // width was carved, leaving the wider room's walls sitting in
+    // completely normal, uncarved terrain — exactly what made them
+    // visible sticking up above ground. Uses the SAME roomCenterZ
+    // formula as main.js's own room construction (not just "wherever the
+    // ramp ends") since the room floor deliberately starts 2 units
+    // earlier than that, to overlap into the ramp's tail and avoid a
+    // seam — using the ramp's end alone left exactly that 2-unit band
+    // uncovered.
+    const roomCenterZ = RAMP_CENTER_Z + RAMP_LENGTH + ROOM_LENGTH / 2;
+    const roomFootprintZMin = roomCenterZ - (ROOM_LENGTH + 4) / 2;
+    const roomFootprintZMax = roomCenterZ + (ROOM_LENGTH + 4) / 2;
+    if (worldZ >= roomFootprintZMin && worldZ <= roomFootprintZMax && Math.abs(worldX - RAMP_CENTER_X) < ROOM_WIDTH / 2 + 1) {
+      return Math.min(base + ridged, ROOM_ROOF_Y); // whichever is LOWER — if the natural terrain here is already below the roof height, leave it as-is; otherwise cap it down to guarantee full coverage regardless of the surrounding noise
+    }
     return base + ridged + cavern;
   },
 };
@@ -514,4 +537,4 @@ function terrainHeightAt(level, worldX, worldZ, seedStr) {
   return biomeHeight(level.biome, worldX, worldZ, seed);
 }
 
-export { buildPlanetTerrain, biomeHeight, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH, POND_Z, POND_RADIUS, POND_LEVEL, RAMP_CENTER_X, RAMP_CENTER_Z, RAMP_LENGTH, RAMP_HALF_WIDTH, ROOM_FLOOR_Y };
+export { buildPlanetTerrain, biomeHeight, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH, POND_Z, POND_RADIUS, POND_LEVEL, RAMP_CENTER_X, RAMP_CENTER_Z, RAMP_LENGTH, RAMP_HALF_WIDTH, ROOM_FLOOR_Y, ROOM_WIDTH, ROOM_LENGTH };

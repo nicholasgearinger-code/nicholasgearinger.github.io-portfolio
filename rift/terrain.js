@@ -28,6 +28,14 @@ const POND_Z = WATERFALL_Z - 24;
 const POND_RADIUS = 13;
 const POND_LEVEL = 12;         // fixed absolute height the pond's water sits at — well within the plateau's typical elevated range (base + WATERFALL_SOURCE_HEIGHT), clearly above the main river far below
 const POND_DEPTH = 4;          // how far below POND_LEVEL the basin's carved floor sits — same "blend toward a fixed absolute floor" guarantee the main river channel uses, so the basin holds water regardless of the surrounding hill noise
+// A dedicated entrance ramp leading down to a genuinely separate
+// underground room (the room mesh itself is built in main.js, using
+// ROOM_FLOOR_Y here to guarantee the two meet at the same height).
+// Fixed location, well clear of the winding canyon's own range (that
+// meandering path can reach up to ±40 in X at its widest, so X=60 keeps
+// real margin regardless of the canyon's exact position at this Z).
+const RAMP_CENTER_X = 60, RAMP_CENTER_Z = 50, RAMP_LENGTH = 18, RAMP_HALF_WIDTH = 4;
+const ROOM_FLOOR_Y = -18; // MUST match main.js's room-mesh floor placement — the ramp's floor at its far end and the room's own floor must meet at the same height for a seamless transition
 const LAVA_CHANNEL_WIDTH = 9;  // Ember's main winding lava channel, half-width in world units — separate constant since it's deliberately wider/deeper than Verdant's river
 const EMBER_PATH_INNER = LAVA_CHANNEL_WIDTH + 0.5; // small gap between the channel's edge and the path so they don't visually run together
 const EMBER_PATH_OUTER = LAVA_CHANNEL_WIDTH + 3.5;
@@ -256,15 +264,17 @@ const BIOME_SHAPERS = {
 
     // A winding tunnel/canyon the player can actually walk through — this
     // engine's player collision only ever checks the terrain heightfield
-    // itself (confirmed: physics.js's only geometry argument is the
-    // single terrain mesh, nothing decoration-related), so a genuinely
-    // explorable "tunnel" has to be carved directly into this height
-    // function, not built as a separate decorative interior. It's
-    // open-air (no roof) rather than a true enclosed underground space —
-    // that would need a fundamentally different interior-level system
-    // this project doesn't have. Meandering centerline built from two
-    // layered sine terms (same technique the river already uses) so it
-    // reads as grown/winding rather than a mechanically straight line.
+    // itself (confirmed: physics.js's only geometry argument used to be
+    // the single terrain mesh — since extended to optionally support
+    // additional collidable meshes too, see the entrance ramp/room
+    // further below), so a genuinely explorable "tunnel" has to be
+    // carved directly into this height function, not built as a
+    // separate decorative interior. This particular feature stays
+    // open-air (no roof) by design — a real enclosed underground room DOES
+    // exist elsewhere on this map now (the entrance ramp below), it's
+    // just not this one. Meandering centerline built from two layered
+    // sine terms (same technique the river already uses) so it reads as
+    // grown/winding rather than a mechanically straight line.
     const tunnelX = Math.sin(worldZ * 0.028 + seed * 0.021) * 26 + Math.sin(worldZ * 0.011 + seed * 0.037) * 14;
     const distFromTunnel = Math.abs(worldX - tunnelX);
     const TUNNEL_HALF_WIDTH = 5;
@@ -288,6 +298,24 @@ const BIOME_SHAPERS = {
 
     const cavernNoise = fbm2(u * 1.9 + 500, v * 1.9 + 500, seed + 200, 3, 2.0, 0.5);
     const cavern = cavernNoise > 0.3 ? -(cavernNoise - 0.3) * 18 : 0; // real carved openings, not just texture
+
+    // A dedicated entrance ramp leading down to a genuinely SEPARATE
+    // underground room (built as its own collidable floor mesh in
+    // main.js, wired into physics.js's newly-added extraMeshes support)
+    // — unlike the open-air canyon above, this actually goes fully
+    // underground with a real ceiling. Kept deliberately separate rather
+    // than trying to connect the two systems, to avoid any interaction
+    // between them.
+    const distAlongRamp = worldZ - RAMP_CENTER_Z;
+    if (Math.abs(worldX - RAMP_CENTER_X) < RAMP_HALF_WIDTH && distAlongRamp >= 0 && distAlongRamp <= RAMP_LENGTH) {
+      const t = Math.min(1, distAlongRamp / RAMP_LENGTH); // 0 at the surface entrance, 1 at the room's floor level
+      const rampFloor = (base + ridged) + t * (ROOM_FLOOR_Y - (base + ridged)); // interpolates from the ACTUAL surrounding terrain height at the entrance (no seam) to EXACTLY ROOM_FLOOR_Y at the far end regardless of what the surrounding noise happens to be there — the base+ridged terms cancel out algebraically at t=1
+      const distFromRampX = Math.abs(worldX - RAMP_CENTER_X);
+      const coreX = RAMP_HALF_WIDTH * 0.6; // same guaranteed-core technique as the pond/tunnel — rampFloor itself already correctly reduces to the natural terrain at t=0 and the exact room floor at t=1, so returning it directly within this radius is safe at every point along the ramp
+      if (distFromRampX <= coreX) return rampFloor;
+      const tx = 1 - (distFromRampX - coreX) / (RAMP_HALF_WIDTH - coreX);
+      return (base + ridged) * (1 - tx * tx) + rampFloor * (tx * tx);
+    }
     return base + ridged + cavern;
   },
 };
@@ -486,4 +514,4 @@ function terrainHeightAt(level, worldX, worldZ, seedStr) {
   return biomeHeight(level.biome, worldX, worldZ, seed);
 }
 
-export { buildPlanetTerrain, biomeHeight, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH, POND_Z, POND_RADIUS, POND_LEVEL };
+export { buildPlanetTerrain, biomeHeight, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH, POND_Z, POND_RADIUS, POND_LEVEL, RAMP_CENTER_X, RAMP_CENTER_Z, RAMP_LENGTH, RAMP_HALF_WIDTH, ROOM_FLOOR_Y };

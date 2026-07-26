@@ -33,16 +33,33 @@ function createPlayerPhysicsState() {
 }
 
 /**
- * Samples the terrain's height directly below (x, z), or null if the
- * terrain mesh doesn't extend that far (shouldn't normally happen within
- * the bounded play area, but callers should treat null as "no ground").
+ * Samples the terrain's height directly below (x, z), or null if nothing
+ * is hit. `extraMeshes` (optional) lets additional collidable geometry —
+ * specifically, a separate underground cave floor/ceiling disconnected
+ * from the main terrain — participate in this same raycast. A plain
+ * single-mesh raycast always resolves to the HIGHEST hit, which is
+ * correct for open terrain but wrong the moment two valid surfaces exist
+ * at the same XZ (the outer ground above a cave, and the cave's own
+ * floor beneath it) — so when more than one hit comes back, this prefers
+ * whichever is closest to `preferredY` (the player's own height just
+ * before this sample) rather than always picking the higher one. With no
+ * extraMeshes, this is byte-identical to the original single-mesh path.
  */
-function sampleGroundHeight(x, z, terrainMesh) {
+function sampleGroundHeight(x, z, terrainMesh, extraMeshes, preferredY) {
   if (!terrainMesh) return null;
   raycaster.set(new THREE.Vector3(x, CAST_HEIGHT, z), DOWN);
   raycaster.far = CAST_HEIGHT + 50;
-  const hits = raycaster.intersectObject(terrainMesh, false);
-  return hits.length > 0 ? hits[0].point.y : null;
+  const hits = extraMeshes && extraMeshes.length
+    ? raycaster.intersectObjects([terrainMesh, ...extraMeshes], false)
+    : raycaster.intersectObject(terrainMesh, false);
+  if (hits.length === 0) return null;
+  if (hits.length === 1 || preferredY === undefined || preferredY === null) return hits[0].point.y;
+  let best = hits[0], bestDist = Math.abs(hits[0].point.y - preferredY);
+  for (let i = 1; i < hits.length; i++) {
+    const d = Math.abs(hits[i].point.y - preferredY);
+    if (d < bestDist) { best = hits[i]; bestDist = d; }
+  }
+  return best.point.y;
 }
 
 /**
@@ -57,15 +74,17 @@ function sampleGroundHeight(x, z, terrainMesh) {
  * @param {number} dt
  * @param {number} playerEyeHeight  camera.position.y is eye height; feet are this far below
  * @param {boolean} jumpRequested  true only on the frame the jump key was first pressed (edge-triggered by the caller)
+ * @param {THREE.Mesh[]} [extraMeshes]  optional additional collidable geometry (e.g. a separate underground cave floor) that participates in the SAME ground raycast as the main terrain — see sampleGroundHeight's own comment for why disambiguating multiple hits matters here
  */
-function updatePlayerPhysics(camera, terrainMesh, state, dt, playerEyeHeight, jumpRequested) {
+function updatePlayerPhysics(camera, terrainMesh, state, dt, playerEyeHeight, jumpRequested, extraMeshes) {
   if (jumpRequested && state.grounded) {
     state.verticalVelocity = JUMP_VELOCITY;
     state.grounded = false;
   }
 
   if (state.grounded) {
-    const groundY = sampleGroundHeight(camera.position.x, camera.position.z, terrainMesh);
+    const preferredY = camera.position.y - playerEyeHeight; // the player's own feet height a moment ago — used to keep following whichever surface they're actually already standing on, not whichever the ray happens to hit first
+    const groundY = sampleGroundHeight(camera.position.x, camera.position.z, terrainMesh, extraMeshes, preferredY);
     if (groundY !== null) {
       const targetY = groundY + playerEyeHeight;
       const delta = targetY - camera.position.y;
@@ -81,8 +100,8 @@ function updatePlayerPhysics(camera, terrainMesh, state, dt, playerEyeHeight, ju
   camera.position.y += state.verticalVelocity * dt;
 
   if (state.verticalVelocity <= 0) {
-    const groundY = sampleGroundHeight(camera.position.x, camera.position.z, terrainMesh);
     const feetY = camera.position.y - playerEyeHeight;
+    const groundY = sampleGroundHeight(camera.position.x, camera.position.z, terrainMesh, extraMeshes, feetY);
     if (groundY !== null && feetY <= groundY) {
       camera.position.y = groundY + playerEyeHeight;
       state.verticalVelocity = 0;

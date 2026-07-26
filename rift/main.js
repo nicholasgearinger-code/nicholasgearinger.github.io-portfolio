@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
-import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH, POND_Z, POND_RADIUS, POND_LEVEL } from "./terrain.js";
+import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH, POND_Z, POND_RADIUS, POND_LEVEL, RAMP_CENTER_X, RAMP_CENTER_Z, RAMP_LENGTH, RAMP_HALF_WIDTH, ROOM_FLOOR_Y } from "./terrain.js";
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
 import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, updateLightShafts, disposeLightShafts, createRockCluster, createCaveMouth } from "./decorations.js";
@@ -340,6 +340,7 @@ let riverCurrentHandle = null;
 let riverFlowStripHandle = null;
 let cliffWallHandle = null;
 let sourcePondHandle = null;
+let caveRoomFloorMesh = null; // the ONE piece of this underground room that's actually collidable — passed into updatePlayerPhysics as an extraMesh; walls/ceiling/decoration are ordinary non-collidable scene objects
 let atmosphereHandle = null;
 let grassHandle = null;
 let flowersHandle = null;
@@ -389,6 +390,12 @@ function teardownLevel() {
   cliffWallHandle = null;
   disposeSourcePond(scene, sourcePondHandle);
   sourcePondHandle = null;
+  if (caveRoomFloorMesh) {
+    scene.remove(caveRoomFloorMesh);
+    caveRoomFloorMesh.geometry.dispose();
+    caveRoomFloorMesh.material.dispose();
+    caveRoomFloorMesh = null;
+  }
   disposeAtmosphericParticles(scene, atmosphereHandle);
   atmosphereHandle = null;
   disposeGrass(scene, grassHandle);
@@ -590,6 +597,73 @@ function buildLevel(levelIdx) {
       scene.add(slab);
       decorationHandles.push({ group: slab, kind: "rockCluster" });
     }
+
+    // A genuinely SEPARATE underground room, reached via the entrance
+    // ramp carved into the terrain above (see terrain.js's comment on
+    // RAMP_CENTER_X/etc. for the full design). Only the FLOOR is
+    // collidable — tracked in caveRoomFloorMesh, passed into
+    // updatePlayerPhysics as an extraMesh below — everything else here
+    // (walls, ceiling, interior spikes) is ordinary non-collidable
+    // decoration, exactly like every other prop in this game. The front
+    // side facing the ramp is deliberately left without a wall, matching
+    // where the player actually walks in.
+    const roomWidth = 16, roomLength = 24;
+    const roomCenterZ = RAMP_CENTER_Z + RAMP_LENGTH + roomLength / 2;
+    const roomFloorGeo = new THREE.PlaneGeometry(roomWidth, roomLength + 4); // slightly longer than the room itself so it overlaps into the ramp's own end, avoiding any gap right at the seam
+    roomFloorGeo.rotateX(-Math.PI / 2);
+    const roomFloorMat = new THREE.MeshStandardMaterial({ color: 0x1a2a34, roughness: 0.9, flatShading: true });
+    const roomFloor = new THREE.Mesh(roomFloorGeo, roomFloorMat);
+    roomFloor.position.set(RAMP_CENTER_X, ROOM_FLOOR_Y, roomCenterZ);
+    roomFloor.receiveShadow = true;
+    scene.add(roomFloor);
+    caveRoomFloorMesh = roomFloor;
+
+    const roomHeight = 9;
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0x2a4048, roughness: 0.85, flatShading: true });
+    const ceiling = new THREE.Mesh(new THREE.BoxGeometry(roomWidth + 1, 1.2, roomLength + 1), wallMat);
+    ceiling.position.set(RAMP_CENTER_X, ROOM_FLOOR_Y + roomHeight, roomCenterZ);
+    ceiling.castShadow = true;
+    scene.add(ceiling);
+    decorationHandles.push({ group: ceiling, kind: "rockCluster" });
+
+    const backWall = new THREE.Mesh(new THREE.BoxGeometry(roomWidth, roomHeight, 1.2), wallMat);
+    backWall.position.set(RAMP_CENTER_X, ROOM_FLOOR_Y + roomHeight / 2, roomCenterZ + roomLength / 2);
+    scene.add(backWall);
+    decorationHandles.push({ group: backWall, kind: "rockCluster" });
+
+    const leftWall = new THREE.Mesh(new THREE.BoxGeometry(1.2, roomHeight, roomLength), wallMat);
+    leftWall.position.set(RAMP_CENTER_X - roomWidth / 2, ROOM_FLOOR_Y + roomHeight / 2, roomCenterZ);
+    scene.add(leftWall);
+    decorationHandles.push({ group: leftWall, kind: "rockCluster" });
+
+    const rightWall = new THREE.Mesh(new THREE.BoxGeometry(1.2, roomHeight, roomLength), wallMat);
+    rightWall.position.set(RAMP_CENTER_X + roomWidth / 2, ROOM_FLOOR_Y + roomHeight / 2, roomCenterZ);
+    scene.add(rightWall);
+    decorationHandles.push({ group: rightWall, kind: "rockCluster" });
+
+    // Ice-spike stalagmites/icicles scattered on the room's own floor —
+    // real interior variety, not a bare box.
+    const roomRand = mulberry32(hashStringToSeed(WORLD_SEED + "-frost-room-" + level.biome));
+    const roomSpikeMat = new THREE.MeshStandardMaterial({ color: 0xcfe8f2, roughness: 0.15, metalness: 0.15, flatShading: true });
+    for (let i = 0; i < 8; i++) {
+      const sx = RAMP_CENTER_X + (roomRand() - 0.5) * (roomWidth - 3);
+      const sz = roomCenterZ + (roomRand() - 0.5) * (roomLength - 3);
+      const sh = 1.4 + roomRand() * 2.5, sr = 0.22 + roomRand() * 0.28;
+      const spike = new THREE.Mesh(new THREE.ConeGeometry(sr, sh, 6), roomSpikeMat);
+      spike.position.set(sx, ROOM_FLOOR_Y + sh / 2, sz);
+      spike.rotation.y = roomRand() * Math.PI * 2;
+      spike.castShadow = true;
+      scene.add(spike);
+      decorationHandles.push({ group: spike, kind: "rockCluster" });
+    }
+
+    // A soft glow inside — the ambient/sun lighting still reaches partway
+    // down through the ramp's open entrance, but the deeper parts of an
+    // enclosed room like this would otherwise read as pitch black.
+    const roomLight = new THREE.PointLight(0x8fd0f0, 0.6, 30);
+    roomLight.position.set(RAMP_CENTER_X, ROOM_FLOOR_Y + roomHeight * 0.6, roomCenterZ);
+    scene.add(roomLight);
+    decorationHandles.push({ group: roomLight, kind: "rockCluster" }); // PointLight has no geometry/material, so the generic disposal traverse is a harmless no-op on it — this just ensures scene.remove happens on teardown
   }
 
   atmosphereHandle = createAtmosphericParticles(scene, level.biome);
@@ -1112,7 +1186,7 @@ function animate() {
 
   if (isGameActive() && currentLevelIdx >= 0) {
     updateMovement(dt, playerPhysics.grounded);
-    updatePlayerPhysics(camera, terrainMesh, playerPhysics, dt, PLAYER_EYE_HEIGHT, jumpQueued);
+    updatePlayerPhysics(camera, terrainMesh, playerPhysics, dt, PLAYER_EYE_HEIGHT, jumpQueued, caveRoomFloorMesh ? [caveRoomFloorMesh] : undefined);
     jumpQueued = false;
     if (camera.position.y < spawnPosition.y - FALL_RESPAWN_OFFSET) respawnInLevel();
     checkLoreProximity();

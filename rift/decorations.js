@@ -1132,11 +1132,21 @@ function updateDecoration(handle, elapsed, dayAmount = 0) {
       // A slow, smooth breathing pulse on the canopy's own glow spots —
       // gradual in/out, not a sharp flash like the fireflies/moss/fungus
       // twinkle, so the whole tree reads as slowly "breathing" rather
-      // than blinking.
-      // Breathing was already here but shallow (a 2.4..4.8 swing, only 2:1),
-      // so it read as a steady glow rather than something alive. Widened to
-      // roughly 5:1 so the pulse is actually legible.
-      const breathe = 0.5 + 0.5 * Math.sin(elapsed * 0.6 + handle.bobSeed * 1.3);
+      // than blinking. Breathing was already here but shallow (a
+      // 2.4..4.8 swing, only 2:1), so it read as a steady glow rather
+      // than something alive. Widened to roughly 5:1 so the pulse is
+      // actually legible.
+      //
+      // Per-tree SPEED is varied here too, not just phase — a shared
+      // speed with only a phase offset (bobSeed) keeps every tree locked
+      // to the exact same rhythm forever, which can still read as one
+      // coordinated wave sweeping through the forest rather than
+      // independent trees. A second, differently-transformed use of
+      // bobSeed (sin(bobSeed*7.3), decorrelated from the *1.3 used for
+      // phase below) gives each tree its own breathing rate too, so they
+      // drift in and out of sync with each other over time.
+      const breatheSpeed = 0.45 + (Math.sin(handle.bobSeed * 7.3) * 0.5 + 0.5) * 0.35; // 0.45..0.80, per tree
+      const breathe = 0.5 + 0.5 * Math.sin(elapsed * breatheSpeed + handle.bobSeed * 1.3);
       // Glow is NIGHT-ONLY: fully off in daylight, ramping in as dusk falls.
       // Multiplying the whole thing (rather than adding a floor) means it
       // reaches genuine zero by day instead of leaving a faint always-on

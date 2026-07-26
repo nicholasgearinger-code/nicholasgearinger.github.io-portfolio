@@ -1054,11 +1054,7 @@ function animate() {
     if (eruptionActive) playEruptionBurst();
     wasErupting = eruptionActive;
   }
-  const lightInfo = {
-    cameraPos: camera.position, sunPos: sun.position, moonPos: dayNightCycle.moonBody.group.position,
-    sunStrength: dayNight.dayAmount, moonStrength: dayNightCycle.moonBody.core.material.opacity * (1 - dayNight.dayAmount),
-  };
-  updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, lightInfo, camera.position);
+  updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, camera.position);
   updateWaterfall(waterfallHandle, dt, elapsedTime);
   updateRiverCurrent(riverCurrentHandle, dt);
   updateRiverFlowStrip(riverFlowStripHandle, dt);

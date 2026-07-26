@@ -1093,7 +1093,15 @@ function animate() {
   // scene.fog.color/.density are all confirmed reset every frame by
   // dayNightCycle, so this override is safe and self-corrects the
   // moment the player surfaces.
-  const isFullySubmerged = currentLevelIdx >= 0 && LEVELS[currentLevelIdx].biome === "verdant" && camera.position.y < LIQUID_LEVEL.verdant;
+  //
+  // Generalized across ANY water-having biome (was hardcoded to
+  // "verdant" specifically) — derives the water level from whatever the
+  // current biome's own LIQUID_LEVEL entry is, so this now applies to
+  // frost's new ocean too, and will automatically cover any future water
+  // biome without needing another hardcoded special-case here.
+  const currentBiome = currentLevelIdx >= 0 ? LEVELS[currentLevelIdx].biome : null;
+  const currentLiquidLevel = currentBiome !== null ? LIQUID_LEVEL[currentBiome] : undefined;
+  const isFullySubmerged = currentLiquidLevel !== undefined && camera.position.y < currentLiquidLevel;
   if (isFullySubmerged) {
     scene.fog.color.setHex(0x0a2838);
     scene.fog.density = 0.14;

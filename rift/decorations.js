@@ -1146,16 +1146,21 @@ function updateDecoration(handle, elapsed, dayAmount = 0) {
       // phase below) gives each tree its own breathing rate too, so they
       // drift in and out of sync with each other over time.
       const breatheSpeed = 0.45 + (Math.sin(handle.bobSeed * 7.3) * 0.5 + 0.5) * 0.35; // 0.45..0.80, per tree
-      const breathe = 0.5 + 0.5 * Math.sin(elapsed * breatheSpeed + handle.bobSeed * 1.3);
+      const breathe = 0.5 + 0.5 * Math.sin(elapsed * breatheSpeed + handle.bobSeed * 1.3); // 0..1
       // Glow is NIGHT-ONLY: fully off in daylight, ramping in as dusk falls.
-      // Multiplying the whole thing (rather than adding a floor) means it
-      // reaches genuine zero by day instead of leaving a faint always-on
-      // sheen. The glow map's near-black purple baseline rides the same
-      // multiplier, which is fine — by day the scene lights the tree
-      // normally, and at night the baseline returns to keep it from
-      // reading as pure black (the reason that baseline exists at all).
+      // Multiplying rather than adding a floor means it reaches genuine
+      // zero both by day AND at the bottom of each breath — previously
+      // `0.8 + breathe*3.6` had a floor that kept the glow always at
+      // LEAST dim, which is exactly why the pulse was hard to notice:
+      // it was breathing between "moderately bright" and "brighter,"
+      // never OFF. Now it's `breathe * 5.5` with no floor at all, so
+      // each tree genuinely turns off, then back on, once per cycle.
+      // Note this also zeroes the glow map's near-black purple baseline
+      // for that instant (it's painted into the same emissive map, so it
+      // scales with the same intensity, not separately) — that's exactly
+      // the intended "off" state, not a bug: real breathing has a bottom.
       const nightAmount = 1 - Math.min(1, Math.max(0, dayAmount / 0.3));
-      handle.material.emissiveIntensity = nightAmount * (0.8 + breathe * 3.6);
+      handle.material.emissiveIntensity = nightAmount * breathe * 5.5;
     }
   } else if (handle.kind === "mossyProp") {
     // Same sharp on/off twinkle character as glowFungus — mostly dim,

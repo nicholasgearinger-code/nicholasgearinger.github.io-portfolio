@@ -404,9 +404,16 @@ function createWeatherSystem(scene, biome) {
   const leaffall = biome === "verdant" ? createLeaffall(scene) : null;
   const groundGlow = biome === "verdant" ? createGroundGlow(scene) : null;
   const blizzardSnow = biome === "frost" ? createBlizzardSnow(scene) : null;
+  // Periodic whiteout — Frost only. A temporary event where visibility
+  // drops to near-zero, distinct from (and much more extreme than) the
+  // constant blizzard baseline already always running. Same timer-cycle
+  // shape as crystalRefraction's periodic flash elsewhere in this file:
+  // count down while inactive, trigger and run for a duration once the
+  // timer hits zero, then reset the timer for the next one.
+  const whiteout = biome === "frost" ? { timer: 20 + Math.random() * 25, active: false, remaining: 0 } : null;
 
   return {
-    scene, biome, profile, lightningLight, rain, distantLightning, dustDevil, crystalRefraction, ashfall, leaffall, groundGlow, blizzardSnow,
+    scene, biome, profile, lightningLight, rain, distantLightning, dustDevil, crystalRefraction, ashfall, leaffall, groundGlow, blizzardSnow, whiteout,
     windAngle: Math.random() * Math.PI * 2,
     lightningTimer: randRange(profile.lightning.intervalMin, profile.lightning.intervalMax),
     lightningFlash: 0,
@@ -428,14 +435,49 @@ function updateWeatherSystem(handle, dt, erupting = false, dayAmount = 0) {
   // constant breeze.
   handle.windAngle += profile.windSpeed * dt;
   const windStrength = Math.max(0, profile.windBaseStrength + Math.sin(handle.elapsed * 0.13) * profile.windVariance);
-  const windX = Math.cos(handle.windAngle) * windStrength;
-  const windZ = Math.sin(handle.windAngle) * windStrength;
+  let windX = Math.cos(handle.windAngle) * windStrength;
+  let windZ = Math.sin(handle.windAngle) * windStrength;
 
   // Fog breathes slowly around its base density, with a longer, gentler
   // wave than the visual "chop" elsewhere in the game — weather fronts are
   // slow, not jittery.
   const fogDensity = profile.baseFogDensity + Math.sin(handle.elapsed * profile.fogPulseSpeed) * profile.fogPulseAmp;
-  handle.scene.fog.density = Math.max(0.0008, fogDensity);
+
+  // Periodic whiteout — Frost only. Cycles the timer/active/remaining
+  // state set up in createWeatherSystem, then feeds a genuine visibility
+  // collapse into the SAME fogDensity variable everything else here
+  // already uses — reusing the existing mechanism rather than a separate
+  // one, since fog density is already how this game controls how far
+  // you can see. A smooth ease in/out (not an instant on/off) over the
+  // first/last second of the event, so it builds and fades like a real
+  // gust rather than snapping like a light switch.
+  let whiteoutFogBoost = 0, whiteoutWindBoost = 0, whiteoutSnowBoost = 0;
+  if (handle.whiteout) {
+    const wo = handle.whiteout;
+    if (!wo.active) {
+      wo.timer -= dt;
+      if (wo.timer <= 0) {
+        wo.active = true;
+        wo.remaining = 6 + Math.random() * 6; // whiteout lasts 6-12s
+        wo.duration = wo.remaining;
+      }
+    } else {
+      wo.remaining -= dt;
+      const easeIn = Math.min(1, (wo.duration - wo.remaining) / 1); // ramps up over the first second
+      const easeOut = Math.min(1, wo.remaining / 1); // ramps down over the last second
+      const strength = Math.min(easeIn, easeOut);
+      whiteoutFogBoost = strength;
+      whiteoutWindBoost = strength;
+      whiteoutSnowBoost = strength;
+      if (wo.remaining <= 0) {
+        wo.active = false;
+        wo.timer = 25 + Math.random() * 30; // next whiteout in 25-55s
+      }
+    }
+  }
+  windX *= 1 + whiteoutWindBoost * 0.8;
+  windZ *= 1 + whiteoutWindBoost * 0.8;
+  handle.scene.fog.density = Math.max(0.0008, fogDensity + whiteoutFogBoost * 0.09); // +0.09 at full strength on top of frost's already-dense 0.0052 baseline is a genuine visibility collapse, not a subtle thickening
 
   // Rain: cycles on and off rather than raining constantly — dry stretches
   // make the wet ones register as weather instead of ambient background.
@@ -564,10 +606,15 @@ function updateWeatherSystem(handle, dt, erupting = false, dayAmount = 0) {
       let y = posAttr.getY(i) - sf.fallSpeeds[i] * dt;
       if (y < 0) y = 60;
       posAttr.setY(i, y);
-      posAttr.setX(i, posAttr.getX(i) + windX * dt * 2.2);
+      posAttr.setX(i, posAttr.getX(i) + windX * dt * 2.2); // windX/windZ already include the whiteout wind boost applied earlier in this function
       posAttr.setZ(i, posAttr.getZ(i) + windZ * dt * 2.2);
     }
     posAttr.needsUpdate = true;
+    // Larger, more opaque flakes during a whiteout — visually sells "so
+    // much snow it's overwhelming" on top of the fog doing the actual
+    // work of limiting visibility.
+    sf.points.material.opacity = 0.85 + whiteoutSnowBoost * 0.15;
+    sf.points.material.size = 0.65 + whiteoutSnowBoost * 0.55;
   }
 
   // Falling leaves — Verdant only. Flutters side-to-side per-particle as

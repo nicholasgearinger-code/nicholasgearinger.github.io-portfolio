@@ -1,10 +1,10 @@
 import * as THREE from "three";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
-import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH } from "./terrain.js";
+import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH, POND_Z, POND_RADIUS, POND_LEVEL } from "./terrain.js";
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
 import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, updateLightShafts, disposeLightShafts, createRockCluster, createCaveMouth } from "./decorations.js";
-import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall } from "./liquid.js";
+import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond } from "./liquid.js";
 import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
 import { createGrass, updateGrass, disposeGrass, createFlowers, updateFlowers, disposeFlowers, createFootstepGlowSystem, spawnFootstepGlow, updateFootstepGlowSystem, disposeFootstepGlowSystem } from "./vegetation.js";
@@ -339,6 +339,7 @@ let waterfallHandle = null;
 let riverCurrentHandle = null;
 let riverFlowStripHandle = null;
 let cliffWallHandle = null;
+let sourcePondHandle = null;
 let atmosphereHandle = null;
 let grassHandle = null;
 let flowersHandle = null;
@@ -386,6 +387,8 @@ function teardownLevel() {
   riverFlowStripHandle = null;
   disposeCliffWall(scene, cliffWallHandle);
   cliffWallHandle = null;
+  disposeSourcePond(scene, sourcePondHandle);
+  sourcePondHandle = null;
   disposeAtmosphericParticles(scene, atmosphereHandle);
   atmosphereHandle = null;
   disposeGrass(scene, grassHandle);
@@ -473,6 +476,16 @@ function buildLevel(levelIdx) {
     waterfallHandle = createWaterfall(scene, topY, bottomY, waterfallX, WATERFALL_Z, RIVER_WIDTH * 1.3);
     riverCurrentHandle = createRiverCurrent(scene, terrainSeed, LIQUID_LEVEL.verdant, WATERFALL_Z, WORLD_BOUND_RADIUS * 0.95, 110);
     riverFlowStripHandle = createRiverFlowStrip(scene, terrainSeed, LIQUID_LEVEL.verdant, WATERFALL_Z, WORLD_BOUND_RADIUS * 0.95, RIVER_WIDTH * 1.3, 40);
+
+    // The pond feeding the waterfall from above — same riverCenterX
+    // formula as the waterfall/river, just evaluated at POND_Z, so it
+    // sits along the same projected upstream path. Sized to 0.35 *
+    // POND_RADIUS (not 0.5) because createSourcePond's plane is SQUARE —
+    // its corners reach radius*sqrt(2), and terrain.js's guarantee only
+    // covers out to 0.55*POND_RADIUS, so 0.35 leaves real margin rather
+    // than sitting right at the edge of the guarantee.
+    const pondX = Math.sin(POND_Z * 0.035 + terrainSeed * 0.01) * 28 + Math.sin(POND_Z * 0.013 + terrainSeed * 0.02) * 14;
+    sourcePondHandle = createSourcePond(scene, pondX, POND_Z, POND_LEVEL, POND_RADIUS * 0.35);
 
     // Craggy rocks scattered around the cliff, plus a cave mouth tucked
     // behind the falls — reuses the existing rock-cluster/cave-mouth
@@ -1058,6 +1071,7 @@ function animate() {
   updateWaterfall(waterfallHandle, dt, elapsedTime);
   updateRiverCurrent(riverCurrentHandle, dt);
   updateRiverFlowStrip(riverFlowStripHandle, dt);
+  updateSourcePond(sourcePondHandle, elapsedTime);
   // Ground indigo/violet night tint — Verdant only. The terrain mesh uses
   // one shared vertex-colored material for the whole landmass, so tinting
   // .color (multiplies with the baked-in vertex colors) plus boosting

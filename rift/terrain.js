@@ -19,6 +19,15 @@ const RIVER_WIDTH = 10;        // Verdant Hollow's river channel, half-width in 
 const RIVER_DEPTH = 7;         // was 2.5 — pushed much deeper per explicit request. Still guarantees a continuous flooded channel regardless of surrounding hill terrain (see the verdant shaper below)
 const WATERFALL_Z = -80;       // fixed world Z where the elevated upstream "source" terrain drops into the river — main.js positions the waterfall visual here too, by sampling the actual rendered terrain height rather than duplicating this file's noise math
 const WATERFALL_SOURCE_HEIGHT = 16; // how high the source area rises above the normal rolling-hills base at its peak, past the ramp-up zone
+// A small source pond up on the elevated plateau, feeding the waterfall
+// — without one the falls had no visible water source at all. Kept well
+// north of WATERFALL_Z - 4 (the waterfall visual's own sampling point in
+// main.js) so carving this basin can never affect where the falls are
+// positioned or how tall they read.
+const POND_Z = WATERFALL_Z - 24;
+const POND_RADIUS = 13;
+const POND_LEVEL = 12;         // fixed absolute height the pond's water sits at — well within the plateau's typical elevated range (base + WATERFALL_SOURCE_HEIGHT), clearly above the main river far below
+const POND_DEPTH = 4;          // how far below POND_LEVEL the basin's carved floor sits — same "blend toward a fixed absolute floor" guarantee the main river channel uses, so the basin holds water regardless of the surrounding hill noise
 const LAVA_CHANNEL_WIDTH = 9;  // Ember's main winding lava channel, half-width in world units — separate constant since it's deliberately wider/deeper than Verdant's river
 const EMBER_PATH_INNER = LAVA_CHANNEL_WIDTH + 0.5; // small gap between the channel's edge and the path so they don't visually run together
 const EMBER_PATH_OUTER = LAVA_CHANNEL_WIDTH + 3.5;
@@ -153,6 +162,31 @@ const BIOME_SHAPERS = {
     if (worldZ < WATERFALL_Z) {
       const t = Math.min(1, (WATERFALL_Z - worldZ) / 4); // tight ramp — a real cliff, not a gradual slope, so the waterfall mesh (which assumes a sharp vertical drop) actually matches the terrain underneath it
       base += t * t * WATERFALL_SOURCE_HEIGHT;
+    }
+
+    // The source pond basin — positioned along the SAME riverCenterX path
+    // (just computed with POND_Z instead of worldZ) so it reads as a
+    // genuine upstream continuation of the river rather than a randomly
+    // placed puddle up on the plateau.
+    const pondCenterX = Math.sin(POND_Z * 0.035 + seed * 0.01) * 28 + Math.sin(POND_Z * 0.013 + seed * 0.02) * 14;
+    const distFromPond = Math.hypot(worldX - pondCenterX, worldZ - POND_Z);
+    if (distFromPond < POND_RADIUS) {
+      // A fully-guaranteed inner CORE (t=1 exactly, independent of the
+      // surrounding hill noise) rather than a blend that only
+      // APPROACHES the floor as distance shrinks — worst-case-checked
+      // numerically before shipping: with a plain `t = 1 - dist/radius`
+      // blend, even a small water mesh near the center could theoretically
+      // still end up floating above the actual terrain if the noise
+      // happened to peak there, since that blend only reaches the true
+      // floor exactly at distance zero. The water mesh (liquid.js/main.js)
+      // is sized to sit within this core, so it's genuinely guaranteed
+      // submerged regardless of the noise, the same structural guarantee
+      // the river channel below uses.
+      const pondFloor = POND_LEVEL - POND_DEPTH;
+      const coreRadius = POND_RADIUS * 0.55;
+      if (distFromPond <= coreRadius) return pondFloor;
+      const t = 1 - (distFromPond - coreRadius) / (POND_RADIUS - coreRadius);
+      return base * (1 - t * t) + pondFloor * (t * t);
     }
 
     // Meandering path built from two different-frequency sine waves rather
@@ -401,4 +435,4 @@ function terrainHeightAt(level, worldX, worldZ, seedStr) {
   return biomeHeight(level.biome, worldX, worldZ, seed);
 }
 
-export { buildPlanetTerrain, biomeHeight, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH };
+export { buildPlanetTerrain, biomeHeight, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH, POND_Z, POND_RADIUS, POND_LEVEL };

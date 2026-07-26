@@ -469,6 +469,59 @@ function disposeCliffWall(scene, handle) {
   handle.mesh.material.dispose();
 }
 
+// The pond feeding the waterfall from above — without this the falls had
+// no visible source at all. The `radius` passed in must be small enough
+// that this SQUARE plane's CORNERS (which reach radius*sqrt(2), not
+// radius) stay within terrain.js's guaranteed core radius (0.55 *
+// POND_RADIUS, where the basin floor is an absolute guarantee
+// independent of the surrounding hill noise) — verified numerically at
+// the main.js call site, not just assumed from the plane's nominal size.
+function createSourcePond(scene, x, z, y, radius) {
+  const segs = 20;
+  const geo = new THREE.PlaneGeometry(radius * 2, radius * 2, segs, segs);
+  geo.rotateX(-Math.PI / 2);
+  const pos = geo.attributes.position;
+  const basePositions = pos.array.slice();
+  // Soft circular fade at the edges (via vertex alpha isn't available on
+  // a single opaque material, so this fades the OPACITY of the whole
+  // material toward the edges isn't possible per-vertex either) — instead
+  // the mesh is kept comfortably smaller than the actual guaranteed-flat
+  // basin floor, so its straight edges sit over flat, water-colored
+  // terrain rather than a visible seam against a slope.
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x0f4a78, roughness: 0.25, metalness: 0.05, transparent: true, opacity: 0.9,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(x, y, z);
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+  return { mesh, basePositions };
+}
+
+function updateSourcePond(handle, elapsed) {
+  if (!handle) return;
+  const pos = handle.mesh.geometry.attributes.position;
+  const base = handle.basePositions;
+  // Same two-layer swell+chop technique as the main water plane's wave
+  // system, just a gentler amplitude — a small still pond shouldn't churn
+  // as much as the river/waterfall below it, but it should still read as
+  // real moving water rather than a static painted disc.
+  for (let i = 0; i < pos.count; i++) {
+    const bx = base[i * 3], bz = base[i * 3 + 2];
+    const swell = Math.sin(bx * 0.25 + elapsed * 0.7) * 0.05 + Math.cos(bz * 0.22 + elapsed * 0.55) * 0.05;
+    const chop = Math.sin(bx * 0.6 + bz * 0.45 + elapsed * 1.6) * 0.02;
+    pos.setY(i, swell + chop);
+  }
+  pos.needsUpdate = true;
+}
+
+function disposeSourcePond(scene, handle) {
+  if (!handle) return;
+  scene.remove(handle.mesh);
+  handle.mesh.geometry.dispose();
+  handle.mesh.material.dispose();
+}
+
 function disposeWaterfall(scene, handle) {
   if (!handle) return;
   scene.remove(handle.mesh);
@@ -776,4 +829,4 @@ function disposeLiquidPlane(scene, handle) {
   }
 }
 
-export { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall };
+export { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond };

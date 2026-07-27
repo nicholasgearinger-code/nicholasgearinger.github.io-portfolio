@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
-import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH, POND_Z, POND_RADIUS, POND_LEVEL, RAMP_CENTER_X, RAMP_CENTER_Z, RAMP_LENGTH, RAMP_HALF_WIDTH, ROOM_FLOOR_Y, ROOM_WIDTH, ROOM_LENGTH } from "./terrain.js";
+import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH, POND_Z, POND_RADIUS, POND_LEVEL, RAMP_CENTER_X, RAMP_CENTER_Z, RAMP_LENGTH, RAMP_HALF_WIDTH, ROOM_FLOOR_Y, ROOM_WIDTH, ROOM_LENGTH, BRANCH_START_X, BRANCH_LENGTH, BRANCH_HALF_WIDTH, BRANCH_Z, CHAMBER_RADIUS } from "./terrain.js";
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
 import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, updateLightShafts, disposeLightShafts, createRockCluster, createCaveMouth, applyVerticalGradient } from "./decorations.js";
@@ -340,7 +340,7 @@ let riverCurrentHandle = null;
 let riverFlowStripHandle = null;
 let cliffWallHandle = null;
 let sourcePondHandle = null;
-let caveRoomFloorMesh = null; // the ONE piece of this underground room that's actually collidable — passed into updatePlayerPhysics as an extraMesh; walls/ceiling/decoration are ordinary non-collidable scene objects
+let caveFloorMeshes = []; // the collidable pieces of this underground network — passed into updatePlayerPhysics as extraMeshes; walls/ceiling/decoration are ordinary non-collidable scene objects. One per level for the main room; a second is added for the branch corridor + chamber.
 let atmosphereHandle = null;
 let grassHandle = null;
 let flowersHandle = null;
@@ -390,12 +390,12 @@ function teardownLevel() {
   cliffWallHandle = null;
   disposeSourcePond(scene, sourcePondHandle);
   sourcePondHandle = null;
-  if (caveRoomFloorMesh) {
-    scene.remove(caveRoomFloorMesh);
-    caveRoomFloorMesh.geometry.dispose();
-    caveRoomFloorMesh.material.dispose();
-    caveRoomFloorMesh = null;
+  for (const floorMesh of caveFloorMeshes) {
+    scene.remove(floorMesh);
+    floorMesh.geometry.dispose();
+    floorMesh.material.dispose();
   }
+  caveFloorMeshes = [];
   disposeAtmosphericParticles(scene, atmosphereHandle);
   atmosphereHandle = null;
   disposeGrass(scene, grassHandle);
@@ -589,7 +589,7 @@ function buildLevel(levelIdx) {
       const aheadZ = rz + 6;
       const aheadX = Math.sin(aheadZ * 0.028 + tunnelSeed * 0.021) * 26 + Math.sin(aheadZ * 0.011 + tunnelSeed * 0.037) * 14;
       const angle = Math.atan2(aheadX - rx, aheadZ - rz);
-      const slab = new THREE.Mesh(new THREE.BoxGeometry(12, 1.6, 9 + roofRand() * 4), roofMat);
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(9, 1.6, 9 + roofRand() * 4), roofMat); // width narrowed from 12 to 9 — was wider than the canyon's own 10-unit carved trench (TUNNEL_HALF_WIDTH*2), the same "decoration wider than the carved area" bug just found and fixed in the underground room
       slab.position.set(rx, roofY, rz);
       slab.rotation.y = angle;
       slab.castShadow = true;
@@ -601,8 +601,8 @@ function buildLevel(levelIdx) {
     // A genuinely SEPARATE underground room, reached via the entrance
     // ramp carved into the terrain above (see terrain.js's comment on
     // RAMP_CENTER_X/etc. for the full design). Only the FLOOR is
-    // collidable — tracked in caveRoomFloorMesh, passed into
-    // updatePlayerPhysics as an extraMesh below — everything else here
+    // collidable — tracked in caveFloorMeshes, passed into
+    // updatePlayerPhysics as extraMeshes below — everything else here
     // (walls, ceiling, interior spikes) is ordinary non-collidable
     // decoration, exactly like every other prop in this game. The front
     // side facing the ramp is deliberately left without a wall, matching
@@ -623,7 +623,7 @@ function buildLevel(levelIdx) {
     roomFloor.position.set(RAMP_CENTER_X, ROOM_FLOOR_Y, roomCenterZ);
     roomFloor.receiveShadow = true;
     scene.add(roomFloor);
-    caveRoomFloorMesh = roomFloor;
+    caveFloorMeshes.push(roomFloor);
 
     const roomHeight = 9;
     // Shared gradient geometry technique for every wall panel — dark near
@@ -705,6 +705,79 @@ function buildLevel(levelIdx) {
     roomAmberLight.position.set(RAMP_CENTER_X + roomWidth * 0.3, ROOM_FLOOR_Y + 2.5, roomCenterZ - roomLength * 0.25);
     scene.add(roomAmberLight);
     decorationHandles.push({ group: roomAmberLight, kind: "rockCluster" });
+
+    // The connecting branch + second chamber — genuine branching network
+    // rather than a single room, per explicit request. Floor is level
+    // (ROOM_FLOOR_Y throughout, matching the main room's own floor
+    // height) and collidable; walls/ceiling/spikes are ordinary
+    // non-collidable decoration, same as everything else here.
+    const branchCenterX = BRANCH_START_X + BRANCH_LENGTH / 2;
+    const branchFloorGeo = new THREE.PlaneGeometry(BRANCH_LENGTH + 4, BRANCH_HALF_WIDTH * 2);
+    branchFloorGeo.rotateX(-Math.PI / 2);
+    const branchFloorMat = new THREE.MeshStandardMaterial({ color: 0x0c1a22, roughness: 0.85, metalness: 0.1, emissive: 0x0a2a30, emissiveIntensity: 0.3, flatShading: true });
+    const branchFloor = new THREE.Mesh(branchFloorGeo, branchFloorMat);
+    branchFloor.position.set(branchCenterX, ROOM_FLOOR_Y, BRANCH_Z);
+    branchFloor.receiveShadow = true;
+    scene.add(branchFloor);
+    caveFloorMeshes.push(branchFloor);
+
+    const branchCeiling = buildGlowWallMesh(new THREE.BoxGeometry(BRANCH_LENGTH + 4, 1.2, BRANCH_HALF_WIDTH * 2 + 1));
+    branchCeiling.position.set(branchCenterX, ROOM_FLOOR_Y + roomHeight, BRANCH_Z);
+    branchCeiling.castShadow = true;
+    scene.add(branchCeiling);
+    decorationHandles.push({ group: branchCeiling, kind: "rockCluster" });
+
+    const branchWallNear = buildGlowWallMesh(new THREE.BoxGeometry(BRANCH_LENGTH + 4, roomHeight, 1.2));
+    branchWallNear.position.set(branchCenterX, ROOM_FLOOR_Y + roomHeight / 2, BRANCH_Z - BRANCH_HALF_WIDTH);
+    scene.add(branchWallNear);
+    decorationHandles.push({ group: branchWallNear, kind: "rockCluster" });
+
+    const branchWallFar = buildGlowWallMesh(new THREE.BoxGeometry(BRANCH_LENGTH + 4, roomHeight, 1.2));
+    branchWallFar.position.set(branchCenterX, ROOM_FLOOR_Y + roomHeight / 2, BRANCH_Z + BRANCH_HALF_WIDTH);
+    scene.add(branchWallFar);
+    decorationHandles.push({ group: branchWallFar, kind: "rockCluster" });
+
+    // The second chamber — round rather than rectangular, for genuine
+    // shape variety across the network.
+    const chamberX = BRANCH_START_X + BRANCH_LENGTH, chamberZ = BRANCH_Z;
+    const chamberFloorGeo = new THREE.CircleGeometry(CHAMBER_RADIUS, 20);
+    chamberFloorGeo.rotateX(-Math.PI / 2);
+    const chamberFloor = new THREE.Mesh(chamberFloorGeo, branchFloorMat);
+    chamberFloor.position.set(chamberX, ROOM_FLOOR_Y, chamberZ);
+    chamberFloor.receiveShadow = true;
+    scene.add(chamberFloor);
+    caveFloorMeshes.push(chamberFloor);
+
+    const chamberWallGeo = new THREE.CylinderGeometry(CHAMBER_RADIUS, CHAMBER_RADIUS, roomHeight, 20, 1, true); // open-ended — no top/bottom cap, just the ring wall
+    applyVerticalGradient(chamberWallGeo, new THREE.Color(0x050a10), new THREE.Color(0x3ad4c8));
+    const chamberWallMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.35, metalness: 0.15, emissive: 0x2ab8b0, emissiveIntensity: 0.55, flatShading: true, side: THREE.DoubleSide });
+    const chamberWall = new THREE.Mesh(chamberWallGeo, chamberWallMat);
+    chamberWall.position.set(chamberX, ROOM_FLOOR_Y + roomHeight / 2, chamberZ);
+    scene.add(chamberWall);
+    decorationHandles.push({ group: chamberWall, kind: "rockCluster" });
+
+    const chamberCeiling = buildGlowWallMesh(new THREE.CylinderGeometry(CHAMBER_RADIUS + 1, CHAMBER_RADIUS + 1, 1.2, 20));
+    chamberCeiling.position.set(chamberX, ROOM_FLOOR_Y + roomHeight, chamberZ);
+    chamberCeiling.castShadow = true;
+    scene.add(chamberCeiling);
+    decorationHandles.push({ group: chamberCeiling, kind: "rockCluster" });
+
+    for (let i = 0; i < 6; i++) {
+      const angle = roomRand() * Math.PI * 2, r = roomRand() * (CHAMBER_RADIUS - 2.5);
+      const sx = chamberX + Math.cos(angle) * r, sz = chamberZ + Math.sin(angle) * r;
+      const sh = 1.4 + roomRand() * 2.8, sr = 0.22 + roomRand() * 0.3;
+      const spike = buildGlowSpike(sh, sr);
+      spike.position.set(sx, ROOM_FLOOR_Y + sh / 2, sz);
+      spike.rotation.y = roomRand() * Math.PI * 2;
+      spike.castShadow = true;
+      scene.add(spike);
+      decorationHandles.push({ group: spike, kind: "rockCluster" });
+    }
+
+    const chamberLight = new THREE.PointLight(0xe8a860, 0.7, 26); // warm accent for the second chamber, contrasting with the main room's cooler teal-dominant lighting
+    chamberLight.position.set(chamberX, ROOM_FLOOR_Y + roomHeight * 0.6, chamberZ);
+    scene.add(chamberLight);
+    decorationHandles.push({ group: chamberLight, kind: "rockCluster" });
   }
 
   atmosphereHandle = createAtmosphericParticles(scene, level.biome);
@@ -1227,7 +1300,7 @@ function animate() {
 
   if (isGameActive() && currentLevelIdx >= 0) {
     updateMovement(dt, playerPhysics.grounded);
-    updatePlayerPhysics(camera, terrainMesh, playerPhysics, dt, PLAYER_EYE_HEIGHT, jumpQueued, caveRoomFloorMesh ? [caveRoomFloorMesh] : undefined);
+    updatePlayerPhysics(camera, terrainMesh, playerPhysics, dt, PLAYER_EYE_HEIGHT, jumpQueued, caveFloorMeshes.length ? caveFloorMeshes : undefined);
     jumpQueued = false;
     if (camera.position.y < spawnPosition.y - FALL_RESPAWN_OFFSET) respawnInLevel();
     checkLoreProximity();

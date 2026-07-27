@@ -34,12 +34,25 @@ const POND_DEPTH = 4;          // how far below POND_LEVEL the basin's carved fl
 // Fixed location, well clear of the winding canyon's own range (that
 // meandering path can reach up to ±40 in X at its widest, so X=60 keeps
 // real margin regardless of the canyon's exact position at this Z).
-const RAMP_CENTER_X = 60, RAMP_CENTER_Z = 50, RAMP_LENGTH = 18, RAMP_HALF_WIDTH = 4;
+const RAMP_CENTER_X = 60, RAMP_CENTER_Z = 50, RAMP_LENGTH = 18, RAMP_HALF_WIDTH = 8; // widened from 4 — at Low graphics tier the terrain mesh is only 40 segments across 240 units (6-unit grid spacing), and the old 8-unit-wide ramp was barely 1.33 grid cells wide, genuinely too narrow for such a sparse mesh to reliably represent
 // The room itself is WIDER than the narrow ramp corridor above — these
 // two constants are shared with main.js's room-mesh construction so the
 // two can never drift out of sync, the same way ROOM_FLOOR_Y already is.
 const ROOM_WIDTH = 16, ROOM_LENGTH = 24;
 const ROOM_ROOF_Y = -7; // just above the room's own ceiling — verified numerically: the ceiling box's actual top surface sits at -8.4 (center -9 + half its 1.2 thickness), so -7 leaves a comfortable 1.4-unit buried margin rather than a razor-thin one
+// A real mountain covering the whole ramp/room/tunnel network — centered
+// to comfortably cover the existing system's full footprint (the ramp
+// starts at Z=50, the room extends out to Z=94) with real margin, not
+// just barely enclosing it.
+const MOUNTAIN_CENTER_X = 60, MOUNTAIN_CENTER_Z = 70, MOUNTAIN_RADIUS = 55, MOUNTAIN_PEAK_HEIGHT = 35; // radius widened from 45 to comfortably cover the branch+second chamber too, not just the original room — verified numerically the chamber's far edge was just barely outside the old radius
+// A connecting branch off the main room, leading to a second chamber —
+// a level corridor (stays at ROOM_FLOOR_Y the whole way, no ramp needed
+// since it connects two already-underground spaces) exiting the main
+// room's east wall.
+const BRANCH_START_X = RAMP_CENTER_X + ROOM_WIDTH / 2; // starts exactly at the main room's east wall
+const BRANCH_LENGTH = 22, BRANCH_HALF_WIDTH = 8; // same width as the ramp, for the same coarse-mesh robustness reasoning
+const BRANCH_Z = RAMP_CENTER_Z + RAMP_LENGTH + ROOM_LENGTH / 2; // same Z as the main room's own center, so it branches off sideways at the same depth
+const CHAMBER_RADIUS = 11; // the second, smaller chamber at the branch's far end
 const ROOM_FLOOR_Y = -18; // MUST match main.js's room-mesh floor placement — the ramp's floor at its far end and the room's own floor must meet at the same height for a seamless transition
 const LAVA_CHANNEL_WIDTH = 9;  // Ember's main winding lava channel, half-width in world units — separate constant since it's deliberately wider/deeper than Verdant's river
 const EMBER_PATH_INNER = LAVA_CHANNEL_WIDTH + 0.5; // small gap between the channel's edge and the path so they don't visually run together
@@ -264,8 +277,25 @@ const BIOME_SHAPERS = {
   // the carving math itself.
   frost(u, v, seed) {
     const worldX = u * (TERRAIN_SIZE / 2), worldZ = v * (TERRAIN_SIZE / 2);
-    const base = fbm2(u * 1.4, v * 1.4, seed, 4, 2.0, 0.5) * 7; // rolling snowdrift hills
+    let base = fbm2(u * 1.4, v * 1.4, seed, 4, 2.0, 0.5) * 7; // rolling snowdrift hills
     const ridged = Math.abs(fbm2(u * 2.6, v * 2.6, seed + 80, 3, 2.0, 0.5)) * 3; // jagged wind-carved ice ridges
+
+    // A real mountain landform over the ramp/room/tunnel network below —
+    // per explicit request that the whole underground system sit beneath
+    // a mountain, not flat ground, with a single opening leading down.
+    // Added directly to `base` (now `let` rather than `const`) so every
+    // downstream carve (ramp, room roof-cover, canyon, branch) picks it
+    // up automatically. This is safe specifically because the roof-cover
+    // carves below all use `Math.min(base+ridged, someRoofY)` — capping
+    // DOWN to a fixed buried height regardless of how much taller the
+    // surrounding terrain becomes, so a much taller mountain here still
+    // gets correctly hollowed out beneath it rather than needing each
+    // carve individually reworked.
+    const distFromMountain = Math.hypot(worldX - MOUNTAIN_CENTER_X, worldZ - MOUNTAIN_CENTER_Z);
+    if (distFromMountain < MOUNTAIN_RADIUS) {
+      const mt = 1 - distFromMountain / MOUNTAIN_RADIUS;
+      base += MOUNTAIN_PEAK_HEIGHT * mt * mt; // eased falloff (t^2) rather than linear, so the mountain has a real rounded profile rather than a conical tent shape
+    }
 
     // A winding tunnel/canyon the player can actually walk through — this
     // engine's player collision only ever checks the terrain heightfield
@@ -336,8 +366,43 @@ const BIOME_SHAPERS = {
     const roomCenterZ = RAMP_CENTER_Z + RAMP_LENGTH + ROOM_LENGTH / 2;
     const roomFootprintZMin = roomCenterZ - (ROOM_LENGTH + 4) / 2;
     const roomFootprintZMax = roomCenterZ + (ROOM_LENGTH + 4) / 2;
-    if (worldZ >= roomFootprintZMin && worldZ <= roomFootprintZMax && Math.abs(worldX - RAMP_CENTER_X) < ROOM_WIDTH / 2 + 1) {
+    if (worldZ >= roomFootprintZMin && worldZ <= roomFootprintZMax && Math.abs(worldX - RAMP_CENTER_X) < ROOM_WIDTH / 2 + 4) { // margin widened from +1 to +4 — same low-res mesh robustness reasoning as the ramp's widening above
       return Math.min(base + ridged, ROOM_ROOF_Y); // whichever is LOWER — if the natural terrain here is already below the roof height, leave it as-is; otherwise cap it down to guarantee full coverage regardless of the surrounding noise
+    }
+
+    // The connecting branch — a LEVEL corridor (stays at ROOM_FLOOR_Y the
+    // whole way, no descent needed since it connects two already-buried
+    // spaces) leading from the main room's east wall out to a second,
+    // smaller chamber. Same guaranteed-core technique as the ramp.
+    const distAlongBranch = worldX - BRANCH_START_X;
+    if (Math.abs(worldZ - BRANCH_Z) < BRANCH_HALF_WIDTH && distAlongBranch >= 0 && distAlongBranch <= BRANCH_LENGTH) {
+      const distFromBranchZ = Math.abs(worldZ - BRANCH_Z);
+      const coreZ = BRANCH_HALF_WIDTH * 0.6;
+      if (distFromBranchZ <= coreZ) return ROOM_FLOOR_Y;
+      const tz = 1 - (distFromBranchZ - coreZ) / (BRANCH_HALF_WIDTH - coreZ);
+      return (base + ridged) * (1 - tz * tz) + ROOM_FLOOR_Y * (tz * tz);
+    }
+    // Roof-cover for the branch corridor — same margin-widening reasoning
+    // as the room's own roof-cover.
+    if (Math.abs(worldZ - BRANCH_Z) < BRANCH_HALF_WIDTH + 4 && distAlongBranch >= -4 && distAlongBranch <= BRANCH_LENGTH + 4) {
+      return Math.min(base + ridged, ROOM_ROOF_Y);
+    }
+
+    // The second chamber at the branch's far end — a radial guaranteed-
+    // core carve, same technique as the source pond's basin, giving a
+    // genuinely different (round rather than rectangular) room shape for
+    // variety.
+    const chamberX = BRANCH_START_X + BRANCH_LENGTH, chamberZ = BRANCH_Z;
+    const distFromChamber = Math.hypot(worldX - chamberX, worldZ - chamberZ);
+    if (distFromChamber < CHAMBER_RADIUS) {
+      const coreR = CHAMBER_RADIUS * 0.55;
+      if (distFromChamber <= coreR) return ROOM_FLOOR_Y;
+      const tc = 1 - (distFromChamber - coreR) / (CHAMBER_RADIUS - coreR);
+      return (base + ridged) * (1 - tc * tc) + ROOM_FLOOR_Y * (tc * tc);
+    }
+    // Roof-cover for the second chamber.
+    if (distFromChamber < CHAMBER_RADIUS + 4) {
+      return Math.min(base + ridged, ROOM_ROOF_Y);
     }
     return base + ridged + cavern;
   },
@@ -537,4 +602,4 @@ function terrainHeightAt(level, worldX, worldZ, seedStr) {
   return biomeHeight(level.biome, worldX, worldZ, seed);
 }
 
-export { buildPlanetTerrain, biomeHeight, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH, POND_Z, POND_RADIUS, POND_LEVEL, RAMP_CENTER_X, RAMP_CENTER_Z, RAMP_LENGTH, RAMP_HALF_WIDTH, ROOM_FLOOR_Y, ROOM_WIDTH, ROOM_LENGTH };
+export { buildPlanetTerrain, biomeHeight, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH, POND_Z, POND_RADIUS, POND_LEVEL, RAMP_CENTER_X, RAMP_CENTER_Z, RAMP_LENGTH, RAMP_HALF_WIDTH, ROOM_FLOOR_Y, ROOM_WIDTH, ROOM_LENGTH, BRANCH_START_X, BRANCH_LENGTH, BRANCH_HALF_WIDTH, BRANCH_Z, CHAMBER_RADIUS };

@@ -206,14 +206,14 @@ function buildBaseDecoration(biome, colorHex, seedRand) {
       if (roll < 0.97) return createFallenLog(colorHex, seedRand); // moss-covered logs/stumps — ground-floor variety and an "aged forest" signal
       return createRockCluster(biome, colorHex, seedRand);
     case "crystal": {
-      // Per explicit "should look exactly like this" reference (a mostly
-      // bare, sun-dappled sand floor with only occasional rock/coral, not
-      // a densely packed reef) — most seeds now place nothing at all,
-      // leaving real open sand for the terrain's own SURFACE_PATCH_STYLE/
-      // HEIGHT_PALETTE to read as the actual star of the scene, the same
-      // way the photo reads as sand first and reef second.
-      if (roll < 0.68) return null;
-      if (roll < 0.87) return createRockCluster(biome, colorHex, seedRand);
+      // Rebalanced per a new reference photo showing dense, colorful
+      // coral walls and explicit "now we can add coral" follow-up — a
+      // real reversal from the prior round's near-total open sand.
+      // Landed roughly in between: noticeably more coral than the bare
+      // FU121 tuning, while keeping real open sand patches rather than
+      // going back to FU118's uniform full coverage.
+      if (roll < 0.4) return null;
+      if (roll < 0.55) return createRockCluster(biome, colorHex, seedRand);
       return createCrystalCluster(colorHex, seedRand);
     }
     case "abyssal":
@@ -593,7 +593,7 @@ function createFloraStalk(colorHex, rand) {
 // regardless of that leftover accent tint. Reused across every reef
 // decoration below for a consistent, coordinated palette rather than each
 // prop rolling its own unrelated colors.
-const CORAL_PALETTE = [0xff6f9e, 0xff9d42, 0xb35cff, 0x3ce7ff, 0xffe066, 0xff5c5c];
+const CORAL_PALETTE = [0xff6f9e, 0xff9d42, 0xb35cff, 0x3ce7ff, 0xffe066, 0xff5c5c, 0x6fd94a];
 
 // Branching staghorn-coral cluster — same angular-shard construction the
 // old crystal cluster used (octahedra fanned out from a base point), now

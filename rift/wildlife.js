@@ -14,8 +14,8 @@ import { LANDMARK_POSITION } from "./landmarks.js";
 // -----------------------------------------------------------------------------
 
 const WILDLIFE_PROFILE = {
-  ember: { flyers: 0, flyerColor: 0x000000, motes: 7, moteColor: 0xff8a4a, moteHeight: 3, moteBlink: true, salamanders: 4, salamanderColor: 0xff7a28, glowcrawlers: 0, glowcrawlerColor: 0x000000, butterflies: 0, fish: 0 }, // too hostile for birds — fireflies-with-intent, plus fire salamanders scurrying near the lava
-  verdant: { flyers: 6, flyerColor: 0x1a1a1a, motes: 8, moteColor: 0xb87cff, moteHeight: 1.5, moteBlink: true, salamanders: 0, salamanderColor: 0x000000, glowcrawlers: 5, glowcrawlerColor: 0x8fe3ff, butterflies: 10, fish: 12 }, // birds circling + real purple fireflies low in the grass + a second glowing ground creature + fluttering butterflies + fish in the water — a living jungle, not just a pretty one
+  ember: { flyers: 0, flyerColor: 0x000000, motes: 7, moteColor: 0xff8a4a, moteHeight: 3, moteBlink: true, salamanders: 4, salamanderColor: 0xff7a28, glowcrawlers: 0, glowcrawlerColor: 0x000000, butterflies: 0, fish: 0, crabs: 0, crabColor: 0x000000 }, // too hostile for birds — fireflies-with-intent, plus fire salamanders scurrying near the lava
+  verdant: { flyers: 6, flyerColor: 0x1a1a1a, motes: 8, moteColor: 0xb87cff, moteHeight: 1.5, moteBlink: true, salamanders: 0, salamanderColor: 0x000000, glowcrawlers: 5, glowcrawlerColor: 0x8fe3ff, butterflies: 10, fish: 12, crabs: 0, crabColor: 0x000000 }, // birds circling + real purple fireflies low in the grass + a second glowing ground creature + fluttering butterflies + fish in the water — a living jungle, not just a pretty one
   // Crystal Spire, redesigned as a tropical reef: the old "flyers" orbit
   // mechanic (circle at altitude, wing-flap via scale pulse) reused as
   // manta rays/sea turtles gliding overhead in the water column instead
@@ -27,10 +27,10 @@ const WILDLIFE_PROFILE = {
   // FISH_COLORS below and createWildlife's fishColors handling — replaces
   // the old zero, since a reef with no fish would defeat the redesign's
   // whole point.
-  crystal: { flyers: 3, flyerColor: 0x2a4a52, motes: 14, moteColor: 0x6ffbe0, moteHeight: 3, moteBlink: true, salamanders: 0, salamanderColor: 0x000000, glowcrawlers: 4, glowcrawlerColor: 0xff6fd8, butterflies: 0, fish: 22, fishColors: [0xff8a3c, 0xffe066, 0x3ce7ff, 0xff6f9e, 0xb35cff, 0x6fff9e] }, // rays gliding overhead + bright drifting plankton + glowing nudibranchs on the floor + a real school of tropical reef fish in six coral-matched colors
-  abyssal: { flyers: 2, flyerColor: 0x14101c, motes: 4, moteColor: 0x8a86ff, moteHeight: 1, moteBlink: false, salamanders: 0, salamanderColor: 0x000000, glowcrawlers: 0, glowcrawlerColor: 0x000000, butterflies: 0, fish: 0 }, // a couple of large slow shapes circling high, and eerie low lure-lights
-  ashen: { flyers: 4, flyerColor: 0x1c1712, motes: 0, moteColor: 0x000000, moteHeight: 0, moteBlink: false, salamanders: 0, salamanderColor: 0x000000, glowcrawlers: 0, glowcrawlerColor: 0x000000, butterflies: 0, fish: 0 },   // scavengers circling over a dead lakebed, nothing bioluminescent down in the dust
-  frost: { flyers: 5, flyerColor: 0x1a1e2a, motes: 9, moteColor: 0xcfeaff, moteHeight: 2.5, moteBlink: true, salamanders: 0, salamanderColor: 0x000000, glowcrawlers: 0, glowcrawlerColor: 0x000000, butterflies: 0, fish: 0 }, // dark arctic bird silhouettes circling above the blizzard + pale wind-blown ice crystals catching the light — no fireflies/butterflies/salamanders/fish, none of which fit a frozen biome with no ocean
+  crystal: { flyers: 3, flyerColor: 0x2a4a52, motes: 14, moteColor: 0x6ffbe0, moteHeight: 3, moteBlink: true, salamanders: 0, salamanderColor: 0x000000, glowcrawlers: 4, glowcrawlerColor: 0xff6fd8, butterflies: 0, fish: 30, fishColors: [0xff8a3c, 0xffe066, 0x3ce7ff, 0xff6f9e, 0xb35cff, 0x6fff9e], crabs: 9, crabColor: 0xff6a3c }, // rays gliding overhead + bright drifting plankton + glowing nudibranchs on the floor + a real school of tropical reef fish in six coral-matched colors + scuttling crabs on the sand — fish count bumped (was 22) and crabs added per explicit follow-up
+  abyssal: { flyers: 2, flyerColor: 0x14101c, motes: 4, moteColor: 0x8a86ff, moteHeight: 1, moteBlink: false, salamanders: 0, salamanderColor: 0x000000, glowcrawlers: 0, glowcrawlerColor: 0x000000, butterflies: 0, fish: 0, crabs: 0, crabColor: 0x000000 }, // a couple of large slow shapes circling high, and eerie low lure-lights
+  ashen: { flyers: 4, flyerColor: 0x1c1712, motes: 0, moteColor: 0x000000, moteHeight: 0, moteBlink: false, salamanders: 0, salamanderColor: 0x000000, glowcrawlers: 0, glowcrawlerColor: 0x000000, butterflies: 0, fish: 0, crabs: 0, crabColor: 0x000000 },   // scavengers circling over a dead lakebed, nothing bioluminescent down in the dust
+  frost: { flyers: 5, flyerColor: 0x1a1e2a, motes: 9, moteColor: 0xcfeaff, moteHeight: 2.5, moteBlink: true, salamanders: 0, salamanderColor: 0x000000, glowcrawlers: 0, glowcrawlerColor: 0x000000, butterflies: 0, fish: 0, crabs: 0, crabColor: 0x000000 }, // dark arctic bird silhouettes circling above the blizzard + pale wind-blown ice crystals catching the light — no fireflies/butterflies/salamanders/fish/crabs, none of which fit a frozen biome with no ocean
 };
 
 let sharedWingTexture = null;
@@ -105,6 +105,47 @@ function getSalamanderTexture() {
   ctx.stroke();
   sharedSalamanderTexture = new THREE.CanvasTexture(canvas);
   return sharedSalamanderTexture;
+}
+
+// A genuine crab silhouette — wide rounded shell, two prominent front
+// claws, small legs trailing along both sides. Explicitly requested this
+// round rather than reusing the salamander's body+tail+4-legs shape,
+// which was judged too lizard-specific for this back in the reef's
+// original redesign.
+let sharedCrabTexture = null;
+function getCrabTexture() {
+  if (sharedCrabTexture) return sharedCrabTexture;
+  const w = 64, h = 40;
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  // Wide rounded shell/body, flatter and broader than the salamander's.
+  ctx.beginPath();
+  ctx.ellipse(w * 0.5, h * 0.55, w * 0.28, h * 0.32, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Two front claws — a rounded pincer shape on each side, held forward.
+  ctx.beginPath();
+  ctx.ellipse(w * 0.2, h * 0.32, w * 0.11, h * 0.16, -0.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(w * 0.8, h * 0.32, w * 0.11, h * 0.16, 0.5, 0, Math.PI * 2);
+  ctx.fill();
+  // Small legs trailing along both sides.
+  ctx.lineWidth = h * 0.05;
+  ctx.strokeStyle = "#ffffff";
+  for (const side of [-1, 1]) {
+    for (let i = 0; i < 3; i++) {
+      const startX = w * 0.5 + side * w * 0.22;
+      const startY = h * (0.5 + i * 0.13);
+      ctx.beginPath();
+      ctx.moveTo(startX, startY);
+      ctx.lineTo(startX + side * w * 0.16, startY + h * 0.14);
+      ctx.stroke();
+    }
+  }
+  sharedCrabTexture = new THREE.CanvasTexture(canvas);
+  return sharedCrabTexture;
 }
 
 // A small rounded snail/grub silhouette — genuinely additive-blended
@@ -239,6 +280,29 @@ function createSalamander(scene, color, heightSampler) {
   };
 }
 
+// A small reef crab scuttling on the sand — same scurry-then-pause ground
+// motion as the salamander above, without that one's eruption-fleeing
+// branch (ember-only, doesn't apply here). Smaller and quicker-paced than
+// the salamander, matching a real crab's short scuttle-stop rhythm.
+function createCrab(scene, color, heightSampler) {
+  const mat = new THREE.SpriteMaterial({ map: getCrabTexture(), color, fog: true });
+  const sprite = new THREE.Sprite(mat);
+  const scale = 0.55 + Math.random() * 0.25;
+  sprite.scale.set(scale, scale * 0.65, 1);
+  scene.add(sprite);
+  return {
+    sprite,
+    heightSampler,
+    x: (Math.random() - 0.5) * 140,
+    z: (Math.random() - 0.5) * 140,
+    wanderAngle: Math.random() * Math.PI * 2,
+    seed: Math.random() * Math.PI * 2,
+    speed: 1.2 + Math.random() * 1,
+    paused: false,
+    pauseTimer: Math.random() * 1.2, // shorter pauses than the salamander — a real crab's scuttle-stop rhythm is quicker
+  };
+}
+
 // A slow, always-glowing ground creature — distinct from both the
 // firefly motes (which drift at a fixed hover height, no ground contact)
 // and the salamander (which is a normal-blended, eruption-fleeing
@@ -333,7 +397,10 @@ function createWildlife(scene, biome, heightSampler, waterLevel) {
     const fishColor = profile.fishColors ? profile.fishColors[Math.floor(Math.random() * profile.fishColors.length)] : 0x3a5a6a;
     fish.push(createFish(scene, fishColor, waterLevel));
   }
-  return { flyers, motes, salamanders, glowcrawlers, butterflies, fish };
+  const crabCount = Math.round((profile.crabs || 0) * mult);
+  const crabs = [];
+  for (let i = 0; i < crabCount; i++) crabs.push(createCrab(scene, profile.crabColor, heightSampler));
+  return { flyers, motes, salamanders, glowcrawlers, butterflies, fish, crabs };
 }
 
 function updateWildlife(handle, elapsed, dt, playerX = 0, playerZ = 0, erupting = false) {
@@ -421,6 +488,30 @@ function updateWildlife(handle, elapsed, dt, playerX = 0, playerZ = 0, erupting 
     const scurryBob = s.paused ? 0 : Math.abs(Math.sin(elapsed * 10 + s.seed)) * 0.06;
     s.sprite.position.set(s.x, groundY + 0.12 + scurryBob, s.z);
   }
+  for (const c of handle.crabs || []) {
+    const distToPlayer = Math.hypot(c.x - playerX, c.z - playerZ);
+    if (distToPlayer < FLEE_RADIUS) {
+      c.wanderAngle = Math.atan2(c.z - playerZ, c.x - playerX);
+      c.x += Math.cos(c.wanderAngle) * dt * c.speed * 2.5;
+      c.z += Math.sin(c.wanderAngle) * dt * c.speed * 2.5;
+      c.paused = false;
+    } else {
+      c.pauseTimer -= dt;
+      if (c.pauseTimer <= 0) {
+        c.paused = !c.paused;
+        c.pauseTimer = c.paused ? 0.4 + Math.random() * 1 : 0.8 + Math.random() * 1.6;
+        if (!c.paused) c.wanderAngle += (Math.random() - 0.5) * Math.PI;
+      }
+      if (!c.paused) {
+        c.x += Math.cos(c.wanderAngle) * dt * c.speed;
+        c.z += Math.sin(c.wanderAngle) * dt * c.speed;
+      }
+    }
+    if (Math.hypot(c.x, c.z) > 100) c.wanderAngle = Math.atan2(-c.z, -c.x);
+    const crabGroundY = c.heightSampler ? (c.heightSampler(c.x, c.z) ?? 0) : 0;
+    const scurryBob2 = c.paused ? 0 : Math.abs(Math.sin(elapsed * 13 + c.seed)) * 0.04; // quicker, smaller bob than the salamander's — a crab's scuttle is faster and lower to the ground
+    c.sprite.position.set(c.x, crabGroundY + 0.06 + scurryBob2, c.z);
+  }
   for (const g of handle.glowcrawlers) {
     const distToPlayer = Math.hypot(g.x - playerX, g.z - playerZ);
     if (distToPlayer < FLEE_RADIUS) {
@@ -482,6 +573,7 @@ function disposeWildlife(scene, handle) {
   for (const f of handle.flyers) { scene.remove(f.sprite); f.sprite.material.dispose(); }
   for (const m of handle.motes) { scene.remove(m.sprite); m.sprite.material.dispose(); }
   for (const s of handle.salamanders || []) { scene.remove(s.sprite); s.sprite.material.dispose(); }
+  for (const c of handle.crabs || []) { scene.remove(c.sprite); c.sprite.material.dispose(); }
   for (const g of handle.glowcrawlers || []) { scene.remove(g.sprite); g.sprite.material.dispose(); }
   for (const b of handle.butterflies || []) { scene.remove(b.sprite); b.sprite.material.dispose(); }
   for (const f of handle.fish || []) { scene.remove(f.sprite); f.sprite.material.dispose(); }

@@ -400,4 +400,113 @@ function disposeFootstepGlowSystem(scene, handle) {
   handle.points.material.dispose();
 }
 
-export { createGrass, updateGrass, disposeGrass, createFlowers, updateFlowers, disposeFlowers, createFootstepGlowSystem, spawnFootstepGlow, updateFootstepGlowSystem, disposeFootstepGlowSystem };
+// -----------------------------------------------------------------------------
+// SUN CAUSTICS — the shifting mesh of bright light patches shallow water
+// casts on a sand floor once sunlight passes through its rippling surface.
+// Per an explicit reference photo where this is the single most visually
+// defining feature of the scene (not the occasional mid-water sunbeam
+// shafts weather.js already has — this is specifically FLOOR-projected
+// light). Crystal (Coral Shallows) only — no other biome is a shallow lit
+// seafloor. Built as one Points cloud with per-vertex animated color, the
+// SAME proven technique createFootstepGlowSystem above already uses
+// (explicitly NOT InstancedMesh.instanceColor, which this file's own
+// top-of-file note already flags as unreliable here) — each patch needs
+// its own independently flickering brightness, and a real BufferAttribute
+// color channel is what reliably delivers that. Ground-hugging via the
+// same sampleHeight placement technique flowers/grass already use, so it
+// follows the actual sand/reef contour instead of floating at one fixed
+// height across a landmass whose elevation varies a lot (sand troughs vs
+// reef mounds).
+// -----------------------------------------------------------------------------
+
+// An irregular, soft-edged blotch — several overlapping radial blobs of
+// decreasing size/opacity rather than one clean circle, since a real
+// caustic cell has a webbed, organic outline, not a perfect disc.
+let sharedCausticTexture = null;
+function getCausticTexture() {
+  if (sharedCausticTexture) return sharedCausticTexture;
+  const size = 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const blobs = [
+    { x: 0.5, y: 0.5, r: 0.46, a: 0.9 },
+    { x: 0.32, y: 0.4, r: 0.24, a: 0.6 },
+    { x: 0.68, y: 0.42, r: 0.22, a: 0.55 },
+    { x: 0.48, y: 0.68, r: 0.26, a: 0.6 },
+  ];
+  for (const b of blobs) {
+    const grad = ctx.createRadialGradient(b.x * size, b.y * size, 0, b.x * size, b.y * size, b.r * size);
+    grad.addColorStop(0, `rgba(255,255,255,${b.a})`);
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(b.x * size, b.y * size, b.r * size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  sharedCausticTexture = new THREE.CanvasTexture(canvas);
+  return sharedCausticTexture;
+}
+
+/**
+ * @param {THREE.Scene} scene
+ * @param {string} biome
+ * @param {(x:number, z:number) => number|null} sampleHeight
+ * @param {number} radius
+ */
+function createCaustics(scene, biome, sampleHeight, radius) {
+  if (biome !== "crystal") return null; // only Coral Shallows is a shallow lit seafloor
+  const count = 260;
+  const positions = new Float32Array(count * 3);
+  const colors = new Float32Array(count * 3);
+  const seeds = new Float32Array(count);
+  const speeds = new Float32Array(count);
+  let placed = 0;
+  let attempts = 0;
+  const maxAttempts = count * 4;
+  while (placed < count && attempts < maxAttempts) {
+    attempts++;
+    const x = (Math.random() * 2 - 1) * radius, z = (Math.random() * 2 - 1) * radius;
+    const y = sampleHeight(x, z);
+    if (y === null) continue;
+    positions[placed * 3] = x;
+    positions[placed * 3 + 1] = y + 0.05; // just above the actual sand/reef surface at this exact point — hugs the real contour rather than floating at one fixed height
+    positions[placed * 3 + 2] = z;
+    colors[placed * 3] = colors[placed * 3 + 1] = colors[placed * 3 + 2] = 1; // updateCaustics scales brightness via this each frame
+    seeds[placed] = Math.random() * Math.PI * 2;
+    speeds[placed] = 0.3 + Math.random() * 0.6; // independent flicker speeds so patches don't pulse in unison
+    placed++;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(positions.slice(0, placed * 3), 3));
+  geo.setAttribute("color", new THREE.BufferAttribute(colors.slice(0, placed * 3), 3));
+  const mat = new THREE.PointsMaterial({
+    map: getCausticTexture(), vertexColors: true, color: 0xeafffa, size: 4.2, transparent: true,
+    blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
+  });
+  const points = new THREE.Points(geo, mat);
+  scene.add(points);
+  return { points, seeds: seeds.slice(0, placed), speeds: speeds.slice(0, placed), count: placed };
+}
+
+function updateCaustics(handle, elapsed) {
+  if (!handle) return;
+  const colorAttr = handle.points.geometry.attributes.color;
+  for (let i = 0; i < handle.count; i++) {
+    // Flicker between dim and bright rather than fully off — real
+    // caustic light never goes fully dark, it just concentrates
+    // elsewhere for a moment.
+    const flicker = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(elapsed * handle.speeds[i] + handle.seeds[i]));
+    colorAttr.setXYZ(i, flicker, flicker, flicker);
+  }
+  colorAttr.needsUpdate = true;
+}
+
+function disposeCaustics(scene, handle) {
+  if (!handle) return;
+  scene.remove(handle.points);
+  handle.points.geometry.dispose();
+  handle.points.material.dispose();
+}
+
+export { createGrass, updateGrass, disposeGrass, createFlowers, updateFlowers, disposeFlowers, createFootstepGlowSystem, spawnFootstepGlow, updateFootstepGlowSystem, disposeFootstepGlowSystem, createCaustics, updateCaustics, disposeCaustics };

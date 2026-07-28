@@ -24,7 +24,7 @@ const WEATHER_PROFILE = {
     lightning: { color: 0xcfe0ff, intervalMin: 6, intervalMax: 14, height: 90, onlyDuringRain: true }, // an ordinary thunderstorm — the one biome where lightning actually means rain
   },
   crystal: {
-    baseFogDensity: 0.0022, fogPulseAmp: 0.0015, fogPulseSpeed: 0.08, // lower base than before — a bright shallow reef should stay more visible than the old resonance-fog atmosphere
+    baseFogDensity: 0.0016, fogPulseAmp: 0.001, fogPulseSpeed: 0.08, // lowered again (was 0.0022) — the reference photo has near-total visibility straight to the sand, the lowest of any biome by a clear margin
     windBaseStrength: 0.35, windVariance: 0.3, windSpeed: 0.03, // repurposed as gentle current strength, driving kelp sway rather than air movement
     rain: false,
     lightning: { color: 0x3ce7ff, intervalMin: 14, intervalMax: 26, height: 20, dim: true }, // no real lightning underwater — a soft, muted pulse of bioluminescent light from deep in the reef, kept dim and lower to the ground than every other biome's actual storm discharge
@@ -315,6 +315,42 @@ function createCrystalRefraction(scene) {
   scene.add(sprite);
   return { sprite, flash: 0, timer: randRange(8, 18) }; // fires more often than the old rainbow — a passing sunbeam should feel like a recurring reef mood, not a rare event
 }
+
+// Crystal-only — a persistent field of many thin light shafts, always at
+// least faintly visible and each independently flickering, rather than
+// the single occasional stronger flash above. This is what actually
+// reads as "dappled sunlight" (the reference image's constant mosaic of
+// moving light rays), distinct from crystalRefraction's rarer, brighter
+// single passing beam layered on top of it. Reuses the same sunbeam
+// texture — cheap, and keeps the whole light-shaft family visually
+// consistent — just many more of them, fainter, always running.
+function createCrystalDapple(scene) {
+  const count = 12;
+  const rays = [];
+  for (let i = 0; i < count; i++) {
+    const mat = new THREE.SpriteMaterial({
+      map: getSunbeamTexture(), transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+    });
+    const sprite = new THREE.Sprite(mat);
+    const width = 3 + Math.random() * 4;
+    const length = 22 + Math.random() * 16;
+    sprite.scale.set(width, length, 1);
+    const angle = Math.random() * Math.PI * 2, dist = Math.random() * 55;
+    const baseX = Math.cos(angle) * dist, baseZ = Math.sin(angle) * dist;
+    sprite.position.set(baseX, 4, baseZ);
+    sprite.material.rotation = (Math.random() - 0.5) * 0.25;
+    scene.add(sprite);
+    rays.push({
+      sprite, baseX, baseZ,
+      baseOpacity: 0.12 + Math.random() * 0.16, // faint individually — it's the many overlapping rays that read as "dappled," not one bright shaft
+      seed: Math.random() * Math.PI * 2,
+      flickerSpeed: 0.4 + Math.random() * 0.7, // independent speeds so they don't pulse in unison
+      swaySpeed: 0.15 + Math.random() * 0.15,
+    });
+  }
+  return { rays };
+}
 function createDustDevil(scene) {
   const count = 40;
   const positions = new Float32Array(count * 3);
@@ -404,6 +440,7 @@ function createWeatherSystem(scene, biome) {
   const distantLightning = createDistantLightning(scene);
   const dustDevil = biome === "ashen" ? createDustDevil(scene) : null;
   const crystalRefraction = biome === "crystal" ? createCrystalRefraction(scene) : null;
+  const crystalDapple = biome === "crystal" ? createCrystalDapple(scene) : null;
   const ashfall = biome === "ember" ? createAshfall(scene) : null;
   const leaffall = biome === "verdant" ? createLeaffall(scene) : null;
   const groundGlow = biome === "verdant" ? createGroundGlow(scene) : null;
@@ -417,7 +454,7 @@ function createWeatherSystem(scene, biome) {
   const whiteout = biome === "frost" ? { timer: 20 + Math.random() * 25, active: false, remaining: 0 } : null;
 
   return {
-    scene, biome, profile, lightningLight, rain, distantLightning, dustDevil, crystalRefraction, ashfall, leaffall, groundGlow, blizzardSnow, whiteout,
+    scene, biome, profile, lightningLight, rain, distantLightning, dustDevil, crystalRefraction, crystalDapple, ashfall, leaffall, groundGlow, blizzardSnow, whiteout,
     windAngle: Math.random() * Math.PI * 2,
     lightningTimer: randRange(profile.lightning.intervalMin, profile.lightning.intervalMax),
     lightningFlash: 0,
@@ -676,6 +713,20 @@ function updateWeatherSystem(handle, dt, erupting = false, dayAmount = 0) {
     cr.sprite.material.opacity = Math.sin(Math.min(1, cr.flash) * Math.PI) * 0.5;
   }
 
+  // Crystal dapple field — always-on light shafts, each independently
+  // flickering and gently swaying, layered underneath the rarer stronger
+  // sunbeam flash above. This is the constant "dappled sunlight" quality
+  // the reef should have at all times, not an occasional event.
+  if (handle.crystalDapple) {
+    for (const ray of handle.crystalDapple.rays) {
+      const flicker = 0.5 + 0.5 * Math.sin(handle.elapsed * ray.flickerSpeed + ray.seed);
+      ray.sprite.material.opacity = ray.baseOpacity * (0.4 + 0.6 * flicker);
+      const sway = Math.sin(handle.elapsed * ray.swaySpeed + ray.seed) * 2.5;
+      ray.sprite.position.x = ray.baseX + sway;
+      ray.sprite.position.z = ray.baseZ + Math.cos(handle.elapsed * ray.swaySpeed * 0.8 + ray.seed) * 2.5;
+    }
+  }
+
   return { windX, windZ, windStrength, rainIntensity: handle.rainIntensity };
 }
 
@@ -699,6 +750,12 @@ function disposeWeatherSystem(scene, handle) {
   if (handle.crystalRefraction) {
     scene.remove(handle.crystalRefraction.sprite);
     handle.crystalRefraction.sprite.material.dispose();
+  }
+  if (handle.crystalDapple) {
+    for (const ray of handle.crystalDapple.rays) {
+      scene.remove(ray.sprite);
+      ray.sprite.material.dispose();
+    }
   }
   if (handle.ashfall) {
     scene.remove(handle.ashfall.points);

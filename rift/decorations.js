@@ -165,7 +165,7 @@ function createDecoration(biome, colorHex, seedRand) {
   // scaled up on the group).
   const isGiant = seedRand() < 0.035;
   const handle = buildBaseDecoration(biome, colorHex, seedRand);
-  if (isGiant) {
+  if (handle && isGiant) {
     handle.group.scale.setScalar(2.4 + seedRand() * 1.4);
   }
   return handle;
@@ -205,7 +205,17 @@ function buildBaseDecoration(biome, colorHex, seedRand) {
       if (roll < 0.93) return createGlowFungus(colorHex, seedRand); // glowing bioluminescent ground clusters
       if (roll < 0.97) return createFallenLog(colorHex, seedRand); // moss-covered logs/stumps — ground-floor variety and an "aged forest" signal
       return createRockCluster(biome, colorHex, seedRand);
-    case "crystal": return roll < 0.72 ? createCrystalCluster(colorHex, seedRand) : createRockCluster(biome, colorHex, seedRand);
+    case "crystal": {
+      // Per explicit "should look exactly like this" reference (a mostly
+      // bare, sun-dappled sand floor with only occasional rock/coral, not
+      // a densely packed reef) — most seeds now place nothing at all,
+      // leaving real open sand for the terrain's own SURFACE_PATCH_STYLE/
+      // HEIGHT_PALETTE to read as the actual star of the scene, the same
+      // way the photo reads as sand first and reef second.
+      if (roll < 0.68) return null;
+      if (roll < 0.87) return createRockCluster(biome, colorHex, seedRand);
+      return createCrystalCluster(colorHex, seedRand);
+    }
     case "abyssal":
       if (roll < 0.25) return createCaveMouth(colorHex, seedRand, biome);
       if (roll < 0.72) return createDebris(colorHex, seedRand);

@@ -33,9 +33,13 @@ const LIQUID_STYLE = {
   // sandy/coral floor and fish stay visible from above — a bright shallow
   // reef reads as clear water, not an opaque colored plane. Roughness
   // pushed lower than Verdant for a livelier, more sun-glittered surface.
+  // Retuned paler/brighter per an explicit reference photo — the
+  // previous baseColor read as a saturated tropical postcard turquoise,
+  // where the photo is a much lighter, almost washed-out pale cyan with
+  // very high visibility straight through to the sand.
   crystal: {
-    baseColor: new THREE.Color(0x0fb8c9), frothColor: new THREE.Color(0xf2fffb),
-    emissive: 0x2ae8d8, emissiveIntensity: 0.05, opacity: 0.62, roughness: 0.06,
+    baseColor: new THREE.Color(0x6fdfe6), frothColor: new THREE.Color(0xffffff),
+    emissive: 0x8ff5ec, emissiveIntensity: 0.04, opacity: 0.42, roughness: 0.04,
   },
 };
 
@@ -584,6 +588,12 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
   const mat = new THREE.MeshStandardMaterial({
     vertexColors: true, emissive: style.emissive, emissiveIntensity: style.emissiveIntensity,
     transparent: true, opacity: style.opacity, roughness: style.roughness, metalness: 0.1,
+    // Crystal is the one biome where the whole landmass sits below the
+    // water — the player is normally looking UP at this surface, not
+    // down at it, so the default single-sided (front-face-only, facing
+    // up) plane would be invisible from below entirely. Every other
+    // biome's water is only ever seen from above, so left untouched.
+    side: biome === "crystal" ? THREE.DoubleSide : THREE.FrontSide,
   });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.y = y;

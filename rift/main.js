@@ -7,7 +7,7 @@ import { createDecoration, updateDecoration, createEmberFire, createLivingTree, 
 import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond } from "./liquid.js";
 import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
-import { createGrass, updateGrass, disposeGrass, createFlowers, updateFlowers, disposeFlowers, createFootstepGlowSystem, spawnFootstepGlow, updateFootstepGlowSystem, disposeFootstepGlowSystem } from "./vegetation.js";
+import { createGrass, updateGrass, disposeGrass, createFlowers, updateFlowers, disposeFlowers, createFootstepGlowSystem, spawnFootstepGlow, updateFootstepGlowSystem, disposeFootstepGlowSystem, createCaustics, updateCaustics, disposeCaustics } from "./vegetation.js";
 import { createHorizonSilhouettes, updateHorizonSilhouettes, disposeHorizonSilhouettes } from "./horizonSilhouettes.js";
 import { createWildlife, updateWildlife, disposeWildlife } from "./wildlife.js";
 import { createLandmark, updateLandmark, disposeLandmark, LANDMARK_POSITION } from "./landmarks.js";
@@ -359,6 +359,7 @@ let caveFloorMeshes = []; // the collidable pieces of this underground network â
 let atmosphereHandle = null;
 let grassHandle = null;
 let flowersHandle = null;
+let causticsHandle = null;
 let footstepGlowHandle = null;
 let weatherHandle = null;
 let cloudsHandle = null;
@@ -419,6 +420,8 @@ function teardownLevel() {
   disposeFootstepGlowSystem(scene, footstepGlowHandle);
   footstepGlowHandle = null;
   flowersHandle = null;
+  disposeCaustics(scene, causticsHandle);
+  causticsHandle = null;
   disposeWeatherSystem(scene, weatherHandle);
   weatherHandle = null;
   disposeClouds(scene, cloudsHandle);
@@ -798,6 +801,7 @@ function buildLevel(levelIdx) {
   atmosphereHandle = createAtmosphericParticles(scene, level.biome);
   grassHandle = createGrass(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), TERRAIN_SIZE * 0.46);
   flowersHandle = createFlowers(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), TERRAIN_SIZE * 0.46);
+  causticsHandle = createCaustics(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), TERRAIN_SIZE * 0.46);
   footstepGlowHandle = level.biome === "verdant" ? createFootstepGlowSystem(scene, 40) : null;
   weatherHandle = createWeatherSystem(scene, level.biome);
   cloudsHandle = createClouds(scene, level.biome);
@@ -832,6 +836,7 @@ function buildLevel(levelIdx) {
   layout.decorationSeeds.forEach((seed) => {
     const groundY = sampleGroundHeight(seed.x, seed.z, terrainMesh) ?? 0;
     const handle = createDecoration(level.biome, level.color, seed.rand);
+    if (!handle) return; // this seed rolled "nothing" â€” currently only Crystal's open-sand rolls do this
     handle.group.position.set(seed.x, groundY, seed.z);
     handle.group.rotation.y = seed.rand() * Math.PI * 2;
     if (level.biome === "verdant") {
@@ -1396,6 +1401,7 @@ function animate() {
   updateAtmosphericParticles(atmosphereHandle, elapsedTime, dt, wind.windX, wind.windZ);
   updateGrass(grassHandle, elapsedTime, wind.windX, wind.windZ, dayNight.dayAmount);
   updateFlowers(flowersHandle, elapsedTime);
+  updateCaustics(causticsHandle, elapsedTime);
   updateFootstepGlowSystem(footstepGlowHandle, dt);
   updateWildlife(wildlifeHandle, elapsedTime, dt, camera.position.x, camera.position.z, eruptionActive);
   updateLandmark(landmarkHandle, elapsedTime, dt);

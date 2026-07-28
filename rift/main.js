@@ -467,7 +467,19 @@ function buildLevel(levelIdx) {
   scene.add(terrainMesh);
 
   if (LIQUID_LEVEL[level.biome] !== undefined) {
-    liquidHandle = createLiquidPlane(scene, level.biome, LIQUID_LEVEL[level.biome], TERRAIN_SIZE, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
+    // The test chasm (terrain.js, centered -50/-50, radius 35) needs to
+    // read as genuinely dry — its floor (-20) sits well below frost's
+    // water level (-1.2), so without this the flat ocean plane would
+    // flood it just like every other low area on the map. The exclusion
+    // radius (65, not just the chasm's own 35) accounts for the water
+    // plane's own mesh being far coarser than the terrain's — only 10
+    // segments across the whole 240-unit map at Low tier, a 24-unit grid
+    // spacing — so the margin needs to cover a full grid cell's reach
+    // plus real safety margin, or the cut boundary would be badly
+    // imprecise (the same "narrow margin vs coarse mesh" bug already
+    // caught twice elsewhere in this cave/tunnel work).
+    const excludeRegions = level.biome === "frost" ? [{ x: -50, z: -50, radius: 65 }] : [];
+    liquidHandle = createLiquidPlane(scene, level.biome, LIQUID_LEVEL[level.biome], TERRAIN_SIZE, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), undefined, excludeRegions);
   }
 
   if (level.biome === "verdant") {

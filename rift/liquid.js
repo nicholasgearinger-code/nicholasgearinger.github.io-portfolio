@@ -538,12 +538,34 @@ function disposeWaterfall(scene, handle) {
   handle.splash.material.dispose();
 }
 
-function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0.6, z: 0.35 }) {
+function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0.6, z: 0.35 }, excludeRegions = []) {
   const style = LIQUID_STYLE[biome];
   if (!style) return null;
   const segs = getGraphicsSettings().liquidSegments; // reverted the earlier ×1.4 workaround — liquidSegments itself is now increased directly in graphicsSettings.js
   const geo = new THREE.PlaneGeometry(size, size, segs, segs);
   geo.rotateX(-Math.PI / 2);
+
+  // Punches real holes in the water plane for any excluded region (e.g.
+  // a chasm that should read as genuinely dry, not flooded) — this flat
+  // plane otherwise covers the WHOLE map uniformly at one fixed height,
+  // with no awareness of what's actually been carved beneath it, so a
+  // deep pit anywhere below `y` would always appear flooded regardless
+  // of intent. Removes any triangle whose centroid falls within an
+  // excluded region's radius; vertex colors are untouched since they're
+  // still valid for the remaining boundary triangles that reference them.
+  if (excludeRegions.length > 0) {
+    const posAttr = geo.attributes.position;
+    const oldIndex = geo.index.array;
+    const newIndex = [];
+    for (let i = 0; i < oldIndex.length; i += 3) {
+      const a = oldIndex[i], b = oldIndex[i + 1], c = oldIndex[i + 2];
+      const cx = (posAttr.getX(a) + posAttr.getX(b) + posAttr.getX(c)) / 3;
+      const cz = (posAttr.getZ(a) + posAttr.getZ(b) + posAttr.getZ(c)) / 3;
+      const excluded = excludeRegions.some((r) => Math.hypot(cx - r.x, cz - r.z) < r.radius);
+      if (!excluded) newIndex.push(a, b, c);
+    }
+    geo.setIndex(newIndex);
+  }
 
   const posAttr = geo.attributes.position;
   const colors = new Float32Array(posAttr.count * 3);

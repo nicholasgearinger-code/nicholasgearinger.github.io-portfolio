@@ -3424,6 +3424,7 @@
     padding: .7rem .8rem; display: flex; flex-direction: column; gap: .5rem; min-width: 210px;
     box-shadow: 0 8px 24px rgba(0,0,0,.4);
   }
+  #rift-graphics-panel[hidden] { display: none; } /* #rift-graphics-panel's own display:flex above outranks the browser's default [hidden]{display:none} rule (ID beats attribute selector), so without this the panel never actually hides when main.js toggles the `hidden` attribute */
   #rift-graphics-label { font-size: 10px; letter-spacing: .08em; color: rgba(232,236,241,.7); }
   #rift-graphics-seg { display: flex; gap: .3rem; }
   .rift-graphics-opt {
@@ -3458,7 +3459,7 @@
   #rift-start-overlay {
     position: absolute; inset: 0;
     background: radial-gradient(ellipse at center, #141b2d 0%, #0a0e14 70%);
-    display: flex; align-items: center; justify-content: center; z-index: 20;
+    display: none; align-items: center; justify-content: center; z-index: 20;
     overflow-y: auto; padding: 16px;
   }
   #rift-start-panel { text-align: center; max-width: 460px; padding: 24px 8px; }
@@ -3478,6 +3479,50 @@
   .rift-level-btn strong { font-size: 12.5px; letter-spacing: .04em; color: #4fd1c5; }
   .rift-level-btn span { font-size: 10.5px; color: rgba(232,236,241,.5); line-height: 1.35; }
   .rift-level-btn:hover { background: rgba(79,209,197,.12); border-color: #4fd1c5; }
+
+  /* ── Rift title gate: animated "RIFT ISLANDS" intro shown before the
+     biome-select menu (#rift-start-overlay, now hidden by default — see
+     above). Play fades this out and hands off to showLevelSelect(), the
+     same function the in-game MENU button already calls, so the biome
+     menu itself needed zero changes. Self-contained: the letter spans are
+     static HTML (not JS-generated) so the animation still plays even if
+     the module script fails to load; only the Play button's hand-off to
+     the biome menu needs JS (wired in main.js). ── */
+  #rift-title-gate {
+    position: absolute; inset: 0; z-index: 25;
+    background: radial-gradient(ellipse at center, #141b2d 0%, #05070c 75%);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 22px; text-align: center; padding: 16px; opacity: 1; transition: opacity .6s ease;
+  }
+  #rift-title-gate.rift-title-gate-hidden { opacity: 0; pointer-events: none; }
+  .rift-title-glyph { font-size: 2.4rem; font-weight: 700; letter-spacing: .05em; }
+  .rift-title-glyph .rtg-lt { color: #22D3EE; text-shadow: 0 0 18px rgba(34,211,238,.75), 0 0 40px rgba(34,211,238,.35); }
+  .rift-title-glyph .rtg-slash { color: #818CF8; text-shadow: 0 0 18px rgba(129,140,248,.75), 0 0 40px rgba(129,140,248,.35); margin: 0 .05em; }
+  .rift-title-glyph .rtg-gt { color: #E879F9; text-shadow: 0 0 18px rgba(232,121,249,.75), 0 0 40px rgba(232,121,249,.35); }
+  .rift-title-word {
+    font-size: 1.7rem; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
+    color: #e8ecf1; margin: 0; display: flex; justify-content: center; flex-wrap: wrap;
+    text-shadow: 0 0 20px rgba(79,209,197,.4);
+  }
+  .rift-title-word .rtw-char {
+    display: inline-block; opacity: 0; transform: translateY(10px);
+    animation: riftTitleCharIn .5s cubic-bezier(.2,.9,.3,1) forwards;
+    animation-delay: calc(var(--i) * 55ms);
+  }
+  .rift-title-word .rtw-space { width: .5em; display: inline-block; }
+  @keyframes riftTitleCharIn { to { opacity: 1; transform: translateY(0); } }
+  .rift-title-play-btn {
+    font-family: 'IBM Plex Mono', monospace; font-size: 13px; letter-spacing: .08em;
+    background: rgba(79,209,197,.12); border: 1px solid rgba(79,209,197,.5); color: #e8ecf1;
+    padding: 10px 26px; border-radius: 100px; cursor: pointer; touch-action: manipulation;
+    opacity: 0; animation: riftTitleBtnIn .5s ease forwards; animation-delay: .9s;
+    transition: background .2s ease, border-color .2s ease, box-shadow .2s ease;
+  }
+  .rift-title-play-btn:hover { background: rgba(79,209,197,.22); border-color: #4fd1c5; box-shadow: 0 0 18px rgba(79,209,197,.3); }
+  @keyframes riftTitleBtnIn { to { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) {
+    .rift-title-word .rtw-char, .rift-title-play-btn { animation: none; opacity: 1; transform: none; }
+  }
 
 </style>
 <script type="importmap">
@@ -4624,6 +4669,12 @@
               <button type="button" class="rift-graphics-opt" data-tier="high">High</button>
             </div>
             <span id="rift-graphics-hint">Applies immediately — rebuilds the current landmass</span>
+          </div>
+
+          <div id="rift-title-gate" class="rift-mono">
+            <div class="rift-title-glyph" aria-hidden="true"><span class="rtg-lt">&lt;</span><span class="rtg-slash">/</span><span class="rtg-gt">&gt;</span></div>
+            <h3 class="rift-title-word" aria-label="Rift Islands"><span class="rtw-char" style="--i:0">R</span><span class="rtw-char" style="--i:1">I</span><span class="rtw-char" style="--i:2">F</span><span class="rtw-char" style="--i:3">T</span><span class="rtw-space"></span><span class="rtw-char" style="--i:4">I</span><span class="rtw-char" style="--i:5">S</span><span class="rtw-char" style="--i:6">L</span><span class="rtw-char" style="--i:7">A</span><span class="rtw-char" style="--i:8">N</span><span class="rtw-char" style="--i:9">D</span><span class="rtw-char" style="--i:10">S</span></h3>
+            <button type="button" id="rift-title-play-btn" class="rift-title-play-btn">▶ Play</button>
           </div>
 
           <div id="rift-start-overlay">

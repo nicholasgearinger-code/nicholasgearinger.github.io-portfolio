@@ -289,6 +289,24 @@ const BIOME_SHAPERS = {
     // specifically to validate that basic large-scale carving renders
     // correctly in isolation before building more complexity on top.
     const CHASM_TEST_X = -50, CHASM_TEST_Z = -50, CHASM_TEST_RADIUS = 35, CHASM_TEST_FLOOR = -20; // position verified numerically to keep the chasm's full outer edge within WORLD_BOUND_RADIUS (the player's reachable movement boundary)
+
+    // Icy cliffs/mountains surrounding the chasm, leaving its own
+    // opening as a genuine hole/entrance — per explicit request. Added
+    // to `base` BEFORE the chasm's own carving check below, so the
+    // chasm's blend-zone walls (which react to base+ridged) pick up
+    // this elevated surrounding terrain, naturally forming steep cliffs
+    // right at the chasm's edge rather than needing a separate carve.
+    // The chasm's own guaranteed core (its actual floor) is an ABSOLUTE
+    // value, not a blend — completely unaffected regardless of how tall
+    // the surrounding mountain becomes, so the entrance always stays a
+    // real open hole, never covered over.
+    const distFromChasmMountain = Math.hypot(worldX - CHASM_TEST_X, worldZ - CHASM_TEST_Z);
+    const CHASM_MOUNTAIN_RADIUS = 70;
+    if (distFromChasmMountain < CHASM_MOUNTAIN_RADIUS) {
+      const cmt = 1 - distFromChasmMountain / CHASM_MOUNTAIN_RADIUS;
+      base += 30 * cmt * cmt;
+    }
+
     const distFromChasmTest = Math.hypot(worldX - CHASM_TEST_X, worldZ - CHASM_TEST_Z);
     if (distFromChasmTest < CHASM_TEST_RADIUS) {
       const coreR = CHASM_TEST_RADIUS * 0.6; // guaranteed floor within this radius, independent of the surrounding noise — same core-guarantee technique proven on the pond/tunnel/room

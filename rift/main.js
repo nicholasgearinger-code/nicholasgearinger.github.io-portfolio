@@ -31,6 +31,13 @@ import { mulberry32, hashStringToSeed } from "./worldgen.js";
 // levels rather than different random layouts each load.
 // ---------------------------------------------------------------------------
 const WORLD_SEED = "rift-islands-prime";
+// Regions where frost's water level applies mathematically (camera.y <
+// LIQUID_LEVEL.frost) but there's deliberately no actual water — the
+// large test chasm, whose floor sits well below the water level but was
+// carved to be dry. Shared by BOTH the water plane's geometry hole
+// (liquid.js's createLiquidPlane) and the underwater-effect trigger
+// below, so the two can never drift out of sync with each other.
+const FROST_DRY_REGIONS = [{ x: -50, z: -50, radius: 65 }];
 const PLAYER_EYE_HEIGHT = 1.6;
 // Player can't walk past this radius from the terrain's center — keeps
 // them off the soft falloff rim (see terrain.js) and away from the finite
@@ -478,7 +485,7 @@ function buildLevel(levelIdx) {
     // plus real safety margin, or the cut boundary would be badly
     // imprecise (the same "narrow margin vs coarse mesh" bug already
     // caught twice elsewhere in this cave/tunnel work).
-    const excludeRegions = level.biome === "frost" ? [{ x: -50, z: -50, radius: 65 }] : [];
+    const excludeRegions = level.biome === "frost" ? FROST_DRY_REGIONS : [];
     liquidHandle = createLiquidPlane(scene, level.biome, LIQUID_LEVEL[level.biome], TERRAIN_SIZE, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), undefined, excludeRegions);
   }
 
@@ -1376,7 +1383,14 @@ function animate() {
   // biome without needing another hardcoded special-case here.
   const currentBiome = currentLevelIdx >= 0 ? LEVELS[currentLevelIdx].biome : null;
   const currentLiquidLevel = currentBiome !== null ? LIQUID_LEVEL[currentBiome] : undefined;
-  const isFullySubmerged = currentLiquidLevel !== undefined && camera.position.y < currentLiquidLevel;
+  // The height check alone isn't enough — it has no awareness of WHERE
+  // the player is, only how deep. Without this, walking into the dry
+  // chasm (well below frost's water level, by design) would still
+  // trigger the underwater screen distortion and light darkening, even
+  // though there's deliberately no water there at all (see
+  // FROST_DRY_REGIONS, shared with the water plane's own geometry hole).
+  const inDryRegion = currentBiome === "frost" && FROST_DRY_REGIONS.some((r) => Math.hypot(camera.position.x - r.x, camera.position.z - r.z) < r.radius);
+  const isFullySubmerged = currentLiquidLevel !== undefined && camera.position.y < currentLiquidLevel && !inDryRegion;
   if (isFullySubmerged) {
     scene.fog.color.setHex(0x0a2838);
     scene.fog.density = 0.14;

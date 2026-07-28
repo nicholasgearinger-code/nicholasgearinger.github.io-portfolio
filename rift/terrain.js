@@ -290,6 +290,44 @@ const BIOME_SHAPERS = {
     // correctly in isolation before building more complexity on top.
     const CHASM_TEST_X = -50, CHASM_TEST_Z = -50, CHASM_OUTER_RADIUS = 40, CHASM_OPENING_RADIUS = 24, CHASM_TEST_FLOOR = -20; // position verified numerically to keep the chasm's full outer edge within WORLD_BOUND_RADIUS (110.7 vs 112 — the widest outer radius that still fits at this fixed position). CHASM_OUTER_RADIUS is now the edge of the whole bridged mountain structure; CHASM_OPENING_RADIUS (24, sized for both "a large hole" and a robust core against Low tier's coarse mesh) is the skylight left open within it, per explicit request to bridge over most of the top
 
+    // A brand new mountain with a genuine THROUGH-TUNNEL — distinct from
+    // both the ramp/room mountain and the bridged chasm above, per
+    // explicit request for a new, unrelated feature. Position (35,-60)
+    // found via systematic search across the whole map, oriented
+    // north-south specifically so the tunnel's own length never needs to
+    // clear the winding canyon's X-range (a first attempt running
+    // east-west put the tunnel's far end well within the canyon's
+    // possible reach — caught and fixed before shipping). Verified
+    // numerically: comfortably clear of both other mountains (98+ units
+    // vs the 85-90 needed) and the whole structure's farthest points stay
+    // within WORLD_BOUND_RADIUS (max 101.2 vs 112).
+    const TUNNEL_MTN_X = 35, TUNNEL_MTN_Z = -60, TUNNEL_MTN_RADIUS = 30, TUNNEL_MTN_PEAK = 25;
+    const distFromTunnelMtn = Math.hypot(worldX - TUNNEL_MTN_X, worldZ - TUNNEL_MTN_Z);
+    if (distFromTunnelMtn < TUNNEL_MTN_RADIUS) {
+      const tmt = 1 - distFromTunnelMtn / TUNNEL_MTN_RADIUS;
+      base += TUNNEL_MTN_PEAK * tmt * tmt;
+    }
+
+    // A straight north-south tunnel through the mountain — a genuine
+    // THROUGH-passage with two open ends, unlike the chasm's single
+    // vertical skylight above. Runs along Z (not X) specifically to
+    // avoid the canyon-overlap risk described above. Same guaranteed-
+    // core-floor technique used throughout this arc: the floor is an
+    // ABSOLUTE value within its core, completely unaffected by the
+    // mountain's own elevation (added to base just above), so the
+    // tunnel stays genuinely hollow no matter how tall the mountain gets.
+    const TUNNEL_MTN_HALF_LENGTH = 35; // wider than the mountain's own diameter (60), so both ends clearly exit into open terrain beyond the mountain's footprint
+    const TUNNEL_MTN_HALF_WIDTH = 8; // same width already proven robust against Low tier's coarse mesh elsewhere in this arc (the ramp, the branch corridor) — named distinctly from the EXISTING winding canyon's own TUNNEL_HALF_WIDTH further below, a real redeclaration bug caught only by actually loading the file (node --check alone missed it)
+    const TUNNEL_MTN_FLOOR_Y = -12;
+    const distAlongTunnelMtn = Math.abs(worldZ - TUNNEL_MTN_Z);
+    const distFromTunnelMtnCenterX = Math.abs(worldX - TUNNEL_MTN_X);
+    if (distAlongTunnelMtn < TUNNEL_MTN_HALF_LENGTH && distFromTunnelMtnCenterX < TUNNEL_MTN_HALF_WIDTH) {
+      const coreX = TUNNEL_MTN_HALF_WIDTH * 0.6;
+      if (distFromTunnelMtnCenterX <= coreX) return TUNNEL_MTN_FLOOR_Y;
+      const t = 1 - (distFromTunnelMtnCenterX - coreX) / (TUNNEL_MTN_HALF_WIDTH - coreX);
+      return (base + ridged) * (1 - t * t) + TUNNEL_MTN_FLOOR_Y * (t * t);
+    }
+
     // Icy cliffs/mountains surrounding the chasm, leaving its own
     // opening as a genuine hole/entrance — per explicit request. Added
     // to `base` BEFORE the chasm's own carving check below, so the

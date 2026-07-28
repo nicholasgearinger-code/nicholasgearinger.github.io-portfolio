@@ -26,10 +26,6 @@ const LIQUID_STYLE = {
     baseColor: new THREE.Color(0x0f4a78), frothColor: new THREE.Color(0xf2fbff),
     emissive: 0x2a8fd6, emissiveIntensity: 0.02, opacity: 0.78, roughness: 0.1, // pushed down further (was 0.06, originally 0.2) per explicit "make night more pronounced" follow-up
   },
-  frost: {
-    baseColor: new THREE.Color(0x0a3a6a), frothColor: new THREE.Color(0xe8f4ff), // a real deep blue ocean per explicit request, icy-white foam rather than Verdant's warmer tropical froth
-    emissive: 0x1a5a9a, emissiveIntensity: 0.03, opacity: 0.85, roughness: 0.08, // slightly more opaque and less rough than Verdant's water — reads colder and denser, not a warm lagoon
-  },
 };
 
 // A soft mottled noise pattern, tiled — real distortion needs a
@@ -695,7 +691,7 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos) {
   // darker at night reads as "reflective" even without a literal mirror
   // image in it. Lava doesn't get this — it's not reflective, it's lit
   // from within.
-  const baseColor = ((biome === "verdant" || biome === "frost") && skyColor)
+  const baseColor = (biome === "verdant" && skyColor)
     ? style.baseColor.clone().lerp(skyColor, 0.4)
     : style.baseColor;
   for (let i = 0; i < posAttr.count; i++) {

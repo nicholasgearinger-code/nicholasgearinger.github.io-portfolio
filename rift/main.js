@@ -31,13 +31,6 @@ import { mulberry32, hashStringToSeed } from "./worldgen.js";
 // levels rather than different random layouts each load.
 // ---------------------------------------------------------------------------
 const WORLD_SEED = "rift-islands-prime";
-// Regions where frost's water level applies mathematically (camera.y <
-// LIQUID_LEVEL.frost) but there's deliberately no actual water — the
-// large test chasm, whose floor sits well below the water level but was
-// carved to be dry. Shared by BOTH the water plane's geometry hole
-// (liquid.js's createLiquidPlane) and the underwater-effect trigger
-// below, so the two can never drift out of sync with each other.
-const FROST_DRY_REGIONS = [{ x: -50, z: -50, radius: 65 }];
 const PLAYER_EYE_HEIGHT = 1.6;
 // Player can't walk past this radius from the terrain's center — keeps
 // them off the soft falloff rim (see terrain.js) and away from the finite
@@ -474,19 +467,7 @@ function buildLevel(levelIdx) {
   scene.add(terrainMesh);
 
   if (LIQUID_LEVEL[level.biome] !== undefined) {
-    // The test chasm (terrain.js, centered -50/-50, radius 35) needs to
-    // read as genuinely dry — its floor (-20) sits well below frost's
-    // water level (-1.2), so without this the flat ocean plane would
-    // flood it just like every other low area on the map. The exclusion
-    // radius (65, not just the chasm's own 35) accounts for the water
-    // plane's own mesh being far coarser than the terrain's — only 10
-    // segments across the whole 240-unit map at Low tier, a 24-unit grid
-    // spacing — so the margin needs to cover a full grid cell's reach
-    // plus real safety margin, or the cut boundary would be badly
-    // imprecise (the same "narrow margin vs coarse mesh" bug already
-    // caught twice elsewhere in this cave/tunnel work).
-    const excludeRegions = level.biome === "frost" ? FROST_DRY_REGIONS : [];
-    liquidHandle = createLiquidPlane(scene, level.biome, LIQUID_LEVEL[level.biome], TERRAIN_SIZE, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), undefined, excludeRegions);
+    liquidHandle = createLiquidPlane(scene, level.biome, LIQUID_LEVEL[level.biome], TERRAIN_SIZE, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
   }
 
   if (level.biome === "verdant") {
@@ -1378,19 +1359,12 @@ function animate() {
   //
   // Generalized across ANY water-having biome (was hardcoded to
   // "verdant" specifically) — derives the water level from whatever the
-  // current biome's own LIQUID_LEVEL entry is, so this now applies to
-  // frost's new ocean too, and will automatically cover any future water
-  // biome without needing another hardcoded special-case here.
+  // current biome's own LIQUID_LEVEL entry is, so it will automatically
+  // cover any future water biome without needing another hardcoded
+  // special-case here.
   const currentBiome = currentLevelIdx >= 0 ? LEVELS[currentLevelIdx].biome : null;
   const currentLiquidLevel = currentBiome !== null ? LIQUID_LEVEL[currentBiome] : undefined;
-  // The height check alone isn't enough — it has no awareness of WHERE
-  // the player is, only how deep. Without this, walking into the dry
-  // chasm (well below frost's water level, by design) would still
-  // trigger the underwater screen distortion and light darkening, even
-  // though there's deliberately no water there at all (see
-  // FROST_DRY_REGIONS, shared with the water plane's own geometry hole).
-  const inDryRegion = currentBiome === "frost" && FROST_DRY_REGIONS.some((r) => Math.hypot(camera.position.x - r.x, camera.position.z - r.z) < r.radius);
-  const isFullySubmerged = currentLiquidLevel !== undefined && camera.position.y < currentLiquidLevel && !inDryRegion;
+  const isFullySubmerged = currentLiquidLevel !== undefined && camera.position.y < currentLiquidLevel;
   if (isFullySubmerged) {
     scene.fog.color.setHex(0x0a2838);
     scene.fog.density = 0.14;

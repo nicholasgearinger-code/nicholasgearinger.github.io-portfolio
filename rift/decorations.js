@@ -212,8 +212,7 @@ function buildBaseDecoration(biome, colorHex, seedRand) {
       return createRockCluster(biome, colorHex, seedRand);
     case "ashen": return roll < 0.62 ? createDeadTree(colorHex, seedRand) : createRockCluster(biome, colorHex, seedRand);
     case "frost":
-      if (roll < 0.15) return createCaveMouth(colorHex, seedRand, biome); // marks the terrain's carved ice-cavern pits with an actual visual opening, not just an unmarked dip in the ground
-      if (roll < 0.6) return createSpire(biome, colorHex, seedRand); // ice spikes — genuinely icy-colored now, was falling through to the rust-brown Ember gradient via the default case below
+      if (roll < 0.53) return createSpire(biome, colorHex, seedRand); // ice spikes — genuinely icy-colored now, was falling through to the rust-brown Ember gradient via the default case below
       return createRockCluster(biome, colorHex, seedRand); // frozen boulders
     default: return createSpire(biome, colorHex, seedRand);
   }

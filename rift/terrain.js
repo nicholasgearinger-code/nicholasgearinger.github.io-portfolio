@@ -69,7 +69,7 @@ function emberChannelCenterX(worldZ, seed) {
 // Tuned against each biome's own height range so it floods only the
 // carved channel/cracks it belongs to, not the surrounding hills — see
 // the per-biome comments in BIOME_SHAPERS below for why each value works.
-const LIQUID_LEVEL = { ember: -1.5, verdant: -1, frost: -1.2 }; // frost added per explicit "surrounded by a deep blue ocean" request — the terrain's edge falloff+sink (see biomeHeight below) already applies to every biome universally, so this one entry is what actually turns that already-submerged rim into real ocean water
+const LIQUID_LEVEL = { ember: -1.5, verdant: -1 }; // frost's ocean removed per explicit request — was added in an earlier round, now reverted
 
 function hashStringToSeed(str) {
   let h = 1779033703 ^ str.length;

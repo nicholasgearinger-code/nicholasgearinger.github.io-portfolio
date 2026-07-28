@@ -50,6 +50,8 @@ const resonanceDot = document.getElementById("rift-resonance-dot");
 const loreTicker = document.getElementById("rift-lore-ticker");
 const discoveryLogEl = document.getElementById("rift-discovery-log");
 const menuBtn = document.getElementById("rift-menu-btn");
+const titleGate = document.getElementById("rift-title-gate");
+const titlePlayBtn = document.getElementById("rift-title-play-btn");
 
 // ---------------------------------------------------------------------------
 // Input mode detection
@@ -260,6 +262,19 @@ controls.addEventListener("unlock", showLevelSelect);
 if (menuBtn) {
   menuBtn.addEventListener("click", () => {
     if (!isTouchDevice) controls.unlock();
+    showLevelSelect();
+  });
+}
+
+// The animated "RIFT ISLANDS" intro (title gate) is shown first, on top of
+// the biome-select overlay (which starts hidden — see index.html). Play
+// fades the gate out and reveals the biome menu via the same
+// showLevelSelect() the in-game MENU button already uses, so entering a
+// level from here works exactly like it always has.
+if (titleGate && titlePlayBtn) {
+  titlePlayBtn.addEventListener("click", () => {
+    titleGate.classList.add("rift-title-gate-hidden");
+    setTimeout(() => { titleGate.style.display = "none"; }, 650); // matches the CSS opacity transition — only removed from layout after it's fully faded
     showLevelSelect();
   });
 }

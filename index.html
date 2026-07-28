@@ -114,7 +114,7 @@
 <link rel="icon" href="icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Inter:wght@300;400;500&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Inter:wght@300;400;500&family=JetBrains+Mono:wght@400;500;700&family=Orbitron:wght@700;800;900&display=swap" rel="stylesheet">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -3549,24 +3549,38 @@
   @keyframes riftMarkSpin { to { transform: translate(-50%, -50%) rotate(405deg); } }
 
   .rift-title-word {
-    font-size: 1.7rem; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
-    color: #e8ecf1; margin: 0; display: flex; justify-content: center; flex-wrap: wrap; position: relative; z-index: 1;
-  }
-  .rift-title-word .rtw-char {
-    display: inline-block; opacity: 0; transform: translateY(10px);
-    animation-name: riftTitleCharIn, riftTitleCharBreathe;
-    animation-duration: .5s, 3.6s;
-    animation-timing-function: cubic-bezier(.2,.9,.3,1), ease-in-out;
+    font-family: 'Orbitron', 'IBM Plex Mono', monospace; font-weight: 800;
+    font-size: 2rem; letter-spacing: .1em; text-transform: uppercase;
+    margin: 0; position: relative; z-index: 1;
+    background: linear-gradient(100deg, #4fd1c5 25%, #eafffb 48%, #4fd1c5 65%);
+    background-size: 240% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
+    opacity: 0; transform: scale(1.7);
+    animation-name: riftTitleImpact, riftTitleShimmer;
+    animation-duration: .65s, 3.2s;
+    animation-timing-function: cubic-bezier(.22,.85,.25,1.35), linear;
     animation-fill-mode: forwards, none;
     animation-iteration-count: 1, infinite;
-    animation-delay: calc(var(--i) * 55ms), calc(1.15s + var(--i) * 90ms);
+    animation-delay: .15s, 1s;
   }
-  .rift-title-word .rtw-space { width: .5em; display: inline-block; }
-  @keyframes riftTitleCharIn { to { opacity: 1; transform: translateY(0); } }
-  @keyframes riftTitleCharBreathe {
-    0%, 100% { text-shadow: 0 0 14px rgba(79,209,197,.35); color: #e8ecf1; }
-    50% { text-shadow: 0 0 24px rgba(79,209,197,.9), 0 0 42px rgba(79,209,197,.4); color: #c8f7ee; }
+  /* The word "slams" onto screen — blurred and oversized, snapping down past
+     its resting size before settling, rather than a gentle typewriter
+     reveal — closer to an action-movie title card than Ghostwire's
+     hacker-terminal decode. */
+  @keyframes riftTitleImpact {
+    0% { opacity: 0; transform: scale(1.7); filter: blur(7px) drop-shadow(0 0 0 rgba(79,209,197,0)); }
+    55% { opacity: 1; transform: scale(.94); filter: blur(0) drop-shadow(0 0 42px rgba(79,209,197,.9)); }
+    75% { transform: scale(1.04); }
+    100% { opacity: 1; transform: scale(1); filter: blur(0) drop-shadow(0 0 16px rgba(79,209,197,.5)) drop-shadow(0 0 34px rgba(79,209,197,.22)); }
   }
+  @keyframes riftTitleShimmer { from { background-position: 0% 0; } to { background-position: -240% 0; } }
+  /* One-time energy burst behind the word, timed to flash right as the
+     impact keyframe above lands, then fade — the "hit" flash. */
+  .rift-title-word::before {
+    content: ''; position: absolute; inset: -55% -15%; z-index: -1; pointer-events: none;
+    background: radial-gradient(ellipse at center, rgba(79,209,197,.55), transparent 70%);
+    opacity: 0; animation: riftTitleFlash .55s ease-out forwards; animation-delay: .38s;
+  }
+  @keyframes riftTitleFlash { 0% { opacity: 0; transform: scale(.4); } 32% { opacity: 1; } 100% { opacity: 0; transform: scale(1.9); } }
 
   .rift-title-tagline {
     font-size: 10px; letter-spacing: .22em; color: rgba(79,209,197,.65); margin: -6px 0 2px;
@@ -3593,10 +3607,23 @@
     0%, 100% { box-shadow: 0 0 0 rgba(79,209,197,0); border-color: rgba(79,209,197,.5); }
     50% { box-shadow: 0 0 18px rgba(79,209,197,.45); border-color: #4fd1c5; }
   }
+  @media (prefers-reduced-motion: no-preference) {
+    /* Brief impact shake across the whole gate, timed to the title's
+       landing beat — skipped outright under reduced-motion below. */
+    #rift-title-gate { animation: riftGateShake .5s ease-out; animation-delay: .32s; }
+  }
+  @keyframes riftGateShake {
+    0%, 100% { transform: translate(0, 0); }
+    20% { transform: translate(-3px, 2px); }
+    40% { transform: translate(3px, -2px); }
+    60% { transform: translate(-2px, 1px); }
+    80% { transform: translate(2px, -1px); }
+  }
   @media (prefers-reduced-motion: reduce) {
-    .rift-title-word .rtw-char, .rift-title-play-btn, .rift-title-tagline,
+    .rift-title-word, .rift-title-word::before, .rift-title-play-btn, .rift-title-tagline,
     .rift-title-starfield, .rift-title-frame-corner, .rift-title-mark::before,
-    .rift-title-mark::after, .rift-title-mark-shard { animation: none; opacity: 1; transform: none; }
+    .rift-title-mark::after, .rift-title-mark-shard, #rift-title-gate { animation: none; opacity: 1; transform: none; }
+    .rift-title-word { background-position: -120% 0; }
     .rift-title-mark-shard { transform: translate(-50%, -50%) rotate(45deg); }
   }
 
@@ -4754,7 +4781,7 @@
             <div class="rift-title-frame-corner rift-title-corner-bl" aria-hidden="true"></div>
             <div class="rift-title-frame-corner rift-title-corner-br" aria-hidden="true"></div>
             <div class="rift-title-mark" aria-hidden="true"><span class="rift-title-mark-shard"></span></div>
-            <h3 class="rift-title-word" aria-label="Rift Islands"><span class="rtw-char" style="--i:0">R</span><span class="rtw-char" style="--i:1">I</span><span class="rtw-char" style="--i:2">F</span><span class="rtw-char" style="--i:3">T</span><span class="rtw-space"></span><span class="rtw-char" style="--i:4">I</span><span class="rtw-char" style="--i:5">S</span><span class="rtw-char" style="--i:6">L</span><span class="rtw-char" style="--i:7">A</span><span class="rtw-char" style="--i:8">N</span><span class="rtw-char" style="--i:9">D</span><span class="rtw-char" style="--i:10">S</span></h3>
+            <h3 class="rift-title-word">RIFT ISLANDS</h3>
             <p class="rift-title-tagline">A 3D biome-hopping exploration adventure</p>
             <button type="button" id="rift-title-play-btn" class="rift-title-play-btn">▶ Play</button>
           </div>

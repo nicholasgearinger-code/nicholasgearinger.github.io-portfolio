@@ -328,6 +328,27 @@ const BIOME_SHAPERS = {
       return (base + ridged) * (1 - t * t) + TUNNEL_MTN_FLOOR_Y * (t * t);
     }
 
+    // A narrow crevice branching off the tunnel-mountain's own eastern
+    // edge, extending further along the X-axis — per explicit request.
+    // Starts exactly where the tunnel's own passage width ends
+    // (CREVICE_START_X = TUNNEL_MTN_X + TUNNEL_MTN_HALF_WIDTH) so the two
+    // connect naturally without needing any overlap-priority logic
+    // between them. Same linear-corridor technique as the branch
+    // corridor elsewhere in this arc. This location has substantially
+    // more clearance than the canyon spot used for feature #5 (70+
+    // units of margin here vs the 11-13 max radius there), so a robust
+    // width was used from the start rather than needing a widening pass.
+    const CREVICE_START_X = TUNNEL_MTN_X + TUNNEL_MTN_HALF_WIDTH;
+    const CREVICE_LENGTH = 25, CREVICE_HALF_WIDTH = 8, CREVICE_FLOOR_Y = -22;
+    const distAlongCrevice = worldX - CREVICE_START_X;
+    const distFromCreviceZ = Math.abs(worldZ - TUNNEL_MTN_Z);
+    if (distAlongCrevice >= 0 && distAlongCrevice < CREVICE_LENGTH && distFromCreviceZ < CREVICE_HALF_WIDTH) {
+      const coreZ2 = CREVICE_HALF_WIDTH * 0.6;
+      if (distFromCreviceZ <= coreZ2) return CREVICE_FLOOR_Y;
+      const t2 = 1 - (distFromCreviceZ - coreZ2) / (CREVICE_HALF_WIDTH - coreZ2);
+      return (base + ridged) * (1 - t2 * t2) + CREVICE_FLOOR_Y * (t2 * t2);
+    }
+
     // Icy cliffs/mountains surrounding the chasm, leaving its own
     // opening as a genuine hole/entrance — per explicit request. Added
     // to `base` BEFORE the chasm's own carving check below, so the
@@ -421,6 +442,28 @@ const BIOME_SHAPERS = {
         if (distFromDeepTunnel <= coreR) return DEEP_TUNNEL_FLOOR;
         const t = 1 - (distFromDeepTunnel - coreR) / (DEEP_TUNNEL_RADIUS - coreR);
         return CANYON_FLOOR * (1 - t * t) + DEEP_TUNNEL_FLOOR * (t * t);
+      }
+    }
+
+    // A genuine walkable ROOM connected to the deep tunnel above — per
+    // explicit follow-up that the opening needed to lead somewhere real,
+    // not just a decorative alcove. Positioned at Z=5, found via a fresh
+    // clearance search (the deep tunnel's own Z=0 was already at its
+    // practical ceiling) — Z=5 actually has MORE room (max safe radius
+    // 13.0 vs 11.0 at Z=0), and naturally overlaps the tunnel's own
+    // footprint (centers only 5 apart vs a combined 21 in radii), so the
+    // two merge into one continuous space rather than needing a separate
+    // connecting corridor. Same tunnelX-alignment technique as the
+    // tunnel above (no need to know the actual seed value), same floor
+    // (-30) for a seamless connection between the two.
+    const DEEP_ROOM_Z = 5, DEEP_ROOM_RADIUS = 11;
+    if (Math.abs(worldZ - DEEP_ROOM_Z) < DEEP_ROOM_RADIUS) {
+      const distFromDeepRoom = Math.hypot(worldX - tunnelX, worldZ - DEEP_ROOM_Z);
+      if (distFromDeepRoom < DEEP_ROOM_RADIUS) {
+        const coreR2 = DEEP_ROOM_RADIUS * 0.6; // named distinctly from the tunnel's own coreR just above, in the same function scope
+        if (distFromDeepRoom <= coreR2) return DEEP_TUNNEL_FLOOR;
+        const t2 = 1 - (distFromDeepRoom - coreR2) / (DEEP_ROOM_RADIUS - coreR2);
+        return CANYON_FLOOR * (1 - t2 * t2) + DEEP_TUNNEL_FLOOR * (t2 * t2);
       }
     }
 

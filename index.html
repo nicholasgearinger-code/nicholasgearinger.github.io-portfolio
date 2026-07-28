@@ -3407,6 +3407,7 @@
     font-size: 9px; letter-spacing: .14em; color: rgba(232,236,241,.55);
     background: rgba(20,27,45,.5); border: 1px solid rgba(232,236,241,.2); border-radius: 100px;
     padding: 4px 10px; pointer-events: auto; touch-action: manipulation; cursor: pointer;
+    z-index: 21; /* stays above #rift-graphics-panel (z-index:20) so it's always tappable, even if the panel's width ever overlaps it again */
   }
   #rift-menu-btn:hover, #rift-menu-btn:active { color: #e8ecf1; border-color: rgba(232,236,241,.4); }
 
@@ -3433,6 +3434,22 @@
   .rift-graphics-opt:hover { color: #e8ecf1; border-color: rgba(232,236,241,.4); }
   .rift-graphics-opt.active { color: #0a0e14; background: #7dd3fc; border-color: #7dd3fc; }
   #rift-graphics-hint { font-size: 8px; color: rgba(232,236,241,.4); line-height: 1.4; }
+
+  @media (max-width: 480px) {
+    /* On narrow phones, GRAPHICS (right:8.6rem) and its panel (min-width
+       210px, right:.7rem) land squarely under the horizontally-centered
+       MENU button — MENU becomes untappable because the panel sits above
+       it in the stacking order. Give GRAPHICS its own row below the
+       MENU/RESONANCE row instead of sharing horizontal space with them. */
+    #rift-graphics-btn { top: 2.6rem; right: .6rem; }
+    #rift-graphics-panel { top: 4.5rem; right: .6rem; min-width: 0; width: min(190px, 62vw); }
+    #rift-viewport.rift-fullscreen #rift-graphics-btn {
+      top: calc(2.6rem + env(safe-area-inset-top)); right: calc(.6rem + env(safe-area-inset-right));
+    }
+    #rift-viewport.rift-fullscreen #rift-graphics-panel {
+      top: calc(4.5rem + env(safe-area-inset-top)); right: calc(.6rem + env(safe-area-inset-right));
+    }
+  }
 
   .rift-level-label {
     margin-left: auto; font-size: 10px; letter-spacing: .1em; color: rgba(232,236,241,.5);

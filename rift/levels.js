@@ -14,7 +14,7 @@ import { TERRAIN_SIZE } from "./terrain.js";
 const LEVELS = [
   { biome: "ember", name: "Ember Reach", tagline: "Jagged volcanic ground, cracked through with old fire." },
   { biome: "verdant", name: "Verdant Hollow", tagline: "Rolling hills, bioluminescent and overgrown." },
-  { biome: "crystal", name: "Crystal Spire", tagline: "Flat, angular ground broken by sudden crystal spires." },
+  { biome: "crystal", name: "Coral Shallows", tagline: "A bright tropical reef, sunlit and alive in the shallow water." },
   { biome: "abyssal", name: "Abyssal Drift", tagline: "Solid ground cut through with chasms that never end." },
   { biome: "ashen", name: "Ashen Expanse", tagline: "A cracked, wind-swept lakebed that forgot how to be full." },
   { biome: "frost", name: "Frostbound Reach", tagline: "A blizzard-locked expanse, ice caverns cut deep beneath the snow." },

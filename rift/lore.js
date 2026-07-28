@@ -25,11 +25,11 @@ const LORE_BY_BIOME = {
     "Life took hold here before the island had decided what it wanted to be.",
   ],
   crystal: [
-    "The air hums at a frequency only visitors seem to notice.",
-    "Every facet catches a light that isn't currently in the sky.",
-    "Sound arrives here a half-second late, as if the island is still deciding whether to let it in.",
-    "The crystal formations grew toward each other, not upward — nobody knows why.",
-    "Silence has a texture here, like it's being filtered through glass.",
+    "The light down here arrives already tired, filtered through more water than it should have crossed.",
+    "Coral grows toward the surface with a patience nothing above the water ever learns.",
+    "Something in the current remembers a shoreline that isn't there anymore.",
+    "The reef keeps growing over its own dead, one bright layer at a time.",
+    "Sound travels strangely here — every ripple sounds like it's arriving from somewhere else.",
   ],
   abyssal: [
     "Light bends strangely near the edge, as if the island is still falling.",

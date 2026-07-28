@@ -28,6 +28,15 @@ const GRASS_STYLE = {
     tuftCount: 500, tuftSize: 2, baseColor: 0x6f6552, tipColor: 0xb6a97e,
     height: 0.24, heightVariance: 0.12, bladeRadius: 0.035, bladeWidth: 0.22,
   }, // sparse, dry, low — scrub clinging on in a dead lakebed, not a lawn
+  // Crystal Spire, redesigned as a reef: the same swaying-blade system
+  // reused as kelp/seaweed fronds instead of grass — much taller than any
+  // land biome's grass and far sparser (a reef floor is sand and coral,
+  // not solid ground cover), with a teal-to-bright-green gradient rather
+  // than an ordinary meadow green.
+  crystal: {
+    tuftCount: 900, tuftSize: 4, baseColor: 0x0f5a52, tipColor: 0x6ffbb0,
+    height: 1.3, heightVariance: 0.6, bladeRadius: 0.05, bladeWidth: 0.3,
+  },
 };
 
 // Small ground-level flowers scattered among the grass — each color gets
@@ -40,6 +49,17 @@ const FLOWER_STYLE = {
     tuftCount: 700, colors: [0xff8fd6, 0x8fc9ff, 0xc9a0ff, 0xffb3e6], stemColor: 0x2d5a2a, // pink/blue/purple — was pink/yellow/purple/cream
     height: 0.22, heightVariance: 0.08, headSize: 0.075,
     glowColors: [0xff8fd6, 0x8fc9ff, 0xc9a0ff], // 3 of the 4 colors now glow (was just 1) — a real pink/blue/purple bioluminescent presence, not a single accent color
+  },
+  // Crystal Spire, redesigned as a reef: small anemone/coral-polyp buds
+  // scattered low among the kelp and coral clusters, reusing the same
+  // instanced-octahedron-head system as Verdant's flowers. Every color
+  // glows here (unlike Verdant's partial set) since a reef genuinely
+  // reads as bioluminescent/vivid throughout, not just in a few accent
+  // spots.
+  crystal: {
+    tuftCount: 550, colors: [0xff6f9e, 0xffe066, 0x3ce7ff, 0xb35cff], stemColor: 0x2a5a52,
+    height: 0.18, heightVariance: 0.1, headSize: 0.09,
+    glowColors: [0xff6f9e, 0xffe066, 0x3ce7ff, 0xb35cff],
   },
 };
 

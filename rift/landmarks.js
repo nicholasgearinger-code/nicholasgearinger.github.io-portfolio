@@ -38,16 +38,10 @@ function createVeinIllustrationTexture(seed) {
   for (let i = 0; i <= pointCount; i++) {
     const t = i / pointCount;
     const wob = Math.sin(t * 5 + seed * 4) * 0.5 + Math.sin(t * 9 + seed * 2.3) * 0.3;
-    // Overall taper on top of the wobble: t=0 is the crater end (see
-    // topPos/botPos derivation below — smaller radius = higher on the
-    // cone = nearer the crater), t=1 is the base. A real flow is fed wide
-    // at the source and narrows/forks as it runs out, rather than staying
-    // a uniform-width stripe top to bottom.
-    const taper = 1.25 - 0.6 * t;
     points.push({
       x: w / 2 + wob * w * 0.24,
       y: t * h,
-      widthMul: (0.55 + 0.45 * Math.sin(t * Math.PI * 0.85 + seed)) * taper,
+      widthMul: 0.55 + 0.45 * Math.sin(t * Math.PI * 0.85 + seed),
     });
   }
 
@@ -797,29 +791,40 @@ function createVerdantLandmark(colorHex) {
   return { group, energy, baseY: 0 };
 }
 
-// Crystal: a colossal crystal spire, dwarfing the regular crystal
-// clusters, faceted rather than a single smooth shape so light catches it
-// from every angle.
+// Crystal (now the reef): a colossal coral pinnacle towering up from the
+// seafloor toward the surface, dwarfing the regular coral clusters —
+// same faceted, angular-shard construction the old crystal spire used
+// (still reads well as coral bommie growth rather than a smooth organic
+// shape), now built from a coordinated tropical coral palette instead of
+// one uniform violet crystalline tint.
+const LANDMARK_CORAL_PALETTE = [0xff6f9e, 0xff9d42, 0x3ce7ff, 0xffe066];
 function createCrystalLandmark(colorHex) {
   const group = new THREE.Group();
+  const spireColor = 0xff6f9e; // dominant coral-pink for the main pinnacle body
   const mainMat = new THREE.MeshStandardMaterial({
-    color: colorHex, emissive: colorHex, emissiveIntensity: 0.5, roughness: 0.1, metalness: 0.15, transparent: true, opacity: 0.92,
+    color: spireColor, emissive: spireColor, emissiveIntensity: 0.4, roughness: 0.35, metalness: 0.05, transparent: true, opacity: 0.95,
   });
   const spire = new THREE.Mesh(new THREE.OctahedronGeometry(3.5, 0), mainMat);
   spire.scale.set(1, 3.2, 1);
   spire.position.y = 11;
   group.add(spire);
-  // Smaller shards clustered at the base, same pattern as the regular
-  // crystal cluster but scaled up and denser.
+  // Smaller coral outcrops clustered at the base, same pattern as the
+  // regular coral cluster but scaled up and denser, each in its own
+  // palette color so the base reads as several coral colonies rather
+  // than one repeated shape.
   for (let i = 0; i < 6; i++) {
     const s = 1.2 + Math.random() * 1.5;
-    const shard = new THREE.Mesh(new THREE.OctahedronGeometry(s, 0), mainMat);
+    const coral = LANDMARK_CORAL_PALETTE[i % LANDMARK_CORAL_PALETTE.length];
+    const outcropMat = new THREE.MeshStandardMaterial({
+      color: coral, emissive: coral, emissiveIntensity: 0.35, roughness: 0.35, metalness: 0.05, transparent: true, opacity: 0.95,
+    });
+    const shard = new THREE.Mesh(new THREE.OctahedronGeometry(s, 0), outcropMat);
     const angle = (i / 6) * Math.PI * 2;
     shard.position.set(Math.cos(angle) * 2.2, s * 0.8, Math.sin(angle) * 2.2);
     shard.rotation.set(Math.random(), Math.random() * Math.PI, Math.random());
     group.add(shard);
   }
-  const energy = createEnergyCore(colorHex, 1.6, 11);
+  const energy = createEnergyCore(0x3ce7ff, 1.6, 11); // bioluminescent cyan pulse at the pinnacle's core, reads as reef life-glow rather than a resonance crystal
   group.add(energy.group);
   return { group, energy, baseY: 0 };
 }

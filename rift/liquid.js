@@ -26,6 +26,17 @@ const LIQUID_STYLE = {
     baseColor: new THREE.Color(0x0f4a78), frothColor: new THREE.Color(0xf2fbff),
     emissive: 0x2a8fd6, emissiveIntensity: 0.02, opacity: 0.78, roughness: 0.1, // pushed down further (was 0.06, originally 0.2) per explicit "make night more pronounced" follow-up
   },
+  // Crystal Spire, redesigned as a tropical reef ocean — this is now the
+  // biome's actual ground-level water (the whole landmass sits below
+  // LIQUID_LEVEL.crystal in terrain.js), not a small feature within it.
+  // Brighter and noticeably lower opacity than Verdant's river so the
+  // sandy/coral floor and fish stay visible from above — a bright shallow
+  // reef reads as clear water, not an opaque colored plane. Roughness
+  // pushed lower than Verdant for a livelier, more sun-glittered surface.
+  crystal: {
+    baseColor: new THREE.Color(0x0fb8c9), frothColor: new THREE.Color(0xf2fffb),
+    emissive: 0x2ae8d8, emissiveIntensity: 0.05, opacity: 0.62, roughness: 0.06,
+  },
 };
 
 // A soft mottled noise pattern, tiled — real distortion needs a
@@ -691,7 +702,7 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos) {
   // darker at night reads as "reflective" even without a literal mirror
   // image in it. Lava doesn't get this — it's not reflective, it's lit
   // from within.
-  const baseColor = (biome === "verdant" && skyColor)
+  const baseColor = ((biome === "verdant" || biome === "crystal") && skyColor)
     ? style.baseColor.clone().lerp(skyColor, 0.4)
     : style.baseColor;
   for (let i = 0; i < posAttr.count; i++) {

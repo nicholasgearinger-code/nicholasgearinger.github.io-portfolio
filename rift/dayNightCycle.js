@@ -51,7 +51,7 @@ const BIOME_SKY_TINT = {
   // read, fading up into smoke rather than sky blue overhead.
   ember: { zenith: 0x2e2620, horizon: 0xff6a30, fog: 0x241e18, amount: 0.5 },
   verdant: { zenith: 0x0a2a34, horizon: 0x6fd0d8, fog: 0x0f2a28, amount: 0.10 },
-  crystal: { zenith: 0x1a1a3e, horizon: 0x9a8fff, fog: 0x181832, amount: 0.12 },
+  crystal: { zenith: 0x0a3a4a, horizon: 0x3ce7d8, fog: 0x0a2e38, amount: 0.16 }, // bright tropical turquoise, replacing the old cool violet resonance-spire tint — amount bumped slightly (was 0.12) since the whole biome is now underwater and should read as consistently blue-green rather than a subtle accent
   abyssal: { zenith: 0x140a1e, horizon: 0x5a2a6a, fog: 0x120a1a, amount: 0.14 },
   ashen: { zenith: 0x2a2210, horizon: 0xd8b878, fog: 0x261e10, amount: 0.10 },
   // Frost gets a high amount for the same reason Ember does — a biome

@@ -24,10 +24,10 @@ const WEATHER_PROFILE = {
     lightning: { color: 0xcfe0ff, intervalMin: 6, intervalMax: 14, height: 90, onlyDuringRain: true }, // an ordinary thunderstorm — the one biome where lightning actually means rain
   },
   crystal: {
-    baseFogDensity: 0.003, fogPulseAmp: 0.0015, fogPulseSpeed: 0.08,
-    windBaseStrength: 0.5, windVariance: 0.4, windSpeed: 0.04,
+    baseFogDensity: 0.0022, fogPulseAmp: 0.0015, fogPulseSpeed: 0.08, // lower base than before — a bright shallow reef should stay more visible than the old resonance-fog atmosphere
+    windBaseStrength: 0.35, windVariance: 0.3, windSpeed: 0.03, // repurposed as gentle current strength, driving kelp sway rather than air movement
     rain: false,
-    lightning: { color: 0x8ff0ff, intervalMin: 10, intervalMax: 20, height: 55 }, // sharp crystalline resonance discharge between the spires
+    lightning: { color: 0x3ce7ff, intervalMin: 14, intervalMax: 26, height: 20, dim: true }, // no real lightning underwater — a soft, muted pulse of bioluminescent light from deep in the reef, kept dim and lower to the ground than every other biome's actual storm discharge
   },
   abyssal: {
     baseFogDensity: 0.0038, fogPulseAmp: 0.0022, fogPulseSpeed: 0.06,
@@ -273,43 +273,47 @@ function createGroundGlow(scene) {
   return { points, basePositions, seeds };
 }
 
-// Crystal-only — a brief rainbow arc, as if light caught one of the
-// spires just right for a moment. A real rainbow texture (hue sweep
-// across the strip), not a single tinted glow.
-let sharedRainbowTexture = null;
-function getRainbowTexture() {
-  if (sharedRainbowTexture) return sharedRainbowTexture;
-  const w = 256, h = 32;
+// Crystal-only — a brief shaft of sunlight piercing down through the
+// water, as if a gap in the surface chop let a beam through for a
+// moment. A real vertical light-shaft texture (bright warm-white core,
+// fading to transparent at both ends along its length and softly toward
+// its sides), not the old horizontal rainbow-hue sweep — this is a
+// downward beam, not an arc.
+let sharedSunbeamTexture = null;
+function getSunbeamTexture() {
+  if (sharedSunbeamTexture) return sharedSunbeamTexture;
+  const w = 32, h = 256;
   const canvas = document.createElement("canvas");
   canvas.width = w; canvas.height = h;
   const ctx = canvas.getContext("2d");
-  const grad = ctx.createLinearGradient(0, 0, w, 0);
-  const hues = [0, 40, 90, 170, 220, 270, 320];
-  hues.forEach((hue, i) => grad.addColorStop(i / (hues.length - 1), `hsla(${hue},85%,65%,0.8)`));
-  ctx.fillStyle = grad;
+  const lengthGrad = ctx.createLinearGradient(0, 0, 0, h);
+  lengthGrad.addColorStop(0, "rgba(255,255,255,0.9)");
+  lengthGrad.addColorStop(0.55, "rgba(210,255,248,0.55)");
+  lengthGrad.addColorStop(1, "rgba(180,255,240,0)");
+  ctx.fillStyle = lengthGrad;
   ctx.fillRect(0, 0, w, h);
-  // Fade the strip's own top/bottom edges so it reads as an arc slice,
+  // Fade the beam's own left/right edges so it reads as a soft shaft,
   // not a hard-edged bar.
-  const fade = ctx.createLinearGradient(0, 0, 0, h);
-  fade.addColorStop(0, "rgba(0,0,0,1)");
-  fade.addColorStop(0.5, "rgba(0,0,0,0)");
-  fade.addColorStop(1, "rgba(0,0,0,1)");
+  const edgeFade = ctx.createLinearGradient(0, 0, w, 0);
+  edgeFade.addColorStop(0, "rgba(0,0,0,1)");
+  edgeFade.addColorStop(0.5, "rgba(0,0,0,0)");
+  edgeFade.addColorStop(1, "rgba(0,0,0,1)");
   ctx.globalCompositeOperation = "destination-out";
-  ctx.fillStyle = fade;
+  ctx.fillStyle = edgeFade;
   ctx.fillRect(0, 0, w, h);
-  sharedRainbowTexture = new THREE.CanvasTexture(canvas);
-  return sharedRainbowTexture;
+  sharedSunbeamTexture = new THREE.CanvasTexture(canvas);
+  return sharedSunbeamTexture;
 }
 
 function createCrystalRefraction(scene) {
   const mat = new THREE.SpriteMaterial({
-    map: getRainbowTexture(), transparent: true, opacity: 0,
+    map: getSunbeamTexture(), transparent: true, opacity: 0,
     blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
   });
   const sprite = new THREE.Sprite(mat);
-  sprite.scale.set(26, 4, 1);
+  sprite.scale.set(5, 34, 1); // tall and narrow — a downward shaft, not the old wide horizontal arc
   scene.add(sprite);
-  return { sprite, flash: 0, timer: randRange(10, 25) };
+  return { sprite, flash: 0, timer: randRange(8, 18) }; // fires more often than the old rainbow — a passing sunbeam should feel like a recurring reef mood, not a rare event
 }
 function createDustDevil(scene) {
   const count = 40;
@@ -651,20 +655,25 @@ function updateWeatherSystem(handle, dt, erupting = false, dayAmount = 0) {
     posAttr.needsUpdate = true;
   }
 
-  // Crystal light refraction — Crystal Spire only. A brief rainbow arc
-  // near one of the spires, as if the light caught it just right.
+  // Crystal sunbeam — a shaft of light piercing down through the reef's
+  // water column, as if a gap in the surface chop let it through for a
+  // moment. Positioned to hang from near the water surface (LIQUID_LEVEL
+  // is 8) down through the column, unlike the old rainbow's scattered
+  // near-spire placement — and kept close to vertical (only a small
+  // random tilt) rather than randomly rotated in-plane, since a real
+  // sunbeam doesn't lie sideways.
   if (handle.crystalRefraction) {
     const cr = handle.crystalRefraction;
     cr.timer -= dt;
     if (cr.timer <= 0) {
       cr.flash = 1;
-      const angle = Math.random() * Math.PI * 2, dist = 15 + Math.random() * 30;
-      cr.sprite.position.set(Math.cos(angle) * dist, 6 + Math.random() * 8, Math.sin(angle) * dist);
-      cr.sprite.material.rotation = Math.random() * Math.PI * 2;
-      cr.timer = randRange(10, 25);
+      const angle = Math.random() * Math.PI * 2, dist = 10 + Math.random() * 35;
+      cr.sprite.position.set(Math.cos(angle) * dist, 5, Math.sin(angle) * dist);
+      cr.sprite.material.rotation = (Math.random() - 0.5) * 0.3; // near-vertical, just a slight natural tilt
+      cr.timer = randRange(8, 18);
     }
-    cr.flash = Math.max(0, cr.flash - dt * 0.6); // lingers a couple seconds rather than a sharp lightning-style pop
-    cr.sprite.material.opacity = Math.sin(Math.min(1, cr.flash) * Math.PI) * 0.55;
+    cr.flash = Math.max(0, cr.flash - dt * 0.5); // lingers a couple seconds rather than a sharp lightning-style pop
+    cr.sprite.material.opacity = Math.sin(Math.min(1, cr.flash) * Math.PI) * 0.5;
   }
 
   return { windX, windZ, windStrength, rainIntensity: handle.rainIntensity };

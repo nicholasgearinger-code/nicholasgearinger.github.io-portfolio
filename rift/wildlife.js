@@ -16,7 +16,18 @@ import { LANDMARK_POSITION } from "./landmarks.js";
 const WILDLIFE_PROFILE = {
   ember: { flyers: 0, flyerColor: 0x000000, motes: 7, moteColor: 0xff8a4a, moteHeight: 3, moteBlink: true, salamanders: 4, salamanderColor: 0xff7a28, glowcrawlers: 0, glowcrawlerColor: 0x000000, butterflies: 0, fish: 0 }, // too hostile for birds — fireflies-with-intent, plus fire salamanders scurrying near the lava
   verdant: { flyers: 6, flyerColor: 0x1a1a1a, motes: 8, moteColor: 0xb87cff, moteHeight: 1.5, moteBlink: true, salamanders: 0, salamanderColor: 0x000000, glowcrawlers: 5, glowcrawlerColor: 0x8fe3ff, butterflies: 10, fish: 12 }, // birds circling + real purple fireflies low in the grass + a second glowing ground creature + fluttering butterflies + fish in the water — a living jungle, not just a pretty one
-  crystal: { flyers: 3, flyerColor: 0x2a3a44, motes: 10, moteColor: 0x9fe8ff, moteHeight: 4, moteBlink: false, salamanders: 0, salamanderColor: 0x000000, glowcrawlers: 0, glowcrawlerColor: 0x000000, butterflies: 0, fish: 0 }, // sparse crystal-moths drifting near the spires
+  // Crystal Spire, redesigned as a tropical reef: the old "flyers" orbit
+  // mechanic (circle at altitude, wing-flap via scale pulse) reused as
+  // manta rays/sea turtles gliding overhead in the water column instead
+  // of moths above dry ground — the flapping motion actually reads
+  // better as a ray's wingbeat than it ever did as a moth. Motes are
+  // drifting bioluminescent plankton. Glowcrawlers (a slow, always-glowing
+  // ground-hugging creature) reused as nudibranchs crawling the reef
+  // floor rather than left unused. A real fish population — see
+  // FISH_COLORS below and createWildlife's fishColors handling — replaces
+  // the old zero, since a reef with no fish would defeat the redesign's
+  // whole point.
+  crystal: { flyers: 3, flyerColor: 0x2a4a52, motes: 14, moteColor: 0x6ffbe0, moteHeight: 3, moteBlink: true, salamanders: 0, salamanderColor: 0x000000, glowcrawlers: 4, glowcrawlerColor: 0xff6fd8, butterflies: 0, fish: 22, fishColors: [0xff8a3c, 0xffe066, 0x3ce7ff, 0xff6f9e, 0xb35cff, 0x6fff9e] }, // rays gliding overhead + bright drifting plankton + glowing nudibranchs on the floor + a real school of tropical reef fish in six coral-matched colors
   abyssal: { flyers: 2, flyerColor: 0x14101c, motes: 4, moteColor: 0x8a86ff, moteHeight: 1, moteBlink: false, salamanders: 0, salamanderColor: 0x000000, glowcrawlers: 0, glowcrawlerColor: 0x000000, butterflies: 0, fish: 0 }, // a couple of large slow shapes circling high, and eerie low lure-lights
   ashen: { flyers: 4, flyerColor: 0x1c1712, motes: 0, moteColor: 0x000000, moteHeight: 0, moteBlink: false, salamanders: 0, salamanderColor: 0x000000, glowcrawlers: 0, glowcrawlerColor: 0x000000, butterflies: 0, fish: 0 },   // scavengers circling over a dead lakebed, nothing bioluminescent down in the dust
   frost: { flyers: 5, flyerColor: 0x1a1e2a, motes: 9, moteColor: 0xcfeaff, moteHeight: 2.5, moteBlink: true, salamanders: 0, salamanderColor: 0x000000, glowcrawlers: 0, glowcrawlerColor: 0x000000, butterflies: 0, fish: 0 }, // dark arctic bird silhouettes circling above the blizzard + pale wind-blown ice crystals catching the light — no fireflies/butterflies/salamanders/fish, none of which fit a frozen biome with no ocean
@@ -318,7 +329,10 @@ function createWildlife(scene, biome, heightSampler, waterLevel) {
   for (let i = 0; i < butterflyCount; i++) butterflies.push(createButterfly(scene, heightSampler));
   const fishCount = waterLevel !== undefined ? Math.round((profile.fish || 0) * mult) : 0;
   const fish = [];
-  for (let i = 0; i < fishCount; i++) fish.push(createFish(scene, 0x3a5a6a, waterLevel));
+  for (let i = 0; i < fishCount; i++) {
+    const fishColor = profile.fishColors ? profile.fishColors[Math.floor(Math.random() * profile.fishColors.length)] : 0x3a5a6a;
+    fish.push(createFish(scene, fishColor, waterLevel));
+  }
   return { flyers, motes, salamanders, glowcrawlers, butterflies, fish };
 }
 

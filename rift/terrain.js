@@ -69,7 +69,7 @@ function emberChannelCenterX(worldZ, seed) {
 // Tuned against each biome's own height range so it floods only the
 // carved channel/cracks it belongs to, not the surrounding hills — see
 // the per-biome comments in BIOME_SHAPERS below for why each value works.
-const LIQUID_LEVEL = { ember: -1.5, verdant: -1 }; // frost's ocean removed per explicit request — was added in an earlier round, now reverted
+const LIQUID_LEVEL = { ember: -1.5, verdant: -1, crystal: 8 }; // crystal's shaper below peaks at seafloor(2.2)+ripple(0.3)+reefMound(3.96)=~6.46 in the worst case every noise stacks at once — 8 keeps a real safety margin above every reef mound while staying shallow enough for a bright, light-filled reef rather than a deep trench
 
 function hashStringToSeed(str) {
   let h = 1779033703 ^ str.length;
@@ -238,12 +238,23 @@ const BIOME_SHAPERS = {
     }
     return base;
   },
-  // Mostly flat/angular ground with sparse sharp spikes.
+  // Crystal Spire, redesigned as a submerged tropical reef: a gently
+  // rolling sandy seafloor (fine ripples layered over broad dunes) with
+  // scattered broad reef mounds where coral has built up — rounded domes,
+  // not the old sharp angular spikes, since coral heads read as lumpy
+  // accretions rather than crystalline points. LIQUID_LEVEL.crystal below
+  // sits comfortably above every mound's peak so the whole biome is
+  // permanently flooded (same proven technique as Frost's since-removed
+  // ocean — a real water plane with zero new rendering code, just a
+  // LIQUID_LEVEL/LIQUID_STYLE entry), while staying shallow enough that
+  // light can plausibly reach the floor for a "bright" reef rather than a
+  // deep-sea trench.
   crystal(u, v, seed) {
-    const flat = fbm2(u * 1.6, v * 1.6, seed, 3, 2.0, 0.45) * 3;
-    const spike = fbm2(u * 3 + 200, v * 3 + 200, seed + 80, 2, 2.0, 0.5);
-    const spikeBoost = spike > 0.62 ? (spike - 0.62) * 26 : 0; // sparse tall spires
-    return flat + spikeBoost;
+    const sandRipple = fbm2(u * 7, v * 7, seed, 2, 2.0, 0.5) * 0.3; // fine current-carved sand ripples
+    const seafloor = fbm2(u * 1.4, v * 1.4, seed + 40, 4, 2.0, 0.45) * 2.2; // gentle rolling seafloor swells
+    const reefNoise = fbm2(u * 2.4 + 200, v * 2.4 + 200, seed + 80, 3, 2.0, 0.5);
+    const reefMound = reefNoise > 0.56 ? (reefNoise - 0.56) * 9 : 0; // broad rounded reef-buildup mounds, not spires
+    return seafloor + sandRipple + reefMound;
   },
   // Deep chasms cut through otherwise moderate terrain.
   abyssal(u, v, seed) {
@@ -606,7 +617,7 @@ function biomeHeight(biome, worldX, worldZ, seed) {
 const SURFACE_PATCH_STYLE = {
   ember: { color: 0x120806, threshold: 0.62, freq: 3.2 },   // scorched/ash-dark patches
   verdant: { color: 0x1e5a2e, threshold: 0.6, freq: 1.8 }, // darker green shadow-blob patches, not brown soil — matches the reference's flat-illustration ground with a few rounded darker-green patches rather than dirt
-  crystal: { color: 0xcfeaff, threshold: 0.7, freq: 2.8 },  // pale mineral-vein streaks
+  crystal: { color: 0xf5e9c8, threshold: 0.68, freq: 2.6 }, // pale sand-and-shell-rubble patches on the reef floor
   abyssal: { color: 0x050308, threshold: 0.6, freq: 2.5 },  // near-black void patches
   ashen: { color: 0xe8dfc8, threshold: 0.65, freq: 3.6 },   // sun-bleached, cracked-pale patches
   frost: { color: 0xaee0f5, threshold: 0.6, freq: 2.4 },    // pale ice-blue shadow patches — cold light through snow, not brown/grey rock texture
@@ -636,6 +647,15 @@ const SURFACE_PATCH_STYLE = {
 // -----------------------------------------------------------------------------
 const HEIGHT_PALETTE = {
   ember: [0x120a08, 0x3a1208, 0x7a2410, 0xc8471c, 0xef8a34, 0xffd9a0], // shadowed valley -> deep rock -> mid rock -> molten-adjacent rust -> warm highlight -> pale sunlit rim
+  // Sand troughs -> open sunlit sand -> coral-orange mound base -> vivid
+  // coral-pink crown -> bright cyan where the shallowest reef peaks catch
+  // the most light from the surface above. Bypasses level.color entirely
+  // (that per-biome base color lives in levels.js, not available in this
+  // session — see MISSING-FILE PATTERN in project notes) the same way
+  // Ember's own palette already does, so the reef reads with real bold
+  // tropical color regardless of whatever base tint the level config
+  // still carries.
+  crystal: [0x1f4a52, 0xe8cf9a, 0xff8a5c, 0xff5c8a, 0x7fe8ff],
 };
 
 // Smooth multi-stop gradient across the palette — was a posterized,

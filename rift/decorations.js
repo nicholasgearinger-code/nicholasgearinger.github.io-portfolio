@@ -578,20 +578,33 @@ function createFloraStalk(colorHex, rand) {
   return { group, kind: "stalk", bobAmplitude: 0.15 + rand() * 0.1, bobSeed: rand() * Math.PI * 2 };
 }
 
-// Natural-looking cluster of angular crystal shards at varying scale.
+// Vivid tropical coral colors — picked independent of the biome's own
+// colorHex (see note above) so the reef reads as genuinely tropical
+// regardless of that leftover accent tint. Reused across every reef
+// decoration below for a consistent, coordinated palette rather than each
+// prop rolling its own unrelated colors.
+const CORAL_PALETTE = [0xff6f9e, 0xff9d42, 0xb35cff, 0x3ce7ff, 0xffe066, 0xff5c5c];
+
+// Branching staghorn-coral cluster — same angular-shard construction the
+// old crystal cluster used (octahedra fanned out from a base point), now
+// in warm coral colors instead of a single cool crystalline tint, and
+// each shard picking its own color from the palette so one cluster reads
+// as several coral colonies growing together rather than one uniform
+// crystal formation.
 function createCrystalCluster(colorHex, rand) {
   const group = new THREE.Group();
   const count = 3 + Math.floor(rand() * 3);
   for (let i = 0; i < count; i++) {
-    const scale = 0.8 + rand() * 1.8;
-    const geo = new THREE.OctahedronGeometry(scale, 0); // rocks/crystals deliberately stay at their sharpest/blockiest form at every tier — smoothing them fights the low-poly art style and wastes polygon budget on something that looks worse rounded
+    const scale = 0.7 + rand() * 1.4;
+    const coral = CORAL_PALETTE[Math.floor(rand() * CORAL_PALETTE.length)];
+    const geo = new THREE.OctahedronGeometry(scale, 0); // stays blocky on purpose, same low-poly rule as every other rock/crystal-family prop
     const mat = new THREE.MeshStandardMaterial({
-      color: colorHex, emissive: colorHex, emissiveIntensity: 0.35,
-      roughness: 0.2, metalness: 0.1, transparent: true, opacity: 0.9,
+      color: coral, emissive: coral, emissiveIntensity: 0.3,
+      roughness: 0.35, metalness: 0.05, transparent: true, opacity: 0.95,
     });
     const shard = new THREE.Mesh(geo, mat);
     const angle = rand() * Math.PI * 2, dist = rand() * 1.4;
-    shard.position.set(Math.cos(angle) * dist, scale * 0.75, Math.sin(angle) * dist);
+    shard.position.set(Math.cos(angle) * dist, scale * 0.65, Math.sin(angle) * dist);
     shard.rotation.set(rand() * 0.6, rand() * Math.PI * 2, rand() * 0.6);
     group.add(shard);
   }
@@ -643,8 +656,10 @@ function createRockCluster(biome, colorHex, rand) {
   // already uses above. Each rock gets its own fresh gradient rather than
   // one shared material/geometry so the highlight isn't identical on
   // every rock in the cluster.
-  const rockLow = new THREE.Color(0x2a2620);
-  const rockHigh = new THREE.Color(colorHex).lerp(new THREE.Color(0xffffff), 0.15);
+  const rockLow = biome === "crystal" ? new THREE.Color(0x3a5850) : new THREE.Color(0x2a2620); // algae-shadowed reef rock rather than dark volcanic rock
+  const rockHigh = biome === "crystal"
+    ? new THREE.Color(0xe8d9b8) // pale sun-bleached coral rubble, ignoring colorHex's leftover violet tint
+    : new THREE.Color(colorHex).lerp(new THREE.Color(0xffffff), 0.15);
   const count = 2 + Math.floor(rand() * 3);
   const mossMaterials = []; // collected across every rock in this cluster that gets moss — see the verdant branch below
   for (let i = 0; i < count; i++) {
@@ -1383,12 +1398,14 @@ function createBloomingVine(colorHex, rand) {
   return { group, kind: "bloomingVine" };
 }
 
-// Crystal: a split rock shell with a cluster of small crystal shards
-// nested in the opening — a geode, distinct from the crystal cluster's
-// bare jutting shards with no rock context at all.
+// Crystal (now the reef): a giant clam with a cluster of anemone
+// tentacles inside its open shell — same split-shell-plus-nested-shards
+// construction the old geode used, now a pearlescent shell instead of
+// dull rock and colorful tentacles instead of crystal shards, distinct
+// from the coral cluster's bare branching shards with no shell context.
 function createGeode(colorHex, rand) {
   const group = new THREE.Group();
-  const shellMat = new THREE.MeshStandardMaterial({ color: 0x3a3540, roughness: 0.9, flatShading: true, side: THREE.DoubleSide });
+  const shellMat = new THREE.MeshStandardMaterial({ color: 0xd8ccc0, roughness: 0.6, flatShading: true, side: THREE.DoubleSide, emissive: 0x6a5f52, emissiveIntensity: 0.08 });
   const shellR = 1.1 + rand() * 0.7;
   const shell = new THREE.Mesh(new THREE.SphereGeometry(shellR, 8, 6, 0, Math.PI * 1.5), shellMat);
   shell.rotation.x = Math.PI * 0.15;
@@ -1396,19 +1413,20 @@ function createGeode(colorHex, rand) {
   shell.position.y = shellR * 0.4;
   group.add(shell);
 
-  const crystalMat = new THREE.MeshStandardMaterial({
-    color: colorHex, emissive: colorHex, emissiveIntensity: 0.5, roughness: 0.15, metalness: 0.1, transparent: true, opacity: 0.9,
+  const tentacleColor = CORAL_PALETTE[Math.floor(rand() * CORAL_PALETTE.length)];
+  const tentacleMat = new THREE.MeshStandardMaterial({
+    color: tentacleColor, emissive: tentacleColor, emissiveIntensity: 0.55, roughness: 0.3, metalness: 0, transparent: true, opacity: 0.9,
   });
-  const shardCount = 4 + Math.floor(rand() * 4);
-  for (let i = 0; i < shardCount; i++) {
+  const tentacleCount = 4 + Math.floor(rand() * 4);
+  for (let i = 0; i < tentacleCount; i++) {
     const s = shellR * (0.25 + rand() * 0.35);
-    const shard = new THREE.Mesh(new THREE.OctahedronGeometry(s, 0), crystalMat);
+    const tentacle = new THREE.Mesh(new THREE.OctahedronGeometry(s, 0), tentacleMat);
     const angle = rand() * Math.PI * 2, dist = rand() * shellR * 0.5;
-    shard.position.set(Math.cos(angle) * dist, shellR * 0.3 + rand() * shellR * 0.4, Math.sin(angle) * dist);
-    shard.rotation.set(rand() * Math.PI, rand() * Math.PI, rand() * Math.PI);
-    group.add(shard);
+    tentacle.position.set(Math.cos(angle) * dist, shellR * 0.3 + rand() * shellR * 0.4, Math.sin(angle) * dist);
+    tentacle.rotation.set(rand() * Math.PI, rand() * Math.PI, rand() * Math.PI);
+    group.add(tentacle);
   }
-  const light = new THREE.PointLight(colorHex, 0.4, 5);
+  const light = new THREE.PointLight(tentacleColor, 0.4, 5);
   light.position.y = shellR * 0.6;
   group.add(light);
   return { group, kind: "geode" };

@@ -395,6 +395,35 @@ const BIOME_SHAPERS = {
     // sine terms (same technique the river already uses) so it reads as
     // grown/winding rather than a mechanically straight line.
     const tunnelX = Math.sin(worldZ * 0.028 + seed * 0.021) * 26 + Math.sin(worldZ * 0.011 + seed * 0.037) * 14;
+
+    // A deep rock tunnel opening at the bottom of the canyon, at one
+    // specific point along its winding path — per explicit request to
+    // use the canyon's own existing geometry as the entrance rather
+    // than a new standalone location. Aligned with `tunnelX` (computed
+    // just above) rather than needing to know the actual numeric seed
+    // value, so this stays perfectly on the canyon's real floor
+    // regardless of exactly where its winding path happens to sit at
+    // this world seed. Z=0 chosen after searching several candidate
+    // points along the canyon — it gives the most clearance (max safe
+    // radius ~11) of anywhere checked; radius 10 used for a small safety
+    // margin under that ceiling. The resulting core (1.0 grid cell at
+    // Low tier) is a real improvement over an initial too-narrow attempt
+    // (0.6 cells) but genuinely can't reach the 2-4 cell robustness used
+    // elsewhere in this arc without risking overlap with the ramp/room
+    // or chasm mountains — a real spatial constraint at this location,
+    // not an arbitrary choice.
+    const DEEP_TUNNEL_Z = 0, DEEP_TUNNEL_Z_HALF_RANGE = 12, DEEP_TUNNEL_RADIUS = 10, DEEP_TUNNEL_FLOOR = -30;
+    const CANYON_FLOOR = -9; // matches TUNNEL_FLOOR below — the canyon's own floor, which this blends UP FROM rather than from the surrounding hill noise
+    if (Math.abs(worldZ - DEEP_TUNNEL_Z) < DEEP_TUNNEL_Z_HALF_RANGE) {
+      const distFromDeepTunnel = Math.hypot(worldX - tunnelX, worldZ - DEEP_TUNNEL_Z);
+      if (distFromDeepTunnel < DEEP_TUNNEL_RADIUS) {
+        const coreR = DEEP_TUNNEL_RADIUS * 0.6;
+        if (distFromDeepTunnel <= coreR) return DEEP_TUNNEL_FLOOR;
+        const t = 1 - (distFromDeepTunnel - coreR) / (DEEP_TUNNEL_RADIUS - coreR);
+        return CANYON_FLOOR * (1 - t * t) + DEEP_TUNNEL_FLOOR * (t * t);
+      }
+    }
+
     const distFromTunnel = Math.abs(worldX - tunnelX);
     const TUNNEL_HALF_WIDTH = 5;
     if (distFromTunnel < TUNNEL_HALF_WIDTH) {

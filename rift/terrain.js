@@ -280,6 +280,23 @@ const BIOME_SHAPERS = {
     let base = fbm2(u * 1.4, v * 1.4, seed, 4, 2.0, 0.5) * 7; // rolling snowdrift hills
     const ridged = Math.abs(fbm2(u * 2.6, v * 2.6, seed + 80, 3, 2.0, 0.5)) * 3; // jagged wind-carved ice ridges
 
+    // A large, deliberately SIMPLE test chasm — open-air, no roof, no
+    // rooms, none of the mountain/ramp/room machinery below. Positioned
+    // well clear of that system (opposite quadrant of the map) so
+    // there's zero interaction between them. Reuses Abyssal's exact
+    // proven threshold-carved-chasm shape (a technique already
+    // established as working in this project) rather than anything new,
+    // specifically to validate that basic large-scale carving renders
+    // correctly in isolation before building more complexity on top.
+    const CHASM_TEST_X = -50, CHASM_TEST_Z = -50, CHASM_TEST_RADIUS = 35, CHASM_TEST_FLOOR = -20; // position verified numerically to keep the chasm's full outer edge within WORLD_BOUND_RADIUS (the player's reachable movement boundary)
+    const distFromChasmTest = Math.hypot(worldX - CHASM_TEST_X, worldZ - CHASM_TEST_Z);
+    if (distFromChasmTest < CHASM_TEST_RADIUS) {
+      const coreR = CHASM_TEST_RADIUS * 0.6; // guaranteed floor within this radius, independent of the surrounding noise — same core-guarantee technique proven on the pond/tunnel/room
+      if (distFromChasmTest <= coreR) return CHASM_TEST_FLOOR;
+      const t = 1 - (distFromChasmTest - coreR) / (CHASM_TEST_RADIUS - coreR);
+      return (base + ridged) * (1 - t * t) + CHASM_TEST_FLOOR * (t * t);
+    }
+
     // A real mountain landform over the ramp/room/tunnel network below —
     // per explicit request that the whole underground system sit beneath
     // a mountain, not flat ground, with a single opening leading down.

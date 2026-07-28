@@ -288,7 +288,7 @@ const BIOME_SHAPERS = {
     // established as working in this project) rather than anything new,
     // specifically to validate that basic large-scale carving renders
     // correctly in isolation before building more complexity on top.
-    const CHASM_TEST_X = -50, CHASM_TEST_Z = -50, CHASM_TEST_RADIUS = 35, CHASM_TEST_FLOOR = -20; // position verified numerically to keep the chasm's full outer edge within WORLD_BOUND_RADIUS (the player's reachable movement boundary)
+    const CHASM_TEST_X = -50, CHASM_TEST_Z = -50, CHASM_OUTER_RADIUS = 40, CHASM_OPENING_RADIUS = 24, CHASM_TEST_FLOOR = -20; // position verified numerically to keep the chasm's full outer edge within WORLD_BOUND_RADIUS (110.7 vs 112 — the widest outer radius that still fits at this fixed position). CHASM_OUTER_RADIUS is now the edge of the whole bridged mountain structure; CHASM_OPENING_RADIUS (24, sized for both "a large hole" and a robust core against Low tier's coarse mesh) is the skylight left open within it, per explicit request to bridge over most of the top
 
     // Icy cliffs/mountains surrounding the chasm, leaving its own
     // opening as a genuine hole/entrance — per explicit request. Added
@@ -307,12 +307,23 @@ const BIOME_SHAPERS = {
       base += 30 * cmt * cmt;
     }
 
+    // The chasm's opening is now much smaller than the mountain built
+    // over it (a "skylight" rather than the whole top being open) — per
+    // explicit request to bridge the edges with solid ground, leaving
+    // only a gap. Everything from the opening's edge out to
+    // CHASM_OUTER_RADIUS now reads as ordinary walkable mountain terrain
+    // (base+ridged, already elevated by the mountain bump above) rather
+    // than continuing the pit — a real bridge connecting the rim on
+    // every side, not just two opposite edges.
     const distFromChasmTest = Math.hypot(worldX - CHASM_TEST_X, worldZ - CHASM_TEST_Z);
-    if (distFromChasmTest < CHASM_TEST_RADIUS) {
-      const coreR = CHASM_TEST_RADIUS * 0.6; // guaranteed floor within this radius, independent of the surrounding noise — same core-guarantee technique proven on the pond/tunnel/room
+    if (distFromChasmTest < CHASM_OPENING_RADIUS) {
+      const coreR = CHASM_OPENING_RADIUS * 0.6; // guaranteed floor within this radius, independent of the surrounding noise — same core-guarantee technique proven on the pond/tunnel/room
       if (distFromChasmTest <= coreR) return CHASM_TEST_FLOOR;
-      const t = 1 - (distFromChasmTest - coreR) / (CHASM_TEST_RADIUS - coreR);
+      const t = 1 - (distFromChasmTest - coreR) / (CHASM_OPENING_RADIUS - coreR);
       return (base + ridged) * (1 - t * t) + CHASM_TEST_FLOOR * (t * t);
+    }
+    if (distFromChasmTest < CHASM_OUTER_RADIUS) {
+      return base + ridged; // the bridged-over ground — a natural continuation of the surrounding mountain, not a carved pit
     }
 
     // A real mountain landform over the ramp/room/tunnel network below —

@@ -45,7 +45,15 @@ const UNDERWATER_STYLE = {
   },
   crystal: {
     fogColor: 0x2fa8b8, fogDensity: 0.028, sunColor: 0x8fe0e6, sunMult: 0.55,
-    ambientColor: 0x6fd8dc, ambientMult: 0.85, tint: [0.35, 0.78, 0.8], tintStrength: 0.14, causticStrength: 0.16, distortAmp: 0.016, volumeColor: 0x5fd0d8,
+    // causticStrength back to 0 — a screen-space full-screen overlay
+    // paints every pixel identically regardless of view direction, so it
+    // necessarily looked like "light everywhere" rather than concentrated
+    // at the surface when looking up, per explicit follow-up. The real
+    // caustics-on-sand (vegetation.js's createCaustics, genuinely
+    // 3D-anchored to the floor) and the water surface's own ripple
+    // shading (genuinely anchored to the real mesh at y=8) are the
+    // correct view-dependent tools for this and are untouched.
+    ambientColor: 0x6fd8dc, ambientMult: 0.85, tint: [0.35, 0.78, 0.8], tintStrength: 0.14, causticStrength: 0, distortAmp: 0.016, volumeColor: 0x5fd0d8,
   },
 };
 

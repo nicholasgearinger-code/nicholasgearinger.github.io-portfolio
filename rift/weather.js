@@ -311,7 +311,7 @@ function createCrystalRefraction(scene) {
     blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
   });
   const sprite = new THREE.Sprite(mat);
-  sprite.scale.set(5, 34, 1); // tall and narrow — a downward shaft, not the old wide horizontal arc
+  sprite.scale.set(4, 14, 1); // shortened (was 34) and reanchored — see the update loop below, which now hangs this from the real water surface (LIQUID_LEVEL.crystal=8) downward instead of floating at a fixed mid-height spanning far above and below both the surface and the floor
   scene.add(sprite);
   return { sprite, flash: 0, timer: randRange(8, 18) }; // fires more often than the old rainbow — a passing sunbeam should feel like a recurring reef mood, not a rare event
 }
@@ -325,7 +325,7 @@ function createCrystalRefraction(scene) {
 // texture — cheap, and keeps the whole light-shaft family visually
 // consistent — just many more of them, fainter, always running.
 function createCrystalDapple(scene) {
-  const count = 12;
+  const count = 9; // trimmed from 12 — now anchored near the surface rather than spread through the whole column, fewer read as plenty
   const rays = [];
   for (let i = 0; i < count; i++) {
     const mat = new THREE.SpriteMaterial({
@@ -333,17 +333,18 @@ function createCrystalDapple(scene) {
       blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
     });
     const sprite = new THREE.Sprite(mat);
-    const width = 3 + Math.random() * 4;
-    const length = 22 + Math.random() * 16;
+    const width = 2 + Math.random() * 2.5; // thinner (was 3-7) — reads as a beam, not a blob
+    const length = 8 + Math.random() * 8; // shortened (was 22-38)
     sprite.scale.set(width, length, 1);
     const angle = Math.random() * Math.PI * 2, dist = Math.random() * 55;
     const baseX = Math.cos(angle) * dist, baseZ = Math.sin(angle) * dist;
-    sprite.position.set(baseX, 4, baseZ);
+    const baseY = 8 - length / 2; // hangs FROM the real water surface (LIQUID_LEVEL.crystal=8) downward — the top edge sits right at the surface instead of floating at a fixed mid-height that spanned far above and below both the surface and the floor, which is what made this read as "light everywhere" instead of "light at the surface"
+    sprite.position.set(baseX, baseY, baseZ);
     sprite.material.rotation = (Math.random() - 0.5) * 0.25;
     scene.add(sprite);
     rays.push({
-      sprite, baseX, baseZ,
-      baseOpacity: 0.12 + Math.random() * 0.16, // faint individually — it's the many overlapping rays that read as "dappled," not one bright shaft
+      sprite, baseX, baseZ, baseY,
+      baseOpacity: 0.1 + Math.random() * 0.14, // faint individually — it's the many overlapping rays that read as "dappled," not one bright shaft
       seed: Math.random() * Math.PI * 2,
       flickerSpeed: 0.4 + Math.random() * 0.7, // independent speeds so they don't pulse in unison
       swaySpeed: 0.15 + Math.random() * 0.15,
@@ -705,7 +706,7 @@ function updateWeatherSystem(handle, dt, erupting = false, dayAmount = 0) {
     if (cr.timer <= 0) {
       cr.flash = 1;
       const angle = Math.random() * Math.PI * 2, dist = 10 + Math.random() * 35;
-      cr.sprite.position.set(Math.cos(angle) * dist, 5, Math.sin(angle) * dist);
+      cr.sprite.position.set(Math.cos(angle) * dist, 1, Math.sin(angle) * dist); // y=1 puts the top edge (scale.y=14, half-height 7) right at the water surface (LIQUID_LEVEL.crystal=8)
       cr.sprite.material.rotation = (Math.random() - 0.5) * 0.3; // near-vertical, just a slight natural tilt
       cr.timer = randRange(8, 18);
     }

@@ -29,17 +29,17 @@ const LIQUID_STYLE = {
   // Crystal Spire, redesigned as a tropical reef ocean — this is now the
   // biome's actual ground-level water (the whole landmass sits below
   // LIQUID_LEVEL.crystal in terrain.js), not a small feature within it.
-  // Brighter and noticeably lower opacity than Verdant's river so the
-  // sandy/coral floor and fish stay visible from above — a bright shallow
-  // reef reads as clear water, not an opaque colored plane. Roughness
-  // pushed lower than Verdant for a livelier, more sun-glittered surface.
-  // Retuned paler/brighter per an explicit reference photo — the
-  // previous baseColor read as a saturated tropical postcard turquoise,
-  // where the photo is a much lighter, almost washed-out pale cyan with
-  // very high visibility straight through to the sand.
+  // Opacity/roughness brought much closer to Verdant's own water per an
+  // explicit "should look more like the water on Verdant" follow-up —
+  // earlier rounds deliberately kept this far more transparent than
+  // Verdant so the reef floor stayed visible from above, but that read
+  // as seeing straight to the bottom rather than real water with its own
+  // presence. Kept a bit brighter/more colorful than Verdant's darker
+  // blue (still a sunlit tropical reef, not a murky river), but no
+  // longer dramatically more see-through.
   crystal: {
     baseColor: new THREE.Color(0x6fdfe6), frothColor: new THREE.Color(0xffffff),
-    emissive: 0x8ff5ec, emissiveIntensity: 0.04, opacity: 0.55, roughness: 0.04,
+    emissive: 0x8ff5ec, emissiveIntensity: 0.04, opacity: 0.74, roughness: 0.08,
   },
 };
 
@@ -700,7 +700,7 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos) {
   // layered on top of the main swell adds finer chop instead of one
   // smooth wave shape everywhere.
   const speed = biome === "ember" ? 0.6 : 1.4;
-  const amp = biome === "ember" ? 0.18 : (biome === "crystal" ? 0.2 : 0.16); // crystal bumped back up a bit (was 0.17) per explicit "shouldn't be super clear and calm" follow-up — the FU125 reduction was really responding to the separate screen-space distortion shader, not this water mesh's own motion
+  const amp = biome === "ember" ? 0.18 : (biome === "crystal" ? 0.32 : 0.16); // crystal bumped further (was 0.2) per explicit "real 3D rolling waves" follow-up — needed genuinely visible geometric swell, not just a subtle ripple, to read as real ocean movement from above
   const chopAmp = amp * 0.35;
   const swell2Amp = amp * 0.55; // a third, slower, larger-scale layer at a different angle — real water has multiple overlapping wave frequencies, not just one swell direction plus fine chop
   const flowSpeed = 0.12; // noise-space units/sec the crust/crack field drifts along flowDir

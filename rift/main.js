@@ -30,6 +30,25 @@ import { mulberry32, hashStringToSeed } from "./worldgen.js";
 // World seed — fixed by default so every visitor explores the same curated
 // levels rather than different random layouts each load.
 // ---------------------------------------------------------------------------
+// Per-biome underwater ambience — DEFAULT reproduces the exact values
+// every biome used before this table existed (a murky river read), so
+// Verdant's underwater look is provably unchanged. Crystal gets its own
+// entry: the shared default fog was heavy/dark enough to crush the whole
+// Coral Shallows reef redesign's bright tropical tuning into near-total
+// darkness regardless of how bright the terrain/water/coral colors
+// themselves were set — a shallow sunlit reef needs to actually stay
+// visible, not read like a deep murky river.
+const UNDERWATER_STYLE = {
+  default: {
+    fogColor: 0x0a2838, fogDensity: 0.14, sunColor: 0x1a4560, sunMult: 0.08,
+    ambientColor: 0x14384f, ambientMult: 0.22, tint: [0.08, 0.28, 0.45], tintStrength: 0.18, causticStrength: 0, distortAmp: 0.01, volumeColor: 0x1a5a7a,
+  },
+  crystal: {
+    fogColor: 0x2fa8b8, fogDensity: 0.028, sunColor: 0x8fe0e6, sunMult: 0.55,
+    ambientColor: 0x6fd8dc, ambientMult: 0.85, tint: [0.35, 0.78, 0.8], tintStrength: 0.14, causticStrength: 0.16, distortAmp: 0.016, volumeColor: 0x5fd0d8,
+  },
+};
+
 const WORLD_SEED = "rift-islands-prime";
 const PLAYER_EYE_HEIGHT = 1.6;
 // Player can't walk past this radius from the terrain's center — keeps
@@ -113,7 +132,11 @@ const underwaterRenderTarget = new THREE.WebGLRenderTarget(
 const underwaterQuadScene = new THREE.Scene();
 const underwaterQuadCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 const underwaterDistortionMaterial = new THREE.ShaderMaterial({
-  uniforms: { tDiffuse: { value: underwaterRenderTarget.texture }, time: { value: 0 } },
+  uniforms: {
+    tDiffuse: { value: underwaterRenderTarget.texture }, time: { value: 0 },
+    tintColor: { value: new THREE.Vector3(0.08, 0.28, 0.45) }, tintStrength: { value: 0.18 },
+    causticStrength: { value: 0.0 }, distortAmp: { value: 0.01 },
+  },
   vertexShader: `
     varying vec2 vUv;
     void main() {
@@ -124,14 +147,30 @@ const underwaterDistortionMaterial = new THREE.ShaderMaterial({
   fragmentShader: `
     uniform sampler2D tDiffuse;
     uniform float time;
+    uniform vec3 tintColor;
+    uniform float tintStrength;
+    uniform float causticStrength;
+    uniform float distortAmp;
     varying vec2 vUv;
     void main() {
       vec2 distortedUv = vUv + vec2(
-        sin(vUv.y * 14.0 + time * 1.6) * 0.01,
-        sin(vUv.x * 11.0 + time * 1.3) * 0.01
+        sin(vUv.y * 14.0 + time * 1.6) * distortAmp,
+        sin(vUv.x * 11.0 + time * 1.3) * distortAmp
       );
       vec4 color = texture2D(tDiffuse, distortedUv);
-      color.rgb = mix(color.rgb, vec3(0.08, 0.28, 0.45), 0.18);
+      color.rgb = mix(color.rgb, tintColor, tintStrength);
+      // Real moving light-ripple bands across the whole screen — the
+      // "looking up through a rippling surface" look a purely geometric
+      // water mesh can't guarantee (it can be hidden by fog, sit outside
+      // the view, or read as flat against a dark backdrop). Two
+      // differently-angled sine fields multiplied together produces a
+      // genuine crossing caustic-net pattern rather than one uniform
+      // wave; only the POSITIVE half brightens (real caustic light
+      // concentrates, it doesn't ever darken the water below its own
+      // baseline). causticStrength is 0 for every biome except crystal,
+      // so this is inert everywhere else.
+      float caustic = sin(vUv.x * 20.0 + vUv.y * 6.0 + time * 1.1) * sin(vUv.y * 17.0 - vUv.x * 4.0 - time * 0.85);
+      color.rgb += max(0.0, caustic) * causticStrength;
       gl_FragColor = color;
     }
   `,
@@ -1386,12 +1425,18 @@ function animate() {
   const currentLiquidLevel = currentBiome !== null ? LIQUID_LEVEL[currentBiome] : undefined;
   const isFullySubmerged = currentLiquidLevel !== undefined && camera.position.y < currentLiquidLevel;
   if (isFullySubmerged) {
-    scene.fog.color.setHex(0x0a2838);
-    scene.fog.density = 0.14;
-    sun.color.setHex(0x1a4560);
-    sun.intensity *= 0.08;
-    ambientLight.color.setHex(0x14384f);
-    ambientLight.intensity *= 0.22;
+    const uwStyle = UNDERWATER_STYLE[currentBiome] || UNDERWATER_STYLE.default;
+    scene.fog.color.setHex(uwStyle.fogColor);
+    scene.fog.density = uwStyle.fogDensity;
+    sun.color.setHex(uwStyle.sunColor);
+    sun.intensity *= uwStyle.sunMult;
+    ambientLight.color.setHex(uwStyle.ambientColor);
+    ambientLight.intensity *= uwStyle.ambientMult;
+    underwaterDistortionMaterial.uniforms.tintColor.value.set(uwStyle.tint[0], uwStyle.tint[1], uwStyle.tint[2]);
+    underwaterDistortionMaterial.uniforms.tintStrength.value = uwStyle.tintStrength;
+    underwaterDistortionMaterial.uniforms.causticStrength.value = uwStyle.causticStrength;
+    underwaterDistortionMaterial.uniforms.distortAmp.value = uwStyle.distortAmp;
+    waterVolumeMesh.material.color.setHex(uwStyle.volumeColor);
   }
   // The enclosing "water volume" sphere — follows the camera every
   // frame, only visible while actually fully submerged.

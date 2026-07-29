@@ -1414,7 +1414,7 @@ function animate() {
     if (eruptionActive) playEruptionBurst();
     wasErupting = eruptionActive;
   }
-  updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, camera.position);
+  updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, camera.position, sun.position);
   updateWaterfall(waterfallHandle, dt, elapsedTime);
   updateOceanSpray(oceanSprayHandle, dt, elapsedTime);
   updateOceanSurfaceDetail(oceanSurfaceDetailHandle, elapsedTime);

@@ -797,7 +797,18 @@ function buildPlanetTerrain(level, seedStr) {
     if (y > maxY) maxY = y;
   }
   geo.computeVertexNormals();
-  applyHeightShading(geo, level.color, minY, maxY, level.biome, seed);
+  // Crystal's palette normalization uses a fixed range for the reef
+  // itself (verified against the shaper's own real height variation,
+  // -2.5..6.5) rather than the raw scanned minY/maxY — the edge falloff's
+  // sink (~-35 at the far corners, present on every biome) and the new
+  // emergent island's peak (11.5) both stretch far beyond what the reef
+  // actually needs to represent, compressing the sand->coral->cyan story
+  // into a narrower slice of the palette than intended. The white-sand
+  // override in applyHeightShading already handles anything above the
+  // water line on its own terms, so this only affects underwater color.
+  const paletteMinY = level.biome === "crystal" ? -2.5 : minY;
+  const paletteMaxY = level.biome === "crystal" ? 6.5 : maxY;
+  applyHeightShading(geo, level.color, paletteMinY, paletteMaxY, level.biome, seed);
 
   return geo;
 }

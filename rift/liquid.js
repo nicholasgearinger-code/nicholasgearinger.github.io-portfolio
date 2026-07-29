@@ -39,7 +39,7 @@ const LIQUID_STYLE = {
   // very high visibility straight through to the sand.
   crystal: {
     baseColor: new THREE.Color(0x6fdfe6), frothColor: new THREE.Color(0xffffff),
-    emissive: 0x8ff5ec, emissiveIntensity: 0.04, opacity: 0.42, roughness: 0.04,
+    emissive: 0x8ff5ec, emissiveIntensity: 0.04, opacity: 0.55, roughness: 0.04,
   },
 };
 
@@ -700,7 +700,7 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos) {
   // layered on top of the main swell adds finer chop instead of one
   // smooth wave shape everywhere.
   const speed = biome === "ember" ? 0.6 : 1.4;
-  const amp = biome === "ember" ? 0.18 : (biome === "crystal" ? 0.17 : 0.16); // crystal eased back down (was 0.22) per explicit "too much heavy distortion" follow-up — still a touch above the shared 0.16 baseline since this surface is viewed constantly from underneath, but no longer aggressively agitated
+  const amp = biome === "ember" ? 0.18 : (biome === "crystal" ? 0.2 : 0.16); // crystal bumped back up a bit (was 0.17) per explicit "shouldn't be super clear and calm" follow-up — the FU125 reduction was really responding to the separate screen-space distortion shader, not this water mesh's own motion
   const chopAmp = amp * 0.35;
   const swell2Amp = amp * 0.55; // a third, slower, larger-scale layer at a different angle — real water has multiple overlapping wave frequencies, not just one swell direction plus fine chop
   const flowSpeed = 0.12; // noise-space units/sec the crust/crack field drifts along flowDir

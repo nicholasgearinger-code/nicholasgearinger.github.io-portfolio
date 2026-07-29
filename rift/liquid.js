@@ -700,7 +700,7 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos) {
   // layered on top of the main swell adds finer chop instead of one
   // smooth wave shape everywhere.
   const speed = biome === "ember" ? 0.6 : 1.4;
-  const amp = biome === "ember" ? 0.18 : (biome === "crystal" ? 0.22 : 0.16); // crystal bumped further (was 0.16, shared with every other water biome) — this surface is viewed constantly from directly underneath now, so the ripple needs to read clearly against the bright sky rather than the subtler from-above glance every other biome gets
+  const amp = biome === "ember" ? 0.18 : (biome === "crystal" ? 0.17 : 0.16); // crystal eased back down (was 0.22) per explicit "too much heavy distortion" follow-up — still a touch above the shared 0.16 baseline since this surface is viewed constantly from underneath, but no longer aggressively agitated
   const chopAmp = amp * 0.35;
   const swell2Amp = amp * 0.55; // a third, slower, larger-scale layer at a different angle — real water has multiple overlapping wave frequencies, not just one swell direction plus fine chop
   const flowSpeed = 0.12; // noise-space units/sec the crust/crack field drifts along flowDir
@@ -789,7 +789,7 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos) {
       posAttr.setY(i, ripple + heat * 0.15);
     } else {
       const accent = style.frothColor;
-      const frothPower = biome === "crystal" ? 1.4 : 3; // crystal's surface is viewed constantly from directly underneath now — a much lower power spreads the bright ripple pattern across far more of the surface instead of keeping it rare/crest-only like every other biome's water
+      const frothPower = biome === "crystal" ? 2.2 : 3; // crystal eased back (was 1.4) per explicit "too much heavy distortion/flickers" follow-up — still spreads the ripple pattern more than every other biome's rare crest-only froth, but far calmer than before
       tmpColor.copy(baseColor).lerp(accent, Math.pow(disturbance, frothPower));
       posAttr.setY(i, ripple);
     }

@@ -53,7 +53,7 @@ const UNDERWATER_STYLE = {
     // 3D-anchored to the floor) and the water surface's own ripple
     // shading (genuinely anchored to the real mesh at y=8) are the
     // correct view-dependent tools for this and are untouched.
-    ambientColor: 0x6fd8dc, ambientMult: 0.85, tint: [0.35, 0.78, 0.8], tintStrength: 0.14, causticStrength: 0, distortAmp: 0.016, volumeColor: 0x5fd0d8,
+    ambientColor: 0x6fd8dc, ambientMult: 0.85, tint: [0.35, 0.78, 0.8], tintStrength: 0.1, causticStrength: 0, distortAmp: 0.005, volumeColor: 0x5fd0d8,
   },
 };
 

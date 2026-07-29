@@ -29,17 +29,15 @@ const LIQUID_STYLE = {
   // Crystal Spire, redesigned as a tropical reef ocean — this is now the
   // biome's actual ground-level water (the whole landmass sits below
   // LIQUID_LEVEL.crystal in terrain.js), not a small feature within it.
-  // Opacity/roughness brought much closer to Verdant's own water per an
-  // explicit "should look more like the water on Verdant" follow-up —
-  // earlier rounds deliberately kept this far more transparent than
-  // Verdant so the reef floor stayed visible from above, but that read
-  // as seeing straight to the bottom rather than real water with its own
-  // presence. Kept a bit brighter/more colorful than Verdant's darker
-  // blue (still a sunlit tropical reef, not a murky river), but no
-  // longer dramatically more see-through.
+  // Retuned to a deep blue with white crest highlights per an explicit
+  // reference illustration — a real reversal of the earlier bright
+  // tropical-turquoise direction. Opacity pushed further toward opaque
+  // (was 0.74) per explicit "needs to be less transparent." frothColor
+  // stays pure white — the reference's defining feature is bright white
+  // lines along each wave crest against the deep blue body.
   crystal: {
-    baseColor: new THREE.Color(0x6fdfe6), frothColor: new THREE.Color(0xffffff),
-    emissive: 0x8ff5ec, emissiveIntensity: 0.04, opacity: 0.74, roughness: 0.08,
+    baseColor: new THREE.Color(0x214d75), frothColor: new THREE.Color(0xffffff),
+    emissive: 0x2a5578, emissiveIntensity: 0.015, opacity: 0.88, roughness: 0.12,
   },
 };
 
@@ -789,7 +787,7 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos) {
       posAttr.setY(i, ripple + heat * 0.15);
     } else {
       const accent = style.frothColor;
-      const frothPower = biome === "crystal" ? 2.2 : 3; // crystal eased back (was 1.4) per explicit "too much heavy distortion/flickers" follow-up — still spreads the ripple pattern more than every other biome's rare crest-only froth, but far calmer than before
+      const frothPower = biome === "crystal" ? 1.9 : 3; // nudged lower (was 2.2) for more visible white crest banding per the deep-blue-with-white reference — the earlier "too much distortion" complaint was mainly the separate screen-space distortAmp, not this
       tmpColor.copy(baseColor).lerp(accent, Math.pow(disturbance, frothPower));
       posAttr.setY(i, ripple);
     }

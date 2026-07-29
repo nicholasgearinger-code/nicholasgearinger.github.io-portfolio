@@ -800,17 +800,52 @@ function createVerdantLandmark(colorHex) {
 // used, just recolored/rescaled/regrounded, and noticeably shorter now
 // since the island's own height (a real terrain feature, not just this
 // one prop) already reads as the tall landmark from a distance.
+// A simple standalone palm tree for the landmark's own clearing — built
+// locally with basic primitives rather than importing decorations.js's
+// full canvas-painted palm archetype (landmarks.js has never imported
+// from decorations.js anywhere in this project, and this keeps that
+// module boundary intact). Leaning cylinder trunk + a small crown of
+// flat frond planes fanned out at the top — simpler than the painted
+// version, but unmistakably a palm rather than another rock.
+function createSimplePalm(x, z, scale) {
+  const group = new THREE.Group();
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x8a6a4a, roughness: 0.8, flatShading: true });
+  const trunkHeight = 4.5 * scale;
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.12 * scale, 0.22 * scale, trunkHeight, 6), trunkMat);
+  trunk.position.y = trunkHeight / 2;
+  trunk.rotation.z = 0.12; // a slight lean, same as the painted version's silhouette
+  group.add(trunk);
+  const frondMat = new THREE.MeshStandardMaterial({ color: 0x3fae4a, roughness: 0.7, side: THREE.DoubleSide, flatShading: true });
+  const crownY = trunkHeight + Math.sin(0.12) * trunkHeight * 0.3;
+  const crownX = Math.cos(0.12) * 0; // trunk lean is small enough this stays negligible
+  const frondCount = 6;
+  for (let i = 0; i < frondCount; i++) {
+    const angle = (i / frondCount) * Math.PI * 2;
+    const frond = new THREE.Mesh(new THREE.PlaneGeometry(0.5 * scale, 2.6 * scale), frondMat);
+    frond.position.set(crownX + Math.cos(angle) * 0.9 * scale, crownY - 0.3 * scale, Math.sin(angle) * 0.9 * scale);
+    frond.rotation.y = -angle;
+    frond.rotation.x = -0.7; // droops outward/down from the crown
+    group.add(frond);
+  }
+  group.position.set(x, 0, z);
+  return group;
+}
+
 function createCrystalLandmark(colorHex) {
   const group = new THREE.Group();
-  const rockColor = 0xd8cdb0; // pale sun-bleached beach rock
+  // Rocks whitened toward the island's own actual sand tone (was
+  // 0xd8cdb0, a warm tan that read as brown/rust under sunset lighting)
+  // and shrunk (was 1.4-3.0 scale, now 0.9-1.8) so they read as a modest
+  // rock accent around the tidepool rather than dominating the whole
+  // clearing — this, not a distant mountain, was very likely what showed
+  // up repeatedly as "jagged brown angular shapes" in prior screenshots.
+  const rockColor = 0xf0e6d0;
   const rockMat = new THREE.MeshStandardMaterial({
     color: rockColor, roughness: 0.75, metalness: 0.02, flatShading: true,
   });
-  // A ring of large weathered boulders, leaving a gap in the middle for
-  // the tidepool.
-  const boulderCount = 6;
+  const boulderCount = 5;
   for (let i = 0; i < boulderCount; i++) {
-    const s = 1.4 + Math.random() * 1.6;
+    const s = 0.9 + Math.random() * 0.9;
     const boulder = new THREE.Mesh(new THREE.OctahedronGeometry(s, 0), rockMat);
     const angle = (i / boulderCount) * Math.PI * 2 + Math.random() * 0.3;
     const dist = 2.6 + Math.random() * 1.2;
@@ -830,6 +865,15 @@ function createCrystalLandmark(colorHex) {
   group.add(pool);
   const energy = createEnergyCore(0x3ce7ff, 0.9, 1.4); // small and low — a glow caught in the tidepool, not a towering beacon
   group.add(energy.group);
+  // A few real palm trees right in the landmark's own clearing — per
+  // explicit follow-up that this spot was reading as bare rock with no
+  // trees. The regular scattered decorations (decorations.js) already
+  // place palms elsewhere on the island, but nothing guaranteed any
+  // landed exactly HERE, at the landmark's own fixed position.
+  const palmSpots = [
+    { x: 4.2, z: -2.5, s: 1.1 }, { x: -3.8, z: 3.2, s: 0.95 }, { x: 1.5, z: 4.6, s: 1.0 },
+  ];
+  for (const p of palmSpots) group.add(createSimplePalm(p.x, p.z, p.s));
   return { group, energy, baseY: 0 };
 }
 

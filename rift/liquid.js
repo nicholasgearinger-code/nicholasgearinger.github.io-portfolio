@@ -578,8 +578,34 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
 
   const posAttr = geo.attributes.position;
   const colors = new Float32Array(posAttr.count * 3);
-  for (let i = 0; i < posAttr.count; i++) {
-    style.baseColor.toArray(colors, i * 3);
+  // Depth-based base color — Crystal only. Real oceans read lighter over
+  // a shallow reef/shoreline and darker over open deep water; a single
+  // flat baseColor everywhere (what every other biome's water still
+  // uses) can't capture that. Computed once here from the actual terrain
+  // height under each vertex (same sampleHeight technique the ember
+  // rocks above already use), stored on the handle so the per-frame wave
+  // update below blends wave disturbance on TOP of this instead of one
+  // uniform starting color.
+  let depthColors = null;
+  if (biome === "crystal" && sampleHeight) {
+    depthColors = new Float32Array(posAttr.count * 3);
+    const shallow = new THREE.Color(0x5fa8c4); // lighter, more turquoise — reef crests and the shoreline
+    const deep = style.baseColor; // the deep blue tuned in LIQUID_STYLE.crystal
+    const tmpDepth = new THREE.Color();
+    const MAX_DEPTH = 7; // beyond this the water reads as fully "deep" — matches the reef's own real depth range from terrain.js
+    for (let i = 0; i < posAttr.count; i++) {
+      const vx = posAttr.getX(i), vz = posAttr.getZ(i);
+      const groundY = sampleHeight(vx, vz);
+      const depth = groundY === null ? MAX_DEPTH : Math.max(0, y - groundY);
+      const t = Math.min(1, depth / MAX_DEPTH);
+      tmpDepth.copy(shallow).lerp(deep, t);
+      tmpDepth.toArray(depthColors, i * 3);
+      tmpDepth.toArray(colors, i * 3);
+    }
+  } else {
+    for (let i = 0; i < posAttr.count; i++) {
+      style.baseColor.toArray(colors, i * 3);
+    }
   }
   geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
 
@@ -683,7 +709,7 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
 
   const basePositions = new Float32Array(posAttr.array); // original Y per vertex, for the ripple to animate around
   return {
-    mesh, glow, shimmer, rocks, waterY: y, basePositions, biome, style,
+    mesh, glow, shimmer, rocks, waterY: y, basePositions, biome, style, depthColors,
     flowDir: normalizeFlow(flowDir), crustOctaves, crackOctaves, flowBeads,
   };
 }
@@ -703,6 +729,7 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos) {
   const swell2Amp = amp * 0.55; // a third, slower, larger-scale layer at a different angle — real water has multiple overlapping wave frequencies, not just one swell direction plus fine chop
   const flowSpeed = 0.12; // noise-space units/sec the crust/crack field drifts along flowDir
   const tmpColor = new THREE.Color();
+  const tmpDepthColor = new THREE.Color();
   // Water tints toward the current sky color each frame (recomputed fresh,
   // not stored — otherwise it'd drift further every frame instead of
   // tracking the actual sky) — real reflection needs a render-to-texture
@@ -788,7 +815,17 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos) {
     } else {
       const accent = style.frothColor;
       const frothPower = biome === "crystal" ? 1.9 : 3; // nudged lower (was 2.2) for more visible white crest banding per the deep-blue-with-white reference — the earlier "too much distortion" complaint was mainly the separate screen-space distortAmp, not this
-      tmpColor.copy(baseColor).lerp(accent, Math.pow(disturbance, frothPower));
+      let localBase = baseColor;
+      if (handle.depthColors) {
+        // Crystal's own per-vertex depth color (lighter over the reef/
+        // shoreline, deep blue over open water) — same sky-reflection
+        // blend the flat baseColor gets elsewhere, just applied per
+        // vertex here instead of once globally.
+        tmpDepthColor.fromArray(handle.depthColors, i * 3);
+        if (skyColor) tmpDepthColor.lerp(skyColor, 0.4);
+        localBase = tmpDepthColor;
+      }
+      tmpColor.copy(localBase).lerp(accent, Math.pow(disturbance, frothPower));
       posAttr.setY(i, ripple);
     }
     tmpColor.toArray(colorAttr.array, i * 3);
@@ -871,7 +908,96 @@ function disposeLiquidPlane(scene, handle) {
   }
 }
 
-export { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSpray, updateOceanSpray, disposeOceanSpray };
+export { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSpray, updateOceanSpray, disposeOceanSpray, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail };
+
+// Ocean surface detail — Coral Shallows only: sun glitter (small, sharp,
+// independently-flickering bright points) and whitecaps/foam texture
+// (real mottled foam-blob patches scattered across the water, not just
+// flat vertex color) covering the whole visible ocean. Real sun glitter
+// is thousands of tiny wave facets catching light at slightly different
+// angles at once — this project's single flat-shaded water plane can't
+// reproduce that exactly, so independently-twinkling bright points
+// scattered across the surface is the standard cheap approximation.
+// Whitecap density uses a sqrt-biased radius (even coverage per unit
+// area, not clustered at center) so the water reads as genuinely choppy
+// stretching out toward the edges rather than only near the middle.
+function createOceanSurfaceDetail(scene, y, size) {
+  // Sun glitter.
+  const glitterCount = 220;
+  const glitterPos = new Float32Array(glitterCount * 3);
+  const glitterColors = new Float32Array(glitterCount * 3);
+  const glitterSeeds = new Float32Array(glitterCount);
+  const glitterSpeeds = new Float32Array(glitterCount);
+  for (let i = 0; i < glitterCount; i++) {
+    glitterPos[i * 3] = (Math.random() * 2 - 1) * size * 0.48;
+    glitterPos[i * 3 + 1] = y + 0.08;
+    glitterPos[i * 3 + 2] = (Math.random() * 2 - 1) * size * 0.48;
+    glitterColors[i * 3] = glitterColors[i * 3 + 1] = glitterColors[i * 3 + 2] = 1; // updateOceanSurfaceDetail scales brightness via this each frame
+    glitterSeeds[i] = Math.random() * Math.PI * 2;
+    glitterSpeeds[i] = 1.2 + Math.random() * 2.2; // fast, sharp twinkle — real sun glitter flickers quickly, not a slow breathing pulse
+  }
+  const glitterGeo = new THREE.BufferGeometry();
+  glitterGeo.setAttribute("position", new THREE.BufferAttribute(glitterPos, 3));
+  glitterGeo.setAttribute("color", new THREE.BufferAttribute(glitterColors, 3));
+  const glitterMat = new THREE.PointsMaterial({
+    vertexColors: true, color: 0xfff8e0, size: 0.4, transparent: true, opacity: 0.9,
+    blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
+  });
+  const glitter = new THREE.Points(glitterGeo, glitterMat);
+  scene.add(glitter);
+
+  // Whitecaps / foam texture — real mottled patches (reusing the same
+  // soft-radial foam texture the waterfall already uses), scattered
+  // across the whole surface. Bigger/more opaque than the glitter points
+  // and using NormalBlending (not additive) so they read as solid white
+  // foam clumps rather than another glowing light source.
+  const whitecapCount = 150;
+  const whitecapPos = new Float32Array(whitecapCount * 3);
+  for (let i = 0; i < whitecapCount; i++) {
+    const r = Math.sqrt(Math.random()) * size * 0.48;
+    const angle = Math.random() * Math.PI * 2;
+    whitecapPos[i * 3] = Math.cos(angle) * r;
+    whitecapPos[i * 3 + 1] = y + 0.1;
+    whitecapPos[i * 3 + 2] = Math.sin(angle) * r;
+  }
+  const whitecapGeo = new THREE.BufferGeometry();
+  whitecapGeo.setAttribute("position", new THREE.BufferAttribute(whitecapPos, 3));
+  const whitecapMat = new THREE.PointsMaterial({
+    map: getFoamTexture(), color: 0xffffff, size: 2.8, transparent: true, opacity: 0.5,
+    depthWrite: false, sizeAttenuation: true,
+  });
+  const whitecaps = new THREE.Points(whitecapGeo, whitecapMat);
+  scene.add(whitecaps);
+
+  return { glitter, glitterSeeds, glitterSpeeds, glitterCount, whitecaps };
+}
+
+function updateOceanSurfaceDetail(handle, elapsed) {
+  if (!handle) return;
+  const colorAttr = handle.glitter.geometry.attributes.color;
+  for (let i = 0; i < handle.glitterCount; i++) {
+    // Cubed (not linear) sine — a sharper, narrower bright peak than a
+    // plain sine gives, closer to how a real specular glint pops on and
+    // fades rather than breathing smoothly in and out.
+    const s = 0.5 + 0.5 * Math.sin(elapsed * handle.glitterSpeeds[i] + handle.glitterSeeds[i]);
+    const flicker = Math.pow(s, 3);
+    colorAttr.setXYZ(i, flicker, flicker, flicker);
+  }
+  colorAttr.needsUpdate = true;
+  // Whitecaps breathe very slowly and subtly — real chop doesn't flicker,
+  // it just varies gradually in how much foam is visible at once.
+  handle.whitecaps.material.opacity = 0.42 + Math.sin(elapsed * 0.3) * 0.08;
+}
+
+function disposeOceanSurfaceDetail(scene, handle) {
+  if (!handle) return;
+  scene.remove(handle.glitter);
+  handle.glitter.geometry.dispose();
+  handle.glitter.material.dispose();
+  scene.remove(handle.whitecaps);
+  handle.whitecaps.geometry.dispose();
+  handle.whitecaps.material.dispose();
+}
 
 // Ocean spray — Coral Shallows only. Mist/foam kicked up where waves
 // break against the emergent island's shoreline, per explicit "ocean

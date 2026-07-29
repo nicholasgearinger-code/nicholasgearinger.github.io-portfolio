@@ -4,7 +4,7 @@ import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERF
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
 import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, updateLightShafts, disposeLightShafts, createRockCluster, createCaveMouth, applyVerticalGradient } from "./decorations.js";
-import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSpray, updateOceanSpray, disposeOceanSpray } from "./liquid.js";
+import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSpray, updateOceanSpray, disposeOceanSpray, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail } from "./liquid.js";
 import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
 import { createGrass, updateGrass, disposeGrass, createFlowers, updateFlowers, disposeFlowers, createFootstepGlowSystem, spawnFootstepGlow, updateFootstepGlowSystem, disposeFootstepGlowSystem, createCaustics, updateCaustics, disposeCaustics } from "./vegetation.js";
@@ -399,6 +399,7 @@ let terrainMesh = null;
 let liquidHandle = null;
 let waterfallHandle = null;
 let oceanSprayHandle = null;
+let oceanSurfaceDetailHandle = null;
 let riverCurrentHandle = null;
 let riverFlowStripHandle = null;
 let cliffWallHandle = null;
@@ -448,6 +449,8 @@ function teardownLevel() {
   waterfallHandle = null;
   disposeOceanSpray(scene, oceanSprayHandle);
   oceanSprayHandle = null;
+  disposeOceanSurfaceDetail(scene, oceanSurfaceDetailHandle);
+  oceanSurfaceDetailHandle = null;
   disposeRiverCurrent(scene, riverCurrentHandle);
   riverCurrentHandle = null;
   disposeRiverFlowStrip(scene, riverFlowStripHandle);
@@ -540,6 +543,7 @@ function buildLevel(levelIdx) {
 
   if (level.biome === "crystal") {
     oceanSprayHandle = createOceanSpray(scene, LIQUID_LEVEL.crystal);
+    oceanSurfaceDetailHandle = createOceanSurfaceDetail(scene, LIQUID_LEVEL.crystal, TERRAIN_SIZE);
   }
 
   if (level.biome === "verdant") {
@@ -859,7 +863,7 @@ function buildLevel(levelIdx) {
   footstepGlowHandle = level.biome === "verdant" ? createFootstepGlowSystem(scene, 40) : null;
   weatherHandle = createWeatherSystem(scene, level.biome);
   cloudsHandle = createClouds(scene, level.biome);
-  horizonHandle = createHorizonSilhouettes(scene, level.biome);
+  horizonHandle = level.biome === "crystal" ? null : createHorizonSilhouettes(scene, level.biome); // Coral Shallows is open ocean now — no distant mountain backdrop, and horizonSilhouettes.js still isn't part of this session so this stays a main.js-only fix rather than touching that file's still-old icy Crystal-Spire theming
   wildlifeHandle = createWildlife(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), LIQUID_LEVEL[level.biome]);
   landmarkHandle = createLandmark(scene, level.biome, level.color, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
 
@@ -1413,6 +1417,7 @@ function animate() {
   updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, camera.position);
   updateWaterfall(waterfallHandle, dt, elapsedTime);
   updateOceanSpray(oceanSprayHandle, dt, elapsedTime);
+  updateOceanSurfaceDetail(oceanSurfaceDetailHandle, elapsedTime);
   updateRiverCurrent(riverCurrentHandle, dt);
   updateRiverFlowStrip(riverFlowStripHandle, dt);
   updateSourcePond(sourcePondHandle, elapsedTime);
@@ -1474,7 +1479,7 @@ function animate() {
   updateLandmark(landmarkHandle, elapsedTime, dt);
   updateClouds(cloudsHandle, dt, wind, dayNight.dayAmount, wind.rainIntensity);
   setAmbientDayAmount(dayNight.dayAmount);
-  if (currentLevelIdx >= 0) updateHorizonSilhouettes(horizonHandle, LEVELS[currentLevelIdx].biome, dayNight.dayAmount);
+  if (currentLevelIdx >= 0 && horizonHandle) updateHorizonSilhouettes(horizonHandle, LEVELS[currentLevelIdx].biome, dayNight.dayAmount);
   updateLightShafts(lightShaftHandles, dayNight.dayAmount);
   updateWorldPulse(dt);
   updateProjectiles(dt);

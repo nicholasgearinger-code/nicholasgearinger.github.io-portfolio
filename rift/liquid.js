@@ -726,7 +726,7 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos) {
   const speed = biome === "ember" ? 0.6 : 1.4;
   const amp = biome === "ember" ? 0.18 : (biome === "crystal" ? 0.32 : 0.16); // crystal bumped further (was 0.2) per explicit "real 3D rolling waves" follow-up — needed genuinely visible geometric swell, not just a subtle ripple, to read as real ocean movement from above
   const chopAmp = amp * 0.35;
-  const swell2Amp = amp * 0.55; // a third, slower, larger-scale layer at a different angle — real water has multiple overlapping wave frequencies, not just one swell direction plus fine chop
+  const swell2Amp = amp * (biome === "crystal" ? 0.75 : 0.55); // crystal weighted higher toward this slower, larger-scale layer specifically (was the same 0.55 as every other biome) — a real rolling-ocean look comes more from big swells than fine chop, per explicit "improve the ocean waves further" follow-up
   const flowSpeed = 0.12; // noise-space units/sec the crust/crack field drifts along flowDir
   const tmpColor = new THREE.Color();
   const tmpDepthColor = new THREE.Color();

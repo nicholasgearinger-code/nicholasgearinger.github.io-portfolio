@@ -214,10 +214,12 @@ function buildBaseDecoration(biome, colorHex, seedRand, worldX, worldZ) {
       return createRockCluster(biome, colorHex, seedRand);
     case "crystal": {
       if (onIsland) {
-        // The island itself — palm trees and open white sand, per
-        // explicit "nearby tropical island with white sand and palm
-        // trees" follow-up. No coral/rock here; this is dry land.
-        if (roll < 0.3) return null;
+        // The island itself — palm trees, fallen coconuts, and open
+        // white sand. Density raised and coconuts added per explicit
+        // "add palm trees and coconuts to make it more like a tropical
+        // paradise" follow-up. No coral/rock here; this is dry land.
+        if (roll < 0.15) return null;
+        if (roll < 0.32) return createCoconut(seedRand);
         return createPalmTree(seedRand);
       }
       // Rebalanced per a new reference photo showing dense, colorful
@@ -1212,6 +1214,25 @@ function createPalmTree(rand) {
     group: spriteGroup, kind: "tree", bobAmplitude: 0.03, bobSeed: rand() * Math.PI * 2, // reuses the same sway/shimmer animation createLivingTree gets — the glow-breathing part of that animation is a harmless no-op here since the glow texture is solid black
     material: spriteGroup.children[0].material,
   };
+}
+
+// A small cluster of fallen coconuts resting on the sand — the island's
+// own ground clutter, distinct from the coconuts already painted into
+// each palm tree's own canopy texture (those only read from a distance
+// up in the crown; these are close-up detail on the beach itself).
+function createCoconut(rand) {
+  const group = new THREE.Group();
+  const coconutMat = new THREE.MeshStandardMaterial({ color: 0x4a3320, roughness: 0.85, flatShading: true });
+  const count = 1 + Math.floor(rand() * 3);
+  for (let i = 0; i < count; i++) {
+    const s = 0.22 + rand() * 0.1;
+    const coconut = new THREE.Mesh(new THREE.IcosahedronGeometry(s, 0), coconutMat);
+    const angle = rand() * Math.PI * 2, dist = rand() * 0.4;
+    coconut.position.set(Math.cos(angle) * dist, s * 0.7, Math.sin(angle) * dist);
+    coconut.rotation.set(rand() * Math.PI, rand() * Math.PI, rand() * Math.PI);
+    group.add(coconut);
+  }
+  return { group, kind: "rockCluster" }; // static prop, no animation needed — same inert kind rockCluster/geode already use
 }
 
 function createLivingTree(colorHex, rand) {

@@ -33,8 +33,7 @@ const CAST_HEIGHT = 400;     // fixed altitude to cast down from — comfortably
 // below all short-circuit on `swimming`, which is only ever true when a
 // real waterLevel was passed in.
 const SWIM_GRAVITY = 5;          // units/s^2 — a gentle sink, not a plummet; water should feel weighty but forgiving, not like falling
-const SWIM_UP_VELOCITY = 9;      // units/s — a swim stroke, gentler than a real jump's 13, and repeatable (not ground-gated) so tapping jump repeatedly is how you rise
-const SWIM_CEILING_BUFFER = 0.6; // stay this far below the real water surface — close enough to see it clearly from underneath, without ever poking through into open air above it
+const SWIM_UP_VELOCITY = 12;     // units/s — strong enough that a well-timed stroke near the surface actually breaches it with real height (v^2/(2*GRAVITY) once airborne, since normal gravity takes over the instant you cross above the surface), not just a gentle underwater rise
 
 const raycaster = new THREE.Raycaster();
 const DOWN = new THREE.Vector3(0, -1, 0);
@@ -112,18 +111,6 @@ function updatePlayerPhysics(camera, terrainMesh, state, dt, playerEyeHeight, ju
 
   state.verticalVelocity -= (swimming ? SWIM_GRAVITY : GRAVITY) * dt;
   camera.position.y += state.verticalVelocity * dt;
-
-  if (swimming) {
-    // A soft ceiling just under the real water surface — without this,
-    // repeated swim-up taps would carry the player straight through the
-    // surface into open air above the ocean, which breaks the whole
-    // "you're underwater" framing this biome depends on.
-    const ceiling = waterLevel - SWIM_CEILING_BUFFER;
-    if (camera.position.y > ceiling) {
-      camera.position.y = ceiling;
-      if (state.verticalVelocity > 0) state.verticalVelocity = 0;
-    }
-  }
 
   if (state.verticalVelocity <= 0) {
     const feetY = camera.position.y - playerEyeHeight;

@@ -873,4 +873,75 @@ function disposeLiquidPlane(scene, handle) {
   }
 }
 
-export { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond };
+export { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSpray, updateOceanSpray, disposeOceanSpray };
+
+// Ocean spray — Coral Shallows only. Mist/foam kicked up where waves
+// break against the emergent island's shoreline, per explicit "ocean
+// spray" follow-up. Reuses createWaterfall's exact same proven
+// arc-and-fall particle technique (position/velocity/life arrays,
+// staggered respawn so bursts don't pulse in unison) rather than
+// inventing a new one — several shoreline emitter points instead of one
+// waterfall base, and a gentler arc since this is ambient shore mist,
+// not a dramatic waterfall burst.
+const ISLAND_CENTER = { x: 55, z: -70 }; // must match terrain.js's own island center
+const SHORE_RADIUS = 17; // sits right around where the island's dome crosses LIQUID_LEVEL.crystal — see terrain.js's numeric verification of the crossing point
+function createOceanSpray(scene, waterLevel) {
+  const emitterCount = 10;
+  const emitters = [];
+  for (let i = 0; i < emitterCount; i++) {
+    const angle = (i / emitterCount) * Math.PI * 2 + Math.random() * 0.2;
+    emitters.push({ x: ISLAND_CENTER.x + Math.cos(angle) * SHORE_RADIUS, z: ISLAND_CENTER.z + Math.sin(angle) * SHORE_RADIUS });
+  }
+  const particlesPerEmitter = 5;
+  const count = emitterCount * particlesPerEmitter;
+  const positions = new Float32Array(count * 3);
+  const vel = new Float32Array(count * 3);
+  const life = new Float32Array(count);
+  const emitterIndex = new Uint8Array(count);
+  for (let i = 0; i < count; i++) {
+    life[i] = 1; // start "dead" — staggers the first spawn wave instead of firing all at once
+    emitterIndex[i] = Math.floor(i / particlesPerEmitter);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const mat = new THREE.PointsMaterial({
+    map: getFoamTexture(), color: 0xffffff, size: 0.5, transparent: true, opacity: 0.75,
+    blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
+  });
+  const points = new THREE.Points(geo, mat);
+  scene.add(points);
+  return { points, vel, life, emitterIndex, emitters, waterLevel };
+}
+
+function updateOceanSpray(handle, dt, elapsed) {
+  if (!handle) return;
+  const posAttr = handle.points.geometry.attributes.position;
+  for (let i = 0; i < handle.life.length; i++) {
+    handle.life[i] += dt * 0.5;
+    if (handle.life[i] >= 1) {
+      handle.life[i] = 0;
+      const em = handle.emitters[handle.emitterIndex[i]];
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 0.4 + Math.random() * 0.8; // gentler outward spread than the waterfall's dramatic burst
+      posAttr.setXYZ(i, em.x + (Math.random() - 0.5) * 3, handle.waterLevel + 0.1, em.z + (Math.random() - 0.5) * 3);
+      handle.vel[i * 3] = Math.cos(angle) * speed;
+      handle.vel[i * 3 + 1] = 1.5 + Math.random() * 1.5; // a modest mist hop, not a waterfall-height burst
+      handle.vel[i * 3 + 2] = Math.sin(angle) * speed;
+    } else {
+      const t = handle.life[i];
+      const gravity = 3.2;
+      posAttr.setX(i, posAttr.getX(i) + handle.vel[i * 3] * dt);
+      posAttr.setY(i, posAttr.getY(i) + (handle.vel[i * 3 + 1] - gravity * t) * dt);
+      posAttr.setZ(i, posAttr.getZ(i) + handle.vel[i * 3 + 2] * dt);
+    }
+  }
+  posAttr.needsUpdate = true;
+  handle.points.material.opacity = 0.65 + Math.sin(elapsed * 2.6) * 0.1; // gentle churn, matching the waterfall foam's own idle shimmer
+}
+
+function disposeOceanSpray(scene, handle) {
+  if (!handle) return;
+  scene.remove(handle.points);
+  handle.points.geometry.dispose();
+  handle.points.material.dispose();
+}

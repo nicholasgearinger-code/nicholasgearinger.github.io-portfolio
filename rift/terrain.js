@@ -69,7 +69,7 @@ function emberChannelCenterX(worldZ, seed) {
 // Tuned against each biome's own height range so it floods only the
 // carved channel/cracks it belongs to, not the surrounding hills — see
 // the per-biome comments in BIOME_SHAPERS below for why each value works.
-const LIQUID_LEVEL = { ember: -1.5, verdant: -1, crystal: 8 }; // crystal's shaper below peaks at seafloor(2.2)+ripple(0.3)+reefMound(3.96)=~6.46 in the worst case every noise stacks at once — 8 keeps a real safety margin above every reef mound while staying shallow enough for a bright, light-filled reef rather than a deep trench
+const LIQUID_LEVEL = { ember: -1.5, verdant: -1, crystal: 8 }; // crystal's underwater reef shaping peaks at seafloor(2.2)+ripple(0.3)+reefMound(3.96)=~6.46 in the worst case every noise stacks at once — 8 keeps a real safety margin above every reef mound while staying shallow enough for a bright, light-filled reef rather than a deep trench. The one deliberate exception is the emergent island (peak 11.5, guaranteed via Math.max) near the landmark position — that's SUPPOSED to clear this line; everywhere else on the map should stay well below it.
 
 function hashStringToSeed(str) {
   let h = 1779033703 ^ str.length;
@@ -250,11 +250,30 @@ const BIOME_SHAPERS = {
   // light can plausibly reach the floor for a "bright" reef rather than a
   // deep-sea trench.
   crystal(u, v, seed) {
+    const worldX = u * (TERRAIN_SIZE / 2), worldZ = v * (TERRAIN_SIZE / 2);
     const sandRipple = fbm2(u * 7, v * 7, seed, 2, 2.0, 0.5) * 0.3; // fine current-carved sand ripples
     const seafloor = fbm2(u * 1.4, v * 1.4, seed + 40, 4, 2.0, 0.45) * 2.2; // gentle rolling seafloor swells
     const reefNoise = fbm2(u * 2.4 + 200, v * 2.4 + 200, seed + 80, 3, 2.0, 0.5);
     const reefMound = reefNoise > 0.56 ? (reefNoise - 0.56) * 9 : 0; // broad rounded reef-buildup mounds, not spires
-    return seafloor + sandRipple + reefMound;
+
+    // A real emergent tropical island at the same coordinates landmarks.js
+    // places its landmark (55, -70) — Math.max against the reef shape
+    // below rather than adding to it, so the island's height is a
+    // structural guarantee independent of whatever the local reef noise
+    // happens to be, not a tuned constant hoping to clear the water line.
+    // Peak (11.5) sits comfortably above LIQUID_LEVEL.crystal (8) with
+    // real margin for actual dry beach, not just a few inches of sand
+    // poking through.
+    const islandDist = Math.hypot(worldX - 55, worldZ + 70);
+    const ISLAND_CORE = 14, ISLAND_BLEND = 26, ISLAND_PEAK = 11.5;
+    let islandBump = 0;
+    if (islandDist < ISLAND_BLEND) {
+      const t = islandDist < ISLAND_CORE ? 1 : 1 - (islandDist - ISLAND_CORE) / (ISLAND_BLEND - ISLAND_CORE);
+      const shaped = t * t * (3 - 2 * t); // smoothstep — a rounded dome, not a cone
+      islandBump = shaped * ISLAND_PEAK;
+    }
+
+    return Math.max(seafloor + sandRipple + reefMound, islandBump);
   },
   // Deep chasms cut through otherwise moderate terrain.
   abyssal(u, v, seed) {
@@ -617,7 +636,7 @@ function biomeHeight(biome, worldX, worldZ, seed) {
 const SURFACE_PATCH_STYLE = {
   ember: { color: 0x120806, threshold: 0.62, freq: 3.2 },   // scorched/ash-dark patches
   verdant: { color: 0x1e5a2e, threshold: 0.6, freq: 1.8 }, // darker green shadow-blob patches, not brown soil — matches the reference's flat-illustration ground with a few rounded darker-green patches rather than dirt
-  crystal: { color: 0xf5e9c8, threshold: 0.68, freq: 2.6 }, // pale sand-and-shell-rubble patches on the reef floor
+  crystal: { color: 0xf5e9c8, threshold: 0.38, freq: 2.2 }, // pale sand-and-shell-rubble — threshold lowered (was 0.68) so real open sand covers much more of the seafloor between coral, not just rare specks
   abyssal: { color: 0x050308, threshold: 0.6, freq: 2.5 },  // near-black void patches
   ashen: { color: 0xe8dfc8, threshold: 0.65, freq: 3.6 },   // sun-bleached, cracked-pale patches
   frost: { color: 0xaee0f5, threshold: 0.6, freq: 2.4 },    // pale ice-blue shadow patches — cold light through snow, not brown/grey rock texture
@@ -647,15 +666,18 @@ const SURFACE_PATCH_STYLE = {
 // -----------------------------------------------------------------------------
 const HEIGHT_PALETTE = {
   ember: [0x120a08, 0x3a1208, 0x7a2410, 0xc8471c, 0xef8a34, 0xffd9a0], // shadowed valley -> deep rock -> mid rock -> molten-adjacent rust -> warm highlight -> pale sunlit rim
-  // Sand troughs -> open sunlit sand -> coral-orange mound base -> vivid
-  // coral-pink crown -> bright cyan where the shallowest reef peaks catch
-  // the most light from the surface above. Bypasses level.color entirely
-  // (that per-biome base color lives in levels.js, not available in this
-  // session — see MISSING-FILE PATTERN in project notes) the same way
-  // Ember's own palette already does, so the reef reads with real bold
-  // tropical color regardless of whatever base tint the level config
-  // still carries.
-  crystal: [0x1f4a52, 0xe8cf9a, 0xff8a5c, 0xff5c8a, 0x7fe8ff],
+  // Shaded sand troughs -> open sunlit sand -> coral-orange mound base ->
+  // vivid coral-pink crown -> bright cyan where the shallowest reef peaks
+  // catch the most light from the surface above. The lowest band is now
+  // genuine (if shadowed) SAND rather than a teal tint — the seafloor
+  // itself should read as a sandy basin the coral grows up out of, per
+  // explicit "add sand to the bottom" follow-up. Bypasses level.color
+  // entirely (that per-biome base color lives in levels.js, not
+  // available in this session — see MISSING-FILE PATTERN in project
+  // notes) the same way Ember's own palette already does, so the reef
+  // reads with real bold tropical color regardless of whatever base
+  // tint the level config still carries.
+  crystal: [0x6b5a3a, 0xe8cf9a, 0xff8a5c, 0xff5c8a, 0x7fe8ff],
 };
 
 // Smooth multi-stop gradient across the palette — was a posterized,
@@ -689,6 +711,16 @@ function applyHeightShading(geo, colorHex, minY, maxY, biome, seed) {
     // rather than symmetric banks. Small gap between the channel's edge
     // and the path itself so they don't visually run together.
     const pathColor = biome === "ember" ? new THREE.Color(0xc99a5e) : null;
+    // Crystal's emergent island (terrain.js's Math.max-guaranteed dome
+    // near the landmark position) needs to read as actual beach, not
+    // whatever the reef palette says at that normalized height — the
+    // palette's own top band is bright cyan, which is right for a
+    // sunlit reef crest but wrong for dry sand. Blended in below by
+    // real world height crossing the water line, not by the palette t
+    // value, so this stays correct regardless of how the island's own
+    // peak height shifts the mesh's overall min/max.
+    const islandSand = biome === "crystal" ? new THREE.Color(0xf5efe0) : null;
+    const waterLine = biome === "crystal" ? LIQUID_LEVEL.crystal : undefined;
     for (let i = 0; i < posAttr.count; i++) {
       const t = (posAttr.getY(i) - minY) / range;
       const x = posAttr.getX(i), z = posAttr.getZ(i);
@@ -712,6 +744,11 @@ function applyHeightShading(geo, colorHex, minY, maxY, biome, seed) {
           const pathT = Math.max(0, 1 - Math.abs((offsetFromChannel - mid) / half));
           tmp.lerp(pathColor, pathT * 0.85);
         }
+      }
+      if (islandSand) {
+        const worldY = posAttr.getY(i);
+        const beachT = Math.min(1, Math.max(0, (worldY - (waterLine - 1.2)) / 1.8)); // soft 1.8-unit blend band straddling the water line
+        if (beachT > 0) tmp.lerp(islandSand, beachT);
       }
       colors[i * 3] = tmp.r; colors[i * 3 + 1] = tmp.g; colors[i * 3 + 2] = tmp.b;
     }

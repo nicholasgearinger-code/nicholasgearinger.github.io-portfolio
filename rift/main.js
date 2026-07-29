@@ -4,7 +4,7 @@ import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERF
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
 import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, updateLightShafts, disposeLightShafts, createRockCluster, createCaveMouth, applyVerticalGradient } from "./decorations.js";
-import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond } from "./liquid.js";
+import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSpray, updateOceanSpray, disposeOceanSpray } from "./liquid.js";
 import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
 import { createGrass, updateGrass, disposeGrass, createFlowers, updateFlowers, disposeFlowers, createFootstepGlowSystem, spawnFootstepGlow, updateFootstepGlowSystem, disposeFootstepGlowSystem, createCaustics, updateCaustics, disposeCaustics } from "./vegetation.js";
@@ -398,6 +398,7 @@ function updateMovement(dt, grounded) {
 let terrainMesh = null;
 let liquidHandle = null;
 let waterfallHandle = null;
+let oceanSprayHandle = null;
 let riverCurrentHandle = null;
 let riverFlowStripHandle = null;
 let cliffWallHandle = null;
@@ -445,6 +446,8 @@ function teardownLevel() {
   liquidHandle = null;
   disposeWaterfall(scene, waterfallHandle);
   waterfallHandle = null;
+  disposeOceanSpray(scene, oceanSprayHandle);
+  oceanSprayHandle = null;
   disposeRiverCurrent(scene, riverCurrentHandle);
   riverCurrentHandle = null;
   disposeRiverFlowStrip(scene, riverFlowStripHandle);
@@ -533,6 +536,10 @@ function buildLevel(levelIdx) {
 
   if (LIQUID_LEVEL[level.biome] !== undefined) {
     liquidHandle = createLiquidPlane(scene, level.biome, LIQUID_LEVEL[level.biome], TERRAIN_SIZE, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
+  }
+
+  if (level.biome === "crystal") {
+    oceanSprayHandle = createOceanSpray(scene, LIQUID_LEVEL.crystal);
   }
 
   if (level.biome === "verdant") {
@@ -882,7 +889,7 @@ function buildLevel(levelIdx) {
 
   layout.decorationSeeds.forEach((seed) => {
     const groundY = sampleGroundHeight(seed.x, seed.z, terrainMesh) ?? 0;
-    const handle = createDecoration(level.biome, level.color, seed.rand);
+    const handle = createDecoration(level.biome, level.color, seed.rand, seed.x, seed.z);
     if (!handle) return; // this seed rolled "nothing" — currently only Crystal's open-sand rolls do this
     handle.group.position.set(seed.x, groundY, seed.z);
     handle.group.rotation.y = seed.rand() * Math.PI * 2;
@@ -1405,6 +1412,7 @@ function animate() {
   }
   updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, camera.position);
   updateWaterfall(waterfallHandle, dt, elapsedTime);
+  updateOceanSpray(oceanSprayHandle, dt, elapsedTime);
   updateRiverCurrent(riverCurrentHandle, dt);
   updateRiverFlowStrip(riverFlowStripHandle, dt);
   updateSourcePond(sourcePondHandle, elapsedTime);

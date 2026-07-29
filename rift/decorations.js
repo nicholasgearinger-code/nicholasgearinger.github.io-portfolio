@@ -154,7 +154,7 @@ function createTreeSprite(tex, glowTex, width, height, rand) {
   return group;
 }
 
-function createDecoration(biome, colorHex, seedRand) {
+function createDecoration(biome, colorHex, seedRand, worldX, worldZ) {
   // Rare oversized "foreground framing" variant — rolled BEFORE anything
   // else below so it doesn't skew the existing per-biome prop-mix odds.
   // Every decoration currently sits at roughly the same on-screen scale
@@ -164,25 +164,32 @@ function createDecoration(biome, colorHex, seedRand) {
   // depth cue that costs nothing extra to build (same geometry, just
   // scaled up on the group).
   const isGiant = seedRand() < 0.035;
-  const handle = buildBaseDecoration(biome, colorHex, seedRand);
+  const handle = buildBaseDecoration(biome, colorHex, seedRand, worldX, worldZ);
   if (handle && isGiant) {
     handle.group.scale.setScalar(2.4 + seedRand() * 1.4);
   }
   return handle;
 }
 
-function buildBaseDecoration(biome, colorHex, seedRand) {
+function buildBaseDecoration(biome, colorHex, seedRand, worldX, worldZ) {
   const roll = seedRand();
   const highDetail = getGraphicsSettings().decorationDetail >= 2;
+  // Coral Shallows' emergent island (see terrain.js's Math.max-guaranteed
+  // dome near the landmark position) needs entirely different dressing
+  // from the surrounding reef — palm trees and open sand, not coral/rock/
+  // clams, which would make no sense sitting on dry land. worldX/worldZ
+  // are only ever passed for crystal's own seeds (see main.js's call
+  // site), so this is a no-op for every other biome.
+  const onIsland = biome === "crystal" && worldX !== undefined && worldZ !== undefined && Math.hypot(worldX - 55, worldZ + 70) < 13;
   // High-tier-exclusive signature piece per biome — not just "more
   // polygons of the same prop," a genuinely different shape that only
   // High actually renders. Rolled first so it doesn't skew the existing
   // biome's usual prop-mix odds when High isn't active.
-  if (highDetail && seedRand() < 0.22) {
+  if (highDetail && !onIsland && seedRand() < 0.22) {
     switch (biome) {
       case "ember": return createObsidianFormation(colorHex, seedRand);
       case "verdant": return createBloomingVine(colorHex, seedRand);
-      case "crystal": return createGeode(colorHex, seedRand);
+      case "crystal": return createGeode(colorHex, seedRand); // a clam/anemone geode — reef floor only, skipped entirely on the island above
       case "abyssal": return createStalagmite(colorHex, seedRand);
       case "ashen": return createFossilRemains(colorHex, seedRand);
     }
@@ -206,6 +213,13 @@ function buildBaseDecoration(biome, colorHex, seedRand) {
       if (roll < 0.97) return createFallenLog(colorHex, seedRand); // moss-covered logs/stumps — ground-floor variety and an "aged forest" signal
       return createRockCluster(biome, colorHex, seedRand);
     case "crystal": {
+      if (onIsland) {
+        // The island itself — palm trees and open white sand, per
+        // explicit "nearby tropical island with white sand and palm
+        // trees" follow-up. No coral/rock here; this is dry land.
+        if (roll < 0.3) return null;
+        return createPalmTree(seedRand);
+      }
       // Rebalanced per a new reference photo showing dense, colorful
       // coral walls and explicit "now we can add coral" follow-up — a
       // real reversal from the prior round's near-total open sand.
@@ -1079,6 +1093,125 @@ function getTreeGlowTexture(archetype, rand) {
     treeGlowTextureCache.set(archetype, variants);
   }
   return variants[Math.floor(rand() * variants.length)];
+}
+
+// A palm tree — Coral Shallows' emergent island only. Genuinely distinct
+// silhouette from Verdant's conifer family: a slender LEANING trunk
+// (conifers stand straight) tapering to a crown of long drooping fronds
+// radiating outward (conifers have a solid conical/columnar canopy, not
+// separate blade shapes). Reuses createTreeSprite's proven jittered
+// crossed-plane technique above, paired with a solid-black glow texture
+// — palm trees don't need Verdant's bioluminescent glow-branch treatment,
+// this is a bright sunlit beach.
+let sharedPalmBlackTexture = null;
+function getPalmBlackTexture() {
+  if (sharedPalmBlackTexture) return sharedPalmBlackTexture;
+  const canvas = document.createElement("canvas");
+  canvas.width = 2; canvas.height = 2;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#000000";
+  ctx.fillRect(0, 0, 2, 2);
+  sharedPalmBlackTexture = new THREE.CanvasTexture(canvas);
+  return sharedPalmBlackTexture;
+}
+
+function createPalmTexture(variantSeed, frondColorHex) {
+  const w = 260, h = 420;
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d");
+
+  // Trunk — a real lean (direction/amount varies per variant), tapering
+  // from base to crown, with a few dark bark rings.
+  const leanX = w * 0.16 * Math.sin(variantSeed * 6.2);
+  const baseX = w * 0.5, baseY = h * 0.98;
+  const topX = baseX + leanX, topY = h * 0.42;
+  const bottomW = w * 0.07, topW = w * 0.03;
+  ctx.fillStyle = "#8a6a4a";
+  ctx.beginPath();
+  ctx.moveTo(baseX - bottomW, baseY);
+  ctx.quadraticCurveTo(baseX - bottomW * 0.5 + leanX * 0.5, h * 0.65, topX - topW, topY);
+  ctx.lineTo(topX + topW, topY);
+  ctx.quadraticCurveTo(baseX + bottomW * 0.5 + leanX * 0.5, h * 0.65, baseX + bottomW, baseY);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = "rgba(0,0,0,0.25)";
+  ctx.lineWidth = 2;
+  for (let i = 1; i < 7; i++) {
+    const ty = baseY - (baseY - topY) * (i / 7);
+    const tx = baseX + leanX * (i / 7);
+    const tw = bottomW + (topW - bottomW) * (i / 7);
+    ctx.beginPath();
+    ctx.moveTo(tx - tw, ty);
+    ctx.lineTo(tx + tw, ty);
+    ctx.stroke();
+  }
+
+  // Crown — long drooping fronds radiating from the top of the trunk,
+  // each a tapered leaf shape (not a straight line) with a gradient from
+  // a darker base to the fully-lit tip color.
+  const frondCount = 7;
+  for (let i = 0; i < frondCount; i++) {
+    const angle = (i / frondCount) * Math.PI * 2 + variantSeed * 3;
+    const droop = 0.35 + 0.25 * Math.abs(Math.sin(angle * 1.7 + variantSeed));
+    const length = w * (0.42 + 0.1 * Math.sin(angle * 2.3));
+    const dirX = Math.cos(angle), dirY = -Math.abs(Math.sin(angle)) * 0.3 - 0.55; // fans outward/up from the crown
+    const endX = topX + dirX * length, endY = topY + dirY * length + length * droop; // droop pulls the tip back down
+    const midX = topX + dirX * length * 0.55, midY = topY + dirY * length * 0.55 - length * 0.12;
+    const grad = ctx.createLinearGradient(topX, topY, endX, endY);
+    grad.addColorStop(0, "#2f7a38");
+    grad.addColorStop(1, frondColorHex);
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(topX, topY);
+    ctx.quadraticCurveTo(midX - dirY * 8, midY + dirX * 8, endX, endY);
+    ctx.quadraticCurveTo(midX + dirY * 8, midY - dirX * 8, topX, topY);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // A few coconuts clustered under the crown.
+  ctx.fillStyle = "#4a3320";
+  for (let i = 0; i < 3; i++) {
+    const a = variantSeed * 5 + i * 2.1;
+    const cx = topX + Math.cos(a) * w * 0.05, cy = topY + h * 0.03 + Math.sin(a) * h * 0.02;
+    ctx.beginPath();
+    ctx.arc(cx, cy, w * 0.02, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+const PALM_TEXTURE_VARIANTS = 3;
+const palmTextureCache = new Map();
+function getPalmTexture(rand) {
+  const frondColors = [0x3fae4a, 0x4fc25a, 0x2f9a3e];
+  const frondColor = frondColors[Math.floor(rand() * frondColors.length)];
+  let variants = palmTextureCache.get(frondColor);
+  if (!variants) {
+    variants = [];
+    const frondHex = `#${frondColor.toString(16).padStart(6, "0")}`;
+    for (let i = 0; i < PALM_TEXTURE_VARIANTS; i++) {
+      variants.push(createPalmTexture((i + 1) / (PALM_TEXTURE_VARIANTS + 1), frondHex));
+    }
+    palmTextureCache.set(frondColor, variants);
+  }
+  return variants[Math.floor(rand() * variants.length)];
+}
+
+function createPalmTree(rand) {
+  const tex = getPalmTexture(rand);
+  const glowTex = getPalmBlackTexture();
+  const height = 6 + rand() * 3.5;
+  const width = height * (260 / 420); // matches createPalmTexture's own canvas aspect ratio
+  const spriteGroup = createTreeSprite(tex, glowTex, width, height, rand);
+  return {
+    group: spriteGroup, kind: "tree", bobAmplitude: 0.03, bobSeed: rand() * Math.PI * 2, // reuses the same sway/shimmer animation createLivingTree gets — the glow-breathing part of that animation is a harmless no-op here since the glow texture is solid black
+    material: spriteGroup.children[0].material,
+  };
 }
 
 function createLivingTree(colorHex, rand) {

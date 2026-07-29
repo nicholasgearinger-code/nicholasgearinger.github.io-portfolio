@@ -791,40 +791,44 @@ function createVerdantLandmark(colorHex) {
   return { group, energy, baseY: 0 };
 }
 
-// Crystal (now the reef): a colossal coral pinnacle towering up from the
-// seafloor toward the surface, dwarfing the regular coral clusters —
-// same faceted, angular-shard construction the old crystal spire used
-// (still reads well as coral bommie growth rather than a smooth organic
-// shape), now built from a coordinated tropical coral palette instead of
-// one uniform violet crystalline tint.
-const LANDMARK_CORAL_PALETTE = [0xff6f9e, 0xff9d42, 0x3ce7ff, 0xffe066];
+// Crystal (Coral Shallows): the emergent island's own landmark — now
+// sits on real dry sand (terrain.js's Math.max-guaranteed island dome at
+// this same position), so the old towering coral pinnacle no longer made
+// sense here at all (coral doesn't grow on a beach). Reworked into a
+// cluster of weathered pale sea-rock boulders around a small glowing
+// tidepool — same proven faceted-shard construction the coral pinnacle
+// used, just recolored/rescaled/regrounded, and noticeably shorter now
+// since the island's own height (a real terrain feature, not just this
+// one prop) already reads as the tall landmark from a distance.
 function createCrystalLandmark(colorHex) {
   const group = new THREE.Group();
-  const spireColor = 0xff6f9e; // dominant coral-pink for the main pinnacle body
-  const mainMat = new THREE.MeshStandardMaterial({
-    color: spireColor, emissive: spireColor, emissiveIntensity: 0.4, roughness: 0.35, metalness: 0.05, transparent: true, opacity: 0.95,
+  const rockColor = 0xd8cdb0; // pale sun-bleached beach rock
+  const rockMat = new THREE.MeshStandardMaterial({
+    color: rockColor, roughness: 0.75, metalness: 0.02, flatShading: true,
   });
-  const spire = new THREE.Mesh(new THREE.OctahedronGeometry(3.5, 0), mainMat);
-  spire.scale.set(1, 3.2, 1);
-  spire.position.y = 11;
-  group.add(spire);
-  // Smaller coral outcrops clustered at the base, same pattern as the
-  // regular coral cluster but scaled up and denser, each in its own
-  // palette color so the base reads as several coral colonies rather
-  // than one repeated shape.
-  for (let i = 0; i < 6; i++) {
-    const s = 1.2 + Math.random() * 1.5;
-    const coral = LANDMARK_CORAL_PALETTE[i % LANDMARK_CORAL_PALETTE.length];
-    const outcropMat = new THREE.MeshStandardMaterial({
-      color: coral, emissive: coral, emissiveIntensity: 0.35, roughness: 0.35, metalness: 0.05, transparent: true, opacity: 0.95,
-    });
-    const shard = new THREE.Mesh(new THREE.OctahedronGeometry(s, 0), outcropMat);
-    const angle = (i / 6) * Math.PI * 2;
-    shard.position.set(Math.cos(angle) * 2.2, s * 0.8, Math.sin(angle) * 2.2);
-    shard.rotation.set(Math.random(), Math.random() * Math.PI, Math.random());
-    group.add(shard);
+  // A ring of large weathered boulders, leaving a gap in the middle for
+  // the tidepool.
+  const boulderCount = 6;
+  for (let i = 0; i < boulderCount; i++) {
+    const s = 1.4 + Math.random() * 1.6;
+    const boulder = new THREE.Mesh(new THREE.OctahedronGeometry(s, 0), rockMat);
+    const angle = (i / boulderCount) * Math.PI * 2 + Math.random() * 0.3;
+    const dist = 2.6 + Math.random() * 1.2;
+    boulder.position.set(Math.cos(angle) * dist, s * 0.55, Math.sin(angle) * dist);
+    boulder.rotation.set(Math.random(), Math.random() * Math.PI, Math.random());
+    group.add(boulder);
   }
-  const energy = createEnergyCore(0x3ce7ff, 1.6, 11); // bioluminescent cyan pulse at the pinnacle's core, reads as reef life-glow rather than a resonance crystal
+  // A small shallow tidepool at the center, with the required energy
+  // core reframed as a soft glow rising from the water rather than a
+  // resonance crystal — reads as something faintly magical caught in
+  // the pool, not a light source that would look out of place on sand.
+  const poolMat = new THREE.MeshStandardMaterial({
+    color: 0x6fdfe6, emissive: 0x6fdfe6, emissiveIntensity: 0.3, roughness: 0.1, transparent: true, opacity: 0.75,
+  });
+  const pool = new THREE.Mesh(new THREE.CylinderGeometry(2.1, 2.1, 0.3, 16), poolMat);
+  pool.position.y = 0.15;
+  group.add(pool);
+  const energy = createEnergyCore(0x3ce7ff, 0.9, 1.4); // small and low — a glow caught in the tidepool, not a towering beacon
   group.add(energy.group);
   return { group, energy, baseY: 0 };
 }

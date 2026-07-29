@@ -25,6 +25,17 @@ const MAX_CLIMB_RATE = 26;   // units/s the player can follow a rising slope —
 const MAX_DESCEND_RATE = 40; // a bit more forgiving going downhill than climbing
 const CAST_HEIGHT = 400;     // fixed altitude to cast down from — comfortably above any terrain height, avoids needing to tune a "how far above the player" margin
 
+// Swimming — passed in per-call as an optional `waterLevel`, only non-null
+// for Coral Shallows (the one biome that's a real whole-level ocean, not
+// just a small liquid feature like Ember's lava channel or Verdant's
+// river). When `waterLevel` is omitted this entire feature is inert and
+// every line below behaves exactly as it always did — the swim branches
+// below all short-circuit on `swimming`, which is only ever true when a
+// real waterLevel was passed in.
+const SWIM_GRAVITY = 5;          // units/s^2 — a gentle sink, not a plummet; water should feel weighty but forgiving, not like falling
+const SWIM_UP_VELOCITY = 9;      // units/s — a swim stroke, gentler than a real jump's 13, and repeatable (not ground-gated) so tapping jump repeatedly is how you rise
+const SWIM_CEILING_BUFFER = 0.6; // stay this far below the real water surface — close enough to see it clearly from underneath, without ever poking through into open air above it
+
 const raycaster = new THREE.Raycaster();
 const DOWN = new THREE.Vector3(0, -1, 0);
 
@@ -75,10 +86,13 @@ function sampleGroundHeight(x, z, terrainMesh, extraMeshes, preferredY) {
  * @param {number} playerEyeHeight  camera.position.y is eye height; feet are this far below
  * @param {boolean} jumpRequested  true only on the frame the jump key was first pressed (edge-triggered by the caller)
  * @param {THREE.Mesh[]} [extraMeshes]  optional additional collidable geometry (e.g. a separate underground cave floor) that participates in the SAME ground raycast as the main terrain — see sampleGroundHeight's own comment for why disambiguating multiple hits matters here
+ * @param {number} [waterLevel]  the Y height of a real, whole-level ocean surface (Coral Shallows' LIQUID_LEVEL.crystal) — omit for every other biome. When provided and the player's eye height is below it, swim mode activates: see the SWIM_* constants above.
  */
-function updatePlayerPhysics(camera, terrainMesh, state, dt, playerEyeHeight, jumpRequested, extraMeshes) {
-  if (jumpRequested && state.grounded) {
-    state.verticalVelocity = JUMP_VELOCITY;
+function updatePlayerPhysics(camera, terrainMesh, state, dt, playerEyeHeight, jumpRequested, extraMeshes, waterLevel) {
+  const swimming = waterLevel !== undefined && waterLevel !== null && camera.position.y < waterLevel;
+
+  if (jumpRequested && (state.grounded || swimming)) {
+    state.verticalVelocity = swimming ? SWIM_UP_VELOCITY : JUMP_VELOCITY;
     state.grounded = false;
   }
 
@@ -96,8 +110,20 @@ function updatePlayerPhysics(camera, terrainMesh, state, dt, playerEyeHeight, ju
     state.grounded = false; // walked off the edge — start falling
   }
 
-  state.verticalVelocity -= GRAVITY * dt;
+  state.verticalVelocity -= (swimming ? SWIM_GRAVITY : GRAVITY) * dt;
   camera.position.y += state.verticalVelocity * dt;
+
+  if (swimming) {
+    // A soft ceiling just under the real water surface — without this,
+    // repeated swim-up taps would carry the player straight through the
+    // surface into open air above the ocean, which breaks the whole
+    // "you're underwater" framing this biome depends on.
+    const ceiling = waterLevel - SWIM_CEILING_BUFFER;
+    if (camera.position.y > ceiling) {
+      camera.position.y = ceiling;
+      if (state.verticalVelocity > 0) state.verticalVelocity = 0;
+    }
+  }
 
   if (state.verticalVelocity <= 0) {
     const feetY = camera.position.y - playerEyeHeight;

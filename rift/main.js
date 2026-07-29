@@ -1367,7 +1367,13 @@ function animate() {
 
   if (isGameActive() && currentLevelIdx >= 0) {
     updateMovement(dt, playerPhysics.grounded);
-    updatePlayerPhysics(camera, terrainMesh, playerPhysics, dt, PLAYER_EYE_HEIGHT, jumpQueued, caveFloorMeshes.length ? caveFloorMeshes : undefined);
+    // Only Coral Shallows is a real whole-level ocean — Ember's/Verdant's
+    // own LIQUID_LEVEL entries are small local features (a lava channel,
+    // a river), not something the whole level is submerged in, so swim
+    // mode stays scoped to the one biome it actually describes rather
+    // than triggering for every biome that happens to have ANY liquid.
+    const swimLevel = LEVELS[currentLevelIdx].biome === "crystal" ? LIQUID_LEVEL[LEVELS[currentLevelIdx].biome] : undefined;
+    updatePlayerPhysics(camera, terrainMesh, playerPhysics, dt, PLAYER_EYE_HEIGHT, jumpQueued, caveFloorMeshes.length ? caveFloorMeshes : undefined, swimLevel);
     jumpQueued = false;
     if (camera.position.y < spawnPosition.y - FALL_RESPAWN_OFFSET) respawnInLevel();
     checkLoreProximity();

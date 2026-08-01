@@ -37,7 +37,7 @@ const LIQUID_STYLE = {
   // lines along each wave crest against the deep blue body.
   crystal: {
     baseColor: new THREE.Color(0x214d75), frothColor: new THREE.Color(0xffffff),
-    emissive: 0x2a5578, emissiveIntensity: 0.015, opacity: 0.88, roughness: 0.12,
+    emissive: 0x2a5578, emissiveIntensity: 0.015, opacity: 0.88, roughness: 0.05,
   },
 };
 
@@ -61,10 +61,10 @@ const LIQUID_STYLE = {
 // (bigger/slower swells carry more amplitude, small wavelets are fast and
 // shallow) without needing to actually simulate the physics.
 const GERSTNER_WAVES_RAW = [
-  { dirX: 1.0, dirZ: 0.3, wavelength: 40, amplitude: 0.42, speed: 1.1, steepness: 0.5 },  // the big rolling swell
-  { dirX: 0.3, dirZ: 1.0, wavelength: 24, amplitude: 0.24, speed: 1.55, steepness: 0.45 }, // a second swell crossing at an angle
-  { dirX: -0.7, dirZ: 0.5, wavelength: 13, amplitude: 0.13, speed: 2.15, steepness: 0.35 }, // finer chop
-  { dirX: 0.6, dirZ: -0.65, wavelength: 7, amplitude: 0.06, speed: 2.9, steepness: 0.3 },   // fine surface texture
+  { dirX: 1.0, dirZ: 0.3, wavelength: 40, amplitude: 0.42, speed: 1.75, steepness: 0.5 },  // the big rolling swell
+  { dirX: 0.3, dirZ: 1.0, wavelength: 24, amplitude: 0.24, speed: 2.5, steepness: 0.45 }, // a second swell crossing at an angle
+  { dirX: -0.7, dirZ: 0.5, wavelength: 13, amplitude: 0.13, speed: 3.4, steepness: 0.35 }, // finer chop
+  { dirX: 0.6, dirZ: -0.65, wavelength: 7, amplitude: 0.06, speed: 4.6, steepness: 0.3 },   // fine surface texture
 ];
 const GERSTNER_WAVES = GERSTNER_WAVES_RAW.map((w) => {
   const len = Math.hypot(w.dirX, w.dirZ) || 1;
@@ -640,7 +640,7 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
   }
   geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
 
-  const mat = new THREE.MeshStandardMaterial({
+  const matOptions = {
     vertexColors: true, emissive: style.emissive, emissiveIntensity: style.emissiveIntensity,
     transparent: true, opacity: style.opacity, roughness: style.roughness, metalness: 0.1,
     // Crystal is the one biome where the whole landmass sits below the
@@ -649,7 +649,17 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
     // up) plane would be invisible from below entirely. Every other
     // biome's water is only ever seen from above, so left untouched.
     side: biome === "crystal" ? THREE.DoubleSide : THREE.FrontSide,
-  });
+  };
+  // MeshPhysicalMaterial (MeshStandardMaterial plus a real clearcoat
+  // layer) for the ocean specifically — a water surface's specular
+  // highlight really is a thin, near-flat reflective film sitting on top
+  // of the bulk-colored water beneath it, which clearcoat models
+  // properly instead of just faking it by cranking the base material's
+  // own roughness down. Ember's lava and Verdant's river keep plain
+  // MeshStandardMaterial, unchanged.
+  const mat = biome === "crystal"
+    ? new THREE.MeshPhysicalMaterial({ ...matOptions, clearcoat: 1.0, clearcoatRoughness: 0.06 })
+    : new THREE.MeshStandardMaterial(matOptions);
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.y = y;
   scene.add(mesh);
@@ -748,9 +758,23 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
 
 function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir) {
   if (!handle) return;
-  const { mesh, glow, shimmer, rocks, basePositions, biome, style, flowDir, crustOctaves, crackOctaves, flowBeads } = handle;
+  const { mesh, glow, shimmer, rocks, basePositions, biome, style, flowDir, crustOctaves, crackOctaves, flowBeads, waterY } = handle;
   const posAttr = mesh.geometry.attributes.position;
   const colorAttr = mesh.geometry.attributes.color;
+  // Crystal writes real analytic Gerstner normals straight into this
+  // attribute each frame (see the per-vertex loop below) instead of
+  // calling geometry.computeVertexNormals() afterward — the analytic
+  // formula is exact for the current frame's exact displacement, where
+  // computeVertexNormals() would only be geometrically approximate and
+  // (since it'd run after this loop) a frame behind. Every other biome
+  // still gets the normal geometric method, called at the end of this
+  // function as before.
+  const normalAttr = mesh.geometry.attributes.normal;
+  // Sun direction is passed as sun.position (a world position far from
+  // the scene, not a literal direction) — normalizing it directly is a
+  // fine approximation of "direction toward the sun" at this distance,
+  // the same approximation the old mirror-water reflection used.
+  const sunDirUnit = (biome === "crystal" && sunDir) ? sunDir.clone().normalize() : null;
   // Cheap per-vertex ripple for ember/verdant — lava churns slower/
   // heavier, water ripples lighter and faster. A second, higher-
   // frequency/lower-amplitude term layered on top of the main swell adds
@@ -764,6 +788,17 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
   const flowSpeed = 0.12; // noise-space units/sec the crust/crack field drifts along flowDir
   const tmpColor = new THREE.Color();
   const tmpDepthColor = new THREE.Color();
+  // Subsurface-scattering crest tint and Fresnel grazing-angle rim —
+  // Crystal only. Real water isn't opaque: light entering a wave crest
+  // scatters inside it and exits toward the viewer tinted by the water
+  // itself, brightest right where the crest faces the sun — a bright
+  // aqua-green rather than the deep-water base blue. Fresnel is the
+  // separate, purely geometric effect of any surface reflecting more of
+  // its environment at a grazing viewing angle than head-on; blended
+  // toward a pale sky tint here since there's no environment map to
+  // literally reflect.
+  const sssColor = new THREE.Color(0x39e6b5);
+  const fresnelColor = new THREE.Color(0xe8f6ff);
   // Water tints toward the current sky color each frame (recomputed fresh,
   // not stored — otherwise it'd drift further every frame instead of
   // tracking the actual sky) — real reflection needs a render-to-texture
@@ -776,22 +811,35 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
     : style.baseColor;
   for (let i = 0; i < posAttr.count; i++) {
     const bx = basePositions[i * 3], bz = basePositions[i * 3 + 2];
-    let ripple, range, gerstnerX = bx, gerstnerZ = bz;
+    let ripple, range, gerstnerX = bx, gerstnerZ = bz, nx = 0, ny = 1, nz = 0;
     if (biome === "crystal") {
       // Real Gerstner (trochoidal) displacement — each wave component
       // pulls the vertex horizontally toward the crest as well as
       // pushing it up, which is what makes real ocean waves look peaked
       // rather than a symmetric sine bump. Summed across several
       // directional components (see GERSTNER_WAVES above the function)
-      // for a genuine rolling-swell-plus-chop ocean surface.
-      let dx = 0, dz = 0, dy = 0;
+      // for a genuine rolling-swell-plus-chop ocean surface. The normal
+      // (nx, ny, nz) is accumulated analytically alongside the
+      // displacement using the standard closed-form Gerstner normal
+      // formula, rather than derived after the fact from triangle
+      // geometry — exact for this frame's precise wave shape, and what
+      // feeds the material's real specular highlights and the Fresnel/
+      // SSS terms below.
+      let dx = 0, dz = 0, dy = 0, nyTerm = 0;
       for (const w of GERSTNER_WAVES) {
         const f = w.k * (w.ndx * bx + w.ndz * bz) - w.speed * elapsed;
         const s = Math.sin(f), c = Math.cos(f);
         dx += w.steepness * w.amplitude * w.ndx * c;
         dz += w.steepness * w.amplitude * w.ndz * c;
         dy += w.amplitude * s;
+        const WA = w.k * w.amplitude;
+        nx -= w.ndx * WA * c;
+        nz -= w.ndz * WA * c;
+        nyTerm += w.steepness * WA * s;
       }
+      ny = 1 - nyTerm;
+      const nLen = Math.hypot(nx, ny, nz) || 1;
+      nx /= nLen; ny /= nLen; nz /= nLen;
       gerstnerX = bx + dx;
       gerstnerZ = bz + dz;
       ripple = dy;
@@ -886,7 +934,33 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
       }
       tmpColor.copy(localBase).lerp(accent, Math.pow(disturbance, frothPower));
       if (biome === "crystal") {
+        // Subsurface scattering — brightest where a wave crest faces the
+        // sun (positive normal·sunDir) and only near an actual crest
+        // (disturbance close to 1, squared to keep it from washing out
+        // the troughs too). Real light passing through thin water at a
+        // crest exits tinted aqua-green rather than the deep base blue.
+        if (sunDirUnit) {
+          const nDotL = Math.max(0, nx * sunDirUnit.x + ny * sunDirUnit.y + nz * sunDirUnit.z);
+          const sss = nDotL * disturbance * disturbance;
+          if (sss > 0) tmpColor.lerp(sssColor, Math.min(1, sss) * 0.65);
+        }
+        // Fresnel — the classic grazing-angle brightening every real
+        // surface shows, computed from the actual view vector (camera
+        // minus this vertex's current world position) against the exact
+        // analytic normal above. No environment map to literally
+        // reflect, so blended toward a pale sky tint instead — reads as
+        // "more reflective at a shallow viewing angle" without one.
+        if (playerPos) {
+          const wx = gerstnerX, wyWorld = waterY + ripple, wz = gerstnerZ;
+          let vx = playerPos.x - wx, vy = (cameraY !== undefined ? cameraY : playerPos.y) - wyWorld, vz = playerPos.z - wz;
+          const vLen = Math.hypot(vx, vy, vz) || 1;
+          vx /= vLen; vy /= vLen; vz /= vLen;
+          const viewDot = Math.abs(nx * vx + ny * vy + nz * vz);
+          const fresnel = Math.pow(THREE.MathUtils.clamp(1 - viewDot, 0, 1), 3);
+          tmpColor.lerp(fresnelColor, fresnel * 0.55);
+        }
         posAttr.setXYZ(i, gerstnerX, ripple, gerstnerZ);
+        normalAttr.setXYZ(i, nx, ny, nz);
       } else {
         posAttr.setY(i, ripple);
       }
@@ -895,7 +969,11 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
   }
   posAttr.needsUpdate = true;
   colorAttr.needsUpdate = true;
-  mesh.geometry.computeVertexNormals();
+  if (biome === "crystal") {
+    normalAttr.needsUpdate = true; // written analytically above, per-frame — skip the geometric recompute below
+  } else {
+    mesh.geometry.computeVertexNormals();
+  }
 
   // Lava also gets a slow overall "breathing" pulse in its base emissive
   // intensity, independent of the spatial hot-spot pattern above — reads

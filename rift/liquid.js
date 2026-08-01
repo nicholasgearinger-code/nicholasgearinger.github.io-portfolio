@@ -639,6 +639,15 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
     }
   }
   geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  // Per-vertex wave-crest intensity, fed into the custom foam fragment
+  // shader below (crystal only) — updateLiquidPlane writes the same
+  // "disturbance" value it already computes for the froth-color blend
+  // into this each frame, raw/unshaped, so all the actual foam shaping
+  // (thresholding, Voronoi masking) happens in the shader instead of
+  // being pre-baked per-vertex like the rest of this file's coloring.
+  if (biome === "crystal") {
+    geo.setAttribute("aFoam", new THREE.BufferAttribute(new Float32Array(posAttr.count), 1));
+  }
 
   const matOptions = {
     vertexColors: true, emissive: style.emissive, emissiveIntensity: style.emissiveIntensity,
@@ -660,6 +669,68 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
   const mat = biome === "crystal"
     ? new THREE.MeshPhysicalMaterial({ ...matOptions, clearcoat: 1.0, clearcoatRoughness: 0.06 })
     : new THREE.MeshStandardMaterial(matOptions);
+  if (biome === "crystal") {
+    // Procedural whitecap foam — real Voronoi/Worley cellular noise
+    // evaluated per-PIXEL in the fragment shader, not per-vertex like
+    // everything else this file paints. Foam is naturally clumpy —
+    // irregular bubble clusters with thin bright seams between them —
+    // which a per-vertex color blend (limited to this mesh's actual
+    // vertex density) can't resolve; a fragment shader can put that
+    // texture at full screen resolution regardless of mesh density.
+    // onBeforeCompile patches the three.js-generated MeshPhysicalMaterial
+    // shader directly rather than writing a full custom ShaderMaterial,
+    // so clearcoat/PBR lighting/fog from the rest of this material keep
+    // working unmodified — only the diffuse color gets a foam pass
+    // layered on top, right where the per-vertex froth/Fresnel/SSS
+    // blending from updateLiquidPlane already leaves off.
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.uTime = { value: 0 };
+      shader.vertexShader = shader.vertexShader
+        .replace("#include <common>", "#include <common>\nattribute float aFoam;\nvarying float vFoam;\nvarying vec2 vFoamPos;")
+        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvFoam = aFoam;\nvFoamPos = position.xz;"); // local-space XZ IS world XZ here — this mesh has no runtime x/z translation or rotation (baked in at creation), only a Y offset
+      shader.fragmentShader = shader.fragmentShader
+        .replace("#include <common>", `#include <common>
+uniform float uTime;
+varying float vFoam;
+varying vec2 vFoamPos;
+// Compact 2D Worley/Voronoi noise — hashed jittered grid, 3x3 neighbor
+// search for the nearest feature point. Cheap enough for two octaves
+// per fragment on mobile.
+vec2 foamHash(vec2 p) {
+  float n = sin(dot(p, vec2(41.0, 289.0)));
+  return fract(vec2(262144.0, 32768.0) * n);
+}
+float foamVoronoi(vec2 p) {
+  vec2 ip = floor(p);
+  vec2 fp = fract(p);
+  float minDist = 1.0;
+  for (int y = -1; y <= 1; y++) {
+    for (int x = -1; x <= 1; x++) {
+      vec2 neighbor = vec2(float(x), float(y));
+      vec2 point = foamHash(ip + neighbor);
+      minDist = min(minDist, length(neighbor + point - fp));
+    }
+  }
+  return minDist;
+}`)
+        .replace("#include <color_fragment>", `#include <color_fragment>
+{
+  // Two Voronoi octaves at different scale/drift — big loose bubble
+  // clusters plus finer surface foam, rather than one uniform cell size.
+  float cellsBig = foamVoronoi(vFoamPos * 0.3 + uTime * 0.035);
+  float cellsFine = foamVoronoi(vFoamPos * 1.0 - uTime * 0.06);
+  float bubbles = (1.0 - smoothstep(0.0, 0.55, cellsBig)) * 0.65 + (1.0 - smoothstep(0.0, 0.4, cellsFine)) * 0.55;
+  bubbles = clamp(bubbles, 0.0, 1.0);
+  // vFoam is the raw per-vertex wave-crest disturbance (0..1, interpolated
+  // across the triangle) — only the actual crest region should be
+  // eligible for foam at all, the Voronoi pattern then decides which
+  // pixels within that region actually show it.
+  float foamMask = bubbles * smoothstep(0.5, 0.92, vFoam);
+  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0), foamMask);
+}`);
+      mat.userData.shader = shader; // so updateLiquidPlane can push uTime each frame
+    };
+  }
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.y = y;
   scene.add(mesh);
@@ -756,7 +827,7 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
   };
 }
 
-function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir) {
+function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir, skyHorizon) {
   if (!handle) return;
   const { mesh, glow, shimmer, rocks, basePositions, biome, style, flowDir, crustOctaves, crackOctaves, flowBeads, waterY } = handle;
   const posAttr = mesh.geometry.attributes.position;
@@ -770,6 +841,12 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
   // still gets the normal geometric method, called at the end of this
   // function as before.
   const normalAttr = mesh.geometry.attributes.normal;
+  // Foam attribute + the onBeforeCompile shader's uTime uniform — both
+  // crystal-only (see createLiquidPlane). uTime only needs setting once
+  // per frame, not per vertex.
+  const foamAttr = biome === "crystal" ? mesh.geometry.attributes.aFoam : null;
+  const foamShader = biome === "crystal" ? mesh.material.userData.shader : null;
+  if (foamShader) foamShader.uniforms.uTime.value = elapsed;
   // Sun direction is passed as sun.position (a world position far from
   // the scene, not a literal direction) — normalizing it directly is a
   // fine approximation of "direction toward the sun" at this distance,
@@ -794,11 +871,19 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
   // itself, brightest right where the crest faces the sun — a bright
   // aqua-green rather than the deep-water base blue. Fresnel is the
   // separate, purely geometric effect of any surface reflecting more of
-  // its environment at a grazing viewing angle than head-on; blended
-  // toward a pale sky tint here since there's no environment map to
-  // literally reflect.
+  // its environment at a grazing viewing angle than head-on — a real sky
+  // reflection shows more zenith color looking straight down at the
+  // water and more horizon color at a shallow/grazing angle, so this now
+  // blends between the day/night cycle's own actual zenith and horizon
+  // colors (skyColor/skyHorizon, passed in from dayNightCycle.js each
+  // frame) rather than one flat constant tint. fresnelZenith/Horizon are
+  // just aliases for clarity; fresnelTint is the single reused Color
+  // instance the per-vertex loop writes into, avoiding an allocation per
+  // vertex per frame.
   const sssColor = new THREE.Color(0x39e6b5);
-  const fresnelColor = new THREE.Color(0xe8f6ff);
+  const fresnelZenith = skyColor || new THREE.Color(0xe8f6ff);
+  const fresnelHorizon = skyHorizon || fresnelZenith;
+  const fresnelTint = new THREE.Color();
   // Water tints toward the current sky color each frame (recomputed fresh,
   // not stored — otherwise it'd drift further every frame instead of
   // tracking the actual sky) — real reflection needs a render-to-texture
@@ -948,19 +1033,25 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
         // surface shows, computed from the actual view vector (camera
         // minus this vertex's current world position) against the exact
         // analytic normal above. No environment map to literally
-        // reflect, so blended toward a pale sky tint instead — reads as
-        // "more reflective at a shallow viewing angle" without one.
+        // reflect, so blended toward the sky's own current color
+        // instead — and specifically toward more horizon color at a
+        // shallow/grazing angle, more zenith color when viewed closer to
+        // overhead, matching how a real sky reflection actually shifts
+        // with viewing angle rather than one flat tint regardless of it.
         if (playerPos) {
           const wx = gerstnerX, wyWorld = waterY + ripple, wz = gerstnerZ;
           let vx = playerPos.x - wx, vy = (cameraY !== undefined ? cameraY : playerPos.y) - wyWorld, vz = playerPos.z - wz;
           const vLen = Math.hypot(vx, vy, vz) || 1;
           vx /= vLen; vy /= vLen; vz /= vLen;
           const viewDot = Math.abs(nx * vx + ny * vy + nz * vz);
-          const fresnel = Math.pow(THREE.MathUtils.clamp(1 - viewDot, 0, 1), 3);
-          tmpColor.lerp(fresnelColor, fresnel * 0.55);
+          const grazing = THREE.MathUtils.clamp(1 - viewDot, 0, 1);
+          const fresnel = Math.pow(grazing, 3);
+          fresnelTint.copy(fresnelZenith).lerp(fresnelHorizon, grazing);
+          tmpColor.lerp(fresnelTint, fresnel * 0.55);
         }
         posAttr.setXYZ(i, gerstnerX, ripple, gerstnerZ);
         normalAttr.setXYZ(i, nx, ny, nz);
+        foamAttr.setX(i, disturbance); // raw signal — smoothstep/threshold shaping happens in the fragment shader, not here
       } else {
         posAttr.setY(i, ripple);
       }
@@ -971,6 +1062,7 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
   colorAttr.needsUpdate = true;
   if (biome === "crystal") {
     normalAttr.needsUpdate = true; // written analytically above, per-frame — skip the geometric recompute below
+    foamAttr.needsUpdate = true;
   } else {
     mesh.geometry.computeVertexNormals();
   }

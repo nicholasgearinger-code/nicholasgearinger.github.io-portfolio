@@ -281,10 +281,25 @@ let starfieldPoints = null;
   const starGeo = new THREE.BufferGeometry();
   const starCount = 1500;
   const positions = new Float32Array(starCount * 3);
+  // Scattered on a thin spherical shell just inside the sky dome's own
+  // radius (dayNightCycle.js's SKY_DOME_RADIUS = 900) instead of an
+  // independent per-axis box — the old ±600 X/Z, 80-580 Y box sat well
+  // inside that 900-radius dome, so its flat faces and corners were
+  // visible as a "room" floating inside the round sky rather than stars
+  // reading as infinitely distant. A sphere has no faces to show through.
+  // Upper-hemisphere only (phi capped at PI/2), matching the old "kept
+  // above the terrain" intent — acos of a uniform random value keeps the
+  // distribution even across the hemisphere's solid angle rather than
+  // clustering stars at the zenith.
+  const STAR_SHELL_MIN = 820, STAR_SHELL_MAX = 880;
   for (let i = 0; i < starCount; i++) {
-    positions[i * 3] = (Math.random() - 0.5) * 1200;
-    positions[i * 3 + 1] = 80 + Math.random() * 500; // kept above the terrain, no reason for stars underfoot
-    positions[i * 3 + 2] = (Math.random() - 0.5) * 1200;
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(Math.random()); // 0 (straight up) .. PI/2 (horizon)
+    const r = STAR_SHELL_MIN + Math.random() * (STAR_SHELL_MAX - STAR_SHELL_MIN);
+    const sinPhi = Math.sin(phi);
+    positions[i * 3] = r * sinPhi * Math.cos(theta);
+    positions[i * 3 + 1] = r * Math.cos(phi);
+    positions[i * 3 + 2] = r * sinPhi * Math.sin(theta);
   }
   starGeo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.8, sizeAttenuation: true, transparent: true, opacity: 1 });

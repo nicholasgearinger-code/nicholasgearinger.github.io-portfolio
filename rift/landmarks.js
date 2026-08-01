@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { getGraphicsSettings } from "./graphicsSettings.js";
+import { createPalmTree } from "./decorations.js";
 
 // -----------------------------------------------------------------------------
 // Lava vein rendering — flat 2D painted illustrations on simple planes,
@@ -807,28 +808,18 @@ function createVerdantLandmark(colorHex) {
 // module boundary intact). Leaning cylinder trunk + a small crown of
 // flat frond planes fanned out at the top — simpler than the painted
 // version, but unmistakably a palm rather than another rock.
-function createSimplePalm(x, z, scale) {
-  const group = new THREE.Group();
-  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x8a6a4a, roughness: 0.8, flatShading: true });
-  const trunkHeight = 4.5 * scale;
-  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.12 * scale, 0.22 * scale, trunkHeight, 6), trunkMat);
-  trunk.position.y = trunkHeight / 2;
-  trunk.rotation.z = 0.12; // a slight lean, same as the painted version's silhouette
-  group.add(trunk);
-  const frondMat = new THREE.MeshStandardMaterial({ color: 0x3fae4a, roughness: 0.7, side: THREE.DoubleSide, flatShading: true });
-  const crownY = trunkHeight + Math.sin(0.12) * trunkHeight * 0.3;
-  const crownX = Math.cos(0.12) * 0; // trunk lean is small enough this stays negligible
-  const frondCount = 6;
-  for (let i = 0; i < frondCount; i++) {
-    const angle = (i / frondCount) * Math.PI * 2;
-    const frond = new THREE.Mesh(new THREE.PlaneGeometry(0.5 * scale, 2.6 * scale), frondMat);
-    frond.position.set(crownX + Math.cos(angle) * 0.9 * scale, crownY - 0.3 * scale, Math.sin(angle) * 0.9 * scale);
-    frond.rotation.y = -angle;
-    frond.rotation.x = -0.7; // droops outward/down from the crown
-    group.add(frond);
-  }
-  group.position.set(x, 0, z);
-  return group;
+// Tiny local deterministic RNG (mulberry32) — createPalmTree (imported
+// from decorations.js) needs a seeded rand function to vary its painted
+// canopy texture per instance, matching this project's fully-deterministic
+// worldgen convention rather than Math.random(), which would make the
+// landmark's palms look different on every reload.
+function mulberry32Local(seed) {
+  return function () {
+    seed |= 0; seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
 function createCrystalLandmark(colorHex) {
@@ -871,9 +862,14 @@ function createCrystalLandmark(colorHex) {
   // place palms elsewhere on the island, but nothing guaranteed any
   // landed exactly HERE, at the landmark's own fixed position.
   const palmSpots = [
-    { x: 4.2, z: -2.5, s: 1.1 }, { x: -3.8, z: 3.2, s: 0.95 }, { x: 1.5, z: 4.6, s: 1.0 },
+    { x: 4.2, z: -2.5, s: 1.1, seed: 101 }, { x: -3.8, z: 3.2, s: 0.95, seed: 202 }, { x: 1.5, z: 4.6, s: 1.0, seed: 303 },
   ];
-  for (const p of palmSpots) group.add(createSimplePalm(p.x, p.z, p.s));
+  for (const p of palmSpots) {
+    const palm = createPalmTree(mulberry32Local(p.seed)).group;
+    palm.position.set(p.x, 0, p.z);
+    palm.scale.setScalar(p.s);
+    group.add(palm);
+  }
   return { group, energy, baseY: 0 };
 }
 

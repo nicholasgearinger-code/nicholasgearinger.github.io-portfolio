@@ -1,5 +1,4 @@
 import * as THREE from "three";
-import { Water } from "three/addons/objects/Water.js";
 import { getGraphicsSettings } from "./graphicsSettings.js";
 
 // -----------------------------------------------------------------------------
@@ -710,34 +709,8 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
 
   const basePositions = new Float32Array(posAttr.array); // original Y per vertex, for the ripple to animate around
 
-  // A real mirror-reflection water surface (Three.js's own Water addon)
-  // for crystal, used ONLY for the above-water view — Water's reflection
-  // technique renders the scene from a virtual flipped camera and
-  // assumes the viewer is looking down at the surface from above, so it
-  // would render wrong looking up from underneath. The existing `mesh`
-  // above (double-sided, depth-colored, hand-animated) keeps handling
-  // the from-below view this biome has always depended on; updateLiquidPlane
-  // toggles which one is actually visible each frame based on camera
-  // position, so only one ever renders at a time (no z-fighting between
-  // two coincident planes).
-  let mirrorWater = null;
-  if (biome === "crystal") {
-    const waterNormals = new THREE.TextureLoader().load("rift/textures/waternormals.jpg", (tex) => {
-      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    });
-    mirrorWater = new Water(new THREE.PlaneGeometry(size, size), {
-      textureWidth: 512, textureHeight: 512,
-      waterNormals, sunDirection: new THREE.Vector3(0, 1, 0), sunColor: 0xffffff,
-      waterColor: 0x1a4d75, distortionScale: 2.6, fog: !!scene.fog,
-    });
-    mirrorWater.rotation.x = -Math.PI / 2;
-    mirrorWater.position.y = y;
-    mirrorWater.visible = false; // starts hidden — updateLiquidPlane sets this correctly on the first frame based on where the camera actually is
-    scene.add(mirrorWater);
-  }
-
   return {
-    mesh, glow, shimmer, rocks, waterY: y, basePositions, biome, style, depthColors, mirrorWater,
+    mesh, glow, shimmer, rocks, waterY: y, basePositions, biome, style, depthColors,
     flowDir: normalizeFlow(flowDir), crustOctaves, crackOctaves, flowBeads,
   };
 }
@@ -745,21 +718,6 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
 function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir) {
   if (!handle) return;
   const { mesh, glow, shimmer, rocks, basePositions, biome, style, flowDir, crustOctaves, crackOctaves, flowBeads } = handle;
-  // Crystal's real mirror-reflection surface only makes sense viewed
-  // from above (it renders the scene from a virtual flipped camera, the
-  // standard reflection technique — looking up from underneath would
-  // show it upside down/wrong). Toggle which of the two planes is
-  // actually visible each frame based on where the camera is, so
-  // there's never two coincident planes fighting for the same pixels.
-  if (handle.mirrorWater) {
-    const isAbove = cameraY !== undefined && cameraY > handle.waterY;
-    handle.mirrorWater.visible = isAbove;
-    mesh.visible = !isAbove;
-    if (isAbove) {
-      handle.mirrorWater.material.uniforms["time"].value = elapsed;
-      if (sunDir) handle.mirrorWater.material.uniforms["sunDirection"].value.copy(sunDir).normalize();
-    }
-  }
   const posAttr = mesh.geometry.attributes.position;
   const colorAttr = mesh.geometry.attributes.color;
   // Cheap per-vertex ripple — lava churns slower/heavier, water ripples
@@ -926,11 +884,6 @@ function disposeLiquidPlane(scene, handle) {
   scene.remove(handle.mesh);
   handle.mesh.geometry.dispose();
   handle.mesh.material.dispose();
-  if (handle.mirrorWater) {
-    scene.remove(handle.mirrorWater);
-    handle.mirrorWater.geometry.dispose();
-    handle.mirrorWater.material.dispose();
-  }
   if (handle.glow) {
     scene.remove(handle.glow);
     handle.glow.geometry.dispose();

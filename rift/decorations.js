@@ -180,7 +180,11 @@ function buildBaseDecoration(biome, colorHex, seedRand, worldX, worldZ) {
   // clams, which would make no sense sitting on dry land. worldX/worldZ
   // are only ever passed for crystal's own seeds (see main.js's call
   // site), so this is a no-op for every other biome.
-  const onIsland = biome === "crystal" && worldX !== undefined && worldZ !== undefined && Math.hypot(worldX - 55, worldZ + 70) < 13;
+  // Threshold tracks terrain.js's ISLAND_CORE (34, up from 14 — see that
+  // file's own comment on why), kept 1 unit inside it same as before, so
+  // decoration placement stays squarely within the guaranteed-dry core
+  // rather than the uncertain height near the actual blend edge.
+  const onIsland = biome === "crystal" && worldX !== undefined && worldZ !== undefined && Math.hypot(worldX - 55, worldZ + 70) < 33;
   // High-tier-exclusive signature piece per biome — not just "more
   // polygons of the same prop," a genuinely different shape that only
   // High actually renders. Rolled first so it doesn't skew the existing

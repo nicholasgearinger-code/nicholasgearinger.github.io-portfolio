@@ -52,14 +52,17 @@ const FLOWER_STYLE = {
   },
   // Crystal Spire, redesigned as a reef: small anemone/coral-polyp buds
   // scattered low among the kelp and coral clusters, reusing the same
-  // instanced-octahedron-head system as Verdant's flowers. Every color
-  // glows here (unlike Verdant's partial set) since a reef genuinely
-  // reads as bioluminescent/vivid throughout, not just in a few accent
-  // spots.
+  // instanced-octahedron-head system as Verdant's flowers. Was "every
+  // color glows, 550 of them" — reads as a wall of bright light balls
+  // carpeting the whole floor rather than a reef with some bioluminescent
+  // accents in it, especially blurred by underwater fog/distance. Pulled
+  // back to the same partial-glow pattern Verdant already uses (accent
+  // colors only, not every color) plus roughly half the density.
   crystal: {
-    tuftCount: 550, colors: [0xff6f9e, 0xffe066, 0x3ce7ff, 0xb35cff], stemColor: 0x2a5a52,
+    tuftCount: 260, colors: [0xff6f9e, 0xffe066, 0x3ce7ff, 0xb35cff], stemColor: 0x2a5a52,
     height: 0.18, heightVariance: 0.1, headSize: 0.09,
-    glowColors: [0xff6f9e, 0xffe066, 0x3ce7ff, 0xb35cff],
+    glowColors: [0xff6f9e, 0x3ce7ff],
+    glowBase: 0.9, glowBreatheBase: 0.6, glowBreatheRange: 0.9, // well below Verdant's defaults (2.8 base, 1.4-3.6 breathing) — accents, not floodlights
   },
 };
 
@@ -211,12 +214,12 @@ function createFlowers(scene, biome, sampleHeight, radius) {
     const isGlow = !!(style.glowColors && style.glowColors.includes(colorHex));
     if (isGlow) {
       mat.emissive = new THREE.Color(colorHex);
-      mat.emissiveIntensity = 2.8;
+      mat.emissiveIntensity = style.glowBase !== undefined ? style.glowBase : 2.8; // per-style override — undefined falls back to the original constant, so Verdant is unaffected
     }
     const mesh = new THREE.InstancedMesh(headGeo, mat, perColor);
     mesh.castShadow = true;
     scene.add(mesh);
-    return { mesh, placed: 0, material: mat, isGlow, phase: Math.random() * Math.PI * 2 };
+    return { mesh, placed: 0, material: mat, isGlow, phase: Math.random() * Math.PI * 2, glowBase: style.glowBreatheBase, glowRange: style.glowBreatheRange };
   });
 
   let attempts = 0;
@@ -315,7 +318,9 @@ function updateFlowers(handle, elapsed) {
   for (const batch of handle.batches) {
     if (!batch.isGlow) continue;
     const breathe = 0.5 + 0.5 * Math.sin(elapsed * 0.5 + batch.phase);
-    batch.material.emissiveIntensity = 1.4 + breathe * 2.2;
+    const base = batch.glowBase !== undefined ? batch.glowBase : 1.4;
+    const range = batch.glowRange !== undefined ? batch.glowRange : 2.2;
+    batch.material.emissiveIntensity = base + breathe * range;
   }
 }
 

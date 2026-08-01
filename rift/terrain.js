@@ -265,7 +265,18 @@ const BIOME_SHAPERS = {
     // real margin for actual dry beach, not just a few inches of sand
     // poking through.
     const islandDist = Math.hypot(worldX - 55, worldZ + 70);
-    const ISLAND_CORE = 14, ISLAND_BLEND = 26, ISLAND_PEAK = 11.5;
+    // Requested "10x bigger" isn't achievable at this fixed center without
+    // either moving the landmark (used across 8+ files — landmarks.js,
+    // decorations.js, etc.) or expanding the terrain square itself: the
+    // island sits at (55, -70) on a 240x240 heightfield centered at the
+    // origin, and the nearest square edge from that point is only ~50
+    // units away (120 - 70, the tightest of the four directions) — a
+    // blend radius any larger than that gets hard-clipped by the terrain
+    // mesh's own edge on that side, not a smooth taper. This pushes right
+    // up against that real ceiling with a small safety margin: ~3x the
+    // old radius (~9x the old area), the largest the island can grow to
+    // while still reading as a full, unclipped circular island.
+    const ISLAND_CORE = 34, ISLAND_BLEND = 45, ISLAND_PEAK = 11.5;
     let islandBump = 0;
     if (islandDist < ISLAND_BLEND) {
       const t = islandDist < ISLAND_CORE ? 1 : 1 - (islandDist - ISLAND_CORE) / (ISLAND_BLEND - ISLAND_CORE);

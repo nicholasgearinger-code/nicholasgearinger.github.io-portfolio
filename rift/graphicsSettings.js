@@ -27,7 +27,7 @@ const TIERS = {
     label: "Low",
     terrainSegments: 40,       // pushed down — bare minimum, genuinely fast on weak devices
     liquidSegments: 10,
-    skyDomeSegments: [12, 6],
+    skyDomeSegments: [28, 14], // was [12, 6] — visibly faceted (flat polygon "corners" showing through the gradient) at that resolution. The sky dome is a single unlit BackSide MeshBasicMaterial sphere with no lighting/shadow cost, so this is essentially free even on Low — nothing like terrain/liquid segment counts, which actually cost real per-frame work.
     grassBladeSegments: 3,     // radial segments per blade — 3 is the coarsest a cone can be, already floor
     decorationDetail: 0,       // subdivision level passed to IcosahedronGeometry/OctahedronGeometry — 0 is their coarsest form, already floor
     grassMultiplier: 0.12,

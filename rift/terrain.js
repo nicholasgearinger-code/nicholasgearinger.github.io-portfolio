@@ -718,8 +718,13 @@ function applyHeightShading(geo, colorHex, minY, maxY, biome, seed) {
     // sunlit reef crest but wrong for dry sand. Blended in below by
     // real world height crossing the water line, not by the palette t
     // value, so this stays correct regardless of how the island's own
-    // peak height shifts the mesh's overall min/max.
-    const islandSand = biome === "crystal" ? new THREE.Color(0xf5efe0) : null;
+    // peak height shifts the mesh's overall min/max. Two sand tones
+    // (rather than one flat color) so the beach itself has a gradient —
+    // pale, slightly cool sand right at the waterline where it's still
+    // damp, warming to a golden tone higher up where the sand is dry.
+    const islandSandWet = biome === "crystal" ? new THREE.Color(0xf3efe4) : null;
+    const islandSandDry = biome === "crystal" ? new THREE.Color(0xe8c97a) : null;
+    const islandSandTmp = biome === "crystal" ? new THREE.Color() : null;
     const waterLine = biome === "crystal" ? LIQUID_LEVEL.crystal : undefined;
     for (let i = 0; i < posAttr.count; i++) {
       const t = (posAttr.getY(i) - minY) / range;
@@ -745,10 +750,14 @@ function applyHeightShading(geo, colorHex, minY, maxY, biome, seed) {
           tmp.lerp(pathColor, pathT * 0.85);
         }
       }
-      if (islandSand) {
+      if (islandSandWet) {
         const worldY = posAttr.getY(i);
         const beachT = Math.min(1, Math.max(0, (worldY - (waterLine - 1.2)) / 1.8)); // soft 1.8-unit blend band straddling the water line
-        if (beachT > 0) tmp.lerp(islandSand, beachT);
+        if (beachT > 0) {
+          const goldT = Math.min(1, Math.max(0, (worldY - waterLine) / 4)); // fades from wet white-sand near the shore to warm gold sand further up the beach
+          islandSandTmp.copy(islandSandWet).lerp(islandSandDry, goldT);
+          tmp.lerp(islandSandTmp, beachT);
+        }
       }
       colors[i * 3] = tmp.r; colors[i * 3 + 1] = tmp.g; colors[i * 3 + 2] = tmp.b;
     }

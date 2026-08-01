@@ -41,6 +41,37 @@ const LIQUID_STYLE = {
   },
 };
 
+// -----------------------------------------------------------------------------
+// Gerstner (trochoidal) wave components — Coral Shallows' ocean only. A
+// real Gerstner wave displaces each vertex horizontally as well as
+// vertically (walking it toward the wave crest and back), which is what
+// gives an ocean surface its actual peaked, slightly-pointed crests and
+// broader troughs instead of the perfectly smooth, symmetric bumps a
+// plain per-vertex sine gives. Several components at different
+// directions/wavelengths/speeds summed together (the standard "sum of
+// Gerstner waves" ocean technique) reads as real chop layered on top of
+// a big rolling swell, rather than one uniform ripple. Ember's lava and
+// Verdant's river keep their existing simpler sine-based ripple — this
+// is scoped to the actual open-ocean biome specifically.
+//
+// steepness (Q) controls how sharp the crest peak is — too high per-wave
+// and neighboring vertices can cross over each other (self-intersecting
+// geometry), so each is kept comfortably under 1/(k*amplitude*waveCount).
+// wavelength/amplitude/speed loosely follow real deep-water dispersion
+// (bigger/slower swells carry more amplitude, small wavelets are fast and
+// shallow) without needing to actually simulate the physics.
+const GERSTNER_WAVES_RAW = [
+  { dirX: 1.0, dirZ: 0.3, wavelength: 40, amplitude: 0.42, speed: 1.1, steepness: 0.5 },  // the big rolling swell
+  { dirX: 0.3, dirZ: 1.0, wavelength: 24, amplitude: 0.24, speed: 1.55, steepness: 0.45 }, // a second swell crossing at an angle
+  { dirX: -0.7, dirZ: 0.5, wavelength: 13, amplitude: 0.13, speed: 2.15, steepness: 0.35 }, // finer chop
+  { dirX: 0.6, dirZ: -0.65, wavelength: 7, amplitude: 0.06, speed: 2.9, steepness: 0.3 },   // fine surface texture
+];
+const GERSTNER_WAVES = GERSTNER_WAVES_RAW.map((w) => {
+  const len = Math.hypot(w.dirX, w.dirZ) || 1;
+  return { ndx: w.dirX / len, ndz: w.dirZ / len, k: (Math.PI * 2) / w.wavelength, amplitude: w.amplitude, speed: w.speed, steepness: w.steepness };
+});
+const GERSTNER_AMPLITUDE_SUM = GERSTNER_WAVES.reduce((sum, w) => sum + w.amplitude, 0);
+
 // A soft mottled noise pattern, tiled — real distortion needs a
 // post-process shader this project doesn't have, so instead this scrolls
 // upward and wobbles sideways on a mostly-transparent overlay just above
@@ -720,14 +751,16 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
   const { mesh, glow, shimmer, rocks, basePositions, biome, style, flowDir, crustOctaves, crackOctaves, flowBeads } = handle;
   const posAttr = mesh.geometry.attributes.position;
   const colorAttr = mesh.geometry.attributes.color;
-  // Cheap per-vertex ripple — lava churns slower/heavier, water ripples
-  // lighter and faster. A second, higher-frequency/lower-amplitude term
-  // layered on top of the main swell adds finer chop instead of one
-  // smooth wave shape everywhere.
+  // Cheap per-vertex ripple for ember/verdant — lava churns slower/
+  // heavier, water ripples lighter and faster. A second, higher-
+  // frequency/lower-amplitude term layered on top of the main swell adds
+  // finer chop instead of one smooth wave shape everywhere. Crystal no
+  // longer uses these — its ocean surface is driven by the Gerstner wave
+  // sum above instead (see GERSTNER_WAVES).
   const speed = biome === "ember" ? 0.6 : 1.4;
-  const amp = biome === "ember" ? 0.18 : (biome === "crystal" ? 0.32 : 0.16); // crystal bumped further (was 0.2) per explicit "real 3D rolling waves" follow-up — needed genuinely visible geometric swell, not just a subtle ripple, to read as real ocean movement from above
+  const amp = biome === "ember" ? 0.18 : 0.16;
   const chopAmp = amp * 0.35;
-  const swell2Amp = amp * (biome === "crystal" ? 0.75 : 0.55); // crystal weighted higher toward this slower, larger-scale layer specifically (was the same 0.55 as every other biome) — a real rolling-ocean look comes more from big swells than fine chop, per explicit "improve the ocean waves further" follow-up
+  const swell2Amp = amp * 0.55;
   const flowSpeed = 0.12; // noise-space units/sec the crust/crack field drifts along flowDir
   const tmpColor = new THREE.Color();
   const tmpDepthColor = new THREE.Color();
@@ -743,20 +776,47 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
     : style.baseColor;
   for (let i = 0; i < posAttr.count; i++) {
     const bx = basePositions[i * 3], bz = basePositions[i * 3 + 2];
-    const swell = Math.sin(bx * 0.15 + elapsed * speed) * amp + Math.cos(bz * 0.12 + elapsed * speed * 0.8) * amp;
-    const chop = Math.sin(bx * 0.55 + bz * 0.4 + elapsed * speed * 2.3) * chopAmp;
-    // A slow, large-scale diagonal swell — water only (lava's existing
-    // 2-layer churn feeds its own crust/crack heat pattern and stays
-    // untouched). Different angle and much lower frequency than the
-    // other two layers, so it reads as a genuine second wave system
-    // moving through the water rather than just a bigger version of the
-    // same ripple.
-    const swell2 = biome !== "ember" ? Math.sin((bx + bz) * 0.045 + elapsed * speed * 0.35) * swell2Amp : 0;
+    let ripple, range, gerstnerX = bx, gerstnerZ = bz;
+    if (biome === "crystal") {
+      // Real Gerstner (trochoidal) displacement — each wave component
+      // pulls the vertex horizontally toward the crest as well as
+      // pushing it up, which is what makes real ocean waves look peaked
+      // rather than a symmetric sine bump. Summed across several
+      // directional components (see GERSTNER_WAVES above the function)
+      // for a genuine rolling-swell-plus-chop ocean surface.
+      let dx = 0, dz = 0, dy = 0;
+      for (const w of GERSTNER_WAVES) {
+        const f = w.k * (w.ndx * bx + w.ndz * bz) - w.speed * elapsed;
+        const s = Math.sin(f), c = Math.cos(f);
+        dx += w.steepness * w.amplitude * w.ndx * c;
+        dz += w.steepness * w.amplitude * w.ndz * c;
+        dy += w.amplitude * s;
+      }
+      gerstnerX = bx + dx;
+      gerstnerZ = bz + dz;
+      ripple = dy;
+      range = GERSTNER_AMPLITUDE_SUM * 2;
+    } else {
+      // Cheap per-vertex ripple — lava churns slower/heavier, water
+      // ripples lighter and faster. A second, higher-frequency/
+      // lower-amplitude term layered on top of the main swell adds
+      // finer chop instead of one smooth wave shape everywhere.
+      const swell = Math.sin(bx * 0.15 + elapsed * speed) * amp + Math.cos(bz * 0.12 + elapsed * speed * 0.8) * amp;
+      const chop = Math.sin(bx * 0.55 + bz * 0.4 + elapsed * speed * 2.3) * chopAmp;
+      // A slow, large-scale diagonal swell — water only (lava's existing
+      // 2-layer churn feeds its own crust/crack heat pattern and stays
+      // untouched). Different angle and much lower frequency than the
+      // other two layers, so it reads as a genuine second wave system
+      // moving through the water rather than just a bigger version of the
+      // same ripple.
+      const swell2 = biome !== "ember" ? Math.sin((bx + bz) * 0.045 + elapsed * speed * 0.35) * swell2Amp : 0;
+      ripple = swell + chop + swell2;
+      range = (amp + chopAmp + (biome !== "ember" ? swell2Amp : 0)) * 2;
+    }
     // A real reactive ripple around wherever the player currently is —
     // water only, not ambient wave motion. Expanding concentric rings
     // (dist*frequency - elapsed*speed) rather than one static bump, so
     // it reads as a wake propagating outward from them as they move.
-    let playerRipple = 0;
     if (playerPos && biome !== "ember") {
       const pdx = bx - playerPos.x, pdz = bz - playerPos.z;
       const pDistSq = pdx * pdx + pdz * pdz;
@@ -764,13 +824,11 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
       if (pDistSq < RIPPLE_RADIUS * RIPPLE_RADIUS) {
         const pDist = Math.sqrt(pDistSq);
         const wave = Math.sin(pDist * 2.4 - elapsed * 6.5) * (1 - pDist / RIPPLE_RADIUS);
-        playerRipple = wave * 0.14;
+        ripple += wave * 0.14;
       }
     }
-    const ripple = swell + chop + swell2 + playerRipple;
 
     // Normalize ripple to 0..1.
-    const range = (amp + chopAmp + (biome !== "ember" ? swell2Amp : 0)) * 2;
     const disturbance = THREE.MathUtils.clamp((ripple + range / 2) / range, 0, 1);
 
     if (biome === "ember" && style.crustColor) {
@@ -827,7 +885,11 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
         localBase = tmpDepthColor;
       }
       tmpColor.copy(localBase).lerp(accent, Math.pow(disturbance, frothPower));
-      posAttr.setY(i, ripple);
+      if (biome === "crystal") {
+        posAttr.setXYZ(i, gerstnerX, ripple, gerstnerZ);
+      } else {
+        posAttr.setY(i, ripple);
+      }
     }
     tmpColor.toArray(colorAttr.array, i * 3);
   }
@@ -970,7 +1032,37 @@ function createOceanSurfaceDetail(scene, y, size) {
   const whitecaps = new THREE.Points(whitecapGeo, whitecapMat);
   scene.add(whitecaps);
 
-  return { glitter, glitterSeeds, glitterSpeeds, glitterCount, whitecaps };
+  // Shore break — a tight ring of foam right where the ocean meets the
+  // island, synced to the same angle-phased crash cycle updateOceanSpray
+  // uses, so there's an actual visible break-line at the water instead of
+  // only the airborne mist above it. Reuses the same foam texture as the
+  // ambient whitecaps but concentrated in an annulus around SHORE_RADIUS
+  // instead of scattered across the whole ocean. vertexColors drives
+  // brightness per point each frame (PointsMaterial has no per-vertex
+  // opacity), so it can fade instead of just being permanently onscreen.
+  const shoreFoamCount = 90;
+  const shoreFoamPos = new Float32Array(shoreFoamCount * 3);
+  const shoreFoamColors = new Float32Array(shoreFoamCount * 3);
+  const shoreFoamAngle = new Float32Array(shoreFoamCount);
+  for (let i = 0; i < shoreFoamCount; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const r = SHORE_RADIUS + (Math.random() - 0.5) * 4;
+    shoreFoamPos[i * 3] = ISLAND_CENTER.x + Math.cos(angle) * r;
+    shoreFoamPos[i * 3 + 1] = y + 0.12;
+    shoreFoamPos[i * 3 + 2] = ISLAND_CENTER.z + Math.sin(angle) * r;
+    shoreFoamAngle[i] = angle;
+  }
+  const shoreFoamGeo = new THREE.BufferGeometry();
+  shoreFoamGeo.setAttribute("position", new THREE.BufferAttribute(shoreFoamPos, 3));
+  shoreFoamGeo.setAttribute("color", new THREE.BufferAttribute(shoreFoamColors, 3));
+  const shoreFoamMat = new THREE.PointsMaterial({
+    map: getFoamTexture(), vertexColors: true, color: 0xffffff, size: 3.4, transparent: true, opacity: 0.9,
+    depthWrite: false, sizeAttenuation: true,
+  });
+  const shoreFoam = new THREE.Points(shoreFoamGeo, shoreFoamMat);
+  scene.add(shoreFoam);
+
+  return { glitter, glitterSeeds, glitterSpeeds, glitterCount, whitecaps, shoreFoam, shoreFoamAngle, shoreFoamCount };
 }
 
 function updateOceanSurfaceDetail(handle, elapsed) {
@@ -988,6 +1080,18 @@ function updateOceanSurfaceDetail(handle, elapsed) {
   // Whitecaps breathe very slowly and subtly — real chop doesn't flicker,
   // it just varies gradually in how much foam is visible at once.
   handle.whitecaps.material.opacity = 0.42 + Math.sin(elapsed * 0.3) * 0.08;
+  if (handle.shoreFoam) {
+    const shoreColorAttr = handle.shoreFoam.geometry.attributes.color;
+    for (let i = 0; i < handle.shoreFoamCount; i++) {
+      // Same phase formula as updateOceanSpray's crash cycle — this ring
+      // and the spray above it break at the same point at the same time.
+      const wavePhase = elapsed * 1.8 + handle.shoreFoamAngle[i] * 2.4;
+      const crash = Math.pow(0.5 + 0.5 * Math.sin(wavePhase), 4);
+      const bright = 0.15 + crash * 0.85; // never fully invisible between crashes — a faint tideline, not on/off
+      shoreColorAttr.setXYZ(i, bright, bright, bright);
+    }
+    shoreColorAttr.needsUpdate = true;
+  }
 }
 
 function disposeOceanSurfaceDetail(scene, handle) {
@@ -998,6 +1102,11 @@ function disposeOceanSurfaceDetail(scene, handle) {
   scene.remove(handle.whitecaps);
   handle.whitecaps.geometry.dispose();
   handle.whitecaps.material.dispose();
+  if (handle.shoreFoam) {
+    scene.remove(handle.shoreFoam);
+    handle.shoreFoam.geometry.dispose();
+    handle.shoreFoam.material.dispose();
+  }
 }
 
 // Ocean spray — Coral Shallows only. Mist/foam kicked up where waves
@@ -1015,7 +1124,7 @@ function createOceanSpray(scene, waterLevel) {
   const emitters = [];
   for (let i = 0; i < emitterCount; i++) {
     const angle = (i / emitterCount) * Math.PI * 2 + Math.random() * 0.2;
-    emitters.push({ x: ISLAND_CENTER.x + Math.cos(angle) * SHORE_RADIUS, z: ISLAND_CENTER.z + Math.sin(angle) * SHORE_RADIUS });
+    emitters.push({ x: ISLAND_CENTER.x + Math.cos(angle) * SHORE_RADIUS, z: ISLAND_CENTER.z + Math.sin(angle) * SHORE_RADIUS, angle });
   }
   const particlesPerEmitter = 5;
   const count = emitterCount * particlesPerEmitter;
@@ -1042,15 +1151,26 @@ function updateOceanSpray(handle, dt, elapsed) {
   if (!handle) return;
   const posAttr = handle.points.geometry.attributes.position;
   for (let i = 0; i < handle.life.length; i++) {
-    handle.life[i] += dt * 0.5;
+    const em = handle.emitters[handle.emitterIndex[i]];
+    // A traveling crash pulse swept around the shoreline by each emitter's
+    // angle, rather than constant ambient mist — real surf builds, breaks
+    // sharply, then recedes. The 4th-power sine gives a brief bright spike
+    // (most of the cycle sits low) instead of a smooth breathing pulse, and
+    // offsetting phase by angle makes the break travel around the island
+    // instead of every point crashing in unison. Matches the phase formula
+    // updateOceanSurfaceDetail uses for its shore-foam ring, so the visible
+    // foam line and the airborne spray above it break together.
+    const wavePhase = elapsed * 1.8 + em.angle * 2.4;
+    const crash = Math.pow(0.5 + 0.5 * Math.sin(wavePhase), 4);
+    handle.life[i] += dt * (0.35 + crash * 1.6); // faster respawn at the crash peak, slower during the lull
     if (handle.life[i] >= 1) {
       handle.life[i] = 0;
-      const em = handle.emitters[handle.emitterIndex[i]];
       const angle = Math.random() * Math.PI * 2;
-      const speed = 0.4 + Math.random() * 0.8; // gentler outward spread than the waterfall's dramatic burst
-      posAttr.setXYZ(i, em.x + (Math.random() - 0.5) * 3, handle.waterLevel + 0.1, em.z + (Math.random() - 0.5) * 3);
+      const speed = (0.3 + crash * 1.1) * (0.6 + Math.random() * 0.8);
+      const spread = 2.5 + crash * 2.5; // wider scatter when the wave actually breaks
+      posAttr.setXYZ(i, em.x + (Math.random() - 0.5) * spread, handle.waterLevel + 0.1, em.z + (Math.random() - 0.5) * spread);
       handle.vel[i * 3] = Math.cos(angle) * speed;
-      handle.vel[i * 3 + 1] = 1.5 + Math.random() * 1.5; // a modest mist hop, not a waterfall-height burst
+      handle.vel[i * 3 + 1] = 1.2 + crash * 2.8 + Math.random() * 1.2; // crash peaks launch spray noticeably higher than the idle drizzle
       handle.vel[i * 3 + 2] = Math.sin(angle) * speed;
     } else {
       const t = handle.life[i];
@@ -1061,7 +1181,7 @@ function updateOceanSpray(handle, dt, elapsed) {
     }
   }
   posAttr.needsUpdate = true;
-  handle.points.material.opacity = 0.65 + Math.sin(elapsed * 2.6) * 0.1; // gentle churn, matching the waterfall foam's own idle shimmer
+  handle.points.material.opacity = 0.55 + Math.sin(elapsed * 2.6) * 0.1; // gentle churn, matching the waterfall foam's own idle shimmer
 }
 
 function disposeOceanSpray(scene, handle) {

@@ -1207,42 +1207,7 @@ function createOceanSurfaceDetail(scene, y, size) {
   const whitecaps = new THREE.Points(whitecapGeo, whitecapMat);
   scene.add(whitecaps);
 
-  // Shore break — a tight ring of foam right where the ocean meets the
-  // island, driven by the real sampled Gerstner wave height
-  // (sampleGerstnerHeight) at each point's own actual position, so
-  // there's an actual visible break-line genuinely tied to the real
-  // ocean surface, not an independent clock. Reuses the same foam
-  // texture as the ambient whitecaps but concentrated in an annulus
-  // around SHORE_RADIUS instead of scattered across the whole ocean.
-  // vertexColors drives brightness per point each frame (PointsMaterial
-  // has no per-vertex opacity), so it can fade instead of just being
-  // permanently onscreen.
-  const shoreFoamCount = 200; // was 90 — the shoreline circumference is ~2.2x larger now (SHORE_RADIUS 17->37), same density needs proportionally more points
-  const shoreFoamPos = new Float32Array(shoreFoamCount * 3);
-  const shoreFoamColors = new Float32Array(shoreFoamCount * 3);
-  const shoreFoamX = new Float32Array(shoreFoamCount);
-  const shoreFoamZ = new Float32Array(shoreFoamCount);
-  for (let i = 0; i < shoreFoamCount; i++) {
-    const angle = Math.random() * Math.PI * 2;
-    const r = SHORE_RADIUS + (Math.random() - 0.5) * 3; // ±1.5, narrowed from ±2.5 — a real foam line is a defined edge, not a broad smear
-    const x = ISLAND_CENTER.x + Math.cos(angle) * r, z = ISLAND_CENTER.z + Math.sin(angle) * r;
-    shoreFoamPos[i * 3] = x;
-    shoreFoamPos[i * 3 + 1] = y + 0.12;
-    shoreFoamPos[i * 3 + 2] = z;
-    shoreFoamX[i] = x;
-    shoreFoamZ[i] = z;
-  }
-  const shoreFoamGeo = new THREE.BufferGeometry();
-  shoreFoamGeo.setAttribute("position", new THREE.BufferAttribute(shoreFoamPos, 3));
-  shoreFoamGeo.setAttribute("color", new THREE.BufferAttribute(shoreFoamColors, 3));
-  const shoreFoamMat = new THREE.PointsMaterial({
-    map: getFoamTexture(), vertexColors: true, color: 0xffffff, size: 4.2, transparent: true, opacity: 0.95,
-    depthWrite: false, sizeAttenuation: true,
-  });
-  const shoreFoam = new THREE.Points(shoreFoamGeo, shoreFoamMat);
-  scene.add(shoreFoam);
-
-  return { glitter, glitterSeeds, glitterSpeeds, glitterCount, whitecaps, shoreFoam, shoreFoamX, shoreFoamZ, shoreFoamCount };
+  return { glitter, glitterSeeds, glitterSpeeds, glitterCount, whitecaps };
 }
 
 function updateOceanSurfaceDetail(handle, elapsed) {
@@ -1260,21 +1225,6 @@ function updateOceanSurfaceDetail(handle, elapsed) {
   // Whitecaps breathe very slowly and subtly — real chop doesn't flicker,
   // it just varies gradually in how much foam is visible at once.
   handle.whitecaps.material.opacity = 0.42 + Math.sin(elapsed * 0.3) * 0.08;
-  if (handle.shoreFoam) {
-    const shoreColorAttr = handle.shoreFoam.geometry.attributes.color;
-    for (let i = 0; i < handle.shoreFoamCount; i++) {
-      // Real wave height sampled at this point's actual position — same
-      // formula as the ocean surface mesh's own per-vertex computation,
-      // so this foam line genuinely tracks the real wave instead of an
-      // independent clock that only coincidentally matched.
-      const waveH = sampleGerstnerHeight(handle.shoreFoamX[i], handle.shoreFoamZ[i], elapsed);
-      const waveNorm = THREE.MathUtils.clamp((waveH + GERSTNER_AMPLITUDE_SUM) / (2 * GERSTNER_AMPLITUDE_SUM), 0, 1);
-      const crash = Math.pow(waveNorm, 4);
-      const bright = 0.22 + crash * 0.95; // never fully invisible between crashes — a faint tideline, not on/off; raised floor and peak for a more pronounced ring
-      shoreColorAttr.setXYZ(i, bright, bright, bright);
-    }
-    shoreColorAttr.needsUpdate = true;
-  }
 }
 
 function disposeOceanSurfaceDetail(scene, handle) {
@@ -1285,26 +1235,4 @@ function disposeOceanSurfaceDetail(scene, handle) {
   scene.remove(handle.whitecaps);
   handle.whitecaps.geometry.dispose();
   handle.whitecaps.material.dispose();
-  if (handle.shoreFoam) {
-    scene.remove(handle.shoreFoam);
-    handle.shoreFoam.geometry.dispose();
-    handle.shoreFoam.material.dispose();
-  }
-}
-
-const ISLAND_CENTER = { x: 55, z: -70 }; // must match terrain.js's own island center
-const SHORE_RADIUS = 37; // was 17 — stale from before the island was enlarged 3x and the beach reshaped into a gentle ramp (see terrain.js); the actual waterline crossing is now ~37, matching decorations.js's own onIsland threshold. At 17 this whole system was spawning deep inland on dry hillside, nowhere near the actual water's edge.
-// Real Gerstner wave height at a given world XZ + time — the exact same
-// formula and parameters as the actual ocean surface mesh's own
-// per-vertex computation above, and the terrain's own onBeforeCompile
-// caustic/wave-wash shader (main.js). Used by the shore-foam ring above
-// so it stays genuinely tied to the real wave, not an independent clock
-// that only coincidentally looked similar.
-function sampleGerstnerHeight(x, z, elapsed) {
-  let h = 0;
-  for (const w of GERSTNER_WAVES) {
-    const f = w.k * (w.ndx * x + w.ndz * z) - w.speed * elapsed;
-    h += w.amplitude * Math.sin(f);
-  }
-  return h;
 }

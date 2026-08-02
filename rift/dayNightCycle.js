@@ -481,7 +481,7 @@ function updateSkyDome(sky, zenithColor, midColor, horizonColor, elapsed, sunDir
     if (sunDir) {
       const vLen = Math.hypot(x, z) || 1;
       const sunLen = Math.hypot(sunDir.x, sunDir.z) || 1;
-      const azAlign = (x / vLen) * (sunDir.x / sunLen) + (z / vLen) * (sunDir.z / sunLen); // -1..1
+      const azAlign = -((x / vLen) * (sunDir.x / sunLen) + (z / vLen) * (sunDir.z / sunLen)); // -1..1 — negated: the un-negated version was putting the vivid color on the far side of the sky instead of around the sun
       azimuthCloseness = THREE.MathUtils.clamp((azAlign + 0.3) / 1.3, 0, 1);
     }
     // Muted fallback leans toward the zenith color rather than a fully

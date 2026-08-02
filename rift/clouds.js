@@ -72,11 +72,15 @@ function createCloud(scene, style, flatten = 1) {
     // making every puff a perfect circle) plus a random in-plane
     // rotation — elongated/squashed ellipses at random orientations
     // read as far more organic than a cluster of uniform circles.
-    const sX = style.scale * (0.6 + Math.random() * 0.7);
-    const sY = style.scale * (0.5 + Math.random() * 0.75) * flatten;
+    const sX = style.scale * (0.75 + Math.random() * 0.65); // was 0.6-1.3 — bigger minimum so puffs reliably overlap their neighbors
+    const sY = style.scale * (0.6 + Math.random() * 0.7) * flatten;
     sprite.material.rotation = Math.random() * Math.PI * 2;
-    const baseLocalX = (Math.random() - 0.5) * style.scale * 1.4;
-    const baseLocalZ = (Math.random() - 0.5) * style.scale * 1.4;
+    // Spread was 1.4x scale — too generous relative to puff size, leaving
+    // real gaps between puffs that read as a scatter of separate circles
+    // rather than one cloud mass. Tightened so puffs actually overlap and
+    // merge into a continuous silhouette.
+    const baseLocalX = (Math.random() - 0.5) * style.scale * 0.8;
+    const baseLocalZ = (Math.random() - 0.5) * style.scale * 0.8;
     sprite.userData.baseScaleX = sX;
     sprite.userData.baseScaleY = sY;
     sprite.userData.baseLocalX = baseLocalX;
@@ -90,7 +94,7 @@ function createCloud(scene, style, flatten = 1) {
     sprite.userData.driftPhaseX = Math.random() * Math.PI * 2;
     sprite.userData.driftPhaseZ = Math.random() * Math.PI * 2;
     sprite.userData.driftSpeed = 0.008 + Math.random() * 0.012;
-    sprite.userData.driftRange = style.scale * (0.18 + Math.random() * 0.18);
+    sprite.userData.driftRange = style.scale * (0.1 + Math.random() * 0.12); // was 0.18-0.36 — scaled down to match the tighter base spread above, otherwise the slow wander would undo the tighter clustering over its own cycle
     // How much THIS puff swells during a storm — varies per-puff so a
     // storm-thickened cloud grows unevenly (real storm clouds bulge and
     // pile up, they don't scale uniformly like a balloon).
@@ -186,7 +190,7 @@ function updateClouds(handle, dt, wind, dayAmount, rainIntensity, skyHorizonColo
         _cloudToCam.multiplyScalar(1 / distToCam);
         _cloudToSun.subVectors(sunPos, cameraPos).normalize();
         const alignment = _cloudToCam.dot(_cloudToSun);
-        sunProximity = THREE.MathUtils.clamp((alignment - 0.45) / 0.5, 0, 1);
+        sunProximity = THREE.MathUtils.clamp((alignment - 0.25) / 0.55, 0, 1); // widened from 0.45/0.5 — more clouds around the sun visibly react, not just the one or two dead-center
       }
     }
     for (const sprite of cloud.sprites) {
@@ -212,13 +216,18 @@ function updateClouds(handle, dt, wind, dayAmount, rainIntensity, skyHorizonColo
       // elsewhere just stay their base color.
       sprite.material.color.copy(cloud.baseColor);
       if (skyHorizonColor && sunProximity > 0) {
-        sprite.material.color.lerp(skyHorizonColor, 0.55 * sunProximity);
+        sprite.material.color.lerp(skyHorizonColor, 0.7 * sunProximity); // was 0.55
         // Extra vibrant push right around the sun during actual dawn/
         // dusk — each cloud blends toward its OWN assigned accent color
         // (see DAWN_DUSK_ACCENTS), so the glow around the sun shows real
         // purple/orange/red/pink variety rather than one uniform tint.
         // Inert (warmth=0) outside the actual dawn/dusk window.
-        if (warmth > 0) sprite.material.color.lerp(cloud.accentColor, warmth * sunProximity * 0.75);
+        if (warmth > 0) sprite.material.color.lerp(cloud.accentColor, warmth * sunProximity * 0.9); // was 0.75
+        // Real backlit brightness right at the sun — clouds directly
+        // around it often look almost lit from within (thin edges are
+        // genuinely translucent to direct sunlight), not just tinted a
+        // different color at the same brightness.
+        sprite.material.color.multiplyScalar(1 + sunProximity * warmth * 0.5);
       }
       // Cheap fake self-shadowing — real clouds are lit from above/the
       // sun's side and darker underneath; a flat-tinted billboard cluster

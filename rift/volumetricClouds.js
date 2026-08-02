@@ -111,9 +111,9 @@ float cloudDensity(vec3 p) {
   coverageMask = smoothstep(1.0 - uCoverage, 1.0, coverageMask);
   if (coverageMask <= 0.0) return 0.0;
 
-  float base = fbm3(windP * 0.05);
-  float worley = worley3(windP * 0.09 + 11.0);
-  float shape = base - worley * 0.55;
+  float base = fbm3(windP * 0.045);
+  float worley = worley3(windP * 0.085 + 11.0);
+  float shape = base * 1.3 - worley * 0.35; // was base - worley*0.55 — that combination clipped to near-zero almost everywhere (base rarely exceeds ~0.6, so subtracting up to 0.55 left barely any density), reading as a weak uniform haze rather than distinct bright formations
   shape = clamp(shape, 0.0, 1.0);
 
   return shape * heightShape * coverageMask * uDensity;
@@ -155,17 +155,20 @@ void main() {
     float density = cloudDensity(samplePos);
     if (density > 0.001) {
       float layerT = (samplePos.y - ${CLOUD_LAYER_BASE.toFixed(1)}) / ${(CLOUD_LAYER_TOP - CLOUD_LAYER_BASE).toFixed(1)};
-      // Cheap fake lighting — no secondary shadow march toward the sun
-      // (real self-shadowing, but multiplies the cost several times
-      // over — not mobile-feasible in a single pass): brighter toward
-      // the cloud top (closer to open sky) and a forward-scattering
-      // boost when the view ray points toward the sun, the real
-      // "silver lining" look around a sun behind cloud edges.
-      float heightLight = mix(0.55, 1.15, layerT);
-      float forwardScatter = pow(max(dot(rayDir, uSunDir), 0.0), 3.0) * 0.6;
-      vec3 litColor = mix(uAmbientColor, uSunColor, clamp(heightLight * 0.6 + forwardScatter, 0.0, 1.0));
+      // Fundamentally bright white — real clouds are, under any real
+      // daylight — with the actual sun color blended in at a capped
+      // weight so they visibly shift warm at dawn/dusk (uSunColor
+      // already ranges from near-white at midday to deep orange near
+      // the horizon) without ever going fully dark/muddy like mixing
+      // toward the ambient light color did. Height/forward-scatter
+      // modulate brightness multiplicatively instead of replacing the
+      // color outright.
+      float heightLight = mix(0.75, 1.2, layerT);
+      float forwardScatter = pow(max(dot(rayDir, uSunDir), 0.0), 3.0) * 0.5;
+      vec3 tintedColor = mix(vec3(1.0), uSunColor, 0.4);
+      vec3 litColor = tintedColor * clamp(heightLight + forwardScatter, 0.55, 1.35);
 
-      float stepAlpha = clamp(density * stepSize * 0.06, 0.0, 1.0);
+      float stepAlpha = clamp(density * stepSize * 0.16, 0.0, 1.0);
       accumColor += litColor * stepAlpha * (1.0 - accumAlpha);
       accumAlpha += stepAlpha * (1.0 - accumAlpha);
     }
@@ -185,7 +188,7 @@ function createVolumetricClouds(scene) {
       uSunDir: { value: new THREE.Vector3(0, 1, 0) },
       uSunColor: { value: new THREE.Color(0xfff4e0) },
       uAmbientColor: { value: new THREE.Color(0x8899bb) },
-      uCoverage: { value: 0.55 },
+      uCoverage: { value: 0.62 },
       uDensity: { value: 1.0 },
       uOpacityMul: { value: 1.0 },
     },

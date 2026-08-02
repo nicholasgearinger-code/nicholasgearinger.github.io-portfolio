@@ -469,9 +469,10 @@ function bandedSkyColor(t, horizonColor, zenithColor, out) {
   return out;
 }
 
-function updateSkyDome(sky, zenithColor, horizonColor, elapsed) {
+function updateSkyDome(sky, zenithColor, horizonColor, elapsed, sunDir) {
   const { posAttr, colorAttr } = sky;
   const tmp = new THREE.Color();
+  const glowColor = new THREE.Color(0xfff3d6);
   for (let i = 0; i < posAttr.count; i++) {
     const x = posAttr.getX(i), y = posAttr.getY(i), z = posAttr.getZ(i);
     const yFrac = y / SKY_DOME_RADIUS; // -1 (bottom) to 1 (top)
@@ -506,6 +507,20 @@ function updateSkyDome(sky, zenithColor, horizonColor, elapsed) {
     if (streak > 0.58) {
       const s = Math.min(1, (streak - 0.58) / 0.35);
       tmp.multiplyScalar(1 - s * 0.42);
+    }
+
+    // Real sun-centered glow — the sky is genuinely brightest right
+    // around the sun's own position and fades outward from there, not
+    // just banded by height regardless of where the sun actually is.
+    // dot-product closeness to the real sun direction (not a fixed
+    // "near the horizon" assumption), so the glow visibly moves with
+    // the sun across the whole sky, including up near the zenith at
+    // midday.
+    if (sunDir) {
+      const len = Math.hypot(x, y, z) || 1;
+      const closeness = (x / len) * sunDir.x + (y / len) * sunDir.y + (z / len) * sunDir.z; // -1..1
+      const glow = Math.pow(Math.max(0, closeness), 5) * 0.85; // sharp falloff — a real glow concentrates near the sun, not a broad wash across the whole sky
+      if (glow > 0.001) tmp.lerp(glowColor, Math.min(1, glow));
     }
 
     tmp.toArray(colorAttr.array, i * 3);
@@ -622,7 +637,9 @@ function updateDayNightCycle(cycle, dt) {
   // bottom edge. Copying skyHorizon directly makes them identical by
   // construction — nothing left to mismatch.
   cycle.scene.fog.color.copy(skyHorizon);
-  updateSkyDome(cycle.sky, skyZenith, skyHorizon, cycle.elapsed);
+  const sunDirLen = Math.hypot(sunOrbit.x, sunOrbit.y, 80) || 1;
+  const sunDirForSky = { x: sunOrbit.x / sunDirLen, y: sunOrbit.y / sunDirLen, z: 80 / sunDirLen };
+  updateSkyDome(cycle.sky, skyZenith, skyHorizon, cycle.elapsed, sunDirForSky);
 
   // Each body fades out once it's below the horizon rather than just
   // disappearing at exactly elevation=0, so setting/rising reads as a

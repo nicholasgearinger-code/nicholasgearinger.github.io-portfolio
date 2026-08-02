@@ -105,6 +105,18 @@ const graphicsPanel = document.getElementById("rift-graphics-panel");
 const arrivalOverlay = document.getElementById("rift-arrival");
 const arrivalNameEl = document.getElementById("rift-arrival-name");
 
+// A real, live FPS counter — plain DOM overlay rather than rendering
+// text into the 3D scene (far cheaper, and easier to read while judging
+// exactly the kind of performance issue this exists to measure).
+// Updated a few times a second, not every single frame — updating DOM
+// text every frame would itself add overhead and the number would be
+// too jittery to read anyway.
+const fpsCounterEl = document.createElement("div");
+fpsCounterEl.style.cssText = "position:fixed;top:8px;left:8px;z-index:9999;font:12px/1.4 monospace;color:#7fffa0;background:rgba(0,0,0,0.55);padding:3px 7px;border-radius:4px;pointer-events:none;";
+fpsCounterEl.textContent = "-- fps";
+viewport.appendChild(fpsCounterEl);
+let fpsFrameCount = 0, fpsAccumTime = 0;
+
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x0a0e14, 0.0032);
 
@@ -167,7 +179,7 @@ function resizeToViewport() {
   renderer.setSize(w, h);
   const pixelRatio = renderer.getPixelRatio();
   underwaterRenderTarget.setSize(w * pixelRatio, h * pixelRatio);
-  cloudRenderTarget.setSize(Math.max(1, Math.round(w * pixelRatio * 0.5)), Math.max(1, Math.round(h * pixelRatio * 0.5)));
+  cloudRenderTarget.setSize(Math.max(1, Math.round(w * pixelRatio * 0.4)), Math.max(1, Math.round(h * pixelRatio * 0.4))); // was 0.5 — cut further per "still lagging" report even after the first downsampling pass
 }
 new ResizeObserver(resizeToViewport).observe(viewport);
 
@@ -177,7 +189,7 @@ new ResizeObserver(resizeToViewport).observe(viewport);
 // fragment shader is expensive enough (24 steps, each sampling FBM+
 // Worley noise) that running it at full screen resolution is real,
 // avoidable cost. Clouds are inherently soft/blurry, so downsampling to
-// half-res and upscaling on composite costs a quarter of the full-res
+// half-res and upscaling on composite costs a fraction of the full-res
 // fragment work with no meaningfully visible quality loss — this is the
 // standard technique real games use for exactly this kind of expensive
 // volumetric/soft effect. On Low/Medium (no volumetricCloudsHandle),
@@ -1745,6 +1757,14 @@ function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.1);
   elapsedTime += dt;
+
+  fpsFrameCount++;
+  fpsAccumTime += dt;
+  if (fpsAccumTime >= 0.5) {
+    fpsCounterEl.textContent = Math.round(fpsFrameCount / fpsAccumTime) + " fps";
+    fpsFrameCount = 0;
+    fpsAccumTime = 0;
+  }
 
   const dayNight = updateDayNightCycle(dayNightCycle, dt);
 

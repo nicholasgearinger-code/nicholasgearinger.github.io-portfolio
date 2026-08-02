@@ -60,11 +60,12 @@ float valueNoise3(vec3 p) {
   float nxy0 = mix(nx00, nx10, f.y), nxy1 = mix(nx01, nx11, f.y);
   return mix(nxy0, nxy1, f.z);
 }
-// 3 octaves — a real cost/quality tradeoff. This is the first knob to
-// cut (down to 2) if performance is a problem.
+// 2 octaves (was 3) — cut per explicit "still lagging" report even after
+// half-res compositing. A real, visible softening of fine noise detail,
+// but clouds are meant to look soft anyway.
 float fbm3(vec3 p) {
   float sum = 0.0, amp = 0.5, freq = 1.0;
-  for (int i = 0; i < 3; i++) {
+  for (int i = 0; i < 2; i++) {
     sum += valueNoise3(p * freq) * amp;
     freq *= 2.02;
     amp *= 0.5;
@@ -139,9 +140,11 @@ void main() {
   tFar = min(tFar, 3000.0);
   if (tFar <= tNear) discard;
 
-  // 24 steps — the single biggest cost/quality lever in this whole
-  // shader. Cut this first if performance is a problem.
-  const int STEPS = 24;
+  // 14 steps (was 24, was already flagged as the biggest cost lever) —
+  // cut hard per explicit "still lagging" report even after half-res
+  // compositing. More visible step banding is possible at this count;
+  // the dithered start offset below helps hide it.
+  const int STEPS = 14;
   float stepSize = (tFar - tNear) / float(STEPS);
   // Dithered start offset (a cheap screen-space hash) — breaks up visible
   // banding between fixed march steps, standard ray-march trick.

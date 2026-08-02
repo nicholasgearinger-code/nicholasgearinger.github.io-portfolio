@@ -465,10 +465,30 @@ function createSkyDome(scene) {
 function updateSkyDome(sky, zenithColor, midColor, horizonColor, elapsed, sunDir) {
   const { posAttr, colorAttr } = sky;
   const tmp = new THREE.Color();
+  const localHorizon = new THREE.Color();
+  const localMid = new THREE.Color();
   const glowColor = new THREE.Color(0xfff3d6);
   for (let i = 0; i < posAttr.count; i++) {
     const x = posAttr.getX(i), y = posAttr.getY(i), z = posAttr.getZ(i);
     const yFrac = y / SKY_DOME_RADIUS; // -1 (bottom) to 1 (top)
+    // Real sunset/sunrise color concentrates near the sun's own position
+    // around the horizon — the far side of the sky reads much more
+    // muted. Horizontal-only alignment (ignores height, that's handled
+    // by yFrac/t below) between this vertex's direction and the sun's,
+    // fairly wide so a real arc of sky around the sun lights up, not a
+    // pinpoint, fading to fully muted well before the opposite horizon.
+    let azimuthCloseness = 1;
+    if (sunDir) {
+      const vLen = Math.hypot(x, z) || 1;
+      const sunLen = Math.hypot(sunDir.x, sunDir.z) || 1;
+      const azAlign = (x / vLen) * (sunDir.x / sunLen) + (z / vLen) * (sunDir.z / sunLen); // -1..1
+      azimuthCloseness = THREE.MathUtils.clamp((azAlign + 0.3) / 1.3, 0, 1);
+    }
+    // Muted fallback leans toward the zenith color rather than a fully
+    // separate neutral gray — keeps the away-from-sun sky looking like
+    // part of the same sky, just without the sun's own dramatic color.
+    localHorizon.copy(horizonColor).lerp(zenithColor, 0.6 * (1 - azimuthCloseness));
+    localMid.copy(midColor).lerp(zenithColor, 0.6 * (1 - azimuthCloseness));
     // Concentrates the gradient near the horizon band rather than
     // spreading it evenly top-to-bottom — real skies change fastest right
     // at the horizon (more atmosphere traversed at a grazing angle), not
@@ -484,9 +504,9 @@ function updateSkyDome(sky, zenithColor, midColor, horizonColor, elapsed, sunDir
     // reference photo) show a genuinely more saturated pink/magenta band
     // partway up, not just the midpoint average of the two ends.
     if (t < 0.5) {
-      tmp.copy(horizonColor).lerp(midColor, t * 2);
+      tmp.copy(localHorizon).lerp(localMid, t * 2);
     } else {
-      tmp.copy(midColor).lerp(zenithColor, (t - 0.5) * 2);
+      tmp.copy(localMid).lerp(zenithColor, (t - 0.5) * 2);
     }
 
     // Jagged dark streaks cutting across the bands — the reference's
@@ -549,7 +569,7 @@ function createDayNightCycle(scene, sun, ambient, starfield, biome) {
   // 14/40/0.6 vs 9/22/0.32 — pushed further apart) — the sun should read
   // as the dominant light source at a glance, not just via the actual
   // DirectionalLight intensity numbers below.
-  const sunBody = createBody(scene, sunStarburstTexture, createSunTexture(), 15, 0xffcf80, 62, 0.55); // opacity was 0.8 — too strong combined with the horizon-closeness size boost below
+  const sunBody = createBody(scene, sunStarburstTexture, createSunTexture(), 9, 0xffcf80, 34, 0.5); // core radius was 15, glow radius 62 — too large/dominant even at the minimum (noon) size; should read as a small bright orb, not a big soft glow filling the sky
   const moonBody = createBody(scene, glowTexture, createMoonTexture(), 8, 0xaebedd, 18, 0.22);
   const sunBeams = createSunBeams(scene, createBeamTexture());
   const sky = createSkyDome(scene);
@@ -676,9 +696,9 @@ function updateDayNightCycle(cycle, dt) {
     : SUN_BODY_MID.clone().lerp(SUN_BODY_HORIZON, (horizonCloseness - 0.5) * 2);
   cycle.sunBody.core.material.color.copy(sunBodyTint);
   cycle.sunBody.glow.material.color.copy(sunBodyTint);
-  const sunSizeBoost = 1 + horizonCloseness * 0.7;
+  const sunSizeBoost = 1 + horizonCloseness * 0.3; // was *0.7 — with a smaller base size now, color is the primary sunset signal, not the sun ballooning in size
   cycle.sunBody.core.scale.setScalar(sunSizeBoost);
-  cycle.sunBody.glow.scale.setScalar(cycle.sunBody.baseGlowScale * sunSizeBoost * (1 + horizonCloseness * 0.25)); // was *0.5 — glow spreads a bit more than the core disc itself grows, but that extra multiplier was compounding into an overly dominant effect near the horizon
+  cycle.sunBody.glow.scale.setScalar(cycle.sunBody.baseGlowScale * sunSizeBoost * (1 + horizonCloseness * 0.15)); // was *0.25
 
   // Rays peak just above the horizon (the classic crepuscular-ray moment)
   // and taper off toward both full night and flat overhead noon light,

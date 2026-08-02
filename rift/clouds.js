@@ -68,11 +68,17 @@ function createCloud(scene, style, flatten = 1) {
       depthWrite: false, fog: true,
     });
     const sprite = new THREE.Sprite(mat);
-    const s = style.scale * (0.6 + Math.random() * 0.7);
+    // Independently varied X/Y scale (was one value used for both,
+    // making every puff a perfect circle) plus a random in-plane
+    // rotation — elongated/squashed ellipses at random orientations
+    // read as far more organic than a cluster of uniform circles.
+    const sX = style.scale * (0.6 + Math.random() * 0.7);
+    const sY = style.scale * (0.5 + Math.random() * 0.75) * flatten;
+    sprite.material.rotation = Math.random() * Math.PI * 2;
     const baseLocalX = (Math.random() - 0.5) * style.scale * 1.4;
     const baseLocalZ = (Math.random() - 0.5) * style.scale * 1.4;
-    sprite.userData.baseScaleX = s;
-    sprite.userData.baseScaleY = s * flatten;
+    sprite.userData.baseScaleX = sX;
+    sprite.userData.baseScaleY = sY;
     sprite.userData.baseLocalX = baseLocalX;
     sprite.userData.baseLocalZ = baseLocalZ;
     // Real clouds reform gradually — minutes, not seconds. driftSpeed
@@ -89,8 +95,12 @@ function createCloud(scene, style, flatten = 1) {
     // storm-thickened cloud grows unevenly (real storm clouds bulge and
     // pile up, they don't scale uniformly like a balloon).
     sprite.userData.stormGrowth = 0.5 + Math.random() * 0.7;
-    sprite.scale.set(s, s * flatten, 1); // flatten<1 spreads wide and low instead of puffy — this is what turns the same technique into a ground fog bank
-    sprite.position.set(baseLocalX, (Math.random() - 0.5) * style.scale * 0.35 * flatten, baseLocalZ);
+    sprite.scale.set(sX, sY, 1); // flatten<1 spreads wide and low instead of puffy — this is what turns the same technique into a ground fog bank
+    const localYRange = style.scale * 0.175 * flatten;
+    const localY = (Math.random() - 0.5) * localYRange * 2;
+    sprite.userData.localY = localY;
+    sprite.userData.localYRange = localYRange || 1; // guard divide-by-zero for the fully-flat ground fog case
+    sprite.position.set(baseLocalX, localY, baseLocalZ);
     group.add(sprite);
     sprites.push(sprite);
   }
@@ -119,6 +129,9 @@ function createClouds(scene, biome) {
   return { clouds, style, groundFog, fogStyle, biome, windOffsetX: 0, windOffsetZ: 0, elapsed: 0 };
 }
 
+const _cloudToSun = new THREE.Vector3();
+const _cloudToCam = new THREE.Vector3();
+
 /**
  * @param {{windX:number, windZ:number}} wind
  * @param {number} dayAmount  0..1, from the day/night cycle — clouds read
@@ -126,11 +139,14 @@ function createClouds(scene, biome) {
  * @param {number} rainIntensity  0..1 — storm clouds darken while it's
  *   actually raining, not just sit there looking identical to a clear day
  * @param {THREE.Color} [skyHorizonColor]  the day/night cycle's own current
- *   horizon color — clouds blend toward it, so they pick up the same real
- *   sunrise/sunset warmth (or night blue) the sky itself is already
- *   showing, instead of only ever displaying their flat base tint.
+ *   horizon color
+ * @param {THREE.Vector3} [sunPos]  the sun body's current world position —
+ *   only clouds actually near this direction (as seen from the camera)
+ *   pick up the horizon/accent color shift, like real clouds do (the sky
+ *   glows dramatically right around the sun, not uniformly everywhere)
+ * @param {THREE.Vector3} [cameraPos]
  */
-function updateClouds(handle, dt, wind, dayAmount, rainIntensity, skyHorizonColor) {
+function updateClouds(handle, dt, wind, dayAmount, rainIntensity, skyHorizonColor, sunPos, cameraPos) {
   if (!handle) return;
   const { clouds, style, groundFog, fogStyle, biome } = handle;
   handle.elapsed += dt;
@@ -157,6 +173,22 @@ function updateClouds(handle, dt, wind, dayAmount, rainIntensity, skyHorizonColo
     // further away, so the same wind speed reads as more sluggish motion.
     if (Math.abs(cloud.group.position.x) > style.spread) cloud.group.position.x = -Math.sign(cloud.group.position.x) * style.spread;
     if (Math.abs(cloud.group.position.z) > style.spread) cloud.group.position.z = -Math.sign(cloud.group.position.z) * style.spread;
+    // How close THIS cloud is to the sun's actual current direction, as
+    // seen from the camera — 0 well away from it, ramping to 1 dead-on.
+    // A fairly wide cone (not a pinpoint) so a real cluster of clouds
+    // "surrounding" the sun lights up together, not just one lucky cloud
+    // exactly in the crosshair.
+    let sunProximity = 0;
+    if (sunPos && cameraPos) {
+      _cloudToCam.subVectors(cloud.group.position, cameraPos);
+      const distToCam = _cloudToCam.length();
+      if (distToCam > 1) {
+        _cloudToCam.multiplyScalar(1 / distToCam);
+        _cloudToSun.subVectors(sunPos, cameraPos).normalize();
+        const alignment = _cloudToCam.dot(_cloudToSun);
+        sunProximity = THREE.MathUtils.clamp((alignment - 0.45) / 0.5, 0, 1);
+      }
+    }
     for (const sprite of cloud.sprites) {
       sprite.material.opacity = cloud.baseOpacity * lightFactor * stormDarken * nightFade;
       // Slow wander within the cloud — each puff drifts around its own
@@ -174,23 +206,28 @@ function updateClouds(handle, dt, wind, dayAmount, rainIntensity, skyHorizonColo
       // storm passes.
       const stormGrow = 1 + storm * sprite.userData.stormGrowth * 0.5;
       sprite.scale.set(sprite.userData.baseScaleX * stormGrow, sprite.userData.baseScaleY * stormGrow, 1);
-      if (skyHorizonColor) {
-        // A real cloud is mostly reflecting the sky/sun color around it,
-        // not showing its own fixed pigment — blending toward the
-        // horizon color (capped well under 1 so the cloud's own base
-        // tint, e.g. Abyssal's dark heavy grey, still reads through)
-        // is what makes clouds glow pink/orange at sunset and read cool
-        // blue-grey at night, all from the one already-correct sky
-        // color system instead of a second one duplicated here.
-        sprite.material.color.copy(cloud.baseColor).lerp(skyHorizonColor, 0.55);
-        // Extra vibrant push during actual dawn/dusk — each cloud blends
-        // toward its OWN assigned accent color (see DAWN_DUSK_ACCENTS)
-        // rather than every cloud converging on the identical single
-        // horizon color, so the sky shows real purple/orange/red/pink
-        // variety at once instead of one uniform tint. Inert (warmth=0)
-        // outside the actual dawn/dusk window.
-        if (warmth > 0) sprite.material.color.lerp(cloud.accentColor, warmth * 0.65);
+      // Only clouds actually near the sun shift color at all — real
+      // atmospheric glow is concentrated around the sun's own position,
+      // not a flat tint applied to the entire sky uniformly. Clouds
+      // elsewhere just stay their base color.
+      sprite.material.color.copy(cloud.baseColor);
+      if (skyHorizonColor && sunProximity > 0) {
+        sprite.material.color.lerp(skyHorizonColor, 0.55 * sunProximity);
+        // Extra vibrant push right around the sun during actual dawn/
+        // dusk — each cloud blends toward its OWN assigned accent color
+        // (see DAWN_DUSK_ACCENTS), so the glow around the sun shows real
+        // purple/orange/red/pink variety rather than one uniform tint.
+        // Inert (warmth=0) outside the actual dawn/dusk window.
+        if (warmth > 0) sprite.material.color.lerp(cloud.accentColor, warmth * sunProximity * 0.75);
       }
+      // Cheap fake self-shadowing — real clouds are lit from above/the
+      // sun's side and darker underneath; a flat-tinted billboard cluster
+      // doesn't show that at all. No shader, no extra render cost — just
+      // a brightness multiply on a color already being written this
+      // frame, using each puff's own fixed local height (set once at
+      // creation) to know whether it's near the top or bottom.
+      const heightT = (sprite.userData.localY / sprite.userData.localYRange + 1) / 2; // 0 at the bottom, 1 at the top
+      sprite.material.color.multiplyScalar(0.8 + heightT * 0.35);
     }
   }
 

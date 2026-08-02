@@ -237,7 +237,7 @@ function createMoonPhaseTexture(phaseT) {
   canvas.width = size; canvas.height = size;
   const ctx = canvas.getContext("2d");
   const cx = size / 2, cy = size / 2, r = size * 0.49;
-  const darkColor = "#141a28";
+  const darkColor = "#05070d"; // was #141a28 — that light navy was clearly visible as a circle outline against the star field instead of blending into space
   const litColor = "#dbe4f4";
 
   ctx.save();
@@ -520,7 +520,7 @@ function updateSkyDome(sky, zenithColor, midColor, horizonColor, elapsed, sunDir
   // real hue), so the glow near the sun reads as a bright, saturated
   // version of the real sunset color instead of overpowering it with an
   // unrelated pale tone.
-  const glowColor = horizonColor.clone().lerp(new THREE.Color(0xffffff), 0.3);
+  const glowColor = horizonColor.clone().lerp(new THREE.Color(0xffffff), 0.12); // was 0.3 toward white — diluted the vivid orange too much right where it should be most intense
   // Genuinely desaturated (luminance-based grayscale, not "toward
   // zenithColor") versions of horizon/mid, computed once per frame
   // rather than per-vertex. Blending "muted, away from the sun" sky
@@ -615,7 +615,7 @@ function updateSkyDome(sky, zenithColor, midColor, horizonColor, elapsed, sunDir
     if (sunDir) {
       const len = Math.hypot(x, y, z) || 1;
       const closeness = (x / len) * sunDir.x + (y / len) * sunDir.y + (z / len) * sunDir.z; // -1..1
-      const glow = Math.pow(Math.max(0, closeness), 2.2) * 0.55; // was pow 5 — that steep a falloff, evaluated only at the sky dome's sparse vertices then linearly interpolated across each triangle, was creating a faceted/star-like sparkle artifact right at the sun instead of a smooth glow
+      const glow = Math.pow(Math.max(0, closeness), 2.2) * 0.75; // was 0.55 — a more intense, vibrant push right around the sun per explicit request
       if (glow > 0.001) tmp.lerp(glowColor, Math.min(1, glow));
     }
 
@@ -751,11 +751,6 @@ function updateDayNightCycle(cycle, dt) {
   // Tied to dayAmount instead — fades out as the sun actually rises, and
   // fades back in as it sets, independent of the moon's own position.
   const moonVisibility = THREE.MathUtils.clamp(1 - dayAmount / 0.35, 0, 1);
-  cycle.sunBody.core.material.opacity = sunVisibility;
-  cycle.sunBody.glow.material.opacity = cycle.sunBody.baseGlowOpacity * sunVisibility;
-  cycle.moonBody.core.material.opacity = moonVisibility;
-  cycle.moonBody.glow.material.opacity = cycle.moonBody.baseGlowOpacity * moonVisibility;
-
   // Real lunar phases — regenerated only when the discretized phase step
   // actually changes (32 steps across the full cycle), not every frame;
   // repainting a canvas and re-uploading a texture every frame for
@@ -769,6 +764,17 @@ function updateDayNightCycle(cycle, dt) {
     cycle.moonBody.core.material.needsUpdate = true;
     if (oldMap) oldMap.dispose();
   }
+  // How much of the disc is actually lit right now (0 at new moon, 1 at
+  // full) — the glow halo behind the moon was a full round glow
+  // regardless of phase, which visually gave away the "missing" dark
+  // portion of a crescent even with the phase texture correctly painted.
+  // A real crescent moon barely glows at all compared to a full one.
+  const moonIllum = (1 - Math.cos(moonPhaseT * Math.PI * 2)) / 2;
+
+  cycle.sunBody.core.material.opacity = sunVisibility;
+  cycle.sunBody.glow.material.opacity = cycle.sunBody.baseGlowOpacity * sunVisibility;
+  cycle.moonBody.core.material.opacity = moonVisibility;
+  cycle.moonBody.glow.material.opacity = cycle.moonBody.baseGlowOpacity * moonVisibility * (0.15 + moonIllum * 0.85);
 
   // The sun's own visual disc and glow — not just the directional
   // light's color — shift through the day too, per the explicit
@@ -780,7 +786,7 @@ function updateDayNightCycle(cycle, dt) {
   // Two-stage lerp (zenith->gold->horizon-red) for a richer progression
   // than a single flat blend, matching the reference's many visible
   // in-between stages rather than just two extremes.
-  const horizonCloseness = THREE.MathUtils.clamp(1 - Math.abs(sunOrbit.elevation) / 0.3, 0, 1); // was /0.55 — that window kept the sun orange-tinted well past sunrise instead of shifting to white promptly once the sun actually clears the horizon
+  const horizonCloseness = THREE.MathUtils.clamp(1 - Math.abs(sunOrbit.elevation) / 0.16, 0, 1); // was /0.3 — still showing visible orange tint well above the horizon per screenshot feedback; narrowed further so it commits to pure white sooner
   const sunBodyTint = horizonCloseness < 0.5
     ? SUN_BODY_ZENITH.clone().lerp(SUN_BODY_MID, horizonCloseness * 2)
     : SUN_BODY_MID.clone().lerp(SUN_BODY_HORIZON, (horizonCloseness - 0.5) * 2);

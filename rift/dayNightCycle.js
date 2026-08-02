@@ -22,15 +22,21 @@ const SKY_DOME_RADIUS = 900;
 // not a hard switch, so sunrise/sunset reads as its own moment.
 const NIGHT = {
   sun: 0x22304a, sunIntensity: 0.05, ambient: 0x1a2438, ambientIntensity: 0.13,
-  skyZenith: 0x05070f, skyHorizon: 0x141a2c,
+  skyZenith: 0x05070f, skyMid: 0x0e1526, skyHorizon: 0x141a2c,
 };
 const DAWN_DUSK = {
   sun: 0xff7a3a, sunIntensity: 0.75, ambient: 0x4a3550, ambientIntensity: 0.45,
-  skyZenith: 0x2a2138, skyHorizon: 0xff6a42,
+  // A direct zenith->horizon lerp (dark purple -> vivid orange) lands on
+  // a dull brick-red in the middle, mathematically, not the vivid pink
+  // the real sky shows there — real skies aren't a 2-color blend, the
+  // middle band genuinely is its own more saturated hue (light
+  // scattering more at that particular angle), not just an average of
+  // the two ends.
+  skyZenith: 0x2a2138, skyMid: 0xd6558a, skyHorizon: 0xff6a42,
 };
 const DAY = {
   sun: 0xfff4e0, sunIntensity: 2.0, ambient: 0x8899bb, ambientIntensity: 0.5,
-  skyZenith: 0x1c3a5e, skyHorizon: 0x8fb8d6,
+  skyZenith: 0x1c3a5e, skyMid: 0x4f79a8, skyHorizon: 0x8fb8d6,
 };
 
 // The sun's own visual disc/glow color at three stages — zenith (high,
@@ -166,13 +172,13 @@ function createSunStarburstTexture() {
   for (let i = 0; i < spikeCount; i++) {
     const angle = (i / spikeCount) * Math.PI * 2;
     const isLong = i % 2 === 0; // alternating long/short spikes, not a uniform starburst
-    const length = size * (isLong ? 0.5 : 0.34);
-    const halfWidth = size * (isLong ? 0.05 : 0.035);
+    const length = size * (isLong ? 0.36 : 0.22); // was 0.5/0.34 — spikes were reading as an overpowering star shape rather than a subtle glow
+    const halfWidth = size * (isLong ? 0.04 : 0.028);
     ctx.save();
     ctx.translate(cx, cy);
     ctx.rotate(angle);
     const grad = ctx.createLinearGradient(0, 0, length, 0);
-    grad.addColorStop(0, "rgba(255,255,255,0.9)");
+    grad.addColorStop(0, "rgba(255,255,255,0.55)"); // was 0.9 — much less overpowering
     grad.addColorStop(1, "rgba(255,255,255,0)");
     ctx.fillStyle = grad;
     ctx.beginPath();
@@ -456,7 +462,7 @@ function createSkyDome(scene) {
 // orange -> cream), not a soft blend. Same posterize-with-a-seam-line
 // technique terrain.js's HEIGHT_PALETTE already uses, applied here to the
 // horizon->zenith gradient instead of a height gradient.
-function updateSkyDome(sky, zenithColor, horizonColor, elapsed, sunDir) {
+function updateSkyDome(sky, zenithColor, midColor, horizonColor, elapsed, sunDir) {
   const { posAttr, colorAttr } = sky;
   const tmp = new THREE.Color();
   const glowColor = new THREE.Color(0xfff3d6);
@@ -471,7 +477,17 @@ function updateSkyDome(sky, zenithColor, horizonColor, elapsed, sunDir) {
     // sun/atmosphere rather than flat color regions with a seam between
     // them.
     const t = THREE.MathUtils.clamp((yFrac + 0.1) / 0.45, 0, 1);
-    tmp.copy(horizonColor).lerp(zenithColor, t);
+    // Real 3-stop gradient (horizon -> mid -> zenith) instead of a direct
+    // 2-color lerp — a straight lerp between DAWN_DUSK's dark purple
+    // zenith and vivid orange horizon mathematically lands on a dull
+    // brick-red in the middle; real skies (and this effect's own
+    // reference photo) show a genuinely more saturated pink/magenta band
+    // partway up, not just the midpoint average of the two ends.
+    if (t < 0.5) {
+      tmp.copy(horizonColor).lerp(midColor, t * 2);
+    } else {
+      tmp.copy(midColor).lerp(zenithColor, (t - 0.5) * 2);
+    }
 
     // Jagged dark streaks cutting across the bands — the reference's
     // cloud/ridge silhouettes. Low frequency around the dome's longitude
@@ -533,7 +549,7 @@ function createDayNightCycle(scene, sun, ambient, starfield, biome) {
   // 14/40/0.6 vs 9/22/0.32 — pushed further apart) — the sun should read
   // as the dominant light source at a glance, not just via the actual
   // DirectionalLight intensity numbers below.
-  const sunBody = createBody(scene, sunStarburstTexture, createSunTexture(), 15, 0xffcf80, 62, 0.8);
+  const sunBody = createBody(scene, sunStarburstTexture, createSunTexture(), 15, 0xffcf80, 62, 0.55); // opacity was 0.8 — too strong combined with the horizon-closeness size boost below
   const moonBody = createBody(scene, glowTexture, createMoonTexture(), 8, 0xaebedd, 18, 0.22);
   const sunBeams = createSunBeams(scene, createBeamTexture());
   const sky = createSkyDome(scene);
@@ -566,7 +582,7 @@ function updateDayNightCycle(cycle, dt) {
 
   // Blend NIGHT -> DAWN_DUSK -> DAY -> DAWN_DUSK -> NIGHT across elevation.
   const dayAmount = Math.max(0, elevation);       // 0 at/below horizon, 1 at noon
-  let sunColor, ambientColor, skyZenith, skyHorizon, sunIntensity, ambientIntensity;
+  let sunColor, ambientColor, skyZenith, skyMid, skyHorizon, sunIntensity, ambientIntensity;
   if (elevation <= 0) {
     // night -> dawn/dusk as the sun approaches the horizon from below.
     // Widened from 0.35 to 0.4 — sunrise/sunset should read as a real
@@ -576,6 +592,7 @@ function updateDayNightCycle(cycle, dt) {
     sunColor = lerpColor(NIGHT.sun, DAWN_DUSK.sun, k);
     ambientColor = lerpColor(NIGHT.ambient, DAWN_DUSK.ambient, k);
     skyZenith = lerpColor(NIGHT.skyZenith, DAWN_DUSK.skyZenith, k);
+    skyMid = lerpColor(NIGHT.skyMid, DAWN_DUSK.skyMid, k);
     skyHorizon = lerpColor(NIGHT.skyHorizon, DAWN_DUSK.skyHorizon, k);
     sunIntensity = THREE.MathUtils.lerp(NIGHT.sunIntensity, DAWN_DUSK.sunIntensity, k);
     ambientIntensity = THREE.MathUtils.lerp(NIGHT.ambientIntensity, DAWN_DUSK.ambientIntensity, k);
@@ -585,6 +602,7 @@ function updateDayNightCycle(cycle, dt) {
     sunColor = lerpColor(DAWN_DUSK.sun, DAY.sun, k);
     ambientColor = lerpColor(DAWN_DUSK.ambient, DAY.ambient, k);
     skyZenith = lerpColor(DAWN_DUSK.skyZenith, DAY.skyZenith, k);
+    skyMid = lerpColor(DAWN_DUSK.skyMid, DAY.skyMid, k);
     skyHorizon = lerpColor(DAWN_DUSK.skyHorizon, DAY.skyHorizon, k);
     sunIntensity = THREE.MathUtils.lerp(DAWN_DUSK.sunIntensity, DAY.sunIntensity, k);
     ambientIntensity = THREE.MathUtils.lerp(DAWN_DUSK.ambientIntensity, DAY.ambientIntensity, k);
@@ -630,7 +648,7 @@ function updateDayNightCycle(cycle, dt) {
   cycle.scene.fog.color.copy(skyHorizon);
   const sunDirLen = Math.hypot(sunOrbit.x, sunOrbit.y, 80) || 1;
   const sunDirForSky = { x: sunOrbit.x / sunDirLen, y: sunOrbit.y / sunDirLen, z: 80 / sunDirLen };
-  updateSkyDome(cycle.sky, skyZenith, skyHorizon, cycle.elapsed, sunDirForSky);
+  updateSkyDome(cycle.sky, skyZenith, skyMid, skyHorizon, cycle.elapsed, sunDirForSky);
 
   // Each body fades out once it's below the horizon rather than just
   // disappearing at exactly elevation=0, so setting/rising reads as a
@@ -660,7 +678,7 @@ function updateDayNightCycle(cycle, dt) {
   cycle.sunBody.glow.material.color.copy(sunBodyTint);
   const sunSizeBoost = 1 + horizonCloseness * 0.7;
   cycle.sunBody.core.scale.setScalar(sunSizeBoost);
-  cycle.sunBody.glow.scale.setScalar(cycle.sunBody.baseGlowScale * sunSizeBoost * (1 + horizonCloseness * 0.5)); // glow spreads out (hazier) a bit more than the core disc itself grows
+  cycle.sunBody.glow.scale.setScalar(cycle.sunBody.baseGlowScale * sunSizeBoost * (1 + horizonCloseness * 0.25)); // was *0.5 — glow spreads a bit more than the core disc itself grows, but that extra multiplier was compounding into an overly dominant effect near the horizon
 
   // Rays peak just above the horizon (the classic crepuscular-ray moment)
   // and taper off toward both full night and flat overhead noon light,

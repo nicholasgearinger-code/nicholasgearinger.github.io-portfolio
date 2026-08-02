@@ -3,7 +3,7 @@ import { PointerLockControls } from "three/addons/controls/PointerLockControls.j
 import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH, POND_Z, POND_RADIUS, POND_LEVEL, RAMP_CENTER_X, RAMP_CENTER_Z, RAMP_LENGTH, RAMP_HALF_WIDTH, ROOM_FLOOR_Y, ROOM_WIDTH, ROOM_LENGTH, BRANCH_START_X, BRANCH_LENGTH, BRANCH_HALF_WIDTH, BRANCH_Z, CHAMBER_RADIUS } from "./terrain.js";
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
-import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, updateLightShafts, disposeLightShafts, createRockCluster, createCaveMouth, applyVerticalGradient } from "./decorations.js";
+import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, createUnderwaterLightShaft, updateLightShafts, disposeLightShafts, createRockCluster, createCaveMouth, applyVerticalGradient } from "./decorations.js";
 import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSpray, updateOceanSpray, disposeOceanSpray, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail } from "./liquid.js";
 import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
@@ -653,6 +653,20 @@ vec2 causticVoronoiF1F2(vec2 p) {
     }
   }
   return vec2(f1, f2);
+}
+// Real Gerstner wave height, evaluated directly above this floor point —
+// mirrors liquid.js's own GERSTNER_WAVES exactly (same wavelength/speed/
+// amplitude per component), so the caustic pattern below is driven by
+// the ACTUAL moving ocean surface overhead rather than independent,
+// unrelated drift constants. Height-only (no horizontal displacement) —
+// that's all the caustic pattern needs.
+float gerstnerHeight(vec2 xz, float t) {
+  float h = 0.0;
+  h += 0.42 * sin(0.15708 * dot(normalize(vec2(1.0, 0.3)), xz) - 1.75 * t);
+  h += 0.24 * sin(0.26180 * dot(normalize(vec2(0.3, 1.0)), xz) - 2.5 * t);
+  h += 0.13 * sin(0.48332 * dot(normalize(vec2(-0.7, 0.5)), xz) - 3.4 * t);
+  h += 0.06 * sin(0.89760 * dot(normalize(vec2(0.6, -0.65)), xz) - 4.6 * t);
+  return h; // range roughly [-0.85, 0.85] — matches GERSTNER_AMPLITUDE_SUM in liquid.js
 }`)
         .replace("#include <color_fragment>", `#include <color_fragment>
 {
@@ -660,15 +674,27 @@ vec2 causticVoronoiF1F2(vec2 p) {
   // Fades in over a 2-unit band right at the shoreline rather than a
   // hard cutoff — a real waterline isn't a knife-edge.
   float underwaterMask = smoothstep(uWaterLevel + 0.5, uWaterLevel - 1.5, vCausticWorldPos.y);
-  vec2 causticUv = vCausticWorldPos.xz * 0.4 + vec2(uTime * 0.05, -uTime * 0.04);
+  // Sample the real overhead wave height at this exact point — same
+  // formula, same phase, as the actual ocean surface mesh. This is what
+  // ties both the caustic pattern's drift AND its brightness to the real
+  // wave motion (speed AND height) instead of two independent things
+  // that only coincidentally looked similar.
+  float waveH = gerstnerHeight(vCausticWorldPos.xz, uTime);
+  float waveNorm = clamp((waveH + 0.85) / 1.7, 0.0, 1.0); // 0 at trough, 1 at crest
+  vec2 causticUv = vCausticWorldPos.xz * 0.4 + vec2(uTime * 0.05, -uTime * 0.04) + waveH * 0.18;
   vec2 v1 = causticVoronoiF1F2(causticUv);
   float edge1 = v1.y - v1.x;
-  vec2 causticUv2 = vCausticWorldPos.xz * 0.4 * 1.6 - vec2(uTime * 0.03, uTime * 0.045) + vec2(37.0, 12.0);
+  vec2 causticUv2 = vCausticWorldPos.xz * 0.4 * 1.6 - vec2(uTime * 0.03, uTime * 0.045) + vec2(37.0, 12.0) - waveH * 0.12;
   vec2 v2 = causticVoronoiF1F2(causticUv2);
   float edge2 = v2.y - v2.x;
   float net = (1.0 - smoothstep(0.0, 0.12, edge1)) * 0.75 + (1.0 - smoothstep(0.0, 0.09, edge2)) * 0.5;
   net = clamp(net, 0.0, 1.0);
-  float causticIntensity = net * underwaterMask * upwardFacing * 0.55;
+  // Real caustic light concentrates more directly under a wave crest
+  // (the crest briefly acts as a converging lens) than in a trough —
+  // crestFocus brightens the whole pattern there instead of a flat
+  // constant intensity everywhere regardless of the wave shape overhead.
+  float crestFocus = smoothstep(0.5, 1.0, waveNorm);
+  float causticIntensity = net * underwaterMask * upwardFacing * (0.32 + crestFocus * 0.42);
   diffuseColor.rgb += vec3(causticIntensity);
 }`);
       terrainMat.userData.shader = shader; // so the animate loop can push uTime each frame
@@ -1160,6 +1186,32 @@ vec2 causticVoronoiF1F2(vec2 p) {
       const groundY = sampleGroundHeight(x, z, terrainMesh) ?? 0;
       if (waterLevel !== undefined && groundY < waterLevel + 0.4) continue; // no light shafts shining out of the middle of the lake either
       const shaft = createLightShaft(x, z, groundY, shaftRand);
+      scene.add(shaft.sprite);
+      lightShaftHandles.push(shaft);
+    }
+  }
+
+  if (level.biome === "crystal") {
+    // Real sunbeams through shallow tropical water are numerous and
+    // overlapping, not sparse — deliberately a denser count than
+    // Verdant's canopy shafts (28). Anchored at the water surface,
+    // extending down toward the floor (see createUnderwaterLightShaft),
+    // only ever placed where the floor is actually underwater. Reuses
+    // lightShaftHandles/updateLightShafts/disposeLightShafts wholesale —
+    // updateLightShafts already scales opacity by dayAmount, so these
+    // fade in through the day and back out at night for free, with no
+    // separate update path needed.
+    const shaftRand = mulberry32(hashStringToSeed(WORLD_SEED + "-underwater-light-shafts-" + level.biome));
+    const shaftCount = 40;
+    const shaftBound = TERRAIN_SIZE * 0.46;
+    const waterY = LIQUID_LEVEL.crystal;
+    for (let i = 0; i < shaftCount; i++) {
+      const x = (shaftRand() * 2 - 1) * shaftBound;
+      const z = (shaftRand() * 2 - 1) * shaftBound;
+      if (Math.hypot(x, z) > shaftBound) continue;
+      const groundY = sampleGroundHeight(x, z, terrainMesh) ?? 0;
+      if (groundY >= waterY - 0.5) continue; // dry island / right at the shoreline — no underwater rays there
+      const shaft = createUnderwaterLightShaft(x, z, groundY, waterY, shaftRand);
       scene.add(shaft.sprite);
       lightShaftHandles.push(shaft);
     }

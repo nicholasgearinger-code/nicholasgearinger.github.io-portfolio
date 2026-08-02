@@ -1730,6 +1730,21 @@ function createLightShaft(x, z, groundY, rand) {
   return { sprite, baseOpacity: 0.3 + rand() * 0.25 };
 }
 
+function createUnderwaterLightShaft(x, z, groundY, waterY, rand) {
+  const mat = new THREE.SpriteMaterial({
+    map: getLightShaftTexture(), color: 0xbfe8ff, transparent: true, opacity: 0,
+    blending: THREE.AdditiveBlending, depthWrite: false, fog: true,
+    rotation: (rand() - 0.5) * 0.3,
+  });
+  const sprite = new THREE.Sprite(mat);
+  sprite.center.set(0.5, 1); // anchored at the top — the water surface — extending down toward the floor, not "canopy height" like the green forest version above
+  const depth = Math.max(1, waterY - groundY);
+  const length = Math.min(depth, 6 + rand() * 6); // real sunbeams fade out well before infinite depth — capped, and never longer than the actual local depth so it doesn't visibly poke through the sand
+  sprite.scale.set(length * 0.32, length, 1);
+  sprite.position.set(x, waterY, z);
+  return { sprite, baseOpacity: 0.22 + rand() * 0.2 };
+}
+
 function updateLightShafts(shafts, dayAmount) {
   if (!shafts) return;
   const t = Math.max(0, dayAmount);
@@ -1744,4 +1759,4 @@ function disposeLightShafts(scene, shafts) {
   }
 }
 
-export { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, updateLightShafts, disposeLightShafts, createRockCluster, createCaveMouth, applyVerticalGradient, createPalmTree };
+export { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, createUnderwaterLightShaft, updateLightShafts, disposeLightShafts, createRockCluster, createCaveMouth, applyVerticalGradient, createPalmTree };

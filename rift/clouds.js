@@ -12,11 +12,11 @@ import { getGraphicsSettings } from "./graphicsSettings.js";
 // -----------------------------------------------------------------------------
 
 const CLOUD_STYLE = {
-  ember: { count: 10, altitude: 88, spread: 170, puffColor: 0x4a3830, opacity: 0.55, scale: 20 },   // low, ashy, smoke-dark rather than fluffy-white — count/scale/spread bumped up for a heavier, more dramatic sky per request, still keeps the dark ashy character rather than fluffy-white
-  verdant: { count: 11, altitude: 95, spread: 160, puffColor: 0xf4f7fb, opacity: 0.85, scale: 24 },  // big, bold, dominant puffy-white clouds per the flat-illustration reference — was scale 15/opacity 0.7, read as too small/subtle to match
-  crystal: { count: 15, altitude: 100, spread: 165, puffColor: 0xeaf3f7, opacity: 0.8, scale: 27 }, // was count:4, scale:11, opacity:0.45 ("sparse, thin, icy-pale") — nowhere near the near-total, voluminous cloud coverage in the explicit reference photo. Big and bold now, close to Verdant's own dominant-cloud tuning; still pale/cool at the base since the sky-color blend (see updateClouds) is what supplies the dramatic sunset warmth on top of this
-  abyssal: { count: 7, altitude: 80, spread: 140, puffColor: 0x2e2a3a, opacity: 0.6, scale: 14 },   // heavy, dark, low — presses down on the chasms
-  ashen: { count: 3, altitude: 110, spread: 150, puffColor: 0xd6cdb8, opacity: 0.35, scale: 10 },   // thin, wispy, dust-pale — barely enough moisture in the air to call these clouds
+  ember: { count: 14, altitude: 88, spread: 175, puffColor: 0x4a3830, opacity: 0.55, scale: 25 },   // low, ashy, smoke-dark rather than fluffy-white — count/scale bumped further for real sky coverage, still keeps the dark ashy character rather than fluffy-white
+  verdant: { count: 16, altitude: 95, spread: 165, puffColor: 0xf4f7fb, opacity: 0.85, scale: 30 },  // big, bold, dominant puffy-white clouds per the flat-illustration reference
+  crystal: { count: 20, altitude: 100, spread: 170, puffColor: 0xeaf3f7, opacity: 0.8, scale: 33 }, // still pale/cool at the base since the sky-color/accent blend below is what supplies the dramatic sunset color on top of this
+  abyssal: { count: 10, altitude: 80, spread: 145, puffColor: 0x2e2a3a, opacity: 0.6, scale: 18 },   // heavy, dark, low — presses down on the chasms
+  ashen: { count: 5, altitude: 110, spread: 155, puffColor: 0xd6cdb8, opacity: 0.35, scale: 13 },   // thin, wispy, dust-pale — barely enough moisture in the air to call these clouds; kept sparser than the others on purpose
 };
 
 // Same cluster-of-billboards technique as sky clouds, just low, wide, and
@@ -31,6 +31,14 @@ const GROUND_FOG_STYLE = {
   ashen: { count: 4, altitude: 1.5, spread: 100, puffColor: 0xb8ab90, opacity: 0.28, scale: 22 },
 };
 
+// Vibrant sunrise/sunset accent palette — each cloud is assigned ONE of
+// these at creation (see createCloud) and blends toward its own color
+// when the sky is actually warm (see updateClouds' "warmth" check),
+// rather than every cloud in the sky showing the exact same single
+// horizon color. Real sunset skies show a real mix of hues across
+// different clouds at once, not one uniform tint.
+const DAWN_DUSK_ACCENTS = [0xff6a3a, 0xff4d7a, 0xb056e8, 0xffb84d, 0xe83d5c, 0x8a4de0];
+
 let sharedPuffTexture = null;
 function getPuffTexture() {
   if (sharedPuffTexture) return sharedPuffTexture;
@@ -39,8 +47,8 @@ function getPuffTexture() {
   canvas.width = size; canvas.height = size;
   const ctx = canvas.getContext("2d");
   const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  grad.addColorStop(0, "rgba(255,255,255,0.95)");
-  grad.addColorStop(0.62, "rgba(255,255,255,0.7)"); // was a single 0.5-stop at 0.4 — held higher/further out so the puff reads as a bold, fairly solid rounded shape instead of a soft diffuse smudge, matching this project's flat-illustration direction
+  grad.addColorStop(0, "rgba(255,255,255,0.97)");
+  grad.addColorStop(0.72, "rgba(255,255,255,0.8)"); // was 0.62/0.7 — pushed further out and higher for a bolder, more solid rounded shape, less soft/diffuse
   grad.addColorStop(1, "rgba(255,255,255,0)");
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, size, size);
@@ -53,6 +61,7 @@ function createCloud(scene, style, flatten = 1) {
   const puffCount = 5 + Math.floor(Math.random() * 5); // was 4-7, now 5-9 — fuller, chunkier cloud shapes
   const sprites = [];
   const baseColor = new THREE.Color(style.puffColor);
+  const accentColor = new THREE.Color(DAWN_DUSK_ACCENTS[Math.floor(Math.random() * DAWN_DUSK_ACCENTS.length)]);
   for (let i = 0; i < puffCount; i++) {
     const mat = new THREE.SpriteMaterial({
       map: getPuffTexture(), color: style.puffColor, transparent: true, opacity: style.opacity,
@@ -88,7 +97,7 @@ function createCloud(scene, style, flatten = 1) {
   const baseY = style.altitude + (Math.random() - 0.5) * 12 * flatten;
   group.position.set((Math.random() - 0.5) * style.spread * 2, baseY, (Math.random() - 0.5) * style.spread * 2);
   scene.add(group);
-  return { group, sprites, baseOpacity: style.opacity, baseColor, baseY };
+  return { group, sprites, baseOpacity: style.opacity, baseColor, accentColor, baseY };
 }
 
 /**
@@ -130,6 +139,11 @@ function updateClouds(handle, dt, wind, dayAmount, rainIntensity, skyHorizonColo
   // Storm clouds are darker AND visibly bigger/denser — real ones pile
   // up and thicken, they don't just dim in place at the same shape.
   const stormDarken = 1 - storm * 0.35;
+  // How warm the sky currently is — a real sunset horizon color has red
+  // well above blue; a clear midday or night sky doesn't. This peaks
+  // naturally during the actual dawn/dusk transition without needing to
+  // duplicate dayNightCycle.js's own elevation-based timing here.
+  const warmth = skyHorizonColor ? THREE.MathUtils.clamp((skyHorizonColor.r - skyHorizonColor.b) * 1.8, 0, 1) : 0;
   // Verdant-only — clouds fade out entirely as true night sets in, not
   // just dim, since a sky full of visible clouds fights the "near-total
   // darkness, lit only by the moon and bioluminescence" goal this biome
@@ -169,6 +183,13 @@ function updateClouds(handle, dt, wind, dayAmount, rainIntensity, skyHorizonColo
         // blue-grey at night, all from the one already-correct sky
         // color system instead of a second one duplicated here.
         sprite.material.color.copy(cloud.baseColor).lerp(skyHorizonColor, 0.55);
+        // Extra vibrant push during actual dawn/dusk — each cloud blends
+        // toward its OWN assigned accent color (see DAWN_DUSK_ACCENTS)
+        // rather than every cloud converging on the identical single
+        // horizon color, so the sky shows real purple/orange/red/pink
+        // variety at once instead of one uniform tint. Inert (warmth=0)
+        // outside the actual dawn/dusk window.
+        if (warmth > 0) sprite.material.color.lerp(cloud.accentColor, warmth * 0.65);
       }
     }
   }

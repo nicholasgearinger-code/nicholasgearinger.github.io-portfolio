@@ -162,33 +162,20 @@ function createSunStarburstTexture() {
   canvas.width = size; canvas.height = size;
   const ctx = canvas.getContext("2d");
   const cx = size / 2, cy = size / 2;
-  const coreGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, size * 0.28);
+  // Pure smooth radial glow — no spikes at all. The starburst-spike
+  // version kept reading as "too many bright rays" across several
+  // rounds of tuning it down; the reference photo shows a big soft round
+  // halo with zero visible rays, matching the flat-illustration style
+  // already used everywhere else in this project. Wider falloff (was
+  // 0.28, now spans further with more intermediate stops) for a gentler,
+  // larger glow instead of a tight bright center.
+  const coreGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, size * 0.5);
   coreGrad.addColorStop(0, "rgba(255,255,255,1)");
-  coreGrad.addColorStop(0.5, "rgba(255,255,255,0.55)");
+  coreGrad.addColorStop(0.3, "rgba(255,255,255,0.7)");
+  coreGrad.addColorStop(0.65, "rgba(255,255,255,0.25)");
   coreGrad.addColorStop(1, "rgba(255,255,255,0)");
   ctx.fillStyle = coreGrad;
   ctx.fillRect(0, 0, size, size);
-  const spikeCount = 12;
-  for (let i = 0; i < spikeCount; i++) {
-    const angle = (i / spikeCount) * Math.PI * 2;
-    const isLong = i % 2 === 0; // alternating long/short spikes, not a uniform starburst
-    const length = size * (isLong ? 0.36 : 0.22); // was 0.5/0.34 — spikes were reading as an overpowering star shape rather than a subtle glow
-    const halfWidth = size * (isLong ? 0.04 : 0.028);
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.rotate(angle);
-    const grad = ctx.createLinearGradient(0, 0, length, 0);
-    grad.addColorStop(0, "rgba(255,255,255,0.55)"); // was 0.9 — much less overpowering
-    grad.addColorStop(1, "rgba(255,255,255,0)");
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.moveTo(0, -halfWidth);
-    ctx.lineTo(length, 0);
-    ctx.lineTo(0, halfWidth);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
-  }
   return new THREE.CanvasTexture(canvas);
 }
 
@@ -562,7 +549,7 @@ function updateSkyDome(sky, zenithColor, midColor, horizonColor, elapsed, sunDir
     if (sunDir) {
       const len = Math.hypot(x, y, z) || 1;
       const closeness = (x / len) * sunDir.x + (y / len) * sunDir.y + (z / len) * sunDir.z; // -1..1
-      const glow = Math.pow(Math.max(0, closeness), 5) * 0.55; // was 0.85 — even at its peak this should brighten the real sky color, not wash it out toward white
+      const glow = Math.pow(Math.max(0, closeness), 2.2) * 0.55; // was pow 5 — that steep a falloff, evaluated only at the sky dome's sparse vertices then linearly interpolated across each triangle, was creating a faceted/star-like sparkle artifact right at the sun instead of a smooth glow
       if (glow > 0.001) tmp.lerp(glowColor, Math.min(1, glow));
     }
 
@@ -585,7 +572,7 @@ function createDayNightCycle(scene, sun, ambient, starfield, biome) {
   // 14/40/0.6 vs 9/22/0.32 — pushed further apart) — the sun should read
   // as the dominant light source at a glance, not just via the actual
   // DirectionalLight intensity numbers below.
-  const sunBody = createBody(scene, sunStarburstTexture, createSunTexture(), 9, 0xffcf80, 34, 0.5); // core radius was 15, glow radius 62 — too large/dominant even at the minimum (noon) size; should read as a small bright orb, not a big soft glow filling the sky
+  const sunBody = createBody(scene, sunStarburstTexture, createSunTexture(), 9, 0xffcf80, 46, 0.6); // glow radius was 34/opacity 0.5 — enlarged for the bigger, softer halo the reference shows now that the texture itself is a smooth gradual falloff instead of a tight bright core with spikes
   const moonBody = createBody(scene, glowTexture, createMoonTexture(), 8, 0xaebedd, 18, 0.22);
   const sunBeams = createSunBeams(scene, createBeamTexture());
   const sky = createSkyDome(scene);
@@ -720,7 +707,7 @@ function updateDayNightCycle(cycle, dt) {
   // and taper off toward both full night and flat overhead noon light,
   // rather than being equally strong all day.
   const beamEmphasis = Math.max(0, 1 - Math.abs(sunOrbit.elevation - 0.25) / 0.5);
-  const beamOpacity = sunVisibility * beamEmphasis * 0.22; // was 0.42 — additive blending across multiple overlapping beam sprites near the sun was compounding into a dominant wash overpowering the actual sky colors, not a subtle ray effect
+  const beamOpacity = sunVisibility * beamEmphasis * 0.015; // was 0.06 — still clearly visible after three rounds of reduction; the reference this is matching shows zero ray shafts, going much closer to fully off
   for (const sprite of cycle.sunBeams.sprites) {
     sprite.material.opacity = beamOpacity;
     // Was a fixed pale yellow (0xffdfa0) at all times — beams never

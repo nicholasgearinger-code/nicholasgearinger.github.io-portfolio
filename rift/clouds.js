@@ -14,7 +14,7 @@ import { getGraphicsSettings } from "./graphicsSettings.js";
 const CLOUD_STYLE = {
   ember: { count: 10, altitude: 88, spread: 170, puffColor: 0x4a3830, opacity: 0.55, scale: 20 },   // low, ashy, smoke-dark rather than fluffy-white — count/scale/spread bumped up for a heavier, more dramatic sky per request, still keeps the dark ashy character rather than fluffy-white
   verdant: { count: 11, altitude: 95, spread: 160, puffColor: 0xf4f7fb, opacity: 0.85, scale: 24 },  // big, bold, dominant puffy-white clouds per the flat-illustration reference — was scale 15/opacity 0.7, read as too small/subtle to match
-  crystal: { count: 4, altitude: 100, spread: 150, puffColor: 0xdcecf5, opacity: 0.45, scale: 11 }, // sparse, thin, icy-pale
+  crystal: { count: 15, altitude: 100, spread: 165, puffColor: 0xeaf3f7, opacity: 0.8, scale: 27 }, // was count:4, scale:11, opacity:0.45 ("sparse, thin, icy-pale") — nowhere near the near-total, voluminous cloud coverage in the explicit reference photo. Big and bold now, close to Verdant's own dominant-cloud tuning; still pale/cool at the base since the sky-color blend (see updateClouds) is what supplies the dramatic sunset warmth on top of this
   abyssal: { count: 7, altitude: 80, spread: 140, puffColor: 0x2e2a3a, opacity: 0.6, scale: 14 },   // heavy, dark, low — presses down on the chasms
   ashen: { count: 3, altitude: 110, spread: 150, puffColor: 0xd6cdb8, opacity: 0.35, scale: 10 },   // thin, wispy, dust-pale — barely enough moisture in the air to call these clouds
 };
@@ -52,6 +52,7 @@ function createCloud(scene, style, flatten = 1) {
   const group = new THREE.Group();
   const puffCount = 5 + Math.floor(Math.random() * 5); // was 4-7, now 5-9 — fuller, chunkier cloud shapes
   const sprites = [];
+  const baseColor = new THREE.Color(style.puffColor);
   for (let i = 0; i < puffCount; i++) {
     const mat = new THREE.SpriteMaterial({
       map: getPuffTexture(), color: style.puffColor, transparent: true, opacity: style.opacity,
@@ -66,7 +67,7 @@ function createCloud(scene, style, flatten = 1) {
   }
   group.position.set((Math.random() - 0.5) * style.spread * 2, style.altitude + (Math.random() - 0.5) * 12 * flatten, (Math.random() - 0.5) * style.spread * 2);
   scene.add(group);
-  return { group, sprites, baseOpacity: style.opacity };
+  return { group, sprites, baseOpacity: style.opacity, baseColor };
 }
 
 /**
@@ -94,8 +95,12 @@ function createClouds(scene, biome) {
  *   noticeably warmer/darker at dawn/dusk than at flat noon light
  * @param {number} rainIntensity  0..1 — storm clouds darken while it's
  *   actually raining, not just sit there looking identical to a clear day
+ * @param {THREE.Color} [skyHorizonColor]  the day/night cycle's own current
+ *   horizon color — clouds blend toward it, so they pick up the same real
+ *   sunrise/sunset warmth (or night blue) the sky itself is already
+ *   showing, instead of only ever displaying their flat base tint.
  */
-function updateClouds(handle, dt, wind, dayAmount, rainIntensity) {
+function updateClouds(handle, dt, wind, dayAmount, rainIntensity, skyHorizonColor) {
   if (!handle) return;
   const { clouds, style, groundFog, fogStyle, biome } = handle;
   const lightFactor = 0.55 + dayAmount * 0.45; // dimmer/moodier at dawn/dusk/night, brightest at noon
@@ -115,6 +120,16 @@ function updateClouds(handle, dt, wind, dayAmount, rainIntensity) {
     if (Math.abs(cloud.group.position.z) > style.spread) cloud.group.position.z = -Math.sign(cloud.group.position.z) * style.spread;
     for (const sprite of cloud.sprites) {
       sprite.material.opacity = cloud.baseOpacity * lightFactor * stormDarken * nightFade;
+      if (skyHorizonColor) {
+        // A real cloud is mostly reflecting the sky/sun color around it,
+        // not showing its own fixed pigment — blending toward the
+        // horizon color (capped well under 1 so the cloud's own base
+        // tint, e.g. Abyssal's dark heavy grey, still reads through)
+        // is what makes clouds glow pink/orange at sunset and read cool
+        // blue-grey at night, all from the one already-correct sky
+        // color system instead of a second one duplicated here.
+        sprite.material.color.copy(cloud.baseColor).lerp(skyHorizonColor, 0.55);
+      }
     }
   }
 

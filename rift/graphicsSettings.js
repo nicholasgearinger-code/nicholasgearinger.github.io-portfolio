@@ -77,7 +77,7 @@ const TIERS = {
     shootingStarPoolSize: 7,
     silhouetteMultiplier: 2,
     shadowsEnabled: true,
-    shadowMapSize: 4096,
+    shadowMapSize: 2048, // was 4096 — that's 4x the GPU fill/bandwidth cost of 2048 for a resolution difference very unlikely to be visible on an actual mobile screen; the extra detail was mostly wasted
     pixelRatioCap: 3,
   },
 };

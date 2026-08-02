@@ -167,8 +167,38 @@ function resizeToViewport() {
   renderer.setSize(w, h);
   const pixelRatio = renderer.getPixelRatio();
   underwaterRenderTarget.setSize(w * pixelRatio, h * pixelRatio);
+  cloudRenderTarget.setSize(Math.max(1, Math.round(w * pixelRatio * 0.5)), Math.max(1, Math.round(h * pixelRatio * 0.5)));
 }
 new ResizeObserver(resizeToViewport).observe(viewport);
+
+// Volumetric clouds (High tier only, see volumetricClouds.js) render
+// into their own small scene at HALF resolution, then get composited
+// back over the main scene as a full-screen quad — the ray-march
+// fragment shader is expensive enough (24 steps, each sampling FBM+
+// Worley noise) that running it at full screen resolution is real,
+// avoidable cost. Clouds are inherently soft/blurry, so downsampling to
+// half-res and upscaling on composite costs a quarter of the full-res
+// fragment work with no meaningfully visible quality loss — this is the
+// standard technique real games use for exactly this kind of expensive
+// volumetric/soft effect. On Low/Medium (no volumetricCloudsHandle),
+// none of this ever runs — see the render loop further down.
+const cloudScene = new THREE.Scene();
+const cloudRenderTarget = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false });
+const cloudCompositeScene = new THREE.Scene();
+const cloudCompositeCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const cloudCompositeMat = new THREE.ShaderMaterial({
+  uniforms: { tCloud: { value: cloudRenderTarget.texture } },
+  vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+  fragmentShader: `
+    uniform sampler2D tCloud;
+    varying vec2 vUv;
+    void main() {
+      gl_FragColor = texture2D(tCloud, vUv);
+    }
+  `,
+  transparent: true, depthWrite: false, depthTest: false,
+});
+cloudCompositeScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), cloudCompositeMat));
 
 // Underwater screen-space distortion — a real post-process pass, only
 // ever used when the player is submerged. The scene renders to this
@@ -598,7 +628,7 @@ function teardownLevel() {
   weatherHandle = null;
   disposeClouds(scene, cloudsHandle);
   cloudsHandle = null;
-  disposeVolumetricClouds(scene, volumetricCloudsHandle);
+  disposeVolumetricClouds(cloudScene, volumetricCloudsHandle);
   volumetricCloudsHandle = null;
   disposeHorizonSilhouettes(scene, horizonHandle);
   horizonHandle = null;
@@ -672,6 +702,7 @@ function buildLevel(levelIdx) {
         .replace("#include <common>", `#include <common>
 varying vec3 vCausticWorldPos;
 varying vec3 vCausticWorldNormal;
+varying float vWaveHeight;
 uniform float uTime;
 uniform float uWaterLevel;
 // Same Gerstner wave height formula as the fragment shader below (and
@@ -697,6 +728,7 @@ float gerstnerHeightVert(vec2 xz, float t) {
   // field player collision actually samples), so there's no physics
   // mismatch to worry about.
   float vWaveH = gerstnerHeightVert(transformed.xz, uTime);
+  vWaveHeight = vWaveH; // read by the fragment shader below (caustics/wave-wash) instead of recomputing the same 4-term Gerstner sum a second time per-fragment — at High tier's dense 600-segment mesh, interpolation error across one triangle is negligible, so this is a real saving with no meaningful visual change
   float vWaveNorm = clamp((vWaveH + 0.85) / 1.7, 0.0, 1.0);
   float vShoreDist = transformed.y - uWaterLevel;
   float vReachHeight = 0.1 + vWaveNorm * 0.5;
@@ -711,6 +743,7 @@ uniform float uTime;
 uniform float uWaterLevel;
 varying vec3 vCausticWorldPos;
 varying vec3 vCausticWorldNormal;
+varying float vWaveHeight;
 vec2 causticHash(vec2 p) {
   float n = sin(dot(p, vec2(41.0, 289.0)));
   return fract(vec2(262144.0, 32768.0) * n);
@@ -735,20 +768,6 @@ vec2 causticVoronoiF1F2(vec2 p) {
   }
   return vec2(f1, f2);
 }
-// Real Gerstner wave height, evaluated directly above this floor point —
-// mirrors liquid.js's own GERSTNER_WAVES exactly (same wavelength/speed/
-// amplitude per component), so the caustic pattern below is driven by
-// the ACTUAL moving ocean surface overhead rather than independent,
-// unrelated drift constants. Height-only (no horizontal displacement) —
-// that's all the caustic pattern needs.
-float gerstnerHeight(vec2 xz, float t) {
-  float h = 0.0;
-  h += 0.42 * sin(0.15708 * dot(normalize(vec2(1.0, 0.3)), xz) - 1.75 * t);
-  h += 0.24 * sin(0.26180 * dot(normalize(vec2(0.3, 1.0)), xz) - 2.5 * t);
-  h += 0.13 * sin(0.48332 * dot(normalize(vec2(-0.7, 0.5)), xz) - 3.4 * t);
-  h += 0.06 * sin(0.89760 * dot(normalize(vec2(0.6, -0.65)), xz) - 4.6 * t);
-  return h; // range roughly [-0.85, 0.85] — matches GERSTNER_AMPLITUDE_SUM in liquid.js
-}
 // Carries the foam mask from the color_fragment injection below to the
 // separate emissivemap_fragment injection further down this same
 // shader — declared here (GLSL global scope, valid across the whole
@@ -761,12 +780,14 @@ float gFoamMask = 0.0;`)
   // Fades in over a 2-unit band right at the shoreline rather than a
   // hard cutoff — a real waterline isn't a knife-edge.
   float underwaterMask = smoothstep(uWaterLevel + 0.5, uWaterLevel - 1.5, vCausticWorldPos.y);
-  // Sample the real overhead wave height at this exact point — same
-  // formula, same phase, as the actual ocean surface mesh. This is what
-  // ties both the caustic pattern's drift AND its brightness to the real
-  // wave motion (speed AND height) instead of two independent things
-  // that only coincidentally looked similar.
-  float waveH = gerstnerHeight(vCausticWorldPos.xz, uTime);
+  // Real wave height, carried over from the vertex shader's own
+  // computation via vWaveHeight (see the varying above) instead of
+  // recomputing the same 4-term Gerstner sum again per-fragment — same
+  // formula, same phase, as the actual ocean surface mesh either way.
+  // This is what ties both the caustic pattern's drift AND its
+  // brightness to the real wave motion (speed AND height) instead of
+  // two independent things that only coincidentally looked similar.
+  float waveH = vWaveHeight;
   float waveNorm = clamp((waveH + 0.85) / 1.7, 0.0, 1.0); // 0 at trough, 1 at crest
   vec2 causticUv = vCausticWorldPos.xz * 0.4 + vec2(uTime * 0.05, -uTime * 0.04) + waveH * 0.18;
   vec2 v1 = causticVoronoiF1F2(causticUv);
@@ -1185,7 +1206,7 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
   // tier regardless — only the sky-cloud sprite groups get hidden here,
   // so they don't double-render alongside the new volumetric layer.
   if (getGraphicsTier() === "high") {
-    volumetricCloudsHandle = createVolumetricClouds(scene);
+    volumetricCloudsHandle = createVolumetricClouds(cloudScene);
     for (const cloud of cloudsHandle.clouds) cloud.group.visible = false;
   }
   horizonHandle = level.biome === "crystal" ? null : createHorizonSilhouettes(scene, level.biome); // Coral Shallows is open ocean now — no distant mountain backdrop, and horizonSilhouettes.js still isn't part of this session so this stays a main.js-only fix rather than touching that file's still-old icy Crystal-Spire theming
@@ -1869,13 +1890,36 @@ function animate() {
     // a full-screen quad draws that texture back out with a
     // sine-distorted UV and a blue tint (see the setup near the
     // renderer/resize code above).
+    if (volumetricCloudsHandle) {
+      renderer.setRenderTarget(cloudRenderTarget);
+      renderer.render(cloudScene, camera);
+    }
     renderer.setRenderTarget(underwaterRenderTarget);
     renderer.render(scene, camera);
+    if (volumetricCloudsHandle) {
+      // Composited onto the SAME still-active render target (still
+      // underwaterRenderTarget — setRenderTarget wasn't called again),
+      // autoClear off so it layers on top instead of wiping the scene
+      // that was just drawn.
+      renderer.autoClear = false;
+      renderer.render(cloudCompositeScene, cloudCompositeCamera);
+      renderer.autoClear = true;
+    }
     renderer.setRenderTarget(null);
     underwaterDistortionMaterial.uniforms.time.value = elapsedTime;
     renderer.render(underwaterQuadScene, underwaterQuadCamera);
   } else {
+    if (volumetricCloudsHandle) {
+      renderer.setRenderTarget(cloudRenderTarget);
+      renderer.render(cloudScene, camera);
+      renderer.setRenderTarget(null);
+    }
     renderer.render(scene, camera);
+    if (volumetricCloudsHandle) {
+      renderer.autoClear = false;
+      renderer.render(cloudCompositeScene, cloudCompositeCamera);
+      renderer.autoClear = true;
+    }
   }
 }
 requestAnimationFrame(animate);

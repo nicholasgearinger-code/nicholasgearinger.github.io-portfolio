@@ -758,7 +758,7 @@ float gFoamMask = 0.0;`)
   // already sampled above — so the wash rhythm matches the actual ocean
   // above instead of an unrelated clock.
   float shoreDist = vCausticWorldPos.y - uWaterLevel;
-  float reachHeight = 0.15 + waveNorm * 0.9;
+  float reachHeight = 0.1 + waveNorm * 0.5; // was 0.15 + waveNorm*0.9 (up to 1.05 above the waterline) — too far up the beach for a real wave's run-up
   // Foam needs real internal structure to read as liquid rather than a
   // glowing strip. A single Voronoi layer at one scale tiles into an
   // evenly-spaced grid of same-size circles — exactly the "disco ball"
@@ -790,7 +790,7 @@ float gFoamMask = 0.0;`)
   // crest recedes rather than snapping back to dry the instant the foam
   // line passes.
   float wetEnvelope = pow(waveNorm, 0.4);
-  float wetMask = (1.0 - smoothstep(reachHeight - 0.3, reachHeight + 1.3, shoreDist)) * wetEnvelope * upwardFacing;
+  float wetMask = (1.0 - smoothstep(reachHeight - 0.3, reachHeight + 0.5, shoreDist)) * wetEnvelope * upwardFacing;
   float totalWetMask = clamp(max(permanentWetBand * 0.75 * upwardFacing, wetMask), 0.0, 1.0);
   diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.55, totalWetMask);
   // Mixed toward an off-white (not pure additive brightening, and not

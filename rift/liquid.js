@@ -1224,7 +1224,7 @@ function createOceanSurfaceDetail(scene, y, size) {
   const shoreFoamZ = new Float32Array(shoreFoamCount);
   for (let i = 0; i < shoreFoamCount; i++) {
     const angle = Math.random() * Math.PI * 2;
-    const r = SHORE_RADIUS + (Math.random() - 0.5) * 5;
+    const r = SHORE_RADIUS + (Math.random() - 0.5) * 3; // ±1.5, narrowed from ±2.5 — a real foam line is a defined edge, not a broad smear
     const x = ISLAND_CENTER.x + Math.cos(angle) * r, z = ISLAND_CENTER.z + Math.sin(angle) * r;
     shoreFoamPos[i * 3] = x;
     shoreFoamPos[i * 3 + 1] = y + 0.12;
@@ -1325,7 +1325,7 @@ function createOceanSpray(scene, waterLevel) {
     const angle = (i / emitterCount) * Math.PI * 2 + Math.random() * 0.2;
     emitters.push({ x: ISLAND_CENTER.x + Math.cos(angle) * SHORE_RADIUS, z: ISLAND_CENTER.z + Math.sin(angle) * SHORE_RADIUS, angle });
   }
-  const particlesPerEmitter = 6; // was 5 — a real breaking wave throws more than a handful of droplets
+  const particlesPerEmitter = Math.max(4, Math.round(24 * getGraphicsSettings().particleMultiplier)); // was a flat 6 — far too few to ever read as anything but individual balls rather than a spray cloud. Scaled by tier like this project's other particle systems (Low~5, Medium 24, High 48)
   const count = emitterCount * particlesPerEmitter;
   const positions = new Float32Array(count * 3);
   const vel = new Float32Array(count * 3);
@@ -1338,7 +1338,7 @@ function createOceanSpray(scene, waterLevel) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   const mat = new THREE.PointsMaterial({
-    map: getFoamTexture(), color: 0xffffff, size: 0.75, transparent: true, opacity: 0.85,
+    map: getFoamTexture(), color: 0xffffff, size: 0.32, transparent: true, opacity: 0.85,
     blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
   });
   const points = new THREE.Points(geo, mat);

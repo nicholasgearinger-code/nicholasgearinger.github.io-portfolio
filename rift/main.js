@@ -714,7 +714,13 @@ float gerstnerHeight(vec2 xz, float t) {
   h += 0.13 * sin(0.48332 * dot(normalize(vec2(-0.7, 0.5)), xz) - 3.4 * t);
   h += 0.06 * sin(0.89760 * dot(normalize(vec2(0.6, -0.65)), xz) - 4.6 * t);
   return h; // range roughly [-0.85, 0.85] — matches GERSTNER_AMPLITUDE_SUM in liquid.js
-}`)
+}
+// Carries the foam mask from the color_fragment injection below to the
+// separate emissivemap_fragment injection further down this same
+// shader — declared here (GLSL global scope, valid across the whole
+// fragment shader's main()) rather than duplicating the whole foam
+// computation a second time at the later injection point.
+float gFoamMask = 0.0;`)
         .replace("#include <color_fragment>", `#include <color_fragment>
 {
   float upwardFacing = clamp(vCausticWorldNormal.y, 0.0, 1.0);
@@ -764,6 +770,14 @@ float gerstnerHeight(vec2 xz, float t) {
   float foamCell = 1.0 - smoothstep(0.0, 0.45, fv.x);
   float foamZone = 1.0 - smoothstep(0.0, 0.4, abs(shoreDist - reachHeight));
   float foamMask = clamp(foamCell * foamZone * upwardFacing, 0.0, 1.0);
+  gFoamMask = foamMask; // read by the emissivemap_fragment injection below, so foam stays visible even under night's dim lighting
+  // Real sand right at the water's edge is ALWAYS wet — a permanent,
+  // always-on dark band centered right at the mean waterline, not
+  // dependent on the current wave's reach at all. Combined with the
+  // dynamic, wave-driven wetMask below via max: the permanent band sets
+  // a floor that's always present, and an active wave crest can push
+  // the wet area further up the beach on top of it.
+  float permanentWetBand = 1.0 - smoothstep(0.0, 0.55, abs(shoreDist - 0.1));
   // True per-pixel memory of "recently wet" would need an accumulation
   // buffer this project doesn't have (nothing here persists between
   // frames) — approximated instead with a slow-power envelope of the
@@ -772,13 +786,27 @@ float gerstnerHeight(vec2 xz, float t) {
   // line passes.
   float wetEnvelope = pow(waveNorm, 0.4);
   float wetMask = (1.0 - smoothstep(reachHeight - 0.3, reachHeight + 1.3, shoreDist)) * wetEnvelope * upwardFacing;
-  diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.55, clamp(wetMask, 0.0, 1.0));
+  float totalWetMask = clamp(max(permanentWetBand * 0.75 * upwardFacing, wetMask), 0.0, 1.0);
+  diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.55, totalWetMask);
   // Mixed toward an off-white (not pure additive brightening, and not
   // pure white either) — this respects the scene's actual lighting
   // instead of blowing out brighter than everything around it, the same
-  // technique the ocean surface's own whitecap foam already uses.
+  // technique the ocean surface's own whitecap foam already uses. This
+  // alone isn't enough to stay visible at night (diffuseColor still gets
+  // multiplied down by the scene's own dim night lighting afterward) —
+  // the emissivemap_fragment injection below adds real glow on top of
+  // this for that.
   diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.95, 0.98, 1.0), foamMask * 0.85);
-}`);
+}`)
+        .replace("#include <emissivemap_fragment>", `#include <emissivemap_fragment>
+// Real foam is bright and highly light-scattering — it should stay
+// clearly visible even under night's heavily dimmed sun/ambient light,
+// which a pure diffuseColor tint (multiplied by whatever light actually
+// reaches it) can't guarantee on its own. Adding directly to
+// totalEmissiveRadiance makes it glow independent of scene lighting,
+// the same way this project's other glowing elements (crystals,
+// bioluminescent flora) already stay visible at night.
+totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
       terrainMat.userData.shader = shader; // so the animate loop can push uTime each frame
     };
   }

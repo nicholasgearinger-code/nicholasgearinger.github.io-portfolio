@@ -1614,6 +1614,21 @@ function animate() {
   // frame, only visible while actually fully submerged.
   waterVolumeMesh.visible = isFullySubmerged;
   if (isFullySubmerged) waterVolumeMesh.position.copy(camera.position);
+  if (isFullySubmerged) {
+    // Real water only lets you see the sky within a narrow cone roughly
+    // straight overhead (Snell's window) — from any other angle you'd
+    // see total internal reflection of the water/seafloor instead, not
+    // the sun or moon. updateDayNightCycle (called earlier this frame,
+    // before isFullySubmerged is even known) already set sun/moon
+    // opacity from orbital elevation alone; this further fades them out
+    // unless the camera itself is looking mostly straight up, using
+    // cameraForward — already computed this frame for the audio listener.
+    const lookingUpFactor = THREE.MathUtils.clamp((cameraForward.y - 0.55) / 0.35, 0, 1);
+    dayNightCycle.sunBody.core.material.opacity *= lookingUpFactor;
+    dayNightCycle.sunBody.glow.material.opacity *= lookingUpFactor;
+    dayNightCycle.moonBody.core.material.opacity *= lookingUpFactor;
+    dayNightCycle.moonBody.glow.material.opacity *= lookingUpFactor;
+  }
   const wind = updateWeatherSystem(weatherHandle, dt, eruptionActive, dayNight.dayAmount);
   updateAtmosphericParticles(atmosphereHandle, elapsedTime, dt, wind.windX, wind.windZ);
   updateGrass(grassHandle, elapsedTime, wind.windX, wind.windZ, dayNight.dayAmount);

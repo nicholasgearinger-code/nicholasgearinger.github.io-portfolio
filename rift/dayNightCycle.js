@@ -22,15 +22,15 @@ const SKY_DOME_RADIUS = 900;
 // not a hard switch, so sunrise/sunset reads as its own moment.
 const NIGHT = {
   sun: 0x22304a, sunIntensity: 0.05, ambient: 0x1a2438, ambientIntensity: 0.13,
-  fog: 0x0a0e14, skyZenith: 0x05070f, skyHorizon: 0x141a2c,
+  skyZenith: 0x05070f, skyHorizon: 0x141a2c,
 };
 const DAWN_DUSK = {
   sun: 0xff7a3a, sunIntensity: 0.75, ambient: 0x4a3550, ambientIntensity: 0.45,
-  fog: 0x2a1f2e, skyZenith: 0x2a2138, skyHorizon: 0xff6a42,
+  skyZenith: 0x2a2138, skyHorizon: 0xff6a42,
 };
 const DAY = {
   sun: 0xfff4e0, sunIntensity: 2.0, ambient: 0x8899bb, ambientIntensity: 0.5,
-  fog: 0x1c2436, skyZenith: 0x1c3a5e, skyHorizon: 0x8fb8d6,
+  skyZenith: 0x1c3a5e, skyHorizon: 0x8fb8d6,
 };
 
 // A subtle per-biome push on top of the shared day/night colors above —
@@ -49,19 +49,19 @@ const BIOME_SKY_TINT = {
   // own accent rather than actual smoke) while horizon stays the vivid
   // lava-glow orange — the "fire glowing through haze near the ground"
   // read, fading up into smoke rather than sky blue overhead.
-  ember: { zenith: 0x2e2620, horizon: 0xff6a30, fog: 0x241e18, amount: 0.5 },
-  verdant: { zenith: 0x0a2a34, horizon: 0x6fd0d8, fog: 0x0f2a28, amount: 0.10 },
-  crystal: { zenith: 0x0a3a4a, horizon: 0x3ce7d8, fog: 0x0a2e38, amount: 0.16 }, // bright tropical turquoise, replacing the old cool violet resonance-spire tint — amount bumped slightly (was 0.12) since the whole biome is now underwater and should read as consistently blue-green rather than a subtle accent
-  abyssal: { zenith: 0x140a1e, horizon: 0x5a2a6a, fog: 0x120a1a, amount: 0.14 },
-  ashen: { zenith: 0x2a2210, horizon: 0xd8b878, fog: 0x261e10, amount: 0.10 },
+  ember: { zenith: 0x2e2620, horizon: 0xff6a30, amount: 0.5 },
+  verdant: { zenith: 0x0a2a34, horizon: 0x6fd0d8, amount: 0.10 },
+  crystal: { zenith: 0x0a3a4a, horizon: 0x3ce7d8, amount: 0.16 }, // bright tropical turquoise, replacing the old cool violet resonance-spire tint — amount bumped slightly (was 0.12) since the whole biome is now underwater and should read as consistently blue-green rather than a subtle accent
+  abyssal: { zenith: 0x140a1e, horizon: 0x5a2a6a, amount: 0.14 },
+  ashen: { zenith: 0x2a2210, horizon: 0xd8b878, amount: 0.10 },
   // Frost gets a high amount for the same reason Ember does — a biome
   // locked in constant blizzard shouldn't read as a normal sky at any
   // time of day either. Pale, desaturated ice-blue/white throughout
-  // (zenith/horizon/fog all close together in hue) rather than a
-  // distinct horizon glow, since the defining atmosphere here is a wall
-  // of driving snow, not a light source near the ground the way Ember's
+  // (zenith/horizon close together in hue) rather than a distinct
+  // horizon glow, since the defining atmosphere here is a wall of
+  // driving snow, not a light source near the ground the way Ember's
   // lava-glow horizon is.
-  frost: { zenith: 0x9fc8dc, horizon: 0xdcf0fa, fog: 0xb8dcec, amount: 0.42 },
+  frost: { zenith: 0x9fc8dc, horizon: 0xdcf0fa, amount: 0.42 },
 };
 
 // A much stronger, Verdant-only sky shift that only kicks in as true
@@ -70,7 +70,7 @@ const BIOME_SKY_TINT = {
 // and pink/blue/purple glowing creatures once night actually crushes down.
 // Daytime sky is unaffected (window gates this to the same kind of
 // night-only activation curve BIOME_NIGHT_DARKEN already uses).
-const VERDANT_NIGHT_SKY = { zenith: 0x2a0a3a, horizon: 0x7a1f7a, fog: 0x1a0a2a, maxAmount: 0.55, window: 0.35 };
+const VERDANT_NIGHT_SKY = { zenith: 0x2a0a3a, horizon: 0x7a1f7a, maxAmount: 0.55, window: 0.35 };
 
 // How much darker a biome's night gets, on top of the shared NIGHT preset
 // above — 1 = no change (the default for any biome not listed). Ember gets
@@ -549,7 +549,7 @@ function updateDayNightCycle(cycle, dt) {
 
   // Blend NIGHT -> DAWN_DUSK -> DAY -> DAWN_DUSK -> NIGHT across elevation.
   const dayAmount = Math.max(0, elevation);       // 0 at/below horizon, 1 at noon
-  let sunColor, ambientColor, fogColor, skyZenith, skyHorizon, sunIntensity, ambientIntensity;
+  let sunColor, ambientColor, skyZenith, skyHorizon, sunIntensity, ambientIntensity;
   if (elevation <= 0) {
     // night -> dawn/dusk as the sun approaches the horizon from below.
     // Widened from 0.35 to 0.4 — sunrise/sunset should read as a real
@@ -558,7 +558,6 @@ function updateDayNightCycle(cycle, dt) {
     const k = Math.max(0, 1 - Math.abs(elevation) / 0.4);
     sunColor = lerpColor(NIGHT.sun, DAWN_DUSK.sun, k);
     ambientColor = lerpColor(NIGHT.ambient, DAWN_DUSK.ambient, k);
-    fogColor = lerpColor(NIGHT.fog, DAWN_DUSK.fog, k);
     skyZenith = lerpColor(NIGHT.skyZenith, DAWN_DUSK.skyZenith, k);
     skyHorizon = lerpColor(NIGHT.skyHorizon, DAWN_DUSK.skyHorizon, k);
     sunIntensity = THREE.MathUtils.lerp(NIGHT.sunIntensity, DAWN_DUSK.sunIntensity, k);
@@ -568,7 +567,6 @@ function updateDayNightCycle(cycle, dt) {
     const k = Math.min(1, dayAmount / 0.4);
     sunColor = lerpColor(DAWN_DUSK.sun, DAY.sun, k);
     ambientColor = lerpColor(DAWN_DUSK.ambient, DAY.ambient, k);
-    fogColor = lerpColor(DAWN_DUSK.fog, DAY.fog, k);
     skyZenith = lerpColor(DAWN_DUSK.skyZenith, DAY.skyZenith, k);
     skyHorizon = lerpColor(DAWN_DUSK.skyHorizon, DAY.skyHorizon, k);
     sunIntensity = THREE.MathUtils.lerp(DAWN_DUSK.sunIntensity, DAY.sunIntensity, k);
@@ -598,16 +596,21 @@ function updateDayNightCycle(cycle, dt) {
   if (tint) {
     skyZenith = lerpColor(skyZenith, tint.zenith, tint.amount);
     skyHorizon = lerpColor(skyHorizon, tint.horizon, tint.amount);
-    fogColor = lerpColor(fogColor, tint.fog, tint.amount);
   }
   if (cycle.biome === "verdant") {
     const nightSkyAmount = THREE.MathUtils.clamp(1 - dayAmount / VERDANT_NIGHT_SKY.window, 0, 1) * VERDANT_NIGHT_SKY.maxAmount;
     skyZenith = lerpColor(skyZenith, VERDANT_NIGHT_SKY.zenith, nightSkyAmount);
     skyHorizon = lerpColor(skyHorizon, VERDANT_NIGHT_SKY.horizon, nightSkyAmount);
-    fogColor = lerpColor(fogColor, VERDANT_NIGHT_SKY.fog, nightSkyAmount);
   }
 
-  cycle.scene.fog.color.copy(fogColor);
+  // The fog is now just the sky dome's own final horizon color, not a
+  // separately-tuned value — the two used to be tracked independently
+  // and could drift apart (DAWN_DUSK's fog was a muted purple while its
+  // horizon was a vivid orange), which showed up as a visible seam right
+  // where distant terrain fades into fog and meets the sky dome's own
+  // bottom edge. Copying skyHorizon directly makes them identical by
+  // construction — nothing left to mismatch.
+  cycle.scene.fog.color.copy(skyHorizon);
   updateSkyDome(cycle.sky, skyZenith, skyHorizon, cycle.elapsed);
 
   // Each body fades out once it's below the horizon rather than just

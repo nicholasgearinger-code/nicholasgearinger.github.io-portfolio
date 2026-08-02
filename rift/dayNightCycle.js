@@ -33,6 +33,17 @@ const DAY = {
   skyZenith: 0x1c3a5e, skyHorizon: 0x8fb8d6,
 };
 
+// The sun's own visual disc/glow color at three stages — zenith (high,
+// small, near-white), mid-elevation (golden), and right at the horizon
+// (deep orange-red) — per the explicit reference photo showing a real
+// sun's progression through the day, not just the ambient lighting
+// color shifting. Separate from NIGHT/DAWN_DUSK/DAY above, which govern
+// the scene's actual light color; these three govern only how the sun
+// itself looks in the sky.
+const SUN_BODY_ZENITH = new THREE.Color(0xfff8ec);
+const SUN_BODY_MID = new THREE.Color(0xffcf7a);
+const SUN_BODY_HORIZON = new THREE.Color(0xff5522);
+
 // A subtle per-biome push on top of the shared day/night colors above —
 // this file was previously entirely biome-unaware (every biome saw the
 // identical sky), which meant biomes only differed up close, not from a
@@ -358,7 +369,7 @@ function createBody(scene, glowTexture, map, coreRadius, glowColor, glowRadius, 
   group.add(glow);
 
   scene.add(group);
-  return { group, core, glow, baseGlowOpacity: glowOpacity };
+  return { group, core, glow, baseGlowOpacity: glowOpacity, baseGlowScale: glowRadius * 2, baseGlowColor: new THREE.Color(glowColor) };
 }
 
 // A large inverted sphere with a vertical vertex-color gradient — replaces
@@ -622,6 +633,26 @@ function updateDayNightCycle(cycle, dt) {
   cycle.sunBody.glow.material.opacity = cycle.sunBody.baseGlowOpacity * sunVisibility;
   cycle.moonBody.core.material.opacity = moonVisibility;
   cycle.moonBody.glow.material.opacity = cycle.moonBody.baseGlowOpacity * moonVisibility;
+
+  // The sun's own visual disc and glow — not just the directional
+  // light's color — shift through the day too, per the explicit
+  // reference photo: high and small and near-white at zenith, swelling
+  // into a bigger, hazier, deep orange-red disc near the horizon (real
+  // atmospheric reddening/refraction, exaggerated here for a dramatic
+  // sunrise/sunset rather than a uniform disc all day). horizonCloseness
+  // is 0 by a moderate elevation, ramping to 1 right at the horizon.
+  // Two-stage lerp (zenith->gold->horizon-red) for a richer progression
+  // than a single flat blend, matching the reference's many visible
+  // in-between stages rather than just two extremes.
+  const horizonCloseness = THREE.MathUtils.clamp(1 - Math.abs(sunOrbit.elevation) / 0.55, 0, 1);
+  const sunBodyTint = horizonCloseness < 0.5
+    ? SUN_BODY_ZENITH.clone().lerp(SUN_BODY_MID, horizonCloseness * 2)
+    : SUN_BODY_MID.clone().lerp(SUN_BODY_HORIZON, (horizonCloseness - 0.5) * 2);
+  cycle.sunBody.core.material.color.copy(sunBodyTint);
+  cycle.sunBody.glow.material.color.copy(sunBodyTint);
+  const sunSizeBoost = 1 + horizonCloseness * 0.7;
+  cycle.sunBody.core.scale.setScalar(sunSizeBoost);
+  cycle.sunBody.glow.scale.setScalar(cycle.sunBody.baseGlowScale * sunSizeBoost * (1 + horizonCloseness * 0.5)); // glow spreads out (hazier) a bit more than the core disc itself grows
 
   // Rays peak just above the horizon (the classic crepuscular-ray moment)
   // and taper off toward both full night and flat overhead noon light,

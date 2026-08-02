@@ -4,7 +4,7 @@ import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERF
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
 import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, createUnderwaterLightShaft, updateLightShafts, disposeLightShafts, createRockCluster, createCaveMouth, applyVerticalGradient } from "./decorations.js";
-import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSpray, updateOceanSpray, disposeOceanSpray, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail } from "./liquid.js";
+import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail } from "./liquid.js";
 import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
 import { createGrass, updateGrass, disposeGrass, createFlowers, updateFlowers, disposeFlowers, createFootstepGlowSystem, spawnFootstepGlow, updateFootstepGlowSystem, disposeFootstepGlowSystem } from "./vegetation.js";
@@ -516,7 +516,6 @@ function updateMovement(dt, grounded) {
 let terrainMesh = null;
 let liquidHandle = null;
 let waterfallHandle = null;
-let oceanSprayHandle = null;
 let oceanSurfaceDetailHandle = null;
 let riverCurrentHandle = null;
 let riverFlowStripHandle = null;
@@ -569,8 +568,6 @@ function teardownLevel() {
   liquidHandle = null;
   disposeWaterfall(scene, waterfallHandle);
   waterfallHandle = null;
-  disposeOceanSpray(scene, oceanSprayHandle);
-  oceanSprayHandle = null;
   disposeOceanSurfaceDetail(scene, oceanSurfaceDetailHandle);
   oceanSurfaceDetailHandle = null;
   disposeRiverCurrent(scene, riverCurrentHandle);
@@ -668,8 +665,41 @@ function buildLevel(levelIdx) {
       shader.uniforms.uTime = { value: 0 };
       shader.uniforms.uWaterLevel = { value: LIQUID_LEVEL.crystal };
       shader.vertexShader = shader.vertexShader
-        .replace("#include <common>", "#include <common>\nvarying vec3 vCausticWorldPos;\nvarying vec3 vCausticWorldNormal;")
-        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvCausticWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;")
+        .replace("#include <common>", `#include <common>
+varying vec3 vCausticWorldPos;
+varying vec3 vCausticWorldNormal;
+uniform float uTime;
+uniform float uWaterLevel;
+// Same Gerstner wave height formula as the fragment shader below (and
+// the actual ocean surface mesh in liquid.js) — duplicated here because
+// vertex and fragment are separate compiled programs and can't share a
+// GLSL function directly, even though both read the same uTime/uWaterLevel
+// uniform values.
+float gerstnerHeightVert(vec2 xz, float t) {
+  float h = 0.0;
+  h += 0.42 * sin(0.15708 * dot(normalize(vec2(1.0, 0.3)), xz) - 1.75 * t);
+  h += 0.24 * sin(0.26180 * dot(normalize(vec2(0.3, 1.0)), xz) - 2.5 * t);
+  h += 0.13 * sin(0.48332 * dot(normalize(vec2(-0.7, 0.5)), xz) - 3.4 * t);
+  h += 0.06 * sin(0.89760 * dot(normalize(vec2(0.6, -0.65)), xz) - 4.6 * t);
+  return h;
+}`)
+        .replace("#include <begin_vertex>", `#include <begin_vertex>
+{
+  // Real foam relief — the same wave-reach model the fragment shader's
+  // wave-wash color effect uses, but applied here as actual vertex
+  // displacement, so the foam reads as a genuine raised, frothy ridge
+  // advancing up the beach rather than a flat painted color. Small and
+  // purely cosmetic (this GPU-side bump never touches the JS height
+  // field player collision actually samples), so there's no physics
+  // mismatch to worry about.
+  float vWaveH = gerstnerHeightVert(transformed.xz, uTime);
+  float vWaveNorm = clamp((vWaveH + 0.85) / 1.7, 0.0, 1.0);
+  float vShoreDist = transformed.y - uWaterLevel;
+  float vReachHeight = 0.1 + vWaveNorm * 0.5;
+  float vFoamZone = 1.0 - smoothstep(0.0, 0.4, abs(vShoreDist - vReachHeight));
+  transformed.y += vFoamZone * 0.14;
+}
+vCausticWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`)
         .replace("#include <beginnormal_vertex>", "#include <beginnormal_vertex>\nvCausticWorldNormal = normalize(mat3(modelMatrix) * objectNormal);");
       shader.fragmentShader = shader.fragmentShader
         .replace("#include <common>", `#include <common>
@@ -825,7 +855,6 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
   }
 
   if (level.biome === "crystal") {
-    oceanSprayHandle = createOceanSpray(scene, LIQUID_LEVEL.crystal);
     oceanSurfaceDetailHandle = createOceanSurfaceDetail(scene, LIQUID_LEVEL.crystal, TERRAIN_SIZE);
   }
 
@@ -1727,7 +1756,6 @@ function animate() {
   }
   updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, camera.position, sun.position, dayNight.skyHorizon);
   updateWaterfall(waterfallHandle, dt, elapsedTime);
-  updateOceanSpray(oceanSprayHandle, dt, elapsedTime);
   updateOceanSurfaceDetail(oceanSurfaceDetailHandle, elapsedTime);
   updateRiverCurrent(riverCurrentHandle, dt);
   updateRiverFlowStrip(riverFlowStripHandle, dt);

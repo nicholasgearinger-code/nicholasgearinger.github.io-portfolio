@@ -467,7 +467,14 @@ function updateSkyDome(sky, zenithColor, midColor, horizonColor, elapsed, sunDir
   const tmp = new THREE.Color();
   const localHorizon = new THREE.Color();
   const localMid = new THREE.Color();
-  const glowColor = new THREE.Color(0xfff3d6);
+  // Was a fixed pale cream (0xfff3d6) at up to 85% blend strength right
+  // near the sun — that washed the rich sunset gradient out to near-white
+  // exactly where it should be most vivid. Now a brightened version of
+  // the ACTUAL current horizon color (mostly toward white, but keeping
+  // real hue), so the glow near the sun reads as a bright, saturated
+  // version of the real sunset color instead of overpowering it with an
+  // unrelated pale tone.
+  const glowColor = horizonColor.clone().lerp(new THREE.Color(0xffffff), 0.3);
   // Genuinely desaturated (luminance-based grayscale, not "toward
   // zenithColor") versions of horizon/mid, computed once per frame
   // rather than per-vertex. Blending "muted, away from the sun" sky
@@ -555,7 +562,7 @@ function updateSkyDome(sky, zenithColor, midColor, horizonColor, elapsed, sunDir
     if (sunDir) {
       const len = Math.hypot(x, y, z) || 1;
       const closeness = (x / len) * sunDir.x + (y / len) * sunDir.y + (z / len) * sunDir.z; // -1..1
-      const glow = Math.pow(Math.max(0, closeness), 5) * 0.85; // sharp falloff — a real glow concentrates near the sun, not a broad wash across the whole sky
+      const glow = Math.pow(Math.max(0, closeness), 5) * 0.55; // was 0.85 — even at its peak this should brighten the real sky color, not wash it out toward white
       if (glow > 0.001) tmp.lerp(glowColor, Math.min(1, glow));
     }
 

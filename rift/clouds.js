@@ -225,19 +225,22 @@ function updateClouds(handle, dt, wind, dayAmount, rainIntensity, skyHorizonColo
       // storm passes.
       const stormGrow = 1 + storm * sprite.userData.stormGrowth * 0.5;
       sprite.scale.set(sprite.userData.baseScaleX * stormGrow, sprite.userData.baseScaleY * stormGrow, 1);
-      // Only clouds actually near the sun shift color at all — real
-      // atmospheric glow is concentrated around the sun's own position,
-      // not a flat tint applied to the entire sky uniformly. Clouds
-      // elsewhere just stay their base color.
+      // Every cloud gets a baseline warmth tint during dawn/dusk, not
+      // just ones near the sun — a real sunset saturates the WHOLE cloud
+      // deck with color (see the reference photo), not a localized halo.
+      // Sun-proximity still matters, but now only for the EXTRA vibrant
+      // accent color and backlit brightness on top of this baseline —
+      // clouds near the sun are the most dramatic, but nothing stays
+      // flatly colorless just for being elsewhere in the sky.
       sprite.material.color.copy(cloud.baseColor);
-      if (skyHorizonColor && sunProximity > 0) {
-        sprite.material.color.lerp(skyHorizonColor, 0.7 * sunProximity); // was 0.55
-        // Extra vibrant push right around the sun during actual dawn/
-        // dusk — each cloud blends toward its OWN assigned accent color
-        // (see DAWN_DUSK_ACCENTS), so the glow around the sun shows real
-        // purple/orange/red/pink variety rather than one uniform tint.
-        // Inert (warmth=0) outside the actual dawn/dusk window.
-        if (warmth > 0) sprite.material.color.lerp(cloud.accentColor, warmth * sunProximity * 0.9); // was 0.75
+      if (skyHorizonColor && warmth > 0) {
+        sprite.material.color.lerp(skyHorizonColor, warmth * 0.6);
+        // Extra vibrant push right around the sun — each cloud blends
+        // further toward its OWN assigned accent color (see
+        // DAWN_DUSK_ACCENTS) the closer it is, so the area right around
+        // the sun shows the most saturated purple/orange/red/pink, while
+        // the rest of the sky still reads warm rather than untouched.
+        sprite.material.color.lerp(cloud.accentColor, warmth * (0.25 + sunProximity * 0.65));
         // Real backlit brightness right at the sun — clouds directly
         // around it often look almost lit from within (thin edges are
         // genuinely translucent to direct sunlight), not just tinted a

@@ -277,33 +277,40 @@ const BIOME_SHAPERS = {
     // old radius (~9x the old area), the largest the island can grow to
     // while still reading as a full, unclipped circular island.
     const ISLAND_CORE = 34, ISLAND_BLEND = 45, ISLAND_PEAK = 11.5;
+    // Rising the full 11.5-unit peak within the outer 11-unit band (CORE
+    // to BLEND) was ALWAYS going to look steep on average — ~46° even
+    // with a perfectly uniform grade — no matter how that curve was
+    // shaped; the earlier "shelf" attempt only redistributed where the
+    // steepness sat within that band, it couldn't reduce it. The actual
+    // fix: stop trying to reach the full peak within the beach band at
+    // all. A real beach is close to sea level for a long stretch; the
+    // hill behind it is a separate landform. Two zones:
     let islandBump = 0;
+    const BEACH_PLATEAU = LIQUID_LEVEL.crystal + 0.7; // modest — just above the waterline, not anywhere near the true peak
     if (islandDist < ISLAND_BLEND) {
-      const t = islandDist < ISLAND_CORE ? 1 : 1 - (islandDist - ISLAND_CORE) / (ISLAND_BLEND - ISLAND_CORE);
-      const shaped = t * t * (3 - 2 * t); // smoothstep — a rounded dome, not a cone
-      islandBump = shaped * ISLAND_PEAK;
-
-      // Real beaches slope gently right where the water actually meets
-      // the sand — the dome above is steepest (~55° grade) almost
-      // exactly at that crossing, nothing like a real beach; a
-      // shorter, gentler rise further inland (toward the actual hill)
-      // is fine, but the shoreline itself needs to be flat. A dedicated
-      // shelf — a straight, shallow ~5° ramp centered on the exact
-      // distance the dome's own curve crosses the waterline — is
-      // smoothly blended in ONLY near that crossing (weight fades to 0
-      // within 6 units either side), so it replaces the dome's steep
-      // local slope with a gentle one while leaving the dome fully in
-      // charge everywhere else: unchanged further out (underwater
-      // reef) and unchanged further in (the rise toward the interior
-      // peak). SHELF_CENTER_DIST was found numerically — the distance
-      // where the unmodified dome formula above equals
-      // LIQUID_LEVEL.crystal (8).
-      const SHELF_CENTER_DIST = 38, SHELF_RADIUS = 6;
-      const shelfDist = Math.abs(islandDist - SHELF_CENTER_DIST);
-      if (shelfDist < SHELF_RADIUS) {
-        const shelfWeight = Math.pow(1 - shelfDist / SHELF_RADIUS, 2); // 1 at the crossing, smoothly 0 at the shelf's own edges
-        const shelfHeight = LIQUID_LEVEL.crystal + (SHELF_CENTER_DIST - islandDist) * 0.09; // ~5° grade
-        islandBump = islandBump * (1 - shelfWeight) + shelfHeight * shelfWeight;
+      if (islandDist >= ISLAND_CORE) {
+        // Beach ring — genuinely gentle (~9° grade) rise from below the
+        // waterline up to the modest plateau above, using the full
+        // 11-unit band uniformly (linear, not smoothstep — smoothstep
+        // would still concentrate steepness in the middle of this band,
+        // which is exactly what "nearly flat" can't tolerate anywhere
+        // within it).
+        const beachT = 1 - (islandDist - ISLAND_CORE) / (ISLAND_BLEND - ISLAND_CORE); // 0 at BLEND, 1 at CORE
+        const rampHeight = beachT * (BEACH_PLATEAU - (LIQUID_LEVEL.crystal - 1)) + (LIQUID_LEVEL.crystal - 1);
+        const outerFade = Math.min(1, beachT / 0.15); // fades the ramp to exactly 0 within the outermost ~15% of the band (near BLEND) instead of colliding with the hard 0 default just outside the islandDist<BLEND guard below — the reef's own natural height takes over smoothly there instead, and that sliver is typically underwater/reef-dominated anyway so this is rarely the visible surface
+        islandBump = rampHeight * outerFade;
+      } else {
+        // Interior hill — carries the REST of the rise, from the
+        // beach's own plateau height up to the true peak, using the
+        // much larger 34-unit radius available inside CORE instead of
+        // cramming it into the beach band. Smoothstep here (not linear)
+        // for a natural-looking crest; matches the beach ring's height
+        // AND has zero slope on both sides exactly at CORE (smoothstep's
+        // derivative is 0 at its own t=0 endpoint), so the two pieces
+        // meet with no visible seam.
+        const hillT = Math.min(1, 1 - islandDist / ISLAND_CORE); // 0 at CORE, 1 at the island's center
+        const shaped = hillT * hillT * (3 - 2 * hillT);
+        islandBump = BEACH_PLATEAU + shaped * (ISLAND_PEAK - BEACH_PLATEAU);
       }
     }
 

@@ -14,6 +14,7 @@ import { createLandmark, updateLandmark, disposeLandmark, LANDMARK_POSITION } fr
 import { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers } from "./graphicsSettings.js";
 import { createWeatherSystem, updateWeatherSystem, disposeWeatherSystem } from "./weather.js";
 import { createClouds, updateClouds, disposeClouds } from "./clouds.js";
+import { createVolumetricClouds, updateVolumetricClouds, disposeVolumetricClouds } from "./volumetricClouds.js";
 import {
   createBolt, updateBolt, disposeBolt,
   createMuzzleFlash, updateMuzzleFlash, disposeMuzzleFlash,
@@ -528,6 +529,7 @@ let flowersHandle = null;
 let footstepGlowHandle = null;
 let weatherHandle = null;
 let cloudsHandle = null;
+let volumetricCloudsHandle = null;
 let horizonHandle = null;
 let wildlifeHandle = null;
 let landmarkHandle = null;
@@ -596,6 +598,8 @@ function teardownLevel() {
   weatherHandle = null;
   disposeClouds(scene, cloudsHandle);
   cloudsHandle = null;
+  disposeVolumetricClouds(scene, volumetricCloudsHandle);
+  volumetricCloudsHandle = null;
   disposeHorizonSilhouettes(scene, horizonHandle);
   horizonHandle = null;
   disposeWildlife(scene, wildlifeHandle);
@@ -1174,6 +1178,16 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
   footstepGlowHandle = level.biome === "verdant" ? createFootstepGlowSystem(scene, 40) : null;
   weatherHandle = createWeatherSystem(scene, level.biome);
   cloudsHandle = createClouds(scene, level.biome);
+  // High tier gets real ray-marched volumetric clouds instead of the
+  // sprite-billboard ones (see volumetricClouds.js for why this is
+  // gated this way — genuine per-pixel GPU cost). Ground fog is a
+  // separate part of the SAME cloudsHandle and keeps running on every
+  // tier regardless — only the sky-cloud sprite groups get hidden here,
+  // so they don't double-render alongside the new volumetric layer.
+  if (getGraphicsTier() === "high") {
+    volumetricCloudsHandle = createVolumetricClouds(scene);
+    for (const cloud of cloudsHandle.clouds) cloud.group.visible = false;
+  }
   horizonHandle = level.biome === "crystal" ? null : createHorizonSilhouettes(scene, level.biome); // Coral Shallows is open ocean now — no distant mountain backdrop, and horizonSilhouettes.js still isn't part of this session so this stays a main.js-only fix rather than touching that file's still-old icy Crystal-Spire theming
   wildlifeHandle = createWildlife(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), LIQUID_LEVEL[level.biome]);
   landmarkHandle = createLandmark(scene, level.biome, level.color, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
@@ -1756,7 +1770,7 @@ function animate() {
   }
   updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, camera.position, sun.position, dayNight.skyHorizon);
   updateWaterfall(waterfallHandle, dt, elapsedTime);
-  updateOceanSurfaceDetail(oceanSurfaceDetailHandle, elapsedTime);
+  updateOceanSurfaceDetail(oceanSurfaceDetailHandle, elapsedTime, dayNight.dayAmount);
   updateRiverCurrent(riverCurrentHandle, dt);
   updateRiverFlowStrip(riverFlowStripHandle, dt);
   updateSourcePond(sourcePondHandle, elapsedTime);
@@ -1839,7 +1853,11 @@ function animate() {
   updateFootstepGlowSystem(footstepGlowHandle, dt);
   updateWildlife(wildlifeHandle, elapsedTime, dt, camera.position.x, camera.position.z, eruptionActive);
   updateLandmark(landmarkHandle, elapsedTime, dt);
-  updateClouds(cloudsHandle, dt, wind, dayNight.dayAmount, wind.rainIntensity);
+  updateClouds(cloudsHandle, dt, wind, dayNight.dayAmount, wind.rainIntensity, dayNight.skyHorizon);
+  if (volumetricCloudsHandle) {
+    const coverage = 0.5 + (wind.rainIntensity || 0) * 0.35; // heavier, more overcast coverage during actual rain — not just uniformly darker like clouds.js's stormDarken, genuinely more sky filled
+    updateVolumetricClouds(volumetricCloudsHandle, elapsedTime, sun.position, sun.color, dayNight.dayAmount, coverage);
+  }
   setAmbientDayAmount(dayNight.dayAmount);
   if (currentLevelIdx >= 0 && horizonHandle) updateHorizonSilhouettes(horizonHandle, LEVELS[currentLevelIdx].biome, dayNight.dayAmount);
   updateLightShafts(lightShaftHandles, dayNight.dayAmount);

@@ -659,13 +659,18 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
     // biome's water is only ever seen from above, so left untouched.
     side: biome === "crystal" ? THREE.DoubleSide : THREE.FrontSide,
   };
-  // MeshPhysicalMaterial (MeshStandardMaterial plus a real clearcoat
-  // layer) for the ocean specifically — a water surface's specular
-  // highlight really is a thin, near-flat reflective film sitting on top
-  // of the bulk-colored water beneath it, which clearcoat models
-  // properly instead of just faking it by cranking the base material's
-  // own roughness down. Ember's lava and Verdant's river keep plain
-  // MeshStandardMaterial, unchanged.
+  // MeshPhysicalMaterial with clearcoat for the ocean specifically — a
+  // water surface's specular highlight really is a thin, near-flat
+  // reflective film on top of the bulk-colored water beneath it, which
+  // clearcoat models properly. This previously rendered black at grazing
+  // angles (the horizon) because clearcoat needs an environment map to
+  // reflect and this scene had none — main.js now sets scene.environment
+  // for the crystal biome specifically (a PMREM map generated from the
+  // sky's own real current zenith/horizon colors, kept in sync through
+  // the day/night cycle), so there's something real for it to reflect.
+  // Ember's lava and Verdant's river keep plain MeshStandardMaterial,
+  // unchanged — this is scoped to the one biome that actually has an
+  // environment map set up for it.
   const mat = biome === "crystal"
     ? new THREE.MeshPhysicalMaterial({ ...matOptions, clearcoat: 1.0, clearcoatRoughness: 0.06 })
     : new THREE.MeshStandardMaterial(matOptions);

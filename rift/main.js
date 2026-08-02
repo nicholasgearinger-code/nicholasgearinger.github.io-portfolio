@@ -116,6 +116,48 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, getGraphicsSettings().p
 renderer.shadowMap.enabled = getGraphicsSettings().shadowsEnabled;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
+// A real environment map for reflective materials (currently: the ocean
+// water's clearcoat layer) to actually reflect, instead of the black a
+// clearcoat/high-Fresnel surface renders at grazing angles with nothing
+// to sample. Not a full scene capture (a live CubeCamera re-rendering
+// the whole scene every frame would cost real GPU time this project
+// deliberately avoids elsewhere) — a small 2-color vertical gradient
+// canvas (zenith -> horizon, the same two colors the sky dome itself
+// uses) run through PMREMGenerator once. Cheap enough to regenerate
+// periodically as the day/night cycle changes those colors (see
+// updateSkyEnvironment below, throttled and called from the crystal-only
+// per-frame update), so reflections still track dawn/day/dusk/night
+// convincingly without literally mirroring the scene.
+const pmremGenerator = new THREE.PMREMGenerator(renderer);
+pmremGenerator.compileEquirectangularShader();
+const skyGradientCanvas = document.createElement("canvas");
+skyGradientCanvas.width = 4; skyGradientCanvas.height = 64;
+const skyGradientCtx = skyGradientCanvas.getContext("2d");
+const skyGradientTexture = new THREE.CanvasTexture(skyGradientCanvas);
+skyGradientTexture.mapping = THREE.EquirectangularReflectionMapping;
+skyGradientTexture.colorSpace = THREE.SRGBColorSpace;
+let skyEnvRenderTarget = null;
+let lastSkyEnvZenith = null, lastSkyEnvHorizon = null;
+// Regenerates the env map from the given zenith/horizon colors — only
+// actually does the (somewhat costly) PMREM pass when the colors have
+// visibly changed since last time, not unconditionally every call.
+function updateSkyEnvironment(zenithColor, horizonColor) {
+  if (!zenithColor || !horizonColor) return;
+  if (lastSkyEnvZenith && lastSkyEnvZenith.equals(zenithColor) && lastSkyEnvHorizon && lastSkyEnvHorizon.equals(horizonColor)) return;
+  if (!lastSkyEnvZenith) lastSkyEnvZenith = zenithColor.clone(); else lastSkyEnvZenith.copy(zenithColor);
+  if (!lastSkyEnvHorizon) lastSkyEnvHorizon = horizonColor.clone(); else lastSkyEnvHorizon.copy(horizonColor);
+  const grad = skyGradientCtx.createLinearGradient(0, 0, 0, skyGradientCanvas.height);
+  grad.addColorStop(0, `#${zenithColor.getHexString()}`);
+  grad.addColorStop(1, `#${horizonColor.getHexString()}`);
+  skyGradientCtx.fillStyle = grad;
+  skyGradientCtx.fillRect(0, 0, skyGradientCanvas.width, skyGradientCanvas.height);
+  skyGradientTexture.needsUpdate = true;
+  const oldTarget = skyEnvRenderTarget;
+  skyEnvRenderTarget = pmremGenerator.fromEquirectangular(skyGradientTexture);
+  if (oldTarget) oldTarget.dispose(); // dispose the PREVIOUS target only, one frame after the new one exists — never disposes the one currently assigned to scene.environment
+  scene.environment = skyEnvRenderTarget.texture;
+}
+
 function resizeToViewport() {
   const w = viewport.clientWidth, h = viewport.clientHeight;
   if (w === 0 || h === 0) return;
@@ -512,6 +554,11 @@ let wasErupting = false; // edge-detects eruption start/stop for audio — see t
 const MAX_DYNAMIC_FIRES = 10; // defensive cap so spawns can never outpace burnouts and pile up indefinitely
 
 function teardownLevel() {
+  if (scene.environment) {
+    scene.environment = null;
+    if (skyEnvRenderTarget) { skyEnvRenderTarget.dispose(); skyEnvRenderTarget = null; }
+    lastSkyEnvZenith = null; lastSkyEnvHorizon = null; // forces a fresh regenerate next time crystal loads, rather than comparing against a stale color from the previous visit
+  }
   if (terrainMesh) {
     scene.remove(terrainMesh);
     terrainMesh.geometry.dispose();
@@ -1645,6 +1692,14 @@ function animate() {
   // cover any future water biome without needing another hardcoded
   // special-case here.
   const currentBiome = currentLevelIdx >= 0 ? LEVELS[currentLevelIdx].biome : null;
+  // Crystal-only, Medium/Low-tier skipped — see updateSkyEnvironment's
+  // own comment for why this exists at all (clearcoat needs something to
+  // reflect). Every other biome gets scene.environment cleared in
+  // teardownLevel so this stays scoped to the one material that actually
+  // uses it.
+  if (currentBiome === "crystal" && getGraphicsTier() !== "low") {
+    updateSkyEnvironment(dayNight.skyZenith, dayNight.skyHorizon);
+  }
   const currentLiquidLevel = currentBiome !== null ? LIQUID_LEVEL[currentBiome] : undefined;
   const isFullySubmerged = currentLiquidLevel !== undefined && camera.position.y < currentLiquidLevel;
   if (isFullySubmerged) {

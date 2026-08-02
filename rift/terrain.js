@@ -282,6 +282,29 @@ const BIOME_SHAPERS = {
       const t = islandDist < ISLAND_CORE ? 1 : 1 - (islandDist - ISLAND_CORE) / (ISLAND_BLEND - ISLAND_CORE);
       const shaped = t * t * (3 - 2 * t); // smoothstep — a rounded dome, not a cone
       islandBump = shaped * ISLAND_PEAK;
+
+      // Real beaches slope gently right where the water actually meets
+      // the sand — the dome above is steepest (~55° grade) almost
+      // exactly at that crossing, nothing like a real beach; a
+      // shorter, gentler rise further inland (toward the actual hill)
+      // is fine, but the shoreline itself needs to be flat. A dedicated
+      // shelf — a straight, shallow ~5° ramp centered on the exact
+      // distance the dome's own curve crosses the waterline — is
+      // smoothly blended in ONLY near that crossing (weight fades to 0
+      // within 6 units either side), so it replaces the dome's steep
+      // local slope with a gentle one while leaving the dome fully in
+      // charge everywhere else: unchanged further out (underwater
+      // reef) and unchanged further in (the rise toward the interior
+      // peak). SHELF_CENTER_DIST was found numerically — the distance
+      // where the unmodified dome formula above equals
+      // LIQUID_LEVEL.crystal (8).
+      const SHELF_CENTER_DIST = 38, SHELF_RADIUS = 6;
+      const shelfDist = Math.abs(islandDist - SHELF_CENTER_DIST);
+      if (shelfDist < SHELF_RADIUS) {
+        const shelfWeight = Math.pow(1 - shelfDist / SHELF_RADIUS, 2); // 1 at the crossing, smoothly 0 at the shelf's own edges
+        const shelfHeight = LIQUID_LEVEL.crystal + (SHELF_CENTER_DIST - islandDist) * 0.09; // ~5° grade
+        islandBump = islandBump * (1 - shelfWeight) + shelfHeight * shelfWeight;
+      }
     }
 
     return Math.max(seafloor + sandRipple + reefMound, islandBump);
@@ -763,9 +786,9 @@ function applyHeightShading(geo, colorHex, minY, maxY, biome, seed) {
       }
       if (islandSandWet) {
         const worldY = posAttr.getY(i);
-        const beachT = Math.min(1, Math.max(0, (worldY - (waterLine - 1.2)) / 1.8)); // soft 1.8-unit blend band straddling the water line
+        const beachT = Math.min(1, Math.max(0, (worldY - (waterLine - 2)) / 4.5)); // widened from 1.8 to 4.5 units to match the new, more gradual beach shelf's own extent — a narrower color band than the actual slope would look like a hard line cutting across a smooth rise
         if (beachT > 0) {
-          const goldT = Math.min(1, Math.max(0, (worldY - waterLine) / 4)); // fades from wet white-sand near the shore to warm gold sand further up the beach
+          const goldT = Math.min(1, Math.max(0, (worldY - waterLine) / 6)); // widened from 4 to 6 for the same reason — fades from wet white-sand near the shore to warm gold sand further up the now-longer beach
           islandSandTmp.copy(islandSandWet).lerp(islandSandDry, goldT);
           tmp.lerp(islandSandTmp, beachT);
         }

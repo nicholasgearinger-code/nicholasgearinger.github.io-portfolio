@@ -743,6 +743,27 @@ float gerstnerHeight(vec2 xz, float t) {
   float crestFocus = smoothstep(0.5, 1.0, waveNorm);
   float causticIntensity = net * underwaterMask * upwardFacing * (0.32 + crestFocus * 0.42);
   diffuseColor.rgb += vec3(causticIntensity);
+
+  // Shoreline wave-wash — real waves surge up the beach slope and
+  // recede, leaving foam at the current edge and darker wet sand behind
+  // it. shoreDist is height above (positive) or below (negative) the
+  // mean waterline; reachHeight is how far above that mean the CURRENT
+  // wave pushes, driven by the same real wave crest/trough (waveNorm)
+  // already sampled above — so the wash rhythm matches the actual ocean
+  // above instead of an unrelated clock.
+  float shoreDist = vCausticWorldPos.y - uWaterLevel;
+  float reachHeight = 0.15 + waveNorm * 0.9;
+  float foamBand = (1.0 - smoothstep(0.0, 0.35, abs(shoreDist - reachHeight))) * upwardFacing;
+  // True per-pixel memory of "recently wet" would need an accumulation
+  // buffer this project doesn't have (nothing here persists between
+  // frames) — approximated instead with a slow-power envelope of the
+  // same wave signal, so sand still reads as wet for a while after a
+  // crest recedes rather than snapping back to dry the instant the foam
+  // line passes.
+  float wetEnvelope = pow(waveNorm, 0.4);
+  float wetMask = (1.0 - smoothstep(reachHeight - 0.3, reachHeight + 1.3, shoreDist)) * wetEnvelope * upwardFacing;
+  diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.55, clamp(wetMask, 0.0, 1.0));
+  diffuseColor.rgb += vec3(foamBand) * 0.85;
 }`);
       terrainMat.userData.shader = shader; // so the animate loop can push uTime each frame
     };

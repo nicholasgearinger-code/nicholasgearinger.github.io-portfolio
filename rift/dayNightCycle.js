@@ -32,7 +32,7 @@ const DAWN_DUSK = {
   // middle band genuinely is its own more saturated hue (light
   // scattering more at that particular angle), not just an average of
   // the two ends.
-  skyZenith: 0x2a2138, skyMid: 0xd6558a, skyHorizon: 0xff6a42,
+  skyZenith: 0x2a2138, skyMid: 0xd6558a, skyHorizon: 0xff4a1e, // horizon was 0xff6a42 — pushed more toward saturated reddish-orange per explicit request, less plain orange
 };
 const DAY = {
   sun: 0xfff4e0, sunIntensity: 2.0, ambient: 0x8899bb, ambientIntensity: 0.5,
@@ -48,7 +48,7 @@ const DAY = {
 // itself looks in the sky.
 const SUN_BODY_ZENITH = new THREE.Color(0xfff8ec);
 const SUN_BODY_MID = new THREE.Color(0xffcf7a);
-const SUN_BODY_HORIZON = new THREE.Color(0xff5522);
+const SUN_BODY_HORIZON = new THREE.Color(0xff4415); // was 0xff5522 — pushed more toward a saturated bright reddish-orange per explicit request
 
 // A subtle per-biome push on top of the shared day/night colors above —
 // this file was previously entirely biome-unaware (every biome saw the
@@ -499,7 +499,14 @@ function updateSkyDome(sky, zenithColor, midColor, horizonColor, elapsed, sunDir
     // stepping — so the sky reads as one real gradient responding to the
     // sun/atmosphere rather than flat color regions with a seam between
     // them.
-    const t = THREE.MathUtils.clamp((yFrac + 0.1) / 0.45, 0, 1);
+    const tLinear = THREE.MathUtils.clamp((yFrac + 0.1) / 0.45, 0, 1);
+    // Non-linear ease (not just the linear tLinear) — the horizon color
+    // should genuinely hold its full intensity longer right near the
+    // actual edge and only then give way to mid/zenith, rather than
+    // fading away at a constant rate the moment you look up even
+    // slightly. pow > 1 shrinks small values further, so the eased t
+    // stays closer to 0 (full horizon color) for longer before rising.
+    const t = Math.pow(tLinear, 1.6);
     // Real 3-stop gradient (horizon -> mid -> zenith) instead of a direct
     // 2-color lerp — a straight lerp between DAWN_DUSK's dark purple
     // zenith and vivid orange horizon mathematically lands on a dull

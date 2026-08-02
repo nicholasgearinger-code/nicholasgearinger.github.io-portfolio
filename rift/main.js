@@ -760,14 +760,19 @@ float gFoamMask = 0.0;`)
   float shoreDist = vCausticWorldPos.y - uWaterLevel;
   float reachHeight = 0.15 + waveNorm * 0.9;
   // Foam needs real internal structure to read as liquid rather than a
-  // glowing strip — reuses the same Voronoi noise already defined above
-  // for the caustic net, but F1 alone (clustered blob shapes) instead of
-  // the F2-F1 edge trick, since foam is clumped bubbles, not a net of
-  // thin lines. Slowly drifting UV so the bubble pattern itself isn't
-  // static.
-  vec2 foamUv = vCausticWorldPos.xz * 1.8 + vec2(uTime * 0.15, uTime * 0.11);
-  vec2 fv = causticVoronoiF1F2(foamUv);
-  float foamCell = 1.0 - smoothstep(0.0, 0.45, fv.x);
+  // glowing strip. A single Voronoi layer at one scale tiles into an
+  // evenly-spaced grid of same-size circles — exactly the "disco ball"
+  // look this had. Two overlapping octaves at different scale/drift
+  // (mirroring the ocean surface's own whitecap foam technique in
+  // liquid.js) breaks that regularity into overlapping bubble clusters
+  // of varying size instead, and at a much smaller/finer scale than the
+  // first attempt.
+  vec2 foamUv1 = vCausticWorldPos.xz * 3.5 + vec2(uTime * 0.15, uTime * 0.11);
+  vec2 foamUv2 = vCausticWorldPos.xz * 9.0 - vec2(uTime * 0.1, uTime * 0.08);
+  vec2 fv1 = causticVoronoiF1F2(foamUv1);
+  vec2 fv2 = causticVoronoiF1F2(foamUv2);
+  float foamCell = (1.0 - smoothstep(0.0, 0.4, fv1.x)) * 0.6 + (1.0 - smoothstep(0.0, 0.32, fv2.x)) * 0.55;
+  foamCell = clamp(foamCell, 0.0, 1.0);
   float foamZone = 1.0 - smoothstep(0.0, 0.4, abs(shoreDist - reachHeight));
   float foamMask = clamp(foamCell * foamZone * upwardFacing, 0.0, 1.0);
   gFoamMask = foamMask; // read by the emissivemap_fragment injection below, so foam stays visible even under night's dim lighting

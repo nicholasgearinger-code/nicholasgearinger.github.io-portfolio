@@ -1208,36 +1208,41 @@ function createOceanSurfaceDetail(scene, y, size) {
   scene.add(whitecaps);
 
   // Shore break — a tight ring of foam right where the ocean meets the
-  // island, synced to the same angle-phased crash cycle updateOceanSpray
-  // uses, so there's an actual visible break-line at the water instead of
-  // only the airborne mist above it. Reuses the same foam texture as the
-  // ambient whitecaps but concentrated in an annulus around SHORE_RADIUS
-  // instead of scattered across the whole ocean. vertexColors drives
-  // brightness per point each frame (PointsMaterial has no per-vertex
-  // opacity), so it can fade instead of just being permanently onscreen.
-  const shoreFoamCount = 90;
+  // island, synced to the same real sampled Gerstner wave height
+  // updateOceanSpray now uses (both read sampleGerstnerHeight at their
+  // own actual position), so there's an actual visible break-line at
+  // the water genuinely tied to the real ocean surface, not just an
+  // airborne mist above it. Reuses the same foam texture as the ambient
+  // whitecaps but concentrated in an annulus around SHORE_RADIUS instead
+  // of scattered across the whole ocean. vertexColors drives brightness
+  // per point each frame (PointsMaterial has no per-vertex opacity), so
+  // it can fade instead of just being permanently onscreen.
+  const shoreFoamCount = 200; // was 90 — the shoreline circumference is ~2.2x larger now (SHORE_RADIUS 17->37), same density needs proportionally more points
   const shoreFoamPos = new Float32Array(shoreFoamCount * 3);
   const shoreFoamColors = new Float32Array(shoreFoamCount * 3);
-  const shoreFoamAngle = new Float32Array(shoreFoamCount);
+  const shoreFoamX = new Float32Array(shoreFoamCount);
+  const shoreFoamZ = new Float32Array(shoreFoamCount);
   for (let i = 0; i < shoreFoamCount; i++) {
     const angle = Math.random() * Math.PI * 2;
-    const r = SHORE_RADIUS + (Math.random() - 0.5) * 4;
-    shoreFoamPos[i * 3] = ISLAND_CENTER.x + Math.cos(angle) * r;
+    const r = SHORE_RADIUS + (Math.random() - 0.5) * 5;
+    const x = ISLAND_CENTER.x + Math.cos(angle) * r, z = ISLAND_CENTER.z + Math.sin(angle) * r;
+    shoreFoamPos[i * 3] = x;
     shoreFoamPos[i * 3 + 1] = y + 0.12;
-    shoreFoamPos[i * 3 + 2] = ISLAND_CENTER.z + Math.sin(angle) * r;
-    shoreFoamAngle[i] = angle;
+    shoreFoamPos[i * 3 + 2] = z;
+    shoreFoamX[i] = x;
+    shoreFoamZ[i] = z;
   }
   const shoreFoamGeo = new THREE.BufferGeometry();
   shoreFoamGeo.setAttribute("position", new THREE.BufferAttribute(shoreFoamPos, 3));
   shoreFoamGeo.setAttribute("color", new THREE.BufferAttribute(shoreFoamColors, 3));
   const shoreFoamMat = new THREE.PointsMaterial({
-    map: getFoamTexture(), vertexColors: true, color: 0xffffff, size: 3.4, transparent: true, opacity: 0.9,
+    map: getFoamTexture(), vertexColors: true, color: 0xffffff, size: 4.2, transparent: true, opacity: 0.95,
     depthWrite: false, sizeAttenuation: true,
   });
   const shoreFoam = new THREE.Points(shoreFoamGeo, shoreFoamMat);
   scene.add(shoreFoam);
 
-  return { glitter, glitterSeeds, glitterSpeeds, glitterCount, whitecaps, shoreFoam, shoreFoamAngle, shoreFoamCount };
+  return { glitter, glitterSeeds, glitterSpeeds, glitterCount, whitecaps, shoreFoam, shoreFoamX, shoreFoamZ, shoreFoamCount };
 }
 
 function updateOceanSurfaceDetail(handle, elapsed) {
@@ -1258,11 +1263,15 @@ function updateOceanSurfaceDetail(handle, elapsed) {
   if (handle.shoreFoam) {
     const shoreColorAttr = handle.shoreFoam.geometry.attributes.color;
     for (let i = 0; i < handle.shoreFoamCount; i++) {
-      // Same phase formula as updateOceanSpray's crash cycle — this ring
-      // and the spray above it break at the same point at the same time.
-      const wavePhase = elapsed * 1.8 + handle.shoreFoamAngle[i] * 2.4;
-      const crash = Math.pow(0.5 + 0.5 * Math.sin(wavePhase), 4);
-      const bright = 0.15 + crash * 0.85; // never fully invisible between crashes — a faint tideline, not on/off
+      // Real wave height sampled at this point's actual position — same
+      // formula as the ocean surface mesh and updateOceanSpray above, so
+      // the visible foam line and the airborne spray break together
+      // because they're reading the same real wave, not two independent
+      // clocks that only coincidentally matched.
+      const waveH = sampleGerstnerHeight(handle.shoreFoamX[i], handle.shoreFoamZ[i], elapsed);
+      const waveNorm = THREE.MathUtils.clamp((waveH + GERSTNER_AMPLITUDE_SUM) / (2 * GERSTNER_AMPLITUDE_SUM), 0, 1);
+      const crash = Math.pow(waveNorm, 4);
+      const bright = 0.22 + crash * 0.95; // never fully invisible between crashes — a faint tideline, not on/off; raised floor and peak for a more pronounced ring
       shoreColorAttr.setXYZ(i, bright, bright, bright);
     }
     shoreColorAttr.needsUpdate = true;
@@ -1293,15 +1302,30 @@ function disposeOceanSurfaceDetail(scene, handle) {
 // waterfall base, and a gentler arc since this is ambient shore mist,
 // not a dramatic waterfall burst.
 const ISLAND_CENTER = { x: 55, z: -70 }; // must match terrain.js's own island center
-const SHORE_RADIUS = 17; // sits right around where the island's dome crosses LIQUID_LEVEL.crystal — see terrain.js's numeric verification of the crossing point
+const SHORE_RADIUS = 37; // was 17 — stale from before the island was enlarged 3x and the beach reshaped into a gentle ramp (see terrain.js); the actual waterline crossing is now ~37, matching decorations.js's own onIsland threshold. At 17 this whole system was spawning deep inland on dry hillside, nowhere near the actual water's edge.
+// Real Gerstner wave height at a given world XZ + time — the exact same
+// formula and parameters as the actual ocean surface mesh's own
+// per-vertex computation above, and the terrain's own onBeforeCompile
+// caustic/wave-wash shader (main.js). All three systems (ocean surface,
+// terrain shoreline effects, and the spray/foam-ring below) now read
+// from one consistent wave model instead of independent clocks that
+// only coincidentally looked similar.
+function sampleGerstnerHeight(x, z, elapsed) {
+  let h = 0;
+  for (const w of GERSTNER_WAVES) {
+    const f = w.k * (w.ndx * x + w.ndz * z) - w.speed * elapsed;
+    h += w.amplitude * Math.sin(f);
+  }
+  return h;
+}
 function createOceanSpray(scene, waterLevel) {
-  const emitterCount = 10;
+  const emitterCount = 22; // was 10 — the shoreline circumference is ~2.2x larger now (SHORE_RADIUS 17->37), same spacing needs proportionally more emitters
   const emitters = [];
   for (let i = 0; i < emitterCount; i++) {
     const angle = (i / emitterCount) * Math.PI * 2 + Math.random() * 0.2;
     emitters.push({ x: ISLAND_CENTER.x + Math.cos(angle) * SHORE_RADIUS, z: ISLAND_CENTER.z + Math.sin(angle) * SHORE_RADIUS, angle });
   }
-  const particlesPerEmitter = 5;
+  const particlesPerEmitter = 6; // was 5 — a real breaking wave throws more than a handful of droplets
   const count = emitterCount * particlesPerEmitter;
   const positions = new Float32Array(count * 3);
   const vel = new Float32Array(count * 3);
@@ -1314,7 +1338,7 @@ function createOceanSpray(scene, waterLevel) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   const mat = new THREE.PointsMaterial({
-    map: getFoamTexture(), color: 0xffffff, size: 0.5, transparent: true, opacity: 0.75,
+    map: getFoamTexture(), color: 0xffffff, size: 0.75, transparent: true, opacity: 0.85,
     blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
   });
   const points = new THREE.Points(geo, mat);
@@ -1327,25 +1351,25 @@ function updateOceanSpray(handle, dt, elapsed) {
   const posAttr = handle.points.geometry.attributes.position;
   for (let i = 0; i < handle.life.length; i++) {
     const em = handle.emitters[handle.emitterIndex[i]];
-    // A traveling crash pulse swept around the shoreline by each emitter's
-    // angle, rather than constant ambient mist — real surf builds, breaks
-    // sharply, then recedes. The 4th-power sine gives a brief bright spike
-    // (most of the cycle sits low) instead of a smooth breathing pulse, and
-    // offsetting phase by angle makes the break travel around the island
-    // instead of every point crashing in unison. Matches the phase formula
-    // updateOceanSurfaceDetail uses for its shore-foam ring, so the visible
-    // foam line and the airborne spray above it break together.
-    const wavePhase = elapsed * 1.8 + em.angle * 2.4;
-    const crash = Math.pow(0.5 + 0.5 * Math.sin(wavePhase), 4);
-    handle.life[i] += dt * (0.35 + crash * 1.6); // faster respawn at the crash peak, slower during the lull
+    // Real wave height sampled at this emitter's actual position, not an
+    // arbitrary angle-swept clock — genuinely tied to the same visible
+    // ocean surface (liquid.js's own Gerstner sum) instead of an
+    // independent rhythm that only coincidentally looked similar. The
+    // wave naturally sweeps around the shoreline on its own since each
+    // emitter sits at a different (x,z) and therefore samples a
+    // different real phase of the traveling wave.
+    const waveH = sampleGerstnerHeight(em.x, em.z, elapsed);
+    const waveNorm = THREE.MathUtils.clamp((waveH + GERSTNER_AMPLITUDE_SUM) / (2 * GERSTNER_AMPLITUDE_SUM), 0, 1);
+    const crash = Math.pow(waveNorm, 4); // still a sharp peak at the real crest, not a smooth breathing pulse
+    handle.life[i] += dt * (0.35 + crash * 1.8); // faster respawn at the crash peak, slower during the lull
     if (handle.life[i] >= 1) {
       handle.life[i] = 0;
       const angle = Math.random() * Math.PI * 2;
-      const speed = (0.3 + crash * 1.1) * (0.6 + Math.random() * 0.8);
-      const spread = 2.5 + crash * 2.5; // wider scatter when the wave actually breaks
+      const speed = (0.35 + crash * 1.4) * (0.6 + Math.random() * 0.8);
+      const spread = 2.8 + crash * 3.2; // wider scatter when the wave actually breaks
       posAttr.setXYZ(i, em.x + (Math.random() - 0.5) * spread, handle.waterLevel + 0.1, em.z + (Math.random() - 0.5) * spread);
       handle.vel[i * 3] = Math.cos(angle) * speed;
-      handle.vel[i * 3 + 1] = 1.2 + crash * 2.8 + Math.random() * 1.2; // crash peaks launch spray noticeably higher than the idle drizzle
+      handle.vel[i * 3 + 1] = 1.4 + crash * 3.6 + Math.random() * 1.4; // crash peaks launch spray noticeably higher than the idle drizzle
       handle.vel[i * 3 + 2] = Math.sin(angle) * speed;
     } else {
       const t = handle.life[i];
@@ -1356,7 +1380,7 @@ function updateOceanSpray(handle, dt, elapsed) {
     }
   }
   posAttr.needsUpdate = true;
-  handle.points.material.opacity = 0.55 + Math.sin(elapsed * 2.6) * 0.1; // gentle churn, matching the waterfall foam's own idle shimmer
+  handle.points.material.opacity = 0.6 + Math.sin(elapsed * 2.6) * 0.15; // gentle churn, matching the waterfall foam's own idle shimmer
 }
 
 function disposeOceanSpray(scene, handle) {

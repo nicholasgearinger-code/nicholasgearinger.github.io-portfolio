@@ -297,7 +297,7 @@ const BIOME_SHAPERS = {
         // within it).
         const beachT = 1 - (islandDist - ISLAND_CORE) / (ISLAND_BLEND - ISLAND_CORE); // 0 at BLEND, 1 at CORE
         const rampHeight = beachT * (BEACH_PLATEAU - (LIQUID_LEVEL.crystal - 1)) + (LIQUID_LEVEL.crystal - 1);
-        const outerFade = Math.min(1, beachT / 0.15); // fades the ramp to exactly 0 within the outermost ~15% of the band (near BLEND) instead of colliding with the hard 0 default just outside the islandDist<BLEND guard below — the reef's own natural height takes over smoothly there instead, and that sliver is typically underwater/reef-dominated anyway so this is rarely the visible surface
+        const outerFade = Math.min(1, beachT / 0.45); // fades the ramp to exactly 0 within the outermost ~45% of the band (near BLEND) instead of colliding with the hard 0 default just outside the islandDist<BLEND guard below — widened from 0.15 (only ~1.65 units) specifically because that was finer than the default mobile terrain mesh's own segment spacing (~6 units at Low tier), so it rendered as one hard triangle edge instead of a gradual blend; ~5 units is wide enough for the coarse mesh to actually resolve as smooth. That zone is typically underwater/reef-dominated anyway so this is rarely the visible dry surface.
         islandBump = rampHeight * outerFade;
       } else {
         // Interior hill — carries the REST of the rise, from the

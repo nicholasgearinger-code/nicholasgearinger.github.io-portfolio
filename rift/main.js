@@ -753,7 +753,17 @@ float gerstnerHeight(vec2 xz, float t) {
   // above instead of an unrelated clock.
   float shoreDist = vCausticWorldPos.y - uWaterLevel;
   float reachHeight = 0.15 + waveNorm * 0.9;
-  float foamBand = (1.0 - smoothstep(0.0, 0.35, abs(shoreDist - reachHeight))) * upwardFacing;
+  // Foam needs real internal structure to read as liquid rather than a
+  // glowing strip — reuses the same Voronoi noise already defined above
+  // for the caustic net, but F1 alone (clustered blob shapes) instead of
+  // the F2-F1 edge trick, since foam is clumped bubbles, not a net of
+  // thin lines. Slowly drifting UV so the bubble pattern itself isn't
+  // static.
+  vec2 foamUv = vCausticWorldPos.xz * 1.8 + vec2(uTime * 0.15, uTime * 0.11);
+  vec2 fv = causticVoronoiF1F2(foamUv);
+  float foamCell = 1.0 - smoothstep(0.0, 0.45, fv.x);
+  float foamZone = 1.0 - smoothstep(0.0, 0.4, abs(shoreDist - reachHeight));
+  float foamMask = clamp(foamCell * foamZone * upwardFacing, 0.0, 1.0);
   // True per-pixel memory of "recently wet" would need an accumulation
   // buffer this project doesn't have (nothing here persists between
   // frames) — approximated instead with a slow-power envelope of the
@@ -763,7 +773,11 @@ float gerstnerHeight(vec2 xz, float t) {
   float wetEnvelope = pow(waveNorm, 0.4);
   float wetMask = (1.0 - smoothstep(reachHeight - 0.3, reachHeight + 1.3, shoreDist)) * wetEnvelope * upwardFacing;
   diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.55, clamp(wetMask, 0.0, 1.0));
-  diffuseColor.rgb += vec3(foamBand) * 0.85;
+  // Mixed toward an off-white (not pure additive brightening, and not
+  // pure white either) — this respects the scene's actual lighting
+  // instead of blowing out brighter than everything around it, the same
+  // technique the ocean surface's own whitecap foam already uses.
+  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.95, 0.98, 1.0), foamMask * 0.85);
 }`);
       terrainMat.userData.shader = shader; // so the animate loop can push uTime each frame
     };

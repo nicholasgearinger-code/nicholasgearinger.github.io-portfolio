@@ -13,8 +13,7 @@ import { createWildlife, updateWildlife, disposeWildlife } from "./wildlife.js";
 import { createLandmark, updateLandmark, disposeLandmark, LANDMARK_POSITION } from "./landmarks.js";
 import { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers } from "./graphicsSettings.js";
 import { createWeatherSystem, updateWeatherSystem, disposeWeatherSystem } from "./weather.js";
-import { createClouds, updateClouds, disposeClouds } from "./clouds.js";
-import { createVolumetricClouds, updateVolumetricClouds, disposeVolumetricClouds } from "./volumetricClouds.js";
+import { createClouds, updateClouds, disposeClouds, getCloudOcclusionFactor } from "./clouds.js";
 import {
   createBolt, updateBolt, disposeBolt,
   createMuzzleFlash, updateMuzzleFlash, disposeMuzzleFlash,
@@ -179,38 +178,8 @@ function resizeToViewport() {
   renderer.setSize(w, h);
   const pixelRatio = renderer.getPixelRatio();
   underwaterRenderTarget.setSize(w * pixelRatio, h * pixelRatio);
-  cloudRenderTarget.setSize(Math.max(1, Math.round(w * pixelRatio * 0.4)), Math.max(1, Math.round(h * pixelRatio * 0.4))); // was 0.5 — cut further per "still lagging" report even after the first downsampling pass
 }
 new ResizeObserver(resizeToViewport).observe(viewport);
-
-// Volumetric clouds (High tier only, see volumetricClouds.js) render
-// into their own small scene at HALF resolution, then get composited
-// back over the main scene as a full-screen quad — the ray-march
-// fragment shader is expensive enough (24 steps, each sampling FBM+
-// Worley noise) that running it at full screen resolution is real,
-// avoidable cost. Clouds are inherently soft/blurry, so downsampling to
-// half-res and upscaling on composite costs a fraction of the full-res
-// fragment work with no meaningfully visible quality loss — this is the
-// standard technique real games use for exactly this kind of expensive
-// volumetric/soft effect. On Low/Medium (no volumetricCloudsHandle),
-// none of this ever runs — see the render loop further down.
-const cloudScene = new THREE.Scene();
-const cloudRenderTarget = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false });
-const cloudCompositeScene = new THREE.Scene();
-const cloudCompositeCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-const cloudCompositeMat = new THREE.ShaderMaterial({
-  uniforms: { tCloud: { value: cloudRenderTarget.texture } },
-  vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
-  fragmentShader: `
-    uniform sampler2D tCloud;
-    varying vec2 vUv;
-    void main() {
-      gl_FragColor = texture2D(tCloud, vUv);
-    }
-  `,
-  transparent: true, depthWrite: false, depthTest: false,
-});
-cloudCompositeScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), cloudCompositeMat));
 
 // Underwater screen-space distortion — a real post-process pass, only
 // ever used when the player is submerged. The scene renders to this
@@ -571,7 +540,6 @@ let flowersHandle = null;
 let footstepGlowHandle = null;
 let weatherHandle = null;
 let cloudsHandle = null;
-let volumetricCloudsHandle = null;
 let horizonHandle = null;
 let wildlifeHandle = null;
 let landmarkHandle = null;
@@ -640,8 +608,6 @@ function teardownLevel() {
   weatherHandle = null;
   disposeClouds(scene, cloudsHandle);
   cloudsHandle = null;
-  disposeVolumetricClouds(cloudScene, volumetricCloudsHandle);
-  volumetricCloudsHandle = null;
   disposeHorizonSilhouettes(scene, horizonHandle);
   horizonHandle = null;
   disposeWildlife(scene, wildlifeHandle);
@@ -1211,16 +1177,6 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
   footstepGlowHandle = level.biome === "verdant" ? createFootstepGlowSystem(scene, 40) : null;
   weatherHandle = createWeatherSystem(scene, level.biome);
   cloudsHandle = createClouds(scene, level.biome);
-  // High tier gets real ray-marched volumetric clouds instead of the
-  // sprite-billboard ones (see volumetricClouds.js for why this is
-  // gated this way — genuine per-pixel GPU cost). Ground fog is a
-  // separate part of the SAME cloudsHandle and keeps running on every
-  // tier regardless — only the sky-cloud sprite groups get hidden here,
-  // so they don't double-render alongside the new volumetric layer.
-  if (getGraphicsTier() === "high") {
-    volumetricCloudsHandle = createVolumetricClouds(cloudScene);
-    for (const cloud of cloudsHandle.clouds) cloud.group.visible = false;
-  }
   horizonHandle = level.biome === "crystal" ? null : createHorizonSilhouettes(scene, level.biome); // Coral Shallows is open ocean now — no distant mountain backdrop, and horizonSilhouettes.js still isn't part of this session so this stays a main.js-only fix rather than touching that file's still-old icy Crystal-Spire theming
   wildlifeHandle = createWildlife(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), LIQUID_LEVEL[level.biome]);
   landmarkHandle = createLandmark(scene, level.biome, level.color, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
@@ -1894,10 +1850,25 @@ function animate() {
   updateFootstepGlowSystem(footstepGlowHandle, dt);
   updateWildlife(wildlifeHandle, elapsedTime, dt, camera.position.x, camera.position.z, eruptionActive);
   updateLandmark(landmarkHandle, elapsedTime, dt);
-  updateClouds(cloudsHandle, dt, wind, dayNight.dayAmount, wind.rainIntensity, dayNight.skyHorizon);
-  if (volumetricCloudsHandle) {
-    const coverage = 0.5 + (wind.rainIntensity || 0) * 0.35; // heavier, more overcast coverage during actual rain — not just uniformly darker like clouds.js's stormDarken, genuinely more sky filled
-    updateVolumetricClouds(volumetricCloudsHandle, elapsedTime, sun.position, sun.color, dayNight.dayAmount, coverage);
+  updateClouds(cloudsHandle, dt, wind, dayNight.dayAmount, wind.rainIntensity, dayNight.skyHorizon, dayNightCycle.sunBody.group.position, camera.position);
+  // Clouds sometimes drift in front of the sun/moon — a cheap angular
+  // check (see getCloudOcclusionFactor's own comment for why this isn't
+  // real depth-buffer occlusion), applied as a further opacity
+  // multiplier on top of whatever the day/night cycle (and the Snell's-
+  // window submersion gating above) already computed this frame.
+  if (cloudsHandle) {
+    const sunOcclusion = 1 - getCloudOcclusionFactor(cloudsHandle, camera.position, dayNightCycle.sunBody.group.position);
+    dayNightCycle.sunBody.core.material.opacity *= sunOcclusion;
+    dayNightCycle.sunBody.glow.material.opacity *= sunOcclusion;
+    // Real sunlight dims when clouds pass in front of the sun, not just
+    // the visual sun sprite fading — the actual DirectionalLight driving
+    // shading/shadows across the whole scene. Floored at 0.35 rather
+    // than letting it go fully dark — cloud cover scatters sunlight, it
+    // doesn't block it entirely the way full night does.
+    dayNightCycle.sun.intensity *= Math.max(0.35, sunOcclusion);
+    const moonOcclusion = 1 - getCloudOcclusionFactor(cloudsHandle, camera.position, dayNightCycle.moonBody.group.position);
+    dayNightCycle.moonBody.core.material.opacity *= moonOcclusion;
+    dayNightCycle.moonBody.glow.material.opacity *= moonOcclusion;
   }
   setAmbientDayAmount(dayNight.dayAmount);
   if (currentLevelIdx >= 0 && horizonHandle) updateHorizonSilhouettes(horizonHandle, LEVELS[currentLevelIdx].biome, dayNight.dayAmount);
@@ -1910,36 +1881,13 @@ function animate() {
     // a full-screen quad draws that texture back out with a
     // sine-distorted UV and a blue tint (see the setup near the
     // renderer/resize code above).
-    if (volumetricCloudsHandle) {
-      renderer.setRenderTarget(cloudRenderTarget);
-      renderer.render(cloudScene, camera);
-    }
     renderer.setRenderTarget(underwaterRenderTarget);
     renderer.render(scene, camera);
-    if (volumetricCloudsHandle) {
-      // Composited onto the SAME still-active render target (still
-      // underwaterRenderTarget — setRenderTarget wasn't called again),
-      // autoClear off so it layers on top instead of wiping the scene
-      // that was just drawn.
-      renderer.autoClear = false;
-      renderer.render(cloudCompositeScene, cloudCompositeCamera);
-      renderer.autoClear = true;
-    }
     renderer.setRenderTarget(null);
     underwaterDistortionMaterial.uniforms.time.value = elapsedTime;
     renderer.render(underwaterQuadScene, underwaterQuadCamera);
   } else {
-    if (volumetricCloudsHandle) {
-      renderer.setRenderTarget(cloudRenderTarget);
-      renderer.render(cloudScene, camera);
-      renderer.setRenderTarget(null);
-    }
     renderer.render(scene, camera);
-    if (volumetricCloudsHandle) {
-      renderer.autoClear = false;
-      renderer.render(cloudCompositeScene, cloudCompositeCamera);
-      renderer.autoClear = true;
-    }
   }
 }
 requestAnimationFrame(animate);

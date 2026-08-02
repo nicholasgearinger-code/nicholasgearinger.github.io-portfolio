@@ -12,6 +12,7 @@ import { getGraphicsSettings } from "./graphicsSettings.js";
 // -----------------------------------------------------------------------------
 
 const CYCLE_SECONDS = 480; // one full day/night cycle — long enough not to be distracting, short enough to actually see it move in a session
+const LUNAR_CYCLE_SECONDS = CYCLE_SECONDS * 8; // a full moon-phase cycle spans 8 in-game days — real moons cycle far slower than the day/night rhythm itself; this stays proportionally slow without being imperceptible in a single session
 const ORBIT_RADIUS = 260;
 const SKY_DOME_RADIUS = 900;
 
@@ -187,16 +188,17 @@ function createSunTexture() {
   const canvas = document.createElement("canvas");
   canvas.width = size; canvas.height = size;
   const ctx = canvas.getContext("2d");
-  ctx.fillStyle = "#fff2cc";
+  const cx = size / 2, cy = size / 2;
+  // Pure overexposed disc — no surface granulation at all. Real direct
+  // sunlight is far too bright to make out any surface detail; the old
+  // mottled-patch texture read as an examinable surface, which is
+  // exactly the opposite of "too bright to look at."
+  const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, size / 2);
+  grad.addColorStop(0, "#ffffff");
+  grad.addColorStop(0.7, "#fff2cc");
+  grad.addColorStop(1, "#ffe9a8");
+  ctx.fillStyle = grad;
   ctx.fillRect(0, 0, size, size);
-  for (let i = 0; i < 90; i++) {
-    const x = Math.random() * size, y = Math.random() * size, r = 4 + Math.random() * 12;
-    const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
-    grad.addColorStop(0, "rgba(255,180,70,0.55)");
-    grad.addColorStop(1, "rgba(255,180,70,0)");
-    ctx.fillStyle = grad;
-    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
-  }
   return new THREE.CanvasTexture(canvas);
 }
 
@@ -217,6 +219,63 @@ function createMoonTexture() {
     ctx.fillStyle = grad;
     ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
   }
+  return new THREE.CanvasTexture(canvas);
+}
+
+// A real lunar phase cycle — new moon (invisible) through crescent,
+// quarter, gibbous, to full moon and back, over several in-game days
+// (see LUNAR_CYCLE_SECONDS), not a static disc. Standard canvas
+// technique: paint one half of the disc lit, then carve/fill the
+// terminator curve with an ellipse whose width traces from a full
+// half-circle (quarter phases, giving a clean straight terminator) down
+// to zero (new/full moon, a fully round terminator that either erases or
+// completes the lit half entirely).
+// @param {number} phaseT  0..1 — 0 and 1 are new moon, 0.5 is full moon
+function createMoonPhaseTexture(phaseT) {
+  const size = 256;
+  const canvas = document.createElement("canvas");
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const cx = size / 2, cy = size / 2, r = size * 0.49;
+  const darkColor = "#141a28";
+  const litColor = "#dbe4f4";
+
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip();
+  ctx.fillStyle = darkColor;
+  ctx.fillRect(0, 0, size, size);
+
+  const waxing = phaseT < 0.5; // right side lit while waxing, left side while waning — arbitrary but consistent convention
+  ctx.fillStyle = litColor;
+  ctx.beginPath();
+  if (waxing) ctx.rect(cx, cy - r, r, r * 2);
+  else ctx.rect(cx - r, cy - r, r, r * 2);
+  ctx.fill();
+
+  const ew = r * Math.cos(phaseT * Math.PI * 2);
+  const gibbous = (waxing && ew < 0) || (!waxing && ew > 0);
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, Math.abs(ew), r, 0, 0, Math.PI * 2);
+  ctx.fillStyle = gibbous ? litColor : darkColor; // gibbous side ADDS lit area into the dark half; crescent side SUBTRACTS by painting dark back over it
+  ctx.fill();
+  ctx.restore();
+
+  // Craters, clipped to the moon's own circular silhouette this time
+  // (the old version filled the whole square canvas, which didn't matter
+  // when the disc itself filled the frame, but would now spill outside
+  // the phase shape).
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip();
+  for (let i = 0; i < 45; i++) {
+    const x = Math.random() * size, y = Math.random() * size, cr = 3 + Math.random() * 16;
+    const grad = ctx.createRadialGradient(x, y, 0, x, y, cr);
+    grad.addColorStop(0, "rgba(120,132,165,0.45)");
+    grad.addColorStop(1, "rgba(120,132,165,0)");
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(x, y, cr, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+
   return new THREE.CanvasTexture(canvas);
 }
 
@@ -588,7 +647,7 @@ function createDayNightCycle(scene, sun, ambient, starfield, biome) {
   const shootingStars = createShootingStars(scene);
   return {
     scene, sun, ambient, starfield, sunBody, moonBody, sunBeams, sky,
-    distantPlanet, aurora, shootingStars, elapsed: 0, biome,
+    distantPlanet, aurora, shootingStars, elapsed: 0, biome, lastMoonPhaseStep: -1,
   };
 }
 
@@ -684,11 +743,32 @@ function updateDayNightCycle(cycle, dt) {
   // disappearing at exactly elevation=0, so setting/rising reads as a
   // smooth fade rather than a pop.
   const sunVisibility = THREE.MathUtils.clamp(0.5 + sunOrbit.elevation / 0.3, 0, 1);
-  const moonVisibility = THREE.MathUtils.clamp(0.5 + moonOrbit.elevation / 0.3, 0, 1);
+  // Was tied to the moon's OWN orbital elevation, the same way the sun
+  // is — meaning the moon had to complete its own downward arc and
+  // "set" below the horizon before disappearing, just like a second sun.
+  // Real moons don't do that: they just fade into the brightening sky as
+  // the sun comes up, regardless of where the moon itself currently sits.
+  // Tied to dayAmount instead — fades out as the sun actually rises, and
+  // fades back in as it sets, independent of the moon's own position.
+  const moonVisibility = THREE.MathUtils.clamp(1 - dayAmount / 0.35, 0, 1);
   cycle.sunBody.core.material.opacity = sunVisibility;
   cycle.sunBody.glow.material.opacity = cycle.sunBody.baseGlowOpacity * sunVisibility;
   cycle.moonBody.core.material.opacity = moonVisibility;
   cycle.moonBody.glow.material.opacity = cycle.moonBody.baseGlowOpacity * moonVisibility;
+
+  // Real lunar phases — regenerated only when the discretized phase step
+  // actually changes (32 steps across the full cycle), not every frame;
+  // repainting a canvas and re-uploading a texture every frame for
+  // something that visibly changes over days would be wasted work.
+  const moonPhaseT = (cycle.elapsed % LUNAR_CYCLE_SECONDS) / LUNAR_CYCLE_SECONDS;
+  const moonPhaseStep = Math.floor(moonPhaseT * 32);
+  if (moonPhaseStep !== cycle.lastMoonPhaseStep) {
+    cycle.lastMoonPhaseStep = moonPhaseStep;
+    const oldMap = cycle.moonBody.core.material.map;
+    cycle.moonBody.core.material.map = createMoonPhaseTexture(moonPhaseT);
+    cycle.moonBody.core.material.needsUpdate = true;
+    if (oldMap) oldMap.dispose();
+  }
 
   // The sun's own visual disc and glow — not just the directional
   // light's color — shift through the day too, per the explicit

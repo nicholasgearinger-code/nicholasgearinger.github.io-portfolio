@@ -713,8 +713,17 @@ function updateDayNightCycle(cycle, dt) {
   // and taper off toward both full night and flat overhead noon light,
   // rather than being equally strong all day.
   const beamEmphasis = Math.max(0, 1 - Math.abs(sunOrbit.elevation - 0.25) / 0.5);
-  const beamOpacity = sunVisibility * beamEmphasis * 0.42; // was 0.32 — a real sunrise/sunset should have visibly dramatic rays, not a faint hint
-  for (const sprite of cycle.sunBeams.sprites) sprite.material.opacity = beamOpacity;
+  const beamOpacity = sunVisibility * beamEmphasis * 0.22; // was 0.42 — additive blending across multiple overlapping beam sprites near the sun was compounding into a dominant wash overpowering the actual sky colors, not a subtle ray effect
+  for (const sprite of cycle.sunBeams.sprites) {
+    sprite.material.opacity = beamOpacity;
+    // Was a fixed pale yellow (0xffdfa0) at all times — beams never
+    // actually reflected the real sunset/sunrise color, which is a real
+    // part of why the light read as flat yellow-white instead of the
+    // rich orange/red the sky itself shows. Same tint the sun's own
+    // body uses, so the rays genuinely match the light source they're
+    // supposed to be coming from.
+    sprite.material.color.copy(sunBodyTint);
+  }
 
   // Stars fade in as the sun drops toward/below the horizon, fully hidden
   // by mid-morning.

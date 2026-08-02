@@ -38,6 +38,11 @@ const GROUND_FOG_STYLE = {
 // horizon color. Real sunset skies show a real mix of hues across
 // different clouds at once, not one uniform tint.
 const DAWN_DUSK_ACCENTS = [0xff6a3a, 0xff4d7a, 0xb056e8, 0xffb84d, 0xe83d5c, 0x8a4de0];
+// Real storm clouds go genuinely dark slate gray, not just their normal
+// color dimmed — see the storm blend in updateClouds. Lightning flashes
+// toward this near-white during a brief random strike.
+const STORM_GRAY = new THREE.Color(0x3a3f47);
+const LIGHTNING_WHITE = new THREE.Color(0xf0f4ff);
 
 let sharedPuffTexture = null;
 function getPuffTexture() {
@@ -193,6 +198,15 @@ function updateClouds(handle, dt, wind, dayAmount, rainIntensity, skyHorizonColo
         sunProximity = THREE.MathUtils.clamp((alignment - 0.25) / 0.55, 0, 1); // widened from 0.45/0.5 — more clouds around the sun visibly react, not just the one or two dead-center
       }
     }
+    // Lightning — a rare, brief flash to near-white across a whole cloud
+    // at once, only during real storms. One random roll per CLOUD per
+    // frame (not per puff — that would multiply the effective
+    // probability by however many puffs a cloud has). Cheap: no new
+    // render pass or shader, just a color lerp already happening below.
+    if (storm > 0.3 && Math.random() < storm * 0.0006) {
+      cloud.lightningUntil = handle.elapsed + 0.12;
+    }
+    const flashing = cloud.lightningUntil && handle.elapsed < cloud.lightningUntil;
     for (const sprite of cloud.sprites) {
       sprite.material.opacity = cloud.baseOpacity * lightFactor * stormDarken * nightFade;
       // Slow wander within the cloud — each puff drifts around its own
@@ -237,6 +251,21 @@ function updateClouds(handle, dt, wind, dayAmount, rainIntensity, skyHorizonColo
       // creation) to know whether it's near the top or bottom.
       const heightT = (sprite.userData.localY / sprite.userData.localYRange + 1) / 2; // 0 at the bottom, 1 at the top
       sprite.material.color.multiplyScalar(0.8 + heightT * 0.35);
+      // Real storm clouds go genuinely dark gray, not just their normal
+      // color dimmed — the old stormDarken only touched opacity. Blended
+      // in on top of everything else above (including the sun-lit
+      // brightness), so a storm rolling in visibly desaturates a cloud
+      // toward slate gray even if it was glowing pink a moment before.
+      if (storm > 0) sprite.material.color.lerp(STORM_GRAY, storm * 0.7);
+      if (flashing) sprite.material.color.lerp(LIGHTNING_WHITE, 0.85);
+      // Clamp — the multiplies above can genuinely push channel values
+      // past 1.0 (e.g. the backlit boost near the sun combined with the
+      // top-of-cloud brightness), and feeding out-of-range color values
+      // to the GPU is what was very likely behind the staticky/
+      // chromatic-noise texture artifact.
+      sprite.material.color.r = Math.min(1, sprite.material.color.r);
+      sprite.material.color.g = Math.min(1, sprite.material.color.g);
+      sprite.material.color.b = Math.min(1, sprite.material.color.b);
     }
   }
 

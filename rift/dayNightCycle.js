@@ -468,6 +468,18 @@ function updateSkyDome(sky, zenithColor, midColor, horizonColor, elapsed, sunDir
   const localHorizon = new THREE.Color();
   const localMid = new THREE.Color();
   const glowColor = new THREE.Color(0xfff3d6);
+  // Genuinely desaturated (luminance-based grayscale, not "toward
+  // zenithColor") versions of horizon/mid, computed once per frame
+  // rather than per-vertex. Blending "muted, away from the sun" sky
+  // toward zenithColor didn't actually read as neutral, because
+  // zenithColor is itself a saturated dusk purple — so the "muted" sky
+  // was still purple, just a different shade, which is exactly why the
+  // colorful sunset looked like it was everywhere instead of concentrated
+  // around the sun. A real luminance-only gray has no hue to leak.
+  const horizonLum = horizonColor.r * 0.299 + horizonColor.g * 0.587 + horizonColor.b * 0.114;
+  const mutedHorizon = new THREE.Color(horizonLum, horizonLum, horizonLum).lerp(horizonColor, 0.15);
+  const midLum = midColor.r * 0.299 + midColor.g * 0.587 + midColor.b * 0.114;
+  const mutedMid = new THREE.Color(midLum, midLum, midLum).lerp(midColor, 0.15);
   for (let i = 0; i < posAttr.count; i++) {
     const x = posAttr.getX(i), y = posAttr.getY(i), z = posAttr.getZ(i);
     const yFrac = y / SKY_DOME_RADIUS; // -1 (bottom) to 1 (top)
@@ -481,14 +493,11 @@ function updateSkyDome(sky, zenithColor, midColor, horizonColor, elapsed, sunDir
     if (sunDir) {
       const vLen = Math.hypot(x, z) || 1;
       const sunLen = Math.hypot(sunDir.x, sunDir.z) || 1;
-      const azAlign = -((x / vLen) * (sunDir.x / sunLen) + (z / vLen) * (sunDir.z / sunLen)); // -1..1 — negated: the un-negated version was putting the vivid color on the far side of the sky instead of around the sun
+      const azAlign = (x / vLen) * (sunDir.x / sunLen) + (z / vLen) * (sunDir.z / sunLen); // -1..1 — reverted last round's negation; that was very likely the wrong diagnosis (the real bug was the zenith-muting issue fixed above, which alone was enough to make this look broken without the alignment itself being inverted)
       azimuthCloseness = THREE.MathUtils.clamp((azAlign + 0.3) / 1.3, 0, 1);
     }
-    // Muted fallback leans toward the zenith color rather than a fully
-    // separate neutral gray — keeps the away-from-sun sky looking like
-    // part of the same sky, just without the sun's own dramatic color.
-    localHorizon.copy(horizonColor).lerp(zenithColor, 0.6 * (1 - azimuthCloseness));
-    localMid.copy(midColor).lerp(zenithColor, 0.6 * (1 - azimuthCloseness));
+    localHorizon.copy(mutedHorizon).lerp(horizonColor, azimuthCloseness);
+    localMid.copy(mutedMid).lerp(midColor, azimuthCloseness);
     // Concentrates the gradient near the horizon band rather than
     // spreading it evenly top-to-bottom — real skies change fastest right
     // at the horizon (more atmosphere traversed at a grazing angle), not

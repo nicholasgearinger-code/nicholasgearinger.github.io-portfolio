@@ -137,13 +137,26 @@ const underwaterRenderTarget = new THREE.WebGLRenderTarget(
   Math.max(1, viewport.clientWidth * renderer.getPixelRatio()),
   Math.max(1, viewport.clientHeight * renderer.getPixelRatio())
 );
+// A real depth attachment — resizing the render target (see
+// resizeToViewport above) automatically resizes this alongside the color
+// texture, no extra code needed there. This is what lets the fragment
+// shader below compute genuine per-pixel distance instead of a single
+// flat blend applied uniformly regardless of what's actually close vs.
+// far in frame.
+underwaterRenderTarget.depthTexture = new THREE.DepthTexture();
+underwaterRenderTarget.depthTexture.type = THREE.UnsignedIntType;
 const underwaterQuadScene = new THREE.Scene();
 const underwaterQuadCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 const underwaterDistortionMaterial = new THREE.ShaderMaterial({
   uniforms: {
-    tDiffuse: { value: underwaterRenderTarget.texture }, time: { value: 0 },
-    tintColor: { value: new THREE.Vector3(0.08, 0.28, 0.45) }, tintStrength: { value: 0.18 },
+    tDiffuse: { value: underwaterRenderTarget.texture }, tDepth: { value: underwaterRenderTarget.depthTexture }, time: { value: 0 },
+    tintColor: { value: new THREE.Vector3(0.08, 0.28, 0.45) }, tintStrength: { value: 0.18 }, fogDensity: { value: 0.05 },
     causticStrength: { value: 0.0 }, distortAmp: { value: 0.01 },
+    // The MAIN scene camera's near/far — not this quad's own orthographic
+    // pass-through camera, which is irrelevant to the depth values
+    // actually written into tDepth. Set once: this project's camera never
+    // changes near/far after creation.
+    cameraNear: { value: camera.near }, cameraFar: { value: camera.far },
   },
   vertexShader: `
     varying vec2 vUv;
@@ -154,31 +167,77 @@ const underwaterDistortionMaterial = new THREE.ShaderMaterial({
   `,
   fragmentShader: `
     uniform sampler2D tDiffuse;
+    uniform sampler2D tDepth;
     uniform float time;
     uniform vec3 tintColor;
     uniform float tintStrength;
+    uniform float fogDensity;
     uniform float causticStrength;
     uniform float distortAmp;
+    uniform float cameraNear;
+    uniform float cameraFar;
     varying vec2 vUv;
+
+    // Perspective (nonlinear) depth-buffer value -> linear view-space
+    // distance from the camera, using the MAIN scene camera's near/far.
+    float linearDepth(float depth) {
+      float viewZ = (cameraNear * cameraFar) / ((cameraFar - cameraNear) * depth - cameraFar);
+      return -viewZ;
+    }
+
+    // Compact 2D Worley/Voronoi noise — the same technique the ocean
+    // surface's own whitecap-foam shader (liquid.js) uses, reused here so
+    // the caustic pattern reads as genuinely procedural light-net shapes
+    // instead of a generic tiled sine grid, and so the two effects share
+    // a consistent visual language.
+    vec2 causticHash(vec2 p) {
+      float n = sin(dot(p, vec2(41.0, 289.0)));
+      return fract(vec2(262144.0, 32768.0) * n);
+    }
+    float causticVoronoi(vec2 p) {
+      vec2 ip = floor(p);
+      vec2 fp = fract(p);
+      float minDist = 1.0;
+      for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+          vec2 neighbor = vec2(float(x), float(y));
+          vec2 point = causticHash(ip + neighbor);
+          minDist = min(minDist, length(neighbor + point - fp));
+        }
+      }
+      return minDist;
+    }
+
     void main() {
       vec2 distortedUv = vUv + vec2(
         sin(vUv.y * 14.0 + time * 1.6) * distortAmp,
         sin(vUv.x * 11.0 + time * 1.3) * distortAmp
       );
       vec4 color = texture2D(tDiffuse, distortedUv);
-      color.rgb = mix(color.rgb, tintColor, tintStrength);
-      // Real moving light-ripple bands across the whole screen — the
-      // "looking up through a rippling surface" look a purely geometric
-      // water mesh can't guarantee (it can be hidden by fog, sit outside
-      // the view, or read as flat against a dark backdrop). Two
-      // differently-angled sine fields multiplied together produces a
-      // genuine crossing caustic-net pattern rather than one uniform
-      // wave; only the POSITIVE half brightens (real caustic light
-      // concentrates, it doesn't ever darken the water below its own
-      // baseline). causticStrength is 0 for every biome except crystal,
-      // so this is inert everywhere else.
-      float caustic = sin(vUv.x * 20.0 + vUv.y * 6.0 + time * 1.1) * sin(vUv.y * 17.0 - vUv.x * 4.0 - time * 0.85);
-      color.rgb += max(0.0, caustic) * causticStrength;
+      float depth = linearDepth(texture2D(tDepth, distortedUv).x);
+
+      // Real exponential fog — same falloff shape as this game's own
+      // FogExp2 (1 - exp(-density * distance)), computed per-pixel from
+      // actual scene depth instead of one flat blend strength applied
+      // everywhere regardless of distance. Close objects stay clear;
+      // distant ones fade into the blue-green tint the way light
+      // actually attenuates through real water. tintStrength stays as a
+      // per-biome overall-intensity multiplier on top of that falloff.
+      float fogFactor = clamp(1.0 - exp(-fogDensity * depth), 0.0, 1.0) * tintStrength;
+      color.rgb = mix(color.rgb, tintColor, fogFactor);
+
+      // Procedural caustics — two Voronoi octaves at different scale and
+      // drift speed, faded out with depth (real caustics are a
+      // near-surface light phenomenon; they don't reach the floor of a
+      // deep trench). causticStrength is 0 for every biome except
+      // crystal, so this whole block is inert everywhere else.
+      vec2 causticUv = distortedUv * 9.0 + vec2(time * 0.12, -time * 0.09);
+      float c1 = causticVoronoi(causticUv);
+      float c2 = causticVoronoi(causticUv * 1.7 - vec2(time * 0.07, time * 0.1));
+      float causticPattern = (1.0 - smoothstep(0.0, 0.35, c1)) * 0.6 + (1.0 - smoothstep(0.0, 0.3, c2)) * 0.5;
+      float depthFade = 1.0 - clamp(depth / 18.0, 0.0, 1.0);
+      color.rgb += causticPattern * depthFade * causticStrength;
+
       gl_FragColor = color;
     }
   `,
@@ -1476,6 +1535,7 @@ function animate() {
     ambientLight.intensity *= uwStyle.ambientMult;
     underwaterDistortionMaterial.uniforms.tintColor.value.set(uwStyle.tint[0], uwStyle.tint[1], uwStyle.tint[2]);
     underwaterDistortionMaterial.uniforms.tintStrength.value = uwStyle.tintStrength;
+    underwaterDistortionMaterial.uniforms.fogDensity.value = uwStyle.fogDensity;
     underwaterDistortionMaterial.uniforms.causticStrength.value = uwStyle.causticStrength;
     underwaterDistortionMaterial.uniforms.distortAmp.value = uwStyle.distortAmp;
     waterVolumeMesh.material.color.setHex(uwStyle.volumeColor);

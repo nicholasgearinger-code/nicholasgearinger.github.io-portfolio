@@ -14,7 +14,7 @@ import { getGraphicsSettings } from "./graphicsSettings.js";
 const CLOUD_STYLE = {
   ember: { count: 14, altitude: 88, spread: 175, puffColor: 0x4a3830, opacity: 0.55, scale: 25 },   // low, ashy, smoke-dark rather than fluffy-white — count/scale bumped further for real sky coverage, still keeps the dark ashy character rather than fluffy-white
   verdant: { count: 16, altitude: 95, spread: 165, puffColor: 0xf4f7fb, opacity: 0.85, scale: 30 },  // big, bold, dominant puffy-white clouds per the flat-illustration reference
-  crystal: { count: 20, altitude: 100, spread: 170, puffColor: 0xeaf3f7, opacity: 0.8, scale: 33 }, // still pale/cool at the base since the sky-color/accent blend below is what supplies the dramatic sunset color on top of this
+  crystal: { count: 10, altitude: 100, spread: 170, puffColor: 0xeaf3f7, opacity: 0.85, scale: 22 }, // was count:20/scale:33 — the current reference shows small, sparse, simple clouds, not near-total sky coverage; still pale/cool at the base since the sky-color/accent blend below is what supplies the dramatic sunset color on top of this
   abyssal: { count: 10, altitude: 80, spread: 145, puffColor: 0x2e2a3a, opacity: 0.6, scale: 18 },   // heavy, dark, low — presses down on the chasms
   ashen: { count: 5, altitude: 110, spread: 155, puffColor: 0xd6cdb8, opacity: 0.35, scale: 13 },   // thin, wispy, dust-pale — barely enough moisture in the air to call these clouds; kept sparser than the others on purpose
 };
@@ -37,7 +37,7 @@ const GROUND_FOG_STYLE = {
 // rather than every cloud in the sky showing the exact same single
 // horizon color. Real sunset skies show a real mix of hues across
 // different clouds at once, not one uniform tint.
-const DAWN_DUSK_ACCENTS = [0xff6a3a, 0xff4d7a, 0xb056e8, 0xffb84d, 0xe83d5c, 0x8a4de0];
+const DAWN_DUSK_ACCENTS = [0xff6a3a, 0xff8c3a, 0xffb84d, 0xf0722a, 0xffa040, 0xe85a1e]; // was pink/purple-heavy (0xff4d7a, 0xb056e8, 0xe83d5c, 0x8a4de0) — shifted to an all-orange/amber palette per explicit request
 // Real storm clouds go genuinely dark slate gray, not just their normal
 // color dimmed — see the storm blend in updateClouds. Lightning flashes
 // toward this near-white during a brief random strike.
@@ -64,7 +64,7 @@ function getPuffTexture() {
 
 function createCloud(scene, style, flatten = 1) {
   const group = new THREE.Group();
-  const puffCount = 5 + Math.floor(Math.random() * 5); // was 4-7, now 5-9 — fuller, chunkier cloud shapes
+  const puffCount = 3 + Math.floor(Math.random() * 3); // was 5-9 — fewer overlapping semi-transparent puffs per cloud, both for simpler shapes closer to the reference and because heavy overlap is a likely real contributor to the persistent dithering/noise artifact on mobile
   const sprites = [];
   const baseColor = new THREE.Color(style.puffColor);
   const accentColor = new THREE.Color(DAWN_DUSK_ACCENTS[Math.floor(Math.random() * DAWN_DUSK_ACCENTS.length)]);

@@ -32,7 +32,7 @@ const DAWN_DUSK = {
   // middle band genuinely is its own more saturated hue (light
   // scattering more at that particular angle), not just an average of
   // the two ends.
-  skyZenith: 0x2a2138, skyMid: 0xd6558a, skyHorizon: 0xff4a1e, // horizon was 0xff6a42 — pushed more toward saturated reddish-orange per explicit request, less plain orange
+  skyZenith: 0x342420, skyMid: 0xe8823a, skyHorizon: 0xff4a1e, // was skyZenith:0x2a2138 (dark purple), skyMid:0xd6558a (vivid pink) — shifted to warm amber-brown/orange so the overall sunrise/sunset reads as orange, not pink/purple
 };
 const DAY = {
   sun: 0xfff4e0, sunIntensity: 2.0, ambient: 0x8899bb, ambientIntensity: 0.5,
@@ -46,7 +46,7 @@ const DAY = {
 // color shifting. Separate from NIGHT/DAWN_DUSK/DAY above, which govern
 // the scene's actual light color; these three govern only how the sun
 // itself looks in the sky.
-const SUN_BODY_ZENITH = new THREE.Color(0xfff8ec);
+const SUN_BODY_ZENITH = new THREE.Color(0xffffff); // was 0xfff8ec — a pale cream still read as warm-tinted rather than genuinely bright white once past sunrise
 const SUN_BODY_MID = new THREE.Color(0xffcf7a);
 const SUN_BODY_HORIZON = new THREE.Color(0xff4415); // was 0xff5522 — pushed more toward a saturated bright reddish-orange per explicit request
 
@@ -700,7 +700,7 @@ function updateDayNightCycle(cycle, dt) {
   // Two-stage lerp (zenith->gold->horizon-red) for a richer progression
   // than a single flat blend, matching the reference's many visible
   // in-between stages rather than just two extremes.
-  const horizonCloseness = THREE.MathUtils.clamp(1 - Math.abs(sunOrbit.elevation) / 0.55, 0, 1);
+  const horizonCloseness = THREE.MathUtils.clamp(1 - Math.abs(sunOrbit.elevation) / 0.3, 0, 1); // was /0.55 — that window kept the sun orange-tinted well past sunrise instead of shifting to white promptly once the sun actually clears the horizon
   const sunBodyTint = horizonCloseness < 0.5
     ? SUN_BODY_ZENITH.clone().lerp(SUN_BODY_MID, horizonCloseness * 2)
     : SUN_BODY_MID.clone().lerp(SUN_BODY_HORIZON, (horizonCloseness - 0.5) * 2);

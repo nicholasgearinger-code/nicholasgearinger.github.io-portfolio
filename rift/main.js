@@ -7,7 +7,7 @@ import { createDecoration, updateDecoration, createEmberFire, createLivingTree, 
 import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSpray, updateOceanSpray, disposeOceanSpray, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail } from "./liquid.js";
 import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
-import { createGrass, updateGrass, disposeGrass, createFlowers, updateFlowers, disposeFlowers, createFootstepGlowSystem, spawnFootstepGlow, updateFootstepGlowSystem, disposeFootstepGlowSystem, createCaustics, updateCaustics, disposeCaustics } from "./vegetation.js";
+import { createGrass, updateGrass, disposeGrass, createFlowers, updateFlowers, disposeFlowers, createFootstepGlowSystem, spawnFootstepGlow, updateFootstepGlowSystem, disposeFootstepGlowSystem } from "./vegetation.js";
 import { createHorizonSilhouettes, updateHorizonSilhouettes, disposeHorizonSilhouettes } from "./horizonSilhouettes.js";
 import { createWildlife, updateWildlife, disposeWildlife } from "./wildlife.js";
 import { createLandmark, updateLandmark, disposeLandmark, LANDMARK_POSITION } from "./landmarks.js";
@@ -45,14 +45,16 @@ const UNDERWATER_STYLE = {
   },
   crystal: {
     fogColor: 0x2fa8b8, fogDensity: 0.028, sunColor: 0x8fe0e6, sunMult: 0.55,
-    // causticStrength back to 0 — a screen-space full-screen overlay
-    // paints every pixel identically regardless of view direction, so it
+    // causticStrength stays 0 — a screen-space full-screen overlay paints
+    // every pixel identically regardless of view direction, so it
     // necessarily looked like "light everywhere" rather than concentrated
-    // at the surface when looking up, per explicit follow-up. The real
-    // caustics-on-sand (vegetation.js's createCaustics, genuinely
-    // 3D-anchored to the floor) and the water surface's own ripple
-    // shading (genuinely anchored to the real mesh at y=8) are the
-    // correct view-dependent tools for this and are untouched.
+    // on the seafloor, per explicit follow-up. Real caustics-on-sand now
+    // come from the terrain material's own onBeforeCompile shader
+    // (terrainMat, set up in loadLevel below) — genuinely anchored to the
+    // actual floor geometry, gated to submerged/upward-facing surfaces
+    // only. The water surface's own ripple shading (liquid.js, anchored
+    // to the real mesh at y=8) is the other correct view-dependent tool
+    // for this; both stay untouched by this constant.
     ambientColor: 0x6fd8dc, ambientMult: 0.85, tint: [0.35, 0.78, 0.8], tintStrength: 0.1, causticStrength: 0, distortAmp: 0.005, volumeColor: 0x5fd0d8,
   },
 };
@@ -482,7 +484,6 @@ let caveFloorMeshes = []; // the collidable pieces of this underground network �
 let atmosphereHandle = null;
 let grassHandle = null;
 let flowersHandle = null;
-let causticsHandle = null;
 let footstepGlowHandle = null;
 let weatherHandle = null;
 let cloudsHandle = null;
@@ -547,8 +548,6 @@ function teardownLevel() {
   disposeFootstepGlowSystem(scene, footstepGlowHandle);
   footstepGlowHandle = null;
   flowersHandle = null;
-  disposeCaustics(scene, causticsHandle);
-  causticsHandle = null;
   disposeWeatherSystem(scene, weatherHandle);
   weatherHandle = null;
   disposeClouds(scene, cloudsHandle);
@@ -600,13 +599,82 @@ function buildLevel(levelIdx) {
   // set here on each level load rather than passed once at construction.
   dayNightCycle.biome = level.biome;
 
-  terrainMesh = new THREE.Mesh(
-    buildPlanetTerrain(level, WORLD_SEED),
-    new THREE.MeshStandardMaterial({
-      vertexColors: true, flatShading: true, roughness: 0.9, metalness: 0.05,
-      emissive: level.color, emissiveIntensity: 0.04,
-    })
-  );
+  const terrainMat = new THREE.MeshStandardMaterial({
+    vertexColors: true, flatShading: true, roughness: 0.9, metalness: 0.05,
+    emissive: level.color, emissiveIntensity: 0.04,
+  });
+  if (level.biome === "crystal") {
+    // Real procedural caustics, anchored to the actual seafloor geometry
+    // via onBeforeCompile — not a screen-space overlay (which paints
+    // every pixel identically regardless of view direction or what's
+    // actually being looked at, the exact reason UNDERWATER_STYLE.crystal
+    // keeps causticStrength at 0 above) and not the old sparse floating-
+    // points system (vegetation.js's now-unused createCaustics, only 260
+    // soft blobs — nowhere near the dense rippling net a real shallow
+    // reef floor shows). Two Voronoi F2-F1 "cell edge" layers (thin
+    // bright lines tracing cell boundaries, not filled blobs — this is
+    // what actually reads as a caustic net rather than a scatter of
+    // dots) at different scale/drift, gated to only the actual submerged,
+    // upward-facing sand — dry island terrain and any vertical rock face
+    // stay untouched.
+    terrainMat.onBeforeCompile = (shader) => {
+      shader.uniforms.uTime = { value: 0 };
+      shader.uniforms.uWaterLevel = { value: LIQUID_LEVEL.crystal };
+      shader.vertexShader = shader.vertexShader
+        .replace("#include <common>", "#include <common>\nvarying vec3 vCausticWorldPos;\nvarying vec3 vCausticWorldNormal;")
+        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvCausticWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;")
+        .replace("#include <beginnormal_vertex>", "#include <beginnormal_vertex>\nvCausticWorldNormal = normalize(mat3(modelMatrix) * objectNormal);");
+      shader.fragmentShader = shader.fragmentShader
+        .replace("#include <common>", `#include <common>
+uniform float uTime;
+uniform float uWaterLevel;
+varying vec3 vCausticWorldPos;
+varying vec3 vCausticWorldNormal;
+vec2 causticHash(vec2 p) {
+  float n = sin(dot(p, vec2(41.0, 289.0)));
+  return fract(vec2(262144.0, 32768.0) * n);
+}
+// F1 (nearest feature point) AND F2 (second-nearest) — F2-F1 is near
+// zero exactly at the boundary between two cells, which traces thin
+// bright interlocking LINES rather than filled blob shapes. That edge
+// pattern is what actually reads as a caustic net; F1 alone (used for
+// the ocean surface's whitecap foam) reads as clustered dots instead,
+// right for foam but wrong for this.
+vec2 causticVoronoiF1F2(vec2 p) {
+  vec2 ip = floor(p);
+  vec2 fp = fract(p);
+  float f1 = 8.0, f2 = 8.0;
+  for (int y = -1; y <= 1; y++) {
+    for (int x = -1; x <= 1; x++) {
+      vec2 neighbor = vec2(float(x), float(y));
+      vec2 point = causticHash(ip + neighbor);
+      float d = length(neighbor + point - fp);
+      if (d < f1) { f2 = f1; f1 = d; } else if (d < f2) { f2 = d; }
+    }
+  }
+  return vec2(f1, f2);
+}`)
+        .replace("#include <color_fragment>", `#include <color_fragment>
+{
+  float upwardFacing = clamp(vCausticWorldNormal.y, 0.0, 1.0);
+  // Fades in over a 2-unit band right at the shoreline rather than a
+  // hard cutoff — a real waterline isn't a knife-edge.
+  float underwaterMask = smoothstep(uWaterLevel + 0.5, uWaterLevel - 1.5, vCausticWorldPos.y);
+  vec2 causticUv = vCausticWorldPos.xz * 0.4 + vec2(uTime * 0.05, -uTime * 0.04);
+  vec2 v1 = causticVoronoiF1F2(causticUv);
+  float edge1 = v1.y - v1.x;
+  vec2 causticUv2 = vCausticWorldPos.xz * 0.4 * 1.6 - vec2(uTime * 0.03, uTime * 0.045) + vec2(37.0, 12.0);
+  vec2 v2 = causticVoronoiF1F2(causticUv2);
+  float edge2 = v2.y - v2.x;
+  float net = (1.0 - smoothstep(0.0, 0.12, edge1)) * 0.75 + (1.0 - smoothstep(0.0, 0.09, edge2)) * 0.5;
+  net = clamp(net, 0.0, 1.0);
+  float causticIntensity = net * underwaterMask * upwardFacing * 0.55;
+  diffuseColor.rgb += vec3(causticIntensity);
+}`);
+      terrainMat.userData.shader = shader; // so the animate loop can push uTime each frame
+    };
+  }
+  terrainMesh = new THREE.Mesh(buildPlanetTerrain(level, WORLD_SEED), terrainMat);
   terrainMesh.receiveShadow = true;
   terrainMesh.castShadow = true; // the terrain's own elevation (spires, ridges) can shadow other parts of itself
   scene.add(terrainMesh);
@@ -933,7 +1001,6 @@ function buildLevel(levelIdx) {
   atmosphereHandle = createAtmosphericParticles(scene, level.biome);
   grassHandle = createGrass(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), TERRAIN_SIZE * 0.46);
   flowersHandle = createFlowers(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), TERRAIN_SIZE * 0.46);
-  causticsHandle = createCaustics(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), TERRAIN_SIZE * 0.46);
   footstepGlowHandle = level.biome === "verdant" ? createFootstepGlowSystem(scene, 40) : null;
   weatherHandle = createWeatherSystem(scene, level.biome);
   cloudsHandle = createClouds(scene, level.biome);
@@ -1488,6 +1555,9 @@ function animate() {
     if (eruptionActive) playEruptionBurst();
     wasErupting = eruptionActive;
   }
+  if (terrainMesh && terrainMesh.material.userData.shader) {
+    terrainMesh.material.userData.shader.uniforms.uTime.value = elapsedTime;
+  }
   updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, camera.position, sun.position, dayNight.skyHorizon);
   updateWaterfall(waterfallHandle, dt, elapsedTime);
   updateOceanSpray(oceanSprayHandle, dt, elapsedTime);
@@ -1548,7 +1618,6 @@ function animate() {
   updateAtmosphericParticles(atmosphereHandle, elapsedTime, dt, wind.windX, wind.windZ);
   updateGrass(grassHandle, elapsedTime, wind.windX, wind.windZ, dayNight.dayAmount);
   updateFlowers(flowersHandle, elapsedTime);
-  updateCaustics(causticsHandle, elapsedTime);
   updateFootstepGlowSystem(footstepGlowHandle, dt);
   updateWildlife(wildlifeHandle, elapsedTime, dt, camera.position.x, camera.position.z, eruptionActive);
   updateLandmark(landmarkHandle, elapsedTime, dt);

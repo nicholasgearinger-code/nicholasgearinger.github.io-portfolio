@@ -474,11 +474,24 @@ function updateSkyDome(sky, zenithColor, horizonColor, elapsed) {
     // cloud/ridge silhouettes. Low frequency around the dome's longitude
     // (broad streaks, not vertical stripes) combined with a higher
     // frequency in latitude for jagged rather than perfectly smooth
-    // edges. Slow elapsed-based drift in the longitude coordinate so they
-    // creep across the sky like real cloud bands instead of being welded
-    // to fixed positions forever.
+    // edges. Slow drift so they creep across the sky like real cloud
+    // bands instead of being welded to fixed positions forever.
+    //
+    // The longitude coordinate is embedded as a point on a circle
+    // (cos/sin of the angle) rather than the angle itself — sampling
+    // noise directly from atan2(z, x) has a hard discontinuity exactly
+    // where atan2 wraps from +PI to -PI (the negative-X meridian), and
+    // skyNoise2D isn't periodic across that jump, so a visible seam
+    // showed up at that one fixed line in the sky — the single "corner"
+    // a sphere's azimuth always has exactly one of. A circle has no such
+    // jump: going all the way around returns smoothly to the exact same
+    // point, so there's nothing left to show as a seam.
     const angle = Math.atan2(z, x);
-    const streak = skyNoise2D(angle * 2.4 + elapsed * 0.006, yFrac * 7 + 100);
+    const streakFreq = 2.4; // same density the old angle*2.4 multiplier targeted
+    const driftedAngle = angle + elapsed * 0.0025; // drift folded in before the circular embedding — 0.0025*streakFreq reproduces the old elapsed*0.006 drift rate in noise-space
+    const circleX = Math.cos(driftedAngle) * streakFreq;
+    const circleZ = Math.sin(driftedAngle) * streakFreq;
+    const streak = skyNoise2D(circleX, circleZ + yFrac * 7 + 100);
     if (streak > 0.58) {
       const s = Math.min(1, (streak - 0.58) / 0.35);
       tmp.multiplyScalar(1 - s * 0.42);

@@ -60,14 +60,35 @@ function createCloud(scene, style, flatten = 1) {
     });
     const sprite = new THREE.Sprite(mat);
     const s = style.scale * (0.6 + Math.random() * 0.7);
+    const baseLocalX = (Math.random() - 0.5) * style.scale * 1.4;
+    const baseLocalZ = (Math.random() - 0.5) * style.scale * 1.4;
+    sprite.userData.baseScaleX = s;
+    sprite.userData.baseScaleY = s * flatten;
+    sprite.userData.baseLocalX = baseLocalX;
+    sprite.userData.baseLocalZ = baseLocalZ;
+    // Real clouds reform gradually — minutes, not seconds. driftSpeed
+    // this slow means a full wander cycle takes roughly 5-13 minutes, so
+    // moment-to-moment it's nearly imperceptible but the cloud's actual
+    // silhouette is visibly different if you look again later, which is
+    // the real thing clouds do that a fast pulse/breathe never looked
+    // like.
+    sprite.userData.driftPhaseX = Math.random() * Math.PI * 2;
+    sprite.userData.driftPhaseZ = Math.random() * Math.PI * 2;
+    sprite.userData.driftSpeed = 0.008 + Math.random() * 0.012;
+    sprite.userData.driftRange = style.scale * (0.18 + Math.random() * 0.18);
+    // How much THIS puff swells during a storm — varies per-puff so a
+    // storm-thickened cloud grows unevenly (real storm clouds bulge and
+    // pile up, they don't scale uniformly like a balloon).
+    sprite.userData.stormGrowth = 0.5 + Math.random() * 0.7;
     sprite.scale.set(s, s * flatten, 1); // flatten<1 spreads wide and low instead of puffy — this is what turns the same technique into a ground fog bank
-    sprite.position.set((Math.random() - 0.5) * style.scale * 1.4, (Math.random() - 0.5) * style.scale * 0.35 * flatten, (Math.random() - 0.5) * style.scale * 1.4);
+    sprite.position.set(baseLocalX, (Math.random() - 0.5) * style.scale * 0.35 * flatten, baseLocalZ);
     group.add(sprite);
     sprites.push(sprite);
   }
-  group.position.set((Math.random() - 0.5) * style.spread * 2, style.altitude + (Math.random() - 0.5) * 12 * flatten, (Math.random() - 0.5) * style.spread * 2);
+  const baseY = style.altitude + (Math.random() - 0.5) * 12 * flatten;
+  group.position.set((Math.random() - 0.5) * style.spread * 2, baseY, (Math.random() - 0.5) * style.spread * 2);
   scene.add(group);
-  return { group, sprites, baseOpacity: style.opacity, baseColor };
+  return { group, sprites, baseOpacity: style.opacity, baseColor, baseY };
 }
 
 /**
@@ -86,7 +107,7 @@ function createClouds(scene, biome) {
   const fogCount = Math.max(1, Math.round(fogStyle.count * mult));
   for (let i = 0; i < fogCount; i++) groundFog.push(createCloud(scene, fogStyle, 0.18));
 
-  return { clouds, style, groundFog, fogStyle, biome, windOffsetX: 0, windOffsetZ: 0 };
+  return { clouds, style, groundFog, fogStyle, biome, windOffsetX: 0, windOffsetZ: 0, elapsed: 0 };
 }
 
 /**
@@ -103,8 +124,12 @@ function createClouds(scene, biome) {
 function updateClouds(handle, dt, wind, dayAmount, rainIntensity, skyHorizonColor) {
   if (!handle) return;
   const { clouds, style, groundFog, fogStyle, biome } = handle;
+  handle.elapsed += dt;
   const lightFactor = 0.55 + dayAmount * 0.45; // dimmer/moodier at dawn/dusk/night, brightest at noon
-  const stormDarken = 1 - (rainIntensity || 0) * 0.4;
+  const storm = rainIntensity || 0; // 0..1
+  // Storm clouds are darker AND visibly bigger/denser — real ones pile
+  // up and thicken, they don't just dim in place at the same shape.
+  const stormDarken = 1 - storm * 0.35;
   // Verdant-only — clouds fade out entirely as true night sets in, not
   // just dim, since a sky full of visible clouds fights the "near-total
   // darkness, lit only by the moon and bioluminescence" goal this biome
@@ -120,6 +145,21 @@ function updateClouds(handle, dt, wind, dayAmount, rainIntensity, skyHorizonColo
     if (Math.abs(cloud.group.position.z) > style.spread) cloud.group.position.z = -Math.sign(cloud.group.position.z) * style.spread;
     for (const sprite of cloud.sprites) {
       sprite.material.opacity = cloud.baseOpacity * lightFactor * stormDarken * nightFade;
+      // Slow wander within the cloud — each puff drifts around its own
+      // starting spot on a multi-minute cycle (see driftSpeed at
+      // creation), rather than the whole cloud pulsing in place. This is
+      // what actually reads as "reforming over time" instead of an
+      // animation loop.
+      const u = handle.elapsed * sprite.userData.driftSpeed;
+      sprite.position.x = sprite.userData.baseLocalX + Math.sin(u + sprite.userData.driftPhaseX) * sprite.userData.driftRange;
+      sprite.position.z = sprite.userData.baseLocalZ + Math.cos(u * 0.8 + sprite.userData.driftPhaseZ) * sprite.userData.driftRange;
+      // Real shape response to weather — storms swell each puff
+      // unevenly (stormGrowth varies per-puff, set at creation) so the
+      // whole cloud visibly thickens and piles up rather than uniformly
+      // scaling like a balloon. Settles back to its base shape as the
+      // storm passes.
+      const stormGrow = 1 + storm * sprite.userData.stormGrowth * 0.5;
+      sprite.scale.set(sprite.userData.baseScaleX * stormGrow, sprite.userData.baseScaleY * stormGrow, 1);
       if (skyHorizonColor) {
         // A real cloud is mostly reflecting the sky/sun color around it,
         // not showing its own fixed pigment — blending toward the
@@ -160,4 +200,37 @@ function disposeClouds(scene, handle) {
   }
 }
 
-export { createClouds, updateClouds, disposeClouds };
+const _occToTarget = new THREE.Vector3();
+const _occToCloud = new THREE.Vector3();
+/**
+ * Returns 0..1 — how much a cloud currently sits between the camera and
+ * a given sky target (the sun or moon's own position), for a cheap
+ * "clouds sometimes drift in front of the sun/moon" effect. Not real
+ * per-pixel depth occlusion — these are alpha-blended, depthWrite:false
+ * sprites, and relying on transparent-object sort order against the
+ * sun/moon's own sprite-based glow would be unpredictable rather than
+ * intentional-looking. This is a deliberate angular-alignment check
+ * instead: cheap (a handful of dot products, not a render pass), and
+ * looks like real occlusion because it only fires when a cloud is
+ * genuinely between the camera and that exact direction.
+ * @param {THREE.Vector3} cameraPos
+ * @param {THREE.Vector3} targetPos  the sun or moon body's world position
+ */
+function getCloudOcclusionFactor(handle, cameraPos, targetPos) {
+  if (!handle) return 0;
+  _occToTarget.subVectors(targetPos, cameraPos).normalize();
+  let occlusion = 0;
+  for (const cloud of handle.clouds) {
+    _occToCloud.subVectors(cloud.group.position, cameraPos);
+    const dist = _occToCloud.length();
+    if (dist < 1) continue;
+    _occToCloud.multiplyScalar(1 / dist);
+    const alignment = _occToCloud.dot(_occToTarget); // 1.0 = dead-on the same direction
+    if (alignment > 0.9975) { // tight threshold — the sun/moon disc is visually small, only a near-dead-on cloud should count
+      occlusion = Math.max(occlusion, cloud.baseOpacity);
+    }
+  }
+  return Math.min(0.92, occlusion); // never fully hides it — a thin bright edge/glow through a cloud is how the real thing looks too
+}
+
+export { createClouds, updateClouds, disposeClouds, getCloudOcclusionFactor };

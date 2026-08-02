@@ -456,19 +456,6 @@ function createSkyDome(scene) {
 // orange -> cream), not a soft blend. Same posterize-with-a-seam-line
 // technique terrain.js's HEIGHT_PALETTE already uses, applied here to the
 // horizon->zenith gradient instead of a height gradient.
-const SKY_BANDS = 4;
-function bandedSkyColor(t, horizonColor, zenithColor, out) {
-  const scaled = THREE.MathUtils.clamp(t, 0, 1) * SKY_BANDS;
-  const idx = Math.min(SKY_BANDS - 1, Math.floor(scaled));
-  const bandT = SKY_BANDS > 1 ? idx / (SKY_BANDS - 1) : 0; // evenly-spaced representative t for this band, not the raw continuous t
-  out.copy(horizonColor).lerp(zenithColor, bandT);
-  const localT = scaled - idx;
-  const nearLowerSeam = localT < 0.06 && idx > 0;
-  const nearUpperSeam = localT > 0.94 && idx < SKY_BANDS - 1;
-  if (nearLowerSeam || nearUpperSeam) out.multiplyScalar(0.82); // subtler than terrain's rock-strata seams — this is sky, not stone
-  return out;
-}
-
 function updateSkyDome(sky, zenithColor, horizonColor, elapsed, sunDir) {
   const { posAttr, colorAttr } = sky;
   const tmp = new THREE.Color();
@@ -478,9 +465,13 @@ function updateSkyDome(sky, zenithColor, horizonColor, elapsed, sunDir) {
     const yFrac = y / SKY_DOME_RADIUS; // -1 (bottom) to 1 (top)
     // Concentrates the gradient near the horizon band rather than
     // spreading it evenly top-to-bottom — real skies change fastest right
-    // at the horizon, not uniformly toward the zenith.
+    // at the horizon (more atmosphere traversed at a grazing angle), not
+    // uniformly toward the zenith. Smooth continuous lerp — no discrete
+    // stepping — so the sky reads as one real gradient responding to the
+    // sun/atmosphere rather than flat color regions with a seam between
+    // them.
     const t = THREE.MathUtils.clamp((yFrac + 0.1) / 0.45, 0, 1);
-    bandedSkyColor(t, horizonColor, zenithColor, tmp);
+    tmp.copy(horizonColor).lerp(zenithColor, t);
 
     // Jagged dark streaks cutting across the bands — the reference's
     // cloud/ridge silhouettes. Low frequency around the dome's longitude

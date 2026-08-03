@@ -1344,17 +1344,14 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
   }
 
   if (level.biome === "crystal") {
-    // Real sunbeams through shallow tropical water are numerous and
-    // overlapping, not sparse — deliberately a denser count than
-    // Verdant's canopy shafts (28). Anchored at the water surface,
-    // extending down toward the floor (see createUnderwaterLightShaft),
-    // only ever placed where the floor is actually underwater. Reuses
-    // lightShaftHandles/updateLightShafts/disposeLightShafts wholesale —
-    // updateLightShafts already scales opacity by dayAmount, so these
-    // fade in through the day and back out at night for free, with no
-    // separate update path needed.
+    // Underwater light shafts disabled per explicit request — they were
+    // reading as floating glowing orbs rather than light beams, not the
+    // "sunbeams through shallow water" effect intended. Loop kept but
+    // shaftCount zeroed rather than deleting the block outright, so this
+    // is a one-line revert if a better-looking beam shape replaces them
+    // later instead of losing the placement logic entirely.
     const shaftRand = mulberry32(hashStringToSeed(WORLD_SEED + "-underwater-light-shafts-" + level.biome));
-    const shaftCount = 40;
+    const shaftCount = 0; // was 40
     const shaftBound = TERRAIN_SIZE * 0.46;
     const waterY = LIQUID_LEVEL.crystal;
     for (let i = 0; i < shaftCount; i++) {
@@ -1822,12 +1819,12 @@ function animate() {
   // only flips submerged once genuinely well below the line, and only
   // flips back once genuinely well above it.
   if (currentLiquidLevel !== undefined) {
-    if (!submergedState && camera.position.y < currentLiquidLevel - 0.6) submergedState = true;
-    else if (submergedState && camera.position.y > currentLiquidLevel + 0.6) submergedState = false;
+    if (!submergedState && camera.position.y < currentLiquidLevel - 1.1) submergedState = true;
+    else if (submergedState && camera.position.y > currentLiquidLevel + 1.1) submergedState = false;
   } else {
     submergedState = false;
   }
-  const isFullySubmerged = submergedState; // was a 0.15 margin — the ocean's own wave amplitude is up to ~0.85 units, so that dead zone was still well within range of real wave motion crossing both boundaries repeatedly while just standing near the shoreline
+  const isFullySubmerged = submergedState; // was 0.6 — still narrower than the ocean's own ~0.85-unit wave amplitude, so waves washing over the camera near the surface could still cross both edges of the dead zone repeatedly, flipping the underwater post-process (fog/distortion/render-target pass) on and off every couple frames. 1.1 comfortably exceeds the max wave amplitude, so only an actual sustained surface crossing (not wave bob) flips the state now.
   if (isFullySubmerged) {
     const uwStyle = UNDERWATER_STYLE[currentBiome] || UNDERWATER_STYLE.default;
     scene.fog.color.setHex(uwStyle.fogColor);

@@ -13,7 +13,7 @@ import { createWildlife, updateWildlife, disposeWildlife } from "./wildlife.js";
 import { createLandmark, updateLandmark, disposeLandmark, LANDMARK_POSITION } from "./landmarks.js";
 import { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers } from "./graphicsSettings.js";
 import { createWeatherSystem, updateWeatherSystem, disposeWeatherSystem } from "./weather.js";
-import { createClouds, updateClouds, disposeClouds, getCloudOcclusionFactor } from "./clouds.js";
+import { createClouds, updateClouds, disposeClouds, getCloudOcclusionFactor, createCloudLayer, updateCloudLayer, disposeCloudLayer } from "./clouds.js";
 import {
   createBolt, updateBolt, disposeBolt,
   createMuzzleFlash, updateMuzzleFlash, disposeMuzzleFlash,
@@ -540,6 +540,7 @@ let flowersHandle = null;
 let footstepGlowHandle = null;
 let weatherHandle = null;
 let cloudsHandle = null;
+let cloudLayerHandle = null;
 let horizonHandle = null;
 let wildlifeHandle = null;
 let landmarkHandle = null;
@@ -608,6 +609,8 @@ function teardownLevel() {
   weatherHandle = null;
   disposeClouds(scene, cloudsHandle);
   cloudsHandle = null;
+  disposeCloudLayer(scene, cloudLayerHandle);
+  cloudLayerHandle = null;
   disposeHorizonSilhouettes(scene, horizonHandle);
   horizonHandle = null;
   disposeWildlife(scene, wildlifeHandle);
@@ -1177,6 +1180,7 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
   footstepGlowHandle = level.biome === "verdant" ? createFootstepGlowSystem(scene, 40) : null;
   weatherHandle = createWeatherSystem(scene, level.biome);
   cloudsHandle = createClouds(scene, level.biome);
+  cloudLayerHandle = createCloudLayer(scene);
   horizonHandle = level.biome === "crystal" ? null : createHorizonSilhouettes(scene, level.biome); // Coral Shallows is open ocean now — no distant mountain backdrop, and horizonSilhouettes.js still isn't part of this session so this stays a main.js-only fix rather than touching that file's still-old icy Crystal-Spire theming
   wildlifeHandle = createWildlife(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), LIQUID_LEVEL[level.biome]);
   landmarkHandle = createLandmark(scene, level.biome, level.color, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
@@ -1851,6 +1855,7 @@ function animate() {
   updateWildlife(wildlifeHandle, elapsedTime, dt, camera.position.x, camera.position.z, eruptionActive);
   updateLandmark(landmarkHandle, elapsedTime, dt);
   updateClouds(cloudsHandle, dt, wind, dayNight.dayAmount, wind.rainIntensity, dayNight.skyHorizon, dayNightCycle.sunBody.group.position, camera.position);
+  updateCloudLayer(cloudLayerHandle, dt, wind, dayNight.dayAmount, dayNight.skyHorizon);
   // Clouds sometimes drift in front of the sun/moon — a cheap angular
   // check (see getCloudOcclusionFactor's own comment for why this isn't
   // real depth-buffer occlusion), applied as a further opacity

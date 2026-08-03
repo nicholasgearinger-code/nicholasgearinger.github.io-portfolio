@@ -333,4 +333,100 @@ function getCloudOcclusionFactor(handle, cameraPos, targetPos) {
   return Math.min(0.92, occlusion); // never fully hides it — a thin bright edge/glow through a cloud is how the real thing looks too
 }
 
-export { createClouds, updateClouds, disposeClouds, getCloudOcclusionFactor };
+// A cheap "complete sky coverage" cloud layer — a single large flat
+// plane high overhead with a seamlessly-tiling noise-blob alpha texture,
+// instead of brute-forcing full coverage by scaling the sprite-cluster
+// system (createClouds above) up to hundreds of individual clouds. This
+// is the standard trick real games use for a full cloud blanket: one
+// mesh, one texture, one material — drift is just nudging a UV offset
+// each frame (no redraw), color response is one material.color update.
+// Vastly cheaper than the fill-rate/overdraw cost of hundreds of
+// overlapping alpha-blended sprites.
+function createCloudLayerTexture() {
+  const size = 512;
+  const canvas = document.createElement("canvas");
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, size, size);
+  const blobCount = 90;
+  for (let i = 0; i < blobCount; i++) {
+    const bx = Math.random() * size, by = Math.random() * size;
+    const r = 35 + Math.random() * 75;
+    const alpha = 0.55 + Math.random() * 0.4;
+    // Draw each blob's wrapped copies too (offset by ±size in x/y) so
+    // any blob straddling a tile edge appears correctly on both sides —
+    // the simplest way to get a texture that tiles seamlessly under
+    // THREE.RepeatWrapping without a more involved seamless-noise
+    // algorithm.
+    for (let ox = -1; ox <= 1; ox++) {
+      for (let oy = -1; oy <= 1; oy++) {
+        const x = bx + ox * size, y = by + oy * size;
+        if (x < -r || x > size + r || y < -r || y > size + r) continue;
+        const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
+        grad.addColorStop(0, `rgba(255,255,255,${alpha})`);
+        grad.addColorStop(0.6, `rgba(255,255,255,${alpha * 0.5})`);
+        grad.addColorStop(1, "rgba(255,255,255,0)");
+        ctx.fillStyle = grad;
+        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  return texture;
+}
+
+/**
+ * @param {THREE.Scene} scene
+ * @param {number} [altitude] how high overhead the layer sits
+ * @param {number} [coverage] 0..1 — how dense the tiling repeats, higher
+ *   repeat count reads as more detailed/broken-up coverage at the same
+ *   texture resolution
+ */
+function createCloudLayer(scene, altitude = 135, repeatCount = 5) {
+  const texture = createCloudLayerTexture();
+  texture.repeat.set(repeatCount, repeatCount);
+  const geo = new THREE.PlaneGeometry(1500, 1500, 1, 1);
+  const mat = new THREE.MeshBasicMaterial({
+    map: texture, transparent: true, depthWrite: false, fog: true,
+    color: 0xffffff, opacity: 0.92,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.rotation.x = -Math.PI / 2; // lay flat, facing down toward the ground
+  mesh.position.y = altitude;
+  scene.add(mesh);
+  return { mesh, mat, texture, driftX: 0, driftZ: 0 };
+}
+
+/**
+ * @param {{windX:number, windZ:number}} wind
+ * @param {number} dayAmount
+ * @param {THREE.Color} [skyHorizonColor]
+ */
+function updateCloudLayer(handle, dt, wind, dayAmount, skyHorizonColor) {
+  if (!handle) return;
+  // Drift is just a texture-offset nudge, not moving real geometry or
+  // redrawing anything — about as cheap as animation gets.
+  handle.driftX += (wind?.windX || 0) * dt * 0.004;
+  handle.driftZ += (wind?.windZ || 0) * dt * 0.004;
+  handle.texture.offset.set(handle.driftX, handle.driftZ);
+  const lightFactor = 0.6 + dayAmount * 0.4; // dimmer/moodier at dawn/dusk/night, brightest at noon — same shape as the sprite clouds' own lightFactor
+  handle.mat.color.setScalar(lightFactor);
+  if (skyHorizonColor) {
+    // A gentler, whole-layer version of the sprite clouds' own sky-tint
+    // blend — this is one flat mesh, not individual clouds that can
+    // react to sun proximity separately, so a single modest tint is the
+    // right level of detail for it rather than trying to replicate that
+    // whole system here.
+    handle.mat.color.lerp(skyHorizonColor, 0.35);
+  }
+}
+
+function disposeCloudLayer(scene, handle) {
+  if (!handle) return;
+  scene.remove(handle.mesh);
+  handle.mat.dispose();
+  handle.texture.dispose();
+}
+
+export { createClouds, updateClouds, disposeClouds, getCloudOcclusionFactor, createCloudLayer, updateCloudLayer, disposeCloudLayer };

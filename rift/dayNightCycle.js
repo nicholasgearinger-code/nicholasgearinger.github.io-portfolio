@@ -168,41 +168,53 @@ function createSunStarburstTexture() {
   canvas.width = size; canvas.height = size;
   const ctx = canvas.getContext("2d");
   const cx = size / 2, cy = size / 2;
-  // A tight soft core plus a scatter of small radiant points fading out
-  // toward the edge — replaces the old uniform "big soft round halo"
-  // (which read as a flat glowing disc with no texture to it) with a
-  // corona that actually looks like it's made of light: individual
-  // glints denser near the sun and sparser/smaller further out, rather
-  // than one smooth continuous gradient. The core is much tighter than
-  // the old 0.5-radius version since the scattered points now carry the
-  // outer spread instead of a solid gradient doing it.
-  const coreGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, size * 0.22);
+  // Tight bright core — the small solid-looking center of the flare.
+  // Tighter than the old version now that real linear spikes (below),
+  // not scattered dust, carry the outward spread.
+  const coreGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, size * 0.16);
   coreGrad.addColorStop(0, "rgba(255,255,255,1)");
-  coreGrad.addColorStop(0.5, "rgba(255,255,255,0.5)");
+  coreGrad.addColorStop(0.55, "rgba(255,255,255,0.55)");
   coreGrad.addColorStop(1, "rgba(255,255,255,0)");
   ctx.fillStyle = coreGrad;
   ctx.fillRect(0, 0, size, size);
 
-  const pointCount = 46;
-  for (let i = 0; i < pointCount; i++) {
-    const angle = Math.random() * Math.PI * 2;
-    // Bias toward the center (pow > 1 skews random toward 0) so points
-    // are denser close to the sun and thin out toward the edge, rather
-    // than being spread evenly across the whole radius.
-    const distT = Math.pow(Math.random(), 1.7);
-    const dist = distT * size * 0.48;
-    const px = cx + Math.cos(angle) * dist;
-    const py = cy + Math.sin(angle) * dist;
-    const r = 1.2 + Math.random() * 3.2 * (1 - distT * 0.5);
-    const alpha = (1 - distT) * 0.55 + 0.12;
-    const pointGrad = ctx.createRadialGradient(px, py, 0, px, py, r);
-    pointGrad.addColorStop(0, `rgba(255,255,255,${alpha})`);
-    pointGrad.addColorStop(1, "rgba(255,255,255,0)");
-    ctx.fillStyle = pointGrad;
+  // Real linear rays — a genuine photographic lens-flare star, not the
+  // old scattered-dot corona (which read as sparkly dust rather than
+  // spikes). Per an explicit reference photo: a small number of long,
+  // thin, sharp rays radiating from a compact core. 8 spikes alternating
+  // long/short (4 longer "primary" rays roughly cardinal, 4 shorter
+  // ones between them) — the classic pattern real camera aperture
+  // blades produce, rather than a perfectly uniform mechanical asterisk.
+  const spikeCount = 8;
+  for (let i = 0; i < spikeCount; i++) {
+    const isPrimary = i % 2 === 0;
+    const angle = (i / spikeCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.08;
+    const length = (isPrimary ? size * 0.5 : size * 0.3) * (0.85 + Math.random() * 0.3);
+    const halfWidth = (isPrimary ? 3.4 : 1.8) * (0.8 + Math.random() * 0.4);
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(angle);
+    const grad = ctx.createLinearGradient(0, 0, length, 0);
+    grad.addColorStop(0, "rgba(255,255,255,0.95)");
+    grad.addColorStop(0.15, "rgba(255,255,255,0.7)");
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = grad;
     ctx.beginPath();
-    ctx.arc(px, py, r, 0, Math.PI * 2);
+    ctx.moveTo(0, -halfWidth);
+    ctx.lineTo(length, 0);
+    ctx.lineTo(0, halfWidth);
+    ctx.closePath();
     ctx.fill();
+    ctx.restore();
   }
+
+  // Soften the spikes' hard vector-triangle edges into something that
+  // reads as real light rather than flat shapes — same self-draw-back
+  // blur trick already used elsewhere in this file (see
+  // createDistantPlanetTexture).
+  ctx.filter = "blur(1.5px)";
+  ctx.drawImage(canvas, 0, 0);
+
   return new THREE.CanvasTexture(canvas);
 }
 

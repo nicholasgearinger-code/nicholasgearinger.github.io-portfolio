@@ -1,5 +1,15 @@
 import * as THREE from "three";
 import { getGraphicsSettings } from "./graphicsSettings.js";
+// Real mirror-reflection plane for Coral Shallows' above-water view — a
+// proven, addon-maintained implementation rather than hand-rolled
+// screen-space ray-marching. THREE.Water renders the scene from a
+// virtual flipped camera each frame; it's a genuine reflection of
+// surrounding geometry (terrain, sky, landmarks), not an approximation.
+// Confirmed in a prior session that this project's index.html importmap
+// already resolves "three/addons/" (to three@0.160.0/examples/jsm/ on
+// jsdelivr) with zero config changes needed — if that importmap entry
+// has since changed, this import would be the first thing to check.
+import { Water } from "three/addons/objects/Water.js";
 
 // -----------------------------------------------------------------------------
 // SWAP POINT: lava/water rendering. A single large flat plane at a fixed
@@ -699,6 +709,11 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
   // being pre-baked per-vertex like the rest of this file's coloring.
   if (biome === "crystal") {
     geo.setAttribute("aFoam", new THREE.BufferAttribute(new Float32Array(posAttr.count), 1));
+    // Sun-glitter intensity — same per-vertex-attribute pattern as aFoam
+    // above, computed each frame in updateLiquidPlane from the exact
+    // analytic Gerstner normal + real view/sun vectors already computed
+    // there for the Fresnel term (no duplicate math, just reused).
+    geo.setAttribute("aSunGlint", new THREE.BufferAttribute(new Float32Array(posAttr.count), 1));
   }
 
   const matOptions = {
@@ -764,14 +779,15 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
         shader.uniforms.uTime = { value: 0 };
         shader.uniforms.uFoamTex = { value: getFoamDetailTexture() };
         shader.vertexShader = shader.vertexShader
-          .replace("#include <common>", "#include <common>\nattribute float aFoam;\nvarying float vFoam;\nvarying vec2 vFoamPos;")
-          .replace("#include <begin_vertex>", "#include <begin_vertex>\nvFoam = aFoam;\nvFoamPos = position.xz;"); // local-space XZ IS world XZ here — this mesh has no runtime x/z translation or rotation (baked in at creation), only a Y offset
+          .replace("#include <common>", "#include <common>\nattribute float aFoam;\nvarying float vFoam;\nvarying vec2 vFoamPos;\nattribute float aSunGlint;\nvarying float vSunGlint;")
+          .replace("#include <begin_vertex>", "#include <begin_vertex>\nvFoam = aFoam;\nvFoamPos = position.xz;\nvSunGlint = aSunGlint;"); // local-space XZ IS world XZ here — this mesh has no runtime x/z translation or rotation (baked in at creation), only a Y offset
         shader.fragmentShader = shader.fragmentShader
           .replace("#include <common>", `#include <common>
 uniform float uTime;
 uniform sampler2D uFoamTex;
 varying float vFoam;
 varying vec2 vFoamPos;
+varying float vSunGlint;
 // Compact 2D Worley/Voronoi noise — hashed jittered grid, 3x3 neighbor
 // search for the nearest feature point. Cheap enough for two octaves
 // per fragment on mobile.
@@ -819,6 +835,14 @@ float foamVoronoi(vec2 p) {
   // pixels within that region actually show it.
   float foamMask = bubbles * smoothstep(0.5, 0.92, vFoam);
   diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0), foamMask);
+  // Real specular sun-glitter — vSunGlint is computed per-vertex in
+  // updateLiquidPlane (JS side) from the exact analytic Gerstner normal
+  // and the real view/sun half-vector, the same trusted values already
+  // driving the Fresnel term right next to it there, not new/separate
+  // math. Additive (not mixed toward white like the foam above) so it
+  // can genuinely blow out brighter than the base albedo the way a real
+  // specular highlight does, rather than just capping at flat white.
+  diffuseColor.rgb += vec3(1.0, 0.97, 0.85) * vSunGlint * 2.4;
 }`);
         m.userData.shader = shader; // so updateLiquidPlane can push uTime each frame
       };
@@ -856,6 +880,48 @@ float foamVoronoi(vec2 p) {
     mesh = new THREE.Mesh(geo, buildWaterMaterial(THREE.FrontSide, true));
     mesh.position.y = y;
     scene.add(mesh);
+  }
+
+  // Real mirror-reflection plane — Coral Shallows only, above-water view
+  // only (toggled in updateLiquidPlane). A SEPARATE flat plane rather
+  // than reusing the wavy `geo` above: THREE.Water's own shader handles
+  // its surface distortion internally via its normal map + distortionScale,
+  // not vertex displacement, so it wants a plain flat plane to work from.
+  // Own texture clone (not the shared cached one, not even the same clone
+  // the colored mesh's normalMap uses) since Water sets its own
+  // wrapping/repeat internally — cloning avoids any property conflict
+  // between the two consumers of the same underlying image.
+  let mirrorWater = null;
+  if (biome === "crystal") {
+    const mirrorGeo = new THREE.PlaneGeometry(size, size);
+    mirrorWater = new Water(mirrorGeo, {
+      textureWidth: 512,
+      textureHeight: 512,
+      waterNormals: getRippleNormalTexture().clone(),
+      sunDirection: new THREE.Vector3(0, 1, 0), // overwritten every frame in updateLiquidPlane from the real sun position
+      sunColor: 0xffffff,
+      waterColor: style.baseColor.getHex(),
+      distortionScale: 2.6,
+      // Semi-transparent (not the addon's opaque default) — this is
+      // layered ON TOP of the existing colored/foam/sun-glint mesh
+      // below, not a replacement for it. A fully opaque reflection would
+      // hide all of that work; this reads as a reflective sheen over
+      // the real water color/foam instead.
+      alpha: 0.55,
+      fog: !!scene.fog,
+    });
+    mirrorWater.rotation.x = -Math.PI / 2;
+    // Tiny Y offset above the main mesh (not coincident) — same
+    // deliberate-gap technique already used elsewhere in this project
+    // (see clouds.js's sky dome vs. realistic cloud dome) specifically
+    // because two coincident large transparent surfaces get an unstable
+    // per-frame camera-distance sort, which reads as flicker when the
+    // camera moves. A stable renderOrder (drawn after the main mesh) is
+    // the second half of that same fix.
+    mirrorWater.position.y = y + 0.03;
+    mirrorWater.renderOrder = 1;
+    mirrorWater.visible = false; // starts hidden — updateLiquidPlane sets real visibility every frame based on camera position
+    scene.add(mirrorWater);
   }
 
   // A separate unlit, additively-blended plane just above the surface —
@@ -946,13 +1012,27 @@ float foamVoronoi(vec2 p) {
 
   return {
     mesh, backMesh, glow, shimmer, rocks, waterY: y, basePositions, biome, style, depthColors,
-    flowDir: normalizeFlow(flowDir), crustOctaves, crackOctaves, flowBeads, rippleTexture,
+    flowDir: normalizeFlow(flowDir), crustOctaves, crackOctaves, flowBeads, rippleTexture, mirrorWater,
   };
 }
 
 function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir, skyHorizon) {
   if (!handle) return;
-  const { mesh, backMesh, glow, shimmer, rocks, basePositions, biome, style, flowDir, crustOctaves, crackOctaves, flowBeads, waterY, rippleTexture } = handle;
+  const { mesh, backMesh, glow, shimmer, rocks, basePositions, biome, style, flowDir, crustOctaves, crackOctaves, flowBeads, waterY, rippleTexture, mirrorWater } = handle;
+  // Real mirror reflection — only shown above the surface (the plane it
+  // renders from assumes a viewer looking down at the water, same as any
+  // real mirror; from underneath it would show a nonsensical flipped
+  // reflection). Layered on top of the always-visible colored/foam mesh
+  // below at low alpha, not a replacement for it — see its creation
+  // comment above for why. `cameraY === undefined` defaults to shown,
+  // matching how this project's other camera-position-dependent checks
+  // already treat a missing value as "assume above water" rather than
+  // silently doing nothing.
+  if (mirrorWater) {
+    mirrorWater.visible = cameraY === undefined ? true : cameraY > waterY;
+    if (sunDir) mirrorWater.material.uniforms.sunDirection.value.copy(sunDir).normalize();
+    mirrorWater.material.uniforms.time.value = elapsed;
+  }
   // Scroll the ripple normal map slowly along the plane's own flow
   // direction — a static (non-scrolling) normal map would still add real
   // per-pixel lighting detail, but it'd be a fixed pattern frozen in
@@ -981,6 +1061,7 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
   // crystal-only (see createLiquidPlane). uTime only needs setting once
   // per frame, not per vertex.
   const foamAttr = biome === "crystal" ? mesh.geometry.attributes.aFoam : null;
+  const sunGlintAttr = biome === "crystal" ? mesh.geometry.attributes.aSunGlint : null;
   const foamShader = biome === "crystal" ? mesh.material.userData.shader : null;
   if (foamShader) foamShader.uniforms.uTime.value = elapsed;
   // backMesh has its own separate material (built by its own
@@ -1190,6 +1271,42 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
           const fresnel = Math.pow(grazing, 3);
           fresnelTint.copy(fresnelZenith).lerp(fresnelHorizon, grazing);
           tmpColor.lerp(fresnelTint, fresnel * 0.55);
+          // Sun-glitter — real specular sparkle toward the sun, per
+          // explicit request to get closer to a reference photo showing
+          // a bright glinting streak across the water. Reuses the SAME
+          // view vector (vx,vy,vz) and analytic normal (nx,ny,nz) the
+          // Fresnel term right above just computed — no separate/
+          // duplicate math, so this can't drift out of sync with it.
+          // Half-vector (Blinn-Phong) between view and sun direction —
+          // standard, well-understood specular math, deliberately kept
+          // simple since GLSL correctness can't be live-verified in this
+          // environment; the JS side here IS verifiable/testable logic.
+          if (sunGlintAttr && sunDirUnit) {
+            let hx = vx + sunDirUnit.x, hy = vy + sunDirUnit.y, hz = vz + sunDirUnit.z;
+            const hLen = Math.hypot(hx, hy, hz) || 1;
+            hx /= hLen; hy /= hLen; hz /= hLen;
+            const nDotH = Math.max(0, nx * hx + ny * hy + nz * hz);
+            // Very tight exponent (300) — only near-perfect alignment
+            // between the reflected view direction and the sun actually
+            // glints, which is what makes it read as a sharp specular
+            // point rather than a soft diffuse blob.
+            const glintCore = Math.pow(nDotH, 300);
+            // Per-vertex, time-varying sparkle mask — real glitter is
+            // countless individual wave facets twinkling independently,
+            // not one smooth highlight; this project's per-vertex (not
+            // per-pixel) resolution can't reproduce that exactly, but a
+            // spatial hash animated over time gives a genuine twinkling
+            // scatter of glints across the lit area instead of one flat
+            // blob, which reads much closer to real sun glitter.
+            const sparkleSeed = hash2(Math.floor(bx * 2.2), Math.floor(bz * 2.2));
+            const sparkleTime = 0.5 + 0.5 * Math.sin(elapsed * 4.2 + sparkleSeed * 62.8);
+            const dayFactor = THREE.MathUtils.clamp((skyColor ? skyColor.r + skyColor.g + skyColor.b : 1) / 1.2, 0, 1); // fades out at night the same general way the sky itself darkens — no separate dayAmount param passed into this function, skyColor is the closest already-available signal
+            sunGlintAttr.setX(i, glintCore * (0.25 + 0.75 * sparkleTime) * dayFactor);
+          } else if (sunGlintAttr) {
+            sunGlintAttr.setX(i, 0);
+          }
+        } else if (sunGlintAttr) {
+          sunGlintAttr.setX(i, 0);
         }
         posAttr.setXYZ(i, gerstnerX, ripple, gerstnerZ);
         normalAttr.setXYZ(i, nx, ny, nz);
@@ -1205,6 +1322,7 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
   if (biome === "crystal") {
     normalAttr.needsUpdate = true; // written analytically above, per-frame — skip the geometric recompute below
     foamAttr.needsUpdate = true;
+    sunGlintAttr.needsUpdate = true;
   } else {
     mesh.geometry.computeVertexNormals();
   }
@@ -1268,6 +1386,17 @@ function disposeLiquidPlane(scene, handle) {
     // disposed above, only the material is this mesh's own.
     scene.remove(handle.backMesh);
     handle.backMesh.material.dispose();
+  }
+  if (handle.mirrorWater) {
+    scene.remove(handle.mirrorWater);
+    handle.mirrorWater.geometry.dispose();
+    // Water's own normal-map texture is a per-instance clone passed in
+    // at construction (see createLiquidPlane) — owned exclusively by
+    // this mirrorWater, dispose it alongside the material itself.
+    if (handle.mirrorWater.material.uniforms.normalSampler) {
+      handle.mirrorWater.material.uniforms.normalSampler.value.dispose();
+    }
+    handle.mirrorWater.material.dispose();
   }
   if (handle.glow) {
     scene.remove(handle.glow);

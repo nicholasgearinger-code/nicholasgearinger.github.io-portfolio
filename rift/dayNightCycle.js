@@ -36,7 +36,13 @@ const DAWN_DUSK = {
 };
 const DAY = {
   sun: 0xfff4e0, sunIntensity: 2.0, ambient: 0x8899bb, ambientIntensity: 0.5,
-  skyZenith: 0x1c3a5e, skyMid: 0x4f79a8, skyHorizon: 0x8fb8d6,
+  // Was a muted, fairly desaturated blue (0x1c3a5e/0x4f79a8/0x8fb8d6) —
+  // deliberately soft/flat per an earlier "no dramatic noon" tuning pass.
+  // Per explicit reference photo (a vivid deep-blue sky with a blazing
+  // sun), pushed to a genuinely saturated azure across the whole
+  // gradient instead — real clear-day skies away from any haze are this
+  // vivid, not grayish.
+  skyZenith: 0x1560c4, skyMid: 0x2f8fe0, skyHorizon: 0x6fc0f0,
 };
 
 // The sun's own visual disc/glow color at three stages — zenith (high,
@@ -744,14 +750,29 @@ function updateDayNightCycle(cycle, dt) {
   // than a single flat blend, matching the reference's many visible
   // in-between stages rather than just two extremes.
   const horizonCloseness = THREE.MathUtils.clamp(1 - Math.abs(sunOrbit.elevation) / 0.05, 0, 1); // was /0.16 — still visibly warm-tinted well above the horizon per screenshot; per explicit request the sun should read white almost as soon as it clears the horizon line, not fade gradually over a wide band
+  // How close the sun is to true zenith (straight overhead) — 0 through
+  // the lower/mid sky, ramping to 1 only in roughly the top quarter of
+  // its arc. Per an explicit reference photo (a small, blazing,
+  // hard-edged sun with sharp lens-flare spikes against a deep saturated
+  // sky), noon should be ITS OWN dramatic moment, not the flattest part
+  // of the day — this is a separate boost from horizonCloseness (which
+  // only fires right at sunrise/sunset) so the two don't fight each
+  // other.
+  const zenithBlaze = THREE.MathUtils.clamp((sunOrbit.elevation - 0.55) / 0.4, 0, 1);
   const sunBodyTint = horizonCloseness < 0.5
     ? SUN_BODY_ZENITH.clone().lerp(SUN_BODY_MID, horizonCloseness * 2)
     : SUN_BODY_MID.clone().lerp(SUN_BODY_HORIZON, (horizonCloseness - 0.5) * 2);
   cycle.sunBody.core.material.color.copy(sunBodyTint);
   cycle.sunBody.glow.material.color.copy(sunBodyTint);
-  const sunSizeBoost = 1 + horizonCloseness * 0.3; // was *0.7 — with a smaller base size now, color is the primary sunset signal, not the sun ballooning in size
+  const sunSizeBoost = 1 + horizonCloseness * 0.3 + zenithBlaze * 0.25; // was *0.7 — with a smaller base size now, color is the primary sunset signal, not the sun ballooning in size
   cycle.sunBody.core.scale.setScalar(sunSizeBoost);
-  cycle.sunBody.glow.scale.setScalar(cycle.sunBody.baseGlowScale * sunSizeBoost * (1 + horizonCloseness * 0.15)); // was *0.25
+  cycle.sunBody.glow.scale.setScalar(cycle.sunBody.baseGlowScale * sunSizeBoost * (1 + horizonCloseness * 0.15 + zenithBlaze * 0.35));
+  // Glow OPACITY also gets a genuine noon boost, not just scale — a
+  // bigger sprite at the same opacity just looks like a soft blur, not
+  // an overexposed blazing point-source the way the reference reads.
+  // Multiplied in on top of the existing sunVisibility opacity set just
+  // above.
+  cycle.sunBody.glow.material.opacity = Math.min(1, cycle.sunBody.glow.material.opacity * (1 + zenithBlaze * 0.55));
 
   // Rays peak just above the horizon (the classic crepuscular-ray moment)
   // and taper off toward both full night and flat overhead noon light,

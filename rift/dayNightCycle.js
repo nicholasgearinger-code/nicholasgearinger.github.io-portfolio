@@ -162,20 +162,41 @@ function createSunStarburstTexture() {
   canvas.width = size; canvas.height = size;
   const ctx = canvas.getContext("2d");
   const cx = size / 2, cy = size / 2;
-  // Pure smooth radial glow — no spikes at all. The starburst-spike
-  // version kept reading as "too many bright rays" across several
-  // rounds of tuning it down; the reference photo shows a big soft round
-  // halo with zero visible rays, matching the flat-illustration style
-  // already used everywhere else in this project. Wider falloff (was
-  // 0.28, now spans further with more intermediate stops) for a gentler,
-  // larger glow instead of a tight bright center.
-  const coreGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, size * 0.5);
+  // A tight soft core plus a scatter of small radiant points fading out
+  // toward the edge — replaces the old uniform "big soft round halo"
+  // (which read as a flat glowing disc with no texture to it) with a
+  // corona that actually looks like it's made of light: individual
+  // glints denser near the sun and sparser/smaller further out, rather
+  // than one smooth continuous gradient. The core is much tighter than
+  // the old 0.5-radius version since the scattered points now carry the
+  // outer spread instead of a solid gradient doing it.
+  const coreGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, size * 0.22);
   coreGrad.addColorStop(0, "rgba(255,255,255,1)");
-  coreGrad.addColorStop(0.3, "rgba(255,255,255,0.7)");
-  coreGrad.addColorStop(0.65, "rgba(255,255,255,0.25)");
+  coreGrad.addColorStop(0.5, "rgba(255,255,255,0.5)");
   coreGrad.addColorStop(1, "rgba(255,255,255,0)");
   ctx.fillStyle = coreGrad;
   ctx.fillRect(0, 0, size, size);
+
+  const pointCount = 46;
+  for (let i = 0; i < pointCount; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    // Bias toward the center (pow > 1 skews random toward 0) so points
+    // are denser close to the sun and thin out toward the edge, rather
+    // than being spread evenly across the whole radius.
+    const distT = Math.pow(Math.random(), 1.7);
+    const dist = distT * size * 0.48;
+    const px = cx + Math.cos(angle) * dist;
+    const py = cy + Math.sin(angle) * dist;
+    const r = 1.2 + Math.random() * 3.2 * (1 - distT * 0.5);
+    const alpha = (1 - distT) * 0.55 + 0.12;
+    const pointGrad = ctx.createRadialGradient(px, py, 0, px, py, r);
+    pointGrad.addColorStop(0, `rgba(255,255,255,${alpha})`);
+    pointGrad.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = pointGrad;
+    ctx.beginPath();
+    ctx.arc(px, py, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
   return new THREE.CanvasTexture(canvas);
 }
 
@@ -192,10 +213,16 @@ function createSunTexture() {
   // sunlight is far too bright to make out any surface detail; the old
   // mottled-patch texture read as an examinable surface, which is
   // exactly the opposite of "too bright to look at."
+  // Neutral white, not warm-tinted — this texture's own baked color used
+  // to carry cream/gold tones (#fff2cc, #ffe9a8) that showed through even
+  // at zenith when the elevation-based tint above multiplies in pure
+  // white, which is exactly why the sun still read orange high in the
+  // sky. The time-of-day warmth now comes ONLY from sunBodyTint
+  // multiplying this texture, not from this texture's own bake.
   const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, size / 2);
   grad.addColorStop(0, "#ffffff");
-  grad.addColorStop(0.7, "#fff2cc");
-  grad.addColorStop(1, "#ffe9a8");
+  grad.addColorStop(0.7, "#ffffff");
+  grad.addColorStop(1, "#fffdf7");
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, size, size);
   return new THREE.CanvasTexture(canvas);

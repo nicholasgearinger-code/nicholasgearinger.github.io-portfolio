@@ -211,10 +211,10 @@ function createMoonTexture() {
   const ctx = canvas.getContext("2d");
   ctx.fillStyle = "#dbe4f4";
   ctx.fillRect(0, 0, size, size);
-  for (let i = 0; i < 45; i++) {
-    const x = Math.random() * size, y = Math.random() * size, r = 3 + Math.random() * 16;
+  for (let i = 0; i < 16; i++) { // was 45 — far too busy/noisy at the small size the moon actually renders at on screen
+    const x = Math.random() * size, y = Math.random() * size, r = 4 + Math.random() * 10;
     const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
-    grad.addColorStop(0, "rgba(120,132,165,0.55)");
+    grad.addColorStop(0, "rgba(120,132,165,0.35)"); // was 0.55 — softer, less busy
     grad.addColorStop(1, "rgba(120,132,165,0)");
     ctx.fillStyle = grad;
     ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
@@ -266,10 +266,10 @@ function createMoonPhaseTexture(phaseT) {
   // the phase shape).
   ctx.save();
   ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip();
-  for (let i = 0; i < 45; i++) {
-    const x = Math.random() * size, y = Math.random() * size, cr = 3 + Math.random() * 16;
+  for (let i = 0; i < 16; i++) { // was 45 — far too busy/noisy at the small size the moon actually renders at on screen
+    const x = Math.random() * size, y = Math.random() * size, cr = 4 + Math.random() * 10;
     const grad = ctx.createRadialGradient(x, y, 0, x, y, cr);
-    grad.addColorStop(0, "rgba(120,132,165,0.45)");
+    grad.addColorStop(0, "rgba(120,132,165,0.3)"); // was 0.45 — softer, less busy
     grad.addColorStop(1, "rgba(120,132,165,0)");
     ctx.fillStyle = grad;
     ctx.beginPath(); ctx.arc(x, y, cr, 0, Math.PI * 2); ctx.fill();
@@ -786,7 +786,7 @@ function updateDayNightCycle(cycle, dt) {
   // Two-stage lerp (zenith->gold->horizon-red) for a richer progression
   // than a single flat blend, matching the reference's many visible
   // in-between stages rather than just two extremes.
-  const horizonCloseness = THREE.MathUtils.clamp(1 - Math.abs(sunOrbit.elevation) / 0.16, 0, 1); // was /0.3 — still showing visible orange tint well above the horizon per screenshot feedback; narrowed further so it commits to pure white sooner
+  const horizonCloseness = THREE.MathUtils.clamp(1 - Math.abs(sunOrbit.elevation) / 0.05, 0, 1); // was /0.16 — still visibly warm-tinted well above the horizon per screenshot; per explicit request the sun should read white almost as soon as it clears the horizon line, not fade gradually over a wide band
   const sunBodyTint = horizonCloseness < 0.5
     ? SUN_BODY_ZENITH.clone().lerp(SUN_BODY_MID, horizonCloseness * 2)
     : SUN_BODY_MID.clone().lerp(SUN_BODY_HORIZON, (horizonCloseness - 0.5) * 2);

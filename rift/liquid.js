@@ -620,7 +620,7 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
   let depthColors = null;
   if (biome === "crystal" && sampleHeight) {
     depthColors = new Float32Array(posAttr.count * 3);
-    const shallow = new THREE.Color(0x5fa8c4); // lighter, more turquoise — reef crests and the shoreline
+    const shallow = new THREE.Color(0x7fd0d8); // was 0x5fa8c4 — brighter, more vivid turquoise right at the shoreline per the reference's clear, bright shallow water
     const deep = style.baseColor; // the deep blue tuned in LIQUID_STYLE.crystal
     const tmpDepth = new THREE.Color();
     const MAX_DEPTH = 7; // beyond this the water reads as fully "deep" — matches the reef's own real depth range from terrain.js
@@ -1210,15 +1210,23 @@ function createOceanSurfaceDetail(scene, y, size) {
   return { glitter, glitterSeeds, glitterSpeeds, glitterCount, whitecaps };
 }
 
-function updateOceanSurfaceDetail(handle, elapsed) {
+function updateOceanSurfaceDetail(handle, elapsed, dayAmount = 1) {
   if (!handle) return;
   const colorAttr = handle.glitter.geometry.attributes.color;
+  // Real specular sun-glint only exists because the sun is actually up
+  // and bright enough to glint off the water — this had no day/night
+  // awareness at all before, so it kept sparkling at full brightness
+  // even at night with only the moon out. Fades out well before true
+  // night (by dayAmount 0.2) rather than a linear fade all the way to 0,
+  // since even a low sun still glints brightly right up until it's
+  // nearly gone.
+  const glitterDayFactor = THREE.MathUtils.clamp(dayAmount / 0.2, 0, 1);
   for (let i = 0; i < handle.glitterCount; i++) {
     // Cubed (not linear) sine — a sharper, narrower bright peak than a
     // plain sine gives, closer to how a real specular glint pops on and
     // fades rather than breathing smoothly in and out.
     const s = 0.5 + 0.5 * Math.sin(elapsed * handle.glitterSpeeds[i] + handle.glitterSeeds[i]);
-    const flicker = Math.pow(s, 3);
+    const flicker = Math.pow(s, 3) * glitterDayFactor;
     colorAttr.setXYZ(i, flicker, flicker, flicker);
   }
   colorAttr.needsUpdate = true;

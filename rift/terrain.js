@@ -763,7 +763,7 @@ function applyHeightShading(geo, colorHex, minY, maxY, biome, seed) {
     // (rather than one flat color) so the beach itself has a gradient —
     // pale, slightly cool sand right at the waterline where it's still
     // damp, warming to a golden tone higher up where the sand is dry.
-    const islandSandWet = biome === "crystal" ? new THREE.Color(0xf3efe4) : null;
+    const islandSandWet = biome === "crystal" ? new THREE.Color(0xc9a876) : null; // was 0xf3efe4 (pale near-white) — real wet sand is a rich saturated tan right at the waterline, not washed-out pale, per the reference photo
     const islandSandDry = biome === "crystal" ? new THREE.Color(0xe8c97a) : null;
     const islandSandTmp = biome === "crystal" ? new THREE.Color() : null;
     const waterLine = biome === "crystal" ? LIQUID_LEVEL.crystal : undefined;

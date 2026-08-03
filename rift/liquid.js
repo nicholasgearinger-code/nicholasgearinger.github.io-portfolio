@@ -906,8 +906,15 @@ float foamVoronoi(vec2 p) {
       // layered ON TOP of the existing colored/foam/sun-glint mesh
       // below, not a replacement for it. A fully opaque reflection would
       // hide all of that work; this reads as a reflective sheen over
-      // the real water color/foam instead.
-      alpha: 0.55,
+      // the real water color/foam instead. Lowered from 0.55 — large
+      // reflected areas (most likely the ocean's own dark base color
+      // extending toward the horizon, not a rendering bug) were reading
+      // as heavier/darker than wanted. Lower alpha lets more of the
+      // brighter colored mesh underneath show through; the sun's
+      // reflected glint (the highest-value part of this effect) still
+      // reads clearly since it's much brighter than the ambient
+      // reflection around it.
+      alpha: 0.32,
       fog: !!scene.fog,
     });
     mirrorWater.rotation.x = -Math.PI / 2;

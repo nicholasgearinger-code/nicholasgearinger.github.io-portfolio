@@ -583,6 +583,12 @@ function teardownLevel() {
   if (terrainMesh) {
     scene.remove(terrainMesh);
     terrainMesh.geometry.dispose();
+    // The sand normal-map texture (crystal-only, see buildLevel) is a
+    // per-level CLONE — material.dispose() below does NOT automatically
+    // dispose textures attached to it, so this needs its own explicit
+    // call, same as every other per-instance texture clone in this
+    // project (see liquid.js's rippleTexture/mirrorWater disposal).
+    if (terrainMesh.material.normalMap) terrainMesh.material.normalMap.dispose();
     terrainMesh.material.dispose();
     terrainMesh = null;
   }
@@ -658,6 +664,31 @@ function faceAwayFromLandmark(x, z) {
   camera.rotation.y = Math.atan2(-dx, -dz);
 }
 
+// Real photo-derived sand grain detail — Coral Shallows only. Same
+// structure-only reasoning as every other real-photo texture this
+// project uses (sky clouds, water ripples): this is a NORMAL map (fine
+// per-pixel bump/lighting detail), not a color swap — the terrain's
+// actual color still comes entirely from HEIGHT_PALETTE's vertexColors
+// (terrain.js), untouched. Cached at module level; buildLevel below
+// clones it per level load so `.repeat` (set once, right after cloning)
+// doesn't collide with any other consumer of the same underlying image
+// (none currently exist, but this matches the established clone-per-
+// instance pattern from liquid.js rather than assuming it'll always be
+// the only user).
+let sandNormalTexture = null;
+function getSandNormalTexture() {
+  if (sandNormalTexture) return sandNormalTexture;
+  const url = new URL("textures/sandnormals.jpg", import.meta.url).href;
+  sandNormalTexture = new THREE.TextureLoader().load(
+    url,
+    () => console.log("[main] sand normal texture loaded:", url),
+    undefined,
+    (err) => console.error("[main] sand normal texture FAILED to load:", url, err)
+  );
+  sandNormalTexture.wrapS = sandNormalTexture.wrapT = THREE.RepeatWrapping;
+  return sandNormalTexture;
+}
+
 function buildLevel(levelIdx) {
   teardownLevel();
   currentLevelIdx = levelIdx;
@@ -672,6 +703,25 @@ function buildLevel(levelIdx) {
     emissive: level.color, emissiveIntensity: 0.04,
   });
   if (level.biome === "crystal") {
+    // Real photo-derived sand grain bump detail — layered on top of the
+    // existing vertexColors height-palette coloring (untouched), using
+    // three.js's own built-in normalMap pipeline rather than hand-rolled
+    // shader perturbation (the caustics/foam work below already pushes
+    // onBeforeCompile hand-rolling about as far as is safe to verify
+    // blind in this environment — reusing the well-tested built-in path
+    // here instead keeps this specific addition low-risk). Applies
+    // across this biome's whole terrain (dry sand AND the underwater
+    // reef floor) rather than being masked to dry sand specifically —
+    // masking it would need the same kind of custom shader work being
+    // deliberately avoided here, and the underwater portion is already
+    // heavily dressed with the caustics/wave-wash effect below, so a
+    // faint grain texture underneath reads fine there too.
+    const repeatCount = Math.max(6, Math.round(TERRAIN_SIZE / 6));
+    const sandNormals = getSandNormalTexture().clone();
+    sandNormals.needsUpdate = true;
+    sandNormals.repeat.set(repeatCount, repeatCount);
+    terrainMat.normalMap = sandNormals;
+    terrainMat.normalScale = new THREE.Vector2(0.55, 0.55);
     // Real procedural caustics, anchored to the actual seafloor geometry
     // via onBeforeCompile — not a screen-space overlay (which paints
     // every pixel identically regardless of view direction or what's

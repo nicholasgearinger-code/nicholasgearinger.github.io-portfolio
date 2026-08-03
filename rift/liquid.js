@@ -894,10 +894,23 @@ float foamVoronoi(vec2 p) {
   let mirrorWater = null;
   if (biome === "crystal") {
     const mirrorGeo = new THREE.PlaneGeometry(size, size);
+    // MUST be given a real repeat count — a fresh clone defaults to
+    // (1,1), meaning ONE full copy of this small texture gets stretched
+    // across the ENTIRE ocean plane instead of tiling into many small
+    // ripples. That's what was actually causing the huge smeared/banded
+    // diagonal streak in the reflection — not a genuine reflection of
+    // anything in the scene, just one texture blown up to plane size.
+    // Same repeatCount formula the main colored mesh's own rippleTexture
+    // already uses (line ~750 below) for a consistent ripple scale
+    // between the two water layers.
+    const mirrorNormals = getRippleNormalTexture().clone();
+    mirrorNormals.needsUpdate = true;
+    const mirrorRepeat = Math.max(6, Math.round(size / 9));
+    mirrorNormals.repeat.set(mirrorRepeat, mirrorRepeat);
     mirrorWater = new Water(mirrorGeo, {
       textureWidth: 512,
       textureHeight: 512,
-      waterNormals: getRippleNormalTexture().clone(),
+      waterNormals: mirrorNormals,
       sunDirection: new THREE.Vector3(0, 1, 0), // overwritten every frame in updateLiquidPlane from the real sun position
       sunColor: 0xffffff,
       waterColor: style.baseColor.getHex(),

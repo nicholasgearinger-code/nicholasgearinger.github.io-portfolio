@@ -26,7 +26,7 @@ const NIGHT = {
   skyZenith: 0x05070f, skyMid: 0x0e1526, skyHorizon: 0x141a2c,
 };
 const DAWN_DUSK = {
-  sun: 0xff7a3a, sunIntensity: 0.75, ambient: 0x4a3550, ambientIntensity: 0.45,
+  sun: 0xff7a3a, sunIntensity: 1.3, ambient: 0x4a3550, ambientIntensity: 0.4, // sunIntensity was 0.75, ambientIntensity 0.45 — the directional light was actually weaker than the flat ambient fill here, which works against surfaces (water, sand, everything) reading as strongly bathed in the warm directional color rather than just uniformly washed
   // A direct zenith->horizon lerp (dark purple -> vivid orange) lands on
   // a dull brick-red in the middle, mathematically, not the vivid pink
   // the real sky shows there — real skies aren't a 2-color blend, the
@@ -666,7 +666,7 @@ function updateDayNightCycle(cycle, dt) {
   // actually sets/rises instead of hovering at the horizon all night.
   cycle.sun.position.set(sunOrbit.x, Math.max(sunOrbit.y, -20), 80);
   cycle.sunBody.group.position.set(sunOrbit.x, sunOrbit.y, 80);
-  cycle.moonBody.group.position.set(moonOrbit.x, moonOrbit.y, 80);
+  cycle.moonBody.group.position.set(moonOrbit.x, Math.max(moonOrbit.y, 55), 80); // floored well above the horizon — the moon fades via opacity below, it shouldn't also visually approach/set at the horizon like the sun does
   cycle.sunBeams.group.position.set(sunOrbit.x, sunOrbit.y, 80);
 
   // Blend NIGHT -> DAWN_DUSK -> DAY -> DAWN_DUSK -> NIGHT across elevation.
@@ -756,7 +756,7 @@ function updateDayNightCycle(cycle, dt) {
   // the sun comes up, regardless of where the moon itself currently sits.
   // Tied to dayAmount instead — fades out as the sun actually rises, and
   // fades back in as it sets, independent of the moon's own position.
-  const moonVisibility = THREE.MathUtils.clamp(1 - dayAmount / 0.35, 0, 1);
+  const moonVisibility = THREE.MathUtils.clamp(1 - dayAmount / 0.35, 0, 1) * 0.92 + 0.08; // floored at a faint 0.08 rather than fading all the way to invisible — "fade until a very faint blue-gray" once the sun is up, not disappear entirely
   // Real lunar phases — regenerated only when the discretized phase step
   // actually changes (32 steps across the full cycle), not every frame;
   // repainting a canvas and re-uploading a texture every frame for
@@ -780,7 +780,7 @@ function updateDayNightCycle(cycle, dt) {
   cycle.sunBody.core.material.opacity = sunVisibility;
   cycle.sunBody.glow.material.opacity = cycle.sunBody.baseGlowOpacity * sunVisibility;
   cycle.moonBody.core.material.opacity = moonVisibility;
-  cycle.moonBody.glow.material.opacity = cycle.moonBody.baseGlowOpacity * moonVisibility * (0.15 + moonIllum * 0.85);
+  cycle.moonBody.glow.material.opacity = cycle.moonBody.baseGlowOpacity * moonVisibility * (0.55 + moonIllum * 0.45); // was 0.15 + moonIllum*0.85 — that made the glow nearly vanish during crescent/new phases, which read as broken rather than atmospheric
 
   // The sun's own visual disc and glow — not just the directional
   // light's color — shift through the day too, per the explicit

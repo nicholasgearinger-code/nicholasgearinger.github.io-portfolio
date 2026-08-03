@@ -1822,12 +1822,12 @@ function animate() {
   // only flips submerged once genuinely well below the line, and only
   // flips back once genuinely well above it.
   if (currentLiquidLevel !== undefined) {
-    if (!submergedState && camera.position.y < currentLiquidLevel - 0.15) submergedState = true;
-    else if (submergedState && camera.position.y > currentLiquidLevel + 0.15) submergedState = false;
+    if (!submergedState && camera.position.y < currentLiquidLevel - 0.6) submergedState = true;
+    else if (submergedState && camera.position.y > currentLiquidLevel + 0.6) submergedState = false;
   } else {
     submergedState = false;
   }
-  const isFullySubmerged = submergedState;
+  const isFullySubmerged = submergedState; // was a 0.15 margin — the ocean's own wave amplitude is up to ~0.85 units, so that dead zone was still well within range of real wave motion crossing both boundaries repeatedly while just standing near the shoreline
   if (isFullySubmerged) {
     const uwStyle = UNDERWATER_STYLE[currentBiome] || UNDERWATER_STYLE.default;
     scene.fog.color.setHex(uwStyle.fogColor);

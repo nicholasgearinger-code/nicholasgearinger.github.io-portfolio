@@ -209,12 +209,12 @@ function createMoonTexture() {
   const canvas = document.createElement("canvas");
   canvas.width = size; canvas.height = size;
   const ctx = canvas.getContext("2d");
-  ctx.fillStyle = "#dbe4f4";
+  ctx.fillStyle = "#fbfcff"; // was #dbe4f4 — a pale gray-blue read as a realistic rocky surface rather than a bright white moon
   ctx.fillRect(0, 0, size, size);
   for (let i = 0; i < 16; i++) { // was 45 — far too busy/noisy at the small size the moon actually renders at on screen
     const x = Math.random() * size, y = Math.random() * size, r = 4 + Math.random() * 10;
     const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
-    grad.addColorStop(0, "rgba(120,132,165,0.35)"); // was 0.55 — softer, less busy
+    grad.addColorStop(0, "rgba(140,150,175,0.22)"); // was 0.35 — softer still, so subtle craters don't undercut the brighter white base with too much gray contrast
     grad.addColorStop(1, "rgba(120,132,165,0)");
     ctx.fillStyle = grad;
     ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
@@ -238,7 +238,7 @@ function createMoonPhaseTexture(phaseT) {
   const ctx = canvas.getContext("2d");
   const cx = size / 2, cy = size / 2, r = size * 0.49;
   const darkColor = "#05070d"; // was #141a28 — that light navy was clearly visible as a circle outline against the star field instead of blending into space
-  const litColor = "#dbe4f4";
+  const litColor = "#fbfcff"; // was #dbe4f4 — a pale gray-blue read as a realistic rocky surface rather than a bright white moon
 
   ctx.save();
   ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip();
@@ -269,7 +269,7 @@ function createMoonPhaseTexture(phaseT) {
   for (let i = 0; i < 16; i++) { // was 45 — far too busy/noisy at the small size the moon actually renders at on screen
     const x = Math.random() * size, y = Math.random() * size, cr = 4 + Math.random() * 10;
     const grad = ctx.createRadialGradient(x, y, 0, x, y, cr);
-    grad.addColorStop(0, "rgba(120,132,165,0.3)"); // was 0.45 — softer, less busy
+    grad.addColorStop(0, "rgba(140,150,175,0.18)"); // was 0.3 — softer still, so subtle craters don't undercut the brighter white base with too much gray contrast
     grad.addColorStop(1, "rgba(120,132,165,0)");
     ctx.fillStyle = grad;
     ctx.beginPath(); ctx.arc(x, y, cr, 0, Math.PI * 2); ctx.fill();

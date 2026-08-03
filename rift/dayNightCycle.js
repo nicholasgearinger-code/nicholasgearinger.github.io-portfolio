@@ -12,7 +12,6 @@ import { getGraphicsSettings } from "./graphicsSettings.js";
 // -----------------------------------------------------------------------------
 
 const CYCLE_SECONDS = 480; // one full day/night cycle — long enough not to be distracting, short enough to actually see it move in a session
-const LUNAR_CYCLE_SECONDS = CYCLE_SECONDS * 8; // a full moon-phase cycle spans 8 in-game days — real moons cycle far slower than the day/night rhythm itself; this stays proportionally slow without being imperceptible in a single session
 const ORBIT_RADIUS = 260;
 const SKY_DOME_RADIUS = 900;
 
@@ -219,63 +218,6 @@ function createMoonTexture() {
     ctx.fillStyle = grad;
     ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
   }
-  return new THREE.CanvasTexture(canvas);
-}
-
-// A real lunar phase cycle — new moon (invisible) through crescent,
-// quarter, gibbous, to full moon and back, over several in-game days
-// (see LUNAR_CYCLE_SECONDS), not a static disc. Standard canvas
-// technique: paint one half of the disc lit, then carve/fill the
-// terminator curve with an ellipse whose width traces from a full
-// half-circle (quarter phases, giving a clean straight terminator) down
-// to zero (new/full moon, a fully round terminator that either erases or
-// completes the lit half entirely).
-// @param {number} phaseT  0..1 — 0 and 1 are new moon, 0.5 is full moon
-function createMoonPhaseTexture(phaseT) {
-  const size = 256;
-  const canvas = document.createElement("canvas");
-  canvas.width = size; canvas.height = size;
-  const ctx = canvas.getContext("2d");
-  const cx = size / 2, cy = size / 2, r = size * 0.49;
-  const darkColor = "#05070d"; // was #141a28 — that light navy was clearly visible as a circle outline against the star field instead of blending into space
-  const litColor = "#fbfcff"; // was #dbe4f4 — a pale gray-blue read as a realistic rocky surface rather than a bright white moon
-
-  ctx.save();
-  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip();
-  ctx.fillStyle = darkColor;
-  ctx.fillRect(0, 0, size, size);
-
-  const waxing = phaseT < 0.5; // right side lit while waxing, left side while waning — arbitrary but consistent convention
-  ctx.fillStyle = litColor;
-  ctx.beginPath();
-  if (waxing) ctx.rect(cx, cy - r, r, r * 2);
-  else ctx.rect(cx - r, cy - r, r, r * 2);
-  ctx.fill();
-
-  const ew = r * Math.cos(phaseT * Math.PI * 2);
-  const gibbous = (waxing && ew < 0) || (!waxing && ew > 0);
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, Math.abs(ew), r, 0, 0, Math.PI * 2);
-  ctx.fillStyle = gibbous ? litColor : darkColor; // gibbous side ADDS lit area into the dark half; crescent side SUBTRACTS by painting dark back over it
-  ctx.fill();
-  ctx.restore();
-
-  // Craters, clipped to the moon's own circular silhouette this time
-  // (the old version filled the whole square canvas, which didn't matter
-  // when the disc itself filled the frame, but would now spill outside
-  // the phase shape).
-  ctx.save();
-  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip();
-  for (let i = 0; i < 16; i++) { // was 45 — far too busy/noisy at the small size the moon actually renders at on screen
-    const x = Math.random() * size, y = Math.random() * size, cr = 4 + Math.random() * 10;
-    const grad = ctx.createRadialGradient(x, y, 0, x, y, cr);
-    grad.addColorStop(0, "rgba(140,150,175,0.18)"); // was 0.3 — softer still, so subtle craters don't undercut the brighter white base with too much gray contrast
-    grad.addColorStop(1, "rgba(120,132,165,0)");
-    ctx.fillStyle = grad;
-    ctx.beginPath(); ctx.arc(x, y, cr, 0, Math.PI * 2); ctx.fill();
-  }
-  ctx.restore();
-
   return new THREE.CanvasTexture(canvas);
 }
 
@@ -499,6 +441,7 @@ function createSkyDome(scene) {
   geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   const mat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false });
   const mesh = new THREE.Mesh(geo, mat);
+  mesh.renderOrder = -100; // forces a stable draw order (always first/furthest-back) instead of relying on three.js's automatic per-frame camera-distance sort for transparent objects — that sort can become unstable between two large overlapping transparent surfaces (this dome and the cloud layer in clouds.js) as the camera moves, which is exactly a "flickers only when moving the camera" symptom
   scene.add(mesh);
   return { mesh, posAttr: geo.attributes.position, colorAttr: geo.attributes.color };
 }
@@ -647,7 +590,7 @@ function createDayNightCycle(scene, sun, ambient, starfield, biome) {
   const shootingStars = createShootingStars(scene);
   return {
     scene, sun, ambient, starfield, sunBody, moonBody, sunBeams, sky,
-    distantPlanet, aurora, shootingStars, elapsed: 0, biome, lastMoonPhaseStep: -1,
+    distantPlanet, aurora, shootingStars, elapsed: 0, biome,
   };
 }
 
@@ -757,30 +700,11 @@ function updateDayNightCycle(cycle, dt) {
   // Tied to dayAmount instead — fades out as the sun actually rises, and
   // fades back in as it sets, independent of the moon's own position.
   const moonVisibility = THREE.MathUtils.clamp(1 - dayAmount / 0.35, 0, 1) * 0.92 + 0.08; // floored at a faint 0.08 rather than fading all the way to invisible — "fade until a very faint blue-gray" once the sun is up, not disappear entirely
-  // Real lunar phases — regenerated only when the discretized phase step
-  // actually changes (32 steps across the full cycle), not every frame;
-  // repainting a canvas and re-uploading a texture every frame for
-  // something that visibly changes over days would be wasted work.
-  const moonPhaseT = (cycle.elapsed % LUNAR_CYCLE_SECONDS) / LUNAR_CYCLE_SECONDS;
-  const moonPhaseStep = Math.floor(moonPhaseT * 32);
-  if (moonPhaseStep !== cycle.lastMoonPhaseStep) {
-    cycle.lastMoonPhaseStep = moonPhaseStep;
-    const oldMap = cycle.moonBody.core.material.map;
-    cycle.moonBody.core.material.map = createMoonPhaseTexture(moonPhaseT);
-    cycle.moonBody.core.material.needsUpdate = true;
-    if (oldMap) oldMap.dispose();
-  }
-  // How much of the disc is actually lit right now (0 at new moon, 1 at
-  // full) — the glow halo behind the moon was a full round glow
-  // regardless of phase, which visually gave away the "missing" dark
-  // portion of a crescent even with the phase texture correctly painted.
-  // A real crescent moon barely glows at all compared to a full one.
-  const moonIllum = (1 - Math.cos(moonPhaseT * Math.PI * 2)) / 2;
 
   cycle.sunBody.core.material.opacity = sunVisibility;
   cycle.sunBody.glow.material.opacity = cycle.sunBody.baseGlowOpacity * sunVisibility;
   cycle.moonBody.core.material.opacity = moonVisibility;
-  cycle.moonBody.glow.material.opacity = cycle.moonBody.baseGlowOpacity * moonVisibility * (0.55 + moonIllum * 0.45); // was 0.15 + moonIllum*0.85 — that made the glow nearly vanish during crescent/new phases, which read as broken rather than atmospheric
+  cycle.moonBody.glow.material.opacity = cycle.moonBody.baseGlowOpacity * moonVisibility; // reverted — no longer scaled by phase illumination, see the phase-system removal above
 
   // The sun's own visual disc and glow — not just the directional
   // light's color — shift through the day too, per the explicit

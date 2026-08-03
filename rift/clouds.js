@@ -393,6 +393,7 @@ function createCloudLayer(scene, altitude = 135, repeatCount = 5) {
   });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.rotation.x = -Math.PI / 2; // lay flat, facing down toward the ground
+  mesh.renderOrder = -90; // draws right after the sky dome (-100), always in the same order — see the sky dome's own renderOrder comment for why an unstable automatic sort between these two large transparent surfaces was likely causing "flickers when the camera moves"
   mesh.position.y = altitude;
   scene.add(mesh);
   return { mesh, mat, texture, driftX: 0, driftZ: 0 };

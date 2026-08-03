@@ -485,7 +485,23 @@ function createRealisticCloudDome(scene) {
   // the explicit renderOrder below, the same double-insurance approach
   // already used for the sky dome vs. the flat cloud layer.
   const RADIUS = 860;
-  const geo = new THREE.SphereGeometry(RADIUS, 48, 24);
+  // Equirectangular UV mapping on a full sphere pinches to a single point
+  // at each pole — every longitude line converges there, so the
+  // triangles nearest the pole get extremely compressed/stretched UVs,
+  // which is exactly the spinning-vortex artifact seen looking straight
+  // up (the north pole sits directly at the zenith, right where players
+  // actually look). thetaStart trims a small cone off the very top of
+  // the sphere so that singular vertex — and the worst-distorted
+  // triangles around it — are never part of the geometry at all, rather
+  // than trying to hide a real pinch with texture tricks. The resulting
+  // small gap at the true zenith just shows the gradient sky dome behind
+  // it (radius 900, further out), which is correct — real skies don't
+  // have dramatic cloud detail directly overhead anyway. The south pole
+  // is left untouched: it's already fully transparent (the source
+  // texture's ground half was zeroed out during preprocessing) and is
+  // below the horizon regardless, so its own pinch is never visible.
+  const NORTH_POLE_TRIM = 0.07; // radians, ~4°
+  const geo = new THREE.SphereGeometry(RADIUS, 48, 24, 0, Math.PI * 2, NORTH_POLE_TRIM, Math.PI - NORTH_POLE_TRIM);
   const mat = new THREE.MeshBasicMaterial({
     map: texture, transparent: true, depthWrite: false, side: THREE.BackSide,
     fog: false, // this is meant to read as sky itself, at the far background — regular scene fog fading it out would be visibly wrong at the far distance it's meant to represent
@@ -504,22 +520,37 @@ function createRealisticCloudDome(scene) {
 }
 
 /**
+ * @param {number} dt
  * @param {number} dayAmount
  * @param {THREE.Color} [skyHorizonColor]
+ * @param {THREE.Color} [skyZenithColor]
  */
-function updateRealisticCloudDome(handle, dayAmount, skyHorizonColor) {
+function updateRealisticCloudDome(handle, dt, dayAmount, skyHorizonColor, skyZenithColor) {
   if (!handle) return;
+  // Slow real drift across the sky rather than a static painted dome —
+  // rotating the whole mesh around Y is the cheapest way to animate an
+  // equirectangular sphere (no texture-offset trick like the flat cloud
+  // layer uses, since this is a sphere, not a tiling plane). Chosen speed
+  // is deliberately slow — real high cloud layers drift, they don't
+  // visibly sweep.
+  handle.mesh.rotation.y += dt * 0.0025;
   // Same dimmer-at-night, brighter-at-noon shape the flat cloud layer and
   // sprite clouds already use, applied here for consistency rather than
   // inventing a fourth slightly-different curve.
   const lightFactor = 0.6 + dayAmount * 0.4;
   handle.mat.color.setScalar(lightFactor);
-  if (skyHorizonColor) {
-    // A gentler tint than the flat cloud layer's own 0.35 — this dome
-    // spans the WHOLE sky (including well away from the horizon), so
-    // tinting it as strongly toward the horizon color would wash out the
-    // zenith-ward clouds with a color that's only really correct near
-    // the horizon itself.
+  if (skyHorizonColor && skyZenithColor) {
+    // Blending toward a single color (just the horizon tint) washed the
+    // whole dome — including clouds well away from the horizon — toward
+    // one hue that's only really correct near the horizon itself. A
+    // 50/50 blend of the sky's own current zenith and horizon colors
+    // gives a genuinely representative average sky tint at any time of
+    // day (blue midday, orange/purple dawn-dusk, dark blue night)
+    // without needing a full per-fragment shader to vary the tint by
+    // view angle the way the real gradient dome does.
+    const avgTint = skyHorizonColor.clone().lerp(skyZenithColor, 0.5);
+    handle.mat.color.lerp(avgTint, 0.45);
+  } else if (skyHorizonColor) {
     handle.mat.color.lerp(skyHorizonColor, 0.2);
   }
 }

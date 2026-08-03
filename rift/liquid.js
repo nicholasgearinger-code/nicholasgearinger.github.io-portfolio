@@ -1296,48 +1296,23 @@ function disposeLiquidPlane(scene, handle) {
 
 export { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail };
 
-// Ocean surface detail — Coral Shallows only: whitecap/foam texture
-// (real mottled foam-blob patches scattered across the water) covering
-// the whole visible ocean. Whitecap density uses a sqrt-biased radius
-// (even coverage per unit area, not clustered at center) so the water
-// reads as genuinely choppy stretching out toward the edges rather than
-// only near the middle.
-// A separate "sun glitter" Points system (independently-flickering
-// bright dots meant to approximate specular wave-facet sparkle) used to
-// live here too — removed per explicit request: its PointsMaterial had
-// no `map` texture, and a THREE.PointsMaterial with no map renders each
-// point as a flat, hard-edged square in WebGL rather than a soft circle
-// (no per-fragment shape masking without a texture to sample alpha
-// from) — that's what was showing up as scattered "floating lights" on
-// the water surface. A correct fix would give it a real soft-glow
-// sprite texture, but the real per-pixel wave-crest foam shader added
-// to the crystal material (see the onBeforeCompile block above) already
-// covers dynamic surface highlight/foam far better than flat scattered
-// points ever did, so removing this system outright rather than patching
-// it was the right call, not just papering over the bug.
+// Ocean surface detail — Coral Shallows only. DISABLED entirely per
+// explicit follow-up request, after two rounds of trying to fix the
+// whitecap Points system (untextured "glitter" removed as flat squares
+// in FU143, then the surviving whitecaps' horizon-distance flicker
+// fixed by capping their scatter radius in FU145) — rather than
+// continuing to patch a system built on sizeAttenuated Points (which
+// are inherently prone to this class of distance-based flicker), it's
+// removed outright. The real per-pixel wave-crest foam shader added to
+// the crystal material's onBeforeCompile block (see above) already
+// covers dynamic surface foam/highlight far better than scattered
+// Points ever did anyway. Returns null; updateOceanSurfaceDetail and
+// disposeOceanSurfaceDetail already null-guard (`if (!handle) return;`),
+// and main.js's own submersion-visibility toggle is already wrapped in
+// `if (oceanSurfaceDetailHandle)`, so this needs no other changes
+// anywhere, including main.js.
 function createOceanSurfaceDetail(scene, y, size) {
-  // Whitecaps / foam texture — real mottled patches (reusing the same
-  // soft-radial foam texture the waterfall already uses), scattered
-  // across the whole surface.
-  const whitecapCount = 150;
-  const whitecapPos = new Float32Array(whitecapCount * 3);
-  for (let i = 0; i < whitecapCount; i++) {
-    const r = Math.sqrt(Math.random()) * size * 0.48;
-    const angle = Math.random() * Math.PI * 2;
-    whitecapPos[i * 3] = Math.cos(angle) * r;
-    whitecapPos[i * 3 + 1] = y + 0.1;
-    whitecapPos[i * 3 + 2] = Math.sin(angle) * r;
-  }
-  const whitecapGeo = new THREE.BufferGeometry();
-  whitecapGeo.setAttribute("position", new THREE.BufferAttribute(whitecapPos, 3));
-  const whitecapMat = new THREE.PointsMaterial({
-    map: getFoamTexture(), color: 0xffffff, size: 2.8, transparent: true, opacity: 0.5,
-    depthWrite: false, sizeAttenuation: true,
-  });
-  const whitecaps = new THREE.Points(whitecapGeo, whitecapMat);
-  scene.add(whitecaps);
-
-  return { whitecaps };
+  return null;
 }
 
 function updateOceanSurfaceDetail(handle, elapsed, dayAmount = 1) {

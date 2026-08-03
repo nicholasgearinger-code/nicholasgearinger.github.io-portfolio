@@ -1351,35 +1351,19 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
     }
   }
 
-  if (level.biome === "crystal") {
-    // Real sunbeams through shallow tropical water are numerous and
-    // overlapping, not sparse — deliberately a denser count than
-    // Verdant's canopy shafts (28). Anchored at the water surface,
-    // extending down toward the floor (see createUnderwaterLightShaft),
-    // only ever placed where the floor is actually underwater. Reuses
-    // lightShaftHandles/updateLightShafts/disposeLightShafts wholesale —
-    // updateLightShafts already scales opacity by dayAmount, so these
-    // fade in through the day and back out at night for free, with no
-    // separate update path needed.
-    // (Was briefly zeroed out on a wrong diagnosis that these were the
-    // "glowing balls" — the real source was the ocean surface glitter/
-    // whitecap Points staying visible from underwater, fixed separately
-    // above. Restored.)
-    const shaftRand = mulberry32(hashStringToSeed(WORLD_SEED + "-underwater-light-shafts-" + level.biome));
-    const shaftCount = 40;
-    const shaftBound = TERRAIN_SIZE * 0.46;
-    const waterY = LIQUID_LEVEL.crystal;
-    for (let i = 0; i < shaftCount; i++) {
-      const x = (shaftRand() * 2 - 1) * shaftBound;
-      const z = (shaftRand() * 2 - 1) * shaftBound;
-      if (Math.hypot(x, z) > shaftBound) continue;
-      const groundY = sampleGroundHeight(x, z, terrainMesh) ?? 0;
-      if (groundY >= waterY - 0.5) continue; // dry island / right at the shoreline — no underwater rays there
-      const shaft = createUnderwaterLightShaft(x, z, groundY, waterY, shaftRand);
-      scene.add(shaft.sprite);
-      lightShaftHandles.push(shaft);
-    }
-  }
+  // Coral Shallows underwater light shafts REMOVED entirely per explicit
+  // request — FU144's fix only hid them above the surface (toggling
+  // .sprite.visible by isFullySubmerged each frame), but underwater they
+  // rendered as noisy/grainy round blobs rather than clean light shafts,
+  // and that same per-frame visibility toggle was very likely the actual
+  // cause of a separately-reported "underwater lighting flickering"
+  // symptom (rapid on/off near the submersion boundary). Not creating
+  // them at all resolves both: no wasted geometry, and nothing left to
+  // flicker. If real underwater sunbeams are wanted again later, this is
+  // the place to rebuild them — ideally with a genuine soft-gradient
+  // sprite texture rather than whatever decorations.js's
+  // createUnderwaterLightShaft currently produces (not available this
+  // session to inspect).
 
   loreMarkers = layout.loreMarkers.map((m) => ({
     ...m, y: sampleGroundHeight(m.x, m.z, terrainMesh) ?? 0, shown: false,
@@ -1921,18 +1905,6 @@ function animate() {
   setAmbientDayAmount(dayNight.dayAmount);
   if (currentLevelIdx >= 0 && horizonHandle) updateHorizonSilhouettes(horizonHandle, LEVELS[currentLevelIdx].biome, dayNight.dayAmount);
   updateLightShafts(lightShaftHandles, dayNight.dayAmount);
-  // Underwater light shafts (Coral Shallows only — createUnderwaterLightShaft,
-  // anchored seafloor-to-surface) were never gated by whether the camera
-  // is actually underwater, so they stayed visible poking up through/
-  // above the water surface from any angle — reported as stray purple
-  // spikes and glowing columns on the surface. Scoped to crystal
-  // specifically: Verdant's canopy light shafts (createLightShaft) share
-  // this same array/update path but are an above-ground forest effect
-  // with no relationship to water submersion at all, so they must stay
-  // untouched by this gating.
-  if (currentBiome === "crystal") {
-    for (const shaft of lightShaftHandles) shaft.sprite.visible = isFullySubmerged;
-  }
   updateWorldPulse(dt);
   updateProjectiles(dt);
   if (isFullySubmerged) {

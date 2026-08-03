@@ -540,6 +540,7 @@ let flowersHandle = null;
 let footstepGlowHandle = null;
 let weatherHandle = null;
 let cloudsHandle = null;
+let submergedState = false; // persists across frames — see the hysteresis check below for why a fresh threshold comparison every frame isn't enough
 let cloudLayerHandle = null;
 let horizonHandle = null;
 let wildlifeHandle = null;
@@ -1812,7 +1813,21 @@ function animate() {
     updateSkyEnvironment(dayNight.skyZenith, dayNight.skyHorizon);
   }
   const currentLiquidLevel = currentBiome !== null ? LIQUID_LEVEL[currentBiome] : undefined;
-  const isFullySubmerged = currentLiquidLevel !== undefined && camera.position.y < currentLiquidLevel;
+  // Hysteresis, not a bare threshold — a plain "camera.y < liquidLevel"
+  // check flickers every single frame when the camera hovers right at
+  // the water line (standing at the shoreline, camera bob, the water
+  // surface's own wave height), rapidly toggling the underwater post-
+  // process (fog, color, distortion) on and off — exactly the "flashing
+  // between dark waves and normal sand" symptom. A dead zone means it
+  // only flips submerged once genuinely well below the line, and only
+  // flips back once genuinely well above it.
+  if (currentLiquidLevel !== undefined) {
+    if (!submergedState && camera.position.y < currentLiquidLevel - 0.15) submergedState = true;
+    else if (submergedState && camera.position.y > currentLiquidLevel + 0.15) submergedState = false;
+  } else {
+    submergedState = false;
+  }
+  const isFullySubmerged = submergedState;
   if (isFullySubmerged) {
     const uwStyle = UNDERWATER_STYLE[currentBiome] || UNDERWATER_STYLE.default;
     scene.fog.color.setHex(uwStyle.fogColor);

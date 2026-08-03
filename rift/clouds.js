@@ -126,15 +126,29 @@ function createCloud(scene, style, flatten = 1) {
  */
 function createClouds(scene, biome) {
   const style = CLOUD_STYLE[biome] || CLOUD_STYLE.verdant;
-  const mult = getGraphicsSettings().cloudMultiplier;
+  // SKY-LEVEL puffy billboard clouds disabled — the photoreal cloud dome
+  // (createRealisticCloudDome below) now owns the sky's cloud cover
+  // entirely, and these flat painted-circle clusters read as an obvious
+  // style mismatch floating in front of it (visible as an isolated
+  // smooth white blob against the photo-textured sky). `clouds` stays an
+  // empty array rather than removing it from the returned handle, so
+  // every downstream loop (updateClouds, disposeClouds,
+  // getCloudOcclusionFactor) that already iterates `handle.clouds`
+  // simply has nothing to do — no null-guards needed, no signature
+  // changes for main.js.
   const clouds = [];
-  const cloudCount = Math.max(1, Math.round(style.count * mult));
-  for (let i = 0; i < cloudCount; i++) clouds.push(createCloud(scene, style));
 
-  const fogStyle = GROUND_FOG_STYLE[biome] || GROUND_FOG_STYLE.verdant;
+  // GROUND FOG also disabled — per explicit follow-up report, this was
+  // showing up as large soft white blobs at close range (viewed near/
+  // inside the puffs, at head height) and as a scattered row of small
+  // white balls sitting right along the horizon over open water (viewed
+  // from a distance) — reads as an obvious rendering artifact, not
+  // atmospheric mist, in both cases. Same empty-array pattern as the
+  // sky clouds above: every consumer (updateClouds, disposeClouds)
+  // already iterates `handle.groundFog` with no assumption about its
+  // length, so this needs no other changes.
   const groundFog = [];
-  const fogCount = Math.max(1, Math.round(fogStyle.count * mult));
-  for (let i = 0; i < fogCount; i++) groundFog.push(createCloud(scene, fogStyle, 0.18));
+  const fogStyle = GROUND_FOG_STYLE[biome] || GROUND_FOG_STYLE.verdant;
 
   return { clouds, style, groundFog, fogStyle, biome, windOffsetX: 0, windOffsetZ: 0, elapsed: 0 };
 }
@@ -384,19 +398,16 @@ function createCloudLayerTexture() {
  *   texture resolution
  */
 function createCloudLayer(scene, altitude = 135, repeatCount = 5) {
-  const texture = createCloudLayerTexture();
-  texture.repeat.set(repeatCount, repeatCount);
-  const geo = new THREE.PlaneGeometry(1500, 1500, 1, 1);
-  const mat = new THREE.MeshBasicMaterial({
-    map: texture, transparent: true, depthWrite: false, fog: true,
-    color: 0xffffff, opacity: 0.92,
-  });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.rotation.x = -Math.PI / 2; // lay flat, facing down toward the ground
-  mesh.renderOrder = -90; // draws right after the sky dome (-100), always in the same order — see the sky dome's own renderOrder comment for why an unstable automatic sort between these two large transparent surfaces was likely causing "flickers when the camera moves"
-  mesh.position.y = altitude;
-  scene.add(mesh);
-  return { mesh, mat, texture, driftX: 0, driftZ: 0 };
+  // Disabled — same reasoning as the sky-level puffy clouds above: this
+  // was a flat painted-blob-texture plane meant for "cheap full sky
+  // coverage" before the photoreal cloud dome existed. Now that the dome
+  // owns full sky coverage on its own, a second, visually different
+  // (flat painted circles vs. photo-extracted structure) cloud layer
+  // floating at a fixed low altitude would be the same kind of style
+  // mismatch, just less localized. Returns null; updateCloudLayer and
+  // disposeCloudLayer already null-guard (`if (!handle) return;`), so
+  // this needs no changes anywhere else, including main.js.
+  return null;
 }
 
 /**
@@ -516,33 +527,7 @@ function createRealisticCloudDome(scene) {
   // that same sequence rather than being left to automatic sorting.
   mesh.renderOrder = -95;
   scene.add(mesh);
-
-  // SECOND independent cloud layer, same texture/shape, nested just
-  // inside the first (RADIUS-6 — enough gap to resolve depth cleanly,
-  // same trick as the first layer vs. the gradient dome behind it).
-  // Drifts at its own speed/direction (see updateRealisticCloudDome) so
-  // the two identical patterns slide past each other rather than moving
-  // together as one rigid image — this is what actually reads as
-  // "weather moving" instead of "a photo slowly spinning." Needs its
-  // OWN Texture instance (texture.clone()) because texture.offset is a
-  // property of the Texture object itself, not the material — sharing
-  // one Texture between both layers would force them to always show the
-  // identical UV offset, which defeats the whole point of drifting them
-  // independently. clone() reuses the same underlying image (cheap, no
-  // extra GPU upload of pixel data), just gives each layer its own
-  // offset/repeat state.
-  const texture2 = texture.clone();
-  texture2.needsUpdate = true;
-  const mat2 = new THREE.MeshBasicMaterial({
-    map: texture2, transparent: true, depthWrite: false, side: THREE.BackSide,
-    fog: false, color: 0xffffff, opacity: 0.55, // thinner than the primary layer — reads as a secondary, higher/fainter cloud deck rather than a second identical copy competing for attention
-  });
-  const geo2 = new THREE.SphereGeometry(RADIUS - 6, 48, 24, 0, Math.PI * 2, NORTH_POLE_TRIM, Math.PI - NORTH_POLE_TRIM);
-  const mesh2 = new THREE.Mesh(geo2, mat2);
-  mesh2.renderOrder = -94; // just after the primary layer in the same stable draw sequence
-  scene.add(mesh2);
-
-  return { mesh, mat, mesh2, mat2 };
+  return { mesh, mat };
 }
 
 /**
@@ -555,33 +540,21 @@ function updateRealisticCloudDome(handle, dt, dayAmount, skyHorizonColor, skyZen
   if (!handle) return;
   // Slow real drift across the sky rather than a static painted dome —
   // rotating the whole mesh around Y is the cheapest way to animate an
-  // equirectangular sphere (no texture-offset trick like the flat cloud
-  // layer uses, since this is a sphere, not a tiling plane). Chosen speed
-  // is deliberately slow — real high cloud layers drift, they don't
-  // visibly sweep.
-  handle.mesh.rotation.y += dt * 0.0025;
-  // Second layer drifts FASTER and in the OPPOSITE direction — the two
-  // identical cloud patterns continuously slide past each other, which
-  // reads as genuinely evolving cloud cover rather than a repeating
-  // rotation. Independent texture (see createRealisticCloudDome) also
-  // gets its own UV offset drift, on a different axis speed than the
-  // primary layer's, so even the two layers' own internal texture-slide
-  // motions don't sync up with each other.
-  if (handle.mesh2) handle.mesh2.rotation.y -= dt * 0.0048;
+  // equirectangular sphere. A SECOND overlapping layer of the same
+  // texture was tried here for extra movement, but two semi-transparent
+  // copies of the same diagonal cloud streaks sliding past each other
+  // read as a warped double-exposure smear rather than clean motion —
+  // reverted. Single layer, single rotation, a bit faster than before so
+  // the drift is genuinely visible without doubling anything.
+  handle.mesh.rotation.y += dt * 0.006;
 
   if (skyHorizonColor && skyZenithColor) {
-    // The texture is now a NEUTRAL white+alpha cloud structure (no baked
+    // The texture is a NEUTRAL white+alpha cloud structure (no baked
     // color at all — see the module comment above) specifically so this
     // dome can be fully colored at runtime instead of showing one frozen
-    // photo's lighting forever. The old version started from a grayscale
-    // `lightFactor` scalar and only lerped 45% of the way toward the sky
-    // tint, so more than half of the final color was always neutral gray
-    // — that's the actual reason it read as washed-out/black-and-white.
-    // Now the tint IS the base color (mat.color.copy, not lerp from
-    // gray), with brightness layered on top as a multiply, so the dome
-    // genuinely carries the sky's real color at full strength — vivid at
-    // dawn/dusk, blue at noon, dark at night — rather than a diluted
-    // hint of it.
+    // photo's lighting forever. mat.color.copy (not lerp from gray) so
+    // the dome carries the sky's real color at full strength — vivid at
+    // dawn/dusk, blue at noon, dark at night.
     const avgTint = skyHorizonColor.clone().lerp(skyZenithColor, 0.5);
     handle.mat.color.copy(avgTint);
     const brightness = 0.75 + dayAmount * 0.5;
@@ -594,52 +567,23 @@ function updateRealisticCloudDome(handle, dt, dayAmount, skyHorizonColor, skyZen
     // instead of going pitch black or untinted white.
     handle.mat.color.setScalar(0.6 + dayAmount * 0.4);
   }
-  // Layer 2 gets the SAME tint/brightness — it's meant to read as more
-  // cloud cover at the same time of day, not a differently-lit sky —
-  // its own opacity (set once at creation, 0.55) is what keeps it
-  // visually secondary to the primary layer.
-  if (handle.mat2) handle.mat2.color.copy(handle.mat.color);
 
   // A slow, gentle "breathing" opacity pulse — real high-altitude cloud
   // decks aren't perfectly static in density even over short spans; this
   // is a cheap way to keep the dome from reading as one motionless
-  // painted image without needing per-fragment noise. Small enough
-  // (±6%) to be felt rather than obviously seen as a pulse.
+  // painted image without needing per-fragment noise or a second layer.
+  // Small enough (±6%) to be felt rather than obviously seen as a pulse.
   handle.breathPhase = (handle.breathPhase || 0) + dt * 0.12;
   const breathe = 1 + Math.sin(handle.breathPhase) * 0.06;
   handle.mat.opacity = 0.9 * breathe;
-  // Layer 2 breathes on its own out-of-phase cycle (cosine vs. sine, and
-  // a different speed) so the two layers' density never pulses in
-  // lockstep — another small thing that keeps the combined result from
-  // reading as two copies of one animation.
-  if (handle.mat2) {
-    handle.breathPhase2 = (handle.breathPhase2 || 0) + dt * 0.085;
-    handle.mat2.opacity = 0.55 * (1 + Math.cos(handle.breathPhase2) * 0.08);
-  }
 
   // A second, independent drift axis on top of the mesh's own Y rotation
-  // — texture.offset.x slides the UVs horizontally at a different,
-  // slightly faster rate than the geometry itself rotates. Two motions
-  // at different speeds layered together read as genuinely shifting,
-  // evolving sky rather than one rigid image slowly spinning as a whole
-  // (which is very recognizable as "a photo on a sphere" once you watch
-  // it for more than a few seconds).
-  handle.driftOffset = (handle.driftOffset || 0) + dt * 0.0009;
+  // — texture.offset.x slides the UVs horizontally at a different rate
+  // than the geometry itself rotates. Two motions at different speeds
+  // layered together (without needing a second overlapping mesh) still
+  // read as genuinely shifting sky rather than one rigid rotation.
+  handle.driftOffset = (handle.driftOffset || 0) + dt * 0.0022;
   handle.mat.map.offset.x = handle.driftOffset;
-  // Layer 2's own texture (a separate clone, see createRealisticCloudDome)
-  // drifts on BOTH axes at rates that share no common multiple with
-  // layer 1's motion, so the two patterns' relative alignment never
-  // repeats on any short, noticeable cycle.
-  if (handle.mat2 && handle.mat2.map) {
-    handle.driftOffset2X = (handle.driftOffset2X || 0) - dt * 0.0016;
-    handle.driftOffset2Y = (handle.driftOffset2Y || 0) + dt * 0.00021;
-    handle.mat2.map.offset.x = handle.driftOffset2X;
-    // Only a tiny vertical nudge, clamped well short of the north-pole
-    // trim / horizon-cutoff edges baked into the texture's alpha — a
-    // full free vertical drift would eventually scroll the zeroed-out
-    // ground band into view or push real cloud detail off the top.
-    handle.mat2.map.offset.y = Math.sin(handle.driftOffset2Y) * 0.015;
-  }
 }
 
 function disposeRealisticCloudDome(scene, handle) {
@@ -653,15 +597,6 @@ function disposeRealisticCloudDome(scene, handle) {
   // layer's own canvas texture is per-instance but this one is loaded
   // once from disk and is cheap to keep resident for the life of the
   // page rather than reloading it every level transition).
-  if (handle.mesh2) {
-    scene.remove(handle.mesh2);
-    handle.mesh2.geometry.dispose();
-    handle.mat2.dispose();
-    // handle.mat2.map (the cloned texture) IS disposed here, unlike the
-    // shared original — clone() made a genuinely separate Texture object
-    // owned only by this dome instance, not the module-level shared one.
-    if (handle.mat2.map) handle.mat2.map.dispose();
-  }
 }
 
 export { createClouds, updateClouds, disposeClouds, getCloudOcclusionFactor, createCloudLayer, updateCloudLayer, disposeCloudLayer, createRealisticCloudDome, updateRealisticCloudDome, disposeRealisticCloudDome };

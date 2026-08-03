@@ -578,6 +578,58 @@ function disposeWaterfall(scene, handle) {
   handle.splash.material.dispose();
 }
 
+// -----------------------------------------------------------------------------
+// Real photo-derived ripple detail — a genuine normal map (surface-
+// direction encoding, NOT baked color, same reasoning as the sky dome's
+// structure-only cloud texture: an image dropped straight in as diffuse
+// color would freeze one fixed lighting moment onto water that's
+// supposed to shift color with the day/night cycle and skyColor tint
+// already computed per-frame below). Reuses the exact same asset as the
+// Coral Shallows THREE.Water mirror plane (`waternormals.jpg`) — one
+// real photo now backs ripple detail on BOTH water systems in the
+// project instead of just the one. Cached at module level (the raw
+// disk-loaded texture); createLiquidPlane clones it per call so each
+// biome's plane can set its own independent repeat/offset without
+// fighting over one shared Texture object's properties (see clouds.js's
+// own dual-layer note for why sharing a Texture instance for per-
+// instance offset animation doesn't work).
+let rippleNormalTexture = null;
+function getRippleNormalTexture() {
+  if (rippleNormalTexture) return rippleNormalTexture;
+  const url = new URL("textures/waternormals.jpg", import.meta.url).href;
+  rippleNormalTexture = new THREE.TextureLoader().load(
+    url,
+    () => console.log("[liquid] ripple normal texture loaded:", url),
+    undefined,
+    (err) => console.error("[liquid] ripple normal texture FAILED to load:", url, err)
+  );
+  rippleNormalTexture.wrapS = rippleNormalTexture.wrapT = THREE.RepeatWrapping;
+  return rippleNormalTexture;
+}
+
+// Real photo-derived FOAM detail — a grayscale mask (white = foam,
+// black = clear water) extracted from a real PBR ocean-foam reference,
+// same structure-only reasoning as the normal map above: this is
+// blended INTO the existing procedural Voronoi foam pattern below
+// rather than replacing it outright, so the real organic foam detail
+// shows through while the procedural noise still breaks up the
+// otherwise-visible repetition of one small tiled texture stretched
+// across a huge ocean plane. Crystal-only, same as the whole foam
+// shader it feeds.
+let foamDetailTexture = null;
+function getFoamDetailTexture() {
+  if (foamDetailTexture) return foamDetailTexture;
+  const url = new URL("textures/oceanfoam.jpg", import.meta.url).href;
+  foamDetailTexture = new THREE.TextureLoader().load(
+    url,
+    () => console.log("[liquid] foam detail texture loaded:", url),
+    undefined,
+    (err) => console.error("[liquid] foam detail texture FAILED to load:", url, err)
+  );
+  foamDetailTexture.wrapS = foamDetailTexture.wrapT = THREE.RepeatWrapping;
+  return foamDetailTexture;
+}
+
 function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0.6, z: 0.35 }, excludeRegions = []) {
   const style = LIQUID_STYLE[biome];
   if (!style) return null;
@@ -653,6 +705,30 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
     vertexColors: true, emissive: style.emissive, emissiveIntensity: style.emissiveIntensity,
     transparent: true, opacity: style.opacity, roughness: style.roughness, metalness: 0.1,
   };
+  // Real ripple detail from a photo-derived normal map — water biomes
+  // only (verdant, crystal); lava isn't reflective/rippled the same way
+  // and keeps its own existing crust/crack/emissive look untouched. A
+  // per-instance CLONE of the shared cached texture (not the shared
+  // texture itself) so this plane's own repeat/offset don't collide with
+  // any other biome's water plane using the same underlying image.
+  // Repeat count is tied to `size` so the ripple detail reads at a
+  // consistent physical scale whether this is Verdant's smaller river
+  // plane or Crystal's much larger ocean, rather than one fixed repeat
+  // looking right on one and smeared/tiny on the other.
+  let rippleTexture = null;
+  if (biome !== "ember") {
+    rippleTexture = getRippleNormalTexture().clone();
+    rippleTexture.needsUpdate = true;
+    const repeatCount = Math.max(6, Math.round(size / 9));
+    rippleTexture.repeat.set(repeatCount, repeatCount);
+    matOptions.normalMap = rippleTexture;
+    // Subtle — this rides ON TOP of the existing Gerstner/sine wave
+    // geometry and per-vertex foam/color work, adding fine specular
+    // micro-detail rather than replacing any of the shape/color that
+    // system already computes. Too strong and it fights the real
+    // geometric wave normals crystal already writes analytically above.
+    matOptions.normalScale = new THREE.Vector2(0.45, 0.45);
+  }
   // Builds one water material with the shared foam shader patch applied —
   // factored into a function because crystal now needs TWO materials
   // (see the front/back split below) rather than duplicating the whole
@@ -686,12 +762,14 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
       // updateLiquidPlane already leaves off.
       m.onBeforeCompile = (shader) => {
         shader.uniforms.uTime = { value: 0 };
+        shader.uniforms.uFoamTex = { value: getFoamDetailTexture() };
         shader.vertexShader = shader.vertexShader
           .replace("#include <common>", "#include <common>\nattribute float aFoam;\nvarying float vFoam;\nvarying vec2 vFoamPos;")
           .replace("#include <begin_vertex>", "#include <begin_vertex>\nvFoam = aFoam;\nvFoamPos = position.xz;"); // local-space XZ IS world XZ here — this mesh has no runtime x/z translation or rotation (baked in at creation), only a Y offset
         shader.fragmentShader = shader.fragmentShader
           .replace("#include <common>", `#include <common>
 uniform float uTime;
+uniform sampler2D uFoamTex;
 varying float vFoam;
 varying vec2 vFoamPos;
 // Compact 2D Worley/Voronoi noise — hashed jittered grid, 3x3 neighbor
@@ -722,6 +800,19 @@ float foamVoronoi(vec2 p) {
   float cellsFine = foamVoronoi(vFoamPos * 1.0 - uTime * 0.06);
   float bubbles = (1.0 - smoothstep(0.0, 0.55, cellsBig)) * 0.65 + (1.0 - smoothstep(0.0, 0.4, cellsFine)) * 0.55;
   bubbles = clamp(bubbles, 0.0, 1.0);
+  // Real photo-derived foam texture, tiled and drifting at its own rate
+  // (deliberately different from the Voronoi octaves' own 0.035/0.06 so
+  // the two never move in visible lockstep). 0.045 UV scale puts roughly
+  // one foam-texture tile per ~22 world units — real whitecap-sized
+  // patches against an ocean plane hundreds of units across, not one
+  // texture stretched over the whole thing (which would look smeared)
+  // or repeating so densely it reads as an obvious grid.
+  float realFoam = texture2D(uFoamTex, vFoamPos * 0.045 + vec2(uTime * 0.01, uTime * 0.007)).r;
+  // Real texture leads (it's far more organic/detailed than the pure
+  // procedural pattern alone), Voronoi still contributes secondary
+  // variation so the same small tile doesn't read as a visibly repeating
+  // stamp at a distance.
+  bubbles = clamp(realFoam * 0.75 + bubbles * 0.35, 0.0, 1.0);
   // vFoam is the raw per-vertex wave-crest disturbance (0..1, interpolated
   // across the triangle) — only the actual crest region should be
   // eligible for foam at all, the Voronoi pattern then decides which
@@ -855,13 +946,26 @@ float foamVoronoi(vec2 p) {
 
   return {
     mesh, backMesh, glow, shimmer, rocks, waterY: y, basePositions, biome, style, depthColors,
-    flowDir: normalizeFlow(flowDir), crustOctaves, crackOctaves, flowBeads,
+    flowDir: normalizeFlow(flowDir), crustOctaves, crackOctaves, flowBeads, rippleTexture,
   };
 }
 
 function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir, skyHorizon) {
   if (!handle) return;
-  const { mesh, backMesh, glow, shimmer, rocks, basePositions, biome, style, flowDir, crustOctaves, crackOctaves, flowBeads, waterY } = handle;
+  const { mesh, backMesh, glow, shimmer, rocks, basePositions, biome, style, flowDir, crustOctaves, crackOctaves, flowBeads, waterY, rippleTexture } = handle;
+  // Scroll the ripple normal map slowly along the plane's own flow
+  // direction — a static (non-scrolling) normal map would still add real
+  // per-pixel lighting detail, but it'd be a fixed pattern frozen in
+  // place while the geometry waves around underneath it, which reads as
+  // "detail painted on" rather than actual moving water surface texture.
+  // Absolute position (elapsed * speed), not an incremental += each
+  // frame — this file only receives cumulative `elapsed`, not a
+  // per-frame dt, so setting the offset directly from elapsed stays
+  // exact regardless of frame rate rather than drifting with it.
+  if (rippleTexture) {
+    const RIPPLE_SCROLL_SPEED = 0.015;
+    rippleTexture.offset.set(flowDir.x * elapsed * RIPPLE_SCROLL_SPEED, flowDir.z * elapsed * RIPPLE_SCROLL_SPEED);
+  }
   const posAttr = mesh.geometry.attributes.position;
   const colorAttr = mesh.geometry.attributes.color;
   // Crystal writes real analytic Gerstner normals straight into this
@@ -1154,6 +1258,11 @@ function disposeLiquidPlane(scene, handle) {
   scene.remove(handle.mesh);
   handle.mesh.geometry.dispose();
   handle.mesh.material.dispose();
+  // handle.rippleTexture IS disposed here — it's a per-instance clone
+  // (see createLiquidPlane), not the shared module-level cached texture,
+  // so this plane owns it exclusively. The shared original stays
+  // resident, same reasoning as clouds.js's own realisticCloudTexture.
+  if (handle.rippleTexture) handle.rippleTexture.dispose();
   if (handle.backMesh) {
     // Shares handle.mesh's geometry (see createLiquidPlane) — already
     // disposed above, only the material is this mesh's own.
@@ -1187,47 +1296,29 @@ function disposeLiquidPlane(scene, handle) {
 
 export { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail };
 
-// Ocean surface detail — Coral Shallows only: sun glitter (small, sharp,
-// independently-flickering bright points) and whitecaps/foam texture
-// (real mottled foam-blob patches scattered across the water, not just
-// flat vertex color) covering the whole visible ocean. Real sun glitter
-// is thousands of tiny wave facets catching light at slightly different
-// angles at once — this project's single flat-shaded water plane can't
-// reproduce that exactly, so independently-twinkling bright points
-// scattered across the surface is the standard cheap approximation.
-// Whitecap density uses a sqrt-biased radius (even coverage per unit
-// area, not clustered at center) so the water reads as genuinely choppy
-// stretching out toward the edges rather than only near the middle.
+// Ocean surface detail — Coral Shallows only: whitecap/foam texture
+// (real mottled foam-blob patches scattered across the water) covering
+// the whole visible ocean. Whitecap density uses a sqrt-biased radius
+// (even coverage per unit area, not clustered at center) so the water
+// reads as genuinely choppy stretching out toward the edges rather than
+// only near the middle.
+// A separate "sun glitter" Points system (independently-flickering
+// bright dots meant to approximate specular wave-facet sparkle) used to
+// live here too — removed per explicit request: its PointsMaterial had
+// no `map` texture, and a THREE.PointsMaterial with no map renders each
+// point as a flat, hard-edged square in WebGL rather than a soft circle
+// (no per-fragment shape masking without a texture to sample alpha
+// from) — that's what was showing up as scattered "floating lights" on
+// the water surface. A correct fix would give it a real soft-glow
+// sprite texture, but the real per-pixel wave-crest foam shader added
+// to the crystal material (see the onBeforeCompile block above) already
+// covers dynamic surface highlight/foam far better than flat scattered
+// points ever did, so removing this system outright rather than patching
+// it was the right call, not just papering over the bug.
 function createOceanSurfaceDetail(scene, y, size) {
-  // Sun glitter.
-  const glitterCount = 220;
-  const glitterPos = new Float32Array(glitterCount * 3);
-  const glitterColors = new Float32Array(glitterCount * 3);
-  const glitterSeeds = new Float32Array(glitterCount);
-  const glitterSpeeds = new Float32Array(glitterCount);
-  for (let i = 0; i < glitterCount; i++) {
-    glitterPos[i * 3] = (Math.random() * 2 - 1) * size * 0.48;
-    glitterPos[i * 3 + 1] = y + 0.08;
-    glitterPos[i * 3 + 2] = (Math.random() * 2 - 1) * size * 0.48;
-    glitterColors[i * 3] = glitterColors[i * 3 + 1] = glitterColors[i * 3 + 2] = 1; // updateOceanSurfaceDetail scales brightness via this each frame
-    glitterSeeds[i] = Math.random() * Math.PI * 2;
-    glitterSpeeds[i] = 1.2 + Math.random() * 2.2; // fast, sharp twinkle — real sun glitter flickers quickly, not a slow breathing pulse
-  }
-  const glitterGeo = new THREE.BufferGeometry();
-  glitterGeo.setAttribute("position", new THREE.BufferAttribute(glitterPos, 3));
-  glitterGeo.setAttribute("color", new THREE.BufferAttribute(glitterColors, 3));
-  const glitterMat = new THREE.PointsMaterial({
-    vertexColors: true, color: 0xfff8e0, size: 0.4, transparent: true, opacity: 0.9,
-    blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
-  });
-  const glitter = new THREE.Points(glitterGeo, glitterMat);
-  scene.add(glitter);
-
   // Whitecaps / foam texture — real mottled patches (reusing the same
   // soft-radial foam texture the waterfall already uses), scattered
-  // across the whole surface. Bigger/more opaque than the glitter points
-  // and using NormalBlending (not additive) so they read as solid white
-  // foam clumps rather than another glowing light source.
+  // across the whole surface.
   const whitecapCount = 150;
   const whitecapPos = new Float32Array(whitecapCount * 3);
   for (let i = 0; i < whitecapCount; i++) {
@@ -1246,29 +1337,11 @@ function createOceanSurfaceDetail(scene, y, size) {
   const whitecaps = new THREE.Points(whitecapGeo, whitecapMat);
   scene.add(whitecaps);
 
-  return { glitter, glitterSeeds, glitterSpeeds, glitterCount, whitecaps };
+  return { whitecaps };
 }
 
 function updateOceanSurfaceDetail(handle, elapsed, dayAmount = 1) {
   if (!handle) return;
-  const colorAttr = handle.glitter.geometry.attributes.color;
-  // Real specular sun-glint only exists because the sun is actually up
-  // and bright enough to glint off the water — this had no day/night
-  // awareness at all before, so it kept sparkling at full brightness
-  // even at night with only the moon out. Fades out well before true
-  // night (by dayAmount 0.2) rather than a linear fade all the way to 0,
-  // since even a low sun still glints brightly right up until it's
-  // nearly gone.
-  const glitterDayFactor = THREE.MathUtils.clamp(dayAmount / 0.2, 0, 1);
-  for (let i = 0; i < handle.glitterCount; i++) {
-    // Cubed (not linear) sine — a sharper, narrower bright peak than a
-    // plain sine gives, closer to how a real specular glint pops on and
-    // fades rather than breathing smoothly in and out.
-    const s = 0.5 + 0.5 * Math.sin(elapsed * handle.glitterSpeeds[i] + handle.glitterSeeds[i]);
-    const flicker = Math.pow(s, 3) * glitterDayFactor;
-    colorAttr.setXYZ(i, flicker, flicker, flicker);
-  }
-  colorAttr.needsUpdate = true;
   // Whitecaps breathe very slowly and subtly — real chop doesn't flicker,
   // it just varies gradually in how much foam is visible at once.
   handle.whitecaps.material.opacity = 0.42 + Math.sin(elapsed * 0.3) * 0.08;
@@ -1276,9 +1349,6 @@ function updateOceanSurfaceDetail(handle, elapsed, dayAmount = 1) {
 
 function disposeOceanSurfaceDetail(scene, handle) {
   if (!handle) return;
-  scene.remove(handle.glitter);
-  handle.glitter.geometry.dispose();
-  handle.glitter.material.dispose();
   scene.remove(handle.whitecaps);
   handle.whitecaps.geometry.dispose();
   handle.whitecaps.material.dispose();

@@ -1868,7 +1868,10 @@ function animate() {
   // above-surface effect, so hide them the same way waterVolumeMesh is
   // gated — only visible while NOT fully submerged.
   if (oceanSurfaceDetailHandle) {
-    oceanSurfaceDetailHandle.glitter.visible = !isFullySubmerged;
+    // glitter no longer exists on this handle — liquid.js removed the
+    // sun-glitter Points system (its untextured PointsMaterial was
+    // rendering as flat squares, reported as "floating lights" on the
+    // water). whitecaps is unaffected.
     oceanSurfaceDetailHandle.whitecaps.visible = !isFullySubmerged;
   }
   if (isFullySubmerged) {

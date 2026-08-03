@@ -430,4 +430,97 @@ function disposeCloudLayer(scene, handle) {
   handle.texture.dispose();
 }
 
-export { createClouds, updateClouds, disposeClouds, getCloudOcclusionFactor, createCloudLayer, updateCloudLayer, disposeCloudLayer };
+// -----------------------------------------------------------------------------
+// SWAP POINT: realistic photo/render-based cloud dome, layered ON TOP of
+// the existing procedural sky dome (dayNightCycle.js) and flat cloud layer
+// above — not a replacement for either. Source is a real equirectangular
+// sky render; only the cloud STRUCTURE was kept (extracted via a one-time
+// offline high-pass filter against the source's own smooth background
+// gradient, then despeckled to drop star-sized noise) — the source's own
+// baked-in sunset colors were deliberately discarded so this dome stays a
+// neutral white+alpha cloud shape that the day/night tint below can color
+// correctly at ANY time of day, not just the sunset the source photo
+// happened to be lit at. The source image's lower half (its own ground/
+// foreground gradient, not real sky) was zeroed to fully transparent
+// during that same offline pass, so this dome's lower hemisphere is
+// invisible and never competes with terrain.
+// -----------------------------------------------------------------------------
+
+let realisticCloudTexture = null;
+function getRealisticCloudTexture() {
+  if (realisticCloudTexture) return realisticCloudTexture;
+  realisticCloudTexture = new THREE.TextureLoader().load("textures/sky_clouds.png");
+  realisticCloudTexture.colorSpace = THREE.SRGBColorSpace;
+  // The source is a full 360° equirectangular panorama, so its left/right
+  // edges are meant to meet seamlessly — RepeatWrapping (not the default
+  // ClampToEdge) is what makes that seam actually invisible at u=0/1
+  // rather than showing a hard edge or a smeared clamp there.
+  realisticCloudTexture.wrapS = THREE.RepeatWrapping;
+  return realisticCloudTexture;
+}
+
+/**
+ * @param {THREE.Scene} scene
+ */
+function createRealisticCloudDome(scene) {
+  const texture = getRealisticCloudTexture();
+  // Smaller than dayNightCycle.js's own SKY_DOME_RADIUS (900) so this
+  // dome sits just INSIDE the gradient sky dome rather than exactly
+  // coincident with it — a deliberate radius gap (not just renderOrder
+  // alone) gives the depth test real separation to resolve, on top of
+  // the explicit renderOrder below, the same double-insurance approach
+  // already used for the sky dome vs. the flat cloud layer.
+  const RADIUS = 860;
+  const geo = new THREE.SphereGeometry(RADIUS, 48, 24);
+  const mat = new THREE.MeshBasicMaterial({
+    map: texture, transparent: true, depthWrite: false, side: THREE.BackSide,
+    fog: false, // this is meant to read as sky itself, at the far background — regular scene fog fading it out would be visibly wrong at the far distance it's meant to represent
+    color: 0xffffff,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  // Draws between the gradient sky dome (-100) and the existing flat
+  // cloud layer (-90) — see both of their own renderOrder comments for
+  // why an unstable automatic sort between large overlapping transparent
+  // surfaces reads as "flickers when the camera moves." A third large
+  // sky-scale transparent surface needs its own explicit, stable slot in
+  // that same sequence rather than being left to automatic sorting.
+  mesh.renderOrder = -95;
+  scene.add(mesh);
+  return { mesh, mat };
+}
+
+/**
+ * @param {number} dayAmount
+ * @param {THREE.Color} [skyHorizonColor]
+ */
+function updateRealisticCloudDome(handle, dayAmount, skyHorizonColor) {
+  if (!handle) return;
+  // Same dimmer-at-night, brighter-at-noon shape the flat cloud layer and
+  // sprite clouds already use, applied here for consistency rather than
+  // inventing a fourth slightly-different curve.
+  const lightFactor = 0.6 + dayAmount * 0.4;
+  handle.mat.color.setScalar(lightFactor);
+  if (skyHorizonColor) {
+    // A gentler tint than the flat cloud layer's own 0.35 — this dome
+    // spans the WHOLE sky (including well away from the horizon), so
+    // tinting it as strongly toward the horizon color would wash out the
+    // zenith-ward clouds with a color that's only really correct near
+    // the horizon itself.
+    handle.mat.color.lerp(skyHorizonColor, 0.2);
+  }
+}
+
+function disposeRealisticCloudDome(scene, handle) {
+  if (!handle) return;
+  scene.remove(handle.mesh);
+  handle.mesh.geometry.dispose();
+  handle.mat.dispose();
+  // realisticCloudTexture itself is NOT disposed here — it's a shared
+  // module-level texture reused across every level load/teardown (same
+  // reasoning as the other shared textures in this file, e.g. the cloud
+  // layer's own canvas texture is per-instance but this one is loaded
+  // once from disk and is cheap to keep resident for the life of the
+  // page rather than reloading it every level transition).
+}
+
+export { createClouds, updateClouds, disposeClouds, getCloudOcclusionFactor, createCloudLayer, updateCloudLayer, disposeCloudLayer, createRealisticCloudDome, updateRealisticCloudDome, disposeRealisticCloudDome };

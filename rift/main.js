@@ -1921,6 +1921,18 @@ function animate() {
   setAmbientDayAmount(dayNight.dayAmount);
   if (currentLevelIdx >= 0 && horizonHandle) updateHorizonSilhouettes(horizonHandle, LEVELS[currentLevelIdx].biome, dayNight.dayAmount);
   updateLightShafts(lightShaftHandles, dayNight.dayAmount);
+  // Underwater light shafts (Coral Shallows only — createUnderwaterLightShaft,
+  // anchored seafloor-to-surface) were never gated by whether the camera
+  // is actually underwater, so they stayed visible poking up through/
+  // above the water surface from any angle — reported as stray purple
+  // spikes and glowing columns on the surface. Scoped to crystal
+  // specifically: Verdant's canopy light shafts (createLightShaft) share
+  // this same array/update path but are an above-ground forest effect
+  // with no relationship to water submersion at all, so they must stay
+  // untouched by this gating.
+  if (currentBiome === "crystal") {
+    for (const shaft of lightShaftHandles) shaft.sprite.visible = isFullySubmerged;
+  }
   updateWorldPulse(dt);
   updateProjectiles(dt);
   if (isFullySubmerged) {

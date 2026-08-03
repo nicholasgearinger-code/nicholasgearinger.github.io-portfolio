@@ -516,7 +516,33 @@ function createRealisticCloudDome(scene) {
   // that same sequence rather than being left to automatic sorting.
   mesh.renderOrder = -95;
   scene.add(mesh);
-  return { mesh, mat };
+
+  // SECOND independent cloud layer, same texture/shape, nested just
+  // inside the first (RADIUS-6 — enough gap to resolve depth cleanly,
+  // same trick as the first layer vs. the gradient dome behind it).
+  // Drifts at its own speed/direction (see updateRealisticCloudDome) so
+  // the two identical patterns slide past each other rather than moving
+  // together as one rigid image — this is what actually reads as
+  // "weather moving" instead of "a photo slowly spinning." Needs its
+  // OWN Texture instance (texture.clone()) because texture.offset is a
+  // property of the Texture object itself, not the material — sharing
+  // one Texture between both layers would force them to always show the
+  // identical UV offset, which defeats the whole point of drifting them
+  // independently. clone() reuses the same underlying image (cheap, no
+  // extra GPU upload of pixel data), just gives each layer its own
+  // offset/repeat state.
+  const texture2 = texture.clone();
+  texture2.needsUpdate = true;
+  const mat2 = new THREE.MeshBasicMaterial({
+    map: texture2, transparent: true, depthWrite: false, side: THREE.BackSide,
+    fog: false, color: 0xffffff, opacity: 0.55, // thinner than the primary layer — reads as a secondary, higher/fainter cloud deck rather than a second identical copy competing for attention
+  });
+  const geo2 = new THREE.SphereGeometry(RADIUS - 6, 48, 24, 0, Math.PI * 2, NORTH_POLE_TRIM, Math.PI - NORTH_POLE_TRIM);
+  const mesh2 = new THREE.Mesh(geo2, mat2);
+  mesh2.renderOrder = -94; // just after the primary layer in the same stable draw sequence
+  scene.add(mesh2);
+
+  return { mesh, mat, mesh2, mat2 };
 }
 
 /**
@@ -534,6 +560,14 @@ function updateRealisticCloudDome(handle, dt, dayAmount, skyHorizonColor, skyZen
   // is deliberately slow — real high cloud layers drift, they don't
   // visibly sweep.
   handle.mesh.rotation.y += dt * 0.0025;
+  // Second layer drifts FASTER and in the OPPOSITE direction — the two
+  // identical cloud patterns continuously slide past each other, which
+  // reads as genuinely evolving cloud cover rather than a repeating
+  // rotation. Independent texture (see createRealisticCloudDome) also
+  // gets its own UV offset drift, on a different axis speed than the
+  // primary layer's, so even the two layers' own internal texture-slide
+  // motions don't sync up with each other.
+  if (handle.mesh2) handle.mesh2.rotation.y -= dt * 0.0048;
 
   if (skyHorizonColor && skyZenithColor) {
     // The texture is now a NEUTRAL white+alpha cloud structure (no baked
@@ -560,6 +594,11 @@ function updateRealisticCloudDome(handle, dt, dayAmount, skyHorizonColor, skyZen
     // instead of going pitch black or untinted white.
     handle.mat.color.setScalar(0.6 + dayAmount * 0.4);
   }
+  // Layer 2 gets the SAME tint/brightness — it's meant to read as more
+  // cloud cover at the same time of day, not a differently-lit sky —
+  // its own opacity (set once at creation, 0.55) is what keeps it
+  // visually secondary to the primary layer.
+  if (handle.mat2) handle.mat2.color.copy(handle.mat.color);
 
   // A slow, gentle "breathing" opacity pulse — real high-altitude cloud
   // decks aren't perfectly static in density even over short spans; this
@@ -569,6 +608,14 @@ function updateRealisticCloudDome(handle, dt, dayAmount, skyHorizonColor, skyZen
   handle.breathPhase = (handle.breathPhase || 0) + dt * 0.12;
   const breathe = 1 + Math.sin(handle.breathPhase) * 0.06;
   handle.mat.opacity = 0.9 * breathe;
+  // Layer 2 breathes on its own out-of-phase cycle (cosine vs. sine, and
+  // a different speed) so the two layers' density never pulses in
+  // lockstep — another small thing that keeps the combined result from
+  // reading as two copies of one animation.
+  if (handle.mat2) {
+    handle.breathPhase2 = (handle.breathPhase2 || 0) + dt * 0.085;
+    handle.mat2.opacity = 0.55 * (1 + Math.cos(handle.breathPhase2) * 0.08);
+  }
 
   // A second, independent drift axis on top of the mesh's own Y rotation
   // — texture.offset.x slides the UVs horizontally at a different,
@@ -579,6 +626,20 @@ function updateRealisticCloudDome(handle, dt, dayAmount, skyHorizonColor, skyZen
   // it for more than a few seconds).
   handle.driftOffset = (handle.driftOffset || 0) + dt * 0.0009;
   handle.mat.map.offset.x = handle.driftOffset;
+  // Layer 2's own texture (a separate clone, see createRealisticCloudDome)
+  // drifts on BOTH axes at rates that share no common multiple with
+  // layer 1's motion, so the two patterns' relative alignment never
+  // repeats on any short, noticeable cycle.
+  if (handle.mat2 && handle.mat2.map) {
+    handle.driftOffset2X = (handle.driftOffset2X || 0) - dt * 0.0016;
+    handle.driftOffset2Y = (handle.driftOffset2Y || 0) + dt * 0.00021;
+    handle.mat2.map.offset.x = handle.driftOffset2X;
+    // Only a tiny vertical nudge, clamped well short of the north-pole
+    // trim / horizon-cutoff edges baked into the texture's alpha — a
+    // full free vertical drift would eventually scroll the zeroed-out
+    // ground band into view or push real cloud detail off the top.
+    handle.mat2.map.offset.y = Math.sin(handle.driftOffset2Y) * 0.015;
+  }
 }
 
 function disposeRealisticCloudDome(scene, handle) {
@@ -592,6 +653,15 @@ function disposeRealisticCloudDome(scene, handle) {
   // layer's own canvas texture is per-instance but this one is loaded
   // once from disk and is cheap to keep resident for the life of the
   // page rather than reloading it every level transition).
+  if (handle.mesh2) {
+    scene.remove(handle.mesh2);
+    handle.mesh2.geometry.dispose();
+    handle.mat2.dispose();
+    // handle.mat2.map (the cloned texture) IS disposed here, unlike the
+    // shared original — clone() made a genuinely separate Texture object
+    // owned only by this dome instance, not the module-level shared one.
+    if (handle.mat2.map) handle.mat2.map.dispose();
+  }
 }
 
 export { createClouds, updateClouds, disposeClouds, getCloudOcclusionFactor, createCloudLayer, updateCloudLayer, disposeCloudLayer, createRealisticCloudDome, updateRealisticCloudDome, disposeRealisticCloudDome };

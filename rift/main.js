@@ -1344,14 +1344,21 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
   }
 
   if (level.biome === "crystal") {
-    // Underwater light shafts disabled per explicit request — they were
-    // reading as floating glowing orbs rather than light beams, not the
-    // "sunbeams through shallow water" effect intended. Loop kept but
-    // shaftCount zeroed rather than deleting the block outright, so this
-    // is a one-line revert if a better-looking beam shape replaces them
-    // later instead of losing the placement logic entirely.
+    // Real sunbeams through shallow tropical water are numerous and
+    // overlapping, not sparse — deliberately a denser count than
+    // Verdant's canopy shafts (28). Anchored at the water surface,
+    // extending down toward the floor (see createUnderwaterLightShaft),
+    // only ever placed where the floor is actually underwater. Reuses
+    // lightShaftHandles/updateLightShafts/disposeLightShafts wholesale —
+    // updateLightShafts already scales opacity by dayAmount, so these
+    // fade in through the day and back out at night for free, with no
+    // separate update path needed.
+    // (Was briefly zeroed out on a wrong diagnosis that these were the
+    // "glowing balls" — the real source was the ocean surface glitter/
+    // whitecap Points staying visible from underwater, fixed separately
+    // above. Restored.)
     const shaftRand = mulberry32(hashStringToSeed(WORLD_SEED + "-underwater-light-shafts-" + level.biome));
-    const shaftCount = 0; // was 40
+    const shaftCount = 40;
     const shaftBound = TERRAIN_SIZE * 0.46;
     const waterY = LIQUID_LEVEL.crystal;
     for (let i = 0; i < shaftCount; i++) {
@@ -1844,6 +1851,18 @@ function animate() {
   // frame, only visible while actually fully submerged.
   waterVolumeMesh.visible = isFullySubmerged;
   if (isFullySubmerged) waterVolumeMesh.position.copy(camera.position);
+  // Ocean surface glitter/whitecaps (createOceanSurfaceDetail) sit right
+  // at the water plane and were never gated on submersion — from
+  // underwater looking up at the surface, those foam/glint points read
+  // as a row of glowing domes along the horizon, which is what was being
+  // reported as "glowing balls" (the earlier fix removing the underwater
+  // light shafts targeted the wrong system entirely). These are an
+  // above-surface effect, so hide them the same way waterVolumeMesh is
+  // gated — only visible while NOT fully submerged.
+  if (oceanSurfaceDetailHandle) {
+    oceanSurfaceDetailHandle.glitter.visible = !isFullySubmerged;
+    oceanSurfaceDetailHandle.whitecaps.visible = !isFullySubmerged;
+  }
   if (isFullySubmerged) {
     // Real water only lets you see the sky within a narrow cone roughly
     // straight overhead (Snell's window) — from any other angle you'd

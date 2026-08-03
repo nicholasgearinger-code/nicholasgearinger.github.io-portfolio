@@ -658,6 +658,17 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
     // up) plane would be invisible from below entirely. Every other
     // biome's water is only ever seen from above, so left untouched.
     side: biome === "crystal" ? THREE.DoubleSide : THREE.FrontSide,
+    // Every OTHER transparent effect in this file sets depthWrite:false
+    // (see waterfall/foam/glitter/whitecaps above) — this material never
+    // did, and it's the one water surface that's both transparent AND
+    // double-sided on a wavy (non-flat) mesh. With depthWrite left at its
+    // default true, which of the front/back faces wins the depth test
+    // for a given pixel depends on triangle draw order rather than true
+    // distance, which can flip as the camera angle shifts slightly —
+    // exactly a "surface flips between dark and light as I move" symptom,
+    // and only from crystal's underside since ember/verdant's water is
+    // FrontSide-only and never hits this failure mode at all.
+    depthWrite: biome !== "crystal",
   };
   // MeshPhysicalMaterial with clearcoat for the ocean specifically — a
   // water surface's specular highlight really is a thin, near-flat

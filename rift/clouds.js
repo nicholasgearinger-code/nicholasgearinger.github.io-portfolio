@@ -534,25 +534,51 @@ function updateRealisticCloudDome(handle, dt, dayAmount, skyHorizonColor, skyZen
   // is deliberately slow — real high cloud layers drift, they don't
   // visibly sweep.
   handle.mesh.rotation.y += dt * 0.0025;
-  // Same dimmer-at-night, brighter-at-noon shape the flat cloud layer and
-  // sprite clouds already use, applied here for consistency rather than
-  // inventing a fourth slightly-different curve.
-  const lightFactor = 0.6 + dayAmount * 0.4;
-  handle.mat.color.setScalar(lightFactor);
+
   if (skyHorizonColor && skyZenithColor) {
-    // Blending toward a single color (just the horizon tint) washed the
-    // whole dome — including clouds well away from the horizon — toward
-    // one hue that's only really correct near the horizon itself. A
-    // 50/50 blend of the sky's own current zenith and horizon colors
-    // gives a genuinely representative average sky tint at any time of
-    // day (blue midday, orange/purple dawn-dusk, dark blue night)
-    // without needing a full per-fragment shader to vary the tint by
-    // view angle the way the real gradient dome does.
+    // The texture is now a NEUTRAL white+alpha cloud structure (no baked
+    // color at all — see the module comment above) specifically so this
+    // dome can be fully colored at runtime instead of showing one frozen
+    // photo's lighting forever. The old version started from a grayscale
+    // `lightFactor` scalar and only lerped 45% of the way toward the sky
+    // tint, so more than half of the final color was always neutral gray
+    // — that's the actual reason it read as washed-out/black-and-white.
+    // Now the tint IS the base color (mat.color.copy, not lerp from
+    // gray), with brightness layered on top as a multiply, so the dome
+    // genuinely carries the sky's real color at full strength — vivid at
+    // dawn/dusk, blue at noon, dark at night — rather than a diluted
+    // hint of it.
     const avgTint = skyHorizonColor.clone().lerp(skyZenithColor, 0.5);
-    handle.mat.color.lerp(avgTint, 0.45);
+    handle.mat.color.copy(avgTint);
+    const brightness = 0.75 + dayAmount * 0.5;
+    handle.mat.color.multiplyScalar(brightness);
   } else if (skyHorizonColor) {
-    handle.mat.color.lerp(skyHorizonColor, 0.2);
+    handle.mat.color.copy(skyHorizonColor).multiplyScalar(0.75 + dayAmount * 0.5);
+  } else {
+    // No sky-color info available at all (shouldn't normally happen) —
+    // fall back to a plain neutral gray so the dome degrades gracefully
+    // instead of going pitch black or untinted white.
+    handle.mat.color.setScalar(0.6 + dayAmount * 0.4);
   }
+
+  // A slow, gentle "breathing" opacity pulse — real high-altitude cloud
+  // decks aren't perfectly static in density even over short spans; this
+  // is a cheap way to keep the dome from reading as one motionless
+  // painted image without needing per-fragment noise. Small enough
+  // (±6%) to be felt rather than obviously seen as a pulse.
+  handle.breathPhase = (handle.breathPhase || 0) + dt * 0.12;
+  const breathe = 1 + Math.sin(handle.breathPhase) * 0.06;
+  handle.mat.opacity = 0.9 * breathe;
+
+  // A second, independent drift axis on top of the mesh's own Y rotation
+  // — texture.offset.x slides the UVs horizontally at a different,
+  // slightly faster rate than the geometry itself rotates. Two motions
+  // at different speeds layered together read as genuinely shifting,
+  // evolving sky rather than one rigid image slowly spinning as a whole
+  // (which is very recognizable as "a photo on a sphere" once you watch
+  // it for more than a few seconds).
+  handle.driftOffset = (handle.driftOffset || 0) + dt * 0.0009;
+  handle.mat.map.offset.x = handle.driftOffset;
 }
 
 function disposeRealisticCloudDome(scene, handle) {

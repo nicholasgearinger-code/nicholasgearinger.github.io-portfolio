@@ -449,7 +449,21 @@ function disposeCloudLayer(scene, handle) {
 let realisticCloudTexture = null;
 function getRealisticCloudTexture() {
   if (realisticCloudTexture) return realisticCloudTexture;
-  realisticCloudTexture = new THREE.TextureLoader().load("textures/sky_clouds.png");
+  // A plain relative string like "textures/sky_clouds.png" resolves
+  // against the PAGE's URL, not this module's own location — if the page
+  // isn't served from exactly the same directory this file lives in
+  // (e.g. index.html at the site root, this file at rift/clouds.js), that
+  // silently 404s with no visible error and nothing renders. new URL(...,
+  // import.meta.url) resolves relative to THIS module's own file
+  // location regardless of where the page itself is hosted, which is the
+  // actually-correct way to reference a sibling asset from an ES module.
+  const url = new URL("textures/sky_clouds.png", import.meta.url).href;
+  realisticCloudTexture = new THREE.TextureLoader().load(
+    url,
+    () => console.log("[clouds] realistic cloud texture loaded:", url),
+    undefined,
+    (err) => console.error("[clouds] realistic cloud texture FAILED to load:", url, err)
+  );
   realisticCloudTexture.colorSpace = THREE.SRGBColorSpace;
   // The source is a full 360° equirectangular panorama, so its left/right
   // edges are meant to meet seamlessly — RepeatWrapping (not the default

@@ -708,17 +708,17 @@ const SURFACE_PATCH_STYLE = {
 const HEIGHT_PALETTE = {
   ember: [0x120a08, 0x3a1208, 0x7a2410, 0xc8471c, 0xef8a34, 0xffd9a0], // shadowed valley -> deep rock -> mid rock -> molten-adjacent rust -> warm highlight -> pale sunlit rim
   // Shaded sand troughs -> open sunlit sand -> coral-orange mound base ->
-  // vivid coral-pink crown -> bright cyan where the shallowest reef peaks
-  // catch the most light from the surface above. The lowest band is now
-  // genuine (if shadowed) SAND rather than a teal tint — the seafloor
-  // itself should read as a sandy basin the coral grows up out of, per
-  // explicit "add sand to the bottom" follow-up. Bypasses level.color
-  // entirely (that per-biome base color lives in levels.js, not
-  // available in this session — see MISSING-FILE PATTERN in project
-  // notes) the same way Ember's own palette already does, so the reef
-  // reads with real bold tropical color regardless of whatever base
-  // tint the level config still carries.
-  crystal: [0x6b5a3a, 0xe8cf9a, 0xff8a5c, 0xff5c8a, 0x7fe8ff],
+  // vivid coral-pink crown -> warm sunlit-highlight where the shallowest
+  // reef peaks catch the most light from the surface above. That last
+  // stop was a bright cyan (0x7fe8ff) nearly identical to the water's own
+  // shallow-tint color in liquid.js (0x7fd0d8) — right where the reef's
+  // true peaks sit closest to the surface (and so are seen through the
+  // thinnest, most saturated wedge of that same shallow-water tint), the
+  // seafloor and the water above it were painting almost the same color,
+  // reading as "the sand and the water are the same color." A warm
+  // highlight reads as sunlit coral/sand catching the light without
+  // fighting the water's own cool cyan tint for the same hue.
+  crystal: [0x6b5a3a, 0xe8cf9a, 0xff8a5c, 0xff5c8a, 0xffe6c2],
 };
 
 // Smooth multi-stop gradient across the palette — was a posterized,

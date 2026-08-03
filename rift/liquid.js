@@ -652,60 +652,45 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
   const matOptions = {
     vertexColors: true, emissive: style.emissive, emissiveIntensity: style.emissiveIntensity,
     transparent: true, opacity: style.opacity, roughness: style.roughness, metalness: 0.1,
-    // Crystal is the one biome where the whole landmass sits below the
-    // water — the player is normally looking UP at this surface, not
-    // down at it, so the default single-sided (front-face-only, facing
-    // up) plane would be invisible from below entirely. Every other
-    // biome's water is only ever seen from above, so left untouched.
-    side: biome === "crystal" ? THREE.DoubleSide : THREE.FrontSide,
-    // Every OTHER transparent effect in this file sets depthWrite:false
-    // (see waterfall/foam/glitter/whitecaps above) — this material never
-    // did, and it's the one water surface that's both transparent AND
-    // double-sided on a wavy (non-flat) mesh. With depthWrite left at its
-    // default true, which of the front/back faces wins the depth test
-    // for a given pixel depends on triangle draw order rather than true
-    // distance, which can flip as the camera angle shifts slightly —
-    // exactly a "surface flips between dark and light as I move" symptom,
-    // and only from crystal's underside since ember/verdant's water is
-    // FrontSide-only and never hits this failure mode at all.
-    depthWrite: biome !== "crystal",
   };
-  // MeshPhysicalMaterial with clearcoat for the ocean specifically — a
-  // water surface's specular highlight really is a thin, near-flat
-  // reflective film on top of the bulk-colored water beneath it, which
-  // clearcoat models properly. This previously rendered black at grazing
-  // angles (the horizon) because clearcoat needs an environment map to
-  // reflect and this scene had none — main.js now sets scene.environment
-  // for the crystal biome specifically (a PMREM map generated from the
-  // sky's own real current zenith/horizon colors, kept in sync through
-  // the day/night cycle), so there's something real for it to reflect.
-  // Ember's lava and Verdant's river keep plain MeshStandardMaterial,
-  // unchanged — this is scoped to the one biome that actually has an
-  // environment map set up for it.
-  const mat = biome === "crystal"
-    ? new THREE.MeshPhysicalMaterial({ ...matOptions, clearcoat: 1.0, clearcoatRoughness: 0.06 })
-    : new THREE.MeshStandardMaterial(matOptions);
-  if (biome === "crystal") {
-    // Procedural whitecap foam — real Voronoi/Worley cellular noise
-    // evaluated per-PIXEL in the fragment shader, not per-vertex like
-    // everything else this file paints. Foam is naturally clumpy —
-    // irregular bubble clusters with thin bright seams between them —
-    // which a per-vertex color blend (limited to this mesh's actual
-    // vertex density) can't resolve; a fragment shader can put that
-    // texture at full screen resolution regardless of mesh density.
-    // onBeforeCompile patches the three.js-generated MeshPhysicalMaterial
-    // shader directly rather than writing a full custom ShaderMaterial,
-    // so clearcoat/PBR lighting/fog from the rest of this material keep
-    // working unmodified — only the diffuse color gets a foam pass
-    // layered on top, right where the per-vertex froth/Fresnel/SSS
-    // blending from updateLiquidPlane already leaves off.
-    mat.onBeforeCompile = (shader) => {
-      shader.uniforms.uTime = { value: 0 };
-      shader.vertexShader = shader.vertexShader
-        .replace("#include <common>", "#include <common>\nattribute float aFoam;\nvarying float vFoam;\nvarying vec2 vFoamPos;")
-        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvFoam = aFoam;\nvFoamPos = position.xz;"); // local-space XZ IS world XZ here — this mesh has no runtime x/z translation or rotation (baked in at creation), only a Y offset
-      shader.fragmentShader = shader.fragmentShader
-        .replace("#include <common>", `#include <common>
+  // Builds one water material with the shared foam shader patch applied —
+  // factored into a function because crystal now needs TWO materials
+  // (see the front/back split below) rather than duplicating the whole
+  // shader-injection string a second time.
+  function buildWaterMaterial(side, depthWrite) {
+    const options = { ...matOptions, side, depthWrite };
+    // MeshPhysicalMaterial with clearcoat for the ocean specifically — a
+    // water surface's specular highlight really is a thin, near-flat
+    // reflective film on top of the bulk-colored water beneath it, which
+    // clearcoat models properly. This previously rendered black at
+    // grazing angles (the horizon) because clearcoat needs an
+    // environment map to reflect and this scene had none — main.js now
+    // sets scene.environment for the crystal biome specifically (a PMREM
+    // map generated from the sky's own real current zenith/horizon
+    // colors, kept in sync through the day/night cycle), so there's
+    // something real for it to reflect. Ember's lava and Verdant's river
+    // keep plain MeshStandardMaterial, unchanged — this is scoped to the
+    // one biome that actually has an environment map set up for it.
+    const m = biome === "crystal"
+      ? new THREE.MeshPhysicalMaterial({ ...options, clearcoat: 1.0, clearcoatRoughness: 0.06 })
+      : new THREE.MeshStandardMaterial(options);
+    if (biome === "crystal") {
+      // Procedural whitecap foam — real Voronoi/Worley cellular noise
+      // evaluated per-PIXEL in the fragment shader, not per-vertex like
+      // everything else this file paints. onBeforeCompile patches the
+      // three.js-generated MeshPhysicalMaterial shader directly rather
+      // than writing a full custom ShaderMaterial, so clearcoat/PBR
+      // lighting/fog from the rest of this material keep working
+      // unmodified — only the diffuse color gets a foam pass layered on
+      // top, right where the per-vertex froth/Fresnel/SSS blending from
+      // updateLiquidPlane already leaves off.
+      m.onBeforeCompile = (shader) => {
+        shader.uniforms.uTime = { value: 0 };
+        shader.vertexShader = shader.vertexShader
+          .replace("#include <common>", "#include <common>\nattribute float aFoam;\nvarying float vFoam;\nvarying vec2 vFoamPos;")
+          .replace("#include <begin_vertex>", "#include <begin_vertex>\nvFoam = aFoam;\nvFoamPos = position.xz;"); // local-space XZ IS world XZ here — this mesh has no runtime x/z translation or rotation (baked in at creation), only a Y offset
+        shader.fragmentShader = shader.fragmentShader
+          .replace("#include <common>", `#include <common>
 uniform float uTime;
 varying float vFoam;
 varying vec2 vFoamPos;
@@ -729,7 +714,7 @@ float foamVoronoi(vec2 p) {
   }
   return minDist;
 }`)
-        .replace("#include <color_fragment>", `#include <color_fragment>
+          .replace("#include <color_fragment>", `#include <color_fragment>
 {
   // Two Voronoi octaves at different scale/drift — big loose bubble
   // clusters plus finer surface foam, rather than one uniform cell size.
@@ -744,12 +729,43 @@ float foamVoronoi(vec2 p) {
   float foamMask = bubbles * smoothstep(0.5, 0.92, vFoam);
   diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0), foamMask);
 }`);
-      mat.userData.shader = shader; // so updateLiquidPlane can push uTime each frame
-    };
+        m.userData.shader = shader; // so updateLiquidPlane can push uTime each frame
+      };
+    }
+    return m;
   }
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.position.y = y;
-  scene.add(mesh);
+
+  // Crystal used to be ONE material with side:DoubleSide + depthWrite:
+  // false — that fixed the close-up "flips between dark and light"
+  // symptom (self-transparency z-fighting between front/back faces of a
+  // wavy surface) but broke the opposite case: viewed from a distance or
+  // elevation at a grazing angle across the whole ocean, a single
+  // DoubleSide+depthWrite:false mesh has no way to correctly self-occlude
+  // — the GPU rasterizes front AND back triangles in index order with no
+  // per-triangle distance sort within one draw call, which showed up as a
+  // solid black band across the horizon (clearcoat sampling the
+  // environment map with backface-flipped normals in an inconsistent
+  // order). Two separate single-sided meshes sharing the SAME geometry
+  // fixes both at once: the front mesh (depthWrite:true) handles the
+  // common "looking across/down at the ocean" case with normal, correct
+  // self-occlusion; the back mesh (depthWrite:false) handles only the
+  // close-up "looking up at the underside while submerged" case, which is
+  // where the original flicker actually lived. Sharing one `geo` means
+  // updateLiquidPlane's per-frame wave/color writes apply to both
+  // automatically — no duplicate per-frame work needed.
+  let mesh, backMesh = null;
+  if (biome === "crystal") {
+    mesh = new THREE.Mesh(geo, buildWaterMaterial(THREE.FrontSide, true));
+    mesh.position.y = y;
+    scene.add(mesh);
+    backMesh = new THREE.Mesh(geo, buildWaterMaterial(THREE.BackSide, false));
+    backMesh.position.y = y;
+    scene.add(backMesh);
+  } else {
+    mesh = new THREE.Mesh(geo, buildWaterMaterial(THREE.FrontSide, true));
+    mesh.position.y = y;
+    scene.add(mesh);
+  }
 
   // A separate unlit, additively-blended plane just above the surface —
   // gives lava genuine luminous "glow" the way MeshStandardMaterial's own
@@ -838,14 +854,14 @@ float foamVoronoi(vec2 p) {
   const basePositions = new Float32Array(posAttr.array); // original Y per vertex, for the ripple to animate around
 
   return {
-    mesh, glow, shimmer, rocks, waterY: y, basePositions, biome, style, depthColors,
+    mesh, backMesh, glow, shimmer, rocks, waterY: y, basePositions, biome, style, depthColors,
     flowDir: normalizeFlow(flowDir), crustOctaves, crackOctaves, flowBeads,
   };
 }
 
 function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir, skyHorizon) {
   if (!handle) return;
-  const { mesh, glow, shimmer, rocks, basePositions, biome, style, flowDir, crustOctaves, crackOctaves, flowBeads, waterY } = handle;
+  const { mesh, backMesh, glow, shimmer, rocks, basePositions, biome, style, flowDir, crustOctaves, crackOctaves, flowBeads, waterY } = handle;
   const posAttr = mesh.geometry.attributes.position;
   const colorAttr = mesh.geometry.attributes.color;
   // Crystal writes real analytic Gerstner normals straight into this
@@ -863,6 +879,12 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
   const foamAttr = biome === "crystal" ? mesh.geometry.attributes.aFoam : null;
   const foamShader = biome === "crystal" ? mesh.material.userData.shader : null;
   if (foamShader) foamShader.uniforms.uTime.value = elapsed;
+  // backMesh has its own separate material (built by its own
+  // onBeforeCompile call) even though it shares mesh's geometry, so its
+  // foam shader's uTime needs setting independently — not covered by the
+  // line above.
+  const backFoamShader = (biome === "crystal" && backMesh) ? backMesh.material.userData.shader : null;
+  if (backFoamShader) backFoamShader.uniforms.uTime.value = elapsed;
   // Sun direction is passed as sun.position (a world position far from
   // the scene, not a literal direction) — normalizing it directly is a
   // fine approximation of "direction toward the sun" at this distance,
@@ -1132,6 +1154,12 @@ function disposeLiquidPlane(scene, handle) {
   scene.remove(handle.mesh);
   handle.mesh.geometry.dispose();
   handle.mesh.material.dispose();
+  if (handle.backMesh) {
+    // Shares handle.mesh's geometry (see createLiquidPlane) — already
+    // disposed above, only the material is this mesh's own.
+    scene.remove(handle.backMesh);
+    handle.backMesh.material.dispose();
+  }
   if (handle.glow) {
     scene.remove(handle.glow);
     handle.glow.geometry.dispose();

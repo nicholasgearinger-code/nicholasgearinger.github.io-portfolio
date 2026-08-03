@@ -718,8 +718,14 @@ function updateDayNightCycle(cycle, dt) {
   // an outright color swap.
   const tint = BIOME_SKY_TINT[cycle.biome];
   if (tint) {
-    skyZenith = lerpColor(skyZenith, tint.zenith, tint.amount);
-    skyHorizon = lerpColor(skyHorizon, tint.horizon, tint.amount);
+    // Was a flat amount applied at all times, including full night —
+    // that's exactly why the horizon kept a bright, persistent glow band
+    // instead of the sky actually going dark. Faded down substantially
+    // (not to zero — a faint hint of the biome's identity is fine) as
+    // dayAmount drops toward night.
+    const effectiveTintAmount = tint.amount * (0.12 + dayAmount * 0.88);
+    skyZenith = lerpColor(skyZenith, tint.zenith, effectiveTintAmount);
+    skyHorizon = lerpColor(skyHorizon, tint.horizon, effectiveTintAmount);
   }
   if (cycle.biome === "verdant") {
     const nightSkyAmount = THREE.MathUtils.clamp(1 - dayAmount / VERDANT_NIGHT_SKY.window, 0, 1) * VERDANT_NIGHT_SKY.maxAmount;

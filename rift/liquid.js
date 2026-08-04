@@ -42,14 +42,14 @@ const LIQUID_STYLE = {
   // Crystal Spire, redesigned as a tropical reef ocean — this is now the
   // biome's actual ground-level water (the whole landmass sits below
   // LIQUID_LEVEL.crystal in terrain.js), not a small feature within it.
-  // Retuned to a deep blue with white crest highlights per an explicit
-  // reference illustration — a real reversal of the earlier bright
-  // tropical-turquoise direction. Opacity pushed further toward opaque
-  // (was 0.74) per explicit "needs to be less transparent." frothColor
-  // stays pure white — the reference's defining feature is bright white
-  // lines along each wave crest against the deep blue body.
+  // baseColor brightened toward a real saturated ocean blue per explicit
+  // reference photo comparison — the previous 0x214d75 was a dark,
+  // fairly desaturated navy; real open-ocean water under clear daylight
+  // reads as a much more vivid medium blue. frothColor stays pure white
+  // — bright white crest highlights against a saturated blue body is
+  // still the core look, just with a livelier base tone underneath it.
   crystal: {
-    baseColor: new THREE.Color(0x214d75), frothColor: new THREE.Color(0xffffff),
+    baseColor: new THREE.Color(0x1f7fb0), frothColor: new THREE.Color(0xffffff),
     emissive: 0x2a5578, emissiveIntensity: 0.015, opacity: 0.88, roughness: 0.05,
   },
 };
@@ -879,6 +879,25 @@ float foamVoronoi(vec2 p) {
     }
   }
   return minDist;
+}
+// F1 AND F2 (nearest + second-nearest feature point) — F2-F1 traces
+// thin lines along cell boundaries rather than filled blobs. Same
+// technique (and reasoning) as main.js's terrain caustic net and shore
+// foam tendrils — added here so open-water whitecaps can have the same
+// lacy, branching character instead of only filled bubble clusters.
+vec2 foamVoronoiF1F2(vec2 p) {
+  vec2 ip = floor(p);
+  vec2 fp = fract(p);
+  float f1 = 8.0, f2 = 8.0;
+  for (int y = -1; y <= 1; y++) {
+    for (int x = -1; x <= 1; x++) {
+      vec2 neighbor = vec2(float(x), float(y));
+      vec2 point = foamHash(ip + neighbor);
+      float d = length(neighbor + point - fp);
+      if (d < f1) { f2 = f1; f1 = d; } else if (d < f2) { f2 = d; }
+    }
+  }
+  return vec2(f1, f2);
 }`)
           .replace("#include <color_fragment>", `#include <color_fragment>
 {
@@ -936,11 +955,21 @@ float foamVoronoi(vec2 p) {
   // variation so the same small tile doesn't read as a visibly repeating
   // stamp at a distance.
   bubbles = clamp(realFoam * 0.75 + bubbles * 0.35, 0.0, 1.0);
+  // Lacy branching lines — SAME technique now used for the shore foam
+  // and underwater caustic net, per explicit "add the same foam into
+  // the waves themselves" request. Only eligible right at the crest
+  // edge (a tight vFoam band, not the whole crest region bubbles uses)
+  // so it reads as thin streaks trailing off a breaking crest rather
+  // than covering the same area as the bubble clusters.
+  vec2 waveTendrilUv = vFoamPos * 1.6 + vec2(uTime * 0.08, -uTime * 0.06);
+  vec2 wtv = foamVoronoiF1F2(waveTendrilUv);
+  float waveTendrilLines = 1.0 - smoothstep(0.0, 0.05, wtv.y - wtv.x);
+  float waveTendrilMask = waveTendrilLines * smoothstep(0.35, 0.55, vFoam);
   // vFoam is the raw per-vertex wave-crest disturbance (0..1, interpolated
   // across the triangle) — only the actual crest region should be
   // eligible for foam at all, the Voronoi pattern then decides which
   // pixels within that region actually show it.
-  float foamMask = bubbles * smoothstep(0.5, 0.92, vFoam);
+  float foamMask = clamp(max(bubbles * smoothstep(0.5, 0.92, vFoam), waveTendrilMask * 0.8), 0.0, 1.0);
   diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0), foamMask);
   // Real specular sun-glitter — vSunGlint is computed per-vertex in
   // updateLiquidPlane (JS side) from the exact analytic Gerstner normal
@@ -1074,16 +1103,33 @@ float foamVoronoi(vec2 p) {
   }
 
   const basePositions = new Float32Array(posAttr.array); // original Y per vertex, for the ripple to animate around
+  // Foam persistence accumulator — per-vertex, decays over real time
+  // rather than the previous purely-instantaneous foam (which appeared
+  // and vanished in lockstep with the wave signal, no lingering). Own
+  // Float32Array on the handle (not a GPU buffer attribute — this is
+  // plain per-frame JS state, read/written each updateLiquidPlane call,
+  // then copied into aFoam for the shader same as before).
+  const foamAccum = biome === "crystal" ? new Float32Array(posAttr.count) : null;
 
   return {
     mesh, backMesh, glow, shimmer, rocks, waterY: y, basePositions, biome, style, depthColors,
-    flowDir: normalizeFlow(flowDir), crustOctaves, crackOctaves, flowBeads, rippleTexture,
+    flowDir: normalizeFlow(flowDir), crustOctaves, crackOctaves, flowBeads, rippleTexture, foamAccum,
+    lastElapsed: undefined, // set on first updateLiquidPlane call — used to derive real per-frame dt for the foam decay above, since this function only receives cumulative elapsed time
   };
 }
 
 function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir, skyHorizon, reflectionTexture, reflectionMatrix) {
   if (!handle) return;
-  const { mesh, backMesh, glow, shimmer, rocks, basePositions, biome, style, flowDir, crustOctaves, crackOctaves, flowBeads, waterY, rippleTexture } = handle;
+  const { mesh, backMesh, glow, shimmer, rocks, basePositions, biome, style, flowDir, crustOctaves, crackOctaves, flowBeads, waterY, rippleTexture, foamAccum } = handle;
+  // Real per-frame dt, derived from consecutive elapsed values — this
+  // function only ever receives cumulative elapsed time, not a raw
+  // per-frame delta, but the foam-persistence decay below needs a real
+  // dt to stay frame-rate-independent (same reasoning as everywhere
+  // else in this project that already avoids incremental-per-frame
+  // accumulation without a real time basis). First call has no prior
+  // value to diff against, so dt is 0 that frame only.
+  const dt = handle.lastElapsed !== undefined ? Math.max(0, elapsed - handle.lastElapsed) : 0;
+  handle.lastElapsed = elapsed;
   // Real planar reflection, sampled DIRECTLY inside the crystal fragment
   // shader below — reflectionTexture/reflectionMatrix are computed and
   // owned by main.js each frame (it's the one place with access to the
@@ -1185,6 +1231,16 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
   const baseColor = ((biome === "verdant" || biome === "crystal") && skyColor)
     ? style.baseColor.clone().lerp(skyColor, 0.4)
     : style.baseColor;
+  // Foam persistence decay factor — real foam lingers for roughly a
+  // second or two after a crest passes rather than vanishing the
+  // instant the wave signal drops, which is what the previous purely-
+  // instantaneous version did. Exponential decay expressed as "fraction
+  // remaining after 1 second" so the tuning knob is intuitive, then
+  // converted to a real per-frame multiplier via the actual dt above —
+  // frame-rate-independent (same decay speed at 30fps and 60fps),
+  // unlike a flat per-frame multiplier would be.
+  const FOAM_RETENTION_PER_SECOND = 0.35;
+  const foamDecayFactor = Math.pow(FOAM_RETENTION_PER_SECOND, dt);
   for (let i = 0; i < posAttr.count; i++) {
     const bx = basePositions[i * 3], bz = basePositions[i * 3 + 2];
     let ripple, range, gerstnerX = bx, gerstnerZ = bz, nx = 0, ny = 1, nz = 0;
@@ -1364,11 +1420,17 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
             const hLen = Math.hypot(hx, hy, hz) || 1;
             hx /= hLen; hy /= hLen; hz /= hLen;
             const nDotH = Math.max(0, nx * hx + ny * hy + nz * hz);
-            // Very tight exponent (300) — only near-perfect alignment
-            // between the reflected view direction and the sun actually
-            // glints, which is what makes it read as a sharp specular
-            // point rather than a soft diffuse blob.
-            const glintCore = Math.pow(nDotH, 300);
+            // Exponent now varies with wave height (disturbance, already
+            // computed above: 0 at trough, 1 at crest) instead of a flat
+            // 300 everywhere — per explicit "crest-vs-trough specular
+            // sharpness" request. Real water shows tight, sharp glints
+            // right at wave crests and a softer, broader sheen in the
+            // smoother troughs; a single fixed exponent couldn't capture
+            // that difference. 150 (soft) at trough up to 450 (tight) at
+            // crest — same underlying Blinn-Phong math, just a per-vertex
+            // sharpness instead of a constant.
+            const glintExponent = 150 + disturbance * 300;
+            const glintCore = Math.pow(nDotH, glintExponent);
             // Per-vertex, time-varying sparkle mask — real glitter is
             // countless individual wave facets twinkling independently,
             // not one smooth highlight; this project's per-vertex (not
@@ -1395,7 +1457,15 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
         // mesh actually displaces again.
         posAttr.setXYZ(i, gerstnerX, ripple, gerstnerZ);
         normalAttr.setXYZ(i, nx, ny, nz);
-        foamAttr.setX(i, disturbance); // raw signal — smoothstep/threshold shaping happens in the fragment shader, not here
+        // Foam persistence — this vertex's foam is the LOUDER of (a) its
+        // real instantaneous disturbance right now, or (b) whatever was
+        // there last frame, decayed toward zero. `max` (not blend) is
+        // what gives a genuine "instant rise, slow fade" shape — real
+        // foam froths up fast when a crest breaks, then lingers and
+        // drains away gradually, not a symmetric ease in/out.
+        const persistedFoam = Math.max(disturbance, (foamAccum[i] || 0) * foamDecayFactor);
+        foamAccum[i] = persistedFoam;
+        foamAttr.setX(i, persistedFoam); // shaped signal now (still smoothstepped/threshold-masked further in the fragment shader on top of this)
       } else {
         posAttr.setY(i, ripple);
       }

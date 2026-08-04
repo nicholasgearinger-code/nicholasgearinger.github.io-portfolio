@@ -207,7 +207,13 @@ function buildBaseDecoration(biome, colorHex, seedRand, worldX, worldZ) {
   // removed entirely per a separate earlier request), so this variable
   // has no visible effect either way at the moment. Worth recomputing
   // properly if island decorations are ever reintroduced.
-  const onIsland = biome === "crystal" && worldX !== undefined && worldZ !== undefined && Math.hypot(worldX - 30, worldZ + 30) < 37;
+  // Position updated to (0, -30) — landmarks.js moved LANDMARK_POSITION
+  // there again from (30, -30) per explicit "stretch the coastline"
+  // follow-up (X centered at 0 for full symmetric clearance). Radius
+  // threshold (37) still not re-verified against terrain.js's current
+  // elongated/stretched shape — doesn't matter functionally right now
+  // since the onIsland branch just returns null unconditionally below.
+  const onIsland = biome === "crystal" && worldX !== undefined && worldZ !== undefined && Math.hypot(worldX - 0, worldZ + 30) < 37;
   // High-tier-exclusive signature piece per biome — not just "more
   // polygons of the same prop," a genuinely different shape that only
   // High actually renders. Rolled first so it doesn't skew the existing

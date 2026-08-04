@@ -257,27 +257,34 @@ const BIOME_SHAPERS = {
     const reefMound = reefNoise > 0.56 ? (reefNoise - 0.56) * 9 : 0; // broad rounded reef-buildup mounds, not spires
 
     // A real emergent tropical island at the same coordinates landmarks.js
-    // places its landmark (30, -30) — Math.max against the reef shape
+    // places its landmark (0, -30) — Math.max against the reef shape
     // below rather than adding to it, so the island's height is a
     // structural guarantee independent of whatever the local reef noise
     // happens to be, not a tuned constant hoping to clear the water line.
-    // MOVED from (55, -70) per an earlier "expand the map constraints"
-    // follow-up — the old position's nearest map edge was only 50 units
-    // away; this position's nearest edge is 90 units (recomputed
-    // directly: min(120-30, 120+30, 120-30, 120+30) = 90).
-    const islandDx = worldX - 30, islandDz = worldZ - (-30);
-    const islandDist = Math.hypot(islandDx, islandDz);
-    // RESCALED from 38/48/26 per explicit follow-up — that version was
+    // MOVED AGAIN from (30, -30) per explicit "stretch the coastline"
+    // follow-up — X centered at 0 gives a full symmetric ±120 units of
+    // clearance along that axis (recomputed directly: min(120-0,120+0)
+    // =120), vs. the ~90 units available at x=30. Z clearance unchanged
+    // (90, at the -Z direction).
+    const islandDx = worldX - 0, islandDz = worldZ - (-30);
+    // ELONGATED along X — per the same follow-up ("stretch the
+    // coastline... goes very far in the distance"). The angle used for
+    // the cove notch below is computed from these RAW (unstretched)
+    // offsets, so the cove's opening direction stays geometrically
+    // meaningful; only the RADIAL distance below is stretched, which is
+    // what actually elongates the landmass shape itself.
+    const ISLAND_STRETCH_X = 1.3; // verified safe: BLEND(88)*1.3=114.4, a real 5.6-unit margin under the 120-unit X clearance — not eyeballed
+    const islandDist = Math.hypot(islandDx / ISLAND_STRETCH_X, islandDz);
+    // RESCALED from 38/48/26 in an earlier round — that version was
     // just the SAME small bump scaled up vertically (a tall pointy
     // hill), not an actual large-scale environment. Real coastal
-    // scenery like the reference photo is two different things at two
-    // different scales: a fairly steep, SHORT cliff face right at the
-    // shore, then broad, gently-rolling hills extending far beyond it —
-    // not one tall cone. CORE/BLEND now use most of the 90-unit
-    // clearance (was 38/48); PEAK is only modestly taller than before
-    // (20, not another big jump) specifically so the height-to-radius
-    // RATIO drops a lot — that ratio, not the absolute height, is what
-    // actually reads as "broad landscape" vs. "steep small hill."
+    // scenery is two different things at two different scales: a
+    // fairly steep, SHORT cliff face right at the shore, then broad,
+    // gently-rolling hills extending far beyond it — not one tall
+    // cone. CORE/BLEND use most of the available clearance; PEAK stays
+    // modest so the height-to-radius RATIO is low — that ratio, not
+    // the absolute height, is what reads as "broad landscape" vs.
+    // "steep small hill."
     const ISLAND_CORE = 78, ISLAND_BLEND = 88, ISLAND_PEAK = 20;
 
     // COVE — an angular "notch" carves a beach opening through the hill
@@ -293,6 +300,19 @@ const BIOME_SHAPERS = {
     const COVE_HALF_WIDTH = 0.85;
     const coveT = Math.min(1, Math.abs(coveAngleDiff) / COVE_HALF_WIDTH); // 0 at the cove's own center angle, 1 at/beyond its edge into solid hillside
     const coveShape = coveT * coveT * (3 - 2 * coveT); // smoothstep — 0 inside the cove (low), 1 in the hills (full height)
+
+    // Distinct dunes along the ridge — per explicit "distinct dunes in
+    // the background" follow-up. A real spatially-separate dune feature
+    // doesn't fit in the remaining clearance beyond the main landmass
+    // (there's genuinely no room left in most directions after the
+    // stretch above), so instead this varies the ridge's OWN peak
+    // height along its length via low-frequency noise (a few distinct
+    // high/low points along X, not fine texture — same fbm2 helper
+    // already used throughout this file), reading as a series of
+    // separate dune humps along the same coastline rather than one
+    // uniform smooth hill.
+    const duneVariation = fbm2(worldX * 0.02, 0, seed + 700, 2, 2.0, 0.5); // deliberately near-zero Z dependence — this is a variation ALONG the coastline's length, not across it
+    const dunePeakMult = 0.7 + Math.max(0, duneVariation + 0.5) * 0.6; // roughly 0.7x-1.3x of ISLAND_PEAK at different points along X
 
     let islandBump = 0;
     const BEACH_PLATEAU = LIQUID_LEVEL.crystal + 0.7; // modest — just above the waterline, not anywhere near the true peak
@@ -347,7 +367,11 @@ const BIOME_SHAPERS = {
         // center of the cove (the notch itself stays low) — this is
         // what actually carves the channel through the hill mass,
         // not just thinning the beach ring alone.
-        const peakForThisAngle = VALLEY_FLOOR + coveShape * (ISLAND_PEAK - VALLEY_FLOOR);
+        // dunePeakMult (computed above, per-worldX) varies the FLANKING
+        // hill's own peak along the coastline's length — only applied
+        // outside the cove (coveShape scales it in), so the cove's own
+        // valley floor height is untouched by this variation.
+        const peakForThisAngle = VALLEY_FLOOR + coveShape * (ISLAND_PEAK * dunePeakMult - VALLEY_FLOOR);
         islandBump = baseAtCore + shaped * (peakForThisAngle - baseAtCore);
       }
     }

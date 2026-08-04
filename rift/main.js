@@ -2146,7 +2146,7 @@ function animate() {
   // behind here is never visible. biome-gated inside updateLiquidPlane
   // itself (crystal only), so this is harmless to pass unconditionally.
   updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, camera.position, sun.position, dayNight.skyHorizon, reflectionRenderTarget.texture, reflectionTextureMatrix, refractionRenderTarget.texture, refractionResolution, weatherHandle ? weatherHandle.rainIntensity : 0);
-  updateOceanHorizonSkirt(oceanHorizonSkirtHandle, dayNight.skyZenith, weatherHandle ? weatherHandle.rainIntensity : 0, reflectionRenderTarget.texture, reflectionTextureMatrix);
+  updateOceanHorizonSkirt(oceanHorizonSkirtHandle, dayNight.skyZenith, weatherHandle ? weatherHandle.rainIntensity : 0, reflectionRenderTarget.texture, reflectionTextureMatrix, elapsedTime);
   updateWaterfall(waterfallHandle, dt, elapsedTime);
   updateOceanSurfaceDetail(oceanSurfaceDetailHandle, elapsedTime, dayNight.dayAmount);
   updateRiverCurrent(riverCurrentHandle, dt);

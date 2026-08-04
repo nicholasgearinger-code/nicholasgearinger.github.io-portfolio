@@ -1770,6 +1770,31 @@ function createOceanHorizonSkirt(scene, biome, y, landmassSize) {
   }
   geo.setIndex(newIndex);
 
+  // Shore-to-distance color gradient — per explicit "match the color
+  // close to shore but gradually change into the distance to show
+  // depth" request. A per-vertex color MULTIPLIES the material's own
+  // dynamic sky/storm-tinted `color` (set each frame in
+  // updateOceanHorizonSkirt) rather than replacing it, so the gradient
+  // and the day/night tinting compose correctly instead of fighting:
+  // right at the seam (distance = cutoutRadius) this multiplies by
+  // white (1,1,1) — the skirt matches the real water's own current
+  // color exactly, no visible seam — fading toward a darker, more
+  // saturated multiplier further out, reading as deep open ocean
+  // receding into the distance.
+  const SHORE_MULT = new THREE.Color(0xffffff);
+  const DEEP_MULT = new THREE.Color(0x33475e);
+  const GRADIENT_END = cutoutRadius + 700; // reaches full "deep" tint well before the fog would have hidden it anyway, so the gradient itself is never the thing doing the far fade — fog still handles that
+  const colors = new Float32Array(posAttr.count * 3);
+  const tmpGradColor = new THREE.Color();
+  for (let i = 0; i < posAttr.count; i++) {
+    const dist = Math.hypot(posAttr.getX(i), posAttr.getZ(i));
+    const t = THREE.MathUtils.clamp((dist - cutoutRadius) / (GRADIENT_END - cutoutRadius), 0, 1);
+    const eased = t * t * (3 - 2 * t);
+    tmpGradColor.copy(SHORE_MULT).lerp(DEEP_MULT, eased);
+    tmpGradColor.toArray(colors, i * 3);
+  }
+  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+
   // DoubleSide — the detailed water plane above needs a separate BackSide
   // backMesh for underwater visibility because its material is a complex
   // per-vertex-animated shader where normals matter; this is a flat,
@@ -1778,19 +1803,18 @@ function createOceanHorizonSkirt(scene, biome, y, landmassSize) {
   // from underneath, letting the raw sky show straight through past the
   // real water plane's own edge — exactly the reported "underwater we
   // can still see the edge" symptom.
-  const mat = new THREE.MeshBasicMaterial({ color: style.baseColor, fog: true, side: THREE.DoubleSide });
-  // A soft, subtler version of the near water's own real planar
-  // reflection — per explicit "add that mirror plane with the extended
-  // ocean plane" request. Reuses the EXACT SAME reflection render pass
-  // main.js already does for the near water (reflectionTexture/
-  // reflectionMatrix, set each frame in updateOceanHorizonSkirt below) —
-  // no extra render cost, just sampling the same texture a second place.
-  // Unlike the near water's shader, there's no wave-distortion term here
-  // (this plane is genuinely flat/still, and distant open water reads as
-  // naturally calmer due to perspective foreshortening anyway) and the
-  // blend is a fixed, gentler amount rather than fresnel-scaled — a
-  // soft, hazy reflection appropriate for something far away, not a
-  // sharp mirror.
+  const mat = new THREE.MeshBasicMaterial({ color: style.baseColor, fog: true, side: THREE.DoubleSide, vertexColors: true });
+  // A real planar mirror reflection — per explicit "change the extended
+  // ocean plane for the true mirror reflection plane" follow-up (this
+  // replaces the earlier round's much softer 0.35 blend). Reuses the
+  // EXACT SAME reflection render pass main.js already does for the near
+  // water (reflectionTexture/reflectionMatrix, set each frame in
+  // updateOceanHorizonSkirt below) — no extra render cost, just sampling
+  // the same texture a second place. Still no wave-distortion term on
+  // the SAMPLE itself (the reflection projection stays flat/clean,
+  // "mirror" implies sharp) — the animated ripple added below perturbs
+  // the actual geometry instead, which naturally breaks up the
+  // reflection too since it rides on the real wave-displaced surface.
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uReflectionTex = { value: null };
     shader.uniforms.uReflectionMatrix = { value: new THREE.Matrix4() };
@@ -1804,7 +1828,7 @@ function createOceanHorizonSkirt(scene, biome, y, landmassSize) {
   if (vReflectionCoord.w > 0.0001) {
     vec2 reflectionUv = clamp(vReflectionCoord.xy / vReflectionCoord.w, 0.001, 0.999);
     vec3 reflectionColor = texture2D(uReflectionTex, reflectionUv).rgb;
-    diffuseColor.rgb = mix(diffuseColor.rgb, reflectionColor, 0.35);
+    diffuseColor.rgb = mix(diffuseColor.rgb, reflectionColor, 0.7);
   }
 }`);
     mat.userData.shader = shader;
@@ -1813,15 +1837,20 @@ function createOceanHorizonSkirt(scene, biome, y, landmassSize) {
   mesh.position.y = y - 0.05; // a hair below the detailed plane so it's naturally occluded wherever the two overlap, rather than z-fighting against it
   mesh.renderOrder = -1;
   scene.add(mesh);
-  return { mesh, mat };
+  // cutoutRadius stored on the handle — updateOceanHorizonSkirt's own
+  // animation needs it to fade wave amplitude in from zero right at the
+  // seam (see there for why), and re-deriving it from landmassSize a
+  // second place could drift out of sync with what was actually built.
+  return { mesh, mat, cutoutRadius };
 }
 
 /**
  * @param {number} [stormAmount]  same 0-1 value passed to updateLiquidPlane — keeps this plane's color in sync with the real water's own storm darkening instead of staying one fixed color while the water right in front of it changes tone
  * @param {THREE.Texture} [reflectionTexture]  the SAME reflection render main.js already produces for the near water each frame
  * @param {THREE.Matrix4} [reflectionMatrix]
+ * @param {number} [elapsed]  drives the plane's own animated ripple — per explicit "animate it" follow-up
  */
-function updateOceanHorizonSkirt(handle, skyColor, stormAmount = 0, reflectionTexture, reflectionMatrix) {
+function updateOceanHorizonSkirt(handle, skyColor, stormAmount = 0, reflectionTexture, reflectionMatrix, elapsed = 0) {
   if (!handle) return;
   // Tints toward the current sky color the same way the detailed plane's
   // own baseColor does (see updateLiquidPlane) — otherwise this would
@@ -1835,6 +1864,28 @@ function updateOceanHorizonSkirt(handle, skyColor, stormAmount = 0, reflectionTe
     if (reflectionTexture) handle.mat.userData.shader.uniforms.uReflectionTex.value = reflectionTexture;
     if (reflectionMatrix) handle.mat.userData.shader.uniforms.uReflectionMatrix.value.copy(reflectionMatrix);
   }
+  // Cheap animated ripple — per explicit "animate it" follow-up. A
+  // simple 2-term sine swell (the same lightweight technique liquid.js
+  // already uses for Ember/Verdant's non-Gerstner water, not the full
+  // per-vertex Gerstner sum the near water uses — this plane is far
+  // enough away that the extra cost/complexity wouldn't read as
+  // meaningfully different, and distant real ocean genuinely looks
+  // calmer/flatter than the water right at your feet anyway). Amplitude
+  // fades from 0 right at the seam (handle.cutoutRadius) up to full over
+  // a short transition band, so it can never mismatch the real water
+  // plane's own animation right at the boundary the two share — a
+  // static seam blending into motion just past it reads as continuous,
+  // not two systems fighting.
+  const posAttr = handle.mesh.geometry.attributes.position;
+  const RIPPLE_FADE_BAND = 60;
+  for (let i = 0; i < posAttr.count; i++) {
+    const x = posAttr.getX(i), z = posAttr.getZ(i);
+    const dist = Math.hypot(x, z);
+    const ampT = THREE.MathUtils.clamp((dist - handle.cutoutRadius) / RIPPLE_FADE_BAND, 0, 1);
+    const swell = (Math.sin(x * 0.05 + elapsed * 0.3) * 0.3 + Math.cos(z * 0.045 + elapsed * 0.25) * 0.25) * ampT;
+    posAttr.setY(i, swell);
+  }
+  posAttr.needsUpdate = true;
 }
 
 function disposeOceanHorizonSkirt(scene, handle) {

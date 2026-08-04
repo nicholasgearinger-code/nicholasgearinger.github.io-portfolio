@@ -2284,6 +2284,11 @@ function animate() {
     dayNightCycle.moonBody.glow.material.opacity *= lookingUpFactor;
   }
   const wind = updateWeatherSystem(weatherHandle, dt, eruptionActive, dayNight.dayAmount);
+  // Rain is an above-surface effect — real rain doesn't fall underwater.
+  // Same visibility-gating pattern already used for whitecaps/the cloud
+  // dome/light shafts above: toggle directly on submersion rather than
+  // trying to fog/hide it any other way.
+  if (weatherHandle && weatherHandle.rain) weatherHandle.rain.points.visible = !isFullySubmerged;
   updateAtmosphericParticles(atmosphereHandle, elapsedTime, dt, wind.windX, wind.windZ);
   updateGrass(grassHandle, elapsedTime, wind.windX, wind.windZ, dayNight.dayAmount);
   updateFlowers(flowersHandle, elapsedTime);

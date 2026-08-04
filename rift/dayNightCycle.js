@@ -433,28 +433,14 @@ function createDistantPlanet(scene) {
   return { core, driftSeed: Math.random() * Math.PI * 2 };
 }
 
-// A handful of tall vertical strips clustered together and given a slow
-// horizontal wave, rather than one flat plane — real auroras ripple
-// unevenly along their length, a single static strip would read as a
-// green banner, not a curtain of light.
+// Aurora removed entirely per explicit "remove the aurora" request — kept
+// as a no-op returning null (rather than deleted) so the call site and the
+// update loop's null-guard below don't need restructuring if it's ever
+// wanted back. Skips building the texture/sprites/group altogether, not
+// just hiding them, since there's no reason to pay for geometry nobody
+// will see.
 function createAurora(scene) {
-  const texture = createAuroraTexture();
-  const group = new THREE.Group();
-  const stripCount = getGraphicsSettings().auroraStrips;
-  const strips = [];
-  for (let i = 0; i < stripCount; i++) {
-    const mat = new THREE.SpriteMaterial({
-      map: texture, transparent: true, opacity: 0, blending: THREE.AdditiveBlending,
-      depthWrite: false, fog: false,
-    });
-    const sprite = new THREE.Sprite(mat);
-    sprite.scale.set(30, 160, 1);
-    sprite.position.set((i - stripCount / 2) * 22, 260, -400);
-    group.add(sprite);
-    strips.push({ sprite, seed: Math.random() * Math.PI * 2 });
-  }
-  scene.add(group);
-  return { group, strips };
+  return null;
 }
 
 // Shooting stars are a small pool of reusable streaks rather than
@@ -839,10 +825,12 @@ function updateDayNightCycle(cycle, dt) {
   // just atmospheric background dressing.
   const auroraVisibility = THREE.MathUtils.clamp(1 - dayAmount / 0.15, 0, 1);
   const auroraBoost = cycle.biome === "frost" ? 1.7 : 1;
-  for (const strip of cycle.aurora.strips) {
-    const shimmer = 0.4 + 0.6 * Math.max(0, Math.sin(cycle.elapsed * 0.35 + strip.seed));
-    strip.sprite.material.opacity = auroraVisibility * shimmer * 0.5 * auroraBoost;
-    strip.sprite.position.x += Math.sin(cycle.elapsed * 0.15 + strip.seed) * dt * 0.4;
+  if (cycle.aurora) {
+    for (const strip of cycle.aurora.strips) {
+      const shimmer = 0.4 + 0.6 * Math.max(0, Math.sin(cycle.elapsed * 0.35 + strip.seed));
+      strip.sprite.material.opacity = auroraVisibility * shimmer * 0.5 * auroraBoost;
+      strip.sprite.position.x += Math.sin(cycle.elapsed * 0.15 + strip.seed) * dt * 0.4;
+    }
   }
 
   // Shooting stars: a pool of reusable streaks, one spawned at a time on a

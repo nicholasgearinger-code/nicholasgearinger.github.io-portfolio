@@ -1585,7 +1585,8 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
   // so its submersion-based visibility can be toggled without touching
   // Verdant's canopy shafts. Count kept conservative (18, vs the
   // original 40) for a first re-introduction.
-  if (level.biome === "crystal" && waterLevel !== undefined) {
+  if (level.biome === "crystal" && LIQUID_LEVEL.crystal !== undefined) {
+    const uwWaterLevel = LIQUID_LEVEL.crystal; // own local lookup — the `waterLevel` above is block-scoped to the Verdant `if` and isn't visible here
     const uwShaftRand = mulberry32(hashStringToSeed(WORLD_SEED + "-uw-light-shafts-" + level.biome));
     const uwShaftBound = WORLD_BOUND_RADIUS * 0.85;
     const uwShaftCount = 18;
@@ -1594,8 +1595,8 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
       const z = (uwShaftRand() * 2 - 1) * uwShaftBound;
       if (Math.hypot(x, z) > uwShaftBound) continue;
       const groundY = sampleGroundHeight(x, z, terrainMesh) ?? 0;
-      if (groundY > waterLevel - 1.0) continue; // needs genuine depth below it — skip shallow-water/near-shore spots
-      const shaft = createUnderwaterLightShaft(x, z, groundY, waterLevel, uwShaftRand);
+      if (groundY > uwWaterLevel - 1.0) continue; // needs genuine depth below it — skip shallow-water/near-shore spots
+      const shaft = createUnderwaterLightShaft(x, z, groundY, uwWaterLevel, uwShaftRand);
       shaft.sprite.visible = false; // starts hidden — animate loop sets real visibility from isFullySubmerged each frame
       scene.add(shaft.sprite);
       underwaterShaftHandles.push(shaft);

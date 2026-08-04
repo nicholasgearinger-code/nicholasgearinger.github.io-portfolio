@@ -1,26 +1,18 @@
 import * as THREE from "three";
 import { getGraphicsSettings } from "./graphicsSettings.js";
-// Real mirror-reflection plane for Coral Shallows' above-water view — a
-// proven, addon-maintained implementation rather than hand-rolled
-// screen-space ray-marching. THREE.Water renders the scene from a
-// virtual flipped camera each frame; it's a genuine reflection of
-// surrounding geometry (terrain, sky, landmarks), not an approximation.
-// RE-ADDED after being pulled once already (see the git history / prior
-// session notes on the removal) — per explicit request to keep it and
-// fix the dark-patch problem rather than do without it. Two real
-// changes from the version that got pulled: (1) the reflection's own
-// internal render texture is now sized to the ACTUAL viewport aspect
-// ratio instead of a fixed 512x512 square — a portrait phone screen
-// forced into a square reflection buffer is a real, previously-untried
-// candidate for the corrupted/empty-looking render content that showed
-// up as dark patches, then later as a flat gray band, then vertical
-// striping; (2) waterColor lightened so ANY remaining dark reflected
-// area reads as a muted tint rather than a stark black patch, since a
-// genuinely failed/empty reflection sample will still show through this
-// color as its floor. If the artifacting comes back in any form, that's
-// a strong signal this addon has a deeper incompatibility with this
-// project's rendering setup that needs more than color/size tuning.
-import { Water } from "three/addons/objects/Water.js";
+// REMOVED (again): THREE.Water mirror-reflection plane. After extensive
+// tuning (patch size in both directions, texture resolution in both
+// directions, scene.environment on/off, vertex-displacing the mirror to
+// match the real Gerstner waves, flattening the real mesh instead) the
+// fundamental problem never resolved: a SEPARATE flat-ish reflective
+// surface will always be at some odds with the genuinely wave-displaced
+// colored mesh sitting right below it — user's own diagnosis ("two
+// systems working over each other") was correct. Replaced with a real
+// planar reflection sampled DIRECTLY inside this file's existing crystal
+// fragment shader (see the onBeforeCompile block below, uReflectionTex/
+// uReflectionMatrix) — rendered by main.js into an offscreen target each
+// frame and projected onto the ACTUAL wave-displaced geometry, so there
+// is no second surface left to ever visually desync from the real waves.
 
 // -----------------------------------------------------------------------------
 // SWAP POINT: lava/water rendering. A single large flat plane at a fixed
@@ -725,6 +717,10 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
     // analytic Gerstner normal + real view/sun vectors already computed
     // there for the Fresnel term (no duplicate math, just reused).
     geo.setAttribute("aSunGlint", new THREE.BufferAttribute(new Float32Array(posAttr.count), 1));
+    // Same pattern again — carries the already-computed grazing-angle
+    // Fresnel value into the reflection shader's blend strength, reused
+    // rather than recomputed in GLSL.
+    geo.setAttribute("aReflectionFresnel", new THREE.BufferAttribute(new Float32Array(posAttr.count), 1));
   }
 
   const matOptions = {
@@ -801,16 +797,27 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
       m.onBeforeCompile = (shader) => {
         shader.uniforms.uTime = { value: 0 };
         shader.uniforms.uFoamTex = { value: getFoamDetailTexture() };
+        // Real planar reflection — texture + projection matrix are both
+        // owned and updated by main.js each frame (it renders the actual
+        // reflection pass; see updateLiquidPlane's own reflectionTexture/
+        // reflectionMatrix params above for how they get here). Starts
+        // null/identity so nothing breaks before the first frame sets
+        // them.
+        shader.uniforms.uReflectionTex = { value: null };
+        shader.uniforms.uReflectionMatrix = { value: new THREE.Matrix4() };
         shader.vertexShader = shader.vertexShader
-          .replace("#include <common>", "#include <common>\nattribute float aFoam;\nvarying float vFoam;\nvarying vec2 vFoamPos;\nattribute float aSunGlint;\nvarying float vSunGlint;")
-          .replace("#include <begin_vertex>", "#include <begin_vertex>\nvFoam = aFoam;\nvFoamPos = position.xz;\nvSunGlint = aSunGlint;"); // local-space XZ IS world XZ here — this mesh has no runtime x/z translation or rotation (baked in at creation), only a Y offset
+          .replace("#include <common>", "#include <common>\nattribute float aFoam;\nvarying float vFoam;\nvarying vec2 vFoamPos;\nattribute float aSunGlint;\nvarying float vSunGlint;\nattribute float aReflectionFresnel;\nvarying float vReflectionFresnel;\nuniform mat4 uReflectionMatrix;\nvarying vec4 vReflectionCoord;")
+          .replace("#include <begin_vertex>", "#include <begin_vertex>\nvFoam = aFoam;\nvFoamPos = position.xz;\nvSunGlint = aSunGlint;\nvReflectionFresnel = aReflectionFresnel;\nvReflectionCoord = uReflectionMatrix * modelMatrix * vec4(transformed, 1.0);"); // local-space XZ IS world XZ here — this mesh has no runtime x/z translation or rotation (baked in at creation), only a Y offset. `transformed` at this point already holds the CPU-side wave-displaced position (the real per-frame Gerstner sum written into the position attribute in updateLiquidPlane, not a GPU displacement) — so the reflection coordinate genuinely follows the real wave surface, not a flat approximation of it.
         shader.fragmentShader = shader.fragmentShader
           .replace("#include <common>", `#include <common>
 uniform float uTime;
 uniform sampler2D uFoamTex;
+uniform sampler2D uReflectionTex;
 varying float vFoam;
 varying vec2 vFoamPos;
 varying float vSunGlint;
+varying float vReflectionFresnel;
+varying vec4 vReflectionCoord;
 // Compact 2D Worley/Voronoi noise — hashed jittered grid, 3x3 neighbor
 // search for the nearest feature point. Cheap enough for two octaves
 // per fragment on mobile.
@@ -833,6 +840,26 @@ float foamVoronoi(vec2 p) {
 }`)
           .replace("#include <color_fragment>", `#include <color_fragment>
 {
+  // Real planar reflection — projective texture lookup, the same
+  // standard technique THREE.Water/Reflector use internally, just
+  // sampled directly onto this ALREADY wave-displaced surface instead
+  // of a separate flat plane. Manual perspective divide (not
+  // textureProj, for GLSL ES1/ES3 compatibility) — guard against w<=0
+  // (behind the reflection camera / degenerate) so a bad sample can't
+  // wrap/smear across the screen.
+  if (vReflectionCoord.w > 0.0001) {
+    vec2 reflectionUv = vReflectionCoord.xy / vReflectionCoord.w;
+    if (reflectionUv.x > 0.0 && reflectionUv.x < 1.0 && reflectionUv.y > 0.0 && reflectionUv.y < 1.0) {
+      vec3 reflectionColor = texture2D(uReflectionTex, reflectionUv).rgb;
+      // vReflectionFresnel is the SAME grazing-angle Fresnel value
+      // already computed once per vertex in updateLiquidPlane (JS side)
+      // for the existing sky-tint blend — reused here rather than
+      // recomputed, so this can't drift out of sync with it. Real
+      // reflections are strongest at grazing angles, weakest looking
+      // straight down — exactly what this term already models.
+      diffuseColor.rgb = mix(diffuseColor.rgb, reflectionColor, vReflectionFresnel * 0.65);
+    }
+  }
   // Two Voronoi octaves at different scale/drift — big loose bubble
   // clusters plus finer surface foam, rather than one uniform cell size.
   float cellsBig = foamVoronoi(vFoamPos * 0.3 + uTime * 0.035);
@@ -903,111 +930,6 @@ float foamVoronoi(vec2 p) {
     mesh = new THREE.Mesh(geo, buildWaterMaterial(THREE.FrontSide, true));
     mesh.position.y = y;
     scene.add(mesh);
-  }
-
-  // Real mirror-reflection plane — Coral Shallows only, above-water view
-  // only (toggled in updateLiquidPlane). A SEPARATE flat plane rather
-  // than reusing the wavy `geo` above: THREE.Water's own shader handles
-  // its surface distortion internally via its normal map + distortionScale,
-  // not vertex displacement, so it wants a plain flat plane to work from.
-  // Own texture clone (not the shared cached one, not even the same clone
-  // the colored mesh's normalMap uses) since Water sets its own
-  // wrapping/repeat internally — cloning avoids any property conflict
-  // between the two consumers of the same underlying image.
-  //
-  // SIZED SMALL AND CAMERA-FOLLOWING (not one huge static plane covering
-  // the whole ocean) — per explicit request, and genuinely the standard
-  // technique real games use for this effect anyway: a modest patch
-  // recentered on the player every frame (see updateLiquidPlane) rather
-  // than a fixed plane spanning the entire `size`-unit ocean. Distant
-  // reflection detail is imperceptible anyway at typical wave/chop
-  // scale, and a smaller surface means far less area for any UV/
-  // precision edge case to show up on. Segment count bumped from a bare
-  // 2-triangle plane to a real grid too — Water's own reflection effect
-  // is a per-PIXEL fragment-shader technique (not vertex-driven), so
-  // this isn't expected to be the actual fix, but it's harmless and
-  // costs nothing meaningful at this size.
-  // Bumped from an initial 70 up to 130 — the patch's own edge (where
-  // reflective water meets the regular non-reflective mesh beyond it)
-  // was itself visible as a "moving dark boundary" following the camera
-  // around, per explicit report. Pushing it further out doesn't remove
-  // that edge, just moves it further from typical view distance.
-  // Pushed further to 220 as a deliberate stress test — per explicit
-  // follow-up, this confirmed patch size is a REAL factor in the
-  // corruption (not just the viewport-aspect-ratio texture fix): bigger
-  // read worse again. Went smaller than the very first attempt (70)
-  // down to 35 next, then per explicit "much smaller" again down to 14
-  // — smaller surface area keeps reading as genuinely better each time
-  // it's tried, not a one-off. Doubling the texture resolution (256,
-  // then 1024) alone didn't visibly change anything, so now testing
-  // patch size again but at this much higher resolution — back up to
-  // 130 (a size already tried once at the old 512 cap) to see whether
-  // more texture detail changes how a bigger patch reads, isolating
-  // resolution and patch size as properly independent variables rather
-  // than only ever changing one at a time from a stale baseline.
-  const MIRROR_PATCH_SIZE = 130;
-  let mirrorWater = null;
-  if (biome === "crystal") {
-    const mirrorGeo = new THREE.PlaneGeometry(MIRROR_PATCH_SIZE, MIRROR_PATCH_SIZE, 10, 10);
-    // MUST be given a real repeat count — a fresh clone defaults to
-    // (1,1), meaning ONE full copy of this small texture gets stretched
-    // across the ENTIRE plane instead of tiling into many small ripples.
-    // Confirmed real bug from the first attempt at this feature.
-    const mirrorNormals = getRippleNormalTexture().clone();
-    mirrorNormals.needsUpdate = true;
-    const mirrorRepeat = Math.max(4, Math.round(MIRROR_PATCH_SIZE / 9));
-    mirrorNormals.repeat.set(mirrorRepeat, mirrorRepeat);
-    // Reflection render-texture sized to the ACTUAL viewport aspect
-    // ratio rather than a fixed square — a portrait phone viewport
-    // forced through a square reflection buffer is a real,
-    // previously-untried candidate for the corrupted-looking reflection
-    // content (dark patches, then a flat gray band, then vertical
-    // striping) that kept surfacing across earlier attempts at this
-    // feature. Cap history: 512 originally, dropped to 256 to test
-    // lower resolution — user reported that made it noticeably WORSE
-    // ("more black than reflection"), so the direction reversed: now
-    // pushed to 1024, well above the original, on the theory that too
-    // LOW a resolution (not too high) may be starving the reflection of
-    // real content to sample, reading as empty/black area instead.
-    const MIRROR_TEX_CAP = 1024;
-    const viewportAspect = window.innerWidth / window.innerHeight;
-    const mirrorTexW = viewportAspect >= 1 ? MIRROR_TEX_CAP : Math.max(64, Math.round(MIRROR_TEX_CAP * viewportAspect));
-    const mirrorTexH = viewportAspect >= 1 ? Math.max(64, Math.round(MIRROR_TEX_CAP / viewportAspect)) : MIRROR_TEX_CAP;
-    mirrorWater = new Water(mirrorGeo, {
-      textureWidth: mirrorTexW,
-      textureHeight: mirrorTexH,
-      waterNormals: mirrorNormals,
-      sunDirection: new THREE.Vector3(0, 1, 0), // overwritten every frame in updateLiquidPlane from the real sun position
-      sunColor: 0xffffff,
-      // Was lightened toward white (0.35 lerp) as a defensive fallback
-      // while the reflection render itself was still suspected broken —
-      // now that the aspect-ratio-corrected texture + smaller patch has
-      // the reflection genuinely rendering real content (confirmed: the
-      // sun visibly reflects correctly in a screenshot), that lightening
-      // is no longer needed and was just reading as washed-out/pink
-      // under sunset light per explicit "should be darker blue" report.
-      // Small lerp kept (0.08, not zero) purely so a fully opaque worst-
-      // case reflection sample never goes fully pitch-black, not as a
-      // wash across the whole thing.
-      waterColor: style.baseColor.clone().lerp(new THREE.Color(0xffffff), 0.08).getHex(),
-      distortionScale: 2.6,
-      // Semi-transparent — layered ON TOP of the existing colored/foam/
-      // sun-glint mesh below, not a replacement for it. A fully opaque
-      // reflection would hide all of that work.
-      alpha: 0.32,
-      fog: !!scene.fog,
-    });
-    mirrorWater.rotation.x = -Math.PI / 2;
-    // Tiny Y offset above the main mesh (not coincident) — avoids the
-    // unstable per-frame camera-distance sort two coincident large
-    // transparent surfaces get, which reads as flicker when the camera
-    // moves. A stable renderOrder (drawn after the main mesh) is the
-    // second half of that same fix. X/Z position is set every frame in
-    // updateLiquidPlane (camera-following), not fixed here.
-    mirrorWater.position.y = y + 0.03;
-    mirrorWater.renderOrder = 1;
-    mirrorWater.visible = false; // starts hidden — updateLiquidPlane sets real visibility every frame based on camera position
-    scene.add(mirrorWater);
   }
 
   // A separate unlit, additively-blended plane just above the surface —
@@ -1098,70 +1020,27 @@ float foamVoronoi(vec2 p) {
 
   return {
     mesh, backMesh, glow, shimmer, rocks, waterY: y, basePositions, biome, style, depthColors,
-    flowDir: normalizeFlow(flowDir), crustOctaves, crackOctaves, flowBeads, rippleTexture, mirrorWater,
+    flowDir: normalizeFlow(flowDir), crustOctaves, crackOctaves, flowBeads, rippleTexture,
   };
 }
 
-function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir, skyHorizon) {
+function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir, skyHorizon, reflectionTexture, reflectionMatrix) {
   if (!handle) return;
-  const { mesh, backMesh, glow, shimmer, rocks, basePositions, biome, style, flowDir, crustOctaves, crackOctaves, flowBeads, waterY, rippleTexture, mirrorWater } = handle;
-  // Real mirror reflection — only shown above the surface (the plane it
-  // renders from assumes a viewer looking down at the water, same as any
-  // real mirror; from underneath it would show a nonsensical flipped
-  // reflection). Layered on top of the always-visible colored/foam mesh
-  // below at low alpha, not a replacement for it — see its creation
-  // comment above for why. `cameraY === undefined` defaults to shown,
-  // matching how this project's other camera-position-dependent checks
-  // already treat a missing value as "assume above water" rather than
-  // silently doing nothing.
-  if (mirrorWater) {
-    mirrorWater.visible = cameraY === undefined ? true : cameraY > waterY;
-    if (sunDir) mirrorWater.material.uniforms.sunDirection.value.copy(sunDir).normalize();
-    mirrorWater.material.uniforms.time.value = elapsed;
-    // Camera-following patch, not a fixed plane — recenters under the
-    // player every frame so a small MIRROR_PATCH_SIZE-unit patch always
-    // covers the water directly around them regardless of where they
-    // are on the map, instead of needing to span the whole ocean. Y
-    // stays fixed at the water surface height (set once at creation);
-    // only X/Z track the camera.
-    if (playerPos) {
-      mirrorWater.position.x = playerPos.x;
-      mirrorWater.position.z = playerPos.z;
-    }
-    // Vertex-displace the mirror's OWN geometry to follow the real
-    // Gerstner waves — per explicit report that a perfectly flat mirror
-    // plane sitting rigidly above the genuinely wavy colored mesh read
-    // as "two systems fighting" (a hard-edged flat rectangle floating
-    // over rippling water). Reuses the EXACT same GERSTNER_WAVES sum
-    // already driving the real ocean surface below — pure JS math on
-    // vertex positions, no shader changes, so this carries none of the
-    // risk a hand-rolled shader edit would.
-    //
-    // COORDINATE NOTE: this geometry was never geometry.rotateX()'d at
-    // creation (unlike the main colored mesh's `geo`) — the -90° rotation
-    // lives on the MESH (mirrorWater.rotation.x), applied at render time.
-    // For that rotation, a vertex's local (x, y, 0) maps to world
-    // (x, 0, -y) — so local Y still corresponds to world Z (negated),
-    // and crucially, WORLD height comes from the vertex's LOCAL Z
-    // component, not local Y. That's why this writes displacement via
-    // `.setZ()` below, not `.setY()` — using setY here would silently do
-    // nothing visible (verified this mapping by hand before writing
-    // code, not by trial and error).
-    const mPos = mirrorWater.geometry.attributes.position;
-    const baseX = mirrorWater.position.x, baseZ = mirrorWater.position.z;
-    for (let i = 0; i < mPos.count; i++) {
-      const localX = mPos.getX(i);
-      const localY = mPos.getY(i);
-      const worldX = baseX + localX;
-      const worldZ = baseZ - localY;
-      let dy = 0;
-      for (const w of GERSTNER_WAVES) {
-        const f = w.k * (w.ndx * worldX + w.ndz * worldZ) - w.speed * elapsed;
-        dy += w.amplitude * Math.sin(f);
-      }
-      mPos.setZ(i, dy);
-    }
-    mPos.needsUpdate = true;
+  const { mesh, backMesh, glow, shimmer, rocks, basePositions, biome, style, flowDir, crustOctaves, crackOctaves, flowBeads, waterY, rippleTexture } = handle;
+  // Real planar reflection, sampled DIRECTLY inside the crystal fragment
+  // shader below — reflectionTexture/reflectionMatrix are computed and
+  // owned by main.js each frame (it's the one place with access to the
+  // real renderer/camera needed to render the reflection pass) and
+  // handed in here, same pattern already used for sunDir/skyColor. Both
+  // optional/undefined-safe: every other biome, and any frame before
+  // main.js has set them up, simply skips pushing them.
+  if (mesh.material.userData.shader) {
+    if (reflectionTexture) mesh.material.userData.shader.uniforms.uReflectionTex.value = reflectionTexture;
+    if (reflectionMatrix) mesh.material.userData.shader.uniforms.uReflectionMatrix.value.copy(reflectionMatrix);
+  }
+  if (backMesh && backMesh.material.userData.shader) {
+    if (reflectionTexture) backMesh.material.userData.shader.uniforms.uReflectionTex.value = reflectionTexture;
+    if (reflectionMatrix) backMesh.material.userData.shader.uniforms.uReflectionMatrix.value.copy(reflectionMatrix);
   }
   // Scroll the ripple normal map slowly along the plane's own flow
   // direction — a static (non-scrolling) normal map would still add real
@@ -1192,6 +1071,7 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
   // per frame, not per vertex.
   const foamAttr = biome === "crystal" ? mesh.geometry.attributes.aFoam : null;
   const sunGlintAttr = biome === "crystal" ? mesh.geometry.attributes.aSunGlint : null;
+  const reflectionFresnelAttr = biome === "crystal" ? mesh.geometry.attributes.aReflectionFresnel : null;
   const foamShader = biome === "crystal" ? mesh.material.userData.shader : null;
   if (foamShader) foamShader.uniforms.uTime.value = elapsed;
   // backMesh has its own separate material (built by its own
@@ -1401,6 +1281,11 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
           const fresnel = Math.pow(grazing, 3);
           fresnelTint.copy(fresnelZenith).lerp(fresnelHorizon, grazing);
           tmpColor.lerp(fresnelTint, fresnel * 0.55);
+          // Real planar reflection blend strength — reuses this SAME
+          // grazing-angle fresnel value (not recomputed) so the new
+          // reflection sampling in the fragment shader can't drift out
+          // of sync with the sky-tint blend right above it.
+          if (reflectionFresnelAttr) reflectionFresnelAttr.setX(i, fresnel);
           // Sun-glitter — real specular sparkle toward the sun, per
           // explicit request to get closer to a reference photo showing
           // a bright glinting streak across the water. Reuses the SAME
@@ -1438,6 +1323,13 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
         } else if (sunGlintAttr) {
           sunGlintAttr.setX(i, 0);
         }
+        if (reflectionFresnelAttr && !playerPos) reflectionFresnelAttr.setX(i, 0);
+        // Real vertical wave height restored — a previous round had this
+        // flattened to 0 to move ALL visible wave motion onto a separate
+        // mirror plane, which has since been removed entirely in favor
+        // of sampling a real planar reflection directly onto THIS
+        // genuinely wave-displaced geometry. That only works if this
+        // mesh actually displaces again.
         posAttr.setXYZ(i, gerstnerX, ripple, gerstnerZ);
         normalAttr.setXYZ(i, nx, ny, nz);
         foamAttr.setX(i, disturbance); // raw signal — smoothstep/threshold shaping happens in the fragment shader, not here
@@ -1453,6 +1345,7 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
     normalAttr.needsUpdate = true; // written analytically above, per-frame — skip the geometric recompute below
     foamAttr.needsUpdate = true;
     sunGlintAttr.needsUpdate = true;
+    reflectionFresnelAttr.needsUpdate = true;
   } else {
     mesh.geometry.computeVertexNormals();
   }
@@ -1516,18 +1409,6 @@ function disposeLiquidPlane(scene, handle) {
     // disposed above, only the material is this mesh's own.
     scene.remove(handle.backMesh);
     handle.backMesh.material.dispose();
-  }
-  if (handle.mirrorWater) {
-    scene.remove(handle.mirrorWater);
-    handle.mirrorWater.geometry.dispose();
-    // Water's own normal-map texture is a per-instance clone passed in
-    // at construction (see createLiquidPlane) — owned exclusively by
-    // this mirrorWater, dispose it alongside the material itself.
-    // Uniform name confirmed against actual Water.js source (not a guess).
-    if (handle.mirrorWater.material.uniforms.normalSampler) {
-      handle.mirrorWater.material.uniforms.normalSampler.value.dispose();
-    }
-    handle.mirrorWater.material.dispose();
   }
   if (handle.glow) {
     scene.remove(handle.glow);

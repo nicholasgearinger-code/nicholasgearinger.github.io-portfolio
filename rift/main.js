@@ -178,6 +178,95 @@ function updateSkyEnvironment(zenithColor, horizonColor) {
   scene.environment = skyEnvRenderTarget.texture;
 }
 
+// -----------------------------------------------------------------------------
+// Real planar water reflection — Coral Shallows only. Renders the scene
+// ONCE per frame from a camera reflected across the water's horizontal
+// plane into an offscreen target, sampled DIRECTLY inside liquid.js's
+// existing crystal fragment shader (uReflectionTex/uReflectionMatrix —
+// see buildWaterMaterial's onBeforeCompile there). This replaced an
+// earlier THREE.Water mirror-plane attempt that never fully resolved
+// after many rounds of tuning — sampling onto the REAL wave-displaced
+// mesh instead of a separate flat plane removes the structural mismatch
+// that kept causing visible seams between the two.
+//
+// Resolution is deliberately well below the main render (this is a
+// SECOND full scene render every frame it's active — genuinely
+// expensive, more so than anything else added this session) — capped at
+// 512 on the long axis, matching the same aspect-ratio-correction
+// already learned to matter for the old mirror plane's own texture.
+const REFLECTION_TEX_CAP = 512;
+const reflectionAspect = viewport.clientWidth / viewport.clientHeight;
+const reflectionTexW = reflectionAspect >= 1 ? REFLECTION_TEX_CAP : Math.max(64, Math.round(REFLECTION_TEX_CAP * reflectionAspect));
+const reflectionTexH = reflectionAspect >= 1 ? Math.max(64, Math.round(REFLECTION_TEX_CAP / reflectionAspect)) : REFLECTION_TEX_CAP;
+const reflectionRenderTarget = new THREE.WebGLRenderTarget(reflectionTexW, reflectionTexH);
+const reflectedCamera = new THREE.PerspectiveCamera();
+// Bias matrix — maps clip-space [-1,1] to texture-space [0,1], the same
+// standard technique THREE.Water/Reflector use internally for projective
+// texture sampling. Combined with the reflected camera's own view+
+// projection matrices fresh each frame (see the animate loop below) to
+// produce the final uReflectionMatrix passed into liquid.js.
+const reflectionBiasMatrix = new THREE.Matrix4().set(
+  0.5, 0.0, 0.0, 0.5,
+  0.0, 0.5, 0.0, 0.5,
+  0.0, 0.0, 0.5, 0.5,
+  0.0, 0.0, 0.0, 1.0
+);
+const reflectionTextureMatrix = new THREE.Matrix4();
+// Scratch objects reused every frame (avoid per-frame allocation in the
+// render loop, same convention already used elsewhere in this file for
+// per-frame vector math).
+const reflectionForward = new THREE.Vector3();
+const reflectionTargetPoint = new THREE.Vector3();
+const reflectionCamUp = new THREE.Vector3();
+
+// Renders the reflection pass for the given water height and pushes the
+// resulting texture/matrix into the crystal water material. Called from
+// the animate loop, crystal-biome-and-above-water only (see call site).
+// Real, well-defined math for the SPECIAL CASE of a purely horizontal
+// mirror plane (this project's water is always flat/horizontal, never
+// tilted) — reflecting a point or direction across a horizontal plane at
+// height H just negates its Y component relative to H, which is far
+// simpler to verify by hand than the general oblique-plane reflection
+// matrix THREE.js's own Reflector.js needs for an arbitrarily-oriented
+// mirror.
+function updateWaterReflection(waterY, liquidHandle) {
+  if (!liquidHandle || !liquidHandle.mesh) return;
+  const camPos = camera.position;
+  camera.getWorldDirection(reflectionForward);
+  const reflectedX = camPos.x, reflectedY = 2 * waterY - camPos.y, reflectedZ = camPos.z;
+  reflectionTargetPoint.set(camPos.x + reflectionForward.x, 2 * waterY - (camPos.y + reflectionForward.y), camPos.z + reflectionForward.z);
+  reflectionCamUp.copy(camera.up).applyQuaternion(camera.quaternion);
+  reflectionCamUp.y *= -1;
+  reflectedCamera.position.set(reflectedX, reflectedY, reflectedZ);
+  reflectedCamera.up.copy(reflectionCamUp);
+  reflectedCamera.lookAt(reflectionTargetPoint);
+  reflectedCamera.fov = camera.fov;
+  reflectedCamera.aspect = camera.aspect;
+  reflectedCamera.near = camera.near;
+  reflectedCamera.far = camera.far;
+  reflectedCamera.updateProjectionMatrix();
+  reflectedCamera.updateMatrixWorld();
+
+  // The water mesh can't usefully reflect itself — hide it (and its
+  // back-face twin) for just this one render, restore immediately after.
+  const wasMeshVisible = liquidHandle.mesh.visible;
+  const wasBackMeshVisible = liquidHandle.backMesh ? liquidHandle.backMesh.visible : null;
+  liquidHandle.mesh.visible = false;
+  if (liquidHandle.backMesh) liquidHandle.backMesh.visible = false;
+
+  const prevTarget = renderer.getRenderTarget();
+  renderer.setRenderTarget(reflectionRenderTarget);
+  renderer.render(scene, reflectedCamera);
+  renderer.setRenderTarget(prevTarget);
+
+  liquidHandle.mesh.visible = wasMeshVisible;
+  if (liquidHandle.backMesh) liquidHandle.backMesh.visible = wasBackMeshVisible;
+
+  reflectionTextureMatrix.copy(reflectionBiasMatrix);
+  reflectionTextureMatrix.multiply(reflectedCamera.projectionMatrix);
+  reflectionTextureMatrix.multiply(reflectedCamera.matrixWorldInverse);
+}
+
 function resizeToViewport() {
   const w = viewport.clientWidth, h = viewport.clientHeight;
   if (w === 0 || h === 0) return;
@@ -1816,7 +1905,21 @@ function animate() {
   if (terrainMesh && terrainMesh.material.userData.shader) {
     terrainMesh.material.userData.shader.uniforms.uTime.value = elapsedTime;
   }
-  updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, camera.position, sun.position, dayNight.skyHorizon);
+  // Real planar water reflection — Coral Shallows only, above-water only
+  // (a reflection rendered from below the surface looking up would be
+  // nonsensical for this same-plane technique). Computes the active
+  // biome directly here (currentLevelIdx/LEVELS, not the later `currentBiome`
+  // const — that's declared further down this function, AFTER this point,
+  // so referencing it here would throw). Also uses a plain position check
+  // rather than the later-computed isFullySubmerged/hysteresis state —
+  // perfectly adequate for deciding whether to spend a second scene
+  // render this frame, doesn't need hysteresis the way the underwater
+  // post-process toggle does.
+  const reflectionBiome = currentLevelIdx >= 0 ? LEVELS[currentLevelIdx].biome : null;
+  if (reflectionBiome === "crystal" && camera.position.y > LIQUID_LEVEL.crystal) {
+    updateWaterReflection(LIQUID_LEVEL.crystal, liquidHandle);
+  }
+  updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, camera.position, sun.position, dayNight.skyHorizon, reflectionRenderTarget.texture, reflectionTextureMatrix);
   updateWaterfall(waterfallHandle, dt, elapsedTime);
   updateOceanSurfaceDetail(oceanSurfaceDetailHandle, elapsedTime, dayNight.dayAmount);
   updateRiverCurrent(riverCurrentHandle, dt);
@@ -1857,17 +1960,14 @@ function animate() {
   // uses it.
   // TEMPORARILY DISABLED as a diagnostic test — per explicit request, to
   // isolate whether scene.environment (a scene-wide PBR env map) being
-  // active at the same time as the THREE.Water mirror plane is
-  // contributing to the reflection-corruption saga this biome's water
-  // has been through. THREE.Water wasn't originally designed with a
-  // global environment map coexisting alongside its own reflection pass
-  // — this has never actually been isolated/tested before now. Water's
-  // clearcoat layer will fall back to reading black at grazing angles
-  // while this is off (the exact symptom updateSkyEnvironment's own
-  // comment describes it existing to fix) — an expected, acceptable
-  // trade-off for this test, not a new bug if noticed. Re-enable this
-  // one line to restore normal behavior once the test result is in.
-  if (false && currentBiome === "crystal" && getGraphicsTier() !== "low") {
+  // active at the same time as the (since-removed) THREE.Water mirror
+  // plane was contributing to that reflection-corruption saga. RE-
+  // ENABLED — that whole mirror-plane approach has since been replaced
+  // entirely with a real planar reflection sampled directly in liquid.js
+  // (see updateWaterReflection above), so the diagnostic test's original
+  // premise no longer applies; this env map still independently feeds
+  // the water's clearcoat layer as it always did.
+  if (currentBiome === "crystal" && getGraphicsTier() !== "low") {
     updateSkyEnvironment(dayNight.skyZenith, dayNight.skyHorizon);
   }
   const currentLiquidLevel = currentBiome !== null ? LIQUID_LEVEL[currentBiome] : undefined;

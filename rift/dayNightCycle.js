@@ -749,9 +749,18 @@ function updateDayNightCycle(cycle, dt) {
   // "set" below the horizon before disappearing, just like a second sun.
   // Real moons don't do that: they just fade into the brightening sky as
   // the sun comes up, regardless of where the moon itself currently sits.
-  // Tied to dayAmount instead — fades out as the sun actually rises, and
-  // fades back in as it sets, independent of the moon's own position.
-  const moonVisibility = THREE.MathUtils.clamp(1 - dayAmount / 0.35, 0, 1) * 0.92 + 0.08; // floored at a faint 0.08 rather than fading all the way to invisible — "fade until a very faint blue-gray" once the sun is up, not disappear entirely
+  // BUG FIX: was keyed off dayAmount (= Math.max(0, elevation)), which
+  // sits at exactly 0 through the entire dawn twilight — the sky was
+  // already visibly brightening/coloring while elevation was still
+  // negative, but the moon stayed at full 1.0 visibility that whole time
+  // and only started fading once the sun had literally cleared the
+  // horizon — reading as "bright moon still up at sunrise," exactly the
+  // reported bug. Now keyed off raw elevation directly, so the fade
+  // starts during dawn twilight (elevation still negative, well before
+  // the sun crosses the horizon) and is nearly complete by the time the
+  // sun actually rises, not just beginning then.
+  const moonFadeT = THREE.MathUtils.clamp((elevation - (-0.2)) / 0.25, 0, 1); // 0 at elevation=-0.2 (dawn twilight starts), 1 at elevation=0.05 (just after sunrise)
+  const moonVisibility = (1 - moonFadeT) * 0.92 + 0.08; // floored at a faint 0.08 rather than fading all the way to invisible — "fade until a very faint blue-gray" once the sun is up, not disappear entirely
 
   cycle.sunBody.core.material.opacity = sunVisibility;
   cycle.sunBody.glow.material.opacity = cycle.sunBody.baseGlowOpacity * sunVisibility;

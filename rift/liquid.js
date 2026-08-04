@@ -74,10 +74,23 @@ const LIQUID_STYLE = {
 // (bigger/slower swells carry more amplitude, small wavelets are fast and
 // shallow) without needing to actually simulate the physics.
 const GERSTNER_WAVES_RAW = [
-  { dirX: 1.0, dirZ: 0.3, wavelength: 40, amplitude: 0.42, speed: 1.75, steepness: 0.5 },  // the big rolling swell
-  { dirX: 0.3, dirZ: 1.0, wavelength: 24, amplitude: 0.24, speed: 2.5, steepness: 0.45 }, // a second swell crossing at an angle
-  { dirX: -0.7, dirZ: 0.5, wavelength: 13, amplitude: 0.13, speed: 3.4, steepness: 0.35 }, // finer chop
-  { dirX: 0.6, dirZ: -0.65, wavelength: 7, amplitude: 0.06, speed: 4.6, steepness: 0.3 },   // fine surface texture
+  // Amplitudes roughly doubled from the original set — per explicit
+  // "water lacks detail" report, traced to the real root cause: total
+  // combined wave height summed to well under 1 unit, viewed from a
+  // 1.6-unit player eye height. That's genuinely too subtle to read as
+  // real chop, and since foam/sun-glitter/reflection-distortion are ALL
+  // gated by this same wave signal (disturbance, normal magnitude), an
+  // under-scaled ocean suppresses every one of those systems at once —
+  // a single root cause explaining the across-the-board flat look,
+  // rather than any one missing feature. Self-intersection safety
+  // margin (steepness*k*amplitude, per this file's own established
+  // rule) was previously ~0.13 at worst case — doubling amplitude
+  // brings that to ~0.26, still comfortably under the ~1.0 fold-over
+  // threshold with real headroom left.
+  { dirX: 1.0, dirZ: 0.3, wavelength: 40, amplitude: 0.85, speed: 1.75, steepness: 0.5 },  // the big rolling swell
+  { dirX: 0.3, dirZ: 1.0, wavelength: 24, amplitude: 0.48, speed: 2.5, steepness: 0.45 }, // a second swell crossing at an angle
+  { dirX: -0.7, dirZ: 0.5, wavelength: 13, amplitude: 0.26, speed: 3.4, steepness: 0.35 }, // finer chop
+  { dirX: 0.6, dirZ: -0.65, wavelength: 7, amplitude: 0.12, speed: 4.6, steepness: 0.3 },   // fine surface texture
 ];
 const GERSTNER_WAVES = GERSTNER_WAVES_RAW.map((w) => {
   const len = Math.hypot(w.dirX, w.dirZ) || 1;

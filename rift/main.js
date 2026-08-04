@@ -841,10 +841,10 @@ uniform float uWaterLevel;
 // uniform values.
 float gerstnerHeightVert(vec2 xz, float t) {
   float h = 0.0;
-  h += 0.42 * sin(0.15708 * dot(normalize(vec2(1.0, 0.3)), xz) - 1.75 * t);
-  h += 0.24 * sin(0.26180 * dot(normalize(vec2(0.3, 1.0)), xz) - 2.5 * t);
-  h += 0.13 * sin(0.48332 * dot(normalize(vec2(-0.7, 0.5)), xz) - 3.4 * t);
-  h += 0.06 * sin(0.89760 * dot(normalize(vec2(0.6, -0.65)), xz) - 4.6 * t);
+  h += 0.85 * sin(0.15708 * dot(normalize(vec2(1.0, 0.3)), xz) - 1.75 * t);
+  h += 0.48 * sin(0.26180 * dot(normalize(vec2(0.3, 1.0)), xz) - 2.5 * t);
+  h += 0.26 * sin(0.48332 * dot(normalize(vec2(-0.7, 0.5)), xz) - 3.4 * t);
+  h += 0.12 * sin(0.89760 * dot(normalize(vec2(0.6, -0.65)), xz) - 4.6 * t);
   return h;
 }`)
         .replace("#include <begin_vertex>", `#include <begin_vertex>
@@ -943,6 +943,14 @@ float gFoamMask = 0.0;`)
   // above instead of an unrelated clock.
   float shoreDist = vCausticWorldPos.y - uWaterLevel;
   float reachHeight = 0.1 + waveNorm * 0.5; // was 0.15 + waveNorm*0.9 (up to 1.05 above the waterline) — too far up the beach for a real wave's run-up
+  // Edge jitter — a slow, large-scale (NOT time-animated, so it reads
+  // as a fixed irregular coastline rather than flickering) Voronoi
+  // sample perturbing the effective wash-line height per-fragment, so
+  // the foam line itself is organic/wavy rather than tracing a
+  // perfectly smooth height contour — real coastlines and wave-wash
+  // lines are never that clean.
+  vec2 jv = causticVoronoiF1F2(vCausticWorldPos.xz * 0.15);
+  float jitteredReach = reachHeight + (jv.x - 0.5) * 0.12;
   // Foam needs real internal structure to read as liquid rather than a
   // glowing strip. A single Voronoi layer at one scale tiles into an
   // evenly-spaced grid of same-size circles — exactly the "disco ball"
@@ -957,8 +965,29 @@ float gFoamMask = 0.0;`)
   vec2 fv2 = causticVoronoiF1F2(foamUv2);
   float foamCell = (1.0 - smoothstep(0.0, 0.4, fv1.x)) * 0.6 + (1.0 - smoothstep(0.0, 0.32, fv2.x)) * 0.55;
   foamCell = clamp(foamCell, 0.0, 1.0);
-  float foamZone = 1.0 - smoothstep(0.0, 0.4, abs(shoreDist - reachHeight));
-  float foamMask = clamp(foamCell * foamZone * upwardFacing, 0.0, 1.0);
+  // Core wash line — NARROW band (was a 0.4 half-width wash reading as
+  // a broad diffuse cloud, per explicit "should be a thin line like the
+  // reference photo, not a wide wash" report) — this is what actually
+  // gives a crisp, well-defined line right at the water's edge instead
+  // of a soft blur.
+  float coreZone = 1.0 - smoothstep(0.0, 0.1, abs(shoreDist - jitteredReach));
+  float coreFoam = clamp(foamCell * coreZone, 0.0, 1.0);
+  // Lacy tendrils — thin BRANCHING LINES (reusing the exact same
+  // Voronoi cell-EDGE technique the caustic net above already uses —
+  // F2-F1 traces thin lines along cell boundaries, not filled circles)
+  // reaching a bit further up the beach past the core line and fading
+  // out with distance. This is what actually produces the fingered,
+  // lacy look real foam has clawing into dry sand, which filled bubble
+  // blobs alone can't reproduce — a genuinely different pattern shape,
+  // not just a softer/smaller version of the same one.
+  vec2 tendrilUv = vCausticWorldPos.xz * 2.2 + vec2(uTime * 0.06, uTime * 0.045);
+  vec2 tv = causticVoronoiF1F2(tendrilUv);
+  float tendrilLines = 1.0 - smoothstep(0.0, 0.06, tv.y - tv.x);
+  float tendrilReach = 0.35; // how far past the core line tendrils can extend, same height units as shoreDist
+  float beyondLine = max(0.0, shoreDist - jitteredReach); // only extends OUTWARD/up the beach, never back into the water
+  float tendrilFalloff = 1.0 - smoothstep(0.0, tendrilReach, beyondLine);
+  float tendrilFoam = clamp(tendrilLines * tendrilFalloff * step(beyondLine, tendrilReach), 0.0, 1.0);
+  float foamMask = clamp(max(coreFoam, tendrilFoam * 0.85) * upwardFacing, 0.0, 1.0);
   gFoamMask = foamMask; // read by the emissivemap_fragment injection below, so foam stays visible even under night's dim lighting
   // Real sand right at the water's edge is ALWAYS wet — a permanent,
   // always-on dark band centered right at the mean waterline, not

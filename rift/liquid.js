@@ -938,12 +938,17 @@ float foamVoronoi(vec2 p) {
   // read worse again. Went smaller than the very first attempt (70)
   // down to 35 next, then per explicit "much smaller" again down to 14
   // — smaller surface area keeps reading as genuinely better each time
-  // it's tried, not a one-off. At this size the reflective patch only
-  // extends ~7 units from the player in any direction.
-  const MIRROR_PATCH_SIZE = 14;
+  // it's tried, not a one-off. Doubling the texture resolution (256,
+  // then 1024) alone didn't visibly change anything, so now testing
+  // patch size again but at this much higher resolution — back up to
+  // 130 (a size already tried once at the old 512 cap) to see whether
+  // more texture detail changes how a bigger patch reads, isolating
+  // resolution and patch size as properly independent variables rather
+  // than only ever changing one at a time from a stale baseline.
+  const MIRROR_PATCH_SIZE = 130;
   let mirrorWater = null;
   if (biome === "crystal") {
-    const mirrorGeo = new THREE.PlaneGeometry(MIRROR_PATCH_SIZE, MIRROR_PATCH_SIZE, 4, 4);
+    const mirrorGeo = new THREE.PlaneGeometry(MIRROR_PATCH_SIZE, MIRROR_PATCH_SIZE, 10, 10);
     // MUST be given a real repeat count — a fresh clone defaults to
     // (1,1), meaning ONE full copy of this small texture gets stretched
     // across the ENTIRE plane instead of tiling into many small ripples.
@@ -1123,6 +1128,40 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
       mirrorWater.position.x = playerPos.x;
       mirrorWater.position.z = playerPos.z;
     }
+    // Vertex-displace the mirror's OWN geometry to follow the real
+    // Gerstner waves — per explicit report that a perfectly flat mirror
+    // plane sitting rigidly above the genuinely wavy colored mesh read
+    // as "two systems fighting" (a hard-edged flat rectangle floating
+    // over rippling water). Reuses the EXACT same GERSTNER_WAVES sum
+    // already driving the real ocean surface below — pure JS math on
+    // vertex positions, no shader changes, so this carries none of the
+    // risk a hand-rolled shader edit would.
+    //
+    // COORDINATE NOTE: this geometry was never geometry.rotateX()'d at
+    // creation (unlike the main colored mesh's `geo`) — the -90° rotation
+    // lives on the MESH (mirrorWater.rotation.x), applied at render time.
+    // For that rotation, a vertex's local (x, y, 0) maps to world
+    // (x, 0, -y) — so local Y still corresponds to world Z (negated),
+    // and crucially, WORLD height comes from the vertex's LOCAL Z
+    // component, not local Y. That's why this writes displacement via
+    // `.setZ()` below, not `.setY()` — using setY here would silently do
+    // nothing visible (verified this mapping by hand before writing
+    // code, not by trial and error).
+    const mPos = mirrorWater.geometry.attributes.position;
+    const baseX = mirrorWater.position.x, baseZ = mirrorWater.position.z;
+    for (let i = 0; i < mPos.count; i++) {
+      const localX = mPos.getX(i);
+      const localY = mPos.getY(i);
+      const worldX = baseX + localX;
+      const worldZ = baseZ - localY;
+      let dy = 0;
+      for (const w of GERSTNER_WAVES) {
+        const f = w.k * (w.ndx * worldX + w.ndz * worldZ) - w.speed * elapsed;
+        dy += w.amplitude * Math.sin(f);
+      }
+      mPos.setZ(i, dy);
+    }
+    mPos.needsUpdate = true;
   }
   // Scroll the ripple normal map slowly along the plane's own flow
   // direction — a static (non-scrolling) normal map would still add real

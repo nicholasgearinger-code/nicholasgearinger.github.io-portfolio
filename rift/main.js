@@ -936,10 +936,17 @@ float gFoamMask = 0.0;`)
   // two independent things that only coincidentally looked similar.
   float waveH = vWaveHeight;
   float waveNorm = clamp((waveH + 1.71) / 3.42, 0.0, 1.0); // 0 at trough, 1 at crest — range corrected to match the actual doubled Gerstner amplitude sum, see the matching vertex-shader fix above
-  vec2 causticUv = vCausticWorldPos.xz * 0.4 + vec2(uTime * 0.05, -uTime * 0.04) + waveH * 0.18;
+  // waveH's own multipliers halved (0.18->0.09, 0.12->0.06) — per
+  // explicit "lacy caustics" follow-up. waveH's real range roughly
+  // doubled when wave amplitude was doubled a few rounds back, so these
+  // UV-distortion multipliers were pushing the caustic net's own
+  // Voronoi sample roughly twice as far per-fragment as originally
+  // tuned, smearing the fine cell-edge lines into something coarser.
+  // Halving restores the original relative distortion magnitude.
+  vec2 causticUv = vCausticWorldPos.xz * 0.4 + vec2(uTime * 0.05, -uTime * 0.04) + waveH * 0.09;
   vec2 v1 = causticVoronoiF1F2(causticUv);
   float edge1 = v1.y - v1.x;
-  vec2 causticUv2 = vCausticWorldPos.xz * 0.4 * 1.6 - vec2(uTime * 0.03, uTime * 0.045) + vec2(37.0, 12.0) - waveH * 0.12;
+  vec2 causticUv2 = vCausticWorldPos.xz * 0.4 * 1.6 - vec2(uTime * 0.03, uTime * 0.045) + vec2(37.0, 12.0) - waveH * 0.06;
   vec2 v2 = causticVoronoiF1F2(causticUv2);
   float edge2 = v2.y - v2.x;
   float net = (1.0 - smoothstep(0.0, 0.12, edge1)) * 0.75 + (1.0 - smoothstep(0.0, 0.09, edge2)) * 0.5;
@@ -952,15 +959,18 @@ float gFoamMask = 0.0;`)
   // Day-brightened, warm-toned caustic light — per explicit reference
   // photo request ("bright, sunlight through the surface, gold on the
   // sand"). Two real changes from the previous flat/neutral version:
-  // (1) intensity now scales with uDayAmount (0.15 floor at night so
-  // caustics don't vanish entirely in the dark, up to a much brighter
-  // ~1.5x peak at full day — real caustics are a DAYLIGHT phenomenon,
-  // essentially absent at night since they need direct sunlight passing
-  // through the surface); (2) color shifted from neutral white toward
-  // warm gold (1.0, 0.92, 0.72) instead of vec3(1.0) — sunlight
+  // (1) intensity now scales with uDayAmount, STRICTLY zero at night
+  // (smoothstep floor, not the earlier 0.15-at-night version) — per
+  // explicit "scoped to only during the day" follow-up: real caustics
+  // need direct sunlight passing through the surface, genuinely absent
+  // at night rather than just dim; (2) color shifted from neutral white
+  // toward warm gold (1.0, 0.92, 0.72) instead of vec3(1.0) — sunlight
   // filtered through water and reflecting off sand reads warm/golden in
-  // the reference, not a cold white shimmer.
-  float dayCausticBoost = 0.15 + uDayAmount * 1.35;
+  // the reference, not a cold white shimmer. underwaterMask right below
+  // already strictly scopes this to actually-submerged geometry (fades
+  // to 0 above the waterline), so combined with this, caustics are now
+  // zero unless BOTH underwater AND daytime.
+  float dayCausticBoost = smoothstep(0.05, 0.4, uDayAmount) * 1.5;
   float causticIntensity = net * underwaterMask * upwardFacing * (0.32 + crestFocus * 0.42) * dayCausticBoost;
   diffuseColor.rgb += vec3(1.0, 0.92, 0.72) * causticIntensity;
 
@@ -2078,6 +2088,17 @@ function animate() {
     // water). whitecaps is unaffected.
     oceanSurfaceDetailHandle.whitecaps.visible = !isFullySubmerged;
   }
+  // Realistic cloud dome (clouds.js) — explicitly set fog:false on its
+  // own material (correct for normal above-water rendering: fading
+  // clouds to fog color at the far background distance they represent
+  // would look wrong), which means scene.fog's underwater color/density
+  // has ZERO effect on it regardless of how it's tuned — it would keep
+  // rendering at full unobstructed visibility straight through the
+  // water, per explicit "should not see any sky through the water"
+  // report. Same established pattern as whitecaps just above: toggle
+  // visibility directly on submersion rather than trying to fog an
+  // object that was deliberately built to ignore fog.
+  if (realisticCloudDomeHandle) realisticCloudDomeHandle.mesh.visible = !isFullySubmerged;
   if (isFullySubmerged) {
     // Real water only lets you see the sky within a narrow cone roughly
     // straight overhead (Snell's window) — from any other angle you'd

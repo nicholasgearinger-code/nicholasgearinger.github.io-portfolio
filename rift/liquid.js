@@ -84,13 +84,21 @@ const GERSTNER_WAVES_RAW = [
   // a single root cause explaining the across-the-board flat look,
   // rather than any one missing feature. Self-intersection safety
   // margin (steepness*k*amplitude, per this file's own established
-  // rule) was previously ~0.13 at worst case — doubling amplitude
-  // brings that to ~0.26, still comfortably under the ~1.0 fold-over
-  // threshold with real headroom left.
-  { dirX: 1.0, dirZ: 0.3, wavelength: 40, amplitude: 0.85, speed: 1.75, steepness: 0.5 },  // the big rolling swell
-  { dirX: 0.3, dirZ: 1.0, wavelength: 24, amplitude: 0.48, speed: 2.5, steepness: 0.45 }, // a second swell crossing at an angle
-  { dirX: -0.7, dirZ: 0.5, wavelength: 13, amplitude: 0.26, speed: 3.4, steepness: 0.35 }, // finer chop
-  { dirX: 0.6, dirZ: -0.65, wavelength: 7, amplitude: 0.12, speed: 4.6, steepness: 0.3 },   // fine surface texture
+  // rule) was previously ~0.13 at worst case — doubling amplitude alone
+  // would have brought that to ~0.26, still safe.
+  // STEEPNESS HALVED here per explicit "waves too sharp edged" follow-
+  // up — real Gerstner crest sharpness scales with amplitude*steepness,
+  // so doubling amplitude while leaving steepness unchanged genuinely
+  // did make crests noticeably more pointed than before. Halving
+  // steepness brings that product back close to the ORIGINAL pre-
+  // doubling level, restoring a more natural rounded swell shape while
+  // keeping the taller, more visible wave height that fixed the "lacks
+  // detail" report. Self-intersection margin now even safer than either
+  // prior version (~0.13, same as the untouched original).
+  { dirX: 1.0, dirZ: 0.3, wavelength: 40, amplitude: 0.85, speed: 1.75, steepness: 0.25 },  // the big rolling swell
+  { dirX: 0.3, dirZ: 1.0, wavelength: 24, amplitude: 0.48, speed: 2.5, steepness: 0.225 }, // a second swell crossing at an angle
+  { dirX: -0.7, dirZ: 0.5, wavelength: 13, amplitude: 0.26, speed: 3.4, steepness: 0.175 }, // finer chop
+  { dirX: 0.6, dirZ: -0.65, wavelength: 7, amplitude: 0.12, speed: 4.6, steepness: 0.15 },   // fine surface texture
 ];
 const GERSTNER_WAVES = GERSTNER_WAVES_RAW.map((w) => {
   const len = Math.hypot(w.dirX, w.dirZ) || 1;

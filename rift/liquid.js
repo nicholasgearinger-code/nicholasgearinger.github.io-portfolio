@@ -721,6 +721,16 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
     // Fresnel value into the reflection shader's blend strength, reused
     // rather than recomputed in GLSL.
     geo.setAttribute("aReflectionFresnel", new THREE.BufferAttribute(new Float32Array(posAttr.count), 1));
+    // Coarse per-vertex reflection distortion — the XZ (horizontal)
+    // components of the exact same analytic Gerstner normal already
+    // computed for lighting/Fresnel/sun-glint, reused here to bend the
+    // reflection sample based on real wave slope, not just vertical
+    // bob. A perfectly flat patch has normal (0,1,0) -> zero distortion;
+    // a steep wave face has real horizontal normal components -> visibly
+    // bent reflection there, which is what makes choppy water actually
+    // look choppy in its reflection instead of a clean undistorted
+    // mirror riding on top of bumpy geometry.
+    geo.setAttribute("aReflectionDistort", new THREE.BufferAttribute(new Float32Array(posAttr.count * 2), 2));
   }
 
   const matOptions = {
@@ -805,18 +815,29 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
         // them.
         shader.uniforms.uReflectionTex = { value: null };
         shader.uniforms.uReflectionMatrix = { value: new THREE.Matrix4() };
+        // Fine-scale reflection distortion — reuses the SAME loaded
+        // ripple-normal texture already driving the material's own
+        // lighting normalMap (see `rippleTexture` above), sampled again
+        // here as an explicit second reference specifically for
+        // perturbing the reflection UV. Kept as its own uniform (not
+        // reusing Three's internal normalMap sampler binding directly)
+        // since that internal name/timing isn't something to rely on
+        // without being able to verify it live.
+        shader.uniforms.uDistortTex = { value: rippleTexture };
         shader.vertexShader = shader.vertexShader
-          .replace("#include <common>", "#include <common>\nattribute float aFoam;\nvarying float vFoam;\nvarying vec2 vFoamPos;\nattribute float aSunGlint;\nvarying float vSunGlint;\nattribute float aReflectionFresnel;\nvarying float vReflectionFresnel;\nuniform mat4 uReflectionMatrix;\nvarying vec4 vReflectionCoord;")
-          .replace("#include <begin_vertex>", "#include <begin_vertex>\nvFoam = aFoam;\nvFoamPos = position.xz;\nvSunGlint = aSunGlint;\nvReflectionFresnel = aReflectionFresnel;\nvReflectionCoord = uReflectionMatrix * modelMatrix * vec4(transformed, 1.0);"); // local-space XZ IS world XZ here — this mesh has no runtime x/z translation or rotation (baked in at creation), only a Y offset. `transformed` at this point already holds the CPU-side wave-displaced position (the real per-frame Gerstner sum written into the position attribute in updateLiquidPlane, not a GPU displacement) — so the reflection coordinate genuinely follows the real wave surface, not a flat approximation of it.
+          .replace("#include <common>", "#include <common>\nattribute float aFoam;\nvarying float vFoam;\nvarying vec2 vFoamPos;\nattribute float aSunGlint;\nvarying float vSunGlint;\nattribute float aReflectionFresnel;\nvarying float vReflectionFresnel;\nattribute vec2 aReflectionDistort;\nvarying vec2 vReflectionDistort;\nuniform mat4 uReflectionMatrix;\nvarying vec4 vReflectionCoord;")
+          .replace("#include <begin_vertex>", "#include <begin_vertex>\nvFoam = aFoam;\nvFoamPos = position.xz;\nvSunGlint = aSunGlint;\nvReflectionFresnel = aReflectionFresnel;\nvReflectionDistort = aReflectionDistort;\nvReflectionCoord = uReflectionMatrix * modelMatrix * vec4(transformed, 1.0);"); // local-space XZ IS world XZ here — this mesh has no runtime x/z translation or rotation (baked in at creation), only a Y offset. `transformed` at this point already holds the CPU-side wave-displaced position (the real per-frame Gerstner sum written into the position attribute in updateLiquidPlane, not a GPU displacement) — so the reflection coordinate genuinely follows the real wave surface, not a flat approximation of it.
         shader.fragmentShader = shader.fragmentShader
           .replace("#include <common>", `#include <common>
 uniform float uTime;
 uniform sampler2D uFoamTex;
 uniform sampler2D uReflectionTex;
+uniform sampler2D uDistortTex;
 varying float vFoam;
 varying vec2 vFoamPos;
 varying float vSunGlint;
 varying float vReflectionFresnel;
+varying vec2 vReflectionDistort;
 varying vec4 vReflectionCoord;
 // Compact 2D Worley/Voronoi noise — hashed jittered grid, 3x3 neighbor
 // search for the nearest feature point. Cheap enough for two octaves
@@ -848,7 +869,22 @@ float foamVoronoi(vec2 p) {
   // (behind the reflection camera / degenerate) so a bad sample can't
   // wrap/smear across the screen.
   if (vReflectionCoord.w > 0.0001) {
-    vec2 reflectionUv = vReflectionCoord.xy / vReflectionCoord.w;
+    // Distortion — two combined scales, same "coarse + fine" layering
+    // this file already uses for foam (Voronoi octaves) and normal
+    // detail. Coarse: the real per-vertex Gerstner wave slope
+    // (vReflectionDistort), so large swells visibly bend what they
+    // reflect. Fine: the loaded ripple-normal texture sampled at the
+    // same world-space scale the foam texture already uses, its RG
+    // channels remapped from [0,1] tangent-space encoding to a [-1,1]
+    // offset direction — small ripples breaking up the reflection at a
+    // finer grain than the per-vertex resolution alone could ever
+    // produce. Without this, the reflection would look like a clean
+    // undistorted mirror riding on top of bumpy geometry — recognizably
+    // fake, since real choppy water visibly scrambles what it reflects.
+    vec2 fineDistort = (texture2D(uDistortTex, vFoamPos * 0.045 + vec2(uTime * 0.01, uTime * 0.007)).rg - 0.5) * 2.0;
+    vec2 totalDistort = vReflectionDistort * 0.06 + fineDistort * 0.012;
+    vec2 reflectionUv = vReflectionCoord.xy / vReflectionCoord.w + totalDistort;
+    reflectionUv = clamp(reflectionUv, 0.001, 0.999); // distortion can push a coordinate that started safely inside [0,1] slightly outside it — clamp rather than let it wrap/smear from the opposite edge
     if (reflectionUv.x > 0.0 && reflectionUv.x < 1.0 && reflectionUv.y > 0.0 && reflectionUv.y < 1.0) {
       vec3 reflectionColor = texture2D(uReflectionTex, reflectionUv).rgb;
       // vReflectionFresnel is the SAME grazing-angle Fresnel value
@@ -1072,6 +1108,7 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
   const foamAttr = biome === "crystal" ? mesh.geometry.attributes.aFoam : null;
   const sunGlintAttr = biome === "crystal" ? mesh.geometry.attributes.aSunGlint : null;
   const reflectionFresnelAttr = biome === "crystal" ? mesh.geometry.attributes.aReflectionFresnel : null;
+  const reflectionDistortAttr = biome === "crystal" ? mesh.geometry.attributes.aReflectionDistort : null;
   const foamShader = biome === "crystal" ? mesh.material.userData.shader : null;
   if (foamShader) foamShader.uniforms.uTime.value = elapsed;
   // backMesh has its own separate material (built by its own
@@ -1158,6 +1195,11 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
       ny = 1 - nyTerm;
       const nLen = Math.hypot(nx, ny, nz) || 1;
       nx /= nLen; ny /= nLen; nz /= nLen;
+      // Reflection distortion — the horizontal (XZ) components of this
+      // exact analytic normal, written unconditionally here (doesn't
+      // need playerPos/view vector the way Fresnel/sun-glint do — a
+      // wave's slope is the same regardless of where the camera is).
+      if (reflectionDistortAttr) reflectionDistortAttr.setXY(i, nx, nz);
       gerstnerX = bx + dx;
       gerstnerZ = bz + dz;
       ripple = dy;
@@ -1346,6 +1388,7 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
     foamAttr.needsUpdate = true;
     sunGlintAttr.needsUpdate = true;
     reflectionFresnelAttr.needsUpdate = true;
+    reflectionDistortAttr.needsUpdate = true;
   } else {
     mesh.geometry.computeVertexNormals();
   }

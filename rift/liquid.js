@@ -932,10 +932,19 @@ float foamVoronoi(vec2 p) {
   // was itself visible as a "moving dark boundary" following the camera
   // around, per explicit report. Pushing it further out doesn't remove
   // that edge, just moves it further from typical view distance.
-  const MIRROR_PATCH_SIZE = 130;
+  // Pushed further still to 220 (near the original full-ocean size that
+  // was part of the broken setup) as a deliberate stress test, per
+  // explicit "push it further to see what happens" — this will show
+  // whether the viewport-aspect-ratio texture fix was the real reason
+  // the reflection started rendering correctly, or whether the small
+  // patch size was ALSO doing real work and this reintroduces the
+  // original corruption (dark patches / gray band / vertical striping).
+  // If those symptoms come back, drop this back toward 130 and treat
+  // patch size as a confirmed real factor, not just a coincidence.
+  const MIRROR_PATCH_SIZE = 220;
   let mirrorWater = null;
   if (biome === "crystal") {
-    const mirrorGeo = new THREE.PlaneGeometry(MIRROR_PATCH_SIZE, MIRROR_PATCH_SIZE, 8, 8);
+    const mirrorGeo = new THREE.PlaneGeometry(MIRROR_PATCH_SIZE, MIRROR_PATCH_SIZE, 12, 12);
     // MUST be given a real repeat count — a fresh clone defaults to
     // (1,1), meaning ONE full copy of this small texture gets stretched
     // across the ENTIRE plane instead of tiling into many small ripples.

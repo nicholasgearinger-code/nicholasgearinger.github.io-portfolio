@@ -278,6 +278,50 @@ function updateWaterReflection(waterY, liquidHandle) {
   reflectionTextureMatrix.multiply(reflectedCamera.matrixWorldInverse);
 }
 
+// Real refraction — a THIRD full scene render every frame it's active
+// (on top of the main render and the reflection above), rendered from
+// the MAIN camera directly rather than a reflected one: "what this
+// camera would see if the water weren't there." No projective-matrix
+// math needed on the liquid.js side since it's already aligned with
+// the current view — just screen-space UV. Kept at a lower resolution
+// cap than the reflection (384 vs 512) to help offset the added cost
+// of a third render pass, since refraction distortion is subtle/close-
+// range rather than needing to resolve distant geometry the way the
+// reflection does.
+const REFRACTION_TEX_CAP = 384;
+const refractionAspect = viewport.clientWidth / viewport.clientHeight;
+const refractionTexW = refractionAspect >= 1 ? REFRACTION_TEX_CAP : Math.max(64, Math.round(REFRACTION_TEX_CAP * refractionAspect));
+const refractionTexH = refractionAspect >= 1 ? Math.max(64, Math.round(REFRACTION_TEX_CAP / refractionAspect)) : REFRACTION_TEX_CAP;
+const refractionRenderTarget = new THREE.WebGLRenderTarget(refractionTexW, refractionTexH);
+// Actual current renderer resolution (NOT the refraction target's own,
+// smaller resolution) — this feeds gl_FragCoord normalization in the
+// shader, which needs to match the real screen the fragment is being
+// rasterized at, independent of what resolution the sampled texture
+// itself happens to be stored at.
+const refractionResolution = new THREE.Vector2(1, 1);
+
+// Renders the refraction pass and pushes the result into the crystal
+// water material. Same "hide the water mesh, render, restore" pattern
+// as updateWaterReflection above, just with the real camera instead of
+// a reflected one.
+function updateWaterRefraction(liquidHandle) {
+  if (!liquidHandle || !liquidHandle.mesh) return;
+  const wasMeshVisible = liquidHandle.mesh.visible;
+  const wasBackMeshVisible = liquidHandle.backMesh ? liquidHandle.backMesh.visible : null;
+  liquidHandle.mesh.visible = false;
+  if (liquidHandle.backMesh) liquidHandle.backMesh.visible = false;
+
+  const prevTarget = renderer.getRenderTarget();
+  renderer.setRenderTarget(refractionRenderTarget);
+  renderer.render(scene, camera);
+  renderer.setRenderTarget(prevTarget);
+
+  liquidHandle.mesh.visible = wasMeshVisible;
+  if (liquidHandle.backMesh) liquidHandle.backMesh.visible = wasBackMeshVisible;
+
+  renderer.getSize(refractionResolution);
+}
+
 function resizeToViewport() {
   const w = viewport.clientWidth, h = viewport.clientHeight;
   if (w === 0 || h === 0) return;
@@ -1029,12 +1073,21 @@ float gFoamMask = 0.0;`)
   // of a soft blur.
   float coreZone = 1.0 - smoothstep(0.0, 0.1, abs(shoreDist - jitteredReach));
   float coreFoam = clamp(foamCell * coreZone, 0.0, 1.0);
-  // Lacy tendril lines (thin Voronoi cell-edge branches reaching further
-  // up the beach) were tried and REMOVED per explicit follow-up — the
-  // underwater caustic net (a separate, pre-existing system using the
-  // same technique) was the part that read well; the shore foam reads
-  // better as just the clean core line on its own.
-  float foamMask = clamp(coreFoam * upwardFacing, 0.0, 1.0);
+  // Lacy tendrils — RE-ADDED per explicit follow-up (user liked the
+  // underwater caustic net's lacy look and wants the same character on
+  // the shore too). Thin BRANCHING LINES — the exact same Voronoi cell-
+  // EDGE technique the caustic net above already uses (F2-F1 traces
+  // thin lines along cell boundaries, not filled circles) — reaching a
+  // bit further up the beach past the core line and fading out with
+  // distance, rather than a hard-edged band.
+  vec2 tendrilUv = vCausticWorldPos.xz * 2.2 + vec2(uTime * 0.06, uTime * 0.045);
+  vec2 tv = causticVoronoiF1F2(tendrilUv);
+  float tendrilLines = 1.0 - smoothstep(0.0, 0.06, tv.y - tv.x);
+  float tendrilReach = 0.35; // how far past the core line tendrils can extend, same height units as shoreDist
+  float beyondLine = max(0.0, shoreDist - jitteredReach); // only extends OUTWARD/up the beach, never back into the water
+  float tendrilFalloff = 1.0 - smoothstep(0.0, tendrilReach, beyondLine);
+  float tendrilFoam = clamp(tendrilLines * tendrilFalloff * step(beyondLine, tendrilReach), 0.0, 1.0);
+  float foamMask = clamp(max(coreFoam, tendrilFoam * 0.85) * upwardFacing, 0.0, 1.0);
   gFoamMask = foamMask; // read by the emissivemap_fragment injection below, so foam stays visible even under night's dim lighting
   // Real sand right at the water's edge is ALWAYS wet — a permanent,
   // always-on dark band centered right at the mean waterline, not
@@ -2025,8 +2078,9 @@ function animate() {
   const reflectionBiome = currentLevelIdx >= 0 ? LEVELS[currentLevelIdx].biome : null;
   if (reflectionBiome === "crystal" && camera.position.y > LIQUID_LEVEL.crystal) {
     updateWaterReflection(LIQUID_LEVEL.crystal, liquidHandle);
+    updateWaterRefraction(liquidHandle);
   }
-  updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, camera.position, sun.position, dayNight.skyHorizon, reflectionRenderTarget.texture, reflectionTextureMatrix);
+  updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, camera.position, sun.position, dayNight.skyHorizon, reflectionRenderTarget.texture, reflectionTextureMatrix, refractionRenderTarget.texture, refractionResolution);
   updateWaterfall(waterfallHandle, dt, elapsedTime);
   updateOceanSurfaceDetail(oceanSurfaceDetailHandle, elapsedTime, dayNight.dayAmount);
   updateRiverCurrent(riverCurrentHandle, dt);

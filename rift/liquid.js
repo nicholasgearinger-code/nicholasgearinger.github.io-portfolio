@@ -845,6 +845,16 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
         // since that internal name/timing isn't something to rely on
         // without being able to verify it live.
         shader.uniforms.uDistortTex = { value: rippleTexture };
+        // Real refraction — a second offscreen render, owned and updated
+        // by main.js the same way the reflection texture is (it's the
+        // one place with the real renderer/camera), but rendered from
+        // the MAIN camera's own view rather than a reflected one — this
+        // is "what the camera would see if the water weren't there,"
+        // sampled with simple screen-space UV (gl_FragCoord) rather than
+        // the reflection's projective-matrix math, since it's already
+        // aligned with the current view.
+        shader.uniforms.uRefractionTex = { value: null };
+        shader.uniforms.uResolution = { value: new THREE.Vector2(1, 1) };
         shader.vertexShader = shader.vertexShader
           .replace("#include <common>", "#include <common>\nattribute float aFoam;\nvarying float vFoam;\nvarying vec2 vFoamPos;\nattribute float aSunGlint;\nvarying float vSunGlint;\nattribute float aReflectionFresnel;\nvarying float vReflectionFresnel;\nattribute vec2 aReflectionDistort;\nvarying vec2 vReflectionDistort;\nuniform mat4 uReflectionMatrix;\nvarying vec4 vReflectionCoord;")
           .replace("#include <begin_vertex>", "#include <begin_vertex>\nvFoam = aFoam;\nvFoamPos = position.xz;\nvSunGlint = aSunGlint;\nvReflectionFresnel = aReflectionFresnel;\nvReflectionDistort = aReflectionDistort;\nvReflectionCoord = uReflectionMatrix * modelMatrix * vec4(transformed, 1.0);"); // local-space XZ IS world XZ here — this mesh has no runtime x/z translation or rotation (baked in at creation), only a Y offset. `transformed` at this point already holds the CPU-side wave-displaced position (the real per-frame Gerstner sum written into the position attribute in updateLiquidPlane, not a GPU displacement) — so the reflection coordinate genuinely follows the real wave surface, not a flat approximation of it.
@@ -854,6 +864,8 @@ uniform float uTime;
 uniform sampler2D uFoamTex;
 uniform sampler2D uReflectionTex;
 uniform sampler2D uDistortTex;
+uniform sampler2D uRefractionTex;
+uniform vec2 uResolution;
 varying float vFoam;
 varying vec2 vFoamPos;
 varying float vSunGlint;
@@ -901,6 +913,43 @@ vec2 foamVoronoiF1F2(vec2 p) {
 }`)
           .replace("#include <color_fragment>", `#include <color_fragment>
 {
+  // Distortion computed ONCE here — two combined scales, same "coarse +
+  // fine" layering this file already uses for foam (Voronoi octaves)
+  // and normal detail. Coarse: the real per-vertex Gerstner wave slope
+  // (vReflectionDistort), so large swells visibly bend what they show.
+  // Fine: the loaded ripple-normal texture sampled at the same world-
+  // space scale the foam texture already uses, its RG channels remapped
+  // from [0,1] tangent-space encoding to a [-1,1] offset direction —
+  // small ripples breaking things up at a finer grain than the
+  // per-vertex resolution alone could ever produce. Shared by BOTH the
+  // refraction and reflection samples below so the two bend consistently
+  // with each other, not independently.
+  vec2 fineDistort = (texture2D(uDistortTex, vFoamPos * 0.045 + vec2(uTime * 0.01, uTime * 0.007)).rg - 0.5) * 2.0;
+  vec2 totalDistort = vReflectionDistort * 0.06 + fineDistort * 0.012;
+
+  // Real refraction — what the seafloor looks like bent through the
+  // water surface, viewed from the SAME camera (not a reflected one),
+  // per explicit follow-up request. uRefractionTex is rendered by
+  // main.js from the main camera each frame with the water hidden —
+  // "what this camera would see if the water weren't there." Simple
+  // screen-space UV (gl_FragCoord) is correct here since it's already
+  // aligned with the current view, unlike the reflection's projective-
+  // matrix sampling below. Distortion scaled down from the reflection's
+  // own (0.5x) — real refraction bending is present but subtler than a
+  // full reflected image would need.
+  vec2 screenUv = gl_FragCoord.xy / uResolution;
+  vec2 refractionUv = clamp(screenUv + totalDistort * 0.5, 0.001, 0.999);
+  vec3 refractionColor = texture2D(uRefractionTex, refractionUv).rgb;
+  // vReflectionFresnel is the SAME grazing-angle value used below for
+  // the reflection blend — steep viewing angles (low fresnel) let most
+  // light actually pass through and refract, so refraction should
+  // DOMINATE there; grazing angles (high fresnel) approach total
+  // internal reflection, where refraction contributes almost nothing
+  // and the reflection block below takes over instead. This is the
+  // same physical trade-off real water shows, not two unrelated effects
+  // fighting for the same pixel.
+  diffuseColor.rgb = mix(refractionColor, diffuseColor.rgb, vReflectionFresnel);
+
   // Real planar reflection — projective texture lookup, the same
   // standard technique THREE.Water/Reflector use internally, just
   // sampled directly onto this ALREADY wave-displaced surface instead
@@ -909,20 +958,6 @@ vec2 foamVoronoiF1F2(vec2 p) {
   // (behind the reflection camera / degenerate) so a bad sample can't
   // wrap/smear across the screen.
   if (vReflectionCoord.w > 0.0001) {
-    // Distortion — two combined scales, same "coarse + fine" layering
-    // this file already uses for foam (Voronoi octaves) and normal
-    // detail. Coarse: the real per-vertex Gerstner wave slope
-    // (vReflectionDistort), so large swells visibly bend what they
-    // reflect. Fine: the loaded ripple-normal texture sampled at the
-    // same world-space scale the foam texture already uses, its RG
-    // channels remapped from [0,1] tangent-space encoding to a [-1,1]
-    // offset direction — small ripples breaking up the reflection at a
-    // finer grain than the per-vertex resolution alone could ever
-    // produce. Without this, the reflection would look like a clean
-    // undistorted mirror riding on top of bumpy geometry — recognizably
-    // fake, since real choppy water visibly scrambles what it reflects.
-    vec2 fineDistort = (texture2D(uDistortTex, vFoamPos * 0.045 + vec2(uTime * 0.01, uTime * 0.007)).rg - 0.5) * 2.0;
-    vec2 totalDistort = vReflectionDistort * 0.06 + fineDistort * 0.012;
     vec2 reflectionUv = vReflectionCoord.xy / vReflectionCoord.w + totalDistort;
     reflectionUv = clamp(reflectionUv, 0.001, 0.999); // distortion can push a coordinate that started safely inside [0,1] slightly outside it — clamp rather than let it wrap/smear from the opposite edge
     if (reflectionUv.x > 0.0 && reflectionUv.x < 1.0 && reflectionUv.y > 0.0 && reflectionUv.y < 1.0) {
@@ -1118,7 +1153,7 @@ vec2 foamVoronoiF1F2(vec2 p) {
   };
 }
 
-function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir, skyHorizon, reflectionTexture, reflectionMatrix) {
+function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir, skyHorizon, reflectionTexture, reflectionMatrix, refractionTexture, resolution) {
   if (!handle) return;
   const { mesh, backMesh, glow, shimmer, rocks, basePositions, biome, style, flowDir, crustOctaves, crackOctaves, flowBeads, waterY, rippleTexture, foamAccum } = handle;
   // Real per-frame dt, derived from consecutive elapsed values — this
@@ -1144,6 +1179,17 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
   if (backMesh && backMesh.material.userData.shader) {
     if (reflectionTexture) backMesh.material.userData.shader.uniforms.uReflectionTex.value = reflectionTexture;
     if (reflectionMatrix) backMesh.material.userData.shader.uniforms.uReflectionMatrix.value.copy(reflectionMatrix);
+  }
+  // Real refraction — same ownership pattern as the reflection just
+  // above (main.js renders it, this just receives the finished texture
+  // + current resolution each frame).
+  if (mesh.material.userData.shader) {
+    if (refractionTexture) mesh.material.userData.shader.uniforms.uRefractionTex.value = refractionTexture;
+    if (resolution) mesh.material.userData.shader.uniforms.uResolution.value.copy(resolution);
+  }
+  if (backMesh && backMesh.material.userData.shader) {
+    if (refractionTexture) backMesh.material.userData.shader.uniforms.uRefractionTex.value = refractionTexture;
+    if (resolution) backMesh.material.userData.shader.uniforms.uResolution.value.copy(resolution);
   }
   // Scroll the ripple normal map slowly along the plane's own flow
   // direction — a static (non-scrolling) normal map would still add real

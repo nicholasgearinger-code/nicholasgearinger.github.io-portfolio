@@ -927,7 +927,12 @@ float foamVoronoi(vec2 p) {
   // is a per-PIXEL fragment-shader technique (not vertex-driven), so
   // this isn't expected to be the actual fix, but it's harmless and
   // costs nothing meaningful at this size.
-  const MIRROR_PATCH_SIZE = 70;
+  // Bumped from an initial 70 up to 130 — the patch's own edge (where
+  // reflective water meets the regular non-reflective mesh beyond it)
+  // was itself visible as a "moving dark boundary" following the camera
+  // around, per explicit report. Pushing it further out doesn't remove
+  // that edge, just moves it further from typical view distance.
+  const MIRROR_PATCH_SIZE = 130;
   let mirrorWater = null;
   if (biome === "crystal") {
     const mirrorGeo = new THREE.PlaneGeometry(MIRROR_PATCH_SIZE, MIRROR_PATCH_SIZE, 8, 8);
@@ -956,12 +961,17 @@ float foamVoronoi(vec2 p) {
       waterNormals: mirrorNormals,
       sunDirection: new THREE.Vector3(0, 1, 0), // overwritten every frame in updateLiquidPlane from the real sun position
       sunColor: 0xffffff,
-      // Lightened from the ocean's own deep-water base color — per
-      // explicit "black areas" report. If the reflection render itself
-      // is ever producing empty/invalid content again, this is the
-      // floor color that shows through instead of stark black, so a
-      // recurrence reads as a muted tint rather than a jarring patch.
-      waterColor: style.baseColor.clone().lerp(new THREE.Color(0xffffff), 0.35).getHex(),
+      // Was lightened toward white (0.35 lerp) as a defensive fallback
+      // while the reflection render itself was still suspected broken —
+      // now that the aspect-ratio-corrected texture + smaller patch has
+      // the reflection genuinely rendering real content (confirmed: the
+      // sun visibly reflects correctly in a screenshot), that lightening
+      // is no longer needed and was just reading as washed-out/pink
+      // under sunset light per explicit "should be darker blue" report.
+      // Small lerp kept (0.08, not zero) purely so a fully opaque worst-
+      // case reflection sample never goes fully pitch-black, not as a
+      // wash across the whole thing.
+      waterColor: style.baseColor.clone().lerp(new THREE.Color(0xffffff), 0.08).getHex(),
       distortionScale: 2.6,
       // Semi-transparent — layered ON TOP of the existing colored/foam/
       // sun-glint mesh below, not a replacement for it. A fully opaque

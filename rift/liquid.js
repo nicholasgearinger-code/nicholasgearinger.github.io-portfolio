@@ -1,15 +1,19 @@
 import * as THREE from "three";
 import { getGraphicsSettings } from "./graphicsSettings.js";
-// Real mirror-reflection plane for Coral Shallows' above-water view — a
-// proven, addon-maintained implementation rather than hand-rolled
-// screen-space ray-marching. THREE.Water renders the scene from a
-// virtual flipped camera each frame; it's a genuine reflection of
-// surrounding geometry (terrain, sky, landmarks), not an approximation.
-// Confirmed in a prior session that this project's index.html importmap
-// already resolves "three/addons/" (to three@0.160.0/examples/jsm/ on
-// jsdelivr) with zero config changes needed — if that importmap entry
-// has since changed, this import would be the first thing to check.
-import { Water } from "three/addons/objects/Water.js";
+// REMOVED: THREE.Water mirror-reflection plane. Tried across several
+// rounds (dark reflected areas, a texture-tiling stretch bug, then a
+// broken/empty reflection render showing as a flat gray band and later
+// vertical striping) — each fix addressed a real, confirmed bug, but a
+// new distinct rendering failure kept surfacing after each one. Likely
+// root cause: this project already does its own custom multi-pass
+// rendering (the underwater render-target swap in main.js), and
+// THREE.Water does its own internal render-to-texture pass for the
+// reflection — getting the two to coexist cleanly is a known friction
+// point with this addon, and further diagnosis would mean guessing at
+// renderer/render-target interaction with no way to verify it without a
+// live browser. Cut rather than continuing to patch blind. The real
+// specular sun-glitter (still below, in the crystal fragment shader)
+// was unaffected by any of this and has been solid since it shipped.
 
 // -----------------------------------------------------------------------------
 // SWAP POINT: lava/water rendering. A single large flat plane at a fixed
@@ -882,70 +886,7 @@ float foamVoronoi(vec2 p) {
     scene.add(mesh);
   }
 
-  // Real mirror-reflection plane — Coral Shallows only, above-water view
-  // only (toggled in updateLiquidPlane). A SEPARATE flat plane rather
-  // than reusing the wavy `geo` above: THREE.Water's own shader handles
-  // its surface distortion internally via its normal map + distortionScale,
-  // not vertex displacement, so it wants a plain flat plane to work from.
-  // Own texture clone (not the shared cached one, not even the same clone
-  // the colored mesh's normalMap uses) since Water sets its own
-  // wrapping/repeat internally — cloning avoids any property conflict
-  // between the two consumers of the same underlying image.
-  let mirrorWater = null;
-  if (biome === "crystal") {
-    const mirrorGeo = new THREE.PlaneGeometry(size, size);
-    // MUST be given a real repeat count — a fresh clone defaults to
-    // (1,1), meaning ONE full copy of this small texture gets stretched
-    // across the ENTIRE ocean plane instead of tiling into many small
-    // ripples. That's what was actually causing the huge smeared/banded
-    // diagonal streak in the reflection — not a genuine reflection of
-    // anything in the scene, just one texture blown up to plane size.
-    // Same repeatCount formula the main colored mesh's own rippleTexture
-    // already uses (line ~750 below) for a consistent ripple scale
-    // between the two water layers.
-    const mirrorNormals = getRippleNormalTexture().clone();
-    mirrorNormals.needsUpdate = true;
-    const mirrorRepeat = Math.max(6, Math.round(size / 9));
-    mirrorNormals.repeat.set(mirrorRepeat, mirrorRepeat);
-    mirrorWater = new Water(mirrorGeo, {
-      textureWidth: 512,
-      textureHeight: 512,
-      waterNormals: mirrorNormals,
-      sunDirection: new THREE.Vector3(0, 1, 0), // overwritten every frame in updateLiquidPlane from the real sun position
-      sunColor: 0xffffff,
-      waterColor: style.baseColor.getHex(),
-      distortionScale: 2.6,
-      // Semi-transparent (not the addon's opaque default) — this is
-      // layered ON TOP of the existing colored/foam/sun-glint mesh
-      // below, not a replacement for it. A fully opaque reflection would
-      // hide all of that work; this reads as a reflective sheen over
-      // the real water color/foam instead. Lowered from 0.55 — large
-      // reflected areas (most likely the ocean's own dark base color
-      // extending toward the horizon, not a rendering bug) were reading
-      // as heavier/darker than wanted. Lower alpha lets more of the
-      // brighter colored mesh underneath show through; the sun's
-      // reflected glint (the highest-value part of this effect) still
-      // reads clearly since it's much brighter than the ambient
-      // reflection around it.
-      alpha: 0.32,
-      fog: !!scene.fog,
-    });
-    mirrorWater.rotation.x = -Math.PI / 2;
-    // Tiny Y offset above the main mesh (not coincident) — same
-    // deliberate-gap technique already used elsewhere in this project
-    // (see clouds.js's sky dome vs. realistic cloud dome) specifically
-    // because two coincident large transparent surfaces get an unstable
-    // per-frame camera-distance sort, which reads as flicker when the
-    // camera moves. A stable renderOrder (drawn after the main mesh) is
-    // the second half of that same fix.
-    mirrorWater.position.y = y + 0.03;
-    mirrorWater.renderOrder = 1;
-    mirrorWater.visible = false; // starts hidden — updateLiquidPlane sets real visibility every frame based on camera position
-    scene.add(mirrorWater);
-  }
 
-  // A separate unlit, additively-blended plane just above the surface —
-  // gives lava genuine luminous "glow" the way MeshStandardMaterial's own
   // emissive can't on its own once it's subject to the renderer's
   // lighting/tone mapping alongside the day/night cycle. Water doesn't
   // get one — it isn't meant to look lit from within.
@@ -1032,27 +973,13 @@ float foamVoronoi(vec2 p) {
 
   return {
     mesh, backMesh, glow, shimmer, rocks, waterY: y, basePositions, biome, style, depthColors,
-    flowDir: normalizeFlow(flowDir), crustOctaves, crackOctaves, flowBeads, rippleTexture, mirrorWater,
+    flowDir: normalizeFlow(flowDir), crustOctaves, crackOctaves, flowBeads, rippleTexture,
   };
 }
 
 function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir, skyHorizon) {
   if (!handle) return;
-  const { mesh, backMesh, glow, shimmer, rocks, basePositions, biome, style, flowDir, crustOctaves, crackOctaves, flowBeads, waterY, rippleTexture, mirrorWater } = handle;
-  // Real mirror reflection — only shown above the surface (the plane it
-  // renders from assumes a viewer looking down at the water, same as any
-  // real mirror; from underneath it would show a nonsensical flipped
-  // reflection). Layered on top of the always-visible colored/foam mesh
-  // below at low alpha, not a replacement for it — see its creation
-  // comment above for why. `cameraY === undefined` defaults to shown,
-  // matching how this project's other camera-position-dependent checks
-  // already treat a missing value as "assume above water" rather than
-  // silently doing nothing.
-  if (mirrorWater) {
-    mirrorWater.visible = cameraY === undefined ? true : cameraY > waterY;
-    if (sunDir) mirrorWater.material.uniforms.sunDirection.value.copy(sunDir).normalize();
-    mirrorWater.material.uniforms.time.value = elapsed;
-  }
+  const { mesh, backMesh, glow, shimmer, rocks, basePositions, biome, style, flowDir, crustOctaves, crackOctaves, flowBeads, waterY, rippleTexture } = handle;
   // Scroll the ripple normal map slowly along the plane's own flow
   // direction — a static (non-scrolling) normal map would still add real
   // per-pixel lighting detail, but it'd be a fixed pattern frozen in
@@ -1406,17 +1333,6 @@ function disposeLiquidPlane(scene, handle) {
     // disposed above, only the material is this mesh's own.
     scene.remove(handle.backMesh);
     handle.backMesh.material.dispose();
-  }
-  if (handle.mirrorWater) {
-    scene.remove(handle.mirrorWater);
-    handle.mirrorWater.geometry.dispose();
-    // Water's own normal-map texture is a per-instance clone passed in
-    // at construction (see createLiquidPlane) — owned exclusively by
-    // this mirrorWater, dispose it alongside the material itself.
-    if (handle.mirrorWater.material.uniforms.normalSampler) {
-      handle.mirrorWater.material.uniforms.normalSampler.value.dispose();
-    }
-    handle.mirrorWater.material.dispose();
   }
   if (handle.glow) {
     scene.remove(handle.glow);

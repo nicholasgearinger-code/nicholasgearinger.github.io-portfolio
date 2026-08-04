@@ -1732,14 +1732,44 @@ function disposeLiquidPlane(scene, handle) {
 // deliberate here (unlike the cloud dome's fog:false) — this is meant to
 // fade into the sky/fog color at distance exactly like real open ocean
 // does, not read as a sharp-edged background plate.
+// REGRESSION FIX: an earlier version of this plane was a solid disc
+// covering the WHOLE 4000-unit area, including directly underneath the
+// landmass and the detailed water plane — anywhere the real coastline
+// dipped close to this plane's fixed height, the flat, unanimated skirt
+// showed through right at the shore ("extra water comes up to the
+// shore"), visibly distinct from the real animated water in front of
+// it. Fixed by punching a hole through the middle matching (with a
+// safety margin) the detailed plane's own footprint, the same
+// centroid-distance triangle-removal technique createLiquidPlane's own
+// excludeRegions already uses above — this plane now ONLY exists in the
+// true background, past where the real water and landmass are.
 // -----------------------------------------------------------------------------
 const SKIRT_SIZE = 4000; // comfortably past every biome's tuned fog density (see weather.js's baseFogDensity values) at any graphics tier, so this always fades into fog well before its own edge could be seen
+const SKIRT_SEGMENTS = 48; // enough for the cutout hole's edge to read as roughly circular rather than an obviously faceted polygon, still cheap for a mesh this simple
 
-function createOceanHorizonSkirt(scene, biome, y) {
+function createOceanHorizonSkirt(scene, biome, y, landmassSize) {
   const style = LIQUID_STYLE[biome];
   if (!style || biome !== "crystal") return null; // scoped to the open-ocean biome specifically — Verdant's river and Ember's lava are contained features, not an "extends to the horizon" ocean
-  const geo = new THREE.PlaneGeometry(SKIRT_SIZE, SKIRT_SIZE, 1, 1);
+  const geo = new THREE.PlaneGeometry(SKIRT_SIZE, SKIRT_SIZE, SKIRT_SEGMENTS, SKIRT_SEGMENTS);
   geo.rotateX(-Math.PI / 2);
+
+  // Punch the hole — same technique/reasoning as createLiquidPlane's own
+  // excludeRegions above, just inverted (keep triangles OUTSIDE the
+  // radius instead of outside specific named regions). Margin beyond
+  // landmassSize/2 gives real clearance past the detailed plane's own
+  // edge so the two can never visibly seam against each other.
+  const cutoutRadius = landmassSize / 2 + 20;
+  const posAttr = geo.attributes.position;
+  const oldIndex = geo.index.array;
+  const newIndex = [];
+  for (let i = 0; i < oldIndex.length; i += 3) {
+    const a = oldIndex[i], b = oldIndex[i + 1], c = oldIndex[i + 2];
+    const cx = (posAttr.getX(a) + posAttr.getX(b) + posAttr.getX(c)) / 3;
+    const cz = (posAttr.getZ(a) + posAttr.getZ(b) + posAttr.getZ(c)) / 3;
+    if (Math.hypot(cx, cz) > cutoutRadius) newIndex.push(a, b, c);
+  }
+  geo.setIndex(newIndex);
+
   // DoubleSide — the detailed water plane above needs a separate BackSide
   // backMesh for underwater visibility because its material is a complex
   // per-vertex-animated shader where normals matter; this is a flat,
@@ -1749,6 +1779,36 @@ function createOceanHorizonSkirt(scene, biome, y) {
   // real water plane's own edge — exactly the reported "underwater we
   // can still see the edge" symptom.
   const mat = new THREE.MeshBasicMaterial({ color: style.baseColor, fog: true, side: THREE.DoubleSide });
+  // A soft, subtler version of the near water's own real planar
+  // reflection — per explicit "add that mirror plane with the extended
+  // ocean plane" request. Reuses the EXACT SAME reflection render pass
+  // main.js already does for the near water (reflectionTexture/
+  // reflectionMatrix, set each frame in updateOceanHorizonSkirt below) —
+  // no extra render cost, just sampling the same texture a second place.
+  // Unlike the near water's shader, there's no wave-distortion term here
+  // (this plane is genuinely flat/still, and distant open water reads as
+  // naturally calmer due to perspective foreshortening anyway) and the
+  // blend is a fixed, gentler amount rather than fresnel-scaled — a
+  // soft, hazy reflection appropriate for something far away, not a
+  // sharp mirror.
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uReflectionTex = { value: null };
+    shader.uniforms.uReflectionMatrix = { value: new THREE.Matrix4() };
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", "#include <common>\nuniform mat4 uReflectionMatrix;\nvarying vec4 vReflectionCoord;")
+      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvReflectionCoord = uReflectionMatrix * modelMatrix * vec4(transformed, 1.0);");
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <common>", "#include <common>\nuniform sampler2D uReflectionTex;\nvarying vec4 vReflectionCoord;")
+      .replace("#include <color_fragment>", `#include <color_fragment>
+{
+  if (vReflectionCoord.w > 0.0001) {
+    vec2 reflectionUv = clamp(vReflectionCoord.xy / vReflectionCoord.w, 0.001, 0.999);
+    vec3 reflectionColor = texture2D(uReflectionTex, reflectionUv).rgb;
+    diffuseColor.rgb = mix(diffuseColor.rgb, reflectionColor, 0.35);
+  }
+}`);
+    mat.userData.shader = shader;
+  };
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.y = y - 0.05; // a hair below the detailed plane so it's naturally occluded wherever the two overlap, rather than z-fighting against it
   mesh.renderOrder = -1;
@@ -1758,8 +1818,10 @@ function createOceanHorizonSkirt(scene, biome, y) {
 
 /**
  * @param {number} [stormAmount]  same 0-1 value passed to updateLiquidPlane — keeps this plane's color in sync with the real water's own storm darkening instead of staying one fixed color while the water right in front of it changes tone
+ * @param {THREE.Texture} [reflectionTexture]  the SAME reflection render main.js already produces for the near water each frame
+ * @param {THREE.Matrix4} [reflectionMatrix]
  */
-function updateOceanHorizonSkirt(handle, skyColor, stormAmount = 0) {
+function updateOceanHorizonSkirt(handle, skyColor, stormAmount = 0, reflectionTexture, reflectionMatrix) {
   if (!handle) return;
   // Tints toward the current sky color the same way the detailed plane's
   // own baseColor does (see updateLiquidPlane) — otherwise this would
@@ -1768,6 +1830,10 @@ function updateOceanHorizonSkirt(handle, skyColor, stormAmount = 0) {
   if (skyColor) {
     handle.mat.color.copy(LIQUID_STYLE.crystal.baseColor).lerp(skyColor, 0.4);
     if (stormAmount > 0) handle.mat.color.lerp(STORM_SEA_COLOR, stormAmount * 0.85);
+  }
+  if (handle.mat.userData.shader) {
+    if (reflectionTexture) handle.mat.userData.shader.uniforms.uReflectionTex.value = reflectionTexture;
+    if (reflectionMatrix) handle.mat.userData.shader.uniforms.uReflectionMatrix.value.copy(reflectionMatrix);
   }
 }
 

@@ -666,9 +666,21 @@ function updateDayNightCycle(cycle, dt) {
   // underneath — but the visible sun disc follows its true position so it
   // actually sets/rises instead of hovering at the horizon all night.
   cycle.sun.position.set(sunOrbit.x, Math.max(sunOrbit.y, -20), 80);
-  cycle.sunBody.group.position.set(sunOrbit.x, sunOrbit.y, 80);
+  // SUN_VISUAL_HORIZON_OFFSET raises only the DRAWN disc/beams, not the
+  // actual light (cycle.sun.position, just above — that stays tied to
+  // the true elevation/orbit math so shadow angle and dayAmount/color
+  // blending are unaffected). Without this, elevation=0 (true sunrise/
+  // sunset) placed the visible disc at world Y=0 — below Coral Shallows'
+  // own water level (LIQUID_LEVEL.crystal=8), which reads as the sun
+  // rising up out of the ocean rather than appearing at the horizon line
+  // itself, especially obvious now that a real flat horizon (the ocean
+  // skirt, liquid.js) exists to compare it against. A modest constant
+  // offset (not scaled per-biome) keeps this simple and reads correctly
+  // across every biome's own roughly-ground-level horizon too.
+  const SUN_VISUAL_HORIZON_OFFSET = 10;
+  cycle.sunBody.group.position.set(sunOrbit.x, sunOrbit.y + SUN_VISUAL_HORIZON_OFFSET, 80);
   cycle.moonBody.group.position.set(moonOrbit.x, Math.max(moonOrbit.y, 55), 80); // floored well above the horizon — the moon fades via opacity below, it shouldn't also visually approach/set at the horizon like the sun does
-  cycle.sunBeams.group.position.set(sunOrbit.x, sunOrbit.y, 80);
+  cycle.sunBeams.group.position.set(sunOrbit.x, sunOrbit.y + SUN_VISUAL_HORIZON_OFFSET, 80);
 
   // Blend NIGHT -> DAWN_DUSK -> DAY -> DAWN_DUSK -> NIGHT across elevation.
   const dayAmount = Math.max(0, elevation);       // 0 at/below horizon, 1 at noon

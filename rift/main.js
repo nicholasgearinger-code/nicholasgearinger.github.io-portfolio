@@ -1192,7 +1192,7 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
 
   if (LIQUID_LEVEL[level.biome] !== undefined) {
     liquidHandle = createLiquidPlane(scene, level.biome, LIQUID_LEVEL[level.biome], TERRAIN_SIZE, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
-    oceanHorizonSkirtHandle = createOceanHorizonSkirt(scene, level.biome, LIQUID_LEVEL[level.biome]); // null for every biome but crystal — see its own comment in liquid.js
+    oceanHorizonSkirtHandle = createOceanHorizonSkirt(scene, level.biome, LIQUID_LEVEL[level.biome], TERRAIN_SIZE); // null for every biome but crystal — see its own comment in liquid.js
   }
 
   if (level.biome === "crystal") {
@@ -2146,7 +2146,7 @@ function animate() {
   // behind here is never visible. biome-gated inside updateLiquidPlane
   // itself (crystal only), so this is harmless to pass unconditionally.
   updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, camera.position, sun.position, dayNight.skyHorizon, reflectionRenderTarget.texture, reflectionTextureMatrix, refractionRenderTarget.texture, refractionResolution, weatherHandle ? weatherHandle.rainIntensity : 0);
-  updateOceanHorizonSkirt(oceanHorizonSkirtHandle, dayNight.skyZenith, weatherHandle ? weatherHandle.rainIntensity : 0);
+  updateOceanHorizonSkirt(oceanHorizonSkirtHandle, dayNight.skyZenith, weatherHandle ? weatherHandle.rainIntensity : 0, reflectionRenderTarget.texture, reflectionTextureMatrix);
   updateWaterfall(waterfallHandle, dt, elapsedTime);
   updateOceanSurfaceDetail(oceanSurfaceDetailHandle, elapsedTime, dayNight.dayAmount);
   updateRiverCurrent(riverCurrentHandle, dt);

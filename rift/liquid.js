@@ -154,8 +154,16 @@ const GERSTNER_AMPLITUDE_SUM = GERSTNER_WAVES.reduce((sum, w) => sum + w.amplitu
 // scale bend layered UNDER the finer wave detail, not a competing
 // pattern of its own.
 function gerstnerDomainWarp(x, z, t) {
-  const wx = Math.sin(x * 0.016 + z * 0.009 + t * 0.05) * 4.5 + Math.sin(x * 0.006 - z * 0.011 - t * 0.02) * 2.5;
-  const wz = Math.cos(x * 0.011 - z * 0.014 + t * 0.04) * 4.5 + Math.cos(x * 0.008 + z * 0.007 - t * 0.018) * 2.5;
+  // Magnitude boosted substantially (was 4.5/2.5, now 16/9 — roughly
+  // 3.5x) per explicit "doesn't look any different" follow-up — the
+  // original tuning was too conservative to read clearly against the
+  // 3.2-42 unit wavelengths at normal player eye height. Still smooth/
+  // continuous vertex-to-vertex (the warp function's own spatial
+  // frequency, 0.006-0.016 per unit, is unchanged — only the magnitude
+  // grew), so this can't cause any mesh tearing or discontinuity, just
+  // a much more visible bend.
+  const wx = Math.sin(x * 0.016 + z * 0.009 + t * 0.05) * 16.0 + Math.sin(x * 0.006 - z * 0.011 - t * 0.02) * 9.0;
+  const wz = Math.cos(x * 0.011 - z * 0.014 + t * 0.04) * 16.0 + Math.cos(x * 0.008 + z * 0.007 - t * 0.018) * 9.0;
   return [x + wx, z + wz];
 }
 

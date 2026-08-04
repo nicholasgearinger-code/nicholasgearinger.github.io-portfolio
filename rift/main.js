@@ -921,8 +921,10 @@ uniform float uWaterLevel;
 // before evaluating the sum, not the output height — same technique
 // and reasoning as liquid.js's own version, translated to GLSL.
 vec2 gerstnerDomainWarp(vec2 p, float t) {
-  float wx = sin(p.x * 0.016 + p.y * 0.009 + t * 0.05) * 4.5 + sin(p.x * 0.006 - p.y * 0.011 - t * 0.02) * 2.5;
-  float wz = cos(p.x * 0.011 - p.y * 0.014 + t * 0.04) * 4.5 + cos(p.x * 0.008 + p.y * 0.007 - t * 0.018) * 2.5;
+  // Kept in exact numeric sync with liquid.js's own boosted magnitude
+  // (was 4.5/2.5, now 16/9) — see that file's comment for why.
+  float wx = sin(p.x * 0.016 + p.y * 0.009 + t * 0.05) * 16.0 + sin(p.x * 0.006 - p.y * 0.011 - t * 0.02) * 9.0;
+  float wz = cos(p.x * 0.011 - p.y * 0.014 + t * 0.04) * 16.0 + cos(p.x * 0.008 + p.y * 0.007 - t * 0.018) * 9.0;
   return p + vec2(wx, wz);
 }
 float gerstnerHeightVert(vec2 xz, float t) {

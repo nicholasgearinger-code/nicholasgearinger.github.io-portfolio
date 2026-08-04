@@ -197,13 +197,17 @@ function buildBaseDecoration(biome, colorHex, seedRand, worldX, worldZ) {
   // clams, which would make no sense sitting on dry land. worldX/worldZ
   // are only ever passed for crystal's own seeds (see main.js's call
   // site), so this is a no-op for every other biome.
-  // Threshold tracks where terrain.js's beach ring actually crosses the
-  // waterline (~38.5, numerically) now that it's a genuinely gentle
-  // ramp spanning the whole CORE-BLEND band rather than a steep dome —
-  // kept a couple units inside that crossing, same margin pattern as
-  // before, so decoration placement stays within the confidently-dry
-  // zone rather than the fuzzy edge right at the waterline.
-  const onIsland = biome === "crystal" && worldX !== undefined && worldZ !== undefined && Math.hypot(worldX - 55, worldZ + 70) < 37;
+  // Position updated to (30, -30) — landmarks.js moved LANDMARK_POSITION
+  // there from (55, -70) per explicit "expand the map constraints"
+  // follow-up (more edge clearance for the island's own radius). Radius
+  // threshold (37) left as an approximation, NOT re-verified against
+  // terrain.js's current CORE/BLEND (38/48, changed in an earlier round)
+  // — doesn't matter functionally right now since the onIsland branch
+  // just returns null unconditionally below (island decorations were
+  // removed entirely per a separate earlier request), so this variable
+  // has no visible effect either way at the moment. Worth recomputing
+  // properly if island decorations are ever reintroduced.
+  const onIsland = biome === "crystal" && worldX !== undefined && worldZ !== undefined && Math.hypot(worldX - 30, worldZ + 30) < 37;
   // High-tier-exclusive signature piece per biome — not just "more
   // polygons of the same prop," a genuinely different shape that only
   // High actually renders. Rolled first so it doesn't skew the existing

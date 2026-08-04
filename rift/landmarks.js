@@ -167,7 +167,7 @@ function getSmokeTexture() {
 // Fixed position per biome (not random — a landmark you can navigate
 // toward and remember is the whole point) — offset from dead-center so it
 // isn't directly on top of the player's spawn point.
-const LANDMARK_POSITION = { x: 55, z: -70 };
+const LANDMARK_POSITION = { x: 30, z: -30 }; // moved from (55, -70) per explicit "expand the map constraints" follow-up — the old position sat only 50 units from the terrain square's nearest edge (a hard clip ceiling for anything sized/centered here, like Coral Shallows' island). This position's nearest edge is 90 units away (min(120-30, 120+30, 120-30, 120+30) — recomputed directly, not assumed), a real 1.8x improvement, while still a deliberately off-center position rather than dead-center (0,0). Kept in the same general direction/quadrant as the original so it's a real move, not a totally different relationship to the rest of the map. This exact coordinate is duplicated as hardcoded literals in terrain.js (crystal's island shaping) and decorations.js (the onIsland check) since those files don't import from here — both were updated to match in the same round this moved.
 
 function createEnergyCore(colorHex, radius, coreHeight) {
   const group = new THREE.Group();

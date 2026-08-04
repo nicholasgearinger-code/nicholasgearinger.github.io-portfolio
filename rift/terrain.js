@@ -257,16 +257,23 @@ const BIOME_SHAPERS = {
     const reefMound = reefNoise > 0.56 ? (reefNoise - 0.56) * 9 : 0; // broad rounded reef-buildup mounds, not spires
 
     // A real emergent tropical island at the same coordinates landmarks.js
-    // places its landmark (55, -70) — Math.max against the reef shape
+    // places its landmark (30, -30) — Math.max against the reef shape
     // below rather than adding to it, so the island's height is a
     // structural guarantee independent of whatever the local reef noise
     // happens to be, not a tuned constant hoping to clear the water line.
-    // Peak (11.5) sits comfortably above LIQUID_LEVEL.crystal (8) with
-    // real margin for actual dry beach, not just a few inches of sand
-    // poking through.
-    const islandDx = worldX - 55, islandDz = worldZ - (-70);
+    // MOVED from (55, -70) per explicit "expand the map constraints"
+    // follow-up — the old position's nearest map edge was only 50 units
+    // away (a hard clip ceiling for the beach/hill radius below); this
+    // position's nearest edge is 90 units away (recomputed directly:
+    // min(120-30, 120+30, 120-30, 120+30) = 90), real room to grow
+    // further later without moving the landmark again. Radius/peak below
+    // are UNCHANGED from the previous round (38/48/26) — this move was
+    // specifically to remove the constraint, not to resize again in the
+    // same round; there's now genuine headroom to push CORE/BLEND well
+    // past 48 if a bigger island is wanted next.
+    const islandDx = worldX - 30, islandDz = worldZ - (-30);
     const islandDist = Math.hypot(islandDx, islandDz);
-    const ISLAND_CORE = 34, ISLAND_BLEND = 45, ISLAND_PEAK = 11.5;
+    const ISLAND_CORE = 38, ISLAND_BLEND = 48, ISLAND_PEAK = 26;
 
     // COVE REDESIGN — per explicit request: remove the uniform beach
     // ring going all the way around the island, replace it with a
@@ -785,6 +792,26 @@ function applyHeightShading(geo, colorHex, minY, maxY, biome, seed) {
     const islandSandDry = biome === "crystal" ? new THREE.Color(0xe8c97a) : null;
     const islandSandTmp = biome === "crystal" ? new THREE.Color() : null;
     const waterLine = biome === "crystal" ? LIQUID_LEVEL.crystal : undefined;
+    // Slope-based rock/grass — per explicit reference photo follow-up
+    // ("beach surrounded by high cliffs with green on top"): height
+    // ALONE can't tell a steep cliff face apart from a flat hilltop at
+    // the same elevation, so this reads the geometry's own real vertex
+    // normal (geo.computeVertexNormals() already ran before this
+    // function is called) as a genuine slope signal — normal.y near 1
+    // is flat ground, near 0 is a near-vertical face. Bare rock on
+    // steep ground regardless of height, grass only where it's flat
+    // enough to hold soil — this happens to align naturally with how
+    // the cove's own hill shape works (terrain.js's smoothstep hill
+    // profile is flattest right at CORE and right at its own peak,
+    // steepest in between), so no separate shape change was needed for
+    // this to land on the right places.
+    const islandRock = biome === "crystal" ? new THREE.Color(0x8f8a7c) : null; // pale warm granite
+    const islandRockShadow = biome === "crystal" ? new THREE.Color(0x5a564c) : null;
+    const islandGrass = biome === "crystal" ? new THREE.Color(0x5a8a3c) : null;
+    const islandGrassDark = biome === "crystal" ? new THREE.Color(0x3d6b28) : null;
+    const islandRockTmp = biome === "crystal" ? new THREE.Color() : null;
+    const islandGrassTmp = biome === "crystal" ? new THREE.Color() : null;
+    const normalAttr = biome === "crystal" ? geo.attributes.normal : null;
     for (let i = 0; i < posAttr.count; i++) {
       const t = (posAttr.getY(i) - minY) / range;
       const x = posAttr.getX(i), z = posAttr.getZ(i);
@@ -816,6 +843,28 @@ function applyHeightShading(geo, colorHex, minY, maxY, biome, seed) {
           const goldT = Math.min(1, Math.max(0, (worldY - waterLine) / 6)); // widened from 4 to 6 for the same reason — fades from wet white-sand near the shore to warm gold sand further up the now-longer beach
           islandSandTmp.copy(islandSandWet).lerp(islandSandDry, goldT);
           tmp.lerp(islandSandTmp, beachT);
+        }
+        // Rock/grass only above the beach's own zone (beachT<1 leaves
+        // room right at the shore for sand alone, no rock/grass
+        // blending fighting it there) — real cliffs and grass start
+        // once you're past the immediate shoreline, not at the water's
+        // edge itself.
+        if (beachT >= 1 && islandRock) {
+          const flatness = normalAttr.getY(i); // 1 = flat, 0 = vertical
+          // Hand-written smoothstep (not THREE.MathUtils.smoothstep —
+          // that method isn't confirmed used anywhere in this file, so
+          // its availability in this project's three.js version isn't
+          // verified; THREE.MathUtils.clamp IS already used above,
+          // safe to build on).
+          const rockT = THREE.MathUtils.clamp((0.82 - flatness) / (0.82 - 0.55), 0, 1); // steep (low flatness) -> 1 (full rock); gentle (flatness>0.82) -> 0
+          const rockAmount = rockT * rockT * (3 - 2 * rockT);
+          const rockNoise = fbm2(x * 0.04, z * 0.04, seed + 900, 2, 2.0, 0.5);
+          islandRockTmp.copy(islandRock).lerp(islandRockShadow, Math.max(0, rockNoise));
+          tmp.lerp(islandRockTmp, rockAmount);
+          const grassAmount = 1 - rockAmount;
+          const grassNoise = fbm2(x * 0.05 + 300, z * 0.05 + 300, seed + 950, 2, 2.0, 0.5);
+          islandGrassTmp.copy(islandGrass).lerp(islandGrassDark, Math.max(0, grassNoise));
+          tmp.lerp(islandGrassTmp, grassAmount * 0.92); // not fully 1 — softens the transition slightly rather than a mechanically hard edge
         }
       }
       colors[i * 3] = tmp.r; colors[i * 3 + 1] = tmp.g; colors[i * 3 + 2] = tmp.b;

@@ -315,7 +315,7 @@ const BIOME_SHAPERS = {
     const dunePeakMult = 0.88 + Math.max(0, duneVariation + 0.5) * 0.24; // narrowed from 0.7x-1.3x to 0.88x-1.12x — softens the height difference between adjacent dune peaks so the terrain between them reads as a gentle roll rather than a jagged dip
 
     let islandBump = 0;
-    const BEACH_PLATEAU = LIQUID_LEVEL.crystal + 0.35; // halved from 0.7 — reads flatter right down near the shore, per explicit "down near the shore flatter" request
+    const BEACH_PLATEAU = LIQUID_LEVEL.crystal + 0.9; // REGRESSION FIX: the previous +0.35 margin was too thin against the water plane's own real wave motion — waves were poking up into the cove notch, flooding it ("water appears where it shouldn't be"). Bumped past the original +0.7 for safer clearance. "Flatter near the shore" is now achieved below via an eased rise curve instead of by lowering this absolute height.
     const VALLEY_FLOOR = BEACH_PLATEAU + 0.4; // where the cove's own floor levels out further inland — still low and close to sea level, matching a real cove valley rather than rising toward a peak
     if (islandDist < ISLAND_BLEND) {
       if (islandDist >= ISLAND_CORE) {
@@ -326,7 +326,15 @@ const BIOME_SHAPERS = {
         // which is exactly what "nearly flat" can't tolerate anywhere
         // within it).
         const beachT = 1 - (islandDist - ISLAND_CORE) / (ISLAND_BLEND - ISLAND_CORE); // 0 at BLEND, 1 at CORE
-        const rampHeight = beachT * (BEACH_PLATEAU - (LIQUID_LEVEL.crystal - 1)) + (LIQUID_LEVEL.crystal - 1);
+        // Eased (not linear) — per "down near the shore flatter" request:
+        // stays close to the low end for most of the band's width (reads
+        // flat underfoot) and only climbs toward BEACH_PLATEAU in the
+        // final stretch approaching CORE, rather than rising at a
+        // constant rate the whole way. Height AT CORE (beachT=1) is
+        // identical either way, so the safe water clearance above stays
+        // exactly what it was — only the shape of the climb changes.
+        const easedBeachT = Math.pow(beachT, 1.8);
+        const rampHeight = easedBeachT * (BEACH_PLATEAU - (LIQUID_LEVEL.crystal - 1)) + (LIQUID_LEVEL.crystal - 1);
         const outerFade = Math.min(1, beachT / 0.45); // fades the ramp to exactly 0 within the outermost ~45% of the band (near BLEND) instead of colliding with the hard 0 default just outside the islandDist<BLEND guard below — widened from 0.15 (only ~1.65 units) specifically because that was finer than the default mobile terrain mesh's own segment spacing, so it rendered as one hard triangle edge instead of a gradual blend
         // (1 - coveShape) suppresses this ring to ~0 outside the cove —
         // the beach only actually rises within the narrow opening; the

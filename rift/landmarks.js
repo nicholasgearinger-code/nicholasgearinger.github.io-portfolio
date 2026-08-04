@@ -824,30 +824,9 @@ function mulberry32Local(seed) {
 
 function createCrystalLandmark(colorHex) {
   const group = new THREE.Group();
-  // Rocks whitened toward the island's own actual sand tone (was
-  // 0xd8cdb0, a warm tan that read as brown/rust under sunset lighting)
-  // and shrunk (was 1.4-3.0 scale, now 0.9-1.8) so they read as a modest
-  // rock accent around the tidepool rather than dominating the whole
-  // clearing — this, not a distant mountain, was very likely what showed
-  // up repeatedly as "jagged brown angular shapes" in prior screenshots.
-  const rockColor = 0xf0e6d0;
-  const rockMat = new THREE.MeshStandardMaterial({
-    color: rockColor, roughness: 0.75, metalness: 0.02, flatShading: true,
-  });
-  const boulderCount = 5;
-  for (let i = 0; i < boulderCount; i++) {
-    const s = 0.9 + Math.random() * 0.9;
-    const boulder = new THREE.Mesh(new THREE.OctahedronGeometry(s, 0), rockMat);
-    const angle = (i / boulderCount) * Math.PI * 2 + Math.random() * 0.3;
-    const dist = 2.6 + Math.random() * 1.2;
-    boulder.position.set(Math.cos(angle) * dist, s * 0.55, Math.sin(angle) * dist);
-    boulder.rotation.set(Math.random(), Math.random() * Math.PI, Math.random());
-    group.add(boulder);
-  }
-  // A small shallow tidepool at the center, with the required energy
-  // core reframed as a soft glow rising from the water rather than a
-  // resonance crystal — reads as something faintly magical caught in
-  // the pool, not a light source that would look out of place on sand.
+  // Boulders and palm trees removed entirely per explicit "fully remove
+  // all trees, rocks, and coral" request — the landmark clearing is now
+  // just the tidepool and its glow, no rock ring or palms around it.
   const poolMat = new THREE.MeshStandardMaterial({
     color: 0x6fdfe6, emissive: 0x6fdfe6, emissiveIntensity: 0.3, roughness: 0.1, transparent: true, opacity: 0.75,
   });
@@ -856,20 +835,6 @@ function createCrystalLandmark(colorHex) {
   group.add(pool);
   const energy = createEnergyCore(0x3ce7ff, 0.9, 1.4); // small and low — a glow caught in the tidepool, not a towering beacon
   group.add(energy.group);
-  // A few real palm trees right in the landmark's own clearing — per
-  // explicit follow-up that this spot was reading as bare rock with no
-  // trees. The regular scattered decorations (decorations.js) already
-  // place palms elsewhere on the island, but nothing guaranteed any
-  // landed exactly HERE, at the landmark's own fixed position.
-  const palmSpots = [
-    { x: 4.2, z: -2.5, s: 1.1, seed: 101 }, { x: -3.8, z: 3.2, s: 0.95, seed: 202 }, { x: 1.5, z: 4.6, s: 1.0, seed: 303 },
-  ];
-  for (const p of palmSpots) {
-    const palm = createPalmTree(mulberry32Local(p.seed)).group;
-    palm.position.set(p.x, 0, p.z);
-    palm.scale.setScalar(p.s);
-    group.add(palm);
-  }
   return { group, energy, baseY: 0 };
 }
 

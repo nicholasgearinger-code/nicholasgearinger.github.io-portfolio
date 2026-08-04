@@ -311,11 +311,11 @@ const BIOME_SHAPERS = {
     // already used throughout this file), reading as a series of
     // separate dune humps along the same coastline rather than one
     // uniform smooth hill.
-    const duneVariation = fbm2(worldX * 0.02, 0, seed + 700, 2, 2.0, 0.5); // deliberately near-zero Z dependence — this is a variation ALONG the coastline's length, not across it
-    const dunePeakMult = 0.7 + Math.max(0, duneVariation + 0.5) * 0.6; // roughly 0.7x-1.3x of ISLAND_PEAK at different points along X
+    const duneVariation = fbm2(worldX * 0.013, 0, seed + 700, 2, 2.0, 0.5); // lowered from 0.02 — broader, more gradual humps along the coastline instead of tightly-packed ones, per explicit "area between the dunes could be smoother" request. Deliberately near-zero Z dependence — this is a variation ALONG the coastline's length, not across it
+    const dunePeakMult = 0.88 + Math.max(0, duneVariation + 0.5) * 0.24; // narrowed from 0.7x-1.3x to 0.88x-1.12x — softens the height difference between adjacent dune peaks so the terrain between them reads as a gentle roll rather than a jagged dip
 
     let islandBump = 0;
-    const BEACH_PLATEAU = LIQUID_LEVEL.crystal + 0.7; // modest — just above the waterline, not anywhere near the true peak
+    const BEACH_PLATEAU = LIQUID_LEVEL.crystal + 0.35; // halved from 0.7 — reads flatter right down near the shore, per explicit "down near the shore flatter" request
     const VALLEY_FLOOR = BEACH_PLATEAU + 0.4; // where the cove's own floor levels out further inland — still low and close to sea level, matching a real cove valley rather than rising toward a peak
     if (islandDist < ISLAND_BLEND) {
       if (islandDist >= ISLAND_CORE) {
@@ -898,7 +898,17 @@ function applyHeightShading(geo, colorHex, minY, maxY, biome, seed) {
           const rockNoise = fbm2(x * 0.04, z * 0.04, seed + 900, 2, 2.0, 0.5);
           islandRockTmp.copy(islandRock).lerp(islandRockShadow, Math.max(0, rockNoise));
           tmp.lerp(islandRockTmp, rockAmount);
-          const grassAmount = 1 - rockAmount;
+          // Grass density gradient by elevation above the beach — sparse
+          // right where the beach ends, gradually filling in further
+          // inland/upslope, per explicit "sparse at the shore and
+          // gradually more towards the top" request. worldY is the best
+          // available proxy for "distance up from the shore" here (the
+          // interior hill's own height rises monotonically inland), and
+          // this multiplies on top of the existing slope-based amount so
+          // steep ground still stays bare regardless of elevation.
+          const grassShoreT = THREE.MathUtils.clamp((worldY - (waterLine + 1)) / 16, 0, 1);
+          const grassShoreFactor = grassShoreT * grassShoreT * (3 - 2 * grassShoreT);
+          const grassAmount = (1 - rockAmount) * grassShoreFactor;
           const grassNoise = fbm2(x * 0.05 + 300, z * 0.05 + 300, seed + 950, 2, 2.0, 0.5);
           islandGrassTmp.copy(islandGrass).lerp(islandGrassDark, Math.max(0, grassNoise));
           tmp.lerp(islandGrassTmp, grassAmount * 0.92); // not fully 1 — softens the transition slightly rather than a mechanically hard edge

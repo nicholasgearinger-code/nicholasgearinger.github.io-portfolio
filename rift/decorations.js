@@ -222,7 +222,8 @@ function buildBaseDecoration(biome, colorHex, seedRand, worldX, worldZ) {
     switch (biome) {
       case "ember": return createObsidianFormation(colorHex, seedRand);
       case "verdant": return createBloomingVine(colorHex, seedRand);
-      case "crystal": return createGeode(colorHex, seedRand); // a clam/anemone geode — reef floor only, skipped entirely on the island above
+      // crystal's geode (a rock/clam formation) removed per explicit
+      // "fully remove all trees, rocks, and coral" request.
       case "abyssal": return createStalagmite(colorHex, seedRand);
       case "ashen": return createFossilRemains(colorHex, seedRand);
     }
@@ -245,27 +246,16 @@ function buildBaseDecoration(biome, colorHex, seedRand, worldX, worldZ) {
       if (roll < 0.93) return createGlowFungus(colorHex, seedRand); // glowing bioluminescent ground clusters
       if (roll < 0.97) return createFallenLog(colorHex, seedRand); // moss-covered logs/stumps — ground-floor variety and an "aged forest" signal
       return createRockCluster(biome, colorHex, seedRand);
-    case "crystal": {
-      if (onIsland) {
-        // Island decorations REMOVED entirely per explicit "remove all
-        // the trees and rocks on the island" request — the plan is a
-        // surrounding grassy/hilly environment instead (a real terrain
-        // reshape, needing terrain.js — not available this session, see
-        // main.js's own note on this). Returning null here just clears
-        // the island of palm trees/coconuts for now; it doesn't build
-        // the new environment on its own.
-        return null;
-      }
-      // Rebalanced per a new reference photo showing dense, colorful
-      // coral walls and explicit "now we can add coral" follow-up — a
-      // real reversal from the prior round's near-total open sand.
-      // Landed roughly in between: noticeably more coral than the bare
-      // FU121 tuning, while keeping real open sand patches rather than
-      // going back to FU118's uniform full coverage.
-      if (roll < 0.4) return null;
-      if (roll < 0.55) return createRockCluster(biome, colorHex, seedRand);
-      return createCrystalCluster(colorHex, seedRand);
-    }
+    case "crystal":
+      // Trees, rocks, and coral removed entirely per explicit "fully
+      // remove all trees, rocks, and coral" request — Coral Shallows
+      // now spawns none of these as scattered decorations, on the
+      // island or across the reef floor. This also sidesteps the
+      // onIsland check's stale detection radius (see its own comment
+      // above) — since this case is null unconditionally now, whether
+      // that radius still matches the island's current elongated shape
+      // no longer matters.
+      return null;
     case "abyssal":
       if (roll < 0.25) return createCaveMouth(colorHex, seedRand, biome);
       if (roll < 0.72) return createDebris(colorHex, seedRand);

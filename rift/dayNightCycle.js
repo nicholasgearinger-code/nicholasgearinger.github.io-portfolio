@@ -480,15 +480,21 @@ function createShootingStars(scene) {
 function randRangeLocal(min, max) { return min + Math.random() * (max - min); }
 
 function createSkyDome(scene) {
-  const [widthSeg, heightSeg] = getGraphicsSettings().skyDomeSegments;
-  const geo = new THREE.SphereGeometry(SKY_DOME_RADIUS, widthSeg, heightSeg);
-  const colors = new Float32Array(geo.attributes.position.count * 3);
-  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-  const mat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.renderOrder = -100; // forces a stable draw order (always first/furthest-back) instead of relying on three.js's automatic per-frame camera-distance sort for transparent objects — that sort can become unstable between two large overlapping transparent surfaces (this dome and the cloud layer in clouds.js) as the camera moves, which is exactly a "flickers only when moving the camera" symptom
-  scene.add(mesh);
-  return { mesh, posAttr: geo.attributes.position, colorAttr: geo.attributes.color };
+  // DISABLED — per explicit request: this vertex-colored gradient sphere
+  // was conflicting with the newer photo-textured cloud dome
+  // (clouds.js's createRealisticCloudDome) layered just inside it,
+  // rather than the two reading as one coherent sky. Returns null;
+  // updateSkyDome (called every frame from updateDayNightCycle) is now
+  // null-guarded, same established pattern already used project-wide
+  // for disabling a system without touching every call site (see
+  // clouds.js's own createClouds/createCloudLayer). scene.background is
+  // now set directly in main.js each frame instead, using the same
+  // zenith/horizon colors this file already computes — a plain solid
+  // color rather than this dome's rich per-vertex banding, but real
+  // background coverage rather than the black voids that would show
+  // through the cloud dome's partial-alpha gaps with nothing behind it
+  // at all.
+  return null;
 }
 
 // A handful of bold, discrete bands instead of one smooth continuous
@@ -497,6 +503,7 @@ function createSkyDome(scene) {
 // technique terrain.js's HEIGHT_PALETTE already uses, applied here to the
 // horizon->zenith gradient instead of a height gradient.
 function updateSkyDome(sky, zenithColor, midColor, horizonColor, elapsed, sunDir) {
+  if (!sky) return; // disabled — see createSkyDome
   const { posAttr, colorAttr } = sky;
   const tmp = new THREE.Color();
   const localHorizon = new THREE.Color();

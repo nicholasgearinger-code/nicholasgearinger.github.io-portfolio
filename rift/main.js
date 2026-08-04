@@ -118,13 +118,24 @@ let fpsFrameCount = 0, fpsAccumTime = 0;
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x0a0e14, 0.0032);
+// Solid-color fallback background, mutated in place each frame (see the
+// animate loop) rather than reassigned — the vertex-colored gradient
+// sky dome (dayNightCycle.js) was removed per explicit request (it was
+// conflicting with the newer photo-textured cloud dome layered just
+// inside it), which leaves nothing behind the cloud dome's own partial-
+// alpha gaps. Without this, those gaps would show flat black voids
+// instead of sky. A plain solid blend of the current zenith/horizon
+// colors isn't as rich as the old dome's per-vertex banding, but it's
+// real coverage — genuinely better than a black hole in the sky.
+const sceneBackgroundColor = new THREE.Color(0x1a2a3a);
+scene.background = sceneBackgroundColor;
 
-// Realistic photo/render-based cloud dome, layered on top of the
-// procedural gradient sky dome — created ONCE here rather than per-level
-// like createClouds/createCloudLayer below, since it's the same dome for
-// every biome (no per-biome config) and teardownLevel only ever removes
-// specific tracked objects individually, never a blanket scene clear, so
-// this is safe to just persist untouched across every level transition.
+// Realistic photo/render-based cloud dome — created ONCE here rather
+// than per-level like createClouds/createCloudLayer below, since it's
+// the same dome for every biome (no per-biome config) and teardownLevel
+// only ever removes specific tracked objects individually, never a
+// blanket scene clear, so this is safe to just persist untouched across
+// every level transition.
 const realisticCloudDomeHandle = createRealisticCloudDome(scene);
 
 const camera = new THREE.PerspectiveCamera(70, viewport.clientWidth / viewport.clientHeight, 0.1, 2000);
@@ -648,6 +659,10 @@ let crystalsTotal = 0;
 let crystalsCollected = 0;
 const decorationHandles = [];
 let lightShaftHandles = [];
+// Coral Shallows underwater light shafts — separate array from the
+// Verdant canopy ones above so submersion-based visibility can be
+// toggled independently without needing to tag/filter a shared array.
+let underwaterShaftHandles = [];
 let loreMarkers = []; // {id, x, z, y, shown}
 let currentLevelIdx = -1;
 let spawnPosition = { x: 0, y: 5, z: 0 };
@@ -734,6 +749,8 @@ function teardownLevel() {
   decorationHandles.length = 0;
   disposeLightShafts(scene, lightShaftHandles);
   lightShaftHandles = [];
+  disposeLightShafts(scene, underwaterShaftHandles);
+  underwaterShaftHandles = [];
   loreMarkers = [];
 }
 
@@ -1549,19 +1566,41 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
     }
   }
 
-  // Coral Shallows underwater light shafts REMOVED entirely per explicit
-  // request — FU144's fix only hid them above the surface (toggling
-  // .sprite.visible by isFullySubmerged each frame), but underwater they
-  // rendered as noisy/grainy round blobs rather than clean light shafts,
-  // and that same per-frame visibility toggle was very likely the actual
-  // cause of a separately-reported "underwater lighting flickering"
-  // symptom (rapid on/off near the submersion boundary). Not creating
-  // them at all resolves both: no wasted geometry, and nothing left to
-  // flicker. If real underwater sunbeams are wanted again later, this is
-  // the place to rebuild them — ideally with a genuine soft-gradient
-  // sprite texture rather than whatever decorations.js's
-  // createUnderwaterLightShaft currently produces (not available this
-  // session to inspect).
+  // Coral Shallows underwater light shafts — RE-ADDED per explicit
+  // request ("more light shining through the surface of the water").
+  // Previously removed on a hypothesis (grainy/noisy underwater look)
+  // made without being able to inspect decorations.js directly — now
+  // that it's available, createUnderwaterLightShaft's actual geometry
+  // looks correctly built (anchored at the real water surface, length
+  // capped to the real local depth so it can't poke through the sand,
+  // same clean soft-gradient texture the working Verdant canopy version
+  // above already uses) — the earlier diagnosis doesn't hold up against
+  // the real code. The SEPARATE flicker issue that came with it before
+  // was very likely the per-frame submersion visibility toggle fighting
+  // the water's own wave bob right at the boundary — main.js's
+  // isFullySubmerged now has a real hysteresis dead zone (1.1 units,
+  // comfortably past the ~1.7-unit wave amplitude) that didn't exist
+  // yet at the time, so that specific failure mode should be resolved
+  // independently of this. Own separate array (underwaterShaftHandles)
+  // so its submersion-based visibility can be toggled without touching
+  // Verdant's canopy shafts. Count kept conservative (18, vs the
+  // original 40) for a first re-introduction.
+  if (level.biome === "crystal" && waterLevel !== undefined) {
+    const uwShaftRand = mulberry32(hashStringToSeed(WORLD_SEED + "-uw-light-shafts-" + level.biome));
+    const uwShaftBound = WORLD_BOUND_RADIUS * 0.85;
+    const uwShaftCount = 18;
+    for (let i = 0; i < uwShaftCount; i++) {
+      const x = (uwShaftRand() * 2 - 1) * uwShaftBound;
+      const z = (uwShaftRand() * 2 - 1) * uwShaftBound;
+      if (Math.hypot(x, z) > uwShaftBound) continue;
+      const groundY = sampleGroundHeight(x, z, terrainMesh) ?? 0;
+      if (groundY > waterLevel - 1.0) continue; // needs genuine depth below it — skip shallow-water/near-shore spots
+      const shaft = createUnderwaterLightShaft(x, z, groundY, waterLevel, uwShaftRand);
+      shaft.sprite.visible = false; // starts hidden — animate loop sets real visibility from isFullySubmerged each frame
+      scene.add(shaft.sprite);
+      underwaterShaftHandles.push(shaft);
+    }
+  }
 
   loreMarkers = layout.loreMarkers.map((m) => ({
     ...m, y: sampleGroundHeight(m.x, m.z, terrainMesh) ?? 0, shown: false,
@@ -1922,6 +1961,13 @@ function animate() {
   }
 
   const dayNight = updateDayNightCycle(dayNightCycle, dt);
+  // Fallback sky background — mutated in place (scene.background already
+  // references this same Color object, set once at module init above),
+  // blended from the day/night cycle's own current colors so it stays
+  // in sync with the cloud dome's own tint and the rest of the lighting.
+  if (dayNight.skyZenith && dayNight.skyHorizon) {
+    sceneBackgroundColor.copy(dayNight.skyHorizon).lerp(dayNight.skyZenith, 0.5);
+  }
 
   if (isGameActive() && currentLevelIdx >= 0) {
     updateMovement(dt, playerPhysics.grounded);
@@ -2099,6 +2145,13 @@ function animate() {
   // visibility directly on submersion rather than trying to fog an
   // object that was deliberately built to ignore fog.
   if (realisticCloudDomeHandle) realisticCloudDomeHandle.mesh.visible = !isFullySubmerged;
+  // Underwater light shafts — opposite gating from the cloud dome just
+  // above: only visible while actually submerged (a beam of light
+  // shining down FROM the surface only makes sense to see from below
+  // it). Safe to toggle every frame now — see the creation comment
+  // (buildLevel) for why the flicker risk that came with this exact
+  // toggle before should no longer apply.
+  for (const s of underwaterShaftHandles) s.sprite.visible = isFullySubmerged;
   if (isFullySubmerged) {
     // Real water only lets you see the sky within a narrow cone roughly
     // straight overhead (Snell's window) — from any other angle you'd
@@ -2146,6 +2199,7 @@ function animate() {
   setAmbientDayAmount(dayNight.dayAmount);
   if (currentLevelIdx >= 0 && horizonHandle) updateHorizonSilhouettes(horizonHandle, LEVELS[currentLevelIdx].biome, dayNight.dayAmount);
   updateLightShafts(lightShaftHandles, dayNight.dayAmount);
+  updateLightShafts(underwaterShaftHandles, dayNight.dayAmount);
   updateWorldPulse(dt);
   updateProjectiles(dt);
   if (isFullySubmerged) {

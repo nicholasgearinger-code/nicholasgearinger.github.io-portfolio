@@ -1714,7 +1714,63 @@ function disposeLiquidPlane(scene, handle) {
   }
 }
 
-export { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail };
+// -----------------------------------------------------------------------------
+// A simple, large "horizon extension" ocean plane — Coral Shallows only.
+// The DETAILED water plane above (createLiquidPlane) is deliberately
+// sized to match the landmass itself (TERRAIN_SIZE), so its per-vertex
+// Gerstner waves/foam stay at a real, walkable-scale resolution near the
+// player — stretching that same vertex budget out to the horizon would
+// make the near-shore waves visibly coarse. Reported symptom this fixes:
+// "the ocean just stops close to shore" — past the landmass's own edge
+// there was previously nothing at all, not open water, so the terrain's
+// own edge-falloff silhouette read as a hard horizon line.
+// This is a second, much larger, much cheaper flat plane sitting just
+// BELOW the detailed one (same Y minus a hair, so the detailed plane
+// naturally occludes it everywhere the two overlap — no z-fighting, no
+// visibility toggling needed) that extends far past both the landmass's
+// real edge and fog's effective visibility range. fog:true is
+// deliberate here (unlike the cloud dome's fog:false) — this is meant to
+// fade into the sky/fog color at distance exactly like real open ocean
+// does, not read as a sharp-edged background plate.
+// -----------------------------------------------------------------------------
+const SKIRT_SIZE = 4000; // comfortably past every biome's tuned fog density (see weather.js's baseFogDensity values) at any graphics tier, so this always fades into fog well before its own edge could be seen
+
+function createOceanHorizonSkirt(scene, biome, y) {
+  const style = LIQUID_STYLE[biome];
+  if (!style || biome !== "crystal") return null; // scoped to the open-ocean biome specifically — Verdant's river and Ember's lava are contained features, not an "extends to the horizon" ocean
+  const geo = new THREE.PlaneGeometry(SKIRT_SIZE, SKIRT_SIZE, 1, 1);
+  geo.rotateX(-Math.PI / 2);
+  const mat = new THREE.MeshBasicMaterial({ color: style.baseColor, fog: true });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.y = y - 0.05; // a hair below the detailed plane so it's naturally occluded wherever the two overlap, rather than z-fighting against it
+  mesh.renderOrder = -1;
+  scene.add(mesh);
+  return { mesh, mat };
+}
+
+/**
+ * @param {number} [stormAmount]  same 0-1 value passed to updateLiquidPlane — keeps this plane's color in sync with the real water's own storm darkening instead of staying one fixed color while the water right in front of it changes tone
+ */
+function updateOceanHorizonSkirt(handle, skyColor, stormAmount = 0) {
+  if (!handle) return;
+  // Tints toward the current sky color the same way the detailed plane's
+  // own baseColor does (see updateLiquidPlane) — otherwise this would
+  // stay one fixed color while the real water's tone shifts through the
+  // day/night cycle, an obvious mismatch right where the two planes meet.
+  if (skyColor) {
+    handle.mat.color.copy(LIQUID_STYLE.crystal.baseColor).lerp(skyColor, 0.4);
+    if (stormAmount > 0) handle.mat.color.lerp(STORM_SEA_COLOR, stormAmount * 0.85);
+  }
+}
+
+function disposeOceanHorizonSkirt(scene, handle) {
+  if (!handle) return;
+  scene.remove(handle.mesh);
+  handle.mesh.geometry.dispose();
+  handle.mat.dispose();
+}
+
+export { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail, createOceanHorizonSkirt, updateOceanHorizonSkirt, disposeOceanHorizonSkirt };
 
 // Ocean surface detail — Coral Shallows only. DISABLED entirely per
 // explicit follow-up request, after two rounds of trying to fix the

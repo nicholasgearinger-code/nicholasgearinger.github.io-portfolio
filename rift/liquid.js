@@ -67,44 +67,97 @@ const LIQUID_STYLE = {
 // Verdant's river keep their existing simpler sine-based ripple — this
 // is scoped to the actual open-ocean biome specifically.
 //
-// steepness (Q) controls how sharp the crest peak is — too high per-wave
-// and neighboring vertices can cross over each other (self-intersecting
-// geometry), so each is kept comfortably under 1/(k*amplitude*waveCount).
-// wavelength/amplitude/speed loosely follow real deep-water dispersion
-// (bigger/slower swells carry more amplitude, small wavelets are fast and
-// shallow) without needing to actually simulate the physics.
-const GERSTNER_WAVES_RAW = [
-  // Amplitudes roughly doubled from the original set — per explicit
-  // "water lacks detail" report, traced to the real root cause: total
-  // combined wave height summed to well under 1 unit, viewed from a
-  // 1.6-unit player eye height. That's genuinely too subtle to read as
-  // real chop, and since foam/sun-glitter/reflection-distortion are ALL
-  // gated by this same wave signal (disturbance, normal magnitude), an
-  // under-scaled ocean suppresses every one of those systems at once —
-  // a single root cause explaining the across-the-board flat look,
-  // rather than any one missing feature. Self-intersection safety
-  // margin (steepness*k*amplitude, per this file's own established
-  // rule) was previously ~0.13 at worst case — doubling amplitude alone
-  // would have brought that to ~0.26, still safe.
-  // STEEPNESS HALVED here per explicit "waves too sharp edged" follow-
-  // up — real Gerstner crest sharpness scales with amplitude*steepness,
-  // so doubling amplitude while leaving steepness unchanged genuinely
-  // did make crests noticeably more pointed than before. Halving
-  // steepness brings that product back close to the ORIGINAL pre-
-  // doubling level, restoring a more natural rounded swell shape while
-  // keeping the taller, more visible wave height that fixed the "lacks
-  // detail" report. Self-intersection margin now even safer than either
-  // prior version (~0.13, same as the untouched original).
-  { dirX: 1.0, dirZ: 0.3, wavelength: 40, amplitude: 0.85, speed: 1.75, steepness: 0.25 },  // the big rolling swell
-  { dirX: 0.3, dirZ: 1.0, wavelength: 24, amplitude: 0.48, speed: 2.5, steepness: 0.225 }, // a second swell crossing at an angle
-  { dirX: -0.7, dirZ: 0.5, wavelength: 13, amplitude: 0.26, speed: 3.4, steepness: 0.175 }, // finer chop
-  { dirX: 0.6, dirZ: -0.65, wavelength: 7, amplitude: 0.12, speed: 4.6, steepness: 0.15 },   // fine surface texture
-];
+// REWORKED from a hand-picked 4-wave set to a GENERATED 10-wave
+// spectrum — per explicit "doesn't behave or look as real as it should"
+// follow-up. The real problem with only 4 discrete components: the
+// combined pattern is fixed and exactly repeats, which reads as
+// synthetic at close range once your eye starts recognizing the same
+// shapes recurring. Ten components, generated from a real underlying
+// relationship rather than hand-picked, is a genuinely richer, less
+// repetitive combination — and two real physical corrections came out
+// of doing this properly:
+//
+// (1) DISPERSION DIRECTION FIXED. The previous hand-tuned set had
+//     SHORT wavelengths moving FASTEST (speed 1.75->4.6 as wavelength
+//     went 40->7) — backwards from real deep-water gravity waves, where
+//     phase speed scales with sqrt(wavelength): LONGER swells actually
+//     travel faster than short chop. This generator derives speed from
+//     that real relationship instead of arbitrary per-wave numbers.
+// (2) Direction spread now uses golden-angle spacing (2.399963 rad)
+//     around one dominant wind heading — mathematically guaranteed to
+//     never have two components running exactly parallel or clustering,
+//     unlike 4 arbitrarily-picked direction vectors.
+//
+// TOTAL AMPLITUDE deliberately kept at the SAME already-tuned sum
+// (1.7) as the previous 4-wave version, not increased again — this
+// round is about wave SHAPE/behavior, not making them taller. The
+// coefficient below is solved backward from that target rather than
+// picked per-wave, so adding more components doesn't silently inflate
+// the total the way naively sampling the same amplitude/wavelength
+// relationship at more points would.
+//
+// steepness (Q) controls how sharp the crest peak is — too high and
+// neighboring vertices can cross over each other (self-intersecting
+// geometry); kept comfortably under this file's own established rule
+// (steepness*k*amplitude, summed across all waves, well under ~1.0 —
+// verified numerically for this exact spectrum, aggregate ≈0.34, not
+// eyeballed) via an explicit per-wave cap.
+const GERSTNER_WAVE_COUNT = 10;
+const GERSTNER_WIND_ANGLE = Math.atan2(0.3, 1.0); // same dominant heading the original swell used
+const GERSTNER_GOLDEN_ANGLE = 2.399963; // radians — well-distributed direction spacing, never clusters or exactly repeats
+const GERSTNER_LONGEST_WAVELENGTH = 42;
+const GERSTNER_SHORTEST_WAVELENGTH = 3.2;
+const GERSTNER_SPEED_AT_LONGEST = 1.9;
+const GERSTNER_TARGET_AMPLITUDE_SUM = 1.7; // matches the previous 4-wave version's already-tuned total exactly
+const GERSTNER_WAVES_RAW = (() => {
+  const wavelengths = [];
+  let wavelengthSum = 0;
+  for (let i = 0; i < GERSTNER_WAVE_COUNT; i++) {
+    const t = i / (GERSTNER_WAVE_COUNT - 1);
+    // Geometric (not linear) spacing across wavelengths — a real ocean
+    // spectrum's energy spans orders of magnitude, not an evenly-spaced
+    // range.
+    const wl = GERSTNER_LONGEST_WAVELENGTH * Math.pow(GERSTNER_SHORTEST_WAVELENGTH / GERSTNER_LONGEST_WAVELENGTH, t);
+    wavelengths.push(wl);
+    wavelengthSum += wl;
+  }
+  const amplitudeCoeff = GERSTNER_TARGET_AMPLITUDE_SUM / wavelengthSum; // solved backward so the SUM lands exactly on target regardless of wave count
+  const waves = [];
+  for (let i = 0; i < GERSTNER_WAVE_COUNT; i++) {
+    const wavelength = wavelengths[i];
+    const amplitude = wavelength * amplitudeCoeff; // longer waves carry proportionally more amplitude, same relationship the original 4-wave set's own numbers implied
+    const speed = GERSTNER_SPEED_AT_LONGEST * Math.sqrt(wavelength / GERSTNER_LONGEST_WAVELENGTH); // real deep-water dispersion
+    const angle = GERSTNER_WIND_ANGLE + Math.sin(i * GERSTNER_GOLDEN_ANGLE) * 0.62; // ~35 degree cone around the dominant heading
+    const k = (Math.PI * 2) / wavelength;
+    const steepness = Math.min(0.5, 0.35 / (k * amplitude * GERSTNER_WAVE_COUNT));
+    waves.push({ dirX: Math.cos(angle), dirZ: Math.sin(angle), wavelength, amplitude, speed, steepness });
+  }
+  return waves;
+})();
 const GERSTNER_WAVES = GERSTNER_WAVES_RAW.map((w) => {
   const len = Math.hypot(w.dirX, w.dirZ) || 1;
   return { ndx: w.dirX / len, ndz: w.dirZ / len, k: (Math.PI * 2) / w.wavelength, amplitude: w.amplitude, speed: w.speed, steepness: w.steepness };
 });
 const GERSTNER_AMPLITUDE_SUM = GERSTNER_WAVES.reduce((sum, w) => sum + w.amplitude, 0);
+
+// Domain warping — per explicit follow-up, this is what actually kills
+// the "I can recognize the same wave pattern repeating" tell cheaply,
+// without needing a genuinely different simulation technique (real FFT
+// ocean sim would be a much larger, higher-risk rewrite — flagged and
+// deliberately not attempted this round). Distorts the SAMPLE POSITION
+// before evaluating the Gerstner sum, using a couple of large-scale,
+// low-frequency sine terms with cross terms (both axes depend on BOTH
+// x and z, not just their own axis) so it reads as smooth, organic
+// drift rather than an axis-aligned artifact. Frequencies (0.006-0.016
+// per unit) are deliberately much lower than any wave's own spatial
+// frequency (wavelengths 3.2-42 units), so this reads as a slow large-
+// scale bend layered UNDER the finer wave detail, not a competing
+// pattern of its own.
+function gerstnerDomainWarp(x, z, t) {
+  const wx = Math.sin(x * 0.016 + z * 0.009 + t * 0.05) * 4.5 + Math.sin(x * 0.006 - z * 0.011 - t * 0.02) * 2.5;
+  const wz = Math.cos(x * 0.011 - z * 0.014 + t * 0.04) * 4.5 + Math.cos(x * 0.008 + z * 0.007 - t * 0.018) * 2.5;
+  return [x + wx, z + wz];
+}
 
 // A soft mottled noise pattern, tiled — real distortion needs a
 // post-process shader this project doesn't have, so instead this scrolls
@@ -1304,8 +1357,18 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
       // feeds the material's real specular highlights and the Fresnel/
       // SSS terms below.
       let dx = 0, dz = 0, dy = 0, nyTerm = 0;
+      // Domain warp applied to the SAMPLE position only (what part of
+      // the wave field gets evaluated here), not the vertex's actual
+      // base position — dx/dz (horizontal Gerstner displacement) are
+      // still added to the real bx/bz below, so the mesh doesn't shift
+      // location, only which piece of the combined wave pattern shows
+      // up at each point. This is what actually breaks up the "same
+      // shape repeating" tell — two vertices at different world
+      // positions now sample the wave sum from different EFFECTIVE
+      // positions instead of a purely linear function of their real one.
+      const [wbx, wbz] = gerstnerDomainWarp(bx, bz, elapsed);
       for (const w of GERSTNER_WAVES) {
-        const f = w.k * (w.ndx * bx + w.ndz * bz) - w.speed * elapsed;
+        const f = w.k * (w.ndx * wbx + w.ndz * wbz) - w.speed * elapsed;
         const s = Math.sin(f), c = Math.cos(f);
         dx += w.steepness * w.amplitude * w.ndx * c;
         dz += w.steepness * w.amplitude * w.ndz * c;

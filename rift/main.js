@@ -903,17 +903,41 @@ varying vec3 vCausticWorldNormal;
 varying float vWaveHeight;
 uniform float uTime;
 uniform float uWaterLevel;
-// Same Gerstner wave height formula as the fragment shader below (and
-// the actual ocean surface mesh in liquid.js) — duplicated here because
-// vertex and fragment are separate compiled programs and can't share a
-// GLSL function directly, even though both read the same uTime/uWaterLevel
-// uniform values.
+// Same Gerstner wave spectrum as the actual ocean surface mesh in
+// liquid.js — duplicated here because vertex and fragment are separate
+// compiled programs and can't share a GLSL function directly, even
+// though both read the same uTime/uWaterLevel uniform values.
+//
+// REWORKED from a hand-picked 4-wave sum to a 10-wave GENERATED
+// spectrum, kept in exact numeric sync with liquid.js's own generator
+// (GERSTNER_WAVES_RAW) — same reasoning as that file's own comment:
+// only 4 discrete components made the combined pattern fixed and
+// exactly repeating, which read as synthetic at close range. These
+// exact coefficients were computed by actually RUNNING the JS
+// generator (not hand-derived), then transcribed here — direction
+// vectors are already unit length (generated via cos/sin of an angle),
+// so no normalize() needed the way the old 4-wave version required.
+// Domain warping (gerstnerDomainWarp) is applied to the SAMPLE position
+// before evaluating the sum, not the output height — same technique
+// and reasoning as liquid.js's own version, translated to GLSL.
+vec2 gerstnerDomainWarp(vec2 p, float t) {
+  float wx = sin(p.x * 0.016 + p.y * 0.009 + t * 0.05) * 4.5 + sin(p.x * 0.006 - p.y * 0.011 - t * 0.02) * 2.5;
+  float wz = cos(p.x * 0.011 - p.y * 0.014 + t * 0.04) * 4.5 + cos(p.x * 0.008 + p.y * 0.007 - t * 0.018) * 2.5;
+  return p + vec2(wx, wz);
+}
 float gerstnerHeightVert(vec2 xz, float t) {
+  vec2 wxz = gerstnerDomainWarp(xz, t);
   float h = 0.0;
-  h += 0.85 * sin(0.15708 * dot(normalize(vec2(1.0, 0.3)), xz) - 1.75 * t);
-  h += 0.48 * sin(0.26180 * dot(normalize(vec2(0.3, 1.0)), xz) - 2.5 * t);
-  h += 0.26 * sin(0.48332 * dot(normalize(vec2(-0.7, 0.5)), xz) - 3.4 * t);
-  h += 0.12 * sin(0.89760 * dot(normalize(vec2(0.6, -0.65)), xz) - 4.6 * t);
+  h += 0.448603 * sin(0.149600 * dot(vec2(0.957826, 0.287348), wxz) - 1.900000 * t);
+  h += 0.336999 * sin(0.199142 * dot(vec2(0.758192, 0.652032), wxz) - 1.646785 * t);
+  h += 0.253161 * sin(0.265092 * dot(vec2(0.947277, -0.320417), wxz) - 1.427317 * t);
+  h += 0.190179 * sin(0.352883 * dot(vec2(0.708455, 0.705756), wxz) - 1.237097 * t);
+  h += 0.142866 * sin(0.469747 * dot(vec2(0.983218, 0.182437), wxz) - 1.072228 * t);
+  h += 0.107324 * sin(0.625312 * dot(vec2(0.999147, -0.041303), wxz) - 0.929331 * t);
+  h += 0.080624 * sin(0.832396 * dot(vec2(0.629256, 0.777198), wxz) - 0.805478 * t);
+  h += 0.060566 * sin(1.108060 * dot(vec2(0.966708, -0.255883), wxz) - 0.698131 * t);
+  h += 0.045498 * sin(1.475016 * dot(vec2(0.875590, 0.483054), wxz) - 0.605091 * t);
+  h += 0.034179 * sin(1.963495 * dot(vec2(0.863805, 0.503827), wxz) - 0.524450 * t);
   return h;
 }`)
         .replace("#include <begin_vertex>", `#include <begin_vertex>
@@ -936,7 +960,7 @@ float gerstnerHeightVert(vec2 xz, float t) {
   // assumed). Found while working on caustic brightness, not something
   // that was reported directly — worth knowing this was quietly wrong
   // for a few rounds.
-  float vWaveNorm = clamp((vWaveH + 1.71) / 3.42, 0.0, 1.0);
+  float vWaveNorm = clamp((vWaveH + 1.7) / 3.4, 0.0, 1.0);
   float vShoreDist = transformed.y - uWaterLevel;
   float vReachHeight = 0.1 + vWaveNorm * 0.5;
   float vFoamZone = 1.0 - smoothstep(0.0, 0.4, abs(vShoreDist - vReachHeight));
@@ -996,7 +1020,7 @@ float gFoamMask = 0.0;`)
   // brightness to the real wave motion (speed AND height) instead of
   // two independent things that only coincidentally looked similar.
   float waveH = vWaveHeight;
-  float waveNorm = clamp((waveH + 1.71) / 3.42, 0.0, 1.0); // 0 at trough, 1 at crest — range corrected to match the actual doubled Gerstner amplitude sum, see the matching vertex-shader fix above
+  float waveNorm = clamp((waveH + 1.7) / 3.4, 0.0, 1.0); // 0 at trough, 1 at crest — range matches the current 10-wave spectrum's exact total amplitude (deliberately kept equal to the prior 4-wave version's tuned total, see liquid.js's GERSTNER_TARGET_AMPLITUDE_SUM)
   // waveH's own multipliers halved (0.18->0.09, 0.12->0.06) — per
   // explicit "lacy caustics" follow-up. waveH's real range roughly
   // doubled when wave amplitude was doubled a few rounds back, so these

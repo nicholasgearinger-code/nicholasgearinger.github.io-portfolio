@@ -914,16 +914,30 @@ float foamVoronoi(vec2 p) {
   // the colored mesh's normalMap uses) since Water sets its own
   // wrapping/repeat internally — cloning avoids any property conflict
   // between the two consumers of the same underlying image.
+  //
+  // SIZED SMALL AND CAMERA-FOLLOWING (not one huge static plane covering
+  // the whole ocean) — per explicit request, and genuinely the standard
+  // technique real games use for this effect anyway: a modest patch
+  // recentered on the player every frame (see updateLiquidPlane) rather
+  // than a fixed plane spanning the entire `size`-unit ocean. Distant
+  // reflection detail is imperceptible anyway at typical wave/chop
+  // scale, and a smaller surface means far less area for any UV/
+  // precision edge case to show up on. Segment count bumped from a bare
+  // 2-triangle plane to a real grid too — Water's own reflection effect
+  // is a per-PIXEL fragment-shader technique (not vertex-driven), so
+  // this isn't expected to be the actual fix, but it's harmless and
+  // costs nothing meaningful at this size.
+  const MIRROR_PATCH_SIZE = 70;
   let mirrorWater = null;
   if (biome === "crystal") {
-    const mirrorGeo = new THREE.PlaneGeometry(size, size);
+    const mirrorGeo = new THREE.PlaneGeometry(MIRROR_PATCH_SIZE, MIRROR_PATCH_SIZE, 8, 8);
     // MUST be given a real repeat count — a fresh clone defaults to
     // (1,1), meaning ONE full copy of this small texture gets stretched
-    // across the ENTIRE ocean plane instead of tiling into many small
-    // ripples. Confirmed real bug from the first attempt at this feature.
+    // across the ENTIRE plane instead of tiling into many small ripples.
+    // Confirmed real bug from the first attempt at this feature.
     const mirrorNormals = getRippleNormalTexture().clone();
     mirrorNormals.needsUpdate = true;
-    const mirrorRepeat = Math.max(6, Math.round(size / 9));
+    const mirrorRepeat = Math.max(4, Math.round(MIRROR_PATCH_SIZE / 9));
     mirrorNormals.repeat.set(mirrorRepeat, mirrorRepeat);
     // Reflection render-texture sized to the ACTUAL viewport aspect
     // ratio rather than a fixed square — a portrait phone viewport
@@ -960,7 +974,8 @@ float foamVoronoi(vec2 p) {
     // unstable per-frame camera-distance sort two coincident large
     // transparent surfaces get, which reads as flicker when the camera
     // moves. A stable renderOrder (drawn after the main mesh) is the
-    // second half of that same fix.
+    // second half of that same fix. X/Z position is set every frame in
+    // updateLiquidPlane (camera-following), not fixed here.
     mirrorWater.position.y = y + 0.03;
     mirrorWater.renderOrder = 1;
     mirrorWater.visible = false; // starts hidden — updateLiquidPlane sets real visibility every frame based on camera position
@@ -1075,6 +1090,16 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
     mirrorWater.visible = cameraY === undefined ? true : cameraY > waterY;
     if (sunDir) mirrorWater.material.uniforms.sunDirection.value.copy(sunDir).normalize();
     mirrorWater.material.uniforms.time.value = elapsed;
+    // Camera-following patch, not a fixed plane — recenters under the
+    // player every frame so a small MIRROR_PATCH_SIZE-unit patch always
+    // covers the water directly around them regardless of where they
+    // are on the map, instead of needing to span the whole ocean. Y
+    // stays fixed at the water surface height (set once at creation);
+    // only X/Z track the camera.
+    if (playerPos) {
+      mirrorWater.position.x = playerPos.x;
+      mirrorWater.position.z = playerPos.z;
+    }
   }
   // Scroll the ripple normal map slowly along the plane's own flow
   // direction — a static (non-scrolling) normal map would still add real

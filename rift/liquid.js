@@ -1740,7 +1740,15 @@ function createOceanHorizonSkirt(scene, biome, y) {
   if (!style || biome !== "crystal") return null; // scoped to the open-ocean biome specifically — Verdant's river and Ember's lava are contained features, not an "extends to the horizon" ocean
   const geo = new THREE.PlaneGeometry(SKIRT_SIZE, SKIRT_SIZE, 1, 1);
   geo.rotateX(-Math.PI / 2);
-  const mat = new THREE.MeshBasicMaterial({ color: style.baseColor, fog: true });
+  // DoubleSide — the detailed water plane above needs a separate BackSide
+  // backMesh for underwater visibility because its material is a complex
+  // per-vertex-animated shader where normals matter; this is a flat,
+  // unlit, single color, so DoubleSide on one material is sufficient. A
+  // single-sided (default FrontSide) version of this plane was invisible
+  // from underneath, letting the raw sky show straight through past the
+  // real water plane's own edge — exactly the reported "underwater we
+  // can still see the edge" symptom.
+  const mat = new THREE.MeshBasicMaterial({ color: style.baseColor, fog: true, side: THREE.DoubleSide });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.y = y - 0.05; // a hair below the detailed plane so it's naturally occluded wherever the two overlap, rather than z-fighting against it
   mesh.renderOrder = -1;

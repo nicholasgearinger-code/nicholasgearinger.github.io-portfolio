@@ -45,6 +45,26 @@ const DAY = {
   skyZenith: 0x1560c4, skyMid: 0x2f8fe0, skyHorizon: 0x6fc0f0,
 };
 
+// The GENERAL sky (scene.background's flat fallback color + the cloud
+// dome's own uniform tint — see updateRealisticCloudDome in clouds.js)
+// has no way to vary by direction, so blending it all the way to
+// DAWN_DUSK's full saturated colors reads as "the entire sky changes
+// color" during sunrise/sunset — per explicit "the whole sky doesn't
+// need to change, mostly from where the sun is located" report. The
+// sun's own disc/glow/beams ALREADY carry that full dramatic color
+// locally (see sunBodyTint/horizonCloseness further down, unaffected by
+// this) — real sunrises work the same way: dramatic color concentrated
+// near the sun, the rest of the sky only mildly warmed. These muted
+// constants replace DAWN_DUSK's sky-only fields (NOT sun/ambient/
+// intensity, which still drive actual scene lighting and keep their
+// full transition) wherever skyZenith/skyMid/skyHorizon get computed
+// below. Zenith stays coolest (lowest damp — real zenith sky barely
+// warms even at sunset), horizon keeps the most (a muted color band is
+// still real), mid is in between.
+const SKY_DAWN_DUSK_ZENITH = lerpColor(DAY.skyZenith, DAWN_DUSK.skyZenith, 0.22);
+const SKY_DAWN_DUSK_MID = lerpColor(DAY.skyMid, DAWN_DUSK.skyMid, 0.32);
+const SKY_DAWN_DUSK_HORIZON = lerpColor(DAY.skyHorizon, DAWN_DUSK.skyHorizon, 0.45);
+
 // The sun's own visual disc/glow color at three stages — zenith (high,
 // small, near-white), mid-elevation (golden), and right at the horizon
 // (deep orange-red) — per the explicit reference photo showing a real
@@ -661,9 +681,9 @@ function updateDayNightCycle(cycle, dt) {
     const k = Math.max(0, 1 - Math.abs(elevation) / 0.4);
     sunColor = lerpColor(NIGHT.sun, DAWN_DUSK.sun, k);
     ambientColor = lerpColor(NIGHT.ambient, DAWN_DUSK.ambient, k);
-    skyZenith = lerpColor(NIGHT.skyZenith, DAWN_DUSK.skyZenith, k);
-    skyMid = lerpColor(NIGHT.skyMid, DAWN_DUSK.skyMid, k);
-    skyHorizon = lerpColor(NIGHT.skyHorizon, DAWN_DUSK.skyHorizon, k);
+    skyZenith = lerpColor(NIGHT.skyZenith, SKY_DAWN_DUSK_ZENITH, k);
+    skyMid = lerpColor(NIGHT.skyMid, SKY_DAWN_DUSK_MID, k);
+    skyHorizon = lerpColor(NIGHT.skyHorizon, SKY_DAWN_DUSK_HORIZON, k);
     sunIntensity = THREE.MathUtils.lerp(NIGHT.sunIntensity, DAWN_DUSK.sunIntensity, k);
     ambientIntensity = THREE.MathUtils.lerp(NIGHT.ambientIntensity, DAWN_DUSK.ambientIntensity, k);
   } else {
@@ -671,9 +691,9 @@ function updateDayNightCycle(cycle, dt) {
     const k = Math.min(1, dayAmount / 0.4);
     sunColor = lerpColor(DAWN_DUSK.sun, DAY.sun, k);
     ambientColor = lerpColor(DAWN_DUSK.ambient, DAY.ambient, k);
-    skyZenith = lerpColor(DAWN_DUSK.skyZenith, DAY.skyZenith, k);
-    skyMid = lerpColor(DAWN_DUSK.skyMid, DAY.skyMid, k);
-    skyHorizon = lerpColor(DAWN_DUSK.skyHorizon, DAY.skyHorizon, k);
+    skyZenith = lerpColor(SKY_DAWN_DUSK_ZENITH, DAY.skyZenith, k);
+    skyMid = lerpColor(SKY_DAWN_DUSK_MID, DAY.skyMid, k);
+    skyHorizon = lerpColor(SKY_DAWN_DUSK_HORIZON, DAY.skyHorizon, k);
     sunIntensity = THREE.MathUtils.lerp(DAWN_DUSK.sunIntensity, DAY.sunIntensity, k);
     ambientIntensity = THREE.MathUtils.lerp(DAWN_DUSK.ambientIntensity, DAY.ambientIntensity, k);
   }

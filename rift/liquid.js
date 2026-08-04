@@ -935,15 +935,15 @@ float foamVoronoi(vec2 p) {
   // Pushed further to 220 as a deliberate stress test — per explicit
   // follow-up, this confirmed patch size is a REAL factor in the
   // corruption (not just the viewport-aspect-ratio texture fix): bigger
-  // read worse again. Now going smaller than the very first attempt
-  // (70) per explicit "smaller is better, go even smaller" — smaller
-  // surface area genuinely seems to be doing real work in avoiding
-  // whatever the underlying rendering issue is, not just a cosmetic
-  // preference.
-  const MIRROR_PATCH_SIZE = 35;
+  // read worse again. Went smaller than the very first attempt (70)
+  // down to 35 next, then per explicit "much smaller" again down to 14
+  // — smaller surface area keeps reading as genuinely better each time
+  // it's tried, not a one-off. At this size the reflective patch only
+  // extends ~7 units from the player in any direction.
+  const MIRROR_PATCH_SIZE = 14;
   let mirrorWater = null;
   if (biome === "crystal") {
-    const mirrorGeo = new THREE.PlaneGeometry(MIRROR_PATCH_SIZE, MIRROR_PATCH_SIZE, 6, 6);
+    const mirrorGeo = new THREE.PlaneGeometry(MIRROR_PATCH_SIZE, MIRROR_PATCH_SIZE, 4, 4);
     // MUST be given a real repeat count — a fresh clone defaults to
     // (1,1), meaning ONE full copy of this small texture gets stretched
     // across the ENTIRE plane instead of tiling into many small ripples.
@@ -954,15 +954,17 @@ float foamVoronoi(vec2 p) {
     mirrorNormals.repeat.set(mirrorRepeat, mirrorRepeat);
     // Reflection render-texture sized to the ACTUAL viewport aspect
     // ratio rather than a fixed square — a portrait phone viewport
-    // forced through a square 512x512 reflection buffer is a real,
+    // forced through a square reflection buffer is a real,
     // previously-untried candidate for the corrupted-looking reflection
     // content (dark patches, then a flat gray band, then vertical
     // striping) that kept surfacing across earlier attempts at this
-    // feature. Capped at 512 on the long axis to keep the cost
-    // reasonable on mobile.
+    // feature. Cap lowered from 512 to 256 per explicit follow-up test —
+    // another real, previously-untried variable, separate from the
+    // aspect-ratio fix itself.
+    const MIRROR_TEX_CAP = 256;
     const viewportAspect = window.innerWidth / window.innerHeight;
-    const mirrorTexW = viewportAspect >= 1 ? 512 : Math.max(64, Math.round(512 * viewportAspect));
-    const mirrorTexH = viewportAspect >= 1 ? Math.max(64, Math.round(512 / viewportAspect)) : 512;
+    const mirrorTexW = viewportAspect >= 1 ? MIRROR_TEX_CAP : Math.max(64, Math.round(MIRROR_TEX_CAP * viewportAspect));
+    const mirrorTexH = viewportAspect >= 1 ? Math.max(64, Math.round(MIRROR_TEX_CAP / viewportAspect)) : MIRROR_TEX_CAP;
     mirrorWater = new Water(mirrorGeo, {
       textureWidth: mirrorTexW,
       textureHeight: mirrorTexH,

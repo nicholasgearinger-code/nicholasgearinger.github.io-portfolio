@@ -1855,7 +1855,19 @@ function animate() {
   // reflect). Every other biome gets scene.environment cleared in
   // teardownLevel so this stays scoped to the one material that actually
   // uses it.
-  if (currentBiome === "crystal" && getGraphicsTier() !== "low") {
+  // TEMPORARILY DISABLED as a diagnostic test — per explicit request, to
+  // isolate whether scene.environment (a scene-wide PBR env map) being
+  // active at the same time as the THREE.Water mirror plane is
+  // contributing to the reflection-corruption saga this biome's water
+  // has been through. THREE.Water wasn't originally designed with a
+  // global environment map coexisting alongside its own reflection pass
+  // — this has never actually been isolated/tested before now. Water's
+  // clearcoat layer will fall back to reading black at grazing angles
+  // while this is off (the exact symptom updateSkyEnvironment's own
+  // comment describes it existing to fix) — an expected, acceptable
+  // trade-off for this test, not a new bug if noticed. Re-enable this
+  // one line to restore normal behavior once the test result is in.
+  if (false && currentBiome === "crystal" && getGraphicsTier() !== "low") {
     updateSkyEnvironment(dayNight.skyZenith, dayNight.skyHorizon);
   }
   const currentLiquidLevel = currentBiome !== null ? LIQUID_LEVEL[currentBiome] : undefined;

@@ -261,35 +261,36 @@ const BIOME_SHAPERS = {
     // below rather than adding to it, so the island's height is a
     // structural guarantee independent of whatever the local reef noise
     // happens to be, not a tuned constant hoping to clear the water line.
-    // MOVED from (55, -70) per explicit "expand the map constraints"
+    // MOVED from (55, -70) per an earlier "expand the map constraints"
     // follow-up — the old position's nearest map edge was only 50 units
-    // away (a hard clip ceiling for the beach/hill radius below); this
-    // position's nearest edge is 90 units away (recomputed directly:
-    // min(120-30, 120+30, 120-30, 120+30) = 90), real room to grow
-    // further later without moving the landmark again. Radius/peak below
-    // are UNCHANGED from the previous round (38/48/26) — this move was
-    // specifically to remove the constraint, not to resize again in the
-    // same round; there's now genuine headroom to push CORE/BLEND well
-    // past 48 if a bigger island is wanted next.
+    // away; this position's nearest edge is 90 units (recomputed
+    // directly: min(120-30, 120+30, 120-30, 120+30) = 90).
     const islandDx = worldX - 30, islandDz = worldZ - (-30);
     const islandDist = Math.hypot(islandDx, islandDz);
-    const ISLAND_CORE = 38, ISLAND_BLEND = 48, ISLAND_PEAK = 26;
+    // RESCALED from 38/48/26 per explicit follow-up — that version was
+    // just the SAME small bump scaled up vertically (a tall pointy
+    // hill), not an actual large-scale environment. Real coastal
+    // scenery like the reference photo is two different things at two
+    // different scales: a fairly steep, SHORT cliff face right at the
+    // shore, then broad, gently-rolling hills extending far beyond it —
+    // not one tall cone. CORE/BLEND now use most of the 90-unit
+    // clearance (was 38/48); PEAK is only modestly taller than before
+    // (20, not another big jump) specifically so the height-to-radius
+    // RATIO drops a lot — that ratio, not the absolute height, is what
+    // actually reads as "broad landscape" vs. "steep small hill."
+    const ISLAND_CORE = 78, ISLAND_BLEND = 88, ISLAND_PEAK = 20;
 
-    // COVE REDESIGN — per explicit request: remove the uniform beach
-    // ring going all the way around the island, replace it with a
-    // grassy-hills-surrounding-a-small-cove layout (reference photo: a
-    // narrow sandy inlet flanked by steep grass slopes, not a beach
-    // wrapping the whole coastline). An angular "notch" does this: a
-    // narrow wedge (COVE_HALF_WIDTH wide) where the beach ring and the
-    // interior hill both stay low, carving a channel from open water up
-    // through the hill mass; everywhere OUTSIDE that wedge, the hill
-    // rises to its full peak and meets the water directly (no beach
-    // shelf there), reading as grass/cliff plunging to the sea.
+    // COVE — an angular "notch" carves a beach opening through the hill
+    // mass; everywhere OUTSIDE that wedge, the hill rises to its full
+    // height and meets the water directly (no beach shelf there),
+    // reading as grass/cliff plunging to the sea.
     const islandAngle = Math.atan2(islandDz, islandDx);
     const COVE_ANGLE = Math.PI / 2; // arbitrary chosen opening direction (facing +Z) — rotate this if a specific approach angle matters more once seen in-browser
     let coveAngleDiff = islandAngle - COVE_ANGLE;
     coveAngleDiff = Math.atan2(Math.sin(coveAngleDiff), Math.cos(coveAngleDiff)); // wrap to [-PI, PI]
-    const COVE_HALF_WIDTH = 0.5; // radians, ~29° — width of the cove opening
+    // Widened from 0.5 (~29°) to 0.85 (~49°) — per the reference photo's
+    // own much broader bay opening, not a narrow slot.
+    const COVE_HALF_WIDTH = 0.85;
     const coveT = Math.min(1, Math.abs(coveAngleDiff) / COVE_HALF_WIDTH); // 0 at the cove's own center angle, 1 at/beyond its edge into solid hillside
     const coveShape = coveT * coveT * (3 - 2 * coveT); // smoothstep — 0 inside the cove (low), 1 in the hills (full height)
 
@@ -300,7 +301,7 @@ const BIOME_SHAPERS = {
       if (islandDist >= ISLAND_CORE) {
         // Beach ring — genuinely gentle (~9° grade) rise from below the
         // waterline up to the modest plateau above, using the full
-        // 11-unit band uniformly (linear, not smoothstep — smoothstep
+        // 10-unit band uniformly (linear, not smoothstep — smoothstep
         // would still concentrate steepness in the middle of this band,
         // which is exactly what "nearly flat" can't tolerate anywhere
         // within it).
@@ -317,12 +318,24 @@ const BIOME_SHAPERS = {
         // Interior hill — carries the REST of the rise, from this same
         // angle's base height (see baseAtCore below — matches the beach
         // ring's own height at CORE for continuity, no seam) up to this
-        // angle's peak. Smoothstep here (not linear) for a natural-
-        // looking crest; matches the beach ring's height AND has zero
-        // slope on both sides exactly at CORE (smoothstep's derivative
-        // is 0 at its own t=0 endpoint).
+        // angle's peak.
+        //
+        // SHAPE CHANGED from smoothstep to an "ease-out" power curve —
+        // per the same "broad landscape, not a pointy hill" follow-up.
+        // Smoothstep is symmetric (steepest at the radial midpoint,
+        // flattening equally on both ends) — over this much larger
+        // radius that reads as one huge smooth dome, not "cliff near
+        // the coast, flat rolling top further in." A power curve
+        // (1-(1-hillT)^POWER) is steep right where hillT is small (near
+        // CORE — i.e., right at the coast) and flattens out fast as
+        // hillT grows (moving inland toward the peak) — verified
+        // numerically (not eyeballed): with POWER=4.5 at this CORE/PEAK,
+        // height barely drops for the first ~30 units in from CORE,
+        // then falls off more steeply approaching the shore, giving a
+        // real "broad flat top, distinct drop near the coast" profile.
+        const HILL_POWER = 4.5;
         const hillT = Math.min(1, 1 - islandDist / ISLAND_CORE); // 0 at CORE, 1 at the island's center
-        const shaped = hillT * hillT * (3 - 2 * hillT);
+        const shaped = 1 - Math.pow(1 - hillT, HILL_POWER);
         // Base height right at CORE for THIS angle — deliberately
         // mirrors the beach ring's own (1 - coveShape) suppression so
         // the two pieces meet with no seam: outside the cove this is

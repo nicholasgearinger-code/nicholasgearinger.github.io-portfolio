@@ -967,6 +967,34 @@ float gerstnerHeightVert(vec2 xz, float t) {
   float vReachHeight = 0.1 + vWaveNorm * 0.5;
   float vFoamZone = 1.0 - smoothstep(0.0, 0.4, abs(vShoreDist - vReachHeight));
   transformed.y += vFoamZone * 0.14;
+  // Real wind-blown sand ripple relief — small parallel ripples on dry
+  // beach sand, per explicit reference photo request ("doesn't appear
+  // flat"). Cosmetic GPU-only displacement, same reasoning as the foam
+  // relief just above — doesn't touch the actual collision heightfield
+  // physics.js samples, so no gameplay mismatch. Gated to a plausible
+  // "beach" height band above the waterline — this project's exact
+  // HEIGHT_PALETTE sand/coral boundary lives in terrain.js, not
+  // available this session, so this height range (up to ~7 units above
+  // the waterline) is a reasonable approximation rather than a
+  // confirmed match to that palette; worth checking the actual sand
+  // extent in-browser and narrowing this if it reaches too far up the
+  // island.
+  float sandRippleZone = smoothstep(-0.3, 1.0, vShoreDist) * (1.0 - smoothstep(5.0, 8.0, vShoreDist));
+  if (sandRippleZone > 0.001) {
+    vec2 rippleDir = normalize(vec2(1.0, 0.35)); // dominant wind/ripple orientation
+    float alongRipple = dot(transformed.xz, rippleDir);
+    float acrossRipple = dot(transformed.xz, vec2(-rippleDir.y, rippleDir.x));
+    // Meander — a slow, low-frequency perpendicular offset so the
+    // ripple LINES aren't perfectly straight, matching how real wind
+    // ripples wander rather than rule a perfect grid.
+    float meander = sin(acrossRipple * 0.12 + sin(alongRipple * 0.05) * 2.0) * 0.6;
+    // Two frequencies — a dominant ripple spacing plus a finer texture
+    // riding on top, same "coarse + fine" layering this file already
+    // uses for foam/caustics, so the sand doesn't read as one uniform
+    // corrugation.
+    float rippleShape = sin((alongRipple + meander) * 2.4) * 0.5 + sin((alongRipple + meander) * 5.1 + 1.7) * 0.18;
+    transformed.y += rippleShape * 0.032 * sandRippleZone;
+  }
 }
 vCausticWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`)
         .replace("#include <beginnormal_vertex>", "#include <beginnormal_vertex>\nvCausticWorldNormal = normalize(mat3(modelMatrix) * objectNormal);");

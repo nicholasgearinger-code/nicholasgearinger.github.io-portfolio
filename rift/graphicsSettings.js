@@ -44,7 +44,7 @@ const TIERS = {
   },
   medium: {
     label: "Medium",
-    terrainSegments: 190,      // a real optimized balance — meaningfully more detail than Low without High's cost
+    terrainSegments: 300,      // boosted from 190 per explicit request — also now genuinely useful rather than just cosmetic headroom, since the new sand ripple vertex displacement (main.js) needs real segment density to resolve smoothly rather than looking faceted/jagged (a ~2.6-unit ripple wavelength needs more than ~1 segment per unit to read as a smooth wave, not a stepped one)
     liquidSegments: 90,        // boosted from 55 per explicit request to test whether mesh resolution was capping how visible the wave/domain-warp detail could read — real cost warning: combined with the now much heavier per-vertex wave math (10 Gerstner components + domain warp, up from 4 plain terms) AND three full scene renders per frame (main + reflection + refraction) already added this session, this is a genuinely compounding performance change, not an isolated one. Watch the FPS counter.
     skyDomeSegments: [32, 16],
     grassBladeSegments: 4,

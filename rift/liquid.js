@@ -958,10 +958,13 @@ float foamVoronoi(vec2 p) {
     // previously-untried candidate for the corrupted-looking reflection
     // content (dark patches, then a flat gray band, then vertical
     // striping) that kept surfacing across earlier attempts at this
-    // feature. Cap lowered from 512 to 256 per explicit follow-up test —
-    // another real, previously-untried variable, separate from the
-    // aspect-ratio fix itself.
-    const MIRROR_TEX_CAP = 256;
+    // feature. Cap history: 512 originally, dropped to 256 to test
+    // lower resolution — user reported that made it noticeably WORSE
+    // ("more black than reflection"), so the direction reversed: now
+    // pushed to 1024, well above the original, on the theory that too
+    // LOW a resolution (not too high) may be starving the reflection of
+    // real content to sample, reading as empty/black area instead.
+    const MIRROR_TEX_CAP = 1024;
     const viewportAspect = window.innerWidth / window.innerHeight;
     const mirrorTexW = viewportAspect >= 1 ? MIRROR_TEX_CAP : Math.max(64, Math.round(MIRROR_TEX_CAP * viewportAspect));
     const mirrorTexH = viewportAspect >= 1 ? Math.max(64, Math.round(MIRROR_TEX_CAP / viewportAspect)) : MIRROR_TEX_CAP;

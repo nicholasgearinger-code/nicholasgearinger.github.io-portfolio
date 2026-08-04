@@ -2146,7 +2146,13 @@ function animate() {
   // behind here is never visible. biome-gated inside updateLiquidPlane
   // itself (crystal only), so this is harmless to pass unconditionally.
   updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, camera.position, sun.position, dayNight.skyHorizon, reflectionRenderTarget.texture, reflectionTextureMatrix, refractionRenderTarget.texture, refractionResolution, weatherHandle ? weatherHandle.rainIntensity : 0);
-  updateOceanHorizonSkirt(oceanHorizonSkirtHandle, dayNight.skyZenith, weatherHandle ? weatherHandle.rainIntensity : 0, reflectionRenderTarget.texture, reflectionTextureMatrix, elapsedTime);
+  // reflectionTexture/reflectionMatrix no longer passed here — the skirt
+  // switched to THREE.Water this round, which renders its OWN internal
+  // reflection pass automatically (via material.onBeforeRender, hooked
+  // into the normal renderer.render call elsewhere in this file) rather
+  // than sampling the near water's manually-managed reflection texture.
+  // sun.position feeds Water's own real sun-specular highlight.
+  updateOceanHorizonSkirt(oceanHorizonSkirtHandle, dayNight.skyZenith, weatherHandle ? weatherHandle.rainIntensity : 0, elapsedTime, sun.position);
   updateWaterfall(waterfallHandle, dt, elapsedTime);
   updateOceanSurfaceDetail(oceanSurfaceDetailHandle, elapsedTime, dayNight.dayAmount);
   updateRiverCurrent(riverCurrentHandle, dt);

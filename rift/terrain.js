@@ -264,29 +264,31 @@ const BIOME_SHAPERS = {
     // Peak (11.5) sits comfortably above LIQUID_LEVEL.crystal (8) with
     // real margin for actual dry beach, not just a few inches of sand
     // poking through.
-    const islandDist = Math.hypot(worldX - 55, worldZ + 70);
-    // Requested "10x bigger" isn't achievable at this fixed center without
-    // either moving the landmark (used across 8+ files — landmarks.js,
-    // decorations.js, etc.) or expanding the terrain square itself: the
-    // island sits at (55, -70) on a 240x240 heightfield centered at the
-    // origin, and the nearest square edge from that point is only ~50
-    // units away (120 - 70, the tightest of the four directions) — a
-    // blend radius any larger than that gets hard-clipped by the terrain
-    // mesh's own edge on that side, not a smooth taper. This pushes right
-    // up against that real ceiling with a small safety margin: ~3x the
-    // old radius (~9x the old area), the largest the island can grow to
-    // while still reading as a full, unclipped circular island.
+    const islandDx = worldX - 55, islandDz = worldZ - (-70);
+    const islandDist = Math.hypot(islandDx, islandDz);
     const ISLAND_CORE = 34, ISLAND_BLEND = 45, ISLAND_PEAK = 11.5;
-    // Rising the full 11.5-unit peak within the outer 11-unit band (CORE
-    // to BLEND) was ALWAYS going to look steep on average — ~46° even
-    // with a perfectly uniform grade — no matter how that curve was
-    // shaped; the earlier "shelf" attempt only redistributed where the
-    // steepness sat within that band, it couldn't reduce it. The actual
-    // fix: stop trying to reach the full peak within the beach band at
-    // all. A real beach is close to sea level for a long stretch; the
-    // hill behind it is a separate landform. Two zones:
+
+    // COVE REDESIGN — per explicit request: remove the uniform beach
+    // ring going all the way around the island, replace it with a
+    // grassy-hills-surrounding-a-small-cove layout (reference photo: a
+    // narrow sandy inlet flanked by steep grass slopes, not a beach
+    // wrapping the whole coastline). An angular "notch" does this: a
+    // narrow wedge (COVE_HALF_WIDTH wide) where the beach ring and the
+    // interior hill both stay low, carving a channel from open water up
+    // through the hill mass; everywhere OUTSIDE that wedge, the hill
+    // rises to its full peak and meets the water directly (no beach
+    // shelf there), reading as grass/cliff plunging to the sea.
+    const islandAngle = Math.atan2(islandDz, islandDx);
+    const COVE_ANGLE = Math.PI / 2; // arbitrary chosen opening direction (facing +Z) — rotate this if a specific approach angle matters more once seen in-browser
+    let coveAngleDiff = islandAngle - COVE_ANGLE;
+    coveAngleDiff = Math.atan2(Math.sin(coveAngleDiff), Math.cos(coveAngleDiff)); // wrap to [-PI, PI]
+    const COVE_HALF_WIDTH = 0.5; // radians, ~29° — width of the cove opening
+    const coveT = Math.min(1, Math.abs(coveAngleDiff) / COVE_HALF_WIDTH); // 0 at the cove's own center angle, 1 at/beyond its edge into solid hillside
+    const coveShape = coveT * coveT * (3 - 2 * coveT); // smoothstep — 0 inside the cove (low), 1 in the hills (full height)
+
     let islandBump = 0;
     const BEACH_PLATEAU = LIQUID_LEVEL.crystal + 0.7; // modest — just above the waterline, not anywhere near the true peak
+    const VALLEY_FLOOR = BEACH_PLATEAU + 0.4; // where the cove's own floor levels out further inland — still low and close to sea level, matching a real cove valley rather than rising toward a peak
     if (islandDist < ISLAND_BLEND) {
       if (islandDist >= ISLAND_CORE) {
         // Beach ring — genuinely gentle (~9° grade) rise from below the
@@ -297,20 +299,36 @@ const BIOME_SHAPERS = {
         // within it).
         const beachT = 1 - (islandDist - ISLAND_CORE) / (ISLAND_BLEND - ISLAND_CORE); // 0 at BLEND, 1 at CORE
         const rampHeight = beachT * (BEACH_PLATEAU - (LIQUID_LEVEL.crystal - 1)) + (LIQUID_LEVEL.crystal - 1);
-        const outerFade = Math.min(1, beachT / 0.45); // fades the ramp to exactly 0 within the outermost ~45% of the band (near BLEND) instead of colliding with the hard 0 default just outside the islandDist<BLEND guard below — widened from 0.15 (only ~1.65 units) specifically because that was finer than the default mobile terrain mesh's own segment spacing (~6 units at Low tier), so it rendered as one hard triangle edge instead of a gradual blend; ~5 units is wide enough for the coarse mesh to actually resolve as smooth. That zone is typically underwater/reef-dominated anyway so this is rarely the visible dry surface.
-        islandBump = rampHeight * outerFade;
+        const outerFade = Math.min(1, beachT / 0.45); // fades the ramp to exactly 0 within the outermost ~45% of the band (near BLEND) instead of colliding with the hard 0 default just outside the islandDist<BLEND guard below — widened from 0.15 (only ~1.65 units) specifically because that was finer than the default mobile terrain mesh's own segment spacing, so it rendered as one hard triangle edge instead of a gradual blend
+        // (1 - coveShape) suppresses this ring to ~0 outside the cove —
+        // the beach only actually rises within the narrow opening; the
+        // Math.max below just falls through to the underwater seafloor
+        // everywhere else along this ring, so there's no sandy shelf
+        // ringing the whole island anymore.
+        islandBump = rampHeight * outerFade * (1 - coveShape);
       } else {
-        // Interior hill — carries the REST of the rise, from the
-        // beach's own plateau height up to the true peak, using the
-        // much larger 34-unit radius available inside CORE instead of
-        // cramming it into the beach band. Smoothstep here (not linear)
-        // for a natural-looking crest; matches the beach ring's height
-        // AND has zero slope on both sides exactly at CORE (smoothstep's
-        // derivative is 0 at its own t=0 endpoint), so the two pieces
-        // meet with no visible seam.
+        // Interior hill — carries the REST of the rise, from this same
+        // angle's base height (see baseAtCore below — matches the beach
+        // ring's own height at CORE for continuity, no seam) up to this
+        // angle's peak. Smoothstep here (not linear) for a natural-
+        // looking crest; matches the beach ring's height AND has zero
+        // slope on both sides exactly at CORE (smoothstep's derivative
+        // is 0 at its own t=0 endpoint).
         const hillT = Math.min(1, 1 - islandDist / ISLAND_CORE); // 0 at CORE, 1 at the island's center
         const shaped = hillT * hillT * (3 - 2 * hillT);
-        islandBump = BEACH_PLATEAU + shaped * (ISLAND_PEAK - BEACH_PLATEAU);
+        // Base height right at CORE for THIS angle — deliberately
+        // mirrors the beach ring's own (1 - coveShape) suppression so
+        // the two pieces meet with no seam: outside the cove this is
+        // ~0 (hill rises straight from the water), inside the cove
+        // this is BEACH_PLATEAU (continues the beach's own height).
+        const baseAtCore = BEACH_PLATEAU * (1 - coveShape);
+        // Peak height for THIS angle — full ISLAND_PEAK outside the
+        // cove (tall flanking hills), the much lower VALLEY_FLOOR dead
+        // center of the cove (the notch itself stays low) — this is
+        // what actually carves the channel through the hill mass,
+        // not just thinning the beach ring alone.
+        const peakForThisAngle = VALLEY_FLOOR + coveShape * (ISLAND_PEAK - VALLEY_FLOOR);
+        islandBump = baseAtCore + shaped * (peakForThisAngle - baseAtCore);
       }
     }
 

@@ -967,19 +967,19 @@ float gerstnerHeightVert(vec2 xz, float t) {
   float vReachHeight = 0.1 + vWaveNorm * 0.5;
   float vFoamZone = 1.0 - smoothstep(0.0, 0.4, abs(vShoreDist - vReachHeight));
   transformed.y += vFoamZone * 0.14;
-  // Real wind-blown sand ripple relief — small parallel ripples on dry
-  // beach sand, per explicit reference photo request ("doesn't appear
-  // flat"). Cosmetic GPU-only displacement, same reasoning as the foam
-  // relief just above — doesn't touch the actual collision heightfield
-  // physics.js samples, so no gameplay mismatch. Gated to a plausible
-  // "beach" height band above the waterline — this project's exact
-  // HEIGHT_PALETTE sand/coral boundary lives in terrain.js, not
-  // available this session, so this height range (up to ~7 units above
-  // the waterline) is a reasonable approximation rather than a
-  // confirmed match to that palette; worth checking the actual sand
-  // extent in-browser and narrowing this if it reaches too far up the
-  // island.
-  float sandRippleZone = smoothstep(-0.3, 1.0, vShoreDist) * (1.0 - smoothstep(5.0, 8.0, vShoreDist));
+  // Real wind-blown sand ripple relief — small parallel ripples on sand,
+  // per explicit reference photo request ("doesn't appear flat"), later
+  // widened to cover underwater sand too ("apply the same to the sand/
+  // ground on the ocean floor"). Cosmetic GPU-only displacement, same
+  // reasoning as the foam relief just above — doesn't touch the actual
+  // collision heightfield physics.js samples, so no gameplay mismatch.
+  // Active across the whole depth range up to a plausible "beach ends
+  // here" upper cutoff — this project's exact HEIGHT_PALETTE sand/coral
+  // boundary lives in terrain.js, not available this session, so that
+  // upper bound (~7 units above the waterline) is a reasonable
+  // approximation rather than a confirmed match to that palette; worth
+  // checking the actual sand extent in-browser.
+  float sandRippleZone = 1.0 - smoothstep(5.0, 8.0, vShoreDist);
   if (sandRippleZone > 0.001) {
     vec2 rippleDir = normalize(vec2(1.0, 0.35)); // dominant wind/ripple orientation
     float alongRipple = dot(transformed.xz, rippleDir);

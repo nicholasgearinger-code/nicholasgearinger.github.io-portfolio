@@ -144,13 +144,30 @@ function createTreeSprite(tex, glowTex, width, height, rand) {
     pos.setZ(i, pos.getZ(i) + (rand() - 0.5) * width * 0.35 * jitterStrength);
   }
   geo.computeVertexNormals();
-  const planeA = new THREE.Mesh(geo, mat);
-  planeA.position.y = height / 2;
-  group.add(planeA);
-  const planeB = new THREE.Mesh(geo, mat);
-  planeB.position.y = height / 2;
-  planeB.rotation.y = Math.PI / 2;
-  group.add(planeB);
+  // A fixed 2-plane cross (0°/90°) has a real, visible flaw: its
+  // silhouette changes noticeably as the viewer walks around it —
+  // worst right at the angles between the two planes, where you see a
+  // thin combined sliver instead of a full canopy. True per-frame
+  // camera-facing billboarding would fix this completely, but at real
+  // ongoing cost across every tree on screen (hundreds, for Verdant's
+  // filler forest) — this project doesn't do that anywhere. More static
+  // planes, spread evenly across 180° (each is already DoubleSide, so a
+  // full "cross" only needs to span half a circle), is the standard
+  // cheaper fix: no per-frame work, just a more consistent silhouette
+  // from more angles. Palm fronds specifically are a directional,
+  // asymmetric fan shape (unlike a round bushy conifer canopy), so the
+  // 2-plane artifact read far worse there — but this benefits every
+  // tree type using this function. Scaled by the existing
+  // decorationDetail knob (organic-shape detail, per graphicsSettings.js's
+  // own art-style rule) rather than a new setting.
+  const detail = getGraphicsSettings().decorationDetail;
+  const planeCount = detail >= 3 ? 4 : detail >= 1 ? 3 : 2;
+  for (let i = 0; i < planeCount; i++) {
+    const plane = new THREE.Mesh(geo, mat);
+    plane.position.y = height / 2;
+    plane.rotation.y = (Math.PI / planeCount) * i;
+    group.add(plane);
+  }
   return group;
 }
 
@@ -220,13 +237,14 @@ function buildBaseDecoration(biome, colorHex, seedRand, worldX, worldZ) {
       return createRockCluster(biome, colorHex, seedRand);
     case "crystal": {
       if (onIsland) {
-        // The island itself — palm trees, fallen coconuts, and open
-        // white sand. Density raised and coconuts added per explicit
-        // "add palm trees and coconuts to make it more like a tropical
-        // paradise" follow-up. No coral/rock here; this is dry land.
-        if (roll < 0.15) return null;
-        if (roll < 0.32) return createCoconut(seedRand);
-        return createPalmTree(seedRand);
+        // Island decorations REMOVED entirely per explicit "remove all
+        // the trees and rocks on the island" request — the plan is a
+        // surrounding grassy/hilly environment instead (a real terrain
+        // reshape, needing terrain.js — not available this session, see
+        // main.js's own note on this). Returning null here just clears
+        // the island of palm trees/coconuts for now; it doesn't build
+        // the new environment on its own.
+        return null;
       }
       // Rebalanced per a new reference photo showing dense, colorful
       // coral walls and explicit "now we can add coral" follow-up — a

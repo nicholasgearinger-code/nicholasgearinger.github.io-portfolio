@@ -11,6 +11,11 @@ import { getGraphicsSettings } from "./graphicsSettings.js";
 // a different look/density per biome without touching drift or tinting.
 // -----------------------------------------------------------------------------
 
+// Shared/reused Color instance for the realistic cloud dome's storm
+// darkening (see updateRealisticCloudDome) — avoids allocating a new
+// THREE.Color every frame the way a literal would.
+const stormCloudColor = new THREE.Color();
+
 const CLOUD_STYLE = {
   ember: { count: 14, altitude: 88, spread: 175, puffColor: 0x4a3830, opacity: 0.55, scale: 25 },   // low, ashy, smoke-dark rather than fluffy-white — count/scale bumped further for real sky coverage, still keeps the dark ashy character rather than fluffy-white
   verdant: { count: 16, altitude: 95, spread: 165, puffColor: 0xf4f7fb, opacity: 0.85, scale: 30 },  // big, bold, dominant puffy-white clouds per the flat-illustration reference
@@ -535,8 +540,9 @@ function createRealisticCloudDome(scene) {
  * @param {number} dayAmount
  * @param {THREE.Color} [skyHorizonColor]
  * @param {THREE.Color} [skyZenithColor]
+ * @param {number} [stormAmount]  0-1, dark storm clouds — Coral Shallows only, driven by weather.js's own rainIntensity, but written generically here so any biome's caller can use it
  */
-function updateRealisticCloudDome(handle, dt, dayAmount, skyHorizonColor, skyZenithColor) {
+function updateRealisticCloudDome(handle, dt, dayAmount, skyHorizonColor, skyZenithColor, stormAmount = 0) {
   if (!handle) return;
   // Slow real drift across the sky rather than a static painted dome —
   // rotating the whole mesh around Y is the cheapest way to animate an
@@ -546,7 +552,9 @@ function updateRealisticCloudDome(handle, dt, dayAmount, skyHorizonColor, skyZen
   // read as a warped double-exposure smear rather than clean motion —
   // reverted. Single layer, single rotation, a bit faster than before so
   // the drift is genuinely visible without doubling anything.
-  handle.mesh.rotation.y += dt * 0.006;
+  // Storm clouds drift noticeably faster than a calm sky's slow roll —
+  // real storm fronts visibly move.
+  handle.mesh.rotation.y += dt * (0.006 + stormAmount * 0.02);
 
   if (skyHorizonColor && skyZenithColor) {
     // The texture is a NEUTRAL white+alpha cloud structure (no baked
@@ -567,6 +575,11 @@ function updateRealisticCloudDome(handle, dt, dayAmount, skyHorizonColor, skyZen
     // instead of going pitch black or untinted white.
     handle.mat.color.setScalar(0.6 + dayAmount * 0.4);
   }
+  // Storm darkening — pulls the (already sky-tinted) color further down
+  // toward a heavy charcoal-gray, applied AFTER the sky tint above so a
+  // storm still reads as "this sky, but stormy" rather than replacing
+  // the biome's own color identity outright.
+  if (stormAmount > 0) handle.mat.color.lerp(stormCloudColor.setScalar(0.16), stormAmount * 0.85);
 
   // A slow, gentle "breathing" opacity pulse — real high-altitude cloud
   // decks aren't perfectly static in density even over short spans; this
@@ -575,14 +588,17 @@ function updateRealisticCloudDome(handle, dt, dayAmount, skyHorizonColor, skyZen
   // Small enough (±6%) to be felt rather than obviously seen as a pulse.
   handle.breathPhase = (handle.breathPhase || 0) + dt * 0.12;
   const breathe = 1 + Math.sin(handle.breathPhase) * 0.06;
-  handle.mat.opacity = 0.9 * breathe;
+  // Storm clouds are also visibly DENSER/thicker, not just darker — bumps
+  // the base opacity toward fully opaque coverage on top of the existing
+  // breathing pulse.
+  handle.mat.opacity = (0.9 + stormAmount * 0.09) * breathe;
 
   // A second, independent drift axis on top of the mesh's own Y rotation
   // — texture.offset.x slides the UVs horizontally at a different rate
   // than the geometry itself rotates. Two motions at different speeds
   // layered together (without needing a second overlapping mesh) still
   // read as genuinely shifting sky rather than one rigid rotation.
-  handle.driftOffset = (handle.driftOffset || 0) + dt * 0.0022;
+  handle.driftOffset = (handle.driftOffset || 0) + dt * (0.0022 + stormAmount * 0.006);
   handle.mat.map.offset.x = handle.driftOffset;
 }
 

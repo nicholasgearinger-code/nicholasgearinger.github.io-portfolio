@@ -54,6 +54,14 @@ const LIQUID_STYLE = {
   },
 };
 
+// A dark, murky storm-sea color — Coral Shallows only, blended in by
+// stormAmount (see updateLiquidPlane) instead of swapping LIQUID_STYLE
+// itself, so the calm-weather tuning above stays untouched and the storm
+// look is purely a runtime blend on top of it. Shared/reused (not
+// allocated per-vertex per-frame) the same way sssColor/fresnelTint
+// already are further down this file.
+const STORM_SEA_COLOR = new THREE.Color(0x1a3226);
+
 // -----------------------------------------------------------------------------
 // Gerstner (trochoidal) wave components — Coral Shallows' ocean only. A
 // real Gerstner wave displaces each vertex horizontally as well as
@@ -1214,7 +1222,7 @@ vec2 foamVoronoiF1F2(vec2 p) {
   };
 }
 
-function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir, skyHorizon, reflectionTexture, reflectionMatrix, refractionTexture, resolution) {
+function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir, skyHorizon, reflectionTexture, reflectionMatrix, refractionTexture, resolution, stormAmount = 0) {
   if (!handle) return;
   const { mesh, backMesh, glow, shimmer, rocks, basePositions, biome, style, flowDir, crustOctaves, crackOctaves, flowBeads, waterY, rippleTexture, foamAccum } = handle;
   // Real per-frame dt, derived from consecutive elapsed values — this
@@ -1338,6 +1346,12 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
   const baseColor = ((biome === "verdant" || biome === "crystal") && skyColor)
     ? style.baseColor.clone().lerp(skyColor, 0.4)
     : style.baseColor;
+  // Storm darkening — Coral Shallows only, and only on the freshly
+  // cloned instance above (never style.baseColor itself, which is the
+  // shared module-level LIQUID_STYLE object every frame and every other
+  // call reads from — lerping that in place would permanently corrupt
+  // it, compounding a little further every frame).
+  if (biome === "crystal" && skyColor && stormAmount > 0) baseColor.lerp(STORM_SEA_COLOR, stormAmount * 0.85);
   // Foam persistence decay factor — real foam lingers for roughly a
   // second or two after a crest passes rather than vanishing the
   // instant the wave signal drops, which is what the previous purely-
@@ -1375,13 +1389,23 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
       // positions now sample the wave sum from different EFFECTIVE
       // positions instead of a purely linear function of their real one.
       const [wbx, wbz] = gerstnerDomainWarp(bx, bz, elapsed);
+      // Runtime roughness multiplier — Coral Shallows storms read as a
+      // genuinely rougher sea, not just a darker-colored calm one. Scales
+      // each wave's amplitude-derived contribution uniformly (steepness*
+      // amplitude and k*amplitude terms are both linear in amplitude, so
+      // substituting a scaled `amp` for `w.amplitude` here is equivalent
+      // to having generated the whole GERSTNER_WAVES table at a taller
+      // target amplitude, without mutating that shared, module-level
+      // table or its baked per-wave steepness values).
+      const stormWaveMult = 1 + stormAmount * 0.9;
       for (const w of GERSTNER_WAVES) {
+        const amp = w.amplitude * stormWaveMult;
         const f = w.k * (w.ndx * wbx + w.ndz * wbz) - w.speed * elapsed;
         const s = Math.sin(f), c = Math.cos(f);
-        dx += w.steepness * w.amplitude * w.ndx * c;
-        dz += w.steepness * w.amplitude * w.ndz * c;
-        dy += w.amplitude * s;
-        const WA = w.k * w.amplitude;
+        dx += w.steepness * amp * w.ndx * c;
+        dz += w.steepness * amp * w.ndz * c;
+        dy += amp * s;
+        const WA = w.k * amp;
         nx -= w.ndx * WA * c;
         nz -= w.ndz * WA * c;
         nyTerm += w.steepness * WA * s;
@@ -1397,7 +1421,7 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
       gerstnerX = bx + dx;
       gerstnerZ = bz + dz;
       ripple = dy;
-      range = GERSTNER_AMPLITUDE_SUM * 2;
+      range = GERSTNER_AMPLITUDE_SUM * stormWaveMult * 2;
     } else {
       // Cheap per-vertex ripple — lava churns slower/heavier, water
       // ripples lighter and faster. A second, higher-frequency/
@@ -1475,7 +1499,10 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
       posAttr.setY(i, ripple + heat * 0.15);
     } else {
       const accent = style.frothColor;
-      const frothPower = biome === "crystal" ? 1.9 : 3; // nudged lower (was 2.2) for more visible white crest banding per the deep-blue-with-white reference — the earlier "too much distortion" complaint was mainly the separate screen-space distortAmp, not this
+      // Lowered further with stormAmount — a rough storm sea shows
+      // whitecaps over much more of its surface, not just the sharpest
+      // crests a calm sea's higher exponent restricts foam to.
+      const frothPower = biome === "crystal" ? 1.9 - stormAmount * 0.7 : 3; // nudged lower (was 2.2) for more visible white crest banding per the deep-blue-with-white reference — the earlier "too much distortion" complaint was mainly the separate screen-space distortAmp, not this
       let localBase = baseColor;
       if (handle.depthColors) {
         // Crystal's own per-vertex depth color (lighter over the reef/
@@ -1484,6 +1511,7 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
         // vertex here instead of once globally.
         tmpDepthColor.fromArray(handle.depthColors, i * 3);
         if (skyColor) tmpDepthColor.lerp(skyColor, 0.4);
+        if (biome === "crystal" && stormAmount > 0) tmpDepthColor.lerp(STORM_SEA_COLOR, stormAmount * 0.85); // tmpDepthColor is a reused per-frame temp (see its declaration above), safe to mutate further — unlike style.baseColor, nothing shared gets corrupted
         localBase = tmpDepthColor;
       }
       tmpColor.copy(localBase).lerp(accent, Math.pow(disturbance, frothPower));

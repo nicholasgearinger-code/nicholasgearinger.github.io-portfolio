@@ -26,7 +26,13 @@ const WEATHER_PROFILE = {
   crystal: {
     baseFogDensity: 0.0016, fogPulseAmp: 0.001, fogPulseSpeed: 0.08, // lowered again (was 0.0022) — the reference photo has near-total visibility straight to the sand, the lowest of any biome by a clear margin
     windBaseStrength: 0.35, windVariance: 0.3, windSpeed: 0.03, // repurposed as gentle current strength, driving kelp sway rather than air movement
-    rain: false,
+    // Rain enabled per explicit "add some rainy weather... heavy rain"
+    // request — was the only biome with none at all. rainHeaviness scales
+    // both particle count and opacity above the shared baseline every
+    // other rainy biome uses (see createRain/updateWeatherSystem), and
+    // cycles longer/rarer than Verdant's forest showers — an open-ocean
+    // squall reads as a bigger, less frequent event, not a quick sprinkle.
+    rain: true, rainCycleMin: 45, rainCycleMax: 80, rainDurationMin: 25, rainDurationMax: 40, rainHeaviness: 1.6,
     lightning: { color: 0x3ce7ff, intervalMin: 14, intervalMax: 26, height: 20, dim: true }, // no real lightning underwater — a soft, muted pulse of bioluminescent light from deep in the reef, kept dim and lower to the ground than every other biome's actual storm discharge
   },
   abyssal: {
@@ -405,15 +411,15 @@ function getRainStreakTexture() {
   return sharedRainStreakTexture;
 }
 
-function createRain(scene) {
-  const count = 1400;
+function createRain(scene, heaviness = 1) {
+  const count = Math.round(1400 * heaviness);
   const positions = new Float32Array(count * 3);
   const speeds = new Float32Array(count);
   for (let i = 0; i < count; i++) {
     positions[i * 3] = (Math.random() - 0.5) * 220;
     positions[i * 3 + 1] = Math.random() * 60;
     positions[i * 3 + 2] = (Math.random() - 0.5) * 220;
-    speeds[i] = 30 + Math.random() * 15;
+    speeds[i] = (30 + Math.random() * 15) * (0.85 + heaviness * 0.15); // heavier rain also falls a bit faster/harder, not just denser
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
@@ -437,7 +443,7 @@ function createWeatherSystem(scene, biome) {
   lightningLight.position.set(0, profile.lightning.height, 0);
   scene.add(lightningLight);
 
-  const rain = profile.rain ? createRain(scene) : null;
+  const rain = profile.rain ? createRain(scene, profile.rainHeaviness || 1) : null;
   const distantLightning = createDistantLightning(scene);
   const dustDevil = biome === "ashen" ? createDustDevil(scene) : null;
   const crystalRefraction = biome === "crystal" ? createCrystalRefraction(scene) : null;
@@ -534,7 +540,7 @@ function updateWeatherSystem(handle, dt, erupting = false, dayAmount = 0) {
     }
     const targetIntensity = handle.rainActive ? 1 : 0;
     handle.rainIntensity += (targetIntensity - handle.rainIntensity) * Math.min(1, dt * 0.6); // fades in/out over a few seconds rather than snapping
-    handle.rain.points.material.opacity = handle.rainIntensity * 0.55;
+    handle.rain.points.material.opacity = Math.min(1, handle.rainIntensity * 0.55 * (profile.rainHeaviness || 1));
 
     const posAttr = handle.rain.points.geometry.attributes.position;
     for (let i = 0; i < handle.rain.speeds.length; i++) {

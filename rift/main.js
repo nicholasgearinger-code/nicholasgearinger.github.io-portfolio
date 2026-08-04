@@ -2134,7 +2134,14 @@ function animate() {
     updateWaterReflection(LIQUID_LEVEL.crystal, liquidHandle);
     updateWaterRefraction(liquidHandle);
   }
-  updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, camera.position, sun.position, dayNight.skyHorizon, reflectionRenderTarget.texture, reflectionTextureMatrix, refractionRenderTarget.texture, refractionResolution);
+  // stormAmount (last arg): reads weatherHandle's own persisted
+  // rainIntensity directly rather than a fresher value from this frame's
+  // updateWeatherSystem call, which hasn't run yet at this point in the
+  // frame (see its own call further down) — rainIntensity already eases
+  // in/out over several seconds (see weather.js), so being one frame
+  // behind here is never visible. biome-gated inside updateLiquidPlane
+  // itself (crystal only), so this is harmless to pass unconditionally.
+  updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, camera.position, sun.position, dayNight.skyHorizon, reflectionRenderTarget.texture, reflectionTextureMatrix, refractionRenderTarget.texture, refractionResolution, weatherHandle ? weatherHandle.rainIntensity : 0);
   updateWaterfall(waterfallHandle, dt, elapsedTime);
   updateOceanSurfaceDetail(oceanSurfaceDetailHandle, elapsedTime, dayNight.dayAmount);
   updateRiverCurrent(riverCurrentHandle, dt);
@@ -2285,7 +2292,7 @@ function animate() {
   updateLandmark(landmarkHandle, elapsedTime, dt);
   updateClouds(cloudsHandle, dt, wind, dayNight.dayAmount, wind.rainIntensity, dayNight.skyHorizon, dayNightCycle.sunBody.group.position, camera.position);
   updateCloudLayer(cloudLayerHandle, dt, wind, dayNight.dayAmount, dayNight.skyHorizon);
-  updateRealisticCloudDome(realisticCloudDomeHandle, dt, dayNight.dayAmount, dayNight.skyHorizon, dayNight.skyZenith);
+  updateRealisticCloudDome(realisticCloudDomeHandle, dt, dayNight.dayAmount, dayNight.skyHorizon, dayNight.skyZenith, wind.rainIntensity);
   // Clouds sometimes drift in front of the sun/moon — a cheap angular
   // check (see getCloudOcclusionFactor's own comment for why this isn't
   // real depth-buffer occlusion), applied as a further opacity

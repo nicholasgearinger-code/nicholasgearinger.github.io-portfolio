@@ -142,7 +142,19 @@ const GERSTNER_WAVES_RAW = (() => {
     const wavelength = wavelengths[i];
     const amplitude = wavelength * amplitudeCoeff; // longer waves carry proportionally more amplitude, same relationship the original 4-wave set's own numbers implied
     const speed = GERSTNER_SPEED_AT_LONGEST * Math.sqrt(wavelength / GERSTNER_LONGEST_WAVELENGTH); // real deep-water dispersion
-    const angle = GERSTNER_WIND_ANGLE + Math.sin(i * GERSTNER_GOLDEN_ANGLE) * 0.62; // ~35 degree cone around the dominant heading
+    // Spread widened from ~35Β° (0.62 rad) to ~83Β° (1.45 rad) per explicit
+    // "the waves should also animate back and forth instead of just side
+    // to side" correction — the narrower cone kept every component
+    // traveling in a broadly similar (mostly-X) direction relative to
+    // GERSTNER_WIND_ANGLE (~16.7Β°), so the combined motion read as one-
+    // directional. This range now spans well past 90Β° at its extremes,
+    // so some components travel substantially along Z (toward/away from
+    // the camera — genuine back-and-forth) while others stay close to
+    // the original dominant heading (the "side to side" swell), summed
+    // together rather than one replacing the other. Amplitude/speed/
+    // wavelength generation above is unaffected — this only changes
+    // which direction each component travels.
+    const angle = GERSTNER_WIND_ANGLE + Math.sin(i * GERSTNER_GOLDEN_ANGLE) * 1.45;
     const k = (Math.PI * 2) / wavelength;
     const steepness = Math.min(0.5, 0.35 / (k * amplitude * GERSTNER_WAVE_COUNT));
     waves.push({ dirX: Math.cos(angle), dirZ: Math.sin(angle), wavelength, amplitude, speed, steepness });
@@ -1761,12 +1773,15 @@ function createOceanHorizonSkirt(scene, biome, y, landmassSize) {
   const geo = new THREE.PlaneGeometry(SKIRT_SIZE, SKIRT_SIZE, SKIRT_SEGMENTS, SKIRT_SEGMENTS);
   geo.rotateX(-Math.PI / 2);
 
-  // Punch the hole — same technique/reasoning as createLiquidPlane's own
-  // excludeRegions above, just inverted (keep triangles OUTSIDE the
-  // radius instead of outside specific named regions). Margin beyond
-  // landmassSize/2 gives real clearance past the detailed plane's own
-  // edge so the two can never visibly seam against each other.
-  const cutoutRadius = landmassSize / 2 + 20;
+  // Margin widened again, 60 -> 300 — per explicit "pull the background
+  // skirt further back away from the Gerstner waves" follow-up: the
+  // reflections weren't reading well because the mirror plane started
+  // essentially right at the shore, where the reflected scene is mostly
+  // nearby terrain/shore geometry rather than open sky — pulling the
+  // seam well out gives the reflection real room to show sky/sun/clouds
+  // instead. SKIRT_SIZE (4000) comfortably accommodates this — still
+  // extends thousands of units past the new seam.
+  const cutoutRadius = landmassSize / 2 + 300;
   const posAttr = geo.attributes.position;
   const oldIndex = geo.index.array;
   const newIndex = [];
@@ -1801,7 +1816,7 @@ function createOceanHorizonSkirt(scene, biome, y, landmassSize) {
     fog: true,
     alpha: 1.0,
   });
-  water.position.y = y - 0.05; // a hair below the detailed plane so it's naturally occluded wherever the two overlap, rather than z-fighting against it
+  water.position.y = y - 0.2; // clearance below the detailed plane — widened from 0.05 per "intersecting too much" report, since the near plane's own real wave troughs can dip well below its base height right near the shared seam
   water.renderOrder = -1;
   scene.add(water);
   // cutoutRadius stored on the handle — updateOceanHorizonSkirt's own
@@ -1813,7 +1828,7 @@ function createOceanHorizonSkirt(scene, biome, y, landmassSize) {
 
 /**
  * @param {number} [stormAmount]  same 0-1 value passed to updateLiquidPlane — keeps this plane's color in sync with the real water's own storm darkening instead of staying one fixed color while the water right in front of it changes tone
- * @param {number} [elapsed]  drives the plane's own animated ripple — per explicit "animate it" follow-up
+ * @param {number} [elapsed]  drives THREE.Water's own internal time uniform (texture-based ripple shading only — this plane's actual geometry stays flat/static, see below)
  * @param {THREE.Vector3} [sunPos]  the sun body's current world position — fed into THREE.Water's own real sun-specular calculation, same object main.js already passes to updateLiquidPlane
  */
 function updateOceanHorizonSkirt(handle, skyColor, stormAmount = 0, elapsed = 0, sunPos) {
@@ -1837,37 +1852,17 @@ function updateOceanHorizonSkirt(handle, skyColor, stormAmount = 0, elapsed = 0,
   // uses for the ripple texture's own scroll offset above).
   uniforms.time.value = elapsed * 0.35;
 
-  // Real geometric wave motion — separate from THREE.Water's own
-  // texture-based ripple shading above, which perturbs lighting/
-  // reflection but not the actual mesh surface. Per explicit "blended
-  // with our Gerstner waves" + "back and forth instead of just side to
-  // side" follow-up: the primary term travels along the SAME dominant
-  // wind direction the near water's Gerstner spectrum uses
-  // (GERSTNER_WIND_ANGLE, defined earlier in this file) for visual
-  // continuity between the two planes, a second term runs along the
-  // PERPENDICULAR axis (this is what actually reads as genuine back-
-  // and-forth cross-chop rather than one direction only), and a third
-  // diagonal term breaks up any residual grid-aligned look. Amplitude
-  // fades from 0 right at the seam (handle.cutoutRadius) up to full over
-  // a short transition band, so it can never mismatch the real water
-  // plane's own animation right at the boundary the two share.
-  const posAttr = handle.mesh.geometry.attributes.position;
-  const RIPPLE_FADE_BAND = 60;
-  const windX = Math.cos(GERSTNER_WIND_ANGLE), windZ = Math.sin(GERSTNER_WIND_ANGLE);
-  for (let i = 0; i < posAttr.count; i++) {
-    const x = posAttr.getX(i), z = posAttr.getZ(i);
-    const dist = Math.hypot(x, z);
-    const ampT = THREE.MathUtils.clamp((dist - handle.cutoutRadius) / RIPPLE_FADE_BAND, 0, 1);
-    const alongWind = x * windX + z * windZ;
-    const acrossWind = -x * windZ + z * windX;
-    const swell = (
-      Math.sin(alongWind * 0.035 + elapsed * 0.32) * 0.3
-      + Math.sin(acrossWind * 0.05 - elapsed * 0.22) * 0.22
-      + Math.sin((alongWind + acrossWind) * 0.025 + elapsed * 0.15) * 0.13
-    ) * ampT;
-    posAttr.setY(i, swell);
-  }
-  posAttr.needsUpdate = true;
+  // REVERTED: this plane's own separate geometric ripple (posAttr.setY
+  // per frame) was removed per explicit "it's intersecting too much with
+  // the Gerstner waves" report — misread the earlier "animate it"/"back
+  // and forth" requests as belonging to THIS plane, when the user meant
+  // the actual near-water Gerstner wave system (see its own widened
+  // GERSTNER_WIND_ANGLE spread comment near the top of this file for
+  // that fix instead). This plane stays geometrically flat/static now —
+  // THREE.Water's own texture-based normal-map shading (driven by the
+  // `time` uniform just above) still gives it a real sense of movement
+  // without any risk of the actual mesh surface poking through the near
+  // water's own wave excursions right at the shared seam.
 }
 
 function disposeOceanHorizonSkirt(scene, handle) {

@@ -827,6 +827,14 @@ function buildLevel(levelIdx) {
     terrainMat.onBeforeCompile = (shader) => {
       shader.uniforms.uTime = { value: 0 };
       shader.uniforms.uWaterLevel = { value: LIQUID_LEVEL.crystal };
+      // Real day/night-driven caustic brightness — per explicit
+      // reference request ("bright, sunlight through the surface")
+      // rather than the previous flat, time-of-day-independent
+      // intensity. Fed from dayNight.dayAmount each frame, same
+      // already-established 0..1 signal every other day/night-aware
+      // system in this file already reads (grass wind, cloud opacity,
+      // ambient light) — not a new/separate day concept.
+      shader.uniforms.uDayAmount = { value: 0 };
       shader.vertexShader = shader.vertexShader
         .replace("#include <common>", `#include <common>
 varying vec3 vCausticWorldPos;
@@ -858,7 +866,16 @@ float gerstnerHeightVert(vec2 xz, float t) {
   // mismatch to worry about.
   float vWaveH = gerstnerHeightVert(transformed.xz, uTime);
   vWaveHeight = vWaveH; // read by the fragment shader below (caustics/wave-wash) instead of recomputing the same 4-term Gerstner sum a second time per-fragment — at High tier's dense 600-segment mesh, interpolation error across one triangle is negligible, so this is a real saving with no meaningful visual change
-  float vWaveNorm = clamp((vWaveH + 0.85) / 1.7, 0.0, 1.0);
+  // Normalization range corrected to match the ACTUAL total Gerstner
+  // amplitude sum (1.71, after amplitudes were roughly doubled in a
+  // prior round to fix an under-detailed ocean) — this literal was
+  // still using the OLD sum (0.85/1.7) and had gone stale, silently
+  // clamping wave-crest detection incorrectly ever since that change
+  // (real wave height can now reach ~1.71, well past what a ±0.85 range
+  // assumed). Found while working on caustic brightness, not something
+  // that was reported directly — worth knowing this was quietly wrong
+  // for a few rounds.
+  float vWaveNorm = clamp((vWaveH + 1.71) / 3.42, 0.0, 1.0);
   float vShoreDist = transformed.y - uWaterLevel;
   float vReachHeight = 0.1 + vWaveNorm * 0.5;
   float vFoamZone = 1.0 - smoothstep(0.0, 0.4, abs(vShoreDist - vReachHeight));
@@ -870,6 +887,7 @@ vCausticWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`)
         .replace("#include <common>", `#include <common>
 uniform float uTime;
 uniform float uWaterLevel;
+uniform float uDayAmount;
 varying vec3 vCausticWorldPos;
 varying vec3 vCausticWorldNormal;
 varying float vWaveHeight;
@@ -917,7 +935,7 @@ float gFoamMask = 0.0;`)
   // brightness to the real wave motion (speed AND height) instead of
   // two independent things that only coincidentally looked similar.
   float waveH = vWaveHeight;
-  float waveNorm = clamp((waveH + 0.85) / 1.7, 0.0, 1.0); // 0 at trough, 1 at crest
+  float waveNorm = clamp((waveH + 1.71) / 3.42, 0.0, 1.0); // 0 at trough, 1 at crest — range corrected to match the actual doubled Gerstner amplitude sum, see the matching vertex-shader fix above
   vec2 causticUv = vCausticWorldPos.xz * 0.4 + vec2(uTime * 0.05, -uTime * 0.04) + waveH * 0.18;
   vec2 v1 = causticVoronoiF1F2(causticUv);
   float edge1 = v1.y - v1.x;
@@ -931,8 +949,20 @@ float gFoamMask = 0.0;`)
   // crestFocus brightens the whole pattern there instead of a flat
   // constant intensity everywhere regardless of the wave shape overhead.
   float crestFocus = smoothstep(0.5, 1.0, waveNorm);
-  float causticIntensity = net * underwaterMask * upwardFacing * (0.32 + crestFocus * 0.42);
-  diffuseColor.rgb += vec3(causticIntensity);
+  // Day-brightened, warm-toned caustic light — per explicit reference
+  // photo request ("bright, sunlight through the surface, gold on the
+  // sand"). Two real changes from the previous flat/neutral version:
+  // (1) intensity now scales with uDayAmount (0.15 floor at night so
+  // caustics don't vanish entirely in the dark, up to a much brighter
+  // ~1.5x peak at full day — real caustics are a DAYLIGHT phenomenon,
+  // essentially absent at night since they need direct sunlight passing
+  // through the surface); (2) color shifted from neutral white toward
+  // warm gold (1.0, 0.92, 0.72) instead of vec3(1.0) — sunlight
+  // filtered through water and reflecting off sand reads warm/golden in
+  // the reference, not a cold white shimmer.
+  float dayCausticBoost = 0.15 + uDayAmount * 1.35;
+  float causticIntensity = net * underwaterMask * upwardFacing * (0.32 + crestFocus * 0.42) * dayCausticBoost;
+  diffuseColor.rgb += vec3(1.0, 0.92, 0.72) * causticIntensity;
 
   // Shoreline wave-wash — real waves surge up the beach slope and
   // recede, leaving foam at the current edge and darker wet sand behind
@@ -972,22 +1002,12 @@ float gFoamMask = 0.0;`)
   // of a soft blur.
   float coreZone = 1.0 - smoothstep(0.0, 0.1, abs(shoreDist - jitteredReach));
   float coreFoam = clamp(foamCell * coreZone, 0.0, 1.0);
-  // Lacy tendrils — thin BRANCHING LINES (reusing the exact same
-  // Voronoi cell-EDGE technique the caustic net above already uses —
-  // F2-F1 traces thin lines along cell boundaries, not filled circles)
-  // reaching a bit further up the beach past the core line and fading
-  // out with distance. This is what actually produces the fingered,
-  // lacy look real foam has clawing into dry sand, which filled bubble
-  // blobs alone can't reproduce — a genuinely different pattern shape,
-  // not just a softer/smaller version of the same one.
-  vec2 tendrilUv = vCausticWorldPos.xz * 2.2 + vec2(uTime * 0.06, uTime * 0.045);
-  vec2 tv = causticVoronoiF1F2(tendrilUv);
-  float tendrilLines = 1.0 - smoothstep(0.0, 0.06, tv.y - tv.x);
-  float tendrilReach = 0.35; // how far past the core line tendrils can extend, same height units as shoreDist
-  float beyondLine = max(0.0, shoreDist - jitteredReach); // only extends OUTWARD/up the beach, never back into the water
-  float tendrilFalloff = 1.0 - smoothstep(0.0, tendrilReach, beyondLine);
-  float tendrilFoam = clamp(tendrilLines * tendrilFalloff * step(beyondLine, tendrilReach), 0.0, 1.0);
-  float foamMask = clamp(max(coreFoam, tendrilFoam * 0.85) * upwardFacing, 0.0, 1.0);
+  // Lacy tendril lines (thin Voronoi cell-edge branches reaching further
+  // up the beach) were tried and REMOVED per explicit follow-up — the
+  // underwater caustic net (a separate, pre-existing system using the
+  // same technique) was the part that read well; the shore foam reads
+  // better as just the clean core line on its own.
+  float foamMask = clamp(coreFoam * upwardFacing, 0.0, 1.0);
   gFoamMask = foamMask; // read by the emissivemap_fragment injection below, so foam stays visible even under night's dim lighting
   // Real sand right at the water's edge is ALWAYS wet — a permanent,
   // always-on dark band centered right at the mean waterline, not
@@ -1933,6 +1953,7 @@ function animate() {
   }
   if (terrainMesh && terrainMesh.material.userData.shader) {
     terrainMesh.material.userData.shader.uniforms.uTime.value = elapsedTime;
+    terrainMesh.material.userData.shader.uniforms.uDayAmount.value = dayNight.dayAmount;
   }
   // Real planar water reflection — Coral Shallows only, above-water only
   // (a reflection rendered from below the surface looking up would be
@@ -2020,9 +2041,17 @@ function animate() {
     scene.fog.color.setHex(uwStyle.fogColor);
     scene.fog.density = uwStyle.fogDensity;
     sun.color.setHex(uwStyle.sunColor);
-    sun.intensity *= uwStyle.sunMult;
+    // Extra day-scaled brightness, crystal only — per explicit "bright,
+    // sunlight through the surface" reference request. Multiplies ON
+    // TOP of the style's own base sunMult/ambientMult rather than
+    // replacing them — other biomes are completely untouched, and
+    // crystal itself is unaffected at night (dayAmount 0 -> boost 1.0,
+    // i.e. no change from today's existing look), this only ever ADDS
+    // brightness as the sun climbs.
+    const dayBrightBoost = currentBiome === "crystal" ? 1.0 + dayNight.dayAmount * 0.9 : 1.0;
+    sun.intensity *= uwStyle.sunMult * dayBrightBoost;
     ambientLight.color.setHex(uwStyle.ambientColor);
-    ambientLight.intensity *= uwStyle.ambientMult;
+    ambientLight.intensity *= uwStyle.ambientMult * dayBrightBoost;
     underwaterDistortionMaterial.uniforms.tintColor.value.set(uwStyle.tint[0], uwStyle.tint[1], uwStyle.tint[2]);
     underwaterDistortionMaterial.uniforms.tintStrength.value = uwStyle.tintStrength;
     underwaterDistortionMaterial.uniforms.fogDensity.value = uwStyle.fogDensity;

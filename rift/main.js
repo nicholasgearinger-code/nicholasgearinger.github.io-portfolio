@@ -12,6 +12,7 @@ import { createHorizonSilhouettes, updateHorizonSilhouettes, disposeHorizonSilho
 import { createWildlife, updateWildlife, disposeWildlife } from "./wildlife.js";
 import { createLandmark, updateLandmark, disposeLandmark, LANDMARK_POSITION } from "./landmarks.js";
 import { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers } from "./graphicsSettings.js";
+import { loadPalmTreeModel, loadAngelfishModel, createRealPalmTree, createRealAngelfish } from "./models.js";
 import { createWeatherSystem, updateWeatherSystem, disposeWeatherSystem } from "./weather.js";
 import { createClouds, updateClouds, disposeClouds, getCloudOcclusionFactor, createCloudLayer, updateCloudLayer, disposeCloudLayer, createRealisticCloudDome, updateRealisticCloudDome, disposeRealisticCloudDome } from "./clouds.js";
 import {
@@ -680,6 +681,13 @@ function updateMovement(dt, grounded) {
 let terrainMesh = null;
 let liquidHandle = null;
 let reflectionFrameCounter = 999; // starts high so the first eligible frame always renders immediately, not a blank/stale texture
+// Real GLB model instances — Coral Shallows only (see models.js). Tracked
+// separately from every other decoration/wildlife array since these load
+// ASYNCHRONOUSLY and need their own teardown (mixer + geometry/material
+// dispose) and their own per-frame update (AnimationMixer.update, for the
+// fish).
+let realPalmTrees = [];
+let realFish = [];
 let waterfallHandle = null;
 let oceanSurfaceDetailHandle = null;
 let riverCurrentHandle = null;
@@ -797,6 +805,19 @@ function teardownLevel() {
   disposeLightShafts(scene, underwaterShaftHandles);
   underwaterShaftHandles = [];
   loreMarkers = [];
+  // Real GLB instances (models.js) — remove from scene only. Deliberately
+  // NOT disposing geometry/material here: these clones share the
+  // underlying buffers with the module-level cached GLTF (palmTreeGLTF/
+  // angelfishGLTF in models.js), so disposing would corrupt that shared
+  // cache and break every future instance created from it, unlike the
+  // procedural decorations above (which own unique geometry per instance
+  // and correctly dispose it). Any in-flight load promise for a biome
+  // being torn down is left to resolve naturally — its own levelIdx
+  // guard (see buildLevel) makes it a no-op if the level has moved on.
+  for (const group of realPalmTrees) scene.remove(group);
+  realPalmTrees = [];
+  for (const fish of realFish) scene.remove(fish.group);
+  realFish = [];
 }
 
 // Orients the camera to face AWAY from the biome's landmark — that's the
@@ -1074,9 +1095,21 @@ float gFoamMask = 0.0;`)
         .replace("#include <color_fragment>", `#include <color_fragment>
 {
   float upwardFacing = clamp(vCausticWorldNormal.y, 0.0, 1.0);
-  // Fades in over a 2-unit band right at the shoreline rather than a
-  // hard cutoff — a real waterline isn't a knife-edge.
-  float underwaterMask = smoothstep(uWaterLevel + 0.5, uWaterLevel - 1.5, vCausticWorldPos.y);
+  // Per explicit "visible caustics" request: this mask is entirely
+  // WORLD-POSITION-based (is this sand vertex underwater), never gated by
+  // camera position — caustics were already technically present in the
+  // refraction render pass, which is what a player looking down through
+  // the water surface from ABOVE actually sees (see liquid.js's
+  // mix(refractionColor, diffuseColor, vReflectionFresnel), which favors
+  // refraction heavily at anything close to a top-down viewing angle).
+  // The real gap was that this mask needed real DEPTH before reaching
+  // full strength (1.5 units) — most of Coral Shallows' reef is
+  // genuinely shallow, so a lot of the most-commonly-viewed-from-above
+  // area was never reaching full brightness. Narrowed to reach full
+  // strength by 1 unit down, and the upper bound tightened to right at
+  // the waterline itself (was +0.5, letting it start slightly ABOVE the
+  // real surface).
+  float underwaterMask = smoothstep(uWaterLevel, uWaterLevel - 1.0, vCausticWorldPos.y);
   // Real wave height, carried over from the vertex shader's own
   // computation via vWaveHeight (see the varying above) instead of
   // recomputing the same 4-term Gerstner sum again per-fragment — same
@@ -1121,7 +1154,7 @@ float gFoamMask = 0.0;`)
   // to 0 above the waterline), so combined with this, caustics are now
   // zero unless BOTH underwater AND daytime.
   float dayCausticBoost = smoothstep(0.05, 0.4, uDayAmount) * 1.5;
-  float causticIntensity = net * underwaterMask * upwardFacing * (0.32 + crestFocus * 0.42) * dayCausticBoost;
+  float causticIntensity = net * underwaterMask * upwardFacing * (0.44 + crestFocus * 0.42) * dayCausticBoost; // base boosted 0.32->0.44 for real visible punch through the water surface, not just underwater
   diffuseColor.rgb += vec3(1.0, 0.92, 0.72) * causticIntensity;
 
   // Shoreline wave-wash — real waves surge up the beach slope and
@@ -1247,6 +1280,76 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
 
   if (level.biome === "crystal") {
     oceanSurfaceDetailHandle = createOceanSurfaceDetail(scene, LIQUID_LEVEL.crystal, TERRAIN_SIZE);
+
+    // Real GLB models (models.js) — per explicit request, replacing
+    // nothing that currently exists (dry-land decorations here were
+    // deliberately emptied out a while back, see FU162) but adding
+    // genuinely new content. Both loads are fire-and-forget async work
+    // kicked off here and resolving whenever the browser finishes
+    // fetching/parsing the model — NOT verified in-browser, this is the
+    // first real external-asset loading in the project (everything else
+    // is procedural). `spawnLevelIdx` guards against the player
+    // switching away from this level before the load finishes — the
+    // callback bails rather than adding trees/fish into whatever biome
+    // is showing by the time it resolves.
+    const spawnLevelIdx = levelIdx;
+    loadPalmTreeModel().then(() => {
+      if (currentLevelIdx !== spawnLevelIdx) return; // player already left this level — don't spawn into whatever's showing now
+      const PALM_COUNT = 5;
+      const palmSeed = hashStringToSeed(WORLD_SEED + "::realPalms");
+      const rng = mulberry32(palmSeed);
+      for (let i = 0; i < PALM_COUNT; i++) {
+        const angle = rng() * Math.PI * 2;
+        const dist = 8 + rng() * 14; // scattered around the landmark clearing, same rough footprint the old hardcoded palm spots used before FU162 removed them
+        const x = LANDMARK_POSITION.x + Math.cos(angle) * dist;
+        const z = LANDMARK_POSITION.z + Math.sin(angle) * dist;
+        const y = terrainHeightAt(level, x, z, WORLD_SEED);
+        if (y === null || y < LIQUID_LEVEL.crystal + 0.5) continue; // stay on dry land, clear of the shoreline
+        const tree = createRealPalmTree();
+        if (!tree) continue;
+        tree.position.set(x, y, z);
+        tree.rotation.y = rng() * Math.PI * 2;
+        const scale = 0.8 + rng() * 0.5;
+        tree.scale.setScalar(scale);
+        scene.add(tree);
+        realPalmTrees.push(tree);
+      }
+    }).catch(() => {}); // load failure already logged inside models.js — nothing further to do here
+
+    loadAngelfishModel().then(() => {
+      if (currentLevelIdx !== spawnLevelIdx) return;
+      const FISH_COUNT = 8;
+      const fishSeed = hashStringToSeed(WORLD_SEED + "::realFish");
+      const rng = mulberry32(fishSeed);
+      for (let i = 0; i < FISH_COUNT; i++) {
+        const angle = rng() * Math.PI * 2;
+        const dist = 20 + rng() * 70; // out over the open reef, not crowded right at the landmark
+        const x = LANDMARK_POSITION.x + Math.cos(angle) * dist;
+        const z = LANDMARK_POSITION.z + Math.sin(angle) * dist;
+        const groundY = terrainHeightAt(level, x, z, WORLD_SEED);
+        if (groundY === null || groundY > LIQUID_LEVEL.crystal - 1.5) continue; // needs real water depth above it, not a shallow puddle right at the seafloor
+        const depth = Math.min(LIQUID_LEVEL.crystal - groundY - 0.8, 1 + rng() * 3.5);
+        const fish = createRealAngelfish();
+        if (!fish) continue;
+        fish.group.position.set(x, LIQUID_LEVEL.crystal - depth, z);
+        fish.group.rotation.y = rng() * Math.PI * 2;
+        const scale = 0.6 + rng() * 0.3;
+        fish.group.scale.setScalar(scale);
+        // Simple wander path, independent of the skeletal swim animation
+        // (which only animates the body/fins in place) — a slow circular
+        // drift so the fish actually moves through the reef rather than
+        // hovering on one spot. Center/radius/phase are baked onto the
+        // instance itself so updateRealFish (animate loop) has everything
+        // it needs without a parallel lookup array.
+        fish.wanderCenterX = x; fish.wanderCenterZ = z;
+        fish.wanderRadius = 3 + rng() * 5;
+        fish.wanderSpeed = 0.15 + rng() * 0.15;
+        fish.wanderPhase = rng() * Math.PI * 2;
+        fish.wanderY = LIQUID_LEVEL.crystal - depth;
+        scene.add(fish.group);
+        realFish.push(fish);
+      }
+    }).catch(() => {});
   }
 
   if (level.biome === "verdant") {
@@ -2215,6 +2318,19 @@ function animate() {
   updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, camera.position, sun.position, dayNight.skyHorizon, reflectionRenderTarget.texture, reflectionTextureMatrix, refractionRenderTarget.texture, refractionResolution, weatherHandle ? weatherHandle.rainIntensity : 0);
   updateWaterfall(waterfallHandle, dt, elapsedTime);
   updateOceanSurfaceDetail(oceanSurfaceDetailHandle, elapsedTime, dayNight.dayAmount);
+  // Real angelfish (models.js) — AnimationMixer drives the loaded skeletal
+  // swim clip (fin/body motion in place), the wander drift here separately
+  // moves the fish THROUGH the reef along a slow circle so they don't just
+  // hover on one spot animating in place. Palm trees need no per-frame
+  // update at all (static geometry).
+  for (const fish of realFish) {
+    fish.mixer.update(dt);
+    const t = elapsedTime * fish.wanderSpeed + fish.wanderPhase;
+    const fx = fish.wanderCenterX + Math.cos(t) * fish.wanderRadius;
+    const fz = fish.wanderCenterZ + Math.sin(t) * fish.wanderRadius;
+    fish.group.position.set(fx, fish.wanderY + Math.sin(t * 1.7) * 0.3, fz);
+    fish.group.rotation.y = -t + Math.PI / 2; // face the direction of travel around the circle (tangent to the path), not the path's own radius direction
+  }
   updateRiverCurrent(riverCurrentHandle, dt);
   updateRiverFlowStrip(riverFlowStripHandle, dt);
   updateSourcePond(sourcePondHandle, elapsedTime);

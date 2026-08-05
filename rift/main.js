@@ -2178,6 +2178,19 @@ function animate() {
     terrainMesh.material.emissive.setHex(0x4a20c8);
     terrainMesh.material.emissiveIntensity = 0.04 + groundNightAmount * 0.5;
   }
+  // Coral Shallows' own night terrain tint — per explicit "the sand is
+  // looking too green at night" report. Without an explicit tint here,
+  // the sand's baked vertex color was left to whatever the raw ambient/
+  // sun light color happened to multiply out to at night, uncontrolled.
+  // A pale, deliberately cool-BLUE moonlight tone (no green component at
+  // all) guarantees the sand reads as moonlit sand rather than whatever
+  // hue the raw lighting math produced. No emissive boost, unlike
+  // Verdant above — a beach shouldn't glow the way that biome's
+  // bioluminescent forest floor does, this is purely a diffuse tint.
+  if (currentLevelIdx >= 0 && LEVELS[currentLevelIdx].biome === "crystal" && terrainMesh) {
+    const groundNightAmount = Math.max(0, Math.min(1, 1 - dayNight.dayAmount / 0.3));
+    terrainMesh.material.color.setRGB(1, 1, 1).lerp(new THREE.Color(0xb8c8e6), groundNightAmount * 0.45);
+  }
   // Underwater effect — Verdant only. All of it (fog, lighting, water
   // volume, screen distortion below) now gated on the SAME strict
   // "fully submerged" condition — the camera/eyes themselves below the

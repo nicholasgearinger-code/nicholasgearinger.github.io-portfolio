@@ -341,7 +341,18 @@ const BIOME_SHAPERS = {
         // Math.max below just falls through to the underwater seafloor
         // everywhere else along this ring, so there's no sandy shelf
         // ringing the whole island anymore.
-        islandBump = rampHeight * outerFade * (1 - coveShape);
+        // Sand ripple texture — per explicit "the sand is looking too
+        // flat" report: the dry beach previously had NO noise added to
+        // its height at all (unlike the underwater seafloor just below,
+        // which already gets a real sandRipple term) — a mathematically
+        // smooth curve reads as visibly artificial up close. Small
+        // amplitude, and scaled by beachT (0 at the wet outer edge where
+        // this ramp meets the water, full strength only further up the
+        // dry beach) so it can never eat into the water-clearance margin
+        // established after the FU163 regression — the sensitive zone
+        // right at the shoreline stays exactly as smooth/safe as before.
+        const sandRippleTerrain = fbm2(worldX * 0.18, worldZ * 0.18, seed + 770, 2, 2.0, 0.5) * 0.18 * beachT;
+        islandBump = (rampHeight + sandRippleTerrain) * outerFade * (1 - coveShape);
       } else {
         // Interior hill — carries the REST of the rise, from this same
         // angle's base height (see baseAtCore below — matches the beach
@@ -836,6 +847,11 @@ function applyHeightShading(geo, colorHex, minY, maxY, biome, seed) {
     const islandSandWet = biome === "crystal" ? new THREE.Color(0xc9a876) : null; // was 0xf3efe4 (pale near-white) — real wet sand is a rich saturated tan right at the waterline, not washed-out pale, per the reference photo
     const islandSandDry = biome === "crystal" ? new THREE.Color(0xe8c97a) : null;
     const islandSandTmp = biome === "crystal" ? new THREE.Color() : null;
+    // A darker fleck tone blended in via noise for real sand grain/
+    // texture — per explicit "too flat" report. A warm dark brown, not
+    // anything cool/green, so it can't itself contribute to any greenish
+    // cast.
+    const ISLAND_SAND_FLECK = new THREE.Color(0x8a6b3f);
     const waterLine = biome === "crystal" ? LIQUID_LEVEL.crystal : undefined;
     // Slope-based rock/grass — per explicit reference photo follow-up
     // ("beach surrounded by high cliffs with green on top"): height
@@ -887,6 +903,14 @@ function applyHeightShading(geo, colorHex, minY, maxY, biome, seed) {
         if (beachT > 0) {
           const goldT = Math.min(1, Math.max(0, (worldY - waterLine) / 6)); // widened from 4 to 6 for the same reason — fades from wet white-sand near the shore to warm gold sand further up the now-longer beach
           islandSandTmp.copy(islandSandWet).lerp(islandSandDry, goldT);
+          // Real color texture — per explicit "flat" report, the sand
+          // was a perfectly smooth 2-tone gradient with no grain/fleck
+          // variation at all. A fine noise sample blends in a slightly
+          // darker fleck tone, breaking up the flatness the same way
+          // rock/grass elsewhere in this function already use noise for
+          // their own texture, not a uniform painted color.
+          const sandFleckNoise = fbm2(x * 0.12, z * 0.12, seed + 810, 2, 2.0, 0.5);
+          if (sandFleckNoise > 0.15) islandSandTmp.lerp(ISLAND_SAND_FLECK, Math.min(1, (sandFleckNoise - 0.15) / 0.5) * 0.35);
           tmp.lerp(islandSandTmp, beachT);
         }
         // Rock/grass only above the beach's own zone (beachT<1 leaves
@@ -914,7 +938,7 @@ function applyHeightShading(geo, colorHex, minY, maxY, biome, seed) {
           // interior hill's own height rises monotonically inland), and
           // this multiplies on top of the existing slope-based amount so
           // steep ground still stays bare regardless of elevation.
-          const grassShoreT = THREE.MathUtils.clamp((worldY - (waterLine + 1)) / 16, 0, 1);
+          const grassShoreT = THREE.MathUtils.clamp((worldY - (waterLine + 6)) / 16, 0, 1); // start distance widened from waterLine+1 to +6 — grass was starting to blend in too close to the shore, reading as unwanted green on what should still be sand
           const grassShoreFactor = grassShoreT * grassShoreT * (3 - 2 * grassShoreT);
           const grassAmount = (1 - rockAmount) * grassShoreFactor;
           const grassNoise = fbm2(x * 0.05 + 300, z * 0.05 + 300, seed + 950, 2, 2.0, 0.5);

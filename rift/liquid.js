@@ -1,20 +1,15 @@
 import * as THREE from "three";
 import { getGraphicsSettings } from "./graphicsSettings.js";
-// THREE.Water tried and REMOVED three times total now — twice on the
-// NEAR water (fundamental conflict: a separate flat-ish reflective
-// surface can't reconcile with the genuinely wave-displaced mesh sitting
-// right below it, user's own "two systems working over each other"
-// diagnosis), and once on the FAR background skirt (createOceanHorizonSkirt,
-// below) — that attempt didn't have the near-water conflict (the skirt
-// isn't standing on anything wave-displaced), but it added its own extra
-// full-scene render pass for no real benefit once the skirt's seam was
-// moved well away from the near water, and its shader has no vertex-color
-// slot to plug the shore-to-distance color gradient into. Both planes now
-// share the SAME approach: a real planar reflection sampled DIRECTLY
-// inside a plain material via onBeforeCompile (uReflectionTex/
-// uReflectionMatrix) — rendered by main.js into ONE offscreen target each
-// frame and reused by both, so there's only ever one extra full-scene
-// render regardless of how many water surfaces sample it.
+// THREE.Water tried and removed three times (twice on this file's own
+// near-water plane, once on a separate background "skirt" plane that
+// used to extend the ocean out to the horizon) — a rigid flat reflective
+// surface never reconciled with genuinely wave-displaced water sitting
+// right below/at it. The separate background skirt itself is GONE now
+// too (see GERSTNER_WAVES below) — per explicit "remove the skirt
+// completely and merge the near Gerstner waves with the far ones"
+// request, Coral Shallows is back to ONE continuous water plane again,
+// just sized much larger than the landmass itself, with a single merged
+// wave spectrum (near chop + far swell) driving the whole thing.
 
 // -----------------------------------------------------------------------------
 // SWAP POINT: lava/water rendering. A single large flat plane at a fixed
@@ -156,7 +151,47 @@ const GERSTNER_WAVES_RAW = (() => {
   }
   return waves;
 })();
-const GERSTNER_WAVES = GERSTNER_WAVES_RAW.map((w) => {
+// A SECOND set of longer-wavelength "far swell" components, merged into
+// the SAME spectrum below — per explicit "remove the skirt completely
+// and merge the near Gerstner waves with the far ones" request. These
+// used to be a separate, smaller spectrum (SKIRT_GERSTNER_WAVES) driving
+// a second, disconnected background plane; now it's one continuous
+// ocean, one wave field. Kept as a genuinely SEPARATE generation block
+// (not folded into the loop above) so the near spectrum's own long-
+// standing tuning stays completely undisturbed — this only ADDS
+// components. Amplitude kept modest (1.2, not the old skirt's 3.5) since
+// these waves are now summed in EVERYWHERE, including right at the
+// player's feet, not just far away — a full 3.5 on top of the near
+// spectrum's own 1.7 would tower over the 1.6-unit eye height this
+// system was originally tuned against.
+const FAR_WAVE_COUNT = 5;
+const FAR_LONGEST_WAVELENGTH = 90;
+const FAR_SHORTEST_WAVELENGTH = 25;
+const FAR_SPEED_AT_LONGEST = 2.6;
+const FAR_TARGET_AMPLITUDE_SUM = 1.2;
+const FAR_WAVES_RAW = (() => {
+  const wavelengths = [];
+  let wavelengthSum = 0;
+  for (let i = 0; i < FAR_WAVE_COUNT; i++) {
+    const t = i / (FAR_WAVE_COUNT - 1);
+    const wl = FAR_LONGEST_WAVELENGTH * Math.pow(FAR_SHORTEST_WAVELENGTH / FAR_LONGEST_WAVELENGTH, t);
+    wavelengths.push(wl);
+    wavelengthSum += wl;
+  }
+  const amplitudeCoeff = FAR_TARGET_AMPLITUDE_SUM / wavelengthSum;
+  const waves = [];
+  for (let i = 0; i < FAR_WAVE_COUNT; i++) {
+    const wavelength = wavelengths[i];
+    const amplitude = wavelength * amplitudeCoeff;
+    const speed = FAR_SPEED_AT_LONGEST * Math.sqrt(wavelength / FAR_LONGEST_WAVELENGTH);
+    const angle = GERSTNER_WIND_ANGLE + Math.sin(i * GERSTNER_GOLDEN_ANGLE) * 1.45; // same heading/spread as the near spectrum, for continuous-looking motion
+    const k = (Math.PI * 2) / wavelength;
+    const steepness = Math.min(0.5, 0.35 / (k * amplitude * FAR_WAVE_COUNT));
+    waves.push({ dirX: Math.cos(angle), dirZ: Math.sin(angle), wavelength, amplitude, speed, steepness });
+  }
+  return waves;
+})();
+const GERSTNER_WAVES = [...GERSTNER_WAVES_RAW, ...FAR_WAVES_RAW].map((w) => {
   const len = Math.hypot(w.dirX, w.dirZ) || 1;
   return { ndx: w.dirX / len, ndz: w.dirZ / len, k: (Math.PI * 2) / w.wavelength, amplitude: w.amplitude, speed: w.speed, steepness: w.steepness };
 });
@@ -793,12 +828,28 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
     const deep = style.baseColor; // the deep blue tuned in LIQUID_STYLE.crystal
     const tmpDepth = new THREE.Color();
     const MAX_DEPTH = 7; // beyond this the water reads as fully "deep" — matches the reef's own real depth range from terrain.js
+    // Distance-based far darkening — per "merge the near Gerstner waves
+    // with the far ones" request: now that this is ONE plane extending
+    // well past the coastline (the separate background skirt is gone),
+    // the depth-based shallow/deep blend above alone still only reaches
+    // LIQUID_STYLE.crystal's own medium reef-blue at "deep" — it never
+    // gets as dark as the old skirt's own distinct DEEP_COLOR further
+    // out. This preserves that "gets progressively darker toward the
+    // horizon" read on the same single plane, starting beyond the
+    // coastline (300 units) and reaching full darkness by ~45% of
+    // whatever size this plane was actually built at.
+    const FAR_DARKEN_COLOR = new THREE.Color(0x061824);
+    const FAR_DARKEN_START = 300;
+    const FAR_DARKEN_END = Math.max(FAR_DARKEN_START + 200, size * 0.45);
     for (let i = 0; i < posAttr.count; i++) {
       const vx = posAttr.getX(i), vz = posAttr.getZ(i);
       const groundY = sampleHeight(vx, vz);
       const depth = groundY === null ? MAX_DEPTH : Math.max(0, y - groundY);
       const t = Math.min(1, depth / MAX_DEPTH);
       tmpDepth.copy(shallow).lerp(deep, t);
+      const distFromCenter = Math.hypot(vx, vz);
+      const farT = THREE.MathUtils.clamp((distFromCenter - FAR_DARKEN_START) / (FAR_DARKEN_END - FAR_DARKEN_START), 0, 1);
+      if (farT > 0) tmpDepth.lerp(FAR_DARKEN_COLOR, farT * farT * (3 - 2 * farT));
       tmpDepth.toArray(depthColors, i * 3);
       tmpDepth.toArray(colors, i * 3);
     }
@@ -1728,207 +1779,8 @@ function disposeLiquidPlane(scene, handle) {
   }
 }
 
-// -----------------------------------------------------------------------------
-// A simple, large "horizon extension" ocean plane — Coral Shallows only.
-// The DETAILED water plane above (createLiquidPlane) is deliberately
-// sized to match the landmass itself (TERRAIN_SIZE), so its per-vertex
-// Gerstner waves/foam stay at a real, walkable-scale resolution near the
-// player — stretching that same vertex budget out to the horizon would
-// make the near-shore waves visibly coarse. Reported symptom this fixes:
-// "the ocean just stops close to shore" — past the landmass's own edge
-// there was previously nothing at all, not open water, so the terrain's
-// own edge-falloff silhouette read as a hard horizon line.
-// This is a second, much larger, much cheaper flat plane sitting just
-// BELOW the detailed one (same Y minus a hair, so the detailed plane
-// naturally occludes it everywhere the two overlap — no z-fighting, no
-// visibility toggling needed) that extends far past both the landmass's
-// real edge and fog's effective visibility range. fog:true is
-// deliberate here (unlike the cloud dome's fog:false) — this is meant to
-// fade into the sky/fog color at distance exactly like real open ocean
-// does, not read as a sharp-edged background plate.
-// REGRESSION FIX: an earlier version of this plane was a solid disc
-// covering the WHOLE 4000-unit area, including directly underneath the
-// landmass and the detailed water plane — anywhere the real coastline
-// dipped close to this plane's fixed height, the flat, unanimated skirt
-// showed through right at the shore ("extra water comes up to the
-// shore"), visibly distinct from the real animated water in front of
-// it. Fixed by punching a hole through the middle matching (with a
-// safety margin) the detailed plane's own footprint, the same
-// centroid-distance triangle-removal technique createLiquidPlane's own
-// excludeRegions already uses above — this plane now ONLY exists in the
-// true background, past where the real water and landmass are.
-// -----------------------------------------------------------------------------
-const SKIRT_SIZE = 4000; // comfortably past every biome's tuned fog density (see weather.js's baseFogDensity values) at any graphics tier, so this always fades into fog well before its own edge could be seen
-const SKIRT_SEGMENTS = 48; // enough for the cutout hole's edge to read as roughly circular rather than an obviously faceted polygon, still cheap for a mesh this simple
-const tmpSkirtColor = new THREE.Color(); // shared/reused across frames in updateOceanHorizonSkirt below — avoids a per-frame allocation
-// A dedicated dark-blue base tint for the background ocean specifically —
-// per explicit "recolor it to be more dark blue" request. Distinct from
-// LIQUID_STYLE.crystal.baseColor, which is tuned for the near water's
-// bright shallow-reef look and was reading too light/similar to the near
-// water out here where a deep, distant sea should read darker/moodier.
-const SKIRT_BASE_COLOR = new THREE.Color(0x0a2e42);
 
-// A SEPARATE, smaller Gerstner wave spectrum for the background skirt —
-// per explicit "make another Gerstner or another type of waves for the
-// background" follow-up. Same generation technique as the near water's
-// own GERSTNER_WAVES above (geometric wavelength spacing, real sqrt
-// dispersion, golden-angle direction spread) but deliberately NOT the
-// same array — fewer components (5, not 10) and bigger wavelengths,
-// since fine chop wouldn't read at this distance anyway and big rolling
-// swells look more like real distant open ocean. Kept fully independent
-// from GERSTNER_WAVES so retuning either one can never accidentally
-// affect the other.
-const SKIRT_GERSTNER_WAVE_COUNT = 5;
-const SKIRT_GERSTNER_LONGEST_WAVELENGTH = 90;
-const SKIRT_GERSTNER_SHORTEST_WAVELENGTH = 25;
-const SKIRT_GERSTNER_SPEED_AT_LONGEST = 2.6;
-const SKIRT_GERSTNER_TARGET_AMPLITUDE_SUM = 3.5; // bigger than the near water's 1.7 — no eye-height constraint out here, and taller distant swells read as more convincing open ocean
-const SKIRT_GERSTNER_WAVES = (() => {
-  const wavelengths = [];
-  let wavelengthSum = 0;
-  for (let i = 0; i < SKIRT_GERSTNER_WAVE_COUNT; i++) {
-    const t = i / (SKIRT_GERSTNER_WAVE_COUNT - 1);
-    const wl = SKIRT_GERSTNER_LONGEST_WAVELENGTH * Math.pow(SKIRT_GERSTNER_SHORTEST_WAVELENGTH / SKIRT_GERSTNER_LONGEST_WAVELENGTH, t);
-    wavelengths.push(wl);
-    wavelengthSum += wl;
-  }
-  const amplitudeCoeff = SKIRT_GERSTNER_TARGET_AMPLITUDE_SUM / wavelengthSum;
-  const waves = [];
-  for (let i = 0; i < SKIRT_GERSTNER_WAVE_COUNT; i++) {
-    const wavelength = wavelengths[i];
-    const amplitude = wavelength * amplitudeCoeff;
-    const speed = SKIRT_GERSTNER_SPEED_AT_LONGEST * Math.sqrt(wavelength / SKIRT_GERSTNER_LONGEST_WAVELENGTH);
-    // Same wind heading + widened spread as the near water's own spectrum
-    // (GERSTNER_WIND_ANGLE, ±1.45 rad) — real visual continuity between
-    // the two planes' wave directions, not just their color.
-    const angle = GERSTNER_WIND_ANGLE + Math.sin(i * GERSTNER_GOLDEN_ANGLE) * 1.45;
-    const k = (Math.PI * 2) / wavelength;
-    const steepness = Math.min(0.5, 0.35 / (k * amplitude * SKIRT_GERSTNER_WAVE_COUNT));
-    const len = Math.hypot(Math.cos(angle), Math.sin(angle)) || 1;
-    waves.push({ ndx: Math.cos(angle) / len, ndz: Math.sin(angle) / len, k, amplitude, speed, steepness });
-  }
-  return waves;
-})();
-
-function createOceanHorizonSkirt(scene, biome, y, landmassSize) {
-  const style = LIQUID_STYLE[biome];
-  if (!style || biome !== "crystal") return null; // scoped to the open-ocean biome specifically — Verdant's river and Ember's lava are contained features, not an "extends to the horizon" ocean
-  const geo = new THREE.PlaneGeometry(SKIRT_SIZE, SKIRT_SIZE, SKIRT_SEGMENTS, SKIRT_SEGMENTS);
-  geo.rotateX(-Math.PI / 2);
-
-  // Margin (landmassSize/2+300) — see FU170's own reasoning; also now the
-  // safety clearance the Gerstner ripple below fades its amplitude in
-  // across.
-  const cutoutRadius = landmassSize / 2 + 300;
-  const posAttr = geo.attributes.position;
-  const oldIndex = geo.index.array;
-  const newIndex = [];
-  for (let i = 0; i < oldIndex.length; i += 3) {
-    const a = oldIndex[i], b = oldIndex[i + 1], c = oldIndex[i + 2];
-    const cx = (posAttr.getX(a) + posAttr.getX(b) + posAttr.getX(c)) / 3;
-    const cz = (posAttr.getZ(a) + posAttr.getZ(b) + posAttr.getZ(c)) / 3;
-    if (Math.hypot(cx, cz) > cutoutRadius) newIndex.push(a, b, c);
-  }
-  geo.setIndex(newIndex);
-
-  // Shore-to-distance color gradient — darkened toward blue per the
-  // earlier recolor request.
-  const SHORE_COLOR = new THREE.Color(0x2a5878);
-  const DEEP_COLOR = new THREE.Color(0x061824);
-  const GRADIENT_END = cutoutRadius + 900;
-  const colors = new Float32Array(posAttr.count * 3);
-  const tmpGradColor = new THREE.Color();
-  for (let i = 0; i < posAttr.count; i++) {
-    const dist = Math.hypot(posAttr.getX(i), posAttr.getZ(i));
-    const t = THREE.MathUtils.clamp((dist - cutoutRadius) / (GRADIENT_END - cutoutRadius), 0, 1);
-    const eased = t * t * (3 - 2 * t);
-    tmpGradColor.copy(SHORE_COLOR).lerp(DEEP_COLOR, eased);
-    tmpGradColor.toArray(colors, i * 3);
-  }
-  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-
-  // basePositions — the Gerstner sum below displaces X/Z horizontally as
-  // well as Y (real trochoidal motion, not just a vertical bob), so it
-  // needs the ORIGINAL flat position to displace FROM each frame rather
-  // than the already-displaced previous frame's position (which would
-  // drift/accumulate). Same pattern createLiquidPlane's own basePositions
-  // already uses for the near water.
-  const basePositions = new Float32Array(posAttr.count * 2); // x,z pairs only — y always starts at 0 on a flat PlaneGeometry
-  for (let i = 0; i < posAttr.count; i++) {
-    basePositions[i * 2] = posAttr.getX(i);
-    basePositions[i * 2 + 1] = posAttr.getZ(i);
-  }
-
-  // REMOVED THREE.CubeCamera reflection entirely per explicit "remove the
-  // reflection layer" request — back to a plain, unlit MeshBasicMaterial,
-  // no envMap/metalness/roughness.
-  const mat = new THREE.MeshBasicMaterial({ color: SKIRT_BASE_COLOR, fog: true, side: THREE.DoubleSide, vertexColors: true });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.position.y = y - 0.2; // clearance below the detailed plane
-  mesh.renderOrder = -1;
-  scene.add(mesh);
-  return { mesh, mat, cutoutRadius, basePositions };
-}
-
-/**
- * @param {number} [stormAmount]  same 0-1 value passed to updateLiquidPlane — keeps this plane's color in sync with the real water's own storm darkening instead of staying one fixed color while the water right in front of it changes tone
- * @param {number} [elapsed]  drives the Gerstner wave sum below
- */
-function updateOceanHorizonSkirt(handle, skyColor, stormAmount = 0, elapsed = 0) {
-  if (!handle) return;
-  // Tints toward the current sky color the same way the detailed plane's
-  // own baseColor does (see updateLiquidPlane), starting from the
-  // dedicated dark-blue SKIRT_BASE_COLOR rather than the near water's
-  // brighter reef tone. The vertex color gradient (baked at creation)
-  // MULTIPLIES this, so day/night tinting and the shore-to-distance
-  // gradient compose correctly rather than fighting.
-  if (skyColor) {
-    tmpSkirtColor.copy(SKIRT_BASE_COLOR).lerp(skyColor, 0.35);
-    if (stormAmount > 0) tmpSkirtColor.lerp(STORM_SEA_COLOR, stormAmount * 0.85);
-    handle.mat.color.copy(tmpSkirtColor);
-  }
-
-  // Real Gerstner (trochoidal) wave sum — per explicit "make another
-  // Gerstner... for the background" follow-up, replacing the earlier
-  // ad-hoc 3-term sine ripple with the SAME proper technique the near
-  // water uses (horizontal displacement toward the crest + vertical
-  // lift, summed across several directional components), just against
-  // SKIRT_GERSTNER_WAVES' own smaller/bigger-wavelength spectrum defined
-  // above. Displaces from basePositions (the untouched original flat
-  // position), not the previous frame's already-displaced position, so
-  // it doesn't drift. Amplitude fades from 0 right at the seam
-  // (handle.cutoutRadius) over a real band, same seam-safety reasoning
-  // as every earlier round of this plane's animation.
-  const posAttr = handle.mesh.geometry.attributes.position;
-  const basePositions = handle.basePositions;
-  const RIPPLE_FADE_BAND = 150;
-  for (let i = 0; i < posAttr.count; i++) {
-    const bx = basePositions[i * 2], bz = basePositions[i * 2 + 1];
-    const dist = Math.hypot(bx, bz);
-    const ampT = THREE.MathUtils.clamp((dist - handle.cutoutRadius) / RIPPLE_FADE_BAND, 0, 1);
-    let dx = 0, dz = 0, dy = 0;
-    for (const w of SKIRT_GERSTNER_WAVES) {
-      const f = w.k * (w.ndx * bx + w.ndz * bz) - w.speed * elapsed;
-      const s = Math.sin(f), c = Math.cos(f);
-      dx += w.steepness * w.amplitude * w.ndx * c;
-      dz += w.steepness * w.amplitude * w.ndz * c;
-      dy += w.amplitude * s;
-    }
-    posAttr.setX(i, bx + dx * ampT);
-    posAttr.setY(i, dy * ampT);
-    posAttr.setZ(i, bz + dz * ampT);
-  }
-  posAttr.needsUpdate = true;
-}
-
-function disposeOceanHorizonSkirt(scene, handle) {
-  if (!handle) return;
-  scene.remove(handle.mesh);
-  handle.mesh.geometry.dispose();
-  handle.mat.dispose();
-}
-
-export { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail, createOceanHorizonSkirt, updateOceanHorizonSkirt, disposeOceanHorizonSkirt };
+export { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail };
 
 // Ocean surface detail — Coral Shallows only. DISABLED entirely per
 // explicit follow-up request, after two rounds of trying to fix the

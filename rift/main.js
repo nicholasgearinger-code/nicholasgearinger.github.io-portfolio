@@ -4,7 +4,7 @@ import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERF
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
 import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, createUnderwaterLightShaft, updateLightShafts, disposeLightShafts, createRockCluster, createCaveMouth, applyVerticalGradient } from "./decorations.js";
-import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail, createOceanHorizonSkirt, updateOceanHorizonSkirt, disposeOceanHorizonSkirt } from "./liquid.js";
+import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail } from "./liquid.js";
 import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
 import { createGrass, updateGrass, disposeGrass, createFlowers, updateFlowers, disposeFlowers, createFootstepGlowSystem, spawnFootstepGlow, updateFootstepGlowSystem, disposeFootstepGlowSystem } from "./vegetation.js";
@@ -679,7 +679,6 @@ function updateMovement(dt, grounded) {
 // ---------------------------------------------------------------------------
 let terrainMesh = null;
 let liquidHandle = null;
-let oceanHorizonSkirtHandle = null;
 let waterfallHandle = null;
 let oceanSurfaceDetailHandle = null;
 let riverCurrentHandle = null;
@@ -743,8 +742,6 @@ function teardownLevel() {
   }
   disposeLiquidPlane(scene, liquidHandle);
   liquidHandle = null;
-  disposeOceanHorizonSkirt(scene, oceanHorizonSkirtHandle);
-  oceanHorizonSkirtHandle = null;
   disposeWaterfall(scene, waterfallHandle);
   waterfallHandle = null;
   disposeOceanSurfaceDetail(scene, oceanSurfaceDetailHandle);
@@ -1191,8 +1188,26 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
   scene.add(terrainMesh);
 
   if (LIQUID_LEVEL[level.biome] !== undefined) {
-    liquidHandle = createLiquidPlane(scene, level.biome, LIQUID_LEVEL[level.biome], TERRAIN_SIZE, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
-    oceanHorizonSkirtHandle = createOceanHorizonSkirt(scene, level.biome, LIQUID_LEVEL[level.biome], TERRAIN_SIZE); // null for every biome but crystal — see its own comment in liquid.js
+    // Crystal's water plane is sized much larger than the landmass
+    // itself (2000, not TERRAIN_SIZE's 240) — per explicit "remove the
+    // skirt completely and merge the near Gerstner waves with the far
+    // ones" request, this used to be two separate planes (a detailed
+    // near plane + a much larger, separate background "skirt" with its
+    // own wave spectrum); now it's ONE plane covering both roles, with
+    // BOTH wave spectra merged into liquid.js's own single GERSTNER_WAVES
+    // (see its own comment there). Other biomes' small rivers/lava keep
+    // their original TERRAIN_SIZE footprint — they were never meant to
+    // extend to any horizon.
+    // REAL TRADE-OFF, not fully mitigated: the vertex segment count
+    // (getGraphicsSettings().liquidSegments, in graphicsSettings.js —
+    // not available to edit this session) is unchanged, so the SAME
+    // vertex budget that used to cover a 240-unit near plane now spans
+    // 2000 units — near-shore triangles are measurably coarser than
+    // before. Bumping liquidSegments up (in graphicsSettings.js) would
+    // restore the old near-shore density if this reads too blocky
+    // up close.
+    const waterPlaneSize = level.biome === "crystal" ? 2000 : TERRAIN_SIZE;
+    liquidHandle = createLiquidPlane(scene, level.biome, LIQUID_LEVEL[level.biome], waterPlaneSize, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
   }
 
   if (level.biome === "crystal") {
@@ -2146,10 +2161,6 @@ function animate() {
   // behind here is never visible. biome-gated inside updateLiquidPlane
   // itself (crystal only), so this is harmless to pass unconditionally.
   updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, camera.position, sun.position, dayNight.skyHorizon, reflectionRenderTarget.texture, reflectionTextureMatrix, refractionRenderTarget.texture, refractionResolution, weatherHandle ? weatherHandle.rainIntensity : 0);
-  // Reflection layer removed per explicit request — the skirt now just
-  // runs its own smaller Gerstner wave spectrum (see liquid.js), no
-  // renderer/scene dependency needed anymore.
-  updateOceanHorizonSkirt(oceanHorizonSkirtHandle, dayNight.skyZenith, weatherHandle ? weatherHandle.rainIntensity : 0, elapsedTime);
   updateWaterfall(waterfallHandle, dt, elapsedTime);
   updateOceanSurfaceDetail(oceanSurfaceDetailHandle, elapsedTime, dayNight.dayAmount);
   updateRiverCurrent(riverCurrentHandle, dt);

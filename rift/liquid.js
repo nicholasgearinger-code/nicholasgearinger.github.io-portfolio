@@ -1768,16 +1768,57 @@ const tmpSkirtColor = new THREE.Color(); // shared/reused across frames in updat
 // water out here where a deep, distant sea should read darker/moodier.
 const SKIRT_BASE_COLOR = new THREE.Color(0x0a2e42);
 
+// A SEPARATE, smaller Gerstner wave spectrum for the background skirt —
+// per explicit "make another Gerstner or another type of waves for the
+// background" follow-up. Same generation technique as the near water's
+// own GERSTNER_WAVES above (geometric wavelength spacing, real sqrt
+// dispersion, golden-angle direction spread) but deliberately NOT the
+// same array — fewer components (5, not 10) and bigger wavelengths,
+// since fine chop wouldn't read at this distance anyway and big rolling
+// swells look more like real distant open ocean. Kept fully independent
+// from GERSTNER_WAVES so retuning either one can never accidentally
+// affect the other.
+const SKIRT_GERSTNER_WAVE_COUNT = 5;
+const SKIRT_GERSTNER_LONGEST_WAVELENGTH = 90;
+const SKIRT_GERSTNER_SHORTEST_WAVELENGTH = 25;
+const SKIRT_GERSTNER_SPEED_AT_LONGEST = 2.6;
+const SKIRT_GERSTNER_TARGET_AMPLITUDE_SUM = 3.5; // bigger than the near water's 1.7 — no eye-height constraint out here, and taller distant swells read as more convincing open ocean
+const SKIRT_GERSTNER_WAVES = (() => {
+  const wavelengths = [];
+  let wavelengthSum = 0;
+  for (let i = 0; i < SKIRT_GERSTNER_WAVE_COUNT; i++) {
+    const t = i / (SKIRT_GERSTNER_WAVE_COUNT - 1);
+    const wl = SKIRT_GERSTNER_LONGEST_WAVELENGTH * Math.pow(SKIRT_GERSTNER_SHORTEST_WAVELENGTH / SKIRT_GERSTNER_LONGEST_WAVELENGTH, t);
+    wavelengths.push(wl);
+    wavelengthSum += wl;
+  }
+  const amplitudeCoeff = SKIRT_GERSTNER_TARGET_AMPLITUDE_SUM / wavelengthSum;
+  const waves = [];
+  for (let i = 0; i < SKIRT_GERSTNER_WAVE_COUNT; i++) {
+    const wavelength = wavelengths[i];
+    const amplitude = wavelength * amplitudeCoeff;
+    const speed = SKIRT_GERSTNER_SPEED_AT_LONGEST * Math.sqrt(wavelength / SKIRT_GERSTNER_LONGEST_WAVELENGTH);
+    // Same wind heading + widened spread as the near water's own spectrum
+    // (GERSTNER_WIND_ANGLE, ±1.45 rad) — real visual continuity between
+    // the two planes' wave directions, not just their color.
+    const angle = GERSTNER_WIND_ANGLE + Math.sin(i * GERSTNER_GOLDEN_ANGLE) * 1.45;
+    const k = (Math.PI * 2) / wavelength;
+    const steepness = Math.min(0.5, 0.35 / (k * amplitude * SKIRT_GERSTNER_WAVE_COUNT));
+    const len = Math.hypot(Math.cos(angle), Math.sin(angle)) || 1;
+    waves.push({ ndx: Math.cos(angle) / len, ndz: Math.sin(angle) / len, k, amplitude, speed, steepness });
+  }
+  return waves;
+})();
+
 function createOceanHorizonSkirt(scene, biome, y, landmassSize) {
   const style = LIQUID_STYLE[biome];
   if (!style || biome !== "crystal") return null; // scoped to the open-ocean biome specifically — Verdant's river and Ember's lava are contained features, not an "extends to the horizon" ocean
   const geo = new THREE.PlaneGeometry(SKIRT_SIZE, SKIRT_SIZE, SKIRT_SEGMENTS, SKIRT_SEGMENTS);
   geo.rotateX(-Math.PI / 2);
 
-  // Margin (landmassSize/2+300) gives the reflection real room to show
-  // sky rather than nearby shore — see FU170's own reasoning. Also now
-  // the safety clearance the reintroduced ripple animation below fades
-  // its amplitude in across.
+  // Margin (landmassSize/2+300) — see FU170's own reasoning; also now the
+  // safety clearance the Gerstner ripple below fades its amplitude in
+  // across.
   const cutoutRadius = landmassSize / 2 + 300;
   const posAttr = geo.attributes.position;
   const oldIndex = geo.index.array;
@@ -1790,8 +1831,8 @@ function createOceanHorizonSkirt(scene, biome, y, landmassSize) {
   }
   geo.setIndex(newIndex);
 
-  // Shore-to-distance color gradient — both stops darkened toward blue
-  // per this round's recolor request (was a lighter 0xbfe8f0/0x0d2a3a).
+  // Shore-to-distance color gradient — darkened toward blue per the
+  // earlier recolor request.
   const SHORE_COLOR = new THREE.Color(0x2a5878);
   const DEEP_COLOR = new THREE.Color(0x061824);
   const GRADIENT_END = cutoutRadius + 900;
@@ -1806,41 +1847,34 @@ function createOceanHorizonSkirt(scene, biome, y, landmassSize) {
   }
   geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
 
-  // SWITCHED from the custom onBeforeCompile planar reflection to a real
-  // THREE.CubeCamera environment reflection — per explicit "let's try
-  // adding reflections to that with CubeCamera" follow-up (this project
-  // discussed it as an option, never tried). Small render-target
-  // resolution (128) since this is a soft, distant, low-detail reflection
-  // (sky/sun/clouds, not the crisp near-water mirror) and a full 6-face
-  // cube render is genuinely expensive — throttled further in
-  // updateOceanHorizonSkirt so it doesn't run every frame. Fixed at the
-  // map's rough center at water height rather than following the player —
-  // a distant reflection dominated by sky doesn't need to track exact
-  // player position the way the near water's per-pixel mirror does.
-  const cubeRenderTarget = new THREE.WebGLCubeRenderTarget(128, {
-    generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter,
-  });
-  const cubeCamera = new THREE.CubeCamera(1, 4000, cubeRenderTarget);
-  cubeCamera.position.set(0, y, 0);
+  // basePositions — the Gerstner sum below displaces X/Z horizontally as
+  // well as Y (real trochoidal motion, not just a vertical bob), so it
+  // needs the ORIGINAL flat position to displace FROM each frame rather
+  // than the already-displaced previous frame's position (which would
+  // drift/accumulate). Same pattern createLiquidPlane's own basePositions
+  // already uses for the near water.
+  const basePositions = new Float32Array(posAttr.count * 2); // x,z pairs only — y always starts at 0 on a flat PlaneGeometry
+  for (let i = 0; i < posAttr.count; i++) {
+    basePositions[i * 2] = posAttr.getX(i);
+    basePositions[i * 2 + 1] = posAttr.getZ(i);
+  }
 
-  const mat = new THREE.MeshStandardMaterial({
-    color: SKIRT_BASE_COLOR, fog: true, side: THREE.DoubleSide, vertexColors: true,
-    envMap: cubeRenderTarget.texture, metalness: 0.9, roughness: 0.15, envMapIntensity: 1.0,
-  });
+  // REMOVED THREE.CubeCamera reflection entirely per explicit "remove the
+  // reflection layer" request — back to a plain, unlit MeshBasicMaterial,
+  // no envMap/metalness/roughness.
+  const mat = new THREE.MeshBasicMaterial({ color: SKIRT_BASE_COLOR, fog: true, side: THREE.DoubleSide, vertexColors: true });
   const mesh = new THREE.Mesh(geo, mat);
-  mesh.position.y = y - 0.2; // clearance below the detailed plane, same margin as before
+  mesh.position.y = y - 0.2; // clearance below the detailed plane
   mesh.renderOrder = -1;
   scene.add(mesh);
-  return { mesh, mat, cutoutRadius, cubeCamera, cubeRenderTarget, cubeUpdateCounter: 0 };
+  return { mesh, mat, cutoutRadius, basePositions };
 }
 
 /**
  * @param {number} [stormAmount]  same 0-1 value passed to updateLiquidPlane — keeps this plane's color in sync with the real water's own storm darkening instead of staying one fixed color while the water right in front of it changes tone
- * @param {number} [elapsed]  drives the plane's own animated ripple
- * @param {THREE.WebGLRenderer} [renderer]  needed to refresh the CubeCamera's own capture
- * @param {THREE.Scene} [scene]  same — the scene the CubeCamera renders into its cube texture
+ * @param {number} [elapsed]  drives the Gerstner wave sum below
  */
-function updateOceanHorizonSkirt(handle, skyColor, stormAmount = 0, elapsed = 0, renderer, scene) {
+function updateOceanHorizonSkirt(handle, skyColor, stormAmount = 0, elapsed = 0) {
   if (!handle) return;
   // Tints toward the current sky color the same way the detailed plane's
   // own baseColor does (see updateLiquidPlane), starting from the
@@ -1854,44 +1888,35 @@ function updateOceanHorizonSkirt(handle, skyColor, stormAmount = 0, elapsed = 0,
     handle.mat.color.copy(tmpSkirtColor);
   }
 
-  // CubeCamera refresh — throttled to every 20 frames (roughly 1-2
-  // updates/sec depending on device fps) since a full 6-face cube render
-  // every single frame would be genuinely expensive for a background
-  // reflection that's mostly slow-moving sky anyway. Hides the skirt
-  // itself during the capture so it doesn't reflect its own surface.
-  if (renderer && scene) {
-    handle.cubeUpdateCounter++;
-    if (handle.cubeUpdateCounter >= 20) {
-      handle.cubeUpdateCounter = 0;
-      handle.mesh.visible = false;
-      handle.cubeCamera.update(renderer, scene);
-      handle.mesh.visible = true;
-    }
-  }
-
-  // Real geometric wave motion — reintroduced now that the seam sits
-  // 300 units clear of the near water (see cutoutRadius above), well
-  // past the earlier 60-unit margin that caused FU168's intersection
-  // regression. Primary term travels along the near water's own
-  // dominant Gerstner wind direction for visual continuity, a second
-  // term runs perpendicular to it (genuine back-and-forth, not just
-  // side-to-side), and a diagonal term breaks up any grid-aligned look.
-  // Amplitude still fades in from 0 right at the seam over a real band.
+  // Real Gerstner (trochoidal) wave sum — per explicit "make another
+  // Gerstner... for the background" follow-up, replacing the earlier
+  // ad-hoc 3-term sine ripple with the SAME proper technique the near
+  // water uses (horizontal displacement toward the crest + vertical
+  // lift, summed across several directional components), just against
+  // SKIRT_GERSTNER_WAVES' own smaller/bigger-wavelength spectrum defined
+  // above. Displaces from basePositions (the untouched original flat
+  // position), not the previous frame's already-displaced position, so
+  // it doesn't drift. Amplitude fades from 0 right at the seam
+  // (handle.cutoutRadius) over a real band, same seam-safety reasoning
+  // as every earlier round of this plane's animation.
   const posAttr = handle.mesh.geometry.attributes.position;
+  const basePositions = handle.basePositions;
   const RIPPLE_FADE_BAND = 150;
-  const windX = Math.cos(GERSTNER_WIND_ANGLE), windZ = Math.sin(GERSTNER_WIND_ANGLE);
   for (let i = 0; i < posAttr.count; i++) {
-    const x = posAttr.getX(i), z = posAttr.getZ(i);
-    const dist = Math.hypot(x, z);
+    const bx = basePositions[i * 2], bz = basePositions[i * 2 + 1];
+    const dist = Math.hypot(bx, bz);
     const ampT = THREE.MathUtils.clamp((dist - handle.cutoutRadius) / RIPPLE_FADE_BAND, 0, 1);
-    const alongWind = x * windX + z * windZ;
-    const acrossWind = -x * windZ + z * windX;
-    const swell = (
-      Math.sin(alongWind * 0.03 + elapsed * 0.28) * 0.35
-      + Math.sin(acrossWind * 0.045 - elapsed * 0.2) * 0.26
-      + Math.sin((alongWind + acrossWind) * 0.02 + elapsed * 0.13) * 0.15
-    ) * ampT;
-    posAttr.setY(i, swell);
+    let dx = 0, dz = 0, dy = 0;
+    for (const w of SKIRT_GERSTNER_WAVES) {
+      const f = w.k * (w.ndx * bx + w.ndz * bz) - w.speed * elapsed;
+      const s = Math.sin(f), c = Math.cos(f);
+      dx += w.steepness * w.amplitude * w.ndx * c;
+      dz += w.steepness * w.amplitude * w.ndz * c;
+      dy += w.amplitude * s;
+    }
+    posAttr.setX(i, bx + dx * ampT);
+    posAttr.setY(i, dy * ampT);
+    posAttr.setZ(i, bz + dz * ampT);
   }
   posAttr.needsUpdate = true;
 }
@@ -1901,7 +1926,6 @@ function disposeOceanHorizonSkirt(scene, handle) {
   scene.remove(handle.mesh);
   handle.mesh.geometry.dispose();
   handle.mat.dispose();
-  handle.cubeRenderTarget.dispose();
 }
 
 export { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail, createOceanHorizonSkirt, updateOceanHorizonSkirt, disposeOceanHorizonSkirt };

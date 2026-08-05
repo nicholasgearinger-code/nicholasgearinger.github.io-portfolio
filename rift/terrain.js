@@ -342,16 +342,30 @@ const BIOME_SHAPERS = {
         // everywhere else along this ring, so there's no sandy shelf
         // ringing the whole island anymore.
         // Sand ripple texture — per explicit "the sand is looking too
-        // flat" report: the dry beach previously had NO noise added to
-        // its height at all (unlike the underwater seafloor just below,
-        // which already gets a real sandRipple term) — a mathematically
-        // smooth curve reads as visibly artificial up close. Small
-        // amplitude, and scaled by beachT (0 at the wet outer edge where
-        // this ramp meets the water, full strength only further up the
-        // dry beach) so it can never eat into the water-clearance margin
-        // established after the FU163 regression — the sensitive zone
-        // right at the shoreline stays exactly as smooth/safe as before.
-        const sandRippleTerrain = fbm2(worldX * 0.18, worldZ * 0.18, seed + 770, 2, 2.0, 0.5) * 0.18 * beachT;
+        // flat" / "add displacement like this [wind-ripple reference
+        // photo]" reports. The dry beach previously had NO noise added
+        // to its height at all (unlike the underwater seafloor just
+        // below, which already gets a real sandRipple term), then a
+        // first attempt used plain isotropic noise — that reads as
+        // scattered lumps, not the long, wavy, roughly PARALLEL ridge
+        // lines real wind-blown sand actually forms. Rebuilt as a real
+        // directional ripple: world position is rotated onto a fixed
+        // "wind" axis, a low-frequency wobble is added along the ridge
+        // direction so the lines aren't perfectly straight (organic,
+        // not a ruled pattern), then a sine at a real ridge WAVELENGTH
+        // (not blob noise) forms the actual parallel crests, with a
+        // second harmonic layered in for irregularity between ridges —
+        // the same "coarse structure + finer variation" layering this
+        // file already uses elsewhere (e.g. the crust/crack pattern in
+        // liquid.js). Still scaled by beachT (0 at the wet outer edge,
+        // full further up the dry beach) so it can never eat into the
+        // water-clearance margin established after the FU163 regression.
+        const RIPPLE_ANGLE = 0.4; // radians — a fixed "prevailing wind" direction for the ridge pattern
+        const rippleAlong = worldX * Math.cos(RIPPLE_ANGLE) + worldZ * Math.sin(RIPPLE_ANGLE);
+        const rippleAcross = -worldX * Math.sin(RIPPLE_ANGLE) + worldZ * Math.cos(RIPPLE_ANGLE);
+        const rippleWobble = fbm2(rippleAlong * 0.04, 0, seed + 771, 2, 2.0, 0.5) * 1.3; // deliberately near-zero rippleAlong-perpendicular dependence — a slow bend ALONG the ridge's own length, not across it, so ridges wander gently rather than staying ruler-straight
+        const ridgePhase = (rippleAcross + rippleWobble) * (Math.PI * 2 / 2.4); // ~2.4-unit ridge spacing
+        const sandRippleTerrain = (Math.sin(ridgePhase) * 0.5 + Math.sin(ridgePhase * 2.1 + 1.3) * 0.15) * 0.16 * beachT;
         islandBump = (rampHeight + sandRippleTerrain) * outerFade * (1 - coveShape);
       } else {
         // Interior hill — carries the REST of the rise, from this same

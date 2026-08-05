@@ -1,5 +1,9 @@
 import * as THREE from "three";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { SSAOPass } from "three/addons/postprocessing/SSAOPass.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH, POND_Z, POND_RADIUS, POND_LEVEL, RAMP_CENTER_X, RAMP_CENTER_Z, RAMP_LENGTH, RAMP_HALF_WIDTH, ROOM_FLOOR_Y, ROOM_WIDTH, ROOM_LENGTH, BRANCH_START_X, BRANCH_LENGTH, BRANCH_HALF_WIDTH, BRANCH_Z, CHAMBER_RADIUS } from "./terrain.js";
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
@@ -147,6 +151,40 @@ renderer.setSize(viewport.clientWidth, viewport.clientHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, getGraphicsSettings().pixelRatioCap));
 renderer.shadowMap.enabled = getGraphicsSettings().shadowsEnabled;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+// Real contact shadows (ambient occlusion) — per explicit "let's do it"
+// follow-up. This is the project's first post-processing pipeline of any
+// kind (everything else renders straight to the canvas or an offscreen
+// target via plain renderer.render() calls) — genuinely new
+// architecture, not a tuning change. SSAOPass darkens creases/contact
+// points (where a tree trunk meets the sand, where terrain folds in on
+// itself) based on actual nearby depth/normal data, independent of the
+// sun's current direction — this is what a directional shadow alone can
+// never give you: the sun can be on the far side of the sky and a tree's
+// base will still darken slightly right where it touches the ground.
+// REAL COST, tier-gated below (Low skips this pass entirely): SSAOPass
+// renders the scene's depth+normals in an extra pass, then blurs/composes
+// the AO term — genuine additional GPU work every frame, same category
+// of cost this project already fought hard to control in the reflection/
+// refraction throttling work.
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const ssaoPass = new SSAOPass(scene, camera, viewport.clientWidth, viewport.clientHeight);
+// Tuned to THIS world's scale (player eye height 1.6, a tree trunk ~1-2
+// units wide) rather than SSAOPass's own defaults, which assume a
+// larger/different scene scale — the defaults read as either invisible
+// (radius too small to reach neighboring geometry) or a heavy fog-like
+// darkening over everything (radius too large) at this project's actual
+// unit scale.
+ssaoPass.kernelRadius = 4;
+ssaoPass.minDistance = 0.0005;
+ssaoPass.maxDistance = 0.12;
+composer.addPass(ssaoPass);
+composer.addPass(new OutputPass());
+function applySsaoTier() {
+  ssaoPass.enabled = getGraphicsSettings().ssaoEnabled;
+}
+applySsaoTier();
 
 // A real environment map for reflective materials (currently: the ocean
 // water's clearcoat layer) to actually reflect, instead of the black a
@@ -329,6 +367,8 @@ function resizeToViewport() {
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
   renderer.setSize(w, h);
+  composer.setSize(w, h);
+  ssaoPass.setSize(w, h);
   const pixelRatio = renderer.getPixelRatio();
   underwaterRenderTarget.setSize(w * pixelRatio, h * pixelRatio);
 }
@@ -542,6 +582,25 @@ sun.shadow.camera.near = 1;
 sun.shadow.camera.far = 500;
 sun.shadow.mapSize.set(getGraphicsSettings().shadowMapSize, getGraphicsSettings().shadowMapSize);
 sun.shadow.bias = -0.0015;
+// normalBias added alongside the existing depth bias, per "still no
+// shadow under the trees" — a flat depth bias alone is a common cause of
+// "peter-panning" (the shadow detaches from its caster enough to miss
+// the actual contact point entirely) especially for THIN, mostly-
+// vertical geometry like a tree trunk. normalBias offsets along the
+// surface NORMAL instead of view depth, which scales more sensibly with
+// the light's incidence angle and is the standard complement/fix for
+// this specific failure mode.
+sun.shadow.normalBias = 0.05;
+// Per explicit "more realistic shadows" request: PCFSoftShadowMap
+// (already the renderer's shadow type, set below) supports a `radius`
+// property controlling edge softness — left at its default (1, a fairly
+// tight/hard edge) until now. Real sunlight isn't a point source, so real
+// shadows have a genuine soft penumbra, not a crisp cutout. This is a
+// UNIFORM softness (doesn't get softer with distance from the caster the
+// way a true penumbra physically would — that needs PCSS, a custom
+// shader technique, not attempted here) but is a real, direct
+// improvement over the previous hard edge with no added render cost.
+sun.shadow.radius = 3;
 scene.add(sun);
 
 // Real moonlight — per explicit "shadows... during night" request.
@@ -563,6 +622,8 @@ moonLight.shadow.camera.near = 1;
 moonLight.shadow.camera.far = 500;
 moonLight.shadow.mapSize.set(getGraphicsSettings().shadowMapSize / 2, getGraphicsSettings().shadowMapSize / 2);
 moonLight.shadow.bias = -0.0015;
+moonLight.shadow.normalBias = 0.05;
+moonLight.shadow.radius = 4; // slightly softer than the sun's own — a dim, diffuse moonlit shadow reads as even less crisp than a bright sunlit one
 scene.add(moonLight);
 
 let starfieldPoints = null;
@@ -1336,7 +1397,21 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
         const dist = 8 + rng() * 14; // scattered around the landmark clearing, same rough footprint the old hardcoded palm spots used before FU162 removed them
         const x = LANDMARK_POSITION.x + Math.cos(angle) * dist;
         const z = LANDMARK_POSITION.z + Math.sin(angle) * dist;
-        const y = terrainHeightAt(level, x, z, WORLD_SEED);
+        // Per "some trees appear to be floating": terrainHeightAt is the
+        // pure ANALYTIC height function, which includes the fine sand-
+        // ripple detail (terrain.js, ~0.8-unit wavelength) added a while
+        // back — at Medium tier's segment spacing (TERRAIN_SIZE/segments
+        // β‰ˆ0.8 units too), the RENDERED mesh can't fully resolve ripple
+        // that fine, so the coarse triangulated surface at a given (x,z)
+        // can sit measurably below/above what the smooth analytic
+        // function returns for that exact point. A tree placed via the
+        // analytic height could end up floating above (or sunk into)
+        // what's actually visible. sampleGroundHeight raycasts the REAL
+        // rendered terrainMesh instead — the exact same function the
+        // player's own feet rest on — guaranteeing the tree base sits
+        // precisely on the visible ground regardless of any analytic-vs-
+        // mesh resolution mismatch.
+        const y = sampleGroundHeight(x, z, terrainMesh);
         if (y === null || y < LIQUID_LEVEL.crystal + 0.5) continue; // stay on dry land, clear of the shoreline
         const tree = createRealPalmTree();
         if (!tree) continue;
@@ -2009,6 +2084,7 @@ function applyGraphicsSettings() {
     moonLight.shadow.mapSize.set(moonShadowSize, moonShadowSize);
     if (moonLight.shadow.map) { moonLight.shadow.map.dispose(); moonLight.shadow.map = null; }
   }
+  applySsaoTier();
   resizeToViewport();
   if (currentLevelIdx >= 0) buildLevel(currentLevelIdx);
 }
@@ -2639,7 +2715,7 @@ function animate() {
     underwaterDistortionMaterial.uniforms.time.value = elapsedTime;
     renderer.render(underwaterQuadScene, underwaterQuadCamera);
   } else {
-    renderer.render(scene, camera);
+    composer.render();
   }
 }
 requestAnimationFrame(animate);

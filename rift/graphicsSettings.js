@@ -41,6 +41,13 @@ const TIERS = {
     shadowsEnabled: false,
     shadowMapSize: 256,
     pixelRatioCap: 1,
+    // Real contact-shadow ambient occlusion (main.js's SSAOPass) — a
+    // genuine extra render pass every frame (scene depth+normals, then
+    // AO blur/compose), same category of cost this project already
+    // fought hard to control in the reflection/refraction throttling
+    // work (see medium's own liquidSegments comment below). Off entirely
+    // on Low, same split as shadowsEnabled.
+    ssaoEnabled: false,
     // Coral Shallows' water reflection/refraction (main.js) are each a
     // FULL extra scene render (terrain, decorations, wildlife — the
     // reduced render-TARGET resolution only saves fragment/pixel cost,
@@ -74,6 +81,7 @@ const TIERS = {
     shadowMapSize: 1536,
     pixelRatioCap: 1.75,
     reflectionUpdateInterval: 2,
+    ssaoEnabled: true,
   },
   high: {
     label: "High",
@@ -94,6 +102,7 @@ const TIERS = {
     shadowMapSize: 2048, // was 4096 — that's 4x the GPU fill/bandwidth cost of 2048 for a resolution difference very unlikely to be visible on an actual mobile screen; the extra detail was mostly wasted
     pixelRatioCap: 3,
     reflectionUpdateInterval: 1, // no throttle — High is the quality-focused tier, update every frame
+    ssaoEnabled: true,
   },
 };
 

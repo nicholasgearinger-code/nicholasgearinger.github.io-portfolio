@@ -150,16 +150,15 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setSize(viewport.clientWidth, viewport.clientHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, getGraphicsSettings().pixelRatioCap));
 renderer.shadowMap.enabled = getGraphicsSettings().shadowsEnabled;
-// Per explicit "let's try PCSS" follow-up: genuine PCSS (shadow softness
-// that scales with distance from the caster) needs custom shadow shader
-// work with no stable off-the-shelf three.js addon at this version — that
-// remains too risky to hand-write blind. VSMShadowMap is the closest safe
-// substitute: a different, stable BUILT-IN shadow algorithm (variance
-// shadow maps) that generally produces smoother, less blocky soft edges
-// than PCFSoftShadowMap, without any custom shader authoring. Not the
-// same effect as true PCSS (still uniform softness, not distance-scaled),
-// but a legitimate real step in that direction within safe bounds.
-renderer.shadowMap.type = THREE.VSMShadowMap;
+// REVERTED per "shadows look wrong, not showing true shading" — this is
+// exactly the risk flagged when VSMShadowMap was first tried as a PCSS
+// substitute: VSM is known to sometimes let light "bleed" through
+// overlapping shadow-casters, and this palm tree's many overlapping
+// frond planes are exactly the kind of geometry where that shows up.
+// Back to the standard PCFSoftShadowMap — genuine directional shading
+// instead of VSM's variance-based approximation, at the cost of giving
+// up the smoother edges VSM offered.
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 // Real contact shadows (ambient occlusion) — per explicit "let's do it"
 // follow-up. This is the project's first post-processing pipeline of any
@@ -617,7 +616,8 @@ sun.shadow.normalBias = 0.05;
 // shader technique, not attempted here) but is a real, direct
 // improvement over the previous hard edge with no added render cost.
 sun.shadow.radius = 3;
-sun.shadow.blurSamples = 16; // VSMShadowMap-specific — how many samples its blur pass takes; radius above still controls the blur's overall size
+// blurSamples removed — was VSM-specific, has no effect now that
+// shadowMap.type is back to PCFSoftShadowMap.
 scene.add(sun);
 
 // Real moonlight — per explicit "shadows... during night" request.
@@ -641,7 +641,6 @@ moonLight.shadow.mapSize.set(getGraphicsSettings().shadowMapSize / 2, getGraphic
 moonLight.shadow.bias = -0.0015;
 moonLight.shadow.normalBias = 0.05;
 moonLight.shadow.radius = 4; // slightly softer than the sun's own — a dim, diffuse moonlit shadow reads as even less crisp than a bright sunlit one
-moonLight.shadow.blurSamples = 16;
 scene.add(moonLight);
 
 let starfieldPoints = null;

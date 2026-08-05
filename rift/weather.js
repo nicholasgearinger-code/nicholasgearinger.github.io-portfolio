@@ -424,7 +424,13 @@ function createRain(scene, heaviness = 1) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   const mat = new THREE.PointsMaterial({
-    map: getRainStreakTexture(), color: 0xcfe0f0, size: 1.2, transparent: true, opacity: 0,
+    // size shrunk 1.2 -> 0.4 per explicit "rain doesn't look real because
+    // it's too big" — this was the LARGEST particle size of any weather
+    // type in this file (bigger than snow at 0.65, leaves at 0.6, ash at
+    // 0.5), which reads as chunky blobs rather than thin fast-falling
+    // streaks. A rain streak's visual length comes from its own texture
+    // + fast fall speed, not from a large point size.
+    map: getRainStreakTexture(), color: 0xcfe0f0, size: 0.4, transparent: true, opacity: 0,
     blending: THREE.AdditiveBlending, depthWrite: false,
   });
   const points = new THREE.Points(geo, mat);

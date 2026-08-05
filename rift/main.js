@@ -1433,8 +1433,6 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
         if (y === null || y < LIQUID_LEVEL.crystal + 0.5) continue; // stay on dry land, clear of the shoreline
         const tree = createRealPalmTree();
         if (!tree) continue;
-        tree.position.set(x, y, z);
-        tree.rotation.y = rng() * Math.PI * 2;
         // Corrective scale, not decorative variety — this model's raw
         // geometry (the "Palm_2_Lit_0" mesh specifically, see models.js)
         // measures ~100 units tall as exported, verified directly against
@@ -1453,6 +1451,20 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
         // 0.16-0.22, targeting ~16-22 units) — going taller/lusher still,
         // not strictly real-world-accurate.
         const scale = 0.21 + rng() * 0.07;
+        // REAL BUG FIX, per "some trees appear to be floating": this
+        // mesh's local geometry is CENTERED on its own origin (Y spans
+        // -50 to +50, verified directly against the raw glTF accessor
+        // bounds), not based at the trunk's foot the way most placed
+        // props are. Setting the group's own position.y directly to the
+        // ground height (as before) put the mesh's MIDPOINT at ground
+        // level — burying the bottom half and leaving the visible base
+        // floating above the sand by 50*scale, a DIFFERENT amount for
+        // every tree since scale is randomized per instance — exactly
+        // matching "some trees float, inconsistently, others don't."
+        // Offsetting up by 50*scale moves the mesh's true bottom (local
+        // Y=-50) down to exactly the sampled ground height instead.
+        tree.position.set(x, y + 50 * scale, z);
+        tree.rotation.y = rng() * Math.PI * 2;
         tree.scale.setScalar(scale);
         scene.add(tree);
         realPalmTrees.push(tree);

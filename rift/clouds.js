@@ -489,6 +489,64 @@ function getRealisticCloudTexture() {
   return realisticCloudTexture;
 }
 
+// -----------------------------------------------------------------------------
+// SWAP POINT: mood-specific sky textures — per explicit "use all of them to
+// best match different times of day and weather conditions" request, later
+// revised to "I'd like to keep the colors for these sky photos" — unlike
+// sky_clouds.png above (structure-only, white+alpha, fully recolored at
+// runtime), these ten keep each photo's own REAL baked color. Alpha is a
+// simple soft fade over the bottom ~22% of each image (most sources have
+// some non-sky content low in frame — a horizon silhouette, reflective
+// water — same reasoning sky_clouds.png's own lower-half zeroing used),
+// fully opaque above that. Because real color is baked in, the runtime tint
+// in updateRealisticCloudDome is DIFFERENT for these — a plain brightness
+// scalar (day/night pacing) instead of the hue-shifting sky-color tint
+// sky_clouds.png still gets, so a photo's own real color isn't distorted.
+// Grouped into condition "buckets" — night and storm each get a single
+// texture (their mood is distinct enough that one representative photo
+// covers it), day and dawn/dusk each get a small POOL (2 and 6
+// respectively) that ROTATES on every fresh entry into that condition (see
+// updateRealisticCloudDome) rather than picking randomly every frame — so a
+// given sunset stays visually consistent throughout its own transition, but
+// the NEXT sunset may show a different one of the six.
+// -----------------------------------------------------------------------------
+
+const moodCloudTextureCache = {};
+function getMoodCloudTexture(filename) {
+  if (moodCloudTextureCache[filename]) return moodCloudTextureCache[filename];
+  const url = new URL(`textures/${filename}`, import.meta.url).href;
+  const tex = new THREE.TextureLoader().load(
+    url,
+    () => console.log("[clouds] mood sky texture loaded:", url),
+    undefined,
+    (err) => console.error("[clouds] mood sky texture FAILED to load:", url, err)
+  );
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping; // same seamless-panorama treatment as the original texture, even though these sources aren't true 360° captures — the visible seam at u=0/1 is far less noticeable than a hard clamp edge would be
+  moodCloudTextureCache[filename] = tex;
+  return tex;
+}
+
+const CLOUD_MOOD_POOLS = {
+  night: ["sky_night.png"],
+  storm: ["sky_storm.png"],
+  day: ["sky_day_1.png", "sky_day_2.png"],
+  duskDawn: ["sky_dusk_1.png", "sky_dusk_2.png", "sky_dusk_3.png", "sky_dusk_4.png", "sky_dusk_5.png", "sky_dusk_6.png"],
+};
+
+/**
+ * Picks which condition bucket applies right now. Same 0.05/0.4 dayAmount
+ * thresholds already used elsewhere in this project's day/night blending
+ * (e.g. the underwater caustic boost) for consistency with where
+ * "dawn/dusk" is considered to actually start and end.
+ */
+function pickCloudMoodBucket(dayAmount, stormAmount) {
+  if (stormAmount > 0.15) return "storm";
+  if (dayAmount < 0.05) return "night";
+  if (dayAmount < 0.4) return "duskDawn";
+  return "day";
+}
+
 /**
  * @param {THREE.Scene} scene
  */
@@ -544,6 +602,28 @@ function createRealisticCloudDome(scene) {
  */
 function updateRealisticCloudDome(handle, dt, dayAmount, skyHorizonColor, skyZenithColor, stormAmount = 0) {
   if (!handle) return;
+
+  // Mood texture selection — per "use all of them to best match different
+  // times of day and weather conditions." Picks a bucket (night/storm/day/
+  // dawn-dusk) from the current conditions, then rotates through that
+  // bucket's own pool only on a FRESH entry into it (not every frame, and
+  // not randomly) — see CLOUD_MOOD_POOLS' own comment above for why. The
+  // underlying dome geometry/rotation/UV setup is completely unchanged;
+  // this only swaps which texture handle.mat.map currently points at.
+  const bucket = pickCloudMoodBucket(dayAmount, stormAmount);
+  if (bucket !== handle.moodBucket) {
+    handle.moodBucket = bucket;
+    handle.moodEntryCounts = handle.moodEntryCounts || {};
+    handle.moodEntryCounts[bucket] = (handle.moodEntryCounts[bucket] || 0) + 1;
+    const pool = CLOUD_MOOD_POOLS[bucket];
+    const selected = pool[(handle.moodEntryCounts[bucket] - 1) % pool.length];
+    if (selected !== handle.moodTextureName) {
+      handle.moodTextureName = selected;
+      handle.mat.map = getMoodCloudTexture(selected);
+      handle.mat.needsUpdate = true;
+    }
+  }
+
   // Slow real drift across the sky rather than a static painted dome —
   // rotating the whole mesh around Y is the cheapest way to animate an
   // equirectangular sphere. A SECOND overlapping layer of the same
@@ -556,7 +636,21 @@ function updateRealisticCloudDome(handle, dt, dayAmount, skyHorizonColor, skyZen
   // real storm fronts visibly move.
   handle.mesh.rotation.y += dt * (0.006 + stormAmount * 0.02);
 
-  if (skyHorizonColor && skyZenithColor) {
+  // Per explicit "I'd like to keep the colors for these sky photos"
+  // follow-up: the mood textures (night/storm/day/duskDawn pools) now
+  // carry their own REAL photographed color (see CLOUD_MOOD_POOLS'
+  // updated comment) instead of the original neutral white+alpha
+  // structure-only approach. Recoloring them with the same hue-shifting
+  // sky tint used below would fight/distort each photo's own real color
+  // — so once a mood texture is active, only a plain BRIGHTNESS scalar
+  // is applied (dimmer at night, full at day), never a hue tint. The
+  // original texture (getRealisticCloudTexture, still the initial state
+  // before the first update call picks a mood bucket) keeps its old
+  // structure-only recolor behavior untouched below.
+  if (handle.moodTextureName) {
+    const brightness = 0.55 + dayAmount * 0.55;
+    handle.mat.color.setScalar(brightness);
+  } else if (skyHorizonColor && skyZenithColor) {
     // The texture is a NEUTRAL white+alpha cloud structure (no baked
     // color at all — see the module comment above) specifically so this
     // dome can be fully colored at runtime instead of showing one frozen
@@ -579,7 +673,18 @@ function updateRealisticCloudDome(handle, dt, dayAmount, skyHorizonColor, skyZen
   // toward a heavy charcoal-gray, applied AFTER the sky tint above so a
   // storm still reads as "this sky, but stormy" rather than replacing
   // the biome's own color identity outright.
-  if (stormAmount > 0) handle.mat.color.lerp(stormCloudColor.setScalar(0.16), stormAmount * 0.85);
+  // BUG FIX: this used to blend at the SAME 0.85 strength regardless of
+  // time of day. During the day that's correct (a bright sky pulled
+  // toward charcoal reads as a real storm), but at night the starting
+  // color is already very dark (NIGHT preset, dayNightCycle.js) — full-
+  // strength storm darkening on top of an already-near-black base
+  // compounded into an almost totally black sky, reported as "what's
+  // causing this" against a screenshot that looked broken rather than
+  // stormy. Scaling the blend amount down as dayAmount drops keeps full
+  // strength at true day and roughly a third of that at true night,
+  // where night's own darkness is already doing the work.
+  const stormDarkenAmount = stormAmount * 0.85 * (0.4 + dayAmount * 0.6);
+  if (stormAmount > 0) handle.mat.color.lerp(stormCloudColor.setScalar(0.16), stormDarkenAmount);
 
   // A slow, gentle "breathing" opacity pulse — real high-altitude cloud
   // decks aren't perfectly static in density even over short spans; this

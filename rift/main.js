@@ -24,7 +24,7 @@ import { initAudio, toggleMuted, playShoot, playShatter, playLoreChime, startAmb
 import { getIslandLore } from "./lore.js";
 import { findClosestHit } from "./hitPrediction.js";
 import { createTouchControls } from "./touchControls.js";
-import { createPlayerPhysicsState, updatePlayerPhysics, sampleGroundHeight, WALK_SPEED, AIR_CONTROL } from "./physics.js";
+import { createPlayerPhysicsState, updatePlayerPhysics, sampleGroundHeight, WALK_SPEED, AIR_CONTROL, SWIM_SPEED_MULTIPLIER } from "./physics.js";
 import { mulberry32, hashStringToSeed } from "./worldgen.js";
 
 // ---------------------------------------------------------------------------
@@ -609,9 +609,9 @@ if (titleGate && titlePlayBtn) {
   });
 }
 
-const keys = { forward: false, back: false, left: false, right: false };
+const keys = { forward: false, back: false, left: false, right: false, up: false, down: false };
 let jumpQueued = false;
-const MOVE_KEYS = new Set(["KeyW", "KeyS", "KeyA", "KeyD", "Space"]);
+const MOVE_KEYS = new Set(["KeyW", "KeyS", "KeyA", "KeyD", "Space", "ShiftLeft", "ShiftRight"]);
 
 window.addEventListener("keydown", (e) => {
   if (isGameActive() && MOVE_KEYS.has(e.code)) e.preventDefault();
@@ -626,6 +626,13 @@ function setKey(code, value) {
     case "KeyS": keys.back = value; break;
     case "KeyA": keys.left = value; break;
     case "KeyD": keys.right = value; break;
+    // Held (not edge-triggered) state, specifically for continuous swim
+    // control — see physics.js's swimming branch. Space ALSO still drives
+    // the separate edge-triggered jumpQueued above for the on-land jump;
+    // both readings come from the same key, same dual-purpose pattern
+    // touchControls.js's up button now mirrors for touch.
+    case "Space": keys.up = value; break;
+    case "ShiftLeft": case "ShiftRight": keys.down = value; break;
   }
 }
 
@@ -633,7 +640,7 @@ const velocity = new THREE.Vector3();
 let footstepDistance = 0;
 const FOOTSTEP_STRIDE = 2.4; // world units between footstep sounds — tied to distance actually covered, not a fixed timer, so sprinting/slow movement both sound right
 
-function updateMovement(dt, grounded) {
+function updateMovement(dt, grounded, swimming) {
   velocity.set(0, 0, 0);
   if (keys.forward) velocity.z -= 1;
   if (keys.back) velocity.z += 1;
@@ -642,7 +649,12 @@ function updateMovement(dt, grounded) {
   const moving = velocity.lengthSq() > 0;
   if (moving) velocity.normalize();
 
-  const speed = WALK_SPEED * (grounded ? 1 : AIR_CONTROL);
+  // Water resistance — per explicit "decreases the movement speed just
+  // like moving in real water" request. Takes priority over the
+  // grounded/airborne distinction below (swimming has its own multiplier
+  // regardless of whether the seafloor happens to be right under the
+  // player's feet at this exact instant).
+  const speed = swimming ? WALK_SPEED * SWIM_SPEED_MULTIPLIER : WALK_SPEED * (grounded ? 1 : AIR_CONTROL);
   controls.moveRight(velocity.x * speed * dt);
   controls.moveForward(-velocity.z * speed * dt);
 
@@ -1318,7 +1330,12 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
         // it didn't look right even though something was visibly
         // rendering. Target ~10-14 units (a tall but real-world-plausible
         // palm, player eye height is 1.6).
-        const scale = 0.10 + rng() * 0.04;
+        // Bumped up further per direct "trees loaded tiny" feedback —
+        // the 0.10-0.14 range was a correct proportional match to the
+        // measured raw geometry, but read as too short/stubby in
+        // practice; going taller/lusher rather than strictly
+        // real-world-accurate.
+        const scale = 0.16 + rng() * 0.06;
         tree.scale.setScalar(scale);
         scene.add(tree);
         realPalmTrees.push(tree);
@@ -1328,13 +1345,36 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
     loadAngelfishModel().then(() => {
       if (currentLevelIdx !== spawnLevelIdx) return;
       const FISH_COUNT = 8;
+      const MAX_ATTEMPTS = 40; // the new WORLD_BOUND_RADIUS check below now rejects roughly half of random angles, so a fixed FISH_COUNT-attempt loop (the old approach) would often place well under 8 — retry with a real cap instead of silently under-spawning
       const fishSeed = hashStringToSeed(WORLD_SEED + "::realFish");
       const rng = mulberry32(fishSeed);
-      for (let i = 0; i < FISH_COUNT; i++) {
+      let placed = 0;
+      for (let i = 0; i < MAX_ATTEMPTS && placed < FISH_COUNT; i++) {
         const angle = rng() * Math.PI * 2;
-        const dist = 20 + rng() * 70; // out over the open reef, not crowded right at the landmark
+        // Pulled in from 20-90 to 8-35 per "still no fish" — the
+        // previous range put every fish 20+ units out over open water,
+        // requiring a real swim before any of them were even in range to
+        // spot. Close enough now that swimming just a short distance out
+        // from the beach should put the player within sight of at least
+        // one.
+        const dist = 8 + rng() * 27;
         const x = LANDMARK_POSITION.x + Math.cos(angle) * dist;
         const z = LANDMARK_POSITION.z + Math.sin(angle) * dist;
+        // The real bug: LANDMARK_POSITION itself sits ~89 units from
+        // world origin (55,-70), and WORLD_BOUND_RADIUS (the player's
+        // actual hard movement limit, ~112 units from origin — see the
+        // real clamp on camera position elsewhere in this file) leaves
+        // only ~22 units of margin beyond the landmark in the outward
+        // direction. This loop was only checking distance FROM THE
+        // LANDMARK, never distance from world origin — so on the
+        // outward-facing half of the circle, spawn points past roughly
+        // 22 units could land beyond the boundary the player can
+        // actually swim to, permanently unreachable regardless of how
+        // close the water/depth conditions looked. Explicit check now:
+        // reject (not just prefer) any point past the real playable
+        // radius, with a real margin so nothing spawns right at the
+        // edge either.
+        if (Math.hypot(x, z) > WORLD_BOUND_RADIUS - 8) continue;
         const groundY = terrainHeightAt(level, x, z, WORLD_SEED);
         if (groundY === null || groundY > LIQUID_LEVEL.crystal - 1.5) continue; // needs real water depth above it, not a shallow puddle right at the seafloor
         const depth = Math.min(LIQUID_LEVEL.crystal - groundY - 0.8, 1 + rng() * 3.5);
@@ -1368,6 +1408,7 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
         fish.wanderY = LIQUID_LEVEL.crystal - depth;
         scene.add(fish.group);
         realFish.push(fish);
+        placed++;
       }
     }).catch(() => {});
   }
@@ -2255,14 +2296,20 @@ function animate() {
   }
 
   if (isGameActive() && currentLevelIdx >= 0) {
-    updateMovement(dt, playerPhysics.grounded);
     // Only Coral Shallows is a real whole-level ocean — Ember's/Verdant's
     // own LIQUID_LEVEL entries are small local features (a lava channel,
     // a river), not something the whole level is submerged in, so swim
     // mode stays scoped to the one biome it actually describes rather
     // than triggering for every biome that happens to have ANY liquid.
     const swimLevel = LEVELS[currentLevelIdx].biome === "crystal" ? LIQUID_LEVEL[LEVELS[currentLevelIdx].biome] : undefined;
-    updatePlayerPhysics(camera, terrainMesh, playerPhysics, dt, PLAYER_EYE_HEIGHT, jumpQueued, caveFloorMeshes.length ? caveFloorMeshes : undefined, swimLevel);
+    // Same "eye height below the surface" check physics.js uses
+    // internally to decide swim mode — computed once here so movement
+    // speed and vertical swim control can't ever disagree about whether
+    // the player is currently swimming.
+    const swimming = swimLevel !== undefined && camera.position.y < swimLevel;
+    updateMovement(dt, playerPhysics.grounded, swimming);
+    const swimVertical = (keys.up ? 1 : 0) - (keys.down ? 1 : 0);
+    updatePlayerPhysics(camera, terrainMesh, playerPhysics, dt, PLAYER_EYE_HEIGHT, jumpQueued, caveFloorMeshes.length ? caveFloorMeshes : undefined, swimLevel, swimVertical);
     jumpQueued = false;
     if (camera.position.y < spawnPosition.y - FALL_RESPAWN_OFFSET) respawnInLevel();
     checkLoreProximity();

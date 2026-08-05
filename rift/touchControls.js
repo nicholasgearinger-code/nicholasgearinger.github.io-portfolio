@@ -45,6 +45,7 @@ function createTouchControls({ camera, keys, onFire, onJump, viewport, isActive 
   const joystickKnob = document.getElementById("rift-touch-joystick-knob");
   const fireButton = document.getElementById("rift-touch-fire");
   const jumpButton = document.getElementById("rift-touch-up");
+  const diveButton = document.getElementById("rift-touch-down"); // optional — swim-down; not in the hard null-check below so this control still works fully (just without dive) if the HTML hasn't been updated with this newer button yet
 
   if (!joystickBase || !joystickKnob || !fireButton || !jumpButton) {
     return; // touch HUD not present — nothing to wire up
@@ -156,6 +157,24 @@ function createTouchControls({ camera, keys, onFire, onJump, viewport, isActive 
     button.addEventListener("touchstart", start, { passive: false });
   }
   bindTapButton(jumpButton, onJump);
+
+  // HELD (not tap) state for continuous swim control — per explicit "swim
+  // up and down" request. Mirrors desktop's dual-purpose Space exactly:
+  // the SAME up button both fires the edge-triggered onJump() tap above
+  // (still drives the on-land jump) AND sets keys.up while actually held
+  // down (drives continuous swim-up in physics.js, inert on land since
+  // nothing reads keys.up there). The new down button is hold-only — no
+  // on-land equivalent, so no tap callback needed for it.
+  function bindHoldButton(button, onDown, onUp) {
+    if (!button) return;
+    const start = (e) => { e.preventDefault(); onDown(); };
+    const end = (e) => { e.preventDefault(); onUp(); };
+    button.addEventListener("touchstart", start, { passive: false });
+    button.addEventListener("touchend", end, { passive: false });
+    button.addEventListener("touchcancel", end, { passive: false });
+  }
+  bindHoldButton(jumpButton, () => { keys.up = true; }, () => { keys.up = false; });
+  bindHoldButton(diveButton, () => { keys.down = true; }, () => { keys.down = false; });
 }
 
 export { createTouchControls };

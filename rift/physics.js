@@ -32,8 +32,11 @@ const CAST_HEIGHT = 400;     // fixed altitude to cast down from — comfortably
 // every line below behaves exactly as it always did — the swim branches
 // below all short-circuit on `swimming`, which is only ever true when a
 // real waterLevel was passed in.
-const SWIM_GRAVITY = 5;          // units/s^2 — a gentle sink, not a plummet; water should feel weighty but forgiving, not like falling
-const SWIM_UP_VELOCITY = 12;     // units/s — strong enough that a well-timed stroke near the surface actually breaches it with real height (v^2/(2*GRAVITY) once airborne, since normal gravity takes over the instant you cross above the surface), not just a gentle underwater rise
+const SWIM_GRAVITY = 5;          // units/s^2 — the gentle sink applied when neither swim-up nor swim-down is held, not a plummet; water should feel weighty but forgiving, not like falling
+const SWIM_SINK_CAP = 4;         // units/s — caps how fast that idle sink can build up, so drifting with no input settles into a slow gentle descent rather than accelerating indefinitely
+const SWIM_UP_VELOCITY = 12;     // units/s — continuous ascend speed while swim-up is HELD (was a one-shot impulse; see updatePlayerPhysics's swimming branch)
+const SWIM_DOWN_VELOCITY = 10;   // units/s — continuous descend speed while swim-down is HELD; slightly gentler than ascending, matches how diving down feels a bit more controlled than kicking up toward the surface
+const SWIM_SPEED_MULTIPLIER = 0.55; // horizontal movement multiplier while swimming — real swimming (no fins) is noticeably slower than walking pace, applied by the caller (main.js) alongside WALK_SPEED the same way AIR_CONTROL already is for jumping
 
 const raycaster = new THREE.Raycaster();
 const DOWN = new THREE.Vector3(0, -1, 0);
@@ -86,12 +89,44 @@ function sampleGroundHeight(x, z, terrainMesh, extraMeshes, preferredY) {
  * @param {boolean} jumpRequested  true only on the frame the jump key was first pressed (edge-triggered by the caller)
  * @param {THREE.Mesh[]} [extraMeshes]  optional additional collidable geometry (e.g. a separate underground cave floor) that participates in the SAME ground raycast as the main terrain — see sampleGroundHeight's own comment for why disambiguating multiple hits matters here
  * @param {number} [waterLevel]  the Y height of a real, whole-level ocean surface (Coral Shallows' LIQUID_LEVEL.crystal) — omit for every other biome. When provided and the player's eye height is below it, swim mode activates: see the SWIM_* constants above.
+ * @param {number} [swimVertical]  -1/0/+1, read fresh every frame from whichever of the swim-up/swim-down inputs is currently HELD (not edge-triggered like jumpRequested) — real swimming is continuous while held, not a single kick. Ignored outside of water; defaults to 0 (neither held) so existing callers that don't pass it still work, just with no vertical swim input.
  */
-function updatePlayerPhysics(camera, terrainMesh, state, dt, playerEyeHeight, jumpRequested, extraMeshes, waterLevel) {
+function updatePlayerPhysics(camera, terrainMesh, state, dt, playerEyeHeight, jumpRequested, extraMeshes, waterLevel, swimVertical = 0) {
   const swimming = waterLevel !== undefined && waterLevel !== null && camera.position.y < waterLevel;
 
-  if (jumpRequested && (state.grounded || swimming)) {
-    state.verticalVelocity = swimming ? SWIM_UP_VELOCITY : JUMP_VELOCITY;
+  // Swimming is a fully separate branch, not interleaved with the
+  // land/jump logic below — per explicit "swim up and down... just like
+  // moving in real water" request, replacing the old model (jump = one
+  // upward impulse, then gravity pulls you back down) with continuous
+  // hold-based control: holding swim-up keeps pushing you up for as long
+  // as it's held, holding swim-down keeps pushing you down, and letting
+  // go of both settles into the original gentle sink. The non-swimming
+  // logic below this branch is completely untouched.
+  if (swimming) {
+    if (swimVertical > 0) {
+      state.verticalVelocity = SWIM_UP_VELOCITY;
+    } else if (swimVertical < 0) {
+      state.verticalVelocity = -SWIM_DOWN_VELOCITY;
+    } else {
+      state.verticalVelocity = Math.max(state.verticalVelocity - SWIM_GRAVITY * dt, -SWIM_SINK_CAP);
+    }
+    camera.position.y += state.verticalVelocity * dt;
+    state.grounded = false;
+
+    // Still respect the seafloor while diving — holding swim-down
+    // shouldn't let the player clip through the bottom.
+    const feetY = camera.position.y - playerEyeHeight;
+    const groundY = sampleGroundHeight(camera.position.x, camera.position.z, terrainMesh, extraMeshes, feetY);
+    if (groundY !== null && feetY <= groundY) {
+      camera.position.y = groundY + playerEyeHeight;
+      state.verticalVelocity = 0;
+      state.grounded = true;
+    }
+    return;
+  }
+
+  if (jumpRequested && state.grounded) {
+    state.verticalVelocity = JUMP_VELOCITY;
     state.grounded = false;
   }
 
@@ -109,7 +144,7 @@ function updatePlayerPhysics(camera, terrainMesh, state, dt, playerEyeHeight, ju
     state.grounded = false; // walked off the edge — start falling
   }
 
-  state.verticalVelocity -= (swimming ? SWIM_GRAVITY : GRAVITY) * dt;
+  state.verticalVelocity -= GRAVITY * dt;
   camera.position.y += state.verticalVelocity * dt;
 
   if (state.verticalVelocity <= 0) {
@@ -123,4 +158,4 @@ function updatePlayerPhysics(camera, terrainMesh, state, dt, playerEyeHeight, ju
   }
 }
 
-export { createPlayerPhysicsState, updatePlayerPhysics, sampleGroundHeight, GRAVITY, JUMP_VELOCITY, WALK_SPEED, AIR_CONTROL };
+export { createPlayerPhysicsState, updatePlayerPhysics, sampleGroundHeight, GRAVITY, JUMP_VELOCITY, WALK_SPEED, AIR_CONTROL, SWIM_SPEED_MULTIPLIER };

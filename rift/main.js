@@ -1335,7 +1335,10 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
         // measured raw geometry, but read as too short/stubby in
         // practice; going taller/lusher rather than strictly
         // real-world-accurate.
-        const scale = 0.16 + rng() * 0.06;
+        // Bumped again per direct "a little too small" follow-up (was
+        // 0.16-0.22, targeting ~16-22 units) — going taller/lusher still,
+        // not strictly real-world-accurate.
+        const scale = 0.21 + rng() * 0.07;
         tree.scale.setScalar(scale);
         scene.add(tree);
         realPalmTrees.push(tree);
@@ -1410,6 +1413,14 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
         realFish.push(fish);
         placed++;
       }
+      // Diagnostic — per repeated "still no fish" with no new evidence to
+      // narrow down why: this makes the NEXT console check conclusive
+      // rather than another guess. If placed is 0, the spawn loop itself
+      // is still rejecting every candidate (a real remaining bug worth
+      // digging into further). If placed > 0, spawning is working and the
+      // issue is something else — visibility/lighting/distance from
+      // wherever the player actually is when they look.
+      console.log(`[models] real fish placed: ${placed}/${FISH_COUNT}`, placed > 0 ? realFish.map((f) => f.group.position.toArray().map((n) => n.toFixed(1))) : "(none placed)");
     }).catch(() => {});
   }
 

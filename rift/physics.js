@@ -32,8 +32,7 @@ const CAST_HEIGHT = 400;     // fixed altitude to cast down from — comfortably
 // every line below behaves exactly as it always did — the swim branches
 // below all short-circuit on `swimming`, which is only ever true when a
 // real waterLevel was passed in.
-const SWIM_GRAVITY = 5;          // units/s^2 — the gentle sink applied when neither swim-up nor swim-down is held, not a plummet; water should feel weighty but forgiving, not like falling
-const SWIM_SINK_CAP = 4;         // units/s — caps how fast that idle sink can build up, so drifting with no input settles into a slow gentle descent rather than accelerating indefinitely
+const BUOYANCY_VELOCITY = 4;     // units/s — per explicit "float to the surface instead of being anchored to the bottom" request: with neither swim button held, the player now naturally rises (real bodies are buoyant), not sinks. Slower than the active SWIM_UP_VELOCITY (12) below so deliberately swimming up still feels stronger/faster than just passively drifting up.
 const SWIM_UP_VELOCITY = 12;     // units/s — continuous ascend speed while swim-up is HELD (was a one-shot impulse; see updatePlayerPhysics's swimming branch)
 const SWIM_DOWN_VELOCITY = 10;   // units/s — continuous descend speed while swim-down is HELD; slightly gentler than ascending, matches how diving down feels a bit more controlled than kicking up toward the surface
 const SWIM_SPEED_MULTIPLIER = 0.55; // horizontal movement multiplier while swimming — real swimming (no fins) is noticeably slower than walking pace, applied by the caller (main.js) alongside WALK_SPEED the same way AIR_CONTROL already is for jumping
@@ -100,15 +99,22 @@ function updatePlayerPhysics(camera, terrainMesh, state, dt, playerEyeHeight, ju
   // upward impulse, then gravity pulls you back down) with continuous
   // hold-based control: holding swim-up keeps pushing you up for as long
   // as it's held, holding swim-down keeps pushing you down, and letting
-  // go of both settles into the original gentle sink. The non-swimming
-  // logic below this branch is completely untouched.
+  // go of both now floats the player back toward the surface on its own
+  // (see BUOYANCY_VELOCITY — per explicit follow-up "float to the
+  // surface instead of being anchored to the bottom") rather than the
+  // original design's gentle sink. The non-swimming logic below this
+  // branch is completely untouched.
   if (swimming) {
     if (swimVertical > 0) {
       state.verticalVelocity = SWIM_UP_VELOCITY;
     } else if (swimVertical < 0) {
       state.verticalVelocity = -SWIM_DOWN_VELOCITY;
     } else {
-      state.verticalVelocity = Math.max(state.verticalVelocity - SWIM_GRAVITY * dt, -SWIM_SINK_CAP);
+      // Passive buoyancy — neither swim button held, so drift back up
+      // toward the surface on its own rather than sinking. Diving deeper
+      // now requires ACTIVELY holding swim-down; letting go always
+      // trends back toward the surface, matching how a real body floats.
+      state.verticalVelocity = BUOYANCY_VELOCITY;
     }
     camera.position.y += state.verticalVelocity * dt;
     state.grounded = false;

@@ -47,7 +47,14 @@ const DAWN_DUSK = {
   skyZenith: 0x342420, skyMid: 0xe8823a, skyHorizon: 0xff4a1e, // was skyZenith:0x2a2138 (dark purple), skyMid:0xd6558a (vivid pink) — shifted to warm amber-brown/orange so the overall sunrise/sunset reads as orange, not pink/purple
 };
 const DAY = {
-  sun: 0xfff4e0, sunIntensity: 2.0, ambient: 0x8899bb, ambientIntensity: 0.5,
+  // ambientIntensity reduced 0.5 -> 0.38 per explicit "shadows don't look
+  // good enough" — a shadow is just "this point gets no contribution from
+  // the sun," ambient light still fully illuminates it, so a strong flat
+  // ambient fill directly washes out shadow contrast regardless of how
+  // correctly the shadow itself is being cast/rendered. sunIntensity
+  // (direct light) left untouched — this only widens the gap between lit
+  // and shadowed areas, not brighten the whole scene further.
+  sun: 0xfff4e0, sunIntensity: 2.0, ambient: 0x8899bb, ambientIntensity: 0.38,
   // Was a muted, fairly desaturated blue (0x1c3a5e/0x4f79a8/0x8fb8d6) —
   // deliberately soft/flat per an earlier "no dramatic noon" tuning pass.
   // Per explicit reference photo (a vivid deep-blue sky with a blazing
@@ -819,7 +826,13 @@ function updateDayNightCycle(cycle, dt) {
   // both dim, never one bright while the other's invisible).
   if (cycle.moonLight) {
     const moonAboveHorizon = Math.max(0, moonOrbit.elevation);
-    cycle.moonLight.intensity = moonAboveHorizon * moonVisibility * 0.22;
+    // Boosted 0.22 -> 0.4 per explicit "we should see shadows even at
+    // night too" — the previous peak was tuned as "a subtle real light,
+    // not a second sun," but subtle enough that its shadow likely wasn't
+    // reading as clearly present at all. Still well under the sun's own
+    // peak (2.0), so night stays visually distinct from day — just a
+    // shadow that's actually legible now, not merely technically present.
+    cycle.moonLight.intensity = moonAboveHorizon * moonVisibility * 0.4;
   }
 
   // The sun's own visual disc and glow — not just the directional

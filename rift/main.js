@@ -1309,7 +1309,16 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
         if (!tree) continue;
         tree.position.set(x, y, z);
         tree.rotation.y = rng() * Math.PI * 2;
-        const scale = 0.8 + rng() * 0.5;
+        // Corrective scale, not decorative variety — this model's raw
+        // geometry (the "Palm_2_Lit_0" mesh specifically, see models.js)
+        // measures ~100 units tall as exported, verified directly against
+        // its accessor bounds. Without this, the previous 0.8-1.3
+        // "variety" multiplier left it roughly 100 units tall — a tree
+        // 60x taller than the player, almost certainly the real reason
+        // it didn't look right even though something was visibly
+        // rendering. Target ~10-14 units (a tall but real-world-plausible
+        // palm, player eye height is 1.6).
+        const scale = 0.10 + rng() * 0.04;
         tree.scale.setScalar(scale);
         scene.add(tree);
         realPalmTrees.push(tree);
@@ -1333,7 +1342,18 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
         if (!fish) continue;
         fish.group.position.set(x, LIQUID_LEVEL.crystal - depth, z);
         fish.group.rotation.y = rng() * Math.PI * 2;
-        const scale = 0.6 + rng() * 0.3;
+        // Corrective scale, not decorative variety — this model's raw
+        // geometry measures ~20 units long as exported (verified against
+        // its accessor bounds: mesh[0] Z spans -10.14 to 10.14). The
+        // previous 0.6-0.9 "variety" multiplier left it roughly
+        // 12-18 units long — a MASSIVE fish, ~10x a real emperor
+        // angelfish relative to the player's 1.6-unit eye height, almost
+        // certainly why it wasn't recognizable as "a fish" even if
+        // something was technically rendering (the camera would likely
+        // end up inside or pressed right up against one small part of
+        // its body). Target ~0.35-0.5 units, a small reef fish visible
+        // at a reasonable distance without being unrealistically large.
+        const scale = 0.018 + rng() * 0.007;
         fish.group.scale.setScalar(scale);
         // Simple wander path, independent of the skeletal swim animation
         // (which only animates the body/fins in place) — a slow circular

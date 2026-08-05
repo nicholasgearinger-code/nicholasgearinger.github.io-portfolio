@@ -1761,6 +1761,12 @@ function disposeLiquidPlane(scene, handle) {
 const SKIRT_SIZE = 4000; // comfortably past every biome's tuned fog density (see weather.js's baseFogDensity values) at any graphics tier, so this always fades into fog well before its own edge could be seen
 const SKIRT_SEGMENTS = 48; // enough for the cutout hole's edge to read as roughly circular rather than an obviously faceted polygon, still cheap for a mesh this simple
 const tmpSkirtColor = new THREE.Color(); // shared/reused across frames in updateOceanHorizonSkirt below — avoids a per-frame allocation
+// A dedicated dark-blue base tint for the background ocean specifically —
+// per explicit "recolor it to be more dark blue" request. Distinct from
+// LIQUID_STYLE.crystal.baseColor, which is tuned for the near water's
+// bright shallow-reef look and was reading too light/similar to the near
+// water out here where a deep, distant sea should read darker/moodier.
+const SKIRT_BASE_COLOR = new THREE.Color(0x0a2e42);
 
 function createOceanHorizonSkirt(scene, biome, y, landmassSize) {
   const style = LIQUID_STYLE[biome];
@@ -1768,14 +1774,10 @@ function createOceanHorizonSkirt(scene, biome, y, landmassSize) {
   const geo = new THREE.PlaneGeometry(SKIRT_SIZE, SKIRT_SIZE, SKIRT_SEGMENTS, SKIRT_SEGMENTS);
   geo.rotateX(-Math.PI / 2);
 
-  // Margin widened again, 60 -> 300 — per explicit "pull the background
-  // skirt further back away from the Gerstner waves" follow-up: the
-  // reflections weren't reading well because the mirror plane started
-  // essentially right at the shore, where the reflected scene is mostly
-  // nearby terrain/shore geometry rather than open sky — pulling the
-  // seam well out gives the reflection real room to show sky/sun/clouds
-  // instead. SKIRT_SIZE (4000) comfortably accommodates this — still
-  // extends thousands of units past the new seam.
+  // Margin (landmassSize/2+300) gives the reflection real room to show
+  // sky rather than nearby shore — see FU170's own reasoning. Also now
+  // the safety clearance the reintroduced ripple animation below fades
+  // its amplitude in across.
   const cutoutRadius = landmassSize / 2 + 300;
   const posAttr = geo.attributes.position;
   const oldIndex = geo.index.array;
@@ -1788,19 +1790,10 @@ function createOceanHorizonSkirt(scene, biome, y, landmassSize) {
   }
   geo.setIndex(newIndex);
 
-  // SWITCHED BACK from THREE.Water to this project's own custom real
-  // planar reflection — per explicit "what other methods can we try"
-  // follow-up. Reuses the EXACT SAME reflection render main.js already
-  // produces for the near water (reflectionTexture/reflectionMatrix, set
-  // each frame in updateOceanHorizonSkirt below) rather than Water.js's
-  // own separate internal render pass — genuinely cheaper (one fewer
-  // full-scene render per frame) AND guaranteed pixel-identical to what
-  // the near water itself shows, since it's literally the same captured
-  // image. A plain material also means vertex colors work again (see
-  // the gradient below), which Water.js's own fixed shader couldn't do
-  // without patching code this project didn't write.
-  const SHORE_COLOR = new THREE.Color(0xbfe8f0); // light — matches how the near Gerstner water reads close to shore (foam/shallow highlights)
-  const DEEP_COLOR = new THREE.Color(0x0d2a3a); // dark — deep open ocean, per explicit "blend from dark to light" request
+  // Shore-to-distance color gradient — both stops darkened toward blue
+  // per this round's recolor request (was a lighter 0xbfe8f0/0x0d2a3a).
+  const SHORE_COLOR = new THREE.Color(0x2a5878);
+  const DEEP_COLOR = new THREE.Color(0x061824);
   const GRADIENT_END = cutoutRadius + 900;
   const colors = new Float32Array(posAttr.count * 3);
   const tmpGradColor = new THREE.Color();
@@ -1813,56 +1806,94 @@ function createOceanHorizonSkirt(scene, biome, y, landmassSize) {
   }
   geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
 
-  const mat = new THREE.MeshBasicMaterial({ color: style.baseColor, fog: true, side: THREE.DoubleSide, vertexColors: true });
-  mat.onBeforeCompile = (shader) => {
-    shader.uniforms.uReflectionTex = { value: null };
-    shader.uniforms.uReflectionMatrix = { value: new THREE.Matrix4() };
-    shader.vertexShader = shader.vertexShader
-      .replace("#include <common>", "#include <common>\nuniform mat4 uReflectionMatrix;\nvarying vec4 vReflectionCoord;")
-      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvReflectionCoord = uReflectionMatrix * modelMatrix * vec4(transformed, 1.0);");
-    shader.fragmentShader = shader.fragmentShader
-      .replace("#include <common>", "#include <common>\nuniform sampler2D uReflectionTex;\nvarying vec4 vReflectionCoord;")
-      .replace("#include <color_fragment>", `#include <color_fragment>
-{
-  if (vReflectionCoord.w > 0.0001) {
-    vec2 reflectionUv = clamp(vReflectionCoord.xy / vReflectionCoord.w, 0.001, 0.999);
-    vec3 reflectionColor = texture2D(uReflectionTex, reflectionUv).rgb;
-    diffuseColor.rgb = mix(diffuseColor.rgb, reflectionColor, 0.6);
-  }
-}`);
-    mat.userData.shader = shader;
-  };
+  // SWITCHED from the custom onBeforeCompile planar reflection to a real
+  // THREE.CubeCamera environment reflection — per explicit "let's try
+  // adding reflections to that with CubeCamera" follow-up (this project
+  // discussed it as an option, never tried). Small render-target
+  // resolution (128) since this is a soft, distant, low-detail reflection
+  // (sky/sun/clouds, not the crisp near-water mirror) and a full 6-face
+  // cube render is genuinely expensive — throttled further in
+  // updateOceanHorizonSkirt so it doesn't run every frame. Fixed at the
+  // map's rough center at water height rather than following the player —
+  // a distant reflection dominated by sky doesn't need to track exact
+  // player position the way the near water's per-pixel mirror does.
+  const cubeRenderTarget = new THREE.WebGLCubeRenderTarget(128, {
+    generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter,
+  });
+  const cubeCamera = new THREE.CubeCamera(1, 4000, cubeRenderTarget);
+  cubeCamera.position.set(0, y, 0);
+
+  const mat = new THREE.MeshStandardMaterial({
+    color: SKIRT_BASE_COLOR, fog: true, side: THREE.DoubleSide, vertexColors: true,
+    envMap: cubeRenderTarget.texture, metalness: 0.9, roughness: 0.15, envMapIntensity: 1.0,
+  });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.y = y - 0.2; // clearance below the detailed plane, same margin as before
   mesh.renderOrder = -1;
   scene.add(mesh);
-  // cutoutRadius stored on the handle for reference/future tuning.
-  return { mesh, mat, cutoutRadius };
+  return { mesh, mat, cutoutRadius, cubeCamera, cubeRenderTarget, cubeUpdateCounter: 0 };
 }
 
 /**
  * @param {number} [stormAmount]  same 0-1 value passed to updateLiquidPlane — keeps this plane's color in sync with the real water's own storm darkening instead of staying one fixed color while the water right in front of it changes tone
- * @param {THREE.Texture} [reflectionTexture]  the SAME reflection render main.js already produces for the near water each frame
- * @param {THREE.Matrix4} [reflectionMatrix]
+ * @param {number} [elapsed]  drives the plane's own animated ripple
+ * @param {THREE.WebGLRenderer} [renderer]  needed to refresh the CubeCamera's own capture
+ * @param {THREE.Scene} [scene]  same — the scene the CubeCamera renders into its cube texture
  */
-function updateOceanHorizonSkirt(handle, skyColor, stormAmount = 0, reflectionTexture, reflectionMatrix) {
+function updateOceanHorizonSkirt(handle, skyColor, stormAmount = 0, elapsed = 0, renderer, scene) {
   if (!handle) return;
   // Tints toward the current sky color the same way the detailed plane's
-  // own baseColor does (see updateLiquidPlane) — otherwise this would
-  // stay one fixed color while the real water's tone shifts through the
-  // day/night cycle, an obvious mismatch right where the two planes meet.
-  // The vertex color gradient (baked at creation) MULTIPLIES this, so
-  // day/night tinting and the shore-to-distance gradient compose
-  // correctly rather than fighting.
+  // own baseColor does (see updateLiquidPlane), starting from the
+  // dedicated dark-blue SKIRT_BASE_COLOR rather than the near water's
+  // brighter reef tone. The vertex color gradient (baked at creation)
+  // MULTIPLIES this, so day/night tinting and the shore-to-distance
+  // gradient compose correctly rather than fighting.
   if (skyColor) {
-    tmpSkirtColor.copy(LIQUID_STYLE.crystal.baseColor).lerp(skyColor, 0.4);
+    tmpSkirtColor.copy(SKIRT_BASE_COLOR).lerp(skyColor, 0.35);
     if (stormAmount > 0) tmpSkirtColor.lerp(STORM_SEA_COLOR, stormAmount * 0.85);
     handle.mat.color.copy(tmpSkirtColor);
   }
-  if (handle.mat.userData.shader) {
-    if (reflectionTexture) handle.mat.userData.shader.uniforms.uReflectionTex.value = reflectionTexture;
-    if (reflectionMatrix) handle.mat.userData.shader.uniforms.uReflectionMatrix.value.copy(reflectionMatrix);
+
+  // CubeCamera refresh — throttled to every 20 frames (roughly 1-2
+  // updates/sec depending on device fps) since a full 6-face cube render
+  // every single frame would be genuinely expensive for a background
+  // reflection that's mostly slow-moving sky anyway. Hides the skirt
+  // itself during the capture so it doesn't reflect its own surface.
+  if (renderer && scene) {
+    handle.cubeUpdateCounter++;
+    if (handle.cubeUpdateCounter >= 20) {
+      handle.cubeUpdateCounter = 0;
+      handle.mesh.visible = false;
+      handle.cubeCamera.update(renderer, scene);
+      handle.mesh.visible = true;
+    }
   }
+
+  // Real geometric wave motion — reintroduced now that the seam sits
+  // 300 units clear of the near water (see cutoutRadius above), well
+  // past the earlier 60-unit margin that caused FU168's intersection
+  // regression. Primary term travels along the near water's own
+  // dominant Gerstner wind direction for visual continuity, a second
+  // term runs perpendicular to it (genuine back-and-forth, not just
+  // side-to-side), and a diagonal term breaks up any grid-aligned look.
+  // Amplitude still fades in from 0 right at the seam over a real band.
+  const posAttr = handle.mesh.geometry.attributes.position;
+  const RIPPLE_FADE_BAND = 150;
+  const windX = Math.cos(GERSTNER_WIND_ANGLE), windZ = Math.sin(GERSTNER_WIND_ANGLE);
+  for (let i = 0; i < posAttr.count; i++) {
+    const x = posAttr.getX(i), z = posAttr.getZ(i);
+    const dist = Math.hypot(x, z);
+    const ampT = THREE.MathUtils.clamp((dist - handle.cutoutRadius) / RIPPLE_FADE_BAND, 0, 1);
+    const alongWind = x * windX + z * windZ;
+    const acrossWind = -x * windZ + z * windX;
+    const swell = (
+      Math.sin(alongWind * 0.03 + elapsed * 0.28) * 0.35
+      + Math.sin(acrossWind * 0.045 - elapsed * 0.2) * 0.26
+      + Math.sin((alongWind + acrossWind) * 0.02 + elapsed * 0.13) * 0.15
+    ) * ampT;
+    posAttr.setY(i, swell);
+  }
+  posAttr.needsUpdate = true;
 }
 
 function disposeOceanHorizonSkirt(scene, handle) {
@@ -1870,6 +1901,7 @@ function disposeOceanHorizonSkirt(scene, handle) {
   scene.remove(handle.mesh);
   handle.mesh.geometry.dispose();
   handle.mat.dispose();
+  handle.cubeRenderTarget.dispose();
 }
 
 export { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail, createOceanHorizonSkirt, updateOceanHorizonSkirt, disposeOceanHorizonSkirt };

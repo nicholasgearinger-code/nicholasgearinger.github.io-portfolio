@@ -2146,12 +2146,12 @@ function animate() {
   // behind here is never visible. biome-gated inside updateLiquidPlane
   // itself (crystal only), so this is harmless to pass unconditionally.
   updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, camera.position, sun.position, dayNight.skyHorizon, reflectionRenderTarget.texture, reflectionTextureMatrix, refractionRenderTarget.texture, refractionResolution, weatherHandle ? weatherHandle.rainIntensity : 0);
-  // Shares the exact same reflectionTexture/reflectionMatrix as the near
-  // water above — the skirt switched back from THREE.Water (which
-  // rendered its own separate internal reflection pass) to this
-  // project's shared custom reflection, so there's only one extra
-  // full-scene render per frame regardless of how many surfaces sample it.
-  updateOceanHorizonSkirt(oceanHorizonSkirtHandle, dayNight.skyZenith, weatherHandle ? weatherHandle.rainIntensity : 0, reflectionRenderTarget.texture, reflectionTextureMatrix);
+  // Switched from the shared planar reflection to its own THREE.CubeCamera
+  // capture — per explicit "try adding reflections with CubeCamera"
+  // follow-up. Throttled internally (every 20 frames) so passing
+  // renderer/scene every frame is cheap; the actual cube-face render only
+  // happens on the throttled frames.
+  updateOceanHorizonSkirt(oceanHorizonSkirtHandle, dayNight.skyZenith, weatherHandle ? weatherHandle.rainIntensity : 0, elapsedTime, renderer, scene);
   updateWaterfall(waterfallHandle, dt, elapsedTime);
   updateOceanSurfaceDetail(oceanSurfaceDetailHandle, elapsedTime, dayNight.dayAmount);
   updateRiverCurrent(riverCurrentHandle, dt);

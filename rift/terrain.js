@@ -363,9 +363,25 @@ const BIOME_SHAPERS = {
         const RIPPLE_ANGLE = 0.4; // radians — a fixed "prevailing wind" direction for the ridge pattern
         const rippleAlong = worldX * Math.cos(RIPPLE_ANGLE) + worldZ * Math.sin(RIPPLE_ANGLE);
         const rippleAcross = -worldX * Math.sin(RIPPLE_ANGLE) + worldZ * Math.cos(RIPPLE_ANGLE);
-        const rippleWobble = fbm2(rippleAlong * 0.04, 0, seed + 771, 2, 2.0, 0.5) * 1.3; // deliberately near-zero rippleAlong-perpendicular dependence — a slow bend ALONG the ridge's own length, not across it, so ridges wander gently rather than staying ruler-straight
-        const ridgePhase = (rippleAcross + rippleWobble) * (Math.PI * 2 / 2.4); // ~2.4-unit ridge spacing
-        const sandRippleTerrain = (Math.sin(ridgePhase) * 0.5 + Math.sin(ridgePhase * 2.1 + 1.3) * 0.15) * 0.16 * beachT;
+        // Shrunk per explicit "really small texture, not the whole
+        // island... just adding detail in the flat surface" correction —
+        // the previous 2.4-unit wavelength/Β±0.1 amplitude read as large
+        // dune-scale ridges reshaping the beach's own silhouette, not
+        // fine surface grain. Wavelength cut to 0.8 units, amplitude cut
+        // from 0.16 to 0.05 (max Β±0.033) — small enough to read as
+        // texture on an otherwise-flat surface rather than landscape.
+        const rippleWobble = fbm2(rippleAlong * 0.08, 0, seed + 771, 2, 2.0, 0.5) * 0.35; // wobble amplitude scaled down to match the finer ridge spacing — a wobble this small relative to a 2.4-unit ridge would have looked erratic
+        const ridgePhase = (rippleAcross + rippleWobble) * (Math.PI * 2 / 0.8);
+        const sandRippleTerrain = (Math.sin(ridgePhase) * 0.5 + Math.sin(ridgePhase * 2.1 + 1.3) * 0.15) * 0.05 * beachT;
+        // HONEST LIMIT: this is real vertex displacement, capped by the
+        // terrain mesh's own segment spacing (graphicsSettings.js,
+        // tier-dependent — not available to check this session). At
+        // Low/Medium tier the mesh's own triangles may already be
+        // larger than this 0.8-unit wavelength, in which case this ripple
+        // gets smoothed away geometrically and won't show at all — a
+        // real texture/normal map (not vertex displacement) would be the
+        // only way to get grain this fine independent of mesh
+        // resolution, and wasn't attempted this round.
         islandBump = (rampHeight + sandRippleTerrain) * outerFade * (1 - coveShape);
       } else {
         // Interior hill — carries the REST of the rise, from this same

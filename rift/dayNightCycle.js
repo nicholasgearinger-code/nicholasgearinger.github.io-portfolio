@@ -14,6 +14,18 @@ import { getGraphicsSettings } from "./graphicsSettings.js";
 const CYCLE_SECONDS = 480; // one full day/night cycle — long enough not to be distracting, short enough to actually see it move in a session
 const ORBIT_RADIUS = 260;
 const SKY_DOME_RADIUS = 900;
+// Per explicit "dynamic shadows that change direction with the sun"
+// request: the sun's real orbit (see orbitPosition below) previously only
+// moved in a fixed vertical plane (X/Y varied, Z was hard-pinned to a
+// single constant 80 everywhere it was used) — a real DirectionalLight,
+// real shadow map, genuinely tied to elevation... but rising and setting
+// along the exact same fixed compass line every cycle, so a shadow's
+// LENGTH changed through the day while its DIRECTION barely did. This
+// swings Z together with elevation (0 at sunrise/sunset, peaking at solar
+// noon) so the sun traces a genuinely tilted daily arc instead of a flat
+// line — like a real sun's path away from the equator — and shadows
+// actually rotate through the day, not just stretch and shrink.
+const AZIMUTH_SWING = 140;
 
 // Color/intensity at each key point in the cycle, now including the sky's
 // own zenith/horizon colors (previously the "sky" was just scene.fog's
@@ -154,6 +166,7 @@ function orbitPosition(phaseAngle) {
   return {
     x: Math.cos(phaseAngle - Math.PI / 2) * ORBIT_RADIUS,
     y: elevation * ORBIT_RADIUS,
+    z: 80 + elevation * AZIMUTH_SWING, // was a hardcoded 80 everywhere this orbit gets used — see AZIMUTH_SWING's own comment above
     elevation,
   };
 }
@@ -632,7 +645,7 @@ function updateSkyDome(sky, zenithColor, midColor, horizonColor, elapsed, sunDir
  * @param {THREE.Points} starfield
  * @param {string} [biome]  optional — enables the per-biome sky tint (BIOME_SKY_TINT above). Falls back to the plain shared sky if omitted, so this stays a non-breaking addition for any existing call site not yet passing it.
  */
-function createDayNightCycle(scene, sun, ambient, starfield, biome) {
+function createDayNightCycle(scene, sun, ambient, starfield, biome, moonLight) {
   const glowTexture = createGlowTexture();
   const sunStarburstTexture = createSunStarburstTexture();
   // Sun bigger, warmer, and noticeably more radiant than the moon (was
@@ -647,7 +660,7 @@ function createDayNightCycle(scene, sun, ambient, starfield, biome) {
   const aurora = createAurora(scene);
   const shootingStars = createShootingStars(scene);
   return {
-    scene, sun, ambient, starfield, sunBody, moonBody, sunBeams, sky,
+    scene, sun, ambient, starfield, sunBody, moonBody, sunBeams, sky, moonLight,
     distantPlanet, aurora, shootingStars, elapsed: 0, biome,
   };
 }
@@ -665,7 +678,7 @@ function updateDayNightCycle(cycle, dt) {
   // sane through the "night" portion instead of pointing straight up from
   // underneath — but the visible sun disc follows its true position so it
   // actually sets/rises instead of hovering at the horizon all night.
-  cycle.sun.position.set(sunOrbit.x, Math.max(sunOrbit.y, -20), 80);
+  cycle.sun.position.set(sunOrbit.x, Math.max(sunOrbit.y, -20), sunOrbit.z);
   // SUN_VISUAL_HORIZON_OFFSET raises only the DRAWN disc/beams, not the
   // actual light (cycle.sun.position, just above — that stays tied to
   // the true elevation/orbit math so shadow angle and dayAmount/color
@@ -678,9 +691,20 @@ function updateDayNightCycle(cycle, dt) {
   // offset (not scaled per-biome) keeps this simple and reads correctly
   // across every biome's own roughly-ground-level horizon too.
   const SUN_VISUAL_HORIZON_OFFSET = 10;
-  cycle.sunBody.group.position.set(sunOrbit.x, sunOrbit.y + SUN_VISUAL_HORIZON_OFFSET, 80);
-  cycle.moonBody.group.position.set(moonOrbit.x, Math.max(moonOrbit.y, 55), 80); // floored well above the horizon — the moon fades via opacity below, it shouldn't also visually approach/set at the horizon like the sun does
-  cycle.sunBeams.group.position.set(sunOrbit.x, sunOrbit.y + SUN_VISUAL_HORIZON_OFFSET, 80);
+  cycle.sunBody.group.position.set(sunOrbit.x, sunOrbit.y + SUN_VISUAL_HORIZON_OFFSET, sunOrbit.z);
+  cycle.moonBody.group.position.set(moonOrbit.x, Math.max(moonOrbit.y, 55), moonOrbit.z); // floored well above the horizon — the moon fades via opacity below, it shouldn't also visually approach/set at the horizon like the sun does
+  // The REAL moonlight (a genuine shadow-casting DirectionalLight, not the
+  // decorative sprite above) — per explicit "shadows... during night"
+  // request. Previously there was no light source at all once the sun set
+  // (ambient light doesn't cast shadows), so night had no shadows by
+  // construction, not as a bug in the shadow system itself. Uses the
+  // moon's TRUE orbit position (same -20 floor style the real sun light
+  // uses below, not the sprite's higher +55 floor — a shadow-casting
+  // light doesn't need the same "never visually touches the horizon"
+  // treatment the drawn sprite does) so its shadow angle genuinely tracks
+  // where the moon actually is, same principle as the sun.
+  if (cycle.moonLight) cycle.moonLight.position.set(moonOrbit.x, Math.max(moonOrbit.y, -20), moonOrbit.z);
+  cycle.sunBeams.group.position.set(sunOrbit.x, sunOrbit.y + SUN_VISUAL_HORIZON_OFFSET, sunOrbit.z);
 
   // Blend NIGHT -> DAWN_DUSK -> DAY -> DAWN_DUSK -> NIGHT across elevation.
   const dayAmount = Math.max(0, elevation);       // 0 at/below horizon, 1 at noon
@@ -754,8 +778,8 @@ function updateDayNightCycle(cycle, dt) {
   // bottom edge. Copying skyHorizon directly makes them identical by
   // construction — nothing left to mismatch.
   cycle.scene.fog.color.copy(skyHorizon);
-  const sunDirLen = Math.hypot(sunOrbit.x, sunOrbit.y, 80) || 1;
-  const sunDirForSky = { x: sunOrbit.x / sunDirLen, y: sunOrbit.y / sunDirLen, z: 80 / sunDirLen };
+  const sunDirLen = Math.hypot(sunOrbit.x, sunOrbit.y, sunOrbit.z) || 1;
+  const sunDirForSky = { x: sunOrbit.x / sunDirLen, y: sunOrbit.y / sunDirLen, z: sunOrbit.z / sunDirLen };
   updateSkyDome(cycle.sky, skyZenith, skyMid, skyHorizon, cycle.elapsed, sunDirForSky);
 
   // Each body fades out once it's below the horizon rather than just
@@ -784,6 +808,19 @@ function updateDayNightCycle(cycle, dt) {
   cycle.sunBody.glow.material.opacity = cycle.sunBody.baseGlowOpacity * sunVisibility;
   cycle.moonBody.core.material.opacity = moonVisibility;
   cycle.moonBody.glow.material.opacity = cycle.moonBody.baseGlowOpacity * moonVisibility; // reverted — no longer scaled by phase illumination, see the phase-system removal above
+  // Real moonlight intensity — dim (peak 0.22 vs the sun's own much
+  // higher peak below) so this reads as a subtle real light source, not
+  // a second sun. Gated on the MOON's own elevation (moonOrbit.elevation,
+  // not the sun's) so it's genuinely 0 whenever the moon itself is below
+  // the horizon — most of the day, when the moon sits on the opposite
+  // side of the same orbit — and additionally scaled by the same
+  // moonVisibility fade the sprite already uses, so the light can never
+  // disagree with how visible the moon currently looks (both faded ==
+  // both dim, never one bright while the other's invisible).
+  if (cycle.moonLight) {
+    const moonAboveHorizon = Math.max(0, moonOrbit.elevation);
+    cycle.moonLight.intensity = moonAboveHorizon * moonVisibility * 0.22;
+  }
 
   // The sun's own visual disc and glow — not just the directional
   // light's color — shift through the day too, per the explicit

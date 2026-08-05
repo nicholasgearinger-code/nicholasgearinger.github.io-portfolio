@@ -544,6 +544,27 @@ sun.shadow.mapSize.set(getGraphicsSettings().shadowMapSize, getGraphicsSettings(
 sun.shadow.bias = -0.0015;
 scene.add(sun);
 
+// Real moonlight — per explicit "shadows... during night" request.
+// Previously the moon was purely decorative (a sprite, no THREE.Light at
+// all — see dayNightCycle.js's moonBody), so once the sun set there was
+// no light source left that could cast a shadow at all (ambient light
+// doesn't). Dim on purpose (peak intensity 0.22, set per-frame in
+// dayNightCycle.js — this is just the initial/structural setup) so it
+// reads as a subtle real light, not a second sun. Shadow map kept at
+// HALF the sun's own resolution — moonlit shadows are a soft, subtle
+// nice-to-have, not worth doubling the shadow-pass cost for.
+const moonLight = new THREE.DirectionalLight(0xaebedd, 0);
+moonLight.castShadow = true;
+moonLight.shadow.camera.left = -SHADOW_EXTENT;
+moonLight.shadow.camera.right = SHADOW_EXTENT;
+moonLight.shadow.camera.top = SHADOW_EXTENT;
+moonLight.shadow.camera.bottom = -SHADOW_EXTENT;
+moonLight.shadow.camera.near = 1;
+moonLight.shadow.camera.far = 500;
+moonLight.shadow.mapSize.set(getGraphicsSettings().shadowMapSize / 2, getGraphicsSettings().shadowMapSize / 2);
+moonLight.shadow.bias = -0.0015;
+scene.add(moonLight);
+
 let starfieldPoints = null;
 {
   const starGeo = new THREE.BufferGeometry();
@@ -575,7 +596,7 @@ let starfieldPoints = null;
   scene.add(starfieldPoints);
 }
 
-const dayNightCycle = createDayNightCycle(scene, sun, ambientLight, starfieldPoints);
+const dayNightCycle = createDayNightCycle(scene, sun, ambientLight, starfieldPoints, undefined, moonLight);
 
 // ---------------------------------------------------------------------------
 // Controls
@@ -1982,6 +2003,11 @@ function applyGraphicsSettings() {
     // resolution once the old one is disposed — changing mapSize alone
     // has no effect on an already-rendered light.
     if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
+  }
+  const moonShadowSize = s.shadowMapSize / 2;
+  if (moonLight.shadow.mapSize.width !== moonShadowSize) {
+    moonLight.shadow.mapSize.set(moonShadowSize, moonShadowSize);
+    if (moonLight.shadow.map) { moonLight.shadow.map.dispose(); moonLight.shadow.map = null; }
   }
   resizeToViewport();
   if (currentLevelIdx >= 0) buildLevel(currentLevelIdx);

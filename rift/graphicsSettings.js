@@ -41,6 +41,19 @@ const TIERS = {
     shadowsEnabled: false,
     shadowMapSize: 256,
     pixelRatioCap: 1,
+    // Coral Shallows' water reflection/refraction (main.js) are each a
+    // FULL extra scene render (terrain, decorations, wildlife — the
+    // reduced render-TARGET resolution only saves fragment/pixel cost,
+    // not the vertex/geometry throughput of rendering the whole scene a
+    // second and third time) — previously fired every single frame
+    // completely independent of graphics tier, the single largest
+    // unmitigated cost in the whole project by the time this was added.
+    // This value: only actually re-render reflection/refraction every
+    // Nth frame, reusing the previous frame's texture in between — a
+    // reflection genuinely doesn't need to update at full framerate to
+    // look right, and Low tier (the weakest devices) gets the most
+    // relief here since it needs it most.
+    reflectionUpdateInterval: 3,
   },
   medium: {
     label: "Medium",
@@ -60,6 +73,7 @@ const TIERS = {
     shadowsEnabled: true,
     shadowMapSize: 1536,
     pixelRatioCap: 1.75,
+    reflectionUpdateInterval: 2,
   },
   high: {
     label: "High",
@@ -79,6 +93,7 @@ const TIERS = {
     shadowsEnabled: true,
     shadowMapSize: 2048, // was 4096 — that's 4x the GPU fill/bandwidth cost of 2048 for a resolution difference very unlikely to be visible on an actual mobile screen; the extra detail was mostly wasted
     pixelRatioCap: 3,
+    reflectionUpdateInterval: 1, // no throttle — High is the quality-focused tier, update every frame
   },
 };
 

@@ -679,6 +679,7 @@ function updateMovement(dt, grounded) {
 // ---------------------------------------------------------------------------
 let terrainMesh = null;
 let liquidHandle = null;
+let reflectionFrameCounter = 999; // starts high so the first eligible frame always renders immediately, not a blank/stale texture
 let waterfallHandle = null;
 let oceanSurfaceDetailHandle = null;
 let riverCurrentHandle = null;
@@ -2182,10 +2183,27 @@ function animate() {
   // perfectly adequate for deciding whether to spend a second scene
   // render this frame, doesn't need hysteresis the way the underwater
   // post-process toggle does.
+  // Reflection/refraction throttling — per explicit "frame rate is an
+  // issue" follow-up. Each of these is a FULL extra scene render (the
+  // reduced render-target resolution only saves fragment/pixel cost, not
+  // the vertex/geometry throughput of rendering the whole scene — terrain,
+  // decorations, wildlife — a second and third time), and previously ran
+  // every single frame regardless of graphics tier — the single largest
+  // unmitigated cost in the project by the time this was added. Now only
+  // actually re-rendered every reflectionUpdateInterval-th frame (tier-
+  // dependent, see graphicsSettings.js); on skipped frames the render
+  // targets simply keep showing last frame's content, which
+  // updateLiquidPlane below still reads every frame regardless — a
+  // reflection/refraction lagging by 1-2 frames is imperceptible, unlike
+  // the render cost of computing it fresh every single frame.
+  reflectionFrameCounter++;
   const reflectionBiome = currentLevelIdx >= 0 ? LEVELS[currentLevelIdx].biome : null;
   if (reflectionBiome === "crystal" && camera.position.y > LIQUID_LEVEL.crystal) {
-    updateWaterReflection(LIQUID_LEVEL.crystal, liquidHandle);
-    updateWaterRefraction(liquidHandle);
+    if (reflectionFrameCounter >= getGraphicsSettings().reflectionUpdateInterval) {
+      reflectionFrameCounter = 0;
+      updateWaterReflection(LIQUID_LEVEL.crystal, liquidHandle);
+      updateWaterRefraction(liquidHandle);
+    }
   }
   // stormAmount (last arg): reads weatherHandle's own persisted
   // rainIntensity directly rather than a fresher value from this frame's

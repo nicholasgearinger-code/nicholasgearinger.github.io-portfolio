@@ -1463,7 +1463,18 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
         // matching "some trees float, inconsistently, others don't."
         // Offsetting up by 50*scale moves the mesh's true bottom (local
         // Y=-50) down to exactly the sampled ground height instead.
-        tree.position.set(x, y + 50 * scale, z);
+        // REVERTED per direct "now ALL the trees are floating" report —
+        // the +50*scale offset below was based on an assumption (local
+        // Y=-50 is the trunk base, Y=+50 is the crown) that I could only
+        // infer from a raw numeric range, not confirm. If that assumption
+        // was backwards, the offset would push every tree further in the
+        // WRONG direction — turning an inconsistent "some trees float a
+        // little" into a uniform "all trees float a lot," which matches
+        // what was reported. Reverting to the plain ground-height
+        // placement (the state that was confirmed reasonably working
+        // in-browser back in FU184) rather than guessing the sign a third
+        // time blind.
+        tree.position.set(x, y, z);
         tree.rotation.y = rng() * Math.PI * 2;
         tree.scale.setScalar(scale);
         scene.add(tree);

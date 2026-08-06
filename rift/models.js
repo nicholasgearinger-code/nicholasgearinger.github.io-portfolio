@@ -1,6 +1,5 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
 import { clone as skeletonClone } from "three/addons/utils/SkeletonUtils.js";
 
 // -----------------------------------------------------------------------------
@@ -62,27 +61,21 @@ function loadAngelfishModel() {
 
 let reefGLTF = null;
 let reefLoadPromise = null;
-let dracoLoader = null;
-function getDracoLoader() {
-  if (dracoLoader) return dracoLoader;
-  dracoLoader = new DRACOLoader();
-  // Same CDN this project's whole importmap already resolves "three/
-  // addons/" through (see index.html) — this is genuinely where three.js
-  // itself ships its Draco decoder binaries, not a separate/new
-  // dependency being introduced.
-  dracoLoader.setDecoderPath("https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/draco/");
-  return dracoLoader;
-}
+// DRACOLoader wiring TEMPORARILY REMOVED — right after adding it, the
+// whole game stopped loading. Since ES module imports fail all-or-
+// nothing, a bad import path here is a far more likely explanation than
+// a scoped reef-only bug, and it's a much more severe failure mode than
+// anything else touched this session. Reverted to plain GLTFLoader
+// (which will fail to load the Draco-compressed reef.glb specifically,
+// caught by the existing .catch() below — the reef just won't appear)
+// so the REST of the game works again while this gets properly diagnosed
+// from an actual browser console error rather than guessed at blind.
 function loadReefModel() {
   if (reefGLTF) return Promise.resolve(reefGLTF);
   if (reefLoadPromise) return reefLoadPromise;
   const url = new URL("models/reef.glb", import.meta.url).href;
   reefLoadPromise = new Promise((resolve, reject) => {
-    // The optimized/decimated file (111MB -> 5.6MB) REQUIRES
-    // KHR_draco_mesh_compression — without setDRACOLoader here,
-    // GLTFLoader throws rather than silently falling back, since the
-    // file's own extensionsRequired lists it.
-    new GLTFLoader().setDRACOLoader(getDracoLoader()).load(
+    new GLTFLoader().load(
       url,
       (gltf) => { reefGLTF = gltf; console.log("[models] reef loaded:", url); resolve(gltf); },
       undefined,

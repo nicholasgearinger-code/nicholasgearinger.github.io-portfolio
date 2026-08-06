@@ -312,11 +312,11 @@ const BIOME_SHAPERS = {
     // separate dune humps along the same coastline rather than one
     // uniform smooth hill.
     const duneVariation = fbm2(worldX * 0.013, 0, seed + 700, 2, 2.0, 0.5); // lowered from 0.02 — broader, more gradual humps along the coastline instead of tightly-packed ones, per explicit "area between the dunes could be smoother" request. Deliberately near-zero Z dependence — this is a variation ALONG the coastline's length, not across it
-    const dunePeakMult = 0.88 + Math.max(0, duneVariation + 0.5) * 0.24; // narrowed from 0.7x-1.3x to 0.88x-1.12x — softens the height difference between adjacent dune peaks so the terrain between them reads as a gentle roll rather than a jagged dip
+    const dunePeakMult = 0.92 + Math.max(0, duneVariation + 0.5) * 0.16; // narrowed further, 0.88-1.12 -> 0.92-1.08, per general "terrain too lumpy" follow-up — softens the height difference between adjacent dune peaks even more
 
     let islandBump = 0;
     const BEACH_PLATEAU = LIQUID_LEVEL.crystal + 0.9; // REGRESSION FIX: the previous +0.35 margin was too thin against the water plane's own real wave motion — waves were poking up into the cove notch, flooding it ("water appears where it shouldn't be"). Bumped past the original +0.7 for safer clearance. "Flatter near the shore" is now achieved below via an eased rise curve instead of by lowering this absolute height.
-    const VALLEY_FLOOR = BEACH_PLATEAU + 0.4; // where the cove's own floor levels out further inland — still low and close to sea level, matching a real cove valley rather than rising toward a peak
+    const VALLEY_FLOOR = BEACH_PLATEAU + 1.8; // was +0.4 (only 1.3 units above the actual water line) — per direct "water appearing where it shouldn't be" report, same recurring failure class as BEACH_PLATEAU's own regression documented above: too thin a margin against noise stacking on top (sand ripple, dune variation) that can locally push this cove channel below the water line. Still clearly the LOWEST point on the island (well under ISLAND_PEAK=20), so the "notch stays low, real cove valley" design intent is unchanged — just with real clearance against the water plane now.
     if (islandDist < ISLAND_BLEND) {
       if (islandDist >= ISLAND_CORE) {
         // Beach ring — genuinely gentle (~9° grade) rise from below the
@@ -372,7 +372,7 @@ const BIOME_SHAPERS = {
         // texture on an otherwise-flat surface rather than landscape.
         const rippleWobble = fbm2(rippleAlong * 0.08, 0, seed + 771, 2, 2.0, 0.5) * 0.35; // wobble amplitude scaled down to match the finer ridge spacing — a wobble this small relative to a 2.4-unit ridge would have looked erratic
         const ridgePhase = (rippleAcross + rippleWobble) * (Math.PI * 2 / 0.8);
-        const sandRippleTerrain = (Math.sin(ridgePhase) * 0.5 + Math.sin(ridgePhase * 2.1 + 1.3) * 0.15) * 0.05 * beachT;
+        const sandRippleTerrain = (Math.sin(ridgePhase) * 0.5 + Math.sin(ridgePhase * 2.1 + 1.3) * 0.15) * 0.03 * beachT; // reduced further from 0.05 per general "terrain too lumpy" follow-up
         // HONEST LIMIT: this is real vertex displacement, capped by the
         // terrain mesh's own segment spacing (graphicsSettings.js,
         // tier-dependent — not available to check this session). At

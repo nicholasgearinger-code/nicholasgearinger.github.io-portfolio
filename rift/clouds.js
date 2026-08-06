@@ -617,10 +617,39 @@ function updateRealisticCloudDome(handle, dt, dayAmount, skyHorizonColor, skyZen
     handle.moodEntryCounts[bucket] = (handle.moodEntryCounts[bucket] || 0) + 1;
     const pool = CLOUD_MOOD_POOLS[bucket];
     const selected = pool[(handle.moodEntryCounts[bucket] - 1) % pool.length];
-    if (selected !== handle.moodTextureName) {
-      handle.moodTextureName = selected;
-      handle.mat.map = getMoodCloudTexture(selected);
-      handle.mat.needsUpdate = true;
+    if (selected !== handle.moodTextureName && selected !== handle.moodPendingTexture) {
+      // Per explicit "create a transition so the sky doesn't just change
+      // all of a sudden" — the texture is no longer swapped immediately
+      // here. Instead this queues the swap and TRANSITION_SECONDS below
+      // fades the dome's own opacity down to 0, swaps the map at that
+      // invisible midpoint (so the change itself is never seen), then
+      // fades back up — same idea as a screen crossfade, just done via
+      // one texture's opacity dipping through zero rather than genuinely
+      // blending two textures together (which would need a second mesh
+      // or custom shader — this is the lower-risk version of that).
+      handle.moodPendingTexture = selected;
+      handle.moodTransitionT = 0;
+    }
+  }
+  const TRANSITION_SECONDS = 1.6; // half-duration each way — ~3.2s total fade-out-and-back, slow enough to read as a real transition, fast enough not to leave the sky visibly blank for long
+  let transitionOpacityMult = 1;
+  if (handle.moodPendingTexture) {
+    handle.moodTransitionT += dt / TRANSITION_SECONDS;
+    if (handle.moodTransitionT < 1) {
+      // Fading out toward the swap point.
+      transitionOpacityMult = 1 - handle.moodTransitionT;
+    } else if (handle.moodTransitionT < 2) {
+      // Just crossed the swap point — apply the queued texture now,
+      // while fully invisible, then fade back in.
+      if (handle.moodTextureName !== handle.moodPendingTexture) {
+        handle.moodTextureName = handle.moodPendingTexture;
+        handle.mat.map = getMoodCloudTexture(handle.moodPendingTexture);
+        handle.mat.needsUpdate = true;
+      }
+      transitionOpacityMult = handle.moodTransitionT - 1;
+    } else {
+      handle.moodPendingTexture = null;
+      transitionOpacityMult = 1;
     }
   }
 
@@ -696,7 +725,7 @@ function updateRealisticCloudDome(handle, dt, dayAmount, skyHorizonColor, skyZen
   // Storm clouds are also visibly DENSER/thicker, not just darker — bumps
   // the base opacity toward fully opaque coverage on top of the existing
   // breathing pulse.
-  handle.mat.opacity = (0.9 + stormAmount * 0.09) * breathe;
+  handle.mat.opacity = (0.9 + stormAmount * 0.09) * breathe * transitionOpacityMult;
 
   // A second, independent drift axis on top of the mesh's own Y rotation
   // — texture.offset.x slides the UVs horizontally at a different rate

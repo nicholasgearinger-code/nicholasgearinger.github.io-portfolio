@@ -2737,6 +2737,19 @@ function animate() {
     dayNightCycle.moonBody.core.material.opacity *= moonOcclusion;
     dayNightCycle.moonBody.glow.material.opacity *= moonOcclusion;
   }
+  // Per explicit "the sun should not be this bright during a storm" —
+  // the dimming above only happens when the sun's sprite position
+  // happens to fall behind a cloud shape at this exact camera angle
+  // (incidental, not tied to how heavily it's actually storming). This
+  // adds a DIRECT stormAmount (wind.rainIntensity) dim on top, to both
+  // the visual sprite and the real light — floored so it never goes
+  // fully dark (real storms still have some diffuse skylight), but a
+  // heavy storm now visibly dims the sun regardless of exact cloud
+  // placement.
+  const stormSunDim = 1 - Math.min(0.75, wind.rainIntensity * 0.85);
+  dayNightCycle.sunBody.core.material.opacity *= stormSunDim;
+  dayNightCycle.sunBody.glow.material.opacity *= stormSunDim;
+  dayNightCycle.sun.intensity *= Math.max(0.3, stormSunDim);
   setAmbientDayAmount(dayNight.dayAmount);
   if (currentLevelIdx >= 0 && horizonHandle) updateHorizonSilhouettes(horizonHandle, LEVELS[currentLevelIdx].biome, dayNight.dayAmount);
   updateLightShafts(lightShaftHandles, dayNight.dayAmount);

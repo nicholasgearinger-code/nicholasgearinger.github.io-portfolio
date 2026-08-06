@@ -822,8 +822,26 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
   // update below blends wave disturbance on TOP of this instead of one
   // uniform starting color.
   let depthColors = null;
+  let shoreDamp = null;
   if (biome === "crystal" && sampleHeight) {
     depthColors = new Float32Array(posAttr.count * 3);
+    // Per explicit "ocean waves are coming up through [the cove], adjust
+    // the waves so it doesn't flow up too much onto the sand" — the
+    // Gerstner wave sum (updateLiquidPlane below) previously applied its
+    // FULL amplitude uniformly across the whole plane, all the way up to
+    // the shoreline itself, with no reduction in shallow water. Real
+    // waves lose height approaching shore (shoaling/damping) — this
+    // precomputes that falloff once per vertex here (reusing the SAME
+    // depth sample already being taken for depthColors, no extra cost),
+    // stored on the handle and read cheaply in the per-frame wave loop
+    // instead of adding a new sample there. 0 right at/above the
+    // shoreline (zero wave contribution — a previous fix already raised
+    // the cove's own static floor height, but that alone can't stop a
+    // wave CREST riding on top of the calm water level from still
+    // reaching over it), ramping to full strength by SHORE_DAMP_DEPTH
+    // units of real depth.
+    shoreDamp = new Float32Array(posAttr.count);
+    const SHORE_DAMP_DEPTH = 3.5;
     const shallow = new THREE.Color(0x7fd0d8); // was 0x5fa8c4 — brighter, more vivid turquoise right at the shoreline per the reference's clear, bright shallow water
     const deep = style.baseColor; // the deep blue tuned in LIQUID_STYLE.crystal
     const tmpDepth = new THREE.Color();
@@ -846,6 +864,8 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
       const groundY = sampleHeight(vx, vz);
       const depth = groundY === null ? MAX_DEPTH : Math.max(0, y - groundY);
       const t = Math.min(1, depth / MAX_DEPTH);
+      const shoreT = THREE.MathUtils.clamp(depth / SHORE_DAMP_DEPTH, 0, 1);
+      shoreDamp[i] = shoreT * shoreT * (3 - 2 * shoreT); // smoothstep — gentle ease in, not a hard linear ramp
       tmpDepth.copy(shallow).lerp(deep, t);
       const distFromCenter = Math.hypot(vx, vz);
       const farT = THREE.MathUtils.clamp((distFromCenter - FAR_DARKEN_START) / (FAR_DARKEN_END - FAR_DARKEN_START), 0, 1);
@@ -1281,7 +1301,7 @@ vec2 foamVoronoiF1F2(vec2 p) {
   const foamAccum = biome === "crystal" ? new Float32Array(posAttr.count) : null;
 
   return {
-    mesh, backMesh, glow, shimmer, rocks, waterY: y, basePositions, biome, style, depthColors,
+    mesh, backMesh, glow, shimmer, rocks, waterY: y, basePositions, biome, style, depthColors, shoreDamp,
     flowDir: normalizeFlow(flowDir), crustOctaves, crackOctaves, flowBeads, rippleTexture, foamAccum,
     lastElapsed: undefined, // set on first updateLiquidPlane call — used to derive real per-frame dt for the foam decay above, since this function only receives cumulative elapsed time
   };
@@ -1463,8 +1483,13 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
       // target amplitude, without mutating that shared, module-level
       // table or its baked per-wave steepness values).
       const stormWaveMult = 1 + stormAmount * 0.9;
+      // Shore damping — see its own precomputation comment in
+      // createLiquidPlane above. Defaults to 1 (no damping) for any
+      // biome/plane that didn't precompute it, so this is a no-op
+      // everywhere except Coral Shallows.
+      const shoreT = handle.shoreDamp ? handle.shoreDamp[i] : 1;
       for (const w of GERSTNER_WAVES) {
-        const amp = w.amplitude * stormWaveMult;
+        const amp = w.amplitude * stormWaveMult * shoreT;
         const f = w.k * (w.ndx * wbx + w.ndz * wbz) - w.speed * elapsed;
         const s = Math.sin(f), c = Math.cos(f);
         dx += w.steepness * amp * w.ndx * c;

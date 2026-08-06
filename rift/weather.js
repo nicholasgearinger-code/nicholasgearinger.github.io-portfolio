@@ -411,15 +411,100 @@ function getRainStreakTexture() {
   return sharedRainStreakTexture;
 }
 
-function createRain(scene, heaviness = 1) {
-  const count = Math.round(1400 * heaviness);
+// Per explicit "how can we make the rain look more like this... with real
+// physics" follow-up — literal particle physics/fluid simulation is
+// genuinely out of reach here (would need compute shaders or a physics
+// engine, not something to hand-write blind). This is the achievable
+// version of that ask: more particles with real per-drop variation
+// (speed, drift phase — not literal physics, but no longer uniform
+// either), PLUS actual ground/water IMPACT ripples where a drop lands —
+// that's the piece that was genuinely missing and does the most to sell
+// "real rain" over "falling lines." Ripples are a small reused POOL
+// (RIPPLE_POOL_SIZE), not one object spawned per raindrop — with
+// thousands of drops falling continuously, spawning a real object per
+// landing would be a real, unbounded performance cost; only a fraction of
+// landings (RIPPLE_SPAWN_CHANCE) claim a pool slot, and slots recycle
+// once their own expand-and-fade animation finishes.
+const RIPPLE_POOL_SIZE = 26;
+const RIPPLE_SPAWN_CHANCE = 0.05;
+const RIPPLE_LIFETIME = 0.9;
+
+function createRipplePool(scene) {
+  // Shared geometry across every pool member — cheap (one thin ring,
+  // scaled per-instance rather than each getting its own geometry), unit
+  // radius so `mesh.scale.setScalar(radius)` directly controls the actual
+  // on-screen ring size as it expands.
+  const geo = new THREE.RingGeometry(0.6, 1, 20);
+  geo.rotateX(-Math.PI / 2); // lies flat, facing up — this is a water-surface ripple, not a billboard
+  const pool = [];
+  for (let i = 0; i < RIPPLE_POOL_SIZE; i++) {
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xdcf0ff, transparent: true, opacity: 0, side: THREE.DoubleSide,
+      depthWrite: false, blending: THREE.AdditiveBlending, fog: true,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.visible = false;
+    mesh.userData.age = Infinity; // Infinity = inactive/available
+    scene.add(mesh);
+    pool.push(mesh);
+  }
+  return pool;
+}
+
+/**
+ * Claims a pool slot for a new ripple at (x, y, z) — reuses whichever
+ * slot is currently inactive (age === Infinity), or if the pool happens
+ * to be fully saturated (every slot mid-animation), silently skips
+ * spawning rather than forcibly cutting off an existing ripple's own
+ * animation early. rainIntensity scales the ripple's own peak size/
+ * opacity — a light drizzle's ripples should read smaller/fainter than a
+ * downpour's, matching how the rain itself already scales.
+ */
+function spawnRipple(pool, x, y, z, rainIntensity) {
+  const slot = pool.find((r) => r.userData.age === Infinity);
+  if (!slot) return;
+  slot.position.set(x, y, z);
+  slot.userData.age = 0;
+  slot.userData.strength = 0.5 + rainIntensity * 0.5;
+  slot.visible = true;
+}
+
+function updateRipplePool(pool, dt) {
+  for (const r of pool) {
+    if (r.userData.age === Infinity) continue;
+    r.userData.age += dt;
+    if (r.userData.age >= RIPPLE_LIFETIME) {
+      r.userData.age = Infinity;
+      r.visible = false;
+      continue;
+    }
+    const t = r.userData.age / RIPPLE_LIFETIME;
+    // Expands steadily but eases out (fast initial spread, slowing near
+    // the end — real ripples don't grow at a constant rate) while
+    // opacity peaks quickly then fades — the classic "ring expanding
+    // outward" look, not a shrinking or static ring.
+    const eased = 1 - (1 - t) * (1 - t);
+    const radius = 0.15 + eased * 1.6 * r.userData.strength;
+    r.scale.setScalar(radius);
+    r.material.opacity = Math.sin(Math.min(1, t * 4)) * (1 - t) * 0.55 * r.userData.strength;
+  }
+}
+
+function createRain(scene, heaviness = 1, waterLevel) {
+  // Was 1400 — denser per explicit "thousands of particles" ask (still
+  // well short of literal thousands at low heaviness, but a real,
+  // meaningful increase; graphics-tier particleMultiplier already scales
+  // this further down on Low, see the call site).
+  const count = Math.round(2200 * heaviness);
   const positions = new Float32Array(count * 3);
   const speeds = new Float32Array(count);
+  const driftPhase = new Float32Array(count); // per-drop phase offset for a subtle horizontal wobble as it falls — real rain isn't perfectly straight even with steady wind
   for (let i = 0; i < count; i++) {
     positions[i * 3] = (Math.random() - 0.5) * 220;
     positions[i * 3 + 1] = Math.random() * 60;
     positions[i * 3 + 2] = (Math.random() - 0.5) * 220;
     speeds[i] = (30 + Math.random() * 15) * (0.85 + heaviness * 0.15); // heavier rain also falls a bit faster/harder, not just denser
+    driftPhase[i] = Math.random() * Math.PI * 2;
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
@@ -435,21 +520,26 @@ function createRain(scene, heaviness = 1) {
   });
   const points = new THREE.Points(geo, mat);
   scene.add(points);
-  return { points, speeds };
+  // waterLevel: the Y height ripples spawn at and particles "land" on —
+  // real per-biome height (e.g. LIQUID_LEVEL.crystal), or undefined for
+  // any biome without a real whole-level ocean (rain just wraps at a
+  // fixed low altitude in that case, same as before, no ripples spawn).
+  const ripplePool = waterLevel !== undefined && waterLevel !== null ? createRipplePool(scene) : null;
+  return { points, speeds, driftPhase, waterLevel, ripplePool };
 }
 
 /**
  * @param {THREE.Scene} scene
  * @param {string} biome
  */
-function createWeatherSystem(scene, biome) {
+function createWeatherSystem(scene, biome, waterLevel) {
   const profile = WEATHER_PROFILE[biome] || WEATHER_PROFILE.ember;
 
   const lightningLight = new THREE.PointLight(profile.lightning.color, 0, 400);
   lightningLight.position.set(0, profile.lightning.height, 0);
   scene.add(lightningLight);
 
-  const rain = profile.rain ? createRain(scene, profile.rainHeaviness || 1) : null;
+  const rain = profile.rain ? createRain(scene, profile.rainHeaviness || 1, waterLevel) : null;
   const distantLightning = createDistantLightning(scene);
   const dustDevil = biome === "ashen" ? createDustDevil(scene) : null;
   const crystalRefraction = biome === "crystal" ? createCrystalRefraction(scene) : null;
@@ -549,15 +639,36 @@ function updateWeatherSystem(handle, dt, erupting = false, dayAmount = 0) {
     handle.rain.points.material.opacity = Math.min(1, handle.rainIntensity * 0.55 * (profile.rainHeaviness || 1));
 
     const posAttr = handle.rain.points.geometry.attributes.position;
+    // Real landing height — was a fixed 0 regardless of biome, so rain
+    // used to visibly fall INTO solid higher ground on hills, or hover
+    // above/vanish below the actual water surface rather than genuinely
+    // reaching it. Falls back to 0 for any biome without a real
+    // whole-level water plane (unchanged behavior there).
+    const landY = handle.rain.waterLevel !== undefined && handle.rain.waterLevel !== null ? handle.rain.waterLevel : 0;
     for (let i = 0; i < handle.rain.speeds.length; i++) {
       let y = posAttr.getY(i) - handle.rain.speeds[i] * dt * Math.max(0.15, handle.rainIntensity);
-      if (y < 0) y = 60;
+      const x = posAttr.getX(i), z = posAttr.getZ(i);
+      if (y < landY) {
+        y = 60;
+        // Real per-drop landing point (before it resets to the top) —
+        // spawn a ripple here if this biome has real water and a pool
+        // slot is actually free, before the drop's XZ gets reassigned
+        // for its next fall.
+        if (handle.rain.ripplePool && Math.random() < RIPPLE_SPAWN_CHANCE) {
+          spawnRipple(handle.rain.ripplePool, x, landY + 0.02, z, handle.rainIntensity);
+        }
+      }
       posAttr.setY(i, y);
       // Rain drifts sideways with the wind instead of falling perfectly
-      // straight down.
-      posAttr.setX(i, posAttr.getX(i) + windX * dt * 0.4);
-      posAttr.setZ(i, posAttr.getZ(i) + windZ * dt * 0.4);
+      // straight down, plus a small per-drop wobble (driftPhase) so drops
+      // don't all trace the exact same drift line — real rain has some
+      // per-drop scatter even under steady wind.
+      const wobble = Math.sin(handle.elapsed * 3 + handle.rain.driftPhase[i]) * 0.15;
+      posAttr.setX(i, x + (windX + wobble) * dt * 0.4);
+      posAttr.setZ(i, z + (windZ + wobble) * dt * 0.4);
     }
+    posAttr.needsUpdate = true;
+    if (handle.rain.ripplePool) updateRipplePool(handle.rain.ripplePool, dt);
     posAttr.needsUpdate = true;
   }
 
@@ -750,6 +861,13 @@ function disposeWeatherSystem(scene, handle) {
     scene.remove(handle.rain.points);
     handle.rain.points.geometry.dispose();
     handle.rain.points.material.dispose();
+    if (handle.rain.ripplePool) {
+      for (const r of handle.rain.ripplePool) {
+        scene.remove(r);
+        r.material.dispose();
+      }
+      handle.rain.ripplePool[0].geometry.dispose(); // shared geometry across every pool member — dispose once, not per-instance
+    }
   }
   if (handle.distantLightning) {
     scene.remove(handle.distantLightning.sprite);

@@ -1874,7 +1874,7 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
   grassHandle = createGrass(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), TERRAIN_SIZE * 0.46);
   flowersHandle = createFlowers(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), TERRAIN_SIZE * 0.46);
   footstepGlowHandle = level.biome === "verdant" ? createFootstepGlowSystem(scene, 40) : null;
-  weatherHandle = createWeatherSystem(scene, level.biome);
+  weatherHandle = createWeatherSystem(scene, level.biome, LIQUID_LEVEL[level.biome]);
   cloudsHandle = createClouds(scene, level.biome);
   cloudLayerHandle = createCloudLayer(scene);
   horizonHandle = level.biome === "crystal" ? null : createHorizonSilhouettes(scene, level.biome); // Coral Shallows is open ocean now — no distant mountain backdrop, and horizonSilhouettes.js still isn't part of this session so this stays a main.js-only fix rather than touching that file's still-old icy Crystal-Spire theming
@@ -2718,6 +2718,28 @@ function animate() {
   updateClouds(cloudsHandle, dt, wind, dayNight.dayAmount, wind.rainIntensity, dayNight.skyHorizon, dayNightCycle.sunBody.group.position, camera.position);
   updateCloudLayer(cloudLayerHandle, dt, wind, dayNight.dayAmount, dayNight.skyHorizon);
   updateRealisticCloudDome(realisticCloudDomeHandle, dt, dayNight.dayAmount, dayNight.skyHorizon, dayNight.skyZenith, wind.rainIntensity);
+  // Per explicit "align the sun to where it would be in the sky
+  // background" request — steers ONLY the drawn sun sprite/glow toward
+  // the current mood texture's own real sun position (computed in
+  // updateRealisticCloudDome above, null when the current texture has no
+  // known sun spot — storm/night, or mid-transition). The REAL
+  // DirectionalLight (dayNightCycle.sun, drives actual shading/shadows)
+  // is deliberately left on its normal physically-motivated orbit — this
+  // is the same "decouple the drawn disc from the real light" precedent
+  // SUN_VISUAL_HORIZON_OFFSET already established for a different reason.
+  // Fast blend (not an instant snap, but converges in well under a
+  // second) rather than a slow one — new mood textures already fade in
+  // from fully invisible (see clouds.js's own transition system), so
+  // this converges to the new target while still hidden in that fade,
+  // and is never seen actually moving.
+  if (realisticCloudDomeHandle && realisticCloudDomeHandle.moodSunTarget) {
+    const target = realisticCloudDomeHandle.moodSunTarget;
+    const radius = dayNightCycle.sunBody.group.position.length() || 1;
+    const alignT = Math.min(1, dt * 3.0);
+    dayNightCycle.sunBody.group.position.x += (target.x * radius - dayNightCycle.sunBody.group.position.x) * alignT;
+    dayNightCycle.sunBody.group.position.y += (target.y * radius - dayNightCycle.sunBody.group.position.y) * alignT;
+    dayNightCycle.sunBody.group.position.z += (target.z * radius - dayNightCycle.sunBody.group.position.z) * alignT;
+  }
   // Clouds sometimes drift in front of the sun/moon — a cheap angular
   // check (see getCloudOcclusionFactor's own comment for why this isn't
   // real depth-buffer occlusion), applied as a further opacity

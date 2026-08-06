@@ -568,14 +568,18 @@ function createRealisticCloudDome(scene) {
   // actually look). thetaStart trims a small cone off the very top of
   // the sphere so that singular vertex — and the worst-distorted
   // triangles around it — are never part of the geometry at all, rather
-  // than trying to hide a real pinch with texture tricks. The resulting
-  // small gap at the true zenith just shows the gradient sky dome behind
-  // it (radius 900, further out), which is correct — real skies don't
-  // have dramatic cloud detail directly overhead anyway. The south pole
-  // is left untouched: it's already fully transparent (the source
-  // texture's ground half was zeroed out during preprocessing) and is
-  // below the horizon regardless, so its own pinch is never visible.
-  const NORTH_POLE_TRIM = 0.07; // radians, ~4°
+  // than trying to hide a real pinch with texture tricks. A flat patch
+  // disc covers the resulting gap (below) — shrunk from an earlier 0.07
+  // rad per direct "looks like a cylinder" feedback: any flat single-
+  // color disc reads as an artificial, distinctly-shaped cap against a
+  // textured, varied dome regardless of how well its COLOR matches, so
+  // the fix is making the visible patch as small as possible instead of
+  // color-matching it better — while still trimming enough to keep the
+  // singular vertex and the very worst few rings of pinched triangles
+  // out of the actual geometry. The south pole is left untouched: it's
+  // already fully transparent (the source texture's ground half was
+  // zeroed out during preprocessing) and is below the horizon regardless.
+  const NORTH_POLE_TRIM = 0.022; // was 0.07 — roughly a third the size
   const geo = new THREE.SphereGeometry(RADIUS, 48, 24, 0, Math.PI * 2, NORTH_POLE_TRIM, Math.PI - NORTH_POLE_TRIM);
   const mat = new THREE.MeshBasicMaterial({
     map: texture, transparent: true, depthWrite: false, side: THREE.BackSide,
@@ -592,16 +596,11 @@ function createRealisticCloudDome(scene) {
   mesh.renderOrder = -95;
   scene.add(mesh);
 
-  // Per explicit "patch the hole at the top of the sky box" — the
-  // NORTH_POLE_TRIM gap above was built assuming the further-out gradient
-  // sky dome would show through cleanly underneath it, but that isn't
-  // reading right in practice (a visible gap/seam rather than a clean
-  // hand-off between the two layers). Real patch instead of relying on
-  // that assumption: a small flat disc sized to exactly cover the
-  // trimmed cone, dynamically re-colored every frame (see
-  // updateRealisticCloudDome below) to match the dome's own CURRENT tint
-  // — so right at the seam it blends with the visible dome edge instead
-  // of risking a mismatched color of its own.
+  // Zenith patch — dynamically re-colored every frame (see
+  // updateRealisticCloudDome below) to match the dome's own CURRENT
+  // tint. Much smaller now (matches the shrunk trim above), so even
+  // though it's still technically a flat disc, it should no longer read
+  // as an obvious distinct "cap" shape the way the larger version did.
   const capRadius = RADIUS * Math.sin(NORTH_POLE_TRIM) * 1.05; // slightly oversized so it comfortably overlaps the dome's own trimmed edge, no thin gap left between them
   const capGeo = new THREE.CircleGeometry(capRadius, 24);
   capGeo.rotateX(Math.PI / 2); // lies flat, normal pointing down — this is viewed from BELOW (camera inside the dome looking up), not above

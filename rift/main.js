@@ -16,7 +16,7 @@ import { createHorizonSilhouettes, updateHorizonSilhouettes, disposeHorizonSilho
 import { createWildlife, updateWildlife, disposeWildlife } from "./wildlife.js";
 import { createLandmark, updateLandmark, disposeLandmark, LANDMARK_POSITION } from "./landmarks.js";
 import { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers } from "./graphicsSettings.js";
-import { loadPalmTreeModel, loadAngelfishModel, createRealPalmTree, createRealAngelfish } from "./models.js";
+import { loadPalmTreeModel, loadAngelfishModel, loadReefModel, createRealPalmTree, createRealAngelfish, createRealReef } from "./models.js";
 import { createWeatherSystem, updateWeatherSystem, disposeWeatherSystem } from "./weather.js";
 import { createClouds, updateClouds, disposeClouds, getCloudOcclusionFactor, createCloudLayer, updateCloudLayer, disposeCloudLayer, createRealisticCloudDome, updateRealisticCloudDome, disposeRealisticCloudDome } from "./clouds.js";
 import {
@@ -799,6 +799,7 @@ let reflectionFrameCounter = 999; // starts high so the first eligible frame alw
 // fish).
 let realPalmTrees = [];
 let realFish = [];
+let realReefStructures = [];
 let waterfallHandle = null;
 let oceanSurfaceDetailHandle = null;
 let riverCurrentHandle = null;
@@ -929,6 +930,8 @@ function teardownLevel() {
   realPalmTrees = [];
   for (const fish of realFish) scene.remove(fish.group);
   realFish = [];
+  for (const reef of realReefStructures) scene.remove(reef);
+  realReefStructures = [];
 }
 
 // Orients the camera to face AWAY from the biome's landmark — that's the
@@ -1557,6 +1560,73 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
       // issue is something else — visibility/lighting/distance from
       // wherever the player actually is when they look.
       console.log(`[models] real fish placed: ${placed}/${FISH_COUNT}`, placed > 0 ? realFish.map((f) => f.group.position.toArray().map((n) => n.toFixed(1))) : "(none placed)");
+    }).catch(() => {});
+
+    // Real reef structures — per explicit "import this model into the
+    // ocean as part of the ocean floor, could add copies and connect
+    // them to make it look realistic." Unlike the palm tree/fish, this
+    // source file's own bounds checked out as genuine (non-cubic, non-
+    // suspicious) geometry — see models.js's own comment — so the whole
+    // loaded scene is cloned wholesale, no cherry-picking needed.
+    // Several CLUSTERS (not one scattered pool like the fish) — each
+    // cluster's pieces sit close enough to overlap/touch their
+    // neighbors, which is what actually reads as "a connected reef
+    // system" rather than isolated identical props dotted around.
+    loadReefModel().then(() => {
+      if (currentLevelIdx !== spawnLevelIdx) return;
+      const CLUSTER_COUNT = 3;
+      const PIECES_PER_CLUSTER = 5;
+      const reefSeed = hashStringToSeed(WORLD_SEED + "::realReef");
+      const rng = mulberry32(reefSeed);
+      let placed = 0;
+      for (let c = 0; c < CLUSTER_COUNT; c++) {
+        // Cluster centers scattered independently of the landmark/fish —
+        // real reefs don't cluster only right next to the one landmark
+        // structure — but still real underwater points, same boundary/
+        // depth checks as fish placement.
+        let centerX, centerZ, centerFound = false;
+        for (let attempt = 0; attempt < 20 && !centerFound; attempt++) {
+          const angle = rng() * Math.PI * 2;
+          const dist = 15 + rng() * 85;
+          const cx = LANDMARK_POSITION.x + Math.cos(angle) * dist;
+          const cz = LANDMARK_POSITION.z + Math.sin(angle) * dist;
+          if (Math.hypot(cx, cz) > WORLD_BOUND_RADIUS - 10) continue;
+          const cGroundY = terrainHeightAt(level, cx, cz, WORLD_SEED);
+          if (cGroundY === null || cGroundY > LIQUID_LEVEL.crystal - 2) continue; // needs real depth for a whole cluster, not just a shallow puddle
+          centerX = cx; centerZ = cz; centerFound = true;
+        }
+        if (!centerFound) continue;
+        for (let p = 0; p < PIECES_PER_CLUSTER; p++) {
+          // Small offset from the cluster center — deliberately smaller
+          // than the model's own ~10-unit footprint so adjacent pieces
+          // genuinely overlap/touch rather than sitting as clearly
+          // separate objects that just happen to be nearby.
+          const ox = (rng() - 0.5) * 9;
+          const oz = (rng() - 0.5) * 9;
+          const x = centerX + ox, z = centerZ + oz;
+          if (Math.hypot(x, z) > WORLD_BOUND_RADIUS - 8) continue;
+          const groundY = terrainHeightAt(level, x, z, WORLD_SEED);
+          if (groundY === null || groundY > LIQUID_LEVEL.crystal - 1) continue;
+          const reef = createRealReef();
+          if (!reef) continue;
+          const scale = 0.8 + rng() * 0.5;
+          // Origin sits roughly mid-height in the source geometry (Y
+          // spans -5.36 to +4.81, not based at the bottom) — for a reef
+          // structure resting ON the seafloor, partial embedding into the
+          // sand reads as natural (real reefs grow out of the substrate,
+          // they don't perch cleanly on top of it the way a tree needs
+          // to), so this doesn't need the same precise base-alignment
+          // fix the palm tree required — just a modest upward lift so it
+          // isn't buried too deep.
+          reef.position.set(x, groundY + 1.4 * scale, z);
+          reef.rotation.y = rng() * Math.PI * 2;
+          reef.scale.setScalar(scale);
+          scene.add(reef);
+          realReefStructures.push(reef);
+          placed++;
+        }
+      }
+      console.log(`[models] real reef pieces placed: ${placed}/${CLUSTER_COUNT * PIECES_PER_CLUSTER}`);
     }).catch(() => {});
   }
 

@@ -11,7 +11,7 @@ import { getGraphicsSettings } from "./graphicsSettings.js";
 // of phase — same math, not a separate system.
 // -----------------------------------------------------------------------------
 
-const CYCLE_SECONDS = 480; // one full day/night cycle — long enough not to be distracting, short enough to actually see it move in a session
+const CYCLE_SECONDS = 900; // was 480 — slowed per explicit "slow down the day/night cycle" request (8min -> 15min per full cycle)
 const ORBIT_RADIUS = 260;
 const SKY_DOME_RADIUS = 900;
 // Per explicit "dynamic shadows that change direction with the sun"

@@ -545,7 +545,7 @@ function updateWeatherSystem(handle, dt, erupting = false, dayAmount = 0) {
       handle.rainTimer = randRange(profile.rainCycleMin, profile.rainCycleMax);
     }
     const targetIntensity = handle.rainActive ? 1 : 0;
-    handle.rainIntensity += (targetIntensity - handle.rainIntensity) * Math.min(1, dt * 0.6); // fades in/out over a few seconds rather than snapping
+    handle.rainIntensity += (targetIntensity - handle.rainIntensity) * Math.min(1, dt * 0.15); // was dt*0.6 (fully transitioned in ~5s) — slowed per explicit "make the weather change more gradual" request, now takes closer to 20-30s to fully ramp in/out
     handle.rain.points.material.opacity = Math.min(1, handle.rainIntensity * 0.55 * (profile.rainHeaviness || 1));
 
     const posAttr = handle.rain.points.geometry.attributes.position;

@@ -285,7 +285,7 @@ const BIOME_SHAPERS = {
     // modest so the height-to-radius RATIO is low — that ratio, not
     // the absolute height, is what reads as "broad landscape" vs.
     // "steep small hill."
-    const ISLAND_CORE = 78, ISLAND_BLEND = 88, ISLAND_PEAK = 20;
+    const ISLAND_CORE = 78, ISLAND_BLEND = 88, ISLAND_PEAK = 14; // was 20 — flattened per explicit "flatten the whole island" request. NOT lowered further than this: VALLEY_FLOOR (below, ~10.7 = LIQUID_LEVEL.crystal+0.9+1.8) needs to stay clearly BELOW the hill peak for the "notch stays low, hills rise above it" shaping to still make sense — checked this by hand before picking 14, an earlier attempt at 8 would have put the hill peak LOWER than the valley floor it's supposed to rise above.
 
     // COVE — an angular "notch" carves a beach opening through the hill
     // mass; everywhere OUTSIDE that wedge, the hill rises to its full

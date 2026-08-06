@@ -591,7 +591,29 @@ function createRealisticCloudDome(scene) {
   // that same sequence rather than being left to automatic sorting.
   mesh.renderOrder = -95;
   scene.add(mesh);
-  return { mesh, mat };
+
+  // Per explicit "patch the hole at the top of the sky box" — the
+  // NORTH_POLE_TRIM gap above was built assuming the further-out gradient
+  // sky dome would show through cleanly underneath it, but that isn't
+  // reading right in practice (a visible gap/seam rather than a clean
+  // hand-off between the two layers). Real patch instead of relying on
+  // that assumption: a small flat disc sized to exactly cover the
+  // trimmed cone, dynamically re-colored every frame (see
+  // updateRealisticCloudDome below) to match the dome's own CURRENT tint
+  // — so right at the seam it blends with the visible dome edge instead
+  // of risking a mismatched color of its own.
+  const capRadius = RADIUS * Math.sin(NORTH_POLE_TRIM) * 1.05; // slightly oversized so it comfortably overlaps the dome's own trimmed edge, no thin gap left between them
+  const capGeo = new THREE.CircleGeometry(capRadius, 24);
+  capGeo.rotateX(Math.PI / 2); // lies flat, normal pointing down — this is viewed from BELOW (camera inside the dome looking up), not above
+  const capMat = new THREE.MeshBasicMaterial({
+    color: 0xffffff, transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false,
+  });
+  const cap = new THREE.Mesh(capGeo, capMat);
+  cap.position.y = RADIUS * Math.cos(NORTH_POLE_TRIM);
+  cap.renderOrder = -95;
+  scene.add(cap);
+
+  return { mesh, mat, cap, capMat };
 }
 
 /**
@@ -727,6 +749,14 @@ function updateRealisticCloudDome(handle, dt, dayAmount, skyHorizonColor, skyZen
   // the base opacity toward fully opaque coverage on top of the existing
   // breathing pulse.
   handle.mat.opacity = (0.9 + stormAmount * 0.09) * breathe * transitionOpacityMult;
+  // Keep the zenith patch (createRealisticCloudDome's own `cap`) matching
+  // the dome's CURRENT tint/opacity every frame — the whole point of
+  // dynamically re-coloring it is so it never visibly mismatches the
+  // dome edge it's patching right up against.
+  if (handle.capMat) {
+    handle.capMat.color.copy(handle.mat.color);
+    handle.capMat.opacity = handle.mat.opacity;
+  }
 
   // A second, independent drift axis on top of the mesh's own Y rotation
   // — texture.offset.x slides the UVs horizontally at a different rate
@@ -742,6 +772,11 @@ function disposeRealisticCloudDome(scene, handle) {
   scene.remove(handle.mesh);
   handle.mesh.geometry.dispose();
   handle.mat.dispose();
+  if (handle.cap) {
+    scene.remove(handle.cap);
+    handle.cap.geometry.dispose();
+    handle.capMat.dispose();
+  }
   // realisticCloudTexture itself is NOT disposed here — it's a shared
   // module-level texture reused across every level load/teardown (same
   // reasoning as the other shared textures in this file, e.g. the cloud

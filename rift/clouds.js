@@ -534,49 +534,6 @@ const CLOUD_MOOD_POOLS = {
   duskDawn: ["sky_dusk_1.png", "sky_dusk_2.png", "sky_dusk_3.png", "sky_dusk_4.png", "sky_dusk_5.png", "sky_dusk_6.png"],
 };
 
-// Per explicit "align the sun to where it would be in the sky
-// background" request: each of these 8 photos has its own real sun/
-// bright-glow sitting at a different spot in frame (storm/night don't —
-// no entry for those, intentionally). UV coordinates found by locating
-// each texture's own brightest-region centroid directly (offline,
-// weighted by brightness^2 so it's dominated by the real bright core,
-// not just generally-lighter cloud areas) — not eyeballed.
-const MOOD_SUN_UV = {
-  "sky_day_1.png": [0.5413, 0.5263],
-  "sky_day_2.png": [0.4283, 0.5705],
-  "sky_dusk_1.png": [0.6013, 0.5929],
-  "sky_dusk_2.png": [0.5563, 0.5262],
-  "sky_dusk_3.png": [0.5083, 0.6257],
-  "sky_dusk_4.png": [0.6764, 0.3018],
-  "sky_dusk_5.png": [0.5931, 0.3213],
-  "sky_dusk_6.png": [0.4187, 0.5270],
-};
-const NORTH_POLE_TRIM = 0.07; // must match createRealisticCloudDome's own sphere geometry construction below
-
-/**
- * Converts a texture UV coordinate into the CURRENT world-space direction
- * that pixel is actually being displayed at — accounting for the dome's
- * own continuous slow rotation (domeRotationY), not just its static
- * un-rotated position. Matches THREE.SphereGeometry's own vertex
- * generation formula (phi from u around Y, theta from v down from the
- * pole), since that's the exact geometry this texture is mapped onto.
- * Returns a plain {x,y,z} unit-ish direction (not normalized to length 1
- * exactly, but very close — good enough for a visual alignment, this
- * isn't feeding anything that needs an exact unit vector).
- */
-function moodUVToWorldDirection(u, v, domeRotationY) {
-  const phi = u * Math.PI * 2;
-  const theta = NORTH_POLE_TRIM + v * (Math.PI - 2 * NORTH_POLE_TRIM);
-  const lx = -Math.cos(phi) * Math.sin(theta);
-  const ly = Math.cos(theta);
-  const lz = Math.sin(phi) * Math.sin(theta);
-  // Rotate by the dome's own current Y spin — without this, the "aligned"
-  // sun would only match the photo at the exact moment this texture first
-  // became active, then visibly drift away from the glow spot as the dome
-  // keeps slowly rotating underneath it.
-  const c = Math.cos(domeRotationY), s = Math.sin(domeRotationY);
-  return { x: lx * c + lz * s, y: ly, z: -lx * s + lz * c };
-}
 
 /**
  * Picks which condition bucket applies right now. Same 0.05/0.4 dayAmount
@@ -708,18 +665,6 @@ function updateRealisticCloudDome(handle, dt, dayAmount, skyHorizonColor, skyZen
   // Storm clouds drift noticeably faster than a calm sky's slow roll —
   // real storm fronts visibly move.
   handle.mesh.rotation.y += dt * (0.006 + stormAmount * 0.02);
-
-  // Per explicit "align the sun to where it would be in the sky
-  // background" request — computed fresh every frame (cheap, just a few
-  // trig calls) since it depends on the dome's own continuously-changing
-  // rotation. null when the current texture has no known sun spot (storm/
-  // night, or mid-transition) — the caller (main.js) leaves the sun on its
-  // normal physically-motivated orbit in that case.
-  handle.moodSunTarget = null;
-  if (handle.moodTextureName && MOOD_SUN_UV[handle.moodTextureName]) {
-    const [su, sv] = MOOD_SUN_UV[handle.moodTextureName];
-    handle.moodSunTarget = moodUVToWorldDirection(su, sv, handle.mesh.rotation.y);
-  }
 
   // Per explicit "I'd like to keep the colors for these sky photos"
   // follow-up: the mood textures (night/storm/day/duskDawn pools) now

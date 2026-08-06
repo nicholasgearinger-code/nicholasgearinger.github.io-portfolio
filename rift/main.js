@@ -2718,28 +2718,6 @@ function animate() {
   updateClouds(cloudsHandle, dt, wind, dayNight.dayAmount, wind.rainIntensity, dayNight.skyHorizon, dayNightCycle.sunBody.group.position, camera.position);
   updateCloudLayer(cloudLayerHandle, dt, wind, dayNight.dayAmount, dayNight.skyHorizon);
   updateRealisticCloudDome(realisticCloudDomeHandle, dt, dayNight.dayAmount, dayNight.skyHorizon, dayNight.skyZenith, wind.rainIntensity);
-  // Per explicit "align the sun to where it would be in the sky
-  // background" request — steers ONLY the drawn sun sprite/glow toward
-  // the current mood texture's own real sun position (computed in
-  // updateRealisticCloudDome above, null when the current texture has no
-  // known sun spot — storm/night, or mid-transition). The REAL
-  // DirectionalLight (dayNightCycle.sun, drives actual shading/shadows)
-  // is deliberately left on its normal physically-motivated orbit — this
-  // is the same "decouple the drawn disc from the real light" precedent
-  // SUN_VISUAL_HORIZON_OFFSET already established for a different reason.
-  // Fast blend (not an instant snap, but converges in well under a
-  // second) rather than a slow one — new mood textures already fade in
-  // from fully invisible (see clouds.js's own transition system), so
-  // this converges to the new target while still hidden in that fade,
-  // and is never seen actually moving.
-  if (realisticCloudDomeHandle && realisticCloudDomeHandle.moodSunTarget) {
-    const target = realisticCloudDomeHandle.moodSunTarget;
-    const radius = dayNightCycle.sunBody.group.position.length() || 1;
-    const alignT = Math.min(1, dt * 3.0);
-    dayNightCycle.sunBody.group.position.x += (target.x * radius - dayNightCycle.sunBody.group.position.x) * alignT;
-    dayNightCycle.sunBody.group.position.y += (target.y * radius - dayNightCycle.sunBody.group.position.y) * alignT;
-    dayNightCycle.sunBody.group.position.z += (target.z * radius - dayNightCycle.sunBody.group.position.z) * alignT;
-  }
   // Clouds sometimes drift in front of the sun/moon — a cheap angular
   // check (see getCloudOcclusionFactor's own comment for why this isn't
   // real depth-buffer occlusion), applied as a further opacity
@@ -2772,6 +2750,21 @@ function animate() {
   dayNightCycle.sunBody.core.material.opacity *= stormSunDim;
   dayNightCycle.sunBody.glow.material.opacity *= stormSunDim;
   dayNightCycle.sun.intensity *= Math.max(0.3, stormSunDim);
+  // Per explicit "definitely major issues aligning the sun with the
+  // skybox... let's make it invisible but still retain all effects and
+  // let the background sun fake it" — the real sun's drawn disc/glow/
+  // beams are forced fully invisible here, LAST, after every dimming/
+  // occlusion/storm calculation above has already run. Those all still
+  // execute and still drive the REAL DirectionalLight's own intensity
+  // (shading, shadows, everything gameplay-relevant) — only the visible
+  // sprite is zeroed out. One of the sky mood textures' own baked-in sun
+  // glow (still there under the hood, just suppressed to a soft ambient
+  // highlight rather than a sharp disc — see clouds.js) now reads as
+  // "the sun" instead, with no risk of two independent systems ever
+  // disagreeing about where it should be.
+  dayNightCycle.sunBody.core.material.opacity = 0;
+  dayNightCycle.sunBody.glow.material.opacity = 0;
+  for (const sprite of dayNightCycle.sunBeams.sprites) sprite.material.opacity = 0;
   setAmbientDayAmount(dayNight.dayAmount);
   if (currentLevelIdx >= 0 && horizonHandle) updateHorizonSilhouettes(horizonHandle, LEVELS[currentLevelIdx].biome, dayNight.dayAmount);
   updateLightShafts(lightShaftHandles, dayNight.dayAmount);

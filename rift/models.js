@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
 import { clone as skeletonClone } from "three/addons/utils/SkeletonUtils.js";
 
 // -----------------------------------------------------------------------------
@@ -61,12 +62,27 @@ function loadAngelfishModel() {
 
 let reefGLTF = null;
 let reefLoadPromise = null;
+let dracoLoader = null;
+function getDracoLoader() {
+  if (dracoLoader) return dracoLoader;
+  dracoLoader = new DRACOLoader();
+  // Same CDN this project's whole importmap already resolves "three/
+  // addons/" through (see index.html) — this is genuinely where three.js
+  // itself ships its Draco decoder binaries, not a separate/new
+  // dependency being introduced.
+  dracoLoader.setDecoderPath("https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/draco/");
+  return dracoLoader;
+}
 function loadReefModel() {
   if (reefGLTF) return Promise.resolve(reefGLTF);
   if (reefLoadPromise) return reefLoadPromise;
   const url = new URL("models/reef.glb", import.meta.url).href;
   reefLoadPromise = new Promise((resolve, reject) => {
-    new GLTFLoader().load(
+    // The optimized/decimated file (111MB -> 5.6MB) REQUIRES
+    // KHR_draco_mesh_compression — without setDRACOLoader here,
+    // GLTFLoader throws rather than silently falling back, since the
+    // file's own extensionsRequired lists it.
+    new GLTFLoader().setDRACOLoader(getDracoLoader()).load(
       url,
       (gltf) => { reefGLTF = gltf; console.log("[models] reef loaded:", url); resolve(gltf); },
       undefined,
@@ -153,6 +169,8 @@ function createRealAngelfish() {
  * scene is cloned wholesale rather than needing to cherry-pick one named
  * child the way the palm tree did.
  */
+let reefLitMaterial = null; // built once, lazily, reused across every reef clone — see its own comment below
+
 function createRealReef() {
   if (!reefGLTF) return null; // caller's responsibility to await loadReefModel() first
   const group = reefGLTF.scene.clone(true);
@@ -160,7 +178,36 @@ function createRealReef() {
     if (obj.isMesh) {
       obj.castShadow = true;
       obj.receiveShadow = true;
-      if (obj.material) obj.material.side = THREE.DoubleSide; // same defensive reasoning as the palm tree's own fronds — thin ledge/coral geometry can be single-sided in the source file
+      // The optimized/decimated source file (111MB -> 5.6MB) dropped
+      // vertex normals entirely and converted the material to
+      // KHR_materials_unlit — presumably part of how the optimizer got
+      // the size down. THREE's GLTFLoader turns that into a
+      // MeshBasicMaterial, which doesn't react to the scene's real
+      // sun/moon lighting at all — every other real GLB model in this
+      // project (palm tree, fish) IS properly lit, so left as-is this
+      // would be the one flat/unlit exception. Two real fixes: (1)
+      // geometry has no NORMAL attribute anymore, so
+      // computeVertexNormals() rebuilds one directly from the (still
+      // fully intact) triangle data — a standard, safe operation, not
+      // guessing at anything; (2) material swapped to a real
+      // MeshStandardMaterial that reuses the SAME diffuse texture the
+      // unlit material was already using, built ONCE and reused across
+      // every clone (not per-instance) since all 15 reef pieces share
+      // the identical look anyway.
+      if (obj.geometry && !obj.geometry.attributes.normal) {
+        obj.geometry.computeVertexNormals();
+      }
+      if (obj.material) {
+        if (!reefLitMaterial) {
+          reefLitMaterial = new THREE.MeshStandardMaterial({
+            map: obj.material.map || null,
+            roughness: 0.95,
+            metalness: 0.02,
+            side: THREE.DoubleSide, // same defensive reasoning as the palm tree's own fronds — thin ledge/coral geometry can be single-sided in the source file
+          });
+        }
+        obj.material = reefLitMaterial;
+      }
       if (obj.geometry) { obj.geometry.computeBoundingSphere(); obj.geometry.computeBoundingBox(); }
     }
   });

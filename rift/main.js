@@ -2907,11 +2907,23 @@ function animate() {
     submergedState = false;
   }
   const isFullySubmerged = submergedState; // was 0.6 — still narrower than the ocean's own ~0.85-unit wave amplitude, so waves washing over the camera near the surface could still cross both edges of the dead zone repeatedly, flipping the underwater post-process (fog/distortion/render-target pass) on and off every couple frames. 1.1 comfortably exceeds the max wave amplitude, so only an actual sustained surface crossing (not wave bob) flips the state now.
-  if (isFullySubmerged) {
+  // Per explicit "remove underwater lighting and fog" — same toggle
+  // pattern as UNDERWATER_EFFECTS_ENABLED below (single flag, not a
+  // deletion, for a clean revert). This one specifically gates the
+  // fog/sun/ambient/tint/waterVolumeMesh color+intensity changes — the
+  // one underwater system that was STILL fully active even after
+  // UNDERWATER_EFFECTS_ENABLED=false disabled the separate screen-space
+  // render path. With this off too, being underwater no longer changes
+  // scene lighting/fog AT ALL — the seafloor/water now render under
+  // exactly the same lighting as everything else, regardless of depth or
+  // submersion state.
+  const UNDERWATER_LIGHTING_ENABLED = false;
+  if (isFullySubmerged && UNDERWATER_LIGHTING_ENABLED) {
     const uwStyle = UNDERWATER_STYLE[currentBiome] || UNDERWATER_STYLE.default;
     // Per explicit "remove underwater color effects that could be
     // darkening everything, except at night/during a storm it should be
     // less bright" — clarity is 0 at night (dayAmount=0) OR during a full
+    // storm (stormAmount=1), preserving exactly today's existing dim
     // storm (stormAmount=1), preserving exactly today's existing dim
     // underwater look in both those cases untouched. It only ever climbs
     // toward 1 on a bright, stormless day, and that's where fog/tint get

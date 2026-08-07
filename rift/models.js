@@ -221,6 +221,10 @@ const CORAL_FILES = {
   stylaster: "stylaster.glb",
   pocillopora: "pocillopora.glb",
   goniastrea: "goniastrea.glb",
+  meandrina: "meandrina.glb",
+  heliopora: "heliopora.glb",
+  acropora: "acropora.glb",
+  distichopora: "distichopora.glb",
 };
 const coralGLTFs = {};
 const coralLoadPromises = {};
@@ -248,7 +252,18 @@ function createRealCoral(species) {
     if (obj.isMesh) {
       obj.castShadow = true;
       obj.receiveShadow = true;
-      if (obj.material) obj.material.side = THREE.DoubleSide; // same defensive reasoning as the palm tree/reef — coral branch geometry can be thin/single-sided
+      if (obj.material) {
+        obj.material.side = THREE.DoubleSide; // same defensive reasoning as the palm tree/reef — coral branch geometry can be thin/single-sided
+        // Defensive, per "appears black, no color" report — GLTFLoader
+        // is SUPPOSED to set this correctly on its own for a baseColor
+        // texture, and the source files' embedded images decode cleanly
+        // on inspection, so this alone probably isn't the real cause
+        // (most likely still a texture-decode issue from the same
+        // upload-corruption class as the earlier RangeError) — but
+        // forcing it explicitly costs nothing and rules this out as a
+        // contributing factor either way.
+        if (obj.material.map) obj.material.map.colorSpace = THREE.SRGBColorSpace;
+      }
       if (obj.geometry) { obj.geometry.computeBoundingSphere(); obj.geometry.computeBoundingBox(); }
     }
   });

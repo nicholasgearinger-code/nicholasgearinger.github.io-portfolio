@@ -1631,77 +1631,10 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
       }
     }).catch(() => {}); // load failure already logged inside models.js — nothing further to do here
 
-    loadAngelfishModel().then(() => {
-      if (currentLevelIdx !== spawnLevelIdx) return;
-      const FISH_COUNT = 16; // was 8 — bumped since the area they're spread across is now much larger, 8 would read as sparse/empty
-      const MAX_ATTEMPTS = 60;
-      const fishSeed = hashStringToSeed(WORLD_SEED + "::realFish");
-      const rng = mulberry32(fishSeed);
-      let placed = 0;
-      for (let i = 0; i < MAX_ATTEMPTS && placed < FISH_COUNT; i++) {
-        // Per explicit "should be all over the sea floor" (coral, but
-        // applies equally here) — was landmark-relative (8-35 units from
-        // LANDMARK_POSITION, which itself sits ~89 units from world
-        // origin), clustering everything into one small patch of a much
-        // larger reachable seafloor. Centered on world origin now,
-        // spanning the real playable radius directly, so fish can turn
-        // up anywhere the player actually swims instead of only right
-        // next to the landmark.
-        const angle = rng() * Math.PI * 2;
-        const dist = rng() * (WORLD_BOUND_RADIUS - 8);
-        const x = Math.cos(angle) * dist;
-        const z = Math.sin(angle) * dist;
-        // Real playable radius check — still needed even centered at
-        // origin now, since dist alone doesn't already guarantee this
-        // (kept for clarity/defense even though it's now redundant with
-        // the dist formula above).
-        if (Math.hypot(x, z) > WORLD_BOUND_RADIUS - 8) continue;
-        const groundY = terrainHeightAt(level, x, z, WORLD_SEED);
-        if (groundY === null || groundY > LIQUID_LEVEL.crystal - 1.5) continue; // needs real water depth above it, not a shallow puddle right at the seafloor
-        const depth = Math.min(LIQUID_LEVEL.crystal - groundY - 0.8, 1 + rng() * 3.5);
-        const fish = createRealAngelfish();
-        if (!fish) continue;
-        fish.group.position.set(x, LIQUID_LEVEL.crystal - depth, z);
-        fish.group.rotation.y = rng() * Math.PI * 2;
-        // Corrective scale, not decorative variety — this model's raw
-        // geometry measures ~20 units long as exported (verified against
-        // its accessor bounds: mesh[0] Z spans -10.14 to 10.14). The
-        // previous 0.6-0.9 "variety" multiplier left it roughly
-        // 12-18 units long — a MASSIVE fish, ~10x a real emperor
-        // angelfish relative to the player's 1.6-unit eye height, almost
-        // certainly why it wasn't recognizable as "a fish" even if
-        // something was technically rendering (the camera would likely
-        // end up inside or pressed right up against one small part of
-        // its body). Target ~0.35-0.5 units, a small reef fish visible
-        // at a reasonable distance without being unrealistically large.
-        const scale = 0.018 + rng() * 0.007;
-        fish.group.scale.setScalar(scale);
-        // Simple wander path, independent of the skeletal swim animation
-        // (which only animates the body/fins in place) — a slow circular
-        // drift so the fish actually moves through the reef rather than
-        // hovering on one spot. Center/radius/phase are baked onto the
-        // instance itself so updateRealFish (animate loop) has everything
-        // it needs without a parallel lookup array.
-        fish.wanderCenterX = x; fish.wanderCenterZ = z;
-        fish.wanderRadius = 3 + rng() * 5;
-        fish.wanderSpeed = 0.15 + rng() * 0.15;
-        fish.wanderPhase = rng() * Math.PI * 2;
-        fish.wanderY = LIQUID_LEVEL.crystal - depth;
-        scene.add(fish.group);
-        realFish.push(fish);
-        placed++;
-      }
-      // Diagnostic — per repeated "still no fish" with no new evidence to
-      // narrow down why: this makes the NEXT console check conclusive
-      // rather than another guess. If placed is 0, the spawn loop itself
-      // is still rejecting every candidate (a real remaining bug worth
-      // digging into further). If placed > 0, spawning is working and the
-      // issue is something else — visibility/lighting/distance from
-      // wherever the player actually is when they look.
-      console.log(`[models] real fish placed: ${placed}/${FISH_COUNT}`, placed > 0 ? realFish.map((f) => f.group.position.toArray().map((n) => n.toFixed(1))) : "(none placed)");
-    }).catch(() => {});
+    // Fish spawning moved below, after coral placement — see that
+    // block's own comment for why (per explicit "make sure the fish are
+    // spawning right over the coral").
 
-    // Real reef structures — per explicit "import this model into the
     // ocean as part of the ocean floor, could add copies and connect
     // them to make it look realistic." Unlike the palm tree/fish, this
     // source file's own bounds checked out as genuine (non-cubic, non-
@@ -1777,7 +1710,7 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
     // broken unit export like the palm tree/fish were), targeting a
     // roughly similar FINAL decorative size (~0.3-0.65 units) across all
     // three despite their differing raw sizes.
-    const CORAL_SPECIES = ["stylaster", "pocillopora", "goniastrea"];
+    const CORAL_SPECIES = ["stylaster", "pocillopora", "goniastrea", "meandrina", "heliopora", "acropora", "distichopora"];
     const CORAL_SCALE_RANGE = {
       // Roughly doubled from the previous pass per "is it really small
       // or invisible" — even the earlier ~0.3-0.65 unit final size (a
@@ -1789,8 +1722,18 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
       stylaster: [5.5, 7.5],    // raw ~0.17 tall -> ~0.94-1.28 final
       pocillopora: [3.8, 5.2],  // raw ~0.24 wide -> ~0.91-1.24 final
       goniastrea: [6.5, 9.0],   // raw ~0.09 wide -> ~0.59-0.82 final
+      // 4 new species per explicit "add more to the reef with good
+      // variety" — deliberately NOT all forced into the same final-size
+      // band this time; real reefs mix small fine-branching pieces with
+      // larger coral heads, and now there's enough species to actually
+      // show that range rather than everything reading as similar-sized
+      // blobs.
+      meandrina: [2.2, 3.2],     // raw ~0.40 wide (brain coral, already fairly large) -> ~0.88-1.29 final
+      heliopora: [2.0, 3.0],     // raw ~0.44 wide (blue coral, branching/lobed) -> ~0.88-1.32 final
+      acropora: [16, 26],        // raw ~0.018 max — a genuine close-up "detail view" of a tiny staghorn fragment, needs a large multiplier -> ~0.28-0.46 final, deliberately smaller/finer than the others
+      distichopora: [2.6, 3.8],  // raw ~0.24 tall -> ~0.62-0.91 final
     };
-    Promise.all(CORAL_SPECIES.map((s) => loadCoralModel(s))).then(() => {
+    Promise.all([...CORAL_SPECIES.map((s) => loadCoralModel(s)), loadAngelfishModel()]).then(() => {
       if (currentLevelIdx !== spawnLevelIdx) return;
       // Was a fixed-24-attempt loop — now that spawn points scatter
       // across the WHOLE map (including the dry island itself, which
@@ -1798,8 +1741,8 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
       // silently place well under the target. Retry-until-reached
       // instead, same pattern fish already uses, per explicit "should be
       // more than just one."
-      const CORAL_COUNT = 70;
-      const CORAL_MAX_ATTEMPTS = 260;
+      const CORAL_COUNT = 220; // was 70 — per explicit "fill it in as much as possible," with 7 species now (was 3) there's real variety to actually fill a denser reef with rather than repeating a small set
+      const CORAL_MAX_ATTEMPTS = 750;
       const coralSeed = hashStringToSeed(WORLD_SEED + "::realCoral");
       const rng = mulberry32(coralSeed);
       let placed = 0;
@@ -1836,6 +1779,72 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
         placed++;
       }
       console.log(`[models] real coral pieces placed: ${placed}/${CORAL_COUNT}`);
+
+      // Fish spawning — moved here, AFTER coral placement, specifically
+      // per explicit "make sure the fish we have is spawning right over
+      // the coral." Previously fish and coral picked completely
+      // independent random points, so any overlap between them was pure
+      // coincidence. Now each fish picks one of the coral pieces JUST
+      // PLACED above and spawns directly above its (x,z) — real reef
+      // fish do exactly this in practice, hovering and feeding right
+      // over the structure rather than scattered evenly across open
+      // sand. Falls back to the old independent-random placement only if
+      // no coral ended up placed at all (shouldn't normally happen, but
+      // keeps fish from silently vanishing if it ever does).
+      const FISH_COUNT = 16; // was 8 — bumped since the area they're spread across is now much larger, 8 would read as sparse/empty
+      const fishSeed = hashStringToSeed(WORLD_SEED + "::realFish");
+      const fishRng = mulberry32(fishSeed);
+      let fishPlaced = 0;
+      const MAX_FISH_ATTEMPTS = Math.max(60, FISH_COUNT * 4);
+      for (let i = 0; i < MAX_FISH_ATTEMPTS && fishPlaced < FISH_COUNT; i++) {
+        let x, z, groundY;
+        if (realCoralPieces.length > 0) {
+          const coralPiece = realCoralPieces[Math.floor(fishRng() * realCoralPieces.length)];
+          // Small jitter around the coral's own position rather than
+          // dead-center every time — a school hovering AROUND a coral
+          // head, not every fish stacked on the exact same point.
+          x = coralPiece.position.x + (fishRng() - 0.5) * 3;
+          z = coralPiece.position.z + (fishRng() - 0.5) * 3;
+          if (Math.hypot(x, z) > WORLD_BOUND_RADIUS - 8) continue;
+          groundY = terrainHeightAt(level, x, z, WORLD_SEED);
+        } else {
+          const angle = fishRng() * Math.PI * 2;
+          const dist = fishRng() * (WORLD_BOUND_RADIUS - 8);
+          x = Math.cos(angle) * dist;
+          z = Math.sin(angle) * dist;
+          groundY = terrainHeightAt(level, x, z, WORLD_SEED);
+        }
+        if (groundY === null || groundY > LIQUID_LEVEL.crystal - 1.5) continue; // needs real water depth above it, not a shallow puddle right at the seafloor
+        // Depth capped lower (1-2.5 above the floor, was 1-4.5) — fish
+        // should read as hovering just above the coral itself, not
+        // anywhere up to mid-water-column above it.
+        const depth = Math.min(LIQUID_LEVEL.crystal - groundY - 0.8, 1 + fishRng() * 1.5);
+        const fish = createRealAngelfish();
+        if (!fish) continue;
+        fish.group.position.set(x, LIQUID_LEVEL.crystal - depth, z);
+        fish.group.rotation.y = fishRng() * Math.PI * 2;
+        // Corrective scale, not decorative variety — this model's raw
+        // geometry measures ~20 units long as exported (verified against
+        // its accessor bounds: mesh[0] Z spans -10.14 to 10.14). Target
+        // ~0.35-0.5 units, a small reef fish visible at a reasonable
+        // distance without being unrealistically large.
+        const scale = 0.018 + fishRng() * 0.007;
+        fish.group.scale.setScalar(scale);
+        // Simple wander path, independent of the skeletal swim animation
+        // (which only animates the body/fins in place) — a tighter
+        // radius than before (was 3-8) so the wander keeps the fish
+        // actually near the coral it spawned over, not drifting well
+        // away from it over time.
+        fish.wanderCenterX = x; fish.wanderCenterZ = z;
+        fish.wanderRadius = 1.5 + fishRng() * 2.5;
+        fish.wanderSpeed = 0.15 + fishRng() * 0.15;
+        fish.wanderPhase = fishRng() * Math.PI * 2;
+        fish.wanderY = LIQUID_LEVEL.crystal - depth;
+        scene.add(fish.group);
+        realFish.push(fish);
+        fishPlaced++;
+      }
+      console.log(`[models] real fish placed: ${fishPlaced}/${FISH_COUNT}`, fishPlaced > 0 ? realFish.map((f) => f.group.position.toArray().map((n) => n.toFixed(1))) : "(none placed)");
     }).catch(() => {});
   }
 

@@ -1035,7 +1035,7 @@ function getSeafloorSandColorTexture() {
 let seafloorSandNormalTexture = null;
 function getSeafloorSandNormalTexture() {
   if (seafloorSandNormalTexture) return seafloorSandNormalTexture;
-  const url = new URL("textures/seafloor_sand_normal.png", import.meta.url).href;
+  const url = new URL("textures/seafloor_sand_normal.jpg", import.meta.url).href;
   seafloorSandNormalTexture = new THREE.TextureLoader().load(
     url,
     () => console.log("[main] seafloor sand normal texture loaded:", url),

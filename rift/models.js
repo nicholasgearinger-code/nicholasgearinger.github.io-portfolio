@@ -218,9 +218,9 @@ function createRealReef() {
 // so this just needs a real upscale multiplier at placement time, not a
 // structural fix.
 const CORAL_FILES = {
-  stylaster: "coral_stylaster.glb",
-  pocillopora: "coral_pocillopora.glb",
-  goniastrea: "coral_goniastrea.glb",
+  stylaster: "stylaster.glb",
+  pocillopora: "pocillopora.glb",
+  goniastrea: "goniastrea.glb",
 };
 const coralGLTFs = {};
 const coralLoadPromises = {};

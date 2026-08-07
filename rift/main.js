@@ -1642,9 +1642,16 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
     // three despite their differing raw sizes.
     const CORAL_SPECIES = ["stylaster", "pocillopora", "goniastrea"];
     const CORAL_SCALE_RANGE = {
-      stylaster: [2.6, 3.8],   // raw ~0.17 tall -> ~0.44-0.65 final
-      pocillopora: [1.8, 2.6], // raw ~0.24 wide -> ~0.43-0.62 final
-      goniastrea: [3.2, 4.6],  // raw ~0.09 wide -> ~0.29-0.42 final
+      // Roughly doubled from the previous pass per "is it really small
+      // or invisible" — even the earlier ~0.3-0.65 unit final size (a
+      // real, plausible coral-head size) could genuinely be hard to spot
+      // against a large, dark, busy-textured seafloor from normal
+      // swimming distance. Larger mature coral colonies real-world are
+      // very plausibly this size too, so this isn't unrealistic, just
+      // biased toward "actually visible" over "textbook-accurate small."
+      stylaster: [5.5, 7.5],    // raw ~0.17 tall -> ~0.94-1.28 final
+      pocillopora: [3.8, 5.2],  // raw ~0.24 wide -> ~0.91-1.24 final
+      goniastrea: [6.5, 9.0],   // raw ~0.09 wide -> ~0.59-0.82 final
     };
     Promise.all(CORAL_SPECIES.map((s) => loadCoralModel(s))).then(() => {
       if (currentLevelIdx !== spawnLevelIdx) return;

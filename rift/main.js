@@ -2830,26 +2830,37 @@ function animate() {
   const isFullySubmerged = submergedState; // was 0.6 — still narrower than the ocean's own ~0.85-unit wave amplitude, so waves washing over the camera near the surface could still cross both edges of the dead zone repeatedly, flipping the underwater post-process (fog/distortion/render-target pass) on and off every couple frames. 1.1 comfortably exceeds the max wave amplitude, so only an actual sustained surface crossing (not wave bob) flips the state now.
   if (isFullySubmerged) {
     const uwStyle = UNDERWATER_STYLE[currentBiome] || UNDERWATER_STYLE.default;
+    // Per explicit "remove underwater color effects that could be
+    // darkening everything, except at night/during a storm it should be
+    // less bright" — clarity is 0 at night (dayAmount=0) OR during a full
+    // storm (stormAmount=1), preserving exactly today's existing dim
+    // underwater look in both those cases untouched. It only ever climbs
+    // toward 1 on a bright, stormless day, and that's where fog/tint get
+    // pulled back and real light is let through — reading `weatherHandle`
+    // directly rather than the frame's own `wind` (computed later this
+    // same function) since this block runs first.
+    const stormAmountNow = weatherHandle ? weatherHandle.rainIntensity : 0;
+    const clarity = currentBiome === "crystal" ? dayNight.dayAmount * (1 - stormAmountNow) : 0;
     scene.fog.color.setHex(uwStyle.fogColor);
-    scene.fog.density = uwStyle.fogDensity;
+    scene.fog.density = uwStyle.fogDensity * (1 - clarity * 0.7); // up to 70% thinner at full clarity, never fully zero — a hard-zero fog would make the far seafloor cut off at an unnaturally sharp render-distance edge instead of fading
     sun.color.setHex(uwStyle.sunColor);
-    // Extra day-scaled brightness, crystal only — per explicit "bright,
-    // sunlight through the surface" reference request. Multiplies ON
-    // TOP of the style's own base sunMult/ambientMult rather than
-    // replacing them — other biomes are completely untouched, and
-    // crystal itself is unaffected at night (dayAmount 0 -> boost 1.0,
-    // i.e. no change from today's existing look), this only ever ADDS
-    // brightness as the sun climbs.
-    const dayBrightBoost = currentBiome === "crystal" ? 1.0 + dayNight.dayAmount * 0.9 : 1.0;
+    // Was capped at 1.9x (dayAmount*0.9), day-only — widened to 2.6x and
+    // now ALSO pulled back during storms (previously storm had zero
+    // effect on this specific multiplier, even though storms already dim
+    // the real sun elsewhere) via the same clarity term as everything
+    // else in this block, so this and fog/tint move together consistently
+    // instead of three separate ad-hoc day/storm rules.
+    const dayBrightBoost = currentBiome === "crystal" ? 1.0 + clarity * 1.6 : 1.0;
     sun.intensity *= uwStyle.sunMult * dayBrightBoost;
     ambientLight.color.setHex(uwStyle.ambientColor);
     ambientLight.intensity *= uwStyle.ambientMult * dayBrightBoost;
     underwaterDistortionMaterial.uniforms.tintColor.value.set(uwStyle.tint[0], uwStyle.tint[1], uwStyle.tint[2]);
-    underwaterDistortionMaterial.uniforms.tintStrength.value = uwStyle.tintStrength;
-    underwaterDistortionMaterial.uniforms.fogDensity.value = uwStyle.fogDensity;
+    underwaterDistortionMaterial.uniforms.tintStrength.value = uwStyle.tintStrength * (1 - clarity * 0.75); // the screen-space color-cast overlay — the main "everything looks tinted/darkened" culprit, pulled back the most aggressively of all these
+    underwaterDistortionMaterial.uniforms.fogDensity.value = scene.fog.density; // kept in sync with the real scene fog set just above, not the style's own un-scaled base value
     underwaterDistortionMaterial.uniforms.causticStrength.value = uwStyle.causticStrength;
     underwaterDistortionMaterial.uniforms.distortAmp.value = uwStyle.distortAmp;
     waterVolumeMesh.material.color.setHex(uwStyle.volumeColor);
+    waterVolumeMesh.material.opacity = 0.12 * (1 - clarity * 0.6); // the enclosing color-cast sphere itself — real, direct contributor to "everything looks a uniform color underwater" that none of the other tuning above actually touches. Direct assignment (not *=) from its own base 0.12 (set at creation) — this property has no other per-frame reset, so *= here would compound every frame while submerged and shrink toward zero within seconds instead of applying a stable reduction.
   }
   // The enclosing "water volume" sphere — follows the camera every
   // frame, only visible while actually fully submerged.

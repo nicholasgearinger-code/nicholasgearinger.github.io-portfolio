@@ -1496,36 +1496,28 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
 
     loadAngelfishModel().then(() => {
       if (currentLevelIdx !== spawnLevelIdx) return;
-      const FISH_COUNT = 8;
-      const MAX_ATTEMPTS = 40; // the new WORLD_BOUND_RADIUS check below now rejects roughly half of random angles, so a fixed FISH_COUNT-attempt loop (the old approach) would often place well under 8 — retry with a real cap instead of silently under-spawning
+      const FISH_COUNT = 16; // was 8 — bumped since the area they're spread across is now much larger, 8 would read as sparse/empty
+      const MAX_ATTEMPTS = 60;
       const fishSeed = hashStringToSeed(WORLD_SEED + "::realFish");
       const rng = mulberry32(fishSeed);
       let placed = 0;
       for (let i = 0; i < MAX_ATTEMPTS && placed < FISH_COUNT; i++) {
+        // Per explicit "should be all over the sea floor" (coral, but
+        // applies equally here) — was landmark-relative (8-35 units from
+        // LANDMARK_POSITION, which itself sits ~89 units from world
+        // origin), clustering everything into one small patch of a much
+        // larger reachable seafloor. Centered on world origin now,
+        // spanning the real playable radius directly, so fish can turn
+        // up anywhere the player actually swims instead of only right
+        // next to the landmark.
         const angle = rng() * Math.PI * 2;
-        // Pulled in from 20-90 to 8-35 per "still no fish" — the
-        // previous range put every fish 20+ units out over open water,
-        // requiring a real swim before any of them were even in range to
-        // spot. Close enough now that swimming just a short distance out
-        // from the beach should put the player within sight of at least
-        // one.
-        const dist = 8 + rng() * 27;
-        const x = LANDMARK_POSITION.x + Math.cos(angle) * dist;
-        const z = LANDMARK_POSITION.z + Math.sin(angle) * dist;
-        // The real bug: LANDMARK_POSITION itself sits ~89 units from
-        // world origin (55,-70), and WORLD_BOUND_RADIUS (the player's
-        // actual hard movement limit, ~112 units from origin — see the
-        // real clamp on camera position elsewhere in this file) leaves
-        // only ~22 units of margin beyond the landmark in the outward
-        // direction. This loop was only checking distance FROM THE
-        // LANDMARK, never distance from world origin — so on the
-        // outward-facing half of the circle, spawn points past roughly
-        // 22 units could land beyond the boundary the player can
-        // actually swim to, permanently unreachable regardless of how
-        // close the water/depth conditions looked. Explicit check now:
-        // reject (not just prefer) any point past the real playable
-        // radius, with a real margin so nothing spawns right at the
-        // edge either.
+        const dist = rng() * (WORLD_BOUND_RADIUS - 8);
+        const x = Math.cos(angle) * dist;
+        const z = Math.sin(angle) * dist;
+        // Real playable radius check — still needed even centered at
+        // origin now, since dist alone doesn't already guarantee this
+        // (kept for clarity/defense even though it's now redundant with
+        // the dist formula above).
         if (Math.hypot(x, z) > WORLD_BOUND_RADIUS - 8) continue;
         const groundY = terrainHeightAt(level, x, z, WORLD_SEED);
         if (groundY === null || groundY > LIQUID_LEVEL.crystal - 1.5) continue; // needs real water depth above it, not a shallow puddle right at the seafloor
@@ -1656,24 +1648,32 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
     };
     Promise.all(CORAL_SPECIES.map((s) => loadCoralModel(s))).then(() => {
       if (currentLevelIdx !== spawnLevelIdx) return;
-      const CORAL_COUNT = 24;
+      // Was a fixed-24-attempt loop — now that spawn points scatter
+      // across the WHOLE map (including the dry island itself, which
+      // fails the depth check every time), a fixed attempt count would
+      // silently place well under the target. Retry-until-reached
+      // instead, same pattern fish already uses, per explicit "should be
+      // more than just one."
+      const CORAL_COUNT = 70;
+      const CORAL_MAX_ATTEMPTS = 260;
       const coralSeed = hashStringToSeed(WORLD_SEED + "::realCoral");
       const rng = mulberry32(coralSeed);
       let placed = 0;
-      for (let i = 0; i < CORAL_COUNT; i++) {
+      for (let i = 0; i < CORAL_MAX_ATTEMPTS && placed < CORAL_COUNT; i++) {
+        // Per explicit "should be all over the sea floor" (revising the
+        // previous "near the shore" narrowing — that request and this
+        // one turned out to be in tension, and this is the more recent,
+        // more specific one) — centered on world origin now, spanning
+        // the real playable radius directly, same reasoning as fish just
+        // above: landmark-relative placement was clustering everything
+        // into one small patch of a much larger reachable seafloor.
         const angle = rng() * Math.PI * 2;
-        // Per explicit "make sure they spawn near the shore in the
-        // walkable area" — was 10-105 units from the landmark (scattered
-        // all the way out into deep water alongside the fish); narrowed
-        // to a band right off the beach instead, and the depth
-        // requirement below loosened to allow genuinely shallow,
-        // near-waterline placement rather than requiring real depth.
-        const dist = 6 + rng() * 20;
-        const x = LANDMARK_POSITION.x + Math.cos(angle) * dist;
-        const z = LANDMARK_POSITION.z + Math.sin(angle) * dist;
+        const dist = rng() * (WORLD_BOUND_RADIUS - 8);
+        const x = Math.cos(angle) * dist;
+        const z = Math.sin(angle) * dist;
         if (Math.hypot(x, z) > WORLD_BOUND_RADIUS - 8) continue;
         const groundY = terrainHeightAt(level, x, z, WORLD_SEED);
-        if (groundY === null || groundY > LIQUID_LEVEL.crystal - 0.3) continue; // was -1 (needed real depth) — shallow, right-off-the-beach water is fine here
+        if (groundY === null || groundY > LIQUID_LEVEL.crystal - 0.3) continue; // still allows genuinely shallow, near-waterline placement, just no longer confined to right off the beach specifically
         const species = CORAL_SPECIES[Math.floor(rng() * CORAL_SPECIES.length)];
         const coral = createRealCoral(species);
         if (!coral) continue;

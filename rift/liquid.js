@@ -1159,6 +1159,7 @@ vec2 foamVoronoiF1F2(vec2 p) {
   // eligible for foam at all, the Voronoi pattern then decides which
   // pixels within that region actually show it.
   float foamMask = clamp(max(bubbles * smoothstep(0.5, 0.92, vFoam), waveTendrilMask * 0.8), 0.0, 1.0);
+  foamMask *= 0.0; // per explicit "try removing all foam" — zeroed rather than the line deleted, for a clean single-line revert once this diagnostic pass is done
   diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0), foamMask);
   // Real specular sun-glitter — vSunGlint is computed per-vertex in
   // updateLiquidPlane (JS side) from the exact analytic Gerstner normal

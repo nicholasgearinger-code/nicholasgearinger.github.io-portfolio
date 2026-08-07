@@ -1435,6 +1435,7 @@ float gFoamMask = 0.0;`)
   float tendrilFalloff = 1.0 - smoothstep(0.0, tendrilReach, beyondLine);
   float tendrilFoam = clamp(tendrilLines * tendrilFalloff * step(beyondLine, tendrilReach), 0.0, 1.0);
   float foamMask = clamp(max(coreFoam, tendrilFoam * 0.85) * upwardFacing, 0.0, 1.0);
+  foamMask *= 0.0; // per explicit "try removing all foam" — zeroed rather than deleted, clean single-line revert
   gFoamMask = foamMask; // read by the emissivemap_fragment injection below, so foam stays visible even under night's dim lighting
   // Real sand right at the water's edge is ALWAYS wet — a permanent,
   // always-on dark band centered right at the mean waterline, not
@@ -1478,6 +1479,35 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
   terrainMesh = new THREE.Mesh(buildPlanetTerrain(level, WORLD_SEED), terrainMat);
   terrainMesh.receiveShadow = true;
   terrainMesh.castShadow = true; // the terrain's own elevation (spires, ridges) can shadow other parts of itself
+  // DIAGNOSTIC per explicit "apply a separate instance of material
+  // shader on just the sea floor" — a genuinely fresh, minimal
+  // MeshStandardMaterial sharing ZERO code with terrainMat's
+  // onBeforeCompile customization (no caustics, no foam, no wave-wash,
+  // no sand-ripple vertex displacement — just the plain sand PBR
+  // textures + vertexColors, exactly what MeshStandardMaterial does out
+  // of the box). Swapped in for the WHOLE terrain (not literally split
+  // per-face by depth — cheap and simple, and answers the real question
+  // either way: if the pattern is gone, it's genuinely something in
+  // terrainMat's shader customization I haven't found yet; if it's
+  // STILL there even on a completely bare material with no custom GLSL
+  // at all, the cause is somewhere else entirely — the mesh geometry/
+  // vertex colors themselves, or a different rendering layer). Toggle
+  // below for a clean single-flag revert.
+  const USE_DIAGNOSTIC_TERRAIN_MATERIAL = level.biome === "crystal";
+  if (USE_DIAGNOSTIC_TERRAIN_MATERIAL) {
+    const diagnosticMat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.9,
+      metalness: 0.05,
+      map: getSeafloorSandColorTexture(),
+      normalMap: getSeafloorSandNormalTexture(),
+      roughnessMap: getSeafloorSandRoughnessTexture(),
+    });
+    diagnosticMat.map.repeat.set(Math.max(6, Math.round(TERRAIN_SIZE / 6)), Math.max(6, Math.round(TERRAIN_SIZE / 6)));
+    diagnosticMat.normalMap.repeat.copy(diagnosticMat.map.repeat);
+    diagnosticMat.roughnessMap.repeat.copy(diagnosticMat.map.repeat);
+    terrainMesh.material = diagnosticMat;
+  }
   scene.add(terrainMesh);
 
   if (LIQUID_LEVEL[level.biome] !== undefined) {

@@ -1007,6 +1007,58 @@ function getSandBumpTexture() {
   return sandBumpTexture;
 }
 
+// Per explicit "let's add some sand to the seafloor" — a real, fuller PBR
+// texture set (color + normal + roughness) replacing the older 3-texture
+// setup above wherever it's actually used below. The normal map here is
+// specifically the OpenGL-convention variant (three.js/WebGL's own
+// convention) — the source pack also included a DirectX variant, which
+// would render lighting inverted/wrong if used here by mistake. AO and
+// height maps were also provided but deliberately NOT wired in: aoMap
+// requires a second UV channel (uv2) this terrain geometry doesn't have,
+// and true height-map displacement needs real vertex-shader work — both
+// meaningfully riskier than a straightforward texture swap, so left out
+// rather than attempted blind.
+let seafloorSandColorTexture = null;
+function getSeafloorSandColorTexture() {
+  if (seafloorSandColorTexture) return seafloorSandColorTexture;
+  const url = new URL("textures/seafloor_sand_color.jpg", import.meta.url).href;
+  seafloorSandColorTexture = new THREE.TextureLoader().load(
+    url,
+    () => console.log("[main] seafloor sand color texture loaded:", url),
+    undefined,
+    (err) => console.error("[main] seafloor sand color texture FAILED to load:", url, err)
+  );
+  seafloorSandColorTexture.colorSpace = THREE.SRGBColorSpace; // real baked color, same correction the old sandColorTexture needed
+  seafloorSandColorTexture.wrapS = seafloorSandColorTexture.wrapT = THREE.RepeatWrapping;
+  return seafloorSandColorTexture;
+}
+let seafloorSandNormalTexture = null;
+function getSeafloorSandNormalTexture() {
+  if (seafloorSandNormalTexture) return seafloorSandNormalTexture;
+  const url = new URL("textures/seafloor_sand_normal.png", import.meta.url).href;
+  seafloorSandNormalTexture = new THREE.TextureLoader().load(
+    url,
+    () => console.log("[main] seafloor sand normal texture loaded:", url),
+    undefined,
+    (err) => console.error("[main] seafloor sand normal texture FAILED to load:", url, err)
+  );
+  seafloorSandNormalTexture.wrapS = seafloorSandNormalTexture.wrapT = THREE.RepeatWrapping;
+  return seafloorSandNormalTexture;
+}
+let seafloorSandRoughnessTexture = null;
+function getSeafloorSandRoughnessTexture() {
+  if (seafloorSandRoughnessTexture) return seafloorSandRoughnessTexture;
+  const url = new URL("textures/seafloor_sand_roughness.jpg", import.meta.url).href;
+  seafloorSandRoughnessTexture = new THREE.TextureLoader().load(
+    url,
+    () => console.log("[main] seafloor sand roughness texture loaded:", url),
+    undefined,
+    (err) => console.error("[main] seafloor sand roughness texture FAILED to load:", url, err)
+  );
+  seafloorSandRoughnessTexture.wrapS = seafloorSandRoughnessTexture.wrapT = THREE.RepeatWrapping;
+  return seafloorSandRoughnessTexture;
+}
+
 function buildLevel(levelIdx) {
   teardownLevel();
   currentLevelIdx = levelIdx;
@@ -1038,20 +1090,26 @@ function buildLevel(levelIdx) {
     // portion is already heavily dressed with the caustics/wave-wash
     // effect below, so the grain reads fine there too.
     const repeatCount = Math.max(6, Math.round(TERRAIN_SIZE / 6));
-    const sandNormals = getSandNormalTexture().clone();
+    const sandNormals = getSeafloorSandNormalTexture().clone();
     sandNormals.needsUpdate = true;
     sandNormals.repeat.set(repeatCount, repeatCount);
     terrainMat.normalMap = sandNormals;
     terrainMat.normalScale = new THREE.Vector2(0.55, 0.55);
-    const sandColor = getSandColorTexture().clone();
+    const sandColor = getSeafloorSandColorTexture().clone();
     sandColor.needsUpdate = true;
     sandColor.repeat.set(repeatCount, repeatCount);
     terrainMat.map = sandColor;
-    const sandBump = getSandBumpTexture().clone();
-    sandBump.needsUpdate = true;
-    sandBump.repeat.set(repeatCount, repeatCount);
-    terrainMat.bumpMap = sandBump;
-    terrainMat.bumpScale = 0.4; // modest — this stacks with normalMap above rather than replacing it, so kept conservative to avoid double-counting the same surface detail into overly harsh shading
+    // roughnessMap replaces the old bumpMap here — a real PBR roughness
+    // channel (matte grit vs. smoother wet-looking patches) rather than
+    // bump's cruder fake-height approximation, now that a genuine
+    // roughness map is actually available. roughness stays set (0.9,
+    // just above, from the base material definition) as the multiplier
+    // this map's own values scale against, same as how map/vertexColors
+    // multiply together.
+    const sandRoughness = getSeafloorSandRoughnessTexture().clone();
+    sandRoughness.needsUpdate = true;
+    sandRoughness.repeat.set(repeatCount, repeatCount);
+    terrainMat.roughnessMap = sandRoughness;
     // Real procedural caustics, anchored to the actual seafloor geometry
     // via onBeforeCompile — not a screen-space overlay (which paints
     // every pixel identically regardless of view direction or what's

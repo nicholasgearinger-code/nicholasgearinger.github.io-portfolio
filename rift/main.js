@@ -1373,7 +1373,13 @@ float gFoamMask = 0.0;`)
   // it. New peak: (0.22+0.2)*0.7 = ~0.29, a real but genuinely secondary
   // highlight instead of the dominant feature of the whole seafloor.
   float dayCausticBoost = smoothstep(0.05, 0.4, uDayAmount) * 0.7;
-  float causticIntensity = net * underwaterMask * upwardFacing * (0.22 + crestFocus * 0.2) * dayCausticBoost;
+  // Zeroed per explicit "disable all underwater effects" — this one
+  // isn't even gated by camera submersion (underwaterMask is purely
+  // WORLD-position based, see its own comment above), so it's a real,
+  // separate candidate for whatever's actually causing the persistent
+  // pattern, independent of the render-path toggle above. Multiplying by
+  // 0 rather than deleting the line — same single-flag-revert reasoning.
+  float causticIntensity = net * underwaterMask * upwardFacing * (0.22 + crestFocus * 0.2) * dayCausticBoost * 0.0;
   diffuseColor.rgb += vec3(1.0, 0.92, 0.72) * causticIntensity;
 
   // Shoreline wave-wash — real waves surge up the beach slope and
@@ -3022,7 +3028,14 @@ function animate() {
   updateLightShafts(underwaterShaftHandles, dayNight.dayAmount);
   updateWorldPulse(dt);
   updateProjectiles(dt);
-  if (isFullySubmerged) {
+  // Per explicit "disable all underwater effects" — set to false rather
+  // than deleting any of the code below, so this is a clean single-flag
+  // revert once whatever's actually going on here (two verified, real
+  // fixes in a row produced zero visible change — genuinely more
+  // consistent with a caching/deployment issue than either fix being
+  // wrong, but not confirmed either way yet) gets sorted out.
+  const UNDERWATER_EFFECTS_ENABLED = false;
+  if (isFullySubmerged && UNDERWATER_EFFECTS_ENABLED) {
     // Two-pass render: scene (including the water volume mesh above,
     // which renders normally as part of it) to an offscreen target, then
     // a full-screen quad draws that texture back out with a

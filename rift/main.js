@@ -16,7 +16,7 @@ import { createHorizonSilhouettes, updateHorizonSilhouettes, disposeHorizonSilho
 import { createWildlife, updateWildlife, disposeWildlife } from "./wildlife.js";
 import { createLandmark, updateLandmark, disposeLandmark, LANDMARK_POSITION } from "./landmarks.js";
 import { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers } from "./graphicsSettings.js";
-import { loadPalmTreeModel, loadAngelfishModel, loadReefModel, createRealPalmTree, createRealAngelfish, createRealReef } from "./models.js";
+import { loadPalmTreeModel, loadAngelfishModel, loadReefModel, loadCoralModel, createRealPalmTree, createRealAngelfish, createRealReef, createRealCoral } from "./models.js";
 import { createWeatherSystem, updateWeatherSystem, disposeWeatherSystem } from "./weather.js";
 import { createClouds, updateClouds, disposeClouds, getCloudOcclusionFactor, createCloudLayer, updateCloudLayer, disposeCloudLayer, createRealisticCloudDome, updateRealisticCloudDome, disposeRealisticCloudDome } from "./clouds.js";
 import {
@@ -671,6 +671,13 @@ let starfieldPoints = null;
   starGeo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.8, sizeAttenuation: true, transparent: true, opacity: 1 });
   starfieldPoints = new THREE.Points(starGeo, starMat);
+  // Per explicit "stars... showing in front of the background clouds"
+  // report — had no explicit renderOrder at all (defaulted to 0), while
+  // the cloud dome explicitly uses -95/-100 (clouds.js). Same fix as
+  // dayNightCycle.js's sun/moon body and distant planet — -101 puts it
+  // behind every cloud layer, consistent with stars being the farthest
+  // background element, not painted on top of nearer cloud geometry.
+  starfieldPoints.renderOrder = -101;
   scene.add(starfieldPoints);
 }
 
@@ -800,6 +807,7 @@ let reflectionFrameCounter = 999; // starts high so the first eligible frame alw
 let realPalmTrees = [];
 let realFish = [];
 let realReefStructures = [];
+let realCoralPieces = [];
 let waterfallHandle = null;
 let oceanSurfaceDetailHandle = null;
 let riverCurrentHandle = null;
@@ -932,6 +940,8 @@ function teardownLevel() {
   realFish = [];
   for (const reef of realReefStructures) scene.remove(reef);
   realReefStructures = [];
+  for (const coral of realCoralPieces) scene.remove(coral);
+  realCoralPieces = [];
 }
 
 // Orients the camera to face AWAY from the biome's landmark — that's the
@@ -1627,6 +1637,55 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
         }
       }
       console.log(`[models] real reef pieces placed: ${placed}/${CLUSTER_COUNT * PIECES_PER_CLUSTER}`);
+    }).catch(() => {});
+
+    // Real coral pieces — 3 species, scattered individually (not
+    // clustered like the reef structures) across the same underwater
+    // area, to complement the reef rather than duplicate its "connected
+    // structure" look. Per-species scale ranges below are DERIVED from
+    // each file's own measured raw bounds (see models.js's own comment —
+    // these are genuinely tiny, true-real-world-scale exports, not a
+    // broken unit export like the palm tree/fish were), targeting a
+    // roughly similar FINAL decorative size (~0.3-0.65 units) across all
+    // three despite their differing raw sizes.
+    const CORAL_SPECIES = ["stylaster", "pocillopora", "goniastrea"];
+    const CORAL_SCALE_RANGE = {
+      stylaster: [2.6, 3.8],   // raw ~0.17 tall -> ~0.44-0.65 final
+      pocillopora: [1.8, 2.6], // raw ~0.24 wide -> ~0.43-0.62 final
+      goniastrea: [3.2, 4.6],  // raw ~0.09 wide -> ~0.29-0.42 final
+    };
+    Promise.all(CORAL_SPECIES.map((s) => loadCoralModel(s))).then(() => {
+      if (currentLevelIdx !== spawnLevelIdx) return;
+      const CORAL_COUNT = 24;
+      const coralSeed = hashStringToSeed(WORLD_SEED + "::realCoral");
+      const rng = mulberry32(coralSeed);
+      let placed = 0;
+      for (let i = 0; i < CORAL_COUNT; i++) {
+        const angle = rng() * Math.PI * 2;
+        const dist = 10 + rng() * 95;
+        const x = LANDMARK_POSITION.x + Math.cos(angle) * dist;
+        const z = LANDMARK_POSITION.z + Math.sin(angle) * dist;
+        if (Math.hypot(x, z) > WORLD_BOUND_RADIUS - 8) continue;
+        const groundY = terrainHeightAt(level, x, z, WORLD_SEED);
+        if (groundY === null || groundY > LIQUID_LEVEL.crystal - 1) continue;
+        const species = CORAL_SPECIES[Math.floor(rng() * CORAL_SPECIES.length)];
+        const coral = createRealCoral(species);
+        if (!coral) continue;
+        const [scaleMin, scaleMax] = CORAL_SCALE_RANGE[species];
+        const scale = scaleMin + rng() * (scaleMax - scaleMin);
+        // Center-origin geometry (verified against raw accessor Y
+        // bounds), same as the reef — partial embedding into the sand
+        // reads as natural for something growing out of the substrate,
+        // same reasoning the reef used, so just a modest lift rather
+        // than a precise base-alignment fix.
+        coral.position.set(x, groundY + 0.15 * scale, z);
+        coral.rotation.y = rng() * Math.PI * 2;
+        coral.scale.setScalar(scale);
+        scene.add(coral);
+        realCoralPieces.push(coral);
+        placed++;
+      }
+      console.log(`[models] real coral pieces placed: ${placed}/${CORAL_COUNT}`);
     }).catch(() => {});
   }
 
@@ -2787,7 +2846,7 @@ function animate() {
   updateLandmark(landmarkHandle, elapsedTime, dt);
   updateClouds(cloudsHandle, dt, wind, dayNight.dayAmount, wind.rainIntensity, dayNight.skyHorizon, dayNightCycle.sunBody.group.position, camera.position);
   updateCloudLayer(cloudLayerHandle, dt, wind, dayNight.dayAmount, dayNight.skyHorizon);
-  updateRealisticCloudDome(realisticCloudDomeHandle, dt, dayNight.dayAmount, dayNight.skyHorizon, dayNight.skyZenith, wind.rainIntensity);
+  updateRealisticCloudDome(realisticCloudDomeHandle, dt, dayNight.dayAmount, dayNight.skyHorizon, dayNight.skyZenith, wind.rainIntensity, dayNightCycle.phaseT);
   // Clouds sometimes drift in front of the sun/moon — a cheap angular
   // check (see getCloudOcclusionFactor's own comment for why this isn't
   // real depth-buffer occlusion), applied as a further opacity

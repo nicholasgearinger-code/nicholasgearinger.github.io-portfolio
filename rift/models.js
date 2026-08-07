@@ -207,4 +207,52 @@ function createRealReef() {
   return group;
 }
 
-export { loadPalmTreeModel, loadAngelfishModel, loadReefModel, createRealPalmTree, createRealAngelfish, createRealReef };
+// Coral pieces — 3 real species (stylaster, pocillopora, goniastrea),
+// all sharing the same clean structure (unlike the palm tree/reef, no
+// fixups needed: normals intact, standard lit PBR materials, no
+// suspicious bundled variants) so ONE generic implementation handles all
+// three rather than tripling near-identical code. The one real gotcha:
+// raw bounds are genuinely tiny (0.02-0.24 units) — these are authored
+// at true real-world scale (real coral colonies really are centimeter-
+// to-decimeter sized), not a broken export like the palm tree/fish were,
+// so this just needs a real upscale multiplier at placement time, not a
+// structural fix.
+const CORAL_FILES = {
+  stylaster: "coral_stylaster.glb",
+  pocillopora: "coral_pocillopora.glb",
+  goniastrea: "coral_goniastrea.glb",
+};
+const coralGLTFs = {};
+const coralLoadPromises = {};
+function loadCoralModel(species) {
+  if (coralGLTFs[species]) return Promise.resolve(coralGLTFs[species]);
+  if (coralLoadPromises[species]) return coralLoadPromises[species];
+  const filename = CORAL_FILES[species];
+  const url = new URL(`models/${filename}`, import.meta.url).href;
+  coralLoadPromises[species] = new Promise((resolve, reject) => {
+    new GLTFLoader().load(
+      url,
+      (gltf) => { coralGLTFs[species] = gltf; console.log(`[models] coral (${species}) loaded:`, url); resolve(gltf); },
+      undefined,
+      (err) => { console.error(`[models] coral (${species}) FAILED to load:`, url, err); reject(err); }
+    );
+  });
+  return coralLoadPromises[species];
+}
+
+function createRealCoral(species) {
+  const gltf = coralGLTFs[species];
+  if (!gltf) return null; // caller's responsibility to await loadCoralModel(species) first
+  const group = gltf.scene.clone(true);
+  group.traverse((obj) => {
+    if (obj.isMesh) {
+      obj.castShadow = true;
+      obj.receiveShadow = true;
+      if (obj.material) obj.material.side = THREE.DoubleSide; // same defensive reasoning as the palm tree/reef — coral branch geometry can be thin/single-sided
+      if (obj.geometry) { obj.geometry.computeBoundingSphere(); obj.geometry.computeBoundingBox(); }
+    }
+  });
+  return group;
+}
+
+export { loadPalmTreeModel, loadAngelfishModel, loadReefModel, loadCoralModel, createRealPalmTree, createRealAngelfish, createRealReef, createRealCoral };

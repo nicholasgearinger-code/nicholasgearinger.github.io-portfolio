@@ -43,6 +43,25 @@ import { mulberry32, hashStringToSeed } from "./worldgen.js";
 // darkness regardless of how bright the terrain/water/coral colors
 // themselves were set — a shallow sunlit reef needs to actually stay
 // visible, not read like a deep murky river.
+// Per explicit "adjust the underwater fog and tint" follow-up — these are
+// what the underwater sun/ambient/fog/tint/volume colors below LERP
+// toward as clarity increases, on top of the existing density/strength
+// scaling from the previous round. That earlier pass only scaled how
+// STRONG the underwater tinting was, never how SATURATED the colors
+// themselves are — UNDERWATER_STYLE.crystal's sun/ambient colors
+// (0x8fe0e6/0x6fd8dc) are strongly saturated cyan, and a saturated cyan
+// LIGHT will keep tinting anything it illuminates cyan no matter how
+// bright it gets, which is very likely why the sand kept reading as flat
+// teal instead of sandy even after the intensity fix. LIGHT uses the
+// exact same warm-white the real above-water DAY sun already uses
+// (dayNightCycle.js) — at full clarity, underwater light color matches
+// normal daylight instead of a separate, permanently-cyan version of it.
+// TINT stays a pale blue rather than pure white — some water character
+// should remain even in the clearest conditions, this just keeps it from
+// being a saturated, dominant cast.
+const UNDERWATER_NEUTRAL_LIGHT = new THREE.Color(0xfff4e0);
+const UNDERWATER_NEUTRAL_TINT = new THREE.Color(0xd8f0f0);
+const tempUnderwaterTintColor = new THREE.Color(); // reused every frame in the underwater block below rather than allocated fresh each time
 const UNDERWATER_STYLE = {
   default: {
     fogColor: 0x0a2838, fogDensity: 0.14, sunColor: 0x1a4560, sunMult: 0.08,
@@ -1314,7 +1333,15 @@ float gFoamMask = 0.0;`)
   vec2 causticUv2 = vCausticWorldPos.xz * 0.4 * 1.6 - vec2(uTime * 0.03, uTime * 0.045) + vec2(37.0, 12.0) - waveH * 0.06;
   vec2 v2 = causticVoronoiF1F2(causticUv2);
   float edge2 = v2.y - v2.x;
-  float net = (1.0 - smoothstep(0.0, 0.12, edge1)) * 0.75 + (1.0 - smoothstep(0.0, 0.09, edge2)) * 0.5;
+  // Net lines narrowed (0.12->0.06, 0.09->0.045) — per "the caustic net
+  // is dominating/hiding the sand texture" diagnosis. The smoothstep
+  // width here controls how BROAD each bright line reads; at the
+  // previous width, the two overlapping octaves together covered enough
+  // of the surface at full strength that it read as a dominant grid
+  // covering the whole floor rather than "thin lines of light," even
+  // though the underlying intent (see causticVoronoiF1F2's own comment)
+  // was always for these to be thin and sparse.
+  float net = (1.0 - smoothstep(0.0, 0.06, edge1)) * 0.75 + (1.0 - smoothstep(0.0, 0.045, edge2)) * 0.5;
   net = clamp(net, 0.0, 1.0);
   // Real caustic light concentrates more directly under a wave crest
   // (the crest briefly acts as a converging lens) than in a trough —
@@ -1335,8 +1362,18 @@ float gFoamMask = 0.0;`)
   // already strictly scopes this to actually-submerged geometry (fades
   // to 0 above the waterline), so combined with this, caustics are now
   // zero unless BOTH underwater AND daytime.
-  float dayCausticBoost = smoothstep(0.05, 0.4, uDayAmount) * 1.5;
-  float causticIntensity = net * underwaterMask * upwardFacing * (0.44 + crestFocus * 0.42) * dayCausticBoost; // base boosted 0.32->0.44 for real visible punch through the water surface, not just underwater
+  // dayCausticBoost peak roughly halved (1.5->0.7) and the base
+  // intensity term reduced (0.44/0.42 -> 0.22/0.2) — per "caustic net
+  // dominating/hiding the sand texture" diagnosis. Worked through the
+  // actual peak math: net(1) * underwaterMask(1) * upwardFacing(1) *
+  // (0.44+0.42) * 1.5 = ~1.29 added directly onto diffuseColor.rgb,
+  // which typically sits well under 1.0 per channel for the sand
+  // texture — more than enough to blow out to near-white and wash out
+  // the actual sand color entirely, not just add a warm dapple on top of
+  // it. New peak: (0.22+0.2)*0.7 = ~0.29, a real but genuinely secondary
+  // highlight instead of the dominant feature of the whole seafloor.
+  float dayCausticBoost = smoothstep(0.05, 0.4, uDayAmount) * 0.7;
+  float causticIntensity = net * underwaterMask * upwardFacing * (0.22 + crestFocus * 0.2) * dayCausticBoost;
   diffuseColor.rgb += vec3(1.0, 0.92, 0.72) * causticIntensity;
 
   // Shoreline wave-wash — real waves surge up the beach slope and
@@ -2841,9 +2878,9 @@ function animate() {
     // same function) since this block runs first.
     const stormAmountNow = weatherHandle ? weatherHandle.rainIntensity : 0;
     const clarity = currentBiome === "crystal" ? dayNight.dayAmount * (1 - stormAmountNow) : 0;
-    scene.fog.color.setHex(uwStyle.fogColor);
+    scene.fog.color.setHex(uwStyle.fogColor).lerp(UNDERWATER_NEUTRAL_TINT, clarity * 0.6);
     scene.fog.density = uwStyle.fogDensity * (1 - clarity * 0.7); // up to 70% thinner at full clarity, never fully zero — a hard-zero fog would make the far seafloor cut off at an unnaturally sharp render-distance edge instead of fading
-    sun.color.setHex(uwStyle.sunColor);
+    sun.color.setHex(uwStyle.sunColor).lerp(UNDERWATER_NEUTRAL_LIGHT, clarity * 0.75);
     // Was capped at 1.9x (dayAmount*0.9), day-only — widened to 2.6x and
     // now ALSO pulled back during storms (previously storm had zero
     // effect on this specific multiplier, even though storms already dim
@@ -2852,14 +2889,17 @@ function animate() {
     // instead of three separate ad-hoc day/storm rules.
     const dayBrightBoost = currentBiome === "crystal" ? 1.0 + clarity * 1.6 : 1.0;
     sun.intensity *= uwStyle.sunMult * dayBrightBoost;
-    ambientLight.color.setHex(uwStyle.ambientColor);
+    ambientLight.color.setHex(uwStyle.ambientColor).lerp(UNDERWATER_NEUTRAL_LIGHT, clarity * 0.75);
     ambientLight.intensity *= uwStyle.ambientMult * dayBrightBoost;
-    underwaterDistortionMaterial.uniforms.tintColor.value.set(uwStyle.tint[0], uwStyle.tint[1], uwStyle.tint[2]);
+    // tintColor lerped the same way as fog above — computed once into a
+    // reused Color rather than allocating fresh each frame.
+    tempUnderwaterTintColor.setRGB(uwStyle.tint[0], uwStyle.tint[1], uwStyle.tint[2]).lerp(UNDERWATER_NEUTRAL_TINT, clarity * 0.6);
+    underwaterDistortionMaterial.uniforms.tintColor.value.set(tempUnderwaterTintColor.r, tempUnderwaterTintColor.g, tempUnderwaterTintColor.b);
     underwaterDistortionMaterial.uniforms.tintStrength.value = uwStyle.tintStrength * (1 - clarity * 0.75); // the screen-space color-cast overlay — the main "everything looks tinted/darkened" culprit, pulled back the most aggressively of all these
     underwaterDistortionMaterial.uniforms.fogDensity.value = scene.fog.density; // kept in sync with the real scene fog set just above, not the style's own un-scaled base value
     underwaterDistortionMaterial.uniforms.causticStrength.value = uwStyle.causticStrength;
     underwaterDistortionMaterial.uniforms.distortAmp.value = uwStyle.distortAmp;
-    waterVolumeMesh.material.color.setHex(uwStyle.volumeColor);
+    waterVolumeMesh.material.color.setHex(uwStyle.volumeColor).lerp(UNDERWATER_NEUTRAL_TINT, clarity * 0.6);
     waterVolumeMesh.material.opacity = 0.12 * (1 - clarity * 0.6); // the enclosing color-cast sphere itself — real, direct contributor to "everything looks a uniform color underwater" that none of the other tuning above actually touches. Direct assignment (not *=) from its own base 0.12 (set at creation) — this property has no other per-frame reset, so *= here would compound every frame while submerged and shrink toward zero within seconds instead of applying a stable reduction.
   }
   // The enclosing "water volume" sphere — follows the camera every

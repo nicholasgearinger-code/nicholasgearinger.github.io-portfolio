@@ -11,7 +11,7 @@ import { getGraphicsSettings } from "./graphicsSettings.js";
 // of phase — same math, not a separate system.
 // -----------------------------------------------------------------------------
 
-const CYCLE_SECONDS = 900; // was 480 — slowed per explicit "slow down the day/night cycle" request (8min -> 15min per full cycle)
+const CYCLE_SECONDS = 1800; // was 900, before that 480 — slowed further per "day/night... change too fast" follow-up (now 30min per full cycle). Also helps sky variety directly: each of the 8 mood-texture phases now stays up roughly 3.75min instead of ~1.9min before the small per-phase pool has to repeat.
 const ORBIT_RADIUS = 260;
 const SKY_DOME_RADIUS = 900;
 // Per explicit "dynamic shadows that change direction with the sun"

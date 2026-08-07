@@ -32,7 +32,13 @@ const WEATHER_PROFILE = {
     // other rainy biome uses (see createRain/updateWeatherSystem), and
     // cycles longer/rarer than Verdant's forest showers — an open-ocean
     // squall reads as a bigger, less frequent event, not a quick sprinkle.
-    rain: true, rainCycleMin: 45, rainCycleMax: 80, rainDurationMin: 25, rainDurationMax: 40, rainHeaviness: 1.6,
+    // Storm frequency reduced significantly per explicit "storms change
+    // too fast and rains too frequently" — was every 45-80s with a
+    // 25-40s duration, meaning the gap between storms could be as short
+    // as 5 seconds and there could easily be 10+ storms within a single
+    // day/night cycle. Now a real, occasional event (every 4-7 minutes)
+    // rather than a near-constant condition.
+    rain: true, rainCycleMin: 240, rainCycleMax: 420, rainDurationMin: 20, rainDurationMax: 35, rainHeaviness: 1.6,
     lightning: { color: 0x3ce7ff, intervalMin: 14, intervalMax: 26, height: 20, dim: true }, // no real lightning underwater — a soft, muted pulse of bioluminescent light from deep in the reef, kept dim and lower to the ground than every other biome's actual storm discharge
   },
   abyssal: {

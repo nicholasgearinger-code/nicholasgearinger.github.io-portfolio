@@ -1479,34 +1479,40 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
   terrainMesh = new THREE.Mesh(buildPlanetTerrain(level, WORLD_SEED), terrainMat);
   terrainMesh.receiveShadow = true;
   terrainMesh.castShadow = true; // the terrain's own elevation (spires, ridges) can shadow other parts of itself
-  // DIAGNOSTIC per explicit "apply a separate instance of material
-  // shader on just the sea floor" — a genuinely fresh, minimal
-  // MeshStandardMaterial sharing ZERO code with terrainMat's
-  // onBeforeCompile customization (no caustics, no foam, no wave-wash,
-  // no sand-ripple vertex displacement — just the plain sand PBR
-  // textures + vertexColors, exactly what MeshStandardMaterial does out
-  // of the box). Swapped in for the WHOLE terrain (not literally split
-  // per-face by depth — cheap and simple, and answers the real question
-  // either way: if the pattern is gone, it's genuinely something in
-  // terrainMat's shader customization I haven't found yet; if it's
-  // STILL there even on a completely bare material with no custom GLSL
-  // at all, the cause is somewhere else entirely — the mesh geometry/
-  // vertex colors themselves, or a different rendering layer). Toggle
-  // below for a clean single-flag revert.
-  const USE_DIAGNOSTIC_TERRAIN_MATERIAL = level.biome === "crystal";
-  if (USE_DIAGNOSTIC_TERRAIN_MATERIAL) {
-    const diagnosticMat = new THREE.MeshStandardMaterial({
+  // Per confirmed diagnostic result — the honeycomb/hex-grid pattern that
+  // persisted across many rounds is GONE on this material, confirming it
+  // really was something in terrainMat's own onBeforeCompile shader
+  // customization (not caustics or foam specifically — both were already
+  // zeroed with no effect; something else in that heavily-modified
+  // shader was the actual cause, never pinned down further since this
+  // fully replaces it instead). This is now the REAL terrain material for
+  // Coral Shallows, not just a test — a plain MeshStandardMaterial with
+  // the seafloor sand PBR set (color/normal/roughness) + vertexColors,
+  // zero custom GLSL. terrainMat itself (and everything built into its
+  // onBeforeCompile — caustics, foam, wave-wash, sand-ripple vertex
+  // displacement) is left fully intact in the code below, just no longer
+  // assigned to the actual mesh, in case any of those specific effects
+  // are worth deliberately rebuilding on top of THIS material later.
+  const USE_SIMPLE_TERRAIN_MATERIAL = level.biome === "crystal";
+  if (USE_SIMPLE_TERRAIN_MATERIAL) {
+    const simpleTerrainMat = new THREE.MeshStandardMaterial({
       vertexColors: true,
       roughness: 0.9,
       metalness: 0.05,
+      // Restores the same small emissive floor terrainMat itself always
+      // had — missing from the first diagnostic pass, and very likely
+      // why deep/dark/night conditions read as too dark: this gives the
+      // surface a minimum visibility floor that doesn't fade with fog or
+      // distance the way reflected light does, same as it always did.
+      emissive: level.color, emissiveIntensity: 0.04,
       map: getSeafloorSandColorTexture(),
       normalMap: getSeafloorSandNormalTexture(),
       roughnessMap: getSeafloorSandRoughnessTexture(),
     });
-    diagnosticMat.map.repeat.set(Math.max(6, Math.round(TERRAIN_SIZE / 6)), Math.max(6, Math.round(TERRAIN_SIZE / 6)));
-    diagnosticMat.normalMap.repeat.copy(diagnosticMat.map.repeat);
-    diagnosticMat.roughnessMap.repeat.copy(diagnosticMat.map.repeat);
-    terrainMesh.material = diagnosticMat;
+    simpleTerrainMat.map.repeat.set(Math.max(6, Math.round(TERRAIN_SIZE / 6)), Math.max(6, Math.round(TERRAIN_SIZE / 6)));
+    simpleTerrainMat.normalMap.repeat.copy(simpleTerrainMat.map.repeat);
+    simpleTerrainMat.roughnessMap.repeat.copy(simpleTerrainMat.map.repeat);
+    terrainMesh.material = simpleTerrainMat;
   }
   scene.add(terrainMesh);
 

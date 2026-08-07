@@ -1198,9 +1198,24 @@ vec2 foamVoronoiF1F2(vec2 p) {
   if (biome === "crystal") {
     mesh = new THREE.Mesh(geo, buildWaterMaterial(THREE.FrontSide, true));
     mesh.position.y = y;
+    // Per explicit "flickering between the sky and the water" (happens
+    // specifically while moving, not standing still) — this had NO
+    // renderOrder at all, while every sky layer (gradient dome, cloud
+    // dome, stars/moon/planet — see clouds.js/dayNightCycle.js/main.js)
+    // explicitly uses -95 to -101. Without an explicit value here, the
+    // water's own depth-sort against those distant sky surfaces at the
+    // horizon was left to per-frame floating-point distance comparison —
+    // stable while standing still (the same marginal comparison repeats
+    // every frame), but exactly the kind of thing camera movement
+    // destabilizes, flipping which one wins frame to frame. -50 sits
+    // comfortably above every sky layer's own renderOrder, so the water
+    // now always wins that comparison outright instead of it being
+    // ambiguous.
+    mesh.renderOrder = -50;
     scene.add(mesh);
     backMesh = new THREE.Mesh(geo, buildWaterMaterial(THREE.BackSide, false));
     backMesh.position.y = y;
+    backMesh.renderOrder = -50;
     scene.add(backMesh);
   } else {
     mesh = new THREE.Mesh(geo, buildWaterMaterial(THREE.FrontSide, true));

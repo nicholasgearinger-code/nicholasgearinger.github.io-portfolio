@@ -527,25 +527,49 @@ function getMoodCloudTexture(filename) {
   return tex;
 }
 
+// Per explicit "it should have a set sequence such as night, sunrise,
+// morning, noon, storm (sometimes, random), afternoon, sunset, twilight,
+// midnight" follow-up — replaces the earlier 4-bucket system (night/
+// storm/day/duskDawn) with 8 ordered phases spanning the FULL cycle, each
+// getting its own texture or small pool. Storm remains a random interrupt
+// on top of whichever phase is current, not a phase with its own slot in
+// the sequence (see pickCloudMoodPhase below) — matches "storm
+// (sometimes, random)" being called out separately from the other 8.
 const CLOUD_MOOD_POOLS = {
-  night: ["sky_night.png"],
+  midnight: ["sky_night.png"],
+  night: ["sky_night.png"], // same single night photo as midnight — they're both "deep night," don't need visually distinct images the way the transitional phases do
+  sunrise: ["sky_dusk_1.png", "sky_dusk_5.png"],
+  morning: ["sky_dusk_2.png"],
+  noon: ["sky_day_1.png", "sky_day_2.png"],
+  afternoon: ["sky_day_1.png", "sky_day_2.png"], // same pool as noon — both "full daylight," the real distinction from morning/dusk is already carried by the brightness scalar (dayAmount) in updateRealisticCloudDome, not by needing separate photos
+  sunset: ["sky_dusk_3.png", "sky_dusk_6.png"],
+  twilight: ["sky_dusk_4.png"],
   storm: ["sky_storm.png"],
-  day: ["sky_day_1.png", "sky_day_2.png"],
-  duskDawn: ["sky_dusk_1.png", "sky_dusk_2.png", "sky_dusk_3.png", "sky_dusk_4.png", "sky_dusk_5.png", "sky_dusk_6.png"],
 };
 
+// Order matters — this IS the sequence, walked in a real loop via
+// phaseT (0-1 fraction through the actual day/night cycle, not just
+// dayAmount, which alone can't distinguish sunrise from sunset — both
+// sit near dayAmount≈0). 8 equal slices, with "midnight" CENTERED at
+// phaseT=0 (matching orbitPosition's own elevation=-1 lowest point
+// falling exactly at phaseAngle=0/phaseT=0) — the shift below moves the
+// slice boundaries so midnight's own slice wraps symmetrically around
+// that point instead of starting there.
+const PHASE_SEQUENCE = ["midnight", "night", "sunrise", "morning", "noon", "afternoon", "sunset", "twilight"];
+function pickTimePhase(phaseT) {
+  const shifted = (phaseT + 1 / 16 + 1) % 1; // +1 before modulo — JS % can return negative for a negative left operand, phaseT should never be negative in practice but this keeps it robust regardless
+  const idx = Math.floor(shifted * PHASE_SEQUENCE.length) % PHASE_SEQUENCE.length;
+  return PHASE_SEQUENCE[idx];
+}
 
 /**
- * Picks which condition bucket applies right now. Same 0.05/0.4 dayAmount
- * thresholds already used elsewhere in this project's day/night blending
- * (e.g. the underwater caustic boost) for consistency with where
- * "dawn/dusk" is considered to actually start and end.
+ * Picks which condition applies right now — storm overrides whatever
+ * time-of-day phase is current (a real interrupt, not a scheduled slot),
+ * otherwise walks the real ordered phase sequence via phaseT.
  */
-function pickCloudMoodBucket(dayAmount, stormAmount) {
+function pickCloudMoodBucket(phaseT, stormAmount) {
   if (stormAmount > 0.15) return "storm";
-  if (dayAmount < 0.05) return "night";
-  if (dayAmount < 0.4) return "duskDawn";
-  return "day";
+  return pickTimePhase(phaseT);
 }
 
 /**
@@ -622,7 +646,7 @@ function createRealisticCloudDome(scene) {
  * @param {THREE.Color} [skyZenithColor]
  * @param {number} [stormAmount]  0-1, dark storm clouds — Coral Shallows only, driven by weather.js's own rainIntensity, but written generically here so any biome's caller can use it
  */
-function updateRealisticCloudDome(handle, dt, dayAmount, skyHorizonColor, skyZenithColor, stormAmount = 0) {
+function updateRealisticCloudDome(handle, dt, dayAmount, skyHorizonColor, skyZenithColor, stormAmount = 0, phaseT = 0) {
   if (!handle) return;
 
   // Mood texture selection — per "use all of them to best match different
@@ -632,7 +656,7 @@ function updateRealisticCloudDome(handle, dt, dayAmount, skyHorizonColor, skyZen
   // not randomly) — see CLOUD_MOOD_POOLS' own comment above for why. The
   // underlying dome geometry/rotation/UV setup is completely unchanged;
   // this only swaps which texture handle.mat.map currently points at.
-  const bucket = pickCloudMoodBucket(dayAmount, stormAmount);
+  const bucket = pickCloudMoodBucket(phaseT, stormAmount);
   if (bucket !== handle.moodBucket) {
     handle.moodBucket = bucket;
     handle.moodEntryCounts = handle.moodEntryCounts || {};

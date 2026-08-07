@@ -437,6 +437,18 @@ function createBody(scene, glowTexture, map, coreRadius, glowColor, glowRadius, 
 
   const coreMat = new THREE.MeshBasicMaterial({ map, fog: false, transparent: true });
   const core = new THREE.Mesh(new THREE.SphereGeometry(coreRadius, 20, 20), coreMat);
+  // Per explicit "stars and planet and moon are showing in front of the
+  // background clouds" report — this (and the starfield/distant planet
+  // below) had NO explicit renderOrder at all, defaulting to 0, while the
+  // cloud dome explicitly uses -95/-100 (see clouds.js). Since these are
+  // all meant to be the FARTHEST background layer — further out than the
+  // clouds, not painted on top of them — -101 puts them behind every
+  // cloud layer. This is consistent with (not a replacement for) the
+  // existing cloud-occlusion opacity fade elsewhere in this file — that
+  // still handles the "moon dims when clouds pass in front of it" look;
+  // this fixes the separate, more basic problem of it drawing on top of
+  // an opaque cloud bank entirely.
+  core.renderOrder = -101;
   group.add(core);
 
   const glowMat = new THREE.SpriteMaterial({
@@ -445,6 +457,7 @@ function createBody(scene, glowTexture, map, coreRadius, glowColor, glowRadius, 
   });
   const glow = new THREE.Sprite(glowMat);
   glow.scale.setScalar(glowRadius * 2);
+  glow.renderOrder = -101;
   group.add(glow);
 
   scene.add(group);
@@ -463,11 +476,13 @@ function createDistantPlanet(scene) {
   const core = new THREE.Mesh(new THREE.SphereGeometry(26, 20, 20), mat);
   core.position.set(-420, 180, -520);
   core.rotation.z = 0.4;
+  core.renderOrder = -101; // see createBody's own comment above — same "showing in front of clouds" fix
   const ringMat = new THREE.MeshBasicMaterial({
     color: 0xd9b48a, transparent: true, opacity: 0.35, side: THREE.DoubleSide, fog: true, depthWrite: false,
   });
   const ring = new THREE.Mesh(new THREE.RingGeometry(34, 46, 48), ringMat);
   ring.rotation.x = Math.PI / 2.4;
+  ring.renderOrder = -101;
   core.add(ring);
   scene.add(core);
   return { core, driftSeed: Math.random() * Math.PI * 2 };
@@ -675,6 +690,7 @@ function createDayNightCycle(scene, sun, ambient, starfield, biome, moonLight) {
 function updateDayNightCycle(cycle, dt) {
   cycle.elapsed += dt;
   const t = (cycle.elapsed % CYCLE_SECONDS) / CYCLE_SECONDS;
+  cycle.phaseT = t; // raw 0-1 position in the cycle — exposed for anything downstream that needs real time-of-day (e.g. clouds.js's mood-texture phase sequence), since dayAmount alone can't tell sunrise from sunset (both sit near dayAmount=0)
   const phaseAngle = t * Math.PI * 2;
 
   const sunOrbit = orbitPosition(phaseAngle);

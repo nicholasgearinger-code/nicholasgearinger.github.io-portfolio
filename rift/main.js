@@ -1662,12 +1662,18 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
       let placed = 0;
       for (let i = 0; i < CORAL_COUNT; i++) {
         const angle = rng() * Math.PI * 2;
-        const dist = 10 + rng() * 95;
+        // Per explicit "make sure they spawn near the shore in the
+        // walkable area" — was 10-105 units from the landmark (scattered
+        // all the way out into deep water alongside the fish); narrowed
+        // to a band right off the beach instead, and the depth
+        // requirement below loosened to allow genuinely shallow,
+        // near-waterline placement rather than requiring real depth.
+        const dist = 6 + rng() * 20;
         const x = LANDMARK_POSITION.x + Math.cos(angle) * dist;
         const z = LANDMARK_POSITION.z + Math.sin(angle) * dist;
         if (Math.hypot(x, z) > WORLD_BOUND_RADIUS - 8) continue;
         const groundY = terrainHeightAt(level, x, z, WORLD_SEED);
-        if (groundY === null || groundY > LIQUID_LEVEL.crystal - 1) continue;
+        if (groundY === null || groundY > LIQUID_LEVEL.crystal - 0.3) continue; // was -1 (needed real depth) — shallow, right-off-the-beach water is fine here
         const species = CORAL_SPECIES[Math.floor(rng() * CORAL_SPECIES.length)];
         const coral = createRealCoral(species);
         if (!coral) continue;

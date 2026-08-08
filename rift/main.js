@@ -3,6 +3,8 @@ import { PointerLockControls } from "three/addons/controls/PointerLockControls.j
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { SSAOPass } from "three/addons/postprocessing/SSAOPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { SMAAPass } from "three/addons/postprocessing/SMAAPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH, POND_Z, POND_RADIUS, POND_LEVEL, RAMP_CENTER_X, RAMP_CENTER_Z, RAMP_LENGTH, RAMP_HALF_WIDTH, ROOM_FLOOR_Y, ROOM_WIDTH, ROOM_LENGTH, BRANCH_START_X, BRANCH_LENGTH, BRANCH_HALF_WIDTH, BRANCH_Z, CHAMBER_RADIUS } from "./terrain.js";
 import { LEVELS, generateLevelLayout } from "./levels.js";
@@ -112,9 +114,20 @@ const titlePlayBtn = document.getElementById("rift-title-play-btn");
 const isTouchDevice = "ontouchstart" in window || navigator.maxTouchPoints > 0;
 if (isTouchDevice) document.body.classList.add("rift-touch-mode");
 let touchGameActive = false;
+// Per "camera won't move" investigation: isGameActive() previously used
+// controls.isLocked directly on desktop — meaning if the browser's
+// Pointer Lock API silently fails or isn't supported (a real, documented
+// gap on iOS/iPadOS Safari specifically), isGameActive() would return
+// false FOREVER, and since updateMovement() itself only ever runs
+// "if (isGameActive())", that's not just broken camera look — it's the
+// player unable to move AT ALL, with no fallback. desktopGameActive
+// mirrors touchGameActive exactly: set true on entering a level
+// regardless of whether controls.lock() actually succeeds, so core
+// gameplay never depends on that browser API working.
+let desktopGameActive = false;
 
 function isGameActive() {
-  return isTouchDevice ? touchGameActive : controls.isLocked;
+  return isTouchDevice ? touchGameActive : desktopGameActive;
 }
 
 // ---------------------------------------------------------------------------
@@ -166,6 +179,17 @@ const camera = new THREE.PerspectiveCamera(70, viewport.clientWidth / viewport.c
 camera.rotation.order = "YXZ";
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+// Per "what effects can be improved" — was defaulting to
+// THREE.NoToneMapping (three.js's own default), which just clips
+// anything over 1.0 in each color channel to flat white instead of
+// rolling off smoothly. This scene has plenty of bright emissive/HDR-ish
+// elements (the sun disc, resonance crystals, the new caustics net) that
+// benefit from a real filmic curve instead. ACESFilmicToneMapping is the
+// industry-standard choice for this — a gentle highlight rolloff that
+// still reads as "bright" without blowing out to solid white, and richer
+// midtone contrast than the flat default.
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
 renderer.setSize(viewport.clientWidth, viewport.clientHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, getGraphicsSettings().pixelRatioCap));
 renderer.shadowMap.enabled = getGraphicsSettings().shadowsEnabled;
@@ -214,9 +238,37 @@ ssaoPass.kernelRadius = 2.5;
 ssaoPass.minDistance = 0.0005;
 ssaoPass.maxDistance = 0.08;
 composer.addPass(ssaoPass);
+// Selective bloom — per "what effects can be improved," the sun disc,
+// resonance crystals, and the new caustics net are all bright/emissive
+// but nothing actually GLOWS. UnrealBloomPass's threshold (0.85) is
+// tuned so only genuinely bright pixels bloom — normal lit sand/terrain/
+// foliage sits well under that in this scene's actual color range, so
+// this should read as "a few things glow" rather than a hazy wash over
+// everything. Strength/radius kept modest (0.55/0.4) for the same
+// reason — a first pass at a tasteful amount, easy to tune up if it
+// reads as too subtle once actually seen live.
+const bloomPass = new UnrealBloomPass(new THREE.Vector2(viewport.clientWidth, viewport.clientHeight), 0.55, 0.4, 0.85);
+composer.addPass(bloomPass);
+// Real anti-aliasing for the final composited image — renderer's own
+// antialias:true (set at construction above) only affects a DIRECT
+// render straight to the canvas; the moment output goes through
+// EffectComposer (as it already does here, for SSAO/bloom), that native
+// MSAA no longer applies to what actually reaches the screen, since
+// composer's intermediate render targets aren't multisampled by default.
+// SMAA over FXAA: better edge quality, comparable cost, and doesn't need
+// a temporal/jitter setup the way TAA would.
+const smaaPass = new SMAAPass(viewport.clientWidth * renderer.getPixelRatio(), viewport.clientHeight * renderer.getPixelRatio());
+composer.addPass(smaaPass);
 composer.addPass(new OutputPass());
 function applySsaoTier() {
   ssaoPass.enabled = getGraphicsSettings().ssaoEnabled;
+  // Bloom + SMAA bundled under one tier property (postFxEnabled) rather
+  // than two separate ones — both are the same category of "extra polish
+  // pass," and Low tier's whole point is skipping exactly this kind of
+  // cost, so one combined on/off matches how the tier system already
+  // treats similar bundles (see oceanEffectsEnabled).
+  bloomPass.enabled = getGraphicsSettings().postFxEnabled !== false;
+  smaaPass.enabled = getGraphicsSettings().postFxEnabled !== false;
 }
 applySsaoTier();
 
@@ -2702,6 +2754,7 @@ if (graphicsBtn && graphicsPanel) {
     { key: "oceanEffectsEnabled", label: "Ocean FX" },
     { key: "reflectionEnabled", label: "Reflections" },
     { key: "causticsEnabled", label: "Caustics" },
+    { key: "postFxEnabled", label: "Bloom+AA" },
   ];
   for (const { key, label } of EFFECT_TOGGLES) {
     const btn = document.createElement("button");
@@ -2831,6 +2884,13 @@ function enterLevel(levelIdx) {
     touchGameActive = true;
     startOverlay.style.display = "none";
   } else {
+    desktopGameActive = true;
+    // Best-effort — still requested since it's a genuinely better
+    // experience where it works (real cursor capture, no drag-to-look
+    // needed), but isGameActive()/movement no longer depend on this
+    // succeeding at all; the mousedown/mousemove drag-look fallback
+    // (below, near the other mouse listeners) covers camera control on
+    // browsers where this silently does nothing.
     controls.lock();
   }
 }
@@ -2955,9 +3015,63 @@ function fireShot() {
   }
 }
 
-document.addEventListener("mousedown", (e) => {
-  if (e.button === 0 && controls.isLocked) fireShot();
-});
+// Click-to-shoot and click-and-drag-to-look share the same mousedown
+// gesture on desktop, so they're handled together here rather than as
+// two independent listeners (which is what this was originally, before
+// drag-look existed — that would have made every look-drag ALSO fire a
+// shot, since both would react to the same mousedown). While genuinely
+// pointer-locked, behavior is unchanged from before: an instant fire on
+// mousedown, no drag concept at all (the cursor doesn't move on-screen
+// during lock, PointerLockControls' own internal listener handles
+// rotation directly). While NOT locked (either because Pointer Lock
+// isn't supported/failed on this browser, or simply hasn't been
+// requested yet), a click is disambiguated from a drag by total
+// movement: under DRAG_THRESHOLD pixels counts as a click and fires;
+// beyond it, the gesture is treated as having been a look-drag and
+// doesn't also fire on release.
+if (!isTouchDevice) {
+  let mouseLookDragging = false;
+  let mouseLookStartX = 0, mouseLookStartY = 0;
+  let mouseLookLastX = 0, mouseLookLastY = 0;
+  let mouseLookMaxDelta = 0; // largest total displacement from the start point seen during this gesture
+  const MOUSE_LOOK_SENSITIVITY = 0.0025; // radians per pixel of drag
+  const DRAG_THRESHOLD = 6; // pixels — below this, treat the gesture as a click (fire) rather than a look-drag
+
+  document.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
+    if (controls.isLocked) { fireShot(); return; } // unchanged classic behavior
+    if (e.target !== renderer.domElement) return; // don't start a look-drag from clicks on HUD buttons (GRAPHICS/MENU/etc.) layered on top of the canvas
+    mouseLookDragging = true;
+    mouseLookStartX = mouseLookLastX = e.clientX;
+    mouseLookStartY = mouseLookLastY = e.clientY;
+    mouseLookMaxDelta = 0;
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!mouseLookDragging || controls.isLocked) return;
+    const dx = e.clientX - mouseLookLastX;
+    const dy = e.clientY - mouseLookLastY;
+    mouseLookLastX = e.clientX;
+    mouseLookLastY = e.clientY;
+    mouseLookMaxDelta = Math.max(mouseLookMaxDelta, Math.hypot(e.clientX - mouseLookStartX, e.clientY - mouseLookStartY));
+    // Same YXZ Euler convention PointerLockControls itself uses
+    // internally, applied directly to the camera here instead since its
+    // own rotation logic only ever runs from raw mousemove while
+    // genuinely locked — this reproduces the same feel without needing
+    // lock to be active at all.
+    camera.rotation.order = "YXZ";
+    camera.rotation.y -= dx * MOUSE_LOOK_SENSITIVITY;
+    camera.rotation.x -= dy * MOUSE_LOOK_SENSITIVITY;
+    // Clamped just short of straight up/down so the view can't flip past
+    // vertical and invert — same reasoning any FPS-style look control
+    // needs regardless of input method.
+    camera.rotation.x = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, camera.rotation.x));
+  });
+  window.addEventListener("mouseup", (e) => {
+    if (!mouseLookDragging) return;
+    mouseLookDragging = false;
+    if (e.button === 0 && !controls.isLocked && mouseLookMaxDelta < DRAG_THRESHOLD) fireShot(); // stayed under the drag threshold the whole time — treat as a click, not a look-drag
+  });
+}
 
 createTouchControls({
   camera, keys, onFire: fireShot, viewport, isActive: isGameActive,

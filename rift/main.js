@@ -1512,6 +1512,133 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
     simpleTerrainMat.map.repeat.set(Math.max(6, Math.round(TERRAIN_SIZE / 6)), Math.max(6, Math.round(TERRAIN_SIZE / 6)));
     simpleTerrainMat.normalMap.repeat.copy(simpleTerrainMat.map.repeat);
     simpleTerrainMat.roughnessMap.repeat.copy(simpleTerrainMat.map.repeat);
+    // NEW seafloor caustics, deliberately NOT a revival of terrainMat's old
+    // onBeforeCompile block above (which is the one implicated in the
+    // honeycomb saga — the pattern persisted even with THAT block's own
+    // caustics/foam contributions already multiplied by 0, meaning
+    // something else inside that same heavily-customized shader was the
+    // real cause, never pinned down before the whole material was
+    // replaced). This is a fresh, much smaller injection onto the
+    // material actually in use today, and deliberately excludes BOTH
+    // pieces of vertex geometry displacement the old block had (foam
+    // relief, sand-ripple) — vertex displacement + per-fragment normal
+    // recompute + tiled texture sampling is exactly the kind of
+    // combination that produces interference/moiré artifacts like the
+    // honeycomb one, so leaving it out entirely removes the most likely
+    // suspect rather than trying to prove which line was safe. Only two
+    // pieces of math are reused, both pure functions with no geometry
+    // side effects: the Gerstner wave-height sum (kept in numeric sync
+    // with the real ocean surface in liquid.js, same as the old block)
+    // and the Voronoi F1/F2 cell-edge caustic-net pattern (already
+    // structurally bounded via clamp()+mix(), the same proven-safe
+    // technique liquid.js's own water-surface caustic effect uses).
+    const CAUSTICS_ENABLED = true; // single flip point if this ever needs to be disabled again
+    if (CAUSTICS_ENABLED) {
+      simpleTerrainMat.onBeforeCompile = (shader) => {
+        shader.uniforms.uTime = { value: 0 };
+        shader.uniforms.uWaterLevel = { value: LIQUID_LEVEL.crystal };
+        shader.uniforms.uDayAmount = { value: 0 };
+        shader.vertexShader = shader.vertexShader
+          .replace("#include <common>", `#include <common>
+varying vec3 vCausticWorldPos;
+varying vec3 vCausticWorldNormal;
+varying float vWaveHeight;
+uniform float uTime;
+// Same 10-component Gerstner spectrum as the real ocean surface
+// (liquid.js) and the old terrainMat block — copied verbatim since this
+// specific function was never implicated in the honeycomb bug (it's pure
+// math with no geometry displacement here, unlike the old block's use of
+// it), and needs to stay numerically identical to liquid.js's own
+// generator for the caustic drift to actually match the real waves
+// overhead rather than just looking similar by coincidence.
+vec2 gerstnerDomainWarp(vec2 p, float t) {
+  float wx = sin(p.x * 0.016 + p.y * 0.009 + t * 0.05) * 16.0 + sin(p.x * 0.006 - p.y * 0.011 - t * 0.02) * 9.0;
+  float wz = cos(p.x * 0.011 - p.y * 0.014 + t * 0.04) * 16.0 + cos(p.x * 0.008 + p.y * 0.007 - t * 0.018) * 9.0;
+  return p + vec2(wx, wz);
+}
+float gerstnerHeightVert(vec2 xz, float t) {
+  vec2 wxz = gerstnerDomainWarp(xz, t);
+  float h = 0.0;
+  h += 0.448603 * sin(0.149600 * dot(vec2(0.957826, 0.287348), wxz) - 1.900000 * t);
+  h += 0.336999 * sin(0.199142 * dot(vec2(0.758192, 0.652032), wxz) - 1.646785 * t);
+  h += 0.253161 * sin(0.265092 * dot(vec2(0.947277, -0.320417), wxz) - 1.427317 * t);
+  h += 0.190179 * sin(0.352883 * dot(vec2(0.708455, 0.705756), wxz) - 1.237097 * t);
+  h += 0.142866 * sin(0.469747 * dot(vec2(0.983218, 0.182437), wxz) - 1.072228 * t);
+  h += 0.107324 * sin(0.625312 * dot(vec2(0.999147, -0.041303), wxz) - 0.929331 * t);
+  h += 0.080624 * sin(0.832396 * dot(vec2(0.629256, 0.777198), wxz) - 0.805478 * t);
+  h += 0.060566 * sin(1.108060 * dot(vec2(0.966708, -0.255883), wxz) - 0.698131 * t);
+  h += 0.045498 * sin(1.475016 * dot(vec2(0.875590, 0.483054), wxz) - 0.605091 * t);
+  h += 0.034179 * sin(1.963495 * dot(vec2(0.863805, 0.503827), wxz) - 0.524450 * t);
+  return h;
+}`)
+          // begin_vertex is intentionally UNTOUCHED here — no transformed.y
+          // displacement at all, unlike the old block. vCausticWorldPos is
+          // computed from the plain, undisplaced position.
+          .replace("#include <begin_vertex>", `#include <begin_vertex>
+vWaveHeight = gerstnerHeightVert(transformed.xz, uTime);
+vCausticWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`)
+          .replace("#include <beginnormal_vertex>", "#include <beginnormal_vertex>\nvCausticWorldNormal = normalize(mat3(modelMatrix) * objectNormal);");
+        shader.fragmentShader = shader.fragmentShader
+          .replace("#include <common>", `#include <common>
+uniform float uTime;
+uniform float uWaterLevel;
+uniform float uDayAmount;
+varying vec3 vCausticWorldPos;
+varying vec3 vCausticWorldNormal;
+varying float vWaveHeight;
+vec2 causticHash(vec2 p) {
+  float n = sin(dot(p, vec2(41.0, 289.0)));
+  return fract(vec2(262144.0, 32768.0) * n);
+}
+// F1 (nearest feature point) and F2 (second-nearest) — F2-F1 traces thin
+// bright lines at cell boundaries, which is what actually reads as a
+// caustic net (F1 alone reads as clustered dots). Same technique as
+// liquid.js's own water-surface caustic effect.
+vec2 causticVoronoiF1F2(vec2 p) {
+  vec2 ip = floor(p);
+  vec2 fp = fract(p);
+  float f1 = 8.0, f2 = 8.0;
+  for (int y = -1; y <= 1; y++) {
+    for (int x = -1; x <= 1; x++) {
+      vec2 neighbor = vec2(float(x), float(y));
+      vec2 point = causticHash(ip + neighbor);
+      float d = length(neighbor + point - fp);
+      if (d < f1) { f2 = f1; f1 = d; } else if (d < f2) { f2 = d; }
+    }
+  }
+  return vec2(f1, f2);
+}`)
+          .replace("#include <color_fragment>", `#include <color_fragment>
+{
+  float upwardFacing = clamp(vCausticWorldNormal.y, 0.0, 1.0);
+  float underwaterMask = smoothstep(uWaterLevel, uWaterLevel - 1.0, vCausticWorldPos.y);
+  float waveH = vWaveHeight;
+  float waveNorm = clamp((waveH + 1.7) / 3.4, 0.0, 1.0); // 0 at trough, 1 at crest — matches the real 10-wave spectrum's total amplitude (1.71)
+  // Sampling the Voronoi field at world XZ, drifted/distorted by uTime and
+  // waveH together, is what makes this light net visibly track the real
+  // ripples overhead rather than just being an independent shimmer that
+  // happens to look similar.
+  vec2 causticUv = vCausticWorldPos.xz * 0.4 + vec2(uTime * 0.05, -uTime * 0.04) + waveH * 0.09;
+  vec2 v1 = causticVoronoiF1F2(causticUv);
+  float edge1 = v1.y - v1.x;
+  vec2 causticUv2 = vCausticWorldPos.xz * 0.4 * 1.6 - vec2(uTime * 0.03, uTime * 0.045) + vec2(37.0, 12.0) - waveH * 0.06;
+  vec2 v2 = causticVoronoiF1F2(causticUv2);
+  float edge2 = v2.y - v2.x;
+  float net = clamp((1.0 - smoothstep(0.0, 0.06, edge1)) * 0.75 + (1.0 - smoothstep(0.0, 0.045, edge2)) * 0.5, 0.0, 1.0);
+  // Real caustic light concentrates more directly under a wave crest (a
+  // brief converging lens) than in a trough.
+  float crestFocus = smoothstep(0.5, 1.0, waveNorm);
+  float dayCausticBoost = smoothstep(0.05, 0.4, uDayAmount) * 0.7; // strictly zero at night — real caustics need direct sunlight through the surface
+  // Peak verified by hand, same bound as the old (disabled) block used:
+  // net(1) * underwaterMask(1) * upwardFacing(1) * (0.22+0.2) * dayCausticBoost(0.7)
+  // = 0.7*0.42 = ~0.29 max added to diffuseColor — a real but secondary
+  // highlight, not enough to blow the sand texture out to white.
+  float causticIntensity = net * underwaterMask * upwardFacing * (0.22 + crestFocus * 0.2) * dayCausticBoost;
+  diffuseColor.rgb += vec3(1.0, 0.92, 0.72) * causticIntensity;
+}`);
+        simpleTerrainMat.userData.shader = shader; // the existing animate-loop block (main.js, "if (terrainMesh.material.userData.shader)") already pushes uTime/uDayAmount generically — no loop changes needed
+      };
+    }
     terrainMesh.material = simpleTerrainMat;
   }
   scene.add(terrainMesh);
@@ -1601,10 +1728,11 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
         // units, so this scale IS the tree's final height in world
         // units. Real coconut palms run 12-25m, but at this game's
         // scale (player eye height 1.6) that reads as a screen-filling
-        // giant — 5-8 (first pass) and 2.5-3.5 (second pass) both still
-        // read as oversized. Explicit "3x smaller" request applied
-        // directly to the 2.5-3.5 range: ~0.83-1.17 units.
-        const scale = 0.83 + rng() * 0.34;
+        // giant — 5-8 (first pass), 2.5-3.5 (second pass), and 0.83-1.17
+        // (third pass, "3x smaller") all still read as oversized in
+        // follow-up screenshots. Explicit "20x smaller" applied directly
+        // to the 0.83-1.17 range: ~0.0415-0.0585 units.
+        const scale = 0.0415 + rng() * 0.017;
         tree.position.set(x, y + tree.userData.groundOffset * scale, z);
         tree.rotation.y = rng() * Math.PI * 2;
         tree.scale.setScalar(scale);

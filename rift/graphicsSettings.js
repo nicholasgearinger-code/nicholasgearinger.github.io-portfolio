@@ -191,8 +191,42 @@ try {
   if (saved && TIERS[saved]) currentTier = saved;
 } catch (_) { /* localStorage unavailable — detected default stands */ }
 
+// Per-effect overrides, per explicit "toggle buttons to tune each effect
+// on and off and adjust display resolution" request — a tier still picks
+// the BASELINE for every setting, but any of these keys can be
+// individually punched through on top of it (e.g. run on "medium" but
+// force shadows off, or "high" but cap resolution down). null/undefined
+// means "no override, use the tier's own value" — every key defaults to
+// that so simply not touching a control changes nothing. Kept as a
+// separate object rather than mutating TIERS directly so switching tiers
+// doesn't silently clear the person's individual toggles, and so this
+// state is easy to reset as a whole (resetOverrides).
+const OVERRIDES_STORAGE_KEY = "riftGraphicsOverrides";
+const OVERRIDABLE_KEYS = ["shadowsEnabled", "ssaoEnabled", "oceanEffectsEnabled", "reflectionEnabled", "causticsEnabled", "pixelRatioCap"];
+let overrides = {};
+try {
+  const saved = localStorage.getItem(OVERRIDES_STORAGE_KEY);
+  if (saved) {
+    const parsed = JSON.parse(saved);
+    // Only keep known keys — guards against a stale/corrupt saved blob
+    // (an old version of this file, manual localStorage editing, etc.)
+    // silently injecting an unexpected property downstream code doesn't
+    // check for.
+    for (const key of OVERRIDABLE_KEYS) if (key in parsed) overrides[key] = parsed[key];
+  }
+} catch (_) { /* localStorage unavailable or corrupt — no overrides stands */ }
+
+function persistOverrides() {
+  try { localStorage.setItem(OVERRIDES_STORAGE_KEY, JSON.stringify(overrides)); } catch (_) { /* best effort */ }
+}
+
 function getGraphicsSettings() {
-  return TIERS[currentTier];
+  // Merge tier defaults with any active overrides — every existing call
+  // site in the project (main.js, liquid.js, etc.) already reads settings
+  // exclusively through this one function, so this merge is the ONLY
+  // change needed for individual toggles to actually take effect
+  // everywhere; nothing downstream needs to know overrides exist at all.
+  return { ...TIERS[currentTier], ...overrides };
 }
 
 function getGraphicsTier() {
@@ -210,4 +244,29 @@ function listGraphicsTiers() {
   return Object.keys(TIERS).map((id) => ({ id, label: TIERS[id].label }));
 }
 
-export { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers };
+// Reads back the value actually in effect for one key right now (tier
+// default, or the override if one is set) — lets UI code show correct
+// on/off state without duplicating the merge logic itself.
+function getEffectiveValue(key) {
+  return key in overrides ? overrides[key] : TIERS[currentTier][key];
+}
+
+// value === null clears that specific override (falls back to the
+// tier's own value again) rather than storing null as if it were a real
+// setting — getGraphicsSettings's spread would otherwise happily merge
+// in a literal null and break whatever reads that key expecting a
+// boolean/number.
+function setOverride(key, value) {
+  if (!OVERRIDABLE_KEYS.includes(key)) return false;
+  if (value === null) delete overrides[key];
+  else overrides[key] = value;
+  persistOverrides();
+  return true;
+}
+
+function resetOverrides() {
+  overrides = {};
+  try { localStorage.removeItem(OVERRIDES_STORAGE_KEY); } catch (_) { /* best effort */ }
+}
+
+export { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers, getEffectiveValue, setOverride, resetOverrides };

@@ -15,7 +15,7 @@ import { createGrass, updateGrass, disposeGrass, createFlowers, updateFlowers, d
 import { createHorizonSilhouettes, updateHorizonSilhouettes, disposeHorizonSilhouettes } from "./horizonSilhouettes.js";
 import { createWildlife, updateWildlife, disposeWildlife } from "./wildlife.js";
 import { createLandmark, updateLandmark, disposeLandmark, LANDMARK_POSITION } from "./landmarks.js";
-import { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers } from "./graphicsSettings.js";
+import { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers, getEffectiveValue, setOverride } from "./graphicsSettings.js";
 import { loadAngelfishModel, loadReefModel, loadCoralModel, loadTreeModel, createRealAngelfish, createRealReef, createRealCoral, createRealTree } from "./models.js";
 import { createWeatherSystem, updateWeatherSystem, disposeWeatherSystem } from "./weather.js";
 import { createClouds, updateClouds, disposeClouds, getCloudOcclusionFactor, createCloudLayer, updateCloudLayer, disposeCloudLayer, createRealisticCloudDome, updateRealisticCloudDome, disposeRealisticCloudDome } from "./clouds.js";
@@ -1568,6 +1568,12 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
         shader.uniforms.uWaterLevel = { value: LIQUID_LEVEL.crystal };
         shader.uniforms.uDayAmount = { value: 0 };
         shader.uniforms.uCausticMap = { value: getCausticPatternTexture() };
+        // Separate from the CAUSTICS_ENABLED const above (a compile-time
+        // "is this shader code built in at all" switch) — this is the
+        // live, per-frame runtime toggle the new individual-effects UI
+        // controls (see the animate-loop uniform push below), so flipping
+        // it doesn't require rebuilding the terrain material/level.
+        shader.uniforms.uCausticsEnabled = { value: 1.0 };
         shader.vertexShader = shader.vertexShader
           .replace("#include <common>", `#include <common>
 varying vec3 vCausticWorldPos;
@@ -1614,6 +1620,7 @@ uniform float uTime;
 uniform float uWaterLevel;
 uniform float uDayAmount;
 uniform sampler2D uCausticMap;
+uniform float uCausticsEnabled;
 varying vec3 vCausticWorldPos;
 varying vec3 vCausticWorldNormal;
 varying float vWaveHeight;`)
@@ -1656,7 +1663,7 @@ varying float vWaveHeight;`)
   // net(1) * underwaterMask(1) * upwardFacing(1) * (0.22+0.2) * dayCausticBoost(0.7)
   // = 0.7*0.42 = ~0.29 max added to diffuseColor — a real but secondary
   // highlight, not enough to blow the sand texture out to white.
-  float causticIntensity = net * underwaterMask * upwardFacing * (0.22 + crestFocus * 0.2) * dayCausticBoost;
+  float causticIntensity = net * underwaterMask * upwardFacing * (0.22 + crestFocus * 0.2) * dayCausticBoost * uCausticsEnabled;
   diffuseColor.rgb += vec3(1.0, 0.92, 0.72) * causticIntensity;
 }`);
         simpleTerrainMat.userData.shader = shader; // the existing animate-loop block (main.js, "if (terrainMesh.material.userData.shader)") already pushes uTime/uDayAmount generically — no loop changes needed
@@ -2634,6 +2641,94 @@ if (graphicsBtn && graphicsPanel) {
     stormBtn.classList.toggle("active", debugForceStorm);
   });
   debugSection.appendChild(stormBtn);
+
+  // Individual effect toggles + resolution control + FPS counter
+  // visibility, per explicit "toggle buttons to tune each effect on and
+  // off and adjust display resolution... turn god[FPS] counter on and
+  // off" request. Second row, same append-into-existing-panel approach
+  // as the debug section above — no index.html changes needed.
+  const effectsSection = document.createElement("div");
+  effectsSection.style.marginTop = "8px";
+  effectsSection.style.paddingTop = "8px";
+  effectsSection.style.borderTop = "1px solid rgba(255,255,255,0.15)";
+  effectsSection.style.display = "flex";
+  effectsSection.style.flexWrap = "wrap";
+  effectsSection.style.gap = "6px";
+  graphicsPanel.appendChild(effectsSection);
+
+  // Each entry: the override key in graphicsSettings.js, a label. Most
+  // take effect immediately via applyGraphicsSettings() below (shadows/
+  // ssao/resolution all read straight from getGraphicsSettings() there;
+  // reflectionEnabled and causticsEnabled are also read fresh every frame
+  // in the animate loop/shader uniform push, both added this round).
+  // oceanEffectsEnabled is the one exception — liquid.js (not in hand
+  // this session to verify) decides at LEVEL-BUILD time whether to
+  // compile its caustic/foam/sun-glitter shader code at all, not via a
+  // live per-frame uniform, so that one's toggle relies on
+  // applyGraphicsSettings()'s buildLevel() call below to actually take
+  // effect — same mechanism tier switches already use, just reused here.
+  const EFFECT_TOGGLES = [
+    { key: "shadowsEnabled", label: "Shadows" },
+    { key: "ssaoEnabled", label: "SSAO" },
+    { key: "oceanEffectsEnabled", label: "Ocean FX" },
+    { key: "reflectionEnabled", label: "Reflections" },
+    { key: "causticsEnabled", label: "Caustics" },
+  ];
+  for (const { key, label } of EFFECT_TOGGLES) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "rift-graphics-opt";
+    const isOn = () => getEffectiveValue(key) !== false;
+    const render = () => { btn.textContent = `${label}: ${isOn() ? "On" : "Off"}`; btn.classList.toggle("active", isOn()); };
+    render();
+    btn.addEventListener("click", () => {
+      setOverride(key, isOn() ? false : true); // explicit true/false override in both directions — a null-clear-to-tier-default here would make it impossible to force an effect ON on a tier whose own default is off (e.g. Low's shadowsEnabled)
+      applyGraphicsSettings();
+      render();
+    });
+    effectsSection.appendChild(btn);
+  }
+
+  // Resolution: cycles the pixelRatioCap override — "Tier" (null, use the
+  // active tier's own value, e.g. Medium's 1.3), then explicit absolute
+  // values. Framed as a single resolution control per "adjust display
+  // resolution and screen ratio" — pixelRatioCap already IS effectively
+  // resolution scale (it's multiplied against window.devicePixelRatio to
+  // get the actual render-buffer size, see applyGraphicsSettings/the
+  // renderer.setPixelRatio call at startup), so a separate "screen ratio"
+  // control isn't a distinct lever this codebase has; this one setting
+  // covers both asks.
+  const RESOLUTION_STEPS = [null, 2, 1.5, 1, 0.75, 0.5];
+  const resolutionLabel = (v) => (v === null ? "Tier" : `${v}x`);
+  let resolutionIdx = 0;
+  const resolutionBtn = document.createElement("button");
+  resolutionBtn.type = "button";
+  resolutionBtn.className = "rift-graphics-opt";
+  resolutionBtn.textContent = `Resolution: ${resolutionLabel(RESOLUTION_STEPS[resolutionIdx])}`;
+  resolutionBtn.addEventListener("click", () => {
+    resolutionIdx = (resolutionIdx + 1) % RESOLUTION_STEPS.length;
+    const v = RESOLUTION_STEPS[resolutionIdx];
+    setOverride("pixelRatioCap", v);
+    applyGraphicsSettings();
+    resolutionBtn.textContent = `Resolution: ${resolutionLabel(v)}`;
+    resolutionBtn.classList.toggle("active", v !== null);
+  });
+  effectsSection.appendChild(resolutionBtn);
+
+  // FPS counter visibility — separate from every setting above since
+  // it's a pure UI toggle (fpsCounterEl, created near the top of this
+  // file), not a graphics-quality/performance lever at all.
+  const fpsBtn = document.createElement("button");
+  fpsBtn.type = "button";
+  fpsBtn.className = "rift-graphics-opt active"; // starts active — the counter is visible by default today
+  fpsBtn.textContent = "FPS Counter: On";
+  fpsBtn.addEventListener("click", () => {
+    const nowHidden = fpsCounterEl.style.display !== "none";
+    fpsCounterEl.style.display = nowHidden ? "none" : "";
+    fpsBtn.textContent = `FPS Counter: ${nowHidden ? "Off" : "On"}`;
+    fpsBtn.classList.toggle("active", !nowHidden);
+  });
+  effectsSection.appendChild(fpsBtn);
 }
 
 // ---------------------------------------------------------------------------
@@ -2993,6 +3088,9 @@ function animate() {
   if (terrainMesh && terrainMesh.material.userData.shader) {
     terrainMesh.material.userData.shader.uniforms.uTime.value = elapsedTime;
     terrainMesh.material.userData.shader.uniforms.uDayAmount.value = dayNight.dayAmount;
+    if (terrainMesh.material.userData.shader.uniforms.uCausticsEnabled) {
+      terrainMesh.material.userData.shader.uniforms.uCausticsEnabled.value = getGraphicsSettings().causticsEnabled !== false ? 1.0 : 0.0;
+    }
   }
   // Real planar water reflection — Coral Shallows only, above-water only
   // (a reflection rendered from below the surface looking up would be
@@ -3019,7 +3117,17 @@ function animate() {
   // the render cost of computing it fresh every single frame.
   reflectionFrameCounter++;
   const reflectionBiome = currentLevelIdx >= 0 ? LEVELS[currentLevelIdx].biome : null;
-  if (reflectionBiome === "crystal" && camera.position.y > LIQUID_LEVEL.crystal) {
+  // reflectionEnabled: new individual toggle, per explicit "toggle
+  // buttons to tune each effect on and off" — undefined (no override set)
+  // treats as enabled, since this key doesn't exist on the base TIERS
+  // objects at all, only ever appears via an explicit override. When
+  // false, skips both full extra scene renders (reflection AND
+  // refraction) entirely rather than just throttling how often they
+  // refresh — the biggest single win this toggle set offers, since
+  // reflectionUpdateInterval already only ever reduces this cost, never
+  // eliminates it.
+  const reflectionEnabled = getGraphicsSettings().reflectionEnabled !== false;
+  if (reflectionEnabled && reflectionBiome === "crystal" && camera.position.y > LIQUID_LEVEL.crystal) {
     if (reflectionFrameCounter >= getGraphicsSettings().reflectionUpdateInterval) {
       reflectionFrameCounter = 0;
       updateWaterReflection(LIQUID_LEVEL.crystal, liquidHandle);

@@ -1195,34 +1195,36 @@ vec2 foamVoronoiF1F2(vec2 p) {
   // without ever checking the CUMULATIVE math, until it mathematically
   // peaked around 1.29 added directly onto diffuseColor — enough to
   // blow out to near-white and dominate the entire surface underneath
-  // it (see main.js's own terrain shader history). Two safeguards
-  // against repeating that here: (1) mix() toward a fixed warm color
-  // instead of raw += — mix() can NEVER exceed that target color no
-  // matter how the mask value moves, structurally ruling out the same
-  // unbounded-overflow failure mode; (2) peak checked by hand right now
-  // rather than left to "looks fine, ship it": causticMask maxes at 1.0,
-  // multiplied by 0.22 (day) and Fresnel/mask both capping at 1.0 in the
-  // worst case — verified by hand: causticMask maxes at exactly 1.0
-  // (clamped), so the whole expression's real worst case is 1.0 * 1.0 *
-  // 1.0 * 0.22 = 0.22, meaning mix() pulls diffuseColor at most 22% of
-  // the way toward the highlight color — nowhere near enough to wash out
-  // the surface underneath it, and structurally incapable of exceeding
-  // that highlight color at all regardless of how any input moves.
+  // Per explicit "let's see more of this all across the waves" —
+  // expanded on confirmed positive feedback (not blind tuning): lines
+  // widened for more spatial coverage, Fresnel-gating loosened so the
+  // effect has real presence across more viewing angles instead of only
+  // concentrating near straight-down, and intensity raised. Still safely
+  // bounded — mix() toward a fixed highlight color structurally cannot
+  // exceed that color regardless of how far any of these move, same
+  // safeguard as before. New verified peak: causticMask maxes at 1.0
+  // (clamped), Fresnel term now maxes at 1.0 (0.35 baseline + 0.65 at
+  // straight-down), uDayAmount maxes at 1.0, times 0.4 = 0.4 real worst
+  // case — a much more present but still genuinely bounded 40% blend at
+  // most, not the earlier 22%.
   vec2 causticUv = vFoamPos * 0.5 + vec2(uTime * 0.018, -uTime * 0.013);
   vec2 causticCells = foamVoronoiF1F2(causticUv);
-  float causticNet = 1.0 - smoothstep(0.0, 0.045, causticCells.y - causticCells.x);
+  float causticNet = 1.0 - smoothstep(0.0, 0.075, causticCells.y - causticCells.x);
   // A second, finer octave breaks up the single-frequency look a lone
   // Voronoi net always has — real caustics show layered detail at more
   // than one scale, not one uniform cell size.
   vec2 causticUv2 = vFoamPos * 1.3 - vec2(uTime * 0.011, uTime * 0.021);
   vec2 causticCells2 = foamVoronoiF1F2(causticUv2);
-  float causticNet2 = 1.0 - smoothstep(0.0, 0.03, causticCells2.y - causticCells2.x);
+  float causticNet2 = 1.0 - smoothstep(0.0, 0.05, causticCells2.y - causticCells2.x);
   float causticMask = clamp(causticNet * 0.7 + causticNet2 * 0.4, 0.0, 1.0);
-  // Fresnel-gated (vReflectionFresnel, the same grazing-angle value used
-  // above) — caustics read on water you're looking mostly straight down
-  // through, same physical logic refraction already uses just above,
-  // and fades with uDayAmount since this needs real direct sunlight.
-  float causticStrength = causticMask * (1.0 - vReflectionFresnel) * uDayAmount * 0.22;
+  // Fresnel gate loosened — was pure (1.0-fresnel), which suppressed the
+  // effect almost entirely at grazing/horizon viewing angles (exactly
+  // where the confirmed-good screenshot showed it working well). A 0.35
+  // baseline keeps real presence at every angle, still favoring the
+  // straight-down case physically like refraction does, just less
+  // exclusively.
+  float causticFresnelGate = 0.35 + 0.65 * (1.0 - vReflectionFresnel);
+  float causticStrength = causticMask * causticFresnelGate * uDayAmount * 0.4;
   diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0, 0.98, 0.88), causticStrength);
 }`);
         m.userData.shader = shader; // so updateLiquidPlane can push uTime each frame

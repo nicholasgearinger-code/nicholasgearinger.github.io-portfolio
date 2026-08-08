@@ -5,6 +5,8 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { SSAOPass } from "three/addons/postprocessing/SSAOPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { SMAAPass } from "three/addons/postprocessing/SMAAPass.js";
+import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
+import { FXAAShader } from "three/addons/shaders/FXAAShader.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH, POND_Z, POND_RADIUS, POND_LEVEL, RAMP_CENTER_X, RAMP_CENTER_Z, RAMP_LENGTH, RAMP_HALF_WIDTH, ROOM_FLOOR_Y, ROOM_WIDTH, ROOM_LENGTH, BRANCH_START_X, BRANCH_LENGTH, BRANCH_HALF_WIDTH, BRANCH_Z, CHAMBER_RADIUS } from "./terrain.js";
 import { LEVELS, generateLevelLayout } from "./levels.js";
@@ -179,16 +181,11 @@ const camera = new THREE.PerspectiveCamera(70, viewport.clientWidth / viewport.c
 camera.rotation.order = "YXZ";
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-// Per "what effects can be improved" — was defaulting to
-// THREE.NoToneMapping (three.js's own default), which just clips
-// anything over 1.0 in each color channel to flat white instead of
-// rolling off smoothly. This scene has plenty of bright emissive/HDR-ish
-// elements (the sun disc, resonance crystals, the new caustics net) that
-// benefit from a real filmic curve instead. ACESFilmicToneMapping is the
-// industry-standard choice for this — a gentle highlight rolloff that
-// still reads as "bright" without blowing out to solid white, and richer
-// midtone contrast than the flat default.
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
+// Tone mapping ITSELF is now set by applyPostFx() below (from the new
+// tone-mapping dropdown's tier default/override, per explicit
+// "individually" follow-up) rather than hardcoded here — this fixed
+// exposure baseline (not part of that dropdown) still applies regardless
+// of which curve is picked.
 renderer.toneMappingExposure = 1.0;
 renderer.setSize(viewport.clientWidth, viewport.clientHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, getGraphicsSettings().pixelRatioCap));
@@ -238,16 +235,14 @@ ssaoPass.kernelRadius = 2.5;
 ssaoPass.minDistance = 0.0005;
 ssaoPass.maxDistance = 0.08;
 composer.addPass(ssaoPass);
-// Selective bloom — per "what effects can be improved," the sun disc,
-// resonance crystals, and the new caustics net are all bright/emissive
-// but nothing actually GLOWS. UnrealBloomPass's threshold (0.85) is
-// tuned so only genuinely bright pixels bloom — normal lit sand/terrain/
-// foliage sits well under that in this scene's actual color range, so
-// this should read as "a few things glow" rather than a hazy wash over
-// everything. Strength/radius kept modest (0.55/0.4) for the same
-// reason — a first pass at a tasteful amount, easy to tune up if it
-// reads as too subtle once actually seen live.
-const bloomPass = new UnrealBloomPass(new THREE.Vector2(viewport.clientWidth, viewport.clientHeight), 0.55, 0.4, 0.85);
+// Selective bloom — the sun disc, resonance crystals, and the caustics
+// net are all bright/emissive but nothing actually GLOWS by default.
+// Per explicit "dropdown options... individually" follow-up, this is no
+// longer a single on/off bundled with AA — BLOOM_LEVELS below defines
+// real distinct presets (strength/radius/threshold), picked via its own
+// dropdown. Constructed here with the 'off' preset's values; applyPostFx
+// (below) sets the real preset immediately after.
+const bloomPass = new UnrealBloomPass(new THREE.Vector2(viewport.clientWidth, viewport.clientHeight), 0, 0.4, 1.0);
 composer.addPass(bloomPass);
 // Real anti-aliasing for the final composited image — renderer's own
 // antialias:true (set at construction above) only affects a DIRECT
@@ -255,20 +250,59 @@ composer.addPass(bloomPass);
 // EffectComposer (as it already does here, for SSAO/bloom), that native
 // MSAA no longer applies to what actually reaches the screen, since
 // composer's intermediate render targets aren't multisampled by default.
-// SMAA over FXAA: better edge quality, comparable cost, and doesn't need
-// a temporal/jitter setup the way TAA would.
+// Two selectable methods per explicit "individually" follow-up — SMAA
+// (better edge quality, the previous single hardcoded choice) and FXAA
+// (cheaper, a real option for weaker devices) — plus Off. Both passes
+// exist simultaneously; applyPostFx enables at most one at a time.
 const smaaPass = new SMAAPass(viewport.clientWidth * renderer.getPixelRatio(), viewport.clientHeight * renderer.getPixelRatio());
 composer.addPass(smaaPass);
+const fxaaPass = new ShaderPass(FXAAShader);
+composer.addPass(fxaaPass);
 composer.addPass(new OutputPass());
+
+// Bloom presets — 'off' truly disables the pass (skips its extra
+// render-target work entirely, not just zeroed strength); the other
+// three are real distinct looks, not a single tuned value times a
+// multiplier, so each can be picked deliberately rather than treated as
+// "how much of the one preset."
+const BLOOM_LEVELS = {
+  off: null,
+  subtle: { strength: 0.35, radius: 0.35, threshold: 0.88 },
+  moderate: { strength: 0.55, radius: 0.4, threshold: 0.85 },
+  strong: { strength: 0.85, radius: 0.55, threshold: 0.78 },
+};
+// Tone mapping curves — three.js's full built-in set. 'none' is the
+// engine's own pre-FU251 default (NoToneMapping — colors above 1.0 per
+// channel just clip to flat white); the others roll off highlights with
+// increasingly filmic character. Exposure fixed at 1.0 for all of them —
+// a per-curve exposure control would be a reasonable future refinement
+// but isn't part of this round's ask.
+const TONE_MAPPINGS = {
+  none: THREE.NoToneMapping,
+  linear: THREE.LinearToneMapping,
+  reinhard: THREE.ReinhardToneMapping,
+  cineon: THREE.CineonToneMapping,
+  aces: THREE.ACESFilmicToneMapping,
+};
+
+function applyPostFx() {
+  const s = getGraphicsSettings();
+  const bloom = BLOOM_LEVELS[s.bloomLevel] ?? null;
+  bloomPass.enabled = bloom !== null;
+  if (bloom) {
+    bloomPass.strength = bloom.strength;
+    bloomPass.radius = bloom.radius;
+    bloomPass.threshold = bloom.threshold;
+  }
+  const aa = s.aaMethod ?? "off";
+  smaaPass.enabled = aa === "smaa";
+  fxaaPass.enabled = aa === "fxaa";
+  renderer.toneMapping = TONE_MAPPINGS[s.toneMapping] ?? THREE.NoToneMapping;
+}
+
 function applySsaoTier() {
   ssaoPass.enabled = getGraphicsSettings().ssaoEnabled;
-  // Bloom + SMAA bundled under one tier property (postFxEnabled) rather
-  // than two separate ones — both are the same category of "extra polish
-  // pass," and Low tier's whole point is skipping exactly this kind of
-  // cost, so one combined on/off matches how the tier system already
-  // treats similar bundles (see oceanEffectsEnabled).
-  bloomPass.enabled = getGraphicsSettings().postFxEnabled !== false;
-  smaaPass.enabled = getGraphicsSettings().postFxEnabled !== false;
+  applyPostFx();
 }
 applySsaoTier();
 
@@ -478,6 +512,11 @@ function resizeToViewport() {
     composer.setSize(targetW, targetH);
     ssaoPass.setSize(targetW, targetH);
     underwaterRenderTarget.setSize(targetW, targetH);
+    // FXAAShader needs its resolution as a texel-size uniform (1/pixels),
+    // not a plain width/height — unlike every other pass here, ShaderPass
+    // doesn't auto-resize this from composer.setSize, so it's set by hand
+    // wherever the render resolution changes.
+    fxaaPass.material.uniforms["resolution"].value.set(1 / targetW, 1 / targetH);
   } else {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, getGraphicsSettings().pixelRatioCap));
     renderer.setSize(w, h);
@@ -485,6 +524,7 @@ function resizeToViewport() {
     ssaoPass.setSize(w, h);
     const pixelRatio = renderer.getPixelRatio();
     underwaterRenderTarget.setSize(w * pixelRatio, h * pixelRatio);
+    fxaaPass.material.uniforms["resolution"].value.set(1 / (w * pixelRatio), 1 / (h * pixelRatio));
   }
 }
 new ResizeObserver(resizeToViewport).observe(viewport);
@@ -2754,7 +2794,6 @@ if (graphicsBtn && graphicsPanel) {
     { key: "oceanEffectsEnabled", label: "Ocean FX" },
     { key: "reflectionEnabled", label: "Reflections" },
     { key: "causticsEnabled", label: "Caustics" },
-    { key: "postFxEnabled", label: "Bloom+AA" },
   ];
   for (const { key, label } of EFFECT_TOGGLES) {
     const btn = document.createElement("button");
@@ -2833,6 +2872,74 @@ if (graphicsBtn && graphicsPanel) {
     aspectBtn.classList.toggle("active", a !== null);
   });
   effectsSection.appendChild(aspectBtn);
+
+  // Bloom / Anti-Aliasing / Tone Mapping — per explicit "dropdown options
+  // for bloom, anti-aliasing and tone mapping individually" follow-up,
+  // replacing the single bundled Bloom+AA toggle from the previous round.
+  // Real <select> elements rather than the cycling-button pattern used
+  // elsewhere in this panel — each of these has more than 2-3 states
+  // (bloom has 4, tone mapping has 5), and repeatedly tapping a cycle
+  // button back around to a specific choice is worse UX than picking it
+  // directly from a list. A dedicated row, own border-top separator, same
+  // visual language (dark panel, existing color variables) as the rest of
+  // the panel via inline styles rather than new index.html CSS, keeping
+  // this self-contained in main.js like every other panel addition this
+  // session.
+  const postFxSection = document.createElement("div");
+  postFxSection.style.marginTop = "8px";
+  postFxSection.style.paddingTop = "8px";
+  postFxSection.style.borderTop = "1px solid rgba(255,255,255,0.15)";
+  postFxSection.style.display = "flex";
+  postFxSection.style.flexWrap = "wrap";
+  postFxSection.style.gap = "6px";
+  graphicsPanel.appendChild(postFxSection);
+
+  function makeDropdown(labelText, key, options, onApply) {
+    // options: array of [value, label] pairs, in the order they should
+    // appear in the dropdown.
+    const wrap = document.createElement("label");
+    wrap.style.display = "flex";
+    wrap.style.flexDirection = "column";
+    wrap.style.gap = "2px";
+    wrap.style.fontFamily = "'IBM Plex Mono', monospace";
+    wrap.style.fontSize = "9px";
+    wrap.style.color = "rgba(232,236,241,0.6)";
+    wrap.style.flex = "1";
+    wrap.style.minWidth = "90px";
+    const span = document.createElement("span");
+    span.textContent = labelText;
+    wrap.appendChild(span);
+    const select = document.createElement("select");
+    select.style.font = "inherit";
+    select.style.color = "rgba(232,236,241,0.9)";
+    select.style.background = "rgba(232,236,241,0.06)";
+    select.style.border = "1px solid rgba(232,236,241,0.18)";
+    select.style.borderRadius = ".3rem";
+    select.style.padding = ".35rem .3rem";
+    for (const [value, optLabel] of options) {
+      const opt = document.createElement("option");
+      opt.value = value;
+      opt.textContent = optLabel;
+      select.appendChild(opt);
+    }
+    select.value = getEffectiveValue(key);
+    select.addEventListener("change", () => {
+      setOverride(key, select.value);
+      onApply();
+    });
+    wrap.appendChild(select);
+    postFxSection.appendChild(wrap);
+  }
+
+  makeDropdown("Bloom", "bloomLevel", [
+    ["off", "Off"], ["subtle", "Subtle"], ["moderate", "Moderate"], ["strong", "Strong"],
+  ], applyPostFx);
+  makeDropdown("Anti-Aliasing", "aaMethod", [
+    ["off", "Off"], ["fxaa", "FXAA"], ["smaa", "SMAA"],
+  ], applyPostFx);
+  makeDropdown("Tone Mapping", "toneMapping", [
+    ["none", "None"], ["linear", "Linear"], ["reinhard", "Reinhard"], ["cineon", "Cineon"], ["aces", "ACES Filmic"],
+  ], applyPostFx);
 
   // FPS counter visibility — separate from every setting above since
   // it's a pure UI toggle (fpsCounterEl, created near the top of this

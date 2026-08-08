@@ -73,11 +73,17 @@ const TIERS = {
     // own intensity down.
     seaLifeMultiplier: 0.3,
     oceanEffectsEnabled: false,
-    // Bloom + SMAA anti-aliasing (main.js composer pipeline) — a real
-    // extra full-screen pass each, same cost category as SSAO/ocean
-    // effects above. Off on Low for the same "maximum performance"
-    // reasoning as everything else in this tier.
-    postFxEnabled: false,
+    // Bloom + anti-aliasing (main.js composer pipeline) — split from the
+    // single bundled postFxEnabled per explicit "individually" follow-up.
+    // Both bloomLevel='off'/aaMethod='off' for the same "maximum
+    // performance" reasoning as everything else in this tier — each is a
+    // real extra full-screen pass. toneMapping is a color-response
+    // setting applied to the existing render, not an extra pass — no
+    // meaningful cost difference between curves, so it stays on 'aces'
+    // even on Low rather than being tied to the performance tier at all.
+    bloomLevel: "off",
+    aaMethod: "off",
+    toneMapping: "aces",
   },
   medium: {
     label: "Medium",
@@ -148,7 +154,9 @@ const TIERS = {
     // efficient middle ground.
     seaLifeMultiplier: 0.75,
     oceanEffectsEnabled: true,
-    postFxEnabled: true,
+    bloomLevel: "moderate",
+    aaMethod: "smaa",
+    toneMapping: "aces",
   },
   high: {
     label: "High",
@@ -177,7 +185,9 @@ const TIERS = {
     // effect at its best, not fewer).
     seaLifeMultiplier: 1.3,
     oceanEffectsEnabled: true,
-    postFxEnabled: true,
+    bloomLevel: "strong",
+    aaMethod: "smaa",
+    toneMapping: "aces",
   },
 };
 
@@ -209,7 +219,7 @@ try {
 // doesn't silently clear the person's individual toggles, and so this
 // state is easy to reset as a whole (resetOverrides).
 const OVERRIDES_STORAGE_KEY = "riftGraphicsOverrides";
-const OVERRIDABLE_KEYS = ["shadowsEnabled", "ssaoEnabled", "oceanEffectsEnabled", "reflectionEnabled", "causticsEnabled", "postFxEnabled", "pixelRatioCap"];
+const OVERRIDABLE_KEYS = ["shadowsEnabled", "ssaoEnabled", "oceanEffectsEnabled", "reflectionEnabled", "causticsEnabled", "bloomLevel", "aaMethod", "toneMapping", "pixelRatioCap"];
 let overrides = {};
 try {
   const saved = localStorage.getItem(OVERRIDES_STORAGE_KEY);

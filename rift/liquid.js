@@ -1017,6 +1017,13 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
         // uDayAmount rather than reusing skyColor brightness as a proxy
         // the way sun-glitter's JS-side dayFactor currently does.
         shader.uniforms.uDayAmount = { value: 1 };
+        // Per explicit "optimize graphics tiers" — gates the caustic net
+        // and sun-glitter contributions below (NOT reflection/refraction,
+        // which are a separate, already tier-throttled system via
+        // reflectionUpdateInterval and stay untouched here) so Low tier
+        // gets a genuinely cheaper fragment shader, not just visually
+        // thinner effects still costing the same per-pixel math.
+        shader.uniforms.uOceanEffectsEnabled = { value: 1 };
         shader.vertexShader = shader.vertexShader
           .replace("#include <common>", "#include <common>\nattribute float aFoam;\nvarying float vFoam;\nvarying vec2 vFoamPos;\nattribute float aSunGlint;\nvarying float vSunGlint;\nattribute float aReflectionFresnel;\nvarying float vReflectionFresnel;\nattribute vec2 aReflectionDistort;\nvarying vec2 vReflectionDistort;\nuniform mat4 uReflectionMatrix;\nvarying vec4 vReflectionCoord;")
           .replace("#include <begin_vertex>", "#include <begin_vertex>\nvFoam = aFoam;\nvFoamPos = position.xz;\nvSunGlint = aSunGlint;\nvReflectionFresnel = aReflectionFresnel;\nvReflectionDistort = aReflectionDistort;\nvReflectionCoord = uReflectionMatrix * modelMatrix * vec4(transformed, 1.0);"); // local-space XZ IS world XZ here — this mesh has no runtime x/z translation or rotation (baked in at creation), only a Y offset. `transformed` at this point already holds the CPU-side wave-displaced position (the real per-frame Gerstner sum written into the position attribute in updateLiquidPlane, not a GPU displacement) — so the reflection coordinate genuinely follows the real wave surface, not a flat approximation of it.
@@ -1029,6 +1036,7 @@ uniform sampler2D uDistortTex;
 uniform sampler2D uRefractionTex;
 uniform vec2 uResolution;
 uniform float uDayAmount;
+uniform float uOceanEffectsEnabled;
 varying float vFoam;
 varying vec2 vFoamPos;
 varying float vSunGlint;
@@ -1177,7 +1185,7 @@ vec2 foamVoronoiF1F2(vec2 p) {
   // math. Additive (not mixed toward white like the foam above) so it
   // can genuinely blow out brighter than the base albedo the way a real
   // specular highlight does, rather than just capping at flat white.
-  diffuseColor.rgb += vec3(1.0, 0.97, 0.85) * vSunGlint * 2.4;
+  diffuseColor.rgb += vec3(1.0, 0.97, 0.85) * vSunGlint * 2.4 * uOceanEffectsEnabled;
 
   // Per explicit "add realistic light scattering on the water mesh to
   // implement natural sunlight caustics" — a genuinely NEW effect (the
@@ -1224,7 +1232,7 @@ vec2 foamVoronoiF1F2(vec2 p) {
   // straight-down case physically like refraction does, just less
   // exclusively.
   float causticFresnelGate = 0.35 + 0.65 * (1.0 - vReflectionFresnel);
-  float causticStrength = causticMask * causticFresnelGate * uDayAmount * 0.4;
+  float causticStrength = causticMask * causticFresnelGate * uDayAmount * 0.4 * uOceanEffectsEnabled;
   diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0, 0.98, 0.88), causticStrength);
 }`);
         m.userData.shader = shader; // so updateLiquidPlane can push uTime each frame
@@ -1414,11 +1422,13 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
     if (refractionTexture) mesh.material.userData.shader.uniforms.uRefractionTex.value = refractionTexture;
     if (resolution) mesh.material.userData.shader.uniforms.uResolution.value.copy(resolution);
     mesh.material.userData.shader.uniforms.uDayAmount.value = dayAmount;
+    mesh.material.userData.shader.uniforms.uOceanEffectsEnabled.value = getGraphicsSettings().oceanEffectsEnabled ? 1 : 0;
   }
   if (backMesh && backMesh.material.userData.shader) {
     if (refractionTexture) backMesh.material.userData.shader.uniforms.uRefractionTex.value = refractionTexture;
     if (resolution) backMesh.material.userData.shader.uniforms.uResolution.value.copy(resolution);
     backMesh.material.userData.shader.uniforms.uDayAmount.value = dayAmount;
+    backMesh.material.userData.shader.uniforms.uOceanEffectsEnabled.value = getGraphicsSettings().oceanEffectsEnabled ? 1 : 0;
   }
   // Scroll the ripple normal map slowly along the plane's own flow
   // direction — a static (non-scrolling) normal map would still add real

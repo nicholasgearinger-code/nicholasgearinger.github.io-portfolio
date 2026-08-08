@@ -1741,7 +1741,7 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
       // silently place well under the target. Retry-until-reached
       // instead, same pattern fish already uses, per explicit "should be
       // more than just one."
-      const CORAL_COUNT = 220; // was 70 — per explicit "fill it in as much as possible," with 7 species now (was 3) there's real variety to actually fill a denser reef with rather than repeating a small set
+      const CORAL_COUNT = Math.round(220 * getGraphicsSettings().seaLifeMultiplier); // was a flat 220 — per explicit "optimize graphics tiers," now scales with tier instead of paying the same cost on every device regardless of settings
       const CORAL_MAX_ATTEMPTS = 1600; // was 750 — raised since the new depth cap above rejects more candidates than before (deep-water points that used to qualify no longer do), so more attempts are needed to still reach the same target count
       const coralSeed = hashStringToSeed(WORLD_SEED + "::realCoral");
       const rng = mulberry32(coralSeed);
@@ -1813,7 +1813,7 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
       // sand. Falls back to the old independent-random placement only if
       // no coral ended up placed at all (shouldn't normally happen, but
       // keeps fish from silently vanishing if it ever does).
-      const FISH_COUNT = 16; // was 8 — bumped since the area they're spread across is now much larger, 8 would read as sparse/empty
+      const FISH_COUNT = Math.round(16 * getGraphicsSettings().seaLifeMultiplier); // was a flat 16 — per explicit "optimize graphics tiers," now scales with tier
       const fishSeed = hashStringToSeed(WORLD_SEED + "::realFish");
       const fishRng = mulberry32(fishSeed);
       let fishPlaced = 0;

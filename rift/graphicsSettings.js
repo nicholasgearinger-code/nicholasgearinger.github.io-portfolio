@@ -60,7 +60,19 @@ const TIERS = {
     // reflection genuinely doesn't need to update at full framerate to
     // look right, and Low tier (the weakest devices) gets the most
     // relief here since it needs it most.
-    reflectionUpdateInterval: 3,
+    reflectionUpdateInterval: 4, // was 3 — pushed further per explicit "optimize low for maximum performance"; reflection/refraction remain the single largest unmitigated per-frame cost (two full extra scene renders), so this tier should lean hardest on not refreshing them every frame
+    // Per explicit "optimize low for maximum performance" — two things
+    // added this session that were never actually tier-gated until now:
+    // (1) seaLifeMultiplier scales coral/fish counts (main.js) — 220
+    // coral pieces + 16 fish is a real, substantial addition of live
+    // meshes to the scene that Low was silently paying full price for.
+    // (2) oceanEffectsEnabled skips the water's entire caustic/foam/
+    // sun-glitter onBeforeCompile shader pass (liquid.js) — a genuinely
+    // plain, fast material on Low instead of a heavily customized
+    // per-pixel fragment shader, rather than just tuning that shader's
+    // own intensity down.
+    seaLifeMultiplier: 0.3,
+    oceanEffectsEnabled: false,
   },
   medium: {
     label: "Medium",
@@ -82,11 +94,21 @@ const TIERS = {
     pixelRatioCap: 1.75,
     reflectionUpdateInterval: 2,
     ssaoEnabled: true,
+    // Per explicit "optimize medium for most efficiency while providing
+    // ALL effects" — oceanEffectsEnabled stays true (the water's real
+    // caustic/foam/sun-glitter shader work, same as before) since
+    // dropping it would violate "all effects." seaLifeMultiplier is the
+    // efficiency lever instead: a moderately-scaled reef (still visually
+    // rich, not the full High-tier density) rather than paying for 220
+    // individual coral meshes at the same tier that's supposed to be the
+    // efficient middle ground.
+    seaLifeMultiplier: 0.75,
+    oceanEffectsEnabled: true,
   },
   high: {
     label: "High",
     terrainSegments: 600,      // pushed to the highest practical detail — the real ceiling this tier is meant to represent, not just "a bit more than Medium"
-    liquidSegments: 200,
+    liquidSegments: 260,       // was 200 — pushed further per explicit "optimize high for best fidelity, highest detail" (the water's per-vertex wave math is the main thing segment count actually improves the look of)
     skyDomeSegments: [64, 32],
     grassBladeSegments: 7,
     decorationDetail: 3,       // linear growth in practice (decorations.js uses it as sphereSeg=6+detail*4, capSeg=8+detail*4, and a >=2 threshold — not a direct exponential Icosahedron/Octahedron subdivision parameter, since rocks/crystals are hardcoded to stay at 0 regardless of this value per the art-style rule above)
@@ -103,6 +125,13 @@ const TIERS = {
     pixelRatioCap: 3,
     reflectionUpdateInterval: 1, // no throttle — High is the quality-focused tier, update every frame
     ssaoEnabled: true,
+    // Per explicit "optimize high for best fidelity, highest detail" —
+    // above the current baseline (1.0), not just matching it, since this
+    // tier is meant to be the genuine ceiling. oceanEffectsEnabled stays
+    // true (same reasoning as Medium — this tier should have every
+    // effect at its best, not fewer).
+    seaLifeMultiplier: 1.3,
+    oceanEffectsEnabled: true,
   },
 };
 

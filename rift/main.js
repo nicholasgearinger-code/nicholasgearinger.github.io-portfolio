@@ -839,6 +839,15 @@ let grassHandle = null;
 let flowersHandle = null;
 let footstepGlowHandle = null;
 let weatherHandle = null;
+// Debug preview controls, per explicit request — let time-of-day and
+// weather be previewed without waiting through a real 900s day/night
+// cycle or a real multi-minute storm interval. debugTimeScale only
+// multiplies the dt fed to updateDayNightCycle (see animate() below) —
+// deliberately NOT elapsedTime itself or the dt passed to physics/player
+// movement/ocean-wave updates, so this speeds up the sun/moon/sky only,
+// without making the player move faster or the water hyper-animate.
+let debugTimeScale = 1;
+let debugForceStorm = false;
 let cloudsHandle = null;
 let submergedState = false; // persists across frames — see the hysteresis check below for why a fresh threshold comparison every frame isn't enough
 let cloudLayerHandle = null;
@@ -2573,6 +2582,44 @@ if (graphicsBtn && graphicsPanel) {
     btn.addEventListener("click", () => changeGraphicsTier(btn.dataset.tier));
   });
   syncGraphicsUI();
+
+  // Debug: time-of-day / weather preview toggles, per explicit request —
+  // appended into the existing panel at runtime rather than touching
+  // index.html, so this ships as a self-contained main.js change. Reuses
+  // the ".rift-graphics-opt" class for visual consistency with the
+  // existing quality-tier buttons (same CSS the page already loads).
+  const debugSection = document.createElement("div");
+  debugSection.style.marginTop = "8px";
+  debugSection.style.paddingTop = "8px";
+  debugSection.style.borderTop = "1px solid rgba(255,255,255,0.15)";
+  debugSection.style.display = "flex";
+  debugSection.style.gap = "6px";
+  graphicsPanel.appendChild(debugSection);
+
+  const TIME_SCALE_STEPS = [1, 20, 100]; // 1x = real ~900s day/night cycle; 100x = ~9s, full cycle visible almost instantly
+  let timeScaleIdx = 0;
+  const timeScaleBtn = document.createElement("button");
+  timeScaleBtn.type = "button";
+  timeScaleBtn.className = "rift-graphics-opt";
+  timeScaleBtn.textContent = "Time: 1x";
+  timeScaleBtn.addEventListener("click", () => {
+    timeScaleIdx = (timeScaleIdx + 1) % TIME_SCALE_STEPS.length;
+    debugTimeScale = TIME_SCALE_STEPS[timeScaleIdx];
+    timeScaleBtn.textContent = `Time: ${debugTimeScale}x`;
+    timeScaleBtn.classList.toggle("active", debugTimeScale !== 1);
+  });
+  debugSection.appendChild(timeScaleBtn);
+
+  const stormBtn = document.createElement("button");
+  stormBtn.type = "button";
+  stormBtn.className = "rift-graphics-opt";
+  stormBtn.textContent = "Storm: Off";
+  stormBtn.addEventListener("click", () => {
+    debugForceStorm = !debugForceStorm;
+    stormBtn.textContent = debugForceStorm ? "Storm: On" : "Storm: Off";
+    stormBtn.classList.toggle("active", debugForceStorm);
+  });
+  debugSection.appendChild(stormBtn);
 }
 
 // ---------------------------------------------------------------------------
@@ -2860,7 +2907,7 @@ function animate() {
     fpsAccumTime = 0;
   }
 
-  const dayNight = updateDayNightCycle(dayNightCycle, dt);
+  const dayNight = updateDayNightCycle(dayNightCycle, dt * debugTimeScale);
   // Fallback sky background — mutated in place (scene.background already
   // references this same Color object, set once at module init above),
   // blended from the day/night cycle's own current colors so it stays
@@ -3151,6 +3198,19 @@ function animate() {
     dayNightCycle.moonBody.glow.material.opacity *= lookingUpFactor;
   }
   const wind = updateWeatherSystem(weatherHandle, dt, eruptionActive, dayNight.dayAmount);
+  // Debug forced storm, per explicit request — ramps rainIntensity up
+  // fast (well above weather.js's own real ~20-30s fade) while the toggle
+  // is on, applied AFTER the normal update so it isn't immediately
+  // overwritten, and mirrored onto `wind.rainIntensity` too since that's
+  // a separate returned value the cloud/light-shaft calls below actually
+  // read, not the same reference as weatherHandle.rainIntensity. Turning
+  // the toggle back off does nothing further here — weather.js's own
+  // internal target was never touched, so it just resumes normally from
+  // wherever rainIntensity happens to be.
+  if (debugForceStorm && weatherHandle) {
+    weatherHandle.rainIntensity = Math.min(1, weatherHandle.rainIntensity + dt * 2);
+    wind.rainIntensity = weatherHandle.rainIntensity;
+  }
   // Rain is an above-surface effect — real rain doesn't fall underwater.
   // Same visibility-gating pattern already used for whitecaps/the cloud
   // dome/light shafts above: toggle directly on submersion rather than

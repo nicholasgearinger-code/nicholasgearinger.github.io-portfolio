@@ -3437,7 +3437,23 @@
   #rift-graphics-panel {
     position: absolute; top: 2.6rem; right: .7rem; z-index: 20; pointer-events: auto;
     background: rgba(10,14,24,.92); border: 1px solid rgba(232,236,241,.2); border-radius: .5rem;
-    padding: .7rem .8rem; display: flex; flex-direction: column; gap: .5rem; min-width: 210px;
+    padding: .7rem .8rem; display: flex; flex-direction: column; gap: .5rem;
+    /* Widened 210px->260px per "toggle buttons to tune each effect" —
+       the panel grew from 3 tier buttons to 3 tier buttons + 2 debug
+       toggles + 7 effect/resolution/FPS toggles, and 210px cramped labels
+       like "FPS Counter: On" into wrapped, hard-to-tap text. */
+    min-width: 260px;
+    /* NEW per "moved so it doesn't overlap anything" — this panel is
+       absolutely positioned (floats OVER whatever is beneath it as it
+       grows), and had no height limit at all before the new toggles
+       roughly tripled its content. On a short/landscape phone screen a
+       tall panel could grow down far enough to reach and cover
+       #rift-touch-fire (bottom-right). Capping height and scrolling
+       internally makes that structurally impossible regardless of how
+       much content this panel ever grows to hold, rather than tuning a
+       height number by eye per device.
+    */
+    max-height: min(70vh, 420px); overflow-y: auto;
     box-shadow: 0 8px 24px rgba(0,0,0,.4);
   }
   #rift-graphics-panel[hidden] { display: none; } /* #rift-graphics-panel's own display:flex above outranks the browser's default [hidden]{display:none} rule (ID beats attribute selector), so without this the panel never actually hides when main.js toggles the `hidden` attribute */
@@ -3459,7 +3475,11 @@
        it in the stacking order. Give GRAPHICS its own row below the
        MENU/RESONANCE row instead of sharing horizontal space with them. */
     #rift-graphics-btn { top: 2.6rem; right: .6rem; }
-    #rift-graphics-panel { top: 4.5rem; right: .6rem; min-width: 0; width: min(190px, 62vw); }
+    /* Widened 190px/62vw -> 230px/78vw — same reasoning as the base rule
+       above, the panel now holds far more than the original 3 tier
+       buttons and needs the room, especially on the narrowest phones this
+       query targets. */
+    #rift-graphics-panel { top: 4.5rem; right: .6rem; min-width: 0; width: min(230px, 78vw); }
     #rift-viewport.rift-fullscreen #rift-graphics-btn {
       top: calc(2.6rem + env(safe-area-inset-top)); right: calc(.6rem + env(safe-area-inset-right));
     }

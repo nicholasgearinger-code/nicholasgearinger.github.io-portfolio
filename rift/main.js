@@ -1586,12 +1586,14 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
         const species = loadedSpecies[Math.floor(rng() * loadedSpecies.length)];
         const tree = createRealTree(species);
         if (!tree) continue;
-        // Real coconut palms genuinely run 12-25m tall — createRealTree
-        // (models.js) already normalized this tree to exactly 1 world
-        // unit tall regardless of its source file's raw units, so this
-        // scale IS the tree's real final height in world units, not a
-        // correction factor being guessed at.
-        const scale = 12 + rng() * 8;
+        // createRealTree (models.js) already normalized this tree to
+        // exactly 1 world unit tall regardless of its source file's raw
+        // units, so this scale IS the tree's final height in world
+        // units. Real coconut palms run 12-25m, but at this game's
+        // scale (player eye height 1.6) that reads as a screen-filling
+        // giant — scaled down to a still-tall-but-human-proportioned
+        // 5-8 units per explicit "make it normal size" request.
+        const scale = 5 + rng() * 3;
         tree.position.set(x, y + tree.userData.groundOffset * scale, z);
         tree.rotation.y = rng() * Math.PI * 2;
         tree.scale.setScalar(scale);

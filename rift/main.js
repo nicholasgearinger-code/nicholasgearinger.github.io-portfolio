@@ -1571,11 +1571,21 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
       const PALM_COUNT = 9; // was 5 — bumped a bit now that there's real variety (4 species) to fill the clearing with instead of repeating one tree
       const palmSeed = hashStringToSeed(WORLD_SEED + "::realPalms");
       const rng = mulberry32(palmSeed);
+      const placedTreePositions = []; // {x,z} of trees actually placed so far, for the min-spacing check below
+      const MIN_TREE_SPACING = 4; // world units — trees were landing right on top of each other with no check at all
       for (let i = 0; i < PALM_COUNT; i++) {
         const angle = rng() * Math.PI * 2;
         const dist = 8 + rng() * 14; // scattered around the landmark clearing, same rough footprint the old hardcoded palm spots used before FU162 removed them
         const x = LANDMARK_POSITION.x + Math.cos(angle) * dist;
         const z = LANDMARK_POSITION.z + Math.sin(angle) * dist;
+        // reject candidates too close to an already-placed tree — per
+        // "all clustered together," nothing previously enforced any
+        // spacing between the 9 trees at all.
+        let tooClose = false;
+        for (const p of placedTreePositions) {
+          if (Math.hypot(x - p.x, z - p.z) < MIN_TREE_SPACING) { tooClose = true; break; }
+        }
+        if (tooClose) continue;
         // sampleGroundHeight raycasts the REAL rendered terrainMesh (the
         // same function the player's own feet rest on), not the analytic
         // height function — guarantees the tree base sits precisely on
@@ -1600,6 +1610,7 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
         tree.scale.setScalar(scale);
         scene.add(tree);
         realPalmTrees.push(tree);
+        placedTreePositions.push({ x, z });
       }
     }).catch(() => {}); // load failure already logged inside models.js — nothing further to do here
 

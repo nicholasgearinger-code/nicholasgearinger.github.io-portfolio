@@ -1742,7 +1742,7 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
       // instead, same pattern fish already uses, per explicit "should be
       // more than just one."
       const CORAL_COUNT = 220; // was 70 — per explicit "fill it in as much as possible," with 7 species now (was 3) there's real variety to actually fill a denser reef with rather than repeating a small set
-      const CORAL_MAX_ATTEMPTS = 750;
+      const CORAL_MAX_ATTEMPTS = 1600; // was 750 — raised since the new depth cap above rejects more candidates than before (deep-water points that used to qualify no longer do), so more attempts are needed to still reach the same target count
       const coralSeed = hashStringToSeed(WORLD_SEED + "::realCoral");
       const rng = mulberry32(coralSeed);
       let placed = 0;
@@ -1760,20 +1760,42 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
         const z = Math.sin(angle) * dist;
         if (Math.hypot(x, z) > WORLD_BOUND_RADIUS - 8) continue;
         const groundY = terrainHeightAt(level, x, z, WORLD_SEED);
-        if (groundY === null || groundY > LIQUID_LEVEL.crystal - 0.3) continue; // still allows genuinely shallow, near-waterline placement, just no longer confined to right off the beach specifically
+        // Per explicit "should be much closer to shore" — the depth
+        // check below only ever had a MINIMUM (rejecting too-shallow
+        // points), no maximum at all, so coral could land anywhere from
+        // right off the beach out to the deepest water on the map.
+        // Capping depth at 6 units keeps the wide horizontal spread from
+        // "fill it in as much as possible" (still scattered across the
+        // whole map by X/Z) while naturally concentrating placement in
+        // shallow, shore-adjacent water — real reef-building coral
+        // mostly does grow in shallower water anyway, so this is also
+        // more true to how a real reef is distributed, not just a
+        // gameplay convenience.
+        if (groundY === null || groundY > LIQUID_LEVEL.crystal - 0.3 || groundY < LIQUID_LEVEL.crystal - 6) continue;
         const species = CORAL_SPECIES[Math.floor(rng() * CORAL_SPECIES.length)];
         const coral = createRealCoral(species);
         if (!coral) continue;
         const [scaleMin, scaleMax] = CORAL_SCALE_RANGE[species];
         const scale = scaleMin + rng() * (scaleMax - scaleMin);
-        // Center-origin geometry (verified against raw accessor Y
-        // bounds), same as the reef — partial embedding into the sand
-        // reads as natural for something growing out of the substrate,
-        // same reasoning the reef used, so just a modest lift rather
-        // than a precise base-alignment fix.
-        coral.position.set(x, groundY + 0.15 * scale, z);
         coral.rotation.y = rng() * Math.PI * 2;
         coral.scale.setScalar(scale);
+        // Per "some models are floating above the sea floor" — real bug:
+        // the old flat "0.15 * scale" offset assumed scale itself was a
+        // rough proxy for size, but scale varies from ~4 (stylaster) to
+        // ~26 (acropora, a genuine tiny detail-view fragment needing a
+        // huge multiplier) — for acropora specifically that formula lifted
+        // it 2.4-3.9 units off the ground despite the whole piece only
+        // being ~0.3-0.46 units tall, floating it completely clear of the
+        // sand. Real fix: compute each piece's ACTUAL bounding box after
+        // rotation+scale are already applied (needs a matrix update first
+        // since Box3.setFromObject reads world-space geometry), then embed
+        // by a fraction of its own real below-origin extent — correct
+        // for every species regardless of its raw size or scale factor,
+        // no per-species guessing needed.
+        coral.updateMatrixWorld(true);
+        const coralBounds = new THREE.Box3().setFromObject(coral);
+        const belowOrigin = -coralBounds.min.y; // how far the geometry actually extends below its own local origin, in real world units, post-scale
+        coral.position.set(x, groundY + belowOrigin * 0.4, z); // ~60% embedded — reads as growing from the substrate, same reasoning as before, just correctly proportional now
         scene.add(coral);
         realCoralPieces.push(coral);
         placed++;

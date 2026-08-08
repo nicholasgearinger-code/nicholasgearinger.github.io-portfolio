@@ -16,7 +16,7 @@ import { createHorizonSilhouettes, updateHorizonSilhouettes, disposeHorizonSilho
 import { createWildlife, updateWildlife, disposeWildlife } from "./wildlife.js";
 import { createLandmark, updateLandmark, disposeLandmark, LANDMARK_POSITION } from "./landmarks.js";
 import { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers } from "./graphicsSettings.js";
-import { loadPalmTreeModel, loadAngelfishModel, loadReefModel, loadCoralModel, createRealPalmTree, createRealAngelfish, createRealReef, createRealCoral } from "./models.js";
+import { loadAngelfishModel, loadReefModel, loadCoralModel, loadTreeModel, createRealAngelfish, createRealReef, createRealCoral, createRealTree } from "./models.js";
 import { createWeatherSystem, updateWeatherSystem, disposeWeatherSystem } from "./weather.js";
 import { createClouds, updateClouds, disposeClouds, getCloudOcclusionFactor, createCloudLayer, updateCloudLayer, disposeCloudLayer, createRealisticCloudDome, updateRealisticCloudDome, disposeRealisticCloudDome } from "./clouds.js";
 import {
@@ -1554,9 +1554,10 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
     // callback bails rather than adding trees/fish into whatever biome
     // is showing by the time it resolves.
     const spawnLevelIdx = levelIdx;
-    loadPalmTreeModel().then(() => {
+    const TREE_SPECIES = ["coconut_low_poly", "coconut_palm", "palm_001", "palm_002"];
+    Promise.all(TREE_SPECIES.map((s) => loadTreeModel(s))).then(() => {
       if (currentLevelIdx !== spawnLevelIdx) return; // player already left this level — don't spawn into whatever's showing now
-      const PALM_COUNT = 5;
+      const PALM_COUNT = 9; // was 5 — bumped a bit now that there's real variety (4 species) to fill the clearing with instead of repeating one tree
       const palmSeed = hashStringToSeed(WORLD_SEED + "::realPalms");
       const rng = mulberry32(palmSeed);
       for (let i = 0; i < PALM_COUNT; i++) {
@@ -1564,66 +1565,23 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
         const dist = 8 + rng() * 14; // scattered around the landmark clearing, same rough footprint the old hardcoded palm spots used before FU162 removed them
         const x = LANDMARK_POSITION.x + Math.cos(angle) * dist;
         const z = LANDMARK_POSITION.z + Math.sin(angle) * dist;
-        // Per "some trees appear to be floating": terrainHeightAt is the
-        // pure ANALYTIC height function, which includes the fine sand-
-        // ripple detail (terrain.js, ~0.8-unit wavelength) added a while
-        // back — at Medium tier's segment spacing (TERRAIN_SIZE/segments
-        // β‰ˆ0.8 units too), the RENDERED mesh can't fully resolve ripple
-        // that fine, so the coarse triangulated surface at a given (x,z)
-        // can sit measurably below/above what the smooth analytic
-        // function returns for that exact point. A tree placed via the
-        // analytic height could end up floating above (or sunk into)
-        // what's actually visible. sampleGroundHeight raycasts the REAL
-        // rendered terrainMesh instead — the exact same function the
-        // player's own feet rest on — guaranteeing the tree base sits
-        // precisely on the visible ground regardless of any analytic-vs-
-        // mesh resolution mismatch.
+        // sampleGroundHeight raycasts the REAL rendered terrainMesh (the
+        // same function the player's own feet rest on), not the analytic
+        // height function — guarantees the tree base sits precisely on
+        // the visible ground regardless of any analytic-vs-mesh
+        // resolution mismatch.
         const y = sampleGroundHeight(x, z, terrainMesh);
         if (y === null || y < LIQUID_LEVEL.crystal + 0.5) continue; // stay on dry land, clear of the shoreline
-        const tree = createRealPalmTree();
+        const species = TREE_SPECIES[Math.floor(rng() * TREE_SPECIES.length)];
+        const tree = createRealTree(species);
         if (!tree) continue;
-        // Corrective scale, not decorative variety — this model's raw
-        // geometry (the "Palm_2_Lit_0" mesh specifically, see models.js)
-        // measures ~100 units tall as exported, verified directly against
-        // its accessor bounds. Without this, the previous 0.8-1.3
-        // "variety" multiplier left it roughly 100 units tall — a tree
-        // 60x taller than the player, almost certainly the real reason
-        // it didn't look right even though something was visibly
-        // rendering. Target ~10-14 units (a tall but real-world-plausible
-        // palm, player eye height is 1.6).
-        // Bumped up further per direct "trees loaded tiny" feedback —
-        // the 0.10-0.14 range was a correct proportional match to the
-        // measured raw geometry, but read as too short/stubby in
-        // practice; going taller/lusher rather than strictly
-        // real-world-accurate.
-        // Bumped again per direct "a little too small" follow-up (was
-        // 0.16-0.22, targeting ~16-22 units) — going taller/lusher still,
-        // not strictly real-world-accurate.
-        const scale = 0.21 + rng() * 0.07;
-        // REAL BUG FIX, per "some trees appear to be floating": this
-        // mesh's local geometry is CENTERED on its own origin (Y spans
-        // -50 to +50, verified directly against the raw glTF accessor
-        // bounds), not based at the trunk's foot the way most placed
-        // props are. Setting the group's own position.y directly to the
-        // ground height (as before) put the mesh's MIDPOINT at ground
-        // level — burying the bottom half and leaving the visible base
-        // floating above the sand by 50*scale, a DIFFERENT amount for
-        // every tree since scale is randomized per instance — exactly
-        // matching "some trees float, inconsistently, others don't."
-        // Offsetting up by 50*scale moves the mesh's true bottom (local
-        // Y=-50) down to exactly the sampled ground height instead.
-        // REVERTED per direct "now ALL the trees are floating" report —
-        // the +50*scale offset below was based on an assumption (local
-        // Y=-50 is the trunk base, Y=+50 is the crown) that I could only
-        // infer from a raw numeric range, not confirm. If that assumption
-        // was backwards, the offset would push every tree further in the
-        // WRONG direction — turning an inconsistent "some trees float a
-        // little" into a uniform "all trees float a lot," which matches
-        // what was reported. Reverting to the plain ground-height
-        // placement (the state that was confirmed reasonably working
-        // in-browser back in FU184) rather than guessing the sign a third
-        // time blind.
-        tree.position.set(x, y, z);
+        // Real coconut palms genuinely run 12-25m tall — createRealTree
+        // (models.js) already normalized this tree to exactly 1 world
+        // unit tall regardless of its source file's raw units, so this
+        // scale IS the tree's real final height in world units, not a
+        // correction factor being guessed at.
+        const scale = 12 + rng() * 8;
+        tree.position.set(x, y + tree.userData.groundOffset * scale, z);
         tree.rotation.y = rng() * Math.PI * 2;
         tree.scale.setScalar(scale);
         scene.add(tree);

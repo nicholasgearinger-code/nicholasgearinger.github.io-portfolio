@@ -25,22 +25,9 @@ import { clone as skeletonClone } from "three/addons/utils/SkeletonUtils.js";
 // exercised.
 // -----------------------------------------------------------------------------
 
-let palmTreeGLTF = null;
-let palmTreeLoadPromise = null;
-function loadPalmTreeModel() {
-  if (palmTreeGLTF) return Promise.resolve(palmTreeGLTF);
-  if (palmTreeLoadPromise) return palmTreeLoadPromise;
-  const url = new URL("models/palmtree.glb", import.meta.url).href;
-  palmTreeLoadPromise = new Promise((resolve, reject) => {
-    new GLTFLoader().load(
-      url,
-      (gltf) => { palmTreeGLTF = gltf; console.log("[models] palm tree loaded:", url); resolve(gltf); },
-      undefined,
-      (err) => { console.error("[models] palm tree FAILED to load:", url, err); reject(err); }
-    );
-  });
-  return palmTreeLoadPromise;
-}
+// REMOVED per explicit "remove the old tree models since it's not
+// working" — loadPalmTreeModel/createRealPalmTree (palmtree.glb) are
+// gone. See createRealTree/TREE_FILES below for the replacement set.
 
 let angelfishGLTF = null;
 let angelfishLoadPromise = null;
@@ -85,46 +72,7 @@ function loadReefModel() {
   return reefLoadPromise;
 }
 
-// The source file's "Palm_2" group bundles the FINAL baked/lit tree mesh
-// ("Palm_2_Lit_0") alongside ~26 separate, much larger overlapping
-// variant/source sub-groups (M_Palm_P2_31, M_Palm_P2_30, ... all sharing
-// the same origin, no spatial offset between them) — almost certainly
-// leftover modeling-process source meshes, not meant to be rendered
-// together. Verified via direct inspection of the glTF JSON (node
-// hierarchy + accessor min/max bounds): "Palm_2_Lit_0" measures ~100
-// units across, the 26 variant groups each measure roughly 1500-4000
-// units across on their own — using the WHOLE "Palm_2" parent (as an
-// earlier version of this function did) clones all 27 overlapping,
-// wildly oversized pieces at once. Using just the named "Palm_2_Lit_0"
-// child is both correct (one tree, not 27 stacked on each other) and far
-// cheaper (1 mesh instead of 55).
-function createRealPalmTree() {
-  if (!palmTreeGLTF) return null; // caller's responsibility to await loadPalmTreeModel() first
-  const source = palmTreeGLTF.scene.getObjectByName("Palm_2_Lit_0");
-  if (!source) { console.error("[models] palm tree: 'Palm_2_Lit_0' not found in loaded scene — falling back to null rather than the oversized full bundle"); return null; }
-  const group = source.clone(true); // deep clone — safe for a static (non-skinned) model, shares the underlying geometry/material buffers (cheap) but gets its own independent transform hierarchy so each placement can be positioned/rotated/scaled independently
-  group.traverse((obj) => {
-    if (obj.isMesh) {
-      obj.castShadow = true;
-      obj.receiveShadow = true;
-      // Defensive, per "still no shadow under the trees in daylight"
-      // report: thin frond/leaf geometry authored as flat planes is very
-      // commonly single-sided (THREE's own FrontSide default) — whichever
-      // way its winding happens to face relative to the sun's current
-      // direction, the OTHER side contributes nothing to the shadow depth
-      // pass. DoubleSide costs a bit more fragment work but guarantees
-      // foliage shadows regardless of the sun's angle or the source
-      // asset's own winding. Geometry bounds explicitly recomputed too —
-      // shared by reference from the cached source (clone() doesn't
-      // duplicate geometry data), so if the ORIGINAL never had correct
-      // bounds this makes every instance correct rather than trusting it
-      // carried over right.
-      if (obj.material) obj.material.side = THREE.DoubleSide;
-      if (obj.geometry) { obj.geometry.computeBoundingSphere(); obj.geometry.computeBoundingBox(); }
-    }
-  });
-  return group;
-}
+
 
 /**
  * Creates ONE real animated angelfish instance — a genuine skeletal clone
@@ -270,4 +218,90 @@ function createRealCoral(species) {
   return group;
 }
 
-export { loadPalmTreeModel, loadAngelfishModel, loadReefModel, loadCoralModel, createRealPalmTree, createRealAngelfish, createRealReef, createRealCoral };
+// New tree set, replacing the old palm tree entirely. 3 source files, 4
+// usable trees: coconut_low_poly and coconut_palm each load+clone their
+// WHOLE scene (single cohesive tree, verified — coconut_palm's 5
+// "Tree_N" meshes overlap/stack by height rather than sitting at
+// separate offsets, i.e. they're the bark+multiple-frond-layer PARTS of
+// ONE tree, not 5 duplicate variants the way the old palm bundle was).
+// palm_trees.glb is genuinely different: it bundles TWO distinct tree
+// variants ("Palm_tree_001_v2" and "Palm_tree_002_v2", each internally
+// made of ~5 material-part sub-meshes) both anchored at the same shared
+// origin — verified via each mesh's own accessor bounds, same diagnostic
+// approach the old palm bundle needed. Extracted as two separate usable
+// trees (palm_001/palm_002) via getObjectByName, not merged.
+//
+// SCALE: all three files carry a root FBX-style Z-up-to-Y-up correction
+// matrix, which makes raw pre-transform accessor bounds unreliable for
+// figuring out true rendered height by eye (an axis mix-up here would
+// repeat the exact float/sink mistake the original palm tree made).
+// Sidestepped entirely rather than risked: createRealTree measures each
+// tree's ACTUAL height via Box3.setFromObject AFTER cloning (which
+// correctly composes every parent transform, including that correction
+// matrix) and normalizes it to exactly 1 world unit tall. The caller
+// (main.js) then applies its own real target scale on top of that
+// normalized size — the same division of responsibility already used
+// for coral (models.js corrects/normalizes the source data, main.js
+// picks the natural in-game size and variety).
+const TREE_FILES = {
+  coconut_low_poly: { file: "coconut_low_poly.glb", nodeName: null },
+  coconut_palm: { file: "coconut_palm.glb", nodeName: null },
+  palm_001: { file: "palm_trees.glb", nodeName: "Palm_tree_001_v2" },
+  palm_002: { file: "palm_trees.glb", nodeName: "Palm_tree_002_v2" },
+};
+const treeGLTFs = {}; // keyed by FILE (not species) — palm_001/palm_002 share one loaded file
+const treeLoadPromises = {};
+function loadTreeModel(species) {
+  const { file } = TREE_FILES[species];
+  if (treeGLTFs[file]) return Promise.resolve(treeGLTFs[file]);
+  if (treeLoadPromises[file]) return treeLoadPromises[file];
+  const url = new URL(`models/${file}`, import.meta.url).href;
+  treeLoadPromises[file] = new Promise((resolve, reject) => {
+    new GLTFLoader().load(
+      url,
+      (gltf) => { treeGLTFs[file] = gltf; console.log(`[models] tree file loaded:`, url); resolve(gltf); },
+      undefined,
+      (err) => { console.error(`[models] tree file FAILED to load:`, url, err); reject(err); }
+    );
+  });
+  return treeLoadPromises[file];
+}
+
+function createRealTree(species) {
+  const { file, nodeName } = TREE_FILES[species];
+  const gltf = treeGLTFs[file];
+  if (!gltf) return null; // caller's responsibility to await loadTreeModel(species) first
+  const source = nodeName ? gltf.scene.getObjectByName(nodeName) : gltf.scene;
+  if (!source) { console.error(`[models] tree (${species}): node '${nodeName}' not found in loaded scene`); return null; }
+  const group = source.clone(true);
+  group.traverse((obj) => {
+    if (obj.isMesh) {
+      obj.castShadow = true;
+      obj.receiveShadow = true;
+      // Same defensive reasoning as every other real GLB in this project
+      // — thin frond/leaf geometry is very commonly single-sided, and
+      // whichever way it happens to face relative to the sun breaks
+      // shadow casting from the other side otherwise.
+      if (obj.material) obj.material.side = THREE.DoubleSide;
+      if (obj.geometry) { obj.geometry.computeBoundingSphere(); obj.geometry.computeBoundingBox(); }
+    }
+  });
+  // Height-normalize to exactly 1 world unit — see this block's own
+  // top-of-section comment for why this is measured at runtime instead
+  // of computed from raw accessor numbers.
+  group.updateMatrixWorld(true);
+  const bbox = new THREE.Box3().setFromObject(group);
+  const rawHeight = bbox.max.y - bbox.min.y;
+  if (rawHeight > 0.0001) group.scale.multiplyScalar(1 / rawHeight);
+  // Re-measure after normalizing so the caller gets an accurate ground-
+  // contact offset regardless of whether this tree's origin sits at its
+  // base or its center (varies per source file — palm_001/palm_002 in
+  // particular are unlikely to be base-aligned given they're cherry-
+  // picked sub-nodes, not the file's own designed-to-be-placed root).
+  group.updateMatrixWorld(true);
+  const normalizedBbox = new THREE.Box3().setFromObject(group);
+  group.userData.groundOffset = -normalizedBbox.min.y; // caller adds this (scaled by their own final size) to groundY so the trunk base sits at the sand, not floating or sunk in
+  return group;
+}
+
+export { loadAngelfishModel, loadReefModel, loadCoralModel, loadTreeModel, createRealAngelfish, createRealReef, createRealCoral, createRealTree };

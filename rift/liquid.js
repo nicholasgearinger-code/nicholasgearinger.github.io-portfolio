@@ -1009,6 +1009,14 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
         // aligned with the current view.
         shader.uniforms.uRefractionTex = { value: null };
         shader.uniforms.uResolution = { value: new THREE.Vector2(1, 1) };
+        // Per explicit "add realistic light scattering on the water mesh
+        // to implement natural sunlight caustics" — gates the new
+        // caustic pattern below to daylight, same reasoning the existing
+        // sun-glitter fade already uses (real caustics need direct
+        // sunlight, not moonlight or an overcast sky). A clean, explicit
+        // uDayAmount rather than reusing skyColor brightness as a proxy
+        // the way sun-glitter's JS-side dayFactor currently does.
+        shader.uniforms.uDayAmount = { value: 1 };
         shader.vertexShader = shader.vertexShader
           .replace("#include <common>", "#include <common>\nattribute float aFoam;\nvarying float vFoam;\nvarying vec2 vFoamPos;\nattribute float aSunGlint;\nvarying float vSunGlint;\nattribute float aReflectionFresnel;\nvarying float vReflectionFresnel;\nattribute vec2 aReflectionDistort;\nvarying vec2 vReflectionDistort;\nuniform mat4 uReflectionMatrix;\nvarying vec4 vReflectionCoord;")
           .replace("#include <begin_vertex>", "#include <begin_vertex>\nvFoam = aFoam;\nvFoamPos = position.xz;\nvSunGlint = aSunGlint;\nvReflectionFresnel = aReflectionFresnel;\nvReflectionDistort = aReflectionDistort;\nvReflectionCoord = uReflectionMatrix * modelMatrix * vec4(transformed, 1.0);"); // local-space XZ IS world XZ here — this mesh has no runtime x/z translation or rotation (baked in at creation), only a Y offset. `transformed` at this point already holds the CPU-side wave-displaced position (the real per-frame Gerstner sum written into the position attribute in updateLiquidPlane, not a GPU displacement) — so the reflection coordinate genuinely follows the real wave surface, not a flat approximation of it.
@@ -1020,6 +1028,7 @@ uniform sampler2D uReflectionTex;
 uniform sampler2D uDistortTex;
 uniform sampler2D uRefractionTex;
 uniform vec2 uResolution;
+uniform float uDayAmount;
 varying float vFoam;
 varying vec2 vFoamPos;
 varying float vSunGlint;
@@ -1169,6 +1178,52 @@ vec2 foamVoronoiF1F2(vec2 p) {
   // can genuinely blow out brighter than the base albedo the way a real
   // specular highlight does, rather than just capping at flat white.
   diffuseColor.rgb += vec3(1.0, 0.97, 0.85) * vSunGlint * 2.4;
+
+  // Per explicit "add realistic light scattering on the water mesh to
+  // implement natural sunlight caustics" — a genuinely NEW effect (the
+  // water surface had specular sun-glitter already, but nothing tracing
+  // a caustic NET pattern). Reuses foamVoronoiF1F2 (the same proven
+  // technique already used for foam above and, previously, the terrain's
+  // own caustic net) but at its own scale/drift so it reads as a
+  // distinct pattern from the foam rather than overlapping it — real
+  // underwater caustic nets drift slowly and broadly, much slower than
+  // foam breaking on a crest.
+  //
+  // DELIBERATELY kept bounded and modest THIS time, learning directly
+  // from the terrain caustic net's own history: that effect started
+  // reasonable but was tuned upward across several separate rounds
+  // without ever checking the CUMULATIVE math, until it mathematically
+  // peaked around 1.29 added directly onto diffuseColor — enough to
+  // blow out to near-white and dominate the entire surface underneath
+  // it (see main.js's own terrain shader history). Two safeguards
+  // against repeating that here: (1) mix() toward a fixed warm color
+  // instead of raw += — mix() can NEVER exceed that target color no
+  // matter how the mask value moves, structurally ruling out the same
+  // unbounded-overflow failure mode; (2) peak checked by hand right now
+  // rather than left to "looks fine, ship it": causticMask maxes at 1.0,
+  // multiplied by 0.22 (day) and Fresnel/mask both capping at 1.0 in the
+  // worst case — verified by hand: causticMask maxes at exactly 1.0
+  // (clamped), so the whole expression's real worst case is 1.0 * 1.0 *
+  // 1.0 * 0.22 = 0.22, meaning mix() pulls diffuseColor at most 22% of
+  // the way toward the highlight color — nowhere near enough to wash out
+  // the surface underneath it, and structurally incapable of exceeding
+  // that highlight color at all regardless of how any input moves.
+  vec2 causticUv = vFoamPos * 0.5 + vec2(uTime * 0.018, -uTime * 0.013);
+  vec2 causticCells = foamVoronoiF1F2(causticUv);
+  float causticNet = 1.0 - smoothstep(0.0, 0.045, causticCells.y - causticCells.x);
+  // A second, finer octave breaks up the single-frequency look a lone
+  // Voronoi net always has — real caustics show layered detail at more
+  // than one scale, not one uniform cell size.
+  vec2 causticUv2 = vFoamPos * 1.3 - vec2(uTime * 0.011, uTime * 0.021);
+  vec2 causticCells2 = foamVoronoiF1F2(causticUv2);
+  float causticNet2 = 1.0 - smoothstep(0.0, 0.03, causticCells2.y - causticCells2.x);
+  float causticMask = clamp(causticNet * 0.7 + causticNet2 * 0.4, 0.0, 1.0);
+  // Fresnel-gated (vReflectionFresnel, the same grazing-angle value used
+  // above) — caustics read on water you're looking mostly straight down
+  // through, same physical logic refraction already uses just above,
+  // and fades with uDayAmount since this needs real direct sunlight.
+  float causticStrength = causticMask * (1.0 - vReflectionFresnel) * uDayAmount * 0.22;
+  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0, 0.98, 0.88), causticStrength);
 }`);
         m.userData.shader = shader; // so updateLiquidPlane can push uTime each frame
       };
@@ -1323,7 +1378,7 @@ vec2 foamVoronoiF1F2(vec2 p) {
   };
 }
 
-function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir, skyHorizon, reflectionTexture, reflectionMatrix, refractionTexture, resolution, stormAmount = 0) {
+function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir, skyHorizon, reflectionTexture, reflectionMatrix, refractionTexture, resolution, stormAmount = 0, dayAmount = 1) {
   if (!handle) return;
   const { mesh, backMesh, glow, shimmer, rocks, basePositions, biome, style, flowDir, crustOctaves, crackOctaves, flowBeads, waterY, rippleTexture, foamAccum } = handle;
   // Real per-frame dt, derived from consecutive elapsed values — this
@@ -1356,10 +1411,12 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
   if (mesh.material.userData.shader) {
     if (refractionTexture) mesh.material.userData.shader.uniforms.uRefractionTex.value = refractionTexture;
     if (resolution) mesh.material.userData.shader.uniforms.uResolution.value.copy(resolution);
+    mesh.material.userData.shader.uniforms.uDayAmount.value = dayAmount;
   }
   if (backMesh && backMesh.material.userData.shader) {
     if (refractionTexture) backMesh.material.userData.shader.uniforms.uRefractionTex.value = refractionTexture;
     if (resolution) backMesh.material.userData.shader.uniforms.uResolution.value.copy(resolution);
+    backMesh.material.userData.shader.uniforms.uDayAmount.value = dayAmount;
   }
   // Scroll the ripple normal map slowly along the plane's own flow
   // direction — a static (non-scrolling) normal map would still add real

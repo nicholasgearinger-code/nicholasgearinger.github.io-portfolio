@@ -1555,8 +1555,19 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
     // is showing by the time it resolves.
     const spawnLevelIdx = levelIdx;
     const TREE_SPECIES = ["coconut_low_poly", "coconut_palm", "palm_001", "palm_002"];
-    Promise.all(TREE_SPECIES.map((s) => loadTreeModel(s))).then(() => {
+    // Promise.allSettled, not Promise.all — per "no trees were placed at
+    // all," the likely cause is that Promise.all is all-or-nothing: if
+    // even ONE of the 3 source files fails to load (a real, repeatedly-
+    // seen pattern in this project with GLB uploads), the whole .then()
+    // below would never run and ZERO trees would spawn, not just the
+    // species tied to the broken file. allSettled + filtering to only
+    // the species that actually resolved degrades gracefully instead —
+    // one bad file means fewer tree types, not no trees at all.
+    Promise.allSettled(TREE_SPECIES.map((s) => loadTreeModel(s))).then((results) => {
       if (currentLevelIdx !== spawnLevelIdx) return; // player already left this level — don't spawn into whatever's showing now
+      const loadedSpecies = TREE_SPECIES.filter((s, i) => results[i].status === "fulfilled");
+      console.log(`[models] tree species loaded: ${loadedSpecies.length}/${TREE_SPECIES.length}`, loadedSpecies, results.filter((r) => r.status === "rejected").map((r) => r.reason));
+      if (loadedSpecies.length === 0) return; // every file failed — nothing to spawn, already logged above for diagnosis
       const PALM_COUNT = 9; // was 5 — bumped a bit now that there's real variety (4 species) to fill the clearing with instead of repeating one tree
       const palmSeed = hashStringToSeed(WORLD_SEED + "::realPalms");
       const rng = mulberry32(palmSeed);
@@ -1572,7 +1583,7 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
         // resolution mismatch.
         const y = sampleGroundHeight(x, z, terrainMesh);
         if (y === null || y < LIQUID_LEVEL.crystal + 0.5) continue; // stay on dry land, clear of the shoreline
-        const species = TREE_SPECIES[Math.floor(rng() * TREE_SPECIES.length)];
+        const species = loadedSpecies[Math.floor(rng() * loadedSpecies.length)];
         const tree = createRealTree(species);
         if (!tree) continue;
         // Real coconut palms genuinely run 12-25m tall — createRealTree

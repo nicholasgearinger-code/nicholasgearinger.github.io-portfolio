@@ -395,16 +395,45 @@ function updateWaterRefraction(liquidHandle) {
   renderer.getSize(refractionResolution);
 }
 
+// null = use the tier's own pixelRatioCap system (native-ish, scaled by
+// device pixel density) as before; { height: N } = a fixed, literal
+// render-buffer resolution — 720/1080/1440/2160 — completely independent
+// of the device's actual screen density, per explicit "720p/1080p/2K/4K"
+// request. Width is derived from the CURRENT aspect ratio each resize
+// (not hardcoded 16:9), so it stays correct whether or not the aspect
+// override below is also active.
+let resolutionOverride = null;
 function resizeToViewport() {
   const w = viewport.clientWidth, h = viewport.clientHeight;
   if (w === 0 || h === 0) return;
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
-  renderer.setSize(w, h);
-  composer.setSize(w, h);
-  ssaoPass.setSize(w, h);
-  const pixelRatio = renderer.getPixelRatio();
-  underwaterRenderTarget.setSize(w * pixelRatio, h * pixelRatio);
+  if (resolutionOverride) {
+    // pixelRatio forced to 1 here because renderer.setSize's own internal
+    // math multiplies whatever width/height you pass it by the
+    // renderer's CURRENT pixelRatio to get the real drawing buffer — left
+    // at the device's actual ratio, that would silently scale this
+    // already-exact target again. updateStyle (setSize's 3rd arg) =
+    // false: leaves the canvas's own CSS box size exactly as
+    // #rift-viewport's layout/aspect-ratio determined it — the browser
+    // then stretches this fixed-pixel buffer to fill that box, the same
+    // relationship a game console's internal "render resolution" has to
+    // the TV's own display resolution.
+    renderer.setPixelRatio(1);
+    const targetH = resolutionOverride.height;
+    const targetW = Math.round(targetH * (w / h));
+    renderer.setSize(targetW, targetH, false);
+    composer.setSize(targetW, targetH);
+    ssaoPass.setSize(targetW, targetH);
+    underwaterRenderTarget.setSize(targetW, targetH);
+  } else {
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, getGraphicsSettings().pixelRatioCap));
+    renderer.setSize(w, h);
+    composer.setSize(w, h);
+    ssaoPass.setSize(w, h);
+    const pixelRatio = renderer.getPixelRatio();
+    underwaterRenderTarget.setSize(w * pixelRatio, h * pixelRatio);
+  }
 }
 new ResizeObserver(resizeToViewport).observe(viewport);
 
@@ -2698,8 +2727,15 @@ if (graphicsBtn && graphicsPanel) {
   // renderer.setPixelRatio call at startup), so a separate "screen ratio"
   // control isn't a distinct lever this codebase has; this one setting
   // covers both asks.
-  const RESOLUTION_STEPS = [null, 2, 1.5, 1, 0.75, 0.5];
-  const resolutionLabel = (v) => (v === null ? "Tier" : `${v}x`);
+  // Resolution: literal fixed render-buffer targets, per explicit
+  // "native resolution... change to 720p, 1080p, 2K, 4K" — genuinely
+  // different from a pixelRatio multiplier (which just scales relative
+  // to whatever the device's own screen density already is); these are
+  // absolute pixel-height targets via resizeToViewport's new
+  // resolutionOverride path above. "Native" (null) restores the
+  // tier-driven pixelRatioCap behavior this project had before.
+  const RESOLUTION_STEPS = [null, 720, 1080, 1440, 2160];
+  const resolutionLabel = (h) => (h === null ? "Native" : h === 1440 ? "2K" : h === 2160 ? "4K" : `${h}p`);
   let resolutionIdx = 0;
   const resolutionBtn = document.createElement("button");
   resolutionBtn.type = "button";
@@ -2707,13 +2743,43 @@ if (graphicsBtn && graphicsPanel) {
   resolutionBtn.textContent = `Resolution: ${resolutionLabel(RESOLUTION_STEPS[resolutionIdx])}`;
   resolutionBtn.addEventListener("click", () => {
     resolutionIdx = (resolutionIdx + 1) % RESOLUTION_STEPS.length;
-    const v = RESOLUTION_STEPS[resolutionIdx];
-    setOverride("pixelRatioCap", v);
-    applyGraphicsSettings();
-    resolutionBtn.textContent = `Resolution: ${resolutionLabel(v)}`;
-    resolutionBtn.classList.toggle("active", v !== null);
+    const h = RESOLUTION_STEPS[resolutionIdx];
+    resolutionOverride = h === null ? null : { height: h };
+    resizeToViewport();
+    resolutionBtn.textContent = `Resolution: ${resolutionLabel(h)}`;
+    resolutionBtn.classList.toggle("active", h !== null);
   });
   effectsSection.appendChild(resolutionBtn);
+
+  // Aspect ratio: per explicit "change screen from narrow 4:3 to 16:9 or
+  // widescreen" — sets an inline aspect-ratio style on #rift-viewport
+  // itself, which the existing ResizeObserver (see resizeToViewport
+  // above) already picks up automatically the moment the element's
+  // computed size changes, no extra wiring needed. Deliberately a NO-OP
+  // while in fullscreen: #rift-viewport.rift-fullscreen (index.html) sets
+  // BOTH width AND height explicitly (100svw/100svh, filling the real
+  // device screen) — CSS aspect-ratio only has any visual effect when at
+  // most one dimension is fixed and the other is left to be computed
+  // from it, so forcing a ratio here while both are already pinned
+  // wouldn't do anything except leave a misleading "active" button state.
+  // True letterboxed fullscreen aspect control would need a real wrapper
+  // layout change, a bigger undertaking than this toggle.
+  const ASPECT_STEPS = [null, [16, 9], [4, 3], [21, 9]];
+  const aspectLabel = (a) => (a === null ? "Auto" : a[0] === 21 ? "21:9" : `${a[0]}:${a[1]}`);
+  let aspectIdx = 0;
+  const aspectBtn = document.createElement("button");
+  aspectBtn.type = "button";
+  aspectBtn.className = "rift-graphics-opt";
+  aspectBtn.textContent = `Aspect: ${aspectLabel(ASPECT_STEPS[aspectIdx])}`;
+  aspectBtn.addEventListener("click", () => {
+    if (viewport.classList.contains("rift-fullscreen")) return; // inert in fullscreen, see comment above — don't change state or the button would lie about what's active
+    aspectIdx = (aspectIdx + 1) % ASPECT_STEPS.length;
+    const a = ASPECT_STEPS[aspectIdx];
+    viewport.style.aspectRatio = a ? `${a[0]} / ${a[1]}` : "";
+    aspectBtn.textContent = `Aspect: ${aspectLabel(a)}`;
+    aspectBtn.classList.toggle("active", a !== null);
+  });
+  effectsSection.appendChild(aspectBtn);
 
   // FPS counter visibility — separate from every setting above since
   // it's a pure UI toggle (fpsCounterEl, created near the top of this

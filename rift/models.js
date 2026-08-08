@@ -271,9 +271,27 @@ function createRealTree(species) {
   const { file, nodeName } = TREE_FILES[species];
   const gltf = treeGLTFs[file];
   if (!gltf) return null; // caller's responsibility to await loadTreeModel(species) first
-  const source = nodeName ? gltf.scene.getObjectByName(nodeName) : gltf.scene;
-  if (!source) { console.error(`[models] tree (${species}): node '${nodeName}' not found in loaded scene`); return null; }
-  const group = source.clone(true);
+  // REAL BUG FIXED HERE: previously cloned the found sub-node directly
+  // (source.clone(true)) for palm_001/palm_002 — but a node found via
+  // getObjectByName and cloned on its own loses its ANCESTORS' transforms
+  // entirely, including the file's root FBX Z-up-to-Y-up correction
+  // matrix (which lives above the per-variant nodes, not on them). That
+  // clone's geometry ended up effectively un-rotated, so the height
+  // measurement below was measuring the WRONG axis as "height" for those
+  // two species specifically — exactly matching "one comically enormous,
+  // one failed to load" (a near-zero or wildly wrong measured height
+  // produces a wildly wrong or non-finite scale). Fixed by cloning the
+  // WHOLE scene (correction matrix included) and then removing sibling
+  // tree variants from within that correctly-transformed clone, rather
+  // than extracting the target node in isolation.
+  const group = gltf.scene.clone(true);
+  if (nodeName) {
+    const target = group.getObjectByName(nodeName);
+    if (!target) { console.error(`[models] tree (${species}): node '${nodeName}' not found in loaded scene`); return null; }
+    for (const sib of [...target.parent.children]) {
+      if (sib !== target) target.parent.remove(sib);
+    }
+  }
   group.traverse((obj) => {
     if (obj.isMesh) {
       obj.castShadow = true;

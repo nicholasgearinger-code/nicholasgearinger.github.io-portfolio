@@ -1086,6 +1086,26 @@ function getSeafloorSandRoughnessTexture() {
   seafloorSandRoughnessTexture.wrapS = seafloorSandRoughnessTexture.wrapT = THREE.RepeatWrapping;
   return seafloorSandRoughnessTexture;
 }
+// User-supplied caustics pattern (blurred cellular blob texture), per
+// explicit "use this texture to create an animated caustics map" request
+// — replaces the FU242 procedural Voronoi net with two animated samples
+// of this actual texture instead (see the caustics onBeforeCompile block
+// below). NOT sRGB — this is sampled as a grayscale brightness/noise
+// field to drive an effect, not displayed as color, same reasoning as
+// the normal/roughness maps just above.
+let causticPatternTexture = null;
+function getCausticPatternTexture() {
+  if (causticPatternTexture) return causticPatternTexture;
+  const url = new URL("textures/caustics_pattern.jpg", import.meta.url).href;
+  causticPatternTexture = new THREE.TextureLoader().load(
+    url,
+    () => console.log("[main] caustics pattern texture loaded:", url),
+    undefined,
+    (err) => console.error("[main] caustics pattern texture FAILED to load:", url, err)
+  );
+  causticPatternTexture.wrapS = causticPatternTexture.wrapT = THREE.RepeatWrapping;
+  return causticPatternTexture;
+}
 
 function buildLevel(levelIdx) {
   teardownLevel();
@@ -1547,6 +1567,7 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
         shader.uniforms.uTime = { value: 0 };
         shader.uniforms.uWaterLevel = { value: LIQUID_LEVEL.crystal };
         shader.uniforms.uDayAmount = { value: 0 };
+        shader.uniforms.uCausticMap = { value: getCausticPatternTexture() };
         shader.vertexShader = shader.vertexShader
           .replace("#include <common>", `#include <common>
 varying vec3 vCausticWorldPos;
@@ -1592,53 +1613,46 @@ vCausticWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`)
 uniform float uTime;
 uniform float uWaterLevel;
 uniform float uDayAmount;
+uniform sampler2D uCausticMap;
 varying vec3 vCausticWorldPos;
 varying vec3 vCausticWorldNormal;
-varying float vWaveHeight;
-vec2 causticHash(vec2 p) {
-  float n = sin(dot(p, vec2(41.0, 289.0)));
-  return fract(vec2(262144.0, 32768.0) * n);
-}
-// F1 (nearest feature point) and F2 (second-nearest) — F2-F1 traces thin
-// bright lines at cell boundaries, which is what actually reads as a
-// caustic net (F1 alone reads as clustered dots). Same technique as
-// liquid.js's own water-surface caustic effect.
-vec2 causticVoronoiF1F2(vec2 p) {
-  vec2 ip = floor(p);
-  vec2 fp = fract(p);
-  float f1 = 8.0, f2 = 8.0;
-  for (int y = -1; y <= 1; y++) {
-    for (int x = -1; x <= 1; x++) {
-      vec2 neighbor = vec2(float(x), float(y));
-      vec2 point = causticHash(ip + neighbor);
-      float d = length(neighbor + point - fp);
-      if (d < f1) { f2 = f1; f1 = d; } else if (d < f2) { f2 = d; }
-    }
-  }
-  return vec2(f1, f2);
-}`)
+varying float vWaveHeight;`)
           .replace("#include <color_fragment>", `#include <color_fragment>
 {
   float upwardFacing = clamp(vCausticWorldNormal.y, 0.0, 1.0);
   float underwaterMask = smoothstep(uWaterLevel, uWaterLevel - 1.0, vCausticWorldPos.y);
   float waveH = vWaveHeight;
   float waveNorm = clamp((waveH + 1.7) / 3.4, 0.0, 1.0); // 0 at trough, 1 at crest — matches the real 10-wave spectrum's total amplitude (1.71)
-  // Sampling the Voronoi field at world XZ, drifted/distorted by uTime and
-  // waveH together, is what makes this light net visibly track the real
-  // ripples overhead rather than just being an independent shimmer that
-  // happens to look similar.
-  vec2 causticUv = vCausticWorldPos.xz * 0.4 + vec2(uTime * 0.05, -uTime * 0.04) + waveH * 0.09;
-  vec2 v1 = causticVoronoiF1F2(causticUv);
-  float edge1 = v1.y - v1.x;
-  vec2 causticUv2 = vCausticWorldPos.xz * 0.4 * 1.6 - vec2(uTime * 0.03, uTime * 0.045) + vec2(37.0, 12.0) - waveH * 0.06;
-  vec2 v2 = causticVoronoiF1F2(causticUv2);
-  float edge2 = v2.y - v2.x;
-  float net = clamp((1.0 - smoothstep(0.0, 0.06, edge1)) * 0.75 + (1.0 - smoothstep(0.0, 0.045, edge2)) * 0.5, 0.0, 1.0);
+  // Real-time caustics from a static texture, standard technique: sample
+  // the SAME source texture twice at different scale/scroll speed, with
+  // the second sample also rotated so it isn't just a parallel copy of
+  // the first — then take the two samples' overlap. Two independently
+  // drifting copies of the same blob pattern cross each other constantly,
+  // and MIN() of the two only lights up where BOTH happen to be bright at
+  // once — that intersection is what reads as a moving, interlocking
+  // light net rather than one pattern just sliding sideways. uTime AND
+  // waveH both drive the scroll offset (same pairing the old Voronoi
+  // version used), so the net's drift still visibly tracks the real
+  // ocean waves overhead, not an independent animation that only
+  // coincidentally looks related.
+  vec2 uv1 = vCausticWorldPos.xz * 0.15 + vec2(uTime * 0.045, uTime * 0.02) + waveH * 0.05;
+  float rot = 0.9; // fixed angle offset for the second sample, radians — enough that its blob edges don't line up with the first sample's
+  vec2 uv2raw = vCausticWorldPos.xz * 0.15 * 1.35 - vec2(uTime * 0.03, uTime * 0.05) - waveH * 0.04;
+  vec2 uv2 = vec2(uv2raw.x * cos(rot) - uv2raw.y * sin(rot), uv2raw.x * sin(rot) + uv2raw.y * cos(rot));
+  float s1 = texture2D(uCausticMap, uv1).r;
+  float s2 = texture2D(uCausticMap, uv2).r;
+  // The source texture is a soft mid-gray/white blob field, not already a
+  // thin bright-line net — remapping (min * 1.7 - 0.55) before clamping
+  // pushes only the brightest overlap of both samples above 0, so this
+  // still reads as scattered light flecks rather than the whole floor
+  // tinted evenly. Verified: min(s1,s2) peaks at 1.0 (both samples fully
+  // white) -> net peaks at exactly 1.0 * 1.7 - 0.55 = 1.15, clamped to 1.0.
+  float net = clamp(min(s1, s2) * 1.7 - 0.55, 0.0, 1.0);
   // Real caustic light concentrates more directly under a wave crest (a
   // brief converging lens) than in a trough.
   float crestFocus = smoothstep(0.5, 1.0, waveNorm);
   float dayCausticBoost = smoothstep(0.05, 0.4, uDayAmount) * 0.7; // strictly zero at night — real caustics need direct sunlight through the surface
-  // Peak verified by hand, same bound as the old (disabled) block used:
+  // Same verified bound as the previous Voronoi version:
   // net(1) * underwaterMask(1) * upwardFacing(1) * (0.22+0.2) * dayCausticBoost(0.7)
   // = 0.7*0.42 = ~0.29 max added to diffuseColor — a real but secondary
   // highlight, not enough to blow the sand texture out to white.
@@ -2907,7 +2921,23 @@ function animate() {
     fpsAccumTime = 0;
   }
 
-  const dayNight = updateDayNightCycle(dayNightCycle, dt * debugTimeScale);
+  // Per "stray blue circle in the sky" report after adding the Time-scale
+  // debug button: feeding updateDayNightCycle one GIANT dt (up to 10s of
+  // simulated time in a single real frame, at 100x) is the likely cause —
+  // if that function's own sun/moon opacity fade uses a per-frame lerp
+  // (current + (target-current)*dt*rate, common for this kind of
+  // crossfade), that math implicitly assumes small real-sized steps; a
+  // huge dt can push the lerp factor past 1 and OVERSHOOT the target
+  // instead of clamping to it, which could plausibly show the moon (or a
+  // stale sun sprite) at the wrong time. Fixed by calling the function
+  // debugTimeScale times per frame with a normal-sized dt each time
+  // instead — same net time advancement, but every individual call sees
+  // exactly the same dt magnitude real time always produces, so nothing
+  // inside dayNightCycle.js gets an input it wasn't built to expect.
+  let dayNight;
+  for (let i = 0; i < debugTimeScale; i++) {
+    dayNight = updateDayNightCycle(dayNightCycle, dt);
+  }
   // Fallback sky background — mutated in place (scene.background already
   // references this same Color object, set once at module init above),
   // blended from the day/night cycle's own current colors so it stays

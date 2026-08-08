@@ -76,8 +76,18 @@ const TIERS = {
   },
   medium: {
     label: "Medium",
-    terrainSegments: 300,      // boosted from 190 per explicit request — also now genuinely useful rather than just cosmetic headroom, since the new sand ripple vertex displacement (main.js) needs real segment density to resolve smoothly rather than looking faceted/jagged (a ~2.6-unit ripple wavelength needs more than ~1 segment per unit to read as a smooth wave, not a stepped one)
-    liquidSegments: 90,        // boosted from 55 per explicit request to test whether mesh resolution was capping how visible the wave/domain-warp detail could read — real cost warning: combined with the now much heavier per-vertex wave math (10 Gerstner components + domain warp, up from 4 plain terms) AND three full scene renders per frame (main + reflection + refraction) already added this session, this is a genuinely compounding performance change, not an isolated one. Watch the FPS counter.
+    terrainSegments: 300,      // left as-is — this is vertex/geometry cost (paid once per frame regardless of screen resolution), not the fill-rate cost this rebalance targets, and the sand-ripple smoothness reasoning below is still valid; boosted from 190 per explicit request — also now genuinely useful rather than just cosmetic headroom, since the new sand ripple vertex displacement (main.js) needs real segment density to resolve smoothly rather than looking faceted/jagged (a ~2.6-unit ripple wavelength needs more than ~1 segment per unit to read as a smooth wave, not a stepped one)
+    // Per "Medium caps at 10fps, make it better AND playable" — pulled
+    // back from 90 to 65. This exact boost (55->90) was already flagged
+    // in this file's own prior comment as an untested, compounding risk
+    // stacked on top of much heavier per-vertex wave math (10 Gerstner
+    // components + domain warp) AND three full scene renders/frame
+    // (main+reflection+refraction) — that risk is now confirmed real.
+    // 65 keeps meaningfully more wave detail than the original 55
+    // baseline while cutting roughly 48% of the vertex/wave-math cost
+    // versus 90 (segment count scales the grid on both axes, so cost
+    // scales with segments^2: 65^2/90^2 β‰ˆ 0.52).
+    liquidSegments: 65,
     skyDomeSegments: [32, 16],
     grassBladeSegments: 4,
     decorationDetail: 1,
@@ -90,9 +100,38 @@ const TIERS = {
     shootingStarPoolSize: 3,
     silhouetteMultiplier: 1,
     shadowsEnabled: true,
-    shadowMapSize: 1536,
-    pixelRatioCap: 1.75,
-    reflectionUpdateInterval: 2,
+    // Trimmed 1536->1280 — shadow-map cost scales with texel area
+    // (1280^2/1536^2 β‰ˆ 0.69, a real ~31% reduction in that pass's
+    // bandwidth/fill cost), while 1280 is still well above Low's 256 and
+    // shadows stay ON (per "still have all effects" philosophy) — this
+    // is a resolution trim, not a feature cut.
+    shadowMapSize: 1280,
+    // The single biggest lever in this rebalance: pixelRatioCap directly
+    // multiplies EVERY per-pixel cost this scene has (SSAO's full-screen
+    // pass, the water's caustic/foam/sun-glitter fragment shader, the new
+    // seafloor caustics, reflection/refraction sampling, general
+    // shading) — fragment/fill-rate cost scales with pixelRatio^2, so
+    // dropping 1.75->1.3 cuts that entire category of cost by roughly
+    // (1.3/1.75)^2 β‰ˆ 45%. This is very likely why Medium was hitting
+    // 10fps specifically — this scene is heavily fragment-shader-bound
+    // (multiple full-screen and per-object custom shaders stacked), and
+    // pixelRatioCap is the one setting that scales literally all of them
+    // at once. 1.3 still renders sharper than native 1x on most phone
+    // screens (device pixel ratios of 2-3 are typical), just not at the
+    // near-full-native 1.75 this was set to before.
+    pixelRatioCap: 1.3,
+    // 2->3 — reflection+refraction are each a FULL extra scene render
+    // (see Low tier's own comment above); at interval=2 Medium was
+    // averaging 1 extra full scene render every frame (2 renders / 2
+    // frames), same amortized cost as if it had NO throttle on a
+    // half-complexity scene. interval=3 drops that average to 2/3 of a
+    // render per frame, a real ~33% cut to this specific cost, and still
+    // updates twice as often as Low's interval=4 — this keeps the
+    // "efficiency lever, not a feature cut" philosophy the rest of this
+    // tier already follows (reflection/refraction stay fully present,
+    // just refreshed slightly less often — genuinely hard to notice on
+    // gently rolling water, unlike dropping the effect entirely would be).
+    reflectionUpdateInterval: 3,
     ssaoEnabled: true,
     // Per explicit "optimize medium for most efficiency while providing
     // ALL effects" — oceanEffectsEnabled stays true (the water's real

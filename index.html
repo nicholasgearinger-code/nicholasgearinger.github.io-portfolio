@@ -3295,10 +3295,10 @@
   }
   #rift-viewport.rift-fullscreen #rift-menu-btn { top: calc(16px + env(safe-area-inset-top)); }
   #rift-viewport.rift-fullscreen .game-fullscreen-btn {
-    top: calc(.7rem + env(safe-area-inset-top)); right: calc(3.6rem + env(safe-area-inset-right));
+    top: calc(.7rem + env(safe-area-inset-top)); right: calc(16rem + env(safe-area-inset-right));
   }
   #rift-viewport.rift-fullscreen #rift-graphics-btn {
-    top: calc(.7rem + env(safe-area-inset-top)); right: calc(8.6rem + env(safe-area-inset-right));
+    top: calc(.7rem + env(safe-area-inset-top)); right: calc(10rem + env(safe-area-inset-right));
   }
   #rift-viewport.rift-fullscreen #rift-graphics-panel {
     top: calc(2.6rem + env(safe-area-inset-top)); right: calc(.7rem + env(safe-area-inset-right));
@@ -3428,12 +3428,33 @@
   #rift-menu-btn:hover, #rift-menu-btn:active { color: #e8ecf1; border-color: rgba(232,236,241,.4); }
 
   #rift-graphics-btn {
-    position: absolute; top: .7rem; right: 8.6rem;
+    /* right widened 8.6rem->10rem — per "GRAPHICS and RESONANCE
+       overlapping in fullscreen" screenshot: at 8.6rem, this button's
+       right edge (137.6px from the screen edge) landed almost exactly
+       where #rift-hud-topright's own left edge starts (~140px, based on
+       "● RESONANCE 0 / 12"'s actual rendered width) — a ~2px gap that
+       read as touching/overlapping text. 10rem (160px) gives real
+       breathing room regardless of minor cross-device font-metric
+       variance. */
+    position: absolute; top: .7rem; right: 10rem;
     font-size: 9px; letter-spacing: .1em; color: rgba(232,236,241,.55);
     background: rgba(20,27,45,.5); border: 1px solid rgba(232,236,241,.2); border-radius: 100px;
     padding: 4px 10px; pointer-events: auto; touch-action: manipulation; cursor: pointer; z-index: 16;
   }
   #rift-graphics-btn:hover, #rift-graphics-btn.gfx-open { color: #e8ecf1; border-color: rgba(232,236,241,.4); }
+  /* Per "the pink button near resonance" — that's #rift-fullscreen-btn,
+     which shares the page-wide .game-fullscreen-btn class (right:3.6rem
+     by default). That offset sits squarely inside RESONANCE's actual
+     rendered span (~16px-166px from the edge), which is the real,
+     persistent cause of the overlap seen across every screenshot this
+     whole conversation, fullscreen or not — not a bug in RESONANCE or
+     GRAPHICS themselves. Scoped to #rift-viewport specifically (not the
+     shared base class) so the UNRELATED #game-fullscreen-btn elsewhere on
+     the portfolio page isn't repositioned by this. Pushed further left
+     than GRAPHICS (10rem, see above) plus its own rendered width, so all
+     three — RESONANCE, GRAPHICS, fullscreen — sit in a clear left-to-
+     right row with real gaps instead of overlapping. */
+  #rift-viewport .game-fullscreen-btn { right: 16rem; }
   #rift-graphics-panel {
     position: absolute; top: 2.6rem; right: .7rem; z-index: 20; pointer-events: auto;
     background: rgba(10,14,24,.92); border: 1px solid rgba(232,236,241,.2); border-radius: .5rem;
@@ -7308,6 +7329,24 @@ panels.forEach(p => observer.observe(p));
   });
   document.addEventListener('mouseleave', () => { cursor.classList.add('cc-out'); });
   document.addEventListener('mouseenter', () => { cursor.classList.remove('cc-out'); });
+
+  // Suppress this decorative cursor specifically over the embedded Rift
+  // Islands game canvas — per explicit "UI elements overlapping" report,
+  // this fixed/high-z-index cursor was rendering on top of the game's own
+  // HUD (RESONANCE readout, GRAPHICS button) whenever a fine pointer
+  // (mouse/trackpad) hovered that area, since this script has no
+  // awareness of the game's embedded viewport at all. Reuses the exact
+  // same cc-out hide mechanism already used above for "pointer left the
+  // document" — same visual behavior, just also triggered by this
+  // specific element's boundary. The game has its own centered aim
+  // reticle (#rift-crosshair) and, once pointer-locked, hides the real OS
+  // cursor entirely on its own — this only needed to stop fighting with
+  // it during the pre-lock/menu-hovering state.
+  const riftViewportEl = document.getElementById('rift-viewport');
+  if (riftViewportEl) {
+    riftViewportEl.addEventListener('mouseenter', () => cursor.classList.add('cc-out'));
+    riftViewportEl.addEventListener('mouseleave', () => cursor.classList.remove('cc-out'));
+  }
 })();
 </script>
 <script>

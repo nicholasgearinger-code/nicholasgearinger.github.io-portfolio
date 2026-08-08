@@ -1591,9 +1591,10 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
         // units, so this scale IS the tree's final height in world
         // units. Real coconut palms run 12-25m, but at this game's
         // scale (player eye height 1.6) that reads as a screen-filling
-        // giant — scaled down to a still-tall-but-human-proportioned
-        // 5-8 units per explicit "make it normal size" request.
-        const scale = 5 + rng() * 3;
+        // giant — 5-8 units (first pass) still read as oversized per a
+        // follow-up screenshot, so scaled down further to 2.5-3.5 units
+        // (roughly 1.5-2x player height, a small/young tree scale).
+        const scale = 2.5 + rng();
         tree.position.set(x, y + tree.userData.groundOffset * scale, z);
         tree.rotation.y = rng() * Math.PI * 2;
         tree.scale.setScalar(scale);

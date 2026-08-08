@@ -219,7 +219,15 @@ try {
 // doesn't silently clear the person's individual toggles, and so this
 // state is easy to reset as a whole (resetOverrides).
 const OVERRIDES_STORAGE_KEY = "riftGraphicsOverrides";
-const OVERRIDABLE_KEYS = ["shadowsEnabled", "ssaoEnabled", "oceanEffectsEnabled", "reflectionEnabled", "causticsEnabled", "bloomLevel", "aaMethod", "toneMapping", "pixelRatioCap"];
+// Per "everything off and still 10fps" — grassMultiplier/particleMultiplier/
+// cloudMultiplier/wildlifeMultiplier/seaLifeMultiplier were tier-scaled
+// (FU233) but never individually overridable at all, unlike shadows/SSAO/
+// ocean effects/etc. These are real, substantial per-frame mesh/instance
+// counts (220 coral pieces, grass blade counts, particle counts) — with
+// every existing toggle off, these five are very likely the actual
+// remaining bottleneck, since nothing was previously able to touch them
+// short of switching the whole tier.
+const OVERRIDABLE_KEYS = ["shadowsEnabled", "ssaoEnabled", "oceanEffectsEnabled", "reflectionEnabled", "causticsEnabled", "bloomLevel", "aaMethod", "toneMapping", "pixelRatioCap", "grassMultiplier", "particleMultiplier", "cloudMultiplier", "wildlifeMultiplier", "seaLifeMultiplier"];
 let overrides = {};
 try {
   const saved = localStorage.getItem(OVERRIDES_STORAGE_KEY);
@@ -286,4 +294,13 @@ function resetOverrides() {
   try { localStorage.removeItem(OVERRIDES_STORAGE_KEY); } catch (_) { /* best effort */ }
 }
 
-export { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers, getEffectiveValue, setOverride, resetOverrides };
+// Read-only lookup of a NAMED tier's raw values, regardless of which tier
+// is currently active — lets UI code (the new Density dropdown) build its
+// preset options from this project's real per-tier numbers instead of
+// duplicating them as separate hardcoded constants that could drift out
+// of sync with the tier objects above.
+function getTierRawSettings(tierId) {
+  return TIERS[tierId];
+}
+
+export { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers, getEffectiveValue, setOverride, resetOverrides, getTierRawSettings };

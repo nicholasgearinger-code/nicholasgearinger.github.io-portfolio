@@ -19,7 +19,7 @@ import { createGrass, updateGrass, disposeGrass, createFlowers, updateFlowers, d
 import { createHorizonSilhouettes, updateHorizonSilhouettes, disposeHorizonSilhouettes } from "./horizonSilhouettes.js";
 import { createWildlife, updateWildlife, disposeWildlife } from "./wildlife.js";
 import { createLandmark, updateLandmark, disposeLandmark, LANDMARK_POSITION } from "./landmarks.js";
-import { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers, getEffectiveValue, setOverride } from "./graphicsSettings.js";
+import { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers, getEffectiveValue, setOverride, resetOverrides, getTierRawSettings } from "./graphicsSettings.js";
 import { loadAngelfishModel, loadReefModel, loadCoralModel, loadTreeModel, createRealAngelfish, createRealReef, createRealCoral, createRealTree } from "./models.js";
 import { createWeatherSystem, updateWeatherSystem, disposeWeatherSystem } from "./weather.js";
 import { createClouds, updateClouds, disposeClouds, getCloudOcclusionFactor, createCloudLayer, updateCloudLayer, disposeCloudLayer, createRealisticCloudDome, updateRealisticCloudDome, disposeRealisticCloudDome } from "./clouds.js";
@@ -2701,8 +2701,25 @@ function applyGraphicsSettings() {
   if (currentLevelIdx >= 0) buildLevel(currentLevelIdx);
 }
 
+// Registry of "re-read my current effective value and update my own
+// displayed state" callbacks — one per individual toggle/dropdown created
+// below (EFFECT_TOGGLES loop, makeDropdown). Exists so syncGraphicsUI can
+// refresh every one of them after a tier change, without each control
+// needing to know about any other.
+const uiSyncCallbacks = [];
+
 function changeGraphicsTier(tier) {
   if (!setGraphicsTier(tier)) return;
+  // Per "graphics settings [should] change automatically when you press
+  // low/medium/high" — previously this ONLY switched the tier; any
+  // individual override already set (e.g. "Shadows: Off" toggled by
+  // hand) silently stayed in effect regardless of which tier was picked
+  // afterward, since getGraphicsSettings() always lets an override win
+  // over the tier default. That's very likely why "everything off, set
+  // to Medium" was still stuck at the OLD toggled state instead of
+  // Medium's real values — pressing a tier now gives a genuinely clean
+  // slate, matching what the button visibly claims to do.
+  resetOverrides();
   applyGraphicsSettings();
   syncGraphicsUI();
 }
@@ -2712,6 +2729,12 @@ function syncGraphicsUI() {
   graphicsPanel?.querySelectorAll(".rift-graphics-opt").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.tier === active);
   });
+  // Re-render every individual toggle/dropdown so their displayed
+  // state (label text, selected option, "active" styling) reflects the
+  // tier's real values immediately — without this, a control could show
+  // "Off" from a just-cleared override while the game itself is now
+  // correctly running the tier's own (possibly "On") value underneath.
+  for (const fn of uiSyncCallbacks) fn();
 }
 
 if (graphicsBtn && graphicsPanel) {
@@ -2802,6 +2825,7 @@ if (graphicsBtn && graphicsPanel) {
     const isOn = () => getEffectiveValue(key) !== false;
     const render = () => { btn.textContent = `${label}: ${isOn() ? "On" : "Off"}`; btn.classList.toggle("active", isOn()); };
     render();
+    uiSyncCallbacks.push(render);
     btn.addEventListener("click", () => {
       setOverride(key, isOn() ? false : true); // explicit true/false override in both directions — a null-clear-to-tier-default here would make it impossible to force an effect ON on a tier whose own default is off (e.g. Low's shadowsEnabled)
       applyGraphicsSettings();
@@ -2927,6 +2951,7 @@ if (graphicsBtn && graphicsPanel) {
       setOverride(key, select.value);
       onApply();
     });
+    uiSyncCallbacks.push(() => { select.value = getEffectiveValue(key); });
     wrap.appendChild(select);
     postFxSection.appendChild(wrap);
   }
@@ -2940,6 +2965,75 @@ if (graphicsBtn && graphicsPanel) {
   makeDropdown("Tone Mapping", "toneMapping", [
     ["none", "None"], ["linear", "Linear"], ["reinhard", "Reinhard"], ["cineon", "Cineon"], ["aces", "ACES Filmic"],
   ], applyPostFx);
+
+  // Density: grass/particle/cloud/wildlife/sea-life counts, per "everything
+  // off and still 10fps" — these five multipliers were tier-scaled but had
+  // NO individual control at all until now, unlike shadows/SSAO/ocean
+  // effects/etc. 220 coral pieces alone at Medium's 0.75x is 165 live
+  // meshes; grass blade counts are typically the single largest instance
+  // count in a scene like this. With every other toggle off, these were
+  // very likely the actual remaining bottleneck. Pulls its 4 preset
+  // options' real numbers directly from each tier's own stored values
+  // (getTierRawSettings) rather than duplicating separate hardcoded
+  // numbers that could drift out of sync — "Minimal" is a new 4th rung
+  // BELOW Low's own values, for cases where even Low's density is still
+  // too much.
+  const DENSITY_KEYS = ["grassMultiplier", "particleMultiplier", "cloudMultiplier", "wildlifeMultiplier", "seaLifeMultiplier"];
+  const DENSITY_PRESETS = {
+    minimal: Object.fromEntries(DENSITY_KEYS.map((k) => [k, getTierRawSettings("low")[k] * 0.4])),
+    low: getTierRawSettings("low"),
+    medium: getTierRawSettings("medium"),
+    high: getTierRawSettings("high"),
+  };
+  function currentDensityPreset() {
+    // Reverse-lookup: which preset (if any) matches every one of the
+    // current effective values exactly — "Custom" when they don't line
+    // up with any single preset (e.g. an old per-key override from
+    // before this dropdown existed, or a partial match).
+    for (const [name, preset] of Object.entries(DENSITY_PRESETS)) {
+      if (DENSITY_KEYS.every((k) => getEffectiveValue(k) === preset[k])) return name;
+    }
+    return "custom";
+  }
+  {
+    const wrap = document.createElement("label");
+    wrap.style.display = "flex";
+    wrap.style.flexDirection = "column";
+    wrap.style.gap = "2px";
+    wrap.style.fontFamily = "'IBM Plex Mono', monospace";
+    wrap.style.fontSize = "9px";
+    wrap.style.color = "rgba(232,236,241,0.6)";
+    wrap.style.flex = "1";
+    wrap.style.minWidth = "90px";
+    const span = document.createElement("span");
+    span.textContent = "Density";
+    wrap.appendChild(span);
+    const select = document.createElement("select");
+    select.style.font = "inherit";
+    select.style.color = "rgba(232,236,241,0.9)";
+    select.style.background = "rgba(232,236,241,0.06)";
+    select.style.border = "1px solid rgba(232,236,241,0.18)";
+    select.style.borderRadius = ".3rem";
+    select.style.padding = ".35rem .3rem";
+    const DENSITY_OPTIONS = [["minimal", "Minimal"], ["low", "Low"], ["medium", "Medium"], ["high", "High"], ["custom", "Custom"]];
+    for (const [value, optLabel] of DENSITY_OPTIONS) {
+      const opt = document.createElement("option");
+      opt.value = value;
+      opt.textContent = optLabel;
+      if (value === "custom") opt.disabled = true; // never a real user choice — only ever shown to reflect an already-mismatched state, same reasoning browsers use for a "Custom" entry in a device/quality dropdown
+      select.appendChild(opt);
+    }
+    select.value = currentDensityPreset();
+    select.addEventListener("change", () => {
+      const preset = DENSITY_PRESETS[select.value];
+      if (!preset) return; // guards the disabled "custom" option, which should be unreachable via direct selection anyway
+      for (const k of DENSITY_KEYS) setOverride(k, preset[k]);
+      applyGraphicsSettings();
+    });
+    uiSyncCallbacks.push(() => { select.value = currentDensityPreset(); });
+    wrap.appendChild(select);
+    postFxSection.appendChild(wrap);
+  }
 
   // FPS counter visibility — separate from every setting above since
   // it's a pure UI toggle (fpsCounterEl, created near the top of this

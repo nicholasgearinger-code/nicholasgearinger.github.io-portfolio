@@ -20,7 +20,7 @@ import { createHorizonSilhouettes, updateHorizonSilhouettes, disposeHorizonSilho
 import { createWildlife, updateWildlife, disposeWildlife } from "./wildlife.js";
 import { createLandmark, updateLandmark, disposeLandmark, LANDMARK_POSITION } from "./landmarks.js";
 import { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers, getEffectiveValue, setOverride, resetOverrides, getTierRawSettings } from "./graphicsSettings.js";
-import { loadAngelfishModel, loadReefModel, loadCoralModel, loadTreeModel, createRealAngelfish, createRealReef, createRealCoral, createRealTree } from "./models.js";
+import { loadAngelfishModel, loadReefModel, loadCoralModel, loadTreeModel, loadSpongeModel, loadPlantModel, loadFishSchoolModel, createRealAngelfish, createRealReef, createRealCoral, createRealTree, createRealSponge, createRealPlant, createRealFishSchool } from "./models.js";
 import { createWeatherSystem, updateWeatherSystem, disposeWeatherSystem } from "./weather.js";
 import { createClouds, updateClouds, disposeClouds, getCloudOcclusionFactor, createCloudLayer, updateCloudLayer, disposeCloudLayer, createRealisticCloudDome, updateRealisticCloudDome, disposeRealisticCloudDome } from "./clouds.js";
 import {
@@ -993,6 +993,9 @@ let realPalmTrees = [];
 let realFish = [];
 let realReefStructures = [];
 let realCoralPieces = [];
+let realSponges = [];
+let realPlants = [];
+let realFishSchools = [];
 let waterfallHandle = null;
 let oceanSurfaceDetailHandle = null;
 let riverCurrentHandle = null;
@@ -1136,6 +1139,12 @@ function teardownLevel() {
   realReefStructures = [];
   for (const coral of realCoralPieces) scene.remove(coral);
   realCoralPieces = [];
+  for (const sponge of realSponges) scene.remove(sponge);
+  realSponges = [];
+  for (const plant of realPlants) scene.remove(plant);
+  realPlants = [];
+  for (const school of realFishSchools) scene.remove(school.group);
+  realFishSchools = [];
 }
 
 // Orients the camera to face AWAY from the biome's landmark — that's the
@@ -1920,18 +1929,36 @@ varying float vWaveHeight;`)
         const tree = createRealTree(species);
         if (!tree) continue;
         // createRealTree (models.js) already normalized this tree to
-        // exactly 1 world unit tall regardless of its source file's raw
-        // units, so this scale IS the tree's final height in world
-        // units. Real coconut palms run 12-25m, but at this game's
-        // scale (player eye height 1.6) that reads as a screen-filling
-        // giant — 5-8 (first pass), 2.5-3.5 (second pass), and 0.83-1.17
-        // (third pass, "3x smaller") all still read as oversized in
-        // follow-up screenshots. Explicit "20x smaller" applied directly
-        // to the 0.83-1.17 range: ~0.0415-0.0585 units.
-        const scale = 0.0415 + rng() * 0.017;
+        // exactly 1 world unit tall (group.scale set to 1/rawHeight)
+        // regardless of its source file's raw units. REAL BUG FOUND AND
+        // FIXED HERE per "two trees enormous, one tiny, confirmed not
+        // perspective" — this line was previously `tree.scale.setScalar
+        // (scale)`, which OVERWRITES that normalization scale entirely
+        // instead of building on it, silently discarding all of it. The
+        // final rendered size ended up depending directly on each
+        // species' own wildly different raw geometry size again (logged
+        // raw heights ranged from 6.28 to 2452.1 across the 4 species —
+        // up to a 390x spread), which is exactly what produced some
+        // species enormous and others tiny once all 4 were finally
+        // loading together for the first time. This was very likely also
+        // the real explanation for the entire earlier "tree is giant"
+        // back-and-forth — every previous scale reduction was applied on
+        // top of this same bug, so no single number could ever have
+        // fixed it consistently across species; only coconut_low_poly
+        // was ever actually loading during most of that, making a
+        // species-dependent bug look like a simple magnitude problem.
+        // multiplyScalar (not setScalar) correctly builds ON TOP of the
+        // existing 1/rawHeight normalization, so `scale` now finally
+        // means what its own name/comment always claimed: the tree's
+        // real final height in world units, for every species alike.
+        // Picked fresh — 4-7 units (~2.5-4x the 1.6-unit player) — since
+        // every previous value was tuned blind against this same broken
+        // math and can't be trusted as a starting point now that it's
+        // fixed.
+        const scale = 4 + rng() * 3;
         tree.position.set(x, y + tree.userData.groundOffset * scale, z);
         tree.rotation.y = rng() * Math.PI * 2;
-        tree.scale.setScalar(scale);
+        tree.scale.multiplyScalar(scale);
         scene.add(tree);
         realPalmTrees.push(tree);
         placedTreePositions.push({ x, z });
@@ -2174,6 +2201,134 @@ varying float vWaveHeight;`)
         fishPlaced++;
       }
       console.log(`[models] real fish placed: ${fishPlaced}/${FISH_COUNT}`, fishPlaced > 0 ? realFish.map((f) => f.group.position.toArray().map((n) => n.toFixed(1))) : "(none placed)");
+    }).catch(() => {});
+
+    // Sponges, plants, and a pre-animated fish school — per explicit "add
+    // more things to Coral Shallows." Kept as a fully SEPARATE
+    // Promise.allSettled block from the coral+fish loading above (not
+    // folded into that Promise.all) so a corrupted/failed upload in any
+    // one of these three new assets can't block the other two, OR the
+    // already-working coral/angelfish/fish system above — Promise.all is
+    // all-or-nothing, a real bug this project already hit once and fixed
+    // for tree loading specifically (see models.js's own history).
+    Promise.allSettled([loadSpongeModel(), loadPlantModel(), loadFishSchoolModel()]).then((results) => {
+      if (currentLevelIdx !== spawnLevelIdx) return;
+      const [spongeResult, plantResult, fishSchoolResult] = results;
+      console.log("[models] sponge/plant/fish-school load:", results.map((r) => r.status));
+
+      if (spongeResult.status === "fulfilled") {
+        // Scattered reef accent, same general placement shape as coral
+        // (random point, needs real water depth, embeds proportionally
+        // via its own measured groundOffset) but far fewer of them and a
+        // bit larger — a sponge reads as a single sparse landmark on the
+        // reef floor, not a carpet the way 220 coral pieces are.
+        const SPONGE_COUNT = Math.round(30 * getGraphicsSettings().seaLifeMultiplier);
+        const SPONGE_MAX_ATTEMPTS = 400;
+        const spongeSeed = hashStringToSeed(WORLD_SEED + "::realSponges");
+        const spongeRng = mulberry32(spongeSeed);
+        let spongesPlaced = 0;
+        for (let i = 0; i < SPONGE_MAX_ATTEMPTS && spongesPlaced < SPONGE_COUNT; i++) {
+          const angle = spongeRng() * Math.PI * 2;
+          const dist = spongeRng() * (WORLD_BOUND_RADIUS - 10);
+          const x = Math.cos(angle) * dist;
+          const z = Math.sin(angle) * dist;
+          if (Math.hypot(x, z) > WORLD_BOUND_RADIUS - 8) continue;
+          const groundY = terrainHeightAt(level, x, z, WORLD_SEED);
+          if (groundY === null || groundY > LIQUID_LEVEL.crystal - 0.6) continue; // needs to be genuinely underwater, not on the dry island or right at the shoreline
+          const sponge = createRealSponge();
+          if (!sponge) continue;
+          // Final size range picked to read as a real reef sponge
+          // cluster relative to the existing coral pieces (roughly
+          // 0.5-1.2 world units, similar order to the mid-sized coral
+          // species) rather than dwarfing or disappearing next to them.
+          const scale = 0.5 + spongeRng() * 0.7;
+          sponge.scale.setScalar(scale);
+          sponge.rotation.y = spongeRng() * Math.PI * 2;
+          sponge.position.set(x, groundY + sponge.userData.groundOffset * scale * 0.5, z); // ~50% embedded, a sponge sits more anchored into the substrate than a coral head does
+          scene.add(sponge);
+          realSponges.push(sponge);
+          spongesPlaced++;
+        }
+        console.log(`[models] sponges placed: ${spongesPlaced}/${SPONGE_COUNT}`);
+      }
+
+      if (plantResult.status === "fulfilled") {
+        // Similar scattered placement, sparser still — a plant/seaweed
+        // accent reads best as an occasional accent, not a dense field.
+        const PLANT_COUNT = Math.round(20 * getGraphicsSettings().seaLifeMultiplier);
+        const PLANT_MAX_ATTEMPTS = 300;
+        const plantSeed = hashStringToSeed(WORLD_SEED + "::realPlants");
+        const plantRng = mulberry32(plantSeed);
+        let plantsPlaced = 0;
+        for (let i = 0; i < PLANT_MAX_ATTEMPTS && plantsPlaced < PLANT_COUNT; i++) {
+          const angle = plantRng() * Math.PI * 2;
+          const dist = plantRng() * (WORLD_BOUND_RADIUS - 10);
+          const x = Math.cos(angle) * dist;
+          const z = Math.sin(angle) * dist;
+          if (Math.hypot(x, z) > WORLD_BOUND_RADIUS - 8) continue;
+          const groundY = terrainHeightAt(level, x, z, WORLD_SEED);
+          if (groundY === null || groundY > LIQUID_LEVEL.crystal - 0.6) continue;
+          const plant = createRealPlant();
+          if (!plant) continue;
+          // The source file's own bounds are notably wider than tall
+          // (~1.5-1.7 horizontal vs ~0.7 vertical) — a sprawling frond
+          // cluster, not an upright plant — sized to read as a modest
+          // seafloor accent rather than a giant fan.
+          const scale = 0.35 + plantRng() * 0.35;
+          plant.scale.setScalar(scale);
+          plant.rotation.y = plantRng() * Math.PI * 2;
+          plant.position.set(x, groundY + plant.userData.groundOffset * scale, z); // fully based at ground level, not embedded — a plant grows FROM the substrate, doesn't sink into it the way coral/sponge do
+          scene.add(plant);
+          realPlants.push(plant);
+          plantsPlaced++;
+        }
+        console.log(`[models] plants placed: ${plantsPlaced}/${PLANT_COUNT}`);
+      }
+
+      if (fishSchoolResult.status === "fulfilled") {
+        // 1-2 whole pre-animated schools (each already containing 9
+        // fish), NOT one instance per individual fish the way the small
+        // angelfish are placed — see createRealFishSchool's own comment
+        // for why this file can't be cleanly split into single reusable
+        // fish. Math.max(1,...) so even Low tier still gets the one
+        // dramatic school moment rather than "zero," unlike coral/sponge/
+        // plant counts which can reasonably reach zero at the low end.
+        const SCHOOL_COUNT = Math.max(1, Math.round(2 * getGraphicsSettings().seaLifeMultiplier));
+        const schoolSeed = hashStringToSeed(WORLD_SEED + "::realFishSchools");
+        const schoolRng = mulberry32(schoolSeed);
+        let schoolsPlaced = 0;
+        const SCHOOL_MAX_ATTEMPTS = 60;
+        for (let i = 0; i < SCHOOL_MAX_ATTEMPTS && schoolsPlaced < SCHOOL_COUNT; i++) {
+          const angle = schoolRng() * Math.PI * 2;
+          const dist = schoolRng() * (WORLD_BOUND_RADIUS - 14); // extra margin vs individual fish — a several-unit-wide formation needs more clearance from the boundary than a single small fish does
+          const x = Math.cos(angle) * dist;
+          const z = Math.sin(angle) * dist;
+          const groundY = terrainHeightAt(level, x, z, WORLD_SEED);
+          if (groundY === null || groundY > LIQUID_LEVEL.crystal - 3) continue; // needs real open-water depth for a multi-unit-tall formation, not shallow water near shore
+          const school = createRealFishSchool();
+          if (!school) continue;
+          // Overall formation width — dramatic but not overwhelming
+          // relative to the reef itself (compare: the whole playable
+          // radius is ~112 units).
+          const scale = 3.5 + schoolRng() * 2;
+          school.group.scale.setScalar(scale);
+          school.group.rotation.y = schoolRng() * Math.PI * 2;
+          // Mid-water column, well clear of both the seafloor and the
+          // surface — same depth-fraction reasoning as the small fish's
+          // own placement, just for a taller formation.
+          const depthBelowSurface = 2 + schoolRng() * 2.5;
+          school.group.position.set(x, LIQUID_LEVEL.crystal - depthBelowSurface, z);
+          school.wanderCenterX = x; school.wanderCenterZ = z;
+          school.wanderRadius = 4 + schoolRng() * 4;
+          school.wanderSpeed = 0.06 + schoolRng() * 0.05; // slower than individual fish — a whole formation drifting, not darting
+          school.wanderPhase = schoolRng() * Math.PI * 2;
+          school.wanderY = LIQUID_LEVEL.crystal - depthBelowSurface;
+          scene.add(school.group);
+          realFishSchools.push(school);
+          schoolsPlaced++;
+        }
+        console.log(`[models] fish schools placed: ${schoolsPlaced}/${SCHOOL_COUNT}`);
+      }
     }).catch(() => {});
   }
 
@@ -3652,6 +3807,18 @@ function animate() {
     const fz = fish.wanderCenterZ + Math.sin(t) * fish.wanderRadius;
     fish.group.position.set(fx, fish.wanderY + Math.sin(t * 1.7) * 0.3, fz);
     fish.group.rotation.y = -t + Math.PI / 2; // face the direction of travel around the circle (tangent to the path), not the path's own radius direction
+  }
+  // Fish schools (models.js) — same wander-circle shape as the individual
+  // angelfish above, just a slower drift and gentler vertical bob
+  // appropriate for a whole formation moving together rather than one
+  // small fish darting around.
+  for (const school of realFishSchools) {
+    school.mixer.update(dt);
+    const t = elapsedTime * school.wanderSpeed + school.wanderPhase;
+    const sx = school.wanderCenterX + Math.cos(t) * school.wanderRadius;
+    const sz = school.wanderCenterZ + Math.sin(t) * school.wanderRadius;
+    school.group.position.set(sx, school.wanderY + Math.sin(t * 1.1) * 0.4, sz);
+    school.group.rotation.y = -t + Math.PI / 2;
   }
   updateRiverCurrent(riverCurrentHandle, dt);
   updateRiverFlowStrip(riverFlowStripHandle, dt);

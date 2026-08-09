@@ -536,8 +536,18 @@ function getMoodCloudTexture(filename) {
 // the sequence (see pickCloudMoodPhase below) — matches "storm
 // (sometimes, random)" being called out separately from the other 8.
 const CLOUD_MOOD_POOLS = {
-  midnight: ["sky_night.png"],
-  night: ["sky_night.png"], // same single night photo as midnight — they're both "deep night," don't need visually distinct images the way the transitional phases do
+  // Per explicit "add more photos for the night sky" — was a single photo
+  // for both phases (sky_night.png only), now a real pool of 4 that
+  // rotates the same way sunrise/sunset's own pools already do. The 3
+  // new photos got the same offline treatment as every existing one here
+  // (bottom-22% alpha fade baked into the PNG; sky_moonlit_sea.png also
+  // had its own baked-in moon disc softened via the same two-stage blur
+  // suppression technique — that photo's moon was sharp/bright enough to
+  // read as a competing second moon next to the game's real dynamic one
+  // otherwise, same reasoning the original 10 photos' sun-hotspot
+  // suppression used).
+  midnight: ["sky_night.png", "sky_night_2.png", "sky_starfield.png", "sky_moonlit_sea.png", "sky_nebula.png"],
+  night: ["sky_night.png", "sky_night_2.png", "sky_starfield.png", "sky_moonlit_sea.png", "sky_nebula.png"],
   sunrise: ["sky_dusk_1.png", "sky_dusk_5.png"],
   morning: ["sky_dusk_2.png"],
   noon: ["sky_day_1.png", "sky_day_2.png"],

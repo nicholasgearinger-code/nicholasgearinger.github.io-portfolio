@@ -230,9 +230,15 @@ function buildBaseDecoration(biome, colorHex, seedRand, worldX, worldZ) {
   }
   // A small flat marker etched with glowing alien glyphs — "something
   // else was here" environmental storytelling, universal across every
-  // biome rather than being its own per-biome variant, since the point is
-  // that these show up in unexpected/inconsistent places.
-  if (seedRand() < 0.1) return createGlyphMarker(colorHex, seedRand);
+  // OTHER biome rather than being its own per-biome variant, since the
+  // point is that these show up in unexpected/inconsistent places.
+  // Excluded for Coral Shallows specifically per explicit "remove the
+  // glyph" — it was the one thing crystal's decoration seeds were still
+  // producing before this session's rock-cluster reintroduction, and
+  // reads as out of place against this biome's otherwise-grounded reef
+  // aesthetic (a mysterious ancient rune marker fits the other biomes'
+  // "abandoned ruins" tone, not a sunlit tropical shallows).
+  if (biome !== "crystal" && seedRand() < 0.1) return createGlyphMarker(colorHex, seedRand);
   switch (biome) {
     case "ember":
       if (roll < 0.5) return createSpire(biome, colorHex, seedRand);
@@ -247,14 +253,24 @@ function buildBaseDecoration(biome, colorHex, seedRand, worldX, worldZ) {
       if (roll < 0.97) return createFallenLog(colorHex, seedRand); // moss-covered logs/stumps — ground-floor variety and an "aged forest" signal
       return createRockCluster(biome, colorHex, seedRand);
     case "crystal":
-      // Trees, rocks, and coral removed entirely per explicit "fully
-      // remove all trees, rocks, and coral" request — Coral Shallows
-      // now spawns none of these as scattered decorations, on the
-      // island or across the reef floor. This also sidesteps the
-      // onIsland check's stale detection radius (see its own comment
-      // above) — since this case is null unconditionally now, whether
-      // that radius still matches the island's current elongated shape
-      // no longer matters.
+      // Trees and coral stay removed here per the original explicit
+      // "fully remove all trees, rocks, and coral" request — both now
+      // have their own dedicated real-GLB systems (models.js) that
+      // replaced this generic version entirely, so reviving them here
+      // would just duplicate/conflict with that. Rocks are being
+      // partially reconsidered though, per explicit "island looks
+      // bare"/"need more in the foreground" follow-ups — a small rock/
+      // rubble cluster is a different, complementary category (plain
+      // ground texture scattered between the real trees/coral, not a
+      // competing focal decoration the way a full tree or coral head
+      // is), and createRockCluster already has crystal-specific reef-
+      // rock coloring built in (see its own comment: algae-shadowed base,
+      // pale sun-bleached coral-rubble highlight) that's been sitting
+      // completely unreachable this whole time. Modest, not universal —
+      // 35% of the seeds that get this far (having already missed the
+      // glyph-marker roll above) become a rock cluster; the rest stay
+      // open sand, so the beach doesn't read as uniformly rocky either.
+      if (seedRand() < 0.35) return createRockCluster(biome, colorHex, seedRand);
       return null;
     case "abyssal":
       if (roll < 0.25) return createCaveMouth(colorHex, seedRand, biome);

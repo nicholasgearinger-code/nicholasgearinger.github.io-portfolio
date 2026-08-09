@@ -3288,6 +3288,16 @@
     position: relative; width: 100%; aspect-ratio: 16 / 9;
     background: #0a0e14; border-radius: 0 0 .4rem .4rem; overflow: hidden;
     font-family: 'Space Grotesk', sans-serif; color: #e8ecf1;
+    /* Per "2-finger touchpad look not working in fullscreen" — this
+       "fullscreen" is CSS-only (position:fixed reparenting, not the real
+       Fullscreen API), and entering it sets overflow:hidden on the whole
+       page (see enterFullscreen() in main.js). With no scrollable content
+       left anywhere, a horizontal 2-finger trackpad swipe becomes MORE
+       likely to get intercepted by the browser's own built-in swipe-to-
+       navigate-back/forward gesture (Safari/macOS especially) before it
+       ever reaches the wheel listener — overscroll-behavior:none is the
+       standard defense against exactly that class of hijack. */
+    overscroll-behavior: none;
   }
   #rift-viewport.rift-fullscreen {
     position: fixed; top: 0; left: 0; width: 100svw; height: 100svh;

@@ -677,12 +677,20 @@ function enterFullscreen() {
   lockedScrollY = window.scrollY;
   document.body.appendChild(viewport);
   document.documentElement.style.overflow = "hidden";
+  // Per "2-finger touchpad look not working in fullscreen" — paired with
+  // the same property on #rift-viewport's own CSS rule (index.html), but
+  // set at the document level too since the browser's built-in swipe-to-
+  // navigate-back/forward gesture (the likely culprit — see that CSS
+  // comment for the full reasoning) is more tied to the page/document's
+  // own scroll behavior than a nested element's.
+  document.documentElement.style.overscrollBehavior = "none";
   document.body.style.position = "fixed";
   document.body.style.top = `-${lockedScrollY}px`;
   document.body.style.left = "0";
   document.body.style.width = "100%";
   document.body.style.height = "100%";
   document.body.style.overflow = "hidden";
+  document.body.style.overscrollBehavior = "none";
   viewport.classList.add("rift-fullscreen");
   fullscreenBtn?.classList.add("gfs-active");
   resizeToViewport();
@@ -697,12 +705,14 @@ function exitFullscreen() {
     viewportHome.parent.appendChild(viewport);
   }
   document.documentElement.style.overflow = "";
+  document.documentElement.style.overscrollBehavior = "";
   document.body.style.position = "";
   document.body.style.top = "";
   document.body.style.left = "";
   document.body.style.width = "";
   document.body.style.height = "";
   document.body.style.overflow = "";
+  document.body.style.overscrollBehavior = "";
   window.scrollTo(0, lockedScrollY);
   resizeToViewport();
 }
@@ -722,13 +732,20 @@ scene.add(ambientLight);
 const sun = new THREE.DirectionalLight(0xffffff, 1.1);
 sun.position.set(60, 100, 40);
 sun.castShadow = true;
-// Shadow frustum sized to the terrain's own extent (see terrain.js's
-// TERRAIN_SIZE) rather than Three.js's small default — otherwise most of
-// the level would fall outside the shadow camera entirely. Resolution
-// kept moderate; this is a single directional light so the cost is one
-// shadow pass regardless, but a bigger map is still real GPU/memory cost
-// on lower-end devices.
-const SHADOW_EXTENT = 140;
+// Shadow frustum — per "how can we improve the shadows," shrunk from 140
+// (sized to cover the WHOLE level statically, extent matching
+// terrain.js's TERRAIN_SIZE) down to a much tighter radius. This only
+// works because the frustum now FOLLOWS THE PLAYER every frame instead
+// of sitting fixed at world origin (see the animate-loop block below,
+// "shadow camera follow") — a smaller frustum covering just the player's
+// immediate surroundings gives far more shadow-map texels per world
+// unit for the exact same texture resolution/memory cost, which is what
+// actually determines how sharp/blocky a shadow edge looks up close.
+// 45 was picked to comfortably cover typical nearby shadow-casting
+// geometry (trees, rocks, decorations within normal view distance)
+// without shrinking so far that shadows visibly vanish at the frustum's
+// own edge while just walking around.
+const SHADOW_EXTENT = 45;
 sun.shadow.camera.left = -SHADOW_EXTENT;
 sun.shadow.camera.right = SHADOW_EXTENT;
 sun.shadow.camera.top = SHADOW_EXTENT;
@@ -759,6 +776,14 @@ sun.shadow.radius = 3;
 // blurSamples removed — was VSM-specific, has no effect now that
 // shadowMap.type is back to PCFSoftShadowMap.
 scene.add(sun);
+// Explicit target, added to the scene — a DirectionalLight's target
+// otherwise silently defaults to an Object3D sitting at local (0,0,0)
+// that's never part of the scene graph, meaning the light always points
+// at world origin regardless of the light's own position. Needed as a
+// real scene object now that the "shadow camera follow" logic below
+// repositions this every frame.
+sun.target.name = "sunShadowTarget";
+scene.add(sun.target);
 
 // Real moonlight — per explicit "shadows... during night" request.
 // Previously the moon was purely decorative (a sprite, no THREE.Light at
@@ -782,6 +807,8 @@ moonLight.shadow.bias = -0.0015;
 moonLight.shadow.normalBias = 0.05;
 moonLight.shadow.radius = 4; // slightly softer than the sun's own — a dim, diffuse moonlit shadow reads as even less crisp than a bright sunlit one
 scene.add(moonLight);
+moonLight.target.name = "moonShadowTarget";
+scene.add(moonLight.target);
 
 let starfieldPoints = null;
 {
@@ -3385,6 +3412,8 @@ function updateEmberFireSpawner(dt) {
 // over decorationHandles that's already being iterated once per frame
 // anyway for updateDecoration above.
 const cameraForward = new THREE.Vector3();
+const sunOrbitDir = new THREE.Vector3();
+const moonOrbitDir = new THREE.Vector3();
 function updateFireAudio() {
   let nearest = null;
   let nearestDistSq = Infinity;
@@ -3444,6 +3473,51 @@ function animate() {
   if (dayNight.skyZenith && dayNight.skyHorizon) {
     sceneBackgroundColor.copy(dayNight.skyHorizon).lerp(dayNight.skyZenith, 0.5);
   }
+
+  // Shadow camera "follow the player" — per "how can we improve the
+  // shadows." updateDayNightCycle just above already set sun.position/
+  // moonLight.position correctly for the TIME OF DAY, but always relative
+  // to world origin (the frustum used to just sit there statically,
+  // covering the whole level at low effective resolution — see
+  // SHADOW_EXTENT's comment at each light's setup). This preserves that
+  // same orbital DIRECTION and distance (re-derived fresh each frame,
+  // before moving anything) but re-centers the whole light+frustum
+  // around the player instead, so the now much-smaller SHADOW_EXTENT
+  // frustum always contains whatever the player can actually see up
+  // close.
+  //
+  // Texel snapping: rounding the frustum's center to whole shadow-texel
+  // increments (rather than letting it drift by fractional amounts every
+  // frame as the player moves smoothly) is what prevents a moving shadow
+  // frustum from causing shadows to visibly shimmer/crawl along edges —
+  // a well-known artifact of naively recentering a shadow camera every
+  // frame. Approximated in world-space XZ rather than the light's own
+  // exact local basis (which would need the frustum's actual right/up
+  // vectors) — a simplification, but the sun/moon here stay reasonably
+  // high-elevation most of the day/night, so XZ is close enough to that
+  // basis to work well in practice, consistent with other simplifications
+  // already made elsewhere in this project.
+  const sunTexelSize = (SHADOW_EXTENT * 2) / sun.shadow.mapSize.width;
+  sunOrbitDir.copy(sun.position).normalize();
+  const sunDist = sun.position.length();
+  sun.target.position.set(
+    Math.round(camera.position.x / sunTexelSize) * sunTexelSize,
+    camera.position.y,
+    Math.round(camera.position.z / sunTexelSize) * sunTexelSize
+  );
+  sun.position.copy(sun.target.position).addScaledVector(sunOrbitDir, sunDist);
+  sun.target.updateMatrixWorld();
+
+  const moonTexelSize = (SHADOW_EXTENT * 2) / moonLight.shadow.mapSize.width;
+  moonOrbitDir.copy(moonLight.position).normalize();
+  const moonDist = moonLight.position.length();
+  moonLight.target.position.set(
+    Math.round(camera.position.x / moonTexelSize) * moonTexelSize,
+    camera.position.y,
+    Math.round(camera.position.z / moonTexelSize) * moonTexelSize
+  );
+  moonLight.position.copy(moonLight.target.position).addScaledVector(moonOrbitDir, moonDist);
+  moonLight.target.updateMatrixWorld();
 
   if (isGameActive() && currentLevelIdx >= 0) {
     // Only Coral Shallows is a real whole-level ocean — Ember's/Verdant's

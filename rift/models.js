@@ -334,6 +334,21 @@ function createRealTree(species) {
   group.updateMatrixWorld(true);
   const bbox = new THREE.Box3().setFromObject(group);
   const rawHeight = bbox.max.y - bbox.min.y;
+  // DIAGNOSTIC per "two trees enormous, one tiny, confirmed not just
+  // perspective" — coconut_palm/palm_001/palm_002 have never actually
+  // rendered successfully before now (blocked by unrelated file-corruption
+  // issues all session), so this exact normalization step has genuinely
+  // never been observed live for those 3 species until this test. Logs
+  // the RAW pre-normalization height and mesh count per species so the
+  // next console check pinpoints exactly which one is measuring wrong,
+  // instead of guessing again — a stray extra node with an outlier
+  // bounding footprint (a leftover light/camera/empty from the source
+  // export) is a real, concrete candidate here, the same category of bug
+  // just found and fixed in a completely different file this session
+  // (tropical_plant.glb's leftover "Lamp" node).
+  let meshCount = 0;
+  group.traverse((obj) => { if (obj.isMesh) meshCount++; });
+  console.log(`[models] tree (${species}) raw height: ${rawHeight.toFixed(4)}, meshes: ${meshCount}, bbox min/max Y: ${bbox.min.y.toFixed(3)}/${bbox.max.y.toFixed(3)}`);
   if (rawHeight > 0.0001) group.scale.multiplyScalar(1 / rawHeight);
   // Re-measure after normalizing so the caller gets an accurate ground-
   // contact offset regardless of whether this tree's origin sits at its

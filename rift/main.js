@@ -1900,16 +1900,31 @@ varying float vWaveHeight;`)
       const loadedSpecies = TREE_SPECIES.filter((s, i) => results[i].status === "fulfilled");
       console.log(`[models] tree species loaded: ${loadedSpecies.length}/${TREE_SPECIES.length}`, loadedSpecies, results.filter((r) => r.status === "rejected").map((r) => r.reason));
       if (loadedSpecies.length === 0) return; // every file failed — nothing to spawn, already logged above for diagnosis
-      const PALM_COUNT = 9; // was 5 — bumped a bit now that there's real variety (4 species) to fill the clearing with instead of repeating one tree
+      // Per explicit "island looks bare" — previously every tree spawned
+      // within a small clearing centered on LANDMARK_POSITION (dist 8-22
+      // from ONE fixed point), leaving the rest of the island's dry land
+      // with zero trees at all regardless of PALM_COUNT. That's the real
+      // cause of the bare look, not tree count on its own — scattering
+      // across the WHOLE island (same pattern coral/sponge/fish already
+      // use for the seafloor) is what actually fixes it. Centered on
+      // world origin now, dist up to ~85 (just inside ISLAND_BLEND=88,
+      // terrain.js's own island-extent constant) rather than the
+      // landmark specifically; the existing dry-land height check below
+      // already rejects any candidate that lands in water, so this
+      // naturally follows the island's real (irregular) coastline
+      // without needing to know its exact shape.
+      const PALM_COUNT = 24; // was 9 — a much larger scatter area needs more trees to read as populated rather than sparser than before
       const palmSeed = hashStringToSeed(WORLD_SEED + "::realPalms");
       const rng = mulberry32(palmSeed);
       const placedTreePositions = []; // {x,z} of trees actually placed so far, for the min-spacing check below
       const MIN_TREE_SPACING = 4; // world units — trees were landing right on top of each other with no check at all
-      for (let i = 0; i < PALM_COUNT; i++) {
+      const PALM_MAX_ATTEMPTS = 500; // retry-until-reached, same pattern as coral/fish/sponge/plant — a wider scatter area means many more candidates land in water and get rejected, so a fixed PALM_COUNT-sized attempt loop would silently under-place
+      let palmsPlaced = 0;
+      for (let i = 0; i < PALM_MAX_ATTEMPTS && palmsPlaced < PALM_COUNT; i++) {
         const angle = rng() * Math.PI * 2;
-        const dist = 8 + rng() * 14; // scattered around the landmark clearing, same rough footprint the old hardcoded palm spots used before FU162 removed them
-        const x = LANDMARK_POSITION.x + Math.cos(angle) * dist;
-        const z = LANDMARK_POSITION.z + Math.sin(angle) * dist;
+        const dist = rng() * 85;
+        const x = Math.cos(angle) * dist;
+        const z = Math.sin(angle) * dist;
         // reject candidates too close to an already-placed tree — per
         // "all clustered together," nothing previously enforced any
         // spacing between the 9 trees at all.
@@ -1962,7 +1977,9 @@ varying float vWaveHeight;`)
         scene.add(tree);
         realPalmTrees.push(tree);
         placedTreePositions.push({ x, z });
+        palmsPlaced++;
       }
+      console.log(`[models] real trees placed: ${palmsPlaced}/${PALM_COUNT}`);
     }).catch(() => {}); // load failure already logged inside models.js — nothing further to do here
 
     // Fish spawning moved below, after coral placement — see that

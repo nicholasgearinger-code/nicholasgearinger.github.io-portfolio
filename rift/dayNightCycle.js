@@ -226,9 +226,24 @@ function createSunStarburstTexture() {
   // ones between them) — the classic pattern real camera aperture
   // blades produce, rather than a perfectly uniform mechanical asterisk.
   const spikeCount = 8;
+  // Per "bloom on the sun looking too square" — the 4 "primary" rays
+  // below (i even) previously landed at exactly 0/90/180/270deg, i.e.
+  // perfectly cardinal-aligned. UnrealBloomPass's own blur is a
+  // separable horizontal+vertical pipeline (not a true radially
+  // symmetric kernel), which has an inherent bias toward those same two
+  // axes — an axis-aligned starburst getting blurred by an axis-aligned
+  // bloom compounds into a squared-off/boxy halo rather than a soft
+  // round one, which is what the screenshots actually showed. Rotating
+  // the WHOLE pattern by a fixed offset (half a ray-step, 22.5deg for 8
+  // rays) breaks that alignment entirely — same 8-ray alternating long/
+  // short star shape, just no longer lined up with bloom's own bias in
+  // either direction. Bloom itself is untouched (still doing real work
+  // everywhere else — crystals, caustics), since this is the actual root
+  // geometric cause, not a symptom to paper over with less bloom overall.
+  const RAY_ROTATION_OFFSET = Math.PI / spikeCount; // half a ray-step
   for (let i = 0; i < spikeCount; i++) {
     const isPrimary = i % 2 === 0;
-    const angle = (i / spikeCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.08;
+    const angle = (i / spikeCount) * Math.PI * 2 + RAY_ROTATION_OFFSET + (Math.random() - 0.5) * 0.08;
     const length = (isPrimary ? size * 0.5 : size * 0.3) * (0.85 + Math.random() * 0.3);
     const halfWidth = (isPrimary ? 3.4 : 1.8) * (0.8 + Math.random() * 0.4);
     ctx.save();
@@ -676,18 +691,6 @@ function createDayNightCycle(scene, sun, ambient, starfield, biome, moonLight) {
   // DirectionalLight intensity numbers below.
   const sunBody = createBody(scene, sunStarburstTexture, createSunTexture(), 9, 0xffcf80, 46, 0.6); // glow radius was 34/opacity 0.5 — enlarged for the bigger, softer halo the reference shows now that the texture itself is a smooth gradual falloff instead of a tight bright core with spikes
   const moonBody = createBody(scene, glowTexture, createMoonTexture(), 8, 0xaebedd, 18, 0.22);
-  // Moon VISUAL hidden per explicit request ("don't want to see it but
-  // still have the day/night light effects") — this only hides the
-  // cosmetic sprite/sphere group (what was showing as a flat pale-blue
-  // disc, since the glow sprite is tinted 0xaebedd and the moon's height
-  // is floored so it never actually sets below the horizon, letting it
-  // show up at any time of day). `moonLight`, the actual DirectionalLight
-  // driving real nighttime lighting/shadows, is a completely separate
-  // object passed into this function untouched — night still gets real
-  // moonlight, there's just no visible disc causing it. updateDayNightCycle
-  // sets opacity on this group's children every frame but never touches
-  // `.visible`, so this stays hidden with no fighting.
-  moonBody.group.visible = false;
   const sunBeams = createSunBeams(scene, createBeamTexture());
   const sky = createSkyDome(scene);
   const distantPlanet = createDistantPlanet(scene);

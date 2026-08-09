@@ -3238,6 +3238,21 @@ if (!isTouchDevice) {
   const MOUSE_LOOK_SENSITIVITY = 0.0025; // radians per pixel of drag
   const DRAG_THRESHOLD = 6; // pixels — below this, treat the gesture as a click (fire) rather than a look-drag
 
+  // Shared by both the click-and-drag path below AND the trackpad-swipe
+  // path further down — same YXZ Euler convention PointerLockControls
+  // itself uses internally, applied directly to the camera here instead
+  // since its own rotation logic only ever runs from raw mousemove while
+  // genuinely locked.
+  function applyLookDelta(dx, dy, sensitivity) {
+    camera.rotation.order = "YXZ";
+    camera.rotation.y -= dx * sensitivity;
+    camera.rotation.x -= dy * sensitivity;
+    // Clamped just short of straight up/down so the view can't flip past
+    // vertical and invert — same reasoning any FPS-style look control
+    // needs regardless of input method.
+    camera.rotation.x = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, camera.rotation.x));
+  }
+
   document.addEventListener("mousedown", (e) => {
     if (e.button !== 0) return;
     if (controls.isLocked) { fireShot(); return; } // unchanged classic behavior
@@ -3254,24 +3269,32 @@ if (!isTouchDevice) {
     mouseLookLastX = e.clientX;
     mouseLookLastY = e.clientY;
     mouseLookMaxDelta = Math.max(mouseLookMaxDelta, Math.hypot(e.clientX - mouseLookStartX, e.clientY - mouseLookStartY));
-    // Same YXZ Euler convention PointerLockControls itself uses
-    // internally, applied directly to the camera here instead since its
-    // own rotation logic only ever runs from raw mousemove while
-    // genuinely locked — this reproduces the same feel without needing
-    // lock to be active at all.
-    camera.rotation.order = "YXZ";
-    camera.rotation.y -= dx * MOUSE_LOOK_SENSITIVITY;
-    camera.rotation.x -= dy * MOUSE_LOOK_SENSITIVITY;
-    // Clamped just short of straight up/down so the view can't flip past
-    // vertical and invert — same reasoning any FPS-style look control
-    // needs regardless of input method.
-    camera.rotation.x = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, camera.rotation.x));
+    applyLookDelta(dx, dy, MOUSE_LOOK_SENSITIVITY);
   });
   window.addEventListener("mouseup", (e) => {
     if (!mouseLookDragging) return;
     mouseLookDragging = false;
     if (e.button === 0 && !controls.isLocked && mouseLookMaxDelta < DRAG_THRESHOLD) fireShot(); // stayed under the drag threshold the whole time — treat as a click, not a look-drag
   });
+
+  // Two-finger trackpad swipe, per explicit "control the camera with the
+  // touchpad like you can with touchscreen." The click-and-drag path
+  // above technically works on a trackpad too, but requires physically
+  // holding the click button down while sliding a finger — an awkward
+  // gesture with no real touchscreen equivalent (a touch drag is just
+  // finger-down-and-move, no separate "click" step at all). The genuine
+  // trackpad analog to a touchscreen drag is a plain two-finger swipe
+  // with NO click — macOS/Windows precision trackpads surface that
+  // gesture to the browser as `wheel` events with deltaX/deltaY, not as
+  // mousemove. Guarded off whenever a click-drag is already in progress
+  // or pointer lock is active, so this never fights either of the other
+  // two look methods.
+  const WHEEL_LOOK_SENSITIVITY = 0.0018; // trackpad wheel deltas run larger per swipe-tick than raw mousemove pixels, so a smaller multiplier than MOUSE_LOOK_SENSITIVITY — a first-pass estimate, worth tuning once actually felt live
+  renderer.domElement.addEventListener("wheel", (e) => {
+    if (controls.isLocked || mouseLookDragging) return;
+    e.preventDefault(); // stop the page itself from scrolling/zooming on this gesture
+    applyLookDelta(e.deltaX, e.deltaY, WHEEL_LOOK_SENSITIVITY);
+  }, { passive: false }); // passive:false required for preventDefault to actually take effect on a wheel listener
 }
 
 createTouchControls({

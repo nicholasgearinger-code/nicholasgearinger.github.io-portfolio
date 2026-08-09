@@ -265,11 +265,29 @@ composer.addPass(new OutputPass());
 // three are real distinct looks, not a single tuned value times a
 // multiplier, so each can be picked deliberately rather than treated as
 // "how much of the one preset."
+// radius/threshold retuned per "still looking very boxy" (moon, not just
+// the sun — so this isn't just the starburst texture's own ray alignment,
+// UnrealBloomPass's own multi-mip separable blur has a real, documented
+// tendency toward a slightly cross/box-shaped halo around small isolated
+// bright points specifically, independent of the source texture). radius
+// cut roughly in half across the board — it's the parameter most
+// directly tied to how far the blend spreads across mip levels, so a
+// tighter radius shrinks the visible area where that artifact shows.
+// threshold nudged up slightly too, so less of the moon/sun's fairly
+// uniform bright disc crosses into bloom range to begin with. This is a
+// real, reasoned mitigation, not a guaranteed full fix — UnrealBloomPass
+// is architecturally not built for perfectly round halos around small
+// point sources; if this still isn't enough, the more complete fix is
+// excluding the sun/moon specifically from the bloom pass via a
+// selective-bloom (THREE.Layers) restructure, since they already have
+// their own hand-authored glow sprites and don't need generic bloom on
+// top of that at all — a bigger, riskier change than this tuning pass,
+// worth doing deliberately rather than blind if this doesn't resolve it.
 const BLOOM_LEVELS = {
   off: null,
-  subtle: { strength: 0.35, radius: 0.35, threshold: 0.88 },
-  moderate: { strength: 0.55, radius: 0.4, threshold: 0.85 },
-  strong: { strength: 0.85, radius: 0.55, threshold: 0.78 },
+  subtle: { strength: 0.35, radius: 0.2, threshold: 0.9 },
+  moderate: { strength: 0.55, radius: 0.25, threshold: 0.88 },
+  strong: { strength: 0.85, radius: 0.35, threshold: 0.82 },
 };
 // Tone mapping curves — three.js's full built-in set. 'none' is the
 // engine's own pre-FU251 default (NoToneMapping — colors above 1.0 per

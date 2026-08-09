@@ -256,14 +256,38 @@ function loadTreeModel(species) {
   if (treeGLTFs[file]) return Promise.resolve(treeGLTFs[file]);
   if (treeLoadPromises[file]) return treeLoadPromises[file];
   const url = new URL(`models/${file}`, import.meta.url).href;
-  treeLoadPromises[file] = new Promise((resolve, reject) => {
-    new GLTFLoader().load(
-      url,
-      (gltf) => { treeGLTFs[file] = gltf; console.log(`[models] tree file loaded:`, url); resolve(gltf); },
-      undefined,
-      (err) => { console.error(`[models] tree file FAILED to load:`, url, err); reject(err); }
-    );
-  });
+  // Fetch as raw bytes first and sanity-check the binary-glTF magic
+  // number before handing anything to GLTFLoader. The plain .load(url)
+  // version of this (still used elsewhere in this file) surfaces a
+  // "RangeError: Length out of range of buffer" for coconut_palm.glb and
+  // palm_trees.glb specifically — that exact error, from that specific
+  // loader, on a file that's genuinely present in the repo, is the
+  // classic signature of Git LFS: GitHub Pages serves the small text
+  // pointer file instead of the real binary blob, and GLTFLoader tries
+  // to read a binary chunk-length header out of that text and blows up.
+  // Checking here turns a useless RangeError into an actionable message.
+  treeLoadPromises[file] = fetch(url)
+    .then((res) => res.arrayBuffer())
+    .then((buffer) => new Promise((resolve, reject) => {
+      const headerBytes = new Uint8Array(buffer, 0, Math.min(4, buffer.byteLength));
+      const magic = String.fromCharCode(...headerBytes);
+      if (magic !== "glTF") {
+        const preview = new TextDecoder().decode(buffer.slice(0, 200));
+        const isLfsPointer = preview.startsWith("version https://git-lfs.github.com/spec");
+        const reason = isLfsPointer
+          ? `${file} is a Git LFS pointer file (text), not the real binary model — GitHub Pages does not serve LFS content directly. Run "git lfs untrack '${file}'" (or the matching glob), then re-add and commit the actual binary so it's a normal tracked file.`
+          : `${file} does not start with the glTF binary magic number (got "${magic}"); first bytes: "${preview.slice(0, 80)}". This is not a valid .glb at this URL.`;
+        reject(new Error(reason));
+        return;
+      }
+      new GLTFLoader().parse(
+        buffer,
+        url,
+        (gltf) => { treeGLTFs[file] = gltf; console.log(`[models] tree file loaded:`, url); resolve(gltf); },
+        (err) => reject(err)
+      );
+    }))
+    .catch((err) => { console.error(`[models] tree file FAILED to load:`, url, err.message || err); throw err; });
   return treeLoadPromises[file];
 }
 
@@ -322,4 +346,169 @@ function createRealTree(species) {
   return group;
 }
 
-export { loadAngelfishModel, loadReefModel, loadCoralModel, loadTreeModel, createRealAngelfish, createRealReef, createRealCoral, createRealTree };
+let spongeGLTF = null;
+let spongeLoadPromise = null;
+function loadSpongeModel() {
+  if (spongeGLTF) return Promise.resolve(spongeGLTF);
+  if (spongeLoadPromise) return spongeLoadPromise;
+  const url = new URL("models/9_aplysina_fistularis.glb", import.meta.url).href;
+  spongeLoadPromise = new Promise((resolve, reject) => {
+    new GLTFLoader().load(
+      url,
+      (gltf) => { spongeGLTF = gltf; console.log("[models] sponge loaded:", url); resolve(gltf); },
+      undefined,
+      (err) => { console.error("[models] sponge FAILED to load:", url, err); reject(err); }
+    );
+  });
+  return spongeLoadPromise;
+}
+
+/**
+ * A yellow tube sponge (Aplysina fistularis) — 16 submeshes (separate
+ * tube/branch pieces of one sponge cluster), no skin/animation, so this
+ * follows the same plain-clone pattern as createRealReef rather than
+ * createRealAngelfish's skeletal one. Inspected accessor bounds land in
+ * the ~0.5-1 unit range already — plausibly close to real-world-meter
+ * scale on its own — but height-normalized the same defensive way as
+ * every other real GLB in this project rather than trusted by eye,
+ * per this file's own standing methodology (raw numbers looking
+ * plausible has been wrong before — see the tree saga above).
+ */
+function createRealSponge() {
+  if (!spongeGLTF) return null; // caller's responsibility to await loadSpongeModel() first
+  const group = spongeGLTF.scene.clone(true);
+  group.traverse((obj) => {
+    if (obj.isMesh) {
+      obj.castShadow = true;
+      obj.receiveShadow = true;
+      if (obj.geometry) { obj.geometry.computeBoundingSphere(); obj.geometry.computeBoundingBox(); }
+    }
+  });
+  group.updateMatrixWorld(true);
+  const bbox = new THREE.Box3().setFromObject(group);
+  const rawHeight = bbox.max.y - bbox.min.y;
+  if (rawHeight > 0.0001) group.scale.multiplyScalar(1 / rawHeight);
+  group.updateMatrixWorld(true);
+  const normalizedBbox = new THREE.Box3().setFromObject(group);
+  group.userData.groundOffset = -normalizedBbox.min.y;
+  return group;
+}
+
+let plantGLTF = null;
+let plantLoadPromise = null;
+function loadPlantModel() {
+  if (plantGLTF) return Promise.resolve(plantGLTF);
+  if (plantLoadPromise) return plantLoadPromise;
+  const url = new URL("models/tropical_plant.glb", import.meta.url).href;
+  plantLoadPromise = new Promise((resolve, reject) => {
+    new GLTFLoader().load(
+      url,
+      (gltf) => { plantGLTF = gltf; console.log("[models] tropical plant loaded:", url); resolve(gltf); },
+      undefined,
+      (err) => { console.error("[models] tropical plant FAILED to load:", url, err); reject(err); }
+    );
+  });
+  return plantLoadPromise;
+}
+
+/**
+ * A tropical leaf cluster (seafloor plant/seaweed accent). The source
+ * file carries a leftover "Lamp" node alongside the actual leaf mesh — a
+ * studio light left over from whatever Sketchfab scene this was
+ * originally exported from, not part of the intended asset — explicitly
+ * removed before use so it doesn't add a stray unwanted light source or
+ * an empty lamp-shaped node into the game's scene graph.
+ */
+function createRealPlant() {
+  if (!plantGLTF) return null; // caller's responsibility to await loadPlantModel() first
+  const group = plantGLTF.scene.clone(true);
+  const lamp = group.getObjectByName("Lamp");
+  if (lamp && lamp.parent) lamp.parent.remove(lamp);
+  group.traverse((obj) => {
+    if (obj.isMesh) {
+      obj.castShadow = true;
+      obj.receiveShadow = true;
+      // Thin leaf geometry — same single-sided risk as tree fronds.
+      if (obj.material) obj.material.side = THREE.DoubleSide;
+      if (obj.geometry) { obj.geometry.computeBoundingSphere(); obj.geometry.computeBoundingBox(); }
+    }
+  });
+  group.updateMatrixWorld(true);
+  const bbox = new THREE.Box3().setFromObject(group);
+  const rawHeight = bbox.max.y - bbox.min.y;
+  if (rawHeight > 0.0001) group.scale.multiplyScalar(1 / rawHeight);
+  group.updateMatrixWorld(true);
+  const normalizedBbox = new THREE.Box3().setFromObject(group);
+  group.userData.groundOffset = -normalizedBbox.min.y;
+  return group;
+}
+
+let fishSchoolGLTF = null;
+let fishSchoolLoadPromise = null;
+function loadFishSchoolModel() {
+  if (fishSchoolGLTF) return Promise.resolve(fishSchoolGLTF);
+  if (fishSchoolLoadPromise) return fishSchoolLoadPromise;
+  const url = new URL("models/animated_swimming_tropical_fish_school_loop.glb", import.meta.url).href;
+  fishSchoolLoadPromise = new Promise((resolve, reject) => {
+    new GLTFLoader().load(
+      url,
+      (gltf) => { fishSchoolGLTF = gltf; console.log("[models] fish school loaded:", url, "animations:", gltf.animations.map((a) => a.name)); resolve(gltf); },
+      undefined,
+      (err) => { console.error("[models] fish school FAILED to load:", url, err); reject(err); }
+    );
+  });
+  return fishSchoolLoadPromise;
+}
+
+/**
+ * A pre-animated school of 9 named reef fish (3 clownfish, 2 blue tang,
+ * 2 moorish idol, 2 yellow tang) sharing ONE skeleton and ONE swim clip
+ * (228 channels), plus 4 additional mesh objects. Inspected structure
+ * directly: those 4 meshes are NOT one-per-fish — the file only has 4
+ * mesh objects total for 9 skeletal characters, and their vertex bounds
+ * span the same huge range (0 to ~1680 units) as the whole laid-out
+ * school, meaning the fish bodies are batched together across meshes
+ * (grouped some other way, not by individual character) and bound to
+ * the shared skin. That means a single fish CANNOT be cleanly cut out of
+ * this file the way createRealAngelfish extracts its one character —
+ * doing so would risk breaking skin bindings between a mesh's vertices
+ * and bones outside whatever subset got kept. Used instead as ONE
+ * cohesive "school" prefab: the whole clone (all 9 fish + shared
+ * animation) is treated as a single placeable/animatable unit, which is
+ * actually a good fit for how a real fish school reads in a reef scene
+ * anyway — a tight group moving together, not scattered individuals.
+ * Bone translations and mesh bounds both run in the hundreds/thousands
+ * (e.g. a single spine bone segment ~110-140 "units") — a real, large
+ * unit-scale mismatch with this project (1 unit β‰ˆ 1 meter), similar in
+ * kind to the tree files' FBX correction issue though this file has no
+ * separate correction matrix to blame; normalized the same defensive
+ * way regardless; using the OVERALL bounding box's largest dimension
+ * (the school's horizontal spread) as the reference size, since that's
+ * this prefab's defining dimension, not its height the way a tree's is.
+ */
+function createRealFishSchool() {
+  if (!fishSchoolGLTF) return null; // caller's responsibility to await loadFishSchoolModel() first
+  const group = skeletonClone(fishSchoolGLTF.scene);
+  group.traverse((obj) => {
+    if (obj.isMesh) { obj.castShadow = true; obj.receiveShadow = false; }
+  });
+  group.updateMatrixWorld(true);
+  const bbox = new THREE.Box3().setFromObject(group);
+  const size = new THREE.Vector3();
+  bbox.getSize(size);
+  const rawSpan = Math.max(size.x, size.y, size.z);
+  if (rawSpan > 0.0001) group.scale.multiplyScalar(1 / rawSpan);
+  group.updateMatrixWorld(true);
+  const normalizedBbox = new THREE.Box3().setFromObject(group);
+  group.userData.groundOffset = -normalizedBbox.min.y; // in case the whole formation needs to sit at a specific depth relative to its own lowest point
+  const mixer = new THREE.AnimationMixer(group);
+  const clip = fishSchoolGLTF.animations[0];
+  if (clip) {
+    const action = mixer.clipAction(clip);
+    action.time = Math.random() * clip.duration; // phase-offset so multiple placed schools don't swim in lockstep
+    action.play();
+  }
+  return { group, mixer };
+}
+
+export { loadAngelfishModel, loadReefModel, loadCoralModel, loadTreeModel, loadSpongeModel, loadPlantModel, loadFishSchoolModel, createRealAngelfish, createRealReef, createRealCoral, createRealTree, createRealSponge, createRealPlant, createRealFishSchool };

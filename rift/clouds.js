@@ -620,6 +620,42 @@ function createRealisticCloudDome(scene) {
     fog: false, // this is meant to read as sky itself, at the far background — regular scene fog fading it out would be visibly wrong at the far distance it's meant to represent
     color: 0xffffff,
   });
+  // Per explicit "blend the sky background with a shader to hide the
+  // seam" — these mood photos are real photographs, not seamless 360°
+  // panoramas, so wrapping one all the way around a sphere leaves a hard
+  // color mismatch exactly where u=1 meets u=0 (slowing the dome's
+  // rotation, done previously, only reduces how OFTEN that seam drifts
+  // into view — it doesn't touch the seam itself). This blends BOTH
+  // edges toward one shared "seam color" — the average of whatever is
+  // actually at u=0 and u=1 for that same row — so the two edges meet at
+  // a mathematically IDENTICAL value rather than just being independently
+  // softened (which would still leave a visible, if gentler, mismatch
+  // between two different fade targets). Works uniformly on every mood
+  // photo already in this pool, including the ones from before this
+  // session, since it operates on the texture at render time rather than
+  // needing each source image edited individually.
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uSeamBlendWidth = { value: 0.05 }; // fraction of the texture's width blended on EACH side of the seam (0.05 = 5%, ~10% of the image total)
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <common>", `#include <common>
+uniform float uSeamBlendWidth;`)
+      .replace("#include <map_fragment>", `#include <map_fragment>
+{
+  float u = vMapUv.x;
+  float distFromSeam = min(u, 1.0 - u);
+  if (distFromSeam < uSeamBlendWidth) {
+    // Same seam color regardless of which side u is approaching from —
+    // this is what makes the two edges meet continuously instead of each
+    // just fading toward its OWN nearer edge (which would still leave a
+    // step between two different targets right at the seam).
+    vec4 edgeAtZero = texture2D(map, vec2(0.0, vMapUv.y));
+    vec4 edgeAtOne = texture2D(map, vec2(1.0, vMapUv.y));
+    vec4 seamColor = mix(edgeAtZero, edgeAtOne, 0.5);
+    float t = distFromSeam / uSeamBlendWidth; // 0 exactly at the seam, 1 at the outer edge of the blend zone
+    diffuseColor = mix(seamColor, diffuseColor, t);
+  }
+}`);
+  };
   const mesh = new THREE.Mesh(geo, mat);
   // Draws between the gradient sky dome (-100) and the existing flat
   // cloud layer (-90) — see both of their own renderOrder comments for
@@ -656,7 +692,7 @@ function createRealisticCloudDome(scene) {
  * @param {THREE.Color} [skyZenithColor]
  * @param {number} [stormAmount]  0-1, dark storm clouds — Coral Shallows only, driven by weather.js's own rainIntensity, but written generically here so any biome's caller can use it
  */
-function updateRealisticCloudDome(handle, dt, dayAmount, skyHorizonColor, skyZenithColor, stormAmount = 0, phaseT = 0) {
+function updateRealisticCloudDome(handle, dt, dayAmount, skyHorizonColor, skyZenithColor, stormAmount = 0, phaseT = 0, skyAzimuth = 0) {
   if (!handle) return;
 
   // Mood texture selection — per "use all of them to best match different
@@ -732,21 +768,24 @@ function updateRealisticCloudDome(handle, dt, dayAmount, skyHorizonColor, skyZen
   // the drift is genuinely visible without doubling anything.
   // Storm clouds drift noticeably faster than a calm sky's slow roll —
   // real storm fronts visibly move.
-  // Per explicit "visible seam in the sky background" — these mood photos
-  // are real photographs, not true seamless 360° panoramas, so their
-  // left/right edges don't naturally match color at the texture's u=0/1
-  // wrap boundary (already flagged in this exact comment block above,
-  // "the visible seam at u=0/1 is far less noticeable than a hard clamp
-  // edge would be" — a known, previously-accepted tradeoff, now worth
-  // reducing further). Slowed roughly 6x (was 0.006/0.02, now 0.001/
-  // 0.0035) — this mesh rotates continuously for a deliberate slow-drift
-  // effect, so ANY fixed starting rotation would still eventually carry
-  // the seam back into view; a much slower drift is what actually reduces
-  // how often that happens, not where it starts. This is a mitigation,
-  // not an elimination — a full fix needs either editing every mood
-  // photo's own edges (only the 4 added this session are in hand) or a
-  // shader-based blend at the seam, neither attempted this round.
-  handle.mesh.rotation.y += dt * (0.001 + stormAmount * 0.0035);
+  // Per explicit "synchronize [the sky] with the background, moving the
+  // sky to be exactly where the sun in the photo matches the sun and
+  // moon cycle" — replaces the free continuous drift this used to have
+  // (see the removed comment's own reasoning, now moot: rotation is
+  // deterministic and driven by the real orbit, so the seam's position
+  // is now predictable relative to time-of-day too, not just slower to
+  // wander). SKY_AZIMUTH_ALIGN_OFFSET is a calibration constant, not a
+  // measured one — derived from three.js's standard SphereGeometry UV
+  // formula (u=0.5 corresponds to local +X) assuming each mood photo's
+  // own bright feature sits roughly at the horizontal CENTER of the
+  // image (a reasonable assumption for this kind of "sky mood" stock
+  // photography, but not verified against a live render for every one of
+  // the 10+ photos in the pool — many, likely most, weren't taken/framed
+  // with that in mind). If the photo's sun/moon doesn't actually line up
+  // with the real dynamic one once tested, this single constant is what
+  // to retune first, not the underlying azimuth math itself.
+  const SKY_AZIMUTH_ALIGN_OFFSET = -Math.PI / 2;
+  handle.mesh.rotation.y = skyAzimuth + SKY_AZIMUTH_ALIGN_OFFSET;
 
   // Per explicit "I'd like to keep the colors for these sky photos"
   // follow-up: the mood textures (night/storm/day/duskDawn pools) now

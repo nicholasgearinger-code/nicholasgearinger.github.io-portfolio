@@ -837,6 +837,23 @@ function updateDayNightCycle(cycle, dt) {
   // disappearing at exactly elevation=0, so setting/rising reads as a
   // smooth fade rather than a pop.
   const sunVisibility = THREE.MathUtils.clamp(0.5 + sunOrbit.elevation / 0.3, 0, 1);
+  // Per explicit "synchronize [sky] with the background, moving the sky
+  // to be exactly where the sun in the photo matches the sun and moon
+  // cycle" — a single blended azimuth (angle around Y, matching
+  // Math.atan2(x,z)'s convention), sun-weighted by day and moon-weighted
+  // by night via sunVisibility, exposed on the handle the same way
+  // phaseT already is (see its own comment above) so clouds.js can read
+  // it directly rather than this needing to thread through the return
+  // object's shape. Blended via sin/cos components rather than the raw
+  // angles themselves — lerping angles directly breaks at the point
+  // where they wrap from +Ο€ back to -Ο€, exactly the kind of thing that
+  // would cause a sudden snap once a day/night cycle running for a while
+  // crosses that boundary.
+  const sunAzimuth = Math.atan2(sunOrbit.x, sunOrbit.z);
+  const moonAzimuth = Math.atan2(moonOrbit.x, moonOrbit.z);
+  const blendedAzX = THREE.MathUtils.lerp(Math.sin(moonAzimuth), Math.sin(sunAzimuth), sunVisibility);
+  const blendedAzZ = THREE.MathUtils.lerp(Math.cos(moonAzimuth), Math.cos(sunAzimuth), sunVisibility);
+  cycle.skyAzimuth = Math.atan2(blendedAzX, blendedAzZ);
   // Was tied to the moon's OWN orbital elevation, the same way the sun
   // is — meaning the moon had to complete its own downward arc and
   // "set" below the horizon before disappearing, just like a second sun.

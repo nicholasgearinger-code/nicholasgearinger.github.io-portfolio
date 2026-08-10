@@ -1749,6 +1749,7 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
         // controls (see the animate-loop uniform push below), so flipping
         // it doesn't require rebuilding the terrain material/level.
         shader.uniforms.uCausticsEnabled = { value: 1.0 };
+        shader.uniforms.uFoamEnabled = { value: 1.0 };
         shader.vertexShader = shader.vertexShader
           .replace("#include <common>", `#include <common>
 varying vec3 vCausticWorldPos;
@@ -1796,9 +1797,32 @@ uniform float uWaterLevel;
 uniform float uDayAmount;
 uniform sampler2D uCausticMap;
 uniform float uCausticsEnabled;
+uniform float uFoamEnabled;
 varying vec3 vCausticWorldPos;
 varying vec3 vCausticWorldNormal;
-varying float vWaveHeight;`)
+varying float vWaveHeight;
+// Re-added for the new wave-wash foam below — removed when caustics
+// switched from Voronoi to texture sampling (FU245), needed again here.
+// Pure math, no geometry side effects — this specific function was
+// never implicated in the honeycomb bug either time it's been used.
+vec2 causticHash(vec2 p) {
+  float n = sin(dot(p, vec2(41.0, 289.0)));
+  return fract(vec2(262144.0, 32768.0) * n);
+}
+vec2 causticVoronoiF1F2(vec2 p) {
+  vec2 ip = floor(p);
+  vec2 fp = fract(p);
+  float f1 = 8.0, f2 = 8.0;
+  for (int y = -1; y <= 1; y++) {
+    for (int x = -1; x <= 1; x++) {
+      vec2 neighbor = vec2(float(x), float(y));
+      vec2 point = causticHash(ip + neighbor);
+      float d = length(neighbor + point - fp);
+      if (d < f1) { f2 = f1; f1 = d; } else if (d < f2) { f2 = d; }
+    }
+  }
+  return vec2(f1, f2);
+}`)
           .replace("#include <color_fragment>", `#include <color_fragment>
 {
   float upwardFacing = clamp(vCausticWorldNormal.y, 0.0, 1.0);
@@ -1840,6 +1864,83 @@ varying float vWaveHeight;`)
   // highlight, not enough to blow the sand texture out to white.
   float causticIntensity = net * underwaterMask * upwardFacing * (0.22 + crestFocus * 0.2) * dayCausticBoost * uCausticsEnabled;
   diffuseColor.rgb += vec3(1.0, 0.92, 0.72) * causticIntensity;
+}
+{
+  // Shoreline wave-wash — per explicit "seafoam as waves crash onto the
+  // shore." Deliberately NOT a separate 3D wave mesh rolling onto the
+  // sand (what the request floated as a fallback plan) — the terrain's
+  // own real elevation relative to water level already traces the exact
+  // shoreline shape, so using each fragment's world-space height as the
+  // "distance up the beach from the water's edge" gets the same visual
+  // result (foam that advances and recedes with the real tide/wave
+  // rhythm) without adding new geometry at all, avoiding the whole
+  // category of risk vertex displacement caused earlier this project
+  // (see the honeycomb saga). Fragment-color-only, mirroring the
+  // caustics block just above. Local upwardFacing/waveNorm recomputed
+  // here rather than reused from that block — they're scoped inside its
+  // own {} braces, not visible out here.
+  float upwardFacing = clamp(vCausticWorldNormal.y, 0.0, 1.0);
+  float waveNorm = clamp((vWaveHeight + 1.7) / 3.4, 0.0, 1.0);
+  // shoreDist: height above (positive) or below (negative) the mean
+  // waterline. reachHeight: how far above that mean the CURRENT wave
+  // pushes, driven by the same real wave crest/trough already sampled
+  // above — the wash rhythm matches the actual ocean, not an unrelated
+  // clock.
+  float shoreDist = vCausticWorldPos.y - uWaterLevel;
+  float reachHeight = 0.1 + waveNorm * 0.5;
+  // Edge jitter — a large-scale, non-time-animated Voronoi sample
+  // perturbing the effective wash-line height per-fragment, so the foam
+  // line itself reads as an organic, wavy coastline rather than tracing
+  // a perfectly smooth height contour.
+  vec2 jv = causticVoronoiF1F2(vCausticWorldPos.xz * 0.15);
+  float jitteredReach = reachHeight + (jv.x - 0.5) * 0.12;
+  // Two overlapping Voronoi octaves at different scale/drift (same
+  // technique liquid.js's own water-surface whitecap foam uses) —
+  // breaks a single-layer Voronoi's evenly-spaced "disco ball" look into
+  // overlapping bubble clusters of varying size, which is what actually
+  // reads as foam rather than a tiled pattern.
+  vec2 foamUv1 = vCausticWorldPos.xz * 3.5 + vec2(uTime * 0.15, uTime * 0.11);
+  vec2 foamUv2 = vCausticWorldPos.xz * 9.0 - vec2(uTime * 0.1, uTime * 0.08);
+  vec2 fv1 = causticVoronoiF1F2(foamUv1);
+  vec2 fv2 = causticVoronoiF1F2(foamUv2);
+  float foamCell = clamp((1.0 - smoothstep(0.0, 0.4, fv1.x)) * 0.6 + (1.0 - smoothstep(0.0, 0.32, fv2.x)) * 0.55, 0.0, 1.0);
+  // Core wash line — a narrow, crisp band right at the water's current
+  // edge, not a wide diffuse cloud.
+  float coreZone = 1.0 - smoothstep(0.0, 0.1, abs(shoreDist - jitteredReach));
+  float coreFoam = clamp(foamCell * coreZone, 0.0, 1.0);
+  // Lacy tendrils reaching a bit further up the beach past the core
+  // line — Voronoi cell EDGES (F2-F1, thin branching lines along cell
+  // boundaries), not filled circles, fading out with distance and only
+  // ever extending outward/up the beach, never back into the water.
+  vec2 tendrilUv = vCausticWorldPos.xz * 2.2 + vec2(uTime * 0.06, uTime * 0.045);
+  vec2 tv = causticVoronoiF1F2(tendrilUv);
+  float tendrilLines = 1.0 - smoothstep(0.0, 0.06, tv.y - tv.x);
+  float tendrilReach = 0.35;
+  float beyondLine = max(0.0, shoreDist - jitteredReach);
+  float tendrilFalloff = 1.0 - smoothstep(0.0, tendrilReach, beyondLine);
+  float tendrilFoam = clamp(tendrilLines * tendrilFalloff * step(beyondLine, tendrilReach), 0.0, 1.0);
+  float foamMask = clamp(max(coreFoam, tendrilFoam * 0.85) * upwardFacing, 0.0, 1.0) * uFoamEnabled;
+  // Sand right at the water's edge reads as permanently wet — a
+  // constant dark band centered at the mean waterline regardless of the
+  // current wave's reach, combined via max() with a dynamic wave-driven
+  // band so an active crest can push visibly-wet sand further up the
+  // beach on top of that floor. wetEnvelope approximates "recently wet
+  // and still darkened" with a slow-power falloff of the same wave
+  // signal (no per-frame accumulation buffer to track real wetness
+  // history with) rather than snapping back to fully dry the instant a
+  // crest recedes.
+  float permanentWetBand = 1.0 - smoothstep(0.0, 0.55, abs(shoreDist - 0.1));
+  float wetEnvelope = pow(waveNorm, 0.4);
+  float wetMask = (1.0 - smoothstep(reachHeight - 0.3, reachHeight + 0.5, shoreDist)) * wetEnvelope * upwardFacing;
+  float totalWetMask = clamp(max(permanentWetBand * 0.75 * upwardFacing, wetMask), 0.0, 1.0) * uFoamEnabled;
+  // Darkens toward the sand's own existing color (multiplicative), not a
+  // flat overlay color — real wet sand is a darker version of itself,
+  // not a different color entirely.
+  diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.55, totalWetMask);
+  // Foam mixes toward an off-white respecting the scene's actual
+  // lighting (not pure additive brightening, not pure white either) —
+  // same technique liquid.js's own whitecap foam already uses.
+  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.95, 0.98, 1.0), foamMask * 0.85);
 }`);
         simpleTerrainMat.userData.shader = shader; // the existing animate-loop block (main.js, "if (terrainMesh.material.userData.shader)") already pushes uTime/uDayAmount generically — no loop changes needed
       };
@@ -3065,6 +3166,7 @@ if (graphicsBtn && graphicsPanel) {
     { key: "oceanEffectsEnabled", label: "Ocean FX" },
     { key: "reflectionEnabled", label: "Reflections" },
     { key: "causticsEnabled", label: "Caustics" },
+    { key: "foamEnabled", label: "Foam" },
   ];
   for (const { key, label } of EFFECT_TOGGLES) {
     const btn = document.createElement("button");
@@ -3789,6 +3891,9 @@ function animate() {
     terrainMesh.material.userData.shader.uniforms.uDayAmount.value = dayNight.dayAmount;
     if (terrainMesh.material.userData.shader.uniforms.uCausticsEnabled) {
       terrainMesh.material.userData.shader.uniforms.uCausticsEnabled.value = getGraphicsSettings().causticsEnabled !== false ? 1.0 : 0.0;
+    }
+    if (terrainMesh.material.userData.shader.uniforms.uFoamEnabled) {
+      terrainMesh.material.userData.shader.uniforms.uFoamEnabled.value = getGraphicsSettings().foamEnabled !== false ? 1.0 : 0.0;
     }
   }
   // Real planar water reflection — Coral Shallows only, above-water only

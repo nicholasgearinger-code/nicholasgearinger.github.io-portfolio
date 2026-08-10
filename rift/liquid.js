@@ -859,13 +859,55 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
     const FAR_DARKEN_COLOR = new THREE.Color(0x061824);
     const FAR_DARKEN_START = 300;
     const FAR_DARKEN_END = Math.max(FAR_DARKEN_START + 200, size * 0.45);
+    // Per explicit "waves that actually roll onto the shore" — SIGNED
+    // depth (NOT clamped to 0 the way `depth` below is, for the existing
+    // color blend) is what makes a real swash zone possible: negative
+    // above water (dry sand), positive below (real depth). The OLD
+    // shoreDamp reached exactly 0 right at the average shoreline and
+    // stayed 0 for any dry-land vertex — meaning a wave crest could
+    // never rise high enough to visibly reach the sand at all, since its
+    // amplitude was already zeroed well before getting there. This new
+    // version keeps a small, CAPPED amplitude in a narrow band just
+    // above the shoreline instead of hard-zeroing it — enough for a real
+    // wave crest to occasionally rise a controlled amount above the
+    // sand's own height, then recede, rather than none at all.
+    // SWASH_REACH matches the terrain's OWN foam-wash effect's max reach
+    // (~0.6 units, see the wave-wash block in main.js) so the water's
+    // actual rising edge visually lines up with where the sand's own
+    // foam/wet-band effect already expects the wave edge to be, instead
+    // of the two independently-tuned systems disagreeing.
+    // SWASH_MAX_AMPLITUDE is deliberately small (22% of full wave
+    // amplitude, not the full uncontrolled height) — this is the same
+    // shoreline this exact damping was built to STOP waves flowing up
+    // over uncontrollably in the first place (see this function's own
+    // earlier comment); the fix here is a small, deliberate, bounded
+    // reach, not simply undoing that original fix.
+    const SWASH_REACH = 0.55;
+    const SWASH_MAX_AMPLITUDE = 0.22;
     for (let i = 0; i < posAttr.count; i++) {
       const vx = posAttr.getX(i), vz = posAttr.getZ(i);
       const groundY = sampleHeight(vx, vz);
       const depth = groundY === null ? MAX_DEPTH : Math.max(0, y - groundY);
+      const signedDepth = groundY === null ? MAX_DEPTH : y - groundY;
       const t = Math.min(1, depth / MAX_DEPTH);
-      const shoreT = THREE.MathUtils.clamp(depth / SHORE_DAMP_DEPTH, 0, 1);
-      shoreDamp[i] = shoreT * shoreT * (3 - 2 * shoreT); // smoothstep — gentle ease in, not a hard linear ramp
+      let swashDamp;
+      if (signedDepth < -SWASH_REACH) {
+        swashDamp = 0; // too far up the beach, never reached
+      } else if (signedDepth < 0) {
+        // Dry-sand swash zone — ramps 0 (at the outer SWASH_REACH edge)
+        // up to SWASH_MAX_AMPLITUDE (right at the average shoreline).
+        const st = (signedDepth + SWASH_REACH) / SWASH_REACH;
+        swashDamp = (st * st * (3 - 2 * st)) * SWASH_MAX_AMPLITUDE;
+      } else {
+        // Underwater — ramps from SWASH_MAX_AMPLITUDE (right at the
+        // shoreline, matching the dry-side zone's own value exactly at
+        // the boundary so there's no visible seam) up to full amplitude
+        // by SHORE_DAMP_DEPTH.
+        const st = Math.min(1, signedDepth / SHORE_DAMP_DEPTH);
+        const eased = st * st * (3 - 2 * st);
+        swashDamp = SWASH_MAX_AMPLITUDE + eased * (1 - SWASH_MAX_AMPLITUDE);
+      }
+      shoreDamp[i] = swashDamp;
       tmpDepth.copy(shallow).lerp(deep, t);
       const distFromCenter = Math.hypot(vx, vz);
       const farT = THREE.MathUtils.clamp((distFromCenter - FAR_DARKEN_START) / (FAR_DARKEN_END - FAR_DARKEN_START), 0, 1);

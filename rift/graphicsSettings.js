@@ -227,7 +227,7 @@ const OVERRIDES_STORAGE_KEY = "riftGraphicsOverrides";
 // every existing toggle off, these five are very likely the actual
 // remaining bottleneck, since nothing was previously able to touch them
 // short of switching the whole tier.
-const OVERRIDABLE_KEYS = ["shadowsEnabled", "ssaoEnabled", "oceanEffectsEnabled", "reflectionEnabled", "causticsEnabled", "bloomLevel", "aaMethod", "toneMapping", "pixelRatioCap", "grassMultiplier", "particleMultiplier", "cloudMultiplier", "wildlifeMultiplier", "seaLifeMultiplier"];
+const OVERRIDABLE_KEYS = ["shadowsEnabled", "ssaoEnabled", "oceanEffectsEnabled", "reflectionEnabled", "causticsEnabled", "foamEnabled", "bloomLevel", "aaMethod", "toneMapping", "pixelRatioCap", "grassMultiplier", "particleMultiplier", "cloudMultiplier", "wildlifeMultiplier", "seaLifeMultiplier"];
 let overrides = {};
 try {
   const saved = localStorage.getItem(OVERRIDES_STORAGE_KEY);

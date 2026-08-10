@@ -691,6 +691,19 @@ function createDayNightCycle(scene, sun, ambient, starfield, biome, moonLight) {
   // DirectionalLight intensity numbers below.
   const sunBody = createBody(scene, sunStarburstTexture, createSunTexture(), 9, 0xffcf80, 46, 0.6); // glow radius was 34/opacity 0.5 — enlarged for the bigger, softer halo the reference shows now that the texture itself is a smooth gradual falloff instead of a tight bright core with spikes
   const moonBody = createBody(scene, glowTexture, createMoonTexture(), 8, 0xaebedd, 18, 0.22);
+  // Moon VISUAL hidden per an earlier explicit request ("don't want to
+  // see it but still have the day/night light effects") — RESTORED here
+  // per "the blue circle is supposed to be the sun" investigation: this
+  // exact line was missing from this freshly re-uploaded copy of the
+  // file, and its absence is very likely the direct cause of that report
+  // — the moon's glow sprite is tinted 0xaebedd (a pale blue, an exact
+  // color match), and its Y position is floored so it never actually
+  // sets below the horizon, letting it show up at almost any time with
+  // no relationship to where the real sun is. `moonLight` (the actual
+  // DirectionalLight driving real nighttime lighting) is a separate
+  // object passed into this function untouched — hiding this group only
+  // removes the stray visible disc, not real night lighting.
+  moonBody.group.visible = false;
   const sunBeams = createSunBeams(scene, createBeamTexture());
   const sky = createSkyDome(scene);
   const distantPlanet = createDistantPlanet(scene);

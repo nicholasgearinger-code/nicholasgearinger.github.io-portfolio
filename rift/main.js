@@ -1104,7 +1104,7 @@ function teardownLevel() {
   horizonHandle = null;
   disposeWildlife(scene, wildlifeHandle);
   wildlifeHandle = null;
-  disposeLandmark(scene, landmarkHandle);
+  if (landmarkHandle) disposeLandmark(scene, landmarkHandle);
   landmarkHandle = null;
   for (const [, handle] of crystalHandles) disposeCrystalMesh(scene, handle);
   crystalHandles.clear();
@@ -1913,13 +1913,34 @@ varying float vWaveHeight;`)
       // already rejects any candidate that lands in water, so this
       // naturally follows the island's real (irregular) coastline
       // without needing to know its exact shape.
-      const PALM_COUNT = 24; // was 9 — a much larger scatter area needs more trees to read as populated rather than sparser than before
+      const PALM_COUNT = 36; // was 24 — per explicit "a bit more density," another real bump now that island-wide scatter is confirmed working
       const palmSeed = hashStringToSeed(WORLD_SEED + "::realPalms");
       const rng = mulberry32(palmSeed);
       const placedTreePositions = []; // {x,z} of trees actually placed so far, for the min-spacing check below
       const MIN_TREE_SPACING = 4; // world units — trees were landing right on top of each other with no check at all
-      const PALM_MAX_ATTEMPTS = 500; // retry-until-reached, same pattern as coral/fish/sponge/plant — a wider scatter area means many more candidates land in water and get rejected, so a fixed PALM_COUNT-sized attempt loop would silently under-place
+      const PALM_MAX_ATTEMPTS = 700; // retry-until-reached, same pattern as coral/fish/sponge/plant — a wider scatter area means many more candidates land in water and get rejected, so a fixed PALM_COUNT-sized attempt loop would silently under-place
       let palmsPlaced = 0;
+      // Shuffled-bag species picker, per explicit "making sure there's
+      // enough variety" — independent random draws per tree (the old
+      // `loadedSpecies[Math.floor(rng()*loadedSpecies.length)]`) can
+      // clump by pure chance (e.g. the same species several times in a
+      // row), especially visible now that trees are spread out and
+      // individually noticeable rather than clustered in one clearing. A
+      // bag refills with one of each species, shuffled, every time it
+      // empties — guarantees every species appears before any repeats,
+      // for as many full cycles as PALM_COUNT allows, rather than
+      // leaving variety up to luck.
+      let speciesBag = [];
+      function nextTreeSpecies() {
+        if (speciesBag.length === 0) {
+          speciesBag = [...loadedSpecies];
+          for (let i = speciesBag.length - 1; i > 0; i--) {
+            const j = Math.floor(rng() * (i + 1));
+            [speciesBag[i], speciesBag[j]] = [speciesBag[j], speciesBag[i]];
+          }
+        }
+        return speciesBag.pop();
+      }
       for (let i = 0; i < PALM_MAX_ATTEMPTS && palmsPlaced < PALM_COUNT; i++) {
         const angle = rng() * Math.PI * 2;
         const dist = rng() * 85;
@@ -1940,7 +1961,7 @@ varying float vWaveHeight;`)
         // resolution mismatch.
         const y = sampleGroundHeight(x, z, terrainMesh);
         if (y === null || y < LIQUID_LEVEL.crystal + 0.5) continue; // stay on dry land, clear of the shoreline
-        const species = loadedSpecies[Math.floor(rng() * loadedSpecies.length)];
+        const species = nextTreeSpecies();
         const tree = createRealTree(species);
         if (!tree) continue;
         // createRealTree (models.js) already normalized this tree to
@@ -2668,7 +2689,16 @@ varying float vWaveHeight;`)
   cloudLayerHandle = createCloudLayer(scene);
   horizonHandle = level.biome === "crystal" ? null : createHorizonSilhouettes(scene, level.biome); // Coral Shallows is open ocean now — no distant mountain backdrop, and horizonSilhouettes.js still isn't part of this session so this stays a main.js-only fix rather than touching that file's still-old icy Crystal-Spire theming
   wildlifeHandle = createWildlife(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), LIQUID_LEVEL[level.biome]);
-  landmarkHandle = createLandmark(scene, level.biome, level.color, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
+  // Per explicit "remove the green crystal that is on the pedestal" —
+  // landmarks.js itself isn't part of this session's file set, so this
+  // is a main.js-only skip (same technique already used for horizonHandle
+  // just above) rather than editing that file's internals directly. This
+  // removes the WHOLE landmark structure for Coral Shallows — crystal and
+  // pedestal together, since there's no way to isolate just the crystal
+  // without landmarks.js in hand. If the pedestal/base was meant to stay
+  // (just the crystal itself removed or replaced), that needs the actual
+  // file.
+  landmarkHandle = level.biome === "crystal" ? null : createLandmark(scene, level.biome, level.color, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
 
   const layout = generateLevelLayout(level.biome, WORLD_SEED);
 
@@ -4039,7 +4069,7 @@ function animate() {
   updateFlowers(flowersHandle, elapsedTime);
   updateFootstepGlowSystem(footstepGlowHandle, dt);
   updateWildlife(wildlifeHandle, elapsedTime, dt, camera.position.x, camera.position.z, eruptionActive);
-  updateLandmark(landmarkHandle, elapsedTime, dt);
+  if (landmarkHandle) updateLandmark(landmarkHandle, elapsedTime, dt);
   updateClouds(cloudsHandle, dt, wind, dayNight.dayAmount, wind.rainIntensity, dayNight.skyHorizon, dayNightCycle.sunBody.group.position, camera.position);
   updateCloudLayer(cloudLayerHandle, dt, wind, dayNight.dayAmount, dayNight.skyHorizon);
   updateRealisticCloudDome(realisticCloudDomeHandle, dt, dayNight.dayAmount, dayNight.skyHorizon, dayNight.skyZenith, wind.rainIntensity, dayNightCycle.phaseT);

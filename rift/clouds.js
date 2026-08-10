@@ -688,21 +688,34 @@ function updateRealisticCloudDome(handle, dt, dayAmount, skyHorizonColor, skyZen
     }
   }
   const TRANSITION_SECONDS = 1.6; // half-duration each way — ~3.2s total fade-out-and-back, slow enough to read as a real transition, fast enough not to leave the sky visibly blank for long
+  // Per explicit "make the transitions between backgrounds smoother" —
+  // two changes, both scoped to this existing fade-to-swap-point
+  // mechanism rather than a full second-mesh true crossfade (a bigger
+  // restructure not undertaken this round): (1) MIN_DIP_OPACITY means the
+  // sky never goes fully blank at the swap point, just dims to a dim-but-
+  // still-visible 15% before recovering — the old hard dip to 0 is
+  // exactly the "sudden"-feeling moment a linear fade to black produces;
+  // (2) smoothstep easing (3t^2-2t^3) instead of a raw linear ramp, which
+  // eases in/out at each end of the fade rather than moving at a
+  // constant, slightly mechanical-feeling rate throughout.
+  const MIN_DIP_OPACITY = 0.15;
+  function smoothstep(t) { return t * t * (3 - 2 * t); }
   let transitionOpacityMult = 1;
   if (handle.moodPendingTexture) {
     handle.moodTransitionT += dt / TRANSITION_SECONDS;
     if (handle.moodTransitionT < 1) {
       // Fading out toward the swap point.
-      transitionOpacityMult = 1 - handle.moodTransitionT;
+      transitionOpacityMult = 1 - smoothstep(handle.moodTransitionT) * (1 - MIN_DIP_OPACITY);
     } else if (handle.moodTransitionT < 2) {
       // Just crossed the swap point — apply the queued texture now,
-      // while fully invisible, then fade back in.
+      // while still dim (not literally invisible, but dim enough that
+      // the swap itself isn't a jarring pop), then fade back in.
       if (handle.moodTextureName !== handle.moodPendingTexture) {
         handle.moodTextureName = handle.moodPendingTexture;
         handle.mat.map = getMoodCloudTexture(handle.moodPendingTexture);
         handle.mat.needsUpdate = true;
       }
-      transitionOpacityMult = handle.moodTransitionT - 1;
+      transitionOpacityMult = MIN_DIP_OPACITY + smoothstep(handle.moodTransitionT - 1) * (1 - MIN_DIP_OPACITY);
     } else {
       handle.moodPendingTexture = null;
       transitionOpacityMult = 1;
@@ -719,7 +732,21 @@ function updateRealisticCloudDome(handle, dt, dayAmount, skyHorizonColor, skyZen
   // the drift is genuinely visible without doubling anything.
   // Storm clouds drift noticeably faster than a calm sky's slow roll —
   // real storm fronts visibly move.
-  handle.mesh.rotation.y += dt * (0.006 + stormAmount * 0.02);
+  // Per explicit "visible seam in the sky background" — these mood photos
+  // are real photographs, not true seamless 360° panoramas, so their
+  // left/right edges don't naturally match color at the texture's u=0/1
+  // wrap boundary (already flagged in this exact comment block above,
+  // "the visible seam at u=0/1 is far less noticeable than a hard clamp
+  // edge would be" — a known, previously-accepted tradeoff, now worth
+  // reducing further). Slowed roughly 6x (was 0.006/0.02, now 0.001/
+  // 0.0035) — this mesh rotates continuously for a deliberate slow-drift
+  // effect, so ANY fixed starting rotation would still eventually carry
+  // the seam back into view; a much slower drift is what actually reduces
+  // how often that happens, not where it starts. This is a mitigation,
+  // not an elimination — a full fix needs either editing every mood
+  // photo's own edges (only the 4 added this session are in hand) or a
+  // shader-based blend at the seam, neither attempted this round.
+  handle.mesh.rotation.y += dt * (0.001 + stormAmount * 0.0035);
 
   // Per explicit "I'd like to keep the colors for these sky photos"
   // follow-up: the mood textures (night/storm/day/duskDawn pools) now

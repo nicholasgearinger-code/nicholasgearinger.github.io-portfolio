@@ -4072,7 +4072,7 @@ function animate() {
   if (landmarkHandle) updateLandmark(landmarkHandle, elapsedTime, dt);
   updateClouds(cloudsHandle, dt, wind, dayNight.dayAmount, wind.rainIntensity, dayNight.skyHorizon, dayNightCycle.sunBody.group.position, camera.position);
   updateCloudLayer(cloudLayerHandle, dt, wind, dayNight.dayAmount, dayNight.skyHorizon);
-  updateRealisticCloudDome(realisticCloudDomeHandle, dt, dayNight.dayAmount, dayNight.skyHorizon, dayNight.skyZenith, wind.rainIntensity, dayNightCycle.phaseT, dayNightCycle.skyAzimuth);
+  updateRealisticCloudDome(realisticCloudDomeHandle, dt, dayNight.dayAmount, dayNight.skyHorizon, dayNight.skyZenith, wind.rainIntensity, dayNightCycle.phaseT);
   // Clouds sometimes drift in front of the sun/moon — a cheap angular
   // check (see getCloudOcclusionFactor's own comment for why this isn't
   // real depth-buffer occlusion), applied as a further opacity

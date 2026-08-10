@@ -620,42 +620,24 @@ function createRealisticCloudDome(scene) {
     fog: false, // this is meant to read as sky itself, at the far background — regular scene fog fading it out would be visibly wrong at the far distance it's meant to represent
     color: 0xffffff,
   });
-  // Per explicit "blend the sky background with a shader to hide the
-  // seam" — these mood photos are real photographs, not seamless 360°
-  // panoramas, so wrapping one all the way around a sphere leaves a hard
-  // color mismatch exactly where u=1 meets u=0 (slowing the dome's
-  // rotation, done previously, only reduces how OFTEN that seam drifts
-  // into view — it doesn't touch the seam itself). This blends BOTH
-  // edges toward one shared "seam color" — the average of whatever is
-  // actually at u=0 and u=1 for that same row — so the two edges meet at
-  // a mathematically IDENTICAL value rather than just being independently
-  // softened (which would still leave a visible, if gentler, mismatch
-  // between two different fade targets). Works uniformly on every mood
-  // photo already in this pool, including the ones from before this
-  // session, since it operates on the texture at render time rather than
-  // needing each source image edited individually.
-  mat.onBeforeCompile = (shader) => {
-    shader.uniforms.uSeamBlendWidth = { value: 0.05 }; // fraction of the texture's width blended on EACH side of the seam (0.05 = 5%, ~10% of the image total)
-    shader.fragmentShader = shader.fragmentShader
-      .replace("#include <common>", `#include <common>
-uniform float uSeamBlendWidth;`)
-      .replace("#include <map_fragment>", `#include <map_fragment>
-{
-  float u = vMapUv.x;
-  float distFromSeam = min(u, 1.0 - u);
-  if (distFromSeam < uSeamBlendWidth) {
-    // Same seam color regardless of which side u is approaching from —
-    // this is what makes the two edges meet continuously instead of each
-    // just fading toward its OWN nearer edge (which would still leave a
-    // step between two different targets right at the seam).
-    vec4 edgeAtZero = texture2D(map, vec2(0.0, vMapUv.y));
-    vec4 edgeAtOne = texture2D(map, vec2(1.0, vMapUv.y));
-    vec4 seamColor = mix(edgeAtZero, edgeAtOne, 0.5);
-    float t = distFromSeam / uSeamBlendWidth; // 0 exactly at the seam, 1 at the outer edge of the blend zone
-    diffuseColor = mix(seamColor, diffuseColor, t);
-  }
-}`);
-  };
+  // REVERTED per direct evidence of real regression — the seam-blend
+  // onBeforeCompile shader that lived here (per "blend the sky with a
+  // shader to hide the seam") was explicitly flagged at the time as
+  // depending on `vMapUv`, a varying name not confirmed against this
+  // project's actual three.js version. The follow-up screenshot showed
+  // severe visual corruption (RGB channel separation, banding across the
+  // whole sky, far worse than the original seam) — exactly the kind of
+  // outcome an incorrect/undefined varying reference can produce (some
+  // GLSL compilers accept a bad reference with undefined behavior rather
+  // than a hard compile error, which is worse here: a silent corruption
+  // instead of a loud, obvious failure). Reverting to this known-good
+  // plain material rather than attempting a second shader fix blind —
+  // per this project's own standing rule, when a change makes things
+  // uniformly worse rather than better, revert to last-known-good rather
+  // than guessing the same unknown again. The seam itself is back to
+  // relying on the earlier, lower-risk mitigation (azimuth-driven
+  // rotation from the sky-sync feature, which — unlike this shader — is
+  // pure JS with no GLSL risk).
   const mesh = new THREE.Mesh(geo, mat);
   // Draws between the gradient sky dome (-100) and the existing flat
   // cloud layer (-90) — see both of their own renderOrder comments for
@@ -692,7 +674,7 @@ uniform float uSeamBlendWidth;`)
  * @param {THREE.Color} [skyZenithColor]
  * @param {number} [stormAmount]  0-1, dark storm clouds — Coral Shallows only, driven by weather.js's own rainIntensity, but written generically here so any biome's caller can use it
  */
-function updateRealisticCloudDome(handle, dt, dayAmount, skyHorizonColor, skyZenithColor, stormAmount = 0, phaseT = 0, skyAzimuth = 0) {
+function updateRealisticCloudDome(handle, dt, dayAmount, skyHorizonColor, skyZenithColor, stormAmount = 0, phaseT = 0) {
   if (!handle) return;
 
   // Mood texture selection — per "use all of them to best match different
@@ -724,34 +706,21 @@ function updateRealisticCloudDome(handle, dt, dayAmount, skyHorizonColor, skyZen
     }
   }
   const TRANSITION_SECONDS = 1.6; // half-duration each way — ~3.2s total fade-out-and-back, slow enough to read as a real transition, fast enough not to leave the sky visibly blank for long
-  // Per explicit "make the transitions between backgrounds smoother" —
-  // two changes, both scoped to this existing fade-to-swap-point
-  // mechanism rather than a full second-mesh true crossfade (a bigger
-  // restructure not undertaken this round): (1) MIN_DIP_OPACITY means the
-  // sky never goes fully blank at the swap point, just dims to a dim-but-
-  // still-visible 15% before recovering — the old hard dip to 0 is
-  // exactly the "sudden"-feeling moment a linear fade to black produces;
-  // (2) smoothstep easing (3t^2-2t^3) instead of a raw linear ramp, which
-  // eases in/out at each end of the fade rather than moving at a
-  // constant, slightly mechanical-feeling rate throughout.
-  const MIN_DIP_OPACITY = 0.15;
-  function smoothstep(t) { return t * t * (3 - 2 * t); }
   let transitionOpacityMult = 1;
   if (handle.moodPendingTexture) {
     handle.moodTransitionT += dt / TRANSITION_SECONDS;
     if (handle.moodTransitionT < 1) {
       // Fading out toward the swap point.
-      transitionOpacityMult = 1 - smoothstep(handle.moodTransitionT) * (1 - MIN_DIP_OPACITY);
+      transitionOpacityMult = 1 - handle.moodTransitionT;
     } else if (handle.moodTransitionT < 2) {
       // Just crossed the swap point — apply the queued texture now,
-      // while still dim (not literally invisible, but dim enough that
-      // the swap itself isn't a jarring pop), then fade back in.
+      // while fully invisible, then fade back in.
       if (handle.moodTextureName !== handle.moodPendingTexture) {
         handle.moodTextureName = handle.moodPendingTexture;
         handle.mat.map = getMoodCloudTexture(handle.moodPendingTexture);
         handle.mat.needsUpdate = true;
       }
-      transitionOpacityMult = MIN_DIP_OPACITY + smoothstep(handle.moodTransitionT - 1) * (1 - MIN_DIP_OPACITY);
+      transitionOpacityMult = handle.moodTransitionT - 1;
     } else {
       handle.moodPendingTexture = null;
       transitionOpacityMult = 1;
@@ -768,24 +737,7 @@ function updateRealisticCloudDome(handle, dt, dayAmount, skyHorizonColor, skyZen
   // the drift is genuinely visible without doubling anything.
   // Storm clouds drift noticeably faster than a calm sky's slow roll —
   // real storm fronts visibly move.
-  // Per explicit "synchronize [the sky] with the background, moving the
-  // sky to be exactly where the sun in the photo matches the sun and
-  // moon cycle" — replaces the free continuous drift this used to have
-  // (see the removed comment's own reasoning, now moot: rotation is
-  // deterministic and driven by the real orbit, so the seam's position
-  // is now predictable relative to time-of-day too, not just slower to
-  // wander). SKY_AZIMUTH_ALIGN_OFFSET is a calibration constant, not a
-  // measured one — derived from three.js's standard SphereGeometry UV
-  // formula (u=0.5 corresponds to local +X) assuming each mood photo's
-  // own bright feature sits roughly at the horizontal CENTER of the
-  // image (a reasonable assumption for this kind of "sky mood" stock
-  // photography, but not verified against a live render for every one of
-  // the 10+ photos in the pool — many, likely most, weren't taken/framed
-  // with that in mind). If the photo's sun/moon doesn't actually line up
-  // with the real dynamic one once tested, this single constant is what
-  // to retune first, not the underlying azimuth math itself.
-  const SKY_AZIMUTH_ALIGN_OFFSET = -Math.PI / 2;
-  handle.mesh.rotation.y = skyAzimuth + SKY_AZIMUTH_ALIGN_OFFSET;
+  handle.mesh.rotation.y += dt * (0.006 + stormAmount * 0.02);
 
   // Per explicit "I'd like to keep the colors for these sky photos"
   // follow-up: the mood textures (night/storm/day/duskDawn pools) now

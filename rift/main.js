@@ -28,7 +28,7 @@ import {
   createMuzzleFlash, updateMuzzleFlash, disposeMuzzleFlash,
   createImpactBurst, updateImpactBurst, disposeImpactBurst,
 } from "./effects.js";
-import { initAudio, toggleMuted, playShoot, playShatter, playLoreChime, startAmbient, playFootstep, setEruptionIntensity, playEruptionBurst, updateFirePosition, updateListenerPosition, setAmbientDayAmount } from "./audio.js";
+import { initAudio, toggleMuted, playShoot, playShatter, playLoreChime, startAmbient, playFootstep, setEruptionIntensity, playEruptionBurst, updateFirePosition, updateListenerPosition, setAmbientDayAmount, setRainIntensity, setWaveIntensity } from "./audio.js";
 import { getIslandLore } from "./lore.js";
 import { findClosestHit } from "./hitPrediction.js";
 import { createTouchControls } from "./touchControls.js";
@@ -4065,6 +4065,28 @@ function animate() {
   // dome/light shafts above: toggle directly on submersion rather than
   // trying to fog/hide it any other way.
   if (weatherHandle && weatherHandle.rain) weatherHandle.rain.points.visible = !isFullySubmerged;
+  setRainIntensity(isFullySubmerged ? 0 : wind.rainIntensity); // same submersion gating as the visual rain particles just above — real rain isn't audible underwater either
+  // Ocean wave sound, per explicit "gets louder the closer the player is
+  // to the water" — Crystal only (the only biome with a real continuous
+  // open-water plane). Uses the ground height directly beneath the
+  // player (the same analytic terrainHeightAt already used throughout
+  // this project for placement, not a new raycast — audio doesn't need
+  // the pixel-perfect precision physics.js's real mesh raycast is for)
+  // relative to LIQUID_LEVEL.crystal: at/below water level (standing at
+  // the shore, wading, or swimming) is loudest, fading out over
+  // WAVE_AUDIBLE_RANGE units of elevation as the player heads further
+  // inland/uphill and the actual shoreline gets further away.
+  if (currentLevelIdx >= 0 && LEVELS[currentLevelIdx].biome === "crystal") {
+    const groundYAtPlayer = terrainHeightAt(LEVELS[currentLevelIdx], camera.position.x, camera.position.z, WORLD_SEED);
+    if (groundYAtPlayer !== null) {
+      const heightAboveWater = groundYAtPlayer - LIQUID_LEVEL.crystal;
+      const WAVE_AUDIBLE_RANGE = 7; // units of elevation above water level beyond which waves fade to inaudible
+      const waveProximity = 1 - THREE.MathUtils.clamp(heightAboveWater / WAVE_AUDIBLE_RANGE, 0, 1);
+      setWaveIntensity(waveProximity);
+    }
+  } else {
+    setWaveIntensity(0);
+  }
   updateAtmosphericParticles(atmosphereHandle, elapsedTime, dt, wind.windX, wind.windZ);
   updateGrass(grassHandle, elapsedTime, wind.windX, wind.windZ, dayNight.dayAmount);
   // Real GLB trees never had any wind response at all, unlike grass —

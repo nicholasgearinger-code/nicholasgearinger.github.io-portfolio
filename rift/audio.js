@@ -34,6 +34,8 @@ const SOUND_FILES = {
   fireLoop: "fire-crackle-loop.mp3",      // positional — loudest near an actual fire, see updateFirePosition below
   eruptionRumble: "eruption-rumble.mp3",  // always playing at a quiet baseline, boosted while an eruption is active
   eruptionBurst: "eruption-burst.mp3",    // one-shot, fired once when an eruption starts
+  rainThunder: "rain-thunder.mp3",        // Verdant and Crystal only (the only two biomes with real rain — see WEATHER_PROFILE in weather.js), gain-driven by setRainIntensity rather than started/stopped
+  oceanWaves: "ocean-waves.mp3",          // Crystal only — the only biome with a real continuous open-water plane. NOT positional (no single point a whole shoreline can be reduced to the way a campfire can) — gain-driven by setWaveIntensity, computed from the player's proximity to water level rather than a PannerNode's distance model.
 };
 const soundBuffers = {}; // key -> decoded AudioBuffer, once ready
 const soundLoadPromises = {}; // key -> in-flight/settled Promise<AudioBuffer|null>, so repeated calls share one fetch
@@ -67,6 +69,8 @@ function preloadRealSounds() {
   loadSoundBuffer("fireLoop");
   loadSoundBuffer("eruptionRumble");
   loadSoundBuffer("eruptionBurst");
+  loadSoundBuffer("rainThunder");
+  loadSoundBuffer("oceanWaves");
 }
 
 // Ember-only state, both reset in stopAmbient() when leaving the biome so
@@ -80,6 +84,20 @@ function preloadRealSounds() {
 //   whichever fire is currently nearest the player.
 let eruptionRumbleGain = null;
 let fireCracklePanner = null;
+// Same external-gain-control pattern as eruptionRumbleGain above — the
+// source loops continuously once attached (Verdant/Crystal only), and
+// setRainIntensity (called every frame from main.js with the same
+// wind.rainIntensity value already driving the visual storm effects)
+// just adjusts this gain node's value directly. No ramping needed here
+// the way setEruptionIntensity ramps toward a discrete on/off target —
+// rainIntensity itself already arrives pre-smoothed frame to frame (see
+// weather.js's own dt*0.15 fade), so this can just track it directly.
+let rainGain = null;
+// Same pattern again — Crystal only, gain driven externally by
+// setWaveIntensity (computed every frame from the player's proximity to
+// water level, see main.js) rather than a PannerNode's distance model,
+// since a whole shoreline has no single point to be "near."
+let waveGain = null;
 
 function ensureContext() {
   if (ctx) return ctx;
@@ -199,6 +217,8 @@ function startAmbient(biome) {
 function stopAmbient() {
   eruptionRumbleGain = null;
   fireCracklePanner = null;
+  rainGain = null;
+  waveGain = null;
   if (!ambientNodes) return;
   const now = ctx ? ctx.currentTime : 0;
   // Fade out fast rather than an abrupt stop, then actually stop the
@@ -269,6 +289,45 @@ function buildAmbientGraph(biome) {
     stopOnSwitch.push(source, gain);
     if (gustFreq) lfoModulate(gain.gain, gustFreq, gustDepth);
     return { source, filter, gain };
+  }
+
+  // Shared by verdant and crystal — the only two biomes with real rain
+  // (see WEATHER_PROFILE in weather.js). Same async-attach-on-load
+  // pattern as the ember fireLoop/eruptionRumble above: starts silent
+  // (gain 0) regardless of whether it's actually raining right this
+  // instant, since setRainIntensity (driven every frame by main.js's own
+  // wind.rainIntensity) is what actually brings it up/down — this just
+  // gets the loop running and ready.
+  function attachRainLoop() {
+    loadSoundBuffer("rainThunder").then((buffer) => {
+      if (!buffer || ambientNodes !== handle) return;
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.loop = true;
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      source.connect(gain).connect(masterGain);
+      source.start();
+      stopOnSwitch.push(source, gain);
+      rainGain = gain;
+    });
+  }
+
+  // Crystal only — starts silent, setWaveIntensity (main.js, driven by
+  // the player's real proximity to water level every frame) brings it up.
+  function attachWaveLoop() {
+    loadSoundBuffer("oceanWaves").then((buffer) => {
+      if (!buffer || ambientNodes !== handle) return;
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.loop = true;
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      source.connect(gain).connect(masterGain);
+      source.start();
+      stopOnSwitch.push(source, gain);
+      waveGain = gain;
+    });
   }
 
   if (biome === "ember") {
@@ -342,6 +401,7 @@ function buildAmbientGraph(biome) {
       eruptionRumbleGain = gain;
     });
   } else if (biome === "verdant") {
+    attachRainLoop();
     drone(60, "sine", 0.02);
     noiseBed("bandpass", 900, 0.5, 0.03, 0.15, 0.012); // wind through foliage, gustier
     noiseBed("bandpass", 2200, 1.2, 0.008, 0.3, 0.004); // thin high shimmer — water/leaves
@@ -356,6 +416,8 @@ function buildAmbientGraph(biome) {
       }
     }, 2200);
   } else if (biome === "crystal") {
+    attachRainLoop();
+    attachWaveLoop();
     drone(50, "sine", 0.018);
     noiseBed("highpass", 3000, 0.8, 0.006, 0.06, 0.004);
     // Sparse resonant chime pings — crystals settling.
@@ -394,6 +456,30 @@ function setEruptionIntensity(active) {
   // back down slower (the rumble lingers as things settle), never all
   // the way to silent either way.
   gainParam.linearRampToValueAtTime(active ? 1.1 : 0.65, now + (active ? 1.2 : 2.5));
+}
+
+// Called every frame from main.js with the same wind.rainIntensity value
+// already driving the visual storm effects (cloud darkening, choppy
+// water, tree sway) — no-ops harmlessly if the current biome has no rain
+// loop attached (rainGain stays null on every biome but Verdant/Crystal,
+// and briefly on those two while the file is still loading). 0.75 peak —
+// a real presence without drowning out the rest of the biome's ambient
+// bed once heavy rain is genuinely underway.
+function setRainIntensity(intensity) {
+  if (!rainGain || !ctx) return;
+  rainGain.gain.value = Math.max(0, Math.min(1, intensity)) * 0.75;
+}
+
+// Called every frame from main.js with a 0-1 proximity value computed
+// from how close the player's current ground height is to water level —
+// no-ops harmlessly outside Crystal (waveGain stays null everywhere
+// else). Direct gain assignment, same reasoning as setRainIntensity —
+// the proximity value itself already changes smoothly as the player
+// moves, no extra smoothing needed here. 0.6 peak — ambient wave sound
+// even standing right at the shoreline, not a jarring roar.
+function setWaveIntensity(intensity) {
+  if (!waveGain || !ctx) return;
+  waveGain.gain.value = Math.max(0, Math.min(1, intensity)) * 0.6;
 }
 
 // Repositions the fire-crackle PannerNode — called every frame from
@@ -573,4 +659,4 @@ function playFootstep(biome) {
   source.start(t);
 }
 
-export { initAudio, toggleMuted, playShoot, playShatter, playLoreChime, startAmbient, playFootstep, setEruptionIntensity, playEruptionBurst, updateFirePosition, updateListenerPosition, setAmbientDayAmount };
+export { initAudio, toggleMuted, playShoot, playShatter, playLoreChime, startAmbient, playFootstep, setEruptionIntensity, playEruptionBurst, updateFirePosition, updateListenerPosition, setAmbientDayAmount, setRainIntensity, setWaveIntensity };

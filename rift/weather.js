@@ -582,9 +582,18 @@ function updateWeatherSystem(handle, dt, erupting = false, dayAmount = 0) {
 
   // Wind: a slowly rotating direction with a wandering strength, not a
   // fixed vector — reads as actual weather moving through rather than a
-  // constant breeze.
+  // constant breeze. Per explicit "wind affects the rain and trees" —
+  // this used to be purely the biome's static profile, with NO
+  // connection to rainIntensity/storm state at all, meaning wind never
+  // actually got stronger during a storm, just the rain did. stormWindBoost
+  // (reads handle.rainIntensity — the END of last frame's value, one
+  // frame stale, imperceptible) means a real storm now visibly gusts
+  // harder, which is what then cascades into stronger rain-drift and
+  // tree-sway too, since both already/now read this same windStrength —
+  // one coherent cause rather than three separately-tuned effects.
   handle.windAngle += profile.windSpeed * dt;
-  const windStrength = Math.max(0, profile.windBaseStrength + Math.sin(handle.elapsed * 0.13) * profile.windVariance);
+  const stormWindBoost = 1 + handle.rainIntensity * 1.8;
+  const windStrength = Math.max(0, profile.windBaseStrength + Math.sin(handle.elapsed * 0.13) * profile.windVariance) * stormWindBoost;
   let windX = Math.cos(handle.windAngle) * windStrength;
   let windZ = Math.sin(handle.windAngle) * windStrength;
 

@@ -1995,6 +1995,7 @@ varying float vWaveHeight;`)
         tree.position.set(x, y + tree.userData.groundOffset * scale, z);
         tree.rotation.y = rng() * Math.PI * 2;
         tree.scale.multiplyScalar(scale);
+        tree.userData.swaySeed = rng() * Math.PI * 2; // per-tree phase offset for wind sway (see the animate-loop update), so trees don't all sway in lockstep
         scene.add(tree);
         realPalmTrees.push(tree);
         placedTreePositions.push({ x, z });
@@ -4066,6 +4067,27 @@ function animate() {
   if (weatherHandle && weatherHandle.rain) weatherHandle.rain.points.visible = !isFullySubmerged;
   updateAtmosphericParticles(atmosphereHandle, elapsedTime, dt, wind.windX, wind.windZ);
   updateGrass(grassHandle, elapsedTime, wind.windX, wind.windZ, dayNight.dayAmount);
+  // Real GLB trees never had any wind response at all, unlike grass —
+  // per explicit "wind affects the rain and trees." Two parts, both
+  // scaled by windStrength (now itself storm-boosted, see weather.js):
+  // a constant LEAN toward the wind's push direction (stronger wind = the
+  // whole tree tilts further that way, same as a real trunk/palm frond
+  // under sustained pressure), plus a smaller oscillating SWAY layered on
+  // top so it isn't perfectly rigid. Only rotation.x/rotation.z are
+  // touched — rotation.y already carries each tree's own random facing
+  // set at spawn time and is left alone.
+  if (wind.windStrength > 0.001) {
+    const windDirX = wind.windX / wind.windStrength;
+    const windDirZ = wind.windZ / wind.windStrength;
+    const leanAmount = Math.min(0.11, wind.windStrength * 0.02);
+    const swayAmount = Math.min(0.05, wind.windStrength * 0.012);
+    for (const tree of realPalmTrees) {
+      const phase = elapsedTime * 1.4 + (tree.userData.swaySeed || 0);
+      const totalTilt = leanAmount + Math.sin(phase) * swayAmount;
+      tree.rotation.x = -windDirZ * totalTilt;
+      tree.rotation.z = windDirX * totalTilt;
+    }
+  }
   updateFlowers(flowersHandle, elapsedTime);
   updateFootstepGlowSystem(footstepGlowHandle, dt);
   updateWildlife(wildlifeHandle, elapsedTime, dt, camera.position.x, camera.position.z, eruptionActive);

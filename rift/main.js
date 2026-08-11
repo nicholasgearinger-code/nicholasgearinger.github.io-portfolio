@@ -319,7 +319,14 @@ const lensRainPass = new ShaderPass({
     // Returns (distance to nearest droplet center, offset-vector.x, offset-vector.y)
     // -- the offset vector (from the droplet's own center to this pixel,
     // in the same space as p) is what drives the refraction direction
-    // below.
+    // below. Per explicit "dribbling down the glass" -- the distance
+    // metric is deliberately COMPRESSED along Y for actively-sliding
+    // droplets (stretched vertically), turning a plain circle into an
+    // elongated trailing teardrop shape rather than a circle that just
+    // teleports smoothly down the screen with no trace of its own
+    // motion. Each droplet's own streak amount comes from its own hash,
+    // so different droplets read as genuinely different sizes/behaviors
+    // across the field rather than one uniform look.
     vec3 dropVoronoi(vec2 p, float slideMix) {
       vec2 ip = floor(p);
       vec2 fp = fract(p);
@@ -335,9 +342,11 @@ const lensRainPass = new ShaderPass({
           // it reads as an individual droplet trickling down the lens
           // rather than the whole grid scrolling uniformly together.
           float slideSpeed = 0.12 + cellPoint.x * 0.3;
+          float streak = 1.0 + cellPoint.y * 3.5 * slideMix;
           cellPoint.y = fract(cellPoint.y - uTime * slideSpeed * slideMix);
           vec2 offset = neighbor + cellPoint - fp;
-          float d = length(offset);
+          vec2 stretched = vec2(offset.x, offset.y / streak);
+          float d = length(stretched);
           if (d < minDist) { minDist = d; minOffset = offset; }
         }
       }
@@ -355,20 +364,30 @@ const lensRainPass = new ShaderPass({
       vec3 v2 = dropVoronoi(p * 10.0 + 37.0, slideMix);
       float r2 = 0.2;
 
-      float in1 = 1.0 - smoothstep(r1 * 0.65, r1, v1.x);
-      float in2 = 1.0 - smoothstep(r2 * 0.65, r2, v2.x);
+      float in1 = 1.0 - smoothstep(r1 * 0.6, r1, v1.x);
+      float in2 = 1.0 - smoothstep(r2 * 0.6, r2, v2.x);
       float coverage = clamp(uRainIntensity * 1.5, 0.0, 1.0);
       float dropMask = max(in1, in2) * coverage;
 
       vec2 refractDir = in1 >= in2 ? v1.yz : v2.yz;
-      vec2 refractOffset = -refractDir * 0.028 * dropMask;
+      float refractDist = length(refractDir);
+      // Two stacked components per explicit "more distortion through the
+      // rain drops," both substantially stronger than before (was a
+      // single 0.028-strength edge bend): an EDGE bend (light curves
+      // more sharply near a real droplet's rim) plus a CENTER magnify
+      // pull (a droplet is a tiny convex lens -- its middle should show a
+      // slightly zoomed, warped version of what's behind it, not look
+      // untouched the way a pure edge-only bend would leave it).
+      vec2 edgeBend = -refractDir * 0.11 * dropMask;
+      vec2 centerPull = -refractDir * 0.05 * dropMask * (1.0 - smoothstep(0.0, 0.15, refractDist));
+      vec2 refractOffset = edgeBend + centerPull;
       vec4 color = texture2D(tDiffuse, clamp(uv + refractOffset, 0.001, 0.999));
 
       // A soft bright rim right at each droplet's own edge — real
       // droplets catch ambient light there.
-      float rim1 = smoothstep(r1 * 0.55, r1 * 0.7, v1.x) * (1.0 - smoothstep(r1 * 0.7, r1, v1.x));
-      float rim2 = smoothstep(r2 * 0.55, r2 * 0.7, v2.x) * (1.0 - smoothstep(r2 * 0.7, r2, v2.x));
-      color.rgb += vec3(max(rim1, rim2) * 0.12 * coverage);
+      float rim1 = smoothstep(r1 * 0.5, r1 * 0.68, v1.x) * (1.0 - smoothstep(r1 * 0.68, r1, v1.x));
+      float rim2 = smoothstep(r2 * 0.5, r2 * 0.68, v2.x) * (1.0 - smoothstep(r2 * 0.68, r2, v2.x));
+      color.rgb += vec3(max(rim1, rim2) * 0.14 * coverage);
 
       gl_FragColor = color;
     }

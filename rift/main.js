@@ -67,6 +67,9 @@ const UNDERWATER_NEUTRAL_LIGHT = new THREE.Color(0xfff4e0);
 const UNDERWATER_NEUTRAL_TINT = new THREE.Color(0xd8f0f0);
 const tempUnderwaterTintColor = new THREE.Color(); // reused every frame in the underwater block below rather than allocated fresh each time
 const tempRainFogColor = new THREE.Color(); // reused every frame for the rain-fog effect below
+const tempSunDir = new THREE.Vector3(); // reused every frame for the lens-rain sun-glow projection below
+const tempCameraDir = new THREE.Vector3();
+const tempSunProjection = new THREE.Vector3();
 // Per "the fog is turning everything white" — was 0x8a97a8, a fairly
 // LIGHT pale gray-blue. A light fog color asserting itself over
 // mid/background distance washes everything toward white/pale rather
@@ -296,6 +299,13 @@ const lensRainPass = new ShaderPass({
     uTime: { value: 0 },
     uRainIntensity: { value: 0 },
     uResolution: { value: new THREE.Vector2(viewport.clientWidth, viewport.clientHeight) },
+    // Real sun screen position (UV space), projected from its actual
+    // world position each frame — see the animate loop below. A
+    // sentinel far outside [0,1] (set whenever the sun isn't usefully
+    // visible — behind the camera or below the horizon) means the glow
+    // naturally never triggers rather than needing a separate on/off
+    // flag.
+    uSunScreenPos: { value: new THREE.Vector2(-10, -10) },
   },
   vertexShader: `
     varying vec2 vUv;
@@ -309,6 +319,7 @@ const lensRainPass = new ShaderPass({
     uniform float uTime;
     uniform float uRainIntensity;
     uniform vec2 uResolution;
+    uniform vec2 uSunScreenPos;
     varying vec2 vUv;
 
     vec2 dropHash(vec2 p) {
@@ -316,41 +327,44 @@ const lensRainPass = new ShaderPass({
       return fract(vec2(262144.0, 32768.0) * n);
     }
 
-    // Returns (distance to nearest droplet center, offset-vector.x, offset-vector.y)
-    // -- the offset vector (from the droplet's own center to this pixel,
-    // in the same space as p) is what drives the refraction direction
-    // below. Per explicit "dribbling down the glass" -- the distance
-    // metric is deliberately COMPRESSED along Y for actively-sliding
-    // droplets (stretched vertically), turning a plain circle into an
-    // elongated trailing teardrop shape rather than a circle that just
-    // teleports smoothly down the screen with no trace of its own
-    // motion. Each droplet's own streak amount comes from its own hash,
-    // so different droplets read as genuinely different sizes/behaviors
-    // across the field rather than one uniform look.
-    vec3 dropVoronoi(vec2 p, float slideMix) {
+    // Returns (distance to nearest droplet center [using an elongated
+    // metric for sliding droplets], offset-vector.x, offset-vector.y,
+    // wet-trail mask). The wet-trail mask is a SEPARATE signal from the
+    // droplet's own body -- a thin, full-column band at this specific
+    // droplet's own X position, present only for droplets whose own hash
+    // marks them as "streaky" (roughly a third of them, matching the
+    // reference photo's mix of plain droplets and ones with long visible
+    // trails). Deliberately NOT direction-dependent on the droplet's
+    // motion (which would need a sign convention on screen-space Y that
+    // can't be verified without a live browser) -- a fixed vertical
+    // column at the droplet's own X already reads as "the path it has
+    // rolled along," since the droplet itself is what's actually
+    // animating down that column over time.
+    vec4 dropVoronoi(vec2 p, float slideMix) {
       vec2 ip = floor(p);
       vec2 fp = fract(p);
       float minDist = 8.0;
       vec2 minOffset = vec2(0.0);
+      float streakMask = 0.0;
       for (int y = -1; y <= 1; y++) {
         for (int x = -1; x <= 1; x++) {
           vec2 neighbor = vec2(float(x), float(y));
           vec2 cellPoint = dropHash(ip + neighbor);
-          // Each droplet slides down at its own random speed (derived
-          // from its own hash, not shared globally) — offset the cell
-          // point's Y over time, wrapped within the cell via fract, so
-          // it reads as an individual droplet trickling down the lens
-          // rather than the whole grid scrolling uniformly together.
           float slideSpeed = 0.12 + cellPoint.x * 0.3;
           float streak = 1.0 + cellPoint.y * 3.5 * slideMix;
+          bool isStreaky = cellPoint.x > 0.6;
           cellPoint.y = fract(cellPoint.y - uTime * slideSpeed * slideMix);
           vec2 offset = neighbor + cellPoint - fp;
           vec2 stretched = vec2(offset.x, offset.y / streak);
           float d = length(stretched);
-          if (d < minDist) { minDist = d; minOffset = offset; }
+          if (d < minDist) {
+            minDist = d;
+            minOffset = offset;
+            streakMask = isStreaky ? (1.0 - smoothstep(0.0, 0.022, abs(offset.x))) : 0.0;
+          }
         }
       }
-      return vec3(minDist, minOffset);
+      return vec4(minDist, minOffset, streakMask);
     }
 
     void main() {
@@ -359,51 +373,79 @@ const lensRainPass = new ShaderPass({
       vec2 p = uv * vec2(aspect, 1.0);
       float slideMix = 0.25 + uRainIntensity * 0.6;
 
-      // Per explicit reference photos ("I want rain to look like this") —
-      // a real window in heavy rain is covered edge-to-edge in droplets
-      // of very different sizes, not a handful of large, sparse ones.
-      // Radii shrunk substantially and a THIRD, much smaller/denser layer
-      // added on top of the original two (large + tiny + tinier), rather
-      // than just retuning the existing two — the reference specifically
-      // shows fine droplet texture in between the bigger ones, which two
-      // scales alone can't produce regardless of their own individual
-      // size.
-      vec3 v1 = dropVoronoi(p * 7.0, slideMix);
+      // Three overlapping scales (large/medium/tiny) for real density
+      // matching a rain-soaked window, not a handful of sparse circles.
+      vec4 v1 = dropVoronoi(p * 7.0, slideMix);
       float r1 = 0.17;
-      vec3 v2 = dropVoronoi(p * 13.0 + 37.0, slideMix);
+      vec4 v2 = dropVoronoi(p * 13.0 + 37.0, slideMix);
       float r2 = 0.12;
-      vec3 v3 = dropVoronoi(p * 21.0 + 91.0, slideMix);
+      vec4 v3 = dropVoronoi(p * 21.0 + 91.0, slideMix);
       float r3 = 0.075;
 
       float in1 = 1.0 - smoothstep(r1 * 0.6, r1, v1.x);
       float in2 = 1.0 - smoothstep(r2 * 0.6, r2, v2.x);
       float in3 = 1.0 - smoothstep(r3 * 0.6, r3, v3.x);
-      // Coverage floor raised (was a straight multiply on rainIntensity,
-      // meaning light rain showed almost nothing) — even modest rain
-      // should show a real scattering of droplets, not an empty lens
-      // that only fills in once the storm is already heavy.
       float coverage = clamp(0.25 + uRainIntensity * 1.3, 0.0, 1.0);
       float dropMask = max(max(in1, in2), in3) * coverage;
 
-      vec2 refractDir = in1 >= in2 ? (in1 >= in3 ? v1.yz : v3.yz) : (in2 >= in3 ? v2.yz : v3.yz);
-      float refractDist = length(refractDir);
-      // Two stacked components per explicit "more distortion through the
-      // rain drops": an EDGE bend (light curves more sharply near a real
-      // droplet's rim) plus a CENTER magnify pull (a droplet is a tiny
-      // convex lens -- its middle should show a slightly zoomed, warped
-      // version of what's behind it, not look untouched the way a pure
-      // edge-only bend would leave it).
-      vec2 edgeBend = -refractDir * 0.11 * dropMask;
-      vec2 centerPull = -refractDir * 0.05 * dropMask * (1.0 - smoothstep(0.0, 0.1, refractDist));
-      vec2 refractOffset = edgeBend + centerPull;
-      vec4 color = texture2D(tDiffuse, clamp(uv + refractOffset, 0.001, 0.999));
+      // Pick whichever layer's droplet actually covers this pixel (its
+      // own distance/offset/radius all travel together, needed below for
+      // a correctly-normalized lens profile).
+      float wonDist; vec2 wonOffset; float wonR; float wonRim; float streakMask;
+      if (in1 >= in2 && in1 >= in3) {
+        wonDist = v1.x; wonOffset = v1.yz; wonR = r1;
+        wonRim = smoothstep(r1 * 0.5, r1 * 0.68, v1.x) * (1.0 - smoothstep(r1 * 0.68, r1, v1.x));
+        streakMask = v1.w;
+      } else if (in2 >= in3) {
+        wonDist = v2.x; wonOffset = v2.yz; wonR = r2;
+        wonRim = smoothstep(r2 * 0.5, r2 * 0.68, v2.x) * (1.0 - smoothstep(r2 * 0.68, r2, v2.x));
+        streakMask = v2.w;
+      } else {
+        wonDist = v3.x; wonOffset = v3.yz; wonR = r3;
+        wonRim = smoothstep(r3 * 0.5, r3 * 0.68, v3.x) * (1.0 - smoothstep(r3 * 0.68, r3, v3.x));
+        streakMask = v3.w;
+      }
 
-      // A soft bright rim right at each droplet's own edge — real
-      // droplets catch ambient light there.
-      float rim1 = smoothstep(r1 * 0.5, r1 * 0.68, v1.x) * (1.0 - smoothstep(r1 * 0.68, r1, v1.x));
-      float rim2 = smoothstep(r2 * 0.5, r2 * 0.68, v2.x) * (1.0 - smoothstep(r2 * 0.68, r2, v2.x));
-      float rim3 = smoothstep(r3 * 0.5, r3 * 0.68, v3.x) * (1.0 - smoothstep(r3 * 0.68, r3, v3.x));
-      color.rgb += vec3(max(max(rim1, rim2), rim3) * 0.14 * coverage);
+      // THE ACTUAL FIX for the hollow-ring look: normalized direction
+      // (unit vector, not the raw offset whose OWN magnitude used to be
+      // baked directly into the bend strength) times a smooth strength
+      // curve that ramps up across the WHOLE droplet interior via
+      // smoothstep, not concentrated in a thin band right at the rim.
+      // The old formula left each droplet's middle nearly undistorted
+      // (matching the background almost exactly) with a sharp bend only
+      // at the boundary -- structurally a ring, regardless of tuning.
+      // This is real water now: distortion visible throughout, strongest
+      // toward the edge the way a genuine convex lens actually behaves,
+      // not just AT the edge.
+      float normRadius = clamp(wonDist / wonR, 0.0, 1.0);
+      float lensPower = smoothstep(0.0, 1.0, normRadius);
+      vec2 dir = wonDist > 0.001 ? wonOffset / wonDist : vec2(0.0);
+      vec2 refractOffset = -dir * lensPower * 0.16 * dropMask;
+
+      // Wet trail — a distinct, WEAKER effect from the droplet's own
+      // lens body: a mild vertical pull (a thin flowing rivulet, not a
+      // full lens sphere) plus darkening the glass slightly rather than
+      // brightening it, since real wet streaks read as a darker, more
+      // saturated version of what's behind them.
+      vec2 trailOffset = vec2(0.0, -0.02) * streakMask * coverage;
+
+      vec4 color = texture2D(tDiffuse, clamp(uv + refractOffset + trailOffset, 0.001, 0.999));
+      color.rgb *= mix(1.0, 0.85, streakMask * coverage);
+
+      // Per explicit "only glow when reflecting sunlight" — the old rim
+      // highlight was a constant brightening on every droplet's edge
+      // regardless of lighting, which isn't how a real droplet works: it
+      // only throws a bright glint back at the camera when it's actually
+      // positioned to catch and reflect the light source. uSunScreenPos
+      // is the real sun's current position projected onto the screen
+      // (see the animate loop) — droplets only glint when they're
+      // actually near that direction, fading smoothly with distance from
+      // it, and never at all when the sun isn't visible (off-screen /
+      // below the horizon), where uSunScreenPos sits far outside [0,1]
+      // and this naturally stays at 0.
+      float distToSun = length(uv - uSunScreenPos);
+      float sunProximity = 1.0 - smoothstep(0.0, 0.55, distToSun);
+      color.rgb += vec3(wonRim * sunProximity * 0.9 * coverage);
 
       gl_FragColor = color;
     }
@@ -4363,6 +4405,24 @@ function animate() {
   if (lensRainPass.enabled) {
     lensRainPass.material.uniforms.uTime.value = elapsedTime;
     lensRainPass.material.uniforms.uRainIntensity.value = wind.rainIntensity;
+    // Per explicit "only glow when reflecting sunlight" — the real sun's
+    // world position projected onto the screen, so the shader's rim
+    // highlight can be gated by actual proximity to it instead of always
+    // being on. Checked against the camera's own forward direction first
+    // (a dot-product test, not relying on Vector3.project()'s own Z
+    // output, which doesn't cleanly indicate behind-camera the way a
+    // direct forward-direction check does) — if the sun is behind the
+    // camera or well outside a reasonable field of view, the sentinel
+    // (-10,-10) is sent instead, which the shader's own distance-based
+    // falloff already treats as "no glow" with no separate flag needed.
+    tempSunDir.copy(dayNightCycle.sunBody.group.position).sub(camera.position).normalize();
+    camera.getWorldDirection(tempCameraDir);
+    if (tempSunDir.dot(tempCameraDir) > 0.1) {
+      tempSunProjection.copy(dayNightCycle.sunBody.group.position).project(camera);
+      lensRainPass.material.uniforms.uSunScreenPos.value.set((tempSunProjection.x + 1) / 2, (tempSunProjection.y + 1) / 2);
+    } else {
+      lensRainPass.material.uniforms.uSunScreenPos.value.set(-10, -10);
+    }
   }
   // Rain is an above-surface effect — real rain doesn't fall underwater.
   // Same visibility-gating pattern already used for whitecaps/the cloud

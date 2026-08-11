@@ -340,12 +340,37 @@ const lensRainPass = new ShaderPass({
     // column at the droplet's own X already reads as "the path it has
     // rolled along," since the droplet itself is what's actually
     // animating down that column over time.
-    vec4 dropVoronoi(vec2 p, float slideMix) {
+    // Returns (distance to nearest droplet center [using an elongated
+    // metric for sliding droplets], offset-vector.x, offset-vector.y,
+    // wet-trail mask). The wet-trail mask is a SEPARATE signal from the
+    // droplet's own body -- a thin, full-column band at this specific
+    // droplet's own X position, present only for droplets whose own hash
+    // marks them as "streaky" (roughly a third of them, matching the
+    // reference photo's mix of plain droplets and ones with long visible
+    // trails). Deliberately NOT direction-dependent on the droplet's
+    // motion (which would need a sign convention on screen-space Y that
+    // can't be verified without a live browser) -- a fixed vertical
+    // column at the droplet's own X already reads as "the path it has
+    // rolled along," since the droplet itself is what's actually
+    // animating down that column over time.
+    //
+    // wrapFade (out param) is the fix for droplets visibly POPPING in and
+    // out of existence: each droplet's own cellPoint.y slides via
+    // fract(), which means once it crosses back around from 0 to 1 (or
+    // vice versa) it JUMPS instantly to the opposite side of its own cell
+    // -- a real, structural artifact of using fract() for looping motion,
+    // not a tuning issue. wrapFade fades a droplet to fully invisible in
+    // the brief window right before/after that wrap point, so the actual
+    // jump happens while nothing is visible there, then fades back in
+    // smoothly on the other side -- the standard, well-established fix
+    // for exactly this class of looping-animation seam.
+    vec4 dropVoronoi(vec2 p, float slideMix, out float wrapFade) {
       vec2 ip = floor(p);
       vec2 fp = fract(p);
       float minDist = 8.0;
       vec2 minOffset = vec2(0.0);
       float streakMask = 0.0;
+      float minCellY = 0.0;
       for (int y = -1; y <= 1; y++) {
         for (int x = -1; x <= 1; x++) {
           vec2 neighbor = vec2(float(x), float(y));
@@ -361,9 +386,11 @@ const lensRainPass = new ShaderPass({
             minDist = d;
             minOffset = offset;
             streakMask = isStreaky ? (1.0 - smoothstep(0.0, 0.022, abs(offset.x))) : 0.0;
+            minCellY = cellPoint.y;
           }
         }
       }
+      wrapFade = smoothstep(0.0, 0.12, minCellY) * smoothstep(0.0, 0.12, 1.0 - minCellY);
       return vec4(minDist, minOffset, streakMask);
     }
 
@@ -375,16 +402,17 @@ const lensRainPass = new ShaderPass({
 
       // Three overlapping scales (large/medium/tiny) for real density
       // matching a rain-soaked window, not a handful of sparse circles.
-      vec4 v1 = dropVoronoi(p * 7.0, slideMix);
+      float wrapFade1, wrapFade2, wrapFade3;
+      vec4 v1 = dropVoronoi(p * 7.0, slideMix, wrapFade1);
       float r1 = 0.17;
-      vec4 v2 = dropVoronoi(p * 13.0 + 37.0, slideMix);
+      vec4 v2 = dropVoronoi(p * 13.0 + 37.0, slideMix, wrapFade2);
       float r2 = 0.12;
-      vec4 v3 = dropVoronoi(p * 21.0 + 91.0, slideMix);
+      vec4 v3 = dropVoronoi(p * 21.0 + 91.0, slideMix, wrapFade3);
       float r3 = 0.075;
 
-      float in1 = 1.0 - smoothstep(r1 * 0.6, r1, v1.x);
-      float in2 = 1.0 - smoothstep(r2 * 0.6, r2, v2.x);
-      float in3 = 1.0 - smoothstep(r3 * 0.6, r3, v3.x);
+      float in1 = (1.0 - smoothstep(r1 * 0.6, r1, v1.x)) * wrapFade1;
+      float in2 = (1.0 - smoothstep(r2 * 0.6, r2, v2.x)) * wrapFade2;
+      float in3 = (1.0 - smoothstep(r3 * 0.6, r3, v3.x)) * wrapFade3;
       float coverage = clamp(0.25 + uRainIntensity * 1.3, 0.0, 1.0);
       float dropMask = max(max(in1, in2), in3) * coverage;
 
@@ -1946,6 +1974,12 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
         // it doesn't require rebuilding the terrain material/level.
         shader.uniforms.uCausticsEnabled = { value: 1.0 };
         shader.uniforms.uFoamEnabled = { value: 1.0 };
+        // Real cloud-occlusion-aware sun strength, per explicit "glows
+        // with sunlight like real ones do" — pushed later in the animate
+        // loop, after cloud occlusion is actually computed for this
+        // frame (see below), not bundled with the other terrain uniforms
+        // above which run earlier.
+        shader.uniforms.uSunGlow = { value: 1.0 };
         shader.vertexShader = shader.vertexShader
           .replace("#include <common>", `#include <common>
 varying vec3 vCausticWorldPos;
@@ -1994,6 +2028,7 @@ uniform float uDayAmount;
 uniform sampler2D uCausticMap;
 uniform float uCausticsEnabled;
 uniform float uFoamEnabled;
+uniform float uSunGlow;
 varying vec3 vCausticWorldPos;
 varying vec3 vCausticWorldNormal;
 varying float vWaveHeight;
@@ -2025,36 +2060,48 @@ vec2 causticVoronoiF1F2(vec2 p) {
   float underwaterMask = smoothstep(uWaterLevel, uWaterLevel - 1.0, vCausticWorldPos.y);
   float waveH = vWaveHeight;
   float waveNorm = clamp((waveH + 1.7) / 3.4, 0.0, 1.0); // 0 at trough, 1 at crest — matches the real 10-wave spectrum's total amplitude (1.71)
-  // Real-time caustics from a static texture, standard technique: sample
-  // the SAME source texture twice at different scale/scroll speed, with
-  // the second sample also rotated so it isn't just a parallel copy of
-  // the first — then take the two samples' overlap. Two independently
-  // drifting copies of the same blob pattern cross each other constantly,
-  // and MIN() of the two only lights up where BOTH happen to be bright at
-  // once — that intersection is what reads as a moving, interlocking
-  // light net rather than one pattern just sliding sideways. uTime AND
-  // waveH both drive the scroll offset (same pairing the old Voronoi
-  // version used), so the net's drift still visibly tracks the real
-  // ocean waves overhead, not an independent animation that only
-  // coincidentally looks related.
-  vec2 uv1 = vCausticWorldPos.xz * 0.15 + vec2(uTime * 0.045, uTime * 0.02) + waveH * 0.05;
+  // PRIMARY net — same technique as before (two drifting samples of the
+  // same texture, min() of their overlap), drift speed raised per
+  // explicit "animate the caustics" for more visible motion.
+  vec2 uv1 = vCausticWorldPos.xz * 0.15 + vec2(uTime * 0.065, uTime * 0.03) + waveH * 0.05;
   float rot = 0.9; // fixed angle offset for the second sample, radians — enough that its blob edges don't line up with the first sample's
-  vec2 uv2raw = vCausticWorldPos.xz * 0.15 * 1.35 - vec2(uTime * 0.03, uTime * 0.05) - waveH * 0.04;
+  vec2 uv2raw = vCausticWorldPos.xz * 0.15 * 1.35 - vec2(uTime * 0.045, uTime * 0.07) - waveH * 0.04;
   vec2 uv2 = vec2(uv2raw.x * cos(rot) - uv2raw.y * sin(rot), uv2raw.x * sin(rot) + uv2raw.y * cos(rot));
   float s1 = texture2D(uCausticMap, uv1).r;
   float s2 = texture2D(uCausticMap, uv2).r;
-  // The source texture is a soft mid-gray/white blob field, not already a
-  // thin bright-line net — remapping (min * 1.7 - 0.55) before clamping
-  // pushes only the brightest overlap of both samples above 0, so this
-  // still reads as scattered light flecks rather than the whole floor
-  // tinted evenly. Verified: min(s1,s2) peaks at 1.0 (both samples fully
-  // white) -> net peaks at exactly 1.0 * 1.7 - 0.55 = 1.15, clamped to 1.0.
-  float net = clamp(min(s1, s2) * 1.7 - 0.55, 0.0, 1.0);
+  float netPrimary = clamp(min(s1, s2) * 1.7 - 0.55, 0.0, 1.0);
+  // SECONDARY net — per explicit "a secondary net that looks different":
+  // the same source texture sampled at a MUCH larger scale (broad, slow-
+  // shifting blobs) with its own different rotation and drift direction/
+  // speed, not just a scaled-up copy of the primary net's own motion.
+  // Real underwater caustics genuinely show this — a fine fast net from
+  // small ripples layered over a coarser, slower pattern from the
+  // larger-scale lensing of bigger swells passing overhead.
+  vec2 uv3 = vCausticWorldPos.xz * 0.045 + vec2(-uTime * 0.018, uTime * 0.026) + waveH * 0.02;
+  float rot2 = -1.4;
+  vec2 uv4raw = vCausticWorldPos.xz * 0.045 * 1.6 - vec2(uTime * 0.012, -uTime * 0.02) - waveH * 0.015;
+  vec2 uv4 = vec2(uv4raw.x * cos(rot2) - uv4raw.y * sin(rot2), uv4raw.x * sin(rot2) + uv4raw.y * cos(rot2));
+  float s3 = texture2D(uCausticMap, uv3).r;
+  float s4 = texture2D(uCausticMap, uv4).r;
+  float netSecondary = clamp(min(s3, s4) * 1.6 - 0.5, 0.0, 1.0);
+  // Secondary layered in at reduced strength via max() — a background
+  // layer that shows through in the gaps of the primary net rather than
+  // competing equally with it or double-brightening where both overlap.
+  float net = max(netPrimary, netSecondary * 0.75);
   // Real caustic light concentrates more directly under a wave crest (a
   // brief converging lens) than in a trough.
   float crestFocus = smoothstep(0.5, 1.0, waveNorm);
-  float dayCausticBoost = smoothstep(0.05, 0.4, uDayAmount) * 0.7; // strictly zero at night — real caustics need direct sunlight through the surface
-  // Same verified bound as the previous Voronoi version:
+  // Per explicit "glows with sunlight like real ones do" — uSunGlow
+  // (cloud-occlusion-aware, computed fresh each frame in the animate
+  // loop from the same real angular check already dimming the visible
+  // sun sprite/DirectionalLight when clouds pass in front of it) now
+  // drives brightness alongside the existing day/night gate, replacing
+  // the old FIXED 0.7 constant — passing clouds visibly dim the caustic
+  // net in real time now, not just the coarse day/night cycle. Same
+  // verified safety ceiling as before: uSunGlow is itself bounded to
+  // [0,1], so this can never exceed the old constant's own max.
+  float dayCausticBoost = smoothstep(0.05, 0.4, uDayAmount) * uSunGlow * 0.7;
+  // Same verified bound as the previous version:
   // net(1) * underwaterMask(1) * upwardFacing(1) * (0.22+0.2) * dayCausticBoost(0.7)
   // = 0.7*0.42 = ~0.29 max added to diffuseColor — a real but secondary
   // highlight, not enough to blow the sand texture out to white.
@@ -4486,8 +4533,10 @@ function animate() {
   // real depth-buffer occlusion), applied as a further opacity
   // multiplier on top of whatever the day/night cycle (and the Snell's-
   // window submersion gating above) already computed this frame.
+  let sunOcclusionForCaustics = 1.0; // default: no clouds tracked this frame, treat as full unoccluded sun
   if (cloudsHandle) {
     const sunOcclusion = 1 - getCloudOcclusionFactor(cloudsHandle, camera.position, dayNightCycle.sunBody.group.position);
+    sunOcclusionForCaustics = sunOcclusion;
     dayNightCycle.sunBody.core.material.opacity *= sunOcclusion;
     dayNightCycle.sunBody.glow.material.opacity *= sunOcclusion;
     // Real sunlight dims when clouds pass in front of the sun, not just
@@ -4499,6 +4548,14 @@ function animate() {
     const moonOcclusion = 1 - getCloudOcclusionFactor(cloudsHandle, camera.position, dayNightCycle.moonBody.group.position);
     dayNightCycle.moonBody.core.material.opacity *= moonOcclusion;
     dayNightCycle.moonBody.glow.material.opacity *= moonOcclusion;
+  }
+  // Per explicit "[caustics] glow with sunlight like real ones do" — the
+  // same real cloud-occlusion value just computed above for the visible
+  // sun sprite/light now also reaches the underwater caustic shader,
+  // pushed here (not bundled with the other terrain uniforms earlier in
+  // the frame) since it genuinely isn't known until this point.
+  if (terrainMesh && terrainMesh.material.userData.shader && terrainMesh.material.userData.shader.uniforms.uSunGlow) {
+    terrainMesh.material.userData.shader.uniforms.uSunGlow.value = sunOcclusionForCaustics;
   }
   // Per explicit "the sun should not be this bright during a storm" —
   // the dimming above only happens when the sun's sprite position

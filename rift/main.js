@@ -378,7 +378,7 @@ const lensRainPass = new ShaderPass({
           float slideSpeed = 0.12 + cellPoint.x * 0.3;
           float streak = 1.0 + cellPoint.y * 3.5 * slideMix;
           bool isStreaky = cellPoint.x > 0.6;
-          cellPoint.y = fract(cellPoint.y - uTime * slideSpeed * slideMix);
+          cellPoint.y = fract(cellPoint.y + uTime * slideSpeed * slideMix); // was "- uTime * ..." — confirmed backwards (moving up instead of down), flipped
           vec2 offset = neighbor + cellPoint - fp;
           vec2 stretched = vec2(offset.x, offset.y / streak);
           float d = length(stretched);
@@ -465,7 +465,7 @@ const lensRainPass = new ShaderPass({
       // full lens sphere) plus darkening the glass slightly rather than
       // brightening it, since real wet streaks read as a darker, more
       // saturated version of what's behind them.
-      vec2 trailOffset = vec2(0.0, -0.02) * streakMask * coverage;
+      vec2 trailOffset = vec2(0.0, 0.02) * streakMask * coverage; // sign flipped to match the corrected slide direction above
 
       vec4 color = texture2D(tDiffuse, clamp(uv + refractOffset + trailOffset, 0.001, 0.999));
       color.rgb *= mix(1.0, 0.85, streakMask * coverage);
@@ -1996,6 +1996,12 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
         // frame (see below), not bundled with the other terrain uniforms
         // above which run earlier.
         shader.uniforms.uSunGlow = { value: 1.0 };
+        // Per explicit "light should light up at a certain place, not
+        // the whole net" — the sun-or-moon's own world XZ position
+        // (blended by day/night dominance, pushed each frame in the
+        // animate loop), used as a localized caustic focus center.
+        shader.uniforms.uFocusXZ = { value: new THREE.Vector2(0, 0) };
+        shader.uniforms.uFocusRadius = { value: 22.0 };
         shader.vertexShader = shader.vertexShader
           .replace("#include <common>", `#include <common>
 varying vec3 vCausticWorldPos;
@@ -2045,6 +2051,8 @@ uniform sampler2D uCausticMap;
 uniform float uCausticsEnabled;
 uniform float uFoamEnabled;
 uniform float uSunGlow;
+uniform vec2 uFocusXZ;
+uniform float uFocusRadius;
 varying vec3 vCausticWorldPos;
 varying vec3 vCausticWorldNormal;
 varying float vWaveHeight;
@@ -2076,27 +2084,44 @@ vec2 causticVoronoiF1F2(vec2 p) {
   float underwaterMask = smoothstep(uWaterLevel, uWaterLevel - 1.0, vCausticWorldPos.y);
   float waveH = vWaveHeight;
   float waveNorm = clamp((waveH + 1.7) / 3.4, 0.0, 1.0); // 0 at trough, 1 at crest — matches the real 10-wave spectrum's total amplitude (1.71)
-  // PRIMARY net — same technique as before (two drifting samples of the
-  // same texture, min() of their overlap), drift speed raised per
-  // explicit "animate the caustics" for more visible motion.
-  vec2 uv1 = vCausticWorldPos.xz * 0.15 + vec2(uTime * 0.065, uTime * 0.03) + waveH * 0.05;
+  // Per explicit "net should move according to the speed of the waves" —
+  // a real, mathematically-grounded proxy for the water surface's
+  // CURRENT vertical velocity, not an arbitrary multiplier: for simple
+  // harmonic motion, speed is highest at the zero-crossing (mid-height,
+  // waveNorm=0.5) and drops to zero right at the crest/trough extremes
+  // (the derivative of sin is cos, which peaks exactly where sin itself
+  // crosses zero). This drives the caustic net's own drift RATE below,
+  // not just its position, so it genuinely speeds up and slows down with
+  // the real wave motion overhead instead of scrolling at a fixed,
+  // disconnected pace. Floored at 0.4 (never fully stops) rather than
+  // ranging all the way to 0.
+  float waveSpeedFactor = 0.4 + (1.0 - abs(waveNorm - 0.5) * 2.0) * 0.9;
+  // PRIMARY net — two drifting samples of the same texture, min() of
+  // their overlap, drift rate scaled by waveSpeedFactor above.
+  vec2 uv1 = vCausticWorldPos.xz * 0.15 + vec2(uTime * 0.065, uTime * 0.03) * waveSpeedFactor + waveH * 0.05;
   float rot = 0.9; // fixed angle offset for the second sample, radians — enough that its blob edges don't line up with the first sample's
-  vec2 uv2raw = vCausticWorldPos.xz * 0.15 * 1.35 - vec2(uTime * 0.045, uTime * 0.07) - waveH * 0.04;
+  vec2 uv2raw = vCausticWorldPos.xz * 0.15 * 1.35 - vec2(uTime * 0.045, uTime * 0.07) * waveSpeedFactor - waveH * 0.04;
   vec2 uv2 = vec2(uv2raw.x * cos(rot) - uv2raw.y * sin(rot), uv2raw.x * sin(rot) + uv2raw.y * cos(rot));
+  // Per explicit "the lines themselves should be animated like waves" —
+  // a small sinusoidal UV wobble applied AFTER the base drift, distorting
+  // the sampled pattern's own SHAPE into a rippling, undulating form
+  // rather than a rigid pattern that only translates. Different
+  // frequency/phase between the two samples so the wobble doesn't read
+  // as one uniform ripple sweeping the whole floor.
+  uv1 += vec2(sin(uv1.y * 9.0 + uTime * 1.6) * 0.018, sin(uv1.x * 7.0 + uTime * 1.3) * 0.018);
+  uv2 += vec2(sin(uv2.y * 6.0 - uTime * 1.1) * 0.02, sin(uv2.x * 8.0 - uTime * 1.4) * 0.02);
   float s1 = texture2D(uCausticMap, uv1).r;
   float s2 = texture2D(uCausticMap, uv2).r;
   float netPrimary = clamp(min(s1, s2) * 1.7 - 0.55, 0.0, 1.0);
-  // SECONDARY net — per explicit "a secondary net that looks different":
-  // the same source texture sampled at a MUCH larger scale (broad, slow-
-  // shifting blobs) with its own different rotation and drift direction/
-  // speed, not just a scaled-up copy of the primary net's own motion.
-  // Real underwater caustics genuinely show this — a fine fast net from
-  // small ripples layered over a coarser, slower pattern from the
-  // larger-scale lensing of bigger swells passing overhead.
-  vec2 uv3 = vCausticWorldPos.xz * 0.045 + vec2(-uTime * 0.018, uTime * 0.026) + waveH * 0.02;
+  // SECONDARY net — much larger scale (broad, slow-shifting blobs), its
+  // own different rotation/drift direction, same wave-speed and wobble
+  // treatment as the primary net above.
+  vec2 uv3 = vCausticWorldPos.xz * 0.045 + vec2(-uTime * 0.018, uTime * 0.026) * waveSpeedFactor + waveH * 0.02;
   float rot2 = -1.4;
-  vec2 uv4raw = vCausticWorldPos.xz * 0.045 * 1.6 - vec2(uTime * 0.012, -uTime * 0.02) - waveH * 0.015;
+  vec2 uv4raw = vCausticWorldPos.xz * 0.045 * 1.6 - vec2(uTime * 0.012, -uTime * 0.02) * waveSpeedFactor - waveH * 0.015;
   vec2 uv4 = vec2(uv4raw.x * cos(rot2) - uv4raw.y * sin(rot2), uv4raw.x * sin(rot2) + uv4raw.y * cos(rot2));
+  uv3 += vec2(sin(uv3.y * 5.0 + uTime * 1.0) * 0.022, sin(uv3.x * 4.0 + uTime * 0.8) * 0.022);
+  uv4 += vec2(sin(uv4.y * 4.5 - uTime * 0.9) * 0.024, sin(uv4.x * 5.5 - uTime * 1.1) * 0.024);
   float s3 = texture2D(uCausticMap, uv3).r;
   float s4 = texture2D(uCausticMap, uv4).r;
   float netSecondary = clamp(min(s3, s4) * 1.6 - 0.5, 0.0, 1.0);
@@ -2107,6 +2132,19 @@ vec2 causticVoronoiF1F2(vec2 p) {
   // Real caustic light concentrates more directly under a wave crest (a
   // brief converging lens) than in a trough.
   float crestFocus = smoothstep(0.5, 1.0, waveNorm);
+  // Per explicit "light shining down from the sun or moon should make it
+  // light up at a certain place, not the whole net" — a real localized
+  // beam-focus zone rather than uniform brightness across the whole
+  // visible floor. uFocusXZ is the sun-or-moon's own world XZ position
+  // (blended by day/night dominance, see the animate loop), used
+  // directly as the focus center — a reasonable simplification of "light
+  // concentrates roughly below wherever the light source currently is,"
+  // without a full refraction-angle calculation. Floored at 0.15 (not
+  // 0) outside the focus zone — real caustics elsewhere on the floor are
+  // much dimmer, not literally invisible.
+  float distFromFocus = length(vCausticWorldPos.xz - uFocusXZ);
+  float focusZone = 1.0 - smoothstep(0.0, uFocusRadius, distFromFocus);
+  float focusMask = 0.15 + focusZone * 0.85;
   // Per explicit "glows with sunlight like real ones do" — uSunGlow
   // (cloud-occlusion-aware, computed fresh each frame in the animate
   // loop from the same real angular check already dimming the visible
@@ -2117,11 +2155,12 @@ vec2 causticVoronoiF1F2(vec2 p) {
   // verified safety ceiling as before: uSunGlow is itself bounded to
   // [0,1], so this can never exceed the old constant's own max.
   float dayCausticBoost = smoothstep(0.05, 0.4, uDayAmount) * uSunGlow * 0.7;
-  // Same verified bound as the previous version:
-  // net(1) * underwaterMask(1) * upwardFacing(1) * (0.22+0.2) * dayCausticBoost(0.7)
+  // Same verified bound as the previous version (focusMask's own max is
+  // 1.0, inside the beam, so this can't exceed the prior ceiling there):
+  // net(1) * underwaterMask(1) * upwardFacing(1) * (0.22+0.2) * dayCausticBoost(0.7) * focusMask(1)
   // = 0.7*0.42 = ~0.29 max added to diffuseColor — a real but secondary
   // highlight, not enough to blow the sand texture out to white.
-  float causticIntensity = net * underwaterMask * upwardFacing * (0.22 + crestFocus * 0.2) * dayCausticBoost * uCausticsEnabled;
+  float causticIntensity = net * underwaterMask * upwardFacing * (0.22 + crestFocus * 0.2) * dayCausticBoost * focusMask * uCausticsEnabled;
   diffuseColor.rgb += vec3(1.0, 0.92, 0.72) * causticIntensity;
 }
 {
@@ -4587,6 +4626,30 @@ function animate() {
   // the frame) since it genuinely isn't known until this point.
   if (terrainMesh && terrainMesh.material.userData.shader && terrainMesh.material.userData.shader.uniforms.uSunGlow) {
     terrainMesh.material.userData.shader.uniforms.uSunGlow.value = sunOcclusionForCaustics;
+  }
+  // Per explicit "light should light up at a certain place, not the
+  // whole net" — the sun/moon's own world position is scaled for the sky
+  // dome (ranges well past 100+ units), not a usable seafloor
+  // coordinate directly. Instead: the NORMALIZED horizontal direction
+  // toward whichever light source is dominant, offset a fixed distance
+  // from the PLAYER's own position — this keeps the focus zone
+  // genuinely near the player (where it can actually be seen) while
+  // still shifting position as the sun/moon's real angle changes through
+  // the day, blended by dayNight.dayAmount the same way brightness/color
+  // already blend between them elsewhere in this system.
+  if (terrainMesh && terrainMesh.material.userData.shader && terrainMesh.material.userData.shader.uniforms.uFocusXZ) {
+    const sunPos = dayNightCycle.sunBody.group.position;
+    const moonPos = dayNightCycle.moonBody.group.position;
+    const sunDirLen = Math.hypot(sunPos.x, sunPos.z) || 1;
+    const moonDirLen = Math.hypot(moonPos.x, moonPos.z) || 1;
+    const FOCUS_OFFSET = 15;
+    const sunFocusX = camera.position.x + (sunPos.x / sunDirLen) * FOCUS_OFFSET;
+    const sunFocusZ = camera.position.z + (sunPos.z / sunDirLen) * FOCUS_OFFSET;
+    const moonFocusX = camera.position.x + (moonPos.x / moonDirLen) * FOCUS_OFFSET;
+    const moonFocusZ = camera.position.z + (moonPos.z / moonDirLen) * FOCUS_OFFSET;
+    const focusX = THREE.MathUtils.lerp(moonFocusX, sunFocusX, dayNight.dayAmount);
+    const focusZ = THREE.MathUtils.lerp(moonFocusZ, sunFocusZ, dayNight.dayAmount);
+    terrainMesh.material.userData.shader.uniforms.uFocusXZ.value.set(focusX, focusZ);
   }
   // Per explicit "the sun should not be this bright during a storm" —
   // the dimming above only happens when the sun's sprite position

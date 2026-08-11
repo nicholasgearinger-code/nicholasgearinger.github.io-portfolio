@@ -497,15 +497,16 @@ function updateRipplePool(pool, dt) {
 }
 
 function createRain(scene, heaviness = 1, waterLevel, particleMultiplier = 1, sampleHeight = null) {
-  // Was 7000 (itself up from 2200 last round) — per explicit "as many
-  // particles as possible." particleMultiplier is genuinely wired in
-  // now (Low=0.2, Medium=1, High=2, see graphicsSettings.js) — it was
-  // NOT actually being applied before despite an old comment here
-  // claiming otherwise, a real gap that matters much more now that the
-  // base count is this much higher: Low tier stays protected at a
-  // reasonable ~2400*heaviness while High can genuinely go all-out at
-  // ~24000*heaviness.
-  const count = Math.round(12000 * heaviness * particleMultiplier);
+  // Was 7000, then 12000 — per explicit "still need much more rainfall,"
+  // pushed further again. particleMultiplier is genuinely wired in now
+  // (Low=0.2, Medium=1, High=2, see graphicsSettings.js): Low stays
+  // protected at ~3200*heaviness while High reaches ~32000*heaviness.
+  // Worth knowing though — the coverage bug fixed alongside this same
+  // round (rain never used to follow the player at all, see playerPos
+  // and the respawn-recentering logic below) is very likely the bigger
+  // lever here: no particle count fixes a rain cloud the player has
+  // simply wandered away from.
+  const count = Math.round(16000 * heaviness * particleMultiplier);
   const positions = new Float32Array(count * 3);
   // terminalSpeed is the physical cap each drop's fall speed can never
   // exceed — real raindrops do have a genuine terminal velocity (air
@@ -614,7 +615,14 @@ function createWeatherSystem(scene, biome, waterLevel, particleMultiplier = 1, s
   };
 }
 
-function updateWeatherSystem(handle, dt, erupting = false, dayAmount = 0) {
+/**
+ * @param {ReturnType<typeof createWeatherSystem>} handle
+ * @param {number} dt
+ * @param {boolean} [erupting]
+ * @param {number} [dayAmount]
+ * @param {{x:number,z:number}} [playerPos] real player/camera position — per "still need much more rainfall," rain particles previously only ever spawned in a fixed volume centered on world origin and never followed the player, so anywhere else on the island saw sparse or zero rain regardless of total particle count. See the respawn block below for how this is used.
+ */
+function updateWeatherSystem(handle, dt, erupting = false, dayAmount = 0, playerPos = null) {
   if (!handle) return { windX: 0, windZ: 0, windStrength: 0, rainIntensity: 0 };
   const { profile } = handle;
   handle.elapsed += dt;
@@ -720,15 +728,7 @@ function updateWeatherSystem(handle, dt, erupting = false, dayAmount = 0) {
         // cycles, since drops respawn at a fixed height rather than a
         // genuinely random point mid-fall.
         handle.rain.currentSpeed[i] = handle.rain.terminalSpeed[i] * (0.3 + Math.random() * 0.4);
-        // Resample this drop's own landing height for its next fall — it
-        // may have drifted with the wind since it last landed, so the
-        // ground beneath it now could genuinely be different (e.g. drifted
-        // from open water toward the beach).
-        if (handle.rain.landHeights && handle.rain.sampleHeight) {
-          const ground = handle.rain.sampleHeight(x, z);
-          handle.rain.landHeights[i] = ground !== null && ground !== undefined ? Math.max(ground, fallbackLandY) : fallbackLandY;
-        }
-        // Real per-drop landing point (before it resets to the top) —
+        // Real per-drop landing point (before it recenters/resets) —
         // spawn a ripple here ONLY if this drop actually landed AT water
         // level, not on elevated dry ground (a ripple on dry sand would
         // be wrong now that landY can be real terrain height above
@@ -736,6 +736,41 @@ function updateWeatherSystem(handle, dt, erupting = false, dayAmount = 0) {
         // slot is actually free.
         if (handle.rain.ripplePool && landY <= fallbackLandY + 0.01 && Math.random() < RIPPLE_SPAWN_CHANCE) {
           spawnRipple(handle.rain.ripplePool, x, landY + 0.02, z, handle.rainIntensity);
+        }
+        // Per explicit "still need much more rainfall" — rain particles
+        // previously only ever spawned once, at world creation, in a
+        // fixed volume centered on world ORIGIN, and individual drops
+        // only ever drifted slowly with wind afterward, never
+        // re-randomized — meaning the whole rain cloud stayed
+        // effectively fixed in place near (0,0) for the entire session
+        // regardless of where the player actually explored to. Anywhere
+        // else on the island saw sparse or zero rain no matter how high
+        // the total particle count was raised. Now, on this natural
+        // respawn cycle (not every frame — only when a drop has actually
+        // finished falling), a drop that's drifted more than 130 units
+        // from the player teleports to a fresh position centered on
+        // wherever the player actually is right now, so the whole cloud
+        // progressively follows the player around the island within a
+        // couple of respawn cycles (each drop's own full fall takes
+        // roughly 1-2 seconds) rather than staying anchored to the map's
+        // center forever.
+        let nextX = x, nextZ = z;
+        if (playerPos) {
+          const distFromPlayer = Math.hypot(x - playerPos.x, z - playerPos.z);
+          if (distFromPlayer > 130) {
+            nextX = playerPos.x + (Math.random() - 0.5) * 220;
+            nextZ = playerPos.z + (Math.random() - 0.5) * 220;
+            posAttr.setX(i, nextX);
+            posAttr.setZ(i, nextZ);
+          }
+        }
+        // Resample this drop's own landing height for its NEXT fall —
+        // uses nextX/nextZ (after any recentering above) since that's
+        // where it's actually about to fall toward, not where it just
+        // landed.
+        if (handle.rain.landHeights && handle.rain.sampleHeight) {
+          const ground = handle.rain.sampleHeight(nextX, nextZ);
+          handle.rain.landHeights[i] = ground !== null && ground !== undefined ? Math.max(ground, fallbackLandY) : fallbackLandY;
         }
       }
       posAttr.setY(i, y);

@@ -4160,7 +4160,7 @@ function animate() {
     dayNightCycle.moonBody.core.material.opacity *= lookingUpFactor;
     dayNightCycle.moonBody.glow.material.opacity *= lookingUpFactor;
   }
-  const wind = updateWeatherSystem(weatherHandle, dt, eruptionActive, dayNight.dayAmount);
+  const wind = updateWeatherSystem(weatherHandle, dt, eruptionActive, dayNight.dayAmount, camera.position);
   // Debug forced storm, per explicit request — ramps rainIntensity up
   // fast (well above weather.js's own real ~20-30s fade) while the toggle
   // is on, applied AFTER the normal update so it isn't immediately

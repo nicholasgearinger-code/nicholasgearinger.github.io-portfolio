@@ -67,7 +67,14 @@ const UNDERWATER_NEUTRAL_LIGHT = new THREE.Color(0xfff4e0);
 const UNDERWATER_NEUTRAL_TINT = new THREE.Color(0xd8f0f0);
 const tempUnderwaterTintColor = new THREE.Color(); // reused every frame in the underwater block below rather than allocated fresh each time
 const tempRainFogColor = new THREE.Color(); // reused every frame for the rain-fog effect below
-const RAIN_FOG_COLOR = new THREE.Color(0x8a97a8); // a pale, cool gray-blue — real heavy-rain haze, not the scene's own near-black default fog tuned for open night sky/distance falloff
+// Per "the fog is turning everything white" — was 0x8a97a8, a fairly
+// LIGHT pale gray-blue. A light fog color asserting itself over
+// mid/background distance washes everything toward white/pale rather
+// than reading as genuine storm gloom, which is exactly the reported
+// symptom. Real heavy-rain atmosphere is dark and moody, not bright —
+// this is now a deep, cool storm-gray, much closer in spirit to this
+// project's own existing STORM_SEA_COLOR (0x1a3226) than to a light haze.
+const RAIN_FOG_COLOR = new THREE.Color(0x2e3640);
 const UNDERWATER_STYLE = {
   default: {
     fogColor: 0x0a2838, fogDensity: 0.14, sunColor: 0x1a4560, sunMult: 0.08,
@@ -4187,14 +4194,15 @@ function animate() {
   // on its own whenever it actually runs.
   if (!isFullySubmerged) {
     const BASE_FOG_DENSITY = 0.0032;
-    const RAIN_FOG_BOOST = 0.045;
+    const RAIN_FOG_BOOST = 0.028; // was 0.045 — pulled back alongside the color fix, erring conservative given direct negative feedback rather than guessing similarly strong values again
     scene.fog.density = BASE_FOG_DENSITY + wind.rainIntensity * RAIN_FOG_BOOST;
-    // A believable heavy-rain haze reads as a pale, cool gray-blue, not
-    // this scene's own near-black default fog color (tuned for open
-    // night sky/distance falloff on a clear day) — lerping toward
-    // RAIN_FOG_COLOR as intensity rises is what makes it look like
-    // genuine atmospheric mist rather than just "the world went dark."
-    tempRainFogColor.setHex(0x0a0e14).lerp(RAIN_FOG_COLOR, wind.rainIntensity * 0.7);
+    // A believable heavy-rain haze reads as dark and moody, not the
+    // scene's own near-black default fog color (tuned for open night
+    // sky/distance falloff on a clear day) OR a bright pale haze (see
+    // RAIN_FOG_COLOR's own comment above for why that direction was
+    // wrong) — lerping toward this deep storm-gray as intensity rises is
+    // what makes it look like genuine atmospheric gloom.
+    tempRainFogColor.setHex(0x0a0e14).lerp(RAIN_FOG_COLOR, wind.rainIntensity * 0.5); // was 0.7 — even at full storm, blends WITH the scene's own natural fog tone rather than fully replacing it
     scene.fog.color.copy(tempRainFogColor);
   }
   // Rain is an above-surface effect — real rain doesn't fall underwater.

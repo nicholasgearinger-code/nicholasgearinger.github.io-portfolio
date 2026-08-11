@@ -3958,7 +3958,7 @@ function animate() {
   // dedicated toggle.
   if (waveSprayHandle && currentLevelIdx >= 0 && LEVELS[currentLevelIdx].biome === "crystal") {
     if (getGraphicsSettings().oceanEffectsEnabled !== false) {
-      updateWaveSprayParticles(waveSprayHandle, dt, elapsedTime, camera.position, (x, z) => terrainHeightAt(LEVELS[currentLevelIdx], x, z, WORLD_SEED), LIQUID_LEVEL.crystal, 40);
+      updateWaveSprayParticles(waveSprayHandle, dt, elapsedTime, camera.position, (x, z) => terrainHeightAt(LEVELS[currentLevelIdx], x, z, WORLD_SEED), LIQUID_LEVEL.crystal, 250);
     } else {
       updateWaveSprayParticles(waveSprayHandle, dt, elapsedTime, camera.position, (x, z) => terrainHeightAt(LEVELS[currentLevelIdx], x, z, WORLD_SEED), LIQUID_LEVEL.crystal, 0); // still ages/fades out any already-alive particles, just spawns none — avoids a hard pop when the setting changes mid-scene
     }

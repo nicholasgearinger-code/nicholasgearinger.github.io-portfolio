@@ -1950,7 +1950,7 @@ function disposeLiquidPlane(scene, handle) {
 // the particle budget is spent where it's actually visible.
 // -----------------------------------------------------------------------------
 
-const MAX_SPRAY_PARTICLES = 180;
+const MAX_SPRAY_PARTICLES = 420; // was 180 — per explicit "much more particles and smaller"
 
 function createSpraySpriteTexture() {
   const size = 64;
@@ -2030,7 +2030,7 @@ function createWaveSprayParticles(scene, maxParticles = MAX_SPRAY_PARTICLES) {
  * @param {number} waterLevel
  * @param {number} [spawnRate] particles/second budget, tier-scaled by the caller
  */
-function updateWaveSprayParticles(handle, dt, elapsed, playerPos, sampleHeight, waterLevel, spawnRate = 40) {
+function updateWaveSprayParticles(handle, dt, elapsed, playerPos, sampleHeight, waterLevel, spawnRate = 250) {
   const { positions, velocities, life, maxLife, sizes, opacities, maxParticles } = handle;
   const GRAVITY = 2.6;
   for (let i = 0; i < maxParticles; i++) {
@@ -2053,7 +2053,7 @@ function updateWaveSprayParticles(handle, dt, elapsed, playerPos, sampleHeight, 
     }
     const lifeT = life[i] / maxLife[i];
     opacities[i] = Math.min(1, lifeT * 3.2); // quick fade over roughly the last third of life, full opacity before that
-    sizes[i] = 0.22 + (1 - lifeT) * 0.1; // droplets swell very slightly as they age/disperse, rather than staying a fixed pinprick size the whole time
+    sizes[i] = 0.09 + (1 - lifeT) * 0.05; // droplets swell very slightly as they age/disperse, rather than staying a fixed pinprick size the whole time
   }
   // Spawn new particles near the player, only at candidate points that are
   // actually within the same shoreline reach window the shader-side foam/
@@ -2103,7 +2103,7 @@ function updateWaveSprayParticles(handle, dt, elapsed, playerPos, sampleHeight, 
     maxLife[slot] = 0.45 + Math.random() * 0.35;
     life[slot] = maxLife[slot];
     opacities[slot] = 1;
-    sizes[slot] = 0.22;
+    sizes[slot] = 0.09;
     spawned++;
   }
   handle.geo.attributes.position.needsUpdate = true;

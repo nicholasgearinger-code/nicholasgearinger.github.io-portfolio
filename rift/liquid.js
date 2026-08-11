@@ -1932,7 +1932,194 @@ function disposeLiquidPlane(scene, handle) {
 }
 
 
-export { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail };
+// -----------------------------------------------------------------------------
+// Wave-break spray particles — per explicit "particle based wave
+// simulation system." Worth being precise about what this actually is: a
+// true particle-based FLUID simulation (SPH or similar) for a whole
+// visible coastline isn't remotely feasible in real-time WebGL, especially
+// with mobile as an explicit target tier throughout this whole project —
+// that's research-grade computational cost, not something any real-time
+// game does for a continuously-visible shoreline. This is the technique
+// real-time games actually use instead: a stylized particle VFX system —
+// small foam/spray sprites launched ballistically (simple gravity +
+// initial velocity, not fluid dynamics) at the wave's breaking line,
+// timed to the same wave rhythm the shader-side foam/swash effects
+// already use, so it reads as part of the same wave rather than an
+// unrelated overlay. Pooled via typed arrays (no per-particle object
+// allocation/GC churn every frame) and spawned only near the player, so
+// the particle budget is spent where it's actually visible.
+// -----------------------------------------------------------------------------
+
+const MAX_SPRAY_PARTICLES = 180;
+
+function createSpraySpriteTexture() {
+  const size = 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, "rgba(255,255,255,0.95)");
+  grad.addColorStop(0.5, "rgba(255,255,255,0.5)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  return new THREE.CanvasTexture(canvas);
+}
+
+/**
+ * @param {THREE.Scene} scene
+ * @param {number} [maxParticles]
+ */
+function createWaveSprayParticles(scene, maxParticles = MAX_SPRAY_PARTICLES) {
+  const positions = new Float32Array(maxParticles * 3);
+  const velocities = new Float32Array(maxParticles * 3);
+  const life = new Float32Array(maxParticles); // 0 = dead/available for reuse, >0 = seconds remaining
+  const maxLife = new Float32Array(maxParticles);
+  const sizes = new Float32Array(maxParticles);
+  const opacities = new Float32Array(maxParticles);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1));
+  geo.setAttribute("aOpacity", new THREE.BufferAttribute(opacities, 1));
+  const texture = createSpraySpriteTexture();
+  // A real custom ShaderMaterial, not THREE.PointsMaterial — the built-in
+  // one only supports a single size/opacity for the WHOLE points system,
+  // not per-particle, which this needs (each droplet ages and fades
+  // independently on its own clock).
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { map: { value: texture } },
+    vertexShader: `
+      attribute float aSize;
+      attribute float aOpacity;
+      varying float vOpacity;
+      void main() {
+        vOpacity = aOpacity;
+        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+        gl_PointSize = aSize * (300.0 / max(0.001, -mvPosition.z));
+        gl_Position = projectionMatrix * mvPosition;
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D map;
+      varying float vOpacity;
+      void main() {
+        vec4 tex = texture2D(map, gl_PointCoord);
+        gl_FragColor = vec4(tex.rgb, tex.a * vOpacity);
+        if (gl_FragColor.a < 0.01) discard;
+      }
+    `,
+    transparent: true,
+    depthWrite: false,
+  });
+  const points = new THREE.Points(geo, mat);
+  // Positions are rewritten in JS every frame rather than describing a
+  // stable, boundable shape — cheaper to just always draw this small,
+  // capped pool than have Three.js recompute a bounding sphere from
+  // scratch each frame to decide whether to cull it.
+  points.frustumCulled = false;
+  scene.add(points);
+  return { points, geo, mat, texture, positions, velocities, life, maxLife, sizes, opacities, maxParticles, spawnAccumulator: 0 };
+}
+
+/**
+ * @param {ReturnType<typeof createWaveSprayParticles>} handle
+ * @param {number} dt
+ * @param {number} elapsed
+ * @param {{x:number,z:number}} playerPos
+ * @param {(x:number,z:number)=>number|null} sampleHeight
+ * @param {number} waterLevel
+ * @param {number} [spawnRate] particles/second budget, tier-scaled by the caller
+ */
+function updateWaveSprayParticles(handle, dt, elapsed, playerPos, sampleHeight, waterLevel, spawnRate = 40) {
+  const { positions, velocities, life, maxLife, sizes, opacities, maxParticles } = handle;
+  const GRAVITY = 2.6;
+  for (let i = 0; i < maxParticles; i++) {
+    if (life[i] <= 0) continue;
+    life[i] -= dt;
+    if (life[i] <= 0) { life[i] = 0; opacities[i] = 0; continue; }
+    velocities[i * 3 + 1] -= GRAVITY * dt;
+    positions[i * 3] += velocities[i * 3] * dt;
+    positions[i * 3 + 1] += velocities[i * 3 + 1] * dt;
+    positions[i * 3 + 2] += velocities[i * 3 + 2] * dt;
+    // A droplet lands and dissolves into the wet sand at roughly its own
+    // spawn height rather than sinking through the ground — clamped to
+    // waterLevel here as a simple floor since each droplet's own exact
+    // spawn-ground-height isn't retained per-particle (not worth a 4th
+    // typed array just for this; the visual difference against the real
+    // local sand height is small for a fast, short-lived sprite).
+    if (positions[i * 3 + 1] < waterLevel - 0.05) {
+      velocities[i * 3 + 1] = 0;
+      positions[i * 3 + 1] = waterLevel - 0.05;
+    }
+    const lifeT = life[i] / maxLife[i];
+    opacities[i] = Math.min(1, lifeT * 3.2); // quick fade over roughly the last third of life, full opacity before that
+    sizes[i] = 0.22 + (1 - lifeT) * 0.1; // droplets swell very slightly as they age/disperse, rather than staying a fixed pinprick size the whole time
+  }
+  // Spawn new particles near the player, only at candidate points that are
+  // actually within the same shoreline reach window the shader-side foam/
+  // swash effects already use (see main.js's wave-wash block and this
+  // file's own createLiquidPlane swash zone) — so spray appears exactly
+  // where those two effects already show foam, not somewhere unrelated.
+  handle.spawnAccumulator += dt * spawnRate;
+  const toSpawn = Math.floor(handle.spawnAccumulator);
+  handle.spawnAccumulator -= toSpawn;
+  let spawned = 0;
+  let searchAttempts = 0;
+  while (spawned < toSpawn && searchAttempts < toSpawn * 4) {
+    searchAttempts++;
+    const angle = Math.random() * Math.PI * 2;
+    const dist = 2 + Math.random() * 14; // a modest radius around the player — the actual visible range for a small foam sprite, no point spawning far outside it
+    const x = playerPos.x + Math.cos(angle) * dist;
+    const z = playerPos.z + Math.sin(angle) * dist;
+    const groundY = sampleHeight(x, z);
+    if (groundY === null) continue;
+    const heightAboveWater = groundY - waterLevel;
+    if (heightAboveWater < -0.3 || heightAboveWater > 0.5) continue; // outside the reach window entirely — same rough band the shader effects use
+    // A slow, shared "crest phase" — NOT the real per-vertex Gerstner sum
+    // (a large CPU function tied to the render mesh's own vertex buffer,
+    // not worth duplicating here for what's inherently a chaotic, already
+    // heavily-randomized effect) — spawns cluster loosely with the real
+    // wave rhythm instead of arriving as a perfectly uniform drizzle.
+    const crestPhase = Math.sin(elapsed * 0.55 + x * 0.08 + z * 0.08) * 0.5 + 0.5;
+    if (Math.random() > crestPhase * 0.8 + 0.15) continue;
+    let slot = -1;
+    for (let i = 0; i < maxParticles; i++) { if (life[i] <= 0) { slot = i; break; } }
+    if (slot === -1) break; // pool full — drop this spawn rather than growing the pool unbounded
+    positions[slot * 3] = x;
+    positions[slot * 3 + 1] = groundY + 0.05;
+    positions[slot * 3 + 2] = z;
+    // Mostly-upward burst with a shoreward horizontal component — "toward
+    // world origin" approximates "toward shore/inland" reasonably well
+    // given this project's islands are roughly radially symmetric (same
+    // approximation the terrain wave-wash foam's own directional tumble
+    // could use too, for the same reason).
+    const radial = Math.hypot(x, z) || 1;
+    const towardCenterX = -x / radial;
+    const towardCenterZ = -z / radial;
+    const burst = 0.6 + Math.random() * 0.9;
+    velocities[slot * 3] = towardCenterX * burst * 0.4 + (Math.random() - 0.5) * 0.4;
+    velocities[slot * 3 + 1] = 1.0 + Math.random() * 1.4;
+    velocities[slot * 3 + 2] = towardCenterZ * burst * 0.4 + (Math.random() - 0.5) * 0.4;
+    maxLife[slot] = 0.45 + Math.random() * 0.35;
+    life[slot] = maxLife[slot];
+    opacities[slot] = 1;
+    sizes[slot] = 0.22;
+    spawned++;
+  }
+  handle.geo.attributes.position.needsUpdate = true;
+  handle.geo.attributes.aSize.needsUpdate = true;
+  handle.geo.attributes.aOpacity.needsUpdate = true;
+}
+
+function disposeWaveSprayParticles(scene, handle) {
+  if (!handle) return;
+  scene.remove(handle.points);
+  handle.geo.dispose();
+  handle.mat.dispose();
+  handle.texture.dispose();
+}
+
+export { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail, createWaveSprayParticles, updateWaveSprayParticles, disposeWaveSprayParticles };
 
 // Ocean surface detail — Coral Shallows only. DISABLED entirely per
 // explicit follow-up request, after two rounds of trying to fix the

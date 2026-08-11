@@ -267,6 +267,114 @@ const smaaPass = new SMAAPass(viewport.clientWidth * renderer.getPixelRatio(), v
 composer.addPass(smaaPass);
 const fxaaPass = new ShaderPass(FXAAShader);
 composer.addPass(fxaaPass);
+// Lens raindrops — per explicit "camera lens rain drops" request. A
+// genuinely different effect from the falling rain particles elsewhere
+// in this project (those are real 3D geometry in the world; this is a
+// 2D screen-space post-process simulating water clinging to/sliding down
+// the camera's own lens), which is why it lives here in the composer
+// chain rather than in weather.js. Uses the SAME proven Voronoi-cell
+// technique already used elsewhere in this project (foamVoronoiF1F2/
+// causticVoronoiF1F2) for organic, non-tiling droplet shapes without
+// needing an external texture asset — two overlapping scales (a few
+// larger/slower drops, many smaller/faster ones) so it doesn't read as
+// an obviously tiled grid. Each droplet refracts the scene behind it
+// (samples tDiffuse at an offset UV based on distance from the drop's
+// own center, approximating a real droplet's convex-lens bulge) and gets
+// a soft bright rim at its edge, the way real droplets catch light.
+// uRainIntensity drives both how many drops appear and how fast they
+// slide, so this fades in/out with actual weather rather than always
+// being present. Uses the well-established default full-screen-quad
+// vertex shader boilerplate (identical in spirit to what FXAAShader/
+// every other ShaderPass here already relies on) — this is a NEW,
+// standalone shader program, not a patch into an existing material's
+// internals the way the (once-reverted, see the sky-seam saga earlier
+// this project) onBeforeCompile shaders are, which is a meaningfully
+// lower-risk way to add a new effect.
+const lensRainPass = new ShaderPass({
+  uniforms: {
+    tDiffuse: { value: null },
+    uTime: { value: 0 },
+    uRainIntensity: { value: 0 },
+    uResolution: { value: new THREE.Vector2(viewport.clientWidth, viewport.clientHeight) },
+  },
+  vertexShader: `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    uniform sampler2D tDiffuse;
+    uniform float uTime;
+    uniform float uRainIntensity;
+    uniform vec2 uResolution;
+    varying vec2 vUv;
+
+    vec2 dropHash(vec2 p) {
+      float n = sin(dot(p, vec2(41.0, 289.0)));
+      return fract(vec2(262144.0, 32768.0) * n);
+    }
+
+    // Returns (distance to nearest droplet center, offset-vector.x, offset-vector.y)
+    // -- the offset vector (from the droplet's own center to this pixel,
+    // in the same space as p) is what drives the refraction direction
+    // below.
+    vec3 dropVoronoi(vec2 p, float slideMix) {
+      vec2 ip = floor(p);
+      vec2 fp = fract(p);
+      float minDist = 8.0;
+      vec2 minOffset = vec2(0.0);
+      for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+          vec2 neighbor = vec2(float(x), float(y));
+          vec2 cellPoint = dropHash(ip + neighbor);
+          // Each droplet slides down at its own random speed (derived
+          // from its own hash, not shared globally) — offset the cell
+          // point's Y over time, wrapped within the cell via fract, so
+          // it reads as an individual droplet trickling down the lens
+          // rather than the whole grid scrolling uniformly together.
+          float slideSpeed = 0.12 + cellPoint.x * 0.3;
+          cellPoint.y = fract(cellPoint.y - uTime * slideSpeed * slideMix);
+          vec2 offset = neighbor + cellPoint - fp;
+          float d = length(offset);
+          if (d < minDist) { minDist = d; minOffset = offset; }
+        }
+      }
+      return vec3(minDist, minOffset);
+    }
+
+    void main() {
+      vec2 uv = vUv;
+      float aspect = uResolution.x / max(1.0, uResolution.y);
+      vec2 p = uv * vec2(aspect, 1.0);
+      float slideMix = 0.25 + uRainIntensity * 0.6;
+
+      vec3 v1 = dropVoronoi(p * 5.5, slideMix);
+      float r1 = 0.26;
+      vec3 v2 = dropVoronoi(p * 10.0 + 37.0, slideMix);
+      float r2 = 0.2;
+
+      float in1 = 1.0 - smoothstep(r1 * 0.65, r1, v1.x);
+      float in2 = 1.0 - smoothstep(r2 * 0.65, r2, v2.x);
+      float coverage = clamp(uRainIntensity * 1.5, 0.0, 1.0);
+      float dropMask = max(in1, in2) * coverage;
+
+      vec2 refractDir = in1 >= in2 ? v1.yz : v2.yz;
+      vec2 refractOffset = -refractDir * 0.028 * dropMask;
+      vec4 color = texture2D(tDiffuse, clamp(uv + refractOffset, 0.001, 0.999));
+
+      // A soft bright rim right at each droplet's own edge — real
+      // droplets catch ambient light there.
+      float rim1 = smoothstep(r1 * 0.55, r1 * 0.7, v1.x) * (1.0 - smoothstep(r1 * 0.7, r1, v1.x));
+      float rim2 = smoothstep(r2 * 0.55, r2 * 0.7, v2.x) * (1.0 - smoothstep(r2 * 0.7, r2, v2.x));
+      color.rgb += vec3(max(rim1, rim2) * 0.12 * coverage);
+
+      gl_FragColor = color;
+    }
+  `,
+});
+composer.addPass(lensRainPass);
 composer.addPass(new OutputPass());
 
 // Bloom presets — 'off' truly disables the pass (skips its extra
@@ -544,6 +652,7 @@ function resizeToViewport() {
     // doesn't auto-resize this from composer.setSize, so it's set by hand
     // wherever the render resolution changes.
     fxaaPass.material.uniforms["resolution"].value.set(1 / targetW, 1 / targetH);
+    lensRainPass.material.uniforms.uResolution.value.set(targetW, targetH);
   } else {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, getGraphicsSettings().pixelRatioCap));
     renderer.setSize(w, h);
@@ -552,6 +661,7 @@ function resizeToViewport() {
     const pixelRatio = renderer.getPixelRatio();
     underwaterRenderTarget.setSize(w * pixelRatio, h * pixelRatio);
     fxaaPass.material.uniforms["resolution"].value.set(1 / (w * pixelRatio), 1 / (h * pixelRatio));
+    lensRainPass.material.uniforms.uResolution.value.set(w * pixelRatio, h * pixelRatio);
   }
 }
 new ResizeObserver(resizeToViewport).observe(viewport);
@@ -4204,6 +4314,20 @@ function animate() {
     // what makes it look like genuine atmospheric gloom.
     tempRainFogColor.setHex(0x0a0e14).lerp(RAIN_FOG_COLOR, wind.rainIntensity * 0.5); // was 0.7 — even at full storm, blends WITH the scene's own natural fog tone rather than fully replacing it
     scene.fog.color.copy(tempRainFogColor);
+  }
+  // Lens raindrops (the composer pass added above, near FXAA/OutputPass)
+  // — enabled entirely OFF (skipping its real per-pixel cost, not just
+  // zeroed) whenever there's no rain to speak of or the current graphics
+  // tier says not to bother, same oceanEffectsEnabled setting already
+  // gating the terrain's own caustic/foam extras — this is exactly that
+  // category of "extra flair," not core rendering. Also off underwater
+  // and while looking through the fullscreen/graphics-menu UI doesn't
+  // matter here (screen-space, unaffected by camera state beyond
+  // rain/submersion).
+  lensRainPass.enabled = !isFullySubmerged && wind.rainIntensity > 0.02 && getGraphicsSettings().oceanEffectsEnabled !== false;
+  if (lensRainPass.enabled) {
+    lensRainPass.material.uniforms.uTime.value = elapsedTime;
+    lensRainPass.material.uniforms.uRainIntensity.value = wind.rainIntensity;
   }
   // Rain is an above-surface effect — real rain doesn't fall underwater.
   // Same visibility-gating pattern already used for whitecaps/the cloud

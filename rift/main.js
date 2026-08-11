@@ -413,7 +413,17 @@ const lensRainPass = new ShaderPass({
       float in1 = (1.0 - smoothstep(r1 * 0.6, r1, v1.x)) * wrapFade1;
       float in2 = (1.0 - smoothstep(r2 * 0.6, r2, v2.x)) * wrapFade2;
       float in3 = (1.0 - smoothstep(r3 * 0.6, r3, v3.x)) * wrapFade3;
-      float coverage = clamp(0.25 + uRainIntensity * 1.3, 0.0, 1.0);
+      // Per explicit "should start with a few drops before it increases
+      // to more and more, then slowly fade out" — the 0.25 floor added
+      // last round (to keep light rain from showing nothing) was
+      // actually working AGAINST this: it made coverage jump straight to
+      // a quarter-full field the instant rain started at all, regardless
+      // of how gradually the underlying rainIntensity itself ramps
+      // (weather.js already fades this over ~20-30s). A near-zero floor
+      // here is what actually lets that existing gradual ramp show
+      // through visually — starting sparse, building up, and fading back
+      // down the same way, instead of popping to a baseline density.
+      float coverage = clamp(0.03 + uRainIntensity * 1.35, 0.0, 1.0);
       float dropMask = max(max(in1, in2), in3) * coverage;
 
       // Pick whichever layer's droplet actually covers this pixel (its
@@ -460,20 +470,24 @@ const lensRainPass = new ShaderPass({
       vec4 color = texture2D(tDiffuse, clamp(uv + refractOffset + trailOffset, 0.001, 0.999));
       color.rgb *= mix(1.0, 0.85, streakMask * coverage);
 
-      // Per explicit "only glow when reflecting sunlight" — the old rim
-      // highlight was a constant brightening on every droplet's edge
-      // regardless of lighting, which isn't how a real droplet works: it
-      // only throws a bright glint back at the camera when it's actually
-      // positioned to catch and reflect the light source. uSunScreenPos
-      // is the real sun's current position projected onto the screen
-      // (see the animate loop) — droplets only glint when they're
-      // actually near that direction, fading smoothly with distance from
-      // it, and never at all when the sun isn't visible (off-screen /
-      // below the horizon), where uSunScreenPos sits far outside [0,1]
-      // and this naturally stays at 0.
+      // Per explicit "shouldn't light up the whole drop like a ring,
+      // just reflect a spot like glass" — the old highlight brightened
+      // the ENTIRE rim uniformly once a droplet was near the sun's
+      // screen direction; real glass/water only throws back a small
+      // glint at whichever single point on its curved surface happens to
+      // be angled correctly toward the light, not the whole edge at
+      // once. sunDir is the direction from THIS pixel toward the sun
+      // (converted into the same aspect-corrected space dir already
+      // lives in, for a consistent angle comparison) — dot(dir, sunDir)
+      // is near 1 only for the small arc of the rim that's actually
+      // facing the sun, and a high power exponent sharpens that into a
+      // tight spot rather than a soft half-moon.
+      vec2 sunDir = normalize((uSunScreenPos - uv) * vec2(aspect, 1.0) + 0.0001);
+      float facingSun = max(0.0, dot(dir, sunDir));
+      float highlightSpot = pow(facingSun, 10.0);
       float distToSun = length(uv - uSunScreenPos);
       float sunProximity = 1.0 - smoothstep(0.0, 0.55, distToSun);
-      color.rgb += vec3(wonRim * sunProximity * 0.9 * coverage);
+      color.rgb += vec3(wonRim * sunProximity * highlightSpot * 2.2 * coverage);
 
       gl_FragColor = color;
     }
@@ -1243,6 +1257,8 @@ let debugTimeScale = 1;
 let debugForceStorm = false;
 let cloudsHandle = null;
 let submergedState = false; // persists across frames — see the hysteresis check below for why a fresh threshold comparison every frame isn't enough
+let wasFullySubmergedLastFrame = false; // detects the exact moment of surfacing, for the post-swim wet-lens effect below
+let postSwimWetness = 0; // 0-1, set to 1 the instant the player surfaces, decays over ~60s — drives the SAME lens-rain shader as real rain, just from a different trigger
 let cloudLayerHandle = null;
 let horizonHandle = null;
 let wildlifeHandle = null;
@@ -4293,6 +4309,20 @@ function animate() {
     submergedState = false;
   }
   const isFullySubmerged = submergedState; // was 0.6 — still narrower than the ocean's own ~0.85-unit wave amplitude, so waves washing over the camera near the surface could still cross both edges of the dead zone repeatedly, flipping the underwater post-process (fog/distortion/render-target pass) on and off every couple frames. 1.1 comfortably exceeds the max wave amplitude, so only an actual sustained surface crossing (not wave bob) flips the state now.
+  // Per explicit "when we get out of the ocean it should also look like
+  // this for a minute until it fades away" — the same lens-rain shader,
+  // just triggered by surfacing instead of real weather. Detects the
+  // EXACT frame the player crosses from submerged to not (not a
+  // continuous check, which would just mean "wet the whole time
+  // underwater" rather than a real fading-away effect after getting out)
+  // and starts a fresh full-wetness decay right then, even if a previous
+  // decay was already partway through (surfacing again mid-fade tops it
+  // back up rather than blending oddly with whatever was left).
+  if (wasFullySubmergedLastFrame && !isFullySubmerged) {
+    postSwimWetness = 1.0;
+  }
+  wasFullySubmergedLastFrame = isFullySubmerged;
+  postSwimWetness = Math.max(0, postSwimWetness - dt / 60); // ~60s to fully fade, per explicit "for a minute"
   // Per explicit "remove underwater lighting and fog" — same toggle
   // pattern as UNDERWATER_EFFECTS_ENABLED below (single flag, not a
   // deletion, for a clean revert). This one specifically gates the
@@ -4441,17 +4471,18 @@ function animate() {
   }
   // Lens raindrops (the composer pass added above, near FXAA/OutputPass)
   // — enabled entirely OFF (skipping its real per-pixel cost, not just
-  // zeroed) whenever there's no rain to speak of or the current graphics
-  // tier says not to bother, same oceanEffectsEnabled setting already
-  // gating the terrain's own caustic/foam extras — this is exactly that
-  // category of "extra flair," not core rendering. Also off underwater
-  // and while looking through the fullscreen/graphics-menu UI doesn't
-  // matter here (screen-space, unaffected by camera state beyond
-  // rain/submersion).
-  lensRainPass.enabled = !isFullySubmerged && wind.rainIntensity > 0.02 && getGraphicsSettings().oceanEffectsEnabled !== false;
+  // zeroed) whenever there's no rain AND no lingering post-swim wetness
+  // to speak of, or the current graphics tier says not to bother, same
+  // oceanEffectsEnabled setting already gating the terrain's own
+  // caustic/foam extras — this is exactly that category of "extra
+  // flair," not core rendering. Also off underwater and while looking
+  // through the fullscreen/graphics-menu UI doesn't matter here (screen-
+  // space, unaffected by camera state beyond rain/submersion).
+  const effectiveLensIntensity = Math.max(wind.rainIntensity, postSwimWetness);
+  lensRainPass.enabled = !isFullySubmerged && effectiveLensIntensity > 0.02 && getGraphicsSettings().oceanEffectsEnabled !== false;
   if (lensRainPass.enabled) {
     lensRainPass.material.uniforms.uTime.value = elapsedTime;
-    lensRainPass.material.uniforms.uRainIntensity.value = wind.rainIntensity;
+    lensRainPass.material.uniforms.uRainIntensity.value = effectiveLensIntensity;
     // Per explicit "only glow when reflecting sunlight" — the real sun's
     // world position projected onto the screen, so the shader's rim
     // highlight can be gated by actual proximity to it instead of always

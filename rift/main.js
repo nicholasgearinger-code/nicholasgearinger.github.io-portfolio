@@ -2790,7 +2790,7 @@ vec2 causticVoronoiF1F2(vec2 p) {
   grassHandle = createGrass(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), TERRAIN_SIZE * 0.46);
   flowersHandle = createFlowers(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), TERRAIN_SIZE * 0.46);
   footstepGlowHandle = level.biome === "verdant" ? createFootstepGlowSystem(scene, 40) : null;
-  weatherHandle = createWeatherSystem(scene, level.biome, LIQUID_LEVEL[level.biome]);
+  weatherHandle = createWeatherSystem(scene, level.biome, LIQUID_LEVEL[level.biome], getGraphicsSettings().particleMultiplier);
   cloudsHandle = createClouds(scene, level.biome);
   cloudLayerHandle = createCloudLayer(scene);
   horizonHandle = level.biome === "crystal" ? null : createHorizonSilhouettes(scene, level.biome); // Coral Shallows is open ocean now — no distant mountain backdrop, and horizonSilhouettes.js still isn't part of this session so this stays a main.js-only fix rather than touching that file's still-old icy Crystal-Spire theming

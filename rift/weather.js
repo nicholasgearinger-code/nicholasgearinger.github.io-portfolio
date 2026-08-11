@@ -496,11 +496,16 @@ function updateRipplePool(pool, dt) {
   }
 }
 
-function createRain(scene, heaviness = 1, waterLevel) {
-  // Was 2200 — per explicit "lots of tiny particles," a real, substantial
-  // increase (still tier-scaled down further via particleMultiplier at
-  // the call site on Low).
-  const count = Math.round(7000 * heaviness);
+function createRain(scene, heaviness = 1, waterLevel, particleMultiplier = 1) {
+  // Was 7000 (itself up from 2200 last round) — per explicit "as many
+  // particles as possible." particleMultiplier is genuinely wired in
+  // now (Low=0.2, Medium=1, High=2, see graphicsSettings.js) — it was
+  // NOT actually being applied before despite an old comment here
+  // claiming otherwise, a real gap that matters much more now that the
+  // base count is this much higher: Low tier stays protected at a
+  // reasonable ~2400*heaviness while High can genuinely go all-out at
+  // ~24000*heaviness.
+  const count = Math.round(12000 * heaviness * particleMultiplier);
   const positions = new Float32Array(count * 3);
   // terminalSpeed is the physical cap each drop's fall speed can never
   // exceed — real raindrops do have a genuine terminal velocity (air
@@ -550,15 +555,17 @@ function createRain(scene, heaviness = 1, waterLevel) {
 /**
  * @param {THREE.Scene} scene
  * @param {string} biome
+ * @param {number} [waterLevel]
+ * @param {number} [particleMultiplier] graphics-tier density scale (Low=0.2, Medium=1, High=2) — real gap fixed: this used to not reach rain's own particle count at all
  */
-function createWeatherSystem(scene, biome, waterLevel) {
+function createWeatherSystem(scene, biome, waterLevel, particleMultiplier = 1) {
   const profile = WEATHER_PROFILE[biome] || WEATHER_PROFILE.ember;
 
   const lightningLight = new THREE.PointLight(profile.lightning.color, 0, 400);
   lightningLight.position.set(0, profile.lightning.height, 0);
   scene.add(lightningLight);
 
-  const rain = profile.rain ? createRain(scene, profile.rainHeaviness || 1, waterLevel) : null;
+  const rain = profile.rain ? createRain(scene, profile.rainHeaviness || 1, waterLevel, particleMultiplier) : null;
   const distantLightning = createDistantLightning(scene);
   const dustDevil = biome === "ashen" ? createDustDevil(scene) : null;
   const crystalRefraction = biome === "crystal" ? createCrystalRefraction(scene) : null;

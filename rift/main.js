@@ -12,7 +12,7 @@ import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERF
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
 import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, createUnderwaterLightShaft, updateLightShafts, disposeLightShafts, createRockCluster, createCaveMouth, applyVerticalGradient } from "./decorations.js";
-import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail, createWaveSprayParticles, updateWaveSprayParticles, disposeWaveSprayParticles } from "./liquid.js";
+import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail } from "./liquid.js";
 import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
 import { createGrass, updateGrass, disposeGrass, createFlowers, updateFlowers, disposeFlowers, createFootstepGlowSystem, spawnFootstepGlow, updateFootstepGlowSystem, disposeFootstepGlowSystem } from "./vegetation.js";
@@ -983,7 +983,6 @@ function updateMovement(dt, grounded, swimming) {
 // ---------------------------------------------------------------------------
 let terrainMesh = null;
 let liquidHandle = null;
-let waveSprayHandle = null;
 let reflectionFrameCounter = 999; // starts high so the first eligible frame always renders immediately, not a blank/stale texture
 // Real GLB model instances — Coral Shallows only (see models.js). Tracked
 // separately from every other decoration/wildlife array since these load
@@ -1069,8 +1068,6 @@ function teardownLevel() {
   }
   disposeLiquidPlane(scene, liquidHandle);
   liquidHandle = null;
-  if (waveSprayHandle) disposeWaveSprayParticles(scene, waveSprayHandle);
-  waveSprayHandle = null;
   disposeWaterfall(scene, waterfallHandle);
   waterfallHandle = null;
   disposeOceanSurfaceDetail(scene, oceanSurfaceDetailHandle);
@@ -1973,7 +1970,6 @@ vec2 causticVoronoiF1F2(vec2 p) {
     // up close.
     const waterPlaneSize = level.biome === "crystal" ? 2000 : TERRAIN_SIZE;
     liquidHandle = createLiquidPlane(scene, level.biome, LIQUID_LEVEL[level.biome], waterPlaneSize, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
-    if (level.biome === "crystal") waveSprayHandle = createWaveSprayParticles(scene);
   }
 
   if (level.biome === "crystal") {
@@ -2790,7 +2786,7 @@ vec2 causticVoronoiF1F2(vec2 p) {
   grassHandle = createGrass(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), TERRAIN_SIZE * 0.46);
   flowersHandle = createFlowers(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), TERRAIN_SIZE * 0.46);
   footstepGlowHandle = level.biome === "verdant" ? createFootstepGlowSystem(scene, 40) : null;
-  weatherHandle = createWeatherSystem(scene, level.biome, LIQUID_LEVEL[level.biome], getGraphicsSettings().particleMultiplier);
+  weatherHandle = createWeatherSystem(scene, level.biome, LIQUID_LEVEL[level.biome], getGraphicsSettings().particleMultiplier, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
   cloudsHandle = createClouds(scene, level.biome);
   cloudLayerHandle = createCloudLayer(scene);
   horizonHandle = level.biome === "crystal" ? null : createHorizonSilhouettes(scene, level.biome); // Coral Shallows is open ocean now — no distant mountain backdrop, and horizonSilhouettes.js still isn't part of this session so this stays a main.js-only fix rather than touching that file's still-old icy Crystal-Spire theming
@@ -3950,19 +3946,6 @@ function animate() {
   // behind here is never visible. biome-gated inside updateLiquidPlane
   // itself (crystal only), so this is harmless to pass unconditionally.
   updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, camera.position, sun.position, dayNight.skyHorizon, reflectionRenderTarget.texture, reflectionTextureMatrix, refractionRenderTarget.texture, refractionResolution, weatherHandle ? weatherHandle.rainIntensity : 0, dayNight.dayAmount);
-  // Wave-break spray particles — per explicit "particle based wave
-  // simulation system." Gated behind oceanEffectsEnabled, the same tier
-  // setting that already gates the terrain's own caustic-net/sun-glitter
-  // fragment effects (off on Low) — this is exactly the kind of "extra
-  // ocean flair" that setting already exists to control, not a new
-  // dedicated toggle.
-  if (waveSprayHandle && currentLevelIdx >= 0 && LEVELS[currentLevelIdx].biome === "crystal") {
-    if (getGraphicsSettings().oceanEffectsEnabled !== false) {
-      updateWaveSprayParticles(waveSprayHandle, dt, elapsedTime, camera.position, (x, z) => terrainHeightAt(LEVELS[currentLevelIdx], x, z, WORLD_SEED), LIQUID_LEVEL.crystal, 250);
-    } else {
-      updateWaveSprayParticles(waveSprayHandle, dt, elapsedTime, camera.position, (x, z) => terrainHeightAt(LEVELS[currentLevelIdx], x, z, WORLD_SEED), LIQUID_LEVEL.crystal, 0); // still ages/fades out any already-alive particles, just spawns none — avoids a hard pop when the setting changes mid-scene
-    }
-  }
   updateWaterfall(waterfallHandle, dt, elapsedTime);
   updateOceanSurfaceDetail(oceanSurfaceDetailHandle, elapsedTime, dayNight.dayAmount);
   // Real angelfish (models.js) — AnimationMixer drives the loaded skeletal

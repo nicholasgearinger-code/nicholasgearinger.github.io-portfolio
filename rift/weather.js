@@ -496,7 +496,7 @@ function updateRipplePool(pool, dt) {
   }
 }
 
-function createRain(scene, heaviness = 1, waterLevel, particleMultiplier = 1) {
+function createRain(scene, heaviness = 1, waterLevel, particleMultiplier = 1, sampleHeight = null) {
   // Was 7000 (itself up from 2200 last round) — per explicit "as many
   // particles as possible." particleMultiplier is genuinely wired in
   // now (Low=0.2, Medium=1, High=2, see graphicsSettings.js) — it was
@@ -519,10 +519,26 @@ function createRain(scene, heaviness = 1, waterLevel, particleMultiplier = 1) {
   const terminalSpeed = new Float32Array(count);
   const currentSpeed = new Float32Array(count);
   const driftPhase = new Float32Array(count); // per-drop phase offset for a subtle horizontal wobble as it falls — real rain isn't perfectly straight even with steady wind
+  // Per-particle landing height — every drop used to land at a single
+  // FLAT height (waterLevel) system-wide, regardless of what was
+  // actually beneath it, meaning rain over the island's dry sand/hills
+  // visually fell through solid ground before "landing" at sea level.
+  // Sampled once per fall cycle (here at creation, and again on respawn
+  // in the update loop below) rather than every frame for every
+  // particle — real terrain sampling isn't free, and doing it for
+  // 12000+ particles every single frame would be a real cost for
+  // something that only needs to be right once per fall, not
+  // continuously (a drop's XZ barely drifts during one fall). Clamped to
+  // never go below the real water surface, so a drop over open water
+  // still lands AT the water, not at the (lower) seafloor beneath it.
+  const landHeights = new Float32Array(count);
+  const fallbackLand = waterLevel !== undefined && waterLevel !== null ? waterLevel : 0;
   for (let i = 0; i < count; i++) {
-    positions[i * 3] = (Math.random() - 0.5) * 220;
+    const x = (Math.random() - 0.5) * 220;
+    const z = (Math.random() - 0.5) * 220;
+    positions[i * 3] = x;
     positions[i * 3 + 1] = Math.random() * 60;
-    positions[i * 3 + 2] = (Math.random() - 0.5) * 220;
+    positions[i * 3 + 2] = z;
     terminalSpeed[i] = (30 + Math.random() * 15) * (0.85 + heaviness * 0.15); // heavier rain also falls a bit faster/harder, not just denser
     // Spawns already partway toward its own terminal velocity (randomized
     // per drop) rather than every drop visibly starting from a dead stop
@@ -531,6 +547,8 @@ function createRain(scene, heaviness = 1, waterLevel, particleMultiplier = 1) {
     // rather than a genuinely random point mid-fall.
     currentSpeed[i] = terminalSpeed[i] * (0.3 + Math.random() * 0.4);
     driftPhase[i] = Math.random() * Math.PI * 2;
+    const ground = sampleHeight ? sampleHeight(x, z) : null;
+    landHeights[i] = ground !== null && ground !== undefined ? Math.max(ground, fallbackLand) : fallbackLand;
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
@@ -549,7 +567,7 @@ function createRain(scene, heaviness = 1, waterLevel, particleMultiplier = 1) {
   // any biome without a real whole-level ocean (rain just wraps at a
   // fixed low altitude in that case, same as before, no ripples spawn).
   const ripplePool = waterLevel !== undefined && waterLevel !== null ? createRipplePool(scene) : null;
-  return { points, terminalSpeed, currentSpeed, driftPhase, waterLevel, ripplePool };
+  return { points, terminalSpeed, currentSpeed, driftPhase, landHeights, sampleHeight, waterLevel, ripplePool };
 }
 
 /**
@@ -557,15 +575,16 @@ function createRain(scene, heaviness = 1, waterLevel, particleMultiplier = 1) {
  * @param {string} biome
  * @param {number} [waterLevel]
  * @param {number} [particleMultiplier] graphics-tier density scale (Low=0.2, Medium=1, High=2) — real gap fixed: this used to not reach rain's own particle count at all
+ * @param {(x:number,z:number)=>number|null} [sampleHeight] real terrain height at a given XZ — lets rain land on the actual ground beneath it instead of a single flat height
  */
-function createWeatherSystem(scene, biome, waterLevel, particleMultiplier = 1) {
+function createWeatherSystem(scene, biome, waterLevel, particleMultiplier = 1, sampleHeight = null) {
   const profile = WEATHER_PROFILE[biome] || WEATHER_PROFILE.ember;
 
   const lightningLight = new THREE.PointLight(profile.lightning.color, 0, 400);
   lightningLight.position.set(0, profile.lightning.height, 0);
   scene.add(lightningLight);
 
-  const rain = profile.rain ? createRain(scene, profile.rainHeaviness || 1, waterLevel, particleMultiplier) : null;
+  const rain = profile.rain ? createRain(scene, profile.rainHeaviness || 1, waterLevel, particleMultiplier, sampleHeight) : null;
   const distantLightning = createDistantLightning(scene);
   const dustDevil = biome === "ashen" ? createDustDevil(scene) : null;
   const crystalRefraction = biome === "crystal" ? createCrystalRefraction(scene) : null;
@@ -674,7 +693,7 @@ function updateWeatherSystem(handle, dt, erupting = false, dayAmount = 0) {
     handle.rain.points.material.opacity = Math.min(1, handle.rainIntensity * 0.55 * (profile.rainHeaviness || 1));
 
     const posAttr = handle.rain.points.geometry.attributes.position;
-    const landY = handle.rain.waterLevel !== undefined && handle.rain.waterLevel !== null ? handle.rain.waterLevel : 0;
+    const fallbackLandY = handle.rain.waterLevel !== undefined && handle.rain.waterLevel !== null ? handle.rain.waterLevel : 0;
     // Real gravity constant for this update loop — tuned so a drop covers
     // the ramp from its spawn speed to its own terminal velocity within a
     // fraction of a second of falling, not the literal 9.8 m/s^2 figure,
@@ -685,6 +704,11 @@ function updateWeatherSystem(handle, dt, erupting = false, dayAmount = 0) {
     const RAIN_GRAVITY = 55;
     for (let i = 0; i < handle.rain.terminalSpeed.length; i++) {
       handle.rain.currentSpeed[i] = Math.min(handle.rain.terminalSpeed[i], handle.rain.currentSpeed[i] + RAIN_GRAVITY * dt);
+      // Per-particle landing height — real ground beneath THIS drop, not
+      // one flat height shared by the whole system (see createRain's own
+      // comment on landHeights for why this matters and why it's only
+      // resampled on respawn below, not every frame).
+      const landY = handle.rain.landHeights ? handle.rain.landHeights[i] : fallbackLandY;
       let y = posAttr.getY(i) - handle.rain.currentSpeed[i] * dt * Math.max(0.15, handle.rainIntensity);
       const x = posAttr.getX(i), z = posAttr.getZ(i);
       if (y < landY) {
@@ -696,11 +720,21 @@ function updateWeatherSystem(handle, dt, erupting = false, dayAmount = 0) {
         // cycles, since drops respawn at a fixed height rather than a
         // genuinely random point mid-fall.
         handle.rain.currentSpeed[i] = handle.rain.terminalSpeed[i] * (0.3 + Math.random() * 0.4);
+        // Resample this drop's own landing height for its next fall — it
+        // may have drifted with the wind since it last landed, so the
+        // ground beneath it now could genuinely be different (e.g. drifted
+        // from open water toward the beach).
+        if (handle.rain.landHeights && handle.rain.sampleHeight) {
+          const ground = handle.rain.sampleHeight(x, z);
+          handle.rain.landHeights[i] = ground !== null && ground !== undefined ? Math.max(ground, fallbackLandY) : fallbackLandY;
+        }
         // Real per-drop landing point (before it resets to the top) —
-        // spawn a ripple here if this biome has real water and a pool
-        // slot is actually free, before the drop's XZ gets reassigned
-        // for its next fall.
-        if (handle.rain.ripplePool && Math.random() < RIPPLE_SPAWN_CHANCE) {
+        // spawn a ripple here ONLY if this drop actually landed AT water
+        // level, not on elevated dry ground (a ripple on dry sand would
+        // be wrong now that landY can be real terrain height above
+        // water) — and only if this biome has real water and a pool
+        // slot is actually free.
+        if (handle.rain.ripplePool && landY <= fallbackLandY + 0.01 && Math.random() < RIPPLE_SPAWN_CHANCE) {
           spawnRipple(handle.rain.ripplePool, x, landY + 0.02, z, handle.rainIntensity);
         }
       }

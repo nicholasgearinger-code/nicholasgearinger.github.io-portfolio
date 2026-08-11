@@ -66,6 +66,8 @@ import { mulberry32, hashStringToSeed } from "./worldgen.js";
 const UNDERWATER_NEUTRAL_LIGHT = new THREE.Color(0xfff4e0);
 const UNDERWATER_NEUTRAL_TINT = new THREE.Color(0xd8f0f0);
 const tempUnderwaterTintColor = new THREE.Color(); // reused every frame in the underwater block below rather than allocated fresh each time
+const tempRainFogColor = new THREE.Color(); // reused every frame for the rain-fog effect below
+const RAIN_FOG_COLOR = new THREE.Color(0x8a97a8); // a pale, cool gray-blue — real heavy-rain haze, not the scene's own near-black default fog tuned for open night sky/distance falloff
 const UNDERWATER_STYLE = {
   default: {
     fogColor: 0x0a2838, fogDensity: 0.14, sunColor: 0x1a4560, sunMult: 0.08,
@@ -4164,6 +4166,36 @@ function animate() {
   if (debugForceStorm && weatherHandle) {
     weatherHandle.rainIntensity = Math.min(1, weatherHandle.rainIntensity + dt * 2);
     wind.rainIntensity = weatherHandle.rainIntensity;
+  }
+  // Rain fog — per explicit "sheet of water, so dense we can hardly see
+  // through it." Real heavy rain reduces visibility through light
+  // scattering off countless droplets — a fundamentally different (and
+  // more reliable) way to create that sensation than particle density
+  // alone: even at the very high counts already in place, individual
+  // streak particles still show visible gaps between them from most
+  // angles/distances, but atmospheric haze is what actually reads as
+  // "can't see through it." scene.fog was previously only ever touched
+  // by the underwater block below, which is currently fully disabled
+  // (UNDERWATER_LIGHTING_ENABLED=false) — meaning fog has sat at its
+  // fixed creation-time value every single frame regardless of weather
+  // until now. Density scales with rainIntensity on top of the scene's
+  // own base value (unchanged on a clear day), pulling visibility down
+  // from ~300 units clear to ~20 units at full heavy rain. Gated off
+  // underwater (isFullySubmerged, computed earlier this same frame) —
+  // real rain haze is an above-surface phenomenon, and if the disabled
+  // underwater block is ever re-enabled it manages scene.fog completely
+  // on its own whenever it actually runs.
+  if (!isFullySubmerged) {
+    const BASE_FOG_DENSITY = 0.0032;
+    const RAIN_FOG_BOOST = 0.045;
+    scene.fog.density = BASE_FOG_DENSITY + wind.rainIntensity * RAIN_FOG_BOOST;
+    // A believable heavy-rain haze reads as a pale, cool gray-blue, not
+    // this scene's own near-black default fog color (tuned for open
+    // night sky/distance falloff on a clear day) — lerping toward
+    // RAIN_FOG_COLOR as intensity rises is what makes it look like
+    // genuine atmospheric mist rather than just "the world went dark."
+    tempRainFogColor.setHex(0x0a0e14).lerp(RAIN_FOG_COLOR, wind.rainIntensity * 0.7);
+    scene.fog.color.copy(tempRainFogColor);
   }
   // Rain is an above-surface effect — real rain doesn't fall underwater.
   // Same visibility-gating pattern already used for whitecaps/the cloud

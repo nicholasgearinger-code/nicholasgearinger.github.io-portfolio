@@ -359,27 +359,42 @@ const lensRainPass = new ShaderPass({
       vec2 p = uv * vec2(aspect, 1.0);
       float slideMix = 0.25 + uRainIntensity * 0.6;
 
-      vec3 v1 = dropVoronoi(p * 5.5, slideMix);
-      float r1 = 0.26;
-      vec3 v2 = dropVoronoi(p * 10.0 + 37.0, slideMix);
-      float r2 = 0.2;
+      // Per explicit reference photos ("I want rain to look like this") —
+      // a real window in heavy rain is covered edge-to-edge in droplets
+      // of very different sizes, not a handful of large, sparse ones.
+      // Radii shrunk substantially and a THIRD, much smaller/denser layer
+      // added on top of the original two (large + tiny + tinier), rather
+      // than just retuning the existing two — the reference specifically
+      // shows fine droplet texture in between the bigger ones, which two
+      // scales alone can't produce regardless of their own individual
+      // size.
+      vec3 v1 = dropVoronoi(p * 7.0, slideMix);
+      float r1 = 0.17;
+      vec3 v2 = dropVoronoi(p * 13.0 + 37.0, slideMix);
+      float r2 = 0.12;
+      vec3 v3 = dropVoronoi(p * 21.0 + 91.0, slideMix);
+      float r3 = 0.075;
 
       float in1 = 1.0 - smoothstep(r1 * 0.6, r1, v1.x);
       float in2 = 1.0 - smoothstep(r2 * 0.6, r2, v2.x);
-      float coverage = clamp(uRainIntensity * 1.5, 0.0, 1.0);
-      float dropMask = max(in1, in2) * coverage;
+      float in3 = 1.0 - smoothstep(r3 * 0.6, r3, v3.x);
+      // Coverage floor raised (was a straight multiply on rainIntensity,
+      // meaning light rain showed almost nothing) — even modest rain
+      // should show a real scattering of droplets, not an empty lens
+      // that only fills in once the storm is already heavy.
+      float coverage = clamp(0.25 + uRainIntensity * 1.3, 0.0, 1.0);
+      float dropMask = max(max(in1, in2), in3) * coverage;
 
-      vec2 refractDir = in1 >= in2 ? v1.yz : v2.yz;
+      vec2 refractDir = in1 >= in2 ? (in1 >= in3 ? v1.yz : v3.yz) : (in2 >= in3 ? v2.yz : v3.yz);
       float refractDist = length(refractDir);
       // Two stacked components per explicit "more distortion through the
-      // rain drops," both substantially stronger than before (was a
-      // single 0.028-strength edge bend): an EDGE bend (light curves
-      // more sharply near a real droplet's rim) plus a CENTER magnify
-      // pull (a droplet is a tiny convex lens -- its middle should show a
-      // slightly zoomed, warped version of what's behind it, not look
-      // untouched the way a pure edge-only bend would leave it).
+      // rain drops": an EDGE bend (light curves more sharply near a real
+      // droplet's rim) plus a CENTER magnify pull (a droplet is a tiny
+      // convex lens -- its middle should show a slightly zoomed, warped
+      // version of what's behind it, not look untouched the way a pure
+      // edge-only bend would leave it).
       vec2 edgeBend = -refractDir * 0.11 * dropMask;
-      vec2 centerPull = -refractDir * 0.05 * dropMask * (1.0 - smoothstep(0.0, 0.15, refractDist));
+      vec2 centerPull = -refractDir * 0.05 * dropMask * (1.0 - smoothstep(0.0, 0.1, refractDist));
       vec2 refractOffset = edgeBend + centerPull;
       vec4 color = texture2D(tDiffuse, clamp(uv + refractOffset, 0.001, 0.999));
 
@@ -387,7 +402,8 @@ const lensRainPass = new ShaderPass({
       // droplets catch ambient light there.
       float rim1 = smoothstep(r1 * 0.5, r1 * 0.68, v1.x) * (1.0 - smoothstep(r1 * 0.68, r1, v1.x));
       float rim2 = smoothstep(r2 * 0.5, r2 * 0.68, v2.x) * (1.0 - smoothstep(r2 * 0.68, r2, v2.x));
-      color.rgb += vec3(max(rim1, rim2) * 0.14 * coverage);
+      float rim3 = smoothstep(r3 * 0.5, r3 * 0.68, v3.x) * (1.0 - smoothstep(r3 * 0.68, r3, v3.x));
+      color.rgb += vec3(max(max(rim1, rim2), rim3) * 0.14 * coverage);
 
       gl_FragColor = color;
     }

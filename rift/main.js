@@ -2179,6 +2179,17 @@ vec2 causticVoronoiF1F2(vec2 p) {
   // own {} braces, not visible out here.
   float upwardFacing = clamp(vCausticWorldNormal.y, 0.0, 1.0);
   float waveNorm = clamp((vWaveHeight + 1.7) / 3.4, 0.0, 1.0);
+  // Per explicit "should move according to the speed of the waves" (the
+  // same fix already applied to the underwater caustic net) — a real,
+  // mathematically-grounded proxy for the water's CURRENT vertical
+  // velocity: for simple harmonic motion, speed peaks at the zero-
+  // crossing (mid-height) and drops to zero at the crest/trough
+  // extremes. This is a genuinely different system from that caustic
+  // net (this is the shoreline wave-wash tendril pattern — a real
+  // Voronoi cell-edge visualization, which is exactly why it naturally
+  // looks like a hex/cell grid rather than a soft blob field), but the
+  // same underlying physics applies to both.
+  float waveSpeedFactor = 0.4 + (1.0 - abs(waveNorm - 0.5) * 2.0) * 0.9;
   // shoreDist: height above (positive) or below (negative) the mean
   // waterline. reachHeight: how far above that mean the CURRENT wave
   // pushes, driven by the same real wave crest/trough already sampled
@@ -2197,8 +2208,8 @@ vec2 causticVoronoiF1F2(vec2 p) {
   // breaks a single-layer Voronoi's evenly-spaced "disco ball" look into
   // overlapping bubble clusters of varying size, which is what actually
   // reads as foam rather than a tiled pattern.
-  vec2 foamUv1 = vCausticWorldPos.xz * 3.5 + vec2(uTime * 0.15, uTime * 0.11);
-  vec2 foamUv2 = vCausticWorldPos.xz * 9.0 - vec2(uTime * 0.1, uTime * 0.08);
+  vec2 foamUv1 = vCausticWorldPos.xz * 3.5 + vec2(uTime * 0.15, uTime * 0.11) * waveSpeedFactor;
+  vec2 foamUv2 = vCausticWorldPos.xz * 9.0 - vec2(uTime * 0.1, uTime * 0.08) * waveSpeedFactor;
   vec2 fv1 = causticVoronoiF1F2(foamUv1);
   vec2 fv2 = causticVoronoiF1F2(foamUv2);
   float foamCell = clamp((1.0 - smoothstep(0.0, 0.4, fv1.x)) * 0.6 + (1.0 - smoothstep(0.0, 0.32, fv2.x)) * 0.55, 0.0, 1.0);
@@ -2210,7 +2221,7 @@ vec2 causticVoronoiF1F2(vec2 p) {
   // line — Voronoi cell EDGES (F2-F1, thin branching lines along cell
   // boundaries), not filled circles, fading out with distance and only
   // ever extending outward/up the beach, never back into the water.
-  vec2 tendrilUv = vCausticWorldPos.xz * 2.2 + vec2(uTime * 0.06, uTime * 0.045);
+  vec2 tendrilUv = vCausticWorldPos.xz * 2.2 + vec2(uTime * 0.14, uTime * 0.1) * waveSpeedFactor;
   vec2 tv = causticVoronoiF1F2(tendrilUv);
   float tendrilLines = 1.0 - smoothstep(0.0, 0.06, tv.y - tv.x);
   float tendrilReach = 0.35;

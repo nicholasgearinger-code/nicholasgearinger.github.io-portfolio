@@ -2221,32 +2221,38 @@ vec2 causticVoronoiF1F2(vec2 p) {
   // line — Voronoi cell EDGES (F2-F1, thin branching lines along cell
   // boundaries), not filled circles, fading out with distance and only
   // ever extending outward/up the beach, never back into the water.
-  // Per explicit follow-up: (1) a sinusoidal UV wobble so the lines
-  // themselves undulate rather than just drifting rigidly (same
-  // technique the underwater caustic net's own lines already use); (2) a
-  // SECOND Voronoi layer at a different rotation/scale/drift, layered on
-  // top for the same "opposing net" complexity real wave caustics show,
-  // not one uniform cell pattern; (3) softened edge falloff (was a
-  // razor-sharp 0.06-wide transition, now 0.16) so this reads as flowing
-  // light rather than a rigid geometric grid; (4) tied to uSunGlow (the
-  // same cloud-occlusion-aware value the underwater net already uses) so
-  // it genuinely shines brighter under direct light instead of a
-  // constant strength regardless of sun visibility.
+  // Per explicit follow-up ("wavy cells across the whole grid, warping
+  // and stretching — want the CELLS wavy, not the grid warping; only
+  // show brightest where sun actually shines through"): the previous
+  // version pre-warped the INPUT UV before Voronoi ran, which moves and
+  // stretches every cell's actual position/shape — that IS "the whole
+  // grid warping," not wavy lines. Fixed by moving the wave onto the
+  // EDGE THRESHOLD itself instead (a per-pixel wobble on each line's own
+  // width, tied to world position + time) — cell positions stay
+  // completely stable now, only each line's thickness ripples along its
+  // own length. Sun-focus now reuses the SAME localized beam the
+  // underwater caustic net already computes (uFocusXZ/uFocusRadius)
+  // instead of a uniform sun-glow multiplier across the whole visible
+  // field — tendrils only really shine near the actual focus point, not
+  // everywhere at once.
   vec2 tendrilUv = vCausticWorldPos.xz * 2.2 + vec2(uTime * 0.14, uTime * 0.1) * waveSpeedFactor;
-  tendrilUv += vec2(sin(tendrilUv.y * 4.0 + uTime * 1.2) * 0.04, sin(tendrilUv.x * 3.5 + uTime * 1.0) * 0.04);
   vec2 tv = causticVoronoiF1F2(tendrilUv);
-  float tendrilLines = 1.0 - smoothstep(0.0, 0.16, tv.y - tv.x);
+  float edgeWave = sin(vCausticWorldPos.x * 2.6 + vCausticWorldPos.z * 1.8 + uTime * 1.8) * 0.025;
+  float tendrilLines = 1.0 - smoothstep(0.0, max(0.03, 0.16 + edgeWave), tv.y - tv.x);
   float rot3 = 1.1;
   vec2 tendrilUv2raw = vCausticWorldPos.xz * 2.2 * 1.4 - vec2(uTime * 0.09, uTime * 0.12) * waveSpeedFactor;
   vec2 tendrilUv2 = vec2(tendrilUv2raw.x * cos(rot3) - tendrilUv2raw.y * sin(rot3), tendrilUv2raw.x * sin(rot3) + tendrilUv2raw.y * cos(rot3));
-  tendrilUv2 += vec2(sin(tendrilUv2.y * 3.0 - uTime * 1.4) * 0.045, sin(tendrilUv2.x * 4.5 - uTime * 1.1) * 0.045);
   vec2 tv2 = causticVoronoiF1F2(tendrilUv2);
-  float tendrilLines2 = 1.0 - smoothstep(0.0, 0.16, tv2.y - tv2.x);
+  float edgeWave2 = sin(vCausticWorldPos.x * 1.9 - vCausticWorldPos.z * 2.3 - uTime * 1.5) * 0.028;
+  float tendrilLines2 = 1.0 - smoothstep(0.0, max(0.03, 0.16 + edgeWave2), tv2.y - tv2.x);
   float tendrilLinesTotal = max(tendrilLines, tendrilLines2 * 0.8);
   float tendrilReach = 0.35;
   float beyondLine = max(0.0, shoreDist - jitteredReach);
   float tendrilFalloff = 1.0 - smoothstep(0.0, tendrilReach, beyondLine);
-  float tendrilFoam = clamp(tendrilLinesTotal * tendrilFalloff * step(beyondLine, tendrilReach) * (0.4 + uSunGlow * 0.6), 0.0, 1.0);
+  float tendrilDistFromFocus = length(vCausticWorldPos.xz - uFocusXZ);
+  float tendrilFocusZone = 1.0 - smoothstep(0.0, uFocusRadius, tendrilDistFromFocus);
+  float tendrilSunMask = 0.12 + tendrilFocusZone * 0.88 * uSunGlow;
+  float tendrilFoam = clamp(tendrilLinesTotal * tendrilFalloff * step(beyondLine, tendrilReach) * tendrilSunMask, 0.0, 1.0);
   float foamMask = clamp(max(coreFoam, tendrilFoam * 0.85) * upwardFacing, 0.0, 1.0) * uFoamEnabled;
   // Sand right at the water's edge reads as permanently wet — a
   // constant dark band centered at the mean waterline regardless of the
@@ -2701,7 +2707,7 @@ vec2 causticVoronoiF1F2(vec2 p) {
           const x = Math.cos(angle) * dist;
           const z = Math.sin(angle) * dist;
           if (Math.hypot(x, z) > WORLD_BOUND_RADIUS - 8) continue;
-          const groundY = terrainHeightAt(level, x, z, WORLD_SEED);
+          const groundY = sampleGroundHeight(x, z, terrainMesh); // was terrainHeightAt (the analytic function) — per "plant is underwater/not on land," the analytic estimate can diverge from the ACTUAL rendered terrain surface at some points, same category of fix already established for tree/fish placement
           if (groundY === null || groundY > LIQUID_LEVEL.crystal - 0.6) continue; // needs to be genuinely underwater, not on the dry island or right at the shoreline
           const sponge = createRealSponge();
           if (!sponge) continue;
@@ -2734,7 +2740,7 @@ vec2 causticVoronoiF1F2(vec2 p) {
           const x = Math.cos(angle) * dist;
           const z = Math.sin(angle) * dist;
           if (Math.hypot(x, z) > WORLD_BOUND_RADIUS - 8) continue;
-          const groundY = terrainHeightAt(level, x, z, WORLD_SEED);
+          const groundY = sampleGroundHeight(x, z, terrainMesh); // was terrainHeightAt — same fix as sponge above
           if (groundY === null || groundY > LIQUID_LEVEL.crystal - 0.6) continue;
           const plant = createRealPlant();
           if (!plant) continue;

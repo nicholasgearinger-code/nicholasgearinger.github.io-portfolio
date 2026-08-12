@@ -36,6 +36,8 @@ const SOUND_FILES = {
   eruptionBurst: "eruption-burst.mp3",    // one-shot, fired once when an eruption starts
   rainThunder: "rain-thunder.mp3",        // Verdant and Crystal only (the only two biomes with real rain — see WEATHER_PROFILE in weather.js), gain-driven by setRainIntensity rather than started/stopped
   oceanWaves: "ocean-waves.mp3",          // Crystal only — the only biome with a real continuous open-water plane. NOT positional (no single point a whole shoreline can be reduced to the way a campfire can) — gain-driven by setWaveIntensity, computed from the player's proximity to water level rather than a PannerNode's distance model.
+  underwaterAmbience: "underwater-ambience.mp3", // Crystal only — loops while fully submerged (isFullySubmerged), gain-ramped on/off rather than a hard switch
+  swimmingSounds: "swimming-sounds.mp3",         // Crystal only — loops while swimming at/near the surface but NOT fully submerged (a distinct state from underwaterAmbience above, not the same trigger)
 };
 const soundBuffers = {}; // key -> decoded AudioBuffer, once ready
 const soundLoadPromises = {}; // key -> in-flight/settled Promise<AudioBuffer|null>, so repeated calls share one fetch
@@ -71,6 +73,8 @@ function preloadRealSounds() {
   loadSoundBuffer("eruptionBurst");
   loadSoundBuffer("rainThunder");
   loadSoundBuffer("oceanWaves");
+  loadSoundBuffer("underwaterAmbience");
+  loadSoundBuffer("swimmingSounds");
 }
 
 // Ember-only state, both reset in stopAmbient() when leaving the biome so
@@ -98,6 +102,15 @@ let rainGain = null;
 // water level, see main.js) rather than a PannerNode's distance model,
 // since a whole shoreline has no single point to be "near."
 let waveGain = null;
+// Two new discrete-state loops, per explicit "play on loop when
+// underwater, and the other when swimming on the surface" — unlike
+// rain/waves (which track a continuously-varying intensity), these are
+// simple on/off triggers based on submersion state, so their setters
+// use a ramped transition (setEruptionIntensity's own pattern) rather
+// than direct value assignment — a hard instant switch crossing the
+// water surface would pop noticeably.
+let underwaterAmbienceGain = null;
+let swimSoundsGain = null;
 
 function ensureContext() {
   if (ctx) return ctx;
@@ -219,6 +232,8 @@ function stopAmbient() {
   fireCracklePanner = null;
   rainGain = null;
   waveGain = null;
+  underwaterAmbienceGain = null;
+  swimSoundsGain = null;
   if (!ambientNodes) return;
   const now = ctx ? ctx.currentTime : 0;
   // Fade out fast rather than an abrupt stop, then actually stop the
@@ -330,6 +345,42 @@ function buildAmbientGraph(biome) {
     });
   }
 
+  // Crystal only — starts silent, setUnderwaterAmbience (main.js, driven
+  // by isFullySubmerged) ramps it up/down on crossing the water surface.
+  function attachUnderwaterLoop() {
+    loadSoundBuffer("underwaterAmbience").then((buffer) => {
+      if (!buffer || ambientNodes !== handle) return;
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.loop = true;
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      source.connect(gain).connect(masterGain);
+      source.start();
+      stopOnSwitch.push(source, gain);
+      underwaterAmbienceGain = gain;
+    });
+  }
+
+  // Crystal only — starts silent, setSwimSoundsActive (main.js, driven
+  // by swimming-at-surface-but-not-fully-submerged) ramps it up/down —
+  // a genuinely different trigger from attachUnderwaterLoop above, not
+  // the same state.
+  function attachSwimLoop() {
+    loadSoundBuffer("swimmingSounds").then((buffer) => {
+      if (!buffer || ambientNodes !== handle) return;
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.loop = true;
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      source.connect(gain).connect(masterGain);
+      source.start();
+      stopOnSwitch.push(source, gain);
+      swimSoundsGain = gain;
+    });
+  }
+
   if (biome === "ember") {
     // Ember plays ONLY the real recordings — no synthesized fallback
     // texture layered underneath (an earlier version's synthesized
@@ -418,6 +469,8 @@ function buildAmbientGraph(biome) {
   } else if (biome === "crystal") {
     attachRainLoop();
     attachWaveLoop();
+    attachUnderwaterLoop();
+    attachSwimLoop();
     drone(50, "sine", 0.018);
     noiseBed("highpass", 3000, 0.8, 0.006, 0.06, 0.004);
     // Sparse resonant chime pings — crystals settling.
@@ -480,6 +533,34 @@ function setRainIntensity(intensity) {
 function setWaveIntensity(intensity) {
   if (!waveGain || !ctx) return;
   waveGain.gain.value = Math.max(0, Math.min(1, intensity)) * 0.6;
+}
+
+// Called every frame from main.js with the real isFullySubmerged state —
+// per explicit "play on loop when underwater." Ramped (setEruptionIntensity's
+// own pattern), not direct assignment — this is a discrete state crossing
+// (in the water or not), and an instant gain jump right at the moment the
+// player's head crosses the surface would be an audible pop, unlike
+// rain/wave intensity which already arrive pre-smoothed frame to frame.
+function setUnderwaterAmbience(active) {
+  if (!underwaterAmbienceGain || !ctx) return;
+  const now = ctx.currentTime;
+  const gainParam = underwaterAmbienceGain.gain;
+  gainParam.cancelScheduledValues(now);
+  gainParam.setValueAtTime(gainParam.value, now);
+  gainParam.linearRampToValueAtTime(active ? 0.65 : 0, now + 0.8);
+}
+
+// Called every frame from main.js with a genuinely different state than
+// setUnderwaterAmbience above — swimming at/near the surface but NOT
+// fully submerged — per explicit "the other when swimming on the
+// surface." Same ramped-transition reasoning.
+function setSwimSoundsActive(active) {
+  if (!swimSoundsGain || !ctx) return;
+  const now = ctx.currentTime;
+  const gainParam = swimSoundsGain.gain;
+  gainParam.cancelScheduledValues(now);
+  gainParam.setValueAtTime(gainParam.value, now);
+  gainParam.linearRampToValueAtTime(active ? 0.55 : 0, now + 0.8);
 }
 
 // Repositions the fire-crackle PannerNode — called every frame from
@@ -659,4 +740,4 @@ function playFootstep(biome) {
   source.start(t);
 }
 
-export { initAudio, toggleMuted, playShoot, playShatter, playLoreChime, startAmbient, playFootstep, setEruptionIntensity, playEruptionBurst, updateFirePosition, updateListenerPosition, setAmbientDayAmount, setRainIntensity, setWaveIntensity };
+export { initAudio, toggleMuted, playShoot, playShatter, playLoreChime, startAmbient, playFootstep, setEruptionIntensity, playEruptionBurst, updateFirePosition, updateListenerPosition, setAmbientDayAmount, setRainIntensity, setWaveIntensity, setUnderwaterAmbience, setSwimSoundsActive };

@@ -28,7 +28,7 @@ import {
   createMuzzleFlash, updateMuzzleFlash, disposeMuzzleFlash,
   createImpactBurst, updateImpactBurst, disposeImpactBurst,
 } from "./effects.js";
-import { initAudio, toggleMuted, playShoot, playShatter, playLoreChime, startAmbient, playFootstep, setEruptionIntensity, playEruptionBurst, updateFirePosition, updateListenerPosition, setAmbientDayAmount, setRainIntensity, setWaveIntensity } from "./audio.js";
+import { initAudio, toggleMuted, playShoot, playShatter, playLoreChime, startAmbient, playFootstep, setEruptionIntensity, playEruptionBurst, updateFirePosition, updateListenerPosition, setAmbientDayAmount, setRainIntensity, setWaveIntensity, setUnderwaterAmbience, setSwimSoundsActive } from "./audio.js";
 import { getIslandLore } from "./lore.js";
 import { findClosestHit } from "./hitPrediction.js";
 import { createTouchControls } from "./touchControls.js";
@@ -2221,13 +2221,32 @@ vec2 causticVoronoiF1F2(vec2 p) {
   // line — Voronoi cell EDGES (F2-F1, thin branching lines along cell
   // boundaries), not filled circles, fading out with distance and only
   // ever extending outward/up the beach, never back into the water.
+  // Per explicit follow-up: (1) a sinusoidal UV wobble so the lines
+  // themselves undulate rather than just drifting rigidly (same
+  // technique the underwater caustic net's own lines already use); (2) a
+  // SECOND Voronoi layer at a different rotation/scale/drift, layered on
+  // top for the same "opposing net" complexity real wave caustics show,
+  // not one uniform cell pattern; (3) softened edge falloff (was a
+  // razor-sharp 0.06-wide transition, now 0.16) so this reads as flowing
+  // light rather than a rigid geometric grid; (4) tied to uSunGlow (the
+  // same cloud-occlusion-aware value the underwater net already uses) so
+  // it genuinely shines brighter under direct light instead of a
+  // constant strength regardless of sun visibility.
   vec2 tendrilUv = vCausticWorldPos.xz * 2.2 + vec2(uTime * 0.14, uTime * 0.1) * waveSpeedFactor;
+  tendrilUv += vec2(sin(tendrilUv.y * 4.0 + uTime * 1.2) * 0.04, sin(tendrilUv.x * 3.5 + uTime * 1.0) * 0.04);
   vec2 tv = causticVoronoiF1F2(tendrilUv);
-  float tendrilLines = 1.0 - smoothstep(0.0, 0.06, tv.y - tv.x);
+  float tendrilLines = 1.0 - smoothstep(0.0, 0.16, tv.y - tv.x);
+  float rot3 = 1.1;
+  vec2 tendrilUv2raw = vCausticWorldPos.xz * 2.2 * 1.4 - vec2(uTime * 0.09, uTime * 0.12) * waveSpeedFactor;
+  vec2 tendrilUv2 = vec2(tendrilUv2raw.x * cos(rot3) - tendrilUv2raw.y * sin(rot3), tendrilUv2raw.x * sin(rot3) + tendrilUv2raw.y * cos(rot3));
+  tendrilUv2 += vec2(sin(tendrilUv2.y * 3.0 - uTime * 1.4) * 0.045, sin(tendrilUv2.x * 4.5 - uTime * 1.1) * 0.045);
+  vec2 tv2 = causticVoronoiF1F2(tendrilUv2);
+  float tendrilLines2 = 1.0 - smoothstep(0.0, 0.16, tv2.y - tv2.x);
+  float tendrilLinesTotal = max(tendrilLines, tendrilLines2 * 0.8);
   float tendrilReach = 0.35;
   float beyondLine = max(0.0, shoreDist - jitteredReach);
   float tendrilFalloff = 1.0 - smoothstep(0.0, tendrilReach, beyondLine);
-  float tendrilFoam = clamp(tendrilLines * tendrilFalloff * step(beyondLine, tendrilReach), 0.0, 1.0);
+  float tendrilFoam = clamp(tendrilLinesTotal * tendrilFalloff * step(beyondLine, tendrilReach) * (0.4 + uSunGlow * 0.6), 0.0, 1.0);
   float foamMask = clamp(max(coreFoam, tendrilFoam * 0.85) * upwardFacing, 0.0, 1.0) * uFoamEnabled;
   // Sand right at the water's edge reads as permanently wet — a
   // constant dark band centered at the mean waterline regardless of the
@@ -4072,6 +4091,7 @@ function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.1);
   elapsedTime += dt;
+  let playerSwimmingThisFrame = false; // captured inside the movement block below, read later (audio triggers) once isFullySubmerged is also available for this same frame
 
   fpsFrameCount++;
   fpsAccumTime += dt;
@@ -4163,6 +4183,7 @@ function animate() {
     // speed and vertical swim control can't ever disagree about whether
     // the player is currently swimming.
     const swimming = swimLevel !== undefined && camera.position.y < swimLevel;
+    playerSwimmingThisFrame = swimming;
     updateMovement(dt, playerPhysics.grounded, swimming);
     const swimVertical = (keys.up ? 1 : 0) - (keys.down ? 1 : 0);
     updatePlayerPhysics(camera, terrainMesh, playerPhysics, dt, PLAYER_EYE_HEIGHT, jumpQueued, caveFloorMeshes.length ? caveFloorMeshes : undefined, swimLevel, swimVertical);
@@ -4373,6 +4394,14 @@ function animate() {
   }
   wasFullySubmergedLastFrame = isFullySubmerged;
   postSwimWetness = Math.max(0, postSwimWetness - dt / 60); // ~60s to fully fade, per explicit "for a minute"
+  // Per explicit "play [underwater ambience] on loop when underwater, and
+  // the other [swimming sounds] when swimming on the surface" — two
+  // distinct, mutually-exclusive states: fully submerged vs. swimming at/
+  // near the surface without being fully under. Both setters no-op
+  // harmlessly outside Crystal biome (their gain nodes are never created
+  // there).
+  setUnderwaterAmbience(isFullySubmerged);
+  setSwimSoundsActive(playerSwimmingThisFrame && !isFullySubmerged);
   // Per explicit "remove underwater lighting and fog" — same toggle
   // pattern as UNDERWATER_EFFECTS_ENABLED below (single flag, not a
   // deletion, for a clean revert). This one specifically gates the

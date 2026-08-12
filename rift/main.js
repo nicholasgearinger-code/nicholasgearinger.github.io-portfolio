@@ -28,7 +28,7 @@ import {
   createMuzzleFlash, updateMuzzleFlash, disposeMuzzleFlash,
   createImpactBurst, updateImpactBurst, disposeImpactBurst,
 } from "./effects.js";
-import { initAudio, toggleMuted, playShoot, playShatter, playLoreChime, startAmbient, playFootstep, setEruptionIntensity, playEruptionBurst, updateFirePosition, updateListenerPosition, setAmbientDayAmount, setRainIntensity, setWaveIntensity, setUnderwaterAmbience, setSwimSoundsActive } from "./audio.js";
+import { initAudio, toggleMuted, playShoot, playShatter, playLoreChime, startAmbient, playFootstep, setEruptionIntensity, playEruptionBurst, updateFirePosition, updateListenerPosition, setAmbientDayAmount, setRainIntensity, setWaveIntensity, setUnderwaterAmbience, setSwimSoundsActive, setWalkSoundsActive } from "./audio.js";
 import { getIslandLore } from "./lore.js";
 import { findClosestHit } from "./hitPrediction.js";
 import { createTouchControls } from "./touchControls.js";
@@ -1200,6 +1200,15 @@ function updateMovement(dt, grounded, swimming) {
   } else {
     footstepDistance = 0; // reset mid-stride rather than carrying a partial step into the next movement burst
   }
+  // Real recorded walking-on-sand ambience, per explicit "let's use this
+  // file for walking on the sand" — layered underneath the existing
+  // synthesized per-step playFootstep() above, not a replacement for it.
+  // Uses the SAME moving/grounded condition every frame (continuous
+  // on/off tracking, not just at each discrete stride event the way the
+  // one-shot footstep sound works), gated to Crystal biome specifically
+  // since this is a real sand recording, not generically appropriate for
+  // every biome's ground surface.
+  setWalkSoundsActive(moving && grounded && currentLevelIdx >= 0 && LEVELS[currentLevelIdx].biome === "crystal");
 
   // Soft world bounds — keeps the player off the terrain's falloff rim and
   // away from the finite plane's actual edge (see terrain.js/WORLD_BOUND_RADIUS
@@ -2217,42 +2226,47 @@ vec2 causticVoronoiF1F2(vec2 p) {
   // edge, not a wide diffuse cloud.
   float coreZone = 1.0 - smoothstep(0.0, 0.1, abs(shoreDist - jitteredReach));
   float coreFoam = clamp(foamCell * coreZone, 0.0, 1.0);
-  // Lacy tendrils reaching a bit further up the beach past the core
-  // line — Voronoi cell EDGES (F2-F1, thin branching lines along cell
-  // boundaries), not filled circles, fading out with distance and only
-  // ever extending outward/up the beach, never back into the water.
-  // Per explicit follow-up ("wavy cells across the whole grid, warping
-  // and stretching — want the CELLS wavy, not the grid warping; only
-  // show brightest where sun actually shines through"): the previous
-  // version pre-warped the INPUT UV before Voronoi ran, which moves and
-  // stretches every cell's actual position/shape — that IS "the whole
-  // grid warping," not wavy lines. Fixed by moving the wave onto the
-  // EDGE THRESHOLD itself instead (a per-pixel wobble on each line's own
-  // width, tied to world position + time) — cell positions stay
-  // completely stable now, only each line's thickness ripples along its
-  // own length. Sun-focus now reuses the SAME localized beam the
-  // underwater caustic net already computes (uFocusXZ/uFocusRadius)
-  // instead of a uniform sun-glow multiplier across the whole visible
-  // field — tendrils only really shine near the actual focus point, not
-  // everywhere at once.
-  vec2 tendrilUv = vCausticWorldPos.xz * 2.2 + vec2(uTime * 0.14, uTime * 0.1) * waveSpeedFactor;
-  vec2 tv = causticVoronoiF1F2(tendrilUv);
-  float edgeWave = sin(vCausticWorldPos.x * 2.6 + vCausticWorldPos.z * 1.8 + uTime * 1.8) * 0.025;
-  float tendrilLines = 1.0 - smoothstep(0.0, max(0.03, 0.16 + edgeWave), tv.y - tv.x);
+  // Per explicit "cells are supposed to be simulated light reflections
+  // of waves — behave like lights instead of a net, glowing only on
+  // wave peaks as light reflects/refracts through the water": a real
+  // conceptual correction, not another tuning pass on the same
+  // technique. Voronoi cell-EDGE detection (F2-F1, what this used to be)
+  // draws a connected line structure by definition — softening or
+  // animating it can never stop it from reading as a net, since tracing
+  // boundaries between cells is inherently a mesh/grid shape. Real
+  // caustic light isn't a net at all — it's scattered, discrete bright
+  // patches where the wavy water surface happens to focus light at that
+  // instant, moving and appearing/disappearing as the wave pattern
+  // changes. Switched to Voronoi cell-FILL (F1 alone — a soft glowing
+  // blob near each cell's own seed point, not its boundary), and
+  // critically, each spot's own visibility is now gated by whether
+  // THIS specific point is actually near a real wave crest right now
+  // (peakGate, built from the same per-fragment waveNorm every other
+  // wave-driven effect here already uses, which genuinely varies by
+  // world position as the real wave pattern travels through) — light
+  // only shows up where a wave is actively cresting, not as a
+  // constant-strength background pattern.
+  vec2 lightUv = vCausticWorldPos.xz * 1.8 + vec2(uTime * 0.1, uTime * 0.07) * waveSpeedFactor;
+  vec2 lv = causticVoronoiF1F2(lightUv);
+  float lightSpot = 1.0 - smoothstep(0.0, 0.22, lv.x);
   float rot3 = 1.1;
-  vec2 tendrilUv2raw = vCausticWorldPos.xz * 2.2 * 1.4 - vec2(uTime * 0.09, uTime * 0.12) * waveSpeedFactor;
-  vec2 tendrilUv2 = vec2(tendrilUv2raw.x * cos(rot3) - tendrilUv2raw.y * sin(rot3), tendrilUv2raw.x * sin(rot3) + tendrilUv2raw.y * cos(rot3));
-  vec2 tv2 = causticVoronoiF1F2(tendrilUv2);
-  float edgeWave2 = sin(vCausticWorldPos.x * 1.9 - vCausticWorldPos.z * 2.3 - uTime * 1.5) * 0.028;
-  float tendrilLines2 = 1.0 - smoothstep(0.0, max(0.03, 0.16 + edgeWave2), tv2.y - tv2.x);
-  float tendrilLinesTotal = max(tendrilLines, tendrilLines2 * 0.8);
+  vec2 lightUv2raw = vCausticWorldPos.xz * 1.8 * 1.3 - vec2(uTime * 0.07, uTime * 0.09) * waveSpeedFactor;
+  vec2 lightUv2 = vec2(lightUv2raw.x * cos(rot3) - lightUv2raw.y * sin(rot3), lightUv2raw.x * sin(rot3) + lightUv2raw.y * cos(rot3));
+  vec2 lv2 = causticVoronoiF1F2(lightUv2);
+  float lightSpot2 = 1.0 - smoothstep(0.0, 0.18, lv2.x);
+  float lightSpotsTotal = max(lightSpot, lightSpot2 * 0.75);
+  // Real wave-crest gate — only the TOP portion of each wave's own cycle
+  // counts as "a peak" (0.62-0.95 of the normalized range, not the
+  // trough or mid-slope), so light genuinely comes and goes with the
+  // real wave motion instead of being always-on.
+  float peakGate = smoothstep(0.62, 0.95, waveNorm);
   float tendrilReach = 0.35;
   float beyondLine = max(0.0, shoreDist - jitteredReach);
   float tendrilFalloff = 1.0 - smoothstep(0.0, tendrilReach, beyondLine);
   float tendrilDistFromFocus = length(vCausticWorldPos.xz - uFocusXZ);
   float tendrilFocusZone = 1.0 - smoothstep(0.0, uFocusRadius, tendrilDistFromFocus);
   float tendrilSunMask = 0.12 + tendrilFocusZone * 0.88 * uSunGlow;
-  float tendrilFoam = clamp(tendrilLinesTotal * tendrilFalloff * step(beyondLine, tendrilReach) * tendrilSunMask, 0.0, 1.0);
+  float tendrilFoam = clamp(lightSpotsTotal * peakGate * tendrilFalloff * step(beyondLine, tendrilReach) * tendrilSunMask, 0.0, 1.0);
   float foamMask = clamp(max(coreFoam, tendrilFoam * 0.85) * upwardFacing, 0.0, 1.0) * uFoamEnabled;
   // Sand right at the water's edge reads as permanently wet — a
   // constant dark band centered at the mean waterline regardless of the

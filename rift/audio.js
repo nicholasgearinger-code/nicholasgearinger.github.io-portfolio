@@ -38,6 +38,7 @@ const SOUND_FILES = {
   oceanWaves: "ocean-waves.mp3",          // Crystal only — the only biome with a real continuous open-water plane. NOT positional (no single point a whole shoreline can be reduced to the way a campfire can) — gain-driven by setWaveIntensity, computed from the player's proximity to water level rather than a PannerNode's distance model.
   underwaterAmbience: "underwater-ambience.mp3", // Crystal only — loops while fully submerged (isFullySubmerged), gain-ramped on/off rather than a hard switch
   swimmingSounds: "swimming-sounds.mp3",         // Crystal only — loops while swimming at/near the surface but NOT fully submerged (a distinct state from underwaterAmbience above, not the same trigger)
+  walkingOnSand: "walking-on-sand.mp3",          // Crystal only — a continuous multi-step recording (not a single footstep), so it's used the same way as underwaterAmbience/swimmingSounds: a looping ambient bed gated on/off by "currently walking on dry land," not triggered per individual step like the existing synthesized playFootstep()
 };
 const soundBuffers = {}; // key -> decoded AudioBuffer, once ready
 const soundLoadPromises = {}; // key -> in-flight/settled Promise<AudioBuffer|null>, so repeated calls share one fetch
@@ -75,6 +76,7 @@ function preloadRealSounds() {
   loadSoundBuffer("oceanWaves");
   loadSoundBuffer("underwaterAmbience");
   loadSoundBuffer("swimmingSounds");
+  loadSoundBuffer("walkingOnSand");
 }
 
 // Ember-only state, both reset in stopAmbient() when leaving the biome so
@@ -111,6 +113,7 @@ let waveGain = null;
 // water surface would pop noticeably.
 let underwaterAmbienceGain = null;
 let swimSoundsGain = null;
+let walkSoundsGain = null;
 
 function ensureContext() {
   if (ctx) return ctx;
@@ -234,6 +237,7 @@ function stopAmbient() {
   waveGain = null;
   underwaterAmbienceGain = null;
   swimSoundsGain = null;
+  walkSoundsGain = null;
   if (!ambientNodes) return;
   const now = ctx ? ctx.currentTime : 0;
   // Fade out fast rather than an abrupt stop, then actually stop the
@@ -381,6 +385,27 @@ function buildAmbientGraph(biome) {
     });
   }
 
+  // Crystal only — starts silent, setWalkSoundsActive (main.js, driven
+  // by the SAME "moving && grounded" condition that already triggers the
+  // synthesized per-step playFootstep(), not a separate check) ramps it
+  // up/down. This is a real recorded multi-step walking ambience, so it
+  // layers as a continuous bed rather than replacing the existing
+  // one-shot footstep sound.
+  function attachWalkLoop() {
+    loadSoundBuffer("walkingOnSand").then((buffer) => {
+      if (!buffer || ambientNodes !== handle) return;
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.loop = true;
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      source.connect(gain).connect(masterGain);
+      source.start();
+      stopOnSwitch.push(source, gain);
+      walkSoundsGain = gain;
+    });
+  }
+
   if (biome === "ember") {
     // Ember plays ONLY the real recordings — no synthesized fallback
     // texture layered underneath (an earlier version's synthesized
@@ -471,6 +496,7 @@ function buildAmbientGraph(biome) {
     attachWaveLoop();
     attachUnderwaterLoop();
     attachSwimLoop();
+    attachWalkLoop();
     drone(50, "sine", 0.018);
     noiseBed("highpass", 3000, 0.8, 0.006, 0.06, 0.004);
     // Sparse resonant chime pings — crystals settling.
@@ -561,6 +587,21 @@ function setSwimSoundsActive(active) {
   gainParam.cancelScheduledValues(now);
   gainParam.setValueAtTime(gainParam.value, now);
   gainParam.linearRampToValueAtTime(active ? 0.55 : 0, now + 0.8);
+}
+
+// Called with the same "moving && grounded" condition that already
+// triggers the synthesized per-step playFootstep() — a real recorded
+// walking loop layered underneath that one-shot sound, not a
+// replacement for it. Slightly faster ramp than swim/underwater (0.4s)
+// since footstep-scale movement starts/stops more abruptly than
+// swimming does.
+function setWalkSoundsActive(active) {
+  if (!walkSoundsGain || !ctx) return;
+  const now = ctx.currentTime;
+  const gainParam = walkSoundsGain.gain;
+  gainParam.cancelScheduledValues(now);
+  gainParam.setValueAtTime(gainParam.value, now);
+  gainParam.linearRampToValueAtTime(active ? 0.35 : 0, now + 0.4);
 }
 
 // Repositions the fire-crackle PannerNode — called every frame from
@@ -740,4 +781,4 @@ function playFootstep(biome) {
   source.start(t);
 }
 
-export { initAudio, toggleMuted, playShoot, playShatter, playLoreChime, startAmbient, playFootstep, setEruptionIntensity, playEruptionBurst, updateFirePosition, updateListenerPosition, setAmbientDayAmount, setRainIntensity, setWaveIntensity, setUnderwaterAmbience, setSwimSoundsActive };
+export { initAudio, toggleMuted, playShoot, playShatter, playLoreChime, startAmbient, playFootstep, setEruptionIntensity, playEruptionBurst, updateFirePosition, updateListenerPosition, setAmbientDayAmount, setRainIntensity, setWaveIntensity, setUnderwaterAmbience, setSwimSoundsActive, setWalkSoundsActive };

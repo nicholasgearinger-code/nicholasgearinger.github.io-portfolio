@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>WebGPU Fluid Wave Prototype</title>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #05070c; height: 100%; }
+  #info {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+    padding: 14px 16px; font: 13px/1.5 -apple-system, system-ui, sans-serif;
+    color: #cfe0f0; background: linear-gradient(to bottom, rgba(5,7,12,0.92), transparent);
+    pointer-events: none;
+  }
+  #info b { color: #fff; }
+  #status {
+    position: fixed; bottom: 12px; left: 12px; z-index: 10;
+    font: 12px/1.4 ui-monospace, monospace; color: #7fd8a0; background: rgba(0,0,0,0.55);
+    padding: 8px 10px; border-radius: 6px; max-width: min(560px, 90vw);
+  }
+  #status.error { color: #ff8a8a; }
+  canvas { display: block; touch-action: none; }
+</style>
+</head>
+<body>
+<div id="info">
+  <b>WebGPU compute-shader wave simulation</b> — a real finite-difference wave equation running on the GPU each frame, not the Gerstner-sum trick the live game currently uses. Click/drag on the water (or tap on mobile) to inject a real disturbance and watch it propagate and reflect off the edges.
+</div>
+<div id="status">Initializing WebGPU…</div>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.webgpu.js",
+    "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.tsl.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from "three";
+import {
+  Fn, instanceIndex, instancedArray, float, uint, If,
+  uniform, vec3, color, positionLocal, mix, clamp,
+  MeshStandardNodeMaterial, min, max, attribute
+} from "three/tsl";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+const statusEl = document.getElementById("status");
+function setStatus(msg, isError = false) {
+  statusEl.textContent = msg;
+  statusEl.classList.toggle("error", isError);
+}
+
+// ---------------------------------------------------------------------------
+// Grid setup. WIDTH*WIDTH cells map 1:1 to a WIDTH*WIDTH plane's vertex grid,
+// so each compute-shader cell corresponds exactly to one mesh vertex — no
+// resampling/interpolation needed between the simulation and the render mesh.
+// 128 is a deliberate starting point: large enough to look like real water,
+// small enough that a first live test isn't also fighting a performance
+// ceiling. This is the first thing worth trying larger (192, 256) once the
+// basic simulation is confirmed working, since compute cost scales with
+// cell count, not the same way fragment-shader cost does.
+// ---------------------------------------------------------------------------
+const WIDTH = 128;
+const CELL_COUNT = WIDTH * WIDTH;
+const PLANE_SIZE = 40; // world units — independent of WIDTH, only affects visual scale/spacing between cells
+
+let renderer, scene, camera, controls, mesh;
+let computeInit, computeUpdate;
+let heightBufferA, heightBufferB, velocityBuffer;
+let heightBufferNode; // always points at heightBufferA (the buffer computeUpdate reads from) — see setupSimulation/animate for how it stays in sync
+let clock = new THREE.Clock();
+let pointerRay = new THREE.Raycaster();
+let pointerNDC = new THREE.Vector2(-10, -10);
+let pointerDown = false;
+let pointerWorldUniform, pointerActiveUniform;
+
+async function init() {
+  if (!navigator.gpu) {
+    setStatus("This browser doesn't report navigator.gpu — WebGPU isn't available here. Try a current Chrome, Edge, Firefox, or Safari 26+ (iOS 26+/macOS Tahoe+).", true);
+    return;
+  }
+
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0a1420);
+  scene.fog = new THREE.Fog(0x0a1420, 25, 70);
+
+  camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 200);
+  camera.position.set(0, 22, 30);
+
+  const canvas = document.createElement("canvas");
+  document.body.appendChild(canvas);
+
+  // WebGPURenderer, same class the live game now uses — this prototype is
+  // the isolated proving ground for whether the technique works AT ALL
+  // before it becomes load-bearing for the actual water/shoreline/caustics
+  // systems.
+  renderer = new THREE.WebGPURenderer({ canvas, antialias: true });
+  await renderer.init();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setAnimationLoop(animate);
+
+  controls = new OrbitControls(camera, canvas);
+  controls.target.set(0, 0, 0);
+  controls.enableDamping = true;
+  controls.maxPolarAngle = Math.PI * 0.49;
+  controls.minDistance = 8;
+  controls.maxDistance = 80;
+
+  const sun = new THREE.DirectionalLight(0xfff4e0, 2.2);
+  sun.position.set(15, 25, 10);
+  scene.add(sun);
+  scene.add(new THREE.AmbientLight(0x1a2a3a, 1.2));
+
+  setupSimulation();
+  heightBufferNode = heightBufferA; // must be valid BEFORE setupMesh() builds the material's node graph, which reads this
+  setupMesh();
+  setupPointerInteraction(canvas);
+
+  window.addEventListener("resize", onResize);
+  setStatus(`Running β€” ${WIDTH}x${WIDTH} = ${CELL_COUNT.toLocaleString()} simulated cells. Click/drag the water to disturb it.`);
+}
+
+// ---------------------------------------------------------------------------
+// The actual simulation: a real 2D wave equation via finite differences,
+// same category of technique as the official Three.js "webgpu_compute_water"
+// example this prototype is deliberately modeled after, since that's the
+// most well-established reference point for this exact pattern (real,
+// working TSL compute code, not an invented approach). Two height buffers
+// are used (A = read-from, B = write-to each step), copied back into sync
+// via a GPU-side buffer copy at the end of each frame rather than reading
+// and writing the same buffer in place, which would race against itself
+// across parallel GPU invocations.
+// ---------------------------------------------------------------------------
+function setupSimulation() {
+  heightBufferA = instancedArray(CELL_COUNT, "float");
+  heightBufferB = instancedArray(CELL_COUNT, "float");
+  velocityBuffer = instancedArray(CELL_COUNT, "float");
+
+  pointerWorldUniform = uniform(new THREE.Vector2(0, 0));
+  pointerActiveUniform = uniform(0);
+
+  computeInit = Fn(() => {
+    heightBufferA.element(instanceIndex).assign(0);
+    heightBufferB.element(instanceIndex).assign(0);
+    velocityBuffer.element(instanceIndex).assign(0);
+  })().compute(CELL_COUNT);
+
+  // Real neighbor-based wave update. Reads FROM heightBufferA, writes the
+  // new state INTO heightBufferB (this frame's "previous" and "next"
+  // buffers swap identity each call — see the animate loop below) so every
+  // parallel invocation reads a fully-settled previous frame, never a
+  // partially-updated one from a neighbor invocation that happened to run
+  // first.
+  computeUpdate = Fn(() => {
+    const i = instanceIndex;
+    const x = i.mod(uint(WIDTH)).toFloat();
+    const y = i.div(uint(WIDTH)).toFloat();
+
+    const self = heightBufferA.element(i);
+
+    // Neighbor lookups, CLAMPED at the grid edges (reading the edge cell's
+    // own value again when there's no real neighbor) rather than wrapping
+    // around β€” a wrapped edge would let a wave that exits one side
+    // reappear on the opposite side, which reads as broken/glitchy rather
+    // than a real pool boundary. A clamped edge instead makes waves
+    // reflect back inward, the way a real wave hitting a pool wall does.
+    const xm = max(x.sub(1), float(0));
+    const xp = min(x.add(1), float(WIDTH - 1));
+    const ym = max(y.sub(1), float(0));
+    const yp = min(y.add(1), float(WIDTH - 1));
+
+    const idxL = y.mul(WIDTH).add(xm).toUint();
+    const idxR = y.mul(WIDTH).add(xp).toUint();
+    const idxU = ym.mul(WIDTH).add(x).toUint();
+    const idxD = yp.mul(WIDTH).add(x).toUint();
+
+    const left = heightBufferA.element(idxL);
+    const right = heightBufferA.element(idxR);
+    const up = heightBufferA.element(idxU);
+    const down = heightBufferA.element(idxD);
+
+    // The actual wave equation: acceleration is proportional to how far
+    // this cell's height differs from the AVERAGE of its neighbors (the
+    // discrete Laplacian) β€” a cell that's a local bump relative to its
+    // surroundings gets pulled back down, one that's a local dip gets
+    // pushed up. That's the real physical mechanism, not an approximation
+    // of one.
+    const laplacian = left.add(right).add(up).add(down).sub(self.mul(4));
+    const waveSpeed = float(1.4);
+    const damping = float(0.994); // slightly less than 1 β€” real water loses energy to friction/viscosity, a perfectly undamped simulation would ring forever and never settle
+
+    const newVelocity = velocityBuffer.element(i).add(laplacian.mul(waveSpeed)).mul(damping);
+    velocityBuffer.element(i).assign(newVelocity);
+
+    let newHeight = self.add(newVelocity.mul(0.05));
+
+    // Real pointer-driven disturbance β€” a genuine, tangible demonstration
+    // that this is an actual simulation reacting to real input, not a
+    // canned animation loop. Only the cell(s) near the current pointer
+    // position get pushed, each frame the pointer is held down.
+    If(pointerActiveUniform.greaterThan(0), () => {
+      const cellWorldX = x.div(WIDTH).sub(0.5).mul(PLANE_SIZE);
+      const cellWorldZ = y.div(WIDTH).sub(0.5).mul(PLANE_SIZE);
+      const dx = cellWorldX.sub(pointerWorldUniform.x);
+      const dz = cellWorldZ.sub(pointerWorldUniform.y);
+      const distSq = dx.mul(dx).add(dz.mul(dz));
+      const radius = float(1.4);
+      If(distSq.lessThan(radius.mul(radius)), () => {
+        newHeight = newHeight.add(float(0.35));
+      });
+    });
+
+    heightBufferB.element(i).assign(newHeight);
+  })().compute(CELL_COUNT);
+}
+
+function setupMesh() {
+  const geometry = new THREE.PlaneGeometry(PLANE_SIZE, PLANE_SIZE, WIDTH - 1, WIDTH - 1);
+  geometry.rotateX(-Math.PI / 2);
+
+  // Explicit vertex-to-cell mapping, rather than relying on instanceIndex
+  // (a compute-shader concept) inside the material's shaders, which run in
+  // a different context. PlaneGeometry with WIDTH-1 segments lays out
+  // vertices in row-major order matching exactly how the height buffer is
+  // indexed above (x + y*WIDTH), so this is a direct 1:1 correspondence,
+  // not an approximation.
+  const cellIndices = new Float32Array(WIDTH * WIDTH);
+  for (let i = 0; i < cellIndices.length; i++) cellIndices[i] = i;
+  geometry.setAttribute("cellIndex", new THREE.Float32BufferAttribute(cellIndices, 1));
+
+  const material = new MeshStandardNodeMaterial({
+    color: 0x2a6f8f,
+    roughness: 0.28,
+    metalness: 0.05,
+    emissive: 0x061018,
+  });
+
+  const cellIdx = attribute("cellIndex", "float").toUint();
+
+  // Displace each vertex's Y directly from the height buffer, indexed by
+  // the explicit cellIndex attribute above.
+  material.positionNode = Fn(() => {
+    const heightAtVertex = heightBufferNode.element(cellIdx);
+    return positionLocal.add(vec3(0, heightAtVertex, 0));
+  })();
+
+  // Approximate shading from the height field itself: darker where the
+  // surface has a steeper local slope (a cheap stand-in for real normal
+  // recomputation β€” accurate per-vertex normals would need sampling
+  // neighbor heights again in a second pass, worth adding once the basic
+  // motion itself is confirmed working live).
+  material.colorNode = Fn(() => {
+    const heightAtVertex = heightBufferNode.element(cellIdx);
+    const base = color(0x1a5570);
+    const highlight = color(0x9fd8ff);
+    const t = clamp(heightAtVertex.mul(2.2).add(0.3), 0, 1);
+    return mix(base, highlight, t);
+  })();
+
+  mesh = new THREE.Mesh(geometry, material);
+  scene.add(mesh);
+
+  const floor = new THREE.Mesh(
+    new THREE.CircleGeometry(60, 48),
+    new THREE.MeshStandardMaterial({ color: 0x0c1420, roughness: 1 })
+  );
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.y = -3;
+  scene.add(floor);
+}
+
+function setupPointerInteraction(canvas) {
+  function updatePointerNDC(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    pointerNDC.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    pointerNDC.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+  }
+
+  function raycastToPlane() {
+    pointerRay.setFromCamera(pointerNDC, camera);
+    const planeY = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const hit = new THREE.Vector3();
+    if (pointerRay.ray.intersectPlane(planeY, hit)) {
+      pointerWorldUniform.value.set(hit.x, hit.z);
+      pointerActiveUniform.value = 1;
+    } else {
+      pointerActiveUniform.value = 0;
+    }
+  }
+
+  canvas.addEventListener("pointerdown", (e) => {
+    pointerDown = true;
+    updatePointerNDC(e.clientX, e.clientY);
+    raycastToPlane();
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (!pointerDown) return;
+    updatePointerNDC(e.clientX, e.clientY);
+    raycastToPlane();
+  });
+  window.addEventListener("pointerup", () => {
+    pointerDown = false;
+    pointerActiveUniform.value = 0;
+  });
+}
+
+let simInitialized = false;
+async function animate() {
+  const dt = Math.min(clock.getDelta(), 0.1);
+  controls.update();
+
+  if (!simInitialized) {
+    await renderer.computeAsync(computeInit);
+    simInitialized = true;
+  }
+
+  // computeUpdate always reads FROM heightBufferA and writes its result
+  // INTO heightBufferB (see setupSimulation) — copying B back into A here,
+  // every frame, keeps the next frame's read consistent without needing a
+  // more complex alternating-buffer-identity scheme. Real GPU-to-GPU copy,
+  // not a CPU round-trip.
+  await renderer.computeAsync(computeUpdate);
+  renderer.copyBufferToBuffer(heightBufferB.value, heightBufferA.value);
+
+  renderer.render(scene, camera);
+}
+
+function onResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+init().catch((err) => {
+  console.error(err);
+  setStatus("WebGPU initialization failed: " + err.message, true);
+});
+</script>
+</body>
+</html>

@@ -1168,6 +1168,12 @@ function setKey(code, value) {
 const velocity = new THREE.Vector3();
 let footstepDistance = 0;
 const FOOTSTEP_STRIDE = 2.4; // world units between footstep sounds — tied to distance actually covered, not a fixed timer, so sprinting/slow movement both sound right
+const WALK_BOB_SPEED = Math.PI * 4; // ~2 full up-down cycles per second — roughly matches a natural walking cadence
+const WALK_BOB_HEIGHT = 0.045; // world units of vertical camera bob at peak
+const WALK_SHAKE_ROLL = 0.006; // radians of subtle camera roll shake while walking
+let playerMovingThisFrame = false; // set inside updateMovement() below (where `moving` actually originates), read later in animate() for the camera bob/shake — module-level since updateMovement is a separate, earlier-defined function, not nested inside animate()
+let walkBobPhase = 0; // continuously accumulates while walking (never hard-reset — see the eased strength below for why), wraps naturally through sin()'s own periodicity
+let walkBobStrength = 0; // eases toward 1 while walking / 0 while not, so starting or stopping mid-swing settles smoothly instead of snapping
 
 function updateMovement(dt, grounded, swimming) {
   velocity.set(0, 0, 0);
@@ -1177,13 +1183,20 @@ function updateMovement(dt, grounded, swimming) {
   if (keys.right) velocity.x += 1;
   const moving = velocity.lengthSq() > 0;
   if (moving) velocity.normalize();
+  playerMovingThisFrame = moving; // captured for the camera bob/shake below, added after updatePlayerPhysics runs later this same frame
 
   // Water resistance — per explicit "decreases the movement speed just
   // like moving in real water" request. Takes priority over the
   // grounded/airborne distinction below (swimming has its own multiplier
   // regardless of whether the seafloor happens to be right under the
   // player's feet at this exact instant).
-  const speed = swimming ? WALK_SPEED * SWIM_SPEED_MULTIPLIER : WALK_SPEED * (grounded ? 1 : AIR_CONTROL);
+  // NATURAL_WALK_MULTIPLIER — per explicit "change the walking to be
+  // slower, more natural" — WALK_SPEED itself lives in physics.js (not
+  // in hand this session), so this is a local multiplier applied on top
+  // rather than editing that constant directly; same net effect without
+  // needing that file.
+  const NATURAL_WALK_MULTIPLIER = 0.72;
+  const speed = (swimming ? WALK_SPEED * SWIM_SPEED_MULTIPLIER : WALK_SPEED * (grounded ? 1 : AIR_CONTROL)) * NATURAL_WALK_MULTIPLIER;
   controls.moveRight(velocity.x * speed * dt);
   controls.moveForward(-velocity.z * speed * dt);
 
@@ -1191,7 +1204,14 @@ function updateMovement(dt, grounded, swimming) {
     footstepDistance += speed * dt;
     if (footstepDistance >= FOOTSTEP_STRIDE) {
       footstepDistance = 0;
-      playFootstep(currentLevelIdx >= 0 ? LEVELS[currentLevelIdx].biome : "ember");
+      // Per explicit "replace the old sound with the new one" — the
+      // synthesized one-shot footstep is now skipped entirely for
+      // Crystal biome, where the real walking-on-sand loop (below)
+      // handles the auditory feedback instead. Every other biome keeps
+      // the original synthesized sound unchanged — this sand recording
+      // isn't generically appropriate for lava/jungle/etc ground.
+      const onSand = currentLevelIdx >= 0 && LEVELS[currentLevelIdx].biome === "crystal";
+      if (!onSand) playFootstep(currentLevelIdx >= 0 ? LEVELS[currentLevelIdx].biome : "ember");
       if (footstepGlowHandle) {
         const groundY = terrainMesh ? (terrainHeightAt(LEVELS[currentLevelIdx], camera.position.x, camera.position.z, WORLD_SEED) ?? camera.position.y - PLAYER_EYE_HEIGHT) : camera.position.y - PLAYER_EYE_HEIGHT;
         spawnFootstepGlow(footstepGlowHandle, camera.position.x, groundY, camera.position.z);
@@ -1200,14 +1220,13 @@ function updateMovement(dt, grounded, swimming) {
   } else {
     footstepDistance = 0; // reset mid-stride rather than carrying a partial step into the next movement burst
   }
-  // Real recorded walking-on-sand ambience, per explicit "let's use this
-  // file for walking on the sand" — layered underneath the existing
-  // synthesized per-step playFootstep() above, not a replacement for it.
-  // Uses the SAME moving/grounded condition every frame (continuous
-  // on/off tracking, not just at each discrete stride event the way the
-  // one-shot footstep sound works), gated to Crystal biome specifically
-  // since this is a real sand recording, not generically appropriate for
-  // every biome's ground surface.
+  // Real recorded walking-on-sand ambience, per explicit "replace the old
+  // sound with the new one" — now the ONLY walking sound in Crystal
+  // biome (the synthesized one-shot above is skipped there entirely, see
+  // the onSand check). Uses the same moving/grounded condition every
+  // frame (continuous on/off tracking, not just at each discrete stride
+  // event), gated to Crystal biome since this is a real sand recording,
+  // not generically appropriate for every biome's ground surface.
   setWalkSoundsActive(moving && grounded && currentLevelIdx >= 0 && LEVELS[currentLevelIdx].biome === "crystal");
 
   // Soft world bounds — keeps the player off the terrain's falloff rim and
@@ -4207,6 +4226,35 @@ function animate() {
     updateMovement(dt, playerPhysics.grounded, swimming);
     const swimVertical = (keys.up ? 1 : 0) - (keys.down ? 1 : 0);
     updatePlayerPhysics(camera, terrainMesh, playerPhysics, dt, PLAYER_EYE_HEIGHT, jumpQueued, caveFloorMeshes.length ? caveFloorMeshes : undefined, swimLevel, swimVertical);
+    // Camera bob/shake — per explicit "simulate a walking cycle with
+    // camera shake and going up and down slightly." Applied AFTER
+    // updatePlayerPhysics sets the real camera position/rotation for
+    // this frame, as a purely visual offset — safe to add to
+    // camera.position.y specifically because updatePlayerPhysics sets it
+    // ABSOLUTELY each frame from real ground height (not incrementally),
+    // so this can never compound or drift across frames; it's naturally
+    // overwritten fresh the moment the next frame's physics runs. Roll
+    // (rotation.z) is used for the shake rather than a horizontal
+    // position sway, specifically because roll is unused by the
+    // look-control system (which only ever touches pitch/yaw) — a small
+    // additive jitter there can't fight the player's own camera control
+    // the way nudging position.x/z each frame could risk doing.
+    // walkBobPhase accumulates continuously (never hard-reset) so the
+    // motion always continues smoothly from wherever it was; only its
+    // STRENGTH eases toward 0 when not walking, so stopping mid-swing
+    // settles naturally instead of snapping back to a flat camera. Gated
+    // on !swimming (already computed above, this exact frame) rather
+    // than isFullySubmerged specifically — a walking-gait bob shouldn't
+    // apply while wading/swimming at all, not just once fully
+    // underwater, and isFullySubmerged isn't even computed yet at this
+    // point in the frame (it's set much later in animate()).
+    const bobActive = playerMovingThisFrame && playerPhysics.grounded && !swimming;
+    walkBobStrength += ((bobActive ? 1 : 0) - walkBobStrength) * Math.min(1, dt * 8);
+    if (walkBobStrength > 0.001) {
+      if (bobActive) walkBobPhase += dt * WALK_BOB_SPEED;
+      camera.position.y += Math.sin(walkBobPhase) * WALK_BOB_HEIGHT * walkBobStrength;
+      camera.rotation.z += (Math.sin(walkBobPhase * 0.5) * WALK_SHAKE_ROLL + (Math.random() - 0.5) * WALK_SHAKE_ROLL * 0.4) * walkBobStrength;
+    }
     jumpQueued = false;
     if (camera.position.y < spawnPosition.y - FALL_RESPAWN_OFFSET) respawnInLevel();
     checkLoreProximity();

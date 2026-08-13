@@ -590,18 +590,21 @@ function setSwimSoundsActive(active) {
 }
 
 // Called with the same "moving && grounded" condition that already
-// triggers the synthesized per-step playFootstep() — a real recorded
-// walking loop layered underneath that one-shot sound, not a
-// replacement for it. Slightly faster ramp than swim/underwater (0.4s)
-// since footstep-scale movement starts/stops more abruptly than
-// swimming does.
+// triggers the synthesized per-step playFootstep() — this now REPLACES
+// that sound for Crystal biome specifically (main.js skips the
+// synthesized call there), not a layer underneath it. Peak gain raised
+// significantly (was 0.35, notably quieter than every other ambient
+// loop here — rain 0.75, waves 0.6, underwater 0.65, swim 0.55 — likely
+// why it wasn't actually noticeable over everything else playing at
+// once). Slightly faster ramp than swim/underwater (0.4s) since
+// footstep-scale movement starts/stops more abruptly than swimming does.
 function setWalkSoundsActive(active) {
   if (!walkSoundsGain || !ctx) return;
   const now = ctx.currentTime;
   const gainParam = walkSoundsGain.gain;
   gainParam.cancelScheduledValues(now);
   gainParam.setValueAtTime(gainParam.value, now);
-  gainParam.linearRampToValueAtTime(active ? 0.35 : 0, now + 0.4);
+  gainParam.linearRampToValueAtTime(active ? 0.7 : 0, now + 0.4);
 }
 
 // Repositions the fire-crackle PannerNode — called every frame from

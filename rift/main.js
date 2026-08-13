@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { WebGPURenderer } from "three/addons/renderers/webgpu/WebGPURenderer.js";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
@@ -192,7 +193,31 @@ const realisticCloudDomeHandle = createRealisticCloudDome(scene);
 const camera = new THREE.PerspectiveCamera(70, viewport.clientWidth / viewport.clientHeight, 0.1, 2000);
 camera.rotation.order = "YXZ";
 
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+// WebGPU renderer — per explicit request, step 1 of the staged plan
+// discussed before touching anything (renderer foundation first, before
+// any water/fluid-sim work builds on top of it). Real, confirmed facts
+// this decision rests on: WebGPURenderer has a documented, built-in
+// automatic fallback to WebGL2 when navigator.gpu isn't available, so
+// this does not need hand-written feature-detection/fallback logic of
+// its own — devices without WebGPU (older Safari, older Android
+// browsers) should keep working via that fallback path. What is
+// GENUINELY UNVERIFIED and needs real browser testing specifically:
+// whether the classic EffectComposer pipeline below (SSAOPass, bloom,
+// SMAA, the custom raw-GLSL lensRainPass) survives unmodified when the
+// ACTUAL WebGPU backend is what's rendering (as opposed to the WebGL2
+// fallback path, where it should behave exactly as before, since that's
+// genuine WebGL under the hood). Raw GLSL passes are a real, known
+// compatibility risk under true WebGPU execution — WebGPU natively
+// compiles WGSL/TSL nodes, not GLSL strings — which is why the final
+// composer.render() call further down is wrapped in a try/catch that
+// falls back to a plain direct render rather than letting a
+// post-processing failure hard-crash the whole scene. If that catch
+// block ever actually fires in testing, migrating each pass to
+// WebGPU-native TSL nodes (starting with the simplest ones) is the
+// planned next step — not something to guess at blind here.
+const renderer = new WebGPURenderer({ canvas, antialias: true });
+await renderer.init();
+let composerRenderFailedOnce = false; // used by the composer.render() safety net far below in animate() — logs the WebGPU/post-processing incompatibility once instead of every frame
 // Tone mapping ITSELF is now set by applyPostFx() below (from the new
 // tone-mapping dropdown's tier default/override, per explicit
 // "individually" follow-up) rather than hardcoded here — this fixed
@@ -4812,7 +4837,24 @@ function animate() {
     underwaterDistortionMaterial.uniforms.time.value = elapsedTime;
     renderer.render(underwaterQuadScene, underwaterQuadCamera);
   } else {
-    composer.render();
+    // Safety net for the genuinely unverified part of the WebGPU
+    // renderer swap (see the renderer setup's own comment above) — the
+    // classic EffectComposer pipeline uses raw GLSL in a few passes
+    // (the custom lensRainPass, most notably), which WebGPU's real
+    // backend doesn't compile the same way WebGL does. If that turns
+    // out to break, this falls back to a plain direct render (losing
+    // bloom/SSAO/AA/lens-rain for that frame, not the whole scene) and
+    // logs it ONCE rather than spamming the console every frame or
+    // leaving the screen black with no diagnostic trail.
+    try {
+      composer.render();
+    } catch (e) {
+      if (!composerRenderFailedOnce) {
+        composerRenderFailedOnce = true;
+        console.error("[webgpu] composer.render() failed, falling back to direct rendering. Post-processing (bloom/SSAO/AA/lens-rain) will be unavailable until the pipeline is migrated to WebGPU-native passes. Original error:", e);
+      }
+      renderer.render(scene, camera);
+    }
   }
 }
 requestAnimationFrame(animate);

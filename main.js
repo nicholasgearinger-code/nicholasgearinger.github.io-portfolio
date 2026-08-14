@@ -1,5 +1,14 @@
 import * as THREE from "three";
+import { WebGPURenderer } from "three/addons/renderers/webgpu/WebGPURenderer.js";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { SSAOPass } from "three/addons/postprocessing/SSAOPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { SMAAPass } from "three/addons/postprocessing/SMAAPass.js";
+import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
+import { FXAAShader } from "three/addons/shaders/FXAAShader.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH, POND_Z, POND_RADIUS, POND_LEVEL, RAMP_CENTER_X, RAMP_CENTER_Z, RAMP_LENGTH, RAMP_HALF_WIDTH, ROOM_FLOOR_Y, ROOM_WIDTH, ROOM_LENGTH, BRANCH_START_X, BRANCH_LENGTH, BRANCH_HALF_WIDTH, BRANCH_Z, CHAMBER_RADIUS } from "./terrain.js";
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
@@ -11,8 +20,8 @@ import { createGrass, updateGrass, disposeGrass, createFlowers, updateFlowers, d
 import { createHorizonSilhouettes, updateHorizonSilhouettes, disposeHorizonSilhouettes } from "./horizonSilhouettes.js";
 import { createWildlife, updateWildlife, disposeWildlife } from "./wildlife.js";
 import { createLandmark, updateLandmark, disposeLandmark, LANDMARK_POSITION } from "./landmarks.js";
-import { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers } from "./graphicsSettings.js";
-import { loadPalmTreeModel, loadAngelfishModel, createRealPalmTree, createRealAngelfish } from "./models.js";
+import { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers, getEffectiveValue, setOverride, resetOverrides, getTierRawSettings } from "./graphicsSettings.js";
+import { loadAngelfishModel, loadReefModel, loadCoralModel, loadTreeModel, loadSpongeModel, loadPlantModel, loadFishSchoolModel, createRealAngelfish, createRealReef, createRealCoral, createRealTree, createRealSponge, createRealPlant, createRealFishSchool } from "./models.js";
 import { createWeatherSystem, updateWeatherSystem, disposeWeatherSystem } from "./weather.js";
 import { createClouds, updateClouds, disposeClouds, getCloudOcclusionFactor, createCloudLayer, updateCloudLayer, disposeCloudLayer, createRealisticCloudDome, updateRealisticCloudDome, disposeRealisticCloudDome } from "./clouds.js";
 import {
@@ -20,12 +29,41 @@ import {
   createMuzzleFlash, updateMuzzleFlash, disposeMuzzleFlash,
   createImpactBurst, updateImpactBurst, disposeImpactBurst,
 } from "./effects.js";
-import { initAudio, toggleMuted, playShoot, playShatter, playLoreChime, startAmbient, playFootstep, setEruptionIntensity, playEruptionBurst, updateFirePosition, updateListenerPosition, setAmbientDayAmount } from "./audio.js";
+import { initAudio, toggleMuted, playShoot, playShatter, playLoreChime, startAmbient, playFootstep, setEruptionIntensity, playEruptionBurst, updateFirePosition, updateListenerPosition, setAmbientDayAmount, setRainIntensity, setWaveIntensity, setUnderwaterAmbience, setSwimSoundsActive, setWalkSoundsActive } from "./audio.js";
 import { getIslandLore } from "./lore.js";
 import { findClosestHit } from "./hitPrediction.js";
 import { createTouchControls } from "./touchControls.js";
 import { createPlayerPhysicsState, updatePlayerPhysics, sampleGroundHeight, WALK_SPEED, AIR_CONTROL, SWIM_SPEED_MULTIPLIER } from "./physics.js";
 import { mulberry32, hashStringToSeed } from "./worldgen.js";
+
+// ---------------------------------------------------------------------------
+// Real error-surfacing, per "still not playing?" β€” placed as early as
+// legally possible in this module (right after the imports, since ES
+// modules require imports at the very top of the file) so ANY uncaught
+// error or rejected promise anywhere in the rest of this file β€” including
+// during initial scene/material setup, which is where a real, confirmed
+// risk lives (onBeforeCompile-based custom materials, which this game's
+// entire terrain shader uses for caustics/foam, are not supported under
+// real WebGPU execution) β€” gets caught and shown directly on the page,
+// since mobile Safari doesn't offer easy devtools access. Standard
+// browser APIs (window error/unhandledrejection listeners), zero new
+// WebGPU/TSL risk β€” this is exactly the diagnostic technique that
+// proved essential throughout the whole standalone-prototype debugging
+// thread (FU305 onward), applied here to the live game for the first
+// time.
+(function setupRiftErrorOverlay() {
+  const overlay = document.createElement("div");
+  overlay.id = "rift-error-overlay";
+  overlay.style.cssText = "display:none; position:fixed; inset:0; z-index:99999; background:rgba(10,5,5,0.96); color:#ffb4b4; font:13px/1.5 ui-monospace, monospace; padding:20px; overflow:auto; white-space:pre-wrap;";
+  document.body.appendChild(overlay);
+  function showError(label, err) {
+    if (overlay.style.display === "block") return; // only the FIRST error, not every subsequent one
+    overlay.style.display = "block";
+    overlay.textContent = "[Rift Islands failed to load]\n" + label + "\n\n" + (err && err.stack ? err.stack : err);
+  }
+  window.addEventListener("error", (e) => showError("Uncaught error:", e.error || e.message));
+  window.addEventListener("unhandledrejection", (e) => showError("Unhandled promise rejection:", e.reason));
+})();
 
 // ---------------------------------------------------------------------------
 // World seed — fixed by default so every visitor explores the same curated
@@ -39,6 +77,37 @@ import { mulberry32, hashStringToSeed } from "./worldgen.js";
 // darkness regardless of how bright the terrain/water/coral colors
 // themselves were set — a shallow sunlit reef needs to actually stay
 // visible, not read like a deep murky river.
+// Per explicit "adjust the underwater fog and tint" follow-up — these are
+// what the underwater sun/ambient/fog/tint/volume colors below LERP
+// toward as clarity increases, on top of the existing density/strength
+// scaling from the previous round. That earlier pass only scaled how
+// STRONG the underwater tinting was, never how SATURATED the colors
+// themselves are — UNDERWATER_STYLE.crystal's sun/ambient colors
+// (0x8fe0e6/0x6fd8dc) are strongly saturated cyan, and a saturated cyan
+// LIGHT will keep tinting anything it illuminates cyan no matter how
+// bright it gets, which is very likely why the sand kept reading as flat
+// teal instead of sandy even after the intensity fix. LIGHT uses the
+// exact same warm-white the real above-water DAY sun already uses
+// (dayNightCycle.js) — at full clarity, underwater light color matches
+// normal daylight instead of a separate, permanently-cyan version of it.
+// TINT stays a pale blue rather than pure white — some water character
+// should remain even in the clearest conditions, this just keeps it from
+// being a saturated, dominant cast.
+const UNDERWATER_NEUTRAL_LIGHT = new THREE.Color(0xfff4e0);
+const UNDERWATER_NEUTRAL_TINT = new THREE.Color(0xd8f0f0);
+const tempUnderwaterTintColor = new THREE.Color(); // reused every frame in the underwater block below rather than allocated fresh each time
+const tempRainFogColor = new THREE.Color(); // reused every frame for the rain-fog effect below
+const tempSunDir = new THREE.Vector3(); // reused every frame for the lens-rain sun-glow projection below
+const tempCameraDir = new THREE.Vector3();
+const tempSunProjection = new THREE.Vector3();
+// Per "the fog is turning everything white" — was 0x8a97a8, a fairly
+// LIGHT pale gray-blue. A light fog color asserting itself over
+// mid/background distance washes everything toward white/pale rather
+// than reading as genuine storm gloom, which is exactly the reported
+// symptom. Real heavy-rain atmosphere is dark and moody, not bright —
+// this is now a deep, cool storm-gray, much closer in spirit to this
+// project's own existing STORM_SEA_COLOR (0x1a3226) than to a light haze.
+const RAIN_FOG_COLOR = new THREE.Color(0x2e3640);
 const UNDERWATER_STYLE = {
   default: {
     fogColor: 0x0a2838, fogDensity: 0.14, sunColor: 0x1a4560, sunMult: 0.08,
@@ -89,9 +158,20 @@ const titlePlayBtn = document.getElementById("rift-title-play-btn");
 const isTouchDevice = "ontouchstart" in window || navigator.maxTouchPoints > 0;
 if (isTouchDevice) document.body.classList.add("rift-touch-mode");
 let touchGameActive = false;
+// Per "camera won't move" investigation: isGameActive() previously used
+// controls.isLocked directly on desktop — meaning if the browser's
+// Pointer Lock API silently fails or isn't supported (a real, documented
+// gap on iOS/iPadOS Safari specifically), isGameActive() would return
+// false FOREVER, and since updateMovement() itself only ever runs
+// "if (isGameActive())", that's not just broken camera look — it's the
+// player unable to move AT ALL, with no fallback. desktopGameActive
+// mirrors touchGameActive exactly: set true on entering a level
+// regardless of whether controls.lock() actually succeeds, so core
+// gameplay never depends on that browser API working.
+let desktopGameActive = false;
 
 function isGameActive() {
-  return isTouchDevice ? touchGameActive : controls.isLocked;
+  return isTouchDevice ? touchGameActive : desktopGameActive;
 }
 
 // ---------------------------------------------------------------------------
@@ -142,11 +222,419 @@ const realisticCloudDomeHandle = createRealisticCloudDome(scene);
 const camera = new THREE.PerspectiveCamera(70, viewport.clientWidth / viewport.clientHeight, 0.1, 2000);
 camera.rotation.order = "YXZ";
 
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+// WebGPU renderer — per explicit request, step 1 of the staged plan
+// discussed before touching anything (renderer foundation first, before
+// any water/fluid-sim work builds on top of it). Real, confirmed facts
+// this decision rests on: WebGPURenderer has a documented, built-in
+// automatic fallback to WebGL2 when navigator.gpu isn't available, so
+// this does not need hand-written feature-detection/fallback logic of
+// its own — devices without WebGPU (older Safari, older Android
+// browsers) should keep working via that fallback path. What is
+// GENUINELY UNVERIFIED and needs real browser testing specifically:
+// whether the classic EffectComposer pipeline below (SSAOPass, bloom,
+// SMAA, the custom raw-GLSL lensRainPass) survives unmodified when the
+// ACTUAL WebGPU backend is what's rendering (as opposed to the WebGL2
+// fallback path, where it should behave exactly as before, since that's
+// genuine WebGL under the hood). Raw GLSL passes are a real, known
+// compatibility risk under true WebGPU execution — WebGPU natively
+// compiles WGSL/TSL nodes, not GLSL strings — which is why the final
+// composer.render() call further down is wrapped in a try/catch that
+// falls back to a plain direct render rather than letting a
+// post-processing failure hard-crash the whole scene. If that catch
+// block ever actually fires in testing, migrating each pass to
+// WebGPU-native TSL nodes (starting with the simplest ones) is the
+// planned next step — not something to guess at blind here.
+const renderer = new WebGPURenderer({ canvas, antialias: true });
+// Real visible loading indicator + timeout, per "no error in console" —
+// the most likely explanation for that exact symptom (nothing renders,
+// nothing throws) is a HANGING promise, not a failing one: if the
+// browser's WebGPU adapter/device request never resolves OR rejects,
+// await renderer.init() below would wait forever, silently, with
+// nothing to catch since nothing actually failed. This shows a real,
+// visible status while waiting, and races the init against a real
+// timeout so a hang becomes a genuine, informative error message
+// instead of indefinite silence.
+const riftLoadingEl = document.createElement("div");
+riftLoadingEl.id = "rift-loading-indicator";
+riftLoadingEl.style.cssText = "position:fixed; bottom:12px; left:12px; z-index:99998; font:12px/1.4 ui-monospace, monospace; color:#7fd8a0; background:rgba(0,0,0,0.55); padding:8px 10px; border-radius:6px;";
+riftLoadingEl.textContent = "Initializing WebGPU renderer…";
+document.body.appendChild(riftLoadingEl);
+function riftInitWithTimeout(promise, ms, label) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(label + " never resolved after " + ms + "ms — the browser's WebGPU adapter/device request is very likely hanging rather than failing cleanly, which explains why nothing appeared and nothing threw an error.")), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
+}
+await riftInitWithTimeout(renderer.init(), 10000, "renderer.init()");
+riftLoadingEl.remove();
+let composerRenderFailedOnce = false; // used by the composer.render() safety net far below in animate() — logs the WebGPU/post-processing incompatibility once instead of every frame
+// Tone mapping ITSELF is now set by applyPostFx() below (from the new
+// tone-mapping dropdown's tier default/override, per explicit
+// "individually" follow-up) rather than hardcoded here — this fixed
+// exposure baseline (not part of that dropdown) still applies regardless
+// of which curve is picked.
+renderer.toneMappingExposure = 1.0;
 renderer.setSize(viewport.clientWidth, viewport.clientHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, getGraphicsSettings().pixelRatioCap));
 renderer.shadowMap.enabled = getGraphicsSettings().shadowsEnabled;
+// REVERTED per "shadows look wrong, not showing true shading" — this is
+// exactly the risk flagged when VSMShadowMap was first tried as a PCSS
+// substitute: VSM is known to sometimes let light "bleed" through
+// overlapping shadow-casters, and this palm tree's many overlapping
+// frond planes are exactly the kind of geometry where that shows up.
+// Back to the standard PCFSoftShadowMap — genuine directional shading
+// instead of VSM's variance-based approximation, at the cost of giving
+// up the smoother edges VSM offered.
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+// Real contact shadows (ambient occlusion) — per explicit "let's do it"
+// follow-up. This is the project's first post-processing pipeline of any
+// kind (everything else renders straight to the canvas or an offscreen
+// target via plain renderer.render() calls) — genuinely new
+// architecture, not a tuning change. SSAOPass darkens creases/contact
+// points (where a tree trunk meets the sand, where terrain folds in on
+// itself) based on actual nearby depth/normal data, independent of the
+// sun's current direction — this is what a directional shadow alone can
+// never give you: the sun can be on the far side of the sky and a tree's
+// base will still darken slightly right where it touches the ground.
+// REAL COST, tier-gated below (Low skips this pass entirely): SSAOPass
+// renders the scene's depth+normals in an extra pass, then blurs/composes
+// the AO term — genuine additional GPU work every frame, same category
+// of cost this project already fought hard to control in the reflection/
+// refraction throttling work.
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const ssaoPass = new SSAOPass(scene, camera, viewport.clientWidth, viewport.clientHeight);
+// Tuned to THIS world's scale (player eye height 1.6, a tree trunk ~1-2
+// units wide) rather than SSAOPass's own defaults, which assume a
+// larger/different scene scale — the defaults read as either invisible
+// (radius too small to reach neighboring geometry) or a heavy fog-like
+// darkening over everything (radius too large) at this project's actual
+// unit scale.
+// Reduced from kernelRadius=4/maxDistance=0.12 per "something doesn't
+// look right" — the palm tree canopy's dense, closely-overlapping frond
+// planes were building up heavy AO darkening between themselves (SSAO
+// naturally piles onto tightly-packed geometry like this), reading as an
+// odd dark blotch through the canopy rather than a subtle ground-contact
+// shadow. Smaller radius/distance keeps it scoped closer to genuine
+// contact points.
+ssaoPass.kernelRadius = 2.5;
+ssaoPass.minDistance = 0.0005;
+ssaoPass.maxDistance = 0.08;
+composer.addPass(ssaoPass);
+// Selective bloom — the sun disc, resonance crystals, and the caustics
+// net are all bright/emissive but nothing actually GLOWS by default.
+// Per explicit "dropdown options... individually" follow-up, this is no
+// longer a single on/off bundled with AA — BLOOM_LEVELS below defines
+// real distinct presets (strength/radius/threshold), picked via its own
+// dropdown. Constructed here with the 'off' preset's values; applyPostFx
+// (below) sets the real preset immediately after.
+const bloomPass = new UnrealBloomPass(new THREE.Vector2(viewport.clientWidth, viewport.clientHeight), 0, 0.4, 1.0);
+composer.addPass(bloomPass);
+// Real anti-aliasing for the final composited image — renderer's own
+// antialias:true (set at construction above) only affects a DIRECT
+// render straight to the canvas; the moment output goes through
+// EffectComposer (as it already does here, for SSAO/bloom), that native
+// MSAA no longer applies to what actually reaches the screen, since
+// composer's intermediate render targets aren't multisampled by default.
+// Two selectable methods per explicit "individually" follow-up — SMAA
+// (better edge quality, the previous single hardcoded choice) and FXAA
+// (cheaper, a real option for weaker devices) — plus Off. Both passes
+// exist simultaneously; applyPostFx enables at most one at a time.
+const smaaPass = new SMAAPass(viewport.clientWidth * renderer.getPixelRatio(), viewport.clientHeight * renderer.getPixelRatio());
+composer.addPass(smaaPass);
+const fxaaPass = new ShaderPass(FXAAShader);
+composer.addPass(fxaaPass);
+// Lens raindrops — per explicit "camera lens rain drops" request. A
+// genuinely different effect from the falling rain particles elsewhere
+// in this project (those are real 3D geometry in the world; this is a
+// 2D screen-space post-process simulating water clinging to/sliding down
+// the camera's own lens), which is why it lives here in the composer
+// chain rather than in weather.js. Uses the SAME proven Voronoi-cell
+// technique already used elsewhere in this project (foamVoronoiF1F2/
+// causticVoronoiF1F2) for organic, non-tiling droplet shapes without
+// needing an external texture asset — two overlapping scales (a few
+// larger/slower drops, many smaller/faster ones) so it doesn't read as
+// an obviously tiled grid. Each droplet refracts the scene behind it
+// (samples tDiffuse at an offset UV based on distance from the drop's
+// own center, approximating a real droplet's convex-lens bulge) and gets
+// a soft bright rim at its edge, the way real droplets catch light.
+// uRainIntensity drives both how many drops appear and how fast they
+// slide, so this fades in/out with actual weather rather than always
+// being present. Uses the well-established default full-screen-quad
+// vertex shader boilerplate (identical in spirit to what FXAAShader/
+// every other ShaderPass here already relies on) — this is a NEW,
+// standalone shader program, not a patch into an existing material's
+// internals the way the (once-reverted, see the sky-seam saga earlier
+// this project) onBeforeCompile shaders are, which is a meaningfully
+// lower-risk way to add a new effect.
+const lensRainPass = new ShaderPass({
+  uniforms: {
+    tDiffuse: { value: null },
+    uTime: { value: 0 },
+    uRainIntensity: { value: 0 },
+    uResolution: { value: new THREE.Vector2(viewport.clientWidth, viewport.clientHeight) },
+    // Real sun screen position (UV space), projected from its actual
+    // world position each frame — see the animate loop below. A
+    // sentinel far outside [0,1] (set whenever the sun isn't usefully
+    // visible — behind the camera or below the horizon) means the glow
+    // naturally never triggers rather than needing a separate on/off
+    // flag.
+    uSunScreenPos: { value: new THREE.Vector2(-10, -10) },
+  },
+  vertexShader: `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    uniform sampler2D tDiffuse;
+    uniform float uTime;
+    uniform float uRainIntensity;
+    uniform vec2 uResolution;
+    uniform vec2 uSunScreenPos;
+    varying vec2 vUv;
+
+    vec2 dropHash(vec2 p) {
+      float n = sin(dot(p, vec2(41.0, 289.0)));
+      return fract(vec2(262144.0, 32768.0) * n);
+    }
+
+    // Returns (distance to nearest droplet center [using an elongated
+    // metric for sliding droplets], offset-vector.x, offset-vector.y,
+    // wet-trail mask). The wet-trail mask is a SEPARATE signal from the
+    // droplet's own body -- a thin, full-column band at this specific
+    // droplet's own X position, present only for droplets whose own hash
+    // marks them as "streaky" (roughly a third of them, matching the
+    // reference photo's mix of plain droplets and ones with long visible
+    // trails). Deliberately NOT direction-dependent on the droplet's
+    // motion (which would need a sign convention on screen-space Y that
+    // can't be verified without a live browser) -- a fixed vertical
+    // column at the droplet's own X already reads as "the path it has
+    // rolled along," since the droplet itself is what's actually
+    // animating down that column over time.
+    // Returns (distance to nearest droplet center [using an elongated
+    // metric for sliding droplets], offset-vector.x, offset-vector.y,
+    // wet-trail mask). The wet-trail mask is a SEPARATE signal from the
+    // droplet's own body -- a thin, full-column band at this specific
+    // droplet's own X position, present only for droplets whose own hash
+    // marks them as "streaky" (roughly a third of them, matching the
+    // reference photo's mix of plain droplets and ones with long visible
+    // trails). Deliberately NOT direction-dependent on the droplet's
+    // motion (which would need a sign convention on screen-space Y that
+    // can't be verified without a live browser) -- a fixed vertical
+    // column at the droplet's own X already reads as "the path it has
+    // rolled along," since the droplet itself is what's actually
+    // animating down that column over time.
+    //
+    // wrapFade (out param) is the fix for droplets visibly POPPING in and
+    // out of existence: each droplet's own cellPoint.y slides via
+    // fract(), which means once it crosses back around from 0 to 1 (or
+    // vice versa) it JUMPS instantly to the opposite side of its own cell
+    // -- a real, structural artifact of using fract() for looping motion,
+    // not a tuning issue. wrapFade fades a droplet to fully invisible in
+    // the brief window right before/after that wrap point, so the actual
+    // jump happens while nothing is visible there, then fades back in
+    // smoothly on the other side -- the standard, well-established fix
+    // for exactly this class of looping-animation seam.
+    vec4 dropVoronoi(vec2 p, float slideMix, out float wrapFade) {
+      vec2 ip = floor(p);
+      vec2 fp = fract(p);
+      float minDist = 8.0;
+      vec2 minOffset = vec2(0.0);
+      float streakMask = 0.0;
+      float minCellY = 0.0;
+      for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+          vec2 neighbor = vec2(float(x), float(y));
+          vec2 cellPoint = dropHash(ip + neighbor);
+          float slideSpeed = 0.12 + cellPoint.x * 0.3;
+          float streak = 1.0 + cellPoint.y * 3.5 * slideMix;
+          bool isStreaky = cellPoint.x > 0.6;
+          cellPoint.y = fract(cellPoint.y + uTime * slideSpeed * slideMix); // was "- uTime * ..." — confirmed backwards (moving up instead of down), flipped
+          vec2 offset = neighbor + cellPoint - fp;
+          vec2 stretched = vec2(offset.x, offset.y / streak);
+          float d = length(stretched);
+          if (d < minDist) {
+            minDist = d;
+            minOffset = offset;
+            streakMask = isStreaky ? (1.0 - smoothstep(0.0, 0.022, abs(offset.x))) : 0.0;
+            minCellY = cellPoint.y;
+          }
+        }
+      }
+      wrapFade = smoothstep(0.0, 0.12, minCellY) * smoothstep(0.0, 0.12, 1.0 - minCellY);
+      return vec4(minDist, minOffset, streakMask);
+    }
+
+    void main() {
+      vec2 uv = vUv;
+      float aspect = uResolution.x / max(1.0, uResolution.y);
+      vec2 p = uv * vec2(aspect, 1.0);
+      float slideMix = 0.25 + uRainIntensity * 0.6;
+
+      // Three overlapping scales (large/medium/tiny) for real density
+      // matching a rain-soaked window, not a handful of sparse circles.
+      float wrapFade1, wrapFade2, wrapFade3;
+      vec4 v1 = dropVoronoi(p * 7.0, slideMix, wrapFade1);
+      float r1 = 0.17;
+      vec4 v2 = dropVoronoi(p * 13.0 + 37.0, slideMix, wrapFade2);
+      float r2 = 0.12;
+      vec4 v3 = dropVoronoi(p * 21.0 + 91.0, slideMix, wrapFade3);
+      float r3 = 0.075;
+
+      float in1 = (1.0 - smoothstep(r1 * 0.6, r1, v1.x)) * wrapFade1;
+      float in2 = (1.0 - smoothstep(r2 * 0.6, r2, v2.x)) * wrapFade2;
+      float in3 = (1.0 - smoothstep(r3 * 0.6, r3, v3.x)) * wrapFade3;
+      // Per explicit "should start with a few drops before it increases
+      // to more and more, then slowly fade out" — the 0.25 floor added
+      // last round (to keep light rain from showing nothing) was
+      // actually working AGAINST this: it made coverage jump straight to
+      // a quarter-full field the instant rain started at all, regardless
+      // of how gradually the underlying rainIntensity itself ramps
+      // (weather.js already fades this over ~20-30s). A near-zero floor
+      // here is what actually lets that existing gradual ramp show
+      // through visually — starting sparse, building up, and fading back
+      // down the same way, instead of popping to a baseline density.
+      float coverage = clamp(0.03 + uRainIntensity * 1.35, 0.0, 1.0);
+      float dropMask = max(max(in1, in2), in3) * coverage;
+
+      // Pick whichever layer's droplet actually covers this pixel (its
+      // own distance/offset/radius all travel together, needed below for
+      // a correctly-normalized lens profile).
+      float wonDist; vec2 wonOffset; float wonR; float wonRim; float streakMask;
+      if (in1 >= in2 && in1 >= in3) {
+        wonDist = v1.x; wonOffset = v1.yz; wonR = r1;
+        wonRim = smoothstep(r1 * 0.5, r1 * 0.68, v1.x) * (1.0 - smoothstep(r1 * 0.68, r1, v1.x));
+        streakMask = v1.w;
+      } else if (in2 >= in3) {
+        wonDist = v2.x; wonOffset = v2.yz; wonR = r2;
+        wonRim = smoothstep(r2 * 0.5, r2 * 0.68, v2.x) * (1.0 - smoothstep(r2 * 0.68, r2, v2.x));
+        streakMask = v2.w;
+      } else {
+        wonDist = v3.x; wonOffset = v3.yz; wonR = r3;
+        wonRim = smoothstep(r3 * 0.5, r3 * 0.68, v3.x) * (1.0 - smoothstep(r3 * 0.68, r3, v3.x));
+        streakMask = v3.w;
+      }
+
+      // THE ACTUAL FIX for the hollow-ring look: normalized direction
+      // (unit vector, not the raw offset whose OWN magnitude used to be
+      // baked directly into the bend strength) times a smooth strength
+      // curve that ramps up across the WHOLE droplet interior via
+      // smoothstep, not concentrated in a thin band right at the rim.
+      // The old formula left each droplet's middle nearly undistorted
+      // (matching the background almost exactly) with a sharp bend only
+      // at the boundary -- structurally a ring, regardless of tuning.
+      // This is real water now: distortion visible throughout, strongest
+      // toward the edge the way a genuine convex lens actually behaves,
+      // not just AT the edge.
+      float normRadius = clamp(wonDist / wonR, 0.0, 1.0);
+      float lensPower = smoothstep(0.0, 1.0, normRadius);
+      vec2 dir = wonDist > 0.001 ? wonOffset / wonDist : vec2(0.0);
+      vec2 refractOffset = -dir * lensPower * 0.16 * dropMask;
+
+      // Wet trail — a distinct, WEAKER effect from the droplet's own
+      // lens body: a mild vertical pull (a thin flowing rivulet, not a
+      // full lens sphere) plus darkening the glass slightly rather than
+      // brightening it, since real wet streaks read as a darker, more
+      // saturated version of what's behind them.
+      vec2 trailOffset = vec2(0.0, 0.02) * streakMask * coverage; // sign flipped to match the corrected slide direction above
+
+      vec4 color = texture2D(tDiffuse, clamp(uv + refractOffset + trailOffset, 0.001, 0.999));
+      color.rgb *= mix(1.0, 0.85, streakMask * coverage);
+
+      // Per explicit "shouldn't light up the whole drop like a ring,
+      // just reflect a spot like glass" — the old highlight brightened
+      // the ENTIRE rim uniformly once a droplet was near the sun's
+      // screen direction; real glass/water only throws back a small
+      // glint at whichever single point on its curved surface happens to
+      // be angled correctly toward the light, not the whole edge at
+      // once. sunDir is the direction from THIS pixel toward the sun
+      // (converted into the same aspect-corrected space dir already
+      // lives in, for a consistent angle comparison) — dot(dir, sunDir)
+      // is near 1 only for the small arc of the rim that's actually
+      // facing the sun, and a high power exponent sharpens that into a
+      // tight spot rather than a soft half-moon.
+      vec2 sunDir = normalize((uSunScreenPos - uv) * vec2(aspect, 1.0) + 0.0001);
+      float facingSun = max(0.0, dot(dir, sunDir));
+      float highlightSpot = pow(facingSun, 10.0);
+      float distToSun = length(uv - uSunScreenPos);
+      float sunProximity = 1.0 - smoothstep(0.0, 0.55, distToSun);
+      color.rgb += vec3(wonRim * sunProximity * highlightSpot * 2.2 * coverage);
+
+      gl_FragColor = color;
+    }
+  `,
+});
+composer.addPass(lensRainPass);
+composer.addPass(new OutputPass());
+
+// Bloom presets — 'off' truly disables the pass (skips its extra
+// render-target work entirely, not just zeroed strength); the other
+// three are real distinct looks, not a single tuned value times a
+// multiplier, so each can be picked deliberately rather than treated as
+// "how much of the one preset."
+// radius/threshold retuned per "still looking very boxy" (moon, not just
+// the sun — so this isn't just the starburst texture's own ray alignment,
+// UnrealBloomPass's own multi-mip separable blur has a real, documented
+// tendency toward a slightly cross/box-shaped halo around small isolated
+// bright points specifically, independent of the source texture). radius
+// cut roughly in half across the board — it's the parameter most
+// directly tied to how far the blend spreads across mip levels, so a
+// tighter radius shrinks the visible area where that artifact shows.
+// threshold nudged up slightly too, so less of the moon/sun's fairly
+// uniform bright disc crosses into bloom range to begin with. This is a
+// real, reasoned mitigation, not a guaranteed full fix — UnrealBloomPass
+// is architecturally not built for perfectly round halos around small
+// point sources; if this still isn't enough, the more complete fix is
+// excluding the sun/moon specifically from the bloom pass via a
+// selective-bloom (THREE.Layers) restructure, since they already have
+// their own hand-authored glow sprites and don't need generic bloom on
+// top of that at all — a bigger, riskier change than this tuning pass,
+// worth doing deliberately rather than blind if this doesn't resolve it.
+const BLOOM_LEVELS = {
+  off: null,
+  subtle: { strength: 0.35, radius: 0.2, threshold: 0.9 },
+  moderate: { strength: 0.55, radius: 0.25, threshold: 0.88 },
+  strong: { strength: 0.85, radius: 0.35, threshold: 0.82 },
+};
+// Tone mapping curves — three.js's full built-in set. 'none' is the
+// engine's own pre-FU251 default (NoToneMapping — colors above 1.0 per
+// channel just clip to flat white); the others roll off highlights with
+// increasingly filmic character. Exposure fixed at 1.0 for all of them —
+// a per-curve exposure control would be a reasonable future refinement
+// but isn't part of this round's ask.
+const TONE_MAPPINGS = {
+  none: THREE.NoToneMapping,
+  linear: THREE.LinearToneMapping,
+  reinhard: THREE.ReinhardToneMapping,
+  cineon: THREE.CineonToneMapping,
+  aces: THREE.ACESFilmicToneMapping,
+};
+
+function applyPostFx() {
+  const s = getGraphicsSettings();
+  const bloom = BLOOM_LEVELS[s.bloomLevel] ?? null;
+  bloomPass.enabled = bloom !== null;
+  if (bloom) {
+    bloomPass.strength = bloom.strength;
+    bloomPass.radius = bloom.radius;
+    bloomPass.threshold = bloom.threshold;
+  }
+  const aa = s.aaMethod ?? "off";
+  smaaPass.enabled = aa === "smaa";
+  fxaaPass.enabled = aa === "fxaa";
+  renderer.toneMapping = TONE_MAPPINGS[s.toneMapping] ?? THREE.NoToneMapping;
+}
+
+function applySsaoTier() {
+  ssaoPass.enabled = getGraphicsSettings().ssaoEnabled;
+  applyPostFx();
+}
+applySsaoTier();
 
 // A real environment map for reflective materials (currently: the ocean
 // water's clearcoat layer) to actually reflect, instead of the black a
@@ -323,14 +811,53 @@ function updateWaterRefraction(liquidHandle) {
   renderer.getSize(refractionResolution);
 }
 
+// null = use the tier's own pixelRatioCap system (native-ish, scaled by
+// device pixel density) as before; { height: N } = a fixed, literal
+// render-buffer resolution — 720/1080/1440/2160 — completely independent
+// of the device's actual screen density, per explicit "720p/1080p/2K/4K"
+// request. Width is derived from the CURRENT aspect ratio each resize
+// (not hardcoded 16:9), so it stays correct whether or not the aspect
+// override below is also active.
+let resolutionOverride = null;
 function resizeToViewport() {
   const w = viewport.clientWidth, h = viewport.clientHeight;
   if (w === 0 || h === 0) return;
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
-  renderer.setSize(w, h);
-  const pixelRatio = renderer.getPixelRatio();
-  underwaterRenderTarget.setSize(w * pixelRatio, h * pixelRatio);
+  if (resolutionOverride) {
+    // pixelRatio forced to 1 here because renderer.setSize's own internal
+    // math multiplies whatever width/height you pass it by the
+    // renderer's CURRENT pixelRatio to get the real drawing buffer — left
+    // at the device's actual ratio, that would silently scale this
+    // already-exact target again. updateStyle (setSize's 3rd arg) =
+    // false: leaves the canvas's own CSS box size exactly as
+    // #rift-viewport's layout/aspect-ratio determined it — the browser
+    // then stretches this fixed-pixel buffer to fill that box, the same
+    // relationship a game console's internal "render resolution" has to
+    // the TV's own display resolution.
+    renderer.setPixelRatio(1);
+    const targetH = resolutionOverride.height;
+    const targetW = Math.round(targetH * (w / h));
+    renderer.setSize(targetW, targetH, false);
+    composer.setSize(targetW, targetH);
+    ssaoPass.setSize(targetW, targetH);
+    underwaterRenderTarget.setSize(targetW, targetH);
+    // FXAAShader needs its resolution as a texel-size uniform (1/pixels),
+    // not a plain width/height — unlike every other pass here, ShaderPass
+    // doesn't auto-resize this from composer.setSize, so it's set by hand
+    // wherever the render resolution changes.
+    fxaaPass.material.uniforms["resolution"].value.set(1 / targetW, 1 / targetH);
+    lensRainPass.material.uniforms.uResolution.value.set(targetW, targetH);
+  } else {
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, getGraphicsSettings().pixelRatioCap));
+    renderer.setSize(w, h);
+    composer.setSize(w, h);
+    ssaoPass.setSize(w, h);
+    const pixelRatio = renderer.getPixelRatio();
+    underwaterRenderTarget.setSize(w * pixelRatio, h * pixelRatio);
+    fxaaPass.material.uniforms["resolution"].value.set(1 / (w * pixelRatio), 1 / (h * pixelRatio));
+    lensRainPass.material.uniforms.uResolution.value.set(w * pixelRatio, h * pixelRatio);
+  }
 }
 new ResizeObserver(resizeToViewport).observe(viewport);
 
@@ -482,12 +1009,20 @@ function enterFullscreen() {
   lockedScrollY = window.scrollY;
   document.body.appendChild(viewport);
   document.documentElement.style.overflow = "hidden";
+  // Per "2-finger touchpad look not working in fullscreen" — paired with
+  // the same property on #rift-viewport's own CSS rule (index.html), but
+  // set at the document level too since the browser's built-in swipe-to-
+  // navigate-back/forward gesture (the likely culprit — see that CSS
+  // comment for the full reasoning) is more tied to the page/document's
+  // own scroll behavior than a nested element's.
+  document.documentElement.style.overscrollBehavior = "none";
   document.body.style.position = "fixed";
   document.body.style.top = `-${lockedScrollY}px`;
   document.body.style.left = "0";
   document.body.style.width = "100%";
   document.body.style.height = "100%";
   document.body.style.overflow = "hidden";
+  document.body.style.overscrollBehavior = "none";
   viewport.classList.add("rift-fullscreen");
   fullscreenBtn?.classList.add("gfs-active");
   resizeToViewport();
@@ -502,12 +1037,14 @@ function exitFullscreen() {
     viewportHome.parent.appendChild(viewport);
   }
   document.documentElement.style.overflow = "";
+  document.documentElement.style.overscrollBehavior = "";
   document.body.style.position = "";
   document.body.style.top = "";
   document.body.style.left = "";
   document.body.style.width = "";
   document.body.style.height = "";
   document.body.style.overflow = "";
+  document.body.style.overscrollBehavior = "";
   window.scrollTo(0, lockedScrollY);
   resizeToViewport();
 }
@@ -527,13 +1064,20 @@ scene.add(ambientLight);
 const sun = new THREE.DirectionalLight(0xffffff, 1.1);
 sun.position.set(60, 100, 40);
 sun.castShadow = true;
-// Shadow frustum sized to the terrain's own extent (see terrain.js's
-// TERRAIN_SIZE) rather than Three.js's small default — otherwise most of
-// the level would fall outside the shadow camera entirely. Resolution
-// kept moderate; this is a single directional light so the cost is one
-// shadow pass regardless, but a bigger map is still real GPU/memory cost
-// on lower-end devices.
-const SHADOW_EXTENT = 140;
+// Shadow frustum — per "how can we improve the shadows," shrunk from 140
+// (sized to cover the WHOLE level statically, extent matching
+// terrain.js's TERRAIN_SIZE) down to a much tighter radius. This only
+// works because the frustum now FOLLOWS THE PLAYER every frame instead
+// of sitting fixed at world origin (see the animate-loop block below,
+// "shadow camera follow") — a smaller frustum covering just the player's
+// immediate surroundings gives far more shadow-map texels per world
+// unit for the exact same texture resolution/memory cost, which is what
+// actually determines how sharp/blocky a shadow edge looks up close.
+// 45 was picked to comfortably cover typical nearby shadow-casting
+// geometry (trees, rocks, decorations within normal view distance)
+// without shrinking so far that shadows visibly vanish at the frustum's
+// own edge while just walking around.
+const SHADOW_EXTENT = 45;
 sun.shadow.camera.left = -SHADOW_EXTENT;
 sun.shadow.camera.right = SHADOW_EXTENT;
 sun.shadow.camera.top = SHADOW_EXTENT;
@@ -542,7 +1086,61 @@ sun.shadow.camera.near = 1;
 sun.shadow.camera.far = 500;
 sun.shadow.mapSize.set(getGraphicsSettings().shadowMapSize, getGraphicsSettings().shadowMapSize);
 sun.shadow.bias = -0.0015;
+// normalBias added alongside the existing depth bias, per "still no
+// shadow under the trees" — a flat depth bias alone is a common cause of
+// "peter-panning" (the shadow detaches from its caster enough to miss
+// the actual contact point entirely) especially for THIN, mostly-
+// vertical geometry like a tree trunk. normalBias offsets along the
+// surface NORMAL instead of view depth, which scales more sensibly with
+// the light's incidence angle and is the standard complement/fix for
+// this specific failure mode.
+sun.shadow.normalBias = 0.05;
+// Per explicit "more realistic shadows" request: PCFSoftShadowMap
+// (already the renderer's shadow type, set below) supports a `radius`
+// property controlling edge softness — left at its default (1, a fairly
+// tight/hard edge) until now. Real sunlight isn't a point source, so real
+// shadows have a genuine soft penumbra, not a crisp cutout. This is a
+// UNIFORM softness (doesn't get softer with distance from the caster the
+// way a true penumbra physically would — that needs PCSS, a custom
+// shader technique, not attempted here) but is a real, direct
+// improvement over the previous hard edge with no added render cost.
+sun.shadow.radius = 3;
+// blurSamples removed — was VSM-specific, has no effect now that
+// shadowMap.type is back to PCFSoftShadowMap.
 scene.add(sun);
+// Explicit target, added to the scene — a DirectionalLight's target
+// otherwise silently defaults to an Object3D sitting at local (0,0,0)
+// that's never part of the scene graph, meaning the light always points
+// at world origin regardless of the light's own position. Needed as a
+// real scene object now that the "shadow camera follow" logic below
+// repositions this every frame.
+sun.target.name = "sunShadowTarget";
+scene.add(sun.target);
+
+// Real moonlight — per explicit "shadows... during night" request.
+// Previously the moon was purely decorative (a sprite, no THREE.Light at
+// all — see dayNightCycle.js's moonBody), so once the sun set there was
+// no light source left that could cast a shadow at all (ambient light
+// doesn't). Dim on purpose (peak intensity 0.22, set per-frame in
+// dayNightCycle.js — this is just the initial/structural setup) so it
+// reads as a subtle real light, not a second sun. Shadow map kept at
+// HALF the sun's own resolution — moonlit shadows are a soft, subtle
+// nice-to-have, not worth doubling the shadow-pass cost for.
+const moonLight = new THREE.DirectionalLight(0xaebedd, 0);
+moonLight.castShadow = true;
+moonLight.shadow.camera.left = -SHADOW_EXTENT;
+moonLight.shadow.camera.right = SHADOW_EXTENT;
+moonLight.shadow.camera.top = SHADOW_EXTENT;
+moonLight.shadow.camera.bottom = -SHADOW_EXTENT;
+moonLight.shadow.camera.near = 1;
+moonLight.shadow.camera.far = 500;
+moonLight.shadow.mapSize.set(getGraphicsSettings().shadowMapSize / 2, getGraphicsSettings().shadowMapSize / 2);
+moonLight.shadow.bias = -0.0015;
+moonLight.shadow.normalBias = 0.05;
+moonLight.shadow.radius = 4; // slightly softer than the sun's own — a dim, diffuse moonlit shadow reads as even less crisp than a bright sunlit one
+scene.add(moonLight);
+moonLight.target.name = "moonShadowTarget";
+scene.add(moonLight.target);
 
 let starfieldPoints = null;
 {
@@ -572,10 +1170,17 @@ let starfieldPoints = null;
   starGeo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.8, sizeAttenuation: true, transparent: true, opacity: 1 });
   starfieldPoints = new THREE.Points(starGeo, starMat);
+  // Per explicit "stars... showing in front of the background clouds"
+  // report — had no explicit renderOrder at all (defaulted to 0), while
+  // the cloud dome explicitly uses -95/-100 (clouds.js). Same fix as
+  // dayNightCycle.js's sun/moon body and distant planet — -101 puts it
+  // behind every cloud layer, consistent with stars being the farthest
+  // background element, not painted on top of nearer cloud geometry.
+  starfieldPoints.renderOrder = -101;
   scene.add(starfieldPoints);
 }
 
-const dayNightCycle = createDayNightCycle(scene, sun, ambientLight, starfieldPoints);
+const dayNightCycle = createDayNightCycle(scene, sun, ambientLight, starfieldPoints, undefined, moonLight);
 
 // ---------------------------------------------------------------------------
 // Controls
@@ -639,6 +1244,12 @@ function setKey(code, value) {
 const velocity = new THREE.Vector3();
 let footstepDistance = 0;
 const FOOTSTEP_STRIDE = 2.4; // world units between footstep sounds — tied to distance actually covered, not a fixed timer, so sprinting/slow movement both sound right
+const WALK_BOB_SPEED = Math.PI * 4; // ~2 full up-down cycles per second — roughly matches a natural walking cadence
+const WALK_BOB_HEIGHT = 0.045; // world units of vertical camera bob at peak
+const WALK_SHAKE_ROLL = 0.006; // radians of subtle camera roll shake while walking
+let playerMovingThisFrame = false; // set inside updateMovement() below (where `moving` actually originates), read later in animate() for the camera bob/shake — module-level since updateMovement is a separate, earlier-defined function, not nested inside animate()
+let walkBobPhase = 0; // continuously accumulates while walking (never hard-reset — see the eased strength below for why), wraps naturally through sin()'s own periodicity
+let walkBobStrength = 0; // eases toward 1 while walking / 0 while not, so starting or stopping mid-swing settles smoothly instead of snapping
 
 function updateMovement(dt, grounded, swimming) {
   velocity.set(0, 0, 0);
@@ -648,13 +1259,20 @@ function updateMovement(dt, grounded, swimming) {
   if (keys.right) velocity.x += 1;
   const moving = velocity.lengthSq() > 0;
   if (moving) velocity.normalize();
+  playerMovingThisFrame = moving; // captured for the camera bob/shake below, added after updatePlayerPhysics runs later this same frame
 
   // Water resistance — per explicit "decreases the movement speed just
   // like moving in real water" request. Takes priority over the
   // grounded/airborne distinction below (swimming has its own multiplier
   // regardless of whether the seafloor happens to be right under the
   // player's feet at this exact instant).
-  const speed = swimming ? WALK_SPEED * SWIM_SPEED_MULTIPLIER : WALK_SPEED * (grounded ? 1 : AIR_CONTROL);
+  // NATURAL_WALK_MULTIPLIER — per explicit "change the walking to be
+  // slower, more natural" — WALK_SPEED itself lives in physics.js (not
+  // in hand this session), so this is a local multiplier applied on top
+  // rather than editing that constant directly; same net effect without
+  // needing that file.
+  const NATURAL_WALK_MULTIPLIER = 0.72;
+  const speed = (swimming ? WALK_SPEED * SWIM_SPEED_MULTIPLIER : WALK_SPEED * (grounded ? 1 : AIR_CONTROL)) * NATURAL_WALK_MULTIPLIER;
   controls.moveRight(velocity.x * speed * dt);
   controls.moveForward(-velocity.z * speed * dt);
 
@@ -662,7 +1280,14 @@ function updateMovement(dt, grounded, swimming) {
     footstepDistance += speed * dt;
     if (footstepDistance >= FOOTSTEP_STRIDE) {
       footstepDistance = 0;
-      playFootstep(currentLevelIdx >= 0 ? LEVELS[currentLevelIdx].biome : "ember");
+      // Per explicit "replace the old sound with the new one" — the
+      // synthesized one-shot footstep is now skipped entirely for
+      // Crystal biome, where the real walking-on-sand loop (below)
+      // handles the auditory feedback instead. Every other biome keeps
+      // the original synthesized sound unchanged — this sand recording
+      // isn't generically appropriate for lava/jungle/etc ground.
+      const onSand = currentLevelIdx >= 0 && LEVELS[currentLevelIdx].biome === "crystal";
+      if (!onSand) playFootstep(currentLevelIdx >= 0 ? LEVELS[currentLevelIdx].biome : "ember");
       if (footstepGlowHandle) {
         const groundY = terrainMesh ? (terrainHeightAt(LEVELS[currentLevelIdx], camera.position.x, camera.position.z, WORLD_SEED) ?? camera.position.y - PLAYER_EYE_HEIGHT) : camera.position.y - PLAYER_EYE_HEIGHT;
         spawnFootstepGlow(footstepGlowHandle, camera.position.x, groundY, camera.position.z);
@@ -671,6 +1296,14 @@ function updateMovement(dt, grounded, swimming) {
   } else {
     footstepDistance = 0; // reset mid-stride rather than carrying a partial step into the next movement burst
   }
+  // Real recorded walking-on-sand ambience, per explicit "replace the old
+  // sound with the new one" — now the ONLY walking sound in Crystal
+  // biome (the synthesized one-shot above is skipped there entirely, see
+  // the onSand check). Uses the same moving/grounded condition every
+  // frame (continuous on/off tracking, not just at each discrete stride
+  // event), gated to Crystal biome since this is a real sand recording,
+  // not generically appropriate for every biome's ground surface.
+  setWalkSoundsActive(moving && grounded && currentLevelIdx >= 0 && LEVELS[currentLevelIdx].biome === "crystal");
 
   // Soft world bounds — keeps the player off the terrain's falloff rim and
   // away from the finite plane's actual edge (see terrain.js/WORLD_BOUND_RADIUS
@@ -700,6 +1333,11 @@ let reflectionFrameCounter = 999; // starts high so the first eligible frame alw
 // fish).
 let realPalmTrees = [];
 let realFish = [];
+let realReefStructures = [];
+let realCoralPieces = [];
+let realSponges = [];
+let realPlants = [];
+let realFishSchools = [];
 let waterfallHandle = null;
 let oceanSurfaceDetailHandle = null;
 let riverCurrentHandle = null;
@@ -712,8 +1350,19 @@ let grassHandle = null;
 let flowersHandle = null;
 let footstepGlowHandle = null;
 let weatherHandle = null;
+// Debug preview controls, per explicit request — let time-of-day and
+// weather be previewed without waiting through a real 900s day/night
+// cycle or a real multi-minute storm interval. debugTimeScale only
+// multiplies the dt fed to updateDayNightCycle (see animate() below) —
+// deliberately NOT elapsedTime itself or the dt passed to physics/player
+// movement/ocean-wave updates, so this speeds up the sun/moon/sky only,
+// without making the player move faster or the water hyper-animate.
+let debugTimeScale = 1;
+let debugForceStorm = false;
 let cloudsHandle = null;
 let submergedState = false; // persists across frames — see the hysteresis check below for why a fresh threshold comparison every frame isn't enough
+let wasFullySubmergedLastFrame = false; // detects the exact moment of surfacing, for the post-swim wet-lens effect below
+let postSwimWetness = 0; // 0-1, set to 1 the instant the player surfaces, decays over ~60s — drives the SAME lens-rain shader as real rain, just from a different trigger
 let cloudLayerHandle = null;
 let horizonHandle = null;
 let wildlifeHandle = null;
@@ -799,7 +1448,7 @@ function teardownLevel() {
   horizonHandle = null;
   disposeWildlife(scene, wildlifeHandle);
   wildlifeHandle = null;
-  disposeLandmark(scene, landmarkHandle);
+  if (landmarkHandle) disposeLandmark(scene, landmarkHandle);
   landmarkHandle = null;
   for (const [, handle] of crystalHandles) disposeCrystalMesh(scene, handle);
   crystalHandles.clear();
@@ -830,6 +1479,16 @@ function teardownLevel() {
   realPalmTrees = [];
   for (const fish of realFish) scene.remove(fish.group);
   realFish = [];
+  for (const reef of realReefStructures) scene.remove(reef);
+  realReefStructures = [];
+  for (const coral of realCoralPieces) scene.remove(coral);
+  realCoralPieces = [];
+  for (const sponge of realSponges) scene.remove(sponge);
+  realSponges = [];
+  for (const plant of realPlants) scene.remove(plant);
+  realPlants = [];
+  for (const school of realFishSchools) scene.remove(school.group);
+  realFishSchools = [];
 }
 
 // Orients the camera to face AWAY from the biome's landmark — that's the
@@ -895,6 +1554,78 @@ function getSandBumpTexture() {
   return sandBumpTexture;
 }
 
+// Per explicit "let's add some sand to the seafloor" — a real, fuller PBR
+// texture set (color + normal + roughness) replacing the older 3-texture
+// setup above wherever it's actually used below. The normal map here is
+// specifically the OpenGL-convention variant (three.js/WebGL's own
+// convention) — the source pack also included a DirectX variant, which
+// would render lighting inverted/wrong if used here by mistake. AO and
+// height maps were also provided but deliberately NOT wired in: aoMap
+// requires a second UV channel (uv2) this terrain geometry doesn't have,
+// and true height-map displacement needs real vertex-shader work — both
+// meaningfully riskier than a straightforward texture swap, so left out
+// rather than attempted blind.
+let seafloorSandColorTexture = null;
+function getSeafloorSandColorTexture() {
+  if (seafloorSandColorTexture) return seafloorSandColorTexture;
+  const url = new URL("textures/seafloor_sand_color.jpg", import.meta.url).href;
+  seafloorSandColorTexture = new THREE.TextureLoader().load(
+    url,
+    () => console.log("[main] seafloor sand color texture loaded:", url),
+    undefined,
+    (err) => console.error("[main] seafloor sand color texture FAILED to load:", url, err)
+  );
+  seafloorSandColorTexture.colorSpace = THREE.SRGBColorSpace; // real baked color, same correction the old sandColorTexture needed
+  seafloorSandColorTexture.wrapS = seafloorSandColorTexture.wrapT = THREE.RepeatWrapping;
+  return seafloorSandColorTexture;
+}
+let seafloorSandNormalTexture = null;
+function getSeafloorSandNormalTexture() {
+  if (seafloorSandNormalTexture) return seafloorSandNormalTexture;
+  const url = new URL("textures/seafloor_sand_normal.jpg", import.meta.url).href;
+  seafloorSandNormalTexture = new THREE.TextureLoader().load(
+    url,
+    () => console.log("[main] seafloor sand normal texture loaded:", url),
+    undefined,
+    (err) => console.error("[main] seafloor sand normal texture FAILED to load:", url, err)
+  );
+  seafloorSandNormalTexture.wrapS = seafloorSandNormalTexture.wrapT = THREE.RepeatWrapping;
+  return seafloorSandNormalTexture;
+}
+let seafloorSandRoughnessTexture = null;
+function getSeafloorSandRoughnessTexture() {
+  if (seafloorSandRoughnessTexture) return seafloorSandRoughnessTexture;
+  const url = new URL("textures/seafloor_sand_roughness.jpg", import.meta.url).href;
+  seafloorSandRoughnessTexture = new THREE.TextureLoader().load(
+    url,
+    () => console.log("[main] seafloor sand roughness texture loaded:", url),
+    undefined,
+    (err) => console.error("[main] seafloor sand roughness texture FAILED to load:", url, err)
+  );
+  seafloorSandRoughnessTexture.wrapS = seafloorSandRoughnessTexture.wrapT = THREE.RepeatWrapping;
+  return seafloorSandRoughnessTexture;
+}
+// User-supplied caustics pattern (blurred cellular blob texture), per
+// explicit "use this texture to create an animated caustics map" request
+// — replaces the FU242 procedural Voronoi net with two animated samples
+// of this actual texture instead (see the caustics onBeforeCompile block
+// below). NOT sRGB — this is sampled as a grayscale brightness/noise
+// field to drive an effect, not displayed as color, same reasoning as
+// the normal/roughness maps just above.
+let causticPatternTexture = null;
+function getCausticPatternTexture() {
+  if (causticPatternTexture) return causticPatternTexture;
+  const url = new URL("textures/caustics_pattern.jpg", import.meta.url).href;
+  causticPatternTexture = new THREE.TextureLoader().load(
+    url,
+    () => console.log("[main] caustics pattern texture loaded:", url),
+    undefined,
+    (err) => console.error("[main] caustics pattern texture FAILED to load:", url, err)
+  );
+  causticPatternTexture.wrapS = causticPatternTexture.wrapT = THREE.RepeatWrapping;
+  return causticPatternTexture;
+}
+
 function buildLevel(levelIdx) {
   teardownLevel();
   currentLevelIdx = levelIdx;
@@ -926,20 +1657,26 @@ function buildLevel(levelIdx) {
     // portion is already heavily dressed with the caustics/wave-wash
     // effect below, so the grain reads fine there too.
     const repeatCount = Math.max(6, Math.round(TERRAIN_SIZE / 6));
-    const sandNormals = getSandNormalTexture().clone();
+    const sandNormals = getSeafloorSandNormalTexture().clone();
     sandNormals.needsUpdate = true;
     sandNormals.repeat.set(repeatCount, repeatCount);
     terrainMat.normalMap = sandNormals;
     terrainMat.normalScale = new THREE.Vector2(0.55, 0.55);
-    const sandColor = getSandColorTexture().clone();
+    const sandColor = getSeafloorSandColorTexture().clone();
     sandColor.needsUpdate = true;
     sandColor.repeat.set(repeatCount, repeatCount);
     terrainMat.map = sandColor;
-    const sandBump = getSandBumpTexture().clone();
-    sandBump.needsUpdate = true;
-    sandBump.repeat.set(repeatCount, repeatCount);
-    terrainMat.bumpMap = sandBump;
-    terrainMat.bumpScale = 0.4; // modest — this stacks with normalMap above rather than replacing it, so kept conservative to avoid double-counting the same surface detail into overly harsh shading
+    // roughnessMap replaces the old bumpMap here — a real PBR roughness
+    // channel (matte grit vs. smoother wet-looking patches) rather than
+    // bump's cruder fake-height approximation, now that a genuine
+    // roughness map is actually available. roughness stays set (0.9,
+    // just above, from the base material definition) as the multiplier
+    // this map's own values scale against, same as how map/vertexColors
+    // multiply together.
+    const sandRoughness = getSeafloorSandRoughnessTexture().clone();
+    sandRoughness.needsUpdate = true;
+    sandRoughness.repeat.set(repeatCount, repeatCount);
+    terrainMat.roughnessMap = sandRoughness;
     // Real procedural caustics, anchored to the actual seafloor geometry
     // via onBeforeCompile — not a screen-space overlay (which paints
     // every pixel identically regardless of view direction or what's
@@ -1144,7 +1881,15 @@ float gFoamMask = 0.0;`)
   vec2 causticUv2 = vCausticWorldPos.xz * 0.4 * 1.6 - vec2(uTime * 0.03, uTime * 0.045) + vec2(37.0, 12.0) - waveH * 0.06;
   vec2 v2 = causticVoronoiF1F2(causticUv2);
   float edge2 = v2.y - v2.x;
-  float net = (1.0 - smoothstep(0.0, 0.12, edge1)) * 0.75 + (1.0 - smoothstep(0.0, 0.09, edge2)) * 0.5;
+  // Net lines narrowed (0.12->0.06, 0.09->0.045) — per "the caustic net
+  // is dominating/hiding the sand texture" diagnosis. The smoothstep
+  // width here controls how BROAD each bright line reads; at the
+  // previous width, the two overlapping octaves together covered enough
+  // of the surface at full strength that it read as a dominant grid
+  // covering the whole floor rather than "thin lines of light," even
+  // though the underlying intent (see causticVoronoiF1F2's own comment)
+  // was always for these to be thin and sparse.
+  float net = (1.0 - smoothstep(0.0, 0.06, edge1)) * 0.75 + (1.0 - smoothstep(0.0, 0.045, edge2)) * 0.5;
   net = clamp(net, 0.0, 1.0);
   // Real caustic light concentrates more directly under a wave crest
   // (the crest briefly acts as a converging lens) than in a trough —
@@ -1165,8 +1910,24 @@ float gFoamMask = 0.0;`)
   // already strictly scopes this to actually-submerged geometry (fades
   // to 0 above the waterline), so combined with this, caustics are now
   // zero unless BOTH underwater AND daytime.
-  float dayCausticBoost = smoothstep(0.05, 0.4, uDayAmount) * 1.5;
-  float causticIntensity = net * underwaterMask * upwardFacing * (0.44 + crestFocus * 0.42) * dayCausticBoost; // base boosted 0.32->0.44 for real visible punch through the water surface, not just underwater
+  // dayCausticBoost peak roughly halved (1.5->0.7) and the base
+  // intensity term reduced (0.44/0.42 -> 0.22/0.2) — per "caustic net
+  // dominating/hiding the sand texture" diagnosis. Worked through the
+  // actual peak math: net(1) * underwaterMask(1) * upwardFacing(1) *
+  // (0.44+0.42) * 1.5 = ~1.29 added directly onto diffuseColor.rgb,
+  // which typically sits well under 1.0 per channel for the sand
+  // texture — more than enough to blow out to near-white and wash out
+  // the actual sand color entirely, not just add a warm dapple on top of
+  // it. New peak: (0.22+0.2)*0.7 = ~0.29, a real but genuinely secondary
+  // highlight instead of the dominant feature of the whole seafloor.
+  float dayCausticBoost = smoothstep(0.05, 0.4, uDayAmount) * 0.7;
+  // Zeroed per explicit "disable all underwater effects" — this one
+  // isn't even gated by camera submersion (underwaterMask is purely
+  // WORLD-position based, see its own comment above), so it's a real,
+  // separate candidate for whatever's actually causing the persistent
+  // pattern, independent of the render-path toggle above. Multiplying by
+  // 0 rather than deleting the line — same single-flag-revert reasoning.
+  float causticIntensity = net * underwaterMask * upwardFacing * (0.22 + crestFocus * 0.2) * dayCausticBoost * 0.0;
   diffuseColor.rgb += vec3(1.0, 0.92, 0.72) * causticIntensity;
 
   // Shoreline wave-wash — real waves surge up the beach slope and
@@ -1222,6 +1983,7 @@ float gFoamMask = 0.0;`)
   float tendrilFalloff = 1.0 - smoothstep(0.0, tendrilReach, beyondLine);
   float tendrilFoam = clamp(tendrilLines * tendrilFalloff * step(beyondLine, tendrilReach), 0.0, 1.0);
   float foamMask = clamp(max(coreFoam, tendrilFoam * 0.85) * upwardFacing, 0.0, 1.0);
+  foamMask *= 0.0; // per explicit "try removing all foam" — zeroed rather than deleted, clean single-line revert
   gFoamMask = foamMask; // read by the emissivemap_fragment injection below, so foam stays visible even under night's dim lighting
   // Real sand right at the water's edge is ALWAYS wet — a permanent,
   // always-on dark band centered right at the mean waterline, not
@@ -1265,6 +2027,369 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
   terrainMesh = new THREE.Mesh(buildPlanetTerrain(level, WORLD_SEED), terrainMat);
   terrainMesh.receiveShadow = true;
   terrainMesh.castShadow = true; // the terrain's own elevation (spires, ridges) can shadow other parts of itself
+  // Per confirmed diagnostic result — the honeycomb/hex-grid pattern that
+  // persisted across many rounds is GONE on this material, confirming it
+  // really was something in terrainMat's own onBeforeCompile shader
+  // customization (not caustics or foam specifically — both were already
+  // zeroed with no effect; something else in that heavily-modified
+  // shader was the actual cause, never pinned down further since this
+  // fully replaces it instead). This is now the REAL terrain material for
+  // Coral Shallows, not just a test — a plain MeshStandardMaterial with
+  // the seafloor sand PBR set (color/normal/roughness) + vertexColors,
+  // zero custom GLSL. terrainMat itself (and everything built into its
+  // onBeforeCompile — caustics, foam, wave-wash, sand-ripple vertex
+  // displacement) is left fully intact in the code below, just no longer
+  // assigned to the actual mesh, in case any of those specific effects
+  // are worth deliberately rebuilding on top of THIS material later.
+  const USE_SIMPLE_TERRAIN_MATERIAL = level.biome === "crystal";
+  if (USE_SIMPLE_TERRAIN_MATERIAL) {
+    const simpleTerrainMat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.9,
+      metalness: 0.05,
+      // Restores the same small emissive floor terrainMat itself always
+      // had — missing from the first diagnostic pass, and very likely
+      // why deep/dark/night conditions read as too dark: this gives the
+      // surface a minimum visibility floor that doesn't fade with fog or
+      // distance the way reflected light does, same as it always did.
+      emissive: level.color, emissiveIntensity: 0.04,
+      map: getSeafloorSandColorTexture(),
+      normalMap: getSeafloorSandNormalTexture(),
+      roughnessMap: getSeafloorSandRoughnessTexture(),
+    });
+    simpleTerrainMat.map.repeat.set(Math.max(6, Math.round(TERRAIN_SIZE / 6)), Math.max(6, Math.round(TERRAIN_SIZE / 6)));
+    simpleTerrainMat.normalMap.repeat.copy(simpleTerrainMat.map.repeat);
+    simpleTerrainMat.roughnessMap.repeat.copy(simpleTerrainMat.map.repeat);
+    // NEW seafloor caustics, deliberately NOT a revival of terrainMat's old
+    // onBeforeCompile block above (which is the one implicated in the
+    // honeycomb saga — the pattern persisted even with THAT block's own
+    // caustics/foam contributions already multiplied by 0, meaning
+    // something else inside that same heavily-customized shader was the
+    // real cause, never pinned down before the whole material was
+    // replaced). This is a fresh, much smaller injection onto the
+    // material actually in use today, and deliberately excludes BOTH
+    // pieces of vertex geometry displacement the old block had (foam
+    // relief, sand-ripple) — vertex displacement + per-fragment normal
+    // recompute + tiled texture sampling is exactly the kind of
+    // combination that produces interference/moiré artifacts like the
+    // honeycomb one, so leaving it out entirely removes the most likely
+    // suspect rather than trying to prove which line was safe. Only two
+    // pieces of math are reused, both pure functions with no geometry
+    // side effects: the Gerstner wave-height sum (kept in numeric sync
+    // with the real ocean surface in liquid.js, same as the old block)
+    // and the Voronoi F1/F2 cell-edge caustic-net pattern (already
+    // structurally bounded via clamp()+mix(), the same proven-safe
+    // technique liquid.js's own water-surface caustic effect uses).
+    const CAUSTICS_ENABLED = true; // single flip point if this ever needs to be disabled again
+    if (CAUSTICS_ENABLED) {
+      simpleTerrainMat.onBeforeCompile = (shader) => {
+        shader.uniforms.uTime = { value: 0 };
+        shader.uniforms.uWaterLevel = { value: LIQUID_LEVEL.crystal };
+        shader.uniforms.uDayAmount = { value: 0 };
+        shader.uniforms.uCausticMap = { value: getCausticPatternTexture() };
+        // Separate from the CAUSTICS_ENABLED const above (a compile-time
+        // "is this shader code built in at all" switch) — this is the
+        // live, per-frame runtime toggle the new individual-effects UI
+        // controls (see the animate-loop uniform push below), so flipping
+        // it doesn't require rebuilding the terrain material/level.
+        shader.uniforms.uCausticsEnabled = { value: 1.0 };
+        shader.uniforms.uFoamEnabled = { value: 1.0 };
+        // Real cloud-occlusion-aware sun strength, per explicit "glows
+        // with sunlight like real ones do" — pushed later in the animate
+        // loop, after cloud occlusion is actually computed for this
+        // frame (see below), not bundled with the other terrain uniforms
+        // above which run earlier.
+        shader.uniforms.uSunGlow = { value: 1.0 };
+        // Per explicit "light should light up at a certain place, not
+        // the whole net" — the sun-or-moon's own world XZ position
+        // (blended by day/night dominance, pushed each frame in the
+        // animate loop), used as a localized caustic focus center.
+        shader.uniforms.uFocusXZ = { value: new THREE.Vector2(0, 0) };
+        shader.uniforms.uFocusRadius = { value: 22.0 };
+        shader.vertexShader = shader.vertexShader
+          .replace("#include <common>", `#include <common>
+varying vec3 vCausticWorldPos;
+varying vec3 vCausticWorldNormal;
+varying float vWaveHeight;
+uniform float uTime;
+// Same 10-component Gerstner spectrum as the real ocean surface
+// (liquid.js) and the old terrainMat block — copied verbatim since this
+// specific function was never implicated in the honeycomb bug (it's pure
+// math with no geometry displacement here, unlike the old block's use of
+// it), and needs to stay numerically identical to liquid.js's own
+// generator for the caustic drift to actually match the real waves
+// overhead rather than just looking similar by coincidence.
+vec2 gerstnerDomainWarp(vec2 p, float t) {
+  float wx = sin(p.x * 0.016 + p.y * 0.009 + t * 0.05) * 16.0 + sin(p.x * 0.006 - p.y * 0.011 - t * 0.02) * 9.0;
+  float wz = cos(p.x * 0.011 - p.y * 0.014 + t * 0.04) * 16.0 + cos(p.x * 0.008 + p.y * 0.007 - t * 0.018) * 9.0;
+  return p + vec2(wx, wz);
+}
+float gerstnerHeightVert(vec2 xz, float t) {
+  vec2 wxz = gerstnerDomainWarp(xz, t);
+  float h = 0.0;
+  h += 0.448603 * sin(0.149600 * dot(vec2(0.957826, 0.287348), wxz) - 1.900000 * t);
+  h += 0.336999 * sin(0.199142 * dot(vec2(0.758192, 0.652032), wxz) - 1.646785 * t);
+  h += 0.253161 * sin(0.265092 * dot(vec2(0.947277, -0.320417), wxz) - 1.427317 * t);
+  h += 0.190179 * sin(0.352883 * dot(vec2(0.708455, 0.705756), wxz) - 1.237097 * t);
+  h += 0.142866 * sin(0.469747 * dot(vec2(0.983218, 0.182437), wxz) - 1.072228 * t);
+  h += 0.107324 * sin(0.625312 * dot(vec2(0.999147, -0.041303), wxz) - 0.929331 * t);
+  h += 0.080624 * sin(0.832396 * dot(vec2(0.629256, 0.777198), wxz) - 0.805478 * t);
+  h += 0.060566 * sin(1.108060 * dot(vec2(0.966708, -0.255883), wxz) - 0.698131 * t);
+  h += 0.045498 * sin(1.475016 * dot(vec2(0.875590, 0.483054), wxz) - 0.605091 * t);
+  h += 0.034179 * sin(1.963495 * dot(vec2(0.863805, 0.503827), wxz) - 0.524450 * t);
+  return h;
+}`)
+          // begin_vertex is intentionally UNTOUCHED here — no transformed.y
+          // displacement at all, unlike the old block. vCausticWorldPos is
+          // computed from the plain, undisplaced position.
+          .replace("#include <begin_vertex>", `#include <begin_vertex>
+vWaveHeight = gerstnerHeightVert(transformed.xz, uTime);
+vCausticWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`)
+          .replace("#include <beginnormal_vertex>", "#include <beginnormal_vertex>\nvCausticWorldNormal = normalize(mat3(modelMatrix) * objectNormal);");
+        shader.fragmentShader = shader.fragmentShader
+          .replace("#include <common>", `#include <common>
+uniform float uTime;
+uniform float uWaterLevel;
+uniform float uDayAmount;
+uniform sampler2D uCausticMap;
+uniform float uCausticsEnabled;
+uniform float uFoamEnabled;
+uniform float uSunGlow;
+uniform vec2 uFocusXZ;
+uniform float uFocusRadius;
+varying vec3 vCausticWorldPos;
+varying vec3 vCausticWorldNormal;
+varying float vWaveHeight;
+// Re-added for the new wave-wash foam below — removed when caustics
+// switched from Voronoi to texture sampling (FU245), needed again here.
+// Pure math, no geometry side effects — this specific function was
+// never implicated in the honeycomb bug either time it's been used.
+vec2 causticHash(vec2 p) {
+  float n = sin(dot(p, vec2(41.0, 289.0)));
+  return fract(vec2(262144.0, 32768.0) * n);
+}
+vec2 causticVoronoiF1F2(vec2 p) {
+  vec2 ip = floor(p);
+  vec2 fp = fract(p);
+  float f1 = 8.0, f2 = 8.0;
+  for (int y = -1; y <= 1; y++) {
+    for (int x = -1; x <= 1; x++) {
+      vec2 neighbor = vec2(float(x), float(y));
+      vec2 point = causticHash(ip + neighbor);
+      float d = length(neighbor + point - fp);
+      if (d < f1) { f2 = f1; f1 = d; } else if (d < f2) { f2 = d; }
+    }
+  }
+  return vec2(f1, f2);
+}`)
+          .replace("#include <color_fragment>", `#include <color_fragment>
+{
+  float upwardFacing = clamp(vCausticWorldNormal.y, 0.0, 1.0);
+  float underwaterMask = smoothstep(uWaterLevel, uWaterLevel - 1.0, vCausticWorldPos.y);
+  float waveH = vWaveHeight;
+  float waveNorm = clamp((waveH + 1.7) / 3.4, 0.0, 1.0); // 0 at trough, 1 at crest — matches the real 10-wave spectrum's total amplitude (1.71)
+  // Per explicit "net should move according to the speed of the waves" —
+  // a real, mathematically-grounded proxy for the water surface's
+  // CURRENT vertical velocity, not an arbitrary multiplier: for simple
+  // harmonic motion, speed is highest at the zero-crossing (mid-height,
+  // waveNorm=0.5) and drops to zero right at the crest/trough extremes
+  // (the derivative of sin is cos, which peaks exactly where sin itself
+  // crosses zero). This drives the caustic net's own drift RATE below,
+  // not just its position, so it genuinely speeds up and slows down with
+  // the real wave motion overhead instead of scrolling at a fixed,
+  // disconnected pace. Floored at 0.4 (never fully stops) rather than
+  // ranging all the way to 0.
+  float waveSpeedFactor = 0.4 + (1.0 - abs(waveNorm - 0.5) * 2.0) * 0.9;
+  // PRIMARY net — two drifting samples of the same texture, min() of
+  // their overlap, drift rate scaled by waveSpeedFactor above.
+  vec2 uv1 = vCausticWorldPos.xz * 0.15 + vec2(uTime * 0.065, uTime * 0.03) * waveSpeedFactor + waveH * 0.05;
+  float rot = 0.9; // fixed angle offset for the second sample, radians — enough that its blob edges don't line up with the first sample's
+  vec2 uv2raw = vCausticWorldPos.xz * 0.15 * 1.35 - vec2(uTime * 0.045, uTime * 0.07) * waveSpeedFactor - waveH * 0.04;
+  vec2 uv2 = vec2(uv2raw.x * cos(rot) - uv2raw.y * sin(rot), uv2raw.x * sin(rot) + uv2raw.y * cos(rot));
+  // Per explicit "the lines themselves should be animated like waves" —
+  // a small sinusoidal UV wobble applied AFTER the base drift, distorting
+  // the sampled pattern's own SHAPE into a rippling, undulating form
+  // rather than a rigid pattern that only translates. Different
+  // frequency/phase between the two samples so the wobble doesn't read
+  // as one uniform ripple sweeping the whole floor.
+  uv1 += vec2(sin(uv1.y * 9.0 + uTime * 1.6) * 0.018, sin(uv1.x * 7.0 + uTime * 1.3) * 0.018);
+  uv2 += vec2(sin(uv2.y * 6.0 - uTime * 1.1) * 0.02, sin(uv2.x * 8.0 - uTime * 1.4) * 0.02);
+  float s1 = texture2D(uCausticMap, uv1).r;
+  float s2 = texture2D(uCausticMap, uv2).r;
+  float netPrimary = clamp(min(s1, s2) * 1.7 - 0.55, 0.0, 1.0);
+  // SECONDARY net — much larger scale (broad, slow-shifting blobs), its
+  // own different rotation/drift direction, same wave-speed and wobble
+  // treatment as the primary net above.
+  vec2 uv3 = vCausticWorldPos.xz * 0.045 + vec2(-uTime * 0.018, uTime * 0.026) * waveSpeedFactor + waveH * 0.02;
+  float rot2 = -1.4;
+  vec2 uv4raw = vCausticWorldPos.xz * 0.045 * 1.6 - vec2(uTime * 0.012, -uTime * 0.02) * waveSpeedFactor - waveH * 0.015;
+  vec2 uv4 = vec2(uv4raw.x * cos(rot2) - uv4raw.y * sin(rot2), uv4raw.x * sin(rot2) + uv4raw.y * cos(rot2));
+  uv3 += vec2(sin(uv3.y * 5.0 + uTime * 1.0) * 0.022, sin(uv3.x * 4.0 + uTime * 0.8) * 0.022);
+  uv4 += vec2(sin(uv4.y * 4.5 - uTime * 0.9) * 0.024, sin(uv4.x * 5.5 - uTime * 1.1) * 0.024);
+  float s3 = texture2D(uCausticMap, uv3).r;
+  float s4 = texture2D(uCausticMap, uv4).r;
+  float netSecondary = clamp(min(s3, s4) * 1.6 - 0.5, 0.0, 1.0);
+  // Secondary layered in at reduced strength via max() — a background
+  // layer that shows through in the gaps of the primary net rather than
+  // competing equally with it or double-brightening where both overlap.
+  float net = max(netPrimary, netSecondary * 0.75);
+  // Real caustic light concentrates more directly under a wave crest (a
+  // brief converging lens) than in a trough.
+  float crestFocus = smoothstep(0.5, 1.0, waveNorm);
+  // Per explicit "light shining down from the sun or moon should make it
+  // light up at a certain place, not the whole net" — a real localized
+  // beam-focus zone rather than uniform brightness across the whole
+  // visible floor. uFocusXZ is the sun-or-moon's own world XZ position
+  // (blended by day/night dominance, see the animate loop), used
+  // directly as the focus center — a reasonable simplification of "light
+  // concentrates roughly below wherever the light source currently is,"
+  // without a full refraction-angle calculation. Floored at 0.15 (not
+  // 0) outside the focus zone — real caustics elsewhere on the floor are
+  // much dimmer, not literally invisible.
+  float distFromFocus = length(vCausticWorldPos.xz - uFocusXZ);
+  float focusZone = 1.0 - smoothstep(0.0, uFocusRadius, distFromFocus);
+  float focusMask = 0.15 + focusZone * 0.85;
+  // Per explicit "glows with sunlight like real ones do" — uSunGlow
+  // (cloud-occlusion-aware, computed fresh each frame in the animate
+  // loop from the same real angular check already dimming the visible
+  // sun sprite/DirectionalLight when clouds pass in front of it) now
+  // drives brightness alongside the existing day/night gate, replacing
+  // the old FIXED 0.7 constant — passing clouds visibly dim the caustic
+  // net in real time now, not just the coarse day/night cycle. Same
+  // verified safety ceiling as before: uSunGlow is itself bounded to
+  // [0,1], so this can never exceed the old constant's own max.
+  float dayCausticBoost = smoothstep(0.05, 0.4, uDayAmount) * uSunGlow * 0.7;
+  // Same verified bound as the previous version (focusMask's own max is
+  // 1.0, inside the beam, so this can't exceed the prior ceiling there):
+  // net(1) * underwaterMask(1) * upwardFacing(1) * (0.22+0.2) * dayCausticBoost(0.7) * focusMask(1)
+  // = 0.7*0.42 = ~0.29 max added to diffuseColor — a real but secondary
+  // highlight, not enough to blow the sand texture out to white.
+  float causticIntensity = net * underwaterMask * upwardFacing * (0.22 + crestFocus * 0.2) * dayCausticBoost * focusMask * uCausticsEnabled;
+  diffuseColor.rgb += vec3(1.0, 0.92, 0.72) * causticIntensity;
+}
+{
+  // Shoreline wave-wash — per explicit "seafoam as waves crash onto the
+  // shore." Deliberately NOT a separate 3D wave mesh rolling onto the
+  // sand (what the request floated as a fallback plan) — the terrain's
+  // own real elevation relative to water level already traces the exact
+  // shoreline shape, so using each fragment's world-space height as the
+  // "distance up the beach from the water's edge" gets the same visual
+  // result (foam that advances and recedes with the real tide/wave
+  // rhythm) without adding new geometry at all, avoiding the whole
+  // category of risk vertex displacement caused earlier this project
+  // (see the honeycomb saga). Fragment-color-only, mirroring the
+  // caustics block just above. Local upwardFacing/waveNorm recomputed
+  // here rather than reused from that block — they're scoped inside its
+  // own {} braces, not visible out here.
+  float upwardFacing = clamp(vCausticWorldNormal.y, 0.0, 1.0);
+  float waveNorm = clamp((vWaveHeight + 1.7) / 3.4, 0.0, 1.0);
+  // Per explicit "should move according to the speed of the waves" (the
+  // same fix already applied to the underwater caustic net) — a real,
+  // mathematically-grounded proxy for the water's CURRENT vertical
+  // velocity: for simple harmonic motion, speed peaks at the zero-
+  // crossing (mid-height) and drops to zero at the crest/trough
+  // extremes. This is a genuinely different system from that caustic
+  // net (this is the shoreline wave-wash tendril pattern — a real
+  // Voronoi cell-edge visualization, which is exactly why it naturally
+  // looks like a hex/cell grid rather than a soft blob field), but the
+  // same underlying physics applies to both.
+  float waveSpeedFactor = 0.4 + (1.0 - abs(waveNorm - 0.5) * 2.0) * 0.9;
+  // shoreDist: height above (positive) or below (negative) the mean
+  // waterline. reachHeight: how far above that mean the CURRENT wave
+  // pushes, driven by the same real wave crest/trough already sampled
+  // above — the wash rhythm matches the actual ocean, not an unrelated
+  // clock.
+  float shoreDist = vCausticWorldPos.y - uWaterLevel;
+  float reachHeight = 0.1 + waveNorm * 0.5;
+  // Edge jitter — a large-scale, non-time-animated Voronoi sample
+  // perturbing the effective wash-line height per-fragment, so the foam
+  // line itself reads as an organic, wavy coastline rather than tracing
+  // a perfectly smooth height contour.
+  vec2 jv = causticVoronoiF1F2(vCausticWorldPos.xz * 0.15);
+  float jitteredReach = reachHeight + (jv.x - 0.5) * 0.12;
+  // Two overlapping Voronoi octaves at different scale/drift (same
+  // technique liquid.js's own water-surface whitecap foam uses) —
+  // breaks a single-layer Voronoi's evenly-spaced "disco ball" look into
+  // overlapping bubble clusters of varying size, which is what actually
+  // reads as foam rather than a tiled pattern.
+  vec2 foamUv1 = vCausticWorldPos.xz * 3.5 + vec2(uTime * 0.15, uTime * 0.11) * waveSpeedFactor;
+  vec2 foamUv2 = vCausticWorldPos.xz * 9.0 - vec2(uTime * 0.1, uTime * 0.08) * waveSpeedFactor;
+  vec2 fv1 = causticVoronoiF1F2(foamUv1);
+  vec2 fv2 = causticVoronoiF1F2(foamUv2);
+  float foamCell = clamp((1.0 - smoothstep(0.0, 0.4, fv1.x)) * 0.6 + (1.0 - smoothstep(0.0, 0.32, fv2.x)) * 0.55, 0.0, 1.0);
+  // Core wash line — a narrow, crisp band right at the water's current
+  // edge, not a wide diffuse cloud.
+  float coreZone = 1.0 - smoothstep(0.0, 0.1, abs(shoreDist - jitteredReach));
+  float coreFoam = clamp(foamCell * coreZone, 0.0, 1.0);
+  // Per explicit "cells are supposed to be simulated light reflections
+  // of waves — behave like lights instead of a net, glowing only on
+  // wave peaks as light reflects/refracts through the water": a real
+  // conceptual correction, not another tuning pass on the same
+  // technique. Voronoi cell-EDGE detection (F2-F1, what this used to be)
+  // draws a connected line structure by definition — softening or
+  // animating it can never stop it from reading as a net, since tracing
+  // boundaries between cells is inherently a mesh/grid shape. Real
+  // caustic light isn't a net at all — it's scattered, discrete bright
+  // patches where the wavy water surface happens to focus light at that
+  // instant, moving and appearing/disappearing as the wave pattern
+  // changes. Switched to Voronoi cell-FILL (F1 alone — a soft glowing
+  // blob near each cell's own seed point, not its boundary), and
+  // critically, each spot's own visibility is now gated by whether
+  // THIS specific point is actually near a real wave crest right now
+  // (peakGate, built from the same per-fragment waveNorm every other
+  // wave-driven effect here already uses, which genuinely varies by
+  // world position as the real wave pattern travels through) — light
+  // only shows up where a wave is actively cresting, not as a
+  // constant-strength background pattern.
+  vec2 lightUv = vCausticWorldPos.xz * 1.8 + vec2(uTime * 0.1, uTime * 0.07) * waveSpeedFactor;
+  vec2 lv = causticVoronoiF1F2(lightUv);
+  float lightSpot = 1.0 - smoothstep(0.0, 0.22, lv.x);
+  float rot3 = 1.1;
+  vec2 lightUv2raw = vCausticWorldPos.xz * 1.8 * 1.3 - vec2(uTime * 0.07, uTime * 0.09) * waveSpeedFactor;
+  vec2 lightUv2 = vec2(lightUv2raw.x * cos(rot3) - lightUv2raw.y * sin(rot3), lightUv2raw.x * sin(rot3) + lightUv2raw.y * cos(rot3));
+  vec2 lv2 = causticVoronoiF1F2(lightUv2);
+  float lightSpot2 = 1.0 - smoothstep(0.0, 0.18, lv2.x);
+  float lightSpotsTotal = max(lightSpot, lightSpot2 * 0.75);
+  // Real wave-crest gate — only the TOP portion of each wave's own cycle
+  // counts as "a peak" (0.62-0.95 of the normalized range, not the
+  // trough or mid-slope), so light genuinely comes and goes with the
+  // real wave motion instead of being always-on.
+  float peakGate = smoothstep(0.62, 0.95, waveNorm);
+  float tendrilReach = 0.35;
+  float beyondLine = max(0.0, shoreDist - jitteredReach);
+  float tendrilFalloff = 1.0 - smoothstep(0.0, tendrilReach, beyondLine);
+  float tendrilDistFromFocus = length(vCausticWorldPos.xz - uFocusXZ);
+  float tendrilFocusZone = 1.0 - smoothstep(0.0, uFocusRadius, tendrilDistFromFocus);
+  float tendrilSunMask = 0.12 + tendrilFocusZone * 0.88 * uSunGlow;
+  float tendrilFoam = clamp(lightSpotsTotal * peakGate * tendrilFalloff * step(beyondLine, tendrilReach) * tendrilSunMask, 0.0, 1.0);
+  float foamMask = clamp(max(coreFoam, tendrilFoam * 0.85) * upwardFacing, 0.0, 1.0) * uFoamEnabled;
+  // Sand right at the water's edge reads as permanently wet — a
+  // constant dark band centered at the mean waterline regardless of the
+  // current wave's reach, combined via max() with a dynamic wave-driven
+  // band so an active crest can push visibly-wet sand further up the
+  // beach on top of that floor. wetEnvelope approximates "recently wet
+  // and still darkened" with a slow-power falloff of the same wave
+  // signal (no per-frame accumulation buffer to track real wetness
+  // history with) rather than snapping back to fully dry the instant a
+  // crest recedes.
+  float permanentWetBand = 1.0 - smoothstep(0.0, 0.55, abs(shoreDist - 0.1));
+  float wetEnvelope = pow(waveNorm, 0.4);
+  float wetMask = (1.0 - smoothstep(reachHeight - 0.3, reachHeight + 0.5, shoreDist)) * wetEnvelope * upwardFacing;
+  float totalWetMask = clamp(max(permanentWetBand * 0.75 * upwardFacing, wetMask), 0.0, 1.0) * uFoamEnabled;
+  // Darkens toward the sand's own existing color (multiplicative), not a
+  // flat overlay color — real wet sand is a darker version of itself,
+  // not a different color entirely.
+  diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.55, totalWetMask);
+  // Foam mixes toward an off-white respecting the scene's actual
+  // lighting (not pure additive brightening, not pure white either) —
+  // same technique liquid.js's own whitecap foam already uses.
+  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.95, 0.98, 1.0), foamMask * 0.85);
+}`);
+        simpleTerrainMat.userData.shader = shader; // the existing animate-loop block (main.js, "if (terrainMesh.material.userData.shader)") already pushes uTime/uDayAmount generically — no loop changes needed
+      };
+    }
+    terrainMesh.material = simpleTerrainMat;
+  }
   scene.add(terrainMesh);
 
   if (LIQUID_LEVEL[level.biome] !== undefined) {
@@ -1305,110 +2430,487 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
     // callback bails rather than adding trees/fish into whatever biome
     // is showing by the time it resolves.
     const spawnLevelIdx = levelIdx;
-    loadPalmTreeModel().then(() => {
+    const TREE_SPECIES = ["coconut_low_poly", "coconut_palm", "palm_001", "palm_002"];
+    // Promise.allSettled, not Promise.all — per "no trees were placed at
+    // all," the likely cause is that Promise.all is all-or-nothing: if
+    // even ONE of the 3 source files fails to load (a real, repeatedly-
+    // seen pattern in this project with GLB uploads), the whole .then()
+    // below would never run and ZERO trees would spawn, not just the
+    // species tied to the broken file. allSettled + filtering to only
+    // the species that actually resolved degrades gracefully instead —
+    // one bad file means fewer tree types, not no trees at all.
+    Promise.allSettled(TREE_SPECIES.map((s) => loadTreeModel(s))).then((results) => {
       if (currentLevelIdx !== spawnLevelIdx) return; // player already left this level — don't spawn into whatever's showing now
-      const PALM_COUNT = 5;
+      const loadedSpecies = TREE_SPECIES.filter((s, i) => results[i].status === "fulfilled");
+      console.log(`[models] tree species loaded: ${loadedSpecies.length}/${TREE_SPECIES.length}`, loadedSpecies, results.filter((r) => r.status === "rejected").map((r) => r.reason));
+      if (loadedSpecies.length === 0) return; // every file failed — nothing to spawn, already logged above for diagnosis
+      // Per explicit "island looks bare" — previously every tree spawned
+      // within a small clearing centered on LANDMARK_POSITION (dist 8-22
+      // from ONE fixed point), leaving the rest of the island's dry land
+      // with zero trees at all regardless of PALM_COUNT. That's the real
+      // cause of the bare look, not tree count on its own — scattering
+      // across the WHOLE island (same pattern coral/sponge/fish already
+      // use for the seafloor) is what actually fixes it. Centered on
+      // world origin now, dist up to ~85 (just inside ISLAND_BLEND=88,
+      // terrain.js's own island-extent constant) rather than the
+      // landmark specifically; the existing dry-land height check below
+      // already rejects any candidate that lands in water, so this
+      // naturally follows the island's real (irregular) coastline
+      // without needing to know its exact shape.
+      const PALM_COUNT = 36; // was 24 — per explicit "a bit more density," another real bump now that island-wide scatter is confirmed working
       const palmSeed = hashStringToSeed(WORLD_SEED + "::realPalms");
       const rng = mulberry32(palmSeed);
-      for (let i = 0; i < PALM_COUNT; i++) {
+      const placedTreePositions = []; // {x,z} of trees actually placed so far, for the min-spacing check below
+      const MIN_TREE_SPACING = 4; // world units — trees were landing right on top of each other with no check at all
+      const PALM_MAX_ATTEMPTS = 700; // retry-until-reached, same pattern as coral/fish/sponge/plant — a wider scatter area means many more candidates land in water and get rejected, so a fixed PALM_COUNT-sized attempt loop would silently under-place
+      let palmsPlaced = 0;
+      // Shuffled-bag species picker, per explicit "making sure there's
+      // enough variety" — independent random draws per tree (the old
+      // `loadedSpecies[Math.floor(rng()*loadedSpecies.length)]`) can
+      // clump by pure chance (e.g. the same species several times in a
+      // row), especially visible now that trees are spread out and
+      // individually noticeable rather than clustered in one clearing. A
+      // bag refills with one of each species, shuffled, every time it
+      // empties — guarantees every species appears before any repeats,
+      // for as many full cycles as PALM_COUNT allows, rather than
+      // leaving variety up to luck.
+      let speciesBag = [];
+      function nextTreeSpecies() {
+        if (speciesBag.length === 0) {
+          speciesBag = [...loadedSpecies];
+          for (let i = speciesBag.length - 1; i > 0; i--) {
+            const j = Math.floor(rng() * (i + 1));
+            [speciesBag[i], speciesBag[j]] = [speciesBag[j], speciesBag[i]];
+          }
+        }
+        return speciesBag.pop();
+      }
+      for (let i = 0; i < PALM_MAX_ATTEMPTS && palmsPlaced < PALM_COUNT; i++) {
         const angle = rng() * Math.PI * 2;
-        const dist = 8 + rng() * 14; // scattered around the landmark clearing, same rough footprint the old hardcoded palm spots used before FU162 removed them
-        const x = LANDMARK_POSITION.x + Math.cos(angle) * dist;
-        const z = LANDMARK_POSITION.z + Math.sin(angle) * dist;
-        const y = terrainHeightAt(level, x, z, WORLD_SEED);
+        const dist = rng() * 85;
+        const x = Math.cos(angle) * dist;
+        const z = Math.sin(angle) * dist;
+        // reject candidates too close to an already-placed tree — per
+        // "all clustered together," nothing previously enforced any
+        // spacing between the 9 trees at all.
+        let tooClose = false;
+        for (const p of placedTreePositions) {
+          if (Math.hypot(x - p.x, z - p.z) < MIN_TREE_SPACING) { tooClose = true; break; }
+        }
+        if (tooClose) continue;
+        // sampleGroundHeight raycasts the REAL rendered terrainMesh (the
+        // same function the player's own feet rest on), not the analytic
+        // height function — guarantees the tree base sits precisely on
+        // the visible ground regardless of any analytic-vs-mesh
+        // resolution mismatch.
+        const y = sampleGroundHeight(x, z, terrainMesh);
         if (y === null || y < LIQUID_LEVEL.crystal + 0.5) continue; // stay on dry land, clear of the shoreline
-        const tree = createRealPalmTree();
+        const species = nextTreeSpecies();
+        const tree = createRealTree(species);
         if (!tree) continue;
-        tree.position.set(x, y, z);
+        // createRealTree (models.js) already normalized this tree to
+        // exactly 1 world unit tall (group.scale set to 1/rawHeight)
+        // regardless of its source file's raw units. REAL BUG FOUND AND
+        // FIXED HERE per "two trees enormous, one tiny, confirmed not
+        // perspective" — this line was previously `tree.scale.setScalar
+        // (scale)`, which OVERWRITES that normalization scale entirely
+        // instead of building on it, silently discarding all of it. The
+        // final rendered size ended up depending directly on each
+        // species' own wildly different raw geometry size again (logged
+        // raw heights ranged from 6.28 to 2452.1 across the 4 species —
+        // up to a 390x spread), which is exactly what produced some
+        // species enormous and others tiny once all 4 were finally
+        // loading together for the first time. This was very likely also
+        // the real explanation for the entire earlier "tree is giant"
+        // back-and-forth — every previous scale reduction was applied on
+        // top of this same bug, so no single number could ever have
+        // fixed it consistently across species; only coconut_low_poly
+        // was ever actually loading during most of that, making a
+        // species-dependent bug look like a simple magnitude problem.
+        // multiplyScalar (not setScalar) correctly builds ON TOP of the
+        // existing 1/rawHeight normalization, so `scale` now finally
+        // means what its own name/comment always claimed: the tree's
+        // real final height in world units, for every species alike.
+        // Picked fresh — 4-7 units (~2.5-4x the 1.6-unit player) — since
+        // every previous value was tuned blind against this same broken
+        // math and can't be trusted as a starting point now that it's
+        // fixed.
+        const scale = 4 + rng() * 3;
+        tree.position.set(x, y + tree.userData.groundOffset * scale, z);
         tree.rotation.y = rng() * Math.PI * 2;
-        // Corrective scale, not decorative variety — this model's raw
-        // geometry (the "Palm_2_Lit_0" mesh specifically, see models.js)
-        // measures ~100 units tall as exported, verified directly against
-        // its accessor bounds. Without this, the previous 0.8-1.3
-        // "variety" multiplier left it roughly 100 units tall — a tree
-        // 60x taller than the player, almost certainly the real reason
-        // it didn't look right even though something was visibly
-        // rendering. Target ~10-14 units (a tall but real-world-plausible
-        // palm, player eye height is 1.6).
-        // Bumped up further per direct "trees loaded tiny" feedback —
-        // the 0.10-0.14 range was a correct proportional match to the
-        // measured raw geometry, but read as too short/stubby in
-        // practice; going taller/lusher rather than strictly
-        // real-world-accurate.
-        const scale = 0.16 + rng() * 0.06;
-        tree.scale.setScalar(scale);
+        tree.scale.multiplyScalar(scale);
+        tree.userData.swaySeed = rng() * Math.PI * 2; // per-tree phase offset for wind sway (see the animate-loop update), so trees don't all sway in lockstep
         scene.add(tree);
         realPalmTrees.push(tree);
+        placedTreePositions.push({ x, z });
+        palmsPlaced++;
       }
+      console.log(`[models] real trees placed: ${palmsPlaced}/${PALM_COUNT}`);
     }).catch(() => {}); // load failure already logged inside models.js — nothing further to do here
 
-    loadAngelfishModel().then(() => {
+    // Fish spawning moved below, after coral placement — see that
+    // block's own comment for why (per explicit "make sure the fish are
+    // spawning right over the coral").
+
+    // ocean as part of the ocean floor, could add copies and connect
+    // them to make it look realistic." Unlike the palm tree/fish, this
+    // source file's own bounds checked out as genuine (non-cubic, non-
+    // suspicious) geometry — see models.js's own comment — so the whole
+    // loaded scene is cloned wholesale, no cherry-picking needed.
+    // Several CLUSTERS (not one scattered pool like the fish) — each
+    // cluster's pieces sit close enough to overlap/touch their
+    // neighbors, which is what actually reads as "a connected reef
+    // system" rather than isolated identical props dotted around.
+    loadReefModel().then(() => {
       if (currentLevelIdx !== spawnLevelIdx) return;
-      const FISH_COUNT = 8;
-      const MAX_ATTEMPTS = 40; // the new WORLD_BOUND_RADIUS check below now rejects roughly half of random angles, so a fixed FISH_COUNT-attempt loop (the old approach) would often place well under 8 — retry with a real cap instead of silently under-spawning
-      const fishSeed = hashStringToSeed(WORLD_SEED + "::realFish");
-      const rng = mulberry32(fishSeed);
+      const CLUSTER_COUNT = 3;
+      const PIECES_PER_CLUSTER = 5;
+      const reefSeed = hashStringToSeed(WORLD_SEED + "::realReef");
+      const rng = mulberry32(reefSeed);
       let placed = 0;
-      for (let i = 0; i < MAX_ATTEMPTS && placed < FISH_COUNT; i++) {
+      for (let c = 0; c < CLUSTER_COUNT; c++) {
+        // Cluster centers scattered independently of the landmark/fish —
+        // real reefs don't cluster only right next to the one landmark
+        // structure — but still real underwater points, same boundary/
+        // depth checks as fish placement.
+        let centerX, centerZ, centerFound = false;
+        for (let attempt = 0; attempt < 20 && !centerFound; attempt++) {
+          const angle = rng() * Math.PI * 2;
+          const dist = 15 + rng() * 85;
+          const cx = LANDMARK_POSITION.x + Math.cos(angle) * dist;
+          const cz = LANDMARK_POSITION.z + Math.sin(angle) * dist;
+          if (Math.hypot(cx, cz) > WORLD_BOUND_RADIUS - 10) continue;
+          const cGroundY = terrainHeightAt(level, cx, cz, WORLD_SEED);
+          if (cGroundY === null || cGroundY > LIQUID_LEVEL.crystal - 2) continue; // needs real depth for a whole cluster, not just a shallow puddle
+          centerX = cx; centerZ = cz; centerFound = true;
+        }
+        if (!centerFound) continue;
+        for (let p = 0; p < PIECES_PER_CLUSTER; p++) {
+          // Small offset from the cluster center — deliberately smaller
+          // than the model's own ~10-unit footprint so adjacent pieces
+          // genuinely overlap/touch rather than sitting as clearly
+          // separate objects that just happen to be nearby.
+          const ox = (rng() - 0.5) * 9;
+          const oz = (rng() - 0.5) * 9;
+          const x = centerX + ox, z = centerZ + oz;
+          if (Math.hypot(x, z) > WORLD_BOUND_RADIUS - 8) continue;
+          const groundY = terrainHeightAt(level, x, z, WORLD_SEED);
+          if (groundY === null || groundY > LIQUID_LEVEL.crystal - 1) continue;
+          const reef = createRealReef();
+          if (!reef) continue;
+          const scale = 0.8 + rng() * 0.5;
+          // Origin sits roughly mid-height in the source geometry (Y
+          // spans -5.36 to +4.81, not based at the bottom) — for a reef
+          // structure resting ON the seafloor, partial embedding into the
+          // sand reads as natural (real reefs grow out of the substrate,
+          // they don't perch cleanly on top of it the way a tree needs
+          // to), so this doesn't need the same precise base-alignment
+          // fix the palm tree required — just a modest upward lift so it
+          // isn't buried too deep.
+          reef.position.set(x, groundY + 1.4 * scale, z);
+          reef.rotation.y = rng() * Math.PI * 2;
+          reef.scale.setScalar(scale);
+          scene.add(reef);
+          realReefStructures.push(reef);
+          placed++;
+        }
+      }
+      console.log(`[models] real reef pieces placed: ${placed}/${CLUSTER_COUNT * PIECES_PER_CLUSTER}`);
+    }).catch(() => {});
+
+    // Real coral pieces — 3 species, scattered individually (not
+    // clustered like the reef structures) across the same underwater
+    // area, to complement the reef rather than duplicate its "connected
+    // structure" look. Per-species scale ranges below are DERIVED from
+    // each file's own measured raw bounds (see models.js's own comment —
+    // these are genuinely tiny, true-real-world-scale exports, not a
+    // broken unit export like the palm tree/fish were), targeting a
+    // roughly similar FINAL decorative size (~0.3-0.65 units) across all
+    // three despite their differing raw sizes.
+    const CORAL_SPECIES = ["stylaster", "pocillopora", "goniastrea", "meandrina", "heliopora", "acropora", "distichopora"];
+    const CORAL_SCALE_RANGE = {
+      // Roughly doubled from the previous pass per "is it really small
+      // or invisible" — even the earlier ~0.3-0.65 unit final size (a
+      // real, plausible coral-head size) could genuinely be hard to spot
+      // against a large, dark, busy-textured seafloor from normal
+      // swimming distance. Larger mature coral colonies real-world are
+      // very plausibly this size too, so this isn't unrealistic, just
+      // biased toward "actually visible" over "textbook-accurate small."
+      stylaster: [5.5, 7.5],    // raw ~0.17 tall -> ~0.94-1.28 final
+      pocillopora: [3.8, 5.2],  // raw ~0.24 wide -> ~0.91-1.24 final
+      goniastrea: [6.5, 9.0],   // raw ~0.09 wide -> ~0.59-0.82 final
+      // 4 new species per explicit "add more to the reef with good
+      // variety" — deliberately NOT all forced into the same final-size
+      // band this time; real reefs mix small fine-branching pieces with
+      // larger coral heads, and now there's enough species to actually
+      // show that range rather than everything reading as similar-sized
+      // blobs.
+      meandrina: [2.2, 3.2],     // raw ~0.40 wide (brain coral, already fairly large) -> ~0.88-1.29 final
+      heliopora: [2.0, 3.0],     // raw ~0.44 wide (blue coral, branching/lobed) -> ~0.88-1.32 final
+      acropora: [16, 26],        // raw ~0.018 max — a genuine close-up "detail view" of a tiny staghorn fragment, needs a large multiplier -> ~0.28-0.46 final, deliberately smaller/finer than the others
+      distichopora: [2.6, 3.8],  // raw ~0.24 tall -> ~0.62-0.91 final
+    };
+    Promise.all([...CORAL_SPECIES.map((s) => loadCoralModel(s)), loadAngelfishModel()]).then(() => {
+      if (currentLevelIdx !== spawnLevelIdx) return;
+      // Was a fixed-24-attempt loop — now that spawn points scatter
+      // across the WHOLE map (including the dry island itself, which
+      // fails the depth check every time), a fixed attempt count would
+      // silently place well under the target. Retry-until-reached
+      // instead, same pattern fish already uses, per explicit "should be
+      // more than just one."
+      const CORAL_COUNT = Math.round(220 * getGraphicsSettings().seaLifeMultiplier); // was a flat 220 — per explicit "optimize graphics tiers," now scales with tier instead of paying the same cost on every device regardless of settings
+      const CORAL_MAX_ATTEMPTS = 1600; // was 750 — raised since the new depth cap above rejects more candidates than before (deep-water points that used to qualify no longer do), so more attempts are needed to still reach the same target count
+      const coralSeed = hashStringToSeed(WORLD_SEED + "::realCoral");
+      const rng = mulberry32(coralSeed);
+      let placed = 0;
+      for (let i = 0; i < CORAL_MAX_ATTEMPTS && placed < CORAL_COUNT; i++) {
+        // Per explicit "should be all over the sea floor" (revising the
+        // previous "near the shore" narrowing — that request and this
+        // one turned out to be in tension, and this is the more recent,
+        // more specific one) — centered on world origin now, spanning
+        // the real playable radius directly, same reasoning as fish just
+        // above: landmark-relative placement was clustering everything
+        // into one small patch of a much larger reachable seafloor.
         const angle = rng() * Math.PI * 2;
-        // Pulled in from 20-90 to 8-35 per "still no fish" — the
-        // previous range put every fish 20+ units out over open water,
-        // requiring a real swim before any of them were even in range to
-        // spot. Close enough now that swimming just a short distance out
-        // from the beach should put the player within sight of at least
-        // one.
-        const dist = 8 + rng() * 27;
-        const x = LANDMARK_POSITION.x + Math.cos(angle) * dist;
-        const z = LANDMARK_POSITION.z + Math.sin(angle) * dist;
-        // The real bug: LANDMARK_POSITION itself sits ~89 units from
-        // world origin (55,-70), and WORLD_BOUND_RADIUS (the player's
-        // actual hard movement limit, ~112 units from origin — see the
-        // real clamp on camera position elsewhere in this file) leaves
-        // only ~22 units of margin beyond the landmark in the outward
-        // direction. This loop was only checking distance FROM THE
-        // LANDMARK, never distance from world origin — so on the
-        // outward-facing half of the circle, spawn points past roughly
-        // 22 units could land beyond the boundary the player can
-        // actually swim to, permanently unreachable regardless of how
-        // close the water/depth conditions looked. Explicit check now:
-        // reject (not just prefer) any point past the real playable
-        // radius, with a real margin so nothing spawns right at the
-        // edge either.
+        const dist = rng() * (WORLD_BOUND_RADIUS - 8);
+        const x = Math.cos(angle) * dist;
+        const z = Math.sin(angle) * dist;
         if (Math.hypot(x, z) > WORLD_BOUND_RADIUS - 8) continue;
         const groundY = terrainHeightAt(level, x, z, WORLD_SEED);
+        // Per explicit "should be much closer to shore" — the depth
+        // check below only ever had a MINIMUM (rejecting too-shallow
+        // points), no maximum at all, so coral could land anywhere from
+        // right off the beach out to the deepest water on the map.
+        // Capping depth at 6 units keeps the wide horizontal spread from
+        // "fill it in as much as possible" (still scattered across the
+        // whole map by X/Z) while naturally concentrating placement in
+        // shallow, shore-adjacent water — real reef-building coral
+        // mostly does grow in shallower water anyway, so this is also
+        // more true to how a real reef is distributed, not just a
+        // gameplay convenience.
+        if (groundY === null || groundY > LIQUID_LEVEL.crystal - 0.3 || groundY < LIQUID_LEVEL.crystal - 6) continue;
+        const species = CORAL_SPECIES[Math.floor(rng() * CORAL_SPECIES.length)];
+        const coral = createRealCoral(species);
+        if (!coral) continue;
+        const [scaleMin, scaleMax] = CORAL_SCALE_RANGE[species];
+        const scale = scaleMin + rng() * (scaleMax - scaleMin);
+        coral.rotation.y = rng() * Math.PI * 2;
+        coral.scale.setScalar(scale);
+        // Per "some models are floating above the sea floor" — real bug:
+        // the old flat "0.15 * scale" offset assumed scale itself was a
+        // rough proxy for size, but scale varies from ~4 (stylaster) to
+        // ~26 (acropora, a genuine tiny detail-view fragment needing a
+        // huge multiplier) — for acropora specifically that formula lifted
+        // it 2.4-3.9 units off the ground despite the whole piece only
+        // being ~0.3-0.46 units tall, floating it completely clear of the
+        // sand. Real fix: compute each piece's ACTUAL bounding box after
+        // rotation+scale are already applied (needs a matrix update first
+        // since Box3.setFromObject reads world-space geometry), then embed
+        // by a fraction of its own real below-origin extent — correct
+        // for every species regardless of its raw size or scale factor,
+        // no per-species guessing needed.
+        coral.updateMatrixWorld(true);
+        const coralBounds = new THREE.Box3().setFromObject(coral);
+        const belowOrigin = -coralBounds.min.y; // how far the geometry actually extends below its own local origin, in real world units, post-scale
+        coral.position.set(x, groundY + belowOrigin * 0.4, z); // ~60% embedded — reads as growing from the substrate, same reasoning as before, just correctly proportional now
+        scene.add(coral);
+        realCoralPieces.push(coral);
+        placed++;
+      }
+      console.log(`[models] real coral pieces placed: ${placed}/${CORAL_COUNT}`);
+
+      // Fish spawning — moved here, AFTER coral placement, specifically
+      // per explicit "make sure the fish we have is spawning right over
+      // the coral." Previously fish and coral picked completely
+      // independent random points, so any overlap between them was pure
+      // coincidence. Now each fish picks one of the coral pieces JUST
+      // PLACED above and spawns directly above its (x,z) — real reef
+      // fish do exactly this in practice, hovering and feeding right
+      // over the structure rather than scattered evenly across open
+      // sand. Falls back to the old independent-random placement only if
+      // no coral ended up placed at all (shouldn't normally happen, but
+      // keeps fish from silently vanishing if it ever does).
+      const FISH_COUNT = Math.round(16 * getGraphicsSettings().seaLifeMultiplier); // was a flat 16 — per explicit "optimize graphics tiers," now scales with tier
+      const fishSeed = hashStringToSeed(WORLD_SEED + "::realFish");
+      const fishRng = mulberry32(fishSeed);
+      let fishPlaced = 0;
+      const MAX_FISH_ATTEMPTS = Math.max(60, FISH_COUNT * 4);
+      for (let i = 0; i < MAX_FISH_ATTEMPTS && fishPlaced < FISH_COUNT; i++) {
+        let x, z, groundY;
+        if (realCoralPieces.length > 0) {
+          const coralPiece = realCoralPieces[Math.floor(fishRng() * realCoralPieces.length)];
+          // Small jitter around the coral's own position rather than
+          // dead-center every time — a school hovering AROUND a coral
+          // head, not every fish stacked on the exact same point.
+          x = coralPiece.position.x + (fishRng() - 0.5) * 3;
+          z = coralPiece.position.z + (fishRng() - 0.5) * 3;
+          if (Math.hypot(x, z) > WORLD_BOUND_RADIUS - 8) continue;
+          groundY = terrainHeightAt(level, x, z, WORLD_SEED);
+        } else {
+          const angle = fishRng() * Math.PI * 2;
+          const dist = fishRng() * (WORLD_BOUND_RADIUS - 8);
+          x = Math.cos(angle) * dist;
+          z = Math.sin(angle) * dist;
+          groundY = terrainHeightAt(level, x, z, WORLD_SEED);
+        }
         if (groundY === null || groundY > LIQUID_LEVEL.crystal - 1.5) continue; // needs real water depth above it, not a shallow puddle right at the seafloor
-        const depth = Math.min(LIQUID_LEVEL.crystal - groundY - 0.8, 1 + rng() * 3.5);
+        // Depth capped lower (1-2.5 above the floor, was 1-4.5) — fish
+        // should read as hovering just above the coral itself, not
+        // anywhere up to mid-water-column above it.
+        const depth = Math.min(LIQUID_LEVEL.crystal - groundY - 0.8, 1 + fishRng() * 1.5);
         const fish = createRealAngelfish();
         if (!fish) continue;
         fish.group.position.set(x, LIQUID_LEVEL.crystal - depth, z);
-        fish.group.rotation.y = rng() * Math.PI * 2;
+        fish.group.rotation.y = fishRng() * Math.PI * 2;
         // Corrective scale, not decorative variety — this model's raw
         // geometry measures ~20 units long as exported (verified against
-        // its accessor bounds: mesh[0] Z spans -10.14 to 10.14). The
-        // previous 0.6-0.9 "variety" multiplier left it roughly
-        // 12-18 units long — a MASSIVE fish, ~10x a real emperor
-        // angelfish relative to the player's 1.6-unit eye height, almost
-        // certainly why it wasn't recognizable as "a fish" even if
-        // something was technically rendering (the camera would likely
-        // end up inside or pressed right up against one small part of
-        // its body). Target ~0.35-0.5 units, a small reef fish visible
-        // at a reasonable distance without being unrealistically large.
-        const scale = 0.018 + rng() * 0.007;
+        // its accessor bounds: mesh[0] Z spans -10.14 to 10.14). Target
+        // ~0.35-0.5 units, a small reef fish visible at a reasonable
+        // distance without being unrealistically large.
+        const scale = 0.018 + fishRng() * 0.007;
         fish.group.scale.setScalar(scale);
         // Simple wander path, independent of the skeletal swim animation
-        // (which only animates the body/fins in place) — a slow circular
-        // drift so the fish actually moves through the reef rather than
-        // hovering on one spot. Center/radius/phase are baked onto the
-        // instance itself so updateRealFish (animate loop) has everything
-        // it needs without a parallel lookup array.
+        // (which only animates the body/fins in place) — a tighter
+        // radius than before (was 3-8) so the wander keeps the fish
+        // actually near the coral it spawned over, not drifting well
+        // away from it over time.
         fish.wanderCenterX = x; fish.wanderCenterZ = z;
-        fish.wanderRadius = 3 + rng() * 5;
-        fish.wanderSpeed = 0.15 + rng() * 0.15;
-        fish.wanderPhase = rng() * Math.PI * 2;
+        fish.wanderRadius = 1.5 + fishRng() * 2.5;
+        fish.wanderSpeed = 0.15 + fishRng() * 0.15;
+        fish.wanderPhase = fishRng() * Math.PI * 2;
         fish.wanderY = LIQUID_LEVEL.crystal - depth;
         scene.add(fish.group);
         realFish.push(fish);
-        placed++;
+        fishPlaced++;
+      }
+      console.log(`[models] real fish placed: ${fishPlaced}/${FISH_COUNT}`, fishPlaced > 0 ? realFish.map((f) => f.group.position.toArray().map((n) => n.toFixed(1))) : "(none placed)");
+    }).catch(() => {});
+
+    // Sponges, plants, and a pre-animated fish school — per explicit "add
+    // more things to Coral Shallows." Kept as a fully SEPARATE
+    // Promise.allSettled block from the coral+fish loading above (not
+    // folded into that Promise.all) so a corrupted/failed upload in any
+    // one of these three new assets can't block the other two, OR the
+    // already-working coral/angelfish/fish system above — Promise.all is
+    // all-or-nothing, a real bug this project already hit once and fixed
+    // for tree loading specifically (see models.js's own history).
+    Promise.allSettled([loadSpongeModel(), loadPlantModel(), loadFishSchoolModel()]).then((results) => {
+      if (currentLevelIdx !== spawnLevelIdx) return;
+      const [spongeResult, plantResult, fishSchoolResult] = results;
+      console.log("[models] sponge/plant/fish-school load:", results.map((r) => r.status));
+
+      if (spongeResult.status === "fulfilled") {
+        // Scattered reef accent, same general placement shape as coral
+        // (random point, needs real water depth, embeds proportionally
+        // via its own measured groundOffset) but far fewer of them and a
+        // bit larger — a sponge reads as a single sparse landmark on the
+        // reef floor, not a carpet the way 220 coral pieces are.
+        const SPONGE_COUNT = Math.round(30 * getGraphicsSettings().seaLifeMultiplier);
+        const SPONGE_MAX_ATTEMPTS = 400;
+        const spongeSeed = hashStringToSeed(WORLD_SEED + "::realSponges");
+        const spongeRng = mulberry32(spongeSeed);
+        let spongesPlaced = 0;
+        for (let i = 0; i < SPONGE_MAX_ATTEMPTS && spongesPlaced < SPONGE_COUNT; i++) {
+          const angle = spongeRng() * Math.PI * 2;
+          const dist = spongeRng() * (WORLD_BOUND_RADIUS - 10);
+          const x = Math.cos(angle) * dist;
+          const z = Math.sin(angle) * dist;
+          if (Math.hypot(x, z) > WORLD_BOUND_RADIUS - 8) continue;
+          const groundY = sampleGroundHeight(x, z, terrainMesh); // was terrainHeightAt (the analytic function) — per "plant is underwater/not on land," the analytic estimate can diverge from the ACTUAL rendered terrain surface at some points, same category of fix already established for tree/fish placement
+          if (groundY === null || groundY > LIQUID_LEVEL.crystal - 0.6) continue; // needs to be genuinely underwater, not on the dry island or right at the shoreline
+          const sponge = createRealSponge();
+          if (!sponge) continue;
+          // Final size range picked to read as a real reef sponge
+          // cluster relative to the existing coral pieces (roughly
+          // 0.5-1.2 world units, similar order to the mid-sized coral
+          // species) rather than dwarfing or disappearing next to them.
+          const scale = 0.5 + spongeRng() * 0.7;
+          sponge.scale.setScalar(scale);
+          sponge.rotation.y = spongeRng() * Math.PI * 2;
+          sponge.position.set(x, groundY + sponge.userData.groundOffset * scale * 0.5, z); // ~50% embedded, a sponge sits more anchored into the substrate than a coral head does
+          scene.add(sponge);
+          realSponges.push(sponge);
+          spongesPlaced++;
+        }
+        console.log(`[models] sponges placed: ${spongesPlaced}/${SPONGE_COUNT}`);
+      }
+
+      if (plantResult.status === "fulfilled") {
+        // Similar scattered placement, sparser still — a plant/seaweed
+        // accent reads best as an occasional accent, not a dense field.
+        const PLANT_COUNT = Math.round(20 * getGraphicsSettings().seaLifeMultiplier);
+        const PLANT_MAX_ATTEMPTS = 300;
+        const plantSeed = hashStringToSeed(WORLD_SEED + "::realPlants");
+        const plantRng = mulberry32(plantSeed);
+        let plantsPlaced = 0;
+        for (let i = 0; i < PLANT_MAX_ATTEMPTS && plantsPlaced < PLANT_COUNT; i++) {
+          const angle = plantRng() * Math.PI * 2;
+          const dist = plantRng() * (WORLD_BOUND_RADIUS - 10);
+          const x = Math.cos(angle) * dist;
+          const z = Math.sin(angle) * dist;
+          if (Math.hypot(x, z) > WORLD_BOUND_RADIUS - 8) continue;
+          const groundY = sampleGroundHeight(x, z, terrainMesh); // was terrainHeightAt — same fix as sponge above
+          if (groundY === null || groundY > LIQUID_LEVEL.crystal - 0.6) continue;
+          const plant = createRealPlant();
+          if (!plant) continue;
+          // The source file's own bounds are notably wider than tall
+          // (~1.5-1.7 horizontal vs ~0.7 vertical) — a sprawling frond
+          // cluster, not an upright plant — sized to read as a modest
+          // seafloor accent rather than a giant fan.
+          const scale = 0.35 + plantRng() * 0.35;
+          plant.scale.setScalar(scale);
+          plant.rotation.y = plantRng() * Math.PI * 2;
+          plant.position.set(x, groundY + plant.userData.groundOffset * scale, z); // fully based at ground level, not embedded — a plant grows FROM the substrate, doesn't sink into it the way coral/sponge do
+          scene.add(plant);
+          realPlants.push(plant);
+          plantsPlaced++;
+        }
+        console.log(`[models] plants placed: ${plantsPlaced}/${PLANT_COUNT}`);
+      }
+
+      if (fishSchoolResult.status === "fulfilled") {
+        // 1-2 whole pre-animated schools (each already containing 9
+        // fish), NOT one instance per individual fish the way the small
+        // angelfish are placed — see createRealFishSchool's own comment
+        // for why this file can't be cleanly split into single reusable
+        // fish. Math.max(1,...) so even Low tier still gets the one
+        // dramatic school moment rather than "zero," unlike coral/sponge/
+        // plant counts which can reasonably reach zero at the low end.
+        const SCHOOL_COUNT = Math.max(1, Math.round(2 * getGraphicsSettings().seaLifeMultiplier));
+        const schoolSeed = hashStringToSeed(WORLD_SEED + "::realFishSchools");
+        const schoolRng = mulberry32(schoolSeed);
+        let schoolsPlaced = 0;
+        const SCHOOL_MAX_ATTEMPTS = 60;
+        for (let i = 0; i < SCHOOL_MAX_ATTEMPTS && schoolsPlaced < SCHOOL_COUNT; i++) {
+          const angle = schoolRng() * Math.PI * 2;
+          const dist = schoolRng() * (WORLD_BOUND_RADIUS - 14); // extra margin vs individual fish — a several-unit-wide formation needs more clearance from the boundary than a single small fish does
+          const x = Math.cos(angle) * dist;
+          const z = Math.sin(angle) * dist;
+          const groundY = terrainHeightAt(level, x, z, WORLD_SEED);
+          if (groundY === null || groundY > LIQUID_LEVEL.crystal - 3) continue; // needs real open-water depth for a multi-unit-tall formation, not shallow water near shore
+          const school = createRealFishSchool();
+          if (!school) continue;
+          // Overall formation width — dramatic but not overwhelming
+          // relative to the reef itself (compare: the whole playable
+          // radius is ~112 units).
+          const scale = 3.5 + schoolRng() * 2;
+          school.group.scale.setScalar(scale);
+          school.group.rotation.y = schoolRng() * Math.PI * 2;
+          // Mid-water column, well clear of both the seafloor and the
+          // surface — same depth-fraction reasoning as the small fish's
+          // own placement, just for a taller formation.
+          const depthBelowSurface = 2 + schoolRng() * 2.5;
+          school.group.position.set(x, LIQUID_LEVEL.crystal - depthBelowSurface, z);
+          school.wanderCenterX = x; school.wanderCenterZ = z;
+          school.wanderRadius = 4 + schoolRng() * 4;
+          school.wanderSpeed = 0.06 + schoolRng() * 0.05; // slower than individual fish — a whole formation drifting, not darting
+          school.wanderPhase = schoolRng() * Math.PI * 2;
+          school.wanderY = LIQUID_LEVEL.crystal - depthBelowSurface;
+          scene.add(school.group);
+          realFishSchools.push(school);
+          schoolsPlaced++;
+        }
+        console.log(`[models] fish schools placed: ${schoolsPlaced}/${SCHOOL_COUNT}`);
       }
     }).catch(() => {});
   }
@@ -1727,12 +3229,21 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
   grassHandle = createGrass(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), TERRAIN_SIZE * 0.46);
   flowersHandle = createFlowers(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), TERRAIN_SIZE * 0.46);
   footstepGlowHandle = level.biome === "verdant" ? createFootstepGlowSystem(scene, 40) : null;
-  weatherHandle = createWeatherSystem(scene, level.biome);
+  weatherHandle = createWeatherSystem(scene, level.biome, LIQUID_LEVEL[level.biome], getGraphicsSettings().particleMultiplier, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
   cloudsHandle = createClouds(scene, level.biome);
   cloudLayerHandle = createCloudLayer(scene);
   horizonHandle = level.biome === "crystal" ? null : createHorizonSilhouettes(scene, level.biome); // Coral Shallows is open ocean now — no distant mountain backdrop, and horizonSilhouettes.js still isn't part of this session so this stays a main.js-only fix rather than touching that file's still-old icy Crystal-Spire theming
   wildlifeHandle = createWildlife(scene, level.biome, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), LIQUID_LEVEL[level.biome]);
-  landmarkHandle = createLandmark(scene, level.biome, level.color, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
+  // Per explicit "remove the green crystal that is on the pedestal" —
+  // landmarks.js itself isn't part of this session's file set, so this
+  // is a main.js-only skip (same technique already used for horizonHandle
+  // just above) rather than editing that file's internals directly. This
+  // removes the WHOLE landmark structure for Coral Shallows — crystal and
+  // pedestal together, since there's no way to isolate just the crystal
+  // without landmarks.js in hand. If the pedestal/base was meant to stay
+  // (just the crystal itself removed or replaced), that needs the actual
+  // file.
+  landmarkHandle = level.biome === "crystal" ? null : createLandmark(scene, level.biome, level.color, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
 
   const layout = generateLevelLayout(level.biome, WORLD_SEED);
 
@@ -1972,12 +3483,35 @@ function applyGraphicsSettings() {
     // has no effect on an already-rendered light.
     if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
   }
+  const moonShadowSize = s.shadowMapSize / 2;
+  if (moonLight.shadow.mapSize.width !== moonShadowSize) {
+    moonLight.shadow.mapSize.set(moonShadowSize, moonShadowSize);
+    if (moonLight.shadow.map) { moonLight.shadow.map.dispose(); moonLight.shadow.map = null; }
+  }
+  applySsaoTier();
   resizeToViewport();
   if (currentLevelIdx >= 0) buildLevel(currentLevelIdx);
 }
 
+// Registry of "re-read my current effective value and update my own
+// displayed state" callbacks — one per individual toggle/dropdown created
+// below (EFFECT_TOGGLES loop, makeDropdown). Exists so syncGraphicsUI can
+// refresh every one of them after a tier change, without each control
+// needing to know about any other.
+const uiSyncCallbacks = [];
+
 function changeGraphicsTier(tier) {
   if (!setGraphicsTier(tier)) return;
+  // Per "graphics settings [should] change automatically when you press
+  // low/medium/high" — previously this ONLY switched the tier; any
+  // individual override already set (e.g. "Shadows: Off" toggled by
+  // hand) silently stayed in effect regardless of which tier was picked
+  // afterward, since getGraphicsSettings() always lets an override win
+  // over the tier default. That's very likely why "everything off, set
+  // to Medium" was still stuck at the OLD toggled state instead of
+  // Medium's real values — pressing a tier now gives a genuinely clean
+  // slate, matching what the button visibly claims to do.
+  resetOverrides();
   applyGraphicsSettings();
   syncGraphicsUI();
 }
@@ -1987,6 +3521,12 @@ function syncGraphicsUI() {
   graphicsPanel?.querySelectorAll(".rift-graphics-opt").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.tier === active);
   });
+  // Re-render every individual toggle/dropdown so their displayed
+  // state (label text, selected option, "active" styling) reflects the
+  // tier's real values immediately — without this, a control could show
+  // "Off" from a just-cleared override while the game itself is now
+  // correctly running the tier's own (possibly "On") value underneath.
+  for (const fn of uiSyncCallbacks) fn();
 }
 
 if (graphicsBtn && graphicsPanel) {
@@ -1999,6 +3539,309 @@ if (graphicsBtn && graphicsPanel) {
     btn.addEventListener("click", () => changeGraphicsTier(btn.dataset.tier));
   });
   syncGraphicsUI();
+
+  // Debug: time-of-day / weather preview toggles, per explicit request —
+  // appended into the existing panel at runtime rather than touching
+  // index.html, so this ships as a self-contained main.js change. Reuses
+  // the ".rift-graphics-opt" class for visual consistency with the
+  // existing quality-tier buttons (same CSS the page already loads).
+  const debugSection = document.createElement("div");
+  debugSection.style.marginTop = "8px";
+  debugSection.style.paddingTop = "8px";
+  debugSection.style.borderTop = "1px solid rgba(255,255,255,0.15)";
+  debugSection.style.display = "flex";
+  debugSection.style.gap = "6px";
+  graphicsPanel.appendChild(debugSection);
+
+  const TIME_SCALE_STEPS = [1, 20, 100]; // 1x = real ~900s day/night cycle; 100x = ~9s, full cycle visible almost instantly
+  let timeScaleIdx = 0;
+  const timeScaleBtn = document.createElement("button");
+  timeScaleBtn.type = "button";
+  timeScaleBtn.className = "rift-graphics-opt";
+  timeScaleBtn.textContent = "Time: 1x";
+  timeScaleBtn.addEventListener("click", () => {
+    timeScaleIdx = (timeScaleIdx + 1) % TIME_SCALE_STEPS.length;
+    debugTimeScale = TIME_SCALE_STEPS[timeScaleIdx];
+    timeScaleBtn.textContent = `Time: ${debugTimeScale}x`;
+    timeScaleBtn.classList.toggle("active", debugTimeScale !== 1);
+  });
+  debugSection.appendChild(timeScaleBtn);
+
+  const stormBtn = document.createElement("button");
+  stormBtn.type = "button";
+  stormBtn.className = "rift-graphics-opt";
+  stormBtn.textContent = "Storm: Off";
+  stormBtn.addEventListener("click", () => {
+    debugForceStorm = !debugForceStorm;
+    stormBtn.textContent = debugForceStorm ? "Storm: On" : "Storm: Off";
+    stormBtn.classList.toggle("active", debugForceStorm);
+  });
+  debugSection.appendChild(stormBtn);
+
+  // Individual effect toggles + resolution control + FPS counter
+  // visibility, per explicit "toggle buttons to tune each effect on and
+  // off and adjust display resolution... turn god[FPS] counter on and
+  // off" request. Second row, same append-into-existing-panel approach
+  // as the debug section above — no index.html changes needed.
+  const effectsSection = document.createElement("div");
+  effectsSection.style.marginTop = "8px";
+  effectsSection.style.paddingTop = "8px";
+  effectsSection.style.borderTop = "1px solid rgba(255,255,255,0.15)";
+  effectsSection.style.display = "flex";
+  effectsSection.style.flexWrap = "wrap";
+  effectsSection.style.gap = "6px";
+  graphicsPanel.appendChild(effectsSection);
+
+  // Each entry: the override key in graphicsSettings.js, a label. Most
+  // take effect immediately via applyGraphicsSettings() below (shadows/
+  // ssao/resolution all read straight from getGraphicsSettings() there;
+  // reflectionEnabled and causticsEnabled are also read fresh every frame
+  // in the animate loop/shader uniform push, both added this round).
+  // oceanEffectsEnabled is the one exception — liquid.js (not in hand
+  // this session to verify) decides at LEVEL-BUILD time whether to
+  // compile its caustic/foam/sun-glitter shader code at all, not via a
+  // live per-frame uniform, so that one's toggle relies on
+  // applyGraphicsSettings()'s buildLevel() call below to actually take
+  // effect — same mechanism tier switches already use, just reused here.
+  const EFFECT_TOGGLES = [
+    { key: "shadowsEnabled", label: "Shadows" },
+    { key: "ssaoEnabled", label: "SSAO" },
+    { key: "oceanEffectsEnabled", label: "Ocean FX" },
+    { key: "reflectionEnabled", label: "Reflections" },
+    { key: "causticsEnabled", label: "Caustics" },
+    { key: "foamEnabled", label: "Foam" },
+  ];
+  for (const { key, label } of EFFECT_TOGGLES) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "rift-graphics-opt";
+    const isOn = () => getEffectiveValue(key) !== false;
+    const render = () => { btn.textContent = `${label}: ${isOn() ? "On" : "Off"}`; btn.classList.toggle("active", isOn()); };
+    render();
+    uiSyncCallbacks.push(render);
+    btn.addEventListener("click", () => {
+      setOverride(key, isOn() ? false : true); // explicit true/false override in both directions — a null-clear-to-tier-default here would make it impossible to force an effect ON on a tier whose own default is off (e.g. Low's shadowsEnabled)
+      applyGraphicsSettings();
+      render();
+    });
+    effectsSection.appendChild(btn);
+  }
+
+  // Resolution: cycles the pixelRatioCap override — "Tier" (null, use the
+  // active tier's own value, e.g. Medium's 1.3), then explicit absolute
+  // values. Framed as a single resolution control per "adjust display
+  // resolution and screen ratio" — pixelRatioCap already IS effectively
+  // resolution scale (it's multiplied against window.devicePixelRatio to
+  // get the actual render-buffer size, see applyGraphicsSettings/the
+  // renderer.setPixelRatio call at startup), so a separate "screen ratio"
+  // control isn't a distinct lever this codebase has; this one setting
+  // covers both asks.
+  // Resolution: literal fixed render-buffer targets, per explicit
+  // "native resolution... change to 720p, 1080p, 2K, 4K" — genuinely
+  // different from a pixelRatio multiplier (which just scales relative
+  // to whatever the device's own screen density already is); these are
+  // absolute pixel-height targets via resizeToViewport's new
+  // resolutionOverride path above. "Native" (null) restores the
+  // tier-driven pixelRatioCap behavior this project had before.
+  const RESOLUTION_STEPS = [null, 720, 1080, 1440, 2160];
+  const resolutionLabel = (h) => (h === null ? "Native" : h === 1440 ? "2K" : h === 2160 ? "4K" : `${h}p`);
+  let resolutionIdx = 0;
+  const resolutionBtn = document.createElement("button");
+  resolutionBtn.type = "button";
+  resolutionBtn.className = "rift-graphics-opt";
+  resolutionBtn.textContent = `Resolution: ${resolutionLabel(RESOLUTION_STEPS[resolutionIdx])}`;
+  resolutionBtn.addEventListener("click", () => {
+    resolutionIdx = (resolutionIdx + 1) % RESOLUTION_STEPS.length;
+    const h = RESOLUTION_STEPS[resolutionIdx];
+    resolutionOverride = h === null ? null : { height: h };
+    resizeToViewport();
+    resolutionBtn.textContent = `Resolution: ${resolutionLabel(h)}`;
+    resolutionBtn.classList.toggle("active", h !== null);
+  });
+  effectsSection.appendChild(resolutionBtn);
+
+  // Aspect ratio: per explicit "change screen from narrow 4:3 to 16:9 or
+  // widescreen" — sets an inline aspect-ratio style on #rift-viewport
+  // itself, which the existing ResizeObserver (see resizeToViewport
+  // above) already picks up automatically the moment the element's
+  // computed size changes, no extra wiring needed. Deliberately a NO-OP
+  // while in fullscreen: #rift-viewport.rift-fullscreen (index.html) sets
+  // BOTH width AND height explicitly (100svw/100svh, filling the real
+  // device screen) — CSS aspect-ratio only has any visual effect when at
+  // most one dimension is fixed and the other is left to be computed
+  // from it, so forcing a ratio here while both are already pinned
+  // wouldn't do anything except leave a misleading "active" button state.
+  // True letterboxed fullscreen aspect control would need a real wrapper
+  // layout change, a bigger undertaking than this toggle.
+  const ASPECT_STEPS = [null, [16, 9], [4, 3], [21, 9]];
+  const aspectLabel = (a) => (a === null ? "Auto" : a[0] === 21 ? "21:9" : `${a[0]}:${a[1]}`);
+  let aspectIdx = 0;
+  const aspectBtn = document.createElement("button");
+  aspectBtn.type = "button";
+  aspectBtn.className = "rift-graphics-opt";
+  aspectBtn.textContent = `Aspect: ${aspectLabel(ASPECT_STEPS[aspectIdx])}`;
+  aspectBtn.addEventListener("click", () => {
+    if (viewport.classList.contains("rift-fullscreen")) return; // inert in fullscreen, see comment above — don't change state or the button would lie about what's active
+    aspectIdx = (aspectIdx + 1) % ASPECT_STEPS.length;
+    const a = ASPECT_STEPS[aspectIdx];
+    viewport.style.aspectRatio = a ? `${a[0]} / ${a[1]}` : "";
+    aspectBtn.textContent = `Aspect: ${aspectLabel(a)}`;
+    aspectBtn.classList.toggle("active", a !== null);
+  });
+  effectsSection.appendChild(aspectBtn);
+
+  // Bloom / Anti-Aliasing / Tone Mapping — per explicit "dropdown options
+  // for bloom, anti-aliasing and tone mapping individually" follow-up,
+  // replacing the single bundled Bloom+AA toggle from the previous round.
+  // Real <select> elements rather than the cycling-button pattern used
+  // elsewhere in this panel — each of these has more than 2-3 states
+  // (bloom has 4, tone mapping has 5), and repeatedly tapping a cycle
+  // button back around to a specific choice is worse UX than picking it
+  // directly from a list. A dedicated row, own border-top separator, same
+  // visual language (dark panel, existing color variables) as the rest of
+  // the panel via inline styles rather than new index.html CSS, keeping
+  // this self-contained in main.js like every other panel addition this
+  // session.
+  const postFxSection = document.createElement("div");
+  postFxSection.style.marginTop = "8px";
+  postFxSection.style.paddingTop = "8px";
+  postFxSection.style.borderTop = "1px solid rgba(255,255,255,0.15)";
+  postFxSection.style.display = "flex";
+  postFxSection.style.flexWrap = "wrap";
+  postFxSection.style.gap = "6px";
+  graphicsPanel.appendChild(postFxSection);
+
+  function makeDropdown(labelText, key, options, onApply) {
+    // options: array of [value, label] pairs, in the order they should
+    // appear in the dropdown.
+    const wrap = document.createElement("label");
+    wrap.style.display = "flex";
+    wrap.style.flexDirection = "column";
+    wrap.style.gap = "2px";
+    wrap.style.fontFamily = "'IBM Plex Mono', monospace";
+    wrap.style.fontSize = "9px";
+    wrap.style.color = "rgba(232,236,241,0.6)";
+    wrap.style.flex = "1";
+    wrap.style.minWidth = "90px";
+    const span = document.createElement("span");
+    span.textContent = labelText;
+    wrap.appendChild(span);
+    const select = document.createElement("select");
+    select.style.font = "inherit";
+    select.style.color = "rgba(232,236,241,0.9)";
+    select.style.background = "rgba(232,236,241,0.06)";
+    select.style.border = "1px solid rgba(232,236,241,0.18)";
+    select.style.borderRadius = ".3rem";
+    select.style.padding = ".35rem .3rem";
+    for (const [value, optLabel] of options) {
+      const opt = document.createElement("option");
+      opt.value = value;
+      opt.textContent = optLabel;
+      select.appendChild(opt);
+    }
+    select.value = getEffectiveValue(key);
+    select.addEventListener("change", () => {
+      setOverride(key, select.value);
+      onApply();
+    });
+    uiSyncCallbacks.push(() => { select.value = getEffectiveValue(key); });
+    wrap.appendChild(select);
+    postFxSection.appendChild(wrap);
+  }
+
+  makeDropdown("Bloom", "bloomLevel", [
+    ["off", "Off"], ["subtle", "Subtle"], ["moderate", "Moderate"], ["strong", "Strong"],
+  ], applyPostFx);
+  makeDropdown("Anti-Aliasing", "aaMethod", [
+    ["off", "Off"], ["fxaa", "FXAA"], ["smaa", "SMAA"],
+  ], applyPostFx);
+  makeDropdown("Tone Mapping", "toneMapping", [
+    ["none", "None"], ["linear", "Linear"], ["reinhard", "Reinhard"], ["cineon", "Cineon"], ["aces", "ACES Filmic"],
+  ], applyPostFx);
+
+  // Density: grass/particle/cloud/wildlife/sea-life counts, per "everything
+  // off and still 10fps" — these five multipliers were tier-scaled but had
+  // NO individual control at all until now, unlike shadows/SSAO/ocean
+  // effects/etc. 220 coral pieces alone at Medium's 0.75x is 165 live
+  // meshes; grass blade counts are typically the single largest instance
+  // count in a scene like this. With every other toggle off, these were
+  // very likely the actual remaining bottleneck. Pulls its 4 preset
+  // options' real numbers directly from each tier's own stored values
+  // (getTierRawSettings) rather than duplicating separate hardcoded
+  // numbers that could drift out of sync — "Minimal" is a new 4th rung
+  // BELOW Low's own values, for cases where even Low's density is still
+  // too much.
+  const DENSITY_KEYS = ["grassMultiplier", "particleMultiplier", "cloudMultiplier", "wildlifeMultiplier", "seaLifeMultiplier"];
+  const DENSITY_PRESETS = {
+    minimal: Object.fromEntries(DENSITY_KEYS.map((k) => [k, getTierRawSettings("low")[k] * 0.4])),
+    low: getTierRawSettings("low"),
+    medium: getTierRawSettings("medium"),
+    high: getTierRawSettings("high"),
+  };
+  function currentDensityPreset() {
+    // Reverse-lookup: which preset (if any) matches every one of the
+    // current effective values exactly — "Custom" when they don't line
+    // up with any single preset (e.g. an old per-key override from
+    // before this dropdown existed, or a partial match).
+    for (const [name, preset] of Object.entries(DENSITY_PRESETS)) {
+      if (DENSITY_KEYS.every((k) => getEffectiveValue(k) === preset[k])) return name;
+    }
+    return "custom";
+  }
+  {
+    const wrap = document.createElement("label");
+    wrap.style.display = "flex";
+    wrap.style.flexDirection = "column";
+    wrap.style.gap = "2px";
+    wrap.style.fontFamily = "'IBM Plex Mono', monospace";
+    wrap.style.fontSize = "9px";
+    wrap.style.color = "rgba(232,236,241,0.6)";
+    wrap.style.flex = "1";
+    wrap.style.minWidth = "90px";
+    const span = document.createElement("span");
+    span.textContent = "Density";
+    wrap.appendChild(span);
+    const select = document.createElement("select");
+    select.style.font = "inherit";
+    select.style.color = "rgba(232,236,241,0.9)";
+    select.style.background = "rgba(232,236,241,0.06)";
+    select.style.border = "1px solid rgba(232,236,241,0.18)";
+    select.style.borderRadius = ".3rem";
+    select.style.padding = ".35rem .3rem";
+    const DENSITY_OPTIONS = [["minimal", "Minimal"], ["low", "Low"], ["medium", "Medium"], ["high", "High"], ["custom", "Custom"]];
+    for (const [value, optLabel] of DENSITY_OPTIONS) {
+      const opt = document.createElement("option");
+      opt.value = value;
+      opt.textContent = optLabel;
+      if (value === "custom") opt.disabled = true; // never a real user choice — only ever shown to reflect an already-mismatched state, same reasoning browsers use for a "Custom" entry in a device/quality dropdown
+      select.appendChild(opt);
+    }
+    select.value = currentDensityPreset();
+    select.addEventListener("change", () => {
+      const preset = DENSITY_PRESETS[select.value];
+      if (!preset) return; // guards the disabled "custom" option, which should be unreachable via direct selection anyway
+      for (const k of DENSITY_KEYS) setOverride(k, preset[k]);
+      applyGraphicsSettings();
+    });
+    uiSyncCallbacks.push(() => { select.value = currentDensityPreset(); });
+    wrap.appendChild(select);
+    postFxSection.appendChild(wrap);
+  }
+
+  // FPS counter visibility — separate from every setting above since
+  // it's a pure UI toggle (fpsCounterEl, created near the top of this
+  // file), not a graphics-quality/performance lever at all.
+  const fpsBtn = document.createElement("button");
+  fpsBtn.type = "button";
+  fpsBtn.className = "rift-graphics-opt active"; // starts active — the counter is visible by default today
+  fpsBtn.textContent = "FPS Counter: On";
+  fpsBtn.addEventListener("click", () => {
+    const nowHidden = fpsCounterEl.style.display !== "none";
+    fpsCounterEl.style.display = nowHidden ? "none" : "";
+    fpsBtn.textContent = `FPS Counter: ${nowHidden ? "Off" : "On"}`;
+    fpsBtn.classList.toggle("active", !nowHidden);
+  });
+  effectsSection.appendChild(fpsBtn);
 }
 
 // ---------------------------------------------------------------------------
@@ -2035,6 +3878,13 @@ function enterLevel(levelIdx) {
     touchGameActive = true;
     startOverlay.style.display = "none";
   } else {
+    desktopGameActive = true;
+    // Best-effort — still requested since it's a genuinely better
+    // experience where it works (real cursor capture, no drag-to-look
+    // needed), but isGameActive()/movement no longer depend on this
+    // succeeding at all; the mousedown/mousemove drag-look fallback
+    // (below, near the other mouse listeners) covers camera control on
+    // browsers where this silently does nothing.
     controls.lock();
   }
 }
@@ -2159,9 +4009,86 @@ function fireShot() {
   }
 }
 
-document.addEventListener("mousedown", (e) => {
-  if (e.button === 0 && controls.isLocked) fireShot();
-});
+// Click-to-shoot and click-and-drag-to-look share the same mousedown
+// gesture on desktop, so they're handled together here rather than as
+// two independent listeners (which is what this was originally, before
+// drag-look existed — that would have made every look-drag ALSO fire a
+// shot, since both would react to the same mousedown). While genuinely
+// pointer-locked, behavior is unchanged from before: an instant fire on
+// mousedown, no drag concept at all (the cursor doesn't move on-screen
+// during lock, PointerLockControls' own internal listener handles
+// rotation directly). While NOT locked (either because Pointer Lock
+// isn't supported/failed on this browser, or simply hasn't been
+// requested yet), a click is disambiguated from a drag by total
+// movement: under DRAG_THRESHOLD pixels counts as a click and fires;
+// beyond it, the gesture is treated as having been a look-drag and
+// doesn't also fire on release.
+if (!isTouchDevice) {
+  let mouseLookDragging = false;
+  let mouseLookStartX = 0, mouseLookStartY = 0;
+  let mouseLookLastX = 0, mouseLookLastY = 0;
+  let mouseLookMaxDelta = 0; // largest total displacement from the start point seen during this gesture
+  const MOUSE_LOOK_SENSITIVITY = 0.0025; // radians per pixel of drag
+  const DRAG_THRESHOLD = 6; // pixels — below this, treat the gesture as a click (fire) rather than a look-drag
+
+  // Shared by both the click-and-drag path below AND the trackpad-swipe
+  // path further down — same YXZ Euler convention PointerLockControls
+  // itself uses internally, applied directly to the camera here instead
+  // since its own rotation logic only ever runs from raw mousemove while
+  // genuinely locked.
+  function applyLookDelta(dx, dy, sensitivity) {
+    camera.rotation.order = "YXZ";
+    camera.rotation.y -= dx * sensitivity;
+    camera.rotation.x -= dy * sensitivity;
+    // Clamped just short of straight up/down so the view can't flip past
+    // vertical and invert — same reasoning any FPS-style look control
+    // needs regardless of input method.
+    camera.rotation.x = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, camera.rotation.x));
+  }
+
+  document.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
+    if (controls.isLocked) { fireShot(); return; } // unchanged classic behavior
+    if (e.target !== renderer.domElement) return; // don't start a look-drag from clicks on HUD buttons (GRAPHICS/MENU/etc.) layered on top of the canvas
+    mouseLookDragging = true;
+    mouseLookStartX = mouseLookLastX = e.clientX;
+    mouseLookStartY = mouseLookLastY = e.clientY;
+    mouseLookMaxDelta = 0;
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!mouseLookDragging || controls.isLocked) return;
+    const dx = e.clientX - mouseLookLastX;
+    const dy = e.clientY - mouseLookLastY;
+    mouseLookLastX = e.clientX;
+    mouseLookLastY = e.clientY;
+    mouseLookMaxDelta = Math.max(mouseLookMaxDelta, Math.hypot(e.clientX - mouseLookStartX, e.clientY - mouseLookStartY));
+    applyLookDelta(dx, dy, MOUSE_LOOK_SENSITIVITY);
+  });
+  window.addEventListener("mouseup", (e) => {
+    if (!mouseLookDragging) return;
+    mouseLookDragging = false;
+    if (e.button === 0 && !controls.isLocked && mouseLookMaxDelta < DRAG_THRESHOLD) fireShot(); // stayed under the drag threshold the whole time — treat as a click, not a look-drag
+  });
+
+  // Two-finger trackpad swipe, per explicit "control the camera with the
+  // touchpad like you can with touchscreen." The click-and-drag path
+  // above technically works on a trackpad too, but requires physically
+  // holding the click button down while sliding a finger — an awkward
+  // gesture with no real touchscreen equivalent (a touch drag is just
+  // finger-down-and-move, no separate "click" step at all). The genuine
+  // trackpad analog to a touchscreen drag is a plain two-finger swipe
+  // with NO click — macOS/Windows precision trackpads surface that
+  // gesture to the browser as `wheel` events with deltaX/deltaY, not as
+  // mousemove. Guarded off whenever a click-drag is already in progress
+  // or pointer lock is active, so this never fights either of the other
+  // two look methods.
+  const WHEEL_LOOK_SENSITIVITY = 0.0018; // trackpad wheel deltas run larger per swipe-tick than raw mousemove pixels, so a smaller multiplier than MOUSE_LOOK_SENSITIVITY — a first-pass estimate, worth tuning once actually felt live
+  renderer.domElement.addEventListener("wheel", (e) => {
+    if (controls.isLocked || mouseLookDragging) return;
+    e.preventDefault(); // stop the page itself from scrolling/zooming on this gesture
+    applyLookDelta(e.deltaX, e.deltaY, WHEEL_LOOK_SENSITIVITY);
+  }, { passive: false }); // passive:false required for preventDefault to actually take effect on a wheel listener
+}
 
 createTouchControls({
   camera, keys, onFire: fireShot, viewport, isActive: isGameActive,
@@ -2251,6 +4178,8 @@ function updateEmberFireSpawner(dt) {
 // over decorationHandles that's already being iterated once per frame
 // anyway for updateDecoration above.
 const cameraForward = new THREE.Vector3();
+const sunOrbitDir = new THREE.Vector3();
+const moonOrbitDir = new THREE.Vector3();
 function updateFireAudio() {
   let nearest = null;
   let nearestDistSq = Infinity;
@@ -2277,6 +4206,7 @@ function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.1);
   elapsedTime += dt;
+  let playerSwimmingThisFrame = false; // captured inside the movement block below, read later (audio triggers) once isFullySubmerged is also available for this same frame
 
   fpsFrameCount++;
   fpsAccumTime += dt;
@@ -2286,7 +4216,23 @@ function animate() {
     fpsAccumTime = 0;
   }
 
-  const dayNight = updateDayNightCycle(dayNightCycle, dt);
+  // Per "stray blue circle in the sky" report after adding the Time-scale
+  // debug button: feeding updateDayNightCycle one GIANT dt (up to 10s of
+  // simulated time in a single real frame, at 100x) is the likely cause —
+  // if that function's own sun/moon opacity fade uses a per-frame lerp
+  // (current + (target-current)*dt*rate, common for this kind of
+  // crossfade), that math implicitly assumes small real-sized steps; a
+  // huge dt can push the lerp factor past 1 and OVERSHOOT the target
+  // instead of clamping to it, which could plausibly show the moon (or a
+  // stale sun sprite) at the wrong time. Fixed by calling the function
+  // debugTimeScale times per frame with a normal-sized dt each time
+  // instead — same net time advancement, but every individual call sees
+  // exactly the same dt magnitude real time always produces, so nothing
+  // inside dayNightCycle.js gets an input it wasn't built to expect.
+  let dayNight;
+  for (let i = 0; i < debugTimeScale; i++) {
+    dayNight = updateDayNightCycle(dayNightCycle, dt);
+  }
   // Fallback sky background — mutated in place (scene.background already
   // references this same Color object, set once at module init above),
   // blended from the day/night cycle's own current colors so it stays
@@ -2294,6 +4240,51 @@ function animate() {
   if (dayNight.skyZenith && dayNight.skyHorizon) {
     sceneBackgroundColor.copy(dayNight.skyHorizon).lerp(dayNight.skyZenith, 0.5);
   }
+
+  // Shadow camera "follow the player" — per "how can we improve the
+  // shadows." updateDayNightCycle just above already set sun.position/
+  // moonLight.position correctly for the TIME OF DAY, but always relative
+  // to world origin (the frustum used to just sit there statically,
+  // covering the whole level at low effective resolution — see
+  // SHADOW_EXTENT's comment at each light's setup). This preserves that
+  // same orbital DIRECTION and distance (re-derived fresh each frame,
+  // before moving anything) but re-centers the whole light+frustum
+  // around the player instead, so the now much-smaller SHADOW_EXTENT
+  // frustum always contains whatever the player can actually see up
+  // close.
+  //
+  // Texel snapping: rounding the frustum's center to whole shadow-texel
+  // increments (rather than letting it drift by fractional amounts every
+  // frame as the player moves smoothly) is what prevents a moving shadow
+  // frustum from causing shadows to visibly shimmer/crawl along edges —
+  // a well-known artifact of naively recentering a shadow camera every
+  // frame. Approximated in world-space XZ rather than the light's own
+  // exact local basis (which would need the frustum's actual right/up
+  // vectors) — a simplification, but the sun/moon here stay reasonably
+  // high-elevation most of the day/night, so XZ is close enough to that
+  // basis to work well in practice, consistent with other simplifications
+  // already made elsewhere in this project.
+  const sunTexelSize = (SHADOW_EXTENT * 2) / sun.shadow.mapSize.width;
+  sunOrbitDir.copy(sun.position).normalize();
+  const sunDist = sun.position.length();
+  sun.target.position.set(
+    Math.round(camera.position.x / sunTexelSize) * sunTexelSize,
+    camera.position.y,
+    Math.round(camera.position.z / sunTexelSize) * sunTexelSize
+  );
+  sun.position.copy(sun.target.position).addScaledVector(sunOrbitDir, sunDist);
+  sun.target.updateMatrixWorld();
+
+  const moonTexelSize = (SHADOW_EXTENT * 2) / moonLight.shadow.mapSize.width;
+  moonOrbitDir.copy(moonLight.position).normalize();
+  const moonDist = moonLight.position.length();
+  moonLight.target.position.set(
+    Math.round(camera.position.x / moonTexelSize) * moonTexelSize,
+    camera.position.y,
+    Math.round(camera.position.z / moonTexelSize) * moonTexelSize
+  );
+  moonLight.position.copy(moonLight.target.position).addScaledVector(moonOrbitDir, moonDist);
+  moonLight.target.updateMatrixWorld();
 
   if (isGameActive() && currentLevelIdx >= 0) {
     // Only Coral Shallows is a real whole-level ocean — Ember's/Verdant's
@@ -2307,9 +4298,39 @@ function animate() {
     // speed and vertical swim control can't ever disagree about whether
     // the player is currently swimming.
     const swimming = swimLevel !== undefined && camera.position.y < swimLevel;
+    playerSwimmingThisFrame = swimming;
     updateMovement(dt, playerPhysics.grounded, swimming);
     const swimVertical = (keys.up ? 1 : 0) - (keys.down ? 1 : 0);
     updatePlayerPhysics(camera, terrainMesh, playerPhysics, dt, PLAYER_EYE_HEIGHT, jumpQueued, caveFloorMeshes.length ? caveFloorMeshes : undefined, swimLevel, swimVertical);
+    // Camera bob/shake — per explicit "simulate a walking cycle with
+    // camera shake and going up and down slightly." Applied AFTER
+    // updatePlayerPhysics sets the real camera position/rotation for
+    // this frame, as a purely visual offset — safe to add to
+    // camera.position.y specifically because updatePlayerPhysics sets it
+    // ABSOLUTELY each frame from real ground height (not incrementally),
+    // so this can never compound or drift across frames; it's naturally
+    // overwritten fresh the moment the next frame's physics runs. Roll
+    // (rotation.z) is used for the shake rather than a horizontal
+    // position sway, specifically because roll is unused by the
+    // look-control system (which only ever touches pitch/yaw) — a small
+    // additive jitter there can't fight the player's own camera control
+    // the way nudging position.x/z each frame could risk doing.
+    // walkBobPhase accumulates continuously (never hard-reset) so the
+    // motion always continues smoothly from wherever it was; only its
+    // STRENGTH eases toward 0 when not walking, so stopping mid-swing
+    // settles naturally instead of snapping back to a flat camera. Gated
+    // on !swimming (already computed above, this exact frame) rather
+    // than isFullySubmerged specifically — a walking-gait bob shouldn't
+    // apply while wading/swimming at all, not just once fully
+    // underwater, and isFullySubmerged isn't even computed yet at this
+    // point in the frame (it's set much later in animate()).
+    const bobActive = playerMovingThisFrame && playerPhysics.grounded && !swimming;
+    walkBobStrength += ((bobActive ? 1 : 0) - walkBobStrength) * Math.min(1, dt * 8);
+    if (walkBobStrength > 0.001) {
+      if (bobActive) walkBobPhase += dt * WALK_BOB_SPEED;
+      camera.position.y += Math.sin(walkBobPhase) * WALK_BOB_HEIGHT * walkBobStrength;
+      camera.rotation.z += (Math.sin(walkBobPhase * 0.5) * WALK_SHAKE_ROLL + (Math.random() - 0.5) * WALK_SHAKE_ROLL * 0.4) * walkBobStrength;
+    }
     jumpQueued = false;
     if (camera.position.y < spawnPosition.y - FALL_RESPAWN_OFFSET) respawnInLevel();
     checkLoreProximity();
@@ -2342,6 +4363,12 @@ function animate() {
   if (terrainMesh && terrainMesh.material.userData.shader) {
     terrainMesh.material.userData.shader.uniforms.uTime.value = elapsedTime;
     terrainMesh.material.userData.shader.uniforms.uDayAmount.value = dayNight.dayAmount;
+    if (terrainMesh.material.userData.shader.uniforms.uCausticsEnabled) {
+      terrainMesh.material.userData.shader.uniforms.uCausticsEnabled.value = getGraphicsSettings().causticsEnabled !== false ? 1.0 : 0.0;
+    }
+    if (terrainMesh.material.userData.shader.uniforms.uFoamEnabled) {
+      terrainMesh.material.userData.shader.uniforms.uFoamEnabled.value = getGraphicsSettings().foamEnabled !== false ? 1.0 : 0.0;
+    }
   }
   // Real planar water reflection — Coral Shallows only, above-water only
   // (a reflection rendered from below the surface looking up would be
@@ -2368,7 +4395,17 @@ function animate() {
   // the render cost of computing it fresh every single frame.
   reflectionFrameCounter++;
   const reflectionBiome = currentLevelIdx >= 0 ? LEVELS[currentLevelIdx].biome : null;
-  if (reflectionBiome === "crystal" && camera.position.y > LIQUID_LEVEL.crystal) {
+  // reflectionEnabled: new individual toggle, per explicit "toggle
+  // buttons to tune each effect on and off" — undefined (no override set)
+  // treats as enabled, since this key doesn't exist on the base TIERS
+  // objects at all, only ever appears via an explicit override. When
+  // false, skips both full extra scene renders (reflection AND
+  // refraction) entirely rather than just throttling how often they
+  // refresh — the biggest single win this toggle set offers, since
+  // reflectionUpdateInterval already only ever reduces this cost, never
+  // eliminates it.
+  const reflectionEnabled = getGraphicsSettings().reflectionEnabled !== false;
+  if (reflectionEnabled && reflectionBiome === "crystal" && camera.position.y > LIQUID_LEVEL.crystal) {
     if (reflectionFrameCounter >= getGraphicsSettings().reflectionUpdateInterval) {
       reflectionFrameCounter = 0;
       updateWaterReflection(LIQUID_LEVEL.crystal, liquidHandle);
@@ -2382,7 +4419,7 @@ function animate() {
   // in/out over several seconds (see weather.js), so being one frame
   // behind here is never visible. biome-gated inside updateLiquidPlane
   // itself (crystal only), so this is harmless to pass unconditionally.
-  updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, camera.position, sun.position, dayNight.skyHorizon, reflectionRenderTarget.texture, reflectionTextureMatrix, refractionRenderTarget.texture, refractionResolution, weatherHandle ? weatherHandle.rainIntensity : 0);
+  updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, camera.position, sun.position, dayNight.skyHorizon, reflectionRenderTarget.texture, reflectionTextureMatrix, refractionRenderTarget.texture, refractionResolution, weatherHandle ? weatherHandle.rainIntensity : 0, dayNight.dayAmount);
   updateWaterfall(waterfallHandle, dt, elapsedTime);
   updateOceanSurfaceDetail(oceanSurfaceDetailHandle, elapsedTime, dayNight.dayAmount);
   // Real angelfish (models.js) — AnimationMixer drives the loaded skeletal
@@ -2397,6 +4434,18 @@ function animate() {
     const fz = fish.wanderCenterZ + Math.sin(t) * fish.wanderRadius;
     fish.group.position.set(fx, fish.wanderY + Math.sin(t * 1.7) * 0.3, fz);
     fish.group.rotation.y = -t + Math.PI / 2; // face the direction of travel around the circle (tangent to the path), not the path's own radius direction
+  }
+  // Fish schools (models.js) — same wander-circle shape as the individual
+  // angelfish above, just a slower drift and gentler vertical bob
+  // appropriate for a whole formation moving together rather than one
+  // small fish darting around.
+  for (const school of realFishSchools) {
+    school.mixer.update(dt);
+    const t = elapsedTime * school.wanderSpeed + school.wanderPhase;
+    const sx = school.wanderCenterX + Math.cos(t) * school.wanderRadius;
+    const sz = school.wanderCenterZ + Math.sin(t) * school.wanderRadius;
+    school.group.position.set(sx, school.wanderY + Math.sin(t * 1.1) * 0.4, sz);
+    school.group.rotation.y = -t + Math.PI / 2;
   }
   updateRiverCurrent(riverCurrentHandle, dt);
   updateRiverFlowStrip(riverFlowStripHandle, dt);
@@ -2475,28 +4524,76 @@ function animate() {
     submergedState = false;
   }
   const isFullySubmerged = submergedState; // was 0.6 — still narrower than the ocean's own ~0.85-unit wave amplitude, so waves washing over the camera near the surface could still cross both edges of the dead zone repeatedly, flipping the underwater post-process (fog/distortion/render-target pass) on and off every couple frames. 1.1 comfortably exceeds the max wave amplitude, so only an actual sustained surface crossing (not wave bob) flips the state now.
-  if (isFullySubmerged) {
+  // Per explicit "when we get out of the ocean it should also look like
+  // this for a minute until it fades away" — the same lens-rain shader,
+  // just triggered by surfacing instead of real weather. Detects the
+  // EXACT frame the player crosses from submerged to not (not a
+  // continuous check, which would just mean "wet the whole time
+  // underwater" rather than a real fading-away effect after getting out)
+  // and starts a fresh full-wetness decay right then, even if a previous
+  // decay was already partway through (surfacing again mid-fade tops it
+  // back up rather than blending oddly with whatever was left).
+  if (wasFullySubmergedLastFrame && !isFullySubmerged) {
+    postSwimWetness = 1.0;
+  }
+  wasFullySubmergedLastFrame = isFullySubmerged;
+  postSwimWetness = Math.max(0, postSwimWetness - dt / 60); // ~60s to fully fade, per explicit "for a minute"
+  // Per explicit "play [underwater ambience] on loop when underwater, and
+  // the other [swimming sounds] when swimming on the surface" — two
+  // distinct, mutually-exclusive states: fully submerged vs. swimming at/
+  // near the surface without being fully under. Both setters no-op
+  // harmlessly outside Crystal biome (their gain nodes are never created
+  // there).
+  setUnderwaterAmbience(isFullySubmerged);
+  setSwimSoundsActive(playerSwimmingThisFrame && !isFullySubmerged);
+  // Per explicit "remove underwater lighting and fog" — same toggle
+  // pattern as UNDERWATER_EFFECTS_ENABLED below (single flag, not a
+  // deletion, for a clean revert). This one specifically gates the
+  // fog/sun/ambient/tint/waterVolumeMesh color+intensity changes — the
+  // one underwater system that was STILL fully active even after
+  // UNDERWATER_EFFECTS_ENABLED=false disabled the separate screen-space
+  // render path. With this off too, being underwater no longer changes
+  // scene lighting/fog AT ALL — the seafloor/water now render under
+  // exactly the same lighting as everything else, regardless of depth or
+  // submersion state.
+  const UNDERWATER_LIGHTING_ENABLED = false;
+  if (isFullySubmerged && UNDERWATER_LIGHTING_ENABLED) {
     const uwStyle = UNDERWATER_STYLE[currentBiome] || UNDERWATER_STYLE.default;
-    scene.fog.color.setHex(uwStyle.fogColor);
-    scene.fog.density = uwStyle.fogDensity;
-    sun.color.setHex(uwStyle.sunColor);
-    // Extra day-scaled brightness, crystal only — per explicit "bright,
-    // sunlight through the surface" reference request. Multiplies ON
-    // TOP of the style's own base sunMult/ambientMult rather than
-    // replacing them — other biomes are completely untouched, and
-    // crystal itself is unaffected at night (dayAmount 0 -> boost 1.0,
-    // i.e. no change from today's existing look), this only ever ADDS
-    // brightness as the sun climbs.
-    const dayBrightBoost = currentBiome === "crystal" ? 1.0 + dayNight.dayAmount * 0.9 : 1.0;
+    // Per explicit "remove underwater color effects that could be
+    // darkening everything, except at night/during a storm it should be
+    // less bright" — clarity is 0 at night (dayAmount=0) OR during a full
+    // storm (stormAmount=1), preserving exactly today's existing dim
+    // storm (stormAmount=1), preserving exactly today's existing dim
+    // underwater look in both those cases untouched. It only ever climbs
+    // toward 1 on a bright, stormless day, and that's where fog/tint get
+    // pulled back and real light is let through — reading `weatherHandle`
+    // directly rather than the frame's own `wind` (computed later this
+    // same function) since this block runs first.
+    const stormAmountNow = weatherHandle ? weatherHandle.rainIntensity : 0;
+    const clarity = currentBiome === "crystal" ? dayNight.dayAmount * (1 - stormAmountNow) : 0;
+    scene.fog.color.setHex(uwStyle.fogColor).lerp(UNDERWATER_NEUTRAL_TINT, clarity * 0.6);
+    scene.fog.density = uwStyle.fogDensity * (1 - clarity * 0.7); // up to 70% thinner at full clarity, never fully zero — a hard-zero fog would make the far seafloor cut off at an unnaturally sharp render-distance edge instead of fading
+    sun.color.setHex(uwStyle.sunColor).lerp(UNDERWATER_NEUTRAL_LIGHT, clarity * 0.75);
+    // Was capped at 1.9x (dayAmount*0.9), day-only — widened to 2.6x and
+    // now ALSO pulled back during storms (previously storm had zero
+    // effect on this specific multiplier, even though storms already dim
+    // the real sun elsewhere) via the same clarity term as everything
+    // else in this block, so this and fog/tint move together consistently
+    // instead of three separate ad-hoc day/storm rules.
+    const dayBrightBoost = currentBiome === "crystal" ? 1.0 + clarity * 1.6 : 1.0;
     sun.intensity *= uwStyle.sunMult * dayBrightBoost;
-    ambientLight.color.setHex(uwStyle.ambientColor);
+    ambientLight.color.setHex(uwStyle.ambientColor).lerp(UNDERWATER_NEUTRAL_LIGHT, clarity * 0.75);
     ambientLight.intensity *= uwStyle.ambientMult * dayBrightBoost;
-    underwaterDistortionMaterial.uniforms.tintColor.value.set(uwStyle.tint[0], uwStyle.tint[1], uwStyle.tint[2]);
-    underwaterDistortionMaterial.uniforms.tintStrength.value = uwStyle.tintStrength;
-    underwaterDistortionMaterial.uniforms.fogDensity.value = uwStyle.fogDensity;
+    // tintColor lerped the same way as fog above — computed once into a
+    // reused Color rather than allocating fresh each frame.
+    tempUnderwaterTintColor.setRGB(uwStyle.tint[0], uwStyle.tint[1], uwStyle.tint[2]).lerp(UNDERWATER_NEUTRAL_TINT, clarity * 0.6);
+    underwaterDistortionMaterial.uniforms.tintColor.value.set(tempUnderwaterTintColor.r, tempUnderwaterTintColor.g, tempUnderwaterTintColor.b);
+    underwaterDistortionMaterial.uniforms.tintStrength.value = uwStyle.tintStrength * (1 - clarity * 0.75); // the screen-space color-cast overlay — the main "everything looks tinted/darkened" culprit, pulled back the most aggressively of all these
+    underwaterDistortionMaterial.uniforms.fogDensity.value = scene.fog.density; // kept in sync with the real scene fog set just above, not the style's own un-scaled base value
     underwaterDistortionMaterial.uniforms.causticStrength.value = uwStyle.causticStrength;
     underwaterDistortionMaterial.uniforms.distortAmp.value = uwStyle.distortAmp;
-    waterVolumeMesh.material.color.setHex(uwStyle.volumeColor);
+    waterVolumeMesh.material.color.setHex(uwStyle.volumeColor).lerp(UNDERWATER_NEUTRAL_TINT, clarity * 0.6);
+    waterVolumeMesh.material.opacity = 0.12 * (1 - clarity * 0.6); // the enclosing color-cast sphere itself — real, direct contributor to "everything looks a uniform color underwater" that none of the other tuning above actually touches. Direct assignment (not *=) from its own base 0.12 (set at creation) — this property has no other per-frame reset, so *= here would compound every frame while submerged and shrink toward zero within seconds instead of applying a stable reduction.
   }
   // The enclosing "water volume" sphere — follows the camera every
   // frame, only visible while actually fully submerged.
@@ -2550,28 +4647,150 @@ function animate() {
     dayNightCycle.moonBody.core.material.opacity *= lookingUpFactor;
     dayNightCycle.moonBody.glow.material.opacity *= lookingUpFactor;
   }
-  const wind = updateWeatherSystem(weatherHandle, dt, eruptionActive, dayNight.dayAmount);
+  const wind = updateWeatherSystem(weatherHandle, dt, eruptionActive, dayNight.dayAmount, camera.position);
+  // Debug forced storm, per explicit request — ramps rainIntensity up
+  // fast (well above weather.js's own real ~20-30s fade) while the toggle
+  // is on, applied AFTER the normal update so it isn't immediately
+  // overwritten, and mirrored onto `wind.rainIntensity` too since that's
+  // a separate returned value the cloud/light-shaft calls below actually
+  // read, not the same reference as weatherHandle.rainIntensity. Turning
+  // the toggle back off does nothing further here — weather.js's own
+  // internal target was never touched, so it just resumes normally from
+  // wherever rainIntensity happens to be.
+  if (debugForceStorm && weatherHandle) {
+    weatherHandle.rainIntensity = Math.min(1, weatherHandle.rainIntensity + dt * 2);
+    wind.rainIntensity = weatherHandle.rainIntensity;
+  }
+  // Rain fog — per explicit "sheet of water, so dense we can hardly see
+  // through it." Real heavy rain reduces visibility through light
+  // scattering off countless droplets — a fundamentally different (and
+  // more reliable) way to create that sensation than particle density
+  // alone: even at the very high counts already in place, individual
+  // streak particles still show visible gaps between them from most
+  // angles/distances, but atmospheric haze is what actually reads as
+  // "can't see through it." scene.fog was previously only ever touched
+  // by the underwater block below, which is currently fully disabled
+  // (UNDERWATER_LIGHTING_ENABLED=false) — meaning fog has sat at its
+  // fixed creation-time value every single frame regardless of weather
+  // until now. Density scales with rainIntensity on top of the scene's
+  // own base value (unchanged on a clear day), pulling visibility down
+  // from ~300 units clear to ~20 units at full heavy rain. Gated off
+  // underwater (isFullySubmerged, computed earlier this same frame) —
+  // real rain haze is an above-surface phenomenon, and if the disabled
+  // underwater block is ever re-enabled it manages scene.fog completely
+  // on its own whenever it actually runs.
+  if (!isFullySubmerged) {
+    const BASE_FOG_DENSITY = 0.0032;
+    const RAIN_FOG_BOOST = 0.028; // was 0.045 — pulled back alongside the color fix, erring conservative given direct negative feedback rather than guessing similarly strong values again
+    scene.fog.density = BASE_FOG_DENSITY + wind.rainIntensity * RAIN_FOG_BOOST;
+    // A believable heavy-rain haze reads as dark and moody, not the
+    // scene's own near-black default fog color (tuned for open night
+    // sky/distance falloff on a clear day) OR a bright pale haze (see
+    // RAIN_FOG_COLOR's own comment above for why that direction was
+    // wrong) — lerping toward this deep storm-gray as intensity rises is
+    // what makes it look like genuine atmospheric gloom.
+    tempRainFogColor.setHex(0x0a0e14).lerp(RAIN_FOG_COLOR, wind.rainIntensity * 0.5); // was 0.7 — even at full storm, blends WITH the scene's own natural fog tone rather than fully replacing it
+    scene.fog.color.copy(tempRainFogColor);
+  }
+  // Lens raindrops (the composer pass added above, near FXAA/OutputPass)
+  // — enabled entirely OFF (skipping its real per-pixel cost, not just
+  // zeroed) whenever there's no rain AND no lingering post-swim wetness
+  // to speak of, or the current graphics tier says not to bother, same
+  // oceanEffectsEnabled setting already gating the terrain's own
+  // caustic/foam extras — this is exactly that category of "extra
+  // flair," not core rendering. Also off underwater and while looking
+  // through the fullscreen/graphics-menu UI doesn't matter here (screen-
+  // space, unaffected by camera state beyond rain/submersion).
+  const effectiveLensIntensity = Math.max(wind.rainIntensity, postSwimWetness);
+  lensRainPass.enabled = !isFullySubmerged && effectiveLensIntensity > 0.02 && getGraphicsSettings().oceanEffectsEnabled !== false;
+  if (lensRainPass.enabled) {
+    lensRainPass.material.uniforms.uTime.value = elapsedTime;
+    lensRainPass.material.uniforms.uRainIntensity.value = effectiveLensIntensity;
+    // Per explicit "only glow when reflecting sunlight" — the real sun's
+    // world position projected onto the screen, so the shader's rim
+    // highlight can be gated by actual proximity to it instead of always
+    // being on. Checked against the camera's own forward direction first
+    // (a dot-product test, not relying on Vector3.project()'s own Z
+    // output, which doesn't cleanly indicate behind-camera the way a
+    // direct forward-direction check does) — if the sun is behind the
+    // camera or well outside a reasonable field of view, the sentinel
+    // (-10,-10) is sent instead, which the shader's own distance-based
+    // falloff already treats as "no glow" with no separate flag needed.
+    tempSunDir.copy(dayNightCycle.sunBody.group.position).sub(camera.position).normalize();
+    camera.getWorldDirection(tempCameraDir);
+    if (tempSunDir.dot(tempCameraDir) > 0.1) {
+      tempSunProjection.copy(dayNightCycle.sunBody.group.position).project(camera);
+      lensRainPass.material.uniforms.uSunScreenPos.value.set((tempSunProjection.x + 1) / 2, (tempSunProjection.y + 1) / 2);
+    } else {
+      lensRainPass.material.uniforms.uSunScreenPos.value.set(-10, -10);
+    }
+  }
   // Rain is an above-surface effect — real rain doesn't fall underwater.
   // Same visibility-gating pattern already used for whitecaps/the cloud
   // dome/light shafts above: toggle directly on submersion rather than
   // trying to fog/hide it any other way.
   if (weatherHandle && weatherHandle.rain) weatherHandle.rain.points.visible = !isFullySubmerged;
+  setRainIntensity(isFullySubmerged ? 0 : wind.rainIntensity); // same submersion gating as the visual rain particles just above — real rain isn't audible underwater either
+  // Ocean wave sound, per explicit "gets louder the closer the player is
+  // to the water" — Crystal only (the only biome with a real continuous
+  // open-water plane). Uses the ground height directly beneath the
+  // player (the same analytic terrainHeightAt already used throughout
+  // this project for placement, not a new raycast — audio doesn't need
+  // the pixel-perfect precision physics.js's real mesh raycast is for)
+  // relative to LIQUID_LEVEL.crystal: at/below water level (standing at
+  // the shore, wading, or swimming) is loudest, fading out over
+  // WAVE_AUDIBLE_RANGE units of elevation as the player heads further
+  // inland/uphill and the actual shoreline gets further away.
+  if (currentLevelIdx >= 0 && LEVELS[currentLevelIdx].biome === "crystal") {
+    const groundYAtPlayer = terrainHeightAt(LEVELS[currentLevelIdx], camera.position.x, camera.position.z, WORLD_SEED);
+    if (groundYAtPlayer !== null) {
+      const heightAboveWater = groundYAtPlayer - LIQUID_LEVEL.crystal;
+      const WAVE_AUDIBLE_RANGE = 7; // units of elevation above water level beyond which waves fade to inaudible
+      const waveProximity = 1 - THREE.MathUtils.clamp(heightAboveWater / WAVE_AUDIBLE_RANGE, 0, 1);
+      setWaveIntensity(waveProximity);
+    }
+  } else {
+    setWaveIntensity(0);
+  }
   updateAtmosphericParticles(atmosphereHandle, elapsedTime, dt, wind.windX, wind.windZ);
   updateGrass(grassHandle, elapsedTime, wind.windX, wind.windZ, dayNight.dayAmount);
+  // Real GLB trees never had any wind response at all, unlike grass —
+  // per explicit "wind affects the rain and trees." Two parts, both
+  // scaled by windStrength (now itself storm-boosted, see weather.js):
+  // a constant LEAN toward the wind's push direction (stronger wind = the
+  // whole tree tilts further that way, same as a real trunk/palm frond
+  // under sustained pressure), plus a smaller oscillating SWAY layered on
+  // top so it isn't perfectly rigid. Only rotation.x/rotation.z are
+  // touched — rotation.y already carries each tree's own random facing
+  // set at spawn time and is left alone.
+  if (wind.windStrength > 0.001) {
+    const windDirX = wind.windX / wind.windStrength;
+    const windDirZ = wind.windZ / wind.windStrength;
+    const leanAmount = Math.min(0.11, wind.windStrength * 0.02);
+    const swayAmount = Math.min(0.05, wind.windStrength * 0.012);
+    for (const tree of realPalmTrees) {
+      const phase = elapsedTime * 1.4 + (tree.userData.swaySeed || 0);
+      const totalTilt = leanAmount + Math.sin(phase) * swayAmount;
+      tree.rotation.x = -windDirZ * totalTilt;
+      tree.rotation.z = windDirX * totalTilt;
+    }
+  }
   updateFlowers(flowersHandle, elapsedTime);
   updateFootstepGlowSystem(footstepGlowHandle, dt);
   updateWildlife(wildlifeHandle, elapsedTime, dt, camera.position.x, camera.position.z, eruptionActive);
-  updateLandmark(landmarkHandle, elapsedTime, dt);
+  if (landmarkHandle) updateLandmark(landmarkHandle, elapsedTime, dt);
   updateClouds(cloudsHandle, dt, wind, dayNight.dayAmount, wind.rainIntensity, dayNight.skyHorizon, dayNightCycle.sunBody.group.position, camera.position);
   updateCloudLayer(cloudLayerHandle, dt, wind, dayNight.dayAmount, dayNight.skyHorizon);
-  updateRealisticCloudDome(realisticCloudDomeHandle, dt, dayNight.dayAmount, dayNight.skyHorizon, dayNight.skyZenith, wind.rainIntensity);
+  updateRealisticCloudDome(realisticCloudDomeHandle, dt, dayNight.dayAmount, dayNight.skyHorizon, dayNight.skyZenith, wind.rainIntensity, dayNightCycle.phaseT);
   // Clouds sometimes drift in front of the sun/moon — a cheap angular
   // check (see getCloudOcclusionFactor's own comment for why this isn't
   // real depth-buffer occlusion), applied as a further opacity
   // multiplier on top of whatever the day/night cycle (and the Snell's-
   // window submersion gating above) already computed this frame.
+  let sunOcclusionForCaustics = 1.0; // default: no clouds tracked this frame, treat as full unoccluded sun
   if (cloudsHandle) {
     const sunOcclusion = 1 - getCloudOcclusionFactor(cloudsHandle, camera.position, dayNightCycle.sunBody.group.position);
+    sunOcclusionForCaustics = sunOcclusion;
     dayNightCycle.sunBody.core.material.opacity *= sunOcclusion;
     dayNightCycle.sunBody.glow.material.opacity *= sunOcclusion;
     // Real sunlight dims when clouds pass in front of the sun, not just
@@ -2584,13 +4803,80 @@ function animate() {
     dayNightCycle.moonBody.core.material.opacity *= moonOcclusion;
     dayNightCycle.moonBody.glow.material.opacity *= moonOcclusion;
   }
+  // Per explicit "[caustics] glow with sunlight like real ones do" — the
+  // same real cloud-occlusion value just computed above for the visible
+  // sun sprite/light now also reaches the underwater caustic shader,
+  // pushed here (not bundled with the other terrain uniforms earlier in
+  // the frame) since it genuinely isn't known until this point.
+  if (terrainMesh && terrainMesh.material.userData.shader && terrainMesh.material.userData.shader.uniforms.uSunGlow) {
+    terrainMesh.material.userData.shader.uniforms.uSunGlow.value = sunOcclusionForCaustics;
+  }
+  // Per explicit "light should light up at a certain place, not the
+  // whole net" — the sun/moon's own world position is scaled for the sky
+  // dome (ranges well past 100+ units), not a usable seafloor
+  // coordinate directly. Instead: the NORMALIZED horizontal direction
+  // toward whichever light source is dominant, offset a fixed distance
+  // from the PLAYER's own position — this keeps the focus zone
+  // genuinely near the player (where it can actually be seen) while
+  // still shifting position as the sun/moon's real angle changes through
+  // the day, blended by dayNight.dayAmount the same way brightness/color
+  // already blend between them elsewhere in this system.
+  if (terrainMesh && terrainMesh.material.userData.shader && terrainMesh.material.userData.shader.uniforms.uFocusXZ) {
+    const sunPos = dayNightCycle.sunBody.group.position;
+    const moonPos = dayNightCycle.moonBody.group.position;
+    const sunDirLen = Math.hypot(sunPos.x, sunPos.z) || 1;
+    const moonDirLen = Math.hypot(moonPos.x, moonPos.z) || 1;
+    const FOCUS_OFFSET = 15;
+    const sunFocusX = camera.position.x + (sunPos.x / sunDirLen) * FOCUS_OFFSET;
+    const sunFocusZ = camera.position.z + (sunPos.z / sunDirLen) * FOCUS_OFFSET;
+    const moonFocusX = camera.position.x + (moonPos.x / moonDirLen) * FOCUS_OFFSET;
+    const moonFocusZ = camera.position.z + (moonPos.z / moonDirLen) * FOCUS_OFFSET;
+    const focusX = THREE.MathUtils.lerp(moonFocusX, sunFocusX, dayNight.dayAmount);
+    const focusZ = THREE.MathUtils.lerp(moonFocusZ, sunFocusZ, dayNight.dayAmount);
+    terrainMesh.material.userData.shader.uniforms.uFocusXZ.value.set(focusX, focusZ);
+  }
+  // Per explicit "the sun should not be this bright during a storm" —
+  // the dimming above only happens when the sun's sprite position
+  // happens to fall behind a cloud shape at this exact camera angle
+  // (incidental, not tied to how heavily it's actually storming). This
+  // adds a DIRECT stormAmount (wind.rainIntensity) dim on top, to both
+  // the visual sprite and the real light — floored so it never goes
+  // fully dark (real storms still have some diffuse skylight), but a
+  // heavy storm now visibly dims the sun regardless of exact cloud
+  // placement.
+  const stormSunDim = 1 - Math.min(0.75, wind.rainIntensity * 0.85);
+  dayNightCycle.sunBody.core.material.opacity *= stormSunDim;
+  dayNightCycle.sunBody.glow.material.opacity *= stormSunDim;
+  dayNightCycle.sun.intensity *= Math.max(0.3, stormSunDim);
+  // Per explicit "definitely major issues aligning the sun with the
+  // skybox... let's make it invisible but still retain all effects and
+  // let the background sun fake it" — the real sun's drawn disc/glow/
+  // beams are forced fully invisible here, LAST, after every dimming/
+  // occlusion/storm calculation above has already run. Those all still
+  // execute and still drive the REAL DirectionalLight's own intensity
+  // (shading, shadows, everything gameplay-relevant) — only the visible
+  // sprite is zeroed out. One of the sky mood textures' own baked-in sun
+  // glow (still there under the hood, just suppressed to a soft ambient
+  // highlight rather than a sharp disc — see clouds.js) now reads as
+  // "the sun" instead, with no risk of two independent systems ever
+  // disagreeing about where it should be.
+  dayNightCycle.sunBody.core.material.opacity = 0;
+  dayNightCycle.sunBody.glow.material.opacity = 0;
+  for (const sprite of dayNightCycle.sunBeams.sprites) sprite.material.opacity = 0;
   setAmbientDayAmount(dayNight.dayAmount);
   if (currentLevelIdx >= 0 && horizonHandle) updateHorizonSilhouettes(horizonHandle, LEVELS[currentLevelIdx].biome, dayNight.dayAmount);
   updateLightShafts(lightShaftHandles, dayNight.dayAmount);
   updateLightShafts(underwaterShaftHandles, dayNight.dayAmount);
   updateWorldPulse(dt);
   updateProjectiles(dt);
-  if (isFullySubmerged) {
+  // Per explicit "disable all underwater effects" — set to false rather
+  // than deleting any of the code below, so this is a clean single-flag
+  // revert once whatever's actually going on here (two verified, real
+  // fixes in a row produced zero visible change — genuinely more
+  // consistent with a caching/deployment issue than either fix being
+  // wrong, but not confirmed either way yet) gets sorted out.
+  const UNDERWATER_EFFECTS_ENABLED = false;
+  if (isFullySubmerged && UNDERWATER_EFFECTS_ENABLED) {
     // Two-pass render: scene (including the water volume mesh above,
     // which renders normally as part of it) to an offscreen target, then
     // a full-screen quad draws that texture back out with a
@@ -2602,7 +4888,24 @@ function animate() {
     underwaterDistortionMaterial.uniforms.time.value = elapsedTime;
     renderer.render(underwaterQuadScene, underwaterQuadCamera);
   } else {
-    renderer.render(scene, camera);
+    // Safety net for the genuinely unverified part of the WebGPU
+    // renderer swap (see the renderer setup's own comment above) — the
+    // classic EffectComposer pipeline uses raw GLSL in a few passes
+    // (the custom lensRainPass, most notably), which WebGPU's real
+    // backend doesn't compile the same way WebGL does. If that turns
+    // out to break, this falls back to a plain direct render (losing
+    // bloom/SSAO/AA/lens-rain for that frame, not the whole scene) and
+    // logs it ONCE rather than spamming the console every frame or
+    // leaving the screen black with no diagnostic trail.
+    try {
+      composer.render();
+    } catch (e) {
+      if (!composerRenderFailedOnce) {
+        composerRenderFailedOnce = true;
+        console.error("[webgpu] composer.render() failed, falling back to direct rendering. Post-processing (bloom/SSAO/AA/lens-rain) will be unavailable until the pipeline is migrated to WebGPU-native passes. Original error:", e);
+      }
+      renderer.render(scene, camera);
+    }
   }
 }
 requestAnimationFrame(animate);

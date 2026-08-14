@@ -1856,7 +1856,19 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
     // and the Voronoi F1/F2 cell-edge caustic-net pattern (already
     // structurally bounded via clamp()+mix(), the same proven-safe
     // technique liquid.js's own water-surface caustic effect uses).
-    const CAUSTICS_ENABLED = true; // single flip point if this ever needs to be disabled again
+    // Per "commit to WebGPU" — disabled, same reasoning as the
+    // EffectComposer pipeline: onBeforeCompile-based shader modification
+    // is officially unsupported under real WebGPU execution, confirmed
+    // via Three.js's own docs, not inferred. Leaving this active risked
+    // either a silent no-op (caustics/foam just never appearing) or a
+    // real failure at material-compile time — same category of risk as
+    // the EffectComposer imports that crashed the whole module load.
+    // This needs a real TSL node-material rebuild (colorNode/
+    // emissiveNode), not a patch — the standalone fluid-sim prototype
+    // already has proven-working TSL caustics logic (real slope-driven
+    // refraction into an interlocking line pattern) that the eventual
+    // rebuild here should draw from directly, not reinvent.
+    const CAUSTICS_ENABLED = false; // single flip point if this ever needs to be disabled again
     if (CAUSTICS_ENABLED) {
       simpleTerrainMat.onBeforeCompile = (shader) => {
         shader.uniforms.uTime = { value: 0 };

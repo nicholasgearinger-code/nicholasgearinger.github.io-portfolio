@@ -152,6 +152,29 @@ const menuBtn = document.getElementById("rift-menu-btn");
 const titleGate = document.getElementById("rift-title-gate");
 const titlePlayBtn = document.getElementById("rift-title-play-btn");
 
+// Per "tapping Play doesn't do anything" — the real bug: this handler
+// used to be registered much later in the file, AFTER the renderer's
+// own top-level await. A top-level await pauses the ENTIRE REST of the
+// module's execution until it resolves, so while WebGPU initialization
+// was pending, this listener genuinely hadn't been attached yet — even
+// though the title screen and Play button themselves are just static
+// HTML/CSS and render immediately regardless of main.js's own progress,
+// creating a real trap: a button visible and looking ready with no
+// actual behavior wired up yet. Moved here, before that await, so the
+// button is interactive immediately, independent of how long (or
+// whether) the 3D renderer setup finishes. showLevelSelect is a hoisted
+// function declaration (defined later in this same file) — safe to
+// reference from a callback here, since the callback itself only
+// actually runs later, on a real click, by which point the whole
+// module will have finished evaluating.
+if (titleGate && titlePlayBtn) {
+  titlePlayBtn.addEventListener("click", () => {
+    titleGate.classList.add("rift-title-gate-hidden");
+    setTimeout(() => { titleGate.style.display = "none"; }, 650); // matches the CSS opacity transition — only removed from layout after it's fully faded
+    showLevelSelect();
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Input mode detection
 // ---------------------------------------------------------------------------
@@ -1197,19 +1220,6 @@ controls.addEventListener("unlock", showLevelSelect);
 if (menuBtn) {
   menuBtn.addEventListener("click", () => {
     if (!isTouchDevice) controls.unlock();
-    showLevelSelect();
-  });
-}
-
-// The animated "RIFT ISLANDS" intro (title gate) is shown first, on top of
-// the biome-select overlay (which starts hidden — see index.html). Play
-// fades the gate out and reveals the biome menu via the same
-// showLevelSelect() the in-game MENU button already uses, so entering a
-// level from here works exactly like it always has.
-if (titleGate && titlePlayBtn) {
-  titlePlayBtn.addEventListener("click", () => {
-    titleGate.classList.add("rift-title-gate-hidden");
-    setTimeout(() => { titleGate.style.display = "none"; }, 650); // matches the CSS opacity transition — only removed from layout after it's fully faded
     showLevelSelect();
   });
 }

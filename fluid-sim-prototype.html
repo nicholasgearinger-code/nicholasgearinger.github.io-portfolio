@@ -51,7 +51,8 @@ import * as THREE from "three";
 import {
   Fn, instanceIndex, instancedArray, float, uint, If,
   uniform, vec3, vec2, color, positionLocal, mix, clamp,
-  min, max, attribute, time, sin, fract, floor, dot
+  min, max, attribute, time, sin, fract, floor, dot,
+  positionWorld, cameraPosition, normalWorld
 } from "three/tsl";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
@@ -85,6 +86,7 @@ function setStatus(msg, isError = false) {
 const WIDTH = 128;
 const CELL_COUNT = WIDTH * WIDTH;
 const PLANE_SIZE = 40; // world units — independent of WIDTH, only affects visual scale/spacing between cells
+const SEAFLOOR_Y = -3.5; // real, known depth below the water surface — per "add volume and a seafloor," this is what colorNode below now measures actual depth against, rather than the previous viewing-angle-only approximation
 
 let renderer, scene, camera, controls, mesh;
 let computeInit, computeUpdate, computeCopyBack;
@@ -104,7 +106,7 @@ async function init() {
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0a1420);
-  scene.fog = new THREE.Fog(0x0a1420, 25, 70);
+  scene.fog = new THREE.Fog(0xa9c9dd, 25, 70); // color updated to match the new sky's horizon tone below, was the old flat navy
 
   camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 200);
   camera.position.set(0, 22, 30);
@@ -134,6 +136,54 @@ async function init() {
   scene.add(sun);
   scene.add(new THREE.AmbientLight(0x1a2a3a, 1.2));
 
+  // Per "add a sky background and sun" — a real 3D sky dome (large
+  // inverted sphere) rather than a flat 2D scene.background, specifically
+  // because a flat backdrop doesn't rotate as the camera orbits via
+  // OrbitControls and would look wrong the moment you drag the view.
+  // Standard THREE.MeshBasicMaterial + CanvasTexture, deliberately NOT a
+  // TSL node material — this carries zero new API risk since it's the
+  // same regardless of WebGL/WebGPU backend, unlike everything else new
+  // in this file.
+  const skyCanvas = document.createElement("canvas");
+  skyCanvas.width = 2;
+  skyCanvas.height = 512;
+  const skyCtx = skyCanvas.getContext("2d");
+  const skyGradient = skyCtx.createLinearGradient(0, 0, 0, 512);
+  skyGradient.addColorStop(0, "#0a2a4a");
+  skyGradient.addColorStop(0.55, "#3d6f95");
+  skyGradient.addColorStop(0.85, "#a9c9dd");
+  skyGradient.addColorStop(1, "#dce8ee");
+  skyCtx.fillStyle = skyGradient;
+  skyCtx.fillRect(0, 0, 2, 512);
+  const skyTexture = new THREE.CanvasTexture(skyCanvas);
+  const skyDome = new THREE.Mesh(
+    new THREE.SphereGeometry(150, 32, 16),
+    new THREE.MeshBasicMaterial({ map: skyTexture, side: THREE.BackSide, fog: false })
+  );
+  scene.add(skyDome);
+
+  // Visible sun disc, positioned to match the actual DirectionalLight's
+  // real direction (sun.position, normalized and pushed out to the
+  // sky dome's radius) rather than an arbitrary separate position —
+  // so the bright spot in the sky is genuinely where the light comes
+  // from, not just decoration.
+  const sunCanvas = document.createElement("canvas");
+  sunCanvas.width = 128;
+  sunCanvas.height = 128;
+  const sunCtx = sunCanvas.getContext("2d");
+  const sunGlow = sunCtx.createRadialGradient(64, 64, 0, 64, 64, 64);
+  sunGlow.addColorStop(0, "rgba(255,250,230,1)");
+  sunGlow.addColorStop(0.3, "rgba(255,240,200,0.85)");
+  sunGlow.addColorStop(1, "rgba(255,230,180,0)");
+  sunCtx.fillStyle = sunGlow;
+  sunCtx.fillRect(0, 0, 128, 128);
+  const sunTexture = new THREE.CanvasTexture(sunCanvas);
+  const sunSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: sunTexture, transparent: true, depthWrite: false, fog: false }));
+  sunSprite.scale.set(20, 20, 1);
+  sunSprite.position.copy(sun.position.clone().normalize().multiplyScalar(140));
+  scene.add(sunSprite);
+
+  setupSeafloor();
   setupSimulation();
   heightBufferNode = heightBufferA; // must be valid BEFORE setupMesh() builds the material's node graph, which reads this
   setupMesh();
@@ -162,6 +212,51 @@ const hash21 = Fn(([p]) => {
   const n = sin(dot(p, vec2(127.1, 311.7))).mul(43758.5453);
   return fract(n);
 });
+
+// Real seafloor geometry, per "add volume below the waves and a seafloor
+// ... more like an ocean like the game." Static (no live simulation
+// needed, unlike the water above), so this uses plain JS vertex
+// manipulation computed once at creation — zero new TSL/WebGPU API
+// surface, unlike everything else in this file that needed real
+// verification before use. Gentle bumps (a couple of overlapping sine
+// waves plus a little randomness) rather than a perfectly flat plane,
+// so it reads as a real seafloor rather than a slab.
+function setupSeafloor() {
+  const seafloorGeo = new THREE.PlaneGeometry(PLANE_SIZE * 1.5, PLANE_SIZE * 1.5, 40, 40);
+  const posAttr = seafloorGeo.attributes.position;
+  for (let i = 0; i < posAttr.count; i++) {
+    const px = posAttr.getX(i);
+    const py = posAttr.getY(i);
+    const bump = Math.sin(px * 0.15) * 0.3 + Math.cos(py * 0.2) * 0.25 + (Math.random() - 0.5) * 0.12;
+    posAttr.setZ(i, bump); // local Z before rotation becomes world Y (up) after rotation.x below
+  }
+  posAttr.needsUpdate = true;
+  seafloorGeo.computeVertexNormals();
+  const seafloor = new THREE.Mesh(
+    seafloorGeo,
+    new THREE.MeshStandardMaterial({ color: 0xd9c49a, roughness: 0.95 })
+  );
+  seafloor.rotation.x = -Math.PI / 2;
+  seafloor.position.y = SEAFLOOR_Y;
+  scene.add(seafloor);
+
+  // A handful of simple grass-like blades, matching the reference
+  // photo's seafloor vegetation — thin flat planes, randomly scattered
+  // and scaled, not an attempt at a full vegetation system.
+  const bladeGeo = new THREE.PlaneGeometry(0.12, 1.1);
+  const bladeMat = new THREE.MeshStandardMaterial({ color: 0x2f6b3a, roughness: 0.85, side: THREE.DoubleSide });
+  for (let i = 0; i < 60; i++) {
+    const blade = new THREE.Mesh(bladeGeo, bladeMat);
+    const bx = (Math.random() - 0.5) * PLANE_SIZE * 1.2;
+    const bz = (Math.random() - 0.5) * PLANE_SIZE * 1.2;
+    blade.position.set(bx, SEAFLOOR_Y + 0.4, bz);
+    blade.rotation.y = Math.random() * Math.PI;
+    blade.rotation.z = (Math.random() - 0.5) * 0.3;
+    const s = 0.6 + Math.random() * 0.7;
+    blade.scale.set(s, s, s);
+    scene.add(blade);
+  }
+}
 
 function setupSimulation() {
   heightBufferA = instancedArray(CELL_COUNT, "float");
@@ -347,13 +442,70 @@ function setupMesh() {
   // recomputation β€” accurate per-vertex normals would need sampling
   // neighbor heights again in a second pass, worth adding once the basic
   // motion itself is confirmed working live).
+  // Shared water-color logic (same Fn([arg]) pattern already proven
+  // working for hash21 above), used by both colorNode and emissiveNode
+  // below rather than duplicating the same blend logic twice.
+  const waterColorAt = Fn(([h]) => {
+    const deep = color(0x0a4a4a);
+    const shallow = color(0x2ea8a0);
+    const foam = color(0xf2fbfa);
+    const t = clamp(h.mul(2.4).add(0.35), 0, 1);
+    const waterColor = mix(deep, shallow, t);
+    const foamStart = float(0.22);
+    const foamFull = float(0.34);
+    const foamAmount = clamp(h.sub(foamStart).div(foamFull.sub(foamStart)), 0, 1);
+    return mix(waterColor, foam, foamAmount);
+  });
+
   material.colorNode = Fn(() => {
     const heightAtVertex = heightBufferNode.element(cellIdx);
-    const base = color(0x1a5570);
-    const highlight = color(0x9fd8ff);
-    const t = clamp(heightAtVertex.mul(2.2).add(0.3), 0, 1);
-    return mix(base, highlight, t);
+    // Per "translucent blue-green with foam like the ocean" (reference
+    // photo showed deep teal water with white foam only at wave crests,
+    // not an even gradient) — three-stage blend instead of the previous
+    // two-color mix: deep teal in troughs, brighter turquoise on rising
+    // slopes, and real white foam ONLY where height genuinely peaks
+    // (foamStart/foamFull threshold band) rather than a uniform tint
+    // change, so foam reads as a real crest feature, not just "the
+    // color at the top of the gradient."
+    const baseColor = waterColorAt(heightAtVertex);
+    // Per "add volume below the waves and a seafloor" — now that a real
+    // seafloor mesh exists at a known Y (SEAFLOOR_Y), this computes
+    // GENUINE depth (actual water-surface world Y minus the seafloor's
+    // Y) rather than the previous fresnel-only approximation from before
+    // there was any seafloor to measure against. positionWorld.y already
+    // reflects the real, wave-displaced surface height at this exact
+    // point (positionNode's displacement has already been applied by the
+    // time colorNode evaluates), so this is a real per-fragment depth
+    // value, not a height-buffer proxy.
+    const localDepth = positionWorld.y.sub(float(SEAFLOOR_Y));
+    const depthDarken = clamp(localDepth.div(6.0), 0, 1);
+    const deepVolume = color(0x03181f);
+    const depthBlended = mix(baseColor, deepVolume, depthDarken.mul(0.5));
+    // Fresnel still contributes on top — a grazing viewing angle means a
+    // genuinely longer path through the water even at the SAME depth, so
+    // this is a real, separate, additional effect layered on the actual
+    // depth term above, not a replacement for it.
+    const viewDir = cameraPosition.sub(positionWorld).normalize();
+    const fresnel = float(1).sub(clamp(normalWorld.dot(viewDir), 0, 1)).pow(3);
+    return mix(depthBlended, deepVolume, fresnel.mul(0.3));
   })();
+  // Per "what are we missing, does it need light/shaders" — a real,
+  // specific cause: at a low, grazing camera angle (as seen in the
+  // reported screenshot), reflectivity dominates a PBR material's
+  // appearance far more than its own diffuse color, and this scene's
+  // background is a flat, dark navy with no real sky/environment — so
+  // what reflects back at that angle is just flat dark color, masking
+  // the actual teal/foam regardless of whether colorNode itself is
+  // working correctly. This emissiveNode gives the water's own color a
+  // GUARANTEED baseline presence, independent of lighting/reflection
+  // angle, rather than trying to perfectly tune reflectivity instead.
+  material.emissiveNode = Fn(() => {
+    const heightAtVertex = heightBufferNode.element(cellIdx);
+    return waterColorAt(heightAtVertex).mul(0.22);
+  })();
+  material.transparent = true;
+  material.opacity = 0.88; // per "translucent" — a straightforward base alpha; the fresnel/volume effect above handles depth-based color, this is a separate flat transparency layer on top
+  material.roughness = 0.4; // raised from the previous 0.18 (and above the original 0.28) — specifically to reduce mirror-like reflection dominance at grazing angles, which was likely the real cause of the flat gray-blue look, not a color-code problem
 
   mesh = new THREE.Mesh(geometry, material);
   scene.add(mesh);

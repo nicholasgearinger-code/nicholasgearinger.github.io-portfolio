@@ -308,24 +308,43 @@ function setupPointerInteraction(canvas) {
 }
 
 let simInitialized = false;
+let animateFailedOnce = false;
 async function animate() {
-  const dt = Math.min(clock.getDelta(), 0.1);
-  controls.update();
+  try {
+    const dt = Math.min(clock.getDelta(), 0.1);
+    controls.update();
 
-  if (!simInitialized) {
-    await renderer.computeAsync(computeInit);
-    simInitialized = true;
+    if (!simInitialized) {
+      await renderer.computeAsync(computeInit);
+      simInitialized = true;
+    }
+
+    // computeUpdate always reads FROM heightBufferA and writes its result
+    // INTO heightBufferB (see setupSimulation) — copying B back into A here,
+    // every frame, keeps the next frame's read consistent without needing a
+    // more complex alternating-buffer-identity scheme. Real GPU-to-GPU copy,
+    // not a CPU round-trip.
+    await renderer.computeAsync(computeUpdate);
+    renderer.copyBufferToBuffer(heightBufferB.value, heightBufferA.value);
+
+    renderer.render(scene, camera);
+  } catch (err) {
+    // Per "setup succeeds (status says Running) but nothing displays" —
+    // renderer.setAnimationLoop calls this function every frame WITHOUT
+    // awaiting or catching whatever it returns, so any error in here was
+    // previously becoming a silent, invisible unhandled promise rejection
+    // — the render loop could fail on literally every single frame with
+    // zero visible trace of why. Now it surfaces to the status text (and
+    // the real console error, for anyone who does have devtools access)
+    // and stops the loop after the first failure, rather than either
+    // failing silently forever or spamming errors every frame.
+    if (!animateFailedOnce) {
+      animateFailedOnce = true;
+      console.error("[fluid-sim] animate() failed:", err);
+      setStatus("Render loop error: " + err.message + " — see console for full details.", true);
+      renderer.setAnimationLoop(null);
+    }
   }
-
-  // computeUpdate always reads FROM heightBufferA and writes its result
-  // INTO heightBufferB (see setupSimulation) — copying B back into A here,
-  // every frame, keeps the next frame's read consistent without needing a
-  // more complex alternating-buffer-identity scheme. Real GPU-to-GPU copy,
-  // not a CPU round-trip.
-  await renderer.computeAsync(computeUpdate);
-  renderer.copyBufferToBuffer(heightBufferB.value, heightBufferA.value);
-
-  renderer.render(scene, camera);
 }
 
 function onResize() {

@@ -67,7 +67,7 @@ const CELL_COUNT = WIDTH * WIDTH;
 const PLANE_SIZE = 40; // world units — independent of WIDTH, only affects visual scale/spacing between cells
 
 let renderer, scene, camera, controls, mesh;
-let computeInit, computeUpdate;
+let computeInit, computeUpdate, computeCopyBack;
 let heightBufferA, heightBufferB, velocityBuffer;
 let heightBufferNode; // always points at heightBufferA (the buffer computeUpdate reads from) — see setupSimulation/animate for how it stays in sync
 let clock = new THREE.Clock();
@@ -215,6 +215,18 @@ function setupSimulation() {
 
     heightBufferB.element(i).assign(newHeight);
   })().compute(CELL_COUNT);
+
+  // Per confirmed error: "renderer.copyBufferToBuffer is not a function" —
+  // that method doesn't exist on this renderer. Rather than guess at
+  // some other renderer-level API for this (another unverified surface,
+  // same risk category that caused this exact bug), this does the copy
+  // using ONLY the technique already proven working elsewhere in this
+  // same file: a real compute shader, dispatched via computeAsync, doing
+  // a trivial per-cell assignment. Same reliability as computeInit/
+  // computeUpdate, since it's the identical mechanism.
+  computeCopyBack = Fn(() => {
+    heightBufferA.element(instanceIndex).assign(heightBufferB.element(instanceIndex));
+  })().compute(CELL_COUNT);
 }
 
 function setupMesh() {
@@ -320,12 +332,16 @@ async function animate() {
     }
 
     // computeUpdate always reads FROM heightBufferA and writes its result
-    // INTO heightBufferB (see setupSimulation) — copying B back into A here,
-    // every frame, keeps the next frame's read consistent without needing a
-    // more complex alternating-buffer-identity scheme. Real GPU-to-GPU copy,
-    // not a CPU round-trip.
+    // INTO heightBufferB (see setupSimulation) — computeCopyBack then
+    // copies B back into A, every frame, keeping the next frame's read
+    // consistent without needing a more complex alternating-buffer-
+    // identity scheme. Both dispatched via computeAsync, real GPU-side
+    // work — not a CPU round-trip, and not renderer.copyBufferToBuffer
+    // (confirmed not to exist on this renderer; see computeCopyBack's
+    // own comment in setupSimulation for why a compute shader replaces
+    // it instead of guessing at some other renderer-level API).
     await renderer.computeAsync(computeUpdate);
-    renderer.copyBufferToBuffer(heightBufferB.value, heightBufferA.value);
+    await renderer.computeAsync(computeCopyBack);
 
     renderer.render(scene, camera);
   } catch (err) {

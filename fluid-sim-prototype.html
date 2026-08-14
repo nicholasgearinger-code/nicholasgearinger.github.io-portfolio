@@ -52,7 +52,7 @@ import {
   Fn, instanceIndex, instancedArray, float, uint, If,
   uniform, vec3, vec2, color, positionLocal, mix, clamp,
   min, max, attribute, time, sin, fract, floor, dot,
-  positionWorld, cameraPosition, normalWorld
+  positionWorld, cameraPosition, normalWorld, cross, reflect
 } from "three/tsl";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
@@ -432,10 +432,41 @@ function setupMesh() {
 
   // Displace each vertex's Y directly from the height buffer, indexed by
   // the explicit cellIndex attribute above.
+
+  // Real per-wave normals, per "make it look physically close to real
+  // water" — until now this geometry only displaced vertex Y, leaving
+  // the ORIGINAL flat plane normals untouched, meaning lighting/fresnel/
+  // reflections never responded to the actual wave slopes at all, only
+  // to a constant "flat up" direction regardless of how steep any given
+  // wave face was. This uses the standard tangent/bitangent cross-
+  // product technique (confirmed as the established approach for this
+  // exact problem — computing normals from a height-displaced surface)
+  // sampling neighbor heights via the same cellIndex-based lookup the
+  // material already uses for position/color, so no new buffer or
+  // compute pass is needed. Shared Fn (same pattern as waterColorAt/
+  // hash21 above) since both normalNode and the sun-glint term in
+  // emissiveNode below need the same real normal.
+  const computeWaveNormal = Fn(() => {
+    const cx = cellIdx.mod(uint(WIDTH)).toFloat();
+    const cy = cellIdx.div(uint(WIDTH)).toFloat();
+    const hC = heightBufferNode.element(cellIdx);
+    const cxRight = min(cx.add(1), float(WIDTH - 1));
+    const cyDown = min(cy.add(1), float(WIDTH - 1));
+    const idxRight = cy.mul(WIDTH).add(cxRight).toUint();
+    const idxDown = cyDown.mul(WIDTH).add(cx).toUint();
+    const hRight = heightBufferNode.element(idxRight);
+    const hDown = heightBufferNode.element(idxDown);
+    const cellSpacing = float(PLANE_SIZE / WIDTH);
+    const tangent = vec3(cellSpacing, hRight.sub(hC), 0);
+    const bitangent = vec3(0, hDown.sub(hC), cellSpacing);
+    return cross(bitangent, tangent).normalize();
+  });
+
   material.positionNode = Fn(() => {
     const heightAtVertex = heightBufferNode.element(cellIdx);
     return positionLocal.add(vec3(0, heightAtVertex, 0));
   })();
+  material.normalNode = computeWaveNormal();
 
   // Approximate shading from the height field itself: darker where the
   // surface has a steeper local slope (a cheap stand-in for real normal
@@ -501,7 +532,22 @@ function setupMesh() {
   // angle, rather than trying to perfectly tune reflectivity instead.
   material.emissiveNode = Fn(() => {
     const heightAtVertex = heightBufferNode.element(cellIdx);
-    return waterColorAt(heightAtVertex).mul(0.22);
+    const baseEmissive = waterColorAt(heightAtVertex).mul(0.22);
+    // Sun glint, per "make it look physically close to real water" — one
+    // of the most recognizable real-water visual cues (a bright, moving
+    // highlight where the sun's reflection lands), and only possible now
+    // that real per-wave normals exist above — a flat normal would give
+    // one uniform highlight everywhere rather than one that genuinely
+    // tracks individual wave faces. sunDir is a constant matching this
+    // scene's actual DirectionalLight position (15,25,10, normalized),
+    // not an arbitrary separate direction.
+    const normal = computeWaveNormal();
+    const viewDir = cameraPosition.sub(positionWorld).normalize();
+    const sunDir = vec3(0.4867, 0.8111, 0.3244);
+    const reflectDir = reflect(viewDir.mul(-1), normal);
+    const sunAlign = clamp(dot(reflectDir, sunDir), 0, 1);
+    const glint = sunAlign.pow(120);
+    return baseEmissive.add(color(0xfff8e0).mul(glint).mul(3.0));
   })();
   material.transparent = true;
   material.opacity = 0.88; // per "translucent" — a straightforward base alpha; the fresnel/volume effect above handles depth-based color, this is a separate flat transparency layer on top

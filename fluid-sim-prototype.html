@@ -42,7 +42,7 @@ import * as THREE from "three";
 import {
   Fn, instanceIndex, instancedArray, float, uint, If,
   uniform, vec3, color, positionLocal, mix, clamp,
-  MeshStandardNodeMaterial, min, max, attribute
+  min, max, attribute
 } from "three/tsl";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
@@ -231,7 +231,7 @@ function setupMesh() {
   for (let i = 0; i < cellIndices.length; i++) cellIndices[i] = i;
   geometry.setAttribute("cellIndex", new THREE.Float32BufferAttribute(cellIndices, 1));
 
-  const material = new MeshStandardNodeMaterial({
+  const material = new THREE.MeshStandardNodeMaterial({
     color: 0x2a6f8f,
     roughness: 0.28,
     metalness: 0.05,

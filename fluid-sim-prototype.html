@@ -87,10 +87,31 @@ const WIDTH = 128;
 const CELL_COUNT = WIDTH * WIDTH;
 const PLANE_SIZE = 40; // world units — independent of WIDTH, only affects visual scale/spacing between cells
 const SEAFLOOR_Y = -3.5; // real, known depth below the water surface — per "add volume and a seafloor," this is what colorNode below now measures actual depth against, rather than the previous viewing-angle-only approximation
+// Shore shape, per "let's build a shore" — the seafloor rises from open-
+// ocean depth (SEAFLOOR_Y) up through and above the water surface along
+// the +Z edge of the grid, real dry land rather than an infinite ocean.
+// These are shared between the seafloor mesh (built in plain JS below,
+// since it's static geometry) and the wave equation's own shore damping
+// (computed analytically in TSL, see computeUpdate) — using the SAME
+// numbers in both places keeps the visual seafloor and the physics that
+// reacts to it describing the same actual shape, not two independently-
+// guessed approximations of each other.
+const SHORE_START_Z = 4; // world Z where the seafloor starts rising out of open-ocean depth
+const SHORE_END_Z = 18; // world Z where it reaches full dry-beach height
+const SHORE_PEAK_Y = 1.4; // beach height above calm water level (0) — a real, visible dry strip, not just barely breaching the surface
+const SHORE_DAMP_DEPTH = 3.5; // matches the game's own liquid.js SHORE_DAMP_DEPTH exactly — real waves lose height over this same depth range approaching shore
 
 let renderer, scene, camera, controls, mesh;
 let computeInit, computeUpdate, computeCopyBack;
 let heightBufferA, heightBufferB, velocityBuffer;
+// Foam persistence, per "creating foam as it draws back in" β€” unlike
+// the height buffer's instantaneous water position, foam needs to
+// LINGER for a moment after a wave recedes rather than vanishing the
+// instant the water level drops, matching how real backwash foam
+// clings to the sand as water pulls back. Ping-ponged the same way as
+// height (A=read-from, B=write-to, copied back each frame).
+let foamBufferA, foamBufferB;
+let foamBufferNode;
 let heightBufferNode; // always points at heightBufferA (the buffer computeUpdate reads from) — see setupSimulation/animate for how it stays in sync
 let clock = new THREE.Clock();
 let pointerRay = new THREE.Raycaster();
@@ -183,9 +204,12 @@ async function init() {
   sunSprite.position.copy(sun.position.clone().normalize().multiplyScalar(140));
   scene.add(sunSprite);
 
-  setupSeafloor();
+  setupLightRays(sun.position);
+
   setupSimulation();
-  heightBufferNode = heightBufferA; // must be valid BEFORE setupMesh() builds the material's node graph, which reads this
+  heightBufferNode = heightBufferA; // must be valid BEFORE setupSeafloor()/setupMesh(), both of which now read this for real physically-based caustics and water rendering respectively
+  foamBufferNode = foamBufferA;
+  setupSeafloor();
   setupMesh();
   setupPointerInteraction(canvas);
 
@@ -213,48 +237,231 @@ const hash21 = Fn(([p]) => {
   return fract(n);
 });
 
-// Real seafloor geometry, per "add volume below the waves and a seafloor
-// ... more like an ocean like the game." Static (no live simulation
-// needed, unlike the water above), so this uses plain JS vertex
-// manipulation computed once at creation — zero new TSL/WebGPU API
-// surface, unlike everything else in this file that needed real
-// verification before use. Gentle bumps (a couple of overlapping sine
-// waves plus a little randomness) rather than a perfectly flat plane,
-// so it reads as a real seafloor rather than a slab.
+// Real local slope at a given INTEGER water-grid cell (gxi, gyi) β€” used
+// below for bilinear interpolation between the 4 nearest cells, rather
+// than snapping to whichever single cell a fragment happens to round
+// into. Two separate functions (X and Z) rather than packing into a
+// vec2 to keep everything in already-proven float math, matching the
+// established pattern throughout this file.
+const sampleSlopeX = Fn(([gxi, gyi]) => {
+  const idxL = gyi.mul(WIDTH).add(gxi.sub(1)).toUint();
+  const idxR = gyi.mul(WIDTH).add(gxi.add(1)).toUint();
+  return heightBufferNode.element(idxR).sub(heightBufferNode.element(idxL));
+});
+const sampleSlopeZ = Fn(([gxi, gyi]) => {
+  const idxU = gyi.sub(1).mul(WIDTH).add(gxi).toUint();
+  const idxD = gyi.add(1).mul(WIDTH).add(gxi).toUint();
+  return heightBufferNode.element(idxD).sub(heightBufferNode.element(idxU));
+});
+
+// Underwater light-ray beams, per "under the waves the light should
+// shine and create beams of light rays" β€” real geometric beams (soft
+// gradient-textured planes, additively blended, matching the sun
+// sprite's own established technique) rather than a full volumetric
+// god-ray post-process, which would need an entire new post-processing
+// pipeline this prototype doesn't have (this file only ever calls
+// renderer.render() directly, no EffectComposer) β€” a much bigger,
+// separate undertaking than is reasonable to add in this pass. This is
+// an honest, well-scoped stand-in: real visible beams, angled toward
+// the actual sun direction but bent partway toward vertical to
+// approximate real Snell's-law refraction (light entering water always
+// looks more vertical than the sun's actual angle in the sky, regardless
+// of how low the sun sits) β€” zero new TSL/WebGPU risk since these are
+// ordinary Three.js materials, not compute-shader-driven.
+let lightRayMeshes = [];
+function setupLightRays(sunPosition) {
+  const sunDir = sunPosition.clone().normalize();
+  const rayDir = new THREE.Vector3(sunDir.x * 0.35, -1, sunDir.z * 0.35).normalize();
+
+  const rayCanvas = document.createElement("canvas");
+  rayCanvas.width = 32;
+  rayCanvas.height = 256;
+  const rayCtx = rayCanvas.getContext("2d");
+  const rayGrad = rayCtx.createLinearGradient(0, 0, 0, 256);
+  rayGrad.addColorStop(0, "rgba(255,250,220,0.55)");
+  rayGrad.addColorStop(0.6, "rgba(255,245,210,0.18)");
+  rayGrad.addColorStop(1, "rgba(255,240,200,0)");
+  rayCtx.fillStyle = rayGrad;
+  rayCtx.fillRect(0, 0, 32, 256);
+  const rayTexture = new THREE.CanvasTexture(rayCanvas);
+
+  const upVec = new THREE.Vector3(0, 1, 0);
+  const rayQuat = new THREE.Quaternion().setFromUnitVectors(upVec, rayDir);
+
+  const RAY_COUNT = 6;
+  for (let i = 0; i < RAY_COUNT; i++) {
+    const rayMat = new THREE.MeshBasicMaterial({
+      map: rayTexture, transparent: true, depthWrite: false, fog: false,
+      blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+      opacity: 0.5 + Math.random() * 0.3,
+    });
+    const rayGeo = new THREE.PlaneGeometry(1.4 + Math.random() * 0.8, 14 + Math.random() * 6);
+    const ray = new THREE.Mesh(rayGeo, rayMat);
+    ray.quaternion.copy(rayQuat);
+    const ox = (Math.random() - 0.5) * 16;
+    const oz = (Math.random() - 0.5) * 12 + 2;
+    ray.position.set(ox, -3, oz);
+    ray.userData.baseOpacity = rayMat.opacity;
+    ray.userData.flickerSeed = Math.random() * Math.PI * 2;
+    lightRayMeshes.push(ray);
+    scene.add(ray);
+  }
+}
+
+function smoothstepJS(edge0, edge1, x) {
+  const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+function shoreProfileY(worldZ) {
+  const t = smoothstepJS(SHORE_START_Z, SHORE_END_Z, worldZ);
+  return SEAFLOOR_Y + t * (SHORE_PEAK_Y - SEAFLOOR_Y);
+}
+
+// Real seafloor geometry, per "let's build a shore" — rises from open-
+// ocean depth up through and above the water surface along the +Z edge,
+// a real beach rather than an infinite flat ocean floor. Static (no live
+// simulation needed), so this uses plain JS vertex manipulation computed
+// once at creation — zero new TSL/WebGPU API surface, unlike everything
+// else in this file that needed real verification before use.
 function setupSeafloor() {
-  const seafloorGeo = new THREE.PlaneGeometry(PLANE_SIZE * 1.5, PLANE_SIZE * 1.5, 40, 40);
+  const seafloorGeo = new THREE.PlaneGeometry(PLANE_SIZE * 4, PLANE_SIZE * 4, 70, 70); // was PLANE_SIZE*1.5 at 60x60 segments — per "bottom is completely dark," the camera was very likely seeing past this plane's finite edge into the raw flat scene background; substantially larger now (safely within the 150-unit-radius sky dome), segment count raised only modestly since the far extended area is just background, not the detailed near-shore zone
   const posAttr = seafloorGeo.attributes.position;
   for (let i = 0; i < posAttr.count; i++) {
     const px = posAttr.getX(i);
     const py = posAttr.getY(i);
+    const worldZ = -py; // local Y maps to world -Z after the rotation.x below (a -90Β° rotation around X)
+    const baseOffset = shoreProfileY(worldZ) - SEAFLOOR_Y; // 0 in open ocean, rises to SHORE_PEAK_Y-SEAFLOOR_Y at full beach height — relative to the mesh's own position.y=SEAFLOOR_Y set below, not double-counted
     const bump = Math.sin(px * 0.15) * 0.3 + Math.cos(py * 0.2) * 0.25 + (Math.random() - 0.5) * 0.12;
-    posAttr.setZ(i, bump); // local Z before rotation becomes world Y (up) after rotation.x below
+    const bumpFade = 1 - smoothstepJS(SHORE_START_Z - 2, SHORE_END_Z, worldZ) * 0.7; // smoother sand near/on the beach, not the same choppy seafloor texture
+    posAttr.setZ(i, baseOffset + bump * bumpFade); // local Z before rotation becomes world Y (up) after rotation.x below
   }
   posAttr.needsUpdate = true;
   seafloorGeo.computeVertexNormals();
-  const seafloor = new THREE.Mesh(
-    seafloorGeo,
-    new THREE.MeshStandardMaterial({ color: 0xd9c49a, roughness: 0.95 })
-  );
+  const seafloorMat = new THREE.MeshStandardNodeMaterial({ color: 0xd9c49a, roughness: 0.95 });
+  // Real procedural caustics, per "rebuild ... caustics" β€” no caustics
+  // texture asset exists in this standalone prototype (unlike the live
+  // game's rift/textures/caustics_pattern.jpg), so this generates a
+  // moving light-net pattern mathematically instead: two overlapping
+  // sine grids drifting at different speeds/directions, combined via
+  // min() β€” the SAME general technique the game's real caustics use
+  // (two drifting samples' min() overlap, see liquid.js/main.js), just
+  // procedural rather than texture-sampled here.
+  // Real physically-motivated caustics, per "create the caustic effect
+  // based on the actual simulated waves" β€” replaces the earlier
+  // procedural sine-grid pattern entirely. Maps this seafloor fragment's
+  // world XZ position back to the water grid's own coordinate space
+  // (inverting the same worldX=(gx/WIDTH-0.5)*PLANE_SIZE formula used
+  // elsewhere for pointer/rain positioning) and samples the ACTUAL
+  // height buffer's neighbors to compute local curvature β€” the exact
+  // same Laplacian quantity computeUpdate above already computes for
+  // the wave physics itself, reused here for a real optical purpose: a
+  // convex, crest-like region focuses light the way a converging lens
+  // does (brighter caustics), a concave trough spreads it (dimmer). The
+  // caustic pattern below is a direct function of the real simulated
+  // wave shape, not an independently animated decoration.
+  // Real physically-motivated caustics, per "make the caustics look more
+  // like [a real underwater photo]" β€” a net of thin, sharp, interlocking
+  // bright lines, not smooth brightness blobs (which is what the
+  // previous curvature-only version produced). Real caustics form this
+  // way because light rays refracting through a sloped water surface
+  // physically converge along CURVES (caustic lines are literally where
+  // ray density spikes), not across smooth regions β€” so this reworks
+  // the technique to actually produce lines, while still deriving
+  // everything from the real simulated wave data, not a decorative
+  // pattern layered on top. Maps this seafloor fragment's world XZ back
+  // into the water grid's coordinate space (same inversion as before)
+  // and samples the ACTUAL height buffer's neighbors.
+  seafloorMat.emissiveNode = Fn(() => {
+    const wp = positionWorld;
+    // Per "low resolution ... blockiness" β€” real bilinear interpolation
+    // between the 4 nearest water-grid cells now, instead of snapping to
+    // whichever single cell (via floor()) a fragment happened to round
+    // into. The old version meant every fragment inside one grid cell's
+    // footprint read the EXACT same slope value, creating hard visible
+    // steps at cell boundaries β€” this blends smoothly across that
+    // boundary instead.
+    const gxF = clamp(wp.x.div(float(PLANE_SIZE)).add(0.5).mul(float(WIDTH)), 1, WIDTH - 2);
+    const gyF = clamp(wp.z.div(float(PLANE_SIZE)).add(0.5).mul(float(WIDTH)), 1, WIDTH - 2);
+    const gx0 = gxF.floor();
+    const gy0 = gyF.floor();
+    const fx = gxF.sub(gx0);
+    const fy = gyF.sub(gy0);
+    const slopeX = mix(
+      mix(sampleSlopeX(gx0, gy0), sampleSlopeX(gx0.add(1), gy0), fx),
+      mix(sampleSlopeX(gx0, gy0.add(1)), sampleSlopeX(gx0.add(1), gy0.add(1)), fx),
+      fy
+    );
+    const slopeZ = mix(
+      mix(sampleSlopeZ(gx0, gy0), sampleSlopeZ(gx0.add(1), gy0), fx),
+      mix(sampleSlopeZ(gx0, gy0.add(1)), sampleSlopeZ(gx0.add(1), gy0.add(1)), fx),
+      fy
+    );
+    const refractStrength = float(14.0);
+    const refractedX = wp.x.add(slopeX.mul(refractStrength));
+    const refractedZ = wp.z.add(slopeZ.mul(refractStrength));
+    // Per "long straight lines" β€” wherever the real wave slope is near
+    // zero (calm water, which is most of a resting ocean), the
+    // refraction above is also near zero, so the underlying sine
+    // pattern shows its raw, perfectly straight, perfectly periodic
+    // baseline shape. This adds gentle, low-frequency organic warping
+    // to the line pattern's OWN coordinates (independent of wave
+    // activity, using the already-proven hash21), so lines have natural
+    // irregular curves even at rest, matching how real caustic nets
+    // never look like a rigid grid even over calm water.
+    const warpSeed = vec2(wp.x.mul(0.06), wp.z.mul(0.06));
+    const warpX = hash21(warpSeed).sub(0.5).mul(3.0);
+    const warpZ = hash21(warpSeed.add(vec2(31.7, 17.3))).sub(0.5).mul(3.0);
+    const warpedX = refractedX.add(warpX);
+    const warpedZ = refractedZ.add(warpZ);
+    // Interlocking thin-line net, three overlapping directions/scales so
+    // it reads as an organic web rather than one rigid grid. Each line
+    // uses |sin(...)| via max(v,-v) (already-proven primitive, avoiding
+    // the unverified .abs()) raised to a high power so only the
+    // near-zero-crossing band stays bright β€” a thin line, not a smooth
+    // gradient.
+    const lineSharpness = float(24.0);
+    const s1 = sin(warpedX.mul(1.1));
+    const line1 = float(1.0).sub(max(s1, s1.mul(-1))).pow(lineSharpness);
+    const s2 = sin(warpedZ.mul(1.1).add(1.3));
+    const line2 = float(1.0).sub(max(s2, s2.mul(-1))).pow(lineSharpness);
+    const s3 = sin(warpedX.mul(0.75).add(warpedZ.mul(0.75)).add(2.4));
+    const line3 = float(1.0).sub(max(s3, s3.mul(-1))).pow(lineSharpness);
+    const net = max(line1, max(line2, line3));
+    // Per "brightness should vary and act like reflected/refracted
+    // light" β€” previously a flat constant multiplier everywhere.
+    // Brightness now scales with the real slope MAGNITUDE (already-
+    // proven abs-via-max technique) β€” calm water produces dim, faint
+    // caustics, real active wave slopes produce brighter, more sharply
+    // focused light, tying brightness itself to actual water motion.
+    const slopeMag = max(slopeX, slopeX.mul(-1)).add(max(slopeZ, slopeZ.mul(-1)));
+    const brightness = clamp(slopeMag.mul(6.0).add(0.35), 0.15, 1.0);
+    return color(0xfff8e0).mul(net).mul(brightness).mul(0.9);
+  })();
+  const seafloor = new THREE.Mesh(seafloorGeo, seafloorMat);
   seafloor.rotation.x = -Math.PI / 2;
   seafloor.position.y = SEAFLOOR_Y;
   scene.add(seafloor);
 
   // A handful of simple grass-like blades, matching the reference
   // photo's seafloor vegetation — thin flat planes, randomly scattered
-  // and scaled, not an attempt at a full vegetation system.
+  // and scaled. Only in genuinely underwater areas now (worldZ well
+  // before the shore starts rising), not scattered onto the dry beach.
   const bladeGeo = new THREE.PlaneGeometry(0.12, 1.1);
   const bladeMat = new THREE.MeshStandardMaterial({ color: 0x2f6b3a, roughness: 0.85, side: THREE.DoubleSide });
-  for (let i = 0; i < 60; i++) {
-    const blade = new THREE.Mesh(bladeGeo, bladeMat);
+  let placed = 0, attempts = 0;
+  while (placed < 60 && attempts < 300) {
+    attempts++;
     const bx = (Math.random() - 0.5) * PLANE_SIZE * 1.2;
     const bz = (Math.random() - 0.5) * PLANE_SIZE * 1.2;
+    if (bz > SHORE_START_Z - 2) continue; // skip the beach/shore area entirely
+    const blade = new THREE.Mesh(bladeGeo, bladeMat);
     blade.position.set(bx, SEAFLOOR_Y + 0.4, bz);
     blade.rotation.y = Math.random() * Math.PI;
     blade.rotation.z = (Math.random() - 0.5) * 0.3;
     const s = 0.6 + Math.random() * 0.7;
     blade.scale.set(s, s, s);
     scene.add(blade);
+    placed++;
   }
 }
 
@@ -262,6 +469,8 @@ function setupSimulation() {
   heightBufferA = instancedArray(CELL_COUNT, "float");
   heightBufferB = instancedArray(CELL_COUNT, "float");
   velocityBuffer = instancedArray(CELL_COUNT, "float");
+  foamBufferA = instancedArray(CELL_COUNT, "float");
+  foamBufferB = instancedArray(CELL_COUNT, "float");
 
   pointerWorldUniform = uniform(new THREE.Vector2(0, 0));
   pointerActiveUniform = uniform(0);
@@ -270,6 +479,8 @@ function setupSimulation() {
     heightBufferA.element(instanceIndex).assign(0);
     heightBufferB.element(instanceIndex).assign(0);
     velocityBuffer.element(instanceIndex).assign(0);
+    foamBufferA.element(instanceIndex).assign(0);
+    foamBufferB.element(instanceIndex).assign(0);
   })().compute(CELL_COUNT);
 
   // Real neighbor-based wave update. Reads FROM heightBufferA, writes the
@@ -316,7 +527,23 @@ function setupSimulation() {
     const waveSpeed = float(1.4);
     const damping = float(0.994); // slightly less than 1 β€” real water loses energy to friction/viscosity, a perfectly undamped simulation would ring forever and never settle
 
-    const newVelocity = velocityBuffer.element(i).add(laplacian.mul(waveSpeed)).mul(damping);
+    // Real shore-based wave damping, per "let's build a shore" — uses
+    // the EXACT same shore shape formula as the seafloor mesh
+    // (SHORE_START_Z/SHORE_END_Z/SHORE_PEAK_Y), computed analytically
+    // here since the seafloor is static and its shape is just this one
+    // formula, not sampled from a buffer. Waves genuinely lose energy
+    // approaching shallow water — a real physical damping applied to
+    // the velocity itself, the same mechanism the game's own
+    // SHORE_DAMP_DEPTH-based damping approximates, not a decorative
+    // visual-only effect layered on top.
+    const cellWorldZ = y.div(float(WIDTH)).sub(0.5).mul(float(PLANE_SIZE));
+    const shoreT = clamp(cellWorldZ.sub(float(SHORE_START_Z)).div(float(SHORE_END_Z - SHORE_START_Z)), 0, 1);
+    const shoreTSmooth = shoreT.mul(shoreT).mul(float(3).sub(shoreT.mul(2))); // manual smoothstep using only already-proven mul/sub, avoiding an unverified smoothstep() import
+    const localFloorY = float(SEAFLOOR_Y).add(shoreTSmooth.mul(float(SHORE_PEAK_Y - SEAFLOOR_Y)));
+    const localDepthAtRest = float(0).sub(localFloorY); // depth at calm water level (Y=0)
+    const shoreDampFactor = clamp(localDepthAtRest.div(float(SHORE_DAMP_DEPTH)), 0.04, 1); // floored at 0.04, never fully frozen/dead even right at the sand
+
+    const newVelocity = velocityBuffer.element(i).add(laplacian.mul(waveSpeed)).mul(damping).mul(shoreDampFactor);
     velocityBuffer.element(i).assign(newVelocity);
 
     let newHeight = self.add(newVelocity.mul(0.05));
@@ -335,28 +562,56 @@ function setupSimulation() {
     // waves at different scales/directions/speeds — real ocean chop from
     // wind has no single dominant direction or period, and a single
     // frequency would read as one uniform metronome-like pulse.
-    const chop1 = sin(x.mul(0.22).add(y.mul(0.09)).add(time.mul(1.3)));
-    const chop2 = sin(x.mul(0.11).sub(y.mul(0.18)).sub(time.mul(0.9)));
-    const chop3 = sin(x.mul(0.35).add(y.mul(0.31)).add(time.mul(1.7)).add(1.7));
+    // Small per-cell phase jitter (hash21, already proven above for the
+    // rain-drop selection) breaks up the chop's otherwise perfectly
+    // clean periodic structure — per "lines instead of a clear fluid,"
+    // a pure sine pattern has a single constant direction/frequency,
+    // and real ocean chop never looks this geometrically regular. This
+    // doesn't change the wave motion itself, just staggers each cell's
+    // effective phase slightly so the RESULT reads as organic texture.
+    const jitter = hash21(vec2(x.mul(0.08), y.mul(0.08))).sub(0.5).mul(0.4); // was mul(0.7)/mul(1.8) — much lower seed frequency (smooth across many cells, not chaotic between adjacent ones) and much smaller magnitude, since a normal is a DERIVATIVE of height and amplifies whatever noise is in its input
+    const chop1 = sin(x.mul(0.22).add(y.mul(0.09)).add(time.mul(1.3)).add(jitter));
+    const chop2 = sin(x.mul(0.11).sub(y.mul(0.18)).sub(time.mul(0.9)).add(jitter.mul(0.7)));
+    const chop3 = sin(x.mul(0.35).add(y.mul(0.31)).add(time.mul(1.7)).add(1.7).add(jitter.mul(1.3)));
     const chop = chop1.mul(0.4).add(chop2.mul(0.3)).add(chop3.mul(0.2));
     newHeight = newHeight.add(chop.mul(0.03));
 
-    // Rolling wave, per explicit "add a rolling wave" — a stronger, wider
-    // disturbance sweeping across the whole grid periodically (a ~7s
-    // cycle), simulating a set wave rolling in from open ocean, distinct
-    // from the smaller continuous ambient chop above. distFromFront uses
-    // max(a-b, b-a) for absolute value rather than .abs() specifically
-    // because max/sub are already proven working elsewhere in this exact
-    // file, while .abs() has never been used/verified here — same
-    // "prefer an already-proven primitive over an unverified one"
-    // caution used throughout this whole debugging thread.
+    // Rolling wave, per explicit "add a rolling wave" / "rolling waves
+    // washing on the shore" β€” sweeps from open ocean (low y / low world
+    // Z) toward the shore (high y / high world Z, where SHORE_START_Z/
+    // SHORE_END_Z live), the same direction the shore damping above
+    // measures against. This formula itself is unchanged from before β€”
+    // what makes it genuinely "wash onto the shore" now is that the new
+    // shoreDampFactor above naturally reduces its height as it enters
+    // shallow water, the real physical mechanism, not a separate
+    // scripted fade written into the wave injection itself.
     const waveCycle = float(7.0);
     const waveT = time.mod(waveCycle).div(waveCycle);
     const waveFrontY = waveT.mul(float(WIDTH + 20.0)).sub(10.0);
     const distFromFront = max(y.sub(waveFrontY), waveFrontY.sub(y));
+    // Per "rolling waves ... crashes creating splashes and white foam" β€”
+    // real breaking event: when the wave's own sweeping front is
+    // actually crossing the shore zone (not just anywhere on the open
+    // grid), add chaotic height turbulence (real breaking is genuinely
+    // chaotic, not a smooth crest riding up) and capture a
+    // breakingBoost value for the persistent foam buffer below to use
+    // β€” a real foam BURST right at the crash point, not just the
+    // existing gradual waterline-proximity foam. breakingBoost declared
+    // outside the nested If (same established pattern newHeight itself
+    // already uses) so it's readable later in this same function, past
+    // where the rolling-wave block ends.
+    const waveFrontWorldZ = waveFrontY.div(float(WIDTH)).sub(0.5).mul(float(PLANE_SIZE));
+    const breakZoneDist = max(waveFrontWorldZ.sub(float(SHORE_START_Z)), float(SHORE_START_Z).sub(waveFrontWorldZ));
+    let breakingBoost = float(0);
     If(distFromFront.lessThan(6.0), () => {
       const waveShape = float(1.0).sub(distFromFront.div(6.0));
       newHeight = newHeight.add(waveShape.mul(0.4));
+      If(breakZoneDist.lessThan(3.0), () => {
+        const turbSeed = vec2(x.add(time.mul(3.0)), y);
+        const turbulence = hash21(turbSeed).sub(0.5).mul(0.5).mul(waveShape);
+        newHeight = newHeight.add(turbulence);
+        breakingBoost = waveShape;
+      });
     });
 
     // Rain-drop ripples, per explicit "react when rain drops hit the
@@ -391,6 +646,26 @@ function setupSimulation() {
       });
     });
 
+    // Real persistent backwash foam, per "creating foam as it draws back
+    // in" β€” uses the FULLY finalized newHeight (after chop/rolling-wave/
+    // rain/pointer are all already applied above), compared against the
+    // same localFloorY shore formula already computed for the damping
+    // above. Distance-to-waterline uses max(a,-a) for absolute value
+    // (already-proven max/mul, avoiding the unverified .abs()). When
+    // genuinely in the wash zone, foam jumps toward full strength;
+    // otherwise it decays slowly (0.955/frame β‰ˆ a couple seconds to
+    // fade) rather than vanishing the instant the water pulls back β€”
+    // the actual "draws back in" lingering effect requested.
+    const distToWaterlineUpdate = max(newHeight.sub(localFloorY), localFloorY.sub(newHeight));
+    const prevFoam = foamBufferA.element(i);
+    let newFoam = prevFoam.mul(0.955);
+    If(distToWaterlineUpdate.lessThan(0.5), () => {
+      const freshFoam = float(1.0).sub(distToWaterlineUpdate.div(0.5));
+      newFoam = max(newFoam, freshFoam);
+    });
+    newFoam = max(newFoam, breakingBoost); // real crash burst from the wave-breaking event above, independent of waterline proximity
+    foamBufferB.element(i).assign(clamp(newFoam, 0, 1));
+
     heightBufferB.element(i).assign(newHeight);
   })().compute(CELL_COUNT);
 
@@ -404,6 +679,7 @@ function setupSimulation() {
   // computeUpdate, since it's the identical mechanism.
   computeCopyBack = Fn(() => {
     heightBufferA.element(instanceIndex).assign(heightBufferB.element(instanceIndex));
+    foamBufferA.element(instanceIndex).assign(foamBufferB.element(instanceIndex));
   })().compute(CELL_COUNT);
 }
 
@@ -476,10 +752,17 @@ function setupMesh() {
   // Shared water-color logic (same Fn([arg]) pattern already proven
   // working for hash21 above), used by both colorNode and emissiveNode
   // below rather than duplicating the same blend logic twice.
+  // Real colors ported directly from the live game's liquid.js, per "I
+  // like how the waves look in the game" — not reinvented guesses.
+  // shallow/deep are the game's own tuned LIQUID_STYLE.crystal values
+  // (baseColor 0x1f7fb0 IS the game's "deep" color; 0x7fd0d8 is its
+  // shoreline "shallow" color, both from a real depth-based vertex-color
+  // blend in liquid.js), and foam is the game's own frothColor (pure
+  // white), not an invented off-white.
   const waterColorAt = Fn(([h]) => {
-    const deep = color(0x0a4a4a);
-    const shallow = color(0x2ea8a0);
-    const foam = color(0xf2fbfa);
+    const deep = color(0x1f7fb0);
+    const shallow = color(0x7fd0d8);
+    const foam = color(0xffffff);
     const t = clamp(h.mul(2.4).add(0.35), 0, 1);
     const waterColor = mix(deep, shallow, t);
     const foamStart = float(0.22);
@@ -499,6 +782,17 @@ function setupMesh() {
     // change, so foam reads as a real crest feature, not just "the
     // color at the top of the gradient."
     const baseColor = waterColorAt(heightAtVertex);
+    // Per "let's build a shore" — localFloorYColor uses the SAME real
+    // shore-shape formula as the seafloor mesh and the wave damping in
+    // computeUpdate (SHORE_START_Z/SHORE_END_Z/SHORE_PEAK_Y), not the
+    // flat SEAFLOOR_Y constant this used before there was an actual
+    // sloped shore β€” so depth-based darkening now correctly reads as
+    // shallower/lighter near the beach instead of showing the same
+    // open-ocean depth everywhere.
+    const worldZ = positionWorld.z;
+    const shoreTColor = clamp(worldZ.sub(float(SHORE_START_Z)).div(float(SHORE_END_Z - SHORE_START_Z)), 0, 1);
+    const shoreTColorSmooth = shoreTColor.mul(shoreTColor).mul(float(3).sub(shoreTColor.mul(2)));
+    const localFloorYColor = float(SEAFLOOR_Y).add(shoreTColorSmooth.mul(float(SHORE_PEAK_Y - SEAFLOOR_Y)));
     // Per "add volume below the waves and a seafloor" — now that a real
     // seafloor mesh exists at a known Y (SEAFLOOR_Y), this computes
     // GENUINE depth (actual water-surface world Y minus the seafloor's
@@ -508,17 +802,46 @@ function setupMesh() {
     // point (positionNode's displacement has already been applied by the
     // time colorNode evaluates), so this is a real per-fragment depth
     // value, not a height-buffer proxy.
-    const localDepth = positionWorld.y.sub(float(SEAFLOOR_Y));
+    const localDepth = positionWorld.y.sub(localFloorYColor);
     const depthDarken = clamp(localDepth.div(6.0), 0, 1);
-    const deepVolume = color(0x03181f);
+    const deepVolume = color(0x061824); // matches liquid.js's own FAR_DARKEN_COLOR — the game's real far-distance/deep darkening tone, not an independently invented one
     const depthBlended = mix(baseColor, deepVolume, depthDarken.mul(0.5));
+    // Real shore-wash foam, per "rebuild foam ... waves washing on the
+    // shore" β€” white foam specifically where the water's actual current
+    // surface height is close to the real sloped beach beneath it (the
+    // moving waterline), not a fixed-position zone. distToWaterline uses
+    // max(a,-a) for absolute value (already-proven max/mul, avoiding the
+    // unverified .abs(), same discipline as the rolling wave above).
+    // This is a genuinely different foam trigger than the crest foam in
+    // waterColorAt β€” that one fires on wave height everywhere, this one
+    // fires on shore proximity specifically, and the two combine
+    // naturally since a wave crest reaching the shore satisfies both.
+    // Per "creating foam as it draws back in" β€” now reads the PERSISTENT
+    // foam buffer (computeUpdate above) instead of a purely instantaneous
+    // position check, so foam genuinely lingers for a moment as a wave
+    // recedes rather than disappearing the instant the water pulls back.
+    const foamPersist = foamBufferNode.element(cellIdx);
+    const washed = mix(depthBlended, color(0xffffff), foamPersist.mul(0.85));
+    // Real whitecap foam, per "ocean waves have white caps as it crests"
+    // β€” real whitecaps form specifically where the water surface is
+    // genuinely STEEP (an actual physical response to wave steepness,
+    // not just "high"), reusing computeWaveNormal's real slope data
+    // rather than a separate invented calculation. normal.y is 1 on a
+    // flat surface and drops as the surface tilts, so (1-normal.y) is a
+    // direct steepness measure. Also gated by height being positive
+    // (a cresting/rising face, not a trough, even if a trough happened
+    // to be locally steep) since real whitecaps form on wave crests.
+    const whitecapNormal = computeWaveNormal();
+    const steepness = clamp(float(1.0).sub(whitecapNormal.y).mul(4.0), 0, 1);
+    const whitecapAmount = clamp(steepness.mul(2.0).sub(0.3), 0, 1).mul(clamp(heightAtVertex.mul(3.0), 0, 1));
+    const whitecapped = mix(washed, color(0xffffff), whitecapAmount.mul(0.75));
     // Fresnel still contributes on top — a grazing viewing angle means a
     // genuinely longer path through the water even at the SAME depth, so
     // this is a real, separate, additional effect layered on the actual
     // depth term above, not a replacement for it.
     const viewDir = cameraPosition.sub(positionWorld).normalize();
     const fresnel = float(1).sub(clamp(normalWorld.dot(viewDir), 0, 1)).pow(3);
-    return mix(depthBlended, deepVolume, fresnel.mul(0.3));
+    return mix(whitecapped, deepVolume, fresnel.mul(0.3));
   })();
   // Per "what are we missing, does it need light/shaders" — a real,
   // specific cause: at a low, grazing camera angle (as seen in the
@@ -546,8 +869,8 @@ function setupMesh() {
     const sunDir = vec3(0.4867, 0.8111, 0.3244);
     const reflectDir = reflect(viewDir.mul(-1), normal);
     const sunAlign = clamp(dot(reflectDir, sunDir), 0, 1);
-    const glint = sunAlign.pow(120);
-    return baseEmissive.add(color(0xfff8e0).mul(glint).mul(3.0));
+    const glint = sunAlign.pow(28); // was 120 — per "lines instead of a clear fluid," a razor-sharp exponent this sensitive to normal direction was very likely amplifying the chop's own periodic structure into visible banding; a wider, softer highlight is both more realistic and less prone to this
+    return baseEmissive.add(color(0xfff8e0).mul(glint).mul(1.4)); // brightness also reduced (3.0->1.4) alongside the softer falloff, so the highlight doesn't overpower with the wider spread
   })();
   material.transparent = true;
   material.opacity = 0.88; // per "translucent" — a straightforward base alpha; the fresnel/volume effect above handles depth-based color, this is a separate flat transparency layer on top
@@ -623,6 +946,16 @@ async function animate() {
     // it instead of guessing at some other renderer-level API).
     await renderer.computeAsync(computeUpdate);
     await renderer.computeAsync(computeCopyBack);
+
+    // Gentle flicker for the underwater light-ray meshes, matching how
+    // real light shafts shimmer as the water surface moves above them —
+    // plain per-frame opacity modulation, not tied to the compute
+    // simulation itself.
+    const nowT = clock.elapsedTime;
+    for (const ray of lightRayMeshes) {
+      const flicker = 0.75 + Math.sin(nowT * 1.3 + ray.userData.flickerSeed) * 0.25;
+      ray.material.opacity = ray.userData.baseOpacity * flicker;
+    }
 
     renderer.render(scene, camera);
   } catch (err) {

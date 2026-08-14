@@ -245,7 +245,29 @@ camera.rotation.order = "YXZ";
 // WebGPU-native TSL nodes (starting with the simplest ones) is the
 // planned next step — not something to guess at blind here.
 const renderer = new WebGPURenderer({ canvas, antialias: true });
-await renderer.init();
+// Real visible loading indicator + timeout, per "no error in console" —
+// the most likely explanation for that exact symptom (nothing renders,
+// nothing throws) is a HANGING promise, not a failing one: if the
+// browser's WebGPU adapter/device request never resolves OR rejects,
+// await renderer.init() below would wait forever, silently, with
+// nothing to catch since nothing actually failed. This shows a real,
+// visible status while waiting, and races the init against a real
+// timeout so a hang becomes a genuine, informative error message
+// instead of indefinite silence.
+const riftLoadingEl = document.createElement("div");
+riftLoadingEl.id = "rift-loading-indicator";
+riftLoadingEl.style.cssText = "position:fixed; bottom:12px; left:12px; z-index:99998; font:12px/1.4 ui-monospace, monospace; color:#7fd8a0; background:rgba(0,0,0,0.55); padding:8px 10px; border-radius:6px;";
+riftLoadingEl.textContent = "Initializing WebGPU renderer…";
+document.body.appendChild(riftLoadingEl);
+function riftInitWithTimeout(promise, ms, label) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(label + " never resolved after " + ms + "ms — the browser's WebGPU adapter/device request is very likely hanging rather than failing cleanly, which explains why nothing appeared and nothing threw an error.")), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
+}
+await riftInitWithTimeout(renderer.init(), 10000, "renderer.init()");
+riftLoadingEl.remove();
 let composerRenderFailedOnce = false; // used by the composer.render() safety net far below in animate() — logs the WebGPU/post-processing incompatibility once instead of every frame
 // Tone mapping ITSELF is now set by applyPostFx() below (from the new
 // tone-mapping dropdown's tier default/override, per explicit

@@ -37,6 +37,35 @@ import { createPlayerPhysicsState, updatePlayerPhysics, sampleGroundHeight, WALK
 import { mulberry32, hashStringToSeed } from "./worldgen.js";
 
 // ---------------------------------------------------------------------------
+// Real error-surfacing, per "still not playing?" β€” placed as early as
+// legally possible in this module (right after the imports, since ES
+// modules require imports at the very top of the file) so ANY uncaught
+// error or rejected promise anywhere in the rest of this file β€” including
+// during initial scene/material setup, which is where a real, confirmed
+// risk lives (onBeforeCompile-based custom materials, which this game's
+// entire terrain shader uses for caustics/foam, are not supported under
+// real WebGPU execution) β€” gets caught and shown directly on the page,
+// since mobile Safari doesn't offer easy devtools access. Standard
+// browser APIs (window error/unhandledrejection listeners), zero new
+// WebGPU/TSL risk β€” this is exactly the diagnostic technique that
+// proved essential throughout the whole standalone-prototype debugging
+// thread (FU305 onward), applied here to the live game for the first
+// time.
+(function setupRiftErrorOverlay() {
+  const overlay = document.createElement("div");
+  overlay.id = "rift-error-overlay";
+  overlay.style.cssText = "display:none; position:fixed; inset:0; z-index:99999; background:rgba(10,5,5,0.96); color:#ffb4b4; font:13px/1.5 ui-monospace, monospace; padding:20px; overflow:auto; white-space:pre-wrap;";
+  document.body.appendChild(overlay);
+  function showError(label, err) {
+    if (overlay.style.display === "block") return; // only the FIRST error, not every subsequent one
+    overlay.style.display = "block";
+    overlay.textContent = "[Rift Islands failed to load]\n" + label + "\n\n" + (err && err.stack ? err.stack : err);
+  }
+  window.addEventListener("error", (e) => showError("Uncaught error:", e.error || e.message));
+  window.addEventListener("unhandledrejection", (e) => showError("Unhandled promise rejection:", e.reason));
+})();
+
+// ---------------------------------------------------------------------------
 // World seed — fixed by default so every visitor explores the same curated
 // levels rather than different random layouts each load.
 // ---------------------------------------------------------------------------

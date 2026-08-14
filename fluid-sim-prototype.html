@@ -217,27 +217,25 @@ function setupSimulation() {
 
     let newHeight = self.add(newVelocity.mul(0.05));
 
-    // Continuous ambient ocean swell, per explicit "add waves and
-    // ripples to simulate an ocean" — real waves enter from one edge of
-    // the grid (y=0, simulating open-ocean swell arriving from that
-    // direction) and propagate/interact through the SAME wave equation
-    // already driving the rest of the simulation above, rather than
-    // being a separate decorative animation layered on top of it.
-    // edgeFade concentrates the injection near that one edge (full
-    // strength at y=0, fading to zero by y=6) and lets the existing
-    // physics carry it into the rest of the grid from there — a
-    // localized source, not the whole grid pulsing uniformly together.
-    // Two overlapping sine frequencies (different speed/wavelength/
-    // phase) so it doesn't read as one uniform metronome-like pulse —
-    // real ocean swell is never perfectly periodic.
-    const edgeBand = float(6.0);
-    const edgeFade = clamp(float(1.0).sub(y.div(edgeBand)), 0.0, 1.0);
-    If(edgeFade.greaterThan(0.001), () => {
-      const swell1 = sin(x.mul(0.14).add(time.mul(1.1)));
-      const swell2 = sin(x.mul(0.31).sub(time.mul(0.7)).add(2.3));
-      const swell = swell1.mul(0.5).add(swell2.mul(0.3));
-      newHeight = newHeight.add(swell.mul(0.05).mul(edgeFade));
-    });
+    // Continuous ambient ocean chop, per explicit "add waves and ripples
+    // to simulate an ocean." Per direct feedback that the previous
+    // edge-limited version produced no visible motion — that version
+    // injected swell only in a thin band at one edge of the grid, which
+    // also happens to be the part of the plane farthest from the camera
+    // (most compressed by perspective) — a real, plausible combination
+    // for "technically present but effectively invisible," not
+    // necessarily too weak in raw amplitude. This version applies
+    // directly across the WHOLE grid every frame instead, removing the
+    // camera-angle dependency entirely rather than just increasing the
+    // same edge-limited approach's strength. Three overlapping sine
+    // waves at different scales/directions/speeds — real ocean chop from
+    // wind has no single dominant direction or period, and a single
+    // frequency would read as one uniform metronome-like pulse.
+    const chop1 = sin(x.mul(0.22).add(y.mul(0.09)).add(time.mul(1.3)));
+    const chop2 = sin(x.mul(0.11).sub(y.mul(0.18)).sub(time.mul(0.9)));
+    const chop3 = sin(x.mul(0.35).add(y.mul(0.31)).add(time.mul(1.7)).add(1.7));
+    const chop = chop1.mul(0.4).add(chop2.mul(0.3)).add(chop3.mul(0.2));
+    newHeight = newHeight.add(chop.mul(0.03));
 
     // Real pointer-driven disturbance β€” a genuine, tangible demonstration
     // that this is an actual simulation reacting to real input, not a

@@ -3299,6 +3299,18 @@
        standard defense against exactly that class of hijack. */
     overscroll-behavior: none;
   }
+  /* New "Fluid Sim" section — a genuinely separate, self-contained WebGPU
+     prototype page (its own import map, its own script), embedded via
+     iframe rather than inlined into this page's own scripts specifically
+     to keep it fully isolated from the Rift game's own module setup —
+     zero risk of the two conflicting. Same aspect-ratio/overflow approach
+     as #rift-viewport above, for visual consistency between the two card
+     embeds. */
+  #fluidsim-viewport {
+    position: relative; width: 100%; aspect-ratio: 16 / 9;
+    background: #05070c; border-radius: 0 0 .4rem .4rem; overflow: hidden;
+  }
+  #fluidsim-viewport iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; }
   #rift-viewport.rift-fullscreen {
     position: fixed; top: 0; left: 0; width: 100svw; height: 100svh;
     z-index: 9999; aspect-ratio: auto; border-radius: 0;
@@ -3810,6 +3822,7 @@
     <li><a href="#models">3D Work</a></li>
     <li><a href="#game">Play</a></li>
     <li><a href="#rift">Rift Islands</a></li>
+    <li><a href="#fluidsim">Fluid Sim</a></li>
     <li><a href="#photography">Photography</a></li>
     <li><a href="#telemetry">Telemetry</a></li>
     <li><a href="#process">Process</a></li>
@@ -4869,6 +4882,32 @@
       </div>
     </div>
     <p class="algo-hint">Built with Three.js — each biome is one large heightfield landmass shaped by layered value noise (distinct octave counts/frequencies per biome, not just a color swap: ridged/jagged for Ember's volcanic ground, gentle rolling for Verdant's hills, threshold-spiked for Crystal's spires, carved chasms for Abyssal Drift, fine dune ripples for Ashen's lakebed), walked with gravity/jump physics that stick to the sampled terrain height every frame rather than a fixed tolerance — the fix for an earlier bug where any real slope could drop you through the ground. A parallel touch/joystick scheme for mobile, synthesized Web Audio (no sound files), and lore drawn from a curated local pool, deterministically picked per location so it's consistent across visits with zero network dependency. Started as a real-time multiplayer free-flight game with server-authoritative combat and client-side prediction; rebuilt single-player as a platformer, with combat repurposed into shattering static Resonance Crystals instead of other players.</p>
+  </div>
+</section>
+
+
+<!-- FLUID SIM PROTOTYPE -->
+<section id="fluidsim" class="panel">
+  <div class="panel-inner">
+    <span class="section-label">Experiment</span>
+    <h2>A real fluid simulation,<br>running on the GPU</h2>
+    <p class="lead" style="margin:0 auto 2.2rem;">A WebGPU compute-shader prototype β€” genuine finite-difference wave physics, not the animated-sine-wave trick most real-time water uses (including Rift Islands' own ocean above, for now). Each cell's height responds to its actual neighbors every frame, computed in parallel on the GPU. Click or drag on the water to push it and watch a real disturbance propagate and reflect off the edges.</p>
+    <div class="algo-card">
+      <div class="cc-titlebar">
+        <div class="cc-dots">
+          <span class="cc-dot" style="background:#FF5F57"></span>
+          <span class="cc-dot" style="background:#FFBD2E"></span>
+          <span class="cc-dot" style="background:#28C840"></span>
+        </div>
+        <span class="cc-filename">fluid-sim-prototype</span>
+      </div>
+      <div class="algo-body" style="padding:0;">
+        <div id="fluidsim-viewport">
+          <iframe src="fluid-sim-prototype.html" title="WebGPU fluid simulation prototype" loading="lazy" allow="fullscreen"></iframe>
+        </div>
+      </div>
+    </div>
+    <p class="algo-hint">Requires a browser with WebGPU support β€” current Chrome, Edge, or Firefox, and Safari 26+ on iOS/iPadOS/macOS. On an unsupported browser the embed will show a plain status message instead of a blank frame. This is a standalone proof of concept, not yet wired into the live game β€” see it as the first step toward eventually replacing Rift Islands' Gerstner-wave ocean with a real simulation driving the water, caustics, foam, and rain ripples together.</p>
   </div>
 </section>
 

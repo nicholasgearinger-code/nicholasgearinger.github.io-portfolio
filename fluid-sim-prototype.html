@@ -269,40 +269,91 @@ const sampleSlopeZ = Fn(([gxi, gyi]) => {
 // of how low the sun sits) β€” zero new TSL/WebGPU risk since these are
 // ordinary Three.js materials, not compute-shader-driven.
 let lightRayMeshes = [];
+function createLightRayGeometry(length, topWidth, bottomWidth) {
+  // Trapezoid, not a rectangle β€” per "diffused ... refracts and
+  // scatters," real light entering water spreads out as it travels
+  // deeper (scattering), so narrow-at-entry/wide-at-depth is both a
+  // real physical shape and what makes this read as diffused rather
+  // than a crisp parallel beam. Origin sits at (0,0,0), the TOP edge
+  // (the water-entry point), with the shape extending along LOCAL -Y
+  // from there β€” critically different from a stock PlaneGeometry,
+  // whose origin is at its CENTER, which was the real bug letting the
+  // previous version's rays extend above the water surface.
+  const geo = new THREE.BufferGeometry();
+  const halfTop = topWidth / 2;
+  const halfBottom = bottomWidth / 2;
+  const vertices = new Float32Array([
+    -halfTop, 0, 0,
+    halfTop, 0, 0,
+    -halfBottom, -length, 0,
+    halfBottom, -length, 0,
+  ]);
+  const uvs = new Float32Array([0, 1, 1, 1, 0, 0, 1, 0]);
+  geo.setAttribute("position", new THREE.BufferAttribute(vertices, 3));
+  geo.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+  geo.setIndex([0, 2, 1, 1, 2, 3]);
+  geo.computeVertexNormals();
+  return geo;
+}
+
 function setupLightRays(sunPosition) {
   const sunDir = sunPosition.clone().normalize();
   const rayDir = new THREE.Vector3(sunDir.x * 0.35, -1, sunDir.z * 0.35).normalize();
 
   const rayCanvas = document.createElement("canvas");
-  rayCanvas.width = 32;
+  rayCanvas.width = 64;
   rayCanvas.height = 256;
   const rayCtx = rayCanvas.getContext("2d");
   const rayGrad = rayCtx.createLinearGradient(0, 0, 0, 256);
-  rayGrad.addColorStop(0, "rgba(255,250,220,0.55)");
-  rayGrad.addColorStop(0.6, "rgba(255,245,210,0.18)");
+  // Softer, more gradual falloff than before β€” per "diffused," a hazier
+  // look with no hard edge, rather than a defined beam shape.
+  rayGrad.addColorStop(0, "rgba(255,250,220,0.4)");
+  rayGrad.addColorStop(0.4, "rgba(255,247,215,0.22)");
+  rayGrad.addColorStop(0.75, "rgba(255,245,210,0.08)");
   rayGrad.addColorStop(1, "rgba(255,240,200,0)");
   rayCtx.fillStyle = rayGrad;
-  rayCtx.fillRect(0, 0, 32, 256);
+  rayCtx.fillRect(0, 0, 64, 256);
+  // Per "still looks ... too sharp" β€” the vertical gradient above never
+  // addressed the trapezoid's LEFT/RIGHT edges, which were still a hard
+  // geometric cutoff. destination-in multiplies what's already drawn by
+  // a new gradient's own alpha, so this softens both edges too, real
+  // Canvas2D compositing (standard browser API, zero WebGPU/TSL risk)
+  // rather than approximating softness through opacity alone.
+  rayCtx.globalCompositeOperation = "destination-in";
+  const hGrad = rayCtx.createLinearGradient(0, 0, 64, 0);
+  hGrad.addColorStop(0, "rgba(255,255,255,0)");
+  hGrad.addColorStop(0.5, "rgba(255,255,255,1)");
+  hGrad.addColorStop(1, "rgba(255,255,255,0)");
+  rayCtx.fillStyle = hGrad;
+  rayCtx.fillRect(0, 0, 64, 256);
   const rayTexture = new THREE.CanvasTexture(rayCanvas);
 
-  const upVec = new THREE.Vector3(0, 1, 0);
-  const rayQuat = new THREE.Quaternion().setFromUnitVectors(upVec, rayDir);
+  // Maps LOCAL -Y (the geometry's own "length" direction, entry toward
+  // depth) to rayDir, not LOCAL +Y β€” matches how createLightRayGeometry
+  // above actually extends its shape.
+  const downVec = new THREE.Vector3(0, -1, 0);
+  const rayQuat = new THREE.Quaternion().setFromUnitVectors(downVec, rayDir);
 
   const RAY_COUNT = 6;
   for (let i = 0; i < RAY_COUNT; i++) {
     const rayMat = new THREE.MeshBasicMaterial({
       map: rayTexture, transparent: true, depthWrite: false, fog: false,
       blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-      opacity: 0.5 + Math.random() * 0.3,
+      opacity: 0.45 + Math.random() * 0.25,
     });
-    const rayGeo = new THREE.PlaneGeometry(1.4 + Math.random() * 0.8, 14 + Math.random() * 6);
+    const rayLength = 2.4 + Math.random() * 1.2; // kept within the real water column depth (seafloor sits around Y=-3.5 in open water) so rays don't visually extend through solid ground
+    const rayGeo = createLightRayGeometry(rayLength, 0.35 + Math.random() * 0.25, 1.6 + Math.random() * 1.0);
     const ray = new THREE.Mesh(rayGeo, rayMat);
     ray.quaternion.copy(rayQuat);
     const ox = (Math.random() - 0.5) * 16;
     const oz = (Math.random() - 0.5) * 12 + 2;
-    ray.position.set(ox, -3, oz);
+    // Entry point pinned just under the resting water level (Y=0), not
+    // at it exactly β€” per "should only show once it hits the water,"
+    // this keeps the beam's own top edge safely below the surface even
+    // as waves push the actual water level up and down around it,
+    // rather than risking it poking above during a crest.
+    ray.position.set(ox, -0.3, oz);
     ray.userData.baseOpacity = rayMat.opacity;
-    ray.userData.flickerSeed = Math.random() * Math.PI * 2;
     lightRayMeshes.push(ray);
     scene.add(ray);
   }
@@ -315,6 +366,23 @@ function smoothstepJS(edge0, edge1, x) {
 function shoreProfileY(worldZ) {
   const t = smoothstepJS(SHORE_START_Z, SHORE_END_Z, worldZ);
   return SEAFLOOR_Y + t * (SHORE_PEAK_Y - SEAFLOOR_Y);
+}
+
+// Per "should vary in brightness, dynamically with the water" β€” a real
+// GPU buffer readback (reading the actual live simulation state back to
+// the CPU) would add real latency/risk for a purely cosmetic flicker, so
+// this instead mirrors the SAME ambient-chop formula the compute shader
+// itself already uses (see computeUpdate's own chop1/chop2/chop3),
+// evaluated in plain JS at each ray's own position β€” a close real
+// approximation of the actual simulated motion at that point, not a
+// disconnected canned sine wave.
+function approxWaterChop(worldX, worldZ, t) {
+  const gx = (worldX / PLANE_SIZE + 0.5) * WIDTH;
+  const gy = (worldZ / PLANE_SIZE + 0.5) * WIDTH;
+  const c1 = Math.sin(gx * 0.22 + gy * 0.09 + t * 1.3);
+  const c2 = Math.sin(gx * 0.11 - gy * 0.18 - t * 0.9);
+  const c3 = Math.sin(gx * 0.35 + gy * 0.31 + t * 1.7 + 1.7);
+  return c1 * 0.4 + c2 * 0.3 + c3 * 0.2;
 }
 
 // Real seafloor geometry, per "let's build a shore" — rises from open-
@@ -953,8 +1021,14 @@ async function animate() {
     // simulation itself.
     const nowT = clock.elapsedTime;
     for (const ray of lightRayMeshes) {
-      const flicker = 0.75 + Math.sin(nowT * 1.3 + ray.userData.flickerSeed) * 0.25;
-      ray.material.opacity = ray.userData.baseOpacity * flicker;
+      // Real water-motion-driven brightness, per "vary dynamically with
+      // the water" β€” uses approxWaterChop (mirrors the actual compute
+      // shader's own ambient-chop formula) evaluated at this ray's real
+      // position, not a disconnected time-only sine wave. abs() since
+      // chop can be negative (a trough) but brightness shouldn't.
+      const chopHere = Math.abs(approxWaterChop(ray.position.x, ray.position.z, nowT));
+      const brightness = 0.55 + chopHere * 0.9;
+      ray.material.opacity = ray.userData.baseOpacity * Math.min(1.4, brightness);
     }
 
     renderer.render(scene, camera);

@@ -1,14 +1,6 @@
 import * as THREE from "three";
 import { WebGPURenderer } from "three/addons/renderers/webgpu/WebGPURenderer.js";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
-import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
-import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
-import { SSAOPass } from "three/addons/postprocessing/SSAOPass.js";
-import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
-import { SMAAPass } from "three/addons/postprocessing/SMAAPass.js";
-import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
-import { FXAAShader } from "three/addons/shaders/FXAAShader.js";
-import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH, POND_Z, POND_RADIUS, POND_LEVEL, RAMP_CENTER_X, RAMP_CENTER_Z, RAMP_LENGTH, RAMP_HALF_WIDTH, ROOM_FLOOR_Y, ROOM_WIDTH, ROOM_LENGTH, BRANCH_START_X, BRANCH_LENGTH, BRANCH_HALF_WIDTH, BRANCH_Z, CHAMBER_RADIUS } from "./terrain.js";
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
@@ -291,7 +283,6 @@ function riftInitWithTimeout(promise, ms, label) {
 }
 await riftInitWithTimeout(renderer.init(), 10000, "renderer.init()");
 riftLoadingEl.remove();
-let composerRenderFailedOnce = false; // used by the composer.render() safety net far below in animate() — logs the WebGPU/post-processing incompatibility once instead of every frame
 // Tone mapping ITSELF is now set by applyPostFx() below (from the new
 // tone-mapping dropdown's tier default/override, per explicit
 // "individually" follow-up) rather than hardcoded here — this fixed
@@ -326,274 +317,49 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 // the AO term — genuine additional GPU work every frame, same category
 // of cost this project already fought hard to control in the reflection/
 // refraction throttling work.
-const composer = new EffectComposer(renderer);
-composer.addPass(new RenderPass(scene, camera));
-const ssaoPass = new SSAOPass(scene, camera, viewport.clientWidth, viewport.clientHeight);
-// Tuned to THIS world's scale (player eye height 1.6, a tree trunk ~1-2
-// units wide) rather than SSAOPass's own defaults, which assume a
-// larger/different scene scale — the defaults read as either invisible
-// (radius too small to reach neighboring geometry) or a heavy fog-like
-// darkening over everything (radius too large) at this project's actual
-// unit scale.
-// Reduced from kernelRadius=4/maxDistance=0.12 per "something doesn't
-// look right" — the palm tree canopy's dense, closely-overlapping frond
-// planes were building up heavy AO darkening between themselves (SSAO
-// naturally piles onto tightly-packed geometry like this), reading as an
-// odd dark blotch through the canopy rather than a subtle ground-contact
-// shadow. Smaller radius/distance keeps it scoped closer to genuine
-// contact points.
-ssaoPass.kernelRadius = 2.5;
-ssaoPass.minDistance = 0.0005;
-ssaoPass.maxDistance = 0.08;
-composer.addPass(ssaoPass);
-// Selective bloom — the sun disc, resonance crystals, and the caustics
-// net are all bright/emissive but nothing actually GLOWS by default.
-// Per explicit "dropdown options... individually" follow-up, this is no
-// longer a single on/off bundled with AA — BLOOM_LEVELS below defines
-// real distinct presets (strength/radius/threshold), picked via its own
-// dropdown. Constructed here with the 'off' preset's values; applyPostFx
-// (below) sets the real preset immediately after.
-const bloomPass = new UnrealBloomPass(new THREE.Vector2(viewport.clientWidth, viewport.clientHeight), 0, 0.4, 1.0);
-composer.addPass(bloomPass);
-// Real anti-aliasing for the final composited image — renderer's own
-// antialias:true (set at construction above) only affects a DIRECT
-// render straight to the canvas; the moment output goes through
-// EffectComposer (as it already does here, for SSAO/bloom), that native
-// MSAA no longer applies to what actually reaches the screen, since
-// composer's intermediate render targets aren't multisampled by default.
-// Two selectable methods per explicit "individually" follow-up — SMAA
-// (better edge quality, the previous single hardcoded choice) and FXAA
-// (cheaper, a real option for weaker devices) — plus Off. Both passes
-// exist simultaneously; applyPostFx enables at most one at a time.
-const smaaPass = new SMAAPass(viewport.clientWidth * renderer.getPixelRatio(), viewport.clientHeight * renderer.getPixelRatio());
-composer.addPass(smaaPass);
-const fxaaPass = new ShaderPass(FXAAShader);
-composer.addPass(fxaaPass);
-// Lens raindrops — per explicit "camera lens rain drops" request. A
-// genuinely different effect from the falling rain particles elsewhere
-// in this project (those are real 3D geometry in the world; this is a
-// 2D screen-space post-process simulating water clinging to/sliding down
-// the camera's own lens), which is why it lives here in the composer
-// chain rather than in weather.js. Uses the SAME proven Voronoi-cell
-// technique already used elsewhere in this project (foamVoronoiF1F2/
-// causticVoronoiF1F2) for organic, non-tiling droplet shapes without
-// needing an external texture asset — two overlapping scales (a few
-// larger/slower drops, many smaller/faster ones) so it doesn't read as
-// an obviously tiled grid. Each droplet refracts the scene behind it
-// (samples tDiffuse at an offset UV based on distance from the drop's
-// own center, approximating a real droplet's convex-lens bulge) and gets
-// a soft bright rim at its edge, the way real droplets catch light.
-// uRainIntensity drives both how many drops appear and how fast they
-// slide, so this fades in/out with actual weather rather than always
-// being present. Uses the well-established default full-screen-quad
-// vertex shader boilerplate (identical in spirit to what FXAAShader/
-// every other ShaderPass here already relies on) — this is a NEW,
-// standalone shader program, not a patch into an existing material's
-// internals the way the (once-reverted, see the sky-seam saga earlier
-// this project) onBeforeCompile shaders are, which is a meaningfully
-// lower-risk way to add a new effect.
-const lensRainPass = new ShaderPass({
-  uniforms: {
-    tDiffuse: { value: null },
-    uTime: { value: 0 },
-    uRainIntensity: { value: 0 },
-    uResolution: { value: new THREE.Vector2(viewport.clientWidth, viewport.clientHeight) },
-    // Real sun screen position (UV space), projected from its actual
-    // world position each frame — see the animate loop below. A
-    // sentinel far outside [0,1] (set whenever the sun isn't usefully
-    // visible — behind the camera or below the horizon) means the glow
-    // naturally never triggers rather than needing a separate on/off
-    // flag.
-    uSunScreenPos: { value: new THREE.Vector2(-10, -10) },
+// Per "commit to WebGPU": EffectComposer and every pass built on it
+// (SSAO, bloom, SMAA/FXAA, the custom lens-rain ShaderPass) is
+// officially, structurally unsupported under real WebGPU execution —
+// confirmed directly via Three.js's own WebGPURenderer documentation,
+// not inferred. This is stage 1 of the real migration plan: disable
+// the whole broken pipeline with honest, inert stand-ins so the game
+// loads and renders again, rather than leaving it in a state where a
+// single broken import crashes the entire module before anything can
+// run. These stand-ins exist ONLY so the many other places in this
+// file that already reference these pass objects (graphics-settings
+// toggles, resize handlers, per-frame uniform updates for the
+// lens-rain effect) don't throw — none of them do anything real yet.
+// Each effect gets rebuilt properly in TSL one at a time in follow-up
+// work, confirmed working before the next, the same discipline that
+// built the standalone fluid-sim prototype successfully. This is NOT
+// a replacement for that real work, just what unblocks it.
+function riftStubVec() {
+  return { set() {}, x: 0, y: 0 };
+}
+function riftStubUniforms(names) {
+  const u = {};
+  for (const name of names) u[name] = { value: riftStubVec() };
+  return u;
+}
+const composer = {
+  setSize() {},
+  render() {},
+  addPass() {},
+};
+const ssaoPass = { enabled: false, kernelRadius: 0, minDistance: 0, maxDistance: 0, setSize() {} };
+const bloomPass = { enabled: false, strength: 0, radius: 0, threshold: 0 };
+const smaaPass = { enabled: false };
+const fxaaPass = { enabled: false, material: { uniforms: riftStubUniforms(["resolution"]) } };
+const lensRainPass = {
+  enabled: false,
+  material: {
+    uniforms: {
+      ...riftStubUniforms(["uResolution", "uSunScreenPos"]),
+      uTime: { value: 0 },
+      uRainIntensity: { value: 0 },
+    },
   },
-  vertexShader: `
-    varying vec2 vUv;
-    void main() {
-      vUv = uv;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-    }
-  `,
-  fragmentShader: `
-    uniform sampler2D tDiffuse;
-    uniform float uTime;
-    uniform float uRainIntensity;
-    uniform vec2 uResolution;
-    uniform vec2 uSunScreenPos;
-    varying vec2 vUv;
-
-    vec2 dropHash(vec2 p) {
-      float n = sin(dot(p, vec2(41.0, 289.0)));
-      return fract(vec2(262144.0, 32768.0) * n);
-    }
-
-    // Returns (distance to nearest droplet center [using an elongated
-    // metric for sliding droplets], offset-vector.x, offset-vector.y,
-    // wet-trail mask). The wet-trail mask is a SEPARATE signal from the
-    // droplet's own body -- a thin, full-column band at this specific
-    // droplet's own X position, present only for droplets whose own hash
-    // marks them as "streaky" (roughly a third of them, matching the
-    // reference photo's mix of plain droplets and ones with long visible
-    // trails). Deliberately NOT direction-dependent on the droplet's
-    // motion (which would need a sign convention on screen-space Y that
-    // can't be verified without a live browser) -- a fixed vertical
-    // column at the droplet's own X already reads as "the path it has
-    // rolled along," since the droplet itself is what's actually
-    // animating down that column over time.
-    // Returns (distance to nearest droplet center [using an elongated
-    // metric for sliding droplets], offset-vector.x, offset-vector.y,
-    // wet-trail mask). The wet-trail mask is a SEPARATE signal from the
-    // droplet's own body -- a thin, full-column band at this specific
-    // droplet's own X position, present only for droplets whose own hash
-    // marks them as "streaky" (roughly a third of them, matching the
-    // reference photo's mix of plain droplets and ones with long visible
-    // trails). Deliberately NOT direction-dependent on the droplet's
-    // motion (which would need a sign convention on screen-space Y that
-    // can't be verified without a live browser) -- a fixed vertical
-    // column at the droplet's own X already reads as "the path it has
-    // rolled along," since the droplet itself is what's actually
-    // animating down that column over time.
-    //
-    // wrapFade (out param) is the fix for droplets visibly POPPING in and
-    // out of existence: each droplet's own cellPoint.y slides via
-    // fract(), which means once it crosses back around from 0 to 1 (or
-    // vice versa) it JUMPS instantly to the opposite side of its own cell
-    // -- a real, structural artifact of using fract() for looping motion,
-    // not a tuning issue. wrapFade fades a droplet to fully invisible in
-    // the brief window right before/after that wrap point, so the actual
-    // jump happens while nothing is visible there, then fades back in
-    // smoothly on the other side -- the standard, well-established fix
-    // for exactly this class of looping-animation seam.
-    vec4 dropVoronoi(vec2 p, float slideMix, out float wrapFade) {
-      vec2 ip = floor(p);
-      vec2 fp = fract(p);
-      float minDist = 8.0;
-      vec2 minOffset = vec2(0.0);
-      float streakMask = 0.0;
-      float minCellY = 0.0;
-      for (int y = -1; y <= 1; y++) {
-        for (int x = -1; x <= 1; x++) {
-          vec2 neighbor = vec2(float(x), float(y));
-          vec2 cellPoint = dropHash(ip + neighbor);
-          float slideSpeed = 0.12 + cellPoint.x * 0.3;
-          float streak = 1.0 + cellPoint.y * 3.5 * slideMix;
-          bool isStreaky = cellPoint.x > 0.6;
-          cellPoint.y = fract(cellPoint.y + uTime * slideSpeed * slideMix); // was "- uTime * ..." — confirmed backwards (moving up instead of down), flipped
-          vec2 offset = neighbor + cellPoint - fp;
-          vec2 stretched = vec2(offset.x, offset.y / streak);
-          float d = length(stretched);
-          if (d < minDist) {
-            minDist = d;
-            minOffset = offset;
-            streakMask = isStreaky ? (1.0 - smoothstep(0.0, 0.022, abs(offset.x))) : 0.0;
-            minCellY = cellPoint.y;
-          }
-        }
-      }
-      wrapFade = smoothstep(0.0, 0.12, minCellY) * smoothstep(0.0, 0.12, 1.0 - minCellY);
-      return vec4(minDist, minOffset, streakMask);
-    }
-
-    void main() {
-      vec2 uv = vUv;
-      float aspect = uResolution.x / max(1.0, uResolution.y);
-      vec2 p = uv * vec2(aspect, 1.0);
-      float slideMix = 0.25 + uRainIntensity * 0.6;
-
-      // Three overlapping scales (large/medium/tiny) for real density
-      // matching a rain-soaked window, not a handful of sparse circles.
-      float wrapFade1, wrapFade2, wrapFade3;
-      vec4 v1 = dropVoronoi(p * 7.0, slideMix, wrapFade1);
-      float r1 = 0.17;
-      vec4 v2 = dropVoronoi(p * 13.0 + 37.0, slideMix, wrapFade2);
-      float r2 = 0.12;
-      vec4 v3 = dropVoronoi(p * 21.0 + 91.0, slideMix, wrapFade3);
-      float r3 = 0.075;
-
-      float in1 = (1.0 - smoothstep(r1 * 0.6, r1, v1.x)) * wrapFade1;
-      float in2 = (1.0 - smoothstep(r2 * 0.6, r2, v2.x)) * wrapFade2;
-      float in3 = (1.0 - smoothstep(r3 * 0.6, r3, v3.x)) * wrapFade3;
-      // Per explicit "should start with a few drops before it increases
-      // to more and more, then slowly fade out" — the 0.25 floor added
-      // last round (to keep light rain from showing nothing) was
-      // actually working AGAINST this: it made coverage jump straight to
-      // a quarter-full field the instant rain started at all, regardless
-      // of how gradually the underlying rainIntensity itself ramps
-      // (weather.js already fades this over ~20-30s). A near-zero floor
-      // here is what actually lets that existing gradual ramp show
-      // through visually — starting sparse, building up, and fading back
-      // down the same way, instead of popping to a baseline density.
-      float coverage = clamp(0.03 + uRainIntensity * 1.35, 0.0, 1.0);
-      float dropMask = max(max(in1, in2), in3) * coverage;
-
-      // Pick whichever layer's droplet actually covers this pixel (its
-      // own distance/offset/radius all travel together, needed below for
-      // a correctly-normalized lens profile).
-      float wonDist; vec2 wonOffset; float wonR; float wonRim; float streakMask;
-      if (in1 >= in2 && in1 >= in3) {
-        wonDist = v1.x; wonOffset = v1.yz; wonR = r1;
-        wonRim = smoothstep(r1 * 0.5, r1 * 0.68, v1.x) * (1.0 - smoothstep(r1 * 0.68, r1, v1.x));
-        streakMask = v1.w;
-      } else if (in2 >= in3) {
-        wonDist = v2.x; wonOffset = v2.yz; wonR = r2;
-        wonRim = smoothstep(r2 * 0.5, r2 * 0.68, v2.x) * (1.0 - smoothstep(r2 * 0.68, r2, v2.x));
-        streakMask = v2.w;
-      } else {
-        wonDist = v3.x; wonOffset = v3.yz; wonR = r3;
-        wonRim = smoothstep(r3 * 0.5, r3 * 0.68, v3.x) * (1.0 - smoothstep(r3 * 0.68, r3, v3.x));
-        streakMask = v3.w;
-      }
-
-      // THE ACTUAL FIX for the hollow-ring look: normalized direction
-      // (unit vector, not the raw offset whose OWN magnitude used to be
-      // baked directly into the bend strength) times a smooth strength
-      // curve that ramps up across the WHOLE droplet interior via
-      // smoothstep, not concentrated in a thin band right at the rim.
-      // The old formula left each droplet's middle nearly undistorted
-      // (matching the background almost exactly) with a sharp bend only
-      // at the boundary -- structurally a ring, regardless of tuning.
-      // This is real water now: distortion visible throughout, strongest
-      // toward the edge the way a genuine convex lens actually behaves,
-      // not just AT the edge.
-      float normRadius = clamp(wonDist / wonR, 0.0, 1.0);
-      float lensPower = smoothstep(0.0, 1.0, normRadius);
-      vec2 dir = wonDist > 0.001 ? wonOffset / wonDist : vec2(0.0);
-      vec2 refractOffset = -dir * lensPower * 0.16 * dropMask;
-
-      // Wet trail — a distinct, WEAKER effect from the droplet's own
-      // lens body: a mild vertical pull (a thin flowing rivulet, not a
-      // full lens sphere) plus darkening the glass slightly rather than
-      // brightening it, since real wet streaks read as a darker, more
-      // saturated version of what's behind them.
-      vec2 trailOffset = vec2(0.0, 0.02) * streakMask * coverage; // sign flipped to match the corrected slide direction above
-
-      vec4 color = texture2D(tDiffuse, clamp(uv + refractOffset + trailOffset, 0.001, 0.999));
-      color.rgb *= mix(1.0, 0.85, streakMask * coverage);
-
-      // Per explicit "shouldn't light up the whole drop like a ring,
-      // just reflect a spot like glass" — the old highlight brightened
-      // the ENTIRE rim uniformly once a droplet was near the sun's
-      // screen direction; real glass/water only throws back a small
-      // glint at whichever single point on its curved surface happens to
-      // be angled correctly toward the light, not the whole edge at
-      // once. sunDir is the direction from THIS pixel toward the sun
-      // (converted into the same aspect-corrected space dir already
-      // lives in, for a consistent angle comparison) — dot(dir, sunDir)
-      // is near 1 only for the small arc of the rim that's actually
-      // facing the sun, and a high power exponent sharpens that into a
-      // tight spot rather than a soft half-moon.
-      vec2 sunDir = normalize((uSunScreenPos - uv) * vec2(aspect, 1.0) + 0.0001);
-      float facingSun = max(0.0, dot(dir, sunDir));
-      float highlightSpot = pow(facingSun, 10.0);
-      float distToSun = length(uv - uSunScreenPos);
-      float sunProximity = 1.0 - smoothstep(0.0, 0.55, distToSun);
-      color.rgb += vec3(wonRim * sunProximity * highlightSpot * 2.2 * coverage);
-
-      gl_FragColor = color;
-    }
-  `,
-});
-composer.addPass(lensRainPass);
-composer.addPass(new OutputPass());
+};
 
 // Bloom presets — 'off' truly disables the pass (skips its extra
 // render-target work entirely, not just zeroed strength); the other
@@ -4907,15 +4673,13 @@ function animate() {
     // bloom/SSAO/AA/lens-rain for that frame, not the whole scene) and
     // logs it ONCE rather than spamming the console every frame or
     // leaving the screen black with no diagnostic trail.
-    try {
-      composer.render();
-    } catch (e) {
-      if (!composerRenderFailedOnce) {
-        composerRenderFailedOnce = true;
-        console.error("[webgpu] composer.render() failed, falling back to direct rendering. Post-processing (bloom/SSAO/AA/lens-rain) will be unavailable until the pipeline is migrated to WebGPU-native passes. Original error:", e);
-      }
-      renderer.render(scene, camera);
-    }
+    // Per "commit to WebGPU" — composer is now an inert stub (see the
+    // stage-1 stand-ins above), so this renders directly rather than
+    // going through it. The previous try/catch here is no longer
+    // meaningful: a no-op stub can't throw, so keeping it would have
+    // silently rendered nothing every single frame instead of actually
+    // falling back to anything.
+    renderer.render(scene, camera);
   }
 }
 requestAnimationFrame(animate);

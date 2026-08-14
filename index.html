@@ -7695,5 +7695,30 @@ panels.forEach(p => observer.observe(p));
     });
   }
 </script>
+<script>
+  // Real error-surfacing for the Rift Islands module load itself, per
+  // "still not working, nothing appears" β€” the error overlay added
+  // inside main.js couldn't help if main.js never got a chance to run a
+  // single line of its own code, which is exactly what happens on a
+  // hard module-level import resolution failure (the same class of bug
+  // the standalone WebGPU prototype hit multiple times earlier in this
+  // whole effort). This is a PLAIN script, not type="module", so it
+  // registers and runs independently, before the module script tag
+  // below is even attempted β€” guaranteed to catch a failure regardless
+  // of whether rift/main.js executes anything at all.
+  (function setupRiftModuleErrorOverlay() {
+    const overlay = document.createElement("div");
+    overlay.id = "rift-module-error-overlay";
+    overlay.style.cssText = "display:none; position:fixed; inset:0; z-index:999999; background:rgba(10,5,5,0.97); color:#ffb4b4; font:13px/1.5 ui-monospace, monospace; padding:20px; overflow:auto; white-space:pre-wrap;";
+    document.body.appendChild(overlay);
+    function showError(label, err) {
+      if (overlay.style.display === "block") return;
+      overlay.style.display = "block";
+      overlay.textContent = "[Rift Islands module failed to load]\n" + label + "\n\n" + (err && err.stack ? err.stack : err);
+    }
+    window.addEventListener("error", (e) => showError("Uncaught error:", e.error || e.message));
+    window.addEventListener("unhandledrejection", (e) => showError("Unhandled promise rejection:", e.reason));
+  })();
+</script>
 <script type="module" src="rift/main.js"></script>
 </body></html>

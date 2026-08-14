@@ -11,7 +11,16 @@
     padding: 14px 16px; font: 13px/1.5 -apple-system, system-ui, sans-serif;
     color: #cfe0f0; background: linear-gradient(to bottom, rgba(5,7,12,0.92), transparent);
     pointer-events: none;
+    transition: opacity 1.4s ease;
   }
+  /* Per "too much text is covering it" — fades to near-invisible a few
+     seconds after load (see the setTimeout near the bottom of the
+     script) rather than staying at full opacity indefinitely. Not
+     display:none/removed entirely — a very low opacity still, so it's
+     not a hard jarring disappearance and the text is technically still
+     there if someone looks closely, just no longer competing with the
+     actual simulation for attention. */
+  #info.faded { opacity: 0.1; }
   #info b { color: #fff; }
   #status {
     position: fixed; bottom: 12px; left: 12px; z-index: 10;
@@ -24,7 +33,7 @@
 </head>
 <body>
 <div id="info">
-  <b>WebGPU compute-shader wave simulation</b> — a real finite-difference wave equation running on the GPU each frame, not the Gerstner-sum trick the live game currently uses. Click/drag on the water (or tap on mobile) to inject a real disturbance and watch it propagate and reflect off the edges.
+  <b>WebGPU compute-shader wave simulation</b> — real physics, not an animated sine wave. Click/drag to disturb the water.
 </div>
 <div id="status">Initializing WebGPU…</div>
 <script type="importmap">
@@ -42,14 +51,25 @@ import * as THREE from "three";
 import {
   Fn, instanceIndex, instancedArray, float, uint, If,
   uniform, vec3, color, positionLocal, mix, clamp,
-  min, max, attribute
+  min, max, attribute, time, sin
 } from "three/tsl";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
 const statusEl = document.getElementById("status");
+const infoEl = document.getElementById("info");
+// Per "too much text is covering it" — fades the intro text out a few
+// seconds after the simulation is confirmed actually running (not a
+// fixed delay from page load, which could fire while still stuck on an
+// error or the WebGPU-unsupported message, fading away the one thing
+// that would explain what's on screen). Triggered from setStatus()
+// itself below, the first time it's called with the real "Running…"
+// text, rather than a separate timer with its own logic to keep in sync.
 function setStatus(msg, isError = false) {
   statusEl.textContent = msg;
   statusEl.classList.toggle("error", isError);
+  if (!isError && msg.startsWith("Running") && !infoEl.classList.contains("faded")) {
+    setTimeout(() => infoEl.classList.add("faded"), 3000);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -120,7 +140,7 @@ async function init() {
   setupPointerInteraction(canvas);
 
   window.addEventListener("resize", onResize);
-  setStatus(`Running β€” ${WIDTH}x${WIDTH} = ${CELL_COUNT.toLocaleString()} simulated cells. Click/drag the water to disturb it.`);
+  setStatus(`Running β€” ${WIDTH}x${WIDTH} = ${CELL_COUNT.toLocaleString()} cells`);
 }
 
 // ---------------------------------------------------------------------------
@@ -196,6 +216,28 @@ function setupSimulation() {
     velocityBuffer.element(i).assign(newVelocity);
 
     let newHeight = self.add(newVelocity.mul(0.05));
+
+    // Continuous ambient ocean swell, per explicit "add waves and
+    // ripples to simulate an ocean" — real waves enter from one edge of
+    // the grid (y=0, simulating open-ocean swell arriving from that
+    // direction) and propagate/interact through the SAME wave equation
+    // already driving the rest of the simulation above, rather than
+    // being a separate decorative animation layered on top of it.
+    // edgeFade concentrates the injection near that one edge (full
+    // strength at y=0, fading to zero by y=6) and lets the existing
+    // physics carry it into the rest of the grid from there — a
+    // localized source, not the whole grid pulsing uniformly together.
+    // Two overlapping sine frequencies (different speed/wavelength/
+    // phase) so it doesn't read as one uniform metronome-like pulse —
+    // real ocean swell is never perfectly periodic.
+    const edgeBand = float(6.0);
+    const edgeFade = clamp(float(1.0).sub(y.div(edgeBand)), 0.0, 1.0);
+    If(edgeFade.greaterThan(0.001), () => {
+      const swell1 = sin(x.mul(0.14).add(time.mul(1.1)));
+      const swell2 = sin(x.mul(0.31).sub(time.mul(0.7)).add(2.3));
+      const swell = swell1.mul(0.5).add(swell2.mul(0.3));
+      newHeight = newHeight.add(swell.mul(0.05).mul(edgeFade));
+    });
 
     // Real pointer-driven disturbance β€” a genuine, tangible demonstration
     // that this is an actual simulation reacting to real input, not a

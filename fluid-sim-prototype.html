@@ -50,8 +50,8 @@
 import * as THREE from "three";
 import {
   Fn, instanceIndex, instancedArray, float, uint, If,
-  uniform, vec3, color, positionLocal, mix, clamp,
-  min, max, attribute, time, sin
+  uniform, vec3, vec2, color, positionLocal, mix, clamp,
+  min, max, attribute, time, sin, fract, floor, dot
 } from "three/tsl";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
@@ -154,6 +154,15 @@ async function init() {
 // and writing the same buffer in place, which would race against itself
 // across parallel GPU invocations.
 // ---------------------------------------------------------------------------
+// 2D input -> 1D pseudo-random output, same input always returns the same
+// "random" value (deterministic, no state needed) — this exact pattern is
+// the standard, well-established shader-community hash function, used
+// here for the rain-drop ripple selection below (setupSimulation).
+const hash21 = Fn(([p]) => {
+  const n = sin(dot(p, vec2(127.1, 311.7))).mul(43758.5453);
+  return fract(n);
+});
+
 function setupSimulation() {
   heightBufferA = instancedArray(CELL_COUNT, "float");
   heightBufferB = instancedArray(CELL_COUNT, "float");
@@ -237,6 +246,40 @@ function setupSimulation() {
     const chop = chop1.mul(0.4).add(chop2.mul(0.3)).add(chop3.mul(0.2));
     newHeight = newHeight.add(chop.mul(0.03));
 
+    // Rolling wave, per explicit "add a rolling wave" — a stronger, wider
+    // disturbance sweeping across the whole grid periodically (a ~7s
+    // cycle), simulating a set wave rolling in from open ocean, distinct
+    // from the smaller continuous ambient chop above. distFromFront uses
+    // max(a-b, b-a) for absolute value rather than .abs() specifically
+    // because max/sub are already proven working elsewhere in this exact
+    // file, while .abs() has never been used/verified here — same
+    // "prefer an already-proven primitive over an unverified one"
+    // caution used throughout this whole debugging thread.
+    const waveCycle = float(7.0);
+    const waveT = time.mod(waveCycle).div(waveCycle);
+    const waveFrontY = waveT.mul(float(WIDTH + 20.0)).sub(10.0);
+    const distFromFront = max(y.sub(waveFrontY), waveFrontY.sub(y));
+    If(distFromFront.lessThan(6.0), () => {
+      const waveShape = float(1.0).sub(distFromFront.div(6.0));
+      newHeight = newHeight.add(waveShape.mul(0.4));
+    });
+
+    // Rain-drop ripples, per explicit "react when rain drops hit the
+    // surface" — a NEW random subset of cells gets picked roughly every
+    // 0.35s (a "rain tick"), using hash21 (proven pattern, see its own
+    // comment above) seeded by each cell's position plus the current
+    // tick number, so the selection changes each tick without needing
+    // any JS-side management or a dedicated RNG buffer — fully
+    // self-contained in the shader. floor() quantizes the tick so the
+    // SAME cells stay picked for one whole tick (reads as a discrete
+    // "drop" landing) rather than a different random set every single
+    // frame (which would just look like flickering noise).
+    const rainTick = floor(time.div(0.35));
+    const rainHash = hash21(vec2(x.add(rainTick.mul(17.0)), y.add(rainTick.mul(29.0))));
+    If(rainHash.lessThan(0.0006), () => {
+      newHeight = newHeight.add(float(0.4));
+    });
+
     // Real pointer-driven disturbance β€” a genuine, tangible demonstration
     // that this is an actual simulation reacting to real input, not a
     // canned animation loop. Only the cell(s) near the current pointer
@@ -247,9 +290,9 @@ function setupSimulation() {
       const dx = cellWorldX.sub(pointerWorldUniform.x);
       const dz = cellWorldZ.sub(pointerWorldUniform.y);
       const distSq = dx.mul(dx).add(dz.mul(dz));
-      const radius = float(1.4);
+      const radius = float(1.8); // widened from 1.4 — a body-sized disturbance stand-in for "player swimming," per explicit request; a real player-position-driven version needs actual game integration (see response text)
       If(distSq.lessThan(radius.mul(radius)), () => {
-        newHeight = newHeight.add(float(0.35));
+        newHeight = newHeight.add(float(0.4));
       });
     });
 

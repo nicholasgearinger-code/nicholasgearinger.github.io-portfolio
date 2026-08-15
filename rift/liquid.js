@@ -950,15 +950,25 @@ function buildCrystalFluidSimPlane(scene, y, size) {
     const chop2 = sin(cellWorldX.mul(0.14).sub(cellWorldZ.mul(0.22)).sub(time.mul(0.9)).add(jitter.mul(0.7)));
     const chop3 = sin(cellWorldX.mul(0.5).add(cellWorldZ.mul(0.4)).add(time.mul(1.7)).add(1.7).add(jitter.mul(1.3)));
     const chop = chop1.mul(0.4).add(chop2.mul(0.3)).add(chop3.mul(0.2));
+    // Per "just some animated ripples, no movement" — chop1/2/3 above are
+    // all similarly fast/short-wavelength, so together they read as fine
+    // shimmer/texture rather than actual rolling waves. Real ocean swell
+    // is dominated by ONE much longer, much slower wave train underneath
+    // the finer chop, not several similarly-scaled ones — this is that
+    // missing dominant term: long wavelength (~90 units), slow period
+    // (~9s), and deliberately the largest single contributor to height
+    // here, with chop layered on top as surface detail rather than being
+    // the only thing moving.
+    const bigSwell = sin(cellWorldX.mul(0.035).add(cellWorldZ.mul(0.02)).add(time.mul(0.7)));
     // Amplitude — 0.03 (ported directly from the prototype) turned out
     // to be a few CENTIMETERS of real displacement, invisible at normal
     // viewing distance once this ran on the actual game's water instead
     // of the prototype's own close-orbiting demo camera. The old
     // Gerstner system's wave height spans multiple full world units
     // peak-to-trough (see GERSTNER_TARGET_AMPLITUDE_SUM elsewhere in
-    // this file) — 0.4 brings this into roughly that same visible range
-    // as a first real test, not a final tuned value.
-    newHeight = newHeight.add(chop.mul(0.4));
+    // this file) — bigSwell*0.9 + chop*0.4 brings this into roughly that
+    // same visible range as a first real test, not a final tuned value.
+    newHeight = newHeight.add(bigSwell.mul(0.9)).add(chop.mul(0.4));
 
     heightBufferB.element(i).assign(newHeight);
   })().compute(CELL_COUNT);
@@ -1007,7 +1017,21 @@ function buildCrystalFluidSimPlane(scene, y, size) {
 
   material.positionNode = Fn(() => {
     const heightAtVertex = heightBufferNode.element(cellIdx);
-    return positionLocal.add(vec3(0, heightAtVertex, 0));
+    // TEMPORARY DIAGNOSTIC — per "not physically based, nothing is
+    // reactive or simulated": need to isolate whether positionNode
+    // itself is even taking effect on this material at all, separate
+    // from whether the compute buffer's contents are correct. This is a
+    // large (2-unit), obviously fast, PURELY time+position-based wave —
+    // zero dependency on the compute buffer. ADDED on top of the real
+    // buffer displacement below, not replacing it, specifically so the
+    // two are distinguishable: if you see ONE large obvious wave moving
+    // uniformly across the whole plane, positionNode works and the bug
+    // is in the compute buffer path specifically. If you see NOTHING
+    // moving at all, positionNode itself isn't taking effect on this
+    // material/renderer — a different, more fundamental problem. Revert
+    // this line once that's confirmed either way.
+    const diagnosticWave = sin(positionLocal.x.mul(0.08).add(time.mul(2.0))).mul(2.0);
+    return positionLocal.add(vec3(0, heightAtVertex.add(diagnosticWave), 0));
   })();
   material.normalNode = computeWaveNormal();
 
@@ -1020,7 +1044,11 @@ function buildCrystalFluidSimPlane(scene, y, size) {
     const heightAtVertex = heightBufferNode.element(cellIdx);
     const deep = color(style.baseColor);
     const crest = color(style.frothColor);
-    const t = clamp(heightAtVertex.mul(2.4).add(0.1), 0, 1);
+    // Rescaled to match the new bigSwell+chop amplitude range (roughly
+    // ±1.3, up from the old ±0.4) — the old 2.4 multiplier would now
+    // clip almost the whole surface to solid deep or solid crest color
+    // with only a thin transition band, rather than a smooth gradient.
+    const t = clamp(heightAtVertex.mul(0.9).add(0.1), 0, 1);
     return mix(deep, crest, t);
   })();
 

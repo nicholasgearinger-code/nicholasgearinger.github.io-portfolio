@@ -999,7 +999,21 @@ function buildCrystalFluidSimPlane(scene, y, size, sampleHeight) {
     // (~9s), and deliberately the largest single contributor to height
     // here, with chop layered on top as surface detail rather than being
     // the only thing moving.
-    const bigSwell = sin(cellWorldX.mul(0.035).add(cellWorldZ.mul(0.02)).add(time.mul(0.7)));
+    // Per "behave more like realistic ocean waves" — real ocean swell
+    // isn't a symmetric sine wave: it has sharp, narrow CRESTS and
+    // broad, flat TROUGHS (the classic trochoidal/Gerstner shape), which
+    // is a large part of why plain sin() reads as mechanical rather than
+    // oceanic. True Gerstner motion also displaces horizontally, which
+    // isn't achievable in a pure heightfield (this grid's vertices are
+    // fixed in X/Z, only Y moves) — this is the standard height-only
+    // approximation of that same crest/trough asymmetry instead: remap
+    // sin()'s [-1,1] range to [0,1], raise it to a power >1 (compresses
+    // most of the range toward the bottom, leaving only a narrow band
+    // near the top at full height — narrow crests, broad troughs), then
+    // remap back to [-1,1].
+    const swellPhase = cellWorldX.mul(0.035).add(cellWorldZ.mul(0.02)).add(time.mul(0.7));
+    const swellNorm = sin(swellPhase).add(1).mul(0.5); // [-1,1] -> [0,1]
+    const bigSwell = pow(swellNorm, 1.8).mul(2).sub(1); // sharpened, back to [-1,1]
     // Per "not much vertical waves to look real" — 0.35/0.15 was an
     // overcorrection from the previous "tone down" pass. Split the
     // difference between that and the earlier too-much 0.6/0.25: 0.5/0.2
@@ -1127,7 +1141,27 @@ function buildCrystalFluidSimPlane(scene, y, size, sampleHeight) {
     const fresnelTerm = pow(grazing, 8.0);
     const skyHighlight = color(0xcfe8ff); // pale sky tone — reads as reflected sky/light, not a light SOURCE of its own
     const baseEmissive = color(style.emissive).mul(style.emissiveIntensity);
-    return baseEmissive.add(skyHighlight.mul(fresnelTerm).mul(0.1));
+    // Per "look more like realistic ocean waves" — real "sun on water"
+    // is small, scattered, individually bright GLITTER points, not one
+    // smooth sheen (which is what the fresnel term above still gives on
+    // its own). Real noise (fluidSimHash21, already proven above for
+    // wave jitter) sampled at a much higher spatial frequency and
+    // aggressively thresholded — only the brightest ~3.5% of the noise
+    // field becomes visible at all — turns a smooth field into isolated
+    // sparkle points instead. Drifts slowly over time (not tied to the
+    // wave phase itself) so individual glints appear/vanish rather than
+    // riding along with the swell. Gated by a GENTLER power of the same
+    // grazing term (2 instead of 8) than the broad sheen — real glitter
+    // scatters across a wider range of viewing angles than a mirror-like
+    // sheen does, since it comes from many small, variously-tilted wave
+    // facets, not one flat reflective plane.
+    const sparkleUV = vec2(positionWorld.x, positionWorld.z).mul(0.8).add(vec2(time.mul(0.6), time.mul(0.4)));
+    const sparkleNoise = fluidSimHash21(sparkleUV);
+    const sparkle = pow(clamp(sparkleNoise.sub(0.965).mul(28.0), 0, 1), 2.0);
+    const sparkleGate = pow(grazing, 2.0);
+    return baseEmissive
+      .add(skyHighlight.mul(fresnelTerm).mul(0.1))
+      .add(color(0xffffff).mul(sparkle).mul(sparkleGate).mul(1.2));
   })();
 
   const mesh = new THREE.Mesh(geometry, material);

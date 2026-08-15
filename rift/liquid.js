@@ -2712,7 +2712,8 @@ function createFoamParticles(scene, sampleHeight, y, size) {
   return {
     foamParticles: true,
     sprite, computeInit, computeUpdate, particleDt, spawnSeed,
-    shoreDisturbance, shorePoints,
+    shoreDisturbance, shoreX, shoreZ, shorePoints,
+    positionBuffer, velocityBuffer, lifeBuffer, // exposed for real disposal below — previously only reachable via closure, so disposeFoamParticles could never actually reach them
     initialized: false, broken: false,
   };
 }
@@ -2756,10 +2757,37 @@ function updateFoamParticles(handle, renderer, dt) {
 
 function disposeFoamParticles(scene, handle) {
   if (!handle) return;
+  // Per a real "GPUValidationError: [Buffer (unlabeled)] used in submit
+  // while destroyed" — positionBuffer/velocityBuffer/lifeBuffer were
+  // created here but never actually exposed on the returned handle, so
+  // this function could only ever reach sprite.geometry/material, never
+  // the underlying compute storage buffers themselves. Disposing the
+  // material likely tears down ITS OWN referenced buffers (positionNode
+  // = positionBuffer.toAttribute(), etc.) as an internal side effect,
+  // while computeInit/computeUpdate — separate node graphs, not owned by
+  // the material — kept referencing those same now-invalid buffer
+  // objects, exactly matching a "used after destroyed" GPU error.
+  // handle.broken is set synchronously (not deferred) as an immediate
+  // safety net: even though main.js nulls its own foamParticlesHandle
+  // reference right after calling this, this guarantees
+  // updateFoamParticles becomes a no-op instantly for this handle
+  // specifically, regardless of how it's reached.
+  handle.broken = true;
   scene.remove(handle.sprite);
   riftDeferDispose(() => {
     handle.sprite.geometry.dispose();
     handle.sprite.material.dispose();
+    // Storage/uniform buffer disposal is genuinely less-documented API
+    // surface (same honest caveat as the fluid-sim system's own buffer
+    // disposal above) — wrapped defensively so a missing/renamed method
+    // logs instead of throwing during teardown.
+    for (const buf of [handle.positionBuffer, handle.velocityBuffer, handle.lifeBuffer, handle.shoreDisturbance, handle.shoreX, handle.shoreZ]) {
+      try {
+        if (buf && typeof buf.dispose === "function") buf.dispose();
+      } catch (err) {
+        console.error("[liquid] foam particles: buffer dispose failed (non-fatal):", err);
+      }
+    }
   });
 }
 

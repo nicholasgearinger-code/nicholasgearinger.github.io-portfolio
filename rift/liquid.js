@@ -4,6 +4,7 @@ import {
   uniform, vec3, vec2, color, positionLocal, mix, clamp,
   min, max, attribute, time, sin, fract, floor, dot, cross,
   pow, positionWorld, cameraPosition, normalWorld, reflect,
+  uniformArray, texture, uv, modelViewMatrix, cameraProjectionMatrix, hash,
 } from "three/tsl";
 import { getGraphicsSettings } from "./graphicsSettings.js";
 
@@ -2539,8 +2540,207 @@ function disposeLiquidPlane(scene, handle) {
   });
 }
 
+// -----------------------------------------------------------------------------
+// Real foam particles, Coral Shallows only — per explicit "add real foam
+// particles... using webgpu". Genuinely GPU-compute-driven (not the flat
+// vertex-color aFoam signal from updateLiquidPlane above, which stays as-is
+// and still drives the base water material's own foam blend) — this is a
+// SEPARATE layer of individually-visible foam sprites scattered along the
+// actual breaking shoreline.
+//
+// This is a deliberately DIFFERENT category of compute problem than the
+// wave height-field simulation that caused so much trouble earlier in this
+// project: each particle here is fully independent — it spawns, drifts,
+// fades, and dies with ZERO dependency on any neighboring particle's state.
+// The wave sim's instability came specifically from each grid cell reading
+// its NEIGHBORS every step (a coupled system that can amplify error); there
+// is no equivalent coupling here, so that whole class of bug structurally
+// cannot happen in this system.
+//
+// Two real lessons carried over from the wave-simulation debugging, applied
+// proactively rather than rediscovered the hard way again:
+// 1. Never rely on TSL's built-in `time`/`deltaTime` inside a compute-only
+//    dispatch — confirmed unreliable there earlier. Uses its own explicit,
+//    self-managed dt uniform, set from main.js's real per-frame `dt` value.
+// 2. Uses the synchronous `renderer.compute()` (not `computeAsync()`) for
+//    the same real performance reason established during the wave work.
+const FOAM_PARTICLE_COUNT = 600;
+const FOAM_SHORE_SAMPLE_COUNT = 160;
 
-export { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, updateFluidSimWater, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail };
+function buildFoamShorePoints(sampleHeight, y, size) {
+  // Walks a grid across the plane once at level-build time and keeps every
+  // point where the real terrain height crosses close to the water level —
+  // i.e., the actual shoreline, following Coral Shallows' real irregular
+  // island coastline rather than assuming a straight line (the same
+  // reasoning already established for shoreDampBuffer above). Downsampled
+  // to a fixed FOAM_SHORE_SAMPLE_COUNT so the per-frame disturbance
+  // evaluation below (real Gerstner math, just at a small number of points)
+  // stays cheap regardless of how many raw candidates the walk finds.
+  const candidates = [];
+  const STEP = Math.max(4, size / 220);
+  const BAND = 1.4; // how close to the water level counts as "shoreline" for this walk
+  for (let x = -size / 2; x <= size / 2; x += STEP) {
+    for (let z = -size / 2; z <= size / 2; z += STEP) {
+      const h = sampleHeight(x, z);
+      if (h == null) continue;
+      if (Math.abs(h - y) < BAND) candidates.push({ x, z });
+    }
+  }
+  if (candidates.length === 0) return null;
+  const points = [];
+  for (let i = 0; i < FOAM_SHORE_SAMPLE_COUNT; i++) {
+    points.push(candidates[Math.floor((i / FOAM_SHORE_SAMPLE_COUNT) * candidates.length)]);
+  }
+  return points;
+}
+
+function createFoamParticles(scene, sampleHeight, y, size) {
+  const shorePoints = buildFoamShorePoints(sampleHeight, y, size);
+  if (!shorePoints) return null; // no shoreline found (shouldn't happen for crystal, but this is a real fallback, not assumed away)
+
+  const shoreX = uniformArray(shorePoints.map((p) => p.x), "float");
+  const shoreZ = uniformArray(shorePoints.map((p) => p.z), "float");
+  // Real wave disturbance at each shore point, re-evaluated every frame in
+  // plain JS (see updateFoamParticles below) using the SAME Gerstner sum
+  // GERSTNER_WAVES already uses for the base water surface — genuinely
+  // reactive to the real wave state, not an independent/fake pattern. Only
+  // FOAM_SHORE_SAMPLE_COUNT points, so this stays cheap even though it's a
+  // real analytic evaluation, not a lookup.
+  const shoreDisturbance = uniformArray(new Array(FOAM_SHORE_SAMPLE_COUNT).fill(0), "float");
+
+  const positionBuffer = instancedArray(FOAM_PARTICLE_COUNT, "vec3");
+  const velocityBuffer = instancedArray(FOAM_PARTICLE_COUNT, "vec3");
+  const lifeBuffer = instancedArray(FOAM_PARTICLE_COUNT, "float");
+  const particleDt = uniform(0.016); // self-managed — see the file-level comment above for why, set from real dt every frame below
+  // Real per-frame-varying seed for respawn shore-point selection — a
+  // TSL Fn() body only runs ONCE at shader-construction time to BUILD the
+  // node graph, so a plain JS Date.now() call inside it would bake in a
+  // single frozen constant forever, never actually varying per frame (the
+  // exact same category of mistake as relying on TSL's built-in `time`
+  // inside a compute-only dispatch — see updateFluidSimWater's own
+  // history). This uniform is what actually varies, set from real elapsed
+  // time in updateFoamParticles below.
+  const spawnSeed = uniform(0);
+
+  const computeInit = Fn(() => {
+    lifeBuffer.element(instanceIndex).assign(0); // dead — respawns on the very next computeUpdate, no separate spawn-immediately logic needed
+    positionBuffer.element(instanceIndex).assign(vec3(0, -9999, 0)); // parked far below the scene until its first real spawn, so nothing flashes at the origin for one frame
+  })().compute(FOAM_PARTICLE_COUNT);
+
+  const computeUpdate = Fn(() => {
+    const id = instanceIndex;
+    const life = lifeBuffer.element(id);
+    const pos = positionBuffer.element(id);
+    const vel = velocityBuffer.element(id);
+
+    If(life.lessThanEqual(0), () => {
+      // Respawn attempt. A different shore index each real respawn (not
+      // just each particle) — hash() fed by both id AND a coarse time
+      // bucket, so the same particle slot cycles through different shore
+      // points over its lifetime instead of always reviving at the same
+      // spot.
+      const shoreIdx = hash(id.add(uint(spawnSeed))).mul(float(FOAM_SHORE_SAMPLE_COUNT)).floor().toUint();
+      const disturbance = shoreDisturbance.element(shoreIdx);
+      // Only spawns where the real wave is actually cresting/breaking right
+      // now (disturbance above threshold) — quiet stretches of shore stay
+      // foam-free, matching how real surf only foams where waves are
+      // actively breaking.
+      If(disturbance.greaterThan(0.35), () => {
+        const sx = shoreX.element(shoreIdx);
+        const sz = shoreZ.element(shoreIdx);
+        const jitterX = hash(id.add(uint(1))).sub(0.5).mul(2.5);
+        const jitterZ = hash(id.add(uint(2))).sub(0.5).mul(2.5);
+        pos.assign(vec3(sx.add(jitterX), float(y).add(0.05), sz.add(jitterZ)));
+        const outAngle = hash(id.add(uint(3))).mul(6.28318);
+        const outSpeed = hash(id.add(uint(4))).mul(0.6).add(0.3);
+        vel.assign(vec3(outAngle.cos().mul(outSpeed), hash(id.add(uint(5))).mul(0.5).add(0.3), outAngle.sin().mul(outSpeed)));
+        life.assign(hash(id.add(uint(6))).mul(1.5).add(1.2)); // 1.2-2.7s — real foam froths up fast and lingers only briefly, not a long slow fade
+      });
+    }).Else(() => {
+      // Alive — integrate real motion using the self-managed dt (see file
+      // comment for why not TSL's built-in time/deltaTime).
+      vel.y.subAssign(particleDt.mul(1.1)); // gravity — foam settles/sinks back rather than floating forever
+      pos.addAssign(vel.mul(particleDt));
+      life.subAssign(particleDt);
+    });
+  })().compute(FOAM_PARTICLE_COUNT);
+
+  const material = new THREE.SpriteNodeMaterial({
+    transparent: true, depthWrite: false, blending: THREE.NormalBlending, // NOT additive — real foam is diffuse/opaque-ish white, not a glowing light source; additive would make overlapping foam blow out to blinding white
+  });
+  material.positionNode = positionBuffer.toAttribute();
+  const lifeAttr = lifeBuffer.toAttribute();
+  // Fades in fast, out slow — matches the same "instant rise, slow fade"
+  // shape already established for the base water's own foam attribute
+  // (see updateLiquidPlane's persistedFoam comment) rather than a plain
+  // linear fade, so this reads consistently with the foam that's already
+  // there.
+  material.opacityNode = clamp(lifeAttr.mul(2.2), 0, 1).mul(clamp(lifeAttr, 0, 1));
+  material.scaleNode = vec3(clamp(lifeAttr.mul(0.9), 0.15, 0.9));
+  const foamTex = texture(getFoamTexture(), uv());
+  material.colorNode = foamTex.rgb;
+  material.opacityNode = material.opacityNode.mul(foamTex.a);
+
+  const sprite = new THREE.Mesh(new THREE.SpriteGeometry(), material);
+  sprite.count = FOAM_PARTICLE_COUNT;
+  sprite.frustumCulled = false; // positions live entirely on the GPU buffer — CPU-side geometry bounds have no idea where particles actually are, so normal frustum culling would cull incorrectly
+  scene.add(sprite);
+
+  return {
+    foamParticles: true,
+    sprite, computeInit, computeUpdate, particleDt, spawnSeed,
+    shoreDisturbance, shorePoints,
+    initialized: false, broken: false,
+  };
+}
+
+function updateFoamParticles(handle, renderer, dt) {
+  if (!handle || !handle.foamParticles || handle.broken) return;
+  // Real wave disturbance at each shore sample point, re-evaluated every
+  // frame — a small, cheap CPU loop (FOAM_SHORE_SAMPLE_COUNT points, not
+  // the full water mesh) using the exact same domain-warped Gerstner sum
+  // the base water surface uses, so foam genuinely tracks real wave state
+  // rather than an independent decorative pattern.
+  const elapsed = performance.now() / 1000;
+  for (let i = 0; i < handle.shorePoints.length; i++) {
+    const p = handle.shorePoints[i];
+    const [wx, wz] = gerstnerDomainWarp(p.x, p.z, elapsed);
+    let dy = 0;
+    for (const w of GERSTNER_WAVES) {
+      const f = w.k * (w.ndx * wx + w.ndz * wz) - w.speed * elapsed;
+      dy += w.amplitude * Math.sin(f);
+    }
+    handle.shoreDisturbance.value[i] = Math.abs(dy) / (GERSTNER_AMPLITUDE_SUM * 0.5);
+  }
+  // Real per-frame-varying respawn seed (see spawnSeed's own comment above
+  // for why this can't just be computed inside the TSL Fn() body) —
+  // multiplied by a large odd-ish constant and wrapped, so it changes every
+  // single frame without ever repeating on any short, noticeable cycle.
+  handle.spawnSeed.value = Math.floor(elapsed * 733) % 999983;
+  handle.particleDt.value = Math.min(dt, 0.05); // clamped — a real stall/tab-switch shouldn't let one giant dt fling every dead particle's respawn timing at once
+  const canSyncCompute = typeof renderer.compute === "function";
+  try {
+    if (!handle.initialized) {
+      if (canSyncCompute) renderer.compute(handle.computeInit); else renderer.computeAsync(handle.computeInit);
+      handle.initialized = true;
+    }
+    if (canSyncCompute) renderer.compute(handle.computeUpdate); else renderer.computeAsync(handle.computeUpdate);
+  } catch (err) {
+    console.error("[liquid] foam particles: compute dispatch failed:", err);
+    handle.broken = true; // stop retrying every frame — same reasoning as updateFluidSimWater's own identical guard
+  }
+}
+
+function disposeFoamParticles(scene, handle) {
+  if (!handle) return;
+  scene.remove(handle.sprite);
+  riftDeferDispose(() => {
+    handle.sprite.geometry.dispose();
+    handle.sprite.material.dispose();
+  });
+}
+
+export { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, updateFluidSimWater, createFoamParticles, updateFoamParticles, disposeFoamParticles, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail };
 
 // Ocean surface detail — Coral Shallows only. DISABLED entirely per
 // explicit follow-up request, after two rounds of trying to fix the

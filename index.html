@@ -2142,11 +2142,16 @@
   @keyframes micPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(248,113,113,.5); } 50% { box-shadow: 0 0 0 6px rgba(248,113,113,0); } }
 
   /* ── CUSTOM CURSOR (fine-pointer devices only) ──
-     Only shown while something is actually loading — the standard OS
-     cursor is used the rest of the time. custom-cursor-active is toggled
-     by window.setCursorBusy() from wherever the site kicks off async work
-     (API calls, model loading, camera start, etc). */
-  .custom-cursor-active, .custom-cursor-active * { cursor: none !important; }
+     Per explicit "remove the outer glow attached to mouseover on whole
+     website" — this used to show a glowing ring cursor during loading
+     states (site-wide backend api() calls toggle it via
+     window.setCursorBusy(), see BACKEND INTEGRATION below), which given
+     how often those calls fire while browsing made it show up more than
+     intended. Forced permanently invisible here (both the class-driven
+     and default states) rather than ripping out the JS wiring — that
+     keeps window.setCursorBusy safe to keep calling from elsewhere
+     without needing to touch every call site, it just no longer has any
+     visible effect.
   #custom-cursor {
     position: fixed; top: 0; left: 0; z-index: 9998; pointer-events: none;
     width: 26px; height: 26px; margin: -13px 0 0 -13px;
@@ -2156,6 +2161,8 @@
     will-change: transform;
   }
   .custom-cursor-active #custom-cursor { opacity: 1; }
+  */
+  #custom-cursor, .custom-cursor-active #custom-cursor { display: none !important; opacity: 0 !important; }
   .cc-out { opacity: 0 !important; }
   #custom-cursor::before {
     content: ''; position: absolute; top: 50%; left: 50%;

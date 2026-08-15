@@ -425,14 +425,7 @@ function buildInstancedMeshesFromParts(parts, count) {
     const mesh = new THREE.InstancedMesh(part.geometry, part.material, count);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
-    // Per-instance positions span a wide scattered area (up to the world's
-    // full playable radius) — a single bounding-sphere-based frustum cull
-    // on the WHOLE InstancedMesh (computed from instance 0's local
-    // geometry bounds, not the true scattered extent) would incorrectly
-    // cull every instance at once the moment that one reference point
-    // left view. Same reasoning already established for the foam/rain
-    // particle sprites elsewhere in this project.
-    mesh.frustumCulled = false;
+    // frustumCulled stays at its default (true) — see finalizeInstancedMeshes below for why disabling it entirely was the wrong fix for the real concern that motivated it.
     return mesh;
   });
 }
@@ -450,8 +443,29 @@ function setInstanceMatrixAt(meshes, parts, index, position, quaternion, scale) 
   }
 }
 
+// Per real "used to be 45-60fps, now 10-15fps" — a genuine regression, not
+// a tradeoff worth accepting. The original mesh.frustumCulled = false was
+// solving a real problem (InstancedMesh's default bounding volume doesn't
+// know about scattered instance positions and would cull the WHOLE mesh
+// incorrectly) but with the wrong fix — disabling culling entirely means
+// EVERY instance across the ENTIRE map now submits to the GPU every frame
+// regardless of camera direction, when the previous per-object approach
+// culled off-screen coral/trees/sponges/plants individually and for free.
+// The correct fix, confirmed directly against Three.js's own official
+// docs (InstancedMesh#computeBoundingSphere: "This bounding sphere
+// encloses all instances... must be computed by your app" after
+// setMatrixAt calls): explicitly compute a real bounding sphere spanning
+// every instance actually placed, right after they're all set. This lets
+// the engine correctly skip the WHOLE InstancedMesh only when NONE of its
+// instances could be visible — coarser than the old per-object culling
+// (a coral instance right at the edge of view still submits if ANY other
+// instance in that same InstancedMesh is visible), but a real, working
+// middle ground instead of no culling at all.
 function finalizeInstancedMeshes(meshes) {
-  for (const mesh of meshes) mesh.instanceMatrix.needsUpdate = true;
+  for (const mesh of meshes) {
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.computeBoundingSphere();
+  }
 }
 
 // Real static coral instancing. placements: array of

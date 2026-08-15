@@ -1087,8 +1087,25 @@ function buildCrystalFluidSimPlane(scene, y, size) {
 // main.js's animate loop, crystal-and-fluid-sim-enabled only.
 let fluidSimLoggedFirstDispatch = false;
 let fluidSimDispatchCount = 0;
+// Per "nothing shows up for fluid-sim" — zero dispatch logs across two
+// separate level loads pointed at exactly one thing: computeAsync hanging
+// forever rather than throwing, the SAME failure mode this project's own
+// renderer.init() hit early in the WebGPU migration (see main.js's
+// riftInitWithTimeout). A silent hang on the very first computeInit call
+// would explain everything observed: handle.updating never resets (stuck
+// on the first await, never reaching finally), so nothing after it ever
+// runs, logs, or throws. This races every computeAsync call against a
+// real timeout so a hang becomes a visible, diagnosable error instead of
+// permanent silence.
+function riftComputeWithTimeout(promise, ms, label) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(label + " never resolved after " + ms + "ms — likely hanging rather than failing cleanly, same class of issue main.js's own renderer.init() hit earlier in this project.")), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
+}
 async function updateFluidSimWater(handle, renderer) {
-  if (!handle || !handle.fluidSim) return;
+  if (!handle || !handle.fluidSim || handle.fluidSimBroken) return;
   // Guards against overlapping dispatches — this is called once per
   // animate() frame WITHOUT being awaited there (see main.js's own
   // comment on that call site), so if one call's computeAsync chain
@@ -1099,12 +1116,12 @@ async function updateFluidSimWater(handle, renderer) {
   handle.updating = true;
   try {
     if (!handle.initialized) {
-      await renderer.computeAsync(handle.computeInit);
+      await riftComputeWithTimeout(renderer.computeAsync(handle.computeInit), 5000, "computeInit");
       handle.initialized = true;
       console.log("[liquid] fluid-sim: computeInit dispatched");
     }
-    await renderer.computeAsync(handle.computeUpdate);
-    await renderer.computeAsync(handle.computeCopyBack);
+    await riftComputeWithTimeout(renderer.computeAsync(handle.computeUpdate), 5000, "computeUpdate");
+    await riftComputeWithTimeout(renderer.computeAsync(handle.computeCopyBack), 5000, "computeCopyBack");
     fluidSimDispatchCount++;
     if (!fluidSimLoggedFirstDispatch) {
       fluidSimLoggedFirstDispatch = true;
@@ -1120,7 +1137,12 @@ async function updateFluidSimWater(handle, renderer) {
       console.log("[liquid] fluid-sim: dispatch count =", fluidSimDispatchCount);
     }
   } catch (err) {
-    console.error("[liquid] fluid-sim: computeAsync threw:", err);
+    console.error("[liquid] fluid-sim: computeAsync failed/timed out:", err.message || err);
+    // Stops retrying every frame once this happens — if the API doesn't
+    // work at all on this device/browser, hammering it 60x/second would
+    // just spam identical timeout errors forever rather than surfacing
+    // one clear, actionable one.
+    handle.fluidSimBroken = true;
   } finally {
     handle.updating = false;
   }

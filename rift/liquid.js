@@ -2716,7 +2716,7 @@ function updateFoamParticles(handle, renderer, dt) {
       const f = w.k * (w.ndx * wx + w.ndz * wz) - w.speed * elapsed;
       dy += w.amplitude * Math.sin(f);
     }
-    handle.shoreDisturbance.value[i] = Math.abs(dy) / (GERSTNER_AMPLITUDE_SUM * 0.5);
+    handle.shoreDisturbance.array[i] = Math.abs(dy) / (GERSTNER_AMPLITUDE_SUM * 0.5);
   }
   // Real per-frame-varying respawn seed (see spawnSeed's own comment above
   // for why this can't just be computed inside the TSL Fn() body) —

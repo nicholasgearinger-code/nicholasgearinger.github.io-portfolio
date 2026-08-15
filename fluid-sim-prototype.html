@@ -118,6 +118,9 @@ let pointerRay = new THREE.Raycaster();
 let pointerNDC = new THREE.Vector2(-10, -10);
 let pointerDown = false;
 let pointerWorldUniform, pointerActiveUniform;
+const WAKE_TRAIL_LENGTH = 6;
+let wakeTrailUniforms, wakeTrailHistory;
+let lastWakeUpdateTime = 0;
 
 async function init() {
   if (!navigator.gpu) {
@@ -205,6 +208,7 @@ async function init() {
   scene.add(sunSprite);
 
   setupLightRays(sun.position);
+  setupSplashParticles();
 
   setupSimulation();
   heightBufferNode = heightBufferA; // must be valid BEFORE setupSeafloor()/setupMesh(), both of which now read this for real physically-based caustics and water rendering respectively
@@ -334,7 +338,7 @@ function setupLightRays(sunPosition) {
   const downVec = new THREE.Vector3(0, -1, 0);
   const rayQuat = new THREE.Quaternion().setFromUnitVectors(downVec, rayDir);
 
-  const RAY_COUNT = 6;
+  const RAY_COUNT = 16; // was 6 — per "more spread out and 3D," more numerous overlapping beams read as a fuller atmospheric volume rather than a few sparse individual shafts
   for (let i = 0; i < RAY_COUNT; i++) {
     const rayMat = new THREE.MeshBasicMaterial({
       map: rayTexture, transparent: true, depthWrite: false, fog: false,
@@ -357,6 +361,31 @@ function setupLightRays(sunPosition) {
     lightRayMeshes.push(ray);
     scene.add(ray);
   }
+
+  // Large soft ambient glow, per "more spread out and 3D" β€” a single big,
+  // very low-opacity radial sprite underwater, tying the individual
+  // beams together into one atmospheric volume rather than reading as a
+  // handful of separate sharp shafts. This is the honest, achievable
+  // approximation of "more 3D light" without real SSGI (see response
+  // text for why true screen-space GI is out of scope here).
+  const glowCanvas = document.createElement("canvas");
+  glowCanvas.width = 128;
+  glowCanvas.height = 128;
+  const glowCtx = glowCanvas.getContext("2d");
+  const glowGrad = glowCtx.createRadialGradient(64, 64, 0, 64, 64, 64);
+  glowGrad.addColorStop(0, "rgba(255,250,225,0.16)");
+  glowGrad.addColorStop(0.6, "rgba(255,248,220,0.06)");
+  glowGrad.addColorStop(1, "rgba(255,245,215,0)");
+  glowCtx.fillStyle = glowGrad;
+  glowCtx.fillRect(0, 0, 128, 128);
+  const glowTexture = new THREE.CanvasTexture(glowCanvas);
+  const glowSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: glowTexture, transparent: true, depthWrite: false, fog: false,
+    blending: THREE.AdditiveBlending,
+  }));
+  glowSprite.scale.set(22, 10, 1);
+  glowSprite.position.set(0, -1.5, 3);
+  scene.add(glowSprite);
 }
 
 function smoothstepJS(edge0, edge1, x) {
@@ -383,6 +412,85 @@ function approxWaterChop(worldX, worldZ, t) {
   const c2 = Math.sin(gx * 0.11 - gy * 0.18 - t * 0.9);
   const c3 = Math.sin(gx * 0.35 + gy * 0.31 + t * 1.7 + 1.7);
   return c1 * 0.4 + c2 * 0.3 + c3 * 0.2;
+}
+
+// Per "physics to simulate waves crashing on shore and splashes" β€” a JS
+// mirror of the compute shader's own real wave-break detection (same
+// waveCycle/waveT/waveFrontY/breakZoneDist formula from computeUpdate's
+// rolling-wave section), used to trigger real splash particle spawning
+// at the ACTUAL break location β€” same "mirror the shader formula in JS"
+// technique already proven for approxWaterChop above, avoiding a risky
+// GPU buffer readback for this too. Returns the break's world Z if
+// currently breaking, or null.
+function currentBreakWorldZ(t) {
+  const waveCycle = 7.0;
+  const waveT = (t % waveCycle) / waveCycle;
+  const waveFrontYGrid = waveT * (WIDTH + 20) - 10;
+  const waveFrontWorldZ = (waveFrontYGrid / WIDTH - 0.5) * PLANE_SIZE;
+  const breakZoneDist = Math.abs(waveFrontWorldZ - SHORE_START_Z);
+  return breakZoneDist < 3.0 ? waveFrontWorldZ : null;
+}
+
+// Real splash particle pool, per "physics ... splashes" β€” reusable
+// sprites with genuine ballistic physics (gravity), not a canned
+// animation. A fixed pool (allocated once, reused via a free/active
+// flag) rather than creating/destroying meshes every spawn, matching
+// the same "pool, don't churn" pattern established for the rain
+// particle system in the live game earlier this whole session.
+const MAX_SPLASH_PARTICLES = 90;
+let splashParticlePool = [];
+function setupSplashParticles() {
+  const splashCanvas = document.createElement("canvas");
+  splashCanvas.width = 32;
+  splashCanvas.height = 32;
+  const sctx = splashCanvas.getContext("2d");
+  const sgrad = sctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+  sgrad.addColorStop(0, "rgba(255,255,255,0.95)");
+  sgrad.addColorStop(0.6, "rgba(255,255,255,0.5)");
+  sgrad.addColorStop(1, "rgba(255,255,255,0)");
+  sctx.fillStyle = sgrad;
+  sctx.fillRect(0, 0, 32, 32);
+  const splashTexture = new THREE.CanvasTexture(splashCanvas);
+
+  for (let i = 0; i < MAX_SPLASH_PARTICLES; i++) {
+    const mat = new THREE.SpriteMaterial({ map: splashTexture, transparent: true, depthWrite: false, fog: false });
+    const sprite = new THREE.Sprite(mat);
+    sprite.visible = false;
+    sprite.scale.set(0.25, 0.25, 1);
+    scene.add(sprite);
+    splashParticlePool.push({ mesh: sprite, velocity: new THREE.Vector3(), life: 0, maxLife: 1 });
+  }
+}
+
+function spawnSplashParticle(x, z) {
+  const p = splashParticlePool.find((p) => p.life <= 0);
+  if (!p) return; // pool exhausted this frame, simply skip rather than growing it unbounded
+  p.mesh.position.set(x + (Math.random() - 0.5) * 1.6, 0.05, z + (Math.random() - 0.5) * 1.6);
+  p.velocity.set((Math.random() - 0.5) * 2.2, 2.2 + Math.random() * 2.2, (Math.random() - 0.5) * 2.2);
+  p.maxLife = 0.55 + Math.random() * 0.35;
+  p.life = p.maxLife;
+  p.mesh.scale.setScalar(0.18 + Math.random() * 0.15);
+  p.mesh.visible = true;
+}
+
+function updateSplashParticles(dt) {
+  for (const p of splashParticlePool) {
+    if (p.life <= 0) continue;
+    p.life -= dt;
+    if (p.life <= 0) {
+      p.mesh.visible = false;
+      continue;
+    }
+    p.velocity.y -= 9.8 * dt; // real gravity
+    p.mesh.position.addScaledVector(p.velocity, dt);
+    if (p.mesh.position.y < -0.3) {
+      // hit the water surface again, despawn rather than sinking through it
+      p.life = 0;
+      p.mesh.visible = false;
+      continue;
+    }
+    p.mesh.material.opacity = Math.min(1, p.life / p.maxLife) * 0.85;
+  }
 }
 
 // Real seafloor geometry, per "let's build a shore" — rises from open-
@@ -542,6 +650,23 @@ function setupSimulation() {
 
   pointerWorldUniform = uniform(new THREE.Vector2(0, 0));
   pointerActiveUniform = uniform(0);
+
+  // Real wake trail, per "add wake trails and real ripples" β€” a fixed
+  // set of SEPARATE uniforms (not a TSL array uniform, which hasn't
+  // been verified/used anywhere in this file, staying consistent with
+  // this thread's "prefer already-proven primitives" discipline), each
+  // holding one recent position from the pointer's own movement
+  // history. Updated on a throttled cadence in animate() (see there),
+  // shifted back like a ring buffer, decaying as they age β€” simulating
+  // how a real moving body leaves a trailing wake of disturbed water
+  // behind it, not just a single point that follows the current
+  // position.
+  wakeTrailUniforms = [];
+  wakeTrailHistory = [];
+  for (let wi = 0; wi < WAKE_TRAIL_LENGTH; wi++) {
+    wakeTrailUniforms.push({ pos: uniform(new THREE.Vector2(0, 0)), active: uniform(0) });
+    wakeTrailHistory.push({ x: 0, z: 0, active: 0 });
+  }
 
   computeInit = Fn(() => {
     heightBufferA.element(instanceIndex).assign(0);
@@ -713,6 +838,28 @@ function setupSimulation() {
         newHeight = newHeight.add(float(0.4));
       });
     });
+
+    // Real wake trail injection, per "add wake trails and real ripples"
+    // β€” same disturbance technique as the main pointer push above,
+    // looped across the fixed trail positions, each scaled by its own
+    // decayed activity (older trail points are weaker, per the decay
+    // applied in animate()'s update). cellWorldX/Z recomputed fresh here
+    // (not reused from the pointer block above, which only declares
+    // them inside its own nested If() scope, not accessible out here).
+    const wakeCellWorldX = x.div(float(WIDTH)).sub(0.5).mul(float(PLANE_SIZE));
+    const wakeCellWorldZ = y.div(float(WIDTH)).sub(0.5).mul(float(PLANE_SIZE));
+    for (let wi = 0; wi < WAKE_TRAIL_LENGTH; wi++) {
+      const wp = wakeTrailUniforms[wi];
+      If(wp.active.greaterThan(0.04), () => {
+        const wdx = wakeCellWorldX.sub(wp.pos.x);
+        const wdz = wakeCellWorldZ.sub(wp.pos.y);
+        const wDistSq = wdx.mul(wdx).add(wdz.mul(wdz));
+        const wRadius = float(1.15);
+        If(wDistSq.lessThan(wRadius.mul(wRadius)), () => {
+          newHeight = newHeight.add(float(0.16).mul(wp.active));
+        });
+      });
+    }
 
     // Real persistent backwash foam, per "creating foam as it draws back
     // in" β€” uses the FULLY finalized newHeight (after chop/rolling-wave/
@@ -1030,6 +1177,41 @@ async function animate() {
       const brightness = 0.55 + chopHere * 0.9;
       ray.material.opacity = ray.userData.baseOpacity * Math.min(1.4, brightness);
     }
+
+    // Real splash particles, per "physics ... splashes" β€” spawned only
+    // when currentBreakWorldZ confirms an actual break is happening
+    // right now (mirrors the compute shader's own real break-detection
+    // formula), scattered across the wave's actual width along that
+    // break line, not spawned arbitrarily.
+    const breakZ = currentBreakWorldZ(nowT);
+    if (breakZ !== null) {
+      for (let i = 0; i < 1; i++) {
+        spawnSplashParticle((Math.random() - 0.5) * (PLANE_SIZE * 0.9), breakZ);
+      }
+    }
+
+    // Real wake trail update, per "add wake trails" β€” throttled (not
+    // every single frame) so the trail reads as evenly-spaced recent
+    // positions rather than an overly dense, jittery blur. Shifts the
+    // history back one slot (ring-buffer style), decaying each point's
+    // strength as it ages further back, then pushes the pointer's real
+    // current position/activity into the front slot.
+    if (nowT - lastWakeUpdateTime > 0.12) {
+      lastWakeUpdateTime = nowT;
+      for (let wi = WAKE_TRAIL_LENGTH - 1; wi > 0; wi--) {
+        wakeTrailHistory[wi].x = wakeTrailHistory[wi - 1].x;
+        wakeTrailHistory[wi].z = wakeTrailHistory[wi - 1].z;
+        wakeTrailHistory[wi].active = wakeTrailHistory[wi - 1].active * 0.82;
+      }
+      wakeTrailHistory[0].x = pointerWorldUniform.value.x;
+      wakeTrailHistory[0].z = pointerWorldUniform.value.y;
+      wakeTrailHistory[0].active = pointerActiveUniform.value;
+      for (let wi = 0; wi < WAKE_TRAIL_LENGTH; wi++) {
+        wakeTrailUniforms[wi].pos.value.set(wakeTrailHistory[wi].x, wakeTrailHistory[wi].z);
+        wakeTrailUniforms[wi].active.value = wakeTrailHistory[wi].active;
+      }
+    }
+    updateSplashParticles(dt);
 
     renderer.render(scene, camera);
   } catch (err) {

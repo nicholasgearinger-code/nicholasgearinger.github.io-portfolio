@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { Fn, instanceIndex, instancedArray, hash, uniform, vec3, vec2, vec4, float, uint, If, texture, uv, floor, fract, smoothstep, clamp, abs } from "three/tsl";
+import { Fn, instanceIndex, instancedArray, hash, uniform, vec3, vec2, vec4, float, uint, If, texture, uv, floor, fract, smoothstep, clamp, abs, pass } from "three/tsl";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
 import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH, POND_Z, POND_RADIUS, POND_LEVEL, RAMP_CENTER_X, RAMP_CENTER_Z, RAMP_LENGTH, RAMP_HALF_WIDTH, ROOM_FLOOR_Y, ROOM_WIDTH, ROOM_LENGTH, BRANCH_START_X, BRANCH_LENGTH, BRANCH_HALF_WIDTH, BRANCH_Z, CHAMBER_RADIUS } from "./terrain.js";
 import { LEVELS, generateLevelLayout } from "./levels.js";
@@ -544,7 +544,7 @@ const bloomPass = { enabled: false, strength: 0, radius: 0, threshold: 0 };
 const smaaPass = { enabled: false };
 const fxaaPass = { enabled: false, material: { uniforms: riftStubUniforms(["resolution"]) } };
 // lensRainPass (the old inert composer stub) removed — replaced by the real
-// TSL lensRenderTarget/lensMaterial two-pass effect below.
+// TSL PostProcessing/pass() droplet effect below (see its own comment).
 
 // Bloom presets — 'off' truly disables the pass (skips its extra
 // render-target work entirely, not just zeroed strength); the other
@@ -816,7 +816,9 @@ function resizeToViewport() {
     composer.setSize(targetW, targetH);
     ssaoPass.setSize(targetW, targetH);
     underwaterRenderTarget.setSize(targetW, targetH);
-    lensRenderTarget.setSize(targetW, targetH);
+    // No manual lensRenderTarget resize needed anymore — postProcessing/
+    // pass() tracks the renderer's own size automatically, unlike the
+    // raw WebGLRenderTarget the old (now-removed) manual technique used.
     // FXAAShader needs its resolution as a texel-size uniform (1/pixels),
     // not a plain width/height — unlike every other pass here, ShaderPass
     // doesn't auto-resize this from composer.setSize, so it's set by hand
@@ -829,7 +831,6 @@ function resizeToViewport() {
     ssaoPass.setSize(w, h);
     const pixelRatio = renderer.getPixelRatio();
     underwaterRenderTarget.setSize(w * pixelRatio, h * pixelRatio);
-    lensRenderTarget.setSize(w * pixelRatio, h * pixelRatio);
     fxaaPass.material.uniforms["resolution"].value.set(1 / (w * pixelRatio), 1 / (h * pixelRatio));
   }
 }
@@ -956,31 +957,28 @@ underwaterQuadScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), underwater
 
 // -----------------------------------------------------------------------------
 // Real lens-water/rain-droplet screen-space effect — per explicit "wet water
-// drops on camera effect", using WebGPU/TSL. Same proven two-pass STRUCTURE
-// as the underwater effect just above (render scene to an offscreen target,
-// then a full-screen quad samples it back with a distortion) — but built
-// with a real TSL node material instead of that effect's raw-GLSL
-// ShaderMaterial, which is the same category of technique already
-// confirmed broken under WebGPU elsewhere in this project (onBeforeCompile,
-// the classic EffectComposer passes) and is very likely why
-// UNDERWATER_EFFECTS_ENABLED is currently false. This is deliberately the
-// most conservative version of this effect — a straightforward per-cell
-// droplet UV distortion, not the full refraction/rim-highlight/blur combo a
-// mature version might have — genuinely new API surface for this project
-// (first use of screen-space render-target sampling via TSL, and of
-// floor/fract/smoothstep here), so fewer moving parts means fewer places
-// for a first pass to go wrong.
-const lensRenderTarget = new THREE.WebGLRenderTarget(
-  Math.max(1, viewport.clientWidth * renderer.getPixelRatio()),
-  Math.max(1, viewport.clientHeight * renderer.getPixelRatio())
-);
-const lensQuadScene = new THREE.Scene();
-const lensQuadCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+// drops on camera effect", using WebGPU/TSL. REBUILT on Three.js's actual
+// purpose-built multi-pass API (THREE.PostProcessing + pass()) after the
+// first version (a manual two-render()-calls-per-frame + raw render-target
+// technique, reused from the underwater effect's own shape) produced a real
+// "GPUValidationError: Invalid CommandEncoder" — a genuine WebGPU-level
+// error, confirming that technique was never actually a supported pattern
+// under WebGPURenderer's command-encoder model, regardless of how many
+// times the shader itself got fixed. This version never manually touches
+// renderTarget/render() at all — postProcessing.render() (see the final
+// render call further below) is now the SINGLE, ALWAYS-used render path,
+// with the droplet EFFECT (not the render TECHNIQUE) being what's
+// conditional, toggled via outputNode reassignment — the confirmed, real
+// pattern for enabling/disabling a pass at runtime (Three.js's own
+// RenderPipeline/PostProcessing docs show exactly this: reassign
+// .outputNode, set .needsUpdate = true).
+const postProcessing = new THREE.PostProcessing(renderer);
+const scenePass = pass(scene, camera);
+const scenePassColor = scenePass.getTextureNode("output");
 const lensTimeUniform = uniform(0);
 const lensIntensityUniform = uniform(0);
 const lensSunScreenPos = uniform(vec2(-10, -10));
-const lensMaterial = new THREE.MeshBasicNodeMaterial();
-lensMaterial.colorNode = Fn(() => {
+const lensDistortedOutput = Fn(() => {
   const screenUV = uv();
   // A grid of cells, each with one pseudo-random droplet inside it (real
   // rain-on-glass reads as many small individual drops scattered across
@@ -1013,11 +1011,9 @@ lensMaterial.colorNode = Fn(() => {
   const dir = cellLocal.sub(dropletCenter);
   // Per real reference photo — "distortion of the environment through the
   // center... not glowing rings": this refraction-like sample offset is
-  // now the PRIMARY visual carrier of the whole effect (the old rim-glow
-  // ring, removed below, used to compete with it) — pulls the sample
+  // the PRIMARY visual carrier of the whole effect. Pulls the sample
   // toward the droplet's own center, the real optical effect of light
-  // bending through a curved water droplet, strengthened since it's
-  // doing more of the visual work now.
+  // bending through a curved water droplet.
   const distortAmount = inDroplet.mul(dropletPresent).mul(0.06).mul(lensIntensityUniform);
   // Per "wet trails as they slide down the lens" — a narrow vertical
   // streak in the same screen-space column as each droplet, extending
@@ -1033,15 +1029,13 @@ lensMaterial.colorNode = Fn(() => {
   const trailDistort = trailMask.mul(0.015).mul(lensIntensityUniform);
   const totalDistortY = distortAmount.mul(dir.y).add(trailDistort);
   const totalDistortX = distortAmount.mul(dir.x);
-  // Per "the camera is flipped" — render targets and a full-screen quad's
-  // own UV frequently disagree on which Y direction is "up" (a classic,
-  // common render-to-texture gotcha, not specific to this effect) — the
-  // scene texture sample flips Y explicitly here, independent of the
-  // droplet math above (which stays in the quad's own natural UV space).
-  const rawSampleUV = screenUV.sub(vec2(totalDistortX, totalDistortY));
-  const flippedSampleUV = vec2(rawSampleUV.x, one.sub(rawSampleUV.y));
-  const distortedUV = clamp(flippedSampleUV, zero, one);
-  const sceneColor = texture(lensRenderTarget.texture, distortedUV);
+  // No manual Y-flip here (unlike the first, now-abandoned version) —
+  // that flip was needed only because that version manually rendered to
+  // a raw WebGLRenderTarget and sampled it back by hand. pass()'s own
+  // texture output is designed specifically for exactly this "read the
+  // rendered scene back" use case and handles orientation internally.
+  const distortedUV = clamp(screenUV.sub(vec2(totalDistortX, totalDistortY)), zero, one);
+  const sceneColor = texture(scenePassColor, distortedUV);
   const gated = inDroplet.mul(dropletPresent);
   // Per "should... reflect light" — a SMALL, soft highlight point offset
   // from the droplet's own center (the classic look of a light source
@@ -1055,15 +1049,14 @@ lensMaterial.colorNode = Fn(() => {
   // "only glow when reflecting sunlight" design (see the JS-side
   // sun-screen-position projection this reads from) — droplets near
   // where the sun actually is on screen catch extra light, same as real
-  // water droplets do. Kept, but now additive with the small highlight
-  // above rather than a separate large glow.
+  // water droplets do. Kept, additive with the small highlight above.
   const sunDist = screenUV.sub(lensSunScreenPos).length();
   const sunGlow = smoothstep(float(0.25), zero, sunDist).mul(gated).mul(0.4);
   const lightBoost = highlight.mul(0.22).add(sunGlow).add(trailMask.mul(0.06)).mul(lensIntensityUniform);
   const finalColor = sceneColor.rgb.add(vec3(lightBoost));
   return vec4(finalColor, one);
 })();
-lensQuadScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), lensMaterial));
+postProcessing.outputNode = scenePass; // starts in the plain-passthrough state; toggled per-frame further below
 
 
 // A large sphere enclosing the camera, rendered from the inside
@@ -1436,7 +1429,8 @@ let debugForceStorm = false;
 let cloudsHandle = null;
 let submergedState = false; // persists across frames — see the hysteresis check below for why a fresh threshold comparison every frame isn't enough
 let wasFullySubmergedLastFrame = false; // detects the exact moment of surfacing, for the post-swim wet-lens effect below
-let lensEffectActive = false; // set each frame below; read by the final render call to decide whether the two-pass lens render happens at all
+let lensEffectActive = false; // set each frame below; read by the final render call to decide which outputNode postProcessing should currently be using
+let lastLensEffectActive = null; // previous frame's value — outputNode is only reassigned (and the real shader-recompile cost only paid) on an actual transition, not every frame
 let postSwimWetness = 0; // 0-1, set to 1 the instant the player surfaces, decays over ~60s — drives the SAME lens-rain shader as real rain, just from a different trigger
 let cloudLayerHandle = null;
 let horizonHandle = null;
@@ -4855,13 +4849,22 @@ function animate() {
     tempRainFogColor.setHex(0x0a0e14).lerp(RAIN_FOG_COLOR, wind.rainIntensity * 0.5); // was 0.7 — even at full storm, blends WITH the scene's own natural fog tone rather than fully replacing it
     scene.fog.color.copy(tempRainFogColor);
   }
-  // Lens raindrops — real TSL two-pass screen-space effect now (see its
-  // own setup comment above for why this replaced the old inert
-  // raw-GLSL stub). Same enable/threshold logic already established here
-  // — skipped entirely (not just zeroed) whenever there's nothing for it
-  // to show, same reasoning as the bloom presets' "off" tier.
+  // Lens raindrops — real TSL two-pass screen-space effect (see its own
+  // setup comment above for why this replaced the old inert raw-GLSL
+  // stub). Same enable/threshold logic already established here — skipped
+  // entirely (not just zeroed) whenever there's nothing for it to show,
+  // same reasoning as the bloom presets' "off" tier.
+  //
+  // Per explicit "rebuild it safely" — re-enabled now that the render
+  // TECHNIQUE underneath has actually changed (THREE.PostProcessing +
+  // pass(), not the manual two-render()-calls-per-frame approach that
+  // produced the real "GPUValidationError: Invalid CommandEncoder" this
+  // flag was originally added to stop). See the postProcessing/
+  // lensDistortedOutput setup comment above for the full story of why
+  // the old technique was abandoned rather than patched further.
+  const LENS_EFFECT_ENABLED = true;
   const effectiveLensIntensity = Math.max(wind.rainIntensity, postSwimWetness);
-  lensEffectActive = !isFullySubmerged && effectiveLensIntensity > 0.02 && getGraphicsSettings().oceanEffectsEnabled !== false;
+  lensEffectActive = LENS_EFFECT_ENABLED && !isFullySubmerged && effectiveLensIntensity > 0.02 && getGraphicsSettings().oceanEffectsEnabled !== false;
   lensDiagEl.textContent = "lens: " + (lensEffectActive ? "ON" : "off") + ", intensity=" + effectiveLensIntensity.toFixed(2) + ", rain=" + (weatherHandle ? weatherHandle.rainIntensity.toFixed(2) : "n/a") + ", wet=" + postSwimWetness.toFixed(2) + ", submerged=" + isFullySubmerged + ", oceanFX=" + (getGraphicsSettings().oceanEffectsEnabled !== false);
   if (lensEffectActive) {
     lensTimeUniform.value = elapsedTime;
@@ -5047,42 +5050,23 @@ function animate() {
     renderer.setRenderTarget(null);
     underwaterDistortionMaterial.uniforms.time.value = elapsedTime;
     renderer.render(underwaterQuadScene, underwaterQuadCamera);
-  } else if (lensEffectActive) {
-    // Real two-pass lens-water render — same structural technique as the
-    // underwater branch above (offscreen render, then a full-screen quad
-    // samples it back distorted), gated so this extra pass only ever
-    // happens when there's actually rain/post-swim wetness to show (see
-    // lensEffectActive's own comment above) — a plain direct render the
-    // rest of the time, same as before this feature existed.
-    //
-    // Per "light/ground flickers when it rains" — tone-mapping/color-
-    // space output conversion is normally applied only at the FINAL
-    // render-to-canvas step; an intermediate render target typically
-    // holds unconverted linear data. Genuinely uncertain (couldn't fully
-    // confirm from documentation) whether that conversion was being
-    // applied correctly, doubly, or not at all across these two calls —
-    // rather than guess, tone mapping is explicitly forced off for the
-    // FIRST pass (into the offscreen target, where it shouldn't apply
-    // yet regardless) and explicitly restored for the SECOND (the real
-    // final canvas output), so it can only ever be applied exactly once,
-    // at the correct step, regardless of whatever Three.js's own default
-    // behavior actually is here.
-    const realToneMapping = renderer.toneMapping;
-    renderer.toneMapping = THREE.NoToneMapping;
-    renderer.setRenderTarget(lensRenderTarget);
-    renderer.render(scene, camera);
-    renderer.setRenderTarget(null);
-    renderer.toneMapping = realToneMapping;
-    renderer.render(lensQuadScene, lensQuadCamera);
   } else {
-    // Safety net for the genuinely unverified part of the WebGPU
-    // renderer swap (see the renderer setup's own comment above) — the
-    // classic EffectComposer pipeline uses raw GLSL in a few passes,
-    // which WebGPU's real backend doesn't compile the same way WebGL
-    // does. Per "commit to WebGPU" — composer is now an inert stub (see
-    // the stage-1 stand-ins above), so this renders directly rather than
-    // going through it.
-    renderer.render(scene, camera);
+    // Real, SINGLE unified render path — replaces both the old plain
+    // renderer.render(scene, camera) call and the old lens-specific
+    // manual two-pass technique (which produced a real
+    // "GPUValidationError: Invalid CommandEncoder" — see the lens
+    // effect's own setup comment for the full story). postProcessing.
+    // render() is now ALWAYS what actually draws the frame, rain or not
+    // — the droplet effect toggles via outputNode reassignment instead
+    // of via a separate render call, only reassigning (and paying the
+    // real shader-recompile cost) on an actual on/off TRANSITION, not
+    // every frame.
+    if (lensEffectActive !== lastLensEffectActive) {
+      postProcessing.outputNode = lensEffectActive ? lensDistortedOutput : scenePass;
+      postProcessing.needsUpdate = true;
+      lastLensEffectActive = lensEffectActive;
+    }
+    postProcessing.render();
   }
 }
 requestAnimationFrame(animate);

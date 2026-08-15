@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { Fn, instanceIndex, instancedArray, hash, uniform, vec3, vec2, vec4, float, uint, If, texture, uv, floor, fract, smoothstep, clamp } from "three/tsl";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
 import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH, POND_Z, POND_RADIUS, POND_LEVEL, RAMP_CENTER_X, RAMP_CENTER_Z, RAMP_LENGTH, RAMP_HALF_WIDTH, ROOM_FLOOR_Y, ROOM_WIDTH, ROOM_LENGTH, BRANCH_START_X, BRANCH_LENGTH, BRANCH_HALF_WIDTH, BRANCH_Z, CHAMBER_RADIUS } from "./terrain.js";
 import { LEVELS, generateLevelLayout } from "./levels.js";
@@ -246,9 +247,129 @@ scene.background = sceneBackgroundColor;
 // blanket scene clear, so this is safe to just persist untouched across
 // every level transition.
 const realisticCloudDomeHandle = createRealisticCloudDome(scene);
+const rainParticlesHandle = createRainParticles(scene); // function is hoisted — defined further below, called here to mirror the cloud dome's own "once at startup, not per-level" lifecycle (visibility is opacity-driven by rainIntensity, not create/destroy)
 
 const camera = new THREE.PerspectiveCamera(70, viewport.clientWidth / viewport.clientHeight, 0.1, 2000);
 camera.rotation.order = "YXZ";
+
+// -----------------------------------------------------------------------------
+// Real GPU-compute rain particles — per explicit "a lot of rain particles...
+// using webgpu". Self-contained here rather than inside weather.js (not
+// available to edit this session) — reads the ALREADY-COMPUTED
+// weatherHandle.rainIntensity (set elsewhere, see weather.js) purely to
+// scale visibility, without needing to touch or understand weather.js's own
+// internals at all.
+//
+// Same proven architecture as liquid.js's foam particles (independent
+// particles, no neighbor-coupling, so none of the wave-simulation
+// instability class of bug applies here either), and the same real lessons
+// already paid for build straight in this time instead of rediscovered:
+// self-managed dt (TSL's built-in time/deltaTime confirmed unreliable
+// inside compute-only dispatch), the synchronous renderer.compute() (not
+// computeAsync — real perf reason established during the wave work), a
+// `broken` guard that stops retrying after a dispatch failure, and
+// `new THREE.Sprite(material)` + `.count` (NOT THREE.Mesh + a
+// THREE.SpriteGeometry that doesn't actually exist — confirmed the hard
+// way building foam particles moments ago in this same project).
+//
+// Spawns in a volume that FOLLOWS THE CAMERA (not a fixed level position)
+// so rain always surrounds the player regardless of where they've walked —
+// camera position is fed in as its own self-managed uniform, updated every
+// frame from JS, same reasoning as the dt uniform.
+const RAIN_PARTICLE_COUNT = 3000;
+const RAIN_RADIUS = 55; // spawn XZ scatter radius around the camera
+const RAIN_HEIGHT = 40; // spawn height above the camera
+const RAIN_FALL_SPEED = 22; // world units/sec — fast, driving rain, not a gentle drizzle
+
+function createRainParticles(scene) {
+  const positionBuffer = instancedArray(RAIN_PARTICLE_COUNT, "vec3");
+  const camPos = uniform(vec3(0, 0, 0));
+  const rainDt = uniform(0.016);
+
+  const computeInit = Fn(() => {
+    const id = instanceIndex;
+    const idf = id.toFloat();
+    const rx = hash(idf).sub(0.5).mul(RAIN_RADIUS * 2);
+    const ry = hash(idf.add(1)).mul(RAIN_HEIGHT);
+    const rz = hash(idf.add(2)).sub(0.5).mul(RAIN_RADIUS * 2);
+    positionBuffer.element(id).assign(camPos.add(vec3(rx, ry, rz)));
+  })().compute(RAIN_PARTICLE_COUNT);
+
+  const computeUpdate = Fn(() => {
+    const id = instanceIndex;
+    const pos = positionBuffer.element(id);
+    pos.y.subAssign(float(RAIN_FALL_SPEED).mul(rainDt));
+    // Respawns at the top of the volume once it falls below the camera's
+    // own band — real per-particle horizontal jitter on respawn (hash fed
+    // by both id AND the current height, which changes every respawn) so
+    // drops don't all cycle back to the exact same XZ column repeatedly.
+    If(pos.y.lessThan(camPos.y.sub(RAIN_HEIGHT * 0.5)), () => {
+      const rx = hash(id.toFloat().add(pos.y)).sub(0.5).mul(RAIN_RADIUS * 2);
+      const rz = hash(id.toFloat().sub(pos.y)).sub(0.5).mul(RAIN_RADIUS * 2);
+      pos.assign(camPos.add(vec3(rx, RAIN_HEIGHT * 0.5, rz)));
+    });
+  })().compute(RAIN_PARTICLE_COUNT);
+
+  const material = new THREE.SpriteNodeMaterial({
+    transparent: true, depthWrite: false, blending: THREE.NormalBlending,
+  });
+  material.positionNode = positionBuffer.toAttribute();
+  // Thin and tall — a real streak, not a round droplet, matching how fast
+  // rain actually reads visually (motion-blurred by its own speed, not a
+  // discrete round shape).
+  material.scaleNode = vec3(0.025, 0.55, 1);
+  const rainTex = texture(getRainStreakTexture(), uv());
+  material.colorNode = rainTex.rgb;
+  const rainOpacity = uniform(0);
+  material.opacityNode = rainOpacity.mul(rainTex.a);
+
+  const sprite = new THREE.Sprite(material);
+  sprite.count = RAIN_PARTICLE_COUNT;
+  sprite.frustumCulled = false; // same reasoning as foam particles — GPU-only positions, CPU-side bounds have no idea where they actually are
+  scene.add(sprite);
+
+  return { sprite, computeInit, computeUpdate, camPos, rainDt, rainOpacity, initialized: false, broken: false };
+}
+
+let rainStreakTexture = null;
+function getRainStreakTexture() {
+  if (rainStreakTexture) return rainStreakTexture;
+  // Same technique as liquid.js's getFoamTexture() (a real canvas gradient,
+  // not a loaded image file — no async texture-load race to worry about,
+  // same reasoning). A vertical streak instead of a radial glow.
+  const w = 24, h = 96;
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, "rgba(200,220,235,0)");
+  grad.addColorStop(0.5, "rgba(200,220,235,0.55)");
+  grad.addColorStop(1, "rgba(200,220,235,0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(w * 0.35, 0, w * 0.3, h);
+  rainStreakTexture = new THREE.CanvasTexture(canvas);
+  return rainStreakTexture;
+}
+
+function updateRainParticles(handle, renderer, camera, dt, rainIntensity) {
+  if (!handle || handle.broken) return;
+  handle.camPos.value.copy(camera.position);
+  handle.rainDt.value = Math.min(dt, 0.05);
+  handle.rainOpacity.value = clampNum(rainIntensity, 0, 1) * 0.6; // real rain still reads as thin/translucent streaks, not opaque white lines
+  const canSyncCompute = typeof renderer.compute === "function";
+  try {
+    if (!handle.initialized) {
+      if (canSyncCompute) renderer.compute(handle.computeInit); else renderer.computeAsync(handle.computeInit);
+      handle.initialized = true;
+    }
+    if (canSyncCompute) renderer.compute(handle.computeUpdate); else renderer.computeAsync(handle.computeUpdate);
+  } catch (err) {
+    console.error("[main] rain particles: compute dispatch failed:", err);
+    handle.broken = true;
+  }
+}
+function clampNum(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
 
 // WebGPU renderer — per explicit request, step 1 of the staged plan
 // discussed before touching anything (renderer foundation first, before
@@ -260,7 +381,7 @@ camera.rotation.order = "YXZ";
 // browsers) should keep working via that fallback path. What is
 // GENUINELY UNVERIFIED and needs real browser testing specifically:
 // whether the classic EffectComposer pipeline below (SSAOPass, bloom,
-// SMAA, the custom raw-GLSL lensRainPass) survives unmodified when the
+// SMAA) survives unmodified when the
 // ACTUAL WebGPU backend is what's rendering (as opposed to the WebGL2
 // fallback path, where it should behave exactly as before, since that's
 // genuine WebGL under the hood). Raw GLSL passes are a real, known
@@ -393,16 +514,8 @@ const ssaoPass = { enabled: false, kernelRadius: 0, minDistance: 0, maxDistance:
 const bloomPass = { enabled: false, strength: 0, radius: 0, threshold: 0 };
 const smaaPass = { enabled: false };
 const fxaaPass = { enabled: false, material: { uniforms: riftStubUniforms(["resolution"]) } };
-const lensRainPass = {
-  enabled: false,
-  material: {
-    uniforms: {
-      ...riftStubUniforms(["uResolution", "uSunScreenPos"]),
-      uTime: { value: 0 },
-      uRainIntensity: { value: 0 },
-    },
-  },
-};
+// lensRainPass (the old inert composer stub) removed — replaced by the real
+// TSL lensRenderTarget/lensMaterial two-pass effect below.
 
 // Bloom presets — 'off' truly disables the pass (skips its extra
 // render-target work entirely, not just zeroed strength); the other
@@ -674,12 +787,12 @@ function resizeToViewport() {
     composer.setSize(targetW, targetH);
     ssaoPass.setSize(targetW, targetH);
     underwaterRenderTarget.setSize(targetW, targetH);
+    lensRenderTarget.setSize(targetW, targetH);
     // FXAAShader needs its resolution as a texel-size uniform (1/pixels),
     // not a plain width/height — unlike every other pass here, ShaderPass
     // doesn't auto-resize this from composer.setSize, so it's set by hand
     // wherever the render resolution changes.
     fxaaPass.material.uniforms["resolution"].value.set(1 / targetW, 1 / targetH);
-    lensRainPass.material.uniforms.uResolution.value.set(targetW, targetH);
   } else {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, getGraphicsSettings().pixelRatioCap));
     renderer.setSize(w, h);
@@ -687,8 +800,8 @@ function resizeToViewport() {
     ssaoPass.setSize(w, h);
     const pixelRatio = renderer.getPixelRatio();
     underwaterRenderTarget.setSize(w * pixelRatio, h * pixelRatio);
+    lensRenderTarget.setSize(w * pixelRatio, h * pixelRatio);
     fxaaPass.material.uniforms["resolution"].value.set(1 / (w * pixelRatio), 1 / (h * pixelRatio));
-    lensRainPass.material.uniforms.uResolution.value.set(w * pixelRatio, h * pixelRatio);
   }
 }
 new ResizeObserver(resizeToViewport).observe(viewport);
@@ -811,6 +924,86 @@ const underwaterDistortionMaterial = new THREE.ShaderMaterial({
   `,
 });
 underwaterQuadScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), underwaterDistortionMaterial));
+
+// -----------------------------------------------------------------------------
+// Real lens-water/rain-droplet screen-space effect — per explicit "wet water
+// drops on camera effect", using WebGPU/TSL. Same proven two-pass STRUCTURE
+// as the underwater effect just above (render scene to an offscreen target,
+// then a full-screen quad samples it back with a distortion) — but built
+// with a real TSL node material instead of that effect's raw-GLSL
+// ShaderMaterial, which is the same category of technique already
+// confirmed broken under WebGPU elsewhere in this project (onBeforeCompile,
+// the classic EffectComposer passes) and is very likely why
+// UNDERWATER_EFFECTS_ENABLED is currently false. This is deliberately the
+// most conservative version of this effect — a straightforward per-cell
+// droplet UV distortion, not the full refraction/rim-highlight/blur combo a
+// mature version might have — genuinely new API surface for this project
+// (first use of screen-space render-target sampling via TSL, and of
+// floor/fract/smoothstep here), so fewer moving parts means fewer places
+// for a first pass to go wrong.
+const lensRenderTarget = new THREE.WebGLRenderTarget(
+  Math.max(1, viewport.clientWidth * renderer.getPixelRatio()),
+  Math.max(1, viewport.clientHeight * renderer.getPixelRatio())
+);
+const lensQuadScene = new THREE.Scene();
+const lensQuadCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const lensTimeUniform = uniform(0);
+const lensIntensityUniform = uniform(0);
+const lensSunScreenPos = uniform(vec2(-10, -10));
+const lensMaterial = new THREE.MeshBasicNodeMaterial();
+lensMaterial.colorNode = Fn(() => {
+  const screenUV = uv();
+  // A grid of cells, each with one pseudo-random droplet inside it (real
+  // rain-on-glass reads as many small individual drops scattered across
+  // the frame, not one large pattern) — same hash-based-cell technique
+  // already used for shore points/particle spawning elsewhere in this
+  // project's TSL code, applied here in 2D screen space instead of 3D
+  // world space.
+  const cellSize = float(11.0);
+  // Slow downward drift, tied to the real self-managed time uniform — real
+  // droplets on glass slide/settle gradually rather than staying perfectly
+  // static, and this is also what makes the pattern eventually cycle
+  // through fresh droplet positions instead of showing the exact same
+  // frozen arrangement for an entire storm.
+  const cellUV = screenUV.mul(cellSize).add(vec2(0, lensTimeUniform.mul(0.15)));
+  const cellId = floor(cellUV);
+  const cellLocal = fract(cellUV);
+  const seed = cellId.x.add(cellId.y.mul(57.0));
+  const dropletCenter = vec2(hash(seed), hash(seed.add(31.0)));
+  // Not every cell gets a visible droplet — real rain-on-glass has gaps,
+  // not uniform full coverage. A float threshold (not a boolean/.select()
+  // — avoiding an API call not yet confirmed anywhere in this project,
+  // when smoothstep already does the same job with functions already
+  // proven working here) that's ~0 or ~1 per cell.
+  const dropletPresent = smoothstep(0.5, 0.51, hash(seed.add(71.0)));
+  const distToCenter = cellLocal.sub(dropletCenter).length();
+  const dropletRadius = float(0.22);
+  const inDroplet = float(1.0).sub(smoothstep(dropletRadius * 0.6, dropletRadius, distToCenter));
+  const dir = cellLocal.sub(dropletCenter);
+  // Refraction-like offset — pulls the sample toward the droplet's own
+  // center, the real optical effect of light bending through a curved
+  // water droplet (a crude but recognizable magnifying-glass distortion),
+  // scaled by how visible this effect should currently be.
+  const distortAmount = inDroplet.mul(dropletPresent).mul(0.018).mul(lensIntensityUniform);
+  const distortedUV = clamp(screenUV.sub(dir.mul(distortAmount)), 0, 1);
+  const sceneColor = texture(lensRenderTarget.texture, distortedUV);
+  // A soft bright rim right at each droplet's own edge — real water
+  // droplets catch and concentrate light at their boundary.
+  const rim = smoothstep(dropletRadius * 0.55, dropletRadius * 0.95, distToCenter).mul(inDroplet);
+  const rimBoost = rim.mul(0.12).mul(lensIntensityUniform);
+  const gated = inDroplet.mul(dropletPresent);
+  // Real sun-glint boost — per the existing, already-worked-out
+  // "only glow when reflecting sunlight" design (see the JS-side
+  // sun-screen-position projection this reads from) — droplets near
+  // where the sun actually is on screen catch extra light, same as real
+  // water droplets do.
+  const sunDist = screenUV.sub(lensSunScreenPos).length();
+  const sunGlow = smoothstep(0.25, 0.0, sunDist).mul(gated).mul(0.5);
+  const finalColor = sceneColor.rgb.add(vec3(rimBoost).mul(gated)).add(vec3(1.0, 0.9, 0.7).mul(sunGlow));
+  return vec4(finalColor, 1.0);
+})();
+lensQuadScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), lensMaterial));
+
 
 // A large sphere enclosing the camera, rendered from the inside
 // (BackSide) with a translucent blue tint — the "volume that looks like
@@ -1182,6 +1375,7 @@ let debugForceStorm = false;
 let cloudsHandle = null;
 let submergedState = false; // persists across frames — see the hysteresis check below for why a fresh threshold comparison every frame isn't enough
 let wasFullySubmergedLastFrame = false; // detects the exact moment of surfacing, for the post-swim wet-lens effect below
+let lensEffectActive = false; // set each frame below; read by the final render call to decide whether the two-pass lens render happens at all
 let postSwimWetness = 0; // 0-1, set to 1 the instant the player surfaces, decays over ~60s — drives the SAME lens-rain shader as real rain, just from a different trigger
 let cloudLayerHandle = null;
 let horizonHandle = null;
@@ -4326,6 +4520,10 @@ function animate() {
   // above, not elapsedTime — particle integration needs an actual frame
   // delta, not a running total.
   if (foamParticlesHandle) updateFoamParticles(foamParticlesHandle, renderer, dt);
+  // Real GPU compute rain — always updates regardless of biome/level (see
+  // its own creation comment for why), reading the already-computed
+  // weatherHandle.rainIntensity purely to scale visibility.
+  updateRainParticles(rainParticlesHandle, renderer, camera, dt, weatherHandle ? weatherHandle.rainIntensity : 0);
   // Real angelfish (models.js) — AnimationMixer drives the loaded skeletal
   // swim clip (fin/body motion in place), the wander drift here separately
   // moves the fish THROUGH the reef along a slow circle so they don't just
@@ -4596,20 +4794,16 @@ function animate() {
     tempRainFogColor.setHex(0x0a0e14).lerp(RAIN_FOG_COLOR, wind.rainIntensity * 0.5); // was 0.7 — even at full storm, blends WITH the scene's own natural fog tone rather than fully replacing it
     scene.fog.color.copy(tempRainFogColor);
   }
-  // Lens raindrops (the composer pass added above, near FXAA/OutputPass)
-  // — enabled entirely OFF (skipping its real per-pixel cost, not just
-  // zeroed) whenever there's no rain AND no lingering post-swim wetness
-  // to speak of, or the current graphics tier says not to bother, same
-  // oceanEffectsEnabled setting already gating the terrain's own
-  // caustic/foam extras — this is exactly that category of "extra
-  // flair," not core rendering. Also off underwater and while looking
-  // through the fullscreen/graphics-menu UI doesn't matter here (screen-
-  // space, unaffected by camera state beyond rain/submersion).
+  // Lens raindrops — real TSL two-pass screen-space effect now (see its
+  // own setup comment above for why this replaced the old inert
+  // raw-GLSL stub). Same enable/threshold logic already established here
+  // — skipped entirely (not just zeroed) whenever there's nothing for it
+  // to show, same reasoning as the bloom presets' "off" tier.
   const effectiveLensIntensity = Math.max(wind.rainIntensity, postSwimWetness);
-  lensRainPass.enabled = !isFullySubmerged && effectiveLensIntensity > 0.02 && getGraphicsSettings().oceanEffectsEnabled !== false;
-  if (lensRainPass.enabled) {
-    lensRainPass.material.uniforms.uTime.value = elapsedTime;
-    lensRainPass.material.uniforms.uRainIntensity.value = effectiveLensIntensity;
+  lensEffectActive = !isFullySubmerged && effectiveLensIntensity > 0.02 && getGraphicsSettings().oceanEffectsEnabled !== false;
+  if (lensEffectActive) {
+    lensTimeUniform.value = elapsedTime;
+    lensIntensityUniform.value = effectiveLensIntensity;
     // Per explicit "only glow when reflecting sunlight" — the real sun's
     // world position projected onto the screen, so the shader's rim
     // highlight can be gated by actual proximity to it instead of always
@@ -4624,9 +4818,9 @@ function animate() {
     camera.getWorldDirection(tempCameraDir);
     if (tempSunDir.dot(tempCameraDir) > 0.1) {
       tempSunProjection.copy(dayNightCycle.sunBody.group.position).project(camera);
-      lensRainPass.material.uniforms.uSunScreenPos.value.set((tempSunProjection.x + 1) / 2, (tempSunProjection.y + 1) / 2);
+      lensSunScreenPos.value.set((tempSunProjection.x + 1) / 2, (tempSunProjection.y + 1) / 2);
     } else {
-      lensRainPass.material.uniforms.uSunScreenPos.value.set(-10, -10);
+      lensSunScreenPos.value.set(-10, -10);
     }
   }
   // Rain is an above-surface effect — real rain doesn't fall underwater.
@@ -4791,22 +4985,25 @@ function animate() {
     renderer.setRenderTarget(null);
     underwaterDistortionMaterial.uniforms.time.value = elapsedTime;
     renderer.render(underwaterQuadScene, underwaterQuadCamera);
+  } else if (lensEffectActive) {
+    // Real two-pass lens-water render — same structural technique as the
+    // underwater branch above (offscreen render, then a full-screen quad
+    // samples it back distorted), gated so this extra pass only ever
+    // happens when there's actually rain/post-swim wetness to show (see
+    // lensEffectActive's own comment above) — a plain direct render the
+    // rest of the time, same as before this feature existed.
+    renderer.setRenderTarget(lensRenderTarget);
+    renderer.render(scene, camera);
+    renderer.setRenderTarget(null);
+    renderer.render(lensQuadScene, lensQuadCamera);
   } else {
     // Safety net for the genuinely unverified part of the WebGPU
     // renderer swap (see the renderer setup's own comment above) — the
-    // classic EffectComposer pipeline uses raw GLSL in a few passes
-    // (the custom lensRainPass, most notably), which WebGPU's real
-    // backend doesn't compile the same way WebGL does. If that turns
-    // out to break, this falls back to a plain direct render (losing
-    // bloom/SSAO/AA/lens-rain for that frame, not the whole scene) and
-    // logs it ONCE rather than spamming the console every frame or
-    // leaving the screen black with no diagnostic trail.
-    // Per "commit to WebGPU" — composer is now an inert stub (see the
-    // stage-1 stand-ins above), so this renders directly rather than
-    // going through it. The previous try/catch here is no longer
-    // meaningful: a no-op stub can't throw, so keeping it would have
-    // silently rendered nothing every single frame instead of actually
-    // falling back to anything.
+    // classic EffectComposer pipeline uses raw GLSL in a few passes,
+    // which WebGPU's real backend doesn't compile the same way WebGL
+    // does. Per "commit to WebGPU" — composer is now an inert stub (see
+    // the stage-1 stand-ins above), so this renders directly rather than
+    // going through it.
     renderer.render(scene, camera);
   }
 }

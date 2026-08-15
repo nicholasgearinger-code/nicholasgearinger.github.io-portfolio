@@ -1234,10 +1234,21 @@ function buildCrystalFluidSimPlane(scene, y, size, sampleHeight) {
     const sunDir = vec3(0.35, 0.3, -0.9).normalize();
     const reflectDir = reflect(viewDir.negate(), normalWorld);
     const sunAlign = clamp(dot(reflectDir, sunDir), 0, 1);
-    const glint = pow(sunAlign, 48.0); // high power -> narrow, bright, streak-like highlights only where facets align closely
+    // Per "lots of flickering" — confirmed via consecutive-frame pixel
+    // diffing (not a guess): pow(48) was specular aliasing, a well-known
+    // rendering artifact — an exponent this high makes the highlight so
+    // narrow that tiny sub-pixel changes in wave normal (which happen
+    // continuously as real waves move) flip individual pixels in and out
+    // of the lit band discontinuously instead of shifting smoothly. The
+    // reference photo also confirms the fix independently: real sun
+    // glitter is soft and diffuse — many gentle overlapping highlights,
+    // not one razor-thin line. Softened significantly (48 -> 14) and the
+    // peak brightness pulled back to compensate for the wider, less
+    // concentrated highlight this produces.
+    const glint = pow(sunAlign, 14.0);
     return baseEmissiveFloored
       .add(skyHighlight.mul(fresnelTerm).mul(0.1))
-      .add(color(0xfff4e0).mul(glint).mul(2.2)); // warm sun-tone, not pure white — matches a real low-sun glint's color
+      .add(color(0xfff4e0).mul(glint).mul(1.1)); // warm sun-tone, not pure white — matches a real low-sun glint's color
   })();
 
   const mesh = new THREE.Mesh(geometry, material);

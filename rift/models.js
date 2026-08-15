@@ -491,6 +491,45 @@ function buildCoralInstances(species, placements) {
   return meshes;
 }
 
+// Real static instancing for any HEIGHT-NORMALIZED single-species model —
+// createRealSponge/createRealPlant both already follow the exact same
+// pattern createRealTree does (clone, normalize to 1 world unit tall,
+// expose userData.groundOffset), just without wind-sway, so this is the
+// same math as buildTreeInstances' own per-placement Y calculation,
+// generalized here rather than duplicated per model type. embedFraction
+// matches each model's own original per-instance value (sponge: 0.5 —
+// "sits more anchored into the substrate than a coral head"; plant: 1.0 —
+// "fully based at ground level... grows FROM the substrate, doesn't sink
+// into it") — NOT a shared constant, since these were deliberately
+// different per model type before this conversion and should stay that
+// way. placements: array of {x, z, groundY, rotationY, scale}. Returns an
+// array of THREE.InstancedMesh.
+function buildNormalizedInstances(cacheKey, buildReferenceFn, placements, embedFraction) {
+  const parts = getInstanceParts(cacheKey, buildReferenceFn);
+  if (!parts || placements.length === 0) return [];
+  const groundOffset = instanceGroundOffsetCache[cacheKey];
+  const meshes = buildInstancedMeshesFromParts(parts, placements.length);
+  for (let i = 0; i < placements.length; i++) {
+    const p = placements[i];
+    const y = p.groundY + groundOffset * p.scale * embedFraction;
+    _instTempPos.set(p.x, y, p.z);
+    _instTempEuler.set(0, p.rotationY, 0);
+    _instTempQuat.setFromEuler(_instTempEuler);
+    _instTempScale.setScalar(p.scale);
+    setInstanceMatrixAt(meshes, parts, i, _instTempPos, _instTempQuat, _instTempScale);
+  }
+  finalizeInstancedMeshes(meshes);
+  return meshes;
+}
+
+function buildSpongeInstances(placements) {
+  return buildNormalizedInstances("sponge", () => createRealSponge(), placements, 0.5);
+}
+
+function buildPlantInstances(placements) {
+  return buildNormalizedInstances("plant", () => createRealPlant(), placements, 1.0);
+}
+
 // Real tree instancing, WITH per-frame wind-sway support (trees are not
 // purely static — see main.js's existing sway update, preserved below
 // rather than dropped). speciesPlacements: an object keyed by species,
@@ -723,4 +762,4 @@ function createRealFishSchool() {
   return { group, mixer };
 }
 
-export { loadAngelfishModel, loadReefModel, loadCoralModel, loadTreeModel, loadSpongeModel, loadPlantModel, loadFishSchoolModel, createRealAngelfish, createRealReef, createRealCoral, createRealTree, createRealSponge, createRealPlant, createRealFishSchool, buildCoralInstances, buildTreeInstances, updateTreeInstanceSway };
+export { loadAngelfishModel, loadReefModel, loadCoralModel, loadTreeModel, loadSpongeModel, loadPlantModel, loadFishSchoolModel, createRealAngelfish, createRealReef, createRealCoral, createRealTree, createRealSponge, createRealPlant, createRealFishSchool, buildCoralInstances, buildTreeInstances, updateTreeInstanceSway, buildSpongeInstances, buildPlantInstances };

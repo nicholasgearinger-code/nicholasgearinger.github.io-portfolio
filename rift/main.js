@@ -13,7 +13,7 @@ import { createHorizonSilhouettes, updateHorizonSilhouettes, disposeHorizonSilho
 import { createWildlife, updateWildlife, disposeWildlife } from "./wildlife.js";
 import { createLandmark, updateLandmark, disposeLandmark, LANDMARK_POSITION } from "./landmarks.js";
 import { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers, getEffectiveValue, setOverride, resetOverrides, getTierRawSettings } from "./graphicsSettings.js";
-import { loadAngelfishModel, loadReefModel, loadCoralModel, loadTreeModel, loadSpongeModel, loadPlantModel, loadFishSchoolModel, createRealAngelfish, createRealReef, createRealCoral, createRealTree, createRealSponge, createRealPlant, createRealFishSchool, buildCoralInstances, buildTreeInstances, updateTreeInstanceSway } from "./models.js";
+import { loadAngelfishModel, loadReefModel, loadCoralModel, loadTreeModel, loadSpongeModel, loadPlantModel, loadFishSchoolModel, createRealAngelfish, createRealReef, createRealCoral, createRealTree, createRealSponge, createRealPlant, createRealFishSchool, buildCoralInstances, buildTreeInstances, updateTreeInstanceSway, buildSpongeInstances, buildPlantInstances } from "./models.js";
 import { createWeatherSystem, updateWeatherSystem, disposeWeatherSystem } from "./weather.js";
 import { createClouds, updateClouds, disposeClouds, getCloudOcclusionFactor, createCloudLayer, updateCloudLayer, disposeCloudLayer, createRealisticCloudDome, updateRealisticCloudDome, disposeRealisticCloudDome } from "./clouds.js";
 import {
@@ -1569,9 +1569,9 @@ function teardownLevel() {
   for (const mesh of realCoralMeshes) scene.remove(mesh);
   realCoralMeshes = [];
   realCoralPlacementPositions = [];
-  for (const sponge of realSponges) scene.remove(sponge);
+  for (const mesh of realSponges) scene.remove(mesh); // InstancedMesh objects now — see buildSpongeInstances
   realSponges = [];
-  for (const plant of realPlants) scene.remove(plant);
+  for (const mesh of realPlants) scene.remove(mesh); // InstancedMesh objects now — see buildPlantInstances
   realPlants = [];
   for (const school of realFishSchools) scene.remove(school.group);
   realFishSchools = [];
@@ -2941,6 +2941,7 @@ vec2 causticVoronoiF1F2(vec2 p) {
         const SPONGE_MAX_ATTEMPTS = 400;
         const spongeSeed = hashStringToSeed(WORLD_SEED + "::realSponges");
         const spongeRng = mulberry32(spongeSeed);
+        const spongePlacements = [];
         let spongesPlaced = 0;
         for (let i = 0; i < SPONGE_MAX_ATTEMPTS && spongesPlaced < SPONGE_COUNT; i++) {
           const angle = spongeRng() * Math.PI * 2;
@@ -2950,21 +2951,18 @@ vec2 causticVoronoiF1F2(vec2 p) {
           if (Math.hypot(x, z) > WORLD_BOUND_RADIUS - 8) continue;
           const groundY = sampleGroundHeight(x, z, terrainMesh); // was terrainHeightAt (the analytic function) — per "plant is underwater/not on land," the analytic estimate can diverge from the ACTUAL rendered terrain surface at some points, same category of fix already established for tree/fish placement
           if (groundY === null || groundY > LIQUID_LEVEL.crystal - 0.6) continue; // needs to be genuinely underwater, not on the dry island or right at the shoreline
-          const sponge = createRealSponge();
-          if (!sponge) continue;
           // Final size range picked to read as a real reef sponge
           // cluster relative to the existing coral pieces (roughly
           // 0.5-1.2 world units, similar order to the mid-sized coral
           // species) rather than dwarfing or disappearing next to them.
           const scale = 0.5 + spongeRng() * 0.7;
-          sponge.scale.setScalar(scale);
-          sponge.rotation.y = spongeRng() * Math.PI * 2;
-          sponge.position.set(x, groundY + sponge.userData.groundOffset * scale * 0.5, z); // ~50% embedded, a sponge sits more anchored into the substrate than a coral head does
-          scene.add(sponge);
-          realSponges.push(sponge);
+          const rotationY = spongeRng() * Math.PI * 2;
+          spongePlacements.push({ x, z, groundY, rotationY, scale });
           spongesPlaced++;
         }
-        console.log(`[models] sponges placed: ${spongesPlaced}/${SPONGE_COUNT}`);
+        const spongeMeshes = buildSpongeInstances(spongePlacements);
+        for (const mesh of spongeMeshes) { scene.add(mesh); realSponges.push(mesh); }
+        console.log(`[models] sponges placed: ${spongesPlaced}/${SPONGE_COUNT} (instanced, ${spongeMeshes.length} draw calls)`);
       }
 
       if (plantResult.status === "fulfilled") {
@@ -2974,6 +2972,7 @@ vec2 causticVoronoiF1F2(vec2 p) {
         const PLANT_MAX_ATTEMPTS = 300;
         const plantSeed = hashStringToSeed(WORLD_SEED + "::realPlants");
         const plantRng = mulberry32(plantSeed);
+        const plantPlacements = [];
         let plantsPlaced = 0;
         for (let i = 0; i < PLANT_MAX_ATTEMPTS && plantsPlaced < PLANT_COUNT; i++) {
           const angle = plantRng() * Math.PI * 2;
@@ -2983,21 +2982,18 @@ vec2 causticVoronoiF1F2(vec2 p) {
           if (Math.hypot(x, z) > WORLD_BOUND_RADIUS - 8) continue;
           const groundY = sampleGroundHeight(x, z, terrainMesh); // was terrainHeightAt — same fix as sponge above
           if (groundY === null || groundY > LIQUID_LEVEL.crystal - 0.6) continue;
-          const plant = createRealPlant();
-          if (!plant) continue;
           // The source file's own bounds are notably wider than tall
           // (~1.5-1.7 horizontal vs ~0.7 vertical) — a sprawling frond
           // cluster, not an upright plant — sized to read as a modest
           // seafloor accent rather than a giant fan.
           const scale = 0.35 + plantRng() * 0.35;
-          plant.scale.setScalar(scale);
-          plant.rotation.y = plantRng() * Math.PI * 2;
-          plant.position.set(x, groundY + plant.userData.groundOffset * scale, z); // fully based at ground level, not embedded — a plant grows FROM the substrate, doesn't sink into it the way coral/sponge do
-          scene.add(plant);
-          realPlants.push(plant);
+          const rotationY = plantRng() * Math.PI * 2;
+          plantPlacements.push({ x, z, groundY, rotationY, scale });
           plantsPlaced++;
         }
-        console.log(`[models] plants placed: ${plantsPlaced}/${PLANT_COUNT}`);
+        const plantMeshes = buildPlantInstances(plantPlacements);
+        for (const mesh of plantMeshes) { scene.add(mesh); realPlants.push(mesh); }
+        console.log(`[models] plants placed: ${plantsPlaced}/${PLANT_COUNT} (instanced, ${plantMeshes.length} draw calls)`);
       }
 
       if (fishSchoolResult.status === "fulfilled") {

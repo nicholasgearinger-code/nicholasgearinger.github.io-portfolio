@@ -996,12 +996,22 @@ lensMaterial.colorNode = Fn(() => {
   // real reference photos of rain-on-glass show a moderate NUMBER of
   // large, clearly-defined drops, not a dense field of micro-ripples.
   const cellSize = float(6.0);
+  // Per real WGSL compile error ("Expected a `,`, but got a
+  // AbstractFloatLiteral") once Ocean FX was actually turned on for the
+  // first time — this whole function is genuinely new, untested code
+  // (never compiled until oceanEffectsEnabled was true), and the exact
+  // line is hard to pin down without seeing the raw generated WGSL. Every
+  // bare JS number below that sits alongside a computed node argument in
+  // the SAME function call is now explicitly wrapped in float() —
+  // defensive and comprehensive rather than guessing at one exact spot.
+  const zero = float(0);
+  const one = float(1);
   // Slow downward drift, tied to the real self-managed time uniform — real
   // droplets on glass slide/settle gradually rather than staying perfectly
   // static, and this is also what makes the pattern eventually cycle
   // through fresh droplet positions instead of showing the exact same
   // frozen arrangement for an entire storm.
-  const cellUV = screenUV.mul(cellSize).add(vec2(0, lensTimeUniform.mul(0.15)));
+  const cellUV = screenUV.mul(cellSize).add(vec2(zero, lensTimeUniform.mul(0.15)));
   const cellId = floor(cellUV);
   const cellLocal = fract(cellUV);
   const seed = cellId.x.add(cellId.y.mul(57.0));
@@ -1011,21 +1021,21 @@ lensMaterial.colorNode = Fn(() => {
   // — avoiding an API call not yet confirmed anywhere in this project,
   // when smoothstep already does the same job with functions already
   // proven working here) that's ~0 or ~1 per cell.
-  const dropletPresent = smoothstep(0.5, 0.51, hash(seed.add(71.0)));
+  const dropletPresent = smoothstep(float(0.5), float(0.51), hash(seed.add(71.0)));
   const distToCenter = cellLocal.sub(dropletCenter).length();
   const dropletRadius = float(0.22);
-  const inDroplet = float(1.0).sub(smoothstep(dropletRadius * 0.6, dropletRadius, distToCenter));
+  const inDroplet = one.sub(smoothstep(dropletRadius.mul(0.6), dropletRadius, distToCenter));
   const dir = cellLocal.sub(dropletCenter);
   // Refraction-like offset — pulls the sample toward the droplet's own
   // center, the real optical effect of light bending through a curved
   // water droplet (a crude but recognizable magnifying-glass distortion),
   // scaled by how visible this effect should currently be.
   const distortAmount = inDroplet.mul(dropletPresent).mul(0.045).mul(lensIntensityUniform);
-  const distortedUV = clamp(screenUV.sub(dir.mul(distortAmount)), 0, 1);
+  const distortedUV = clamp(screenUV.sub(dir.mul(distortAmount)), zero, one);
   const sceneColor = texture(lensRenderTarget.texture, distortedUV);
   // A soft bright rim right at each droplet's own edge — real water
   // droplets catch and concentrate light at their boundary.
-  const rim = smoothstep(dropletRadius * 0.55, dropletRadius * 0.95, distToCenter).mul(inDroplet);
+  const rim = smoothstep(dropletRadius.mul(0.55), dropletRadius.mul(0.95), distToCenter).mul(inDroplet);
   const rimBoost = rim.mul(0.2).mul(lensIntensityUniform);
   const gated = inDroplet.mul(dropletPresent);
   // Real sun-glint boost — per the existing, already-worked-out
@@ -1034,9 +1044,9 @@ lensMaterial.colorNode = Fn(() => {
   // where the sun actually is on screen catch extra light, same as real
   // water droplets do.
   const sunDist = screenUV.sub(lensSunScreenPos).length();
-  const sunGlow = smoothstep(0.25, 0.0, sunDist).mul(gated).mul(0.5);
+  const sunGlow = smoothstep(float(0.25), zero, sunDist).mul(gated).mul(0.5);
   const finalColor = sceneColor.rgb.add(vec3(rimBoost).mul(gated)).add(vec3(1.0, 0.9, 0.7).mul(sunGlow));
-  return vec4(finalColor, 1.0);
+  return vec4(finalColor, one);
 })();
 lensQuadScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), lensMaterial));
 

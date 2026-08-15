@@ -1,5 +1,27 @@
 import * as THREE from "three";
 import { getGraphicsSettings } from "./graphicsSettings.js";
+
+// Per real WebGPU error "[Buffer (unlabeled)] used in submit while
+// destroyed" hit switching Ember -> Verdant — confirmed via a real
+// devtools GPUValidationError, not guessed. Root cause: renderer.render()
+// issues real GPU work (queue.submit()) that finishes ASYNCHRONOUSLY, off
+// the JS thread — calling .dispose() on a geometry/material/texture
+// SYNCHRONOUSLY in the same tick a level is torn down can destroy a
+// buffer the GPU hasn't actually finished using yet from the previous
+// frame's submission, which WebGPU validates strictly (WebGL silently
+// tolerated the same eager disposal). This is a well-documented Three.js
+// WebGPU migration issue, not something specific to this codebase — the
+// Three.js community's own recommended mitigation is exactly this: defer
+// the actual dispose() call past the current frame rather than doing it
+// eagerly. scene.remove() itself is NOT deferred (stays synchronous, so
+// nothing wrong ever gets drawn) — only the GPU-resource-freeing
+// .dispose() calls are pushed past a frame boundary. Double-rAF (two
+// frame boundaries, not one) for extra margin, since a single frame isn't
+// guaranteed long enough for the GPU process to fully catch up.
+function riftDeferDispose(disposeFn) {
+  requestAnimationFrame(() => requestAnimationFrame(disposeFn));
+}
+
 // THREE.Water tried and removed three times (twice on this file's own
 // near-water plane, once on a separate background "skirt" plane that
 // used to extend the ocean out to the horizon) — a rigid flat reflective
@@ -570,9 +592,11 @@ function updateRiverFlowStrip(handle, dt) {
 function disposeRiverFlowStrip(scene, handle) {
   if (!handle) return;
   scene.remove(handle.group);
-  handle.group.traverse((obj) => {
-    if (obj.geometry) obj.geometry.dispose();
-    if (obj.material) obj.material.dispose(); // the shared pooled texture itself intentionally not disposed
+  riftDeferDispose(() => {
+    handle.group.traverse((obj) => {
+      if (obj.geometry) obj.geometry.dispose();
+      if (obj.material) obj.material.dispose(); // the shared pooled texture itself intentionally not disposed
+    });
   });
 }
 
@@ -614,8 +638,10 @@ function updateRiverCurrent(handle, dt) {
 function disposeRiverCurrent(scene, handle) {
   if (!handle) return;
   scene.remove(handle.points);
-  handle.points.geometry.dispose();
-  handle.points.material.dispose();
+  riftDeferDispose(() => {
+    handle.points.geometry.dispose();
+    handle.points.material.dispose();
+  });
 }
 
 // A wide craggy rock wall spanning the whole cliff face the waterfall
@@ -661,8 +687,10 @@ function createCliffWall(scene, topY, bottomY, x, z, width, seedRand) {
 function disposeCliffWall(scene, handle) {
   if (!handle) return;
   scene.remove(handle.mesh);
-  handle.mesh.geometry.dispose();
-  handle.mesh.material.dispose();
+  riftDeferDispose(() => {
+    handle.mesh.geometry.dispose();
+    handle.mesh.material.dispose();
+  });
 }
 
 // The pond feeding the waterfall from above — without this the falls had
@@ -714,20 +742,24 @@ function updateSourcePond(handle, elapsed) {
 function disposeSourcePond(scene, handle) {
   if (!handle) return;
   scene.remove(handle.mesh);
-  handle.mesh.geometry.dispose();
-  handle.mesh.material.dispose();
+  riftDeferDispose(() => {
+    handle.mesh.geometry.dispose();
+    handle.mesh.material.dispose();
+  });
 }
 
 function disposeWaterfall(scene, handle) {
   if (!handle) return;
   scene.remove(handle.mesh);
-  handle.mesh.geometry.dispose();
-  handle.mesh.material.dispose(); // shared pooled texture itself intentionally not disposed
   scene.remove(handle.foam);
-  handle.foam.material.dispose();
   scene.remove(handle.splash);
-  handle.splash.geometry.dispose();
-  handle.splash.material.dispose();
+  riftDeferDispose(() => {
+    handle.mesh.geometry.dispose();
+    handle.mesh.material.dispose(); // shared pooled texture itself intentionally not disposed
+    handle.foam.material.dispose();
+    handle.splash.geometry.dispose();
+    handle.splash.material.dispose();
+  });
 }
 
 // -----------------------------------------------------------------------------
@@ -1915,42 +1947,44 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
 function disposeLiquidPlane(scene, handle) {
   if (!handle) return;
   scene.remove(handle.mesh);
-  handle.mesh.geometry.dispose();
-  handle.mesh.material.dispose();
-  // handle.rippleTexture IS disposed here — it's a per-instance clone
-  // (see createLiquidPlane), not the shared module-level cached texture,
-  // so this plane owns it exclusively. The shared original stays
-  // resident, same reasoning as clouds.js's own realisticCloudTexture.
-  if (handle.rippleTexture) handle.rippleTexture.dispose();
-  if (handle.backMesh) {
-    // Shares handle.mesh's geometry (see createLiquidPlane) — already
-    // disposed above, only the material is this mesh's own.
-    scene.remove(handle.backMesh);
-    handle.backMesh.material.dispose();
-  }
-  if (handle.glow) {
-    scene.remove(handle.glow);
-    handle.glow.geometry.dispose();
-    handle.glow.material.dispose();
-  }
-  if (handle.shimmer) {
-    scene.remove(handle.shimmer);
-    handle.shimmer.geometry.dispose();
-    handle.shimmer.material.map.dispose();
-    handle.shimmer.material.dispose();
-  }
-  if (handle.rocks) {
-    scene.remove(handle.rocks.mesh);
-    handle.rocks.mesh.geometry.dispose();
-    handle.rocks.mesh.material.dispose();
-  }
-  if (handle.flowBeads) {
-    scene.remove(handle.flowBeads.group);
-    for (const b of handle.flowBeads.beads) {
-      b.mesh.geometry.dispose();
-      b.mesh.material.dispose();
+  if (handle.backMesh) scene.remove(handle.backMesh);
+  if (handle.glow) scene.remove(handle.glow);
+  if (handle.shimmer) scene.remove(handle.shimmer);
+  if (handle.rocks) scene.remove(handle.rocks.mesh);
+  if (handle.flowBeads) scene.remove(handle.flowBeads.group);
+  riftDeferDispose(() => {
+    handle.mesh.geometry.dispose();
+    handle.mesh.material.dispose();
+    // handle.rippleTexture IS disposed here — it's a per-instance clone
+    // (see createLiquidPlane), not the shared module-level cached texture,
+    // so this plane owns it exclusively. The shared original stays
+    // resident, same reasoning as clouds.js's own realisticCloudTexture.
+    if (handle.rippleTexture) handle.rippleTexture.dispose();
+    if (handle.backMesh) {
+      // Shares handle.mesh's geometry (see createLiquidPlane) — already
+      // disposed above, only the material is this mesh's own.
+      handle.backMesh.material.dispose();
     }
-  }
+    if (handle.glow) {
+      handle.glow.geometry.dispose();
+      handle.glow.material.dispose();
+    }
+    if (handle.shimmer) {
+      handle.shimmer.geometry.dispose();
+      handle.shimmer.material.map.dispose();
+      handle.shimmer.material.dispose();
+    }
+    if (handle.rocks) {
+      handle.rocks.mesh.geometry.dispose();
+      handle.rocks.mesh.material.dispose();
+    }
+    if (handle.flowBeads) {
+      for (const b of handle.flowBeads.beads) {
+        b.mesh.geometry.dispose();
+        b.mesh.material.dispose();
+      }
+    }
+  });
 }
 
 
@@ -1985,6 +2019,8 @@ function updateOceanSurfaceDetail(handle, elapsed, dayAmount = 1) {
 function disposeOceanSurfaceDetail(scene, handle) {
   if (!handle) return;
   scene.remove(handle.whitecaps);
-  handle.whitecaps.geometry.dispose();
-  handle.whitecaps.material.dispose();
+  riftDeferDispose(() => {
+    handle.whitecaps.geometry.dispose();
+    handle.whitecaps.material.dispose();
+  });
 }

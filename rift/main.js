@@ -1201,19 +1201,26 @@ const MAX_DYNAMIC_FIRES = 10; // defensive cap so spawns can never outpace burno
 function teardownLevel() {
   if (scene.environment) {
     scene.environment = null;
-    if (skyEnvRenderTarget) { skyEnvRenderTarget.dispose(); skyEnvRenderTarget = null; }
+    if (skyEnvRenderTarget) {
+      const targetToDispose = skyEnvRenderTarget;
+      riftDeferDispose(() => targetToDispose.dispose());
+      skyEnvRenderTarget = null;
+    }
     lastSkyEnvZenith = null; lastSkyEnvHorizon = null; // forces a fresh regenerate next time crystal loads, rather than comparing against a stale color from the previous visit
   }
   if (terrainMesh) {
     scene.remove(terrainMesh);
-    terrainMesh.geometry.dispose();
-    // The sand normal-map texture (crystal-only, see buildLevel) is a
-    // per-level CLONE — material.dispose() below does NOT automatically
-    // dispose textures attached to it, so this needs its own explicit
-    // call, same as every other per-instance texture clone in this
-    // project (see liquid.js's rippleTexture/mirrorWater disposal).
-    if (terrainMesh.material.normalMap) terrainMesh.material.normalMap.dispose();
-    terrainMesh.material.dispose();
+    const meshToDispose = terrainMesh;
+    riftDeferDispose(() => {
+      meshToDispose.geometry.dispose();
+      // The sand normal-map texture (crystal-only, see buildLevel) is a
+      // per-level CLONE — material.dispose() below does NOT automatically
+      // dispose textures attached to it, so this needs its own explicit
+      // call, same as every other per-instance texture clone in this
+      // project (see liquid.js's rippleTexture/mirrorWater disposal).
+      if (meshToDispose.material.normalMap) meshToDispose.material.normalMap.dispose();
+      meshToDispose.material.dispose();
+    });
     terrainMesh = null;
   }
   disposeLiquidPlane(scene, liquidHandle);
@@ -1232,8 +1239,10 @@ function teardownLevel() {
   sourcePondHandle = null;
   for (const floorMesh of caveFloorMeshes) {
     scene.remove(floorMesh);
-    floorMesh.geometry.dispose();
-    floorMesh.material.dispose();
+    riftDeferDispose(() => {
+      floorMesh.geometry.dispose();
+      floorMesh.material.dispose();
+    });
   }
   caveFloorMeshes = [];
   disposeAtmosphericParticles(scene, atmosphereHandle);
@@ -1261,9 +1270,11 @@ function teardownLevel() {
   allCrystals = [];
   for (const handle of decorationHandles) {
     scene.remove(handle.group);
-    handle.group.traverse((obj) => {
-      if (obj.geometry) obj.geometry.dispose();
-      if (obj.material) obj.material.dispose();
+    riftDeferDispose(() => {
+      handle.group.traverse((obj) => {
+        if (obj.geometry) obj.geometry.dispose();
+        if (obj.material) obj.material.dispose();
+      });
     });
   }
   decorationHandles.length = 0;
@@ -1344,6 +1355,18 @@ function riftEnsureTextureImage(texture) {
     texture.image = placeholderCanvas;
   }
   return texture;
+}
+// Per real WebGPU error "[Buffer (unlabeled)] used in submit while
+// destroyed" hit switching Ember -> Verdant — same real GPUValidationError,
+// same fix as liquid.js's own copy of this helper (see its comment there
+// for the full explanation): renderer.render()'s queue.submit() finishes
+// asynchronously, off the JS thread, so disposing a geometry/material
+// buffer synchronously in the same tick a level tears down can destroy
+// something the GPU hasn't actually finished using yet from the previous
+// frame. scene.remove() stays synchronous (correct immediately); only the
+// GPU-resource-freeing .dispose() calls are pushed past a frame boundary.
+function riftDeferDispose(disposeFn) {
+  requestAnimationFrame(() => requestAnimationFrame(disposeFn));
 }
 let sandNormalTexture = null;
 function getSandNormalTexture() {

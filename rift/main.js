@@ -4,7 +4,7 @@ import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERF
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
 import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, createUnderwaterLightShaft, updateLightShafts, disposeLightShafts, createRockCluster, createCaveMouth, applyVerticalGradient } from "./decorations.js";
-import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail } from "./liquid.js";
+import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, updateFluidSimWater, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail } from "./liquid.js";
 import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
 import { createGrass, updateGrass, disposeGrass, createFlowers, updateFlowers, disposeFlowers, createFootstepGlowSystem, spawnFootstepGlow, updateFootstepGlowSystem, disposeFootstepGlowSystem } from "./vegetation.js";
@@ -4287,6 +4287,40 @@ function animate() {
   // behind here is never visible. biome-gated inside updateLiquidPlane
   // itself (crystal only), so this is harmless to pass unconditionally.
   updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, camera.position, sun.position, dayNight.skyHorizon, reflectionRenderTarget.texture, reflectionTextureMatrix, refractionRenderTarget.texture, refractionResolution, weatherHandle ? weatherHandle.rainIntensity : 0, dayNight.dayAmount);
+  // Real GPU compute dispatch for the fluid-sim water (see liquid.js's
+  // buildCrystalFluidSimPlane) — separate from updateLiquidPlane above
+  // since dispatching a compute shader needs the renderer, which only
+  // this file holds. Deliberately NOT awaited here: this whole animate()
+  // loop is a plain synchronous requestAnimationFrame callback, not
+  // renderer.setAnimationLoop's own async-aware loop (which is what the
+  // standalone prototype used) — converting the entire render loop to
+  // async is real architectural risk well beyond this stage's scope, not
+  // attempted blind here. Firing this off without awaiting means the
+  // compute dispatch's internal awaits resolve across whatever future
+  // microtask ticks the browser schedules them on, which can lag the
+  // visible wave motion by roughly a frame under load — a known,
+  // deliberate simplification for this stage, not a bug, and safe
+  // specifically because the buffer-disposal timing fix already applied
+  // elsewhere prevents this from ever racing against a level teardown.
+  if (liquidHandle && liquidHandle.fluidSim) updateFluidSimWater(liquidHandle, renderer);
+  // TEMPORARY DIAGNOSTIC — per "no change" even after a 5s timeout that
+  // should have guaranteed SOME log from inside updateFluidSimWater by
+  // now. This is a PLAIN, synchronous, unconditional log (zero async,
+  // zero try/catch) placed directly at this call site, specifically to
+  // answer one narrow question with certainty: does animate() actually
+  // reach this exact line every frame, and what does liquidHandle look
+  // like when it does? If THIS never shows up either, animate() itself
+  // isn't reaching this point (an earlier throw/return this frame) — if
+  // it DOES show up but "has fluidSim: false", the handle reaching this
+  // point isn't the one built by buildCrystalFluidSimPlane. Remove once
+  // answered.
+  if (!window.__riftFluidSimDiagLogged) {
+    window.__riftFluidSimDiagLogged = 0;
+  }
+  if (window.__riftFluidSimDiagLogged < 5) {
+    window.__riftFluidSimDiagLogged++;
+    console.log("[main] fluid-sim diagnostic — reached call site. liquidHandle:", liquidHandle, "has fluidSim:", liquidHandle ? liquidHandle.fluidSim : "(no handle)");
+  }
   updateWaterfall(waterfallHandle, dt, elapsedTime);
   updateOceanSurfaceDetail(oceanSurfaceDetailHandle, elapsedTime, dayNight.dayAmount);
   // Real angelfish (models.js) — AnimationMixer drives the loaded skeletal

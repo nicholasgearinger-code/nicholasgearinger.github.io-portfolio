@@ -22,6 +22,24 @@ function riftDeferDispose(disposeFn) {
   requestAnimationFrame(() => requestAnimationFrame(disposeFn));
 }
 
+// Same WebGPU null-image fix as main.js's own copy of this helper (see
+// its comment there for the full explanation) — a freshly-created
+// THREE.Texture's `.image` is `null` until TextureLoader's async fetch
+// completes, and WebGPURenderer's Textures.updateTexture reads
+// `image.complete` with no null-check, throwing on any frame rendered
+// before the photo arrives. This file has its own TextureLoader calls
+// (getRippleNormalTexture, getFoamDetailTexture) separate from main.js's,
+// so it needs its own copy of this helper — ES modules don't share scope.
+function riftEnsureTextureImage(texture) {
+  if (!texture.image) {
+    const placeholderCanvas = document.createElement("canvas");
+    placeholderCanvas.width = 1;
+    placeholderCanvas.height = 1;
+    texture.image = placeholderCanvas;
+  }
+  return texture;
+}
+
 // THREE.Water tried and removed three times (twice on this file's own
 // near-water plane, once on a separate background "skirt" plane that
 // used to extend the ocean out to the horizon) — a rigid flat reflective
@@ -781,12 +799,12 @@ let rippleNormalTexture = null;
 function getRippleNormalTexture() {
   if (rippleNormalTexture) return rippleNormalTexture;
   const url = new URL("textures/waternormals.jpg", import.meta.url).href;
-  rippleNormalTexture = new THREE.TextureLoader().load(
+  rippleNormalTexture = riftEnsureTextureImage(new THREE.TextureLoader().load(
     url,
     () => console.log("[liquid] ripple normal texture loaded:", url),
     undefined,
     (err) => console.error("[liquid] ripple normal texture FAILED to load:", url, err)
-  );
+  ));
   rippleNormalTexture.wrapS = rippleNormalTexture.wrapT = THREE.RepeatWrapping;
   return rippleNormalTexture;
 }
@@ -804,12 +822,12 @@ let foamDetailTexture = null;
 function getFoamDetailTexture() {
   if (foamDetailTexture) return foamDetailTexture;
   const url = new URL("textures/oceanfoam.jpg", import.meta.url).href;
-  foamDetailTexture = new THREE.TextureLoader().load(
+  foamDetailTexture = riftEnsureTextureImage(new THREE.TextureLoader().load(
     url,
     () => console.log("[liquid] foam detail texture loaded:", url),
     undefined,
     (err) => console.error("[liquid] foam detail texture FAILED to load:", url, err)
-  );
+  ));
   foamDetailTexture.wrapS = foamDetailTexture.wrapT = THREE.RepeatWrapping;
   return foamDetailTexture;
 }

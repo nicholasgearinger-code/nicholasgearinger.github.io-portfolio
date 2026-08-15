@@ -886,6 +886,26 @@ function buildCrystalFluidSimPlane(scene, y, size, sampleHeight) {
   const velocityBuffer = instancedArray(CELL_COUNT, "float");
   let heightBufferNode = heightBufferA; // always points at the buffer computeUpdate currently reads FROM — swapped by updateFluidSimWater each frame
 
+  // Per "water physics are not working" — confirmed via real pixel-
+  // diffing of a phone recording AND the on-screen dispatch counter
+  // together: dispatch genuinely runs continuously (#7789 and climbing),
+  // yet the surface is completely static. That combination points at
+  // TSL's built-in `time` node specifically — it's normally driven by
+  // renderer.render()'s per-frame update cycle, and this shader is only
+  // ever dispatched via renderer.compute(), never render(). If `time`
+  // isn't actually advancing inside a compute-only context, every
+  // dispatch injects the identical frozen wave-forcing value — with the
+  // light damping (0.994) here, a lightly-damped system driven by
+  // CONSTANT forcing will genuinely settle into a true static
+  // equilibrium within a few seconds and stay there, which matches
+  // exactly what thousands of successful-but-invisible dispatches would
+  // look like. Rather than depend on uncertain built-in update timing,
+  // this is a real, self-managed uniform — explicitly set from main.js's
+  // own already-tracked elapsedTime every frame (see updateFluidSimWater
+  // below), completely independent of whatever renderer.compute() does
+  // or doesn't do to the global time node.
+  const fluidTimeUniform = uniform(0);
+
   // Real shore damping, Stage 2 — per "too much wave going onto the land."
   // Precomputed ONCE here in plain JS using the REAL terrain heightfield
   // (sampleHeight, the same callback the old Gerstner path already used
@@ -988,9 +1008,9 @@ function buildCrystalFluidSimPlane(scene, y, size, sampleHeight) {
     const jitter = fluidSimHash21(vec2(cellWorldX.mul(0.05), cellWorldZ.mul(0.05))).sub(0.5).mul(0.4);
     // Per "wave motion could be slower" — time multipliers cut roughly
     // in half across chop and the dominant swell below.
-    const chop1 = sin(cellWorldX.mul(0.28).add(cellWorldZ.mul(0.11)).add(time.mul(0.65)).add(jitter));
-    const chop2 = sin(cellWorldX.mul(0.14).sub(cellWorldZ.mul(0.22)).sub(time.mul(0.45)).add(jitter.mul(0.7)));
-    const chop3 = sin(cellWorldX.mul(0.5).add(cellWorldZ.mul(0.4)).add(time.mul(0.85)).add(1.7).add(jitter.mul(1.3)));
+    const chop1 = sin(cellWorldX.mul(0.28).add(cellWorldZ.mul(0.11)).add(fluidTimeUniform.mul(0.65)).add(jitter));
+    const chop2 = sin(cellWorldX.mul(0.14).sub(cellWorldZ.mul(0.22)).sub(fluidTimeUniform.mul(0.45)).add(jitter.mul(0.7)));
+    const chop3 = sin(cellWorldX.mul(0.5).add(cellWorldZ.mul(0.4)).add(fluidTimeUniform.mul(0.85)).add(1.7).add(jitter.mul(1.3)));
     const chop = chop1.mul(0.4).add(chop2.mul(0.3)).add(chop3.mul(0.2));
     // Per "just some animated ripples, no movement" — chop1/2/3 above are
     // all similarly fast/short-wavelength, so together they read as fine
@@ -1013,7 +1033,7 @@ function buildCrystalFluidSimPlane(scene, y, size, sampleHeight) {
     // most of the range toward the bottom, leaving only a narrow band
     // near the top at full height — narrow crests, broad troughs), then
     // remap back to [-1,1].
-    const swellPhase = cellWorldX.mul(0.035).add(cellWorldZ.mul(0.02)).add(time.mul(0.35));
+    const swellPhase = cellWorldX.mul(0.035).add(cellWorldZ.mul(0.02)).add(fluidTimeUniform.mul(0.35));
     const swellNorm = sin(swellPhase).add(1).mul(0.5); // [-1,1] -> [0,1]
     const bigSwell = pow(swellNorm, 1.8).mul(2).sub(1); // sharpened, back to [-1,1]
     // Per "not much vertical waves to look real" — 0.35/0.15 was an
@@ -1192,6 +1212,7 @@ function buildCrystalFluidSimPlane(scene, y, size, sampleHeight) {
     mesh,
     computeInit, computeUpdate, computeCopyBack,
     heightBufferA, heightBufferB,
+    fluidTimeUniform, // self-managed clock — see its own comment above for why; updateFluidSimWater sets .value from main.js's real elapsedTime every frame
     initialized: false, // updateFluidSimWater dispatches computeInit exactly once, the first time it's called for this handle
     getHeightBufferNode: () => heightBufferNode,
     setHeightBufferNode: (n) => { heightBufferNode = n; },
@@ -1219,8 +1240,9 @@ function buildCrystalFluidSimPlane(scene, y, size, sampleHeight) {
 // was built to diagnose computeAsync specifically stalling in a way that
 // turned out to be a diagnostic-logging bug, not a real hang (see chat) —
 // none of that complexity is needed for a synchronous call.
-function updateFluidSimWater(handle, renderer) {
+function updateFluidSimWater(handle, renderer, elapsedTime) {
   if (!handle || !handle.fluidSim) return;
+  if (handle.fluidTimeUniform) handle.fluidTimeUniform.value = elapsedTime;
   const diagEl = typeof window !== "undefined" ? window.riftFluidSimDiagEl : null;
   if (diagEl) diagEl.style.display = "block";
   if (handle.fluidSimBroken) {
@@ -1252,7 +1274,7 @@ function updateFluidSimWater(handle, renderer) {
     // itself is the problem — most likely iOS Safari's WebGPU compute
     // support behaving differently than the desktop Chrome this was last
     // confirmed working on.
-    if (diagEl) diagEl.textContent = "wave: " + (canSyncCompute ? "sync" : "async-fallback") + ", dispatch #" + handle.fluidSimDispatchCount;
+    if (diagEl) diagEl.textContent = "wave: " + (canSyncCompute ? "sync" : "async-fallback") + ", #" + handle.fluidSimDispatchCount + ", t=" + elapsedTime.toFixed(1);
   } catch (err) {
     console.error("[liquid] fluid-sim: compute dispatch failed:", err);
     // Stops retrying every frame once this happens — if compute doesn't

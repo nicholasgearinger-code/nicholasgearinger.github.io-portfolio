@@ -4307,7 +4307,7 @@ function animate() {
   // renderer's synchronous compute() (see updateFluidSimWater's own
   // comment for why) — a plain, ordinary synchronous call, same as
   // everything else in this frame, no async/await involved.
-  if (liquidHandle && liquidHandle.fluidSim) updateFluidSimWater(liquidHandle, renderer);
+  if (liquidHandle && liquidHandle.fluidSim) updateFluidSimWater(liquidHandle, renderer, elapsedTime);
   updateWaterfall(waterfallHandle, dt, elapsedTime);
   updateOceanSurfaceDetail(oceanSurfaceDetailHandle, elapsedTime, dayNight.dayAmount);
   // Real angelfish (models.js) — AnimationMixer drives the loaded skeletal

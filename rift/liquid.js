@@ -1016,22 +1016,11 @@ function buildCrystalFluidSimPlane(scene, y, size) {
   });
 
   material.positionNode = Fn(() => {
+    // Diagnostic wave (confirmed positionNode works — see chat) removed.
+    // heightAtVertex alone now, straight from the compute buffer, so the
+    // next test isolates the buffer path specifically.
     const heightAtVertex = heightBufferNode.element(cellIdx);
-    // TEMPORARY DIAGNOSTIC — per "not physically based, nothing is
-    // reactive or simulated": need to isolate whether positionNode
-    // itself is even taking effect on this material at all, separate
-    // from whether the compute buffer's contents are correct. This is a
-    // large (2-unit), obviously fast, PURELY time+position-based wave —
-    // zero dependency on the compute buffer. ADDED on top of the real
-    // buffer displacement below, not replacing it, specifically so the
-    // two are distinguishable: if you see ONE large obvious wave moving
-    // uniformly across the whole plane, positionNode works and the bug
-    // is in the compute buffer path specifically. If you see NOTHING
-    // moving at all, positionNode itself isn't taking effect on this
-    // material/renderer — a different, more fundamental problem. Revert
-    // this line once that's confirmed either way.
-    const diagnosticWave = sin(positionLocal.x.mul(0.08).add(time.mul(2.0))).mul(2.0);
-    return positionLocal.add(vec3(0, heightAtVertex.add(diagnosticWave), 0));
+    return positionLocal.add(vec3(0, heightAtVertex, 0));
   })();
   material.normalNode = computeWaveNormal();
 
@@ -1073,14 +1062,45 @@ function buildCrystalFluidSimPlane(scene, y, size) {
 // updateLiquidPlane (which is CPU-side only) because dispatching a compute
 // shader needs the renderer, which only main.js holds. Called from
 // main.js's animate loop, crystal-and-fluid-sim-enabled only.
+let fluidSimLoggedFirstDispatch = false;
+let fluidSimDispatchCount = 0;
 async function updateFluidSimWater(handle, renderer) {
   if (!handle || !handle.fluidSim) return;
-  if (!handle.initialized) {
-    await renderer.computeAsync(handle.computeInit);
-    handle.initialized = true;
+  // Guards against overlapping dispatches — this is called once per
+  // animate() frame WITHOUT being awaited there (see main.js's own
+  // comment on that call site), so if one call's computeAsync chain
+  // hasn't finished by the time the next frame fires, this skips that
+  // frame's dispatch rather than letting two overlapping compute
+  // sequences race each other against the same buffers.
+  if (handle.updating) return;
+  handle.updating = true;
+  try {
+    if (!handle.initialized) {
+      await renderer.computeAsync(handle.computeInit);
+      handle.initialized = true;
+      console.log("[liquid] fluid-sim: computeInit dispatched");
+    }
+    await renderer.computeAsync(handle.computeUpdate);
+    await renderer.computeAsync(handle.computeCopyBack);
+    fluidSimDispatchCount++;
+    if (!fluidSimLoggedFirstDispatch) {
+      fluidSimLoggedFirstDispatch = true;
+      console.log("[liquid] fluid-sim: first computeUpdate+computeCopyBack dispatch succeeded");
+    }
+    // Per "not physically based, nothing is reactive" — a real, visible
+    // confirmation signal in the console: if this count is climbing over
+    // time (check again a few seconds later), the compute dispatch is
+    // genuinely running every frame. If it's NOT climbing, the dispatch
+    // itself is stalling somewhere above, independent of anything
+    // visual.
+    if (fluidSimDispatchCount % 180 === 0) {
+      console.log("[liquid] fluid-sim: dispatch count =", fluidSimDispatchCount);
+    }
+  } catch (err) {
+    console.error("[liquid] fluid-sim: computeAsync threw:", err);
+  } finally {
+    handle.updating = false;
   }
-  await renderer.computeAsync(handle.computeUpdate);
-  await renderer.computeAsync(handle.computeCopyBack);
   // computeUpdate reads FROM heightBufferA and writes INTO heightBufferB;
   // computeCopyBack then copies B back into A — so heightBufferA always
   // holds the current, fully-settled state by the time this returns,

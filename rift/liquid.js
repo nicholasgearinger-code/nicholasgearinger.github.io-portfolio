@@ -1084,25 +1084,24 @@ function buildCrystalFluidSimPlane(scene, y, size, sampleHeight) {
   })();
   material.normalNode = computeWaveNormal();
 
-  // Minimal two-tone height blend for this stage — deep base color at
-  // rest, brightening toward the style's own froth color at real wave
-  // peaks. Real foam (procedural + photo-texture blend, matching what
-  // the disabled Gerstner-path shader already had) is deliberately a
-  // later stage, not attempted here.
+  // Per "a lot of banding, make it look more like real ocean" — a real
+  // photo of open ocean (see chat) reads as a fairly consistent deep
+  // blue-teal, with SUBTLE brightness variation from the surface shape,
+  // not sweeping shifts between two very different colors. The previous
+  // version blended all the way from deep blue to near-white
+  // (style.frothColor) on every wave cycle — even at a modest 0.4
+  // multiplier, that swing between two very different hues is exactly
+  // what reads as banding/stripes. This blends toward a SLIGHTLY
+  // brighter version of the SAME deep color instead of a different hue
+  // entirely, and much less of it — real whitecap foam (a genuinely
+  // different white color) is deliberately a separate, later stage
+  // rather than being faked here via a height threshold.
   material.colorNode = Fn(() => {
     const heightAtVertex = heightBufferNode.element(cellIdx);
     const deep = color(style.baseColor);
-    const crest = color(style.frothColor);
-    // Per "blue and white lines" — the previous 0.9 multiplier meant the
-    // color swung across nearly its FULL deep-to-crest range on every
-    // wave cycle, reading as hard periodic banding rather than subtle
-    // color variation. Pulled back further (0.9 -> 0.4) so only genuine
-    // wave PEAKS approach the bright crest color, with most of the
-    // surface staying a deep-to-mid blue — closer to how real water
-    // actually looks, where whitecap-bright coloring is the exception at
-    // crests, not a large fraction of the whole surface.
-    const t = clamp(heightAtVertex.mul(0.4).add(0.05), 0, 1);
-    return mix(deep, crest, t);
+    const litDeep = deep.mul(1.35); // same hue, just brighter — not a shift toward white
+    const t = clamp(heightAtVertex.mul(0.15).add(0.1), 0, 1);
+    return mix(deep, litDeep, t);
   })();
 
   // Per explicit "apply a custom shader to make it look like water" — a
@@ -1119,18 +1118,16 @@ function buildCrystalFluidSimPlane(scene, y, size, sampleHeight) {
   material.emissiveNode = Fn(() => {
     const viewDir = cameraPosition.sub(positionWorld).normalize();
     const grazing = float(1.0).sub(clamp(dot(normalWorld, viewDir), 0, 1));
-    // Per "looks too white instead of blue" — the previous pow(3)/0.55
-    // combo meant the highlight was strong AND active across most of a
-    // flat ocean viewed from a normal player-eye-height angle (grazing
-    // is high almost everywhere except looking straight down), washing
-    // the whole surface pale instead of just catching light at real
-    // grazing/horizon angles. pow(6) makes the falloff much steeper —
-    // only genuinely near-horizontal viewing angles light up — and the
-    // multiplier is cut roughly in half on top of that.
-    const fresnelTerm = pow(grazing, 6.0);
+    // Per "too much fresnel glow" — still too strong even after the
+    // first pow(3)->pow(6) pass. Pushed further (pow 6 -> 8, an even
+    // steeper falloff so only truly near-horizontal angles catch any
+    // highlight at all) and the multiplier cut by more than half again
+    // (0.25 -> 0.1) — the reference photo shows only faint, scattered
+    // glints, not a broad sheen.
+    const fresnelTerm = pow(grazing, 8.0);
     const skyHighlight = color(0xcfe8ff); // pale sky tone — reads as reflected sky/light, not a light SOURCE of its own
     const baseEmissive = color(style.emissive).mul(style.emissiveIntensity);
-    return baseEmissive.add(skyHighlight.mul(fresnelTerm).mul(0.25));
+    return baseEmissive.add(skyHighlight.mul(fresnelTerm).mul(0.1));
   })();
 
   const mesh = new THREE.Mesh(geometry, material);

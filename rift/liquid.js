@@ -876,7 +876,7 @@ const fluidSimHash21 = Fn(([p]) => {
   return fract(p3b.x.add(p3b.y).mul(p3b.z));
 });
 
-function buildCrystalFluidSimPlane(scene, y, size) {
+function buildCrystalFluidSimPlane(scene, y, size, sampleHeight) {
   const WIDTH = FLUID_SIM_WIDTH;
   const CELL_COUNT = WIDTH * WIDTH;
 
@@ -884,6 +884,38 @@ function buildCrystalFluidSimPlane(scene, y, size) {
   const heightBufferB = instancedArray(CELL_COUNT, "float");
   const velocityBuffer = instancedArray(CELL_COUNT, "float");
   let heightBufferNode = heightBufferA; // always points at the buffer computeUpdate currently reads FROM — swapped by updateFluidSimWater each frame
+
+  // Real shore damping, Stage 2 — per "too much wave going onto the land."
+  // Precomputed ONCE here in plain JS using the REAL terrain heightfield
+  // (sampleHeight, the same callback the old Gerstner path already used
+  // for its own per-vertex shoreDamp array), not the prototype's
+  // straight-line shore formula, which would be wrong for Coral
+  // Shallows' actual irregular island coastline. 0 at/above the real
+  // shoreline (no wave energy at all right at the sand), ramping to 1 by
+  // SHORE_DAMP_DEPTH units of real depth — same constant and same
+  // falloff shape the old system used, so this reads consistently with
+  // how shore damping already looks everywhere else in this project.
+  // instancedArray() accepts a pre-filled Float32Array directly (not
+  // just a cell count) to seed a real GPU storage buffer with this CPU-
+  // computed data — confirmed via Three.js's own TSL examples, not
+  // guessed at.
+  const SHORE_DAMP_DEPTH = 3.5;
+  const shoreDampData = new Float32Array(CELL_COUNT);
+  if (sampleHeight) {
+    for (let sy = 0; sy < WIDTH; sy++) {
+      for (let sx = 0; sx < WIDTH; sx++) {
+        const worldX = (sx / WIDTH - 0.5) * size;
+        const worldZ = (sy / WIDTH - 0.5) * size;
+        const groundY = sampleHeight(worldX, worldZ);
+        const depth = y - groundY; // positive = real water depth at this cell; negative/zero = dry land
+        const damp = Math.max(0, Math.min(1, depth / SHORE_DAMP_DEPTH));
+        shoreDampData[sy * WIDTH + sx] = damp;
+      }
+    }
+  } else {
+    shoreDampData.fill(1); // no terrain sampler given — behaves as open ocean everywhere, same as Stage 1
+  }
+  const shoreDampBuffer = instancedArray(shoreDampData, "float");
 
   const computeInit = Fn(() => {
     heightBufferA.element(instanceIndex).assign(0);
@@ -924,7 +956,14 @@ function buildCrystalFluidSimPlane(scene, y, size) {
     const waveSpeed = float(1.4);
     const damping = float(0.994); // <1 — real water loses energy to friction/viscosity; undamped would ring forever
 
-    const newVelocity = velocityBuffer.element(i).add(laplacian.mul(waveSpeed)).mul(damping);
+    // Real shore damping (see shoreDampBuffer above) — 0 at/above the
+    // actual shoreline, 1 in genuine open water. Applied to the PHYSICS
+    // velocity itself (not just a decorative visual cutoff layered on
+    // top), same as the old Gerstner system's own shoreDamp — a real
+    // wave loses energy shoaling into shallow water, this is that
+    // mechanism, not an approximation of it.
+    const shoreDamp = shoreDampBuffer.element(i);
+    const newVelocity = velocityBuffer.element(i).add(laplacian.mul(waveSpeed)).mul(damping).mul(shoreDamp);
     velocityBuffer.element(i).assign(newVelocity);
     let newHeight = self.add(newVelocity.mul(0.05));
 
@@ -960,15 +999,15 @@ function buildCrystalFluidSimPlane(scene, y, size) {
     // here, with chop layered on top as surface detail rather than being
     // the only thing moving.
     const bigSwell = sin(cellWorldX.mul(0.035).add(cellWorldZ.mul(0.02)).add(time.mul(0.7)));
-    // Amplitude — 0.03 (ported directly from the prototype) turned out
-    // to be a few CENTIMETERS of real displacement, invisible at normal
-    // viewing distance once this ran on the actual game's water instead
-    // of the prototype's own close-orbiting demo camera. The old
-    // Gerstner system's wave height spans multiple full world units
-    // peak-to-trough (see GERSTNER_TARGET_AMPLITUDE_SUM elsewhere in
-    // this file) — bigSwell*0.9 + chop*0.4 brings this into roughly that
-    // same visible range as a first real test, not a final tuned value.
-    newHeight = newHeight.add(bigSwell.mul(0.9)).add(chop.mul(0.4));
+    // Per "too much wave going onto the land / blue and white lines" —
+    // two changes from the previous pass: (1) amplitude pulled back from
+    // 0.9/0.4 to 0.6/0.25 — the earlier values were tuned blind without
+    // shore damping in place, so open water was reading as overly harsh
+    // banding; (2) both terms now multiplied by the same real shoreDamp
+    // factor as the physics above, so decorative chop/swell fade out
+    // approaching the shore the same way the real wave physics does,
+    // instead of maintaining full amplitude right up onto dry sand.
+    newHeight = newHeight.add(bigSwell.mul(0.6).mul(shoreDamp)).add(chop.mul(0.25).mul(shoreDamp));
 
     heightBufferB.element(i).assign(newHeight);
   })().compute(CELL_COUNT);
@@ -1056,11 +1095,15 @@ function buildCrystalFluidSimPlane(scene, y, size) {
     const heightAtVertex = heightBufferNode.element(cellIdx);
     const deep = color(style.baseColor);
     const crest = color(style.frothColor);
-    // Rescaled to match the new bigSwell+chop amplitude range (roughly
-    // ±1.3, up from the old ±0.4) — the old 2.4 multiplier would now
-    // clip almost the whole surface to solid deep or solid crest color
-    // with only a thin transition band, rather than a smooth gradient.
-    const t = clamp(heightAtVertex.mul(0.9).add(0.1), 0, 1);
+    // Per "blue and white lines" — the previous 0.9 multiplier meant the
+    // color swung across nearly its FULL deep-to-crest range on every
+    // wave cycle, reading as hard periodic banding rather than subtle
+    // color variation. Pulled back further (0.9 -> 0.4) so only genuine
+    // wave PEAKS approach the bright crest color, with most of the
+    // surface staying a deep-to-mid blue — closer to how real water
+    // actually looks, where whitecap-bright coloring is the exception at
+    // crests, not a large fraction of the whole surface.
+    const t = clamp(heightAtVertex.mul(0.4).add(0.05), 0, 1);
     return mix(deep, crest, t);
   })();
 
@@ -1161,7 +1204,7 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
   if (!style) return null;
 
   if (biome === "crystal" && CRYSTAL_FLUID_SIM_ENABLED) {
-    return buildCrystalFluidSimPlane(scene, y, size);
+    return buildCrystalFluidSimPlane(scene, y, size, sampleHeight);
   }
 
   const segs = getGraphicsSettings().liquidSegments; // reverted the earlier ×1.4 workaround — liquidSegments itself is now increased directly in graphicsSettings.js

@@ -3769,8 +3769,30 @@ if (graphicsBtn && graphicsPanel) {
     uiSyncCallbacks.push(render);
     btn.addEventListener("click", () => {
       setOverride(key, isOn() ? false : true); // explicit true/false override in both directions — a null-clear-to-tier-default here would make it impossible to force an effect ON on a tier whose own default is off (e.g. Low's shadowsEnabled)
-      applyGraphicsSettings();
-      render();
+      if (key === "shadowsEnabled") {
+        // Per a real "GPUValidationError: Invalid CommandEncoder" that
+        // TWO different targeted fixes this session failed to resolve
+        // (first suspected postProcessing.render(), then suspected
+        // synchronous shadow-map disposal — both ruled out or fixed
+        // without stopping the crash, confirmed live by testing) —
+        // rather than guess at a third specific cause inside a deep
+        // renderer/GPU interaction with no way to inspect it directly,
+        // this setting no longer applies live at all. The preference is
+        // still saved (setOverride above) and takes effect cleanly on
+        // the NEXT page load, which naturally sidesteps whatever
+        // mid-session GPU-teardown race this actually is — a fresh
+        // renderer/scene never has any in-flight GPU work to race
+        // against in the first place.
+        btn.textContent = `${label}: ${isOn() ? "On" : "Off"} (reload to apply)`;
+        btn.classList.toggle("active", isOn());
+        // Deliberately NOT calling the generic render() below for this
+        // case — it unconditionally overwrites btn.textContent, which
+        // would instantly wipe the "(reload to apply)" message just set
+        // above.
+      } else {
+        applyGraphicsSettings();
+        render();
+      }
     });
     effectsSection.appendChild(btn);
   }

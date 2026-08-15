@@ -1011,7 +1011,29 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
           envMapIntensity: 1.7,
         })
       : new THREE.MeshStandardMaterial(options);
-    if (biome === "crystal") {
+    // Per "Coral Shallows won't load" — this onBeforeCompile block uses
+    // the exact same technique (raw GLSL string-patching a three.js-
+    // generated shader) already confirmed officially unsupported under
+    // real WebGPU execution, the same root cause that broke the terrain
+    // shader earlier in this project (see main.js's CAUSTICS_ENABLED /
+    // simpleTerrainMat). That fix only ever addressed the terrain side —
+    // this water-specific onBeforeCompile (foam/reflection/refraction/
+    // caustics, crystal-biome-only) was never touched, and crystal is the
+    // ONLY biome that reaches this branch, which is exactly why Coral
+    // Shallows specifically fails to load while the others don't.
+    // CRYSTAL_WATER_SHADER_ENABLED is the same single flip-point pattern
+    // as CAUSTICS_ENABLED — stage-1 stopgap: crystal's water falls back
+    // to a plain MeshPhysicalMaterial (still has clearcoat/PBR lighting,
+    // loses the foam/reflection/refraction/caustic shader layer) so the
+    // level loads again. Every downstream consumer of
+    // mesh.material.userData.shader (updateLiquidPlane's reflection/
+    // refraction/uTime pushes below) is already guarded with
+    // `if (...userData.shader)` checks, so leaving it unset here is
+    // safe — confirmed by reading those call sites, not assumed. Real
+    // fix is a TSL node-material rebuild of this whole block, not yet
+    // started, same as the terrain caustics.
+    const CRYSTAL_WATER_SHADER_ENABLED = false;
+    if (biome === "crystal" && CRYSTAL_WATER_SHADER_ENABLED) {
       // Procedural whitecap foam — real Voronoi/Worley cellular noise
       // evaluated per-PIXEL in the fragment shader, not per-vertex like
       // everything else this file paints. onBeforeCompile patches the

@@ -211,6 +211,20 @@ fpsCounterEl.textContent = "-- fps";
 viewport.appendChild(fpsCounterEl);
 let fpsFrameCount = 0, fpsAccumTime = 0;
 
+// Per "the water region is completely static, zero real change" —
+// confirmed via actual pixel-diffing a screen recording, not a look
+// complaint. That recording was on iPhone Safari; every prior confirmed-
+// working test of the fluid-sim compute dispatch was on desktop Chrome,
+// and there's no devtools console access on a phone to check directly.
+// This is the same on-screen-diagnostic technique as fpsCounterEl above,
+// so the real dispatch status is readable straight off the phone screen
+// without a computer — updateFluidSimWater (liquid.js) writes into this
+// every time it's called.
+const fluidSimDiagEl = document.createElement("div");
+fluidSimDiagEl.style.cssText = "position:fixed;top:32px;left:8px;z-index:9999;font:11px/1.4 monospace;color:#7fd0ff;background:rgba(0,0,0,0.55);padding:3px 7px;border-radius:4px;pointer-events:none;display:none;";
+viewport.appendChild(fluidSimDiagEl);
+window.riftFluidSimDiagEl = fluidSimDiagEl; // liquid.js writes to this directly — separate module, no shared scope otherwise
+
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x0a0e14, 0.0032);
 // Solid-color fallback background, mutated in place each frame (see the

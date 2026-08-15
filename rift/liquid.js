@@ -1137,6 +1137,21 @@ function buildCrystalFluidSimPlane(scene, y, size, sampleHeight) {
     const fresnelTerm = pow(grazing, 8.0);
     const skyHighlight = color(0xcfe8ff); // pale sky tone — reads as reflected sky/light, not a light SOURCE of its own
     const baseEmissive = color(style.emissive).mul(style.emissiveIntensity);
+    // Per "something is wrong with the water" on a night-time screenshot
+    // — style.emissiveIntensity is 0.015, extremely low, meaning almost
+    // all of this water's visible brightness normally comes from real
+    // scene lighting (a PBR material's diffuse/specular response), not
+    // emissive. At night, with little direct light for the wave normals
+    // to interact with, that leaves very little left to actually SEE —
+    // the geometry can be moving correctly underneath while still
+    // reading as a flat, dark, undifferentiated slab. This is a real,
+    // independent floor — the water's own base color at low intensity —
+    // so there's always SOME visible tonal variation regardless of how
+    // dark the actual scene lighting gets, without meaningfully changing
+    // the daytime look (this is small next to what real sunlight already
+    // contributes).
+    const nightFloor = color(style.baseColor).mul(0.06);
+    const baseEmissiveFloored = baseEmissive.add(nightFloor);
     // Per "not quite right, more like [reference photo] — 10fps" —
     // TWO problems with the previous hash-noise sparkle at once: (1) it
     // was almost certainly the real performance cause — emissiveNode
@@ -1161,7 +1176,7 @@ function buildCrystalFluidSimPlane(scene, y, size, sampleHeight) {
     const reflectDir = reflect(viewDir.negate(), normalWorld);
     const sunAlign = clamp(dot(reflectDir, sunDir), 0, 1);
     const glint = pow(sunAlign, 48.0); // high power -> narrow, bright, streak-like highlights only where facets align closely
-    return baseEmissive
+    return baseEmissiveFloored
       .add(skyHighlight.mul(fresnelTerm).mul(0.1))
       .add(color(0xfff4e0).mul(glint).mul(2.2)); // warm sun-tone, not pure white — matches a real low-sun glint's color
   })();
@@ -1205,7 +1220,13 @@ function buildCrystalFluidSimPlane(scene, y, size, sampleHeight) {
 // turned out to be a diagnostic-logging bug, not a real hang (see chat) —
 // none of that complexity is needed for a synchronous call.
 function updateFluidSimWater(handle, renderer) {
-  if (!handle || !handle.fluidSim || handle.fluidSimBroken) return;
+  if (!handle || !handle.fluidSim) return;
+  const diagEl = typeof window !== "undefined" ? window.riftFluidSimDiagEl : null;
+  if (diagEl) diagEl.style.display = "block";
+  if (handle.fluidSimBroken) {
+    if (diagEl) diagEl.textContent = "wave: FAILED — " + (handle.fluidSimBrokenReason || "unknown");
+    return;
+  }
   const canSyncCompute = typeof renderer.compute === "function";
   try {
     if (!handle.initialized) {
@@ -1220,6 +1241,18 @@ function updateFluidSimWater(handle, renderer) {
       renderer.computeAsync(handle.computeUpdate);
       renderer.computeAsync(handle.computeCopyBack);
     }
+    handle.fluidSimDispatchCount = (handle.fluidSimDispatchCount || 0) + 1;
+    // Per "the water region is completely static" (confirmed via real
+    // pixel-diffing of a phone screen recording, not a look complaint) —
+    // this on-screen line is readable straight off a phone without
+    // devtools, exactly for that situation. If this count is climbing
+    // while the water still isn't visibly moving, the dispatch itself is
+    // fine and the bug is elsewhere (the buffer not reaching the
+    // material). If it's NOT climbing / shows FAILED, the dispatch call
+    // itself is the problem — most likely iOS Safari's WebGPU compute
+    // support behaving differently than the desktop Chrome this was last
+    // confirmed working on.
+    if (diagEl) diagEl.textContent = "wave: " + (canSyncCompute ? "sync" : "async-fallback") + ", dispatch #" + handle.fluidSimDispatchCount;
   } catch (err) {
     console.error("[liquid] fluid-sim: compute dispatch failed:", err);
     // Stops retrying every frame once this happens — if compute doesn't
@@ -1227,6 +1260,8 @@ function updateFluidSimWater(handle, renderer) {
     // just spam identical errors forever rather than surfacing one clear
     // one.
     handle.fluidSimBroken = true;
+    handle.fluidSimBrokenReason = String(err && err.message || err);
+    if (diagEl) diagEl.textContent = "wave: FAILED — " + handle.fluidSimBrokenReason;
   }
   // computeUpdate reads FROM heightBufferA and writes INTO heightBufferB;
   // computeCopyBack then copies B back into A — so heightBufferA always

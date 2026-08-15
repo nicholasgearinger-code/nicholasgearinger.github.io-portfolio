@@ -1,5 +1,4 @@
 import * as THREE from "three";
-import { WebGPURenderer } from "three/addons/renderers/webgpu/WebGPURenderer.js";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
 import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH, POND_Z, POND_RADIUS, POND_LEVEL, RAMP_CENTER_X, RAMP_CENTER_Z, RAMP_LENGTH, RAMP_HALF_WIDTH, ROOM_FLOOR_Y, ROOM_WIDTH, ROOM_LENGTH, BRANCH_START_X, BRANCH_LENGTH, BRANCH_HALF_WIDTH, BRANCH_Z, CHAMBER_RADIUS } from "./terrain.js";
 import { LEVELS, generateLevelLayout } from "./levels.js";
@@ -161,6 +160,7 @@ const titlePlayBtn = document.getElementById("rift-title-play-btn");
 // module will have finished evaluating.
 if (titleGate && titlePlayBtn) {
   titlePlayBtn.addEventListener("click", () => {
+    alert("Play button handler fired"); // TEMPORARY diagnostic — remove once the real cause is confirmed. If this never appears, something is blocking the tap before it reaches the button at all; if it DOES appear, the handler is firing correctly and the problem is downstream in showLevelSelect() or the biome-menu markup itself.
     titleGate.classList.add("rift-title-gate-hidden");
     setTimeout(() => { titleGate.style.display = "none"; }, 650); // matches the CSS opacity transition — only removed from layout after it's fully faded
     showLevelSelect();
@@ -259,7 +259,7 @@ camera.rotation.order = "YXZ";
 // block ever actually fires in testing, migrating each pass to
 // WebGPU-native TSL nodes (starting with the simplest ones) is the
 // planned next step — not something to guess at blind here.
-const renderer = new WebGPURenderer({ canvas, antialias: true });
+const renderer = new THREE.WebGPURenderer({ canvas, antialias: true });
 // Real visible loading indicator + timeout, per "no error in console" —
 // the most likely explanation for that exact symptom (nothing renders,
 // nothing throws) is a HANGING promise, not a failing one: if the

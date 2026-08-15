@@ -247,7 +247,6 @@ scene.background = sceneBackgroundColor;
 // blanket scene clear, so this is safe to just persist untouched across
 // every level transition.
 const realisticCloudDomeHandle = createRealisticCloudDome(scene);
-const rainParticlesHandle = createRainParticles(scene); // function is hoisted — defined further below, called here to mirror the cloud dome's own "once at startup, not per-level" lifecycle (visibility is opacity-driven by rainIntensity, not create/destroy)
 
 const camera = new THREE.PerspectiveCamera(70, viewport.clientWidth / viewport.clientHeight, 0.1, 2000);
 camera.rotation.order = "YXZ";
@@ -369,6 +368,13 @@ function updateRainParticles(handle, renderer, camera, dt, rainIntensity) {
   }
 }
 function clampNum(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+// Called here, after every RAIN_* const above has a real value — calling
+// this any earlier (originally placed right after the cloud dome, before
+// these consts) hit a real temporal-dead-zone ReferenceError: the
+// function declaration itself is hoisted, but the module-level consts its
+// body reads are NOT initialized until the engine's sequential top-level
+// execution actually reaches their own `const` lines above.
+const rainParticlesHandle = createRainParticles(scene);
 
 
 // WebGPU renderer — per explicit request, step 1 of the staged plan

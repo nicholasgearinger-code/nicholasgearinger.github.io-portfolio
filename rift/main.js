@@ -13,7 +13,7 @@ import { createHorizonSilhouettes, updateHorizonSilhouettes, disposeHorizonSilho
 import { createWildlife, updateWildlife, disposeWildlife } from "./wildlife.js";
 import { createLandmark, updateLandmark, disposeLandmark, LANDMARK_POSITION } from "./landmarks.js";
 import { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers, getEffectiveValue, setOverride, resetOverrides, getTierRawSettings } from "./graphicsSettings.js";
-import { loadAngelfishModel, loadReefModel, loadCoralModel, loadTreeModel, loadSpongeModel, loadPlantModel, loadFishSchoolModel, createRealAngelfish, createRealReef, createRealCoral, createRealTree, createRealSponge, createRealPlant, createRealFishSchool } from "./models.js";
+import { loadAngelfishModel, loadReefModel, loadCoralModel, loadTreeModel, loadSpongeModel, loadPlantModel, loadFishSchoolModel, createRealAngelfish, createRealReef, createRealCoral, createRealTree, createRealSponge, createRealPlant, createRealFishSchool, buildCoralInstances, buildTreeInstances, updateTreeInstanceSway } from "./models.js";
 import { createWeatherSystem, updateWeatherSystem, disposeWeatherSystem } from "./weather.js";
 import { createClouds, updateClouds, disposeClouds, getCloudOcclusionFactor, createCloudLayer, updateCloudLayer, disposeCloudLayer, createRealisticCloudDome, updateRealisticCloudDome, disposeRealisticCloudDome } from "./clouds.js";
 import {
@@ -1397,10 +1397,12 @@ let reflectionFrameCounter = 999; // starts high so the first eligible frame alw
 // ASYNCHRONOUSLY and need their own teardown (mixer + geometry/material
 // dispose) and their own per-frame update (AnimationMixer.update, for the
 // fish).
-let realPalmTrees = [];
+let realPalmTreeMeshes = []; // InstancedMesh objects (one per unique sub-mesh per species actually placed) — see buildTreeInstances
+let realTreeInstanceHandle = null; // per-instance placement data for the per-frame wind-sway update (updateTreeInstanceSway)
 let realFish = [];
 let realReefStructures = [];
-let realCoralPieces = [];
+let realCoralMeshes = []; // InstancedMesh objects (one per unique sub-mesh per species actually placed) — see buildCoralInstances
+let realCoralPlacementPositions = []; // lightweight {x,z} — fish spawning reads this instead of individual coral objects, which no longer exist post-instancing
 let realSponges = [];
 let realPlants = [];
 let realFishSchools = [];
@@ -1557,14 +1559,16 @@ function teardownLevel() {
   // and correctly dispose it). Any in-flight load promise for a biome
   // being torn down is left to resolve naturally — its own levelIdx
   // guard (see buildLevel) makes it a no-op if the level has moved on.
-  for (const group of realPalmTrees) scene.remove(group);
-  realPalmTrees = [];
+  for (const mesh of realPalmTreeMeshes) scene.remove(mesh);
+  realPalmTreeMeshes = [];
+  realTreeInstanceHandle = null;
   for (const fish of realFish) scene.remove(fish.group);
   realFish = [];
   for (const reef of realReefStructures) scene.remove(reef);
   realReefStructures = [];
-  for (const coral of realCoralPieces) scene.remove(coral);
-  realCoralPieces = [];
+  for (const mesh of realCoralMeshes) scene.remove(mesh);
+  realCoralMeshes = [];
+  realCoralPlacementPositions = [];
   for (const sponge of realSponges) scene.remove(sponge);
   realSponges = [];
   for (const plant of realPlants) scene.remove(plant);
@@ -2598,6 +2602,7 @@ vec2 causticVoronoiF1F2(vec2 p) {
       const palmSeed = hashStringToSeed(WORLD_SEED + "::realPalms");
       const rng = mulberry32(palmSeed);
       const placedTreePositions = []; // {x,z} of trees actually placed so far, for the min-spacing check below
+      const treePlacementsBySpecies = {}; // accumulated here, actually built into InstancedMeshes once after the whole placement loop finishes — see buildTreeInstances below
       const MIN_TREE_SPACING = 4; // world units — trees were landing right on top of each other with no check at all
       const PALM_MAX_ATTEMPTS = 700; // retry-until-reached, same pattern as coral/fish/sponge/plant — a wider scatter area means many more candidates land in water and get rejected, so a fixed PALM_COUNT-sized attempt loop would silently under-place
       let palmsPlaced = 0;
@@ -2643,46 +2648,36 @@ vec2 causticVoronoiF1F2(vec2 p) {
         const y = sampleGroundHeight(x, z, terrainMesh);
         if (y === null || y < LIQUID_LEVEL.crystal + 0.5) continue; // stay on dry land, clear of the shoreline
         const species = nextTreeSpecies();
-        const tree = createRealTree(species);
-        if (!tree) continue;
-        // createRealTree (models.js) already normalized this tree to
-        // exactly 1 world unit tall (group.scale set to 1/rawHeight)
-        // regardless of its source file's raw units. REAL BUG FOUND AND
-        // FIXED HERE per "two trees enormous, one tiny, confirmed not
-        // perspective" — this line was previously `tree.scale.setScalar
-        // (scale)`, which OVERWRITES that normalization scale entirely
-        // instead of building on it, silently discarding all of it. The
-        // final rendered size ended up depending directly on each
-        // species' own wildly different raw geometry size again (logged
-        // raw heights ranged from 6.28 to 2452.1 across the 4 species —
-        // up to a 390x spread), which is exactly what produced some
-        // species enormous and others tiny once all 4 were finally
-        // loading together for the first time. This was very likely also
-        // the real explanation for the entire earlier "tree is giant"
-        // back-and-forth — every previous scale reduction was applied on
-        // top of this same bug, so no single number could ever have
-        // fixed it consistently across species; only coconut_low_poly
-        // was ever actually loading during most of that, making a
-        // species-dependent bug look like a simple magnitude problem.
-        // multiplyScalar (not setScalar) correctly builds ON TOP of the
-        // existing 1/rawHeight normalization, so `scale` now finally
-        // means what its own name/comment always claimed: the tree's
-        // real final height in world units, for every species alike.
+        // Per explicit "instance all objects... start with coral and
+        // trees" — no longer creates a real object per placement at all
+        // (createRealTree used to be called here 36 times, each a full
+        // GLTF scene clone). Just collects placement data now; the
+        // actual InstancedMesh build happens once, after this whole loop
+        // finishes, via models.js's buildTreeInstances — see its own
+        // comment for why this is safe to defer (species-specific
+        // normalization/node-extraction logic is untouched, just called
+        // once per species instead of once per placement).
         // Picked fresh — 4-7 units (~2.5-4x the 1.6-unit player) — since
-        // every previous value was tuned blind against this same broken
-        // math and can't be trusted as a starting point now that it's
-        // fixed.
+        // every previous value was tuned against the old (now-fixed)
+        // broken scale-normalization math and can't be trusted as a
+        // starting point.
         const scale = 4 + rng() * 3;
-        tree.position.set(x, y + tree.userData.groundOffset * scale, z);
-        tree.rotation.y = rng() * Math.PI * 2;
-        tree.scale.multiplyScalar(scale);
-        tree.userData.swaySeed = rng() * Math.PI * 2; // per-tree phase offset for wind sway (see the animate-loop update), so trees don't all sway in lockstep
-        scene.add(tree);
-        realPalmTrees.push(tree);
+        const rotationY = rng() * Math.PI * 2;
+        const swaySeed = rng() * Math.PI * 2; // per-tree phase offset for wind sway, so trees don't all sway in lockstep
+        if (!treePlacementsBySpecies[species]) treePlacementsBySpecies[species] = [];
+        treePlacementsBySpecies[species].push({ x, z, groundY: y, rotationY, scale, swaySeed });
         placedTreePositions.push({ x, z });
         palmsPlaced++;
       }
-      console.log(`[models] real trees placed: ${palmsPlaced}/${PALM_COUNT}`);
+      const treeInstanceHandle = buildTreeInstances(treePlacementsBySpecies);
+      for (const species in treeInstanceHandle.meshesBySpecies) {
+        for (const mesh of treeInstanceHandle.meshesBySpecies[species]) {
+          scene.add(mesh);
+          realPalmTreeMeshes.push(mesh);
+        }
+      }
+      realTreeInstanceHandle = treeInstanceHandle;
+      console.log(`[models] real trees placed: ${palmsPlaced}/${PALM_COUNT} (instanced, ${Object.values(treeInstanceHandle.meshesBySpecies).reduce((n, m) => n + m.length, 0)} draw calls)`);
     }).catch(() => {}); // load failure already logged inside models.js — nothing further to do here
 
     // Fish spawning moved below, after coral placement — see that
@@ -2799,6 +2794,7 @@ vec2 causticVoronoiF1F2(vec2 p) {
       const CORAL_MAX_ATTEMPTS = 1600; // was 750 — raised since the new depth cap above rejects more candidates than before (deep-water points that used to qualify no longer do), so more attempts are needed to still reach the same target count
       const coralSeed = hashStringToSeed(WORLD_SEED + "::realCoral");
       const rng = mulberry32(coralSeed);
+      const coralPlacementsBySpecies = {}; // accumulated here, actually built into InstancedMeshes once after the whole placement loop finishes
       let placed = 0;
       for (let i = 0; i < CORAL_MAX_ATTEMPTS && placed < CORAL_COUNT; i++) {
         // Per explicit "should be all over the sea floor" (revising the
@@ -2827,34 +2823,33 @@ vec2 causticVoronoiF1F2(vec2 p) {
         // gameplay convenience.
         if (groundY === null || groundY > LIQUID_LEVEL.crystal - 0.3 || groundY < LIQUID_LEVEL.crystal - 6) continue;
         const species = CORAL_SPECIES[Math.floor(rng() * CORAL_SPECIES.length)];
-        const coral = createRealCoral(species);
-        if (!coral) continue;
         const [scaleMin, scaleMax] = CORAL_SCALE_RANGE[species];
         const scale = scaleMin + rng() * (scaleMax - scaleMin);
-        coral.rotation.y = rng() * Math.PI * 2;
-        coral.scale.setScalar(scale);
-        // Per "some models are floating above the sea floor" — real bug:
-        // the old flat "0.15 * scale" offset assumed scale itself was a
-        // rough proxy for size, but scale varies from ~4 (stylaster) to
-        // ~26 (acropora, a genuine tiny detail-view fragment needing a
-        // huge multiplier) — for acropora specifically that formula lifted
-        // it 2.4-3.9 units off the ground despite the whole piece only
-        // being ~0.3-0.46 units tall, floating it completely clear of the
-        // sand. Real fix: compute each piece's ACTUAL bounding box after
-        // rotation+scale are already applied (needs a matrix update first
-        // since Box3.setFromObject reads world-space geometry), then embed
-        // by a fraction of its own real below-origin extent — correct
-        // for every species regardless of its raw size or scale factor,
-        // no per-species guessing needed.
-        coral.updateMatrixWorld(true);
-        const coralBounds = new THREE.Box3().setFromObject(coral);
-        const belowOrigin = -coralBounds.min.y; // how far the geometry actually extends below its own local origin, in real world units, post-scale
-        coral.position.set(x, groundY + belowOrigin * 0.4, z); // ~60% embedded — reads as growing from the substrate, same reasoning as before, just correctly proportional now
-        scene.add(coral);
-        realCoralPieces.push(coral);
+        const rotationY = rng() * Math.PI * 2;
+        // Per explicit "instance all objects... start with coral and
+        // trees" — no longer creates a real object per placement
+        // (createRealCoral used to be called here up to 220 times, each
+        // a full GLTF scene clone, each its own Box3 bounding-box
+        // computation). Just collects placement data; the actual
+        // InstancedMesh build (and the embed-depth math, mathematically
+        // identical to the old per-instance version — see
+        // buildCoralInstances's own comment for why) happens once, after
+        // this whole loop finishes.
+        if (!coralPlacementsBySpecies[species]) coralPlacementsBySpecies[species] = [];
+        coralPlacementsBySpecies[species].push({ x, z, groundY, rotationY, scale });
+        realCoralPlacementPositions.push({ x, z }); // lightweight — fish spawning below reads just this, not a full object
         placed++;
       }
-      console.log(`[models] real coral pieces placed: ${placed}/${CORAL_COUNT}`);
+      const coralMeshesAll = [];
+      for (const species in coralPlacementsBySpecies) {
+        const meshes = buildCoralInstances(species, coralPlacementsBySpecies[species]);
+        for (const mesh of meshes) {
+          scene.add(mesh);
+          realCoralMeshes.push(mesh);
+          coralMeshesAll.push(mesh);
+        }
+      }
+      console.log(`[models] real coral pieces placed: ${placed}/${CORAL_COUNT} (instanced, ${coralMeshesAll.length} draw calls)`);
 
       // Fish spawning — moved here, AFTER coral placement, specifically
       // per explicit "make sure the fish we have is spawning right over
@@ -2874,13 +2869,13 @@ vec2 causticVoronoiF1F2(vec2 p) {
       const MAX_FISH_ATTEMPTS = Math.max(60, FISH_COUNT * 4);
       for (let i = 0; i < MAX_FISH_ATTEMPTS && fishPlaced < FISH_COUNT; i++) {
         let x, z, groundY;
-        if (realCoralPieces.length > 0) {
-          const coralPiece = realCoralPieces[Math.floor(fishRng() * realCoralPieces.length)];
+        if (realCoralPlacementPositions.length > 0) {
+          const coralPos = realCoralPlacementPositions[Math.floor(fishRng() * realCoralPlacementPositions.length)];
           // Small jitter around the coral's own position rather than
           // dead-center every time — a school hovering AROUND a coral
           // head, not every fish stacked on the exact same point.
-          x = coralPiece.position.x + (fishRng() - 0.5) * 3;
-          z = coralPiece.position.z + (fishRng() - 0.5) * 3;
+          x = coralPos.x + (fishRng() - 0.5) * 3;
+          z = coralPos.z + (fishRng() - 0.5) * 3;
           if (Math.hypot(x, z) > WORLD_BOUND_RADIUS - 8) continue;
           groundY = terrainHeightAt(level, x, z, WORLD_SEED);
         } else {
@@ -4855,17 +4850,19 @@ function animate() {
   // entirely (not just zeroed) whenever there's nothing for it to show,
   // same reasoning as the bloom presets' "off" tier.
   //
-  // Per explicit "rebuild it safely" — re-enabled now that the render
-  // TECHNIQUE underneath has actually changed (THREE.PostProcessing +
-  // pass(), not the manual two-render()-calls-per-frame approach that
-  // produced the real "GPUValidationError: Invalid CommandEncoder" this
-  // flag was originally added to stop). See the postProcessing/
-  // lensDistortedOutput setup comment above for the full story of why
-  // the old technique was abandoned rather than patched further.
-  const LENS_EFFECT_ENABLED = true;
+  // FORCED OFF AGAIN — per a real "GPUValidationError: Invalid
+  // CommandEncoder" appearing even with this effect confirmed inactive
+  // (see the final render call's own comment for the full story: it
+  // turned out to be postProcessing.render() itself being unstable as an
+  // every-frame direct-render replacement, not this shader). The render
+  // call has been reverted to plain renderer.render(scene, camera), so
+  // this flag is currently moot either way — kept explicit and off for
+  // honesty in the on-screen diagnostic below rather than leaving a
+  // stale "true" that no longer reflects what's actually happening.
+  const LENS_EFFECT_ENABLED = false;
   const effectiveLensIntensity = Math.max(wind.rainIntensity, postSwimWetness);
   lensEffectActive = LENS_EFFECT_ENABLED && !isFullySubmerged && effectiveLensIntensity > 0.02 && getGraphicsSettings().oceanEffectsEnabled !== false;
-  lensDiagEl.textContent = "lens: " + (lensEffectActive ? "ON" : "off") + ", intensity=" + effectiveLensIntensity.toFixed(2) + ", rain=" + (weatherHandle ? weatherHandle.rainIntensity.toFixed(2) : "n/a") + ", wet=" + postSwimWetness.toFixed(2) + ", submerged=" + isFullySubmerged + ", oceanFX=" + (getGraphicsSettings().oceanEffectsEnabled !== false);
+  lensDiagEl.textContent = "lens: " + (lensEffectActive ? "ON" : "off (disabled — see LENS_EFFECT_ENABLED)") + ", intensity=" + effectiveLensIntensity.toFixed(2) + ", rain=" + (weatherHandle ? weatherHandle.rainIntensity.toFixed(2) : "n/a") + ", wet=" + postSwimWetness.toFixed(2) + ", submerged=" + isFullySubmerged + ", oceanFX=" + (getGraphicsSettings().oceanEffectsEnabled !== false);
   if (lensEffectActive) {
     lensTimeUniform.value = elapsedTime;
     lensIntensityUniform.value = effectiveLensIntensity;
@@ -4926,18 +4923,15 @@ function animate() {
   // top so it isn't perfectly rigid. Only rotation.x/rotation.z are
   // touched — rotation.y already carries each tree's own random facing
   // set at spawn time and is left alone.
-  if (wind.windStrength > 0.001) {
-    const windDirX = wind.windX / wind.windStrength;
-    const windDirZ = wind.windZ / wind.windStrength;
-    const leanAmount = Math.min(0.11, wind.windStrength * 0.02);
-    const swayAmount = Math.min(0.05, wind.windStrength * 0.012);
-    for (const tree of realPalmTrees) {
-      const phase = elapsedTime * 1.4 + (tree.userData.swaySeed || 0);
-      const totalTilt = leanAmount + Math.sin(phase) * swayAmount;
-      tree.rotation.x = -windDirZ * totalTilt;
-      tree.rotation.z = windDirX * totalTilt;
-    }
-  }
+  //
+  // Per explicit "instance all objects... start with coral and trees" —
+  // trees are now THREE.InstancedMesh, which has no equivalent of "just
+  // nudge this one object's own .rotation.x/z" (there's no live per-
+  // instance object anymore, just a shared matrix array) — the whole
+  // per-instance matrix has to be rebuilt and re-set each time instead.
+  // See updateTreeInstanceSway (models.js) for the actual math, which is
+  // the SAME lean+sway formula as before, just applied differently.
+  updateTreeInstanceSway(realTreeInstanceHandle, elapsedTime, wind);
   updateFlowers(flowersHandle, elapsedTime);
   updateFootstepGlowSystem(footstepGlowHandle, dt);
   updateWildlife(wildlifeHandle, elapsedTime, dt, camera.position.x, camera.position.z, eruptionActive);
@@ -5051,22 +5045,23 @@ function animate() {
     underwaterDistortionMaterial.uniforms.time.value = elapsedTime;
     renderer.render(underwaterQuadScene, underwaterQuadCamera);
   } else {
-    // Real, SINGLE unified render path — replaces both the old plain
-    // renderer.render(scene, camera) call and the old lens-specific
-    // manual two-pass technique (which produced a real
-    // "GPUValidationError: Invalid CommandEncoder" — see the lens
-    // effect's own setup comment for the full story). postProcessing.
-    // render() is now ALWAYS what actually draws the frame, rain or not
-    // — the droplet effect toggles via outputNode reassignment instead
-    // of via a separate render call, only reassigning (and paying the
-    // real shader-recompile cost) on an actual on/off TRANSITION, not
-    // every frame.
-    if (lensEffectActive !== lastLensEffectActive) {
-      postProcessing.outputNode = lensEffectActive ? lensDistortedOutput : scenePass;
-      postProcessing.needsUpdate = true;
-      lastLensEffectActive = lensEffectActive;
-    }
-    postProcessing.render();
+    // Per real "GPUValidationError: Invalid CommandEncoder" appearing
+    // even with the lens effect confirmed OFF (lensEffectActive: false
+    // in the on-screen diagnostic) — triggered just by toggling an
+    // UNRELATED setting (shadows) — this is not a bug in the droplet
+    // shader at all. It means postProcessing.render() itself is
+    // unstable as an every-frame replacement for direct rendering
+    // whenever renderer state changes mid-session (shadows, resolution,
+    // graphics quality, etc.), in this Three.js version. The "ground/
+    // light flickers" report also turned out to persist with the lens
+    // effect off, confirming the same thing from a different angle. Both
+    // the earlier manual two-render() technique AND Three.js's own
+    // purpose-built PostProcessing API have now produced real device
+    // errors — reverting to the plain, proven-stable single render()
+    // call rather than keep experimenting live. postProcessing/
+    // lensDistortedOutput stay defined above (unused) for a future
+    // attempt, not deleted.
+    renderer.render(scene, camera);
   }
 }
 requestAnimationFrame(animate);

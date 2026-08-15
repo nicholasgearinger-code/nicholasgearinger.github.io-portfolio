@@ -361,6 +361,203 @@ function createRealTree(species) {
   return group;
 }
 
+// -----------------------------------------------------------------------------
+// Real instancing — per explicit "instance all objects... start with static
+// objects like coral and trees." Converts many separate scene objects (each
+// today a full GLTF scene clone, each its own draw call) into a handful of
+// THREE.InstancedMesh objects — one per unique sub-mesh a model contains,
+// batching every PLACED instance of that species into a single draw call.
+//
+// Deliberately reuses createRealCoral/createRealTree EXACTLY as they
+// already work today — called ONCE per species (not once per placement) to
+// build a single correctly-normalized "reference" object, never added to
+// the scene itself, whose mesh parts (geometry/material/local transform)
+// are extracted and cached. This does NOT reimplement any of the existing
+// species-specific logic (palm_001/palm_002's sibling-node removal, the
+// height-normalize-to-1-unit pass, coral's DoubleSide/colorSpace fixups) —
+// all of that keeps running exactly as before, completely untouched; only
+// the "clone the whole thing again for every single placement" part is
+// being replaced with "clone it once per species, then just place it many
+// times via lightweight per-instance matrices."
+//
+// NOT VERIFIED IN-BROWSER — first use of THREE.InstancedMesh in this
+// project. Lower architectural risk than anything TSL/compute-related
+// attempted this session (InstancedMesh is a long-standing, renderer-
+// agnostic Three.js feature, not WebGPU/compute-specific), but still a
+// real, untested code path.
+function extractInstanceParts(referenceGroup) {
+  referenceGroup.updateMatrixWorld(true);
+  const parts = [];
+  referenceGroup.traverse((obj) => {
+    if (obj.isMesh) {
+      parts.push({ geometry: obj.geometry, material: obj.material, localMatrix: obj.matrixWorld.clone() });
+    }
+  });
+  return parts;
+}
+
+const instancePartsCache = {}; // keyed by a caller-provided cache key ("coral:acropora", "tree:palm_001") — the one reference object's parts, reused for every placement of that species
+const instanceGroundOffsetCache = {};
+
+function getInstanceParts(cacheKey, buildReferenceFn) {
+  if (instancePartsCache[cacheKey]) return instancePartsCache[cacheKey];
+  const referenceGroup = buildReferenceFn();
+  if (!referenceGroup) return null;
+  instancePartsCache[cacheKey] = extractInstanceParts(referenceGroup);
+  instanceGroundOffsetCache[cacheKey] = referenceGroup.userData.groundOffset || 0;
+  return instancePartsCache[cacheKey];
+}
+
+// Scratch objects reused across calls rather than allocated fresh each
+// time — this runs once per PLACEMENT (hundreds of times per species at
+// build time), and per-instance-per-frame for swaying trees, so allocation
+// here is worth avoiding (same reasoning as main.js's own tempSunProjection
+// and similar module-level scratch vectors).
+const _instTempMatrix = new THREE.Matrix4();
+const _instTempPartMatrix = new THREE.Matrix4();
+const _instTempPos = new THREE.Vector3();
+const _instTempQuat = new THREE.Quaternion();
+const _instTempScale = new THREE.Vector3();
+const _instTempEuler = new THREE.Euler();
+
+function buildInstancedMeshesFromParts(parts, count) {
+  return parts.map((part) => {
+    const mesh = new THREE.InstancedMesh(part.geometry, part.material, count);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    // Per-instance positions span a wide scattered area (up to the world's
+    // full playable radius) — a single bounding-sphere-based frustum cull
+    // on the WHOLE InstancedMesh (computed from instance 0's local
+    // geometry bounds, not the true scattered extent) would incorrectly
+    // cull every instance at once the moment that one reference point
+    // left view. Same reasoning already established for the foam/rain
+    // particle sprites elsewhere in this project.
+    mesh.frustumCulled = false;
+    return mesh;
+  });
+}
+
+// Sets ONE placement's matrix across every sub-mesh of a model at once —
+// composes the placement's own transform (position/rotation/scale) with
+// each sub-mesh's own local transform within the model, so a multi-part
+// model (e.g. coral made of several differently-positioned/materialed
+// pieces) still holds together correctly once instanced.
+function setInstanceMatrixAt(meshes, parts, index, position, quaternion, scale) {
+  _instTempMatrix.compose(position, quaternion, scale);
+  for (let j = 0; j < parts.length; j++) {
+    _instTempPartMatrix.multiplyMatrices(_instTempMatrix, parts[j].localMatrix);
+    meshes[j].setMatrixAt(index, _instTempPartMatrix);
+  }
+}
+
+function finalizeInstancedMeshes(meshes) {
+  for (const mesh of meshes) mesh.instanceMatrix.needsUpdate = true;
+}
+
+// Real static coral instancing. placements: array of
+// {x, z, groundY, rotationY, scale}. Returns an array of
+// THREE.InstancedMesh (one per coral sub-mesh) ready to add to the scene —
+// replaces up to 220 individual createRealCoral() calls + scene.add() with
+// a handful of draw calls total (one per unique sub-mesh per species
+// actually placed, not one per placement).
+//
+// Embed-depth math: the original per-instance code computed each coral's
+// real bounding box AFTER its own rotation+scale were applied
+// (coral.updateMatrixWorld(true); Box3.setFromObject(coral)). A pure
+// Y-axis rotation leaves an object's Y-extent unchanged (it only mixes X
+// and Z), so that per-instance recomputation was always producing the
+// EXACT SAME below-origin depth regardless of that instance's own
+// rotationY — genuinely redundant work, not something this simplification
+// changes the result of. Computed once per species at scale 1 here
+// (instanceGroundOffsetCache) and multiplied by each instance's own scale
+// below, which is mathematically identical to the original per-instance
+// result, just computed once instead of 220 times.
+function buildCoralInstances(species, placements) {
+  const cacheKey = `coral:${species}`;
+  const parts = getInstanceParts(cacheKey, () => createRealCoral(species));
+  if (!parts || placements.length === 0) return [];
+  const groundOffset = instanceGroundOffsetCache[cacheKey];
+  const meshes = buildInstancedMeshesFromParts(parts, placements.length);
+  for (let i = 0; i < placements.length; i++) {
+    const p = placements[i];
+    const belowOrigin = groundOffset * p.scale;
+    _instTempPos.set(p.x, p.groundY + belowOrigin * 0.4, p.z);
+    _instTempEuler.set(0, p.rotationY, 0);
+    _instTempQuat.setFromEuler(_instTempEuler);
+    _instTempScale.setScalar(p.scale);
+    setInstanceMatrixAt(meshes, parts, i, _instTempPos, _instTempQuat, _instTempScale);
+  }
+  finalizeInstancedMeshes(meshes);
+  return meshes;
+}
+
+// Real tree instancing, WITH per-frame wind-sway support (trees are not
+// purely static — see main.js's existing sway update, preserved below
+// rather than dropped). speciesPlacements: an object keyed by species,
+// each value an array of {x, z, groundY, rotationY, scale, swaySeed} —
+// same groundY-based interface as buildCoralInstances, for consistency;
+// the species' own userData.groundOffset (from createRealTree) is looked
+// up internally here, not by the caller. Returns { meshesBySpecies,
+// instances } — instances is a flat array (one entry per placement) that
+// updateTreeInstanceSway (below) uses to recompute each instance's matrix
+// every frame without needing to re-walk placements.
+function buildTreeInstances(speciesPlacements) {
+  const meshesBySpecies = {};
+  const instances = [];
+  for (const species in speciesPlacements) {
+    const placements = speciesPlacements[species];
+    if (placements.length === 0) continue;
+    const cacheKey = `tree:${species}`;
+    const parts = getInstanceParts(cacheKey, () => createRealTree(species));
+    if (!parts) continue;
+    const groundOffset = instanceGroundOffsetCache[cacheKey];
+    const meshes = buildInstancedMeshesFromParts(parts, placements.length);
+    meshesBySpecies[species] = meshes;
+    for (let i = 0; i < placements.length; i++) {
+      const p = placements[i];
+      const y = p.groundY + groundOffset * p.scale;
+      _instTempPos.set(p.x, y, p.z);
+      _instTempEuler.set(0, p.rotationY, 0);
+      _instTempQuat.setFromEuler(_instTempEuler);
+      _instTempScale.setScalar(p.scale);
+      setInstanceMatrixAt(meshes, parts, i, _instTempPos, _instTempQuat, _instTempScale);
+      instances.push({ meshes, parts, indexInSpecies: i, position: _instTempPos.clone(), baseYaw: p.rotationY, scale: p.scale, swaySeed: p.swaySeed });
+    }
+    finalizeInstancedMeshes(meshes);
+  }
+  return { meshesBySpecies, instances };
+}
+
+// Per-frame tree wind sway — replaces the original per-object
+// `tree.rotation.x = ...; tree.rotation.z = ...` loop. Recomputes each
+// instance's FULL matrix (position + composed tilt-X/yaw-Y/tilt-Z rotation
+// + scale) since InstancedMesh has no equivalent of a live "just nudge
+// this one object's own .rotation" shortcut — the whole matrix has to be
+// rebuilt and re-set each time. Euler order 'XYZ' explicitly matches
+// Three.js's own default Euler composition order, so this produces the
+// IDENTICAL final orientation the original per-object rotation.x/z
+// assignment would have, not just a visually-similar approximation.
+function updateTreeInstanceSway(treeInstanceHandle, elapsedTime, wind) {
+  if (!treeInstanceHandle || wind.windStrength <= 0.001) return;
+  const windDirX = wind.windX / wind.windStrength;
+  const windDirZ = wind.windZ / wind.windStrength;
+  const leanAmount = Math.min(0.11, wind.windStrength * 0.02);
+  const swayAmount = Math.min(0.05, wind.windStrength * 0.012);
+  const touchedMeshSets = new Set();
+  for (const inst of treeInstanceHandle.instances) {
+    const phase = elapsedTime * 1.4 + (inst.swaySeed || 0);
+    const totalTilt = leanAmount + Math.sin(phase) * swayAmount;
+    const tiltX = -windDirZ * totalTilt;
+    const tiltZ = windDirX * totalTilt;
+    _instTempEuler.set(tiltX, inst.baseYaw, tiltZ, "XYZ");
+    _instTempQuat.setFromEuler(_instTempEuler);
+    _instTempScale.setScalar(inst.scale);
+    setInstanceMatrixAt(inst.meshes, inst.parts, inst.indexInSpecies, inst.position, _instTempQuat, _instTempScale);
+    touchedMeshSets.add(inst.meshes);
+  }
+  for (const meshes of touchedMeshSets) finalizeInstancedMeshes(meshes);
+}
+
 let spongeGLTF = null;
 let spongeLoadPromise = null;
 function loadSpongeModel() {
@@ -526,4 +723,4 @@ function createRealFishSchool() {
   return { group, mixer };
 }
 
-export { loadAngelfishModel, loadReefModel, loadCoralModel, loadTreeModel, loadSpongeModel, loadPlantModel, loadFishSchoolModel, createRealAngelfish, createRealReef, createRealCoral, createRealTree, createRealSponge, createRealPlant, createRealFishSchool };
+export { loadAngelfishModel, loadReefModel, loadCoralModel, loadTreeModel, loadSpongeModel, loadPlantModel, loadFishSchoolModel, createRealAngelfish, createRealReef, createRealCoral, createRealTree, createRealSponge, createRealPlant, createRealFishSchool, buildCoralInstances, buildTreeInstances, updateTreeInstanceSway };

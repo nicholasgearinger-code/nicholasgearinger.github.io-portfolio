@@ -283,6 +283,36 @@ function riftInitWithTimeout(promise, ms, label) {
 }
 await riftInitWithTimeout(renderer.init(), 10000, "renderer.init()");
 riftLoadingEl.remove();
+// Real WebGPU error surfacing — per "Script error." with no details on
+// the index.html-level overlay. Root cause (confirmed via Three.js's own
+// GitHub issues, not guessed): WebGPURenderer genuinely cannot propagate
+// GPU pipeline/shader-compile errors through normal JS try/catch — some
+// failures (e.g. "Device Lost") go straight to console.error internally,
+// bypassing window.onerror/unhandledrejection entirely, which is exactly
+// why the overlay in index.html only ever saw the browser's generic
+// muted placeholder instead of a real message. The WebGPU spec's actual
+// answer for this is the GPUDevice's own "uncapturederror" event — it
+// fires for real native GPU errors regardless of whether Three.js's own
+// try/catch machinery can see them. Reaching the raw device requires
+// going through renderer.backend, which only exists on the real WebGPU
+// path (the automatic WebGL2 fallback has no GPUDevice at all — guarded
+// below so this stays a no-op, not a new crash, on that path).
+const riftGpuDevice = renderer.backend && renderer.backend.device;
+if (riftGpuDevice && typeof riftGpuDevice.addEventListener === "function") {
+  riftGpuDevice.addEventListener("uncapturederror", (event) => {
+    const msg = "[Real WebGPU device error]\n" + event.error.constructor.name + ": " + event.error.message;
+    console.error(msg);
+    const existingOverlay = document.getElementById("rift-module-error-overlay");
+    if (existingOverlay) {
+      existingOverlay.style.display = "block";
+      existingOverlay.textContent = msg;
+    } else {
+      alert(msg); // fallback if index.html's overlay isn't present for some reason
+    }
+  });
+} else {
+  console.warn("[rift] No GPUDevice found on renderer.backend — likely running the WebGL2 fallback path, or Three.js's internal backend property name has changed since this was written.");
+}
 // Tone mapping ITSELF is now set by applyPostFx() below (from the new
 // tone-mapping dropdown's tier default/override, per explicit
 // "individually" follow-up) rather than hardcoded here — this fixed

@@ -1,19 +1,10 @@
 import * as THREE from "three";
-import { WebGPURenderer } from "three/addons/renderers/webgpu/WebGPURenderer.js";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
-import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
-import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
-import { SSAOPass } from "three/addons/postprocessing/SSAOPass.js";
-import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
-import { SMAAPass } from "three/addons/postprocessing/SMAAPass.js";
-import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
-import { FXAAShader } from "three/addons/shaders/FXAAShader.js";
-import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH, POND_Z, POND_RADIUS, POND_LEVEL, RAMP_CENTER_X, RAMP_CENTER_Z, RAMP_LENGTH, RAMP_HALF_WIDTH, ROOM_FLOOR_Y, ROOM_WIDTH, ROOM_LENGTH, BRANCH_START_X, BRANCH_LENGTH, BRANCH_HALF_WIDTH, BRANCH_Z, CHAMBER_RADIUS } from "./terrain.js";
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
 import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, createUnderwaterLightShaft, updateLightShafts, disposeLightShafts, createRockCluster, createCaveMouth, applyVerticalGradient } from "./decorations.js";
-import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail } from "./liquid.js";
+import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, updateFluidSimWater, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail } from "./liquid.js";
 import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
 import { createGrass, updateGrass, disposeGrass, createFlowers, updateFlowers, disposeFlowers, createFootstepGlowSystem, spawnFootstepGlow, updateFootstepGlowSystem, disposeFootstepGlowSystem } from "./vegetation.js";
@@ -152,6 +143,30 @@ const menuBtn = document.getElementById("rift-menu-btn");
 const titleGate = document.getElementById("rift-title-gate");
 const titlePlayBtn = document.getElementById("rift-title-play-btn");
 
+// Per "tapping Play doesn't do anything" — the real bug: this handler
+// used to be registered much later in the file, AFTER the renderer's
+// own top-level await. A top-level await pauses the ENTIRE REST of the
+// module's execution until it resolves, so while WebGPU initialization
+// was pending, this listener genuinely hadn't been attached yet — even
+// though the title screen and Play button themselves are just static
+// HTML/CSS and render immediately regardless of main.js's own progress,
+// creating a real trap: a button visible and looking ready with no
+// actual behavior wired up yet. Moved here, before that await, so the
+// button is interactive immediately, independent of how long (or
+// whether) the 3D renderer setup finishes. showLevelSelect is a hoisted
+// function declaration (defined later in this same file) — safe to
+// reference from a callback here, since the callback itself only
+// actually runs later, on a real click, by which point the whole
+// module will have finished evaluating.
+if (titleGate && titlePlayBtn) {
+  titlePlayBtn.addEventListener("click", () => {
+    alert("Play button handler fired"); // TEMPORARY diagnostic — remove once the real cause is confirmed. If this never appears, something is blocking the tap before it reaches the button at all; if it DOES appear, the handler is firing correctly and the problem is downstream in showLevelSelect() or the biome-menu markup itself.
+    titleGate.classList.add("rift-title-gate-hidden");
+    setTimeout(() => { titleGate.style.display = "none"; }, 650); // matches the CSS opacity transition — only removed from layout after it's fully faded
+    showLevelSelect();
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Input mode detection
 // ---------------------------------------------------------------------------
@@ -244,7 +259,7 @@ camera.rotation.order = "YXZ";
 // block ever actually fires in testing, migrating each pass to
 // WebGPU-native TSL nodes (starting with the simplest ones) is the
 // planned next step — not something to guess at blind here.
-const renderer = new WebGPURenderer({ canvas, antialias: true });
+const renderer = new THREE.WebGPURenderer({ canvas, antialias: true });
 // Real visible loading indicator + timeout, per "no error in console" —
 // the most likely explanation for that exact symptom (nothing renders,
 // nothing throws) is a HANGING promise, not a failing one: if the
@@ -268,7 +283,36 @@ function riftInitWithTimeout(promise, ms, label) {
 }
 await riftInitWithTimeout(renderer.init(), 10000, "renderer.init()");
 riftLoadingEl.remove();
-let composerRenderFailedOnce = false; // used by the composer.render() safety net far below in animate() — logs the WebGPU/post-processing incompatibility once instead of every frame
+// Real WebGPU error surfacing — per "Script error." with no details on
+// the index.html-level overlay. Root cause (confirmed via Three.js's own
+// GitHub issues, not guessed): WebGPURenderer genuinely cannot propagate
+// GPU pipeline/shader-compile errors through normal JS try/catch — some
+// failures (e.g. "Device Lost") go straight to console.error internally,
+// bypassing window.onerror/unhandledrejection entirely, which is exactly
+// why the overlay in index.html only ever saw the browser's generic
+// muted placeholder instead of a real message. The WebGPU spec's actual
+// answer for this is the GPUDevice's own "uncapturederror" event — it
+// fires for real native GPU errors regardless of whether Three.js's own
+// try/catch machinery can see them. Reaching the raw device requires
+// going through renderer.backend, which only exists on the real WebGPU
+// path (the automatic WebGL2 fallback has no GPUDevice at all — guarded
+// below so this stays a no-op, not a new crash, on that path).
+const riftGpuDevice = renderer.backend && renderer.backend.device;
+if (riftGpuDevice && typeof riftGpuDevice.addEventListener === "function") {
+  riftGpuDevice.addEventListener("uncapturederror", (event) => {
+    const msg = "[Real WebGPU device error]\n" + event.error.constructor.name + ": " + event.error.message;
+    console.error(msg);
+    const existingOverlay = document.getElementById("rift-module-error-overlay");
+    if (existingOverlay) {
+      existingOverlay.style.display = "block";
+      existingOverlay.textContent = msg;
+    } else {
+      alert(msg); // fallback if index.html's overlay isn't present for some reason
+    }
+  });
+} else {
+  console.warn("[rift] No GPUDevice found on renderer.backend — likely running the WebGL2 fallback path, or Three.js's internal backend property name has changed since this was written.");
+}
 // Tone mapping ITSELF is now set by applyPostFx() below (from the new
 // tone-mapping dropdown's tier default/override, per explicit
 // "individually" follow-up) rather than hardcoded here — this fixed
@@ -303,274 +347,49 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 // the AO term — genuine additional GPU work every frame, same category
 // of cost this project already fought hard to control in the reflection/
 // refraction throttling work.
-const composer = new EffectComposer(renderer);
-composer.addPass(new RenderPass(scene, camera));
-const ssaoPass = new SSAOPass(scene, camera, viewport.clientWidth, viewport.clientHeight);
-// Tuned to THIS world's scale (player eye height 1.6, a tree trunk ~1-2
-// units wide) rather than SSAOPass's own defaults, which assume a
-// larger/different scene scale — the defaults read as either invisible
-// (radius too small to reach neighboring geometry) or a heavy fog-like
-// darkening over everything (radius too large) at this project's actual
-// unit scale.
-// Reduced from kernelRadius=4/maxDistance=0.12 per "something doesn't
-// look right" — the palm tree canopy's dense, closely-overlapping frond
-// planes were building up heavy AO darkening between themselves (SSAO
-// naturally piles onto tightly-packed geometry like this), reading as an
-// odd dark blotch through the canopy rather than a subtle ground-contact
-// shadow. Smaller radius/distance keeps it scoped closer to genuine
-// contact points.
-ssaoPass.kernelRadius = 2.5;
-ssaoPass.minDistance = 0.0005;
-ssaoPass.maxDistance = 0.08;
-composer.addPass(ssaoPass);
-// Selective bloom — the sun disc, resonance crystals, and the caustics
-// net are all bright/emissive but nothing actually GLOWS by default.
-// Per explicit "dropdown options... individually" follow-up, this is no
-// longer a single on/off bundled with AA — BLOOM_LEVELS below defines
-// real distinct presets (strength/radius/threshold), picked via its own
-// dropdown. Constructed here with the 'off' preset's values; applyPostFx
-// (below) sets the real preset immediately after.
-const bloomPass = new UnrealBloomPass(new THREE.Vector2(viewport.clientWidth, viewport.clientHeight), 0, 0.4, 1.0);
-composer.addPass(bloomPass);
-// Real anti-aliasing for the final composited image — renderer's own
-// antialias:true (set at construction above) only affects a DIRECT
-// render straight to the canvas; the moment output goes through
-// EffectComposer (as it already does here, for SSAO/bloom), that native
-// MSAA no longer applies to what actually reaches the screen, since
-// composer's intermediate render targets aren't multisampled by default.
-// Two selectable methods per explicit "individually" follow-up — SMAA
-// (better edge quality, the previous single hardcoded choice) and FXAA
-// (cheaper, a real option for weaker devices) — plus Off. Both passes
-// exist simultaneously; applyPostFx enables at most one at a time.
-const smaaPass = new SMAAPass(viewport.clientWidth * renderer.getPixelRatio(), viewport.clientHeight * renderer.getPixelRatio());
-composer.addPass(smaaPass);
-const fxaaPass = new ShaderPass(FXAAShader);
-composer.addPass(fxaaPass);
-// Lens raindrops — per explicit "camera lens rain drops" request. A
-// genuinely different effect from the falling rain particles elsewhere
-// in this project (those are real 3D geometry in the world; this is a
-// 2D screen-space post-process simulating water clinging to/sliding down
-// the camera's own lens), which is why it lives here in the composer
-// chain rather than in weather.js. Uses the SAME proven Voronoi-cell
-// technique already used elsewhere in this project (foamVoronoiF1F2/
-// causticVoronoiF1F2) for organic, non-tiling droplet shapes without
-// needing an external texture asset — two overlapping scales (a few
-// larger/slower drops, many smaller/faster ones) so it doesn't read as
-// an obviously tiled grid. Each droplet refracts the scene behind it
-// (samples tDiffuse at an offset UV based on distance from the drop's
-// own center, approximating a real droplet's convex-lens bulge) and gets
-// a soft bright rim at its edge, the way real droplets catch light.
-// uRainIntensity drives both how many drops appear and how fast they
-// slide, so this fades in/out with actual weather rather than always
-// being present. Uses the well-established default full-screen-quad
-// vertex shader boilerplate (identical in spirit to what FXAAShader/
-// every other ShaderPass here already relies on) — this is a NEW,
-// standalone shader program, not a patch into an existing material's
-// internals the way the (once-reverted, see the sky-seam saga earlier
-// this project) onBeforeCompile shaders are, which is a meaningfully
-// lower-risk way to add a new effect.
-const lensRainPass = new ShaderPass({
-  uniforms: {
-    tDiffuse: { value: null },
-    uTime: { value: 0 },
-    uRainIntensity: { value: 0 },
-    uResolution: { value: new THREE.Vector2(viewport.clientWidth, viewport.clientHeight) },
-    // Real sun screen position (UV space), projected from its actual
-    // world position each frame — see the animate loop below. A
-    // sentinel far outside [0,1] (set whenever the sun isn't usefully
-    // visible — behind the camera or below the horizon) means the glow
-    // naturally never triggers rather than needing a separate on/off
-    // flag.
-    uSunScreenPos: { value: new THREE.Vector2(-10, -10) },
+// Per "commit to WebGPU": EffectComposer and every pass built on it
+// (SSAO, bloom, SMAA/FXAA, the custom lens-rain ShaderPass) is
+// officially, structurally unsupported under real WebGPU execution —
+// confirmed directly via Three.js's own WebGPURenderer documentation,
+// not inferred. This is stage 1 of the real migration plan: disable
+// the whole broken pipeline with honest, inert stand-ins so the game
+// loads and renders again, rather than leaving it in a state where a
+// single broken import crashes the entire module before anything can
+// run. These stand-ins exist ONLY so the many other places in this
+// file that already reference these pass objects (graphics-settings
+// toggles, resize handlers, per-frame uniform updates for the
+// lens-rain effect) don't throw — none of them do anything real yet.
+// Each effect gets rebuilt properly in TSL one at a time in follow-up
+// work, confirmed working before the next, the same discipline that
+// built the standalone fluid-sim prototype successfully. This is NOT
+// a replacement for that real work, just what unblocks it.
+function riftStubVec() {
+  return { set() {}, x: 0, y: 0 };
+}
+function riftStubUniforms(names) {
+  const u = {};
+  for (const name of names) u[name] = { value: riftStubVec() };
+  return u;
+}
+const composer = {
+  setSize() {},
+  render() {},
+  addPass() {},
+};
+const ssaoPass = { enabled: false, kernelRadius: 0, minDistance: 0, maxDistance: 0, setSize() {} };
+const bloomPass = { enabled: false, strength: 0, radius: 0, threshold: 0 };
+const smaaPass = { enabled: false };
+const fxaaPass = { enabled: false, material: { uniforms: riftStubUniforms(["resolution"]) } };
+const lensRainPass = {
+  enabled: false,
+  material: {
+    uniforms: {
+      ...riftStubUniforms(["uResolution", "uSunScreenPos"]),
+      uTime: { value: 0 },
+      uRainIntensity: { value: 0 },
+    },
   },
-  vertexShader: `
-    varying vec2 vUv;
-    void main() {
-      vUv = uv;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-    }
-  `,
-  fragmentShader: `
-    uniform sampler2D tDiffuse;
-    uniform float uTime;
-    uniform float uRainIntensity;
-    uniform vec2 uResolution;
-    uniform vec2 uSunScreenPos;
-    varying vec2 vUv;
-
-    vec2 dropHash(vec2 p) {
-      float n = sin(dot(p, vec2(41.0, 289.0)));
-      return fract(vec2(262144.0, 32768.0) * n);
-    }
-
-    // Returns (distance to nearest droplet center [using an elongated
-    // metric for sliding droplets], offset-vector.x, offset-vector.y,
-    // wet-trail mask). The wet-trail mask is a SEPARATE signal from the
-    // droplet's own body -- a thin, full-column band at this specific
-    // droplet's own X position, present only for droplets whose own hash
-    // marks them as "streaky" (roughly a third of them, matching the
-    // reference photo's mix of plain droplets and ones with long visible
-    // trails). Deliberately NOT direction-dependent on the droplet's
-    // motion (which would need a sign convention on screen-space Y that
-    // can't be verified without a live browser) -- a fixed vertical
-    // column at the droplet's own X already reads as "the path it has
-    // rolled along," since the droplet itself is what's actually
-    // animating down that column over time.
-    // Returns (distance to nearest droplet center [using an elongated
-    // metric for sliding droplets], offset-vector.x, offset-vector.y,
-    // wet-trail mask). The wet-trail mask is a SEPARATE signal from the
-    // droplet's own body -- a thin, full-column band at this specific
-    // droplet's own X position, present only for droplets whose own hash
-    // marks them as "streaky" (roughly a third of them, matching the
-    // reference photo's mix of plain droplets and ones with long visible
-    // trails). Deliberately NOT direction-dependent on the droplet's
-    // motion (which would need a sign convention on screen-space Y that
-    // can't be verified without a live browser) -- a fixed vertical
-    // column at the droplet's own X already reads as "the path it has
-    // rolled along," since the droplet itself is what's actually
-    // animating down that column over time.
-    //
-    // wrapFade (out param) is the fix for droplets visibly POPPING in and
-    // out of existence: each droplet's own cellPoint.y slides via
-    // fract(), which means once it crosses back around from 0 to 1 (or
-    // vice versa) it JUMPS instantly to the opposite side of its own cell
-    // -- a real, structural artifact of using fract() for looping motion,
-    // not a tuning issue. wrapFade fades a droplet to fully invisible in
-    // the brief window right before/after that wrap point, so the actual
-    // jump happens while nothing is visible there, then fades back in
-    // smoothly on the other side -- the standard, well-established fix
-    // for exactly this class of looping-animation seam.
-    vec4 dropVoronoi(vec2 p, float slideMix, out float wrapFade) {
-      vec2 ip = floor(p);
-      vec2 fp = fract(p);
-      float minDist = 8.0;
-      vec2 minOffset = vec2(0.0);
-      float streakMask = 0.0;
-      float minCellY = 0.0;
-      for (int y = -1; y <= 1; y++) {
-        for (int x = -1; x <= 1; x++) {
-          vec2 neighbor = vec2(float(x), float(y));
-          vec2 cellPoint = dropHash(ip + neighbor);
-          float slideSpeed = 0.12 + cellPoint.x * 0.3;
-          float streak = 1.0 + cellPoint.y * 3.5 * slideMix;
-          bool isStreaky = cellPoint.x > 0.6;
-          cellPoint.y = fract(cellPoint.y + uTime * slideSpeed * slideMix); // was "- uTime * ..." — confirmed backwards (moving up instead of down), flipped
-          vec2 offset = neighbor + cellPoint - fp;
-          vec2 stretched = vec2(offset.x, offset.y / streak);
-          float d = length(stretched);
-          if (d < minDist) {
-            minDist = d;
-            minOffset = offset;
-            streakMask = isStreaky ? (1.0 - smoothstep(0.0, 0.022, abs(offset.x))) : 0.0;
-            minCellY = cellPoint.y;
-          }
-        }
-      }
-      wrapFade = smoothstep(0.0, 0.12, minCellY) * smoothstep(0.0, 0.12, 1.0 - minCellY);
-      return vec4(minDist, minOffset, streakMask);
-    }
-
-    void main() {
-      vec2 uv = vUv;
-      float aspect = uResolution.x / max(1.0, uResolution.y);
-      vec2 p = uv * vec2(aspect, 1.0);
-      float slideMix = 0.25 + uRainIntensity * 0.6;
-
-      // Three overlapping scales (large/medium/tiny) for real density
-      // matching a rain-soaked window, not a handful of sparse circles.
-      float wrapFade1, wrapFade2, wrapFade3;
-      vec4 v1 = dropVoronoi(p * 7.0, slideMix, wrapFade1);
-      float r1 = 0.17;
-      vec4 v2 = dropVoronoi(p * 13.0 + 37.0, slideMix, wrapFade2);
-      float r2 = 0.12;
-      vec4 v3 = dropVoronoi(p * 21.0 + 91.0, slideMix, wrapFade3);
-      float r3 = 0.075;
-
-      float in1 = (1.0 - smoothstep(r1 * 0.6, r1, v1.x)) * wrapFade1;
-      float in2 = (1.0 - smoothstep(r2 * 0.6, r2, v2.x)) * wrapFade2;
-      float in3 = (1.0 - smoothstep(r3 * 0.6, r3, v3.x)) * wrapFade3;
-      // Per explicit "should start with a few drops before it increases
-      // to more and more, then slowly fade out" — the 0.25 floor added
-      // last round (to keep light rain from showing nothing) was
-      // actually working AGAINST this: it made coverage jump straight to
-      // a quarter-full field the instant rain started at all, regardless
-      // of how gradually the underlying rainIntensity itself ramps
-      // (weather.js already fades this over ~20-30s). A near-zero floor
-      // here is what actually lets that existing gradual ramp show
-      // through visually — starting sparse, building up, and fading back
-      // down the same way, instead of popping to a baseline density.
-      float coverage = clamp(0.03 + uRainIntensity * 1.35, 0.0, 1.0);
-      float dropMask = max(max(in1, in2), in3) * coverage;
-
-      // Pick whichever layer's droplet actually covers this pixel (its
-      // own distance/offset/radius all travel together, needed below for
-      // a correctly-normalized lens profile).
-      float wonDist; vec2 wonOffset; float wonR; float wonRim; float streakMask;
-      if (in1 >= in2 && in1 >= in3) {
-        wonDist = v1.x; wonOffset = v1.yz; wonR = r1;
-        wonRim = smoothstep(r1 * 0.5, r1 * 0.68, v1.x) * (1.0 - smoothstep(r1 * 0.68, r1, v1.x));
-        streakMask = v1.w;
-      } else if (in2 >= in3) {
-        wonDist = v2.x; wonOffset = v2.yz; wonR = r2;
-        wonRim = smoothstep(r2 * 0.5, r2 * 0.68, v2.x) * (1.0 - smoothstep(r2 * 0.68, r2, v2.x));
-        streakMask = v2.w;
-      } else {
-        wonDist = v3.x; wonOffset = v3.yz; wonR = r3;
-        wonRim = smoothstep(r3 * 0.5, r3 * 0.68, v3.x) * (1.0 - smoothstep(r3 * 0.68, r3, v3.x));
-        streakMask = v3.w;
-      }
-
-      // THE ACTUAL FIX for the hollow-ring look: normalized direction
-      // (unit vector, not the raw offset whose OWN magnitude used to be
-      // baked directly into the bend strength) times a smooth strength
-      // curve that ramps up across the WHOLE droplet interior via
-      // smoothstep, not concentrated in a thin band right at the rim.
-      // The old formula left each droplet's middle nearly undistorted
-      // (matching the background almost exactly) with a sharp bend only
-      // at the boundary -- structurally a ring, regardless of tuning.
-      // This is real water now: distortion visible throughout, strongest
-      // toward the edge the way a genuine convex lens actually behaves,
-      // not just AT the edge.
-      float normRadius = clamp(wonDist / wonR, 0.0, 1.0);
-      float lensPower = smoothstep(0.0, 1.0, normRadius);
-      vec2 dir = wonDist > 0.001 ? wonOffset / wonDist : vec2(0.0);
-      vec2 refractOffset = -dir * lensPower * 0.16 * dropMask;
-
-      // Wet trail — a distinct, WEAKER effect from the droplet's own
-      // lens body: a mild vertical pull (a thin flowing rivulet, not a
-      // full lens sphere) plus darkening the glass slightly rather than
-      // brightening it, since real wet streaks read as a darker, more
-      // saturated version of what's behind them.
-      vec2 trailOffset = vec2(0.0, 0.02) * streakMask * coverage; // sign flipped to match the corrected slide direction above
-
-      vec4 color = texture2D(tDiffuse, clamp(uv + refractOffset + trailOffset, 0.001, 0.999));
-      color.rgb *= mix(1.0, 0.85, streakMask * coverage);
-
-      // Per explicit "shouldn't light up the whole drop like a ring,
-      // just reflect a spot like glass" — the old highlight brightened
-      // the ENTIRE rim uniformly once a droplet was near the sun's
-      // screen direction; real glass/water only throws back a small
-      // glint at whichever single point on its curved surface happens to
-      // be angled correctly toward the light, not the whole edge at
-      // once. sunDir is the direction from THIS pixel toward the sun
-      // (converted into the same aspect-corrected space dir already
-      // lives in, for a consistent angle comparison) — dot(dir, sunDir)
-      // is near 1 only for the small arc of the rim that's actually
-      // facing the sun, and a high power exponent sharpens that into a
-      // tight spot rather than a soft half-moon.
-      vec2 sunDir = normalize((uSunScreenPos - uv) * vec2(aspect, 1.0) + 0.0001);
-      float facingSun = max(0.0, dot(dir, sunDir));
-      float highlightSpot = pow(facingSun, 10.0);
-      float distToSun = length(uv - uSunScreenPos);
-      float sunProximity = 1.0 - smoothstep(0.0, 0.55, distToSun);
-      color.rgb += vec3(wonRim * sunProximity * highlightSpot * 2.2 * coverage);
-
-      gl_FragColor = color;
-    }
-  `,
-});
-composer.addPass(lensRainPass);
-composer.addPass(new OutputPass());
+};
 
 // Bloom presets — 'off' truly disables the pass (skips its extra
 // render-target work entirely, not just zeroed strength); the other
@@ -1201,19 +1020,6 @@ if (menuBtn) {
   });
 }
 
-// The animated "RIFT ISLANDS" intro (title gate) is shown first, on top of
-// the biome-select overlay (which starts hidden — see index.html). Play
-// fades the gate out and reveals the biome menu via the same
-// showLevelSelect() the in-game MENU button already uses, so entering a
-// level from here works exactly like it always has.
-if (titleGate && titlePlayBtn) {
-  titlePlayBtn.addEventListener("click", () => {
-    titleGate.classList.add("rift-title-gate-hidden");
-    setTimeout(() => { titleGate.style.display = "none"; }, 650); // matches the CSS opacity transition — only removed from layout after it's fully faded
-    showLevelSelect();
-  });
-}
-
 const keys = { forward: false, back: false, left: false, right: false, up: false, down: false };
 let jumpQueued = false;
 const MOVE_KEYS = new Set(["KeyW", "KeyS", "KeyA", "KeyD", "Space", "ShiftLeft", "ShiftRight"]);
@@ -1395,19 +1201,26 @@ const MAX_DYNAMIC_FIRES = 10; // defensive cap so spawns can never outpace burno
 function teardownLevel() {
   if (scene.environment) {
     scene.environment = null;
-    if (skyEnvRenderTarget) { skyEnvRenderTarget.dispose(); skyEnvRenderTarget = null; }
+    if (skyEnvRenderTarget) {
+      const targetToDispose = skyEnvRenderTarget;
+      riftDeferDispose(() => targetToDispose.dispose());
+      skyEnvRenderTarget = null;
+    }
     lastSkyEnvZenith = null; lastSkyEnvHorizon = null; // forces a fresh regenerate next time crystal loads, rather than comparing against a stale color from the previous visit
   }
   if (terrainMesh) {
     scene.remove(terrainMesh);
-    terrainMesh.geometry.dispose();
-    // The sand normal-map texture (crystal-only, see buildLevel) is a
-    // per-level CLONE — material.dispose() below does NOT automatically
-    // dispose textures attached to it, so this needs its own explicit
-    // call, same as every other per-instance texture clone in this
-    // project (see liquid.js's rippleTexture/mirrorWater disposal).
-    if (terrainMesh.material.normalMap) terrainMesh.material.normalMap.dispose();
-    terrainMesh.material.dispose();
+    const meshToDispose = terrainMesh;
+    riftDeferDispose(() => {
+      meshToDispose.geometry.dispose();
+      // The sand normal-map texture (crystal-only, see buildLevel) is a
+      // per-level CLONE — material.dispose() below does NOT automatically
+      // dispose textures attached to it, so this needs its own explicit
+      // call, same as every other per-instance texture clone in this
+      // project (see liquid.js's rippleTexture/mirrorWater disposal).
+      if (meshToDispose.material.normalMap) meshToDispose.material.normalMap.dispose();
+      meshToDispose.material.dispose();
+    });
     terrainMesh = null;
   }
   disposeLiquidPlane(scene, liquidHandle);
@@ -1426,8 +1239,10 @@ function teardownLevel() {
   sourcePondHandle = null;
   for (const floorMesh of caveFloorMeshes) {
     scene.remove(floorMesh);
-    floorMesh.geometry.dispose();
-    floorMesh.material.dispose();
+    riftDeferDispose(() => {
+      floorMesh.geometry.dispose();
+      floorMesh.material.dispose();
+    });
   }
   caveFloorMeshes = [];
   disposeAtmosphericParticles(scene, atmosphereHandle);
@@ -1455,9 +1270,11 @@ function teardownLevel() {
   allCrystals = [];
   for (const handle of decorationHandles) {
     scene.remove(handle.group);
-    handle.group.traverse((obj) => {
-      if (obj.geometry) obj.geometry.dispose();
-      if (obj.material) obj.material.dispose();
+    riftDeferDispose(() => {
+      handle.group.traverse((obj) => {
+        if (obj.geometry) obj.geometry.dispose();
+        if (obj.material) obj.material.dispose();
+      });
     });
   }
   decorationHandles.length = 0;
@@ -1513,16 +1330,54 @@ function faceAwayFromLandmark(x, z) {
 // clone's own `.repeat` (set once, right after cloning) can't collide
 // with any other consumer of the same underlying image — same
 // established pattern as liquid.js's own texture clones.
+//
+// Per "Script error." crashing every biome — real devtools stack trace
+// confirmed: TypeError: Cannot read properties of null (reading
+// 'complete') at Textures.updateTexture inside three.webgpu.js. A
+// freshly-created THREE.Texture's `.image` is `null` by default until
+// TextureLoader's async network fetch finishes — WebGLRenderer silently
+// tolerates that and skips upload until ready, but WebGPURenderer's
+// Textures.updateTexture reads `image.complete` with NO null-check, so
+// it throws on any frame rendered before an async-loaded texture's
+// photo finishes downloading. Every TextureLoader().load() call in this
+// file builds a material that gets rendered the SAME frame the texture
+// is created — long before a real network fetch can complete — so this
+// shared helper gives every one of them a real (tiny, invisible) `.image`
+// immediately. TextureLoader's own internal onLoad callback (already
+// wired into every `.load()` call below) overwrites `.image` with the
+// real photo and sets `needsUpdate` itself once it actually arrives —
+// nothing else needs to change for that swap to happen.
+function riftEnsureTextureImage(texture) {
+  if (!texture.image) {
+    const placeholderCanvas = document.createElement("canvas");
+    placeholderCanvas.width = 1;
+    placeholderCanvas.height = 1;
+    texture.image = placeholderCanvas;
+  }
+  return texture;
+}
+// Per real WebGPU error "[Buffer (unlabeled)] used in submit while
+// destroyed" hit switching Ember -> Verdant — same real GPUValidationError,
+// same fix as liquid.js's own copy of this helper (see its comment there
+// for the full explanation): renderer.render()'s queue.submit() finishes
+// asynchronously, off the JS thread, so disposing a geometry/material
+// buffer synchronously in the same tick a level tears down can destroy
+// something the GPU hasn't actually finished using yet from the previous
+// frame. scene.remove() stays synchronous (correct immediately); only the
+// GPU-resource-freeing .dispose() calls are pushed past a frame boundary.
+function riftDeferDispose(disposeFn) {
+  requestAnimationFrame(() => requestAnimationFrame(disposeFn));
+}
 let sandNormalTexture = null;
 function getSandNormalTexture() {
   if (sandNormalTexture) return sandNormalTexture;
   const url = new URL("textures/sandnormals.jpg", import.meta.url).href;
-  sandNormalTexture = new THREE.TextureLoader().load(
+  sandNormalTexture = riftEnsureTextureImage(new THREE.TextureLoader().load(
     url,
     () => console.log("[main] sand normal texture loaded:", url),
     undefined,
     (err) => console.error("[main] sand normal texture FAILED to load:", url, err)
-  );
+  ));
   sandNormalTexture.wrapS = sandNormalTexture.wrapT = THREE.RepeatWrapping;
   return sandNormalTexture;
 }
@@ -1530,12 +1385,12 @@ let sandColorTexture = null;
 function getSandColorTexture() {
   if (sandColorTexture) return sandColorTexture;
   const url = new URL("textures/sandcolor.jpg", import.meta.url).href;
-  sandColorTexture = new THREE.TextureLoader().load(
+  sandColorTexture = riftEnsureTextureImage(new THREE.TextureLoader().load(
     url,
     () => console.log("[main] sand color texture loaded:", url),
     undefined,
     (err) => console.error("[main] sand color texture FAILED to load:", url, err)
-  );
+  ));
   sandColorTexture.colorSpace = THREE.SRGBColorSpace; // this one carries real baked color (unlike normal/bump, which are data maps, not color) — needs the same colorSpace correction this project's other painted-color textures already use, or it renders washed out
   sandColorTexture.wrapS = sandColorTexture.wrapT = THREE.RepeatWrapping;
   return sandColorTexture;
@@ -1544,12 +1399,12 @@ let sandBumpTexture = null;
 function getSandBumpTexture() {
   if (sandBumpTexture) return sandBumpTexture;
   const url = new URL("textures/sandbump.jpg", import.meta.url).href;
-  sandBumpTexture = new THREE.TextureLoader().load(
+  sandBumpTexture = riftEnsureTextureImage(new THREE.TextureLoader().load(
     url,
     () => console.log("[main] sand bump texture loaded:", url),
     undefined,
     (err) => console.error("[main] sand bump texture FAILED to load:", url, err)
-  );
+  ));
   sandBumpTexture.wrapS = sandBumpTexture.wrapT = THREE.RepeatWrapping;
   return sandBumpTexture;
 }
@@ -1569,12 +1424,12 @@ let seafloorSandColorTexture = null;
 function getSeafloorSandColorTexture() {
   if (seafloorSandColorTexture) return seafloorSandColorTexture;
   const url = new URL("textures/seafloor_sand_color.jpg", import.meta.url).href;
-  seafloorSandColorTexture = new THREE.TextureLoader().load(
+  seafloorSandColorTexture = riftEnsureTextureImage(new THREE.TextureLoader().load(
     url,
     () => console.log("[main] seafloor sand color texture loaded:", url),
     undefined,
     (err) => console.error("[main] seafloor sand color texture FAILED to load:", url, err)
-  );
+  ));
   seafloorSandColorTexture.colorSpace = THREE.SRGBColorSpace; // real baked color, same correction the old sandColorTexture needed
   seafloorSandColorTexture.wrapS = seafloorSandColorTexture.wrapT = THREE.RepeatWrapping;
   return seafloorSandColorTexture;
@@ -1583,12 +1438,12 @@ let seafloorSandNormalTexture = null;
 function getSeafloorSandNormalTexture() {
   if (seafloorSandNormalTexture) return seafloorSandNormalTexture;
   const url = new URL("textures/seafloor_sand_normal.jpg", import.meta.url).href;
-  seafloorSandNormalTexture = new THREE.TextureLoader().load(
+  seafloorSandNormalTexture = riftEnsureTextureImage(new THREE.TextureLoader().load(
     url,
     () => console.log("[main] seafloor sand normal texture loaded:", url),
     undefined,
     (err) => console.error("[main] seafloor sand normal texture FAILED to load:", url, err)
-  );
+  ));
   seafloorSandNormalTexture.wrapS = seafloorSandNormalTexture.wrapT = THREE.RepeatWrapping;
   return seafloorSandNormalTexture;
 }
@@ -1596,12 +1451,12 @@ let seafloorSandRoughnessTexture = null;
 function getSeafloorSandRoughnessTexture() {
   if (seafloorSandRoughnessTexture) return seafloorSandRoughnessTexture;
   const url = new URL("textures/seafloor_sand_roughness.jpg", import.meta.url).href;
-  seafloorSandRoughnessTexture = new THREE.TextureLoader().load(
+  seafloorSandRoughnessTexture = riftEnsureTextureImage(new THREE.TextureLoader().load(
     url,
     () => console.log("[main] seafloor sand roughness texture loaded:", url),
     undefined,
     (err) => console.error("[main] seafloor sand roughness texture FAILED to load:", url, err)
-  );
+  ));
   seafloorSandRoughnessTexture.wrapS = seafloorSandRoughnessTexture.wrapT = THREE.RepeatWrapping;
   return seafloorSandRoughnessTexture;
 }
@@ -1616,12 +1471,12 @@ let causticPatternTexture = null;
 function getCausticPatternTexture() {
   if (causticPatternTexture) return causticPatternTexture;
   const url = new URL("textures/caustics_pattern.jpg", import.meta.url).href;
-  causticPatternTexture = new THREE.TextureLoader().load(
+  causticPatternTexture = riftEnsureTextureImage(new THREE.TextureLoader().load(
     url,
     () => console.log("[main] caustics pattern texture loaded:", url),
     undefined,
     (err) => console.error("[main] caustics pattern texture FAILED to load:", url, err)
-  );
+  ));
   causticPatternTexture.wrapS = causticPatternTexture.wrapT = THREE.RepeatWrapping;
   return causticPatternTexture;
 }
@@ -2080,7 +1935,19 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
     // and the Voronoi F1/F2 cell-edge caustic-net pattern (already
     // structurally bounded via clamp()+mix(), the same proven-safe
     // technique liquid.js's own water-surface caustic effect uses).
-    const CAUSTICS_ENABLED = true; // single flip point if this ever needs to be disabled again
+    // Per "commit to WebGPU" — disabled, same reasoning as the
+    // EffectComposer pipeline: onBeforeCompile-based shader modification
+    // is officially unsupported under real WebGPU execution, confirmed
+    // via Three.js's own docs, not inferred. Leaving this active risked
+    // either a silent no-op (caustics/foam just never appearing) or a
+    // real failure at material-compile time — same category of risk as
+    // the EffectComposer imports that crashed the whole module load.
+    // This needs a real TSL node-material rebuild (colorNode/
+    // emissiveNode), not a patch — the standalone fluid-sim prototype
+    // already has proven-working TSL caustics logic (real slope-driven
+    // refraction into an interlocking line pattern) that the eventual
+    // rebuild here should draw from directly, not reinvent.
+    const CAUSTICS_ENABLED = false; // single flip point if this ever needs to be disabled again
     if (CAUSTICS_ENABLED) {
       simpleTerrainMat.onBeforeCompile = (shader) => {
         shader.uniforms.uTime = { value: 0 };
@@ -4420,6 +4287,22 @@ function animate() {
   // behind here is never visible. biome-gated inside updateLiquidPlane
   // itself (crystal only), so this is harmless to pass unconditionally.
   updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, camera.position, sun.position, dayNight.skyHorizon, reflectionRenderTarget.texture, reflectionTextureMatrix, refractionRenderTarget.texture, refractionResolution, weatherHandle ? weatherHandle.rainIntensity : 0, dayNight.dayAmount);
+  // Real GPU compute dispatch for the fluid-sim water (see liquid.js's
+  // buildCrystalFluidSimPlane) — separate from updateLiquidPlane above
+  // since dispatching a compute shader needs the renderer, which only
+  // this file holds. Deliberately NOT awaited here: this whole animate()
+  // loop is a plain synchronous requestAnimationFrame callback, not
+  // renderer.setAnimationLoop's own async-aware loop (which is what the
+  // standalone prototype used) — converting the entire render loop to
+  // async is real architectural risk well beyond this stage's scope, not
+  // attempted blind here. Firing this off without awaiting means the
+  // compute dispatch's internal awaits resolve across whatever future
+  // microtask ticks the browser schedules them on, which can lag the
+  // visible wave motion by roughly a frame under load — a known,
+  // deliberate simplification for this stage, not a bug, and safe
+  // specifically because the buffer-disposal timing fix already applied
+  // elsewhere prevents this from ever racing against a level teardown.
+  if (liquidHandle && liquidHandle.fluidSim) updateFluidSimWater(liquidHandle, renderer);
   updateWaterfall(waterfallHandle, dt, elapsedTime);
   updateOceanSurfaceDetail(oceanSurfaceDetailHandle, elapsedTime, dayNight.dayAmount);
   // Real angelfish (models.js) — AnimationMixer drives the loaded skeletal
@@ -4897,15 +4780,13 @@ function animate() {
     // bloom/SSAO/AA/lens-rain for that frame, not the whole scene) and
     // logs it ONCE rather than spamming the console every frame or
     // leaving the screen black with no diagnostic trail.
-    try {
-      composer.render();
-    } catch (e) {
-      if (!composerRenderFailedOnce) {
-        composerRenderFailedOnce = true;
-        console.error("[webgpu] composer.render() failed, falling back to direct rendering. Post-processing (bloom/SSAO/AA/lens-rain) will be unavailable until the pipeline is migrated to WebGPU-native passes. Original error:", e);
-      }
-      renderer.render(scene, camera);
-    }
+    // Per "commit to WebGPU" — composer is now an inert stub (see the
+    // stage-1 stand-ins above), so this renders directly rather than
+    // going through it. The previous try/catch here is no longer
+    // meaningful: a no-op stub can't throw, so keeping it would have
+    // silently rendered nothing every single frame instead of actually
+    // falling back to anything.
+    renderer.render(scene, camera);
   }
 }
 requestAnimationFrame(animate);

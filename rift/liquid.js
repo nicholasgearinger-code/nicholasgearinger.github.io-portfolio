@@ -3,7 +3,7 @@ import {
   Fn, instanceIndex, instancedArray, float, uint, If,
   uniform, vec3, vec2, color, positionLocal, mix, clamp,
   min, max, attribute, time, sin, fract, floor, dot, cross,
-  pow, positionWorld, cameraPosition, normalWorld,
+  pow, positionWorld, cameraPosition, normalWorld, reflect,
 } from "three/tsl";
 import { getGraphicsSettings } from "./graphicsSettings.js";
 
@@ -986,9 +986,11 @@ function buildCrystalFluidSimPlane(scene, y, size, sampleHeight) {
     const cellWorldX = x.div(float(WIDTH)).sub(0.5).mul(float(size));
     const cellWorldZ = yy.div(float(WIDTH)).sub(0.5).mul(float(size));
     const jitter = fluidSimHash21(vec2(cellWorldX.mul(0.05), cellWorldZ.mul(0.05))).sub(0.5).mul(0.4);
-    const chop1 = sin(cellWorldX.mul(0.28).add(cellWorldZ.mul(0.11)).add(time.mul(1.3)).add(jitter));
-    const chop2 = sin(cellWorldX.mul(0.14).sub(cellWorldZ.mul(0.22)).sub(time.mul(0.9)).add(jitter.mul(0.7)));
-    const chop3 = sin(cellWorldX.mul(0.5).add(cellWorldZ.mul(0.4)).add(time.mul(1.7)).add(1.7).add(jitter.mul(1.3)));
+    // Per "wave motion could be slower" — time multipliers cut roughly
+    // in half across chop and the dominant swell below.
+    const chop1 = sin(cellWorldX.mul(0.28).add(cellWorldZ.mul(0.11)).add(time.mul(0.65)).add(jitter));
+    const chop2 = sin(cellWorldX.mul(0.14).sub(cellWorldZ.mul(0.22)).sub(time.mul(0.45)).add(jitter.mul(0.7)));
+    const chop3 = sin(cellWorldX.mul(0.5).add(cellWorldZ.mul(0.4)).add(time.mul(0.85)).add(1.7).add(jitter.mul(1.3)));
     const chop = chop1.mul(0.4).add(chop2.mul(0.3)).add(chop3.mul(0.2));
     // Per "just some animated ripples, no movement" — chop1/2/3 above are
     // all similarly fast/short-wavelength, so together they read as fine
@@ -1011,7 +1013,7 @@ function buildCrystalFluidSimPlane(scene, y, size, sampleHeight) {
     // most of the range toward the bottom, leaving only a narrow band
     // near the top at full height — narrow crests, broad troughs), then
     // remap back to [-1,1].
-    const swellPhase = cellWorldX.mul(0.035).add(cellWorldZ.mul(0.02)).add(time.mul(0.7));
+    const swellPhase = cellWorldX.mul(0.035).add(cellWorldZ.mul(0.02)).add(time.mul(0.35));
     const swellNorm = sin(swellPhase).add(1).mul(0.5); // [-1,1] -> [0,1]
     const bigSwell = pow(swellNorm, 1.8).mul(2).sub(1); // sharpened, back to [-1,1]
     // Per "not much vertical waves to look real" — 0.35/0.15 was an
@@ -1132,36 +1134,36 @@ function buildCrystalFluidSimPlane(scene, y, size, sampleHeight) {
   material.emissiveNode = Fn(() => {
     const viewDir = cameraPosition.sub(positionWorld).normalize();
     const grazing = float(1.0).sub(clamp(dot(normalWorld, viewDir), 0, 1));
-    // Per "too much fresnel glow" — still too strong even after the
-    // first pow(3)->pow(6) pass. Pushed further (pow 6 -> 8, an even
-    // steeper falloff so only truly near-horizontal angles catch any
-    // highlight at all) and the multiplier cut by more than half again
-    // (0.25 -> 0.1) — the reference photo shows only faint, scattered
-    // glints, not a broad sheen.
     const fresnelTerm = pow(grazing, 8.0);
     const skyHighlight = color(0xcfe8ff); // pale sky tone — reads as reflected sky/light, not a light SOURCE of its own
     const baseEmissive = color(style.emissive).mul(style.emissiveIntensity);
-    // Per "look more like realistic ocean waves" — real "sun on water"
-    // is small, scattered, individually bright GLITTER points, not one
-    // smooth sheen (which is what the fresnel term above still gives on
-    // its own). Real noise (fluidSimHash21, already proven above for
-    // wave jitter) sampled at a much higher spatial frequency and
-    // aggressively thresholded — only the brightest ~3.5% of the noise
-    // field becomes visible at all — turns a smooth field into isolated
-    // sparkle points instead. Drifts slowly over time (not tied to the
-    // wave phase itself) so individual glints appear/vanish rather than
-    // riding along with the swell. Gated by a GENTLER power of the same
-    // grazing term (2 instead of 8) than the broad sheen — real glitter
-    // scatters across a wider range of viewing angles than a mirror-like
-    // sheen does, since it comes from many small, variously-tilted wave
-    // facets, not one flat reflective plane.
-    const sparkleUV = vec2(positionWorld.x, positionWorld.z).mul(0.8).add(vec2(time.mul(0.6), time.mul(0.4)));
-    const sparkleNoise = fluidSimHash21(sparkleUV);
-    const sparkle = pow(clamp(sparkleNoise.sub(0.965).mul(28.0), 0, 1), 2.0);
-    const sparkleGate = pow(grazing, 2.0);
+    // Per "not quite right, more like [reference photo] — 10fps" —
+    // TWO problems with the previous hash-noise sparkle at once: (1) it
+    // was almost certainly the real performance cause — emissiveNode
+    // runs PER PIXEL (not per vertex like positionNode/normalNode), so a
+    // fract/dot/hash noise evaluation on every single covered pixel is
+    // real, substantial cost, unlike the cheap per-vertex wave physics;
+    // (2) the reference photo shows a long, STREAKY reflection path
+    // toward the sun, not scattered random dots — that's a real
+    // specular highlight (reflect the view ray off each wave facet's
+    // own normal, check how closely it points at the sun), not noise at
+    // all. This replaces the noise sparkle with exactly that: reflect()
+    // + dot() + pow() — three cheap ops, the same category of cost as
+    // the fresnel term already above, not a new expensive class of
+    // computation. Individual glints naturally form a broken streaky
+    // path (not a uniform blob) because only wave facets whose ACTUAL
+    // slope happens to align with the sun direction light up — the real
+    // physical mechanism behind real sun glitter, not an approximation
+    // of it. sunDir is a fixed low-angle approximation (this material
+    // doesn't currently receive the game's real dynamic sun direction as
+    // a uniform) matching the reference photo's dramatic low-sun mood.
+    const sunDir = vec3(0.35, 0.3, -0.9).normalize();
+    const reflectDir = reflect(viewDir.negate(), normalWorld);
+    const sunAlign = clamp(dot(reflectDir, sunDir), 0, 1);
+    const glint = pow(sunAlign, 48.0); // high power -> narrow, bright, streak-like highlights only where facets align closely
     return baseEmissive
       .add(skyHighlight.mul(fresnelTerm).mul(0.1))
-      .add(color(0xffffff).mul(sparkle).mul(sparkleGate).mul(1.2));
+      .add(color(0xfff4e0).mul(glint).mul(2.2)); // warm sun-tone, not pure white — matches a real low-sun glint's color
   })();
 
   const mesh = new THREE.Mesh(geometry, material);

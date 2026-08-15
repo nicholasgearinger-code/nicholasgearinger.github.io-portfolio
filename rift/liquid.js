@@ -3,6 +3,7 @@ import {
   Fn, instanceIndex, instancedArray, float, uint, If,
   uniform, vec3, vec2, color, positionLocal, mix, clamp,
   min, max, attribute, time, sin, fract, floor, dot, cross,
+  pow, positionWorld, cameraPosition, normalWorld,
 } from "three/tsl";
 import { getGraphicsSettings } from "./graphicsSettings.js";
 
@@ -861,15 +862,15 @@ function getFoamDetailTexture() {
 // specific, not yet wired to real player position). The whole plane
 // behaves as uniform open ocean for now.
 const CRYSTAL_FLUID_SIM_ENABLED = true;
-// Raised from 128 — the plane this actually renders on (Coral Shallows'
-// real 2000-unit ocean) is 50x larger than the prototype's own 40-unit
-// demo plane, so 128 cells meant ~15.6 world units per cell, producing
-// technically-real but visually enormous, barely-perceptible wave
-// wavelengths. 256 is a first real test of "does this look right at a
-// meaningfully lower compute cost than matching the prototype's original
-// cell density would require" — not a final number, worth tuning
-// further based on how this actually performs/looks on a real device.
-const FLUID_SIM_WIDTH = 256;
+// Per "tanking performance" — lowered back from 256. The world-space
+// chop/swell fix (see computeUpdate below) already decoupled visible
+// wavelength from grid resolution, which was the ONLY reason 256 was
+// tried in the first place — so there's no real visual reason left to
+// keep the 4x compute+vertex cost 256 carries over 128. This is both the
+// compute-shader cell count AND the render mesh's actual vertex count
+// (WIDTH*WIDTH each), so it's a direct, real lever on both costs at
+// once, not just one of them.
+const FLUID_SIM_WIDTH = 128;
 const fluidSimHash21 = Fn(([p]) => {
   const p3 = fract(vec3(p.x, p.y, p.x).mul(0.1031));
   const p3b = p3.add(vec3(dot(p3, p3.add(vec3(33.33, 33.33, 33.33))).add(0)));
@@ -999,15 +1000,11 @@ function buildCrystalFluidSimPlane(scene, y, size, sampleHeight) {
     // here, with chop layered on top as surface detail rather than being
     // the only thing moving.
     const bigSwell = sin(cellWorldX.mul(0.035).add(cellWorldZ.mul(0.02)).add(time.mul(0.7)));
-    // Per "too much wave going onto the land / blue and white lines" —
-    // two changes from the previous pass: (1) amplitude pulled back from
-    // 0.9/0.4 to 0.6/0.25 — the earlier values were tuned blind without
-    // shore damping in place, so open water was reading as overly harsh
-    // banding; (2) both terms now multiplied by the same real shoreDamp
-    // factor as the physics above, so decorative chop/swell fade out
-    // approaching the shore the same way the real wave physics does,
-    // instead of maintaining full amplitude right up onto dry sand.
-    newHeight = newHeight.add(bigSwell.mul(0.6).mul(shoreDamp)).add(chop.mul(0.25).mul(shoreDamp));
+    // Per explicit "tone down the waves" — pulled back further still,
+    // 0.6/0.25 -> 0.35/0.15. Real ocean swell in calm-to-moderate
+    // conditions (which is the mood this biome is going for) is
+    // meaningfully gentler than what 0.6 was producing.
+    newHeight = newHeight.add(bigSwell.mul(0.35).mul(shoreDamp)).add(chop.mul(0.15).mul(shoreDamp));
 
     heightBufferB.element(i).assign(newHeight);
   })().compute(CELL_COUNT);
@@ -1107,6 +1104,26 @@ function buildCrystalFluidSimPlane(scene, y, size, sampleHeight) {
     return mix(deep, crest, t);
   })();
 
+  // Per explicit "apply a custom shader to make it look like water" — a
+  // real fresnel term: a surface's reflectivity genuinely increases at
+  // grazing viewing angles (why looking straight down INTO a lake shows
+  // its actual color/depth, while looking ACROSS it near the horizon
+  // shows a bright sky-like sheen instead) — this is the single most
+  // recognizable "that's water, not a painted blue plane" visual cue,
+  // and was completely absent from the flat two-tone colorNode alone.
+  // Uses the same computeWaveNormal() already driving normalNode, so the
+  // fresnel term correctly responds to actual wave slope, not a flat
+  // up-vector — a crest tilted toward the camera reads differently than
+  // a trough, same as real water.
+  material.emissiveNode = Fn(() => {
+    const viewDir = cameraPosition.sub(positionWorld).normalize();
+    const grazing = float(1.0).sub(clamp(dot(normalWorld, viewDir), 0, 1));
+    const fresnelTerm = pow(grazing, 3.0);
+    const skyHighlight = color(0xcfe8ff); // pale sky tone — reads as reflected sky/light, not a light SOURCE of its own
+    const baseEmissive = color(style.emissive).mul(style.emissiveIntensity);
+    return baseEmissive.add(skyHighlight.mul(fresnelTerm).mul(0.55));
+  })();
+
   const mesh = new THREE.Mesh(geometry, material);
   mesh.position.y = y;
   mesh.renderOrder = -50; // matches the Gerstner-path crystal water's own renderOrder — see its comment for why this needs to stably win against sky-layer depth sort
@@ -1128,66 +1145,46 @@ function buildCrystalFluidSimPlane(scene, y, size, sampleHeight) {
 // updateLiquidPlane (which is CPU-side only) because dispatching a compute
 // shader needs the renderer, which only main.js holds. Called from
 // main.js's animate loop, crystal-and-fluid-sim-enabled only.
-let fluidSimLoggedFirstDispatch = false;
-let fluidSimDispatchCount = 0;
-// Per "nothing shows up for fluid-sim" — zero dispatch logs across two
-// separate level loads pointed at exactly one thing: computeAsync hanging
-// forever rather than throwing, the SAME failure mode this project's own
-// renderer.init() hit early in the WebGPU migration (see main.js's
-// riftInitWithTimeout). A silent hang on the very first computeInit call
-// would explain everything observed: handle.updating never resets (stuck
-// on the first await, never reaching finally), so nothing after it ever
-// runs, logs, or throws. This races every computeAsync call against a
-// real timeout so a hang becomes a visible, diagnosable error instead of
-// permanent silence.
-function riftComputeWithTimeout(promise, ms, label) {
-  let timeoutId;
-  const timeout = new Promise((_, reject) => {
-    timeoutId = setTimeout(() => reject(new Error(label + " never resolved after " + ms + "ms — likely hanging rather than failing cleanly, same class of issue main.js's own renderer.init() hit earlier in this project.")), ms);
-  });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
-}
-async function updateFluidSimWater(handle, renderer) {
+//
+// Per "tanking performance" — this used to be `await
+// renderer.computeAsync(...)` three times, every frame. computeAsync
+// forces a real CPU<->GPU synchronization round-trip on each call (that's
+// what makes it "async" — it waits for the GPU to actually finish and
+// hand results back), which is exactly the wrong tool for an ordinary
+// per-frame dispatch that nothing needs to read back on the CPU side.
+// Three.js's own current guidance (confirmed, not assumed): prefer the
+// synchronous `renderer.compute()` for the ordinary frame loop, and
+// reserve computeAsync for when the promise/readback semantics are
+// actually needed — which this isn't. Switching to it removes three
+// unnecessary GPU sync stalls per frame, which was very likely the bulk
+// of the performance cost. This also fully replaces the earlier
+// timeout-guarded async version — that whole hang-detection apparatus
+// was built to diagnose computeAsync specifically stalling in a way that
+// turned out to be a diagnostic-logging bug, not a real hang (see chat) —
+// none of that complexity is needed for a synchronous call.
+function updateFluidSimWater(handle, renderer) {
   if (!handle || !handle.fluidSim || handle.fluidSimBroken) return;
-  // Guards against overlapping dispatches — this is called once per
-  // animate() frame WITHOUT being awaited there (see main.js's own
-  // comment on that call site), so if one call's computeAsync chain
-  // hasn't finished by the time the next frame fires, this skips that
-  // frame's dispatch rather than letting two overlapping compute
-  // sequences race each other against the same buffers.
-  if (handle.updating) return;
-  handle.updating = true;
+  const canSyncCompute = typeof renderer.compute === "function";
   try {
     if (!handle.initialized) {
-      await riftComputeWithTimeout(renderer.computeAsync(handle.computeInit), 5000, "computeInit");
+      if (canSyncCompute) renderer.compute(handle.computeInit);
+      else renderer.computeAsync(handle.computeInit); // defensive fallback for a renderer build without sync compute() — not awaited, since nothing here can usefully block a synchronous per-frame loop anyway
       handle.initialized = true;
-      console.log("[liquid] fluid-sim: computeInit dispatched");
     }
-    await riftComputeWithTimeout(renderer.computeAsync(handle.computeUpdate), 5000, "computeUpdate");
-    await riftComputeWithTimeout(renderer.computeAsync(handle.computeCopyBack), 5000, "computeCopyBack");
-    fluidSimDispatchCount++;
-    if (!fluidSimLoggedFirstDispatch) {
-      fluidSimLoggedFirstDispatch = true;
-      console.log("[liquid] fluid-sim: first computeUpdate+computeCopyBack dispatch succeeded");
-    }
-    // Per "not physically based, nothing is reactive" — a real, visible
-    // confirmation signal in the console: if this count is climbing over
-    // time (check again a few seconds later), the compute dispatch is
-    // genuinely running every frame. If it's NOT climbing, the dispatch
-    // itself is stalling somewhere above, independent of anything
-    // visual.
-    if (fluidSimDispatchCount % 180 === 0) {
-      console.log("[liquid] fluid-sim: dispatch count =", fluidSimDispatchCount);
+    if (canSyncCompute) {
+      renderer.compute(handle.computeUpdate);
+      renderer.compute(handle.computeCopyBack);
+    } else {
+      renderer.computeAsync(handle.computeUpdate);
+      renderer.computeAsync(handle.computeCopyBack);
     }
   } catch (err) {
-    console.error("[liquid] fluid-sim: computeAsync failed/timed out:", err.message || err);
-    // Stops retrying every frame once this happens — if the API doesn't
+    console.error("[liquid] fluid-sim: compute dispatch failed:", err);
+    // Stops retrying every frame once this happens — if compute doesn't
     // work at all on this device/browser, hammering it 60x/second would
-    // just spam identical timeout errors forever rather than surfacing
-    // one clear, actionable one.
+    // just spam identical errors forever rather than surfacing one clear
+    // one.
     handle.fluidSimBroken = true;
-  } finally {
-    handle.updating = false;
   }
   // computeUpdate reads FROM heightBufferA and writes INTO heightBufferB;
   // computeCopyBack then copies B back into A — so heightBufferA always

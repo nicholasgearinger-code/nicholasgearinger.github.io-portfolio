@@ -989,6 +989,29 @@ function buildCrystalFluidSimPlane(scene, y, size) {
   const cellIndices = new Float32Array(WIDTH * WIDTH);
   for (let ci = 0; ci < cellIndices.length; ci++) cellIndices[ci] = ci;
   geometry.setAttribute("cellIndex", new THREE.Float32BufferAttribute(cellIndices, 1));
+  // Belt-and-suspenders per the console's "AttributeNode: Vertex attribute
+  // 'uv' not found on geometry" warning — PlaneGeometry always generates
+  // uv by default and none of this material's node graph (positionNode/
+  // normalNode/colorNode below) references uv anywhere, so this specific
+  // warning most likely belongs to a DIFFERENT object elsewhere in the
+  // scene (several other, clearly-unrelated errors show up in the same
+  // console dump). Logged explicitly here so that's actually verifiable
+  // rather than assumed either way, and generated as a real fallback in
+  // the genuinely-unexpected case this mesh's own geometry is somehow
+  // missing it.
+  console.log("[liquid] fluid-sim geometry has uv attribute:", !!geometry.attributes.uv);
+  if (!geometry.attributes.uv) {
+    const uvs = new Float32Array(WIDTH * WIDTH * 2);
+    for (let uy = 0; uy < WIDTH; uy++) {
+      for (let ux = 0; ux < WIDTH; ux++) {
+        const idx = uy * WIDTH + ux;
+        uvs[idx * 2] = ux / (WIDTH - 1);
+        uvs[idx * 2 + 1] = uy / (WIDTH - 1);
+      }
+    }
+    geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+    console.log("[liquid] fluid-sim: generated a fallback uv attribute");
+  }
 
   const style = LIQUID_STYLE.crystal;
   const material = new THREE.MeshStandardNodeMaterial({

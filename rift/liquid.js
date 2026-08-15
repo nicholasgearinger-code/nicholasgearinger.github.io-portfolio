@@ -861,7 +861,31 @@ function getFoamDetailTexture() {
 // reactivity, and the pointer/wake-trail interaction system (demo-input-
 // specific, not yet wired to real player position). The whole plane
 // behaves as uniform open ocean for now.
-const CRYSTAL_FLUID_SIM_ENABLED = true;
+// Per explicit "should we try another algorithm, Gerstner looks good" —
+// reverted to false. The real reason to switch, beyond preference: the
+// existing CPU-side Gerstner system (GERSTNER_WAVES below, real 10-wave
+// trochoidal spectrum + far-field waves, actual deep-water dispersion,
+// domain warping) writes displaced positions via plain posAttr.setXYZ()
+// calls — a completely standard, renderer-agnostic geometry attribute
+// update, identical under WebGL or WebGPU. It was NEVER actually broken
+// by the WebGPU migration; only the separate foam/reflection SHADING
+// layer (onBeforeCompile, already disabled via
+// CRYSTAL_WATER_SHADER_ENABLED above) was the incompatible part. This
+// compute-shader system was built to replace something that didn't
+// need replacing, and cost real time chasing a whole class of bugs
+// (CFL numerical instability, TSL time-node quirks under compute-only
+// dispatch) that a pure analytic per-frame evaluation like Gerstner
+// simply doesn't have — there's no iterative state to destabilize.
+// It also already has real sun glint (with day/night fade), foam with
+// genuine "instant rise, slow fade" persistence, and shore damping
+// already tuned through past iteration — all more complete than what
+// this compute path had built up. Left in place, still working and
+// still flag-gated, in case a future real use case specifically needs
+// GPU-compute wave physics (crowds of interactive objects genuinely
+// disturbing the surface, for instance) — but that's a different
+// problem than "make Coral Shallows' ocean look right," which the
+// existing Gerstner system already solves.
+const CRYSTAL_FLUID_SIM_ENABLED = false;
 // Per "tanking performance" — lowered back from 256. The world-space
 // chop/swell fix (see computeUpdate below) already decoupled visible
 // wavelength from grid resolution, which was the ONLY reason 256 was
@@ -974,8 +998,22 @@ function buildCrystalFluidSimPlane(scene, y, size, sampleHeight) {
     const down = heightBufferA.element(idxD);
 
     const laplacian = left.add(right).add(up).add(down).sub(self.mul(4));
-    const waveSpeed = float(1.4);
-    const damping = float(0.994); // <1 — real water loses energy to friction/viscosity; undamped would ring forever
+    // Per "moves at first then settles and stops, a lot of flickering" —
+    // this is almost certainly numerical instability, not a real
+    // architectural bug: waveSpeed=1.4 was ported directly from the
+    // prototype's own 40-unit demo plane, but this grid's cells are
+    // ~50x larger in real-world size (2000-unit plane / 128 cells here,
+    // vs 40 / 128 there) and the Laplacian term below is never
+    // normalized by actual cell spacing — so the same constant behaves
+    // completely differently at this scale. An explicit finite-
+    // difference wave scheme run past its stability threshold produces
+    // exactly this signature: looks fine briefly, then decays into
+    // chaotic high-frequency noise that reads as "stopped" because it's
+    // no longer coherent motion. Cut substantially as the direct,
+    // standard fix for exactly this failure mode — worth confirming
+    // live, this isn't something I can verify without running it.
+    const waveSpeed = float(0.35);
+    const damping = float(0.985); // slightly heavier than before (0.994) — extra margin to actively damp out any residual instability rather than only barely tolerating it
 
     // Real shore damping (see shoreDampBuffer above) — 0 at/above the
     // actual shoreline, 1 in genuine open water. Applied to the PHYSICS

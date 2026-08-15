@@ -3604,17 +3604,37 @@ function applyGraphicsSettings() {
   const s = getGraphicsSettings();
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, s.pixelRatioCap));
   renderer.shadowMap.enabled = s.shadowsEnabled;
+  // Per a real "GPUValidationError: Invalid CommandEncoder" triggered
+  // specifically by toggling shadows — with the lens effect confirmed OFF
+  // (see its own on-screen diagnostic), ruling that out as the cause and
+  // pointing here instead. Same exact bug CLASS already found and fixed
+  // once this session for foam particles' compute buffers: a GPU
+  // resource (here, the shadow map render target) disposed SYNCHRONOUSLY
+  // the instant a setting changes, with no deferral for any GPU command
+  // still in flight that might reference it. riftDeferDispose (the same
+  // double-rAF helper already proven necessary elsewhere in this exact
+  // file) gives any in-flight render a couple of frames to actually
+  // finish before the texture is torn down, instead of destroying it out
+  // from under a command buffer that hasn't completed yet.
   if (sun.shadow.mapSize.width !== s.shadowMapSize) {
     sun.shadow.mapSize.set(s.shadowMapSize, s.shadowMapSize);
     // Three.js only regenerates the shadow map texture at the new
     // resolution once the old one is disposed — changing mapSize alone
     // has no effect on an already-rendered light.
-    if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
+    if (sun.shadow.map) {
+      const oldSunShadowMap = sun.shadow.map;
+      sun.shadow.map = null;
+      riftDeferDispose(() => oldSunShadowMap.dispose());
+    }
   }
   const moonShadowSize = s.shadowMapSize / 2;
   if (moonLight.shadow.mapSize.width !== moonShadowSize) {
     moonLight.shadow.mapSize.set(moonShadowSize, moonShadowSize);
-    if (moonLight.shadow.map) { moonLight.shadow.map.dispose(); moonLight.shadow.map = null; }
+    if (moonLight.shadow.map) {
+      const oldMoonShadowMap = moonLight.shadow.map;
+      moonLight.shadow.map = null;
+      riftDeferDispose(() => oldMoonShadowMap.dispose());
+    }
   }
   applySsaoTier();
   resizeToViewport();

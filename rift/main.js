@@ -226,6 +226,18 @@ fluidSimDiagEl.style.cssText = "position:fixed;top:32px;left:8px;z-index:9999;fo
 viewport.appendChild(fluidSimDiagEl);
 window.riftFluidSimDiagEl = fluidSimDiagEl; // liquid.js writes to this directly — separate module, no shared scope otherwise
 
+// Per "still isn't any visible rain drops on lens" — same on-screen-
+// diagnostic technique as the two above, specifically to answer one
+// narrow, decisive question: is lensEffectActive (the flag that gates
+// the whole two-pass lens render) actually ever turning on at all during
+// real play? If this never shows "ON", the droplet shader itself isn't
+// the problem — something upstream (rainIntensity never crossing the
+// threshold, oceanEffectsEnabled being off, isFullySubmerged staying
+// true, etc.) is preventing the effect from running in the first place.
+const lensDiagEl = document.createElement("div");
+lensDiagEl.style.cssText = "position:fixed;top:56px;left:8px;z-index:9999;font:11px/1.4 monospace;color:#ffb37f;background:rgba(0,0,0,0.55);padding:3px 7px;border-radius:4px;pointer-events:none;";
+viewport.appendChild(lensDiagEl);
+
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x0a0e14, 0.0032);
 // Solid-color fallback background, mutated in place each frame (see the
@@ -4825,6 +4837,7 @@ function animate() {
   // to show, same reasoning as the bloom presets' "off" tier.
   const effectiveLensIntensity = Math.max(wind.rainIntensity, postSwimWetness);
   lensEffectActive = !isFullySubmerged && effectiveLensIntensity > 0.02 && getGraphicsSettings().oceanEffectsEnabled !== false;
+  lensDiagEl.textContent = "lens: " + (lensEffectActive ? "ON" : "off") + ", intensity=" + effectiveLensIntensity.toFixed(2) + ", rain=" + (weatherHandle ? weatherHandle.rainIntensity.toFixed(2) : "n/a") + ", wet=" + postSwimWetness.toFixed(2) + ", submerged=" + isFullySubmerged + ", oceanFX=" + (getGraphicsSettings().oceanEffectsEnabled !== false);
   if (lensEffectActive) {
     lensTimeUniform.value = elapsedTime;
     lensIntensityUniform.value = effectiveLensIntensity;
@@ -5016,9 +5029,25 @@ function animate() {
     // happens when there's actually rain/post-swim wetness to show (see
     // lensEffectActive's own comment above) — a plain direct render the
     // rest of the time, same as before this feature existed.
+    //
+    // Per "light/ground flickers when it rains" — tone-mapping/color-
+    // space output conversion is normally applied only at the FINAL
+    // render-to-canvas step; an intermediate render target typically
+    // holds unconverted linear data. Genuinely uncertain (couldn't fully
+    // confirm from documentation) whether that conversion was being
+    // applied correctly, doubly, or not at all across these two calls —
+    // rather than guess, tone mapping is explicitly forced off for the
+    // FIRST pass (into the offscreen target, where it shouldn't apply
+    // yet regardless) and explicitly restored for the SECOND (the real
+    // final canvas output), so it can only ever be applied exactly once,
+    // at the correct step, regardless of whatever Three.js's own default
+    // behavior actually is here.
+    const realToneMapping = renderer.toneMapping;
+    renderer.toneMapping = THREE.NoToneMapping;
     renderer.setRenderTarget(lensRenderTarget);
     renderer.render(scene, camera);
     renderer.setRenderTarget(null);
+    renderer.toneMapping = realToneMapping;
     renderer.render(lensQuadScene, lensQuadCamera);
   } else {
     // Safety net for the genuinely unverified part of the WebGPU

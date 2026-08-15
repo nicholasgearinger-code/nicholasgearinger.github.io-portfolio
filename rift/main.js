@@ -316,7 +316,14 @@ function createRainParticles(scene) {
   // Thin and tall — a real streak, not a round droplet, matching how fast
   // rain actually reads visually (motion-blurred by its own speed, not a
   // discrete round shape).
-  material.scaleNode = vec3(0.025, 0.55, 1);
+  // Per real giant-blob rendering — CONFIRMED via Three.js's own GitHub
+  // issue tracker (their docs were wrong about this too): scaleNode on
+  // SpriteNodeMaterial expects a vec2 (width, height), not vec3. A vec3
+  // gets silently coerced through an internal float() cast, which very
+  // likely explains both the huge distorted blob shapes and a real chunk
+  // of the performance cost (massive wrongly-scaled overlapping sprites
+  // cost far more fill-rate than small correctly-sized ones).
+  material.scaleNode = vec2(0.025, 0.55);
   const rainTex = texture(getRainStreakTexture(), uv());
   material.colorNode = rainTex.rgb;
   const rainOpacity = uniform(0);
@@ -350,11 +357,15 @@ function getRainStreakTexture() {
   return rainStreakTexture;
 }
 
-function updateRainParticles(handle, renderer, camera, dt, rainIntensity) {
+function updateRainParticles(handle, renderer, camera, dt, rainIntensity, isUnderwater) {
   if (!handle || handle.broken) return;
   handle.camPos.value.copy(camera.position);
   handle.rainDt.value = Math.min(dt, 0.05);
-  handle.rainOpacity.value = clampNum(rainIntensity, 0, 1) * 0.6; // real rain still reads as thin/translucent streaks, not opaque white lines
+  // Per "rain is seen while underwater" — real rain doesn't fall visibly
+  // below the water surface; zeroed here rather than skipping the whole
+  // update, so particles keep quietly cycling (no visible pop/jump the
+  // instant the player resurfaces).
+  handle.rainOpacity.value = isUnderwater ? 0 : clampNum(rainIntensity, 0, 1) * 0.6; // real rain still reads as thin/translucent streaks, not opaque white lines
   const canSyncCompute = typeof renderer.compute === "function";
   try {
     if (!handle.initialized) {
@@ -965,7 +976,14 @@ lensMaterial.colorNode = Fn(() => {
   // already used for shore points/particle spawning elsewhere in this
   // project's TSL code, applied here in 2D screen space instead of 3D
   // world space.
-  const cellSize = float(11.0);
+  // Per "no water drops on camera like this [reference]" — the original
+  // 11x11 grid produced many small, subtle distortions rather than a
+  // handful of clearly visible individual droplets, which is likely why
+  // this wasn't reading as "water on the lens" at all in practice. Fewer,
+  // larger cells (11 -> 6) and a stronger distortion/highlight below —
+  // real reference photos of rain-on-glass show a moderate NUMBER of
+  // large, clearly-defined drops, not a dense field of micro-ripples.
+  const cellSize = float(6.0);
   // Slow downward drift, tied to the real self-managed time uniform — real
   // droplets on glass slide/settle gradually rather than staying perfectly
   // static, and this is also what makes the pattern eventually cycle
@@ -990,13 +1008,13 @@ lensMaterial.colorNode = Fn(() => {
   // center, the real optical effect of light bending through a curved
   // water droplet (a crude but recognizable magnifying-glass distortion),
   // scaled by how visible this effect should currently be.
-  const distortAmount = inDroplet.mul(dropletPresent).mul(0.018).mul(lensIntensityUniform);
+  const distortAmount = inDroplet.mul(dropletPresent).mul(0.045).mul(lensIntensityUniform);
   const distortedUV = clamp(screenUV.sub(dir.mul(distortAmount)), 0, 1);
   const sceneColor = texture(lensRenderTarget.texture, distortedUV);
   // A soft bright rim right at each droplet's own edge — real water
   // droplets catch and concentrate light at their boundary.
   const rim = smoothstep(dropletRadius * 0.55, dropletRadius * 0.95, distToCenter).mul(inDroplet);
-  const rimBoost = rim.mul(0.12).mul(lensIntensityUniform);
+  const rimBoost = rim.mul(0.2).mul(lensIntensityUniform);
   const gated = inDroplet.mul(dropletPresent);
   // Real sun-glint boost — per the existing, already-worked-out
   // "only glow when reflecting sunlight" design (see the JS-side
@@ -4529,7 +4547,7 @@ function animate() {
   // Real GPU compute rain — always updates regardless of biome/level (see
   // its own creation comment for why), reading the already-computed
   // weatherHandle.rainIntensity purely to scale visibility.
-  updateRainParticles(rainParticlesHandle, renderer, camera, dt, weatherHandle ? weatherHandle.rainIntensity : 0);
+  updateRainParticles(rainParticlesHandle, renderer, camera, dt, weatherHandle ? weatherHandle.rainIntensity : 0, wasFullySubmergedLastFrame);
   // Real angelfish (models.js) — AnimationMixer drives the loaded skeletal
   // swim clip (fin/body motion in place), the wander drift here separately
   // moves the fish THROUGH the reef along a slow circle so they don't just

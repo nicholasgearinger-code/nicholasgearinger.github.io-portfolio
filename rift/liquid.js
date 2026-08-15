@@ -2687,7 +2687,13 @@ function createFoamParticles(scene, sampleHeight, y, size) {
   // linear fade, so this reads consistently with the foam that's already
   // there.
   material.opacityNode = clamp(lifeAttr.mul(2.2), 0, 1).mul(clamp(lifeAttr, 0, 1));
-  material.scaleNode = vec3(clamp(lifeAttr.mul(0.9), 0.15, 0.9));
+  // Per real giant-blob rendering — CONFIRMED via Three.js's own GitHub
+  // issue tracker: scaleNode on SpriteNodeMaterial expects a vec2 (width,
+  // height), not vec3 (their own docs were wrong about this too). A vec3
+  // gets silently coerced through an internal float() cast, which very
+  // likely explains the oversized distorted foam shapes reported live.
+  const foamSize = clamp(lifeAttr.mul(0.9), 0.15, 0.9);
+  material.scaleNode = vec2(foamSize, foamSize);
   const foamTex = texture(getFoamTexture(), uv());
   material.colorNode = foamTex.rgb;
   material.opacityNode = material.opacityNode.mul(foamTex.a);

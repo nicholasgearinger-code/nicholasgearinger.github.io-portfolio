@@ -2681,7 +2681,13 @@ function createFoamParticles(scene, sampleHeight, y, size) {
   material.colorNode = foamTex.rgb;
   material.opacityNode = material.opacityNode.mul(foamTex.a);
 
-  const sprite = new THREE.Mesh(new THREE.SpriteGeometry(), material);
+  // Per the real crash — `THREE.SpriteGeometry` isn't a real constructor;
+  // confirmed directly against Three.js's own official Sprite docs:
+  // `.count` (WebGPU-only, for exactly this instanced-sprite-particle use
+  // case) is a real property on `THREE.Sprite` itself. Sprite carries its
+  // own internal geometry — it isn't built from THREE.Mesh + a separate
+  // geometry object at all, unlike every other mesh in this file.
+  const sprite = new THREE.Sprite(material);
   sprite.count = FOAM_PARTICLE_COUNT;
   sprite.frustumCulled = false; // positions live entirely on the GPU buffer — CPU-side geometry bounds have no idea where particles actually are, so normal frustum culling would cull incorrectly
   scene.add(sprite);

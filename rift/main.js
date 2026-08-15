@@ -1431,6 +1431,7 @@ let debugForceStorm = false;
 let cloudsHandle = null;
 let submergedState = false; // persists across frames — see the hysteresis check below for why a fresh threshold comparison every frame isn't enough
 let wasFullySubmergedLastFrame = false; // detects the exact moment of surfacing, for the post-swim wet-lens effect below
+let pendingShadowReload = false; // set by applyGraphicsSettings whenever the saved shadow preference differs from the renderer's actual live state — drives the Shadows button's own "(reload to apply)" label
 let lensEffectActive = false; // set each frame below; read by the final render call to decide which outputNode postProcessing should currently be using
 let lastLensEffectActive = null; // previous frame's value — outputNode is only reassigned (and the real shader-recompile cost only paid) on an actual transition, not every frame
 let postSwimWetness = 0; // 0-1, set to 1 the instant the player surfaces, decays over ~60s — drives the SAME lens-rain shader as real rain, just from a different trigger
@@ -3603,37 +3604,46 @@ function respawnInLevel() {
 function applyGraphicsSettings() {
   const s = getGraphicsSettings();
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, s.pixelRatioCap));
-  renderer.shadowMap.enabled = s.shadowsEnabled;
-  // Per a real "GPUValidationError: Invalid CommandEncoder" triggered
-  // specifically by toggling shadows — with the lens effect confirmed OFF
-  // (see its own on-screen diagnostic), ruling that out as the cause and
-  // pointing here instead. Same exact bug CLASS already found and fixed
-  // once this session for foam particles' compute buffers: a GPU
-  // resource (here, the shadow map render target) disposed SYNCHRONOUSLY
-  // the instant a setting changes, with no deferral for any GPU command
-  // still in flight that might reference it. riftDeferDispose (the same
-  // double-rAF helper already proven necessary elsewhere in this exact
-  // file) gives any in-flight render a couple of frames to actually
-  // finish before the texture is torn down, instead of destroying it out
-  // from under a command buffer that hasn't completed yet.
-  if (sun.shadow.mapSize.width !== s.shadowMapSize) {
-    sun.shadow.mapSize.set(s.shadowMapSize, s.shadowMapSize);
-    // Three.js only regenerates the shadow map texture at the new
-    // resolution once the old one is disposed — changing mapSize alone
-    // has no effect on an already-rendered light.
-    if (sun.shadow.map) {
-      const oldSunShadowMap = sun.shadow.map;
-      sun.shadow.map = null;
-      riftDeferDispose(() => oldSunShadowMap.dispose());
+  // Per a real "GPUValidationError: Invalid CommandEncoder" — confirmed
+  // reachable via BOTH the individual Shadows toggle AND graphics tier
+  // switching (Low/Medium/High), which also calls this same function and
+  // was NOT covered by an earlier attempt at this fix that only guarded
+  // the toggle button's own click handler. Moved the actual protection
+  // HERE instead — the one function every caller shares — so no future
+  // caller can bypass it either. Two earlier targeted fixes this session
+  // (first suspecting postProcessing.render(), then suspecting
+  // synchronous shadow-map disposal) were both ruled out or fixed
+  // without stopping the crash. Rather than guess at a fourth specific
+  // mechanism inside a deep renderer/GPU interaction with no way to
+  // inspect it directly: shadow state (the enabled flag, map size, map
+  // disposal) is now NEVER touched live at all, regardless of entry
+  // point — only ever applied on the next fresh page load (see the
+  // startup line near the renderer setup), which naturally avoids
+  // whatever mid-session GPU race this actually is. pendingShadowReload
+  // drives the Shadows button's own "(reload to apply)" label — see its
+  // render() function below — automatically, from whichever path
+  // (button or tier) actually changed the saved preference.
+  pendingShadowReload = s.shadowsEnabled !== renderer.shadowMap.enabled;
+  if (!pendingShadowReload) {
+    if (sun.shadow.mapSize.width !== s.shadowMapSize) {
+      sun.shadow.mapSize.set(s.shadowMapSize, s.shadowMapSize);
+      // Three.js only regenerates the shadow map texture at the new
+      // resolution once the old one is disposed — changing mapSize alone
+      // has no effect on an already-rendered light.
+      if (sun.shadow.map) {
+        const oldSunShadowMap = sun.shadow.map;
+        sun.shadow.map = null;
+        riftDeferDispose(() => oldSunShadowMap.dispose());
+      }
     }
-  }
-  const moonShadowSize = s.shadowMapSize / 2;
-  if (moonLight.shadow.mapSize.width !== moonShadowSize) {
-    moonLight.shadow.mapSize.set(moonShadowSize, moonShadowSize);
-    if (moonLight.shadow.map) {
-      const oldMoonShadowMap = moonLight.shadow.map;
-      moonLight.shadow.map = null;
-      riftDeferDispose(() => oldMoonShadowMap.dispose());
+    const moonShadowSize = s.shadowMapSize / 2;
+    if (moonLight.shadow.mapSize.width !== moonShadowSize) {
+      moonLight.shadow.mapSize.set(moonShadowSize, moonShadowSize);
+      if (moonLight.shadow.map) {
+        const oldMoonShadowMap = moonLight.shadow.map;
+        moonLight.shadow.map = null;
+        riftDeferDispose(() => oldMoonShadowMap.dispose());
+      }
     }
   }
   applySsaoTier();
@@ -3764,35 +3774,25 @@ if (graphicsBtn && graphicsPanel) {
     btn.type = "button";
     btn.className = "rift-graphics-opt";
     const isOn = () => getEffectiveValue(key) !== false;
-    const render = () => { btn.textContent = `${label}: ${isOn() ? "On" : "Off"}`; btn.classList.toggle("active", isOn()); };
+    // Per real "GPUValidationError: Invalid CommandEncoder" — shadows
+    // never actually apply live at all anymore (see
+    // applyGraphicsSettings's own comment for the full story); this
+    // label reflects pendingShadowReload directly, which
+    // applyGraphicsSettings sets from whichever path actually changed
+    // the preference (this button OR a tier switch), so it stays
+    // correct regardless of entry point rather than being set once by
+    // this button's own click handler.
+    const render = () => {
+      const suffix = key === "shadowsEnabled" && pendingShadowReload ? " (reload to apply)" : "";
+      btn.textContent = `${label}: ${isOn() ? "On" : "Off"}${suffix}`;
+      btn.classList.toggle("active", isOn());
+    };
     render();
     uiSyncCallbacks.push(render);
     btn.addEventListener("click", () => {
       setOverride(key, isOn() ? false : true); // explicit true/false override in both directions — a null-clear-to-tier-default here would make it impossible to force an effect ON on a tier whose own default is off (e.g. Low's shadowsEnabled)
-      if (key === "shadowsEnabled") {
-        // Per a real "GPUValidationError: Invalid CommandEncoder" that
-        // TWO different targeted fixes this session failed to resolve
-        // (first suspected postProcessing.render(), then suspected
-        // synchronous shadow-map disposal — both ruled out or fixed
-        // without stopping the crash, confirmed live by testing) —
-        // rather than guess at a third specific cause inside a deep
-        // renderer/GPU interaction with no way to inspect it directly,
-        // this setting no longer applies live at all. The preference is
-        // still saved (setOverride above) and takes effect cleanly on
-        // the NEXT page load, which naturally sidesteps whatever
-        // mid-session GPU-teardown race this actually is — a fresh
-        // renderer/scene never has any in-flight GPU work to race
-        // against in the first place.
-        btn.textContent = `${label}: ${isOn() ? "On" : "Off"} (reload to apply)`;
-        btn.classList.toggle("active", isOn());
-        // Deliberately NOT calling the generic render() below for this
-        // case — it unconditionally overwrites btn.textContent, which
-        // would instantly wipe the "(reload to apply)" message just set
-        // above.
-      } else {
-        applyGraphicsSettings();
-        render();
-      }
+      applyGraphicsSettings();
+      render();
     });
     effectsSection.appendChild(btn);
   }

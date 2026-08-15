@@ -1319,16 +1319,42 @@ function faceAwayFromLandmark(x, z) {
 // clone's own `.repeat` (set once, right after cloning) can't collide
 // with any other consumer of the same underlying image — same
 // established pattern as liquid.js's own texture clones.
+//
+// Per "Script error." crashing every biome — real devtools stack trace
+// confirmed: TypeError: Cannot read properties of null (reading
+// 'complete') at Textures.updateTexture inside three.webgpu.js. A
+// freshly-created THREE.Texture's `.image` is `null` by default until
+// TextureLoader's async network fetch finishes — WebGLRenderer silently
+// tolerates that and skips upload until ready, but WebGPURenderer's
+// Textures.updateTexture reads `image.complete` with NO null-check, so
+// it throws on any frame rendered before an async-loaded texture's
+// photo finishes downloading. Every TextureLoader().load() call in this
+// file builds a material that gets rendered the SAME frame the texture
+// is created — long before a real network fetch can complete — so this
+// shared helper gives every one of them a real (tiny, invisible) `.image`
+// immediately. TextureLoader's own internal onLoad callback (already
+// wired into every `.load()` call below) overwrites `.image` with the
+// real photo and sets `needsUpdate` itself once it actually arrives —
+// nothing else needs to change for that swap to happen.
+function riftEnsureTextureImage(texture) {
+  if (!texture.image) {
+    const placeholderCanvas = document.createElement("canvas");
+    placeholderCanvas.width = 1;
+    placeholderCanvas.height = 1;
+    texture.image = placeholderCanvas;
+  }
+  return texture;
+}
 let sandNormalTexture = null;
 function getSandNormalTexture() {
   if (sandNormalTexture) return sandNormalTexture;
   const url = new URL("textures/sandnormals.jpg", import.meta.url).href;
-  sandNormalTexture = new THREE.TextureLoader().load(
+  sandNormalTexture = riftEnsureTextureImage(new THREE.TextureLoader().load(
     url,
     () => console.log("[main] sand normal texture loaded:", url),
     undefined,
     (err) => console.error("[main] sand normal texture FAILED to load:", url, err)
-  );
+  ));
   sandNormalTexture.wrapS = sandNormalTexture.wrapT = THREE.RepeatWrapping;
   return sandNormalTexture;
 }
@@ -1336,12 +1362,12 @@ let sandColorTexture = null;
 function getSandColorTexture() {
   if (sandColorTexture) return sandColorTexture;
   const url = new URL("textures/sandcolor.jpg", import.meta.url).href;
-  sandColorTexture = new THREE.TextureLoader().load(
+  sandColorTexture = riftEnsureTextureImage(new THREE.TextureLoader().load(
     url,
     () => console.log("[main] sand color texture loaded:", url),
     undefined,
     (err) => console.error("[main] sand color texture FAILED to load:", url, err)
-  );
+  ));
   sandColorTexture.colorSpace = THREE.SRGBColorSpace; // this one carries real baked color (unlike normal/bump, which are data maps, not color) — needs the same colorSpace correction this project's other painted-color textures already use, or it renders washed out
   sandColorTexture.wrapS = sandColorTexture.wrapT = THREE.RepeatWrapping;
   return sandColorTexture;
@@ -1350,12 +1376,12 @@ let sandBumpTexture = null;
 function getSandBumpTexture() {
   if (sandBumpTexture) return sandBumpTexture;
   const url = new URL("textures/sandbump.jpg", import.meta.url).href;
-  sandBumpTexture = new THREE.TextureLoader().load(
+  sandBumpTexture = riftEnsureTextureImage(new THREE.TextureLoader().load(
     url,
     () => console.log("[main] sand bump texture loaded:", url),
     undefined,
     (err) => console.error("[main] sand bump texture FAILED to load:", url, err)
-  );
+  ));
   sandBumpTexture.wrapS = sandBumpTexture.wrapT = THREE.RepeatWrapping;
   return sandBumpTexture;
 }
@@ -1375,12 +1401,12 @@ let seafloorSandColorTexture = null;
 function getSeafloorSandColorTexture() {
   if (seafloorSandColorTexture) return seafloorSandColorTexture;
   const url = new URL("textures/seafloor_sand_color.jpg", import.meta.url).href;
-  seafloorSandColorTexture = new THREE.TextureLoader().load(
+  seafloorSandColorTexture = riftEnsureTextureImage(new THREE.TextureLoader().load(
     url,
     () => console.log("[main] seafloor sand color texture loaded:", url),
     undefined,
     (err) => console.error("[main] seafloor sand color texture FAILED to load:", url, err)
-  );
+  ));
   seafloorSandColorTexture.colorSpace = THREE.SRGBColorSpace; // real baked color, same correction the old sandColorTexture needed
   seafloorSandColorTexture.wrapS = seafloorSandColorTexture.wrapT = THREE.RepeatWrapping;
   return seafloorSandColorTexture;
@@ -1389,12 +1415,12 @@ let seafloorSandNormalTexture = null;
 function getSeafloorSandNormalTexture() {
   if (seafloorSandNormalTexture) return seafloorSandNormalTexture;
   const url = new URL("textures/seafloor_sand_normal.jpg", import.meta.url).href;
-  seafloorSandNormalTexture = new THREE.TextureLoader().load(
+  seafloorSandNormalTexture = riftEnsureTextureImage(new THREE.TextureLoader().load(
     url,
     () => console.log("[main] seafloor sand normal texture loaded:", url),
     undefined,
     (err) => console.error("[main] seafloor sand normal texture FAILED to load:", url, err)
-  );
+  ));
   seafloorSandNormalTexture.wrapS = seafloorSandNormalTexture.wrapT = THREE.RepeatWrapping;
   return seafloorSandNormalTexture;
 }
@@ -1402,12 +1428,12 @@ let seafloorSandRoughnessTexture = null;
 function getSeafloorSandRoughnessTexture() {
   if (seafloorSandRoughnessTexture) return seafloorSandRoughnessTexture;
   const url = new URL("textures/seafloor_sand_roughness.jpg", import.meta.url).href;
-  seafloorSandRoughnessTexture = new THREE.TextureLoader().load(
+  seafloorSandRoughnessTexture = riftEnsureTextureImage(new THREE.TextureLoader().load(
     url,
     () => console.log("[main] seafloor sand roughness texture loaded:", url),
     undefined,
     (err) => console.error("[main] seafloor sand roughness texture FAILED to load:", url, err)
-  );
+  ));
   seafloorSandRoughnessTexture.wrapS = seafloorSandRoughnessTexture.wrapT = THREE.RepeatWrapping;
   return seafloorSandRoughnessTexture;
 }
@@ -1422,12 +1448,12 @@ let causticPatternTexture = null;
 function getCausticPatternTexture() {
   if (causticPatternTexture) return causticPatternTexture;
   const url = new URL("textures/caustics_pattern.jpg", import.meta.url).href;
-  causticPatternTexture = new THREE.TextureLoader().load(
+  causticPatternTexture = riftEnsureTextureImage(new THREE.TextureLoader().load(
     url,
     () => console.log("[main] caustics pattern texture loaded:", url),
     undefined,
     (err) => console.error("[main] caustics pattern texture FAILED to load:", url, err)
-  );
+  ));
   causticPatternTexture.wrapS = causticPatternTexture.wrapT = THREE.RepeatWrapping;
   return causticPatternTexture;
 }

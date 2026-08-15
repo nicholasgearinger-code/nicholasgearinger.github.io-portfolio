@@ -480,6 +480,31 @@ function getRealisticCloudTexture() {
     undefined,
     (err) => console.error("[clouds] realistic cloud texture FAILED to load:", url, err)
   );
+  // Per "Rift Islands module failed to load" / "Script error." on every
+  // biome, root cause confirmed via a real devtools stack trace:
+  // TypeError: Cannot read properties of null (reading 'complete') at
+  // Textures.updateTexture, inside three.webgpu.js's own render path.
+  // A freshly-created THREE.Texture's `.image` is `null` by default
+  // (Texture.DEFAULT_IMAGE) until TextureLoader's async network fetch
+  // finishes — WebGLRenderer silently tolerates that and just skips
+  // upload until ready, but WebGPURenderer's Textures.updateTexture
+  // reads `image.complete` with NO null-check, so it throws on any
+  // frame rendered before this photo finishes downloading. Since the
+  // dome mesh (createRealisticCloudDome, below) gets added to the scene
+  // and rendered the SAME frame this function returns — long before a
+  // real network fetch can complete — this crashed on every biome's
+  // very first frame(s), 100% reliably, not as an occasional race.
+  // Fix: give `.image` a real (tiny, invisible) value immediately so
+  // WebGPU never sees null; TextureLoader's own internal onLoad
+  // callback (wired into `.load()` above) overwrites `.image` with the
+  // real photo and sets `needsUpdate` itself once it actually arrives —
+  // nothing else here needs to change for that swap to happen.
+  if (!realisticCloudTexture.image) {
+    const placeholderCanvas = document.createElement("canvas");
+    placeholderCanvas.width = 1;
+    placeholderCanvas.height = 1;
+    realisticCloudTexture.image = placeholderCanvas;
+  }
   realisticCloudTexture.colorSpace = THREE.SRGBColorSpace;
   // The source is a full 360° equirectangular panorama, so its left/right
   // edges are meant to meet seamlessly — RepeatWrapping (not the default
@@ -521,6 +546,16 @@ function getMoodCloudTexture(filename) {
     undefined,
     (err) => console.error("[clouds] mood sky texture FAILED to load:", url, err)
   );
+  // Same WebGPU null-image fix as getRealisticCloudTexture above — this
+  // texture gets used as a live material.map (updateRealisticCloudDome)
+  // the moment a mood-phase change first requests it, same race, same
+  // fix, see the long comment above for the full explanation.
+  if (!tex.image) {
+    const placeholderCanvas = document.createElement("canvas");
+    placeholderCanvas.width = 1;
+    placeholderCanvas.height = 1;
+    tex.image = placeholderCanvas;
+  }
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = THREE.RepeatWrapping; // same seamless-panorama treatment as the original texture, even though these sources aren't true 360° captures — the visible seam at u=0/1 is far less noticeable than a hard clamp edge would be
   moodCloudTextureCache[filename] = tex;

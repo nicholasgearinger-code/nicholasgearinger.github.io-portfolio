@@ -1000,11 +1000,12 @@ function buildCrystalFluidSimPlane(scene, y, size, sampleHeight) {
     // here, with chop layered on top as surface detail rather than being
     // the only thing moving.
     const bigSwell = sin(cellWorldX.mul(0.035).add(cellWorldZ.mul(0.02)).add(time.mul(0.7)));
-    // Per explicit "tone down the waves" — pulled back further still,
-    // 0.6/0.25 -> 0.35/0.15. Real ocean swell in calm-to-moderate
-    // conditions (which is the mood this biome is going for) is
-    // meaningfully gentler than what 0.6 was producing.
-    newHeight = newHeight.add(bigSwell.mul(0.35).mul(shoreDamp)).add(chop.mul(0.15).mul(shoreDamp));
+    // Per "not much vertical waves to look real" — 0.35/0.15 was an
+    // overcorrection from the previous "tone down" pass. Split the
+    // difference between that and the earlier too-much 0.6/0.25: 0.5/0.2
+    // — real, visible vertical motion without going back to the earlier
+    // amount that looked like too much wave energy.
+    newHeight = newHeight.add(bigSwell.mul(0.5).mul(shoreDamp)).add(chop.mul(0.2).mul(shoreDamp));
 
     heightBufferB.element(i).assign(newHeight);
   })().compute(CELL_COUNT);
@@ -1118,10 +1119,18 @@ function buildCrystalFluidSimPlane(scene, y, size, sampleHeight) {
   material.emissiveNode = Fn(() => {
     const viewDir = cameraPosition.sub(positionWorld).normalize();
     const grazing = float(1.0).sub(clamp(dot(normalWorld, viewDir), 0, 1));
-    const fresnelTerm = pow(grazing, 3.0);
+    // Per "looks too white instead of blue" — the previous pow(3)/0.55
+    // combo meant the highlight was strong AND active across most of a
+    // flat ocean viewed from a normal player-eye-height angle (grazing
+    // is high almost everywhere except looking straight down), washing
+    // the whole surface pale instead of just catching light at real
+    // grazing/horizon angles. pow(6) makes the falloff much steeper —
+    // only genuinely near-horizontal viewing angles light up — and the
+    // multiplier is cut roughly in half on top of that.
+    const fresnelTerm = pow(grazing, 6.0);
     const skyHighlight = color(0xcfe8ff); // pale sky tone — reads as reflected sky/light, not a light SOURCE of its own
     const baseEmissive = color(style.emissive).mul(style.emissiveIntensity);
-    return baseEmissive.add(skyHighlight.mul(fresnelTerm).mul(0.55));
+    return baseEmissive.add(skyHighlight.mul(fresnelTerm).mul(0.25));
   })();
 
   const mesh = new THREE.Mesh(geometry, material);

@@ -1,4 +1,9 @@
 import * as THREE from "three";
+import {
+  Fn, instanceIndex, instancedArray, float, uint, If,
+  uniform, vec3, vec2, color, positionLocal, mix, clamp,
+  min, max, attribute, time, sin, fract, floor, dot, cross,
+} from "three/tsl";
 import { getGraphicsSettings } from "./graphicsSettings.js";
 
 // Per real WebGPU error "[Buffer (unlabeled)] used in submit while
@@ -832,9 +837,232 @@ function getFoamDetailTexture() {
   return foamDetailTexture;
 }
 
+// -----------------------------------------------------------------------------
+// SWAP POINT: real WebGPU compute-shader fluid simulation, Coral Shallows
+// water only — genuine finite-difference wave physics (neighbor-based
+// Laplacian, the same technique the standalone fluid-sim prototype proved
+// working in-browser), replacing the CPU-side Gerstner-sum approximation
+// every other biome (and crystal itself, when this flag is off) still
+// uses. Single flip-point, same discipline as CRYSTAL_WATER_SHADER_ENABLED
+// above — createLiquidPlane branches to this ENTIRELY SEPARATE, self-
+// contained function before touching any of the existing shared geo/
+// posAttr/colors setup below, so flipping this off is a full, clean
+// revert to the known-working Gerstner path with zero risk of leftover
+// state from this one.
+//
+// STAGE 1 SCOPE (deliberately, not an oversight — see chat plan): real
+// wave motion + real per-vertex normals only. Explicitly NOT included yet:
+// shore damping (the prototype's shore formula assumes a straight
+// coastline along one axis, which is WRONG for Coral Shallows' actual
+// irregular island shape — porting it as-is would look correct only in
+// one direction; real terrain-aware shore damping is its own follow-up
+// stage, not guessed at here), foam, reflection, refraction, rain-ripple
+// reactivity, and the pointer/wake-trail interaction system (demo-input-
+// specific, not yet wired to real player position). The whole plane
+// behaves as uniform open ocean for now.
+const CRYSTAL_FLUID_SIM_ENABLED = true;
+// Raised from 128 — the plane this actually renders on (Coral Shallows'
+// real 2000-unit ocean) is 50x larger than the prototype's own 40-unit
+// demo plane, so 128 cells meant ~15.6 world units per cell, producing
+// technically-real but visually enormous, barely-perceptible wave
+// wavelengths. 256 is a first real test of "does this look right at a
+// meaningfully lower compute cost than matching the prototype's original
+// cell density would require" — not a final number, worth tuning
+// further based on how this actually performs/looks on a real device.
+const FLUID_SIM_WIDTH = 256;
+const fluidSimHash21 = Fn(([p]) => {
+  const p3 = fract(vec3(p.x, p.y, p.x).mul(0.1031));
+  const p3b = p3.add(vec3(dot(p3, p3.add(vec3(33.33, 33.33, 33.33))).add(0)));
+  return fract(p3b.x.add(p3b.y).mul(p3b.z));
+});
+
+function buildCrystalFluidSimPlane(scene, y, size) {
+  const WIDTH = FLUID_SIM_WIDTH;
+  const CELL_COUNT = WIDTH * WIDTH;
+
+  const heightBufferA = instancedArray(CELL_COUNT, "float");
+  const heightBufferB = instancedArray(CELL_COUNT, "float");
+  const velocityBuffer = instancedArray(CELL_COUNT, "float");
+  let heightBufferNode = heightBufferA; // always points at the buffer computeUpdate currently reads FROM — swapped by updateFluidSimWater each frame
+
+  const computeInit = Fn(() => {
+    heightBufferA.element(instanceIndex).assign(0);
+    heightBufferB.element(instanceIndex).assign(0);
+    velocityBuffer.element(instanceIndex).assign(0);
+  })().compute(CELL_COUNT);
+
+  // The real wave equation — acceleration proportional to how far this
+  // cell's height differs from the average of its neighbors (the
+  // discrete Laplacian). Edges CLAMPED (re-reading the edge cell's own
+  // value) rather than wrapped, so waves reflect inward off the plane's
+  // boundary like a real pool wall instead of teleporting to the far
+  // side. Directly ported from the confirmed-working prototype, only
+  // WIDTH/size-related constants changed to match this plane's real
+  // dimensions.
+  const computeUpdate = Fn(() => {
+    const i = instanceIndex;
+    const x = i.mod(uint(WIDTH)).toFloat();
+    const yy = i.div(uint(WIDTH)).toFloat();
+    const self = heightBufferA.element(i);
+
+    const xm = max(x.sub(1), float(0));
+    const xp = min(x.add(1), float(WIDTH - 1));
+    const ym = max(yy.sub(1), float(0));
+    const yp = min(yy.add(1), float(WIDTH - 1));
+
+    const idxL = yy.mul(WIDTH).add(xm).toUint();
+    const idxR = yy.mul(WIDTH).add(xp).toUint();
+    const idxU = ym.mul(WIDTH).add(x).toUint();
+    const idxD = yp.mul(WIDTH).add(x).toUint();
+
+    const left = heightBufferA.element(idxL);
+    const right = heightBufferA.element(idxR);
+    const up = heightBufferA.element(idxU);
+    const down = heightBufferA.element(idxD);
+
+    const laplacian = left.add(right).add(up).add(down).sub(self.mul(4));
+    const waveSpeed = float(1.4);
+    const damping = float(0.994); // <1 — real water loses energy to friction/viscosity; undamped would ring forever
+
+    const newVelocity = velocityBuffer.element(i).add(laplacian.mul(waveSpeed)).mul(damping);
+    velocityBuffer.element(i).assign(newVelocity);
+    let newHeight = self.add(newVelocity.mul(0.05));
+
+    // Ambient ocean chop — three overlapping sine waves at different
+    // scales/directions/speeds (real wind-driven chop has no single
+    // dominant direction/period) plus small per-cell phase jitter so the
+    // result reads as organic texture rather than a geometrically clean,
+    // obviously-periodic pattern.
+    //
+    // Uses REAL WORLD-SPACE position (cellWorldX/Z), not raw cell index
+    // (x/yy) — the prototype's own version used cell index directly,
+    // which was fine on its 40-unit demo plane but meant visual wave
+    // wavelength was entirely a function of grid resolution rather than
+    // real distance. On Coral Shallows' actual 2000-unit ocean that
+    // produced technically-real but essentially invisible waves spanning
+    // hundreds of world units. World-space frequencies below keep the
+    // wavelength meaningful (tens of units, roughly ocean-swell-to-chop
+    // scale) regardless of how many cells the grid actually has.
+    const cellWorldX = x.div(float(WIDTH)).sub(0.5).mul(float(size));
+    const cellWorldZ = yy.div(float(WIDTH)).sub(0.5).mul(float(size));
+    const jitter = fluidSimHash21(vec2(cellWorldX.mul(0.05), cellWorldZ.mul(0.05))).sub(0.5).mul(0.4);
+    const chop1 = sin(cellWorldX.mul(0.28).add(cellWorldZ.mul(0.11)).add(time.mul(1.3)).add(jitter));
+    const chop2 = sin(cellWorldX.mul(0.14).sub(cellWorldZ.mul(0.22)).sub(time.mul(0.9)).add(jitter.mul(0.7)));
+    const chop3 = sin(cellWorldX.mul(0.5).add(cellWorldZ.mul(0.4)).add(time.mul(1.7)).add(1.7).add(jitter.mul(1.3)));
+    const chop = chop1.mul(0.4).add(chop2.mul(0.3)).add(chop3.mul(0.2));
+    newHeight = newHeight.add(chop.mul(0.03));
+
+    heightBufferB.element(i).assign(newHeight);
+  })().compute(CELL_COUNT);
+
+  // renderer.copyBufferToBuffer isn't available on this renderer (confirmed
+  // via the prototype's own real testing, not assumed) — copying via a
+  // trivial per-cell compute-shader assignment instead, same mechanism as
+  // computeInit/computeUpdate above, not a new unverified API surface.
+  const computeCopyBack = Fn(() => {
+    heightBufferA.element(instanceIndex).assign(heightBufferB.element(instanceIndex));
+  })().compute(CELL_COUNT);
+
+  const geometry = new THREE.PlaneGeometry(size, size, WIDTH - 1, WIDTH - 1);
+  geometry.rotateX(-Math.PI / 2);
+  // Explicit vertex-to-cell mapping — PlaneGeometry with WIDTH-1 segments
+  // lays out vertices in row-major order matching exactly how the height
+  // buffer is indexed (x + y*WIDTH), a direct 1:1 correspondence.
+  const cellIndices = new Float32Array(WIDTH * WIDTH);
+  for (let ci = 0; ci < cellIndices.length; ci++) cellIndices[ci] = ci;
+  geometry.setAttribute("cellIndex", new THREE.Float32BufferAttribute(cellIndices, 1));
+
+  const style = LIQUID_STYLE.crystal;
+  const material = new THREE.MeshStandardNodeMaterial({
+    color: style.baseColor, roughness: style.roughness, metalness: 0.05,
+    emissive: style.emissive, emissiveIntensity: style.emissiveIntensity,
+    transparent: true, opacity: style.opacity,
+  });
+
+  const cellIdx = attribute("cellIndex", "float").toUint();
+  const cellSpacing = float(size / WIDTH);
+
+  const computeWaveNormal = Fn(() => {
+    const cx = cellIdx.mod(uint(WIDTH)).toFloat();
+    const cy = cellIdx.div(uint(WIDTH)).toFloat();
+    const hC = heightBufferNode.element(cellIdx);
+    const cxRight = min(cx.add(1), float(WIDTH - 1));
+    const cyDown = min(cy.add(1), float(WIDTH - 1));
+    const idxRight = cy.mul(WIDTH).add(cxRight).toUint();
+    const idxDown = cyDown.mul(WIDTH).add(cx).toUint();
+    const hRight = heightBufferNode.element(idxRight);
+    const hDown = heightBufferNode.element(idxDown);
+    const tangent = vec3(cellSpacing, hRight.sub(hC), 0);
+    const bitangent = vec3(0, hDown.sub(hC), cellSpacing);
+    return cross(bitangent, tangent).normalize();
+  });
+
+  material.positionNode = Fn(() => {
+    const heightAtVertex = heightBufferNode.element(cellIdx);
+    return positionLocal.add(vec3(0, heightAtVertex, 0));
+  })();
+  material.normalNode = computeWaveNormal();
+
+  // Minimal two-tone height blend for this stage — deep base color at
+  // rest, brightening toward the style's own froth color at real wave
+  // peaks. Real foam (procedural + photo-texture blend, matching what
+  // the disabled Gerstner-path shader already had) is deliberately a
+  // later stage, not attempted here.
+  material.colorNode = Fn(() => {
+    const heightAtVertex = heightBufferNode.element(cellIdx);
+    const deep = color(style.baseColor);
+    const crest = color(style.frothColor);
+    const t = clamp(heightAtVertex.mul(2.4).add(0.1), 0, 1);
+    return mix(deep, crest, t);
+  })();
+
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.position.y = y;
+  mesh.renderOrder = -50; // matches the Gerstner-path crystal water's own renderOrder — see its comment for why this needs to stably win against sky-layer depth sort
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+
+  return {
+    fluidSim: true,
+    mesh,
+    computeInit, computeUpdate, computeCopyBack,
+    heightBufferA, heightBufferB,
+    initialized: false, // updateFluidSimWater dispatches computeInit exactly once, the first time it's called for this handle
+    getHeightBufferNode: () => heightBufferNode,
+    setHeightBufferNode: (n) => { heightBufferNode = n; },
+  };
+}
+
+// Real per-frame compute dispatch for the fluid-sim water — separate from
+// updateLiquidPlane (which is CPU-side only) because dispatching a compute
+// shader needs the renderer, which only main.js holds. Called from
+// main.js's animate loop, crystal-and-fluid-sim-enabled only.
+async function updateFluidSimWater(handle, renderer) {
+  if (!handle || !handle.fluidSim) return;
+  if (!handle.initialized) {
+    await renderer.computeAsync(handle.computeInit);
+    handle.initialized = true;
+  }
+  await renderer.computeAsync(handle.computeUpdate);
+  await renderer.computeAsync(handle.computeCopyBack);
+  // computeUpdate reads FROM heightBufferA and writes INTO heightBufferB;
+  // computeCopyBack then copies B back into A — so heightBufferA always
+  // holds the current, fully-settled state by the time this returns,
+  // matching what positionNode/normalNode already read via
+  // getHeightBufferNode(). No buffer-identity swap needed (unlike a
+  // classic ping-pong scheme) since computeCopyBack does that work on
+  // the GPU side every frame — same scheme the confirmed-working
+  // prototype itself used.
+}
+
 function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0.6, z: 0.35 }, excludeRegions = []) {
   const style = LIQUID_STYLE[biome];
   if (!style) return null;
+
+  if (biome === "crystal" && CRYSTAL_FLUID_SIM_ENABLED) {
+    return buildCrystalFluidSimPlane(scene, y, size);
+  }
+
   const segs = getGraphicsSettings().liquidSegments; // reverted the earlier ×1.4 workaround — liquidSegments itself is now increased directly in graphicsSettings.js
   const geo = new THREE.PlaneGeometry(size, size, segs, segs);
   geo.rotateX(-Math.PI / 2);
@@ -1504,6 +1732,11 @@ vec2 foamVoronoiF1F2(vec2 p) {
 
 function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir, skyHorizon, reflectionTexture, reflectionMatrix, refractionTexture, resolution, stormAmount = 0, dayAmount = 1) {
   if (!handle) return;
+  // Fluid-sim water (see buildCrystalFluidSimPlane) is driven entirely by
+  // a GPU compute shader, dispatched separately from main.js's animate
+  // loop via updateFluidSimWater (needs the renderer, which this
+  // CPU-only function doesn't have) — nothing below applies to it.
+  if (handle.fluidSim) return;
   const { mesh, backMesh, glow, shimmer, rocks, basePositions, biome, style, flowDir, crustOctaves, crackOctaves, flowBeads, waterY, rippleTexture, foamAccum } = handle;
   // Real per-frame dt, derived from consecutive elapsed values — this
   // function only ever receives cumulative elapsed time, not a raw
@@ -1964,6 +2197,29 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
 
 function disposeLiquidPlane(scene, handle) {
   if (!handle) return;
+  if (handle.fluidSim) {
+    scene.remove(handle.mesh);
+    riftDeferDispose(() => {
+      handle.mesh.geometry.dispose();
+      handle.mesh.material.dispose();
+      // GENUINELY UNVERIFIED: whether Three.js's compute storage buffers
+      // (instancedArray, used for height/velocity above) need their own
+      // explicit disposal beyond the mesh/geometry/material, on top of
+      // the buffer-destroy timing issue already fixed elsewhere in this
+      // file. Wrapped in try/catch so an unexpected API shape here can't
+      // crash disposal for everything else — if this turns out to leak
+      // GPU memory over repeated level switches, that's the next thing
+      // to investigate with real devtools memory profiling, not guessed
+      // at further here.
+      try {
+        if (handle.heightBufferA && typeof handle.heightBufferA.dispose === "function") handle.heightBufferA.dispose();
+        if (handle.heightBufferB && typeof handle.heightBufferB.dispose === "function") handle.heightBufferB.dispose();
+      } catch (err) {
+        console.warn("[liquid] fluid-sim buffer disposal — unverified API, logging instead of crashing:", err);
+      }
+    });
+    return;
+  }
   scene.remove(handle.mesh);
   if (handle.backMesh) scene.remove(handle.backMesh);
   if (handle.glow) scene.remove(handle.glow);
@@ -2006,7 +2262,7 @@ function disposeLiquidPlane(scene, handle) {
 }
 
 
-export { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail };
+export { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, updateFluidSimWater, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail };
 
 // Ocean surface detail — Coral Shallows only. DISABLED entirely per
 // explicit follow-up request, after two rounds of trying to fix the

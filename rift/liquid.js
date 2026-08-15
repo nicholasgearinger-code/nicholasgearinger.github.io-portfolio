@@ -950,7 +950,15 @@ function buildCrystalFluidSimPlane(scene, y, size) {
     const chop2 = sin(cellWorldX.mul(0.14).sub(cellWorldZ.mul(0.22)).sub(time.mul(0.9)).add(jitter.mul(0.7)));
     const chop3 = sin(cellWorldX.mul(0.5).add(cellWorldZ.mul(0.4)).add(time.mul(1.7)).add(1.7).add(jitter.mul(1.3)));
     const chop = chop1.mul(0.4).add(chop2.mul(0.3)).add(chop3.mul(0.2));
-    newHeight = newHeight.add(chop.mul(0.03));
+    // Amplitude — 0.03 (ported directly from the prototype) turned out
+    // to be a few CENTIMETERS of real displacement, invisible at normal
+    // viewing distance once this ran on the actual game's water instead
+    // of the prototype's own close-orbiting demo camera. The old
+    // Gerstner system's wave height spans multiple full world units
+    // peak-to-trough (see GERSTNER_TARGET_AMPLITUDE_SUM elsewhere in
+    // this file) — 0.4 brings this into roughly that same visible range
+    // as a first real test, not a final tuned value.
+    newHeight = newHeight.add(chop.mul(0.4));
 
     heightBufferB.element(i).assign(newHeight);
   })().compute(CELL_COUNT);

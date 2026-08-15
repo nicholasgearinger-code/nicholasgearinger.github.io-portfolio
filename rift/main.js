@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { Fn, instanceIndex, instancedArray, hash, uniform, vec3, vec2, vec4, float, uint, If, texture, uv, floor, fract, smoothstep, clamp } from "three/tsl";
+import { Fn, instanceIndex, instancedArray, hash, uniform, vec3, vec2, vec4, float, uint, If, texture, uv, floor, fract, smoothstep, clamp, abs } from "three/tsl";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
 import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH, POND_Z, POND_RADIUS, POND_LEVEL, RAMP_CENTER_X, RAMP_CENTER_Z, RAMP_LENGTH, RAMP_HALF_WIDTH, ROOM_FLOOR_Y, ROOM_WIDTH, ROOM_LENGTH, BRANCH_START_X, BRANCH_LENGTH, BRANCH_HALF_WIDTH, BRANCH_Z, CHAMBER_RADIUS } from "./terrain.js";
 import { LEVELS, generateLevelLayout } from "./levels.js";
@@ -988,22 +988,7 @@ lensMaterial.colorNode = Fn(() => {
   // already used for shore points/particle spawning elsewhere in this
   // project's TSL code, applied here in 2D screen space instead of 3D
   // world space.
-  // Per "no water drops on camera like this [reference]" — the original
-  // 11x11 grid produced many small, subtle distortions rather than a
-  // handful of clearly visible individual droplets, which is likely why
-  // this wasn't reading as "water on the lens" at all in practice. Fewer,
-  // larger cells (11 -> 6) and a stronger distortion/highlight below —
-  // real reference photos of rain-on-glass show a moderate NUMBER of
-  // large, clearly-defined drops, not a dense field of micro-ripples.
   const cellSize = float(6.0);
-  // Per real WGSL compile error ("Expected a `,`, but got a
-  // AbstractFloatLiteral") once Ocean FX was actually turned on for the
-  // first time — this whole function is genuinely new, untested code
-  // (never compiled until oceanEffectsEnabled was true), and the exact
-  // line is hard to pin down without seeing the raw generated WGSL. Every
-  // bare JS number below that sits alongside a computed node argument in
-  // the SAME function call is now explicitly wrapped in float() —
-  // defensive and comprehensive rather than guessing at one exact spot.
   const zero = float(0);
   const one = float(1);
   // Slow downward drift, tied to the real self-managed time uniform — real
@@ -1026,26 +1011,56 @@ lensMaterial.colorNode = Fn(() => {
   const dropletRadius = float(0.22);
   const inDroplet = one.sub(smoothstep(dropletRadius.mul(0.6), dropletRadius, distToCenter));
   const dir = cellLocal.sub(dropletCenter);
-  // Refraction-like offset — pulls the sample toward the droplet's own
-  // center, the real optical effect of light bending through a curved
-  // water droplet (a crude but recognizable magnifying-glass distortion),
-  // scaled by how visible this effect should currently be.
-  const distortAmount = inDroplet.mul(dropletPresent).mul(0.045).mul(lensIntensityUniform);
-  const distortedUV = clamp(screenUV.sub(dir.mul(distortAmount)), zero, one);
+  // Per real reference photo — "distortion of the environment through the
+  // center... not glowing rings": this refraction-like sample offset is
+  // now the PRIMARY visual carrier of the whole effect (the old rim-glow
+  // ring, removed below, used to compete with it) — pulls the sample
+  // toward the droplet's own center, the real optical effect of light
+  // bending through a curved water droplet, strengthened since it's
+  // doing more of the visual work now.
+  const distortAmount = inDroplet.mul(dropletPresent).mul(0.06).mul(lensIntensityUniform);
+  // Per "wet trails as they slide down the lens" — a narrow vertical
+  // streak in the same screen-space column as each droplet, extending
+  // toward increasing cellUV.y (the same direction the whole pattern
+  // already drifts in, above) — real water trails are what a droplet
+  // LEAVES BEHIND as it slides, not a symmetric mark. Narrow, and faded
+  // out with distance from the droplet, so it reads as a thin residual
+  // streak rather than a second droplet.
+  const trailXDist = abs(cellLocal.x.sub(dropletCenter.x));
+  const belowDroplet = smoothstep(zero, float(0.03), cellLocal.y.sub(dropletCenter.y));
+  const trailFade = one.sub(clamp(cellLocal.y.sub(dropletCenter.y), zero, one));
+  const trailMask = smoothstep(float(0.035), float(0.01), trailXDist).mul(belowDroplet).mul(trailFade).mul(dropletPresent);
+  const trailDistort = trailMask.mul(0.015).mul(lensIntensityUniform);
+  const totalDistortY = distortAmount.mul(dir.y).add(trailDistort);
+  const totalDistortX = distortAmount.mul(dir.x);
+  // Per "the camera is flipped" — render targets and a full-screen quad's
+  // own UV frequently disagree on which Y direction is "up" (a classic,
+  // common render-to-texture gotcha, not specific to this effect) — the
+  // scene texture sample flips Y explicitly here, independent of the
+  // droplet math above (which stays in the quad's own natural UV space).
+  const rawSampleUV = screenUV.sub(vec2(totalDistortX, totalDistortY));
+  const flippedSampleUV = vec2(rawSampleUV.x, one.sub(rawSampleUV.y));
+  const distortedUV = clamp(flippedSampleUV, zero, one);
   const sceneColor = texture(lensRenderTarget.texture, distortedUV);
-  // A soft bright rim right at each droplet's own edge — real water
-  // droplets catch and concentrate light at their boundary.
-  const rim = smoothstep(dropletRadius.mul(0.55), dropletRadius.mul(0.95), distToCenter).mul(inDroplet);
-  const rimBoost = rim.mul(0.2).mul(lensIntensityUniform);
   const gated = inDroplet.mul(dropletPresent);
+  // Per "should... reflect light" — a SMALL, soft highlight point offset
+  // from the droplet's own center (the classic look of a light source
+  // reflecting off one side of a curved sphere), not a bright ring
+  // tracing the whole edge — real droplets show one modest bright spot,
+  // not a glowing halo.
+  const highlightPos = dropletCenter.add(vec2(-0.07, -0.07));
+  const highlightDist = cellLocal.sub(highlightPos).length();
+  const highlight = smoothstep(float(0.09), zero, highlightDist).mul(gated);
   // Real sun-glint boost — per the existing, already-worked-out
   // "only glow when reflecting sunlight" design (see the JS-side
   // sun-screen-position projection this reads from) — droplets near
   // where the sun actually is on screen catch extra light, same as real
-  // water droplets do.
+  // water droplets do. Kept, but now additive with the small highlight
+  // above rather than a separate large glow.
   const sunDist = screenUV.sub(lensSunScreenPos).length();
-  const sunGlow = smoothstep(float(0.25), zero, sunDist).mul(gated).mul(0.5);
-  const finalColor = sceneColor.rgb.add(vec3(rimBoost).mul(gated)).add(vec3(1.0, 0.9, 0.7).mul(sunGlow));
+  const sunGlow = smoothstep(float(0.25), zero, sunDist).mul(gated).mul(0.4);
+  const lightBoost = highlight.mul(0.22).add(sunGlow).add(trailMask.mul(0.06)).mul(lensIntensityUniform);
+  const finalColor = sceneColor.rgb.add(vec3(lightBoost));
   return vec4(finalColor, one);
 })();
 lensQuadScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), lensMaterial));

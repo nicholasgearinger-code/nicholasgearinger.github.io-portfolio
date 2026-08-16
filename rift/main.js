@@ -1431,7 +1431,7 @@ let debugForceStorm = false;
 let cloudsHandle = null;
 let submergedState = false; // persists across frames — see the hysteresis check below for why a fresh threshold comparison every frame isn't enough
 let wasFullySubmergedLastFrame = false; // detects the exact moment of surfacing, for the post-swim wet-lens effect below
-let pendingShadowReload = false; // set by applyGraphicsSettings whenever the saved shadow preference differs from the renderer's actual live state — drives the Shadows button's own "(reload to apply)" label
+let pendingSettingsReload = false; // set true by applyGraphicsSettings whenever ANY graphics setting is changed mid-session — every setting now requires a page reload to actually take effect (see applyGraphicsSettings's own comment for why)
 let lensEffectActive = false; // set each frame below; read by the final render call to decide which outputNode postProcessing should currently be using
 let lastLensEffectActive = null; // previous frame's value — outputNode is only reassigned (and the real shader-recompile cost only paid) on an actual transition, not every frame
 let postSwimWetness = 0; // 0-1, set to 1 the instant the player surfaces, decays over ~60s — drives the SAME lens-rain shader as real rain, just from a different trigger
@@ -3602,53 +3602,24 @@ function respawnInLevel() {
 // effect right away instead of only on the next level entry.
 // ---------------------------------------------------------------------------
 function applyGraphicsSettings() {
-  const s = getGraphicsSettings();
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, s.pixelRatioCap));
-  // Per a real "GPUValidationError: Invalid CommandEncoder" — confirmed
-  // reachable via BOTH the individual Shadows toggle AND graphics tier
-  // switching (Low/Medium/High), which also calls this same function and
-  // was NOT covered by an earlier attempt at this fix that only guarded
-  // the toggle button's own click handler. Moved the actual protection
-  // HERE instead — the one function every caller shares — so no future
-  // caller can bypass it either. Two earlier targeted fixes this session
-  // (first suspecting postProcessing.render(), then suspecting
-  // synchronous shadow-map disposal) were both ruled out or fixed
-  // without stopping the crash. Rather than guess at a fourth specific
-  // mechanism inside a deep renderer/GPU interaction with no way to
-  // inspect it directly: shadow state (the enabled flag, map size, map
-  // disposal) is now NEVER touched live at all, regardless of entry
-  // point — only ever applied on the next fresh page load (see the
-  // startup line near the renderer setup), which naturally avoids
-  // whatever mid-session GPU race this actually is. pendingShadowReload
-  // drives the Shadows button's own "(reload to apply)" label — see its
-  // render() function below — automatically, from whichever path
-  // (button or tier) actually changed the saved preference.
-  pendingShadowReload = s.shadowsEnabled !== renderer.shadowMap.enabled;
-  if (!pendingShadowReload) {
-    if (sun.shadow.mapSize.width !== s.shadowMapSize) {
-      sun.shadow.mapSize.set(s.shadowMapSize, s.shadowMapSize);
-      // Three.js only regenerates the shadow map texture at the new
-      // resolution once the old one is disposed — changing mapSize alone
-      // has no effect on an already-rendered light.
-      if (sun.shadow.map) {
-        const oldSunShadowMap = sun.shadow.map;
-        sun.shadow.map = null;
-        riftDeferDispose(() => oldSunShadowMap.dispose());
-      }
-    }
-    const moonShadowSize = s.shadowMapSize / 2;
-    if (moonLight.shadow.mapSize.width !== moonShadowSize) {
-      moonLight.shadow.mapSize.set(moonShadowSize, moonShadowSize);
-      if (moonLight.shadow.map) {
-        const oldMoonShadowMap = moonLight.shadow.map;
-        moonLight.shadow.map = null;
-        riftDeferDispose(() => oldMoonShadowMap.dispose());
-      }
-    }
-  }
-  applySsaoTier();
-  resizeToViewport();
-  if (currentLevelIdx >= 0) buildLevel(currentLevelIdx);
+  // Per explicit "before you load into the level you must've set the
+  // settings first and if you want to change it you must reload" — this
+  // function no longer touches the live renderer/scene under ANY
+  // circumstance, full stop. Structurally prevents the WHOLE category of
+  // live-graphics-setting bugs hit repeatedly this session (shadows
+  // alone crashed via two different entry points, even after two
+  // separate targeted fixes at the underlying mechanism) rather than
+  // continuing to chase each one individually. A setting change now
+  // ALWAYS just saves the preference (already done by setOverride/
+  // setGraphicsTier in the caller, before this runs) and takes effect on
+  // the next fresh page load, which never has any in-flight GPU work to
+  // race against in the first place. The initial, once-at-startup
+  // application (renderer.shadowMap.enabled near the renderer setup,
+  // resizeToViewport's own startup call, etc.) is a SEPARATE code path
+  // from this function and is untouched — settings still apply correctly
+  // on first load, exactly as before; only mid-session CHANGES are
+  // affected.
+  pendingSettingsReload = true;
 }
 
 // Registry of "re-read my current effective value and update my own
@@ -3697,6 +3668,20 @@ if (graphicsBtn && graphicsPanel) {
     btn.addEventListener("click", () => changeGraphicsTier(btn.dataset.tier));
   });
   syncGraphicsUI();
+
+  // Per explicit "before you load into the level you must've set the
+  // settings first... you must reload" — a single, unmistakable banner
+  // covering EVERY control in this panel (tier buttons, individual
+  // toggles, the density dropdown), rather than only decorating the
+  // toggle buttons — those other controls don't have an obvious per-
+  // control label spot the way a toggle's own text does, and one clear
+  // shared notice is more reliable than trying to add a bespoke
+  // indicator to every different control type.
+  const reloadBanner = document.createElement("div");
+  reloadBanner.style.cssText = "display:none;margin-bottom:8px;padding:6px 8px;border-radius:4px;background:rgba(255,180,80,0.18);color:#ffb450;font-size:0.85em;text-align:center;";
+  reloadBanner.textContent = "Settings changed — reload the page to apply";
+  graphicsPanel.insertBefore(reloadBanner, graphicsPanel.firstChild);
+  uiSyncCallbacks.push(() => { reloadBanner.style.display = pendingSettingsReload ? "block" : "none"; });
 
   // Debug: time-of-day / weather preview toggles, per explicit request —
   // appended into the existing panel at runtime rather than touching
@@ -3774,16 +3759,15 @@ if (graphicsBtn && graphicsPanel) {
     btn.type = "button";
     btn.className = "rift-graphics-opt";
     const isOn = () => getEffectiveValue(key) !== false;
-    // Per real "GPUValidationError: Invalid CommandEncoder" — shadows
-    // never actually apply live at all anymore (see
-    // applyGraphicsSettings's own comment for the full story); this
-    // label reflects pendingShadowReload directly, which
-    // applyGraphicsSettings sets from whichever path actually changed
-    // the preference (this button OR a tier switch), so it stays
-    // correct regardless of entry point rather than being set once by
-    // this button's own click handler.
+    // Per explicit "before you load into the level you must've set the
+    // settings first... you must reload" — every setting (not just
+    // shadows anymore) requires a reload to actually take effect once
+    // changed; this label reflects the shared pendingSettingsReload flag
+    // directly, which applyGraphicsSettings sets from WHICHEVER path
+    // actually changed a preference (this button, a tier switch, or the
+    // density dropdown), so it stays correct regardless of entry point.
     const render = () => {
-      const suffix = key === "shadowsEnabled" && pendingShadowReload ? " (reload to apply)" : "";
+      const suffix = pendingSettingsReload ? " (reload to apply)" : "";
       btn.textContent = `${label}: ${isOn() ? "On" : "Off"}${suffix}`;
       btn.classList.toggle("active", isOn());
     };

@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { Fn, instanceIndex, instancedArray, hash, uniform, vec3, vec2, vec4, float, uint, If, texture, uv, floor, fract, smoothstep, clamp, abs, pass, color, positionWorld, max as tslMax, min as tslMin, vertexColor, normalWorld, sin, cos, dot } from "three/tsl";
+import { Fn, instanceIndex, instancedArray, hash, uniform, vec3, vec2, vec4, float, uint, If, texture, uv, floor, fract, smoothstep, clamp, abs, pass, color, positionWorld, max as tslMax, min as tslMin, vertexColor, normalWorld, sin, cos, dot, mix, pow } from "three/tsl";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
 import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH, POND_Z, POND_RADIUS, POND_LEVEL, RAMP_CENTER_X, RAMP_CENTER_Z, RAMP_LENGTH, RAMP_HALF_WIDTH, ROOM_FLOOR_Y, ROOM_WIDTH, ROOM_LENGTH, BRANCH_START_X, BRANCH_LENGTH, BRANCH_HALF_WIDTH, BRANCH_Z, CHAMBER_RADIUS } from "./terrain.js";
 import { LEVELS, generateLevelLayout } from "./levels.js";
@@ -994,7 +994,13 @@ const lensDistortedOutput = Fn(() => {
   // static, and this is also what makes the pattern eventually cycle
   // through fresh droplet positions instead of showing the exact same
   // frozen arrangement for an entire storm.
-  const cellUV = screenUV.mul(cellSize).add(vec2(zero, lensTimeUniform.mul(0.15)));
+  // Per direct observation "flow organically down the glass lens not
+  // up" — flipped the sign directly based on what was actually seen
+  // live, rather than re-reasoning about UV orientation (this exact
+  // project's screen-space UV convention has been wrong more than once
+  // already this session, so trusting the real observation over theory
+  // here).
+  const cellUV = screenUV.mul(cellSize).add(vec2(zero, lensTimeUniform.mul(-0.15)));
   const cellId = floor(cellUV);
   const cellLocal = fract(cellUV);
   const seed = cellId.x.add(cellId.y.mul(57.0));
@@ -1005,16 +1011,45 @@ const lensDistortedOutput = Fn(() => {
   // when smoothstep already does the same job with functions already
   // proven working here) that's ~0 or ~1 per cell.
   const dropletPresent = smoothstep(float(0.5), float(0.51), hash(seed.add(71.0)));
-  const distToCenter = cellLocal.sub(dropletCenter).length();
-  const dropletRadius = float(0.22);
+  // Per explicit "mix of large and small droplets" — per-cell randomized
+  // radius instead of one fixed size. pow(x, 2.2) biases the
+  // distribution toward smaller values (real rain-on-glass is mostly
+  // small drops with occasional larger ones, not an even split) — mix()
+  // then maps that into the actual size range. Capped at 0.34 (not
+  // closer to the 0.5 cell-boundary limit) so even the largest droplets
+  // stay fully within their own cell rather than visibly clipping
+  // against a neighbor's.
+  const sizeRand = hash(seed.add(113.0));
+  const dropletRadius = mix(float(0.09), float(0.34), pow(sizeRand, 2.2));
+  const distToCenterRaw = cellLocal.sub(dropletCenter).length();
+  // Per explicit "change shape organically like water" — real droplets
+  // are never perfect circles. A second, higher-frequency hash-cell
+  // layer sampled at this droplet's own local position perturbs the
+  // distance field directly (the same domain-warping principle already
+  // used for the Gerstner wave sum elsewhere in this project, just in 2D
+  // screen space instead of 3D world space) — this bulges and pinches
+  // the effective edge unevenly around the circle instead of leaving it
+  // perfectly round. Scaled by the droplet's OWN radius so small drops
+  // stay comparatively cleaner (their wobble would otherwise be
+  // disproportionately large relative to their own size) while big ones
+  // show more visible organic variation, matching how real large drops
+  // sag and distort more than tiny ones.
+  const wobbleUV = cellLocal.mul(24.0);
+  const wobbleCellId = floor(wobbleUV);
+  const wobbleHash = hash(wobbleCellId.x.add(wobbleCellId.y.mul(41.0)).add(seed));
+  const wobble = wobbleHash.sub(0.5).mul(dropletRadius).mul(0.35);
+  const distToCenter = distToCenterRaw.add(wobble);
   const inDroplet = one.sub(smoothstep(dropletRadius.mul(0.6), dropletRadius, distToCenter));
   const dir = cellLocal.sub(dropletCenter);
   // Per real reference photo — "distortion of the environment through the
   // center... not glowing rings": this refraction-like sample offset is
   // the PRIMARY visual carrier of the whole effect. Pulls the sample
   // toward the droplet's own center, the real optical effect of light
-  // bending through a curved water droplet.
-  const distortAmount = inDroplet.mul(dropletPresent).mul(0.06).mul(lensIntensityUniform);
+  // bending through a curved water droplet. Scaled by the droplet's own
+  // radius now too — a real larger droplet bends light through a
+  // longer optical path and refracts more strongly than a tiny one.
+  const sizeFactor = dropletRadius.div(0.22); // normalized against the old fixed radius, so overall intensity tuning elsewhere stays roughly in the same ballpark
+  const distortAmount = inDroplet.mul(dropletPresent).mul(0.06).mul(sizeFactor).mul(lensIntensityUniform);
   // Per "wet trails as they slide down the lens" — a narrow vertical
   // streak in the same screen-space column as each droplet, extending
   // toward increasing cellUV.y (the same direction the whole pattern
@@ -1023,10 +1058,16 @@ const lensDistortedOutput = Fn(() => {
   // out with distance from the droplet, so it reads as a thin residual
   // streak rather than a second droplet.
   const trailXDist = abs(cellLocal.x.sub(dropletCenter.x));
-  const belowDroplet = smoothstep(zero, float(0.03), cellLocal.y.sub(dropletCenter.y));
-  const trailFade = one.sub(clamp(cellLocal.y.sub(dropletCenter.y), zero, one));
-  const trailMask = smoothstep(float(0.035), float(0.01), trailXDist).mul(belowDroplet).mul(trailFade).mul(dropletPresent);
-  const trailDistort = trailMask.mul(0.015).mul(lensIntensityUniform);
+  // Trail direction flipped to match the drift flip above — stays
+  // "behind" the droplet's actual now-reversed visible motion instead of
+  // now pointing the wrong way. Width now scales with the droplet's own
+  // size too — a real larger drop leaves a wider, more visible wet trail
+  // than a tiny one.
+  const belowDroplet = smoothstep(zero, float(0.03), dropletCenter.y.sub(cellLocal.y));
+  const trailFade = one.sub(clamp(dropletCenter.y.sub(cellLocal.y), zero, one));
+  const trailWidth = dropletRadius.mul(0.16);
+  const trailMask = smoothstep(trailWidth, trailWidth.mul(0.3), trailXDist).mul(belowDroplet).mul(trailFade).mul(dropletPresent);
+  const trailDistort = trailMask.mul(0.015).mul(sizeFactor).mul(lensIntensityUniform);
   const totalDistortY = distortAmount.mul(dir.y).add(trailDistort);
   const totalDistortX = distortAmount.mul(dir.x);
   // No manual Y-flip here (unlike the first, now-abandoned version) —
@@ -1041,10 +1082,12 @@ const lensDistortedOutput = Fn(() => {
   // from the droplet's own center (the classic look of a light source
   // reflecting off one side of a curved sphere), not a bright ring
   // tracing the whole edge — real droplets show one modest bright spot,
-  // not a glowing halo.
-  const highlightPos = dropletCenter.add(vec2(-0.07, -0.07));
+  // not a glowing halo. Offset and size now scale with the droplet's own
+  // radius — a bigger droplet's highlight sits proportionally further
+  // from center and covers more area than a tiny droplet's would.
+  const highlightPos = dropletCenter.add(vec2(-0.32, -0.32).mul(dropletRadius));
   const highlightDist = cellLocal.sub(highlightPos).length();
-  const highlight = smoothstep(float(0.09), zero, highlightDist).mul(gated);
+  const highlight = smoothstep(dropletRadius.mul(0.4), zero, highlightDist).mul(gated);
   // Real sun-glint boost — per the existing, already-worked-out
   // "only glow when reflecting sunlight" design (see the JS-side
   // sun-screen-position projection this reads from) — droplets near

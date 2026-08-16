@@ -5,7 +5,7 @@ import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERF
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
 import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, createUnderwaterLightShaft, updateLightShafts, disposeLightShafts, createRockCluster, createCaveMouth, applyVerticalGradient } from "./decorations.js";
-import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, updateFluidSimWater, createFoamParticles, updateFoamParticles, disposeFoamParticles, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail } from "./liquid.js";
+import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, updateFluidSimWater, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail } from "./liquid.js";
 import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
 import { createGrass, updateGrass, disposeGrass, createFlowers, updateFlowers, disposeFlowers, createFootstepGlowSystem, spawnFootstepGlow, updateFootstepGlowSystem, disposeFootstepGlowSystem } from "./vegetation.js";
@@ -1408,7 +1408,6 @@ let realPlants = [];
 let realFishSchools = [];
 let waterfallHandle = null;
 let oceanSurfaceDetailHandle = null;
-let foamParticlesHandle = null;
 let riverCurrentHandle = null;
 let riverFlowStripHandle = null;
 let cliffWallHandle = null;
@@ -1495,8 +1494,6 @@ function teardownLevel() {
   waterfallHandle = null;
   disposeOceanSurfaceDetail(scene, oceanSurfaceDetailHandle);
   oceanSurfaceDetailHandle = null;
-  disposeFoamParticles(scene, foamParticlesHandle);
-  foamParticlesHandle = null;
   disposeRiverCurrent(scene, riverCurrentHandle);
   riverCurrentHandle = null;
   disposeRiverFlowStrip(scene, riverFlowStripHandle);
@@ -2554,11 +2551,13 @@ vec2 causticVoronoiF1F2(vec2 p) {
 
   if (level.biome === "crystal") {
     oceanSurfaceDetailHandle = createOceanSurfaceDetail(scene, LIQUID_LEVEL.crystal, TERRAIN_SIZE);
-    // Real GPU-compute foam particles — per explicit "add real foam
-    // particles... using webgpu". Same waterPlaneSize used for the water
-    // plane itself, and the same real terrain sampler, so the shore points
-    // this walks match the actual coastline the water plane sits against.
-    foamParticlesHandle = createFoamParticles(scene, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), LIQUID_LEVEL.crystal, 2000); // 2000 matches waterPlaneSize's own crystal-specific value above (out of scope here) — see that block's comment for why crystal's plane is sized differently from other biomes
+    // Real GPU-compute foam particles — REMOVED per explicit "remove
+    // those big white balls that you called foam." The vertex-based
+    // foam sheet on the water surface itself (see liquid.js's
+    // buildWaterMaterial emissiveNode) is now the sole foam system.
+    // createFoamParticles/updateFoamParticles/disposeFoamParticles stay
+    // defined and exported in liquid.js (unused, not deleted) in case a
+    // scattered-bubble accent is wanted again later on top of the sheet.
 
     // Real GLB models (models.js) — per explicit request, replacing
     // nothing that currently exists (dry-land decorations here were
@@ -4584,14 +4583,9 @@ function animate() {
   if (liquidHandle && liquidHandle.fluidSim) updateFluidSimWater(liquidHandle, renderer, elapsedTime);
   updateWaterfall(waterfallHandle, dt, elapsedTime);
   updateOceanSurfaceDetail(oceanSurfaceDetailHandle, elapsedTime, dayNight.dayAmount);
-  // Real GPU compute foam particles — separate from updateFluidSimWater
-  // above (foam particles run regardless of whether CRYSTAL_FLUID_SIM_ENABLED
-  // is on, since they're their own independent system layered on top of
-  // whichever water surface — Gerstner or fluid-sim — is currently active).
-  // Uses the real per-frame `dt` already computed for updateWaterfall just
-  // above, not elapsedTime — particle integration needs an actual frame
-  // delta, not a running total.
-  if (foamParticlesHandle) updateFoamParticles(foamParticlesHandle, renderer, dt);
+  // Foam particle update call REMOVED per explicit "remove those big
+  // white balls that you called foam" — see foamParticlesHandle's own
+  // removal comment near where it used to be created.
   // Real GPU compute rain — always updates regardless of biome/level (see
   // its own creation comment for why), reading the already-computed
   // weatherHandle.rainIntensity purely to scale visibility.

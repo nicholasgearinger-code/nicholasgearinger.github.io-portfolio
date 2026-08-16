@@ -2158,7 +2158,19 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
         // what gives a genuine "instant rise, slow fade" shape — real
         // foam froths up fast when a crest breaks, then lingers and
         // drains away gradually, not a symmetric ease in/out.
-        const persistedFoam = Math.max(disturbance, (foamAccum[i] || 0) * foamDecayFactor);
+        // Per "foam looks applied to the whole ocean instead of just
+        // when it washes on shore" — real bug: `disturbance` (below,
+        // unchanged) is purely wave-crest-height-based, which is high at
+        // crests EVERYWHERE across the open ocean, not something that
+        // was ever shore-specific on its own. shoreProximity uses the
+        // SAME shoreDamp array already computed above for the swash
+        // zone (0 right at the shoreline, ramping up to 1 in deep
+        // water) — inverted here, since that convention is the opposite
+        // of what foam coverage needs — to gate foam down to near-zero
+        // once a vertex is genuinely out in open water, regardless of
+        // how tall its own wave crest happens to be.
+        const shoreProximity = handle.shoreDamp ? 1 - handle.shoreDamp[i] : 0;
+        const persistedFoam = Math.max(disturbance, (foamAccum[i] || 0) * foamDecayFactor) * shoreProximity;
         foamAccum[i] = persistedFoam;
         foamAttr.setX(i, persistedFoam); // shaped signal now (still smoothstepped/threshold-masked further in the fragment shader on top of this)
       } else {

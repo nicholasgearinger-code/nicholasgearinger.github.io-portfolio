@@ -4,7 +4,7 @@ import {
   uniform, vec3, vec2, color, positionLocal, mix, clamp,
   min, max, attribute, time, sin, fract, floor, dot, cross,
   pow, positionWorld, cameraPosition, normalWorld, reflect,
-  uniformArray, texture, uv, modelViewMatrix, cameraProjectionMatrix, hash, smoothstep as tslSmoothstep,
+  uniformArray, texture, uv, modelViewMatrix, cameraProjectionMatrix, hash, smoothstep as tslSmoothstep, vertexColor,
 } from "three/tsl";
 import { getGraphicsSettings } from "./graphicsSettings.js";
 
@@ -1600,7 +1600,19 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
       // assumption, this wires the SAME attribute in explicitly via
       // colorNode — an INPUT to the PBR lighting model (not a final
       // output override), so normal light response is unaffected.
-      m.colorNode = attribute("color");
+      // Per "still looking wrong... uniform gray/white" persisting even
+      // after wiring attribute("color") explicitly — that fix was
+      // real but incomplete: confirmed via Three.js's own TSL docs that
+      // VertexColorNode is a DISTINCT class from a generic AttributeNode
+      // (extends it, doesn't just alias it), meaning the dedicated
+      // vertexColor() TSL function very likely handles something a
+      // generic attribute("color") read skips — most plausibly sRGB-to-
+      // linear color-space conversion, standard for color data feeding a
+      // PBR pipeline, which would explain an overbright/washed-out
+      // result if skipped. aFoam (below) is a plain scalar, not a color,
+      // so it doesn't have this same category of concern — only the
+      // base color read needed correcting.
+      m.colorNode = vertexColor();
       m.emissiveNode = Fn(() => {
         const rawFoam = clamp(attribute("aFoam"), 0, 1);
         // Smoothstep threshold (not a hard cutoff) — the reference photo

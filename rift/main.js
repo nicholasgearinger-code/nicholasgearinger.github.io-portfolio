@@ -1020,7 +1020,7 @@ const lensDistortedOutput = Fn(() => {
   // stay fully within their own cell rather than visibly clipping
   // against a neighbor's.
   const sizeRand = hash(seed.add(113.0));
-  const dropletRadius = mix(float(0.09), float(0.34), pow(sizeRand, 2.2));
+  const dropletRadius = mix(float(0.09), float(0.34), pow(sizeRand, float(2.2)));
   const distToCenterRaw = cellLocal.sub(dropletCenter).length();
   // Per explicit "change shape organically like water" — real droplets
   // are never perfect circles. A second, higher-frequency hash-cell

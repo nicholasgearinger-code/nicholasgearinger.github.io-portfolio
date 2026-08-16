@@ -1627,6 +1627,29 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
       // so it doesn't have this same category of concern — only the
       // base color read needed correcting.
       m.colorNode = vertexColor();
+      // Real underwater caustic lighting — per explicit "the underwater
+      // caustic lighting from the prototype." The original lived inside
+      // the same dead onBeforeCompile block removed a few rounds back
+      // during the foam cleanup (its own comment described a Voronoi
+      // F1/F2 feature-point technique — "nearest + second-nearest
+      // feature point... traces thin lines along cell boundaries rather
+      // than filled blobs"), applied to the water's own surface, not the
+      // seafloor (terrain.js, not available this session, is where a
+      // true seafloor-projected version would need to live instead).
+      // Rebuilt here using the SAME hash-cell technique already proven
+      // working in this project for the lens droplet effect — two
+      // overlapping grids at different scale/speed/rotation, each
+      // producing a bright dot near one jittered point per cell, taking
+      // the max of both layers (not multiplying — multiplying two sparse
+      // independent patterns would only light up where both happen to
+      // coincide, far too rare; max gives the continuous, interlocking
+      // web of light real overlapping ripples actually focus into).
+      // causticIntensityUniform is set each frame in updateLiquidPlane
+      // from dayAmount*(1-stormAmount) — caustics need real direct
+      // sunlight and fade out both at night and during storms, matching
+      // the original prototype's own intent (its uDayAmount gating).
+      const causticTimeUniform = uniform(0);
+      const causticIntensityUniform = uniform(0);
       m.emissiveNode = Fn(() => {
         const rawFoam = clamp(foamBuffer.toAttribute(), 0, 1);
         // Smoothstep threshold (not a hard cutoff) — the reference photo
@@ -1644,8 +1667,35 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
         // than fully gating it — avoids the texture's own tile edges
         // ever reading as a hard boundary.
         const foamCoverage = foamMask.mul(mix(float(0.55), float(1.0), detail.r));
-        return color(0xf0f8ff).mul(foamCoverage).mul(1.4);
+        const foamGlow = color(0xf0f8ff).mul(foamCoverage).mul(1.4);
+
+        const causticUV1 = positionWorld.xz.mul(0.4).add(vec2(causticTimeUniform.mul(0.15), causticTimeUniform.mul(0.09)));
+        const causticCell1 = fract(causticUV1);
+        const causticId1 = floor(causticUV1);
+        const seed1 = causticId1.x.add(causticId1.y.mul(57.0));
+        const jitter1 = vec2(hash(seed1), hash(seed1.add(31.0)));
+        const dist1 = causticCell1.sub(jitter1).length();
+        const pattern1 = tslSmoothstep(float(0.28), float(0.0), dist1);
+
+        // Second layer — different scale, opposing drift direction, and
+        // a distinct hash seed offset so its jitter points don't align
+        // with layer 1's — real interfering ripple caustics never repeat
+        // the same lattice twice.
+        const causticUV2 = positionWorld.xz.mul(0.55).add(vec2(causticTimeUniform.mul(-0.11), causticTimeUniform.mul(0.14)));
+        const causticCell2 = fract(causticUV2);
+        const causticId2 = floor(causticUV2);
+        const seed2 = causticId2.x.add(causticId2.y.mul(91.0)).add(7.0);
+        const jitter2 = vec2(hash(seed2), hash(seed2.add(53.0)));
+        const dist2 = causticCell2.sub(jitter2).length();
+        const pattern2 = tslSmoothstep(float(0.28), float(0.0), dist2);
+
+        const causticPattern = max(pattern1, pattern2);
+        const causticGlow = color(0xfff8e0).mul(causticPattern).mul(causticIntensityUniform).mul(0.6);
+
+        return foamGlow.add(causticGlow);
       })();
+      m.userData.causticTimeUniform = causticTimeUniform;
+      m.userData.causticIntensityUniform = causticIntensityUniform;
     }
     return m;
   }
@@ -1843,6 +1893,27 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
     if (resolution) backMesh.material.userData.shader.uniforms.uResolution.value.copy(resolution);
     backMesh.material.userData.shader.uniforms.uDayAmount.value = dayAmount;
     backMesh.material.userData.shader.uniforms.uOceanEffectsEnabled.value = getGraphicsSettings().oceanEffectsEnabled ? 1 : 0;
+  }
+  // Real caustic lighting — per explicit "underwater caustic lighting
+  // from the prototype." causticIntensity: real caustics need direct
+  // sunlight and shouldn't show at night or during a storm — same
+  // dayAmount*(1-stormAmount) "clarity" concept already established
+  // elsewhere in this project for underwater rendering, applied here.
+  // Respects the Ocean FX graphics setting the same way the reflection/
+  // refraction uniforms above do.
+  // Per finding a real, dedicated "Caustics" graphics toggle (distinct
+  // from the broader oceanEffectsEnabled) while building the seafloor's
+  // own caustics in main.js — realigned here too, so both caustic
+  // systems respect the same, more specific setting instead of this one
+  // reading a broader flag than the terrain version does.
+  const causticIntensity = getGraphicsSettings().causticsEnabled !== false ? dayAmount * (1 - stormAmount) : 0;
+  if (mesh.material.userData.causticTimeUniform) {
+    mesh.material.userData.causticTimeUniform.value = elapsed;
+    mesh.material.userData.causticIntensityUniform.value = causticIntensity;
+  }
+  if (backMesh && backMesh.material.userData.causticTimeUniform) {
+    backMesh.material.userData.causticTimeUniform.value = elapsed;
+    backMesh.material.userData.causticIntensityUniform.value = causticIntensity;
   }
   // Scroll the ripple normal map slowly along the plane's own flow
   // direction — a static (non-scrolling) normal map would still add real

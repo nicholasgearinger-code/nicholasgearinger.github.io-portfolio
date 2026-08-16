@@ -227,7 +227,18 @@ const OVERRIDES_STORAGE_KEY = "riftGraphicsOverrides";
 // every existing toggle off, these five are very likely the actual
 // remaining bottleneck, since nothing was previously able to touch them
 // short of switching the whole tier.
-const OVERRIDABLE_KEYS = ["shadowsEnabled", "ssaoEnabled", "oceanEffectsEnabled", "reflectionEnabled", "causticsEnabled", "foamEnabled", "bloomLevel", "aaMethod", "toneMapping", "pixelRatioCap", "grassMultiplier", "particleMultiplier", "cloudMultiplier", "wildlifeMultiplier", "seaLifeMultiplier"];
+// lensEffectEnabled added per "the lens FX button says enabled but it's
+// off" — the real, confirmed bug: main.js's graphics panel button was
+// built to control this key, but the key itself was never added here,
+// so setOverride() was silently rejecting every click (its own key
+// !== false check at the top returns false immediately for any
+// unlisted key) — the button's displayed on/off state was always just
+// the unregistered-key default, never actually reflecting or applying
+// what the person clicked. Same pattern as causticsEnabled/foamEnabled/
+// reflectionEnabled just above — whitelisted here without an explicit
+// per-tier value, relying on the same undefined-defaults-to-on
+// convention already established for those.
+const OVERRIDABLE_KEYS = ["shadowsEnabled", "ssaoEnabled", "oceanEffectsEnabled", "reflectionEnabled", "causticsEnabled", "foamEnabled", "lensEffectEnabled", "bloomLevel", "aaMethod", "toneMapping", "pixelRatioCap", "grassMultiplier", "particleMultiplier", "cloudMultiplier", "wildlifeMultiplier", "seaLifeMultiplier"];
 let overrides = {};
 try {
   const saved = localStorage.getItem(OVERRIDES_STORAGE_KEY);

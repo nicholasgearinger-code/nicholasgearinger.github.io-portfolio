@@ -1588,6 +1588,19 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
       ? new THREE.MeshStandardNodeMaterial({ ...options, envMapIntensity: 1.7 })
       : new THREE.MeshStandardMaterial(options);
     if (biome === "crystal") {
+      // Per "still looking wrong... uniform gray/white" — a real
+      // regression from the MeshPhysicalMaterial -> MeshStandardNodeMaterial
+      // switch, not a foam-coverage issue: the water's actual blue/depth
+      // coloring comes entirely from the per-vertex "color" attribute
+      // (colorAttr, written every frame in updateLiquidPlane), driven by
+      // the classic `vertexColors: true` constructor option — genuinely
+      // uncertain whether NodeMaterial variants honor that flag the same
+      // automatic way classic materials do (couldn't confirm either way
+      // from documentation), so rather than keep trusting an unverified
+      // assumption, this wires the SAME attribute in explicitly via
+      // colorNode — an INPUT to the PBR lighting model (not a final
+      // output override), so normal light response is unaffected.
+      m.colorNode = attribute("color");
       m.emissiveNode = Fn(() => {
         const rawFoam = clamp(attribute("aFoam"), 0, 1);
         // Smoothstep threshold (not a hard cutoff) — the reference photo

@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { Fn, instanceIndex, instancedArray, hash, uniform, vec3, vec2, vec4, float, uint, If, texture, uv, floor, fract, smoothstep, clamp, abs, pass } from "three/tsl";
+import { Fn, instanceIndex, instancedArray, hash, uniform, vec3, vec2, vec4, float, uint, If, texture, uv, floor, fract, smoothstep, clamp, abs, pass, color, positionWorld, max as tslMax, min as tslMin, vertexColor, normalWorld, sin, cos, dot } from "three/tsl";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
 import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH, POND_Z, POND_RADIUS, POND_LEVEL, RAMP_CENTER_X, RAMP_CENTER_Z, RAMP_LENGTH, RAMP_HALF_WIDTH, ROOM_FLOOR_Y, ROOM_WIDTH, ROOM_LENGTH, BRANCH_START_X, BRANCH_LENGTH, BRANCH_HALF_WIDTH, BRANCH_Z, CHAMBER_RADIUS } from "./terrain.js";
 import { LEVELS, generateLevelLayout } from "./levels.js";
@@ -2165,7 +2165,8 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
   // are worth deliberately rebuilding on top of THIS material later.
   const USE_SIMPLE_TERRAIN_MATERIAL = level.biome === "crystal";
   if (USE_SIMPLE_TERRAIN_MATERIAL) {
-    const simpleTerrainMat = new THREE.MeshStandardMaterial({
+    const seafloorColorTex = getSeafloorSandColorTexture();
+    const simpleTerrainMat = new THREE.MeshStandardNodeMaterial({
       vertexColors: true,
       roughness: 0.9,
       metalness: 0.05,
@@ -2175,13 +2176,177 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
       // surface a minimum visibility floor that doesn't fade with fog or
       // distance the way reflected light does, same as it always did.
       emissive: level.color, emissiveIntensity: 0.04,
-      map: getSeafloorSandColorTexture(),
+      map: seafloorColorTex,
       normalMap: getSeafloorSandNormalTexture(),
       roughnessMap: getSeafloorSandRoughnessTexture(),
     });
     simpleTerrainMat.map.repeat.set(Math.max(6, Math.round(TERRAIN_SIZE / 6)), Math.max(6, Math.round(TERRAIN_SIZE / 6)));
     simpleTerrainMat.normalMap.repeat.copy(simpleTerrainMat.map.repeat);
     simpleTerrainMat.roughnessMap.repeat.copy(simpleTerrainMat.map.repeat);
+    // Per "I want this on the seafloor as it's light reflecting and
+    // refracting through the water" — switched to MeshStandardNodeMaterial
+    // (from MeshStandardMaterial) specifically to add real TSL caustics
+    // below. Same real regression already found and fixed once this
+    // session for the water material: vertexColors:true is genuinely
+    // uncertain to be honored automatically by NodeMaterial variants the
+    // same way classic materials do, so colorNode is wired explicitly
+    // here too — but UNLIKE the water fix, this material also has a real
+    // `map` texture meant to MULTIPLY against vertex colors (per this
+    // file's own earlier comment on terrainMat: "map MULTIPLIES against
+    // vertexColors — three.js's standard behavior when both are set").
+    // Naively copying the water's plain `vertexColor()` fix here would
+    // have silently dropped the sand detail texture entirely — this
+    // explicitly reproduces the multiply instead of assuming it still
+    // happens automatically.
+    simpleTerrainMat.colorNode = vertexColor().mul(texture(seafloorColorTex, uv()));
+    // Real seafloor caustics — per explicit request, replacing the OLD
+    // onBeforeCompile version (raw GLSL, WebGPU-incompatible, already
+    // disabled — see this block's own surrounding comments for the full
+    // "honeycomb artifact" history). Reuses the EXACT SAME hash-cell
+    // Voronoi-style technique already proven working this session for
+    // the water surface's own caustics (liquid.js) — two overlapping
+    // layers at different scale/drift, max'd together (not multiplied —
+    // multiplying two independent sparse patterns would only light up
+    // where both coincide, far too rare). Deliberately fragment-only
+    // (emissiveNode, purely additive) — per this file's own explicit
+    // warning that vertex displacement combined with per-fragment normal
+    // recompute was the likely cause of an earlier, never-fully-
+    // diagnosed "honeycomb" artifact; this touches no geometry at all.
+    const terrainCausticTimeUniform = uniform(0);
+    const terrainCausticIntensityUniform = uniform(0);
+    // Real sun/moon focus position (world XZ, blended by day/night
+    // dominance) and cloud-occlusion-aware brightness — per explicit
+    // "real simulated light... interacting with the waves dynamically
+    // from the sun and moon." Both fed each frame from the SAME
+    // already-computed, already-working logic the old dead shader used
+    // to read (see the animate loop further below) — not reinvented.
+    const terrainCausticFocusXZUniform = uniform(vec2(0, 0));
+    const terrainCausticFocusRadiusUniform = uniform(22.0);
+    const terrainCausticSunGlowUniform = uniform(1.0);
+    simpleTerrainMat.emissiveNode = Fn(() => {
+      // Per explicit "using what we wrote in the prototype" — ported
+      // from the old (still-present, safely disabled via
+      // CAUSTICS_ENABLED=false below) onBeforeCompile block's real
+      // design: two ANIMATED SAMPLES of a real caustic pattern texture
+      // (causticPatternTexture — a real user-supplied image, not
+      // procedural noise), combined with min() rather than max(). This
+      // is the key insight the old design already worked out and my
+      // first pass here missed: min() of two INDEPENDENT drifting
+      // samples only stays bright where BOTH happen to align, which
+      // naturally produces the thin, sharp, interconnected light-lines
+      // real caustics show — max() (what the first version used)
+      // instead makes broad overlapping blobs, much softer and less
+      // realistic. A second, larger-scale/slower "secondary net" layers
+      // in underneath at reduced strength (via max, not min — a
+      // background layer meant to show through the primary net's gaps,
+      // not compete with it), same as the prototype.
+      //
+      // Per explicit "real simulated light reflecting and refracting
+      // through the water interacting with the waves dynamically from
+      // the sun and moon" — the two pieces flagged as follow-up scope
+      // last round are now both ported too: wave-synced drift speed
+      // (below) and the localized sun/moon focus zone (further down).
+      // Real Gerstner-synced wave height, sampled at this fragment's own
+      // world position — the SAME 10-wave spectrum and domain warp as
+      // the actual ocean surface (liquid.js's own generator), transcribed
+      // to TSL with EXACT numeric coefficients (not re-derived) so the
+      // caustic net's motion genuinely tracks the real waves overhead
+      // instead of just looking similar by coincidence. This is real,
+      // substantial trigonometry — first use of TSL sin/cos/dot in this
+      // project — kept as plain inline math (not a separate parameterized
+      // Fn(), whose exact multi-argument syntax isn't independently
+      // confirmed) specifically to avoid stacking a second class of new,
+      // unverified API risk on top of this one.
+      const t = terrainCausticTimeUniform;
+      const dwWx = sin(positionWorld.x.mul(0.016).add(positionWorld.z.mul(0.009)).add(t.mul(0.05))).mul(16.0)
+        .add(sin(positionWorld.x.mul(0.006).sub(positionWorld.z.mul(0.011)).sub(t.mul(0.02))).mul(9.0));
+      const dwWz = cos(positionWorld.x.mul(0.011).sub(positionWorld.z.mul(0.014)).add(t.mul(0.04))).mul(16.0)
+        .add(cos(positionWorld.x.mul(0.008).add(positionWorld.z.mul(0.007)).sub(t.mul(0.018))).mul(9.0));
+      const warpedXZ = vec2(positionWorld.x.add(dwWx), positionWorld.z.add(dwWz));
+      // Small local helper — plain JS building TSL node expressions (not
+      // itself a new TSL API), just to keep the ten near-identical wave
+      // terms below correct and readable instead of ten hand-copied
+      // blocks.
+      const gerstnerTerm = (dirX, dirZ, freq, speed, amp) =>
+        sin(dot(vec2(dirX, dirZ), warpedXZ).mul(freq).sub(t.mul(speed))).mul(amp);
+      const waveH = gerstnerTerm(0.957826, 0.287348, 0.149600, 1.900000, 0.448603)
+        .add(gerstnerTerm(0.758192, 0.652032, 0.199142, 1.646785, 0.336999))
+        .add(gerstnerTerm(0.947277, -0.320417, 0.265092, 1.427317, 0.253161))
+        .add(gerstnerTerm(0.708455, 0.705756, 0.352883, 1.237097, 0.190179))
+        .add(gerstnerTerm(0.983218, 0.182437, 0.469747, 1.072228, 0.142866))
+        .add(gerstnerTerm(0.999147, -0.041303, 0.625312, 0.929331, 0.107324))
+        .add(gerstnerTerm(0.629256, 0.777198, 0.832396, 0.805478, 0.080624))
+        .add(gerstnerTerm(0.966708, -0.255883, 1.108060, 0.698131, 0.060566))
+        .add(gerstnerTerm(0.875590, 0.483054, 1.475016, 0.605091, 0.045498))
+        .add(gerstnerTerm(0.863805, 0.503827, 1.963495, 0.524450, 0.034179));
+      // 0 at trough, 1 at crest — 1.7/3.4 matches the real 10-wave
+      // spectrum's own total amplitude, same as the prototype.
+      const waveNorm = clamp(waveH.add(1.7).div(3.4), 0, 1);
+      // Real physics, not an arbitrary multiplier: for simple harmonic
+      // motion, vertical SPEED is highest at the zero-crossing (mid-
+      // height) and drops to zero at the crest/trough extremes — the
+      // derivative of sin is cos, which peaks exactly where sin crosses
+      // zero. Floored at 0.4 so the net never fully stops.
+      const waveSpeedFactor = float(0.4).add(float(1.0).sub(abs(waveNorm.sub(0.5)).mul(2.0)).mul(0.9));
+
+      const worldXZ = positionWorld.xz.mul(0.15);
+      const uv1 = worldXZ.add(vec2(t.mul(0.065), t.mul(0.03)).mul(waveSpeedFactor)).add(waveH.mul(0.05));
+      // Fixed rotation angles — precomputed as plain JS constants (not
+      // TSL trig calls) since these never change per-fragment; avoids
+      // relying on any uncertain TSL sin()/cos() node-method syntax for
+      // values that are really just two fixed numbers.
+      const rotCos = Math.cos(0.9), rotSin = Math.sin(0.9);
+      const uv2raw = worldXZ.mul(1.35).sub(vec2(t.mul(0.045), t.mul(0.07)).mul(waveSpeedFactor)).sub(waveH.mul(0.04));
+      const uv2 = vec2(
+        uv2raw.x.mul(rotCos).sub(uv2raw.y.mul(rotSin)),
+        uv2raw.x.mul(rotSin).add(uv2raw.y.mul(rotCos))
+      );
+      const s1 = texture(getCausticPatternTexture(), uv1).r;
+      const s2 = texture(getCausticPatternTexture(), uv2).r;
+      const netPrimary = clamp(tslMin(s1, s2).mul(1.7).sub(0.55), 0, 1);
+
+      const worldXZ2 = positionWorld.xz.mul(0.045);
+      const uv3 = worldXZ2.add(vec2(t.mul(-0.018), t.mul(0.026)).mul(waveSpeedFactor)).add(waveH.mul(0.02));
+      const rot2Cos = Math.cos(-1.4), rot2Sin = Math.sin(-1.4);
+      const uv4raw = worldXZ2.mul(1.6).sub(vec2(t.mul(0.012), t.mul(-0.02)).mul(waveSpeedFactor)).sub(waveH.mul(0.015));
+      const uv4 = vec2(
+        uv4raw.x.mul(rot2Cos).sub(uv4raw.y.mul(rot2Sin)),
+        uv4raw.x.mul(rot2Sin).add(uv4raw.y.mul(rot2Cos))
+      );
+      const s3 = texture(getCausticPatternTexture(), uv3).r;
+      const s4 = texture(getCausticPatternTexture(), uv4).r;
+      const netSecondary = clamp(tslMin(s3, s4).mul(1.6).sub(0.5), 0, 1);
+
+      const causticPattern = tslMax(netPrimary, netSecondary.mul(0.75));
+      // Gated to submerged, upward-facing sand only — dry island terrain
+      // and vertical rock faces stay untouched, matching the old (now-
+      // removed) block's own explicit intent. underwaterMask uses the
+      // real water level (LIQUID_LEVEL.crystal, already imported in this
+      // file) compared against this fragment's actual world Y — a real
+      // depth check, not an approximation. upwardMask uses the real
+      // surface normal — steep rock faces (low normalWorld.y) don't
+      // catch a focused caustic net the way a flat sandy bottom does.
+      const underwaterMask = smoothstep(float(0.5), float(-0.5), positionWorld.y.sub(float(LIQUID_LEVEL.crystal)));
+      const upwardMask = smoothstep(float(0.3), float(0.7), normalWorld.y);
+      // Real localized sun/moon focus — per explicit "interacting...
+      // dynamically from the sun and moon." terrainCausticFocusXZUniform
+      // is the real, already-blended sun-or-moon world XZ position (see
+      // the animate loop below) — light doesn't concentrate uniformly
+      // across the whole floor, it focuses roughly below wherever the
+      // dominant light source currently is. Floored at 0.15 outside the
+      // focus zone (real caustics elsewhere are dimmer, not literally
+      // invisible), same as the prototype.
+      const distFromFocus = positionWorld.xz.sub(terrainCausticFocusXZUniform).length();
+      const focusZone = float(1.0).sub(smoothstep(float(0.0), terrainCausticFocusRadiusUniform, distFromFocus));
+      const focusMask = float(0.15).add(focusZone.mul(0.85));
+      const finalCaustic = causticPattern.mul(underwaterMask).mul(upwardMask).mul(focusMask).mul(terrainCausticIntensityUniform).mul(terrainCausticSunGlowUniform);
+      return color(0xfff8e0).mul(finalCaustic).mul(0.85);
+    })();
+    simpleTerrainMat.userData.causticTimeUniform = terrainCausticTimeUniform;
+    simpleTerrainMat.userData.causticIntensityUniform = terrainCausticIntensityUniform;
+    simpleTerrainMat.userData.causticFocusXZUniform = terrainCausticFocusXZUniform;
+    simpleTerrainMat.userData.causticFocusRadiusUniform = terrainCausticFocusRadiusUniform;
+    simpleTerrainMat.userData.causticSunGlowUniform = terrainCausticSunGlowUniform;
     // NEW seafloor caustics, deliberately NOT a revival of terrainMat's old
     // onBeforeCompile block above (which is the one implicated in the
     // honeycomb saga — the pattern persisted even with THAT block's own
@@ -4523,6 +4688,21 @@ function animate() {
       terrainMesh.material.userData.shader.uniforms.uFoamEnabled.value = getGraphicsSettings().foamEnabled !== false ? 1.0 : 0.0;
     }
   }
+  // Real seafloor caustics (simpleTerrainMat's own TSL emissiveNode, see
+  // its build site above) — separate userData keys from the .shader
+  // block above (that one belongs to the OLD, still-dead onBeforeCompile
+  // path; this is the new, actually-active one). Uses the dedicated
+  // causticsEnabled graphics setting (found already referenced by the
+  // old dead code above, a real player-facing toggle distinct from the
+  // broader oceanEffectsEnabled) — same dayAmount*(1-rainIntensity)
+  // "clarity" concept as the water surface's own caustics.
+  if (terrainMesh && terrainMesh.material.userData.causticTimeUniform) {
+    terrainMesh.material.userData.causticTimeUniform.value = elapsedTime;
+    const terrainCausticIntensity = getGraphicsSettings().causticsEnabled !== false
+      ? dayNight.dayAmount * (1 - (weatherHandle ? weatherHandle.rainIntensity : 0))
+      : 0;
+    terrainMesh.material.userData.causticIntensityUniform.value = terrainCausticIntensity;
+  }
   // Real planar water reflection — Coral Shallows only, above-water only
   // (a reflection rendered from below the surface looking up would be
   // nonsensical for this same-plane technique). Computes the active
@@ -4984,6 +5164,12 @@ function animate() {
   if (terrainMesh && terrainMesh.material.userData.shader && terrainMesh.material.userData.shader.uniforms.uSunGlow) {
     terrainMesh.material.userData.shader.uniforms.uSunGlow.value = sunOcclusionForCaustics;
   }
+  // Real active path (the .shader check above belongs to the OLD, still-
+  // disabled onBeforeCompile block) — same sunOcclusionForCaustics value,
+  // now actually reaching the TSL caustic shader that's really running.
+  if (terrainMesh && terrainMesh.material.userData.causticSunGlowUniform) {
+    terrainMesh.material.userData.causticSunGlowUniform.value = sunOcclusionForCaustics;
+  }
   // Per explicit "light should light up at a certain place, not the
   // whole net" — the sun/moon's own world position is scaled for the sky
   // dome (ranges well past 100+ units), not a usable seafloor
@@ -4994,7 +5180,7 @@ function animate() {
   // still shifting position as the sun/moon's real angle changes through
   // the day, blended by dayNight.dayAmount the same way brightness/color
   // already blend between them elsewhere in this system.
-  if (terrainMesh && terrainMesh.material.userData.shader && terrainMesh.material.userData.shader.uniforms.uFocusXZ) {
+  if (terrainMesh && ((terrainMesh.material.userData.shader && terrainMesh.material.userData.shader.uniforms.uFocusXZ) || terrainMesh.material.userData.causticFocusXZUniform)) {
     const sunPos = dayNightCycle.sunBody.group.position;
     const moonPos = dayNightCycle.moonBody.group.position;
     const sunDirLen = Math.hypot(sunPos.x, sunPos.z) || 1;
@@ -5006,7 +5192,13 @@ function animate() {
     const moonFocusZ = camera.position.z + (moonPos.z / moonDirLen) * FOCUS_OFFSET;
     const focusX = THREE.MathUtils.lerp(moonFocusX, sunFocusX, dayNight.dayAmount);
     const focusZ = THREE.MathUtils.lerp(moonFocusZ, sunFocusZ, dayNight.dayAmount);
-    terrainMesh.material.userData.shader.uniforms.uFocusXZ.value.set(focusX, focusZ);
+    if (terrainMesh.material.userData.shader && terrainMesh.material.userData.shader.uniforms.uFocusXZ) {
+      terrainMesh.material.userData.shader.uniforms.uFocusXZ.value.set(focusX, focusZ);
+    }
+    // Real active path — same reasoning as the sunGlow block above.
+    if (terrainMesh.material.userData.causticFocusXZUniform) {
+      terrainMesh.material.userData.causticFocusXZUniform.value.set(focusX, focusZ);
+    }
   }
   // Per explicit "the sun should not be this bright during a storm" —
   // the dimming above only happens when the sun's sprite position

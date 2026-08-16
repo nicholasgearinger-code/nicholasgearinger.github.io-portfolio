@@ -2340,7 +2340,10 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
       const focusZone = float(1.0).sub(smoothstep(float(0.0), terrainCausticFocusRadiusUniform, distFromFocus));
       const focusMask = float(0.15).add(focusZone.mul(0.85));
       const finalCaustic = causticPattern.mul(underwaterMask).mul(upwardMask).mul(focusMask).mul(terrainCausticIntensityUniform).mul(terrainCausticSunGlowUniform);
-      return color(0xfff8e0).mul(finalCaustic).mul(0.85);
+      // Per "might be a little too strong" — pulled back from 0.85 to
+      // 0.55, a real, easily-reversible tuning number, not a structural
+      // change.
+      return color(0xfff8e0).mul(finalCaustic).mul(0.55);
     })();
     simpleTerrainMat.userData.causticTimeUniform = terrainCausticTimeUniform;
     simpleTerrainMat.userData.causticIntensityUniform = terrainCausticIntensityUniform;
@@ -5046,19 +5049,15 @@ function animate() {
   // entirely (not just zeroed) whenever there's nothing for it to show,
   // same reasoning as the bloom presets' "off" tier.
   //
-  // FORCED OFF AGAIN — per a real "GPUValidationError: Invalid
-  // CommandEncoder" appearing even with this effect confirmed inactive
-  // (see the final render call's own comment for the full story: it
-  // turned out to be postProcessing.render() itself being unstable as an
-  // every-frame direct-render replacement, not this shader). The render
-  // call has been reverted to plain renderer.render(scene, camera), so
-  // this flag is currently moot either way — kept explicit and off for
-  // honesty in the on-screen diagnostic below rather than leaving a
-  // stale "true" that no longer reflects what's actually happening.
-  const LENS_EFFECT_ENABLED = false;
+  // Per explicit "restore it and try again" — re-enabled now that the
+  // actual render path (postProcessing.render(), see the final render
+  // call) is also restored. See that call's own comment for why this is
+  // a real, reasoned attempt (root cause structurally addressed via the
+  // settings-require-reload fix) rather than blind repetition.
+  const LENS_EFFECT_ENABLED = true;
   const effectiveLensIntensity = Math.max(wind.rainIntensity, postSwimWetness);
   lensEffectActive = LENS_EFFECT_ENABLED && !isFullySubmerged && effectiveLensIntensity > 0.02 && getGraphicsSettings().oceanEffectsEnabled !== false;
-  lensDiagEl.textContent = "lens: " + (lensEffectActive ? "ON" : "off (disabled — see LENS_EFFECT_ENABLED)") + ", intensity=" + effectiveLensIntensity.toFixed(2) + ", rain=" + (weatherHandle ? weatherHandle.rainIntensity.toFixed(2) : "n/a") + ", wet=" + postSwimWetness.toFixed(2) + ", submerged=" + isFullySubmerged + ", oceanFX=" + (getGraphicsSettings().oceanEffectsEnabled !== false);
+  lensDiagEl.textContent = "lens: " + (lensEffectActive ? "ON" : "off") + ", intensity=" + effectiveLensIntensity.toFixed(2) + ", rain=" + (weatherHandle ? weatherHandle.rainIntensity.toFixed(2) : "n/a") + ", wet=" + postSwimWetness.toFixed(2) + ", submerged=" + isFullySubmerged + ", oceanFX=" + (getGraphicsSettings().oceanEffectsEnabled !== false);
   if (lensEffectActive) {
     lensTimeUniform.value = elapsedTime;
     lensIntensityUniform.value = effectiveLensIntensity;
@@ -5253,23 +5252,26 @@ function animate() {
     underwaterDistortionMaterial.uniforms.time.value = elapsedTime;
     renderer.render(underwaterQuadScene, underwaterQuadCamera);
   } else {
-    // Per real "GPUValidationError: Invalid CommandEncoder" appearing
-    // even with the lens effect confirmed OFF (lensEffectActive: false
-    // in the on-screen diagnostic) — triggered just by toggling an
-    // UNRELATED setting (shadows) — this is not a bug in the droplet
-    // shader at all. It means postProcessing.render() itself is
-    // unstable as an every-frame replacement for direct rendering
-    // whenever renderer state changes mid-session (shadows, resolution,
-    // graphics quality, etc.), in this Three.js version. The "ground/
-    // light flickers" report also turned out to persist with the lens
-    // effect off, confirming the same thing from a different angle. Both
-    // the earlier manual two-render() technique AND Three.js's own
-    // purpose-built PostProcessing API have now produced real device
-    // errors — reverting to the plain, proven-stable single render()
-    // call rather than keep experimenting live. postProcessing/
-    // lensDistortedOutput stay defined above (unused) for a future
-    // attempt, not deleted.
-    renderer.render(scene, camera);
+    // Per explicit "restore it and try again" — the root cause of the
+    // earlier "GPUValidationError: Invalid CommandEncoder" has since
+    // been structurally addressed: it traced to LIVE graphics-setting
+    // changes racing with postProcessing's internal state mid-session
+    // (shadows, tier switches, resolution). Every graphics setting now
+    // requires a page reload to actually apply (see applyGraphicsSettings
+    // and pendingSettingsReload elsewhere in this file) — nothing can
+    // trigger a live renderer state change while postProcessing.render()
+    // is active anymore, which is the specific condition that produced
+    // the crash. Real confidence this is safer now, not blind repetition
+    // of what failed before — but still genuinely unverified live, since
+    // this exact render path has never actually run successfully end to
+    // end. outputNode only gets reassigned (paying the real shader-
+    // recompile cost) on an actual on/off transition, not every frame.
+    if (lensEffectActive !== lastLensEffectActive) {
+      postProcessing.outputNode = lensEffectActive ? lensDistortedOutput : scenePass;
+      postProcessing.needsUpdate = true;
+      lastLensEffectActive = lensEffectActive;
+    }
+    postProcessing.render();
   }
 }
 requestAnimationFrame(animate);

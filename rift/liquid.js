@@ -1779,12 +1779,13 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
       // independent patterns would only light up where both happen to
       // coincide, far too rare; max gives the continuous, interlocking
       // web of light real overlapping ripples actually focus into).
-      // causticIntensityUniform is set each frame in updateLiquidPlane
-      // from dayAmount*(1-stormAmount) — caustics need real direct
-      // sunlight and fade out both at night and during storms, matching
-      // the original prototype's own intent (its uDayAmount gating).
-      const causticTimeUniform = uniform(0);
-      const causticIntensityUniform = uniform(0);
+      // Per explicit "remove the surface caustics system, we want just
+      // the seafloor" — this water-surface caustic glow (a hash-cell
+      // approximation built before terrain.js was available this
+      // session) is removed entirely. The real, more accurate seafloor
+      // version — built later using the actual prototype's texture-
+      // based min() technique and full wave-sync — lives in main.js's
+      // simpleTerrainMat and is unaffected by this removal.
       // Real, self-managed water-level reference for the foam signal
       // below — set once at creation (the base water Y never changes
       // during a level), not per-frame.
@@ -1857,29 +1858,6 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
         const foamCoverage = foamMask.mul(crestLines).mul(shoreProximity);
         const foamGlow = color(0xf0f8ff).mul(foamCoverage).mul(1.8);
 
-        const causticUV1 = positionWorld.xz.mul(0.4).add(vec2(causticTimeUniform.mul(0.15), causticTimeUniform.mul(0.09)));
-        const causticCell1 = fract(causticUV1);
-        const causticId1 = floor(causticUV1);
-        const seed1 = causticId1.x.add(causticId1.y.mul(57.0));
-        const jitter1 = vec2(hash(seed1), hash(seed1.add(31.0)));
-        const dist1 = causticCell1.sub(jitter1).length();
-        const pattern1 = tslSmoothstep(float(0.28), float(0.0), dist1);
-
-        // Second layer — different scale, opposing drift direction, and
-        // a distinct hash seed offset so its jitter points don't align
-        // with layer 1's — real interfering ripple caustics never repeat
-        // the same lattice twice.
-        const causticUV2 = positionWorld.xz.mul(0.55).add(vec2(causticTimeUniform.mul(-0.11), causticTimeUniform.mul(0.14)));
-        const causticCell2 = fract(causticUV2);
-        const causticId2 = floor(causticUV2);
-        const seed2 = causticId2.x.add(causticId2.y.mul(91.0)).add(7.0);
-        const jitter2 = vec2(hash(seed2), hash(seed2.add(53.0)));
-        const dist2 = causticCell2.sub(jitter2).length();
-        const pattern2 = tslSmoothstep(float(0.28), float(0.0), dist2);
-
-        const causticPattern = max(pattern1, pattern2);
-        const causticGlow = color(0xfff8e0).mul(causticPattern).mul(causticIntensityUniform).mul(0.6);
-
         // Real sun-glint specular sparkle — per "not seeing a lot of
         // actual waves going up and down": this was a real, significant
         // omission in the first version of this rebuild, not a distance/
@@ -1924,10 +1902,8 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
         // the same multiplier than the old razor-sharp one did).
         const sunGlint = color(0xfff4e0).mul(glintCore).mul(1.1);
 
-        return foamGlow.add(causticGlow).add(sunGlint);
+        return foamGlow.add(sunGlint);
       })();
-      m.userData.causticTimeUniform = causticTimeUniform;
-      m.userData.causticIntensityUniform = causticIntensityUniform;
     }
     return m;
   }
@@ -2126,27 +2102,11 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
     backMesh.material.userData.shader.uniforms.uDayAmount.value = dayAmount;
     backMesh.material.userData.shader.uniforms.uOceanEffectsEnabled.value = getGraphicsSettings().oceanEffectsEnabled ? 1 : 0;
   }
-  // Real caustic lighting — per explicit "underwater caustic lighting
-  // from the prototype." causticIntensity: real caustics need direct
-  // sunlight and shouldn't show at night or during a storm — same
-  // dayAmount*(1-stormAmount) "clarity" concept already established
-  // elsewhere in this project for underwater rendering, applied here.
-  // Respects the Ocean FX graphics setting the same way the reflection/
-  // refraction uniforms above do.
-  // Per finding a real, dedicated "Caustics" graphics toggle (distinct
-  // from the broader oceanEffectsEnabled) while building the seafloor's
-  // own caustics in main.js — realigned here too, so both caustic
-  // systems respect the same, more specific setting instead of this one
-  // reading a broader flag than the terrain version does.
-  const causticIntensity = getGraphicsSettings().causticsEnabled !== false ? dayAmount * (1 - stormAmount) : 0;
-  if (mesh.material.userData.causticTimeUniform) {
-    mesh.material.userData.causticTimeUniform.value = elapsed;
-    mesh.material.userData.causticIntensityUniform.value = causticIntensity;
-  }
-  if (backMesh && backMesh.material.userData.causticTimeUniform) {
-    backMesh.material.userData.causticTimeUniform.value = elapsed;
-    backMesh.material.userData.causticIntensityUniform.value = causticIntensity;
-  }
+  // Water-surface caustic uniform updates removed — per explicit "remove
+  // the surface caustics system, we want just the seafloor" (see
+  // buildWaterMaterial's own removal comment). The seafloor version in
+  // main.js's simpleTerrainMat has its own, separate update path and is
+  // unaffected.
   if (biome === "crystal") {
     // Real GPU-driven wave shape — per explicit "rebuild it... using the
     // best tool we have." position/normal/color/foam are now all real

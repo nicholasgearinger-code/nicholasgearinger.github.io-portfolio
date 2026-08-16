@@ -6,7 +6,7 @@ import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
 import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, createUnderwaterLightShaft, updateLightShafts, disposeLightShafts, createRockCluster, createCaveMouth, applyVerticalGradient } from "./decorations.js";
 import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, updateFluidSimWater, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail } from "./liquid.js";
-import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
+import { createDayNightCycle, updateDayNightCycle, CYCLE_SECONDS } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
 import { createGrass, updateGrass, disposeGrass, createFlowers, updateFlowers, disposeFlowers, createFootstepGlowSystem, spawnFootstepGlow, updateFootstepGlowSystem, disposeFootstepGlowSystem } from "./vegetation.js";
 import { createHorizonSilhouettes, updateHorizonSilhouettes, disposeHorizonSilhouettes } from "./horizonSilhouettes.js";
@@ -986,7 +986,11 @@ const lensDistortedOutput = Fn(() => {
   // already used for shore points/particle spawning elsewhere in this
   // project's TSL code, applied here in 2D screen space instead of 3D
   // world space.
-  const cellSize = float(6.0);
+  // Per real reference photo — the actual reference shows dense,
+  // heavily overlapping coverage across nearly the whole frame, not
+  // sparse scattered drops. Increased from 6.0 (more, smaller cells
+  // packed across the screen).
+  const cellSize = float(10.0);
   const zero = float(0);
   const one = float(1);
   // Slow downward drift, tied to the real self-managed time uniform — real
@@ -1010,7 +1014,10 @@ const lensDistortedOutput = Fn(() => {
   // — avoiding an API call not yet confirmed anywhere in this project,
   // when smoothstep already does the same job with functions already
   // proven working here) that's ~0 or ~1 per cell.
-  const dropletPresent = smoothstep(float(0.5), float(0.51), hash(seed.add(71.0)));
+  // Per real reference photo — most cells should show a droplet now,
+  // not roughly half (was 0.5/0.51 threshold, ~50% coverage; now
+  // ~80%), matching the real reference's dense, near-total coverage.
+  const dropletPresent = smoothstep(float(0.19), float(0.2), hash(seed.add(71.0)));
   // Per explicit "mix of large and small droplets" — per-cell randomized
   // radius instead of one fixed size. pow(x, 2.2) biases the
   // distribution toward smaller values (real rain-on-glass is mostly
@@ -1799,6 +1806,18 @@ function buildLevel(levelIdx) {
   // and persists across level switches, so its per-biome sky tint has to be
   // set here on each level load rather than passed once at construction.
   dayNightCycle.biome = level.biome;
+  // Per explicit "still need to be able to start the Biome levels in the
+  // Day not Night" — the earlier sunrise-start fix only set the INITIAL
+  // elapsed value at module load (dayNightCycle.js's own createDayNightCycle),
+  // which only actually applies to the very first page load. Since
+  // dayNightCycle persists across every level switch rather than being
+  // recreated, entering a second (or the same) level later in a session —
+  // after real time has passed and the cycle has moved on — was never
+  // actually reset to sunrise at all. Same exact derivation as before
+  // (t=0.26, just past the true elevation-crossing-positive sunrise
+  // point at t=0.25), reapplied here on every level entry instead of
+  // only once at boot.
+  dayNightCycle.elapsed = 0.26 * CYCLE_SECONDS;
 
   const terrainMat = new THREE.MeshStandardMaterial({
     vertexColors: true, flatShading: true, roughness: 0.9, metalness: 0.05,
@@ -3963,6 +3982,17 @@ if (graphicsBtn && graphicsPanel) {
     { key: "reflectionEnabled", label: "Reflections" },
     { key: "causticsEnabled", label: "Caustics" },
     { key: "foamEnabled", label: "Foam" },
+    // Per explicit "add a button specifically in graphics to turn off
+    // just the Lens effect, it's still not working" — a dedicated,
+    // real toggle given this system's own unreliable history this
+    // session (multiple real bugs, a full crash-and-restore cycle),
+    // rather than requiring a code edit every time it needs to be
+    // turned off. Uses the exact same generic override mechanism as
+    // every other toggle here — getEffectiveValue(key) !== false
+    // defaults an unregistered key to "on" (matching the current
+    // hardcoded default), so this works without needing graphicsSettings.js
+    // itself to pre-declare the key.
+    { key: "lensEffectEnabled", label: "Lens FX" },
   ];
   for (const { key, label } of EFFECT_TOGGLES) {
     const btn = document.createElement("button");
@@ -5097,7 +5127,12 @@ function animate() {
   // call) is also restored. See that call's own comment for why this is
   // a real, reasoned attempt (root cause structurally addressed via the
   // settings-require-reload fix) rather than blind repetition.
-  const LENS_EFFECT_ENABLED = true;
+  // Now reads the real "Lens FX" graphics toggle instead of a hardcoded
+  // constant, per explicit "add a button... to turn off just the Lens
+  // effect" — same requires-a-reload-to-apply behavior as every other
+  // graphics setting (this is only READ here, at the top of the frame,
+  // not something this per-frame code changes itself).
+  const LENS_EFFECT_ENABLED = getGraphicsSettings().lensEffectEnabled !== false;
   const effectiveLensIntensity = Math.max(wind.rainIntensity, postSwimWetness);
   lensEffectActive = LENS_EFFECT_ENABLED && !isFullySubmerged && effectiveLensIntensity > 0.02 && getGraphicsSettings().oceanEffectsEnabled !== false;
   lensDiagEl.textContent = "lens: " + (lensEffectActive ? "ON" : "off") + ", intensity=" + effectiveLensIntensity.toFixed(2) + ", rain=" + (weatherHandle ? weatherHandle.rainIntensity.toFixed(2) : "n/a") + ", wet=" + postSwimWetness.toFixed(2) + ", submerged=" + isFullySubmerged + ", oceanFX=" + (getGraphicsSettings().oceanEffectsEnabled !== false);

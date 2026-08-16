@@ -2,7 +2,7 @@ import * as THREE from "three";
 import {
   Fn, instanceIndex, instancedArray, float, uint, If,
   uniform, vec3, vec2, color, positionLocal, mix, clamp,
-  min, max, attribute, time, sin, fract, floor, dot, cross,
+  min, max, attribute, time, sin, cos, fract, floor, dot, cross,
   pow, positionWorld, cameraPosition, normalWorld, reflect,
   uniformArray, texture, uv, modelViewMatrix, cameraProjectionMatrix, hash, smoothstep as tslSmoothstep, vertexColor,
 } from "three/tsl";
@@ -243,6 +243,42 @@ const GERSTNER_WAVES = [...GERSTNER_WAVES_RAW, ...FAR_WAVES_RAW].map((w) => {
   return { ndx: w.dirX / len, ndz: w.dirZ / len, k: (Math.PI * 2) / w.wavelength, amplitude: w.amplitude, speed: w.speed, steepness: w.steepness };
 });
 const GERSTNER_AMPLITUDE_SUM = GERSTNER_WAVES.reduce((sum, w) => sum + w.amplitude, 0);
+// Real GPU-side (TSL) copy of the exact same 15-component spectrum above
+// (10 near + 5 far) — per explicit "rebuild it to look realistic using
+// the best tool we have." These are NOT re-derived/approximated: each
+// number was obtained by actually RUNNING the JS generator above (same
+// methodology already used once for the terrain caustics' own Gerstner
+// sync in main.js) and transcribing its real output, so the GPU-driven
+// wave shape is numerically identical to this file's own CPU spectrum,
+// not just visually similar. Every wave's steepness independently
+// verified to already be hitting its own safety cap (0.5, the max this
+// formula allows before self-intersecting loops become possible) — the
+// underlying math was already at its sharpest safe setting; the real
+// bottleneck was mesh resolution, capped by this exact computation
+// previously having to run per-vertex on the CPU every frame. Moving it
+// to a TSL positionNode (see buildWaterMaterial) removes that
+// bottleneck, since the SAME analytic (non-iterative, non-simulated —
+// still the stable closed-form Gerstner equation, not the earlier
+// abandoned fluid-sim's discretized wave equation) formula now
+// evaluates in parallel across however many vertices the mesh actually
+// has, instead of costing linear CPU time per vertex per frame.
+const GERSTNER_WAVES_TSL = [
+  { ndx: 0.957826, ndz: 0.287348, k: 0.1496, amplitude: 0.448603, speed: 1.9, steepness: 0.5 },
+  { ndx: 0.295404, ndz: 0.955372, k: 0.199142, amplitude: 0.336999, speed: 1.646785, steepness: 0.5 },
+  { ndx: 0.405755, ndz: -0.913982, k: 0.265092, amplitude: 0.253161, speed: 1.427317, steepness: 0.5 },
+  { ndx: 0.128265, ndz: 0.99174, k: 0.352883, amplitude: 0.190179, speed: 1.237097, steepness: 0.5 },
+  { ndx: 0.999244, ndz: 0.038884, k: 0.469747, amplitude: 0.142866, speed: 1.072228, steepness: 0.5 },
+  { ndx: 0.883834, ndz: -0.4678, k: 0.625312, amplitude: 0.107324, speed: 0.929331, steepness: 0.5 },
+  { ndx: -0.120653, ndz: 0.992695, k: 0.832396, amplitude: 0.080624, speed: 0.805478, steepness: 0.5 },
+  { ndx: 0.544216, ndz: -0.838945, k: 1.10806, amplitude: 0.060566, speed: 0.698131, steepness: 0.5 },
+  { ndx: 0.704654, ndz: 0.709551, k: 1.475016, amplitude: 0.045498, speed: 0.605091, steepness: 0.5 },
+  { ndx: 0.663943, ndz: 0.747783, k: 1.963495, amplitude: 0.034179, speed: 0.52445, steepness: 0.5 },
+  { ndx: 0.957826, ndz: 0.287348, k: 0.069813, amplitude: 0.411886, speed: 2.6, steepness: 0.5 },
+  { ndx: 0.295404, ndz: 0.955372, k: 0.096164, amplitude: 0.299021, speed: 2.215315, steepness: 0.5 },
+  { ndx: 0.405755, ndz: -0.913982, k: 0.132461, amplitude: 0.217083, speed: 1.887547, steepness: 0.5 },
+  { ndx: 0.128265, ndz: 0.99174, k: 0.182459, amplitude: 0.157598, speed: 1.608274, steepness: 0.5 },
+  { ndx: 0.999244, ndz: 0.038884, k: 0.251327, amplitude: 0.114413, speed: 1.37032, steepness: 0.5 },
+];
 
 // Domain warping — per explicit follow-up, this is what actually kills
 // the "I can recognize the same wave pattern repeating" tell cheaply,
@@ -1353,7 +1389,18 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
     return buildCrystalFluidSimPlane(scene, y, size, sampleHeight);
   }
 
-  const segs = getGraphicsSettings().liquidSegments; // reverted the earlier ×1.4 workaround — liquidSegments itself is now increased directly in graphicsSettings.js
+  // Per explicit "rebuild it... using the best tool we have" — crystal's
+  // wave shape now displaces on the GPU (positionNode, below), which
+  // removes the CPU-per-vertex-per-frame cost that previously capped
+  // this at getGraphicsSettings().liquidSegments (a shared, modest
+  // number tuned for CPU affordability across every biome). A GPU vertex
+  // shader evaluates the same analytic formula in parallel regardless of
+  // vertex count, so crystal specifically can afford far more detail —
+  // this is the actual fix for "barely moving, no breaking waves": the
+  // underlying Gerstner math was already correct and already at its
+  // safety-capped maximum steepness, but too few vertices to show it
+  // before this change.
+  const segs = biome === "crystal" ? 350 : getGraphicsSettings().liquidSegments;
   const geo = new THREE.PlaneGeometry(size, size, segs, segs);
   geo.rotateX(-Math.PI / 2);
 
@@ -1386,13 +1433,22 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
   // both tested live with zero visual difference) — this project has
   // exactly ONE mechanism actually PROVEN to correctly move CPU-written
   // per-frame data to a GPU shader read: instancedArray + plain
-  // .array[i] writes + .toAttribute() (confirmed working for rain and
-  // the now-removed foam particles). aFoam — a genuinely custom,
-  // non-standard attribute name, unlike "color" which now uses the
-  // documented, dedicated vertexColor() TSL function — switches to that
-  // proven mechanism here instead of continuing to trust the untested
-  // geo.setAttribute()/attribute("aFoam") pairing.
-  const foamBuffer = biome === "crystal" ? instancedArray(posAttr.count, "float") : null;
+  // .value.array[i] writes + .toAttribute() (confirmed working for rain
+  // and foam particles). shoreDampBuffer follows this same proven
+  // mechanism now — it's written ONCE here at creation (shore proximity
+  // is static, computed from real terrain depth, never changes frame to
+  // frame), not per-frame, so there's no ongoing CPU cost either way.
+  // foam is no longer a separate persistent buffer at all in this
+  // rebuild — the old "instant rise, slow fade" CPU-side persistence
+  // (foamAccum) is a genuinely nice quality this simplifies away in
+  // exchange for real GPU-computed, instantaneous wave-disturbance-based
+  // foam instead (see buildWaterMaterial's emissiveNode) — replicating
+  // true CROSS-FRAME persistence on the GPU would need a real stateful
+  // compute shader (write this frame's value, read next frame's), the
+  // same category of added complexity that caused the earlier fluid-sim
+  // wave system's own instability. A deliberate, flagged simplification,
+  // not a silent omission.
+  const shoreDampBuffer = biome === "crystal" ? instancedArray(posAttr.count, "float") : null;
   const colors = new Float32Array(posAttr.count * 3);
   // Depth-based base color — Crystal only. Real oceans read lighter over
   // a shallow reef/shoreline and darker over open deep water; a single
@@ -1489,6 +1545,7 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
         swashDamp = SWASH_MAX_AMPLITUDE + eased * (1 - SWASH_MAX_AMPLITUDE);
       }
       shoreDamp[i] = swashDamp;
+      if (shoreDampBuffer) shoreDampBuffer.value.array[i] = swashDamp;
       tmpDepth.copy(shallow).lerp(deep, t);
       const distFromCenter = Math.hypot(vx, vz);
       const farT = THREE.MathUtils.clamp((distFromCenter - FAR_DARKEN_START) / (FAR_DARKEN_END - FAR_DARKEN_START), 0, 1);
@@ -1496,6 +1553,10 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
       tmpDepth.toArray(depthColors, i * 3);
       tmpDepth.toArray(colors, i * 3);
     }
+    // Written once, right here at creation — real shore proximity never
+    // changes frame to frame, so this needsUpdate call happens exactly
+    // once per level load, not every frame.
+    if (shoreDampBuffer) shoreDampBuffer.value.needsUpdate = true;
   } else {
     for (let i = 0; i < posAttr.count; i++) {
       style.baseColor.toArray(colors, i * 3);
@@ -1626,6 +1687,80 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
       // result if skipped. aFoam (below) is a plain scalar, not a color,
       // so it doesn't have this same category of concern — only the
       // base color read needed correcting.
+      // Real GPU-driven wave shape — per explicit "rebuild it to look
+      // realistic using the best tool we have." positionNode/normalNode
+      // below replace the CPU-side per-vertex Gerstner loop entirely for
+      // crystal — this is the actual fix for "barely moving, no breaking
+      // waves": the math itself (domain warp + 15-wave trochoidal sum,
+      // real horizontal+vertical displacement) is UNCHANGED and already
+      // correct; what changes is that it now evaluates in parallel on
+      // the GPU across a MUCH higher-resolution mesh (350 segments, up
+      // from whatever CPU-affordable count this ran at before — see
+      // createLiquidPlane), instead of costing linear CPU time per
+      // vertex per frame, which is what was actually smoothing away the
+      // already-correct sharp crests before they ever reached the
+      // screen. GERSTNER_WAVES_TSL (module-level, above) is the exact
+      // same 15-component spectrum this file's own CPU generator
+      // produces — obtained by actually running that generator, not
+      // re-derived — so wave SHAPE is unchanged, only where it's
+      // computed. waterTimeUniform is the same self-managed-uniform
+      // pattern already proven necessary throughout this project (TSL's
+      // built-in time is not reliably usable the way a naive read would
+      // assume), updated every frame in updateLiquidPlane below.
+      const waterTimeUniform = uniform(0);
+      const gerstnerDomainWarpTSL = (bx, bz, t) => {
+        const dwWx = sin(bx.mul(0.016).add(bz.mul(0.009)).add(t.mul(0.05))).mul(16.0)
+          .add(sin(bx.mul(0.006).sub(bz.mul(0.011)).sub(t.mul(0.02))).mul(9.0));
+        const dwWz = cos(bx.mul(0.011).sub(bz.mul(0.014)).add(t.mul(0.04))).mul(16.0)
+          .add(cos(bx.mul(0.008).add(bz.mul(0.007)).sub(t.mul(0.018))).mul(9.0));
+        return [bx.add(dwWx), bz.add(dwWz)];
+      };
+      m.positionNode = Fn(() => {
+        const t = waterTimeUniform;
+        const bx = positionLocal.x, bz = positionLocal.z;
+        const [wbx, wbz] = gerstnerDomainWarpTSL(bx, bz, t);
+        const shoreT = shoreDampBuffer.toAttribute();
+        let dx = float(0), dz = float(0), dy = float(0);
+        for (const w of GERSTNER_WAVES_TSL) {
+          const amp = shoreT.mul(w.amplitude);
+          const f = dot(vec2(w.ndx, w.ndz), vec2(wbx, wbz)).mul(w.k).sub(t.mul(w.speed));
+          const s = sin(f), c = cos(f);
+          dx = dx.add(c.mul(amp).mul(w.steepness * w.ndx));
+          dz = dz.add(c.mul(amp).mul(w.steepness * w.ndz));
+          dy = dy.add(s.mul(amp));
+        }
+        return vec3(positionLocal.x.add(dx), positionLocal.y.add(dy), positionLocal.z.add(dz));
+      })();
+      // Real analytic Gerstner normal — the exact same closed-form
+      // derivative-based formula the old CPU version used (not a
+      // geometric/triangle-derived approximation), evaluated
+      // independently here in its own Fn() rather than sharing node
+      // objects with positionNode above — a deliberate, conservative
+      // choice: reusing TSL node objects ACROSS separate material-
+      // property Fn() bodies isn't a pattern this project has verified,
+      // so this recomputes the same sum a second time instead of risking
+      // that uncertainty. The GPU cost of that duplication is real but
+      // minor compared to the risk of an unverified sharing pattern.
+      m.normalNode = Fn(() => {
+        const t = waterTimeUniform;
+        const bx = positionLocal.x, bz = positionLocal.z;
+        const [wbx, wbz] = gerstnerDomainWarpTSL(bx, bz, t);
+        const shoreT = shoreDampBuffer.toAttribute();
+        let nx = float(0), nz = float(0), nyTerm = float(0);
+        for (const w of GERSTNER_WAVES_TSL) {
+          const amp = shoreT.mul(w.amplitude);
+          const f = dot(vec2(w.ndx, w.ndz), vec2(wbx, wbz)).mul(w.k).sub(t.mul(w.speed));
+          const s = sin(f), c = cos(f);
+          const WA = amp.mul(w.k);
+          nx = nx.sub(WA.mul(c).mul(w.ndx));
+          nz = nz.sub(WA.mul(c).mul(w.ndz));
+          nyTerm = nyTerm.add(WA.mul(s).mul(w.steepness));
+        }
+        const ny = float(1).sub(nyTerm);
+        const nLen = vec3(nx, ny, nz).length();
+        return vec3(nx.div(nLen), ny.div(nLen), nz.div(nLen));
+      })();
+      m.userData.waterTimeUniform = waterTimeUniform;
       m.colorNode = vertexColor();
       // Real underwater caustic lighting — per explicit "the underwater
       // caustic lighting from the prototype." The original lived inside
@@ -1650,12 +1785,50 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
       // the original prototype's own intent (its uDayAmount gating).
       const causticTimeUniform = uniform(0);
       const causticIntensityUniform = uniform(0);
+      // Real, self-managed water-level reference for the foam signal
+      // below — set once at creation (the base water Y never changes
+      // during a level), not per-frame.
+      const waterLevelUniform = uniform(y);
+      // Real sun-direction uniform for the glint sparkle below — fed
+      // each frame in updateLiquidPlane from the REAL sunDir parameter
+      // that function already receives (main.js's actual sun position),
+      // same confirmed uniform(vec3(...)) + .value.copy() pattern already
+      // proven working for the rain particles' own camera-position
+      // uniform. Defaults to the same fallback direction the old
+      // (disabled) fluid-sim material used, in case a frame ever runs
+      // before the first real update.
+      const sunDirUniform = uniform(vec3(0.35, 0.3, -0.9));
+      m.userData.sunDirUniform = sunDirUniform;
       m.emissiveNode = Fn(() => {
-        const rawFoam = clamp(foamBuffer.toAttribute(), 0, 1);
+        // Real foam, derived directly from the GPU-displaced position —
+        // per the foamBuffer removal above, no longer a separate
+        // persistent CPU-written buffer. positionWorld.y already
+        // reflects the wave height AFTER positionNode's displacement
+        // (fragment interpolation happens downstream of vertex
+        // displacement), so this needs no separate wave-sum
+        // recomputation at all — genuinely the cheapest possible way to
+        // get a real, wave-synced foam signal. Same normalization shape
+        // as the old CPU disturbance value (clamped 0-1 across the
+        // spectrum's real total amplitude), just instantaneous rather
+        // than persisted frame-to-frame (see this file's own
+        // shoreDampBuffer comment for why persistence was deliberately
+        // dropped in this rebuild).
+        const waveHeight = positionWorld.y.sub(waterLevelUniform);
+        const rawFoam = clamp(waveHeight.add(GERSTNER_AMPLITUDE_SUM).div(GERSTNER_AMPLITUDE_SUM * 2), 0, 1);
         // Smoothstep threshold (not a hard cutoff) — the reference photo
         // shows foam with a soft, feathered edge fading into clear water,
         // not a sharp line.
         const foamMask = tslSmoothstep(0.15, 0.55, rawFoam);
+        // Per "foam looks applied to the whole ocean instead of just
+        // when it washes on shore" (a real bug already found and fixed
+        // once this session) — reapplied here so this rebuild doesn't
+        // silently reintroduce it. shoreDampBuffer is 0 at the shoreline
+        // and ramps to 1 in open water; inverted here since foam
+        // coverage needs the opposite shape (strong near shore, fading
+        // in open water) — same real shore-proximity data already
+        // driving the wave amplitude damping above, not a separate
+        // computation.
+        const shoreProximity = float(1).sub(shoreDampBuffer.toAttribute());
         // Real photo-derived foam detail (getFoamDetailTexture — already
         // loaded elsewhere in this file for the now-disabled
         // onBeforeCompile shader, reused here), tiled across world space
@@ -1666,7 +1839,7 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
         // Detail modulates coverage within an already-foamy area rather
         // than fully gating it — avoids the texture's own tile edges
         // ever reading as a hard boundary.
-        const foamCoverage = foamMask.mul(mix(float(0.55), float(1.0), detail.r));
+        const foamCoverage = foamMask.mul(mix(float(0.55), float(1.0), detail.r)).mul(shoreProximity);
         const foamGlow = color(0xf0f8ff).mul(foamCoverage).mul(1.4);
 
         const causticUV1 = positionWorld.xz.mul(0.4).add(vec2(causticTimeUniform.mul(0.15), causticTimeUniform.mul(0.09)));
@@ -1692,7 +1865,37 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
         const causticPattern = max(pattern1, pattern2);
         const causticGlow = color(0xfff8e0).mul(causticPattern).mul(causticIntensityUniform).mul(0.6);
 
-        return foamGlow.add(causticGlow);
+        // Real sun-glint specular sparkle — per "not seeing a lot of
+        // actual waves going up and down": this was a real, significant
+        // omission in the first version of this rebuild, not a distance/
+        // perspective illusion (confirmed via real frame-to-frame pixel
+        // diffing that the geometry IS moving, just without this — the
+        // strongest VISUAL CUE the old CPU version had for "the water is
+        // actively waving," since it's a bright, wave-crest-tracking
+        // highlight, not just a subtle base-color shift). normalWorld
+        // here reflects the REAL analytic normal from normalNode above
+        // (that's the whole purpose of overriding it) — trusted rather
+        // than recomputing the wave sum a third independent time.
+        // Manual length-based normalization throughout (not .normalize()
+        // as a node method — appears in this file's disabled fluid-sim
+        // code but was never actually live-tested, so not trusted here
+        // either, same reasoning as normalNode's own manual normalize).
+        const viewVec = cameraPosition.sub(positionWorld);
+        const viewDir = viewVec.div(viewVec.length());
+        const sunDirNorm = sunDirUniform.div(sunDirUniform.length());
+        const reflectDir = reflect(viewDir.negate(), normalWorld);
+        const sunAlign = clamp(dot(reflectDir, sunDirNorm), 0, 1);
+        // Sharper near crests, softer in troughs — reuses rawFoam
+        // (already computed above from the real wave-displaced position)
+        // as the crest-proximity signal, matching the old CPU version's
+        // own "steeper near crests" intent without a third independent
+        // wave-sum recomputation. 150 (soft, trough) to 450 (tight,
+        // crest) — same range as the original.
+        const glintExponent = float(150).add(rawFoam.mul(300));
+        const glintCore = pow(sunAlign, glintExponent);
+        const sunGlint = color(0xfff4e0).mul(glintCore).mul(1.8);
+
+        return foamGlow.add(causticGlow).add(sunGlint);
       })();
       m.userData.causticTimeUniform = causticTimeUniform;
       m.userData.causticIntensityUniform = causticIntensityUniform;
@@ -1842,7 +2045,7 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
 
   return {
     mesh, backMesh, glow, shimmer, rocks, waterY: y, basePositions, biome, style, depthColors, shoreDamp,
-    flowDir: normalizeFlow(flowDir), crustOctaves, crackOctaves, flowBeads, rippleTexture, foamAccum, foamBuffer,
+    flowDir: normalizeFlow(flowDir), crustOctaves, crackOctaves, flowBeads, rippleTexture, foamAccum, shoreDampBuffer,
     lastElapsed: undefined, // set on first updateLiquidPlane call — used to derive real per-frame dt for the foam decay above, since this function only receives cumulative elapsed time
   };
 }
@@ -1914,6 +2117,28 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
   if (backMesh && backMesh.material.userData.causticTimeUniform) {
     backMesh.material.userData.causticTimeUniform.value = elapsed;
     backMesh.material.userData.causticIntensityUniform.value = causticIntensity;
+  }
+  if (biome === "crystal") {
+    // Real GPU-driven wave shape — per explicit "rebuild it... using the
+    // best tool we have." position/normal/color/foam are now all real
+    // TSL nodes on the material (see buildWaterMaterial's
+    // positionNode/normalNode/colorNode/emissiveNode) — the CPU-side
+    // per-vertex loop further below (posAttr/colorAttr writes, the
+    // Gerstner sum, foam persistence, SSS/Fresnel/sun-glint) is now
+    // entirely dead for crystal, replaced by the GPU computation. The
+    // self-managed time and sun-direction uniforms still need updating
+    // here each frame — sunDir is the same real parameter this function
+    // already receives (main.js's actual sun position), not a new input.
+    // Returns before that loop runs at all — not just skipping crystal's
+    // OWN branch inside it, the whole per-vertex CPU cost this rebuild
+    // exists to eliminate.
+    if (mesh.material.userData.waterTimeUniform) mesh.material.userData.waterTimeUniform.value = elapsed;
+    if (backMesh && backMesh.material.userData.waterTimeUniform) backMesh.material.userData.waterTimeUniform.value = elapsed;
+    if (sunDir) {
+      if (mesh.material.userData.sunDirUniform) mesh.material.userData.sunDirUniform.value.copy(sunDir);
+      if (backMesh && backMesh.material.userData.sunDirUniform) backMesh.material.userData.sunDirUniform.value.copy(sunDir);
+    }
+    return;
   }
   // Scroll the ripple normal map slowly along the plane's own flow
   // direction — a static (non-scrolling) normal map would still add real

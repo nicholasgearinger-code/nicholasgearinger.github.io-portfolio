@@ -90,6 +90,17 @@ const UNDERWATER_NEUTRAL_TINT = new THREE.Color(0xd8f0f0);
 const tempUnderwaterTintColor = new THREE.Color(); // reused every frame in the underwater block below rather than allocated fresh each time
 const tempRainFogColor = new THREE.Color(); // reused every frame for the rain-fog effect below
 const tempSunDir = new THREE.Vector3(); // reused every frame for the lens-rain sun-glow projection below
+// Per "the ocean waves need some sun glint... because I can't see
+// anything it's too dark" — at night there's legitimately no sun to
+// glint off, which the water's own sun-glint code was correctly
+// reflecting; real ocean waves still catch moonlight, though. Reuses
+// the same sun-or-moon dominance blend already established for the
+// terrain caustic focus position elsewhere in this file, rather than
+// building a separate night-specific glint system — the water's own
+// glint shader already reacts to whatever direction it's given, so
+// blending what's FED to it (sun position at day, moon position at
+// night) is the whole fix.
+const tempWaterGlintDir = new THREE.Vector3();
 const tempCameraDir = new THREE.Vector3();
 const tempSunProjection = new THREE.Vector3();
 // Per "the fog is turning everything white" — was 0x8a97a8, a fairly
@@ -1027,7 +1038,12 @@ const lensDistortedOutput = Fn(() => {
   // stay fully within their own cell rather than visibly clipping
   // against a neighbor's.
   const sizeRand = hash(seed.add(113.0));
-  const dropletRadius = mix(float(0.09), float(0.34), pow(sizeRand, float(2.2)));
+  // Per "should have more larger ones so that we can see more visible
+  // distortions" — max size raised (0.34 -> 0.48) and the small-bias
+  // eased (pow 2.2 -> 1.5, less aggressively skewed toward tiny drops)
+  // so genuinely large droplets show up meaningfully more often, not
+  // just as a rare outlier.
+  const dropletRadius = mix(float(0.09), float(0.48), pow(sizeRand, float(1.5)));
   const distToCenterRaw = cellLocal.sub(dropletCenter).length();
   // Per explicit "change shape organically like water" — real droplets
   // are never perfect circles. A second, higher-frequency hash-cell
@@ -4828,7 +4844,12 @@ function animate() {
   // in/out over several seconds (see weather.js), so being one frame
   // behind here is never visible. biome-gated inside updateLiquidPlane
   // itself (crystal only), so this is harmless to pass unconditionally.
-  updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, camera.position, sun.position, dayNight.skyHorizon, reflectionRenderTarget.texture, reflectionTextureMatrix, refractionRenderTarget.texture, refractionResolution, weatherHandle ? weatherHandle.rainIntensity : 0, dayNight.dayAmount);
+  // Blended sun-or-moon direction (moon at night, sun by day) for the
+  // water's own glint — see tempWaterGlintDir's own declaration above
+  // for why. Same lerp-by-dayAmount convention already used for the
+  // terrain caustic focus position.
+  tempWaterGlintDir.copy(moonLight.position).lerp(sun.position, dayNight.dayAmount);
+  updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, camera.position, tempWaterGlintDir, dayNight.skyHorizon, reflectionRenderTarget.texture, reflectionTextureMatrix, refractionRenderTarget.texture, refractionResolution, weatherHandle ? weatherHandle.rainIntensity : 0, dayNight.dayAmount);
   // Real GPU compute dispatch for the fluid-sim water (see liquid.js's
   // buildCrystalFluidSimPlane) — separate from updateLiquidPlane above
   // since dispatching a compute shader needs the renderer, which only
@@ -5134,8 +5155,16 @@ function animate() {
   // not something this per-frame code changes itself).
   const LENS_EFFECT_ENABLED = getGraphicsSettings().lensEffectEnabled !== false;
   const effectiveLensIntensity = Math.max(wind.rainIntensity, postSwimWetness);
-  lensEffectActive = LENS_EFFECT_ENABLED && !isFullySubmerged && effectiveLensIntensity > 0.02 && getGraphicsSettings().oceanEffectsEnabled !== false;
-  lensDiagEl.textContent = "lens: " + (lensEffectActive ? "ON" : "off") + ", intensity=" + effectiveLensIntensity.toFixed(2) + ", rain=" + (weatherHandle ? weatherHandle.rainIntensity.toFixed(2) : "n/a") + ", wet=" + postSwimWetness.toFixed(2) + ", submerged=" + isFullySubmerged + ", oceanFX=" + (getGraphicsSettings().oceanEffectsEnabled !== false);
+  // Per "the rain drop lens effect looks like it's connected to the
+  // Ocean FX button instead of Lens FX" — a real, confirmed bug: this
+  // condition ALSO checked oceanEffectsEnabled, a leftover from before
+  // the dedicated Lens FX toggle existed (this effect used to piggyback
+  // on the nearest existing toggle). Now that lensEffectEnabled is its
+  // own real setting, this dropped the unrelated oceanEffectsEnabled
+  // check entirely — turning Ocean FX off should no longer silently
+  // disable the lens effect too.
+  lensEffectActive = LENS_EFFECT_ENABLED && !isFullySubmerged && effectiveLensIntensity > 0.02;
+  lensDiagEl.textContent = "lens: " + (lensEffectActive ? "ON" : "off") + ", intensity=" + effectiveLensIntensity.toFixed(2) + ", rain=" + (weatherHandle ? weatherHandle.rainIntensity.toFixed(2) : "n/a") + ", wet=" + postSwimWetness.toFixed(2) + ", submerged=" + isFullySubmerged;
   if (lensEffectActive) {
     lensTimeUniform.value = elapsedTime;
     lensIntensityUniform.value = effectiveLensIntensity;

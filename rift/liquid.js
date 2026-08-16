@@ -1815,10 +1815,13 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
         // dropped in this rebuild).
         const waveHeight = positionWorld.y.sub(waterLevelUniform);
         const rawFoam = clamp(waveHeight.add(GERSTNER_AMPLITUDE_SUM).div(GERSTNER_AMPLITUDE_SUM * 2), 0, 1);
-        // Smoothstep threshold (not a hard cutoff) — the reference photo
-        // shows foam with a soft, feathered edge fading into clear water,
-        // not a sharp line.
-        const foamMask = tslSmoothstep(0.15, 0.55, rawFoam);
+        // Per "should be white lines... breaking waves at the crests
+        // only" — narrowed significantly (was 0.15-0.55, a broad
+        // mid-to-high band; now 0.62-0.8) so foam only appears right at
+        // the true peak of the wave height range. Real whitecaps form
+        // specifically where a wave actually crests, not across most of
+        // its rising face.
+        const foamMask = tslSmoothstep(0.62, 0.8, rawFoam);
         // Per "foam looks applied to the whole ocean instead of just
         // when it washes on shore" (a real bug already found and fixed
         // once this session) — reapplied here so this rebuild doesn't
@@ -1829,18 +1832,30 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
         // driving the wave amplitude damping above, not a separate
         // computation.
         const shoreProximity = float(1).sub(shoreDampBuffer.toAttribute());
-        // Real photo-derived foam detail (getFoamDetailTexture — already
-        // loaded elsewhere in this file for the now-disabled
-        // onBeforeCompile shader, reused here), tiled across world space
-        // so it reads as genuine organic texture rather than a flat
-        // white blob — this is what gives the connected-sheet look real
-        // bubbly detail instead of a uniform color fill.
-        const detail = texture(getFoamDetailTexture(), positionWorld.xz.mul(0.12));
-        // Detail modulates coverage within an already-foamy area rather
-        // than fully gating it — avoids the texture's own tile edges
-        // ever reading as a hard boundary.
-        const foamCoverage = foamMask.mul(mix(float(0.55), float(1.0), detail.r)).mul(shoreProximity);
-        const foamGlow = color(0xf0f8ff).mul(foamCoverage).mul(1.4);
+        // Real crest-line pattern — per "change it to white lines...
+        // to look like breaking waves," replacing the old isotropic
+        // detail-texture multiply (which read as scattered round dots,
+        // not lines). A wave's own phase function — the SAME
+        // dot(direction, position)*k - speed*t term already driving the
+        // real Gerstner displacement above, not a separate invention —
+        // is mathematically constant along lines PERPENDICULAR to that
+        // wave's travel direction, which is exactly the real geometry
+        // of a breaking crest line. Uses the dominant (largest-
+        // amplitude) wave component as a cheap single-term proxy for
+        // orientation, not the full 15-wave sum — this only needs to
+        // establish which way the lines run, not exact height.
+        const dominantWave = GERSTNER_WAVES_TSL[0];
+        const dominantPhase = dot(vec2(dominantWave.ndx, dominantWave.ndz), positionWorld.xz).mul(dominantWave.k).sub(waterTimeUniform.mul(dominantWave.speed));
+        // fract() turns the phase into a repeating 0-1 sawtooth, one
+        // cycle per real wavelength; thresholding narrow bands at BOTH
+        // ends (0 and 1 wrap to the same point) gives thin lines spaced
+        // one wavelength apart, tracing the crest contour instead of
+        // filling the whole crest region solid.
+        const linePhase = fract(dominantPhase.div(6.28318));
+        const lineWidth = float(0.08);
+        const crestLines = tslSmoothstep(one.sub(lineWidth), one, linePhase).add(tslSmoothstep(lineWidth, zero, linePhase));
+        const foamCoverage = foamMask.mul(crestLines).mul(shoreProximity);
+        const foamGlow = color(0xf0f8ff).mul(foamCoverage).mul(1.8);
 
         const causticUV1 = positionWorld.xz.mul(0.4).add(vec2(causticTimeUniform.mul(0.15), causticTimeUniform.mul(0.09)));
         const causticCell1 = fract(causticUV1);
@@ -1891,9 +1906,23 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
         // own "steeper near crests" intent without a third independent
         // wave-sum recomputation. 150 (soft, trough) to 450 (tight,
         // crest) — same range as the original.
-        const glintExponent = float(150).add(rawFoam.mul(300));
+        // Per "why so many white dots on the ocean waves" — the exact
+        // same specular-aliasing bug already diagnosed and fixed once
+        // this session for this water's OWN earlier glint (confirmed via
+        // real frame-diffing that pow(48) was too sharp, softened to
+        // pow(14)) — reintroduced here at an even worse severity (150-450)
+        // and compounded by the new 350-segment mesh: more individual
+        // vertices, each independently flipping in/out of a razor-thin
+        // highlight, reads as scattered dots instead of a smooth
+        // streak. Matches the same proven-good range this project
+        // already established, not a fresh guess.
+        const glintExponent = float(10).add(rawFoam.mul(8));
         const glintCore = pow(sunAlign, glintExponent);
-        const sunGlint = color(0xfff4e0).mul(glintCore).mul(1.8);
+        // Multiplier pulled back too (1.8 -> 1.1) — the earlier-proven
+        // value for this same softer exponent range (a wider highlight
+        // naturally covers more pixels, so it reads brighter overall at
+        // the same multiplier than the old razor-sharp one did).
+        const sunGlint = color(0xfff4e0).mul(glintCore).mul(1.1);
 
         return foamGlow.add(causticGlow).add(sunGlint);
       })();

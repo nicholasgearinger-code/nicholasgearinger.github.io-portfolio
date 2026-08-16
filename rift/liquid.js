@@ -4,7 +4,7 @@ import {
   uniform, vec3, vec2, color, positionLocal, mix, clamp,
   min, max, attribute, time, sin, fract, floor, dot, cross,
   pow, positionWorld, cameraPosition, normalWorld, reflect,
-  uniformArray, texture, uv, modelViewMatrix, cameraProjectionMatrix, hash,
+  uniformArray, texture, uv, modelViewMatrix, cameraProjectionMatrix, hash, smoothstep as tslSmoothstep,
 } from "three/tsl";
 import { getGraphicsSettings } from "./graphicsSettings.js";
 
@@ -1564,311 +1564,49 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
     // something real for it to reflect. Ember's lava and Verdant's river
     // keep plain MeshStandardMaterial, unchanged — this is scoped to the
     // one biome that actually has an environment map set up for it.
+    // Per explicit "make waves and foam look more like [reference photo]"
+    // — a real, connected foam SHEET rather than sparse individual
+    // particles, using data that's already being computed correctly
+    // every frame (the aFoam vertex attribute) but was never actually
+    // visible, since the shader that would have displayed it
+    // (onBeforeCompile, below) has been disabled the whole time. Reuses
+    // the EXACT emissiveNode pattern already proven working elsewhere in
+    // this file (the fluid-sim water's own fresnel/glint emissiveNode) —
+    // additive on top of the material's normal PBR lighting response,
+    // not a colorNode override that would need to manually reconstruct
+    // the whole base color pipeline. Switched to MeshStandardNodeMaterial
+    // (already proven working in this exact file) instead of
+    // MeshPhysicalMaterial specifically to get TSL node support at
+    // all — the one real tradeoff is losing clearcoat (envMapIntensity
+    // itself is a regular MeshStandardMaterial property too, so that
+    // carries over unchanged). Deliberately kept CHEAP given the current
+    // 10fps baseline: reads an already-computed per-VERTEX attribute
+    // (free GPU interpolation across each triangle, not a per-pixel
+    // recomputation) and one texture sample for organic detail — no new
+    // compute buffers, no new particle systems.
     const m = biome === "crystal"
-      ? new THREE.MeshPhysicalMaterial({
-          ...options, clearcoat: 1.0, clearcoatRoughness: 0.06,
-          // Boosted from the implicit default (1.0) — per explicit
-          // request to lean harder on this ALREADY-BUILT reflection
-          // system (the sky-gradient PMREM env map set up in main.js)
-          // now that the separate THREE.Water mirror plane has been
-          // removed entirely. envMapIntensity is a well-tested built-in
-          // MeshPhysicalMaterial property (not custom shader code), so
-          // this carries none of the render-target risk that broke the
-          // mirror — it just tells the material to sample its existing
-          // environment map more strongly.
-          envMapIntensity: 1.7,
-        })
+      ? new THREE.MeshStandardNodeMaterial({ ...options, envMapIntensity: 1.7 })
       : new THREE.MeshStandardMaterial(options);
-    // Per "Coral Shallows won't load" — this onBeforeCompile block uses
-    // the exact same technique (raw GLSL string-patching a three.js-
-    // generated shader) already confirmed officially unsupported under
-    // real WebGPU execution, the same root cause that broke the terrain
-    // shader earlier in this project (see main.js's CAUSTICS_ENABLED /
-    // simpleTerrainMat). That fix only ever addressed the terrain side —
-    // this water-specific onBeforeCompile (foam/reflection/refraction/
-    // caustics, crystal-biome-only) was never touched, and crystal is the
-    // ONLY biome that reaches this branch, which is exactly why Coral
-    // Shallows specifically fails to load while the others don't.
-    // CRYSTAL_WATER_SHADER_ENABLED is the same single flip-point pattern
-    // as CAUSTICS_ENABLED — stage-1 stopgap: crystal's water falls back
-    // to a plain MeshPhysicalMaterial (still has clearcoat/PBR lighting,
-    // loses the foam/reflection/refraction/caustic shader layer) so the
-    // level loads again. Every downstream consumer of
-    // mesh.material.userData.shader (updateLiquidPlane's reflection/
-    // refraction/uTime pushes below) is already guarded with
-    // `if (...userData.shader)` checks, so leaving it unset here is
-    // safe — confirmed by reading those call sites, not assumed. Real
-    // fix is a TSL node-material rebuild of this whole block, not yet
-    // started, same as the terrain caustics.
-    const CRYSTAL_WATER_SHADER_ENABLED = false;
-    if (biome === "crystal" && CRYSTAL_WATER_SHADER_ENABLED) {
-      // Procedural whitecap foam — real Voronoi/Worley cellular noise
-      // evaluated per-PIXEL in the fragment shader, not per-vertex like
-      // everything else this file paints. onBeforeCompile patches the
-      // three.js-generated MeshPhysicalMaterial shader directly rather
-      // than writing a full custom ShaderMaterial, so clearcoat/PBR
-      // lighting/fog from the rest of this material keep working
-      // unmodified — only the diffuse color gets a foam pass layered on
-      // top, right where the per-vertex froth/Fresnel/SSS blending from
-      // updateLiquidPlane already leaves off.
-      m.onBeforeCompile = (shader) => {
-        shader.uniforms.uTime = { value: 0 };
-        shader.uniforms.uFoamTex = { value: getFoamDetailTexture() };
-        // Real planar reflection — texture + projection matrix are both
-        // owned and updated by main.js each frame (it renders the actual
-        // reflection pass; see updateLiquidPlane's own reflectionTexture/
-        // reflectionMatrix params above for how they get here). Starts
-        // null/identity so nothing breaks before the first frame sets
-        // them.
-        shader.uniforms.uReflectionTex = { value: null };
-        shader.uniforms.uReflectionMatrix = { value: new THREE.Matrix4() };
-        // Fine-scale reflection distortion — reuses the SAME loaded
-        // ripple-normal texture already driving the material's own
-        // lighting normalMap (see `rippleTexture` above), sampled again
-        // here as an explicit second reference specifically for
-        // perturbing the reflection UV. Kept as its own uniform (not
-        // reusing Three's internal normalMap sampler binding directly)
-        // since that internal name/timing isn't something to rely on
-        // without being able to verify it live.
-        shader.uniforms.uDistortTex = { value: rippleTexture };
-        // Real refraction — a second offscreen render, owned and updated
-        // by main.js the same way the reflection texture is (it's the
-        // one place with the real renderer/camera), but rendered from
-        // the MAIN camera's own view rather than a reflected one — this
-        // is "what the camera would see if the water weren't there,"
-        // sampled with simple screen-space UV (gl_FragCoord) rather than
-        // the reflection's projective-matrix math, since it's already
-        // aligned with the current view.
-        shader.uniforms.uRefractionTex = { value: null };
-        shader.uniforms.uResolution = { value: new THREE.Vector2(1, 1) };
-        // Per explicit "add realistic light scattering on the water mesh
-        // to implement natural sunlight caustics" — gates the new
-        // caustic pattern below to daylight, same reasoning the existing
-        // sun-glitter fade already uses (real caustics need direct
-        // sunlight, not moonlight or an overcast sky). A clean, explicit
-        // uDayAmount rather than reusing skyColor brightness as a proxy
-        // the way sun-glitter's JS-side dayFactor currently does.
-        shader.uniforms.uDayAmount = { value: 1 };
-        // Per explicit "optimize graphics tiers" — gates the caustic net
-        // and sun-glitter contributions below (NOT reflection/refraction,
-        // which are a separate, already tier-throttled system via
-        // reflectionUpdateInterval and stay untouched here) so Low tier
-        // gets a genuinely cheaper fragment shader, not just visually
-        // thinner effects still costing the same per-pixel math.
-        shader.uniforms.uOceanEffectsEnabled = { value: 1 };
-        shader.vertexShader = shader.vertexShader
-          .replace("#include <common>", "#include <common>\nattribute float aFoam;\nvarying float vFoam;\nvarying vec2 vFoamPos;\nattribute float aSunGlint;\nvarying float vSunGlint;\nattribute float aReflectionFresnel;\nvarying float vReflectionFresnel;\nattribute vec2 aReflectionDistort;\nvarying vec2 vReflectionDistort;\nuniform mat4 uReflectionMatrix;\nvarying vec4 vReflectionCoord;")
-          .replace("#include <begin_vertex>", "#include <begin_vertex>\nvFoam = aFoam;\nvFoamPos = position.xz;\nvSunGlint = aSunGlint;\nvReflectionFresnel = aReflectionFresnel;\nvReflectionDistort = aReflectionDistort;\nvReflectionCoord = uReflectionMatrix * modelMatrix * vec4(transformed, 1.0);"); // local-space XZ IS world XZ here — this mesh has no runtime x/z translation or rotation (baked in at creation), only a Y offset. `transformed` at this point already holds the CPU-side wave-displaced position (the real per-frame Gerstner sum written into the position attribute in updateLiquidPlane, not a GPU displacement) — so the reflection coordinate genuinely follows the real wave surface, not a flat approximation of it.
-        shader.fragmentShader = shader.fragmentShader
-          .replace("#include <common>", `#include <common>
-uniform float uTime;
-uniform sampler2D uFoamTex;
-uniform sampler2D uReflectionTex;
-uniform sampler2D uDistortTex;
-uniform sampler2D uRefractionTex;
-uniform vec2 uResolution;
-uniform float uDayAmount;
-uniform float uOceanEffectsEnabled;
-varying float vFoam;
-varying vec2 vFoamPos;
-varying float vSunGlint;
-varying float vReflectionFresnel;
-varying vec2 vReflectionDistort;
-varying vec4 vReflectionCoord;
-// Compact 2D Worley/Voronoi noise — hashed jittered grid, 3x3 neighbor
-// search for the nearest feature point. Cheap enough for two octaves
-// per fragment on mobile.
-vec2 foamHash(vec2 p) {
-  float n = sin(dot(p, vec2(41.0, 289.0)));
-  return fract(vec2(262144.0, 32768.0) * n);
-}
-float foamVoronoi(vec2 p) {
-  vec2 ip = floor(p);
-  vec2 fp = fract(p);
-  float minDist = 1.0;
-  for (int y = -1; y <= 1; y++) {
-    for (int x = -1; x <= 1; x++) {
-      vec2 neighbor = vec2(float(x), float(y));
-      vec2 point = foamHash(ip + neighbor);
-      minDist = min(minDist, length(neighbor + point - fp));
-    }
-  }
-  return minDist;
-}
-// F1 AND F2 (nearest + second-nearest feature point) — F2-F1 traces
-// thin lines along cell boundaries rather than filled blobs. Same
-// technique (and reasoning) as main.js's terrain caustic net and shore
-// foam tendrils — added here so open-water whitecaps can have the same
-// lacy, branching character instead of only filled bubble clusters.
-vec2 foamVoronoiF1F2(vec2 p) {
-  vec2 ip = floor(p);
-  vec2 fp = fract(p);
-  float f1 = 8.0, f2 = 8.0;
-  for (int y = -1; y <= 1; y++) {
-    for (int x = -1; x <= 1; x++) {
-      vec2 neighbor = vec2(float(x), float(y));
-      vec2 point = foamHash(ip + neighbor);
-      float d = length(neighbor + point - fp);
-      if (d < f1) { f2 = f1; f1 = d; } else if (d < f2) { f2 = d; }
-    }
-  }
-  return vec2(f1, f2);
-}`)
-          .replace("#include <color_fragment>", `#include <color_fragment>
-{
-  // Distortion computed ONCE here — two combined scales, same "coarse +
-  // fine" layering this file already uses for foam (Voronoi octaves)
-  // and normal detail. Coarse: the real per-vertex Gerstner wave slope
-  // (vReflectionDistort), so large swells visibly bend what they show.
-  // Fine: the loaded ripple-normal texture sampled at the same world-
-  // space scale the foam texture already uses, its RG channels remapped
-  // from [0,1] tangent-space encoding to a [-1,1] offset direction —
-  // small ripples breaking things up at a finer grain than the
-  // per-vertex resolution alone could ever produce. Shared by BOTH the
-  // refraction and reflection samples below so the two bend consistently
-  // with each other, not independently.
-  vec2 fineDistort = (texture2D(uDistortTex, vFoamPos * 0.045 + vec2(uTime * 0.01, uTime * 0.007)).rg - 0.5) * 2.0;
-  vec2 totalDistort = vReflectionDistort * 0.06 + fineDistort * 0.012;
-
-  // Real refraction — what the seafloor looks like bent through the
-  // water surface, viewed from the SAME camera (not a reflected one),
-  // per explicit follow-up request. uRefractionTex is rendered by
-  // main.js from the main camera each frame with the water hidden —
-  // "what this camera would see if the water weren't there." Simple
-  // screen-space UV (gl_FragCoord) is correct here since it's already
-  // aligned with the current view, unlike the reflection's projective-
-  // matrix sampling below. Distortion scaled down from the reflection's
-  // own (0.5x) — real refraction bending is present but subtler than a
-  // full reflected image would need.
-  vec2 screenUv = gl_FragCoord.xy / uResolution;
-  vec2 refractionUv = clamp(screenUv + totalDistort * 0.5, 0.001, 0.999);
-  vec3 refractionColor = texture2D(uRefractionTex, refractionUv).rgb;
-  // vReflectionFresnel is the SAME grazing-angle value used below for
-  // the reflection blend — steep viewing angles (low fresnel) let most
-  // light actually pass through and refract, so refraction should
-  // DOMINATE there; grazing angles (high fresnel) approach total
-  // internal reflection, where refraction contributes almost nothing
-  // and the reflection block below takes over instead. This is the
-  // same physical trade-off real water shows, not two unrelated effects
-  // fighting for the same pixel.
-  diffuseColor.rgb = mix(refractionColor, diffuseColor.rgb, vReflectionFresnel);
-
-  // Real planar reflection — projective texture lookup, the same
-  // standard technique THREE.Water/Reflector use internally, just
-  // sampled directly onto this ALREADY wave-displaced surface instead
-  // of a separate flat plane. Manual perspective divide (not
-  // textureProj, for GLSL ES1/ES3 compatibility) — guard against w<=0
-  // (behind the reflection camera / degenerate) so a bad sample can't
-  // wrap/smear across the screen.
-  if (vReflectionCoord.w > 0.0001) {
-    vec2 reflectionUv = vReflectionCoord.xy / vReflectionCoord.w + totalDistort;
-    reflectionUv = clamp(reflectionUv, 0.001, 0.999); // distortion can push a coordinate that started safely inside [0,1] slightly outside it — clamp rather than let it wrap/smear from the opposite edge
-    if (reflectionUv.x > 0.0 && reflectionUv.x < 1.0 && reflectionUv.y > 0.0 && reflectionUv.y < 1.0) {
-      vec3 reflectionColor = texture2D(uReflectionTex, reflectionUv).rgb;
-      // vReflectionFresnel is the SAME grazing-angle Fresnel value
-      // already computed once per vertex in updateLiquidPlane (JS side)
-      // for the existing sky-tint blend — reused here rather than
-      // recomputed, so this can't drift out of sync with it. Real
-      // reflections are strongest at grazing angles, weakest looking
-      // straight down — exactly what this term already models.
-      diffuseColor.rgb = mix(diffuseColor.rgb, reflectionColor, vReflectionFresnel * 0.65);
-    }
-  }
-  // Two Voronoi octaves at different scale/drift — big loose bubble
-  // clusters plus finer surface foam, rather than one uniform cell size.
-  float cellsBig = foamVoronoi(vFoamPos * 0.3 + uTime * 0.035);
-  float cellsFine = foamVoronoi(vFoamPos * 1.0 - uTime * 0.06);
-  float bubbles = (1.0 - smoothstep(0.0, 0.55, cellsBig)) * 0.65 + (1.0 - smoothstep(0.0, 0.4, cellsFine)) * 0.55;
-  bubbles = clamp(bubbles, 0.0, 1.0);
-  // Real photo-derived foam texture, tiled and drifting at its own rate
-  // (deliberately different from the Voronoi octaves' own 0.035/0.06 so
-  // the two never move in visible lockstep). 0.045 UV scale puts roughly
-  // one foam-texture tile per ~22 world units — real whitecap-sized
-  // patches against an ocean plane hundreds of units across, not one
-  // texture stretched over the whole thing (which would look smeared)
-  // or repeating so densely it reads as an obvious grid.
-  float realFoam = texture2D(uFoamTex, vFoamPos * 0.045 + vec2(uTime * 0.01, uTime * 0.007)).r;
-  // Real texture leads (it's far more organic/detailed than the pure
-  // procedural pattern alone), Voronoi still contributes secondary
-  // variation so the same small tile doesn't read as a visibly repeating
-  // stamp at a distance.
-  bubbles = clamp(realFoam * 0.75 + bubbles * 0.35, 0.0, 1.0);
-  // Lacy branching lines — SAME technique now used for the shore foam
-  // and underwater caustic net, per explicit "add the same foam into
-  // the waves themselves" request. Only eligible right at the crest
-  // edge (a tight vFoam band, not the whole crest region bubbles uses)
-  // so it reads as thin streaks trailing off a breaking crest rather
-  // than covering the same area as the bubble clusters.
-  vec2 waveTendrilUv = vFoamPos * 1.6 + vec2(uTime * 0.08, -uTime * 0.06);
-  vec2 wtv = foamVoronoiF1F2(waveTendrilUv);
-  float waveTendrilLines = 1.0 - smoothstep(0.0, 0.05, wtv.y - wtv.x);
-  float waveTendrilMask = waveTendrilLines * smoothstep(0.35, 0.55, vFoam);
-  // vFoam is the raw per-vertex wave-crest disturbance (0..1, interpolated
-  // across the triangle) — only the actual crest region should be
-  // eligible for foam at all, the Voronoi pattern then decides which
-  // pixels within that region actually show it.
-  float foamMask = clamp(max(bubbles * smoothstep(0.5, 0.92, vFoam), waveTendrilMask * 0.8), 0.0, 1.0);
-  foamMask *= 0.0; // per explicit "try removing all foam" — zeroed rather than the line deleted, for a clean single-line revert once this diagnostic pass is done
-  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0), foamMask);
-  // Real specular sun-glitter — vSunGlint is computed per-vertex in
-  // updateLiquidPlane (JS side) from the exact analytic Gerstner normal
-  // and the real view/sun half-vector, the same trusted values already
-  // driving the Fresnel term right next to it there, not new/separate
-  // math. Additive (not mixed toward white like the foam above) so it
-  // can genuinely blow out brighter than the base albedo the way a real
-  // specular highlight does, rather than just capping at flat white.
-  diffuseColor.rgb += vec3(1.0, 0.97, 0.85) * vSunGlint * 2.4 * uOceanEffectsEnabled;
-
-  // Per explicit "add realistic light scattering on the water mesh to
-  // implement natural sunlight caustics" — a genuinely NEW effect (the
-  // water surface had specular sun-glitter already, but nothing tracing
-  // a caustic NET pattern). Reuses foamVoronoiF1F2 (the same proven
-  // technique already used for foam above and, previously, the terrain's
-  // own caustic net) but at its own scale/drift so it reads as a
-  // distinct pattern from the foam rather than overlapping it — real
-  // underwater caustic nets drift slowly and broadly, much slower than
-  // foam breaking on a crest.
-  //
-  // DELIBERATELY kept bounded and modest THIS time, learning directly
-  // from the terrain caustic net's own history: that effect started
-  // reasonable but was tuned upward across several separate rounds
-  // without ever checking the CUMULATIVE math, until it mathematically
-  // peaked around 1.29 added directly onto diffuseColor — enough to
-  // blow out to near-white and dominate the entire surface underneath
-  // Per explicit "let's see more of this all across the waves" —
-  // expanded on confirmed positive feedback (not blind tuning): lines
-  // widened for more spatial coverage, Fresnel-gating loosened so the
-  // effect has real presence across more viewing angles instead of only
-  // concentrating near straight-down, and intensity raised. Still safely
-  // bounded — mix() toward a fixed highlight color structurally cannot
-  // exceed that color regardless of how far any of these move, same
-  // safeguard as before. New verified peak: causticMask maxes at 1.0
-  // (clamped), Fresnel term now maxes at 1.0 (0.35 baseline + 0.65 at
-  // straight-down), uDayAmount maxes at 1.0, times 0.4 = 0.4 real worst
-  // case — a much more present but still genuinely bounded 40% blend at
-  // most, not the earlier 22%.
-  vec2 causticUv = vFoamPos * 0.5 + vec2(uTime * 0.018, -uTime * 0.013);
-  vec2 causticCells = foamVoronoiF1F2(causticUv);
-  float causticNet = 1.0 - smoothstep(0.0, 0.075, causticCells.y - causticCells.x);
-  // A second, finer octave breaks up the single-frequency look a lone
-  // Voronoi net always has — real caustics show layered detail at more
-  // than one scale, not one uniform cell size.
-  vec2 causticUv2 = vFoamPos * 1.3 - vec2(uTime * 0.011, uTime * 0.021);
-  vec2 causticCells2 = foamVoronoiF1F2(causticUv2);
-  float causticNet2 = 1.0 - smoothstep(0.0, 0.05, causticCells2.y - causticCells2.x);
-  float causticMask = clamp(causticNet * 0.7 + causticNet2 * 0.4, 0.0, 1.0);
-  // Fresnel gate loosened — was pure (1.0-fresnel), which suppressed the
-  // effect almost entirely at grazing/horizon viewing angles (exactly
-  // where the confirmed-good screenshot showed it working well). A 0.35
-  // baseline keeps real presence at every angle, still favoring the
-  // straight-down case physically like refraction does, just less
-  // exclusively.
-  float causticFresnelGate = 0.35 + 0.65 * (1.0 - vReflectionFresnel);
-  float causticStrength = causticMask * causticFresnelGate * uDayAmount * 0.4 * uOceanEffectsEnabled;
-  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0, 0.98, 0.88), causticStrength);
-}`);
-        m.userData.shader = shader; // so updateLiquidPlane can push uTime each frame
-      };
+    if (biome === "crystal") {
+      m.emissiveNode = Fn(() => {
+        const rawFoam = clamp(attribute("aFoam"), 0, 1);
+        // Smoothstep threshold (not a hard cutoff) — the reference photo
+        // shows foam with a soft, feathered edge fading into clear water,
+        // not a sharp line.
+        const foamMask = tslSmoothstep(0.15, 0.55, rawFoam);
+        // Real photo-derived foam detail (getFoamDetailTexture — already
+        // loaded elsewhere in this file for the now-disabled
+        // onBeforeCompile shader, reused here), tiled across world space
+        // so it reads as genuine organic texture rather than a flat
+        // white blob — this is what gives the connected-sheet look real
+        // bubbly detail instead of a uniform color fill.
+        const detail = texture(getFoamDetailTexture(), positionWorld.xz.mul(0.12));
+        // Detail modulates coverage within an already-foamy area rather
+        // than fully gating it — avoids the texture's own tile edges
+        // ever reading as a hard boundary.
+        const foamCoverage = foamMask.mul(mix(float(0.55), float(1.0), detail.r));
+        return color(0xf0f8ff).mul(foamCoverage).mul(1.4);
+      })();
     }
     return m;
   }

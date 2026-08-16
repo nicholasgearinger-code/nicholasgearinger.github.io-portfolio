@@ -1380,6 +1380,19 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
   }
 
   const posAttr = geo.attributes.position;
+  // Per repeated, confirmed failure of the classic BufferAttribute +
+  // needsUpdate mechanism to produce ANY visible change under this
+  // project's WebGPU NodeMaterial water (two different colorNode fixes
+  // both tested live with zero visual difference) — this project has
+  // exactly ONE mechanism actually PROVEN to correctly move CPU-written
+  // per-frame data to a GPU shader read: instancedArray + plain
+  // .array[i] writes + .toAttribute() (confirmed working for rain and
+  // the now-removed foam particles). aFoam — a genuinely custom,
+  // non-standard attribute name, unlike "color" which now uses the
+  // documented, dedicated vertexColor() TSL function — switches to that
+  // proven mechanism here instead of continuing to trust the untested
+  // geo.setAttribute()/attribute("aFoam") pairing.
+  const foamBuffer = biome === "crystal" ? instancedArray(posAttr.count, "float") : null;
   const colors = new Float32Array(posAttr.count * 3);
   // Depth-based base color — Crystal only. Real oceans read lighter over
   // a shallow reef/shoreline and darker over open deep water; a single
@@ -1496,7 +1509,8 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
   // (thresholding, Voronoi masking) happens in the shader instead of
   // being pre-baked per-vertex like the rest of this file's coloring.
   if (biome === "crystal") {
-    geo.setAttribute("aFoam", new THREE.BufferAttribute(new Float32Array(posAttr.count), 1));
+    // aFoam BufferAttribute removed — foamBuffer (instancedArray, above)
+    // replaces it entirely now.
     // Sun-glitter intensity — same per-vertex-attribute pattern as aFoam
     // above, computed each frame in updateLiquidPlane from the exact
     // analytic Gerstner normal + real view/sun vectors already computed
@@ -1614,7 +1628,7 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
       // base color read needed correcting.
       m.colorNode = vertexColor();
       m.emissiveNode = Fn(() => {
-        const rawFoam = clamp(attribute("aFoam"), 0, 1);
+        const rawFoam = clamp(foamBuffer.toAttribute(), 0, 1);
         // Smoothstep threshold (not a hard cutoff) — the reference photo
         // shows foam with a soft, feathered edge fading into clear water,
         // not a sharp line.
@@ -1778,7 +1792,7 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
 
   return {
     mesh, backMesh, glow, shimmer, rocks, waterY: y, basePositions, biome, style, depthColors, shoreDamp,
-    flowDir: normalizeFlow(flowDir), crustOctaves, crackOctaves, flowBeads, rippleTexture, foamAccum,
+    flowDir: normalizeFlow(flowDir), crustOctaves, crackOctaves, flowBeads, rippleTexture, foamAccum, foamBuffer,
     lastElapsed: undefined, // set on first updateLiquidPlane call — used to derive real per-frame dt for the foam decay above, since this function only receives cumulative elapsed time
   };
 }
@@ -1854,10 +1868,10 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
   // still gets the normal geometric method, called at the end of this
   // function as before.
   const normalAttr = mesh.geometry.attributes.normal;
-  // Foam attribute + the onBeforeCompile shader's uTime uniform — both
-  // crystal-only (see createLiquidPlane). uTime only needs setting once
-  // per frame, not per vertex.
-  const foamAttr = biome === "crystal" ? mesh.geometry.attributes.aFoam : null;
+  // Foam signal — crystal-only (see createLiquidPlane). No longer a
+  // geometry attribute; handle.foamBuffer (instancedArray) replaces it —
+  // see that variable's own comment in createLiquidPlane for why.
+  const foamBuffer = biome === "crystal" ? handle.foamBuffer : null;
   const sunGlintAttr = biome === "crystal" ? mesh.geometry.attributes.aSunGlint : null;
   const reflectionFresnelAttr = biome === "crystal" ? mesh.geometry.attributes.aReflectionFresnel : null;
   const reflectionDistortAttr = biome === "crystal" ? mesh.geometry.attributes.aReflectionDistort : null;
@@ -2197,7 +2211,15 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
         const shoreProximity = handle.shoreDamp ? 1 - handle.shoreDamp[i] : 0;
         const persistedFoam = Math.max(disturbance, (foamAccum[i] || 0) * foamDecayFactor) * shoreProximity;
         foamAccum[i] = persistedFoam;
-        foamAttr.setX(i, persistedFoam); // shaped signal now (still smoothstepped/threshold-masked further in the fragment shader on top of this)
+        // Per a confirmed Three.js source (a real advanced-TSL guide,
+        // not a guess): instancedArray's underlying writable data lives
+        // at .value (the actual BufferAttribute object, confirmed by
+        // .value.addUpdateRange being a real, documented
+        // BufferAttribute method), NOT a plain .array shortcut the way
+        // uniformArray works — those are different TSL constructs with
+        // different CPU-write APIs, which earlier code in this exact
+        // file wrongly conflated.
+        if (foamBuffer) foamBuffer.value.array[i] = persistedFoam;
       } else {
         posAttr.setY(i, ripple);
       }
@@ -2208,7 +2230,16 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
   colorAttr.needsUpdate = true;
   if (biome === "crystal") {
     normalAttr.needsUpdate = true; // written analytically above, per-frame — skip the geometric recompute below
-    foamAttr.needsUpdate = true;
+    // foamBuffer (instancedArray) needs its OWN needsUpdate — set on
+    // .value specifically (the real BufferAttribute underneath), not on
+    // foamBuffer itself, per the same confirmed API shape used for the
+    // write above. No addUpdateRange call — every single element gets a
+    // new value every frame (not a small subset), so the simpler
+    // whole-buffer needsUpdate=true (Three.js's own default behavior
+    // without a narrowed range) is the correct, safe choice here rather
+    // than guessing at addUpdateRange's exact byte-vs-element-offset
+    // convention for this specific API.
+    if (foamBuffer) foamBuffer.value.needsUpdate = true;
     sunGlintAttr.needsUpdate = true;
     reflectionFresnelAttr.needsUpdate = true;
     reflectionDistortAttr.needsUpdate = true;

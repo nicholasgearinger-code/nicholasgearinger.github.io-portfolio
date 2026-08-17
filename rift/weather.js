@@ -496,6 +496,59 @@ function updateRipplePool(pool, dt) {
   }
 }
 
+// Per "the rain is all falling at the same rate... it needs variation" —
+// real rain is a genuine mix of drop sizes, and bigger drops actually DO
+// fall faster (more mass, less relative air resistance) — this project
+// already had real per-particle terminalSpeed variance (30-45 range) but
+// EVERY particle rendered at the identical fixed material.size, so that
+// speed variance was invisible on screen: a fast drop and a slow drop
+// looked like the exact same streak. Splits the population into three
+// genuinely distinct tiers — fine/fast/slow drops each get their OWN
+// terminalSpeed range AND their own material.size/opacity — so bigger,
+// faster, brighter streaks and small, slower, fainter ones are now both
+// really there and visibly different, not just numerically different
+// underneath an identical sprite.
+const RAIN_TIERS = [
+  { name: "mist", fraction: 0.45, speedBase: 20, speedRand: 8, size: 0.055, opacityMul: 0.65 },
+  { name: "normal", fraction: 0.35, speedBase: 32, speedRand: 10, size: 0.1, opacityMul: 1.0 },
+  { name: "heavy", fraction: 0.2, speedBase: 46, speedRand: 16, size: 0.17, opacityMul: 1.3 },
+];
+
+// Builds ONE tier's worth of particles — same per-particle arrays/logic
+// this project already had (terminalSpeed/currentSpeed/driftPhase/
+// landHeights), just scoped to one size/speed tier instead of the whole
+// population, and returning its own THREE.Points/material so each tier
+// can be sized and toned independently.
+function createRainTier(scene, tier, count, heaviness, waterLevel, sampleHeight) {
+  const positions = new Float32Array(count * 3);
+  const terminalSpeed = new Float32Array(count);
+  const currentSpeed = new Float32Array(count);
+  const driftPhase = new Float32Array(count);
+  const landHeights = new Float32Array(count);
+  const fallbackLand = waterLevel !== undefined && waterLevel !== null ? waterLevel : 0;
+  for (let i = 0; i < count; i++) {
+    const x = (Math.random() - 0.5) * 220;
+    const z = (Math.random() - 0.5) * 220;
+    positions[i * 3] = x;
+    positions[i * 3 + 1] = Math.random() * 60;
+    positions[i * 3 + 2] = z;
+    terminalSpeed[i] = (tier.speedBase + Math.random() * tier.speedRand) * (0.85 + heaviness * 0.15);
+    currentSpeed[i] = terminalSpeed[i] * (0.3 + Math.random() * 0.4);
+    driftPhase[i] = Math.random() * Math.PI * 2;
+    const ground = sampleHeight ? sampleHeight(x, z) : null;
+    landHeights[i] = ground !== null && ground !== undefined ? Math.max(ground, fallbackLand) : fallbackLand;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const mat = new THREE.PointsMaterial({
+    map: getRainStreakTexture(), color: 0xcfe0f0, size: tier.size, transparent: true, opacity: 0,
+    blending: THREE.AdditiveBlending, depthWrite: false,
+  });
+  const points = new THREE.Points(geo, mat);
+  scene.add(points);
+  return { points, terminalSpeed, currentSpeed, driftPhase, landHeights, opacityMul: tier.opacityMul };
+}
+
 function createRain(scene, heaviness = 1, waterLevel, particleMultiplier = 1, sampleHeight = null) {
   // Was 7000, then 12000 — per explicit "still need much more rainfall,"
   // pushed further again. particleMultiplier is genuinely wired in now
@@ -506,69 +559,14 @@ function createRain(scene, heaviness = 1, waterLevel, particleMultiplier = 1, sa
   // and the respawn-recentering logic below) is very likely the bigger
   // lever here: no particle count fixes a rain cloud the player has
   // simply wandered away from.
-  const count = Math.round(16000 * heaviness * particleMultiplier);
-  const positions = new Float32Array(count * 3);
-  // terminalSpeed is the physical cap each drop's fall speed can never
-  // exceed — real raindrops do have a genuine terminal velocity (air
-  // resistance balances gravity), so this stays as a per-drop random
-  // value the way the old fixed `speeds` array was. What's NEW is
-  // currentSpeed: each drop's REAL current speed, which now ramps up
-  // toward that cap under constant gravity each frame (see the update
-  // loop below) instead of falling at its full terminal speed from the
-  // instant it spawns — the old model had every drop moving at its
-  // final speed immediately, which isn't how falling actually works.
-  const terminalSpeed = new Float32Array(count);
-  const currentSpeed = new Float32Array(count);
-  const driftPhase = new Float32Array(count); // per-drop phase offset for a subtle horizontal wobble as it falls — real rain isn't perfectly straight even with steady wind
-  // Per-particle landing height — every drop used to land at a single
-  // FLAT height (waterLevel) system-wide, regardless of what was
-  // actually beneath it, meaning rain over the island's dry sand/hills
-  // visually fell through solid ground before "landing" at sea level.
-  // Sampled once per fall cycle (here at creation, and again on respawn
-  // in the update loop below) rather than every frame for every
-  // particle — real terrain sampling isn't free, and doing it for
-  // 12000+ particles every single frame would be a real cost for
-  // something that only needs to be right once per fall, not
-  // continuously (a drop's XZ barely drifts during one fall). Clamped to
-  // never go below the real water surface, so a drop over open water
-  // still lands AT the water, not at the (lower) seafloor beneath it.
-  const landHeights = new Float32Array(count);
-  const fallbackLand = waterLevel !== undefined && waterLevel !== null ? waterLevel : 0;
-  for (let i = 0; i < count; i++) {
-    const x = (Math.random() - 0.5) * 220;
-    const z = (Math.random() - 0.5) * 220;
-    positions[i * 3] = x;
-    positions[i * 3 + 1] = Math.random() * 60;
-    positions[i * 3 + 2] = z;
-    terminalSpeed[i] = (30 + Math.random() * 15) * (0.85 + heaviness * 0.15); // heavier rain also falls a bit faster/harder, not just denser
-    // Spawns already partway toward its own terminal velocity (randomized
-    // per drop) rather than every drop visibly starting from a dead stop
-    // at the same instant — that would look like a synchronized "pulse"
-    // each time the pool cycles, since drops spawn at a fixed height
-    // rather than a genuinely random point mid-fall.
-    currentSpeed[i] = terminalSpeed[i] * (0.3 + Math.random() * 0.4);
-    driftPhase[i] = Math.random() * Math.PI * 2;
-    const ground = sampleHeight ? sampleHeight(x, z) : null;
-    landHeights[i] = ground !== null && ground !== undefined ? Math.max(ground, fallbackLand) : fallbackLand;
-  }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-  const mat = new THREE.PointsMaterial({
-    // size shrunk further (0.4 -> 0.1) per explicit "lots of tiny
-    // particles" — a rain streak's visual length comes from its own
-    // texture + fast fall speed, not from a large point size; a real
-    // raindrop is a fine, thin thing, not a visible blob.
-    map: getRainStreakTexture(), color: 0xcfe0f0, size: 0.1, transparent: true, opacity: 0,
-    blending: THREE.AdditiveBlending, depthWrite: false,
-  });
-  const points = new THREE.Points(geo, mat);
-  scene.add(points);
+  const totalCount = Math.round(16000 * heaviness * particleMultiplier);
+  const tiers = RAIN_TIERS.map((tier) => createRainTier(scene, tier, Math.round(totalCount * tier.fraction), heaviness, waterLevel, sampleHeight));
   // waterLevel: the Y height ripples spawn at and particles "land" on —
   // real per-biome height (e.g. LIQUID_LEVEL.crystal), or undefined for
   // any biome without a real whole-level ocean (rain just wraps at a
   // fixed low altitude in that case, same as before, no ripples spawn).
   const ripplePool = waterLevel !== undefined && waterLevel !== null ? createRipplePool(scene) : null;
-  return { points, terminalSpeed, currentSpeed, driftPhase, landHeights, sampleHeight, waterLevel, ripplePool };
+  return { tiers, sampleHeight, waterLevel, ripplePool };
 }
 
 /**
@@ -698,9 +696,7 @@ function updateWeatherSystem(handle, dt, erupting = false, dayAmount = 0, player
     }
     const targetIntensity = handle.rainActive ? 1 : 0;
     handle.rainIntensity += (targetIntensity - handle.rainIntensity) * Math.min(1, dt * 0.15); // was dt*0.6 (fully transitioned in ~5s) — slowed per explicit "make the weather change more gradual" request, now takes closer to 20-30s to fully ramp in/out
-    handle.rain.points.material.opacity = Math.min(1, handle.rainIntensity * 0.55 * (profile.rainHeaviness || 1));
 
-    const posAttr = handle.rain.points.geometry.attributes.position;
     const fallbackLandY = handle.rain.waterLevel !== undefined && handle.rain.waterLevel !== null ? handle.rain.waterLevel : 0;
     // Real gravity constant for this update loop — tuned so a drop covers
     // the ramp from its spawn speed to its own terminal velocity within a
@@ -710,81 +706,102 @@ function updateWeatherSystem(handle, dt, erupting = false, dayAmount = 0, player
     // project uses a game-appropriate constant rather than a literal SI
     // unit value.
     const RAIN_GRAVITY = 55;
-    for (let i = 0; i < handle.rain.terminalSpeed.length; i++) {
-      handle.rain.currentSpeed[i] = Math.min(handle.rain.terminalSpeed[i], handle.rain.currentSpeed[i] + RAIN_GRAVITY * dt);
-      // Per-particle landing height — real ground beneath THIS drop, not
-      // one flat height shared by the whole system (see createRain's own
-      // comment on landHeights for why this matters and why it's only
-      // resampled on respawn below, not every frame).
-      const landY = handle.rain.landHeights ? handle.rain.landHeights[i] : fallbackLandY;
-      let y = posAttr.getY(i) - handle.rain.currentSpeed[i] * dt * Math.max(0.15, handle.rainIntensity);
-      const x = posAttr.getX(i), z = posAttr.getZ(i);
-      if (y < landY) {
-        y = 60;
-        // Resets to a randomized partial speed on respawn, same
-        // reasoning as the initial spawn in createRain above — every
-        // drop restarting from a dead stop at the exact same instant
-        // would look like a synchronized pulse each time the pool
-        // cycles, since drops respawn at a fixed height rather than a
-        // genuinely random point mid-fall.
-        handle.rain.currentSpeed[i] = handle.rain.terminalSpeed[i] * (0.3 + Math.random() * 0.4);
-        // Real per-drop landing point (before it recenters/resets) —
-        // spawn a ripple here ONLY if this drop actually landed AT water
-        // level, not on elevated dry ground (a ripple on dry sand would
-        // be wrong now that landY can be real terrain height above
-        // water) — and only if this biome has real water and a pool
-        // slot is actually free.
-        if (handle.rain.ripplePool && landY <= fallbackLandY + 0.01 && Math.random() < RIPPLE_SPAWN_CHANCE) {
-          spawnRipple(handle.rain.ripplePool, x, landY + 0.02, z, handle.rainIntensity);
-        }
-        // Per explicit "still need much more rainfall" — rain particles
-        // previously only ever spawned once, at world creation, in a
-        // fixed volume centered on world ORIGIN, and individual drops
-        // only ever drifted slowly with wind afterward, never
-        // re-randomized — meaning the whole rain cloud stayed
-        // effectively fixed in place near (0,0) for the entire session
-        // regardless of where the player actually explored to. Anywhere
-        // else on the island saw sparse or zero rain no matter how high
-        // the total particle count was raised. Now, on this natural
-        // respawn cycle (not every frame — only when a drop has actually
-        // finished falling), a drop that's drifted more than 130 units
-        // from the player teleports to a fresh position centered on
-        // wherever the player actually is right now, so the whole cloud
-        // progressively follows the player around the island within a
-        // couple of respawn cycles (each drop's own full fall takes
-        // roughly 1-2 seconds) rather than staying anchored to the map's
-        // center forever.
-        let nextX = x, nextZ = z;
-        if (playerPos) {
-          const distFromPlayer = Math.hypot(x - playerPos.x, z - playerPos.z);
-          if (distFromPlayer > 130) {
-            nextX = playerPos.x + (Math.random() - 0.5) * 220;
-            nextZ = playerPos.z + (Math.random() - 0.5) * 220;
-            posAttr.setX(i, nextX);
-            posAttr.setZ(i, nextZ);
+    // Per "these look like giant blobs" — a real, well-known point-sprite
+    // artifact: THREE.PointsMaterial's default size ATTENUATION scales a
+    // point's screen size by 1/distance-to-camera, which is exactly
+    // correct for normal viewing distance but blows up toward infinity
+    // as a drop happens to drift very close to the camera itself (a
+    // near-camera pass was always statistically inevitable across
+    // thousands of particles). Rather than a shader-level clamp (a real
+    // custom sizeNode, more risk on a WebGPU/TSL material this session
+    // hasn't touched yet), this reuses the exact respawn mechanism
+    // already below for a drop that's finished falling — a drop that
+    // drifts inside this radius of the camera is treated as "landed"
+    // immediately, teleporting it back out to a normal fall distance
+    // instead of ever getting close enough to blow up on screen.
+    const CAMERA_RESPAWN_DIST = 2.2;
+    for (const tier of handle.rain.tiers) {
+      tier.points.material.opacity = Math.min(1, handle.rainIntensity * 0.55 * (profile.rainHeaviness || 1) * tier.opacityMul);
+      const posAttr = tier.points.geometry.attributes.position;
+      for (let i = 0; i < tier.terminalSpeed.length; i++) {
+        tier.currentSpeed[i] = Math.min(tier.terminalSpeed[i], tier.currentSpeed[i] + RAIN_GRAVITY * dt);
+        // Per-particle landing height — real ground beneath THIS drop, not
+        // one flat height shared by the whole system (see createRain's own
+        // comment on landHeights for why this matters and why it's only
+        // resampled on respawn below, not every frame).
+        const landY = tier.landHeights ? tier.landHeights[i] : fallbackLandY;
+        let y = posAttr.getY(i) - tier.currentSpeed[i] * dt * Math.max(0.15, handle.rainIntensity);
+        const x = posAttr.getX(i), z = posAttr.getZ(i);
+        const tooCloseToCamera = playerPos && playerPos.y !== undefined && Math.hypot(x - playerPos.x, y - playerPos.y, z - playerPos.z) < CAMERA_RESPAWN_DIST;
+        if (y < landY || tooCloseToCamera) {
+          y = 60;
+          // Resets to a randomized partial speed on respawn, same
+          // reasoning as the initial spawn in createRain above — every
+          // drop restarting from a dead stop at the exact same instant
+          // would look like a synchronized pulse each time the pool
+          // cycles, since drops respawn at a fixed height rather than a
+          // genuinely random point mid-fall.
+          tier.currentSpeed[i] = tier.terminalSpeed[i] * (0.3 + Math.random() * 0.4);
+          // Real per-drop landing point (before it recenters/resets) —
+          // spawn a ripple here ONLY if this drop actually landed AT water
+          // level, not on elevated dry ground (a ripple on dry sand would
+          // be wrong now that landY can be real terrain height above
+          // water) — and only if this biome has real water and a pool
+          // slot is actually free. A camera-proximity respawn never
+          // actually landed anywhere, so it never spawns one either.
+          if (!tooCloseToCamera && handle.rain.ripplePool && landY <= fallbackLandY + 0.01 && Math.random() < RIPPLE_SPAWN_CHANCE) {
+            spawnRipple(handle.rain.ripplePool, x, landY + 0.02, z, handle.rainIntensity);
+          }
+          // Per explicit "still need much more rainfall" — rain particles
+          // previously only ever spawned once, at world creation, in a
+          // fixed volume centered on world ORIGIN, and individual drops
+          // only ever drifted slowly with wind afterward, never
+          // re-randomized — meaning the whole rain cloud stayed
+          // effectively fixed in place near (0,0) for the entire session
+          // regardless of where the player actually explored to. Anywhere
+          // else on the island saw sparse or zero rain no matter how high
+          // the total particle count was raised. Now, on this natural
+          // respawn cycle (not every frame — only when a drop has actually
+          // finished falling), a drop that's drifted more than 130 units
+          // from the player teleports to a fresh position centered on
+          // wherever the player actually is right now, so the whole cloud
+          // progressively follows the player around the island within a
+          // couple of respawn cycles (each drop's own full fall takes
+          // roughly 1-2 seconds) rather than staying anchored to the map's
+          // center forever. A too-close-to-camera respawn always
+          // recenters (not just when past the 130 threshold) since the
+          // whole point is putting real distance behind it right now.
+          let nextX = x, nextZ = z;
+          if (playerPos) {
+            const distFromPlayer = Math.hypot(x - playerPos.x, z - playerPos.z);
+            if (distFromPlayer > 130 || tooCloseToCamera) {
+              nextX = playerPos.x + (Math.random() - 0.5) * 220;
+              nextZ = playerPos.z + (Math.random() - 0.5) * 220;
+              posAttr.setX(i, nextX);
+              posAttr.setZ(i, nextZ);
+            }
+          }
+          // Resample this drop's own landing height for its NEXT fall —
+          // uses nextX/nextZ (after any recentering above) since that's
+          // where it's actually about to fall toward, not where it just
+          // landed.
+          if (tier.landHeights && handle.rain.sampleHeight) {
+            const ground = handle.rain.sampleHeight(nextX, nextZ);
+            tier.landHeights[i] = ground !== null && ground !== undefined ? Math.max(ground, fallbackLandY) : fallbackLandY;
           }
         }
-        // Resample this drop's own landing height for its NEXT fall —
-        // uses nextX/nextZ (after any recentering above) since that's
-        // where it's actually about to fall toward, not where it just
-        // landed.
-        if (handle.rain.landHeights && handle.rain.sampleHeight) {
-          const ground = handle.rain.sampleHeight(nextX, nextZ);
-          handle.rain.landHeights[i] = ground !== null && ground !== undefined ? Math.max(ground, fallbackLandY) : fallbackLandY;
-        }
+        posAttr.setY(i, y);
+        // Rain drifts sideways with the wind instead of falling perfectly
+        // straight down, plus a small per-drop wobble (driftPhase) so drops
+        // don't all trace the exact same drift line — real rain has some
+        // per-drop scatter even under steady wind.
+        const wobble = Math.sin(handle.elapsed * 3 + tier.driftPhase[i]) * 0.15;
+        posAttr.setX(i, x + (windX + wobble) * dt * 0.4);
+        posAttr.setZ(i, z + (windZ + wobble) * dt * 0.4);
       }
-      posAttr.setY(i, y);
-      // Rain drifts sideways with the wind instead of falling perfectly
-      // straight down, plus a small per-drop wobble (driftPhase) so drops
-      // don't all trace the exact same drift line — real rain has some
-      // per-drop scatter even under steady wind.
-      const wobble = Math.sin(handle.elapsed * 3 + handle.rain.driftPhase[i]) * 0.15;
-      posAttr.setX(i, x + (windX + wobble) * dt * 0.4);
-      posAttr.setZ(i, z + (windZ + wobble) * dt * 0.4);
+      posAttr.needsUpdate = true;
     }
-    posAttr.needsUpdate = true;
     if (handle.rain.ripplePool) updateRipplePool(handle.rain.ripplePool, dt);
-    posAttr.needsUpdate = true;
   }
 
   // Lightning: a biome-unique colored flash from a light positioned where
@@ -973,9 +990,11 @@ function disposeWeatherSystem(scene, handle) {
   if (!handle) return;
   scene.remove(handle.lightningLight);
   if (handle.rain) {
-    scene.remove(handle.rain.points);
-    handle.rain.points.geometry.dispose();
-    handle.rain.points.material.dispose();
+    for (const tier of handle.rain.tiers) {
+      scene.remove(tier.points);
+      tier.points.geometry.dispose();
+      tier.points.material.dispose();
+    }
     if (handle.rain.ripplePool) {
       for (const r of handle.rain.ripplePool) {
         scene.remove(r);

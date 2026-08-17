@@ -5318,7 +5318,7 @@ function animate() {
   // Same visibility-gating pattern already used for whitecaps/the cloud
   // dome/light shafts above: toggle directly on submersion rather than
   // trying to fog/hide it any other way.
-  if (weatherHandle && weatherHandle.rain) weatherHandle.rain.points.visible = !isFullySubmerged;
+  if (weatherHandle && weatherHandle.rain) for (const tier of weatherHandle.rain.tiers) tier.points.visible = !isFullySubmerged; // rain is now 3 separate size-tiered Points objects (see weather.js's createRain), not one — every tier needs the same submersion toggle
   setRainIntensity(isFullySubmerged ? 0 : wind.rainIntensity); // same submersion gating as the visual rain particles just above — real rain isn't audible underwater either
   // Ocean wave sound, per explicit "gets louder the closer the player is
   // to the water" — Crystal only (the only biome with a real continuous

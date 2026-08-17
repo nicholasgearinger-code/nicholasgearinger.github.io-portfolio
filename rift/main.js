@@ -983,12 +983,31 @@ underwaterQuadScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), underwater
 // under WebGPURenderer's command-encoder model, regardless of how many
 // times the shader itself got fixed. This version never manually touches
 // renderTarget/render() at all — postProcessing.render() (see the final
-// render call further below) is now the SINGLE, ALWAYS-used render path,
-// with the droplet EFFECT (not the render TECHNIQUE) being what's
-// conditional, toggled via outputNode reassignment — the confirmed, real
-// pattern for enabling/disabling a pass at runtime (Three.js's own
-// RenderPipeline/PostProcessing docs show exactly this: reassign
-// .outputNode, set .needsUpdate = true).
+// render call further below) is now the SINGLE, ALWAYS-used render path.
+//
+// Per "seems like it only works once instead of every time it rains" —
+// the PREVIOUS version of this comment described toggling the droplet
+// effect on/off at runtime by reassigning .outputNode between this node
+// and plain scenePass on every active/inactive transition. That's the
+// documented pattern for RenderPipeline/PostProcessing, but this
+// project's own repeated-transition case (many storms across one play
+// session) was flagged as "genuinely unverified live" back when it was
+// written, and the real-world report now is that it stops working after
+// the first cycle — consistent with that specific repeated-reassignment
+// path being where the bug actually lives, not the shader itself.
+// Structural fix rather than another guess: this shader ALREADY reduces
+// to a true no-op at zero intensity — distortAmount and trailDistort are
+// both multiplied by lensIntensityUniform, so at 0 the sample offset is
+// exactly zero (sceneColor samples screenUV unchanged) and lightBoost is
+// exactly zero too, meaning the output is bit-for-bit the untouched
+// scene. So outputNode no longer needs to be swapped per rain
+// cycle at all — it's assigned ONCE below (right after this Fn, gated
+// only by the static Lens FX graphics setting, same reload-to-apply
+// convention as every other graphics toggle) and never reassigned again
+// for the rest of the session. Every rain cycle, surfacing event, and
+// dry-off now only ever touches uniform .value updates, never
+// .outputNode/.needsUpdate — removing the exact mechanism that only
+// seemed to work the first time.
 const postProcessing = new THREE.PostProcessing(renderer);
 const scenePass = pass(scene, camera);
 const scenePassColor = scenePass.getTextureNode("output");
@@ -1090,26 +1109,33 @@ const lensDistortedOutput = Fn(() => {
   // longer optical path and refracts more strongly than a tiny one.
   const sizeFactor = dropletRadius.div(0.22); // normalized against the old fixed radius, so overall intensity tuning elsewhere stays roughly in the same ballpark
   const distortAmount = inDroplet.mul(dropletPresent).mul(0.06).mul(sizeFactor).mul(lensIntensityUniform);
-  // Per "drip onto the lens like real rain does" — a narrow vertical
-  // streak in the same screen-space column as each droplet, extending
-  // toward increasing cellUV.y (the same direction the whole pattern
-  // already drifts in, above) — real water trails are what a droplet
-  // LEAVES BEHIND as it slides, not a symmetric mark. Narrow, and faded
-  // out with distance from the droplet, so it reads as a thin residual
-  // streak rather than a second droplet.
-  const trailXDist = abs(cellLocal.x.sub(dropletCenter.x));
+  // Per "trails are not straight lines it's more organic" — real water
+  // dripping down glass wanders left-right as it goes (surface tension
+  // catching on microscopic imperfections), not a razor-straight vertical
+  // line. A per-droplet hash seeds a meander phase/direction so each
+  // trail wanders its own way, and a sine wave along the trail's OWN
+  // downward distance (not raw screen Y, so the wander travels WITH the
+  // trail as it slides rather than being pinned to fixed screen rows)
+  // bends the sample point gently side to side. Amplitude scales with
+  // the droplet's own width so the wander stays proportional and never
+  // wanders the trail out past a plausible width for its own droplet.
+  const trailDist = dropletCenter.y.sub(cellLocal.y);
+  const meanderPhase = hash(seed.add(97.0)).mul(6.28);
+  const meanderAmount = mix(float(0.3), float(1.0), hash(seed.add(151.0))); // some trails wander more than others
+  const meanderX = sin(trailDist.mul(14.0).add(meanderPhase)).mul(dropletRadius.mul(0.22)).mul(meanderAmount);
+  const trailXDist = abs(cellLocal.x.sub(dropletCenter.x).sub(meanderX));
   // Trail direction flipped to match the drift flip above — stays
   // "behind" the droplet's actual now-reversed visible motion instead of
   // now pointing the wrong way. Width now scales with the droplet's own
   // size too — a real larger drop leaves a wider, more visible wet trail
   // than a tiny one.
-  const belowDroplet = smoothstep(zero, float(0.03), dropletCenter.y.sub(cellLocal.y));
+  const belowDroplet = smoothstep(zero, float(0.03), trailDist);
   // Trail LENGTH now scales with the droplet's own radius (was a fixed
   // 0-1 falloff regardless of size) — real heavier drops run further
   // down the glass before losing momentum than small clinging ones do,
   // so a bigger droplet here now visibly drips further, not just wider.
   const trailLength = dropletRadius.mul(1.8).add(0.15);
-  const trailFade = one.sub(clamp(dropletCenter.y.sub(cellLocal.y).div(trailLength), zero, one));
+  const trailFade = one.sub(clamp(trailDist.div(trailLength), zero, one));
   const trailWidth = dropletRadius.mul(0.16);
   const trailMask = smoothstep(trailWidth, trailWidth.mul(0.3), trailXDist).mul(belowDroplet).mul(trailFade).mul(dropletPresent);
   const trailDistort = trailMask.mul(0.015).mul(sizeFactor).mul(lensIntensityUniform);
@@ -1133,18 +1159,43 @@ const lensDistortedOutput = Fn(() => {
   const highlightPos = dropletCenter.add(vec2(-0.32, -0.32).mul(dropletRadius));
   const highlightDist = cellLocal.sub(highlightPos).length();
   const highlight = smoothstep(dropletRadius.mul(0.4), zero, highlightDist).mul(gated);
-  // Real sun-glint boost — per the existing, already-worked-out
-  // "only glow when reflecting sunlight" design (see the JS-side
-  // sun-screen-position projection this reads from) — droplets near
-  // where the sun actually is on screen catch extra light, same as real
-  // water droplets do. Kept, additive with the small highlight above.
+  // Per "it should interact with the light, shining in the sun" — real
+  // droplets act as tiny lenses: when one sits between the camera and
+  // the sun it doesn't just glow evenly, it catches light at a bright,
+  // tight FOCUSED point (the classic sun-through-a-raindrop sparkle),
+  // while droplets more broadly in the sun's general direction still
+  // pick up a softer overall brightening from backlighting even without
+  // catching the exact focal point.
   const sunDist = screenUV.sub(lensSunScreenPos).length();
-  const sunGlow = smoothstep(float(0.25), zero, sunDist).mul(gated).mul(0.4);
-  const lightBoost = highlight.mul(0.22).add(sunGlow).add(trailMask.mul(0.06)).mul(lensIntensityUniform);
-  const finalColor = sceneColor.rgb.add(vec3(lightBoost));
+  const sunProximity = smoothstep(float(0.35), zero, sunDist);
+  // Broad, soft backlit brightening across the whole droplet — was the
+  // old flat "sunGlow", kept but reframed as the AMBIENT half of the
+  // effect rather than the whole thing.
+  const sunLitGlow = sunProximity.mul(gated).mul(0.35);
+  // Tight per-droplet glint — offset from center by ANOTHER per-droplet
+  // hash (distinct from the highlight's own fixed offset above) so the
+  // sparkle reads as a field of many individually-catching drops, not
+  // one flat wash repeated identically across every droplet. Small and
+  // bright, the way a real focused glint looks, not a soft area light.
+  const glintPos = dropletCenter.add(vec2(hash(seed.add(191.0)).sub(0.5), hash(seed.add(223.0)).sub(0.5)).mul(dropletRadius.mul(0.5)));
+  const glintDist = cellLocal.sub(glintPos).length();
+  const sunGlint = smoothstep(dropletRadius.mul(0.22), zero, glintDist).mul(gated).mul(sunProximity);
+  // Warm-white tint on the glint specifically (real sunlight, not the
+  // neutral-white ambient highlight/trail terms) — sold via color, not
+  // just brightness, so it reads as catching actual sunlight rather than
+  // an arbitrary bright spot.
+  const sunTint = vec3(1.15, 1.05, 0.82);
+  const lightBoost = highlight.mul(0.22).add(sunLitGlow).add(trailMask.mul(0.06).mul(one.add(sunProximity.mul(0.8)))).mul(lensIntensityUniform);
+  const finalColor = sceneColor.rgb.add(vec3(lightBoost)).add(sunTint.mul(sunGlint).mul(0.9).mul(lensIntensityUniform));
   return vec4(finalColor, one);
 })();
-postProcessing.outputNode = scenePass; // starts in the plain-passthrough state; toggled per-frame further below
+// Per explicit "add a button... to turn off just the Lens effect" — this
+// is now the ONLY place outputNode is ever assigned (see this whole
+// block's own setup comment above for why the old per-frame toggle was
+// removed). Reads the static Lens FX graphics setting once, same
+// requires-a-reload-to-apply convention as every other graphics toggle
+// in this project — NOT re-checked or re-assigned per frame.
+postProcessing.outputNode = (getGraphicsSettings().lensEffectEnabled !== false) ? lensDistortedOutput : scenePass;
 
 
 // A large sphere enclosing the camera, rendered from the inside
@@ -1519,8 +1570,7 @@ let cloudsHandle = null;
 let submergedState = false; // persists across frames — see the hysteresis check below for why a fresh threshold comparison every frame isn't enough
 let wasFullySubmergedLastFrame = false; // detects the exact moment of surfacing, for the post-swim wet-lens effect below
 let pendingSettingsReload = false; // set true by applyGraphicsSettings whenever ANY graphics setting is changed mid-session — every setting now requires a page reload to actually take effect (see applyGraphicsSettings's own comment for why)
-let lensEffectActive = false; // set each frame below; read by the final render call to decide which outputNode postProcessing should currently be using
-let lastLensEffectActive = null; // previous frame's value — outputNode is only reassigned (and the real shader-recompile cost only paid) on an actual transition, not every frame
+let lensEffectActive = false; // set each frame below — no longer used to gate outputNode (see the shader setup's own comment for why that per-frame swap was removed); kept purely for the debug HUD text and as the flag that stops lensDripPhase advancing/sun-projection updating when there's nothing to show.
 let postSwimWetness = 0; // 0-1, set to 1 the instant the player surfaces, decays over ~60s — drives the SAME lens-rain shader as real rain, just from a different trigger
 // Per explicit "lasting until the rain is gone and slowly dry up" — real
 // rain-on-glass doesn't track the instant rainIntensity value 1:1 (that
@@ -5217,34 +5267,53 @@ function animate() {
   // disable the lens effect too.
   lensEffectActive = LENS_EFFECT_ENABLED && !isFullySubmerged && effectiveLensIntensity > 0.02;
   lensDiagEl.textContent = "lens: " + (lensEffectActive ? "ON" : "off") + ", intensity=" + effectiveLensIntensity.toFixed(2) + ", rain=" + (weatherHandle ? weatherHandle.rainIntensity.toFixed(2) : "n/a") + ", wet=" + postSwimWetness.toFixed(2) + ", submerged=" + isFullySubmerged;
-  if (lensEffectActive) {
-    // lensDripPhase (not raw elapsedTime) is what actually drives the
-    // droplets' downward slide in the shader — only advances while
-    // there's wetness, at a rate scaled by how much, so the slide
-    // itself speeds up/slows down with the storm instead of running at
-    // a fixed rate the whole time the effect happens to be active.
-    lensDripPhase += dt * effectiveLensIntensity;
-    lensTimeUniform.value = lensDripPhase;
-    lensIntensityUniform.value = effectiveLensIntensity;
-    // Per explicit "only glow when reflecting sunlight" — the real sun's
-    // world position projected onto the screen, so the shader's rim
-    // highlight can be gated by actual proximity to it instead of always
-    // being on. Checked against the camera's own forward direction first
-    // (a dot-product test, not relying on Vector3.project()'s own Z
-    // output, which doesn't cleanly indicate behind-camera the way a
-    // direct forward-direction check does) — if the sun is behind the
-    // camera or well outside a reasonable field of view, the sentinel
-    // (-10,-10) is sent instead, which the shader's own distance-based
-    // falloff already treats as "no glow" with no separate flag needed.
-    tempSunDir.copy(dayNightCycle.sunBody.group.position).sub(camera.position).normalize();
-    camera.getWorldDirection(tempCameraDir);
-    if (tempSunDir.dot(tempCameraDir) > 0.1) {
-      tempSunProjection.copy(dayNightCycle.sunBody.group.position).project(camera);
-      lensSunScreenPos.value.set((tempSunProjection.x + 1) / 2, (tempSunProjection.y + 1) / 2);
-    } else {
-      lensSunScreenPos.value.set(-10, -10);
-    }
+  // Per "seems like it only works once" fix above — outputNode is now
+  // PERMANENTLY set to the droplet shader (when Lens FX is on at all),
+  // so this uniform push must run and land on the CORRECT value every
+  // single frame, active or not — the old code only updated these
+  // uniforms inside "if (lensEffectActive)", which was safe back when
+  // an inactive frame meant outputNode had been swapped away from this
+  // shader entirely, but would now leave lensIntensityUniform frozen at
+  // its last nonzero value (e.g. while fully submerged, or Lens FX
+  // toggled off) with nothing left to zero it back out — the shader
+  // would keep showing whatever intensity it last saw forever. Always
+  // computing and pushing the REAL current value, including the
+  // explicit 0 case, is what keeps the shader's own already-proven
+  // "reduces to a true no-op at zero intensity" property actually true
+  // in practice.
+  const renderedLensIntensity = LENS_EFFECT_ENABLED && !isFullySubmerged ? effectiveLensIntensity : 0;
+  // lensDripPhase (not raw elapsedTime) is what actually drives the
+  // droplets' downward slide in the shader — only advances while
+  // there's wetness, at a rate scaled by how much, so the slide itself
+  // speeds up/slows down with the storm instead of running at a fixed
+  // rate the whole time the effect happens to be active. Naturally
+  // stops advancing on its own once renderedLensIntensity is 0 — no
+  // separate branch needed.
+  lensDripPhase += dt * renderedLensIntensity;
+  lensTimeUniform.value = lensDripPhase;
+  lensIntensityUniform.value = renderedLensIntensity;
+  // Per explicit "only glow when reflecting sunlight" — the real sun's
+  // world position projected onto the screen, so the shader's rim
+  // highlight can be gated by actual proximity to it instead of always
+  // being on. Checked against the camera's own forward direction first
+  // (a dot-product test, not relying on Vector3.project()'s own Z
+  // output, which doesn't cleanly indicate behind-camera the way a
+  // direct forward-direction check does) — if the sun is behind the
+  // camera or well outside a reasonable field of view, the sentinel
+  // (-10,-10) is sent instead, which the shader's own distance-based
+  // falloff already treats as "no glow" with no separate flag needed.
+  // Kept cheap to compute even when renderedLensIntensity is 0 — it's
+  // just a projection, and always running it means there's no separate
+  // stale-value risk here either.
+  tempSunDir.copy(dayNightCycle.sunBody.group.position).sub(camera.position).normalize();
+  camera.getWorldDirection(tempCameraDir);
+  if (tempSunDir.dot(tempCameraDir) > 0.1) {
+    tempSunProjection.copy(dayNightCycle.sunBody.group.position).project(camera);
+    lensSunScreenPos.value.set((tempSunProjection.x + 1) / 2, (tempSunProjection.y + 1) / 2);
+  } else {
+    lensSunScreenPos.value.set(-10, -10);
   }
+
   // Rain is an above-surface effect — real rain doesn't fall underwater.
   // Same visibility-gating pattern already used for whitecaps/the cloud
   // dome/light shafts above: toggle directly on submersion rather than
@@ -5417,25 +5486,16 @@ function animate() {
     underwaterDistortionMaterial.uniforms.time.value = elapsedTime;
     renderer.render(underwaterQuadScene, underwaterQuadCamera);
   } else {
-    // Per explicit "restore it and try again" — the root cause of the
-    // earlier "GPUValidationError: Invalid CommandEncoder" has since
-    // been structurally addressed: it traced to LIVE graphics-setting
-    // changes racing with postProcessing's internal state mid-session
-    // (shadows, tier switches, resolution). Every graphics setting now
-    // requires a page reload to actually apply (see applyGraphicsSettings
-    // and pendingSettingsReload elsewhere in this file) — nothing can
-    // trigger a live renderer state change while postProcessing.render()
-    // is active anymore, which is the specific condition that produced
-    // the crash. Real confidence this is safer now, not blind repetition
-    // of what failed before — but still genuinely unverified live, since
-    // this exact render path has never actually run successfully end to
-    // end. outputNode only gets reassigned (paying the real shader-
-    // recompile cost) on an actual on/off transition, not every frame.
-    if (lensEffectActive !== lastLensEffectActive) {
-      postProcessing.outputNode = lensEffectActive ? lensDistortedOutput : scenePass;
-      postProcessing.needsUpdate = true;
-      lastLensEffectActive = lensEffectActive;
-    }
+    // Per "seems like it only works once instead of every time it rains"
+    // — outputNode is no longer reassigned here at all (see the lens
+    // shader's own setup comment for the full reasoning). It's set
+    // exactly once, right after the shader is defined, and every frame
+    // from then on only ever updates uniform .value fields (time,
+    // intensity, sun position) — never .outputNode or .needsUpdate. That
+    // removes the one mechanism in this whole path that was ever
+    // actually re-triggered on every storm/surfacing cycle, which is the
+    // most likely place a "works the first time, not after" bug could
+    // live.
     postProcessing.render();
   }
 }

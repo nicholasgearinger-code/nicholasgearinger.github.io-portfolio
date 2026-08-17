@@ -5,7 +5,7 @@ import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERF
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
 import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, createUnderwaterLightShaft, updateLightShafts, disposeLightShafts, createRockCluster, createCaveMouth, applyVerticalGradient } from "./decorations.js";
-import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, updateFluidSimWater, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail } from "./liquid.js";
+import { createLiquidPlane, updateLiquidPlane, updateRippleLayer, disposeLiquidPlane, updateFluidSimWater, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail } from "./liquid.js";
 import { createDayNightCycle, updateDayNightCycle, CYCLE_SECONDS } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
 import { createGrass, updateGrass, disposeGrass, createFlowers, updateFlowers, disposeFlowers, createFootstepGlowSystem, spawnFootstepGlow, updateFootstepGlowSystem, disposeFootstepGlowSystem } from "./vegetation.js";
@@ -5027,6 +5027,12 @@ function animate() {
   // terrain caustic focus position.
   tempWaterGlintDir.copy(moonLight.position).lerp(sun.position, dayNight.dayAmount);
   updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, camera.position, tempWaterGlintDir, dayNight.skyHorizon, reflectionRenderTarget.texture, reflectionTextureMatrix, refractionRenderTarget.texture, refractionResolution, weatherHandle ? weatherHandle.rainIntensity : 0, dayNight.dayAmount, weatherHandle ? weatherHandle.windStrength : 0);
+  // Real GPU compute dispatch for the additive ripple layer (see
+  // liquid.js's own setup comment on it) — separate call for the same
+  // reason the fluid-sim water's own dispatch (just below) is separate
+  // from updateLiquidPlane: compute needs the real renderer, which that
+  // CPU-only function doesn't receive.
+  updateRippleLayer(liquidHandle, renderer, camera.position, camera.position.y, dt);
   // Real GPU compute dispatch for the fluid-sim water (see liquid.js's
   // buildCrystalFluidSimPlane) — separate from updateLiquidPlane above
   // since dispatching a compute shader needs the renderer, which only
@@ -5417,7 +5423,7 @@ function animate() {
       volumetricCloudsHandle, dt, camera, tempSunDir, dayNightCycle.sun.color, tempCloudAmbient,
       weatherHandle ? weatherHandle.lightningFlash : 0,
       weatherHandle ? weatherHandle.lightningLight.color : null,
-      wind.windX, wind.windZ, wind.rainIntensity
+      wind.windX, wind.windZ, wind.rainIntensity, currentBiome
     );
   }
 

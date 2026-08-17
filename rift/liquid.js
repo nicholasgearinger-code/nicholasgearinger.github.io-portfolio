@@ -240,7 +240,15 @@ const FAR_WAVES_RAW = (() => {
 })();
 const GERSTNER_WAVES = [...GERSTNER_WAVES_RAW, ...FAR_WAVES_RAW].map((w) => {
   const len = Math.hypot(w.dirX, w.dirZ) || 1;
-  return { ndx: w.dirX / len, ndz: w.dirZ / len, k: (Math.PI * 2) / w.wavelength, amplitude: w.amplitude, speed: w.speed, steepness: w.steepness };
+  // Per explicit "increase mesh displacement for more up and down waves"
+  // — a single multiplier applied uniformly across the whole spectrum
+  // here, rather than hand-editing each of the 15 components' own
+  // amplitude values individually. Scales real vertical motion up
+  // without touching direction/wavelength/speed/steepness, so the
+  // wave SHAPE and travel behavior stay exactly as already tuned —
+  // only how far up and down the surface actually moves changes.
+  const AMPLITUDE_BOOST = 1.6;
+  return { ndx: w.dirX / len, ndz: w.dirZ / len, k: (Math.PI * 2) / w.wavelength, amplitude: w.amplitude * AMPLITUDE_BOOST, speed: w.speed, steepness: w.steepness };
 });
 const GERSTNER_AMPLITUDE_SUM = GERSTNER_WAVES.reduce((sum, w) => sum + w.amplitude, 0);
 // Real GPU-side (TSL) copy of the exact same 15-component spectrum above
@@ -262,22 +270,28 @@ const GERSTNER_AMPLITUDE_SUM = GERSTNER_WAVES.reduce((sum, w) => sum + w.amplitu
 // abandoned fluid-sim's discretized wave equation) formula now
 // evaluates in parallel across however many vertices the mesh actually
 // has, instead of costing linear CPU time per vertex per frame.
+// Per explicit "increase mesh displacement for more up and down waves" —
+// same AMPLITUDE_BOOST multiplier as GERSTNER_WAVES above, applied here
+// too since this is the array that actually drives the real-time
+// positionNode displacement (see this array's own comment above) —
+// boosting only the CPU copy would have left the visible GPU-driven
+// water completely unchanged.
 const GERSTNER_WAVES_TSL = [
-  { ndx: 0.957826, ndz: 0.287348, k: 0.1496, amplitude: 0.448603, speed: 1.9, steepness: 0.5 },
-  { ndx: 0.295404, ndz: 0.955372, k: 0.199142, amplitude: 0.336999, speed: 1.646785, steepness: 0.5 },
-  { ndx: 0.405755, ndz: -0.913982, k: 0.265092, amplitude: 0.253161, speed: 1.427317, steepness: 0.5 },
-  { ndx: 0.128265, ndz: 0.99174, k: 0.352883, amplitude: 0.190179, speed: 1.237097, steepness: 0.5 },
-  { ndx: 0.999244, ndz: 0.038884, k: 0.469747, amplitude: 0.142866, speed: 1.072228, steepness: 0.5 },
-  { ndx: 0.883834, ndz: -0.4678, k: 0.625312, amplitude: 0.107324, speed: 0.929331, steepness: 0.5 },
-  { ndx: -0.120653, ndz: 0.992695, k: 0.832396, amplitude: 0.080624, speed: 0.805478, steepness: 0.5 },
-  { ndx: 0.544216, ndz: -0.838945, k: 1.10806, amplitude: 0.060566, speed: 0.698131, steepness: 0.5 },
-  { ndx: 0.704654, ndz: 0.709551, k: 1.475016, amplitude: 0.045498, speed: 0.605091, steepness: 0.5 },
-  { ndx: 0.663943, ndz: 0.747783, k: 1.963495, amplitude: 0.034179, speed: 0.52445, steepness: 0.5 },
-  { ndx: 0.957826, ndz: 0.287348, k: 0.069813, amplitude: 0.411886, speed: 2.6, steepness: 0.5 },
-  { ndx: 0.295404, ndz: 0.955372, k: 0.096164, amplitude: 0.299021, speed: 2.215315, steepness: 0.5 },
-  { ndx: 0.405755, ndz: -0.913982, k: 0.132461, amplitude: 0.217083, speed: 1.887547, steepness: 0.5 },
-  { ndx: 0.128265, ndz: 0.99174, k: 0.182459, amplitude: 0.157598, speed: 1.608274, steepness: 0.5 },
-  { ndx: 0.999244, ndz: 0.038884, k: 0.251327, amplitude: 0.114413, speed: 1.37032, steepness: 0.5 },
+  { ndx: 0.957826, ndz: 0.287348, k: 0.1496, amplitude: 0.448603 * 1.6, speed: 1.9, steepness: 0.5 },
+  { ndx: 0.295404, ndz: 0.955372, k: 0.199142, amplitude: 0.336999 * 1.6, speed: 1.646785, steepness: 0.5 },
+  { ndx: 0.405755, ndz: -0.913982, k: 0.265092, amplitude: 0.253161 * 1.6, speed: 1.427317, steepness: 0.5 },
+  { ndx: 0.128265, ndz: 0.99174, k: 0.352883, amplitude: 0.190179 * 1.6, speed: 1.237097, steepness: 0.5 },
+  { ndx: 0.999244, ndz: 0.038884, k: 0.469747, amplitude: 0.142866 * 1.6, speed: 1.072228, steepness: 0.5 },
+  { ndx: 0.883834, ndz: -0.4678, k: 0.625312, amplitude: 0.107324 * 1.6, speed: 0.929331, steepness: 0.5 },
+  { ndx: -0.120653, ndz: 0.992695, k: 0.832396, amplitude: 0.080624 * 1.6, speed: 0.805478, steepness: 0.5 },
+  { ndx: 0.544216, ndz: -0.838945, k: 1.10806, amplitude: 0.060566 * 1.6, speed: 0.698131, steepness: 0.5 },
+  { ndx: 0.704654, ndz: 0.709551, k: 1.475016, amplitude: 0.045498 * 1.6, speed: 0.605091, steepness: 0.5 },
+  { ndx: 0.663943, ndz: 0.747783, k: 1.963495, amplitude: 0.034179 * 1.6, speed: 0.52445, steepness: 0.5 },
+  { ndx: 0.957826, ndz: 0.287348, k: 0.069813, amplitude: 0.411886 * 1.6, speed: 2.6, steepness: 0.5 },
+  { ndx: 0.295404, ndz: 0.955372, k: 0.096164, amplitude: 0.299021 * 1.6, speed: 2.215315, steepness: 0.5 },
+  { ndx: 0.405755, ndz: -0.913982, k: 0.132461, amplitude: 0.217083 * 1.6, speed: 1.887547, steepness: 0.5 },
+  { ndx: 0.128265, ndz: 0.99174, k: 0.182459, amplitude: 0.157598 * 1.6, speed: 1.608274, steepness: 0.5 },
+  { ndx: 0.999244, ndz: 0.038884, k: 0.251327, amplitude: 0.114413 * 1.6, speed: 1.37032, steepness: 0.5 },
 ];
 
 // Domain warping — per explicit follow-up, this is what actually kills
@@ -1411,6 +1425,99 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
   const geo = new THREE.PlaneGeometry(size, size, segs, segs);
   geo.rotateX(-Math.PI / 2);
 
+  // Per explicit "add a small additive ripple layer" — real disturbance
+  // propagation (a genuine discrete wave equation, GPU compute-driven),
+  // layered ON TOP of the existing Gerstner ocean above via positionNode,
+  // not replacing it. Reuses the EXACT proven instancedArray ping-pong
+  // pattern and the real hard-won CFL-stable constants (waveSpeed=0.35,
+  // damping=0.985) from buildCrystalFluidSimPlane's own past debugging
+  // (that system fought real numerical-instability and TSL time-node
+  // bugs to arrive at these — reused directly here rather than re-
+  // guessed) — but deliberately smaller in scope: a small grid covering
+  // a fixed area around the map's central water/shore region (not the
+  // whole 2000-unit ocean), with NO ambient chop/swell of its own (that's
+  // already Gerstner's job) — this layer stays flat and silent until a
+  // real disturbance (currently: the player moving at/near the surface,
+  // see updateLiquidPlane) actually excites it, then lets real physics
+  // carry that disturbance outward and fade.
+  const RIPPLE_ENABLED = biome === "crystal";
+  const RIPPLE_WIDTH = 64;
+  const RIPPLE_CELL_COUNT = RIPPLE_WIDTH * RIPPLE_WIDTH;
+  const RIPPLE_AREA_SIZE = 260; // world units this grid covers — fixed placement, not following the player (a moving/scrolling grid would need to shift stored wave STATE, not just its own world-mapping, to avoid ripples appearing to slide; out of scope for this "small" pass)
+  let rippleLayer = null;
+  if (RIPPLE_ENABLED) {
+    const rippleHeightA = instancedArray(RIPPLE_CELL_COUNT, "float");
+    const rippleHeightB = instancedArray(RIPPLE_CELL_COUNT, "float");
+    const rippleVelocity = instancedArray(RIPPLE_CELL_COUNT, "float");
+    const ripplePlayerPos = uniform(vec2(9999, 9999)); // parked far outside the grid until the first real update — see updateLiquidPlane
+    const rippleSplashStrength = uniform(0);
+
+    const rippleComputeInit = Fn(() => {
+      rippleHeightA.element(instanceIndex).assign(0);
+      rippleHeightB.element(instanceIndex).assign(0);
+      rippleVelocity.element(instanceIndex).assign(0);
+    })().compute(RIPPLE_CELL_COUNT);
+
+    const rippleComputeUpdate = Fn(() => {
+      const i = instanceIndex;
+      const x = i.mod(uint(RIPPLE_WIDTH)).toFloat();
+      const yy = i.div(uint(RIPPLE_WIDTH)).toFloat();
+      const self = rippleHeightA.element(i);
+
+      // Edges clamped (re-reads the edge cell's own value), same
+      // boundary technique as buildCrystalFluidSimPlane — reflects
+      // energy inward like a real wall rather than wrapping.
+      const xm = max(x.sub(1), float(0));
+      const xp = min(x.add(1), float(RIPPLE_WIDTH - 1));
+      const ym = max(yy.sub(1), float(0));
+      const yp = min(yy.add(1), float(RIPPLE_WIDTH - 1));
+      const idxL = yy.mul(RIPPLE_WIDTH).add(xm).toUint();
+      const idxR = yy.mul(RIPPLE_WIDTH).add(xp).toUint();
+      const idxU = ym.mul(RIPPLE_WIDTH).add(x).toUint();
+      const idxD = yp.mul(RIPPLE_WIDTH).add(x).toUint();
+      const left = rippleHeightA.element(idxL);
+      const right = rippleHeightA.element(idxR);
+      const up = rippleHeightA.element(idxU);
+      const down = rippleHeightA.element(idxD);
+
+      const laplacian = left.add(right).add(up).add(down).sub(self.mul(4));
+      const waveSpeed = float(0.35);
+      const damping = float(0.985);
+      const newVelocity = rippleVelocity.element(i).add(laplacian.mul(waveSpeed)).mul(damping);
+      rippleVelocity.element(i).assign(newVelocity);
+      let newHeight = self.add(newVelocity.mul(0.05));
+
+      // Real disturbance injection — every cell checks its OWN distance
+      // to the player's current grid position and adds a falloff-
+      // weighted bump, rather than needing a targeted single-cell write
+      // (no such operation needed here — this is just a per-cell
+      // distance check against a uniform, same category of technique
+      // already used elsewhere in this project for proximity gating).
+      const cellWorldX = x.div(float(RIPPLE_WIDTH)).sub(0.5).mul(float(RIPPLE_AREA_SIZE));
+      const cellWorldZ = yy.div(float(RIPPLE_WIDTH)).sub(0.5).mul(float(RIPPLE_AREA_SIZE));
+      const distToPlayer = vec2(cellWorldX, cellWorldZ).sub(ripplePlayerPos).length();
+      const splashFalloff = tslSmoothstep(float(6), float(0), distToPlayer);
+      newHeight = newHeight.add(splashFalloff.mul(rippleSplashStrength));
+
+      rippleHeightB.element(i).assign(newHeight);
+    })().compute(RIPPLE_CELL_COUNT);
+
+    // renderer.copyBufferToBuffer isn't available on this renderer
+    // (confirmed via buildCrystalFluidSimPlane's own real testing) —
+    // copying via a trivial per-cell compute assignment instead, the
+    // same proven mechanism, not a new unverified API.
+    const rippleComputeCopyBack = Fn(() => {
+      rippleHeightA.element(instanceIndex).assign(rippleHeightB.element(instanceIndex));
+    })().compute(RIPPLE_CELL_COUNT);
+
+    rippleLayer = {
+      heightBuffer: rippleHeightA, width: RIPPLE_WIDTH, areaSize: RIPPLE_AREA_SIZE,
+      playerPos: ripplePlayerPos, splashStrength: rippleSplashStrength,
+      computeInit: rippleComputeInit, computeUpdate: rippleComputeUpdate, computeCopyBack: rippleComputeCopyBack,
+      initialized: false, lastPlayerX: null, lastPlayerZ: null,
+    };
+  }
+
   // Punches real holes in the water plane for any excluded region (e.g.
   // a chasm that should read as genuinely dry, not flooded) — this flat
   // plane otherwise covers the WHOLE map uniformly at one fixed height,
@@ -1736,7 +1843,24 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
           dz = dz.add(c.mul(amp).mul(w.steepness * w.ndz));
           dy = dy.add(s.mul(amp));
         }
-        return vec3(positionLocal.x.add(dx), positionLocal.y.add(dy), positionLocal.z.add(dz));
+        // Real additive ripple layer (see this function's own setup
+        // comment above) — nearest-neighbor sample (not bilinear; a real
+        // simplification for this "small" pass, worth upgrading to
+        // bilinear later if the per-cell blockiness is visible up close)
+        // from the SAME instancedArray buffer the compute shader writes,
+        // read directly here by index rather than through a texture —
+        // this only works because instancedArray buffers are genuine GPU
+        // storage buffers any shader holding a reference to them can
+        // read, not something scoped to whichever material "owns" a
+        // matching vertex layout.
+        let rippleY = float(0);
+        if (rippleLayer) {
+          const rgx = clamp(positionLocal.x.div(float(rippleLayer.areaSize)).add(0.5), 0, 1).mul(float(rippleLayer.width - 1));
+          const rgz = clamp(positionLocal.z.div(float(rippleLayer.areaSize)).add(0.5), 0, 1).mul(float(rippleLayer.width - 1));
+          const rippleIdx = rgz.round().toUint().mul(uint(rippleLayer.width)).add(rgx.round().toUint());
+          rippleY = rippleLayer.heightBuffer.element(rippleIdx);
+        }
+        return vec3(positionLocal.x.add(dx), positionLocal.y.add(dy).add(rippleY), positionLocal.z.add(dz));
       })();
       // Real analytic Gerstner normal — the exact same closed-form
       // derivative-based formula the old CPU version used (not a
@@ -2058,8 +2182,46 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
   return {
     mesh, backMesh, glow, shimmer, rocks, waterY: y, basePositions, biome, style, depthColors, shoreDamp,
     flowDir: normalizeFlow(flowDir), crustOctaves, crackOctaves, flowBeads, rippleTexture, foamAccum, shoreDampBuffer,
+    rippleLayer,
     lastElapsed: undefined, // set on first updateLiquidPlane call — used to derive real per-frame dt for the foam decay above, since this function only receives cumulative elapsed time
   };
+}
+
+// Real disturbance-driven update for the additive ripple layer (see
+// createLiquidPlane's own setup comment) — separate from
+// updateLiquidPlane itself for the SAME reason updateFluidSimWater is
+// separate from it: compute dispatch needs the real renderer, which
+// updateLiquidPlane (called from a CPU-only context in main.js) doesn't
+// receive. Call this alongside updateLiquidPlane, with the renderer main.js
+// already has on hand.
+function updateRippleLayer(handle, renderer, playerPos, playerY, dt) {
+  const ripple = handle && handle.rippleLayer;
+  if (!ripple) return;
+  if (!renderer || typeof renderer.compute !== "function") return; // defensive — same canSyncCompute-style guard updateFluidSimWater already uses
+  if (!ripple.initialized) {
+    renderer.compute(ripple.computeInit);
+    ripple.initialized = true;
+  }
+  // Real per-frame horizontal speed, derived from consecutive position
+  // values (this function only ever receives position, not velocity) —
+  // same derive-speed-from-position-delta technique already used
+  // elsewhere in this project for anything handed position only.
+  let speed = 0;
+  if (ripple.lastPlayerX !== null && dt > 0) {
+    const ddx = playerPos.x - ripple.lastPlayerX;
+    const ddz = playerPos.z - ripple.lastPlayerZ;
+    speed = Math.sqrt(ddx * ddx + ddz * ddz) / dt;
+  }
+  ripple.lastPlayerX = playerPos.x;
+  ripple.lastPlayerZ = playerPos.z;
+  // Only disturbs the water when the player is actually AT the surface
+  // (swimming/wading), not just anywhere above or below it — a real
+  // proximity gate, not a decorative one.
+  const nearSurface = Math.abs(playerY - handle.waterY) < 2.5;
+  ripple.playerPos.value.set(playerPos.x, playerPos.z);
+  ripple.splashStrength.value = nearSurface ? Math.min(0.6, speed * 0.05) : 0;
+  renderer.compute(ripple.computeUpdate);
+  renderer.compute(ripple.computeCopyBack);
 }
 
 function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir, skyHorizon, reflectionTexture, reflectionMatrix, refractionTexture, resolution, stormAmount = 0, dayAmount = 1, windStrength = 0) {
@@ -2663,6 +2825,18 @@ function disposeLiquidPlane(scene, handle) {
         b.mesh.material.dispose();
       }
     }
+    // Same genuinely-unverified disposal question as the fluid-sim
+    // buffers above (see that block's own comment) — try/catch for the
+    // same reason, so an unexpected API shape here can't break disposal
+    // for everything else.
+    if (handle.rippleLayer) {
+      try {
+        const r = handle.rippleLayer;
+        if (r.heightBuffer && typeof r.heightBuffer.dispose === "function") r.heightBuffer.dispose();
+      } catch (err) {
+        console.warn("[liquid] ripple layer buffer disposal — unverified API, logging instead of crashing:", err);
+      }
+    }
   });
 }
 
@@ -2906,7 +3080,7 @@ function disposeFoamParticles(scene, handle) {
   });
 }
 
-export { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, updateFluidSimWater, createFoamParticles, updateFoamParticles, disposeFoamParticles, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail };
+export { createLiquidPlane, updateLiquidPlane, updateRippleLayer, disposeLiquidPlane, updateFluidSimWater, createFoamParticles, updateFoamParticles, disposeFoamParticles, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail };
 
 // Ocean surface detail — Coral Shallows only. DISABLED entirely per
 // explicit follow-up request, after two rounds of trying to fix the

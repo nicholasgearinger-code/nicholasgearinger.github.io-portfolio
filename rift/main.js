@@ -298,7 +298,13 @@ camera.rotation.order = "YXZ";
 // so rain always surrounds the player regardless of where they've walked —
 // camera position is fed in as its own self-managed uniform, updated every
 // frame from JS, same reasoning as the dt uniform.
-const RAIN_PARTICLE_COUNT = 3000;
+// Per "performance... low FPS even at low settings" — this was a flat
+// constant regardless of graphics tier, unlike weather.js's own rain
+// splash system, which already scales with particleMultiplier. 3000 is
+// the real Medium-tier baseline (multiplier 1); scaling it by the same
+// established multiplier (Low 0.2, Medium 1, High 2) now gives Low a
+// genuinely cheap 600, not the same fixed 3000 every tier ran before.
+const RAIN_PARTICLE_COUNT = Math.round(3000 * getGraphicsSettings().particleMultiplier);
 const RAIN_RADIUS = 55; // spawn XZ scatter radius around the camera
 const RAIN_HEIGHT = 40; // spawn height above the camera
 const RAIN_FALL_SPEED = 22; // world units/sec — fast, driving rain, not a gentle drizzle

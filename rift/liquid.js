@@ -1395,12 +1395,19 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
   // this at getGraphicsSettings().liquidSegments (a shared, modest
   // number tuned for CPU affordability across every biome). A GPU vertex
   // shader evaluates the same analytic formula in parallel regardless of
-  // vertex count, so crystal specifically can afford far more detail —
-  // this is the actual fix for "barely moving, no breaking waves": the
-  // underlying Gerstner math was already correct and already at its
-  // safety-capped maximum steepness, but too few vertices to show it
-  // before this change.
-  const segs = biome === "crystal" ? 350 : getGraphicsSettings().liquidSegments;
+  // vertex count, so crystal specifically can afford somewhat more detail.
+  //
+  // Per "performance... low FPS even at low settings" — the flat 350
+  // above was a REAL bug, not a deliberate choice: it ignored the
+  // graphics tier entirely, so even Low (10 segments intended) actually
+  // ran the water at 350 — denser than even High tier's own intended
+  // maximum (260). Fixed to scale off the real tier value instead, with
+  // a modest 1.3x multiplier for crystal specifically (the GPU wave
+  // system does benefit from somewhat more resolution than other
+  // biomes' simpler water) rather than overriding tier entirely. Low
+  // now gets ~13 segments, Medium ~85, High ~338 — real headroom on
+  // High without silently taxing Low/Medium the same amount.
+  const segs = biome === "crystal" ? Math.round(getGraphicsSettings().liquidSegments * 1.3) : getGraphicsSettings().liquidSegments;
   const geo = new THREE.PlaneGeometry(size, size, segs, segs);
   geo.rotateX(-Math.PI / 2);
 
@@ -1854,7 +1861,7 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
         // filling the whole crest region solid.
         const linePhase = fract(dominantPhase.div(6.28318));
         const lineWidth = float(0.08);
-        const crestLines = tslSmoothstep(one.sub(lineWidth), one, linePhase).add(tslSmoothstep(lineWidth, zero, linePhase));
+        const crestLines = tslSmoothstep(float(1).sub(lineWidth), float(1), linePhase).add(tslSmoothstep(lineWidth, float(0), linePhase));
         const foamCoverage = foamMask.mul(crestLines).mul(shoreProximity);
         const foamGlow = color(0xf0f8ff).mul(foamCoverage).mul(1.8);
 

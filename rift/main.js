@@ -1096,7 +1096,18 @@ const lensDistortedOutput = Fn(() => {
     const wiggleFreq = mix(float(10.0), float(22.0), hash(seed.add(163.0)));
     const wigglePhase = hash(seed.add(97.0)).mul(6.28);
     const wiggleAmount = mix(float(0.06), float(0.16), hash(seed.add(151.0))).mul(dropletRadius.div(0.22));
-    const pathX = (atY) => dropletBaseX.add(sin(atY.sub(startY).mul(wiggleFreq).add(wigglePhase)).mul(wiggleAmount));
+    // Per "flow more organically" — a single clean sine reads as too
+    // mechanical/regular once the trail is wide enough to actually show
+    // its shape (see trailWidth below). Layering a second, faster,
+    // smaller wave on top (different frequency/phase so they don't just
+    // reinforce each other) breaks that regularity up the way a real
+    // trickle's path genuinely wanders — never quite repeating itself.
+    const pathX = (atY) => {
+      const t = atY.sub(startY);
+      const w1 = sin(t.mul(wiggleFreq).add(wigglePhase)).mul(wiggleAmount);
+      const w2 = sin(t.mul(wiggleFreq.mul(2.3)).add(wigglePhase.mul(1.7))).mul(wiggleAmount.mul(0.35));
+      return dropletBaseX.add(w1).add(w2);
+    };
     // Sample position relative to the droplet, in lane-width-scaled
     // units for both axes (the Y delta is scaled by cellSize to match
     // laneLocalX's own already-scaled units — same simplification the
@@ -1133,7 +1144,24 @@ const lensDistortedOutput = Fn(() => {
     const trailDistScaled = dyScaled; // positive = this sample sits ABOVE (already-travelled-through) the droplet's current position
     const belowDroplet = smoothstep(zero, float(0.3), trailDistScaled);
     const trailFade = one.sub(clamp(trailDistScaled.div(tslMax(traveledScaled, float(0.01))), zero, one));
-    const trailWidth = dropletRadius.mul(0.16);
+    // Per "trails are too thin, they should match the size of the
+    // raindrop" — was dropletRadius*0.16 (a hair-thin string next to the
+    // actual drop). A real drip's wet trail is nearly as wide as the
+    // drop itself right where it's still attached, then genuinely tapers
+    // thinner further up as the water thins out — trailWidth now mixes
+    // from a near-full-radius width (trailFade near 1, i.e. right at the
+    // droplet) down to a much thinner width far up the trail (trailFade
+    // near 0), instead of one fixed thin value the whole way.
+    const trailWidthNear = dropletRadius.mul(0.8);
+    const trailWidthFar = dropletRadius.mul(0.22);
+    const trailWidthTapered = mix(trailWidthFar, trailWidthNear, trailFade);
+    // Per "flow more organically" — real wet trails aren't a perfectly
+    // even ribbon either; they bulge and pinch along their own length
+    // (surface tension pooling unevenly). A slow noise wave along the
+    // trail's own travelled distance modulates width by roughly ±35%,
+    // giving it a genuinely liquid, uneven flow instead of a clean taper.
+    const bulgeNoise = sin(trailDistScaled.mul(5.0).add(seed.mul(17.0))).mul(0.5).add(0.5);
+    const trailWidth = trailWidthTapered.mul(mix(float(0.65), float(1.35), bulgeNoise));
     const trailMask = smoothstep(trailWidth, trailWidth.mul(0.3), abs(dx)).mul(belowDroplet).mul(trailFade).mul(dropletPresent);
     const trailDistort = trailMask.mul(0.015).mul(sizeFactor).mul(lensIntensityUniform);
     distortX = distortX.add(distortAmount.mul(dx));

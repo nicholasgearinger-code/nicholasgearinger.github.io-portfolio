@@ -1029,193 +1029,142 @@ const lensDistortedOutput = Fn(() => {
   const cellSize = float(10.0);
   const zero = float(0);
   const one = float(1);
-  const cellUV = screenUV.mul(cellSize);
-  const cellId = floor(cellUV);
-  const cellLocal = fract(cellUV);
-  // Per "sliding all at the same rate... trails need to draw a path down
-  // the glass as it slides" — the OLD version scrolled the entire grid
-  // at one single shared speed (lensTimeUniform.mul(-0.2), identical for
-  // every cell), which is exactly why every droplet visibly moved in
-  // lockstep. Real rain-on-glass drops slide at genuinely different
-  // rates (surface tension, glass imperfections, drop weight all vary
-  // per-drop) AND each one's trail is the ACTUAL wet path it has
-  // physically traveled so far, not a fixed-length mark that pops in at
-  // full size — this section replaces the whole-grid scroll with a
-  // PER-CELL slide instead, which naturally produces both.
-  //
-  // dropletSpeedMul is a per-cell rate (0.5x-1.8x), keyed on cellId
-  // alone (not the full per-epoch seed below) so a given patch of glass
-  // keeps the same general "runs fast" or "barely creeps" character
-  // across cycles, the way a real streak channel on a window tends to.
-  const cellIdHash = hash(cellId.x.add(cellId.y.mul(57.0)));
-  const dropletSpeedMul = mix(float(0.5), float(1.8), cellIdHash);
-  // creepRaw runs continuously per-cell at that cell's own rate;
-  // epoch (its integer part) changes each time a full slide-cycle
-  // finishes, and localCreep (its fractional part, 0->1) is this
-  // droplet's OWN progress through the CURRENT cycle — 0 the instant it
-  // reforms, 1 just before it wraps to the next cycle.
-  const creepRaw = lensTimeUniform.mul(0.05).mul(dropletSpeedMul).add(cellIdHash.mul(53.0));
-  const epoch = floor(creepRaw);
-  const localCreep = fract(creepRaw);
-  // The epoch is folded into the seed used for every hash-derived
-  // property below (size, wobble, presence, glint offset...) so each
-  // new cycle reforms as a genuinely fresh-looking droplet — merging/
-  // reforming with different characteristics each time, the way real
-  // drops do, rather than the exact same droplet retracing the exact
-  // same path forever.
-  const seed = cellId.x.add(cellId.y.mul(57.0)).add(epoch.mul(311.0));
-  // dropletCenter.y now ANIMATES (was a fixed per-cell hash) — sweeps
-  // from just above the cell (-0.15, so it eases in from off-cell rather
-  // than popping in at the top edge) to just below it (1.15, easing back
-  // out the bottom) as localCreep runs 0->1. This is the actual slide;
-  // x stays fixed for the cycle's duration, same as before.
-  const dropletCenter = vec2(hash(seed), mix(float(-0.15), float(1.15), localCreep));
-  // Not every cell gets a visible droplet — real rain-on-glass has gaps,
-  // not uniform full coverage. A float threshold (not a boolean/.select()
-  // — avoiding an API call not yet confirmed anywhere in this project,
-  // when smoothstep already does the same job with functions already
-  // proven working here) that's ~0 or ~1 per cell.
-  // Per explicit "lasting until the rain is gone and slowly dry up" —
-  // the coverage threshold itself now scales with lensIntensityUniform
-  // (which JS now feeds from the wetness accumulator, not raw
-  // rainIntensity) instead of being a fixed ~80% regardless of how wet
-  // the glass currently is. At full wetness the threshold sits low
-  // (0.05 — nearly every cell qualifies, dense near-total coverage
-  // matching the real reference photo). As wetness drains toward 0 the
-  // threshold climbs toward 0.95 — fewer and fewer cells still qualify,
-  // so drops visibly thin out and disappear as the glass dries, rather
-  // than the whole pattern cutting off uniformly the instant rain stops.
-  const coverageThreshold = mix(float(0.95), float(0.05), lensIntensityUniform);
-  const dropletPresent = smoothstep(coverageThreshold, coverageThreshold.add(0.02), hash(seed.add(71.0)));
-  // Per explicit "mix of large and small droplets" — per-cell randomized
-  // radius instead of one fixed size. pow(x, 2.2) biases the
-  // distribution toward smaller values (real rain-on-glass is mostly
-  // small drops with occasional larger ones, not an even split) — mix()
-  // then maps that into the actual size range. Capped at 0.34 (not
-  // closer to the 0.5 cell-boundary limit) so even the largest droplets
-  // stay fully within their own cell rather than visibly clipping
-  // against a neighbor's.
-  const sizeRand = hash(seed.add(113.0));
-  // Per "should have more larger ones so that we can see more visible
-  // distortions" — max size raised (0.34 -> 0.48) and the small-bias
-  // eased (pow 2.2 -> 1.5, less aggressively skewed toward tiny drops)
-  // so genuinely large droplets show up meaningfully more often, not
-  // just as a rare outlier.
-  const dropletRadius = mix(float(0.09), float(0.48), pow(sizeRand, float(1.5)));
-  const distToCenterRaw = cellLocal.sub(dropletCenter).length();
-  // Per explicit "more round" — real rain droplets on glass, especially
-  // the smaller/mid-sized ones this effect is mostly made of, read as
-  // genuinely round beads, not organically bulged blobs. Pulled the
-  // wobble WAY down (0.35 -> 0.12 of the droplet's own radius) rather
-  // than removing it outright — a little irregularity still keeps them
-  // from looking like a stamped, perfectly-identical pattern, but the
-  // dominant silhouette is now the circle, not the wobble.
-  const wobbleUV = cellLocal.mul(24.0);
-  const wobbleCellId = floor(wobbleUV);
-  const wobbleHash = hash(wobbleCellId.x.add(wobbleCellId.y.mul(41.0)).add(seed));
-  const wobble = wobbleHash.sub(0.5).mul(dropletRadius).mul(0.12);
-  const distToCenter = distToCenterRaw.add(wobble);
-  // Edge band tightened (0.6->0.82 of radius) — a narrower falloff band
-  // reads as a cleaner, more defined circular edge than the previous
-  // wider blur, which softened the roundness the wobble reduction above
-  // is meant to show off.
-  const inDroplet = one.sub(smoothstep(dropletRadius.mul(0.82), dropletRadius, distToCenter));
-  const dir = cellLocal.sub(dropletCenter);
-  // Per real reference photo — "distortion of the environment through the
-  // center... not glowing rings": this refraction-like sample offset is
-  // the PRIMARY visual carrier of the whole effect. Pulls the sample
-  // toward the droplet's own center, the real optical effect of light
-  // bending through a curved water droplet. Scaled by the droplet's own
-  // radius now too — a real larger droplet bends light through a
-  // longer optical path and refracts more strongly than a tiny one.
-  const sizeFactor = dropletRadius.div(0.22); // normalized against the old fixed radius, so overall intensity tuning elsewhere stays roughly in the same ballpark
-  const distortAmount = inDroplet.mul(dropletPresent).mul(0.06).mul(sizeFactor).mul(lensIntensityUniform);
-  // Per "trails are not straight lines it's more organic" — real water
-  // dripping down glass wanders left-right as it goes (surface tension
-  // catching on microscopic imperfections), not a razor-straight vertical
-  // line. A per-droplet hash seeds a meander phase/direction so each
-  // trail wanders its own way, and a sine wave along the trail's OWN
-  // downward distance (not raw screen Y, so the wander travels WITH the
-  // trail as it slides rather than being pinned to fixed screen rows)
-  // bends the sample point gently side to side. Amplitude scales with
-  // the droplet's own width so the wander stays proportional and never
-  // wanders the trail out past a plausible width for its own droplet.
-  const trailDist = dropletCenter.y.sub(cellLocal.y);
-  const meanderPhase = hash(seed.add(97.0)).mul(6.28);
-  const meanderAmount = mix(float(0.3), float(1.0), hash(seed.add(151.0))); // some trails wander more than others
-  const meanderX = sin(trailDist.mul(14.0).add(meanderPhase)).mul(dropletRadius.mul(0.22)).mul(meanderAmount);
-  const trailXDist = abs(cellLocal.x.sub(dropletCenter.x).sub(meanderX));
-  // Trail direction flipped to match the drift flip above — stays
-  // "behind" the droplet's actual now-reversed visible motion instead of
-  // now pointing the wrong way. Width now scales with the droplet's own
-  // size too — a real larger drop leaves a wider, more visible wet trail
-  // than a tiny one.
-  const belowDroplet = smoothstep(zero, float(0.03), trailDist);
-  // Per "trails need to draw a path down the glass as it slides" — trail
-  // length is no longer a fixed value that appears at full size the
-  // instant a droplet is present. It's now capped by how far THIS
-  // droplet has actually traveled since it reformed (traveledDist,
-  // derived straight from localCreep/dropletCenter's own animated
-  // position above) — near-zero right when a cycle starts, growing
-  // together with the droplet's own slide, same as a real drip actually
-  // WETS the glass behind it as it goes rather than dragging a
-  // pre-existing mark. Still capped by the droplet's own size too (a
-  // real heavier drop can still run further than a tiny one could, even
-  // late in its slide) — whichever limit is smaller wins.
-  const traveledDist = dropletCenter.y.sub(float(-0.15));
-  const trailLength = tslMin(traveledDist, dropletRadius.mul(1.8).add(0.15));
-  const trailFade = one.sub(clamp(trailDist.div(trailLength), zero, one));
-  const trailWidth = dropletRadius.mul(0.16);
-  const trailMask = smoothstep(trailWidth, trailWidth.mul(0.3), trailXDist).mul(belowDroplet).mul(trailFade).mul(dropletPresent);
-  const trailDistort = trailMask.mul(0.015).mul(sizeFactor).mul(lensIntensityUniform);
-  const totalDistortY = distortAmount.mul(dir.y).add(trailDistort);
-  const totalDistortX = distortAmount.mul(dir.x);
+  // Per "trace a streak path down the whole view so it doesn't look like
+  // it disappeared" — the previous version confined a droplet's ENTIRE
+  // slide to one small grid cell (~1/10th of the screen), so a "long"
+  // trail still only ever spanned a tenth of the view before the
+  // droplet's cycle reset. This is a real structural change, not a
+  // tuning tweak: lanes now only divide the screen HORIZONTALLY (still
+  // cellSize columns, same density as before), and a droplet's Y
+  // position sweeps the FULL screen height (real screenUV.y, not a
+  // fract()'d per-cell value) over its slide — so a slow-moving drop can
+  // now genuinely trace a continuous path from top to bottom.
+  const laneUV = screenUV.x.mul(cellSize);
+  const laneId = floor(laneUV);
+  const laneLocalX = fract(laneUV);
+  const startY = float(-0.15); // eases in just above the very top of the screen, same reasoning as the old per-cell entry/exit margin
+  const endY = float(1.15); // eases out just below the very bottom
+  // Confining every lane to exactly ONE simultaneous droplet would look
+  // far sparser than before (the old grid had ~cellSize droplets stacked
+  // per lane at once). ROWS unrolls that many independent, separately-
+  // phased droplets per lane instead — each with its own speed/seed —
+  // so real rain density is preserved even though any ONE droplet can
+  // now occupy much more of the screen at once.
+  const ROWS_PER_LANE = 4;
+  let distortX = float(0);
+  let distortY = float(0);
+  let lightBoost = float(0);
+  let sunGlintColor = vec3(0, 0, 0);
+  for (let row = 0; row < ROWS_PER_LANE; row++) {
+    const rowBase = laneId.add(float(row * 131.0));
+    const rowHash = hash(rowBase);
+    // Per-row/lane slide rate (0.4x-1.6x) keyed on the row's own STABLE
+    // identity (not the per-cycle seed below) so a given lane+row keeps
+    // its general "runs fast" or "barely creeps" character across
+    // cycles, the way a real streak channel on a window tends to.
+    const rowSpeedMul = mix(float(0.4), float(1.6), rowHash);
+    const creepRaw = lensTimeUniform.mul(0.045).mul(rowSpeedMul).add(rowHash.mul(53.0));
+    const epoch = floor(creepRaw);
+    const localCreep = fract(creepRaw);
+    // Epoch folded into the seed so every new cycle reforms as a fresh-
+    // looking droplet (new size/position/wobble), the way real drops
+    // merge and re-form rather than retracing the exact same path
+    // forever.
+    const seed = rowBase.add(epoch.mul(311.0));
+    const dropletBaseX = hash(seed); // fixed for this cycle's whole slide, 0-1 within the lane
+    const dropletY = mix(startY, endY, localCreep); // the droplet's CURRENT position, full screen-height units
+    // Per "lasting until the rain is gone and slowly dry up" — coverage
+    // threshold scales with lensIntensityUniform (fed from the JS-side
+    // wetness accumulator): dense near-total coverage at full wetness,
+    // thinning out as the glass dries, rather than a fixed coverage
+    // percentage that cuts off uniformly the instant rain stops.
+    const coverageThreshold = mix(float(0.95), float(0.05), lensIntensityUniform);
+    const dropletPresent = smoothstep(coverageThreshold, coverageThreshold.add(0.02), hash(seed.add(71.0)));
+    // Per explicit "mix of large and small droplets" — pow() biases the
+    // distribution toward smaller values (real rain-on-glass is mostly
+    // small drops with occasional larger ones).
+    const sizeRand = hash(seed.add(113.0));
+    const dropletRadius = mix(float(0.09), float(0.48), pow(sizeRand, float(1.5)));
+    // Per "it should wobble a little as it slides" — a real physical
+    // wiggle in the droplet's OWN position as it travels, not just its
+    // edge shape. pathX(y) gives the path's x position AT ANY HEIGHT
+    // along its slide (not just its current position) — used for both
+    // the round body itself (naturally reduces to the body's current
+    // wobbled x right at its own position) AND every point along its
+    // trail, so the trail actually traces the SAME wobbly path the body
+    // travelled rather than a straight line trailing a wobbling body.
+    const wiggleFreq = mix(float(10.0), float(22.0), hash(seed.add(163.0)));
+    const wigglePhase = hash(seed.add(97.0)).mul(6.28);
+    const wiggleAmount = mix(float(0.06), float(0.16), hash(seed.add(151.0))).mul(dropletRadius.div(0.22));
+    const pathX = (atY) => dropletBaseX.add(sin(atY.sub(startY).mul(wiggleFreq).add(wigglePhase)).mul(wiggleAmount));
+    // Sample position relative to the droplet, in lane-width-scaled
+    // units for both axes (the Y delta is scaled by cellSize to match
+    // laneLocalX's own already-scaled units — same simplification the
+    // original single-cell version relied on, just now applied at
+    // comparison time instead of upfront on the whole coordinate space,
+    // since Y itself needs to stay unscaled for the full-height slide
+    // above).
+    const dx = laneLocalX.sub(pathX(screenUV.y));
+    const dyScaled = screenUV.y.sub(dropletY).mul(cellSize);
+    const relPos = vec2(dx, dyScaled);
+    // Small per-droplet edge irregularity (shape only, not position) —
+    // kept subtle so the dominant silhouette stays a clean circle per
+    // "more round," not a bulged organic blob.
+    const edgeWobbleUV = relPos.mul(6.0);
+    const edgeWobbleCellId = floor(edgeWobbleUV);
+    const edgeWobbleHash = hash(edgeWobbleCellId.x.add(edgeWobbleCellId.y.mul(41.0)).add(seed));
+    const edgeWobble = edgeWobbleHash.sub(0.5).mul(dropletRadius).mul(0.12);
+    const distToCenter = relPos.length().add(edgeWobble);
+    const inDroplet = one.sub(smoothstep(dropletRadius.mul(0.82), dropletRadius, distToCenter));
+    const gated = inDroplet.mul(dropletPresent);
+    // Real refraction — pulls the sample toward the droplet's own
+    // center, the actual optical effect of light bending through a
+    // curved water droplet. Scaled by the droplet's own radius — a
+    // bigger droplet bends light through a longer optical path.
+    const sizeFactor = dropletRadius.div(0.22);
+    const distortAmount = inDroplet.mul(dropletPresent).mul(0.06).mul(sizeFactor).mul(lensIntensityUniform);
+    // Per "trace a streak path down the whole view so it doesn't look
+    // like it disappeared" — trail length is no longer capped by the
+    // droplet's own size at all; it's simply how far this droplet has
+    // ACTUALLY travelled since it reformed (in the same scaled units as
+    // everything else above), which can now legitimately span most of
+    // the screen height for a drop mid-slide.
+    const traveledScaled = dropletY.sub(startY).mul(cellSize);
+    const trailDistScaled = dyScaled; // positive = this sample sits ABOVE (already-travelled-through) the droplet's current position
+    const belowDroplet = smoothstep(zero, float(0.3), trailDistScaled);
+    const trailFade = one.sub(clamp(trailDistScaled.div(tslMax(traveledScaled, float(0.01))), zero, one));
+    const trailWidth = dropletRadius.mul(0.16);
+    const trailMask = smoothstep(trailWidth, trailWidth.mul(0.3), abs(dx)).mul(belowDroplet).mul(trailFade).mul(dropletPresent);
+    const trailDistort = trailMask.mul(0.015).mul(sizeFactor).mul(lensIntensityUniform);
+    distortX = distortX.add(distortAmount.mul(dx));
+    distortY = distortY.add(distortAmount.mul(dyScaled)).add(trailDistort);
+    // Small directional highlight (light reflecting off one side of the
+    // curved bead) plus a tight Fresnel-style rim brightening right at
+    // the outer edge — per "reflecting... the world through it": real
+    // droplets don't just refract, the curved surface itself catches a
+    // thin bright rim at grazing angles the way any lens/bead does.
+    const highlightOffset = vec2(-0.32, -0.32).mul(dropletRadius);
+    const highlightDist = relPos.sub(highlightOffset).length();
+    const highlight = smoothstep(dropletRadius.mul(0.4), zero, highlightDist).mul(gated);
+    const rimT = distToCenter.div(tslMax(dropletRadius, float(0.001)));
+    const fresnelRim = smoothstep(float(0.7), float(1.0), rimT).mul(gated).mul(0.16);
+    const sunDist = screenUV.sub(lensSunScreenPos).length();
+    const sunProximity = smoothstep(float(0.35), zero, sunDist);
+    const sunLitGlow = sunProximity.mul(gated).mul(0.35);
+    const glintOffset = vec2(hash(seed.add(191.0)).sub(0.5), hash(seed.add(223.0)).sub(0.5)).mul(dropletRadius.mul(0.5));
+    const glintDist = relPos.sub(glintOffset).length();
+    const sunGlint = smoothstep(dropletRadius.mul(0.22), zero, glintDist).mul(gated).mul(sunProximity);
+    lightBoost = lightBoost.add(highlight.mul(0.22)).add(fresnelRim).add(sunLitGlow).add(trailMask.mul(0.06).mul(one.add(sunProximity.mul(0.8))));
+    sunGlintColor = sunGlintColor.add(vec3(1.15, 1.05, 0.82).mul(sunGlint));
+  }
   // No manual Y-flip here (unlike the first, now-abandoned version) —
   // that flip was needed only because that version manually rendered to
   // a raw WebGLRenderTarget and sampled it back by hand. pass()'s own
   // texture output is designed specifically for exactly this "read the
   // rendered scene back" use case and handles orientation internally.
-  const distortedUV = clamp(screenUV.sub(vec2(totalDistortX, totalDistortY)), zero, one);
+  const distortedUV = clamp(screenUV.sub(vec2(distortX, distortY)), zero, one);
   const sceneColor = texture(scenePassColor, distortedUV);
-  const gated = inDroplet.mul(dropletPresent);
-  // Per "should... reflect light" — a SMALL, soft highlight point offset
-  // from the droplet's own center (the classic look of a light source
-  // reflecting off one side of a curved sphere), not a bright ring
-  // tracing the whole edge — real droplets show one modest bright spot,
-  // not a glowing halo. Offset and size now scale with the droplet's own
-  // radius — a bigger droplet's highlight sits proportionally further
-  // from center and covers more area than a tiny droplet's would.
-  const highlightPos = dropletCenter.add(vec2(-0.32, -0.32).mul(dropletRadius));
-  const highlightDist = cellLocal.sub(highlightPos).length();
-  const highlight = smoothstep(dropletRadius.mul(0.4), zero, highlightDist).mul(gated);
-  // Per "it should interact with the light, shining in the sun" — real
-  // droplets act as tiny lenses: when one sits between the camera and
-  // the sun it doesn't just glow evenly, it catches light at a bright,
-  // tight FOCUSED point (the classic sun-through-a-raindrop sparkle),
-  // while droplets more broadly in the sun's general direction still
-  // pick up a softer overall brightening from backlighting even without
-  // catching the exact focal point.
-  const sunDist = screenUV.sub(lensSunScreenPos).length();
-  const sunProximity = smoothstep(float(0.35), zero, sunDist);
-  // Broad, soft backlit brightening across the whole droplet — was the
-  // old flat "sunGlow", kept but reframed as the AMBIENT half of the
-  // effect rather than the whole thing.
-  const sunLitGlow = sunProximity.mul(gated).mul(0.35);
-  // Tight per-droplet glint — offset from center by ANOTHER per-droplet
-  // hash (distinct from the highlight's own fixed offset above) so the
-  // sparkle reads as a field of many individually-catching drops, not
-  // one flat wash repeated identically across every droplet. Small and
-  // bright, the way a real focused glint looks, not a soft area light.
-  const glintPos = dropletCenter.add(vec2(hash(seed.add(191.0)).sub(0.5), hash(seed.add(223.0)).sub(0.5)).mul(dropletRadius.mul(0.5)));
-  const glintDist = cellLocal.sub(glintPos).length();
-  const sunGlint = smoothstep(dropletRadius.mul(0.22), zero, glintDist).mul(gated).mul(sunProximity);
-  // Warm-white tint on the glint specifically (real sunlight, not the
-  // neutral-white ambient highlight/trail terms) — sold via color, not
-  // just brightness, so it reads as catching actual sunlight rather than
-  // an arbitrary bright spot.
-  const sunTint = vec3(1.15, 1.05, 0.82);
-  const lightBoost = highlight.mul(0.22).add(sunLitGlow).add(trailMask.mul(0.06).mul(one.add(sunProximity.mul(0.8)))).mul(lensIntensityUniform);
-  const finalColor = sceneColor.rgb.add(vec3(lightBoost)).add(sunTint.mul(sunGlint).mul(0.9).mul(lensIntensityUniform));
+  const finalColor = sceneColor.rgb.add(vec3(lightBoost.mul(lensIntensityUniform))).add(sunGlintColor.mul(0.9).mul(lensIntensityUniform));
   return vec4(finalColor, one);
 })();
 // Per explicit "add a button... to turn off just the Lens effect" — this

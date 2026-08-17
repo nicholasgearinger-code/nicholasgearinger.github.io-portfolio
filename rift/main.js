@@ -1029,26 +1029,47 @@ const lensDistortedOutput = Fn(() => {
   const cellSize = float(10.0);
   const zero = float(0);
   const one = float(1);
-  // Downward drift, tied to lensTimeUniform — but that uniform is now fed
-  // from the JS-side lensDripPhase accumulator (see its own declaration
-  // and per-frame update further below), NOT raw elapsedTime anymore.
-  // lensDripPhase only advances while there's real wetness, at a rate
-  // scaled by how wet the glass currently is — so this drift genuinely
-  // speeds up as a storm builds and slows toward a standstill as it
-  // dries, instead of sliding at the same constant rate regardless of
-  // rain state (which is what a raw elapsedTime feed always did, being
-  // itself constant-rate by definition).
-  // Per direct observation "flow organically down the glass lens not
-  // up" — flipped the sign directly based on what was actually seen
-  // live, rather than re-reasoning about UV orientation (this exact
-  // project's screen-space UV convention has been wrong more than once
-  // already this session, so trusting the real observation over theory
-  // here).
-  const cellUV = screenUV.mul(cellSize).add(vec2(zero, lensTimeUniform.mul(-0.2)));
+  const cellUV = screenUV.mul(cellSize);
   const cellId = floor(cellUV);
   const cellLocal = fract(cellUV);
-  const seed = cellId.x.add(cellId.y.mul(57.0));
-  const dropletCenter = vec2(hash(seed), hash(seed.add(31.0)));
+  // Per "sliding all at the same rate... trails need to draw a path down
+  // the glass as it slides" — the OLD version scrolled the entire grid
+  // at one single shared speed (lensTimeUniform.mul(-0.2), identical for
+  // every cell), which is exactly why every droplet visibly moved in
+  // lockstep. Real rain-on-glass drops slide at genuinely different
+  // rates (surface tension, glass imperfections, drop weight all vary
+  // per-drop) AND each one's trail is the ACTUAL wet path it has
+  // physically traveled so far, not a fixed-length mark that pops in at
+  // full size — this section replaces the whole-grid scroll with a
+  // PER-CELL slide instead, which naturally produces both.
+  //
+  // dropletSpeedMul is a per-cell rate (0.5x-1.8x), keyed on cellId
+  // alone (not the full per-epoch seed below) so a given patch of glass
+  // keeps the same general "runs fast" or "barely creeps" character
+  // across cycles, the way a real streak channel on a window tends to.
+  const cellIdHash = hash(cellId.x.add(cellId.y.mul(57.0)));
+  const dropletSpeedMul = mix(float(0.5), float(1.8), cellIdHash);
+  // creepRaw runs continuously per-cell at that cell's own rate;
+  // epoch (its integer part) changes each time a full slide-cycle
+  // finishes, and localCreep (its fractional part, 0->1) is this
+  // droplet's OWN progress through the CURRENT cycle — 0 the instant it
+  // reforms, 1 just before it wraps to the next cycle.
+  const creepRaw = lensTimeUniform.mul(0.05).mul(dropletSpeedMul).add(cellIdHash.mul(53.0));
+  const epoch = floor(creepRaw);
+  const localCreep = fract(creepRaw);
+  // The epoch is folded into the seed used for every hash-derived
+  // property below (size, wobble, presence, glint offset...) so each
+  // new cycle reforms as a genuinely fresh-looking droplet — merging/
+  // reforming with different characteristics each time, the way real
+  // drops do, rather than the exact same droplet retracing the exact
+  // same path forever.
+  const seed = cellId.x.add(cellId.y.mul(57.0)).add(epoch.mul(311.0));
+  // dropletCenter.y now ANIMATES (was a fixed per-cell hash) — sweeps
+  // from just above the cell (-0.15, so it eases in from off-cell rather
+  // than popping in at the top edge) to just below it (1.15, easing back
+  // out the bottom) as localCreep runs 0->1. This is the actual slide;
+  // x stays fixed for the cycle's duration, same as before.
+  const dropletCenter = vec2(hash(seed), mix(float(-0.15), float(1.15), localCreep));
   // Not every cell gets a visible droplet — real rain-on-glass has gaps,
   // not uniform full coverage. A float threshold (not a boolean/.select()
   // — avoiding an API call not yet confirmed anywhere in this project,
@@ -1130,11 +1151,19 @@ const lensDistortedOutput = Fn(() => {
   // size too — a real larger drop leaves a wider, more visible wet trail
   // than a tiny one.
   const belowDroplet = smoothstep(zero, float(0.03), trailDist);
-  // Trail LENGTH now scales with the droplet's own radius (was a fixed
-  // 0-1 falloff regardless of size) — real heavier drops run further
-  // down the glass before losing momentum than small clinging ones do,
-  // so a bigger droplet here now visibly drips further, not just wider.
-  const trailLength = dropletRadius.mul(1.8).add(0.15);
+  // Per "trails need to draw a path down the glass as it slides" — trail
+  // length is no longer a fixed value that appears at full size the
+  // instant a droplet is present. It's now capped by how far THIS
+  // droplet has actually traveled since it reformed (traveledDist,
+  // derived straight from localCreep/dropletCenter's own animated
+  // position above) — near-zero right when a cycle starts, growing
+  // together with the droplet's own slide, same as a real drip actually
+  // WETS the glass behind it as it goes rather than dragging a
+  // pre-existing mark. Still capped by the droplet's own size too (a
+  // real heavier drop can still run further than a tiny one could, even
+  // late in its slide) — whichever limit is smaller wins.
+  const traveledDist = dropletCenter.y.sub(float(-0.15));
+  const trailLength = tslMin(traveledDist, dropletRadius.mul(1.8).add(0.15));
   const trailFade = one.sub(clamp(trailDist.div(trailLength), zero, one));
   const trailWidth = dropletRadius.mul(0.16);
   const trailMask = smoothstep(trailWidth, trailWidth.mul(0.3), trailXDist).mul(belowDroplet).mul(trailFade).mul(dropletPresent);

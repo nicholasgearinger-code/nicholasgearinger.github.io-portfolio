@@ -1197,18 +1197,36 @@ const lensDistortedOutput = Fn(() => {
     const trailDistort = trailMask.mul(0.015).mul(sizeFactor).mul(lensIntensityUniform);
     distortX = distortX.add(distortAmount.mul(dx));
     distortY = distortY.add(distortAmount.mul(dyScaled)).add(trailDistort);
-    // Small directional highlight (light reflecting off one side of the
-    // curved bead) plus a tight Fresnel-style rim brightening right at
-    // the outer edge — per "reflecting... the world through it": real
-    // droplets don't just refract, the curved surface itself catches a
-    // thin bright rim at grazing angles the way any lens/bead does.
-    const highlightOffset = vec2(-0.32, -0.32).mul(dropletRadius);
-    const highlightDist = relPos.sub(highlightOffset).length();
-    const highlight = smoothstep(dropletRadius.mul(0.4), zero, highlightDist).mul(gated);
-    const rimT = distToCenter.div(tslMax(dropletRadius, float(0.001)));
-    const fresnelRim = smoothstep(float(0.7), float(1.0), rimT).mul(gated).mul(0.16);
     const sunDist = screenUV.sub(lensSunScreenPos).length();
     const sunProximity = smoothstep(float(0.35), zero, sunDist);
+    // Per "should only show if it's reflecting the light, not... painted
+    // on" — real, confirmed bug: the highlight and rim below used to be
+    // unconditional (present on every droplet at full strength
+    // regardless of where the actual light source was, or whether there
+    // was one in view at all), which is exactly what reads as a flat,
+    // painted-on glass/balloon look instead of a real reflection. `lit`
+    // is now the actual gate for both — mostly driven by sunProximity
+    // (the real light source), with only a small ambient floor left so
+    // droplets aren't 100% invisible in flat, sourceless light.
+    const lit = mix(float(0.1), one, sunProximity);
+    // Per "not only from one direction" — the highlight's offset used to
+    // be a fixed diagonal (-0.32,-0.32) on literally every droplet, so
+    // it always caught "light" from the same corner no matter where the
+    // sun actually was. It's now the real per-pixel direction FROM here
+    // TOWARD the sun's own screen position, so the bright spot lands on
+    // whichever side of each droplet is actually facing the light.
+    const toSun = lensSunScreenPos.sub(screenUV);
+    const toSunDir = toSun.div(tslMax(toSun.length(), float(0.001)));
+    const highlightOffset = toSunDir.mul(dropletRadius.mul(0.32));
+    const highlightDist = relPos.sub(highlightOffset).length();
+    const highlight = smoothstep(dropletRadius.mul(0.4), zero, highlightDist).mul(gated).mul(lit);
+    // Tight Fresnel-style rim brightening right at the outer edge — real
+    // droplets don't just refract, the curved surface itself catches a
+    // thin bright rim at grazing angles the way any lens/bead does, but
+    // (same fix) only actually brightens when there's real light to
+    // catch, not as a constant ring around every drop.
+    const rimT = distToCenter.div(tslMax(dropletRadius, float(0.001)));
+    const fresnelRim = smoothstep(float(0.7), float(1.0), rimT).mul(gated).mul(0.16).mul(lit);
     const sunLitGlow = sunProximity.mul(gated).mul(0.35);
     const glintOffset = vec2(hash(seed.add(191.0)).sub(0.5), hash(seed.add(223.0)).sub(0.5)).mul(dropletRadius.mul(0.5));
     const glintDist = relPos.sub(glintOffset).length();

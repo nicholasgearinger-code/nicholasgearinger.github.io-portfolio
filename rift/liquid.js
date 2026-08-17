@@ -1451,7 +1451,26 @@ function detectShorelinePoints(sampleHeight, waterY, size) {
 
 function createBreakingWave(scene, waterY, sampleHeight, size) {
   const shorePoints = detectShorelinePoints(sampleHeight, waterY, size);
-  if (shorePoints.length < 2) return null; // no usable shoreline found in range — real, defensive bail rather than building broken geometry
+  // Per "I don't think I see any changes" — real, visible on-screen
+  // diagnostic instead of another blind guess, same established pattern
+  // this project already uses for exactly this situation (the fluid-sim
+  // water's own "wave: FAILED" readout). Shoreline detection is a real
+  // scan over a BOUNDED area (±220 world units from origin) — if the
+  // actual Coral Shallows coastline sits outside that range, or its
+  // shape doesn't produce a clean single crossing per X column, this
+  // silently finds nothing and no mesh gets created at all, which would
+  // look exactly like "no changes." This surfaces that directly instead
+  // of failing invisibly.
+  const diagEl = typeof window !== "undefined" ? window.riftBreakingWaveDiagEl : null;
+  if (diagEl) diagEl.style.display = "block";
+  if (shorePoints.length < 2) {
+    if (diagEl) diagEl.textContent = "wave-crest: NO SHORELINE FOUND (0-1 points in ±220 range)";
+    return { mesh: null, breakTimeUniform: null }; // no usable shoreline found in range — real, defensive bail rather than building broken geometry
+  }
+  if (diagEl) {
+    const xs = shorePoints.map((p) => p.x), zs = shorePoints.map((p) => p.z);
+    diagEl.textContent = `wave-crest: ${shorePoints.length} pts, x[${Math.min(...xs).toFixed(0)},${Math.max(...xs).toFixed(0)}] z[${Math.min(...zs).toFixed(0)},${Math.max(...zs).toFixed(0)}]`;
+  }
 
   const crossRes = BREAK_CROSS_RES;
   const vertCount = shorePoints.length * crossRes;
@@ -1594,12 +1613,12 @@ function createBreakingWave(scene, waterY, sampleHeight, size) {
 }
 
 function updateBreakingWave(handle, elapsed) {
-  if (!handle) return;
+  if (!handle || !handle.mesh) return;
   handle.breakTimeUniform.value = elapsed;
 }
 
 function disposeBreakingWave(scene, handle) {
-  if (!handle) return;
+  if (!handle || !handle.mesh) return;
   scene.remove(handle.mesh);
   riftDeferDispose(() => {
     handle.mesh.geometry.dispose();

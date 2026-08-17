@@ -239,6 +239,15 @@ fluidSimDiagEl.style.cssText = "position:fixed;top:32px;left:8px;z-index:9999;fo
 viewport.appendChild(fluidSimDiagEl);
 window.riftFluidSimDiagEl = fluidSimDiagEl; // liquid.js writes to this directly — separate module, no shared scope otherwise
 
+// Per "I don't think I see any changes" (the breaking-wave crest) — same
+// established on-screen-diagnostic technique as fluidSimDiagEl just
+// above, so real shoreline-detection results are readable straight off
+// the phone screen instead of guessing blind a second time.
+const breakingWaveDiagEl = document.createElement("div");
+breakingWaveDiagEl.style.cssText = "position:fixed;top:56px;left:8px;z-index:9999;font:11px/1.4 monospace;color:#ffcf7f;background:rgba(0,0,0,0.55);padding:3px 7px;border-radius:4px;pointer-events:none;display:none;";
+viewport.appendChild(breakingWaveDiagEl);
+window.riftBreakingWaveDiagEl = breakingWaveDiagEl; // liquid.js writes to this directly — separate module, no shared scope otherwise
+
 // Per "still isn't any visible rain drops on lens" — same on-screen-
 // diagnostic technique as the two above, specifically to answer one
 // narrow, decisive question: is lensEffectActive (the flag that gates

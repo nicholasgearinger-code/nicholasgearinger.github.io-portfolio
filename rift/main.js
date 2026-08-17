@@ -4999,7 +4999,7 @@ function animate() {
   // for why. Same lerp-by-dayAmount convention already used for the
   // terrain caustic focus position.
   tempWaterGlintDir.copy(moonLight.position).lerp(sun.position, dayNight.dayAmount);
-  updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, camera.position, tempWaterGlintDir, dayNight.skyHorizon, reflectionRenderTarget.texture, reflectionTextureMatrix, refractionRenderTarget.texture, refractionResolution, weatherHandle ? weatherHandle.rainIntensity : 0, dayNight.dayAmount);
+  updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, camera.position, tempWaterGlintDir, dayNight.skyHorizon, reflectionRenderTarget.texture, reflectionTextureMatrix, refractionRenderTarget.texture, refractionResolution, weatherHandle ? weatherHandle.rainIntensity : 0, dayNight.dayAmount, weatherHandle ? weatherHandle.windStrength : 0);
   // Real GPU compute dispatch for the fluid-sim water (see liquid.js's
   // buildCrystalFluidSimPlane) — separate from updateLiquidPlane above
   // since dispatching a compute shader needs the renderer, which only

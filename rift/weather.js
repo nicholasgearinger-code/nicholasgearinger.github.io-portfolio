@@ -642,6 +642,7 @@ function createWeatherSystem(scene, biome, waterLevel, particleMultiplier = 1, s
     rainActive: false,
     rainTimer: profile.rain ? randRange(2, profile.rainCycleMin) : Infinity, // first rain shouldn't take the full cycle to arrive
     rainIntensity: 0,
+    windStrength: 0, // set for real every frame in updateWeatherSystem — initialized here only so the very first frame (before that's run even once) has a real number instead of undefined for liquid.js's updateLiquidPlane call, which runs earlier in the frame than this system's own update
     dustDevilTimer: randRange(8, 20),
     elapsed: 0,
   };
@@ -670,9 +671,25 @@ function updateWeatherSystem(handle, dt, erupting = false, dayAmount = 0, player
   // harder, which is what then cascades into stronger rain-drift and
   // tree-sway too, since both already/now read this same windStrength —
   // one coherent cause rather than three separately-tuned effects.
+  //
+  // Per explicit "a slight breeze and a big storm like a squall wind when
+  // it rains" — pushed further (1.8->2.6): a full storm should feel like
+  // a genuine squall, visibly stronger than just "the regular breeze but
+  // a bit more," not a modest bump on top of it. windStrength itself
+  // (this value) is what liquid.js's wave choppiness now also reads
+  // directly (see updateLiquidPlane's own windStrength param) — the same
+  // single value already driving rain-drift and tree-sway now drives
+  // wave chop too, so a squall visibly hits all three at once, not just
+  // rain and trees.
   handle.windAngle += profile.windSpeed * dt;
-  const stormWindBoost = 1 + handle.rainIntensity * 1.8;
+  const stormWindBoost = 1 + handle.rainIntensity * 2.6;
   const windStrength = Math.max(0, profile.windBaseStrength + Math.sin(handle.elapsed * 0.13) * profile.windVariance) * stormWindBoost;
+  // Persisted on the handle (same reasoning/pattern as handle.rainIntensity
+  // just below) — liquid.js's updateLiquidPlane call in main.js runs
+  // EARLIER in the frame than this function does, so it reads last
+  // frame's value directly off the handle rather than this frame's fresh
+  // local variable, which doesn't exist yet at that point in the loop.
+  handle.windStrength = windStrength;
   let windX = Math.cos(handle.windAngle) * windStrength;
   let windZ = Math.sin(handle.windAngle) * windStrength;
 

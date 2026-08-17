@@ -2062,7 +2062,7 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
   };
 }
 
-function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir, skyHorizon, reflectionTexture, reflectionMatrix, refractionTexture, resolution, stormAmount = 0, dayAmount = 1) {
+function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir, skyHorizon, reflectionTexture, reflectionMatrix, refractionTexture, resolution, stormAmount = 0, dayAmount = 1, windStrength = 0) {
   if (!handle) return;
   // Fluid-sim water (see buildCrystalFluidSimPlane) is driven entirely by
   // a GPU compute shader, dispatched separately from main.js's animate
@@ -2273,7 +2273,24 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
       // to having generated the whole GERSTNER_WAVES table at a taller
       // target amplitude, without mutating that shared, module-level
       // table or its baked per-wave steepness values).
-      const stormWaveMult = 1 + stormAmount * 0.9;
+      //
+      // Per explicit "a slight breeze and a big storm... should make the
+      // water waves more choppy" — this used to be driven ONLY by
+      // stormAmount (=rainIntensity), meaning completely calm, dry
+      // weather always meant dead-flat baseline chop regardless of any
+      // actual wind blowing. windStrength is the SAME live value weather.js
+      // already feeds trees and rain-drift (it already includes the
+      // storm boost internally, see its own comment there), so a plain
+      // breeze now ruffles the water a little even with zero rain, and a
+      // real squall — wind boosted hard by heavy rain — pushes chop
+      // considerably further than the old rain-only formula did.
+      // 0.35 is Crystal's own calm-weather windBaseStrength (weather.js)
+      // — windExcess is 0 at that ordinary calm state (so this doesn't
+      // change how the sea already looked on an unremarkable day),
+      // rising only as real wind — an actual breeze gust or a squall —
+      // pushes above it.
+      const windExcess = Math.max(0, windStrength - 0.35);
+      const stormWaveMult = 1 + windExcess * 0.35 + stormAmount * 0.9;
       // Shore damping — see its own precomputation comment in
       // createLiquidPlane above. Defaults to 1 (no damping) for any
       // biome/plane that didn't precompute it, so this is a no-op

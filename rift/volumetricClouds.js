@@ -170,17 +170,21 @@ export function createVolumetricClouds(scene) {
     scrollOffset: uniform(vec3(0, 0, 0)),
     coverage: uniform(0.5), // overall sky coverage, 0=clear 1=overcast — biome/weather can drive this later without touching the shader
     stormDarken: uniform(0), // 0=normal fluffy-white clouds, 1=full storm-gray — driven live from rain intensity, see updateVolumetricClouds
+    // Per "map the cloud object to be near the player" — these used to
+    // be fixed WORLD-space altitudes (baked as plain numbers into the
+    // shader), so the band sat at an absolute height regardless of where
+    // the player actually was — if the player climbed a hill, the "close
+    // ceiling overhead" would stay at the same world Y and could end up
+    // level with them, or even below. Real uniforms now, pushed every
+    // frame as camera.position.y + a fixed offset (see
+    // updateVolumetricClouds) — the band genuinely follows the player's
+    // current altitude, not just their XZ position.
+    cloudBaseY: uniform(18),
+    cloudTopY: uniform(42),
   };
 
-  // Per "looked far away, need to be much bigger and closer" — altitude
-  // brought way down (130-220 -> 50-95, both the band's height above
-  // ground AND its own thickness reduced) so clouds sit much closer to
-  // the player instead of a thin, distant band high overhead. TILE_SCALE
-  // halved too — each cluster now spans roughly twice the world-space
-  // footprint, reading as a genuinely large, close formation rather than
-  // a small distant puff.
-  const CLOUD_BASE = 50;
-  const CLOUD_TOP = 95;
+  const CLOUD_BASE_OFFSET = 18; // height above the PLAYER's own current altitude, not an absolute world Y — see cloudBaseY uniform above
+  const CLOUD_TOP_OFFSET = 42;
   const STEP_COUNT = 20; // real GPU-side loop now (Loop(), not a JS-unrolled for), so this doesn't multiply compiled shader size the way it did before — real per-frame cost, but not a compile-time one
   const SHADOW_STEP_COUNT = 3;
   const TILE_SCALE = float(0.0035);
@@ -198,8 +202,8 @@ export function createVolumetricClouds(scene) {
     // referenced from THIS fragment's own world position (already on the
     // box surface) rather than the camera — min/max instead of assuming
     // a sign on rayDir.y, since a box can be entered through any face.
-    const tToBase = float(CLOUD_BASE).sub(rayOrigin.y).div(rayDir.y);
-    const tToTop = float(CLOUD_TOP).sub(rayOrigin.y).div(rayDir.y);
+    const tToBase = uniforms.cloudBaseY.sub(rayOrigin.y).div(rayDir.y);
+    const tToTop = uniforms.cloudTopY.sub(rayOrigin.y).div(rayDir.y);
     const tStart = tslMax(tslMin(tToBase, tToTop), float(0));
     const tEnd = tslMin(tslMax(tToBase, tToTop), tStart.add(500));
 
@@ -265,27 +269,32 @@ export function createVolumetricClouds(scene) {
   // scattered" math needed the way the post-process version required.
 
   // Sized to comfortably contain the whole visible sky from anywhere the
-  // player can stand, and re-centered on the camera's XZ every frame
-  // (see updateVolumetricClouds) — the box itself doesn't need to span
-  // the whole world, just always surround the camera.
-  const geometry = new THREE.BoxGeometry(3000, CLOUD_TOP - CLOUD_BASE, 3000);
+  // player can stand, and re-centered on the camera's XZ AND Y every
+  // frame now (see updateVolumetricClouds) — the box itself doesn't need
+  // to span the whole world, just always surround the camera, at
+  // whatever altitude the player currently is.
+  const geometry = new THREE.BoxGeometry(3000, CLOUD_TOP_OFFSET - CLOUD_BASE_OFFSET, 3000);
   const mesh = new THREE.Mesh(geometry, material);
-  mesh.position.y = (CLOUD_BASE + CLOUD_TOP) / 2;
   mesh.frustumCulled = false; // it's meant to always surround the camera; never legitimately off-screen
   scene.add(mesh);
 
-  return { mesh, uniforms, densityTexture };
+  return { mesh, uniforms, densityTexture, baseOffset: CLOUD_BASE_OFFSET, topOffset: CLOUD_TOP_OFFSET };
 }
 
 // Per-frame JS-side push — sun direction/color, storm/lightning state,
-// and re-centering the box on the camera so it always contains the sky
-// regardless of where the player roams. Wind drift is folded into
-// scrollOffset so the SAME baked volume reads as continuously moving
-// clouds without ever needing to be regenerated.
+// and re-centering the box on the camera (now in all three axes, not
+// just XZ — see cloudBaseY/cloudTopY's own comment above) so the cloud
+// layer always sits the same relative height above wherever the player
+// currently is. Wind drift is folded into scrollOffset so the SAME
+// baked volume reads as continuously moving clouds without ever needing
+// to be regenerated.
 export function updateVolumetricClouds(handle, dt, camera, sunDirection, sunColor, ambientColor, lightningFlash, lightningColor, windX = 0, windZ = 0, rainIntensity = 0) {
   if (!handle) return;
   handle.mesh.position.x = camera.position.x;
   handle.mesh.position.z = camera.position.z;
+  handle.mesh.position.y = camera.position.y + (handle.baseOffset + handle.topOffset) / 2;
+  handle.uniforms.cloudBaseY.value = camera.position.y + handle.baseOffset;
+  handle.uniforms.cloudTopY.value = camera.position.y + handle.topOffset;
   handle.uniforms.sunDir.value.copy(sunDirection);
   handle.uniforms.sunColor.value.copy(sunColor);
   handle.uniforms.ambientColor.value.copy(ambientColor);

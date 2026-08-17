@@ -93,9 +93,12 @@ function buildCloudDensityTexture(size = 48) {
   for (let z = 0; z < size; z++) {
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
-        // Coarse Worley layer, inverted: the big billowy cloud-cluster
-        // shape (real cumulus reads as rounded blobs, not uniform haze).
-        const billowLow = 1 - worleyNoise3D(size, 4, x, y, z, 1);
+        // Per "only a few big ones not the entire sky" — cells dropped
+        // 4->2: only 8 possible coarse cluster cores across the whole
+        // tileable volume instead of 64, so each surviving cluster
+        // occupies a much larger contiguous region — genuinely big,
+        // sculptural formations rather than many small puffs.
+        const billowLow = 1 - worleyNoise3D(size, 2, x, y, z, 1);
         const billowMid = 1 - worleyNoise3D(size, 8, x, y, z, 2);
         // Value-noise FBM for wispy fine detail layered on top of the
         // billowy base — 3 octaves, each an integer frequency divisor of
@@ -115,9 +118,9 @@ function buildCloudDensityTexture(size = 48) {
         // wall density through a 16-step accumulation is exactly what
         // drives transmittance to ~0 everywhere the camera looks upward,
         // which is what "black sky" actually was. Raised hard (0.35->0.68)
-        // and the transition band narrowed (0.4->0.16) so coverage is
-        // genuinely selective — real gaps, not an even fog.
-        const coverage = smootherstep(Math.max(0, Math.min(1, (billowLow - 0.68) / 0.16)));
+        // then further (0.68->0.74, band 0.16->0.12) per "only a few big
+        // ones" — fewer clusters pass at all, each with a sharper edge.
+        const coverage = smootherstep(Math.max(0, Math.min(1, (billowLow - 0.74) / 0.12)));
         let density = (billowMid * 0.55 + fbm * 0.45) * coverage;
         // Remap tightened to match (was (d-0.15)/0.6, now requires a
         // notably higher raw value before anything becomes visible at
@@ -187,11 +190,11 @@ export function createVolumetricClouds() {
   // these only after confirming on real hardware that there's headroom.
   const STEP_COUNT = 16;
   const SHADOW_STEP_COUNT = 3;
-  // Per "covering the entire sky" — raised (0.006->0.013): each cloud
-  // cluster in the baked volume now maps to a visually smaller patch of
-  // sky, so the SAME sparse volume reads as distinct puffs rather than
-  // a few clusters each large enough to blot out huge swaths at once.
-  const TILE_SCALE = float(0.013);
+  // Per "only a few big ones not the entire sky" — lowered (0.013->0.007):
+  // combined with cells=2 above, each surviving cluster now spans a much
+  // larger stretch of actual world-space, reading as one big sculptural
+  // formation instead of a small puff.
+  const TILE_SCALE = float(0.007);
 
   const node = Fn(() => {
     const screenUV = uv();
@@ -272,7 +275,7 @@ export function createVolumetricClouds() {
             const shadowUV = shadowPos.mul(TILE_SCALE).add(uniforms.scrollOffset);
             lightAccum.addAssign(texture3D(densityTexture, shadowUV.fract()).r);
           }
-          const selfShadow = exp(lightAccum.mul(-0.6));
+          const selfShadow = exp(lightAccum.mul(-1.1));
           // Per "not fluffy white clouds" — real, confirmed under-
           // brightening: the old 0.065 final multiplier and 0.5x ambient
           // weight just weren't enough light to read as lit white cloud
@@ -297,7 +300,7 @@ export function createVolumetricClouds() {
           const flashColor = uniforms.lightningColor.mul(uniforms.lightningFlash).mul(1.4);
           const extinctionMul = mix(float(1), float(1.7), uniforms.stormDarken);
           const sampleExtinction = exp(density.mul(stepSize).mul(-0.06).mul(extinctionMul));
-          const sampleLight = litColor.add(flashColor).mul(density).mul(stepSize).mul(0.3).mul(transmittance);
+          const sampleLight = litColor.add(flashColor).mul(density).mul(stepSize).mul(0.38).mul(transmittance);
           scattered.addAssign(sampleLight);
           transmittance.mulAssign(sampleExtinction);
         });

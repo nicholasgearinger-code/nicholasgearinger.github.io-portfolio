@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { Fn, uniform, vec2, vec3, vec4, float, texture3D, uv, dot, mix, clamp, pow, exp, normalize, smoothstep, texture, perspectiveDepthToViewZ, max as tslMax, min as tslMin } from "three/tsl";
+import { Fn, uniform, vec3, vec4, float, texture3D, dot, mix, clamp, pow, exp, normalize, Loop, positionWorld, cameraPosition, max as tslMax, min as tslMin } from "three/tsl";
 
 // -----------------------------------------------------------------------------
 // Real raymarched volumetric clouds — per explicit "in addition to the
@@ -145,25 +145,23 @@ function buildCloudDensityTexture(size = 48) {
   return tex;
 }
 
-// Creates the whole layer: bakes the density volume once, sets up every
-// uniform the raymarch needs, and builds the actual TSL shader graph.
-// Returns { node, uniforms } — `node` is a vec4 (rgb = in-scattered light
-// already weighted by density/phase/shadowing, a = transmittance, i.e.
-// how much of whatever's BEHIND the clouds still shows through) meant to
-// be composited as: finalRGB = backgroundRGB * node.a + node.rgb — the
-// standard physically-based volumetric-over-background blend. `uniforms`
-// is what the per-frame update call (see updateVolumetricClouds below)
-// actually writes into.
-export function createVolumetricClouds(sceneDepthTexture, cameraNear, cameraFar) {
+// Creates the whole layer: bakes the density volume once, and builds a
+// real 3D mesh (a big box spanning the cloud altitude band) with a
+// raymarching node material — per explicit "here's what we need," this
+// replaces the earlier full-screen post-process version with an actual
+// mesh in the scene. That's a genuinely better architecture, not just a
+// different one: because it's real geometry, Three.js's normal
+// depth-tested transparent-object rendering handles occlusion against
+// trees/terrain automatically — no manual depth-texture sampling needed
+// at all, which is what the "clouds pass in front of trees" bug actually
+// needed. Ray reconstruction is simpler too: positionWorld (the actual
+// fragment being rasterized on the box's surface) and the built-in
+// cameraPosition give the ray directly, no manual camera-basis-vector/
+// FOV/aspect uniforms required.
+export function createVolumetricClouds(scene) {
   const densityTexture = buildCloudDensityTexture(48);
 
   const uniforms = {
-    cameraForward: uniform(vec3(0, 0, -1)),
-    cameraRight: uniform(vec3(1, 0, 0)),
-    cameraUp: uniform(vec3(0, 1, 0)),
-    cameraPos: uniform(vec3(0, 0, 0)),
-    tanHalfFov: uniform(0.7),
-    aspect: uniform(1.6),
     sunDir: uniform(vec3(0, 1, 0)),
     sunColor: uniform(vec3(1, 0.95, 0.85)),
     ambientColor: uniform(vec3(0.4, 0.48, 0.6)),
@@ -174,80 +172,32 @@ export function createVolumetricClouds(sceneDepthTexture, cameraNear, cameraFar)
     stormDarken: uniform(0), // 0=normal fluffy-white clouds, 1=full storm-gray — driven live from rain intensity, see updateVolumetricClouds
   };
 
-  const CLOUD_BASE = float(130);
-  const CLOUD_TOP = float(220);
-  // Per real concern about shader compile cost — this project has no
-  // precedent anywhere yet for TSL's Loop() construct (a genuine
-  // GPU-side runtime loop), only JS-level `for` loops that get fully
-  // UNROLLED into the compiled shader at build time (the same technique
-  // already proven working in this file's own lens-rain shader, ROWS_PER_LANE).
-  // Since that's the only pattern with a track record in this exact
-  // codebase, it's what's used here too — but unrolling is real,
-  // multiplying instruction count directly, so both step counts are kept
-  // deliberately conservative (16 main x 3 shadow = 48 texture3D samples
-  // baked into the shader, not 140) rather than guessing higher without
-  // a way to check actual compile time/mobile behavior first. Raise
-  // these only after confirming on real hardware that there's headroom.
-  const STEP_COUNT = 16;
+  const CLOUD_BASE = 130;
+  const CLOUD_TOP = 220;
+  const STEP_COUNT = 20; // real GPU-side loop now (Loop(), not a JS-unrolled for), so this doesn't multiply compiled shader size the way it did before — real per-frame cost, but not a compile-time one
   const SHADOW_STEP_COUNT = 3;
-  // Per "only a few big ones not the entire sky" — lowered (0.013->0.007):
-  // combined with cells=2 above, each surviving cluster now spans a much
-  // larger stretch of actual world-space, reading as one big sculptural
-  // formation instead of a small puff.
+  // Per "only a few big ones not the entire sky" — each surviving
+  // cluster spans a large stretch of world-space, reading as one big
+  // sculptural formation instead of a small puff.
   const TILE_SCALE = float(0.007);
 
-  const node = Fn(() => {
-    const screenUV = uv();
-    const ndcX = screenUV.x.mul(2).sub(1);
-    // Per this project's own established convention (re-derived and
-    // confirmed several times already this session, see the lens shader's
-    // own notes): increasing screenUV.y reads as visually DOWN here, so
-    // going "up" on screen needs a NEGATED y term — flipped directly per
-    // that same confirmed convention rather than re-guessing it.
-    const ndcY = screenUV.y.mul(2).sub(1).negate();
-    const rayDir = normalize(
-      uniforms.cameraForward
-        .add(uniforms.cameraRight.mul(ndcX).mul(uniforms.tanHalfFov).mul(uniforms.aspect))
-        .add(uniforms.cameraUp.mul(ndcY).mul(uniforms.tanHalfFov))
-    );
+  const material = new THREE.MeshBasicNodeMaterial();
+  material.transparent = true;
+  material.depthWrite = false; // never occludes anything ITSELF (it's translucent) — but depthTest (on by default) is what makes real geometry correctly occlude the cloud box, which is the actual fix here
+  material.side = THREE.BackSide; // camera is meant to sit INSIDE this box (it's sized to comfortably contain the whole visible sky) — render its inner surface, not the outer one
 
-    // Per "it's wrong" persisting through three straight brightness/
-    // shadow tuning passes — real signal that this wasn't a tuning
-    // problem at all. This shader was the ONLY place in this whole
-    // project using TSL's If(), nested two levels deep, with mutable
-    // .toVar() writes expected to cross both levels correctly — an
-    // entirely unproven pattern here. Every OTHER effect in this file
-    // (the lens droplets specifically) gates contributions with plain
-    // MULTIPLICATION instead — "value * mask" naturally becomes 0
-    // rather than branching around it — and that pattern has a real,
-    // confirmed working track record across many rounds this session.
-    // Rebuilt this whole shader to match: zero If() blocks below, only
-    // multiplicative gating. Real cost: the sky-ward-only early-out and
-    // the "skip empty air" density check are both gone, so every pixel
-    // now runs the full fixed-step march unconditionally — a genuine
-    // perf regression versus the branched version, worth re-introducing
-    // carefully later, but only once this is confirmed actually correct.
-    // Per this project's established pattern (the lens shader explicitly
-    // avoids .select() too, for the same reason) — smoothstep() as a
-    // soft step function instead, the one comparison-to-float technique
-    // with an actual proven track record here.
-    const skyMask = smoothstep(float(0.06), float(0.1), rayDir.y);
+  material.colorNode = Fn(() => {
+    const rayOrigin = positionWorld;
+    const rayDir = normalize(positionWorld.sub(cameraPosition));
 
-    const tBase = CLOUD_BASE.sub(uniforms.cameraPos.y).div(rayDir.y);
-    const tTop = CLOUD_TOP.sub(uniforms.cameraPos.y).div(rayDir.y);
-    const tStart = tslMax(tBase, float(0));
-    let tEnd = tslMin(tTop, tStart.add(500));
-
-    // Real depth occlusion — reads the ACTUAL rendered scene's depth at
-    // this pixel, converts it to a real distance along THIS ray, and
-    // clamps the march so real geometry (a tree, a mountain) genuinely
-    // blocks the cloud layer behind it instead of clouds always drawing
-    // on top regardless of what's really there.
-    const depthSample = texture(sceneDepthTexture, screenUV).r;
-    const viewZ = perspectiveDepthToViewZ(depthSample, float(cameraNear), float(cameraFar));
-    const forwardDot = tslMax(dot(rayDir, uniforms.cameraForward), float(0.0001));
-    const sceneDistance = viewZ.negate().div(forwardDot);
-    tEnd = tslMin(tEnd, sceneDistance);
+    // Ray/slab intersection with the cloud band's two horizontal planes,
+    // referenced from THIS fragment's own world position (already on the
+    // box surface) rather than the camera — min/max instead of assuming
+    // a sign on rayDir.y, since a box can be entered through any face.
+    const tToBase = float(CLOUD_BASE).sub(rayOrigin.y).div(rayDir.y);
+    const tToTop = float(CLOUD_TOP).sub(rayOrigin.y).div(rayDir.y);
+    const tStart = tslMax(tslMin(tToBase, tToTop), float(0));
+    const tEnd = tslMin(tslMax(tToBase, tToTop), tStart.add(500));
 
     const stepSize = tslMax(tEnd.sub(tStart), float(0)).div(STEP_COUNT).toVar();
     const t = tStart.toVar();
@@ -260,27 +210,17 @@ export function createVolumetricClouds(sceneDepthTexture, cameraNear, cameraFar)
     const cosAngle = dot(rayDir, uniforms.sunDir);
     const phase = pow(clamp(cosAngle, 0, 1), 3).mul(2).add(0.15);
 
-    for (let i = 0; i < STEP_COUNT; i++) {
-      const pos = uniforms.cameraPos.add(rayDir.mul(t));
+    Loop(STEP_COUNT, () => {
+      const pos = rayOrigin.add(rayDir.mul(t));
       const sampleUV = pos.mul(TILE_SCALE).add(uniforms.scrollOffset);
-      // inRange replaces the old t<tEnd If()-gate — same reasoning,
-      // multiplicative instead of branched.
-      // Same smoothstep-as-soft-step technique as skyMask above, in
-      // place of .select() — 1 while t is safely below tEnd, easing to 0
-      // right at the occlusion boundary instead of a hard cutoff.
-      const inRange = float(1).sub(smoothstep(tEnd.sub(stepSize), tEnd, t));
-      const density = texture3D(densityTexture, sampleUV.fract()).r.mul(uniforms.coverage.mul(2)).mul(inRange);
+      const density = texture3D(densityTexture, sampleUV.fract()).r.mul(uniforms.coverage.mul(2));
 
-      // Shadow-march and lighting now run EVERY step unconditionally
-      // (no more If(density>0.01)) — density itself multiplies the
-      // final contribution down to ~0 in empty air, same end result,
-      // without a real branch depending on a runtime value.
       const lightAccum = float(0).toVar();
-      for (let s = 0; s < SHADOW_STEP_COUNT; s++) {
-        const shadowPos = pos.add(uniforms.sunDir.mul(float(6).mul(s + 1)));
+      Loop(SHADOW_STEP_COUNT, ({ i }) => {
+        const shadowPos = pos.add(uniforms.sunDir.mul(float(6).mul(float(i).add(1))));
         const shadowUV = shadowPos.mul(TILE_SCALE).add(uniforms.scrollOffset);
         lightAccum.addAssign(texture3D(densityTexture, shadowUV.fract()).r);
-      }
+      });
       const selfShadow = exp(lightAccum.mul(-0.25));
       const ambientTerm = uniforms.ambientColor.mul(1.3);
       const sunTerm = uniforms.sunColor.mul(phase).mul(selfShadow).mul(1.5);
@@ -296,49 +236,44 @@ export function createVolumetricClouds(sceneDepthTexture, cameraNear, cameraFar)
       scattered.addAssign(sampleLight);
       transmittance.mulAssign(sampleExtinction);
       t.addAssign(stepSize);
-    }
+    });
 
-    // skyMask applied once at the very end — ground-facing pixels get
-    // transmittance forced back to 1 (fully see-through, no cloud
-    // effect) and scattered forced to 0, the same net result the old
-    // If(rayDir.y...) early-out gave, just via multiplication.
-    const finalTransmittance = mix(float(1), transmittance, skyMask);
-    const finalScattered = scattered.mul(skyMask);
-    return vec4(finalScattered, finalTransmittance);
+    return vec4(scattered, float(1).sub(transmittance));
   })();
+  // colorNode above returns straight RGBA (alpha = how much cloud is
+  // there, not transmittance) — MeshBasicNodeMaterial's normal alpha
+  // blending (src*alpha + dst*(1-alpha), the standard transparent-object
+  // blend) does the actual background compositing for us here, since
+  // this is real geometry now — no manual "scene * transmittance +
+  // scattered" math needed the way the post-process version required.
 
-  return { node, uniforms, densityTexture };
+  // Sized to comfortably contain the whole visible sky from anywhere the
+  // player can stand, and re-centered on the camera's XZ every frame
+  // (see updateVolumetricClouds) — the box itself doesn't need to span
+  // the whole world, just always surround the camera.
+  const geometry = new THREE.BoxGeometry(3000, CLOUD_TOP - CLOUD_BASE, 3000);
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.position.y = (CLOUD_BASE + CLOUD_TOP) / 2;
+  mesh.frustumCulled = false; // it's meant to always surround the camera; never legitimately off-screen
+  scene.add(mesh);
+
+  return { mesh, uniforms, densityTexture };
 }
 
-// Per-frame JS-side push — camera basis vectors (for the ray-reconstruction
-// math above), sun direction/color, and the current lightning flash. Wind
-// drift is folded into scrollOffset so the SAME baked volume reads as
-// continuously moving clouds without ever needing to be regenerated.
-const _forward = new THREE.Vector3();
-const _right = new THREE.Vector3();
-const _up = new THREE.Vector3();
+// Per-frame JS-side push — sun direction/color, storm/lightning state,
+// and re-centering the box on the camera so it always contains the sky
+// regardless of where the player roams. Wind drift is folded into
+// scrollOffset so the SAME baked volume reads as continuously moving
+// clouds without ever needing to be regenerated.
 export function updateVolumetricClouds(handle, dt, camera, sunDirection, sunColor, ambientColor, lightningFlash, lightningColor, windX = 0, windZ = 0, rainIntensity = 0) {
   if (!handle) return;
-  camera.getWorldDirection(_forward);
-  _right.crossVectors(_forward, camera.up).normalize();
-  _up.crossVectors(_right, _forward).normalize();
-  handle.uniforms.cameraForward.value.copy(_forward);
-  handle.uniforms.cameraRight.value.copy(_right);
-  handle.uniforms.cameraUp.value.copy(_up);
-  handle.uniforms.cameraPos.value.copy(camera.position);
-  handle.uniforms.tanHalfFov.value = Math.tan((camera.fov * Math.PI) / 360);
-  handle.uniforms.aspect.value = camera.aspect;
+  handle.mesh.position.x = camera.position.x;
+  handle.mesh.position.z = camera.position.z;
   handle.uniforms.sunDir.value.copy(sunDirection);
   handle.uniforms.sunColor.value.copy(sunColor);
   handle.uniforms.ambientColor.value.copy(ambientColor);
   handle.uniforms.lightningFlash.value = lightningFlash;
   if (lightningColor) handle.uniforms.lightningColor.value.copy(lightningColor);
-  // Per "we also need to animate them to drift" — real, confirmed bug:
-  // this multiplier (0.004) worked out to a small fraction of a
-  // world-unit of equivalent shift per second — completely
-  // imperceptible. Raised hard (0.004->0.05), and a small CONSTANT base
-  // drift added on top of the wind-driven part (real clouds visibly
-  // drift even in a near-calm breeze, not only during a squall).
   const baseDriftX = 0.6, baseDriftZ = 0.25;
   handle._scrollX = (handle._scrollX || 0) + (windX + baseDriftX) * dt * 0.05;
   handle._scrollZ = (handle._scrollZ || 0) + (windZ + baseDriftZ) * dt * 0.05;

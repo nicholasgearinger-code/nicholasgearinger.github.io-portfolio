@@ -1013,29 +1013,22 @@ underwaterQuadScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), underwater
 const postProcessing = new THREE.PostProcessing(renderer);
 const scenePass = pass(scene, camera);
 const scenePassColor = scenePass.getTextureNode("output");
-// Per "they look like they're passing in front of the trees... supposed
-// to be far away" — a real, confirmed gap: the raymarch had NO idea what
-// was actually in front of the cloud layer, so it always drew over
-// foreground geometry regardless of what should really be closer to the
-// camera. Depth is always available from any scene pass without needing
-// MRT setup — plugged into the cloud shader below to fix exactly this.
-const scenePassDepth = scenePass.getTextureNode("depth");
 const lensTimeUniform = uniform(0);
 const lensIntensityUniform = uniform(0);
 const lensSunScreenPos = uniform(vec2(-10, -10));
-// Per explicit "in addition to the background we already have to have
-// depth... 3D dense cloud with real dynamic ray marching shader" — built
-// once here (the one-time noise-volume bake lives inside this call), its
-// output node composited into the lens shader's own final color below so
-// this doesn't need a second full render-target round trip of its own.
+// Per explicit "here's what we need" — rebuilt as a REAL 3D mesh (a big
+// box added directly to the scene) with a raymarching node material,
+// rather than a full-screen post-process pass. This is a genuinely
+// better architecture, not just a different one: it's real geometry, so
+// it renders as part of the NORMAL scene pass above and gets Three.js's
+// standard depth-tested transparent-object compositing automatically —
+// trees/terrain correctly occlude it with zero manual depth-sampling
+// code, which is exactly what "clouds passing in front of trees" needed.
 // Gated by its own graphics setting read ONCE here (same reload-to-apply
-// convention as every other toggle in this file) — when off, the whole
-// raymarch subgraph is never even built into the compiled shader at all
-// (not just a uniform-driven no-op), so weak devices don't pay for the
-// fixed-count step loop's real GPU instructions at all, not just its
-// visible effect.
+// convention as every other toggle in this file) — when off, the mesh is
+// simply never created/added at all.
 const VOLUMETRIC_CLOUDS_ENABLED = getGraphicsSettings().volumetricCloudsEnabled !== false;
-const volumetricCloudsHandle = VOLUMETRIC_CLOUDS_ENABLED ? createVolumetricClouds(scenePassDepth, camera.near, camera.far) : null;
+const volumetricCloudsHandle = VOLUMETRIC_CLOUDS_ENABLED ? createVolumetricClouds(scene) : null;
 const lensDistortedOutput = Fn(() => {
   const screenUV = uv();
   // A grid of cells, each with one pseudo-random droplet inside it (real
@@ -1269,20 +1262,12 @@ const lensDistortedOutput = Fn(() => {
   // rendered scene back" use case and handles orientation internally.
   const distortedUV = clamp(screenUV.sub(vec2(distortX, distortY)), zero, one);
   const sceneColor = texture(scenePassColor, distortedUV);
-  // Real volumetric clouds, composited BEFORE the lens droplet
-  // highlight/glint terms below (clouds are a sky feature sitting far
-  // behind the glass those droplets are on — layering them in first
-  // means the droplets' own highlights/glints still sit on top of the
-  // clouds correctly, not the other way around). Sampled at the
-  // UNDISTORTED screenUV rather than distortedUV — refraction shifts are
-  // tiny (a few percent of screen space at most) and clouds read as
-  // effectively-infinite-distance, so which exact cloud pixels a given
-  // raindrop bends toward is visually indistinguishable either way; this
-  // avoids needing a second real render-target pass just to let the
-  // lens shader's UV-offset sampling trick apply to clouds too.
-  const cloudsRGBA = volumetricCloudsHandle ? volumetricCloudsHandle.node : vec4(0, 0, 0, 1);
-  const sceneWithClouds = sceneColor.rgb.mul(cloudsRGBA.a).add(cloudsRGBA.rgb);
-  const finalColor = sceneWithClouds.add(vec3(lightBoost.mul(lensIntensityUniform))).add(sunGlintColor.mul(0.9).mul(lensIntensityUniform));
+  // Per "here's what we need" — volumetric clouds are now a real mesh in
+  // the scene (see volumetricCloudsHandle's own setup in main.js and
+  // volumetricClouds.js), so they're ALREADY part of scenePassColor
+  // above by the time this shader runs — no manual compositing needed
+  // here anymore, unlike the old post-process version.
+  const finalColor = sceneColor.rgb.add(vec3(lightBoost.mul(lensIntensityUniform))).add(sunGlintColor.mul(0.9).mul(lensIntensityUniform));
   return vec4(finalColor, one);
 })();
 // Per explicit "add a button... to turn off just the Lens effect" — this

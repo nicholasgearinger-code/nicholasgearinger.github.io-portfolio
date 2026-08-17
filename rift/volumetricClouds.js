@@ -172,14 +172,18 @@ export function createVolumetricClouds(scene) {
     stormDarken: uniform(0), // 0=normal fluffy-white clouds, 1=full storm-gray — driven live from rain intensity, see updateVolumetricClouds
   };
 
-  const CLOUD_BASE = 130;
-  const CLOUD_TOP = 220;
+  // Per "looked far away, need to be much bigger and closer" — altitude
+  // brought way down (130-220 -> 50-95, both the band's height above
+  // ground AND its own thickness reduced) so clouds sit much closer to
+  // the player instead of a thin, distant band high overhead. TILE_SCALE
+  // halved too — each cluster now spans roughly twice the world-space
+  // footprint, reading as a genuinely large, close formation rather than
+  // a small distant puff.
+  const CLOUD_BASE = 50;
+  const CLOUD_TOP = 95;
   const STEP_COUNT = 20; // real GPU-side loop now (Loop(), not a JS-unrolled for), so this doesn't multiply compiled shader size the way it did before — real per-frame cost, but not a compile-time one
   const SHADOW_STEP_COUNT = 3;
-  // Per "only a few big ones not the entire sky" — each surviving
-  // cluster spans a large stretch of world-space, reading as one big
-  // sculptural formation instead of a small puff.
-  const TILE_SCALE = float(0.007);
+  const TILE_SCALE = float(0.0035);
 
   const material = new THREE.MeshBasicNodeMaterial();
   material.transparent = true;
@@ -213,7 +217,14 @@ export function createVolumetricClouds(scene) {
     Loop(STEP_COUNT, () => {
       const pos = rayOrigin.add(rayDir.mul(t));
       const sampleUV = pos.mul(TILE_SCALE).add(uniforms.scrollOffset);
-      const density = texture3D(densityTexture, sampleUV.fract()).r.mul(uniforms.coverage.mul(2));
+      // Per "I want it to look like this" (crisp, sculpted, high-contrast
+      // puffs vs. clear blue sky, not a soft uniform haze) — pow() sharpens
+      // the raw density response: low readings fade toward 0 faster
+      // (genuinely clear sky between clusters) while real cores stay
+      // strong, instead of a flat linear response that reads as an even
+      // gray wash everywhere.
+      const rawDensity = clamp(texture3D(densityTexture, sampleUV.fract()).r, 0, 1);
+      const density = pow(rawDensity, 1.6).mul(uniforms.coverage.mul(2));
 
       const lightAccum = float(0).toVar();
       Loop(SHADOW_STEP_COUNT, ({ i }) => {
@@ -230,9 +241,15 @@ export function createVolumetricClouds(scene) {
       // gray, and makes the cloud itself more extinctive/opaque too.
       const litColor = mix(baseLitColor, vec3(0.32, 0.34, 0.4), uniforms.stormDarken);
       const flashColor = uniforms.lightningColor.mul(uniforms.lightningFlash).mul(1.4);
+      // Extinction pushed much harder (-0.045->-0.12) — real cluster
+      // cores should read as genuinely opaque white, with clear sky
+      // visible between them, not a translucent haze covering the whole
+      // band. Brightness raised too (0.6->0.85) to compensate — stronger
+      // extinction alone would otherwise just make things darker, not
+      // more defined.
       const extinctionMul = mix(float(1), float(1.7), uniforms.stormDarken);
-      const sampleExtinction = exp(density.mul(stepSize).mul(-0.045).mul(extinctionMul));
-      const sampleLight = litColor.add(flashColor).mul(density).mul(stepSize).mul(0.6).mul(transmittance);
+      const sampleExtinction = exp(density.mul(stepSize).mul(-0.12).mul(extinctionMul));
+      const sampleLight = litColor.add(flashColor).mul(density).mul(stepSize).mul(0.85).mul(transmittance);
       scattered.addAssign(sampleLight);
       transmittance.mulAssign(sampleExtinction);
       t.addAssign(stepSize);

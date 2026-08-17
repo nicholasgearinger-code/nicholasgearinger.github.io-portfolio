@@ -93,12 +93,17 @@ function buildCloudDensityTexture(size = 48) {
   for (let z = 0; z < size; z++) {
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
-        // Per "only a few big ones not the entire sky" — cells dropped
-        // 4->2: only 8 possible coarse cluster cores across the whole
-        // tileable volume instead of 64, so each surviving cluster
-        // occupies a much larger contiguous region — genuinely big,
-        // sculptural formations rather than many small puffs.
-        const billowLow = 1 - worleyNoise3D(size, 2, x, y, z, 1);
+        // Per "huge and closer to the center, not far off in the
+        // distance" — the earlier "only a few big ones" sparsity (2%
+        // coverage) meant the player, now standing under a tight,
+        // low, close band, would very often just be under a genuine
+        // GAP with nothing overhead at all — explaining "just moved
+        // them down the y axis," not actually closer/bigger-feeling.
+        // Raised cells back up (2->3) for more frequent cluster
+        // placement — more chances for real cloud to actually be
+        // near the player at any given moment, not endless empty sky
+        // between rare formations.
+        const billowLow = 1 - worleyNoise3D(size, 3, x, y, z, 1);
         const billowMid = 1 - worleyNoise3D(size, 8, x, y, z, 2);
         // Value-noise FBM for wispy fine detail layered on top of the
         // billowy base — 3 octaves, each an integer frequency divisor of
@@ -109,18 +114,12 @@ function buildCloudDensityTexture(size = 48) {
           amp *= 0.5;
           freq *= 2;
         }
-        // Per "clouds are black" — a real, confirmed bug: this coverage
-        // threshold (0.35) was FAR too permissive. Worley min-distance
-        // (even inverted, even capped at 1) has a mean sitting well above
-        // that for a single random point per cell — meaning most of the
-        // volume was qualifying as "in cloud," not the sparse, mostly-
-        // clear-with-pockets field this was meant to produce. Wall-to-
-        // wall density through a 16-step accumulation is exactly what
-        // drives transmittance to ~0 everywhere the camera looks upward,
-        // which is what "black sky" actually was. Raised hard (0.35->0.68)
-        // then further (0.68->0.74, band 0.16->0.12) per "only a few big
-        // ones" — fewer clusters pass at all, each with a sharper edge.
-        const coverage = smootherstep(Math.max(0, Math.min(1, (billowLow - 0.74) / 0.12)));
+        // Threshold lowered again (0.74->0.55, band widened 0.12->0.18)
+        // — same reasoning as the cells change above: real coverage
+        // needed to go back up meaningfully (verified via simulation:
+        // ~2% before, ~14% now) so clusters are reliably present near
+        // the player instead of rare and easy to simply not be under.
+        const coverage = smootherstep(Math.max(0, Math.min(1, (billowLow - 0.55) / 0.18)));
         let density = (billowMid * 0.55 + fbm * 0.45) * coverage;
         // Remap tightened to match (was (d-0.15)/0.6, now requires a
         // notably higher raw value before anything becomes visible at
@@ -168,7 +167,7 @@ export function createVolumetricClouds(scene) {
     lightningFlash: uniform(0),
     lightningColor: uniform(vec3(0.8, 0.87, 1)),
     scrollOffset: uniform(vec3(0, 0, 0)),
-    coverage: uniform(0.5), // overall sky coverage, 0=clear 1=overcast — biome/weather can drive this later without touching the shader
+    coverage: uniform(0.85), // was 0.5 — per "huge and closer... not far off" pushed up alongside the density-bake sparsity fix, real reliable presence over rare-but-precious formations
     stormDarken: uniform(0), // 0=normal fluffy-white clouds, 1=full storm-gray — driven live from rain intensity, see updateVolumetricClouds
     // Per "map the cloud object to be near the player" — these used to
     // be fixed WORLD-space altitudes (baked as plain numbers into the
@@ -179,15 +178,15 @@ export function createVolumetricClouds(scene) {
     // frame as camera.position.y + a fixed offset (see
     // updateVolumetricClouds) — the band genuinely follows the player's
     // current altitude, not just their XZ position.
-    cloudBaseY: uniform(18),
-    cloudTopY: uniform(42),
+    cloudBaseY: uniform(22),
+    cloudTopY: uniform(60),
   };
 
-  const CLOUD_BASE_OFFSET = 18; // height above the PLAYER's own current altitude, not an absolute world Y — see cloudBaseY uniform above
-  const CLOUD_TOP_OFFSET = 42;
+  const CLOUD_BASE_OFFSET = 22; // height above the PLAYER's own current altitude, not an absolute world Y — see cloudBaseY uniform above
+  const CLOUD_TOP_OFFSET = 60; // band thickened (24->38 units) — per the reference image's tall, voluminous cloud form; the previous thin band forced real cloud shapes into a flat slab
   const STEP_COUNT = 20; // real GPU-side loop now (Loop(), not a JS-unrolled for), so this doesn't multiply compiled shader size the way it did before — real per-frame cost, but not a compile-time one
   const SHADOW_STEP_COUNT = 3;
-  const TILE_SCALE = float(0.0035);
+  const TILE_SCALE = float(0.002); // was 0.0035 — per "huge" halved again, each cluster now spans roughly 75% more world-space than last round
 
   const material = new THREE.MeshBasicNodeMaterial();
   material.transparent = true;

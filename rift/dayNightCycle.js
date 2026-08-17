@@ -691,18 +691,27 @@ function createDayNightCycle(scene, sun, ambient, starfield, biome, moonLight) {
   // DirectionalLight intensity numbers below.
   const sunBody = createBody(scene, sunStarburstTexture, createSunTexture(), 9, 0xffcf80, 46, 0.6); // glow radius was 34/opacity 0.5 — enlarged for the bigger, softer halo the reference shows now that the texture itself is a smooth gradual falloff instead of a tight bright core with spikes
   const moonBody = createBody(scene, glowTexture, createMoonTexture(), 8, 0xc8d4e8, 18, 0.22); // was 0xaebedd — nudged warmer/less saturated so it doesn't read as distinctly "blue" if this body's own visibility is ever turned back on
-  // Moon VISUAL hidden per an earlier explicit request ("don't want to
-  // see it but still have the day/night light effects") — RESTORED here
-  // per "the blue circle is supposed to be the sun" investigation: this
-  // exact line was missing from this freshly re-uploaded copy of the
-  // file, and its absence is very likely the direct cause of that report
-  // — the moon's glow sprite is tinted 0xaebedd (a pale blue, an exact
-  // color match), and its Y position is floored so it never actually
-  // sets below the horizon, letting it show up at almost any time with
-  // no relationship to where the real sun is. `moonLight` (the actual
-  // DirectionalLight driving real nighttime lighting) is a separate
-  // object passed into this function untouched — hiding this group only
-  // removes the stray visible disc, not real night lighting.
+  // TEMPORARY DIAGNOSTIC per "we need to fix the sun sprite" — confirmed
+  // by direct on-screen testing (not just code review) that the sun
+  // itself, not the moon, is the blue disc. Every color/tint value
+  // feeding the sun (SUN_BODY_ZENITH/MID/HORIZON, the starburst and
+  // surface CanvasTextures) reads as unambiguously warm/white in the
+  // code, with no plausible path to blue found by review alone — so
+  // rather than guess at a fourth theory blind, this strips the CANVAS
+  // TEXTURES specifically (map=null on both core and glow), leaving
+  // ONLY the plain THREE.Color tint driving what's on screen. If the sun
+  // STILL renders blue with this in place, the bug is NOT in
+  // createSunTexture/createSunStarburstTexture at all (rules out a
+  // canvas/texture-upload issue) — it'd have to be in how
+  // material.color itself is being applied, a different and deeper
+  // question. If it renders correctly warm/white instead, that confirms
+  // the texture generation itself is the real cause, and this comes back
+  // out in favor of a real texture fix.
+  sunBody.core.material.map = null;
+  sunBody.glow.material.map = null;
+  // Moon re-hidden — the on-screen test already answered the question
+  // this was left visible for (sun vs. moon), no need to keep it showing
+  // while the sun gets diagnosed.
   moonBody.group.visible = false;
   const sunBeams = createSunBeams(scene, createBeamTexture());
   const sky = createSkyDome(scene);

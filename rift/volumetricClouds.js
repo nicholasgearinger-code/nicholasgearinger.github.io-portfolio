@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { Fn, uniform, vec2, vec3, vec4, float, texture3D, uv, If, dot, mix, clamp, pow, exp, normalize, smoothstep, texture, perspectiveDepthToViewZ, max as tslMax, min as tslMin } from "three/tsl";
+import { Fn, uniform, vec2, vec3, vec4, float, texture3D, uv, dot, mix, clamp, pow, exp, normalize, smoothstep, texture, perspectiveDepthToViewZ, max as tslMax, min as tslMin } from "three/tsl";
 
 // -----------------------------------------------------------------------------
 // Real raymarched volumetric clouds — per explicit "in addition to the
@@ -211,128 +211,100 @@ export function createVolumetricClouds(sceneDepthTexture, cameraNear, cameraFar)
         .add(uniforms.cameraUp.mul(ndcY).mul(uniforms.tanHalfFov))
     );
 
+    // Per "it's wrong" persisting through three straight brightness/
+    // shadow tuning passes — real signal that this wasn't a tuning
+    // problem at all. This shader was the ONLY place in this whole
+    // project using TSL's If(), nested two levels deep, with mutable
+    // .toVar() writes expected to cross both levels correctly — an
+    // entirely unproven pattern here. Every OTHER effect in this file
+    // (the lens droplets specifically) gates contributions with plain
+    // MULTIPLICATION instead — "value * mask" naturally becomes 0
+    // rather than branching around it — and that pattern has a real,
+    // confirmed working track record across many rounds this session.
+    // Rebuilt this whole shader to match: zero If() blocks below, only
+    // multiplicative gating. Real cost: the sky-ward-only early-out and
+    // the "skip empty air" density check are both gone, so every pixel
+    // now runs the full fixed-step march unconditionally — a genuine
+    // perf regression versus the branched version, worth re-introducing
+    // carefully later, but only once this is confirmed actually correct.
+    // Per this project's established pattern (the lens shader explicitly
+    // avoids .select() too, for the same reason) — smoothstep() as a
+    // soft step function instead, the one comparison-to-float technique
+    // with an actual proven track record here.
+    const skyMask = smoothstep(float(0.06), float(0.1), rayDir.y);
+
+    const tBase = CLOUD_BASE.sub(uniforms.cameraPos.y).div(rayDir.y);
+    const tTop = CLOUD_TOP.sub(uniforms.cameraPos.y).div(rayDir.y);
+    const tStart = tslMax(tBase, float(0));
+    let tEnd = tslMin(tTop, tStart.add(500));
+
+    // Real depth occlusion — reads the ACTUAL rendered scene's depth at
+    // this pixel, converts it to a real distance along THIS ray, and
+    // clamps the march so real geometry (a tree, a mountain) genuinely
+    // blocks the cloud layer behind it instead of clouds always drawing
+    // on top regardless of what's really there.
+    const depthSample = texture(sceneDepthTexture, screenUV).r;
+    const viewZ = perspectiveDepthToViewZ(depthSample, float(cameraNear), float(cameraFar));
+    const forwardDot = tslMax(dot(rayDir, uniforms.cameraForward), float(0.0001));
+    const sceneDistance = viewZ.negate().div(forwardDot);
+    tEnd = tslMin(tEnd, sceneDistance);
+
+    const stepSize = tslMax(tEnd.sub(tStart), float(0)).div(STEP_COUNT).toVar();
+    const t = tStart.toVar();
     const transmittance = float(1).toVar();
     const scattered = vec3(0, 0, 0).toVar();
 
-    // Real early-out — a ray pointed anywhere near level or downward
-    // essentially never reaches the cloud band (base is 130 units up),
-    // so skip the whole march for the (typically majority of on-screen)
-    // pixels looking at terrain/water/trees instead of sky. This is a
-    // genuine cost saving, not a cosmetic branch — TSL's If() compiles to
-    // real shader-level branching.
-    // Per "covering the entire sky" — the OTHER real cause on top of
-    // TILE_SCALE above: this threshold (0.02) is so shallow that a
-    // near-horizontal ray triggers the march, and near-horizontal rays
-    // travel an extremely long SLANT distance through a 90-unit-thick
-    // band (path length grows as 1/rayDir.y, blowing up toward the
-    // horizon) — accumulating density over a much longer path than a
-    // straight-up ray ever would, darkening huge swaths near the
-    // horizon in particular. Raised (0.02->0.08) so only genuinely
-    // sky-ward rays march at all.
-    If(rayDir.y.greaterThan(0.08), () => {
-      // Ray/slab intersection with the cloud band's two horizontal
-      // planes — where the march actually starts and ends along this ray.
-      const tBase = CLOUD_BASE.sub(uniforms.cameraPos.y).div(rayDir.y);
-      const tTop = CLOUD_TOP.sub(uniforms.cameraPos.y).div(rayDir.y);
-      const tStart = tslMax(tBase, float(0));
-      // Hard cap on total march distance (same fix, other half) — even
-      // above the new 0.08 threshold, a shallow ray can still travel very
-      // far through the band; capping the path length directly prevents
-      // any single ray from ever over-accumulating regardless of angle.
-      let tEnd = tslMin(tTop, tStart.add(500));
+    // Forward-scattering phase term — brighter looking toward the sun
+    // THROUGH the cloud (the real "silver lining" / backlit sunset
+    // look), dimmer looking away from it.
+    const cosAngle = dot(rayDir, uniforms.sunDir);
+    const phase = pow(clamp(cosAngle, 0, 1), 3).mul(2).add(0.15);
 
-      // Per "they look like they're passing in front of the trees...
-      // supposed to be far away" — real depth occlusion. Reads the ACTUAL
-      // rendered scene's depth at this pixel, converts it to a real
-      // distance along THIS ray (not just straight-ahead camera depth,
-      // which would be wrong for off-center pixels — divided by
-      // dot(rayDir, cameraForward) to account for the angle), and clamps
-      // the march to never go past whatever real geometry (a tree, a
-      // mountain, terrain) is already sitting there. A tree in front of
-      // the cloud band now genuinely occludes it, the way real distant
-      // clouds actually work.
-      const depthSample = texture(sceneDepthTexture, screenUV).r;
-      const viewZ = perspectiveDepthToViewZ(depthSample, float(cameraNear), float(cameraFar));
-      const forwardDot = tslMax(dot(rayDir, uniforms.cameraForward), float(0.0001));
-      const sceneDistance = viewZ.negate().div(forwardDot);
-      tEnd = tslMin(tEnd, sceneDistance);
+    for (let i = 0; i < STEP_COUNT; i++) {
+      const pos = uniforms.cameraPos.add(rayDir.mul(t));
+      const sampleUV = pos.mul(TILE_SCALE).add(uniforms.scrollOffset);
+      // inRange replaces the old t<tEnd If()-gate — same reasoning,
+      // multiplicative instead of branched.
+      // Same smoothstep-as-soft-step technique as skyMask above, in
+      // place of .select() — 1 while t is safely below tEnd, easing to 0
+      // right at the occlusion boundary instead of a hard cutoff.
+      const inRange = float(1).sub(smoothstep(tEnd.sub(stepSize), tEnd, t));
+      const density = texture3D(densityTexture, sampleUV.fract()).r.mul(uniforms.coverage.mul(2)).mul(inRange);
 
-      const stepSize = tslMax(tEnd.sub(tStart), float(0)).div(STEP_COUNT).toVar();
-      const t = tStart.toVar();
-
-      // Forward-scattering phase term — brighter looking toward the sun
-      // THROUGH the cloud (the real "silver lining" / backlit sunset
-      // look), dimmer looking away from it. A simplified single-lobe
-      // Henyey-Greenstein-style term rather than the full physical
-      // function — visually convincing at a fraction of the cost.
-      const cosAngle = dot(rayDir, uniforms.sunDir);
-      const phase = pow(clamp(cosAngle, 0, 1), 3).mul(2).add(0.15);
-
-      for (let i = 0; i < STEP_COUNT; i++) {
-        const pos = uniforms.cameraPos.add(rayDir.mul(t));
-        const sampleUV = pos.mul(TILE_SCALE).add(uniforms.scrollOffset);
-        // Per "clouds are black" fix — coverage is now a genuine 0-2x
-        // dial (0.5 default = 1x, i.e. the baked density unchanged) via
-        // uniforms.coverage.mul(2), not the old .add(0.5) which could
-        // only ever multiply UP from a 1x floor, never actually reduce
-        // density even at coverage=0.
-        // Gated by t < tEnd (the occlusion-clamped end) — when stepSize
-        // was forced to 0 above (real geometry sits at or before the
-        // cloud band even starts), every iteration would otherwise keep
-        // resampling the exact same point 16 times over, over-
-        // accumulating a visible ring artifact right at the occlusion
-        // edge instead of just correctly contributing nothing.
-        const density = texture3D(densityTexture, sampleUV.fract()).r.mul(uniforms.coverage.mul(2)).mul(t.lessThan(tEnd).select(float(1), float(0)));
-
-        If(density.greaterThan(0.01), () => {
-          // Real self-shadowing — a short secondary march TOWARD the sun
-          // from this sample point, so density genuinely blocks light
-          // from reaching deeper/darker parts of the cloud instead of
-          // every sample being lit identically regardless of what's
-          // between it and the sun.
-          const shadowSteps = SHADOW_STEP_COUNT;
-          const shadowStepSize = float(6);
-          const lightAccum = float(0).toVar();
-          for (let s = 0; s < shadowSteps; s++) {
-            const shadowPos = pos.add(uniforms.sunDir.mul(shadowStepSize.mul(s + 1)));
-            const shadowUV = shadowPos.mul(TILE_SCALE).add(uniforms.scrollOffset);
-            lightAccum.addAssign(texture3D(densityTexture, shadowUV.fract()).r);
-          }
-          const selfShadow = exp(lightAccum.mul(-0.25));
-          // Per "no color, no light... look black" — STILL confirmed
-          // black on real device video despite the previous round's fix,
-          // because that same round ALSO made individual clusters much
-          // bigger (cells 4->2, per "only a few big ones") — a ray now
-          // travels through many more consecutive dense steps inside one
-          // real cluster than before, so the previous self-shadow value
-          // (-0.6) compounded with that into something far darker than
-          // when it was tuned. Cut hard this time (-0.6->-0.25) and the
-          // final brightness multiplier raised again too (0.38->0.6) —
-          // erring toward "visibly bright, maybe slightly flat" rather
-          // than risking a third round of "technically shaded but
-          // invisible."
-          const ambientTerm = uniforms.ambientColor.mul(1.3);
-          const sunTerm = uniforms.sunColor.mul(phase).mul(selfShadow).mul(1.5);
-          const baseLitColor = sunTerm.add(ambientTerm);
-          // Per "turn dark when it rains" — stormDarken (driven live from
-          // rain intensity, see updateVolumetricClouds) blends the whole
-          // lit color toward a flat storm gray, AND makes the cloud
-          // itself more extinctive/opaque below — both together are what
-          // actually reads as "storm clouds," not brightness alone.
-          const litColor = mix(baseLitColor, vec3(0.32, 0.34, 0.4), uniforms.stormDarken);
-          const flashColor = uniforms.lightningColor.mul(uniforms.lightningFlash).mul(1.4);
-          const extinctionMul = mix(float(1), float(1.7), uniforms.stormDarken);
-          const sampleExtinction = exp(density.mul(stepSize).mul(-0.045).mul(extinctionMul));
-          const sampleLight = litColor.add(flashColor).mul(density).mul(stepSize).mul(0.6).mul(transmittance);
-          scattered.addAssign(sampleLight);
-          transmittance.mulAssign(sampleExtinction);
-        });
-
-        t.addAssign(stepSize);
+      // Shadow-march and lighting now run EVERY step unconditionally
+      // (no more If(density>0.01)) — density itself multiplies the
+      // final contribution down to ~0 in empty air, same end result,
+      // without a real branch depending on a runtime value.
+      const lightAccum = float(0).toVar();
+      for (let s = 0; s < SHADOW_STEP_COUNT; s++) {
+        const shadowPos = pos.add(uniforms.sunDir.mul(float(6).mul(s + 1)));
+        const shadowUV = shadowPos.mul(TILE_SCALE).add(uniforms.scrollOffset);
+        lightAccum.addAssign(texture3D(densityTexture, shadowUV.fract()).r);
       }
-    });
+      const selfShadow = exp(lightAccum.mul(-0.25));
+      const ambientTerm = uniforms.ambientColor.mul(1.3);
+      const sunTerm = uniforms.sunColor.mul(phase).mul(selfShadow).mul(1.5);
+      const baseLitColor = sunTerm.add(ambientTerm);
+      // Per "turn dark when it rains" — stormDarken (driven live from
+      // rain intensity) blends the whole lit color toward a flat storm
+      // gray, and makes the cloud itself more extinctive/opaque too.
+      const litColor = mix(baseLitColor, vec3(0.32, 0.34, 0.4), uniforms.stormDarken);
+      const flashColor = uniforms.lightningColor.mul(uniforms.lightningFlash).mul(1.4);
+      const extinctionMul = mix(float(1), float(1.7), uniforms.stormDarken);
+      const sampleExtinction = exp(density.mul(stepSize).mul(-0.045).mul(extinctionMul));
+      const sampleLight = litColor.add(flashColor).mul(density).mul(stepSize).mul(0.6).mul(transmittance);
+      scattered.addAssign(sampleLight);
+      transmittance.mulAssign(sampleExtinction);
+      t.addAssign(stepSize);
+    }
 
-    return vec4(scattered, transmittance);
+    // skyMask applied once at the very end — ground-facing pixels get
+    // transmittance forced back to 1 (fully see-through, no cloud
+    // effect) and scattered forced to 0, the same net result the old
+    // If(rayDir.y...) early-out gave, just via multiplication.
+    const finalTransmittance = mix(float(1), transmittance, skyMask);
+    const finalScattered = scattered.mul(skyMask);
+    return vec4(finalScattered, finalTransmittance);
   })();
 
   return { node, uniforms, densityTexture };

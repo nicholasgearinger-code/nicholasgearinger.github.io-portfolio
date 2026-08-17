@@ -106,12 +106,26 @@ function buildCloudDensityTexture(size = 48) {
           amp *= 0.5;
           freq *= 2;
         }
-        // Coverage mask — a real gap between cloud clusters instead of
-        // wall-to-wall haze, per "3D dense cloud" reading as distinct
-        // formations rather than an even fog layer.
-        const coverage = smootherstep(Math.max(0, Math.min(1, (billowLow - 0.35) / 0.4)));
+        // Per "clouds are black" — a real, confirmed bug: this coverage
+        // threshold (0.35) was FAR too permissive. Worley min-distance
+        // (even inverted, even capped at 1) has a mean sitting well above
+        // that for a single random point per cell — meaning most of the
+        // volume was qualifying as "in cloud," not the sparse, mostly-
+        // clear-with-pockets field this was meant to produce. Wall-to-
+        // wall density through a 16-step accumulation is exactly what
+        // drives transmittance to ~0 everywhere the camera looks upward,
+        // which is what "black sky" actually was. Raised hard (0.35->0.68)
+        // and the transition band narrowed (0.4->0.16) so coverage is
+        // genuinely selective — real gaps, not an even fog.
+        const coverage = smootherstep(Math.max(0, Math.min(1, (billowLow - 0.68) / 0.16)));
         let density = (billowMid * 0.55 + fbm * 0.45) * coverage;
-        density = Math.max(0, Math.min(1, (density - 0.15) / 0.6)); // remap/sharpen edges
+        // Remap tightened to match (was (d-0.15)/0.6, now requires a
+        // notably higher raw value before anything becomes visible at
+        // all, and rarely saturates to fully opaque) — this is the other
+        // half of the same fix: even within a "covered" pocket, density
+        // should read as real cloud texture (soft, varied), not a flat
+        // opaque block.
+        density = Math.max(0, Math.min(1, (density - 0.32) / 0.42));
         data[x + y * size + z * size * size] = Math.round(density * 255);
       }
     }
@@ -219,7 +233,12 @@ export function createVolumetricClouds() {
       for (let i = 0; i < STEP_COUNT; i++) {
         const pos = uniforms.cameraPos.add(rayDir.mul(t));
         const sampleUV = pos.mul(TILE_SCALE).add(uniforms.scrollOffset);
-        const density = texture3D(densityTexture, sampleUV.fract()).r.mul(uniforms.coverage.add(0.5));
+        // Per "clouds are black" fix — coverage is now a genuine 0-2x
+        // dial (0.5 default = 1x, i.e. the baked density unchanged) via
+        // uniforms.coverage.mul(2), not the old .add(0.5) which could
+        // only ever multiply UP from a 1x floor, never actually reduce
+        // density even at coverage=0.
+        const density = texture3D(densityTexture, sampleUV.fract()).r.mul(uniforms.coverage.mul(2));
 
         If(density.greaterThan(0.01), () => {
           // Real self-shadowing — a short secondary march TOWARD the sun
@@ -238,8 +257,15 @@ export function createVolumetricClouds() {
           const selfShadow = exp(lightAccum.mul(-1.2));
           const litColor = uniforms.sunColor.mul(phase).mul(selfShadow).add(uniforms.ambientColor.mul(0.5));
           const flashColor = uniforms.lightningColor.mul(uniforms.lightningFlash).mul(1.4);
-          const sampleExtinction = exp(density.mul(stepSize).mul(-0.09));
-          const sampleLight = litColor.add(flashColor).mul(density).mul(stepSize).mul(0.045).mul(transmittance);
+          // Extinction softened (-0.09 -> -0.06) and scattered brightness
+          // raised (0.045 -> 0.065) as part of the same "clouds are
+          // black" fix — with the density bake now genuinely sparse (see
+          // buildCloudDensityTexture's own comment), the real clusters
+          // that DO form should read as bright, translucent, sunlit
+          // shapes, not collapse to near-opaque black after a handful of
+          // accumulation steps.
+          const sampleExtinction = exp(density.mul(stepSize).mul(-0.06));
+          const sampleLight = litColor.add(flashColor).mul(density).mul(stepSize).mul(0.065).mul(transmittance);
           scattered.addAssign(sampleLight);
           transmittance.mulAssign(sampleExtinction);
         });

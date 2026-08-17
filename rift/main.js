@@ -1039,9 +1039,6 @@ const lensDistortedOutput = Fn(() => {
   // position sweeps the FULL screen height (real screenUV.y, not a
   // fract()'d per-cell value) over its slide — so a slow-moving drop can
   // now genuinely trace a continuous path from top to bottom.
-  const laneUV = screenUV.x.mul(cellSize);
-  const laneId = floor(laneUV);
-  const laneLocalX = fract(laneUV);
   const startY = float(-0.15); // eases in just above the very top of the screen, same reasoning as the old per-cell entry/exit margin
   const endY = float(1.15); // eases out just below the very bottom
   // Confining every lane to exactly ONE simultaneous droplet would look
@@ -1056,6 +1053,25 @@ const lensDistortedOutput = Fn(() => {
   let lightBoost = float(0);
   let sunGlintColor = vec3(0, 0, 0);
   for (let row = 0; row < ROWS_PER_LANE; row++) {
+    // Per "invisible walls that cut off some of the rain drops" — real,
+    // confirmed bug: lanes are hard vertical boundaries (fract() wraps
+    // every 1.0), and once trails got wide (the size fix above) a
+    // droplet sitting anywhere near its own lane's edge would get
+    // hard-clipped right at that boundary — a droplet or trail simply
+    // has no way to spill into its neighbor's lane, since the neighbor
+    // is an entirely different, unrelated droplet. Rather than actually
+    // sampling neighboring lanes too (a real fix, but a 3x cost
+    // multiplier on top of the existing 4-row loop), each ROW's lane
+    // grid is offset by a different quarter-lane fraction — so the same
+    // physical screen position sees FOUR independently-placed sets of
+    // lane boundaries, one per row. A droplet clipped by row 0's
+    // boundary at some screen X is virtually never ALSO clipped by row
+    // 1/2/3's boundaries at that same X (their edges sit elsewhere), and
+    // since every row's contribution is combined below, the union
+    // reliably fills in what any single row's edge would have cut off.
+    const laneUV = screenUV.x.mul(cellSize).add(float(row * 0.25));
+    const laneId = floor(laneUV);
+    const laneLocalX = fract(laneUV);
     const rowBase = laneId.add(float(row * 131.0));
     const rowHash = hash(rowBase);
     // Per-row/lane slide rate (0.4x-1.6x) keyed on the row's own STABLE
@@ -1071,7 +1087,13 @@ const lensDistortedOutput = Fn(() => {
     // merge and re-form rather than retracing the exact same path
     // forever.
     const seed = rowBase.add(epoch.mul(311.0));
-    const dropletBaseX = hash(seed); // fixed for this cycle's whole slide, 0-1 within the lane
+    // Inset away from the raw 0-1 range (was hash(seed) directly) — a
+    // droplet spawning right at its own lane's edge is the single
+    // biggest contributor to the clipped-wall look, on top of the
+    // per-row offset above; keeping spawn points a bit more centered
+    // cuts down how often a large droplet even reaches its lane's edge
+    // at all.
+    const dropletBaseX = mix(float(0.18), float(0.82), hash(seed)); // fixed for this cycle's whole slide, within the lane
     const dropletY = mix(startY, endY, localCreep); // the droplet's CURRENT position, full screen-height units
     // Per "lasting until the rain is gone and slowly dry up" — coverage
     // threshold scales with lensIntensityUniform (fed from the JS-side

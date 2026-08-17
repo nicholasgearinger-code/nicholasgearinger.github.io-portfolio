@@ -1010,18 +1010,22 @@ const lensDistortedOutput = Fn(() => {
   const cellSize = float(10.0);
   const zero = float(0);
   const one = float(1);
-  // Slow downward drift, tied to the real self-managed time uniform — real
-  // droplets on glass slide/settle gradually rather than staying perfectly
-  // static, and this is also what makes the pattern eventually cycle
-  // through fresh droplet positions instead of showing the exact same
-  // frozen arrangement for an entire storm.
+  // Downward drift, tied to lensTimeUniform — but that uniform is now fed
+  // from the JS-side lensDripPhase accumulator (see its own declaration
+  // and per-frame update further below), NOT raw elapsedTime anymore.
+  // lensDripPhase only advances while there's real wetness, at a rate
+  // scaled by how wet the glass currently is — so this drift genuinely
+  // speeds up as a storm builds and slows toward a standstill as it
+  // dries, instead of sliding at the same constant rate regardless of
+  // rain state (which is what a raw elapsedTime feed always did, being
+  // itself constant-rate by definition).
   // Per direct observation "flow organically down the glass lens not
   // up" — flipped the sign directly based on what was actually seen
   // live, rather than re-reasoning about UV orientation (this exact
   // project's screen-space UV convention has been wrong more than once
   // already this session, so trusting the real observation over theory
   // here).
-  const cellUV = screenUV.mul(cellSize).add(vec2(zero, lensTimeUniform.mul(-0.15)));
+  const cellUV = screenUV.mul(cellSize).add(vec2(zero, lensTimeUniform.mul(-0.2)));
   const cellId = floor(cellUV);
   const cellLocal = fract(cellUV);
   const seed = cellId.x.add(cellId.y.mul(57.0));
@@ -1031,10 +1035,18 @@ const lensDistortedOutput = Fn(() => {
   // — avoiding an API call not yet confirmed anywhere in this project,
   // when smoothstep already does the same job with functions already
   // proven working here) that's ~0 or ~1 per cell.
-  // Per real reference photo — most cells should show a droplet now,
-  // not roughly half (was 0.5/0.51 threshold, ~50% coverage; now
-  // ~80%), matching the real reference's dense, near-total coverage.
-  const dropletPresent = smoothstep(float(0.19), float(0.2), hash(seed.add(71.0)));
+  // Per explicit "lasting until the rain is gone and slowly dry up" —
+  // the coverage threshold itself now scales with lensIntensityUniform
+  // (which JS now feeds from the wetness accumulator, not raw
+  // rainIntensity) instead of being a fixed ~80% regardless of how wet
+  // the glass currently is. At full wetness the threshold sits low
+  // (0.05 — nearly every cell qualifies, dense near-total coverage
+  // matching the real reference photo). As wetness drains toward 0 the
+  // threshold climbs toward 0.95 — fewer and fewer cells still qualify,
+  // so drops visibly thin out and disappear as the glass dries, rather
+  // than the whole pattern cutting off uniformly the instant rain stops.
+  const coverageThreshold = mix(float(0.95), float(0.05), lensIntensityUniform);
+  const dropletPresent = smoothstep(coverageThreshold, coverageThreshold.add(0.02), hash(seed.add(71.0)));
   // Per explicit "mix of large and small droplets" — per-cell randomized
   // radius instead of one fixed size. pow(x, 2.2) biases the
   // distribution toward smaller values (real rain-on-glass is mostly
@@ -1051,24 +1063,23 @@ const lensDistortedOutput = Fn(() => {
   // just as a rare outlier.
   const dropletRadius = mix(float(0.09), float(0.48), pow(sizeRand, float(1.5)));
   const distToCenterRaw = cellLocal.sub(dropletCenter).length();
-  // Per explicit "change shape organically like water" — real droplets
-  // are never perfect circles. A second, higher-frequency hash-cell
-  // layer sampled at this droplet's own local position perturbs the
-  // distance field directly (the same domain-warping principle already
-  // used for the Gerstner wave sum elsewhere in this project, just in 2D
-  // screen space instead of 3D world space) — this bulges and pinches
-  // the effective edge unevenly around the circle instead of leaving it
-  // perfectly round. Scaled by the droplet's OWN radius so small drops
-  // stay comparatively cleaner (their wobble would otherwise be
-  // disproportionately large relative to their own size) while big ones
-  // show more visible organic variation, matching how real large drops
-  // sag and distort more than tiny ones.
+  // Per explicit "more round" — real rain droplets on glass, especially
+  // the smaller/mid-sized ones this effect is mostly made of, read as
+  // genuinely round beads, not organically bulged blobs. Pulled the
+  // wobble WAY down (0.35 -> 0.12 of the droplet's own radius) rather
+  // than removing it outright — a little irregularity still keeps them
+  // from looking like a stamped, perfectly-identical pattern, but the
+  // dominant silhouette is now the circle, not the wobble.
   const wobbleUV = cellLocal.mul(24.0);
   const wobbleCellId = floor(wobbleUV);
   const wobbleHash = hash(wobbleCellId.x.add(wobbleCellId.y.mul(41.0)).add(seed));
-  const wobble = wobbleHash.sub(0.5).mul(dropletRadius).mul(0.35);
+  const wobble = wobbleHash.sub(0.5).mul(dropletRadius).mul(0.12);
   const distToCenter = distToCenterRaw.add(wobble);
-  const inDroplet = one.sub(smoothstep(dropletRadius.mul(0.6), dropletRadius, distToCenter));
+  // Edge band tightened (0.6->0.82 of radius) — a narrower falloff band
+  // reads as a cleaner, more defined circular edge than the previous
+  // wider blur, which softened the roundness the wobble reduction above
+  // is meant to show off.
+  const inDroplet = one.sub(smoothstep(dropletRadius.mul(0.82), dropletRadius, distToCenter));
   const dir = cellLocal.sub(dropletCenter);
   // Per real reference photo — "distortion of the environment through the
   // center... not glowing rings": this refraction-like sample offset is
@@ -1079,7 +1090,7 @@ const lensDistortedOutput = Fn(() => {
   // longer optical path and refracts more strongly than a tiny one.
   const sizeFactor = dropletRadius.div(0.22); // normalized against the old fixed radius, so overall intensity tuning elsewhere stays roughly in the same ballpark
   const distortAmount = inDroplet.mul(dropletPresent).mul(0.06).mul(sizeFactor).mul(lensIntensityUniform);
-  // Per "wet trails as they slide down the lens" — a narrow vertical
+  // Per "drip onto the lens like real rain does" — a narrow vertical
   // streak in the same screen-space column as each droplet, extending
   // toward increasing cellUV.y (the same direction the whole pattern
   // already drifts in, above) — real water trails are what a droplet
@@ -1093,7 +1104,12 @@ const lensDistortedOutput = Fn(() => {
   // size too — a real larger drop leaves a wider, more visible wet trail
   // than a tiny one.
   const belowDroplet = smoothstep(zero, float(0.03), dropletCenter.y.sub(cellLocal.y));
-  const trailFade = one.sub(clamp(dropletCenter.y.sub(cellLocal.y), zero, one));
+  // Trail LENGTH now scales with the droplet's own radius (was a fixed
+  // 0-1 falloff regardless of size) — real heavier drops run further
+  // down the glass before losing momentum than small clinging ones do,
+  // so a bigger droplet here now visibly drips further, not just wider.
+  const trailLength = dropletRadius.mul(1.8).add(0.15);
+  const trailFade = one.sub(clamp(dropletCenter.y.sub(cellLocal.y).div(trailLength), zero, one));
   const trailWidth = dropletRadius.mul(0.16);
   const trailMask = smoothstep(trailWidth, trailWidth.mul(0.3), trailXDist).mul(belowDroplet).mul(trailFade).mul(dropletPresent);
   const trailDistort = trailMask.mul(0.015).mul(sizeFactor).mul(lensIntensityUniform);
@@ -1506,6 +1522,23 @@ let pendingSettingsReload = false; // set true by applyGraphicsSettings whenever
 let lensEffectActive = false; // set each frame below; read by the final render call to decide which outputNode postProcessing should currently be using
 let lastLensEffectActive = null; // previous frame's value — outputNode is only reassigned (and the real shader-recompile cost only paid) on an actual transition, not every frame
 let postSwimWetness = 0; // 0-1, set to 1 the instant the player surfaces, decays over ~60s — drives the SAME lens-rain shader as real rain, just from a different trigger
+// Per explicit "lasting until the rain is gone and slowly dry up" — real
+// rain-on-glass doesn't track the instant rainIntensity value 1:1 (that
+// made droplets vanish the SAME frame a storm ended, no drying at all).
+// This chases wind.rainIntensity asymmetrically: wets up fast (drops
+// visibly accumulating as a storm starts) but dries down slowly (drops
+// lingering and shrinking away after it stops) — see its own update
+// further below for the actual ramp rates.
+let lensRainWetness = 0;
+// Drives the droplets' downward slide. Deliberately a SEPARATE
+// accumulator from elapsedTime (which is what the old version fed
+// straight into the shader) — multiplying an absolute elapsed-time value
+// by a changing intensity would jump the visible droplet POSITIONS
+// every time intensity changes, not just their speed. This instead only
+// advances while there's actual wetness to slide, at a rate scaled by
+// that wetness, so real drips slow to a near-stop as the glass dries
+// rather than sliding at a constant rate regardless of how wet it is.
+let lensDripPhase = 0;
 let cloudLayerHandle = null;
 let horizonHandle = null;
 let wildlifeHandle = null;
@@ -5160,7 +5193,20 @@ function animate() {
   // graphics setting (this is only READ here, at the top of the frame,
   // not something this per-frame code changes itself).
   const LENS_EFFECT_ENABLED = getGraphicsSettings().lensEffectEnabled !== false;
-  const effectiveLensIntensity = Math.max(wind.rainIntensity, postSwimWetness);
+  // Per explicit "lasting until the rain is gone and slowly dry up" —
+  // lensRainWetness CHASES wind.rainIntensity instead of just copying it
+  // every frame, asymmetrically: wets up fast (~3s to catch up to a
+  // sudden downpour — droplets should visibly build, not teleport to
+  // full coverage) but dries down slow (~35s to fully clear — real
+  // window/windshield rain lingers and thins out well after the rain
+  // itself has stopped, it doesn't vanish the instant it does).
+  const rainTarget = wind.rainIntensity;
+  if (rainTarget > lensRainWetness) {
+    lensRainWetness = Math.min(rainTarget, lensRainWetness + dt / 3);
+  } else {
+    lensRainWetness = Math.max(rainTarget, lensRainWetness - dt / 35);
+  }
+  const effectiveLensIntensity = Math.max(lensRainWetness, postSwimWetness);
   // Per "the rain drop lens effect looks like it's connected to the
   // Ocean FX button instead of Lens FX" — a real, confirmed bug: this
   // condition ALSO checked oceanEffectsEnabled, a leftover from before
@@ -5172,7 +5218,13 @@ function animate() {
   lensEffectActive = LENS_EFFECT_ENABLED && !isFullySubmerged && effectiveLensIntensity > 0.02;
   lensDiagEl.textContent = "lens: " + (lensEffectActive ? "ON" : "off") + ", intensity=" + effectiveLensIntensity.toFixed(2) + ", rain=" + (weatherHandle ? weatherHandle.rainIntensity.toFixed(2) : "n/a") + ", wet=" + postSwimWetness.toFixed(2) + ", submerged=" + isFullySubmerged;
   if (lensEffectActive) {
-    lensTimeUniform.value = elapsedTime;
+    // lensDripPhase (not raw elapsedTime) is what actually drives the
+    // droplets' downward slide in the shader — only advances while
+    // there's wetness, at a rate scaled by how much, so the slide
+    // itself speeds up/slows down with the storm instead of running at
+    // a fixed rate the whole time the effect happens to be active.
+    lensDripPhase += dt * effectiveLensIntensity;
+    lensTimeUniform.value = lensDripPhase;
     lensIntensityUniform.value = effectiveLensIntensity;
     // Per explicit "only glow when reflecting sunlight" — the real sun's
     // world position projected onto the screen, so the shader's rim

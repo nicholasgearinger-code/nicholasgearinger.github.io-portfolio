@@ -5,7 +5,7 @@ import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERF
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
 import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, createUnderwaterLightShaft, updateLightShafts, disposeLightShafts, createRockCluster, createCaveMouth, applyVerticalGradient } from "./decorations.js";
-import { createLiquidPlane, updateLiquidPlane, updateRippleLayer, disposeLiquidPlane, updateFluidSimWater, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail } from "./liquid.js";
+import { createLiquidPlane, updateLiquidPlane, updateRippleLayer, disposeLiquidPlane, updateFluidSimWater, createBreakingWave, updateBreakingWave, disposeBreakingWave, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail } from "./liquid.js";
 import { createDayNightCycle, updateDayNightCycle, CYCLE_SECONDS } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
 import { createGrass, updateGrass, disposeGrass, createFlowers, updateFlowers, disposeFlowers, createFootstepGlowSystem, spawnFootstepGlow, updateFootstepGlowSystem, disposeFootstepGlowSystem } from "./vegetation.js";
@@ -1611,6 +1611,7 @@ function updateMovement(dt, grounded, swimming) {
 // ---------------------------------------------------------------------------
 let terrainMesh = null;
 let liquidHandle = null;
+let breakingWaveHandle = null; // real 3D curling wave crest geometry — Coral Shallows only, see createBreakingWave (liquid.js)
 let reflectionFrameCounter = 999; // starts high so the first eligible frame always renders immediately, not a blank/stale texture
 // Real GLB model instances — Coral Shallows only (see models.js). Tracked
 // separately from every other decoration/wildlife array since these load
@@ -1726,6 +1727,8 @@ function teardownLevel() {
   }
   disposeLiquidPlane(scene, liquidHandle);
   liquidHandle = null;
+  disposeBreakingWave(scene, breakingWaveHandle);
+  breakingWaveHandle = null;
   disposeWaterfall(scene, waterfallHandle);
   waterfallHandle = null;
   disposeOceanSurfaceDetail(scene, oceanSurfaceDetailHandle);
@@ -2963,6 +2966,16 @@ vec2 causticVoronoiF1F2(vec2 p) {
     // up close.
     const waterPlaneSize = level.biome === "crystal" ? 2000 : TERRAIN_SIZE;
     liquidHandle = createLiquidPlane(scene, level.biome, LIQUID_LEVEL[level.biome], waterPlaneSize, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
+    // Real 3D curling wave-crest geometry — per explicit "genuine 3D
+    // breaking wave geometry," additive to (not replacing) the ocean
+    // plane just created above. Coral Shallows only, same scoping as
+    // the ocean's own other crystal-specific features (fluid sim, real
+    // foam particles). Uses the SAME real terrain sampler the ocean
+    // plane's own shore-damping already reads from — a genuinely
+    // detected shoreline, not a hardcoded line.
+    if (level.biome === "crystal") {
+      breakingWaveHandle = createBreakingWave(scene, LIQUID_LEVEL.crystal, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED), waterPlaneSize);
+    }
   }
 
   if (level.biome === "crystal") {
@@ -5027,6 +5040,7 @@ function animate() {
   // terrain caustic focus position.
   tempWaterGlintDir.copy(moonLight.position).lerp(sun.position, dayNight.dayAmount);
   updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, camera.position, tempWaterGlintDir, dayNight.skyHorizon, reflectionRenderTarget.texture, reflectionTextureMatrix, refractionRenderTarget.texture, refractionResolution, weatherHandle ? weatherHandle.rainIntensity : 0, dayNight.dayAmount, weatherHandle ? weatherHandle.windStrength : 0);
+  updateBreakingWave(breakingWaveHandle, elapsedTime);
   // Real GPU compute dispatch for the additive ripple layer (see
   // liquid.js's own setup comment on it) — separate call for the same
   // reason the fluid-sim water's own dispatch (just below) is separate

@@ -1395,6 +1395,218 @@ function updateFluidSimWater(handle, renderer, elapsedTime) {
   // prototype itself used.
 }
 
+// -----------------------------------------------------------------------------
+// Real 3D breaking-wave geometry — per explicit "genuine 3D breaking wave
+// geometry," a real, different request from the foam pass just before it.
+// A heightfield (which is what the whole ocean above IS — one Y value per
+// X/Z position) can structurally never curl over itself; that's not a
+// tuning limitation, it's what a heightfield IS. A genuine overturning
+// wave needs an actual parametric CURL — a tube/barrel cross-section
+// swept along the shore, where the SAME (x,z) column legitimately has
+// multiple real Y values as the lip arcs up, over, and back down. This
+// is a completely separate mesh from the ocean plane above (additive,
+// same discipline as the ripple layer and volumetric clouds — doesn't
+// touch or replace the existing water at all), built along a REAL
+// detected shoreline (sampled from the same terrain heightfield the
+// ocean's own shore-damping already uses), not a hardcoded straight
+// line.
+//
+// Honest scope limits, stated up front rather than discovered later:
+// - Shoreline detection is a single-crossing scan per X column (see
+//   detectShorelinePoints below) — this works well for a simple, mostly-
+//   one-directional coastline. A complex bay/inlet with multiple shore
+//   crossings at the same X isn't something this first pass handles.
+// - Capped to a representative shore SEGMENT (~440 units), not the
+//   entire coastline — matching how the rest of this project scopes
+//   "small/local" additions rather than a fully general everywhere-
+//   system.
+// -----------------------------------------------------------------------------
+
+const BREAK_CROSS_RES = 14; // vertices across the curl profile, back (calm water) to tip (breaking lip)
+const BREAK_ALONG_STEP = 3; // world units between along-shore sample points
+
+// Real shoreline detection — reuses the SAME sampleHeight callback the
+// ocean's own shoreDampBuffer already samples from, scanning for where
+// real terrain height crosses the water level. For each X column, scans
+// Z from one edge of the search window to the other and records the
+// FIRST point where depth crosses from "wet" to "dry" (or vice versa) —
+// a real, computed shoreline, not an authored/guessed line.
+function detectShorelinePoints(sampleHeight, waterY, size) {
+  const points = [];
+  if (!sampleHeight) return points;
+  const scanRange = Math.min(size / 2, 220); // real, deliberate cap — a representative shore segment, not the whole map's coastline
+  for (let x = -scanRange; x <= scanRange; x += BREAK_ALONG_STEP) {
+    let prevDepth = null;
+    for (let z = -scanRange; z <= scanRange; z += 1.5) {
+      const depth = waterY - sampleHeight(x, z);
+      if (prevDepth !== null && ((prevDepth > 0.3) !== (depth > 0.3))) {
+        points.push({ x, z: z - 0.75 }); // roughly the midpoint of the crossing step
+        break;
+      }
+      prevDepth = depth;
+    }
+  }
+  return points;
+}
+
+function createBreakingWave(scene, waterY, sampleHeight, size) {
+  const shorePoints = detectShorelinePoints(sampleHeight, waterY, size);
+  if (shorePoints.length < 2) return null; // no usable shoreline found in range — real, defensive bail rather than building broken geometry
+
+  const crossRes = BREAK_CROSS_RES;
+  const vertCount = shorePoints.length * crossRes;
+  const positions = new Float32Array(vertCount * 3);
+  const uvs = new Float32Array(vertCount * 2);
+  const shoreNormals = new Float32Array(vertCount * 3);
+
+  for (let i = 0; i < shorePoints.length; i++) {
+    const p = shorePoints[i];
+    const prev = shorePoints[Math.max(0, i - 1)];
+    const next = shorePoints[Math.min(shorePoints.length - 1, i + 1)];
+    const tanX = next.x - prev.x, tanZ = next.z - prev.z;
+    const tanLen = Math.hypot(tanX, tanZ) || 1;
+    // Perpendicular to the along-shore tangent — the cross-section
+    // direction a real wave crest curls along, toward or away from open
+    // water.
+    let normX = -(tanZ / tanLen), normZ = tanX / tanLen;
+    // Real orientation check — samples a few units out along the
+    // candidate normal and flips it if that direction turns out to be
+    // the DRIER one (a real wave curls TOWARD the shore, arriving FROM
+    // open water, so the normal needs to consistently point offshore,
+    // not flip randomly segment to segment based on which way the
+    // tangent happened to be computed).
+    if (sampleHeight) {
+      const outDepth = waterY - sampleHeight(p.x + normX * 4, p.z + normZ * 4);
+      const inDepth = waterY - sampleHeight(p.x - normX * 4, p.z - normZ * 4);
+      if (inDepth > outDepth) { normX = -normX; normZ = -normZ; }
+    }
+    for (let j = 0; j < crossRes; j++) {
+      const vi = (i * crossRes + j);
+      positions[vi * 3] = p.x;
+      positions[vi * 3 + 1] = waterY;
+      positions[vi * 3 + 2] = p.z;
+      uvs[vi * 2] = i / (shorePoints.length - 1);
+      uvs[vi * 2 + 1] = j / (crossRes - 1);
+      shoreNormals[vi * 3] = normX;
+      shoreNormals[vi * 3 + 1] = 0;
+      shoreNormals[vi * 3 + 2] = normZ;
+    }
+  }
+
+  const indices = [];
+  for (let i = 0; i < shorePoints.length - 1; i++) {
+    for (let j = 0; j < crossRes - 1; j++) {
+      const a = i * crossRes + j, b = (i + 1) * crossRes + j, c = (i + 1) * crossRes + j + 1, d = i * crossRes + j + 1;
+      indices.push(a, b, d, b, c, d);
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+  geo.setAttribute("shoreNormal", new THREE.BufferAttribute(shoreNormals, 3));
+  geo.setIndex(indices);
+
+  const breakTimeUniform = uniform(0);
+  const material = new THREE.MeshStandardNodeMaterial({ transparent: true, side: THREE.DoubleSide, roughness: 0.25, metalness: 0 });
+
+  // uvNode.x = along-shore progress (0-1 across the detected segment);
+  // uvNode.y = cross-section progress (0 = base/calm water, 1 = the
+  // curling lip's own tip). Plain JS helper (not Fn()-wrapped) — called
+  // from within each of positionNode/colorNode/opacityNode's own Fn()
+  // bodies below, matching the confirmed pattern from real TSL raymarch
+  // examples (helper functions invoked directly inside a Loop/If body,
+  // not separately Fn()-wrapped themselves) rather than nesting Fn()
+  // calls inside Fn() calls, which isn't a pattern this project has
+  // used or verified elsewhere. Recomputes the same curl math
+  // independently in each of the three call sites below — real,
+  // duplicated GPU cost, but the SAME deliberate, already-justified
+  // trade-off this file's own Gerstner normalNode/positionNode split
+  // already makes ("reusing TSL node objects ACROSS separate material-
+  // property Fn() bodies isn't a pattern this project has verified, so
+  // this recomputes... instead of risking that uncertainty").
+  const sharedCurl = () => {
+    const uvNode = uv();
+    const shoreNormal = attribute("shoreNormal", "vec3");
+    const alongShore = uvNode.x;
+    const v = uvNode.y;
+
+    // Real breaking cycle — per shore position, a wave rolls through
+    // calm -> rising -> curling -> collapsing -> foam -> reset,
+    // repeating. alongShore offsets the phase so the break travels
+    // visibly ALONG the shore over time (real waves break progressively
+    // along a beach, not everywhere at once).
+    const cyclePeriod = float(6.5);
+    const phase = fract(breakTimeUniform.div(cyclePeriod).sub(alongShore.mul(0.6)));
+    // Asymmetric shape (pow<1 biases toward a fast rise, slower foam
+    // fade) — a real wave doesn't rise and fall symmetrically.
+    const breakProgress = pow(clamp(sin(phase.mul(3.14159)), 0, 1), float(0.6));
+
+    // The actual curl — sin/cos of the SAME angle parameter (not two
+    // independent offsets) is what makes the tip genuinely arc up, OVER,
+    // and back down/inward as angle passes 90°, rather than just rising
+    // higher. maxCurlAngle past PI (180°) means the tip is legitimately
+    // overhanging BACK toward the base by the time breakProgress peaks —
+    // a true barrel, not just a steep face.
+    const maxCurlAngle = float(4.2);
+    const waveHeight = float(1.7);
+    const angle = v.mul(maxCurlAngle).mul(breakProgress);
+    const radius = waveHeight.mul(mix(float(0.25), float(1), breakProgress)).mul(v.mul(0.6).add(0.4));
+    const acrossOffset = sin(angle).mul(radius);
+    const upOffset = float(1).sub(cos(angle)).mul(radius);
+
+    // Curls IN toward shore (negated) — matching how a real breaking
+    // wave's lip pitches forward onto the beach, not out to sea.
+    const worldOffset = shoreNormal.mul(acrossOffset.negate());
+    return { worldOffset, upOffset, v, breakProgress };
+  };
+
+  material.positionNode = Fn(() => {
+    const { worldOffset, upOffset } = sharedCurl();
+    return positionLocal.add(vec3(worldOffset.x, upOffset, worldOffset.z));
+  })();
+
+  material.colorNode = Fn(() => {
+    const { v, breakProgress } = sharedCurl();
+    // Deep-water blue-green at the base, shading to foam-white toward
+    // the curling tip and specifically where breakProgress is high (the
+    // moment it's actually breaking, not mid-swell) — same general
+    // "white right at the crest" logic as the ocean's own foam system,
+    // applied here to real 3D geometry instead of a flat surface signal.
+    const baseColor = color(0x1f6f78);
+    const foamColor = color(0xf4faff);
+    const foamAmount = clamp(v.mul(1.3).add(breakProgress.mul(0.6)).sub(0.5), 0, 1);
+    return mix(baseColor, foamColor, foamAmount);
+  })();
+
+  material.opacityNode = Fn(() => {
+    const { breakProgress } = sharedCurl();
+    // Fades toward fully transparent when NOT breaking (breakProgress
+    // near 0) so this ribbon blends into the real ocean surface beside
+    // it during the calm part of its own cycle, instead of showing as a
+    // visible flat intrusion sitting at a fixed height.
+    return clamp(breakProgress.mul(1.4), 0.15, 0.95);
+  })();
+
+  const mesh = new THREE.Mesh(geo, material);
+  scene.add(mesh);
+  return { mesh, breakTimeUniform };
+}
+
+function updateBreakingWave(handle, elapsed) {
+  if (!handle) return;
+  handle.breakTimeUniform.value = elapsed;
+}
+
+function disposeBreakingWave(scene, handle) {
+  if (!handle) return;
+  scene.remove(handle.mesh);
+  riftDeferDispose(() => {
+    handle.mesh.geometry.dispose();
+    handle.mesh.material.dispose();
+  });
+}
+
 function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0.6, z: 0.35 }, excludeRegions = []) {
   const style = LIQUID_STYLE[biome];
   if (!style) return null;
@@ -1963,7 +2175,23 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
         // in open water) — same real shore-proximity data already
         // driving the wave amplitude damping above, not a separate
         // computation.
-        const shoreProximity = float(1).sub(shoreDampBuffer.toAttribute());
+        const shoreProximityRaw = float(1).sub(shoreDampBuffer.toAttribute());
+        // Per explicit "volumetric foam layer... that touches the
+        // shore... more realistic" — real waves don't wash up to the
+        // exact same point on the sand continuously; they arrive in
+        // loose sets, each reaching a bit further than the calm in
+        // between (matching the reference video's own rolling-in/
+        // receding rhythm). shoreDampBuffer itself is fixed per-vertex
+        // real-terrain data and shouldn't change, but the EFFECTIVE
+        // "counts as near-shore" threshold can breathe — a slow sine
+        // (real ~35s period, deliberately much slower than any
+        // individual wave's own crest-to-crest period so it reads as a
+        // genuine set/lull cycle, not just another wave) biases
+        // shoreProximity upward during a "wash in," letting foam
+        // genuinely reach further up the slope in cycles rather than
+        // sitting at one static line.
+        const washCycle = sin(waterTimeUniform.mul(0.18)).mul(0.5).add(0.5); // 0..1, ~35s period
+        const shoreProximity = clamp(shoreProximityRaw.add(washCycle.mul(0.3)), 0, 1);
         // Real crest-line pattern — per "change it to white lines...
         // to look like breaking waves," replacing the old isotropic
         // detail-texture multiply (which read as scattered round dots,
@@ -1986,8 +2214,33 @@ function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir = { x: 0
         const linePhase = fract(dominantPhase.div(6.28318));
         const lineWidth = float(0.08);
         const crestLines = tslSmoothstep(float(1).sub(lineWidth), float(1), linePhase).add(tslSmoothstep(lineWidth, float(0), linePhase));
-        const foamCoverage = foamMask.mul(crestLines).mul(shoreProximity);
-        const foamGlow = color(0xf0f8ff).mul(foamCoverage).mul(1.8);
+        // Per "volumetric foam layer" — a real wave's crest line doesn't
+        // stay a thin line all the way to shore; the moment it actually
+        // reaches shallow water it dissolves into a full, rough,
+        // connected foam MASS (exactly what the reference video shows —
+        // a thick white wash, not a hairline). Blends the existing thin
+        // crestLines (kept as-is for open-water chop, far from shore)
+        // toward a much wider, noise-broken-up band as shoreProximity
+        // rises — same hash(x.add(y.mul(57.0))) single-scalar-seed
+        // technique already proven working in this project's lens
+        // shader, reused here rather than inventing a new spatial-noise
+        // approach. `.floor()` on the seed coordinates keeps the noise
+        // texture stable per small world-space cell rather than
+        // shimmering every fragment.
+        const foamNoiseSeed = positionWorld.x.mul(2.2).add(waterTimeUniform.mul(1.3)).floor().add(positionWorld.z.mul(2.2).floor().mul(57.0));
+        const foamNoise = hash(foamNoiseSeed);
+        const wideWash = tslSmoothstep(float(0.3), float(0.75), foamNoise).mul(tslSmoothstep(float(1).sub(lineWidth.mul(4)), float(1), linePhase).add(tslSmoothstep(lineWidth.mul(4), float(0), linePhase)));
+        const foamShape = mix(crestLines, max(crestLines, wideWash), shoreProximity);
+        const foamCoverage = foamMask.mul(foamShape).mul(shoreProximity);
+        // Per "volumetric" — a real foamy wash has visible thickness/
+        // depth, not a flat, uniformly-bright color fill. A second,
+        // coarser noise layer darkens SOME of the covered area slightly
+        // (reads as shadowed pockets between foam bubbles/clumps) while
+        // the brightest cells stay near-white — real foam has exactly
+        // this uneven, clumpy brightness variation, not a flat wash.
+        const depthNoiseSeed = positionWorld.x.mul(0.9).add(positionWorld.z.mul(0.9).mul(37.0));
+        const depthNoise = mix(float(0.65), float(1.15), hash(depthNoiseSeed));
+        const foamGlow = color(0xf0f8ff).mul(foamCoverage).mul(depthNoise).mul(1.8);
 
         // Real sun-glint specular sparkle — per "not seeing a lot of
         // actual waves going up and down": this was a real, significant
@@ -3080,7 +3333,7 @@ function disposeFoamParticles(scene, handle) {
   });
 }
 
-export { createLiquidPlane, updateLiquidPlane, updateRippleLayer, disposeLiquidPlane, updateFluidSimWater, createFoamParticles, updateFoamParticles, disposeFoamParticles, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail };
+export { createLiquidPlane, updateLiquidPlane, updateRippleLayer, disposeLiquidPlane, updateFluidSimWater, createFoamParticles, updateFoamParticles, disposeFoamParticles, createBreakingWave, updateBreakingWave, disposeBreakingWave, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail };
 
 // Ocean surface detail — Coral Shallows only. DISABLED entirely per
 // explicit follow-up request, after two rounds of trying to fix the

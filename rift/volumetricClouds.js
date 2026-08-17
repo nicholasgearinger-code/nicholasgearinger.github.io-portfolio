@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { Fn, uniform, vec2, vec3, vec4, float, texture3D, uv, If, dot, mix, clamp, pow, exp, normalize, smoothstep, max as tslMax, min as tslMin } from "three/tsl";
+import { Fn, uniform, vec2, vec3, vec4, float, texture3D, uv, If, dot, mix, clamp, pow, exp, normalize, smoothstep, texture, perspectiveDepthToViewZ, max as tslMax, min as tslMin } from "three/tsl";
 
 // -----------------------------------------------------------------------------
 // Real raymarched volumetric clouds — per explicit "in addition to the
@@ -154,7 +154,7 @@ function buildCloudDensityTexture(size = 48) {
 // standard physically-based volumetric-over-background blend. `uniforms`
 // is what the per-frame update call (see updateVolumetricClouds below)
 // actually writes into.
-export function createVolumetricClouds() {
+export function createVolumetricClouds(sceneDepthTexture, cameraNear, cameraFar) {
   const densityTexture = buildCloudDensityTexture(48);
 
   const uniforms = {
@@ -239,8 +239,25 @@ export function createVolumetricClouds() {
       // above the new 0.08 threshold, a shallow ray can still travel very
       // far through the band; capping the path length directly prevents
       // any single ray from ever over-accumulating regardless of angle.
-      const tEnd = tslMin(tTop, tStart.add(500));
-      const stepSize = tEnd.sub(tStart).div(STEP_COUNT).toVar();
+      let tEnd = tslMin(tTop, tStart.add(500));
+
+      // Per "they look like they're passing in front of the trees...
+      // supposed to be far away" — real depth occlusion. Reads the ACTUAL
+      // rendered scene's depth at this pixel, converts it to a real
+      // distance along THIS ray (not just straight-ahead camera depth,
+      // which would be wrong for off-center pixels — divided by
+      // dot(rayDir, cameraForward) to account for the angle), and clamps
+      // the march to never go past whatever real geometry (a tree, a
+      // mountain, terrain) is already sitting there. A tree in front of
+      // the cloud band now genuinely occludes it, the way real distant
+      // clouds actually work.
+      const depthSample = texture(sceneDepthTexture, screenUV).r;
+      const viewZ = perspectiveDepthToViewZ(depthSample, float(cameraNear), float(cameraFar));
+      const forwardDot = tslMax(dot(rayDir, uniforms.cameraForward), float(0.0001));
+      const sceneDistance = viewZ.negate().div(forwardDot);
+      tEnd = tslMin(tEnd, sceneDistance);
+
+      const stepSize = tslMax(tEnd.sub(tStart), float(0)).div(STEP_COUNT).toVar();
       const t = tStart.toVar();
 
       // Forward-scattering phase term — brighter looking toward the sun
@@ -259,7 +276,13 @@ export function createVolumetricClouds() {
         // uniforms.coverage.mul(2), not the old .add(0.5) which could
         // only ever multiply UP from a 1x floor, never actually reduce
         // density even at coverage=0.
-        const density = texture3D(densityTexture, sampleUV.fract()).r.mul(uniforms.coverage.mul(2));
+        // Gated by t < tEnd (the occlusion-clamped end) — when stepSize
+        // was forced to 0 above (real geometry sits at or before the
+        // cloud band even starts), every iteration would otherwise keep
+        // resampling the exact same point 16 times over, over-
+        // accumulating a visible ring artifact right at the occlusion
+        // edge instead of just correctly contributing nothing.
+        const density = texture3D(densityTexture, sampleUV.fract()).r.mul(uniforms.coverage.mul(2)).mul(t.lessThan(tEnd).select(float(1), float(0)));
 
         If(density.greaterThan(0.01), () => {
           // Real self-shadowing — a short secondary march TOWARD the sun
@@ -275,19 +298,19 @@ export function createVolumetricClouds() {
             const shadowUV = shadowPos.mul(TILE_SCALE).add(uniforms.scrollOffset);
             lightAccum.addAssign(texture3D(densityTexture, shadowUV.fract()).r);
           }
-          const selfShadow = exp(lightAccum.mul(-1.1));
-          // Per "not fluffy white clouds" — real, confirmed under-
-          // brightening: the old 0.065 final multiplier and 0.5x ambient
-          // weight just weren't enough light to read as lit white cloud
-          // against a bright sky background, so what SHOULD have been
-          // pale, sunlit puffs came out as near-black silhouettes
-          // instead — transmittance was correctly carving out cloud
-          // shapes, there just wasn't enough scattered light being added
-          // back to fill them in. Ambient weight and the final
-          // brightness multiplier both raised substantially; self-shadow
-          // softened too (-1.2->-0.6) so the INTERIOR of a cluster
-          // doesn't go dark before the overall brightness fix even gets
-          // a chance to show.
+          const selfShadow = exp(lightAccum.mul(-0.25));
+          // Per "no color, no light... look black" — STILL confirmed
+          // black on real device video despite the previous round's fix,
+          // because that same round ALSO made individual clusters much
+          // bigger (cells 4->2, per "only a few big ones") — a ray now
+          // travels through many more consecutive dense steps inside one
+          // real cluster than before, so the previous self-shadow value
+          // (-0.6) compounded with that into something far darker than
+          // when it was tuned. Cut hard this time (-0.6->-0.25) and the
+          // final brightness multiplier raised again too (0.38->0.6) —
+          // erring toward "visibly bright, maybe slightly flat" rather
+          // than risking a third round of "technically shaded but
+          // invisible."
           const ambientTerm = uniforms.ambientColor.mul(1.3);
           const sunTerm = uniforms.sunColor.mul(phase).mul(selfShadow).mul(1.5);
           const baseLitColor = sunTerm.add(ambientTerm);
@@ -299,8 +322,8 @@ export function createVolumetricClouds() {
           const litColor = mix(baseLitColor, vec3(0.32, 0.34, 0.4), uniforms.stormDarken);
           const flashColor = uniforms.lightningColor.mul(uniforms.lightningFlash).mul(1.4);
           const extinctionMul = mix(float(1), float(1.7), uniforms.stormDarken);
-          const sampleExtinction = exp(density.mul(stepSize).mul(-0.06).mul(extinctionMul));
-          const sampleLight = litColor.add(flashColor).mul(density).mul(stepSize).mul(0.38).mul(transmittance);
+          const sampleExtinction = exp(density.mul(stepSize).mul(-0.045).mul(extinctionMul));
+          const sampleLight = litColor.add(flashColor).mul(density).mul(stepSize).mul(0.6).mul(transmittance);
           scattered.addAssign(sampleLight);
           transmittance.mulAssign(sampleExtinction);
         });

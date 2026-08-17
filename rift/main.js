@@ -1013,6 +1013,13 @@ underwaterQuadScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), underwater
 const postProcessing = new THREE.PostProcessing(renderer);
 const scenePass = pass(scene, camera);
 const scenePassColor = scenePass.getTextureNode("output");
+// Per "they look like they're passing in front of the trees... supposed
+// to be far away" — a real, confirmed gap: the raymarch had NO idea what
+// was actually in front of the cloud layer, so it always drew over
+// foreground geometry regardless of what should really be closer to the
+// camera. Depth is always available from any scene pass without needing
+// MRT setup — plugged into the cloud shader below to fix exactly this.
+const scenePassDepth = scenePass.getTextureNode("depth");
 const lensTimeUniform = uniform(0);
 const lensIntensityUniform = uniform(0);
 const lensSunScreenPos = uniform(vec2(-10, -10));
@@ -1028,7 +1035,7 @@ const lensSunScreenPos = uniform(vec2(-10, -10));
 // fixed-count step loop's real GPU instructions at all, not just its
 // visible effect.
 const VOLUMETRIC_CLOUDS_ENABLED = getGraphicsSettings().volumetricCloudsEnabled !== false;
-const volumetricCloudsHandle = VOLUMETRIC_CLOUDS_ENABLED ? createVolumetricClouds() : null;
+const volumetricCloudsHandle = VOLUMETRIC_CLOUDS_ENABLED ? createVolumetricClouds(scenePassDepth, camera.near, camera.far) : null;
 const lensDistortedOutput = Fn(() => {
   const screenUV = uv();
   // A grid of cells, each with one pseudo-random droplet inside it (real

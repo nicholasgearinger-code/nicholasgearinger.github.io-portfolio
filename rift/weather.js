@@ -407,9 +407,17 @@ function getRainStreakTexture() {
   canvas.width = size; canvas.height = size;
   const ctx = canvas.getContext("2d");
   const grad = ctx.createLinearGradient(0, 0, 0, size);
+  // Per "they don't all have to have those shiny white spots" — softened
+  // the peak (0.85->0.68) and swapped the old flat-topped plateau
+  // (0.15-0.85 both at max alpha, a hard "bar" shape) for a real taper
+  // that peaks briefly in the middle and eases off both ways. Combined
+  // with the new per-particle brightness attribute above, THIS is now
+  // just the maximum any single drop can reach — most drops sit well
+  // under it.
   grad.addColorStop(0, "rgba(255,255,255,0)");
-  grad.addColorStop(0.15, "rgba(255,255,255,0.85)");
-  grad.addColorStop(0.85, "rgba(255,255,255,0.85)");
+  grad.addColorStop(0.3, "rgba(255,255,255,0.5)");
+  grad.addColorStop(0.5, "rgba(255,255,255,0.68)");
+  grad.addColorStop(0.7, "rgba(255,255,255,0.5)");
   grad.addColorStop(1, "rgba(255,255,255,0)");
   ctx.fillStyle = grad;
   ctx.fillRect(size * 0.42, 0, size * 0.16, size);
@@ -525,6 +533,19 @@ function createRainTier(scene, tier, count, heaviness, waterLevel, sampleHeight)
   const currentSpeed = new Float32Array(count);
   const driftPhase = new Float32Array(count);
   const landHeights = new Float32Array(count);
+  // Per "they don't all have to have those shiny white spots" — real
+  // rain only reads as a uniform field of bright glowing streaks when
+  // EVERY drop is rendered at the same brightness, which is what a
+  // single flat material color/opacity always produces regardless of
+  // per-tier size/opacity differences. Real rain is mostly faint,
+  // barely-there translucent streaks, with only an occasional drop
+  // actually catching enough light to read as a bright highlight — a
+  // per-vertex color attribute (vertexColors, a real per-particle
+  // brightness, not just a per-TIER average) is what actually delivers
+  // that: most drops land low on this curve (dim, easy to miss), a
+  // shrinking few land high (the "shiny" ones), rather than a hard
+  // bright/dim split.
+  const brightness = new Float32Array(count * 3);
   const fallbackLand = waterLevel !== undefined && waterLevel !== null ? waterLevel : 0;
   for (let i = 0; i < count; i++) {
     const x = (Math.random() - 0.5) * 220;
@@ -537,12 +558,25 @@ function createRainTier(scene, tier, count, heaviness, waterLevel, sampleHeight)
     driftPhase[i] = Math.random() * Math.PI * 2;
     const ground = sampleHeight ? sampleHeight(x, z) : null;
     landHeights[i] = ground !== null && ground !== undefined ? Math.max(ground, fallbackLand) : fallbackLand;
+    // Math.random() squared skews the whole population toward the low
+    // (dim) end, with a shrinking tail reaching up toward 1 (bright) —
+    // the "mostly faint, occasionally shiny" distribution real rain
+    // actually shows, rather than an even 0-1 spread that would still
+    // leave plenty of particles looking uniformly bright. A faint cool
+    // tint (slightly less red/green than blue) on top of that shared
+    // brightness, not a flat gray multiply — real backlit rain reads
+    // very slightly blue-white, not neutral gray.
+    const b = 0.12 + Math.random() * Math.random() * 0.95;
+    brightness[i * 3] = b * 0.92;
+    brightness[i * 3 + 1] = b * 0.97;
+    brightness[i * 3 + 2] = b;
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute("color", new THREE.BufferAttribute(brightness, 3));
   const mat = new THREE.PointsMaterial({
     map: getRainStreakTexture(), color: 0xcfe0f0, size: tier.size, transparent: true, opacity: 0,
-    blending: THREE.AdditiveBlending, depthWrite: false,
+    blending: THREE.AdditiveBlending, depthWrite: false, vertexColors: true,
   });
   const points = new THREE.Points(geo, mat);
   scene.add(points);

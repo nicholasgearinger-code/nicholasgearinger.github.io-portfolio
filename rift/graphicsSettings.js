@@ -84,6 +84,13 @@ const TIERS = {
     bloomLevel: "off",
     aaMethod: "off",
     toneMapping: "aces",
+    // Real per-pixel raymarched volumetric clouds (volumetricClouds.js) —
+    // a genuine multi-step (24-40 iteration) loop run for every sky-facing
+    // pixel, on top of everything else already in this post-processing
+    // chain (the lens-rain shader). Off by default on Low, same
+    // reasoning/category as shadowsEnabled/ssaoEnabled just above — this
+    // is squarely a "real extra cost, not free" feature.
+    volumetricCloudsEnabled: false,
   },
   medium: {
     label: "Medium",
@@ -238,7 +245,7 @@ const OVERRIDES_STORAGE_KEY = "riftGraphicsOverrides";
 // reflectionEnabled just above — whitelisted here without an explicit
 // per-tier value, relying on the same undefined-defaults-to-on
 // convention already established for those.
-const OVERRIDABLE_KEYS = ["shadowsEnabled", "ssaoEnabled", "oceanEffectsEnabled", "reflectionEnabled", "causticsEnabled", "foamEnabled", "lensEffectEnabled", "bloomLevel", "aaMethod", "toneMapping", "pixelRatioCap", "grassMultiplier", "particleMultiplier", "cloudMultiplier", "wildlifeMultiplier", "seaLifeMultiplier"];
+const OVERRIDABLE_KEYS = ["shadowsEnabled", "ssaoEnabled", "oceanEffectsEnabled", "reflectionEnabled", "causticsEnabled", "foamEnabled", "lensEffectEnabled", "volumetricCloudsEnabled", "bloomLevel", "aaMethod", "toneMapping", "pixelRatioCap", "grassMultiplier", "particleMultiplier", "cloudMultiplier", "wildlifeMultiplier", "seaLifeMultiplier"];
 let overrides = {};
 try {
   const saved = localStorage.getItem(OVERRIDES_STORAGE_KEY);

@@ -1,236 +1,283 @@
 import * as THREE from "three";
+import { Fn, uniform, vec2, vec3, vec4, float, texture3D, uv, If, dot, mix, clamp, pow, exp, normalize, smoothstep, max as tslMax, min as tslMin } from "three/tsl";
 
 // -----------------------------------------------------------------------------
-// Real ray-marched volumetric clouds — a single large box the camera sits
-// inside of; the fragment shader marches each pixel's view ray through a
-// thin horizontal "cloud layer" slab, sampling 3D Worley+Perlin/value FBM
-// noise at each step and accumulating density/light via a standard
-// emission-absorption volumetric model. This is genuine per-pixel GPU
-// cost — one primary march per pixel, no nested shadow marching (that
-// would multiply the cost several times over, not mobile-feasible) —
-// so lighting is a cheap approximation (height gradient + forward-
-// scattering silver-lining) rather than real self-shadowing.
+// Real raymarched volumetric clouds — per explicit "in addition to the
+// background we already have to have depth... 3D dense cloud with real
+// dynamic ray marching shader." This is a SEPARATE, additive layer: it
+// doesn't touch or replace the existing flat cloud dome (clouds.js) at
+// all — it composites on top of whatever's already rendered, adding a
+// genuine sense of depth (parallax as you move, real self-shadowing, real
+// light scattering) that a flat sprite/dome layer structurally can't do.
 //
-// Gated to High graphics tier only by the caller (main.js) — Low/Medium
-// keep the existing cheap sprite-billboard clouds (clouds.js) instead.
-// This is real, uncertain-cost GPU work; if it runs poorly even on High,
-// the next levers are (in order of impact): STEPS, FBM_OCTAVES, or
-// disabling this and falling back to clouds.js entirely.
+// Two distinct halves, worth keeping straight:
+// 1. A 3D density VOLUME, baked ONCE on the CPU at startup (see
+//    buildCloudDensityTexture below) — Worley+value-noise FBM, the
+//    standard technique for this look (the same broad approach real-time
+//    cloud systems like Horizon Zero Dawn's Nubis use: bake noise once,
+//    animate by SCROLLING through it, not by regenerating it every
+//    frame). This is what makes it "3D dense" — an actual volume, not a
+//    2D texture pretending to be one.
+// 2. A per-pixel RAYMARCH through that volume, run fresh every single
+//    frame in the shader below — THIS is the "real dynamic" half: real
+//    lighting (sun angle/color, forward scattering, lightning), real
+//    self-shadowing (density blocks light from reaching deeper parts of
+//    the cloud), genuine parallax as the camera moves. The volume data
+//    is static; everything about how it's LIT and traversed is fully
+//    live.
 // -----------------------------------------------------------------------------
 
-const CLOUD_LAYER_BASE = 90;
-const CLOUD_LAYER_TOP = 190;
-const BOX_HALF = 900; // comfortably covers the sky dome's own 900-unit radius
+// Deterministic integer hash -> [0,1). Not cryptographic — just needs to
+// be fast and look uncorrelated at the scales this noise bake uses.
+function hash3(x, y, z) {
+  let h = (x * 374761393 + y * 668265263 + z * 2147483647) | 0;
+  h = (h ^ (h >>> 13)) >>> 0;
+  h = (h * 1274126177) >>> 0;
+  h = (h ^ (h >>> 16)) >>> 0;
+  return h / 4294967295;
+}
 
-const VERT = `
-varying vec3 vWorldPos;
-void main() {
-  vec4 worldPos = modelMatrix * vec4(position, 1.0);
-  vWorldPos = worldPos.xyz;
-  gl_Position = projectionMatrix * viewMatrix * worldPos;
-}
-`;
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smootherstep(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
 
-const FRAG = `
-uniform float uTime;
-uniform vec3 uSunDir;
-uniform vec3 uSunColor;
-uniform vec3 uAmbientColor;
-uniform float uCoverage;   // 0..1 — how much of the sky has cloud, weather-driven
-uniform float uDensity;    // overall density multiplier
-uniform float uOpacityMul; // day/night fade
-varying vec3 vWorldPos;
-// cameraPosition is one of three.js's automatic built-in uniforms for
-// ShaderMaterial (not RawShaderMaterial) — no explicit declaration needed.
+// Tileable 3D value noise — frequency MUST be an integer divisor of `size`
+// for this to wrap seamlessly (every octave below uses one), since lattice
+// coordinates are taken mod `size` before hashing.
+function valueNoise3D(size, freq, x, y, z, seed) {
+  const scale = freq / size;
+  const px = x * scale, py = y * scale, pz = z * scale;
+  const xi = Math.floor(px), yi = Math.floor(py), zi = Math.floor(pz);
+  const xf = smootherstep(px - xi), yf = smootherstep(py - yi), zf = smootherstep(pz - zi);
+  const w = (a, b, c) => hash3(((a % freq) + freq) % freq + seed * 101, ((b % freq) + freq) % freq + seed * 131, ((c % freq) + freq) % freq + seed * 167);
+  const c000 = w(xi, yi, zi), c100 = w(xi + 1, yi, zi), c010 = w(xi, yi + 1, zi), c110 = w(xi + 1, yi + 1, zi);
+  const c001 = w(xi, yi, zi + 1), c101 = w(xi + 1, yi, zi + 1), c011 = w(xi, yi + 1, zi + 1), c111 = w(xi + 1, yi + 1, zi + 1);
+  const x00 = lerp(c000, c100, xf), x10 = lerp(c010, c110, xf), x01 = lerp(c001, c101, xf), x11 = lerp(c011, c111, xf);
+  const y0 = lerp(x00, x10, yf), y1 = lerp(x01, x11, yf);
+  return lerp(y0, y1, zf);
+}
 
-float hash3(vec3 p) {
-  p = fract(p * 0.3183099 + vec3(0.1, 0.2, 0.3));
-  p *= 17.0;
-  return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
-}
-float valueNoise3(vec3 p) {
-  vec3 i = floor(p), f = fract(p);
-  f = f * f * (3.0 - 2.0 * f);
-  float n000 = hash3(i + vec3(0.0,0.0,0.0)), n100 = hash3(i + vec3(1.0,0.0,0.0));
-  float n010 = hash3(i + vec3(0.0,1.0,0.0)), n110 = hash3(i + vec3(1.0,1.0,0.0));
-  float n001 = hash3(i + vec3(0.0,0.0,1.0)), n101 = hash3(i + vec3(1.0,0.0,1.0));
-  float n011 = hash3(i + vec3(0.0,1.0,1.0)), n111 = hash3(i + vec3(1.0,1.0,1.0));
-  float nx00 = mix(n000, n100, f.x), nx10 = mix(n010, n110, f.x);
-  float nx01 = mix(n001, n101, f.x), nx11 = mix(n011, n111, f.x);
-  float nxy0 = mix(nx00, nx10, f.y), nxy1 = mix(nx01, nx11, f.y);
-  return mix(nxy0, nxy1, f.z);
-}
-// 2 octaves (was 3) — cut per explicit "still lagging" report even after
-// half-res compositing. A real, visible softening of fine noise detail,
-// but clouds are meant to look soft anyway.
-float fbm3(vec3 p) {
-  float sum = 0.0, amp = 0.5, freq = 1.0;
-  for (int i = 0; i < 2; i++) {
-    sum += valueNoise3(p * freq) * amp;
-    freq *= 2.02;
-    amp *= 0.5;
-  }
-  return sum;
-}
-// Cheap 3D Worley (F1) — a 2x2x2 neighbor search (not the mathematically
-// complete 3x3x3) is a real approximation, not exact, but visually very
-// close for this purpose at roughly a third of the cost.
-vec3 hash3v(vec3 p) {
-  p = vec3(dot(p, vec3(127.1, 311.7, 74.7)), dot(p, vec3(269.5, 183.3, 246.1)), dot(p, vec3(113.5, 271.9, 124.6)));
-  return fract(sin(p) * 43758.5453123);
-}
-float worley3(vec3 p) {
-  vec3 ip = floor(p), fp = fract(p);
-  float minDist = 1.0;
-  for (int z = 0; z <= 1; z++) {
-    for (int y = 0; y <= 1; y++) {
-      for (int x = 0; x <= 1; x++) {
-        vec3 neighbor = vec3(float(x), float(y), float(z));
-        vec3 point = hash3v(ip + neighbor);
-        float d = length(neighbor + point - fp);
-        minDist = min(minDist, d);
+// Tileable 3D Worley (cellular) noise — one random feature point per grid
+// cell, checked against the 26 neighboring cells (with wraparound) so
+// tiles seam-free. Returns normalized min-distance, 0 at a feature point
+// rising toward 1 at a cell's farthest corner — inverted by the caller to
+// turn this into "billowy" cloud-blob density (high near feature points).
+function worleyNoise3D(size, cells, x, y, z, seed) {
+  const scale = cells / size;
+  const px = x * scale, py = y * scale, pz = z * scale;
+  const xi = Math.floor(px), yi = Math.floor(py), zi = Math.floor(pz);
+  let minDist = 999;
+  for (let dz = -1; dz <= 1; dz++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const cx = ((xi + dx) % cells + cells) % cells;
+        const cy = ((yi + dy) % cells + cells) % cells;
+        const cz = ((zi + dz) % cells + cells) % cells;
+        const fx = cx + hash3(cx + seed * 17, cy + seed * 29, cz + seed * 41);
+        const fy = cy + hash3(cx + seed * 53, cy + seed * 61, cz + seed * 71);
+        const fz = cz + hash3(cx + seed * 89, cy + seed * 97, cz + seed * 103);
+        const ddx = (xi + dx) + (fx - cx) - px, ddy = (yi + dy) + (fy - cy) - py, ddz = (zi + dz) + (fz - cz) - pz;
+        const d = Math.sqrt(ddx * ddx + ddy * ddy + ddz * ddz);
+        if (d < minDist) minDist = d;
       }
     }
   }
-  return minDist;
+  return Math.min(1, minDist);
 }
 
-// Cloud density at a given world position — Worley carves cauliflower-
-// like cavities out of a value-noise FBM base shape (the standard
-// "billowy" cloud look), shaped by a vertical falloff so density is 0 at
-// the very top/bottom of the layer and peaks mid-layer (a real cumulus
-// silhouette, not a uniform haze slab), and masked by a large-scale
-// coverage noise so clouds cluster into formations instead of filling
-// the whole sky evenly.
-float cloudDensity(vec3 p) {
-  float layerT = (p.y - ${CLOUD_LAYER_BASE.toFixed(1)}) / ${(CLOUD_LAYER_TOP - CLOUD_LAYER_BASE).toFixed(1)};
-  if (layerT < 0.0 || layerT > 1.0) return 0.0;
-  float heightShape = smoothstep(0.0, 0.18, layerT) * (1.0 - smoothstep(0.55, 1.0, layerT));
-
-  vec3 windP = p + vec3(uTime * 1.6, 0.0, uTime * 0.9);
-  float coverageMask = fbm3(windP * 0.012);
-  coverageMask = smoothstep(1.0 - uCoverage, 1.0, coverageMask);
-  if (coverageMask <= 0.0) return 0.0;
-
-  float base = fbm3(windP * 0.045);
-  float worley = worley3(windP * 0.085 + 11.0);
-  float shape = base * 1.3 - worley * 0.35; // was base - worley*0.55 — that combination clipped to near-zero almost everywhere (base rarely exceeds ~0.6, so subtracting up to 0.55 left barely any density), reading as a weak uniform haze rather than distinct bright formations
-  shape = clamp(shape, 0.0, 1.0);
-
-  return shape * heightShape * coverageMask * uDensity;
-}
-
-void main() {
-  vec3 rayDir = normalize(vWorldPos - cameraPosition);
-  vec3 rayOrigin = cameraPosition;
-
-  // Analytic ray/slab intersection — only march the actual thin cloud
-  // layer, not the whole (much larger) bounding box.
-  float tNear, tFar;
-  if (abs(rayDir.y) < 0.0005) {
-    if (rayOrigin.y < ${CLOUD_LAYER_BASE.toFixed(1)} || rayOrigin.y > ${CLOUD_LAYER_TOP.toFixed(1)}) discard;
-    tNear = 0.0; tFar = 3000.0;
-  } else {
-    float t0 = (${CLOUD_LAYER_BASE.toFixed(1)} - rayOrigin.y) / rayDir.y;
-    float t1 = (${CLOUD_LAYER_TOP.toFixed(1)} - rayOrigin.y) / rayDir.y;
-    tNear = min(t0, t1);
-    tFar = max(t0, t1);
-  }
-  tNear = max(tNear, 0.0);
-  tFar = min(tFar, 3000.0);
-  if (tFar <= tNear) discard;
-
-  // 14 steps (was 24, was already flagged as the biggest cost lever) —
-  // cut hard per explicit "still lagging" report even after half-res
-  // compositing. More visible step banding is possible at this count;
-  // the dithered start offset below helps hide it.
-  const int STEPS = 14;
-  float stepSize = (tFar - tNear) / float(STEPS);
-  // Dithered start offset (a cheap screen-space hash) — breaks up visible
-  // banding between fixed march steps, standard ray-march trick.
-  float t = tNear + stepSize * fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
-  vec3 accumColor = vec3(0.0);
-  float accumAlpha = 0.0;
-
-  for (int i = 0; i < STEPS; i++) {
-    if (accumAlpha >= 0.985) break;
-    vec3 samplePos = rayOrigin + rayDir * t;
-    float density = cloudDensity(samplePos);
-    if (density > 0.001) {
-      float layerT = (samplePos.y - ${CLOUD_LAYER_BASE.toFixed(1)}) / ${(CLOUD_LAYER_TOP - CLOUD_LAYER_BASE).toFixed(1)};
-      // Fundamentally bright white — real clouds are, under any real
-      // daylight — with the actual sun color blended in at a capped
-      // weight so they visibly shift warm at dawn/dusk (uSunColor
-      // already ranges from near-white at midday to deep orange near
-      // the horizon) without ever going fully dark/muddy like mixing
-      // toward the ambient light color did. Height/forward-scatter
-      // modulate brightness multiplicatively instead of replacing the
-      // color outright.
-      float heightLight = mix(0.75, 1.2, layerT);
-      float forwardScatter = pow(max(dot(rayDir, uSunDir), 0.0), 3.0) * 0.5;
-      vec3 tintedColor = mix(vec3(1.0), uSunColor, 0.4);
-      vec3 litColor = tintedColor * clamp(heightLight + forwardScatter, 0.55, 1.35);
-
-      float stepAlpha = clamp(density * stepSize * 0.16, 0.0, 1.0);
-      accumColor += litColor * stepAlpha * (1.0 - accumAlpha);
-      accumAlpha += stepAlpha * (1.0 - accumAlpha);
+// Builds the actual density volume. size=48 keeps the one-time CPU bake
+// well under a second while still giving real 3D detail once scrolled
+// through slowly by the raymarch below — this data is scrolled/animated,
+// not regenerated, so it doesn't need to be large to read as "dense."
+function buildCloudDensityTexture(size = 48) {
+  const data = new Uint8Array(size * size * size);
+  for (let z = 0; z < size; z++) {
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        // Coarse Worley layer, inverted: the big billowy cloud-cluster
+        // shape (real cumulus reads as rounded blobs, not uniform haze).
+        const billowLow = 1 - worleyNoise3D(size, 4, x, y, z, 1);
+        const billowMid = 1 - worleyNoise3D(size, 8, x, y, z, 2);
+        // Value-noise FBM for wispy fine detail layered on top of the
+        // billowy base — 3 octaves, each an integer frequency divisor of
+        // `size` so every octave still tiles seamlessly.
+        let fbm = 0, amp = 0.5, freq = 4;
+        for (let o = 0; o < 3; o++) {
+          fbm += valueNoise3D(size, freq, x, y, z, o + 10) * amp;
+          amp *= 0.5;
+          freq *= 2;
+        }
+        // Coverage mask — a real gap between cloud clusters instead of
+        // wall-to-wall haze, per "3D dense cloud" reading as distinct
+        // formations rather than an even fog layer.
+        const coverage = smootherstep(Math.max(0, Math.min(1, (billowLow - 0.35) / 0.4)));
+        let density = (billowMid * 0.55 + fbm * 0.45) * coverage;
+        density = Math.max(0, Math.min(1, (density - 0.15) / 0.6)); // remap/sharpen edges
+        data[x + y * size + z * size * size] = Math.round(density * 255);
+      }
     }
-    t += stepSize;
   }
-
-  if (accumAlpha < 0.01) discard;
-  gl_FragColor = vec4(accumColor, accumAlpha * uOpacityMul);
-}
-`;
-
-function createVolumetricClouds(scene) {
-  const geo = new THREE.BoxGeometry(BOX_HALF * 2, (CLOUD_LAYER_TOP - CLOUD_LAYER_BASE) + 40, BOX_HALF * 2);
-  const mat = new THREE.ShaderMaterial({
-    uniforms: {
-      uTime: { value: 0 },
-      uSunDir: { value: new THREE.Vector3(0, 1, 0) },
-      uSunColor: { value: new THREE.Color(0xfff4e0) },
-      uAmbientColor: { value: new THREE.Color(0x8899bb) },
-      uCoverage: { value: 0.62 },
-      uDensity: { value: 1.0 },
-      uOpacityMul: { value: 1.0 },
-    },
-    vertexShader: VERT,
-    fragmentShader: FRAG,
-    transparent: true,
-    depthWrite: false,
-    depthTest: true,
-    side: THREE.BackSide, // the camera sits INSIDE this box (half-width 900 vs. WORLD_BOUND_RADIUS ~112) — only the inner surface is ever visible
-    fog: false,
-  });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.position.set(0, (CLOUD_LAYER_BASE + CLOUD_LAYER_TOP) / 2, 0);
-  mesh.renderOrder = 10; // after opaque terrain/water, so depth-testing against them works correctly while this itself stays transparent
-  scene.add(mesh);
-  return { mesh, mat };
+  const tex = new THREE.Data3DTexture(data, size, size, size);
+  tex.format = THREE.RedFormat;
+  tex.type = THREE.UnsignedByteType;
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.wrapR = THREE.RepeatWrapping;
+  tex.needsUpdate = true;
+  return tex;
 }
 
-/**
- * @param {THREE.Vector3} sunDirection  world-space position/direction toward
- *   the sun (e.g. the scene's directional light position) — normalized here
- * @param {THREE.Color} sunColor
- * @param {number} dayAmount  0..1
- * @param {number} [coverage]  0..1, optional — defaults to the value already set
- */
-function updateVolumetricClouds(handle, elapsed, sunDirection, sunColor, dayAmount, coverage) {
+// Creates the whole layer: bakes the density volume once, sets up every
+// uniform the raymarch needs, and builds the actual TSL shader graph.
+// Returns { node, uniforms } — `node` is a vec4 (rgb = in-scattered light
+// already weighted by density/phase/shadowing, a = transmittance, i.e.
+// how much of whatever's BEHIND the clouds still shows through) meant to
+// be composited as: finalRGB = backgroundRGB * node.a + node.rgb — the
+// standard physically-based volumetric-over-background blend. `uniforms`
+// is what the per-frame update call (see updateVolumetricClouds below)
+// actually writes into.
+export function createVolumetricClouds() {
+  const densityTexture = buildCloudDensityTexture(48);
+
+  const uniforms = {
+    cameraForward: uniform(vec3(0, 0, -1)),
+    cameraRight: uniform(vec3(1, 0, 0)),
+    cameraUp: uniform(vec3(0, 1, 0)),
+    cameraPos: uniform(vec3(0, 0, 0)),
+    tanHalfFov: uniform(0.7),
+    aspect: uniform(1.6),
+    sunDir: uniform(vec3(0, 1, 0)),
+    sunColor: uniform(vec3(1, 0.95, 0.85)),
+    ambientColor: uniform(vec3(0.4, 0.48, 0.6)),
+    lightningFlash: uniform(0),
+    lightningColor: uniform(vec3(0.8, 0.87, 1)),
+    scrollOffset: uniform(vec3(0, 0, 0)),
+    coverage: uniform(0.5), // overall sky coverage, 0=clear 1=overcast — biome/weather can drive this later without touching the shader
+  };
+
+  const CLOUD_BASE = float(130);
+  const CLOUD_TOP = float(220);
+  // Per real concern about shader compile cost — this project has no
+  // precedent anywhere yet for TSL's Loop() construct (a genuine
+  // GPU-side runtime loop), only JS-level `for` loops that get fully
+  // UNROLLED into the compiled shader at build time (the same technique
+  // already proven working in this file's own lens-rain shader, ROWS_PER_LANE).
+  // Since that's the only pattern with a track record in this exact
+  // codebase, it's what's used here too — but unrolling is real,
+  // multiplying instruction count directly, so both step counts are kept
+  // deliberately conservative (16 main x 3 shadow = 48 texture3D samples
+  // baked into the shader, not 140) rather than guessing higher without
+  // a way to check actual compile time/mobile behavior first. Raise
+  // these only after confirming on real hardware that there's headroom.
+  const STEP_COUNT = 16;
+  const SHADOW_STEP_COUNT = 3;
+  const TILE_SCALE = float(0.006); // world-units -> noise-volume UV scale; bigger clouds = smaller number
+
+  const node = Fn(() => {
+    const screenUV = uv();
+    const ndcX = screenUV.x.mul(2).sub(1);
+    // Per this project's own established convention (re-derived and
+    // confirmed several times already this session, see the lens shader's
+    // own notes): increasing screenUV.y reads as visually DOWN here, so
+    // going "up" on screen needs a NEGATED y term — flipped directly per
+    // that same confirmed convention rather than re-guessing it.
+    const ndcY = screenUV.y.mul(2).sub(1).negate();
+    const rayDir = normalize(
+      uniforms.cameraForward
+        .add(uniforms.cameraRight.mul(ndcX).mul(uniforms.tanHalfFov).mul(uniforms.aspect))
+        .add(uniforms.cameraUp.mul(ndcY).mul(uniforms.tanHalfFov))
+    );
+
+    const transmittance = float(1).toVar();
+    const scattered = vec3(0, 0, 0).toVar();
+
+    // Real early-out — a ray pointed anywhere near level or downward
+    // essentially never reaches the cloud band (base is 130 units up),
+    // so skip the whole march for the (typically majority of on-screen)
+    // pixels looking at terrain/water/trees instead of sky. This is a
+    // genuine cost saving, not a cosmetic branch — TSL's If() compiles to
+    // real shader-level branching.
+    If(rayDir.y.greaterThan(0.02), () => {
+      // Ray/slab intersection with the cloud band's two horizontal
+      // planes — where the march actually starts and ends along this ray.
+      const tBase = CLOUD_BASE.sub(uniforms.cameraPos.y).div(rayDir.y);
+      const tTop = CLOUD_TOP.sub(uniforms.cameraPos.y).div(rayDir.y);
+      const tStart = tslMax(tBase, float(0));
+      const tEnd = tTop;
+      const stepSize = tEnd.sub(tStart).div(STEP_COUNT).toVar();
+      const t = tStart.toVar();
+
+      // Forward-scattering phase term — brighter looking toward the sun
+      // THROUGH the cloud (the real "silver lining" / backlit sunset
+      // look), dimmer looking away from it. A simplified single-lobe
+      // Henyey-Greenstein-style term rather than the full physical
+      // function — visually convincing at a fraction of the cost.
+      const cosAngle = dot(rayDir, uniforms.sunDir);
+      const phase = pow(clamp(cosAngle, 0, 1), 3).mul(2).add(0.15);
+
+      for (let i = 0; i < STEP_COUNT; i++) {
+        const pos = uniforms.cameraPos.add(rayDir.mul(t));
+        const sampleUV = pos.mul(TILE_SCALE).add(uniforms.scrollOffset);
+        const density = texture3D(densityTexture, sampleUV.fract()).r.mul(uniforms.coverage.add(0.5));
+
+        If(density.greaterThan(0.01), () => {
+          // Real self-shadowing — a short secondary march TOWARD the sun
+          // from this sample point, so density genuinely blocks light
+          // from reaching deeper/darker parts of the cloud instead of
+          // every sample being lit identically regardless of what's
+          // between it and the sun.
+          const shadowSteps = SHADOW_STEP_COUNT;
+          const shadowStepSize = float(6);
+          const lightAccum = float(0).toVar();
+          for (let s = 0; s < shadowSteps; s++) {
+            const shadowPos = pos.add(uniforms.sunDir.mul(shadowStepSize.mul(s + 1)));
+            const shadowUV = shadowPos.mul(TILE_SCALE).add(uniforms.scrollOffset);
+            lightAccum.addAssign(texture3D(densityTexture, shadowUV.fract()).r);
+          }
+          const selfShadow = exp(lightAccum.mul(-1.2));
+          const litColor = uniforms.sunColor.mul(phase).mul(selfShadow).add(uniforms.ambientColor.mul(0.5));
+          const flashColor = uniforms.lightningColor.mul(uniforms.lightningFlash).mul(1.4);
+          const sampleExtinction = exp(density.mul(stepSize).mul(-0.09));
+          const sampleLight = litColor.add(flashColor).mul(density).mul(stepSize).mul(0.045).mul(transmittance);
+          scattered.addAssign(sampleLight);
+          transmittance.mulAssign(sampleExtinction);
+        });
+
+        t.addAssign(stepSize);
+      }
+    });
+
+    return vec4(scattered, transmittance);
+  })();
+
+  return { node, uniforms, densityTexture };
+}
+
+// Per-frame JS-side push — camera basis vectors (for the ray-reconstruction
+// math above), sun direction/color, and the current lightning flash. Wind
+// drift is folded into scrollOffset so the SAME baked volume reads as
+// continuously moving clouds without ever needing to be regenerated.
+const _forward = new THREE.Vector3();
+const _right = new THREE.Vector3();
+const _up = new THREE.Vector3();
+export function updateVolumetricClouds(handle, dt, camera, sunDirection, sunColor, ambientColor, lightningFlash, lightningColor, windX = 0, windZ = 0) {
   if (!handle) return;
-  handle.mat.uniforms.uTime.value = elapsed;
-  if (sunDirection) handle.mat.uniforms.uSunDir.value.copy(sunDirection).normalize();
-  if (sunColor) handle.mat.uniforms.uSunColor.value.copy(sunColor);
-  handle.mat.uniforms.uOpacityMul.value = 0.35 + dayAmount * 0.65; // dimmer at night, same spirit as clouds.js's own lightFactor
-  if (coverage !== undefined) handle.mat.uniforms.uCoverage.value = coverage;
+  camera.getWorldDirection(_forward);
+  _right.crossVectors(_forward, camera.up).normalize();
+  _up.crossVectors(_right, _forward).normalize();
+  handle.uniforms.cameraForward.value.copy(_forward);
+  handle.uniforms.cameraRight.value.copy(_right);
+  handle.uniforms.cameraUp.value.copy(_up);
+  handle.uniforms.cameraPos.value.copy(camera.position);
+  handle.uniforms.tanHalfFov.value = Math.tan((camera.fov * Math.PI) / 360);
+  handle.uniforms.aspect.value = camera.aspect;
+  handle.uniforms.sunDir.value.copy(sunDirection);
+  handle.uniforms.sunColor.value.copy(sunColor);
+  handle.uniforms.ambientColor.value.copy(ambientColor);
+  handle.uniforms.lightningFlash.value = lightningFlash;
+  if (lightningColor) handle.uniforms.lightningColor.value.copy(lightningColor);
+  handle._scrollX = (handle._scrollX || 0) + windX * dt * 0.004;
+  handle._scrollZ = (handle._scrollZ || 0) + windZ * dt * 0.004;
+  handle.uniforms.scrollOffset.value.set(handle._scrollX, 0, handle._scrollZ);
 }
-
-function disposeVolumetricClouds(scene, handle) {
-  if (!handle) return;
-  scene.remove(handle.mesh);
-  handle.mesh.geometry.dispose();
-  handle.mesh.material.dispose();
-}
-
-export { createVolumetricClouds, updateVolumetricClouds, disposeVolumetricClouds };

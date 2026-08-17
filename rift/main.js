@@ -15,6 +15,7 @@ import { createLandmark, updateLandmark, disposeLandmark, LANDMARK_POSITION } fr
 import { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers, getEffectiveValue, setOverride, resetOverrides, getTierRawSettings } from "./graphicsSettings.js";
 import { loadAngelfishModel, loadReefModel, loadCoralModel, loadTreeModel, loadSpongeModel, loadPlantModel, loadFishSchoolModel, createRealAngelfish, createRealReef, createRealCoral, createRealTree, createRealSponge, createRealPlant, createRealFishSchool, buildCoralInstances, buildTreeInstances, updateTreeInstanceSway, buildSpongeInstances, buildPlantInstances } from "./models.js";
 import { createWeatherSystem, updateWeatherSystem, disposeWeatherSystem } from "./weather.js";
+import { createVolumetricClouds, updateVolumetricClouds } from "./volumetricClouds.js";
 import { createClouds, updateClouds, disposeClouds, getCloudOcclusionFactor, createCloudLayer, updateCloudLayer, disposeCloudLayer, createRealisticCloudDome, updateRealisticCloudDome, disposeRealisticCloudDome } from "./clouds.js";
 import {
   createBolt, updateBolt, disposeBolt,
@@ -103,6 +104,7 @@ const tempSunDir = new THREE.Vector3(); // reused every frame for the lens-rain 
 const tempWaterGlintDir = new THREE.Vector3();
 const tempCameraDir = new THREE.Vector3();
 const tempSunProjection = new THREE.Vector3();
+const tempCloudAmbient = new THREE.Color(); // reused every frame for the volumetric clouds' ambient sky-light term below
 // Per "the fog is turning everything white" — was 0x8a97a8, a fairly
 // LIGHT pale gray-blue. A light fog color asserting itself over
 // mid/background distance washes everything toward white/pale rather
@@ -1014,6 +1016,19 @@ const scenePassColor = scenePass.getTextureNode("output");
 const lensTimeUniform = uniform(0);
 const lensIntensityUniform = uniform(0);
 const lensSunScreenPos = uniform(vec2(-10, -10));
+// Per explicit "in addition to the background we already have to have
+// depth... 3D dense cloud with real dynamic ray marching shader" — built
+// once here (the one-time noise-volume bake lives inside this call), its
+// output node composited into the lens shader's own final color below so
+// this doesn't need a second full render-target round trip of its own.
+// Gated by its own graphics setting read ONCE here (same reload-to-apply
+// convention as every other toggle in this file) — when off, the whole
+// raymarch subgraph is never even built into the compiled shader at all
+// (not just a uniform-driven no-op), so weak devices don't pay for the
+// fixed-count step loop's real GPU instructions at all, not just its
+// visible effect.
+const VOLUMETRIC_CLOUDS_ENABLED = getGraphicsSettings().volumetricCloudsEnabled !== false;
+const volumetricCloudsHandle = VOLUMETRIC_CLOUDS_ENABLED ? createVolumetricClouds() : null;
 const lensDistortedOutput = Fn(() => {
   const screenUV = uv();
   // A grid of cells, each with one pseudo-random droplet inside it (real
@@ -1247,7 +1262,20 @@ const lensDistortedOutput = Fn(() => {
   // rendered scene back" use case and handles orientation internally.
   const distortedUV = clamp(screenUV.sub(vec2(distortX, distortY)), zero, one);
   const sceneColor = texture(scenePassColor, distortedUV);
-  const finalColor = sceneColor.rgb.add(vec3(lightBoost.mul(lensIntensityUniform))).add(sunGlintColor.mul(0.9).mul(lensIntensityUniform));
+  // Real volumetric clouds, composited BEFORE the lens droplet
+  // highlight/glint terms below (clouds are a sky feature sitting far
+  // behind the glass those droplets are on — layering them in first
+  // means the droplets' own highlights/glints still sit on top of the
+  // clouds correctly, not the other way around). Sampled at the
+  // UNDISTORTED screenUV rather than distortedUV — refraction shifts are
+  // tiny (a few percent of screen space at most) and clouds read as
+  // effectively-infinite-distance, so which exact cloud pixels a given
+  // raindrop bends toward is visually indistinguishable either way; this
+  // avoids needing a second real render-target pass just to let the
+  // lens shader's UV-offset sampling trick apply to clouds too.
+  const cloudsRGBA = volumetricCloudsHandle ? volumetricCloudsHandle.node : vec4(0, 0, 0, 1);
+  const sceneWithClouds = sceneColor.rgb.mul(cloudsRGBA.a).add(cloudsRGBA.rgb);
+  const finalColor = sceneWithClouds.add(vec3(lightBoost.mul(lensIntensityUniform))).add(sunGlintColor.mul(0.9).mul(lensIntensityUniform));
   return vec4(finalColor, one);
 })();
 // Per explicit "add a button... to turn off just the Lens effect" — this
@@ -4159,6 +4187,13 @@ if (graphicsBtn && graphicsPanel) {
     // hardcoded default), so this works without needing graphicsSettings.js
     // itself to pre-declare the key.
     { key: "lensEffectEnabled", label: "Lens FX" },
+    // Per "3D dense cloud with real dynamic ray marching shader" — same
+    // generic override mechanism as every toggle above, and same
+    // reload-to-apply convention (this one especially: the raymarch
+    // subgraph is only even built into the compiled shader once, at
+    // startup — see volumetricCloudsHandle's own setup comment — so
+    // toggling this can't take effect without a reload no matter what).
+    { key: "volumetricCloudsEnabled", label: "Volumetric Clouds" },
   ];
   for (const { key, label } of EFFECT_TOGGLES) {
     const btn = document.createElement("button");
@@ -5373,6 +5408,25 @@ function animate() {
     lensSunScreenPos.value.set((tempSunProjection.x + 1) / 2, (tempSunProjection.y + 1) / 2);
   } else {
     lensSunScreenPos.value.set(-10, -10);
+  }
+
+  // Real volumetric clouds (volumetricClouds.js) — reuses tempSunDir just
+  // computed above rather than re-deriving sun direction a second way.
+  // dayNightCycle.sun.color is the same real DirectionalLight color
+  // already driving actual scene lighting (warm by day, cool at night),
+  // and skyZenith/skyHorizon (blended) stand in for ambient sky
+  // contribution — both already computed this frame, nothing new to
+  // calculate just for this. Lightning reads the SAME flash/color this
+  // biome's real lightning light already uses, so a strike lights the
+  // clouds and the ground at once, not on two independent timers.
+  if (volumetricCloudsHandle) {
+    tempCloudAmbient.copy(dayNight.skyHorizon).lerp(dayNight.skyZenith, 0.5);
+    updateVolumetricClouds(
+      volumetricCloudsHandle, dt, camera, tempSunDir, dayNightCycle.sun.color, tempCloudAmbient,
+      weatherHandle ? weatherHandle.lightningFlash : 0,
+      weatherHandle ? weatherHandle.lightningLight.color : null,
+      wind.windX, wind.windZ
+    );
   }
 
   // Rain is an above-surface effect — real rain doesn't fall underwater.

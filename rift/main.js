@@ -1163,9 +1163,18 @@ const lensDistortedOutput = Fn(() => {
     // everything else above), which can now legitimately span most of
     // the screen height for a drop mid-slide.
     const traveledScaled = dropletY.sub(startY).mul(cellSize);
-    const trailDistScaled = dyScaled; // positive = this sample sits ABOVE (already-travelled-through) the droplet's current position
-    const belowDroplet = smoothstep(zero, float(0.3), trailDistScaled);
-    const trailFade = one.sub(clamp(trailDistScaled.div(tslMax(traveledScaled, float(0.01))), zero, one));
+    // Per "the trail is supposed to be behind it as the rain drop is
+    // making it" — real, confirmed bug: this was reading the WRONG
+    // side. dyScaled is positive when a sample sits BELOW the droplet
+    // (screenUV.y increasing = further down the screen, the direction
+    // the droplet is heading TOWARD, not where it's already been) — so
+    // the old code was painting the "trail" on the droplet's leading
+    // side instead of the wet path behind it. Negated here: trailSide is
+    // positive only for samples ABOVE the droplet's current position —
+    // the ground it's actually already covered.
+    const trailSide = dyScaled.negate();
+    const behindDroplet = smoothstep(zero, float(0.3), trailSide);
+    const trailFade = one.sub(clamp(trailSide.div(tslMax(traveledScaled, float(0.01))), zero, one));
     // Per "trails are too thin, they should match the size of the
     // raindrop" — was dropletRadius*0.16 (a hair-thin string next to the
     // actual drop). A real drip's wet trail is nearly as wide as the
@@ -1182,9 +1191,9 @@ const lensDistortedOutput = Fn(() => {
     // (surface tension pooling unevenly). A slow noise wave along the
     // trail's own travelled distance modulates width by roughly ±35%,
     // giving it a genuinely liquid, uneven flow instead of a clean taper.
-    const bulgeNoise = sin(trailDistScaled.mul(5.0).add(seed.mul(17.0))).mul(0.5).add(0.5);
+    const bulgeNoise = sin(trailSide.mul(5.0).add(seed.mul(17.0))).mul(0.5).add(0.5);
     const trailWidth = trailWidthTapered.mul(mix(float(0.65), float(1.35), bulgeNoise));
-    const trailMask = smoothstep(trailWidth, trailWidth.mul(0.3), abs(dx)).mul(belowDroplet).mul(trailFade).mul(dropletPresent);
+    const trailMask = smoothstep(trailWidth, trailWidth.mul(0.3), abs(dx)).mul(behindDroplet).mul(trailFade).mul(dropletPresent);
     const trailDistort = trailMask.mul(0.015).mul(sizeFactor).mul(lensIntensityUniform);
     distortX = distortX.add(distortAmount.mul(dx));
     distortY = distortY.add(distortAmount.mul(dyScaled)).add(trailDistort);

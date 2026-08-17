@@ -1208,7 +1208,13 @@ const lensDistortedOutput = Fn(() => {
     // is now the actual gate for both — mostly driven by sunProximity
     // (the real light source), with only a small ambient floor left so
     // droplets aren't 100% invisible in flat, sourceless light.
-    const lit = mix(float(0.1), one, sunProximity);
+    // Per "bring back a little bit of the ring so it's more visible" —
+    // the ambient floor was tuned down too far after fixing the
+    // always-on painted-on look; raised a bit (0.1->0.3) so the rim
+    // still reads as a real, if subtle, edge under ordinary light,
+    // while staying well below the near-sun brightness — not back to
+    // fully unconditional.
+    const lit = mix(float(0.3), one, sunProximity);
     // Per "not only from one direction" — the highlight's offset used to
     // be a fixed diagonal (-0.32,-0.32) on literally every droplet, so
     // it always caught "light" from the same corner no matter where the

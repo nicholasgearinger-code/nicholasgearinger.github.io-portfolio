@@ -690,7 +690,7 @@ function createDayNightCycle(scene, sun, ambient, starfield, biome, moonLight) {
   // as the dominant light source at a glance, not just via the actual
   // DirectionalLight intensity numbers below.
   const sunBody = createBody(scene, sunStarburstTexture, createSunTexture(), 9, 0xffcf80, 46, 0.6); // glow radius was 34/opacity 0.5 — enlarged for the bigger, softer halo the reference shows now that the texture itself is a smooth gradual falloff instead of a tight bright core with spikes
-  const moonBody = createBody(scene, glowTexture, createMoonTexture(), 8, 0xaebedd, 18, 0.22);
+  const moonBody = createBody(scene, glowTexture, createMoonTexture(), 8, 0xc8d4e8, 18, 0.22); // was 0xaebedd — nudged warmer/less saturated so it doesn't read as distinctly "blue" if this body's own visibility is ever turned back on
   // Moon VISUAL hidden per an earlier explicit request ("don't want to
   // see it but still have the day/night light effects") — RESTORED here
   // per "the blue circle is supposed to be the sun" investigation: this

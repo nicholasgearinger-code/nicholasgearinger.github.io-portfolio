@@ -168,6 +168,7 @@ export function createVolumetricClouds() {
     lightningColor: uniform(vec3(0.8, 0.87, 1)),
     scrollOffset: uniform(vec3(0, 0, 0)),
     coverage: uniform(0.5), // overall sky coverage, 0=clear 1=overcast — biome/weather can drive this later without touching the shader
+    stormDarken: uniform(0), // 0=normal fluffy-white clouds, 1=full storm-gray — driven live from rain intensity, see updateVolumetricClouds
   };
 
   const CLOUD_BASE = float(130);
@@ -186,7 +187,11 @@ export function createVolumetricClouds() {
   // these only after confirming on real hardware that there's headroom.
   const STEP_COUNT = 16;
   const SHADOW_STEP_COUNT = 3;
-  const TILE_SCALE = float(0.006); // world-units -> noise-volume UV scale; bigger clouds = smaller number
+  // Per "covering the entire sky" — raised (0.006->0.013): each cloud
+  // cluster in the baked volume now maps to a visually smaller patch of
+  // sky, so the SAME sparse volume reads as distinct puffs rather than
+  // a few clusters each large enough to blot out huge swaths at once.
+  const TILE_SCALE = float(0.013);
 
   const node = Fn(() => {
     const screenUV = uv();
@@ -212,13 +217,26 @@ export function createVolumetricClouds() {
     // pixels looking at terrain/water/trees instead of sky. This is a
     // genuine cost saving, not a cosmetic branch — TSL's If() compiles to
     // real shader-level branching.
-    If(rayDir.y.greaterThan(0.02), () => {
+    // Per "covering the entire sky" — the OTHER real cause on top of
+    // TILE_SCALE above: this threshold (0.02) is so shallow that a
+    // near-horizontal ray triggers the march, and near-horizontal rays
+    // travel an extremely long SLANT distance through a 90-unit-thick
+    // band (path length grows as 1/rayDir.y, blowing up toward the
+    // horizon) — accumulating density over a much longer path than a
+    // straight-up ray ever would, darkening huge swaths near the
+    // horizon in particular. Raised (0.02->0.08) so only genuinely
+    // sky-ward rays march at all.
+    If(rayDir.y.greaterThan(0.08), () => {
       // Ray/slab intersection with the cloud band's two horizontal
       // planes — where the march actually starts and ends along this ray.
       const tBase = CLOUD_BASE.sub(uniforms.cameraPos.y).div(rayDir.y);
       const tTop = CLOUD_TOP.sub(uniforms.cameraPos.y).div(rayDir.y);
       const tStart = tslMax(tBase, float(0));
-      const tEnd = tTop;
+      // Hard cap on total march distance (same fix, other half) — even
+      // above the new 0.08 threshold, a shallow ray can still travel very
+      // far through the band; capping the path length directly prevents
+      // any single ray from ever over-accumulating regardless of angle.
+      const tEnd = tslMin(tTop, tStart.add(500));
       const stepSize = tEnd.sub(tStart).div(STEP_COUNT).toVar();
       const t = tStart.toVar();
 
@@ -254,18 +272,32 @@ export function createVolumetricClouds() {
             const shadowUV = shadowPos.mul(TILE_SCALE).add(uniforms.scrollOffset);
             lightAccum.addAssign(texture3D(densityTexture, shadowUV.fract()).r);
           }
-          const selfShadow = exp(lightAccum.mul(-1.2));
-          const litColor = uniforms.sunColor.mul(phase).mul(selfShadow).add(uniforms.ambientColor.mul(0.5));
+          const selfShadow = exp(lightAccum.mul(-0.6));
+          // Per "not fluffy white clouds" — real, confirmed under-
+          // brightening: the old 0.065 final multiplier and 0.5x ambient
+          // weight just weren't enough light to read as lit white cloud
+          // against a bright sky background, so what SHOULD have been
+          // pale, sunlit puffs came out as near-black silhouettes
+          // instead — transmittance was correctly carving out cloud
+          // shapes, there just wasn't enough scattered light being added
+          // back to fill them in. Ambient weight and the final
+          // brightness multiplier both raised substantially; self-shadow
+          // softened too (-1.2->-0.6) so the INTERIOR of a cluster
+          // doesn't go dark before the overall brightness fix even gets
+          // a chance to show.
+          const ambientTerm = uniforms.ambientColor.mul(1.3);
+          const sunTerm = uniforms.sunColor.mul(phase).mul(selfShadow).mul(1.5);
+          const baseLitColor = sunTerm.add(ambientTerm);
+          // Per "turn dark when it rains" — stormDarken (driven live from
+          // rain intensity, see updateVolumetricClouds) blends the whole
+          // lit color toward a flat storm gray, AND makes the cloud
+          // itself more extinctive/opaque below — both together are what
+          // actually reads as "storm clouds," not brightness alone.
+          const litColor = mix(baseLitColor, vec3(0.32, 0.34, 0.4), uniforms.stormDarken);
           const flashColor = uniforms.lightningColor.mul(uniforms.lightningFlash).mul(1.4);
-          // Extinction softened (-0.09 -> -0.06) and scattered brightness
-          // raised (0.045 -> 0.065) as part of the same "clouds are
-          // black" fix — with the density bake now genuinely sparse (see
-          // buildCloudDensityTexture's own comment), the real clusters
-          // that DO form should read as bright, translucent, sunlit
-          // shapes, not collapse to near-opaque black after a handful of
-          // accumulation steps.
-          const sampleExtinction = exp(density.mul(stepSize).mul(-0.06));
-          const sampleLight = litColor.add(flashColor).mul(density).mul(stepSize).mul(0.065).mul(transmittance);
+          const extinctionMul = mix(float(1), float(1.7), uniforms.stormDarken);
+          const sampleExtinction = exp(density.mul(stepSize).mul(-0.06).mul(extinctionMul));
+          const sampleLight = litColor.add(flashColor).mul(density).mul(stepSize).mul(0.3).mul(transmittance);
           scattered.addAssign(sampleLight);
           transmittance.mulAssign(sampleExtinction);
         });
@@ -287,7 +319,7 @@ export function createVolumetricClouds() {
 const _forward = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _up = new THREE.Vector3();
-export function updateVolumetricClouds(handle, dt, camera, sunDirection, sunColor, ambientColor, lightningFlash, lightningColor, windX = 0, windZ = 0) {
+export function updateVolumetricClouds(handle, dt, camera, sunDirection, sunColor, ambientColor, lightningFlash, lightningColor, windX = 0, windZ = 0, rainIntensity = 0) {
   if (!handle) return;
   camera.getWorldDirection(_forward);
   _right.crossVectors(_forward, camera.up).normalize();
@@ -303,7 +335,19 @@ export function updateVolumetricClouds(handle, dt, camera, sunDirection, sunColo
   handle.uniforms.ambientColor.value.copy(ambientColor);
   handle.uniforms.lightningFlash.value = lightningFlash;
   if (lightningColor) handle.uniforms.lightningColor.value.copy(lightningColor);
-  handle._scrollX = (handle._scrollX || 0) + windX * dt * 0.004;
-  handle._scrollZ = (handle._scrollZ || 0) + windZ * dt * 0.004;
+  // Per "we also need to animate them to drift" — real, confirmed bug:
+  // this multiplier (0.004) worked out to a small fraction of a
+  // world-unit of equivalent shift per second — completely
+  // imperceptible. Raised hard (0.004->0.05), and a small CONSTANT base
+  // drift added on top of the wind-driven part (real clouds visibly
+  // drift even in a near-calm breeze, not only during a squall).
+  const baseDriftX = 0.6, baseDriftZ = 0.25;
+  handle._scrollX = (handle._scrollX || 0) + (windX + baseDriftX) * dt * 0.05;
+  handle._scrollZ = (handle._scrollZ || 0) + (windZ + baseDriftZ) * dt * 0.05;
   handle.uniforms.scrollOffset.value.set(handle._scrollX, 0, handle._scrollZ);
+  // Per "turn dark when it rains" — driven straight off real rain
+  // intensity (0-1, already smoothed/eased by weather.js), not the raw
+  // instantaneous rain flag, so clouds darken and lighten gradually
+  // along with the storm itself rather than snapping.
+  handle.uniforms.stormDarken.value = rainIntensity;
 }

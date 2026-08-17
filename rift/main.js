@@ -5425,7 +5425,7 @@ function animate() {
       volumetricCloudsHandle, dt, camera, tempSunDir, dayNightCycle.sun.color, tempCloudAmbient,
       weatherHandle ? weatherHandle.lightningFlash : 0,
       weatherHandle ? weatherHandle.lightningLight.color : null,
-      wind.windX, wind.windZ
+      wind.windX, wind.windZ, wind.rainIntensity
     );
   }
 

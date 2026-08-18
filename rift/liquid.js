@@ -1586,22 +1586,34 @@ function createBreakingWave(scene, waterY, sampleHeight, size) {
     const segRand = mix(hash(segI), hash(segI.add(1)), segFrac);
     const segRand2 = mix(hash(segI.add(97)), hash(segI.add(98)), segFrac);
 
-    // Real breaking cycle — per shore position, a wave rolls through
-    // calm -> rising -> curling -> collapsing -> foam -> reset, repeating.
-    // alongShore's own smooth offset is kept (the break still visibly
-    // travels down the beach), but segRand now adds real per-stretch
-    // timing variance on top, so it's not one perfectly uniform
-    // traveling phase.
-    const cyclePeriod = float(6.5).add(segRand2.mul(2.2));
+    // Per "only take a second to play the whole animation" — cut from a
+    // 6.5-8.7s cycle to ~1-1.4s, a completely different pace, not a
+    // tuning tweak.
+    const cyclePeriod = float(1.0).add(segRand2.mul(0.4));
     const phase = fract(breakTimeUniform.div(cyclePeriod).sub(alongShore.mul(0.6)).add(segRand.mul(0.8)));
-    // Per "too stiff" — replaced the smooth symmetric sine ease with a
-    // real asymmetric envelope: a FAST attack (real waves break
-    // suddenly, not gradually), a brief hold right at peak curl, then a
-    // longer foam-dissipation tail — genuinely different shape, not just
-    // a retuned curve.
-    const attack = tslSmoothstep(float(0), float(0.16), phase);
-    const release = float(1).sub(tslSmoothstep(float(0.3), float(1), phase));
-    const breakProgress = attack.mul(release);
+
+    // Per "flow down flat onto the shore as white water" — real,
+    // confirmed missing phase: the old model only ever curled UP then
+    // shrank back down to nothing, with no equivalent of the actual
+    // collapse — a real broken wave's curl crashes down and then
+    // surges FORWARD across the sand as a flat, spreading sheet of
+    // whitewater (the swash), which is a genuinely different motion
+    // from the curl itself (low and wide vs. tall and tight), not just
+    // the same curl fading out. Two separate, overlapping envelopes now:
+    // curlProgress is a short, sharp spike (the barrel forming and
+    // immediately collapsing); swashProgress rises as the curl is
+    // already collapsing and fades out over a longer tail (the flat
+    // water actually reaching up the sand and draining back).
+    const curlAttack = tslSmoothstep(float(0), float(0.12), phase);
+    const curlRelease = float(1).sub(tslSmoothstep(float(0.12), float(0.32), phase));
+    const curlProgress = curlAttack.mul(curlRelease);
+    const swashAttack = tslSmoothstep(float(0.2), float(0.4), phase);
+    const swashRelease = float(1).sub(tslSmoothstep(float(0.4), float(0.88), phase));
+    const swashProgress = swashAttack.mul(swashRelease);
+    // breakProgress kept as the general "how lit-up/foamy is this point
+    // right now" driver for color/opacity below — whichever of the two
+    // phases is more active at this instant.
+    const breakProgress = max(curlProgress, swashProgress);
 
     // Fast, chaotic turbulence riding on TOP of the main curl motion —
     // real water is never perfectly smooth even mid-wave. Two sine terms
@@ -1614,25 +1626,35 @@ function createBreakingWave(scene, waterY, sampleHeight, size) {
     const turb2 = sin(breakTimeUniform.mul(14.0).sub(alongShore.mul(22.0)).add(v.mul(19.0)).add(segRand.mul(6.28)));
     const turbulence = turb1.mul(0.55).add(turb2.mul(0.45)).mul(breakProgress).mul(0.09);
 
-    // The actual curl — sin/cos of the SAME angle parameter (not two
-    // independent offsets) is what makes the tip genuinely arc up, OVER,
-    // and back down/inward as angle passes 90°, rather than just rising
-    // higher. maxCurlAngle past PI (180°) means the tip is legitimately
-    // overhanging BACK toward the base by the time breakProgress peaks —
-    // a true barrel, not just a steep face. Per-segment height/curl
-    // variance (segRand-driven) on top, so not every stretch of shore
-    // produces an identically-sized wave.
-    const maxCurlAngle = float(3.7).add(segRand2.mul(1.1));
-    const waveHeight = float(1.3).add(segRand.mul(1.1));
-    const angle = v.mul(maxCurlAngle).mul(breakProgress).add(turbulence);
-    const radius = waveHeight.mul(mix(float(0.25), float(1), breakProgress)).mul(v.mul(0.6).add(0.4)).add(turbulence.mul(waveHeight).mul(0.5));
-    const acrossOffset = sin(angle).mul(radius);
-    const upOffset = float(1).sub(cos(angle)).mul(radius);
+    // The curl itself (tube forming/collapsing) — sin/cos of the SAME
+    // angle parameter is what makes the tip genuinely arc up, OVER, and
+    // back down as angle passes 90°, a true overhang rather than just a
+    // steep face. Driven by curlProgress specifically (its own short
+    // spike), not the general breakProgress — the curl itself is brief.
+    const maxCurlAngle = float(1.9).add(segRand2.mul(0.5));
+    const waveHeight = float(0.55).add(segRand.mul(0.4));
+    const angle = v.mul(maxCurlAngle).mul(curlProgress).add(turbulence);
+    const radius = waveHeight.mul(mix(float(0.25), float(1), curlProgress)).mul(v.mul(0.6).add(0.4)).add(turbulence.mul(waveHeight).mul(0.5));
+    const curlAcross = sin(angle).mul(radius);
+    const curlUp = float(1).sub(cos(angle)).mul(radius);
 
-    // Curls IN toward shore (negated) — matching how a real breaking
-    // wave's lip pitches forward onto the beach, not out to sea.
-    const worldOffset = shoreNormal.mul(acrossOffset.negate());
-    return { worldOffset, upOffset, v, breakProgress };
+    // The swash — low and flat (real whitewater is a thin sheet, not a
+    // tall shape), reaching noticeably FURTHER onto the shore than the
+    // curl itself did (real swash runs up the sand past where the wave
+    // actually broke), fading out as it drains back.
+    const swashReach = waveHeight.mul(1.9).mul(swashProgress).mul(v.mul(0.7).add(0.3));
+    const swashHeight = waveHeight.mul(0.18).mul(swashProgress);
+
+    const totalAcross = curlAcross.add(swashReach);
+    const totalUp = curlUp.add(swashHeight);
+
+    // Per "curling the opposite direction" — real, confirmed feedback
+    // from actually seeing it, not a re-derivation: sign flipped
+    // directly (removed the .negate() that was here) rather than
+    // re-reasoning about which way shoreNormal "should" point in
+    // theory.
+    const worldOffset = shoreNormal.mul(totalAcross);
+    return { worldOffset, upOffset: totalUp, v, breakProgress };
   };
 
   material.positionNode = Fn(() => {

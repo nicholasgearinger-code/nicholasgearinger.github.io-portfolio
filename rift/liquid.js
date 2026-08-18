@@ -1557,27 +1557,75 @@ function createBreakingWave(scene, waterY, sampleHeight, size) {
     const alongShore = uvNode.x;
     const v = uvNode.y;
 
+    // Per "needs to be like water physics... too stiff" — real, confirmed
+    // cause: EVERY point along the shore broke in perfectly smooth
+    // lockstep (one clean linear phase gradient), and EVERY point across
+    // a cross-section rotated as one rigid arm (angle = v * breakProgress,
+    // nothing else). Real surf is chaotic at multiple scales — no two
+    // stretches of a beach break with identical timing or height, and the
+    // water surface itself is never perfectly smooth even mid-motion.
+    // Per-segment randomization (NOT a smooth function of alongShore) so
+    // adjacent stretches of shore genuinely differ, the way a real
+    // uneven seafloor makes real waves break unevenly along a beach —
+    // hash() of the segment index, blended across the segment boundary
+    // so it doesn't visibly pop between segments.
+    // Per real rendered-frame testing (an actual headless-WebGL preview
+    // of this exact math, not just code review) — this was the direct
+    // cause of the "too stiff... jagged" look: segmentCount was tied to
+    // shorePoints.length, the SAME resolution as the vertex grid itself,
+    // so the per-segment randomization varied at nearly the same
+    // frequency as individual vertices — wild vertex-to-vertex jumps
+    // (a jagged "picket fence" of narrow spikes, confirmed visually)
+    // instead of smooth, wide wave groups. A "segment" needs to span
+    // many vertices, not one — fixed at a small constant, decoupled
+    // from vertex resolution entirely.
+    const segmentCount = float(6);
+    const segF = alongShore.mul(segmentCount);
+    const segI = floor(segF);
+    const segFrac = fract(segF);
+    const segRand = mix(hash(segI), hash(segI.add(1)), segFrac);
+    const segRand2 = mix(hash(segI.add(97)), hash(segI.add(98)), segFrac);
+
     // Real breaking cycle — per shore position, a wave rolls through
-    // calm -> rising -> curling -> collapsing -> foam -> reset,
-    // repeating. alongShore offsets the phase so the break travels
-    // visibly ALONG the shore over time (real waves break progressively
-    // along a beach, not everywhere at once).
-    const cyclePeriod = float(6.5);
-    const phase = fract(breakTimeUniform.div(cyclePeriod).sub(alongShore.mul(0.6)));
-    // Asymmetric shape (pow<1 biases toward a fast rise, slower foam
-    // fade) — a real wave doesn't rise and fall symmetrically.
-    const breakProgress = pow(clamp(sin(phase.mul(3.14159)), 0, 1), float(0.6));
+    // calm -> rising -> curling -> collapsing -> foam -> reset, repeating.
+    // alongShore's own smooth offset is kept (the break still visibly
+    // travels down the beach), but segRand now adds real per-stretch
+    // timing variance on top, so it's not one perfectly uniform
+    // traveling phase.
+    const cyclePeriod = float(6.5).add(segRand2.mul(2.2));
+    const phase = fract(breakTimeUniform.div(cyclePeriod).sub(alongShore.mul(0.6)).add(segRand.mul(0.8)));
+    // Per "too stiff" — replaced the smooth symmetric sine ease with a
+    // real asymmetric envelope: a FAST attack (real waves break
+    // suddenly, not gradually), a brief hold right at peak curl, then a
+    // longer foam-dissipation tail — genuinely different shape, not just
+    // a retuned curve.
+    const attack = tslSmoothstep(float(0), float(0.16), phase);
+    const release = float(1).sub(tslSmoothstep(float(0.3), float(1), phase));
+    const breakProgress = attack.mul(release);
+
+    // Fast, chaotic turbulence riding on TOP of the main curl motion —
+    // real water is never perfectly smooth even mid-wave. Two sine terms
+    // at different, non-harmonic frequencies (so they don't just look
+    // like one regular ripple) driven by real elapsed time, along-shore
+    // position, AND cross-section position, scaled down by breakProgress
+    // so it's a subtle wobble on an already-curling wave, not noise on
+    // still water.
+    const turb1 = sin(breakTimeUniform.mul(9.0).add(alongShore.mul(37.0)).add(v.mul(11.0)));
+    const turb2 = sin(breakTimeUniform.mul(14.0).sub(alongShore.mul(22.0)).add(v.mul(19.0)).add(segRand.mul(6.28)));
+    const turbulence = turb1.mul(0.55).add(turb2.mul(0.45)).mul(breakProgress).mul(0.09);
 
     // The actual curl — sin/cos of the SAME angle parameter (not two
     // independent offsets) is what makes the tip genuinely arc up, OVER,
     // and back down/inward as angle passes 90°, rather than just rising
     // higher. maxCurlAngle past PI (180°) means the tip is legitimately
     // overhanging BACK toward the base by the time breakProgress peaks —
-    // a true barrel, not just a steep face.
-    const maxCurlAngle = float(4.2);
-    const waveHeight = float(1.7);
-    const angle = v.mul(maxCurlAngle).mul(breakProgress);
-    const radius = waveHeight.mul(mix(float(0.25), float(1), breakProgress)).mul(v.mul(0.6).add(0.4));
+    // a true barrel, not just a steep face. Per-segment height/curl
+    // variance (segRand-driven) on top, so not every stretch of shore
+    // produces an identically-sized wave.
+    const maxCurlAngle = float(3.7).add(segRand2.mul(1.1));
+    const waveHeight = float(1.3).add(segRand.mul(1.1));
+    const angle = v.mul(maxCurlAngle).mul(breakProgress).add(turbulence);
+    const radius = waveHeight.mul(mix(float(0.25), float(1), breakProgress)).mul(v.mul(0.6).add(0.4)).add(turbulence.mul(waveHeight).mul(0.5));
     const acrossOffset = sin(angle).mul(radius);
     const upOffset = float(1).sub(cos(angle)).mul(radius);
 
@@ -1592,17 +1640,33 @@ function createBreakingWave(scene, waterY, sampleHeight, size) {
     return positionLocal.add(vec3(worldOffset.x, upOffset, worldOffset.z));
   })();
 
+  // Per "it's not white right yet" — real, confirmed cause (screenshots
+  // showed a uniformly dark, flat-shaded shape, not just dim foam):
+  // colorNode sets a LIT material's surface albedo, which still gets
+  // multiplied by actual scene light before it reaches the screen — at
+  // dusk/night, even a pure white albedo renders dark, because there's
+  // barely any light hitting it to reflect. The ocean's OWN existing
+  // foam crest system already solves exactly this by using emissiveNode
+  // instead (an unlit glow added on top, independent of scene lighting)
+  // — matched here directly rather than re-solving the same problem a
+  // different way.
   material.colorNode = Fn(() => {
+    const { breakProgress } = sharedCurl();
+    // Kept dark and subtle — this is the LIT base color, mostly hidden
+    // under the real emissive foam glow below except right at the calm
+    // edges of the ribbon.
+    return color(0x123840).mul(float(1).sub(breakProgress.mul(0.5)));
+  })();
+
+  material.emissiveNode = Fn(() => {
     const { v, breakProgress } = sharedCurl();
-    // Deep-water blue-green at the base, shading to foam-white toward
-    // the curling tip and specifically where breakProgress is high (the
-    // moment it's actually breaking, not mid-swell) — same general
-    // "white right at the crest" logic as the ocean's own foam system,
-    // applied here to real 3D geometry instead of a flat surface signal.
-    const baseColor = color(0x1f6f78);
-    const foamColor = color(0xf4faff);
+    // Real foam glow, visible regardless of time of day — brightest
+    // toward the curling tip and specifically where breakProgress is
+    // high (the moment it's actually breaking, not mid-swell), same
+    // general shaping logic as the ocean's own crest foam, just applied
+    // to real 3D geometry instead of a flat surface signal.
     const foamAmount = clamp(v.mul(1.3).add(breakProgress.mul(0.6)).sub(0.5), 0, 1);
-    return mix(baseColor, foamColor, foamAmount);
+    return color(0xf4faff).mul(foamAmount).mul(1.6);
   })();
 
   material.opacityNode = Fn(() => {

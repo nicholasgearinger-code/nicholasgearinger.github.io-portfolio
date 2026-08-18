@@ -5049,7 +5049,7 @@ function animate() {
   // terrain caustic focus position.
   tempWaterGlintDir.copy(moonLight.position).lerp(sun.position, dayNight.dayAmount);
   updateLiquidPlane(liquidHandle, elapsedTime, dayNight.skyZenith, camera.position.y, camera.position, tempWaterGlintDir, dayNight.skyHorizon, reflectionRenderTarget.texture, reflectionTextureMatrix, refractionRenderTarget.texture, refractionResolution, weatherHandle ? weatherHandle.rainIntensity : 0, dayNight.dayAmount, weatherHandle ? weatherHandle.windStrength : 0);
-  updateBreakingWave(breakingWaveHandle, elapsedTime);
+  updateBreakingWave(breakingWaveHandle, renderer, elapsedTime);
   // Real GPU compute dispatch for the additive ripple layer (see
   // liquid.js's own setup comment on it) — separate call for the same
   // reason the fluid-sim water's own dispatch (just below) is separate

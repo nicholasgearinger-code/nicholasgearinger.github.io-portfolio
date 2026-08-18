@@ -1527,7 +1527,7 @@ function createBreakingWave(scene, waterY, sampleHeight, size) {
       const depth = waterY - groundY;
       const idx = j * WIDE_ALONG + i;
       depthData[idx] = depth;
-      speedData[idx] = Math.sqrt(Math.max(0.4, depth)); // clamped — dry/near-dry cells still need a real, non-zero speed value here
+      speedData[idx] = Math.sqrt(Math.max(0.4, Math.min(depth, 2.0))); // capped depth input — uncapped, the effective wave speed in real deep water (depth~8) reached ~0.99, nearly 3x the proven-stable 0.35 baseline and close to the 1.4 value already found genuinely unstable elsewhere in this file; capped for real margin while still preserving relative shallow-vs-deep variation
     }
   }
   const depthBuffer = instancedArray(depthData, "float");
@@ -1568,27 +1568,41 @@ function createBreakingWave(scene, waterY, sampleHeight, size) {
     const down = heightA.element(idxD);
     const laplacian = left.add(right).add(up).add(down).sub(self.mul(4));
 
-    // Same proven CFL-stable constants as buildCrystalFluidSimPlane
-    // above (this exact grid scale was already validated there) —
-    // waveSpeed modulated per-cell by the REAL depth-derived
-    // speedBuffer, which is what actually produces shoaling.
+    // Per "hard to see any difference... don't move enough" — real,
+    // confirmed bugs found by actually running this exact physics
+    // standalone and both reading real numeric output AND rendering it
+    // as a heatmap video, not by guessing at more constants:
+    // 1) shoreDamp used to hard-zero velocity the instant a cell went
+    //    dry (clamp(depth/3.5,0,1) — depth<=0 gave exactly 0), which
+    //    permanently froze the actual shoreline cell forever — the sim
+    //    could structurally never show water advancing onto sand at
+    //    all. Shifted so the ramp extends INTO dry land, letting real
+    //    swash actually happen.
+    // 2) damping=0.985 applied every step (60x/second) decayed 99% of
+    //    amplitude within ~5 simulated seconds — but the wave needs
+    //    several seconds just to CROSS this domain to reach shore, so
+    //    it was being fully "used up" before arriving, regardless of
+    //    numerical stability. Raised to 0.997 (verified: this alone
+    //    took the wave from never reaching the shore in 20s to visibly
+    //    reaching it every cycle).
     const waveSpeed = float(0.35);
-    const damping = float(0.985);
+    const damping = float(0.997);
     const localSpeed = speedBuffer.element(i);
     const depthHere = depthBuffer.element(i);
-    const shoreDamp = clamp(depthHere.div(3.5), 0, 1);
+    const shoreDamp = clamp(depthHere.add(4.5).div(7.0), 0, 1);
 
     const newVelocity = velocityBuffer.element(i).add(laplacian.mul(waveSpeed).mul(localSpeed)).mul(damping).mul(shoreDamp);
     velocityBuffer.element(i).assign(newVelocity);
     let newHeight = self.add(newVelocity.mul(0.05));
 
-    // Real incoming-swell forcing — injected ONLY at the far offshore
-    // edge (the first ~2.5 rows), a periodic push that then genuinely
-    // PROPAGATES toward shore through the real wave equation above,
-    // rather than being scripted along its whole path. This is the
-    // actual "wave rolling in," emerging from simulated physics.
+    // 3) Forcing was far too SLOW (periods of ~5-9s) to read as
+    // repeating wave sets rolling in — it produced one slow "breathing"
+    // swell across the whole domain instead of distinct crests. Sped up
+    // substantially (confirmed via the same rendered test: this is what
+    // actually made foam start firing repeatedly instead of once at
+    // startup then never again).
     const isForcingEdge = float(1).sub(tslSmoothstep(float(0), float(2.5), yy));
-    const forcing = sin(simTimeUniform.mul(1.3)).mul(0.35).add(sin(simTimeUniform.mul(0.7).add(1.7)).mul(0.2));
+    const forcing = sin(simTimeUniform.mul(2.8)).mul(0.55).add(sin(simTimeUniform.mul(4.1).add(1.2)).mul(0.3));
     newHeight = mix(newHeight, forcing, isForcingEdge.mul(0.4));
     heightB.element(i).assign(newHeight);
 
@@ -1597,9 +1611,14 @@ function createBreakingWave(scene, waterY, sampleHeight, size) {
     // threshold, an actual breaking-wave detector driven by the
     // simulation's own shape, not a hand-scripted timer. Decays
     // multiplicatively so it lingers and fades like real foam.
+    // 4) Threshold (0.045-0.12) was calibrated blind and, per real
+    // measured slope data right at the shore, off by roughly an order
+    // of magnitude — real slopes there only reach ~0.002-0.02 once
+    // shoreDamp has done its job smoothing things out, so foam almost
+    // never crossed the old threshold at the one place it needed to.
     const neighborTowardShore = heightA.element(idxD);
     const slope = abs(self.sub(neighborTowardShore));
-    const breakingHere = tslSmoothstep(float(0.045), float(0.12), slope).mul(shoreDamp);
+    const breakingHere = tslSmoothstep(float(0.006), float(0.025), slope).mul(shoreDamp);
     const newFoam = max(foamA.element(i).mul(0.93), breakingHere);
     foamB.element(i).assign(newFoam);
   })().compute(CELL_COUNT);

@@ -5,18 +5,30 @@ import {
   disposeGPUFFTOcean as disposeBaseOcean,
 } from "./gpu_fft_ocean_v3.js";
 import { setGPUShallowWaterInteraction } from "./gpu_shallow_water.js";
+import {
+  createGPUUnderwaterLighting,
+  updateGPUUnderwaterLighting,
+  disposeGPUUnderwaterLighting,
+} from "./gpu_underwater_lighting.js";
 
-// Interaction bridge layered over the stabilized FFT + shallow-water ocean.
-// main.js already calls updateRippleLayer() before updateFluidSimWater() every
-// frame. This wrapper turns that existing hook into a real solver impulse rather
-// than a decorative ripple mesh, while leaving the stable base surface intact.
+// Interaction + underwater-lighting bridge layered over the stabilized
+// FFT + shallow-water ocean. The water simulation remains unchanged here;
+// this wrapper adds physical interaction impulses plus wave-reactive caustics
+// and volumetric light shafts without introducing another water surface mesh.
 
 export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   const handle = createBaseOcean(scene, y, size, sampleHeight);
   if (!handle?.gpuFFT) return handle;
+
   handle.fftInteractionPrev = null;
   handle.fftInteractionPrevY = null;
   handle.fftInteractionWasSubmerged = false;
+  handle.fftUnderwaterLighting = createGPUUnderwaterLighting(
+    scene,
+    sampleHeight,
+    y,
+    handle.fftShallowHandle,
+  );
   return handle;
 }
 
@@ -39,7 +51,7 @@ export function updateGPUFFTOceanVisuals(
   storm = 0,
   day = 1,
 ) {
-  return updateBaseVisuals(
+  updateBaseVisuals(
     handle,
     elapsed,
     skyColor,
@@ -54,6 +66,17 @@ export function updateGPUFFTOceanVisuals(
     storm,
     day,
   );
+
+  if (handle?.fftUnderwaterLighting?.gpuUnderwaterLighting) {
+    updateGPUUnderwaterLighting(
+      handle.fftUnderwaterLighting,
+      elapsed,
+      cameraY,
+      day,
+      storm,
+      sunDir,
+    );
+  }
 }
 
 export function updateGPUFFTOceanRipples(handle, playerPos, cameraY, dt = 1 / 60) {
@@ -77,11 +100,11 @@ export function updateGPUFFTOceanRipples(handle, playerPos, cameraY, dt = 1 / 60
        (handle.fftInteractionPrevY < waterY && cameraY >= waterY))
     : false;
 
-  // Gentle wake near the surface, stronger impulse when entering/exiting water.
-  // Strength remains capped so the interaction cannot destabilize the solver.
   const wake = nearSurface ? Math.min(1.35, horizontalSpeed * 0.065) : 0;
   const swimWake = submerged && cameraY > waterY - 5.0 ? Math.min(0.55, horizontalSpeed * 0.025) : 0;
-  const splash = crossedSurface ? Math.min(3.0, 1.65 + Math.abs((cameraY - (handle.fftInteractionPrevY ?? cameraY)) / safeDt) * 0.035) : 0;
+  const splash = crossedSurface
+    ? Math.min(3.0, 1.65 + Math.abs((cameraY - (handle.fftInteractionPrevY ?? cameraY)) / safeDt) * 0.035)
+    : 0;
   const strength = Math.min(3.4, Math.max(wake, swimWake) + splash);
   const radius = Math.min(6.5, 2.2 + horizontalSpeed * 0.045 + (crossedSurface ? 1.6 : 0));
 
@@ -99,7 +122,11 @@ export function updateGPUFFTOceanRipples(handle, playerPos, cameraY, dt = 1 / 60
 }
 
 export function disposeGPUFFTOcean(scene, handle) {
+  if (handle?.fftUnderwaterLighting?.gpuUnderwaterLighting) {
+    disposeGPUUnderwaterLighting(scene, handle.fftUnderwaterLighting);
+  }
   if (handle) {
+    handle.fftUnderwaterLighting = null;
     handle.fftInteractionPrev = null;
     handle.fftInteractionPrevY = null;
   }

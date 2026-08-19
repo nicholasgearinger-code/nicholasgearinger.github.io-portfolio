@@ -20,9 +20,10 @@ import {
 } from "three/tsl";
 
 const FFT_N = 128;
-// Render tessellation stays decoupled from the simulations: high visual density
-// with the spectral solve still at 128^2 and the shallow solver at its own grid.
-const RENDER_N = 640;
+// Bicubic reconstruction provides much more curvature per simulation cell than
+// the previous 640^2 four-corner interpolation. 512^2 keeps the mobile vertex
+// cost under control while the 4x4 reconstruction removes broad planar facets.
+const RENDER_N = 512;
 const DETAIL_DOMAIN = 420;
 
 const DAY_SURFACE = new THREE.Color(0x0b3c49);
@@ -44,12 +45,21 @@ function smooth01(t) {
   return t * t * (3 - 2 * t);
 }
 
-// GPU-side smooth interpolation weight. Plain bilinear interpolation gives a
-// constant slope across each simulation cell, which is visible as broad planar
-// facets once displacement becomes large. Cubic Hermite weights keep values
-// continuous while easing the slope at sample boundaries.
 function smoothWeight(t) {
   return t.mul(t).mul(float(3).sub(t.mul(2)));
+}
+
+// Uniform Catmull-Rom spline. Unlike smoothstep-bilinear interpolation this
+// preserves a continuous-looking tangent through cell boundaries by using the
+// two neighboring samples on either side of the active interval.
+function catmullRom(p0, p1, p2, p3, t) {
+  const t2 = t.mul(t);
+  const t3 = t2.mul(t);
+  return p1.mul(2)
+    .add(p2.sub(p0).mul(t))
+    .add(p0.mul(2).sub(p1.mul(5)).add(p2.mul(4)).sub(p3).mul(t2))
+    .add(p0.negate().add(p1.mul(3)).sub(p2.mul(3)).add(p3).mul(t3))
+    .mul(0.5);
 }
 
 function buildDenseRenderGeometry(size, waterY, sampleHeight) {
@@ -146,6 +156,41 @@ function sampleSmoothScalar(buffer, coord, N, component = "x", wrap = false) {
   return mix(mix(v00, v10, tx), mix(v01, v11, tx), tz);
 }
 
+function sampleCubicVec4(buffer, coord, N) {
+  const bx = floor(coord.x);
+  const bz = floor(coord.y);
+  const tx = coord.x.sub(bx);
+  const tz = coord.y.sub(bz);
+  const row = uint(N);
+
+  const x0 = max(bx.sub(1), float(0)).toUint();
+  const x1 = clamp(bx, 0, N - 1).toUint();
+  const x2 = min(bx.add(1), float(N - 1)).toUint();
+  const x3 = min(bx.add(2), float(N - 1)).toUint();
+  const z0 = max(bz.sub(1), float(0)).toUint();
+  const z1 = clamp(bz, 0, N - 1).toUint();
+  const z2 = min(bz.add(1), float(N - 1)).toUint();
+  const z3 = min(bz.add(2), float(N - 1)).toUint();
+
+  const r0 = catmullRom(
+    buffer.element(z0.mul(row).add(x0)), buffer.element(z0.mul(row).add(x1)),
+    buffer.element(z0.mul(row).add(x2)), buffer.element(z0.mul(row).add(x3)), tx,
+  );
+  const r1 = catmullRom(
+    buffer.element(z1.mul(row).add(x0)), buffer.element(z1.mul(row).add(x1)),
+    buffer.element(z1.mul(row).add(x2)), buffer.element(z1.mul(row).add(x3)), tx,
+  );
+  const r2 = catmullRom(
+    buffer.element(z2.mul(row).add(x0)), buffer.element(z2.mul(row).add(x1)),
+    buffer.element(z2.mul(row).add(x2)), buffer.element(z2.mul(row).add(x3)), tx,
+  );
+  const r3 = catmullRom(
+    buffer.element(z3.mul(row).add(x0)), buffer.element(z3.mul(row).add(x1)),
+    buffer.element(z3.mul(row).add(x2)), buffer.element(z3.mul(row).add(x3)), tx,
+  );
+  return catmullRom(r0, r1, r2, r3, tz);
+}
+
 function installCoupledGeometry(handle, detailHandle, shallowHandle, size, sampleHeight) {
   if (!handle?.gpuFFT || !detailHandle?.gpuFFT || !shallowHandle?.gpuShallowWater || handle.fftDenseGeometryApplied) return;
   const longA = handle.resources?.[8];
@@ -164,7 +209,10 @@ function installCoupledGeometry(handle, detailHandle, shallowHandle, size, sampl
   const depth = attribute("fftDepthWorld", "float");
 
   handle.mesh.material.positionNode = Fn(() => {
-    const la = sampleSmoothVec4(longA, longCoord, FFT_N);
+    // The large swell and shallow-water elevation get true 4x4 reconstruction;
+    // these are the fields that dominate the visible silhouette. Horizontal
+    // choppy channels remain four-sample to keep the mobile vertex cost sane.
+    const la = sampleCubicVec4(longA, longCoord, FFT_N);
     const ldz = sampleSmoothScalar(longB, longCoord, FFT_N, "x", false);
 
     const dx0f = floor(detailCoord.x);
@@ -187,21 +235,18 @@ function installCoupledGeometry(handle, detailHandle, shallowHandle, size, sampl
       dtz,
     );
 
-    const shallow = sampleSmoothVec4(shallowState, shallowCoord, SHALLOW_N);
+    const shallow = sampleCubicVec4(shallowState, shallowCoord, SHALLOW_N);
 
-    const longAmp = smoothstep(float(3.0), float(11.5), depth);
-    const detailAmp = smoothstep(float(8.5), float(20.0), depth);
-    const shallowDepthBlend = float(1).sub(smoothstep(float(7.0), float(15.5), depth));
+    const longAmp = smoothstep(float(3.0), float(12.0), depth);
+    const detailAmp = smoothstep(float(9.0), float(21.0), depth);
+    const shallowDepthBlend = float(1).sub(smoothstep(float(7.0), float(16.0), depth));
     const shallowBlend = shallowDepthBlend.mul(coverage);
 
-    // Softer horizontal displacement is critical here. Excess choppiness makes
-    // neighboring vertices shear past one another and exposes the triangulation.
-    // Vertical energy is preserved more strongly so the water still has swell.
-    const fftX = la.z.mul(longAmp).mul(0.76).add(da.z.mul(0.30).mul(detailAmp));
-    const fftY = la.x.mul(longAmp).add(da.x.mul(0.52).mul(detailAmp));
-    const fftZ = ldz.mul(longAmp).mul(0.76).add(ddz.mul(0.30).mul(detailAmp));
+    const fftX = la.z.mul(longAmp).mul(0.68).add(da.z.mul(0.24).mul(detailAmp));
+    const fftY = la.x.mul(longAmp).add(da.x.mul(0.44).mul(detailAmp));
+    const fftZ = ldz.mul(longAmp).mul(0.68).add(ddz.mul(0.24).mul(detailAmp));
 
-    const horizontalFade = float(1).sub(shallowBlend.mul(0.95));
+    const horizontalFade = float(1).sub(shallowBlend.mul(0.96));
     const yDisp = mix(fftY, shallow.x, shallowBlend);
 
     return positionLocal.add(vec3(
@@ -256,43 +301,43 @@ function setupSmoothFFTLighting(handle) {
     return pow(float(1).sub(facing), float(4.0));
   })();
 
-  const crest = smoothstep(waterLevel.add(0.55), waterLevel.add(2.8), positionWorld.y);
+  const crest = smoothstep(waterLevel.add(0.55), waterLevel.add(2.9), positionWorld.y);
   const slope = clamp(float(1).sub(abs(worldNormal.y)), 0, 1);
-  const steepCrest = smoothstep(float(0.14), float(0.42), slope)
-    .mul(smoothstep(float(0.28), float(0.84), crest));
+  const steepCrest = smoothstep(float(0.15), float(0.44), slope)
+    .mul(smoothstep(float(0.30), float(0.86), crest));
   const offshoreWhitecap = clamp(
     steepCrest.mul(foamStrength).mul(float(1).sub(underwaterMix.mul(0.86))),
     0, 1,
   );
 
   const shallow = sampleSmoothVec4(shallowState, shallowCoord, SHALLOW_N);
-  const surfFoam = clamp(shallow.w.mul(coverage).mul(1.05), 0, 1);
+  const surfFoam = clamp(shallow.w.mul(coverage).mul(1.02), 0, 1);
   const whitecap = clamp(max(offshoreWhitecap, surfFoam), 0, 1)
     .mul(float(1).sub(underwaterMix.mul(0.88)));
 
   const viewDirWorld = cameraPosition.sub(positionWorld).normalize();
   const halfDir = lightDirection.normalize().add(viewDirWorld).normalize();
   const directFacing = clamp(dot(worldNormal, lightDirection.normalize()), 0, 1);
-  const glint = pow(clamp(dot(worldNormal, halfDir), 0, 1), float(62))
+  const glint = pow(clamp(dot(worldNormal, halfDir), 0, 1), float(58))
     .mul(float(0.12).add(daylight.mul(0.88)))
     .mul(float(1).sub(underwaterMix.mul(0.72)));
   const glintColor = mix(moonGlintColor, sunGlintColor, daylight);
 
   material.colorNode = Fn(() => {
     const base = mix(surfaceColor, underwaterColor, underwaterMix);
-    const grazingLight = mix(base, crestColor, fresnel.mul(0.26));
-    const crestLight = crest.mul(float(1).sub(underwaterMix)).mul(0.08);
+    const grazingLight = mix(base, crestColor, fresnel.mul(0.24));
+    const crestLight = crest.mul(float(1).sub(underwaterMix)).mul(0.07);
     const directionalLift = directFacing.mul(daylight.mul(0.07).add(0.022));
     const litWater = mix(grazingLight, crestColor, crestLight.add(directionalLift));
     const foamed = mix(litWater, foamColor, whitecap.mul(0.84));
-    return mix(foamed, glintColor, clamp(glint.mul(0.68), 0, 0.64));
+    return mix(foamed, glintColor, clamp(glint.mul(0.72), 0, 0.68));
   })();
 
-  const baseRoughness = mix(float(0.20), float(0.055), fresnel.mul(0.80).add(glint.mul(0.20)));
-  material.roughnessNode = mix(baseRoughness, float(0.42), whitecap.mul(0.90));
+  const baseRoughness = mix(float(0.19), float(0.05), fresnel.mul(0.80).add(glint.mul(0.20)));
+  material.roughnessNode = mix(baseRoughness, float(0.44), whitecap.mul(0.92));
   material.emissiveNode = underwaterColor
-    .mul(underwaterMix.mul(float(0.03).add(daylight.mul(0.075))))
-    .add(foamColor.mul(whitecap.mul(0.009)));
+    .mul(underwaterMix.mul(float(0.035).add(daylight.mul(0.085))))
+    .add(foamColor.mul(whitecap.mul(0.010)));
   material.needsUpdate = true;
 
   handle.fftSurfaceColor = surfaceColor;
@@ -312,7 +357,7 @@ function applyPhotographicOceanLook(handle, underwater = false, day = 1, storm =
   const stormT = Math.max(0, Math.min(1, storm));
   if (handle.fftDaylight) handle.fftDaylight.value = dayT;
   if (handle.fftUnderwaterMix) handle.fftUnderwaterMix.value = underwater ? 1 : 0;
-  if (handle.fftFoamStrength) handle.fftFoamStrength.value = 0.56 + stormT * 0.72;
+  if (handle.fftFoamStrength) handle.fftFoamStrength.value = 0.58 + stormT * 0.72;
   if (sunDir && handle.fftLightDirection?.value) handle.fftLightDirection.value.copy(sunDir).normalize();
 
   if (handle.fftSurfaceColor?.value) {
@@ -347,11 +392,9 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   const shallowHandle = createGPUShallowWater(sampleHeight, y, handle.resources?.[8], size, SHALLOW_DOMAIN);
   handle.fftShallowHandle = shallowHandle;
 
-  // Less brute-force amplitude, more natural curvature. The waves remain large
-  // enough to read clearly, but no longer force the render surface into wedges.
-  handle.waveScale.value = 38.0;
+  handle.waveScale.value = 38.5;
   if (detailHandle?.waveScale) detailHandle.waveScale.value = 27.0;
-  handle.mesh.scale.y = 1.0;
+  handle.mesh.scale.y = 1.03;
   handle.fftVisualBoost = true;
   handle.fftUnderwater = false;
 
@@ -361,7 +404,7 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   setupSmoothFFTLighting(handle);
   applyPhotographicOceanLook(handle, false, 1, 0, null);
 
-  console.info("[gpu-fft-ocean] ACTIVE: smooth Hermite FFT/shallow interpolation");
+  console.info("[gpu-fft-ocean] ACTIVE: bicubic FFT/shallow reconstruction + 512 render grid");
   return handle;
 }
 
@@ -387,17 +430,17 @@ export function updateGPUFFTOceanVisuals(
 
   const stormT = Math.max(0, Math.min(1, storm));
   const underwater = Number.isFinite(cameraY) && cameraY < handle.waterY - 0.12;
-  const longSet = Math.sin(elapsed * 0.071 + 0.4) * 1.7;
-  const detailSet = Math.sin(elapsed * 0.173 + 1.9) * 1.4;
+  const longSet = Math.sin(elapsed * 0.071 + 0.4) * 1.4;
+  const detailSet = Math.sin(elapsed * 0.173 + 1.9) * 1.2;
 
-  handle.waveScale.value = 38.0 + longSet + stormT * 9.0;
+  handle.waveScale.value = 38.5 + longSet + stormT * 9.0;
   if (handle.fftDetailHandle?.waveScale) {
-    handle.fftDetailHandle.waveScale.value = 27.0 + detailSet + stormT * 9.0;
+    handle.fftDetailHandle.waveScale.value = 27.0 + detailSet + stormT * 9.5;
   }
   if (handle.fftShallowHandle?.forcingStrength) {
-    handle.fftShallowHandle.forcingStrength.value = 0.78 + stormT * 0.24;
+    handle.fftShallowHandle.forcingStrength.value = 0.80 + stormT * 0.26;
   }
-  handle.mesh.scale.y = 1.0 + stormT * 0.06;
+  handle.mesh.scale.y = 1.03 + stormT * 0.07;
 
   if (handle.fftUnderwater !== underwater) handle.fftUnderwater = underwater;
   applyPhotographicOceanLook(handle, underwater, day, storm, sunDir);

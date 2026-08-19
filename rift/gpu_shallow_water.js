@@ -13,11 +13,18 @@ import {
 // horizontal transport, wet/dry damping and breaking are solved here. The
 // outer edge is weakly forced from the *actual current FFT displacement* so the
 // two simulations are coupled instead of running as unrelated animations.
+//
+// Resolution raised from 128 to 192 so the 360-unit surf domain resolves at
+// ~1.88 world units/cell instead of ~2.83. This matters before introducing the
+// 3D breaker sheet: the source height/velocity/breaking field itself needs to
+// be smooth enough that a higher-density render mesh is not merely interpolating
+// visibly coarse shallow-water cells.
 // -----------------------------------------------------------------------------
 
-export const SHALLOW_N = 128;
+export const SHALLOW_N = 192;
 export const SHALLOW_DOMAIN = 360;
 const GRAVITY = 9.81;
+const FFT_SOURCE_N = 128;
 
 function buildBathymetry(sampleHeight, waterY, domain, N) {
   const data = new Float32Array(N * N * 4);
@@ -93,15 +100,12 @@ export function createGPUShallowWater(sampleHeight, waterY, fftSpatialA, fftDoma
     const inv2dx = float(1 / (2 * cellSize));
     const dt = dtUniform;
 
-    // Conservative height update from the divergence of horizontal volume flux.
     const fluxXR = hR.mul(r.y);
     const fluxXL = hL.mul(l.y);
     const fluxZU = hU.mul(u.z);
     const fluxZD = hD.mul(d.z);
     const dEtaDt = fluxXR.sub(fluxXL).add(fluxZU.sub(fluxZD)).mul(inv2dx).negate();
 
-    // Hydrostatic pressure gradient. Bottom topography enters through h/depth
-    // in continuity and through the wet/dry/friction terms below.
     const dEtaDx = r.x.sub(l.x).mul(inv2dx);
     const dEtaDz = u.x.sub(d.x).mul(inv2dx);
 
@@ -109,30 +113,26 @@ export function createGPUShallowWater(sampleHeight, waterY, fftSpatialA, fftDoma
     let velX = c.y.sub(dEtaDx.mul(float(GRAVITY)).mul(dt));
     let velZ = c.z.sub(dEtaDz.mul(float(GRAVITY)).mul(dt));
 
-    // Manning-like shallow friction: weak in deeper water, strong in the swash
-    // zone so the beach calms naturally rather than carrying offshore chop onto land.
     const shallowDrag = float(1).sub(smoothstep(float(0.45), float(3.2), bc.x));
     const drag = float(0.16).add(shallowDrag.mul(1.65));
     const damp = float(1).div(float(1).add(drag.mul(dt)));
     velX = velX.mul(damp);
     velZ = velZ.mul(damp);
 
-    // Couple only the outer cells to the current long-wave FFT. Interior cells
-    // evolve by the shallow-water equations and bathymetry after the waves enter.
     const edgeX = min(xf, float(N - 1).sub(xf));
     const edgeZ = min(zf, float(N - 1).sub(zf));
     const edgeDist = min(edgeX, edgeZ);
-    const boundary = float(1).sub(smoothstep(float(1), float(9), edgeDist));
+    const boundary = float(1).sub(smoothstep(float(1), float(12), edgeDist));
 
-    const fgx = clamp(bc.y.div(float(fftDomain)).add(0.5), 0, 1).mul(float(127));
-    const fgz = clamp(bc.z.div(float(fftDomain)).add(0.5), 0, 1).mul(float(127));
+    const fgx = clamp(bc.y.div(float(fftDomain)).add(0.5), 0, 1).mul(float(FFT_SOURCE_N - 1));
+    const fgz = clamp(bc.z.div(float(fftDomain)).add(0.5), 0, 1).mul(float(FFT_SOURCE_N - 1));
     const fx0f = floor(fgx);
     const fz0f = floor(fgz);
-    const fx1f = min(fx0f.add(1), float(127));
-    const fz1f = min(fz0f.add(1), float(127));
+    const fx1f = min(fx0f.add(1), float(FFT_SOURCE_N - 1));
+    const fz1f = min(fz0f.add(1), float(FFT_SOURCE_N - 1));
     const ftx = fgx.sub(fx0f);
     const ftz = fgz.sub(fz0f);
-    const frow = uint(128);
+    const frow = uint(FFT_SOURCE_N);
     const fi00 = fz0f.toUint().mul(frow).add(fx0f.toUint());
     const fi10 = fz0f.toUint().mul(frow).add(fx1f.toUint());
     const fi01 = fz1f.toUint().mul(frow).add(fx0f.toUint());
@@ -143,8 +143,6 @@ export function createGPUShallowWater(sampleHeight, waterY, fftSpatialA, fftDoma
     const coupling = boundary.mul(forcingStrength).mul(smoothstep(float(1.0), float(4.0), bc.x));
     eta = mix(eta, fftEta.mul(0.82), coupling.mul(0.38));
 
-    // Physically motivated breaking indicator. Large relative wave height and
-    // supercritical/Froude-like flow in finite depth produce breaking energy.
     const localDepth = max(bc.x.add(eta), float(0.08));
     const speed = vec2(velX, velZ).length();
     const celerity = sqrt(float(GRAVITY).mul(localDepth));
@@ -157,13 +155,9 @@ export function createGPUShallowWater(sampleHeight, waterY, fftSpatialA, fftDoma
       smoothstep(float(0.78), float(1.08), froude),
     ).mul(depthBand).mul(wet);
 
-    // Foam is a transported breaking-energy proxy for now. The 3D breaker sheet
-    // will consume this same field, so foam and curl originate from one event.
     const foamDecay = max(float(0), float(1).sub(dt.mul(0.62)));
     const foam = max(c.w.mul(foamDecay), breaker);
 
-    // Wet/dry stabilization and a conservative eta clamp keep the mobile solver
-    // robust when cells alternately flood and expose during run-up.
     eta = clamp(eta, float(-1.6), float(1.6)).mul(wet);
     velX = clamp(velX, float(-8), float(8)).mul(wet);
     velZ = clamp(velZ, float(-8), float(8)).mul(wet);

@@ -1,12 +1,12 @@
 import * as THREE from "three";
 import {
   Fn, uniform, color, float, uint, vec2,
-  positionWorld, attribute, floor, min, abs, sin, pow, max, mix, clamp,
+  positionWorld, attribute, floor, min, abs, sin, cos, pow, max, mix, clamp,
 } from "three/tsl";
 import { SHALLOW_N, SHALLOW_DOMAIN } from "./gpu_shallow_water.js";
 
 const CAUSTIC_DOMAIN = 320;
-const CAUSTIC_SEGMENTS = 144;
+const CAUSTIC_SEGMENTS = 160;
 const GOD_RAY_COUNT = 16;
 
 function smooth01(t) {
@@ -101,7 +101,9 @@ function buildTerrainConformingCausticGeometry(sampleHeight, waterY) {
     );
 
     waterMask[i] = depth > 0.25 ? 1 : 0;
-    depthMask[i] = smooth01((Math.min(Math.max(depth, 0), 18) - 0.35) / 8.5);
+    const emerge = smooth01((depth - 0.25) / 0.85);
+    const deepFade = 1 - 0.62 * smooth01((depth - 8.0) / 14.0);
+    depthMask[i] = emerge * deepFade;
   }
 
   geometry.setAttribute("causticShallowCoord", new THREE.Float32BufferAttribute(shallowCoords, 2));
@@ -125,42 +127,63 @@ function createCausticMesh(sampleHeight, waterY, shallowHandle) {
   const daylight = uniform(1.0);
   const underwater = uniform(0.0);
   const storm = uniform(0.0);
-  const causticColor = uniform(color(0x9df4ff));
+  const causticColor = uniform(color(0xd7ffff));
 
   const coord = attribute("causticShallowCoord", "vec2");
   const waterMask = attribute("causticWaterMask", "float");
   const depthMask = attribute("causticDepthMask", "float");
   const shallow = sampleSmoothVec4(shallowHandle.state, coord, SHALLOW_N);
   const eta = shallow.x;
-  const speed = vec2(shallow.y, shallow.z).length();
+  const vx = shallow.y;
+  const vz = shallow.z;
+  const speed = vec2(vx, vz).length();
 
-  const p1 = positionWorld.x.mul(0.54)
-    .add(positionWorld.z.mul(0.37))
-    .add(elapsed.mul(1.18))
-    .add(eta.mul(5.2));
-  const p2 = positionWorld.x.mul(-0.31)
-    .add(positionWorld.z.mul(0.61))
-    .sub(elapsed.mul(0.92))
-    .add(eta.mul(3.7));
-  const p3 = positionWorld.x.mul(0.18)
-    .add(positionWorld.z.mul(-0.73))
-    .add(elapsed.mul(0.67))
-    .add(speed.mul(1.4));
+  // Small live-wave domain warp: enough to make the caustics swim with the
+  // simulated surface without turning the pattern into broad streaks.
+  const baseX = positionWorld.x.mul(0.58);
+  const baseZ = positionWorld.z.mul(0.58);
 
-  const l1 = pow(float(1).sub(abs(sin(p1))), float(10));
-  const l2 = pow(float(1).sub(abs(sin(p2))), float(12));
-  const l3 = pow(float(1).sub(abs(sin(p3))), float(11));
-  const network = clamp(max(l1.mul(0.95), max(l2.mul(0.82), l3.mul(0.68))), 0, 1);
-  const focus = clamp(float(0.72).add(abs(eta).mul(1.5)).add(speed.mul(0.10)), 0.7, 1.35);
-  const intensity = network.mul(focus)
-    .mul(waterMask)
-    .mul(depthMask)
-    .mul(daylight.mul(daylight))
-    .mul(float(1).sub(storm.mul(0.68)))
-    .mul(float(0.30).add(underwater.mul(0.70)));
+  const warpA = sin(baseX.mul(0.71).add(baseZ.mul(0.43)).add(elapsed.mul(0.46)));
+  const warpB = cos(baseX.mul(-0.39).add(baseZ.mul(0.83)).sub(elapsed.mul(0.34)));
 
-  material.colorNode = causticColor.mul(float(0.25).add(intensity.mul(1.15)));
-  material.opacityNode = clamp(intensity.mul(0.66), 0, 0.76);
+  const qx = baseX.add(warpA.mul(0.52)).add(eta.mul(1.25)).add(vx.mul(0.10));
+  const qz = baseZ.add(warpB.mul(0.52)).sub(eta.mul(1.05)).add(vz.mul(0.10));
+
+  // Three independently closed focus fields. Their near-zero contours form the
+  // thin, connected cellular lines seen in real swimming-pool/ocean caustics.
+  const a1 = sin(qx.mul(1.18));
+  const a2 = sin(qz.mul(1.07));
+  const a3 = sin(qx.add(qz).mul(0.74).add(elapsed.mul(0.10)));
+  const fieldA = a1.add(a2).add(a3.mul(0.62));
+
+  const b1 = sin(qx.mul(1.79).sub(qz.mul(0.41)).add(elapsed.mul(0.15)));
+  const b2 = sin(qz.mul(1.63).add(qx.mul(0.36)).sub(elapsed.mul(0.12)));
+  const fieldB = b1.add(b2);
+
+  const c1 = sin(qx.mul(0.53).add(qz.mul(1.37)).sub(elapsed.mul(0.08)));
+  const c2 = sin(qz.mul(0.59).sub(qx.mul(1.29)).add(elapsed.mul(0.09)));
+  const fieldC = c1.add(c2);
+
+  const lineA = pow(float(1).sub(clamp(abs(fieldA).mul(0.78), 0, 1)), float(12));
+  const lineB = pow(float(1).sub(clamp(abs(fieldB).mul(0.88), 0, 1)), float(14));
+  const lineC = pow(float(1).sub(clamp(abs(fieldC).mul(0.92), 0, 1)), float(15));
+
+  const core = max(lineA, max(lineB.mul(0.82), lineC.mul(0.68)));
+
+  const haloA = pow(float(1).sub(clamp(abs(fieldA).mul(0.43), 0, 1)), float(4));
+  const haloB = pow(float(1).sub(clamp(abs(fieldB).mul(0.48), 0, 1)), float(4));
+  const halo = max(haloA, haloB.mul(0.70));
+
+  const focus = clamp(float(0.86).add(abs(eta).mul(0.38)).add(speed.mul(0.035)), 0.78, 1.18);
+  const lighting = daylight.mul(daylight).mul(float(1).sub(storm.mul(0.76)));
+  const visibility = float(0.22).add(underwater.mul(0.78));
+
+  const coreIntensity = core.mul(focus).mul(waterMask).mul(depthMask).mul(lighting).mul(visibility);
+  const haloIntensity = halo.mul(0.20).mul(waterMask).mul(depthMask).mul(lighting).mul(visibility);
+  const intensity = clamp(coreIntensity.add(haloIntensity), 0, 1.25);
+
+  material.colorNode = causticColor.mul(float(0.15).add(intensity.mul(1.70)));
+  material.opacityNode = clamp(intensity.mul(0.86), 0, 0.90);
 
   const mesh = new THREE.Mesh(geometry, material);
   mesh.frustumCulled = false;
@@ -257,7 +280,7 @@ export function updateGPUUnderwaterLighting(handle, elapsed, cameraY, dayAmount 
     u.daylight.value = day;
     u.underwater.value = underwater ? 1 : 0;
     u.storm.value = storm;
-    u.causticColor.value.set(0x78dce9).lerp(new THREE.Color(0xc6fbff), day);
+    u.causticColor.value.set(0x78dce9).lerp(new THREE.Color(0xe5ffff), day);
   }
 
   const sunX = sunDir?.x ?? 0.35;

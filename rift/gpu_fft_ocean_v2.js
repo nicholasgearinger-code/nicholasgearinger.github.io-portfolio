@@ -5,42 +5,22 @@ import {
   disposeGPUFFTOcean as disposeBaseOcean,
 } from "./gpu_fft_ocean.js";
 
-const ACTIVE_BADGE_ID = "gpu-fft-ocean-active";
+// Visual/animation tuning layered over the real 128x128 GPU FFT simulation.
+// This keeps the FFT kernel stable while pushing Coral Shallows toward a
+// rough, photographic open-ocean look: darker water, rolling wave sets,
+// stronger crest/trough separation, and less glassy highlights.
 
-function ensureActiveBadge() {
-  if (typeof document === "undefined") return null;
-  let badge = document.getElementById(ACTIVE_BADGE_ID);
-  if (badge) return badge;
-  badge = document.createElement("div");
-  badge.id = ACTIVE_BADGE_ID;
-  badge.textContent = "GPU FFT OCEAN ACTIVE · MAGENTA TEST";
-  badge.style.cssText = [
-    "position:fixed",
-    "top:12px",
-    "right:12px",
-    "z-index:100000",
-    "padding:8px 11px",
-    "border:1px solid rgba(255,80,255,.9)",
-    "border-radius:7px",
-    "background:rgba(35,0,35,.9)",
-    "color:#ff9cff",
-    "font:700 11px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace",
-    "letter-spacing:.08em",
-    "box-shadow:0 0 18px rgba(255,0,255,.35)",
-    "pointer-events:none",
-  ].join(";");
-  document.body.appendChild(badge);
-  return badge;
-}
-
-function forceMagenta(handle) {
+function applyRoughOceanLook(handle) {
   if (!handle?.gpuFFT) return;
-  if (handle.deepTint?.value) handle.deepTint.value.set(0xff00ff);
-  if (handle.shallowTint?.value) handle.shallowTint.value.set(0xff66ff);
+
+  if (handle.deepTint?.value) handle.deepTint.value.set(0x0a2930);
+  if (handle.shallowTint?.value) handle.shallowTint.value.set(0x1b5962);
+
   if (handle.mesh?.material) {
-    handle.mesh.material.color?.set?.(0xff00ff);
-    handle.mesh.material.roughness = 0.025;
-    handle.mesh.material.opacity = 0.97;
+    handle.mesh.material.color?.set?.(0x10383f);
+    handle.mesh.material.roughness = 0.14;
+    handle.mesh.material.metalness = 0.015;
+    handle.mesh.material.opacity = 0.96;
   }
 }
 
@@ -48,13 +28,15 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   const handle = createBaseOcean(scene, y, size, sampleHeight);
   if (!handle) return handle;
 
-  handle.waveScale.value = 2.35;
-  handle.mesh.scale.y = 1.3;
+  // Stronger than the old diagnostic pass, but without the artificial
+  // magenta color. The FFT still supplies every actual wave frequency;
+  // these only control overall resolved displacement.
+  handle.waveScale.value = 2.7;
+  handle.mesh.scale.y = 1.46;
   handle.fftVisualBoost = true;
-  handle.fftBadge = ensureActiveBadge();
-  forceMagenta(handle);
+  applyRoughOceanLook(handle);
 
-  console.info("[gpu-fft-ocean] ACTIVE: MAGENTA FFT diagnostic mode");
+  console.info("[gpu-fft-ocean] ACTIVE: rough open-ocean tuning");
   return handle;
 }
 
@@ -96,16 +78,27 @@ export function updateGPUFFTOceanVisuals(
   );
 
   const stormT = Math.max(0, Math.min(1, storm));
-  handle.waveScale.value = 2.35 + stormT * 1.4;
-  handle.mesh.scale.y = 1.3 + Math.sin(elapsed * 0.22) * 0.05;
-  forceMagenta(handle);
 
-  if (!handle.fftBadge || !handle.fftBadge.isConnected) {
-    handle.fftBadge = ensureActiveBadge();
-  }
+  // Real seas arrive in wave groups rather than holding one perfectly
+  // constant amplitude. Two very slow envelopes modulate the same FFT
+  // spectrum, creating larger sets followed by quieter trough periods
+  // without adding Gerstner or procedural sine waves to the surface.
+  const setEnvelope =
+    Math.sin(elapsed * 0.105) * 0.18 +
+    Math.sin(elapsed * 0.247 + 1.7) * 0.10;
+
+  handle.waveScale.value = 2.70 + setEnvelope + stormT * 1.05;
+
+  // Slight vertical emphasis gives the silhouette the steep rise/fall seen
+  // in rough ocean photography while preserving the FFT's horizontal chop.
+  handle.mesh.scale.y =
+    1.46 +
+    Math.sin(elapsed * 0.083 + 0.4) * 0.045 +
+    stormT * 0.12;
+
+  applyRoughOceanLook(handle);
 }
 
 export function disposeGPUFFTOcean(scene, handle) {
-  if (handle?.fftBadge?.isConnected) handle.fftBadge.remove();
   return disposeBaseOcean(scene, handle);
 }

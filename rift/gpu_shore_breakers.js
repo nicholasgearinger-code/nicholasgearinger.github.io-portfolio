@@ -1,26 +1,27 @@
 import * as THREE from "three";
 import {
   Fn, uniform, color, float, uint, vec2, vec3,
-  positionLocal, positionView, positionWorld, positionViewDirection, cameraPosition,
+  positionLocal, positionView, positionWorld, cameraPosition,
   attribute, floor, min, max, abs, dFdx, dFdy, cross, dot, pow, mix, clamp,
-  smoothstep, sin,
+  smoothstep, sin, cos, sqrt,
 } from "three/tsl";
 
 // -----------------------------------------------------------------------------
-// 3D shoreline breaker ribbon
+// Smooth 3D shoreline breaker tubes
 //
-// The deep ocean and shoaling surface remain height fields, but an overturning
-// crest cannot be represented by y=f(x,z). This mesh is a separate Lagrangian-
-// style ribbon around the shoreline. It reads the live GPU shallow-water state
-// (eta, velocityX, velocityZ, breaking energy) and uses that solved state to
-// create the pitching lip. The mesh is visual geometry only; it does not replace
-// the shallow-water equations that decide where/when breaking occurs.
+// Offshore FFT + shallow-water equations remain the physical source. A true
+// overturning breaker cannot be represented by a single-valued height field, so
+// this separate high-resolution ribbon maps the solved shallow-water state onto
+// a rounded Lagrangian-style cross-section. The crest can therefore rise, roll
+// past vertical, and fold shoreward without damaging the stable base ocean mesh.
 // -----------------------------------------------------------------------------
 
-const ALONG_SEGMENTS = 384;
-const PROFILE_SEGMENTS = 28;
-const INNER_OFFSET = 0.8;
-const OUTER_OFFSET = 17.0;
+const ALONG_SEGMENTS = 416;
+const PROFILE_SEGMENTS = 56;
+const INNER_OFFSET = 1.0;
+const OUTER_OFFSET = 15.0;
+const GRAVITY = 9.81;
+const PI = Math.PI;
 
 function smooth01(t) {
   t = THREE.MathUtils.clamp(t, 0, 1);
@@ -34,16 +35,13 @@ function findShoreRadius(sampleHeight, waterY, angle, maxRadius) {
   let previousGround = sampleHeight(ca * previousR, sa * previousR);
   let previousWet = Number.isFinite(previousGround) && previousGround < waterY - 0.08;
 
-  // Search from the island center outward. The first dry->wet transition is the
-  // principal shoreline for this polar direction. Small 1.5-unit steps keep the
-  // ribbon stable on irregular beaches without an expensive contouring pass.
-  for (let r = 7.5; r <= maxRadius; r += 1.5) {
+  for (let r = 7.25; r <= maxRadius; r += 1.25) {
     const ground = sampleHeight(ca * r, sa * r);
     if (!Number.isFinite(ground)) continue;
     const wet = ground < waterY - 0.08;
     if (!previousWet && wet) {
       let lo = previousR, hi = r;
-      for (let k = 0; k < 7; k++) {
+      for (let k = 0; k < 8; k++) {
         const mid = (lo + hi) * 0.5;
         const g = sampleHeight(ca * mid, sa * mid);
         if (Number.isFinite(g) && g < waterY - 0.08) hi = mid;
@@ -71,27 +69,37 @@ function buildBreakerGeometry(sampleHeight, waterY, shallowDomain, shallowN) {
 
   const shoreRadii = new Float32Array(along + 1);
   for (let a = 0; a <= along; a++) {
-    const angle = (a / along) * Math.PI * 2;
+    const angle = (a / along) * PI * 2;
     shoreRadii[a] = findShoreRadius(sampleHeight, waterY, angle, maxRadius);
   }
   shoreRadii[along] = shoreRadii[0];
 
+  // Smooth the polar shoreline contour before building the ribbon. This removes
+  // little terrain-sampling kinks that would otherwise show up as faceted crests.
+  const smoothed = new Float32Array(shoreRadii.length);
+  for (let a = 0; a < along; a++) {
+    let sum = 0, weight = 0;
+    for (let k = -4; k <= 4; k++) {
+      const idx = (a + k + along) % along;
+      const w = 5 - Math.abs(k);
+      sum += shoreRadii[idx] * w;
+      weight += w;
+    }
+    smoothed[a] = sum / weight;
+  }
+  smoothed[along] = smoothed[0];
+
   let v = 0;
   for (let a = 0; a <= along; a++) {
-    const angle = (a / along) * Math.PI * 2;
+    const angle = (a / along) * PI * 2;
     const ca = Math.cos(angle), sa = Math.sin(angle);
-    const radius = shoreRadii[a];
-
-    // For an island, inward radial direction is a stable first-order shoreline
-    // normal. The solved shallow-water velocity still determines whether a crest
-    // is energetic enough to pitch, so this direction only orients the ribbon.
+    const radius = smoothed[a];
     const inwardX = -ca;
     const inwardZ = -sa;
 
     for (let p = 0; p <= profile; p++) {
       const t = p / profile;
-      // Slightly ease physical spacing toward the crest region so the fold has
-      // more geometry than the outer tail/wash portion.
+      // Dense spacing around the crest, slightly broader spacing in the wash.
       const e = smooth01(t);
       const offset = INNER_OFFSET + (OUTER_OFFSET - INNER_OFFSET) * e;
       const x = ca * (radius + offset);
@@ -138,7 +146,7 @@ function smoothWeight(t) {
   return t.mul(t).mul(float(3).sub(t.mul(2)));
 }
 
-function sampleSmoothState(buffer, coord, N) {
+function sampleSmooth(buffer, coord, N) {
   const x0f = floor(coord.x);
   const z0f = floor(coord.y);
   const x1f = min(x0f.add(1), float(N - 1));
@@ -156,21 +164,15 @@ function sampleSmoothState(buffer, coord, N) {
 }
 
 export function createGPUShoreBreakers(scene, sampleHeight, waterY, shallowHandle) {
-  if (!scene || !shallowHandle?.gpuShallowWater || !shallowHandle.state) return null;
+  if (!scene || !shallowHandle?.gpuShallowWater || !shallowHandle.state || !shallowHandle.bathymetry) return null;
 
-  const geometry = buildBreakerGeometry(
-    sampleHeight,
-    waterY,
-    shallowHandle.domain,
-    shallowHandle.N,
-  );
-
+  const geometry = buildBreakerGeometry(sampleHeight, waterY, shallowHandle.domain, shallowHandle.N);
   const material = new THREE.MeshStandardNodeMaterial({
     color: 0x2b8ea0,
-    roughness: 0.10,
+    roughness: 0.085,
     metalness: 0.0,
     transparent: true,
-    opacity: 0.86,
+    opacity: 0.91,
     side: THREE.DoubleSide,
     depthWrite: false,
   });
@@ -181,52 +183,74 @@ export function createGPUShoreBreakers(scene, sampleHeight, waterY, shallowHandl
   const underwater = uniform(0.0);
   const lightDirection = uniform(new THREE.Vector3(0.35, 0.8, 0.3));
   const waterColor = uniform(color(0x167e91));
-  const lipColor = uniform(color(0x8edce0));
-  const foamColor = uniform(color(0xf1f6f3));
+  const lipColor = uniform(color(0x91e4e6));
+  const foamColor = uniform(color(0xf3f8f5));
 
   const coord = attribute("breakerShallowCoord", "vec2");
   const profile = attribute("breakerProfile", "float");
   const shore = attribute("breakerShoreDir", "vec2");
   const phaseSeed = attribute("breakerPhase", "float");
   const state = shallowHandle.state;
+  const bathymetry = shallowHandle.bathymetry;
+
+  const breakerTerms = Fn(() => {
+    const s = sampleSmooth(state, coord, shallowHandle.N);
+    const b = sampleSmooth(bathymetry, coord, shallowHandle.N);
+    const depth = max(b.x.add(s.x), float(0.08));
+    const speed = vec2(s.y, s.z).length();
+    const celerity = sqrt(float(GRAVITY).mul(depth));
+    const froude = speed.div(max(celerity, float(0.05)));
+    const relativeHeight = abs(s.x).div(max(b.x, float(0.20)));
+    const depthBand = smoothstep(float(0.18), float(0.65), b.x)
+      .mul(float(1).sub(smoothstep(float(5.2), float(8.5), b.x)));
+    const dynamicBreak = max(
+      smoothstep(float(0.30), float(0.66), relativeHeight),
+      smoothstep(float(0.52), float(0.92), froude),
+    ).mul(depthBand);
+    const physicalEnergy = clamp(max(s.w, dynamicBreak), 0, 1);
+    return vec3(physicalEnergy, speed, s.x);
+  });
 
   material.positionNode = Fn(() => {
-    const s = sampleSmoothState(state, coord, shallowHandle.N);
-    const eta = s.x;
-    const velocity = vec2(s.y, s.z);
-    const speed = velocity.length();
-    const breaking = clamp(s.w, 0, 1);
+    const terms = breakerTerms();
+    const breaking = terms.x;
+    const speed = terms.y;
+    const eta = terms.z;
 
-    // Wave sets modulate an already physics-derived break. They do not create a
-    // breaker by themselves; they only prevent the whole shoreline from firing
-    // with identical strength on every frame.
-    const setPulse = float(0.68).add(
-      sin(time.mul(0.36).add(phaseSeed.mul(11.0))).mul(0.20)
-    ).add(
-      sin(time.mul(0.17).add(phaseSeed.mul(4.7)).add(1.8)).mul(0.12)
+    const setPulse = float(0.80)
+      .add(sin(time.mul(0.31).add(phaseSeed.mul(8.7))).mul(0.12))
+      .add(sin(time.mul(0.14).add(phaseSeed.mul(3.1)).add(2.2)).mul(0.08));
+    const energy = clamp(
+      breaking.mul(setPulse).mul(float(1.05).add(storm.mul(0.42))),
+      0,
+      1,
     );
-    const energy = clamp(breaking.mul(setPulse).mul(float(0.84).add(storm.mul(0.52))), 0, 1);
 
-    // Across-ribbon profile: offshore tail -> rising face -> lip -> shoreward
-    // collapse. Concentrated smooth masks avoid the giant triangular wedges that
-    // occurred when the main ocean mesh itself was forced to curl.
-    const rise = smoothstep(float(0.18), float(0.55), profile)
-      .mul(float(1).sub(smoothstep(float(0.82), float(1.0), profile)));
-    const lip = smoothstep(float(0.48), float(0.72), profile)
-      .mul(float(1).sub(smoothstep(float(0.76), float(0.98), profile)));
-    const collapse = smoothstep(float(0.68), float(0.95), profile);
+    // Tube cross-section. The active section rotates through roughly 270°:
+    // lower face -> vertical crest -> overhanging lip -> downward crash.
+    const tubeT = clamp(profile.sub(0.22).div(0.66), 0, 1);
+    const tubeMask = smoothstep(float(0.16), float(0.30), profile)
+      .mul(float(1).sub(smoothstep(float(0.90), float(0.99), profile)));
+    const theta = tubeT.mul(float(PI * 1.52));
 
-    const lift = rise.mul(energy).mul(float(1.9).add(speed.mul(0.08)));
-    const pitch = lip.mul(energy).mul(float(2.9).add(speed.mul(0.11)));
-    const lipDrop = collapse.mul(energy).mul(0.72);
+    const radius = energy.mul(float(2.15).add(speed.mul(0.14)));
+    const arcForward = sin(theta).mul(radius);
+    const arcLift = float(1).sub(cos(theta)).mul(radius);
 
-    // The lip pitches toward shore. Because this is a separate ribbon, the top
-    // can pass horizontally over lower profile vertices without destabilizing
-    // the base FFT/shallow-water surface.
-    const horizontal = pitch.sub(collapse.mul(energy).mul(0.55));
+    // The upper lip is pushed farther shoreward and then allowed to fall. This
+    // makes the profile non-monotonic in X/Z, which is the actual geometric
+    // requirement for a visible tube rather than another peaked height field.
+    const lip = smoothstep(float(0.58), float(0.75), tubeT);
+    const lipForward = lip.mul(energy).mul(float(1.7).add(speed.mul(0.10)));
+    const crash = smoothstep(float(0.78), float(0.99), tubeT);
+    const crashDrop = crash.mul(energy).mul(float(1.35).add(speed.mul(0.05)));
+
+    // Calm portions collapse almost exactly onto the solved shallow surface.
+    const horizontal = arcForward.mul(tubeMask).add(lipForward);
+    const vertical = arcLift.mul(tubeMask).sub(crashDrop);
     return positionLocal.add(vec3(
       shore.x.mul(horizontal),
-      eta.add(lift).sub(lipDrop).add(0.035),
+      eta.add(vertical).add(energy.mul(0.06)).add(0.025),
       shore.y.mul(horizontal),
     ));
   })();
@@ -238,42 +262,48 @@ export function createGPUShoreBreakers(scene, sampleHeight, waterY, shallowHandl
   })();
   material.normalNode = geometricNormal;
 
-  const sFrag = sampleSmoothState(state, coord, shallowHandle.N);
-  const breakerEnergy = clamp(sFrag.w, 0, 1);
-  const lipMask = smoothstep(float(0.48), float(0.66), profile)
-    .mul(float(1).sub(smoothstep(float(0.80), float(0.97), profile)));
-  const washMask = float(1).sub(smoothstep(float(0.26), float(0.72), profile));
+  const termsFrag = breakerTerms();
+  const breakerEnergy = termsFrag.x;
+  const tubeTFrag = clamp(profile.sub(0.22).div(0.66), 0, 1);
+  const lipFoam = smoothstep(float(0.54), float(0.68), tubeTFrag)
+    .mul(float(1).sub(smoothstep(float(0.86), float(0.98), tubeTFrag)));
+  const impactFoam = smoothstep(float(0.77), float(0.98), tubeTFrag);
+  const washFoam = float(1).sub(smoothstep(float(0.12), float(0.44), profile));
   const foam = clamp(
-    breakerEnergy.mul(lipMask.mul(1.35).add(washMask.mul(0.45)))
-      .mul(float(1).sub(underwater.mul(0.82))),
+    breakerEnergy.mul(
+      lipFoam.mul(1.55)
+        .add(impactFoam.mul(1.05))
+        .add(washFoam.mul(0.55))
+    ).mul(float(1).sub(underwater.mul(0.84))),
     0,
     1,
   );
 
-  const viewDir = cameraPosition.sub(positionWorld).normalize();
   const worldNormal = Fn(() => {
     const dx = dFdx(positionWorld);
     const dy = dFdy(positionWorld);
     return cross(dx, dy).normalize();
   })();
-  const fresnel = pow(
-    float(1).sub(clamp(abs(dot(worldNormal, viewDir)), 0, 1)),
-    float(3.4),
-  );
+  const viewDir = cameraPosition.sub(positionWorld).normalize();
+  const fresnel = pow(float(1).sub(clamp(abs(dot(worldNormal, viewDir)), 0, 1)), float(3.2));
   const lightFacing = clamp(dot(worldNormal, lightDirection.normalize()), 0, 1);
 
   material.colorNode = Fn(() => {
-    const wet = mix(waterColor, lipColor, fresnel.mul(0.36).add(lightFacing.mul(daylight).mul(0.12)));
-    return mix(wet, foamColor, foam.mul(0.94));
+    const translucentLip = mix(
+      waterColor,
+      lipColor,
+      clamp(fresnel.mul(0.42).add(lightFacing.mul(daylight).mul(0.16)), 0, 0.60),
+    );
+    return mix(translucentLip, foamColor, foam.mul(0.96));
   })();
-  material.roughnessNode = mix(float(0.08), float(0.48), foam.mul(0.96));
-  material.emissiveNode = lipColor.mul(underwater.mul(daylight).mul(0.055))
-    .add(foamColor.mul(foam.mul(0.008)));
+  material.roughnessNode = mix(float(0.07), float(0.50), foam.mul(0.97));
+  material.emissiveNode = lipColor.mul(underwater.mul(daylight).mul(0.065))
+    .add(foamColor.mul(foam.mul(0.010)));
 
   const mesh = new THREE.Mesh(geometry, material);
   mesh.position.y = waterY;
   mesh.frustumCulled = false;
-  mesh.renderOrder = 6;
+  mesh.renderOrder = 7;
   scene.add(mesh);
 
   return {
@@ -301,9 +331,9 @@ export function updateGPUShoreBreakers(handle, elapsed, cameraY, waterY, stormAm
   if (sunDir && handle.lightDirection?.value) handle.lightDirection.value.copy(sunDir).normalize();
 
   const day = handle.daylight.value;
-  handle.waterColor.value.set(0x0a3140).lerp(new THREE.Color(0x167e91), day);
-  handle.lipColor.value.set(0x365f73).lerp(new THREE.Color(0x8edce0), day);
-  handle.foamColor.value.set(0x83949d).lerp(new THREE.Color(0xf1f6f3), day);
+  handle.waterColor.value.set(0x092b36).lerp(new THREE.Color(0x167e91), day);
+  handle.lipColor.value.set(0x31566c).lerp(new THREE.Color(0x91e4e6), day);
+  handle.foamColor.value.set(0x82939b).lerp(new THREE.Color(0xf3f8f5), day);
 }
 
 export function disposeGPUShoreBreakers(scene, handle) {

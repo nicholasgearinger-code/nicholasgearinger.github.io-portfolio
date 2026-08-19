@@ -28,9 +28,6 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   const handle = createBaseOcean(scene, y, size, sampleHeight);
   if (!handle) return handle;
 
-  // Stronger than the old diagnostic pass, but without the artificial
-  // magenta color. The FFT still supplies every actual wave frequency;
-  // these only control overall resolved displacement.
   handle.waveScale.value = 2.7;
   handle.mesh.scale.y = 1.46;
   handle.fftVisualBoost = true;
@@ -40,8 +37,8 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   return handle;
 }
 
-export async function updateGPUFFTOcean(handle, renderer) {
-  return updateBaseOcean(handle, renderer);
+export function updateGPUFFTOcean(handle, renderer, elapsedTime = 0) {
+  return updateBaseOcean(handle, renderer, elapsedTime);
 }
 
 export function updateGPUFFTOceanVisuals(
@@ -78,19 +75,11 @@ export function updateGPUFFTOceanVisuals(
   );
 
   const stormT = Math.max(0, Math.min(1, storm));
-
-  // Real seas arrive in wave groups rather than holding one perfectly
-  // constant amplitude. Two very slow envelopes modulate the same FFT
-  // spectrum, creating larger sets followed by quieter trough periods
-  // without adding Gerstner or procedural sine waves to the surface.
   const setEnvelope =
     Math.sin(elapsed * 0.105) * 0.18 +
     Math.sin(elapsed * 0.247 + 1.7) * 0.10;
 
   handle.waveScale.value = 2.70 + setEnvelope + stormT * 1.05;
-
-  // Slight vertical emphasis gives the silhouette the steep rise/fall seen
-  // in rough ocean photography while preserving the FFT's horizontal chop.
   handle.mesh.scale.y =
     1.46 +
     Math.sin(elapsed * 0.083 + 0.4) * 0.045 +

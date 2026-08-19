@@ -6,11 +6,6 @@ import {
   disposeGPUFFTOcean as disposeBaseOcean,
 } from "./gpu_fft_ocean_v3.js";
 import { setGPUShallowWaterInteraction } from "./gpu_shallow_water.js";
-import {
-  createGPUUnderwaterLighting,
-  updateGPUUnderwaterLighting,
-  disposeGPUUnderwaterLighting,
-} from "./gpu_underwater_lighting.js";
 
 const WATER_IOR = 1.333;
 
@@ -52,6 +47,54 @@ function installPhysicalWaterOptics(handle) {
   }));
 }
 
+function findExistingTerrainCausticMaterial(scene) {
+  if (!scene) return null;
+  let found = null;
+  scene.traverse((obj) => {
+    if (found || !obj?.isMesh) return;
+    const mat = obj.material;
+    const data = mat?.userData;
+    if (
+      data?.causticTimeUniform &&
+      data?.causticIntensityUniform &&
+      data?.causticFocusRadiusUniform
+    ) {
+      found = mat;
+    }
+  });
+  return found;
+}
+
+function installExistingCausticTuning(handle) {
+  if (!handle?.fftScene) return;
+  const mat = handle.fftTerrainCausticMaterial ?? findExistingTerrainCausticMaterial(handle.fftScene);
+  if (!mat) return;
+  handle.fftTerrainCausticMaterial = mat;
+  if (mat.userData.fftCausticTuneInstalled) return;
+
+  const previousBeforeRender = mat.onBeforeRender;
+  mat.onBeforeRender = function (...args) {
+    if (typeof previousBeforeRender === "function") previousBeforeRender.apply(this, args);
+    const data = this.userData;
+    if (!data) return;
+
+    // Preserve the game's existing TSL caustic simulation and only refine its
+    // presentation: a slightly broader focus zone and modest intensity lift.
+    // main.js still owns time-of-day, rain, cloud occlusion, sun/moon focus and
+    // texture-driven wave motion; this runs immediately before drawing so those
+    // values remain authoritative rather than being replaced by a second effect.
+    if (data.causticFocusRadiusUniform) data.causticFocusRadiusUniform.value = 30.0;
+    if (data.causticIntensityUniform) {
+      data.causticIntensityUniform.value = THREE.MathUtils.clamp(
+        data.causticIntensityUniform.value * 1.16,
+        0,
+        1,
+      );
+    }
+  };
+  mat.userData.fftCausticTuneInstalled = true;
+}
+
 export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   const handle = createBaseOcean(scene, y, size, sampleHeight);
   if (!handle?.gpuFFT) return handle;
@@ -59,15 +102,11 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   handle.fftInteractionPrev = null;
   handle.fftInteractionPrevY = null;
   handle.fftInteractionWasSubmerged = false;
+  handle.fftScene = scene;
+  handle.fftTerrainCausticMaterial = null;
 
   installPhysicalWaterOptics(handle);
-
-  handle.fftUnderwaterLighting = createGPUUnderwaterLighting(
-    scene,
-    sampleHeight,
-    y,
-    handle.fftShallowHandle,
-  );
+  installExistingCausticTuning(handle);
   return handle;
 }
 
@@ -107,6 +146,7 @@ export function updateGPUFFTOceanVisuals(
   );
 
   installPhysicalWaterOptics(handle);
+  installExistingCausticTuning(handle);
 
   const physical = handle?.fftPhysicalMaterial;
   if (physical) {
@@ -117,9 +157,6 @@ export function updateGPUFFTOceanVisuals(
     physical.ior = WATER_IOR;
 
     if (underwater) {
-      // Treat the underside as a thin optical boundary rather than a thick cyan
-      // volume. High transmission + long attenuation distance keeps refraction
-      // visible without turning the horizon into an opaque turquoise wall.
       physical.transmission = 0.965;
       physical.thickness = 0.075;
       physical.attenuationDistance = 90.0;
@@ -134,17 +171,6 @@ export function updateGPUFFTOceanVisuals(
       physical.specularIntensity = 0.92;
       physical.roughness = 0.045 + stormT * 0.025;
     }
-  }
-
-  if (handle?.fftUnderwaterLighting?.gpuUnderwaterLighting) {
-    updateGPUUnderwaterLighting(
-      handle.fftUnderwaterLighting,
-      elapsed,
-      cameraY,
-      day,
-      storm,
-      sunDir,
-    );
   }
 }
 
@@ -191,14 +217,16 @@ export function updateGPUFFTOceanRipples(handle, playerPos, cameraY, dt = 1 / 60
 }
 
 export function disposeGPUFFTOcean(scene, handle) {
-  if (handle?.fftUnderwaterLighting?.gpuUnderwaterLighting) {
-    disposeGPUUnderwaterLighting(scene, handle.fftUnderwaterLighting);
-  }
   if (handle) {
-    handle.fftUnderwaterLighting = null;
+    const mat = handle.fftTerrainCausticMaterial;
+    if (mat?.userData?.fftCausticTuneInstalled) {
+      mat.userData.fftCausticTuneInstalled = false;
+    }
     handle.fftInteractionPrev = null;
     handle.fftInteractionPrevY = null;
     handle.fftPhysicalMaterial = null;
+    handle.fftTerrainCausticMaterial = null;
+    handle.fftScene = null;
   }
   return disposeBaseOcean(scene, handle);
 }

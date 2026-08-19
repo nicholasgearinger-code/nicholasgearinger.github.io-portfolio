@@ -7,7 +7,7 @@ import { SHALLOW_N, SHALLOW_DOMAIN } from "./gpu_shallow_water.js";
 
 const CAUSTIC_DOMAIN = 320;
 const CAUSTIC_SEGMENTS = 160;
-const GOD_RAY_COUNT = 16;
+const GOD_RAY_COUNT = 10;
 
 function smooth01(t) {
   t = THREE.MathUtils.clamp(t, 0, 1);
@@ -37,24 +37,25 @@ function sampleSmoothVec4(buffer, coord, N) {
 
 function createBeamTexture() {
   const canvas = document.createElement("canvas");
-  canvas.width = 96;
+  canvas.width = 128;
   canvas.height = 256;
   const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   const horizontal = ctx.createLinearGradient(0, 0, canvas.width, 0);
   horizontal.addColorStop(0, "rgba(255,255,255,0)");
-  horizontal.addColorStop(0.28, "rgba(255,255,255,0.12)");
-  horizontal.addColorStop(0.5, "rgba(255,255,255,0.82)");
-  horizontal.addColorStop(0.72, "rgba(255,255,255,0.12)");
+  horizontal.addColorStop(0.18, "rgba(255,255,255,0.025)");
+  horizontal.addColorStop(0.5, "rgba(255,255,255,0.32)");
+  horizontal.addColorStop(0.82, "rgba(255,255,255,0.025)");
   horizontal.addColorStop(1, "rgba(255,255,255,0)");
   ctx.fillStyle = horizontal;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   const vertical = ctx.createLinearGradient(0, 0, 0, canvas.height);
-  vertical.addColorStop(0, "rgba(255,255,255,0.0)");
-  vertical.addColorStop(0.09, "rgba(255,255,255,0.82)");
-  vertical.addColorStop(0.60, "rgba(255,255,255,0.45)");
-  vertical.addColorStop(1, "rgba(255,255,255,0.0)");
+  vertical.addColorStop(0, "rgba(255,255,255,0)");
+  vertical.addColorStop(0.12, "rgba(255,255,255,0.42)");
+  vertical.addColorStop(0.52, "rgba(255,255,255,0.24)");
+  vertical.addColorStop(1, "rgba(255,255,255,0)");
   ctx.globalCompositeOperation = "destination-in";
   ctx.fillStyle = vertical;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -101,8 +102,8 @@ function buildTerrainConformingCausticGeometry(sampleHeight, waterY) {
     );
 
     waterMask[i] = depth > 0.25 ? 1 : 0;
-    const emerge = smooth01((depth - 0.25) / 0.85);
-    const deepFade = 1 - 0.62 * smooth01((depth - 8.0) / 14.0);
+    const emerge = smooth01((depth - 0.20) / 0.70);
+    const deepFade = 1 - 0.86 * smooth01((depth - 4.0) / 11.0);
     depthMask[i] = emerge * deepFade;
   }
 
@@ -127,7 +128,7 @@ function createCausticMesh(sampleHeight, waterY, shallowHandle) {
   const daylight = uniform(1.0);
   const underwater = uniform(0.0);
   const storm = uniform(0.0);
-  const causticColor = uniform(color(0xd7ffff));
+  const causticColor = uniform(color(0xc9fbff));
 
   const coord = attribute("causticShallowCoord", "vec2");
   const waterMask = attribute("causticWaterMask", "float");
@@ -138,52 +139,50 @@ function createCausticMesh(sampleHeight, waterY, shallowHandle) {
   const vz = shallow.z;
   const speed = vec2(vx, vz).length();
 
-  // Small live-wave domain warp: enough to make the caustics swim with the
-  // simulated surface without turning the pattern into broad streaks.
-  const baseX = positionWorld.x.mul(0.58);
-  const baseZ = positionWorld.z.mul(0.58);
+  // Much smaller world-space scale than the previous pass. These frequencies
+  // produce compact 0.5-2m cells instead of giant bright loops across terrain.
+  const baseX = positionWorld.x.mul(2.85);
+  const baseZ = positionWorld.z.mul(2.85);
 
-  const warpA = sin(baseX.mul(0.71).add(baseZ.mul(0.43)).add(elapsed.mul(0.46)));
-  const warpB = cos(baseX.mul(-0.39).add(baseZ.mul(0.83)).sub(elapsed.mul(0.34)));
+  const warpA = sin(baseX.mul(0.31).add(baseZ.mul(0.19)).add(elapsed.mul(0.62)));
+  const warpB = cos(baseX.mul(-0.17).add(baseZ.mul(0.37)).sub(elapsed.mul(0.51)));
 
-  const qx = baseX.add(warpA.mul(0.52)).add(eta.mul(1.25)).add(vx.mul(0.10));
-  const qz = baseZ.add(warpB.mul(0.52)).sub(eta.mul(1.05)).add(vz.mul(0.10));
+  const qx = baseX.add(warpA.mul(0.18)).add(eta.mul(0.42)).add(vx.mul(0.035));
+  const qz = baseZ.add(warpB.mul(0.18)).sub(eta.mul(0.36)).add(vz.mul(0.035));
 
-  // Three independently closed focus fields. Their near-zero contours form the
-  // thin, connected cellular lines seen in real swimming-pool/ocean caustics.
   const a1 = sin(qx.mul(1.18));
   const a2 = sin(qz.mul(1.07));
-  const a3 = sin(qx.add(qz).mul(0.74).add(elapsed.mul(0.10)));
+  const a3 = sin(qx.add(qz).mul(0.74).add(elapsed.mul(0.13)));
   const fieldA = a1.add(a2).add(a3.mul(0.62));
 
-  const b1 = sin(qx.mul(1.79).sub(qz.mul(0.41)).add(elapsed.mul(0.15)));
-  const b2 = sin(qz.mul(1.63).add(qx.mul(0.36)).sub(elapsed.mul(0.12)));
+  const b1 = sin(qx.mul(1.79).sub(qz.mul(0.41)).add(elapsed.mul(0.18)));
+  const b2 = sin(qz.mul(1.63).add(qx.mul(0.36)).sub(elapsed.mul(0.14)));
   const fieldB = b1.add(b2);
 
-  const c1 = sin(qx.mul(0.53).add(qz.mul(1.37)).sub(elapsed.mul(0.08)));
-  const c2 = sin(qz.mul(0.59).sub(qx.mul(1.29)).add(elapsed.mul(0.09)));
+  const c1 = sin(qx.mul(0.53).add(qz.mul(1.37)).sub(elapsed.mul(0.10)));
+  const c2 = sin(qz.mul(0.59).sub(qx.mul(1.29)).add(elapsed.mul(0.11)));
   const fieldC = c1.add(c2);
 
-  const lineA = pow(float(1).sub(clamp(abs(fieldA).mul(0.78), 0, 1)), float(12));
-  const lineB = pow(float(1).sub(clamp(abs(fieldB).mul(0.88), 0, 1)), float(14));
-  const lineC = pow(float(1).sub(clamp(abs(fieldC).mul(0.92), 0, 1)), float(15));
+  const lineA = pow(float(1).sub(clamp(abs(fieldA).mul(0.96), 0, 1)), float(18));
+  const lineB = pow(float(1).sub(clamp(abs(fieldB).mul(1.02), 0, 1)), float(20));
+  const lineC = pow(float(1).sub(clamp(abs(fieldC).mul(1.06), 0, 1)), float(21));
 
-  const core = max(lineA, max(lineB.mul(0.82), lineC.mul(0.68)));
+  const core = max(lineA, max(lineB.mul(0.72), lineC.mul(0.54)));
 
-  const haloA = pow(float(1).sub(clamp(abs(fieldA).mul(0.43), 0, 1)), float(4));
-  const haloB = pow(float(1).sub(clamp(abs(fieldB).mul(0.48), 0, 1)), float(4));
-  const halo = max(haloA, haloB.mul(0.70));
+  const haloA = pow(float(1).sub(clamp(abs(fieldA).mul(0.58), 0, 1)), float(6));
+  const haloB = pow(float(1).sub(clamp(abs(fieldB).mul(0.62), 0, 1)), float(6));
+  const halo = max(haloA, haloB.mul(0.55));
 
-  const focus = clamp(float(0.86).add(abs(eta).mul(0.38)).add(speed.mul(0.035)), 0.78, 1.18);
-  const lighting = daylight.mul(daylight).mul(float(1).sub(storm.mul(0.76)));
-  const visibility = float(0.22).add(underwater.mul(0.78));
+  const focus = clamp(float(0.88).add(abs(eta).mul(0.16)).add(speed.mul(0.018)), 0.82, 1.08);
+  const lighting = daylight.mul(daylight).mul(float(1).sub(storm.mul(0.82)));
+  const visibility = float(0.08).add(underwater.mul(0.92));
 
   const coreIntensity = core.mul(focus).mul(waterMask).mul(depthMask).mul(lighting).mul(visibility);
-  const haloIntensity = halo.mul(0.20).mul(waterMask).mul(depthMask).mul(lighting).mul(visibility);
-  const intensity = clamp(coreIntensity.add(haloIntensity), 0, 1.25);
+  const haloIntensity = halo.mul(0.08).mul(waterMask).mul(depthMask).mul(lighting).mul(visibility);
+  const intensity = clamp(coreIntensity.add(haloIntensity), 0, 0.72);
 
-  material.colorNode = causticColor.mul(float(0.15).add(intensity.mul(1.70)));
-  material.opacityNode = clamp(intensity.mul(0.86), 0, 0.90);
+  material.colorNode = causticColor.mul(float(0.06).add(intensity.mul(0.82)));
+  material.opacityNode = clamp(intensity.mul(0.34), 0, 0.28);
 
   const mesh = new THREE.Mesh(geometry, material);
   mesh.frustumCulled = false;
@@ -214,7 +213,7 @@ function createGodRays(sampleHeight, waterY) {
     const z = Math.sin(angle) * radius;
     const ground = sampleHeight ? sampleHeight(x, z) : waterY - 10;
     const depth = Number.isFinite(ground) ? waterY - ground : 0;
-    if (depth < 2.5) continue;
+    if (depth < 3.0) continue;
 
     const mat = new THREE.SpriteMaterial({
       map: texture,
@@ -224,11 +223,11 @@ function createGodRays(sampleHeight, waterY) {
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       fog: true,
-      rotation: (rng() - 0.5) * 0.10,
+      rotation: (rng() - 0.5) * 0.08,
     });
     const sprite = new THREE.Sprite(mat);
-    const length = Math.min(depth * 0.94, 28);
-    const width = 2.0 + rng() * 3.8;
+    const length = Math.min(depth * 0.72, 18);
+    const width = 4.0 + rng() * 4.0;
     sprite.position.set(x, waterY - length * 0.52, z);
     sprite.scale.set(width, length, 1);
     sprite.visible = false;
@@ -241,7 +240,7 @@ function createGodRays(sampleHeight, waterY) {
       length,
       width,
       phase: rng() * Math.PI * 2,
-      baseOpacity: 0.055 + rng() * 0.085,
+      baseOpacity: 0.012 + rng() * 0.018,
       baseRotation: mat.rotation,
     });
   }
@@ -280,29 +279,29 @@ export function updateGPUUnderwaterLighting(handle, elapsed, cameraY, dayAmount 
     u.daylight.value = day;
     u.underwater.value = underwater ? 1 : 0;
     u.storm.value = storm;
-    u.causticColor.value.set(0x78dce9).lerp(new THREE.Color(0xe5ffff), day);
+    u.causticColor.value.set(0x78dce9).lerp(new THREE.Color(0xd8ffff), day);
   }
 
   const sunX = sunDir?.x ?? 0.35;
   const sunZ = sunDir?.z ?? 0.25;
   const t = Number.isFinite(elapsed) ? elapsed : 0;
-  const globalIntensity = Math.pow(day, 1.55) * (1 - storm * 0.72) * (underwater ? 1 : 0);
+  const globalIntensity = Math.pow(day, 1.75) * (1 - storm * 0.82) * (underwater ? 1 : 0);
 
   for (const ray of handle.rays ?? []) {
-    const w1 = Math.sin(t * 0.62 + ray.phase);
-    const w2 = Math.sin(t * 1.07 + ray.phase * 1.73);
-    const focus = 0.72 + 0.20 * w1 + 0.08 * w2;
-    const driftX = w1 * 0.85 + w2 * 0.32;
-    const driftZ = Math.cos(t * 0.48 + ray.phase) * 0.72;
-    const refractLean = ray.length * 0.075;
+    const w1 = Math.sin(t * 0.49 + ray.phase);
+    const w2 = Math.sin(t * 0.81 + ray.phase * 1.73);
+    const focus = 0.68 + 0.14 * w1 + 0.07 * w2;
+    const driftX = w1 * 0.58 + w2 * 0.20;
+    const driftZ = Math.cos(t * 0.41 + ray.phase) * 0.52;
+    const refractLean = ray.length * 0.055;
 
-    ray.sprite.visible = globalIntensity > 0.015;
-    ray.sprite.material.opacity = ray.baseOpacity * globalIntensity * Math.max(0.24, focus);
-    ray.sprite.material.rotation = ray.baseRotation + w2 * 0.055;
+    ray.sprite.visible = globalIntensity > 0.03;
+    ray.sprite.material.opacity = ray.baseOpacity * globalIntensity * Math.max(0.18, focus);
+    ray.sprite.material.rotation = ray.baseRotation + w2 * 0.035;
     ray.sprite.position.x = ray.baseX + driftX - sunX * refractLean;
     ray.sprite.position.z = ray.baseZ + driftZ - sunZ * refractLean;
-    ray.sprite.scale.x = ray.width * (0.78 + focus * 0.32);
-    ray.sprite.scale.y = ray.length * (0.96 + w1 * 0.025);
+    ray.sprite.scale.x = ray.width * (0.90 + focus * 0.18);
+    ray.sprite.scale.y = ray.length * (0.99 + w1 * 0.012);
   }
 }
 

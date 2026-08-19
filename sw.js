@@ -3,7 +3,7 @@
 //
 // Ocean simulation modules are explicitly network-first so physics changes
 // cannot be hidden behind an older cached Rift build.
-const CACHE_NAME = 'ngearinger-shell-v14';
+const CACHE_NAME = 'ngearinger-shell-v15';
 
 const STATIC_SHELL = [
   './manifest.json',
@@ -32,6 +32,7 @@ const CORE_SHELL = [
   './rift/gpu_fft_ocean.js',
   './rift/gpu_fft_ocean_v2.js',
   './rift/gpu_fft_ocean_v3.js',
+  './rift/gpu_fft_ocean_v4.js',
   './rift/gpu_shallow_water.js',
   './rift/gpu_shore_breakers.js',
 ];

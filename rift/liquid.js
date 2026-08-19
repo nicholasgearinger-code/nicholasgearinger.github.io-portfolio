@@ -17,6 +17,26 @@ export function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir =
   return legacy.createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir, excludeRegions);
 }
 
+// main.js still calls the old Crystal-only breaking-wave helper after creating
+// the liquid plane. Under the FFT ocean that legacy mesh becomes a second,
+// overlapping water surface and can appear as the large cyan/gray slab seen in
+// the current build. Crystal breakers now belong to the FFT/shallow-water path,
+// so keep this old helper disabled. The call site is Crystal-only; other biome
+// liquid systems are untouched.
+export function createBreakingWave() {
+  return null;
+}
+
+export function updateBreakingWave(handle, ...args) {
+  if (!handle) return;
+  return legacy.updateBreakingWave(handle, ...args);
+}
+
+export function disposeBreakingWave(scene, handle) {
+  if (!handle) return;
+  return legacy.disposeBreakingWave(scene, handle);
+}
+
 export function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir, skyHorizon, reflectionTexture, reflectionMatrix, refractionTexture, resolution, stormAmount = 0, dayAmount = 1) {
   if (handle?.gpuFFT) {
     updateGPUFFTOceanVisuals(

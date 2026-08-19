@@ -4,7 +4,7 @@ import {
   updateGPUFFTOcean,
   updateGPUFFTOceanVisuals,
   disposeGPUFFTOcean,
-} from "./gpu_fft_ocean.js";
+} from "./gpu_fft_ocean_v2.js";
 
 // Compatibility router: Crystal uses the new GPU FFT ocean. Ember, Verdant,
 // waterfalls, rivers, ponds, cliff helpers, and every other liquid feature

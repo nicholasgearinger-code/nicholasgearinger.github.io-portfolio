@@ -1,5 +1,8 @@
 import * as THREE from "three";
 import {
+  Fn, float, uint, positionWorld, floor, fract, clamp, abs,
+} from "three/tsl";
+import {
   createGPUFFTOceanPlane as createBaseOcean,
   updateGPUFFTOcean as updateBaseOcean,
   updateGPUFFTOceanVisuals as updateBaseVisuals,
@@ -8,6 +11,8 @@ import {
 import { setGPUShallowWaterInteraction } from "./gpu_shallow_water.js";
 
 const WATER_IOR = 1.333;
+const FFT_N = 128;
+const DETAIL_DOMAIN = 420;
 
 function installPhysicalWaterOptics(handle) {
   const mesh = handle?.mesh;
@@ -65,34 +70,108 @@ function findExistingTerrainCausticMaterial(scene) {
   return found;
 }
 
-function installExistingCausticTuning(handle) {
+function installFFTDrivenCaustics(handle) {
   if (!handle?.fftScene) return;
-  const mat = handle.fftTerrainCausticMaterial ?? findExistingTerrainCausticMaterial(handle.fftScene);
-  if (!mat) return;
+
+  const mat =
+    handle.fftTerrainCausticMaterial ??
+    findExistingTerrainCausticMaterial(handle.fftScene);
+  if (!mat?.emissiveNode) return;
+
   handle.fftTerrainCausticMaterial = mat;
-  if (mat.userData.fftCausticTuneInstalled) return;
+  const data = mat.userData;
+  if (data?.fftCausticSyncInstalled) return;
+
+  // Prefer the 420-unit detail cascade because its wavelength range is closer
+  // to the surface ripples that actually form visible caustic cells. Fall back
+  // to the primary long-wave FFT if the detail cascade is unavailable.
+  const detailA = handle.fftDetailHandle?.resources?.[8];
+  const baseA = handle.resources?.[8];
+  const source = detailA ?? baseA;
+  if (!source) return;
+
+  const baseDomain =
+    handle.mesh?.geometry?.parameters?.width ??
+    handle.mesh?.geometry?.parameters?.height ??
+    2000;
+  const domain = detailA ? DETAIL_DOMAIN : baseDomain;
+
+  // Remove the old temporary presentation-only tuning. In particular, the old
+  // onBeforeRender hook multiplied caustic intensity by 1.16 every draw, which
+  // could compound over time. main.js remains authoritative for intensity.
+  delete data.fftCausticTuneInstalled;
+
+  data.fftOriginalCausticEmissive = mat.emissiveNode;
+  data.fftOriginalCausticBeforeRender = mat.onBeforeRender;
+
+  const fftFocus = Fn(() => {
+    const n = uint(FFT_N);
+    const nF = float(FFT_N);
+    const gx = fract(positionWorld.x.div(float(domain)).add(0.5)).mul(nF);
+    const gz = fract(positionWorld.z.div(float(domain)).add(0.5)).mul(nF);
+
+    const x0 = floor(gx).toUint();
+    const z0 = floor(gz).toUint();
+    const xL = x0.add(uint(FFT_N - 1)).mod(n);
+    const xR = x0.add(uint(1)).mod(n);
+    const zD = z0.add(uint(FFT_N - 1)).mod(n);
+    const zU = z0.add(uint(1)).mod(n);
+
+    const c = source.element(z0.mul(n).add(x0)).x;
+    const l = source.element(z0.mul(n).add(xL)).x;
+    const r = source.element(z0.mul(n).add(xR)).x;
+    const d = source.element(zD.mul(n).add(x0)).x;
+    const u = source.element(zU.mul(n).add(x0)).x;
+
+    const inv2dx = float(1 / (2 * (domain / FFT_N)));
+    const dhdx = r.sub(l).mul(inv2dx);
+    const dhdz = u.sub(d).mul(inv2dx);
+
+    // Surface slope changes the incoming ray direction while the discrete
+    // Laplacian approximates convergence/divergence of neighboring rays. The
+    // existing caustic texture supplies the fine cellular pattern; this factor
+    // makes its brightness/focus follow the live FFT surface.
+    const slope = clamp(
+      abs(dhdx).add(abs(dhdz)).mul(2.0),
+      0,
+      1,
+    );
+    const curvature = abs(r.add(l).sub(c.mul(2)))
+      .add(abs(u.add(d).sub(c.mul(2))));
+    const bend = clamp(curvature.mul(1.45), 0, 1);
+
+    return clamp(
+      float(0.82)
+        .add(slope.mul(0.32))
+        .add(bend.mul(0.58)),
+      0.82,
+      1.48,
+    );
+  })();
+
+  mat.emissiveNode = data.fftOriginalCausticEmissive.mul(fftFocus);
 
   const previousBeforeRender = mat.onBeforeRender;
   mat.onBeforeRender = function (...args) {
-    if (typeof previousBeforeRender === "function") previousBeforeRender.apply(this, args);
-    const data = this.userData;
-    if (!data) return;
+    if (typeof previousBeforeRender === "function") {
+      previousBeforeRender.apply(this, args);
+    }
 
-    // Preserve the game's existing TSL caustic simulation and only refine its
-    // presentation: a slightly broader focus zone and modest intensity lift.
-    // main.js still owns time-of-day, rain, cloud occlusion, sun/moon focus and
-    // texture-driven wave motion; this runs immediately before drawing so those
-    // values remain authoritative rather than being replaced by a second effect.
-    if (data.causticFocusRadiusUniform) data.causticFocusRadiusUniform.value = 30.0;
-    if (data.causticIntensityUniform) {
-      data.causticIntensityUniform.value = THREE.MathUtils.clamp(
-        data.causticIntensityUniform.value * 1.16,
-        0,
-        1,
-      );
+    const ud = this.userData;
+    if (!ud) return;
+
+    // Lock the built-in terrain-caustic animation to the exact GPU FFT clock.
+    // The built-in pattern, day/night, rain and cloud occlusion remain intact.
+    if (ud.causticTimeUniform && handle.fftTime) {
+      ud.causticTimeUniform.value = handle.fftTime.value;
+    }
+    if (ud.causticFocusRadiusUniform) {
+      ud.causticFocusRadiusUniform.value = 30.0;
     }
   };
-  mat.userData.fftCausticTuneInstalled = true;
+
+  mat.needsUpdate = true;
+  data.fftCausticSyncInstalled = true;
 }
 
 export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
@@ -106,7 +185,7 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   handle.fftTerrainCausticMaterial = null;
 
   installPhysicalWaterOptics(handle);
-  installExistingCausticTuning(handle);
+  installFFTDrivenCaustics(handle);
   return handle;
 }
 
@@ -146,7 +225,7 @@ export function updateGPUFFTOceanVisuals(
   );
 
   installPhysicalWaterOptics(handle);
-  installExistingCausticTuning(handle);
+  installFFTDrivenCaustics(handle);
 
   const physical = handle?.fftPhysicalMaterial;
   if (physical) {
@@ -219,9 +298,20 @@ export function updateGPUFFTOceanRipples(handle, playerPos, cameraY, dt = 1 / 60
 export function disposeGPUFFTOcean(scene, handle) {
   if (handle) {
     const mat = handle.fftTerrainCausticMaterial;
-    if (mat?.userData?.fftCausticTuneInstalled) {
-      mat.userData.fftCausticTuneInstalled = false;
+    const data = mat?.userData;
+    if (data?.fftCausticSyncInstalled) {
+      if (data.fftOriginalCausticEmissive) {
+        mat.emissiveNode = data.fftOriginalCausticEmissive;
+      }
+      if ("fftOriginalCausticBeforeRender" in data) {
+        mat.onBeforeRender = data.fftOriginalCausticBeforeRender;
+      }
+      mat.needsUpdate = true;
+      delete data.fftOriginalCausticEmissive;
+      delete data.fftOriginalCausticBeforeRender;
+      delete data.fftCausticSyncInstalled;
     }
+
     handle.fftInteractionPrev = null;
     handle.fftInteractionPrevY = null;
     handle.fftPhysicalMaterial = null;

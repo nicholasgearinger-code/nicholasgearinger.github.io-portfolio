@@ -6,9 +6,10 @@ import {
 } from "./gpu_fft_ocean.js";
 
 // Visual/animation tuning layered over the real 128x128 GPU FFT simulation.
-// This keeps the FFT kernel stable while pushing Coral Shallows toward a
-// rough, photographic open-ocean look: darker water, rolling wave sets,
-// stronger crest/trough separation, and less glassy highlights.
+// The base FFT currently normalizes each inverse transform by N^2, so the
+// physically generated Phillips amplitudes land at only centimeter-scale in
+// this game's world units. This wrapper calibrates that resolved FFT field to
+// visible open-ocean scale without changing the butterfly implementation.
 
 function applyRoughOceanLook(handle) {
   if (!handle?.gpuFFT) return;
@@ -28,12 +29,15 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   const handle = createBaseOcean(scene, y, size, sampleHeight);
   if (!handle) return handle;
 
-  handle.waveScale.value = 2.7;
-  handle.mesh.scale.y = 1.46;
+  // Calibrated from the current spectrum: 2.7 was effectively flat after the
+  // inverse-FFT 1/(128^2) normalization. ~45 brings the same genuine FFT field
+  // into meter-scale motion rather than inventing a separate procedural wave.
+  handle.waveScale.value = 45.0;
+  handle.mesh.scale.y = 1.08;
   handle.fftVisualBoost = true;
   applyRoughOceanLook(handle);
 
-  console.info("[gpu-fft-ocean] ACTIVE: rough open-ocean tuning");
+  console.info("[gpu-fft-ocean] ACTIVE: calibrated rough open-ocean FFT");
   return handle;
 }
 
@@ -75,15 +79,16 @@ export function updateGPUFFTOceanVisuals(
   );
 
   const stormT = Math.max(0, Math.min(1, storm));
-  const setEnvelope =
-    Math.sin(elapsed * 0.105) * 0.18 +
-    Math.sin(elapsed * 0.247 + 1.7) * 0.10;
 
-  handle.waveScale.value = 2.70 + setEnvelope + stormT * 1.05;
-  handle.mesh.scale.y =
-    1.46 +
-    Math.sin(elapsed * 0.083 + 0.4) * 0.045 +
-    stormT * 0.12;
+  // Wave-group envelope changes the energy of the same spectral field slowly,
+  // so the sea arrives in larger and smaller sets while every crest is still
+  // produced by the FFT spectrum itself.
+  const setEnvelope =
+    Math.sin(elapsed * 0.105) * 4.0 +
+    Math.sin(elapsed * 0.247 + 1.7) * 2.2;
+
+  handle.waveScale.value = 45.0 + setEnvelope + stormT * 14.0;
+  handle.mesh.scale.y = 1.08 + stormT * 0.10;
 
   applyRoughOceanLook(handle);
 }

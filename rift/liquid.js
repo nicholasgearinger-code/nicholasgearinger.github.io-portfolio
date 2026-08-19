@@ -33,9 +33,9 @@ export function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos,
   );
 }
 
-export async function updateFluidSimWater(handle, renderer) {
-  if (handle?.gpuFFT) return updateGPUFFTOcean(handle, renderer);
-  return legacy.updateFluidSimWater(handle, renderer);
+export function updateFluidSimWater(handle, renderer, elapsedTime) {
+  if (handle?.gpuFFT) return updateGPUFFTOcean(handle, renderer, elapsedTime);
+  return legacy.updateFluidSimWater(handle, renderer, elapsedTime);
 }
 
 export function updateRippleLayer(handle, renderer, cameraPos, cameraY, dt) {

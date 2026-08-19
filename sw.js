@@ -1,21 +1,16 @@
 // Ghostwire / portfolio service worker — caches the app shell so the site
 // (including the Ghostwire game) loads offline or on a flaky connection.
 //
-// FFT TEST NOTE: v8 explicitly treats the Rift game modules as network-first.
-// The previous worker only considered a small shell list "core", which meant
-// main.js/liquid.js/FFT modules were cache-first and could keep an older ocean
-// implementation alive even after a successful Pages deployment.
-const CACHE_NAME = 'ngearinger-shell-v8';
+// FFT TEST NOTE: v9 explicitly treats BOTH the root duplicate modules and
+// the actual live Rift game modules under /rift as network-first.
+const CACHE_NAME = 'ngearinger-shell-v9';
 
-// Rarely change — safe to serve cache-first for instant loads.
 const STATIC_SHELL = [
   './manifest.json',
   './icon-192.png',
   './icon-512.png',
 ];
 
-// Change frequently during active development — always prefer the network
-// so deploys are visible immediately; cache is only a fallback for offline.
 const CORE_SHELL = [
   './',
   './index.html',
@@ -23,14 +18,19 @@ const CORE_SHELL = [
   './webcam-ai.js',
   './music/tracks.js',
 
-  // Rift / Coral Shallows runtime. These MUST be network-first while the FFT
-  // ocean is under active development or an old cached module graph can mask
-  // a successful GitHub Pages deployment.
+  // Root duplicate game files.
   './main.js',
   './liquid.js',
   './liquid_legacy.js',
   './gpu_fft_ocean.js',
   './gpu_fft_ocean_v2.js',
+
+  // Actual live Rift game files used by the embedded game.
+  './rift/main.js',
+  './rift/liquid.js',
+  './rift/liquid_legacy.js',
+  './rift/gpu_fft_ocean.js',
+  './rift/gpu_fft_ocean_v2.js',
 ];
 
 self.addEventListener('install', (event) => {

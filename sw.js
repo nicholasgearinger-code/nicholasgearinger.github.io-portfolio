@@ -3,7 +3,7 @@
 //
 // Ocean simulation modules are explicitly network-first so physics changes
 // cannot be hidden behind an older cached Rift build.
-const CACHE_NAME = 'ngearinger-shell-v16';
+const CACHE_NAME = 'ngearinger-shell-v17';
 
 const STATIC_SHELL = [
   './manifest.json',

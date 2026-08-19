@@ -6,10 +6,17 @@ import {
   disposeGPUFFTOcean as disposeBaseOcean,
 } from "./gpu_fft_ocean.js";
 import {
+  createGPUShallowWater,
+  updateGPUShallowWater,
+  disposeGPUShallowWater,
+  SHALLOW_N,
+  SHALLOW_DOMAIN,
+} from "./gpu_shallow_water.js";
+import {
   Fn, uniform, color, float, uint, vec3,
   positionLocal, positionView, positionWorld, positionViewDirection, cameraPosition,
   attribute, floor, min, max, dFdx, dFdy, cross, dot, abs, pow, mix, clamp,
-  smoothstep, sin,
+  smoothstep,
 } from "three/tsl";
 
 const FFT_N = 128;
@@ -30,6 +37,11 @@ function positiveFract(v) {
   return ((v % 1) + 1) % 1;
 }
 
+function smooth01(t) {
+  t = THREE.MathUtils.clamp(t, 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
 function buildDenseRenderGeometry(size, waterY, sampleHeight) {
   const geometry = new THREE.PlaneGeometry(size, size, RENDER_N - 1, RENDER_N - 1);
   geometry.rotateX(-Math.PI / 2);
@@ -37,12 +49,11 @@ function buildDenseRenderGeometry(size, waterY, sampleHeight) {
   const count = geometry.attributes.position.count;
   const longCoords = new Float32Array(count * 2);
   const detailCoords = new Float32Array(count * 2);
+  const shallowCoords = new Float32Array(count * 2);
+  const shallowCoverage = new Float32Array(count);
   const shore = new Float32Array(count);
   const depthWorld = new Float32Array(count);
-  const shoreDir = new Float32Array(count * 2);
-  const breakerSeed = new Float32Array(count);
   const pos = geometry.attributes.position;
-  const gradientStep = Math.max(1.5, size / RENDER_N * 0.8);
 
   for (let ry = 0; ry < RENDER_N; ry++) {
     const fy = ry * (FFT_N - 1) / (RENDER_N - 1);
@@ -57,138 +68,137 @@ function buildDenseRenderGeometry(size, waterY, sampleHeight) {
       detailCoords[i * 2] = positiveFract(x / DETAIL_DOMAIN + 0.5) * FFT_N;
       detailCoords[i * 2 + 1] = positiveFract(z / DETAIL_DOMAIN + 0.5) * FFT_N;
 
+      const sgx = (x / SHALLOW_DOMAIN + 0.5) * (SHALLOW_N - 1);
+      const sgz = (z / SHALLOW_DOMAIN + 0.5) * (SHALLOW_N - 1);
+      shallowCoords[i * 2] = THREE.MathUtils.clamp(sgx, 0, SHALLOW_N - 1);
+      shallowCoords[i * 2 + 1] = THREE.MathUtils.clamp(sgz, 0, SHALLOW_N - 1);
+
+      const squareRadius = Math.max(Math.abs(x), Math.abs(z)) / (SHALLOW_DOMAIN * 0.5);
+      shallowCoverage[i] = 1 - smooth01((squareRadius - 0.80) / 0.18);
+
       const groundY = sampleHeight ? sampleHeight(x, z) : null;
       const signedDepth = groundY === null ? 12 : waterY - groundY;
       const depth = Math.max(0, signedDepth);
       depthWorld[i] = Math.min(depth, 24);
 
-      if (signedDepth <= -0.55) shore[i] = 0;
+      if (signedDepth <= -0.35) shore[i] = 0;
       else if (signedDepth < 0) {
-        const t = (signedDepth + 0.55) / 0.55;
-        shore[i] = t * t * (3 - 2 * t) * 0.12;
+        const t = (signedDepth + 0.35) / 0.35;
+        shore[i] = smooth01(t) * 0.08;
       } else {
-        const t = THREE.MathUtils.clamp(signedDepth / 3.5, 0, 1);
-        const e = t * t * (3 - 2 * t);
-        shore[i] = 0.12 + e * 0.88;
+        shore[i] = 0.08 + smooth01(signedDepth / 2.5) * 0.92;
       }
-
-      // Local uphill terrain gradient = direction the breaker should curl
-      // toward as it approaches land. Radial fallback keeps flat patches sane.
-      let sx = -x;
-      let sz = -z;
-      if (sampleHeight) {
-        const hx1 = sampleHeight(x + gradientStep, z);
-        const hx0 = sampleHeight(x - gradientStep, z);
-        const hz1 = sampleHeight(x, z + gradientStep);
-        const hz0 = sampleHeight(x, z - gradientStep);
-        if ([hx1, hx0, hz1, hz0].every(Number.isFinite)) {
-          sx = hx1 - hx0;
-          sz = hz1 - hz0;
-        }
-      }
-      const sl = Math.hypot(sx, sz) || 1;
-      shoreDir[i * 2] = sx / sl;
-      shoreDir[i * 2 + 1] = sz / sl;
-
-      breakerSeed[i] = positiveFract(Math.sin(x * 0.031 + z * 0.047) * 43758.5453);
     }
   }
 
   geometry.setAttribute("fftCoordLong", new THREE.Float32BufferAttribute(longCoords, 2));
   geometry.setAttribute("fftCoordDetail", new THREE.Float32BufferAttribute(detailCoords, 2));
+  geometry.setAttribute("shallowCoord", new THREE.Float32BufferAttribute(shallowCoords, 2));
+  geometry.setAttribute("shallowCoverage", new THREE.Float32BufferAttribute(shallowCoverage, 1));
   geometry.setAttribute("fftShoreDense", new THREE.Float32BufferAttribute(shore, 1));
   geometry.setAttribute("fftDepthWorld", new THREE.Float32BufferAttribute(depthWorld, 1));
-  geometry.setAttribute("fftShoreDir", new THREE.Float32BufferAttribute(shoreDir, 2));
-  geometry.setAttribute("fftBreakerSeed", new THREE.Float32BufferAttribute(breakerSeed, 1));
   return geometry;
 }
 
-function installDualCascadeGeometry(handle, detailHandle, size, sampleHeight) {
-  if (!handle?.gpuFFT || !detailHandle?.gpuFFT || handle.fftDenseGeometryApplied) return;
+function sampleBilinearVec4(buffer, coord, N) {
+  const x0f = floor(coord.x);
+  const z0f = floor(coord.y);
+  const x1f = min(x0f.add(1), float(N - 1));
+  const z1f = min(z0f.add(1), float(N - 1));
+  const tx = coord.x.sub(x0f);
+  const tz = coord.y.sub(z0f);
+  const row = uint(N);
+  const i00 = z0f.toUint().mul(row).add(x0f.toUint());
+  const i10 = z0f.toUint().mul(row).add(x1f.toUint());
+  const i01 = z1f.toUint().mul(row).add(x0f.toUint());
+  const i11 = z1f.toUint().mul(row).add(x1f.toUint());
+  const a0 = mix(buffer.element(i00), buffer.element(i10), tx);
+  const a1 = mix(buffer.element(i01), buffer.element(i11), tx);
+  return mix(a0, a1, tz);
+}
+
+function sampleBilinearScalar(buffer, coord, N, component = "x", wrap = false) {
+  const x0f = floor(coord.x);
+  const z0f = floor(coord.y);
+  const x1f = wrap ? x0f.add(1).mod(float(N)) : min(x0f.add(1), float(N - 1));
+  const z1f = wrap ? z0f.add(1).mod(float(N)) : min(z0f.add(1), float(N - 1));
+  const tx = coord.x.sub(x0f);
+  const tz = coord.y.sub(z0f);
+  const row = uint(N);
+  const i00 = z0f.toUint().mul(row).add(x0f.toUint());
+  const i10 = z0f.toUint().mul(row).add(x1f.toUint());
+  const i01 = z1f.toUint().mul(row).add(x0f.toUint());
+  const i11 = z1f.toUint().mul(row).add(x1f.toUint());
+  const v00 = buffer.element(i00)[component];
+  const v10 = buffer.element(i10)[component];
+  const v01 = buffer.element(i01)[component];
+  const v11 = buffer.element(i11)[component];
+  return mix(mix(v00, v10, tx), mix(v01, v11, tx), tz);
+}
+
+function installCoupledGeometry(handle, detailHandle, shallowHandle, size, sampleHeight) {
+  if (!handle?.gpuFFT || !detailHandle?.gpuFFT || !shallowHandle?.gpuShallowWater || handle.fftDenseGeometryApplied) return;
   const longA = handle.resources?.[8];
   const longB = handle.resources?.[9];
   const detailA = detailHandle.resources?.[8];
   const detailB = detailHandle.resources?.[9];
-  if (!longA || !longB || !detailA || !detailB) return;
+  const shallowState = shallowHandle.state;
+  if (!longA || !longB || !detailA || !detailB || !shallowState) return;
 
   const geometry = buildDenseRenderGeometry(size, handle.waterY ?? 0, sampleHeight);
   const longCoord = attribute("fftCoordLong", "vec2");
   const detailCoord = attribute("fftCoordDetail", "vec2");
+  const shallowCoord = attribute("shallowCoord", "vec2");
+  const coverage = attribute("shallowCoverage", "float");
   const shore = attribute("fftShoreDense", "float");
   const depth = attribute("fftDepthWorld", "float");
-  const towardShore = attribute("fftShoreDir", "vec2");
-  const breakerSeed = attribute("fftBreakerSeed", "float");
-  const breakerTime = uniform(0.0);
-  handle.fftBreakerTime = breakerTime;
 
   handle.mesh.material.positionNode = Fn(() => {
-    const lx0f = floor(longCoord.x);
-    const lz0f = floor(longCoord.y);
-    const lx1f = min(lx0f.add(1), float(FFT_N - 1));
-    const lz1f = min(lz0f.add(1), float(FFT_N - 1));
-    const ltx = longCoord.x.sub(lx0f);
-    const ltz = longCoord.y.sub(lz0f);
-    const lx0 = lx0f.toUint(), lx1 = lx1f.toUint();
-    const lz0 = lz0f.toUint(), lz1 = lz1f.toUint();
-    const row = uint(FFT_N);
-    const li00 = lz0.mul(row).add(lx0);
-    const li10 = lz0.mul(row).add(lx1);
-    const li01 = lz1.mul(row).add(lx0);
-    const li11 = lz1.mul(row).add(lx1);
-    const la0 = mix(longA.element(li00), longA.element(li10), ltx);
-    const la1 = mix(longA.element(li01), longA.element(li11), ltx);
-    const la = mix(la0, la1, ltz);
-    const lb0 = mix(longB.element(li00).x, longB.element(li10).x, ltx);
-    const lb1 = mix(longB.element(li01).x, longB.element(li11).x, ltx);
-    const ldz = mix(lb0, lb1, ltz);
+    const la = sampleBilinearVec4(longA, longCoord, FFT_N);
+    const ldz = sampleBilinearScalar(longB, longCoord, FFT_N, "x", false);
 
+    // Detail cascade wraps over its smaller physical domain.
     const dx0f = floor(detailCoord.x);
     const dz0f = floor(detailCoord.y);
     const dx1f = dx0f.add(1).mod(float(FFT_N));
     const dz1f = dz0f.add(1).mod(float(FFT_N));
     const dtx = detailCoord.x.sub(dx0f);
     const dtz = detailCoord.y.sub(dz0f);
-    const dx0 = dx0f.toUint(), dx1 = dx1f.toUint();
-    const dz0 = dz0f.toUint(), dz1 = dz1f.toUint();
-    const di00 = dz0.mul(row).add(dx0);
-    const di10 = dz0.mul(row).add(dx1);
-    const di01 = dz1.mul(row).add(dx0);
-    const di11 = dz1.mul(row).add(dx1);
+    const row = uint(FFT_N);
+    const di00 = dz0f.toUint().mul(row).add(dx0f.toUint());
+    const di10 = dz0f.toUint().mul(row).add(dx1f.toUint());
+    const di01 = dz1f.toUint().mul(row).add(dx0f.toUint());
+    const di11 = dz1f.toUint().mul(row).add(dx1f.toUint());
     const da0 = mix(detailA.element(di00), detailA.element(di10), dtx);
     const da1 = mix(detailA.element(di01), detailA.element(di11), dtx);
     const da = mix(da0, da1, dtz);
-    const db0 = mix(detailB.element(di00).x, detailB.element(di10).x, dtx);
-    const db1 = mix(detailB.element(di01).x, detailB.element(di11).x, dtx);
-    const ddz = mix(db0, db1, dtz);
+    const ddz = mix(
+      mix(detailB.element(di00).x, detailB.element(di10).x, dtx),
+      mix(detailB.element(di01).x, detailB.element(di11).x, dtx),
+      dtz,
+    );
 
-    // Shoaling: short chop disappears first; long swell eases down closer to
-    // land. The breaker below then takes over the shallow-water silhouette.
-    const longAmp = smoothstep(float(1.15), float(8.0), depth);
-    const detailAmp = smoothstep(float(3.0), float(13.0), depth);
-    const detailVertical = float(0.68);
-    const detailHorizontal = float(0.52);
+    const shallow = sampleBilinearVec4(shallowState, shallowCoord, SHALLOW_N);
 
-    // Narrow surf zone. Phase travels from deeper water toward shore. A sharp
-    // positive crest plus a delayed horizontal shove creates a curling/tubular
-    // profile instead of simply scaling the FFT down onto the beach.
-    const breakerBand = smoothstep(float(0.65), float(1.55), depth)
-      .mul(float(1).sub(smoothstep(float(4.8), float(7.0), depth)));
-    const phase = depth.mul(1.34).sub(breakerTime.mul(2.35)).add(breakerSeed.mul(0.75));
-    const crestRaw = max(sin(phase), float(0));
-    const crestSharp = pow(crestRaw, float(5.0)).mul(breakerBand);
-    const curlRaw = max(sin(phase.add(0.52)), float(0));
-    const curl = pow(curlRaw, float(7.0)).mul(breakerBand);
-    const breakerLift = crestSharp.mul(1.75);
-    const breakerPush = curl.mul(1.28);
+    // Physical regime blend. Open-ocean horizontal chop disappears before the
+    // beach; the solved shallow-water surface takes over as finite depth begins
+    // to dominate. No synthetic breaker sine/curl is added here.
+    const longAmp = smoothstep(float(3.0), float(11.0), depth);
+    const detailAmp = smoothstep(float(8.0), float(19.0), depth);
+    const shallowDepthBlend = float(1).sub(smoothstep(float(7.0), float(15.0), depth));
+    const shallowBlend = shallowDepthBlend.mul(coverage);
 
-    const fftX = la.z.mul(longAmp).add(da.z.mul(detailHorizontal).mul(detailAmp));
-    const fftY = la.x.mul(longAmp).add(da.x.mul(detailVertical).mul(detailAmp));
-    const fftZ = ldz.mul(longAmp).add(ddz.mul(detailHorizontal).mul(detailAmp));
+    const fftX = la.z.mul(longAmp).add(da.z.mul(0.48).mul(detailAmp));
+    const fftY = la.x.mul(longAmp).add(da.x.mul(0.60).mul(detailAmp));
+    const fftZ = ldz.mul(longAmp).add(ddz.mul(0.48).mul(detailAmp));
+
+    const horizontalFade = float(1).sub(shallowBlend.mul(0.92));
+    const yDisp = mix(fftY, shallow.x, shallowBlend);
 
     return positionLocal.add(vec3(
-      fftX.mul(shore).add(towardShore.x.mul(breakerPush)),
-      fftY.mul(shore).add(breakerLift),
-      fftZ.mul(shore).add(towardShore.y.mul(breakerPush)),
+      fftX.mul(shore).mul(horizontalFade),
+      yDisp.mul(shore),
+      fftZ.mul(shore).mul(horizontalFade),
     ));
   })();
 
@@ -201,7 +211,8 @@ function installDualCascadeGeometry(handle, detailHandle, size, sampleHeight) {
 
 function setupSmoothFFTLighting(handle) {
   const material = handle?.mesh?.material;
-  if (!material || handle.fftSmoothLightingApplied) return;
+  const shallowHandle = handle?.fftShallowHandle;
+  if (!material || !shallowHandle?.gpuShallowWater || handle.fftSmoothLightingApplied) return;
 
   const surfaceColor = uniform(color(0x0b3138));
   const underwaterColor = uniform(color(0x168da0));
@@ -214,10 +225,10 @@ function setupSmoothFFTLighting(handle) {
   const underwaterMix = uniform(0.0);
   const waterLevel = uniform(handle.waterY ?? 0);
   const foamStrength = uniform(1.0);
-  const breakerTime = handle.fftBreakerTime ?? uniform(0.0);
 
-  const depth = attribute("fftDepthWorld", "float");
-  const breakerSeed = attribute("fftBreakerSeed", "float");
+  const shallowCoord = attribute("shallowCoord", "vec2");
+  const coverage = attribute("shallowCoverage", "float");
+  const shallowState = shallowHandle.state;
 
   const geometricNormal = Fn(() => {
     const dx = dFdx(positionView);
@@ -235,6 +246,7 @@ function setupSmoothFFTLighting(handle) {
     const facing = clamp(abs(dot(geometricNormal, positionViewDirection)), 0, 1);
     return pow(float(1).sub(facing), float(4.2));
   })();
+
   const crest = smoothstep(waterLevel.add(0.45), waterLevel.add(2.6), positionWorld.y);
   const slope = clamp(float(1).sub(abs(worldNormal.y)), 0, 1);
   const steepCrest = smoothstep(float(0.10), float(0.38), slope)
@@ -244,16 +256,12 @@ function setupSmoothFFTLighting(handle) {
     0, 1,
   );
 
-  // Surf foam is broader than the breaker crest itself: bright at the tube,
-  // then a delayed pulse washes over the shallows before fading on the sand.
-  const breakerBand = smoothstep(float(0.55), float(1.35), depth)
-    .mul(float(1).sub(smoothstep(float(5.2), float(7.2), depth)));
-  const phase = depth.mul(1.34).sub(breakerTime.mul(2.35)).add(breakerSeed.mul(0.75));
-  const breakerFoam = pow(max(sin(phase), float(0)), float(4.0)).mul(breakerBand);
-  const shallowBand = float(1).sub(smoothstep(float(1.9), float(4.6), depth));
-  const washPulse = pow(max(sin(phase.sub(1.15)), float(0)), float(2.0));
-  const washFoam = shallowBand.mul(washPulse).mul(0.68);
-  const whitecap = clamp(max(offshoreWhitecap, breakerFoam.add(washFoam)), 0, 1)
+  // The shallow solver's w channel is generated from relative wave height and
+  // Froude-like breaking criteria. Bilinear sampling keeps it smooth and ties
+  // foam to the same physical event that will later drive the 3D breaker sheet.
+  const shallow = sampleBilinearVec4(shallowState, shallowCoord, SHALLOW_N);
+  const surfFoam = clamp(shallow.w.mul(coverage).mul(1.12), 0, 1);
+  const whitecap = clamp(max(offshoreWhitecap, surfFoam), 0, 1)
     .mul(float(1).sub(underwaterMix.mul(0.88)));
 
   const viewDirWorld = cameraPosition.sub(positionWorld).normalize();
@@ -267,7 +275,7 @@ function setupSmoothFFTLighting(handle) {
   material.colorNode = Fn(() => {
     const base = mix(surfaceColor, underwaterColor, underwaterMix);
     const grazingLight = mix(base, crestColor, fresnel.mul(0.30));
-    const crestLight = crest.mul(float(1).sub(underwaterMix)).mul(0.11);
+    const crestLight = crest.mul(float(1).sub(underwaterMix)).mul(0.10);
     const directionalLift = directFacing.mul(daylight.mul(0.08).add(0.025));
     const litWater = mix(grazingLight, crestColor, crestLight.add(directionalLift));
     const foamed = mix(litWater, foamColor, whitecap.mul(0.90));
@@ -300,6 +308,7 @@ function applyPhotographicOceanLook(handle, underwater = false, day = 1, storm =
   if (handle.fftUnderwaterMix) handle.fftUnderwaterMix.value = underwater ? 1 : 0;
   if (handle.fftFoamStrength) handle.fftFoamStrength.value = 0.62 + stormT * 0.76;
   if (sunDir && handle.fftLightDirection?.value) handle.fftLightDirection.value.copy(sunDir).normalize();
+
   if (handle.fftSurfaceColor?.value) {
     handle.fftSurfaceColor.value.copy(NIGHT_SURFACE).lerp(DAY_SURFACE, dayT).lerp(STORM_SURFACE, stormT * 0.72);
   }
@@ -329,19 +338,22 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   }
   handle.fftDetailHandle = detailHandle;
 
+  const shallowHandle = createGPUShallowWater(sampleHeight, y, handle.resources?.[8], size, SHALLOW_DOMAIN);
+  handle.fftShallowHandle = shallowHandle;
+
   handle.waveScale.value = 43.0;
   if (detailHandle?.waveScale) detailHandle.waveScale.value = 31.0;
   handle.mesh.scale.y = 1.08;
   handle.fftVisualBoost = true;
   handle.fftUnderwater = false;
 
-  installDualCascadeGeometry(handle, detailHandle, size, sampleHeight);
+  installCoupledGeometry(handle, detailHandle, shallowHandle, size, sampleHeight);
   handle.mesh.material.normalNode = null;
   handle.mesh.material.colorNode = null;
   setupSmoothFFTLighting(handle);
   applyPhotographicOceanLook(handle, false, 1, 0, null);
 
-  console.info("[gpu-fft-ocean] ACTIVE: shoaling FFT + curling shore break + foam wash");
+  console.info("[gpu-fft-ocean] ACTIVE: FFT deep water + GPU shallow-water surf solver");
   return handle;
 }
 
@@ -349,6 +361,7 @@ export function updateGPUFFTOcean(handle, renderer, elapsedTime = 0) {
   if (!handle?.gpuFFT) return;
   updateBaseOcean(handle, renderer, elapsedTime);
   if (handle.fftDetailHandle?.gpuFFT) updateBaseOcean(handle.fftDetailHandle, renderer, elapsedTime);
+  if (handle.fftShallowHandle?.gpuShallowWater) updateGPUShallowWater(handle.fftShallowHandle, renderer, elapsedTime);
 }
 
 export function updateGPUFFTOceanVisuals(
@@ -373,7 +386,9 @@ export function updateGPUFFTOceanVisuals(
   if (handle.fftDetailHandle?.waveScale) {
     handle.fftDetailHandle.waveScale.value = 31.0 + detailSet + stormT * 12.0;
   }
-  if (handle.fftBreakerTime) handle.fftBreakerTime.value = elapsed;
+  if (handle.fftShallowHandle?.forcingStrength) {
+    handle.fftShallowHandle.forcingStrength.value = 0.82 + stormT * 0.28;
+  }
   handle.mesh.scale.y = 1.08 + stormT * 0.08;
 
   if (handle.fftUnderwater !== underwater) handle.fftUnderwater = underwater;
@@ -382,7 +397,12 @@ export function updateGPUFFTOceanVisuals(
 
 export function disposeGPUFFTOcean(scene, handle) {
   const detail = handle?.fftDetailHandle;
-  if (handle) handle.fftDetailHandle = null;
+  const shallow = handle?.fftShallowHandle;
+  if (handle) {
+    handle.fftDetailHandle = null;
+    handle.fftShallowHandle = null;
+  }
+  if (shallow?.gpuShallowWater) disposeGPUShallowWater(shallow);
   if (detail?.gpuFFT) disposeBaseOcean(scene, detail);
   return disposeBaseOcean(scene, handle);
 }

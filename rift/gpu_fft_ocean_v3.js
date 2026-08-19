@@ -4,30 +4,19 @@ import {
   updateGPUFFTOceanVisuals as updateBaseVisuals,
   disposeGPUFFTOcean as disposeBaseOcean,
 } from "./gpu_fft_ocean_v2.js";
-import {
-  createGPUShoreBreakers,
-  updateGPUShoreBreakers,
-  disposeGPUShoreBreakers,
-} from "./gpu_shore_breakers.js";
 
-// Thin integration layer: the stable FFT + shallow-water surface remains in v2.
-// The breaker ribbon is deliberately separate so overturning geometry can be
-// tuned or removed without destabilizing the main ocean mesh again.
+// Validation integration layer.
+//
+// The previous 3D breaker ribbon is intentionally disabled while the rebuilt
+// shallow-water solver is validated. Keeping only FFT + the stable finite-depth
+// surface gives us a clean baseline: if any spike remains, it is in the base
+// simulation/render path rather than a second overlapping breaker mesh.
 
 export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   const handle = createBaseOcean(scene, y, size, sampleHeight);
   if (!handle?.gpuFFT) return handle;
-
-  handle.fftBreakerHandle = createGPUShoreBreakers(
-    scene,
-    sampleHeight,
-    y,
-    handle.fftShallowHandle,
-  );
-
-  if (handle.fftBreakerHandle) {
-    console.info("[gpu-fft-ocean] ACTIVE: FFT + shallow-water + 3D shore breaker ribbon");
-  }
+  handle.fftBreakerHandle = null;
+  console.info("[gpu-fft-ocean] ACTIVE: stable FFT + shallow-water validation build (breaker ribbon disabled)");
   return handle;
 }
 
@@ -51,7 +40,6 @@ export function updateGPUFFTOceanVisuals(
   day = 1,
 ) {
   if (!handle?.gpuFFT) return;
-
   updateBaseVisuals(
     handle,
     elapsed,
@@ -67,24 +55,9 @@ export function updateGPUFFTOceanVisuals(
     storm,
     day,
   );
-
-  if (handle.fftBreakerHandle?.gpuShoreBreakers) {
-    updateGPUShoreBreakers(
-      handle.fftBreakerHandle,
-      elapsed,
-      cameraY,
-      handle.waterY,
-      storm,
-      day,
-      sunDir,
-    );
-  }
 }
 
 export function disposeGPUFFTOcean(scene, handle) {
-  if (handle?.fftBreakerHandle?.gpuShoreBreakers) {
-    disposeGPUShoreBreakers(scene, handle.fftBreakerHandle);
-  }
   if (handle) handle.fftBreakerHandle = null;
   return disposeBaseOcean(scene, handle);
 }

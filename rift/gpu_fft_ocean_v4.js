@@ -19,27 +19,22 @@ function installPhysicalWaterOptics(handle) {
   const old = mesh?.material;
   if (!mesh || !old || handle.fftPhysicalOpticsApplied) return;
 
-  // MeshPhysicalNodeMaterial gives the WebGPU path real physically-based
-  // transmission/refraction while keeping our existing FFT TSL node graph.
-  // Water's IOR is 1.333; Fresnel reflection is therefore derived by the PBR
-  // material rather than approximated only through alpha/tinting.
   const physical = new THREE.MeshPhysicalNodeMaterial({
     color: 0xffffff,
-    roughness: 0.055,
+    roughness: 0.045,
     metalness: 0.0,
-    transmission: 0.78,
+    transmission: 0.82,
     ior: WATER_IOR,
-    thickness: 0.55,
-    attenuationDistance: 24.0,
-    attenuationColor: new THREE.Color(0x63c9d1),
-    specularIntensity: 1.0,
+    thickness: 0.34,
+    attenuationDistance: 38.0,
+    attenuationColor: new THREE.Color(0x8ad6db),
+    specularIntensity: 0.92,
     transparent: false,
     opacity: 1.0,
     side: THREE.DoubleSide,
     depthWrite: true,
   });
 
-  // Preserve every custom node installed by the FFT/shallow-water stack.
   physical.positionNode = old.positionNode ?? null;
   physical.normalNode = old.normalNode ?? null;
   physical.colorNode = old.colorNode ?? null;
@@ -52,17 +47,10 @@ function installPhysicalWaterOptics(handle) {
   handle.fftPhysicalMaterial = physical;
   handle.fftPhysicalOpticsApplied = true;
 
-  // WebGPU may still have the old material referenced by the current frame.
   requestAnimationFrame(() => requestAnimationFrame(() => {
     try { old.dispose?.(); } catch (_) {}
   }));
 }
-
-// Interaction + underwater-lighting bridge layered over the stabilized
-// FFT + shallow-water ocean. The water simulation remains unchanged here;
-// this wrapper adds physical interaction impulses plus wave-reactive caustics,
-// refractive transmission, and volumetric light shafts without introducing a
-// second water surface mesh.
 
 export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   const handle = createBaseOcean(scene, y, size, sampleHeight);
@@ -120,8 +108,6 @@ export function updateGPUFFTOceanVisuals(
 
   installPhysicalWaterOptics(handle);
 
-  // Transmission needs opacity 1. The physical material itself now decides how
-  // much light is reflected vs transmitted from IOR/Fresnel and the live normal.
   const physical = handle?.fftPhysicalMaterial;
   if (physical) {
     const underwater = Number.isFinite(cameraY) && cameraY < (handle.waterY ?? 0) - 0.08;
@@ -129,9 +115,25 @@ export function updateGPUFFTOceanVisuals(
     physical.transparent = false;
     physical.opacity = 1.0;
     physical.ior = WATER_IOR;
-    physical.transmission = underwater ? 0.90 : 0.78 - stormT * 0.13;
-    physical.thickness = underwater ? 0.38 : 0.58;
-    physical.attenuationDistance = underwater ? 32.0 : 24.0;
+
+    if (underwater) {
+      // Treat the underside as a thin optical boundary rather than a thick cyan
+      // volume. High transmission + long attenuation distance keeps refraction
+      // visible without turning the horizon into an opaque turquoise wall.
+      physical.transmission = 0.965;
+      physical.thickness = 0.075;
+      physical.attenuationDistance = 90.0;
+      physical.attenuationColor.set(0xb6e6e8);
+      physical.specularIntensity = 0.82;
+      physical.roughness = 0.028;
+    } else {
+      physical.transmission = 0.82 - stormT * 0.12;
+      physical.thickness = 0.34;
+      physical.attenuationDistance = 38.0;
+      physical.attenuationColor.set(0x8ad6db);
+      physical.specularIntensity = 0.92;
+      physical.roughness = 0.045 + stormT * 0.025;
+    }
   }
 
   if (handle?.fftUnderwaterLighting?.gpuUnderwaterLighting) {

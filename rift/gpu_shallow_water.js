@@ -8,12 +8,11 @@ import {
 // -----------------------------------------------------------------------------
 // Stable GPU shallow-water solver for Coral Shallows' surf zone.
 //
-// The previous centered FTCS-like update was prone to odd/even numerical modes:
-// neighboring cells could grow with opposite signs and the render mesh exposed
-// those modes as giant folded triangles. This version uses a Lax-Friedrichs
-// predictor (neighbor averaging + conservative flux gradients), which adds the
-// numerical diffusion required by a mobile real-time shallow-water solver.
-// Two small substeps are dispatched per rendered frame for a safer CFL margin.
+// Lax-Friedrichs stabilization prevents the alternating high/low grid mode that
+// previously folded the render mesh into giant triangles. Player interaction is
+// injected directly into this same state as a localized height/velocity impulse,
+// so ripples, wake and splash foam propagate through the physical solver rather
+// than being rendered as a disconnected decal.
 // -----------------------------------------------------------------------------
 
 export const SHALLOW_N = 256;
@@ -56,6 +55,9 @@ export function createGPUShallowWater(sampleHeight, waterY, fftSpatialA, fftDoma
 
   const dtUniform = uniform(1 / 120);
   const forcingStrength = uniform(1.0);
+  const interactionPosition = uniform(new THREE.Vector2(0, 0));
+  const interactionStrength = uniform(0.0);
+  const interactionRadius = uniform(3.0);
 
   const computeUpdate = Fn(() => {
     const i = instanceIndex;
@@ -96,9 +98,6 @@ export function createGPUShallowWater(sampleHeight, waterY, fftSpatialA, fftDoma
     const inv2dx = float(1 / (2 * cellSize));
     const dt = dtUniform;
 
-    // Lax-Friedrichs predictor: average opposite neighbors before applying the
-    // conservative flux gradient. This deliberately damps the grid-scale mode
-    // that caused alternating spikes in the old centered update.
     const etaAverage = l.x.add(r.x).add(d.x).add(u.x).mul(0.25);
     const velXAverage = l.y.add(r.y).add(d.y).add(u.y).mul(0.25);
     const velZAverage = l.z.add(r.z).add(d.z).add(u.z).mul(0.25);
@@ -109,13 +108,6 @@ export function createGPUShallowWater(sampleHeight, waterY, fftSpatialA, fftDoma
     const fluxZD = hD.mul(d.z);
     const divergence = fluxXR.sub(fluxXL).add(fluxZU.sub(fluxZD)).mul(inv2dx);
 
-    const surfaceL = bL.add(l.x);
-    const surfaceR = bR.add(r.x);
-    const surfaceD = bD.add(d.x);
-    const surfaceU = bU.add(u.x);
-    // Because b stores still-water depth rather than bed elevation, free-surface
-    // pressure is driven by eta. Keep bathymetry out of this gradient to avoid
-    // accelerating water down a fictitious depth slope at rest.
     const dEtaDx = r.x.sub(l.x).mul(inv2dx);
     const dEtaDz = u.x.sub(d.x).mul(inv2dx);
 
@@ -123,18 +115,13 @@ export function createGPUShallowWater(sampleHeight, waterY, fftSpatialA, fftDoma
     let velX = velXAverage.sub(dEtaDx.mul(float(GRAVITY)).mul(dt));
     let velZ = velZAverage.sub(dEtaDz.mul(float(GRAVITY)).mul(dt));
 
-    // Depth-dependent bottom drag. Dry and very shallow cells are heavily
-    // damped so they cannot accumulate fast velocities that later explode when
-    // a wet front reaches them.
     const shallowDrag = float(1).sub(smoothstep(float(0.55), float(3.8), bc.x));
     const drag = float(0.34).add(shallowDrag.mul(2.6));
     const damp = float(1).div(float(1).add(drag.mul(dt)));
     velX = velX.mul(damp);
     velZ = velZ.mul(damp);
 
-    // Weak boundary coupling to the current FFT elevation. The forcing is kept
-    // gentle because the Lax-Friedrichs solver then transports that energy into
-    // the surf zone instead of stamping the FFT field directly onto the beach.
+    // Deep-water FFT forcing enters only through the outside of the shallow grid.
     const edgeX = min(xf, float(N - 1).sub(xf));
     const edgeZ = min(zf, float(N - 1).sub(zf));
     const edgeDist = min(edgeX, edgeZ);
@@ -159,9 +146,21 @@ export function createGPUShallowWater(sampleHeight, waterY, fftSpatialA, fftDoma
     const coupling = boundary.mul(forcingStrength).mul(smoothstep(float(1.4), float(5.0), bc.x));
     eta = mix(eta, fftEta.mul(0.46), coupling.mul(0.16));
 
-    // Physically plausible local safety envelope. A shallow cell should never
-    // receive a metre-scale elevation jump in one update. The depth-relative
-    // bound removes catastrophic folds while still allowing real shoaling.
+    // Player/water collision impulse. bc.yz are this cell's world X/Z. A
+    // smooth radial falloff injects a small depression plus outward velocity,
+    // which propagates as real concentric ripples/wake through the solver.
+    const ix = bc.y.sub(interactionPosition.x);
+    const iz = bc.z.sub(interactionPosition.y);
+    const dist = sqrt(ix.mul(ix).add(iz.mul(iz)));
+    const impulseMask = float(1).sub(
+      smoothstep(interactionRadius.mul(0.18), interactionRadius, dist)
+    ).mul(wet);
+    const impulse = interactionStrength.mul(impulseMask);
+    eta = eta.sub(impulse.mul(dt).mul(0.34));
+    const invDist = float(1).div(max(dist, float(0.25)));
+    velX = velX.add(ix.mul(invDist).mul(impulse).mul(dt).mul(0.95));
+    velZ = velZ.add(iz.mul(invDist).mul(impulse).mul(dt).mul(0.95));
+
     const etaLimit = min(float(0.95), bc.x.mul(0.34).add(0.10));
     eta = clamp(eta, etaLimit.negate(), etaLimit);
 
@@ -182,7 +181,8 @@ export function createGPUShallowWater(sampleHeight, waterY, fftSpatialA, fftDoma
     ).mul(depthBand).mul(wet);
 
     const foamDecay = max(float(0), float(1).sub(dt.mul(0.48)));
-    const foam = max(c.w.mul(foamDecay), breaker);
+    const interactionFoam = impulseMask.mul(clamp(interactionStrength.mul(0.16), 0, 0.75));
+    const foam = max(max(c.w.mul(foamDecay), breaker), interactionFoam);
 
     eta = eta.mul(wet);
     velX = velX.mul(wet);
@@ -205,10 +205,20 @@ export function createGPUShallowWater(sampleHeight, waterY, fftSpatialA, fftDoma
     bathymetry,
     dtUniform,
     forcingStrength,
+    interactionPosition,
+    interactionStrength,
+    interactionRadius,
     computeFrame: [computeUpdate, computeCopy],
     lastElapsed: null,
     resources: [stateA, stateB, bathymetry],
   };
+}
+
+export function setGPUShallowWaterInteraction(handle, x, z, strength = 0, radius = 3) {
+  if (!handle?.gpuShallowWater) return;
+  if (handle.interactionPosition?.value) handle.interactionPosition.value.set(x, z);
+  if (handle.interactionStrength) handle.interactionStrength.value = THREE.MathUtils.clamp(strength, 0, 5);
+  if (handle.interactionRadius) handle.interactionRadius.value = THREE.MathUtils.clamp(radius, 1.2, 8);
 }
 
 export function updateGPUShallowWater(handle, renderer, elapsedTime = 0) {
@@ -223,6 +233,11 @@ export function updateGPUShallowWater(handle, renderer, elapsedTime = 0) {
   for (let substep = 0; substep < SUBSTEPS; substep++) {
     for (const node of handle.computeFrame) renderer.compute(node);
   }
+
+  // Impulses are fed every frame by updateRippleLayer while the player is near
+  // the surface. Decay here prevents a stale input from continuously forcing the
+  // solver if gameplay pauses or the player leaves the interaction zone.
+  if (handle.interactionStrength) handle.interactionStrength.value *= 0.72;
 }
 
 export function disposeGPUShallowWater(handle) {

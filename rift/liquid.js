@@ -4,7 +4,7 @@ import {
   updateGPUFFTOcean,
   updateGPUFFTOceanVisuals,
   disposeGPUFFTOcean,
-} from "./gpu_fft_ocean_v2.js";
+} from "./gpu_fft_ocean_v3.js";
 
 // Preserve the full Rift liquid API from the legacy module. Explicit exports
 // below override the Crystal entry points so only Coral Shallows uses FFT.

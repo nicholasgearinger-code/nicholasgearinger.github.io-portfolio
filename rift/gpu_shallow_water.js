@@ -8,20 +8,17 @@ import {
 // -----------------------------------------------------------------------------
 // GPU shallow-water solver for Coral Shallows' surf zone.
 //
-// This is deliberately a separate physical regime from the deep-water FFT:
-// the FFT remains the correct model offshore, while finite-depth bathymetry,
-// horizontal transport, wet/dry damping and breaking are solved here. The
-// outer edge is weakly forced from the *actual current FFT displacement* so the
-// two simulations are coupled instead of running as unrelated animations.
+// Deep water is handled by the FFT cascades; this finite-depth solver handles
+// shoaling, horizontal transport, wet/dry damping and the breaking-energy field
+// used for surf foam / future 3D breaker emission.
 //
-// Resolution raised from 128 to 192 so the 360-unit surf domain resolves at
-// ~1.88 world units/cell instead of ~2.83. This matters before introducing the
-// 3D breaker sheet: the source height/velocity/breaking field itself needs to
-// be smooth enough that a higher-density render mesh is not merely interpolating
-// visibly coarse shallow-water cells.
+// 256^2 over 360 world units gives ~1.41 units/cell. The shoreline is the most
+// visually sensitive part of the ocean, so this grid intentionally gets more
+// simulation density than the offshore FFT rather than asking a render mesh to
+// interpolate a coarse near-shore solution.
 // -----------------------------------------------------------------------------
 
-export const SHALLOW_N = 192;
+export const SHALLOW_N = 256;
 export const SHALLOW_DOMAIN = 360;
 const GRAVITY = 9.81;
 const FFT_SOURCE_N = 128;
@@ -119,10 +116,12 @@ export function createGPUShallowWater(sampleHeight, waterY, fftSpatialA, fftDoma
     velX = velX.mul(damp);
     velZ = velZ.mul(damp);
 
+    // A wider boundary in cells preserves approximately the same physical
+    // forcing width after increasing the grid resolution.
     const edgeX = min(xf, float(N - 1).sub(xf));
     const edgeZ = min(zf, float(N - 1).sub(zf));
     const edgeDist = min(edgeX, edgeZ);
-    const boundary = float(1).sub(smoothstep(float(1), float(12), edgeDist));
+    const boundary = float(1).sub(smoothstep(float(2), float(17), edgeDist));
 
     const fgx = clamp(bc.y.div(float(fftDomain)).add(0.5), 0, 1).mul(float(FFT_SOURCE_N - 1));
     const fgz = clamp(bc.z.div(float(fftDomain)).add(0.5), 0, 1).mul(float(FFT_SOURCE_N - 1));

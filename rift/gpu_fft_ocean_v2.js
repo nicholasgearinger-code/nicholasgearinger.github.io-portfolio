@@ -20,10 +20,14 @@ import {
 } from "three/tsl";
 
 const FFT_N = 128;
-// Bicubic reconstruction provides much more curvature per simulation cell than
-// the previous 640^2 four-corner interpolation. 512^2 keeps the mobile vertex
-// cost under control while the 4x4 reconstruction removes broad planar facets.
+// One continuous render mesh, but with NON-UNIFORM physical spacing. 68% of
+// each axis' vertices are concentrated inside the 360-unit shallow-water domain,
+// putting roughly ~1 world unit between vertices where the player sees the surf
+// up close. The outer ocean gets progressively larger cells where faceting is
+// much harder to perceive. This is a better mobile geometry budget than simply
+// increasing a uniform 2000-unit grid again.
 const RENDER_N = 512;
+const SHORE_VERTEX_FRACTION = 0.68;
 const DETAIL_DOMAIN = 420;
 
 const DAY_SURFACE = new THREE.Color(0x0b3c49);
@@ -49,9 +53,26 @@ function smoothWeight(t) {
   return t.mul(t).mul(float(3).sub(t.mul(2)));
 }
 
-// Uniform Catmull-Rom spline. Unlike smoothstep-bilinear interpolation this
-// preserves a continuous-looking tangent through cell boundaries by using the
-// two neighboring samples on either side of the active interval.
+// Redistribute a normalized [-1,1] plane coordinate so the central shallow
+// domain receives most of the vertices. The mapping is continuous and monotonic,
+// so the ocean remains one watertight indexed mesh with no overlapping patch.
+function redistributeAxis(u, size) {
+  const sign = u < 0 ? -1 : 1;
+  const a = Math.abs(u);
+  const centerHalf = SHALLOW_DOMAIN * 0.5;
+  const outerHalf = size * 0.5;
+  let world;
+  if (a <= SHORE_VERTEX_FRACTION) {
+    world = (a / SHORE_VERTEX_FRACTION) * centerHalf;
+  } else {
+    const t = (a - SHORE_VERTEX_FRACTION) / (1 - SHORE_VERTEX_FRACTION);
+    world = centerHalf + t * (outerHalf - centerHalf);
+  }
+  return sign * world;
+}
+
+// Uniform Catmull-Rom spline. Unlike four-corner interpolation this uses the
+// neighboring samples to reconstruct a curved tangent through each cell.
 function catmullRom(p0, p1, p2, p3, t) {
   const t2 = t.mul(t);
   const t3 = t2.mul(t);
@@ -74,17 +95,23 @@ function buildDenseRenderGeometry(size, waterY, sampleHeight) {
   const shore = new Float32Array(count);
   const depthWorld = new Float32Array(count);
   const pos = geometry.attributes.position;
+  const halfSize = size * 0.5;
 
   for (let ry = 0; ry < RENDER_N; ry++) {
-    const fy = ry * (FFT_N - 1) / (RENDER_N - 1);
     for (let rx = 0; rx < RENDER_N; rx++) {
-      const fx = rx * (FFT_N - 1) / (RENDER_N - 1);
       const i = ry * RENDER_N + rx;
-      longCoords[i * 2] = fx;
-      longCoords[i * 2 + 1] = fy;
 
-      const x = pos.getX(i);
-      const z = pos.getZ(i);
+      // PlaneGeometry starts uniform. Remap its X/Z positions toward the center
+      // before deriving every simulation coordinate from the new world position.
+      const rawX = pos.getX(i);
+      const rawZ = pos.getZ(i);
+      const x = redistributeAxis(rawX / halfSize, size);
+      const z = redistributeAxis(rawZ / halfSize, size);
+      pos.setXYZ(i, x, 0, z);
+
+      longCoords[i * 2] = THREE.MathUtils.clamp((x / size + 0.5) * (FFT_N - 1), 0, FFT_N - 1);
+      longCoords[i * 2 + 1] = THREE.MathUtils.clamp((z / size + 0.5) * (FFT_N - 1), 0, FFT_N - 1);
+
       detailCoords[i * 2] = positiveFract(x / DETAIL_DOMAIN + 0.5) * FFT_N;
       detailCoords[i * 2 + 1] = positiveFract(z / DETAIL_DOMAIN + 0.5) * FFT_N;
 
@@ -111,6 +138,7 @@ function buildDenseRenderGeometry(size, waterY, sampleHeight) {
     }
   }
 
+  pos.needsUpdate = true;
   geometry.setAttribute("fftCoordLong", new THREE.Float32BufferAttribute(longCoords, 2));
   geometry.setAttribute("fftCoordDetail", new THREE.Float32BufferAttribute(detailCoords, 2));
   geometry.setAttribute("shallowCoord", new THREE.Float32BufferAttribute(shallowCoords, 2));
@@ -209,9 +237,6 @@ function installCoupledGeometry(handle, detailHandle, shallowHandle, size, sampl
   const depth = attribute("fftDepthWorld", "float");
 
   handle.mesh.material.positionNode = Fn(() => {
-    // The large swell and shallow-water elevation get true 4x4 reconstruction;
-    // these are the fields that dominate the visible silhouette. Horizontal
-    // choppy channels remain four-sample to keep the mobile vertex cost sane.
     const la = sampleCubicVec4(longA, longCoord, FFT_N);
     const ldz = sampleSmoothScalar(longB, longCoord, FFT_N, "x", false);
 
@@ -235,6 +260,8 @@ function installCoupledGeometry(handle, detailHandle, shallowHandle, size, sampl
       dtz,
     );
 
+    // Highest-quality reconstruction is deliberately reserved for the shallow
+    // field because it is the closest and most visually revealing water regime.
     const shallow = sampleCubicVec4(shallowState, shallowCoord, SHALLOW_N);
 
     const longAmp = smoothstep(float(3.0), float(12.0), depth);
@@ -404,7 +431,7 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   setupSmoothFFTLighting(handle);
   applyPhotographicOceanLook(handle, false, 1, 0, null);
 
-  console.info("[gpu-fft-ocean] ACTIVE: bicubic FFT/shallow reconstruction + 512 render grid");
+  console.info("[gpu-fft-ocean] ACTIVE: 256 shallow solve + shore-biased render geometry");
   return handle;
 }
 

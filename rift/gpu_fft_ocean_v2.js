@@ -20,7 +20,11 @@ import {
 } from "three/tsl";
 
 const FFT_N = 128;
-const RENDER_N = 384;
+// Render tessellation is intentionally decoupled from the FFT solve. 640^2
+// vertices gives the displaced surface far more geometric curvature while the
+// expensive spectral simulation remains 128^2. Across the 2000-unit ocean this
+// is ~3.13 world units/vertex instead of ~5.22 at the previous 384 setting.
+const RENDER_N = 640;
 const DETAIL_DOMAIN = 420;
 
 const DAY_SURFACE = new THREE.Color(0x0b3c49);
@@ -157,7 +161,6 @@ function installCoupledGeometry(handle, detailHandle, shallowHandle, size, sampl
     const la = sampleBilinearVec4(longA, longCoord, FFT_N);
     const ldz = sampleBilinearScalar(longB, longCoord, FFT_N, "x", false);
 
-    // Detail cascade wraps over its smaller physical domain.
     const dx0f = floor(detailCoord.x);
     const dz0f = floor(detailCoord.y);
     const dx1f = dx0f.add(1).mod(float(FFT_N));
@@ -180,9 +183,6 @@ function installCoupledGeometry(handle, detailHandle, shallowHandle, size, sampl
 
     const shallow = sampleBilinearVec4(shallowState, shallowCoord, SHALLOW_N);
 
-    // Physical regime blend. Open-ocean horizontal chop disappears before the
-    // beach; the solved shallow-water surface takes over as finite depth begins
-    // to dominate. No synthetic breaker sine/curl is added here.
     const longAmp = smoothstep(float(3.0), float(11.0), depth);
     const detailAmp = smoothstep(float(8.0), float(19.0), depth);
     const shallowDepthBlend = float(1).sub(smoothstep(float(7.0), float(15.0), depth));
@@ -256,9 +256,6 @@ function setupSmoothFFTLighting(handle) {
     0, 1,
   );
 
-  // The shallow solver's w channel is generated from relative wave height and
-  // Froude-like breaking criteria. Bilinear sampling keeps it smooth and ties
-  // foam to the same physical event that will later drive the 3D breaker sheet.
   const shallow = sampleBilinearVec4(shallowState, shallowCoord, SHALLOW_N);
   const surfFoam = clamp(shallow.w.mul(coverage).mul(1.12), 0, 1);
   const whitecap = clamp(max(offshoreWhitecap, surfFoam), 0, 1)
@@ -353,7 +350,7 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   setupSmoothFFTLighting(handle);
   applyPhotographicOceanLook(handle, false, 1, 0, null);
 
-  console.info("[gpu-fft-ocean] ACTIVE: FFT deep water + GPU shallow-water surf solver");
+  console.info("[gpu-fft-ocean] ACTIVE: 640 render tessellation + FFT/shallow-water physics");
   return handle;
 }
 

@@ -1,9 +1,9 @@
 // Ghostwire / portfolio service worker — caches the app shell so the site
 // (including the Ghostwire game) loads offline or on a flaky connection.
 //
-// FFT TEST NOTE: v9 explicitly treats BOTH the root duplicate modules and
-// the actual live Rift game modules under /rift as network-first.
-const CACHE_NAME = 'ngearinger-shell-v9';
+// Ocean simulation modules are explicitly network-first so physics changes
+// cannot be hidden behind an older cached Rift build.
+const CACHE_NAME = 'ngearinger-shell-v10';
 
 const STATIC_SHELL = [
   './manifest.json',
@@ -31,6 +31,7 @@ const CORE_SHELL = [
   './rift/liquid_legacy.js',
   './rift/gpu_fft_ocean.js',
   './rift/gpu_fft_ocean_v2.js',
+  './rift/gpu_shallow_water.js',
 ];
 
 self.addEventListener('install', (event) => {

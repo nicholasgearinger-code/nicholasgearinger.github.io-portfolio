@@ -2,7 +2,7 @@ import * as THREE from "three";
 import {
   Fn, instanceIndex, instancedArray, float, uint,
   uniform, vec2, vec3, vec4, color, positionLocal,
-  mix, clamp, min, max, attribute, time, sin, cos, cross,
+  mix, clamp, min, max, attribute, sin, cos, cross,
 } from "three/tsl";
 
 // Mobile-first spectral ocean. The random spectrum is seeded once on the CPU;
@@ -148,7 +148,6 @@ function createPackedFFTKernelSet(N, source, destination, ping, pong, bitReverse
       const b1r = B.z.mul(wr).sub(B.w.mul(wi));
       const b1i = B.z.mul(wi).add(B.w.mul(wr));
 
-      // first half writes A + W*B, second half writes A - W*B
       const halfFlag = axis.div(uint(half)).mod(uint(2)).toFloat();
       const sign = float(1).sub(halfFlag.mul(2));
       output.element(i).assign(vec4(
@@ -172,7 +171,6 @@ function createPackedFFTKernelSet(N, source, destination, ping, pong, bitReverse
     [read, write] = [write, read];
   }
 
-  // Vertical bit reversal must write into the buffer not holding the current row result.
   write = read === ping ? pong : ping;
   kernels.push(makeBitReverse(read, write, false));
   read = write;
@@ -222,14 +220,15 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   const mirrorBuffer = instancedArray(spectrumData.mirror, "float");
   const bitReverseBuffer = instancedArray(spectrumData.bitReverse, "float");
 
-  const spectrumA = instancedArray(count, "vec4"); // H complex + Dx complex
-  const spectrumB = instancedArray(count, "vec4"); // Dz complex + spare
+  const spectrumA = instancedArray(count, "vec4");
+  const spectrumB = instancedArray(count, "vec4");
   const fftPing = instancedArray(count, "vec4");
   const fftPong = instancedArray(count, "vec4");
   const spatialA = instancedArray(count, "vec4");
   const spatialB = instancedArray(count, "vec4");
 
   const waveScale = uniform(1.0);
+  const fftTime = uniform(0.0);
   const stormAmount = uniform(0.0);
   const dayAmount = uniform(1.0);
   const deepTint = uniform(new THREE.Color(0x145f91));
@@ -243,7 +242,7 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
     const mirrorIndex = mirrorBuffer.element(i).toUint();
     const h0m = h0Buffer.element(mirrorIndex);
     const meta = metaBuffer.element(i);
-    const phase = meta.w.mul(time);
+    const phase = meta.w.mul(fftTime);
     const c = cos(phase);
     const s = sin(phase);
 
@@ -360,6 +359,7 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
     waterY: y,
     computeFrame,
     waveScale,
+    fftTime,
     stormAmount,
     dayAmount,
     deepTint,
@@ -368,11 +368,16 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   };
 }
 
-export async function updateGPUFFTOcean(handle, renderer) {
-  if (!handle?.gpuFFT) return;
-  // Renderer accepts an array of compute nodes, allowing the dependent FFT
-  // dispatches to be submitted as one compute group instead of dozens of JS awaits.
-  await renderer.computeAsync(handle.computeFrame);
+export function updateGPUFFTOcean(handle, renderer, elapsedTime = 0) {
+  if (!handle?.gpuFFT || !renderer || typeof renderer.compute !== "function") return;
+  handle.fftTime.value = Number.isFinite(elapsedTime) ? elapsedTime : 0;
+  try {
+    for (const computeNode of handle.computeFrame) renderer.compute(computeNode);
+  } catch (err) {
+    console.error("[gpu-fft-ocean] compute dispatch failed:", err);
+    handle.fluidSimBroken = true;
+    throw err;
+  }
 }
 
 export function updateGPUFFTOceanVisuals(handle, elapsed, skyColor, cameraY, playerPos, sunDir, skyHorizon, reflectionTexture, reflectionMatrix, refractionTexture, resolution, storm = 0, day = 1) {
@@ -381,8 +386,6 @@ export function updateGPUFFTOceanVisuals(handle, elapsed, skyColor, cameraY, pla
   handle.dayAmount.value = THREE.MathUtils.clamp(day, 0, 1);
   handle.waveScale.value = 1 + THREE.MathUtils.clamp(storm, 0, 1) * 0.7;
   if (skyColor) {
-    // Keep the FFT ocean tied to the live day/night palette without mutating
-    // the shared input Color object from main.js.
     handle.deepTint.value.set(0x145f91).lerp(skyColor, 0.18);
     handle.shallowTint.value.set(0x65cbd5).lerp(skyColor, 0.12);
   }
@@ -402,7 +405,5 @@ export function disposeGPUFFTOcean(scene, handle) {
       }
     }
   };
-  // Match the repo's existing WebGPU safety policy: do not destroy resources
-  // in the same tick they may still be referenced by submitted GPU work.
   requestAnimationFrame(() => requestAnimationFrame(cleanup));
 }

@@ -3,16 +3,10 @@ import * as THREE from "three";
 // -----------------------------------------------------------------------------
 // Rift startup preflight + adaptive performance controller.
 //
-// Goals:
-// 1) Never leave a player staring at a canvas that looks frozen while WebGPU,
-//    model parsing, shaders, and compute pipelines are warming.
-// 2) Preload the shared level modules + binary model assets once, before a
-//    level is entered, so level construction mostly hits memory/browser cache.
-// 3) Keep a loading overlay over the game for a few real rendered frames after
-//    a level selection. Three/WebGPU lazily compiles many material/compute
-//    pipelines on first use; those warm-up frames happen behind the overlay.
-// 4) Adapt render resolution conservatively on sustained low FPS. This does not
-//    change gameplay simulation state or graphics-tier preferences.
+// This module is imported by levels.js, which is itself a static dependency of
+// main.js. That means this code executes before main.js constructs the renderer
+// or level-select buttons, giving us one safe place to install startup progress,
+// WebGPU warm-up tracking and conservative runtime quality adaptation.
 // -----------------------------------------------------------------------------
 
 const isTouch = typeof window !== "undefined" && (
@@ -26,6 +20,8 @@ const state = {
   warmRenderFrames: 0,
   warmComputeCalls: 0,
   levelWarmStartedAt: 0,
+  compileStarted: false,
+  compileReady: false,
   requestedPixelRatio: 1,
   adaptiveScale: 1,
   renderer: null,
@@ -35,6 +31,7 @@ const state = {
   status: null,
   detail: null,
   failedOptionalAssets: 0,
+  corePromise: null,
 };
 
 window.__riftRuntimePreloader = state;
@@ -43,6 +40,7 @@ window.__riftReducedEffects = false;
 
 function ensureOverlay() {
   if (state.overlay?.isConnected) return state.overlay;
+
   const root = document.createElement("div");
   root.id = "rift-preflight-loader";
   root.style.cssText = [
@@ -122,6 +120,24 @@ function timeout(promise, ms, label) {
   return Promise.race([promise, timer]).finally(() => clearTimeout(id));
 }
 
+function nextPaint() {
+  // Two frames: one to commit styles/layout, one to guarantee the progress bar
+  // has actually painted before the synchronous level builder gets CPU time.
+  return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+}
+
+function waitForRendererReady(maxMs = 12000) {
+  if (state.rendererReady) return Promise.resolve();
+  const started = performance.now();
+  return new Promise((resolve) => {
+    const poll = () => {
+      if (state.rendererReady || performance.now() - started >= maxMs) resolve();
+      else setTimeout(poll, 25);
+    };
+    poll();
+  });
+}
+
 const MODULES = [
   "main.js", "terrain.js", "levels.js", "graphicsSettings.js", "models.js",
   "decorations.js", "liquid.js", "liquid_legacy.js", "gpu_fft_ocean.js",
@@ -143,8 +159,6 @@ async function preloadFetch(relativePath) {
   const url = new URL(relativePath, import.meta.url);
   const response = await fetch(url, { cache: "force-cache" });
   if (!response.ok) throw new Error(`${relativePath}: HTTP ${response.status}`);
-  // Drain the body so the browser actually stores the complete response in its
-  // cache rather than only resolving after headers.
   await response.arrayBuffer();
 }
 
@@ -152,8 +166,11 @@ async function modelTasks() {
   const models = await import("./models.js");
   const tasks = [];
   const add = (label, fn) => {
-    if (typeof fn === "function") tasks.push({ label, run: () => timeout(Promise.resolve().then(fn), 30000, label) });
+    if (typeof fn === "function") {
+      tasks.push({ label, run: () => timeout(Promise.resolve().then(fn), 30000, label) });
+    }
   };
+
   add("angelfish", models.loadAngelfishModel);
   add("reef", models.loadReefModel);
   for (const species of ["stylaster", "pocillopora", "goniastrea", "meandrina", "heliopora", "acropora", "distichopora"]) {
@@ -168,51 +185,76 @@ async function modelTasks() {
   return tasks;
 }
 
-async function runPreflight() {
-  showOverlay(2, "Loading level systems…", "Caching modules");
-  const tasks = [];
-  for (const path of MODULES) tasks.push({ label: path, run: () => timeout(preloadFetch(path), 15000, path) });
-  for (const path of TEXTURES) tasks.push({ label: path, run: () => timeout(preloadFetch(path), 15000, path) });
-
-  try {
-    tasks.push(...await modelTasks());
-  } catch (err) {
-    console.warn("[rift-preflight] model task discovery failed:", err);
-    state.failedOptionalAssets++;
-  }
-
-  let done = 0;
-  const total = Math.max(1, tasks.length);
-  const workers = tasks.map(async (task) => {
-    try {
-      await task.run();
-    } catch (err) {
-      state.failedOptionalAssets++;
-      console.warn(`[rift-preflight] optional preload skipped (${task.label}):`, err);
-    } finally {
-      done++;
-      const pct = 4 + (done / total) * 72;
-      setProgress(pct, "Loading levels and assets…", task.label);
+async function runTaskPool(tasks, concurrency, onDone) {
+  let cursor = 0;
+  async function worker() {
+    while (true) {
+      const index = cursor++;
+      if (index >= tasks.length) return;
+      const task = tasks[index];
+      try {
+        await task.run();
+      } catch (err) {
+        state.failedOptionalAssets++;
+        console.warn(`[rift-preflight] optional preload skipped (${task.label}):`, err);
+      } finally {
+        onDone(task);
+      }
     }
-  });
+  }
+  const workers = [];
+  const workerCount = Math.min(concurrency, Math.max(1, tasks.length));
+  for (let i = 0; i < workerCount; i++) workers.push(worker());
   await Promise.all(workers);
-  state.coreReady = true;
-  setProgress(78, "Core assets ready", state.failedOptionalAssets ? `${state.failedOptionalAssets} optional asset(s) unavailable` : "All preload tasks complete");
-  if (!state.levelWarming) setTimeout(hideOverlay, 220);
 }
 
-// Capture level selection globally. The buttons are created later by main.js,
-// so a delegated listener is safer than trying to bind them during this module.
-document.addEventListener("click", (event) => {
-  const button = event.target?.closest?.(".rift-level-btn");
-  if (!button) return;
-  state.levelWarming = true;
-  state.warmRenderFrames = 0;
-  state.warmComputeCalls = 0;
-  state.levelWarmStartedAt = performance.now();
-  const name = button.querySelector("strong")?.textContent || "selected level";
-  showOverlay(80, `Building ${name}…`, "Creating terrain and level objects");
-}, true);
+async function runPreflight() {
+  showOverlay(2, "Loading level systems…", "Caching modules");
+
+  // Module/textures first. Keep concurrency bounded so mobile Safari doesn't
+  // decode/allocate a large stack of resources simultaneously.
+  const coreTasks = [];
+  for (const path of MODULES) coreTasks.push({ label: path, run: () => timeout(preloadFetch(path), 15000, path) });
+  for (const path of TEXTURES) coreTasks.push({ label: path, run: () => timeout(preloadFetch(path), 15000, path) });
+
+  let done = 0;
+  let total = coreTasks.length;
+  await runTaskPool(coreTasks, isTouch ? 4 : 6, (task) => {
+    done++;
+    setProgress(4 + (done / Math.max(1, total)) * 40, "Loading level systems…", task.label);
+  });
+
+  // Give renderer/device creation priority before starting the heavier GLB parse
+  // work. If renderer init is slow, the loader continues to show progress rather
+  // than competing with a dozen model decoders at the same time.
+  setProgress(46, "Initializing graphics device…", "Waiting for WebGPU renderer");
+  await waitForRendererReady();
+
+  let models = [];
+  try {
+    models = await modelTasks();
+  } catch (err) {
+    state.failedOptionalAssets++;
+    console.warn("[rift-preflight] model task discovery failed:", err);
+  }
+
+  if (models.length) {
+    let modelDone = 0;
+    await runTaskPool(models, isTouch ? 3 : 5, (task) => {
+      modelDone++;
+      const pct = 48 + (modelDone / models.length) * 28;
+      setProgress(pct, "Loading 3D assets…", task.label);
+    });
+  }
+
+  state.coreReady = true;
+  setProgress(
+    78,
+    "World data ready",
+    state.failedOptionalAssets ? `${state.failedOptionalAssets} optional asset(s) unavailable` : "Modules, textures and models cached",
+  );
+  if (!state.levelWarming) setTimeout(hideOverlay, 220);
+}
 
 // Patch the renderer BEFORE main.js constructs it. Static dependencies execute
 // before the importing module's body, so levels.js importing this file makes the
@@ -227,7 +269,7 @@ if (proto && !proto.__riftBootstrapPatched) {
       state.renderer = this;
       const result = await originalInit.apply(this, args);
       state.rendererReady = true;
-      if (!state.coreReady) setProgress(76, "Initializing WebGPU…", "Renderer device ready");
+      if (!state.coreReady) setProgress(46, "WebGPU ready", "Graphics device initialized");
       return result;
     };
   }
@@ -237,24 +279,52 @@ if (proto && !proto.__riftBootstrapPatched) {
     proto.render = function (...args) {
       const result = originalRender.apply(this, args);
       state.renderer = this;
+
       if (state.levelWarming) {
         const now = performance.now();
-        // Count no more than one warm-up frame every ~8ms so reflection and
-        // refraction sub-renders in the same display frame don't fake progress.
+
+        // WebGPU/NodeMaterial compilers are lazy. compileAsync, when available,
+        // explicitly walks the selected level scene after its first real render.
+        if (!state.compileStarted) {
+          state.compileStarted = true;
+          if (typeof this.compileAsync === "function" && args[0] && args[1]) {
+            timeout(Promise.resolve(this.compileAsync(args[0], args[1])), 9000, "renderer.compileAsync()")
+              .then(() => { state.compileReady = true; })
+              .catch((err) => {
+                console.warn("[rift-preflight] compileAsync warm-up skipped:", err);
+                state.compileReady = true;
+              });
+          } else {
+            state.compileReady = true;
+          }
+        }
+
+        // Reflection/refraction can call renderer.render several times inside one
+        // display frame. Don't let those sub-renders fake loader progress.
         if (!state._lastWarmRender || now - state._lastWarmRender > 8) {
           state._lastWarmRender = now;
           state.warmRenderFrames++;
-          const pct = Math.min(98, 83 + state.warmRenderFrames * 1.5 + Math.min(4, state.warmComputeCalls * 0.25));
-          setProgress(pct, "Compiling shaders and GPU pipelines…", `${state.warmRenderFrames} warm-up frame${state.warmRenderFrames === 1 ? "" : "s"}`);
+          const compileBonus = state.compileReady ? 3 : 0;
+          const pct = Math.min(98, 82 + state.warmRenderFrames * 1.35 + Math.min(4, state.warmComputeCalls * 0.22) + compileBonus);
+          setProgress(
+            pct,
+            state.compileReady ? "Warming GPU pipelines…" : "Compiling shaders…",
+            `${state.warmRenderFrames} warm frame${state.warmRenderFrames === 1 ? "" : "s"} · ${state.warmComputeCalls} compute dispatches`,
+          );
         }
-        const warmedLongEnough = now - state.levelWarmStartedAt > 520;
-        const pipelinesTouched = state.warmRenderFrames >= 6 && (state.warmComputeCalls > 0 || state.warmRenderFrames >= 10);
+
+        const warmedLongEnough = now - state.levelWarmStartedAt > 650;
+        // Crystal should hit compute immediately; purely procedural non-water
+        // levels may not. Ten warm frames is the fallback for those levels.
+        const computeOrFallback = state.warmComputeCalls > 0 || state.warmRenderFrames >= 10;
+        const pipelinesTouched = state.warmRenderFrames >= 6 && state.compileReady && computeOrFallback;
         if (state.coreReady && state.rendererReady && warmedLongEnough && pipelinesTouched) {
           state.levelWarming = false;
           setProgress(100, "Ready", "Shaders and compute pipelines warmed");
           setTimeout(hideOverlay, 180);
         }
       }
+
       return result;
     };
   }
@@ -268,9 +338,9 @@ if (proto && !proto.__riftBootstrapPatched) {
     };
   }
 
-  // Dynamic pixel-ratio cap. main.js remains authoritative about the requested
-  // graphics-tier resolution; this wrapper only scales it downward when a phone
-  // is demonstrably missing frame budget for several seconds.
+  // main.js remains authoritative about the graphics tier. This wrapper only
+  // scales its requested pixel ratio downward after sustained missed frame
+  // budgets; it never changes or persists the user's chosen quality tier.
   const originalSetPixelRatio = proto.setPixelRatio;
   if (typeof originalSetPixelRatio === "function") {
     proto.setPixelRatio = function (ratio) {
@@ -282,13 +352,73 @@ if (proto && !proto.__riftBootstrapPatched) {
   }
 }
 
-// Independent FPS sampler so adaptive resolution still works even if the debug
-// FPS HUD is disabled. It is intentionally slow-reacting: quality only drops
-// after sustained misses and recovers even more slowly to avoid oscillation.
+// Intercept the FIRST level-button click, paint the loader, wait for preflight,
+// then replay the same click. Without this interception buildLevel() runs
+// synchronously inside the original click handler, which can block Safari before
+// it ever gets one frame to display the progress UI.
+let replayingLevelClick = false;
+document.addEventListener("click", (event) => {
+  const button = event.target?.closest?.(".rift-level-btn");
+  if (!button || replayingLevelClick) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  event.stopImmediatePropagation();
+
+  state.levelWarming = true;
+  state.warmRenderFrames = 0;
+  state.warmComputeCalls = 0;
+  state.compileStarted = false;
+  state.compileReady = false;
+  state._lastWarmRender = 0;
+  state.levelWarmStartedAt = performance.now();
+
+  const name = button.querySelector("strong")?.textContent || "selected level";
+  showOverlay(79, `Preparing ${name}…`, state.coreReady ? "Building level" : "Finishing asset preload");
+
+  (async () => {
+    try {
+      await state.corePromise;
+    } catch (_) {
+      // runPreflight already logs individual failures and always degrades to
+      // runtime loading. Don't strand the button on a nonessential asset error.
+    }
+    setProgress(81, `Building ${name}…`, "Creating terrain and level objects");
+    await nextPaint();
+
+    replayingLevelClick = true;
+    try {
+      button.click();
+    } finally {
+      replayingLevelClick = false;
+    }
+
+    // Hard failsafe: shader warm-up should normally finish in under a second,
+    // but never leave a permanent opaque loader if a browser doesn't expose the
+    // expected compile/render callbacks.
+    setTimeout(() => {
+      if (!state.levelWarming || !state.coreReady) return;
+      state.levelWarming = false;
+      setProgress(100, "Ready", "Warm-up timeout reached; continuing");
+      setTimeout(hideOverlay, 180);
+    }, 7000);
+  })();
+}, true);
+
+// Independent FPS sampler so adaptive resolution still works with the HUD off.
+// It reacts over multi-second windows, not frame-by-frame, to avoid resolution
+// oscillation and visual pumping.
 let perfStart = performance.now();
 let perfFrames = 0;
 let goodWindows = 0;
 function monitorPerformance(now) {
+  if (!state.coreReady || state.levelWarming) {
+    perfStart = now;
+    perfFrames = 0;
+    requestAnimationFrame(monitorPerformance);
+    return;
+  }
+
   perfFrames++;
   const elapsed = now - perfStart;
   if (elapsed >= 2200) {
@@ -302,7 +432,7 @@ function monitorPerformance(now) {
       goodWindows = 0;
     } else if (fps < 25) {
       state.adaptiveScale = Math.max(isTouch ? 0.74 : 0.82, state.adaptiveScale - 0.07);
-      window.__riftWaterDetailStride = isTouch ? 2 : 2;
+      window.__riftWaterDetailStride = 2;
       window.__riftReducedEffects = true;
       goodWindows = 0;
     } else if (fps > 38) {
@@ -328,10 +458,10 @@ function monitorPerformance(now) {
 }
 
 showOverlay(1, "Preparing Rift Islands…", "Starting preload");
-queueMicrotask(() => runPreflight().catch((err) => {
+state.corePromise = runPreflight().catch((err) => {
   console.warn("[rift-preflight] preload failed; continuing with runtime loading:", err);
   state.coreReady = true;
-  setProgress(78, "Core preload incomplete", "The game can continue using runtime loading");
+  setProgress(78, "Core preload incomplete", "Continuing with runtime loading");
   if (!state.levelWarming) setTimeout(hideOverlay, 400);
-}));
+});
 requestAnimationFrame(monitorPerformance);

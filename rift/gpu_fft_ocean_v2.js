@@ -24,7 +24,9 @@ const FFT_N = 128;
 // interpolation. The previous Catmull-Rom displacement could overshoot sparse
 // FFT/shallow samples and create needle-like peaks even on a dense render mesh.
 const RENDER_N = 512;
-const DETAIL_DOMAIN = 420;
+// Shorter second FFT domain: same 128^2 compute cost, but more medium/short wave
+// structure across the visible ocean. This remains genuine spectral FFT detail.
+const DETAIL_DOMAIN = 260;
 
 const DAY_SURFACE = new THREE.Color(0x0b3c49);
 const NIGHT_SURFACE = new THREE.Color(0x06151f);
@@ -189,20 +191,20 @@ function installCoupledGeometry(handle, detailHandle, shallowHandle, size, sampl
 
     const shallow = sampleSmoothVec4(shallowState, shallowCoord, SHALLOW_N);
 
-    // Broad offshore swell survives into intermediate depth. Fine detail and
-    // horizontal shear fade earlier so shallow water calms before the breaker
-    // ribbon takes over.
+    // Broad offshore swell survives into intermediate depth. The shorter detail
+    // cascade now contributes much more medium/short-wave structure while still
+    // fading before the beach so the stable finite-depth solver owns the surf.
     const longAmp = smoothstep(float(2.5), float(11.5), depth);
-    const detailAmp = smoothstep(float(9.5), float(22.0), depth);
+    const detailAmp = smoothstep(float(6.5), float(18.0), depth);
     const shallowDepthBlend = float(1).sub(smoothstep(float(6.5), float(15.0), depth));
     const shallowBlend = shallowDepthBlend.mul(coverage);
 
-    // Horizontal displacement was the largest contributor to triangular cones.
-    // Keep enough for natural crest asymmetry but let vertical FFT energy define
-    // the swell silhouette. The detail cascade is mostly vertical texture now.
-    const fftX = la.z.mul(longAmp).mul(0.34).add(da.z.mul(0.10).mul(detailAmp));
-    const fftY = la.x.mul(longAmp).add(da.x.mul(0.30).mul(detailAmp));
-    const fftZ = ldz.mul(longAmp).mul(0.34).add(ddz.mul(0.10).mul(detailAmp));
+    // Stronger but still bounded choppiness. The detail contribution is kept far
+    // below the old spike-producing values, while vertical energy is high enough
+    // to break up the broad swell into believable wind-driven wave faces.
+    const fftX = la.z.mul(longAmp).mul(0.42).add(da.z.mul(0.18).mul(detailAmp));
+    const fftY = la.x.mul(longAmp).mul(1.08).add(da.x.mul(0.58).mul(detailAmp));
+    const fftZ = ldz.mul(longAmp).mul(0.42).add(ddz.mul(0.18).mul(detailAmp));
 
     const horizontalFade = float(1).sub(shallowBlend.mul(0.98));
     const yDisp = mix(fftY, shallow.x, shallowBlend);
@@ -240,6 +242,7 @@ function setupSmoothFFTLighting(handle) {
 
   const shallowCoord = attribute("shallowCoord", "vec2");
   const coverage = attribute("shallowCoverage", "float");
+  const depth = attribute("fftDepthWorld", "float");
   const shallowState = shallowHandle.state;
 
   const geometricNormal = Fn(() => {
@@ -259,43 +262,62 @@ function setupSmoothFFTLighting(handle) {
     return pow(float(1).sub(facing), float(4.0));
   })();
 
-  const crest = smoothstep(waterLevel.add(0.45), waterLevel.add(2.5), positionWorld.y);
+  const crest = smoothstep(waterLevel.add(0.32), waterLevel.add(2.25), positionWorld.y);
   const slope = clamp(float(1).sub(abs(worldNormal.y)), 0, 1);
-  const steepCrest = smoothstep(float(0.18), float(0.48), slope)
-    .mul(smoothstep(float(0.26), float(0.82), crest));
+  const steepCrest = smoothstep(float(0.15), float(0.43), slope)
+    .mul(smoothstep(float(0.20), float(0.78), crest));
   const offshoreWhitecap = clamp(
     steepCrest.mul(foamStrength).mul(float(1).sub(underwaterMix.mul(0.86))),
     0, 1,
   );
 
   const shallow = sampleSmoothVec4(shallowState, shallowCoord, SHALLOW_N);
-  const surfFoam = clamp(shallow.w.mul(coverage).mul(1.02), 0, 1);
-  const whitecap = clamp(max(offshoreWhitecap, surfFoam), 0, 1)
+  const surfFoam = clamp(shallow.w.mul(coverage).mul(1.10), 0, 1);
+
+  // Shore wash comes from the same stable shallow-water state: eta, horizontal
+  // velocity and breaker energy. It brightens only in the shallow band, so foam
+  // advances/recedes with solved water rather than being a static beach decal.
+  const shoreBand = float(1).sub(smoothstep(float(1.0), float(4.8), depth)).mul(coverage);
+  const washMotion = clamp(
+    abs(shallow.x).mul(1.80)
+      .add(abs(shallow.y).add(abs(shallow.z)).mul(0.14))
+      .add(shallow.w.mul(0.85)),
+    0,
+    1,
+  );
+  const shoreWashFoam = smoothstep(float(0.06), float(0.28), washMotion.mul(shoreBand));
+
+  const whitecap = clamp(max(max(offshoreWhitecap, surfFoam), shoreWashFoam), 0, 1)
     .mul(float(1).sub(underwaterMix.mul(0.88)));
 
   const viewDirWorld = cameraPosition.sub(positionWorld).normalize();
   const halfDir = lightDirection.normalize().add(viewDirWorld).normalize();
   const directFacing = clamp(dot(worldNormal, lightDirection.normalize()), 0, 1);
-  const glint = pow(clamp(dot(worldNormal, halfDir), 0, 1), float(58))
-    .mul(float(0.12).add(daylight.mul(0.88)))
+  const ndh = clamp(dot(worldNormal, halfDir), 0, 1);
+  const tightGlint = pow(ndh, float(92))
+    .mul(float(0.18).add(daylight.mul(0.95)))
     .mul(float(1).sub(underwaterMix.mul(0.72)));
+  const softGlint = pow(ndh, float(18))
+    .mul(float(0.05).add(daylight.mul(0.22)))
+    .mul(float(1).sub(underwaterMix.mul(0.72)));
+  const glint = tightGlint.add(softGlint);
   const glintColor = mix(moonGlintColor, sunGlintColor, daylight);
 
   material.colorNode = Fn(() => {
     const base = mix(surfaceColor, underwaterColor, underwaterMix);
-    const grazingLight = mix(base, crestColor, fresnel.mul(0.24));
-    const crestLight = crest.mul(float(1).sub(underwaterMix)).mul(0.07);
-    const directionalLift = directFacing.mul(daylight.mul(0.07).add(0.022));
+    const grazingLight = mix(base, crestColor, fresnel.mul(0.34));
+    const crestLight = crest.mul(float(1).sub(underwaterMix)).mul(0.11);
+    const directionalLift = directFacing.mul(daylight.mul(0.11).add(0.028));
     const litWater = mix(grazingLight, crestColor, crestLight.add(directionalLift));
-    const foamed = mix(litWater, foamColor, whitecap.mul(0.84));
-    return mix(foamed, glintColor, clamp(glint.mul(0.72), 0, 0.68));
+    const foamed = mix(litWater, foamColor, whitecap.mul(0.88));
+    return mix(foamed, glintColor, clamp(glint.mul(0.78), 0, 0.74));
   })();
 
-  const baseRoughness = mix(float(0.19), float(0.05), fresnel.mul(0.80).add(glint.mul(0.20)));
-  material.roughnessNode = mix(baseRoughness, float(0.44), whitecap.mul(0.92));
+  const baseRoughness = mix(float(0.16), float(0.028), fresnel.mul(0.86).add(glint.mul(0.24)));
+  material.roughnessNode = mix(baseRoughness, float(0.40), whitecap.mul(0.90));
   material.emissiveNode = underwaterColor
     .mul(underwaterMix.mul(float(0.035).add(daylight.mul(0.085))))
-    .add(foamColor.mul(whitecap.mul(0.010)));
+    .add(foamColor.mul(whitecap.mul(0.012)));
   material.needsUpdate = true;
 
   handle.fftSurfaceColor = surfaceColor;
@@ -315,7 +337,7 @@ function applyPhotographicOceanLook(handle, underwater = false, day = 1, storm =
   const stormT = Math.max(0, Math.min(1, storm));
   if (handle.fftDaylight) handle.fftDaylight.value = dayT;
   if (handle.fftUnderwaterMix) handle.fftUnderwaterMix.value = underwater ? 1 : 0;
-  if (handle.fftFoamStrength) handle.fftFoamStrength.value = 0.48 + stormT * 0.64;
+  if (handle.fftFoamStrength) handle.fftFoamStrength.value = 0.58 + stormT * 0.68;
   if (sunDir && handle.fftLightDirection?.value) handle.fftLightDirection.value.copy(sunDir).normalize();
 
   if (handle.fftSurfaceColor?.value) {
@@ -350,11 +372,8 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   const shallowHandle = createGPUShallowWater(sampleHeight, y, handle.resources?.[8], size, SHALLOW_DOMAIN);
   handle.fftShallowHandle = shallowHandle;
 
-  // These were previously diagnostic-scale values used to prove the FFT was
-  // moving. Lower physical amplitudes produce broad ocean shoulders rather than
-  // narrow peaks once two cascades are combined.
-  handle.waveScale.value = 24.0;
-  if (detailHandle?.waveScale) detailHandle.waveScale.value = 13.5;
+  handle.waveScale.value = 28.0;
+  if (detailHandle?.waveScale) detailHandle.waveScale.value = 18.0;
   handle.mesh.scale.y = 1.0;
   handle.fftVisualBoost = true;
   handle.fftUnderwater = false;
@@ -365,7 +384,7 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   setupSmoothFFTLighting(handle);
   applyPhotographicOceanLook(handle, false, 1, 0, null);
 
-  console.info("[gpu-fft-ocean] ACTIVE: bounded smooth FFT reconstruction + rounded swell tuning");
+  console.info("[gpu-fft-ocean] ACTIVE: multi-scale FFT detail + shallow-water shore wash foam");
   return handle;
 }
 
@@ -394,14 +413,14 @@ export function updateGPUFFTOceanVisuals(
   const longSet = Math.sin(elapsed * 0.071 + 0.4) * 0.75;
   const detailSet = Math.sin(elapsed * 0.173 + 1.9) * 0.55;
 
-  handle.waveScale.value = 24.0 + longSet + stormT * 6.0;
+  handle.waveScale.value = 28.0 + longSet * 1.2 + stormT * 7.0;
   if (handle.fftDetailHandle?.waveScale) {
-    handle.fftDetailHandle.waveScale.value = 13.5 + detailSet + stormT * 5.0;
+    handle.fftDetailHandle.waveScale.value = 18.0 + detailSet * 1.5 + stormT * 6.0;
   }
   if (handle.fftShallowHandle?.forcingStrength) {
-    handle.fftShallowHandle.forcingStrength.value = 0.72 + stormT * 0.24;
+    handle.fftShallowHandle.forcingStrength.value = 0.78 + stormT * 0.24;
   }
-  handle.mesh.scale.y = 1.0 + stormT * 0.045;
+  handle.mesh.scale.y = 1.02 + stormT * 0.05;
 
   if (handle.fftUnderwater !== underwater) handle.fftUnderwater = underwater;
   applyPhotographicOceanLook(handle, underwater, day, storm, sunDir);

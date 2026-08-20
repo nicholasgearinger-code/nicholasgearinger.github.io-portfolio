@@ -10,7 +10,7 @@ import {
   createGPUSurfSystem,
   updateGPUSurfSystem,
   disposeGPUSurfSystem,
-} from "./gpu_surf_system_v2.js";
+} from "./gpu_surf_system_v3.js";
 
 const DAY_SURFACE = new THREE.Color(0x245b63);
 const NIGHT_SURFACE = new THREE.Color(0x071a22);
@@ -27,8 +27,6 @@ function tuneReferenceOcean(handle, elapsed = 0, cameraY = Infinity, storm = 0, 
   const dayT = THREE.MathUtils.clamp(day, 0, 1);
   const t = Number.isFinite(elapsed) ? elapsed : 0;
 
-  // Natural coastal sea state: restrain the large swell and keep the short FFT
-  // cascade energetic so the surface reads as dense wind-driven chop.
   const longSet =
     Math.sin(t * 0.061 + 0.4) * 0.65 +
     Math.sin(t * 0.027 + 2.1) * 0.38;
@@ -89,7 +87,7 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   tuneReferenceOcean(handle, 0, Infinity, 0, 1);
 
   if (handle.fftSurfSystem) {
-    console.info("[gpu-fft-ocean] ACTIVE: natural coastal rollers + lacy wash + wet-sand surf");
+    console.info("[gpu-fft-ocean] ACTIVE: continuous shore waves + narrow swash foam + wet sand");
   }
   return handle;
 }

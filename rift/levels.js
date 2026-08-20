@@ -1,3 +1,4 @@
+import "./runtime_bootstrap.js";
 import { mulberry32, hashStringToSeed, biomeColor } from "./worldgen.js";
 import { TERRAIN_SIZE } from "./terrain.js";
 
@@ -20,45 +21,25 @@ const LEVELS = [
   { biome: "frost", name: "Frostbound Reach", tagline: "A blizzard-locked expanse, ice caverns cut deep beneath the snow." },
 ];
 LEVELS.forEach((l) => {
-  if (l.biome === "frost") return; // worldgen.js's biomeColor() has no case for this brand-new biome and isn't part of this session's working set to check — skipped entirely rather than risk calling it with an unrecognized value (if it throws for an unknown biome, that would crash every OTHER level's color too, not just this one)
+  if (l.biome === "frost") return;
   l.color = biomeColor(l.biome);
 });
-// A pale, cold ice-blue, distinct from every other biome's accent color.
 LEVELS.find((l) => l.biome === "frost").color = 0xbfe8fa;
 
 const CRYSTAL_COUNT = 12;
 const LORE_MARKER_COUNT = 5;
-const DECORATION_COUNT = 60; // was 22 — the real bottleneck behind "the forest looks sparse everywhere, not just Verdant specifically" (main.js's forest-filler pass only ever supplemented whatever this produced, it never fixed the underlying scarcity)
-
-// Both crystals and decorations stay within this fraction of the terrain's
-// half-size — keeps everything off the soft falloff rim at the edge (see
-// terrain.js) where the ground is flattening out toward the boundary.
-const PLACEMENT_RADIUS_FRAC = 0.78; // was 0.7 — a little more reach toward the edge, blending better into main.js's forest-filler pass (which covers out to ~0.95*WORLD_BOUND_RADIUS) and horizonSilhouettes.js's distant treeline just beyond that
+const DECORATION_COUNT = 60;
+const PLACEMENT_RADIUS_FRAC = 0.78;
 
 function randomPointOnTerrain(rand) {
-  // sqrt(rand()) rather than a bare rand() — a disc's AREA at radius r
-  // grows with r, so sampling r linearly over-concentrates points near
-  // the center; the sqrt correction is what actually makes points land
-  // uniformly per unit of ground area instead of clustering inward.
   const r = Math.sqrt(rand()) * (TERRAIN_SIZE / 2) * PLACEMENT_RADIUS_FRAC;
   const angle = rand() * Math.PI * 2;
   return { x: Math.cos(angle) * r, z: Math.sin(angle) * r };
 }
 
-/**
- * @param {string} biome
- * @param {string} seed
- * @returns {{
- *   spawn: {x:number, z:number},
- *   crystalSeeds: Array<{id:string, x:number, z:number}>,
- *   loreMarkers: Array<{id:string, x:number, z:number}>,
- *   decorationSeeds: Array<{id:string, x:number, z:number, rand:() => number}>,
- * }}
- */
 function generateLevelLayout(biome, seed) {
   const rand = mulberry32(hashStringToSeed(seed + "::level::" + biome));
-
-  const spawn = { x: 0, z: 0 }; // terrain center — every biome's falloff/shaping keeps this area gentle
+  const spawn = { x: 0, z: 0 };
 
   const crystalSeeds = [];
   for (let i = 0; i < CRYSTAL_COUNT; i++) {
@@ -75,11 +56,6 @@ function generateLevelLayout(biome, seed) {
   const decorationSeeds = [];
   for (let i = 0; i < DECORATION_COUNT; i++) {
     const p = randomPointOnTerrain(rand);
-    // Each decoration gets its own derived PRNG stream (seeded off its own
-    // index) so createDecoration()'s internal randomness — branch counts,
-    // crystal-shard counts, scale variation — stays deterministic and
-    // reproducible per placement without decorations affecting each
-    // other's random draws.
     const localRand = mulberry32(hashStringToSeed(seed + "::decoration::" + biome + "::" + i));
     decorationSeeds.push({ id: `${biome}-deco-${i}`, x: p.x, z: p.z, rand: localRand });
   }

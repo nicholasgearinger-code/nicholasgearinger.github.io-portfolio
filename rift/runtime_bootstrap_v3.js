@@ -15,7 +15,6 @@ const state = {
   levelWarmStartedAt: 0,
   compileStarted: false,
   compileReady: false,
-  requestedPixelRatio: 1,
   adaptiveScale: 1,
   renderer: null,
   failedOptionalAssets: 0,
@@ -27,6 +26,14 @@ const state = {
 window.__riftRuntimePreloader = state;
 window.__riftWaterDetailStride = isTouch ? 2 : 1;
 window.__riftReducedEffects = false;
+// Never change WebGPU canvas DPR from the adaptive controller while gameplay is
+// active. WebGPU canvas textures are short-lived swapchain resources; resizing
+// or changing pixel ratio destroys the current BGRA8 canvas texture. If a queued
+// command buffer still references that texture, Queue.submit() correctly raises
+// "Destroyed texture ... used in a submit". Runtime adaptation therefore only
+// changes simulation/effect quality. Display resolution changes remain owned by
+// the game's normal initialization / explicit graphics / resize paths.
+window.__riftAdaptiveResolutionDisabled = true;
 
 function setProgress(value, status, detail) {
   const fn = window.__riftLoaderSetProgress;
@@ -161,13 +168,9 @@ if (proto && !proto.__riftBootstrapV3Patched) {
       if (state.levelWarming) {
         const now = performance.now();
 
-        // Do NOT call renderer.compileAsync() here. On WebGPU that method can
-        // create/submit internal encoder work while the live animation loop is
-        // already dispatching compute and render commands. Simple scenes often
-        // tolerate the overlap, but the multi-pass FFT/surf stack can leave the
-        // backend command encoder invalid on Safari/iPhone. Normal warm-up
-        // renders already force the same pipelines to compile, sequentially,
-        // without racing the renderer's encoder state.
+        // Do not run compileAsync concurrently with the live render/compute
+        // command stream. Sequential warm-up frames compile the same pipelines
+        // without risking an overlapping encoder on WebGPU.
         if (!state.compileStarted) {
           state.compileStarted = true;
           state.compileReady = true;
@@ -197,15 +200,9 @@ if (proto && !proto.__riftBootstrapV3Patched) {
     };
   }
 
-  const originalSetPixelRatio = proto.setPixelRatio;
-  if (typeof originalSetPixelRatio === "function") {
-    proto.setPixelRatio = function (ratio) {
-      state.renderer = this;
-      if (Number.isFinite(ratio) && ratio > 0) state.requestedPixelRatio = ratio;
-      const scale = state.gameStarted ? state.adaptiveScale : 1;
-      return originalSetPixelRatio.call(this, Math.max(0.65, state.requestedPixelRatio * scale));
-    };
-  }
+  // Intentionally DO NOT patch renderer.setPixelRatio(). The prior adaptive
+  // wrapper changed DPR during active WebGPU frames and could destroy the
+  // swapchain texture before the encoded command buffer was submitted.
 }
 
 let perfStart = performance.now();
@@ -245,9 +242,9 @@ function monitorPerformance(now) {
       goodWindows = 0;
     }
 
-    if (state.renderer && typeof state.renderer.setPixelRatio === "function") {
-      state.renderer.setPixelRatio(state.requestedPixelRatio);
-    }
+    // No live renderer.setPixelRatio()/setSize() calls here. Adaptive quality is
+    // intentionally restricted to shader/compute/effect cost so the active
+    // WebGPU canvas texture remains valid until the frame is submitted.
     perfStart = now;
     perfFrames = 0;
   }

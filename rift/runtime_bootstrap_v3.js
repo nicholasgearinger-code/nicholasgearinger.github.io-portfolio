@@ -160,18 +160,17 @@ if (proto && !proto.__riftBootstrapV3Patched) {
 
       if (state.levelWarming) {
         const now = performance.now();
+
+        // Do NOT call renderer.compileAsync() here. On WebGPU that method can
+        // create/submit internal encoder work while the live animation loop is
+        // already dispatching compute and render commands. Simple scenes often
+        // tolerate the overlap, but the multi-pass FFT/surf stack can leave the
+        // backend command encoder invalid on Safari/iPhone. Normal warm-up
+        // renders already force the same pipelines to compile, sequentially,
+        // without racing the renderer's encoder state.
         if (!state.compileStarted) {
           state.compileStarted = true;
-          if (typeof this.compileAsync === "function" && args[0] && args[1]) {
-            timeout(Promise.resolve(this.compileAsync(args[0], args[1])), 9000, "renderer.compileAsync()")
-              .then(() => { state.compileReady = true; })
-              .catch((err) => {
-                console.warn("[rift-preflight] background compile warm-up skipped:", err);
-                state.compileReady = true;
-              });
-          } else {
-            state.compileReady = true;
-          }
+          state.compileReady = true;
         }
 
         if (!state._lastWarmRender || now - state._lastWarmRender > 8) {

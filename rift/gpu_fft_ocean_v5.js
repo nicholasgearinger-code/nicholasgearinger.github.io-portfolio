@@ -11,7 +11,7 @@ import {
   updateGPUSurfCompute,
   updateGPUSurfSystem,
   disposeGPUSurfSystem,
-} from "./gpu_surf_system_v6.js";
+} from "./gpu_surf_system_v7.js";
 
 const DAY_SURFACE = new THREE.Color(0x245b63);
 const NIGHT_SURFACE = new THREE.Color(0x071a22);
@@ -89,7 +89,7 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   tuneReferenceOcean(handle, 0, Infinity, 0, 1);
 
   if (handle.fftSurfSystem) {
-    console.info("[gpu-fft-ocean] ACTIVE: rolling breakers + physical swash/backwash foam transport");
+    console.info("[gpu-fft-ocean] ACTIVE: continuous breakers + physical swash/backwash foam transport");
   }
   return handle;
 }
@@ -143,9 +143,6 @@ export function updateGPUFFTOceanVisuals(
     const dayT = THREE.MathUtils.clamp(day, 0, 1);
     const stormT = THREE.MathUtils.clamp(storm, 0, 1);
 
-    // Set these from source values every frame rather than multiplying/ANDing
-    // previous state. This makes quality restoration deterministic after the
-    // adaptive controller recovers from a low-FPS window.
     if (handle.fftSurfSystem.mist?.points) {
       handle.fftSurfSystem.mist.points.visible = !underwater && !reduced;
       if (handle.fftSurfSystem.mist.material) {

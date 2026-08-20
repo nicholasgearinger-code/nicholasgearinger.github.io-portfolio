@@ -21,14 +21,16 @@ function installPhysicalWaterOptics(handle) {
 
   const physical = new THREE.MeshPhysicalNodeMaterial({
     color: 0xffffff,
-    roughness: 0.045,
+    roughness: 0.032,
     metalness: 0.0,
-    transmission: 0.82,
+    transmission: 0.72,
     ior: WATER_IOR,
-    thickness: 0.34,
-    attenuationDistance: 38.0,
-    attenuationColor: new THREE.Color(0x8ad6db),
-    specularIntensity: 0.92,
+    thickness: 0.26,
+    attenuationDistance: 30.0,
+    attenuationColor: new THREE.Color(0x86d2d8),
+    specularIntensity: 0.98,
+    clearcoat: 0.28,
+    clearcoatRoughness: 0.055,
     transparent: false,
     opacity: 1.0,
     side: THREE.DoubleSide,
@@ -174,6 +176,36 @@ function installFFTDrivenCaustics(handle) {
   data.fftCausticSyncInstalled = true;
 }
 
+function tuneWaveEnergy(handle, elapsed = 0, storm = 0) {
+  if (!handle?.gpuFFT) return;
+
+  const stormT = THREE.MathUtils.clamp(storm, 0, 1);
+
+  // Keep the proven two-cascade FFT architecture, but put more energy into the
+  // medium and short wavelengths. Two slow envelopes keep the sea state from
+  // feeling mechanically repetitive while the actual wave motion still comes
+  // entirely from the GPU FFT spectra.
+  const longSet =
+    Math.sin(elapsed * 0.071 + 0.4) * 1.15 +
+    Math.sin(elapsed * 0.031 + 2.2) * 0.75;
+  const detailSet =
+    Math.sin(elapsed * 0.173 + 1.9) * 0.90 +
+    Math.sin(elapsed * 0.289 + 0.65) * 0.50;
+
+  if (handle.waveScale) {
+    handle.waveScale.value = 30.0 + longSet + stormT * 7.5;
+  }
+  if (handle.fftDetailHandle?.waveScale) {
+    handle.fftDetailHandle.waveScale.value = 20.0 + detailSet + stormT * 6.5;
+  }
+
+  // A small vertical boost makes rolling shoulders and troughs read better at
+  // mobile camera height without changing the water plane's mean level.
+  if (handle.mesh) {
+    handle.mesh.scale.y = 1.06 + stormT * 0.055;
+  }
+}
+
 export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   const handle = createBaseOcean(scene, y, size, sampleHeight);
   if (!handle?.gpuFFT) return handle;
@@ -186,6 +218,7 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
 
   installPhysicalWaterOptics(handle);
   installFFTDrivenCaustics(handle);
+  tuneWaveEnergy(handle, 0, 0);
   return handle;
 }
 
@@ -224,6 +257,10 @@ export function updateGPUFFTOceanVisuals(
     day,
   );
 
+  // gpu_fft_ocean_v2 sets its conservative validation amplitudes every frame;
+  // apply the richer sea-state tuning after that update so these values remain
+  // authoritative for the rendered surface.
+  tuneWaveEnergy(handle, elapsed, storm);
   installPhysicalWaterOptics(handle);
   installFFTDrivenCaustics(handle);
 
@@ -236,19 +273,25 @@ export function updateGPUFFTOceanVisuals(
     physical.ior = WATER_IOR;
 
     if (underwater) {
-      physical.transmission = 0.965;
-      physical.thickness = 0.075;
-      physical.attenuationDistance = 90.0;
+      physical.transmission = 0.955;
+      physical.thickness = 0.07;
+      physical.attenuationDistance = 88.0;
       physical.attenuationColor.set(0xb6e6e8);
-      physical.specularIntensity = 0.82;
-      physical.roughness = 0.028;
+      physical.specularIntensity = 0.84;
+      physical.roughness = 0.024;
+      physical.clearcoat = 0.10;
+      physical.clearcoatRoughness = 0.075;
     } else {
-      physical.transmission = 0.82 - stormT * 0.12;
-      physical.thickness = 0.34;
-      physical.attenuationDistance = 38.0;
-      physical.attenuationColor.set(0x8ad6db);
-      physical.specularIntensity = 0.92;
-      physical.roughness = 0.045 + stormT * 0.025;
+      // Lower transmission and a tighter dual specular response give individual
+      // wave faces enough contrast to read as water instead of one dark sheet.
+      physical.transmission = 0.72 - stormT * 0.10;
+      physical.thickness = 0.26;
+      physical.attenuationDistance = 30.0;
+      physical.attenuationColor.set(0x86d2d8);
+      physical.specularIntensity = 0.98;
+      physical.roughness = 0.032 + stormT * 0.022;
+      physical.clearcoat = 0.28;
+      physical.clearcoatRoughness = 0.055 + stormT * 0.025;
     }
   }
 }

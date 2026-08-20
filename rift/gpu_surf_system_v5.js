@@ -18,16 +18,30 @@ import {
 // the solved velocity field during both run-up and backwash.
 // -----------------------------------------------------------------------------
 
-function suppressProceduralWash(handle) {
-  if (handle?.wash?.mesh) handle.wash.mesh.visible = false;
-  if (handle?.wetSand?.mesh) handle.wetSand.mesh.visible = false;
+function disposeProceduralLayer(scene, layer) {
+  if (!layer) return;
+  if (layer.mesh) scene?.remove(layer.mesh);
+  try { layer.geometry?.dispose?.(); } catch (_) {}
+  try { layer.material?.dispose?.(); } catch (_) {}
+}
+
+function removeProceduralWash(scene, handle) {
+  if (!handle) return;
+  disposeProceduralLayer(scene, handle.wash);
+  disposeProceduralLayer(scene, handle.wetSand);
+  handle.wash = null;
+  handle.wetSand = null;
 }
 
 export function createGPUSurfSystem(scene, sampleHeight, waterY, shallowHandle) {
   const handle = createBaseSurf(scene, sampleHeight, waterY, shallowHandle);
   if (!handle?.gpuSurfSystem) return handle;
 
-  suppressProceduralWash(handle);
+  // v4 constructs its historical painted wash/wet-sand layers as part of the
+  // base surf bundle. They are no longer merely hidden: remove and dispose them
+  // immediately so only the simulated swash owns beach water/foam resources.
+  removeProceduralWash(scene, handle);
+
   handle.fluidSwash = createGPUSwashSolver(
     scene,
     sampleHeight,
@@ -51,11 +65,10 @@ export function updateGPUSurfCompute(handle, renderer, elapsedTime = 0) {
 export function updateGPUSurfSystem(handle, elapsed, cameraY, storm = 0, day = 1, sunDir = null) {
   if (!handle?.gpuSurfSystem) return;
 
-  // Breaker crest geometry and spray remain from v4. Immediately suppress the
-  // old procedural wash again because v4's updater intentionally re-enables it
-  // whenever the camera is above water.
+  // v4 still owns the bounded breaker crest geometry and spray/mist animation.
+  // wash/wetSand are null, so its update loop naturally skips those obsolete
+  // resources instead of touching invisible materials every frame.
   updateBaseSurf(handle, elapsed, cameraY, storm, day, sunDir);
-  suppressProceduralWash(handle);
 
   if (handle.fluidSwash?.gpuSwash) {
     updateGPUSwashVisuals(handle.fluidSwash, cameraY, storm, day);

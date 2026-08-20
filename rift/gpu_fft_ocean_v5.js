@@ -26,6 +26,7 @@ function tuneReferenceOcean(handle, elapsed = 0, cameraY = Infinity, storm = 0, 
   const stormT = THREE.MathUtils.clamp(storm, 0, 1);
   const dayT = THREE.MathUtils.clamp(day, 0, 1);
   const t = Number.isFinite(elapsed) ? elapsed : 0;
+  const reduced = typeof window !== "undefined" && window.__riftReducedEffects === true;
 
   const longSet =
     Math.sin(t * 0.061 + 0.4) * 0.72 +
@@ -34,8 +35,6 @@ function tuneReferenceOcean(handle, elapsed = 0, cameraY = Infinity, storm = 0, 
     Math.sin(t * 0.181 + 1.3) * 0.76 +
     Math.sin(t * 0.307 + 0.6) * 0.46;
 
-  // Slightly fuller offshore sea so the larger shore breakers grow out of an
-  // already moving ocean, while staying well below the old unstable amplitudes.
   if (handle.waveScale) {
     handle.waveScale.value = 25.0 + longSet + stormT * 6.0;
   }
@@ -64,14 +63,18 @@ function tuneReferenceOcean(handle, elapsed = 0, cameraY = Infinity, storm = 0, 
   const physical = handle.fftPhysicalMaterial;
   const underwater = Number.isFinite(cameraY) && cameraY < (handle.waterY ?? 0) - 0.08;
   if (physical && !underwater) {
-    physical.transmission = 0.66 - stormT * 0.08;
-    physical.thickness = 0.30;
+    // MeshPhysical transmission can require its own scene/color pass. Under a
+    // sustained frame-budget miss, disable ONLY that extra optical pass; the
+    // FFT surface, Fresnel/specular/clearcoat, explicit ocean reflection,
+    // breakers and foam remain visible. It restores automatically when FPS does.
+    physical.transmission = reduced ? 0.0 : 0.66 - stormT * 0.08;
+    physical.thickness = reduced ? 0.10 : 0.30;
     physical.attenuationDistance = 28.0;
     physical.attenuationColor.set(0x72aeb2);
     physical.specularIntensity = 1.0;
-    physical.roughness = 0.045 + stormT * 0.022;
-    physical.clearcoat = 0.46;
-    physical.clearcoatRoughness = 0.082 + stormT * 0.022;
+    physical.roughness = (reduced ? 0.055 : 0.045) + stormT * 0.022;
+    physical.clearcoat = reduced ? 0.34 : 0.46;
+    physical.clearcoatRoughness = (reduced ? 0.105 : 0.082) + stormT * 0.022;
   }
 }
 
@@ -133,6 +136,17 @@ export function updateGPUFFTOceanVisuals(
 
   if (handle?.fftSurfSystem?.gpuSurfSystem) {
     updateGPUSurfSystem(handle.fftSurfSystem, elapsed, cameraY, storm, day, sunDir);
+
+    // Mist is deliberately the first visual to shed under load: it is mostly a
+    // soft additive fill-rate effect and contributes less to wave readability
+    // than the actual breaker mesh, foam edge or primary droplets.
+    const reduced = typeof window !== "undefined" && window.__riftReducedEffects === true;
+    if (handle.fftSurfSystem.mist?.points) {
+      handle.fftSurfSystem.mist.points.visible = handle.fftSurfSystem.mist.points.visible && !reduced;
+    }
+    if (reduced && handle.fftSurfSystem.spray?.material) {
+      handle.fftSurfSystem.spray.material.opacity *= 0.82;
+    }
   }
 }
 

@@ -3,8 +3,20 @@ import {
   float, uint, vec4, max, min, abs, clamp, smoothstep, mix,
 } from "three/tsl";
 
+const TOUCH_DEVICE = typeof window !== "undefined" && (
+  "ontouchstart" in window || (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0)
+);
+
 export function createPersistentOceanFoam(cascade) {
-  if (!cascade?.gpuFFTStandalone) return null;
+  // Safari/iPhone WebGPU is much more sensitive to storage-buffer pressure in
+  // fragment stages. The v8 water material already reads several spectral and
+  // shallow-water storage fields, so binding another compute-written storage
+  // buffer into that fragment graph can invalidate the WebGPU command encoder
+  // on some devices. Keep the persistent Jacobian foam field on desktop, while
+  // touch devices use the existing compression/curvature whitecaps from the
+  // base ocean shader. This preserves the third FFT cascade and its motion while
+  // removing the risky extra storage binding/compute pass on mobile.
+  if (TOUCH_DEVICE || !cascade?.gpuFFTStandalone) return null;
 
   const N = cascade.N;
   const count = N * N;

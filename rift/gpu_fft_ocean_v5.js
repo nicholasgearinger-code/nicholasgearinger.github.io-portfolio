@@ -10,7 +10,7 @@ import {
   createGPUSurfSystem,
   updateGPUSurfSystem,
   disposeGPUSurfSystem,
-} from "./gpu_surf_system_v3.js";
+} from "./gpu_surf_system_v4.js";
 
 const DAY_SURFACE = new THREE.Color(0x245b63);
 const NIGHT_SURFACE = new THREE.Color(0x071a22);
@@ -28,23 +28,25 @@ function tuneReferenceOcean(handle, elapsed = 0, cameraY = Infinity, storm = 0, 
   const t = Number.isFinite(elapsed) ? elapsed : 0;
 
   const longSet =
-    Math.sin(t * 0.061 + 0.4) * 0.65 +
-    Math.sin(t * 0.027 + 2.1) * 0.38;
+    Math.sin(t * 0.061 + 0.4) * 0.72 +
+    Math.sin(t * 0.027 + 2.1) * 0.42;
   const detailSet =
-    Math.sin(t * 0.181 + 1.3) * 0.72 +
-    Math.sin(t * 0.307 + 0.6) * 0.44;
+    Math.sin(t * 0.181 + 1.3) * 0.76 +
+    Math.sin(t * 0.307 + 0.6) * 0.46;
 
+  // Slightly fuller offshore sea so the larger shore breakers grow out of an
+  // already moving ocean, while staying well below the old unstable amplitudes.
   if (handle.waveScale) {
-    handle.waveScale.value = 23.0 + longSet + stormT * 5.5;
+    handle.waveScale.value = 25.0 + longSet + stormT * 6.0;
   }
   if (handle.fftDetailHandle?.waveScale) {
-    handle.fftDetailHandle.waveScale.value = 20.5 + detailSet + stormT * 6.0;
+    handle.fftDetailHandle.waveScale.value = 21.5 + detailSet + stormT * 6.4;
   }
   if (handle.mesh) {
-    handle.mesh.scale.y = 0.99 + stormT * 0.045;
+    handle.mesh.scale.y = 1.01 + stormT * 0.05;
   }
   if (handle.fftFoamStrength) {
-    handle.fftFoamStrength.value = 0.62 + stormT * 0.72;
+    handle.fftFoamStrength.value = 0.68 + stormT * 0.78;
   }
 
   if (handle.fftSurfaceColor?.value) {
@@ -67,9 +69,9 @@ function tuneReferenceOcean(handle, elapsed = 0, cameraY = Infinity, storm = 0, 
     physical.attenuationDistance = 28.0;
     physical.attenuationColor.set(0x72aeb2);
     physical.specularIntensity = 1.0;
-    physical.roughness = 0.047 + stormT * 0.022;
-    physical.clearcoat = 0.42;
-    physical.clearcoatRoughness = 0.085 + stormT * 0.022;
+    physical.roughness = 0.045 + stormT * 0.022;
+    physical.clearcoat = 0.46;
+    physical.clearcoatRoughness = 0.082 + stormT * 0.022;
   }
 }
 
@@ -87,7 +89,7 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   tuneReferenceOcean(handle, 0, Infinity, 0, 1);
 
   if (handle.fftSurfSystem) {
-    console.info("[gpu-fft-ocean] ACTIVE: continuous shore waves + narrow swash foam + wet sand");
+    console.info("[gpu-fft-ocean] ACTIVE: larger rolling breakers + whitewater splash + swash");
   }
   return handle;
 }

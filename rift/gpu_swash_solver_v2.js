@@ -1,5 +1,5 @@
 import {
-  Fn, instanceIndex, float, uint, vec2, vec4,
+  Fn, instanceIndex, instancedArray, float, uint, vec2, vec4,
   attribute, floor, min, max, abs, mix, clamp, smoothstep,
 } from "three/tsl";
 import {
@@ -14,8 +14,12 @@ import {
 // Swash v2: keep the real wetting/drying simulation and transported foam tracer,
 // but make whitewater readable at the actual moving wet/dry front. No procedural
 // shore mask is introduced here: foam is still stored in and advected with the
-// solved swash state. This pass only adds physically motivated foam production at
-// the advancing/receding water front and a clearer rendering response.
+// solved swash state.
+//
+// The foam-front retention pass uses a dedicated scratch buffer. The previous
+// version wrote state.w in-place while neighboring compute invocations were
+// reading the same storage buffer, which is an undefined GPU data race. Two
+// ordered dispatches (read -> scratch, scratch -> state) make the result stable.
 // -----------------------------------------------------------------------------
 
 function smoothWeight(t) {
@@ -49,6 +53,9 @@ function installFoamFrontBoost(handle) {
 
   const count = SWASH_S * SWASH_R;
   const state = handle.state;
+  const scratch = instancedArray(count, "vec4");
+  handle.foamFrontScratch = scratch;
+  if (Array.isArray(handle.resources)) handle.resources.push(scratch);
 
   handle.foamFrontCompute = Fn(() => {
     const i = instanceIndex;
@@ -70,9 +77,6 @@ function installFoamFrontBoost(handle) {
     const landDry = float(1).sub(smoothstep(float(0.003), float(0.024), land.x));
     const offshoreWet = smoothstep(float(0.006), float(0.055), off.x);
 
-    // Positive cross-shore velocity is landward in the swash basis. Generate a
-    // strong white leading edge while the film advances, but retain a smaller
-    // amount during backwash so the same transported foam visibly returns.
     const runup = smoothstep(float(0.055), float(0.62), max(c.y, float(0)));
     const backwash = smoothstep(float(0.055), float(0.58), max(c.y.negate(), float(0)));
     const speed = abs(c.y).add(abs(c.z).mul(0.32));
@@ -83,20 +87,19 @@ function installFoamFrontBoost(handle) {
     const returningFoam = c.w.mul(backwash).mul(0.22);
     const shearFoam = movingFilm.mul(0.13);
 
-    // The base solver already handles physical breaker production + advection.
-    // This retention only keeps the tracer readable long enough to travel across
-    // exposed sand with the thin film instead of visually disappearing instantly.
     let foam = c.w.mul(0.997);
     foam = max(foam, advancingFoam);
     foam = max(foam, returningFoam);
     foam = max(foam, shearFoam);
     foam = clamp(foam, 0, 1);
 
-    state.element(i).assign(vec4(c.x, c.y, c.z, foam));
+    scratch.element(i).assign(vec4(c.x, c.y, c.z, foam));
   })().compute(count);
 
-  // Rebuild only the visual response on the existing mesh. The geometry and its
-  // positionNode remain driven by the solved water depth from the base swash.
+  handle.foamFrontCopy = Fn(() => {
+    state.element(instanceIndex).assign(scratch.element(instanceIndex));
+  })().compute(count);
+
   const material = handle.material;
   const coord = attribute("swashCoord", "vec2");
   const sampled = sampleStrip(handle.state, coord);
@@ -123,8 +126,6 @@ function installFoamFrontBoost(handle) {
   const returningWhite = transported.mul(backwash).mul(0.18);
   const foam = clamp(max(max(leadingWhite, movingWhite), returningWhite), 0, 1);
 
-  // Keep shallow water transparent enough that the sand remains visible while
-  // allowing bright whitewater to sit clearly on top of the moving water film.
   const beachFilm = film.mul(
     float(1).sub(smoothstep(float(1.8), float(4.0), max(sampledMeta.x, float(0)))),
   );
@@ -161,8 +162,9 @@ export function createGPUSwashSolver(scene, sampleHeight, waterY, sourceShallow,
 export function updateGPUSwashSolver(handle, renderer, elapsedTime = 0) {
   if (!handle?.gpuSwash) return;
   updateBaseSwash(handle, renderer, elapsedTime);
-  if (handle.foamFrontCompute && renderer && typeof renderer.compute === "function") {
+  if (handle.foamFrontCompute && handle.foamFrontCopy && renderer && typeof renderer.compute === "function") {
     renderer.compute(handle.foamFrontCompute);
+    renderer.compute(handle.foamFrontCopy);
   }
 }
 
@@ -173,6 +175,8 @@ export function updateGPUSwashVisuals(handle, cameraY, storm = 0, day = 1) {
 export function disposeGPUSwashSolver(scene, handle) {
   if (handle) {
     handle.foamFrontCompute = null;
+    handle.foamFrontCopy = null;
+    handle.foamFrontScratch = null;
     handle.foamFrontBoostInstalled = false;
   }
   disposeBaseSwash(scene, handle);

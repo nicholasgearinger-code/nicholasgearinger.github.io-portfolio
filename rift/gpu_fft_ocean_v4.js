@@ -13,6 +13,9 @@ import { setGPUShallowWaterInteraction } from "./gpu_shallow_water.js";
 const WATER_IOR = 1.333;
 const FFT_N = 128;
 const DETAIL_DOMAIN = 260;
+const TOUCH_DEVICE = typeof window !== "undefined" && (
+  "ontouchstart" in window || (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0)
+);
 
 function installPhysicalWaterOptics(handle) {
   const mesh = handle?.mesh;
@@ -84,8 +87,6 @@ function installFFTDrivenCaustics(handle) {
   const data = mat.userData;
   if (data?.fftCausticSyncInstalled) return;
 
-  // Prefer the shorter 260-unit detail cascade because its wavelength range is
-  // closest to the wavelets that visibly focus sunlight on the seabed.
   const detailA = handle.fftDetailHandle?.resources?.[8];
   const baseA = handle.resources?.[8];
   const source = detailA ?? baseA;
@@ -170,9 +171,6 @@ function tuneWaveEnergy(handle, elapsed = 0, storm = 0) {
   if (!handle?.gpuFFT) return;
 
   const stormT = THREE.MathUtils.clamp(storm, 0, 1);
-
-  // Multiple slow envelopes vary the sea state without introducing any
-  // non-FFT displacement. The actual surface remains entirely spectral.
   const longSet =
     Math.sin(elapsed * 0.071 + 0.4) * 0.90 +
     Math.sin(elapsed * 0.031 + 2.2) * 0.55;
@@ -201,6 +199,7 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   handle.fftInteractionWasSubmerged = false;
   handle.fftScene = scene;
   handle.fftTerrainCausticMaterial = null;
+  handle.fftPerfFrame = 0;
 
   installPhysicalWaterOptics(handle);
   installFFTDrivenCaustics(handle);
@@ -209,7 +208,26 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
 }
 
 export function updateGPUFFTOcean(handle, renderer, elapsedTime = 0) {
-  return updateBaseOcean(handle, renderer, elapsedTime);
+  if (!handle?.gpuFFT) return;
+
+  // The primary FFT and finite-depth surf remain full-rate. The shorter detail
+  // FFT is secondary visual structure and can refresh less often on a phone.
+  // Temporarily masking only the detail handle works with the existing v2 update
+  // path without duplicating or changing any FFT math.
+  handle.fftPerfFrame = (handle.fftPerfFrame ?? 0) + 1;
+  const runtimeStride = typeof window !== "undefined" && Number.isFinite(window.__riftWaterDetailStride)
+    ? Math.max(1, Math.floor(window.__riftWaterDetailStride))
+    : (TOUCH_DEVICE ? 2 : 1);
+  const detail = handle.fftDetailHandle;
+  const originalDetailFlag = detail?.gpuFFT;
+  const skipDetail = !!detail?.gpuFFT && runtimeStride > 1 && (handle.fftPerfFrame % runtimeStride !== 0);
+
+  if (skipDetail) detail.gpuFFT = false;
+  try {
+    return updateBaseOcean(handle, renderer, elapsedTime);
+  } finally {
+    if (detail && originalDetailFlag !== undefined) detail.gpuFFT = originalDetailFlag;
+  }
 }
 
 export function updateGPUFFTOceanVisuals(
@@ -265,8 +283,6 @@ export function updateGPUFFTOceanVisuals(
       physical.clearcoat = 0.10;
       physical.clearcoatRoughness = 0.075;
     } else {
-      // Strong grazing reflection, a clear top lobe, and slightly reduced
-      // transmission make individual FFT wave faces readable against the sky.
       physical.transmission = 0.74 - stormT * 0.10;
       physical.thickness = 0.42;
       physical.attenuationDistance = 30.0;

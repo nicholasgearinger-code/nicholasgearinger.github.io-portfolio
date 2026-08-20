@@ -1,9 +1,9 @@
 // Ghostwire / portfolio service worker — caches the app shell so the site
 // (including the Ghostwire game) loads offline or on a flaky connection.
 //
-// Ocean simulation modules are explicitly network-first so physics changes
-// cannot be hidden behind an older cached Rift build.
-const CACHE_NAME = 'ngearinger-shell-v29';
+// Rift simulation/bootstrap modules are explicitly network-first so loading,
+// shader and performance changes cannot be hidden behind an older cached build.
+const CACHE_NAME = 'ngearinger-shell-v30';
 
 const STATIC_SHELL = [
   './manifest.json',
@@ -26,7 +26,11 @@ const CORE_SHELL = [
   './gpu_fft_ocean_v2.js',
 
   // Actual live Rift game files used by the embedded game.
+  './rift/runtime_bootstrap.js',
   './rift/main.js',
+  './rift/levels.js',
+  './rift/graphicsSettings.js',
+  './rift/models.js',
   './rift/liquid.js',
   './rift/liquid_legacy.js',
   './rift/gpu_fft_ocean.js',

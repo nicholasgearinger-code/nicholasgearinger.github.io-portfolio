@@ -1,9 +1,8 @@
-// Ghostwire / portfolio service worker — caches the app shell so the site
-// (including the Ghostwire game) loads offline or on a flaky connection.
-//
-// Rift simulation/bootstrap modules are explicitly network-first so loading,
-// shader and performance changes cannot be hidden behind an older cached build.
-const CACHE_NAME = 'ngearinger-shell-v32';
+// Ghostwire / portfolio service worker — caches the lightweight portfolio shell
+// immediately, while Rift Islands assets are cached ON DEMAND as they are used.
+// This prevents a fresh portfolio visit from downloading the full game stack,
+// shaders and simulation modules before the visitor ever presses Play.
+const CACHE_NAME = 'ngearinger-shell-v33';
 
 const STATIC_SHELL = [
   './manifest.json',
@@ -11,42 +10,15 @@ const STATIC_SHELL = [
   './icon-512.png',
 ];
 
+// Keep install deliberately small. Rift files are NOT listed here; /rift/
+// requests are network-first below and are cached only after the game requests
+// them. That preserves repeat/offline behavior without taxing normal site load.
 const CORE_SHELL = [
   './',
   './index.html',
   './ghostwire.js',
   './webcam-ai.js',
   './music/tracks.js',
-
-  // Root duplicate game files.
-  './main.js',
-  './liquid.js',
-  './liquid_legacy.js',
-  './gpu_fft_ocean.js',
-  './gpu_fft_ocean_v2.js',
-
-  // Actual live Rift game files used by the embedded game.
-  './rift/runtime_bootstrap.js',
-  './rift/main.js',
-  './rift/levels.js',
-  './rift/graphicsSettings.js',
-  './rift/models.js',
-  './rift/liquid.js',
-  './rift/liquid_legacy.js',
-  './rift/gpu_fft_ocean.js',
-  './rift/gpu_fft_ocean_v2.js',
-  './rift/gpu_fft_ocean_v3.js',
-  './rift/gpu_fft_ocean_v4.js',
-  './rift/gpu_fft_ocean_v5.js',
-  './rift/gpu_shallow_water.js',
-  './rift/gpu_swash_solver.js',
-  './rift/gpu_swash_solver_v2.js',
-  './rift/gpu_surf_system.js',
-  './rift/gpu_surf_system_v2.js',
-  './rift/gpu_surf_system_v3.js',
-  './rift/gpu_surf_system_v4.js',
-  './rift/gpu_surf_system_v5.js',
-  './rift/gpu_shore_breakers.js',
 ];
 
 self.addEventListener('install', (event) => {
@@ -73,11 +45,18 @@ function isCoreRequest(req) {
   return CORE_SHELL.some((url) => path.endsWith(url.replace('./', '/')) || path === '/');
 }
 
+function isRiftRequest(req) {
+  const path = new URL(req.url).pathname;
+  return path.includes('/rift/');
+}
+
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;
 
-  if (isCoreRequest(req)) {
+  // Portfolio core and Rift runtime code are network-first so new fixes are not
+  // hidden by an old cache. Rift is cached here only once a real request occurs.
+  if (isCoreRequest(req) || isRiftRequest(req)) {
     event.respondWith(
       fetch(req, { cache: 'reload' }).then((res) => {
         if (res && res.ok) {

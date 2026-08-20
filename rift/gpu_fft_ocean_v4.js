@@ -13,9 +13,95 @@ import { setGPUShallowWaterInteraction } from "./gpu_shallow_water.js";
 const WATER_IOR = 1.333;
 const FFT_N = 128;
 const DETAIL_DOMAIN = 260;
+const SHALLOW_N = 256;
+const SHALLOW_DOMAIN = 360;
+const MOBILE_RENDER_N = 320;
 const TOUCH_DEVICE = typeof window !== "undefined" && (
   "ontouchstart" in window || (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0)
 );
+
+function positiveFract(v) {
+  return ((v % 1) + 1) % 1;
+}
+
+function smooth01(t) {
+  t = THREE.MathUtils.clamp(t, 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
+// v2 deliberately keeps a 512² presentation mesh on desktop. Phones were
+// paying ~262k displaced water vertices every frame even though the source FFT
+// is only 128². Rebuild only the PRESENTATION geometry at 320² on touch devices
+// using the exact same named attributes the existing TSL displacement graph
+// reads. The simulation, interpolation, normals, shallow-water coupling and
+// physics remain unchanged; only rasterized vertex density drops (~61%).
+function installMobileRenderGeometry(handle, size, sampleHeight) {
+  if (!TOUCH_DEVICE || !handle?.mesh || handle.fftMobileGeometryApplied) return;
+
+  const n = MOBILE_RENDER_N;
+  const waterY = handle.waterY ?? 0;
+  const geometry = new THREE.PlaneGeometry(size, size, n - 1, n - 1);
+  geometry.rotateX(-Math.PI / 2);
+
+  const count = geometry.attributes.position.count;
+  const longCoords = new Float32Array(count * 2);
+  const detailCoords = new Float32Array(count * 2);
+  const shallowCoords = new Float32Array(count * 2);
+  const shallowCoverage = new Float32Array(count);
+  const shore = new Float32Array(count);
+  const depthWorld = new Float32Array(count);
+  const pos = geometry.attributes.position;
+
+  for (let rz = 0; rz < n; rz++) {
+    const fz = rz * (FFT_N - 1) / (n - 1);
+    for (let rx = 0; rx < n; rx++) {
+      const fx = rx * (FFT_N - 1) / (n - 1);
+      const i = rz * n + rx;
+      longCoords[i * 2] = fx;
+      longCoords[i * 2 + 1] = fz;
+
+      const x = pos.getX(i);
+      const z = pos.getZ(i);
+      detailCoords[i * 2] = positiveFract(x / DETAIL_DOMAIN + 0.5) * FFT_N;
+      detailCoords[i * 2 + 1] = positiveFract(z / DETAIL_DOMAIN + 0.5) * FFT_N;
+
+      const sgx = (x / SHALLOW_DOMAIN + 0.5) * (SHALLOW_N - 1);
+      const sgz = (z / SHALLOW_DOMAIN + 0.5) * (SHALLOW_N - 1);
+      shallowCoords[i * 2] = THREE.MathUtils.clamp(sgx, 0, SHALLOW_N - 1);
+      shallowCoords[i * 2 + 1] = THREE.MathUtils.clamp(sgz, 0, SHALLOW_N - 1);
+
+      const squareRadius = Math.max(Math.abs(x), Math.abs(z)) / (SHALLOW_DOMAIN * 0.5);
+      shallowCoverage[i] = 1 - smooth01((squareRadius - 0.80) / 0.18);
+
+      const groundY = sampleHeight ? sampleHeight(x, z) : null;
+      const signedDepth = groundY === null ? 12 : waterY - groundY;
+      const depth = Math.max(0, signedDepth);
+      depthWorld[i] = Math.min(depth, 24);
+
+      if (signedDepth <= -0.35) shore[i] = 0;
+      else if (signedDepth < 0) {
+        const t = (signedDepth + 0.35) / 0.35;
+        shore[i] = smooth01(t) * 0.08;
+      } else {
+        shore[i] = 0.08 + smooth01(signedDepth / 2.5) * 0.92;
+      }
+    }
+  }
+
+  geometry.setAttribute("fftCoordLong", new THREE.Float32BufferAttribute(longCoords, 2));
+  geometry.setAttribute("fftCoordDetail", new THREE.Float32BufferAttribute(detailCoords, 2));
+  geometry.setAttribute("shallowCoord", new THREE.Float32BufferAttribute(shallowCoords, 2));
+  geometry.setAttribute("shallowCoverage", new THREE.Float32BufferAttribute(shallowCoverage, 1));
+  geometry.setAttribute("fftShoreDense", new THREE.Float32BufferAttribute(shore, 1));
+  geometry.setAttribute("fftDepthWorld", new THREE.Float32BufferAttribute(depthWorld, 1));
+  geometry.computeBoundingSphere();
+
+  const oldGeometry = handle.mesh.geometry;
+  handle.mesh.geometry = geometry;
+  try { oldGeometry?.dispose?.(); } catch (_) {}
+  handle.fftMobileGeometryApplied = true;
+  handle.mesh.material.needsUpdate = true;
+}
 
 function installPhysicalWaterOptics(handle) {
   const mesh = handle?.mesh;
@@ -201,6 +287,7 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   handle.fftTerrainCausticMaterial = null;
   handle.fftPerfFrame = 0;
 
+  installMobileRenderGeometry(handle, size, sampleHeight);
   installPhysicalWaterOptics(handle);
   installFFTDrivenCaustics(handle);
   tuneWaveEnergy(handle, 0, 0);
@@ -210,10 +297,6 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
 export function updateGPUFFTOcean(handle, renderer, elapsedTime = 0) {
   if (!handle?.gpuFFT) return;
 
-  // The primary FFT and finite-depth surf remain full-rate. The shorter detail
-  // FFT is secondary visual structure and can refresh less often on a phone.
-  // Temporarily masking only the detail handle works with the existing v2 update
-  // path without duplicating or changing any FFT math.
   handle.fftPerfFrame = (handle.fftPerfFrame ?? 0) + 1;
   const runtimeStride = typeof window !== "undefined" && Number.isFinite(window.__riftWaterDetailStride)
     ? Math.max(1, Math.floor(window.__riftWaterDetailStride))

@@ -8,7 +8,7 @@ import {
   updateGPUSwashSolver,
   updateGPUSwashVisuals,
   disposeGPUSwashSolver,
-} from "./gpu_swash_solver.js";
+} from "./gpu_swash_solver_v2.js";
 
 // -----------------------------------------------------------------------------
 // Surf v5: keep v4's bounded rolling breaker geometry + lightweight spray, but
@@ -38,7 +38,7 @@ export function createGPUSurfSystem(scene, sampleHeight, waterY, shallowHandle) 
   handle.fluidFoam = !!handle.fluidSwash;
 
   if (handle.fluidSwash) {
-    console.info("[gpu-surf] ACTIVE: simulated swash run-up/backwash + advected foam tracer");
+    console.info("[gpu-surf] ACTIVE: simulated swash + transported whitewater on sand");
   }
   return handle;
 }

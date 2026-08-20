@@ -97,8 +97,6 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
 export function updateGPUFFTOcean(handle, renderer, elapsedTime = 0) {
   const result = updateBaseOcean(handle, renderer, elapsedTime);
   if (handle?.fftSurfSystem?.gpuSurfSystem) {
-    // Advance the compact beach solver after the main FFT + 256² shallow-water
-    // state so its offshore boundary samples the freshest ocean result.
     updateGPUSurfCompute(handle.fftSurfSystem, renderer, elapsedTime);
   }
   return result;
@@ -141,11 +139,25 @@ export function updateGPUFFTOceanVisuals(
     updateGPUSurfSystem(handle.fftSurfSystem, elapsed, cameraY, storm, day, sunDir);
 
     const reduced = typeof window !== "undefined" && window.__riftReducedEffects === true;
+    const underwater = Number.isFinite(cameraY) && cameraY < (handle.waterY ?? 0) - 0.10;
+    const dayT = THREE.MathUtils.clamp(day, 0, 1);
+    const stormT = THREE.MathUtils.clamp(storm, 0, 1);
+
+    // Set these from source values every frame rather than multiplying/ANDing
+    // previous state. This makes quality restoration deterministic after the
+    // adaptive controller recovers from a low-FPS window.
     if (handle.fftSurfSystem.mist?.points) {
-      handle.fftSurfSystem.mist.points.visible = handle.fftSurfSystem.mist.points.visible && !reduced;
+      handle.fftSurfSystem.mist.points.visible = !underwater && !reduced;
+      if (handle.fftSurfSystem.mist.material) {
+        handle.fftSurfSystem.mist.material.opacity = reduced ? 0 : (0.06 + dayT * 0.08 + stormT * 0.09);
+      }
     }
-    if (reduced && handle.fftSurfSystem.spray?.material) {
-      handle.fftSurfSystem.spray.material.opacity *= 0.82;
+    if (handle.fftSurfSystem.spray?.points) {
+      handle.fftSurfSystem.spray.points.visible = !underwater;
+    }
+    if (handle.fftSurfSystem.spray?.material) {
+      const baseOpacity = 0.26 + dayT * 0.20 + stormT * 0.16;
+      handle.fftSurfSystem.spray.material.opacity = baseOpacity * (reduced ? 0.82 : 1.0);
     }
   }
 }

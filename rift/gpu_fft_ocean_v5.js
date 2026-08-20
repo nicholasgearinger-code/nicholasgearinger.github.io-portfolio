@@ -8,9 +8,10 @@ import {
 } from "./gpu_fft_ocean_v4.js";
 import {
   createGPUSurfSystem,
+  updateGPUSurfCompute,
   updateGPUSurfSystem,
   disposeGPUSurfSystem,
-} from "./gpu_surf_system_v4.js";
+} from "./gpu_surf_system_v5.js";
 
 const DAY_SURFACE = new THREE.Color(0x245b63);
 const NIGHT_SURFACE = new THREE.Color(0x071a22);
@@ -63,10 +64,6 @@ function tuneReferenceOcean(handle, elapsed = 0, cameraY = Infinity, storm = 0, 
   const physical = handle.fftPhysicalMaterial;
   const underwater = Number.isFinite(cameraY) && cameraY < (handle.waterY ?? 0) - 0.08;
   if (physical && !underwater) {
-    // MeshPhysical transmission can require its own scene/color pass. Under a
-    // sustained frame-budget miss, disable ONLY that extra optical pass; the
-    // FFT surface, Fresnel/specular/clearcoat, explicit ocean reflection,
-    // breakers and foam remain visible. It restores automatically when FPS does.
     physical.transmission = reduced ? 0.0 : 0.66 - stormT * 0.08;
     physical.thickness = reduced ? 0.10 : 0.30;
     physical.attenuationDistance = 28.0;
@@ -92,13 +89,19 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   tuneReferenceOcean(handle, 0, Infinity, 0, 1);
 
   if (handle.fftSurfSystem) {
-    console.info("[gpu-fft-ocean] ACTIVE: larger rolling breakers + whitewater splash + swash");
+    console.info("[gpu-fft-ocean] ACTIVE: rolling breakers + physical swash/backwash foam transport");
   }
   return handle;
 }
 
 export function updateGPUFFTOcean(handle, renderer, elapsedTime = 0) {
-  return updateBaseOcean(handle, renderer, elapsedTime);
+  const result = updateBaseOcean(handle, renderer, elapsedTime);
+  if (handle?.fftSurfSystem?.gpuSurfSystem) {
+    // Advance the compact beach solver after the main FFT + 256² shallow-water
+    // state so its offshore boundary samples the freshest ocean result.
+    updateGPUSurfCompute(handle.fftSurfSystem, renderer, elapsedTime);
+  }
+  return result;
 }
 
 export function updateGPUFFTOceanVisuals(
@@ -137,9 +140,6 @@ export function updateGPUFFTOceanVisuals(
   if (handle?.fftSurfSystem?.gpuSurfSystem) {
     updateGPUSurfSystem(handle.fftSurfSystem, elapsed, cameraY, storm, day, sunDir);
 
-    // Mist is deliberately the first visual to shed under load: it is mostly a
-    // soft additive fill-rate effect and contributes less to wave readability
-    // than the actual breaker mesh, foam edge or primary droplets.
     const reduced = typeof window !== "undefined" && window.__riftReducedEffects === true;
     if (handle.fftSurfSystem.mist?.points) {
       handle.fftSurfSystem.mist.points.visible = handle.fftSurfSystem.mist.points.visible && !reduced;

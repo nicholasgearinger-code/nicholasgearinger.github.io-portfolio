@@ -5,7 +5,7 @@ import {
   updateGPUFFTOceanVisuals,
   updateGPUFFTOceanRipples,
   disposeGPUFFTOcean,
-} from "./gpu_fft_ocean_v4.js";
+} from "./gpu_fft_ocean_v5.js";
 
 // Preserve the full Rift liquid API from the legacy module. Explicit exports
 // below override the Crystal entry points so only Coral Shallows uses FFT.
@@ -19,7 +19,7 @@ export function createLiquidPlane(scene, biome, y, size, sampleHeight, flowDir =
 }
 
 // The legacy Crystal breaker was a second overlapping water mesh. Keep it off;
-// the stable FFT/shallow-water surface now supplies surf foam and interactions.
+// the new local surf system lives inside the FFT ocean wrapper instead.
 export function createBreakingWave() {
   return null;
 }

@@ -1,3 +1,4 @@
+import * as THREE from "three";
 import {
   createGPUFFTOceanPlane as createBaseOcean,
   updateGPUFFTOcean as updateBaseOcean,
@@ -9,11 +10,70 @@ import {
   createGPUSurfSystem,
   updateGPUSurfSystem,
   disposeGPUSurfSystem,
-} from "./gpu_surf_system.js";
+} from "./gpu_surf_system_v2.js";
 
-// Adds local breakers, beach wash and whitewater spray on top of the stable
-// FFT + shallow-water + optics stack. The surf meshes are intentionally local
-// disconnected patches so a bad shoreline sample cannot tear the global ocean.
+const DAY_SURFACE = new THREE.Color(0x245b63);
+const NIGHT_SURFACE = new THREE.Color(0x071a22);
+const STORM_SURFACE = new THREE.Color(0x183a40);
+const DAY_CREST = new THREE.Color(0xc7dedc);
+const NIGHT_CREST = new THREE.Color(0x708c95);
+const DAY_FOAM = new THREE.Color(0xf7f9f4);
+const NIGHT_FOAM = new THREE.Color(0x91a1a4);
+
+function tuneReferenceOcean(handle, elapsed = 0, cameraY = Infinity, storm = 0, day = 1) {
+  if (!handle?.gpuFFT) return;
+
+  const stormT = THREE.MathUtils.clamp(storm, 0, 1);
+  const dayT = THREE.MathUtils.clamp(day, 0, 1);
+  const t = Number.isFinite(elapsed) ? elapsed : 0;
+
+  // Natural coastal sea state: restrain the large swell and keep the short FFT
+  // cascade energetic so the surface reads as dense wind-driven chop.
+  const longSet =
+    Math.sin(t * 0.061 + 0.4) * 0.65 +
+    Math.sin(t * 0.027 + 2.1) * 0.38;
+  const detailSet =
+    Math.sin(t * 0.181 + 1.3) * 0.72 +
+    Math.sin(t * 0.307 + 0.6) * 0.44;
+
+  if (handle.waveScale) {
+    handle.waveScale.value = 23.0 + longSet + stormT * 5.5;
+  }
+  if (handle.fftDetailHandle?.waveScale) {
+    handle.fftDetailHandle.waveScale.value = 20.5 + detailSet + stormT * 6.0;
+  }
+  if (handle.mesh) {
+    handle.mesh.scale.y = 0.99 + stormT * 0.045;
+  }
+  if (handle.fftFoamStrength) {
+    handle.fftFoamStrength.value = 0.62 + stormT * 0.72;
+  }
+
+  if (handle.fftSurfaceColor?.value) {
+    handle.fftSurfaceColor.value.copy(NIGHT_SURFACE)
+      .lerp(DAY_SURFACE, dayT)
+      .lerp(STORM_SURFACE, stormT * 0.55);
+  }
+  if (handle.fftCrestColor?.value) {
+    handle.fftCrestColor.value.copy(NIGHT_CREST).lerp(DAY_CREST, dayT);
+  }
+  if (handle.fftFoamColor?.value) {
+    handle.fftFoamColor.value.copy(NIGHT_FOAM).lerp(DAY_FOAM, dayT);
+  }
+
+  const physical = handle.fftPhysicalMaterial;
+  const underwater = Number.isFinite(cameraY) && cameraY < (handle.waterY ?? 0) - 0.08;
+  if (physical && !underwater) {
+    physical.transmission = 0.66 - stormT * 0.08;
+    physical.thickness = 0.30;
+    physical.attenuationDistance = 28.0;
+    physical.attenuationColor.set(0x72aeb2);
+    physical.specularIntensity = 1.0;
+    physical.roughness = 0.047 + stormT * 0.022;
+    physical.clearcoat = 0.42;
+    physical.clearcoatRoughness = 0.085 + stormT * 0.022;
+  }
+}
 
 export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   const handle = createBaseOcean(scene, y, size, sampleHeight);
@@ -26,8 +86,10 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
     handle.fftShallowHandle,
   );
 
+  tuneReferenceOcean(handle, 0, Infinity, 0, 1);
+
   if (handle.fftSurfSystem) {
-    console.info("[gpu-fft-ocean] ACTIVE: local breakers + beach wash + whitewater spray");
+    console.info("[gpu-fft-ocean] ACTIVE: natural coastal rollers + lacy wash + wet-sand surf");
   }
   return handle;
 }
@@ -66,6 +128,8 @@ export function updateGPUFFTOceanVisuals(
     storm,
     day,
   );
+
+  tuneReferenceOcean(handle, elapsed, cameraY, storm, day);
 
   if (handle?.fftSurfSystem?.gpuSurfSystem) {
     updateGPUSurfSystem(handle.fftSurfSystem, elapsed, cameraY, storm, day, sunDir);

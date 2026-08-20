@@ -1,6 +1,6 @@
 import {
   Fn, instanceIndex, instancedArray, uniform,
-  float, uint, max, abs, clamp, smoothstep, mix,
+  float, uint, max, min, abs, clamp, smoothstep, mix,
 } from "three/tsl";
 
 export function createPersistentOceanFoam(cascade) {
@@ -24,6 +24,7 @@ export function createPersistentOceanFoam(cascade) {
     const xR = x.add(uint(1)).mod(row);
     const zD = z.add(uint(N - 1)).mod(row);
     const zU = z.add(uint(1)).mod(row);
+
     const iL = z.mul(row).add(xL);
     const iR = z.mul(row).add(xR);
     const iD = zD.mul(row).add(x);
@@ -47,6 +48,7 @@ export function createPersistentOceanFoam(cascade) {
       .mul(float(1).add(dDzdz))
       .sub(dDxdz.mul(dDzdx));
     const compression = clamp(float(1).sub(jacobian), 0, 1);
+
     const curvature = abs(aR.x.add(aL.x).sub(aC.x.mul(2)))
       .add(abs(aU.x.add(aD.x).sub(aC.x.mul(2))));
     const breaking = max(
@@ -55,10 +57,14 @@ export function createPersistentOceanFoam(cascade) {
     );
 
     const previous = foamA.element(i);
-    const upstream = foamA.element(iL).mul(0.66).add(foamA.element(iD).mul(0.34));
-    const advected = mix(previous, upstream, dtUniform.mul(0.82).min(float(0.11)));
-    const decay = float(1).sub(dtUniform.mul(float(0.12).add(stormUniform.mul(0.035)))).max(0);
-    const injection = breaking.mul(dtUniform).mul(float(1.8).add(stormUniform.mul(1.25)));
+    const upstream = foamA.element(iL).mul(0.66)
+      .add(foamA.element(iD).mul(0.34));
+    const advected = mix(previous, upstream, min(dtUniform.mul(0.82), float(0.11)));
+    const decay = max(float(0), float(1).sub(dtUniform.mul(float(0.12).add(stormUniform.mul(0.035)))));
+    const injection = breaking
+      .mul(dtUniform)
+      .mul(float(1.8).add(stormUniform.mul(1.25)));
+
     foamB.element(i).assign(clamp(advected.mul(decay).add(injection), 0, 1));
   })().compute(count);
 

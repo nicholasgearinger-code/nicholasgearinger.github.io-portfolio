@@ -3,7 +3,7 @@
 //
 // Rift simulation/bootstrap modules are explicitly network-first so loading,
 // shader and performance changes cannot be hidden behind an older cached build.
-const CACHE_NAME = 'ngearinger-shell-v30';
+const CACHE_NAME = 'ngearinger-shell-v31';
 
 const STATIC_SHELL = [
   './manifest.json',
@@ -39,10 +39,12 @@ const CORE_SHELL = [
   './rift/gpu_fft_ocean_v4.js',
   './rift/gpu_fft_ocean_v5.js',
   './rift/gpu_shallow_water.js',
+  './rift/gpu_swash_solver.js',
   './rift/gpu_surf_system.js',
   './rift/gpu_surf_system_v2.js',
   './rift/gpu_surf_system_v3.js',
   './rift/gpu_surf_system_v4.js',
+  './rift/gpu_surf_system_v5.js',
   './rift/gpu_shore_breakers.js',
 ];
 

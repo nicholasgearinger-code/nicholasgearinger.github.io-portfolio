@@ -19,7 +19,13 @@ export const SHALLOW_N = 256;
 export const SHALLOW_DOMAIN = 360;
 const GRAVITY = 9.81;
 const FFT_SOURCE_N = 128;
-const SUBSTEPS = 2;
+const TOUCH_DEVICE = typeof window !== "undefined" && (
+  "ontouchstart" in window || (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0)
+);
+// Two substeps remain on desktop/high-power devices. Mobile uses one stabilized
+// step per display frame: the scheme is already dissipative/bounded, and this
+// halves the biggest finite-depth compute cost without lowering the 256² grid.
+const SUBSTEPS = TOUCH_DEVICE ? 1 : 2;
 
 function buildBathymetry(sampleHeight, waterY, domain, N) {
   const data = new Float32Array(N * N * 4);
@@ -48,7 +54,6 @@ export function createGPUShallowWater(sampleHeight, waterY, fftSpatialA, fftDoma
   const bathymetryData = buildBathymetry(sampleHeight, waterY, domain, N);
   const zeroState = new Float32Array(count * 4);
 
-  // state = eta, velocityX, velocityZ, breakingFoam
   const stateA = instancedArray(zeroState, "vec4");
   const stateB = instancedArray(new Float32Array(count * 4), "vec4");
   const bathymetry = instancedArray(bathymetryData, "vec4");
@@ -121,7 +126,6 @@ export function createGPUShallowWater(sampleHeight, waterY, fftSpatialA, fftDoma
     velX = velX.mul(damp);
     velZ = velZ.mul(damp);
 
-    // Deep-water FFT forcing enters only through the outside of the shallow grid.
     const edgeX = min(xf, float(N - 1).sub(xf));
     const edgeZ = min(zf, float(N - 1).sub(zf));
     const edgeDist = min(edgeX, edgeZ);
@@ -146,9 +150,6 @@ export function createGPUShallowWater(sampleHeight, waterY, fftSpatialA, fftDoma
     const coupling = boundary.mul(forcingStrength).mul(smoothstep(float(1.4), float(5.0), bc.x));
     eta = mix(eta, fftEta.mul(0.46), coupling.mul(0.16));
 
-    // Player/water collision impulse. bc.yz are this cell's world X/Z. A
-    // smooth radial falloff injects a small depression plus outward velocity,
-    // which propagates as real concentric ripples/wake through the solver.
     const ix = bc.y.sub(interactionPosition.x);
     const iz = bc.z.sub(interactionPosition.y);
     const dist = sqrt(ix.mul(ix).add(iz.mul(iz)));
@@ -225,7 +226,7 @@ export function updateGPUShallowWater(handle, renderer, elapsedTime = 0) {
   if (!handle?.gpuShallowWater || !renderer || typeof renderer.compute !== "function") return;
   let frameDt = 1 / 60;
   if (Number.isFinite(handle.lastElapsed) && Number.isFinite(elapsedTime)) {
-    frameDt = THREE.MathUtils.clamp(elapsedTime - handle.lastElapsed, 1 / 240, 1 / 45);
+    frameDt = THREE.MathUtils.clamp(elapsedTime - handle.lastElapsed, 1 / 240, TOUCH_DEVICE ? 1 / 36 : 1 / 45);
   }
   handle.lastElapsed = Number.isFinite(elapsedTime) ? elapsedTime : 0;
   handle.dtUniform.value = frameDt / SUBSTEPS;
@@ -234,9 +235,6 @@ export function updateGPUShallowWater(handle, renderer, elapsedTime = 0) {
     for (const node of handle.computeFrame) renderer.compute(node);
   }
 
-  // Impulses are fed every frame by updateRippleLayer while the player is near
-  // the surface. Decay here prevents a stale input from continuously forcing the
-  // solver if gameplay pauses or the player leaves the interaction zone.
   if (handle.interactionStrength) handle.interactionStrength.value *= 0.72;
 }
 

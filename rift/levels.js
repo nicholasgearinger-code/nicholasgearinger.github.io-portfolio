@@ -1,4 +1,4 @@
-import "./runtime_bootstrap.js";
+import "./runtime_bootstrap_v2.js";
 import { mulberry32, hashStringToSeed, biomeColor } from "./worldgen.js";
 import { TERRAIN_SIZE } from "./terrain.js";
 

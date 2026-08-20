@@ -12,7 +12,7 @@ import { setGPUShallowWaterInteraction } from "./gpu_shallow_water.js";
 
 const WATER_IOR = 1.333;
 const FFT_N = 128;
-const DETAIL_DOMAIN = 420;
+const DETAIL_DOMAIN = 260;
 
 function installPhysicalWaterOptics(handle) {
   const mesh = handle?.mesh;
@@ -23,14 +23,14 @@ function installPhysicalWaterOptics(handle) {
     color: 0xffffff,
     roughness: 0.032,
     metalness: 0.0,
-    transmission: 0.72,
+    transmission: 0.74,
     ior: WATER_IOR,
-    thickness: 0.26,
+    thickness: 0.42,
     attenuationDistance: 30.0,
-    attenuationColor: new THREE.Color(0x86d2d8),
-    specularIntensity: 0.98,
-    clearcoat: 0.28,
-    clearcoatRoughness: 0.055,
+    attenuationColor: new THREE.Color(0x76c7d0),
+    specularIntensity: 1.0,
+    clearcoat: 0.72,
+    clearcoatRoughness: 0.12,
     transparent: false,
     opacity: 1.0,
     side: THREE.DoubleSide,
@@ -84,9 +84,8 @@ function installFFTDrivenCaustics(handle) {
   const data = mat.userData;
   if (data?.fftCausticSyncInstalled) return;
 
-  // Prefer the 420-unit detail cascade because its wavelength range is closer
-  // to the surface ripples that actually form visible caustic cells. Fall back
-  // to the primary long-wave FFT if the detail cascade is unavailable.
+  // Prefer the shorter 260-unit detail cascade because its wavelength range is
+  // closest to the wavelets that visibly focus sunlight on the seabed.
   const detailA = handle.fftDetailHandle?.resources?.[8];
   const baseA = handle.resources?.[8];
   const source = detailA ?? baseA;
@@ -98,9 +97,6 @@ function installFFTDrivenCaustics(handle) {
     2000;
   const domain = detailA ? DETAIL_DOMAIN : baseDomain;
 
-  // Remove the old temporary presentation-only tuning. In particular, the old
-  // onBeforeRender hook multiplied caustic intensity by 1.16 every draw, which
-  // could compound over time. main.js remains authoritative for intensity.
   delete data.fftCausticTuneInstalled;
 
   data.fftOriginalCausticEmissive = mat.emissiveNode;
@@ -129,10 +125,6 @@ function installFFTDrivenCaustics(handle) {
     const dhdx = r.sub(l).mul(inv2dx);
     const dhdz = u.sub(d).mul(inv2dx);
 
-    // Surface slope changes the incoming ray direction while the discrete
-    // Laplacian approximates convergence/divergence of neighboring rays. The
-    // existing caustic texture supplies the fine cellular pattern; this factor
-    // makes its brightness/focus follow the live FFT surface.
     const slope = clamp(
       abs(dhdx).add(abs(dhdz)).mul(2.0),
       0,
@@ -162,8 +154,6 @@ function installFFTDrivenCaustics(handle) {
     const ud = this.userData;
     if (!ud) return;
 
-    // Lock the built-in terrain-caustic animation to the exact GPU FFT clock.
-    // The built-in pattern, day/night, rain and cloud occlusion remain intact.
     if (ud.causticTimeUniform && handle.fftTime) {
       ud.causticTimeUniform.value = handle.fftTime.value;
     }
@@ -181,28 +171,24 @@ function tuneWaveEnergy(handle, elapsed = 0, storm = 0) {
 
   const stormT = THREE.MathUtils.clamp(storm, 0, 1);
 
-  // Keep the proven two-cascade FFT architecture, but put more energy into the
-  // medium and short wavelengths. Two slow envelopes keep the sea state from
-  // feeling mechanically repetitive while the actual wave motion still comes
-  // entirely from the GPU FFT spectra.
+  // Multiple slow envelopes vary the sea state without introducing any
+  // non-FFT displacement. The actual surface remains entirely spectral.
   const longSet =
-    Math.sin(elapsed * 0.071 + 0.4) * 1.15 +
-    Math.sin(elapsed * 0.031 + 2.2) * 0.75;
+    Math.sin(elapsed * 0.071 + 0.4) * 0.90 +
+    Math.sin(elapsed * 0.031 + 2.2) * 0.55;
   const detailSet =
-    Math.sin(elapsed * 0.173 + 1.9) * 0.90 +
-    Math.sin(elapsed * 0.289 + 0.65) * 0.50;
+    Math.sin(elapsed * 0.173 + 1.9) * 0.70 +
+    Math.sin(elapsed * 0.289 + 0.65) * 0.40;
 
   if (handle.waveScale) {
-    handle.waveScale.value = 30.0 + longSet + stormT * 7.5;
+    handle.waveScale.value = 28.0 + longSet + stormT * 7.0;
   }
   if (handle.fftDetailHandle?.waveScale) {
-    handle.fftDetailHandle.waveScale.value = 20.0 + detailSet + stormT * 6.5;
+    handle.fftDetailHandle.waveScale.value = 18.0 + detailSet + stormT * 6.0;
   }
 
-  // A small vertical boost makes rolling shoulders and troughs read better at
-  // mobile camera height without changing the water plane's mean level.
   if (handle.mesh) {
-    handle.mesh.scale.y = 1.06 + stormT * 0.055;
+    handle.mesh.scale.y = 1.02 + stormT * 0.05;
   }
 }
 
@@ -257,9 +243,6 @@ export function updateGPUFFTOceanVisuals(
     day,
   );
 
-  // gpu_fft_ocean_v2 sets its conservative validation amplitudes every frame;
-  // apply the richer sea-state tuning after that update so these values remain
-  // authoritative for the rendered surface.
   tuneWaveEnergy(handle, elapsed, storm);
   installPhysicalWaterOptics(handle);
   installFFTDrivenCaustics(handle);
@@ -282,16 +265,16 @@ export function updateGPUFFTOceanVisuals(
       physical.clearcoat = 0.10;
       physical.clearcoatRoughness = 0.075;
     } else {
-      // Lower transmission and a tighter dual specular response give individual
-      // wave faces enough contrast to read as water instead of one dark sheet.
-      physical.transmission = 0.72 - stormT * 0.10;
-      physical.thickness = 0.26;
+      // Strong grazing reflection, a clear top lobe, and slightly reduced
+      // transmission make individual FFT wave faces readable against the sky.
+      physical.transmission = 0.74 - stormT * 0.10;
+      physical.thickness = 0.42;
       physical.attenuationDistance = 30.0;
-      physical.attenuationColor.set(0x86d2d8);
-      physical.specularIntensity = 0.98;
-      physical.roughness = 0.032 + stormT * 0.022;
-      physical.clearcoat = 0.28;
-      physical.clearcoatRoughness = 0.055 + stormT * 0.025;
+      physical.attenuationColor.set(0x76c7d0);
+      physical.specularIntensity = 1.0;
+      physical.roughness = 0.032 + stormT * 0.020;
+      physical.clearcoat = 0.72;
+      physical.clearcoatRoughness = 0.12 + stormT * 0.025;
     }
   }
 }

@@ -11,7 +11,7 @@ import {
   updateGPUSurfCompute,
   updateGPUSurfSystem,
   disposeGPUSurfSystem,
-} from "./gpu_surf_system_v5.js";
+} from "./gpu_surf_system_v6.js";
 
 const DAY_SURFACE = new THREE.Color(0x245b63);
 const NIGHT_SURFACE = new THREE.Color(0x071a22);

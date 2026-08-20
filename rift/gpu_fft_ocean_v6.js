@@ -26,6 +26,51 @@ const NIGHT_CREST = new THREE.Color(0x738f98);
 const DAY_FOAM = new THREE.Color(0xf8faf6);
 const NIGHT_FOAM = new THREE.Color(0x91a0a3);
 
+// Three r182's instancedArray(TypedArray, type) builds the underlying
+// StorageInstancedBufferAttribute correctly, but passes the TypedArray itself
+// into StorageBufferNode.bufferCount. r183 changed that argument to
+// buffer.count. Safari/iOS reaches the bad r182 path while materializing these
+// storage attributes for the first compute dispatch and can fail inside the
+// backend's native TypedArray.set(). Repair the node metadata in-place before
+// any FFT/shallow/surf compute is submitted. This preserves the exact GPU FFT
+// buffers and avoids a risky library-wide upgrade while matching r183 behavior.
+function repairR182StorageBufferCounts(root) {
+  const seen = new WeakSet();
+
+  const visit = (value, depth = 0) => {
+    if (!value || typeof value !== "object" || depth > 8 || seen.has(value)) return;
+    seen.add(value);
+
+    if (value.isStorageBufferNode === true) {
+      const count = value.value?.count;
+      if (Number.isFinite(count) && value.bufferCount !== count) {
+        value.bufferCount = count;
+      }
+      return;
+    }
+
+    // Do not descend through TSL graphs or Three scene/render objects. The
+    // storage nodes we need are exposed directly on the simulation handles and
+    // in their resources arrays.
+    if (
+      value.isNode === true ||
+      value.isObject3D === true ||
+      value.isMaterial === true ||
+      value.isBufferGeometry === true ||
+      value.isTexture === true
+    ) return;
+
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, depth + 1);
+      return;
+    }
+
+    for (const child of Object.values(value)) visit(child, depth + 1);
+  };
+
+  visit(root);
+}
+
 function installSpectralOpticalDetail(handle) {
   if (!handle?.gpuFFT || handle.fftSpectralOpticsV6Installed) return;
   const material = handle.fftPhysicalMaterial ?? handle.mesh?.material;
@@ -197,6 +242,7 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
     handle.fftShallowHandle,
   );
 
+  repairR182StorageBufferCounts(handle);
   installSpectralOpticalDetail(handle);
   tuneReferenceOcean(handle, 0, Infinity, 0, 1);
 

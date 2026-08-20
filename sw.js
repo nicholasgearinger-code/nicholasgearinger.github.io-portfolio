@@ -2,7 +2,7 @@
 // immediately, while Rift Islands assets are cached ON DEMAND as they are used.
 // This prevents a fresh portfolio visit from downloading the full game stack,
 // shaders and simulation modules before the visitor ever presses Play.
-const CACHE_NAME = 'ngearinger-shell-v43';
+const CACHE_NAME = 'ngearinger-shell-v44';
 
 const STATIC_SHELL = [
   './manifest.json',

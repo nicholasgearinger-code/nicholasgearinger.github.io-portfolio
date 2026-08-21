@@ -283,6 +283,93 @@ function suppressLegacyLightning(handle) {
   }
 }
 
+// The remaining "lightning" flash was not coming from lightningLight anymore.
+// Coral Shallows' realistic cloud dome changes to its storm mood by fading the
+// entire dome to opacity 0, swapping the panorama, then fading back in. At the
+// same time the dome has a slow opacity breathing term. Against a dark storm,
+// either behavior reads as the whole sky/scene blinking. The weather wrapper
+// already has the live storm state, so install a tiny guard on the two dome
+// materials (sphere + zenith cap, both renderOrder -95): while Crystal is
+// storming, their opacity is held steady and storm-time map swaps are deferred.
+// Clear-weather opacity/map behavior remains untouched.
+function installCrystalStormSkyGuard(handle) {
+  if (!handle?.scene || handle.biome !== "crystal") return;
+
+  const guarded = handle.crystalStormSkyMaterials || (handle.crystalStormSkyMaterials = []);
+  for (const child of handle.scene.children) {
+    const material = child?.material;
+    if (!material || child.renderOrder !== -95) continue;
+    material.userData = material.userData || {};
+    if (material.userData.riftCrystalStormSkyGuard) continue;
+
+    const opacityDescriptor = Object.getOwnPropertyDescriptor(material, "opacity");
+    if (opacityDescriptor && opacityDescriptor.configurable === false) continue;
+
+    let storedOpacity = Number.isFinite(material.opacity) ? material.opacity : 1;
+    let storedMap = material.map ?? null;
+    const hasMapSlot = "map" in material;
+
+    Object.defineProperty(material, "opacity", {
+      configurable: true,
+      enumerable: true,
+      get() {
+        return storedOpacity;
+      },
+      set(value) {
+        const next = Number.isFinite(value) ? value : 1;
+        const storming = !!handle.rainActive || (handle.rainIntensity ?? 0) > 0.01;
+        storedOpacity = storming ? 0.99 : next;
+      },
+    });
+
+    if (hasMapSlot) {
+      const mapDescriptor = Object.getOwnPropertyDescriptor(material, "map");
+      if (!mapDescriptor || mapDescriptor.configurable !== false) {
+        Object.defineProperty(material, "map", {
+          configurable: true,
+          enumerable: true,
+          get() {
+            return storedMap;
+          },
+          set(value) {
+            const storming = !!handle.rainActive || (handle.rainIntensity ?? 0) > 0.01;
+            // The existing daylight/cloud texture is already darkened smoothly
+            // by stormAmount, so keep that map during a storm instead of doing a
+            // full-brightness panorama swap at the transition midpoint.
+            if (!storming) storedMap = value;
+          },
+        });
+      }
+    }
+
+    material.userData.riftCrystalStormSkyGuard = true;
+    guarded.push(material);
+  }
+}
+
+function removeCrystalStormSkyGuard(handle) {
+  const guarded = handle?.crystalStormSkyMaterials;
+  if (!guarded) return;
+  for (const material of guarded) {
+    if (!material) continue;
+    const opacity = material.opacity;
+    const map = material.map;
+    try {
+      delete material.opacity;
+      material.opacity = opacity;
+      if ("map" in material || map) {
+        delete material.map;
+        material.map = map;
+      }
+    } catch (_) {
+      // Material disposal immediately follows level teardown; cleanup here is
+      // best-effort only and must never block teardown.
+    }
+    if (material.userData) delete material.userData.riftCrystalStormSkyGuard;
+  }
+  handle.crystalStormSkyMaterials = null;
+}
+
 function suppressCrystalStormFlicker(handle) {
   if (!handle || handle.biome !== "crystal") return;
   const storming = !!handle.rainActive || (handle.rainIntensity ?? 0) > 0.08;
@@ -332,6 +419,7 @@ export function updateWeatherSystem(handle, dt, erupting = false, dayAmount = 0,
   // Legacy has just run, so hard-disable every old lightning channel again.
   suppressLegacyLightning(handle);
   suppressCrystalStormFlicker(handle);
+  installCrystalStormSkyGuard(handle);
 
   const eligible = strikeEligible(handle);
   const cooldownRange = STRIKE_COOLDOWNS[handle.biome] ?? [20, 36];
@@ -355,6 +443,7 @@ export function updateWeatherSystem(handle, dt, erupting = false, dayAmount = 0,
 }
 
 export function disposeWeatherSystem(scene, handle) {
+  removeCrystalStormSkyGuard(handle);
   const bolt = handle?.realLightningBolt;
   if (bolt) {
     scene.remove(bolt.group);

@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import {
-  Fn, instanceIndex, instancedArray, float, uint,
+  Fn, instanceIndex, instancedArray, storage, float, uint,
   uniform, vec2, vec3, vec4, color, positionLocal,
   mix, clamp, min, max, attribute, sin, cos, cross,
 } from "three/tsl";
@@ -215,10 +215,33 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   const count = N * N;
   const spectrumData = buildSpectrumData(N, size, 1337);
 
-  const h0Buffer = instancedArray(spectrumData.h0, "vec4");
-  const metaBuffer = instancedArray(spectrumData.meta, "vec4");
-  const mirrorBuffer = instancedArray(spectrumData.mirror, "float");
-  const bitReverseBuffer = instancedArray(spectrumData.bitReverse, "float");
+  // three.js r182 has a bug in instancedArray(TypedArray, type): the TypedArray
+  // itself is forwarded as StorageBufferNode.bufferCount instead of the logical
+  // element count. Some WebGPU backends tolerate it, but Safari/iOS reaches a
+  // native TypedArray.set() failure while createStorageAttribute() initializes
+  // the compute buffer. Build the four CPU-seeded buffers explicitly with the
+  // correct itemSize and bufferCount. Numeric instancedArray(count, type) below
+  // remains safe because its count is already scalar.
+  const h0Buffer = storage(
+    new THREE.StorageInstancedBufferAttribute(spectrumData.h0, 4),
+    "vec4",
+    count,
+  );
+  const metaBuffer = storage(
+    new THREE.StorageInstancedBufferAttribute(spectrumData.meta, 4),
+    "vec4",
+    count,
+  );
+  const mirrorBuffer = storage(
+    new THREE.StorageInstancedBufferAttribute(spectrumData.mirror, 1),
+    "float",
+    count,
+  );
+  const bitReverseBuffer = storage(
+    new THREE.StorageInstancedBufferAttribute(spectrumData.bitReverse, 1),
+    "float",
+    N,
+  );
 
   const spectrumA = instancedArray(count, "vec4");
   const spectrumB = instancedArray(count, "vec4");

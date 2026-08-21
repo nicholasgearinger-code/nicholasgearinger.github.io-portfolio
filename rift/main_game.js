@@ -24,10 +24,20 @@ if (matchingLines.length !== 1) {
 }
 source = lines.filter((line) => !line.includes(badEditLabel)).join("\n");
 
-// The preserved loader normally resolves its relative URLs from its own file.
-// Once evaluated from a Blob URL, import.meta.url would instead be blob:, so pin
-// it back to the real /rift/ module directory before importing it.
-source = source.replaceAll("import.meta.url", JSON.stringify(moduleBaseUrl.href));
+// The preserved loader is evaluated from a Blob URL. Rewrite only its two
+// actual import.meta.url URL-construction lines. Do not globally replace the
+// text, because the loader also contains the literal string "import.meta.url"
+// as part of its own runtime-source rewrite step.
+const loaderBaseLine = 'const baseModuleUrl = new URL("./main_game_rain_base.js", import.meta.url);';
+const loaderModuleLine = 'const moduleBaseUrl = new URL("./", import.meta.url);';
+const resolvedBaseLine = `const baseModuleUrl = new URL("./main_game_rain_base.js", ${JSON.stringify(moduleBaseUrl.href)});`;
+const resolvedModuleLine = `const moduleBaseUrl = new URL("./", ${JSON.stringify(moduleBaseUrl.href)});`;
+
+if (!source.includes(loaderBaseLine) || !source.includes(loaderModuleLine)) {
+  throw new Error("[rift-underwater-hotfix] Tuned loader URL bootstrap changed unexpectedly");
+}
+source = source.replace(loaderBaseLine, resolvedBaseLine);
+source = source.replace(loaderModuleLine, resolvedModuleLine);
 source += "\n//# sourceURL=rift/main_game_underwater_hotfixed.loader.js\n";
 
 const blob = new Blob([source], { type: "text/javascript" });

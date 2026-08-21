@@ -32,19 +32,19 @@ function applyNaturalLightBalance(cycle) {
     const lowSun = 1 - altitudeT;
 
     if (elevation > -0.08) {
-      // Stronger low-angle attenuation: direct sun should lose energy quickly
-      // near the horizon while the sky remains a soft diffuse source.
-      cycle.sun.intensity *= THREE.MathUtils.lerp(0.36, 1.0, altitudeT);
-      cycle.sun.color.lerp(HORIZON_SUN_LIGHT, lowSun * 0.24);
+      // Low-angle sunlight should lose direct energy rapidly as it approaches
+      // the horizon, while the sky remains a broad diffuse source.
+      cycle.sun.intensity *= THREE.MathUtils.lerp(0.28, 1.0, altitudeT);
+      cycle.sun.color.lerp(HORIZON_SUN_LIGHT, lowSun * 0.26);
 
-      cycle.ambient.intensity *= 1 + lowSun * 0.22;
+      cycle.ambient.intensity *= 1 + lowSun * 0.26;
       if (cycle.ambient.color?.isColor) {
         cycle.ambient.color.lerp(HORIZON_SKY_FILL, lowSun * 0.07);
       }
     }
   }
 
-  if (cycle.moonLight) cycle.moonLight.intensity *= 0.38;
+  if (cycle.moonLight) cycle.moonLight.intensity *= 0.32;
 }
 
 export function createDayNightCycle(scene, sun, ambient, starfield, biome, moonLight) {

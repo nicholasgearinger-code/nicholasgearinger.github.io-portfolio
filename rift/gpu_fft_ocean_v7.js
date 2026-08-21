@@ -7,9 +7,9 @@ import {
   disposeGPUFFTOcean as disposeBaseOcean,
 } from "./gpu_fft_ocean_v6.js";
 
-const DAY_BODY = new THREE.Color(0x2f7478);
-const DAY_SHALLOW = new THREE.Color(0x6bc5c0);
-const DAY_CREST = new THREE.Color(0xd9f0e9);
+const DAY_BODY = new THREE.Color(0x287f8f);
+const DAY_SHALLOW = new THREE.Color(0x72d9cf);
+const DAY_CREST = new THREE.Color(0xe6f5ef);
 const DAY_FOAM = new THREE.Color(0xfbfcf8);
 const NIGHT_BODY = new THREE.Color(0x071a22);
 const STORM_BODY = new THREE.Color(0x183b42);
@@ -52,10 +52,10 @@ function tuneCoastalOptics(handle, elapsed = 0, cameraY = Infinity, storm = 0, d
     handle.fftFoamColor.value.set(0x91a0a3).lerp(DAY_FOAM, dayT);
   }
   if (handle.fftOpticalShallowTint?.value) {
-    handle.fftOpticalShallowTint.value.set(0x315d65).lerp(DAY_SHALLOW, dayT);
+    handle.fftOpticalShallowTint.value.set(0x2c6068).lerp(DAY_SHALLOW, dayT);
   }
   if (handle.fftOpticalTransmissionTint?.value) {
-    handle.fftOpticalTransmissionTint.value.set(0x5b7e83).lerp(new THREE.Color(0xb8e7da), dayT);
+    handle.fftOpticalTransmissionTint.value.set(0x5b7e83).lerp(new THREE.Color(0xc9f0e5), dayT);
   }
   if (handle.fftOpticalSparkleTint?.value) {
     handle.fftOpticalSparkleTint.value.set(0xaec7da).lerp(new THREE.Color(0xffe8bf), dayT);
@@ -78,14 +78,17 @@ function tuneCoastalOptics(handle, elapsed = 0, cameraY = Infinity, storm = 0, d
     physical.clearcoat = 0.06;
     physical.clearcoatRoughness = 0.075;
   } else {
-    physical.transmission = reduced ? 0 : 0.62 - stormT * 0.09;
-    physical.thickness = reduced ? 0.08 : 0.30;
-    physical.attenuationDistance = 36;
-    physical.attenuationColor.set(0x83c7c3);
-    physical.specularIntensity = 1.0;
-    physical.roughness = (reduced ? 0.058 : 0.036) + stormT * 0.028;
-    physical.clearcoat = reduced ? 0.28 : 0.62;
-    physical.clearcoatRoughness = (reduced ? 0.11 : 0.072) + stormT * 0.032;
+    // Clear tropical shallows: slightly more transmission and a longer
+    // attenuation distance let the pale seabed show through near shore while
+    // deeper water still keeps the FFT body's saturated cyan-blue color.
+    physical.transmission = reduced ? 0 : 0.70 - stormT * 0.11;
+    physical.thickness = reduced ? 0.08 : 0.24;
+    physical.attenuationDistance = 48;
+    physical.attenuationColor.set(0x98d8d1);
+    physical.specularIntensity = 0.96;
+    physical.roughness = (reduced ? 0.058 : 0.032) + stormT * 0.030;
+    physical.clearcoat = reduced ? 0.28 : 0.58;
+    physical.clearcoatRoughness = (reduced ? 0.11 : 0.068) + stormT * 0.034;
   }
 }
 

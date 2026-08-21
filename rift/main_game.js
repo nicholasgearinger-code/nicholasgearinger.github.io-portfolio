@@ -1,8 +1,8 @@
-// Rift storm rain/lens tuning loader.
+// Rift storm rain/lens + underwater realism tuning loader.
 //
 // The full game source is preserved byte-for-byte in main_game_rain_base.js.
-// This loader applies only narrowly-scoped presentation tuning at startup so
-// the large, stable runtime does not need to be manually rewritten.
+// This loader applies narrowly-scoped presentation tuning at startup so the
+// large, stable runtime does not need to be manually rewritten.
 
 const baseModuleUrl = new URL("./main_game_rain_base.js", import.meta.url);
 const moduleBaseUrl = new URL("./", import.meta.url);
@@ -45,6 +45,23 @@ const edits = [
   ["weatherHandle.rainIntensity = Math.min(1, weatherHandle.rainIntensity + dt * 2);", "weatherHandle.rainIntensity = Math.min(1, weatherHandle.rainIntensity + dt * 0.2);", "forced storm ramp"],
   ["lensRainWetness = Math.min(rainTarget, lensRainWetness + dt / 3);", "lensRainWetness = Math.min(rainTarget, lensRainWetness + dt / 14);", "lens wet-up"],
   ["lensRainWetness = Math.max(rainTarget, lensRainWetness - dt / 35);", "lensRainWetness = Math.max(rainTarget, lensRainWetness - dt / 40);", "lens dry-down"],
+  ["const UNDERWATER_NEUTRAL_TINT = new THREE.Color(0xd8f0f0);", "const UNDERWATER_NEUTRAL_TINT = new THREE.Color(0xd8f0f0);\nconst UNDERWATER_SURFACE_FOG = new THREE.Color(0x35b9c8);\nconst UNDERWATER_DEEP_FOG = new THREE.Color(0x07506d);\nconst UNDERWATER_STORM_FOG = new THREE.Color(0x153d52);\nconst UNDERWATER_SURFACE_LIGHT = new THREE.Color(0xfff3d6);\nconst UNDERWATER_DEEP_LIGHT = new THREE.Color(0x7bc8d2);\nconst UNDERWATER_SURFACE_AMBIENT = new THREE.Color(0x8fe1e5);\nconst UNDERWATER_DEEP_AMBIENT = new THREE.Color(0x2f8095);\nconst UNDERWATER_SURFACE_TINT = new THREE.Color(0x62c9d2);\nconst UNDERWATER_DEEP_TINT = new THREE.Color(0x12627a);", "underwater depth palette"],
+  ["fogColor: 0x2fa8b8, fogDensity: 0.028, sunColor: 0x8fe0e6, sunMult: 0.55,", "fogColor: 0x35b9c8, fogDensity: 0.018, sunColor: 0xfff3d6, sunMult: 0.68,", "crystal underwater direct light"],
+  ["ambientColor: 0x6fd8dc, ambientMult: 0.85, tint: [0.35, 0.78, 0.8], tintStrength: 0.1, causticStrength: 0, distortAmp: 0.005, volumeColor: 0x5fd0d8,", "ambientColor: 0x8fe1e5, ambientMult: 0.92, tint: [0.25, 0.67, 0.74], tintStrength: 0.06, causticStrength: 0, distortAmp: 0.003, volumeColor: 0x36aabd,", "crystal underwater ambient"],
+  ["const UNDERWATER_LIGHTING_ENABLED = false;", "const UNDERWATER_LIGHTING_ENABLED = true;", "enable underwater lighting"],
+  ["const clarity = currentBiome === \"crystal\" ? dayNight.dayAmount * (1 - stormAmountNow) : 0;", "const waterDepth = Math.max(0, currentLiquidLevel - camera.position.y);\n    const depthFactor = THREE.MathUtils.clamp(waterDepth / 16, 0, 1);\n    const clarity = currentBiome === \"crystal\" ? dayNight.dayAmount * (1 - stormAmountNow) : 0;", "underwater depth factor"],
+  ["scene.fog.color.setHex(uwStyle.fogColor).lerp(UNDERWATER_NEUTRAL_TINT, clarity * 0.6);", "tempUnderwaterTintColor.copy(UNDERWATER_SURFACE_FOG).lerp(UNDERWATER_DEEP_FOG, depthFactor);\n    tempUnderwaterTintColor.lerp(UNDERWATER_STORM_FOG, (1 - clarity) * 0.22);\n    scene.fog.color.copy(tempUnderwaterTintColor);", "underwater fog color by depth"],
+  ["scene.fog.density = uwStyle.fogDensity * (1 - clarity * 0.7);", "scene.fog.density = THREE.MathUtils.lerp(0.008, 0.034, depthFactor) + (1 - clarity) * 0.006;", "underwater fog density by depth"],
+  ["sun.color.setHex(uwStyle.sunColor).lerp(UNDERWATER_NEUTRAL_LIGHT, clarity * 0.75);", "sun.color.copy(UNDERWATER_SURFACE_LIGHT).lerp(UNDERWATER_DEEP_LIGHT, depthFactor * 0.72);", "underwater sunlight absorption"],
+  ["const dayBrightBoost = currentBiome === \"crystal\" ? 1.0 + clarity * 1.6 : 1.0;", "const dayBrightBoost = currentBiome === \"crystal\" ? (1.0 + clarity * 0.9) * (1 - depthFactor * 0.48) : 1.0;", "underwater direct light falloff"],
+  ["ambientLight.color.setHex(uwStyle.ambientColor).lerp(UNDERWATER_NEUTRAL_LIGHT, clarity * 0.75);", "ambientLight.color.copy(UNDERWATER_SURFACE_AMBIENT).lerp(UNDERWATER_DEEP_AMBIENT, depthFactor * 0.82);", "underwater ambient absorption"],
+  ["ambientLight.intensity *= uwStyle.ambientMult * dayBrightBoost;", "ambientLight.intensity *= uwStyle.ambientMult * (1.0 + clarity * 0.45) * (1 - depthFactor * 0.28);", "underwater diffuse fill"],
+  ["tempUnderwaterTintColor.setRGB(uwStyle.tint[0], uwStyle.tint[1], uwStyle.tint[2]).lerp(UNDERWATER_NEUTRAL_TINT, clarity * 0.6);", "tempUnderwaterTintColor.copy(UNDERWATER_SURFACE_TINT).lerp(UNDERWATER_DEEP_TINT, depthFactor);", "underwater depth tint"],
+  ["underwaterDistortionMaterial.uniforms.tintStrength.value = uwStyle.tintStrength * (1 - clarity * 0.75);", "underwaterDistortionMaterial.uniforms.tintStrength.value = 0.02 + depthFactor * 0.07;", "underwater tint strength"],
+  ["waterVolumeMesh.material.color.setHex(uwStyle.volumeColor).lerp(UNDERWATER_NEUTRAL_TINT, clarity * 0.6);", "waterVolumeMesh.material.color.copy(UNDERWATER_SURFACE_TINT).lerp(UNDERWATER_DEEP_TINT, depthFactor);", "water volume color by depth"],
+  ["waterVolumeMesh.material.opacity = 0.12 * (1 - clarity * 0.6);", "waterVolumeMesh.material.opacity = 0.025 + depthFactor * 0.055 + (1 - clarity) * 0.015;", "water volume opacity by depth"],
+  ["(0.22 + crestFocus * 0.2) * dayCausticBoost", "(0.28 + crestFocus * 0.24) * dayCausticBoost", "seafloor caustic brightness"],
+  ["updateLightShafts(underwaterShaftHandles, dayNight.dayAmount);", "const underwaterRayDepth = Math.max(0, currentLiquidLevel - camera.position.y);\n  const underwaterRayDepthFade = 1 - THREE.MathUtils.clamp(underwaterRayDepth / 24, 0, 1) * 0.55;\n  const underwaterRayStorm = weatherHandle ? weatherHandle.rainIntensity : 0;\n  updateLightShafts(underwaterShaftHandles, dayNight.dayAmount * (1 - underwaterRayStorm * 0.65) * underwaterRayDepthFade);", "underwater god ray attenuation"],
 ];
 
 for (const [from, to, label] of edits) source = replaceExactlyOnce(source, from, to, label);
@@ -52,7 +69,7 @@ for (const [from, to, label] of edits) source = replaceExactlyOnce(source, from,
 source = source.replace(/(\bfrom\s*)(["'])(\.{1,2}\/[^"']+)\2/g, (_, prefix, quote, specifier) => `${prefix}${quote}${new URL(specifier, moduleBaseUrl).href}${quote}`);
 source = source.replace(/(\bimport\s*)(["'])(\.{1,2}\/[^"']+)\2/g, (_, prefix, quote, specifier) => `${prefix}${quote}${new URL(specifier, moduleBaseUrl).href}${quote}`);
 source = source.replaceAll("import.meta.url", JSON.stringify(moduleBaseUrl.href));
-source += "\n//# sourceURL=rift/main_game_rain_tuned.runtime.js\n";
+source += "\n//# sourceURL=rift/main_game_rain_underwater_tuned.runtime.js\n";
 
 const blob = new Blob([source], { type: "text/javascript" });
 const blobUrl = URL.createObjectURL(blob);

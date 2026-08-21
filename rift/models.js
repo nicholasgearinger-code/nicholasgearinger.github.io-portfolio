@@ -11,18 +11,24 @@ function tuneFoliageMaterial(material) {
   }
 
   material.userData = material.userData || {};
-  if (material.userData.riftNaturalFoliageLightingV2) return;
+  if (material.userData.riftNaturalFoliageLightingV3) return;
 
   material.side = THREE.DoubleSide;
   material.toneMapped = true;
   if (material.map) material.map.colorSpace = THREE.SRGBColorSpace;
 
-  // Palm leaves are broad, rough dielectric surfaces. Clamp all of the glossy
-  // PBR channels so low-angle sun/environment light cannot clip fronds white.
+  // Palm leaves are broad, rough dielectric surfaces. Clamp glossy PBR channels
+  // hard enough that low-angle sun/environment light cannot bleach fronds white.
   if ("metalness" in material) material.metalness = 0.0;
-  if ("roughness" in material) material.roughness = Math.max(0.97, Number(material.roughness) || 0);
-  if ("envMapIntensity" in material) material.envMapIntensity = Math.min(0.14, Number(material.envMapIntensity) || 0.14);
-  if ("specularIntensity" in material) material.specularIntensity = Math.min(0.08, Number(material.specularIntensity) || 0.08);
+  if ("roughness" in material) {
+    material.roughness = Math.max(0.99, Number(material.roughness) || 0);
+  }
+  if ("envMapIntensity" in material) {
+    material.envMapIntensity = Math.min(0.06, Number(material.envMapIntensity) || 0.06);
+  }
+  if ("specularIntensity" in material) {
+    material.specularIntensity = Math.min(0.04, Number(material.specularIntensity) || 0.04);
+  }
   if ("clearcoat" in material) material.clearcoat = 0.0;
   if ("clearcoatRoughness" in material) material.clearcoatRoughness = 1.0;
   if ("iridescence" in material) material.iridescence = 0.0;
@@ -30,11 +36,10 @@ function tuneFoliageMaterial(material) {
   if (material.emissive?.isColor) material.emissive.set(0x000000);
   if ("emissiveIntensity" in material) material.emissiveIntensity = 0.0;
 
-  // Leave authored texture hue intact, but lower the reflectance ceiling enough
-  // that sun-facing texels retain green/brown detail instead of becoming white.
-  if (material.color?.isColor) material.color.multiplyScalar(0.84);
+  // Preserve authored hue/detail but keep the albedo ceiling below white clipping.
+  if (material.color?.isColor) material.color.multiplyScalar(0.90);
 
-  material.userData.riftNaturalFoliageLightingV2 = true;
+  material.userData.riftNaturalFoliageLightingV3 = true;
   material.needsUpdate = true;
 }
 

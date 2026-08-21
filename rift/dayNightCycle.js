@@ -1,138 +1,79 @@
 import * as THREE from "three";
-import * as current from "./dayNightCycle_phase_base.js";
+import * as current from "./dayNightCycle_lighting_base.js";
 
-export * from "./dayNightCycle_phase_base.js";
+export * from "./dayNightCycle_lighting_base.js";
 
-// Lunar phases layer. The preserved base module still owns the realistic
-// sun/moon textures, orbit, sky timing and scene lighting. This wrapper only
-// masks the existing cratered moon surface and scales its halo/moonlight.
-const LUNAR_CYCLE_DAYS = 8;
-const LUNAR_CYCLE_SECONDS = current.CYCLE_SECONDS * LUNAR_CYCLE_DAYS;
-const PHASE_TEX_SIZE = 128;
-const PHASE_STEPS = 180;
+// -----------------------------------------------------------------------------
+// Atmospheric light balance
+// -----------------------------------------------------------------------------
+// The preserved base module owns the full day/night orbit, moon phases, sky,
+// sun/moon visuals and shadow direction. This wrapper only corrects the actual
+// scene-light intensity balance so dawn/dusk behaves more like real low-angle
+// sunlight: weaker direct light, a little more diffuse sky fill, and genuinely
+// dim moonlight rather than a second weak sun.
 
-function clamp01(v) {
-  return Math.max(0, Math.min(1, Number(v) || 0));
+const ORBIT_RADIUS = 260;
+const SUN_VISUAL_HORIZON_OFFSET = 10;
+const HORIZON_SUN_LIGHT = new THREE.Color(0xff9a57);
+
+function clamp01(value) {
+  return Math.max(0, Math.min(1, Number(value) || 0));
 }
 
-function smooth01(v) {
-  const t = clamp01(v);
+function smoothstep01(value) {
+  const t = clamp01(value);
   return t * t * (3 - 2 * t);
 }
 
-function createPhaseMask() {
-  const canvas = document.createElement("canvas");
-  canvas.width = PHASE_TEX_SIZE;
-  canvas.height = PHASE_TEX_SIZE;
-  const ctx = canvas.getContext("2d");
-  const image = ctx.createImageData(PHASE_TEX_SIZE, PHASE_TEX_SIZE);
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.NoColorSpace;
-  texture.needsUpdate = true;
-  return { canvas, ctx, image, texture, lastStep: -1, illumination: 1 };
-}
+function applyNaturalLightBalance(cycle) {
+  if (!cycle) return;
 
-function updatePhaseMask(mask, phase01) {
-  const phase = ((phase01 % 1) + 1) % 1;
-  const step = Math.round(phase * PHASE_STEPS) % PHASE_STEPS;
-  if (step === mask.lastStep) return mask.illumination;
+  const visualY = cycle.sunBody?.group?.position?.y;
+  if (Number.isFinite(visualY) && cycle.sun && cycle.ambient) {
+    const elevation = THREE.MathUtils.clamp(
+      (visualY - SUN_VISUAL_HORIZON_OFFSET) / ORBIT_RADIUS,
+      -1,
+      1,
+    );
 
-  // Full moon at 0, new moon at 0.5, full again at 1. The illuminated
-  // hemisphere is projected onto the visible lunar sphere, so quarter and
-  // crescent shapes have a real curved terminator rather than a flat wipe.
-  const angle = phase * Math.PI * 2;
-  const lightX = Math.sin(angle);
-  const lightZ = Math.cos(angle);
-  const illumination = (1 + Math.cos(angle)) * 0.5;
+    // 1 right at the horizon, smoothly reaching 0 by roughly 16 degrees of
+    // solar elevation. Real sunlight passes through far more atmosphere at
+    // this angle, so direct irradiance drops sharply while diffuse sky light
+    // remains comparatively strong.
+    const altitudeT = smoothstep01(Math.max(0, elevation) / 0.28);
+    const lowSun = 1 - altitudeT;
 
-  const size = PHASE_TEX_SIZE;
-  const c = (size - 1) * 0.5;
-  const r = size * 0.46;
-  const data = mask.image.data;
+    // Keep nighttime values owned by the base cycle. This correction only
+    // applies through twilight and once the sun is above the horizon.
+    if (elevation > -0.08) {
+      const directAttenuation = THREE.MathUtils.lerp(0.58, 1.0, altitudeT);
+      cycle.sun.intensity *= directAttenuation;
 
-  for (let y = 0; y < size; y++) {
-    const ny = (c - y) / r;
-    for (let x = 0; x < size; x++) {
-      const nx = (x - c) / r;
-      const rr = nx * nx + ny * ny;
-      const i = (y * size + x) * 4;
-      let lit = 0;
+      // The base already warms the sun near the horizon; this small additional
+      // physical bias makes sure any remaining highlight energy is amber rather
+      // than neutral white without recoloring midday sunlight.
+      cycle.sun.color.lerp(HORIZON_SUN_LIGHT, lowSun * 0.12);
 
-      if (rr <= 1) {
-        const nz = Math.sqrt(Math.max(0, 1 - rr));
-        const incidence = nx * lightX + nz * lightZ;
-        lit = smooth01((incidence + 0.018) / 0.036);
-      }
-
-      // SpriteMaterial alphaMap reads the green channel. Keep RGB equal so the
-      // mask is unambiguous and leave alpha fully opaque.
-      const value = Math.round(lit * 255);
-      data[i] = value;
-      data[i + 1] = value;
-      data[i + 2] = value;
-      data[i + 3] = 255;
+      // Soft sky fill prevents the scene from becoming pure black silhouettes
+      // once the direct sun is attenuated. This is diffuse illumination, not a
+      // second directional source, so it does not recreate hard white patches.
+      cycle.ambient.intensity *= 1 + lowSun * 0.14;
     }
   }
 
-  mask.ctx.putImageData(mask.image, 0, 0);
-  mask.texture.needsUpdate = true;
-  mask.lastStep = step;
-  mask.illumination = illumination;
-  return illumination;
-}
-
-function installMoonPhases(cycle) {
-  if (!cycle || cycle.__riftMoonPhasesInstalled) return cycle;
-  const mask = createPhaseMask();
-  updatePhaseMask(mask, 0);
-
-  if (cycle.moonBody?.core?.material) {
-    cycle.moonBody.core.material.alphaMap = mask.texture;
-    cycle.moonBody.core.material.alphaTest = 0.01;
-    cycle.moonBody.core.material.needsUpdate = true;
-  }
-
-  cycle.__riftMoonPhaseMask = mask;
-  cycle.__riftMoonPhasesInstalled = true;
-  cycle.moonPhase = 0;
-  cycle.moonIllumination = 1;
-  return cycle;
-}
-
-function updateMoonPhases(cycle) {
-  if (!cycle?.__riftMoonPhasesInstalled) return;
-
-  const elapsed = Math.max(0, Number(cycle.elapsed) || 0);
-  const phase = (elapsed % LUNAR_CYCLE_SECONDS) / LUNAR_CYCLE_SECONDS;
-  const illumination = updatePhaseMask(cycle.__riftMoonPhaseMask, phase);
-
-  // The base updater refreshes glow opacity and moonlight each frame, so these
-  // multipliers never accumulate. A crescent has a faint halo and weak shadows;
-  // a new moon contributes essentially no visible moon or moonlight.
-  if (cycle.moonBody?.glow?.material) {
-    cycle.moonBody.glow.material.opacity *= Math.pow(illumination, 0.72);
-  }
-
-  if (cycle.moonLight) {
-    cycle.moonLight.intensity *= Math.pow(illumination, 0.85);
-  }
-
-  if (cycle.moonBody?.group && illumination < 0.002) {
-    cycle.moonBody.group.visible = false;
-  }
-
-  cycle.moonPhase = phase;
-  cycle.moonIllumination = illumination;
+  // The previous peak moonlight was 0.4 versus 2.0 for the sun — far too close
+  // for realistic night lighting and strong enough to create bright highlights.
+  // Preserve the lunar-phase multiplier from the base and simply scale the final
+  // result down to a subtle, shadow-readable maximum.
+  if (cycle.moonLight) cycle.moonLight.intensity *= 0.45;
 }
 
 export function createDayNightCycle(scene, sun, ambient, starfield, biome, moonLight) {
-  return installMoonPhases(
-    current.createDayNightCycle(scene, sun, ambient, starfield, biome, moonLight),
-  );
+  return current.createDayNightCycle(scene, sun, ambient, starfield, biome, moonLight);
 }
 
 export function updateDayNightCycle(cycle, dt) {
   const result = current.updateDayNightCycle(cycle, dt);
-  updateMoonPhases(cycle);
+  applyNaturalLightBalance(cycle);
   return result;
 }

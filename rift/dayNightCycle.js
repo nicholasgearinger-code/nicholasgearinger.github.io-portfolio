@@ -3,18 +3,10 @@ import * as current from "./dayNightCycle_lighting_base.js";
 
 export * from "./dayNightCycle_lighting_base.js";
 
-// -----------------------------------------------------------------------------
-// Atmospheric light balance
-// -----------------------------------------------------------------------------
-// The preserved base module owns the full day/night orbit, moon phases, sky,
-// sun/moon visuals and shadow direction. This wrapper only corrects the actual
-// scene-light intensity balance so dawn/dusk behaves more like real low-angle
-// sunlight: weaker direct light, a little more diffuse sky fill, and genuinely
-// dim moonlight rather than a second weak sun.
-
 const ORBIT_RADIUS = 260;
 const SUN_VISUAL_HORIZON_OFFSET = 10;
-const HORIZON_SUN_LIGHT = new THREE.Color(0xff9a57);
+const HORIZON_SUN_LIGHT = new THREE.Color(0xff9657);
+const HORIZON_SKY_FILL = new THREE.Color(0xffc79a);
 
 function clamp01(value) {
   return Math.max(0, Math.min(1, Number(value) || 0));
@@ -36,36 +28,23 @@ function applyNaturalLightBalance(cycle) {
       1,
     );
 
-    // 1 right at the horizon, smoothly reaching 0 by roughly 16 degrees of
-    // solar elevation. Real sunlight passes through far more atmosphere at
-    // this angle, so direct irradiance drops sharply while diffuse sky light
-    // remains comparatively strong.
-    const altitudeT = smoothstep01(Math.max(0, elevation) / 0.28);
+    const altitudeT = smoothstep01(Math.max(0, elevation) / 0.30);
     const lowSun = 1 - altitudeT;
 
-    // Keep nighttime values owned by the base cycle. This correction only
-    // applies through twilight and once the sun is above the horizon.
     if (elevation > -0.08) {
-      const directAttenuation = THREE.MathUtils.lerp(0.58, 1.0, altitudeT);
-      cycle.sun.intensity *= directAttenuation;
+      // Stronger low-angle attenuation: direct sun should lose energy quickly
+      // near the horizon while the sky remains a soft diffuse source.
+      cycle.sun.intensity *= THREE.MathUtils.lerp(0.36, 1.0, altitudeT);
+      cycle.sun.color.lerp(HORIZON_SUN_LIGHT, lowSun * 0.24);
 
-      // The base already warms the sun near the horizon; this small additional
-      // physical bias makes sure any remaining highlight energy is amber rather
-      // than neutral white without recoloring midday sunlight.
-      cycle.sun.color.lerp(HORIZON_SUN_LIGHT, lowSun * 0.12);
-
-      // Soft sky fill prevents the scene from becoming pure black silhouettes
-      // once the direct sun is attenuated. This is diffuse illumination, not a
-      // second directional source, so it does not recreate hard white patches.
-      cycle.ambient.intensity *= 1 + lowSun * 0.14;
+      cycle.ambient.intensity *= 1 + lowSun * 0.22;
+      if (cycle.ambient.color?.isColor) {
+        cycle.ambient.color.lerp(HORIZON_SKY_FILL, lowSun * 0.07);
+      }
     }
   }
 
-  // The previous peak moonlight was 0.4 versus 2.0 for the sun — far too close
-  // for realistic night lighting and strong enough to create bright highlights.
-  // Preserve the lunar-phase multiplier from the base and simply scale the final
-  // result down to a subtle, shadow-readable maximum.
-  if (cycle.moonLight) cycle.moonLight.intensity *= 0.45;
+  if (cycle.moonLight) cycle.moonLight.intensity *= 0.38;
 }
 
 export function createDayNightCycle(scene, sun, ambient, starfield, biome, moonLight) {

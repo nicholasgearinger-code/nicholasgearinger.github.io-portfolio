@@ -24,6 +24,94 @@ let status = null;
 let detail = null;
 let shownProgress = 0;
 
+// ---------------------------------------------------------------------------
+// Water backend test switch.
+// One small developer pill is available before the heavy game modules load, so
+// an iPhone can deliberately boot the desktop three-FFT + SSR path (and can
+// always switch back even if that experimental path fails during startup).
+// AUTO follows the real hardware; each tap moves to the opposite profile first,
+// then the native profile, then back to AUTO.
+// ---------------------------------------------------------------------------
+const WATER_TEST_MODE_KEY = "riftWaterTestMode";
+const HARDWARE_WATER_PROFILE = (
+  typeof window !== "undefined" &&
+  ("ontouchstart" in window ||
+    (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0))
+) ? "mobile" : "desktop";
+
+function readWaterTestSelection() {
+  try {
+    const saved = localStorage.getItem(WATER_TEST_MODE_KEY);
+    return saved === "mobile" || saved === "desktop" ? saved : "auto";
+  } catch (_) {
+    return "auto";
+  }
+}
+
+function resolveWaterProfile(selection) {
+  return selection === "auto" ? HARDWARE_WATER_PROFILE : selection;
+}
+
+function nextWaterTestSelection(selection) {
+  const alternate = HARDWARE_WATER_PROFILE === "mobile" ? "desktop" : "mobile";
+  if (selection === "auto") return alternate;
+  if (selection === alternate) return HARDWARE_WATER_PROFILE;
+  return "auto";
+}
+
+let waterTestSelection = readWaterTestSelection();
+
+function applyWaterTestGlobals() {
+  const resolved = resolveWaterProfile(waterTestSelection);
+  window.__riftWaterTestMode = resolved;
+  window.__riftWaterTestForced = waterTestSelection !== "auto";
+  window.__riftWaterTestSelection = waterTestSelection;
+  return resolved;
+}
+
+function persistWaterTestSelection() {
+  try {
+    if (waterTestSelection === "auto") localStorage.removeItem(WATER_TEST_MODE_KEY);
+    else localStorage.setItem(WATER_TEST_MODE_KEY, waterTestSelection);
+  } catch (_) {
+    // If storage is blocked the current page still uses the chosen profile.
+  }
+}
+
+const waterProfileButton = document.createElement("button");
+waterProfileButton.type = "button";
+waterProfileButton.id = "rift-water-profile-test";
+waterProfileButton.title = "Switch Water Pro between the mobile and desktop rendering backends.";
+waterProfileButton.style.cssText =
+  "position:absolute;top:96px;left:8px;z-index:99999;padding:5px 9px;" +
+  "border:1px solid rgba(90,235,226,.55);border-radius:999px;" +
+  "background:rgba(3,12,20,.78);color:#8ff6ee;font:9px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;" +
+  "letter-spacing:.08em;cursor:pointer;touch-action:manipulation;backdrop-filter:blur(4px);";
+
+function refreshWaterProfileButton() {
+  const resolved = applyWaterTestGlobals();
+  const suffix = waterTestSelection === "auto" ? "AUTO" : "TEST";
+  waterProfileButton.textContent = `WATER: ${resolved.toUpperCase()} · ${suffix}`;
+}
+
+waterProfileButton.addEventListener("click", () => {
+  waterTestSelection = nextWaterTestSelection(waterTestSelection);
+  persistWaterTestSelection();
+  refreshWaterProfileButton();
+
+  // Once runtime loading has begun, backend modules may already be evaluated.
+  // Reload so the newly selected FFT/SSR profile is guaranteed to initialize
+  // from a clean WebGPU state. Before Play, no reload is necessary.
+  if (loading || loaded || window.__riftLoadAttempted) {
+    waterProfileButton.textContent += " ↻";
+    setTimeout(() => location.reload(), 80);
+  }
+});
+
+refreshWaterProfileButton();
+if (viewport) viewport.appendChild(waterProfileButton);
+
+
 window.__riftLazyLauncherReady = true;
 window.__riftLoadAttempted = false;
 window.__riftLoadError = null;

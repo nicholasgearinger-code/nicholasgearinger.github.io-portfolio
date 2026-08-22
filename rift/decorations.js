@@ -4,10 +4,6 @@ import * as current from "./decorations_underwater_base.js";
 
 export * from "./decorations_underwater_base.js";
 
-// Mobile-first underwater shafts. The prior pass still rendered too many
-// translucent layers on iPhone. Keep only a sparse subset of the original
-// shaft cells active and make each active beam larger so the scene reads as
-// cinematic rather than busy while cutting draw-call pressure substantially.
 let underwaterShaftTexture = null;
 let shaftOrdinal = 0;
 
@@ -15,34 +11,34 @@ function getUnderwaterShaftTexture() {
   if (underwaterShaftTexture) return underwaterShaftTexture;
 
   const canvas = document.createElement("canvas");
-  canvas.width = 128;
-  canvas.height = 512;
+  canvas.width = 192;
+  canvas.height = 640;
   const ctx = canvas.getContext("2d");
   const w = canvas.width;
   const h = canvas.height;
 
   const vertical = ctx.createLinearGradient(0, 0, 0, h);
-  vertical.addColorStop(0, "rgba(255,255,255,0.98)");
-  vertical.addColorStop(0.08, "rgba(238,253,255,0.88)");
-  vertical.addColorStop(0.28, "rgba(188,240,248,0.44)");
-  vertical.addColorStop(0.70, "rgba(108,214,231,0.14)");
-  vertical.addColorStop(1, "rgba(75,190,212,0)");
+  vertical.addColorStop(0.0, "rgba(255,255,255,0.70)");
+  vertical.addColorStop(0.08, "rgba(235,251,255,0.50)");
+  vertical.addColorStop(0.28, "rgba(175,231,242,0.22)");
+  vertical.addColorStop(0.72, "rgba(110,200,220,0.08)");
+  vertical.addColorStop(1.0, "rgba(90,185,210,0.00)");
 
   const horizontal = ctx.createLinearGradient(0, 0, w, 0);
-  horizontal.addColorStop(0, "rgba(255,255,255,0)");
-  horizontal.addColorStop(0.18, "rgba(255,255,255,0.16)");
-  horizontal.addColorStop(0.50, "rgba(255,255,255,1)");
-  horizontal.addColorStop(0.82, "rgba(255,255,255,0.16)");
-  horizontal.addColorStop(1, "rgba(255,255,255,0)");
+  horizontal.addColorStop(0.0, "rgba(255,255,255,0.00)");
+  horizontal.addColorStop(0.18, "rgba(255,255,255,0.06)");
+  horizontal.addColorStop(0.50, "rgba(255,255,255,0.55)");
+  horizontal.addColorStop(0.82, "rgba(255,255,255,0.06)");
+  horizontal.addColorStop(1.0, "rgba(255,255,255,0.00)");
 
   ctx.save();
-  ctx.filter = "blur(8px)";
+  ctx.filter = "blur(18px)";
   ctx.fillStyle = vertical;
   ctx.beginPath();
-  ctx.moveTo(w * 0.43, 0);
-  ctx.lineTo(w * 0.57, 0);
-  ctx.lineTo(w * 0.95, h);
-  ctx.lineTo(w * 0.05, h);
+  ctx.moveTo(w * 0.18, 0);
+  ctx.lineTo(w * 0.82, 0);
+  ctx.lineTo(w * 1.04, h);
+  ctx.lineTo(w * -0.04, h);
   ctx.closePath();
   ctx.fill();
 
@@ -78,7 +74,7 @@ function makeRaySprite(color, rotation) {
 
 function getActiveStride() {
   const detail = Number(getGraphicsSettings?.().decorationDetail ?? 0);
-  return detail >= 2 ? 4 : 5;
+  return detail >= 2 ? 5 : 6;
 }
 
 export function createUnderwaterLightShaft(x, z, groundY, waterY, rand) {
@@ -88,35 +84,34 @@ export function createUnderwaterLightShaft(x, z, groundY, waterY, rand) {
 
   const stride = getActiveStride();
 
-  // Only a smaller subset of shafts become active. Inactive handles keep the
-  // caller's lifecycle intact but contain no renderables.
   if (ordinal % stride !== 0) {
     group.visible = false;
     return { sprite: group, disabled: true, layers: [] };
   }
 
   const depth = Math.max(1, waterY - groundY);
-  const length = THREE.MathUtils.clamp(depth * (1.35 + rand() * 0.22), 18, 34);
-  const rotation = (rand() - 0.5) * 0.10;
+  const length = THREE.MathUtils.clamp(depth * (1.45 + rand() * 0.18), 20, 38);
+  const rotation = (rand() - 0.5) * 0.06;
 
-  const volume = makeRaySprite(0x74ddec, rotation);
-  volume.scale.set(length * (1.08 + rand() * 0.14), length, 1);
-  group.add(volume);
+  // Broad outer mist beam
+  const outer = makeRaySprite(0x7fd9e9, rotation);
+  outer.scale.set(length * (1.75 + rand() * 0.18), length * 1.05, 1);
+  group.add(outer);
 
-  const core = makeRaySprite(0xebfdff, rotation * 0.55);
-  core.scale.set(length * (0.24 + rand() * 0.05), length * 0.9, 1);
-  core.position.y = -0.04;
-  group.add(core);
+  // Softer inner beam, but not a hard spotlight core
+  const inner = makeRaySprite(0xdffbff, rotation * 0.65);
+  inner.scale.set(length * (0.90 + rand() * 0.10), length * 0.98, 1);
+  group.add(inner);
 
   return {
     sprite: group,
     disabled: false,
-    baseOpacity: 0.22 + rand() * 0.05,
+    baseOpacity: 0.12 + rand() * 0.025,
     phase: rand() * Math.PI * 2,
-    drift: 0.55 + rand() * 0.35,
+    drift: 0.45 + rand() * 0.25,
     layers: [
-      { sprite: volume, weight: 0.65 },
-      { sprite: core, weight: 1.0 },
+      { sprite: outer, weight: 0.85 },
+      { sprite: inner, weight: 0.48 },
     ],
   };
 }
@@ -131,18 +126,17 @@ export function updateLightShafts(shafts, dayAmount) {
     if (!shaft || shaft.disabled || !shaft.layers?.length) continue;
 
     const breathe =
-      0.95 + Math.sin(t * 0.28 * (shaft.drift || 1) + shaft.phase) * 0.05;
+      0.96 + Math.sin(t * 0.18 * (shaft.drift || 1) + shaft.phase) * 0.04;
 
-    for (let i = 0; i < shaft.layers.length; i++) {
-      const layer = shaft.layers[i];
+    for (const layer of shaft.layers) {
       layer.sprite.material.opacity =
         shaft.baseOpacity * layer.weight * strength * breathe;
     }
 
     shaft.layers[0].sprite.position.x =
-      Math.sin(t * 0.09 + shaft.phase) * 0.10;
+      Math.sin(t * 0.045 + shaft.phase) * 0.06;
     shaft.layers[1].sprite.position.x =
-      Math.sin(t * 0.12 + shaft.phase * 1.3) * 0.04;
+      Math.sin(t * 0.065 + shaft.phase * 1.2) * 0.03;
   }
 }
 

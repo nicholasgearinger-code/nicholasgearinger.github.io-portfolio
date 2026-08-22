@@ -8,6 +8,7 @@ import {
 import {
   ensureRealisticWorldLighting,
   updateRealisticWorldLighting,
+  updateRealisticLightingExposure,
   setRealisticLightingBiome,
 } from "./worldLighting.js";
 
@@ -54,8 +55,8 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
   }
 
   // Run after dayNightCycle has authored this frame's base sun/ambient values.
-  // This creates a stronger direct-light key, lower flat ambient, and cheap
-  // hemisphere sky/ground bounce while remaining storm + underwater aware.
+  // v2 also discovers and drives main.js's existing moon DirectionalLight,
+  // providing a real cool nighttime key without introducing another shadow pass.
   if (handle?.worldLighting) {
     updateRealisticWorldLighting(
       handle.worldLighting,
@@ -73,6 +74,13 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
 }
 
 async function updateFluidSimWater(handle, renderer) {
+  // This is the one existing liquid hook that already receives the renderer.
+  // Use it to apply the lighting system's smooth eye-adaptation exposure target
+  // without adding another call or dependency to main.js's hot render loop.
+  if (handle?.worldLighting) {
+    updateRealisticLightingExposure(handle.worldLighting, renderer);
+  }
+
   if (handle?.gpuFFT) return updateGPUFFTOcean(handle, renderer);
   return legacy.updateFluidSimWater(handle, renderer);
 }

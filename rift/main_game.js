@@ -1,4 +1,4 @@
-// Runtime tuning wrapper for rain/underwater presentation plus Water Pro v10.
+// Runtime tuning wrapper for rain/underwater presentation plus Water Pro v9.
 // The large stable game source remains preserved in main_game_rain_base.js;
 // this layer only appends uniquely-validated source edits to the existing tuned
 // loader before it executes.
@@ -53,7 +53,7 @@ const extraEdits = [
   ],
   [
     `const postProcessing = new THREE.PostProcessing(renderer);\nconst scenePass = pass(scene, camera);\nconst scenePassColor = scenePass.getTextureNode("output");`,
-    `const postProcessing = new THREE.PostProcessing(renderer);\nconst scenePass = pass(scene, camera);\nconst riftSSRTier = getGraphicsTier();\nconst riftWaterProfile = globalThis.__riftWaterTestMode === "desktop"\n  ? "desktop"\n  : globalThis.__riftWaterTestMode === "mobile"\n    ? "mobile"\n    : (isTouchDevice ? "mobile" : "desktop");\nconst riftSSRIsMobile = riftWaterProfile === "mobile";\nconst riftForcedDesktopWater = globalThis.__riftWaterTestForced === true && riftWaterProfile === "desktop";\nconst riftSSRQualityTier = riftForcedDesktopWater && riftSSRTier === "low" ? "medium" : riftSSRTier;\nconst riftSSREnabled = getEffectiveValue("reflectionEnabled") !== false && (riftSSRIsMobile || riftSSRQualityTier !== "low");\nlet riftSSRPass = null;\nlet riftSSRBaseOpacity = 0;\nif (riftSSREnabled) {\n  scenePass.setMRT(mrt({\n    output: output,\n    normal: directionToColor(normalView),\n    metalrough: vec2(metalness, roughness),\n  }));\n}\nconst scenePassColor = scenePass.getTextureNode("output");\nif (riftSSREnabled) {\n  const riftSceneNormalPacked = scenePass.getTextureNode("normal");\n  const riftSceneDepth = scenePass.getTextureNode("depth");\n  const riftSceneMetalRough = scenePass.getTextureNode("metalrough");\n  const riftNormalTexture = scenePass.getTexture("normal");\n  const riftMetalRoughTexture = scenePass.getTexture("metalrough");\n  riftNormalTexture.type = THREE.UnsignedByteType;\n  riftMetalRoughTexture.type = THREE.UnsignedByteType;\n  const riftSceneNormal = sample((uvNode) => colorToDirection(riftSceneNormalPacked.sample(uvNode)));\n  const riftSmoothReflectivity = pow(float(1).sub(riftSceneMetalRough.g), float(3)).mul(0.82);\n  const riftReflectivity = tslMax(riftSceneMetalRough.r, riftSmoothReflectivity);\n  riftSSRPass = ssr(scenePassColor, riftSceneDepth, riftSceneNormal, riftReflectivity, riftSceneMetalRough.g);\n  if (riftSSRIsMobile) {\n    riftSSRBaseOpacity = Number(globalThis.__riftMobileSSROpacity ?? 0.39);\n    riftSSRPass.resolutionScale = Number(globalThis.__riftMobileSSRResolutionScale ?? 0.37);\n    riftSSRPass.quality.value = Number(globalThis.__riftMobileSSRQuality ?? 0.19);\n    riftSSRPass.blurQuality.value = 1;\n    riftSSRPass.maxDistance.value = 0.36;\n    riftSSRPass.opacity.value = riftSSRBaseOpacity;\n    riftSSRPass.thickness.value = 0.032;\n  } else {\n    riftSSRBaseOpacity = riftSSRQualityTier === "high" ? 0.82 : 0.58;\n    riftSSRPass.quality.value = riftSSRQualityTier === "high" ? 0.48 : 0.28;\n    riftSSRPass.blurQuality.value = riftSSRQualityTier === "high" ? 2 : 1;\n    riftSSRPass.maxDistance.value = riftSSRQualityTier === "high" ? 0.72 : 0.48;\n    riftSSRPass.opacity.value = riftSSRBaseOpacity;\n    riftSSRPass.thickness.value = riftSSRQualityTier === "high" ? 0.020 : 0.026;\n  }\n}`,
+    `const postProcessing = new THREE.PostProcessing(renderer);\nconst scenePass = pass(scene, camera);\nconst riftSSRTier = getGraphicsTier();\nconst riftWaterProfile = globalThis.__riftWaterTestMode === "desktop"\n  ? "desktop"\n  : globalThis.__riftWaterTestMode === "mobile"\n    ? "mobile"\n    : (isTouchDevice ? "mobile" : "desktop");\nconst riftForcedDesktopWater = globalThis.__riftWaterTestForced === true && riftWaterProfile === "desktop";\nconst riftSSRQualityTier = riftForcedDesktopWater && riftSSRTier === "low" ? "medium" : riftSSRTier;\nconst riftSSREnabled = riftWaterProfile === "desktop" && riftSSRQualityTier !== "low" && getEffectiveValue("reflectionEnabled") !== false;\nlet riftSSRPass = null;\nlet riftSSRBaseOpacity = 0;\nif (riftSSREnabled) {\n  scenePass.setMRT(mrt({\n    output: output,\n    normal: directionToColor(normalView),\n    metalrough: vec2(metalness, roughness),\n  }));\n}\nconst scenePassColor = scenePass.getTextureNode("output");\nif (riftSSREnabled) {\n  const riftSceneNormalPacked = scenePass.getTextureNode("normal");\n  const riftSceneDepth = scenePass.getTextureNode("depth");\n  const riftSceneMetalRough = scenePass.getTextureNode("metalrough");\n  const riftNormalTexture = scenePass.getTexture("normal");\n  const riftMetalRoughTexture = scenePass.getTexture("metalrough");\n  riftNormalTexture.type = THREE.UnsignedByteType;\n  riftMetalRoughTexture.type = THREE.UnsignedByteType;\n  const riftSceneNormal = sample((uvNode) => colorToDirection(riftSceneNormalPacked.sample(uvNode)));\n  const riftSmoothReflectivity = pow(float(1).sub(riftSceneMetalRough.g), float(3)).mul(0.82);\n  const riftReflectivity = tslMax(riftSceneMetalRough.r, riftSmoothReflectivity);\n  riftSSRPass = ssr(scenePassColor, riftSceneDepth, riftSceneNormal, riftReflectivity, riftSceneMetalRough.g);\n  riftSSRBaseOpacity = riftSSRQualityTier === "high" ? 0.82 : 0.58;\n  riftSSRPass.quality.value = riftSSRQualityTier === "high" ? 0.48 : 0.28;\n  riftSSRPass.blurQuality.value = riftSSRQualityTier === "high" ? 2 : 1;\n  riftSSRPass.maxDistance.value = riftSSRQualityTier === "high" ? 0.72 : 0.48;\n  riftSSRPass.opacity.value = riftSSRBaseOpacity;\n  riftSSRPass.thickness.value = riftSSRQualityTier === "high" ? 0.020 : 0.026;\n}`,
     "Water Pro WebGPU SSR setup",
   ],
   [
@@ -63,8 +63,8 @@ const extraEdits = [
   ],
   [
     "const isFullySubmerged = submergedState;",
-    `const isFullySubmerged = submergedState;\n  globalThis.__riftWaterSubmerged = isFullySubmerged;\n  if (riftSSRPass) {\n    let riftFrameSSROpacity = riftSSRBaseOpacity;\n    if (riftSSRIsMobile) {\n      const riftTargetSSRScale = Number(globalThis.__riftMobileSSRResolutionScale ?? 0.37);\n      const riftTargetSSRQuality = Number(globalThis.__riftMobileSSRQuality ?? 0.19);\n      riftFrameSSROpacity = Number(globalThis.__riftMobileSSROpacity ?? 0.39);\n      if (Math.abs(Number(riftSSRPass.resolutionScale ?? 0) - riftTargetSSRScale) > 0.005) {\n        riftSSRPass.resolutionScale = riftTargetSSRScale;\n      }\n      riftSSRPass.quality.value = riftTargetSSRQuality;\n    }\n    riftSSRPass.opacity.value = isFullySubmerged ? 0 : riftFrameSSROpacity;\n  }`,
-    "adaptive mobile SSR and submerged disable",
+    `const isFullySubmerged = submergedState;\n  if (riftSSRPass) riftSSRPass.opacity.value = isFullySubmerged ? 0 : riftSSRBaseOpacity;`,
+    "disable SSR while submerged",
   ],
 ];
 
@@ -77,6 +77,10 @@ source = source.replace(
   `\n${injectedEditLines}\n];\n\nfor (const [from, to, label] of edits) source = replaceExactlyOnce(source, from, to, label);`,
 );
 
+// The tuned loader is itself evaluated from a Blob URL. Rewrite only its two
+// concrete URL bootstrap lines; do not globally replace the text
+// "import.meta.url" because that phrase also appears inside its own string-
+// replacement code.
 const loaderBaseLine =
   'const baseModuleUrl = new URL("./main_game_rain_base.js", import.meta.url);';
 const loaderModuleLine =

@@ -22,6 +22,11 @@
  *   POST /api/subscribe              newsletter sign-up
  *   POST /api/track                  record an analytics event
  *   GET  /api/analytics         [A]  aggregated analytics summary
+ *   GET  /api/activity               recent anonymized activity
+ *   GET  /api/stats                  public telemetry snapshot
+ *   GET  /api/stream                 live telemetry SSE stream
+ *   GET  /api/leaderboard            Signal Runner top scores
+ *   POST /api/leaderboard            submit a Signal Runner score
  *   GET  /api/guestbook              approved guestbook entries
  *   POST /api/guestbook              sign the guestbook
  *   PATCH  /api/guestbook/:id   [A]  approve entry
@@ -57,6 +62,8 @@ const download = require('./routes/download');
 const ask = require('./routes/ask');
 const activityRoute = require('./routes/activity');
 const statsRoute = require('./routes/stats');
+const leaderboardRoute = require('./routes/leaderboard');
+const streamRoute = require('./routes/stream');
 
 /* ── Route table. Patterns support :params. ── */
 const routes = [
@@ -77,6 +84,10 @@ const routes = [
   ['GET', '/api/analytics', analytics.summary],
   ['GET', '/api/activity', activityRoute.activity],
   ['GET', '/api/stats', statsRoute.stats],
+  ['GET', '/api/stream', streamRoute.stream],
+
+  ['GET', '/api/leaderboard', leaderboardRoute.list],
+  ['POST', '/api/leaderboard', leaderboardRoute.create],
 
   ['GET', '/api/guestbook', guestbook.list],
   ['POST', '/api/guestbook', guestbook.create],

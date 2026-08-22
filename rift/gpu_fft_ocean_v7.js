@@ -6,6 +6,7 @@ import {
   updateGPUFFTOceanRipples as updateBaseRipples,
   disposeGPUFFTOcean as disposeBaseOcean,
 } from "./gpu_fft_ocean_v6.js";
+import { upgradeSwashFoamV6 } from "./gpu_swash_solver_v6.js";
 
 const DAY_BODY = new THREE.Color(0x287f8f);
 const DAY_SHALLOW = new THREE.Color(0x72d9cf);
@@ -97,8 +98,9 @@ function tuneCoastalOptics(handle, elapsed = 0, cameraY = Infinity, storm = 0, d
 export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   const handle = createBaseOcean(scene, y, size, sampleHeight);
   if (!handle?.gpuFFT) return handle;
+  upgradeSwashFoamV6(handle.fftSurfSystem?.fluidSwash);
   tuneCoastalOptics(handle, 0, Infinity, 0, 1);
-  console.info("[gpu-fft-ocean] ACTIVE v7: aligned celestial glint + coastal spectral optics");
+  console.info("[gpu-fft-ocean] ACTIVE v7: aligned celestial glint + coastal optics + swash foam v6");
   return handle;
 }
 
@@ -126,6 +128,7 @@ export function updateGPUFFTOceanVisuals(
     reflectionTexture, reflectionMatrix, refractionTexture, resolution,
     storm, day,
   );
+  upgradeSwashFoamV6(handle?.fftSurfSystem?.fluidSwash);
   tuneCoastalOptics(handle, elapsed, cameraY, storm, day);
 }
 

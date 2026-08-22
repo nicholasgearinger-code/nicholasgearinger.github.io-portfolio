@@ -20,6 +20,7 @@ import * as THREE from "three";
 const WHITE_SKY = new THREE.Color(0xcfeaf2);
 const NIGHT_SKY = new THREE.Color(0x314765);
 const NIGHT_HAZE = new THREE.Color(0x263951);
+const NIGHT_GROUND = new THREE.Color(0x1a2029);
 const DAY_SUN = new THREE.Color(0xffefd2);
 const DAWN_SUN = new THREE.Color(0xffa45f);
 const MOON_KEY = new THREE.Color(0xa9bde3);
@@ -223,7 +224,7 @@ export function updateRealisticWorldLighting(
 
     const bounceBase = GROUND_BOUNCE[state.biome] || GROUND_BOUNCE.default;
     state.groundTmp.copy(bounceBase);
-    state.groundTmp.lerp(new THREE.Color(0x1a2029), night * 0.72);
+    state.groundTmp.lerp(NIGHT_GROUND, night * 0.72);
     state.skyFill.groundColor.copy(state.groundTmp);
 
     let fillIntensity = THREE.MathUtils.lerp(0.115, 0.285, day);

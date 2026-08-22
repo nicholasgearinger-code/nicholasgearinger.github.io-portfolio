@@ -1,16 +1,19 @@
 // Hotfix wrapper for the underwater realism tuning loader.
 // The full tuned loader is preserved unchanged in main_game_underwater_base.js.
-// One optional caustic-brightness edit used a non-unique search fragment and
-// intentionally tripped the loader's safety check. Remove only that edit before
-// executing the preserved loader; all other rain, lens, depth, fog and god-ray
-// tuning remains unchanged.
+// This outer layer removes one known non-unique caustic edit and injects a
+// celestial-glint alignment fix before the tuned loader executes.
 
-const tunedLoaderUrl = new URL("./main_game_underwater_base.js", import.meta.url);
+const tunedLoaderUrl = new URL(
+  "./main_game_underwater_base.js",
+  import.meta.url,
+);
 const moduleBaseUrl = new URL("./", import.meta.url);
 
 const response = await fetch(tunedLoaderUrl, { cache: "reload" });
 if (!response.ok) {
-  throw new Error(`[rift-underwater-hotfix] Failed to load tuned runtime loader: HTTP ${response.status}`);
+  throw new Error(
+    `[rift-underwater-hotfix] Failed to load tuned runtime loader: HTTP ${response.status}`,
+  );
 }
 
 let source = await response.text();
@@ -24,17 +27,43 @@ if (matchingLines.length !== 1) {
 }
 source = lines.filter((line) => !line.includes(badEditLabel)).join("\n");
 
+// The stable runtime currently lerps between opposite Sun/Moon positions using
+// dayAmount before sending a direction to the water. Near twilight that vector
+// can point between both bodies (or become nearly zero), producing a bright
+// ocean streak in a direction where no celestial light exists. Select the
+// actually dominant light instead; day/night fading still controls its strength.
+const editsLoopMarker =
+  '\n];\n\nfor (const [from, to, label] of edits) source = replaceExactlyOnce(source, from, to, label);';
+const glintEdit =
+  '  ["tempWaterGlintDir.copy(moonLight.position).lerp(sun.position, dayNight.dayAmount);", "tempWaterGlintDir.copy(sun.intensity >= moonLight.intensity ? sun.position : moonLight.position);", "celestial glint source alignment"],';
+
+if (!source.includes(editsLoopMarker)) {
+  throw new Error(
+    "[rift-underwater-hotfix] Tuned loader edit loop changed unexpectedly",
+  );
+}
+source = source.replace(
+  editsLoopMarker,
+  `\n${glintEdit}\n];\n\nfor (const [from, to, label] of edits) source = replaceExactlyOnce(source, from, to, label);`,
+);
+
 // The preserved loader is evaluated from a Blob URL. Rewrite only its two
 // actual import.meta.url URL-construction lines. Do not globally replace the
 // text, because the loader also contains the literal string "import.meta.url"
 // as part of its own runtime-source rewrite step.
-const loaderBaseLine = 'const baseModuleUrl = new URL("./main_game_rain_base.js", import.meta.url);';
-const loaderModuleLine = 'const moduleBaseUrl = new URL("./", import.meta.url);';
-const resolvedBaseLine = `const baseModuleUrl = new URL("./main_game_rain_base.js", ${JSON.stringify(moduleBaseUrl.href)});`;
-const resolvedModuleLine = `const moduleBaseUrl = new URL("./", ${JSON.stringify(moduleBaseUrl.href)});`;
+const loaderBaseLine =
+  'const baseModuleUrl = new URL("./main_game_rain_base.js", import.meta.url);';
+const loaderModuleLine =
+  'const moduleBaseUrl = new URL("./", import.meta.url);';
+const resolvedBaseLine =
+  `const baseModuleUrl = new URL("./main_game_rain_base.js", ${JSON.stringify(moduleBaseUrl.href)});`;
+const resolvedModuleLine =
+  `const moduleBaseUrl = new URL("./", ${JSON.stringify(moduleBaseUrl.href)});`;
 
 if (!source.includes(loaderBaseLine) || !source.includes(loaderModuleLine)) {
-  throw new Error("[rift-underwater-hotfix] Tuned loader URL bootstrap changed unexpectedly");
+  throw new Error(
+    "[rift-underwater-hotfix] Tuned loader URL bootstrap changed unexpectedly",
+  );
 }
 source = source.replace(loaderBaseLine, resolvedBaseLine);
 source = source.replace(loaderModuleLine, resolvedModuleLine);

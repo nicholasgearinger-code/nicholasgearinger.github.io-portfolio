@@ -1,7 +1,7 @@
-// Hotfix wrapper for the underwater realism tuning loader.
-// The full tuned loader is preserved unchanged in main_game_underwater_base.js.
-// This outer layer removes one known non-unique caustic edit and injects a
-// celestial-glint alignment fix before the tuned loader executes.
+// Runtime tuning wrapper for rain/underwater presentation plus Water Pro v9.
+// The large stable game source remains preserved in main_game_rain_base.js;
+// this layer only appends uniquely-validated source edits to the existing tuned
+// loader before it executes.
 
 const tunedLoaderUrl = new URL(
   "./main_game_underwater_base.js",
@@ -12,45 +12,75 @@ const moduleBaseUrl = new URL("./", import.meta.url);
 const response = await fetch(tunedLoaderUrl, { cache: "reload" });
 if (!response.ok) {
   throw new Error(
-    `[rift-underwater-hotfix] Failed to load tuned runtime loader: HTTP ${response.status}`,
+    `[rift-water-pro] Failed to load tuned runtime loader: HTTP ${response.status}`,
   );
 }
 
 let source = await response.text();
+
+// The older optional caustic-brightness edit is intentionally removed because
+// its source fragment appears twice in the preserved runtime. The actual world-
+// anchored caustic shader remains active at its stable brightness.
 const lines = source.split("\n");
 const badEditLabel = '"seafloor caustic brightness"';
 const matchingLines = lines.filter((line) => line.includes(badEditLabel));
 if (matchingLines.length !== 1) {
   throw new Error(
-    `[rift-underwater-hotfix] Expected exactly one caustic tuning entry, found ${matchingLines.length}`,
+    `[rift-water-pro] Expected exactly one caustic tuning entry, found ${matchingLines.length}`,
   );
 }
 source = lines.filter((line) => !line.includes(badEditLabel)).join("\n");
 
-// The stable runtime currently lerps between opposite Sun/Moon positions using
-// dayAmount before sending a direction to the water. Near twilight that vector
-// can point between both bodies (or become nearly zero), producing a bright
-// ocean streak in a direction where no celestial light exists. Select the
-// actually dominant light instead; day/night fading still controls its strength.
 const editsLoopMarker =
   '\n];\n\nfor (const [from, to, label] of edits) source = replaceExactlyOnce(source, from, to, label);';
-const glintEdit =
-  '  ["tempWaterGlintDir.copy(moonLight.position).lerp(sun.position, dayNight.dayAmount);", "tempWaterGlintDir.copy(sun.intensity >= moonLight.intensity ? sun.position : moonLight.position);", "celestial glint source alignment"],';
 
 if (!source.includes(editsLoopMarker)) {
   throw new Error(
-    "[rift-underwater-hotfix] Tuned loader edit loop changed unexpectedly",
+    "[rift-water-pro] Tuned loader edit loop changed unexpectedly",
   );
 }
+
+const extraEdits = [
+  [
+    "tempWaterGlintDir.copy(moonLight.position).lerp(sun.position, dayNight.dayAmount);",
+    "tempWaterGlintDir.copy(sun.intensity >= moonLight.intensity ? sun.position : moonLight.position);",
+    "celestial glint source alignment",
+  ],
+  [
+    'import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";',
+    `import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";\nimport { mrt, output, normalView, metalness, roughness, blendColor, sample, directionToColor, colorToDirection } from "three/tsl";\nimport { ssr } from "three/addons/tsl/display/SSRNode.js";`,
+    "Water Pro SSR imports",
+  ],
+  [
+    `const postProcessing = new THREE.PostProcessing(renderer);\nconst scenePass = pass(scene, camera);\nconst scenePassColor = scenePass.getTextureNode("output");`,
+    `const postProcessing = new THREE.PostProcessing(renderer);\nconst scenePass = pass(scene, camera);\nconst riftSSRTier = getGraphicsTier();\nconst riftSSREnabled = !isTouchDevice && riftSSRTier !== "low" && getEffectiveValue("reflectionEnabled") !== false;\nlet riftSSRPass = null;\nlet riftSSRBaseOpacity = 0;\nif (riftSSREnabled) {\n  scenePass.setMRT(mrt({\n    output: output,\n    normal: directionToColor(normalView),\n    metalrough: vec2(metalness, roughness),\n  }));\n}\nconst scenePassColor = scenePass.getTextureNode("output");\nif (riftSSREnabled) {\n  const riftSceneNormalPacked = scenePass.getTextureNode("normal");\n  const riftSceneDepth = scenePass.getTextureNode("depth");\n  const riftSceneMetalRough = scenePass.getTextureNode("metalrough");\n  const riftNormalTexture = scenePass.getTexture("normal");\n  const riftMetalRoughTexture = scenePass.getTexture("metalrough");\n  riftNormalTexture.type = THREE.UnsignedByteType;\n  riftMetalRoughTexture.type = THREE.UnsignedByteType;\n  const riftSceneNormal = sample((uvNode) => colorToDirection(riftSceneNormalPacked.sample(uvNode)));\n  const riftSmoothReflectivity = pow(float(1).sub(riftSceneMetalRough.g), float(3)).mul(0.82);\n  const riftReflectivity = tslMax(riftSceneMetalRough.r, riftSmoothReflectivity);\n  riftSSRPass = ssr(scenePassColor, riftSceneDepth, riftSceneNormal, riftReflectivity, riftSceneMetalRough.g);\n  riftSSRBaseOpacity = riftSSRTier === "high" ? 0.82 : 0.58;\n  riftSSRPass.quality.value = riftSSRTier === "high" ? 0.48 : 0.28;\n  riftSSRPass.blurQuality.value = riftSSRTier === "high" ? 2 : 1;\n  riftSSRPass.maxDistance.value = riftSSRTier === "high" ? 0.72 : 0.48;\n  riftSSRPass.opacity.value = riftSSRBaseOpacity;\n  riftSSRPass.thickness.value = riftSSRTier === "high" ? 0.020 : 0.026;\n}`,
+    "Water Pro WebGPU SSR setup",
+  ],
+  [
+    'postProcessing.outputNode = (getGraphicsSettings().lensEffectEnabled !== false) ? lensDistortedOutput : scenePass;',
+    `const riftBasePostOutput = (getGraphicsSettings().lensEffectEnabled !== false) ? lensDistortedOutput : scenePassColor;\npostProcessing.outputNode = (riftSSREnabled && riftSSRPass) ? blendColor(riftBasePostOutput, riftSSRPass) : riftBasePostOutput;`,
+    "Water Pro SSR composition",
+  ],
+  [
+    "const isFullySubmerged = submergedState;",
+    `const isFullySubmerged = submergedState;\n  if (riftSSRPass) riftSSRPass.opacity.value = isFullySubmerged ? 0 : riftSSRBaseOpacity;`,
+    "disable SSR while submerged",
+  ],
+];
+
+const injectedEditLines = extraEdits
+  .map(([from, to, label]) => `  [${JSON.stringify(from)}, ${JSON.stringify(to)}, ${JSON.stringify(label)}],`)
+  .join("\n");
+
 source = source.replace(
   editsLoopMarker,
-  `\n${glintEdit}\n];\n\nfor (const [from, to, label] of edits) source = replaceExactlyOnce(source, from, to, label);`,
+  `\n${injectedEditLines}\n];\n\nfor (const [from, to, label] of edits) source = replaceExactlyOnce(source, from, to, label);`,
 );
 
-// The preserved loader is evaluated from a Blob URL. Rewrite only its two
-// actual import.meta.url URL-construction lines. Do not globally replace the
-// text, because the loader also contains the literal string "import.meta.url"
-// as part of its own runtime-source rewrite step.
+// The tuned loader is itself evaluated from a Blob URL. Rewrite only its two
+// concrete URL bootstrap lines; do not globally replace the text
+// "import.meta.url" because that phrase also appears inside its own string-
+// replacement code.
 const loaderBaseLine =
   'const baseModuleUrl = new URL("./main_game_rain_base.js", import.meta.url);';
 const loaderModuleLine =
@@ -62,12 +92,12 @@ const resolvedModuleLine =
 
 if (!source.includes(loaderBaseLine) || !source.includes(loaderModuleLine)) {
   throw new Error(
-    "[rift-underwater-hotfix] Tuned loader URL bootstrap changed unexpectedly",
+    "[rift-water-pro] Tuned loader URL bootstrap changed unexpectedly",
   );
 }
 source = source.replace(loaderBaseLine, resolvedBaseLine);
 source = source.replace(loaderModuleLine, resolvedModuleLine);
-source += "\n//# sourceURL=rift/main_game_underwater_hotfixed.loader.js\n";
+source += "\n//# sourceURL=rift/main_game_water_pro.loader.js\n";
 
 const blob = new Blob([source], { type: "text/javascript" });
 const blobUrl = URL.createObjectURL(blob);

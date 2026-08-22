@@ -24,19 +24,42 @@ import {
 // that visually separates a flat FFT heightfield from photographic ocean water.
 // -----------------------------------------------------------------------------
 
-const TOUCH_DEVICE = typeof window !== "undefined" && (
+const HARDWARE_TOUCH_DEVICE = typeof window !== "undefined" && (
   "ontouchstart" in window ||
   (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0)
 );
+
+function readWaterTestMode() {
+  const globalMode = typeof globalThis !== "undefined"
+    ? globalThis.__riftWaterTestMode
+    : null;
+  if (globalMode === "mobile" || globalMode === "desktop") return globalMode;
+  try {
+    const stored = localStorage.getItem("riftWaterTestMode");
+    if (stored === "mobile" || stored === "desktop") return stored;
+  } catch (_) {
+    // Storage can be unavailable in private/embedded contexts; hardware auto
+    // detection below remains the safe fallback.
+  }
+  return HARDWARE_TOUCH_DEVICE ? "mobile" : "desktop";
+}
+
+const WATER_TEST_MODE = readWaterTestMode();
+const TOUCH_DEVICE = WATER_TEST_MODE === "mobile";
+
+if (typeof globalThis !== "undefined") {
+  globalThis.__riftWaterTestMode = WATER_TEST_MODE;
+}
 
 function backendForHandle(handle) {
   return handle?.__riftWaterProBackend === "v8-three-fft" ? oceanV8 : oceanV7;
 }
 
 function chooseBackend() {
-  // Keep the third FFT off Safari/iOS until its standalone storage/compute path
-  // is rebuilt. Desktop keeps the full three-scale v8 simulation at every tier,
-  // matching the previous desktop behavior.
+  // Normal play still follows hardware detection. The developer water switch
+  // can deliberately force either path so the desktop three-FFT build can be
+  // exercised from a phone and the mobile two-FFT build can be checked from a
+  // desktop browser.
   return TOUCH_DEVICE ? oceanV7 : oceanV8;
 }
 
@@ -296,7 +319,7 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   installWaterProOptics(handle);
   tuneWaterProState(handle, 0, null, 0, 1);
   console.info(
-    `[gpu-fft-ocean] ACTIVE v9 Water Pro: ${handle.__riftWaterProBackend} + depth color + translucent crests + whitecaps + facet glitter`,
+    `[gpu-fft-ocean] ACTIVE v9 Water Pro: ${handle.__riftWaterProBackend} (test profile: ${WATER_TEST_MODE}) + depth color + translucent crests + whitecaps + facet glitter`,
   );
   return handle;
 }

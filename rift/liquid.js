@@ -1,5 +1,5 @@
 import * as legacy from "./liquid_legacy.js";
-import * as oceanV16 from "./gpu_fft_ocean_v16.js";
+import * as oceanV17 from "./gpu_fft_ocean_v17.js";
 import { getEffectiveValue as getBaseGraphicsEffectiveValue } from "./graphicsSettings_fft_base.js";
 
 function setFFTReflectionOwnership(active) {
@@ -12,7 +12,7 @@ function applyFFTReflectionPreference(handle) {
   const physical = handle?.fftPhysicalMaterial;
   if (!physical) return;
 
-  // Water Pro v16 owns Crystal reflections through the existing physical
+  // Water Pro v17 owns Crystal reflections through the existing physical
   // environment and aligned facet glitter. Mobile SSR and planar captures stay
   // disabled so Safari keeps the proven render/compute graph.
   const enabled = getBaseGraphicsEffectiveValue("reflectionEnabled") !== false;
@@ -31,13 +31,13 @@ export function createLiquidPlane(
   excludeRegions = [],
 ) {
   if (biome === "crystal") {
-    const handle = oceanV16.createGPUFFTOceanPlane(scene, y, size, sampleHeight);
+    const handle = oceanV17.createGPUFFTOceanPlane(scene, y, size, sampleHeight);
     if (handle?.gpuFFT) {
-      handle.__riftOceanBackend = "v16-water-pro";
+      handle.__riftOceanBackend = "v17-water-pro";
       setFFTReflectionOwnership(true);
       applyFFTReflectionPreference(handle);
       console.info(
-        `[rift-water] Water Pro v16 selected (${handle.__riftWaterProBackend ?? "FFT"}); denser white 3D shoreline foam`,
+        `[rift-water] Water Pro v17 selected (${handle.__riftWaterProBackend ?? "FFT"}); milky bubble shoreline foam`,
       );
     }
     return handle;
@@ -88,7 +88,7 @@ export function updateLiquidPlane(
     setFFTReflectionOwnership(true);
     applyFFTReflectionPreference(handle);
 
-    oceanV16.updateGPUFFTOceanVisuals(
+    oceanV17.updateGPUFFTOceanVisuals(
       handle,
       elapsed,
       skyColor,
@@ -125,14 +125,14 @@ export function updateLiquidPlane(
 
 export function updateFluidSimWater(handle, renderer, elapsedTime) {
   if (handle?.gpuFFT) {
-    return oceanV16.updateGPUFFTOcean(handle, renderer, elapsedTime);
+    return oceanV17.updateGPUFFTOcean(handle, renderer, elapsedTime);
   }
   return legacy.updateFluidSimWater(handle, renderer, elapsedTime);
 }
 
 export function updateRippleLayer(handle, renderer, cameraPos, cameraY, dt) {
   if (handle?.gpuFFT) {
-    oceanV16.updateGPUFFTOceanRipples(handle, cameraPos, cameraY, dt);
+    oceanV17.updateGPUFFTOceanRipples(handle, cameraPos, cameraY, dt);
     return;
   }
   return legacy.updateRippleLayer(handle, renderer, cameraPos, cameraY, dt);
@@ -141,7 +141,7 @@ export function updateRippleLayer(handle, renderer, cameraPos, cameraY, dt) {
 export function disposeLiquidPlane(scene, handle) {
   if (handle?.gpuFFT) {
     setFFTReflectionOwnership(false);
-    return oceanV16.disposeGPUFFTOcean(scene, handle);
+    return oceanV17.disposeGPUFFTOcean(scene, handle);
   }
   return legacy.disposeLiquidPlane(scene, handle);
 }

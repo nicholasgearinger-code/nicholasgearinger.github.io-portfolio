@@ -5,37 +5,10 @@
  * ------------------------------------------------------------------
  * Dependency-free Node.js (18+). Run:  node server.js
  *
- * Serves the static portfolio and a small, practical JSON API. State
- * persists to flat files in ./data (no database). Optional email, chat
- * webhook, and AI features activate only when their env vars are set.
- *
- * API
- *   GET  /api/health                 service status & enabled features
- *   GET  /api/status                 availability badge ("open to work")
- *   POST /api/status            [A]  update availability
- *   POST /api/contact                contact-form submissions
- *   GET  /api/messages          [A]  list messages
- *   PATCH  /api/messages/:id/read [A] mark message read
- *   DELETE /api/messages/:id    [A]  delete message
- *   GET  /api/views                  read page-view counter
- *   POST /api/views                  increment page-view counter
- *   POST /api/subscribe              newsletter sign-up
- *   POST /api/track                  record an analytics event
- *   GET  /api/analytics         [A]  aggregated analytics summary
- *   GET  /api/guestbook              approved guestbook entries
- *   POST /api/guestbook              sign the guestbook
- *   PATCH  /api/guestbook/:id   [A]  approve entry
- *   DELETE /api/guestbook/:id   [A]  delete entry
- *   GET  /api/projects               projects + clap counts
- *   GET  /api/projects/:id           one project
- *   POST /api/projects/:id/clap      clap for a project
- *   POST /api/ask                    ask the profile-grounded AI assistant
- *   GET  /api/vcard                  download a .vcf contact card
- *   GET  /api/resume                 structured JSON résumé
- *   GET  /robots.txt, /sitemap.xml   SEO
- *   GET  /*                          static site
- *
- *   [A] = requires the X-Admin-Token header (set ADMIN_TOKEN)
+ * Render runs this file from backend/, while the canonical lib/ and routes/
+ * modules live at the repository root. Keep this entry point thin and import
+ * those canonical modules directly so both local/root and Render layouts use
+ * the same API implementation.
  */
 
 const http = require('http');
@@ -44,22 +17,22 @@ const fsp = require('fs').promises;
 const path = require('path');
 const { URL } = require('url');
 
-const { CONFIG } = require('./lib/config');
-const { sendJson, readBody, corsHeaders } = require('./lib/http');
+const { CONFIG } = require('../lib/config');
+const { sendJson, readBody, corsHeaders } = require('../lib/http');
 
-const health = require('./routes/status'); // health + status live together
-const contact = require('./routes/contact');
-const engagement = require('./routes/engagement');
-const analytics = require('./routes/analytics');
-const guestbook = require('./routes/guestbook');
-const leaderboard = require('./routes/leaderboard');
-const projects = require('./routes/projects');
-const download = require('./routes/download');
-const ask = require('./routes/ask');
-const translateRoute = require('./routes/translate');
-const activityRoute = require('./routes/activity');
-const statsRoute = require('./routes/stats');
-const streamRoute = require('./routes/stream');
+const health = require('../routes/status'); // health + status live together
+const contact = require('../routes/contact');
+const engagement = require('../routes/engagement');
+const analytics = require('../routes/analytics');
+const guestbook = require('../routes/guestbook');
+const leaderboard = require('../routes/leaderboard');
+const projects = require('../routes/projects');
+const download = require('../routes/download');
+const ask = require('../routes/ask');
+const translateRoute = require('../routes/translate');
+const activityRoute = require('../routes/activity');
+const statsRoute = require('../routes/stats');
+const streamRoute = require('../routes/stream');
 
 /* ── Route table. Patterns support :params. ── */
 const routes = [

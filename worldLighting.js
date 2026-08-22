@@ -25,6 +25,12 @@ const DAY_SUN = new THREE.Color(0xffefd2);
 const DAWN_SUN = new THREE.Color(0xffa45f);
 const MOON_KEY = new THREE.Color(0xa9bde3);
 
+// Must match dayNightCycle.js. We only use this to reconstruct the moon's true
+// elevation after that file clamps the below-horizon sun light to y=-20 for
+// shadow stability. The visible sun/moon bodies still follow the full orbit.
+const DAY_NIGHT_ORBIT_RADIUS = 260;
+const DAY_NIGHT_ORBIT_Z = 80;
+
 const GROUND_BOUNCE = {
   crystal: new THREE.Color(0x9a7558), // warm sand / coral bounce
   verdant: new THREE.Color(0x31533b), // vegetation / moss bounce
@@ -103,6 +109,7 @@ export function ensureRealisticWorldLighting(scene, biome = "default", waterY = 
     skyTmp: new THREE.Color(),
     groundTmp: new THREE.Color(),
     sunTargetTmp: new THREE.Color(),
+    sunRelativeTmp: new THREE.Vector3(),
     moonDirectionTmp: new THREE.Vector3(),
   };
 
@@ -177,13 +184,25 @@ export function updateRealisticWorldLighting(
   // 2) Real moon key using main.js's existing DirectionalLight
   // ---------------------------------------------------------------------------
   if (state.moon && state.sun) {
-    // The visible moon is opposite the sun on the same orbit. main.js already
-    // centers the sun shadow target around the player before this call, so using
-    // the opposite target-relative direction keeps moon shadows centered too.
-    state.moonDirectionTmp.copy(state.sun.position).sub(state.sun.target.position);
-    const keyDistance = Math.max(120, state.moonDirectionTmp.length());
-    if (state.moonDirectionTmp.lengthSq() < 1e-8) state.moonDirectionTmp.set(0.3, 0.9, 0.2);
-    state.moonDirectionTmp.normalize().multiplyScalar(-1);
+    // main.js has already player-centered the sun shadow frustum before this
+    // hook. target-relative X therefore still equals the day/night orbit's real
+    // X coordinate. dayNightCycle intentionally clamps the below-horizon SUN
+    // light to y=-20, but the visible moon keeps the true opposite elevation.
+    // Reconstruct that elevation from x^2 + y^2 = R^2 so moonlight rises high
+    // overhead at midnight instead of getting stuck just above the horizon.
+    state.sunRelativeTmp.copy(state.sun.position).sub(state.sun.target.position);
+    const orbitX = THREE.MathUtils.clamp(
+      state.sunRelativeTmp.x,
+      -DAY_NIGHT_ORBIT_RADIUS,
+      DAY_NIGHT_ORBIT_RADIUS,
+    );
+    const moonY = Math.sqrt(Math.max(0, DAY_NIGHT_ORBIT_RADIUS * DAY_NIGHT_ORBIT_RADIUS - orbitX * orbitX));
+
+    state.moonDirectionTmp.set(-orbitX, Math.max(12, moonY), DAY_NIGHT_ORBIT_Z).normalize();
+    const keyDistance = Math.sqrt(
+      DAY_NIGHT_ORBIT_RADIUS * DAY_NIGHT_ORBIT_RADIUS +
+      DAY_NIGHT_ORBIT_Z * DAY_NIGHT_ORBIT_Z,
+    );
 
     state.moon.target.position.copy(state.sun.target.position);
     state.moon.position.copy(state.moon.target.position).addScaledVector(state.moonDirectionTmp, keyDistance);

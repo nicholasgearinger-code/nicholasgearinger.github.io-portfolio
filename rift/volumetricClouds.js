@@ -11,14 +11,12 @@ import {
 export function createVolumetricClouds(scene) {
   const handle = createProceduralClouds(scene);
   if (handle?.material) {
-    // The new cloud band is fixed in world altitude, so the player normally
-    // views its bottom face from OUTSIDE the cloud box. The historical renderer
-    // used BackSide because its box followed the camera vertically and always
-    // enclosed it. DoubleSide is required now for both below-cloud and
-    // inside-cloud viewpoints; forceSinglePass avoids the usual transparent
-    // double-sided two-pass cost on mobile.
-    handle.material.side = THREE.DoubleSide;
-    handle.material.forceSinglePass = true;
+    // The cloud slab now stays at a real world altitude rather than following
+    // the camera vertically. Rift gameplay remains below the cloud base, so the
+    // outward-facing BOTTOM of the box is the only surface needed to launch the
+    // raymarch. FrontSide keeps it one-pass and also culls the distant side faces
+    // that could otherwise produce nearly-horizontal divide-by-zero rays.
+    handle.material.side = THREE.FrontSide;
     handle.material.needsUpdate = true;
   }
   return handle;

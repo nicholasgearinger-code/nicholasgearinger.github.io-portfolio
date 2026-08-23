@@ -23,8 +23,8 @@ import {
 
 // Mobile production wrapper for the GPU FFT ocean.
 // The FFT remains responsible for real displacement + normals. This wrapper keeps
-// the top face reflective and makes the underside transmission-heavy, while the
-// broader underwater atmosphere now lives in underwaterWorld.js.
+// the top face reflective and gives the underside a cheap transmission/Snell cue;
+// broader underwater atmosphere lives in underwaterWorld.js.
 const SKY_BIAS = new THREE.Color(0xc4eaf0);
 const HORIZON_FALLBACK = new THREE.Color(0xa6d6df);
 const NIGHT_HORIZON = new THREE.Color(0x2b405b);
@@ -34,12 +34,12 @@ const NIGHT_FOAM = new THREE.Color(0x7f9fac);
 const DEEP_BASE = new THREE.Color(0x0a4a58);
 const SHALLOW_BASE = new THREE.Color(0x55c9c3);
 
-const UNDER_SURFACE_DAY = new THREE.Color(0x62ced8);
-const UNDER_SURFACE_NIGHT = new THREE.Color(0x315f7a);
-const UNDER_DEEP_DAY = new THREE.Color(0x1b6b80);
-const UNDER_DEEP_NIGHT = new THREE.Color(0x172f48);
-const UNDER_GRAZING_DAY = new THREE.Color(0x2b6576);
-const UNDER_GRAZING_NIGHT = new THREE.Color(0x162b43);
+const UNDER_SURFACE_DAY = new THREE.Color(0x79dfe5);
+const UNDER_SURFACE_NIGHT = new THREE.Color(0x365f7b);
+const UNDER_DEEP_DAY = new THREE.Color(0x1a6178);
+const UNDER_DEEP_NIGHT = new THREE.Color(0x162d45);
+const UNDER_GRAZING_DAY = new THREE.Color(0x16445b);
+const UNDER_GRAZING_NIGHT = new THREE.Color(0x102238);
 
 function installProductionWaterNodes(handle, size) {
   if (!handle?.gpuFFT || handle.productionWaterNodesInstalled) return;
@@ -59,11 +59,9 @@ function installProductionWaterNodes(handle, size) {
 
   const viewDir = cameraPosition.sub(positionWorld).normalize();
 
-  // v5 added two per-pixel sine ripple bands here, but the phone dropped from
-  // ~17 FPS to ~11 FPS without producing enough visible improvement. Remove that
-  // cost and instead flatten ONLY the underside shading normal. The full FFT
-  // geometry still rises/falls/chops exactly as before; this just prevents its
-  // largest low-frequency normal lobes becoming repeated oval patches below.
+  // Flatten only the underside SHADING normal. Real FFT geometry keeps its full
+  // displacement/chop, while the broad low-frequency normal lobes no longer turn
+  // into giant smooth discs when viewed from below.
   const underwaterNormal = vec3(
     baseNormalNode.x.mul(0.22),
     baseNormalNode.y,
@@ -71,9 +69,10 @@ function installProductionWaterNodes(handle, size) {
   ).normalize();
   material.normalNode = mix(baseNormalNode, underwaterNormal, handle.underwaterAmount);
 
-  // Double-sided water must use a symmetric view angle. A negative back-face dot
-  // cannot simply clamp to zero or the whole underside becomes grazing Fresnel.
+  // Double-sided water needs a symmetric view angle.
   const ndv = clamp(abs(normalWorld.dot(viewDir)), 0, 1);
+  const ndv2 = ndv.mul(ndv);
+  const ndv4 = ndv2.mul(ndv2);
   const grazing = float(1).sub(ndv);
   const g2 = grazing.mul(grazing);
   const g4 = g2.mul(g2);
@@ -92,8 +91,8 @@ function installProductionWaterNodes(handle, size) {
     1,
   );
 
-  // Topside shoreline foam stays narrow and broken. From below it becomes almost
-  // invisible; underwaterWorld.js handles the water-column look instead.
+  // Topside shoreline foam stays narrow and broken. From below it is almost
+  // invisible; underwaterWorld.js supplies the water-column detail.
   const shallowMask = clamp(float(0.075).sub(depthT).mul(13.3333), 0, 1);
   const foamWave = sin(
     positionWorld.x.mul(0.20)
@@ -122,23 +121,32 @@ function installProductionWaterNodes(handle, size) {
     const horizonWater = mix(reflectedWater, handle.horizonTint, horizonFade.mul(horizonStrength));
     const topWater = mix(horizonWater, handle.foamVisualTint, shoreFoam);
 
-    // Underwater: broad movement comes from the REAL displaced geometry, while
-    // color modulation stays restrained. This intentionally avoids drawing a
-    // second synthetic ripple pattern over the FFT and frees mobile GPU budget
-    // for actual underwater fog/light shafts/particles.
+    // Underwater transmission uses information the FFT has already produced —
+    // displaced crest height + view angle — so there is no extra noise/texture
+    // lookup. Nearly overhead facets transmit considerably more daylight, giving
+    // the underside moving bright patches instead of one uniformly dark ceiling.
     const crest = clamp(
-      positionWorld.y.sub(handle.waterLevelNode).mul(0.42).add(0.5),
+      positionWorld.y.sub(handle.waterLevelNode).mul(0.44).add(0.5),
       0,
       1,
     );
-    const facingLight = clamp(ndv.mul(0.24).add(0.56), 0.50, 0.80);
-    const transmission = clamp(facingLight.add(crest.sub(0.5).mul(0.12)), 0.46, 0.82);
+    const facingLight = clamp(ndv.mul(0.20).add(0.54), 0.48, 0.77);
+    const transmission = clamp(
+      facingLight.add(crest.sub(0.5).mul(0.14)),
+      0.44,
+      0.84,
+    );
     const underBase = mix(handle.underDeepTint, handle.underSurfaceTint, transmission);
 
-    // Only a very small total-internal-reflection cue remains. The scene-level
-    // depth fog now supplies most underwater distance separation.
-    const underView = mix(underBase, handle.underGrazingTint, grazing.mul(0.07));
-    const underwaterFar = mix(underView, handle.underDeepTint, horizonFade.mul(0.16));
+    // Cheap Snell-window cue: only the most head-on portion of the water ceiling
+    // gets this extra pale transmission. ndv^4 gives a tight central response
+    // using multiplies only — much cheaper than a screen-space refraction pass.
+    const snellStrength = ndv4.mul(handle.dayAmount).mul(0.30);
+    const underSnell = mix(underBase, handle.underSurfaceTint, snellStrength);
+
+    // Total-internal-reflection cue at shallow angles remains deliberately small.
+    const underView = mix(underSnell, handle.underGrazingTint, grazing.mul(0.065));
+    const underwaterFar = mix(underView, handle.underDeepTint, horizonFade.mul(0.14));
 
     return mix(topWater, underwaterFar, handle.underwaterAmount);
   })();
@@ -149,14 +157,14 @@ function installProductionWaterNodes(handle, size) {
     .add(nightAmount.mul(0.075));
   const grazingRoughness = mix(float(0.078), float(0.045), handle.dayAmount);
   const topRoughness = mix(baseRoughness, grazingRoughness, fresnel);
-  const underwaterRoughness = float(0.23)
+  const underwaterRoughness = float(0.235)
     .add(handle.stormAmount.mul(0.04))
     .add(nightAmount.mul(0.03));
   material.roughnessNode = mix(topRoughness, underwaterRoughness, handle.underwaterAmount);
   material.metalnessNode = float(0.01);
 
-  // Never fade the underwater ceiling to transparent at distance. Any gaps beyond
-  // finite geometry are also matched to water fog/background by underwaterWorld.
+  // Do not fade the underwater ceiling transparent at distance. The dedicated
+  // underwater horizon shell handles the finite-world background instead.
   const topOpacity = mix(float(0.94), float(0.02), horizonFade);
   const underwaterOpacity = float(0.98);
   material.opacityNode = mix(topOpacity, underwaterOpacity, handle.underwaterAmount);
@@ -178,7 +186,7 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   handle.deepTint.value.copy(DEEP_BASE);
   handle.shallowTint.value.copy(SHALLOW_BASE);
 
-  console.info("[gpu-fft-ocean] mobile production water pass v6 + atmospheric underwater mode active");
+  console.info("[gpu-fft-ocean] mobile production water pass v7 + transmitted underside active");
   return handle;
 }
 

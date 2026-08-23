@@ -9,35 +9,37 @@ const HORIZON_SUN_LIGHT = new THREE.Color(0xff9657);
 const HORIZON_SKY_FILL = new THREE.Color(0xffc79a);
 
 const REAL_SUN_ZENITH = new THREE.Color(0xfffdf4);
-const REAL_SUN_HORIZON = new THREE.Color(0xff8338);
+const REAL_SUN_HORIZON = new THREE.Color(0xff7f32);
 const REAL_HALO_ZENITH = new THREE.Color(0xfff4d6);
 const REAL_HALO_HORIZON = new THREE.Color(0xffa04c);
-const REAL_TWILIGHT_GLOW = new THREE.Color(0xff7042);
+const REAL_TWILIGHT_GLOW = new THREE.Color(0xff713e);
 
-// Atmosphere targets. The preserved base still owns the authoritative cycle and
-// biome tint; these colors are blended into its result near the horizon so dawn
-// and dusk become a true atmospheric event rather than a global orange filter.
-const SKY_ZENITH_DAY = new THREE.Color(0x68b7ef);
-const SKY_MID_DAY = new THREE.Color(0x9ed4f3);
-const SKY_HORIZON_DAY = new THREE.Color(0xd8eff9);
-const SKY_ZENITH_TWILIGHT = new THREE.Color(0x4568a6);
-const SKY_MID_TWILIGHT = new THREE.Color(0xd88a82);
-const SKY_HORIZON_TWILIGHT = new THREE.Color(0xff9b55);
-const CLOUD_LIGHT_DAY = new THREE.Color(0xf7fbff);
-const CLOUD_SHADOW_DAY = new THREE.Color(0x9fb7cc);
-const CLOUD_LIGHT_TWILIGHT = new THREE.Color(0xffbd86);
-const CLOUD_SHADOW_TWILIGHT = new THREE.Color(0x766d92);
-const CLOUD_LIGHT_NIGHT = new THREE.Color(0x7186a0);
-const CLOUD_SHADOW_NIGHT = new THREE.Color(0x202a3d);
+// Day/twilight atmosphere. The zenith intentionally stays blue during sunrise
+// and sunset; only the lower atmosphere becomes strongly warm. This fixes the
+// previous full-sky pink/purple wash and better matches real long-path scattering.
+const SKY_ZENITH_DAY = new THREE.Color(0x67b8ef);
+const SKY_MID_DAY = new THREE.Color(0xa8daf5);
+const SKY_HORIZON_DAY = new THREE.Color(0xdceff8);
+const SKY_ZENITH_TWILIGHT = new THREE.Color(0x587bb3);
+const SKY_MID_TWILIGHT = new THREE.Color(0xd39a8d);
+const SKY_HORIZON_TWILIGHT = new THREE.Color(0xff9a50);
+const CLOUD_LIGHT_DAY = new THREE.Color(0xf8fbff);
+const CLOUD_SHADOW_DAY = new THREE.Color(0x9fb6ca);
+const CLOUD_LIGHT_TWILIGHT = new THREE.Color(0xffc58f);
+const CLOUD_SHADOW_TWILIGHT = new THREE.Color(0x71798d);
+const CLOUD_LIGHT_NIGHT = new THREE.Color(0x70839a);
+const CLOUD_SHADOW_NIGHT = new THREE.Color(0x202a3b);
 
-// The real Sun remains physically small. The much larger thing the eye reads in
-// photos is glare in the atmosphere, so disc, halo, aureole and horizon bloom are
-// separate layers rather than one oversized white ball.
-const SUN_CORE_DIAMETER = 2.85;
-const SUN_HALO_DIAMETER = 34;
-const SUN_AUREOLE_DIAMETER = 110;
-const SUN_HORIZON_GLOW_WIDTH = 205;
-const SUN_HORIZON_GLOW_HEIGHT = 76;
+// The earlier physically tiny 2.85-unit disc was technically close to the Sun's
+// true angular diameter, but on a phone it read as a white pixel. Keep the
+// layered optical model while giving the visible disc enough screen presence to
+// feel like a real celestial body. The halo/aureole remain much larger than the
+// disc because atmosphere, not the photosphere, creates most perceived glare.
+const SUN_CORE_DIAMETER = 5.8;
+const SUN_HALO_DIAMETER = 60;
+const SUN_AUREOLE_DIAMETER = 165;
+const SUN_HORIZON_GLOW_WIDTH = 250;
+const SUN_HORIZON_GLOW_HEIGHT = 92;
 const MOON_CORE_DIAMETER = 2.45;
 const MOON_GLOW_DIAMETER = 7.2;
 
@@ -77,12 +79,14 @@ function createSolarDiscTexture(size = 128) {
         continue;
       }
 
-      const limb = 1 - Math.pow(clamp01(r), 2) * 0.08;
-      const edge = 1 - smoothstep01((r - 0.92) / 0.08);
+      // A small amount of limb darkening keeps the disc spherical while the edge
+      // remains soft enough to avoid a jagged circle at mobile resolution.
+      const limb = 1 - Math.pow(clamp01(r), 2) * 0.075;
+      const edge = 1 - smoothstep01((r - 0.91) / 0.09);
       const value = Math.round(255 * limb);
       data[i] = 255;
-      data[i + 1] = Math.max(238, value);
-      data[i + 2] = Math.max(218, Math.round(value * 0.96));
+      data[i + 1] = Math.max(240, value);
+      data[i + 2] = Math.max(220, Math.round(value * 0.965));
       data[i + 3] = Math.round(255 * edge);
     }
   }
@@ -123,7 +127,7 @@ function installRealSun(cycle) {
 
   const discTexture = createSolarDiscTexture();
   const haloTexture = createSolarHaloTexture(128, 2.0);
-  const aureoleTexture = createSolarHaloTexture(128, 3.1);
+  const aureoleTexture = createSolarHaloTexture(128, 3.0);
   const horizonTexture = createSolarHaloTexture(128, 2.6);
 
   const discMaterial = new THREE.SpriteMaterial({
@@ -135,6 +139,7 @@ function installRealSun(cycle) {
     depthTest: true,
     fog: false,
     toneMapped: false,
+    alphaTest: 0.01,
   });
   const disc = new THREE.Sprite(discMaterial);
   disc.name = "rift-real-sun-disc";
@@ -145,7 +150,7 @@ function installRealSun(cycle) {
     map: haloTexture,
     color: REAL_HALO_ZENITH.clone(),
     transparent: true,
-    opacity: 0.26,
+    opacity: 0.22,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
     depthTest: true,
@@ -161,7 +166,7 @@ function installRealSun(cycle) {
     map: aureoleTexture,
     color: REAL_HALO_ZENITH.clone(),
     transparent: true,
-    opacity: 0.075,
+    opacity: 0.06,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
     depthTest: true,
@@ -173,10 +178,9 @@ function installRealSun(cycle) {
   aureole.scale.set(SUN_AUREOLE_DIAMETER, SUN_AUREOLE_DIAMETER, 1);
   aureole.renderOrder = -93;
 
-  // A very broad, vertically compressed glow represents the extra optical path
-  // through dense atmosphere at sunrise/sunset. It is nearly invisible at noon
-  // and localizes the warm sky around the actual Sun instead of tinting the whole
-  // world orange.
+  // Long optical path through the lower atmosphere creates a broad horizontal
+  // glow around a low Sun. Localizing it to the Sun prevents the whole sky from
+  // becoming orange or pink during every dawn/dusk frame.
   const horizonGlowMaterial = new THREE.SpriteMaterial({
     map: horizonTexture,
     color: REAL_TWILIGHT_GLOW.clone(),
@@ -217,8 +221,8 @@ function updateRealSun(cycle) {
   const sunBody = cycle?.sunBody;
   if (!visual || !sunBody?.group?.position) return;
 
-  // The legacy geometry remains as an API anchor for code that reads the Sun's
-  // world position, but the new sprites are the only visible solar body.
+  // Preserve the old body as the authoritative orbit/API anchor only. It no
+  // longer draws, preventing two different Suns from appearing simultaneously.
   if (sunBody.core) sunBody.core.visible = false;
   if (sunBody.glow) sunBody.glow.visible = false;
 
@@ -232,31 +236,36 @@ function updateRealSun(cycle) {
   visual.discMaterial.color.copy(REAL_SUN_HORIZON).lerp(REAL_SUN_ZENITH, altitudeT);
   visual.haloMaterial.color.copy(REAL_HALO_HORIZON).lerp(REAL_HALO_ZENITH, altitudeT);
   visual.aureoleMaterial.color.copy(visual.haloMaterial.color);
-  visual.horizonGlowMaterial.color.copy(REAL_TWILIGHT_GLOW).lerp(REAL_HALO_HORIZON, altitudeT * 0.25);
+  visual.horizonGlowMaterial.color
+    .copy(REAL_TWILIGHT_GLOW)
+    .lerp(REAL_HALO_HORIZON, altitudeT * 0.22);
 
+  // The enlarged disc carries the identity of the Sun; glare supports it rather
+  // than overwhelming it. Clouds attenuate the disc but never collapse it into a
+  // one-pixel point unless the weather really is opaque.
   visual.discMaterial.opacity = visible
-    * THREE.MathUtils.lerp(0.92, 1.0, altitudeT)
-    * transmission;
+    * THREE.MathUtils.lerp(0.98, 1.0, altitudeT)
+    * (0.65 + transmission * 0.35);
   visual.haloMaterial.opacity = visible
-    * THREE.MathUtils.lerp(0.42, 0.22, altitudeT)
+    * THREE.MathUtils.lerp(0.30, 0.16, altitudeT)
     * (0.35 + transmission * 0.65);
   visual.aureoleMaterial.opacity = visible
-    * THREE.MathUtils.lerp(0.19, 0.06, altitudeT)
-    * (0.4 + transmission * 0.6);
+    * THREE.MathUtils.lerp(0.12, 0.045, altitudeT)
+    * (0.40 + transmission * 0.60);
   visual.horizonGlowMaterial.opacity = visible
     * horizon
-    * 0.17
+    * 0.12
     * (0.42 + transmission * 0.58);
 
-  const discScale = SUN_CORE_DIAMETER * (1 + horizon * 0.045);
-  const haloScale = SUN_HALO_DIAMETER * (1 + horizon * 0.28);
-  const aureoleScale = SUN_AUREOLE_DIAMETER * (1 + horizon * 0.42);
+  const discScale = SUN_CORE_DIAMETER * (1 + horizon * 0.12);
+  const haloScale = SUN_HALO_DIAMETER * (1 + horizon * 0.24);
+  const aureoleScale = SUN_AUREOLE_DIAMETER * (1 + horizon * 0.34);
   visual.disc.scale.set(discScale, discScale, 1);
   visual.halo.scale.set(haloScale, haloScale, 1);
   visual.aureole.scale.set(aureoleScale, aureoleScale, 1);
   visual.horizonGlow.scale.set(
-    SUN_HORIZON_GLOW_WIDTH * (1 + horizon * 0.28),
-    SUN_HORIZON_GLOW_HEIGHT * (1 + horizon * 0.12),
+    SUN_HORIZON_GLOW_WIDTH * (1 + horizon * 0.22),
+    SUN_HORIZON_GLOW_HEIGHT * (1 + horizon * 0.10),
     1,
   );
 
@@ -327,9 +336,9 @@ function applyNaturalLightBalance(cycle) {
     if (elevation > -0.08) {
       cycle.sun.intensity *= THREE.MathUtils.lerp(0.28, 1.0, altitudeT);
       cycle.sun.color.lerp(HORIZON_SUN_LIGHT, lowSun * 0.26);
-      cycle.ambient.intensity *= 1 + lowSun * 0.26;
+      cycle.ambient.intensity *= 1 + lowSun * 0.20;
       if (cycle.ambient.color?.isColor) {
-        cycle.ambient.color.lerp(HORIZON_SKY_FILL, lowSun * 0.07);
+        cycle.ambient.color.lerp(HORIZON_SKY_FILL, lowSun * 0.05);
       }
     }
   }
@@ -345,9 +354,8 @@ function blendResultColor(result, key, target, amount) {
 function applySunriseSunsetAtmosphere(cycle, result) {
   const elevation = sunElevation(cycle);
 
-  // sunlightPresence begins before the disc clears the horizon so the sky warms
-  // first, as in a real dawn. dayT reaches one only after the Sun has climbed far
-  // enough that the long orange optical path is no longer dominant.
+  // The atmosphere begins to brighten before the solar disc appears. Warmth is
+  // concentrated near the lower sky while the zenith stays distinctly blue.
   const sunlightPresence = smoothstep01((elevation + 0.115) / 0.145);
   const dayT = smoothstep01(Math.max(0, elevation) / 0.42);
   const lowSun = smoothstep01(1 - Math.min(1, Math.abs(elevation) / 0.24))
@@ -357,21 +365,18 @@ function applySunriseSunsetAtmosphere(cycle, result) {
   const targetMid = SKY_MID_TWILIGHT.clone().lerp(SKY_MID_DAY, dayT);
   const targetHorizon = SKY_HORIZON_TWILIGHT.clone().lerp(SKY_HORIZON_DAY, dayT);
 
-  // Keep biome/night authorship from the preserved base. These targets become
-  // strongest around actual daylight and fade out completely into true night.
-  const atmosphereWeight = sunlightPresence * 0.72;
-  blendResultColor(result, "skyZenith", targetZenith, atmosphereWeight * 0.72);
-  blendResultColor(result, "skyMid", targetMid, atmosphereWeight * 0.78);
-  blendResultColor(result, "skyHorizon", targetHorizon, atmosphereWeight * (0.74 + lowSun * 0.18));
-
-  // Some preserved call sites use `fogColor`/`skyColor` rather than the three
-  // explicit bands. Warm them only slightly; local Sun glare carries most of the
-  // dramatic sunrise/sunset hue.
-  blendResultColor(result, "fogColor", targetHorizon, lowSun * 0.18);
-  blendResultColor(result, "skyColor", targetMid, lowSun * 0.14);
+  // Retain the preserved biome/night atmosphere. Sunrise/sunset strongly affects
+  // the horizon, moderately affects the middle sky and only gently touches the
+  // zenith — closer to actual atmospheric scattering than a full-screen tint.
+  const atmosphereWeight = sunlightPresence * 0.64;
+  blendResultColor(result, "skyZenith", targetZenith, atmosphereWeight * 0.30);
+  blendResultColor(result, "skyMid", targetMid, atmosphereWeight * (0.48 + lowSun * 0.10));
+  blendResultColor(result, "skyHorizon", targetHorizon, atmosphereWeight * (0.80 + lowSun * 0.16));
+  blendResultColor(result, "fogColor", targetHorizon, lowSun * 0.15);
+  blendResultColor(result, "skyColor", targetMid, lowSun * 0.08);
 
   if (cycle.ambient?.color?.isColor && sunlightPresence > 0) {
-    cycle.ambient.color.lerp(targetMid, lowSun * 0.055);
+    cycle.ambient.color.lerp(targetMid, lowSun * 0.035);
   }
 
   const daylightCloud = CLOUD_LIGHT_TWILIGHT.clone().lerp(CLOUD_LIGHT_DAY, dayT);
@@ -379,9 +384,6 @@ function applySunriseSunsetAtmosphere(cycle, result) {
   const cloudLight = CLOUD_LIGHT_NIGHT.clone().lerp(daylightCloud, sunlightPresence);
   const cloudShadow = CLOUD_SHADOW_NIGHT.clone().lerp(daylightShadow, sunlightPresence);
 
-  // Feed the exact same atmosphere into clouds and any later water/lighting pass.
-  // Clone result colors when present so downstream modules never mutate the
-  // day/night return object by accident.
   const skyZenith = result?.skyZenith?.isColor ? result.skyZenith.clone() : targetZenith;
   const skyMid = result?.skyMid?.isColor ? result.skyMid.clone() : targetMid;
   const skyHorizon = result?.skyHorizon?.isColor ? result.skyHorizon.clone() : targetHorizon;

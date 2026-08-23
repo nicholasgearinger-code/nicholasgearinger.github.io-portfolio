@@ -29,14 +29,19 @@ import {
 import { LIQUID_LEVEL } from "./terrain.js";
 
 // -----------------------------------------------------------------------------
-// Dynamic cloud presentation layer.
+// Natural mobile volumetric-cloud presentation layer.
 //
-// proceduralClouds.js owns the persistent weather volume/state. This wrapper
-// upgrades the live shader with stable per-ray jitter and slowly morphing volume
-// coordinates, then adds a cheap procedural cirrus deck. The important mobile
-// constraint remains unchanged: Low keeps the same eight primary march steps.
-// Shape evolution comes from moving through the 3D field and changing its cross
-// section over time instead of increasing the brute-force sample count.
+// proceduralClouds.js continues to own the weather state, 3D noise volume,
+// wind and cloud-occlusion model. This wrapper keeps Low at the same eight
+// primary raymarch steps, but improves the way those samples are launched,
+// shaped and lit:
+//   * a single horizontal launch plane replaces the old box faces, removing
+//     vertical/horizon wall artifacts while the cloud density remains fully 3D;
+//   * stable weather-texture jitter hides the eight-step shelves;
+//   * restrained domain warping changes shape without the melted/blobby look;
+//   * Beer-Lambert extinction + a cheap powder term produces softer interiors;
+//   * cloud density is allowed to breathe and reform without cumulative UV drift;
+//   * thin procedural cirrus remains a separate one-draw high-altitude layer.
 // -----------------------------------------------------------------------------
 
 function clamp01(value) {
@@ -95,9 +100,9 @@ function createCirrusTexture(size = 192) {
       const streak = fbm2D(u * 10.5 + broad * 1.7, v * 2.2 - broad * 0.9);
       const detail = fbm2D(u * 18.0 - 3.2, v * 5.0 + 4.7);
       const field = broad * 0.54 + streak * 0.34 + detail * 0.12;
-      const wispy = smooth01((field - 0.49) / 0.22);
-      const breakup = smooth01((streak - 0.38) / 0.34);
-      const alpha = Math.pow(clamp01(wispy * (0.55 + breakup * 0.45)), 1.35);
+      const wispy = smooth01((field - 0.51) / 0.20);
+      const breakup = smooth01((streak - 0.40) / 0.32);
+      const alpha = Math.pow(clamp01(wispy * (0.58 + breakup * 0.42)), 1.55);
       const i = (x + y * size) * 4;
       data[i] = 255;
       data[i + 1] = 255;
@@ -117,12 +122,12 @@ function createCirrusTexture(size = 192) {
 
 function createCirrusLayer(scene) {
   const texture = createCirrusTexture();
-  texture.repeat.set(1.55, 1.05);
+  texture.repeat.set(1.45, 1.00);
   const material = new THREE.MeshBasicMaterial({
     map: texture,
     color: 0xe9f2fa,
     transparent: true,
-    opacity: 0.20,
+    opacity: 0.10,
     depthWrite: false,
     depthTest: true,
     side: THREE.DoubleSide,
@@ -132,7 +137,7 @@ function createCirrusLayer(scene) {
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = "rift-procedural-cirrus";
   mesh.rotation.x = -Math.PI / 2;
-  mesh.position.y = 176;
+  mesh.position.y = 180;
   mesh.renderOrder = -90;
   mesh.frustumCulled = false;
   scene.add(mesh);
@@ -147,8 +152,8 @@ function createCirrusLayer(scene) {
   };
 }
 
-function installDynamicCloudShader(handle) {
-  if (!handle?.material || handle.__riftDynamicShaderInstalled) return;
+function installNaturalCloudShader(handle) {
+  if (!handle?.material || handle.__riftNaturalCloudShaderInstalled) return;
 
   const uniforms = handle.uniforms;
   uniforms.morphOffset = uniform(new THREE.Vector3());
@@ -177,22 +182,22 @@ function installDynamicCloudShader(handle) {
     const marchLength = tslMax(tEnd.sub(tStart), float(0));
     const stepSize = marchLength.div(RAY_STEPS).toVar();
 
-    // Low uses only eight view samples. Starting every ray at the same fraction
-    // of its first interval makes those samples line up as horizontal shelves at
-    // grazing angles. One weather-texture lookup produces a stable per-pixel
-    // jitter without temporal sparkle or another raymarch step.
+    // Stable spatial jitter hides Low's eight discrete intervals without the
+    // sparkle that time-randomized noise would cause on a phone display.
     const jitterUV = vec2(positionWorld.x, positionWorld.z)
-      .mul(0.0137)
-      .add(uniforms.weatherOffset.mul(3.17))
+      .mul(0.0129)
+      .add(uniforms.weatherOffset.mul(2.91))
       .fract();
     const jitterSeed = texture(weatherTex, jitterUV).g;
-    const jitter = float(0.12).add(jitterSeed.mul(0.76));
+    const jitter = float(0.10).add(jitterSeed.mul(0.80));
     const t = tStart.add(stepSize.mul(jitter)).toVar();
     const transmittance = float(1).toVar();
     const scattered = vec3(0, 0, 0).toVar();
 
+    // A broad forward-scattering lobe gives the characteristic bright side of
+    // sunlit cumulus without a costly full phase-function evaluation.
     const sunFacing = clamp(dot(rayDir, uniforms.sunDir), 0, 1);
-    const forwardPhase = pow(sunFacing, 5).mul(2.25).add(0.18);
+    const forwardPhase = pow(sunFacing, 4).mul(1.95).add(0.20);
 
     Loop(RAY_STEPS, () => {
       const pos = rayOrigin.add(rayDir.mul(t));
@@ -210,57 +215,59 @@ function installDynamicCloudShader(handle) {
       const weatherSample = texture(weatherTex, weatherUV);
       const coverageThreshold = float(1).sub(uniforms.coverage);
       const coverageMask = smoothstep(
-        coverageThreshold.sub(0.14),
-        coverageThreshold.add(0.16),
+        coverageThreshold.sub(0.11),
+        coverageThreshold.add(0.15),
         weatherSample.r,
       );
 
-      const convectiveLocal = mix(float(0.58), float(1.32), weatherSample.g)
+      // Flatter bases, rounder tops. Convection raises the upper fade and narrows
+      // the base transition, creating towers without stretching every cloud.
+      const convectiveLocal = mix(float(0.52), float(1.22), weatherSample.g)
         .mul(uniforms.convection);
       const lowerFade = smoothstep(
-        float(0.01),
-        mix(float(0.105), float(0.040), convectiveLocal),
+        float(0.012),
+        mix(float(0.115), float(0.050), convectiveLocal),
         height01,
       );
-      const topStart = mix(float(0.64), float(0.88), convectiveLocal);
-      const upperFade = float(1).sub(smoothstep(topStart, float(0.997), height01));
+      const topStart = mix(float(0.66), float(0.86), convectiveLocal);
+      const upperFade = float(1).sub(smoothstep(topStart, float(0.995), height01));
       const verticalProfile = lowerFade.mul(upperFade);
 
       const baseShapeUV = pos.mul(TILE_SCALE).add(uniforms.scrollOffset).fract();
-
-      // One extra 3D fetch is enough to bend the coordinates of the main sample.
-      // Because the offset itself evolves in three dimensions, billows swell,
-      // split and dissolve instead of the whole texture merely sliding sideways.
       const warp = texture3D(
         shapeTex,
         baseShapeUV.add(uniforms.morphOffset).fract(),
       );
+
+      // Restraint matters here. The previous 0.06/0.14 warp was large enough to
+      // turn cumulus into stretched liquid blobs. These offsets are intentionally
+      // small: enough to make lobes evolve, not enough to reveal the distortion.
       const warpedUV = baseShapeUV
         .add(vec3(
-          warp.g.sub(0.5).mul(0.060),
-          warp.b.sub(0.5).mul(0.035),
-          warp.r.sub(0.5).mul(0.060),
+          warp.g.sub(0.5).mul(0.035),
+          warp.b.sub(0.5).mul(0.020),
+          warp.r.sub(0.5).mul(0.035),
         ))
-        .add(uniforms.secondaryMorph.mul(0.14))
+        .add(uniforms.secondaryMorph.mul(0.08))
         .fract();
       const shape = texture3D(shapeTex, warpedUV);
 
-      const baseThreshold = mix(float(0.62), float(0.41), uniforms.density);
-      const broadMass = smoothstep(baseThreshold, baseThreshold.add(0.28), shape.r);
+      const baseThreshold = mix(float(0.65), float(0.43), uniforms.density);
+      const broadMass = smoothstep(baseThreshold, baseThreshold.add(0.27), shape.r);
       const erosionAmount = uniforms.erosion
-        .mul(mix(float(0.36), float(0.13), uniforms.stormDarken));
+        .mul(mix(float(0.42), float(0.17), uniforms.stormDarken));
       const erodedMass = clamp(
         broadMass
           .sub(shape.g.mul(erosionAmount))
-          .add(shape.b.mul(0.09))
-          .add(warp.b.mul(0.035)),
+          .add(shape.b.mul(0.05))
+          .add(warp.b.mul(0.02)),
         0,
         1,
       );
 
       const moistureBoost = mix(
-        float(0.80),
-        float(1.18),
+        float(0.76),
+        float(1.15),
         uniforms.humidity.mul(weatherSample.b),
       );
       const localDensity = erodedMass
@@ -278,30 +285,37 @@ function installDynamicCloudShader(handle) {
           shadowPos
             .mul(TILE_SCALE)
             .add(uniforms.scrollOffset)
-            .add(uniforms.secondaryMorph.mul(0.08))
+            .add(uniforms.secondaryMorph.mul(0.05))
             .fract(),
         );
-        lightAccum.addAssign(shadowShape.r.mul(0.70).add(shadowShape.a.mul(0.30)));
+        lightAccum.addAssign(shadowShape.r.mul(0.72).add(shadowShape.a.mul(0.28)));
       });
-      const selfShadow = exp(lightAccum.mul(-0.40));
+      const selfShadow = exp(lightAccum.mul(-0.42));
 
-      const underside = mix(float(0.50), float(1.0), smoothstep(0.03, 0.62, height01));
+      // Powder approximation: optically thicker cloud regions receive a little
+      // extra diffuse bounce, avoiding gray cardboard interiors with only one
+      // sun-shadow sample on Low.
+      const powder = float(1).sub(exp(localDensity.mul(-2.4)));
+      const underside = mix(float(0.48), float(1.0), smoothstep(0.04, 0.62, height01));
       const silverEdge = pow(float(1).sub(erodedMass), 2)
         .mul(forwardPhase)
-        .mul(0.42)
-        .mul(float(1).sub(uniforms.stormDarken.mul(0.58)));
-      const ambientTerm = uniforms.ambientColor.mul(mix(float(0.72), float(1.03), underside));
+        .mul(0.30)
+        .mul(float(1).sub(uniforms.stormDarken.mul(0.62)));
+      const ambientTerm = uniforms.ambientColor
+        .mul(mix(float(0.70), float(1.02), underside))
+        .mul(float(0.90).add(powder.mul(0.16)));
       const sunTerm = uniforms.sunColor
         .mul(forwardPhase)
         .mul(selfShadow)
-        .mul(mix(float(0.80), float(1.22), underside));
+        .mul(mix(float(0.76), float(1.16), underside))
+        .mul(float(0.86).add(powder.mul(0.18)));
       const clearLit = ambientTerm.add(sunTerm).add(uniforms.sunColor.mul(silverEdge));
-      const stormLit = mix(clearLit, vec3(0.20, 0.23, 0.29), uniforms.stormDarken.mul(0.84));
+      const stormLit = mix(clearLit, vec3(0.19, 0.22, 0.28), uniforms.stormDarken.mul(0.84));
       const flash = uniforms.lightningColor
         .mul(uniforms.lightningFlash)
-        .mul(mix(float(0.7), float(1.6), localDensity));
+        .mul(mix(float(0.7), float(1.55), localDensity));
 
-      const extinctionScale = mix(float(0.043), float(0.082), uniforms.stormDarken);
+      const extinctionScale = mix(float(0.040), float(0.078), uniforms.stormDarken);
       const sampleAlpha = float(1).sub(
         exp(localDensity.mul(stepSize).mul(extinctionScale).negate()),
       );
@@ -310,12 +324,18 @@ function installDynamicCloudShader(handle) {
       t.addAssign(stepSize);
     });
 
-    const alpha = float(1).sub(transmittance).mul(signedY.abs());
+    // Extremely grazing Low-tier rays are where eight samples become visibly
+    // stair-stepped. Fade them naturally into atmospheric haze instead of
+    // drawing a serrated stack of cloud slices at the horizon.
+    const horizonFade = smoothstep(float(0.018), float(0.095), rayDir.y.abs());
+    const alpha = float(1).sub(transmittance)
+      .mul(signedY.abs())
+      .mul(horizonFade);
     return vec4(scattered, alpha);
   })();
 
   handle.material.needsUpdate = true;
-  handle.__riftDynamicShaderInstalled = true;
+  handle.__riftNaturalCloudShaderInstalled = true;
 }
 
 function updateCirrus(handle, dt, camera, sunColor, ambientColor, windX, windZ, storm, underwater) {
@@ -328,24 +348,21 @@ function updateCirrus(handle, dt, camera, sunColor, ambientColor, windX, windZ, 
   cirrus.mesh.position.z = camera.position.z;
   const safeDt = Math.min(Math.max(Number(dt) || 0, 0), 0.1);
   cirrus.age += safeDt;
-  cirrus.offsetX += (windX + 0.30) * safeDt * 0.00033;
-  cirrus.offsetY += (windZ + 0.11) * safeDt * 0.00024;
-
-  // Offset and a barely perceptible rotation change the high streaks as they
-  // advect, avoiding a static wallpaper look while remaining one cheap plane.
+  cirrus.offsetX += (windX + 0.30) * safeDt * 0.00030;
+  cirrus.offsetY += (windZ + 0.11) * safeDt * 0.00022;
   cirrus.texture.offset.set(
-    cirrus.offsetX + Math.sin(cirrus.age * 0.017) * 0.018,
-    cirrus.offsetY + Math.cos(cirrus.age * 0.013) * 0.012,
+    cirrus.offsetX + Math.sin(cirrus.age * 0.011) * 0.010,
+    cirrus.offsetY + Math.cos(cirrus.age * 0.009) * 0.008,
   );
-  cirrus.mesh.rotation.z = Math.sin(cirrus.age * 0.006) * 0.045;
-  cirrus.material.opacity = THREE.MathUtils.lerp(0.22, 0.05, clamp01(storm));
+  cirrus.mesh.rotation.z = Math.sin(cirrus.age * 0.004) * 0.028;
+  cirrus.material.opacity = THREE.MathUtils.lerp(0.10, 0.03, clamp01(storm));
 
   const atmosphere = globalThis.__riftSkyAtmosphere;
   const daylightColor = atmosphere?.cloudLight?.isColor
     ? atmosphere.cloudLight.clone()
     : new THREE.Color(0xf7fbff);
-  if (!atmosphere && sunColor?.isColor) daylightColor.lerp(sunColor, 0.12);
-  if (ambientColor?.isColor) daylightColor.lerp(ambientColor, 0.12);
+  if (!atmosphere && sunColor?.isColor) daylightColor.lerp(sunColor, 0.10);
+  if (ambientColor?.isColor) daylightColor.lerp(ambientColor, 0.10);
   cirrus.material.color.copy(daylightColor);
 }
 
@@ -353,13 +370,30 @@ export function createVolumetricClouds(scene) {
   const handle = createProceduralClouds(scene);
   if (!handle) return handle;
 
+  // The old box was useful during debugging, but its side faces can launch
+  // near-horizontal marches that appear as vertical cloud walls. A plane at the
+  // cloud base is only the rasterization entry surface; the shader still marches
+  // all the way to cloudTopY, so the cloud itself remains a genuine 3D volume.
+  if (handle.mesh) {
+    handle.mesh.geometry?.dispose();
+    handle.mesh.geometry = new THREE.PlaneGeometry(
+      handle.quality.boxSize,
+      handle.quality.boxSize,
+      1,
+      1,
+    );
+    handle.mesh.rotation.set(-Math.PI / 2, 0, 0);
+    handle.mesh.scale.set(1, 1, 1);
+    handle.mesh.frustumCulled = false;
+  }
+
   handle.material.side = THREE.DoubleSide;
   handle.material.forceSinglePass = true;
-  handle.material.opacity = 0.94;
+  handle.material.opacity = 0.90;
   handle.material.needsUpdate = true;
   handle.__riftCirrus = createCirrusLayer(scene);
   handle.__riftMorphAge = Math.random() * 100;
-  installDynamicCloudShader(handle);
+  installNaturalCloudShader(handle);
   return handle;
 }
 
@@ -393,7 +427,7 @@ export function updateVolumetricClouds(
   );
 
   if (!handle?.uniforms || !camera) return;
-  installDynamicCloudShader(handle);
+  installNaturalCloudShader(handle);
 
   const waterY = LIQUID_LEVEL?.[currentBiome];
   const underwater = Number.isFinite(waterY) && camera.position.y < waterY - 0.15;
@@ -420,21 +454,21 @@ export function updateVolumetricClouds(
   handle.__riftMorphAge += safeDt;
   const age = handle.__riftMorphAge;
 
-  // Fair weather remains visibly populated, but density is deliberately softer
-  // than the previous visibility fix. Broader coverage plus ray jitter gives
-  // solid-looking cloud bodies without exposing each Low-tier march interval.
-  const fairCoverageFloor = THREE.MathUtils.lerp(0.54, 0.76, storm);
-  const fairDensityFloor = THREE.MathUtils.lerp(0.47, 0.70, storm);
-  const humidityFloor = THREE.MathUtils.lerp(0.55, 0.79, storm);
-  const erosionCeiling = THREE.MathUtils.lerp(0.47, 0.29, storm);
+  // Fair-weather clouds should occupy only part of the sky. Storms naturally
+  // raise these floors through the same weather state rather than every day
+  // beginning as forced overcast.
+  const fairCoverageFloor = THREE.MathUtils.lerp(0.40, 0.68, storm);
+  const fairDensityFloor = THREE.MathUtils.lerp(0.36, 0.62, storm);
+  const humidityFloor = THREE.MathUtils.lerp(0.50, 0.74, storm);
+  const erosionCeiling = THREE.MathUtils.lerp(0.58, 0.34, storm);
   const fairPulse = 1 - smooth01(storm);
   const coveragePulse = (
-    Math.sin(age * 0.085) * 0.022 +
-    Math.sin(age * 0.031 + 1.8) * 0.016
+    Math.sin(age * 0.060) * 0.014 +
+    Math.sin(age * 0.021 + 1.8) * 0.009
   ) * fairPulse;
   const densityPulse = (
-    Math.sin(age * 0.071 + 0.7) * 0.024 +
-    Math.sin(age * 0.023 + 2.4) * 0.014
+    Math.sin(age * 0.052 + 0.7) * 0.015 +
+    Math.sin(age * 0.018 + 2.4) * 0.008
   ) * fairPulse;
 
   u.coverage.value = clamp01(Math.max(Number(u.coverage.value) || 0, fairCoverageFloor) + coveragePulse);
@@ -445,51 +479,51 @@ export function updateVolumetricClouds(
     erosionCeiling,
   );
 
-  // The base updater already performs wind advection. These small non-linear
-  // offsets are applied AFTER it, so the 3D cross-section bends and breathes
-  // rather than following one rigid translation vector forever.
-  u.scrollOffset.value.x += Math.sin(age * 0.057) * 0.034 + Math.sin(age * 0.019) * 0.021;
-  u.scrollOffset.value.y += Math.sin(age * 0.043 + 0.8) * (0.018 + convection * 0.018);
-  u.scrollOffset.value.z += Math.cos(age * 0.051) * 0.034 + Math.sin(age * 0.017 + 2.0) * 0.020;
-  u.weatherOffset.value.x += Math.sin(age * 0.009) * 0.0009;
-  u.weatherOffset.value.y += Math.cos(age * 0.011) * 0.0007;
-
+  // Shape evolution lives only in these bounded morph offsets. The previous
+  // implementation repeatedly ADDED sine offsets into scrollOffset every frame,
+  // which accumulated into large unintended distortion over time. Wind advection
+  // remains entirely owned by proceduralClouds.js and never accumulates a wobble.
   u.morphOffset.value.set(
-    Math.sin(age * 0.031) * 0.105,
-    Math.sin(age * 0.023 + 1.7) * 0.075,
-    Math.cos(age * 0.027 + 0.5) * 0.105,
+    Math.sin(age * 0.026) * 0.065,
+    Math.sin(age * 0.019 + 1.7) * 0.045,
+    Math.cos(age * 0.023 + 0.5) * 0.065,
   );
   u.secondaryMorph.value.set(
-    Math.cos(age * 0.017 + 2.1) * 0.075,
-    Math.sin(age * 0.019 + 0.4) * 0.055,
-    Math.sin(age * 0.015 + 1.2) * 0.075,
+    Math.cos(age * 0.014 + 2.1) * 0.050,
+    Math.sin(age * 0.016 + 0.4) * 0.035,
+    Math.sin(age * 0.013 + 1.2) * 0.050,
   );
   u.timePhase.value = age;
 
-  // More vertical room keeps cumulus out of the flat horizon strip. Convective
-  // weather additionally grows the top in a slow pulse, so towers visibly build
-  // before a storm instead of just getting darker.
+  // More modest vertical growth. Scattered cumulus keeps a plausible 70-ish unit
+  // thickness; only real convection/storm state grows tall towers.
   const originalBase = Number(u.cloudBaseY.value) || 58;
   const originalTop = Number(u.cloudTopY.value) || 108;
-  const visualBase = Math.min(originalBase, THREE.MathUtils.lerp(50, 40, storm));
-  const towerPulse = (0.5 + 0.5 * Math.sin(age * 0.038 + 0.9)) * convection * (6 + storm * 14);
+  const visualBase = Math.min(originalBase, THREE.MathUtils.lerp(54, 42, storm));
+  const towerPulse = (0.5 + 0.5 * Math.sin(age * 0.028 + 0.9))
+    * convection
+    * (4 + storm * 10);
   const visualTop = Math.max(
     originalTop,
-    THREE.MathUtils.lerp(138, 180, storm) + towerPulse,
+    THREE.MathUtils.lerp(126, 170, storm) + towerPulse,
   );
   u.cloudBaseY.value = visualBase;
   u.cloudTopY.value = visualTop;
-  handle.mesh.position.y = (visualBase + visualTop) * 0.5;
-  handle.mesh.scale.y = Math.max(1, (visualTop - visualBase) / 430);
+
+  // Keep the launch plane exactly at the cloud base. It follows the camera in X/Z
+  // through the base updater but no longer has box thickness or side faces.
+  handle.mesh.position.y = visualBase;
+  handle.mesh.rotation.set(-Math.PI / 2, 0, 0);
+  handle.mesh.scale.set(1, 1, 1);
 
   // Sunrise/sunset colors are authored by dayNightCycle.js and reused here so
-  // cloud illumination, the visible Sun and the fallback sky are one atmosphere.
+  // cloud illumination, Sun glare and atmospheric horizon remain coherent.
   const atmosphere = globalThis.__riftSkyAtmosphere;
   if (atmosphere) {
     if (atmosphere.cloudLight?.isColor) u.sunColor.value.copy(atmosphere.cloudLight);
     if (atmosphere.cloudShadow?.isColor) {
       u.ambientColor.value.copy(atmosphere.cloudShadow);
-      if (atmosphere.skyZenith?.isColor) u.ambientColor.value.lerp(atmosphere.skyZenith, 0.30);
+      if (atmosphere.skyZenith?.isColor) u.ambientColor.value.lerp(atmosphere.skyZenith, 0.28);
     }
   }
 
@@ -503,6 +537,7 @@ export function updateVolumetricClouds(
     cloudTop: visualTop,
     weatherType: handle.currentWeatherType,
     morphAge: age,
+    launchSurface: "plane",
   };
 }
 

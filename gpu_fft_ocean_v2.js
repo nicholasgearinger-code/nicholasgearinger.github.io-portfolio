@@ -22,11 +22,9 @@ import {
 } from "./gpu_fft_ocean.js";
 
 // Mobile production wrapper for the GPU FFT ocean.
-// Keep the FFT simulation/normal field from gpu_fft_ocean.js, while handling
-// Fresnel, depth color, broken shore foam, atmosphere and day/night roughness in
-// one lightweight material pass. The real sun/moon specular response comes from
-// the scene's DirectionalLights; this shader deliberately does not add a second
-// fake glitter calculation on top of the PBR lighting.
+// The FFT remains responsible for real displacement + normals. This wrapper keeps
+// the top face reflective and makes the underside transmission-heavy, while the
+// broader underwater atmosphere now lives in underwaterWorld.js.
 const SKY_BIAS = new THREE.Color(0xc4eaf0);
 const HORIZON_FALLBACK = new THREE.Color(0xa6d6df);
 const NIGHT_HORIZON = new THREE.Color(0x2b405b);
@@ -36,10 +34,6 @@ const NIGHT_FOAM = new THREE.Color(0x7f9fac);
 const DEEP_BASE = new THREE.Color(0x0a4a58);
 const SHALLOW_BASE = new THREE.Color(0x55c9c3);
 
-// Dedicated underside palette. Underwater deliberately uses a calmer,
-// transmission-heavy palette than the top face. From below, large low-frequency
-// FFT normals should read as the shape of the ceiling, not as giant colored
-// Fresnel blobs painted onto it.
 const UNDER_SURFACE_DAY = new THREE.Color(0x62ced8);
 const UNDER_SURFACE_NIGHT = new THREE.Color(0x315f7a);
 const UNDER_DEEP_DAY = new THREE.Color(0x1b6b80);
@@ -65,30 +59,15 @@ function installProductionWaterNodes(handle, size) {
 
   const viewDir = cameraPosition.sub(positionWorld).normalize();
 
-  // Two inexpensive, directional micro-ripple bands. These do NOT replace the
-  // FFT displacement; they only break up the broad underwater lighting lobes.
-  // The actual surface silhouette and large swell remain driven by the GPU FFT.
-  const microRippleA = sin(
-    positionWorld.x.mul(0.92)
-      .add(positionWorld.z.mul(1.31))
-      .add(time.mul(1.45)),
-  );
-  const microRippleB = sin(
-    positionWorld.x.mul(-1.47)
-      .add(positionWorld.z.mul(0.58))
-      .sub(time.mul(1.12)),
-  );
-
-  // This is the key shallow-water artifact fix. The base FFT normal is correct
-  // for the top face, but from below its largest low-frequency lobes were being
-  // amplified by PBR lighting into rows of obvious oval/circular patches. Keep
-  // only ~30% of that broad tilt underwater and add much smaller directional
-  // ripples on top. Geometry still moves with the full FFT; only the underside
-  // lighting normal is stabilized.
+  // v5 added two per-pixel sine ripple bands here, but the phone dropped from
+  // ~17 FPS to ~11 FPS without producing enough visible improvement. Remove that
+  // cost and instead flatten ONLY the underside shading normal. The full FFT
+  // geometry still rises/falls/chops exactly as before; this just prevents its
+  // largest low-frequency normal lobes becoming repeated oval patches below.
   const underwaterNormal = vec3(
-    baseNormalNode.x.mul(0.30).add(microRippleA.mul(0.055)),
-    abs(baseNormalNode.y).mul(0.35).add(0.88),
-    baseNormalNode.z.mul(0.30).add(microRippleB.mul(0.055)),
+    baseNormalNode.x.mul(0.22),
+    baseNormalNode.y,
+    baseNormalNode.z.mul(0.22),
   ).normalize();
   material.normalNode = mix(baseNormalNode, underwaterNormal, handle.underwaterAmount);
 
@@ -100,8 +79,6 @@ function installProductionWaterNodes(handle, size) {
   const g4 = g2.mul(g2);
   const fresnel = float(0.035).add(g4.mul(grazing).mul(0.965));
 
-  // Above-water distance fade. Underwater keeps a substantially opaque ceiling
-  // so the finite plane edge cannot become a bright sky-colored strip.
   const dx = positionWorld.x.sub(cameraPosition.x);
   const dz = positionWorld.z.sub(cameraPosition.z);
   const distSq = dx.mul(dx).add(dz.mul(dz));
@@ -115,7 +92,8 @@ function installProductionWaterNodes(handle, size) {
     1,
   );
 
-  // Narrow, broken shoreline foam. Foam is heavily suppressed from below.
+  // Topside shoreline foam stays narrow and broken. From below it becomes almost
+  // invisible; underwaterWorld.js handles the water-column look instead.
   const shallowMask = clamp(float(0.075).sub(depthT).mul(13.3333), 0, 1);
   const foamWave = sin(
     positionWorld.x.mul(0.20)
@@ -124,7 +102,7 @@ function installProductionWaterNodes(handle, size) {
   ).mul(0.5).add(0.5);
   const foamBreakup = clamp(foamWave.sub(0.38).mul(1.62), 0, 1);
   const foamDayVisibility = mix(float(0.38), float(1.0), handle.dayAmount);
-  const foamUnderVisibility = float(1).sub(handle.underwaterAmount.mul(0.92));
+  const foamUnderVisibility = float(1).sub(handle.underwaterAmount.mul(0.96));
   const shoreFoam = shallowMask
     .mul(foamBreakup)
     .mul(float(0.20).add(handle.stormAmount.mul(0.16)))
@@ -133,8 +111,6 @@ function installProductionWaterNodes(handle, size) {
 
   material.colorNode = Fn(() => {
     const cleanBase = mix(handle.shallowTint, handle.deepTint, depthT);
-
-    // Cheap Beer-Lambert-style absorption approximation for the top surface.
     const absorption = mix(float(1.05), float(0.80), depthT);
     const depthColor = cleanBase.mul(absorption);
 
@@ -146,42 +122,23 @@ function installProductionWaterNodes(handle, size) {
     const horizonWater = mix(reflectedWater, handle.horizonTint, horizonFade.mul(horizonStrength));
     const topWater = mix(horizonWater, handle.foamVisualTint, shoreFoam);
 
-    // -----------------------------------------------------------------------
-    // Underwater shallow-wave ceiling
-    // -----------------------------------------------------------------------
-    // Previous v4 still used the large FFT slope and view-angle response as the
-    // dominant color modulation. That was enough to preserve the same giant oval
-    // lobes even after the original back-face Fresnel bug was fixed. v5 keeps
-    // those low-frequency terms deliberately subtle and lets two finer moving
-    // ripple bands provide most of the visible underwater surface variation.
+    // Underwater: broad movement comes from the REAL displaced geometry, while
+    // color modulation stays restrained. This intentionally avoids drawing a
+    // second synthetic ripple pattern over the FFT and frees mobile GPU budget
+    // for actual underwater fog/light shafts/particles.
     const crest = clamp(
-      positionWorld.y.sub(handle.waterLevelNode).mul(0.48).add(0.5),
+      positionWorld.y.sub(handle.waterLevelNode).mul(0.42).add(0.5),
       0,
       1,
     );
-    const rippleA01 = microRippleA.mul(0.5).add(0.5);
-    const rippleB01 = microRippleB.mul(0.5).add(0.5);
-    const microShimmer = rippleA01.mul(0.56).add(rippleB01.mul(0.44));
-
-    const transmission = clamp(
-      float(0.61)
-        .add(crest.mul(0.16))
-        .add(microShimmer.sub(0.5).mul(0.13)),
-      0.42,
-      0.84,
-    );
+    const facingLight = clamp(ndv.mul(0.24).add(0.56), 0.50, 0.80);
+    const transmission = clamp(facingLight.add(crest.sub(0.5).mul(0.12)), 0.46, 0.82);
     const underBase = mix(handle.underDeepTint, handle.underSurfaceTint, transmission);
 
-    // Real total-internal-reflection still darkens grazing views, but only very
-    // gently now. It is no longer allowed to draw the FFT's broad lobe pattern.
-    const underView = mix(
-      underBase,
-      handle.underGrazingTint,
-      grazing.mul(0.11),
-    );
-
-    // Distance becomes underwater atmospheric color rather than transparent sky.
-    const underwaterFar = mix(underView, handle.underDeepTint, horizonFade.mul(0.28));
+    // Only a very small total-internal-reflection cue remains. The scene-level
+    // depth fog now supplies most underwater distance separation.
+    const underView = mix(underBase, handle.underGrazingTint, grazing.mul(0.07));
+    const underwaterFar = mix(underView, handle.underDeepTint, horizonFade.mul(0.16));
 
     return mix(topWater, underwaterFar, handle.underwaterAmount);
   })();
@@ -192,18 +149,16 @@ function installProductionWaterNodes(handle, size) {
     .add(nightAmount.mul(0.075));
   const grazingRoughness = mix(float(0.078), float(0.045), handle.dayAmount);
   const topRoughness = mix(baseRoughness, grazingRoughness, fresnel);
-
-  // Slightly rougher underwater than v4. Combined with the stabilized normal,
-  // this keeps individual PBR highlights from turning into another set of large
-  // smooth discs while still allowing moving light to read on the ceiling.
-  const underwaterRoughness = float(0.205)
+  const underwaterRoughness = float(0.23)
     .add(handle.stormAmount.mul(0.04))
     .add(nightAmount.mul(0.03));
   material.roughnessNode = mix(topRoughness, underwaterRoughness, handle.underwaterAmount);
   material.metalnessNode = float(0.01);
 
+  // Never fade the underwater ceiling to transparent at distance. Any gaps beyond
+  // finite geometry are also matched to water fog/background by underwaterWorld.
   const topOpacity = mix(float(0.94), float(0.02), horizonFade);
-  const underwaterOpacity = mix(float(0.96), float(0.91), horizonFade);
+  const underwaterOpacity = float(0.98);
   material.opacityNode = mix(topOpacity, underwaterOpacity, handle.underwaterAmount);
   material.transparent = true;
   material.depthWrite = false;
@@ -218,16 +173,12 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
 
   installProductionWaterNodes(handle, size);
 
-  // Keep the real FFT amplitude, but restrained enough for the 128x128 mobile
-  // mesh. Shallow-water attenuation itself is already handled by fftShore in the
-  // base simulation, so we do not fake a second amplitude reduction here.
   handle.waveScale.value = 1.45;
   handle.mesh.scale.y = 1.05;
-
   handle.deepTint.value.copy(DEEP_BASE);
   handle.shallowTint.value.copy(SHALLOW_BASE);
 
-  console.info("[gpu-fft-ocean] mobile production water pass v5 + shallow underwater ripples active");
+  console.info("[gpu-fft-ocean] mobile production water pass v6 + atmospheric underwater mode active");
   return handle;
 }
 
@@ -272,7 +223,6 @@ export function updateGPUFFTOceanVisuals(
   const dayT = THREE.MathUtils.clamp(day, 0, 1);
   const nightT = 1 - dayT;
 
-  // Smooth transition through the surface instead of a binary material switch.
   if (handle.underwaterAmount) {
     const rawUnder = Number.isFinite(cameraY) && Number.isFinite(handle.waterY)
       ? THREE.MathUtils.clamp((handle.waterY + 0.12 - cameraY) / 0.55, 0, 1)

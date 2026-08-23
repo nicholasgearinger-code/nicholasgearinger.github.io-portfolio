@@ -11,6 +11,11 @@ import {
   updateRealisticLightingExposure,
   setRealisticLightingBiome,
 } from "./worldLighting.js";
+import {
+  ensureUnderwaterWorld,
+  updateUnderwaterWorld,
+  disposeUnderwaterWorld,
+} from "./underwaterWorld.js";
 
 function attachWorldLighting(scene, biome, waterY, handle) {
   const lighting = ensureRealisticWorldLighting(scene, biome, waterY);
@@ -18,6 +23,12 @@ function attachWorldLighting(scene, biome, waterY, handle) {
   if (handle && typeof handle === "object") {
     handle.worldLighting = lighting;
     handle.worldLightingBiome = biome;
+    // Crystal is the only full open-ocean level. Give it a dedicated, cheap
+    // underwater atmosphere that runs through this same already-existing liquid
+    // update hook instead of adding another hot-loop dependency to main.js.
+    handle.underwaterWorld = biome === "crystal"
+      ? ensureUnderwaterWorld(scene, waterY)
+      : null;
   }
   return handle;
 }
@@ -72,6 +83,22 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
     );
   }
 
+  // Underwater atmosphere is deliberately applied AFTER the normal world-light
+  // pass. Above water it becomes a no-op; below the Crystal ocean it filters the
+  // existing key light, adds cheap diffuse water-column fill, depth fog, motes,
+  // and a few soft surface shafts. No second scene render is introduced.
+  if (handle?.underwaterWorld) {
+    updateUnderwaterWorld(
+      handle.underwaterWorld,
+      elapsed,
+      cameraY,
+      playerPos,
+      dayAmount,
+      stormAmount,
+      handle.worldLighting,
+    );
+  }
+
   return result;
 }
 
@@ -88,6 +115,10 @@ async function updateFluidSimWater(handle, renderer) {
 }
 
 function disposeLiquidPlane(scene, handle) {
+  if (handle?.underwaterWorld) {
+    disposeUnderwaterWorld(scene, handle.underwaterWorld);
+    handle.underwaterWorld = null;
+  }
   if (handle?.gpuFFT) return disposeGPUFFTOcean(scene, handle);
   return legacy.disposeLiquidPlane(scene, handle);
 }

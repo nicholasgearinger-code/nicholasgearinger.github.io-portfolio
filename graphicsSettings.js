@@ -38,7 +38,12 @@ const TIERS = {
     sunBeams: 3,
     shootingStarPoolSize: 1,
     silhouetteMultiplier: 0.6,
-    shadowsEnabled: false,
+    // Low now keeps REAL local shadows instead of disabling them entirely.
+    // worldLighting.js turns the existing sun light into a single mobile
+    // "celestial key": sun by day, smoothly rotating toward moon direction at
+    // night. Only that one directional light casts on Low, so the 512 map costs
+    // one shadow pass rather than separate sun + moon passes.
+    shadowsEnabled: true,
     shadowMapSize: 512,
     pixelRatioCap: 1,
   },
@@ -84,10 +89,9 @@ const TIERS = {
 
 // No saved preference yet means this is a first visit — default touch
 // devices to "low" instead of "medium" (a phone's GPU generally can't
-// absorb Medium's shadow pass painlessly the way a laptop/desktop can),
-// so the out-of-box experience on mobile is actually smooth rather than
-// technically-available-but-choppy. Anyone can still bump it up via the
-// settings panel; this only decides the untouched default.
+// absorb Medium's full-resolution shadow/detail cost painlessly the way a
+// laptop/desktop can). Low still has a deliberately optimized 512 real-shadow
+// path now; it is no longer a "no shadows" mode.
 function detectDefaultTier() {
   const isTouch = typeof window !== "undefined" && ("ontouchstart" in window || (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0));
   return isTouch ? "low" : "medium";

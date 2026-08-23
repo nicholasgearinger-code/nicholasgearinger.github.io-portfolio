@@ -12,6 +12,7 @@ import {
   sin,
   time,
   uniform,
+  vec3,
 } from "three/tsl";
 import {
   createGPUFFTOceanPlane as createBaseOcean,
@@ -35,16 +36,15 @@ const NIGHT_FOAM = new THREE.Color(0x7f9fac);
 const DEEP_BASE = new THREE.Color(0x0a4a58);
 const SHALLOW_BASE = new THREE.Color(0x55c9c3);
 
-// Dedicated underside palette. The old top-surface Fresnel was also being used
-// from below, which made the low-frequency FFT normal lobes read as soft purple
-// circles/ovals instead of a continuous moving water ceiling. Underwater now has
-// its own restrained transmission/reflection balance instead of reusing the sky
-// palette verbatim.
-const UNDER_SURFACE_DAY = new THREE.Color(0x58c8d7);
+// Dedicated underside palette. Underwater deliberately uses a calmer,
+// transmission-heavy palette than the top face. From below, large low-frequency
+// FFT normals should read as the shape of the ceiling, not as giant colored
+// Fresnel blobs painted onto it.
+const UNDER_SURFACE_DAY = new THREE.Color(0x62ced8);
 const UNDER_SURFACE_NIGHT = new THREE.Color(0x315f7a);
-const UNDER_DEEP_DAY = new THREE.Color(0x17647b);
+const UNDER_DEEP_DAY = new THREE.Color(0x1b6b80);
 const UNDER_DEEP_NIGHT = new THREE.Color(0x172f48);
-const UNDER_GRAZING_DAY = new THREE.Color(0x245a70);
+const UNDER_GRAZING_DAY = new THREE.Color(0x2b6576);
 const UNDER_GRAZING_NIGHT = new THREE.Color(0x162b43);
 
 function installProductionWaterNodes(handle, size) {
@@ -52,6 +52,7 @@ function installProductionWaterNodes(handle, size) {
 
   const material = handle.mesh.material;
   const depthT = attribute("fftDepth", "float");
+  const baseNormalNode = material.normalNode;
 
   handle.skyReflectionTint = uniform(SKY_BIAS.clone());
   handle.horizonTint = uniform(HORIZON_FALLBACK.clone());
@@ -62,27 +63,45 @@ function installProductionWaterNodes(handle, size) {
   handle.underDeepTint = uniform(UNDER_DEEP_DAY.clone());
   handle.underGrazingTint = uniform(UNDER_GRAZING_DAY.clone());
 
-  // Keep the actual FFT-derived normal. Extra procedural normal layers were
-  // intentionally removed in the previous mobile pass after the iPhone frame
-  // rate showed they were not worth the per-pixel trigonometric cost.
   const viewDir = cameraPosition.sub(positionWorld).normalize();
 
-  // IMPORTANT underwater fix: use the absolute view/normal angle. With a
-  // DoubleSide water material the camera can see the same geometry from below;
-  // clamping a negative back-face dot product directly to zero made virtually
-  // the whole underside look like a 100% grazing Fresnel reflection. That is the
-  // source of the broad circular/oval FFT-lobe artifacts seen in testing.
+  // Two inexpensive, directional micro-ripple bands. These do NOT replace the
+  // FFT displacement; they only break up the broad underwater lighting lobes.
+  // The actual surface silhouette and large swell remain driven by the GPU FFT.
+  const microRippleA = sin(
+    positionWorld.x.mul(0.92)
+      .add(positionWorld.z.mul(1.31))
+      .add(time.mul(1.45)),
+  );
+  const microRippleB = sin(
+    positionWorld.x.mul(-1.47)
+      .add(positionWorld.z.mul(0.58))
+      .sub(time.mul(1.12)),
+  );
+
+  // This is the key shallow-water artifact fix. The base FFT normal is correct
+  // for the top face, but from below its largest low-frequency lobes were being
+  // amplified by PBR lighting into rows of obvious oval/circular patches. Keep
+  // only ~30% of that broad tilt underwater and add much smaller directional
+  // ripples on top. Geometry still moves with the full FFT; only the underside
+  // lighting normal is stabilized.
+  const underwaterNormal = vec3(
+    baseNormalNode.x.mul(0.30).add(microRippleA.mul(0.055)),
+    abs(baseNormalNode.y).mul(0.35).add(0.88),
+    baseNormalNode.z.mul(0.30).add(microRippleB.mul(0.055)),
+  ).normalize();
+  material.normalNode = mix(baseNormalNode, underwaterNormal, handle.underwaterAmount);
+
+  // Double-sided water must use a symmetric view angle. A negative back-face dot
+  // cannot simply clamp to zero or the whole underside becomes grazing Fresnel.
   const ndv = clamp(abs(normalWorld.dot(viewDir)), 0, 1);
   const grazing = float(1).sub(ndv);
   const g2 = grazing.mul(grazing);
   const g4 = g2.mul(g2);
   const fresnel = float(0.035).add(g4.mul(grazing).mul(0.965));
 
-  // Fade earlier than v2. At night even a thin strip of finite ocean geometry
-  // reads as a black horizon wall, so the surface now merges into atmospheric
-  // color well before the square plane edge becomes visible. This fade is used
-  // only for ABOVE-water viewing; underwater keeps the ceiling opaque enough to
-  // avoid revealing the finite plane as a bright cyan strip.
+  // Above-water distance fade. Underwater keeps a substantially opaque ceiling
+  // so the finite plane edge cannot become a bright sky-colored strip.
   const dx = positionWorld.x.sub(cameraPosition.x);
   const dz = positionWorld.z.sub(cameraPosition.z);
   const distSq = dx.mul(dx).add(dz.mul(dz));
@@ -96,10 +115,7 @@ function installProductionWaterNodes(handle, size) {
     1,
   );
 
-  // Narrow, broken shoreline foam. Night foam is deliberately dimmer so the
-  // beach does not turn into one broad self-illuminated white rail. Foam is also
-  // strongly suppressed from below — a diver should mostly see a moving water
-  // ceiling, not the top-face shoreline mask painted through the surface.
+  // Narrow, broken shoreline foam. Foam is heavily suppressed from below.
   const shallowMask = clamp(float(0.075).sub(depthT).mul(13.3333), 0, 1);
   const foamWave = sin(
     positionWorld.x.mul(0.20)
@@ -108,7 +124,7 @@ function installProductionWaterNodes(handle, size) {
   ).mul(0.5).add(0.5);
   const foamBreakup = clamp(foamWave.sub(0.38).mul(1.62), 0, 1);
   const foamDayVisibility = mix(float(0.38), float(1.0), handle.dayAmount);
-  const foamUnderVisibility = float(1).sub(handle.underwaterAmount.mul(0.90));
+  const foamUnderVisibility = float(1).sub(handle.underwaterAmount.mul(0.92));
   const shoreFoam = shallowMask
     .mul(foamBreakup)
     .mul(float(0.20).add(handle.stormAmount.mul(0.16)))
@@ -122,73 +138,72 @@ function installProductionWaterNodes(handle, size) {
     const absorption = mix(float(1.05), float(0.80), depthT);
     const depthColor = cleanBase.mul(absorption);
 
-    // Slightly stronger sky/Fresnel contribution at night helps the dark water
-    // retain readable wave shape while the real moon DirectionalLight supplies
-    // the broken silver-blue specular path.
     const fresnelStrength = mix(float(0.78), float(0.70), handle.dayAmount);
     const skyAtAngle = mix(handle.skyReflectionTint, handle.horizonTint, horizonFade);
     const reflectedWater = mix(depthColor, skyAtAngle, fresnel.mul(fresnelStrength));
 
-    // Far-water atmospheric match is stronger at night, eliminating the black
-    // ocean/sky divider without simply brightening the entire water surface.
     const horizonStrength = mix(float(0.88), float(0.72), handle.dayAmount);
     const horizonWater = mix(reflectedWater, handle.horizonTint, horizonFade.mul(horizonStrength));
     const topWater = mix(horizonWater, handle.foamVisualTint, shoreFoam);
 
     // -----------------------------------------------------------------------
-    // Underwater wave ceiling
+    // Underwater shallow-wave ceiling
     // -----------------------------------------------------------------------
-    // Looking almost straight up should transmit the brightest cyan-blue light;
-    // grazing angles trend toward darker total-internal-reflection color. This
-    // is a cheap Snell-window approximation and avoids sampling another texture.
-    const underFacing = mix(handle.underDeepTint, handle.underSurfaceTint, ndv);
-    const underFresnel = mix(
-      underFacing,
-      handle.underGrazingTint,
-      clamp(fresnel.mul(0.80), 0, 1),
-    );
-
-    // Use the REAL FFT normal slope and displaced crest height for fine wave
-    // readability from below. No new sin/noise field is added: the existing GPU
-    // simulation already paid for this information. Steeper facets become a bit
-    // darker while crests catch a restrained amount of extra transmitted light.
-    const slope = clamp(float(1).sub(abs(normalWorld.y)), 0, 1);
+    // Previous v4 still used the large FFT slope and view-angle response as the
+    // dominant color modulation. That was enough to preserve the same giant oval
+    // lobes even after the original back-face Fresnel bug was fixed. v5 keeps
+    // those low-frequency terms deliberately subtle and lets two finer moving
+    // ripple bands provide most of the visible underwater surface variation.
     const crest = clamp(
-      positionWorld.y.sub(handle.waterLevelNode).mul(0.55).add(0.5),
+      positionWorld.y.sub(handle.waterLevelNode).mul(0.48).add(0.5),
       0,
       1,
     );
-    const slopeDarkened = mix(underFresnel, handle.underDeepTint, slope.mul(0.42));
-    const crestLit = mix(slopeDarkened, handle.underSurfaceTint, crest.mul(0.16));
+    const rippleA01 = microRippleA.mul(0.5).add(0.5);
+    const rippleB01 = microRippleB.mul(0.5).add(0.5);
+    const microShimmer = rippleA01.mul(0.56).add(rippleB01.mul(0.44));
 
-    // Distance underwater should become atmospheric WATER color, not transparent
-    // sky. This removes the flat pale strip previously exposed by opacity fading.
-    const underwaterFar = mix(crestLit, handle.underDeepTint, horizonFade.mul(0.30));
+    const transmission = clamp(
+      float(0.61)
+        .add(crest.mul(0.16))
+        .add(microShimmer.sub(0.5).mul(0.13)),
+      0.42,
+      0.84,
+    );
+    const underBase = mix(handle.underDeepTint, handle.underSurfaceTint, transmission);
+
+    // Real total-internal-reflection still darkens grazing views, but only very
+    // gently now. It is no longer allowed to draw the FFT's broad lobe pattern.
+    const underView = mix(
+      underBase,
+      handle.underGrazingTint,
+      grazing.mul(0.11),
+    );
+
+    // Distance becomes underwater atmospheric color rather than transparent sky.
+    const underwaterFar = mix(underView, handle.underDeepTint, horizonFade.mul(0.28));
 
     return mix(topWater, underwaterFar, handle.underwaterAmount);
   })();
 
-  // Night water needs a broader, softer highlight than bright-day water. This
-  // directly attacks the narrow vertical orange/silver streak seen in testing:
-  // higher roughness broadens and lowers the standard PBR specular lobe instead
-  // of layering a fake screen-space blur over it.
   const nightAmount = float(1).sub(handle.dayAmount);
   const baseRoughness = float(0.115)
     .add(handle.stormAmount.mul(0.05))
     .add(nightAmount.mul(0.075));
   const grazingRoughness = mix(float(0.078), float(0.045), handle.dayAmount);
   const topRoughness = mix(baseRoughness, grazingRoughness, fresnel);
-  const underwaterRoughness = float(0.17)
-    .add(handle.stormAmount.mul(0.045))
-    .add(nightAmount.mul(0.035));
+
+  // Slightly rougher underwater than v4. Combined with the stabilized normal,
+  // this keeps individual PBR highlights from turning into another set of large
+  // smooth discs while still allowing moving light to read on the ceiling.
+  const underwaterRoughness = float(0.205)
+    .add(handle.stormAmount.mul(0.04))
+    .add(nightAmount.mul(0.03));
   material.roughnessNode = mix(topRoughness, underwaterRoughness, handle.underwaterAmount);
   material.metalnessNode = float(0.01);
 
-  // Above water: fade almost completely before the plane edge. Underwater: keep
-  // the water ceiling largely opaque so the finite plane cannot show up as the
-  // bright flat cyan band seen in the previous screenshot.
   const topOpacity = mix(float(0.94), float(0.02), horizonFade);
-  const underwaterOpacity = mix(float(0.90), float(0.82), horizonFade);
+  const underwaterOpacity = mix(float(0.96), float(0.91), horizonFade);
   material.opacityNode = mix(topOpacity, underwaterOpacity, handle.underwaterAmount);
   material.transparent = true;
   material.depthWrite = false;
@@ -203,15 +218,16 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
 
   installProductionWaterNodes(handle, size);
 
-  // Keep amplitude restrained enough that the 128x128 mobile FFT surface does
-  // not read as stacked horizontal ribbons at grazing view angles.
+  // Keep the real FFT amplitude, but restrained enough for the 128x128 mobile
+  // mesh. Shallow-water attenuation itself is already handled by fftShore in the
+  // base simulation, so we do not fake a second amplitude reduction here.
   handle.waveScale.value = 1.45;
   handle.mesh.scale.y = 1.05;
 
   handle.deepTint.value.copy(DEEP_BASE);
   handle.shallowTint.value.copy(SHALLOW_BASE);
 
-  console.info("[gpu-fft-ocean] mobile production water pass v4 + underwater ceiling active");
+  console.info("[gpu-fft-ocean] mobile production water pass v5 + shallow underwater ripples active");
   return handle;
 }
 
@@ -257,8 +273,6 @@ export function updateGPUFFTOceanVisuals(
   const nightT = 1 - dayT;
 
   // Smooth transition through the surface instead of a binary material switch.
-  // Full underwater shading engages once the camera is roughly half a meter
-  // below the nominal water level, preventing a hard pop while diving/surfacing.
   if (handle.underwaterAmount) {
     const rawUnder = Number.isFinite(cameraY) && Number.isFinite(handle.waterY)
       ? THREE.MathUtils.clamp((handle.waterY + 0.12 - cameraY) / 0.55, 0, 1)
@@ -271,8 +285,6 @@ export function updateGPUFFTOceanVisuals(
   }
   if (handle.waterLevelNode) handle.waterLevelNode.value = handle.waterY;
 
-  // Base updater still owns simulation weather uniforms, but its default palette
-  // is replaced each frame with Crystal's tropical day palette.
   handle.deepTint.value.copy(DEEP_BASE);
   handle.shallowTint.value.copy(SHALLOW_BASE);
 
@@ -284,8 +296,6 @@ export function updateGPUFFTOceanVisuals(
     handle.skyReflectionTint.value.copy(SKY_BIAS);
   }
 
-  // At night, force a small cool component back into the reflected sky so dark
-  // clouds/sky do not collapse the whole ocean to featureless black.
   if (nightT > 0) {
     handle.skyReflectionTint.value.lerp(NIGHT_SKY_REFLECTION, nightT * 0.28);
   }
@@ -303,8 +313,6 @@ export function updateGPUFFTOceanVisuals(
 
   handle.foamVisualTint.value.copy(DAY_FOAM).lerp(NIGHT_FOAM, nightT * 0.72);
 
-  // Underwater palette follows the same day/night cycle but stays physically
-  // restrained: bright tropical cyan by day, muted blue-gray at night.
   if (handle.underSurfaceTint) {
     handle.underSurfaceTint.value.copy(UNDER_SURFACE_DAY).lerp(UNDER_SURFACE_NIGHT, nightT * 0.88);
     handle.underDeepTint.value.copy(UNDER_DEEP_DAY).lerp(UNDER_DEEP_NIGHT, nightT * 0.90);

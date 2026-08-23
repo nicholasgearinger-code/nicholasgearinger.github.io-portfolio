@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { getGraphicsTier } from "./graphicsSettings.js";
 
 // -----------------------------------------------------------------------------
 // Mobile-first physically-inspired world-lighting pass.
@@ -6,15 +7,16 @@ import * as THREE from "three";
 // dayNightCycle.js remains the source of truth for the authored sky and the
 // baseline sun/ambient values. This pass reshapes those values into a more
 // realistic direct-vs-diffuse balance and also drives the EXISTING moon
-// DirectionalLight created by main.js. No new shadow-casting light is created.
+// DirectionalLight created by main.js.
 //
-// Goals:
-//   - strong directional sun by day, almost no residual orange sun at night
-//   - cool directional moonlight with real shadows after sunset
-//   - lower flat AmbientLight + cheap HemisphereLight sky/ground bounce
-//   - cooler atmospheric perspective at night
-//   - gentle eye adaptation through renderer.toneMappingExposure
-//   - storm/underwater aware behavior without additional render passes
+// LOW SHADOW MODE:
+// Low now has genuine 512x512 shadows. To keep that affordable on phones, the
+// existing SUN DirectionalLight becomes one continuously-moving "celestial key":
+// it follows the sun by day, smoothly rotates through twilight, and follows the
+// moon direction at night. The separate moon DirectionalLight stays non-shadowing
+// on Low, so Low pays for exactly ONE real shadow-map pass rather than sun+moon.
+// Its orthographic shadow frustum is tightened around the player as well, making
+// 512 pixels useful locally instead of spreading them across a huge area.
 // -----------------------------------------------------------------------------
 
 const WHITE_SKY = new THREE.Color(0xcfeaf2);
@@ -25,18 +27,17 @@ const DAY_SUN = new THREE.Color(0xffefd2);
 const DAWN_SUN = new THREE.Color(0xffa45f);
 const MOON_KEY = new THREE.Color(0xa9bde3);
 
-// Must match dayNightCycle.js. We only use this to reconstruct the moon's true
-// elevation after that file clamps the below-horizon sun light to y=-20 for
-// shadow stability. The visible sun/moon bodies still follow the full orbit.
 const DAY_NIGHT_ORBIT_RADIUS = 260;
 const DAY_NIGHT_ORBIT_Z = 80;
+const LOW_SHADOW_EXTENT = 28;
+const STANDARD_SHADOW_EXTENT = 45;
 
 const GROUND_BOUNCE = {
-  crystal: new THREE.Color(0x9a7558), // warm sand / coral bounce
-  verdant: new THREE.Color(0x31533b), // vegetation / moss bounce
-  ember: new THREE.Color(0x6a321f),   // lava / ash warmth
-  abyssal: new THREE.Color(0x291f38), // violet-black rock
-  ashen: new THREE.Color(0x68563a),   // dry stone / dust
+  crystal: new THREE.Color(0x9a7558),
+  verdant: new THREE.Color(0x31533b),
+  ember: new THREE.Color(0x6a321f),
+  abyssal: new THREE.Color(0x291f38),
+  ashen: new THREE.Color(0x68563a),
   default: new THREE.Color(0x44504c),
 };
 
@@ -47,6 +48,20 @@ function clamp01(v) {
 function smooth01(v) {
   const x = clamp01(v);
   return x * x * (3 - 2 * x);
+}
+
+function setShadowExtent(light, extent) {
+  const camera = light?.shadow?.camera;
+  if (!camera) return;
+  if (
+    camera.left === -extent && camera.right === extent &&
+    camera.top === extent && camera.bottom === -extent
+  ) return;
+  camera.left = -extent;
+  camera.right = extent;
+  camera.top = extent;
+  camera.bottom = -extent;
+  camera.updateProjectionMatrix?.();
 }
 
 function findWorldLights(scene) {
@@ -64,8 +79,6 @@ function findWorldLights(scene) {
     if (!ambient && obj?.isAmbientLight) ambient = obj;
   });
 
-  // Fallback to creation order if target names ever change. main.js currently
-  // adds the sun first and moon second.
   if (!sun) sun = directional[0] ?? null;
   if (!moon) moon = directional.find((light) => light !== sun) ?? null;
 
@@ -85,10 +98,6 @@ export function ensureRealisticWorldLighting(scene, biome = "default", waterY = 
   const { sun, moon, ambient } = findWorldLights(scene);
   const ground = (GROUND_BOUNCE[biome] || GROUND_BOUNCE.default).clone();
 
-  // One non-shadowed hemisphere light approximates large-area skylight and
-  // ground bounce. This is far cheaper than adding another directional/point
-  // light and gives normals a directional environment response that a plain
-  // AmbientLight cannot provide.
   const skyFill = new THREE.HemisphereLight(0xa8d9ee, ground, 0.20);
   skyFill.name = "rift-realistic-sky-fill";
   skyFill.castShadow = false;
@@ -110,11 +119,13 @@ export function ensureRealisticWorldLighting(scene, biome = "default", waterY = 
     groundTmp: new THREE.Color(),
     sunTargetTmp: new THREE.Color(),
     sunRelativeTmp: new THREE.Vector3(),
+    sunDirectionTmp: new THREE.Vector3(),
     moonDirectionTmp: new THREE.Vector3(),
+    lowKeyDirectionTmp: new THREE.Vector3(),
   };
 
   scene.userData.__realisticWorldLighting = state;
-  console.info("[world-lighting] realistic sun/moon/sky lighting v2 active");
+  console.info("[world-lighting] realistic sun/moon/sky lighting + mobile shadows v3 active");
   return state;
 }
 
@@ -130,8 +141,6 @@ export function updateRealisticWorldLighting(
 ) {
   if (!state) return;
 
-  // A scene can theoretically own more than one liquid handle. liquid.js may
-  // call this more than once in one animation frame; never multiply lights twice.
   if (Number.isFinite(elapsed) && Math.abs(elapsed - state.lastElapsed) < 1e-6) return;
 
   if (Number.isFinite(elapsed) && Number.isFinite(state.lastElapsed)) {
@@ -141,31 +150,66 @@ export function updateRealisticWorldLighting(
 
   const day = smooth01(dayAmount);
   const storm = clamp01(stormAmount);
+  const lowShadowMode = getGraphicsTier() === "low";
   const currentWaterY = Number.isFinite(waterY) ? waterY : state.waterY;
   const underwater = Number.isFinite(currentWaterY) && Number.isFinite(cameraY)
     ? cameraY < currentWaterY + 0.08
     : false;
 
-  // dayAmount reaches 0 exactly at the horizon and stays there all night, so it
-  // cannot distinguish orange twilight from deep night on its own. The baseline
-  // sun intensity authored by dayNightCycle DOES: roughly 0.75 at the horizon
-  // and 0.12 in full darkness. Use that to produce a smooth moon handoff.
   const authoredSunIntensity = state.sun?.intensity ?? THREE.MathUtils.lerp(0.12, 1.15, day);
   const night = smooth01(clamp01((0.52 - authoredSunIntensity) / 0.40));
   const daylight = 1 - night;
 
   // ---------------------------------------------------------------------------
-  // 1) Direct sun key
+  // Real-shadow tier policy
   // ---------------------------------------------------------------------------
+  // Low: one real 512 shadow map, reused continuously for sun -> moon.
+  // Medium/High: preserve the project's existing independent sun/moon lights.
   if (state.sun) {
-    const sunBoost = THREE.MathUtils.lerp(1.12, 1.38, day);
-    const stormDirect = THREE.MathUtils.lerp(1.0, 0.72, storm);
+    state.sun.castShadow = true;
+    setShadowExtent(state.sun, lowShadowMode ? LOW_SHADOW_EXTENT : STANDARD_SHADOW_EXTENT);
+  }
+  if (state.moon) {
+    state.moon.castShadow = !lowShadowMode;
+    setShadowExtent(state.moon, lowShadowMode ? LOW_SHADOW_EXTENT : STANDARD_SHADOW_EXTENT);
+  }
 
-    // Kill the leftover warm solar key progressively after twilight. This is
-    // what removes the razor-thin orange "laser" reflection from night water.
-    const solarNightSuppression = THREE.MathUtils.lerp(1.0, 0.08, night);
-    state.sun.intensity = authoredSunIntensity * sunBoost * stormDirect * solarNightSuppression;
+  // Capture the sun's player-centered orbital direction BEFORE Low repurposes
+  // the light. main.js has already moved its target/frustum to the player.
+  if (state.sun) {
+    state.sunRelativeTmp.copy(state.sun.position).sub(state.sun.target.position);
+    state.sunDirectionTmp.copy(state.sunRelativeTmp);
+    if (state.sunDirectionTmp.lengthSq() > 1e-8) state.sunDirectionTmp.normalize();
+  }
 
+  // Reconstruct the true opposite moon direction from the orbit X coordinate.
+  const orbitX = state.sun
+    ? THREE.MathUtils.clamp(state.sunRelativeTmp.x, -DAY_NIGHT_ORBIT_RADIUS, DAY_NIGHT_ORBIT_RADIUS)
+    : 0;
+  const moonY = Math.sqrt(Math.max(
+    0,
+    DAY_NIGHT_ORBIT_RADIUS * DAY_NIGHT_ORBIT_RADIUS - orbitX * orbitX,
+  ));
+  state.moonDirectionTmp.set(-orbitX, Math.max(12, moonY), DAY_NIGHT_ORBIT_Z).normalize();
+
+  const keyDistance = Math.sqrt(
+    DAY_NIGHT_ORBIT_RADIUS * DAY_NIGHT_ORBIT_RADIUS +
+    DAY_NIGHT_ORBIT_Z * DAY_NIGHT_ORBIT_Z,
+  );
+
+  // ---------------------------------------------------------------------------
+  // Direct sun/moon energy
+  // ---------------------------------------------------------------------------
+  const sunBoost = THREE.MathUtils.lerp(1.12, 1.38, day);
+  const stormDirect = THREE.MathUtils.lerp(1.0, 0.72, storm);
+  const solarNightSuppression = THREE.MathUtils.lerp(1.0, 0.08, night);
+  const solarIntensity = authoredSunIntensity * sunBoost * stormDirect * solarNightSuppression;
+
+  let moonIntensity = 0.20 * night;
+  moonIntensity *= THREE.MathUtils.lerp(1.0, 0.58, storm);
+  if (underwater) moonIntensity *= 0.22;
+
+  if (state.sun) {
     if (day > 0.55) {
       state.sunTargetTmp.copy(DAY_SUN);
       state.sun.color.lerp(state.sunTargetTmp, 0.18);
@@ -173,60 +217,52 @@ export function updateRealisticWorldLighting(
       state.sunTargetTmp.copy(DAWN_SUN);
       state.sun.color.lerp(state.sunTargetTmp, 0.14);
     } else {
-      // Residual night sun contribution is almost zero, but making it cool keeps
-      // any tiny remaining specular response from being orange.
       state.sunTargetTmp.copy(MOON_KEY);
       state.sun.color.lerp(state.sunTargetTmp, 0.72);
     }
+
+    if (lowShadowMode) {
+      // One continuous shadow-casting key. Directly lerping two nearly-opposite
+      // horizon vectors can collapse toward zero around twilight, so keep a
+      // positive elevation floor during the handoff. That also avoids enormous,
+      // unstable grazing-angle shadows exactly at sunset.
+      state.lowKeyDirectionTmp.set(
+        THREE.MathUtils.lerp(state.sunDirectionTmp.x, state.moonDirectionTmp.x, night),
+        Math.max(
+          0.18,
+          THREE.MathUtils.lerp(Math.max(0.08, state.sunDirectionTmp.y), state.moonDirectionTmp.y, night),
+        ),
+        THREE.MathUtils.lerp(state.sunDirectionTmp.z, state.moonDirectionTmp.z, night),
+      ).normalize();
+
+      state.sun.position.copy(state.sun.target.position).addScaledVector(state.lowKeyDirectionTmp, keyDistance);
+      state.sun.intensity = solarIntensity + moonIntensity;
+      state.sun.color.lerp(MOON_KEY, night * 0.82);
+    } else {
+      state.sun.intensity = solarIntensity;
+    }
   }
 
-  // ---------------------------------------------------------------------------
-  // 2) Real moon key using main.js's existing DirectionalLight
-  // ---------------------------------------------------------------------------
-  if (state.moon && state.sun) {
-    // main.js has already player-centered the sun shadow frustum before this
-    // hook. target-relative X therefore still equals the day/night orbit's real
-    // X coordinate. dayNightCycle intentionally clamps the below-horizon SUN
-    // light to y=-20, but the visible moon keeps the true opposite elevation.
-    // Reconstruct that elevation from x^2 + y^2 = R^2 so moonlight rises high
-    // overhead at midnight instead of getting stuck just above the horizon.
-    state.sunRelativeTmp.copy(state.sun.position).sub(state.sun.target.position);
-    const orbitX = THREE.MathUtils.clamp(
-      state.sunRelativeTmp.x,
-      -DAY_NIGHT_ORBIT_RADIUS,
-      DAY_NIGHT_ORBIT_RADIUS,
-    );
-    const moonY = Math.sqrt(Math.max(0, DAY_NIGHT_ORBIT_RADIUS * DAY_NIGHT_ORBIT_RADIUS - orbitX * orbitX));
-
-    state.moonDirectionTmp.set(-orbitX, Math.max(12, moonY), DAY_NIGHT_ORBIT_Z).normalize();
-    const keyDistance = Math.sqrt(
-      DAY_NIGHT_ORBIT_RADIUS * DAY_NIGHT_ORBIT_RADIUS +
-      DAY_NIGHT_ORBIT_Z * DAY_NIGHT_ORBIT_Z,
-    );
-
-    state.moon.target.position.copy(state.sun.target.position);
+  // Dedicated moon key remains available on Medium/High, but Low disables its
+  // light contribution because the sun light already carries moon energy there.
+  if (state.moon) {
+    state.moon.target.position.copy(state.sun?.target?.position ?? state.moon.target.position);
     state.moon.position.copy(state.moon.target.position).addScaledVector(state.moonDirectionTmp, keyDistance);
     state.moon.target.updateMatrixWorld();
-
     state.moon.color.copy(MOON_KEY);
-    let moonIntensity = 0.20 * night;
-    moonIntensity *= THREE.MathUtils.lerp(1.0, 0.58, storm);
-    if (underwater) moonIntensity *= 0.22;
-    state.moon.intensity = moonIntensity;
+    state.moon.intensity = lowShadowMode ? 0 : moonIntensity;
   }
 
   // ---------------------------------------------------------------------------
-  // 3) Flat ambient reduction
+  // Flat ambient reduction
   // ---------------------------------------------------------------------------
   if (state.ambient) {
-    // Keep a little more base visibility at night than v1, but still far below
-    // the old flat-lighting setup. Most readable fill comes from skyFill below.
     const ambientScale = THREE.MathUtils.lerp(0.62, 0.40, day);
     state.ambient.intensity *= ambientScale;
   }
 
   // ---------------------------------------------------------------------------
-  // 4) Sky fill + ground bounce
+  // Sky fill + ground bounce
   // ---------------------------------------------------------------------------
   if (state.skyFill) {
     if (skyColor?.isColor) {
@@ -253,21 +289,15 @@ export function updateRealisticWorldLighting(
   }
 
   // ---------------------------------------------------------------------------
-  // 5) Night atmospheric perspective
+  // Night atmospheric perspective
   // ---------------------------------------------------------------------------
-  // Far surfaces should recede into blue-gray night air instead of collapsing
-  // into a black silhouette. Change only fog COLOR here; weather.js/main.js keep
-  // ownership of density so this does not fight rain/fog strength controls.
   if (state.scene?.fog?.color && night > 0) {
     state.scene.fog.color.lerp(NIGHT_HAZE, night * 0.32);
   }
 
   // ---------------------------------------------------------------------------
-  // 6) Eye adaptation target
+  // Eye adaptation target
   // ---------------------------------------------------------------------------
-  // Exposure moves slowly in updateRealisticLightingExposure(), where the actual
-  // renderer is available. Storm nights get a little less compensation so rain
-  // still reads as genuinely dark weather rather than auto-exposure erasing it.
   let targetExposure = THREE.MathUtils.lerp(1.24, 0.98, day);
   targetExposure *= THREE.MathUtils.lerp(1.0, 0.94, storm);
   if (underwater) targetExposure = THREE.MathUtils.lerp(targetExposure, 1.08, 0.72);
@@ -283,8 +313,6 @@ export function updateRealisticLightingExposure(state, renderer) {
       : 1.0;
   }
 
-  // Exponential adaptation is frame-rate independent: quick enough to follow a
-  // sunrise over several seconds, slow enough to avoid visible brightness pops.
   const dt = THREE.MathUtils.clamp(state.frameDt || 1 / 60, 1 / 240, 0.1);
   const alpha = 1 - Math.exp(-dt * 1.6);
   state.exposureCurrent = THREE.MathUtils.lerp(state.exposureCurrent, state.targetExposure, alpha);

@@ -43,8 +43,13 @@ if (!source.includes(editsLoopMarker)) {
 const extraEdits = [
   [
     'import { createVolumetricClouds, updateVolumetricClouds } from "./volumetricClouds.js";',
-    'import { createVolumetricClouds, updateVolumetricClouds } from "./volumetricClouds_reference_guided.js";',
-    "reference-guided temporal cloud renderer import",
+    'import { createVolumetricClouds, updateVolumetricClouds } from "./volumetricClouds_reference_v2.js";',
+    "reference-guided temporal cloud renderer v2 import",
+  ],
+  [
+    'import { createDayNightCycle, updateDayNightCycle, CYCLE_SECONDS } from "./dayNightCycle.js";',
+    'import { createDayNightCycle, updateDayNightCycle, CYCLE_SECONDS } from "./dayNightCycle_celestial_scale_v2.js";',
+    "large realistic sun and moon import",
   ],
   [
     "tempWaterGlintDir.copy(moonLight.position).lerp(sun.position, dayNight.dayAmount);",

@@ -43,7 +43,7 @@ if (!source.includes(editsLoopMarker)) {
 const extraEdits = [
   [
     'import { createVolumetricClouds, updateVolumetricClouds } from "./volumetricClouds.js";',
-    'import { createVolumetricClouds, updateVolumetricClouds } from "./volumetricClouds_temporal_v2.js";',
+    'import { createVolumetricClouds, updateVolumetricClouds } from "./volumetricClouds_temporal_v3.js";',
     "temporal cloud renderer import",
   ],
   [

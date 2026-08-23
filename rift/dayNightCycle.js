@@ -7,17 +7,37 @@ const ORBIT_RADIUS = 260;
 const SUN_VISUAL_HORIZON_OFFSET = 10;
 const HORIZON_SUN_LIGHT = new THREE.Color(0xff9657);
 const HORIZON_SKY_FILL = new THREE.Color(0xffc79a);
+
 const REAL_SUN_ZENITH = new THREE.Color(0xfffdf4);
-const REAL_SUN_HORIZON = new THREE.Color(0xff8a3d);
+const REAL_SUN_HORIZON = new THREE.Color(0xff8338);
 const REAL_HALO_ZENITH = new THREE.Color(0xfff4d6);
 const REAL_HALO_HORIZON = new THREE.Color(0xffa04c);
+const REAL_TWILIGHT_GLOW = new THREE.Color(0xff7042);
 
-// The real Sun and Moon both subtend roughly half a degree in our sky. The Sun
-// itself remains physically small; the much larger apparent size in photographs
-// comes from atmospheric glare, which is rendered as two separate soft halos.
+// Atmosphere targets. The preserved base still owns the authoritative cycle and
+// biome tint; these colors are blended into its result near the horizon so dawn
+// and dusk become a true atmospheric event rather than a global orange filter.
+const SKY_ZENITH_DAY = new THREE.Color(0x68b7ef);
+const SKY_MID_DAY = new THREE.Color(0x9ed4f3);
+const SKY_HORIZON_DAY = new THREE.Color(0xd8eff9);
+const SKY_ZENITH_TWILIGHT = new THREE.Color(0x4568a6);
+const SKY_MID_TWILIGHT = new THREE.Color(0xd88a82);
+const SKY_HORIZON_TWILIGHT = new THREE.Color(0xff9b55);
+const CLOUD_LIGHT_DAY = new THREE.Color(0xf7fbff);
+const CLOUD_SHADOW_DAY = new THREE.Color(0x9fb7cc);
+const CLOUD_LIGHT_TWILIGHT = new THREE.Color(0xffbd86);
+const CLOUD_SHADOW_TWILIGHT = new THREE.Color(0x766d92);
+const CLOUD_LIGHT_NIGHT = new THREE.Color(0x7186a0);
+const CLOUD_SHADOW_NIGHT = new THREE.Color(0x202a3d);
+
+// The real Sun remains physically small. The much larger thing the eye reads in
+// photos is glare in the atmosphere, so disc, halo, aureole and horizon bloom are
+// separate layers rather than one oversized white ball.
 const SUN_CORE_DIAMETER = 2.85;
-const SUN_HALO_DIAMETER = 28;
-const SUN_AUREOLE_DIAMETER = 82;
+const SUN_HALO_DIAMETER = 34;
+const SUN_AUREOLE_DIAMETER = 110;
+const SUN_HORIZON_GLOW_WIDTH = 205;
+const SUN_HORIZON_GLOW_HEIGHT = 76;
 const MOON_CORE_DIAMETER = 2.45;
 const MOON_GLOW_DIAMETER = 7.2;
 
@@ -28,6 +48,16 @@ function clamp01(value) {
 function smoothstep01(value) {
   const t = clamp01(value);
   return t * t * (3 - 2 * t);
+}
+
+function sunElevation(cycle) {
+  const y = cycle?.sunBody?.group?.position?.y;
+  if (!Number.isFinite(y)) return -1;
+  return THREE.MathUtils.clamp(
+    (y - SUN_VISUAL_HORIZON_OFFSET) / ORBIT_RADIUS,
+    -1,
+    1,
+  );
 }
 
 function createSolarDiscTexture(size = 128) {
@@ -47,9 +77,6 @@ function createSolarDiscTexture(size = 128) {
         continue;
       }
 
-      // Very subtle limb darkening keeps the disc spherical without turning it
-      // into a shaded ball. The last few percent of the radius receive a soft
-      // antialiased edge so the Sun stays round even at phone resolution.
       const limb = 1 - Math.pow(clamp01(r), 2) * 0.08;
       const edge = 1 - smoothstep01((r - 0.92) / 0.08);
       const value = Math.round(255 * limb);
@@ -97,6 +124,7 @@ function installRealSun(cycle) {
   const discTexture = createSolarDiscTexture();
   const haloTexture = createSolarHaloTexture(128, 2.0);
   const aureoleTexture = createSolarHaloTexture(128, 3.1);
+  const horizonTexture = createSolarHaloTexture(128, 2.6);
 
   const discMaterial = new THREE.SpriteMaterial({
     map: discTexture,
@@ -127,7 +155,7 @@ function installRealSun(cycle) {
   const halo = new THREE.Sprite(haloMaterial);
   halo.name = "rift-real-sun-halo";
   halo.scale.set(SUN_HALO_DIAMETER, SUN_HALO_DIAMETER, 1);
-  halo.renderOrder = -91;
+  halo.renderOrder = -92;
 
   const aureoleMaterial = new THREE.SpriteMaterial({
     map: aureoleTexture,
@@ -143,19 +171,42 @@ function installRealSun(cycle) {
   const aureole = new THREE.Sprite(aureoleMaterial);
   aureole.name = "rift-real-sun-aureole";
   aureole.scale.set(SUN_AUREOLE_DIAMETER, SUN_AUREOLE_DIAMETER, 1);
-  aureole.renderOrder = -92;
+  aureole.renderOrder = -93;
 
-  cycle.sunBody.group.add(aureole, halo, disc);
+  // A very broad, vertically compressed glow represents the extra optical path
+  // through dense atmosphere at sunrise/sunset. It is nearly invisible at noon
+  // and localizes the warm sky around the actual Sun instead of tinting the whole
+  // world orange.
+  const horizonGlowMaterial = new THREE.SpriteMaterial({
+    map: horizonTexture,
+    color: REAL_TWILIGHT_GLOW.clone(),
+    transparent: true,
+    opacity: 0,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    depthTest: true,
+    fog: false,
+    toneMapped: false,
+  });
+  const horizonGlow = new THREE.Sprite(horizonGlowMaterial);
+  horizonGlow.name = "rift-real-sun-horizon-glow";
+  horizonGlow.scale.set(SUN_HORIZON_GLOW_WIDTH, SUN_HORIZON_GLOW_HEIGHT, 1);
+  horizonGlow.renderOrder = -94;
+
+  cycle.sunBody.group.add(horizonGlow, aureole, halo, disc);
   cycle.__riftRealSun = {
     disc,
     halo,
     aureole,
+    horizonGlow,
     discMaterial,
     haloMaterial,
     aureoleMaterial,
+    horizonGlowMaterial,
     discTexture,
     haloTexture,
     aureoleTexture,
+    horizonTexture,
   };
   cycle.__riftRealSunInstalled = true;
 }
@@ -166,34 +217,36 @@ function updateRealSun(cycle) {
   const sunBody = cycle?.sunBody;
   if (!visual || !sunBody?.group?.position) return;
 
-  // Keep the historical Sun geometry alive for the rest of the game's existing
-  // API (cloud occlusion code still writes its material opacity), but hide its
-  // actual drawing. The new camera-facing disc is what players see.
+  // The legacy geometry remains as an API anchor for code that reads the Sun's
+  // world position, but the new sprites are the only visible solar body.
   if (sunBody.core) sunBody.core.visible = false;
   if (sunBody.glow) sunBody.glow.visible = false;
 
-  const elevation = THREE.MathUtils.clamp(
-    (sunBody.group.position.y - SUN_VISUAL_HORIZON_OFFSET) / ORBIT_RADIUS,
-    -1,
-    1,
-  );
+  const elevation = sunElevation(cycle);
   const altitudeT = smoothstep01(Math.max(0, elevation) / 0.34);
   const horizon = smoothstep01(1 - Math.min(1, Math.abs(elevation) / 0.18));
   const visible = smoothstep01((elevation + 0.035) / 0.075);
-
-  // Use the previous frame's procedural-weather occlusion. The cloud renderer
-  // itself is also depth/blend composited over the Sun, so this is only the
-  // extra physical dimming of the solar disc through dense vapor.
   const cloudOcclusion = clamp01(globalThis.__riftProceduralCloudOcclusion || 0);
   const transmission = 1 - cloudOcclusion * 0.88;
 
   visual.discMaterial.color.copy(REAL_SUN_HORIZON).lerp(REAL_SUN_ZENITH, altitudeT);
   visual.haloMaterial.color.copy(REAL_HALO_HORIZON).lerp(REAL_HALO_ZENITH, altitudeT);
   visual.aureoleMaterial.color.copy(visual.haloMaterial.color);
+  visual.horizonGlowMaterial.color.copy(REAL_TWILIGHT_GLOW).lerp(REAL_HALO_HORIZON, altitudeT * 0.25);
 
-  visual.discMaterial.opacity = visible * THREE.MathUtils.lerp(0.92, 1.0, altitudeT) * transmission;
-  visual.haloMaterial.opacity = visible * THREE.MathUtils.lerp(0.34, 0.20, altitudeT) * (0.35 + transmission * 0.65);
-  visual.aureoleMaterial.opacity = visible * THREE.MathUtils.lerp(0.13, 0.055, altitudeT) * (0.4 + transmission * 0.6);
+  visual.discMaterial.opacity = visible
+    * THREE.MathUtils.lerp(0.92, 1.0, altitudeT)
+    * transmission;
+  visual.haloMaterial.opacity = visible
+    * THREE.MathUtils.lerp(0.42, 0.22, altitudeT)
+    * (0.35 + transmission * 0.65);
+  visual.aureoleMaterial.opacity = visible
+    * THREE.MathUtils.lerp(0.19, 0.06, altitudeT)
+    * (0.4 + transmission * 0.6);
+  visual.horizonGlowMaterial.opacity = visible
+    * horizon
+    * 0.17
+    * (0.42 + transmission * 0.58);
 
   const discScale = SUN_CORE_DIAMETER * (1 + horizon * 0.045);
   const haloScale = SUN_HALO_DIAMETER * (1 + horizon * 0.28);
@@ -201,11 +254,17 @@ function updateRealSun(cycle) {
   visual.disc.scale.set(discScale, discScale, 1);
   visual.halo.scale.set(haloScale, haloScale, 1);
   visual.aureole.scale.set(aureoleScale, aureoleScale, 1);
+  visual.horizonGlow.scale.set(
+    SUN_HORIZON_GLOW_WIDTH * (1 + horizon * 0.28),
+    SUN_HORIZON_GLOW_HEIGHT * (1 + horizon * 0.12),
+    1,
+  );
 
   const show = visible > 0.001;
   visual.disc.visible = show;
   visual.halo.visible = show;
   visual.aureole.visible = show;
+  visual.horizonGlow.visible = show && horizon > 0.01;
 }
 
 function configureNaturalShadows(cycle) {
@@ -213,15 +272,10 @@ function configureNaturalShadows(cycle) {
 
   const sunShadow = cycle.sun?.shadow;
   if (sunShadow) {
-    // Keep bias tiny. Large bias/normalBias values visibly detach thin palm
-    // shadows from their casters at low solar angles.
     sunShadow.bias = -0.00028;
     sunShadow.normalBias = 0.018;
     sunShadow.radius = 2.0;
     if (sunShadow.camera) {
-      // The light remains about one orbit radius from the player-centred target.
-      // Tightening the useful depth range improves precision without increasing
-      // shadow-map resolution or adding any mobile GPU cost.
       sunShadow.camera.near = 120;
       sunShadow.camera.far = 420;
       sunShadow.camera.updateProjectionMatrix?.();
@@ -245,20 +299,15 @@ function configureNaturalShadows(cycle) {
 
 function alignCelestialLighting(cycle) {
   if (!cycle) return;
-
   const sunBody = cycle.sunBody;
-  // The visible Sun is now handled by updateRealSun(). Keep the old object's
-  // transforms untouched so legacy code still has a valid celestial position.
-
   const moonBody = cycle.moonBody;
+
   if (moonBody?.core?.scale && moonBody?.glow?.scale) {
     moonBody.core.scale.set(MOON_CORE_DIAMETER, MOON_CORE_DIAMETER, 1);
     moonBody.glow.scale.set(MOON_GLOW_DIAMETER, MOON_GLOW_DIAMETER, 1);
     if (moonBody.glow.material) moonBody.glow.material.opacity *= 0.58;
   }
 
-  // One celestial direction owns the visible position, DirectionalLight,
-  // shadows and the direction handed to the ocean.
   if (cycle.sun?.position && sunBody?.group?.position) {
     cycle.sun.position.copy(sunBody.group.position);
   }
@@ -269,22 +318,15 @@ function alignCelestialLighting(cycle) {
 
 function applyNaturalLightBalance(cycle) {
   if (!cycle) return;
+  const elevation = sunElevation(cycle);
 
-  const visualY = cycle.sunBody?.group?.position?.y;
-  if (Number.isFinite(visualY) && cycle.sun && cycle.ambient) {
-    const elevation = THREE.MathUtils.clamp(
-      (visualY - SUN_VISUAL_HORIZON_OFFSET) / ORBIT_RADIUS,
-      -1,
-      1,
-    );
-
+  if (cycle.sun && cycle.ambient) {
     const altitudeT = smoothstep01(Math.max(0, elevation) / 0.30);
     const lowSun = 1 - altitudeT;
 
     if (elevation > -0.08) {
       cycle.sun.intensity *= THREE.MathUtils.lerp(0.28, 1.0, altitudeT);
       cycle.sun.color.lerp(HORIZON_SUN_LIGHT, lowSun * 0.26);
-
       cycle.ambient.intensity *= 1 + lowSun * 0.26;
       if (cycle.ambient.color?.isColor) {
         cycle.ambient.color.lerp(HORIZON_SKY_FILL, lowSun * 0.07);
@@ -293,6 +335,68 @@ function applyNaturalLightBalance(cycle) {
   }
 
   if (cycle.moonLight) cycle.moonLight.intensity *= 0.32;
+}
+
+function blendResultColor(result, key, target, amount) {
+  const color = result?.[key];
+  if (color?.isColor) color.lerp(target, clamp01(amount));
+}
+
+function applySunriseSunsetAtmosphere(cycle, result) {
+  const elevation = sunElevation(cycle);
+
+  // sunlightPresence begins before the disc clears the horizon so the sky warms
+  // first, as in a real dawn. dayT reaches one only after the Sun has climbed far
+  // enough that the long orange optical path is no longer dominant.
+  const sunlightPresence = smoothstep01((elevation + 0.115) / 0.145);
+  const dayT = smoothstep01(Math.max(0, elevation) / 0.42);
+  const lowSun = smoothstep01(1 - Math.min(1, Math.abs(elevation) / 0.24))
+    * sunlightPresence;
+
+  const targetZenith = SKY_ZENITH_TWILIGHT.clone().lerp(SKY_ZENITH_DAY, dayT);
+  const targetMid = SKY_MID_TWILIGHT.clone().lerp(SKY_MID_DAY, dayT);
+  const targetHorizon = SKY_HORIZON_TWILIGHT.clone().lerp(SKY_HORIZON_DAY, dayT);
+
+  // Keep biome/night authorship from the preserved base. These targets become
+  // strongest around actual daylight and fade out completely into true night.
+  const atmosphereWeight = sunlightPresence * 0.72;
+  blendResultColor(result, "skyZenith", targetZenith, atmosphereWeight * 0.72);
+  blendResultColor(result, "skyMid", targetMid, atmosphereWeight * 0.78);
+  blendResultColor(result, "skyHorizon", targetHorizon, atmosphereWeight * (0.74 + lowSun * 0.18));
+
+  // Some preserved call sites use `fogColor`/`skyColor` rather than the three
+  // explicit bands. Warm them only slightly; local Sun glare carries most of the
+  // dramatic sunrise/sunset hue.
+  blendResultColor(result, "fogColor", targetHorizon, lowSun * 0.18);
+  blendResultColor(result, "skyColor", targetMid, lowSun * 0.14);
+
+  if (cycle.ambient?.color?.isColor && sunlightPresence > 0) {
+    cycle.ambient.color.lerp(targetMid, lowSun * 0.055);
+  }
+
+  const daylightCloud = CLOUD_LIGHT_TWILIGHT.clone().lerp(CLOUD_LIGHT_DAY, dayT);
+  const daylightShadow = CLOUD_SHADOW_TWILIGHT.clone().lerp(CLOUD_SHADOW_DAY, dayT);
+  const cloudLight = CLOUD_LIGHT_NIGHT.clone().lerp(daylightCloud, sunlightPresence);
+  const cloudShadow = CLOUD_SHADOW_NIGHT.clone().lerp(daylightShadow, sunlightPresence);
+
+  // Feed the exact same atmosphere into clouds and any later water/lighting pass.
+  // Clone result colors when present so downstream modules never mutate the
+  // day/night return object by accident.
+  const skyZenith = result?.skyZenith?.isColor ? result.skyZenith.clone() : targetZenith;
+  const skyMid = result?.skyMid?.isColor ? result.skyMid.clone() : targetMid;
+  const skyHorizon = result?.skyHorizon?.isColor ? result.skyHorizon.clone() : targetHorizon;
+
+  globalThis.__riftSkyAtmosphere = {
+    sunElevation: elevation,
+    sunlightPresence,
+    dayT,
+    lowSun,
+    skyZenith,
+    skyMid,
+    skyHorizon,
+    cloudLight,
+    cloudShadow,
+  };
 }
 
 export function createDayNightCycle(
@@ -321,6 +425,7 @@ export function updateDayNightCycle(cycle, dt) {
   configureNaturalShadows(cycle);
   alignCelestialLighting(cycle);
   applyNaturalLightBalance(cycle);
+  applySunriseSunsetAtmosphere(cycle, result);
   updateRealSun(cycle);
   return result;
 }

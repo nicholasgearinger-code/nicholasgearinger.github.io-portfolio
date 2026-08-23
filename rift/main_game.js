@@ -42,6 +42,11 @@ if (!source.includes(editsLoopMarker)) {
 
 const extraEdits = [
   [
+    'import { createVolumetricClouds, updateVolumetricClouds } from "./volumetricClouds.js";',
+    'import { createVolumetricClouds, updateVolumetricClouds } from "./volumetricClouds_temporal.js";',
+    "temporal cloud renderer import",
+  ],
+  [
     "tempWaterGlintDir.copy(moonLight.position).lerp(sun.position, dayNight.dayAmount);",
     "tempWaterGlintDir.copy(sun.intensity >= moonLight.intensity ? sun.position : moonLight.position);",
     "celestial glint source alignment",

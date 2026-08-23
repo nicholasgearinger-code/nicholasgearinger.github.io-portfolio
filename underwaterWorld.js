@@ -2,10 +2,9 @@ import * as THREE from "three";
 import { getGraphicsTier } from "./graphicsSettings.js";
 
 // Lightweight underwater atmosphere for the Crystal ocean.
-// This deliberately avoids another fullscreen render pass: mobile already spends
-// most of its budget on the GPU FFT ocean + shadows. The effect is built from
-// scene fog, one non-shadowed hemisphere fill, a handful of translucent shafts,
-// and a tiny suspended-particle field around the camera.
+// No fullscreen pass and no additional realtime light: we reuse worldLighting's
+// existing hemisphere fill + directional key, then add fog, a few translucent
+// shafts and a tiny suspended-particle field around the camera.
 
 const SHALLOW_FOG_DAY = new THREE.Color(0x2a9caf);
 const DEEP_FOG_DAY = new THREE.Color(0x0b425b);
@@ -108,11 +107,6 @@ export function ensureUnderwaterWorld(scene, waterY) {
     return state;
   }
 
-  const fill = new THREE.HemisphereLight(SKY_FILL_DAY, GROUND_FILL_DAY, 0);
-  fill.name = "rift-underwater-fill";
-  fill.castShadow = false;
-  scene.add(fill);
-
   const motes = makeMotes(moteCountForTier());
   motes.name = "rift-underwater-motes";
   scene.add(motes);
@@ -154,17 +148,18 @@ export function ensureUnderwaterWorld(scene, waterY) {
     scene,
     waterY,
     enabled: true,
-    fill,
     motes,
+    shaftGroup,
     shafts,
     fogColor: new THREE.Color(),
+    deepFogColor: new THREE.Color(),
     skyColor: new THREE.Color(),
     groundColor: new THREE.Color(),
     moteColor: new THREE.Color(),
   };
 
   scene.userData.__riftUnderwaterWorld = state;
-  console.info("[underwater] mobile atmospheric lighting v1 active");
+  console.info("[underwater] mobile atmospheric lighting v2 active");
   return state;
 }
 
@@ -180,13 +175,9 @@ export function updateUnderwaterWorld(
   if (!state?.enabled || !Number.isFinite(state.waterY)) return;
 
   const depth = Number.isFinite(cameraY) ? Math.max(0, state.waterY - cameraY) : 0;
-  // Start the transition soon after the eyes cross the surface, then be fully
-  // active by about one metre down. This is deliberately smoother than main.js's
-  // gameplay hysteresis; visual atmosphere can fade without affecting swim state.
   const submerged = smooth01((depth - 0.12) / 0.88);
 
   if (submerged <= 0.001) {
-    state.fill.intensity = 0;
     state.motes.visible = false;
     for (const s of state.shafts) s.sprite.visible = false;
     return;
@@ -200,41 +191,41 @@ export function updateUnderwaterWorld(
   // -------------------------------------------------------------------------
   // Water-column fog / background
   // -------------------------------------------------------------------------
-  const shallowFog = state.fogColor.copy(SHALLOW_FOG_NIGHT).lerp(SHALLOW_FOG_DAY, daylight);
-  const deepFog = state.skyColor.copy(DEEP_FOG_NIGHT).lerp(DEEP_FOG_DAY, daylight);
-  state.fogColor.copy(shallowFog).lerp(deepFog, deepT * 0.82);
+  state.fogColor.copy(SHALLOW_FOG_NIGHT).lerp(SHALLOW_FOG_DAY, daylight);
+  state.deepFogColor.copy(DEEP_FOG_NIGHT).lerp(DEEP_FOG_DAY, daylight);
+  state.fogColor.lerp(state.deepFogColor, deepT * 0.82);
 
   if (state.scene.fog?.isFogExp2) {
-    // Clear reef water close to the surface, progressively denser with depth.
     const density = THREE.MathUtils.lerp(0.0065, 0.030, deepT) * (1 + storm * 0.38);
     state.scene.fog.density = THREE.MathUtils.lerp(state.scene.fog.density, density, submerged * 0.62);
     state.scene.fog.color.lerp(state.fogColor, submerged * 0.72);
   }
 
-  // scene.background is not affected by fog. Tint it to the water-column color
-  // while submerged so gaps beyond the finite water/terrain geometry cannot show
-  // up as the bright cyan horizon strip seen in testing.
+  // Background itself ignores fog. Matching it to the water column removes the
+  // bright cyan gap beyond the finite water/terrain geometry.
   if (state.scene.background?.isColor) {
     state.scene.background.lerp(state.fogColor, submerged * 0.88);
   }
 
   // -------------------------------------------------------------------------
-  // Diffuse underwater fill
+  // Reuse the existing world lights instead of adding another light calculation
   // -------------------------------------------------------------------------
   state.skyColor.copy(SKY_FILL_NIGHT).lerp(SKY_FILL_DAY, daylight);
   state.groundColor.copy(GROUND_FILL_NIGHT).lerp(GROUND_FILL_DAY, daylight);
-  state.fill.color.copy(state.skyColor);
-  state.fill.groundColor.copy(state.groundColor);
-  state.fill.intensity = submerged * THREE.MathUtils.lerp(0.18, 0.62, daylight) * (1 - deepT * 0.38);
 
-  // Keep the real directional key for shape/shadows, but filter it through the
-  // water column instead of letting the above-water sun blast the reef unchanged.
+  if (worldLighting?.skyFill) {
+    worldLighting.skyFill.color.copy(state.skyColor);
+    worldLighting.skyFill.groundColor.copy(state.groundColor);
+    worldLighting.skyFill.intensity = submerged
+      * THREE.MathUtils.lerp(0.18, 0.62, daylight)
+      * (1 - deepT * 0.38);
+  }
+
   if (worldLighting?.sun) {
     const key = worldLighting.sun;
     const transmission = THREE.MathUtils.lerp(0.78, 0.34, deepT) * (1 - storm * 0.24);
     key.intensity *= THREE.MathUtils.lerp(1, transmission, submerged);
-    const waterSun = state.skyColor;
-    key.color.lerp(waterSun, submerged * (0.10 + deepT * 0.18));
+    key.color.lerp(state.skyColor, submerged * (0.10 + deepT * 0.18));
   }
 
   // -------------------------------------------------------------------------
@@ -273,7 +264,6 @@ export function updateUnderwaterWorld(
 export function disposeUnderwaterWorld(scene, state) {
   if (!state) return;
   state.enabled = false;
-  if (state.fill) scene.remove(state.fill);
   if (state.motes) {
     scene.remove(state.motes);
     state.motes.geometry?.dispose();
@@ -283,7 +273,5 @@ export function disposeUnderwaterWorld(scene, state) {
     for (const s of state.shafts) s.sprite.material?.dispose();
   }
   if (state.shaftGroup) scene.remove(state.shaftGroup);
-  const group = state.scene?.getObjectByName?.("rift-underwater-shafts-v2");
-  if (group) state.scene.remove(group);
   if (scene?.userData?.__riftUnderwaterWorld === state) delete scene.userData.__riftUnderwaterWorld;
 }

@@ -55,8 +55,9 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
   }
 
   // Run after dayNightCycle has authored this frame's base sun/ambient values.
-  // v2 also discovers and drives main.js's existing moon DirectionalLight,
-  // providing a real cool nighttime key without introducing another shadow pass.
+  // v4 also keeps the visible sun/moon camera-relative to the player so the
+  // celestial discs stay aligned with the actual lighting direction while the
+  // player moves around the world.
   if (handle?.worldLighting) {
     updateRealisticWorldLighting(
       handle.worldLighting,
@@ -67,6 +68,7 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
       dayAmount,
       stormAmount,
       handle.waterY,
+      playerPos,
     );
   }
 
@@ -75,8 +77,8 @@ function updateLiquidPlane(handle, elapsed, skyColor, cameraY, playerPos, sunDir
 
 async function updateFluidSimWater(handle, renderer) {
   // This is the one existing liquid hook that already receives the renderer.
-  // Use it to apply the lighting system's smooth eye-adaptation exposure target
-  // without adding another call or dependency to main.js's hot render loop.
+  // Use it to apply smooth eye adaptation and the WebGPU-safe real-shadow
+  // configuration without adding another dependency to main.js's hot loop.
   if (handle?.worldLighting) {
     updateRealisticLightingExposure(handle.worldLighting, renderer);
   }

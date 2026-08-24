@@ -18,9 +18,6 @@ if (!response.ok) {
 
 let source = await response.text();
 
-// The older optional caustic-brightness edit is intentionally removed because
-// its source fragment appears twice in the preserved runtime. The actual world-
-// anchored caustic shader remains active at its stable brightness.
 const lines = source.split("\n");
 const badEditLabel = '"seafloor caustic brightness"';
 const matchingLines = lines.filter((line) => line.includes(badEditLabel));
@@ -44,16 +41,16 @@ const extraEdits = [
   [
     'import { createVolumetricClouds, updateVolumetricClouds } from "./volumetricClouds.js";',
     'import { createVolumetricClouds, updateVolumetricClouds } from "./volumetricClouds_reference_v2.js";',
-    "reference-guided temporal cloud renderer v2 import",
+    "progressive low-resolution volumetric cloud renderer import",
   ],
   [
     'import { createDayNightCycle, updateDayNightCycle, CYCLE_SECONDS } from "./dayNightCycle.js";',
-    'import { createDayNightCycle, updateDayNightCycle, CYCLE_SECONDS } from "./dayNightCycle_celestial_physical_v4.js";',
-    "bright physical sun and reference atmosphere v4 import",
+    'import { createDayNightCycle, updateDayNightCycle, CYCLE_SECONDS } from "./dayNightCycle_celestial_physical_v5.js";',
+    "high-contrast physical sun and atmosphere v5 import",
   ],
   [
     "sceneBackgroundColor.copy(dayNight.skyHorizon).lerp(dayNight.skyZenith, 0.5);",
-    "sceneBackgroundColor.copy(dayNight.skyHorizon).lerp(dayNight.skyZenith, 0.5);\n    if (globalThis.__riftReferenceAtmosphere) renderer.toneMappingExposure = globalThis.__riftReferenceAtmosphere.exposure ?? 1.04;",
+    "sceneBackgroundColor.copy(dayNight.skyHorizon).lerp(dayNight.skyZenith, 0.5);\n    if (globalThis.__riftReferenceAtmosphere) renderer.toneMappingExposure = globalThis.__riftReferenceAtmosphere.exposure ?? 0.98;",
     "reference atmosphere dynamic exposure",
   ],
   [
@@ -92,10 +89,6 @@ source = source.replace(
   `\n${injectedEditLines}\n];\n\nfor (const [from, to, label] of edits) source = replaceExactlyOnce(source, from, to, label);`,
 );
 
-// The tuned loader is itself evaluated from a Blob URL. Rewrite only its two
-// concrete URL bootstrap lines; do not globally replace the text
-// "import.meta.url" because that phrase also appears inside its own string-
-// replacement code.
 const loaderBaseLine =
   'const baseModuleUrl = new URL("./main_game_rain_base.js", import.meta.url);';
 const loaderModuleLine =

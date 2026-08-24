@@ -1,7 +1,8 @@
 // Compatibility entry point retained because main_game.js imports this module.
 // Three.js r185.1 migration branch: use the stability-first clustered cloud pass.
-// The experimental v2 density shader is kept in the branch for debugging, but it
-// is no longer on the live test path after causing a Safari/WebGPU runtime error.
+// The experimental r185 v2 density shader is intentionally kept in the branch
+// for isolated debugging, but it is no longer on the live iPhone test path after
+// Safari reported an opaque runtime "Script error." while it was active.
 export {
   createVolumetricClouds,
   updateVolumetricClouds,

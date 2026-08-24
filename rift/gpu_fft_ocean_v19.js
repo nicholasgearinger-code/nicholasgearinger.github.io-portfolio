@@ -9,10 +9,37 @@ import {
 // Breaker energy deposits foam near shore, then a tiny CPU field advects,
 // diffuses, and decays it through run-up/backwash. No new GPU compute work.
 
+function applyReferenceOceanPalette(handle) {
+  const atmosphere = typeof globalThis !== "undefined"
+    ? globalThis.__riftReferenceAtmosphere
+    : null;
+  if (!handle?.gpuFFT || !atmosphere) return;
+
+  if (handle.fftV9ShallowColor?.value?.isColor && atmosphere.waterShallowColor?.isColor) {
+    handle.fftV9ShallowColor.value.copy(atmosphere.waterShallowColor);
+  }
+  if (handle.fftV9MidColor?.value?.isColor && atmosphere.waterMidColor?.isColor) {
+    handle.fftV9MidColor.value.copy(atmosphere.waterMidColor);
+  }
+  if (handle.fftV9DeepColor?.value?.isColor && atmosphere.waterDeepColor?.isColor) {
+    handle.fftV9DeepColor.value.copy(atmosphere.waterDeepColor);
+  }
+  if (handle.fftV9SkyColor?.value?.isColor && atmosphere.horizonColor?.isColor) {
+    handle.fftV9SkyColor.value.copy(atmosphere.horizonColor).lerp(atmosphere.zenithColor, 0.42);
+  }
+  if (handle.fftV9SunColor?.value?.isColor && atmosphere.sunColor?.isColor) {
+    handle.fftV9SunColor.value.copy(atmosphere.sunColor);
+  }
+  if (handle.fftV9CrestColor?.value?.isColor) {
+    handle.fftV9CrestColor.value.set(0xb7f4ef);
+  }
+}
+
 export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   const handle = oceanV18.createGPUFFTOceanPlane(scene, y, size, sampleHeight);
   if (handle?.gpuFFT) {
     installPersistentShoreFoam(handle.fftSurfSystem);
+    applyReferenceOceanPalette(handle);
     handle.__riftWaterProBackend = "v9-two-fft + v19-persistent-foam-field";
     console.info("[rift-water] Water Pro v19: persistent breaker-driven shoreline foam field");
   }
@@ -53,6 +80,7 @@ export function updateGPUFFTOceanVisuals(
     storm,
     day,
   );
+  applyReferenceOceanPalette(handle);
   updatePersistentShoreFoam(handle?.fftSurfSystem, elapsed, cameraY, storm, day, handle);
 }
 

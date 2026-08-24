@@ -24,10 +24,11 @@
       // native import-map resolution once module loading has begun, so installing
       // a scoped import map later from rift/main.js is too late on-device.
       html = html.replaceAll('three@0.182.0', 'three@0.185.1');
-      html = html.replace(
-        '</head>',
-        '<script>window.__riftR185StaticImportMap=true;window.__riftThreeTarget="0.185.1";<\\/script></head>'
-      );
+
+      const marker = '<scr' + 'ipt>' +
+        'window.__riftR185StaticImportMap=true;window.__riftThreeTarget="0.185.1";' +
+        '<' + '/scr' + 'ipt></head>';
+      html = html.replace('</head>', marker);
 
       document.open();
       document.write(html);

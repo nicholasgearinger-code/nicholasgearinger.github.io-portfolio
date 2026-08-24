@@ -1,16 +1,21 @@
 import * as THREE from "three";
 import * as base from "./dayNightCycle_celestial_scale_v2.js";
+import {
+  createReferenceAtmosphere,
+  updateReferenceAtmosphere,
+} from "./atmosphereReference_v1.js";
 
 export * from "./dayNightCycle_celestial_scale_v2.js";
 
 // -----------------------------------------------------------------------------
-// Celestial presentation v3.
+// Celestial presentation v3 + reference-atmosphere integration.
 //
-// The v2 apparent-size correction made the Sun/Moon readable again, but the Sun
-// was still a nearly uniform tinted circle. This layer gives the solar disc a
-// brighter photospheric centre, subtle limb darkening/granulation and a warmer
-// low-altitude edge while preserving the existing physical orbit, cloud
-// occlusion, lunar phases and sunrise/sunset system.
+// The Sun keeps its readable photospheric disc / halo, while a lightweight
+// vertex-colored atmosphere dome now supplies the blue zenith, bright hazy
+// horizon and low-Sun aureole seen in the ocean reference photographs. The
+// resulting sky colors are also exposed to the ocean and volumetric-cloud paths
+// through globalThis.__riftReferenceAtmosphere so all three systems share the
+// same lighting palette.
 // -----------------------------------------------------------------------------
 
 const ORBIT_RADIUS = 260;
@@ -24,6 +29,7 @@ const MOON_GLOW = 44.0;
 const HIGH_SUN = new THREE.Color(0xfff8df);
 const LOW_SUN = new THREE.Color(0xff9a4d);
 const MOON_COLOR = new THREE.Color(0xf2f1e9);
+const atmosphereByCycle = new WeakMap();
 
 function clamp01(v) {
   return Math.max(0, Math.min(1, Number(v) || 0));
@@ -58,9 +64,6 @@ function createPhotosphereTexture(size = 256) {
 
       const r = Math.sqrt(rr);
       const mu = Math.sqrt(Math.max(0, 1 - rr));
-      // Solar-style limb darkening: centre is hotter/brighter, edge slightly
-      // warmer/dimmer. The subtle multi-scale hash prevents a flat painted disc
-      // while remaining stable in screen space.
       const limb = 0.72 + 0.28 * mu;
       const g1 = hash2(Math.floor(x * 0.22), Math.floor(y * 0.22));
       const g2 = hash2(Math.floor(x * 0.075) + 17, Math.floor(y * 0.075) - 11);
@@ -125,8 +128,6 @@ function updatePhysicalCelestials(cycle) {
 
     if (visual.discMaterial) {
       visual.discMaterial.color.copy(LOW_SUN).lerp(HIGH_SUN, altitude);
-      // Preserve cloud occlusion from the base update, but keep an unobscured Sun
-      // optically bright rather than pastel/transparent.
       if ((globalThis.__riftProceduralCloudOcclusion || 0) < 0.25) {
         visual.discMaterial.opacity = Math.max(0.93, visual.discMaterial.opacity || 0);
       }
@@ -148,17 +149,35 @@ function updatePhysicalCelestials(cycle) {
     sunHorizonDisc: SUN_DISC_HORIZON,
     moonDisc: MOON_DISC,
     photosphere: true,
+    referenceAtmosphere: true,
   };
 }
 
 export function createDayNightCycle(scene, sun, ambient, starfield, biome, moonLight) {
   const cycle = base.createDayNightCycle(scene, sun, ambient, starfield, biome, moonLight);
   updatePhysicalCelestials(cycle);
+  const atmosphere = createReferenceAtmosphere(scene, sun, ambient, moonLight);
+  atmosphereByCycle.set(cycle, atmosphere);
+  updateReferenceAtmosphere(
+    atmosphere,
+    cycle,
+    null,
+    globalThis.__riftProceduralWeatherState ?? null,
+  );
   return cycle;
 }
 
 export function updateDayNightCycle(cycle, dt) {
   const result = base.updateDayNightCycle(cycle, dt);
   updatePhysicalCelestials(cycle);
+  const atmosphere = atmosphereByCycle.get(cycle);
+  if (atmosphere) {
+    updateReferenceAtmosphere(
+      atmosphere,
+      cycle,
+      result,
+      globalThis.__riftProceduralWeatherState ?? null,
+    );
+  }
   return result;
 }

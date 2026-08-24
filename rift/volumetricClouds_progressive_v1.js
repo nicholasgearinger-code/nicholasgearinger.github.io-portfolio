@@ -10,7 +10,7 @@ import {
   updateVolumetricClouds as updateReferenceClouds,
   disposeVolumetricClouds as disposeReferenceClouds,
 } from "./volumetricClouds_reference_ocean_v5.js";
-import { createProgressiveEnvelopePair } from "./cloudEnvelopeNubis.js";
+import { createProgressiveEnvelopePair } from "./cloudEnvelopeProgressive.js";
 
 // -----------------------------------------------------------------------------
 // Progressive cloud v1 — Rift's low-resolution volumetric-cloud renderer.

@@ -22,6 +22,8 @@ const CLEAR_HAZE = new THREE.Color(0xd8eef6);
 const CLEAR_AMBIENT = new THREE.Color(0xa8c9df);
 const SUN_WHITE = new THREE.Color(0xfffff4);
 const SUN_WARM = new THREE.Color(0xffa65c);
+const WARM_HORIZON = new THREE.Color(0xffbd7b);
+const WARM_HAZE = new THREE.Color(0xffc58d);
 const STORM_ZENITH = new THREE.Color(0x718696);
 const STORM_HORIZON = new THREE.Color(0xa6b1b8);
 const STORM_AMBIENT = new THREE.Color(0x7d8993);
@@ -74,8 +76,22 @@ function recolorAtmosphereDome(atmosphere) {
   colorAttr.needsUpdate = true;
 }
 
+function installBrightSunMaterial(cycle) {
+  if (cycle?.__riftBrightSunV4Installed) return;
+  const material = cycle?.__riftRealSun?.discMaterial;
+  if (!material) return;
+  material.blending = THREE.AdditiveBlending;
+  material.premultipliedAlpha = false;
+  material.transparent = true;
+  material.depthWrite = false;
+  material.toneMapped = false;
+  material.needsUpdate = true;
+  cycle.__riftBrightSunV4Installed = true;
+}
+
 function applyReferenceDaylight(cycle, result) {
   if (!cycle) return result;
+  installBrightSunMaterial(cycle);
 
   const sunPos = cycle.sunBody?.group?.position;
   const elevation = sunPos?.isVector3
@@ -114,11 +130,8 @@ function applyReferenceDaylight(cycle, result) {
     visual.aureole?.scale.set(aureoleSize, aureoleSize, 1);
 
     if (visual.discMaterial) {
-      visual.discMaterial.blending = THREE.AdditiveBlending;
-      visual.discMaterial.premultipliedAlpha = false;
       visual.discMaterial.color.copy(SUN_WARM).lerp(SUN_WHITE, highSun);
       visual.discMaterial.opacity = daylight * (0.88 + transmission * 0.12);
-      visual.discMaterial.needsUpdate = true;
     }
     if (visual.haloMaterial) {
       visual.haloMaterial.opacity = daylight
@@ -141,11 +154,9 @@ function applyReferenceDaylight(cycle, result) {
     atmosphere.storm = storm;
     atmosphere.zenithColor.copy(CLEAR_ZENITH).lerp(STORM_ZENITH, storm * 0.78);
     atmosphere.horizonColor.copy(CLEAR_HORIZON).lerp(STORM_HORIZON, storm * 0.72);
-    if (lowSun > 0.001) {
-      atmosphere.horizonColor.lerp(new THREE.Color(0xffbd7b), lowSun * 0.42);
-    }
+    if (lowSun > 0.001) atmosphere.horizonColor.lerp(WARM_HORIZON, lowSun * 0.42);
     atmosphere.hazeColor.copy(CLEAR_HAZE)
-      .lerp(new THREE.Color(0xffc58d), lowSun * 0.62)
+      .lerp(WARM_HAZE, lowSun * 0.62)
       .lerp(STORM_HORIZON, storm * 0.58);
     atmosphere.sunColor.copy(SUN_WARM).lerp(SUN_WHITE, highSun);
     atmosphere.ambientColor.copy(CLEAR_AMBIENT).lerp(STORM_AMBIENT, storm * 0.72);

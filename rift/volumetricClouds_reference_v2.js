@@ -1,10 +1,10 @@
 // Compatibility entry point retained because main_game.js imports this module.
-// Three.js r185.1 migration branch: route the live game through the r185 cumulus
-// presentation layer. It keeps the quarter-resolution progressive renderer but
-// replaces the near-constant cloud-top envelope with smooth continuous-height
-// cumulus organization so 3D Perlin-Worley density can form rounded cloud masses.
+// Three.js r185.1 migration branch: route the live game through the second r185
+// cloud pass. V2 replaces the old visible Nubis density equation with clustered
+// macro placement, normalized local-height shaping, 3D Worley-carved cloud tops,
+// edge-only erosion, stable ray-step dithering, and five-tap low-res recovery.
 export {
   createVolumetricClouds,
   updateVolumetricClouds,
   disposeVolumetricClouds,
-} from "./volumetricClouds_r185_v1.js";
+} from "./volumetricClouds_r185_v2.js";

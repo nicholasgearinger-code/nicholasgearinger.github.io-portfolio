@@ -35,10 +35,24 @@ window.__riftReducedEffects = false;
 // the game's normal initialization / explicit graphics / resize paths.
 window.__riftAdaptiveResolutionDisabled = true;
 
+function showMigrationDiagnostic(label, message) {
+  const text = String(message || "Unknown error");
+  window.__riftR185LastDiagnostic = {
+    label,
+    message: text,
+    time: performance.now(),
+    threeRevision: THREE.REVISION,
+  };
+  const overlay = document.getElementById("rift-error-overlay");
+  if (overlay && overlay.style.display === "block" && overlay.textContent?.includes("Script error.")) {
+    overlay.textContent += `\n\n[r185 diagnostic]\n${label}: ${text}`;
+  }
+}
+
 // r185 migration diagnostics. Safari can reduce some cross-origin module/shader
 // failures to the unhelpful string "Script error.". Capture WebGPU uncaptured
-// errors separately so the next device failure leaves a real message in a small
-// global debug record even if window.onerror is opaque.
+// errors separately so the next device failure leaves a real message even when
+// window.onerror is opaque.
 try {
   if (navigator?.gpu?.addEventListener) {
     navigator.gpu.addEventListener("uncapturederror", (event) => {
@@ -48,12 +62,19 @@ try {
         time: performance.now(),
         threeRevision: THREE.REVISION,
       };
+      showMigrationDiagnostic("WebGPU uncaptured error", message);
       console.error("[rift-r185] WebGPU uncaptured error:", event?.error || event);
     });
   }
 } catch (err) {
   console.warn("[rift-r185] WebGPU diagnostic hook unavailable:", err);
 }
+
+window.addEventListener("unhandledrejection", (event) => {
+  const reason = event?.reason;
+  const message = reason?.stack || reason?.message || String(reason || "Unknown rejected promise");
+  showMigrationDiagnostic("Unhandled promise rejection", message);
+});
 
 function setProgress(value, status, detail) {
   const fn = window.__riftLoaderSetProgress;

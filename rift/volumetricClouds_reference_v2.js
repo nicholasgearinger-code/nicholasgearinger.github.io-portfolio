@@ -1,9 +1,10 @@
 // Compatibility entry point retained because main_game.js imports this module.
-// The live implementation now routes through the progressive low-resolution
-// cloud renderer: shell-like macro envelopes, higher ray quality, stable shape
-// evolution, and a quarter-resolution mobile cloud pass upscaled in screen space.
+// Three.js r185.1 migration branch: route the live game through the r185 cumulus
+// presentation layer. It keeps the quarter-resolution progressive renderer but
+// replaces the near-constant cloud-top envelope with smooth continuous-height
+// cumulus organization so 3D Perlin-Worley density can form rounded cloud masses.
 export {
   createVolumetricClouds,
   updateVolumetricClouds,
   disposeVolumetricClouds,
-} from "./volumetricClouds_progressive_v1.js";
+} from "./volumetricClouds_r185_v1.js";

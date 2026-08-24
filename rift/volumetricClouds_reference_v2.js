@@ -1,10 +1,9 @@
-// Compatibility entry point retained because main_game.js already imports this
-// module. The live cloud implementation now layers the stable Nubis v3 renderer
-// with ocean-reference v5: higher mobile raymarch quality, larger separated
-// cumulus, reduced stratiform envelope influence, stronger domain warping, and
-// stabilized temporal macro motion.
+// Compatibility entry point retained because main_game.js imports this module.
+// The live implementation now routes through the progressive low-resolution
+// cloud renderer: shell-like macro envelopes, higher ray quality, stable shape
+// evolution, and a quarter-resolution mobile cloud pass upscaled in screen space.
 export {
   createVolumetricClouds,
   updateVolumetricClouds,
   disposeVolumetricClouds,
-} from "./volumetricClouds_reference_ocean_v5.js";
+} from "./volumetricClouds_progressive_v1.js";

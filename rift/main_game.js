@@ -48,8 +48,13 @@ const extraEdits = [
   ],
   [
     'import { createDayNightCycle, updateDayNightCycle, CYCLE_SECONDS } from "./dayNightCycle.js";',
-    'import { createDayNightCycle, updateDayNightCycle, CYCLE_SECONDS } from "./dayNightCycle_celestial_physical_v3.js";',
-    "physical large sun and moon v3 import",
+    'import { createDayNightCycle, updateDayNightCycle, CYCLE_SECONDS } from "./dayNightCycle_celestial_physical_v4.js";',
+    "bright physical sun and reference atmosphere v4 import",
+  ],
+  [
+    "sceneBackgroundColor.copy(dayNight.skyHorizon).lerp(dayNight.skyZenith, 0.5);",
+    "sceneBackgroundColor.copy(dayNight.skyHorizon).lerp(dayNight.skyZenith, 0.5);\n    if (globalThis.__riftReferenceAtmosphere) renderer.toneMappingExposure = globalThis.__riftReferenceAtmosphere.exposure ?? 1.04;",
+    "reference atmosphere dynamic exposure",
   ],
   [
     "tempWaterGlintDir.copy(moonLight.position).lerp(sun.position, dayNight.dayAmount);",

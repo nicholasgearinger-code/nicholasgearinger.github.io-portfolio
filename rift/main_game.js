@@ -48,13 +48,13 @@ const extraEdits = [
   ],
   [
     'import { createDayNightCycle, updateDayNightCycle, CYCLE_SECONDS } from "./dayNightCycle.js";',
-    'import { createDayNightCycle, updateDayNightCycle, CYCLE_SECONDS } from "./dayNightCycle_celestial_scale_v2.js";',
-    "large realistic sun and moon import",
+    'import { createDayNightCycle, updateDayNightCycle, CYCLE_SECONDS } from "./dayNightCycle_celestial_physical_v3.js";',
+    "physical large sun and moon v3 import",
   ],
   [
     "tempWaterGlintDir.copy(moonLight.position).lerp(sun.position, dayNight.dayAmount);",
-    "tempWaterGlintDir.copy(sun.intensity >= moonLight.intensity ? sun.position : moonLight.position);",
-    "celestial glint source alignment",
+    "tempWaterGlintDir.copy(sun.intensity >= moonLight.intensity ? sun.position : moonLight.position).sub(camera.position).normalize();",
+    "camera-relative celestial glint alignment",
   ],
   [
     'import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";',

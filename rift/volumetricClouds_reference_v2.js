@@ -1,8 +1,9 @@
 // Compatibility entry point retained because main_game.js already imports this
-// module. The live cloud implementation is now the true 3D Perlin-Worley
-// raymarcher with the v2 large-cumulus presentation tuning.
+// module. The live cloud implementation now follows a Nubis-style architecture:
+// 2D cloud envelope + true 3D Perlin-Worley mass + 3D detail erosion + adaptive
+// raymarch shading + Beer-Lambert / anisotropic multi-scattering lighting.
 export {
   createVolumetricClouds,
   updateVolumetricClouds,
   disposeVolumetricClouds,
-} from "./volumetricClouds_perlinWorley_v2.js";
+} from "./volumetricClouds_nubis_v1.js";

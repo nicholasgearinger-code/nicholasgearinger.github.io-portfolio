@@ -1,5 +1,31 @@
 // Rift Islands lazy launcher. The portfolio loads only this tiny module.
 // The heavy WebGPU/runtime graph is imported only after the visitor presses Play.
+//
+// Three.js r185 migration:
+// The portfolio's root import map still intentionally points at r182 while this
+// migration is validated. Rift itself has no static imports in this launcher, so
+// we can register a more-specific /rift/ scope before any of the WebGPU modules
+// are dynamically imported. Scoped mappings take precedence over the root map
+// for modules whose referrer lives under this Rift module directory. This keeps
+// the rest of the portfolio on its known-good dependency while the migration
+// branch runs the game on 0.185.1.
+const RIFT_THREE_VERSION = "0.185.1";
+const riftModuleScope = new URL("./", import.meta.url).href;
+const riftThreeBase = `https://cdn.jsdelivr.net/npm/three@${RIFT_THREE_VERSION}/`;
+const r185ImportMap = document.createElement("script");
+r185ImportMap.type = "importmap";
+r185ImportMap.textContent = JSON.stringify({
+  scopes: {
+    [riftModuleScope]: {
+      "three": `${riftThreeBase}build/three.webgpu.js`,
+      "three/webgpu": `${riftThreeBase}build/three.webgpu.js`,
+      "three/tsl": `${riftThreeBase}build/three.tsl.js`,
+      "three/addons/": `${riftThreeBase}examples/jsm/`,
+    },
+  },
+});
+document.head.appendChild(r185ImportMap);
+window.__riftThreeTarget = RIFT_THREE_VERSION;
 
 const playButton = document.getElementById("rift-title-play-btn");
 const viewport = document.getElementById("rift-viewport");
@@ -223,11 +249,11 @@ async function loadRiftAndOpenMenu() {
 
   if (playButton) playButton.disabled = true;
   showOverlay();
-  setProgress(3, "Loading Rift runtime…", "Initializing WebGPU support");
+  setProgress(3, "Loading Rift runtime…", `Initializing Three.js r${RIFT_THREE_VERSION.replace("0.", "")} WebGPU`);
   await nextPaint();
 
   let driftTimer = setInterval(() => {
-    if (shownProgress < 18) setProgress(shownProgress + 1, "Loading Rift runtime…", "Initializing WebGPU support");
+    if (shownProgress < 18) setProgress(shownProgress + 1, "Loading Rift runtime…", `Initializing Three.js ${RIFT_THREE_VERSION}`);
   }, 220);
 
   try {
@@ -252,7 +278,7 @@ async function loadRiftAndOpenMenu() {
       driftTimer = null;
     }
 
-    setProgress(100, "Ready", "Choose any level");
+    setProgress(100, `Ready · Three.js ${RIFT_THREE_VERSION}`, "Choose any level");
     loaded = true;
     window.__riftModuleLoaded = true;
     await nextPaint();

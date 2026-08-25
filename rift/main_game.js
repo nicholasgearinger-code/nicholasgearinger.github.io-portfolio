@@ -51,8 +51,8 @@ const extraEdits = [
   ],
   [
     'import { createDayNightCycle, updateDayNightCycle, CYCLE_SECONDS } from "./dayNightCycle.js";',
-    'import { createDayNightCycle, updateDayNightCycle, CYCLE_SECONDS } from "./dayNightCycle_celestial_physical_v5.js";',
-    "high-contrast physical sun and atmosphere v5 import",
+    'import { createDayNightCycle, updateDayNightCycle, CYCLE_SECONDS } from "./dayNightCycle_celestial_physical_v6.js";',
+    "global atmospheric solar lighting v6 import",
   ],
   [
     "sceneBackgroundColor.copy(dayNight.skyHorizon).lerp(dayNight.skyZenith, 0.5);",

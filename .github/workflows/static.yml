@@ -1,43 +1,83 @@
-# Simple workflow for deploying static content to GitHub Pages
+# Deploy the production site plus isolated r185 migration/experiment previews.
 name: Deploy static content to Pages
 
 on:
-  # Runs on pushes targeting the default branch
   push:
-    branches: ["main"]
-
-  # Allows you to run this workflow manually from the Actions tab
+    branches: ["main", "three-r185-migration", "shadow-v11-experiment"]
   workflow_dispatch:
 
-# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
 permissions:
   contents: read
   pages: write
   id-token: write
 
-# Allow only one concurrent deployment, skipping runs queued between the run in-progress and latest queued.
-# However, do NOT cancel in-progress runs as we want to allow these production deployments to complete.
 concurrency:
   group: "pages"
-  cancel-in-progress: false
+  # Only the newest Pages build should publish. During rapid renderer testing,
+  # allowing every queued run to finish can redeploy an older preview after a
+  # newer hotfix has already been pushed.
+  cancel-in-progress: true
 
 jobs:
-  # Single deploy job since we're just deploying
   deploy:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      # Always publish production from main regardless of which preview branch
+      # triggered this workflow.
+      - name: Checkout production site
         uses: actions/checkout@v4
+        with:
+          ref: main
+
+      # Stable r185 migration preview. Keep this frozen on the last known-good
+      # build while shadow work is tested independently.
+      - name: Checkout r185 migration preview
+        uses: actions/checkout@v4
+        with:
+          ref: three-r185-migration
+          path: .r185-preview-source
+
+      - name: Stage r185 preview
+        shell: bash
+        run: |
+          rm -rf r185-build
+          mkdir -p r185-build
+          rsync -a \
+            --exclude='.git' \
+            --exclude='.github' \
+            .r185-preview-source/ r185-build/
+          rm -rf .r185-preview-source
+
+      # Shadow v11 experiment preview. This is intentionally a separate branch
+      # and path so a bad shadow test can never replace the known-good r185 build.
+      - name: Checkout shadow v11 experiment
+        uses: actions/checkout@v4
+        with:
+          ref: shadow-v11-experiment
+          path: .shadow-v11-preview-source
+
+      - name: Stage shadow v11 experiment
+        shell: bash
+        run: |
+          rm -rf shadow-v11-build
+          mkdir -p shadow-v11-build
+          rsync -a \
+            --exclude='.git' \
+            --exclude='.github' \
+            .shadow-v11-preview-source/ shadow-v11-build/
+          rm -rf .shadow-v11-preview-source
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
+
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v4
         with:
-          # Upload entire repository
           path: '.'
+
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5

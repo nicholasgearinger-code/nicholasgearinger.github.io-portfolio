@@ -3,7 +3,7 @@ name: Deploy static content to Pages
 
 on:
   push:
-    branches: ["main", "three-r185-migration", "shadow-v11-experiment", "rift-lighting-v20-experiment", "cloud-model3-reference-volumetrics-v2"]
+    branches: ["main", "three-r185-migration", "shadow-v11-experiment", "rift-lighting-v20-experiment"]
   workflow_dispatch:
 
 permissions:
@@ -27,11 +27,6 @@ jobs:
         with:
           ref: main
 
-      # Production Rift now uses the same pre-parse r185 import-map behavior as
-      # the known-good /r185-build/r185-test.html preview. Safari freezes native
-      # import-map resolution once module parsing starts, so make the production
-      # document r185 before Pages publishes it instead of relying on a late
-      # runtime import-map swap.
       - name: Promote known-good r185 runtime to production
         shell: bash
         run: |
@@ -46,8 +41,6 @@ jobs:
           p.write_text(html, encoding="utf-8")
           PY
 
-      # Keep the exact migration branch available as a frozen rollback/reference
-      # preview even though its Rift subtree is now the production baseline.
       - name: Checkout r185 migration preview
         uses: actions/checkout@v4
         with:
@@ -99,8 +92,7 @@ jobs:
             .lighting-v20-preview-source/ lighting-v20-build/
           rm -rf .lighting-v20-preview-source
 
-      # Review-only Cloud Model 3 build. Production is still checked out from
-      # main above; this branch is isolated under /cloud-model3-build/.
+      # Cloud Model 3 stays isolated from production while it is reviewed.
       - name: Checkout Cloud Model 3 preview
         uses: actions/checkout@v4
         with:

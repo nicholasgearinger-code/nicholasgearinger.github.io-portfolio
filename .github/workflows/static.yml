@@ -3,7 +3,7 @@ name: Deploy static content to Pages
 
 on:
   push:
-    branches: ["main", "three-r185-migration", "shadow-v11-experiment", "rift-lighting-v20-experiment"]
+    branches: ["main", "three-r185-migration", "shadow-v11-experiment", "rift-lighting-v20-experiment", "cloud-model3-reference-volumetrics-v2"]
   workflow_dispatch:
 
 permissions:
@@ -98,6 +98,35 @@ jobs:
             --exclude='.github' \
             .lighting-v20-preview-source/ lighting-v20-build/
           rm -rf .lighting-v20-preview-source
+
+      # Review-only Cloud Model 3 build. Production is still checked out from
+      # main above; this branch is isolated under /cloud-model3-build/.
+      - name: Checkout Cloud Model 3 preview
+        uses: actions/checkout@v4
+        with:
+          ref: cloud-model3-reference-volumetrics-v2
+          path: .cloud-model3-preview-source
+
+      - name: Stage Cloud Model 3 preview
+        shell: bash
+        run: |
+          rm -rf cloud-model3-build
+          mkdir -p cloud-model3-build
+          rsync -a \
+            --exclude='.git' \
+            --exclude='.github' \
+            .cloud-model3-preview-source/ cloud-model3-build/
+          rm -rf .cloud-model3-preview-source
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("cloud-model3-build/index.html")
+          html = p.read_text(encoding="utf-8")
+          html = html.replace("three@0.182.0", "three@0.185.1")
+          marker = '<script>window.__riftR185StaticImportMap=true;window.__riftThreeTarget="0.185.1";window.__riftMigrationBuild="cloud-model3-review";</script>'
+          if marker not in html:
+              html = html.replace("</head>", marker + "</head>", 1)
+          p.write_text(html, encoding="utf-8")
+          PY
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

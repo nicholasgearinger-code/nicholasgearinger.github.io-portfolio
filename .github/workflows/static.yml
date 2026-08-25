@@ -27,11 +27,6 @@ jobs:
         with:
           ref: main
 
-      # Production Rift now uses the same pre-parse r185 import-map behavior as
-      # the known-good /r185-build/r185-test.html preview. Safari freezes native
-      # import-map resolution once module parsing starts, so make the production
-      # document r185 before Pages publishes it instead of relying on a late
-      # runtime import-map swap.
       - name: Promote known-good r185 runtime to production
         shell: bash
         run: |
@@ -46,8 +41,6 @@ jobs:
           p.write_text(html, encoding="utf-8")
           PY
 
-      # Keep the exact migration branch available as a frozen rollback/reference
-      # preview even though its Rift subtree is now the production baseline.
       - name: Checkout r185 migration preview
         uses: actions/checkout@v4
         with:
@@ -98,6 +91,34 @@ jobs:
             --exclude='.github' \
             .lighting-v20-preview-source/ lighting-v20-build/
           rm -rf .lighting-v20-preview-source
+
+      # Cloud Model 3 stays isolated from production while it is reviewed.
+      - name: Checkout Cloud Model 3 preview
+        uses: actions/checkout@v4
+        with:
+          ref: cloud-model3-reference-volumetrics-v2
+          path: .cloud-model3-preview-source
+
+      - name: Stage Cloud Model 3 preview
+        shell: bash
+        run: |
+          rm -rf cloud-model3-build
+          mkdir -p cloud-model3-build
+          rsync -a \
+            --exclude='.git' \
+            --exclude='.github' \
+            .cloud-model3-preview-source/ cloud-model3-build/
+          rm -rf .cloud-model3-preview-source
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("cloud-model3-build/index.html")
+          html = p.read_text(encoding="utf-8")
+          html = html.replace("three@0.182.0", "three@0.185.1")
+          marker = '<script>window.__riftR185StaticImportMap=true;window.__riftThreeTarget="0.185.1";window.__riftMigrationBuild="cloud-model3-review";</script>'
+          if marker not in html:
+              html = html.replace("</head>", marker + "</head>", 1)
+          p.write_text(html, encoding="utf-8")
+          PY
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

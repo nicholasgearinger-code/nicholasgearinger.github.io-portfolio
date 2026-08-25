@@ -3,6 +3,8 @@
 
 const playButton = document.getElementById("rift-title-play-btn");
 const viewport = document.getElementById("rift-viewport");
+const graphicsBtn = document.getElementById("rift-graphics-btn");
+const graphicsPanel = document.getElementById("rift-graphics-panel");
 
 // index.html still contains an older global error overlay that listens to every
 // uncaught page error. A cross-origin error from an unrelated portfolio script
@@ -25,12 +27,9 @@ let detail = null;
 let shownProgress = 0;
 
 // ---------------------------------------------------------------------------
-// Water backend test switch.
-// One small developer pill is available before the heavy game modules load, so
-// an iPhone can deliberately boot the desktop three-FFT + SSR path (and can
-// always switch back even if that experimental path fails during startup).
-// AUTO follows the real hardware; each tap moves to the opposite profile first,
-// then the native profile, then back to AUTO.
+// Water backend selector.
+// Keep it inside the real Graphics panel rather than floating over the game.
+// AUTO follows the detected hardware; Mobile/Desktop force the backend.
 // ---------------------------------------------------------------------------
 const WATER_TEST_MODE_KEY = "riftWaterTestMode";
 const HARDWARE_WATER_PROFILE = (
@@ -52,14 +51,9 @@ function resolveWaterProfile(selection) {
   return selection === "auto" ? HARDWARE_WATER_PROFILE : selection;
 }
 
-function nextWaterTestSelection(selection) {
-  const alternate = HARDWARE_WATER_PROFILE === "mobile" ? "desktop" : "mobile";
-  if (selection === "auto") return alternate;
-  if (selection === alternate) return HARDWARE_WATER_PROFILE;
-  return "auto";
-}
-
 let waterTestSelection = readWaterTestSelection();
+let waterProfileStatus = null;
+const waterProfileButtons = [];
 
 function applyWaterTestGlobals() {
   const resolved = resolveWaterProfile(waterTestSelection);
@@ -73,44 +67,94 @@ function persistWaterTestSelection() {
   try {
     if (waterTestSelection === "auto") localStorage.removeItem(WATER_TEST_MODE_KEY);
     else localStorage.setItem(WATER_TEST_MODE_KEY, waterTestSelection);
-  } catch (_) {
-    // If storage is blocked the current page still uses the chosen profile.
-  }
+  } catch (_) {}
 }
 
-const waterProfileButton = document.createElement("button");
-waterProfileButton.type = "button";
-waterProfileButton.id = "rift-water-profile-test";
-waterProfileButton.title = "Switch Water Pro between the mobile and desktop rendering backends.";
-waterProfileButton.style.cssText =
-  "position:absolute;top:96px;left:8px;z-index:99999;padding:5px 9px;" +
-  "border:1px solid rgba(90,235,226,.55);border-radius:999px;" +
-  "background:rgba(3,12,20,.78);color:#8ff6ee;font:9px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;" +
-  "letter-spacing:.08em;cursor:pointer;touch-action:manipulation;backdrop-filter:blur(4px);";
-
-function refreshWaterProfileButton() {
+function refreshWaterProfileControl() {
   const resolved = applyWaterTestGlobals();
-  const suffix = waterTestSelection === "auto" ? "AUTO" : "TEST";
-  waterProfileButton.textContent = `WATER: ${resolved.toUpperCase()} · ${suffix}`;
+  for (const btn of waterProfileButtons) {
+    const active = btn.dataset.waterProfile === waterTestSelection;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-pressed", active ? "true" : "false");
+  }
+  if (waterProfileStatus) {
+    waterProfileStatus.textContent = waterTestSelection === "auto"
+      ? `Auto → ${resolved[0].toUpperCase()}${resolved.slice(1)}`
+      : `Forced ${resolved[0].toUpperCase()}${resolved.slice(1)}`;
+  }
 }
 
-waterProfileButton.addEventListener("click", () => {
-  waterTestSelection = nextWaterTestSelection(waterTestSelection);
+function selectWaterProfile(selection) {
+  if (!['auto', 'mobile', 'desktop'].includes(selection)) return;
+  const changed = selection !== waterTestSelection;
+  waterTestSelection = selection;
   persistWaterTestSelection();
-  refreshWaterProfileButton();
+  refreshWaterProfileControl();
 
-  // Once runtime loading has begun, backend modules may already be evaluated.
-  // Reload so the newly selected FFT/SSR profile is guaranteed to initialize
-  // from a clean WebGPU state. Before Play, no reload is necessary.
-  if (loading || loaded || window.__riftLoadAttempted) {
-    waterProfileButton.textContent += " ↻";
-    setTimeout(() => location.reload(), 80);
+  if (changed && (loading || loaded || window.__riftLoadAttempted)) {
+    if (waterProfileStatus) waterProfileStatus.textContent += " · reloading…";
+    setTimeout(() => location.reload(), 100);
   }
-});
+}
 
-refreshWaterProfileButton();
-if (viewport) viewport.appendChild(waterProfileButton);
+function installWaterProfileControl() {
+  if (!graphicsPanel || document.getElementById("rift-water-profile-settings")) {
+    applyWaterTestGlobals();
+    return;
+  }
 
+  const section = document.createElement("div");
+  section.id = "rift-water-profile-settings";
+  section.style.cssText = "margin-top:2px;padding-top:8px;border-top:1px solid rgba(255,255,255,.15);display:flex;flex-direction:column;gap:6px;";
+
+  const header = document.createElement("div");
+  header.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:10px;";
+
+  const label = document.createElement("span");
+  label.textContent = "Water backend";
+  label.style.cssText = "font-size:9px;letter-spacing:.06em;color:rgba(232,236,241,.72);";
+
+  waterProfileStatus = document.createElement("span");
+  waterProfileStatus.style.cssText = "font-size:8px;letter-spacing:.04em;color:rgba(125,211,252,.72);white-space:nowrap;";
+  header.append(label, waterProfileStatus);
+
+  const segmented = document.createElement("div");
+  segmented.style.cssText = "display:flex;gap:4px;";
+
+  for (const [value, text] of [["auto", "Auto"], ["mobile", "Mobile"], ["desktop", "Desktop"]]) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.dataset.waterProfile = value;
+    btn.textContent = text;
+    btn.className = "rift-graphics-opt";
+    btn.title = value === "auto"
+      ? `Follow this device automatically (${HARDWARE_WATER_PROFILE})`
+      : `Force the ${value} water rendering backend`;
+    btn.addEventListener("click", () => selectWaterProfile(value));
+    segmented.appendChild(btn);
+    waterProfileButtons.push(btn);
+  }
+
+  const hint = document.createElement("span");
+  hint.textContent = "Changing backend reloads after Rift has started.";
+  hint.style.cssText = "font-size:8px;color:rgba(232,236,241,.4);line-height:1.35;";
+
+  section.append(header, segmented, hint);
+  graphicsPanel.appendChild(section);
+  refreshWaterProfileControl();
+}
+
+installWaterProfileControl();
+
+// Graphics settings must be reachable before the heavy game module loads.
+if (graphicsBtn && graphicsPanel) {
+  graphicsBtn.addEventListener("click", () => {
+    if (loaded || window.__riftModuleLoaded) return;
+    const open = graphicsPanel.hidden;
+    graphicsPanel.hidden = !open;
+    graphicsBtn.classList.toggle("gfx-open", open);
+  });
+}
 
 window.__riftLazyLauncherReady = true;
 window.__riftLoadAttempted = false;
@@ -208,6 +252,8 @@ function showFailure(err) {
     detail.style.overflow = "visible";
   }
   if (percent) percent.textContent = "ERR";
+  if (graphicsBtn) graphicsBtn.style.zIndex = "99999";
+  if (graphicsPanel) graphicsPanel.style.zIndex = "99999";
   console.error("[rift-lazy-entry] load failed:", err);
 }
 
@@ -231,17 +277,12 @@ async function loadRiftAndOpenMenu() {
   }, 220);
 
   try {
-    // Import the runtime controller first. This installs the WebGPU performance
-    // hooks before the full game creates its renderer, and preloads all shared
-    // textures/models before the level menu becomes available.
     runtimeImport = runtimeImport || import("./runtime_bootstrap_v3.js");
     const runtime = await runtimeImport;
     setProgress(24, "Runtime ready", "Loading all shared level assets");
 
     const activateRuntime = runtime?.activateRuntime || window.__riftActivateRuntime;
-    if (typeof activateRuntime === "function") {
-      await activateRuntime();
-    }
+    if (typeof activateRuntime === "function") await activateRuntime();
 
     setProgress(95, "Assets ready", "Loading Rift game module");
     gameImport = gameImport || import("./main_game.js");
@@ -258,9 +299,6 @@ async function loadRiftAndOpenMenu() {
     await nextPaint();
     hideOverlay();
 
-    // main_game.js has now attached the original title-screen Play handler.
-    // Replay exactly once to open the normal level menu; level buttons after
-    // this are direct game clicks and are never intercepted by the launcher.
     replaying = true;
     try {
       if (playButton) {

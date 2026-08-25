@@ -1,4 +1,4 @@
-// Runtime tuning wrapper for rain/underwater presentation plus Water Pro v9.
+// Runtime tuning wrapper for rain/underwater presentation plus Water Pro.
 // The large stable game source remains preserved in main_game_rain_base.js;
 // this layer only appends uniquely-validated source edits to the existing tuned
 // loader before it executes.
@@ -37,7 +37,7 @@ if (!source.includes(editsLoopMarker)) {
   );
 }
 
-const extraEdits = [
+const coreEdits = [
   [
     'import { createVolumetricClouds, updateVolumetricClouds } from "./volumetricClouds.js";',
     'import { createVolumetricClouds, updateVolumetricClouds } from "./volumetricClouds_reference_v2.js";',
@@ -58,6 +58,17 @@ const extraEdits = [
     "tempWaterGlintDir.copy(sun.intensity >= moonLight.intensity ? sun.position : moonLight.position).sub(camera.position).normalize();",
     "camera-relative celestial glint alignment",
   ],
+];
+
+// Safari/iOS must not even evaluate Three's SSR addon on the mobile backend.
+// Previously the SSR import was injected unconditionally and only disabled at
+// runtime. That still forced Safari to evaluate the desktop TSL/SSR module graph
+// during the 95% "Loading Rift game module" step, which can fail before any of
+// the riftSSREnabled guards run. Build the SSR source edits only for an actual
+// desktop water boot; mobile keeps the stable FFT + physical-environment path.
+const desktopSSRRequested = globalThis.__riftWaterTestMode === "desktop";
+
+const desktopSSREdits = [
   [
     'import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";',
     `import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";\nimport { mrt, output, normalView, metalness, roughness, blendColor, sample, directionToColor, colorToDirection } from "three/tsl";\nimport { ssr } from "three/addons/tsl/display/SSRNode.js";`,
@@ -79,6 +90,10 @@ const extraEdits = [
     "disable SSR while submerged",
   ],
 ];
+
+const extraEdits = desktopSSRRequested
+  ? [...coreEdits, ...desktopSSREdits]
+  : coreEdits;
 
 const injectedEditLines = extraEdits
   .map(([from, to, label]) => `  [${JSON.stringify(from)}, ${JSON.stringify(to)}, ${JSON.stringify(label)}],`)

@@ -1,5 +1,5 @@
 import * as legacy from "./liquid_legacy.js";
-import * as oceanV19 from "./gpu_fft_ocean_v19.js";
+import * as oceanV19 from "./gpu_fft_ocean_r185_v21.js";
 import { getEffectiveValue as getBaseGraphicsEffectiveValue } from "./graphicsSettings_fft_base.js";
 
 function setFFTReflectionOwnership(active) {
@@ -8,32 +8,10 @@ function setFFTReflectionOwnership(active) {
   }
 }
 
-function getWaterProfile() {
-  const selected = typeof globalThis !== "undefined"
-    ? globalThis.__riftWaterTestMode
-    : null;
-  if (selected === "mobile" || selected === "desktop") return selected;
-
-  // Defensive fallback for a stale/cached launcher: never assume desktop on a
-  // touch device if the launcher has not populated the profile global yet.
-  const touch = typeof window !== "undefined" && (
-    "ontouchstart" in window ||
-    (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0)
-  );
-  return touch ? "mobile" : "desktop";
-}
-
-function useMobileSafeWaterBackend() {
-  return getWaterProfile() === "mobile";
-}
-
 function applyFFTReflectionPreference(handle) {
   const physical = handle?.fftPhysicalMaterial;
   if (!physical) return;
 
-  // Water Pro v19 owns Crystal reflections through the existing physical
-  // environment and aligned facet glitter. Mobile SSR and planar captures stay
-  // disabled so Safari keeps the proven render/compute graph.
   const enabled = getBaseGraphicsEffectiveValue("reflectionEnabled") !== false;
   if (!enabled) physical.envMapIntensity = 0;
 }
@@ -62,8 +40,6 @@ function tuneAtmosphereWaterMaterial(handle, atmosphere, stormAmount = 0) {
   physical.clearcoat = 0.40;
   physical.clearcoatRoughness = 0.13 + storm * 0.05;
 
-  // Keep reflections energetic enough to read the blue sky but slightly soften
-  // the mirror response; the custom facet glitter provides the solar sparkle.
   const enabled = getBaseGraphicsEffectiveValue("reflectionEnabled") !== false;
   if (enabled) physical.envMapIntensity = Math.max(Number(physical.envMapIntensity) || 0, 1.0 - storm * 0.12);
 }
@@ -79,28 +55,21 @@ export function createLiquidPlane(
   flowDir = { x: 0.6, z: 0.35 },
   excludeRegions = [],
 ) {
-  // Three r182's WebGPU storage-attribute upload is currently crashing Safari
-  // in the very first FFT compute dispatch (native TypedArray.set() inside
-  // createStorageAttribute). Do not let that renderer-level fault take down the
-  // entire game on the Mobile profile. Mobile/Auto-on-touch uses the proven
-  // non-compute liquid implementation until the live runtime moves to the r185
-  // water path. Desktop remains full Water Pro v19 FFT so the selector still
-  // provides an explicit high-end/test backend.
-  if (biome === "crystal" && !useMobileSafeWaterBackend()) {
+  if (biome === "crystal") {
     const handle = oceanV19.createGPUFFTOceanPlane(scene, y, size, sampleHeight);
     if (handle?.gpuFFT) {
-      handle.__riftOceanBackend = "v19-water-pro";
+      handle.__riftOceanBackend = "r185-water-pro-v21";
       setFFTReflectionOwnership(true);
       applyFFTReflectionPreference(handle);
       console.info(
-        `[rift-water] Water Pro v19 selected (${handle.__riftWaterProBackend ?? "FFT"}); persistent breaker-driven shoreline foam`,
+        `[rift-water] r185 Water Pro v21 selected (${handle.__riftWaterProBackend ?? "FFT"}); batched mobile compute enabled`,
       );
     }
     return handle;
   }
 
   setFFTReflectionOwnership(false);
-  const handle = legacy.createLiquidPlane(
+  return legacy.createLiquidPlane(
     scene,
     biome,
     y,
@@ -109,16 +78,6 @@ export function createLiquidPlane(
     flowDir,
     excludeRegions,
   );
-
-  if (biome === "crystal" && handle) {
-    handle.__riftOceanBackend = "mobile-safe-legacy";
-    handle.__riftMobileSafeWater = true;
-    console.info(
-      "[rift-water] Mobile-safe Crystal water selected; r182 FFT compute bypassed",
-    );
-  }
-
-  return handle;
 }
 
 export function createBreakingWave() {

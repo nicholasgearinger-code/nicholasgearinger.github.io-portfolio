@@ -3,7 +3,7 @@ name: Deploy static content to Pages
 
 on:
   push:
-    branches: ["main", "three-r185-migration", "shadow-v11-experiment"]
+    branches: ["main", "three-r185-migration", "shadow-v11-experiment", "rift-lighting-v20-experiment"]
   workflow_dispatch:
 
 permissions:
@@ -33,7 +33,7 @@ jobs:
           ref: main
 
       # Stable r185 migration preview. Keep this frozen on the last known-good
-      # build while shadow work is tested independently.
+      # build while renderer experiments are tested independently.
       - name: Checkout r185 migration preview
         uses: actions/checkout@v4
         with:
@@ -51,8 +51,7 @@ jobs:
             .r185-preview-source/ r185-build/
           rm -rf .r185-preview-source
 
-      # Shadow v11 experiment preview. This is intentionally a separate branch
-      # and path so a bad shadow test can never replace the known-good r185 build.
+      # Legacy isolated shadow experiment.
       - name: Checkout shadow v11 experiment
         uses: actions/checkout@v4
         with:
@@ -69,6 +68,26 @@ jobs:
             --exclude='.github' \
             .shadow-v11-preview-source/ shadow-v11-build/
           rm -rf .shadow-v11-preview-source
+
+      # Rift Lighting 2.0: CSM + SSS + GTAO/SSGI + Model 2 cloud shadows.
+      # Separate path means this experimental post/shadow stack cannot replace the
+      # known-good r185 preview if WebGPU rejects one of the new passes.
+      - name: Checkout Rift Lighting 2.0 experiment
+        uses: actions/checkout@v4
+        with:
+          ref: rift-lighting-v20-experiment
+          path: .lighting-v20-preview-source
+
+      - name: Stage Rift Lighting 2.0 experiment
+        shell: bash
+        run: |
+          rm -rf lighting-v20-build
+          mkdir -p lighting-v20-build
+          rsync -a \
+            --exclude='.git' \
+            --exclude='.github' \
+            .lighting-v20-preview-source/ lighting-v20-build/
+          rm -rf .lighting-v20-preview-source
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

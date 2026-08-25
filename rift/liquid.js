@@ -1,5 +1,5 @@
 import * as legacy from "./liquid_legacy.js";
-import * as oceanV19 from "./gpu_fft_ocean_r185_v20.js";
+import * as oceanV19 from "./gpu_fft_ocean_r185_v21.js";
 import { getEffectiveValue as getBaseGraphicsEffectiveValue } from "./graphicsSettings_fft_base.js";
 
 function setFFTReflectionOwnership(active) {

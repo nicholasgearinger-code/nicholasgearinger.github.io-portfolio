@@ -3,10 +3,21 @@
 // the problematic extra SkyMesh render pass with a single-dome analytic atmosphere
 // driven by Sky Pro/Preetham-style turbidity, Rayleigh and Mie parameters.
 //
-// Rollback: ?atmosphereLegacy=1 is no longer needed for normal operation; v11 is
-// still preserved in the repository for direct comparison if required.
+// Rollback on-device:
+//   ?atmosphereLegacy=1 -> return immediately to the proven v10 atmosphere.
+
+import * as physical from "./dayNightCycle_celestial_physical_v12.js";
+import * as legacy from "./dayNightCycle_celestial_physical_v10.js";
 export * from "./dayNightCycle_celestial_physical_v12.js";
-export {
-  createDayNightCycle,
-  updateDayNightCycle,
-} from "./dayNightCycle_celestial_physical_v12.js";
+
+const forceLegacy = typeof location !== "undefined"
+  && new URLSearchParams(location.search).has("atmosphereLegacy");
+const active = forceLegacy ? legacy : physical;
+
+export function createDayNightCycle(...args) {
+  return active.createDayNightCycle(...args);
+}
+
+export function updateDayNightCycle(...args) {
+  return active.updateDayNightCycle(...args);
+}

@@ -5,9 +5,8 @@
 //
 // r185 migration note:
 // This wrapper now translates the preserved r182-era source to the current
-// r185 WebGPU APIs at load time: RenderPipeline, Timer, and the updated SSRNode
-// setup/composition. Keeping the migration here lets the stable base remain an
-// exact rollback point while the three-r185-migration branch is validated.
+// r185 WebGPU APIs at load time: RenderPipeline, Timer, the updated SSRNode,
+// and the isolated Rift Lighting 2.0 hybrid WebGPU lighting experiment.
 
 const tunedLoaderUrl = new URL(
   "./main_game_underwater_base.js",
@@ -51,8 +50,8 @@ const extraEdits = [
   ],
   [
     'import { createDayNightCycle, updateDayNightCycle, CYCLE_SECONDS } from "./dayNightCycle.js";',
-    'import { createDayNightCycle, updateDayNightCycle, CYCLE_SECONDS } from "./dayNightCycle_celestial_physical_v8.js";',
-    "photographic sunrise sunset global solar lighting v8 import",
+    'import { createDayNightCycle, updateDayNightCycle, CYCLE_SECONDS } from "./dayNightCycle_lighting_v20.js";',
+    "Rift Lighting 2.0 photographic celestial path without legacy shadow scheduler",
   ],
   [
     "sceneBackgroundColor.copy(dayNight.skyHorizon).lerp(dayNight.skyZenith, 0.5);",
@@ -66,23 +65,23 @@ const extraEdits = [
   ],
   [
     'import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";',
-    `import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";\nimport { mrt, output, normalView, metalness, roughness, sample, packNormalToRGB, unpackRGBToNormal } from "three/tsl";\nimport { ssr } from "three/addons/tsl/display/SSRNode.js";`,
-    "r185 Water Pro SSR imports",
+    `import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";\nimport { ssr } from "three/addons/tsl/display/SSRNode.js";\nimport { setupRiftLightingV20 } from "./riftLightingV20.js";`,
+    "r185 Water Pro SSR and Rift Lighting 2.0 imports",
   ],
   [
     `const postProcessing = new THREE.PostProcessing(renderer);\nconst scenePass = pass(scene, camera);\nconst scenePassColor = scenePass.getTextureNode("output");`,
-    `const postProcessing = new THREE.RenderPipeline(renderer);\nconst scenePass = pass(scene, camera);\nconst riftSSRTier = getGraphicsTier();\nconst riftWaterProfile = globalThis.__riftWaterTestMode === "desktop"\n  ? "desktop"\n  : globalThis.__riftWaterTestMode === "mobile"\n    ? "mobile"\n    : (isTouchDevice ? "mobile" : "desktop");\nconst riftSSRIsMobile = riftWaterProfile === "mobile";\nconst riftForcedDesktopWater = globalThis.__riftWaterTestForced === true && riftWaterProfile === "desktop";\nconst riftSSRQualityTier = riftForcedDesktopWater && riftSSRTier === "low" ? "medium" : riftSSRTier;\nconst riftSSREnabled = riftWaterProfile === "desktop" && riftSSRQualityTier !== "low" && getEffectiveValue("reflectionEnabled") !== false;\nlet riftSSRPass = null;\nlet riftSSRBaseIntensity = 0;\nif (riftSSREnabled) {\n  scenePass.setMRT(mrt({\n    output: output,\n    normal: packNormalToRGB(normalView),\n    metalrough: vec2(metalness, roughness),\n  }));\n}\nconst scenePassColor = scenePass.getTextureNode("output");\nif (riftSSREnabled) {\n  const riftSceneNormalPacked = scenePass.getTextureNode("normal");\n  const riftSceneDepth = scenePass.getTextureNode("depth");\n  const riftSceneMetalRough = scenePass.getTextureNode("metalrough");\n  const riftNormalTexture = scenePass.getTexture("normal");\n  const riftMetalRoughTexture = scenePass.getTexture("metalrough");\n  riftNormalTexture.type = THREE.UnsignedByteType;\n  riftMetalRoughTexture.type = THREE.UnsignedByteType;\n  const riftSceneNormal = sample((uvNode) => unpackRGBToNormal(riftSceneNormalPacked.sample(uvNode)));\n  riftSSRPass = ssr(scenePassColor, riftSceneDepth, riftSceneNormal, {\n    metalnessNode: riftSceneMetalRough.r,\n    roughnessNode: riftSceneMetalRough.g,\n  });\n  if (riftSSRIsMobile) {\n    riftSSRBaseIntensity = 0.30;\n    riftSSRPass.resolutionScale = 0.30;\n    riftSSRPass.quality.value = 0.14;\n    riftSSRPass.blurQuality = 1;\n    riftSSRPass.maxDistance.value = 0.30;\n    riftSSRPass.intensity.value = riftSSRBaseIntensity;\n    riftSSRPass.thickness.value = 0.036;\n  } else {\n    riftSSRBaseIntensity = riftSSRQualityTier === "high" ? 0.82 : 0.58;\n    riftSSRPass.quality.value = riftSSRQualityTier === "high" ? 0.48 : 0.28;\n    riftSSRPass.blurQuality = riftSSRQualityTier === "high" ? 2 : 1;\n    riftSSRPass.maxDistance.value = riftSSRQualityTier === "high" ? 0.72 : 0.48;\n    riftSSRPass.intensity.value = riftSSRBaseIntensity;\n    riftSSRPass.thickness.value = riftSSRQualityTier === "high" ? 0.020 : 0.026;\n  }\n}`,
-    "r185 Water Pro WebGPU SSR setup",
+    `const postProcessing = new THREE.RenderPipeline(renderer);\nconst scenePass = pass(scene, camera);\nconst riftSSRTier = getGraphicsTier();\nconst riftWaterProfile = globalThis.__riftWaterTestMode === "desktop"\n  ? "desktop"\n  : globalThis.__riftWaterTestMode === "mobile"\n    ? "mobile"\n    : (isTouchDevice ? "mobile" : "desktop");\nconst riftSSRIsMobile = riftWaterProfile === "mobile";\nconst riftForcedDesktopWater = globalThis.__riftWaterTestForced === true && riftWaterProfile === "desktop";\nconst riftSSRQualityTier = riftForcedDesktopWater && riftSSRTier === "low" ? "medium" : riftSSRTier;\nconst riftSSREnabled = riftWaterProfile === "desktop" && riftSSRQualityTier !== "low" && getEffectiveValue("reflectionEnabled") !== false;\nconst riftLighting = setupRiftLightingV20({\n  scene, camera, renderer, sun, moonLight, scenePass,\n  tier: riftSSRTier,\n  isTouchDevice,\n  needSSR: riftSSREnabled,\n});\nconst scenePassColor = riftLighting.sceneColor;\nlet riftSSRPass = null;\nlet riftSSRBaseIntensity = 0;\nif (riftSSREnabled) {\n  riftSSRPass = ssr(scenePassColor, riftLighting.sceneDepth, riftLighting.sceneNormal, {\n    metalnessNode: riftLighting.metalRough.r,\n    roughnessNode: riftLighting.metalRough.g,\n  });\n  if (riftSSRIsMobile) {\n    riftSSRBaseIntensity = 0.30;\n    riftSSRPass.resolutionScale = 0.30;\n    riftSSRPass.quality.value = 0.14;\n    riftSSRPass.blurQuality = 1;\n    riftSSRPass.maxDistance.value = 0.30;\n    riftSSRPass.intensity.value = riftSSRBaseIntensity;\n    riftSSRPass.thickness.value = 0.036;\n  } else {\n    riftSSRBaseIntensity = riftSSRQualityTier === "high" ? 0.82 : 0.58;\n    riftSSRPass.quality.value = riftSSRQualityTier === "high" ? 0.48 : 0.28;\n    riftSSRPass.blurQuality = riftSSRQualityTier === "high" ? 2 : 1;\n    riftSSRPass.maxDistance.value = riftSSRQualityTier === "high" ? 0.72 : 0.48;\n    riftSSRPass.intensity.value = riftSSRBaseIntensity;\n    riftSSRPass.thickness.value = riftSSRQualityTier === "high" ? 0.020 : 0.026;\n  }\n}`,
+    "r185 Water Pro plus Rift Lighting 2.0 post setup",
   ],
   [
     'postProcessing.outputNode = (getGraphicsSettings().lensEffectEnabled !== false) ? lensDistortedOutput : scenePass;',
-    `const riftBasePostOutput = (getGraphicsSettings().lensEffectEnabled !== false) ? lensDistortedOutput : scenePassColor;\n// r183+ SSRNode returns premultiplied reflection color. Add RGB to the beauty\n// pass instead of using the old blendColor() path.\npostProcessing.outputNode = (riftSSREnabled && riftSSRPass) ? riftBasePostOutput.add(riftSSRPass.rgb) : riftBasePostOutput;`,
-    "r185 Water Pro additive SSR composition",
+    `const riftBasePostOutput = (getGraphicsSettings().lensEffectEnabled !== false) ? lensDistortedOutput : scenePassColor;\nconst riftLightingPostOutput = riftLighting.compose(riftBasePostOutput);\n// Keep reflections above diffuse AO/GI; SSS/CSM are already integrated into the\n// scene's direct-lighting context before this post composition.\npostProcessing.outputNode = (riftSSREnabled && riftSSRPass) ? riftLightingPostOutput.add(riftSSRPass.rgb) : riftLightingPostOutput;`,
+    "Rift Lighting 2.0 composition plus additive SSR",
   ],
   [
     "const isFullySubmerged = submergedState;",
-    `const isFullySubmerged = submergedState;\n  if (riftSSRPass) riftSSRPass.intensity.value = isFullySubmerged ? 0 : riftSSRBaseIntensity;`,
-    "disable SSR while submerged",
+    `const isFullySubmerged = submergedState;\n  riftLighting.update(dt, isFullySubmerged);\n  if (riftSSRPass) riftSSRPass.intensity.value = isFullySubmerged ? 0 : riftSSRBaseIntensity;`,
+    "update Rift Lighting 2.0 and disable SSR while submerged",
   ],
   [
     "const clock = new THREE.Clock();",

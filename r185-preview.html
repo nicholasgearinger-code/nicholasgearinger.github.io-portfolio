@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Rift Islands · r185.1 Preview</title>
+  <style>
+    html,body{margin:0;min-height:100%;background:#020913;color:#dff;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+    #boot{position:fixed;inset:0;display:grid;place-items:center;padding:28px;text-align:center;line-height:1.5}
+    small{opacity:.72}
+  </style>
+</head>
+<body>
+  <div id="boot">Preparing the Rift r185.1 preview…</div>
+  <script>
+    (async () => {
+      const commit = '79572c74d1ec44449c7e08c2ae93c0c76c4e8568';
+      const repo = 'nicholasgearinger-code/nicholasgearinger.github.io-portfolio';
+      const assetBase = `https://cdn.jsdelivr.net/gh/${repo}@${commit}/`;
+      const htmlSources = [
+        `${assetBase}index.html`,
+        `https://raw.githubusercontent.com/${repo}/${commit}/index.html`,
+      ];
+
+      let html = null;
+      let lastError = null;
+      for (const url of htmlSources) {
+        try {
+          const response = await fetch(url, { cache: 'no-store' });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          html = await response.text();
+          if (html && html.includes('<html')) break;
+          throw new Error('Response was not HTML');
+        } catch (error) {
+          lastError = error;
+          html = null;
+        }
+      }
+      if (!html) throw lastError || new Error('Could not fetch migration index.html');
+
+      // r185.1 must exist in the import map before any module is parsed on Safari.
+      html = html.replaceAll('three@0.182.0', 'three@0.185.1');
+
+      const bootstrap = `
+        <base href="${assetBase}">
+        <script>
+          window.__riftR185StaticImportMap = true;
+          window.__riftThreeTarget = '0.185.1';
+          window.__riftMigrationBuild = 'r185-sun-v9';
+          window.__riftPreviewCommit = '${commit}';
+        <\/script>`;
+      html = html.replace('<head>', '<head>' + bootstrap);
+
+      document.open();
+      document.write(html);
+      document.close();
+    })().catch((error) => {
+      const boot = document.getElementById('boot');
+      if (boot) boot.innerHTML = `Preview bootstrap failed.<br><small>${String(error?.message || error)}</small>`;
+      console.error('[rift-r185-pages-preview]', error);
+    });
+  </script>
+</body>
+</html>

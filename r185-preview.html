@@ -14,7 +14,7 @@
   <div id="boot">Preparing the Rift r185.1 preview…</div>
   <script>
     (async () => {
-      const commit = '79572c74d1ec44449c7e08c2ae93c0c76c4e8568';
+      const commit = '3721e903875be5773e37df033a397f168e264e9b';
       const repo = 'nicholasgearinger-code/nicholasgearinger.github.io-portfolio';
       const assetBase = `https://cdn.jsdelivr.net/gh/${repo}@${commit}/`;
       const htmlSources = [
@@ -46,7 +46,7 @@
         <script>
           window.__riftR185StaticImportMap = true;
           window.__riftThreeTarget = '0.185.1';
-          window.__riftMigrationBuild = 'r185-sun-v9';
+          window.__riftMigrationBuild = 'r185-shadow-v10';
           window.__riftPreviewCommit = '${commit}';
         <\/script>`;
       html = html.replace('<head>', '<head>' + bootstrap);

@@ -51,8 +51,8 @@ const extraEdits = [
   ],
   [
     'import { createDayNightCycle, updateDayNightCycle, CYCLE_SECONDS } from "./dayNightCycle.js";',
-    'import { createDayNightCycle, updateDayNightCycle, CYCLE_SECONDS } from "./dayNightCycle_celestial_physical_v7.js";',
-    "photometric cloud-aware global solar lighting v7 import",
+    'import { createDayNightCycle, updateDayNightCycle, CYCLE_SECONDS } from "./dayNightCycle_celestial_physical_v8.js";',
+    "photographic sunrise sunset global solar lighting v8 import",
   ],
   [
     "sceneBackgroundColor.copy(dayNight.skyHorizon).lerp(dayNight.skyZenith, 0.5);",

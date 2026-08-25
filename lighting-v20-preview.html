@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Rift Islands · Lighting 2.0 Test</title>
+  <meta http-equiv="cache-control" content="no-store">
+  <style>
+    html,body{margin:0;min-height:100%;background:#020913;color:#dff;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+    body{display:grid;place-items:center;padding:28px;text-align:center;line-height:1.5}
+    a{color:#72f1ff}
+    small{opacity:.72}
+  </style>
+</head>
+<body>
+  <div>
+    Opening the isolated Rift Lighting 2.0 test…<br>
+    <small>CSM · contact shadows · GTAO/SSGI · cloud shadows</small><br><br>
+    <small>If it does not redirect, <a href="./lighting-v20-build/r185-test.html">open the experiment directly</a>.</small>
+  </div>
+  <script>
+    const target = new URL('./lighting-v20-build/r185-test.html', location.href);
+    target.search = location.search;
+    location.replace(target.href);
+  </script>
+</body>
+</html>

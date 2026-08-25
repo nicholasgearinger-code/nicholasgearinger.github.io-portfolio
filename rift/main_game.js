@@ -49,6 +49,16 @@ const coreEdits = [
     "high-contrast physical sun and atmosphere v5 import",
   ],
   [
+    'import { createWeatherSystem, updateWeatherSystem, disposeWeatherSystem } from "./weather.js";',
+    'import { createWeatherSystem, updateWeatherSystem, disposeWeatherSystem } from "./weather_stable_lighting.js";',
+    "stable storm lighting import",
+  ],
+  [
+    "moonLight.castShadow = true;",
+    'moonLight.castShadow = getGraphicsTier() !== "low";',
+    "single sun shadow on mobile low",
+  ],
+  [
     "sceneBackgroundColor.copy(dayNight.skyHorizon).lerp(dayNight.skyZenith, 0.5);",
     "sceneBackgroundColor.copy(dayNight.skyHorizon).lerp(dayNight.skyZenith, 0.5);\n    if (globalThis.__riftReferenceAtmosphere) renderer.toneMappingExposure = globalThis.__riftReferenceAtmosphere.exposure ?? 0.98;",
     "reference atmosphere dynamic exposure",

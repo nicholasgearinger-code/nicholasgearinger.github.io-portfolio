@@ -13,7 +13,10 @@ permissions:
 
 concurrency:
   group: "pages"
-  cancel-in-progress: false
+  # Only the newest Pages build should publish. During rapid migration testing,
+  # allowing every queued run to finish can redeploy an older/broken preview
+  # after a newer hotfix has already been pushed.
+  cancel-in-progress: true
 
 jobs:
   deploy:
@@ -29,9 +32,9 @@ jobs:
         with:
           ref: main
 
-      # Put a complete copy of the migration branch under /r185-build/ in the
-      # Pages artifact. This avoids raw.githack reliability issues and jsDelivr's
-      # 50 MB GitHub-package limit while keeping the live root site untouched.
+      # Put a complete copy of the CURRENT migration branch under /r185-build/.
+      # With cancel-in-progress=true, stale queued deployments cannot overwrite
+      # the latest known-good preview after a rapid sequence of test commits.
       - name: Checkout r185 migration preview
         uses: actions/checkout@v4
         with:

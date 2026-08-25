@@ -5,16 +5,11 @@ export * from "./weather.js";
 // -----------------------------------------------------------------------------
 // Stable-lighting weather wrapper
 // -----------------------------------------------------------------------------
-// weather_lightning_visible_base.js deliberately disabled the old whole-scene
-// lightning flash because rapidly changing scene lights brought back the exact
-// full-frame flashing/flicker artifact we had already removed. weather.js later
-// added a second environmental flash rig (15,000-intensity PointLight plus a
-// HemisphereLight), unintentionally reintroducing that problem.
-//
-// Keep the visible, depth-tested lightning bolt and its localized sky-glow sprite,
-// but permanently remove the two rapidly changing scene lights from the scene.
-// The bolt remains bright/emissive; terrain, sun/moon lighting and shadow maps stay
-// stable from frame to frame.
+// The visible lightning bolt may change quickly, but no separate scene light or
+// giant additive sky sprite is allowed to flash with it. Those secondary flash
+// layers were the source of the full-frame/large-area brightness flicker that
+// returned after the older storm-flicker fix had already disabled legacy global
+// lightning illumination.
 // -----------------------------------------------------------------------------
 
 function stabilizeLightningLighting(handle) {
@@ -22,16 +17,21 @@ function stabilizeLightningLighting(handle) {
 
   const rig = handle.__riftLightningFlashRig;
   if (rig) {
-    // Removing these from the scene is stronger than merely setting intensity=0:
-    // weather.js can continue updating its private flash envelope without ever
-    // putting a rapidly changing light back into the renderer's lighting graph.
+    // Remove every environmental flash object from the scene. weather.js can
+    // continue advancing its internal envelope, but none of these objects can
+    // reach the renderer. The actual depth-tested lightning bolt lives in the
+    // underlying weather_lightning_visible_base.js path and is unaffected.
     rig.strikeLight?.removeFromParent?.();
     rig.skyFill?.removeFromParent?.();
+    rig.skyGlow?.removeFromParent?.();
+
     if (rig.strikeLight) rig.strikeLight.intensity = 0;
     if (rig.skyFill) rig.skyFill.intensity = 0;
+    if (rig.glowMaterial) rig.glowMaterial.opacity = 0;
+    if (rig.skyGlow) rig.skyGlow.visible = false;
   }
 
-  // Preserve the already-established no-global-flash contract from
+  // Preserve the established no-global-flash contract from
   // weather_lightning_visible_base.js as well.
   handle.lightningFlash = 0;
   if (handle.lightningLight) handle.lightningLight.intensity = 0;

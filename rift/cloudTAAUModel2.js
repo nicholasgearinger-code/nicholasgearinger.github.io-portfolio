@@ -14,6 +14,9 @@ import { taau } from "three/addons/tsl/display/TAAUNode.js";
 // camera jitter, motion-vector reprojection and output-resolution reconstruction.
 // Rift keeps current-frame alpha in the blend as a transparency safety net so a
 // stale/opaque temporal alpha can never cover the physical sky.
+//
+// The cloud pass owns a private camera clone. TAAU is free to jitter that camera
+// without ever perturbing the gameplay camera used by terrain, water and input.
 
 export function installRiftCloudTAAU(handle, camera, resolutionScale = 0.33) {
   if (!handle || !camera || handle.__riftModel2TAAUState) return handle?.__riftModel2TAAUState || null;
@@ -31,12 +34,17 @@ export function installRiftCloudTAAU(handle, camera, resolutionScale = 0.33) {
   if (!color || !depth || !velocity) return null;
 
   // Dispose the old TRAA node if it is still hanging off the preserved cloud
-  // infrastructure. The progressive wrapper bypassed it visually, so Model 2 can
-  // cleanly replace it with r185's upscaling-aware temporal node.
+  // infrastructure. Model 2 replaces it with r185's upscaling-aware TAAU.
   temporal.temporalNode?.dispose?.();
   temporal.temporalNode = null;
 
-  const taauNode = taau(color, depth, velocity, camera);
+  const cloudCamera = camera.clone();
+  cloudCamera.name = "rift-cloud-model2-taau-camera";
+  cloudCamera.copy(camera, false);
+  cloudCamera.updateMatrixWorld(true);
+  cloudPass.camera = cloudCamera;
+
+  const taauNode = taau(color, depth, velocity, cloudCamera);
   taauNode.depthThreshold = 0.0014;
   taauNode.edgeDepthDiff = 0.0028;
   taauNode.maxVelocityLength = 68;
@@ -51,8 +59,8 @@ export function installRiftCloudTAAU(handle, camera, resolutionScale = 0.33) {
   );
 
   // TAAU's history alpha is useful for antialiasing the silhouette, but the
-  // current frame retains 35% authority so a cleared/history pixel cannot turn
-  // into an opaque sky blocker.
+  // current frame retains authority so a cleared/history pixel cannot turn into
+  // an opaque sky blocker.
   const safeAlpha = clamp(
     resolved.a.mul(0.65).add(current.a.mul(0.35)),
     float(0),
@@ -73,6 +81,7 @@ export function installRiftCloudTAAU(handle, camera, resolutionScale = 0.33) {
 
   handle.__riftModel2TAAUState = {
     node: taauNode,
+    cloudCamera,
     resolutionScale,
   };
 
@@ -85,6 +94,7 @@ export function installRiftCloudTAAU(handle, camera, resolutionScale = 0.33) {
     edgeDepthDiff: taauNode.edgeDepthDiff,
     maxVelocityLength: taauNode.maxVelocityLength,
     implementation: "Three r185 TAAU",
+    isolatedCamera: true,
   };
 
   console.info(
@@ -99,8 +109,14 @@ export function syncRiftCloudTAAU(handle, camera, resolutionScale) {
   const temporal = handle?.__riftTemporalCloudState;
   if (!state || !temporal?.cloudPass || !camera) return;
 
-  state.node.camera = camera;
-  temporal.cloudPass.camera = camera;
+  // Restore an unjittered copy each frame. TAAU applies and clears its own view
+  // offset around the cloud-only pass.
+  state.cloudCamera.copy(camera, false);
+  state.cloudCamera.clearViewOffset?.();
+  state.cloudCamera.updateMatrixWorld(true);
+  state.node.camera = state.cloudCamera;
+  temporal.cloudPass.camera = state.cloudCamera;
+
   if (Number.isFinite(resolutionScale) && Math.abs(resolutionScale - state.resolutionScale) > 1e-4) {
     state.resolutionScale = resolutionScale;
     temporal.cloudPass.setResolutionScale(resolutionScale);

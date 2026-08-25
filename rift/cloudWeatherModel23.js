@@ -1,0 +1,184 @@
+import * as THREE from "three";
+
+// Rift Cloud Model 2.3 weather field.
+// Same channel contract as Model 2.0, but clear-weather coverage is intentionally
+// more persistent so the sky contains many scattered cloud families rather than
+// long empty sectors. 3D density still owns the visible silhouette.
+
+function clamp01(v) {
+  return Math.max(0, Math.min(1, v));
+}
+
+function smooth01(v) {
+  const t = clamp01(v);
+  return t * t * (3 - 2 * t);
+}
+
+function hash2(x, y, seed) {
+  let h = Math.imul((x + seed * 29) | 0, 374761393)
+    ^ Math.imul((y + seed * 43) | 0, 668265263);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967295;
+}
+
+function valueNoise(u, v, cells, seed) {
+  const x = u * cells;
+  const y = v * cells;
+  const xi = Math.floor(x);
+  const yi = Math.floor(y);
+  const tx = smooth01(x - xi);
+  const ty = smooth01(y - yi);
+  const wrap = (n) => ((n % cells) + cells) % cells;
+  const a = hash2(wrap(xi), wrap(yi), seed);
+  const b = hash2(wrap(xi + 1), wrap(yi), seed);
+  const c = hash2(wrap(xi), wrap(yi + 1), seed);
+  const d = hash2(wrap(xi + 1), wrap(yi + 1), seed);
+  return THREE.MathUtils.lerp(
+    THREE.MathUtils.lerp(a, b, tx),
+    THREE.MathUtils.lerp(c, d, tx),
+    ty,
+  );
+}
+
+function fbm(u, v, seed, baseCells = 3, octaves = 5) {
+  let value = 0;
+  let weight = 0;
+  let amp = 0.55;
+  let cells = baseCells;
+  for (let i = 0; i < octaves; i++) {
+    value += valueNoise(u, v, cells, seed + i * 97) * amp;
+    weight += amp;
+    cells *= 2;
+    amp *= 0.5;
+  }
+  return value / Math.max(1e-4, weight);
+}
+
+function torusDelta(a, b) {
+  const d = Math.abs(a - b);
+  return Math.min(d, 1 - d);
+}
+
+function makeConvectiveCells(seed, count = 52) {
+  const cells = [];
+  let s = seed >>> 0;
+  const rand = () => {
+    s |= 0;
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+
+  for (let i = 0; i < count; i++) {
+    cells.push({
+      x: rand(),
+      y: rand(),
+      rx: THREE.MathUtils.lerp(0.030, 0.082, Math.pow(rand(), 0.82)),
+      ry: THREE.MathUtils.lerp(0.026, 0.074, Math.pow(rand(), 0.86)),
+      strength: THREE.MathUtils.lerp(0.52, 1.0, rand()),
+      tower: THREE.MathUtils.lerp(0.24, 1.0, Math.pow(rand(), 0.72)),
+    });
+  }
+  return cells;
+}
+
+function cellField(u, v, cells) {
+  let union = 0;
+  let tower = 0;
+  for (const cell of cells) {
+    const dx = torusDelta(u, cell.x) / cell.rx;
+    const dy = torusDelta(v, cell.y) / cell.ry;
+    const r = Math.sqrt(dx * dx + dy * dy);
+    if (r >= 1) continue;
+    const w = smooth01(1 - r) * cell.strength;
+    union = 1 - (1 - union) * (1 - w * 0.88);
+    tower = Math.max(tower, w * cell.tower);
+  }
+  return { union: clamp01(union), tower: clamp01(tower) };
+}
+
+function buildWeatherData(size, seed) {
+  const data = new Uint8Array(size * size * 4);
+  const cells = makeConvectiveCells(seed ^ 0x9e3779b9, 52);
+  let p = 0;
+
+  for (let y = 0; y < size; y++) {
+    const v = y / size;
+    for (let x = 0; x < size; x++) {
+      const u = x / size;
+      const synoptic = fbm(u, v, seed + 11, 2, 5);
+      const mesoscale = fbm(u + 0.171, v - 0.233, seed + 211, 4, 4);
+      const moistureNoise = fbm(u - 0.307, v + 0.119, seed + 409, 3, 5);
+      const breakup = fbm(u + 0.421, v + 0.337, seed + 601, 8, 3);
+      const convective = cellField(u, v, cells);
+
+      // More persistent baseline than Model 2.0, but still enough negative space
+      // to preserve blue gaps between cloud streets in fair weather.
+      const coverage = clamp01(
+        0.24
+        + synoptic * 0.32
+        + mesoscale * 0.20
+        + convective.union * 0.42
+        - (1 - breakup) * 0.045
+      );
+
+      const cloudType = clamp01(
+        0.27
+        + mesoscale * 0.24
+        + convective.tower * 0.46
+        + (coverage - 0.5) * 0.08
+      );
+
+      const humidity = clamp01(
+        0.42
+        + moistureNoise * 0.34
+        + synoptic * 0.13
+        + coverage * 0.17
+      );
+
+      const stormPotential = clamp01(
+        Math.pow(Math.max(0, convective.tower - 0.54), 1.35) * 0.66
+        + Math.max(0, humidity - 0.76) * 0.60
+        + Math.max(0, coverage - 0.78) * 0.40
+      );
+
+      data[p++] = Math.round(coverage * 255);
+      data[p++] = Math.round(cloudType * 255);
+      data[p++] = Math.round(humidity * 255);
+      data[p++] = Math.round(stormPotential * 255);
+    }
+  }
+  return data;
+}
+
+function makeTexture(data, size) {
+  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = false;
+  texture.colorSpace = THREE.NoColorSpace;
+  texture.unpackAlignment = 1;
+  texture.needsUpdate = true;
+  texture.userData.riftWeatherCpu = { data, size };
+  return texture;
+}
+
+export function createRiftCloudWeatherTexture23(size = 176, seed = 0x52494654) {
+  return makeTexture(buildWeatherData(size, seed), size);
+}
+
+export function createRiftCloudWeatherPair23(size = 176) {
+  return {
+    a: createRiftCloudWeatherTexture23(size, 0x52494654),
+    b: createRiftCloudWeatherTexture23(size, 0x6a09e667),
+    size,
+    dispose() {
+      this.a?.dispose?.();
+      this.b?.dispose?.();
+    },
+  };
+}

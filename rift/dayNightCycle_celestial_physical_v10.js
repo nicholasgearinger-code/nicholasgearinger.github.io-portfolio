@@ -7,11 +7,11 @@ export * from "./dayNightCycle_celestial_physical_v9.js";
 // -----------------------------------------------------------------------------
 // Celestial v10 — r185 mobile directional-shadow budget.
 //
-// Low no longer disables shadows. Instead it keeps a single player-following Sun
-// shadow map, disables the second Moon shadow pass, uses r185-friendly small bias
-// values, and refreshes the map every other rendered frame. The preserved game
-// already recenters/snaps the directional-light shadow camera around the player;
-// this layer makes that existing architecture affordable enough for Mobile Low.
+// Shadow v11 experiment A/B test:
+// Keep the known-good v10 camera/frustum/bias path completely unchanged, but
+// refresh the single Mobile Low Sun shadow every rendered frame instead of every
+// other frame. This isolates whether the visible shadow swimming is caused by
+// reusing a stale map while the physical Sun direction continues to move.
 // -----------------------------------------------------------------------------
 
 const shadowStateByCycle = new WeakMap();
@@ -33,16 +33,11 @@ function configureShadowBudget(cycle, sun, moonLight) {
     sun.shadow.camera.near = 0.5;
     sun.shadow.camera.far = 320;
 
-    // r185 improved WebGPU shadow precision. The old r182-era -0.0015 / 0.05
-    // offsets were large enough to detach thin tree/rock shadows. Use values in
-    // the much smaller range recommended for the newer renderer.
+    // Preserve the proven r185 v10 bias/filter settings exactly for this test.
     sun.shadow.bias = -0.00028;
     sun.shadow.normalBias = 0.018;
     sun.shadow.radius = 2;
 
-    // Reuse a shadow map for one frame between refreshes. The game's existing
-    // texel-snapped, player-following shadow camera makes this far less visible
-    // than updating an unsnapped map at half rate.
     sun.shadow.autoUpdate = false;
     sun.shadow.needsUpdate = true;
   }
@@ -53,12 +48,15 @@ function configureShadowBudget(cycle, sun, moonLight) {
     frame: 0,
     sun,
     moonLight,
-    refreshInterval: low ? 2 : 1,
+    // EXPERIMENT ONLY: refresh every rendered frame on Low. No shadow-camera
+    // transforms, map type, bias, radius, or projection settings are changed.
+    refreshInterval: 1,
   };
   shadowStateByCycle.set(cycle, state);
 
   globalThis.__riftShadowSystemV10 = {
     active: true,
+    experiment: "full-rate-refresh-only",
     tier,
     lowMobileMode: low,
     sunShadowEnabled: !!sun.castShadow,
@@ -79,9 +77,9 @@ function updateShadowBudget(cycle) {
 
   state.frame++;
 
-  // Don't burn a shadow pass after sunset when this tier intentionally has no
-  // Moon shadow map. When the Sun becomes visible again, force an immediate
-  // refresh, then settle back to the every-other-frame cadence.
+  // Keep the existing night optimization, but while the Sun is active refresh
+  // its shadow every rendered frame so the shadow map and changing solar
+  // direction cannot become one frame out of phase.
   const sunActive = (Number(state.sun.intensity) || 0) > 0.015;
   const shouldRefresh = sunActive && (
     state.frame <= 2 ||

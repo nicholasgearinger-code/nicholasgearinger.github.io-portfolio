@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Rift Islands · Three.js r185.1 Test</title>
+  <style>
+    html,body{margin:0;min-height:100%;background:#020913;color:#dff;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+    #boot{position:fixed;inset:0;display:grid;place-items:center;padding:24px;text-align:center}
+  </style>
+</head>
+<body>
+  <div id="boot">Preparing the Three.js r185.1 test build…</div>
+  <script>
+    (async () => {
+      const response = await fetch('./index.html?rift-r185-bootstrap=1', { cache: 'no-store' });
+      if (!response.ok) throw new Error(`Could not load index.html (${response.status})`);
+
+      let html = await response.text();
+
+      // The normal portfolio page is intentionally still pinned to r182 while the
+      // migration branch is under test. Build a fresh document where the import
+      // map is already r185.1 BEFORE any module script is parsed. Safari freezes
+      // native import-map resolution once module loading has begun, so installing
+      // a scoped import map later from rift/main.js is too late on-device.
+      html = html.replaceAll('three@0.182.0', 'three@0.185.1');
+
+      const marker = '<scr' + 'ipt>' +
+        'window.__riftR185StaticImportMap=true;window.__riftThreeTarget="0.185.1";window.__riftMigrationBuild="r185-cloud-v1";' +
+        '<' + '/scr' + 'ipt></head>';
+      html = html.replace('</head>', marker);
+
+      document.open();
+      document.write(html);
+      document.close();
+    })().catch((error) => {
+      const boot = document.getElementById('boot');
+      if (boot) boot.textContent = `r185.1 bootstrap failed: ${error?.message || error}`;
+      console.error('[rift-r185-bootstrap]', error);
+    });
+  </script>
+</body>
+</html>

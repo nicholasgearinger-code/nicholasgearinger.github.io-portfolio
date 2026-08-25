@@ -5,9 +5,9 @@ import * as oceanV20 from "./gpu_fft_ocean_r185_v20.js";
 // Water Pro r185 v21 — sunrise/sunset optical response.
 //
 // The FFT simulation/compute graph remains untouched. This layer only retunes
-// existing v9 optical uniforms/material properties from the shared solar state:
-// warmer/brighter glint, reflected-sky tint, slightly smoother clear-water
-// response, and warm back-lit crests when a richer solar state is available.
+// existing v9 optical uniforms/material properties from the shared v8 solar state:
+// warmer/brighter glint, sunset-colored reflected sky, slightly smoother clear
+// golden-hour response, and warm back-lit crests.
 // -----------------------------------------------------------------------------
 
 const TMP_SKY = new THREE.Color();
@@ -23,7 +23,7 @@ function clamp01(v) {
 function applySunsetOceanOptics(handle, stormAmount = 0) {
   if (!handle?.gpuFFT) return;
 
-  const sunset = globalThis.__riftSunsetAtmosphereV8 || globalThis.__riftSunsetAtmosphereV9;
+  const sunset = globalThis.__riftSunsetAtmosphereV8;
   const atmosphere = globalThis.__riftReferenceAtmosphere;
   const solar = globalThis.__riftSolarLightingV7 || globalThis.__riftSolarLightingV6;
   if (!sunset && !atmosphere && !solar) return;
@@ -37,6 +37,9 @@ function applySunsetOceanOptics(handle, stormAmount = 0) {
 
   if (handle.fftV9SkyColor?.value?.isColor) {
     if (sunset) {
+      // Water mostly sees the low sky at grazing angles. Bias the reflection tint
+      // toward the orange/gold lower atmosphere during sunrise/sunset while the
+      // Fresnel term still lets deeper body color show at near-normal angles.
       TMP_SKY.copy(sunset.horizonColor)
         .lerp(sunset.upperMidColor, THREE.MathUtils.lerp(0.22, 0.34, sunset.highSun || 0));
       handle.fftV9SkyColor.value.copy(TMP_SKY);
@@ -54,6 +57,9 @@ function applySunsetOceanOptics(handle, stormAmount = 0) {
       || new THREE.Color(0xffedd0),
     );
 
+    // The v9 shader multiplies this color by both broad and tight microfacet
+    // glitter. HDR values are intentional and create a long hot reflection path
+    // without brightening the water body or whole scene exposure.
     const solarEnergy = clamp01((solar?.directSunIntensity ?? 4.5) / 6.5);
     const glintEnergy = THREE.MathUtils.lerp(0.88, 1.34, solarEnergy)
       * THREE.MathUtils.lerp(1.0, 1.48, lowSun)
@@ -69,6 +75,8 @@ function applySunsetOceanOptics(handle, stormAmount = 0) {
 
   const physical = handle.fftPhysicalMaterial;
   if (physical) {
+    // Slightly smoother clear-water highlight during golden hour makes the
+    // glint path read continuously while FFT slopes still fragment it naturally.
     physical.clearcoat = THREE.MathUtils.lerp(0.40, 0.50, lowSun * clear);
     physical.clearcoatRoughness = THREE.MathUtils.lerp(
       0.13 + storm * 0.05,

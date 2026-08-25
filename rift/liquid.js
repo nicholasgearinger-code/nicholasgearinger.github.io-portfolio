@@ -12,6 +12,9 @@ function applyFFTReflectionPreference(handle) {
   const physical = handle?.fftPhysicalMaterial;
   if (!physical) return;
 
+  // Water Pro v19 owns Crystal reflections through the existing physical
+  // environment and aligned facet glitter. Mobile SSR and planar captures stay
+  // disabled so Safari keeps the proven render/compute graph.
   const enabled = getBaseGraphicsEffectiveValue("reflectionEnabled") !== false;
   if (!enabled) physical.envMapIntensity = 0;
 }
@@ -40,6 +43,8 @@ function tuneAtmosphereWaterMaterial(handle, atmosphere, stormAmount = 0) {
   physical.clearcoat = 0.40;
   physical.clearcoatRoughness = 0.13 + storm * 0.05;
 
+  // Keep reflections energetic enough to read the blue sky but slightly soften
+  // the mirror response; the custom facet glitter provides the solar sparkle.
   const enabled = getBaseGraphicsEffectiveValue("reflectionEnabled") !== false;
   if (enabled) physical.envMapIntensity = Math.max(Number(physical.envMapIntensity) || 0, 1.0 - storm * 0.12);
 }
@@ -58,11 +63,11 @@ export function createLiquidPlane(
   if (biome === "crystal") {
     const handle = oceanV19.createGPUFFTOceanPlane(scene, y, size, sampleHeight);
     if (handle?.gpuFFT) {
-      handle.__riftOceanBackend = "r185-water-pro-v21";
+      handle.__riftOceanBackend = "v19-water-pro";
       setFFTReflectionOwnership(true);
       applyFFTReflectionPreference(handle);
       console.info(
-        `[rift-water] r185 Water Pro v21 selected (${handle.__riftWaterProBackend ?? "FFT"}); batched mobile compute enabled`,
+        `[rift-water] Water Pro v19 selected (${handle.__riftWaterProBackend ?? "FFT"}); persistent breaker-driven shoreline foam`,
       );
     }
     return handle;

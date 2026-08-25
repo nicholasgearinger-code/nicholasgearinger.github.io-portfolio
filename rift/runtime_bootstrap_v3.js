@@ -35,6 +35,47 @@ window.__riftReducedEffects = false;
 // the game's normal initialization / explicit graphics / resize paths.
 window.__riftAdaptiveResolutionDisabled = true;
 
+function showMigrationDiagnostic(label, message) {
+  const text = String(message || "Unknown error");
+  window.__riftR185LastDiagnostic = {
+    label,
+    message: text,
+    time: performance.now(),
+    threeRevision: THREE.REVISION,
+  };
+  const overlay = document.getElementById("rift-error-overlay");
+  if (overlay && overlay.style.display === "block" && overlay.textContent?.includes("Script error.")) {
+    overlay.textContent += `\n\n[r185 diagnostic]\n${label}: ${text}`;
+  }
+}
+
+// r185 migration diagnostics. Safari can reduce some cross-origin module/shader
+// failures to the unhelpful string "Script error.". Capture WebGPU uncaptured
+// errors separately so the next device failure leaves a real message even when
+// window.onerror is opaque.
+try {
+  if (navigator?.gpu?.addEventListener) {
+    navigator.gpu.addEventListener("uncapturederror", (event) => {
+      const message = event?.error?.message || String(event?.error || "Unknown WebGPU error");
+      window.__riftR185GPUError = {
+        message,
+        time: performance.now(),
+        threeRevision: THREE.REVISION,
+      };
+      showMigrationDiagnostic("WebGPU uncaptured error", message);
+      console.error("[rift-r185] WebGPU uncaptured error:", event?.error || event);
+    });
+  }
+} catch (err) {
+  console.warn("[rift-r185] WebGPU diagnostic hook unavailable:", err);
+}
+
+window.addEventListener("unhandledrejection", (event) => {
+  const reason = event?.reason;
+  const message = reason?.stack || reason?.message || String(reason || "Unknown rejected promise");
+  showMigrationDiagnostic("Unhandled promise rejection", message);
+});
+
 function setProgress(value, status, detail) {
   const fn = window.__riftLoaderSetProgress;
   if (typeof fn === "function") fn(value, status, detail);
@@ -279,23 +320,22 @@ document.addEventListener("click", (event) => {
   const now = performance.now();
   if (now < state.levelClickLockUntil) {
     event.preventDefault();
-    event.stopPropagation();
     event.stopImmediatePropagation();
     return;
   }
-  state.levelClickLockUntil = now + 650;
+  state.levelClickLockUntil = now + 900;
+
   state.gameStarted = true;
   state.levelWarming = true;
   state.warmRenderFrames = 0;
   state.warmComputeCalls = 0;
   state.compileStarted = false;
   state.compileReady = false;
-  state._lastWarmRender = 0;
   state.levelWarmStartedAt = now;
-
-  setTimeout(() => {
-    if (state.levelWarming) state.levelWarming = false;
-  }, 7000);
 }, true);
 
-export { activateRuntime };
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", activateRuntime, { once: true });
+} else {
+  activateRuntime();
+}

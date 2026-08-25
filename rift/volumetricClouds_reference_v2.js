@@ -1,10 +1,24 @@
 // Compatibility entry point retained because main_game.js imports this module.
-// Three.js r185.1 migration branch: keep the stable v1.7 persistent cumulus
-// presentation on the live iPhone test path while the experimental v1.8
-// 4x4 temporal interleaver remains isolated for debugging. The v1.8 resolver
-// currently fails to seed/reconstruct visible cloud history reliably on Safari.
-export {
-  createVolumetricClouds,
-  updateVolumetricClouds,
-  disposeVolumetricClouds,
-} from "./volumetricClouds_r185_v17.js";
+// Rift Cloud Model 2.0 is the default r185.1 test path. Add ?cloudFallback=1 to
+// the URL to instantly return to the last known-good v1.7 renderer if Safari or
+// a specific WebGPU backend exposes a regression while Model 2 is being tuned.
+
+import * as model2 from "./volumetricClouds_r185_model2.js";
+import * as fallback from "./volumetricClouds_r185_v17.js";
+
+const forceFallback = typeof location !== "undefined"
+  && new URLSearchParams(location.search).has("cloudFallback");
+
+const active = forceFallback ? fallback : model2;
+
+export function createVolumetricClouds(scene) {
+  return active.createVolumetricClouds(scene);
+}
+
+export function updateVolumetricClouds(...args) {
+  return active.updateVolumetricClouds(...args);
+}
+
+export function disposeVolumetricClouds(handle) {
+  return active.disposeVolumetricClouds(handle);
+}

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Rift Cloud Reference Fitter</title>
+  <style>
+    :root{color-scheme:dark;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:#071018;color:#d9f5ff}
+    body{margin:0;display:grid;grid-template-columns:minmax(0,1fr) 340px;min-height:100vh}
+    main{display:grid;place-items:center;padding:18px;background:#0a1420}
+    canvas{max-width:100%;max-height:92vh;border:1px solid #26506a;background:#4875a6;box-shadow:0 18px 80px #0008}
+    aside{padding:16px;overflow:auto;border-left:1px solid #1e3f55;background:#08111a}
+    h1{font-size:17px;margin:0 0 14px;color:#69edf1}
+    label{display:block;font-size:12px;margin:10px 0 4px;color:#9ec7d7}
+    select,input,button,textarea{width:100%;box-sizing:border-box;background:#0c1c29;color:#e7fbff;border:1px solid #2b5368;border-radius:7px;padding:8px;font:inherit}
+    input[type=range]{padding:0}.grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}.row{display:flex;gap:7px;margin-top:8px}.row>*{flex:1}
+    button{cursor:pointer;background:#103247}button:hover{background:#16455e}textarea{min-height:220px;white-space:pre;font-size:11px}
+    small{display:block;color:#688fa1;line-height:1.45;margin-top:10px}
+    @media(max-width:850px){body{grid-template-columns:1fr;grid-template-rows:auto auto}aside{border-left:0;border-top:1px solid #1e3f55}}
+  </style>
+</head>
+<body>
+  <main><canvas id="preview" width="900" height="700"></canvas></main>
+  <aside>
+    <h1>Model 3 reference fitter</h1>
+    <label>Archetype</label><select id="archetype"></select>
+    <label>Lobe</label><select id="lobe"></select>
+    <div class="grid" id="fields"></div>
+    <label>Reference image</label><input id="reference" type="file" accept="image/*" />
+    <label>Reference opacity</label><input id="referenceOpacity" type="range" min="0" max="1" step="0.01" value="0.46" />
+    <label>Density threshold</label><input id="threshold" type="range" min="0.05" max="0.8" step="0.01" value="0.28" />
+    <div class="row"><button id="add">Add lobe</button><button id="remove">Remove</button></div>
+    <div class="row"><button id="copy">Copy JSON</button><button id="reset">Reset</button></div>
+    <label>Export</label><textarea id="export" spellcheck="false"></textarea>
+    <small>Upload one of the Sky Pro reference captures, then fit the front-projection silhouette. Model 3 preserves this macro form in the 3D atlas; Perlin-Worley detail only erodes the boundary at runtime.</small>
+  </aside>
+  <script type="module" src="./cloudReferenceEditor.js"></script>
+</body>
+</html>

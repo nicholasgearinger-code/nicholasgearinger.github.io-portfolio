@@ -1,17 +1,10 @@
 import * as THREE from "three";
 
-// Rift Cloud Model 2.0 weather field.
-//
-// The weather texture controls meteorology instead of drawing cloud silhouettes.
-// Channels:
-//   R = coverage potential
-//   G = cloud type (0=stratiform, ~0.5=cumulus, 1=towering)
-//   B = humidity / condensable moisture
-//   A = storm / precipitation potential
-//
-// Two independent tileable fields are cross-faded and advected at different
-// rates by the renderer so clouds can form and dissipate instead of behaving like
-// one frozen mask sliding across the sky.
+// Rift Cloud Model 2 weather field — persistent-cumulus revision.
+// Channels remain meteorological rather than silhouette data:
+// R coverage potential, G cloud type, B humidity, A storm potential.
+// This revision distributes more, smaller convective families so fair weather
+// does not leave huge empty sectors of sky.
 
 function clamp01(v) {
   return Math.max(0, Math.min(1, v));
@@ -38,12 +31,10 @@ function valueNoise(u, v, cells, seed) {
   const tx = smooth01(x - xi);
   const ty = smooth01(y - yi);
   const wrap = (n) => ((n % cells) + cells) % cells;
-
   const a = hash2(wrap(xi), wrap(yi), seed);
   const b = hash2(wrap(xi + 1), wrap(yi), seed);
   const c = hash2(wrap(xi), wrap(yi + 1), seed);
   const d = hash2(wrap(xi + 1), wrap(yi + 1), seed);
-
   return THREE.MathUtils.lerp(
     THREE.MathUtils.lerp(a, b, tx),
     THREE.MathUtils.lerp(c, d, tx),
@@ -70,7 +61,7 @@ function torusDelta(a, b) {
   return Math.min(d, 1 - d);
 }
 
-function makeConvectiveCells(seed, count = 34) {
+function makeConvectiveCells(seed, count = 52) {
   const cells = [];
   let s = seed >>> 0;
   const rand = () => {
@@ -85,10 +76,10 @@ function makeConvectiveCells(seed, count = 34) {
     cells.push({
       x: rand(),
       y: rand(),
-      rx: THREE.MathUtils.lerp(0.035, 0.105, Math.pow(rand(), 0.75)),
-      ry: THREE.MathUtils.lerp(0.030, 0.090, Math.pow(rand(), 0.80)),
-      strength: THREE.MathUtils.lerp(0.45, 1.0, rand()),
-      tower: THREE.MathUtils.lerp(0.28, 1.0, Math.pow(rand(), 0.65)),
+      rx: THREE.MathUtils.lerp(0.030, 0.082, Math.pow(rand(), 0.82)),
+      ry: THREE.MathUtils.lerp(0.026, 0.074, Math.pow(rand(), 0.86)),
+      strength: THREE.MathUtils.lerp(0.52, 1.0, rand()),
+      tower: THREE.MathUtils.lerp(0.24, 1.0, Math.pow(rand(), 0.72)),
     });
   }
   return cells;
@@ -103,7 +94,7 @@ function cellField(u, v, cells) {
     const r = Math.sqrt(dx * dx + dy * dy);
     if (r >= 1) continue;
     const w = smooth01(1 - r) * cell.strength;
-    union = 1 - (1 - union) * (1 - w * 0.82);
+    union = 1 - (1 - union) * (1 - w * 0.88);
     tower = Math.max(tower, w * cell.tower);
   }
   return { union: clamp01(union), tower: clamp01(tower) };
@@ -111,51 +102,45 @@ function cellField(u, v, cells) {
 
 function buildWeatherData(size, seed) {
   const data = new Uint8Array(size * size * 4);
-  const cells = makeConvectiveCells(seed ^ 0x9e3779b9, 34);
+  const cells = makeConvectiveCells(seed ^ 0x9e3779b9, 52);
   let p = 0;
 
   for (let y = 0; y < size; y++) {
     const v = y / size;
     for (let x = 0; x < size; x++) {
       const u = x / size;
-
       const synoptic = fbm(u, v, seed + 11, 2, 5);
       const mesoscale = fbm(u + 0.171, v - 0.233, seed + 211, 4, 4);
       const moistureNoise = fbm(u - 0.307, v + 0.119, seed + 409, 3, 5);
       const breakup = fbm(u + 0.421, v + 0.337, seed + 601, 8, 3);
       const convective = cellField(u, v, cells);
 
-      // Weather coverage is intentionally broad and persistent. The 3D density
-      // field will decide the actual cloud silhouette inside these regions.
       const coverage = clamp01(
-        0.14
-        + synoptic * 0.36
-        + mesoscale * 0.18
-        + convective.union * 0.40
-        - (1 - breakup) * 0.08
+        0.24
+        + synoptic * 0.32
+        + mesoscale * 0.20
+        + convective.union * 0.42
+        - (1 - breakup) * 0.045
       );
 
-      // Low type values favor stratocumulus; middle values fair-weather cumulus;
-      // high values allow taller convective profiles. Type never directly cuts a
-      // cloud top — the 3D profile/noise still determines visible shape.
       const cloudType = clamp01(
-        0.18
-        + mesoscale * 0.28
-        + convective.tower * 0.52
-        + (coverage - 0.5) * 0.10
+        0.27
+        + mesoscale * 0.24
+        + convective.tower * 0.46
+        + (coverage - 0.5) * 0.08
       );
 
       const humidity = clamp01(
-        0.34
-        + moistureNoise * 0.40
-        + synoptic * 0.14
-        + coverage * 0.18
+        0.42
+        + moistureNoise * 0.34
+        + synoptic * 0.13
+        + coverage * 0.17
       );
 
       const stormPotential = clamp01(
-        Math.pow(Math.max(0, convective.tower - 0.50), 1.35) * 0.70
-        + Math.max(0, humidity - 0.72) * 0.65
-        + Math.max(0, coverage - 0.72) * 0.45
+        Math.pow(Math.max(0, convective.tower - 0.54), 1.35) * 0.66
+        + Math.max(0, humidity - 0.76) * 0.60
+        + Math.max(0, coverage - 0.78) * 0.40
       );
 
       data[p++] = Math.round(coverage * 255);
@@ -164,7 +149,6 @@ function buildWeatherData(size, seed) {
       data[p++] = Math.round(stormPotential * 255);
     }
   }
-
   return data;
 }
 
@@ -183,8 +167,7 @@ function makeTexture(data, size) {
 }
 
 export function createRiftCloudWeatherTexture(size = 192, seed = 0x52494654) {
-  const data = buildWeatherData(size, seed);
-  return makeTexture(data, size);
+  return makeTexture(buildWeatherData(size, seed), size);
 }
 
 export function createRiftCloudWeatherPair(size = 192) {

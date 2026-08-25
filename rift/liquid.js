@@ -8,6 +8,25 @@ function setFFTReflectionOwnership(active) {
   }
 }
 
+function getWaterProfile() {
+  const selected = typeof globalThis !== "undefined"
+    ? globalThis.__riftWaterTestMode
+    : null;
+  if (selected === "mobile" || selected === "desktop") return selected;
+
+  // Defensive fallback for a stale/cached launcher: never assume desktop on a
+  // touch device if the launcher has not populated the profile global yet.
+  const touch = typeof window !== "undefined" && (
+    "ontouchstart" in window ||
+    (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0)
+  );
+  return touch ? "mobile" : "desktop";
+}
+
+function useMobileSafeWaterBackend() {
+  return getWaterProfile() === "mobile";
+}
+
 function applyFFTReflectionPreference(handle) {
   const physical = handle?.fftPhysicalMaterial;
   if (!physical) return;
@@ -60,7 +79,14 @@ export function createLiquidPlane(
   flowDir = { x: 0.6, z: 0.35 },
   excludeRegions = [],
 ) {
-  if (biome === "crystal") {
+  // Three r182's WebGPU storage-attribute upload is currently crashing Safari
+  // in the very first FFT compute dispatch (native TypedArray.set() inside
+  // createStorageAttribute). Do not let that renderer-level fault take down the
+  // entire game on the Mobile profile. Mobile/Auto-on-touch uses the proven
+  // non-compute liquid implementation until the live runtime moves to the r185
+  // water path. Desktop remains full Water Pro v19 FFT so the selector still
+  // provides an explicit high-end/test backend.
+  if (biome === "crystal" && !useMobileSafeWaterBackend()) {
     const handle = oceanV19.createGPUFFTOceanPlane(scene, y, size, sampleHeight);
     if (handle?.gpuFFT) {
       handle.__riftOceanBackend = "v19-water-pro";
@@ -74,7 +100,7 @@ export function createLiquidPlane(
   }
 
   setFFTReflectionOwnership(false);
-  return legacy.createLiquidPlane(
+  const handle = legacy.createLiquidPlane(
     scene,
     biome,
     y,
@@ -83,6 +109,16 @@ export function createLiquidPlane(
     flowDir,
     excludeRegions,
   );
+
+  if (biome === "crystal" && handle) {
+    handle.__riftOceanBackend = "mobile-safe-legacy";
+    handle.__riftMobileSafeWater = true;
+    console.info(
+      "[rift-water] Mobile-safe Crystal water selected; r182 FFT compute bypassed",
+    );
+  }
+
+  return handle;
 }
 
 export function createBreakingWave() {

@@ -16,19 +16,23 @@ function fftOwnsWaterReflections() {
     globalThis.__riftFFTUsesEnvironmentReflections === true;
 }
 
-function hasExplicitCloudOverride() {
+function hasExplicitOverride(key) {
   try {
     const raw = localStorage.getItem(OVERRIDES_STORAGE_KEY);
     if (!raw) return false;
     const parsed = JSON.parse(raw);
-    return parsed && Object.prototype.hasOwnProperty.call(parsed, "volumetricCloudsEnabled");
+    return parsed && Object.prototype.hasOwnProperty.call(parsed, key);
   } catch (_) {
     return false;
   }
 }
 
 function lowGetsAdaptiveClouds() {
-  return base.getGraphicsTier?.() === "low" && !hasExplicitCloudOverride();
+  return base.getGraphicsTier?.() === "low" && !hasExplicitOverride("volumetricCloudsEnabled");
+}
+
+function lowGetsMobileSunShadows() {
+  return base.getGraphicsTier?.() === "low" && !hasExplicitOverride("shadowsEnabled");
 }
 
 export function getGraphicsSettings() {
@@ -42,6 +46,20 @@ export function getGraphicsSettings() {
     settings = { ...settings, volumetricCloudsEnabled: true };
   }
 
+  // Low used to disable the renderer's shadow map entirely. That made the mobile
+  // scene read flat and also made storm/light changes much more visually abrupt.
+  // Keep one inexpensive directional sun-shadow map in the Low baseline instead.
+  // 512² is still only 1/4 the texel count of Medium's 1024-class map and is a
+  // much better visual tradeoff than having no grounding/contact shadows at all.
+  // An explicit player override still wins.
+  if (lowGetsMobileSunShadows() && settings.shadowsEnabled === false) {
+    settings = {
+      ...settings,
+      shadowsEnabled: true,
+      shadowMapSize: Math.max(512, Number(settings.shadowMapSize) || 0),
+    };
+  }
+
   if (!fftOwnsWaterReflections()) return settings;
 
   // The user's real reflection preference remains untouched in the base module.
@@ -52,5 +70,6 @@ export function getGraphicsSettings() {
 
 export function getEffectiveValue(key) {
   if (key === "volumetricCloudsEnabled" && lowGetsAdaptiveClouds()) return true;
+  if (key === "shadowsEnabled" && lowGetsMobileSunShadows()) return true;
   return base.getEffectiveValue(key);
 }

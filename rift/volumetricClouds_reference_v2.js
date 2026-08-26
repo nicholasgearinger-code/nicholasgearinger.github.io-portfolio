@@ -1,15 +1,19 @@
-// Compatibility entry point retained because main_game.js imports this module.
-// Rift Cloud Model 2.6 is the default r185.1 mobile path. It fixes the finite
-// temporal launch/display plane being reset to world origin, which clipped the
-// cloud compositor into thin horizontal strips once the player moved away from
-// X/Z = 0. Model 2.5 remains available as an immediate rollback.
+// Compatibility entry retained because main_game.js imports this module.
+// Rift Cloud Model 3.6 is the default on this review branch.
 //
-// Rollbacks remain available on-device:
-//   ?cloudModel25=1  -> previous Model 2.5 temporal-stability pass
-//   ?cloudModel24=1  -> previous atmosphere-coupled Model 2.4
-//   ?cloudModel22=1  -> earlier known-good Model 2.2
-//   ?cloudFallback=1 -> older known-good v1.7 renderer
+// 3.6 keeps Model 3.5's lighting/shader path, but adds low-Sun reference
+// composition steering so broken/distant cloud banks spend more time in the
+// solar corridor. This creates the cloud/Sun intersections needed for the
+// existing Model 3.5b crepuscular-ray pass to become visible in normal play.
+// Rollbacks remain query-selectable for A/B review.
 
+import * as model36 from "./volumetricClouds_r185_model36.js";
+import * as model35 from "./volumetricClouds_r185_model35.js";
+import * as model34 from "./volumetricClouds_r185_model34.js";
+import * as model33 from "./volumetricClouds_r185_model33.js";
+import * as model32 from "./volumetricClouds_r185_model32.js";
+import * as model31 from "./volumetricClouds_r185_model31.js";
+import * as model30 from "./volumetricClouds_r185_model30.js";
 import * as model26 from "./volumetricClouds_r185_model26.js";
 import * as model25 from "./volumetricClouds_r185_model25.js";
 import * as model24 from "./volumetricClouds_r185_model24.js";
@@ -19,16 +23,19 @@ import * as fallback from "./volumetricClouds_r185_v17.js";
 const params = typeof location !== "undefined"
   ? new URLSearchParams(location.search)
   : null;
-const forceFallback = params?.has("cloudFallback") === true;
-const forceModel22 = params?.has("cloudModel22") === true;
-const forceModel24 = params?.has("cloudModel24") === true;
-const forceModel25 = params?.has("cloudModel25") === true;
 
-const active = forceFallback
-  ? fallback
-  : (forceModel22
-    ? model22
-    : (forceModel24 ? model24 : (forceModel25 ? model25 : model26)));
+let active = model36;
+if (params?.has("cloudModel35")) active = model35;
+else if (params?.has("cloudModel34")) active = model34;
+else if (params?.has("cloudModel33")) active = model33;
+else if (params?.has("cloudModel32")) active = model32;
+else if (params?.has("cloudModel31")) active = model31;
+else if (params?.has("cloudModel30")) active = model30;
+else if (params?.has("cloudModel26")) active = model26;
+else if (params?.has("cloudModel25")) active = model25;
+else if (params?.has("cloudModel24")) active = model24;
+else if (params?.has("cloudModel22")) active = model22;
+else if (params?.has("cloudFallback")) active = fallback;
 
 export function createVolumetricClouds(scene) {
   return active.createVolumetricClouds(scene);

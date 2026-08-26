@@ -92,7 +92,7 @@ jobs:
             .lighting-v20-preview-source/ lighting-v20-build/
           rm -rf .lighting-v20-preview-source
 
-      # Cloud Model 3 stays isolated from production while it is reviewed.
+      # Cloud Model 3.1 stays isolated from production while it is reviewed.
       - name: Checkout Cloud Model 3 preview
         uses: actions/checkout@v4
         with:
@@ -114,7 +114,7 @@ jobs:
           p = Path("cloud-model3-build/index.html")
           html = p.read_text(encoding="utf-8")
           html = html.replace("three@0.182.0", "three@0.185.1")
-          marker = '<script>window.__riftR185StaticImportMap=true;window.__riftThreeTarget="0.185.1";window.__riftMigrationBuild="cloud-model3-review";</script>'
+          marker = '<script>window.__riftR185StaticImportMap=true;window.__riftThreeTarget="0.185.1";window.__riftMigrationBuild="cloud-model31-review";</script>'
           if marker not in html:
               html = html.replace("</head>", marker + "</head>", 1)
           p.write_text(html, encoding="utf-8")

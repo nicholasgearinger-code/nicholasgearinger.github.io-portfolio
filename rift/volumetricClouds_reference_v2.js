@@ -1,16 +1,17 @@
 // Compatibility entry point retained because main_game.js imports this module.
-// Rift Cloud Model 3.0 is the default on this review branch: authored reference
-// shapes define the macro cloud silhouette, while Perlin-Worley detail is limited
-// to interior modulation and edge erosion. The proven Model 2.6 camera-centered
-// temporal path remains available for immediate A/B comparison and rollback.
+// Rift Cloud Model 3.1 is the default on this review branch. It keeps Model 3's
+// authored macro silhouette, then adds finer cauliflower crowns, stronger flat
+// condensation bases, and reference-aware directional self-shadowing.
 //
 // Rollbacks / comparisons:
+//   ?cloudModel30=1  -> previous Model 3.0 reference-shaped renderer
 //   ?cloudModel26=1  -> previous Model 2.6 camera-centered temporal surface
 //   ?cloudModel25=1  -> previous Model 2.5 temporal-stability pass
 //   ?cloudModel24=1  -> previous atmosphere-coupled Model 2.4
 //   ?cloudModel22=1  -> earlier known-good Model 2.2
 //   ?cloudFallback=1 -> older known-good v1.7 renderer
 
+import * as model31 from "./volumetricClouds_r185_model31.js";
 import * as model30 from "./volumetricClouds_r185_model30.js";
 import * as model26 from "./volumetricClouds_r185_model26.js";
 import * as model25 from "./volumetricClouds_r185_model25.js";
@@ -26,6 +27,7 @@ const forceModel22 = params?.has("cloudModel22") === true;
 const forceModel24 = params?.has("cloudModel24") === true;
 const forceModel25 = params?.has("cloudModel25") === true;
 const forceModel26 = params?.has("cloudModel26") === true;
+const forceModel30 = params?.has("cloudModel30") === true;
 
 const active = forceFallback
   ? fallback
@@ -35,7 +37,9 @@ const active = forceFallback
       ? model24
       : (forceModel25
         ? model25
-        : (forceModel26 ? model26 : model30))));
+        : (forceModel26
+          ? model26
+          : (forceModel30 ? model30 : model31)))));
 
 export function createVolumetricClouds(scene) {
   return active.createVolumetricClouds(scene);

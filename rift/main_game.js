@@ -3,9 +3,11 @@
 // The Model 3.5b godray patch is layered on top of the rain/underwater tuning
 // loader. That lower loader first changes the lens glint multiplier from 0.9 to
 // 0.35, so the later godray edit must look for the already-tuned 0.35 fragment.
-// The previous review loader still searched for 0.9 and aborted before Rift
-// could boot. Keep the known Model 4 loader pinned below, patch only that ordering
-// mismatch, then execute it with this deployed module URL as its base.
+// The review build also originally created the native GodraysNode before the
+// scene's `sun` DirectionalLight declaration, triggering the temporal-dead-zone
+// ReferenceError seen on iPhone. Keep the known Model 4 loader pinned below,
+// patch those two ordering mismatches, then execute it with this deployed module
+// URL as its base.
 
 const moduleUrl = import.meta.url;
 const pinnedLoaderUrl =
@@ -44,6 +46,32 @@ source = replaceExactly(
   "sunGlintColor.mul(0.35).mul(lensIntensityUniform)",
   "Model 3.5b lens/glint godray",
   2,
+);
+
+// The r185 GodraysNode replacement is inserted at the post-processing setup,
+// but the stable game declares `sun` later in the module. Add two source edits
+// immediately after that replacement: instantiate the SAME real sun object just
+// before the RenderPipeline/GodraysNode graph is built, then remove the later
+// duplicate declaration while leaving all of its position/shadow/scene setup in
+// place. This preserves the graph and shadow-light identity instead of deferring
+// godray creation until after the graph has already captured a zero texture.
+const godraySetupEditTail = `    "r185 Water Pro WebGPU SSR + Model 3.5b godrays setup",
+  ],`;
+source = replaceFirst(
+  source,
+  godraySetupEditTail,
+  `${godraySetupEditTail}
+  [
+    "const postProcessing = new THREE.RenderPipeline(renderer);",
+    "const sun = new THREE.DirectionalLight(0xffffff, 1.1 /* Model 4 early sun for GodraysNode */);\\nconst postProcessing = new THREE.RenderPipeline(renderer);",
+    "Model 4 preinitialize sun before godray graph",
+  ],
+  [
+    "const sun = new THREE.DirectionalLight(0xffffff, 1.1);",
+    "// Model 4: sun already instantiated before post-processing; continue configuring the same light below.",
+    "Model 4 remove duplicate late sun declaration",
+  ],`,
+  "godray sun initialization ordering edits",
 );
 
 // A Blob module has a blob: import.meta.url. Re-anchor only the *first* actual

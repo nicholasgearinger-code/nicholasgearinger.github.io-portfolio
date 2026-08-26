@@ -1,12 +1,10 @@
-// Model 4.4.2 mobile WebGPU stability wrapper.
+// Model 4.4.2 mobile WebGPU stability wrapper — corrected nested patch.
 //
-// The previous 4.4.1 atlas fix proved the live Data3DTexture upload was not the
-// source of the iPhone Invalid CommandEncoder failure. Three r185.1 has known
-// WebGPU validation regressions involving shadow/godray-adjacent render passes,
-// so this diagnostic/stability layer removes the native GodraysNode pass on
-// touch devices while leaving the entire Model 4.4.1 desktop path unchanged.
-//
-// The underlying 4.4.1 entry is pinned by commit so this wrapper cannot recurse.
+// The pinned 4.4.1 entry is itself a source-rewriting wrapper. The first 4.4.2
+// attempt searched that wrapper for the final riftGodraysEnabled declaration,
+// but that declaration exists one layer deeper in the runtime source it fetches.
+// This version injects the mobile Godrays disable into the 4.4.1 wrapper's own
+// patch sequence, so it is applied at the correct layer.
 
 const moduleUrl = import.meta.url;
 const pinned441Url =
@@ -27,8 +25,7 @@ function replaceExactlyOnce(sourceText, from, to, label) {
   return sourceText.replace(from, to);
 }
 
-// The pinned 4.4.1 wrapper is executed from a Blob below. Preserve the real
-// HTTP module base so its own relative-URL re-anchoring keeps working.
+// Preserve the branch HTTP base when the 4.4.1 wrapper runs from this Blob.
 source = replaceExactlyOnce(
   source,
   "const moduleUrl = import.meta.url;",
@@ -36,17 +33,19 @@ source = replaceExactlyOnce(
   "module URL anchor",
 );
 
-// r185.1 GodraysNode is shadow-map based. On iPhone/other touch devices remove
-// that native pass entirely; desktop retains it unchanged. The existing cloud
-// renderer, atmospheric Sun, lens pipeline, water and Model 4.4.1 atlas remain.
+// Inject one extra replacement into the nested 4.4.1 runtime rewriter. This is
+// where riftGodraysEnabled actually exists.
+const sourceMapMarker = 'source += "\\n//# sourceURL=rift/main_game_model41_hotfix.runtime.js\\n";';
+const nestedMobilePatch = `source = replaceFirst(\n  source,\n  \`const riftGodraysEnabled =\\n  renderer.shadowMap.enabled &&\\n  !new URLSearchParams(location.search).has("godraysOff");\`,\n  \`const riftGodraysEnabled =\\n  !isTouchDevice &&\\n  renderer.shadowMap.enabled &&\\n  !new URLSearchParams(location.search).has("godraysOff");\`,\n  "Model 4.4.2 disable native GodraysNode on touch",\n);\n\n${sourceMapMarker}`;
+
 source = replaceExactlyOnce(
   source,
-  `const riftGodraysEnabled =\n  renderer.shadowMap.enabled &&\n  !new URLSearchParams(location.search).has(\"godraysOff\");`,
-  `const riftGodraysEnabled =\n  !isTouchDevice &&\n  renderer.shadowMap.enabled &&\n  !new URLSearchParams(location.search).has(\"godraysOff\");`,
-  "native GodraysNode enable gate",
+  sourceMapMarker,
+  nestedMobilePatch,
+  "nested 4.4.1 source-map insertion point",
 );
 
-source += "\n;globalThis.__riftModel442MobileStability={active:true,nativeGodraysDisabledOnTouch:true,threeTarget:'0.185.1'};\n";
+source += "\n;globalThis.__riftModel442MobileStability={active:true,nativeGodraysDisabledOnTouch:true,threeTarget:'0.185.1',nestedPatch:true};\n";
 source += "\n//# sourceURL=rift/main_game_model442_mobile_stability.runtime.js\n";
 
 const blob = new Blob([source], { type: "text/javascript" });

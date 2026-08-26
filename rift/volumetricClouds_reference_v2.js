@@ -1,21 +1,7 @@
-// Compatibility entry point retained because main_game.js imports this module.
-// Rift Cloud Model 3.3 is the default on this review branch.
-//
-// Model 3.2 strengthens lighting on the proven 3.1 authored shapes without an
-// additional sample. Model 3.3 then bakes multiple cloud families into a v3 atlas
-// so the sky gains hero clouds, satellites, broken groups, horizon banks and storm
-// cells while retaining the same single-atlas runtime lookup.
-//
-// Rollbacks / comparisons:
-//   ?cloudModel32=1  -> Model 3.2 lighting on the 3.1 atlas
-//   ?cloudModel31=1  -> previous Model 3.1 crown/self-shadow build
-//   ?cloudModel30=1  -> previous Model 3.0 reference-shaped build
-//   ?cloudModel26=1  -> Model 2.6 camera-centered temporal surface
-//   ?cloudModel25=1  -> Model 2.5 temporal-stability pass
-//   ?cloudModel24=1  -> Model 2.4 atmosphere-coupled build
-//   ?cloudModel22=1  -> Model 2.2
-//   ?cloudFallback=1 -> v1.7 fallback
-
+// Rift Cloud Model 3.4 review entry. The default keeps Model 3.3's reference
+// families and adds celestial-coupled sunset/moon lighting with zero additional
+// raymarch samples. Rollbacks remain query-selectable for A/B review.
+import * as THREE from "three";
 import * as model33 from "./volumetricClouds_r185_model33.js";
 import * as model32 from "./volumetricClouds_r185_model32.js";
 import * as model31 from "./volumetricClouds_r185_model31.js";
@@ -26,31 +12,39 @@ import * as model24 from "./volumetricClouds_r185_model24.js";
 import * as model22 from "./volumetricClouds_r185_model22.js";
 import * as fallback from "./volumetricClouds_r185_v17.js";
 
-const params = typeof location !== "undefined"
-  ? new URLSearchParams(location.search)
-  : null;
-
-// Keep this intentionally imperative. A deeply nested ternary here previously
-// introduced one extra closing parenthesis and caused Safari to abort the entire
-// Rift module graph with `Unexpected token ')'` before the game could start.
+const params = typeof location !== "undefined" ? new URLSearchParams(location.search) : null;
 let active = model33;
-if (params?.has("cloudModel32")) active = model32;
-else if (params?.has("cloudModel31")) active = model31;
-else if (params?.has("cloudModel30")) active = model30;
-else if (params?.has("cloudModel26")) active = model26;
-else if (params?.has("cloudModel25")) active = model25;
-else if (params?.has("cloudModel24")) active = model24;
-else if (params?.has("cloudModel22")) active = model22;
-else if (params?.has("cloudFallback")) active = fallback;
+let model34 = true;
+if (params?.has("cloudModel33")) { active=model33; model34=false; }
+else if (params?.has("cloudModel32")) { active=model32; model34=false; }
+else if (params?.has("cloudModel31")) { active=model31; model34=false; }
+else if (params?.has("cloudModel30")) { active=model30; model34=false; }
+else if (params?.has("cloudModel26")) { active=model26; model34=false; }
+else if (params?.has("cloudModel25")) { active=model25; model34=false; }
+else if (params?.has("cloudModel24")) { active=model24; model34=false; }
+else if (params?.has("cloudModel22")) { active=model22; model34=false; }
+else if (params?.has("cloudFallback")) { active=fallback; model34=false; }
 
-export function createVolumetricClouds(scene) {
-  return active.createVolumetricClouds(scene);
+const SUNSET_EDGE=new THREE.Color(0xffb27d), SUNSET_CORE=new THREE.Color(0x6d718a);
+const MOON_EDGE=new THREE.Color(0xc5d2e3), MOON_CORE=new THREE.Color(0x3f4d65), T=new THREE.Color();
+const clamp=v=>Math.max(0,Math.min(1,Number(v)||0));
+
+function apply34(handle){
+  const u=handle?.uniforms, c=globalThis.__riftCelestialModel34; if(!u||!c)return;
+  const sunset=clamp(c.sunsetStrength), fire=clamp(c.horizonFire), night=clamp(c.night), moon=clamp(c.moonIllumination)*night, storm=clamp(c.storm), clear=1-storm;
+  if(u.sunColor?.value?.isColor){
+    if(night>0.55){T.copy(MOON_EDGE).multiplyScalar(0.72+moon*0.42);u.sunColor.value.lerp(T,moon*0.46);}
+    else {T.copy(c.sunColor||SUNSET_EDGE).lerp(SUNSET_EDGE,sunset*0.58);u.sunColor.value.lerp(T,sunset*clear*0.52);}
+  }
+  if(u.ambientColor?.value?.isColor) u.ambientColor.value.lerp(night>0.45?MOON_CORE:SUNSET_CORE,(night>0.45?moon*0.34:sunset*clear*0.20));
+  if(u.m2SilverStrength)u.m2SilverStrength.value=THREE.MathUtils.clamp(u.m2SilverStrength.value+sunset*clear*0.17+moon*0.055,0.08,0.82);
+  if(u.m31CrownLightBoost)u.m31CrownLightBoost.value=THREE.MathUtils.clamp(u.m31CrownLightBoost.value+sunset*clear*0.12+fire*0.08+moon*0.045,0.68,1.55);
+  if(u.m31SelfShadow)u.m31SelfShadow.value=THREE.MathUtils.clamp(u.m31SelfShadow.value+sunset*0.08+night*0.04,0.72,1.45);
+  if(u.m31BaseDarkening)u.m31BaseDarkening.value=THREE.MathUtils.clamp(u.m31BaseDarkening.value+sunset*0.09+night*0.055,0.30,0.92);
+  if(u.m2MultiScatter)u.m2MultiScatter.value=THREE.MathUtils.clamp(u.m2MultiScatter.value+sunset*clear*0.028+moon*0.012,0.12,0.38);
+  globalThis.__riftCloudModel34Debug={active:true,version:"3.4-celestial-coupled-lighting",sunset,horizonFire:fire,night,moonIllumination:moon,storm,silverStrength:u.m2SilverStrength?.value,crownLightBoost:u.m31CrownLightBoost?.value,selfShadow:u.m31SelfShadow?.value,baseDarkening:u.m31BaseDarkening?.value,threeRevision:THREE.REVISION};
 }
 
-export function updateVolumetricClouds(...args) {
-  return active.updateVolumetricClouds(...args);
-}
-
-export function disposeVolumetricClouds(handle) {
-  return active.disposeVolumetricClouds(handle);
-}
+export function createVolumetricClouds(scene){const h=active.createVolumetricClouds(scene);if(h&&model34)h.__riftModel34=true;return h;}
+export function updateVolumetricClouds(...args){const r=active.updateVolumetricClouds(...args);if(model34)apply34(args[0]);return r;}
+export function disposeVolumetricClouds(handle){delete globalThis.__riftCloudModel34Debug;return active.disposeVolumetricClouds(handle);}

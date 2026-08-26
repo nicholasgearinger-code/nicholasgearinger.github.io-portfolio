@@ -1,11 +1,13 @@
 // Compatibility entry retained because main_game.js imports this module.
-// Rift Cloud Model 4.1 is the default on this review branch.
+// Rift Cloud Model 4.2 is the default on this review branch.
 //
-// Model 4.1 keeps the photo-reconstructed Model 4 volume, but separates the
-// reference macro masses into individual cloud bodies, enlarges the photographic
-// low-Sun presentation, and retains the inherited r185 TAAU/self-shadow path.
+// Model 4.2 keeps the photo-reconstructed Model 4 volume and Model 4.1 godray
+// integration, but retunes golden-hour composition toward the supplied sunset
+// reference: shallow broken horizontal banks, open sky gaps, and a crisp bright
+// white-yellow Sun with a compact warm photographic halo.
 // Rollbacks remain query-selectable for A/B review.
 
+import * as model42 from "./volumetricClouds_r185_model42.js";
 import * as model41 from "./volumetricClouds_r185_model41.js";
 import * as model40 from "./volumetricClouds_r185_model40.js";
 import * as model36 from "./volumetricClouds_r185_model36.js";
@@ -25,8 +27,9 @@ const params = typeof location !== "undefined"
   ? new URLSearchParams(location.search)
   : null;
 
-let active = model41;
-if (params?.has("cloudModel40")) active = model40;
+let active = model42;
+if (params?.has("cloudModel41")) active = model41;
+else if (params?.has("cloudModel40")) active = model40;
 else if (params?.has("cloudModel36")) active = model36;
 else if (params?.has("cloudModel35")) active = model35;
 else if (params?.has("cloudModel34")) active = model34;

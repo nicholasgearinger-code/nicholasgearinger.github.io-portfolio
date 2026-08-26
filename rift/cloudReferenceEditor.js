@@ -1,4 +1,4 @@
-import { REFERENCE_CLOUD_ARCHETYPES } from "./cloudArchetypes_reference_v2.js";
+import { REFERENCE_CLOUD_ARCHETYPES } from "./cloudArchetypes_reference_v3.js";
 
 const canvas = document.querySelector("#preview");
 const ctx = canvas.getContext("2d");

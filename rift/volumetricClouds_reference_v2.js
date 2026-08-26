@@ -1,11 +1,13 @@
 // Compatibility entry retained because main_game.js imports this module.
-// Rift Cloud Model 4.4 is the default on this review branch.
+// Rift Cloud Model 4.4.1 is the default on this review branch.
 //
-// Model 4.4 keeps the reconstructed reference volume, 4.3 solar presentation,
-// cloud lighting and godray path, then adds a dynamic cloud-shape library for
-// deep cumulus, stratocumulus, altocumulus, sunset bands, cirrus and storms.
-// Rollbacks remain query-selectable for A/B review.
+// 4.4.1 keeps Model 4.4's cloud-shape library, Sun, lighting and god rays, but
+// touch/mobile uses one immutable pre-baked 3D reference atlas instead of replacing
+// the active Data3DTexture payload after asynchronous photo analysis completes.
+// Desktop retains the full live reference-reconstruction path.
+// Rollbacks remain query-selectable for A/B and stability review.
 
+import * as model441 from "./volumetricClouds_r185_model441.js";
 import * as model44 from "./volumetricClouds_r185_model44.js";
 import * as model43 from "./volumetricClouds_r185_model43.js";
 import * as model42 from "./volumetricClouds_r185_model42.js";
@@ -28,8 +30,9 @@ const params = typeof location !== "undefined"
   ? new URLSearchParams(location.search)
   : null;
 
-let active = model44;
-if (params?.has("cloudModel43")) active = model43;
+let active = model441;
+if (params?.has("cloudModel44")) active = model44;
+else if (params?.has("cloudModel43")) active = model43;
 else if (params?.has("cloudModel42")) active = model42;
 else if (params?.has("cloudModel41")) active = model41;
 else if (params?.has("cloudModel40")) active = model40;

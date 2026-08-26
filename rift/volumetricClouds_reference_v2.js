@@ -29,30 +29,19 @@ import * as fallback from "./volumetricClouds_r185_v17.js";
 const params = typeof location !== "undefined"
   ? new URLSearchParams(location.search)
   : null;
-const forceFallback = params?.has("cloudFallback") === true;
-const forceModel22 = params?.has("cloudModel22") === true;
-const forceModel24 = params?.has("cloudModel24") === true;
-const forceModel25 = params?.has("cloudModel25") === true;
-const forceModel26 = params?.has("cloudModel26") === true;
-const forceModel30 = params?.has("cloudModel30") === true;
-const forceModel31 = params?.has("cloudModel31") === true;
-const forceModel32 = params?.has("cloudModel32") === true;
 
-const active = forceFallback
-  ? fallback
-  : (forceModel22
-    ? model22
-    : (forceModel24
-      ? model24
-      : (forceModel25
-        ? model25
-        : (forceModel26
-          ? model26
-          : (forceModel30
-            ? model30
-            : (forceModel31
-              ? model31
-              : (forceModel32 ? model32 : model33))))))));
+// Keep this intentionally imperative. A deeply nested ternary here previously
+// introduced one extra closing parenthesis and caused Safari to abort the entire
+// Rift module graph with `Unexpected token ')'` before the game could start.
+let active = model33;
+if (params?.has("cloudModel32")) active = model32;
+else if (params?.has("cloudModel31")) active = model31;
+else if (params?.has("cloudModel30")) active = model30;
+else if (params?.has("cloudModel26")) active = model26;
+else if (params?.has("cloudModel25")) active = model25;
+else if (params?.has("cloudModel24")) active = model24;
+else if (params?.has("cloudModel22")) active = model22;
+else if (params?.has("cloudFallback")) active = fallback;
 
 export function createVolumetricClouds(scene) {
   return active.createVolumetricClouds(scene);

@@ -1,9 +1,14 @@
 # Deploy production plus isolated renderer/lighting previews.
+#
+# IMPORTANT: only main publishes to the protected github-pages environment.
+# Review branches are staged by this main workflow below, so pushes to those
+# branches must not start their own Pages deployment jobs (GitHub rejects those
+# before any steps run when the environment only permits main).
 name: Deploy static content to Pages
 
 on:
   push:
-    branches: ["main", "three-r185-migration", "shadow-v11-experiment", "rift-lighting-v20-experiment", "cloud-model3-reference-volumetrics-v2", "cloud-model4-reference-reconstruction-v1"]
+    branches: ["main"]
   workflow_dispatch:
 
 permissions:

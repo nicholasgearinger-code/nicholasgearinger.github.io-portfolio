@@ -34,6 +34,8 @@ function tuneModel33Structure(handle, dt, sunDirection, rainIntensity) {
     rainIntensity,
   });
 
+  // Structure-only controls. Model 3.2 owns the lighting values after the base
+  // update, so 3.3 intentionally does NOT overwrite self-shadow/base/crown light.
   u.m3ReferenceWeights.value.set(...state.weights);
   u.m3ReferenceWorldScale.value = state.worldScale;
   u.m3ReferenceStrength.value = state.referenceStrength;
@@ -41,17 +43,17 @@ function tuneModel33Structure(handle, dt, sunDirection, rainIntensity) {
   u.m2EdgeErosion.value = state.edgeErosion;
   u.m2DetailScale.value = state.detailScale;
   u.m2DensityScale.value = state.densityScale;
-  u.m31SelfShadow.value = state.selfShadowStrength;
-  u.m31BaseDarkening.value = state.baseDarkening;
-  u.m31CrownLightBoost.value = state.crownLightBoost;
 
   // Preserve more blue gaps in fair weather; close the deck progressively only
   // when coverage/storm state actually calls for it.
   if (u.coverage) {
     const fairCoverage = THREE.MathUtils.clamp(
-      0.38 + state.coverage * 0.22 + state.humidity * 0.05,
-      0.40,
-      0.62,
+      0.39
+        + state.coverage * 0.22
+        + state.humidity * 0.05
+        - state.clusterGap * 0.12,
+      0.38,
+      0.61,
     );
     u.coverage.value = THREE.MathUtils.lerp(fairCoverage, 0.91, state.storm);
   }
@@ -113,6 +115,12 @@ function tuneModel33Structure(handle, dt, sunDirection, rainIntensity) {
     crownBreakup: state.crownBreakup,
     clusterGap: state.clusterGap,
     evolutionStrength: state.evolutionStrength,
+    inheritedLighting: {
+      silverStrength: u.m2SilverStrength?.value,
+      crownLightBoost: u.m31CrownLightBoost?.value,
+      selfShadow: u.m31SelfShadow?.value,
+      baseDarkening: u.m31BaseDarkening?.value,
+    },
     threeRevision: THREE.REVISION,
   };
 }

@@ -3,7 +3,7 @@ name: Deploy static content to Pages
 
 on:
   push:
-    branches: ["main", "three-r185-migration", "shadow-v11-experiment", "rift-lighting-v20-experiment", "cloud-model3-reference-volumetrics-v2"]
+    branches: ["main", "three-r185-migration", "shadow-v11-experiment", "rift-lighting-v20-experiment", "cloud-model3-reference-volumetrics-v2", "cloud-model4-reference-reconstruction-v1"]
   workflow_dispatch:
 
 permissions:
@@ -92,7 +92,7 @@ jobs:
             .lighting-v20-preview-source/ lighting-v20-build/
           rm -rf .lighting-v20-preview-source
 
-      # Cloud Model 3.5 stays isolated from production while it is reviewed.
+      # Cloud Model 3 stays isolated from production while it is reviewed.
       - name: Checkout Cloud Model 3 preview
         uses: actions/checkout@v4
         with:
@@ -115,6 +115,35 @@ jobs:
           html = p.read_text(encoding="utf-8")
           html = html.replace("three@0.182.0", "three@0.185.1")
           marker = '<script>window.__riftR185StaticImportMap=true;window.__riftThreeTarget="0.185.1";window.__riftMigrationBuild="cloud-model35-review";</script>'
+          if marker not in html:
+              html = html.replace("</head>", marker + "</head>", 1)
+          p.write_text(html, encoding="utf-8")
+          PY
+
+      # Model 4 reconstructs the volumetric macro density from the sky reference
+      # textures and therefore gets its own isolated Pages path for iPhone review.
+      - name: Checkout Cloud Model 4 preview
+        uses: actions/checkout@v4
+        with:
+          ref: cloud-model4-reference-reconstruction-v1
+          path: .cloud-model4-preview-source
+
+      - name: Stage Cloud Model 4 preview
+        shell: bash
+        run: |
+          rm -rf cloud-model4-build
+          mkdir -p cloud-model4-build
+          rsync -a \
+            --exclude='.git' \
+            --exclude='.github' \
+            .cloud-model4-preview-source/ cloud-model4-build/
+          rm -rf .cloud-model4-preview-source
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("cloud-model4-build/index.html")
+          html = p.read_text(encoding="utf-8")
+          html = html.replace("three@0.182.0", "three@0.185.1")
+          marker = '<script>window.__riftR185StaticImportMap=true;window.__riftThreeTarget="0.185.1";window.__riftMigrationBuild="cloud-model40-reference-reconstruction";</script>'
           if marker not in html:
               html = html.replace("</head>", marker + "</head>", 1)
           p.write_text(html, encoding="utf-8")

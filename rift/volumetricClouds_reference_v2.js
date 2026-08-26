@@ -1,12 +1,12 @@
 // Compatibility entry retained because main_game.js imports this module.
-// Rift Cloud Model 4.3 is the default on this review branch.
+// Rift Cloud Model 4.4 is the default on this review branch.
 //
-// Model 4.3 keeps the reconstructed reference volume and Model 4.1 godray path,
-// but makes the low-Sun solar presentation authoritative across every photosphere
-// sprite and blends multiple cloud/reference families with the procedural macro
-// field for substantially more cloud-size, silhouette and spacing variation.
+// Model 4.4 keeps the reconstructed reference volume, 4.3 solar presentation,
+// cloud lighting and godray path, then adds a dynamic cloud-shape library for
+// deep cumulus, stratocumulus, altocumulus, sunset bands, cirrus and storms.
 // Rollbacks remain query-selectable for A/B review.
 
+import * as model44 from "./volumetricClouds_r185_model44.js";
 import * as model43 from "./volumetricClouds_r185_model43.js";
 import * as model42 from "./volumetricClouds_r185_model42.js";
 import * as model41 from "./volumetricClouds_r185_model41.js";
@@ -28,8 +28,9 @@ const params = typeof location !== "undefined"
   ? new URLSearchParams(location.search)
   : null;
 
-let active = model43;
-if (params?.has("cloudModel42")) active = model42;
+let active = model44;
+if (params?.has("cloudModel43")) active = model43;
+else if (params?.has("cloudModel42")) active = model42;
 else if (params?.has("cloudModel41")) active = model41;
 else if (params?.has("cloudModel40")) active = model40;
 else if (params?.has("cloudModel36")) active = model36;

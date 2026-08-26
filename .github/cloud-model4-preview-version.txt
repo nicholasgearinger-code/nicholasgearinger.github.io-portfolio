@@ -1,0 +1,3 @@
+cloud-model4-reference-reconstruction-v1
+a46a153403cf0dae2de07e322c6130e32827e878
+model=4.2 sunset-reference-stratocumulus

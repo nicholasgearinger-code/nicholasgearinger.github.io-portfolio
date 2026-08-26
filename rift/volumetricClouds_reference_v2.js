@@ -1,11 +1,12 @@
 // Compatibility entry retained because main_game.js imports this module.
-// Rift Cloud Model 4.0 is the default on this review branch.
+// Rift Cloud Model 4.1 is the default on this review branch.
 //
-// Model 4.0 reconstructs the macro density atlas directly from the real sky
-// references in rift/textures, while retaining Model 3.6's r185 raymarch, TAAU,
-// lighting, solar-corridor composition and cloud-aware crepuscular-ray path.
+// Model 4.1 keeps the photo-reconstructed Model 4 volume, but separates the
+// reference macro masses into individual cloud bodies, enlarges the photographic
+// low-Sun presentation, and retains the inherited r185 TAAU/self-shadow path.
 // Rollbacks remain query-selectable for A/B review.
 
+import * as model41 from "./volumetricClouds_r185_model41.js";
 import * as model40 from "./volumetricClouds_r185_model40.js";
 import * as model36 from "./volumetricClouds_r185_model36.js";
 import * as model35 from "./volumetricClouds_r185_model35.js";
@@ -24,8 +25,9 @@ const params = typeof location !== "undefined"
   ? new URLSearchParams(location.search)
   : null;
 
-let active = model40;
-if (params?.has("cloudModel36")) active = model36;
+let active = model41;
+if (params?.has("cloudModel40")) active = model40;
+else if (params?.has("cloudModel36")) active = model36;
 else if (params?.has("cloudModel35")) active = model35;
 else if (params?.has("cloudModel34")) active = model34;
 else if (params?.has("cloudModel33")) active = model33;

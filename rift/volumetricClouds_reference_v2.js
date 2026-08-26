@@ -1,12 +1,12 @@
 // Compatibility entry retained because main_game.js imports this module.
-// Rift Cloud Model 3.6 is the default on this review branch.
+// Rift Cloud Model 4.0 is the default on this review branch.
 //
-// 3.6 keeps Model 3.5's lighting/shader path, but adds low-Sun reference
-// composition steering so broken/distant cloud banks spend more time in the
-// solar corridor. This creates the cloud/Sun intersections needed for the
-// existing Model 3.5b crepuscular-ray pass to become visible in normal play.
+// Model 4.0 reconstructs the macro density atlas directly from the real sky
+// references in rift/textures, while retaining Model 3.6's r185 raymarch, TAAU,
+// lighting, solar-corridor composition and cloud-aware crepuscular-ray path.
 // Rollbacks remain query-selectable for A/B review.
 
+import * as model40 from "./volumetricClouds_r185_model40.js";
 import * as model36 from "./volumetricClouds_r185_model36.js";
 import * as model35 from "./volumetricClouds_r185_model35.js";
 import * as model34 from "./volumetricClouds_r185_model34.js";
@@ -24,8 +24,9 @@ const params = typeof location !== "undefined"
   ? new URLSearchParams(location.search)
   : null;
 
-let active = model36;
-if (params?.has("cloudModel35")) active = model35;
+let active = model40;
+if (params?.has("cloudModel36")) active = model36;
+else if (params?.has("cloudModel35")) active = model35;
 else if (params?.has("cloudModel34")) active = model34;
 else if (params?.has("cloudModel33")) active = model33;
 else if (params?.has("cloudModel32")) active = model32;

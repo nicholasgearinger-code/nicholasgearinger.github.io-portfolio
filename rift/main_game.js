@@ -26,6 +26,14 @@ function replaceExactly(sourceText, from, to, label, expectedCount = 1) {
   return sourceText.split(from).join(to);
 }
 
+function replaceFirst(sourceText, from, to, label) {
+  const index = sourceText.indexOf(from);
+  if (index < 0) {
+    throw new Error(`[rift-model4-hotfix] Missing ${label} fragment`);
+  }
+  return sourceText.slice(0, index) + to + sourceText.slice(index + from.length);
+}
+
 // The original loader contains this expression twice: once in the match string
 // and once in the replacement string for the godray compositor edit. Preserve
 // the underwater lens tuning (0.35) in both places so the ordered edit chain is
@@ -38,17 +46,17 @@ source = replaceExactly(
   2,
 );
 
-// A Blob module has a blob: import.meta.url. Re-anchor only the loader's two
-// actual base-URL expressions to this deployed file. Do not globally replace the
-// literal string \"import.meta.url\" because the loader intentionally uses that
-// literal later while rewriting the generated game module.
-source = replaceExactly(
+// A Blob module has a blob: import.meta.url. Re-anchor only the *first* actual
+// top-level base-URL expressions to this deployed file. The pinned loader also
+// contains the same moduleBaseUrl text inside a generated replacement string,
+// so counting/replacing every occurrence corrupts the edit chain.
+source = replaceFirst(
   source,
   `const tunedLoaderUrl = new URL(\n  "./main_game_underwater_base.js",\n  import.meta.url,\n);`,
   `const tunedLoaderUrl = new URL(\n  "./main_game_underwater_base.js",\n  ${JSON.stringify(moduleUrl)},\n);`,
   "tuned loader base URL",
 );
-source = replaceExactly(
+source = replaceFirst(
   source,
   `const moduleBaseUrl = new URL("./", import.meta.url);`,
   `const moduleBaseUrl = new URL("./", ${JSON.stringify(moduleUrl)});`,

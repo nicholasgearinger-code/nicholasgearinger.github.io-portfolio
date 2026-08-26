@@ -1,13 +1,9 @@
-// Model 4.0 review loader hotfix.
+// Model 4.1 review loader hotfix / godray visibility tuning.
 //
-// The Model 3.5b godray patch is layered on top of the rain/underwater tuning
-// loader. That lower loader first changes the lens glint multiplier from 0.9 to
-// 0.35, so the later godray edit must look for the already-tuned 0.35 fragment.
-// The review build also originally created the native GodraysNode before the
-// scene's `sun` DirectionalLight declaration, triggering the temporal-dead-zone
-// ReferenceError seen on iPhone. Keep the known Model 4 loader pinned below,
-// patch those two ordering mismatches, then execute it with this deployed module
-// URL as its base.
+// The pinned Model 4 runtime remains the tested integration point. This wrapper
+// fixes the ordered-loader issues discovered on iPhone, then retunes the existing
+// r185 GodraysNode + cloud-alpha radial path so cloud openings can produce visible
+// crepuscular shafts instead of only acting as a weak mask on terrain godrays.
 
 const moduleUrl = import.meta.url;
 const pinnedLoaderUrl =
@@ -15,7 +11,7 @@ const pinnedLoaderUrl =
 
 const response = await fetch(pinnedLoaderUrl, { cache: "no-store" });
 if (!response.ok) {
-  throw new Error(`[rift-model4-hotfix] Failed to load pinned Model 4 runtime loader: HTTP ${response.status}`);
+  throw new Error(`[rift-model41-hotfix] Failed to load pinned Model 4 runtime loader: HTTP ${response.status}`);
 }
 
 let source = await response.text();
@@ -23,7 +19,7 @@ let source = await response.text();
 function replaceExactly(sourceText, from, to, label, expectedCount = 1) {
   const count = sourceText.split(from).length - 1;
   if (count !== expectedCount) {
-    throw new Error(`[rift-model4-hotfix] Expected ${expectedCount} ${label} fragment(s), found ${count}`);
+    throw new Error(`[rift-model41-hotfix] Expected ${expectedCount} ${label} fragment(s), found ${count}`);
   }
   return sourceText.split(from).join(to);
 }
@@ -31,15 +27,12 @@ function replaceExactly(sourceText, from, to, label, expectedCount = 1) {
 function replaceFirst(sourceText, from, to, label) {
   const index = sourceText.indexOf(from);
   if (index < 0) {
-    throw new Error(`[rift-model4-hotfix] Missing ${label} fragment`);
+    throw new Error(`[rift-model41-hotfix] Missing ${label} fragment`);
   }
   return sourceText.slice(0, index) + to + sourceText.slice(index + from.length);
 }
 
-// The original loader contains this expression twice: once in the match string
-// and once in the replacement string for the godray compositor edit. Preserve
-// the underwater lens tuning (0.35) in both places so the ordered edit chain is
-// internally consistent.
+// The rain/underwater layer lowers the lens glint before the later godray edit.
 source = replaceExactly(
   source,
   "sunGlintColor.mul(0.9).mul(lensIntensityUniform)",
@@ -48,13 +41,9 @@ source = replaceExactly(
   2,
 );
 
-// The r185 GodraysNode replacement is inserted at the post-processing setup,
-// but the stable game declares `sun` later in the module. Add two source edits
-// immediately after that replacement: instantiate the SAME real sun object just
-// before the RenderPipeline/GodraysNode graph is built, then remove the later
-// duplicate declaration while leaving all of its position/shadow/scene setup in
-// place. This preserves the graph and shadow-light identity instead of deferring
-// godray creation until after the graph has already captured a zero texture.
+// GodraysNode must receive the real DirectionalLight before the TSL graph is
+// constructed. The stable game configures this light later, so instantiate the
+// same object early and remove only the later duplicate declaration.
 const godraySetupEditTail = `    "r185 Water Pro WebGPU SSR + Model 3.5b godrays setup",
   ],`;
 source = replaceFirst(
@@ -63,21 +52,140 @@ source = replaceFirst(
   `${godraySetupEditTail}
   [
     "const postProcessing = new THREE.RenderPipeline(renderer);",
-    "const sun = new THREE.DirectionalLight(0xffffff, 1.1 /* Model 4 early sun for GodraysNode */);\\nconst postProcessing = new THREE.RenderPipeline(renderer);",
-    "Model 4 preinitialize sun before godray graph",
+    "const sun = new THREE.DirectionalLight(0xffffff, 1.1 /* Model 4.1 early sun for GodraysNode */);\\nconst postProcessing = new THREE.RenderPipeline(renderer);",
+    "Model 4.1 preinitialize sun before godray graph",
   ],
   [
     "const sun = new THREE.DirectionalLight(0xffffff, 1.1);",
-    "// Model 4: sun already instantiated before post-processing; continue configuring the same light below.",
-    "Model 4 remove duplicate late sun declaration",
+    "// Model 4.1: sun already instantiated before post-processing; configure the same light below.",
+    "Model 4.1 remove duplicate late sun declaration",
   ],`,
   "godray sun initialization ordering edits",
 );
 
-// A Blob module has a blob: import.meta.url. Re-anchor only the *first* actual
-// top-level base-URL expressions to this deployed file. The pinned loader also
-// contains the same moduleBaseUrl text inside a generated replacement string,
-// so counting/replacing every occurrence corrupts the edit chain.
+// ---------------------------------------------------------------------------
+// Model 4.1 godray visibility pass.
+// Mobile remains low resolution, but the previous 14-step / 0.28-scale path was
+// too faint to survive the phone's final composite. A small quality increase and
+// lower attenuation make the shafts readable without turning this into a costly
+// full-resolution volumetric pass.
+// ---------------------------------------------------------------------------
+source = replaceFirst(
+  source,
+  `riftGodraysPass.raymarchSteps.value = isTouchDevice ? 14 : (riftSSRTier === "high" ? 44 : 30);`,
+  `riftGodraysPass.raymarchSteps.value = isTouchDevice ? 18 : (riftSSRTier === "high" ? 48 : 34);`,
+  "mobile godray raymarch steps",
+);
+source = replaceFirst(
+  source,
+  `riftGodraysPass.resolutionScale = isTouchDevice ? 0.28 : (riftSSRTier === "high" ? 0.50 : 0.40);`,
+  `riftGodraysPass.resolutionScale = isTouchDevice ? 0.33 : (riftSSRTier === "high" ? 0.54 : 0.44);`,
+  "godray resolution scale",
+);
+source = replaceFirst(
+  source,
+  `riftGodraysPass.density.value = 0.16;`,
+  `riftGodraysPass.density.value = 0.235;`,
+  "godray base density",
+);
+source = replaceFirst(
+  source,
+  `riftGodraysPass.maxDensity.value = isTouchDevice ? 0.30 : 0.44;`,
+  `riftGodraysPass.maxDensity.value = isTouchDevice ? 0.46 : 0.58;`,
+  "godray max density",
+);
+source = replaceFirst(
+  source,
+  `riftGodraysPass.distanceAttenuation.value = 2.0;`,
+  `riftGodraysPass.distanceAttenuation.value = 1.28;`,
+  "godray distance attenuation",
+);
+source = replaceFirst(
+  source,
+  `const riftCloudShaftSamples = isTouchDevice ? 3 : 5;`,
+  `const riftCloudShaftSamples = isTouchDevice ? 4 : 6;`,
+  "cloud shaft sample count",
+);
+
+// In 3.5b the cloud mask was essentially clear-path transmission, so a full
+// cloud sheet or a full clear sky both lacked the strong *transition* needed to
+// form recognizable rays. Favor mixed clear/opaque paths: that is where real
+// crepuscular shafts appear around cloud gaps.
+source = replaceFirst(
+  source,
+  `  const pathTransmission = pathClear.div(float(riftCloudShaftSamples));
+  const sunReach = float(1).sub(smoothstep(float(0.16), float(1.05), rayLength));
+  return localClear
+    .mul(pathTransmission)
+    .mul(float(0.42).add(sunReach.mul(float(0.58))));`,
+  `  const pathTransmission = pathClear.div(float(riftCloudShaftSamples));
+  const mixedPath = smoothstep(float(0.06), float(0.48), pathTransmission)
+    .mul(float(1).sub(smoothstep(float(0.62), float(0.98), pathTransmission)));
+  const sunReach = float(1).sub(smoothstep(float(0.14), float(1.08), rayLength));
+  return localClear
+    .mul(float(0.08).add(mixedPath.mul(float(0.92))))
+    .mul(float(0.34).add(sunReach.mul(float(0.66))));`,
+  "cloud shaft mixed-transmission mask",
+);
+
+// Add a restrained cloud-only radial scattering term. The native GodraysNode
+// still contributes physical scene-shadow shafts, while this term supplies the
+// missing ray energy from the actual current-frame cloud transmittance field.
+source = replaceFirst(
+  source,
+  `  const riftRayEnergy = riftRaySample
+    .mul(riftGodrayStrength)
+    .mul(riftCloudShaftMask(distortedUV));
+  const riftGodrayAdd = riftGodrayColor.mul(riftRayEnergy);`,
+  `  const riftCloudRayMask = riftCloudShaftMask(distortedUV);
+  const riftNativeRayEnergy = riftRaySample
+    .mul(riftGodrayStrength)
+    .mul(riftCloudRayMask);
+  const riftCloudOnlyRayEnergy = riftCloudRayMask
+    .mul(riftGodrayStrength)
+    .mul(float(0.26));
+  const riftRayEnergy = riftNativeRayEnergy.add(riftCloudOnlyRayEnergy);
+  const riftGodrayAdd = riftGodrayColor.mul(riftRayEnergy);`,
+  "lens cloud-generated ray energy",
+);
+source = replaceFirst(
+  source,
+  `  const rayEnergy = raySample
+    .mul(riftGodrayStrength)
+    .mul(riftCloudShaftMask(screenUV));
+  return vec4(baseColor.rgb.add(riftGodrayColor.mul(rayEnergy)), baseColor.a);`,
+  `  const cloudRayMask = riftCloudShaftMask(screenUV);
+  const nativeRayEnergy = raySample
+    .mul(riftGodrayStrength)
+    .mul(cloudRayMask);
+  const cloudOnlyRayEnergy = cloudRayMask
+    .mul(riftGodrayStrength)
+    .mul(float(0.26));
+  const rayEnergy = nativeRayEnergy.add(cloudOnlyRayEnergy);
+  return vec4(baseColor.rgb.add(riftGodrayColor.mul(rayEnergy)), baseColor.a);`,
+  "unlensed cloud-generated ray energy",
+);
+
+// Give golden-hour shafts enough exposure to be visible on the current mobile
+// tone map. Strength is still driven by daylight, Sun altitude, weather and the
+// global broken-cloud transmittance signal.
+source = replaceFirst(
+  source,
+  `    riftGodrayStrength.value = THREE.MathUtils.clamp(
+      shaftStrength * (isTouchDevice ? 0.68 : 0.82),
+      0,
+      0.82
+    );`,
+  `    riftGodrayStrength.value = THREE.MathUtils.clamp(
+      shaftStrength * (isTouchDevice ? 1.12 : 1.02),
+      0,
+      1.15
+    );`,
+  "golden-hour godray strength",
+);
+
+// A Blob module has a blob: import.meta.url. Re-anchor only the real top-level
+// URLs; identical text also exists inside generated edit templates.
 source = replaceFirst(
   source,
   `const tunedLoaderUrl = new URL(\n  "./main_game_underwater_base.js",\n  import.meta.url,\n);`,
@@ -91,7 +199,7 @@ source = replaceFirst(
   "module base URL",
 );
 
-source += "\n//# sourceURL=rift/main_game_model4_hotfix.runtime.js\n";
+source += "\n//# sourceURL=rift/main_game_model41_hotfix.runtime.js\n";
 
 const blob = new Blob([source], { type: "text/javascript" });
 const blobUrl = URL.createObjectURL(blob);

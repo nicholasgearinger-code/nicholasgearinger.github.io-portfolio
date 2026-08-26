@@ -143,7 +143,7 @@ jobs:
           p = Path("cloud-model4-build/index.html")
           html = p.read_text(encoding="utf-8")
           html = html.replace("three@0.182.0", "three@0.185.1")
-          marker = '<script>window.__riftR185StaticImportMap=true;window.__riftThreeTarget="0.185.1";window.__riftMigrationBuild="cloud-model41-separated-rays";</script>'
+          marker = '<script>window.__riftR185StaticImportMap=true;window.__riftThreeTarget="0.185.1";window.__riftMigrationBuild="cloud-model43-reference-sun-variety";</script>'
           if marker not in html:
               html = html.replace("</head>", marker + "</head>", 1)
           p.write_text(html, encoding="utf-8")

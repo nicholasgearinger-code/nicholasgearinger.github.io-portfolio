@@ -1,47 +1,49 @@
-# Rift Cloud Model 3.1 — Reference-Shaped Volumetrics
+# Rift Cloud Model 3 — Reference-Shaped Volumetrics
 
-Model 3 changes the cloud pipeline from **noise-first** to **shape-first**. Model 3.1 keeps that architecture and focuses on crown structure and lighting depth.
-
-## Why
-
-Model 2's Perlin-Worley field is good at realistic erosion and texture, but it is not a controllable authoring tool for the macro silhouette seen in the Sky Pro references. Model 3 therefore stores deliberate cauliflower towers, broken cumulus families, horizon banks and storm decks in a compact periodic 3D atlas.
+Model 3 changes the cloud pipeline from **noise-first** to **shape-first**.
 
 ## Runtime pipeline
 
-1. `cloudArchetypes_reference_v2.js` defines the macro shapes as overlapping 3D ellipsoid/metaball lobes. The v2 set adds substantially more independent upper crowns, flatter bases, and a storm deck built from a low layer plus embedded convective cells.
-2. `cloudReferenceVolumeAtlas_v2.js` bakes those shapes into one RGBA `Data3DTexture`:
-   - R: towering cumulus
-   - G: broken/medium cumulus
-   - B: stratiform / storm deck
-   - A: distant cumulus / horizon banks
-3. `cloudInstanceDirector_reference_v2.js` computes dynamic channel weights and Model 3.1 crown/self-shadow controls from sun altitude, humidity, cloud coverage, convection and storm intensity.
-4. `volumetricClouds_r185_model31.js` samples the reference atlas as the **macro density source**. Existing Perlin-Worley noise only modulates the interior, scallops the upper crown shell and erodes boundaries.
-5. Directional optical depth samples the same authored atlas along the sun vector. A cheap local authored-core term adds interior depth without another texture fetch.
-6. The existing r185 camera-centered temporal cloud pass, TAAU, weather state and shadow pipeline remain in use.
+1. `cloudArchetypes_reference_v2.js` defines the Model 3.1 authored macro shapes.
+2. `volumetricClouds_r185_model31.js` adds crown breakup and reference-aware self-shadowing.
+3. `volumetricClouds_r185_model32.js` retunes the existing 3.1 lighting controls for stronger warm/cool separation, silver lining, deeper humid interiors, darker bases, and subtle ocean/sky bounce without adding another sample.
+4. `cloudArchetypes_reference_v3.js` expands each existing atlas channel with satellite puffs, additional broken-cumulus families, embedded storm cells, and flattened horizon banks.
+5. `cloudReferenceVolumeAtlas_v3.js` bakes those families into the same single RGBA `Data3DTexture` used by the inherited Model 3 raymarch.
+6. `cloudInstanceDirector_reference_v3.js` changes weights, scale, coverage, convection, and slow macro evolution from weather and sun state.
+7. `volumetricClouds_r185_model33.js` is the current review default and combines the 3.2 lighting with the 3.3 structural atlas.
 
-## Model 3.1 visual goals
+The existing r185 camera-centered cloud surface, TAAU, Perlin-Worley shell erosion, weather state, and cloud-shadow pipeline remain in place.
 
-- more distinct cauliflower domes instead of one smooth molded crown
-- flatter/darker condensation bases
-- brighter sun-facing crown tops
-- cooler gray-blue interior self-shadowing
-- better silver edges without whitening the entire cloud
-- storm decks with layered cells rather than one rectangular wall
+## Model 3.2 lighting goals
 
-## Mobile cost
+- brighter sun-facing crowns without whole-cloud clipping
+- stronger silver lining and low-sun warmth
+- cooler gray-blue interiors
+- darker, humidity-aware condensation bases
+- subtle ocean/sky bounce through the existing ambient term
+- neutral/silver moonlit clouds
 
-The mobile atlas is 64×44×64 RGBA8 (~704 KiB). Model 3.1 does not add a new full-screen pass and keeps the same view/light sample counts as Model 3.0. Crown breakup reuses the existing base-noise sample; the local self-shadow term is arithmetic-only.
+Model 3.2 adds **zero** 3D texture samples and no full-screen pass.
 
-## Reference fitting editor
+## Model 3.3 structural goals
 
-Open `rift/cloud-reference-editor.html` during development. It now loads the v2 archetypes. Upload a reference capture, choose an archetype/lobe, and adjust its normalized center/radii while comparing the generated front silhouette over the reference image. `Copy JSON` exports the edited archetype for committing back into `cloudArchetypes_reference_v2.js`.
+- hero cumulus + nearby satellite puffs
+- multiple broken-cumulus families in one periodic tile
+- flattened distant/horizon banks
+- storm shelf plus embedded convective towers
+- more open blue gaps in fair weather
+- stable, very slow macro evolution compatible with TAAU
+
+The v3 atlas preserves the same single reference-atlas lookup per ray sample. Mobile atlas size is 64×46×64 RGBA8 (~736 KiB).
 
 ## Review / rollback
 
-The branch defaults to Model 3.1. Add one of these query parameters to compare:
+The review branch defaults to Model 3.3. Query switches:
 
-- `?cloudModel30=1` — previous Model 3.0
-- `?cloudModel26=1` — previous camera-centered Model 2.6
+- `?cloudModel32=1` — Model 3.2 lighting on the 3.1 atlas
+- `?cloudModel31=1` — Model 3.1
+- `?cloudModel30=1` — Model 3.0
+- `?cloudModel26=1` — Model 2.6
 - `?cloudModel25=1` — Model 2.5
 - `?cloudModel24=1` — Model 2.4
 - `?cloudModel22=1` — Model 2.2
@@ -49,12 +51,10 @@ The branch defaults to Model 3.1. Add one of these query parameters to compare:
 
 ## Review targets
 
-- hero cumulus silhouette at midday
-- visible small/medium crown hierarchy at the top of hero clouds
-- flat base and darker underside without crushing all interior detail
-- authored self-shadow following the same lobe structure as the silhouette
-- distant bank scale near the horizon
-- golden-hour warm edge color without whole-sky washout
-- moonlit silver edge / dark interior balance
-- storm-deck cell variation and FPS
-- iPhone TAAU stability
+- midday: multiple readable cumulus families rather than one dominant slab
+- cloud interiors: clear crown / core / base separation
+- sunset: localized warm edge color with cool interior shadows
+- horizon: layered distant banks with atmospheric spacing
+- storm: low shelf + embedded convective cells rather than one flat wall
+- night: coherent moonlit silhouettes and restrained silver edges
+- iPhone FPS / TAAU stability versus Model 3.1

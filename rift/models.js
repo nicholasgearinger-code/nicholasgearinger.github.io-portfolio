@@ -3,6 +3,22 @@ import * as current from "./models_lighting_base.js";
 
 export * from "./models_lighting_base.js";
 
+// These two source assets are not currently usable in the deployed repo:
+// - models/reef.glb is absent, so requesting it always produces a 404.
+// - models/animated_swimming_tropical_fish_school_loop.glb is only a 2-byte
+//   placeholder, not a binary glTF, so GLTFLoader cannot parse it.
+// Both features were already optional at their call sites. Resolve them as
+// unavailable without making doomed network requests; createRealReef() and
+// createRealFishSchool() naturally return null because their base caches remain
+// empty. Re-enable the base loaders once real assets are committed.
+export function loadReefModel() {
+  return Promise.resolve(null);
+}
+
+export function loadFishSchoolModel() {
+  return Promise.resolve(null);
+}
+
 function tuneFoliageMaterial(material) {
   if (!material) return;
   if (Array.isArray(material)) {

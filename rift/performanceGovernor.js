@@ -2,7 +2,9 @@
 //
 // Keeps desktop behavior unchanged. On touch/mobile devices it dynamically
 // adjusts renderer pixel ratio with a slow hysteresis loop so expensive render
-// targets are not constantly reallocated. Use ?perfLegacy=1 to disable.
+// targets are not constantly reallocated. Every ratio change is routed through
+// Rift's existing resize function, which keeps composer/SSAO/underwater/FXAA
+// targets synchronized. Use ?perfLegacy=1 to disable.
 
 const params = typeof location !== "undefined"
   ? new URLSearchParams(location.search)
@@ -10,7 +12,9 @@ const params = typeof location !== "undefined"
 
 const PERF_LEGACY = params?.has("perfLegacy") === true;
 const IS_TOUCH = typeof window !== "undefined"
-  && ("ontouchstart" in window || (navigator?.maxTouchPoints || 0) > 0);
+  && ("ontouchstart" in window || (typeof navigator !== "undefined" && (navigator.maxTouchPoints || 0) > 0));
+
+let resizeHandler = null;
 
 const state = {
   enabled: IS_TOUCH && !PERF_LEGACY,
@@ -21,6 +25,7 @@ const state = {
   cooldown: 0,
   changes: 0,
   tier: "native",
+  fixedResolution: false,
 };
 
 function clamp(v, lo, hi) {
@@ -42,14 +47,6 @@ function caps(settings) {
   return { min, max, initial };
 }
 
-export function getRiftInitialPixelRatio(settings) {
-  const c = caps(settings);
-  state.ratio = c.initial;
-  state.tier = state.enabled ? "adaptive-mobile" : "native";
-  publish();
-  return state.ratio;
-}
-
 function publish() {
   globalThis.__riftPerformanceGovernor = {
     enabled: state.enabled,
@@ -60,22 +57,56 @@ function publish() {
     estimatedFps: state.frameMs > 0 ? 1000 / state.frameMs : 0,
     changes: state.changes,
     tier: state.tier,
+    fixedResolution: state.fixedResolution,
   };
 }
 
-export function updateRiftPerformanceGovernor(renderer, dt, viewport, settings) {
+function applyRatio(renderer) {
+  publish();
+  if (typeof resizeHandler === "function") {
+    resizeHandler();
+  } else if (renderer?.setPixelRatio) {
+    renderer.setPixelRatio(state.ratio);
+  }
+}
+
+export function setRiftPerformanceResizeHandler(handler) {
+  resizeHandler = typeof handler === "function" ? handler : null;
+}
+
+export function getRiftInitialPixelRatio(settings) {
+  const c = caps(settings);
+  state.ratio = c.initial;
+  state.tier = state.enabled ? "adaptive-mobile" : "native";
+  publish();
+  return state.ratio;
+}
+
+export function updateRiftPerformanceGovernor(renderer, dt, viewport, settings, fixedResolution = null) {
   if (!renderer) return;
 
   const c = caps(settings);
   if (state.ratio == null) state.ratio = c.initial;
 
+  // Respect the user's explicit 720p/1080p/etc override. The game owns that
+  // mode completely; adaptive DPR resumes automatically when the override is
+  // cleared.
+  state.fixedResolution = !!fixedResolution;
+  if (state.fixedResolution) {
+    state.tier = "fixed-resolution";
+    state.slowSeconds = 0;
+    state.fastSeconds = 0;
+    publish();
+    return;
+  }
+
   if (!state.enabled) {
     const expected = c.max;
-    if (Math.abs((renderer.getPixelRatio?.() || expected) - expected) > 0.001) {
-      renderer.setPixelRatio(expected);
-    }
     state.ratio = expected;
-    publish();
+    state.tier = "native";
+    const actual = Number(renderer.getPixelRatio?.());
+    if (Number.isFinite(actual) && Math.abs(actual - expected) > 0.001) applyRatio(renderer);
+    else publish();
     return;
   }
 
@@ -113,17 +144,15 @@ export function updateRiftPerformanceGovernor(renderer, dt, viewport, settings) 
     state.cooldown = 3.0;
   }
 
+  let needsResize = false;
   if (Math.abs(next - state.ratio) > 0.001) {
     state.ratio = Number(next.toFixed(3));
-    renderer.setPixelRatio(state.ratio);
     state.changes++;
+    needsResize = true;
   } else {
-    // A browser resize or graphics-setting transition may reset pixel ratio.
-    // Re-assert the governor value without changing its state.
+    // A viewport resize or settings transition may have temporarily changed DPR.
     const actual = Number(renderer.getPixelRatio?.());
-    if (Number.isFinite(actual) && Math.abs(actual - state.ratio) > 0.001) {
-      renderer.setPixelRatio(state.ratio);
-    }
+    needsResize = Number.isFinite(actual) && Math.abs(actual - state.ratio) > 0.001;
   }
 
   state.tier = state.ratio <= 0.61
@@ -131,7 +160,9 @@ export function updateRiftPerformanceGovernor(renderer, dt, viewport, settings) 
     : state.ratio <= 0.73
       ? "adaptive-mobile-medium"
       : "adaptive-mobile-high";
-  publish();
+
+  if (needsResize) applyRatio(renderer);
+  else publish();
 }
 
 export function getRiftPerformanceState() {

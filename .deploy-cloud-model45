@@ -1,0 +1,6 @@
+Trigger GitHub Pages staging for Cloud Model 4.5 backlit clouds + stable custom mobile god rays.
+Review branch head includes:
+- Model 4.5 volumetric backlighting
+- Model 4.5 default selector
+- native r185 GodraysNode disabled on touch
+- cloud-transmittance radial rays enabled on touch

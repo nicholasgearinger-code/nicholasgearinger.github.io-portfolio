@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { float, mix, positionWorld, smoothstep, texture, uniform } from "three/tsl";
 import * as base from "./volumetricClouds_r185_model27.js";
 import { sampleWeatherCpu } from "./cloudWeatherModel2.js";
 import { createRiftCloudShadowMap28 } from "./cloudShadowModel28.js";
@@ -21,7 +22,6 @@ export * from "./volumetricClouds_r185_model27.js";
 // do NOT add a second cloud raymarch or another WebGPU render pass.
 // -----------------------------------------------------------------------------
 
-const TAU = Math.PI * 2;
 const stateByHandle = new WeakMap();
 
 function clamp01(v) {
@@ -218,6 +218,111 @@ function updateStructuredShadow(handle, dt, sunDirection, anatomy) {
   };
 }
 
+function installTerrainShadowReceiver(handle) {
+  const scene = handle?.__riftScene;
+  const shadowTexture = handle?.__riftModel2Shadow?.texture;
+  if (!scene || !shadowTexture) return null;
+
+  const current = handle.__riftTerrainShadowReceiver;
+  if (current?.parent && current.material?.userData?.__riftCloudShadow28) return current;
+  handle.__riftTerrainShadowReceiver = null;
+
+  let receiver = null;
+  scene.traverse((obj) => {
+    if (receiver || !obj?.isMesh) return;
+    const material = obj.material;
+
+    // Coral Shallows' real terrain is uniquely identifiable without importing
+    // main_game internals: it is the large MeshStandardNodeMaterial receiver with
+    // the caustic-time uniform installed by the seafloor material. Water and props
+    // do not carry that marker. This keeps the shadow sample off unrelated meshes.
+    if (
+      material?.isMeshStandardNodeMaterial &&
+      material.userData?.causticTimeUniform &&
+      obj.receiveShadow === true &&
+      obj.geometry?.attributes?.color
+    ) {
+      receiver = obj;
+    }
+  });
+
+  if (!receiver) return null;
+  const material = receiver.material;
+  if (material.userData.__riftCloudShadow28) {
+    handle.__riftTerrainShadowReceiver = receiver;
+    return receiver;
+  }
+
+  const baseColorNode = material.colorNode;
+  if (!baseColorNode) return null;
+
+  const worldScale = (Number(handle.quality?.weatherScale) || 0.001) * 0.72;
+  const strengthUniform = uniform(0);
+  const shadowUV = positionWorld.xz.mul(float(worldScale)).fract();
+  const cloudTransmittance = texture(shadowTexture, shadowUV).r;
+
+  // The map stores physical-ish transmittance (1=clear, 0=dense cloud). Even the
+  // darkest patch keeps ~56% of the material's base color because skylight still
+  // illuminates a beach under cloud cover. The normal PBR lighting then supplies
+  // the remaining directional/ambient response.
+  const shadowFactor = mix(float(0.56), float(1.0), cloudTransmittance);
+  const aboveWater = smoothstep(float(8.05), float(9.05), positionWorld.y);
+  const appliedShadow = mix(
+    float(1.0),
+    shadowFactor,
+    strengthUniform.mul(aboveWater),
+  );
+
+  material.colorNode = baseColorNode.mul(appliedShadow);
+  material.userData.__riftCloudShadow28 = {
+    strengthUniform,
+    baseColorNode,
+    shadowTexture,
+    worldScale,
+  };
+  material.needsUpdate = true;
+  handle.__riftTerrainShadowReceiver = receiver;
+
+  return receiver;
+}
+
+function updateTerrainShadowReceiver(handle, anatomy) {
+  const receiver = installTerrainShadowReceiver(handle);
+  const state = receiver?.material?.userData?.__riftCloudShadow28;
+  if (!state?.strengthUniform) return false;
+
+  const optics = globalThis.__riftCelestialOpticsV14;
+  const daylight = clamp01(optics?.dayAmount ?? 0);
+  const solarElevation = Number(optics?.solarElevation) || -1;
+  const sunAbove = smoothRange(-0.015, 0.12, solarElevation);
+  const averageT = clamp01(handle.__riftModel2Shadow?.averageTransmittance ?? 1);
+  const shadowPresence = 1 - averageT;
+  const storm = clamp01(anatomy?.storm ?? 0);
+
+  // Cloud shadows are strongest under a healthy daytime Sun. Overcast still has
+  // spatial variation, but a fully storm-dark sky shifts more toward diffuse
+  // illumination, so the projected pattern softens slightly instead of becoming
+  // an implausible black cookie-cutter texture.
+  const targetStrength = daylight
+    * sunAbove
+    * THREE.MathUtils.lerp(0.56, 0.82, shadowPresence)
+    * THREE.MathUtils.lerp(1.0, 0.84, storm);
+  state.strengthUniform.value = clamp01(targetStrength);
+  return true;
+}
+
+function restoreTerrainShadowReceiver(handle) {
+  const receiver = handle?.__riftTerrainShadowReceiver;
+  const material = receiver?.material;
+  const state = material?.userData?.__riftCloudShadow28;
+  if (material && state?.baseColorNode) {
+    material.colorNode = state.baseColorNode;
+    delete material.userData.__riftCloudShadow28;
+    material.needsUpdate = true;
+  }
+  if (handle) handle.__riftTerrainShadowReceiver = null;
+}
+
 function computeCelestialOcclusion(handle, camera, direction, anatomy) {
   const u = handle?.uniforms;
   const pair = handle?.__riftModel2WeatherPair;
@@ -336,6 +441,7 @@ export function createVolumetricClouds(scene) {
   const handle = base.createVolumetricClouds(scene);
   if (!handle) return handle;
   handle.__riftModel28 = true;
+  handle.__riftScene = scene;
   installStructuredShadow(handle);
   ensureState(handle);
   return handle;
@@ -374,6 +480,7 @@ export function updateVolumetricClouds(
   installStructuredShadow(handle);
   const anatomy = tuneCloudAnatomy(handle, rainIntensity);
   updateStructuredShadow(handle, dt, sunDirection, anatomy);
+  const terrainShadowActive = updateTerrainShadowReceiver(handle, anatomy);
   const occ = updateCelestialOcclusion(handle, dt, camera, anatomy);
 
   globalThis.__riftCloudModel28 = {
@@ -386,6 +493,10 @@ export function updateVolumetricClouds(
     topY: anatomy?.topY || 0,
     sunOcclusion: occ?.sunOcclusion || 0,
     moonOcclusion: occ?.moonOcclusion || 0,
+    terrainShadowActive,
+    terrainShadowStrength: Number(
+      handle.__riftTerrainShadowReceiver?.material?.userData?.__riftCloudShadow28?.strengthUniform?.value,
+    ) || 0,
     shadowTransmittance: handle.__riftModel2Shadow?.averageTransmittance ?? 1,
     shadowHz: handle.__riftModel2Shadow?.updateInterval
       ? Math.round(1 / handle.__riftModel2Shadow.updateInterval)
@@ -398,9 +509,11 @@ export function updateVolumetricClouds(
 }
 
 export function disposeVolumetricClouds(handle) {
+  restoreTerrainShadowReceiver(handle);
   stateByHandle.delete(handle);
   delete globalThis.__riftCloudModel28;
   delete globalThis.__riftSunDiskOcclusion;
   delete globalThis.__riftMoonDiskOcclusion;
+  if (handle) handle.__riftScene = null;
   return base.disposeVolumetricClouds(handle);
 }

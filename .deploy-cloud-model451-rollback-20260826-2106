@@ -1,0 +1,3 @@
+Trigger GitHub Pages staging after rolling Cloud Model 4 review branch back to stable Model 4.5.1.
+Review branch commit: cf43bc91ef243933908964c3f5dfd86fc713f1a3
+Reason: Model 4.6 scenePassColor radial re-sampling regressed mobile WebGPU with Invalid CommandEncoder.

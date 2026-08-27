@@ -1,16 +1,16 @@
 // Compatibility entry retained because the r185 runtime imports this filename.
-// Celestial v13 keeps the proven v10 photographic Sun/shadow budget and v12's
-// single-dome Preetham/Sky-style physical controls, but maps them into a more
-// photographic sky: blue zenith, localized warm horizon, narrow aerosol haze.
+// Celestial v14 layers phase-consistent lunar motion and lightweight camera-space
+// lens optics over v13's photographic atmosphere. The existing lunar phase mask
+// remains owned by the preserved dayNightCycle_lighting_base.js stack.
 //
 // Rollback on-device:
 //   ?atmosphereV12=1    -> previous single-dome v12
 //   ?atmosphereLegacy=1 -> proven v10 atmosphere
 
-import * as physical from "./dayNightCycle_celestial_physical_v13.js";
+import * as physical from "./dayNightCycle_celestial_physical_v14.js";
 import * as v12 from "./dayNightCycle_celestial_physical_v12.js";
 import * as legacy from "./dayNightCycle_celestial_physical_v10.js";
-export * from "./dayNightCycle_celestial_physical_v13.js";
+export * from "./dayNightCycle_celestial_physical_v14.js";
 
 const params = typeof location !== "undefined"
   ? new URLSearchParams(location.search)

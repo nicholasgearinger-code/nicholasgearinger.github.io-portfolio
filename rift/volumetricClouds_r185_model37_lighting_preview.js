@@ -3,13 +3,15 @@ import * as base from "./volumetricClouds_r185_model37.js";
 export * from "./volumetricClouds_r185_model37.js";
 
 // -----------------------------------------------------------------------------
-// SAFE LIGHTING PREVIEW v2
+// SAFE LIGHTING PREVIEW v3
 //
-// Still no new render pass, texture, sampler, TSL node graph, compute dispatch,
+// No new render pass, texture, sampler, TSL node graph, compute dispatch,
 // shader rebuild hook, or extra Three.js import. This preview only:
 //   1) performs a tiny CPU-side probe through Model 3's already-resident atlas
 //      along the camera -> Sun ray so visually dense cloud can truly hide the Sun;
-//   2) nudges scalar lighting uniforms that Model 3.7 already owns.
+//   2) nudges scalar lighting uniforms Model 3.7 already owns;
+//   3) amplifies the EXISTING lightning emission scalar already consumed by the
+//      stable Model 3.1 cloud shader.
 //
 // Enable only with: ?cloudLightingPreview=1
 // Normal production remains exact Model 3.7 behavior.
@@ -101,11 +103,9 @@ function probeSunOcclusion(handle, camera, sunDirection) {
   const end = Math.max(t0, t1);
   if (!(end > start)) return 0;
 
-  // 13 CPU atlas samples are tiny compared with a GPU cloud ray march and do not
-  // modify the WebGPU command stream. This is deliberately denser than Model 3.7's
-  // conservative 7-sample celestial probe so a visually opaque macro cloud reads
-  // as opaque to the solar disc too.
-  const samples = 13;
+  // Still CPU-only. A slightly denser 17-point probe makes the local solar
+  // column react to authored Model 3 macro volume more like the visible cloud.
+  const samples = 17;
   let optical = 0;
   for (let i = 0; i < samples; i++) {
     const f = (i + 0.5) / samples;
@@ -120,10 +120,19 @@ function probeSunOcclusion(handle, camera, sunDirection) {
 
   optical /= samples;
   const density = Number(u.m2DensityScale?.value) || 1;
-  return clamp01(1 - Math.exp(-optical * density * 6.2));
+  return clamp01(1 - Math.exp(-optical * density * 8.0));
 }
 
-function applySafeRimPreview(handle, camera, sunDirection) {
+function boostedLightningFlash(lightningFlash) {
+  const input = clamp01(lightningFlash);
+  if (input <= 0.0001) return 0;
+  // Model 3.1 already adds lightningColor * lightningFlash inside the cloud
+  // volume. Let that existing HDR-capable scalar peak above one for a very brief
+  // internal flash without changing the shader graph or adding another light.
+  return Math.min(1.65, Math.pow(input, 0.70) * 1.12 + input * 0.53);
+}
+
+function applySafeRimPreview(handle, camera, sunDirection, lightningIn, lightningOut) {
   const u = handle?.uniforms;
   const e = camera?.matrixWorld?.elements;
   if (!u || !e || !sunDirection) return null;
@@ -137,25 +146,25 @@ function applySafeRimPreview(handle, camera, sunDirection) {
   const sx = Number(sunDirection.x) || 0;
   const sy = Number(sunDirection.y) || 0;
   const sz = Number(sunDirection.z) || 0;
-  const sunFacing = smoothRange(0.20, 0.93, normalizedDot(viewX, viewY, viewZ, sx, sy, sz));
+  const sunFacing = smoothRange(0.16, 0.91, normalizedDot(viewX, viewY, viewZ, sx, sy, sz));
   const sunAbove = smoothRange(-0.02, 0.10, sy);
-  const lowSun = sunAbove * (1 - smoothRange(0.22, 0.62, sy));
+  const lowSun = sunAbove * (1 - smoothRange(0.20, 0.62, sy));
 
   const baseSunOcc = clamp01(globalThis.__riftSunDiskOcclusion || 0);
   const sampledSunOcc = probeSunOcclusion(handle, camera, sunDirection);
   const opticalSunOcc = Math.max(baseSunOcc, sampledSunOcc);
 
-  // Perceptual remap: the hard solar image should disappear much faster than the
-  // diffuse cloud volume. Keep zero truly zero so clear sky never hides the Sun.
+  // Hard sunlight should react much more decisively than the soft cloud body.
+  // Clear remains exactly zero; a real cloud column ramps quickly toward opaque.
   const visualSunOcc = opticalSunOcc <= 0.002
     ? 0
-    : smoothRange(0.035, 0.70, opticalSunOcc);
+    : smoothRange(0.018, 0.56, opticalSunOcc);
 
-  // Celestial v16 reads these globals on its next update. This is a one-frame
-  // delayed CPU signal, not a render-time callback, so it preserves the stable
-  // iOS/WebGPU command graph.
+  // Celestial v16 reads this on its next update. Keep the LOCAL Sun-column
+  // signal separate from the global weather/cloud-cover signal — the player can
+  // have broken clouds elsewhere while the Sun itself is perfectly clear.
   globalThis.__riftSunDiskOcclusion = visualSunOcc;
-  globalThis.__riftProceduralCloudOcclusion = visualSunOcc;
+  globalThis.__riftLocalSunCloudOcclusion = visualSunOcc;
   if (globalThis.__riftCelestialOpticsV14) {
     globalThis.__riftCelestialOpticsV14.sunDiskOcclusion = visualSunOcc;
   }
@@ -164,50 +173,63 @@ function applySafeRimPreview(handle, camera, sunDirection) {
   const partialOcc = clamp01(4 * visualSunOcc * (1 - visualSunOcc));
   const brokenCloud = clamp01(4 * cloudT * (1 - cloudT));
 
-  // A strong rim is a boundary phenomenon: favor partial local occlusion and
-  // broken cloud, not clear sky and not a completely buried Sun.
-  const rimWindow = clamp01(partialOcc * 0.78 + brokenCloud * (1 - visualSunOcc) * 0.42);
+  // Backlighting is LOCAL to the Sun/cloud overlap. Global broken cloud can
+  // modulate a rim that already exists, but can never create one by itself.
+  const localPresence = smoothRange(0.035, 0.20, visualSunOcc);
+  const localEscape = 1 - smoothRange(0.76, 0.985, visualSunOcc);
+  const rimWindow = clamp01(
+    localPresence
+      * localEscape
+      * (0.50 + partialOcc * 0.70)
+      * (0.88 + brokenCloud * 0.12),
+  );
   const rim = clamp01(
     sunAbove
       * sunFacing
       * rimWindow
-      * (0.96 + lowSun * 0.52),
+      * (1.05 + lowSun * 0.72),
   );
 
-  // Existing scalar uniforms only. These are more visible than preview v1 but
-  // remain inside ranges the stable Model 3.7 shader already consumes.
+  // Existing scalar uniforms only. These ranges stay within the stable Model 3
+  // lighting model but make the backlit edge/interior contrast plainly visible.
   if (u.m2SilverStrength) {
     const current = Number(u.m2SilverStrength.value) || 0.58;
-    const target = Math.min(1.35, current * (1 + rim * 0.52));
-    u.m2SilverStrength.value = lerp(current, target, 0.52);
+    const target = Math.min(1.72, current * (1 + rim * 0.72));
+    u.m2SilverStrength.value = lerp(current, target, 0.58);
   }
 
   if (u.m31CrownLightBoost) {
     const current = Number(u.m31CrownLightBoost.value) || 1.18;
-    const target = Math.min(1.78, current * (1 + rim * 0.18));
-    u.m31CrownLightBoost.value = lerp(current, target, 0.46);
+    const target = Math.min(2.05, current * (1 + rim * 0.25));
+    u.m31CrownLightBoost.value = lerp(current, target, 0.50);
   }
 
   if (u.m31SelfShadow) {
     const current = Number(u.m31SelfShadow.value) || 1.02;
-    const target = Math.min(1.48, current + rim * 0.09 + lowSun * 0.035);
-    u.m31SelfShadow.value = lerp(current, target, 0.38);
+    const target = Math.min(1.56, current + rim * 0.13 + lowSun * 0.045);
+    u.m31SelfShadow.value = lerp(current, target, 0.42);
   }
 
   if (u.m31BaseDarkening) {
     const current = Number(u.m31BaseDarkening.value) || 0.58;
-    const target = Math.min(0.90, current + rim * 0.065 + lowSun * 0.028);
-    u.m31BaseDarkening.value = lerp(current, target, 0.36);
+    const target = Math.min(0.94, current + rim * 0.09 + lowSun * 0.035);
+    u.m31BaseDarkening.value = lerp(current, target, 0.40);
   }
 
   if (u.m2AmbientStrength) {
     const current = Number(u.m2AmbientStrength.value) || 0.56;
-    const target = Math.max(0.34, current * (1 - rim * 0.085));
-    u.m2AmbientStrength.value = lerp(current, target, 0.34);
+    const target = Math.max(0.30, current * (1 - rim * 0.13));
+    u.m2AmbientStrength.value = lerp(current, target, 0.38);
   }
 
+  // main_game 4.6.4 currently uses diagnostic.visualSunOcclusion for its cheap
+  // scene-sprite ray gate. For completely clear Sun, feed that gate the fully
+  // closed state so the global broken-cloud term cannot invent rays elsewhere.
+  // The REAL solar occlusion remains visualSunOcc in the dedicated globals above.
+  const rayGateSunOcclusion = visualSunOcc < 0.075 ? 1 : visualSunOcc;
+
   const diagnostic = {
-    version: "3.7-safe-rim-preview-2",
+    version: "3.7-safe-rim-preview-3",
     enabled: true,
     rim,
     rimWindow,
@@ -217,10 +239,13 @@ function applySafeRimPreview(handle, camera, sunDirection) {
     baseSunOcclusion: baseSunOcc,
     sampledSunOcclusion: sampledSunOcc,
     opticalSunOcclusion: opticalSunOcc,
-    visualSunOcclusion: visualSunOcc,
+    actualVisualSunOcclusion: visualSunOcc,
+    visualSunOcclusion: rayGateSunOcclusion,
     cloudTransmittance: cloudT,
     partialOcclusion: partialOcc,
     brokenCloud,
+    lightningFlashIn: clamp01(lightningIn),
+    lightningFlashOut: Number(lightningOut) || 0,
     silverStrength: Number(u.m2SilverStrength?.value) || 0,
     crownBoost: Number(u.m31CrownLightBoost?.value) || 0,
     selfShadow: Number(u.m31SelfShadow?.value) || 0,
@@ -229,6 +254,7 @@ function applySafeRimPreview(handle, camera, sunDirection) {
   };
 
   globalThis.__riftCloudSafeLightingPreview = diagnostic;
+  globalThis.__riftLightningSceneFlash = clamp01((Number(lightningOut) || 0) / 1.35);
   return diagnostic;
 }
 
@@ -250,6 +276,8 @@ export function updateVolumetricClouds(
   rainIntensity = 0,
   currentBiome = "default",
 ) {
+  const cloudLightning = boostedLightningFlash(lightningFlash);
+
   base.updateVolumetricClouds(
     handle,
     dt,
@@ -257,7 +285,7 @@ export function updateVolumetricClouds(
     sunDirection,
     sunColor,
     ambientColor,
-    lightningFlash,
+    cloudLightning,
     lightningColor,
     windX,
     windZ,
@@ -266,10 +294,12 @@ export function updateVolumetricClouds(
   );
 
   if (!handle || !camera) return;
-  applySafeRimPreview(handle, camera, sunDirection);
+  applySafeRimPreview(handle, camera, sunDirection, lightningFlash, cloudLightning);
 }
 
 export function disposeVolumetricClouds(handle) {
   delete globalThis.__riftCloudSafeLightingPreview;
+  delete globalThis.__riftLocalSunCloudOcclusion;
+  delete globalThis.__riftLightningSceneFlash;
   return base.disposeVolumetricClouds(handle);
 }

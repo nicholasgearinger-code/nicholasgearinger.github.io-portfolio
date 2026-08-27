@@ -1,30 +1,15 @@
 // Rift Islands lazy launcher. The portfolio loads only this tiny module.
 // The heavy WebGPU/runtime graph is imported only after the visitor presses Play.
 //
-// Three.js r185 migration:
-// The portfolio's root import map still intentionally points at r182 while this
-// migration is validated. Rift itself has no static imports in this launcher, so
-// we can register a more-specific /rift/ scope before any of the WebGPU modules
-// are dynamically imported. Scoped mappings take precedence over the root map
-// for modules whose referrer lives under this Rift module directory. This keeps
-// the rest of the portfolio on its known-good dependency while the migration
-// branch runs the game on 0.185.1.
-const RIFT_THREE_VERSION = "0.185.1";
-const riftModuleScope = new URL("./", import.meta.url).href;
-const riftThreeBase = `https://cdn.jsdelivr.net/npm/three@${RIFT_THREE_VERSION}/`;
-const r185ImportMap = document.createElement("script");
-r185ImportMap.type = "importmap";
-r185ImportMap.textContent = JSON.stringify({
-  scopes: {
-    [riftModuleScope]: {
-      "three": `${riftThreeBase}build/three.webgpu.js`,
-      "three/webgpu": `${riftThreeBase}build/three.webgpu.js`,
-      "three/tsl": `${riftThreeBase}build/three.tsl.js`,
-      "three/addons/": `${riftThreeBase}examples/jsm/`,
-    },
-  },
-});
-document.head.appendChild(r185ImportMap);
+// Three.js versioning:
+// Use the page's single root import map for Rift too. Earlier builds injected a
+// second, scoped import map at runtime so Rift could use r185 while the rest of
+// the page used r182. That intentionally loaded two separate Three.js module
+// graphs and triggers THREE.WARNING: Multiple instances of Three.js being
+// imported. Keeping one Three.js version for the whole page avoids duplicate
+// class/prototype identities and is substantially safer for GLTFLoader,
+// materials, textures and WebGPU nodes shared across modules.
+const RIFT_THREE_VERSION = "0.182.0";
 window.__riftThreeTarget = RIFT_THREE_VERSION;
 
 const playButton = document.getElementById("rift-title-play-btn");

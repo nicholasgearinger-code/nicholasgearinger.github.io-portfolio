@@ -178,7 +178,7 @@ jobs:
           p = Path("perf-environment-build/index.html")
           html = p.read_text(encoding="utf-8")
           html = html.replace("three@0.182.0", "three@0.185.1")
-          marker = '<script>window.__riftR185StaticImportMap=true;window.__riftThreeTarget="0.185.1";window.__riftMigrationBuild="environment-performance-1-preview";</script>'
+          marker = '<script>window.__riftR185StaticImportMap=true;window.__riftThreeTarget="0.185.1";window.__riftMigrationBuild="environment-performance-1-preview-v2";</script>'
           if marker not in html:
               html = html.replace("</head>", marker + "</head>", 1)
           p.write_text(html, encoding="utf-8")

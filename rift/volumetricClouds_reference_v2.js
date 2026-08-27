@@ -1,10 +1,11 @@
 // Compatibility entry point retained because main_game.js imports this module.
-// Rift Cloud Model 2.8 is the default r185.1 path. It preserves Model 2.6's
-// camera-centered TAAU surface, Model 2.7's Sun/Moon scattering, and adds more
-// defined cumulus anatomy, celestial-disc occlusion, and a structured projected
-// cloud-shadow map for terrain lighting.
+// Rift Cloud Model 2.9 is the default r185.1 path. It preserves Model 2.8's
+// structured cumulus, Sun/Moon occlusion and moving terrain shadows, then adds
+// stronger photographic cloud-family separation and dynamic sunrise/sunset
+// backlighting without increasing the mobile ray-march budget.
 //
 // Rollbacks remain available on-device:
+//   ?cloudModel28=1  -> previous structured cumulus / occlusion / shadow pass
 //   ?cloudModel27=1  -> previous dual-celestial scattering pass
 //   ?cloudModel26=1  -> previous Model 2.6 camera-centered path
 //   ?cloudModel25=1  -> previous Model 2.5 temporal-stability pass
@@ -12,6 +13,7 @@
 //   ?cloudModel22=1  -> earlier known-good Model 2.2
 //   ?cloudFallback=1 -> older known-good v1.7 renderer
 
+import * as model29 from "./volumetricClouds_r185_model29.js";
 import * as model28 from "./volumetricClouds_r185_model28.js";
 import * as model27 from "./volumetricClouds_r185_model27.js";
 import * as model26 from "./volumetricClouds_r185_model26.js";
@@ -29,6 +31,7 @@ const forceModel24 = params?.has("cloudModel24") === true;
 const forceModel25 = params?.has("cloudModel25") === true;
 const forceModel26 = params?.has("cloudModel26") === true;
 const forceModel27 = params?.has("cloudModel27") === true;
+const forceModel28 = params?.has("cloudModel28") === true;
 
 const active = forceFallback
   ? fallback
@@ -38,7 +41,9 @@ const active = forceFallback
       ? model24
       : (forceModel25
         ? model25
-        : (forceModel26 ? model26 : (forceModel27 ? model27 : model28)))));
+        : (forceModel26
+          ? model26
+          : (forceModel27 ? model27 : (forceModel28 ? model28 : model29))))));
 
 export function createVolumetricClouds(scene) {
   return active.createVolumetricClouds(scene);

@@ -138,22 +138,15 @@ export function updateLightShafts(shafts, dayAmount) {
   const solarElevation = Number(optics?.solarElevation);
   const sunDir = optics?.sunDirection;
 
-  // Crepuscular rays become visually strongest at lower solar altitudes, where
-  // the light travels through more atmosphere and cuts laterally through gaps.
-  // At noon they still exist, but are subtler and more vertical.
   const altitudeShape = Number.isFinite(solarElevation)
     ? THREE.MathUtils.lerp(1.15, 0.72, THREE.MathUtils.smoothstep(solarElevation, 0.08, 0.72))
     : 1;
 
-  // Broken/partial clouds are ideal for shafts. Fully clear sky keeps a soft
-  // baseline; a fully blocked Sun reduces the source again.
   const partialCloud = 1 - Math.min(1, Math.abs(cloudTransmission - 0.58) / 0.58);
   const cloudSculpt = 0.72 + partialCloud * 0.28;
   const strength = daylight * sourceVisibility * altitudeShape * cloudSculpt;
   const t = performance.now() * 0.001;
 
-  // Project the real sun direction into a sprite rotation. We clamp the tilt so
-  // low-Sun rays look directional without ever flipping nearly horizontal.
   const directionalTilt = sunDir
     ? THREE.MathUtils.clamp(Math.atan2(-sunDir.x, Math.max(0.18, sunDir.y)), -0.58, 0.58)
     : 0;
@@ -161,8 +154,6 @@ export function updateLightShafts(shafts, dayAmount) {
   for (const shaft of shafts) {
     if (!shaft || shaft.disabled) continue;
 
-    // Above-water legacy shafts from decorations_underwater_base.js are simple
-    // one-sprite handles. Keep them supported instead of silently skipping them.
     if (!shaft.layers?.length) {
       const sprite = shaft.sprite;
       if (!sprite?.material) continue;
@@ -173,7 +164,9 @@ export function updateLightShafts(shafts, dayAmount) {
         directionalTilt,
         0.08,
       );
-      sprite.material.color?.copy?.(SHAFT_DAY)?.lerp?.(SHAFT_GOLD, lowSun * 0.72);
+      if (sprite.material.color?.isColor) {
+        sprite.material.color.copy(SHAFT_DAY).lerp(SHAFT_GOLD, lowSun * 0.72);
+      }
       continue;
     }
 
@@ -191,7 +184,7 @@ export function updateLightShafts(shafts, dayAmount) {
       const material = sprite.material;
       material.opacity = shaft.baseOpacity * layer.weight * underwaterStrength * breathe;
 
-      const baseRotation = shaft.baseRotations?.[i] ?? Number(material.rotation) || 0;
+      const baseRotation = shaft.baseRotations?.[i] ?? (Number(material.rotation) || 0);
       material.rotation = baseRotation + directionalTilt * (shaft.underwater ? 0.48 : 0.75);
 
       if (shaft.underwater) {

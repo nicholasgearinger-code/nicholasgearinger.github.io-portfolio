@@ -1,26 +1,26 @@
 // Compatibility entry point retained because main_game.js imports this module.
-// Default production path: Model 3.7 authored reference-volume clouds.
+// Default production path: Model 3.7 authored reference-volume clouds + the
+// lightweight CPU-side Sun/cloud coupling layer.
 //
 // Model 3.x changes the macro density architecture rather than retuning the old
 // noise field. A baked 3D atlas contains distinct towering cumulus, broken
 // cumulus, stratiform/storm and distant cloud families; Perlin/Worley remains
-// detail/erosion only. Model 3.7 then adapts that proven review renderer to the
-// current production Sun/Moon system and preserves local celestial occlusion and
-// terrain cloud shadows.
-//
-// SAFE lighting preview:
-//   ?cloudLightingPreview=1 -> Model 3.7 + conservative existing-uniform rim test
-// The normal URL still runs exact Model 3.7 behavior.
+// detail/erosion only. The lighting layer adds no render pass or GPU graph change.
 //
 // On-device rollbacks:
-//   ?cloudModel36=1 -> raw Model 3.6 review renderer
-//   ?cloudModel29=1 -> previous production Model 2.9
-//   ?cloudModel28=1 -> previous structured Model 2.8
-//   ?cloudModel27=1 -> previous dual-celestial Model 2.7
-//   ?cloudModel26=1 -> Model 2.6 camera-centered/TAAU path
-//   ?cloudFallback=1 -> older known-good v1.7 renderer
+//   ?cloudLightingLegacy=1 -> exact plain Model 3.7 lighting
+//   ?cloudModel37=1        -> exact plain Model 3.7 lighting
+//   ?cloudModel36=1        -> raw Model 3.6 review renderer
+//   ?cloudModel29=1        -> previous production Model 2.9
+//   ?cloudModel28=1        -> previous structured Model 2.8
+//   ?cloudModel27=1        -> previous dual-celestial Model 2.7
+//   ?cloudModel26=1        -> Model 2.6 camera-centered/TAAU path
+//   ?cloudFallback=1       -> older known-good v1.7 renderer
+//
+// ?cloudLightingPreview=1 is retained as a harmless compatibility alias for the
+// now-default coupled lighting path.
 
-import * as lightingPreview from "./volumetricClouds_r185_model37_lighting_preview.js";
+import * as coupledLighting from "./volumetricClouds_r185_model37_lighting_preview.js";
 import * as model37 from "./volumetricClouds_r185_model37.js";
 import * as model36 from "./volumetricClouds_r185_model36.js";
 import * as model29 from "./volumetricClouds_r185_model29.js";
@@ -42,9 +42,9 @@ const active = params?.has("cloudFallback")
           ? model29
           : params?.has("cloudModel36")
             ? model36
-            : params?.has("cloudLightingPreview")
-              ? lightingPreview
-              : model37;
+            : (params?.has("cloudModel37") || params?.has("cloudLightingLegacy"))
+              ? model37
+              : coupledLighting;
 
 export function createVolumetricClouds(scene) {
   return active.createVolumetricClouds(scene);

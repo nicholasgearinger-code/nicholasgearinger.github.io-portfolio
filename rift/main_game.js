@@ -1,4 +1,4 @@
-// Rift Islands runtime loader — Model 4.6.3 safe sprite god rays.
+// Rift Islands runtime loader — Model 4.6.4 safe cloud-gated sprite god rays.
 // Keeps the proven Water Pro / r185 migration path, then re-enables the
 // existing scene sprites as depth-tested crepuscular rays. No extra render
 // targets, no depth-texture sampling, and no post-process god-ray pass.
@@ -31,7 +31,7 @@ if (!source.includes(editsLoopMarker)) {
 const godRaySetup = `
 const dayNightCycle = createDayNightCycle(scene, sun, ambientLight, starfieldPoints, undefined, moonLight);
 
-// Model 4.6.3: safe scene-space crepuscular rays.
+// Model 4.6.4: safe scene-space crepuscular rays.
 // Reuses the old sun-beam sprites instead of adding another WebGPU pass.
 // Because these are ordinary transparent scene objects with depthTest=true,
 // opaque foreground geometry naturally cuts them into visible shafts.
@@ -103,19 +103,58 @@ const godRayUpdate = `
     ? THREE.MathUtils.clamp(riftShadowT, 0, 1)
     : 1 - riftOcclusion;
 
-  // Partial cloud cover strengthens the read of shafts, while a fully blocked
-  // Sun still reduces them. Clear sky keeps a softer atmospheric baseline.
-  const riftPartialCloud = 1 - Math.min(
+  const riftLightingPreview = globalThis.__riftCloudSafeLightingPreview?.enabled === true;
+  const riftPreviewSunOcc = THREE.MathUtils.clamp(
+    Number(globalThis.__riftCloudSafeLightingPreview?.visualSunOcclusion ?? riftOcclusion) || 0,
+    0,
     1,
-    Math.abs(riftCloudTransmission - 0.58) / 0.58,
   );
-  const riftCloudSculpt = 0.58 + 0.42 * riftPartialCloud;
-  const riftSourceVisibility = 0.28 + 0.72 * riftCloudTransmission;
-  const riftRayStrength =
-    riftRayAltitude *
-    riftCloudSculpt *
-    riftSourceVisibility *
-    (isTouchDevice ? 0.12 : 0.10);
+
+  let riftRayStrength = 0;
+  let riftGapGate = 0;
+
+  if (riftLightingPreview) {
+    // Preview v2: real crepuscular-ray gating. Clear sky has no cloud edge to
+    // sculpt a shaft, and fully opaque cloud has no direct solar opening. Rays
+    // peak in the physically interesting middle state: broken/partial cloud with
+    // some direct Sun still escaping through/around the local cloud column.
+    const riftCloudPresence = THREE.MathUtils.clamp(1 - riftCloudTransmission, 0, 1);
+    const riftCloudOpening = THREE.MathUtils.clamp(riftCloudTransmission, 0, 1);
+    const riftPresenceGate = THREE.MathUtils.smoothstep(riftCloudPresence, 0.06, 0.26);
+    const riftOpeningGate = THREE.MathUtils.smoothstep(riftCloudOpening, 0.06, 0.30);
+    const riftBrokenWindow = riftPresenceGate * riftOpeningGate;
+    const riftLocalPartial = THREE.MathUtils.clamp(
+      4 * riftPreviewSunOcc * (1 - riftPreviewSunOcc),
+      0,
+      1,
+    );
+    const riftDirectOpening = 1 - riftPreviewSunOcc;
+
+    riftGapGate = THREE.MathUtils.clamp(
+      (riftLocalPartial * 0.78 + riftBrokenWindow * 0.62) * riftDirectOpening,
+      0,
+      1,
+    );
+
+    riftRayStrength =
+      riftRayAltitude *
+      riftGapGate *
+      (isTouchDevice ? 0.18 : 0.15);
+  } else {
+    // Preserve the known-good production behavior byte-for-byte when the preview
+    // flag is absent.
+    const riftPartialCloud = 1 - Math.min(
+      1,
+      Math.abs(riftCloudTransmission - 0.58) / 0.58,
+    );
+    const riftCloudSculpt = 0.58 + 0.42 * riftPartialCloud;
+    const riftSourceVisibility = 0.28 + 0.72 * riftCloudTransmission;
+    riftRayStrength =
+      riftRayAltitude *
+      riftCloudSculpt *
+      riftSourceVisibility *
+      (isTouchDevice ? 0.12 : 0.10);
+  }
 
   const riftLowSunWarmth = 1 - THREE.MathUtils.smoothstep(riftRayDay, 0.30, 0.72);
   const riftTime = performance.now() * 0.001;
@@ -133,9 +172,14 @@ const godRayUpdate = `
 
   globalThis.__riftGodRays463 = {
     active: riftRayStrength > 0.0015,
-    mode: "depth-tested-scene-sprites",
+    mode: riftLightingPreview
+      ? "cloud-gap-gated-depth-tested-sprites"
+      : "depth-tested-scene-sprites",
     strength: riftRayStrength,
     cloudTransmittance: riftCloudTransmission,
+    localSunOcclusion: riftPreviewSunOcc,
+    gapGate: riftGapGate,
+    lightingPreview: riftLightingPreview,
     count: riftGodRaySprites.length,
   };
 }
@@ -258,12 +302,12 @@ clock.connect(document);`,
   [
     "const dayNightCycle = createDayNightCycle(scene, sun, ambientLight, starfieldPoints, undefined, moonLight);",
     godRaySetup.trim(),
-    "Model 4.6.3 depth-tested sprite god-ray setup",
+    "Model 4.6.4 depth-tested sprite god-ray setup",
   ],
   [
     "for (const sprite of dayNightCycle.sunBeams.sprites) sprite.material.opacity = 0;",
     godRayUpdate.trim(),
-    "Model 4.6.3 re-enable scene-space god rays",
+    "Model 4.6.4 cloud-gated scene-space god rays",
   ],
 ];
 

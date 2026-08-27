@@ -1,25 +1,14 @@
-// Runtime tuning wrapper for rain/underwater presentation plus Water Pro v9.
-// The large stable game source remains preserved in main_game_rain_base.js;
-// this layer only appends uniquely-validated source edits to the existing tuned
-// loader before it executes.
-//
-// r185 migration note:
-// This wrapper now translates the preserved r182-era source to the current
-// r185 WebGPU APIs at load time: RenderPipeline, Timer, and the updated SSRNode
-// setup/composition. Keeping the migration here lets the stable base remain an
-// exact rollback point while the three-r185-migration branch is validated.
+// Rift Islands runtime loader — Model 4.6.3 safe sprite god rays.
+// Keeps the proven Water Pro / r185 migration path, then re-enables the
+// existing scene sprites as depth-tested crepuscular rays. No extra render
+// targets, no depth-texture sampling, and no post-process god-ray pass.
 
-const tunedLoaderUrl = new URL(
-  "./main_game_underwater_base.js",
-  import.meta.url,
-);
+const tunedLoaderUrl = new URL("./main_game_underwater_base.js", import.meta.url);
 const moduleBaseUrl = new URL("./", import.meta.url);
 
 const response = await fetch(tunedLoaderUrl, { cache: "reload" });
 if (!response.ok) {
-  throw new Error(
-    `[rift-water-pro] Failed to load tuned runtime loader: HTTP ${response.status}`,
-  );
+  throw new Error(`[rift-water-pro] Failed to load tuned runtime loader: HTTP ${response.status}`);
 }
 
 let source = await response.text();
@@ -28,9 +17,7 @@ const lines = source.split("\n");
 const badEditLabel = '"seafloor caustic brightness"';
 const matchingLines = lines.filter((line) => line.includes(badEditLabel));
 if (matchingLines.length !== 1) {
-  throw new Error(
-    `[rift-water-pro] Expected exactly one caustic tuning entry, found ${matchingLines.length}`,
-  );
+  throw new Error(`[rift-water-pro] Expected exactly one caustic tuning entry, found ${matchingLines.length}`);
 }
 source = lines.filter((line) => !line.includes(badEditLabel)).join("\n");
 
@@ -38,10 +25,121 @@ const editsLoopMarker =
   '\n];\n\nfor (const [from, to, label] of edits) source = replaceExactlyOnce(source, from, to, label);';
 
 if (!source.includes(editsLoopMarker)) {
-  throw new Error(
-    "[rift-water-pro] Tuned loader edit loop changed unexpectedly",
-  );
+  throw new Error("[rift-water-pro] Tuned loader edit loop changed unexpectedly");
 }
+
+const godRaySetup = `
+const dayNightCycle = createDayNightCycle(scene, sun, ambientLight, starfieldPoints, undefined, moonLight);
+
+// Model 4.6.3: safe scene-space crepuscular rays.
+// Reuses the old sun-beam sprites instead of adding another WebGPU pass.
+// Because these are ordinary transparent scene objects with depthTest=true,
+// opaque foreground geometry naturally cuts them into visible shafts.
+const riftGodRayWarm = new THREE.Color(0xffd8a0);
+const riftGodRaySprites = (() => {
+  const group = dayNightCycle?.sunBeams?.group;
+  const sprites = dayNightCycle?.sunBeams?.sprites;
+  if (!group || !Array.isArray(sprites) || sprites.length === 0) return [];
+
+  const original = sprites.slice();
+  const targetCount = isTouchDevice ? 6 : Math.max(10, sprites.length);
+
+  while (sprites.length < targetCount) {
+    const sourceSprite = original[sprites.length % original.length];
+    const clone = sourceSprite.clone();
+    clone.material = sourceSprite.material.clone();
+    group.add(clone);
+    sprites.push(clone);
+  }
+
+  const count = sprites.length;
+  for (let i = 0; i < count; i++) {
+    const sprite = sprites[i];
+
+    // Existing sprites may share materials; give every ray independent opacity
+    // and rotation so the fan can be shaped without cross-talk.
+    if (original.includes(sprite)) sprite.material = sprite.material.clone();
+
+    const material = sprite.material;
+    material.transparent = true;
+    material.depthTest = true;
+    material.depthWrite = false;
+    material.blending = THREE.AdditiveBlending;
+    material.fog = true;
+    material.toneMapped = false;
+    material.opacity = 0;
+
+    // Fan primarily below/around the low Sun instead of a full 360-degree star.
+    const u = count <= 1 ? 0.5 : i / (count - 1);
+    const fanAngle = THREE.MathUtils.lerp(-1.02, 1.02, u);
+    const jitter = Math.sin((i + 1) * 12.9898) * 0.085;
+    material.rotation = fanAngle + jitter;
+
+    sprite.center.set(0.5, 1.0);
+    const length = (isTouchDevice ? 310 : 345) + (i % 4) * 24;
+    const widthRatio = 0.105 + (i % 3) * 0.024;
+    sprite.scale.set(length * widthRatio, length, 1);
+    sprite.renderOrder = -90;
+  }
+
+  return sprites;
+})();
+`;
+
+const godRayUpdate = `
+{
+  const riftRayDay = THREE.MathUtils.clamp(Number(dayNight.dayAmount) || 0, 0, 1);
+  const riftRayRise = THREE.MathUtils.smoothstep(riftRayDay, 0.015, 0.10);
+  const riftRayNoonFade = 1 - THREE.MathUtils.smoothstep(riftRayDay, 0.48, 0.88);
+  const riftRayAltitude = riftRayRise * riftRayNoonFade;
+
+  const riftShadowT = Number(globalThis.__riftCloudShadowState?.averageTransmittance);
+  const riftOcclusion = THREE.MathUtils.clamp(
+    Number(globalThis.__riftProceduralCloudOcclusion) || 0,
+    0,
+    1,
+  );
+  const riftCloudTransmission = Number.isFinite(riftShadowT)
+    ? THREE.MathUtils.clamp(riftShadowT, 0, 1)
+    : 1 - riftOcclusion;
+
+  // Partial cloud cover strengthens the read of shafts, while a fully blocked
+  // Sun still reduces them. Clear sky keeps a softer atmospheric baseline.
+  const riftPartialCloud = 1 - Math.min(
+    1,
+    Math.abs(riftCloudTransmission - 0.58) / 0.58,
+  );
+  const riftCloudSculpt = 0.58 + 0.42 * riftPartialCloud;
+  const riftSourceVisibility = 0.28 + 0.72 * riftCloudTransmission;
+  const riftRayStrength =
+    riftRayAltitude *
+    riftCloudSculpt *
+    riftSourceVisibility *
+    (isTouchDevice ? 0.12 : 0.10);
+
+  const riftLowSunWarmth = 1 - THREE.MathUtils.smoothstep(riftRayDay, 0.30, 0.72);
+  const riftTime = performance.now() * 0.001;
+
+  for (let i = 0; i < riftGodRaySprites.length; i++) {
+    const sprite = riftGodRaySprites[i];
+    const material = sprite.material;
+    const variation = 0.76 + (i % 4) * 0.095;
+    const breathe = 0.94 + Math.sin(riftTime * 0.22 + i * 1.71) * 0.06;
+
+    material.color.copy(sun.color).lerp(riftGodRayWarm, riftLowSunWarmth * 0.28);
+    material.opacity = riftRayStrength * variation * breathe;
+    sprite.visible = material.opacity > 0.0015;
+  }
+
+  globalThis.__riftGodRays463 = {
+    active: riftRayStrength > 0.0015,
+    mode: "depth-tested-scene-sprites",
+    strength: riftRayStrength,
+    cloudTransmittance: riftCloudTransmission,
+    count: riftGodRaySprites.length,
+  };
+}
+`;
 
 const extraEdits = [
   [
@@ -61,38 +159,111 @@ const extraEdits = [
   ],
   [
     "tempWaterGlintDir.copy(moonLight.position).lerp(sun.position, dayNight.dayAmount);",
-    "tempWaterGlintDir.copy(sun.intensity >= moonLight.intensity ? sun.position : moonLight.position).sub(camera.position).normalize();",
+    'tempWaterGlintDir.copy(sun.intensity >= moonLight.intensity ? sun.position : moonLight.position).sub(camera.position).normalize();',
     "camera-relative celestial glint alignment",
   ],
   [
     'import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";',
-    `import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";\nimport { mrt, output, normalView, metalness, roughness, sample, packNormalToRGB, unpackRGBToNormal } from "three/tsl";\nimport { ssr } from "three/addons/tsl/display/SSRNode.js";`,
+    'import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";\nimport { mrt, output, normalView, metalness, roughness, sample, packNormalToRGB, unpackRGBToNormal } from "three/tsl";\nimport { ssr } from "three/addons/tsl/display/SSRNode.js";',
     "r185 Water Pro SSR imports",
   ],
   [
-    `const postProcessing = new THREE.PostProcessing(renderer);\nconst scenePass = pass(scene, camera);\nconst scenePassColor = scenePass.getTextureNode("output");`,
-    `const postProcessing = new THREE.RenderPipeline(renderer);\nconst scenePass = pass(scene, camera);\nconst riftSSRTier = getGraphicsTier();\nconst riftWaterProfile = globalThis.__riftWaterTestMode === "desktop"\n  ? "desktop"\n  : globalThis.__riftWaterTestMode === "mobile"\n    ? "mobile"\n    : (isTouchDevice ? "mobile" : "desktop");\nconst riftSSRIsMobile = riftWaterProfile === "mobile";\nconst riftForcedDesktopWater = globalThis.__riftWaterTestForced === true && riftWaterProfile === "desktop";\nconst riftSSRQualityTier = riftForcedDesktopWater && riftSSRTier === "low" ? "medium" : riftSSRTier;\nconst riftSSREnabled = riftWaterProfile === "desktop" && riftSSRQualityTier !== "low" && getEffectiveValue("reflectionEnabled") !== false;\nlet riftSSRPass = null;\nlet riftSSRBaseIntensity = 0;\nif (riftSSREnabled) {\n  scenePass.setMRT(mrt({\n    output: output,\n    normal: packNormalToRGB(normalView),\n    metalrough: vec2(metalness, roughness),\n  }));\n}\nconst scenePassColor = scenePass.getTextureNode("output");\nif (riftSSREnabled) {\n  const riftSceneNormalPacked = scenePass.getTextureNode("normal");\n  const riftSceneDepth = scenePass.getTextureNode("depth");\n  const riftSceneMetalRough = scenePass.getTextureNode("metalrough");\n  const riftNormalTexture = scenePass.getTexture("normal");\n  const riftMetalRoughTexture = scenePass.getTexture("metalrough");\n  riftNormalTexture.type = THREE.UnsignedByteType;\n  riftMetalRoughTexture.type = THREE.UnsignedByteType;\n  const riftSceneNormal = sample((uvNode) => unpackRGBToNormal(riftSceneNormalPacked.sample(uvNode)));\n  riftSSRPass = ssr(scenePassColor, riftSceneDepth, riftSceneNormal, {\n    metalnessNode: riftSceneMetalRough.r,\n    roughnessNode: riftSceneMetalRough.g,\n  });\n  if (riftSSRIsMobile) {\n    riftSSRBaseIntensity = 0.30;\n    riftSSRPass.resolutionScale = 0.30;\n    riftSSRPass.quality.value = 0.14;\n    riftSSRPass.blurQuality = 1;\n    riftSSRPass.maxDistance.value = 0.30;\n    riftSSRPass.intensity.value = riftSSRBaseIntensity;\n    riftSSRPass.thickness.value = 0.036;\n  } else {\n    riftSSRBaseIntensity = riftSSRQualityTier === "high" ? 0.82 : 0.58;\n    riftSSRPass.quality.value = riftSSRQualityTier === "high" ? 0.48 : 0.28;\n    riftSSRPass.blurQuality = riftSSRQualityTier === "high" ? 2 : 1;\n    riftSSRPass.maxDistance.value = riftSSRQualityTier === "high" ? 0.72 : 0.48;\n    riftSSRPass.intensity.value = riftSSRBaseIntensity;\n    riftSSRPass.thickness.value = riftSSRQualityTier === "high" ? 0.020 : 0.026;\n  }\n}`,
+    `const postProcessing = new THREE.PostProcessing(renderer);
+const scenePass = pass(scene, camera);
+const scenePassColor = scenePass.getTextureNode("output");`,
+    `const postProcessing = new THREE.RenderPipeline(renderer);
+const scenePass = pass(scene, camera);
+const riftSSRTier = getGraphicsTier();
+const riftWaterProfile = globalThis.__riftWaterTestMode === "desktop"
+  ? "desktop"
+  : globalThis.__riftWaterTestMode === "mobile"
+    ? "mobile"
+    : (isTouchDevice ? "mobile" : "desktop");
+const riftSSRIsMobile = riftWaterProfile === "mobile";
+const riftForcedDesktopWater = globalThis.__riftWaterTestForced === true && riftWaterProfile === "desktop";
+const riftSSRQualityTier = riftForcedDesktopWater && riftSSRTier === "low" ? "medium" : riftSSRTier;
+const riftSSREnabled = riftWaterProfile === "desktop" && riftSSRQualityTier !== "low" && getEffectiveValue("reflectionEnabled") !== false;
+let riftSSRPass = null;
+let riftSSRBaseIntensity = 0;
+if (riftSSREnabled) {
+  scenePass.setMRT(mrt({
+    output: output,
+    normal: packNormalToRGB(normalView),
+    metalrough: vec2(metalness, roughness),
+  }));
+}
+const scenePassColor = scenePass.getTextureNode("output");
+if (riftSSREnabled) {
+  const riftSceneNormalPacked = scenePass.getTextureNode("normal");
+  const riftSceneDepth = scenePass.getTextureNode("depth");
+  const riftSceneMetalRough = scenePass.getTextureNode("metalrough");
+  const riftNormalTexture = scenePass.getTexture("normal");
+  const riftMetalRoughTexture = scenePass.getTexture("metalrough");
+  riftNormalTexture.type = THREE.UnsignedByteType;
+  riftMetalRoughTexture.type = THREE.UnsignedByteType;
+  const riftSceneNormal = sample((uvNode) => unpackRGBToNormal(riftSceneNormalPacked.sample(uvNode)));
+  riftSSRPass = ssr(scenePassColor, riftSceneDepth, riftSceneNormal, {
+    metalnessNode: riftSceneMetalRough.r,
+    roughnessNode: riftSceneMetalRough.g,
+  });
+  if (riftSSRIsMobile) {
+    riftSSRBaseIntensity = 0.30;
+    riftSSRPass.resolutionScale = 0.30;
+    riftSSRPass.quality.value = 0.14;
+    riftSSRPass.blurQuality = 1;
+    riftSSRPass.maxDistance.value = 0.30;
+    riftSSRPass.intensity.value = riftSSRBaseIntensity;
+    riftSSRPass.thickness.value = 0.036;
+  } else {
+    riftSSRBaseIntensity = riftSSRQualityTier === "high" ? 0.82 : 0.58;
+    riftSSRPass.quality.value = riftSSRQualityTier === "high" ? 0.48 : 0.28;
+    riftSSRPass.blurQuality = riftSSRQualityTier === "high" ? 2 : 1;
+    riftSSRPass.maxDistance.value = riftSSRQualityTier === "high" ? 0.72 : 0.48;
+    riftSSRPass.intensity.value = riftSSRBaseIntensity;
+    riftSSRPass.thickness.value = riftSSRQualityTier === "high" ? 0.020 : 0.026;
+  }
+}`,
     "r185 Water Pro WebGPU SSR setup",
   ],
   [
     'postProcessing.outputNode = (getGraphicsSettings().lensEffectEnabled !== false) ? lensDistortedOutput : scenePass;',
-    `const riftBasePostOutput = (getGraphicsSettings().lensEffectEnabled !== false) ? lensDistortedOutput : scenePassColor;\n// r183+ SSRNode returns premultiplied reflection color. Add RGB to the beauty\n// pass instead of using the old blendColor() path.\npostProcessing.outputNode = (riftSSREnabled && riftSSRPass) ? riftBasePostOutput.add(riftSSRPass.rgb) : riftBasePostOutput;`,
+    `const riftBasePostOutput = (getGraphicsSettings().lensEffectEnabled !== false) ? lensDistortedOutput : scenePassColor;
+// r183+ SSRNode returns premultiplied reflection color. Add RGB to the beauty
+// pass instead of using the old blendColor() path.
+postProcessing.outputNode = (riftSSREnabled && riftSSRPass) ? riftBasePostOutput.add(riftSSRPass.rgb) : riftBasePostOutput;`,
     "r185 Water Pro additive SSR composition",
   ],
   [
     "const isFullySubmerged = submergedState;",
-    `const isFullySubmerged = submergedState;\n  if (riftSSRPass) riftSSRPass.intensity.value = isFullySubmerged ? 0 : riftSSRBaseIntensity;`,
+    `const isFullySubmerged = submergedState;
+  if (riftSSRPass) riftSSRPass.intensity.value = isFullySubmerged ? 0 : riftSSRBaseIntensity;`,
     "disable SSR while submerged",
   ],
   [
     "const clock = new THREE.Clock();",
-    "const clock = new THREE.Timer();\nclock.connect(document);",
+    `const clock = new THREE.Timer();
+clock.connect(document);`,
     "r185 Timer migration",
   ],
   [
-    "function animate() {\n  requestAnimationFrame(animate);\n  const dt = Math.min(clock.getDelta(), 0.1);",
-    "function animate(timestamp) {\n  requestAnimationFrame(animate);\n  clock.update(timestamp);\n  const dt = Math.min(clock.getDelta(), 0.1);",
+    `function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.1);`,
+    `function animate(timestamp) {
+  requestAnimationFrame(animate);
+  clock.update(timestamp);
+  const dt = Math.min(clock.getDelta(), 0.1);`,
     "r185 Timer frame update",
+  ],
+  [
+    "const dayNightCycle = createDayNightCycle(scene, sun, ambientLight, starfieldPoints, undefined, moonLight);",
+    godRaySetup.trim(),
+    "Model 4.6.3 depth-tested sprite god-ray setup",
+  ],
+  [
+    "for (const sprite of dayNightCycle.sunBeams.sprites) sprite.material.opacity = 0;",
+    godRayUpdate.trim(),
+    "Model 4.6.3 re-enable scene-space god rays",
   ],
 ];
 
@@ -115,9 +286,7 @@ const resolvedModuleLine =
   `const moduleBaseUrl = new URL("./", ${JSON.stringify(moduleBaseUrl.href)});`;
 
 if (!source.includes(loaderBaseLine) || !source.includes(loaderModuleLine)) {
-  throw new Error(
-    "[rift-water-pro] Tuned loader URL bootstrap changed unexpectedly",
-  );
+  throw new Error("[rift-water-pro] Tuned loader URL bootstrap changed unexpectedly");
 }
 source = source.replace(loaderBaseLine, resolvedBaseLine);
 source = source.replace(loaderModuleLine, resolvedModuleLine);

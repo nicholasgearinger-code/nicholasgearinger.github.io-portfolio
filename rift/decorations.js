@@ -7,6 +7,15 @@ export * from "./decorations_underwater_base.js";
 let underwaterShaftTexture = null;
 let shaftOrdinal = 0;
 
+const SHAFT_DAY = new THREE.Color(0xe8f7d0);
+const SHAFT_GOLD = new THREE.Color(0xffd39b);
+const SHAFT_WATER_DAY = new THREE.Color(0xcdf7ff);
+const SHAFT_WATER_GOLD = new THREE.Color(0xffe1b8);
+
+function clamp01(v) {
+  return Math.max(0, Math.min(1, Number(v) || 0));
+}
+
 function getUnderwaterShaftTexture() {
   if (underwaterShaftTexture) return underwaterShaftTexture;
 
@@ -93,12 +102,10 @@ export function createUnderwaterLightShaft(x, z, groundY, waterY, rand) {
   const length = THREE.MathUtils.clamp(depth * (1.45 + rand() * 0.18), 20, 38);
   const rotation = (rand() - 0.5) * 0.06;
 
-  // Broad outer mist beam
   const outer = makeRaySprite(0x7fd9e9, rotation);
   outer.scale.set(length * (1.75 + rand() * 0.18), length * 1.05, 1);
   group.add(outer);
 
-  // Softer inner beam, but not a hard spotlight core
   const inner = makeRaySprite(0xdffbff, rotation * 0.65);
   inner.scale.set(length * (0.90 + rand() * 0.10), length * 0.98, 1);
   group.add(inner);
@@ -106,9 +113,12 @@ export function createUnderwaterLightShaft(x, z, groundY, waterY, rand) {
   return {
     sprite: group,
     disabled: false,
+    underwater: true,
+    depth,
     baseOpacity: 0.12 + rand() * 0.025,
     phase: rand() * Math.PI * 2,
     drift: 0.45 + rand() * 0.25,
+    baseRotations: [rotation, rotation * 0.65],
     layers: [
       { sprite: outer, weight: 0.85 },
       { sprite: inner, weight: 0.48 },
@@ -119,24 +129,80 @@ export function createUnderwaterLightShaft(x, z, groundY, waterY, rand) {
 export function updateLightShafts(shafts, dayAmount) {
   if (!shafts) return;
 
-  const strength = THREE.MathUtils.clamp(Number(dayAmount) || 0, 0, 1);
+  const optics = globalThis.__riftCelestialOpticsV14;
+  const fallbackDay = clamp01(dayAmount);
+  const daylight = clamp01(optics?.dayAmount ?? fallbackDay);
+  const sourceVisibility = clamp01(optics?.sourceVisibility ?? fallbackDay);
+  const cloudTransmission = clamp01(optics?.cloudTransmission ?? 1);
+  const lowSun = clamp01(optics?.lowSun ?? 0);
+  const solarElevation = Number(optics?.solarElevation);
+  const sunDir = optics?.sunDirection;
+
+  // Crepuscular rays become visually strongest at lower solar altitudes, where
+  // the light travels through more atmosphere and cuts laterally through gaps.
+  // At noon they still exist, but are subtler and more vertical.
+  const altitudeShape = Number.isFinite(solarElevation)
+    ? THREE.MathUtils.lerp(1.15, 0.72, THREE.MathUtils.smoothstep(solarElevation, 0.08, 0.72))
+    : 1;
+
+  // Broken/partial clouds are ideal for shafts. Fully clear sky keeps a soft
+  // baseline; a fully blocked Sun reduces the source again.
+  const partialCloud = 1 - Math.min(1, Math.abs(cloudTransmission - 0.58) / 0.58);
+  const cloudSculpt = 0.72 + partialCloud * 0.28;
+  const strength = daylight * sourceVisibility * altitudeShape * cloudSculpt;
   const t = performance.now() * 0.001;
 
+  // Project the real sun direction into a sprite rotation. We clamp the tilt so
+  // low-Sun rays look directional without ever flipping nearly horizontal.
+  const directionalTilt = sunDir
+    ? THREE.MathUtils.clamp(Math.atan2(-sunDir.x, Math.max(0.18, sunDir.y)), -0.58, 0.58)
+    : 0;
+
   for (const shaft of shafts) {
-    if (!shaft || shaft.disabled || !shaft.layers?.length) continue;
+    if (!shaft || shaft.disabled) continue;
 
-    const breathe =
-      0.96 + Math.sin(t * 0.18 * (shaft.drift || 1) + shaft.phase) * 0.04;
-
-    for (const layer of shaft.layers) {
-      layer.sprite.material.opacity =
-        shaft.baseOpacity * layer.weight * strength * breathe;
+    // Above-water legacy shafts from decorations_underwater_base.js are simple
+    // one-sprite handles. Keep them supported instead of silently skipping them.
+    if (!shaft.layers?.length) {
+      const sprite = shaft.sprite;
+      if (!sprite?.material) continue;
+      const breathe = 0.94 + Math.sin(t * 0.28 + (shaft.phase || 0)) * 0.06;
+      sprite.material.opacity = (shaft.baseOpacity || 0.3) * strength * 0.46 * breathe;
+      sprite.material.rotation = THREE.MathUtils.lerp(
+        Number(sprite.material.rotation) || 0,
+        directionalTilt,
+        0.08,
+      );
+      sprite.material.color?.copy?.(SHAFT_DAY)?.lerp?.(SHAFT_GOLD, lowSun * 0.72);
+      continue;
     }
 
-    shaft.layers[0].sprite.position.x =
-      Math.sin(t * 0.045 + shaft.phase) * 0.06;
-    shaft.layers[1].sprite.position.x =
-      Math.sin(t * 0.065 + shaft.phase * 1.2) * 0.03;
+    const breathe = 0.96 + Math.sin(t * 0.18 * (shaft.drift || 1) + shaft.phase) * 0.04;
+    const depthFade = shaft.underwater
+      ? THREE.MathUtils.lerp(1, 0.55, clamp01((shaft.depth || 0) / 34))
+      : 1;
+    const underwaterStrength = shaft.underwater
+      ? strength * depthFade * (0.82 + cloudTransmission * 0.18)
+      : strength;
+
+    for (let i = 0; i < shaft.layers.length; i++) {
+      const layer = shaft.layers[i];
+      const sprite = layer.sprite;
+      const material = sprite.material;
+      material.opacity = shaft.baseOpacity * layer.weight * underwaterStrength * breathe;
+
+      const baseRotation = shaft.baseRotations?.[i] ?? Number(material.rotation) || 0;
+      material.rotation = baseRotation + directionalTilt * (shaft.underwater ? 0.48 : 0.75);
+
+      if (shaft.underwater) {
+        material.color.copy(SHAFT_WATER_DAY).lerp(SHAFT_WATER_GOLD, lowSun * 0.34);
+      } else {
+        material.color.copy(SHAFT_DAY).lerp(SHAFT_GOLD, lowSun * 0.72);
+      }
+    }
+
+    shaft.layers[0].sprite.position.x = Math.sin(t * 0.045 + shaft.phase) * 0.06;
+    shaft.layers[1].sprite.position.x = Math.sin(t * 0.065 + shaft.phase * 1.2) * 0.03;
   }
 }
 
@@ -145,12 +211,19 @@ export function disposeLightShafts(scene, shafts) {
   for (const shaft of shafts) {
     if (!shaft) continue;
     scene.remove(shaft.sprite);
-    for (const layer of shaft.layers || []) {
-      layer.sprite.material?.dispose();
+    if (shaft.layers?.length) {
+      for (const layer of shaft.layers) layer.sprite.material?.dispose();
+    } else {
+      shaft.sprite?.material?.dispose?.();
     }
   }
 }
 
 export function createLightShaft(...args) {
-  return current.createLightShaft(...args);
+  const shaft = current.createLightShaft(...args);
+  if (shaft) {
+    shaft.underwater = false;
+    shaft.phase = Math.random() * Math.PI * 2;
+  }
+  return shaft;
 }

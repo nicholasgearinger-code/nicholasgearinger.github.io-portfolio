@@ -1,16 +1,14 @@
 // Compatibility entry point retained because main_game.js imports this module.
-// Default production path: Model 3.8 authored reference-volume clouds with
-// dramatic Sun/Moon directional lighting.
+// Default production path: Model 3.7 authored reference-volume clouds.
 //
 // Model 3.x changes the macro density architecture rather than retuning the old
 // noise field. A baked 3D atlas contains distinct towering cumulus, broken
 // cumulus, stratiform/storm and distant cloud families; Perlin/Worley remains
-// detail/erosion only. Model 3.8 keeps Model 3.7's production celestial coupling,
-// local Sun/Moon occlusion and terrain cloud shadows, then strengthens true
-// view-dependent rim/back lighting without adding ray steps or render passes.
+// detail/erosion only. Model 3.7 then adapts that proven review renderer to the
+// current production Sun/Moon system and preserves local celestial occlusion and
+// terrain cloud shadows.
 //
 // On-device rollbacks:
-//   ?cloudModel37=1 -> previous Model 3.7 production lighting
 //   ?cloudModel36=1 -> raw Model 3.6 review renderer
 //   ?cloudModel29=1 -> previous production Model 2.9
 //   ?cloudModel28=1 -> previous structured Model 2.8
@@ -18,7 +16,6 @@
 //   ?cloudModel26=1 -> Model 2.6 camera-centered/TAAU path
 //   ?cloudFallback=1 -> older known-good v1.7 renderer
 
-import * as model38 from "./volumetricClouds_r185_model38.js";
 import * as model37 from "./volumetricClouds_r185_model37.js";
 import * as model36 from "./volumetricClouds_r185_model36.js";
 import * as model29 from "./volumetricClouds_r185_model29.js";
@@ -40,9 +37,7 @@ const active = params?.has("cloudFallback")
           ? model29
           : params?.has("cloudModel36")
             ? model36
-            : params?.has("cloudModel37")
-              ? model37
-              : model38;
+            : model37;
 
 export function createVolumetricClouds(scene) {
   return active.createVolumetricClouds(scene);

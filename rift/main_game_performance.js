@@ -84,20 +84,20 @@ if (!PERF_PREVIEW) {
     `\n${injected}\n];\n\nconst injectedEditLines = extraEdits`,
   );
 
-  // main_game.js is about to execute from a Blob URL. Resolve the two bootstrap
-  // URLs against this real module directory first so its nested loader still finds
-  // the same stable source files.
-  const loaderBaseLine =
-    'const tunedLoaderUrl = new URL("./main_game_underwater_base.js", import.meta.url);';
-  const loaderModuleLine =
-    'const moduleBaseUrl = new URL("./", import.meta.url);';
-  const resolvedBaseLine =
-    `const tunedLoaderUrl = new URL("./main_game_underwater_base.js", ${JSON.stringify(moduleBaseUrl.href)});`;
-  const resolvedModuleLine =
-    `const moduleBaseUrl = new URL("./", ${JSON.stringify(moduleBaseUrl.href)});`;
+  // main_game.js is about to execute from a Blob URL. Rewrite the real two-line
+  // bootstrap as one uniquely-identifiable block. The moduleBaseUrl declaration
+  // also appears later inside main_game.js as source-code text for its own nested
+  // loader, which is why matching that single line by itself was ambiguous.
+  const loaderBootstrap = [
+    'const tunedLoaderUrl = new URL("./main_game_underwater_base.js", import.meta.url);',
+    'const moduleBaseUrl = new URL("./", import.meta.url);',
+  ].join("\n");
+  const resolvedBootstrap = [
+    `const tunedLoaderUrl = new URL("./main_game_underwater_base.js", ${JSON.stringify(moduleBaseUrl.href)});`,
+    `const moduleBaseUrl = new URL("./", ${JSON.stringify(moduleBaseUrl.href)});`,
+  ].join("\n");
 
-  source = replaceExactlyOnce(source, loaderBaseLine, resolvedBaseLine, "known-good loader URL");
-  source = replaceExactlyOnce(source, loaderModuleLine, resolvedModuleLine, "known-good module base URL");
+  source = replaceExactlyOnce(source, loaderBootstrap, resolvedBootstrap, "known-good loader bootstrap");
   source += "\n//# sourceURL=rift/main_game_performance.runtime.js\n";
 
   globalThis.__riftEnvironmentPerformance = {

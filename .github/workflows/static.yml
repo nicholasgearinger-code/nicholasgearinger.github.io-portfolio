@@ -154,6 +154,36 @@ jobs:
           p.write_text(html, encoding="utf-8")
           PY
 
+      # Environment Performance 1.0 is an A/B preview based directly on the
+      # current known-good production commit. It reduces instance-buffer updates,
+      # batches the static horizon and adds synchronized adaptive mobile DPR.
+      - name: Checkout Environment Performance 1.0 preview
+        uses: actions/checkout@v4
+        with:
+          ref: perf-environment-1
+          path: .perf-environment-preview-source
+
+      - name: Stage Environment Performance 1.0 preview
+        shell: bash
+        run: |
+          rm -rf perf-environment-build
+          mkdir -p perf-environment-build
+          rsync -a \
+            --exclude='.git' \
+            --exclude='.github' \
+            .perf-environment-preview-source/ perf-environment-build/
+          rm -rf .perf-environment-preview-source
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("perf-environment-build/index.html")
+          html = p.read_text(encoding="utf-8")
+          html = html.replace("three@0.182.0", "three@0.185.1")
+          marker = '<script>window.__riftR185StaticImportMap=true;window.__riftThreeTarget="0.185.1";window.__riftMigrationBuild="environment-performance-1-preview";</script>'
+          if marker not in html:
+              html = html.replace("</head>", marker + "</head>", 1)
+          p.write_text(html, encoding="utf-8")
+          PY
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 

@@ -8,6 +8,10 @@
 // current production Sun/Moon system and preserves local celestial occlusion and
 // terrain cloud shadows.
 //
+// SAFE lighting preview:
+//   ?cloudLightingPreview=1 -> Model 3.7 + conservative existing-uniform rim test
+// The normal URL still runs exact Model 3.7 behavior.
+//
 // On-device rollbacks:
 //   ?cloudModel36=1 -> raw Model 3.6 review renderer
 //   ?cloudModel29=1 -> previous production Model 2.9
@@ -16,6 +20,7 @@
 //   ?cloudModel26=1 -> Model 2.6 camera-centered/TAAU path
 //   ?cloudFallback=1 -> older known-good v1.7 renderer
 
+import * as lightingPreview from "./volumetricClouds_r185_model37_lighting_preview.js";
 import * as model37 from "./volumetricClouds_r185_model37.js";
 import * as model36 from "./volumetricClouds_r185_model36.js";
 import * as model29 from "./volumetricClouds_r185_model29.js";
@@ -37,7 +42,9 @@ const active = params?.has("cloudFallback")
           ? model29
           : params?.has("cloudModel36")
             ? model36
-            : model37;
+            : params?.has("cloudLightingPreview")
+              ? lightingPreview
+              : model37;
 
 export function createVolumetricClouds(scene) {
   return active.createVolumetricClouds(scene);

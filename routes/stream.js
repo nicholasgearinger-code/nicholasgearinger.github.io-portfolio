@@ -17,6 +17,7 @@
  */
 
 const bus = require('../lib/bus');
+const { corsHeaders } = require('../lib/http');
 const { computeStats } = require('./stats');
 
 const HEARTBEAT_MS = 20000; // keep intermediary proxies from timing out an idle connection
@@ -27,6 +28,7 @@ async function stream(req, res) {
     'Cache-Control': 'no-cache, no-transform',
     Connection: 'keep-alive',
     'X-Accel-Buffering': 'no', // disable buffering on proxies that respect this (e.g., nginx)
+    ...corsHeaders(req),
   });
 
   function send(payload) {

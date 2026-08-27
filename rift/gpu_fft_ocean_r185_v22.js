@@ -12,10 +12,9 @@ import { disposeOceanFFTCascade } from "./ocean_fft_cascade.js";
 // RangeError (buffer offset/length out of bounds), then lose the GPU device.
 //
 // iOS therefore uses the proven sequential two-cascade FFT submission path from
-// v19. The optional 32x32 mobile micro FFT is removed because the earlier v9
-// mobile path already documented that an additional standalone FFT could
-// invalidate Safari's WebGPU command encoder. Visual optics remain v21.
-// Desktop/non-iOS keeps v21 unchanged.
+// v19. The optional 32x32 mobile micro FFT keeps its already-bound storage
+// buffers alive for the material graph, but its compute dispatches are frozen.
+// Visual optics remain v21. Desktop/non-iOS keeps v21 unchanged.
 // -----------------------------------------------------------------------------
 
 const IOS_WEBKIT = typeof navigator !== "undefined" && (
@@ -25,18 +24,18 @@ const IOS_WEBKIT = typeof navigator !== "undefined" && (
 
 const IOS_FFT_MIN_INTERVAL = 1 / 30;
 
-function disableUnsafeMobileMicroFFT(handle) {
+function freezeUnsafeMobileMicroFFT(handle) {
   const micro = handle?.fftMobileMicroHandle;
   if (!micro) return false;
 
-  try {
-    disposeOceanFFTCascade(micro);
-  } catch (_) {
-    // Disposal is best-effort; nulling the handle prevents future dispatches.
-  }
-
+  // installMobileThreeScaleDisplacement() has already captured micro.spatialA/B
+  // in the water material node graph. Do NOT dispose those buffers here. Simply
+  // make the micro cascade ineligible for future updateOceanFFTCascade() calls
+  // and hide it from v10's per-frame updater. The zero/current buffer contents
+  // remain valid bindings until normal ocean disposal.
+  micro.gpuFFTStandalone = false;
+  handle.__riftIOSFrozenMicroFFT = micro;
   handle.fftMobileMicroHandle = null;
-  handle.fftMobileThreeScaleInstalled = false;
   handle.__riftIOSMicroFFTDisabled = true;
   return true;
 }
@@ -44,7 +43,7 @@ function disableUnsafeMobileMicroFFT(handle) {
 function installIOSSafeState(handle) {
   if (!IOS_WEBKIT || !handle?.gpuFFT || handle.__riftIOSFFTSafeV22) return;
 
-  const removedMicroFFT = disableUnsafeMobileMicroFFT(handle);
+  const frozenMicroFFT = freezeUnsafeMobileMicroFFT(handle);
   handle.__riftIOSFFTSafeV22 = true;
   handle.__riftIOSFFTLastTime = -Infinity;
   handle.__riftIOSFFTFailureCount = 0;
@@ -55,12 +54,12 @@ function installIOSSafeState(handle) {
     active: true,
     sequentialSubmission: true,
     targetHz: 30,
-    removedMicroFFT,
+    frozenMicroFFT,
     waterBackend: handle.__riftWaterProBackend ?? null,
   };
 
   console.info(
-    `[gpu-fft-ocean:r185:v22] iOS safe FFT active: sequential two-cascade submission @ <=30 Hz${removedMicroFFT ? "; mobile micro FFT removed" : ""}`,
+    `[gpu-fft-ocean:r185:v22] iOS safe FFT active: sequential two-cascade submission @ <=30 Hz${frozenMicroFFT ? "; mobile micro FFT compute frozen" : ""}`,
   );
 }
 
@@ -127,7 +126,15 @@ export function updateGPUFFTOceanRipples(...args) {
   return oceanV21.updateGPUFFTOceanRipples(...args);
 }
 
-export function disposeGPUFFTOcean(...args) {
+export function disposeGPUFFTOcean(scene, handle) {
+  const frozen = handle?.__riftIOSFrozenMicroFFT;
+  if (frozen) {
+    // Temporarily restore the standalone marker so the cascade disposer releases
+    // the buffers that were intentionally kept alive during rendering.
+    frozen.gpuFFTStandalone = true;
+    try { disposeOceanFFTCascade(frozen); } catch (_) {}
+    handle.__riftIOSFrozenMicroFFT = null;
+  }
   delete globalThis.__riftIOSFFTSafeV22;
-  return oceanV21.disposeGPUFFTOcean(...args);
+  return oceanV21.disposeGPUFFTOcean(scene, handle);
 }

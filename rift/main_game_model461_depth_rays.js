@@ -21,12 +21,21 @@ function replaceOnce(text, from, to, label) {
   return text.replace(from, to);
 }
 
-// Keep all relative runtime URLs anchored to this branch rather than the Blob.
-source = replaceOnce(
+function replaceFirst(text, from, to, label) {
+  const index = text.indexOf(from);
+  if (index < 0) {
+    throw new Error(`[rift-model461-depth-rays] Missing ${label}`);
+  }
+  return text.slice(0, index) + to + text.slice(index + from.length);
+}
+
+// 4.5.1 intentionally contains another copy of this text inside its nested
+// runtime patch template. Re-anchor only the real top-level declaration.
+source = replaceFirst(
   source,
   "const moduleUrl = import.meta.url;",
   `const moduleUrl = ${JSON.stringify(moduleUrl)};`,
-  "module URL anchor",
+  "top-level module URL anchor",
 );
 
 const injectionAnchor =
@@ -41,7 +50,7 @@ source = replaceOnce(
   "4.5.1 nested patch insertion point",
 );
 
-source += "\n;globalThis.__riftModel461Runtime={active:true,version:'4.6.1',depthCloudRays:true,sceneColorFeedback:false,threeTarget:'0.185.1'};\n";
+source += "\n;globalThis.__riftModel461Runtime={active:true,version:'4.6.1-hotfix1',depthCloudRays:true,sceneColorFeedback:false,threeTarget:'0.185.1'};\n";
 source += "\n//# sourceURL=rift/main_game_model461_depth_cloud_rays.runtime.js\n";
 
 const blob = new Blob([source], { type: "text/javascript" });

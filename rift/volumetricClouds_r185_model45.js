@@ -16,6 +16,7 @@ export * from "./volumetricClouds_r185_model441.js";
 const TMP_WARM = new THREE.Color(0xffbd72);
 const TMP_CORE = new THREE.Color(0xfff4cf);
 const TMP_SHADOW = new THREE.Color(0x68738d);
+const TMP_VIEW = new THREE.Vector3();
 
 function clamp01(v) {
   return Math.max(0, Math.min(1, Number(v) || 0));
@@ -63,9 +64,8 @@ function tuneBacklighting(handle, camera, sunDirection, sunColor, rainIntensity 
   );
   const brokenCloud = clamp01(1 - Math.abs(cloudT * 2 - 1));
 
-  const view = new THREE.Vector3();
-  camera.getWorldDirection(view);
-  const sunView = clamp01((view.dot(sunDirection) - 0.60) / 0.40);
+  camera.getWorldDirection(TMP_VIEW);
+  const sunView = clamp01((TMP_VIEW.dot(sunDirection) - 0.60) / 0.40);
   const lowSun = smoothRange(-3, 2, altitudeDeg) * (1 - smoothRange(18, 30, altitudeDeg));
   const backlight = clamp01(
     daylight
@@ -78,14 +78,14 @@ function tuneBacklighting(handle, camera, sunDirection, sunColor, rainIntensity 
   if (u.sunColor?.value?.isColor) {
     const energy = maxChannel(u.sunColor.value);
     TMP_CORE.copy(sunColor?.isColor ? sunColor : TMP_WARM)
-      .lerp(TMP_WARM, golden * 0.72)
-      .multiplyScalar((1 + backlight * 0.72) * energy / maxChannel(TMP_CORE));
+      .lerp(TMP_WARM, golden * 0.72);
+    TMP_CORE.multiplyScalar((1 + backlight * 0.72) * energy / maxChannel(TMP_CORE));
     u.sunColor.value.lerp(TMP_CORE, 0.72);
   }
 
   if (u.ambientColor?.value?.isColor) {
     const energy = maxChannel(u.ambientColor.value);
-    TMP_SHADOW.multiplyScalar(energy / maxChannel(TMP_SHADOW));
+    TMP_SHADOW.setHex(0x68738d).multiplyScalar(energy / maxChannel(TMP_SHADOW));
     u.ambientColor.value.lerp(TMP_SHADOW, backlight * 0.18);
   }
 
@@ -133,17 +133,6 @@ function tuneBacklighting(handle, camera, sunDirection, sunColor, rainIntensity 
       Number(u.m2MultiScatter.value) || target,
       target,
       0.56,
-    );
-  }
-
-  if (u.m2LightExtinction) {
-    // Preserve dark cores while allowing thin, backlit crowns to transmit more
-    // of the warm solar radiance. The silver-edge term remains the dominant rim.
-    const target = THREE.MathUtils.lerp(1.0, 0.84, backlight);
-    u.m2LightExtinction.value = THREE.MathUtils.lerp(
-      Number(u.m2LightExtinction.value) || target,
-      target,
-      0.46,
     );
   }
 

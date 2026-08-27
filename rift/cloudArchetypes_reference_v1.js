@@ -1,0 +1,2 @@
+export const REFERENCE_CLOUD_ARCHETYPES = {};
+export const REFERENCE_CLOUD_ARCHETYPE_LIST = [];

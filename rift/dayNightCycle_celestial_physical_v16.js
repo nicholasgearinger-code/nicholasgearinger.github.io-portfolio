@@ -6,13 +6,16 @@ export * from "./dayNightCycle_celestial_physical_v15.js";
 // -----------------------------------------------------------------------------
 // Celestial v16 — cloud-disc occlusion.
 //
-// Model 2.8 estimates the optical depth along the actual camera->Sun and
-// camera->Moon directions. Apply that result AFTER the preserved photographic
-// celestial stack has authored its normal opacities, so a real cloud crossing a
-// celestial body progressively hides the hard disc/core while leaving a softer
-// diffuse halo behind it. No render-time callbacks and no new pass — safe on the
-// same iOS/WebGPU path stabilized by v15.
+// Model 3.7 estimates optical depth along the camera->Sun and camera->Moon
+// directions. Apply that result AFTER the preserved photographic celestial stack
+// authors its normal opacities. The optional cloudLightingPreview keeps the same
+// render graph but uses a more photographic transfer curve: unobscured Sun is
+// hotter/brighter, cloud cover kills the hard disc quickly, and a softer halo
+// survives just long enough to feed cloud-edge backlighting.
 // -----------------------------------------------------------------------------
+
+const PREVIEW_ENABLED = typeof location !== "undefined"
+  && new URLSearchParams(location.search).has("cloudLightingPreview");
 
 function clamp01(v) {
   return Math.max(0, Math.min(1, Number(v) || 0));
@@ -30,18 +33,22 @@ function multiplyMaterials(materials, factor) {
 function applyCloudDiscOcclusion(cycle) {
   if (!cycle) return;
 
-  const sunOcclusion = clamp01(globalThis.__riftSunDiskOcclusion || 0);
+  const previewLocal = Number(globalThis.__riftLocalSunCloudOcclusion);
+  const sunOcclusion = PREVIEW_ENABLED && Number.isFinite(previewLocal)
+    ? clamp01(previewLocal)
+    : clamp01(globalThis.__riftSunDiskOcclusion || 0);
   const moonOcclusion = clamp01(globalThis.__riftMoonDiskOcclusion || 0);
 
-  // Dense cloud kills the hard solar image quickly. Diffuse glare survives much
-  // longer because cloud droplets forward-scatter the hidden source around the
-  // cloud edge — exactly the bright/silver rim seen in photographic references.
-  const sunDiscTransmission = Math.pow(1 - sunOcclusion, 2.35);
-  const sunHaloTransmission = THREE.MathUtils.lerp(
-    1.0,
-    0.24,
-    Math.pow(sunOcclusion, 0.82),
-  );
+  // Normal production keeps the proven v16 transfer curve. The opt-in preview
+  // makes the hard solar image far more decisive: brilliant when clear, rapidly
+  // extinguished by a real cloud column. The broader aureole survives longer so
+  // cloud edges can glow without the white disc visibly punching through them.
+  const sunDiscTransmission = PREVIEW_ENABLED
+    ? 1.32 * Math.pow(1 - sunOcclusion, 5.0)
+    : Math.pow(1 - sunOcclusion, 2.35);
+  const sunHaloTransmission = PREVIEW_ENABLED
+    ? THREE.MathUtils.lerp(1.48, 0.10, Math.pow(sunOcclusion, 0.70))
+    : THREE.MathUtils.lerp(1.0, 0.24, Math.pow(sunOcclusion, 0.82));
 
   const visual = cycle.__riftRealSun;
   const photo = cycle.__riftPhotometricSunV7;
@@ -61,26 +68,28 @@ function applyCloudDiscOcclusion(cycle) {
     cycle.sunBody?.glow?.material,
   ], sunHaloTransmission);
 
-  // Local direct illumination drops when the player is under the same cloud
-  // column that hides the Sun. Ambient sky light stays untouched, so this reads
-  // as a passing cloud shadow instead of the entire world fading to black.
+  // Local direct illumination falls sharply under the cloud that hides the Sun,
+  // while ambient sky light remains intact. Clear preview Sun gets a tiny direct
+  // boost so the source and its water/terrain response feel energetically linked.
   if (cycle.sun) {
-    cycle.sun.intensity *= THREE.MathUtils.lerp(1.0, 0.46, sunOcclusion);
+    cycle.sun.intensity *= PREVIEW_ENABLED
+      ? THREE.MathUtils.lerp(1.06, 0.12, Math.pow(sunOcclusion, 0.74))
+      : THREE.MathUtils.lerp(1.0, 0.46, sunOcclusion);
   }
 
   const optics = globalThis.__riftCelestialOpticsV14;
   if (optics) {
     optics.sourceVisibility = clamp01(
       (Number(optics.sourceVisibility) || 0)
-      * THREE.MathUtils.lerp(1.0, 0.18, sunOcclusion),
+      * (PREVIEW_ENABLED
+        ? THREE.MathUtils.lerp(1.0, 0.045, Math.pow(sunOcclusion, 0.72))
+        : THREE.MathUtils.lerp(1.0, 0.18, sunOcclusion)),
     );
     optics.sunDiskOcclusion = sunOcclusion;
     optics.moonDiskOcclusion = moonOcclusion;
   }
 
-  // Moonlight is much weaker and visually broader. Preserve the existing lunar
-  // phase mask; cloud occlusion simply attenuates whatever illuminated fraction
-  // that mask currently exposes.
+  // Moonlight stays phase-aware and follows the established softer attenuation.
   const moonDiscTransmission = Math.pow(1 - moonOcclusion, 1.65);
   const moonHaloTransmission = THREE.MathUtils.lerp(1.0, 0.32, moonOcclusion);
   multiplyMaterials([
@@ -95,7 +104,10 @@ function applyCloudDiscOcclusion(cycle) {
   }
 
   globalThis.__riftCelestialV16 = {
-    version: "16-cloud-disc-occlusion",
+    version: PREVIEW_ENABLED
+      ? "16-cloud-disc-occlusion-preview-v3"
+      : "16-cloud-disc-occlusion",
+    preview: PREVIEW_ENABLED,
     sunOcclusion,
     moonOcclusion,
     sunDiscTransmission,

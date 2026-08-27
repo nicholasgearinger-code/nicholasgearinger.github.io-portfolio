@@ -51,7 +51,7 @@ if (!PERF_PREVIEW) {
     ],
     [
       'import { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers, getEffectiveValue, setOverride, resetOverrides, getTierRawSettings } from "./graphicsSettings.js";',
-      'import { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers, getEffectiveValue, setOverride, resetOverrides, getTierRawSettings } from "./graphicsSettings.js";\nimport { getRiftInitialPixelRatio, updateRiftPerformanceGovernor } from "./performanceGovernor.js";',
+      'import { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers, getEffectiveValue, setOverride, resetOverrides, getTierRawSettings } from "./graphicsSettings.js";\nimport { getRiftInitialPixelRatio, updateRiftPerformanceGovernor, setRiftPerformanceResizeHandler } from "./performanceGovernor.js";',
       "mobile adaptive resolution governor import",
     ],
     [
@@ -60,8 +60,18 @@ if (!PERF_PREVIEW) {
       "mobile adaptive initial pixel ratio",
     ],
     [
+      '    renderer.setPixelRatio(Math.min(window.devicePixelRatio, getGraphicsSettings().pixelRatioCap));',
+      '    const adaptivePixelRatio = Number(globalThis.__riftPerformanceGovernor?.pixelRatio);\n    renderer.setPixelRatio(Number.isFinite(adaptivePixelRatio) ? adaptivePixelRatio : Math.min(window.devicePixelRatio, getGraphicsSettings().pixelRatioCap));',
+      "keep adaptive DPR inside existing resize pipeline",
+    ],
+    [
+      'new ResizeObserver(resizeToViewport).observe(viewport);',
+      'setRiftPerformanceResizeHandler(resizeToViewport);\nnew ResizeObserver(resizeToViewport).observe(viewport);',
+      "register synchronized adaptive resize handler",
+    ],
+    [
       'const dt = Math.min(clock.getDelta(), 0.1);',
-      'const dt = Math.min(clock.getDelta(), 0.1);\n  updateRiftPerformanceGovernor(renderer, dt, viewport, getGraphicsSettings());',
+      'const dt = Math.min(clock.getDelta(), 0.1);\n  updateRiftPerformanceGovernor(renderer, dt, viewport, getGraphicsSettings(), resolutionOverride);',
       "mobile adaptive resolution frame governor",
     ],
   ];

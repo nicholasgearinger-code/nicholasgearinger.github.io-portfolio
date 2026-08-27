@@ -1,49 +1,43 @@
 // Compatibility entry point retained because main_game.js imports this module.
-// Rift Cloud Model 2.9 is the default r185.1 path. It preserves Model 2.8's
-// structured cumulus, Sun/Moon occlusion and moving terrain shadows, then adds
-// stronger photographic cloud-family separation and dynamic sunrise/sunset
-// backlighting without increasing the mobile ray-march budget.
+// Default production path: Model 3.7 authored reference-volume clouds.
 //
-// Rollbacks remain available on-device:
-//   ?cloudModel28=1  -> previous structured cumulus / occlusion / shadow pass
-//   ?cloudModel27=1  -> previous dual-celestial scattering pass
-//   ?cloudModel26=1  -> previous Model 2.6 camera-centered path
-//   ?cloudModel25=1  -> previous Model 2.5 temporal-stability pass
-//   ?cloudModel24=1  -> previous atmosphere-coupled Model 2.4
-//   ?cloudModel22=1  -> earlier known-good Model 2.2
+// Model 3.x changes the macro density architecture rather than retuning the old
+// noise field. A baked 3D atlas contains distinct towering cumulus, broken
+// cumulus, stratiform/storm and distant cloud families; Perlin/Worley remains
+// detail/erosion only. Model 3.7 then adapts that proven review renderer to the
+// current production Sun/Moon system and preserves local celestial occlusion and
+// terrain cloud shadows.
+//
+// On-device rollbacks:
+//   ?cloudModel36=1 -> raw Model 3.6 review renderer
+//   ?cloudModel29=1 -> previous production Model 2.9
+//   ?cloudModel28=1 -> previous structured Model 2.8
+//   ?cloudModel27=1 -> previous dual-celestial Model 2.7
+//   ?cloudModel26=1 -> Model 2.6 camera-centered/TAAU path
 //   ?cloudFallback=1 -> older known-good v1.7 renderer
 
+import * as model37 from "./volumetricClouds_r185_model37.js";
+import * as model36 from "./volumetricClouds_r185_model36.js";
 import * as model29 from "./volumetricClouds_r185_model29.js";
 import * as model28 from "./volumetricClouds_r185_model28.js";
 import * as model27 from "./volumetricClouds_r185_model27.js";
 import * as model26 from "./volumetricClouds_r185_model26.js";
-import * as model25 from "./volumetricClouds_r185_model25.js";
-import * as model24 from "./volumetricClouds_r185_model24.js";
-import * as model22 from "./volumetricClouds_r185_model22.js";
 import * as fallback from "./volumetricClouds_r185_v17.js";
 
-const params = typeof location !== "undefined"
-  ? new URLSearchParams(location.search)
-  : null;
-const forceFallback = params?.has("cloudFallback") === true;
-const forceModel22 = params?.has("cloudModel22") === true;
-const forceModel24 = params?.has("cloudModel24") === true;
-const forceModel25 = params?.has("cloudModel25") === true;
-const forceModel26 = params?.has("cloudModel26") === true;
-const forceModel27 = params?.has("cloudModel27") === true;
-const forceModel28 = params?.has("cloudModel28") === true;
-
-const active = forceFallback
+const params = typeof location !== "undefined" ? new URLSearchParams(location.search) : null;
+const active = params?.has("cloudFallback")
   ? fallback
-  : (forceModel22
-    ? model22
-    : (forceModel24
-      ? model24
-      : (forceModel25
-        ? model25
-        : (forceModel26
-          ? model26
-          : (forceModel27 ? model27 : (forceModel28 ? model28 : model29))))));
+  : params?.has("cloudModel26")
+    ? model26
+    : params?.has("cloudModel27")
+      ? model27
+      : params?.has("cloudModel28")
+        ? model28
+        : params?.has("cloudModel29")
+          ? model29
+          : params?.has("cloudModel36")
+            ? model36
+            : model37;
 
 export function createVolumetricClouds(scene) {
   return active.createVolumetricClouds(scene);

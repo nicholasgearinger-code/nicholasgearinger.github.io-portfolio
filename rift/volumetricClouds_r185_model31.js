@@ -20,53 +20,49 @@ import {
   max as tslMax,
   min as tslMin,
 } from "three/tsl";
-import * as base from "./volumetricClouds_r185_model26.js";
-import { createReferenceCloudAtlas } from "./cloudReferenceVolumeAtlas.js";
+import * as base from "./volumetricClouds_r185_model30.js";
+import { createReferenceCloudAtlas } from "./cloudReferenceVolumeAtlas_v2.js";
 import {
   computeReferenceCloudState,
-  updateReferenceCloudAdvection,
-} from "./cloudInstanceDirector_reference_v1.js";
+} from "./cloudInstanceDirector_reference_v2.js";
 
-export * from "./volumetricClouds_r185_model26.js";
+export * from "./volumetricClouds_r185_model30.js";
 
 // -----------------------------------------------------------------------------
-// Rift Cloud Model 3.0 — reference-shaped volumetric clouds.
+// Rift Cloud Model 3.1 — crown structure + authored self-shadowing.
 //
-// Model 2 used Perlin-Worley noise as both macro silhouette and fine structure.
-// Model 3 makes the authored reference atlas the macro density source. Procedural
-// noise is retained only as interior variation, edge erosion and motion detail.
-// The existing r185 temporal pass, TAAU, camera-centered launch surface, weather
-// integration, cloud shadow system and mobile quality tiers remain intact.
+// 3.0 proved the reference-shaped architecture. 3.1 deliberately leaves the
+// successful r185/TAAU path alone and improves the two weakest visual layers:
+//   1) authored macro volumes now contain many more independent cauliflower crowns
+//      and a less slab-like storm deck;
+//   2) the same reference density that makes the visible silhouette now controls
+//      directional optical depth, core shadow, darker flat bases and crown light.
+//
+// Perlin-Worley remains detail only. No extra full-screen pass and no additional
+// 3D texture lookup is added to the view march versus Model 3.0.
 // -----------------------------------------------------------------------------
 
-function installModel3Uniforms(handle) {
-  if (!handle?.uniforms || handle.__riftModel3UniformsInstalled) return;
+function installModel31Uniforms(handle) {
+  if (!handle?.uniforms || handle.__riftModel31UniformsInstalled) return;
   const u = handle.uniforms;
-  u.m3ReferenceOffset = uniform(new THREE.Vector2());
-  u.m3ReferenceWeights = uniform(new THREE.Vector4(1, 0.62, 0, 0.64));
-  u.m3ReferenceWorldScale = uniform(1 / 1080);
-  u.m3ReferenceStrength = uniform(0.95);
-  handle.__riftModel3UniformsInstalled = true;
+  u.m31CrownBreakup = uniform(0.9);
+  u.m31SelfShadow = uniform(0.95);
+  u.m31BaseDarkening = uniform(0.5);
+  u.m31CrownLightBoost = uniform(1.12);
+  handle.__riftModel31UniformsInstalled = true;
 }
 
-function atlasSizeFor(handle) {
-  const label = handle?.__riftModel2Quality?.label;
-  if (label === "mobile-low") return { width: 64, height: 40, depth: 64 };
-  if (label === "medium") return { width: 80, height: 48, depth: 80 };
-  return { width: 96, height: 56, depth: 96 };
-}
-
-function installModel3Shader(handle) {
+function installModel31Shader(handle) {
   if (
     !handle?.material ||
     !handle?.__riftModel3Atlas?.texture ||
     !handle?.__riftModel2Volumes?.baseTexture ||
     !handle?.__riftModel2Volumes?.detailTexture ||
     !handle?.uniforms ||
-    handle.__riftModel3ShaderInstalled
+    handle.__riftModel31ShaderInstalled
   ) return;
 
-  installModel3Uniforms(handle);
+  installModel31Uniforms(handle);
 
   const u = handle.uniforms;
   const referenceTex = handle.__riftModel3Atlas.texture;
@@ -151,21 +147,21 @@ function installModel3Shader(handle) {
           .fract();
         const warpNoise = texture3D(baseTex, warpUV);
         const warpVector = vec3(warpNoise.g, warpNoise.b, warpNoise.a).sub(0.5);
-        const crownWarp = smoothstep(float(0.18), float(0.94), height01)
+        const crownWarp = smoothstep(float(0.16), float(0.90), height01)
           .mul(u.convection);
         const warpStrength = u.m2DomainWarp
-          .mul(float(0.28).add(crownWarp.mul(0.72)));
+          .mul(float(0.24).add(crownWarp.mul(0.76)));
         const densityPos = pos.add(vec3(
           warpVector.x.mul(warpStrength),
-          warpVector.y.mul(warpStrength).mul(0.18),
+          warpVector.y.mul(warpStrength).mul(0.17),
           warpVector.z.mul(warpStrength),
         ));
 
         const referenceRaw = sampleReference(densityPos, height01);
-        const referenceThreshold = mix(float(0.46), float(0.12), u.coverage);
+        const referenceThreshold = mix(float(0.47), float(0.12), u.coverage);
         const referenceMass = smoothstep(
           referenceThreshold,
-          referenceThreshold.add(0.22),
+          referenceThreshold.add(0.205),
           referenceRaw,
         );
 
@@ -185,8 +181,24 @@ function installModel3Shader(handle) {
           densityThreshold.add(0.235),
           broadSignal,
         );
-        const interiorVariation = mix(float(0.82), float(1.12), broadSignal);
-        const authoredMass = referenceMass.mul(interiorVariation);
+
+        // Model 3.1 crown breakup: the authored atlas remains the silhouette, but
+        // upper cloud mass exposes more of the existing broad Worley structure.
+        // The flat condensation base is intentionally excluded from this modulation.
+        const crownZone = smoothstep(float(0.20), float(0.72), height01)
+          .mul(float(1).sub(u.stormDarken.mul(0.58)));
+        const crownScallop = float(0.74)
+          .add(baseNoise.g.mul(0.22))
+          .add(baseNoise.b.mul(0.16));
+        const crownMod = mix(
+          float(1),
+          crownScallop,
+          crownZone.mul(u.m31CrownBreakup),
+        );
+        const interiorVariation = mix(float(0.86), float(1.10), broadSignal);
+        const authoredMass = referenceMass
+          .mul(interiorVariation)
+          .mul(crownMod);
         const macroMass = mix(
           proceduralMass,
           authoredMass,
@@ -204,8 +216,8 @@ function installModel3Shader(handle) {
 
         const hitWeight = smoothstep(float(0.0035), float(0.080), coarseDensity);
         const adaptiveAdvance = mix(
-          nominalStep.mul(2.45),
-          nominalStep.mul(0.70),
+          nominalStep.mul(2.50),
+          nominalStep.mul(0.69),
           hitWeight,
         ).toVar();
 
@@ -220,78 +232,114 @@ function installModel3Shader(handle) {
             .add(detail.g.mul(0.25))
             .add(detail.b.mul(0.125));
 
-          const edgeEnter = smoothstep(float(0.010), float(0.22), coarseDensity);
+          const edgeEnter = smoothstep(float(0.010), float(0.21), coarseDensity);
           const edgeExit = float(1).sub(
-            smoothstep(float(0.52), float(0.93), coarseDensity),
+            smoothstep(float(0.50), float(0.92), coarseDensity),
           );
           const edgeBand = edgeEnter.mul(edgeExit);
+          const crownErosion = mix(
+            float(1),
+            float(1.42),
+            crownZone.mul(u.m31CrownBreakup),
+          );
           const erosionSignal = float(1).sub(detailFbm);
           const erosionAmount = erosionSignal
             .mul(u.m2EdgeErosion)
             .mul(u.erosion)
             .mul(edgeBand)
-            .mul(float(1).sub(u.stormDarken.mul(0.28)));
+            .mul(crownErosion)
+            .mul(float(1).sub(u.stormDarken.mul(0.34)));
           const localDensity = clamp(
             coarseDensity.sub(erosionAmount),
             0,
             1,
           );
 
+          // Reference-aware self shadow. The light march follows the authored
+          // atlas at three distances, then a cheap local core term restores the
+          // dense gray-blue interior without adding another texture lookup.
           const opticalDepth = float(0).toVar();
           Loop(LIGHT_STEPS, ({ i }) => {
-            const lightDistance = float(17).mul(float(i).add(1));
+            const lightDistance = float(11).add(float(i).mul(19));
             const lp = pos.add(u.sunDir.mul(lightDistance));
             const lh = clamp(lp.y.sub(u.cloudBaseY).div(slabThickness), 0, 1);
             const lref = sampleReference(lp, lh);
             const lshape = smoothstep(
               referenceThreshold,
-              referenceThreshold.add(0.22),
+              referenceThreshold.add(0.205),
               lref,
             );
+            const lcore = lshape.mul(float(0.80).add(lref.mul(0.34)));
+            const lowerOpticalWeight = mix(
+              float(1.13),
+              float(0.92),
+              smoothstep(float(0.10), float(0.78), lh),
+            );
             opticalDepth.addAssign(
-              lshape
+              lcore
+                .mul(lowerOpticalWeight)
                 .mul(u.m2DensityScale)
                 .mul(float(0.82).add(u.humidity.mul(0.18))),
             );
           });
 
-          const lightDepth = opticalDepth.mul(u.m2LightExtinction);
+          const authoredCore = smoothstep(float(0.38), float(0.88), referenceMass);
+          const localCoreDepth = authoredCore
+            .mul(u.m31SelfShadow)
+            .mul(float(0.46));
+          const lightDepth = opticalDepth
+            .mul(u.m2LightExtinction)
+            .mul(u.m31SelfShadow)
+            .add(localCoreDepth);
           const beer0 = exp(lightDepth.negate());
           const beer1 = exp(lightDepth.mul(-0.50));
           const beer2 = exp(lightDepth.mul(-0.25));
           const multiScatter = beer0.mul(phase0)
             .add(beer1.mul(phase1).mul(0.50))
             .add(beer2.mul(phase2).mul(0.25))
-            .add(u.m2MultiScatter.mul(0.085));
+            .add(u.m2MultiScatter.mul(0.080));
 
           const powder = float(1).sub(exp(localDensity.mul(-2.35)));
-          const heightLight = smoothstep(float(0.04), float(0.79), height01);
-          const coolAmbient = u.ambientColor.mul(vec3(0.72, 0.83, 1.00));
-          const shadowAmbient = u.ambientColor.mul(vec3(0.46, 0.56, 0.73));
+          const heightLight = smoothstep(float(0.035), float(0.78), height01);
+          const underside = float(1).sub(
+            smoothstep(float(0.055), float(0.30), height01),
+          );
+          const crownLight = smoothstep(float(0.35), float(0.82), height01)
+            .mul(crownZone)
+            .mul(u.m31CrownLightBoost);
+
+          const coolAmbient = u.ambientColor.mul(vec3(0.70, 0.82, 1.00));
+          const shadowAmbient = u.ambientColor.mul(vec3(0.43, 0.54, 0.72));
+          const baseAmbient = shadowAmbient.mul(
+            float(1).sub(underside.mul(u.m31BaseDarkening).mul(0.42)),
+          );
           const ambientMix = mix(
-            shadowAmbient,
+            baseAmbient,
             coolAmbient,
-            heightLight.mul(0.62).add(powder.mul(0.20)),
+            heightLight.mul(0.62).add(powder.mul(0.18)),
           ).mul(u.m2AmbientStrength);
+
           const directLight = u.sunColor
             .mul(multiScatter)
-            .mul(float(0.84).add(heightLight.mul(0.48)));
+            .mul(float(0.78).add(heightLight.mul(0.48)).add(crownLight.mul(0.18)))
+            .mul(float(1).sub(underside.mul(u.m31BaseDarkening).mul(0.34)));
           const silverEdge = u.sunColor
-            .mul(pow(float(1).sub(referenceMass), 2.35))
+            .mul(pow(float(1).sub(referenceMass), 2.45))
             .mul(phase0)
             .mul(u.m2SilverStrength)
-            .mul(float(1).sub(u.stormDarken.mul(0.58)));
+            .mul(float(1).sub(u.stormDarken.mul(0.62)));
+
           const litClear = ambientMix.add(directLight).add(silverEdge);
           const lit = mix(
             litClear,
-            shadowAmbient.mul(0.78).add(directLight.mul(0.56)),
-            u.stormDarken.mul(0.72),
+            baseAmbient.mul(0.80).add(directLight.mul(0.48)),
+            u.stormDarken.mul(0.76),
           );
           const flash = u.lightningColor
             .mul(u.lightningFlash)
-            .mul(float(0.55).add(localDensity.mul(1.35)));
+            .mul(float(0.50).add(localDensity.mul(1.20)));
 
-          const extinction = mix(float(0.036), float(0.074), u.stormDarken);
+          const extinction = mix(float(0.036), float(0.076), u.stormDarken);
           const sampleAlpha = float(1).sub(
             exp(localDensity.mul(adaptiveAdvance).mul(extinction).negate()),
           );
@@ -315,37 +363,42 @@ function installModel3Shader(handle) {
   })();
 
   handle.material.needsUpdate = true;
-  handle.__riftModel3ShaderInstalled = true;
+  handle.__riftModel31ShaderInstalled = true;
   console.info(
-    `[clouds] Rift Cloud Model 3 reference-shaped density active (${RAY_STEPS} view / ${LIGHT_STEPS} light samples; atlas ${handle.__riftModel3Atlas.width}x${handle.__riftModel3Atlas.height}x${handle.__riftModel3Atlas.depth})`,
+    `[clouds] Rift Cloud Model 3.1 active (${RAY_STEPS} view / ${LIGHT_STEPS} authored self-shadow samples; atlas ${handle.__riftModel3Atlas.width}x${handle.__riftModel3Atlas.height}x${handle.__riftModel3Atlas.depth})`,
   );
 }
 
-function tuneModel3(handle, dt, sunDirection, windX, windZ, rainIntensity) {
-  if (!handle?.uniforms || !handle.__riftModel3State) return;
+function tuneModel31(handle, sunDirection, rainIntensity) {
+  if (!handle?.uniforms) return null;
   const u = handle.uniforms;
   const state = computeReferenceCloudState({
     sunDirection,
     rainIntensity,
   });
-  const offset = updateReferenceCloudAdvection(handle, dt, windX, windZ);
 
-  u.m3ReferenceOffset.value.copy(offset);
+  // Model 3.0 owns advection and the reference offset. 3.1 only replaces the
+  // meteorological weights and visual/lighting controls after the base update.
   u.m3ReferenceWeights.value.set(...state.weights);
   u.m3ReferenceWorldScale.value = state.worldScale;
   u.m3ReferenceStrength.value = state.referenceStrength;
-
   u.m2EdgeErosion.value = state.edgeErosion;
   u.m2DetailScale.value = state.detailScale;
   u.m2DensityScale.value = state.densityScale;
   u.m2LightExtinction.value = state.extinction;
   u.m2AmbientStrength.value = state.ambientStrength;
   u.m2SilverStrength.value = state.silverStrength;
-  u.m2MultiScatter.value = THREE.MathUtils.lerp(0.27, 0.20, state.storm);
+  u.m2MultiScatter.value = THREE.MathUtils.lerp(0.28, 0.19, state.storm);
+  u.m31CrownBreakup.value = state.crownBreakup;
+  u.m31SelfShadow.value = state.selfShadowStrength;
+  u.m31BaseDarkening.value = state.baseDarkening;
+  u.m31CrownLightBoost.value = state.crownLightBoost;
 
-  const fairBase = THREE.MathUtils.lerp(57, 49, state.humidity);
-  const baseY = THREE.MathUtils.lerp(fairBase, 34, state.storm);
-  const fairTop = baseY + 160 + state.convection * 44;
+  // Keep fair-weather bases visually flat and give the new small crowns enough
+  // vertical room without increasing the maximum storm slab from Model 3.0.
+  const fairBase = THREE.MathUtils.lerp(56, 48, state.humidity);
+  const baseY = THREE.MathUtils.lerp(fairBase, 33, state.storm);
+  const fairTop = baseY + 168 + state.convection * 50;
   const topY = THREE.MathUtils.lerp(fairTop, baseY + 238, state.storm);
   u.cloudBaseY.value = baseY;
   u.cloudTopY.value = topY;
@@ -356,26 +409,32 @@ function tuneModel3(handle, dt, sunDirection, windX, windZ, rainIntensity) {
   if (temporal?.displayMesh) temporal.displayMesh.position.y = baseY;
 
   if (handle.__riftCirrus?.material) {
-    const cirrus = THREE.MathUtils.lerp(0.015, 0.004, state.storm);
-    handle.__riftCirrus.material.opacity = cirrus * THREE.MathUtils.lerp(1.0, 0.68, state.humidity);
+    const cirrus = THREE.MathUtils.lerp(0.012, 0.0035, state.storm);
+    handle.__riftCirrus.material.opacity = cirrus
+      * THREE.MathUtils.lerp(1.0, 0.72, state.humidity);
   }
 
-  globalThis.__riftCloudModel3Debug = {
+  const offset = u.m3ReferenceOffset?.value;
+  globalThis.__riftCloudModel31Debug = {
     active: true,
-    version: "3.0-reference-shaped-volumetrics",
-    architecture: "RGBA baked reference macro atlas + Perlin-Worley shell erosion + Beer-Lambert lighting + existing r185 TAAU",
+    version: "3.1-crown-self-shadow",
+    architecture: "reference archetype atlas v2 + crown-only shell breakup + authored directional self-shadow + r185 TAAU",
     atlas: {
-      width: handle.__riftModel3Atlas.width,
-      height: handle.__riftModel3Atlas.height,
-      depth: handle.__riftModel3Atlas.depth,
-      bytes: handle.__riftModel3Atlas.bytes,
+      width: handle.__riftModel3Atlas?.width,
+      height: handle.__riftModel3Atlas?.height,
+      depth: handle.__riftModel3Atlas?.depth,
+      bytes: handle.__riftModel3Atlas?.bytes,
     },
     weights: [...state.weights],
     referenceStrength: state.referenceStrength,
     worldScale: state.worldScale,
-    offset: [offset.x, offset.y],
+    offset: offset ? [offset.x, offset.y] : [0, 0],
     baseY,
     topY,
+    crownBreakup: state.crownBreakup,
+    selfShadowStrength: state.selfShadowStrength,
+    baseDarkening: state.baseDarkening,
+    crownLightBoost: state.crownLightBoost,
     storm: state.storm,
     humidity: state.humidity,
     convection: state.convection,
@@ -384,20 +443,27 @@ function tuneModel3(handle, dt, sunDirection, windX, windZ, rainIntensity) {
     night: state.night,
     threeRevision: THREE.REVISION,
   };
+
+  return state;
+}
+
+function atlasSizeFor(handle) {
+  const label = handle?.__riftModel2Quality?.label;
+  if (label === "mobile-low") return { width: 64, height: 44, depth: 64 };
+  if (label === "medium") return { width: 80, height: 52, depth: 80 };
+  return { width: 96, height: 60, depth: 96 };
 }
 
 export function createVolumetricClouds(scene) {
   const handle = base.createVolumetricClouds(scene);
   if (!handle) return handle;
 
-  installModel3Uniforms(handle);
+  // Replace Model 3.0's first-generation atlas before either Model 3 shader is
+  // compiled. The v2 atlas has more crown lobes and a sharper flat base.
+  handle.__riftModel3Atlas?.dispose?.();
   handle.__riftModel3Atlas = createReferenceCloudAtlas(atlasSizeFor(handle));
-  handle.__riftModel3State = {
-    offsetX: Math.random(),
-    offsetZ: Math.random(),
-    age: Math.random() * 120,
-  };
-  handle.__riftModel3ShaderInstalled = false;
+  installModel31Uniforms(handle);
+  handle.__riftModel31ShaderInstalled = false;
   return handle;
 }
 
@@ -431,18 +497,15 @@ export function updateVolumetricClouds(
   );
 
   if (!handle || !camera) return;
-  installModel3Shader(handle);
-  tuneModel3(handle, dt, sunDirection, windX, windZ, rainIntensity);
+  installModel31Shader(handle);
+  tuneModel31(handle, sunDirection, rainIntensity);
 }
 
 export function disposeVolumetricClouds(handle) {
-  handle?.__riftModel3Atlas?.dispose?.();
   if (handle) {
-    handle.__riftModel3Atlas = null;
-    handle.__riftModel3State = null;
-    handle.__riftModel3ShaderInstalled = false;
-    handle.__riftModel3UniformsInstalled = false;
+    handle.__riftModel31ShaderInstalled = false;
+    handle.__riftModel31UniformsInstalled = false;
   }
-  delete globalThis.__riftCloudModel3Debug;
+  delete globalThis.__riftCloudModel31Debug;
   return base.disposeVolumetricClouds(handle);
 }

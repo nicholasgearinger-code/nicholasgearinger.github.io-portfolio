@@ -1,1 +1,0 @@
-Model 3.7 dependency promotion is assembled from the existing cloud-model3-reference-volumetrics-v2 blobs.

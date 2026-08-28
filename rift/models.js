@@ -1,7 +1,100 @@
 import * as THREE from "three";
 import * as current from "./models_lighting_base.js";
+import "./ktx2ModelSupport.js";
 
 export * from "./models_lighting_base.js";
+
+// -----------------------------------------------------------------------------
+// Environment Performance 1.2 — KTX2-safe model warm-up.
+//
+// runtime_bootstrap_v3 intentionally preloads models before main_game creates the
+// WebGPU renderer. That was fine for ordinary embedded PNG/JPEG GLBs, but a KTX2
+// GLB needs KTX2Loader.detectSupport(renderer) before GLTFLoader can decode the
+// KHR_texture_basisu images. During preflight we therefore FETCH ONLY. The exact
+// compressed GLB bytes are warmed into the browser cache, then the original model
+// loaders parse them after WebGPURenderer.init() has completed. ktx2ModelSupport.js
+// transparently attaches a shared KTX2Loader at that point.
+// -----------------------------------------------------------------------------
+
+const prefetchPromises = new Map();
+
+function rendererReady() {
+  return globalThis.__riftRuntimePreloader?.rendererReady === true;
+}
+
+function prefetchModel(filename) {
+  const url = new URL(`models/${filename}`, import.meta.url).href;
+  if (prefetchPromises.has(url)) return prefetchPromises.get(url);
+
+  const promise = fetch(url, { cache: "force-cache" })
+    .then((response) => {
+      if (!response.ok) throw new Error(`${filename}: HTTP ${response.status}`);
+      return response.arrayBuffer();
+    })
+    .then((buffer) => {
+      globalThis.__riftKTX2Prefetch = globalThis.__riftKTX2Prefetch || {
+        files: 0,
+        bytes: 0,
+      };
+      globalThis.__riftKTX2Prefetch.files++;
+      globalThis.__riftKTX2Prefetch.bytes += buffer.byteLength;
+      return null;
+    });
+
+  prefetchPromises.set(url, promise);
+  return promise;
+}
+
+const CORAL_FILES = {
+  stylaster: "stylaster.glb",
+  pocillopora: "pocillopora.glb",
+  goniastrea: "goniastrea.glb",
+  meandrina: "meandrina.glb",
+  heliopora: "heliopora.glb",
+  acropora: "acropora.glb",
+  distichopora: "distichopora.glb",
+};
+
+const TREE_FILES = {
+  coconut_low_poly: "coconut_low_poly.glb",
+  coconut_palm: "coconut_palm.glb",
+  palm_001: "palm_trees.glb",
+  palm_002: "palm_trees.glb",
+};
+
+export function loadAngelfishModel() {
+  return rendererReady()
+    ? current.loadAngelfishModel()
+    : prefetchModel("angelfish.glb");
+}
+
+export function loadCoralModel(species) {
+  const filename = CORAL_FILES[species];
+  if (!filename) return Promise.reject(new Error(`Unknown coral species: ${species}`));
+  return rendererReady()
+    ? current.loadCoralModel(species)
+    : prefetchModel(filename);
+}
+
+export function loadTreeModel(species) {
+  const filename = TREE_FILES[species];
+  if (!filename) return Promise.reject(new Error(`Unknown tree species: ${species}`));
+  return rendererReady()
+    ? current.loadTreeModel(species)
+    : prefetchModel(filename);
+}
+
+export function loadSpongeModel() {
+  return rendererReady()
+    ? current.loadSpongeModel()
+    : prefetchModel("9_aplysina_fistularis.glb");
+}
+
+export function loadPlantModel() {
+  return rendererReady()
+    ? current.loadPlantModel()
+    : prefetchModel("tropical_plant.glb");
+}
 
 // These two source assets are not currently usable in the deployed repo:
 // - models/reef.glb is absent, so requesting it always produces a 404.

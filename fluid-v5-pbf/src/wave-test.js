@@ -1,15 +1,15 @@
 // Fluid V5 bootstrap. The HTML shell is inherited from V4.4, so mark the build immediately,
 // then wait for the validated V4.4 renderer to expose its runtime handles before mounting V5.
 
-const V5_BUILD = 'M3.4.4 HDR TIME OF DAY + BRIGHT NIGHT FLOODS';
+const V5_BUILD = 'M3.4.5 USER PANORAMAS + BLACK NIGHT + BRIGHT FLOODS';
 document.title = `Fluid V5 · ${V5_BUILD}`;
 const earlyBrand = document.querySelector('.hud.card.title');
-if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M3.4.4';
+if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M3.4.5';
 const earlyLoadTitle = document.querySelector('#loading h2');
-if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M3.4.4';
+if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M3.4.5';
 const earlyStats = document.getElementById('v4stats');
-if (earlyStats) earlyStats.textContent = 'BUILD: HDR TIME OF DAY · BRIGHT NIGHT FLOODS · waiting for V4.4 core…';
-window.__fluidV5Version = '5.1.4.4-m344-booting';
+if (earlyStats) earlyStats.textContent = 'BUILD: USER DAY/SUNSET MAPS · BLACK NIGHT · BRIGHT FLOODS · waiting for V4.4 core…';
+window.__fluidV5Version = '5.1.4.5-m345-booting';
 window.__fluidV5Build = V5_BUILD;
 
 await import('./wave-test-v44.js');
@@ -37,8 +37,8 @@ try {
   console.error('[Fluid V5 pool slab] full-floor initialization failed; upstream compact block retained.', err);
 }
 
-// Time of day remains coupled to controlled HDR panoramas. M3.4.4 upgrades only the Night transport:
-// black overhead environment + six wide submerged flood fixtures + colored volumetric water fill.
+// M3.4.5 uses the user-supplied 2:1 panorama maps for Day and Sunset, a true black map for Night,
+// and keeps M3.4.4's broad submerged flood-light transport for the night pool itself.
 let lightLabReady = false;
 try {
   await import('./v5-light-lab.js');
@@ -46,16 +46,16 @@ try {
   try {
     await import('./v5-environment-m343.js');
   } catch (err) {
-    console.error('[Fluid V5 Environment] HDR panorama system failed; atmosphere fallback retained.', err);
+    console.error('[Fluid V5 Environment] M3.4.5 supplied panorama system failed; atmosphere fallback retained.', err);
   }
   try {
     await import('./v5-night-pool-m34.js');
   } catch (err) {
     window.__v5DedicatedNightPool = false;
-    console.error('[Fluid V5 Night Pool] M3.4.4 broad-flood renderer failed; atmosphere fallback remains active.', err);
+    console.error('[Fluid V5 Night Pool] broad-flood renderer failed; atmosphere fallback remains active.', err);
   }
 } catch (err) {
-  console.error('[Fluid V5 Light Lab] M3.4.4 atmosphere module failed; retaining the M3.0 sun path.', err);
+  console.error('[Fluid V5 Light Lab] M3.4.5 atmosphere module failed; retaining the M3.0 sun path.', err);
 }
 
 // Reuse the validated mobile atomic backend. Day/Sunset provide the directional air-to-water
@@ -74,45 +74,47 @@ if (!window.__v5ProjectedCaustics?.online) {
       height:prev.height || 0,
       error:String(err?.message || err),
     };
-    console.error('[Fluid V5 atomic] M3.4.4 time-of-day caustic handoff rejected; inherited receiver lighting remains active.', err);
+    console.error('[Fluid V5 atomic] M3.4.5 time-of-day caustic handoff rejected; inherited receiver lighting remains active.', err);
   }
 }
 
-// Milestone 2 remains optional. If a drain/secondary/underwater experiment is rejected, the
-// validated V4.4 renderer and V5 M1 controls remain usable.
 try {
   await import('./v5-m2-safe.js');
 } catch (err) {
   console.error('[Fluid V5 M2] milestone 2 module failed; retained M1/V4.4 stack.', err);
 }
 
-// Developer visualizations are session-only and must never hijack the next reload.
 try {
   await import('./v5-debug-policy.js');
 } catch (err) {
   console.error('[Fluid V5 debug policy] unable to reset developer view.', err);
 }
 
-// Once the atomic path is online, V5 owns visible solar floor caustics. Keep the inherited V4
-// receiver estimate at minimum so it cannot overpower Day/Sunset or the dedicated Night fixtures.
 try {
   await import('./v5-caustic-handoff.js');
 } catch (err) {
   console.error('[Fluid V5 caustic handoff] legacy receiver suppression failed.', err);
 }
 
-// Reorganize all live controls after their modules have mounted.
 try {
   await import('./v5-tabs-m34.js');
 } catch (err) {
-  console.error('[Fluid V5 UI] M3.4.4 tabbed control shell failed; original controls remain available.', err);
+  console.error('[Fluid V5 UI] M3.4.5 tabbed control shell failed; original controls remain available.', err);
 }
 
-window.__fluidV5Version = '5.1.4.4-m344';
+window.__fluidV5Version = '5.1.4.5-m345';
 const brand = document.querySelector('.hud.card.title');
-if (brand) brand.textContent = 'FLUID V5 · M3.4.4';
+if (brand) brand.textContent = 'FLUID V5 · M3.4.5';
 const stats = document.getElementById('v4stats');
-if (stats && !stats.textContent.includes('BUILD:')) stats.textContent = `BUILD: HDR TIME OF DAY · BRIGHT NIGHT FLOODS · ${stats.textContent}`;
+if (stats && !stats.textContent.includes('BUILD:')) stats.textContent = `BUILD: USER PANORAMAS · BLACK NIGHT · BRIGHT FLOODS · ${stats.textContent}`;
+
+// The night module has its own delayed development branding; stamp the integrated build after it.
+setTimeout(() => {
+  const b = document.querySelector('.hud.card.title');
+  if (b) b.textContent = 'FLUID V5 · M3.4.5';
+  document.title = 'Fluid V5 · M3.4.5 USER PANORAMAS + BRIGHT NIGHT FLOODS';
+  window.__fluidV5Version = '5.1.4.5-m345';
+}, 1150);
 
 setTimeout(() => {
   const toggle = document.getElementById('v4WaveToggle');

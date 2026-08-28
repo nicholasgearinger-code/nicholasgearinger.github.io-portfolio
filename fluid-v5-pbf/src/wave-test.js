@@ -1,15 +1,15 @@
 // Fluid V5 bootstrap. The HTML shell is inherited from V4.4, so mark the build immediately,
 // then wait for the validated V4.4 renderer to expose its runtime handles before mounting V5.
 
-const V5_BUILD = 'M2.4 COPY-ATOMIC + TABS';
+const V5_BUILD = 'M2.5 SSFR-ATOMIC + TABS';
 document.title = `Fluid V5 · ${V5_BUILD}`;
 const earlyBrand = document.querySelector('.hud.card.title');
-if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M2.4';
+if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M2.5';
 const earlyLoadTitle = document.querySelector('#loading h2');
-if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M2.4';
+if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M2.5';
 const earlyStats = document.getElementById('v4stats');
-if (earlyStats) earlyStats.textContent = 'BUILD: COPY-ATOMIC · TABBED UI · waiting for V4.4 core…';
-window.__fluidV5Version = '5.0.4-m2-booting';
+if (earlyStats) earlyStats.textContent = 'BUILD: SSFR-ATOMIC · TABBED UI · waiting for V4.4 core…';
+window.__fluidV5Version = '5.0.5-m2-booting';
 window.__fluidV5Build = V5_BUILD;
 
 await import('./wave-test-v44.js');
@@ -29,17 +29,24 @@ if (!(await waitForV44())) {
 
 await import('./v5-lab.js');
 
-// M2.4 mobile path: preserve atomic<u32> compute accumulation, then copy the raw u32 grid into
-// an r32uint sampled texture. This avoids storage textures and fragment-stage storage buffers.
+// M2.5 mobile path: derive photon sources from the already-filtered SSFR water depth. This uses
+// the exact reconstructed surface visible in the final renderer and reduces the caustic compute
+// bindings to the composite uniform, one sampled depth texture, one atomic buffer and tuning data.
 if (!window.__v5ProjectedCaustics?.online) {
   try {
-    await import('./v5-atomic-copy.js');
+    await import('./v5-atomic-ssfr.js');
   } catch (err) {
+    const prev = window.__v5AtomicStatus || {};
     window.__v5AtomicStatus = {
-      online:false, stage:'rejected', backend:'copy-texture', width:0, height:0,
-      error:String(err?.message||err),
+      ...prev,
+      online:false,
+      stage:`rejected @ ${prev.stage || 'module'}`,
+      backend:'ssfr-copy',
+      width:prev.width || 0,
+      height:prev.height || 0,
+      error:String(err?.message || err),
     };
-    console.error('[Fluid V5 atomic] copy-texture fallback rejected; V4.4 receiver caustics remain active.', err);
+    console.error('[Fluid V5 atomic] SSFR-driven atomic pass rejected; V4.4 receiver caustics remain active.', err);
   }
 }
 
@@ -59,11 +66,11 @@ try {
   console.error('[Fluid V5 UI] tabbed control shell failed; original controls remain available.', err);
 }
 
-window.__fluidV5Version = '5.0.4-m2';
+window.__fluidV5Version = '5.0.5-m2';
 const brand = document.querySelector('.hud.card.title');
-if (brand) brand.textContent = 'FLUID V5 · M2.4';
+if (brand) brand.textContent = 'FLUID V5 · M2.5';
 const stats = document.getElementById('v4stats');
-if (stats && !stats.textContent.includes('BUILD:')) stats.textContent = `BUILD: COPY-ATOMIC · TABS · ${stats.textContent}`;
+if (stats && !stats.textContent.includes('BUILD:')) stats.textContent = `BUILD: SSFR-ATOMIC · TABS · ${stats.textContent}`;
 
 setTimeout(() => {
   const toggle = document.getElementById('v4WaveToggle');

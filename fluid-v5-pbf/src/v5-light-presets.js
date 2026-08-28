@@ -1,29 +1,29 @@
-// Fluid V5 M3.4.4 unified time-of-day + bright submerged pool-light moods.
-// Day/Sunset keep their HDR balance. Night remains black overhead, while broad submerged fixtures
-// provide the pool's visible light and a stronger colored water-volume glow.
+// Fluid V5 M3.4.5 unified time-of-day + supplied panorama environments.
+// Day and Sunset use the user-supplied 2:1 panorama maps. Night uses a true black environment
+// and is illuminated only by the broad submerged pool flood fixtures.
 
 export const TIME_PRESETS = {
   day: {
     label:'DAY',
-    description:'Balanced daylight with a softer HDR sky, restrained sun energy, clear blue water and readable white caustics.',
-    envIntensity:0.44, envYaw:0.02, exposure:0.88,
-    sunColor:'#fff4dc', sunIntensity:0.58, sunElevation:58, sunAzimuth:32,
-    waterTint:'#b9e7f7', waterTintStrength:0.045,
-    transmit:[0.22,0.50,0.72], absorption:0.38, roughness:0.044,
-    causticGain:0.52,
+    description:'Balanced daylight using the supplied lake panorama. Direct sun is aligned to the visible sun in the environment, with reduced exposure so the pool and tiles keep detail.',
+    envIntensity:0.34, envYaw:0.00, exposure:0.80,
+    sunColor:'#fff4dc', sunIntensity:0.44, sunElevation:38, sunAzimuth:36,
+    waterTint:'#b9e7f7', waterTintStrength:0.035,
+    transmit:[0.20,0.47,0.69], absorption:0.40, roughness:0.045,
+    causticGain:0.46,
   },
   sunset: {
     label:'SUNSET',
-    description:'A true HDR sunset panorama with a low orange sun, pink-violet clouds, darker surroundings and warm reflections moving across the water.',
-    envIntensity:0.72, envYaw:0.00, exposure:0.92,
-    sunColor:'#ff7a3c', sunIntensity:0.58, sunElevation:8, sunAzimuth:98,
-    waterTint:'#ff8a68', waterTintStrength:0.29,
-    transmit:[0.36,0.40,0.50], absorption:0.40, roughness:0.051,
-    causticGain:0.52,
+    description:'The supplied coastal sunset panorama drives the environment while a low warm sun, aligned with its bright horizon, produces warm moving reflections across the water.',
+    envIntensity:0.50, envYaw:0.00, exposure:0.84,
+    sunColor:'#ff7a4a', sunIntensity:0.38, sunElevation:14, sunAzimuth:38,
+    waterTint:'#ff8b72', waterTintStrength:0.25,
+    transmit:[0.34,0.38,0.49], absorption:0.42, roughness:0.052,
+    causticGain:0.44,
   },
   night: {
     label:'NIGHT',
-    description:'Black overhead environment with solar fill removed. Six bright submerged flood fixtures illuminate the tiles and make the water volume itself glow.',
+    description:'Pure black environment with all solar and overhead fill removed. Six bright submerged flood fixtures illuminate the tiles and make the water volume itself glow.',
     envIntensity:0.0, envYaw:0.00, exposure:0.82,
     sunColor:'#000000', sunIntensity:0.0, sunElevation:0, sunAzimuth:0,
     waterTint:'#123a68', waterTintStrength:0.34,

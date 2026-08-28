@@ -1,0 +1,35 @@
+name: Fluid V2 review smoke check
+
+on:
+  push:
+    branches: ["fluid-v2-hybrid-webgpu"]
+  pull_request:
+    paths:
+      - "fluid-sim-prototype.html"
+      - "fluid-v2/**"
+      - ".github/workflows/fluid-v2-review.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check ES module syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check fluid-v2/FluidSolver.js
+          node --check fluid-v2/FluidSurface.js
+          node --check fluid-v2/FluidParticles.js
+          node --check fluid-v2/FluidPhysics.js
+          node --check fluid-v2/main.js
+      - name: Check portfolio entrypoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q './fluid-v2/main.js' fluid-sim-prototype.html
+          grep -q '@dimforge/rapier3d-compat' fluid-sim-prototype.html
+          grep -q 'three@0.185.1' fluid-sim-prototype.html

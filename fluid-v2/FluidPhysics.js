@@ -2,15 +2,16 @@ import * as THREE from "three";
 import RAPIER from "@dimforge/rapier3d-compat";
 
 export class FluidPhysics {
-  static async create(scene, solver, particles) {
+  static async create(scene, solver, particles, crowns = null) {
     await RAPIER.init();
-    return new FluidPhysics(scene, solver, particles);
+    return new FluidPhysics(scene, solver, particles, crowns);
   }
 
-  constructor(scene, solver, particles) {
+  constructor(scene, solver, particles, crowns) {
     this.scene = scene;
     this.solver = solver;
     this.particles = particles;
+    this.crowns = crowns;
     this.waterY = 0;
     this.entries = [];
     this.world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
@@ -44,7 +45,15 @@ export class FluidPhysics {
     );
     mesh.castShadow = true;
     this.scene.add(mesh);
-    this.entries.push({ body, mesh, radius, previousY: 7.5, wakeCooldown: 0 });
+    this.entries.push({
+      body,
+      mesh,
+      radius,
+      displacedVolume: (4 / 3) * Math.PI * radius ** 3,
+      previousY: 7.5,
+      wakeCooldown: 0,
+      impacted: false,
+    });
   }
 
   spawnCube(x = 0, z = 0) {
@@ -62,7 +71,15 @@ export class FluidPhysics {
     );
     mesh.castShadow = true;
     this.scene.add(mesh);
-    this.entries.push({ body, mesh, radius: half * 1.15, previousY: 8.5, wakeCooldown: 0 });
+    this.entries.push({
+      body,
+      mesh,
+      radius: half * 1.15,
+      displacedVolume: size ** 3,
+      previousY: 8.5,
+      wakeCooldown: 0,
+      impacted: false,
+    });
   }
 
   clear() {
@@ -71,42 +88,60 @@ export class FluidPhysics {
       this.world.removeRigidBody(entry.body);
     }
     this.entries.length = 0;
+    this.crowns?.clear();
   }
 
   update(dt) {
     const safeDt = Math.min(dt, 1 / 30);
+
+    // First apply buoyancy/drag and continuously displace the free surface where
+    // moving bodies occupy water. This is deliberately separate from the one-off
+    // impact impulse below: a floating object should keep making a trough/wake.
     for (const entry of this.entries) {
       const body = entry.body;
       const p = body.translation();
       const v = body.linvel();
-      const submerged = THREE.MathUtils.clamp((this.waterY + entry.radius - p.y) / (entry.radius * 2), 0, 1);
+      const submerged = THREE.MathUtils.clamp(
+        (this.waterY + entry.radius - p.y) / (entry.radius * 2),
+        0,
+        1,
+      );
+
       body.resetForces(true);
       body.resetTorques(true);
+
       if (submerged > 0) {
         const mass = Math.max(0.05, body.mass());
-        const drag = 1.8 * submerged;
+        const drag = 1.85 * submerged;
         body.addForce({
           x: -v.x * drag * mass,
-          y: 9.81 * mass * 1.34 * submerged - v.y * drag * 0.45 * mass,
+          y: 9.81 * mass * 1.36 * submerged - v.y * drag * 0.48 * mass,
           z: -v.z * drag * mass,
         }, true);
 
-        // Moving bodies carve a shallow trough and push horizontal momentum
-        // into the flow. A negative height splat reads more like displacement
-        // than the old positive mound and naturally rebounds into wake ripples.
         entry.wakeCooldown -= safeDt;
-        const speed = Math.hypot(v.x, v.z);
-        if (entry.wakeCooldown <= 0 && speed > 0.45) {
-          const wake = Math.min(0.34, 0.07 + speed * 0.028);
+        const horizontalSpeed = Math.hypot(v.x, v.z);
+        const downward = Math.max(0, -v.y);
+        if (entry.wakeCooldown <= 0 && (horizontalSpeed > 0.25 || downward > 0.3)) {
+          const trough = THREE.MathUtils.clamp(
+            0.045 + submerged * 0.08 + horizontalSpeed * 0.012,
+            0.045,
+            0.24,
+          );
           this.solver.queueSplat({
             x: p.x,
             z: p.z,
-            vx: v.x * 0.36,
-            vz: v.z * 0.36,
-            strength: -wake,
-            radius: entry.radius * 1.35,
+            vx: v.x * 0.34,
+            vz: v.z * 0.34,
+            strength: -trough,
+            radius: entry.radius * (1.0 + submerged * 0.35),
+            radialImpulse: downward * 0.14 + horizontalSpeed * 0.035,
+            ringRadius: entry.radius * 1.25,
+            ringWidth: entry.radius * 0.42,
+            ringStrength: trough * 0.34,
+            foam: horizontalSpeed * 0.025,
           });
-          entry.wakeCooldown = 0.07;
+          entry.wakeCooldown = 0.065;
         }
       }
     }
@@ -118,26 +153,41 @@ export class FluidPhysics {
       const p = entry.body.translation();
       const q = entry.body.rotation();
       const v = entry.body.linvel();
-      if (entry.previousY > 0.12 && p.y <= 0.12 && v.y < -0.6) {
-        const impact = THREE.MathUtils.clamp(Math.abs(v.y) * 0.135, 0.28, 1.8);
-        this.solver.queueSplat({
+
+      // Detect the *bottom* of the object crossing the mean surface, not its
+      // center. The measured vertical impact speed and approximate displaced
+      // volume determine the crater, crown and radial flow injected into the GPU.
+      const previousBottom = entry.previousY - entry.radius;
+      const currentBottom = p.y - entry.radius;
+      if (previousBottom > this.waterY && currentBottom <= this.waterY && v.y < -0.55) {
+        const impactSpeed = Math.abs(v.y);
+        this.solver.queueImpact({
           x: p.x,
           z: p.z,
-          vx: v.x * 0.26,
-          vz: v.z * 0.26,
-          strength: -impact,
-          radius: entry.radius * (1.65 + impact * 0.42),
+          radius: entry.radius,
+          verticalSpeed: impactSpeed,
+          vx: v.x,
+          vz: v.z,
+          displacedVolume: entry.displacedVolume,
         });
-        this.particles?.emit(p.x, p.z, impact, { x: v.x, z: v.z });
+
+        const sprayStrength = THREE.MathUtils.clamp(impactSpeed * 0.14, 0.35, 2.0);
+        this.particles?.emit(p.x, p.z, sprayStrength, { x: v.x, z: v.z });
+        this.crowns?.emit(p.x, p.z, entry.radius, impactSpeed);
+        entry.impacted = true;
       }
+
+      if (p.y - entry.radius > this.waterY + 0.35) entry.impacted = false;
       entry.previousY = p.y;
       entry.mesh.position.set(p.x, p.y, p.z);
       entry.mesh.quaternion.set(q.x, q.y, q.z, q.w);
+
       if (p.y < -12) {
         entry.body.setTranslation({ x: 0, y: 8, z: 0 }, true);
         entry.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
         entry.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
         entry.previousY = 8;
+        entry.impacted = false;
       }
     }
   }

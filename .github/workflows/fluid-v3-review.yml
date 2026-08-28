@@ -1,0 +1,36 @@
+name: Fluid V3 review smoke check
+
+on:
+  push:
+    branches: ["fluid-v3-mls-mpm"]
+  pull_request:
+    paths:
+      - "fluid-v3-prototype.html"
+      - "fluid-v3/**"
+      - ".github/workflows/fluid-v3-review.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check ES module syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in \
+            fluid-v3/MLSMPMSolver.js \
+            fluid-v3/FluidParticleRenderer.js \
+            fluid-v3/main.js
+          do
+            node --input-type=module --check < "$file"
+          done
+      - name: Check V3 entrypoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q './fluid-v3/main.js' fluid-v3-prototype.html
+          grep -q 'three@0.185.1' fluid-v3-prototype.html

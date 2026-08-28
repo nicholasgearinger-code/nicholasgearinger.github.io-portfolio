@@ -1,15 +1,15 @@
 // Fluid V5 bootstrap. The HTML shell is inherited from V4.4, so mark the build immediately,
 // then wait for the validated V4.4 renderer to expose its runtime handles before mounting V5.
 
-const V5_BUILD = 'M2.6 SSFR-ATOMIC + SAFE DEBUG';
+const V5_BUILD = 'M2.7 FULL-SURFACE ATOMIC + SAFE DEBUG';
 document.title = `Fluid V5 · ${V5_BUILD}`;
 const earlyBrand = document.querySelector('.hud.card.title');
-if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M2.6';
+if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M2.7';
 const earlyLoadTitle = document.querySelector('#loading h2');
-if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M2.6';
+if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M2.7';
 const earlyStats = document.getElementById('v4stats');
-if (earlyStats) earlyStats.textContent = 'BUILD: SSFR-ATOMIC · SAFE DEBUG · waiting for V4.4 core…';
-window.__fluidV5Version = '5.0.6-m2-booting';
+if (earlyStats) earlyStats.textContent = 'BUILD: FULL-SURFACE ATOMIC · SAFE DEBUG · waiting for V4.4 core…';
+window.__fluidV5Version = '5.0.7-m2-booting';
 window.__fluidV5Build = V5_BUILD;
 
 await import('./wave-test-v44.js');
@@ -29,22 +29,24 @@ if (!(await waitForV44())) {
 
 await import('./v5-lab.js');
 
-// SSFR-driven atomic path: derive photon sources from the already-filtered visible water surface.
+// M2.7 camera-independent source: launch refracted sunlight from the complete live PBF particle
+// surface instead of the camera-visible SSFR depth map. The mobile-safe atomic->r32uint resolve
+// remains unchanged from the path that validated successfully on iOS.
 if (!window.__v5ProjectedCaustics?.online) {
   try {
-    await import('./v5-atomic-ssfr.js');
+    await import('./v5-atomic-fullsurface.js');
   } catch (err) {
     const prev = window.__v5AtomicStatus || {};
     window.__v5AtomicStatus = {
       ...prev,
       online:false,
       stage:`rejected @ ${prev.stage || 'module'}`,
-      backend:'ssfr-copy',
+      backend:'particle-full',
       width:prev.width || 0,
       height:prev.height || 0,
       error:String(err?.message || err),
     };
-    console.error('[Fluid V5 atomic] SSFR-driven atomic pass rejected; V4.4 receiver caustics remain active.', err);
+    console.error('[Fluid V5 atomic] full-surface particle pass rejected; V4.4 receiver caustics remain active.', err);
   }
 }
 
@@ -65,16 +67,16 @@ try {
 
 // Reorganize all live controls after their modules have mounted.
 try {
-  await import('./v5-tabs-m26.js');
+  await import('./v5-tabs-m27.js');
 } catch (err) {
   console.error('[Fluid V5 UI] tabbed control shell failed; original controls remain available.', err);
 }
 
-window.__fluidV5Version = '5.0.6-m2';
+window.__fluidV5Version = '5.0.7-m2';
 const brand = document.querySelector('.hud.card.title');
-if (brand) brand.textContent = 'FLUID V5 · M2.6';
+if (brand) brand.textContent = 'FLUID V5 · M2.7';
 const stats = document.getElementById('v4stats');
-if (stats && !stats.textContent.includes('BUILD:')) stats.textContent = `BUILD: SSFR-ATOMIC · SAFE DEBUG · ${stats.textContent}`;
+if (stats && !stats.textContent.includes('BUILD:')) stats.textContent = `BUILD: FULL-SURFACE ATOMIC · SAFE DEBUG · ${stats.textContent}`;
 
 setTimeout(() => {
   const toggle = document.getElementById('v4WaveToggle');

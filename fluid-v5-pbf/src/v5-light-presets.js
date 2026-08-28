@@ -1,5 +1,5 @@
-// Fluid V5 M3.3 unified time-of-day + pool-light moods.
-// Environment, sun, water response and caustic character are intentionally coupled.
+// Fluid V5 M3.4 unified time-of-day + true night-pool moods.
+// Environment, sun, water response and caustic character are coupled; Night is lit by submerged fixtures.
 
 export const TIME_PRESETS = {
   day: {
@@ -22,31 +22,31 @@ export const TIME_PRESETS = {
   },
   night: {
     label:'NIGHT',
-    description:'Very dark environment with the sun removed. Pool-wall fixtures become the dominant light source.',
-    envIntensity:0.045, envYaw:0.12, exposure:1.08,
-    sunColor:'#7898ff', sunIntensity:0.018, sunElevation:28, sunAzimuth:18,
-    waterTint:'#167dff', waterTintStrength:1.05,
-    transmit:[0.18,0.52,0.96], absorption:0.40, roughness:0.050,
+    description:'Near-black environment with the sun removed. Six submerged pool-wall fixtures become the dominant light sources.',
+    envIntensity:0.016, envYaw:0.12, exposure:0.94,
+    sunColor:'#7898ff', sunIntensity:0.004, sunElevation:28, sunAzimuth:18,
+    waterTint:'#126cff', waterTintStrength:1.38,
+    transmit:[0.055,0.25,1.00], absorption:0.47, roughness:0.046,
     causticGain:0.0,
   },
 };
 
 export const POOL_LIGHT_MODES = {
   blue: {
-    label:'BLUE', color:'#167dff', intensity:1.65, volumetric:1.10,
-    waterTint:'#167dff', transmit:[0.16,0.50,0.98],
+    label:'BLUE', color:'#167dff', accent:'#7624ff', intensity:2.10, volumetric:1.34,
+    waterTint:'#126cff', transmit:[0.055,0.25,1.00],
   },
   aqua: {
-    label:'AQUA', color:'#22ffd0', intensity:1.52, volumetric:1.02,
-    waterTint:'#20f0d6', transmit:[0.16,0.92,0.82],
+    label:'AQUA', color:'#22ffd0', accent:'#20ff69', intensity:1.98, volumetric:1.28,
+    waterTint:'#18e8cf', transmit:[0.055,1.00,0.68],
   },
   red: {
-    label:'RED', color:'#ff261e', intensity:1.62, volumetric:1.08,
-    waterTint:'#ff2b20', transmit:[0.96,0.20,0.18],
+    label:'RED', color:'#ff261e', accent:'#ff189e', intensity:2.08, volumetric:1.32,
+    waterTint:'#ff251d', transmit:[1.00,0.055,0.04],
   },
   rainbow: {
-    label:'RAINBOW', color:'#ffffff', intensity:1.58, volumetric:1.12,
-    waterTint:'#ffffff', transmit:[0.62,0.68,0.86], rainbow:true,
+    label:'RAINBOW', color:'#ffffff', accent:'#ffffff', intensity:2.04, volumetric:1.36,
+    waterTint:'#ffffff', transmit:[0.42,0.48,0.72], rainbow:true,
   },
 };
 

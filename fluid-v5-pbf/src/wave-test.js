@@ -28,6 +28,17 @@ if (!(await waitForV44())) {
 
 await import('./v5-lab.js');
 
+// M1 originally coupled projected caustics and its first spray renderer in one module. If that
+// extension was rejected by a mobile adapter, recover the atomic caustic system independently
+// before mounting M2. The fallback traces the complete pool floor and uses conservative WGSL.
+if (!window.__v5ProjectedCaustics?.texture) {
+  try {
+    await import('./v5-atomic-safe.js');
+  } catch (err) {
+    console.error('[Fluid V5 atomic] independent fallback rejected; V4.4 receiver caustics remain active.', err);
+  }
+}
+
 // Milestone 2 is deliberately optional at boot. The safety loader preserves the immutable M2
 // checkpoint while applying mobile/WebGPU synchronization fixes before evaluating it. If any
 // experimental M2 subsystem is rejected, Milestone 1 and the validated V4.4 renderer survive.

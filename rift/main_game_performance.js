@@ -1,4 +1,4 @@
-// Rift Islands Environment Performance 1.0 loader.
+// Rift Islands Environment Performance 1.1 loader.
 //
 // Safe A/B wrapper around the current known-good main_game.js loader.
 // Normal Rift stays byte-for-byte on the stable runtime. Enable the staged
@@ -24,7 +24,7 @@ function replaceExactlyOnce(source, from, to, label) {
 if (!PERF_PREVIEW) {
   globalThis.__riftEnvironmentPerformance = {
     enabled: false,
-    version: "1.0-preview",
+    version: "1.1-30fps-preview",
     reason: params?.has("perfLegacy") ? "perfLegacy" : "preview-not-requested",
   };
   await import(baseModuleUrl);
@@ -51,8 +51,8 @@ if (!PERF_PREVIEW) {
     ],
     [
       'import { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers, getEffectiveValue, setOverride, resetOverrides, getTierRawSettings } from "./graphicsSettings.js";',
-      'import { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers, getEffectiveValue, setOverride, resetOverrides, getTierRawSettings } from "./graphicsSettings.js";\nimport { getRiftInitialPixelRatio, updateRiftPerformanceGovernor, setRiftPerformanceResizeHandler } from "./performanceGovernor.js";',
-      "mobile adaptive resolution governor import",
+      'import { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers, getEffectiveValue, setOverride, resetOverrides, getTierRawSettings } from "./graphicsSettings_performance.js";\nimport { getRiftInitialPixelRatio, updateRiftPerformanceGovernor, updateRiftShadowPerformance, setRiftPerformanceResizeHandler } from "./performanceGovernor.js";',
+      "mobile 30fps graphics and governor import",
     ],
     [
       'renderer.setSize(viewport.clientWidth, viewport.clientHeight);\nrenderer.setPixelRatio(Math.min(window.devicePixelRatio, getGraphicsSettings().pixelRatioCap));',
@@ -73,6 +73,11 @@ if (!PERF_PREVIEW) {
       'const dt = Math.min(clock.getDelta(), 0.1);',
       'const dt = Math.min(clock.getDelta(), 0.1);\n  updateRiftPerformanceGovernor(renderer, dt, viewport, getGraphicsSettings(), resolutionOverride);',
       "mobile adaptive resolution frame governor",
+    ],
+    [
+      'let dayNight;\n  for (let i = 0; i < debugTimeScale; i++) {\n    dayNight = updateDayNightCycle(dayNightCycle, dt);\n  }',
+      'let dayNight;\n  for (let i = 0; i < debugTimeScale; i++) {\n    dayNight = updateDayNightCycle(dayNightCycle, dt);\n  }\n  updateRiftShadowPerformance(sun, moonLight);',
+      "mobile shadow map refresh cadence",
     ],
   ];
 
@@ -102,8 +107,11 @@ if (!PERF_PREVIEW) {
 
   globalThis.__riftEnvironmentPerformance = {
     enabled: true,
-    version: "1.0-preview",
+    version: "1.1-30fps-preview",
+    targetFps: 30,
     dynamicResolution: true,
+    shadowRefreshCadence: true,
+    lowShadowMap256: true,
     staticHighCountGrass: true,
     batchedHorizon: true,
     textureCompression: "prepared-not-active",

@@ -1,15 +1,15 @@
 // Fluid V5 bootstrap. The HTML shell is inherited from V4.4, so mark the build immediately,
 // then wait for the validated V4.4 renderer to expose its runtime handles before mounting V5.
 
-const V5_BUILD = 'M3.4.3 HDR DAY + SUNSET + TRUE NIGHT';
+const V5_BUILD = 'M3.4.4 HDR TIME OF DAY + BRIGHT NIGHT FLOODS';
 document.title = `Fluid V5 · ${V5_BUILD}`;
 const earlyBrand = document.querySelector('.hud.card.title');
-if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M3.4.3';
+if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M3.4.4';
 const earlyLoadTitle = document.querySelector('#loading h2');
-if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M3.4.3';
+if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M3.4.4';
 const earlyStats = document.getElementById('v4stats');
-if (earlyStats) earlyStats.textContent = 'BUILD: HDR TIME OF DAY · TRUE NIGHT POOL · waiting for V4.4 core…';
-window.__fluidV5Version = '5.1.4.3-m343-booting';
+if (earlyStats) earlyStats.textContent = 'BUILD: HDR TIME OF DAY · BRIGHT NIGHT FLOODS · waiting for V4.4 core…';
+window.__fluidV5Version = '5.1.4.4-m344-booting';
 window.__fluidV5Build = V5_BUILD;
 
 await import('./wave-test-v44.js');
@@ -37,8 +37,8 @@ try {
   console.error('[Fluid V5 pool slab] full-floor initialization failed; upstream compact block retained.', err);
 }
 
-// M3.4.3 couples every time of day to a controlled Radiance HDR panorama. Day is deliberately
-// softer; Sunset gets a low orange HDR sun and pink-violet cloud shelves; Night is near-black.
+// Time of day remains coupled to controlled HDR panoramas. M3.4.4 upgrades only the Night transport:
+// black overhead environment + six wide submerged flood fixtures + colored volumetric water fill.
 let lightLabReady = false;
 try {
   await import('./v5-light-lab.js');
@@ -46,16 +46,16 @@ try {
   try {
     await import('./v5-environment-m343.js');
   } catch (err) {
-    console.error('[Fluid V5 Environment] M3.4.3 HDR panorama system failed; atmosphere fallback retained.', err);
+    console.error('[Fluid V5 Environment] HDR panorama system failed; atmosphere fallback retained.', err);
   }
   try {
     await import('./v5-night-pool-m34.js');
   } catch (err) {
     window.__v5DedicatedNightPool = false;
-    console.error('[Fluid V5 Night Pool] M3.4.3 Night-only six-fixture renderer failed; atmosphere fallback remains active.', err);
+    console.error('[Fluid V5 Night Pool] M3.4.4 broad-flood renderer failed; atmosphere fallback remains active.', err);
   }
 } catch (err) {
-  console.error('[Fluid V5 Light Lab] M3.4.3 atmosphere module failed; retaining the M3.0 sun path.', err);
+  console.error('[Fluid V5 Light Lab] M3.4.4 atmosphere module failed; retaining the M3.0 sun path.', err);
 }
 
 // Reuse the validated mobile atomic backend. Day/Sunset provide the directional air-to-water
@@ -74,7 +74,7 @@ if (!window.__v5ProjectedCaustics?.online) {
       height:prev.height || 0,
       error:String(err?.message || err),
     };
-    console.error('[Fluid V5 atomic] M3.4.3 time-of-day caustic handoff rejected; inherited receiver lighting remains active.', err);
+    console.error('[Fluid V5 atomic] M3.4.4 time-of-day caustic handoff rejected; inherited receiver lighting remains active.', err);
   }
 }
 
@@ -105,14 +105,14 @@ try {
 try {
   await import('./v5-tabs-m34.js');
 } catch (err) {
-  console.error('[Fluid V5 UI] M3.4.3 tabbed control shell failed; original controls remain available.', err);
+  console.error('[Fluid V5 UI] M3.4.4 tabbed control shell failed; original controls remain available.', err);
 }
 
-window.__fluidV5Version = '5.1.4.3-m343';
+window.__fluidV5Version = '5.1.4.4-m344';
 const brand = document.querySelector('.hud.card.title');
-if (brand) brand.textContent = 'FLUID V5 · M3.4.3';
+if (brand) brand.textContent = 'FLUID V5 · M3.4.4';
 const stats = document.getElementById('v4stats');
-if (stats && !stats.textContent.includes('BUILD:')) stats.textContent = `BUILD: HDR TIME OF DAY · TRUE NIGHT POOL · ${stats.textContent}`;
+if (stats && !stats.textContent.includes('BUILD:')) stats.textContent = `BUILD: HDR TIME OF DAY · BRIGHT NIGHT FLOODS · ${stats.textContent}`;
 
 setTimeout(() => {
   const toggle = document.getElementById('v4WaveToggle');

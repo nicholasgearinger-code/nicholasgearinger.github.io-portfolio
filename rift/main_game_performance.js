@@ -50,6 +50,11 @@ if (!PERF_PREVIEW) {
       "static horizon BatchedMesh optimization",
     ],
     [
+      'import { createVolumetricClouds, updateVolumetricClouds } from "./volumetricClouds_reference_v2.js";',
+      'import { createVolumetricClouds, updateVolumetricClouds } from "./volumetricClouds_performance.js";',
+      "mobile lower-resolution Model 3.7 volumetric clouds",
+    ],
+    [
       'import { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers, getEffectiveValue, setOverride, resetOverrides, getTierRawSettings } from "./graphicsSettings.js";',
       'import { getGraphicsSettings, getGraphicsTier, setGraphicsTier, listGraphicsTiers, getEffectiveValue, setOverride, resetOverrides, getTierRawSettings } from "./graphicsSettings_performance.js";\nimport { getRiftInitialPixelRatio, updateRiftPerformanceGovernor, updateRiftShadowPerformance, setRiftPerformanceResizeHandler } from "./performanceGovernor.js";',
       "mobile 30fps graphics and governor import",
@@ -110,6 +115,7 @@ if (!PERF_PREVIEW) {
     version: "1.1-30fps-preview",
     targetFps: 30,
     dynamicResolution: true,
+    cloudInternalScale: 0.24,
     shadowRefreshCadence: true,
     lowShadowMap256: true,
     staticHighCountGrass: true,

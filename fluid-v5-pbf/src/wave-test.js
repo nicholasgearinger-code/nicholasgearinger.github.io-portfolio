@@ -1,15 +1,15 @@
 // Fluid V5 bootstrap. The HTML shell is inherited from V4.4, so mark the build immediately,
 // then wait for the validated V4.4 renderer to expose its runtime handles before mounting V5.
 
-const V5_BUILD = 'M2.8 ATOMIC HANDOFF + FULL FLOOR';
+const V5_BUILD = 'M2.9 FULL-POOL PHYSICS + ATOMIC';
 document.title = `Fluid V5 · ${V5_BUILD}`;
 const earlyBrand = document.querySelector('.hud.card.title');
-if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M2.8';
+if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M2.9';
 const earlyLoadTitle = document.querySelector('#loading h2');
-if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M2.8';
+if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M2.9';
 const earlyStats = document.getElementById('v4stats');
-if (earlyStats) earlyStats.textContent = 'BUILD: ATOMIC HANDOFF · FULL FLOOR · waiting for V4.4 core…';
-window.__fluidV5Version = '5.0.8-m2-booting';
+if (earlyStats) earlyStats.textContent = 'BUILD: FULL-POOL PHYSICS · ATOMIC · waiting for V4.4 core…';
+window.__fluidV5Version = '5.0.9-m2-booting';
 window.__fluidV5Build = V5_BUILD;
 
 await import('./wave-test-v44.js');
@@ -29,8 +29,16 @@ if (!(await waitForV44())) {
 
 await import('./v5-lab.js');
 
-// M2.8 keeps the camera-independent full PBF surface as the photon source, but widens the
-// accumulation reconstruction and gives the complete floor a subtle transmitted-sun baseline.
+// M2.9 fixes the physical pool initial condition before caustic projection. Pool-like scenarios
+// use a shallow PBF slab spanning the full X/Z floor; Dam Break alone keeps the upstream compact
+// 35%-width water column. This makes caustic coverage follow real water rather than a stretched decal.
+try {
+  await import('./v5-pool-slab.js');
+} catch (err) {
+  console.error('[Fluid V5 pool slab] full-floor initialization failed; upstream compact block retained.', err);
+}
+
+// Camera-independent full PBF-surface photon source with the mobile-safe atomic -> r32uint resolve.
 if (!window.__v5ProjectedCaustics?.online) {
   try {
     await import('./v5-atomic-fullsurface-m28.js');
@@ -45,7 +53,7 @@ if (!window.__v5ProjectedCaustics?.online) {
       height:prev.height || 0,
       error:String(err?.message || err),
     };
-    console.error('[Fluid V5 atomic] M2.8 full-floor particle pass rejected; V4.4 receiver caustics remain active.', err);
+    console.error('[Fluid V5 atomic] full-surface particle pass rejected; V4.4 receiver caustics remain active.', err);
   }
 }
 
@@ -74,16 +82,16 @@ try {
 
 // Reorganize all live controls after their modules have mounted.
 try {
-  await import('./v5-tabs-m28.js');
+  await import('./v5-tabs-m29.js');
 } catch (err) {
   console.error('[Fluid V5 UI] tabbed control shell failed; original controls remain available.', err);
 }
 
-window.__fluidV5Version = '5.0.8-m2';
+window.__fluidV5Version = '5.0.9-m2';
 const brand = document.querySelector('.hud.card.title');
-if (brand) brand.textContent = 'FLUID V5 · M2.8';
+if (brand) brand.textContent = 'FLUID V5 · M2.9';
 const stats = document.getElementById('v4stats');
-if (stats && !stats.textContent.includes('BUILD:')) stats.textContent = `BUILD: ATOMIC HANDOFF · FULL FLOOR · ${stats.textContent}`;
+if (stats && !stats.textContent.includes('BUILD:')) stats.textContent = `BUILD: FULL-POOL PHYSICS · ATOMIC · ${stats.textContent}`;
 
 setTimeout(() => {
   const toggle = document.getElementById('v4WaveToggle');

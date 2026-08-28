@@ -23,7 +23,9 @@ jobs:
           set -euo pipefail
           for file in \
             fluid-v2/FluidSolver.js \
+            fluid-v2/RendererCompat.js \
             fluid-v2/FluidSurface.js \
+            fluid-v2/FluidCaustics.js \
             fluid-v2/FluidParticles.js \
             fluid-v2/FluidPhysics.js \
             fluid-v2/main.js
@@ -34,6 +36,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          grep -q './fluid-v2/RendererCompat.js' fluid-sim-prototype.html
           grep -q './fluid-v2/main.js' fluid-sim-prototype.html
           grep -q '@dimforge/rapier3d-compat' fluid-sim-prototype.html
           grep -q 'three@0.185.1' fluid-sim-prototype.html

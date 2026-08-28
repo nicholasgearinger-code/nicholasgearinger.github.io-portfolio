@@ -11,12 +11,10 @@ const ssfr = window.__ssfr;
 if (!ssfr?.dev || !ssfr?.format) {
   console.warn('[Fluid V4 lighting] SSFR handle unavailable; keeping previous optics.');
 } else {
-  // Keep the detailed Quarry Cloudy HDR reflections, but do not let the environment
-  // make the water body read as dark navy at grazing angles.
   try {
     if (ssfr.env) {
       await ssfr.env.load(ROOT + 'env/quarry_cloudy_1k.hdr');
-      ssfr.env.intensity = 1.08;
+      ssfr.env.intensity = 1.15;
       ssfr.env.yaw = 0.0;
       ssfr.bindCache = null;
     }
@@ -26,14 +24,12 @@ if (!ssfr?.dev || !ssfr?.format) {
 
   let src = CW.compositePrelude + CW.compositeFS;
 
-  // Lift only the reflected water lobe. The previous pass allowed dark parts of the HDR
-  // panorama to dominate steep/grazing views, which produced the navy slab in side view.
+  // Lift very dark HDR reflections so side/grazing views stay pool-blue rather than navy.
   src = src.replace(
     '  let physical = envReflect(d);',
-    '  let physical = envReflect(d) * 0.72 + vec3f(0.10, 0.18, 0.24);'
+    '  let physical = envReflect(d) * 0.68 + vec3f(0.12, 0.20, 0.25);'
   );
 
-  // Small swimming-pool mosaic tiles so the clearer water has a bright refractive target.
   const floorRe = /fn floorColor\(p: vec3f\) -> vec3f \{[\s\S]*?\n\}/;
   const poolFloor = `fn floorColor(p: vec3f) -> vec3f {
   let uv = p.xz * 8.0;
@@ -41,19 +37,18 @@ if (!ssfr?.dev || !ssfr?.format) {
   let f = abs(fract(uv) - vec2f(0.5));
   let grout = 1.0 - smoothstep(0.455, 0.49, max(f.x, f.y));
   let alt = (cell.x + cell.y) - 2.0 * floor((cell.x + cell.y) * 0.5);
-  let aquaA = vec3f(0.24, 0.60, 0.68);
-  let aquaB = vec3f(0.36, 0.72, 0.77);
-  var c = mix(aquaA, aquaB, vec3f(alt * 0.68));
-  c = mix(c, vec3f(0.82, 0.94, 0.94), vec3f(grout * 0.82));
+  let aquaA = vec3f(0.28, 0.63, 0.70);
+  let aquaB = vec3f(0.40, 0.75, 0.80);
+  var c = mix(aquaA, aquaB, vec3f(alt * 0.66));
+  c = mix(c, vec3f(0.84, 0.95, 0.95), vec3f(grout * 0.82));
   return c;
 }`;
   if (floorRe.test(src)) src = src.replace(floorRe, poolFloor);
 
-  // Bright underwater receiver plus the sphere shadow.
   const floorNeedle = '      return mix(floorColor(p), far, vec3f(fade));';
   const floorPatch = `      var floorLit = floorColor(p);
-      let sunFill = 1.02 + 0.30 * max(C.sunDir.y, 0.0);
-      floorLit = floorLit * sunFill + vec3f(0.045, 0.065, 0.070);
+      let sunFill = 1.05 + 0.30 * max(C.sunDir.y, 0.0);
+      floorLit = floorLit * sunFill + vec3f(0.05, 0.07, 0.075);
       if (C.bodyCount > 0) {
         let centre = bdata[0u].xyz;
         let radius = max(bdata[1u].x, 1.0e-4);
@@ -66,7 +61,7 @@ if (!ssfr?.dev || !ssfr?.format) {
           let tFar = -qb + root;
           if (tFar > 0.0) {
             let edge = smoothstep(0.0, radius * radius * 0.22, disc);
-            let shadow = mix(1.0, 0.54, edge);
+            let shadow = mix(1.0, 0.56, edge);
             floorLit *= vec3f(shadow * 0.97, shadow * 0.99, shadow * 1.02);
           }
         }
@@ -74,9 +69,6 @@ if (!ssfr?.dev || !ssfr?.format) {
       return mix(floorLit, far, vec3f(fade));`;
   if (src.includes(floorNeedle)) src = src.replace(floorNeedle, floorPatch);
 
-  // The stock SSFR model is absorption-only, so thick water naturally falls toward black.
-  // Add a restrained cyan single-scattering approximation and substantially reduce optical
-  // density. This keeps deep side views translucent and aqua instead of opaque/navy.
   const transNeedle = '  let trans = hitCol * exp(-C.absorb * thick);';
   const transPatch = `  let refrDx = dpdx(refrDir);
   let refrDy = dpdy(refrDir);
@@ -88,82 +80,104 @@ if (!ssfr?.dev || !ssfr?.format) {
   hitCol += vec3f(1.00, 0.98, 0.90) * focus * 0.11;
 
   let attenuation = exp(-C.absorb * thick);
-  let scatterAmount = 1.0 - exp(-thick * 0.55);
-  let waterScatter = vec3f(0.055, 0.16, 0.20) * scatterAmount;
+  let scatterAmount = 1.0 - exp(-thick * 0.42);
+  let waterScatter = vec3f(0.065, 0.18, 0.22) * scatterAmount;
   let trans = hitCol * attenuation + waterScatter;`;
   if (src.includes(transNeedle)) src = src.replace(transNeedle, transPatch);
 
-  const mod = ssfr.dev.createShaderModule({ code: src, label: 'fluidV4LightCyanWaterWGSL' });
+  const mod = ssfr.dev.createShaderModule({ code: src, label: 'fluidV4EngineBoundWaterWGSL' });
   ssfr.pipeComposite = ssfr.dev.createRenderPipeline({
-    label: 'fluidV4LightCyanWaterComposite',
+    label: 'fluidV4EngineBoundWaterComposite',
     layout: 'auto',
     vertex: { module: mod, entryPoint: 'vs' },
     fragment: { module: mod, entryPoint: 'fs', targets: [{ format: ssfr.format }] },
     primitive: { topology: 'triangle-list' },
   });
+  ssfr.bindCache = null;
+
+  // IMPORTANT: Particles4All copies its internal RayMarch values back into SSFR every frame.
+  // Therefore values such as exposure/absorption/roughness/sun MUST be changed through the
+  // upstream hidden controls, whose oninput handlers mutate that RayMarch object. Directly
+  // assigning ssfr.exposure etc. only lasts until the next animation frame.
+  const upstreamSet = (id, value) => {
+    const el = document.getElementById(id);
+    if (!el || typeof el.oninput !== 'function') return false;
+    el.value = String(value);
+    el.oninput();
+    return true;
+  };
 
   const LOOK_DEFAULTS = {
-    exposure: 1.62,
-    absorption: 0.16,
-    thickness: 0.13,
-    roughness: 0.035,
-    sun: 4.05,
-    env: 1.08,
-    transmitR: 0.70,
-    transmitG: 0.88,
-    transmitB: 0.96,
+    exposure: 1.78,
+    absorption: 0.045,
+    thickness: 0.070,
+    roughness: 0.025,
+    sun: 4.45,
+    sunElevation: 34,
+    env: 1.15,
   };
 
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, Number(v)));
-  const savedKey = 'fluidV4WaterLookV1';
+  const savedKey = 'fluidV4WaterLookV2';
   let look = { ...LOOK_DEFAULTS };
   try {
     const saved = JSON.parse(localStorage.getItem(savedKey) || 'null');
     if (saved && typeof saved === 'object') look = { ...look, ...saved };
   } catch {}
 
+  let engineBound = false;
   function applyLook() {
-    look.exposure = clamp(look.exposure, 0.45, 2.6);
+    look.exposure = clamp(look.exposure, 0.45, 2.8);
     look.absorption = clamp(look.absorption, 0.0, 1.2);
-    look.thickness = clamp(look.thickness, 0.02, 1.2);
+    look.thickness = clamp(look.thickness, 0.015, 1.2);
     look.roughness = clamp(look.roughness, 0.004, 0.18);
     look.sun = clamp(look.sun, 0.2, 8.0);
+    look.sunElevation = clamp(look.sunElevation, 5, 80);
     look.env = clamp(look.env, 0.0, 2.5);
-    look.transmitR = clamp(look.transmitR, 0.10, 1.0);
-    look.transmitG = clamp(look.transmitG, 0.10, 1.0);
-    look.transmitB = clamp(look.transmitB, 0.10, 1.0);
 
+    const hits = [
+      upstreamSet('exposure', look.exposure),
+      upstreamSet('absorption', look.absorption),
+      upstreamSet('roughness', look.roughness),
+      upstreamSet('sunint', look.sun),
+      upstreamSet('sunelev', look.sunElevation),
+      upstreamSet('ssfrthick', look.thickness),
+      upstreamSet('envintensity', look.env),
+    ];
+    engineBound = hits.every(Boolean);
+
+    // These are not overwritten by the upstream per-frame RayMarch->SSFR sync.
     ssfr.ior = 1.333;
-    ssfr.exposure = look.exposure;
-    ssfr.absorption = look.absorption;
-    ssfr.thicknessScale = look.thickness;
-    ssfr.roughness = look.roughness;
-    ssfr.sunIntensity = look.sun;
-    ssfr.transmit = [look.transmitR, look.transmitG, look.transmitB];
     if (ssfr.env) ssfr.env.intensity = look.env;
+    ssfr.bindCache = null;
+
+    const badge = document.getElementById('v4TuneLive');
+    if (badge) {
+      badge.textContent = engineBound ? 'ENGINE BOUND ✓' : 'BIND ERROR';
+      badge.style.color = engineBound ? '#9dffc8' : '#ff9f9f';
+    }
   }
+
   applyLook();
 
-  // Add live controls inside the existing QUALITY panel. The PBF SSFR renderer reads these
-  // values every frame when it writes the composite uniform buffer, so no simulation restart
-  // or shader rebuild is required while dragging a slider.
   const panel = document.getElementById('settingsPanel');
   if (panel && !document.getElementById('v4LiveWaterTune')) {
     const style = document.createElement('style');
     style.textContent = `
-      #settingsPanel{max-height:min(72vh,620px);overflow-y:auto;-webkit-overflow-scrolling:touch}
+      #settingsPanel{max-height:min(76vh,650px);overflow-y:auto;-webkit-overflow-scrolling:touch}
       .v4Tune{margin-top:11px;padding-top:10px;border-top:1px solid rgba(78,214,220,.22)}
       .v4TuneHead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
       .v4TuneTitle{font-size:10px;color:#86f6ff;letter-spacing:.11em;font-weight:800}
-      .v4TuneLive{font-size:8px;color:#9dffc8;letter-spacing:.08em}
-      .v4TuneRow{display:grid;grid-template-columns:78px 1fr 42px;align-items:center;gap:7px;margin:7px 0}
+      .v4TuneLive{font-size:8px;color:#9dffc8;letter-spacing:.06em}
+      .v4TuneRow{display:grid;grid-template-columns:76px 1fr 42px;align-items:center;gap:7px;margin:7px 0}
       .v4TuneRow label{font-size:8.5px;color:#b6d1dc;letter-spacing:.025em}
-      .v4TuneRow input[type=range]{width:100%;margin:0;accent-color:#69e8df;touch-action:pan-x;height:22px}
+      .v4TuneRow input[type=range]{width:100%;margin:0;accent-color:#69e8df;touch-action:pan-x;height:24px}
       .v4TuneVal{font-size:8px;text-align:right;color:#ffd890;font-variant-numeric:tabular-nums}
       .v4TuneButtons{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:9px}
-      .v4TuneBtn{appearance:none;border:1px solid rgba(78,214,220,.35);background:rgba(4,17,24,.78);color:#dffcff;border-radius:9px;padding:7px 5px;font:800 8.5px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.04em}
+      .v4TuneBtn{appearance:none;border:1px solid rgba(78,214,220,.35);background:rgba(4,17,24,.78);color:#dffcff;border-radius:9px;padding:8px 5px;font:800 8.5px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.04em}
       .v4TuneBtn:active{transform:scale(.97)}
-      @media(max-width:600px){.v4TuneRow{grid-template-columns:66px 1fr 38px;gap:5px}.v4TuneRow label{font-size:8px}}
+      .v4TuneNote{font-size:7.5px;color:#82a6b2;line-height:1.35;margin-top:7px}
+      @media(max-width:600px){.v4TuneRow{grid-template-columns:64px 1fr 38px;gap:5px}.v4TuneRow label{font-size:8px}}
     `;
     document.head.appendChild(style);
 
@@ -171,22 +185,21 @@ if (!ssfr?.dev || !ssfr?.format) {
     wrap.id = 'v4LiveWaterTune';
     wrap.className = 'v4Tune';
     wrap.innerHTML = `
-      <div class="v4TuneHead"><div class="v4TuneTitle">WATER LOOK · LIVE</div><div class="v4TuneLive">NO RELOAD</div></div>
+      <div class="v4TuneHead"><div class="v4TuneTitle">WATER LOOK · LIVE</div><div id="v4TuneLive" class="v4TuneLive">BINDING…</div></div>
       <div id="v4TuneRows"></div>
       <div class="v4TuneButtons"><button id="v4ClearLook" class="v4TuneBtn">CLEAR WATER</button><button id="v4ResetLook" class="v4TuneBtn">RESET LOOK</button></div>
+      <div class="v4TuneNote">These controls now drive the PBF engine's own RayMarch/SSFR settings, so changes persist every frame.</div>
     `;
     panel.appendChild(wrap);
 
     const defs = [
-      ['exposure', 'EXPOSURE', 0.45, 2.60, 0.01, 2],
-      ['absorption', 'ABSORB', 0.00, 1.20, 0.01, 2],
-      ['thickness', 'THICKNESS', 0.02, 1.20, 0.01, 2],
+      ['exposure', 'EXPOSURE', 0.45, 2.80, 0.01, 2],
+      ['absorption', 'ABSORB', 0.00, 1.20, 0.005, 3],
+      ['thickness', 'THICKNESS', 0.015, 1.20, 0.005, 3],
       ['roughness', 'ROUGHNESS', 0.004, 0.18, 0.001, 3],
-      ['sun', 'SUN', 0.20, 8.00, 0.05, 2],
+      ['sun', 'SUN POWER', 0.20, 8.00, 0.05, 2],
+      ['sunElevation', 'SUN ANGLE', 5, 80, 1, 0],
       ['env', 'HDR ENV', 0.00, 2.50, 0.02, 2],
-      ['transmitR', 'RED TRANS', 0.10, 1.00, 0.01, 2],
-      ['transmitG', 'GREEN', 0.10, 1.00, 0.01, 2],
-      ['transmitB', 'BLUE', 0.10, 1.00, 0.01, 2],
     ];
 
     const rows = document.getElementById('v4TuneRows');
@@ -204,9 +217,12 @@ if (!ssfr?.dev || !ssfr?.format) {
       const lab = document.createElement('label');
       lab.textContent = label;
       const input = document.createElement('input');
-      input.type = 'range'; input.min = String(min); input.max = String(max); input.step = String(step); input.value = String(look[key]);
+      input.type = 'range';
+      input.min = String(min); input.max = String(max); input.step = String(step); input.value = String(look[key]);
       input.setAttribute('aria-label', label);
-      const out = document.createElement('div'); out.className = 'v4TuneVal'; out.textContent = Number(look[key]).toFixed(digits);
+      const out = document.createElement('div');
+      out.className = 'v4TuneVal';
+      out.textContent = Number(look[key]).toFixed(digits);
       input.addEventListener('input', () => updateReadout(key, input, out, digits));
       input.addEventListener('change', () => updateReadout(key, input, out, digits));
       row.append(lab, input, out);
@@ -232,19 +248,22 @@ if (!ssfr?.dev || !ssfr?.format) {
       e.preventDefault(); e.stopPropagation();
       look = {
         ...look,
-        exposure: 1.82,
-        absorption: 0.055,
-        thickness: 0.075,
-        roughness: 0.025,
-        sun: 4.5,
-        env: 1.15,
-        transmitR: 0.90,
-        transmitG: 0.96,
-        transmitB: 0.99,
+        exposure: 1.90,
+        absorption: 0.012,
+        thickness: 0.035,
+        roughness: 0.018,
+        sun: 4.8,
+        sunElevation: 38,
+        env: 1.20,
       };
       syncUI();
     };
+
+    // Refresh badge now that it exists.
+    applyLook();
   }
 
-  console.info('[Fluid V4 lighting] lighter cyan transmission + live water-look sliders enabled.');
+  const stats = document.getElementById('v4stats');
+  if (stats && !stats.textContent.includes('tune-bound')) stats.textContent += ' · tune-bound';
+  console.info('[Fluid V4 lighting] engine-bound water-look sliders enabled; upstream frame overwrite fixed.');
 }

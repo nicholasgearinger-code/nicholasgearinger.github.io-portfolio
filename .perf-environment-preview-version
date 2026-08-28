@@ -1,4 +1,4 @@
-Environment Performance 1.1
+Environment Performance 1.1b
 branch: perf-environment-1
 target: 30 FPS mobile Low
-features: adaptive DPR 0.42-0.82, 256 shadow maps, shadow refresh cadence, instanced grass optimization, batched horizon
+features: adaptive DPR 0.42-0.82, 24% cloud internal scale, 256 shadow maps, shadow refresh cadence, instanced grass optimization, batched horizon

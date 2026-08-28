@@ -1,15 +1,15 @@
 // Fluid V5 bootstrap. The HTML shell is inherited from V4.4, so mark the build immediately,
 // then wait for the validated V4.4 renderer to expose its runtime handles before mounting V5.
 
-const V5_BUILD = 'M3.3 TIME OF DAY + POOL LIGHTS + WATER MOOD';
+const V5_BUILD = 'M3.4 TRUE NIGHT POOL + SIX FIXTURES';
 document.title = `Fluid V5 · ${V5_BUILD}`;
 const earlyBrand = document.querySelector('.hud.card.title');
-if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M3.3';
+if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M3.4';
 const earlyLoadTitle = document.querySelector('#loading h2');
-if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M3.3';
+if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M3.4';
 const earlyStats = document.getElementById('v4stats');
-if (earlyStats) earlyStats.textContent = 'BUILD: TIME OF DAY · POOL LIGHTS · WATER MOOD · waiting for V4.4 core…';
-window.__fluidV5Version = '5.1.3-m33-booting';
+if (earlyStats) earlyStats.textContent = 'BUILD: TRUE NIGHT POOL · SIX FIXTURES · waiting for V4.4 core…';
+window.__fluidV5Version = '5.1.4-m34-booting';
 window.__fluidV5Build = V5_BUILD;
 
 await import('./wave-test-v44.js');
@@ -37,33 +37,38 @@ try {
   console.error('[Fluid V5 pool slab] full-floor initialization failed; upstream compact block retained.', err);
 }
 
-// M3.3 couples environment, sun, exposure, water tint and caustic character into Day/Sunset/Night.
-// Night replaces the sun with colored underwater wall fixtures, including a rainbow cycle mode.
+// M3.4 keeps the simplified Day/Sunset/Night atmosphere controller, then layers a conservative
+// six-fixture night-pool renderer that does not depend on fragment-stage SSFR depth sampling.
 let lightLabReady = false;
 try {
   await import('./v5-light-lab.js');
-  lightLabReady = window.__v5LightLab?.version === 'M3.3';
+  lightLabReady = !!window.__v5LightLab;
+  try {
+    await import('./v5-night-pool-m34.js');
+  } catch (err) {
+    console.error('[Fluid V5 Night Pool] M3.4 six-fixture renderer failed; M3.3 mood lighting remains active.', err);
+  }
 } catch (err) {
-  console.error('[Fluid V5 Light Lab] M3.3 atmosphere module failed; retaining the M3.0 sun path.', err);
+  console.error('[Fluid V5 Light Lab] M3.4 atmosphere module failed; retaining the M3.0 sun path.', err);
 }
 
 // Reuse the validated mobile atomic backend. Day/Sunset provide the directional air-to-water
-// source; Night reports no atomic source because its fixtures are already underwater.
+// source; Night reports no solar source because its fixtures are submerged.
 if (!window.__v5ProjectedCaustics?.online) {
   try {
-    await import(lightLabReady ? './v5-atomic-multilight-m33.js' : './v5-atomic-contrast-m30.js');
+    await import(lightLabReady ? './v5-atomic-multilight-m34.js' : './v5-atomic-contrast-m30.js');
   } catch (err) {
     const prev = window.__v5AtomicStatus || {};
     window.__v5AtomicStatus = {
       ...prev,
       online:false,
       stage:`rejected @ ${prev.stage || 'module'}`,
-      backend:lightLabReady ? 'time-sun-m33' : 'particle-contrast',
+      backend:lightLabReady ? 'time-sun-m34' : 'particle-contrast',
       width:prev.width || 0,
       height:prev.height || 0,
       error:String(err?.message || err),
     };
-    console.error('[Fluid V5 atomic] M3.3 time-of-day caustic handoff rejected; inherited receiver lighting remains active.', err);
+    console.error('[Fluid V5 atomic] M3.4 time-of-day caustic handoff rejected; inherited receiver lighting remains active.', err);
   }
 }
 
@@ -82,8 +87,8 @@ try {
   console.error('[Fluid V5 debug policy] unable to reset developer view.', err);
 }
 
-// Once the atomic path is online, V5 owns visible floor caustics. Keep the inherited V4 receiver
-// caustic control at minimum so the old camera-space estimate cannot overpower the atomic map.
+// Once the atomic path is online, V5 owns visible solar floor caustics. Keep the inherited V4
+// receiver estimate at minimum so it cannot overpower Day/Sunset or the dedicated Night fixtures.
 try {
   await import('./v5-caustic-handoff.js');
 } catch (err) {
@@ -92,16 +97,16 @@ try {
 
 // Reorganize all live controls after their modules have mounted.
 try {
-  await import('./v5-tabs-m33.js');
+  await import('./v5-tabs-m34.js');
 } catch (err) {
-  console.error('[Fluid V5 UI] M3.3 tabbed control shell failed; original controls remain available.', err);
+  console.error('[Fluid V5 UI] M3.4 tabbed control shell failed; original controls remain available.', err);
 }
 
-window.__fluidV5Version = '5.1.3-m33';
+window.__fluidV5Version = '5.1.4-m34';
 const brand = document.querySelector('.hud.card.title');
-if (brand) brand.textContent = 'FLUID V5 · M3.3';
+if (brand) brand.textContent = 'FLUID V5 · M3.4';
 const stats = document.getElementById('v4stats');
-if (stats && !stats.textContent.includes('BUILD:')) stats.textContent = `BUILD: TIME OF DAY · POOL LIGHTS · WATER MOOD · ${stats.textContent}`;
+if (stats && !stats.textContent.includes('BUILD:')) stats.textContent = `BUILD: TRUE NIGHT POOL · SIX FIXTURES · ${stats.textContent}`;
 
 setTimeout(() => {
   const toggle = document.getElementById('v4WaveToggle');

@@ -61,7 +61,7 @@ try {
 // Reorganize all live controls after their modules have mounted. Moving existing nodes preserves
 // the original event handlers and stored state while giving mobile users a clean tabbed interface.
 try {
-  await import('./v5-tabs.js');
+  await import('./v5-tabs-m25.js');
 } catch (err) {
   console.error('[Fluid V5 UI] tabbed control shell failed; original controls remain available.', err);
 }

@@ -154,16 +154,108 @@ jobs:
           p.write_text(html, encoding="utf-8")
           PY
 
-      # Environment Performance 1.0 is an A/B preview based directly on the
-      # current known-good production commit. It reduces instance-buffer updates,
-      # batches the static horizon and adds synchronized adaptive mobile DPR.
-      - name: Checkout Environment Performance 1.0 preview
+      # Environment Performance is an A/B preview based directly on the current
+      # known-good production commit. In addition to the runtime performance
+      # changes on perf-environment-1, this Pages-only build step converts the
+      # real GLB material textures to KTX2/Basis Universal without touching the
+      # source branch binaries. That keeps the experiment reversible and lets us
+      # measure GPU-memory/bandwidth effects independently.
+      - name: Checkout Environment Performance preview
         uses: actions/checkout@v4
         with:
           ref: perf-environment-1
           path: .perf-environment-preview-source
 
-      - name: Stage Environment Performance 1.0 preview
+      - name: Build KTX2 model textures for performance preview
+        shell: bash
+        run: |
+          set -u
+
+          echo "Installing Khronos KTX-Software 4.4.2..."
+          curl -L --fail --retry 3 \
+            -o /tmp/ktx-software.deb \
+            https://github.com/KhronosGroup/KTX-Software/releases/download/v4.4.2/KTX-Software-4.4.2-Linux-x86_64.deb
+          sudo dpkg -i /tmp/ktx-software.deb || sudo apt-get -f install -y
+
+          echo "Installing glTF Transform CLI..."
+          npm install --global @gltf-transform/cli@4.4.2
+
+          cd .perf-environment-preview-source/rift/models
+
+          files=(
+            angelfish.glb
+            stylaster.glb
+            pocillopora.glb
+            goniastrea.glb
+            meandrina.glb
+            heliopora.glb
+            acropora.glb
+            distichopora.glb
+            coconut_low_poly.glb
+            coconut_palm.glb
+            palm_trees.glb
+            9_aplysina_fistularis.glb
+            tropical_plant.glb
+          )
+
+          converted=0
+          skipped=0
+          failed=0
+          before_total=0
+          after_total=0
+
+          for file in "${files[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo "[KTX2] skip missing: $file"
+              skipped=$((skipped + 1))
+              continue
+            fi
+
+            bytes=$(stat -c%s "$file")
+            if [ "$bytes" -lt 1024 ]; then
+              echo "[KTX2] skip placeholder: $file ($bytes bytes)"
+              skipped=$((skipped + 1))
+              continue
+            fi
+
+            magic=$(head -c 4 "$file" || true)
+            if [ "$magic" != "glTF" ]; then
+              echo "[KTX2] skip non-binary glTF/LFS pointer: $file"
+              skipped=$((skipped + 1))
+              continue
+            fi
+
+            stem="${file%.glb}"
+            stage1="${stem}.uastc.tmp.glb"
+            stage2="${stem}.ktx2.tmp.glb"
+            rm -f "$stage1" "$stage2"
+
+            echo "[KTX2] converting $file"
+            if gltf-transform uastc "$file" "$stage1" \
+                --slots "{normalTexture,occlusionTexture,metallicRoughnessTexture}" \
+                --level 4 --rdo --rdo-lambda 4 --zstd 18 --verbose \
+              && gltf-transform etc1s "$stage1" "$stage2" \
+                --quality 255 --verbose; then
+              before=$(stat -c%s "$file")
+              after=$(stat -c%s "$stage2")
+              before_total=$((before_total + before))
+              after_total=$((after_total + after))
+              mv "$stage2" "$file"
+              rm -f "$stage1"
+              converted=$((converted + 1))
+              echo "[KTX2] $file: $before -> $after bytes"
+            else
+              echo "[KTX2] WARNING: conversion failed; keeping original $file"
+              rm -f "$stage1" "$stage2"
+              failed=$((failed + 1))
+            fi
+          done
+
+          echo "[KTX2] converted=$converted skipped=$skipped failed=$failed"
+          echo "[KTX2] selected asset bytes: $before_total -> $after_total"
+          if command -v toktx >/dev/null 2>&1; then toktx --version || true; fi
+
+      - name: Stage Environment Performance preview
         shell: bash
         run: |
           rm -rf perf-environment-build
@@ -178,7 +270,7 @@ jobs:
           p = Path("perf-environment-build/index.html")
           html = p.read_text(encoding="utf-8")
           html = html.replace("three@0.182.0", "three@0.185.1")
-          marker = '<script>window.__riftR185StaticImportMap=true;window.__riftThreeTarget="0.185.1";window.__riftMigrationBuild="environment-performance-1-preview-v2";</script>'
+          marker = '<script>window.__riftR185StaticImportMap=true;window.__riftThreeTarget="0.185.1";window.__riftMigrationBuild="environment-performance-1.2-ktx2";</script>'
           if marker not in html:
               html = html.replace("</head>", marker + "</head>", 1)
           p.write_text(html, encoding="utf-8")

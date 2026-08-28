@@ -1,6 +1,7 @@
-// Fluid V4.2 pool presentation + receiver caustics.
+// Fluid V4.2.1 pool presentation + stable receiver caustics.
 // Loads the existing PBF integration/tuning, then rebuilds only the final SSFR composite.
-// Physics remains untouched.
+// Physics remains untouched. This version intentionally avoids WGSL screen derivatives in
+// divergent fragment control flow because mobile WebGPU can reject that pipeline.
 
 await import('./lighting-tune.js');
 
@@ -10,7 +11,7 @@ const CW = await import(ROOT + 'src/ssfr_composite_wgsl.js');
 const ssfr = window.__ssfr;
 
 if (!ssfr?.dev || !ssfr?.format) {
-  console.warn('[Fluid V4.2] SSFR unavailable; keeping previous composite.');
+  console.warn('[Fluid V4.2.1] SSFR unavailable; keeping previous composite.');
 } else {
   let src = CW.compositePrelude + CW.compositeFS;
 
@@ -63,8 +64,8 @@ fn tracePool(o: vec3f, d: vec3f) -> PoolHit {
   let hi = C.boxMax;
   let pad = 0.025;
 
-  // The simulation domain is intentionally tall to allow splashes. The visible tiled pool
-  // lining is not: cap the side walls just above the normal water level.
+  // Keep the tall physics domain for splashes, but render a normal pool lining only a little
+  // above the resting waterline.
   let wallTop = lo.y + (hi.y - lo.y) * 0.37;
 
   if (abs(d.y) > 1.0e-5) {
@@ -105,7 +106,7 @@ fn tracePool(o: vec3f, d: vec3f) -> PoolHit {
   return h;
 }`;
 
-  if (!src.includes(floorNeedle)) throw new Error('Fluid V4.2: upstream floor signature changed.');
+  if (!src.includes(floorNeedle)) throw new Error('Fluid V4.2.1: upstream floor signature changed.');
   src = src.replace(floorNeedle, poolFns);
 
   const bgNeedle = `fn background(o: vec3f, d: vec3f) -> vec3f {
@@ -128,7 +129,8 @@ fn tracePool(o: vec3f, d: vec3f) -> PoolHit {
     let ph = tracePool(o, d);
     if (ph.t < 1.0e29) {
       let tile = poolTileColor(ph.p, ph.n);
-      let far = select(kHaze, envSample(d), C.hasEnvMap != 0);
+      var far = kHaze;
+      if (C.hasEnvMap != 0) { far = envSample(d); }
       let haze = min(0.075, 1.0 - exp(-0.010 * ph.t));
       return mix(tile, far, vec3f(haze));
     }
@@ -136,7 +138,7 @@ fn tracePool(o: vec3f, d: vec3f) -> PoolHit {
   return skyColor(d);
 }`;
 
-  if (!src.includes(bgNeedle)) throw new Error('Fluid V4.2: upstream background signature changed.');
+  if (!src.includes(bgNeedle)) throw new Error('Fluid V4.2.1: upstream background signature changed.');
   src = src.replace(bgNeedle, bgPatch);
 
   const transNeedle = '  let trans = hitCol * exp(-C.absorb * thick);';
@@ -145,41 +147,63 @@ fn tracePool(o: vec3f, d: vec3f) -> PoolHit {
     thick = min(thick, poolHit.t);
   }
 
-  // Approximate light focusing from the live refracted surface. The derivative term moves
-  // with every PBF ripple/wave. Receiver-facing weighting keeps caustics readable on both
-  // the floor and the submerged vertical tile walls.
-  let refrDx = dpdx(refrDir);
-  let refrDy = dpdy(refrDir);
-  let convergence = max(0.0, -(refrDx.x + refrDy.y));
-  let curvature = length(refrDx) + length(refrDy);
+  // Stable mobile caustics: no dpdx/dpdy. The pattern is projected in receiver space and
+  // warped by the live reconstructed water normal + Snell refraction direction, so ripples
+  // physically move and squeeze the bright bands without triggering WGSL derivative rules.
   let receiver = select(0.0, 1.0, poolHit.t < 1.0e29);
   let receiverFacing = max(dot(poolHit.n, -refrDir), 0.0);
-  let focus = min(2.8, convergence * 54.0 + curvature * 4.0) * receiver;
-  focus *= 0.42 + 0.58 * receiverFacing;
-  let causticGain = 0.28 + 1.30 * clamp(C.groundReflection, 0.0, 2.0);
+  let receiverSun = 0.22 + 0.78 * abs(dot(poolHit.n, C.sunDir));
 
-  // Warm-white refracted sunlight, preserving the aqua tile colour beneath it.
-  hitCol *= vec3f(1.0 + focus * causticGain * 0.72,
-                  1.0 + focus * causticGain * 0.69,
-                  1.0 + focus * causticGain * 0.56);
-  hitCol += vec3f(1.0, 0.97, 0.86) * focus * causticGain * 0.12;
+  var cuv = poolHit.p.xz * 7.5;
+  var cwarp = refrDir.xz * 2.2 + n.xz * 3.4;
+  if (abs(poolHit.n.x) > 0.5) {
+    cuv = poolHit.p.zy * 7.5;
+    cwarp = refrDir.zy * 2.2 + n.zy * 3.4;
+  }
+  if (abs(poolHit.n.z) > 0.5) {
+    cuv = poolHit.p.xy * 7.5;
+    cwarp = refrDir.xy * 2.2 + n.xy * 3.4;
+  }
+
+  let a = sin((cuv.x + cwarp.x) * 6.2831853 + (cuv.y + cwarp.y) * 2.30);
+  let b = sin((cuv.y - cwarp.y * 0.72) * 7.15 - (cuv.x + cwarp.x * 0.44) * 1.85);
+  let c = sin((cuv.x + cuv.y + cwarp.x - cwarp.y) * 4.35);
+  let cells = clamp(0.48 + 0.22 * a + 0.20 * b + 0.14 * c, 0.0, 1.0);
+  let bands = pow(smoothstep(0.56, 0.90, cells), 2.2);
+  let waveEnergy = clamp(0.18 + length(n.xz) * 2.0 + abs(refrDir.x) * 0.30 + abs(refrDir.z) * 0.30, 0.0, 1.35);
+  let focus = bands * waveEnergy * receiver * receiverFacing * receiverSun;
+  let causticGain = 0.24 + 1.18 * clamp(C.groundReflection, 0.0, 2.0);
+
+  hitCol *= vec3f(1.0 + focus * causticGain * 0.78,
+                  1.0 + focus * causticGain * 0.75,
+                  1.0 + focus * causticGain * 0.62);
+  hitCol += vec3f(1.0, 0.97, 0.86) * focus * causticGain * 0.14;
 
   let trans = hitCol * exp(-C.absorb * thick);`;
 
-  if (!src.includes(transNeedle)) throw new Error('Fluid V4.2: upstream transmission signature changed.');
+  if (!src.includes(transNeedle)) throw new Error('Fluid V4.2.1: upstream transmission signature changed.');
   src = src.replace(transNeedle, transPatch);
 
-  const mod = ssfr.dev.createShaderModule({ code: src, label: 'fluidV42PoolCausticsWGSL' });
-  ssfr.pipeComposite = ssfr.dev.createRenderPipeline({
-    label: 'fluidV42PoolCausticsComposite',
-    layout: 'auto',
-    vertex: { module: mod, entryPoint: 'vs' },
-    fragment: { module: mod, entryPoint: 'fs', targets: [{ format: ssfr.format }] },
-    primitive: { topology: 'triangle-list' },
-  });
-  ssfr.bindCache = null;
+  const mod = ssfr.dev.createShaderModule({ code: src, label: 'fluidV421StablePoolCausticsWGSL' });
+  const previousPipe = ssfr.pipeComposite;
+  try {
+    // Validate asynchronously and only swap the live renderer after the pipeline is known-good.
+    // If mobile WebGPU rejects the custom shader, the proven previous composite stays active.
+    const nextPipe = await ssfr.dev.createRenderPipelineAsync({
+      label: 'fluidV421StablePoolCausticsComposite',
+      layout: 'auto',
+      vertex: { module: mod, entryPoint: 'vs' },
+      fragment: { module: mod, entryPoint: 'fs', targets: [{ format: ssfr.format }] },
+      primitive: { topology: 'triangle-list' },
+    });
+    ssfr.pipeComposite = nextPipe;
+    ssfr.bindCache = null;
 
-  const stats = document.getElementById('v4stats');
-  if (stats && !stats.textContent.includes('short-wall')) stats.textContent += ' · short-wall · wall-caustics';
-  console.info('[Fluid V4.2] shorter tiled pool walls and bottom/side caustics enabled.');
+    const stats = document.getElementById('v4stats');
+    if (stats && !stats.textContent.includes('stable-caustics')) stats.textContent += ' · short-wall · stable-caustics';
+    console.info('[Fluid V4.2.1] stable derivative-free bottom/side caustics enabled.');
+  } catch (err) {
+    ssfr.pipeComposite = previousPipe;
+    console.error('[Fluid V4.2.1] custom caustic pipeline rejected; retained previous stable renderer.', err);
+  }
 }

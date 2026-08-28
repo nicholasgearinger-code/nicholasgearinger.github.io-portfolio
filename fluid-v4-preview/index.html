@@ -4,16 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="theme-color" content="#06131a">
-<title>Fluid V4.3.1 Preview</title>
+<title>Fluid V4.3.2 Preview</title>
 <style>
 html,body{margin:0;width:100%;height:100%;background:#06131a;color:#dffcff;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 body{display:grid;place-items:center}.status{padding:24px;text-align:center}.title{font-size:14px;letter-spacing:.12em;color:#86f6ff;font-weight:800}.note{margin-top:10px;font-size:12px;color:#8ba7b2;line-height:1.5}.err{color:#ff9f9f;white-space:pre-wrap}
 </style>
 </head>
 <body>
-<div class="status"><div class="title">FLUID V4.3.1 · REALTIME CAUSTICS</div><div id="note" class="note">Loading isolated WebGPU preview…</div></div>
+<div class="status"><div class="title">FLUID V4.3.2 · FLOOR CAUSTICS</div><div id="note" class="note">Loading isolated WebGPU preview…</div></div>
 <script type="module">
-const commit='d250b03f0de66f03177d6300dd24c6f54e43c797';
+const commit='12a25df815b4d1d23c67eeaaf2df4b8d18ad059e';
 const base=`https://cdn.jsdelivr.net/gh/nicholasgearinger-code/nicholasgearinger.github.io-portfolio@${commit}/fluid-v4-pbf/`;
 const note=document.getElementById('note');
 try{
@@ -26,8 +26,8 @@ try{
   document.close();
 }catch(err){
   note.classList.add('err');
-  note.textContent='Unable to load the isolated V4.3.1 preview.\n'+(err?.message||err);
-  console.error('[Fluid V4.3.1 preview]',err);
+  note.textContent='Unable to load the isolated V4.3.2 preview.\n'+(err?.message||err);
+  console.error('[Fluid V4.3.2 preview]',err);
 }
 </script>
 </body>

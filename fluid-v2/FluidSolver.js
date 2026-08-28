@@ -19,21 +19,19 @@ import {
   dot,
 } from "three/tsl";
 
-// Hybrid 2.5D water solver.
+// Hybrid 2.5D free-surface solver.
 //
-// The old portfolio demo only evolved a scalar height field. This solver keeps
-// a real horizontal velocity field and runs the same core stages used by
-// stable-fluid solvers:
-//   splat + semi-Lagrangian advection
-//   curl / vorticity confinement
-//   shallow-water gravity
-//   divergence
-//   Jacobi pressure ping-pong
-//   pressure projection
-//   continuity-driven height update + advected foam
+// The persistent state is physical rather than animated:
+//   - scalar free-surface displacement h(x,z)
+//   - horizontal water velocity u(x,z)
+//   - advected foam/aeration
+//   - divergence / pressure / vorticity work fields
 //
-// Storage stays entirely on the GPU. The CPU only updates uniforms and queues
-// splats; there is no per-cell CPU readback in the frame loop.
+// Each frame runs semi-Lagrangian advection, shallow-water gravity, vorticity,
+// divergence, Jacobi pressure ping-pong, pressure projection and nonlinear
+// continuity. Impacts inject a *volume-conserving-looking* crater + crown shape
+// plus radial momentum directly into the fields, so expanding rings and rebounds
+// are produced by the solver instead of by an overlay animation.
 
 const MAX_SPLATS = 4;
 
@@ -60,8 +58,8 @@ export class FluidSolver {
     this.vorticityStrength = uniform(vorticity);
     this.projectionStrength = uniform(projection);
     this.velocityDissipation = uniform(0.995);
-    this.heightDissipation = uniform(0.9992);
-    this.foamDissipation = uniform(0.976);
+    this.heightDissipation = uniform(0.9990);
+    this.foamDissipation = uniform(0.982);
 
     this.heightA = instancedArray(this.cellCount, "float");
     this.heightB = instancedArray(this.cellCount, "float");
@@ -80,6 +78,11 @@ export class FluidSolver {
       impulse: uniform(new THREE.Vector2()),
       strength: uniform(0),
       radius: uniform(1),
+      radialImpulse: uniform(0),
+      ringRadius: uniform(0),
+      ringWidth: uniform(0.4),
+      ringStrength: uniform(0),
+      foam: uniform(0),
     }));
 
     this._buildComputeGraph();
@@ -87,7 +90,19 @@ export class FluidSolver {
     this.frame = 0;
   }
 
-  queueSplat({ x, z, vx = 0, vz = 0, strength = 1, radius = 1.2 } = {}) {
+  queueSplat({
+    x,
+    z,
+    vx = 0,
+    vz = 0,
+    strength = 1,
+    radius = 1.2,
+    radialImpulse = 0,
+    ringRadius = 0,
+    ringWidth = 0.4,
+    ringStrength = 0,
+    foam = 0,
+  } = {}) {
     if (!Number.isFinite(x) || !Number.isFinite(z)) return;
     this.splatQueue.push({
       x,
@@ -95,11 +110,48 @@ export class FluidSolver {
       vx: Number.isFinite(vx) ? vx : 0,
       vz: Number.isFinite(vz) ? vz : 0,
       strength: THREE.MathUtils.clamp(Number(strength) || 0, -4, 4),
-      radius: THREE.MathUtils.clamp(Number(radius) || 1.2, 0.25, 5),
+      radius: THREE.MathUtils.clamp(Number(radius) || 1.2, 0.22, 5),
+      radialImpulse: THREE.MathUtils.clamp(Number(radialImpulse) || 0, -8, 8),
+      ringRadius: THREE.MathUtils.clamp(Number(ringRadius) || 0, 0, 6),
+      ringWidth: THREE.MathUtils.clamp(Number(ringWidth) || 0.4, 0.12, 2.5),
+      ringStrength: THREE.MathUtils.clamp(Number(ringStrength) || 0, -4, 4),
+      foam: THREE.MathUtils.clamp(Number(foam) || 0, 0, 2),
     });
-    // Bound input work. Fast pointer movement can otherwise queue hundreds of
-    // splats while the GPU is rendering one frame.
-    if (this.splatQueue.length > 24) this.splatQueue.splice(0, this.splatQueue.length - 24);
+    if (this.splatQueue.length > 32) this.splatQueue.splice(0, this.splatQueue.length - 32);
+  }
+
+  // A rigid-body impact removes water from the footprint and deposits it in a
+  // crown around the body while adding outward radial momentum. The solver then
+  // evolves that disturbed free surface into the rebound and travelling waves.
+  queueImpact({
+    x,
+    z,
+    radius = 0.7,
+    verticalSpeed = 3,
+    vx = 0,
+    vz = 0,
+    displacedVolume = 1,
+  } = {}) {
+    const r = THREE.MathUtils.clamp(radius, 0.25, 2.6);
+    const speed = THREE.MathUtils.clamp(Math.abs(verticalSpeed), 0, 16);
+    const volume = THREE.MathUtils.clamp(displacedVolume, 0.05, 12);
+    const depression = -THREE.MathUtils.clamp(0.24 + speed * 0.19 + volume * 0.045, 0.25, 3.0);
+    const crown = THREE.MathUtils.clamp(0.16 + speed * 0.145 + volume * 0.035, 0.15, 2.4);
+    const radial = THREE.MathUtils.clamp(0.45 + speed * 0.46 + volume * 0.06, 0.45, 7.5);
+
+    this.queueSplat({
+      x,
+      z,
+      vx: vx * 0.24,
+      vz: vz * 0.24,
+      strength: depression,
+      radius: r * 1.08,
+      radialImpulse: radial,
+      ringRadius: r * 1.48,
+      ringWidth: Math.max(this.cellWorldSize * 1.35, r * 0.46),
+      ringStrength: crown,
+      foam: THREE.MathUtils.clamp(0.25 + speed * 0.12, 0.2, 1.5),
+    });
   }
 
   setPressureIterations(value) {
@@ -128,30 +180,22 @@ export class FluidSolver {
     this.dt.value = THREE.MathUtils.clamp(dtSeconds || 1 / 60, 1 / 240, 1 / 30);
     this._flushSplats();
 
-    // Each dispatch reads only settled buffers from an earlier stage and writes
-    // a different buffer. This avoids same-dispatch read/write hazards.
     this.renderer.compute(this.computeAdvectAndSplat);
     this.renderer.compute(this.computeCurl);
     this.renderer.compute(this.computeForces);
     this.renderer.compute(this.computeDivergence);
 
-    // Real pressure ping-pong. A -> B, then B -> A. An even iteration count
-    // guarantees pressureA is always the final projected pressure field.
     for (let i = 0; i < this.pressureIterations; i += 2) {
       this.renderer.compute(this.computePressureB);
       this.renderer.compute(this.computePressureA);
     }
 
     this.renderer.compute(this.computeProjectAndHeight);
-
-    // Projection writes velocityB because velocityA is still a source in that
-    // pass. Copying B -> A is GPU-to-GPU and makes A canonical for next frame.
-    this.renderer.copyBufferToBuffer(this.velocityB.value, this.velocityA.value);
+    this.renderer.compute(this.computeCommitVelocity);
     this.frame++;
   }
 
   _flushSplats() {
-    // Prefer newest inputs so touch interaction remains responsive under load.
     const selected = this.splatQueue.splice(Math.max(0, this.splatQueue.length - MAX_SPLATS));
 
     for (let i = 0; i < MAX_SPLATS; i++) {
@@ -161,12 +205,21 @@ export class FluidSolver {
         target.strength.value = 0;
         target.impulse.value.set(0, 0);
         target.position.value.set(1e5, 1e5);
+        target.radialImpulse.value = 0;
+        target.ringRadius.value = 0;
+        target.ringStrength.value = 0;
+        target.foam.value = 0;
         continue;
       }
       target.position.value.set(source.x, source.z);
       target.impulse.value.set(source.vx, source.vz);
       target.strength.value = source.strength;
       target.radius.value = source.radius;
+      target.radialImpulse.value = source.radialImpulse;
+      target.ringRadius.value = source.ringRadius;
+      target.ringWidth.value = source.ringWidth;
+      target.ringStrength.value = source.ringStrength;
+      target.foam.value = source.foam;
     }
   }
 
@@ -195,8 +248,6 @@ export class FluidSolver {
   }
 
   _sampleScalar(buffer, gx, gy) {
-    // Semi-Lagrangian backtrace with bilinear reconstruction. Keeping a one-cell
-    // guard band avoids sampling outside the storage grid at the pool walls.
     const sx = clamp(gx, float(1), float(this.size - 2));
     const sy = clamp(gy, float(1), float(this.size - 2));
     const x0 = floor(sx);
@@ -259,8 +310,6 @@ export class FluidSolver {
       const i = instanceIndex;
       const { x, y } = this._coords(i);
       const velocity = this.velocityA.element(i);
-
-      // Convert world velocity to grid cells for the backtrace.
       const cellsPerWorld = float(1 / cellWorldSize);
       const backX = x.sub(velocity.x.mul(this.dt).mul(cellsPerWorld));
       const backY = y.sub(velocity.y.mul(this.dt).mul(cellsPerWorld));
@@ -283,16 +332,30 @@ export class FluidSolver {
         const dx = worldX.sub(splat.position.x);
         const dz = worldZ.sub(splat.position.y);
         const distSq = dx.mul(dx).add(dz.mul(dz));
-        const radiusSq = splat.radius.mul(splat.radius).add(0.0001);
-        const radial = clamp(float(1).sub(distSq.div(radiusSq)), 0, 1);
-        const shaped = radial.mul(radial).mul(splat.strength);
+        const dist = sqrt(distSq.add(0.000001));
+        const core = clamp(float(1).sub(dist.div(splat.radius)), 0, 1);
+        const coreShape = core.mul(core).mul(float(3).sub(core.mul(2)));
 
-        heightImpulse = heightImpulse.add(shaped.mul(0.22));
-        velocityImpulse = velocityImpulse.add(splat.impulse.mul(shaped.mul(0.42)));
-        foamImpulse = foamImpulse.add(abs(shaped).mul(0.32));
+        const ringDistance = abs(dist.sub(splat.ringRadius));
+        const ring = float(1).sub(smoothstep(0, splat.ringWidth, ringDistance));
+        const radialDir = vec2(dx, dz).div(dist.add(0.001));
+        const radialMask = max(core.mul(0.32), ring);
+
+        heightImpulse = heightImpulse
+          .add(coreShape.mul(splat.strength).mul(0.34))
+          .add(ring.mul(splat.ringStrength).mul(0.31));
+
+        velocityImpulse = velocityImpulse
+          .add(splat.impulse.mul(coreShape).mul(0.46))
+          .add(radialDir.mul(splat.radialImpulse).mul(radialMask));
+
+        foamImpulse = foamImpulse
+          .add(abs(coreShape.mul(splat.strength)).mul(0.18))
+          .add(abs(ring.mul(splat.ringStrength)).mul(0.42))
+          .add(ring.mul(splat.foam).mul(0.55));
       }
 
-      this.heightB.element(i).assign(clamp(advectedHeight.add(heightImpulse), -2.4, 2.4));
+      this.heightB.element(i).assign(clamp(advectedHeight.add(heightImpulse), -2.8, 2.8));
       this.velocityB.element(i).assign(advectedVelocity.add(velocityImpulse));
       this.foamB.element(i).assign(clamp(max(advectedFoam, foamImpulse), 0, 1));
     })().compute(this.cellCount);
@@ -334,8 +397,6 @@ export class FluidSolver {
       let nextVelocity = this.velocityB.element(i)
         .add(vortForce.add(gravityForce).mul(this.dt));
 
-      // No-flow pool boundary. Velocity smoothly falls to zero in a three-cell
-      // guard band instead of wrapping to the opposite side of the pool.
       const edgeDistance = min(
         min(n.x, float(size - 1).sub(n.x)),
         min(n.y, float(size - 1).sub(n.y)),
@@ -384,24 +445,36 @@ export class FluidSolver {
         .sub(gradP.mul(this.projectionStrength));
       this.velocityB.element(i).assign(projected);
 
-      // Shallow-water continuity. We intentionally use the pre-projection
-      // divergence: pressure makes the horizontal flow well-behaved while the
-      // free surface still rises/falls as water converges/diverges.
-      const div = this.divergence.element(i);
-      const nextHeight = this.heightB.element(i)
-        .sub(div.mul(this.meanDepth).mul(this.dt))
-        .mul(this.heightDissipation);
-      this.heightA.element(i).assign(clamp(nextHeight, -2.4, 2.4));
+      const hC = this.heightB.element(i);
+      const hL = this.heightB.element(n.left);
+      const hR = this.heightB.element(n.right);
+      const hU = this.heightB.element(n.up);
+      const hD = this.heightB.element(n.down);
+      const gradH = vec2(hR.sub(hL), hD.sub(hU)).mul(0.5 / cellWorldSize);
 
-      // Foam is an advected scalar generated by strong rotation, convergence,
-      // and large free-surface excursions. It decays instead of disappearing
-      // immediately, so backwash and wake streaks persist naturally.
-      const energy = abs(this.curl.element(i)).mul(0.10)
-        .add(abs(div).mul(0.34))
-        .add(abs(nextHeight).mul(0.18));
-      const generated = smoothstep(0.18, 0.95, energy);
+      // Nonlinear shallow-water continuity:
+      //   dh/dt + u·grad(h) + (H+h) div(u) = 0
+      // This makes object-sized depressions/crowns transport actual free-surface
+      // volume instead of simply fading as a scalar ripple animation.
+      const effectiveDepth = clamp(this.meanDepth.add(hC), 0.08, 3.2);
+      const transport = dot(projected, gradH).add(effectiveDepth.mul(this.divergence.element(i)));
+      const nextHeight = hC.sub(transport.mul(this.dt)).mul(this.heightDissipation);
+      this.heightA.element(i).assign(clamp(nextHeight, -2.8, 2.8));
+
+      const div = this.divergence.element(i);
+      const speedSq = dot(projected, projected);
+      const energy = abs(this.curl.element(i)).mul(0.085)
+        .add(abs(div).mul(0.42))
+        .add(abs(nextHeight).mul(0.16))
+        .add(speedSq.mul(0.018));
+      const generated = smoothstep(0.16, 0.92, energy);
       const nextFoam = max(this.foamB.element(i).mul(this.foamDissipation), generated);
       this.foamA.element(i).assign(clamp(nextFoam, 0, 1));
+    })().compute(this.cellCount);
+
+    this.computeCommitVelocity = Fn(() => {
+      const i = instanceIndex;
+      this.velocityA.element(i).assign(this.velocityB.element(i));
     })().compute(this.cellCount);
   }
 }

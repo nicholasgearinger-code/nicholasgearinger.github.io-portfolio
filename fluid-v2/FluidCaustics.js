@@ -10,28 +10,43 @@ import {
   clamp,
   smoothstep,
   abs,
-  sin,
+  sqrt,
+  dot,
+  max,
+  uniform,
 } from "three/tsl";
 
-// Lightweight realtime caustics for the hybrid heightfield.
+// Realtime caustics projected from the *physical* heightfield.
 //
-// Each caustic vertex samples the live water height field, estimates slope and
-// curvature, then projects that vertex across the pool floor as if the surface
-// normal had refracted a vertical sun ray. Compressed/curved parts of the water
-// brighten while flat water contributes almost nothing. A very small analytic
-// capillary component matches the micro-ripples used by FluidSurface so the
-// caustics retain fine dancing structure even when the macro heightfield is calm.
+// Every vertex represents a point on the water surface. We estimate its normal,
+// refract the incoming sunlight from air (n≈1.0) into water (n≈1.333) using
+// Snell's law, intersect that transmitted ray with the pool floor, then move the
+// caustic receiver vertex to that hit point. Curvature supplies a lightweight
+// local Jacobian/focusing estimate; overlapping/compressed triangles add more
+// energy through additive blending.
 export class FluidCaustics {
-  constructor(solver, timeUniform, { resolution = 64 } = {}) {
+  constructor(solver, timeUniform, {
+    resolution = 64,
+    floorY = -3.535,
+    lightDirection = new THREE.Vector3(14, -24, 8).normalize(),
+  } = {}) {
     this.solver = solver;
     this.time = timeUniform;
     this.resolution = Math.max(24, Math.min(96, resolution | 0));
+    this.floorY = floorY;
+    this.lightDirection = uniform(lightDirection.clone().normalize());
     this.mesh = this._buildMesh();
+  }
+
+  setLightDirection(direction) {
+    if (!direction) return;
+    this.lightDirection.value.copy(direction).normalize();
   }
 
   _buildMesh() {
     const { size, worldSize, cellWorldSize, heightA, foamA } = this.solver;
     const res = this.resolution;
+    const floorY = this.floorY;
 
     const geometry = new THREE.PlaneGeometry(
       worldSize,
@@ -41,7 +56,6 @@ export class FluidCaustics {
     );
     geometry.rotateX(-Math.PI / 2);
 
-    // Map the cheaper caustic mesh to the nearest cells of the full simulation.
     const count = res * res;
     const indices = new Float32Array(count);
     for (let y = 0; y < res; y++) {
@@ -56,14 +70,14 @@ export class FluidCaustics {
     const cellIndex = attribute("fluidCell", "float").toUint();
     const material = new THREE.MeshBasicNodeMaterial({
       transparent: true,
-      opacity: 0.72,
+      opacity: 0.58,
       depthWrite: false,
       depthTest: true,
       blending: THREE.AdditiveBlending,
       side: THREE.DoubleSide,
     });
 
-    const causticField = Fn(() => {
+    const opticalState = Fn(() => {
       const x = cellIndex.mod(size).toFloat();
       const y = cellIndex.div(size).toFloat();
       const xm = x.sub(1).max(0);
@@ -84,59 +98,56 @@ export class FluidCaustics {
 
       const slopeX = hR.sub(hL).div(2 * cellWorldSize);
       const slopeZ = hD.sub(hU).div(2 * cellWorldSize);
+      const normal = vec3(slopeX.mul(-1), 1, slopeZ.mul(-1)).normalize();
+
+      // GLSL refract(I,N,eta) expanded explicitly for TSL. I points from the
+      // light toward the water. eta = n_air / n_water.
+      const I = this.lightDirection;
+      const eta = float(1 / 1.333);
+      const ndoti = dot(normal, I);
+      const k = max(float(1).sub(eta.mul(eta).mul(float(1).sub(ndoti.mul(ndoti)))), 0);
+      const transmitted = I.mul(eta)
+        .sub(normal.mul(eta.mul(ndoti).add(sqrt(k))))
+        .normalize();
+
+      const waterToFloor = hC.sub(floorY);
+      const travel = waterToFloor.div(max(transmitted.y.mul(-1), 0.08));
+      const shiftX = transmitted.x.mul(travel);
+      const shiftZ = transmitted.z.mul(travel);
+
       const curvature = hL.add(hR).add(hU).add(hD).sub(hC.mul(4))
         .div(cellWorldSize * cellWorldSize);
+      const focusing = smoothstep(0.018, 0.34, abs(curvature));
+      const incidence = clamp(ndoti.mul(-1), 0, 1);
+      const foam = clamp(foamA.element(cellIndex).mul(1.55), 0, 1);
+      const clearWater = float(1).sub(foam.mul(0.86));
 
-      // Curvature is the useful focusing cue: flat water has nearly zero
-      // caustic energy while converging/diverging wavelets create bright lines.
-      const macroFocus = smoothstep(0.025, 0.42, abs(curvature));
-      const slopeEnergy = smoothstep(0.03, 0.55, abs(slopeX).add(abs(slopeZ)));
-
-      const worldX = x.div(size - 1).sub(0.5).mul(worldSize);
-      const worldZ = y.div(size - 1).sub(0.5).mul(worldSize);
-
-      // Analytic capillary wavelengths shared conceptually with FluidSurface.
-      // Their product forms narrow moving folds instead of a scrolling bitmap.
-      const m1 = sin(worldX.mul(1.55).add(worldZ.mul(0.82)).add(this.time.mul(2.35)));
-      const m2 = sin(worldX.mul(-0.93).add(worldZ.mul(1.72)).sub(this.time.mul(1.78)));
-      const microFold = smoothstep(0.72, 0.985, abs(m1.mul(m2)));
-
-      const foam = clamp(foamA.element(cellIndex).mul(1.7), 0, 1);
-      const clearWater = float(1).sub(foam.mul(0.78));
-
+      // A nonzero base means a smooth surface still transmits light; curvature
+      // concentrates that energy into the dancing bright folds.
       const intensity = clamp(
-        macroFocus.mul(1.25)
-          .add(slopeEnergy.mul(0.28))
-          .add(microFold.mul(0.72))
+        float(0.11)
+          .add(focusing.mul(1.38))
+          .mul(incidence)
           .mul(clearWater),
         0,
-        1.75,
+        1.65,
       );
 
-      return vec3(slopeX, slopeZ, intensity);
+      return vec3(shiftX, shiftZ, intensity);
     })();
 
-    const causticVarying = vertexStage(causticField);
+    const varying = vertexStage(opticalState);
 
-    // Approximate refraction displacement on the receiver. This is intentionally
-    // conservative: the visible intensity comes from actual live curvature,
-    // while the X/Z shift makes the bands slide/focus with the surface normals.
     material.positionNode = Fn(() => {
-      const slopeX = causticField.x;
-      const slopeZ = causticField.y;
-      const refractDistance = float(1.55);
-      return positionLocal.add(vec3(
-        slopeX.mul(refractDistance).mul(-1),
-        0,
-        slopeZ.mul(refractDistance).mul(-1),
-      ));
+      const state = opticalState;
+      return positionLocal.add(vec3(state.x, 0, state.y));
     })();
 
-    material.colorNode = color(0xb8fbff).mul(causticVarying.z);
+    material.colorNode = color(0xc9ffff).mul(varying.z);
 
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.name = "FluidRealtimeCaustics";
-    mesh.position.y = -3.535;
+    mesh.name = "FluidSnellCaustics";
+    mesh.position.y = floorY;
     mesh.frustumCulled = false;
     mesh.renderOrder = 2;
     return mesh;

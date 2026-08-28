@@ -29,13 +29,13 @@
     border-radius: 10px; padding: 9px 11px; color: #e9fbff; box-shadow: 0 10px 30px rgba(0,0,0,.18);
   }
   .title { font: 700 12px/1.2 system-ui, sans-serif; letter-spacing: .13em; text-transform: uppercase; color: var(--cyan); }
-  .sub { margin-top: 5px; font-size: 10px; line-height: 1.35; color: var(--muted); max-width: 450px; }
+  .sub { margin-top: 5px; font-size: 10px; line-height: 1.35; color: var(--muted); max-width: 500px; }
   .stats { text-align: right; white-space: nowrap; }
   #fps { color: #a7f3d0; font-weight: 700; font-size: 13px; }
   #sim-state { margin-top: 3px; color: var(--cyan); font-size: 10px; }
   #quality-state { margin-top: 2px; color: var(--muted); font-size: 9px; }
   .bottom { display: flex; gap: 8px; align-items: flex-end; justify-content: space-between; }
-  #status { max-width: min(480px, 60vw); font-size: 9px; color: #b9d9e3; }
+  #status { max-width: min(520px, 60vw); font-size: 9px; color: #b9d9e3; }
   #status.error { color: #ff9c9c; border-color: rgba(255,120,120,.45); }
   .controls { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; pointer-events: auto; }
   button {
@@ -72,7 +72,7 @@
   <div class="top">
     <div class="card">
       <div class="title">Hybrid WebGPU Fluid Lab</div>
-      <div class="sub">Heightfield + advected velocity + vorticity + Jacobi pressure projection + foam + transmissive spray + Rapier rigid bodies. Drag across the surface to inject momentum.</div>
+      <div class="sub">Physical free-surface deformation + advected velocity + vorticity + pressure projection + displaced-volume impacts + Snell caustics + ballistic splash sheets/droplets.</div>
     </div>
     <div class="card stats">
       <div id="fps">-- FPS</div>
@@ -85,7 +85,7 @@
     <div class="controls">
       <button id="drop-ball" type="button">Drop sphere</button>
       <button id="drop-cube" type="button">Drop cube</button>
-      <button id="splash" type="button">Splat</button>
+      <button id="splash" type="button">Impact</button>
       <button id="vorticity" type="button">Vorticity ON</button>
       <button id="pressure" type="button">Pressure</button>
       <button id="pause" type="button">Pause</button>
@@ -93,7 +93,6 @@
     </div>
   </div>
 </div>
-<script type="module" src="./fluid-v2/RendererCompat.js"></script>
 <script type="module" src="./fluid-v2/main.js"></script>
 </body>
 </html>

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#06131a">
+<title>Fluid V4 · PBF Water</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#06131a;color:#dffcff;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}#view{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}#upstream-ui,#debugpanel{display:none!important}#loading{position:fixed;inset:0;z-index:20;display:grid;place-content:center;justify-items:center;gap:10px;background:#06131a;transition:opacity .3s ease}#loading.gone{opacity:0;pointer-events:none}#loading h2{font-size:13px;letter-spacing:.12em;color:#86f6ff}#loadnote{font-size:12px;color:#8ba7b2}#loadrings{display:flex;gap:7px}#loadrings i{width:7px;height:7px;border-radius:50%;background:#66e7de;animation:pulse 1s ease-in-out infinite}#loadrings i:nth-child(2){animation-delay:.15s}#loadrings i:nth-child(3){animation-delay:.3s}@keyframes pulse{50%{opacity:.25;transform:translateY(-4px)}}#nogpu{display:none;position:fixed;inset:0;z-index:30;padding:20vh 9vw;background:#06131a;color:#ff9f9f;white-space:pre-wrap}
+.hud{position:fixed;z-index:10;pointer-events:none}.card{background:rgba(6,22,29,.86);border:1px solid rgba(84,218,222,.42);box-shadow:0 8px 28px rgba(0,0,0,.18);backdrop-filter:blur(10px);border-radius:14px}.title{left:max(14px,env(safe-area-inset-left));top:max(14px,env(safe-area-inset-top));padding:12px 18px;color:#86f6ff;font-weight:800;letter-spacing:.14em;font-size:15px}.perf{right:max(14px,env(safe-area-inset-right));top:max(14px,env(safe-area-inset-top));padding:11px 15px;text-align:right;min-width:176px}.fps{font-size:23px;font-weight:800;color:#9dffc8}.status{font-size:11px;line-height:1.55;color:#9fc1cf;letter-spacing:.04em}.hint{left:max(14px,env(safe-area-inset-left));bottom:max(14px,env(safe-area-inset-bottom));padding:11px 13px;max-width:245px;font-size:12px;line-height:1.45;color:#b6d1dc}.controls{right:max(14px,env(safe-area-inset-right));bottom:max(14px,env(safe-area-inset-bottom));display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;max-width:430px;pointer-events:auto}.btn{appearance:none;border:1px solid rgba(78,214,220,.48);background:rgba(6,22,29,.9);color:#dffcff;border-radius:999px;padding:11px 15px;font:700 12px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.03em;box-shadow:0 4px 15px rgba(0,0,0,.18)}.btn.active{border-color:#f1ad43;color:#ffd890}.btn:active{transform:scale(.97)}
+#license{position:fixed;left:50%;bottom:5px;transform:translateX(-50%);font-size:8px;color:rgba(210,240,245,.42);z-index:9;pointer-events:none}@media(max-width:600px){.title{font-size:13px;padding:10px 13px;max-width:48vw}.perf{min-width:155px}.controls{max-width:58vw}.btn{padding:10px 12px}.hint{max-width:35vw;font-size:10px}}
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<div id="loading"><h2>FLUID V4 · PBF WATER</h2><div id="loadnote">starting WebGPU…</div><div id="loadrings"><i></i><i></i><i></i></div></div>
+<div id="nogpu"></div>
+<div class="hud card title">FLUID V4 · PBF WATER</div>
+<div class="hud card perf"><div id="v4fps" class="fps">-- FPS</div><div id="v4mode" class="status">WATER MODE</div><div id="v4stats" class="status">loading…</div></div>
+<div id="v4hint" class="hud card hint">Water mode: tap or drag the surface to create ripples.</div>
+<div class="hud controls"><button id="modeBtn" class="btn active">MODE: WATER</button><button id="dropBtn" class="btn">DROP BALL</button><button id="pauseV4" class="btn">PAUSE</button><button id="resetV4" class="btn">RESET</button></div>
+<div id="license">PBF core © 2026 matsuoka-601 · MIT</div>
+<div id="upstream-ui">
+  <div id="ui">
+    <button data-preset="small"></button><button data-preset="medium"></button><button data-preset="large"></button>
+    <button id="reset"></button><button id="pour"></button><span id="pourleft"></span><button id="pause"></button><button id="resetcam"></button><button id="nobodies"></button><button id="grabmode"></button>
+    <input id="inifile" type="file"><button id="loadini"></button><div id="ininote"></div><div id="pourrate"></div><div id="sceneinfo"></div><div id="meshinfo"></div><div id="envinfo"></div><input id="envfile" type="file"><button id="envclear"></button><button id="floorplane"></button>
+    <select id="viewmode"><option value="0"></option><option value="1"></option><option value="2"></option><option value="3"></option></select>
+    <select id="raysurface"><option value="0"></option><option value="1"></option></select><select id="ssfrfilter"><option value="0"></option><option value="1"></option><option value="2"></option></select><select id="ssfrdebug"><option value="0"></option></select><select id="raydebug"><option value="0"></option></select>
+    <div id="surfacegroup"></div><div id="raygroup"></div><div id="ssfrgroup"></div><div id="envgroup"></div>
+    <pre id="stats"></pre><pre id="timing"></pre><span id="adapter"></span>
+    <label><input id="normalsmooth" type="range"><span id="normalsmoothv"></span></label>
+    <div id="sliderBank"></div>
+  </div>
+</div>
+<div id="debugpanel" hidden><button id="debugclose"></button></div>
+<script>
+const ids=['ssfrscale','boxx','pourspeed','pourwidth','pourheight','pourtilt','timescale','substeps','iters','omega','xsph','scorr','fradius','fstrength','flimit','grab','camspeed','tension','radius','meshres','fieldsmooth','meshiso','ior','absorption','thicksteps','groundrefl','roughness','sunint','sunelev','sunazim','exposure','envintensity','envyaw','ssfrradius','anisoratio','ssfriters','ssfrsigma','ssfrdelta','ssfrmu','ssfrthickr','ssfrthick','ssfrthickblur','ssfrdepthcull'];
+const bank=document.getElementById('sliderBank');for(const id of ids){if(document.getElementById(id))continue;const l=document.createElement('label');const i=document.createElement('input');i.type='range';i.id=id;const s=document.createElement('span');s.id=id+'v';l.append(i,s);bank.append(l)}
+</script>
+<script type="module" src="./src/main.js"></script>
+</body></html>

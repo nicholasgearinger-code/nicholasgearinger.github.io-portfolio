@@ -90,11 +90,23 @@ export class FluidPhysics {
           y: 9.81 * mass * 1.34 * submerged - v.y * drag * 0.45 * mass,
           z: -v.z * drag * mass,
         }, true);
+
+        // Moving bodies carve a shallow trough and push horizontal momentum
+        // into the flow. A negative height splat reads more like displacement
+        // than the old positive mound and naturally rebounds into wake ripples.
         entry.wakeCooldown -= safeDt;
         const speed = Math.hypot(v.x, v.z);
         if (entry.wakeCooldown <= 0 && speed > 0.45) {
-          this.solver.queueSplat({ x: p.x, z: p.z, vx: v.x * 0.32, vz: v.z * 0.32, strength: Math.min(0.5, 0.1 + speed * 0.035), radius: entry.radius * 1.3 });
-          entry.wakeCooldown = 0.08;
+          const wake = Math.min(0.34, 0.07 + speed * 0.028);
+          this.solver.queueSplat({
+            x: p.x,
+            z: p.z,
+            vx: v.x * 0.36,
+            vz: v.z * 0.36,
+            strength: -wake,
+            radius: entry.radius * 1.35,
+          });
+          entry.wakeCooldown = 0.07;
         }
       }
     }
@@ -107,8 +119,15 @@ export class FluidPhysics {
       const q = entry.body.rotation();
       const v = entry.body.linvel();
       if (entry.previousY > 0.12 && p.y <= 0.12 && v.y < -0.6) {
-        const impact = THREE.MathUtils.clamp(Math.abs(v.y) * 0.12, 0.25, 1.6);
-        this.solver.queueSplat({ x: p.x, z: p.z, vx: v.x * 0.22, vz: v.z * 0.22, strength: impact, radius: entry.radius * (1.5 + impact * 0.35) });
+        const impact = THREE.MathUtils.clamp(Math.abs(v.y) * 0.135, 0.28, 1.8);
+        this.solver.queueSplat({
+          x: p.x,
+          z: p.z,
+          vx: v.x * 0.26,
+          vz: v.z * 0.26,
+          strength: -impact,
+          radius: entry.radius * (1.65 + impact * 0.42),
+        });
         this.particles?.emit(p.x, p.z, impact, { x: v.x, z: v.z });
       }
       entry.previousY = p.y;

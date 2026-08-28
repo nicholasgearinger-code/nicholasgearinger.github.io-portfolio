@@ -1,15 +1,15 @@
 // Fluid V5 bootstrap. The HTML shell is inherited from V4.4, so mark the build immediately,
 // then wait for the validated V4.4 renderer to expose its runtime handles before mounting V5.
 
-const V5_BUILD = 'M3.1 MULTI-LIGHT LAB + CAUSTIC CONTRAST';
+const V5_BUILD = 'M3.2 DISTINCTIVE LIGHT RIGS + COLORED CAUSTICS';
 document.title = `Fluid V5 · ${V5_BUILD}`;
 const earlyBrand = document.querySelector('.hud.card.title');
-if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M3.1';
+if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M3.2';
 const earlyLoadTitle = document.querySelector('#loading h2');
-if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M3.1';
+if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M3.2';
 const earlyStats = document.getElementById('v4stats');
-if (earlyStats) earlyStats.textContent = 'BUILD: MULTI-LIGHT LAB · CAUSTIC CONTRAST · waiting for V4.4 core…';
-window.__fluidV5Version = '5.1.1-m31-booting';
+if (earlyStats) earlyStats.textContent = 'BUILD: DISTINCTIVE LIGHT RIGS · COLORED CAUSTICS · waiting for V4.4 core…';
+window.__fluidV5Version = '5.1.2-m32-booting';
 window.__fluidV5Build = V5_BUILD;
 
 await import('./wave-test-v44.js');
@@ -37,35 +37,33 @@ try {
   console.error('[Fluid V5 pool slab] full-floor initialization failed; upstream compact block retained.', err);
 }
 
-// M3.1 primary light rig. General receiver lighting supports Sun, Spot, Point, Underwater and
-// Skylight. Only emitters that physically cross the air-water interface toward the receiver
-// (Sun/Spot/Point) are eligible to drive the atomic caustic projector.
+// M3.2: presets now change real receiver light color/shape/falloff and environment balance.
+// Sun/Spot/Point may drive atomic caustics; Underwater/Skylight remain direct or ambient sources.
 let lightLabReady = false;
 try {
   await import('./v5-light-lab.js');
-  lightLabReady = !!window.__v5LightLab;
+  lightLabReady = window.__v5LightLab?.version === 'M3.2';
 } catch (err) {
-  console.error('[Fluid V5 Light Lab] M3.1 lighting module failed; retaining the M3.0 sun path.', err);
+  console.error('[Fluid V5 Light Lab] M3.2 lighting module failed; retaining the M3.0 sun path.', err);
 }
 
-// Keep the validated full-PBF-surface, atomic<u32> -> r32uint mobile backend. M3.1 changes only
-// the incoming photon source (Sun/Spot/Point) and retains the M3.0 local-density high-pass so
-// broad illumination does not masquerade as caustics.
+// Keep the validated full-PBF-surface, atomic<u32> -> r32uint mobile backend. M3.2 adds
+// per-preset caustic gain and emitter tint while retaining the local-density high-pass.
 if (!window.__v5ProjectedCaustics?.online) {
   try {
-    await import(lightLabReady ? './v5-atomic-multilight-m31.js' : './v5-atomic-contrast-m30.js');
+    await import(lightLabReady ? './v5-atomic-multilight-m32.js' : './v5-atomic-contrast-m30.js');
   } catch (err) {
     const prev = window.__v5AtomicStatus || {};
     window.__v5AtomicStatus = {
       ...prev,
       online:false,
       stage:`rejected @ ${prev.stage || 'module'}`,
-      backend:lightLabReady ? 'particle-multilight' : 'particle-contrast',
+      backend:lightLabReady ? 'particle-multilight-m32' : 'particle-contrast',
       width:prev.width || 0,
       height:prev.height || 0,
       error:String(err?.message || err),
     };
-    console.error('[Fluid V5 atomic] M3.1 caustic projector rejected; inherited receiver lighting remains active.', err);
+    console.error('[Fluid V5 atomic] M3.2 caustic projector rejected; inherited receiver lighting remains active.', err);
   }
 }
 
@@ -92,19 +90,18 @@ try {
   console.error('[Fluid V5 caustic handoff] legacy receiver suppression failed.', err);
 }
 
-// Reorganize all live controls after their modules have mounted. M3.1 separates WATER from a
-// dedicated LIGHTING tab, where every light type includes a description and its relevant controls.
+// Reorganize all live controls after their modules have mounted.
 try {
-  await import('./v5-tabs-m31.js');
+  await import('./v5-tabs-m32.js');
 } catch (err) {
-  console.error('[Fluid V5 UI] M3.1 tabbed control shell failed; original controls remain available.', err);
+  console.error('[Fluid V5 UI] M3.2 tabbed control shell failed; original controls remain available.', err);
 }
 
-window.__fluidV5Version = '5.1.1-m31';
+window.__fluidV5Version = '5.1.2-m32';
 const brand = document.querySelector('.hud.card.title');
-if (brand) brand.textContent = 'FLUID V5 · M3.1';
+if (brand) brand.textContent = 'FLUID V5 · M3.2';
 const stats = document.getElementById('v4stats');
-if (stats && !stats.textContent.includes('BUILD:')) stats.textContent = `BUILD: MULTI-LIGHT LAB · CAUSTIC CONTRAST · ${stats.textContent}`;
+if (stats && !stats.textContent.includes('BUILD:')) stats.textContent = `BUILD: DISTINCTIVE LIGHT RIGS · COLORED CAUSTICS · ${stats.textContent}`;
 
 setTimeout(() => {
   const toggle = document.getElementById('v4WaveToggle');

@@ -1,15 +1,15 @@
 // Fluid V5 bootstrap. The HTML shell is inherited from V4.4, so mark the build immediately,
 // then wait for the validated V4.4 renderer to expose its runtime handles before mounting V5.
 
-const V5_BUILD = 'M3.4 TRUE NIGHT POOL + SIX FIXTURES';
+const V5_BUILD = 'M3.4.2 TUNED NIGHT POOL + LOCAL SIX FIXTURES';
 document.title = `Fluid V5 · ${V5_BUILD}`;
 const earlyBrand = document.querySelector('.hud.card.title');
-if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M3.4';
+if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M3.4.2';
 const earlyLoadTitle = document.querySelector('#loading h2');
-if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M3.4';
+if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M3.4.2';
 const earlyStats = document.getElementById('v4stats');
-if (earlyStats) earlyStats.textContent = 'BUILD: TRUE NIGHT POOL · SIX FIXTURES · waiting for V4.4 core…';
-window.__fluidV5Version = '5.1.4-m34-booting';
+if (earlyStats) earlyStats.textContent = 'BUILD: TUNED NIGHT POOL · LOCAL SIX FIXTURES · waiting for V4.4 core…';
+window.__fluidV5Version = '5.1.4.2-m342-booting';
 window.__fluidV5Build = V5_BUILD;
 
 await import('./wave-test-v44.js');
@@ -37,8 +37,8 @@ try {
   console.error('[Fluid V5 pool slab] full-floor initialization failed; upstream compact block retained.', err);
 }
 
-// M3.4 keeps the simplified Day/Sunset/Night atmosphere controller, then layers a conservative
-// six-fixture night-pool renderer that does not depend on fragment-stage SSFR depth sampling.
+// M3.4.2 keeps the simplified Day/Sunset/Night atmosphere controller. Night is handed off to the
+// tuned six-fixture renderer so the older four-light mood pass cannot double-light the pool.
 let lightLabReady = false;
 try {
   await import('./v5-light-lab.js');
@@ -46,10 +46,11 @@ try {
   try {
     await import('./v5-night-pool-m34.js');
   } catch (err) {
-    console.error('[Fluid V5 Night Pool] M3.4 six-fixture renderer failed; M3.3 mood lighting remains active.', err);
+    window.__v5DedicatedNightPool = false;
+    console.error('[Fluid V5 Night Pool] M3.4.2 tuned six-fixture renderer failed; atmosphere fallback remains active.', err);
   }
 } catch (err) {
-  console.error('[Fluid V5 Light Lab] M3.4 atmosphere module failed; retaining the M3.0 sun path.', err);
+  console.error('[Fluid V5 Light Lab] M3.4.2 atmosphere module failed; retaining the M3.0 sun path.', err);
 }
 
 // Reuse the validated mobile atomic backend. Day/Sunset provide the directional air-to-water
@@ -68,7 +69,7 @@ if (!window.__v5ProjectedCaustics?.online) {
       height:prev.height || 0,
       error:String(err?.message || err),
     };
-    console.error('[Fluid V5 atomic] M3.4 time-of-day caustic handoff rejected; inherited receiver lighting remains active.', err);
+    console.error('[Fluid V5 atomic] M3.4.2 time-of-day caustic handoff rejected; inherited receiver lighting remains active.', err);
   }
 }
 
@@ -99,14 +100,14 @@ try {
 try {
   await import('./v5-tabs-m34.js');
 } catch (err) {
-  console.error('[Fluid V5 UI] M3.4 tabbed control shell failed; original controls remain available.', err);
+  console.error('[Fluid V5 UI] M3.4.2 tabbed control shell failed; original controls remain available.', err);
 }
 
-window.__fluidV5Version = '5.1.4-m34';
+window.__fluidV5Version = '5.1.4.2-m342';
 const brand = document.querySelector('.hud.card.title');
-if (brand) brand.textContent = 'FLUID V5 · M3.4';
+if (brand) brand.textContent = 'FLUID V5 · M3.4.2';
 const stats = document.getElementById('v4stats');
-if (stats && !stats.textContent.includes('BUILD:')) stats.textContent = `BUILD: TRUE NIGHT POOL · SIX FIXTURES · ${stats.textContent}`;
+if (stats && !stats.textContent.includes('BUILD:')) stats.textContent = `BUILD: TUNED NIGHT POOL · LOCAL SIX FIXTURES · ${stats.textContent}`;
 
 setTimeout(() => {
   const toggle = document.getElementById('v4WaveToggle');

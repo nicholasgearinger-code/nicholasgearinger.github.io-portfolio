@@ -18,8 +18,8 @@
 <div id="loading"><h2>FLUID V4 · PBF WATER</h2><div id="loadnote">starting WebGPU…</div><div id="loadrings"><i></i><i></i><i></i></div></div>
 <div id="nogpu"></div>
 <div class="hud card title">FLUID V4 · PBF WATER</div>
-<div class="hud card perf"><div id="v4fps" class="fps">-- FPS</div><div id="v4mode" class="status">WATER MODE</div><div id="v4stats" class="status">loading…</div><button id="settingsBtn" class="qualityTrigger">QUALITY: MED</button></div>
-<div id="settingsPanel" class="card settings hidden"><div class="settingsTitle">SIMULATION QUALITY</div><div class="qualityRow"><button class="qbtn" data-quality="low">LOW</button><button class="qbtn" data-quality="medium">MED</button><button class="qbtn" data-quality="high">HIGH</button></div><div id="qualityNote" class="qualityNote">Medium keeps the current mobile balance.</div></div>
+<div class="hud card perf"><div id="v4fps" class="fps">-- FPS</div><div id="v4mode" class="status">WATER MODE</div><div id="v4stats" class="status">loading…</div><button id="settingsBtn" class="qualityTrigger">⚙ WATER SETTINGS</button></div>
+<div id="settingsPanel" class="card settings"><div class="settingsTitle">SIMULATION + WATER SETTINGS</div><div class="qualityRow"><button class="qbtn" data-quality="low">LOW</button><button class="qbtn" data-quality="medium">MED</button><button class="qbtn" data-quality="high">HIGH</button></div><div id="qualityNote" class="qualityNote">Medium keeps the current mobile balance.</div></div>
 <div id="v4hint" class="hud card hint">Water mode: tap or drag the surface to create ripples.</div>
 <div class="hud controls"><button id="modeBtn" class="btn active">MODE: WATER</button><button id="dropBtn" class="btn">DROP BALL</button><button id="pauseV4" class="btn">PAUSE</button><button id="resetV4" class="btn">RESET</button></div>
 <div id="license">PBF core © 2026 matsuoka-601 · MIT</div>
@@ -32,6 +32,5 @@
 <script>
 const ids=['ssfrscale','boxx','pourspeed','pourwidth','pourheight','pourtilt','timescale','substeps','iters','omega','xsph','scorr','fradius','fstrength','flimit','grab','camspeed','tension','radius','meshres','fieldsmooth','meshiso','ior','absorption','thicksteps','groundrefl','roughness','sunint','sunelev','sunazim','exposure','envintensity','envyaw','ssfrradius','anisoratio','ssfriters','ssfrsigma','ssfrdelta','ssfrmu','ssfrthickr','ssfrthick','ssfrthickblur','ssfrdepthcull'];const bank=document.getElementById('sliderBank');for(const id of ids){if(document.getElementById(id))continue;const l=document.createElement('label');const i=document.createElement('input');i.type='range';i.id=id;const s=document.createElement('span');s.id=id+'v';l.append(i,s);bank.append(l)}
 </script>
-<script type="module" src="./src/main.js"></script>
 <script type="module" src="./src/lighting-tune.js"></script>
 </body></html>

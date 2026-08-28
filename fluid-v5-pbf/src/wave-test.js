@@ -1,15 +1,15 @@
 // Fluid V5 bootstrap. The HTML shell is inherited from V4.4, so mark the build immediately,
 // then wait for the validated V4.4 renderer to expose its runtime handles before mounting V5.
 
-const V5_BUILD = 'M2.5 SSFR-ATOMIC + TABS';
+const V5_BUILD = 'M2.6 SSFR-ATOMIC + SAFE DEBUG';
 document.title = `Fluid V5 · ${V5_BUILD}`;
 const earlyBrand = document.querySelector('.hud.card.title');
-if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M2.5';
+if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M2.6';
 const earlyLoadTitle = document.querySelector('#loading h2');
-if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M2.5';
+if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M2.6';
 const earlyStats = document.getElementById('v4stats');
-if (earlyStats) earlyStats.textContent = 'BUILD: SSFR-ATOMIC · TABBED UI · waiting for V4.4 core…';
-window.__fluidV5Version = '5.0.5-m2-booting';
+if (earlyStats) earlyStats.textContent = 'BUILD: SSFR-ATOMIC · SAFE DEBUG · waiting for V4.4 core…';
+window.__fluidV5Version = '5.0.6-m2-booting';
 window.__fluidV5Build = V5_BUILD;
 
 await import('./wave-test-v44.js');
@@ -29,9 +29,7 @@ if (!(await waitForV44())) {
 
 await import('./v5-lab.js');
 
-// M2.5 mobile path: derive photon sources from the already-filtered SSFR water depth. This uses
-// the exact reconstructed surface visible in the final renderer and reduces the caustic compute
-// bindings to the composite uniform, one sampled depth texture, one atomic buffer and tuning data.
+// SSFR-driven atomic path: derive photon sources from the already-filtered visible water surface.
 if (!window.__v5ProjectedCaustics?.online) {
   try {
     await import('./v5-atomic-ssfr.js');
@@ -58,19 +56,25 @@ try {
   console.error('[Fluid V5 M2] milestone 2 module failed; retained M1/V4.4 stack.', err);
 }
 
-// Reorganize all live controls after their modules have mounted. Moving existing nodes preserves
-// the original event handlers and stored state while giving mobile users a clean tabbed interface.
+// Developer visualizations are session-only and must never hijack the next reload.
 try {
-  await import('./v5-tabs-m25.js');
+  await import('./v5-debug-policy.js');
+} catch (err) {
+  console.error('[Fluid V5 debug policy] unable to reset developer view.', err);
+}
+
+// Reorganize all live controls after their modules have mounted.
+try {
+  await import('./v5-tabs-m26.js');
 } catch (err) {
   console.error('[Fluid V5 UI] tabbed control shell failed; original controls remain available.', err);
 }
 
-window.__fluidV5Version = '5.0.5-m2';
+window.__fluidV5Version = '5.0.6-m2';
 const brand = document.querySelector('.hud.card.title');
-if (brand) brand.textContent = 'FLUID V5 · M2.5';
+if (brand) brand.textContent = 'FLUID V5 · M2.6';
 const stats = document.getElementById('v4stats');
-if (stats && !stats.textContent.includes('BUILD:')) stats.textContent = `BUILD: SSFR-ATOMIC · TABS · ${stats.textContent}`;
+if (stats && !stats.textContent.includes('BUILD:')) stats.textContent = `BUILD: SSFR-ATOMIC · SAFE DEBUG · ${stats.textContent}`;
 
 setTimeout(() => {
   const toggle = document.getElementById('v4WaveToggle');

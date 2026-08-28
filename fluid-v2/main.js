@@ -6,6 +6,7 @@ import { FluidSolver } from "./FluidSolver.js";
 import { FluidSurface, createPoolEnvironment } from "./FluidSurface.js";
 import { FluidCaustics } from "./FluidCaustics.js";
 import { FluidParticles } from "./FluidParticles.js";
+import { FluidSplashCrowns } from "./FluidSplashCrown.js";
 import { FluidPhysics } from "./FluidPhysics.js";
 
 const $ = (selector) => document.querySelector(selector);
@@ -25,9 +26,9 @@ const url = new URL(location.href);
 const qualityOverride = url.searchParams.get("quality");
 
 const QUALITY = {
-  low: { grid: 96, pressure: 6, dpr: 1.0, droplets: 56, caustics: 44 },
-  medium: { grid: 128, pressure: 10, dpr: 1.25, droplets: 96, caustics: 56 },
-  high: { grid: 192, pressure: 16, dpr: 1.5, droplets: 144, caustics: 80 },
+  low: { grid: 96, pressure: 6, dpr: 1.0, droplets: 56, caustics: 44, crowns: 4 },
+  medium: { grid: 128, pressure: 10, dpr: 1.25, droplets: 96, caustics: 56, crowns: 6 },
+  high: { grid: 192, pressure: 16, dpr: 1.5, droplets: 144, caustics: 80, crowns: 8 },
 };
 
 let qualityName = qualityOverride && QUALITY[qualityOverride]
@@ -43,6 +44,7 @@ let solver;
 let surface;
 let caustics;
 let particles;
+let crowns;
 let physics;
 let timer;
 let paused = false;
@@ -66,7 +68,7 @@ async function init() {
     return;
   }
 
-  setStatus("Initializing WebGPU fluid solver…");
+  setStatus("Initializing physical WebGPU fluid solver…");
 
   renderer = new THREE.WebGPURenderer({ canvas, antialias: !isTouch, alpha: false });
   renderer.setPixelRatio(Math.min(devicePixelRatio, quality.dpr));
@@ -129,12 +131,20 @@ async function init() {
   const environment = createPoolEnvironment(solver.worldSize);
   scene.add(environment);
 
-  caustics = new FluidCaustics(solver, surface.time, { resolution: quality.caustics });
+  const incomingSun = new THREE.Vector3()
+    .copy(sun.target.position)
+    .sub(sun.position)
+    .normalize();
+  caustics = new FluidCaustics(solver, surface.time, {
+    resolution: quality.caustics,
+    lightDirection: incomingSun,
+  });
   scene.add(caustics.mesh);
 
   particles = new FluidParticles(scene, solver, { count: quality.droplets });
+  crowns = new FluidSplashCrowns(scene, solver, { count: quality.crowns });
   setStatus("Loading Rapier physics…");
-  physics = await FluidPhysics.create(scene, solver, particles);
+  physics = await FluidPhysics.create(scene, solver, particles, crowns);
   physics.spawnBall(-4, -2);
   physics.spawnCube(4, 2);
 
@@ -146,15 +156,34 @@ async function init() {
   renderer.setAnimationLoop(animate);
   addEventListener("resize", onResize);
 
-  // Seed broad waves plus directional flow so the pool begins alive rather than
-  // as a perfectly flat sheet while keeping all later disturbances physical.
-  solver.queueSplat({ x: 0, z: 0, strength: -1.2, radius: 2.2 });
-  solver.queueSplat({ x: -5, z: 3, vx: 3.0, vz: -1.1, strength: -0.62, radius: 1.55 });
+  // Seed the actual solver, not the display material.
+  solver.queueImpact({ x: 0, z: 0, radius: 1.0, verticalSpeed: 2.8, displacedVolume: 1.1 });
+  solver.queueSplat({
+    x: -5,
+    z: 3,
+    vx: 3.0,
+    vz: -1.1,
+    strength: -0.38,
+    radius: 1.2,
+    radialImpulse: 0.65,
+    ringRadius: 1.55,
+    ringWidth: 0.5,
+    ringStrength: 0.25,
+  });
 
   updateHUD();
-  setStatus("Running — live caustics, capillary ripples and impact spray enabled.");
+  setStatus("Running — surface deformation, splash crowns and caustics are driven by the live fluid state.");
 
-  globalThis.__fluidLab = { renderer, scene, solver, surface, caustics, particles, physics };
+  globalThis.__fluidLab = {
+    renderer,
+    scene,
+    solver,
+    surface,
+    caustics,
+    particles,
+    crowns,
+    physics,
+  };
 }
 
 function setupPointerInput() {
@@ -173,8 +202,8 @@ function setupPointerInput() {
     const p = updateHit(event);
     if (!p) return;
     lastPointerWorld = p.clone();
-    solver.queueSplat({ x: p.x, z: p.z, strength: -0.62, radius: 1.15 });
-    particles.emit(p.x, p.z, 0.5);
+    solver.queueImpact({ x: p.x, z: p.z, radius: 0.42, verticalSpeed: 2.1, displacedVolume: 0.12 });
+    particles.emit(p.x, p.z, 0.42);
   });
 
   canvas.addEventListener("pointermove", (event) => {
@@ -191,14 +220,19 @@ function setupPointerInput() {
       vz = THREE.MathUtils.clamp((p.z - lastPointerWorld.z) / dt, -12, 12);
     }
 
-    const dragStrength = 0.22 + Math.min(0.42, Math.hypot(vx, vz) * 0.022);
+    const dragStrength = 0.18 + Math.min(0.34, Math.hypot(vx, vz) * 0.018);
     solver.queueSplat({
       x: p.x,
       z: p.z,
       vx,
       vz,
       strength: -dragStrength,
-      radius: 0.88,
+      radius: 0.78,
+      radialImpulse: Math.hypot(vx, vz) * 0.025,
+      ringRadius: 0.92,
+      ringWidth: 0.28,
+      ringStrength: dragStrength * 0.25,
+      foam: Math.hypot(vx, vz) * 0.02,
     });
     lastPointerWorld?.copy(p);
     lastPointerTime = now;
@@ -215,27 +249,26 @@ function setupPointerInput() {
 
 function setupUI() {
   $("#drop-ball").addEventListener("click", () => {
-    const x = THREE.MathUtils.randFloat(-5, 5);
-    const z = THREE.MathUtils.randFloat(-5, 5);
-    physics.spawnBall(x, z);
+    physics.spawnBall(THREE.MathUtils.randFloat(-5, 5), THREE.MathUtils.randFloat(-5, 5));
   });
   $("#drop-cube").addEventListener("click", () => {
-    const x = THREE.MathUtils.randFloat(-5, 5);
-    const z = THREE.MathUtils.randFloat(-5, 5);
-    physics.spawnCube(x, z);
+    physics.spawnCube(THREE.MathUtils.randFloat(-5, 5), THREE.MathUtils.randFloat(-5, 5));
   });
   $("#splash").addEventListener("click", () => {
     const x = THREE.MathUtils.randFloat(-7, 7);
     const z = THREE.MathUtils.randFloat(-7, 7);
-    solver.queueSplat({
+    const impactSpeed = THREE.MathUtils.randFloat(5.0, 8.0);
+    solver.queueImpact({
       x,
       z,
-      vx: THREE.MathUtils.randFloat(-4, 4),
-      vz: THREE.MathUtils.randFloat(-4, 4),
-      strength: -1.45,
-      radius: 2.0,
+      radius: 0.85,
+      verticalSpeed: impactSpeed,
+      vx: THREE.MathUtils.randFloat(-2.5, 2.5),
+      vz: THREE.MathUtils.randFloat(-2.5, 2.5),
+      displacedVolume: 1.25,
     });
-    particles.emit(x, z, 1.3);
+    particles.emit(x, z, impactSpeed * 0.17);
+    crowns.emit(x, z, 0.85, impactSpeed);
   });
   $("#pause").addEventListener("click", (event) => {
     paused = !paused;
@@ -250,6 +283,7 @@ function setupUI() {
   });
   $("#reset").addEventListener("click", () => {
     physics.clear();
+    crowns.clear();
     solver.reset();
     physics.spawnBall(-4, -2);
     physics.spawnCube(4, 2);
@@ -278,6 +312,7 @@ function animate(timestamp) {
   if (!paused) {
     physics.update(dt);
     particles.update(dt);
+    crowns.update(dt);
     solver.step(dt);
     surface.update(dt);
   }

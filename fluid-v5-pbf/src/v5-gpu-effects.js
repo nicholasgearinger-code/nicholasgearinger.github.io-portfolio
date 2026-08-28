@@ -14,6 +14,22 @@ const [CW, CH] = dims;
 const WG = 256;
 const groups = n => Math.max(1, Math.ceil(n / WG));
 
+// Preserve all V5 query state when a legacy quality button is used. The V4 handler rebuilds
+// the URL from only `quality`, so intercept it in capture phase and perform the reload here.
+for (const b of document.querySelectorAll('[data-quality]')) {
+  b.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    try { localStorage.setItem('fluidV5AutoQualityV1', '0'); } catch {}
+    state.autoQuality = false;
+    const next = new URLSearchParams(location.search);
+    next.set('quality', b.dataset.quality);
+    next.set('v5', '1');
+    next.set('qv', String(Date.now()));
+    location.assign(location.pathname + '?' + next.toString() + location.hash);
+  }, { capture: true });
+}
+
 // ---------------- Projected caustics ---------------------------------------
 const accum = dev.createBuffer({
   label: 'fluidV5CausticAccum', size: CW * CH * 4,
@@ -195,7 +211,7 @@ function encodeOverlay(enc,target){const debug=window.__v5DebugMode==='caustics'
 
 // ---------------- Physical spray / foam -----------------------------------
 const sprayUni=dev.createBuffer({label:'fluidV5SprayUniform',size:96,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
-const sprayF=new Float32Array(24);const sprayU=new Uint32Array(sprayF.buffer);
+const sprayF=new Float32Array(24);
 const sprayWGSL=`
 struct S{vp:mat4x4f,screen:vec4f,misc:vec4f}
 @group(0)@binding(0)var<uniform>U:S;
@@ -221,7 +237,7 @@ const sprayPipe=await dev.createRenderPipelineAsync({label:'fluidV5SprayFoam',la
 let sprayCache=null;
 function sprayBG(){const key=`${sim.gen}|${sim.parity}`;if(sprayCache?.key===key)return sprayCache.bg;const bg=dev.createBindGroup({layout:sprayPipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:sprayUni}},{binding:1,resource:{buffer:sim.livePos()}},{binding:2,resource:{buffer:sim.liveVel()}},{binding:3,resource:{buffer:sim.buf.normal}},{binding:4,resource:{buffer:sim.liveBody()}}]});sprayCache={key,bg};return bg;}
 function matMul(a,b){const o=new Float32Array(16);for(let c=0;c<4;c++)for(let r=0;r<4;r++){let s=0;for(let k=0;k<4;k++)s+=a[k*4+r]*b[c*4+k];o[c*4+r]=s;}return o;}
-function encodeSpray(enc,target,args){if(state.spray<=0.002||window.__v5DebugMode!=='final')return;const view=args[5],proj=args[6],w=args[10]||1,h=args[11]||1;const vp=matMul(proj,view);sprayF.set(vp,0);sprayF[16]=w;sprayF[17]=h;sprayF[18]=sim.params.box[1]*.28;sprayF[19]=state.spray;sprayF[20]=performance.now()*.001;sprayU[21]=sim.n;sprayF[22]=quality==='high'?1:2;sprayF[23]=sim.params.spacing;dev.queue.writeBuffer(sprayUni,0,sprayF);const stride=quality==='high'?1:2;const instances=Math.ceil(sim.n/stride);const pass=enc.beginRenderPass({colorAttachments:[{view:target,loadOp:'load',storeOp:'store'}]});pass.setPipeline(sprayPipe);pass.setBindGroup(0,sprayBG());pass.draw(6,instances);pass.end();}
+function encodeSpray(enc,target,args){if(state.spray<=0.002||window.__v5DebugMode!=='final')return;const view=args[5],proj=args[6],w=args[10]||1,h=args[11]||1;const vp=matMul(proj,view);sprayF.set(vp,0);sprayF[16]=w;sprayF[17]=h;sprayF[18]=sim.params.box[1]*.28;sprayF[19]=state.spray;sprayF[20]=performance.now()*.001;sprayF[21]=sim.n;sprayF[22]=quality==='high'?1:2;sprayF[23]=sim.params.spacing;dev.queue.writeBuffer(sprayUni,0,sprayF);const stride=quality==='high'?1:2;const instances=Math.ceil(sim.n/stride);const pass=enc.beginRenderPass({colorAttachments:[{view:target,loadOp:'load',storeOp:'store'}]});pass.setPipeline(sprayPipe);pass.setBindGroup(0,sprayBG());pass.draw(6,instances);pass.end();}
 
 // Wrap the already validated V4.4 temporal renderer, preserving it as fallback.
 const baseRender=ssfr.render;

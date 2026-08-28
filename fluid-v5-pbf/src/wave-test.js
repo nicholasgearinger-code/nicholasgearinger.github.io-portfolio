@@ -1,16 +1,15 @@
 // Fluid V5 bootstrap. The HTML shell is inherited from V4.4, so mark the build immediately,
 // then wait for the validated V4.4 renderer to expose its runtime handles before mounting V5.
-// This prevents the V5 lab from racing the separate pool-realism module on mobile browsers.
 
-const V5_BUILD = 'M2.2 LIVE-ATOMIC';
+const V5_BUILD = 'M2.3 BUFFER-ATOMIC';
 document.title = `Fluid V5 · ${V5_BUILD}`;
 const earlyBrand = document.querySelector('.hud.card.title');
-if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M2.2';
+if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M2.3';
 const earlyLoadTitle = document.querySelector('#loading h2');
-if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M2.2';
+if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M2.3';
 const earlyStats = document.getElementById('v4stats');
-if (earlyStats) earlyStats.textContent = 'BUILD: LIVE-ATOMIC · waiting for V4.4 core…';
-window.__fluidV5Version = '5.0.2-m2-booting';
+if (earlyStats) earlyStats.textContent = 'BUILD: BUFFER-ATOMIC · waiting for V4.4 core…';
+window.__fluidV5Version = '5.0.3-m2-booting';
 window.__fluidV5Build = V5_BUILD;
 
 await import('./wave-test-v44.js');
@@ -30,31 +29,29 @@ if (!(await waitForV44())) {
 
 await import('./v5-lab.js');
 
-// M1 originally coupled projected caustics and its first spray renderer in one module. If that
-// extension was rejected by a mobile adapter, recover the atomic caustic system independently
-// before mounting M2. The fallback traces the complete pool floor and uses conservative WGSL.
-if (!window.__v5ProjectedCaustics?.texture) {
+// If M1 did not publish a working projected-caustic pass, use the simpler M2.3 path:
+// atomic<u32> compute accumulation + direct fragment-stage buffer resolve. This avoids the
+// storage-texture resolve that proved unreliable on the current iPhone test path.
+if (!window.__v5ProjectedCaustics?.online) {
   try {
-    await import('./v5-atomic-safe.js');
+    await import('./v5-atomic-buffer.js');
   } catch (err) {
-    console.error('[Fluid V5 atomic] independent fallback rejected; V4.4 receiver caustics remain active.', err);
+    window.__v5AtomicStatus = { online:false, stage:'rejected', backend:'buffer-direct', width:0, height:0, error:String(err?.message||err) };
+    console.error('[Fluid V5 atomic] buffer-direct fallback rejected; V4.4 receiver caustics remain active.', err);
   }
 }
 
-// Milestone 2 is deliberately optional at boot. The safety loader preserves the immutable M2
-// checkpoint while applying mobile/WebGPU synchronization fixes before evaluating it. If any
-// experimental M2 subsystem is rejected, Milestone 1 and the validated V4.4 renderer survive.
 try {
   await import('./v5-m2-safe.js');
 } catch (err) {
   console.error('[Fluid V5 M2] milestone 2 module failed; retained M1/V4.4 stack.', err);
 }
 
-window.__fluidV5Version = window.__v5M2?.version || '5.0.2-m2';
+window.__fluidV5Version = window.__v5M2?.version || '5.0.3-m2';
 const brand = document.querySelector('.hud.card.title');
-if (brand) brand.textContent = 'FLUID V5 · M2.2';
+if (brand) brand.textContent = 'FLUID V5 · M2.3';
 const stats = document.getElementById('v4stats');
-if (stats && !stats.textContent.includes('BUILD:')) stats.textContent = `BUILD: LIVE-ATOMIC · ${stats.textContent}`;
+if (stats && !stats.textContent.includes('BUILD:')) stats.textContent = `BUILD: BUFFER-ATOMIC · ${stats.textContent}`;
 
 setTimeout(() => {
   const toggle = document.getElementById('v4WaveToggle');

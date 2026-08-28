@@ -4,6 +4,7 @@ import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import WebGPU from "three/addons/capabilities/WebGPU.js";
 import { FluidSolver } from "./FluidSolver.js";
 import { FluidSurface, createPoolEnvironment } from "./FluidSurface.js";
+import { FluidCaustics } from "./FluidCaustics.js";
 import { FluidParticles } from "./FluidParticles.js";
 import { FluidPhysics } from "./FluidPhysics.js";
 
@@ -24,9 +25,9 @@ const url = new URL(location.href);
 const qualityOverride = url.searchParams.get("quality");
 
 const QUALITY = {
-  low: { grid: 96, pressure: 6, dpr: 1.0, droplets: 56 },
-  medium: { grid: 128, pressure: 10, dpr: 1.25, droplets: 96 },
-  high: { grid: 192, pressure: 16, dpr: 1.5, droplets: 144 },
+  low: { grid: 96, pressure: 6, dpr: 1.0, droplets: 56, caustics: 44 },
+  medium: { grid: 128, pressure: 10, dpr: 1.25, droplets: 96, caustics: 56 },
+  high: { grid: 192, pressure: 16, dpr: 1.5, droplets: 144, caustics: 80 },
 };
 
 let qualityName = qualityOverride && QUALITY[qualityOverride]
@@ -40,6 +41,7 @@ let camera;
 let controls;
 let solver;
 let surface;
+let caustics;
 let particles;
 let physics;
 let timer;
@@ -72,12 +74,12 @@ async function init() {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.08;
+  renderer.toneMappingExposure = 1.12;
   await renderer.init();
 
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x79b8d6);
-  scene.fog = new THREE.FogExp2(0x8fc4d9, 0.012);
+  scene.background = new THREE.Color(0x82c1dd);
+  scene.fog = new THREE.FogExp2(0x9acddd, 0.0105);
 
   camera = new THREE.PerspectiveCamera(52, innerWidth / innerHeight, 0.08, 180);
   camera.position.set(18, 16, 22);
@@ -90,10 +92,10 @@ async function init() {
   controls.maxDistance = 58;
   controls.maxPolarAngle = Math.PI * 0.49;
 
-  const hemi = new THREE.HemisphereLight(0xdff4ff, 0x314151, 1.8);
+  const hemi = new THREE.HemisphereLight(0xe8f8ff, 0x314151, 1.65);
   scene.add(hemi);
 
-  const sun = new THREE.DirectionalLight(0xfff2cf, 4.4);
+  const sun = new THREE.DirectionalLight(0xfff3d2, 4.8);
   sun.position.set(-14, 24, -8);
   sun.castShadow = true;
   sun.shadow.mapSize.set(isTouch ? 512 : 1024, isTouch ? 512 : 1024);
@@ -114,8 +116,8 @@ async function init() {
     size: quality.grid,
     worldSize: 34,
     pressureIterations: quality.pressure,
-    gravity: 10.5,
-    meanDepth: 0.72,
+    gravity: 11.8,
+    meanDepth: 0.82,
     vorticity: baseVorticity,
     projection: 0.82,
   });
@@ -123,7 +125,12 @@ async function init() {
 
   surface = new FluidSurface(solver);
   scene.add(surface.mesh);
-  scene.add(createPoolEnvironment(solver.worldSize));
+
+  const environment = createPoolEnvironment(solver.worldSize);
+  scene.add(environment);
+
+  caustics = new FluidCaustics(solver, surface.time, { resolution: quality.caustics });
+  scene.add(caustics.mesh);
 
   particles = new FluidParticles(scene, solver, { count: quality.droplets });
   setStatus("Loading Rapier physics…");
@@ -139,13 +146,15 @@ async function init() {
   renderer.setAnimationLoop(animate);
   addEventListener("resize", onResize);
 
-  solver.queueSplat({ x: 0, z: 0, strength: 1.25, radius: 2.1 });
-  solver.queueSplat({ x: -5, z: 3, vx: 2.4, vz: -0.8, strength: 0.6, radius: 1.5 });
+  // Seed broad waves plus directional flow so the pool begins alive rather than
+  // as a perfectly flat sheet while keeping all later disturbances physical.
+  solver.queueSplat({ x: 0, z: 0, strength: -1.2, radius: 2.2 });
+  solver.queueSplat({ x: -5, z: 3, vx: 3.0, vz: -1.1, strength: -0.62, radius: 1.55 });
 
   updateHUD();
-  setStatus("Running — drag the water or drop rigid bodies into it.");
+  setStatus("Running — live caustics, capillary ripples and impact spray enabled.");
 
-  globalThis.__fluidLab = { renderer, scene, solver, surface, particles, physics };
+  globalThis.__fluidLab = { renderer, scene, solver, surface, caustics, particles, physics };
 }
 
 function setupPointerInput() {
@@ -164,8 +173,8 @@ function setupPointerInput() {
     const p = updateHit(event);
     if (!p) return;
     lastPointerWorld = p.clone();
-    solver.queueSplat({ x: p.x, z: p.z, strength: 0.75, radius: 1.15 });
-    particles.emit(p.x, p.z, 0.45);
+    solver.queueSplat({ x: p.x, z: p.z, strength: -0.62, radius: 1.15 });
+    particles.emit(p.x, p.z, 0.5);
   });
 
   canvas.addEventListener("pointermove", (event) => {
@@ -182,13 +191,14 @@ function setupPointerInput() {
       vz = THREE.MathUtils.clamp((p.z - lastPointerWorld.z) / dt, -12, 12);
     }
 
+    const dragStrength = 0.22 + Math.min(0.42, Math.hypot(vx, vz) * 0.022);
     solver.queueSplat({
       x: p.x,
       z: p.z,
       vx,
       vz,
-      strength: 0.28 + Math.min(0.42, Math.hypot(vx, vz) * 0.022),
-      radius: 0.92,
+      strength: -dragStrength,
+      radius: 0.88,
     });
     lastPointerWorld?.copy(p);
     lastPointerTime = now;
@@ -217,8 +227,15 @@ function setupUI() {
   $("#splash").addEventListener("click", () => {
     const x = THREE.MathUtils.randFloat(-7, 7);
     const z = THREE.MathUtils.randFloat(-7, 7);
-    solver.queueSplat({ x, z, vx: THREE.MathUtils.randFloat(-4, 4), vz: THREE.MathUtils.randFloat(-4, 4), strength: 1.3, radius: 2.0 });
-    particles.emit(x, z, 1.1);
+    solver.queueSplat({
+      x,
+      z,
+      vx: THREE.MathUtils.randFloat(-4, 4),
+      vz: THREE.MathUtils.randFloat(-4, 4),
+      strength: -1.45,
+      radius: 2.0,
+    });
+    particles.emit(x, z, 1.3);
   });
   $("#pause").addEventListener("click", (event) => {
     paused = !paused;
@@ -262,6 +279,7 @@ function animate(timestamp) {
     physics.update(dt);
     particles.update(dt);
     solver.step(dt);
+    surface.update(dt);
   }
 
   renderer.render(scene, camera);

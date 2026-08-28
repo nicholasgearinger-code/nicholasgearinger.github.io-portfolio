@@ -11,22 +11,19 @@ import {
   vertexStage,
   highpModelNormalViewMatrix,
   uniform,
-  sin,
-  cos,
+  sqrt,
+  dot,
+  smoothstep,
 } from "three/tsl";
 
-// Renders the GPU height/foam storage buffers directly. No CPU vertex upload is
-// performed after construction: vertex displacement, normals, foam color,
-// roughness and transmission all read the live simulation buffers.
-//
-// The macro water shape remains fully simulation-driven. A tiny analytic
-// capillary layer is added only to the rendered displacement/normal so smooth
-// areas still carry realistic reflection breakup without making the pressure
-// solver pay for a much denser grid.
+// The visible geometry is now strictly simulation-driven. There are no analytic
+// sine-wave displacements in positionNode: every crest, cavity, rebound and wake
+// must exist in FluidSolver.heightA. That makes it possible to judge the actual
+// physics rather than a cosmetic ripple overlay.
 export class FluidSurface {
   constructor(solver) {
     this.solver = solver;
-    this.time = uniform(0);
+    this.time = uniform(0); // retained for review-tool compatibility
     this.mesh = this._buildMesh();
   }
 
@@ -35,8 +32,14 @@ export class FluidSurface {
   }
 
   _buildMesh() {
-    const { size, worldSize, cellWorldSize, heightA, foamA } = this.solver;
-    const waveTime = this.time;
+    const {
+      size,
+      worldSize,
+      cellWorldSize,
+      heightA,
+      foamA,
+      velocityA,
+    } = this.solver;
 
     const geometry = new THREE.PlaneGeometry(
       worldSize,
@@ -53,40 +56,25 @@ export class FluidSurface {
     const cellIndex = attribute("fluidCell", "float").toUint();
 
     const material = new THREE.MeshPhysicalNodeMaterial({
-      color: 0x0a7189,
-      roughness: 0.038,
+      color: 0x08758d,
+      roughness: 0.032,
       metalness: 0,
-      transmission: 0.96,
+      transmission: 0.965,
       ior: 1.333,
-      thickness: 1.55,
+      thickness: 1.62,
       attenuationDistance: 12,
-      attenuationColor: new THREE.Color(0x2a9aaf),
-      clearcoat: 0.04,
-      clearcoatRoughness: 0.06,
-      envMapIntensity: 1.35,
+      attenuationColor: new THREE.Color(0x2697ad),
+      clearcoat: 0.03,
+      clearcoatRoughness: 0.045,
+      envMapIntensity: 1.45,
       side: THREE.DoubleSide,
-    });
-
-    const microWaveHeight = Fn(() => {
-      const p = positionLocal;
-      const phaseA = p.x.mul(0.72).add(p.z.mul(0.31)).add(waveTime.mul(1.42));
-      const phaseB = p.x.mul(-0.48).add(p.z.mul(0.91)).sub(waveTime.mul(1.08));
-      const phaseC = p.x.mul(1.84).add(p.z.mul(-1.27)).add(waveTime.mul(2.65));
-      return sin(phaseA).mul(0.034)
-        .add(sin(phaseB).mul(0.022))
-        .add(sin(phaseC).mul(0.009));
     });
 
     material.positionNode = Fn(() => {
       const h = heightA.element(cellIndex);
-      const micro = microWaveHeight();
-      return positionLocal.add(vec3(0, h.add(micro), 0));
+      return positionLocal.add(vec3(0, h, 0));
     })();
 
-    // Finite-difference normals are evaluated in the vertex stage from the same
-    // storage field that displaced the surface. Analytic derivatives of the
-    // capillary waves are added so reflections retain crisp small ripples even
-    // though the physical grid remains mobile-friendly.
     const localSurfaceNormal = Fn(() => {
       const x = cellIndex.mod(size).toFloat();
       const y = cellIndex.div(size).toFloat();
@@ -100,24 +88,10 @@ export class FluidSurface {
       const idxU = ym.mul(size).add(x).toUint();
       const idxD = yp.mul(size).add(x).toUint();
 
-      let dhdx = heightA.element(idxR).sub(heightA.element(idxL))
+      const dhdx = heightA.element(idxR).sub(heightA.element(idxL))
         .div(2 * cellWorldSize);
-      let dhdz = heightA.element(idxD).sub(heightA.element(idxU))
+      const dhdz = heightA.element(idxD).sub(heightA.element(idxU))
         .div(2 * cellWorldSize);
-
-      const p = positionLocal;
-      const phaseA = p.x.mul(0.72).add(p.z.mul(0.31)).add(waveTime.mul(1.42));
-      const phaseB = p.x.mul(-0.48).add(p.z.mul(0.91)).sub(waveTime.mul(1.08));
-      const phaseC = p.x.mul(1.84).add(p.z.mul(-1.27)).add(waveTime.mul(2.65));
-
-      dhdx = dhdx
-        .add(cos(phaseA).mul(0.034 * 0.72))
-        .add(cos(phaseB).mul(0.022 * -0.48))
-        .add(cos(phaseC).mul(0.009 * 1.84));
-      dhdz = dhdz
-        .add(cos(phaseA).mul(0.034 * 0.31))
-        .add(cos(phaseB).mul(0.022 * 0.91))
-        .add(cos(phaseC).mul(0.009 * -1.27));
 
       return vec3(dhdx.mul(-1), 1, dhdz.mul(-1)).normalize();
     })();
@@ -127,16 +101,23 @@ export class FluidSurface {
     ).normalize();
 
     const foam = vertexStage(foamA.element(cellIndex));
-    const foamMask = clamp(foam.mul(1.42), 0, 1);
+    const foamMask = clamp(foam.mul(1.55), 0, 1);
+    const velocity = velocityA.element(cellIndex);
+    const speed = vertexStage(sqrt(dot(velocity, velocity)));
+    const turbulent = smoothstep(0.45, 4.5, speed);
 
     material.colorNode = mix(
-      color(0x087087),
-      color(0xf2feff),
+      color(0x077087),
+      color(0xf4ffff),
       foamMask,
     );
-    material.roughnessNode = mix(float(0.035), float(0.48), foamMask);
-    material.transmissionNode = mix(float(0.965), float(0.05), foamMask);
-    material.thicknessNode = mix(float(1.58), float(0.16), foamMask);
+    material.roughnessNode = mix(
+      mix(float(0.028), float(0.12), turbulent),
+      float(0.56),
+      foamMask,
+    );
+    material.transmissionNode = mix(float(0.97), float(0.035), foamMask);
+    material.thicknessNode = mix(float(1.62), float(0.12), foamMask);
 
     const mesh = new THREE.Mesh(geometry, material);
     mesh.name = "HybridFluidHeightfield";
@@ -191,8 +172,6 @@ export function createPoolEnvironment(worldSize) {
     group.add(wall);
   }
 
-  // A few submerged forms make transmission/refraction and caustic motion easy
-  // to judge during review without requiring external model assets.
   const rockMaterial = new THREE.MeshStandardMaterial({
     color: 0x4d554f,
     roughness: 0.92,

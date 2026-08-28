@@ -1,7 +1,6 @@
 // Fluid V5 M2 safety loader.
-// Keep v5-m2.js immutable as the Milestone 2 checkpoint, and apply the drain-normal ordering
-// correction here before importing it. This mirrors the source-patch approach already used by
-// the validated V4.4 realism stack.
+// Keep v5-m2.js immutable as the Milestone 2 checkpoint, and apply synchronization/diagnostic
+// corrections here before importing it.
 
 const srcUrl = new URL('./v5-m2.js', import.meta.url);
 const response = await fetch(srcUrl, { cache: 'no-store' });
@@ -18,6 +17,16 @@ const safeSwitch = "if(removed>0){const syncEnc=dev.createCommandEncoder({label:
 if (!src.includes(oldSwitch)) throw new Error('Fluid V5 M2 safety loader: drain parity-switch signature changed.');
 src = src.replace(oldSwitch, safeSwitch);
 
+const oldAtomicDecl = "const atomic=window.__v5ProjectedCaustics;const show=state.devHud||window.__v5DebugMode!=='final';";
+const newAtomicDecl = "const atomic=window.__v5ProjectedCaustics;const atomicStatus=window.__v5AtomicStatus;const show=state.devHud||window.__v5DebugMode!=='final';";
+if (!src.includes(oldAtomicDecl)) throw new Error('Fluid V5 M2 safety loader: atomic HUD declaration signature changed.');
+src = src.replace(oldAtomicDecl, newAtomicDecl);
+
+const oldAtomicText = "atomic caustics ${atomic?atomic.width+'×'+atomic.height:'offline'} · UW depth ${uwDepth.toFixed(2)} m";
+const newAtomicText = "atomic caustics ${atomic?atomic.width+'×'+atomic.height+(atomic.backend?' '+atomic.backend:''):(atomicStatus?.stage||'offline')} · UW depth ${uwDepth.toFixed(2)} m";
+if (!src.includes(oldAtomicText)) throw new Error('Fluid V5 M2 safety loader: atomic HUD text signature changed.');
+src = src.replace(oldAtomicText, newAtomicText);
+
 const blobUrl = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
 try {
   await import(blobUrl);
@@ -25,4 +34,4 @@ try {
   URL.revokeObjectURL(blobUrl);
 }
 
-console.info('[Fluid V5 M2] drain normals synchronized with compacted particle parity.');
+console.info('[Fluid V5 M2] drain parity + atomic diagnostics safety patches enabled.');

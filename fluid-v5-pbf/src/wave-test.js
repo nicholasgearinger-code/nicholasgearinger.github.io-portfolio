@@ -1,15 +1,15 @@
 // Fluid V5 bootstrap. The HTML shell is inherited from V4.4, so mark the build immediately,
 // then wait for the validated V4.4 renderer to expose its runtime handles before mounting V5.
 
-const V5_BUILD = 'M3.0 CAUSTIC CONTRAST + FULL-POOL PHYSICS';
+const V5_BUILD = 'M3.1 MULTI-LIGHT LAB + CAUSTIC CONTRAST';
 document.title = `Fluid V5 · ${V5_BUILD}`;
 const earlyBrand = document.querySelector('.hud.card.title');
-if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M3.0';
+if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M3.1';
 const earlyLoadTitle = document.querySelector('#loading h2');
-if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M3.0';
+if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M3.1';
 const earlyStats = document.getElementById('v4stats');
-if (earlyStats) earlyStats.textContent = 'BUILD: CAUSTIC CONTRAST · FULL-POOL PHYSICS · waiting for V4.4 core…';
-window.__fluidV5Version = '5.1.0-m3-booting';
+if (earlyStats) earlyStats.textContent = 'BUILD: MULTI-LIGHT LAB · CAUSTIC CONTRAST · waiting for V4.4 core…';
+window.__fluidV5Version = '5.1.1-m31-booting';
 window.__fluidV5Build = V5_BUILD;
 
 await import('./wave-test-v44.js');
@@ -37,24 +37,35 @@ try {
   console.error('[Fluid V5 pool slab] full-floor initialization failed; upstream compact block retained.', err);
 }
 
-// M3.0 keeps the full live PBF particle surface as the photon source, but high-passes the resolved
-// photon density against its local neighborhood. Ordinary transmitted sunlight remains in the
-// base water renderer; this pass contributes only genuine local caustic concentration.
+// M3.1 primary light rig. General receiver lighting supports Sun, Spot, Point, Underwater and
+// Skylight. Only emitters that physically cross the air-water interface toward the receiver
+// (Sun/Spot/Point) are eligible to drive the atomic caustic projector.
+let lightLabReady = false;
+try {
+  await import('./v5-light-lab.js');
+  lightLabReady = !!window.__v5LightLab;
+} catch (err) {
+  console.error('[Fluid V5 Light Lab] M3.1 lighting module failed; retaining the M3.0 sun path.', err);
+}
+
+// Keep the validated full-PBF-surface, atomic<u32> -> r32uint mobile backend. M3.1 changes only
+// the incoming photon source (Sun/Spot/Point) and retains the M3.0 local-density high-pass so
+// broad illumination does not masquerade as caustics.
 if (!window.__v5ProjectedCaustics?.online) {
   try {
-    await import('./v5-atomic-contrast-m30.js');
+    await import(lightLabReady ? './v5-atomic-multilight-m31.js' : './v5-atomic-contrast-m30.js');
   } catch (err) {
     const prev = window.__v5AtomicStatus || {};
     window.__v5AtomicStatus = {
       ...prev,
       online:false,
       stage:`rejected @ ${prev.stage || 'module'}`,
-      backend:'particle-contrast',
+      backend:lightLabReady ? 'particle-multilight' : 'particle-contrast',
       width:prev.width || 0,
       height:prev.height || 0,
       error:String(err?.message || err),
     };
-    console.error('[Fluid V5 atomic] M3.0 caustic-contrast pass rejected; V4.4 receiver caustics remain active.', err);
+    console.error('[Fluid V5 atomic] M3.1 caustic projector rejected; inherited receiver lighting remains active.', err);
   }
 }
 
@@ -81,18 +92,19 @@ try {
   console.error('[Fluid V5 caustic handoff] legacy receiver suppression failed.', err);
 }
 
-// Reorganize all live controls after their modules have mounted.
+// Reorganize all live controls after their modules have mounted. M3.1 separates WATER from a
+// dedicated LIGHTING tab, where every light type includes a description and its relevant controls.
 try {
-  await import('./v5-tabs-m30.js');
+  await import('./v5-tabs-m31.js');
 } catch (err) {
-  console.error('[Fluid V5 UI] tabbed control shell failed; original controls remain available.', err);
+  console.error('[Fluid V5 UI] M3.1 tabbed control shell failed; original controls remain available.', err);
 }
 
-window.__fluidV5Version = '5.1.0-m3';
+window.__fluidV5Version = '5.1.1-m31';
 const brand = document.querySelector('.hud.card.title');
-if (brand) brand.textContent = 'FLUID V5 · M3.0';
+if (brand) brand.textContent = 'FLUID V5 · M3.1';
 const stats = document.getElementById('v4stats');
-if (stats && !stats.textContent.includes('BUILD:')) stats.textContent = `BUILD: CAUSTIC CONTRAST · FULL-POOL PHYSICS · ${stats.textContent}`;
+if (stats && !stats.textContent.includes('BUILD:')) stats.textContent = `BUILD: MULTI-LIGHT LAB · CAUSTIC CONTRAST · ${stats.textContent}`;
 
 setTimeout(() => {
   const toggle = document.getElementById('v4WaveToggle');

@@ -1,4 +1,4 @@
-// Fluid V4 lighter cyan water pass.
+// Fluid V4 lighter cyan water pass + live mobile tuning controls.
 // Keep the PBF physics untouched; tune only environment, SSFR optics and pool lighting.
 
 await import('./main.js');
@@ -102,19 +102,149 @@ if (!ssfr?.dev || !ssfr?.format) {
     primitive: { topology: 'triangle-list' },
   });
 
-  // Clearer than the previous reference-matched pass. The target is the user's lighter
-  // cyan screenshot: high transmission, gentle body tint, and visible refracted scenery.
-  ssfr.ior = 1.333;
-  ssfr.absorption = 0.16;
-  ssfr.transmit = [0.70, 0.88, 0.96];
-  ssfr.thicknessScale = 0.13;
-  ssfr.roughness = 0.035;
-  ssfr.sunIntensity = 4.05;
-  ssfr.sunElevation = 32.0;
-  ssfr.sunAzimuth = 42.75;
-  ssfr.exposure = 1.62;
-  ssfr.groundReflection = 0.0;
-  ssfr.bindCache = null;
+  const LOOK_DEFAULTS = {
+    exposure: 1.62,
+    absorption: 0.16,
+    thickness: 0.13,
+    roughness: 0.035,
+    sun: 4.05,
+    env: 1.08,
+    transmitR: 0.70,
+    transmitG: 0.88,
+    transmitB: 0.96,
+  };
 
-  console.info('[Fluid V4 lighting] lighter cyan transmission, lifted HDR reflections and underwater scattering enabled.');
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, Number(v)));
+  const savedKey = 'fluidV4WaterLookV1';
+  let look = { ...LOOK_DEFAULTS };
+  try {
+    const saved = JSON.parse(localStorage.getItem(savedKey) || 'null');
+    if (saved && typeof saved === 'object') look = { ...look, ...saved };
+  } catch {}
+
+  function applyLook() {
+    look.exposure = clamp(look.exposure, 0.45, 2.6);
+    look.absorption = clamp(look.absorption, 0.0, 1.2);
+    look.thickness = clamp(look.thickness, 0.02, 1.2);
+    look.roughness = clamp(look.roughness, 0.004, 0.18);
+    look.sun = clamp(look.sun, 0.2, 8.0);
+    look.env = clamp(look.env, 0.0, 2.5);
+    look.transmitR = clamp(look.transmitR, 0.10, 1.0);
+    look.transmitG = clamp(look.transmitG, 0.10, 1.0);
+    look.transmitB = clamp(look.transmitB, 0.10, 1.0);
+
+    ssfr.ior = 1.333;
+    ssfr.exposure = look.exposure;
+    ssfr.absorption = look.absorption;
+    ssfr.thicknessScale = look.thickness;
+    ssfr.roughness = look.roughness;
+    ssfr.sunIntensity = look.sun;
+    ssfr.transmit = [look.transmitR, look.transmitG, look.transmitB];
+    if (ssfr.env) ssfr.env.intensity = look.env;
+  }
+  applyLook();
+
+  // Add live controls inside the existing QUALITY panel. The PBF SSFR renderer reads these
+  // values every frame when it writes the composite uniform buffer, so no simulation restart
+  // or shader rebuild is required while dragging a slider.
+  const panel = document.getElementById('settingsPanel');
+  if (panel && !document.getElementById('v4LiveWaterTune')) {
+    const style = document.createElement('style');
+    style.textContent = `
+      #settingsPanel{max-height:min(72vh,620px);overflow-y:auto;-webkit-overflow-scrolling:touch}
+      .v4Tune{margin-top:11px;padding-top:10px;border-top:1px solid rgba(78,214,220,.22)}
+      .v4TuneHead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+      .v4TuneTitle{font-size:10px;color:#86f6ff;letter-spacing:.11em;font-weight:800}
+      .v4TuneLive{font-size:8px;color:#9dffc8;letter-spacing:.08em}
+      .v4TuneRow{display:grid;grid-template-columns:78px 1fr 42px;align-items:center;gap:7px;margin:7px 0}
+      .v4TuneRow label{font-size:8.5px;color:#b6d1dc;letter-spacing:.025em}
+      .v4TuneRow input[type=range]{width:100%;margin:0;accent-color:#69e8df;touch-action:pan-x;height:22px}
+      .v4TuneVal{font-size:8px;text-align:right;color:#ffd890;font-variant-numeric:tabular-nums}
+      .v4TuneButtons{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:9px}
+      .v4TuneBtn{appearance:none;border:1px solid rgba(78,214,220,.35);background:rgba(4,17,24,.78);color:#dffcff;border-radius:9px;padding:7px 5px;font:800 8.5px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.04em}
+      .v4TuneBtn:active{transform:scale(.97)}
+      @media(max-width:600px){.v4TuneRow{grid-template-columns:66px 1fr 38px;gap:5px}.v4TuneRow label{font-size:8px}}
+    `;
+    document.head.appendChild(style);
+
+    const wrap = document.createElement('div');
+    wrap.id = 'v4LiveWaterTune';
+    wrap.className = 'v4Tune';
+    wrap.innerHTML = `
+      <div class="v4TuneHead"><div class="v4TuneTitle">WATER LOOK · LIVE</div><div class="v4TuneLive">NO RELOAD</div></div>
+      <div id="v4TuneRows"></div>
+      <div class="v4TuneButtons"><button id="v4ClearLook" class="v4TuneBtn">CLEAR WATER</button><button id="v4ResetLook" class="v4TuneBtn">RESET LOOK</button></div>
+    `;
+    panel.appendChild(wrap);
+
+    const defs = [
+      ['exposure', 'EXPOSURE', 0.45, 2.60, 0.01, 2],
+      ['absorption', 'ABSORB', 0.00, 1.20, 0.01, 2],
+      ['thickness', 'THICKNESS', 0.02, 1.20, 0.01, 2],
+      ['roughness', 'ROUGHNESS', 0.004, 0.18, 0.001, 3],
+      ['sun', 'SUN', 0.20, 8.00, 0.05, 2],
+      ['env', 'HDR ENV', 0.00, 2.50, 0.02, 2],
+      ['transmitR', 'RED TRANS', 0.10, 1.00, 0.01, 2],
+      ['transmitG', 'GREEN', 0.10, 1.00, 0.01, 2],
+      ['transmitB', 'BLUE', 0.10, 1.00, 0.01, 2],
+    ];
+
+    const rows = document.getElementById('v4TuneRows');
+    const inputs = new Map();
+    const updateReadout = (key, input, out, digits) => {
+      look[key] = Number(input.value);
+      out.textContent = Number(input.value).toFixed(digits);
+      applyLook();
+      try { localStorage.setItem(savedKey, JSON.stringify(look)); } catch {}
+    };
+
+    for (const [key, label, min, max, step, digits] of defs) {
+      const row = document.createElement('div');
+      row.className = 'v4TuneRow';
+      const lab = document.createElement('label');
+      lab.textContent = label;
+      const input = document.createElement('input');
+      input.type = 'range'; input.min = String(min); input.max = String(max); input.step = String(step); input.value = String(look[key]);
+      input.setAttribute('aria-label', label);
+      const out = document.createElement('div'); out.className = 'v4TuneVal'; out.textContent = Number(look[key]).toFixed(digits);
+      input.addEventListener('input', () => updateReadout(key, input, out, digits));
+      input.addEventListener('change', () => updateReadout(key, input, out, digits));
+      row.append(lab, input, out);
+      rows.appendChild(row);
+      inputs.set(key, { input, out, digits });
+    }
+
+    const syncUI = () => {
+      for (const [key, ref] of inputs) {
+        ref.input.value = String(look[key]);
+        ref.out.textContent = Number(look[key]).toFixed(ref.digits);
+      }
+      applyLook();
+      try { localStorage.setItem(savedKey, JSON.stringify(look)); } catch {}
+    };
+
+    document.getElementById('v4ResetLook').onclick = e => {
+      e.preventDefault(); e.stopPropagation();
+      look = { ...LOOK_DEFAULTS };
+      syncUI();
+    };
+    document.getElementById('v4ClearLook').onclick = e => {
+      e.preventDefault(); e.stopPropagation();
+      look = {
+        ...look,
+        exposure: 1.82,
+        absorption: 0.055,
+        thickness: 0.075,
+        roughness: 0.025,
+        sun: 4.5,
+        env: 1.15,
+        transmitR: 0.90,
+        transmitG: 0.96,
+        transmitB: 0.99,
+      };
+      syncUI();
+    };
+  }
+
+  console.info('[Fluid V4 lighting] lighter cyan transmission + live water-look sliders enabled.');
 }

@@ -1,15 +1,15 @@
 // Fluid V5 bootstrap. The HTML shell is inherited from V4.4, so mark the build immediately,
 // then wait for the validated V4.4 renderer to expose its runtime handles before mounting V5.
 
-const V5_BUILD = 'M3.2 DISTINCTIVE LIGHT RIGS + COLORED CAUSTICS';
+const V5_BUILD = 'M3.3 TIME OF DAY + POOL LIGHTS + WATER MOOD';
 document.title = `Fluid V5 · ${V5_BUILD}`;
 const earlyBrand = document.querySelector('.hud.card.title');
-if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M3.2';
+if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M3.3';
 const earlyLoadTitle = document.querySelector('#loading h2');
-if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M3.2';
+if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M3.3';
 const earlyStats = document.getElementById('v4stats');
-if (earlyStats) earlyStats.textContent = 'BUILD: DISTINCTIVE LIGHT RIGS · COLORED CAUSTICS · waiting for V4.4 core…';
-window.__fluidV5Version = '5.1.2-m32-booting';
+if (earlyStats) earlyStats.textContent = 'BUILD: TIME OF DAY · POOL LIGHTS · WATER MOOD · waiting for V4.4 core…';
+window.__fluidV5Version = '5.1.3-m33-booting';
 window.__fluidV5Build = V5_BUILD;
 
 await import('./wave-test-v44.js');
@@ -37,33 +37,33 @@ try {
   console.error('[Fluid V5 pool slab] full-floor initialization failed; upstream compact block retained.', err);
 }
 
-// M3.2: presets now change real receiver light color/shape/falloff and environment balance.
-// Sun/Spot/Point may drive atomic caustics; Underwater/Skylight remain direct or ambient sources.
+// M3.3 couples environment, sun, exposure, water tint and caustic character into Day/Sunset/Night.
+// Night replaces the sun with colored underwater wall fixtures, including a rainbow cycle mode.
 let lightLabReady = false;
 try {
   await import('./v5-light-lab.js');
-  lightLabReady = window.__v5LightLab?.version === 'M3.2';
+  lightLabReady = window.__v5LightLab?.version === 'M3.3';
 } catch (err) {
-  console.error('[Fluid V5 Light Lab] M3.2 lighting module failed; retaining the M3.0 sun path.', err);
+  console.error('[Fluid V5 Light Lab] M3.3 atmosphere module failed; retaining the M3.0 sun path.', err);
 }
 
-// Keep the validated full-PBF-surface, atomic<u32> -> r32uint mobile backend. M3.2 adds
-// per-preset caustic gain and emitter tint while retaining the local-density high-pass.
+// Reuse the validated mobile atomic backend. Day/Sunset provide the directional air-to-water
+// source; Night reports no atomic source because its fixtures are already underwater.
 if (!window.__v5ProjectedCaustics?.online) {
   try {
-    await import(lightLabReady ? './v5-atomic-multilight-m32.js' : './v5-atomic-contrast-m30.js');
+    await import(lightLabReady ? './v5-atomic-multilight-m33.js' : './v5-atomic-contrast-m30.js');
   } catch (err) {
     const prev = window.__v5AtomicStatus || {};
     window.__v5AtomicStatus = {
       ...prev,
       online:false,
       stage:`rejected @ ${prev.stage || 'module'}`,
-      backend:lightLabReady ? 'particle-multilight-m32' : 'particle-contrast',
+      backend:lightLabReady ? 'time-sun-m33' : 'particle-contrast',
       width:prev.width || 0,
       height:prev.height || 0,
       error:String(err?.message || err),
     };
-    console.error('[Fluid V5 atomic] M3.2 caustic projector rejected; inherited receiver lighting remains active.', err);
+    console.error('[Fluid V5 atomic] M3.3 time-of-day caustic handoff rejected; inherited receiver lighting remains active.', err);
   }
 }
 
@@ -92,16 +92,16 @@ try {
 
 // Reorganize all live controls after their modules have mounted.
 try {
-  await import('./v5-tabs-m32.js');
+  await import('./v5-tabs-m33.js');
 } catch (err) {
-  console.error('[Fluid V5 UI] M3.2 tabbed control shell failed; original controls remain available.', err);
+  console.error('[Fluid V5 UI] M3.3 tabbed control shell failed; original controls remain available.', err);
 }
 
-window.__fluidV5Version = '5.1.2-m32';
+window.__fluidV5Version = '5.1.3-m33';
 const brand = document.querySelector('.hud.card.title');
-if (brand) brand.textContent = 'FLUID V5 · M3.2';
+if (brand) brand.textContent = 'FLUID V5 · M3.3';
 const stats = document.getElementById('v4stats');
-if (stats && !stats.textContent.includes('BUILD:')) stats.textContent = `BUILD: DISTINCTIVE LIGHT RIGS · COLORED CAUSTICS · ${stats.textContent}`;
+if (stats && !stats.textContent.includes('BUILD:')) stats.textContent = `BUILD: TIME OF DAY · POOL LIGHTS · WATER MOOD · ${stats.textContent}`;
 
 setTimeout(() => {
   const toggle = document.getElementById('v4WaveToggle');

@@ -1,15 +1,15 @@
 // Fluid V5 bootstrap. The HTML shell is inherited from V4.4, so mark the build immediately,
 // then wait for the validated V4.4 renderer to expose its runtime handles before mounting V5.
 
-const V5_BUILD = 'M2.9 FULL-POOL PHYSICS + ATOMIC';
+const V5_BUILD = 'M3.0 CAUSTIC CONTRAST + FULL-POOL PHYSICS';
 document.title = `Fluid V5 · ${V5_BUILD}`;
 const earlyBrand = document.querySelector('.hud.card.title');
-if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M2.9';
+if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M3.0';
 const earlyLoadTitle = document.querySelector('#loading h2');
-if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M2.9';
+if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M3.0';
 const earlyStats = document.getElementById('v4stats');
-if (earlyStats) earlyStats.textContent = 'BUILD: FULL-POOL PHYSICS · ATOMIC · waiting for V4.4 core…';
-window.__fluidV5Version = '5.0.9-m2-booting';
+if (earlyStats) earlyStats.textContent = 'BUILD: CAUSTIC CONTRAST · FULL-POOL PHYSICS · waiting for V4.4 core…';
+window.__fluidV5Version = '5.1.0-m3-booting';
 window.__fluidV5Build = V5_BUILD;
 
 await import('./wave-test-v44.js');
@@ -29,31 +29,32 @@ if (!(await waitForV44())) {
 
 await import('./v5-lab.js');
 
-// M2.9 fixes the physical pool initial condition before caustic projection. Pool-like scenarios
-// use a shallow PBF slab spanning the full X/Z floor; Dam Break alone keeps the upstream compact
-// 35%-width water column. This makes caustic coverage follow real water rather than a stretched decal.
+// Pool-like scenarios use a shallow PBF slab spanning the full X/Z floor. Dam Break alone keeps
+// the upstream compact 35%-width water column.
 try {
   await import('./v5-pool-slab.js');
 } catch (err) {
   console.error('[Fluid V5 pool slab] full-floor initialization failed; upstream compact block retained.', err);
 }
 
-// Camera-independent full PBF-surface photon source with the mobile-safe atomic -> r32uint resolve.
+// M3.0 keeps the full live PBF particle surface as the photon source, but high-passes the resolved
+// photon density against its local neighborhood. Ordinary transmitted sunlight remains in the
+// base water renderer; this pass contributes only genuine local caustic concentration.
 if (!window.__v5ProjectedCaustics?.online) {
   try {
-    await import('./v5-atomic-fullsurface-m28.js');
+    await import('./v5-atomic-contrast-m30.js');
   } catch (err) {
     const prev = window.__v5AtomicStatus || {};
     window.__v5AtomicStatus = {
       ...prev,
       online:false,
       stage:`rejected @ ${prev.stage || 'module'}`,
-      backend:'particle-full-wide',
+      backend:'particle-contrast',
       width:prev.width || 0,
       height:prev.height || 0,
       error:String(err?.message || err),
     };
-    console.error('[Fluid V5 atomic] full-surface particle pass rejected; V4.4 receiver caustics remain active.', err);
+    console.error('[Fluid V5 atomic] M3.0 caustic-contrast pass rejected; V4.4 receiver caustics remain active.', err);
   }
 }
 
@@ -73,7 +74,7 @@ try {
 }
 
 // Once the atomic path is online, V5 owns visible floor caustics. Keep the inherited V4 receiver
-// caustic control at minimum so the old camera-space rectangle cannot overpower the atomic map.
+// caustic control at minimum so the old camera-space estimate cannot overpower the atomic map.
 try {
   await import('./v5-caustic-handoff.js');
 } catch (err) {
@@ -82,16 +83,16 @@ try {
 
 // Reorganize all live controls after their modules have mounted.
 try {
-  await import('./v5-tabs-m29.js');
+  await import('./v5-tabs-m30.js');
 } catch (err) {
   console.error('[Fluid V5 UI] tabbed control shell failed; original controls remain available.', err);
 }
 
-window.__fluidV5Version = '5.0.9-m2';
+window.__fluidV5Version = '5.1.0-m3';
 const brand = document.querySelector('.hud.card.title');
-if (brand) brand.textContent = 'FLUID V5 · M2.9';
+if (brand) brand.textContent = 'FLUID V5 · M3.0';
 const stats = document.getElementById('v4stats');
-if (stats && !stats.textContent.includes('BUILD:')) stats.textContent = `BUILD: FULL-POOL PHYSICS · ATOMIC · ${stats.textContent}`;
+if (stats && !stats.textContent.includes('BUILD:')) stats.textContent = `BUILD: CAUSTIC CONTRAST · FULL-POOL PHYSICS · ${stats.textContent}`;
 
 setTimeout(() => {
   const toggle = document.getElementById('v4WaveToggle');

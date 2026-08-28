@@ -2,10 +2,11 @@
 await import('./wave-test-v44.js');
 await import('./v5-lab.js');
 
-// Milestone 2 is deliberately optional at boot. If an experimental M2 subsystem is rejected
-// by a mobile WebGPU adapter, Milestone 1 and the validated V4.4 renderer remain available.
+// Milestone 2 is deliberately optional at boot. The safety loader preserves the immutable M2
+// checkpoint while applying mobile/WebGPU synchronization fixes before evaluating it. If any
+// experimental M2 subsystem is rejected, Milestone 1 and the validated V4.4 renderer survive.
 try {
-  await import('./v5-m2.js');
+  await import('./v5-m2-safe.js');
 } catch (err) {
   console.error('[Fluid V5 M2] milestone 2 module failed; retained M1/V4.4 stack.', err);
 }

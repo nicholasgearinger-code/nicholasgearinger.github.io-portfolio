@@ -137,6 +137,7 @@ try{
 function decorate(){
   const root=document.getElementById('v5LightLab');if(!root)return;
   const title=root.querySelector('.v5MoodTitle');if(title)title.textContent='TIME OF DAY · M3.4';
+  for(const n of root.querySelectorAll('.v5MoodNote')){if((n.textContent||'').includes('Four underwater fixtures'))n.textContent=(n.textContent||'').replace('Four underwater fixtures on the pool side walls illuminate the tiles, volumetric water and the visible water surface. Rainbow assigns a different moving hue to each fixture.','Six submerged wall fixtures create overlapping colored pools on the tiles, visible lamp glows and volumetric beams. Rainbow phase-shifts the six fixture colors around the pool.');}
   const old=document.getElementById('v5NightPoolM34');if(old)old.remove();
   if(lab.state?.time==='night'){
     const note=document.createElement('div');note.id='v5NightPoolM34';note.className='v5MoodNote';

@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#081820" />
+<title>Fluid V3.3 — Shallow Interactive Pool</title>
+<style>
+  :root { color-scheme: dark; --cyan:#7ce7ef; --panel:rgba(3,17,24,.76); --border:rgba(124,231,239,.28); }
+  * { box-sizing:border-box; }
+  html,body { margin:0; width:100%; height:100%; overflow:hidden; background:#081820; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  #fluid-v3-canvas { position:fixed; inset:0; width:100%; height:100%; display:block; touch-action:none; }
+  .hud { position:fixed; inset:0; pointer-events:none; display:flex; flex-direction:column; justify-content:space-between; padding:max(10px,env(safe-area-inset-top)) 12px max(10px,env(safe-area-inset-bottom)); }
+  .row { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; }
+  .card { border:1px solid var(--border); background:var(--panel); border-radius:12px; padding:10px 12px; box-shadow:0 10px 28px rgba(0,0,0,.2); }
+  .title { color:var(--cyan); font:700 13px/1.15 system-ui,sans-serif; letter-spacing:.12em; text-transform:uppercase; }
+  .sub,#status,#quality { color:#b5d3dc; font-size:10px; line-height:1.4; margin-top:5px; }
+  #fps { color:#a7f3d0; font-size:14px; font-weight:800; text-align:right; }
+  #state { color:var(--cyan); font-size:10px; text-align:right; margin-top:3px; }
+  .controls { pointer-events:auto; display:flex; flex-wrap:wrap; justify-content:flex-end; gap:7px; }
+  button { border:1px solid rgba(124,231,239,.34); border-radius:999px; background:rgba(4,25,34,.85); color:#e8fdff; padding:9px 12px; font:700 10px/1 ui-monospace,monospace; }
+  #drop { border-color:rgba(255,178,82,.55); color:#ffd8a1; }
+  #kick { border-color:rgba(255,110,110,.5); color:#ffc0c0; }
+  #status.error { color:#ffaaaa; border-color:rgba(255,100,100,.5); }
+  @media(max-width:680px){ .sub{display:none}.card{padding:8px 10px}.controls{max-width:72vw}button{padding:8px 9px;font-size:9px}#status{max-width:46vw}.title{font-size:11px} }
+</style>
+<link rel="modulepreload" href="./fluid-v3/main-shallow.js" />
+<link rel="modulepreload" href="./fluid-v3/MLSMPMSolverPool.js" />
+<link rel="modulepreload" href="./fluid-v3/FluidScreenSpaceRendererPool.js" />
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.webgpu.js",
+    "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.webgpu.js",
+    "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.tsl.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="fluid-v3-canvas"></canvas>
+<div class="hud">
+  <div class="row">
+    <div class="card">
+      <div class="title">Fluid V3.3 · Shallow Pool</div>
+      <div class="sub">Same 3D MLS-MPM physics, but framed as a shallow filled basin with a more readable continuous water material.</div>
+    </div>
+    <div class="card">
+      <div id="fps">-- FPS</div>
+      <div id="state">STARTING</div>
+      <div id="quality">--</div>
+    </div>
+  </div>
+  <div class="row" style="align-items:flex-end">
+    <div id="status" class="card">Initializing…</div>
+    <div class="controls">
+      <button id="drop" type="button">Drop sphere</button>
+      <button id="kick" type="button">Throw through water</button>
+      <button id="pause" type="button">Pause</button>
+      <button id="reset" type="button">Reset</button>
+    </div>
+  </div>
+</div>
+<script type="module" src="./fluid-v3/main-shallow.js"></script>
+</body>
+</html>

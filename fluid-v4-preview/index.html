@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#06131a">
+<title>Fluid V4.3 Preview</title>
+<style>
+html,body{margin:0;width:100%;height:100%;background:#06131a;color:#dffcff;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+body{display:grid;place-items:center}.status{padding:24px;text-align:center}.title{font-size:14px;letter-spacing:.12em;color:#86f6ff;font-weight:800}.note{margin-top:10px;font-size:12px;color:#8ba7b2;line-height:1.5}.err{color:#ff9f9f;white-space:pre-wrap}
+</style>
+</head>
+<body>
+<div class="status"><div class="title">FLUID V4.3 · REALTIME CAUSTICS</div><div id="note" class="note">Loading isolated WebGPU preview…</div></div>
+<script type="module">
+const commit='c333507a348579c30fa971b7ceeb68ece3b8bd68';
+const base=`https://cdn.jsdelivr.net/gh/nicholasgearinger-code/nicholasgearinger.github.io-portfolio@${commit}/fluid-v4-pbf/`;
+const note=document.getElementById('note');
+try{
+  const response=await fetch(base+'index.html',{cache:'no-store'});
+  if(!response.ok) throw new Error(`Preview source returned HTTP ${response.status}`);
+  let html=await response.text();
+  html=html.replace('<head>','<head><base href="'+base+'">');
+  document.open();
+  document.write(html);
+  document.close();
+}catch(err){
+  note.classList.add('err');
+  note.textContent='Unable to load the isolated V4.3 preview.\n'+(err?.message||err);
+  console.error('[Fluid V4.3 preview]',err);
+}
+</script>
+</body>
+</html>

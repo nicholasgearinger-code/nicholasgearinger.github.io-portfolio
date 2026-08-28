@@ -1,15 +1,15 @@
 // Fluid V5 bootstrap. The HTML shell is inherited from V4.4, so mark the build immediately,
 // then wait for the validated V4.4 renderer to expose its runtime handles before mounting V5.
 
-const V5_BUILD = 'M2.3 BUFFER-ATOMIC';
+const V5_BUILD = 'M2.4 COPY-ATOMIC + TABS';
 document.title = `Fluid V5 · ${V5_BUILD}`;
 const earlyBrand = document.querySelector('.hud.card.title');
-if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M2.3';
+if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M2.4';
 const earlyLoadTitle = document.querySelector('#loading h2');
-if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M2.3';
+if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M2.4';
 const earlyStats = document.getElementById('v4stats');
-if (earlyStats) earlyStats.textContent = 'BUILD: BUFFER-ATOMIC · waiting for V4.4 core…';
-window.__fluidV5Version = '5.0.3-m2-booting';
+if (earlyStats) earlyStats.textContent = 'BUILD: COPY-ATOMIC · TABBED UI · waiting for V4.4 core…';
+window.__fluidV5Version = '5.0.4-m2-booting';
 window.__fluidV5Build = V5_BUILD;
 
 await import('./wave-test-v44.js');
@@ -29,29 +29,41 @@ if (!(await waitForV44())) {
 
 await import('./v5-lab.js');
 
-// If M1 did not publish a working projected-caustic pass, use the simpler M2.3 path:
-// atomic<u32> compute accumulation + direct fragment-stage buffer resolve. This avoids the
-// storage-texture resolve that proved unreliable on the current iPhone test path.
+// M2.4 mobile path: preserve atomic<u32> compute accumulation, then copy the raw u32 grid into
+// an r32uint sampled texture. This avoids storage textures and fragment-stage storage buffers.
 if (!window.__v5ProjectedCaustics?.online) {
   try {
-    await import('./v5-atomic-buffer.js');
+    await import('./v5-atomic-copy.js');
   } catch (err) {
-    window.__v5AtomicStatus = { online:false, stage:'rejected', backend:'buffer-direct', width:0, height:0, error:String(err?.message||err) };
-    console.error('[Fluid V5 atomic] buffer-direct fallback rejected; V4.4 receiver caustics remain active.', err);
+    window.__v5AtomicStatus = {
+      online:false, stage:'rejected', backend:'copy-texture', width:0, height:0,
+      error:String(err?.message||err),
+    };
+    console.error('[Fluid V5 atomic] copy-texture fallback rejected; V4.4 receiver caustics remain active.', err);
   }
 }
 
+// Milestone 2 remains optional. If a drain/secondary/underwater experiment is rejected, the
+// validated V4.4 renderer and V5 M1 controls remain usable.
 try {
   await import('./v5-m2-safe.js');
 } catch (err) {
   console.error('[Fluid V5 M2] milestone 2 module failed; retained M1/V4.4 stack.', err);
 }
 
-window.__fluidV5Version = window.__v5M2?.version || '5.0.3-m2';
+// Reorganize all live controls after their modules have mounted. Moving existing nodes preserves
+// the original event handlers and stored state while giving mobile users a clean tabbed interface.
+try {
+  await import('./v5-tabs.js');
+} catch (err) {
+  console.error('[Fluid V5 UI] tabbed control shell failed; original controls remain available.', err);
+}
+
+window.__fluidV5Version = '5.0.4-m2';
 const brand = document.querySelector('.hud.card.title');
-if (brand) brand.textContent = 'FLUID V5 · M2.3';
+if (brand) brand.textContent = 'FLUID V5 · M2.4';
 const stats = document.getElementById('v4stats');
-if (stats && !stats.textContent.includes('BUILD:')) stats.textContent = `BUILD: BUFFER-ATOMIC · ${stats.textContent}`;
+if (stats && !stats.textContent.includes('BUILD:')) stats.textContent = `BUILD: COPY-ATOMIC · TABS · ${stats.textContent}`;
 
 setTimeout(() => {
   const toggle = document.getElementById('v4WaveToggle');

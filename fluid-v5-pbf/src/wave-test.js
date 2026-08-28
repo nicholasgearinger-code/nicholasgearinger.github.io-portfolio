@@ -1,15 +1,15 @@
 // Fluid V5 bootstrap. The HTML shell is inherited from V4.4, so mark the build immediately,
 // then wait for the validated V4.4 renderer to expose its runtime handles before mounting V5.
 
-const V5_BUILD = 'M3.4.5 USER PANORAMAS + BLACK NIGHT + BRIGHT FLOODS';
+const V5_BUILD = 'M3.4.6 LINEAR HDR PANORAMAS + SMOOTH NIGHT FLOODS';
 document.title = `Fluid V5 · ${V5_BUILD}`;
 const earlyBrand = document.querySelector('.hud.card.title');
-if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M3.4.5';
+if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M3.4.6';
 const earlyLoadTitle = document.querySelector('#loading h2');
-if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M3.4.5';
+if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M3.4.6';
 const earlyStats = document.getElementById('v4stats');
-if (earlyStats) earlyStats.textContent = 'BUILD: USER DAY/SUNSET MAPS · BLACK NIGHT · BRIGHT FLOODS · waiting for V4.4 core…';
-window.__fluidV5Version = '5.1.4.5-m345-booting';
+if (earlyStats) earlyStats.textContent = 'BUILD: LINEAR HDR PANORAMAS · BLACK NIGHT · SMOOTH FLOODS · waiting for V4.4 core…';
+window.__fluidV5Version = '5.1.4.6-m346-booting';
 window.__fluidV5Build = V5_BUILD;
 
 await import('./wave-test-v44.js');
@@ -37,8 +37,8 @@ try {
   console.error('[Fluid V5 pool slab] full-floor initialization failed; upstream compact block retained.', err);
 }
 
-// M3.4.5 uses the user-supplied 2:1 panorama maps for Day and Sunset, a true black map for Night,
-// and keeps M3.4.4's broad submerged flood-light transport for the night pool itself.
+// M3.4.6 converts the supplied Day/Sunset panoramas from display sRGB into controlled linear
+// Radiance HDR before the existing cubemap loader sees them. Night remains literal black HDR.
 let lightLabReady = false;
 try {
   await import('./v5-light-lab.js');
@@ -46,16 +46,16 @@ try {
   try {
     await import('./v5-environment-m343.js');
   } catch (err) {
-    console.error('[Fluid V5 Environment] M3.4.5 supplied panorama system failed; atmosphere fallback retained.', err);
+    console.error('[Fluid V5 Environment] M3.4.6 linear HDR panorama system failed; atmosphere fallback retained.', err);
   }
   try {
     await import('./v5-night-pool-m34.js');
   } catch (err) {
     window.__v5DedicatedNightPool = false;
-    console.error('[Fluid V5 Night Pool] broad-flood renderer failed; atmosphere fallback remains active.', err);
+    console.error('[Fluid V5 Night Pool] M3.4.6 smooth six-fixture renderer failed; atmosphere fallback remains active.', err);
   }
 } catch (err) {
-  console.error('[Fluid V5 Light Lab] M3.4.5 atmosphere module failed; retaining the M3.0 sun path.', err);
+  console.error('[Fluid V5 Light Lab] M3.4.6 atmosphere module failed; retaining the M3.0 sun path.', err);
 }
 
 // Reuse the validated mobile atomic backend. Day/Sunset provide the directional air-to-water
@@ -74,7 +74,7 @@ if (!window.__v5ProjectedCaustics?.online) {
       height:prev.height || 0,
       error:String(err?.message || err),
     };
-    console.error('[Fluid V5 atomic] M3.4.5 time-of-day caustic handoff rejected; inherited receiver lighting remains active.', err);
+    console.error('[Fluid V5 atomic] M3.4.6 time-of-day caustic handoff rejected; inherited receiver lighting remains active.', err);
   }
 }
 
@@ -99,22 +99,22 @@ try {
 try {
   await import('./v5-tabs-m34.js');
 } catch (err) {
-  console.error('[Fluid V5 UI] M3.4.5 tabbed control shell failed; original controls remain available.', err);
+  console.error('[Fluid V5 UI] M3.4.6 tabbed control shell failed; original controls remain available.', err);
 }
 
-window.__fluidV5Version = '5.1.4.5-m345';
+window.__fluidV5Version = '5.1.4.6-m346';
 const brand = document.querySelector('.hud.card.title');
-if (brand) brand.textContent = 'FLUID V5 · M3.4.5';
+if (brand) brand.textContent = 'FLUID V5 · M3.4.6';
 const stats = document.getElementById('v4stats');
-if (stats && !stats.textContent.includes('BUILD:')) stats.textContent = `BUILD: USER PANORAMAS · BLACK NIGHT · BRIGHT FLOODS · ${stats.textContent}`;
+if (stats && !stats.textContent.includes('BUILD:')) stats.textContent = `BUILD: LINEAR HDR · BLACK NIGHT · SMOOTH FLOODS · ${stats.textContent}`;
 
-// The night module has its own delayed development branding; stamp the integrated build after it.
+// The Night module uses a delayed brand stamp; make the integrated build win afterward.
 setTimeout(() => {
   const b = document.querySelector('.hud.card.title');
-  if (b) b.textContent = 'FLUID V5 · M3.4.5';
-  document.title = 'Fluid V5 · M3.4.5 USER PANORAMAS + BRIGHT NIGHT FLOODS';
-  window.__fluidV5Version = '5.1.4.5-m345';
-}, 1150);
+  if (b) b.textContent = 'FLUID V5 · M3.4.6';
+  document.title = 'Fluid V5 · M3.4.6 LINEAR HDR + SMOOTH NIGHT';
+  window.__fluidV5Version = '5.1.4.6-m346';
+}, 1250);
 
 setTimeout(() => {
   const toggle = document.getElementById('v4WaveToggle');

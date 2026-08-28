@@ -1,10 +1,12 @@
-// Rift Islands mobile performance governor.
+// Rift Islands mobile performance governor — Environment Performance 1.1.
 //
-// Keeps desktop behavior unchanged. On touch/mobile devices it dynamically
-// adjusts renderer pixel ratio with a slow hysteresis loop so expensive render
-// targets are not constantly reallocated. Every ratio change is routed through
-// Rift's existing resize function, which keeps composer/SSAO/underwater/FXAA
-// targets synchronized. Use ?perfLegacy=1 to disable.
+// Target: keep the complete Low visual feature set present while aggressively
+// protecting a ~30 FPS frame budget on touch/mobile devices. The two largest safe
+// levers here are pixel count and shadow refresh frequency: neither removes an
+// effect, and both can be changed without touching the fragile WebGPU render graph.
+// Every DPR change is routed through Rift's existing resize function so composer,
+// underwater, FXAA and other targets stay synchronized. Use ?perfLegacy=1 to
+// bypass this preview behavior.
 
 const params = typeof location !== "undefined"
   ? new URLSearchParams(location.search)
@@ -26,6 +28,18 @@ const state = {
   changes: 0,
   tier: "native",
   fixedResolution: false,
+  targetFps: 30,
+};
+
+const shadowState = {
+  installed: false,
+  frame: 0,
+  sunUpdates: 0,
+  moonUpdates: 0,
+  sunWasActive: false,
+  moonWasActive: false,
+  sunInterval: 1,
+  moonInterval: 1,
 };
 
 function clamp(v, lo, hi) {
@@ -35,15 +49,17 @@ function clamp(v, lo, hi) {
 function caps(settings) {
   const dpr = typeof window !== "undefined" ? (window.devicePixelRatio || 1) : 1;
   const settingsCap = Number(settings?.pixelRatioCap) || dpr;
-  const nativeCap = Math.max(0.5, Math.min(dpr, settingsCap));
+  const nativeCap = Math.max(0.4, Math.min(dpr, settingsCap));
 
   if (!state.enabled) return { min: nativeCap, max: nativeCap, initial: nativeCap };
 
-  // At the current 11–20 FPS mobile load, starting below 1.0 immediately cuts
-  // fragment/post cost while leaving enough resolution for TAAU/cloud softness.
-  const max = Math.min(nativeCap, 1.0);
-  const min = Math.min(max, 0.55);
-  const initial = clamp(Math.min(max, 0.82), min, max);
+  // v1.0 bottomed out at 0.55 and the test phone still sat near 15 FPS. Low is
+  // explicitly the performance tier, so v1.1 starts closer to the target and can
+  // fall to 0.42. At 0.42 versus 0.55 the full-screen pixel workload is only
+  // ~58%, while temporal clouds / browser scaling hide much of the sharpness loss.
+  const max = Math.min(nativeCap, 0.82);
+  const min = Math.min(max, 0.42);
+  const initial = clamp(Math.min(max, 0.62), min, max);
   return { min, max, initial };
 }
 
@@ -55,9 +71,17 @@ function publish() {
     pixelRatio: state.ratio,
     frameMs: state.frameMs,
     estimatedFps: state.frameMs > 0 ? 1000 / state.frameMs : 0,
+    targetFps: state.targetFps,
     changes: state.changes,
     tier: state.tier,
     fixedResolution: state.fixedResolution,
+    shadows: {
+      installed: shadowState.installed,
+      sunInterval: shadowState.sunInterval,
+      moonInterval: shadowState.moonInterval,
+      sunUpdates: shadowState.sunUpdates,
+      moonUpdates: shadowState.moonUpdates,
+    },
   };
 }
 
@@ -77,7 +101,7 @@ export function setRiftPerformanceResizeHandler(handler) {
 export function getRiftInitialPixelRatio(settings) {
   const c = caps(settings);
   state.ratio = c.initial;
-  state.tier = state.enabled ? "adaptive-mobile" : "native";
+  state.tier = state.enabled ? "adaptive-mobile-medium" : "native";
   publish();
   return state.ratio;
 }
@@ -88,9 +112,8 @@ export function updateRiftPerformanceGovernor(renderer, dt, viewport, settings, 
   const c = caps(settings);
   if (state.ratio == null) state.ratio = c.initial;
 
-  // Respect the user's explicit 720p/1080p/etc override. The game owns that
-  // mode completely; adaptive DPR resumes automatically when the override is
-  // cleared.
+  // Respect an explicit resolution override. Adaptive DPR resumes automatically
+  // when that fixed mode is cleared.
   state.fixedResolution = !!fixedResolution;
   if (state.fixedResolution) {
     state.tier = "fixed-resolution";
@@ -114,16 +137,16 @@ export function updateRiftPerformanceGovernor(renderer, dt, viewport, settings, 
   if (seconds <= 0) return;
 
   const frameMs = seconds * 1000;
-  // Ignore one-off tab/resume stalls and smooth the signal heavily enough that
-  // changing quality cannot oscillate frame-to-frame.
-  if (frameMs < 100) state.frameMs += (frameMs - state.frameMs) * 0.055;
+  if (frameMs < 100) state.frameMs += (frameMs - state.frameMs) * 0.07;
 
   state.cooldown = Math.max(0, state.cooldown - seconds);
 
-  if (state.frameMs > 39.0) {
+  // 30 FPS = 33.3 ms. Drop quality quickly once the smoothed frame budget is
+  // clearly missed, but require sustained headroom before restoring resolution.
+  if (state.frameMs > 35.0) {
     state.slowSeconds += seconds;
-    state.fastSeconds = Math.max(0, state.fastSeconds - seconds * 2);
-  } else if (state.frameMs < 29.0) {
+    state.fastSeconds = Math.max(0, state.fastSeconds - seconds * 2.5);
+  } else if (state.frameMs < 29.5) {
     state.fastSeconds += seconds;
     state.slowSeconds = Math.max(0, state.slowSeconds - seconds * 2);
   } else {
@@ -132,16 +155,16 @@ export function updateRiftPerformanceGovernor(renderer, dt, viewport, settings, 
   }
 
   let next = state.ratio;
-  if (state.cooldown <= 0 && state.slowSeconds > 0.85 && state.ratio > c.min + 0.001) {
-    next = Math.max(c.min, state.ratio - 0.06);
+  if (state.cooldown <= 0 && state.slowSeconds > 0.55 && state.ratio > c.min + 0.001) {
+    next = Math.max(c.min, state.ratio - 0.07);
     state.slowSeconds = 0;
     state.fastSeconds = 0;
-    state.cooldown = 1.8;
-  } else if (state.cooldown <= 0 && state.fastSeconds > 4.0 && state.ratio < c.max - 0.001) {
-    next = Math.min(c.max, state.ratio + 0.03);
+    state.cooldown = 1.15;
+  } else if (state.cooldown <= 0 && state.fastSeconds > 6.0 && state.ratio < c.max - 0.001) {
+    next = Math.min(c.max, state.ratio + 0.025);
     state.slowSeconds = 0;
     state.fastSeconds = 0;
-    state.cooldown = 3.0;
+    state.cooldown = 4.0;
   }
 
   let needsResize = false;
@@ -150,14 +173,13 @@ export function updateRiftPerformanceGovernor(renderer, dt, viewport, settings, 
     state.changes++;
     needsResize = true;
   } else {
-    // A viewport resize or settings transition may have temporarily changed DPR.
     const actual = Number(renderer.getPixelRatio?.());
     needsResize = Number.isFinite(actual) && Math.abs(actual - state.ratio) > 0.001;
   }
 
-  state.tier = state.ratio <= 0.61
+  state.tier = state.ratio <= 0.50
     ? "adaptive-mobile-low"
-    : state.ratio <= 0.73
+    : state.ratio <= 0.66
       ? "adaptive-mobile-medium"
       : "adaptive-mobile-high";
 
@@ -165,6 +187,50 @@ export function updateRiftPerformanceGovernor(renderer, dt, viewport, settings, 
   else publish();
 }
 
+function configureShadow(shadow) {
+  if (!shadow) return;
+  shadow.autoUpdate = false;
+  shadow.needsUpdate = true;
+}
+
+export function updateRiftShadowPerformance(sun, moonLight) {
+  if (!state.enabled) return;
+
+  if (!shadowState.installed) {
+    configureShadow(sun?.shadow);
+    configureShadow(moonLight?.shadow);
+    shadowState.installed = true;
+  }
+
+  shadowState.frame++;
+
+  // Keep both shadow effects enabled but amortize their map renders. At 30 FPS,
+  // 3-frame Sun updates are ~10 Hz and are visually acceptable with the existing
+  // soft PCF shadow radius; moon shadows can update even less often because the
+  // source is much dimmer and moves slowly.
+  const low = state.tier === "adaptive-mobile-low";
+  const medium = state.tier === "adaptive-mobile-medium";
+  shadowState.sunInterval = low ? 3 : medium ? 2 : 2;
+  shadowState.moonInterval = low ? 6 : medium ? 5 : 4;
+
+  const sunActive = Number(sun?.intensity) > 0.01 && sun?.castShadow !== false;
+  const moonActive = Number(moonLight?.intensity) > 0.004 && moonLight?.castShadow !== false;
+
+  if (sun?.shadow && sunActive && (!shadowState.sunWasActive || shadowState.frame % shadowState.sunInterval === 0)) {
+    sun.shadow.needsUpdate = true;
+    shadowState.sunUpdates++;
+  }
+
+  if (moonLight?.shadow && moonActive && (!shadowState.moonWasActive || shadowState.frame % shadowState.moonInterval === 0)) {
+    moonLight.shadow.needsUpdate = true;
+    shadowState.moonUpdates++;
+  }
+
+  shadowState.sunWasActive = sunActive;
+  shadowState.moonWasActive = moonActive;
+  publish();
+}
+
 export function getRiftPerformanceState() {
-  return { ...state };
+  return { ...state, shadows: { ...shadowState } };
 }

@@ -1,6 +1,6 @@
-// Fluid V5 M3.1 Multi-Light Lab.
-// One selected rig drives general receiver lighting. Sun/Spot/Point may also drive the atomic
-// caustic projector; underwater and skylight remain direct/ambient sources for physical sanity.
+// Fluid V5 M3.2 Multi-Light Lab.
+// Each preset now has a deliberately distinctive receiver-light response. Sun/Spot/Point may
+// drive atomic caustics; underwater and skylight remain direct/ambient sources.
 
 import { LIGHT_TYPES, LIGHT_PRESETS, ENV_PRESETS, clonePreset } from './v5-light-presets.js';
 
@@ -10,7 +10,7 @@ const panel = document.getElementById('settingsPanel');
 if (!sim?.dev || !ssfr?.dev || !panel) throw new Error('Fluid V5 light lab: runtime unavailable.');
 
 const dev = ssfr.dev;
-const STORE = 'fluidV5LightLabM31';
+const STORE = 'fluidV5LightLabM32';
 const clamp = (v,a,b)=>Math.min(b,Math.max(a,Number(v)));
 const copy = v=>JSON.parse(JSON.stringify(v));
 const defaultRigs = {
@@ -73,6 +73,7 @@ function packed(){
     intensity:clamp(r.intensity??1,0,2.5), range:clamp(r.range??3.2,.25,8),
     cone, coneOuterCos:Math.cos(cone*Math.PI/180), coneInnerCos:Math.cos(inner*Math.PI/180),
     softness:soft, volumetric:clamp(r.volumetric??0,0,1.5), shadow:state.shadow,
+    causticGain:clamp(r.causticGain??1,0,2), character:r.character||'custom',
     envPreset:state.envPreset,
   };
 }
@@ -92,10 +93,10 @@ function applyEngine(){
     upstreamSet('sunint',Math.max(.08,P.intensity*4.8));
     upstreamSet('sunelev',r.elevation??55);upstreamSet('sunazim',r.azimuth??40);
   }else if(state.activeType==='skylight'){
-    upstreamSet('sunint',0.08);
+    upstreamSet('sunint',0.035);
   }else{
-    // Retain a tiny base directional fill so the inherited PBR material never collapses to black.
-    upstreamSet('sunint',0.22);
+    // Local rigs define the scene; retain only a tiny inherited PBR fill.
+    upstreamSet('sunint',0.055);
   }
   upstreamSet('envintensity',env.intensity);
   ssfr.bindCache=null;save();
@@ -118,7 +119,7 @@ function setEnv(name){if(!ENV_PRESETS[name])return;state.envPreset=name;state.pr
 
 // ----- Mobile-safe additive receiver-light pass -----------------------------------------------
 window.__v5LightStatus={online:false,stage:'shader',error:''};
-const lightUni=dev.createBuffer({label:'fluidV5MultiLightUniform',size:80,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
+const lightUni=dev.createBuffer({label:'fluidV5MultiLightM32Uniform',size:80,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
 const LF=new Float32Array(20);
 const shader=`
 struct Comp {
@@ -146,20 +147,31 @@ fn poolHit(o:vec3f,d:vec3f)->Hit{
 }
 fn localLight(p:vec3f,n:vec3f)->vec3f{
  let typ=i32(L.meta.x+.5);let power=max(L.meta.y,0.0);let col=L.color.rgb;
- if(typ==0){let toLight=-normalize(L.dir.xyz);let ndl=max(dot(n,toLight),0.0);return col*ndl*power*.045;}
- if(typ==4){let hemi=.28+.72*max(n.y,0.0);return col*power*hemi*.038;}
+ if(typ==0){
+  let toLight=-normalize(L.dir.xyz);let ndl=max(dot(n,toLight),0.0);
+  let wall=1.0-max(n.y,0.0);let shape=.10+.31*ndl+.055*wall;
+  return col*power*shape;
+ }
+ if(typ==4){
+  let up=max(n.y,0.0);let hemi=.34+.66*up;
+  return col*power*(.055+.105*hemi);
+ }
  let toL=L.pos.xyz-p;let dist=length(toL);if(dist<1e-4||dist>L.meta.z){return vec3f(0);}
  let ld=toL/dist;let ndl=max(dot(n,ld),0.0);let x=dist/max(L.meta.z,1e-3);var atten=(1.0-smoothstep(.72,1.0,x))/(1.0+1.5*x*x);
  if(typ==1||typ==3){let fromLamp=-ld;let cone=dot(fromLamp,normalize(L.dir.xyz));atten*=smoothstep(L.meta.w,L.dir.w,cone);}
- let waterLoss=select(1.0,exp(-dist*.36),typ==3);let gain=select(.105,.145,typ==3);
- return col*(power*ndl*atten*waterLoss*gain);
+ let waterLoss=select(1.0,exp(-dist*.28),typ==3);
+ let localGain=select(.34,.64,typ==3);
+ let hotspot=pow(max(ndl,0.0),select(1.15,.78,typ==3));
+ return col*(power*(.18*ndl+.82*hotspot)*atten*waterLoss*localGain);
 }
 fn beam(ro:vec3f,rd:vec3f)->vec3f{
- let typ=i32(L.meta.x+.5);if(typ!=3||L.extra.x<=.001){return vec3f(0);}
+ let typ=i32(L.meta.x+.5);if((typ!=1&&typ!=3)||L.extra.x<=.001){return vec3f(0);}
  let d=normalize(L.dir.xyz);let toO=ro-L.pos.xyz;let a=dot(rd,rd);let b=dot(rd,d);let c=dot(d,d);let e=dot(rd,toO);let f=dot(d,toO);let den=max(a*c-b*b,1e-4);
  let t=max(0.0,(b*f-c*e)/den);let s=max(0.0,(a*f-b*e)/den);if(s>L.meta.z){return vec3f(0);}
  let q=ro+rd*t;let r=L.pos.xyz+d*s;let dist=length(q-r);let width=.035+s*tan(acos(clamp(L.meta.w,-.99,.99)))*.38;
- let glow=exp(-dist*dist/max(width*width,1e-4))*(1.0-s/L.meta.z)*L.extra.x*L.meta.y*.026;
+ let beamGain=select(.095,.19,typ==3);
+ let core=exp(-dist*dist/max(width*width,1e-4));let halo=exp(-dist*dist/max(width*width*4.0,1e-4))*.22;
+ let glow=(core+halo)*(1.0-s/L.meta.z)*L.extra.x*L.meta.y*beamGain;
  return L.color.rgb*glow;
 }
 @fragment fn fs(v:V)->@location(0)vec4f{
@@ -167,13 +179,13 @@ fn beam(ro:vec3f,rd:vec3f)->vec3f{
  var c=beam(ro,rd);let h=poolHit(ro,rd);if(h.t<1e29){c+=localLight(h.p,h.n);}return vec4f(c,0);
 }`;
 try{
-  const mod=dev.createShaderModule({code:shader,label:'fluidV5MultiLightWGSL'});
+  const mod=dev.createShaderModule({code:shader,label:'fluidV5MultiLightM32WGSL'});
   if(typeof mod.getCompilationInfo==='function'){
     const info=await mod.getCompilationInfo();const bad=(info.messages||[]).filter(m=>m.type==='error');
     if(bad.length)throw new Error(bad.map(m=>`${m.lineNum||'?'}:${m.linePos||'?'} ${m.message}`).join(' | '));
   }
   window.__v5LightStatus.stage='pipeline';
-  const pipe=await dev.createRenderPipelineAsync({label:'fluidV5MultiLightOverlay',layout:'auto',vertex:{module:mod,entryPoint:'vs'},fragment:{module:mod,entryPoint:'fs',targets:[{format:ssfr.format,blend:{color:{srcFactor:'one',dstFactor:'one',operation:'add'},alpha:{srcFactor:'zero',dstFactor:'one',operation:'add'}}}]},primitive:{topology:'triangle-list'}});
+  const pipe=await dev.createRenderPipelineAsync({label:'fluidV5MultiLightM32Overlay',layout:'auto',vertex:{module:mod,entryPoint:'vs'},fragment:{module:mod,entryPoint:'fs',targets:[{format:ssfr.format,blend:{color:{srcFactor:'one',dstFactor:'one',operation:'add'},alpha:{srcFactor:'zero',dstFactor:'one',operation:'add'}}}]},primitive:{topology:'triangle-list'}});
   let cache=null;
   const bg=()=>{if(cache?.comp===ssfr.compUni)return cache.bg;const g=dev.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:ssfr.compUni}},{binding:1,resource:{buffer:lightUni}}]});cache={comp:ssfr.compUni,bg:g};return g};
   const baseRender=ssfr.render;
@@ -187,8 +199,8 @@ try{
     try{const pass=enc.beginRenderPass({colorAttachments:[{view:target,loadOp:'load',storeOp:'store'}]});pass.setPipeline(pipe);pass.setBindGroup(0,bg());pass.draw(3);pass.end();}catch(err){window.__v5LightStatus.stage='frame-error';window.__v5LightStatus.error=String(err?.message||err)}
     return out;
   };
-  window.__v5LightStatus={online:true,stage:'online',backend:'receiver-overlay',error:''};
-}catch(err){window.__v5LightStatus={online:false,stage:'rejected',backend:'receiver-overlay',error:String(err?.message||err)};console.warn('[Fluid V5 Light Lab] receiver-light overlay rejected; controls/base lighting remain active.',err)}
+  window.__v5LightStatus={online:true,stage:'online',backend:'receiver-character-m32',error:''};
+}catch(err){window.__v5LightStatus={online:false,stage:'rejected',backend:'receiver-character-m32',error:String(err?.message||err)};console.warn('[Fluid V5 Light Lab M3.2] receiver-light overlay rejected; controls/base lighting remain active.',err)}
 
 // ----- UI --------------------------------------------------------------------------------------
 const root=document.createElement('div');root.id='v5LightLab';root.className='v5LightLab';
@@ -204,13 +216,13 @@ function positionRows(host,r){
 }
 function renderUI(){
   const P=packed(),r=state.rigs[state.activeType];root.innerHTML='';
-  const head=document.createElement('div');head.className='v5LightHead';head.innerHTML=`<div class="v5LightTitle">MULTI-LIGHT LAB · M3.1</div><div class="v5LightBadge">${P.activeType.toUpperCase()}</div>`;root.appendChild(head);
-  const desc=document.createElement('p');desc.className='v5LightDesc';desc.textContent='Choose the primary light rig. Sun, spot and point lights can drive the atomic caustic projector; underwater and skylight modes provide direct/ambient illumination without inventing physically incorrect surface caustics.';root.appendChild(desc);
+  const head=document.createElement('div');head.className='v5LightHead';head.innerHTML=`<div class="v5LightTitle">MULTI-LIGHT LAB · M3.2</div><div class="v5LightBadge">${P.activeType.toUpperCase()}</div>`;root.appendChild(head);
+  const desc=document.createElement('p');desc.className='v5LightDesc';desc.textContent='Each preset now changes the actual pool receiver lighting, beam geometry, color and caustic response—not only the environment background. Sun, spot and point can drive atomic caustics; underwater and skylight remain direct/ambient sources.';root.appendChild(desc);
   const types=document.createElement('div');types.className='v5LightGrid';for(const t of LIGHT_TYPES){const b=document.createElement('button');b.className='v5LightBtn'+(t===state.activeType?' active':'');b.textContent=t.toUpperCase();b.onclick=e=>{e.preventDefault();e.stopPropagation();setType(t)};types.appendChild(b)}root.appendChild(types);
   const sub1=document.createElement('div');sub1.className='v5LightSub';sub1.textContent='PRESET';root.appendChild(sub1);
   const sel=document.createElement('select');sel.className='v5LightSelect';const custom=document.createElement('option');custom.value='custom';custom.textContent='CUSTOM';sel.appendChild(custom);for(const [k,p] of Object.entries(LIGHT_PRESETS)){const o=document.createElement('option');o.value=k;o.textContent=p.label;sel.appendChild(o)}sel.value=LIGHT_PRESETS[state.preset]?state.preset:'custom';sel.onchange=()=>{if(sel.value!=='custom')applyPreset(sel.value)};root.appendChild(sel);
   const sub2=document.createElement('div');sub2.className='v5LightSub';sub2.textContent='LIGHT PARAMETERS';root.appendChild(sub2);
-  root.append(row('INTENSITY',r,'intensity',0,2.2,.02,v=>Number(v).toFixed(2)));
+  root.append(row('INTENSITY',r,'intensity',0,2.5,.02,v=>Number(v).toFixed(2)));
   const colorWrap=document.createElement('div');colorWrap.className='v5LightRow';const cl=document.createElement('label');cl.textContent='COLOR';const ci=document.createElement('input');ci.type='color';ci.className='v5LightColor';ci.value=r.color||'#ffffff';const cv=document.createElement('span');cv.className='v5LightVal';cv.textContent=(r.color||'#ffffff').toUpperCase();ci.oninput=()=>{r.color=ci.value;cv.textContent=ci.value.toUpperCase();state.preset='custom';applyEngine()};colorWrap.append(cl,ci,cv);root.appendChild(colorWrap);
   if(state.activeType==='sun'){root.append(row('ELEVATION',r,'elevation',8,82,1,v=>`${Math.round(v)}°`));root.append(row('AZIMUTH',r,'azimuth',0,360,1,v=>`${Math.round(v)}°`));root.append(row('SOFTNESS',r,'softness',.01,.5,.01,v=>Number(v).toFixed(2)))}
   if(state.activeType==='spot'){positionRows(root,r);root.append(row('AIM AZIMUTH',r,'azimuth',0,360,1,v=>`${Math.round(v)}°`));root.append(row('AIM DOWN',r,'elevation',5,90,1,v=>`${Math.round(v)}°`));root.append(row('CONE',r,'cone',6,68,1,v=>`${Math.round(v)}°`));root.append(row('EDGE SOFT',r,'softness',.02,.8,.01,v=>Number(v).toFixed(2)));root.append(row('RANGE',r,'range',.6,6,.05,v=>Number(v).toFixed(2)))}
@@ -220,9 +232,9 @@ function renderUI(){
   const sub3=document.createElement('div');sub3.className='v5LightSub';sub3.textContent='ENVIRONMENT';root.appendChild(sub3);
   const envSel=document.createElement('select');envSel.className='v5LightSelect';for(const [k,e] of Object.entries(ENV_PRESETS)){const o=document.createElement('option');o.value=k;o.textContent=e.label;envSel.appendChild(o)}envSel.value=state.envPreset;envSel.onchange=()=>setEnv(envSel.value);root.appendChild(envSel);
   const ca=document.createElement('button');ca.className='v5LightBtn v5LightWide'+(P.causticType!=='none'?' active':'');ca.disabled=!supportedCaustic(state.activeType);ca.textContent=supportedCaustic(state.activeType)?`ATOMIC CAUSTIC SOURCE: ${state.causticEnabled?'ON':'OFF'}`:'ATOMIC CAUSTICS: NOT APPLICABLE';ca.onclick=e=>{e.preventDefault();state.causticEnabled=!state.causticEnabled;state.preset='custom';applyEngine();renderUI()};root.appendChild(ca);
-  const note=document.createElement('div');note.className='v5LightNote';note.textContent=state.activeType==='sun'?'Directional sunlight produces the classic broad pool-caustic field. Elevation and azimuth change both the direct lighting and photon projection.':state.activeType==='spot'?'A finite cone light produces localized caustics only where its beam reaches the water. Cone, position and aim all feed the atomic projector.':state.activeType==='point'?'A point source emits toward every water particle, creating radial/localized caustic concentration with distance falloff.':state.activeType==='underwater'?'A submerged pool fixture illuminates tiles and adds a volumetric beam through the water. Because the lamp is already inside the water, it does not use the air-to-water surface caustic projector.':'Skylight is diffuse environment illumination. Large-area diffuse light naturally softens or eliminates sharp caustics.';root.appendChild(note);
+  const note=document.createElement('div');note.className='v5LightNote';note.textContent=state.activeType==='sun'?'Directional sunlight now strongly changes the pool itself: Noon is hard/white, Afternoon is warm/slanted, Golden Hour is orange/grazing, and Moonlight is dim blue.':state.activeType==='spot'?'Spotlights now produce a visible beam cone and localized receiver pool. Spotlight is warm and overhead; Flashlight is cooler, narrower and strongly off-axis.':state.activeType==='point'?'The overhead bulb creates a warm radial pool of light with distance falloff and localized point-source caustics.':state.activeType==='underwater'?'Submerged fixtures now produce strong colored side-lighting and visible volumetric beams. Blue, aqua and red presets are intentionally very different night looks.':'Skylight is diffuse and non-caustic. Overcast is cool/flat; Indoor Pool is brighter cyan-white ambient illumination.';root.appendChild(note);
 }
 
-window.__v5LightLab={state,applyPreset,setType,setEnv,getPackedState:packed,apply:applyEngine,supportedCaustic};
+window.__v5LightLab={version:'M3.2',state,applyPreset,setType,setEnv,getPackedState:packed,apply:applyEngine,supportedCaustic};
 applyEngine();renderUI();
-console.info('[Fluid V5 M3.1] Multi-Light Lab enabled.');
+console.info('[Fluid V5 M3.2] distinctive Multi-Light Lab enabled.');

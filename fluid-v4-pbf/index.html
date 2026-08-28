@@ -33,4 +33,5 @@
 const ids=['ssfrscale','boxx','pourspeed','pourwidth','pourheight','pourtilt','timescale','substeps','iters','omega','xsph','scorr','fradius','fstrength','flimit','grab','camspeed','tension','radius','meshres','fieldsmooth','meshiso','ior','absorption','thicksteps','groundrefl','roughness','sunint','sunelev','sunazim','exposure','envintensity','envyaw','ssfrradius','anisoratio','ssfriters','ssfrsigma','ssfrdelta','ssfrmu','ssfrthickr','ssfrthick','ssfrthickblur','ssfrdepthcull'];const bank=document.getElementById('sliderBank');for(const id of ids){if(document.getElementById(id))continue;const l=document.createElement('label');const i=document.createElement('input');i.type='range';i.id=id;const s=document.createElement('span');s.id=id+'v';l.append(i,s);bank.append(l)}
 </script>
 <script type="module" src="./src/main.js"></script>
+<script type="module" src="./src/lighting-tune.js"></script>
 </body></html>

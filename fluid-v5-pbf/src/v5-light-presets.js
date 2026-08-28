@@ -1,69 +1,82 @@
-// Fluid V5 M3.1 multi-light presets.
-// Positions are normalized to the current simulation box so the rigs survive quality/domain changes.
+// Fluid V5 M3.2 multi-light presets.
+// Presets deliberately differ in receiver lighting, environment fill, beam geometry and caustic
+// strength so switching rigs is obvious even when the HDR background is mostly out of frame.
 
 export const LIGHT_TYPES = ['sun', 'spot', 'point', 'underwater', 'skylight'];
 
 export const ENV_PRESETS = {
-  bright:  { label:'BRIGHT SKY', intensity:1.05, yaw:0.00 },
-  cloudy:  { label:'CLOUDY',    intensity:0.78, yaw:0.18 },
-  indoor:  { label:'INDOOR',    intensity:0.52, yaw:0.34 },
-  sunset:  { label:'SUNSET',    intensity:0.62, yaw:0.58 },
-  night:   { label:'NIGHT',     intensity:0.18, yaw:0.12 },
+  bright:  { label:'BRIGHT SKY', intensity:0.92, yaw:0.00 },
+  cloudy:  { label:'CLOUDY',    intensity:0.56, yaw:0.18 },
+  indoor:  { label:'INDOOR',    intensity:0.24, yaw:0.34 },
+  sunset:  { label:'SUNSET',    intensity:0.34, yaw:0.58 },
+  night:   { label:'NIGHT',     intensity:0.055, yaw:0.12 },
 };
 
 export const LIGHT_PRESETS = {
   noon: {
     label:'NOON', type:'sun', caustic:true, envPreset:'bright',
-    color:'#fff4dc', intensity:1.00, elevation:62, azimuth:38, softness:0.08,
+    color:'#fff8e8', intensity:1.28, elevation:72, azimuth:32, softness:0.045,
+    causticGain:1.12, character:'hard-white',
   },
   afternoon: {
     label:'AFTERNOON', type:'sun', caustic:true, envPreset:'bright',
-    color:'#ffdcb5', intensity:0.92, elevation:43, azimuth:64, softness:0.12,
+    color:'#ffd3a1', intensity:1.10, elevation:38, azimuth:72, softness:0.10,
+    causticGain:1.05, character:'warm-slant',
   },
   golden: {
     label:'GOLDEN HOUR', type:'sun', caustic:true, envPreset:'sunset',
-    color:'#ffb36b', intensity:0.78, elevation:23, azimuth:82, softness:0.17,
+    color:'#ff8f3c', intensity:1.06, elevation:16, azimuth:96, softness:0.16,
+    causticGain:0.86, character:'orange-grazing',
   },
   moon: {
     label:'MOONLIGHT', type:'sun', caustic:true, envPreset:'night',
-    color:'#9bbcff', intensity:0.25, elevation:35, azimuth:24, softness:0.10,
+    color:'#6d91ff', intensity:0.46, elevation:29, azimuth:18, softness:0.07,
+    causticGain:0.34, character:'blue-night',
   },
   spot: {
     label:'SPOTLIGHT', type:'spot', caustic:true, envPreset:'indoor',
-    color:'#fff3d8', intensity:1.10, position:[0.50,0.92,0.50],
-    azimuth:25, elevation:78, cone:24, softness:0.22, range:3.8,
+    color:'#fff0c8', intensity:1.72, position:[0.50,0.96,0.50],
+    azimuth:18, elevation:82, cone:18, softness:0.10, range:4.1, volumetric:0.22,
+    causticGain:1.28, character:'tight-stage',
   },
   flashlight: {
     label:'FLASHLIGHT', type:'spot', caustic:true, envPreset:'night',
-    color:'#e8f3ff', intensity:1.28, position:[0.12,0.68,0.16],
-    azimuth:48, elevation:34, cone:17, softness:0.12, range:3.4,
+    color:'#c9e7ff', intensity:2.05, position:[0.08,0.62,0.10],
+    azimuth:56, elevation:28, cone:11, softness:0.055, range:3.7, volumetric:0.38,
+    causticGain:1.38, character:'cold-pencil',
   },
   bulb: {
     label:'OVERHEAD BULB', type:'point', caustic:true, envPreset:'indoor',
-    color:'#ffe5ba', intensity:1.05, position:[0.50,0.86,0.50], range:3.1,
+    color:'#ffc77f', intensity:1.68, position:[0.50,0.82,0.50], range:2.45,
+    causticGain:1.12, character:'warm-radial',
   },
   poolBlue: {
     label:'POOL BLUE', type:'underwater', caustic:false, envPreset:'night',
-    color:'#58aaff', intensity:1.00, position:[0.06,0.18,0.50],
-    azimuth:90, elevation:2, cone:52, softness:0.34, range:2.8, volumetric:0.80,
+    color:'#167dff', intensity:1.82, position:[0.035,0.16,0.50],
+    azimuth:90, elevation:3, cone:38, softness:0.18, range:3.2, volumetric:1.28,
+    character:'deep-blue-beam',
   },
   poolAqua: {
     label:'POOL AQUA', type:'underwater', caustic:false, envPreset:'night',
-    color:'#4fffe0', intensity:0.86, position:[0.94,0.22,0.48],
-    azimuth:270, elevation:5, cone:58, softness:0.38, range:2.7, volumetric:0.70,
+    color:'#25ffd0', intensity:1.58, position:[0.965,0.20,0.48],
+    azimuth:270, elevation:6, cone:44, softness:0.24, range:3.0, volumetric:1.10,
+    character:'aqua-sidewash',
   },
   redLed: {
     label:'RED LED', type:'underwater', caustic:false, envPreset:'night',
-    color:'#ff4d45', intensity:0.78, position:[0.06,0.20,0.52],
-    azimuth:90, elevation:1, cone:46, softness:0.30, range:2.5, volumetric:0.62,
+    color:'#ff241c', intensity:1.72, position:[0.035,0.18,0.52],
+    azimuth:90, elevation:2, cone:34, softness:0.15, range:2.7, volumetric:1.18,
+    character:'red-night-beam',
   },
   overcast: {
     label:'OVERCAST', type:'skylight', caustic:false, envPreset:'cloudy',
-    color:'#dcecff', intensity:0.76, softness:0.88,
+    color:'#bed6e9', intensity:0.90, softness:0.96,
+    character:'flat-cool',
   },
   indoor: {
     label:'INDOOR POOL', type:'skylight', caustic:false, envPreset:'indoor',
-    color:'#edf6ff', intensity:0.70, softness:0.72,
+    color:'#d5f2ef', intensity:1.02, softness:0.76,
+    character:'cyan-indoor',
   },
 };
 

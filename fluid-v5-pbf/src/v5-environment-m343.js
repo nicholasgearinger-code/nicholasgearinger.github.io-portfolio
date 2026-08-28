@@ -49,7 +49,8 @@ function daySky(u,v){
   let c=mix3([0.64,0.82,1.08],[0.10,0.27,0.72],Math.pow(y,.58));
   const haze=Math.exp(-Math.pow(elev/.17,2));
   c=add3(c,[0.26,0.25,0.20],haze*.34);
-  const ang=angularDistance(u,v,.61,.27);
+  // u/v aligned with azimuth 32°, elevation 58°.
+  const ang=angularDistance(u,v,.589,.178);
   const glow=Math.exp(-ang*ang/.012);
   const disc=Math.exp(-ang*ang/.000035);
   c=add3(c,[1.4,1.18,.78],glow*.24);
@@ -76,8 +77,8 @@ function sunsetSky(u,v){
   c=mix3(c,[.10,.055,.16],cloud*.62);
   c=add3(c,[.72,.15,.26],band*(1-cloud)*.14);
 
-  // Low HDR sun and broad orange glow aligned with the direct-sun azimuth.
-  const ang=angularDistance(u,v,.73,.472);
+  // u/v aligned with azimuth 98°, elevation 8°.
+  const ang=angularDistance(u,v,.772,.456);
   const glow=Math.exp(-ang*ang/.018);
   const inner=Math.exp(-ang*ang/.0013);
   const disc=Math.exp(-ang*ang/.000050);
@@ -153,16 +154,19 @@ function paintStatus(){
   const s=window.__v5EnvironmentStatus;
   const el=ensureStatusBadge();
   if(!el)return;
+  let text,color;
   if(s.online){
-    el.textContent=`ENVIRONMENT · ${String(s.mode).toUpperCase()} HDRI · READY`;
-    el.style.color='#9dffc8';
+    text=`ENVIRONMENT · ${String(s.mode).toUpperCase()} HDRI · READY`;
+    color='#9dffc8';
   }else if(s.stage==='loading'){
-    el.textContent=`ENVIRONMENT · ${String(s.mode).toUpperCase()} HDRI · LOADING…`;
-    el.style.color='#ffd890';
+    text=`ENVIRONMENT · ${String(s.mode).toUpperCase()} HDRI · LOADING…`;
+    color='#ffd890';
   }else{
-    el.textContent=`ENVIRONMENT · FALLBACK · ${s.error||s.stage}`;
-    el.style.color='#ffaaaa';
+    text=`ENVIRONMENT · FALLBACK · ${s.error||s.stage}`;
+    color='#ffaaaa';
   }
+  if(el.textContent!==text)el.textContent=text;
+  if(el.style.color!==color)el.style.color=color;
 }
 
 async function applyEnvironment(mode){
@@ -185,7 +189,6 @@ async function applyEnvironment(mode){
     paintStatus();
   }catch(err){
     if(token!==generation)return;
-    // Keep a failed Night environment black instead of falling through to the inherited blue sky.
     env.intensity=mode==='night'?0.0:mood.envIntensity;
     window.__v5EnvironmentStatus={online:false,stage:'rejected',backend:'radiance-hdri-m343',mode,error:String(err?.message||err)};
     paintStatus();
@@ -198,7 +201,7 @@ window.addEventListener('fluid-v5-light-change',e=>{
   setTimeout(()=>{void applyEnvironment(mode);},0);
 });
 
-// The Lighting UI rebuilds itself after button presses, so restore the environment status badge too.
+// The Lighting UI rebuilds itself after button presses, so restore the status badge after DOM moves.
 const observer=new MutationObserver(()=>paintStatus());
 const panel=document.getElementById('settingsPanel');
 if(panel)observer.observe(panel,{childList:true,subtree:true});

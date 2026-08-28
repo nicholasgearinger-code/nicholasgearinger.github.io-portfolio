@@ -1,52 +1,52 @@
-// Fluid V5 M3.4.2 unified time-of-day + tuned true-night-pool moods.
-// Environment, sun, water response and caustic character are coupled; Night is lit by localized submerged fixtures.
+// Fluid V5 M3.4.3 unified time-of-day + environment-balanced pool moods.
+// Day, Sunset and Night use controlled HDR panoramas; Night is lit only by submerged fixtures.
 
 export const TIME_PRESETS = {
   day: {
     label:'DAY',
-    description:'Bright neutral daylight with a high sun, clear blue water and strong white caustics.',
-    envIntensity:0.92, envYaw:0.00, exposure:1.50,
-    sunColor:'#fff8e8', sunIntensity:1.28, sunElevation:70, sunAzimuth:32,
-    waterTint:'#b8e8ff', waterTintStrength:0.12,
-    transmit:[0.30,0.67,0.92], absorption:0.30, roughness:0.038,
-    causticGain:1.12,
+    description:'Balanced daylight with a softer HDR sky, restrained sun energy, clear blue water and readable white caustics.',
+    envIntensity:0.56, envYaw:0.02, exposure:1.02,
+    sunColor:'#fff4dc', sunIntensity:0.72, sunElevation:58, sunAzimuth:32,
+    waterTint:'#b9e7f7', waterTintStrength:0.055,
+    transmit:[0.24,0.55,0.78], absorption:0.36, roughness:0.043,
+    causticGain:0.66,
   },
   sunset: {
     label:'SUNSET',
-    description:'Low red-orange sun, darkened environment and warm reflections moving across the water surface.',
-    envIntensity:0.30, envYaw:0.58, exposure:1.38,
-    sunColor:'#ff5c25', sunIntensity:1.08, sunElevation:13, sunAzimuth:98,
-    waterTint:'#ff3d1f', waterTintStrength:0.82,
-    transmit:[0.67,0.50,0.38], absorption:0.34, roughness:0.044,
-    causticGain:0.90,
+    description:'A true HDR sunset panorama with a low orange sun, pink-violet clouds, darker surroundings and warm reflections moving across the water.',
+    envIntensity:0.76, envYaw:0.00, exposure:0.98,
+    sunColor:'#ff7a3c', sunIntensity:0.62, sunElevation:8, sunAzimuth:98,
+    waterTint:'#ff8a68', waterTintStrength:0.31,
+    transmit:[0.38,0.42,0.52], absorption:0.39, roughness:0.050,
+    causticGain:0.56,
   },
   night: {
     label:'NIGHT',
-    description:'Near-black environment with the sun removed. Six submerged pool-wall fixtures create localized colored pools and underwater beams.',
-    envIntensity:0.012, envYaw:0.12, exposure:0.82,
-    sunColor:'#7898ff', sunIntensity:0.003, sunElevation:28, sunAzimuth:18,
-    waterTint:'#126cff', waterTintStrength:0.58,
-    transmit:[0.11,0.34,0.82], absorption:0.52, roughness:0.048,
+    description:'Near-black HDR environment with solar and overhead fill removed. Only the six submerged pool-wall fixtures illuminate the pool.',
+    envIntensity:0.22, envYaw:0.00, exposure:0.70,
+    sunColor:'#000000', sunIntensity:0.0, sunElevation:0, sunAzimuth:0,
+    waterTint:'#102b4b', waterTintStrength:0.24,
+    transmit:[0.07,0.12,0.19], absorption:0.56, roughness:0.052,
     causticGain:0.0,
   },
 };
 
 export const POOL_LIGHT_MODES = {
   blue: {
-    label:'BLUE', color:'#167dff', accent:'#7624ff', intensity:0.88, volumetric:0.52,
-    waterTint:'#126cff', transmit:[0.10,0.32,0.86],
+    label:'BLUE', color:'#167dff', accent:'#7624ff', intensity:0.88, volumetric:0.46,
+    waterTint:'#164b8f', transmit:[0.07,0.18,0.38],
   },
   aqua: {
-    label:'AQUA', color:'#22ffd0', accent:'#20ff69', intensity:0.82, volumetric:0.48,
-    waterTint:'#18e8cf', transmit:[0.10,0.76,0.64],
+    label:'AQUA', color:'#22ffd0', accent:'#20ff69', intensity:0.84, volumetric:0.43,
+    waterTint:'#167f78', transmit:[0.07,0.31,0.28],
   },
   red: {
-    label:'RED', color:'#ff261e', accent:'#ff189e', intensity:0.86, volumetric:0.50,
-    waterTint:'#ff251d', transmit:[0.70,0.12,0.10],
+    label:'RED', color:'#ff261e', accent:'#ff189e', intensity:0.86, volumetric:0.44,
+    waterTint:'#76202d', transmit:[0.30,0.07,0.08],
   },
   rainbow: {
-    label:'RAINBOW', color:'#ffffff', accent:'#ffffff', intensity:0.84, volumetric:0.50,
-    waterTint:'#ffffff', transmit:[0.22,0.34,0.58], rainbow:true,
+    label:'RAINBOW', color:'#ffffff', accent:'#ffffff', intensity:0.84, volumetric:0.44,
+    waterTint:'#343b55', transmit:[0.11,0.15,0.22], rainbow:true,
   },
 };
 

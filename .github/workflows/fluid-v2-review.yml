@@ -21,11 +21,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node --check fluid-v2/FluidSolver.js
-          node --check fluid-v2/FluidSurface.js
-          node --check fluid-v2/FluidParticles.js
-          node --check fluid-v2/FluidPhysics.js
-          node --check fluid-v2/main.js
+          for file in \
+            fluid-v2/FluidSolver.js \
+            fluid-v2/FluidSurface.js \
+            fluid-v2/FluidParticles.js \
+            fluid-v2/FluidPhysics.js \
+            fluid-v2/main.js
+          do
+            node --input-type=module --check < "$file"
+          done
       - name: Check portfolio entrypoint
         shell: bash
         run: |

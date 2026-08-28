@@ -23,6 +23,7 @@ if (!src.includes(writeNeedle)) throw new Error('Fluid V5 M3.4.3 atmosphere: nig
 src = src.replace(writeNeedle, writePatch);
 
 src = src.replaceAll("backend:'time-of-day-m33'", "backend:'time-of-day-m343'");
+src = src.replaceAll("version:'M3.3'", "version:'M3.4.3'");
 src = src.replaceAll('Fluid V5 M3.3', 'Fluid V5 M3.4.3');
 const blobUrl = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
 try {

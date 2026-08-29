@@ -10,7 +10,8 @@ function tick(){
  if(on&&!activeLast){saved=Number.isFinite(Number(state.whitewater))?Number(state.whitewater):.86;state.whitewater=0;}
  else if(!on&&activeLast){if(saved!==null)state.whitewater=saved;saved=null;}
  activeLast=on;
- const S=window.__v5WaterfallWhitewaterM65;if(S){S.active=on;S.genericStrength=Number(state.whitewater)||0;S.savedStrength=saved??Number(state.whitewater)||0;}
+ const S=window.__v5WaterfallWhitewaterM65;
+ if(S){S.active=on;S.genericStrength=Number(state.whitewater)||0;S.savedStrength=saved!==null?saved:(Number(state.whitewater)||0);}
 }
 setInterval(tick,45);tick();
 window.__v5WaterfallWhitewaterM65={online:true,backend:'waterfall-primary-body-owns-whitewater-m65',active:false,genericStrength:Number(state.whitewater)||0,savedStrength:Number(state.whitewater)||0};

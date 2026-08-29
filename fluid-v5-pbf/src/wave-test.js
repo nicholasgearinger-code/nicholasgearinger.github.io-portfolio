@@ -1,18 +1,18 @@
-// Fluid V5 M6.3.1 bootstrap. Production V4.4 stays untouched; V5 development systems fail
-// independently. M6.3.1 keeps the deterministic solve -> source -> render queue order and
-// fixes the reservoir-pump WGSL for the current reserved-word grammar used by Safari/WebKit.
+// Fluid V5 M6.4 bootstrap. Production V4.4 stays untouched; V5 development systems fail
+// independently. M6.4 keeps the deterministic solve -> reservoir source -> bulk guide -> render
+// order, lowers source birth rate, and adds a FLIP-like coherent curtain guide before surfacing.
 
-const V5_BUILD='M6.3.1 WGSL-FIX POST-STEP RESERVOIR HOUDINI WATERFALL';
-const V5_VERSION='6.3.1-m631';
-function stampBuild(){document.title=`Fluid V5 · ${V5_BUILD}`;const brand=document.querySelector('.hud.card.title');if(brand&&brand.textContent!=='FLUID V5 · M6.3.1')brand.textContent='FLUID V5 · M6.3.1';const load=document.querySelector('#loading h2');if(load&&load.textContent!=='FLUID V5 · M6.3.1')load.textContent='FLUID V5 · M6.3.1';window.__fluidV5Version=V5_VERSION;window.__fluidV5Build=V5_BUILD;}
+const V5_BUILD='M6.4 FLIP-GUIDED RESERVOIR HOUDINI WATERFALL';
+const V5_VERSION='6.4.0-m64';
+function stampBuild(){document.title=`Fluid V5 · ${V5_BUILD}`;const brand=document.querySelector('.hud.card.title');if(brand&&brand.textContent!=='FLUID V5 · M6.4')brand.textContent='FLUID V5 · M6.4';const load=document.querySelector('#loading h2');if(load&&load.textContent!=='FLUID V5 · M6.4')load.textContent='FLUID V5 · M6.4';window.__fluidV5Version=V5_VERSION;window.__fluidV5Build=V5_BUILD;}
 stampBuild();
 const initialBrand=document.querySelector('.hud.card.title');if(initialBrand)new MutationObserver(()=>stampBuild()).observe(initialBrand,{childList:true,characterData:true,subtree:true});
-const earlyStats=document.getElementById('v4stats');if(earlyStats)earlyStats.textContent='BUILD: M6.3.1 · WGSL RESERVED-WORD FIX · POST-STEP GPU PUMP · waiting for V4.4 core…';
+const earlyStats=document.getElementById('v4stats');if(earlyStats)earlyStats.textContent='BUILD: M6.4 · FLIP GUIDE · LOWER-RATE RESERVOIR SOURCE · waiting for V4.4 core…';
 window.__fluidV5Version=`${V5_VERSION}-booting`;
 
 await import('./wave-test-v44.js');
 async function waitForV44(timeoutMs=12000){const start=performance.now();while(performance.now()-start<timeoutMs){if(window.__sim?.dev&&window.__ssfr?.dev&&window.__ui&&window.__cam&&window.__mesh)return true;await new Promise(r=>setTimeout(r,25));}return false;}
-if(!(await waitForV44()))throw new Error('Fluid V5 M6.3.1 bootstrap: V4.4 runtime did not become ready within 12 seconds.');stampBuild();
+if(!(await waitForV44()))throw new Error('Fluid V5 M6.4 bootstrap: V4.4 runtime did not become ready within 12 seconds.');stampBuild();
 
 await import('./v5-lab.js');
 try{await import('./v5-pool-slab.js');}catch(err){console.error('[Fluid V5 pool slab] full-floor initialization failed; upstream compact block retained.',err);}
@@ -38,16 +38,17 @@ try{await import('./v5-scenarios-m46.js');}catch(err){console.error('[Fluid V5 M
 try{await import('./v5-rain-waterfall-m562.js');}catch(err){const prev=window.__v5WeatherM56||{};window.__v5WeatherM56={...prev,online:!!prev.controls,controls:!!prev.controls,rainVisual:!!prev.rainVisual,rippleVisual:false,waterfallVisual:!!prev.waterfallVisual,waterfallMist:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.6.2] weather module failed.',err);}
 try{await import('./v5-ripples-m57.js');}catch(err){window.__v5RippleM57={online:false,visual:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.7] global ripple layer rejected.',err);}
 
-// Authoritative M6.3.1 waterfall stack. The reservoir source submits immediately after sim.step(),
-// never from inside the SSFR renderer. The pump wrapper also patches WGSL reserved identifiers.
-try{await import('./v5-waterfall-pump-m63.js');}catch(err){window.__v5WaterfallM62={...(window.__v5WaterfallM62||{}),online:false,error:String(err?.message||err),backend:'closed-loop-reservoir-pump-m631-post-step'};console.error('[Fluid V5 M6.3.1] reservoir pump rejected.',err);}
-try{await import('./v5-microdrops-m59.js');}catch(err){window.__v5MicroDropsM59={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M6.3.1] microdroplet surfacing rejected.',err);}
-try{await import('./v5-waterfall-houdini-m62.js');}catch(err){window.__v5WaterfallM60={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M6.3.1] Houdini reconstructed body/whitewater/mist rejected.',err);}
+// Authoritative M6.4 waterfall stack. The reservoir source is deliberately lower-rate, then a
+// post-source guide restores the coherent grid-scale bulk motion that FLIP/APIC normally supplies.
+try{await import('./v5-waterfall-pump-m64.js');}catch(err){window.__v5WaterfallM62={...(window.__v5WaterfallM62||{}),online:false,error:String(err?.message||err),backend:'closed-loop-reservoir-pump-m64-post-step'};console.error('[Fluid V5 M6.4] reservoir pump rejected.',err);}
+try{await import('./v5-waterfall-guide-m64.js');}catch(err){window.__v5WaterfallGuideM64={online:false,error:String(err?.message||err),backend:'post-pbf-ballistic-curtain-guide-m64'};console.error('[Fluid V5 M6.4] coherent waterfall guide rejected.',err);}
+try{await import('./v5-microdrops-m59.js');}catch(err){window.__v5MicroDropsM59={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M6.4] microdroplet surfacing rejected.',err);}
+try{await import('./v5-waterfall-houdini-m62.js');}catch(err){window.__v5WaterfallM60={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M6.4] Houdini reconstructed body/whitewater/mist rejected.',err);}
 
 try{await import('./v5-tabs-m34.js');}catch(err){console.error('[Fluid V5 UI] tab shell failed.',err);}
 try{await import('./v5-m5-ui.js');}catch(err){console.error('[Fluid V5 UI] integrated diagnostics failed.',err);}
 
-stampBuild();const stats=document.getElementById('v4stats');if(stats&&!stats.textContent.includes('BUILD:'))stats.textContent=`BUILD: M6.3.1 RESERVOIR + HOUDINI · ${stats.textContent}`;
+stampBuild();const stats=document.getElementById('v4stats');if(stats&&!stats.textContent.includes('BUILD:'))stats.textContent=`BUILD: M6.4 FLIP GUIDE + RESERVOIR + HOUDINI · ${stats.textContent}`;
 for(const delay of [100,350,800,1600,3000,6000])setTimeout(stampBuild,delay);
 setTimeout(()=>{const toggle=document.getElementById('v4WaveToggle');const want=window.__v5State?.scenario==='wave';if(toggle&&toggle.classList.contains('active')!==want)toggle.click();},420);
-console.info(`[Fluid V5] ${V5_BUILD} / ${V5_VERSION} enabled; waterfall pump WGSL reserved identifier fixed.`);
+console.info(`[Fluid V5] ${V5_BUILD} / ${V5_VERSION} enabled; coherent waterfall guide active between source and rendering.`);

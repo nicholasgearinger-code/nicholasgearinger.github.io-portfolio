@@ -1,4 +1,4 @@
-// Fluid V5 M5 integrated controls/status. Appends to the already-mounted M4.7 tab shell.
+// Fluid V5 M5.7 integrated controls/status. Appends to the already-mounted tab shell.
 const state=window.__v5State;if(!state)throw new Error('Fluid V5 M5 UI: state unavailable.');
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));for(let i=0;i<40&&!document.querySelector('[data-panel="physics"]');i++)await sleep(50);
 const physics=document.querySelector('[data-panel="physics"]'),realism=document.querySelector('[data-panel="realism"]'),dev=document.querySelector('[data-panel="developer"]');
@@ -9,6 +9,6 @@ let p=section(physics,'v5M5Physics','M5 SOLVER REFINEMENT','XPBD-style compliant
 slider(p,'XPBD DENSITY','xpbdDensity',0,1,.05);slider(p,'SHAPE HYDRO','shapeHydro',0,1.25,.05);
 let r=section(realism,'v5M5Detail','M5 ADAPTIVE DETAIL','High-speed/high-curvature surface particles receive render-only refractive detail proxies. They add thin-sheet and splash-crown detail without changing fluid mass. Whitewater spray uses the M5.4 Fresnel/refractive shader.');
 slider(r,'SURFACE DETAIL','surfaceDetail',0,1.25,.05);
-let d=section(dev,'v5M5Status','M5 BACKENDS','Waiting for subsystem status…');
-function tick(){if(!d)return;let x=window.__v5XPBDM50,h=window.__v5RigidHydroM51,a=window.__v5AdaptiveDetailM52,v=window.__v5VolumeLightM53,w=window.__v5WhitewaterM54||window.__v5WhitewaterM41,rain=window.__v5WeatherM56;let lines=[`XPBD ${x?.online?'ON':'fallback'} · ${x?.lastIterations??0} iter`,`RIGID HYDRO ${h?.online?'ON':'fallback'}`,`ADAPTIVE DETAIL ${a?.online?'ON':'fallback'} · ${a?.capacity||'--'}`,`WHITEWATER OPTICS ${w?.online?'ON':'fallback'}`,`VOLUME LIGHT ${v?.online?'ON':'fallback'}`,`WEATHER M5.6 ${rain?.online?'ON':'fallback'} · rain ${rain?.rainVisual||'--'} · sheet ${rain?.waterfallCells||'--'}`];d.lastElementChild.textContent=lines.join(' · ');}setInterval(tick,420);tick();
-console.info('[Fluid V5 M5.6] controls and diagnostics mounted.');
+let d=section(dev,'v5M5Status','M5.7 BACKENDS','Waiting for subsystem status…');
+function tick(){if(!d)return;let x=window.__v5XPBDM50,h=window.__v5RigidHydroM51,a=window.__v5AdaptiveDetailM52,v=window.__v5VolumeLightM53,w=window.__v5WhitewaterM54||window.__v5WhitewaterM41,rain=window.__v5WeatherM56,rp=window.__v5RippleM57,wf=window.__v5WaterfallM57;let lines=[`XPBD ${x?.online?'ON':'fallback'} · ${x?.lastIterations??0} iter`,`RIGID HYDRO ${h?.online?'ON':'fallback'}`,`ADAPTIVE DETAIL ${a?.online?'ON':'fallback'} · ${a?.capacity||'--'}`,`WHITEWATER OPTICS ${w?.online?'ON':'fallback'}`,`VOLUME LIGHT ${v?.online?'ON':'fallback'}`,`RAIN ${rain?.rainVisual?'ON':'fallback'} · STORM RIPPLES ${rain?.rippleVisual?'ON':'fallback'}`,`GLOBAL RIPPLES ${rp?.visual?'ON':'fallback'} · ${rp?.slots||'--'} slots`,`WATERFALL ${wf?.online?'REAL PBF':'fallback'} · +${wf?.particlesAdded?.toLocaleString?.()||0}`];d.lastElementChild.textContent=lines.join(' · ');}setInterval(tick,420);tick();
+console.info('[Fluid V5 M5.7] controls and diagnostics mounted.');

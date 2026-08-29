@@ -1,15 +1,15 @@
 // Fluid V5 bootstrap. Production V4.4 stays untouched; M4/M5 systems run only on the isolated
 // fluid-v5-development branch and can fail independently back to the validated earlier stack.
 
-const V5_BUILD = 'M5.6.1 SAFARI-SAFE STORM + WATERFALL';
+const V5_BUILD = 'M5.6.2 RIPPLE RAIN + SHEET WATERFALL';
 document.title = `Fluid V5 · ${V5_BUILD}`;
 const earlyBrand = document.querySelector('.hud.card.title');
-if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M5.6.1';
+if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M5.6.2';
 const earlyLoadTitle = document.querySelector('#loading h2');
-if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M5.6.1';
+if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M5.6.2';
 const earlyStats = document.getElementById('v4stats');
-if (earlyStats) earlyStats.textContent = 'BUILD: XPBD · SHAPE HYDRO · MICRO-RAIN HOTFIX · CONTINUOUS WATERFALL · waiting for V4.4 core…';
-window.__fluidV5Version = '5.3.6.1-m561-booting';
+if (earlyStats) earlyStats.textContent = 'BUILD: XPBD · SHAPE HYDRO · PROPAGATING RAIN RIPPLES · SHEET WATERFALL · waiting for V4.4 core…';
+window.__fluidV5Version = '5.3.6.2-m562-booting';
 window.__fluidV5Build = V5_BUILD;
 
 await import('./wave-test-v44.js');
@@ -86,13 +86,13 @@ catch (err) { window.__v5VolumeLightM53={online:false,error:String(err?.message|
 // ----- Physical scenarios ------------------------------------------------------------------
 try { await import('./v5-scenarios-m46.js'); }
 catch (err) { console.error('[Fluid V5 M4.6] advanced scenarios rejected.', err); }
-// M5.6.1 installs scenario control takeover before compiling either optional weather shader, so
-// a Safari validation failure can no longer fall through to the old giant-airborne-particle rain.
-try { await import('./v5-rain-waterfall-m56.js'); }
+// M5.6.2 keeps the M5.6.1 capture-phase control takeover, adds reconstructed-surface ring waves,
+// and validates rain, ripples, waterfall sheet and mist as independent optional GPU passes.
+try { await import('./v5-rain-waterfall-m562.js'); }
 catch (err) {
   const prev=window.__v5WeatherM56||{};
-  window.__v5WeatherM56={...prev,online:!!prev.controls,controls:!!prev.controls,rainVisual:false,waterfallVisual:false,error:String(err?.message||err)};
-  console.error('[Fluid V5 M5.6.1] weather module failed after control takeover; old airborne rain remains disabled if controls initialized.', err);
+  window.__v5WeatherM56={...prev,online:!!prev.controls,controls:!!prev.controls,rainVisual:!!prev.rainVisual,rippleVisual:false,waterfallVisual:!!prev.waterfallVisual,waterfallMist:false,error:String(err?.message||err)};
+  console.error('[Fluid V5 M5.6.2] weather module failed; any initialized capture-phase controls remain authoritative.', err);
 }
 
 try { await import('./v5-tabs-m34.js'); }
@@ -100,16 +100,16 @@ catch (err) { console.error('[Fluid V5 UI] integrated tab shell failed; original
 try { await import('./v5-m5-ui.js'); }
 catch (err) { console.error('[Fluid V5 UI] M5 controls/status failed; M5 systems remain active.', err); }
 
-window.__fluidV5Version='5.3.6.1-m561';
+window.__fluidV5Version='5.3.6.2-m562';
 const brand=document.querySelector('.hud.card.title');
-if(brand)brand.textContent='FLUID V5 · M5.6.1';
+if(brand)brand.textContent='FLUID V5 · M5.6.2';
 const stats=document.getElementById('v4stats');
-if(stats&&!stats.textContent.includes('BUILD:'))stats.textContent=`BUILD: M5.6.1 WEATHER HOTFIX · ${stats.textContent}`;
+if(stats&&!stats.textContent.includes('BUILD:'))stats.textContent=`BUILD: M5.6.2 RIPPLE RAIN + SHEET FALL · ${stats.textContent}`;
 setTimeout(()=>{
   const b=document.querySelector('.hud.card.title');
-  if(b)b.textContent='FLUID V5 · M5.6.1';
-  document.title='Fluid V5 · M5.6.1 SAFARI-SAFE STORM + WATERFALL';
-  window.__fluidV5Version='5.3.6.1-m561';
+  if(b)b.textContent='FLUID V5 · M5.6.2';
+  document.title='Fluid V5 · M5.6.2 RIPPLE RAIN + SHEET WATERFALL';
+  window.__fluidV5Version='5.3.6.2-m562';
 },1450);
 setTimeout(()=>{
   const toggle=document.getElementById('v4WaveToggle');

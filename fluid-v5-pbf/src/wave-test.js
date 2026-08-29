@@ -1,15 +1,15 @@
 // Fluid V5 bootstrap. Production V4.4 stays untouched; M4/M5 systems run only on the isolated
 // fluid-v5-development branch and can fail independently back to the validated earlier stack.
 
-const V5_BUILD = 'M5.7.1 GLOBAL RIPPLES + WIDE PBF WATERFALL';
+const V5_BUILD = 'M5.7.2 GLOBAL RIPPLES + RECONSTRUCTED PBF WATERFALL';
 document.title = `Fluid V5 · ${V5_BUILD}`;
 const earlyBrand = document.querySelector('.hud.card.title');
-if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M5.7.1';
+if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M5.7.2';
 const earlyLoadTitle = document.querySelector('#loading h2');
-if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M5.7.1';
+if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M5.7.2';
 const earlyStats = document.getElementById('v4stats');
-if (earlyStats) earlyStats.textContent = 'BUILD: XPBD · SHAPE HYDRO · GLOBAL PROPAGATING RIPPLES · WIDE REAL PBF WATERFALL · waiting for V4.4 core…';
-window.__fluidV5Version = '5.3.7.1-m571-booting';
+if (earlyStats) earlyStats.textContent = 'BUILD: XPBD · GLOBAL RIPPLES · REAL PBF WATERFALL · ANISOTROPIC CURTAIN RECONSTRUCTION · waiting for V4.4 core…';
+window.__fluidV5Version = '5.3.7.2-m572-booting';
 window.__fluidV5Build = V5_BUILD;
 
 await import('./wave-test-v44.js');
@@ -57,19 +57,15 @@ catch (err) { console.error('[Fluid V5 debug policy] unable to reset developer v
 try { await import('./v5-caustic-handoff.js'); }
 catch (err) { console.error('[Fluid V5 caustic handoff] legacy receiver suppression failed.', err); }
 
-// ----- M4 foundation -----------------------------------------------------------------------
 try { await import('./v5-workload-m45.js'); }
 catch (err) { console.error('[Fluid V5 M4.5] adaptive workload manager rejected.', err); }
 try { await import('./v5-physics-m40.js'); }
 catch (err) { window.__v5PhysicsM40={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M4.0] Physics 2.0 rejected; base PBF remains active.', err); }
-
-// ----- M5 solver refinement ----------------------------------------------------------------
 try { await import('./v5-xpbd-density-m50.js'); }
 catch (err) { window.__v5XPBDM50={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.0] XPBD density refinement rejected; M4/base PBF retained.', err); }
 try { await import('./v5-rigid-hydro-m51.js'); }
 catch (err) { window.__v5RigidHydroM51={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.1] shape-aware rigid hydrodynamics rejected.', err); }
 
-// ----- Surface / whitewater / optical detail ------------------------------------------------
 try { await import('./v5-surface-m42.js'); }
 catch (err) { window.__v5SurfaceM42={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M4.2] Surface 2.0 rejected; base SSFR remains active.', err); }
 try { await import('./v5-whitewater-optics-m54.js'); }
@@ -77,13 +73,11 @@ catch (err) { window.__v5WhitewaterM54={online:false,error:String(err?.message||
 try { await import('./v5-adaptive-detail-m52.js'); }
 catch (err) { window.__v5AdaptiveDetailM52={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.2] adaptive refractive surface detail rejected.', err); }
 
-// ----- Night optics -------------------------------------------------------------------------
 try { await import('./v5-night-caustics-m44.js'); }
 catch (err) { window.__v5NightCausticsM44={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M4.4] underwater fixture caustics rejected.', err); }
 try { await import('./v5-volume-light-m53.js'); }
 catch (err) { window.__v5VolumeLightM53={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.3] underwater volumetric transport rejected.', err); }
 
-// ----- Physical scenarios ------------------------------------------------------------------
 try { await import('./v5-scenarios-m46.js'); }
 catch (err) { console.error('[Fluid V5 M4.6] advanced scenarios rejected.', err); }
 try { await import('./v5-rain-waterfall-m562.js'); }
@@ -94,26 +88,27 @@ catch (err) {
 }
 try { await import('./v5-ripples-m57.js'); }
 catch (err) { window.__v5RippleM57={online:false,visual:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.7] global ripple layer rejected; real PBF motion remains active.',err); }
-// M5.7.1 keeps the real ballistic PBF waterfall but widens it into a multi-layer curtain spanning
-// most of the pool, with physical lane-to-lane velocity variation for ribbon breakup.
+// M5.7.2: real waterfall first, then rendering-only refinement of that exact emitted particle range.
 try { await import('./v5-waterfall-physics-m57.js'); }
-catch (err) { window.__v5WaterfallM57={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.7.1] wide physics waterfall rejected; other scenarios remain active.',err); }
+catch (err) { window.__v5WaterfallM57={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.7.2] physics waterfall rejected; other scenarios remain active.',err); }
+try { await import('./v5-waterfall-surface-m572.js'); }
+catch (err) { window.__v5WaterfallSurfaceM572={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.7.2] waterfall reconstruction rejected; real PBF waterfall remains active.',err); }
 
 try { await import('./v5-tabs-m34.js'); }
 catch (err) { console.error('[Fluid V5 UI] integrated tab shell failed; original controls remain available.', err); }
 try { await import('./v5-m5-ui.js'); }
 catch (err) { console.error('[Fluid V5 UI] M5 controls/status failed; M5 systems remain active.', err); }
 
-window.__fluidV5Version='5.3.7.1-m571';
+window.__fluidV5Version='5.3.7.2-m572';
 const brand=document.querySelector('.hud.card.title');
-if(brand)brand.textContent='FLUID V5 · M5.7.1';
+if(brand)brand.textContent='FLUID V5 · M5.7.2';
 const stats=document.getElementById('v4stats');
-if(stats&&!stats.textContent.includes('BUILD:'))stats.textContent=`BUILD: M5.7.1 GLOBAL RIPPLES + WIDE REAL PBF WATERFALL · ${stats.textContent}`;
+if(stats&&!stats.textContent.includes('BUILD:'))stats.textContent=`BUILD: M5.7.2 GLOBAL RIPPLES + RECONSTRUCTED REAL PBF WATERFALL · ${stats.textContent}`;
 setTimeout(()=>{
   const b=document.querySelector('.hud.card.title');
-  if(b)b.textContent='FLUID V5 · M5.7.1';
-  document.title='Fluid V5 · M5.7.1 GLOBAL RIPPLES + WIDE PBF WATERFALL';
-  window.__fluidV5Version='5.3.7.1-m571';
+  if(b)b.textContent='FLUID V5 · M5.7.2';
+  document.title='Fluid V5 · M5.7.2 GLOBAL RIPPLES + RECONSTRUCTED PBF WATERFALL';
+  window.__fluidV5Version='5.3.7.2-m572';
 },1500);
 setTimeout(()=>{
   const toggle=document.getElementById('v4WaveToggle');

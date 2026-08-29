@@ -1,13 +1,14 @@
-// Fluid V5 M5.8 tagged thin-sheet PBF waterfall.
-// Airborne waterfall particles remain ordinary conserved PBF fluid (phase.x == 0), but phase.w
-// carries a render-only marker. The marker survives GPU spatial sorting and is cleared after impact
-// by the M5.8 sheet renderer, allowing the normal SSFR pool surface to take over seamlessly.
+// Fluid V5 M5.8.1 fixed-mass thin-sheet PBF waterfall.
+// A small tagged PBF curtain is primed once, then the surface module recycles those same particles
+// from the impact zone back to the lip. The waterfall therefore remains continuous without filling
+// the pool or exhausting the simulator's append capacity.
 
 const sim=window.__sim,ui=window.__ui,state=window.__v5State;
-if(!sim?.appendFluid||!state)throw new Error('Fluid V5 M5.8 waterfall: PBF runtime unavailable.');
+if(!sim?.appendFluid||!state)throw new Error('Fluid V5 M5.8.1 waterfall: PBF runtime unavailable.');
 const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
 const TAG=0x5746; // "WF" in phase.w; phase.x remains zero so solver semantics are unchanged.
 const q=new URLSearchParams(location.search),quality=['low','medium','high'].includes(q.get('quality'))?q.get('quality'):'medium';
+const TARGET=quality==='low'?900:quality==='high'?2600:1600;
 if(!Number.isFinite(Number(state.waterfallFlow)))state.waterfallFlow=1.0;
 if(!Number.isFinite(Number(state.waterfallWidth)))state.waterfallWidth=.78;
 state.waterfallFlow=clamp(Number(state.waterfallFlow),.45,1.55);
@@ -16,7 +17,9 @@ const save=()=>{try{localStorage.setItem('fluidV5LabStateV1',JSON.stringify(stat
 let seed=0x57415452,extruded=0,nextLayer=0,added=0,last=performance.now(),lastRing=0;
 const rnd=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296};
 const waterTop=()=>sim.params.box[1]*.28;
-const budget=()=>Math.max(0,Math.min(9000,(sim.cap||sim.n)-sim.n-64));
+// Cumulative budget, not a per-frame cap. Once TARGET particles have been created, emission stops;
+// M5.8.1 continuously recycles those exact tagged particles instead of appending more mass.
+const budget=()=>Math.max(0,Math.min(TARGET-added,(sim.cap||sim.n)-sim.n-64));
 function resetEmitter(){extruded=0;nextLayer=0;added=0;last=performance.now();lastRing=0;}
 function stopWave(){const t=document.getElementById('v4WaveToggle');if(t?.classList.contains('active'))t.click();}
 function choose(){state.scenario='waterfall-m58';ui.pouring=false;stopWave();save();document.getElementById('reset')?.click();resetEmitter();sync();}
@@ -39,8 +42,6 @@ function config(){
  const width=clamp(requested,d*minAcross,b[2]*.92);
  const across=clamp(Math.round(width/d),minAcross,maxAcross);
  const actualWidth=(across-1)*d;
- // Thin physical curtain: more closely spaced extrusion layers preserve mass without a 3–4
- // particle-deep airborne slab that visually breaks into balls.
  const thick=quality==='low'?1:2;
  const extrusionSpeed=1.03+.31*flow;
  const vx=.23+.085*flow;
@@ -63,18 +64,22 @@ function emitImpactRipples(now,c){
 function tagAppended(start,count){
  if(count<=0)return;
  const tag=new Uint32Array(count*4);
- for(let i=0;i<count;i++)tag[i*4+3]=TAG;
+ for(let i=0;i<count;i++){
+  // phase.y is unused for fluid particles and provides a stable seed that survives spatial sorting.
+  tag[i*4+1]=(start+i+1)>>>0;
+  tag[i*4+3]=TAG;
+ }
  const off=start*16;
- // appendFluid initializes both phase buffers to zero. Overwrite only the unused .w marker;
- // scatterPhase copies the complete vec4u so the tag follows the particles through every sort.
  for(const s of ['A','B'])sim.dev.queue.writeBuffer(sim.buf['body'+s],off,tag);
 }
 
 function step(now){
  requestAnimationFrame(step);
  const dt=clamp((now-last)/1000,0,.05);last=now;
- if(state.scenario!=='waterfall-m58'||ui.paused||document.hidden||dt<=0||budget()<=0)return;
- const c=config();extruded+=c.extrusionSpeed*dt;
+ if(state.scenario!=='waterfall-m58'||ui.paused||document.hidden||dt<=0)return;
+ const c=config();
+ if(budget()<=0){emitImpactRipples(now,c);return;}
+ extruded+=c.extrusionSpeed*dt;
  let layers=0;while((nextLayer+layers)*c.layerStep<=extruded&&layers<22)layers++;
  if(layers<=0){emitImpactRipples(now,c);return;}
  const pos=[],vel=[],hitT=impactPoint(c).t;
@@ -115,22 +120,22 @@ function step(now){
   if(a>0){tagAppended(before,a);added+=a;}
  }
  emitImpactRipples(now,c);
- const S=window.__v5WaterfallM57;if(S){S.particlesAdded=added;S.remaining=budget();S.layers=nextLayer;S.width=c.width;S.thickness=c.thick;S.across=c.across;S.impactX=impactPoint(c).x;S.tag=TAG;}
+ const S=window.__v5WaterfallM57;if(S){S.particlesAdded=added;S.remaining=budget();S.target=TARGET;S.layers=nextLayer;S.width=c.width;S.thickness=c.thick;S.across=c.across;S.impactX=impactPoint(c).x;S.tag=TAG;}
 }
 requestAnimationFrame(step);
 
 function sync(){
  const b=document.querySelector('[data-m46="waterfall-m58"]');if(b)b.classList.toggle('active',state.scenario==='waterfall-m58');
- const s=document.getElementById('v5WaterfallM57Status');if(s){const c=config();s.textContent=`THIN TAGGED PBF CURTAIN · ${c.across}×${c.thick} physical lattice · ${(c.width/c.b[2]*100).toFixed(0)}% width · +${added.toLocaleString()} particles`;}
+ const s=document.getElementById('v5WaterfallM57Status');if(s){const c=config();s.textContent=`FIXED-MASS PBF CURTAIN · ${c.across}×${c.thick} lattice · ${(c.width/c.b[2]*100).toFixed(0)}% width · ${added.toLocaleString()}/${TARGET.toLocaleString()} circulating particles`;}
 }
 function mount(){
  const host=document.querySelector('[data-panel="scenes"]')||document.getElementById('settingsPanel');if(!host||document.getElementById('v5WaterfallM57'))return;
  const w=document.createElement('div');w.id='v5WaterfallM57';w.style.cssText='margin-top:10px;padding:9px;border:1px solid rgba(78,214,220,.18);border-radius:10px;background:rgba(4,17,24,.58)';
- w.innerHTML=`<div style="font:800 9px ui-monospace;color:#9dffc8;letter-spacing:.10em">PHYSICS WATERFALL · M5.8</div><div style="font:7.4px/1.45 ui-monospace;color:#86a8b5;margin-top:5px">A thin, densely extruded PBF curtain carries the real mass and momentum. Airborne particles are tagged for dedicated sheet surfacing; after impact the tag is cleared and they become ordinary pool water again.</div><div class="v5Slider"><label>WATERFALL WIDTH</label><input id="v5WaterfallWidth" type="range" min="0.48" max="0.92" step="0.01"><div id="v5WaterfallWidthVal" class="v5Val"></div></div><div id="v5WaterfallM57Status" style="font:7.5px/1.45 ui-monospace;color:#9fc5d0;margin-top:6px"></div>`;
+ w.innerHTML=`<div style="font:800 9px ui-monospace;color:#9dffc8;letter-spacing:.10em">PHYSICS WATERFALL · M5.8.1</div><div style="font:7.4px/1.45 ui-monospace;color:#86a8b5;margin-top:5px">A fixed tagged PBF curtain carries the real mass and momentum. After impact the same particles are pumped back to the lip, so a continuous waterfall cannot fill or overflow the pool.</div><div class="v5Slider"><label>WATERFALL WIDTH</label><input id="v5WaterfallWidth" type="range" min="0.48" max="0.92" step="0.01"><div id="v5WaterfallWidthVal" class="v5Val"></div></div><div id="v5WaterfallM57Status" style="font:7.5px/1.45 ui-monospace;color:#9fc5d0;margin-top:6px"></div>`;
  host.appendChild(w);w.onpointerdown=e=>e.stopPropagation();
  const input=w.querySelector('#v5WaterfallWidth'),val=w.querySelector('#v5WaterfallWidthVal');input.value=state.waterfallWidth;const sv=()=>val.textContent=`${Math.round(state.waterfallWidth*100)}%`;sv();input.oninput=e=>{e.stopPropagation();state.waterfallWidth=Number(input.value);save();sv();sync();};sync();
 }
 setInterval(()=>{installButton();mount();sync();},520);mount();
-window.__v5WaterfallM57={online:true,backend:'tagged-thin-pbf-curtain-m58',particlesAdded:0,remaining:budget(),layers:0,width:0,thickness:0,across:0,impactX:0,tag:TAG};
+window.__v5WaterfallM57={online:true,backend:'fixed-mass-tagged-pbf-curtain-m581',particlesAdded:0,remaining:TARGET,target:TARGET,layers:0,width:0,thickness:0,across:0,impactX:0,tag:TAG};
 window.__v5WaterfallTag=TAG;
-console.info('[Fluid V5 M5.8] tagged thin-sheet PBF waterfall online.');
+console.info('[Fluid V5 M5.8.1] fixed-mass tagged PBF waterfall online.');

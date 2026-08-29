@@ -1,15 +1,15 @@
 // Fluid V5 bootstrap. Production V4.4 stays untouched; M4/M5 systems run only on the isolated
 // fluid-v5-development branch and can fail independently back to the validated earlier stack.
 
-const V5_BUILD = 'M5.8.1 FIXED-MASS PBF WATERFALL';
+const V5_BUILD = 'M5.9 CONTINUOUS WATERFALL + MICRODROPS';
 document.title = `Fluid V5 · ${V5_BUILD}`;
 const earlyBrand = document.querySelector('.hud.card.title');
-if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M5.8.1';
+if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M5.9';
 const earlyLoadTitle = document.querySelector('#loading h2');
-if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M5.8.1';
+if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M5.9';
 const earlyStats = document.getElementById('v4stats');
-if (earlyStats) earlyStats.textContent = 'BUILD: XPBD · GLOBAL RIPPLES · FIXED-MASS REAL PBF WATERFALL · GPU RECIRCULATION · THIN-SHEET SURFACE · waiting for V4.4 core…';
-window.__fluidV5Version = '5.3.8.1-m581-booting';
+if (earlyStats) earlyStats.textContent = 'BUILD: XPBD · GLOBAL RIPPLES · DETERMINISTIC FIXED-MASS WATERFALL · MICRODROPLET SURFACING · waiting for V4.4 core…';
+window.__fluidV5Version = '5.3.9-m59-booting';
 window.__fluidV5Build = V5_BUILD;
 
 await import('./wave-test-v44.js');
@@ -69,7 +69,7 @@ catch (err) { window.__v5RigidHydroM51={online:false,error:String(err?.message||
 try { await import('./v5-surface-m42.js'); }
 catch (err) { window.__v5SurfaceM42={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M4.2] Surface 2.0 rejected; base SSFR remains active.', err); }
 try { await import('./v5-whitewater-optics-m54.js'); }
-catch (err) { window.__v5WhitewaterM54={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.4] refractive Whitewater 2.0 rejected; simulation remains active.', err); }
+catch (err) { window.__v5WhitewaterM54={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.9] fine refractive Whitewater rejected; simulation remains active.', err); }
 try { await import('./v5-adaptive-detail-m52.js'); }
 catch (err) { window.__v5AdaptiveDetailM52={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.2] adaptive refractive surface detail rejected.', err); }
 
@@ -89,29 +89,31 @@ catch (err) {
 try { await import('./v5-ripples-m57.js'); }
 catch (err) { window.__v5RippleM57={online:false,visual:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.7] global ripple layer rejected; real PBF motion remains active.',err); }
 
-// M5.8.1: prime a small tagged PBF curtain once, then recycle that same physical mass from the
-// impact zone to the waterfall lip. The surface stage excludes the tagged particles from normal
-// solver-sized SSFR splats and renders a dedicated thin sheet from the same live positions.
+// M5.9: prime a bounded tagged PBF curtain once. The surface module now cycles those particles from
+// the simulation path with a flight-time watchdog, so contact-plane errors can no longer stop the
+// waterfall. A second pass replaces solver-sized airborne splash particles with microdroplets.
 try { await import('./v5-waterfall-physics-m57.js'); }
-catch (err) { window.__v5WaterfallM57={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.8.1] fixed-mass physics waterfall rejected; other scenarios remain active.',err); }
+catch (err) { window.__v5WaterfallM57={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.9] fixed-mass physics waterfall rejected; other scenarios remain active.',err); }
 try { await import('./v5-waterfall-surface-m572.js'); }
-catch (err) { window.__v5WaterfallSurfaceM572={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.8.1] recycle thin-sheet surface rejected; real PBF waterfall remains active.',err); }
+catch (err) { window.__v5WaterfallSurfaceM572={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.9] deterministic waterfall cycle/surface rejected; real PBF waterfall remains active.',err); }
+try { await import('./v5-microdrops-m59.js'); }
+catch (err) { window.__v5MicroDropsM59={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.9] microdroplet surfacing rejected; ordinary SSFR remains active.',err); }
 
 try { await import('./v5-tabs-m34.js'); }
 catch (err) { console.error('[Fluid V5 UI] integrated tab shell failed; original controls remain available.', err); }
 try { await import('./v5-m5-ui.js'); }
 catch (err) { console.error('[Fluid V5 UI] M5 controls/status failed; M5 systems remain active.', err); }
 
-window.__fluidV5Version='5.3.8.1-m581';
+window.__fluidV5Version='5.3.9-m59';
 const brand=document.querySelector('.hud.card.title');
-if(brand)brand.textContent='FLUID V5 · M5.8.1';
+if(brand)brand.textContent='FLUID V5 · M5.9';
 const stats=document.getElementById('v4stats');
-if(stats&&!stats.textContent.includes('BUILD:'))stats.textContent=`BUILD: M5.8.1 FIXED-MASS PBF WATERFALL + GPU RECIRCULATION · ${stats.textContent}`;
+if(stats&&!stats.textContent.includes('BUILD:'))stats.textContent=`BUILD: M5.9 CONTINUOUS WATERFALL + MICRODROPS · ${stats.textContent}`;
 setTimeout(()=>{
   const b=document.querySelector('.hud.card.title');
-  if(b)b.textContent='FLUID V5 · M5.8.1';
-  document.title='Fluid V5 · M5.8.1 FIXED-MASS PBF WATERFALL';
-  window.__fluidV5Version='5.3.8.1-m581';
+  if(b)b.textContent='FLUID V5 · M5.9';
+  document.title='Fluid V5 · M5.9 CONTINUOUS WATERFALL + MICRODROPS';
+  window.__fluidV5Version='5.3.9-m59';
 },1500);
 setTimeout(()=>{
   const toggle=document.getElementById('v4WaveToggle');

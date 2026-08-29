@@ -1,45 +1,19 @@
-// Fluid V5 M6.6.1 Safari wrapper for the layered waterfall renderer.
-// M6.6 contains the canonical Safari/WebKit-safe WGSL directly.
-// This wrapper loads the source, relabels the runtime as M6.6.1,
-// and keeps the visible mobile diagnostic path.
+// Fluid V5 M6.6.1 Safari wrapper for the native PBF waterfall presentation.
+// The M6.6 module contains no custom WGSL curtain. Safari therefore uses the same core SSFR path as
+// every other fluid scenario, with waterfall geometry coming directly from simulated PBF particles.
 
 const diag=document.createElement('div');
 diag.id='v5WaterfallM661Diag';
 diag.style.cssText='display:none;position:fixed;z-index:51;left:12px;right:12px;top:150px;max-width:760px;margin:auto;padding:8px 10px;border:1px solid rgba(255,118,118,.7);border-radius:10px;background:rgba(28,7,11,.94);color:#ffb0b0;font:8px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere;pointer-events:none';
 document.body.appendChild(diag);
 
-const url=new URL('./v5-waterfall-houdini-m66.js',import.meta.url);
-const response=await fetch(url,{cache:'no-store'});
-if(!response.ok)throw new Error(`Fluid V5 M6.6.1: unable to load M6.6 renderer (${response.status}).`);
-
-let src=await response.text();
-
-src=src.replaceAll('M6.6','M6.6.1');
-src=src.replaceAll('fluidV5M66','fluidV5M661');
-src=src.replaceAll('layered-vertical-curtain-m66','layered-vertical-curtain-m661-safari');
-src=src.replaceAll('m66','m661');
-
-const blob=URL.createObjectURL(new Blob([src],{type:'text/javascript'}));
 try{
- await import(blob);
- if(window.__v5WaterfallM60){
-  window.__v5WaterfallM60.backend='layered-vertical-curtain-m661-safari';
-  window.__v5WaterfallM60.error='';
- }
- const S=window.__v5WaterfallM661||window.__v5WaterfallM66;
- if(S){
-  S.backend='layered-vertical-curtain-m661-safari';
-  S.safariFixed=true;
-  S.layered=true;
-  S.foam=true;
- }
+ await import('./v5-waterfall-houdini-m66.js');
+ const base=window.__v5WaterfallM66||{};
+ window.__v5WaterfallM661={...base,online:true,backend:'native-pbf-ssfr-m661-safari',safariFixed:true,nativeBody:true,analyticCurtain:false};
+ if(window.__v5WaterfallM60){window.__v5WaterfallM60.backend='native-pbf-ssfr-m661-safari';window.__v5WaterfallM60.error='';}
 }catch(err){
- window.__v5WaterfallM60={...(window.__v5WaterfallM60||{}),online:false,error:String(err?.message||err),backend:'layered-vertical-curtain-m661-safari'};
- diag.style.display='block';
- diag.textContent='WATERFALL M6.6.1 RENDER ERROR · '+String(err?.message||err);
- throw err;
-}finally{
- URL.revokeObjectURL(blob);
+ window.__v5WaterfallM60={...(window.__v5WaterfallM60||{}),online:false,error:String(err?.message||err),backend:'native-pbf-ssfr-m661-safari'};
+ diag.style.display='block';diag.textContent='WATERFALL M6.6.1 RENDER ERROR · '+String(err?.message||err);throw err;
 }
-
-console.info('[Fluid V5 M6.6.1] layered vertical waterfall curtain + plunge mist + impact foam online.');
+console.info('[Fluid V5 M6.6.1] Safari native PBF waterfall presentation online.');

@@ -1,15 +1,30 @@
-// Fluid V5 bootstrap. Production V4.4 stays untouched; M4/M5 systems run only on the isolated
-// fluid-v5-development branch and can fail independently back to the validated earlier stack.
+// Fluid V5 M6.0.1 bootstrap. Production V4.4 stays untouched; the isolated V5 development stack
+// can fail subsystem-by-subsystem back to earlier validated paths. M6 replaces the old direct
+// waterfall sheet renderer with a Houdini-style PBF -> reconstructed body -> whitewater -> mist path.
 
-const V5_BUILD = 'M5.9 CONTINUOUS WATERFALL + MICRODROPS';
-document.title = `Fluid V5 · ${V5_BUILD}`;
-const earlyBrand = document.querySelector('.hud.card.title');
-if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M5.9';
-const earlyLoadTitle = document.querySelector('#loading h2');
-if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M5.9';
+const V5_BUILD = 'M6.0.1 HOUDINI WATERFALL';
+const V5_VERSION = '6.0.1-m601';
+
+function stampBuild() {
+  document.title = `Fluid V5 · ${V5_BUILD}`;
+  const brand = document.querySelector('.hud.card.title');
+  if (brand && brand.textContent !== 'FLUID V5 · M6.0.1') brand.textContent = 'FLUID V5 · M6.0.1';
+  const loadTitle = document.querySelector('#loading h2');
+  if (loadTitle && loadTitle.textContent !== 'FLUID V5 · M6.0.1') loadTitle.textContent = 'FLUID V5 · M6.0.1';
+  window.__fluidV5Version = V5_VERSION;
+  window.__fluidV5Build = V5_BUILD;
+}
+
+// Stamp before any inherited module can identify itself. A MutationObserver keeps M6 authoritative
+// because the validated M3.5 lighting wrapper still contains its own historical branding code.
+stampBuild();
+const brandNode = document.querySelector('.hud.card.title');
+if (brandNode) {
+  new MutationObserver(() => stampBuild()).observe(brandNode, { childList:true, characterData:true, subtree:true });
+}
 const earlyStats = document.getElementById('v4stats');
-if (earlyStats) earlyStats.textContent = 'BUILD: XPBD · GLOBAL RIPPLES · DETERMINISTIC FIXED-MASS WATERFALL · MICRODROPLET SURFACING · waiting for V4.4 core…';
-window.__fluidV5Version = '5.3.9-m59-booting';
+if (earlyStats) earlyStats.textContent = 'BUILD: M6 HOUDINI WATERFALL · PBF BODY RECONSTRUCTION · WHITEWATER · MIST · waiting for V4.4 core…';
+window.__fluidV5Version = `${V5_VERSION}-booting`;
 window.__fluidV5Build = V5_BUILD;
 
 await import('./wave-test-v44.js');
@@ -21,7 +36,8 @@ async function waitForV44(timeoutMs = 12000) {
   }
   return false;
 }
-if (!(await waitForV44())) throw new Error('Fluid V5 bootstrap: V4.4 runtime did not become ready within 12 seconds.');
+if (!(await waitForV44())) throw new Error('Fluid V5 M6.0.1 bootstrap: V4.4 runtime did not become ready within 12 seconds.');
+stampBuild();
 
 await import('./v5-lab.js');
 try { await import('./v5-pool-slab.js'); }
@@ -31,6 +47,7 @@ let lightLabReady = false;
 try {
   await import('./v5-light-lab.js');
   lightLabReady = !!window.__v5LightLab;
+  stampBuild();
   try { await import('./v5-environment-m343.js'); }
   catch (err) { console.error('[Fluid V5 Environment] true HDR environment system failed; atmosphere fallback retained.', err); }
   try { await import('./v5-night-pool-m34.js'); }
@@ -40,6 +57,7 @@ try {
 } catch (err) {
   console.error('[Fluid V5 Light Lab] atmosphere module failed; retaining the M3.0 sun path.', err);
 }
+stampBuild();
 
 if (!window.__v5ProjectedCaustics?.online) {
   try { await import(lightLabReady ? './v5-atomic-multilight-m34.js' : './v5-atomic-contrast-m30.js'); }
@@ -89,35 +107,36 @@ catch (err) {
 try { await import('./v5-ripples-m57.js'); }
 catch (err) { window.__v5RippleM57={online:false,visual:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.7] global ripple layer rejected; real PBF motion remains active.',err); }
 
-// M5.9: prime a bounded tagged PBF curtain once. The surface module now cycles those particles from
-// the simulation path with a flight-time watchdog, so contact-plane errors can no longer stop the
-// waterfall. A second pass replaces solver-sized airborne splash particles with microdroplets.
+// M6 waterfall stack:
+// 1) prime the bounded tagged PBF curtain once;
+// 2) globally replace sparse airborne non-waterfall PBF parcels with microdroplets;
+// 3) reconstruct tagged waterfall particles as one continuous density/aeration body + mist.
+// The obsolete M5.8/M5.9 direct waterfall sheet module is intentionally NOT imported here.
 try { await import('./v5-waterfall-physics-m57.js'); }
-catch (err) { window.__v5WaterfallM57={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.9] fixed-mass physics waterfall rejected; other scenarios remain active.',err); }
-try { await import('./v5-waterfall-surface-m572.js'); }
-catch (err) { window.__v5WaterfallSurfaceM572={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.9] deterministic waterfall cycle/surface rejected; real PBF waterfall remains active.',err); }
+catch (err) { window.__v5WaterfallM57={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M6.0.1] fixed-mass waterfall physics rejected; other scenarios remain active.',err); }
 try { await import('./v5-microdrops-m59.js'); }
-catch (err) { window.__v5MicroDropsM59={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.9] microdroplet surfacing rejected; ordinary SSFR remains active.',err); }
+catch (err) { window.__v5MicroDropsM59={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M6.0.1] microdroplet surfacing rejected; ordinary SSFR remains active.',err); }
+try { await import('./v5-waterfall-houdini-m60.js'); }
+catch (err) {
+  window.__v5WaterfallM60={online:false,error:String(err?.message||err)};
+  console.error('[Fluid V5 M6.0.1] Houdini-style waterfall body/whitewater/mist renderer rejected; real PBF waterfall remains active.',err);
+}
 
 try { await import('./v5-tabs-m34.js'); }
 catch (err) { console.error('[Fluid V5 UI] integrated tab shell failed; original controls remain available.', err); }
 try { await import('./v5-m5-ui.js'); }
-catch (err) { console.error('[Fluid V5 UI] M5 controls/status failed; M5 systems remain active.', err); }
+catch (err) { console.error('[Fluid V5 UI] M5/M6 controls/status failed; simulation systems remain active.', err); }
 
-window.__fluidV5Version='5.3.9-m59';
-const brand=document.querySelector('.hud.card.title');
-if(brand)brand.textContent='FLUID V5 · M5.9';
+stampBuild();
 const stats=document.getElementById('v4stats');
-if(stats&&!stats.textContent.includes('BUILD:'))stats.textContent=`BUILD: M5.9 CONTINUOUS WATERFALL + MICRODROPS · ${stats.textContent}`;
-setTimeout(()=>{
-  const b=document.querySelector('.hud.card.title');
-  if(b)b.textContent='FLUID V5 · M5.9';
-  document.title='Fluid V5 · M5.9 CONTINUOUS WATERFALL + MICRODROPS';
-  window.__fluidV5Version='5.3.9-m59';
-},1500);
+if(stats&&!stats.textContent.includes('BUILD:'))stats.textContent=`BUILD: M6 HOUDINI PBF → BODY → WHITEWATER → MIST · ${stats.textContent}`;
+
+// Hold the integrated build label authoritative while slower HDR/light modules settle.
+for (const delay of [100,350,800,1600,3000,6000]) setTimeout(stampBuild,delay);
 setTimeout(()=>{
   const toggle=document.getElementById('v4WaveToggle');
   const want=window.__v5State?.scenario==='wave';
   if(toggle&&toggle.classList.contains('active')!==want)toggle.click();
 },420);
-console.info(`[Fluid V5] ${V5_BUILD} / ${window.__fluidV5Version} isolated lab enabled; production V4.4 remains untouched.`);
+
+console.info(`[Fluid V5] ${V5_BUILD} / ${V5_VERSION} enabled; M6 waterfall renderer is authoritative and production V4.4 remains untouched.`);

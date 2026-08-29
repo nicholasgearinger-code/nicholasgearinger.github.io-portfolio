@@ -1,15 +1,15 @@
-// Fluid V5 bootstrap. Production V4.4 stays untouched; all M4 systems run only on the isolated
+// Fluid V5 bootstrap. Production V4.4 stays untouched; M4/M5 systems run only on the isolated
 // fluid-v5-development branch and can fail independently back to the validated earlier stack.
 
-const V5_BUILD = 'M4.7 FULL SIMULATION UPGRADE';
+const V5_BUILD = 'M5.5 REMAINING SOLVER + DETAIL UPGRADES';
 document.title = `Fluid V5 · ${V5_BUILD}`;
 const earlyBrand = document.querySelector('.hud.card.title');
-if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M4.7';
+if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M5.5';
 const earlyLoadTitle = document.querySelector('#loading h2');
-if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M4.7';
+if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M5.5';
 const earlyStats = document.getElementById('v4stats');
-if (earlyStats) earlyStats.textContent = 'BUILD: PHYSICS 2.0 · WHITEWATER 2.0 · SURFACE 2.0 · GGX IBL · waiting for V4.4 core…';
-window.__fluidV5Version = '5.2.7-m47-booting';
+if (earlyStats) earlyStats.textContent = 'BUILD: XPBD REFINE · SHAPE HYDRO · ADAPTIVE REFRACTIVE DETAIL · VOLUME LIGHT · waiting for V4.4 core…';
+window.__fluidV5Version = '5.3.5-m55-booting';
 window.__fluidV5Build = V5_BUILD;
 
 await import('./wave-test-v44.js');
@@ -35,9 +35,8 @@ try {
   catch (err) { console.error('[Fluid V5 Environment] true HDR environment system failed; atmosphere fallback retained.', err); }
   try { await import('./v5-night-pool-m34.js'); }
   catch (err) { window.__v5DedicatedNightPool = false; console.error('[Fluid V5 Night Pool] photometric six-fixture renderer failed.', err); }
-  // M4.3 supersedes the ordinary-mip M3.5 approximation with actual split-sum GGX prefiltering.
   try { await import('./v5-ibl-m43.js'); }
-  catch (err) { window.__v5IBLStatus={online:false,stage:'rejected',backend:'split-sum-ggx-m43',error:String(err?.message||err)}; console.error('[Fluid V5 IBL] M4.3 split-sum IBL failed; base sharp HDR remains active.', err); }
+  catch (err) { window.__v5IBLStatus={online:false,stage:'rejected',backend:'split-sum-ggx-m43',error:String(err?.message||err)}; console.error('[Fluid V5 IBL] split-sum IBL failed; base sharp HDR remains active.', err); }
 } catch (err) {
   console.error('[Fluid V5 Light Lab] atmosphere module failed; retaining the M3.0 sun path.', err);
 }
@@ -57,26 +56,44 @@ catch (err) { console.error('[Fluid V5 debug policy] unable to reset developer v
 try { await import('./v5-caustic-handoff.js'); }
 catch (err) { console.error('[Fluid V5 caustic handoff] legacy receiver suppression failed.', err); }
 
-// ----- M4 simulation/rendering suite ---------------------------------------------------------
+// ----- M4 foundation -----------------------------------------------------------------------
 try { await import('./v5-workload-m45.js'); }
 catch (err) { console.error('[Fluid V5 M4.5] adaptive workload manager rejected.', err); }
 try { await import('./v5-physics-m40.js'); }
 catch (err) { window.__v5PhysicsM40={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M4.0] Physics 2.0 rejected; base PBF remains active.', err); }
+
+// ----- M5 solver refinement ----------------------------------------------------------------
+try { await import('./v5-xpbd-density-m50.js'); }
+catch (err) { window.__v5XPBDM50={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.0] XPBD density refinement rejected; M4/base PBF retained.', err); }
+try { await import('./v5-rigid-hydro-m51.js'); }
+catch (err) { window.__v5RigidHydroM51={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.1] shape-aware rigid hydrodynamics rejected.', err); }
+
+// ----- Surface / whitewater / optical detail ------------------------------------------------
 try { await import('./v5-surface-m42.js'); }
 catch (err) { window.__v5SurfaceM42={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M4.2] Surface 2.0 rejected; base SSFR remains active.', err); }
-try { await import('./v5-whitewater-m41.js'); }
-catch (err) { window.__v5WhitewaterM41={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M4.1] Whitewater 2.0 rejected; fluid simulation remains active.', err); }
+// M5.4 loads the M4.1 three-population simulation itself and replaces only its sprite shading.
+try { await import('./v5-whitewater-optics-m54.js'); }
+catch (err) { window.__v5WhitewaterM54={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.4] refractive Whitewater 2.0 rejected; simulation remains active.', err); }
+try { await import('./v5-adaptive-detail-m52.js'); }
+catch (err) { window.__v5AdaptiveDetailM52={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.2] adaptive refractive surface detail rejected.', err); }
+
+// ----- Night optics -------------------------------------------------------------------------
 try { await import('./v5-night-caustics-m44.js'); }
 catch (err) { window.__v5NightCausticsM44={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M4.4] underwater fixture caustics rejected.', err); }
+try { await import('./v5-volume-light-m53.js'); }
+catch (err) { window.__v5VolumeLightM53={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.3] underwater volumetric transport rejected.', err); }
+
 try { await import('./v5-scenarios-m46.js'); }
 catch (err) { console.error('[Fluid V5 M4.6] advanced scenarios rejected.', err); }
 
 try { await import('./v5-tabs-m34.js'); }
-catch (err) { console.error('[Fluid V5 UI] M4.7 integrated tab shell failed; original controls remain available.', err); }
+catch (err) { console.error('[Fluid V5 UI] integrated tab shell failed; original controls remain available.', err); }
+try { await import('./v5-m5-ui.js'); }
+catch (err) { console.error('[Fluid V5 UI] M5 controls/status failed; M5 systems remain active.', err); }
 
-window.__fluidV5Version='5.2.7-m47';
-const brand=document.querySelector('.hud.card.title');if(brand)brand.textContent='FLUID V5 · M4.7';
-const stats=document.getElementById('v4stats');if(stats&&!stats.textContent.includes('BUILD:'))stats.textContent=`BUILD: M4.7 FULL SUITE · ${stats.textContent}`;
-setTimeout(()=>{const b=document.querySelector('.hud.card.title');if(b)b.textContent='FLUID V5 · M4.7';document.title='Fluid V5 · M4.7 FULL SIMULATION UPGRADE';window.__fluidV5Version='5.2.7-m47';},1400);
+window.__fluidV5Version='5.3.5-m55';
+const brand=document.querySelector('.hud.card.title');if(brand)brand.textContent='FLUID V5 · M5.5';
+const stats=document.getElementById('v4stats');if(stats&&!stats.textContent.includes('BUILD:'))stats.textContent=`BUILD: M5.5 FULL REMAINDER · ${stats.textContent}`;
+setTimeout(()=>{const b=document.querySelector('.hud.card.title');if(b)b.textContent='FLUID V5 · M5.5';document.title='Fluid V5 · M5.5 REMAINING SOLVER + DETAIL UPGRADES';window.__fluidV5Version='5.3.5-m55';},1450);
 setTimeout(()=>{const toggle=document.getElementById('v4WaveToggle'),want=window.__v5State?.scenario==='wave';if(toggle&&toggle.classList.contains('active')!==want)toggle.click();},420);
 console.info(`[Fluid V5] ${V5_BUILD} / ${window.__fluidV5Version} isolated lab enabled; production V4.4 remains untouched.`);

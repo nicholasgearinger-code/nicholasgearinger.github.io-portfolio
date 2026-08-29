@@ -1,6 +1,7 @@
 // Fluid V5 M6.6.1 Safari wrapper for the layered waterfall renderer.
-// M6.6 contains the canonical layered renderer; this wrapper applies small Safari/WebKit compiler
-// compatibility fixes, relabels the runtime as M6.6.1, and keeps the visible mobile diagnostic path.
+// M6.6 contains the canonical Safari/WebKit-safe WGSL directly.
+// This wrapper loads the source, relabels the runtime as M6.6.1,
+// and keeps the visible mobile diagnostic path.
 
 const diag=document.createElement('div');
 diag.id='v5WaterfallM661Diag';
@@ -10,13 +11,9 @@ document.body.appendChild(diag);
 const url=new URL('./v5-waterfall-houdini-m66.js',import.meta.url);
 const response=await fetch(url,{cache:'no-store'});
 if(!response.ok)throw new Error(`Fluid V5 M6.6.1: unable to load M6.6 renderer (${response.status}).`);
+
 let src=await response.text();
 
-// WGSL reserves `macro` as a future keyword. WebKit correctly rejects it as an identifier.
-// Rename the broad-flow variable before the shader module is compiled.
-src=src.replaceAll('macro','flowA');
-
-// Keep the stable M6.6 source file while exposing the mobile test build as M6.6.1.
 src=src.replaceAll('M6.6','M6.6.1');
 src=src.replaceAll('fluidV5M66','fluidV5M661');
 src=src.replaceAll('layered-vertical-curtain-m66','layered-vertical-curtain-m661-safari');
@@ -34,6 +31,7 @@ try{
   S.backend='layered-vertical-curtain-m661-safari';
   S.safariFixed=true;
   S.layered=true;
+  S.foam=true;
  }
 }catch(err){
  window.__v5WaterfallM60={...(window.__v5WaterfallM60||{}),online:false,error:String(err?.message||err),backend:'layered-vertical-curtain-m661-safari'};
@@ -43,4 +41,5 @@ try{
 }finally{
  URL.revokeObjectURL(blob);
 }
-console.info('[Fluid V5 M6.6.1] layered vertical waterfall curtain + broad plunge mist online.');
+
+console.info('[Fluid V5 M6.6.1] layered vertical waterfall curtain + plunge mist + impact foam online.');

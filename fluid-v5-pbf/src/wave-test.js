@@ -1,15 +1,15 @@
 // Fluid V5 bootstrap. Production V4.4 stays untouched; M4/M5 systems run only on the isolated
 // fluid-v5-development branch and can fail independently back to the validated earlier stack.
 
-const V5_BUILD = 'M5.6 STORM RAIN + CONTINUOUS WATERFALL';
+const V5_BUILD = 'M5.6.1 SAFARI-SAFE STORM + WATERFALL';
 document.title = `Fluid V5 · ${V5_BUILD}`;
 const earlyBrand = document.querySelector('.hud.card.title');
-if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M5.6';
+if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M5.6.1';
 const earlyLoadTitle = document.querySelector('#loading h2');
-if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M5.6';
+if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M5.6.1';
 const earlyStats = document.getElementById('v4stats');
-if (earlyStats) earlyStats.textContent = 'BUILD: XPBD · SHAPE HYDRO · MICRO-RAIN · CONTINUOUS WATERFALL · waiting for V4.4 core…';
-window.__fluidV5Version = '5.3.6-m56-booting';
+if (earlyStats) earlyStats.textContent = 'BUILD: XPBD · SHAPE HYDRO · MICRO-RAIN HOTFIX · CONTINUOUS WATERFALL · waiting for V4.4 core…';
+window.__fluidV5Version = '5.3.6.1-m561-booting';
 window.__fluidV5Build = V5_BUILD;
 
 await import('./wave-test-v44.js');
@@ -44,7 +44,8 @@ try {
 if (!window.__v5ProjectedCaustics?.online) {
   try { await import(lightLabReady ? './v5-atomic-multilight-m34.js' : './v5-atomic-contrast-m30.js'); }
   catch (err) {
-    const prev=window.__v5AtomicStatus||{};window.__v5AtomicStatus={...prev,online:false,stage:`rejected @ ${prev.stage||'module'}`,backend:lightLabReady?'time-sun-m34':'particle-contrast',width:prev.width||0,height:prev.height||0,error:String(err?.message||err)};
+    const prev=window.__v5AtomicStatus||{};
+    window.__v5AtomicStatus={...prev,online:false,stage:`rejected @ ${prev.stage||'module'}`,backend:lightLabReady?'time-sun-m34':'particle-contrast',width:prev.width||0,height:prev.height||0,error:String(err?.message||err)};
     console.error('[Fluid V5 atomic] daytime caustic handoff rejected; inherited receiver lighting remains active.',err);
   }
 }
@@ -85,17 +86,34 @@ catch (err) { window.__v5VolumeLightM53={online:false,error:String(err?.message|
 // ----- Physical scenarios ------------------------------------------------------------------
 try { await import('./v5-scenarios-m46.js'); }
 catch (err) { console.error('[Fluid V5 M4.6] advanced scenarios rejected.', err); }
+// M5.6.1 installs scenario control takeover before compiling either optional weather shader, so
+// a Safari validation failure can no longer fall through to the old giant-airborne-particle rain.
 try { await import('./v5-rain-waterfall-m56.js'); }
-catch (err) { window.__v5WeatherM56={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.6] storm rain / continuous waterfall rejected; older scenario source remains available.', err); }
+catch (err) {
+  const prev=window.__v5WeatherM56||{};
+  window.__v5WeatherM56={...prev,online:!!prev.controls,controls:!!prev.controls,rainVisual:false,waterfallVisual:false,error:String(err?.message||err)};
+  console.error('[Fluid V5 M5.6.1] weather module failed after control takeover; old airborne rain remains disabled if controls initialized.', err);
+}
 
 try { await import('./v5-tabs-m34.js'); }
 catch (err) { console.error('[Fluid V5 UI] integrated tab shell failed; original controls remain available.', err); }
 try { await import('./v5-m5-ui.js'); }
 catch (err) { console.error('[Fluid V5 UI] M5 controls/status failed; M5 systems remain active.', err); }
 
-window.__fluidV5Version='5.3.6-m56';
-const brand=document.querySelector('.hud.card.title');if(brand)brand.textContent='FLUID V5 · M5.6';
-const stats=document.getElementById('v4stats');if(stats&&!stats.textContent.includes('BUILD:'))stats.textContent=`BUILD: M5.6 STORM + WATERFALL · ${stats.textContent}`;
-setTimeout(()=>{const b=document.querySelector('.hud.card.title');if(b)b.textContent='FLUID V5 · M5.6';document.title='Fluid V5 · M5.6 STORM RAIN + CONTINUOUS WATERFALL';window.__fluidV5Version='5.3.6-m56';},1450);
-setTimeout(()=>{const toggle=document.getElementById('v4WaveToggle'),want=window.__v5State?.scenario==='wave';if(toggle&&toggle.classList.contains('active')!==want)toggle.click();},420);
+window.__fluidV5Version='5.3.6.1-m561';
+const brand=document.querySelector('.hud.card.title');
+if(brand)brand.textContent='FLUID V5 · M5.6.1';
+const stats=document.getElementById('v4stats');
+if(stats&&!stats.textContent.includes('BUILD:'))stats.textContent=`BUILD: M5.6.1 WEATHER HOTFIX · ${stats.textContent}`;
+setTimeout(()=>{
+  const b=document.querySelector('.hud.card.title');
+  if(b)b.textContent='FLUID V5 · M5.6.1';
+  document.title='Fluid V5 · M5.6.1 SAFARI-SAFE STORM + WATERFALL';
+  window.__fluidV5Version='5.3.6.1-m561';
+},1450);
+setTimeout(()=>{
+  const toggle=document.getElementById('v4WaveToggle');
+  const want=window.__v5State?.scenario==='wave';
+  if(toggle&&toggle.classList.contains('active')!==want)toggle.click();
+},420);
 console.info(`[Fluid V5] ${V5_BUILD} / ${window.__fluidV5Version} isolated lab enabled; production V4.4 remains untouched.`);

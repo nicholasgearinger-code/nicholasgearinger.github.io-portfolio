@@ -1,15 +1,15 @@
 // Fluid V5 bootstrap. Production V4.4 stays untouched; M4/M5 systems run only on the isolated
 // fluid-v5-development branch and can fail independently back to the validated earlier stack.
 
-const V5_BUILD = 'M5.7.2 GLOBAL RIPPLES + RECONSTRUCTED PBF WATERFALL';
+const V5_BUILD = 'M5.8 TAGGED PBF WATERFALL SURFACE';
 document.title = `Fluid V5 · ${V5_BUILD}`;
 const earlyBrand = document.querySelector('.hud.card.title');
-if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M5.7.2';
+if (earlyBrand) earlyBrand.textContent = 'FLUID V5 · M5.8';
 const earlyLoadTitle = document.querySelector('#loading h2');
-if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M5.7.2';
+if (earlyLoadTitle) earlyLoadTitle.textContent = 'FLUID V5 · M5.8';
 const earlyStats = document.getElementById('v4stats');
-if (earlyStats) earlyStats.textContent = 'BUILD: XPBD · GLOBAL RIPPLES · REAL PBF WATERFALL · ANISOTROPIC CURTAIN RECONSTRUCTION · waiting for V4.4 core…';
-window.__fluidV5Version = '5.3.7.2-m572-booting';
+if (earlyStats) earlyStats.textContent = 'BUILD: XPBD · GLOBAL RIPPLES · TAGGED REAL PBF WATERFALL · DEDICATED THIN-SHEET SURFACE · waiting for V4.4 core…';
+window.__fluidV5Version = '5.3.8-m58-booting';
 window.__fluidV5Build = V5_BUILD;
 
 await import('./wave-test-v44.js');
@@ -88,27 +88,31 @@ catch (err) {
 }
 try { await import('./v5-ripples-m57.js'); }
 catch (err) { window.__v5RippleM57={online:false,visual:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.7] global ripple layer rejected; real PBF motion remains active.',err); }
-// M5.7.2: real waterfall first, then rendering-only refinement of that exact emitted particle range.
+
+// M5.8: physics first. Airborne waterfall fluid is tagged in an unused phase component while
+// remaining ordinary fluid for every PBF constraint. The surface stage then removes those tagged
+// particles from the normal large SSFR ellipsoid pass, draws the fine sheet, and clears the tag
+// near impact so the same particles become regular pool water again.
 try { await import('./v5-waterfall-physics-m57.js'); }
-catch (err) { window.__v5WaterfallM57={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.7.2] physics waterfall rejected; other scenarios remain active.',err); }
+catch (err) { window.__v5WaterfallM57={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.8] tagged physics waterfall rejected; other scenarios remain active.',err); }
 try { await import('./v5-waterfall-surface-m572.js'); }
-catch (err) { window.__v5WaterfallSurfaceM572={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.7.2] waterfall reconstruction rejected; real PBF waterfall remains active.',err); }
+catch (err) { window.__v5WaterfallSurfaceM572={online:false,error:String(err?.message||err)};console.error('[Fluid V5 M5.8] tagged thin-sheet surface rejected; real PBF waterfall remains active.',err); }
 
 try { await import('./v5-tabs-m34.js'); }
 catch (err) { console.error('[Fluid V5 UI] integrated tab shell failed; original controls remain available.', err); }
 try { await import('./v5-m5-ui.js'); }
 catch (err) { console.error('[Fluid V5 UI] M5 controls/status failed; M5 systems remain active.', err); }
 
-window.__fluidV5Version='5.3.7.2-m572';
+window.__fluidV5Version='5.3.8-m58';
 const brand=document.querySelector('.hud.card.title');
-if(brand)brand.textContent='FLUID V5 · M5.7.2';
+if(brand)brand.textContent='FLUID V5 · M5.8';
 const stats=document.getElementById('v4stats');
-if(stats&&!stats.textContent.includes('BUILD:'))stats.textContent=`BUILD: M5.7.2 GLOBAL RIPPLES + RECONSTRUCTED REAL PBF WATERFALL · ${stats.textContent}`;
+if(stats&&!stats.textContent.includes('BUILD:'))stats.textContent=`BUILD: M5.8 TAGGED PBF WATERFALL + DEDICATED THIN-SHEET SURFACE · ${stats.textContent}`;
 setTimeout(()=>{
   const b=document.querySelector('.hud.card.title');
-  if(b)b.textContent='FLUID V5 · M5.7.2';
-  document.title='Fluid V5 · M5.7.2 GLOBAL RIPPLES + RECONSTRUCTED PBF WATERFALL';
-  window.__fluidV5Version='5.3.7.2-m572';
+  if(b)b.textContent='FLUID V5 · M5.8';
+  document.title='Fluid V5 · M5.8 TAGGED PBF WATERFALL SURFACE';
+  window.__fluidV5Version='5.3.8-m58';
 },1500);
 setTimeout(()=>{
   const toggle=document.getElementById('v4WaveToggle');

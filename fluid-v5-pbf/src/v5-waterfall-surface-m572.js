@@ -1,89 +1,113 @@
-// Fluid V5 M5.7.2 waterfall-specific surface reconstruction.
-// The physical waterfall remains the conserved PBF lattice. This module changes only rendering:
-// - connected airborne PBF particles receive a stronger anisotropic sheet profile;
-// - isolated airborne particles render much smaller;
-// - extra render-only micro-splats interpolate visual density between physical samples.
-// No proxy enters the density/pressure solve.
+// Fluid V5 M5.8 tagged thin-sheet waterfall surfacing.
+// The PBF solver remains authoritative. Airborne waterfall particles are tagged in phase.w:
+//   1) normal SSFR depth/thickness splats skip that tag, removing the large ellipsoid blobs;
+//   2) this module draws a fine velocity-aligned translucent sheet from those same live particles;
+//   3) a tiny compute pass clears the tag near the water surface, so impacted particles immediately
+//      rejoin the ordinary SSFR pool and continue contributing mass, refraction and caustics.
 
-const sim=window.__sim,ssfr=window.__ssfr,mesh=window.__mesh,state=window.__v5State,ui=window.__ui;
-if(!sim?.dev||!ssfr?.dev||!mesh||!state)throw new Error('Fluid V5 M5.7.2 waterfall reconstruction: runtime unavailable.');
-const dev=sim.dev,format=ssfr.format;
+const sim=window.__sim,ssfr=window.__ssfr,state=window.__v5State,ui=window.__ui;
+if(!sim?.dev||!ssfr?.dev||!state)throw new Error('Fluid V5 M5.8 waterfall surface: runtime unavailable.');
+const dev=sim.dev,format=ssfr.format,TAG=window.__v5WaterfallTag||0x5746;
 const q=new URLSearchParams(location.search),quality=['low','medium','high'].includes(q.get('quality'))?q.get('quality'):'medium';
-const SUBS=quality==='low'?2:quality==='high'?5:4;
-const MAX_PHYS=quality==='low'?5000:quality==='high'?10000:7500;
 if(!Number.isFinite(Number(state.waterfallSmooth)))state.waterfallSmooth=.92;
-state.waterfallSmooth=Math.max(0,Math.min(1.25,Number(state.waterfallSmooth)));
+state.waterfallSmooth=Math.max(.35,Math.min(1.25,Number(state.waterfallSmooth)));
 try{localStorage.setItem('fluidV5LabStateV1',JSON.stringify(state))}catch{}
+const active=()=>state.scenario==='waterfall-m58';
 
-const base={ratio:mesh.anisoRatio,stretch:mesh.anisoStretch,lambda:mesh.anisoLambda,minN:mesh.anisoMinNeighbours,radius:mesh.anisoRadiusScale,lonely:mesh.anisoLonely,delta:ssfr.narrowDelta,mu:ssfr.narrowMu,bilateral:ssfr.bilateralRange,cleanup:ssfr.cleanupRadius,filter:ssfr.filterIterations};
-let tuned=false;
-function active(){return state.scenario==='waterfall-m572';}
-function tuneSurface(){
- if(active()){
-  const s=Math.max(0,Math.min(1.25,state.waterfallSmooth));
-  mesh.anisoRatio=Math.max(base.ratio||0,4.8+1.7*s);
-  mesh.anisoStretch=Math.max(base.stretch||0,2.15+1.20*s);
-  mesh.anisoLambda=Math.max(base.lambda||0,.91+.035*s);
-  mesh.anisoMinNeighbours=Math.min(Number.isFinite(base.minN)?base.minN:17,Math.max(6,Math.round(12-4*s)));
-  mesh.anisoRadiusScale=Math.max(base.radius||0,1.95+.22*s);
-  mesh.anisoLonely=Math.min(Number.isFinite(base.lonely)?base.lonely:.92,Math.max(.30,.66-.25*s));
-  ssfr.narrowDelta=Math.max(base.delta||0,9.0+1.8*s);
-  ssfr.narrowMu=Math.max(base.mu||0,1.02+.16*s);
-  ssfr.bilateralRange=Math.max(base.bilateral||0,2.15+.30*s);
-  ssfr.cleanupPass=true;ssfr.cleanupRadius=Math.max(base.cleanup||3,4);
-  const pressure=window.__v5Workload?.pressure||0;
-  ssfr.filterIterations=Math.max(ssfr.filterIterations||0,pressure>.72?3:(quality==='high'?5:4));
-  tuned=true;
- }else if(tuned){
-  mesh.anisoRatio=base.ratio;mesh.anisoStretch=base.stretch;mesh.anisoLambda=base.lambda;mesh.anisoMinNeighbours=base.minN;mesh.anisoRadiusScale=base.radius;mesh.anisoLonely=base.lonely;
-  ssfr.narrowDelta=base.delta;ssfr.narrowMu=base.mu;ssfr.bilateralRange=base.bilateral;ssfr.cleanupRadius=base.cleanup;ssfr.filterIterations=Math.max(ssfr.filterIterations||0,base.filter||0);tuned=false;
- }
-}
-setInterval(tuneSurface,120);tuneSurface();
+// ----- Replace only the regular SSFR particle splat representation for tagged airborne fluid. ---
+const UP='https://cdn.jsdelivr.net/gh/matsuoka-601/Particles4All@58d6fa6d2c50e3f58da5c7a6f9b885ce26c485f0/src/';
+const SW=await import(UP+'ssfr_wgsl.js');
+const skipNeedle=`  if (S.skipBodies != 0u && phase[ii].x != 0u) {\n    o.clip = vec4f(2.0, 2.0, 2.0, 1.0);\n    return o;\n  }`;
+const skipPatch=`  if (phase[ii].w == ${TAG}u) {\n    o.clip = vec4f(2.0, 2.0, 2.0, 1.0);\n    return o;\n  }\n\n${skipNeedle}`;
+if(!SW.splatPrelude.includes(skipNeedle))throw new Error('Fluid V5 M5.8: upstream SSFR splat signature changed.');
+const splatPrelude=SW.splatPrelude.replace(skipNeedle,skipPatch);
+const mk=(src,label)=>dev.createShaderModule({code:splatPrelude+src,label});
+const skipDepth=await dev.createRenderPipelineAsync({label:'fluidV5M58DepthNoWaterfallBlobs',layout:'auto',vertex:{module:mk(SW.depthFS,'fluidV5M58DepthWGSL'),entryPoint:'vs'},fragment:{module:mk(SW.depthFS,'fluidV5M58DepthFSWGSL'),entryPoint:'fs',targets:[{format:'r32float'}]},primitive:{topology:'triangle-strip'},depthStencil:{format:'depth24plus',depthWriteEnabled:true,depthCompare:'less'}});
+const thickMod=mk(SW.thickFS,'fluidV5M58ThickWGSL');
+const skipThick=await dev.createRenderPipelineAsync({label:'fluidV5M58ThickNoWaterfallBlobs',layout:'auto',vertex:{module:thickMod,entryPoint:'vs'},fragment:{module:thickMod,entryPoint:'fs',targets:[{format:'r16float',blend:{color:{srcFactor:'one',dstFactor:'one',operation:'add'},alpha:{srcFactor:'one',dstFactor:'one',operation:'add'}}}]},primitive:{topology:'triangle-strip'}});
+ssfr.pipeDepth=skipDepth;ssfr.pipeThick=skipThick;ssfr.bindCache=null;
 
-const uni=dev.createBuffer({label:'fluidV5M572WaterfallVisualUniform',size:112,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
-const headF=new Float32Array(20),metaU=new Uint32Array(4),tuneF=new Float32Array(4);
-const shader=`
-struct U{vp:mat4x4f,screen:vec4f,meta:vec4u,tune:vec4f}
+// ----- Release landed tagged particles back to the normal pool surface ------------------------
+const releaseUni=dev.createBuffer({label:'fluidV5M58ReleaseUniform',size:16,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
+const releaseF=new Float32Array(4),releaseU=new Uint32Array(releaseF.buffer);
+const releaseWGSL=`
+struct U{releaseY:f32,pad:f32,n:u32,tag:u32}
 @group(0)@binding(0)var<uniform>C:U;
 @group(0)@binding(1)var<storage,read>P:array<vec4f>;
-@group(0)@binding(2)var<storage,read>V0:array<vec4f>;
-struct O{@builtin(position)p:vec4f,@location(0)q:vec2f,@location(1)speed:f32,@location(2)age:f32}
+@group(0)@binding(2)var<storage,read_write>phase:array<vec4u>;
+@compute @workgroup_size(256)fn main(@builtin(global_invocation_id)gid:vec3u){
+ let i=gid.x;if(i>=C.n){return;}let ph=phase[i];if(ph.w!=C.tag){return;}
+ if(P[i].y<=C.releaseY){phase[i]=vec4u(ph.x,ph.y,ph.z,0u);}
+}`;
+const releasePipe=await dev.createComputePipelineAsync({label:'fluidV5M58ReleaseLanded',layout:'auto',compute:{module:dev.createShaderModule({code:releaseWGSL,label:'fluidV5M58ReleaseWGSL'}),entryPoint:'main'}});
+
+// ----- Fine sheet renderer -------------------------------------------------------------------
+const sheetUni=dev.createBuffer({label:'fluidV5M58SheetUniform',size:96,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
+const SF=new Float32Array(24),SU=new Uint32Array(SF.buffer);
+const sheetWGSL=`
+struct U{vp:mat4x4f,screen:vec4f,tune:vec4f,meta:vec4u}
+@group(0)@binding(0)var<uniform>C:U;
+@group(0)@binding(1)var<storage,read>P:array<vec4f>;
+@group(0)@binding(2)var<storage,read>V:array<vec4f>;
+@group(0)@binding(3)var<storage,read>phase:array<vec4u>;
+struct O{@builtin(position)p:vec4f,@location(0)q:vec2f,@location(1)speed:f32,@location(2)fall:f32}
 fn corner(i:u32)->vec2f{let a=array<vec2f,6>(vec2f(-1,-1),vec2f(1,-1),vec2f(-1,1),vec2f(-1,1),vec2f(1,-1),vec2f(1,1));return a[i];}
-fn suboff(k:u32)->vec2f{let a=array<vec2f,5>(vec2f(-.31,-.12),vec2f(.30,.10),vec2f(-.10,.31),vec2f(.12,-.30),vec2f(0,0));return a[min(k,4u)];}
 @vertex fn vs(@builtin(vertex_index)vi:u32,@builtin(instance_index)ii:u32)->O{
- var o:O;let subs=max(C.meta.z,1u);let local=ii/subs;let sub=ii-local*subs;
- if(local>=C.meta.y){o.p=vec4f(2);o.q=vec2f(2);o.speed=0;o.age=0;return o;}
- let idx=C.meta.x+local;if(idx>=C.meta.w){o.p=vec4f(2);o.q=vec2f(2);o.speed=0;o.age=0;return o;}
- let p0=P[idx].xyz;let vv=V0[idx].xyz;let sp=length(vv);
- if(p0.y<=C.tune.x+C.tune.y*.25){o.p=vec4f(2);o.q=vec2f(2);o.speed=0;o.age=0;return o;}
- var dir=vec3f(0,-1,0);if(sp>.02){dir=vv/sp;}let side=normalize(cross(dir,vec3f(0,0,1))+.001*vec3f(1,0,0));let across=normalize(cross(dir,side));let so=suboff(sub)*C.tune.y*.34;let wp=p0+side*so.x+across*so.y;
- let pc=C.vp*vec4f(wp,1);let pe=C.vp*vec4f(wp+dir*C.tune.y*.75,1);if(pc.w<=1e-5||pe.w<=1e-5){o.p=vec4f(2);o.q=vec2f(2);o.speed=0;o.age=0;return o;}
- let cn=pc.xy/pc.w;let en=pe.xy/pe.w;var along=en-cn;let al=length(along);if(al>1e-5){along/=al;}else{along=vec2f(0,-1);}let normal=vec2f(-along.y,along.x);let q=corner(vi);
- let px=mix(.52,.80,clamp(sp*.22,0.0,1.0))*C.tune.z;let halfW=px*2.0/max(C.screen.x,1.0);let halfL=max(al*.78,px*3.1/max(C.screen.y,1.0));let ndc=cn+normal*q.x*halfW+along*q.y*halfL;
- o.p=vec4f(ndc*pc.w,pc.z,pc.w);o.q=q;o.speed=sp;o.age=clamp((p0.y-C.tune.x)/max(C.tune.w,1e-4),0.0,1.0);return o;
+ var o:O;if(ii>=C.meta.x||phase[ii].w!=C.meta.y){o.p=vec4f(2);o.q=vec2f(2);o.speed=0;o.fall=0;return o;}
+ let wp=P[ii].xyz;let vv=V[ii].xyz;let sp=length(vv);var dir=vec3f(0,-1,0);if(sp>.02){dir=vv/sp;}
+ let side=vec3f(0,0,1);let pc=C.vp*vec4f(wp,1);let pl=C.vp*vec4f(wp+dir*C.tune.y*1.32,1);let ps=C.vp*vec4f(wp+side*C.tune.y*.58*C.tune.z,1);
+ if(pc.w<=1e-5||pl.w<=1e-5||ps.w<=1e-5){o.p=vec4f(2);o.q=vec2f(2);o.speed=0;o.fall=0;return o;}
+ let cn=pc.xy/pc.w;let ln=pl.xy/pl.w;let sn=ps.xy/ps.w;var along=ln-cn;var wide=sn-cn;let al=length(along);let wl=length(wide);
+ if(al>1e-6){along/=al;}else{along=vec2f(0,-1);}if(wl>1e-6){wide/=wl;}else{wide=vec2f(1,0);}
+ // Force the two projected axes to remain orthogonal enough to avoid diamond-shaped blobs.
+ let normal=normalize(wide-along*dot(wide,along)+vec2f(1e-6,0));let q=corner(vi);let speedGain=clamp(sp*.13,0.0,1.0);
+ let halfW=max(wl*.82,1.0/max(C.screen.x,1.0));let halfL=max(al*(.68+.22*speedGain),1.4/max(C.screen.y,1.0));let ndc=cn+normal*q.x*halfW+along*q.y*halfL;
+ o.p=vec4f(ndc*pc.w,pc.z,pc.w);o.q=q;o.speed=sp;o.fall=clamp((C.tune.x-wp.y)/max(C.tune.x-C.tune.w,1e-4),0.0,1.0);return o;
 }
 @fragment fn fs(v:O)->@location(0)vec4f{
- let r=dot(v.q,v.q);if(r>1){discard;}let core=1.0-smoothstep(.04,1.0,r);let rim=pow(1.0-sqrt(max(0.0,1.0-r)),.42);let fast=clamp(v.speed*.18,0.0,1.0);let col=mix(vec3f(.19,.63,.84),vec3f(.91,.98,1.0),.30+fast*.42+rim*.16);let a=core*(.065+.070*fast)*(1.0-.18*v.age);return vec4f(col,a);
+ let ax=abs(v.q.x),ay=abs(v.q.y);if(ax>1||ay>1){discard;}let sx=1.0-smoothstep(.54,1.0,ax);let sy=1.0-smoothstep(.72,1.0,ay);let mask=sx*sy;
+ let fast=clamp(v.speed*.11,0.0,1.0);let aerate=clamp(v.fall*.82+fast*.32,0.0,1.0);let col=mix(vec3f(.13,.50,.70),vec3f(.91,.98,1.0),.22+.58*aerate);
+ let alpha=mask*(.095+.080*aerate);return vec4f(col,alpha);
 }`;
-let pipe=null;
-try{
- const mod=dev.createShaderModule({code:shader,label:'fluidV5M572WaterfallVisualWGSL'});
- pipe=await dev.createRenderPipelineAsync({label:'fluidV5M572WaterfallVisual',layout:'auto',vertex:{module:mod,entryPoint:'vs'},fragment:{module:mod,entryPoint:'fs',targets:[{format,blend:{color:{srcFactor:'src-alpha',dstFactor:'one-minus-src-alpha',operation:'add'},alpha:{srcFactor:'one',dstFactor:'one-minus-src-alpha',operation:'add'}}}]},primitive:{topology:'triangle-list'}});
-}catch(err){window.__v5WaterfallSurfaceM572={online:false,error:String(err?.message||err)};throw err;}
+const sheetMod=dev.createShaderModule({code:sheetWGSL,label:'fluidV5M58SheetWGSL'});
+const sheetPipe=await dev.createRenderPipelineAsync({label:'fluidV5M58Sheet',layout:'auto',vertex:{module:sheetMod,entryPoint:'vs'},fragment:{module:sheetMod,entryPoint:'fs',targets:[{format,blend:{color:{srcFactor:'src-alpha',dstFactor:'one-minus-src-alpha',operation:'add'},alpha:{srcFactor:'one',dstFactor:'one-minus-src-alpha',operation:'add'}}}]},primitive:{topology:'triangle-list'}});
 function matMul(a,b){const o=new Float32Array(16);for(let c=0;c<4;c++)for(let r=0;r<4;r++){let s=0;for(let k=0;k<4;k++)s+=a[k*4+r]*b[c*4+k];o[c*4+r]=s;}return o;}
+
 const baseRender=ssfr.render;
 ssfr.render=function(...args){
- const out=baseRender.apply(this,args);if(!active()||!pipe||ui?.paused||window.__v5DebugMode!=='final')return out;
- const W=window.__v5WaterfallM57,first=W?.firstIndex??-1,last=W?.lastIndex??-1;if(first<0||last<=first)return out;
- const enc=args[0],target=args[1],view=args[5],proj=args[6],w=args[10]||1,h=args[11]||1;if(!enc||!target||!view||!proj)return out;
- const count=Math.min(MAX_PHYS,last-first);headF.set(matMul(proj,view),0);headF[16]=w;headF[17]=h;headF[18]=0;headF[19]=0;metaU[0]=first;metaU[1]=count;metaU[2]=SUBS;metaU[3]=last;
- const b=sim.params.box,d=sim.params.spacing;tuneF[0]=b[1]*.28;tuneF[1]=d;tuneF[2]=Math.max(.60,state.waterfallSmooth);tuneF[3]=Math.max(.2,b[1]*.31);
- dev.queue.writeBuffer(uni,0,headF);dev.queue.writeBuffer(uni,80,metaU);dev.queue.writeBuffer(uni,96,tuneF);
- const bg=dev.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:uni}},{binding:1,resource:{buffer:sim.livePos()}},{binding:2,resource:{buffer:sim.liveVel()}}]});
- const pass=enc.beginRenderPass({colorAttachments:[{view:target,loadOp:'load',storeOp:'store'}]});pass.setPipeline(pipe);pass.setBindGroup(0,bg);pass.draw(6,count*SUBS);pass.end();return out;
+ const enc=args[0],target=args[1],view=args[5],proj=args[6],w=args[10]||1,h=args[11]||1;
+ // Clear tags slightly above the rest surface before ordinary SSFR runs, allowing impacted PBF
+ // particles to become normal pool water on the same frame.
+ if(enc&&sim.n>0){
+  const releaseY=sim.params.box[1]*.28+sim.params.spacing*1.35;releaseF[0]=releaseY;releaseF[1]=0;releaseU[2]=sim.n;releaseU[3]=TAG;dev.queue.writeBuffer(releaseUni,0,releaseF);
+  const rb=dev.createBindGroup({layout:releasePipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:releaseUni}},{binding:1,resource:{buffer:sim.livePos()}},{binding:2,resource:{buffer:sim.buf[sim.parity===0?'bodyA':'bodyB']}}]});
+  const cp=enc.beginComputePass();cp.setPipeline(releasePipe);cp.setBindGroup(0,rb);cp.dispatchWorkgroups(Math.max(1,Math.ceil(sim.n/256)));cp.end();
+ }
+ const out=baseRender.apply(this,args);
+ if(!active()||!enc||!target||!view||!proj||ui?.paused||window.__v5DebugMode!=='final')return out;
+ const b=sim.params.box,d=sim.params.spacing,topY=b[1]*.28+Math.min(.79,b[1]*.315);SF.set(matMul(proj,view),0);SF[16]=w;SF[17]=h;SF[18]=0;SF[19]=0;SF[20]=topY;SF[21]=d;SF[22]=state.waterfallSmooth;SF[23]=b[1]*.28;
+ // meta shares words 20..23 in WGSL after tune, so write it separately at byte 80? No: layout is
+ // mat4(64)+screen(16)+tune(16)+meta(16) = 112 bytes. Recreate a correctly aligned buffer below.
+ return out;
 };
-function mount(){const host=document.querySelector('[data-panel="scenes"]')||document.getElementById('settingsPanel');if(!host||document.getElementById('v5WaterfallSurfaceM572UI'))return;const d=document.createElement('div');d.id='v5WaterfallSurfaceM572UI';d.style.cssText='margin-top:8px';d.innerHTML=`<div class="v5Slider"><label>WATERFALL SMOOTH</label><input id="v5WaterfallSmooth" type="range" min="0" max="1.25" step="0.05"><div id="v5WaterfallSmoothVal" class="v5Val"></div></div>`;host.appendChild(d);const r=d.querySelector('input'),v=d.querySelector('.v5Val');r.value=state.waterfallSmooth;const sync=()=>v.textContent=Number(state.waterfallSmooth).toFixed(2);sync();r.oninput=e=>{e.stopPropagation();state.waterfallSmooth=Number(r.value);try{localStorage.setItem('fluidV5LabStateV1',JSON.stringify(state))}catch{}sync();};d.onpointerdown=e=>e.stopPropagation();}
+
+// Rebuild the sheet uniform at the correct 112-byte size; the compact declaration above is kept
+// only as a construction guard and never used for drawing.
+sheetUni.destroy();
+const drawUni=dev.createBuffer({label:'fluidV5M58SheetDrawUniform',size:112,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
+const head=new Float32Array(24),meta=new Uint32Array(4);
+const wrapped=ssfr.render;
+ssfr.render=function(...args){
+ const enc=args[0],target=args[1],view=args[5],proj=args[6],w=args[10]||1,h=args[11]||1;
+ // `wrapped` performs landed-tag release + all existing SSFR/M4/M5 rendering.
+ const out=wrapped.apply(this,args);
+ if(!active()||!enc||!target||!view||!proj||ui?.paused||window.__v5DebugMode!=='final')return out;
+ const b=sim.params.box,d=sim.params.spacing,topY=b[1]*.28+Math.min(.79,b[1]*.315);head.set(matMul(proj,view),0);head[16]=w;head[17]=h;head[18]=0;head[19]=0;head[20]=topY;head[21]=d;head[22]=state.waterfallSmooth;head[23]=b[1]*.28;meta[0]=sim.n;meta[1]=TAG;meta[2]=0;meta[3]=0;dev.queue.writeBuffer(drawUni,0,head);dev.queue.writeBuffer(drawUni,96,meta);
+ const bg=dev.createBindGroup({layout:sheetPipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:drawUni}},{binding:1,resource:{buffer:sim.livePos()}},{binding:2,resource:{buffer:sim.liveVel()}},{binding:3,resource:{buffer:sim.buf[sim.parity===0?'bodyA':'bodyB']}}]});
+ const pass=enc.beginRenderPass({colorAttachments:[{view:target,loadOp:'load',storeOp:'store'}]});pass.setPipeline(sheetPipe);pass.setBindGroup(0,bg);pass.draw(6,sim.n);pass.end();return out;
+};
+
+function mount(){const host=document.querySelector('[data-panel="scenes"]')||document.getElementById('settingsPanel');if(!host||document.getElementById('v5WaterfallSurfaceM572UI'))return;const d=document.createElement('div');d.id='v5WaterfallSurfaceM572UI';d.style.cssText='margin-top:8px';d.innerHTML=`<div class="v5Slider"><label>WATERFALL SHEET</label><input id="v5WaterfallSmooth" type="range" min="0.35" max="1.25" step="0.05"><div id="v5WaterfallSmoothVal" class="v5Val"></div></div><div style="font:7.4px/1.45 ui-monospace;color:#86a8b5;margin-top:4px">Tagged airborne PBF particles are removed from the normal large-ellipsoid SSFR pass and rendered as a thin velocity-aligned sheet. They return to normal SSFR automatically at impact.</div>`;host.appendChild(d);const r=d.querySelector('input'),v=d.querySelector('.v5Val');r.value=state.waterfallSmooth;const sync=()=>v.textContent=Number(state.waterfallSmooth).toFixed(2);sync();r.oninput=e=>{e.stopPropagation();state.waterfallSmooth=Number(r.value);try{localStorage.setItem('fluidV5LabStateV1',JSON.stringify(state))}catch{}sync();};d.onpointerdown=e=>e.stopPropagation();}
 setInterval(mount,500);mount();
-window.__v5WaterfallSurfaceM572={online:true,backend:'anisotropic-microsplat-m572',subsplats:SUBS};
-console.info('[Fluid V5 M5.7.2] waterfall anisotropic reconstruction + micro-splats online.');
+window.__v5WaterfallSurfaceM572={online:true,backend:'tagged-ssfr-exclusion-sheet-m58',tag:TAG};
+console.info('[Fluid V5 M5.8] tagged SSFR exclusion + thin PBF waterfall sheet online.');

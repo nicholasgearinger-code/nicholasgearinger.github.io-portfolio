@@ -27,7 +27,7 @@ src=src.replace("const thick=quality==='high'?2:1;","const thick=quality==='low'
 // lower curtain can form streaks and breakup rather than collapsing into large gelatinous clumps.
 src=src.replace("const basePeriod=quality==='low'?260:quality==='high'?350:300;","const basePeriod=quality==='low'?78:quality==='high'?42:56;");
 src=src.replace("const period=clamp(Math.round(basePeriod/flow),150,600);","const period=clamp(Math.round(basePeriod/flow),34,120);");
-src=src.replace("const maxAgeMs=Math.round((fallT+.22)*1000);","const maxAgeMs=Math.round((fallT+.48)*1000);");
+src=src.replace("const maxAgeMs=Math.round((fallT+.22)*1000);","const maxAgeMs=Math.round((fallT+.60)*1000);");
 
 // Six stable inlet rows create a sheet volume. Jitter is intentionally tiny: breakup should emerge
 // downstream from solved motion, not from a noisy emitter.
@@ -39,12 +39,16 @@ src=src.replace("V[i]=vec4f(C.geo1.z+(hx-.5)*.006,C.geo1.w-hv*.009,(hz-.5)*.010,
 
 // Keep classification through true contact so the density renderer sees the complete falling body.
 src=src.replace("let landed=p.y<=C.geo0.x+C.geo1.y*.90;","let landed=p.y<=C.geo0.x+C.geo1.y*.08;");
+// Never hand an airborne parcel back to the generic pool renderer merely because it crossed the
+// nominal impact X or exceeded its first flight-age estimate. It stays tagged until it is physically
+// near the receiving surface; the render mask then has an unambiguous owner for the entire fall.
+src=src.replace("if(C.shape.z==0u||landed||overshot||expired){body[i]=vec4u(ph.x,ph.y,0u,0u);return;}","if(C.shape.z==0u||landed||(expired&&p.y<=C.geo0.x+C.geo1.y*1.35)){body[i]=vec4u(ph.x,ph.y,0u,0u);return;}");
 
 // Surface disturbance comes from solved mass and momentum, not an injected ripple bus.
 src=src.replace("setInterval(rippleTick,90);","// synthetic ripple timer disabled: native PBF impact owns the pool response.");
 
 src=src.replace('THIN PRIMARY PBF','BROAD NATIVE PBF CURTAIN');
-src=src.replace('Only a small temporary primary curtain is tagged as waterfall fluid. Contact or a hard flight-age budget hands every parcel back to ordinary pool water.','A broad six-row, multi-layer inlet feeds actual PBF water. Pressure, XPBD density, local material smoothing, gravity and pool collisions determine the falling sheet and plunge; the visible density surface is reconstructed only from these solved parcels.');
+src=src.replace('Only a small temporary primary curtain is tagged as waterfall fluid. Contact or a hard flight-age budget hands every parcel back to ordinary pool water.','A broad six-row, multi-layer inlet feeds actual PBF water. Pressure, XPBD density, local material smoothing, gravity and pool collisions determine the falling sheet and plunge; the visible density surface is reconstructed only from these solved parcels, which remain waterfall-tagged until physical pool contact.');
 
 const blob=URL.createObjectURL(new Blob([src],{type:'text/javascript'}));
 try{await import(blob);}finally{URL.revokeObjectURL(blob);}
@@ -57,5 +61,6 @@ if(window.__v5WaterfallM62){
  window.__v5WaterfallM62.inletRows=6;
  window.__v5WaterfallM62.inletLayers=quality==='low'?3:4;
  window.__v5WaterfallM62.broadCurtain=true;
+ window.__v5WaterfallM62.tagUntilContact=true;
 }
-console.info('[Fluid V5 M6.6] broad native PBF waterfall curtain source online.');
+console.info('[Fluid V5 M6.6] broad native PBF waterfall curtain source online; carrier tag persists through pool contact.');

@@ -1,7 +1,8 @@
 // Fluid V5 M6.6.1 Safari-safe wrapper for the resampled waterfall renderer.
-// Fixes two static M6.6 integration errors before compilation/use:
+// Fixes three static M6.6 integration/compiler errors before compilation/use:
 // 1) quality presets accidentally compared the URLSearchParams object instead of `quality`;
-// 2) the mist uniform WGSL struct is 128 bytes, not 112 bytes.
+// 2) the mist uniform WGSL struct is 128 bytes, not 112 bytes;
+// 3) the body fragment shader mutates alpha, so it must be declared with `var`, not `let`.
 
 const diag=document.createElement('div');
 diag.id='v5WaterfallM661Diag';
@@ -18,6 +19,7 @@ const fixes=[
  ["const MIST_CAP=q==='low'?140:q==='high'?520:300;","const MIST_CAP=quality==='low'?140:quality==='high'?520:300;"],
  ["size:112,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST","size:128,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST"],
  ["const MF=new Float32Array(28),MU=new Uint32Array(MF.buffer);","const MF=new Float32Array(32),MU=new Uint32Array(MF.buffer);"],
+ ["let alpha=edge*density*C.style.z;","var alpha=edge*density*C.style.z;"],
 ];
 for(const [a,b] of fixes){if(!src.includes(a))throw new Error(`Fluid V5 M6.6.1 renderer patch signature missing: ${a.slice(0,54)}`);src=src.replace(a,b);}
 src=src.replaceAll('M6.6','M6.6.1');

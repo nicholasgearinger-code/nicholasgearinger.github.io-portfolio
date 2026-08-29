@@ -41,7 +41,6 @@ function tuneSurface(){
 }
 setInterval(tuneSurface,120);tuneSurface();
 
-// 64-byte VP + 16-byte screen + 16-byte u32 metadata + 16-byte tuning = 112 bytes.
 const uni=dev.createBuffer({label:'fluidV5M572WaterfallVisualUniform',size:112,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
 const headF=new Float32Array(20),metaU=new Uint32Array(4),tuneF=new Float32Array(4);
 const shader=`
@@ -58,7 +57,7 @@ fn suboff(k:u32)->vec2f{let a=array<vec2f,5>(vec2f(-.31,-.12),vec2f(.30,.10),vec
  let idx=C.meta.x+local;if(idx>=C.meta.w){o.p=vec4f(2);o.q=vec2f(2);o.speed=0;o.age=0;return o;}
  let p0=P[idx].xyz;let vv=V0[idx].xyz;let sp=length(vv);
  if(p0.y<=C.tune.x+C.tune.y*.25){o.p=vec4f(2);o.q=vec2f(2);o.speed=0;o.age=0;return o;}
- let dir=select(vec3f(0,-1,0),normalize(vv),sp>.02);let side=normalize(cross(dir,vec3f(0,0,1))+.001*vec3f(1,0,0));let across=normalize(cross(dir,side));let so=suboff(sub)*C.tune.y*.34;let wp=p0+side*so.x+across*so.y;
+ var dir=vec3f(0,-1,0);if(sp>.02){dir=vv/sp;}let side=normalize(cross(dir,vec3f(0,0,1))+.001*vec3f(1,0,0));let across=normalize(cross(dir,side));let so=suboff(sub)*C.tune.y*.34;let wp=p0+side*so.x+across*so.y;
  let pc=C.vp*vec4f(wp,1);let pe=C.vp*vec4f(wp+dir*C.tune.y*.75,1);if(pc.w<=1e-5||pe.w<=1e-5){o.p=vec4f(2);o.q=vec2f(2);o.speed=0;o.age=0;return o;}
  let cn=pc.xy/pc.w;let en=pe.xy/pe.w;var along=en-cn;let al=length(along);if(al>1e-5){along/=al;}else{along=vec2f(0,-1);}let normal=vec2f(-along.y,along.x);let q=corner(vi);
  let px=mix(.52,.80,clamp(sp*.22,0.0,1.0))*C.tune.z;let halfW=px*2.0/max(C.screen.x,1.0);let halfL=max(al*.78,px*3.1/max(C.screen.y,1.0));let ndc=cn+normal*q.x*halfW+along*q.y*halfL;

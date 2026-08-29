@@ -14,9 +14,115 @@ const a=src.indexOf('// --- Deterministic fixed-mass circulation');
 const b=src.indexOf('// --- Houdini-style screen-space particle-fluid surface');
 if(a<0||b<=a)throw new Error('Fluid V5 M6.5 renderer: circulation block signature changed.');
 src=src.slice(0,a)+`// --- M6.5 circulation ownership ---------------------------------------------------------------\n// The bounded M6.5 reservoir source owns lifecycle. Airborne particles are never recycled here.\n\n`+src.slice(b);
-// Current WGSL reserves `meta`; patch every surviving renderer uniform member before compilation.
+
+// Current Safari/WebKit WGSL rejects some identifiers accepted by other implementations.
 src=src.replaceAll('meta:vec4u','mdata:vec4u');
 src=src.replaceAll('C.meta','C.mdata');
+
+// Replace the compact legacy mist shader with deliberately conservative WGSL. The old one-line
+// declarations hit a WebKit parser failure at the end of the module (reported as GlobalDecl 11:1).
+// This keeps the same 128-byte uniform layout and render bindings, so no JS-side renderer changes
+// are required; it only makes the impact mist module portable across Safari's WGSL parser.
+const mistStart=src.indexOf('const mistWGSL=`');
+const mistEnd=mistStart>=0?src.indexOf('`;\nconst mistMod=',mistStart):-1;
+if(mistStart<0||mistEnd<0)throw new Error('Fluid V5 M6.5 renderer: mist shader signature changed.');
+const safeMistDecl=[
+'const mistWGSL=`',
+'struct MistUniform {',
+'  vp: mat4x4<f32>,',
+'  geo: vec4<f32>,',
+'  screen: vec4<f32>,',
+'  tune: vec4<f32>,',
+'  mdata: vec4<u32>,',
+'}',
+'',
+'@group(0) @binding(0) var<uniform> C: MistUniform;',
+'',
+'struct MistOut {',
+'  @builtin(position) pos: vec4<f32>,',
+'  @location(0) quad: vec2<f32>,',
+'  @location(1) alpha: f32,',
+'  @location(2) ptype: f32,',
+'}',
+'',
+'fn hash1(seedIn: u32) -> f32 {',
+'  var x: u32 = seedIn;',
+'  x = x ^ (x >> 16u);',
+'  x = x * 0x7feb352du;',
+'  x = x ^ (x >> 15u);',
+'  x = x * 0x846ca68bu;',
+'  x = x ^ (x >> 16u);',
+'  return f32(x) / 4294967295.0;',
+'}',
+'',
+'fn corner(i: u32) -> vec2<f32> {',
+'  let corners = array<vec2<f32>, 6>(',
+'    vec2<f32>(-1.0, -1.0),',
+'    vec2<f32>( 1.0, -1.0),',
+'    vec2<f32>(-1.0,  1.0),',
+'    vec2<f32>(-1.0,  1.0),',
+'    vec2<f32>( 1.0, -1.0),',
+'    vec2<f32>( 1.0,  1.0)',
+'  );',
+'  return corners[i];',
+'}',
+'',
+'@vertex',
+'fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> MistOut {',
+'  var out: MistOut;',
+'  if (C.mdata.y == 0u) {',
+'    out.pos = vec4<f32>(2.0, 2.0, 2.0, 2.0);',
+'    out.quad = vec2<f32>(2.0, 2.0);',
+'    out.alpha = 0.0;',
+'    out.ptype = 0.0;',
+'    return out;',
+'  }',
+'',
+'  let h0 = hash1(ii * 9187u + 17u);',
+'  let h1 = hash1(ii * 6151u + 89u);',
+'  let h2 = hash1(ii * 3761u + 227u);',
+'  let h3 = hash1(ii * 1597u + 601u);',
+'  let ptype = select(0.0, 1.0, h3 >= 0.72);',
+'  let life = fract(h2 + C.tune.x * mix(0.21, 0.52, ptype));',
+'  let spread = C.geo.z * mix(0.42, 0.64, ptype);',
+'  let worldX = C.geo.x + (h0 - 0.5) * C.geo.w * 0.15 + mix(0.03, 0.16, ptype) * life;',
+'  let worldZ = C.geo.y + (h1 - 0.5) * spread;',
+'  let worldY = C.geo.w + mix(0.02, 0.30, ptype) * life - mix(0.01, 0.16, ptype) * life * life;',
+'  let clip = C.vp * vec4<f32>(worldX, worldY, worldZ, 1.0);',
+'  if (clip.w <= 0.00001) {',
+'    out.pos = vec4<f32>(2.0, 2.0, 2.0, 2.0);',
+'    out.quad = vec2<f32>(2.0, 2.0);',
+'    out.alpha = 0.0;',
+'    out.ptype = ptype;',
+'    return out;',
+'  }',
+'',
+'  let q = corner(vi);',
+'  let px = mix(1.4, 1.0, ptype) * 2.0 / max(C.screen.x, 1.0);',
+'  let py = mix(1.4, 3.1, ptype) * 2.0 / max(C.screen.y, 1.0);',
+'  let ndc = clip.xy / clip.w + q * vec2<f32>(px, py);',
+'  out.pos = vec4<f32>(ndc * clip.w, clip.z, clip.w);',
+'  out.quad = q;',
+'  out.alpha = (1.0 - life) * C.tune.y;',
+'  out.ptype = ptype;',
+'  return out;',
+'}',
+'',
+'@fragment',
+'fn fs(input: MistOut) -> @location(0) vec4<f32> {',
+'  let radius = length(input.quad);',
+'  if (radius > 1.0) {',
+'    discard;',
+'  }',
+'  let soft = 1.0 - smoothstep(0.10, 1.0, radius);',
+'  let alpha = soft * input.alpha * mix(0.055, 0.22, input.ptype);',
+'  let rgb = mix(vec3<f32>(0.82, 0.92, 0.96), vec3<f32>(0.96, 1.0, 1.0), input.ptype);',
+'  return vec4<f32>(rgb, alpha);',
+'}',
+'`;'
+].join('\n');
+src=src.slice(0,mistStart)+safeMistDecl+src.slice(mistEnd+2);
+
 // Broader anisotropic field splats: fewer primary particles reconstruct as a continuous FLIP-like body.
 src=src.replace("C.geo.z*(1.35+clamp(sp*.08,0.0,.65))","C.geo.z*(2.20+clamp(sp*.10,0.0,.90))");
 src=src.replace("side*C.geo.z*.72","side*C.geo.z*1.02");

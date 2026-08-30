@@ -1,19 +1,20 @@
-// Fluid V5 M7.5.4 — scale fountain + whirlpool to the CURRENT deep pool instead of replaying M4.6 constants.
-// The old M4.6 fountain launched from y=0.16*box with only ~1.25..1.59 m/s vertical speed.
-// In the current pool that nozzle is far below the free surface, so the jet cannot physically emerge.
-// This build estimates the actual pool surface, emits a connected real-particle jet just below it,
-// and drives a whole-body angular velocity field so PBF damping cannot erase the whirlpool.
-// All vortex work is encoded into the existing M7.3.9 unified command buffer; feature submits = 0.
+// Fluid V5 M7.5.5 — finer fountain reconstruction + circular Rankine whirlpool.
+// Fountain is now mass-conserving: it pumps the existing PBF water through a narrow near-surface nozzle
+// instead of continuously appending new fluid to a closed tank. This prevents the pool from overfilling
+// and exploding into oversized disconnected blobs. During fountain mode SSFR splats are reduced slightly
+// so isolated spray reads finer, while the underlying solver particle spacing remains unchanged.
+// Whirlpool now uses a Rankine velocity profile: solid-body rotation in the core, potential-vortex falloff
+// outside the core, with radial motion damped instead of artificial inward/downward forcing. The circular
+// pressure gradient is therefore responsible for the free-surface depression. One unified GPU submit/frame.
 
-const sim=window.__sim,ui=window.__ui,scenes=window.__v5M743Scenes,wave=window.__v5M745WaveLab,modern=window.__v5M752PhysicalScenes;
-if(!sim?.dev||!sim?.appendFluid||!ui||!scenes?.online||!wave?.online||!modern?.online||!window.__v5M739Unified?.online)
-  throw new Error('M7.5.4 scaled scenes: unified runtime unavailable.');
+const sim=window.__sim,ui=window.__ui,scenes=window.__v5M743Scenes,wave=window.__v5M745WaveLab,modern=window.__v5M752PhysicalScenes,ssfr=window.__ssfr;
+if(!sim?.dev||!ui||!scenes?.online||!wave?.online||!modern?.online||!window.__v5M739Unified?.online)
+  throw new Error('M7.5.5 refined scenes: unified runtime unavailable.');
 const dev=sim.dev;
 const baseN=Math.max(1,sim.scene?.nFluid||sim.n||1);
-const quality=new URLSearchParams(location.search).get('quality')||'low';
-let active='none',added=0,passes=0,start=performance.now(),readyAt=0,lastSource=0,seed=0x75412345;
-let fountainHeight=.58,fountainFlow=1.0,vortexOmega=4.1,vortexGain=1.0;
-const rnd=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296};
+const baseSplat=ssfr?.splatRadius??1.0;
+let active='none',passes=0,start=performance.now();
+let fountainHeight=.28,fountainGain=1.0,vortexOmega=6.8,vortexGain=1.0,vortexCore=.25;
 
 function poolSurface(){
   const b=sim.params.box,d=sim.params.spacing||.044;
@@ -22,100 +23,152 @@ function poolSurface(){
   const layers=Math.max(1,Math.ceil(baseN/(nx*nz)));
   return Math.min(b[1]-2*d,(layers+1)*d);
 }
-function restoreCount(){if(sim.n!==baseN){sim.n=baseN;sim.uploadParams?.(1/240);sim.bindCache=null;}added=0;}
-function budget(){return Math.max(0,Math.min(4200,(sim.cap||sim.n)-sim.n-32));}
-function appendCloud(p,v){const room=budget(),n=Math.min(room,p.length/3|0);if(n<=0)return 0;const a=sim.appendFluid(p.slice(0,n*3),v.slice(0,n*3));added+=a;return a;}
-function fountainLaunch(){
-  const d=sim.params.spacing||.044,s=poolSurface(),g=Math.max(1,sim.params.gravity||9.81);
-  const nozzleY=Math.max(2*d,s-1.25*d),peak=Math.min(sim.params.box[1]-2*d,s+fountainHeight);
-  return {surface:s,nozzleY,speed:Math.sqrt(Math.max(.05,2*g*(peak-nozzleY)))*1.06};
+function jetSpeed(){
+  const g=Math.max(1,sim.params.gravity||9.81);
+  return Math.sqrt(Math.max(.02,2*g*fountainHeight));
 }
-function emitFountain(now){
-  const room=budget();if(room<=0)return;
-  const b=sim.params.box,d=sim.params.spacing||.044,J=fountainLaunch();
-  const dt=Math.min(.05,Math.max(.001,(now-lastSource)*.001));lastSource=now;
-  // Emit enough vertical layers to keep layer spacing below the PBF particle spacing.
-  const layerStep=d*.76;
-  const layers=Math.max(1,Math.min(5,Math.ceil(J.speed*dt/layerStep)));
-  const p=[],v=[];
-  for(let l=0;l<layers;l++){
-    const y=J.nozzleY+l*layerStep*.92;
-    // 5-point connected nozzle cross-section: center + four neighbours.
-    const ring=[[0,0],[.56,0],[-.56,0],[0,.56],[0,-.56]];
-    for(const q of ring){
-      const jx=(rnd()-.5)*d*.08,jz=(rnd()-.5)*d*.08;
-      p.push(b[0]*.50+q[0]*d+jx,y,b[2]*.50+q[1]*d+jz);
-      const side=.055;
-      v.push(q[0]*side+(rnd()-.5)*.018,J.speed*(.965+rnd()*.07),q[1]*side+(rnd()-.5)*.018);
-    }
-  }
-  appendCloud(p,v);
+function restoreCount(){
+  if(sim.n!==baseN){sim.n=baseN;sim.uploadParams?.(1/240);sim.bindCache=null;}
+}
+function applyRenderDetail(){
+  if(!ssfr)return;
+  // This only changes the reconstructed splat radius, not the physical PBF particle size.
+  ssfr.splatRadius=active==='fountain'?Math.min(baseSplat,.76):baseSplat;
+  ssfr.bindCache=null;
 }
 
-const vortexWGSL=`
-struct VortexU { box:vec4f, motion:vec4f, data:vec4u }
-@group(0) @binding(0) var<uniform> U:VortexU;
+const effectWGSL=`
+struct EffectU {
+  box:vec4f,
+  motion:vec4f,
+  params:vec4f,
+  info:vec4u,
+}
+@group(0) @binding(0) var<uniform> U:EffectU;
 @group(0) @binding(1) var<storage,read> pos:array<vec4f>;
 @group(0) @binding(2) var<storage,read_write> vel:array<vec4f>;
-fn safeDir(v:vec2f)->vec2f { let m=length(v); return select(vec2f(0.0),v/m,m>1.0e-6); }
+fn safeDir(q:vec2f)->vec2f {
+  let m=length(q);
+  return select(vec2f(0.0),q/m,m>1.0e-6);
+}
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid:vec3u){
-  let i=gid.x;let n=U.data.x;if(i>=n){return;}
-  let p=pos[i].xyz;var v=vel[i].xyz;
-  let b=U.box.xyz;let d=max(U.box.w,.001);let surface=U.motion.x;
-  let omega=U.motion.y;let gain=U.motion.z;let t=U.motion.w;
-  let centre=vec2f(b.x*.5,b.z*.5);let q=p.xz-centre;let r=length(q);
-  let R=min(b.x,b.z)*.46;if(r>=R){return;}
-  let dir=safeDir(q);let tang=vec2f(-dir.y,dir.x);let rn=clamp(r/max(R,1.0e-5),0.0,1.0);
-  let wet=1.0-smoothstep(surface+d,surface+4.0*d,p.y);
-  let depth=.30+.70*smoothstep(d*2.0,max(surface,d*4.0),p.y);
-  let ramp=smoothstep(0.0,1.15,t);
-  let spinSpeed=omega*r*(.72+.28*rn);
-  let inward=.105*gain*(1.0-rn);
-  let goalXZ=tang*spinSpeed-dir*inward;
-  let blend=clamp((.070+.105*(1.0-rn))*gain*wet*depth*ramp,0.0,.32);
-  v.x=mix(v.x,goalXZ.x,blend);v.z=mix(v.z,goalXZ.y,blend);
-  // A bounded downward-core target helps the rotating pressure field open a visible free-surface funnel.
-  let core=1.0-smoothstep(d*1.4,R*.17,r);
-  let collar=smoothstep(R*.20,R*.34,r)*(1.0-smoothstep(R*.34,R*.58,r));
-  let downGoal=-.58*gain*ramp;
-  v.y=mix(v.y,downGoal,.085*core*wet*ramp);
-  v.y=mix(v.y,.045*gain*ramp,.012*collar*wet*ramp);
+  let i=gid.x;
+  let n=U.info.x;
+  if(i>=n){return;}
+  let mode=U.info.y;
+  let p=pos[i].xyz;
+  var v=vel[i].xyz;
+  let b=U.box.xyz;
+  let d=max(U.box.w,.001);
+  let surface=U.motion.x;
+  let drive=U.motion.y;
+  let gain=U.motion.z;
+  let t=U.motion.w;
+  let centre=vec2f(b.x*.5,b.z*.5);
+  let q=p.xz-centre;
+  let r=length(q);
+  let dir=safeDir(q);
+  let tang=vec2f(-dir.y,dir.x);
+  let ramp=smoothstep(0.0,1.5,t);
+
+  // MODE 1: recirculating fountain pump. Existing water is accelerated through a narrow
+  // near-surface nozzle; surrounding water feeds inward. No particles are created.
+  if(mode==1u){
+    let nozzleR=max(1.20*d,min(b.x,b.z)*.038);
+    let feedR=max(4.8*d,nozzleR*3.8);
+    let column=1.0-smoothstep(nozzleR*.58,nozzleR,r);
+    let feed=(1.0-smoothstep(nozzleR,feedR,r))*(1.0-column);
+    let nozzleBottom=max(2.0*d,surface-max(.20,5.0*d));
+    let topWeight=smoothstep(nozzleBottom,surface+.25*d,p.y);
+    let exitMask=1.0-smoothstep(surface+.40*d,surface+1.65*d,p.y);
+    let wet=1.0-smoothstep(surface+2.0*d,surface+5.0*d,p.y);
+    let pump=column*topWeight*exitMask*wet*ramp;
+    let blend=clamp((.12+.16*topWeight)*gain*pump,0.0,.34);
+    v.y=mix(v.y,drive,blend);
+    // Gentle submerged lift keeps the nozzle supplied without forcing the entire pool upward.
+    let stem=column*(1.0-topWeight)*wet*ramp;
+    v.y=mix(v.y,drive*.22,.025*gain*stem);
+    // Physically plausible intake around the nozzle: small radial convergence below the surface.
+    let intake=feed*(1.0-smoothstep(surface-.10,surface+.08,p.y))*wet*ramp;
+    v.x-=dir.x*.055*gain*intake;
+    v.z-=dir.y*.055*gain*intake;
+  }
+
+  // MODE 2: circular Rankine vortex. Forced-vortex core (v_theta = omega r), then
+  // potential-vortex falloff (v_theta = omega rc^2 / r). No artificial downward core.
+  if(mode==2u){
+    let R=min(b.x,b.z)*.46;
+    if(r<R){
+      let coreR=max(2.5*d,R*U.params.x);
+      let omega=drive;
+      let vtCore=omega*r;
+      let vtOuter=omega*coreR*coreR/max(r,coreR);
+      let vt=select(vtOuter,vtCore,r<=coreR);
+      let wallFade=1.0-smoothstep(R*.88,R,r);
+      let wet=1.0-smoothstep(surface+1.4*d,surface+4.0*d,p.y);
+      let depth=.40+.60*smoothstep(2.0*d,max(surface,5.0*d),p.y);
+      let blend=clamp((.070+.080*(1.0-r/R))*gain*wallFade*wet*depth*ramp,0.0,.24);
+      var vr=dot(v.xz,dir);
+      var vv=dot(v.xz,tang);
+      vv=mix(vv,vt,blend);
+      // Remove non-circular slosh gradually while preserving the pressure-driven vertical response.
+      vr*=1.0-clamp(.45*blend,0.0,.12);
+      v.x=dir.x*vr+tang.x*vv;
+      v.z=dir.y*vr+tang.y*vv;
+      v.y*=1.0-clamp(.10*blend,0.0,.025);
+    }
+  }
   vel[i]=vec4f(v,0.0);
 }`;
-const mod=dev.createShaderModule({code:vortexWGSL,label:'fluidV5M754ScaledVortexWGSL'});
+
+const mod=dev.createShaderModule({code:effectWGSL,label:'fluidV5M755FountainRankineWGSL'});
 if(typeof mod.getCompilationInfo==='function'){
-  const info=await mod.getCompilationInfo(),errors=(info.messages||[]).filter(m=>m.type==='error');
-  if(errors.length)throw new Error('M7.5.4 vortex WGSL: '+errors.map(m=>`${m.lineNum||'?'}:${m.linePos||'?'} ${m.message}`).join(' | '));
+  const info=await mod.getCompilationInfo();
+  const errors=(info.messages||[]).filter(m=>m.type==='error');
+  if(errors.length)throw new Error('M7.5.5 effect WGSL: '+errors.map(m=>`${m.lineNum||'?'}:${m.linePos||'?'} ${m.message}`).join(' | '));
 }
-const pipe=await dev.createComputePipelineAsync({label:'fluidV5M754ScaledVortex',layout:'auto',compute:{module:mod,entryPoint:'main'}});
-const uni=dev.createBuffer({label:'fluidV5M754ScaledVortexUniform',size:48,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
-const F=new Float32Array(12),I=new Uint32Array(F.buffer);
-let inStep=false;const baseStep=sim.step.bind(sim),baseCreate=dev.createCommandEncoder.bind(dev);
-function encodeVortex(enc){
-  if(active!=='whirlpool')return false;
+const pipe=await dev.createComputePipelineAsync({label:'fluidV5M755FountainRankine',layout:'auto',compute:{module:mod,entryPoint:'main'}});
+const uni=dev.createBuffer({label:'fluidV5M755EffectUniform',size:64,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
+const F=new Float32Array(16),I=new Uint32Array(F.buffer);
+let inStep=false;
+const baseStep=sim.step.bind(sim),baseCreate=dev.createCommandEncoder.bind(dev);
+function encodeEffect(enc){
+  if(active!=='fountain'&&active!=='whirlpool')return false;
   const b=sim.params.box,d=sim.params.spacing||.044,s=poolSurface(),t=(performance.now()-start)*.001;
-  F.fill(0);F[0]=b[0];F[1]=b[1];F[2]=b[2];F[3]=d;F[4]=s;F[5]=vortexOmega;F[6]=vortexGain;F[7]=t;I[8]=Math.max(1,sim.n||1);
+  F.fill(0);
+  F[0]=b[0];F[1]=b[1];F[2]=b[2];F[3]=d;
+  F[4]=s;F[5]=active==='fountain'?jetSpeed():vortexOmega;F[6]=active==='fountain'?fountainGain:vortexGain;F[7]=t;
+  F[8]=vortexCore;F[9]=0;F[10]=0;F[11]=0;
+  I[12]=Math.max(1,sim.n||1);I[13]=active==='fountain'?1:2;I[14]=0;I[15]=0;
   dev.queue.writeBuffer(uni,0,F);
   const pos=sim.livePos?.(),vel=sim.liveVel?.();if(!pos||!vel)return false;
-  const bg=dev.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:uni}},{binding:1,resource:{buffer:pos}},{binding:2,resource:{buffer:vel}}]});
-  const pass=enc.beginComputePass({label:'fluidV5M754ScaledVortexPass'});pass.setPipeline(pipe);pass.setBindGroup(0,bg);pass.dispatchWorkgroups(Math.ceil(sim.n/256));pass.end();passes++;return true;
+  const bg=dev.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:[
+    {binding:0,resource:{buffer:uni}},{binding:1,resource:{buffer:pos}},{binding:2,resource:{buffer:vel}}
+  ]});
+  const pass=enc.beginComputePass({label:'fluidV5M755EffectPass'});
+  pass.setPipeline(pipe);pass.setBindGroup(0,bg);pass.dispatchWorkgroups(Math.ceil(sim.n/256));pass.end();passes++;return true;
 }
-dev.createCommandEncoder=function(desc){const enc=baseCreate(desc);if(inStep&&active==='whirlpool'){try{encodeVortex(enc)}catch(err){console.error('[M7.5.4 vortex]',err)}}return enc;};
+dev.createCommandEncoder=function(desc){
+  const enc=baseCreate(desc);
+  if(inStep&&(active==='fountain'||active==='whirlpool')){
+    try{encodeEffect(enc)}catch(err){console.error('[M7.5.5 effect]',err)}
+  }
+  return enc;
+};
 sim.step=function(dt){inStep=true;try{return baseStep(dt)}finally{inStep=false;}};
 
-function disable(){if(active==='none')return;active='none';restoreCount();syncUI();}
+function disable(){
+  if(active==='none')return;
+  active='none';restoreCount();applyRenderDetail();syncUI();
+}
 function choose(name){
   if(name!=='fountain'&&name!=='whirlpool')return;
   modern.disable();wave.disable();restoreCount();scenes.choose('pool');
-  active=name;added=0;passes=0;start=performance.now();readyAt=start+220;lastSource=start;seed=(seed+0x9e3779b9)>>>0;
-  if(ui.paused)ui.paused=false;syncUI();
+  active=name;passes=0;start=performance.now();
+  if(ui.paused)ui.paused=false;
+  applyRenderDetail();syncUI();
 }
-function sourceLoop(now){
-  requestAnimationFrame(sourceLoop);if(document.hidden||ui.paused||active!=='fountain'||now<readyAt)return;
-  if(wave.enabled){disable();return;}const minGap=quality==='high'?12:quality==='medium'?14:16;if(now-lastSource<minGap)return;emitFountain(now);
-}
-requestAnimationFrame(sourceLoop);
 
 const tabbar=document.getElementById('m742Tabs'),host=document.getElementById('m742Host');let scenePage=null,status=null,fBtn=null,wBtn=null;
 if(tabbar&&host){const tabs=[...tabbar.children],idx=tabs.findIndex(b=>b.dataset.key==='scenes');if(idx>=0)scenePage=host.children[idx]||null;}
@@ -131,20 +184,27 @@ function rewire(name,handler){
 }
 function syncUI(){
   fBtn?.classList.toggle('active',active==='fountain');wBtn?.classList.toggle('active',active==='whirlpool');
-  if(!status)return;const J=fountainLaunch();
-  status.textContent=`M7.5.4 ${active==='none'?'STANDBY':active.toUpperCase()}\ncurrent pool surface ≈ ${J.surface.toFixed(3)} m · old nozzle 0.400 m · corrected nozzle ${J.nozzleY.toFixed(3)} m\nfountain launch ${J.speed.toFixed(2)} m/s · appended ${added.toLocaleString()} · budget ${budget().toLocaleString()}\nvortex ω ${vortexOmega.toFixed(2)} rad/s · gain ${vortexGain.toFixed(2)} · unified passes ${passes} · feature submits 0`;
+  if(!status)return;
+  status.textContent=`M7.5.5 ${active==='none'?'STANDBY':active.toUpperCase()}\nphysical spacing ${(sim.params.spacing||.044).toFixed(4)} m · SSFR splat ${(ssfr?.splatRadius??1).toFixed(2)}\nfountain peak ${fountainHeight.toFixed(2)} m · jet ${jetSpeed().toFixed(2)} m/s · mass added 0\nRankine vortex ω ${vortexOmega.toFixed(1)} rad/s · core ${(vortexCore*100).toFixed(0)}% radius · passes ${passes} · feature submits 0`;
 }
 if(scenePage){
   fBtn=rewire('fountain',()=>choose('fountain'));wBtn=rewire('whirlpool',()=>choose('whirlpool'));
   scenePage.addEventListener('click',e=>{const b=e.target.closest?.('button');if(!b)return;const n=b.dataset?.scene;if(n!=='fountain'&&n!=='whirlpool'&&active!=='none')disable();},true);
-  const sec=document.createElement('div');sec.className='m742Section';sec.innerHTML='<div class="m742SectionTitle">CURRENT-POOL PHYSICS · M7.5.4</div><div class="m742Note">Fountain is now scaled from the measured pool surface instead of the obsolete M4.6 depth. Whirlpool drives sustained whole-body angular momentum so XSPH/PBF damping cannot erase the rotation before a funnel develops.</div>';
-  slider(sec,'FOUNTAIN PEAK',.30,.90,.05,fountainHeight,v=>fountainHeight=v,v=>`${Number(v).toFixed(2)} m`);
-  slider(sec,'VORTEX OMEGA',2.2,6.0,.1,vortexOmega,v=>vortexOmega=v,v=>`${Number(v).toFixed(1)} rad/s`);
-  slider(sec,'VORTEX GAIN',.65,1.55,.05,vortexGain,v=>vortexGain=v);
+  const sec=document.createElement('div');sec.className='m742Section';
+  sec.innerHTML='<div class="m742SectionTitle">FINE FOUNTAIN + CIRCULAR VORTEX · M7.5.5</div><div class="m742Note">Fountain now recirculates the existing pool instead of adding mass, which removes the overfill/spray explosion. Whirlpool uses a circular Rankine vortex: solid-body core plus 1/r outer swirl. The surface depression comes from centrifugal pressure, not an artificial downward funnel force. LOW still uses 4.4 cm physical particle spacing; the smaller fountain droplets use a tighter SSFR reconstruction only.</div>';
+  slider(sec,'FOUNTAIN PEAK',.12,.55,.02,fountainHeight,v=>fountainHeight=v,v=>`${Number(v).toFixed(2)} m`);
+  slider(sec,'FOUNTAIN GAIN',.55,1.60,.05,fountainGain,v=>fountainGain=v);
+  slider(sec,'VORTEX OMEGA',3.0,10.0,.2,vortexOmega,v=>vortexOmega=v,v=>`${Number(v).toFixed(1)} rad/s`);
+  slider(sec,'VORTEX CORE',.14,.38,.01,vortexCore,v=>vortexCore=v,v=>`${Math.round(Number(v)*100)}%`);
+  slider(sec,'VORTEX DRIVE',.60,1.65,.05,vortexGain,v=>vortexGain=v);
   status=document.createElement('div');status.className='m742Status';status.style.marginTop='10px';sec.appendChild(status);scenePage.appendChild(sec);setInterval(syncUI,350);syncUI();
 }
-const auto=new URLSearchParams(location.search).get('scene');if(auto==='fountain'||auto==='whirlpool')setTimeout(()=>choose(auto),320);
-window.__v5M754ScaledScenes={online:true,backend:'current-depth-connected-fountain-global-vortex-m754',gpuSubmitsAdded:0,choose,disable,get active(){return active},get added(){return added},get passes(){return passes},get surface(){return poolSurface()},get jetSpeed(){return fountainLaunch().speed},get vortexOmega(){return vortexOmega}};
-window.__fluidV5Version='7.5.4';window.__fluidV5Build='M7.5.4 CURRENT-POOL FOUNTAIN + WHIRLPOOL / M7.3.9 ONE-SUBMIT CORE';
-const title=document.querySelector('.hud.card.title');if(title)title.textContent='FLUID V5 · M7.5.4';document.title='Fluid V5 · M7.5.4 Current-Pool Physics';
-console.info('[Fluid V5 M7.5.4] scaled connected fountain + sustained global vortex online; feature submits 0.');
+const auto=new URLSearchParams(location.search).get('scene');if(auto==='fountain'||auto==='whirlpool')setTimeout(()=>choose(auto),340);
+window.__v5M754ScaledScenes={
+  online:true,backend:'mass-conserving-fountain-rankine-vortex-m755',gpuSubmitsAdded:0,choose,disable,
+  get active(){return active},get added(){return 0},get passes(){return passes},get surface(){return poolSurface()},
+  get jetSpeed(){return jetSpeed()},get vortexOmega(){return vortexOmega},get vortexCore(){return vortexCore}
+};
+window.__fluidV5Version='7.5.5';window.__fluidV5Build='M7.5.5 FINE FOUNTAIN + CIRCULAR RANKINE VORTEX / M7.3.9 ONE-SUBMIT CORE';
+const title=document.querySelector('.hud.card.title');if(title)title.textContent='FLUID V5 · M7.5.5';document.title='Fluid V5 · M7.5.5 Fine Fountain + Rankine Vortex';
+console.info('[Fluid V5 M7.5.5] mass-conserving fountain + circular Rankine vortex online; feature submits 0.');

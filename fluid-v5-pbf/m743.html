@@ -11,10 +11,10 @@
 </head>
 <body>
 <canvas id="view"></canvas>
-<div id="loading"><h2>FLUID V5 · M7.4.3</h2><div id="loadnote">starting unified core + Settings + safe scene seeds…</div></div>
+<div id="loading"><h2>FLUID V5 · UNIFIED</h2><div id="loadnote">starting unified core + Settings + safe scene seeds…</div></div>
 <div id="nogpu"></div>
-<div class="hud card title">FLUID V5 · M7.4.3</div>
-<div class="hud card perf"><div id="v4fps" class="fps">-- FPS</div><div id="v4mode" class="status">SCENES-ONLY TEST</div><div id="v4stats" class="status">PBF + SSFR · one submit · Pool/Dam</div></div>
+<div class="hud card title">FLUID V5 · UNIFIED</div>
+<div class="hud card perf"><div id="v4fps" class="fps">-- FPS</div><div id="v4mode" class="status">SCENES TEST</div><div id="v4stats" class="status">PBF + SSFR · one submit</div></div>
 <div id="heartbeat" class="card heartbeat">JS heartbeat: starting…</div>
 <div id="settingsPanel" class="settings hidden"><div class="settingsTitle">SETTINGS</div><div class="qualityRow"><button class="qbtn" data-quality="low">LOW</button><button class="qbtn" data-quality="medium">MED</button><button class="qbtn" data-quality="high">HIGH</button></div><div id="qualityNote"></div></div>
 <button id="settingsBtn"></button><div id="v4hint" class="hint"></div><div class="controls"><button id="modeBtn"></button><button id="dropBtn"></button><button id="pauseV4"></button><button id="resetV4"></button></div><div id="license"></div>
@@ -22,17 +22,19 @@
 <script>const ids=['ssfrscale','boxx','pourspeed','pourwidth','pourheight','pourtilt','timescale','substeps','iters','omega','xsph','scorr','fradius','fstrength','flimit','grab','camspeed','tension','radius','meshres','fieldsmooth','meshiso','ior','absorption','thicksteps','groundrefl','roughness','sunint','sunelev','sunazim','exposure','envintensity','envyaw','ssfrradius','anisoratio','ssfriters','ssfrsigma','ssfrdelta','ssfrmu','ssfrthickr','ssfrthick','ssfrthickblur','ssfrdepthcull'];const bank=document.getElementById('sliderBank');for(const id of ids){const l=document.createElement('label'),i=document.createElement('input'),s=document.createElement('span');i.type='range';i.id=id;s.id=id+'v';l.append(i,s);bank.append(l)}</script>
 <script type="module">
 const note=document.getElementById('loadnote'),fail=document.getElementById('nogpu'),loading=document.getElementById('loading'),hb=document.getElementById('heartbeat'),fps=document.getElementById('v4fps'),stats=document.getElementById('v4stats');
+const query=new URLSearchParams(location.search),lab745=query.get('lab745')==='1';
 let seconds=0,rafs=0,lastRafs=0;requestAnimationFrame(function tick(){rafs++;requestAnimationFrame(tick)});
-setInterval(()=>{seconds++;const delta=rafs-lastRafs;lastRafs=rafs;fps.textContent=`${delta} FPS`;const g=window.__v5M739Unified,s=window.__v5M743Scenes;hb.textContent=`JS ${seconds}s · RAF ${delta}/s · submits ${g?.submitted||0} · unified ${g?.unifiedFrames||0} · scene ${s?.active||'baseline'} · seeds ${s?.seedCount||0}`;if(stats&&g)stats.textContent=`ONE GPU SUBMIT/FRAME · SCENE EXTRA SUBMITS 0 · unexpected ${g.unexpected} · open ${g.open?'YES':'NO'}`},1000);
+setInterval(()=>{seconds++;const delta=rafs-lastRafs;lastRafs=rafs;fps.textContent=`${delta} FPS`;const g=window.__v5M739Unified,s=window.__v5M743Scenes,w=window.__v5M745WaveLab;hb.textContent=`JS ${seconds}s · RAF ${delta}/s · submits ${g?.submitted||0} · unified ${g?.unifiedFrames||0} · scene ${w?.enabled?('wave-'+w.kind):(s?.active||'baseline')} · seeds ${s?.seedCount||0}`;if(stats&&g)stats.textContent=`ONE GPU SUBMIT/FRAME · EXTRA FEATURE SUBMITS 0 · unexpected ${g.unexpected} · open ${g.open?'YES':'NO'}`},1000);
 try{
  note.textContent='starting proven M7.3.9 unified scheduler…';
  await import('./src/v5-ios-unified-m739.js');
- window.__fluidV5Version='7.4.3';window.__fluidV5Build='M7.4.3 SCENES ONLY / M7.3.9 GPU CORE';
- const title=document.querySelector('.hud.card.title');if(title)title.textContent='FLUID V5 · M7.4.3';document.title='Fluid V5 · M7.4.3 Scenes-Only';
+ window.__fluidV5Version=lab745?'7.4.5':'7.4.3';window.__fluidV5Build=lab745?'M7.4.5 WAVE LAB / M7.3.9 GPU CORE':'M7.4.3 SCENES ONLY / M7.3.9 GPU CORE';
+ const title=document.querySelector('.hud.card.title');if(title)title.textContent=lab745?'FLUID V5 · M7.4.5':'FLUID V5 · M7.4.3';document.title=lab745?'Fluid V5 · M7.4.5 Wave Lab':'Fluid V5 · M7.4.3 Scenes-Only';
  note.textContent='adding Settings UI only…';await import('./src/v5-settings-only-m742.js');
  note.textContent='adding Pool/Dam scene seeding inside unified frame…';await import('./src/v5-scenes-only-m743.js');
+ if(lab745){note.textContent='adding spectral Wave Lab inside unified frame…';await import('./src/v5-wave-lab-m745.js')}
  const dev=window.__sim?.dev;if(dev?.lost)dev.lost.then(info=>{hb.style.color='#ff9f9f';hb.textContent=`DEVICE LOST: ${info?.reason||'unknown'} ${info?.message||''}`});
  loading.classList.add('gone');
-}catch(err){console.error('[M7.4.3 boot]',err);loading.classList.add('gone');fail.style.display='block';fail.textContent='M7.4.3 ERROR\n\n'+String(err?.message||err)+'\n\n'+String(err?.stack||'')}
+}catch(err){console.error('[Unified scenes boot]',err);loading.classList.add('gone');fail.style.display='block';fail.textContent=(lab745?'M7.4.5':'M7.4.3')+' ERROR\n\n'+String(err?.message||err)+'\n\n'+String(err?.stack||'')}
 </script>
 </body></html>

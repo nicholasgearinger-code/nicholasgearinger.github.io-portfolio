@@ -25,13 +25,6 @@ src=src.replace('const width=b[2]*clamp(Number(state.gravityPourWidth)||.72,.38,
 src=src.replace('const wallTop=Math.min(b[1]-d*2.2,floorY+Math.max(d*8.5,b[1]*.20));','const wallTop=Math.min(b[1]-d*.72,floorY+Math.max(d*13.0,b[1]*.30));');
 src=src.replace('const upperWanted=Math.round(nFluid*clamp(Number(state.gravityPourVolume)||.46,.24,.62));','const upperWanted=Math.round(nFluid*clamp(Number(state.gravityPourVolume)||.68,.34,.74));');
 
-// The scene requests a numerical floor. M4.0 remains authoritative and may raise this further from
-// its spacing/speed CFL test. The water itself still starts with zero velocity.
-src=src.replace('function tune(on){\n if(on&&!wasActive)',`function tune(on){
- if(on){window.__v5SolverFloor={owner:'m70',substeps:quality==='low'?4:quality==='high'?6:5,iterations:quality==='low'?6:quality==='high'?10:8,maxSubsteps:quality==='high'?10:8,cfl:true};}
- else if(window.__v5SolverFloor?.owner==='m70'){window.__v5SolverFloor=null;}
- if(on&&!wasActive)`);
-
 // M7 material settings are modest. Accuracy comes from the shared solver controller, not from
 // scene-specific artificial cohesion or velocity forcing.
 src=src.replace("sim.params.substeps=Math.max(Number(sim.params.substeps)||2,quality==='high'?5:4);","sim.params.substeps=Math.max(Number(sim.params.substeps)||2,quality==='low'?4:quality==='high'?6:5);");
@@ -56,6 +49,21 @@ try{await import(blob);}finally{URL.revokeObjectURL(blob);}
 
 const sim=window.__sim,state=window.__v5State;
 const active=()=>state?.scenario==='gravity-pour-m70';
+const quality=new URLSearchParams(location.search).get('quality')||'medium';
+const solverFloor=()=>({owner:'m70',substeps:quality==='low'?4:quality==='high'?6:5,iterations:quality==='low'?6:quality==='high'?10:8,maxSubsteps:quality==='high'?10:8,cfl:true});
+
+// This wrapper is deliberately installed OUTSIDE the canonical scene wrapper. It therefore runs
+// before M7 tune() and, critically, before M4.0 adapt(). The shared M4 solver sees the floor on the
+// same frame as the actual PBF step, so the HUD's real substep count must reflect it.
+if(sim?.step&&!sim.__m70SolverFloorStep){
+ const sceneStep=sim.step.bind(sim);
+ sim.__m70SolverFloorStep=sceneStep;
+ sim.step=function(frameDt){
+  if(active())window.__v5SolverFloor=solverFloor();
+  else if(window.__v5SolverFloor?.owner==='m70')window.__v5SolverFloor=null;
+  return sceneStep(frameDt);
+ };
+}
 
 // Strict benchmark isolation: no module may append new PRIMARY PBF mass while this experiment is
 // active. Secondary spray/detail systems are separate buffers and continue to operate normally.
@@ -79,11 +87,11 @@ setInterval(()=>{
  const on=active();
  if(on&&!wasActive)massReference=Number(sim?.n)||0;
  if(on){
-  const S=window.__v5GravityPourM70;if(S){S.massReference=massReference;S.massCurrent=Number(sim?.n)||0;S.massDrift=(Number(sim?.n)||0)-massReference;S.solverFloor=window.__v5SolverFloor||null;S.revision=3;S.highVolume=true;S.massConserved=S.massDrift===0;}
+  const S=window.__v5GravityPourM70;if(S){S.massReference=massReference;S.massCurrent=Number(sim?.n)||0;S.massDrift=(Number(sim?.n)||0)-massReference;S.solverFloor=window.__v5SolverFloor||solverFloor();S.revision=3;S.highVolume=true;S.massConserved=S.massDrift===0;}
  }
  if(!on&&window.__v5SolverFloor?.owner==='m70')window.__v5SolverFloor=null;
  wasActive=on;
 },120);
 
 if(window.__v5GravityPourM70){window.__v5GravityPourM70.backend='solver-authoritative-gated-pour-pbf-m70';window.__v5GravityPourM70.revision=3;window.__v5GravityPourM70.highVolume=true;window.__v5GravityPourM70.fixedPrimaryMass=true;}
-console.info('[Fluid V5 M7.0] revision 3: CFL solver floor + fixed-primary-mass gravity pour online.');
+console.info('[Fluid V5 M7.0] revision 3: guaranteed solver floor + fixed-primary-mass gravity pour online.');

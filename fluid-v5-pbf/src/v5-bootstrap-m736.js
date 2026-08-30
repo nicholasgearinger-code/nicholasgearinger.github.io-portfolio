@@ -68,8 +68,8 @@ await optional('./v5-xpbd-density-m50.js', 'XPBD density');
 await optional('./v5-rigid-hydro-m51.js', 'rigid hydrodynamics');
 await optional('./v5-surface-m42.js', 'surface controller');
 
-// Scene drivers remain available, but the expensive whitewater/microdrop/volumetric stacks are
-// not installed during boot. We will add them back only behind explicit performance toggles.
+// Scene drivers remain available, but expensive whitewater/microdrop/volumetric stacks are not
+// installed during boot. They can be reintroduced later behind explicit performance toggles.
 await optional('./v5-scenarios-m46.js', 'advanced scenarios');
 await optional('./v5-rain-waterfall-m562.js', 'rain and waterfall');
 await optional('./v5-ripples-m57.js', 'physical ripples');
@@ -95,10 +95,16 @@ if (autoGravity) {
 stamp();
 window.__v5M736Ready=true;
 if (stats) stats.textContent = `BUILD: M7.3.6 · ATOMIC STABLE · ${stats.textContent || 'ready'}`;
+phase('finalizing settings…');
 
-// Leave boot paused only long enough for one compositor turn, then start exactly once.
-await new Promise(requestAnimationFrame);
-ui.paused = wasPaused;
-phase('ready');
-if (loading) { loading.classList.remove('v5hold'); loading.classList.add('gone'); }
-console.info('[Fluid V5 M7.3.6] atomic stable module graph ready; no late boot imports remain.');
+let released=false;
+window.__v5M736Release = async function releaseM736(){
+  if(released)return;
+  released=true;
+  stamp();
+  await new Promise(requestAnimationFrame);
+  ui.paused = wasPaused;
+  if (loading) { loading.classList.remove('v5hold'); loading.classList.add('gone'); }
+  console.info('[Fluid V5 M7.3.6] atomic stable module graph released; no late boot imports remain.');
+};
+console.info('[Fluid V5 M7.3.6] essential graph ready and held for final settings install.');

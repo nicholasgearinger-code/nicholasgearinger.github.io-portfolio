@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#06131a">
+<title>Fluid V5 · M7.5.1 Restored Scene Behavior</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#06131a;color:#dffcff;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}#view{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}#upstream-ui,#debugpanel{display:none!important}#loading{position:fixed;inset:0;z-index:120;display:grid;place-content:center;justify-items:center;gap:10px;background:#06131a;transition:opacity .25s ease}#loading.gone{opacity:0;pointer-events:none}#loading h2{font-size:14px;letter-spacing:.12em;color:#86f6ff}#loadnote{font-size:11px;color:#8ba7b2;text-align:center;max-width:80vw}#nogpu{display:none;position:fixed;inset:0;z-index:130;padding:18vh 8vw;background:#06131a;color:#ff9f9f;white-space:pre-wrap;font:12px/1.5 ui-monospace;overflow:auto}.hud{position:fixed;z-index:10;pointer-events:none}.card{background:rgba(6,22,29,.86);border:1px solid rgba(84,218,222,.42);border-radius:13px;box-shadow:0 7px 24px rgba(0,0,0,.18)}.title{left:max(12px,env(safe-area-inset-left));top:max(12px,env(safe-area-inset-top));padding:10px 13px;color:#86f6ff;font-weight:800;letter-spacing:.12em;font-size:13px}.perf{right:max(12px,env(safe-area-inset-right));top:max(12px,env(safe-area-inset-top));padding:9px 11px;text-align:right;min-width:185px}.fps{font-size:20px;font-weight:800;color:#9dffc8}.status{font-size:9px;line-height:1.45;color:#9fc1cf}.heartbeat{position:fixed;left:max(12px,env(safe-area-inset-left));bottom:max(12px,env(safe-area-inset-bottom));z-index:15;padding:8px 10px;font:9px/1.45 ui-monospace;color:#9dffc8}.settings,.controls,.hint,#license{display:none!important}
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<div id="loading"><h2>FLUID V5 · M7.5.1</h2><div id="loadnote">starting one-submit core + restored continuous scene behavior…</div></div>
+<div id="nogpu"></div>
+<div class="hud card title">FLUID V5 · M7.5.1</div>
+<div class="hud card perf"><div id="v4fps" class="fps">-- FPS</div><div id="v4mode" class="status">WATER MODE</div><div id="v4stats" class="status">PBF + SSFR · one submit</div></div>
+<div id="heartbeat" class="card heartbeat">JS heartbeat: starting…</div>
+<div id="settingsPanel" class="settings hidden"><div class="settingsTitle">SETTINGS</div><div class="qualityRow"><button class="qbtn" data-quality="low">LOW</button><button class="qbtn" data-quality="medium">MED</button><button class="qbtn" data-quality="high">HIGH</button></div><div id="qualityNote"></div></div>
+<button id="settingsBtn"></button><div id="v4hint" class="hint"></div><div class="controls"><button id="modeBtn"></button><button id="dropBtn"></button><button id="pauseV4"></button><button id="resetV4"></button></div><div id="license"></div>
+<div id="upstream-ui"><div id="ui"><button data-preset="small"></button><button data-preset="medium"></button><button data-preset="large"></button><button id="reset"></button><button id="pour"></button><span id="pourleft"></span><button id="pause"></button><button id="resetcam"></button><button id="nobodies"></button><button id="grabmode"></button><input id="inifile" type="file"><button id="loadini"></button><div id="ininote"></div><div id="pourrate"></div><div id="sceneinfo"></div><div id="meshinfo"></div><div id="envinfo"></div><input id="envfile" type="file"><button id="envclear"></button><button id="floorplane"></button><select id="viewmode"><option value="0"></option><option value="1"></option><option value="2"></option><option value="3"></option></select><select id="raysurface"><option value="0"></option><option value="1"></option><option value="2"></option></select><select id="ssfrfilter"><option value="0"></option><option value="1"></option><option value="2"></option></select><select id="ssfrdebug"><option value="0"></option></select><select id="raydebug"><option value="0"></option></select><div id="surfacegroup"></div><div id="raygroup"></div><div id="ssfrgroup"></div><div id="envgroup"></div><pre id="stats"></pre><pre id="timing"></pre><span id="adapter"></span><label><input id="normalsmooth" type="range"><span id="normalsmoothv"></span></label><div id="sliderBank"></div></div></div><div id="debugpanel" hidden><button id="debugclose"></button></div>
+<script>const ids=['ssfrscale','boxx','pourspeed','pourwidth','pourheight','pourtilt','timescale','substeps','iters','omega','xsph','scorr','fradius','fstrength','flimit','grab','camspeed','tension','radius','meshres','fieldsmooth','meshiso','ior','absorption','thicksteps','groundrefl','roughness','sunint','sunelev','sunazim','exposure','envintensity','envyaw','ssfrradius','anisoratio','ssfriters','ssfrsigma','ssfrdelta','ssfrmu','ssfrthickr','ssfrthick','ssfrthickblur','ssfrdepthcull'];const bank=document.getElementById('sliderBank');for(const id of ids){const l=document.createElement('label'),i=document.createElement('input'),s=document.createElement('span');i.type='range';i.id=id;s.id=id+'v';l.append(i,s);bank.append(l)}</script>
+<script type="module">
+const note=document.getElementById('loadnote'),fail=document.getElementById('nogpu'),loading=document.getElementById('loading'),hb=document.getElementById('heartbeat'),fps=document.getElementById('v4fps'),stats=document.getElementById('v4stats');
+let seconds=0,rafs=0,lastRafs=0;requestAnimationFrame(function tick(){rafs++;requestAnimationFrame(tick)});
+setInterval(()=>{seconds++;const delta=rafs-lastRafs;lastRafs=rafs;fps.textContent=`${delta} FPS`;const g=window.__v5M739Unified,s=window.__v5M743Scenes,w=window.__v5M745WaveLab,r=window.__v5M746Realism,a=window.__v5M747WaterLook,p=window.__v5M748PoolMaterial,e=window.__v5M749PoolEnvironment,x=window.__v5M751PhysicalScenes;const scene=x?.active&&x.active!=='none'?x.active:(w?.enabled?('wave-'+w.kind):(s?.active||'pool'));hb.textContent=`JS ${seconds}s · RAF ${delta}/s · submits ${g?.submitted||0} · unified ${g?.unifiedFrames||0} · ${scene} · pulses ${x?.pulses||0} · pool ${p?.online?'V4':'--'}`;if(stats&&g)stats.textContent=`ONE GPU SUBMIT/FRAME · restored scene ${x?.active&&x.active!=='none'?'ON':'OFF'} · scene submits 0 · realism ${r?.online?'ON':'OFF'} · V4 HDR ${e?.loaded?'ON':'OFF'} · unexpected ${g.unexpected}`},1000);
+try{
+ note.textContent='starting proven M7.3.9 unified scheduler…';await import('./src/v5-ios-unified-m739.js');
+ window.__fluidV5Version='7.5.1';window.__fluidV5Build='M7.5.1 LEGACY SCENE FIDELITY / M7.3.9 GPU CORE';
+ note.textContent='adding Settings UI…';await import('./src/v5-settings-only-m742.js');
+ note.textContent='adding safe scene seeds…';await import('./src/v5-scenes-only-m743.js');
+ note.textContent='adding spectral Wave Lab…';await import('./src/v5-wave-lab-m745.js');
+ note.textContent='restoring shader-only realism…';await import('./src/v5-realism-shader-m746.js');
+ note.textContent='adding water-body controls…';await import('./src/v5-water-appearance-m747.js');
+ note.textContent='restoring V4 clear pool optics + tiled liner…';await import('./src/v5-pool-material-m748.js');
+ note.textContent='restoring V4 neutral reflection environment…';await import('./src/v5-pool-environment-m749.js');
+ note.textContent='restoring continuous legacy scene behavior…';await import('./src/v5-physical-scenes-m751.js');
+ const dev=window.__sim?.dev;if(dev?.lost)dev.lost.then(info=>{hb.style.color='#ff9f9f';hb.textContent=`DEVICE LOST: ${info?.reason||'unknown'} ${info?.message||''}`});
+ loading.classList.add('gone');
+}catch(err){console.error('[M7.5.1 boot]',err);loading.classList.add('gone');fail.style.display='block';fail.textContent='M7.5.1 ERROR\n\n'+String(err?.message||err)+'\n\n'+String(err?.stack||'')}
+</script>
+</body></html>

@@ -12,7 +12,7 @@ const shader=`
 struct WaveU {
   box:vec4f,
   drive:vec4f,
-  meta:vec4u,
+  info:vec4u,
 }
 @group(0) @binding(0) var<uniform> U:WaveU;
 @group(0) @binding(1) var<storage,read> pos:array<vec4f>;
@@ -20,18 +20,18 @@ struct WaveU {
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid:vec3u){
   let i=gid.x;
-  if(i>=U.meta.x){return;}
+  if(i>=U.info.x){return;}
   let p=pos[i].xyz;
   let band=max(U.drive.z,0.001);
   let edge=1.0-clamp((p.x-U.drive.w)/band,0.0,1.0);
   if(edge<=0.0){return;}
   let surfaceWeight=0.35+0.65*clamp(p.y/max(U.box.y*0.48,0.001),0.0,1.0);
-  let phase=U.drive.x;
-  let target=sin(phase)*U.drive.y*edge*surfaceWeight;
+  let phaseValue=U.drive.x;
+  let targetVelocity=sin(phaseValue)*U.drive.y*edge*surfaceWeight;
   var v=vel[i];
   let follow=clamp(0.12+0.22*edge,0.0,0.42);
-  v.x=mix(v.x,target,follow);
-  v.y+=cos(phase)*U.drive.y*0.012*edge*surfaceWeight;
+  v.x=mix(v.x,targetVelocity,follow);
+  v.y+=cos(phaseValue)*U.drive.y*0.012*edge*surfaceWeight;
   vel[i]=v;
 }`;
 const mod=dev.createShaderModule({code:shader,label:'fluidV5M744WaveWGSL'});

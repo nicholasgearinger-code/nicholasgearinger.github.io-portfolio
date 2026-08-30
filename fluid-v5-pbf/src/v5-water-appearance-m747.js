@@ -1,17 +1,19 @@
-// Fluid V5 M7.4.7 — water-body optical appearance controls.
+// Fluid V5 M7.4.7.1 — water-body optical appearance controls.
 // This module changes ONLY existing SSFR material uniforms and M7.4.6 realism parameters.
 // It creates no GPU passes, command encoders or queue submissions.
 
 const ssfr=window.__ssfr;
 const realism=window.__fluidV44Realism;
 if(!ssfr||!realism||!window.__v5M746Realism?.online)
-  throw new Error('M7.4.7 water appearance: M7.4.6 realism runtime unavailable.');
+  throw new Error('M7.4.7.1 water appearance: M7.4.6 realism runtime unavailable.');
 
 const looks={
   POOL:{
-    transmit:[0.27,0.66,0.91], absorption:0.58, roughness:0.032, thickness:0.82,
-    scattering:0.18, dispersion:0.10, foam:0.08, shafts:0.12, micro:0.22,
-    note:'Clear chlorinated pool: high transmission, low turbidity, bright cyan/blue water.'
+    // Reference-matched clear pool: nearly colorless at short paths, pale aqua through depth.
+    // High RGB transmission keeps the basin/tile visible; slightly lower red produces the blue-cyan depth cue.
+    transmit:[0.76,0.91,0.97], absorption:0.34, roughness:0.028, thickness:0.72,
+    scattering:0.10, dispersion:0.05, foam:0.05, shafts:0.10, micro:0.18,
+    note:'Clear pale-aqua pool: very high transmission and low turbidity, with blue/cyan emerging mainly over longer optical paths.'
   },
   POND:{
     transmit:[0.34,0.55,0.24], absorption:1.18, roughness:0.075, thickness:1.02,
@@ -75,7 +77,7 @@ function sync(refresh=false){
 
 if(page){
   const sec=document.createElement('div');sec.className='m742Section';
-  sec.innerHTML='<div class="m742SectionTitle">WATER BODY APPEARANCE · M7.4.7</div>';
+  sec.innerHTML='<div class="m742SectionTitle">WATER BODY APPEARANCE · M7.4.7.1</div>';
   const grid=document.createElement('div');grid.className='m742Grid';
   for(const name of ['POOL','POND','OCEAN','TROPICAL']){
     const b=document.createElement('button');b.className='m742Btn';b.textContent=name;
@@ -97,7 +99,7 @@ if(page){
 
 applyPreset('POOL');
 window.__v5M747WaterLook={online:true,backend:'existing-ssfr-material-only',gpuPassesAdded:0,gpuSubmitsAdded:0,looks,state,get active(){return active},applyPreset};
-window.__fluidV5Version='7.4.7';
-const title=document.querySelector('.hud.card.title');if(title)title.textContent='FLUID V5 · M7.4.7';
-document.title='Fluid V5 · M7.4.7 Water Bodies';
-console.info('[Fluid V5 M7.4.7] water-body optical presets online; zero extra GPU passes/submits.');
+window.__fluidV5Version='7.4.7.1';
+const title=document.querySelector('.hud.card.title');if(title)title.textContent='FLUID V5 · M7.4.7.1';
+document.title='Fluid V5 · M7.4.7.1 Water Bodies';
+console.info('[Fluid V5 M7.4.7.1] clear-pool reference tuning online; zero extra GPU passes/submits.');

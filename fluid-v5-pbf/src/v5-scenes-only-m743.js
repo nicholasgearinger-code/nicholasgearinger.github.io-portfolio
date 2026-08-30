@@ -149,3 +149,12 @@ if(scenePage){
 
 window.__v5M743Scenes={online:true,backend:'unified-static-scene-seed-m743',choose,get active(){return active},get pending(){return pending},get seedCount(){return seedCount}};
 console.info('[Fluid V5 M7.4.3] Pool/Dam static scene controller online; zero extra queue submits.');
+
+// M7.4.4 is opt-in so the known-good M7.4.3 behavior remains available at the same source path.
+if(new URLSearchParams(location.search).get('wave744')==='1'){
+  await import('./v5-wave-unified-m744.js');
+  window.__fluidV5Version='7.4.4';
+  window.__fluidV5Build='M7.4.4 WAVE TANK / M7.3.9 GPU CORE';
+  const title=document.querySelector('.hud.card.title');if(title)title.textContent='FLUID V5 · M7.4.4';
+  document.title='Fluid V5 · M7.4.4 Wave Tank';
+}

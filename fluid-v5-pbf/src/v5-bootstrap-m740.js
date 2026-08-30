@@ -10,13 +10,13 @@ async function optional(path,label){phase(`loading ${label}…`);try{await impor
 
 const wasPaused=!!ui.paused;ui.paused=true;
 try{
-  // Do not let a persisted auto-quality setting reload the page while the feature graph mounts.
-  try{const k='fluidV5LabStateV1',s=JSON.parse(localStorage.getItem(k)||'null');if(s&&typeof s==='object'){s.autoQuality=false;localStorage.setItem(k,JSON.stringify(s))}localStorage.setItem('fluidV5AutoQualityV1','0')}catch{}
+  // Do not let persisted state reload the page or enter a not-yet-unified scene while the graph mounts.
+  try{const k='fluidV5LabStateV1',s=JSON.parse(localStorage.getItem(k)||'null');if(s&&typeof s==='object'){s.autoQuality=false;if(s.scenario==='gravity-pour-m71')s.scenario='pool';localStorage.setItem(k,JSON.stringify(s))}localStorage.setItem('fluidV5AutoQualityV1','0')}catch{}
 
   phase('loading physical scene state…');
   await optional('./wave-test-v44.js','wave driver');
   await import('./v5-lab.js');
-  if(window.__v5State){window.__v5State.autoQuality=false;window.__v5State.vorticity=0;window.__v5State.hydroDrag=0;window.__v5State.xpbdDensity=0;try{localStorage.setItem('fluidV5LabStateV1',JSON.stringify(window.__v5State))}catch{}}
+  if(window.__v5State){window.__v5State.autoQuality=false;if(window.__v5State.scenario==='gravity-pour-m71')window.__v5State.scenario='pool';window.__v5State.vorticity=0;window.__v5State.hydroDrag=0;window.__v5State.xpbdDensity=0;try{localStorage.setItem('fluidV5LabStateV1',JSON.stringify(window.__v5State))}catch{}}
 
   phase('restoring full-floor physical pool…');
   await optional('./v5-pool-slab-m740.js','unified pool slab');

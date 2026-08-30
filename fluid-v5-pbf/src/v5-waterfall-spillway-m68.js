@@ -1,8 +1,7 @@
 // Fluid V5 M6.8 elevated-reservoir spillway.
-// This replaces nozzle-driven waterfall shaping with terrain + gravity. The same PBF liquid that
-// fills the upper reservoir flows down a gently sloped shelf, crosses a real unsupported lip, falls
-// under gravity, impacts the lower pool, and is quietly recirculated from a deep lower intake back
-// into the rear of the upper reservoir. No ballistic guide, analytic curtain, or waterfall tag is used.
+// The same PBF liquid fills an upper reservoir, accelerates across a real shelf, crosses an
+// unsupported edge, free-falls under gravity, impacts the lower pool, and is recirculated only from
+// a deep downstream intake back to the rear reservoir. No ballistic waterfall trajectory is imposed.
 
 const sim=window.__sim,ui=window.__ui,state=window.__v5State,ssfr=window.__ssfr;
 if(!sim?.dev||!ui||!state||!ssfr)throw new Error('Fluid V5 M6.8 spillway: runtime unavailable.');
@@ -13,38 +12,55 @@ const ACTIVE='waterfall-m68';
 const active=()=>state.scenario===ACTIVE;
 const save=()=>{try{localStorage.setItem('fluidV5LabStateV1',JSON.stringify(state));}catch{}};
 
+if(!Number.isFinite(Number(state.waterfallSpillWidth)))state.waterfallSpillWidth=.94;
+if(!Number.isFinite(Number(state.waterfallSpillHeight)))state.waterfallSpillHeight=.76;
+if(!Number.isFinite(Number(state.waterfallFlow)))state.waterfallFlow=1.05;
+state.waterfallSpillWidth=clamp(Number(state.waterfallSpillWidth),.70,.985);
+state.waterfallSpillHeight=clamp(Number(state.waterfallSpillHeight),.62,.82);
+state.waterfallFlow=clamp(Number(state.waterfallFlow),.55,1.65);
+save();
+
 function geom(){
  const b=sim.params.box,d=sim.params.spacing;
- const lipX=b[0]*.385;
- const shelfY=b[1]*.63;
- const z0=b[2]*.075;
- const z1=b[2]*.925;
- const rise=Math.min(.10,b[1]*.045);
- const wallTop=Math.min(b[1]-d*2.6,shelfY+.78);
+ const widthFrac=clamp(Number(state.waterfallSpillWidth)||.94,.70,.985);
+ const shelfFrac=clamp(Number(state.waterfallSpillHeight)||.76,.62,.82);
+ const flow=clamp(Number(state.waterfallFlow)||1.05,.55,1.65);
+ // A longer upper reach gives the reservoir enough volume to develop pressure before the lip.
+ const lipX=b[0]*.54;
+ const shelfY=b[1]*shelfFrac;
+ const spillWidth=b[2]*widthFrac;
+ const z0=(b[2]-spillWidth)*.5;
+ const z1=z0+spillWidth;
+ // A shallow downhill approach accelerates the physical water without prescribing its velocity.
+ const rise=Math.min(.095,b[1]*.038);
+ const wallTop=b[1]-d*2.6;
  const lowerNx=Math.max(2,Math.floor((b[0]-3*d)/d));
  const lowerNz=Math.max(2,Math.floor((b[2]-3*d)/d));
  const upperNx=Math.max(3,Math.floor((lipX-3*d)/d));
  const upperNz=Math.max(3,Math.floor((z1-z0-3*d)/d));
  const nFluid=Math.max(1,Number(sim.scene?.nFluid)||Math.max(1,sim.n-(sim.nBodyParts||0)));
- const desiredUpper=Math.round(nFluid*(quality==='low'?.24:quality==='high'?.28:.26));
- const maxUpperLayers=Math.max(4,Math.floor((wallTop-(shelfY+rise)-2*d)/d));
+ const baseUpper=quality==='low'?.28:quality==='high'?.36:.33;
+ const desiredUpper=Math.round(nFluid*baseUpper);
+ const maxUpperLayers=Math.max(4,Math.floor((wallTop-(shelfY+rise)-d*1.15)/d));
  const upperCap=Math.max(1,upperNx*upperNz*maxUpperLayers);
  const upperN=Math.min(desiredUpper,upperCap);
  const lowerN=Math.max(1,nFluid-upperN);
  const lowerLayers=Math.ceil(lowerN/(lowerNx*lowerNz));
- const lowerSurface=Math.min(shelfY-d*4,d*(.75+lowerLayers));
+ const lowerSurface=Math.min(shelfY-d*5,d*(.75+lowerLayers));
  const upperLayers=Math.ceil(upperN/(upperNx*upperNz));
- const upperSurface=Math.min(wallTop-d*1.2,shelfY+rise*.55+d*(.8+upperLayers));
- const intakeX=b[0]*.68;
- const intakeY=Math.max(d*2.2,lowerSurface*.52);
- const pumpPeriod=quality==='low'?250:quality==='high'?145:185;
- return{b,d,lipX,shelfY,z0,z1,rise,wallTop,lowerNx,lowerNz,upperNx,upperNz,
-  nFluid,upperN,lowerN,lowerSurface,upperSurface,intakeX,intakeY,pumpPeriod};
+ const upperSurface=Math.min(wallTop-d*1.05,shelfY+rise*.55+d*(.8+upperLayers));
+ const intakeX=b[0]*.72;
+ const intakeY=Math.max(d*2.2,lowerSurface*.50);
+ const basePump=quality==='low'?255:quality==='high'?145:185;
+ const pumpPeriod=clamp(Math.round(basePump/flow),82,420);
+ return{b,d,lipX,shelfY,z0,z1,spillWidth,widthFrac,shelfFrac,flow,rise,wallTop,
+  lowerNx,lowerNz,upperNx,upperNz,nFluid,upperN,lowerN,lowerSurface,upperSurface,
+  intakeX,intakeY,pumpPeriod};
 }
 
 // ---------- Static PBF boundary construction --------------------------------------------------
-// The upstream solver already treats sampled boundary particles as solid terrain. M6.8 augments the
-// normal outer box with a sloped upper shelf, side walls, and the vertical cliff below the spill lip.
+// The upstream PBF density solve already handles sampled solid boundary particles. We add a tall
+// spillway shelf, cliff and side retaining walls to that native boundary field.
 function buildBoundary(){
  const g=geom(),d=g.d,h=sim.h,b=g.b;
  const pts=[];
@@ -59,23 +75,22 @@ function buildBoundary(){
  for(let i=0;i<base.length;i+=3)add(base[i],base[i+1],base[i+2]);
  const step=d*.92;
  const floorY=x=>g.shelfY+g.rise*(1-clamp(x/Math.max(g.lipX,1e-4),0,1));
- // Sloped approach shelf.
+ // Broad, gently sloped approach shelf.
  for(let x=d;x<=g.lipX+step*.25;x+=step){
   const y=floorY(x);
   for(let z=g.z0;z<=g.z1+step*.25;z+=step)add(x,y,z);
  }
- // Tall vertical cliff beneath the lip. It stops at the shelf surface, so water above the shelf
- // crosses the lip freely and immediately loses support.
+ // Tall cliff directly below the unsupported edge.
  for(let y=d;y<=g.shelfY+step*.15;y+=step)
   for(let z=g.z0;z<=g.z1+step*.25;z+=step)add(g.lipX,y,z);
- // Side walls retain the upper reservoir and channel the sheet to a broad spill width.
+ // Retaining/channel walls end exactly at the lip, so the entire adjustable width can spill.
  for(const z of [g.z0,g.z1]){
   for(let x=d;x<=g.lipX+step*.25;x+=step){
    const fy=floorY(x);
    for(let y=fy;y<=g.wallTop+step*.25;y+=step)add(x,y,z);
   }
  }
- // A second shelf skin just below the first reduces tunnelling without creating a fake flow force.
+ // Second shelf skin reduces high-speed tunnelling while remaining purely collision geometry.
  for(let x=d;x<=g.lipX+step*.25;x+=step){
   const y=floorY(x)-d*.55;
   for(let z=g.z0;z<=g.z1+step*.25;z+=step)add(x,y,z);
@@ -125,7 +140,7 @@ function installBoundary(){
  dev.queue.writeBuffer(sim.buf.bcellStart,0,sorted.cellStart);
  sim.nBoundary=n;sim.scene.boundary={pts:bd.pts,psi:bd.psi,count:n};
  sim.uploadParams(1/240);sim.buildBindGroups();
- const S=window.__v5WaterfallM68;if(S){S.boundarySamples=n;S.lipX=bd.g.lipX;S.shelfY=bd.g.shelfY;S.dropHeight=bd.g.shelfY-bd.g.lowerSurface;}
+ const S=window.__v5WaterfallM68;if(S){S.boundarySamples=n;S.lipX=bd.g.lipX;S.shelfY=bd.g.shelfY;S.dropHeight=bd.g.shelfY-bd.g.lowerSurface;S.spillWidth=bd.g.spillWidth;}
 }
 
 // ---------- Initial two-level water distribution ----------------------------------------------
@@ -162,15 +177,12 @@ function seedWater(){
  const enc=dev.createCommandEncoder({label:'fluidV5M68SeedEncoder'});enc.clearBuffer(seedCounter);
  const bg=dev.createBindGroup({layout:seedPipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:seedUni}},{binding:1,resource:{buffer:sim.livePos()}},{binding:2,resource:{buffer:sim.liveVel()}},{binding:3,resource:{buffer:sim.liveBody()}},{binding:4,resource:{buffer:seedCounter}}]});
  const cp=enc.beginComputePass();cp.setPipeline(seedPipe);cp.setBindGroup(0,bg);cp.dispatchWorkgroups(Math.max(1,Math.ceil(sim.n/256)));cp.end();dev.queue.submit([enc.finish()]);
- // Rebuild the neighbour ordering from the new two-level distribution before the next visible step.
  sim.primeGrid();
- const S=window.__v5WaterfallM68;if(S){S.upperParticles=g.upperN;S.lowerParticles=g.lowerN;S.upperSurface=g.upperSurface;S.lowerSurface=g.lowerSurface;S.dropHeight=g.shelfY-g.lowerSurface;}
+ const S=window.__v5WaterfallM68;if(S){S.upperParticles=g.upperN;S.lowerParticles=g.lowerN;S.upperSurface=g.upperSurface;S.lowerSurface=g.lowerSurface;S.dropHeight=g.shelfY-g.lowerSurface;S.spillWidth=g.spillWidth;}
 }
 
 // ---------- Hidden recirculation pump ----------------------------------------------------------
-// The pump never places water into the waterfall itself. It only lifts deep lower-pool water into
-// the rear submerged portion of the upper reservoir, where ordinary pressure + gravity determine
-// how and when it reaches the spill lip.
+// The pump changes reservoir head/flow rate only. It never injects a trajectory at the waterfall.
 const pumpUni=dev.createBuffer({label:'fluidV5M68PumpUniform',size:80,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
 const PF=new Float32Array(20),PU=new Uint32Array(PF.buffer);
 const pumpWGSL=`
@@ -185,10 +197,10 @@ fn hash1(x0:u32)->f32{var x=x0;x=x^(x>>16u);x=x*0x7feb352du;x=x^(x>>15u);x=x*0x8
  if(p.x<C.g1.x||p.y>C.g1.y||p.z<C.g0.z||p.z>C.g0.w){return;}
  let period=max(C.meta.y,1u);let s=i^(C.meta.z*747796405u);if((s+C.meta.z*1664525u)%period!=0u){return;}
  let h0=hash1(s+17u);let h1=hash1(s+101u);let h2=hash1(s+313u);let d=C.g1.z;
- let x=d*(1.8+h0*2.8);let floorY=C.g0.x+C.g2.x*(1.0-clamp(x/max(C.g0.y,0.0001),0.0,1.0));
+ let x=d*(1.8+h0*3.6);let floorY=C.g0.x+C.g2.x*(1.0-clamp(x/max(C.g0.y,0.0001),0.0,1.0));
  let z=C.g0.z+d*2.0+h1*max(C.g0.w-C.g0.z-d*4.0,d);
- let y=floorY+d*(2.2+h2*6.2);
- P[i]=vec4<f32>(x,y,z,1.0);V[i]=vec4<f32>(0.035+h0*.025,0.0,(h1-.5)*.012,0.0);
+ let y=floorY+d*(2.0+h2*7.0);
+ P[i]=vec4<f32>(x,y,z,1.0);V[i]=vec4<f32>(0.020+h0*.018,0.0,(h1-.5)*.008,0.0);
 }`;
 const pumpMod=dev.createShaderModule({code:pumpWGSL,label:'fluidV5M68PumpWGSL'});
 const pumpPipe=await dev.createComputePipelineAsync({label:'fluidV5M68Recirculation',layout:'auto',compute:{module:pumpMod,entryPoint:'main'}});
@@ -197,7 +209,7 @@ function recirculate(){
  if(!active()||ui.paused||!sim.n)return;const g=geom();PF.fill(0);PF[0]=g.shelfY;PF[1]=g.lipX;PF[2]=g.z0;PF[3]=g.z1;PF[4]=g.intakeX;PF[5]=g.intakeY;PF[6]=g.d;PF[7]=g.upperSurface;PF[8]=g.rise;PU[12]=sim.n;PU[13]=g.pumpPeriod;PU[14]=pumpFrame++;PU[15]=1;dev.queue.writeBuffer(pumpUni,0,PF);
  const bg=dev.createBindGroup({layout:pumpPipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:pumpUni}},{binding:1,resource:{buffer:sim.livePos()}},{binding:2,resource:{buffer:sim.liveVel()}},{binding:3,resource:{buffer:sim.liveBody()}}]});
  const enc=dev.createCommandEncoder({label:'fluidV5M68PumpEncoder'}),cp=enc.beginComputePass();cp.setPipeline(pumpPipe);cp.setBindGroup(0,bg);cp.dispatchWorkgroups(Math.max(1,Math.ceil(sim.n/256)));cp.end();dev.queue.submit([enc.finish()]);pumpSubmits++;
- const S=window.__v5WaterfallM68;if(S){S.pumpSubmits=pumpSubmits;S.pumpPeriod=g.pumpPeriod;}
+ const S=window.__v5WaterfallM68;if(S){S.pumpSubmits=pumpSubmits;S.pumpPeriod=g.pumpPeriod;S.flow=g.flow;}
 }
 
 // ---------- Scenario lifecycle / physical material tuning -------------------------------------
@@ -210,12 +222,12 @@ function tune(on){
  if(on){
   sim.params.substeps=Math.max(Number(sim.params.substeps)||2,quality==='high'?4:3);
   sim.params.iterations=Math.max(Number(sim.params.iterations)||4,quality==='high'?6:5);
-  sim.params.xsphC=Math.max(Number(sim.params.xsphC)||0,.052);
-  sim.params.sCorrK=Math.max(Number(sim.params.sCorrK)||0,.09);
-  sim.params.surfaceTensionK=Math.max(Number(sim.params.surfaceTensionK)||0,.22);
+  sim.params.xsphC=Math.max(Number(sim.params.xsphC)||0,.050);
+  sim.params.sCorrK=Math.max(Number(sim.params.sCorrK)||0,.085);
+  sim.params.surfaceTensionK=Math.max(Number(sim.params.surfaceTensionK)||0,.18);
   state.xpbdDensity=Math.max(Number(state.xpbdDensity)||0,.78);
-  state.whitewater=Math.max(.16,Math.min(.42,Number(savedPhysics?.whitewater)||.28));
-  ssfr.transmit=[.13,.72,.69];ssfr.absorption=.72;ssfr.roughness=.026;ssfr.thicknessScale=.90;
+  state.whitewater=Math.max(.14,Math.min(.38,Number(savedPhysics?.whitewater)||.26));
+  ssfr.transmit=[.10,.68,.66];ssfr.absorption=.70;ssfr.roughness=.024;ssfr.thicknessScale=.92;
  }else if(wasActive&&savedPhysics){
   sim.params.substeps=savedPhysics.substeps;sim.params.iterations=savedPhysics.iterations;sim.params.xsphC=savedPhysics.xsphC;sim.params.sCorrK=savedPhysics.sCorrK;sim.params.surfaceTensionK=savedPhysics.surfaceTensionK;
   if(Number.isFinite(savedPhysics.xpbd))state.xpbdDensity=savedPhysics.xpbd;if(Number.isFinite(savedPhysics.whitewater))state.whitewater=savedPhysics.whitewater;
@@ -241,11 +253,37 @@ function choose(){state.scenario=ACTIVE;ui.pouring=false;stopWave();save();reset
 function waterfallButton(){return document.querySelector('[data-m46="waterfall"]')||document.querySelector('[data-m46="waterfall-m562"]')||[...document.querySelectorAll('#v5ScenariosM46 button')].find(b=>/WATERFALL/i.test(b.textContent||''));}
 function installButton(){const old=waterfallButton();if(!old)return false;if(old.dataset.m68==='1')return true;const b=old.cloneNode(true);b.dataset.m46=ACTIVE;b.dataset.m68='1';b.textContent='WATERFALL';b.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();choose();},{capture:true});old.replaceWith(b);return true;}
 installButton();const panel=document.getElementById('settingsPanel');if(panel)new MutationObserver(()=>installButton()).observe(panel,{childList:true,subtree:true});
-function sync(){const b=document.querySelector('[data-m68="1"]');if(b)b.classList.toggle('active',active());const el=document.getElementById('v5WaterfallM68Status');if(el){const g=geom(),S=window.__v5WaterfallM68;el.textContent=`${g.upperN.toLocaleString()} upper + ${g.lowerN.toLocaleString()} lower PBF · shelf ${g.shelfY.toFixed(2)} m · drop ~${Math.max(0,g.shelfY-g.lowerSurface).toFixed(2)} m · ${S?.boundarySamples||0} terrain samples · pump 1/${g.pumpPeriod}`;}}
-function mount(){const h=document.querySelector('[data-panel="scenes"]')||document.getElementById('settingsPanel');if(!h||document.getElementById('v5WaterfallM68'))return;const d=document.createElement('div');d.id='v5WaterfallM68';d.style.cssText='margin-top:10px;padding:9px;border:1px solid rgba(78,214,220,.18);border-radius:10px;background:rgba(4,17,24,.58)';d.innerHTML=`<div style="font:800 9px ui-monospace;color:#9dffc8;letter-spacing:.10em">ELEVATED RESERVOIR · M6.8</div><div style="font:7.4px/1.45 ui-monospace;color:#86a8b5;margin-top:5px">Real PBF water rests on a sampled sloped shelf, flows to an unsupported spill lip under gravity, free-falls into the lower pool, and is recirculated only through a hidden deep intake. No waterfall trajectory or curtain is prescribed.</div><div id="v5WaterfallM68Status" style="font:7.5px/1.45 ui-monospace;color:#9fc5d0;margin-top:6px"></div>`;h.appendChild(d);}
+
+let rebuildTimer=0;
+function scheduleGeometryRebuild(){
+ clearTimeout(rebuildTimer);
+ rebuildTimer=setTimeout(()=>{if(active())resetScene();},320);
+}
+function sync(){
+ const b=document.querySelector('[data-m68="1"]');if(b)b.classList.toggle('active',active());
+ const g=geom(),S=window.__v5WaterfallM68;
+ const el=document.getElementById('v5WaterfallM68Status');
+ if(el)el.textContent=`${g.upperN.toLocaleString()} upper + ${g.lowerN.toLocaleString()} lower PBF · width ${g.spillWidth.toFixed(2)} m · drop ~${Math.max(0,g.shelfY-g.lowerSurface).toFixed(2)} m · flow ${g.flow.toFixed(2)}× · ${S?.boundarySamples||0} terrain samples`;
+ const w=document.getElementById('v5M68WidthVal');if(w)w.textContent=`${Math.round(g.widthFrac*100)}% · ${g.spillWidth.toFixed(2)} m`;
+ const h=document.getElementById('v5M68HeightVal');if(h)h.textContent=`${Math.max(0,g.shelfY-g.lowerSurface).toFixed(2)} m drop`;
+ const f=document.getElementById('v5M68FlowVal');if(f)f.textContent=`${g.flow.toFixed(2)}×`;
+}
+function mount(){
+ const h=document.querySelector('[data-panel="scenes"]')||document.getElementById('settingsPanel');
+ if(!h||document.getElementById('v5WaterfallM68'))return;
+ const d=document.createElement('div');d.id='v5WaterfallM68';d.style.cssText='margin-top:10px;padding:9px;border:1px solid rgba(78,214,220,.18);border-radius:10px;background:rgba(4,17,24,.58)';
+ d.innerHTML=`<div style="font:800 9px ui-monospace;color:#9dffc8;letter-spacing:.10em">PHYSICAL SPILLWAY · M6.8</div><div style="font:7.4px/1.45 ui-monospace;color:#86a8b5;margin-top:5px">The waterfall is ordinary PBF water flowing from an elevated reservoir over real collision geometry. Width and drop rebuild the terrain/reservoir; Flow changes only the hidden recirculation rate, so the sheet responds dynamically instead of following a prescribed path.</div><div class="v5Slider" style="margin-top:8px"><label>SPILL WIDTH</label><input id="v5M68Width" type="range" min="0.70" max="0.985" step="0.005"><div class="v5Val" id="v5M68WidthVal"></div></div><div class="v5Slider"><label>DROP HEIGHT</label><input id="v5M68Height" type="range" min="0.62" max="0.82" step="0.005"><div class="v5Val" id="v5M68HeightVal"></div></div><div class="v5Slider"><label>RESERVOIR FLOW</label><input id="v5M68Flow" type="range" min="0.55" max="1.65" step="0.05"><div class="v5Val" id="v5M68FlowVal"></div></div><div id="v5WaterfallM68Status" style="font:7.5px/1.45 ui-monospace;color:#9fc5d0;margin-top:6px"></div>`;
+ h.appendChild(d);
+ const width=d.querySelector('#v5M68Width'),height=d.querySelector('#v5M68Height'),flow=d.querySelector('#v5M68Flow');
+ width.value=state.waterfallSpillWidth;height.value=state.waterfallSpillHeight;flow.value=state.waterfallFlow;
+ width.addEventListener('input',e=>{state.waterfallSpillWidth=clamp(Number(e.target.value),.70,.985);save();sync();scheduleGeometryRebuild();});
+ height.addEventListener('input',e=>{state.waterfallSpillHeight=clamp(Number(e.target.value),.62,.82);save();sync();scheduleGeometryRebuild();});
+ flow.addEventListener('input',e=>{state.waterfallFlow=clamp(Number(e.target.value),.55,1.65);save();sync();});
+ d.addEventListener('pointerdown',e=>e.stopPropagation());d.addEventListener('click',e=>e.stopPropagation());
+ sync();
+}
 setInterval(()=>{installButton();mount();sync();},500);mount();sync();
 
-window.__v5WaterfallM68={online:true,backend:'elevated-reservoir-spillway-m68',active:false,ready:false,error:'',boundarySamples:0,upperParticles:0,lowerParticles:0,upperSurface:0,lowerSurface:0,lipX:0,shelfY:0,dropHeight:0,pumpPeriod:0,pumpSubmits:0,analyticCurtain:false,ballisticGuide:false,taggedCarrier:false,physicsTerrain:true,gravityDriven:true,recirculating:true};
-// Normalize prior waterfall selections into the new physical scenario on reload.
+window.__v5WaterfallM68={online:true,backend:'adjustable-elevated-reservoir-spillway-m68',active:false,ready:false,error:'',boundarySamples:0,upperParticles:0,lowerParticles:0,upperSurface:0,lowerSurface:0,lipX:0,shelfY:0,dropHeight:0,spillWidth:0,flow:state.waterfallFlow,pumpPeriod:0,pumpSubmits:0,analyticCurtain:false,ballisticGuide:false,taggedCarrier:false,physicsTerrain:true,gravityDriven:true,recirculating:true,adjustable:true};
 if(/^waterfall/.test(String(state.scenario||''))){state.scenario=ACTIVE;save();setTimeout(()=>{try{resetScene();}catch(err){console.error('[Fluid V5 M6.8 initial reset]',err);}},80);}
-console.info('[Fluid V5 M6.8] elevated reservoir + physical spillway waterfall online.');
+console.info('[Fluid V5 M6.8] adjustable wide/high physical reservoir spillway online.');

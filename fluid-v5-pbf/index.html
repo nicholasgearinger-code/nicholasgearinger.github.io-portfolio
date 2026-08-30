@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="theme-color" content="#06131a">
-<title>Fluid V5 · M6.2 Reservoir Houdini Waterfall</title>
+<title>Fluid V5 · M7.1 Isolated Gravity Pour</title>
 <style>
 :root{color-scheme:dark}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#06131a;color:#dffcff;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}#view{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}#upstream-ui,#debugpanel{display:none!important}#loading{position:fixed;inset:0;z-index:20;display:grid;place-content:center;justify-items:center;gap:10px;background:#06131a;transition:opacity .3s ease}#loading.gone{opacity:0;pointer-events:none}#loading h2{font-size:13px;letter-spacing:.12em;color:#86f6ff}#loadnote{font-size:12px;color:#8ba7b2}#loadrings{display:flex;gap:7px}#loadrings i{width:7px;height:7px;border-radius:50%;background:#66e7de;animation:pulse 1s ease-in-out infinite}#loadrings i:nth-child(2){animation-delay:.15s}#loadrings i:nth-child(3){animation-delay:.3s}@keyframes pulse{50%{opacity:.25;transform:translateY(-4px)}}#nogpu{display:none;position:fixed;inset:0;z-index:30;padding:20vh 9vw;background:#06131a;color:#ff9f9f;white-space:pre-wrap}
 .hud{position:fixed;z-index:10;pointer-events:none}.card{background:rgba(6,22,29,.84);border:1px solid rgba(84,218,222,.42);box-shadow:0 7px 24px rgba(0,0,0,.18);backdrop-filter:blur(9px);-webkit-backdrop-filter:blur(9px);border-radius:13px}.title{left:max(12px,env(safe-area-inset-left));top:max(12px,env(safe-area-inset-top));padding:10px 14px;color:#86f6ff;font-weight:800;letter-spacing:.13em;font-size:14px}.perf{right:max(12px,env(safe-area-inset-right));top:max(12px,env(safe-area-inset-top));padding:8px 10px 9px;text-align:right;min-width:132px;pointer-events:auto}.fps{font-size:21px;font-weight:800;color:#9dffc8;line-height:1.05}.status{font-size:10px;line-height:1.45;color:#9fc1cf;letter-spacing:.035em}.qualityTrigger{margin-top:5px;border:1px solid rgba(78,214,220,.42);background:rgba(4,17,24,.72);color:#dffcff;border-radius:999px;padding:4px 8px;font:700 9px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.05em}.qualityTrigger:active{transform:scale(.97)}
@@ -15,12 +15,12 @@
 </head>
 <body>
 <canvas id="view"></canvas>
-<div id="loading"><h2>FLUID V5 · M6.2</h2><div id="loadnote">starting WebGPU…</div><div id="loadrings"><i></i><i></i><i></i></div></div>
+<div id="loading"><h2>FLUID V5 · M7.1</h2><div id="loadnote">starting isolated WebGPU PBF benchmark…</div><div id="loadrings"><i></i><i></i><i></i></div></div>
 <div id="nogpu"></div>
-<div class="hud card title">FLUID V5 · M6.2</div>
-<div class="hud card perf"><div id="v4fps" class="fps">-- FPS</div><div id="v4mode" class="status">WATER MODE</div><div id="v4stats" class="status">BUILD: M6.2 RESERVOIR WATERFALL · loading…</div><button id="settingsBtn" class="qualityTrigger">⚙ WATER SETTINGS</button></div>
+<div class="hud card title">FLUID V5 · M7.1</div>
+<div class="hud card perf"><div id="v4fps" class="fps">-- FPS</div><div id="v4mode" class="status">M7.1 GRAVITY POUR</div><div id="v4stats" class="status">BUILD: M7.1 ISOLATED PRIMARY PBF POUR · loading…</div><button id="settingsBtn" class="qualityTrigger">⚙ WATER SETTINGS</button></div>
 <div id="settingsPanel" class="card settings"><div class="settingsTitle">SIMULATION + WATER SETTINGS</div><div class="qualityRow"><button class="qbtn" data-quality="low">LOW</button><button class="qbtn" data-quality="medium">MED</button><button class="qbtn" data-quality="high">HIGH</button></div><div id="qualityNote" class="qualityNote">Medium keeps the current mobile balance.</div></div>
-<div id="v4hint" class="hud card hint">Water mode: tap or drag the surface to create ripples.</div>
+<div id="v4hint" class="hud card hint">M7.1: elevated PBF water starts at rest; the physical gate opens and gravity determines the pour.</div>
 <div class="hud controls"><button id="modeBtn" class="btn active">MODE: WATER</button><button id="dropBtn" class="btn">DROP BALL</button><button id="pauseV4" class="btn">PAUSE</button><button id="resetV4" class="btn">RESET</button></div>
 <div id="license">PBF core © 2026 matsuoka-601 · MIT</div>
 <div id="upstream-ui"><div id="ui">
@@ -33,5 +33,5 @@
 const ids=['ssfrscale','boxx','pourspeed','pourwidth','pourheight','pourtilt','timescale','substeps','iters','omega','xsph','scorr','fradius','fstrength','flimit','grab','camspeed','tension','radius','meshres','fieldsmooth','meshiso','ior','absorption','thicksteps','groundrefl','roughness','sunint','sunelev','sunazim','exposure','envintensity','envyaw','ssfrradius','anisoratio','ssfriters','ssfrsigma','ssfrdelta','ssfrmu','ssfrthickr','ssfrthick','ssfrthickblur','ssfrdepthcull'];const bank=document.getElementById('sliderBank');for(const id of ids){if(document.getElementById(id))continue;const l=document.createElement('label');const i=document.createElement('input');i.type='range';i.id=id;const s=document.createElement('span');s.id=id+'v';l.append(i,s);bank.append(l)}
 </script>
 <script type="module" src="./src/pool-realism-v44.js"></script>
-<script type="module" src="./src/wave-test.js"></script>
+<script type="module" src="./src/wave-test-m71.js"></script>
 </body></html>

@@ -1,0 +1,1 @@
+M7.4.7 Water Body Appearance test marker. Presets: POOL / POND / OCEAN / TROPICAL. Uses existing SSFR transmission, absorption, roughness, optical depth and M7.4.6 scattering only; no new GPU passes or queue submissions.

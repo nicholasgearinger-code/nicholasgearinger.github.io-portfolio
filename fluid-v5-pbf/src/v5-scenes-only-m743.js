@@ -30,9 +30,14 @@ fn hash11(x:u32)->f32 {
 }
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid:vec3u){
-  let i=gid.x;if(i>=U.nFluid){return;}
-  let nx=max(U.dims.x,1u), nz=max(U.dims.z,1u), layer=nx*nz;
-  let ix=i%nx, iz=(i/nx)%nz, iy=i/layer;
+  let i=gid.x;
+  if(i>=U.nFluid){return;}
+  let nx=max(U.dims.x,1u);
+  let nz=max(U.dims.z,1u);
+  let layer=nx*nz;
+  let ix=i%nx;
+  let iz=(i/nx)%nz;
+  let iy=i/layer;
   let jx=(hash11(i*3u+1u)-.5)*U.jitter;
   let jy=(hash11(i*3u+2u)-.5)*U.jitter;
   let jz=(hash11(i*3u+3u)-.5)*U.jitter;
@@ -41,7 +46,9 @@ fn main(@builtin(global_invocation_id) gid:vec3u){
               U.margin+(f32(iz)+.5)*U.spacing+jz);
   // mode 1 = compact side block (dam-break initial condition).
   if(U.mode==1u){ p.x=U.margin+(f32(ix)+.5)*U.spacing+jx; }
-  pos[i]=vec4f(p,1); pred[i]=vec4f(p,1); vel[i]=vec4f(0);
+  pos[i]=vec4f(p,1);
+  pred[i]=vec4f(p,1);
+  vel[i]=vec4f(0);
 }`;
 const mod=dev.createShaderModule({code:shader,label:'fluidV5M743SceneSeedWGSL'});
 if(typeof mod.getCompilationInfo==='function'){

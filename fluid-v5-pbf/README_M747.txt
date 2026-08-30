@@ -1,0 +1,1 @@
+M7.4.7 adds water-body optical appearance presets (POOL, POND, OCEAN, TROPICAL) using existing SSFR material controls only. No added GPU passes or queue submissions. Entry point: m747.html

@@ -39,7 +39,7 @@
       " note.textContent='installing M8.3 scenario compatibility layer…';await import('./src/v5-scenes-m830.js');"
     ])html=html.replace(line,'');
 
-    html=html.replace(sceneLine,sceneLine+"\n note.textContent='installing M8.5.2 fine laminar faucet…';await import('./src/v5-faucet-fast-m852.js');");
+    html=html.replace(sceneLine,sceneLine+"\n note.textContent='installing M8.5.2 fine laminar faucet…';await import('./src/v5-faucet-fast-m852.js');\n await import('./src/v5-fps-hud-m852.js');");
     html=html.replace("const scene=s?.active||'pool';","const scene=window.__v5M852Faucet?.active||'faucet';");
     html=html.replaceAll('M8.3','M8.5.2')
       .replace("window.__fluidV5Version='8.5.2.0'","window.__fluidV5Version='8.5.2'")

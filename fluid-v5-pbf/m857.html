@@ -1,6 +1,6 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no"><meta name="theme-color" content="#06131a"><title>Fluid V8 · M8.5.7 Higher Resolution Faucet</title>
-<style>*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;background:#06131a;color:#dffcff;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}#boot{position:fixed;inset:0;display:grid;place-content:center;gap:12px;padding:30px;text-align:center}#boot b{color:#86f6ff;letter-spacing:.12em}#boot small{color:#8ba7b2;line-height:1.5;max-width:84vw}#boot.err{color:#ff9f9f;white-space:pre-wrap;text-align:left}</style></head><body><div id="boot"><b>FLUID V8 · M8.5.7</b><small>loading M8.5.6 coherent faucet · 12.5K particles · 23 mm spacing · higher adaptive SSFR resolution…</small></div>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no"><meta name="theme-color" content="#06131a"><title>Fluid V8 · M8.5.7.1 Higher Resolution Faucet</title>
+<style>*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;background:#06131a;color:#dffcff;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}#boot{position:fixed;inset:0;display:grid;place-content:center;gap:12px;padding:30px;text-align:center}#boot b{color:#86f6ff;letter-spacing:.12em}#boot small{color:#8ba7b2;line-height:1.5;max-width:84vw}#boot.err{color:#ff9f9f;white-space:pre-wrap;text-align:left}</style></head><body><div id="boot"><b>FLUID V8 · M8.5.7.1</b><small>loading M8.5.7 quality profile · mobile browser-safe FPS HUD…</small></div>
 <script>
 (async()=>{
   const boot=document.getElementById('boot');
@@ -19,7 +19,7 @@
     if(!r.ok)throw new Error(`M8.3 shell fetch failed: HTTP ${r.status}`);
     let html=await r.text();
     const sceneLine=" note.textContent='loading Pool + Dam Break seeds…';await import('./src/v5-scenes-only-m743.js');";
-    if(!html.includes(sceneLine))throw new Error('M8.5.7 bootstrap could not locate static scene import.');
+    if(!html.includes(sceneLine))throw new Error('M8.5.7.1 bootstrap could not locate static scene import.');
 
     for(const line of [
       " note.textContent='loading physical Wave Lab…';await import('./src/v5-wave-lab-m745.js');",
@@ -35,14 +35,14 @@
       " note.textContent='installing M8.3 scenario compatibility layer…';await import('./src/v5-scenes-m830.js');"
     ])html=html.replace(line,'');
 
-    html=html.replace(sceneLine,sceneLine+"\n note.textContent='installing M8.5.2 laminar inlet…';await import('./src/v5-faucet-fast-m852.js');\n await import('./src/v5-fps-hud-m852.js');\n note.textContent='restoring M8.5.3 high-fast camera/render profile…';await import('./src/v5-faucet-high-m853.js');\n note.textContent='applying M8.5.5 gentle continuity tune…';await import('./src/v5-faucet-gentle-m855.js');\n note.textContent='applying M8.5.6 conservative coherence tune…';await import('./src/v5-faucet-cohesion-m856.js');\n note.textContent='applying M8.5.7 higher-resolution profile…';await import('./src/v5-faucet-quality-m857.js');");
+    html=html.replace(sceneLine,sceneLine+"\n note.textContent='installing M8.5.2 laminar inlet…';await import('./src/v5-faucet-fast-m852.js');\n await import('./src/v5-fps-hud-m852.js');\n await import('./src/v5-mobile-hud-m857.js');\n note.textContent='restoring M8.5.3 high-fast camera/render profile…';await import('./src/v5-faucet-high-m853.js');\n note.textContent='applying M8.5.5 gentle continuity tune…';await import('./src/v5-faucet-gentle-m855.js');\n note.textContent='applying M8.5.6 conservative coherence tune…';await import('./src/v5-faucet-cohesion-m856.js');\n note.textContent='applying M8.5.7 higher-resolution profile…';await import('./src/v5-faucet-quality-m857.js');");
     html=html.replace("const scene=s?.active||'pool';","const scene=window.__v5M852Faucet?.active||'faucet';");
-    html=html.replaceAll('M8.3','M8.5.7')
-      .replace("window.__fluidV5Version='8.5.7.0'","window.__fluidV5Version='8.5.7'")
-      .replace("window.__fluidV5Build='M8.5.7 FULL SCENARIO RESTORE / M8.2 COMMON WATER / ONE-SUBMIT CORE'","window.__fluidV5Build='M8.5.7 12.5K / 23MM QUALITY BUMP / M8.5.6 COHERENT FAUCET'");
+    html=html.replaceAll('M8.3','M8.5.7.1')
+      .replace("window.__fluidV5Version='8.5.7.1.0'","window.__fluidV5Version='8.5.7.1'")
+      .replace("window.__fluidV5Build='M8.5.7.1 FULL SCENARIO RESTORE / M8.2 COMMON WATER / ONE-SUBMIT CORE'","window.__fluidV5Build='M8.5.7.1 12.5K / 23MM QUALITY BUMP / MOBILE HUD FIX'");
     document.open();document.write(html);document.close();
   }catch(err){
-    console.error('[M8.5.7 bootstrap]',err);boot.className='err';boot.textContent='M8.5.7 BOOTSTRAP ERROR\n\n'+String(err?.message||err)+'\n\n'+String(err?.stack||'');
+    console.error('[M8.5.7.1 bootstrap]',err);boot.className='err';boot.textContent='M8.5.7.1 BOOTSTRAP ERROR\n\n'+String(err?.message||err)+'\n\n'+String(err?.stack||'');
   }
 })();
 </script></body></html>

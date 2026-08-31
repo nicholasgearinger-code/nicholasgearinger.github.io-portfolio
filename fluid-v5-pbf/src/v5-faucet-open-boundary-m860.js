@@ -20,7 +20,7 @@ const nativeCreate=dev.createCommandEncoder.bind(dev);
 const baseStep=sim.step.bind(sim);
 
 let active='faucet';
-let speed=1.34;                 // ordinary faucet jet; BCC sampling carries continuity
+let speed=1.34;
 let radiusScale=2.30;
 let phase=0;
 let layerSerial=0;
@@ -30,6 +30,7 @@ let inletPasses=0;
 let requested=0;
 let raf=0,lastRaf=0,rafRate=0;
 let status=null;
+let envStatus='loading';
 
 const MAX_SOURCE=96;
 const sourcePos=dev.createBuffer({label:'m860SourcePos',size:MAX_SOURCE*16,
@@ -74,7 +75,7 @@ fn main(@builtin(global_invocation_id) gid:vec3u){
   let i=gid.x;
   if(i>=U.n||U.n==0u){return;}
   let j=(i+U.offset)%U.n;
-  var p=pos[j].xyz;
+  let p=pos[j].xyz;
   var v=vel[j].xyz;
   let q=p.xz-U.centre;
   let r=length(q);
@@ -84,8 +85,9 @@ fn main(@builtin(global_invocation_id) gid:vec3u){
   if(p.y>U.outletY && p.y<U.topY+0.055 && r<U.nozzleR*1.42){
     let radial=select(vec2f(0.0),q/max(r,1.0e-6),r>1.0e-6);
     let wall=max(0.0,r-U.nozzleR*.82)/max(U.nozzleR*.35,1.0e-5);
-    v.xz=v.xz*.18-radial*(U.radialGain*wall);
-    v.y=mix(v.y,-U.speed,.72);
+    let guidedXZ=vec2f(v.x,v.z)*.18-radial*(U.radialGain*wall);
+    let guidedY=mix(v.y,-U.speed,.72);
+    v=vec3f(guidedXZ.x,guidedY,guidedXZ.y);
     vel[j]=vec4f(v,0.0);
   }
 
@@ -110,8 +112,6 @@ if(typeof mod.getCompilationInfo==='function'){
 const pipe=await dev.createComputePipelineAsync({label:'m860OpenBoundary',layout:'auto',compute:{module:mod,entryPoint:'main'}});
 
 function bccPlane(d,parity){
-  // BCC lattice cell a=cuberoot(2)d preserves cubic-lattice number density:
-  // 2 particles / a^3 = 1 / d^3. Alternating planes are a/2 ~= 0.63d apart.
   const a=Math.cbrt(2)*d,half=.5*a,R=radiusScale*d;
   const off=parity?half:0;
   const e=Math.ceil((R+half)/a)+1,out=[];
@@ -134,7 +134,6 @@ function prepareSource(frameDt){
   if(layers<=0){pendingN=0;return;}
 
   const topY=b[1]-d*1.55;
-  const outletY=b[1]-d*6.1;
   const cx=b[0]*.5,cz=b[2]*.5,g=Math.max(0,Number(p.gravity)||9.81);
   const P=new Float32Array(MAX_SOURCE*4),V=new Float32Array(MAX_SOURCE*4);
   let n=0;
@@ -143,8 +142,6 @@ function prepareSource(frameDt){
     const cross=bccPlane(d,parity);
     const eventDist=(k+1)*step-before;
     const tau=Math.min(dt,Math.max(0,eventDist/Math.max(speed,1e-6)));
-    // Same sub-frame birth compensation used by the proven M8.5.2 inlet, but applied to
-    // non-overlapping BCC planes inside the hidden throat.
     const upstream=speed*tau+g*dt*tau-.5*g*tau*tau;
     const y=Math.min(b[1]-d*.62,topY+upstream);
     const vy=-speed+g*tau;
@@ -184,7 +181,6 @@ function encodeInlet(enc){
   pendingN=0;inletPasses++;
 }
 
-// Install pre-solve inlet in the existing unified command buffer.
 dev.createCommandEncoder=function(desc){
   const enc=nativeCreate(desc);
   if(expectSimEncoder)encodeInlet(enc);
@@ -222,6 +218,14 @@ function frameCamera(){
 applyPhysics();applyVisual();frameCamera();
 setTimeout(()=>{applyPhysics();applyVisual();frameCamera()},400);
 
+const HDR1K='https://cdn.jsdelivr.net/gh/matsuoka-601/Particles4All@58d6fa6d2c50e3f58da5c7a6f9b885ce26c485f0/env/quarry_cloudy_1k.hdr';
+(async()=>{
+  try{
+    envStatus=await ssfr.env.load(HDR1K);
+    ssfr.env.intensity=1.02;ssfr.env.yaw=0;ssfr.bindCache=null;
+  }catch(err){envStatus='environment unavailable';console.warn('[M8.6] HDR load failed',err);}
+})();
+
 requestAnimationFrame(function tick(){raf++;requestAnimationFrame(tick)});
 setInterval(()=>{
   rafRate=raf-lastRaf;lastRaf=raf;
@@ -242,7 +246,6 @@ function choose(name){
   if(ui.paused)ui.paused=false;sync();
 }
 
-// Compact scene controls, compatible with the existing M8 mobile settings shell.
 const panel=document.getElementById('m742Panel'),tabs=document.getElementById('m742Tabs'),host=document.getElementById('m742Host');
 if(panel&&tabs){
   document.getElementById('m860Dock')?.remove();
@@ -270,10 +273,9 @@ function sync(){
   if(!status)return;
   const d=Number(sim.params?.spacing)||.025;
   const a=Math.cbrt(2)*d,axial=.5*a;
-  status.textContent=`ACTIVE ${active.toUpperCase()} · RAF ${rafRate}/s\nactive ${sim.n.toLocaleString()} / cap ${(sim.cap||sim.n).toLocaleString()} · constant mass\nspacing ${(d*1000).toFixed(0)} mm · BCC axial ${(axial/d).toFixed(2)}d (${(axial*1000).toFixed(1)} mm)\nexit ${speed.toFixed(2)} m/s · PBF 2×3 · XSPH .052 · tension .074\ninlet passes ${inletPasses.toLocaleString()} · source particles ${requested.toLocaleString()} · SSFR ${Math.round(visual.scale*100)}%`;
+  status.textContent=`ACTIVE ${active.toUpperCase()} · RAF ${rafRate}/s\nactive ${sim.n.toLocaleString()} / cap ${(sim.cap||sim.n).toLocaleString()} · constant mass\nspacing ${(d*1000).toFixed(0)} mm · BCC axial ${(axial/d).toFixed(2)}d (${(axial*1000).toFixed(1)} mm)\nexit ${speed.toFixed(2)} m/s · PBF 2×3 · XSPH .052 · tension .074\ninlet passes ${inletPasses.toLocaleString()} · source particles ${requested.toLocaleString()} · SSFR ${Math.round(visual.scale*100)}%\nenvironment ${envStatus}`;
 }
 
-// Compatibility alias keeps the existing FPS HUD module usable without importing M8.5.2.
 window.__v5M852Faucet={online:true,backend:'bcc-open-boundary-m860',choose,get active(){return active},get raf(){return rafRate}};
 window.__v5M860Faucet={online:true,backend:'bcc-open-boundary-m860',choose,get active(){return active},get raf(){return rafRate},get passes(){return inletPasses}};
 window.__fluidV5Version='8.6.0';

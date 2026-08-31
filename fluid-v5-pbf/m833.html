@@ -5,13 +5,13 @@
 (async()=>{
   const boot=document.getElementById('boot');
   try{
-    const r=await fetch('./m830.html?m833=1',{cache:'no-store'});
+    const r=await fetch('./m830.html?m833=2',{cache:'no-store'});
     if(!r.ok)throw new Error(`M8.3 base fetch failed: HTTP ${r.status}`);
     let html=await r.text();
     const waveNeedle="note.textContent='loading physical Wave Lab…';await import('./src/v5-wave-lab-m745.js');";
     const sceneNeedle="note.textContent='installing M8.3 scenario compatibility layer…';await import('./src/v5-scenes-m830.js');";
     if(!html.includes(waveNeedle)||!html.includes(sceneNeedle))throw new Error('M8.3.3 bootstrap could not locate source import points.');
-    html=html.replace(waveNeedle,"note.textContent='installing iOS/WebKit WGSL compatibility…';await import('./src/v5-wgsl-ios-compat-m832.js');\n "+waveNeedle);
+    html=html.replace(waveNeedle,"note.textContent='installing iOS/WebKit + source compatibility…';await import('./src/v5-wgsl-source-compat-m833.js');\n "+waveNeedle);
     html=html.replace(sceneNeedle,sceneNeedle+"\n note.textContent='connecting faucet stream + waterfall sheet…';await import('./src/v5-source-flow-m833.js');");
     html=html.replaceAll('M8.3','M8.3.3')
       .replace("window.__fluidV5Version='8.3.0'","window.__fluidV5Version='8.3.3'")

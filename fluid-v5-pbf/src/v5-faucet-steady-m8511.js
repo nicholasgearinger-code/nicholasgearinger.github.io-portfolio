@@ -23,7 +23,6 @@ let expectSimEncoder=false;
 let serial=1;
 let recycledRequested=0;
 let recyclePasses=0;
-let denseLayers=0;
 
 const emitPos=dev.createBuffer({
   label:'fluidV5M8511EmitPos',size:MAX_EMIT*16,
@@ -118,11 +117,10 @@ sim.appendFluid=function(pos,vel){
   if(faucet.active!=='faucet')return nativeAppend(pos,vel);
   const dense=densify(pos,vel);
   if(dense.n<=0)return 0;
-  dev.queue.writeBuffer(emitPos,0,dense.P,0,dense.n*4);
-  dev.queue.writeBuffer(emitVel,0,dense.V,0,dense.n*4);
+  dev.queue.writeBuffer(emitPos,0,dense.P);
+  dev.queue.writeBuffer(emitVel,0,dense.V);
   pending=dense.n;
   recycledRequested+=dense.n;
-  denseLayers+=dense.n;
   // Report the requested emission as accepted: the actual particles are moved from the
   // basin into the nozzle in the pre-solve GPU pass below rather than appended to sim.n.
   return dense.n;

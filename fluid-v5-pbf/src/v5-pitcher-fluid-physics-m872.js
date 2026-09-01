@@ -1,7 +1,9 @@
-// Fluid V8 M8.7.2 — true vessel-to-vessel pour.
-// Water starts inside the pitcher as ordinary PBF particles. The pitcher rotates through
-// a kinematic pour arc; moving-wall collision transfers that motion into the water, which
-// can leave only through the open spout. The receiving tumbler is an open physical container.
+// Fluid V8 M8.7.2 — true vessel-to-vessel pour, containment revision.
+// Water starts at rest below the pitcher spout as ordinary PBF particles. The upright
+// pitcher is a closed containment volume except for the physically elevated spout throat.
+// After a long settling period the pitcher rotates slowly; wall contact only prevents
+// penetration, while gravity moves the free surface to the spout and drains it into the
+// receiving tumbler. The glass is open at the top with hard inner-wall/base containment.
 // All extra collision + vessel rendering is appended to the existing unified command buffer.
 
 const sim=window.__sim,ui=window.__ui,cam=window.__cam,ssfr=window.__ssfr;
@@ -61,31 +63,33 @@ function writeSeed(P,V){
 }
 function seedPitcher(){
   const d=Math.max(.001,Number(sim.params?.spacing)||.025),a=Math.cbrt(2)*d,dy=.5*a;
-  const minY=profile[0][0]+d*.72,fillY=.145,P=[],V=[];let layer=0;
+  // Deliberately keep the initial free surface below the .145 m spout throat. This makes
+  // the upright pitcher a real reservoir: zero-velocity water can settle without draining.
+  const minY=profile[0][0]+d*.72,fillY=.100,P=[],V=[];let layer=0;
   for(let y=minY;y<=fillY+1e-6;y+=dy,layer++){
-    const R=Math.max(0,profileRadius(y)-d*.46),off=(layer&1)?a*.5:0,e=Math.ceil((R+a)/a);
+    const R=Math.max(0,profileRadius(y)-d*.52),off=(layer&1)?a*.5:0,e=Math.ceil((R+a)/a);
     for(let ix=-e;ix<=e;ix++)for(let iz=-e;iz<=e;iz++){
       const x=ix*a+off,z=iz*a+off;if(x*x+z*z>R*R)continue;
       const p=pitcherPoint([x,y,z],0);P.push(p[0],p[1],p[2],1);V.push(0,0,0,0);
-      if(P.length/4>=Math.min(fullCapacity,1400))break;
+      if(P.length/4>=Math.min(fullCapacity,1200))break;
     }
   }
   const n=writeSeed(new Float32Array(P),new Float32Array(V));scene.seeded=n;return n;
 }
 
 function angleAt(t){
-  // Upright settle -> deliberate turn -> sustained pour -> return upright.
-  if(t<1.15)return 0;
-  if(t<3.05)return pitcher.maxAngle*smooth((t-1.15)/1.90);
-  if(t<5.65)return pitcher.maxAngle;
-  if(t<7.35)return pitcher.maxAngle*(1-smooth((t-5.65)/1.70));
+  // Long upright rest -> slow deliberate turn -> gravity drain -> slow return.
+  if(t<2.60)return 0;
+  if(t<5.00)return pitcher.maxAngle*smooth((t-2.60)/2.40);
+  if(t<7.80)return pitcher.maxAngle;
+  if(t<9.80)return pitcher.maxAngle*(1-smooth((t-7.80)/2.00));
   return 0;
 }
 function stageAt(t){
-  if(t<1.15)return 'SETTLING IN PITCHER';
-  if(t<3.05)return 'TURNING TO POUR';
-  if(t<5.65)return 'POUR HOLD';
-  if(t<7.35)return 'RETURNING UPRIGHT';
+  if(t<2.60)return 'WATER RESTING IN PITCHER';
+  if(t<5.00)return 'GRAVITY POUR — TURNING';
+  if(t<7.80)return 'GRAVITY POUR — DRAINING';
+  if(t<9.80)return 'RETURNING UPRIGHT';
   return 'POUR COMPLETE';
 }
 function advanceMotion(dt){
@@ -142,23 +146,26 @@ fn trackedBody(l:vec3f,pr:f32)->bool{
   let r=length(l.xz);return l.y>-.225-pr*2.0 && l.y<.205+pr*2.0 && r<bodyR(clamp(l.y,-.225,.205))+pr*2.0;
 }
 fn trackedSpout(l:vec3f,pr:f32)->bool{
-  if(l.x<.035-pr || l.x>.260+pr){return false;}
+  if(l.x<.050-pr || l.x>.260+pr){return false;}
   let sy=spoutY(clamp(l.x,.060,.250));
-  return abs(l.z)<.074+pr && l.y>sy-.052-pr && l.y<sy+.095+pr;
+  return abs(l.z)<.070+pr && l.y>sy-.038-pr*.45 && l.y<sy+.090+pr;
 }
 fn portal(l:vec3f,pr:f32)->bool{
-  if(l.x<.025 || l.x>.275 || abs(l.z)>.086+pr){return false;}
+  // The throat is intentionally high and narrow. Upright water at ~.10 m cannot enter it;
+  // when the pitcher rotates, gravity raises the free surface against this side naturally.
+  if(l.x<.050 || l.x>.275 || abs(l.z)>.073+pr*.45){return false;}
   let sy=spoutY(clamp(l.x,.060,.250));
-  return l.y>sy-.060-pr;
+  return l.y>sy-.020-pr*.20;
 }
 fn wallVelocity(worldP:vec3f)->vec3f{
   let r=worldP-U.pitch.xyz;let w=U.motion.y;return vec3f(-w*r.y,w*r.x,0.0);
 }
-fn contactVelocity(v:vec3f,p:vec3f,nLocal:vec3f)->vec3f{
-  let n=dirWorld(nLocal);let wv=wallVelocity(p);var rel=v-wv;let outv=dot(rel,n);
-  if(outv>0.0){rel-=n*outv*1.04;}
-  let normalPart=n*dot(rel,n);let tangent=rel-normalPart;
-  return wv+normalPart+tangent*.985;
+fn contactVelocity(v0:vec3f,p:vec3f,nLocal:vec3f)->vec3f{
+  // Slip wall: inherit only the wall's normal motion needed to prevent penetration.
+  // Tangential pitcher motion does not drag/launch the liquid; gravity remains the driver.
+  let n=dirWorld(nLocal);let wv=wallVelocity(p);var v=v0;let relOut=dot(v-wv,n);
+  if(relOut>0.0){v-=n*relOut*1.025;}
+  let vn=n*dot(v,n);let vt=v-vn;return vn+vt*.997;
 }
 
 @compute @workgroup_size(256)
@@ -181,45 +188,51 @@ fn main(@builtin(global_invocation_id) gid:vec3u){
     }
   }
 
-  // Open spout trough: bottom and side rails move with the pitcher; the top and outlet are free.
+  // Open spout trough: bottom + side rails contain the sheet, while top and outlet stay open.
   let l2=toLocal(p,U.pitch.w);let prevSp=wasSpout || (wasBody && portal(l2,pr));
   if(prevSp && l2.x<.258+pr){
     let sy=spoutY(clamp(l2.x,.060,.250));var q=l2;var nLocal=vec3f(0.0);var hit=false;
-    let halfW=max(.030,.068-pr*.30);let low=sy-.047+pr*.45;
+    let halfW=max(.030,.066-pr*.30);let low=sy-.034+pr*.50;
     if(q.y<low){q.y=low;nLocal=vec3f(0.0,-1.0,0.0);hit=true;}
     if(abs(q.z)>halfW){let sg=select(-1.0,1.0,q.z>=0.0);q.z=sg*halfW;nLocal=vec3f(0.0,0.0,sg);hit=true;}
-    if(q.x<.045-pr){q.x=.045-pr;nLocal=vec3f(-1.0,0.0,0.0);hit=true;}
+    if(q.x<.052-pr*.20){q.x=.052-pr*.20;nLocal=vec3f(-1.0,0.0,0.0);hit=true;}
     if(hit){p=toWorld(q);v=contactVelocity(v,p,nLocal);}
   }
 
-  // Static open tumbler. Crossing through the rim from above is allowed; wall/base crossings are not.
+  // Static open tumbler. The center of the rim is open. Once a particle crosses that opening,
+  // the inside base and radial wall are hard containment boundaries so water cannot seep out.
   let gc=vec2f(U.glass0.x,U.glass0.z);var gq=p.xz-gc;var gr=length(gq);var gd=safe2(gq);
   let baseTop=U.glass2.x;let rim=U.glass1.w;let gh=max(rim-baseTop,1.0e-4);let ty=clamp((p.y-baseTop)/gh,0.0,1.0);
-  let inner=mix(U.glass0.w,U.glass1.x,ty);let outer=mix(U.glass1.y,U.glass1.z,ty);let innerSafe=max(.01,inner-pr);let outerSafe=outer+pr*.70;
-  let gp=p-v*dt;let gpq=gp.xz-gc;let gpr=length(gpq);let pty=clamp((gp.y-baseTop)/gh,0.0,1.0);let prevInner=mix(U.glass0.w,U.glass1.x,pty)-pr;let prevOuter=mix(U.glass1.y,U.glass1.z,pty)+pr*.70;
+  let inner=mix(U.glass0.w,U.glass1.x,ty);let outer=mix(U.glass1.y,U.glass1.z,ty);let innerSafe=max(.01,inner-pr*1.05);let outerSafe=outer+pr*.85;
+  let gp=p-v*dt;let gpq=gp.xz-gc;let gpr=length(gpq);let pty=clamp((gp.y-baseTop)/gh,0.0,1.0);let prevInner=max(.01,mix(U.glass0.w,U.glass1.x,pty)-pr*1.05);let prevOuter=mix(U.glass1.y,U.glass1.z,pty)+pr*.85;
+  let enteredFromTop=gp.y>=rim-pr*.30 && p.y<rim && gr<inner+pr*.25 && v.y<1.0;
+  let wasInside=gpr<=prevInner+pr*.12 || enteredFromTop;
 
-  if(p.y<baseTop+pr && p.y>U.glass0.y-pr*1.5 && gr<outerSafe){
-    let fromInside=(gpr<=max(prevInner,.01)) || (gp.y>rim && gpr<inner);
-    if(fromInside || gr<innerSafe){p.y=baseTop+pr;if(v.y<0.0){v.y=-v.y*.06;}v.x*=.88;v.z*=.88;}
-    else{let o=gc+gd*outerSafe;p.x=o.x;p.z=o.y;let rv=dot(vec2f(v.x,v.z),gd);if(rv<0.0){let vv=vec2f(v.x,v.z)-gd*rv*1.08;v.x=vv.x;v.z=vv.y;}}
+  // Solid base for every particle already in/captured by the glass footprint.
+  if(p.y<baseTop+pr && p.y>U.glass0.y-pr*1.5 && gr<inner+pr*.35){
+    if(wasInside || gr<innerSafe){p.y=baseTop+pr;if(v.y<0.0){v.y=-v.y*.035;}v.x*=.91;v.z*=.91;}
   }
 
-  if(p.y<rim-pr*.08 && p.y>baseTop+pr*.30){
+  // Interior radial wall. This catches both ordinary wall contact and a one-step wall skip.
+  if(p.y<rim-pr*.04 && p.y>baseTop+pr*.12){
     gq=p.xz-gc;gr=length(gq);gd=safe2(gq);
-    let entered=gp.y>=rim-pr*.25 && gpr<inner+pr*.30 && v.y<.5;
-    if(gr>innerSafe && gr<outerSafe){
-      let fromInside=(gpr<=max(prevInner,.01)) || entered;
-      if(fromInside){let o=gc+gd*innerSafe;p.x=o.x;p.z=o.y;let rv=dot(vec2f(v.x,v.z),gd);if(rv>0.0){let vv=vec2f(v.x,v.z)-gd*rv*1.10;v.x=vv.x;v.z=vv.y;}v.y*=.99;}
-      else{let o=gc+gd*outerSafe;p.x=o.x;p.z=o.y;let rv=dot(vec2f(v.x,v.z),gd);if(rv<0.0){let vv=vec2f(v.x,v.z)-gd*rv*1.10;v.x=vv.x;v.z=vv.y;}}
-    }else if(gr<=innerSafe && gpr>prevOuter && gp.y<rim-pr*.25){let o=gc+gd*outerSafe;p.x=o.x;p.z=o.y;}
-    else if(gr>=outerSafe && gpr<prevInner && gp.y<rim-pr*.25){let o=gc+gd*innerSafe;p.x=o.x;p.z=o.y;}
+    if(wasInside){
+      if(gr>innerSafe){let o=gc+gd*innerSafe;p.x=o.x;p.z=o.y;let rv=dot(vec2f(v.x,v.z),gd);if(rv>0.0){let vv=vec2f(v.x,v.z)-gd*rv*1.08;v.x=vv.x;v.z=vv.y;}v.y*=.995;}
+    }else{
+      // Outside particles cannot tunnel inward through the glass wall.
+      if(gr<outerSafe && gr>innerSafe){let o=gc+gd*outerSafe;p.x=o.x;p.z=o.y;let rv=dot(vec2f(v.x,v.z),gd);if(rv<0.0){let vv=vec2f(v.x,v.z)-gd*rv*1.08;v.x=vv.x;v.z=vv.y;}}
+      else if(gr<=innerSafe && gpr>prevOuter && gp.y<rim-pr*.25){let o=gc+gd*outerSafe;p.x=o.x;p.z=o.y;}
+    }
+    // A captured interior particle that skips completely past wall thickness is pulled back in.
+    if(wasInside && gr>=outerSafe){let o=gc+gd*innerSafe;p.x=o.x;p.z=o.y;}
   }
 
-  if(abs(p.y-rim)<pr*1.12){
+  // Thick rim ring, but leave its center unobstructed for falling water.
+  if(abs(p.y-rim)<pr*1.15){
     gq=p.xz-gc;gr=length(gq);gd=safe2(gq);
     if(gr>innerSafe&&gr<outerSafe){
-      if(gp.y>rim+pr*.20){p.y=rim+pr*1.12;if(v.y<0.0){v.y=-v.y*.04;}}
-      else if(gpr<innerSafe){let o=gc+gd*innerSafe;p.x=o.x;p.z=o.y;}
+      if(gp.y>rim+pr*.18 && !enteredFromTop){p.y=rim+pr*1.15;if(v.y<0.0){v.y=-v.y*.025;}}
+      else if(wasInside){let o=gc+gd*innerSafe;p.x=o.x;p.z=o.y;}
       else{let o=gc+gd*outerSafe;p.x=o.x;p.z=o.y;}
     }
   }

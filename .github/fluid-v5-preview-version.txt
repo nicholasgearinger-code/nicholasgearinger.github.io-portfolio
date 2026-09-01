@@ -1,5 +1,5 @@
 Fluid V8 Pages preview checkpoint
-milestone: M8.9.1-mesh-interior
+milestone: M8.9.2-glb-material-inner-shell
 source_branch: fluid-v5-development
-source_commit: af91972d94b7b452667cddcba9d27f4bfed47d91
+source_commit: c20102cd56d24d4799aa75812045e152d2749948
 purpose: trigger main-only Pages workflow to stage the isolated Fluid V8 development preview without merging Fluid V8 source into main.

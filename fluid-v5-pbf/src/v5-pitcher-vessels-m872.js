@@ -4,6 +4,8 @@ import {dev,queue,cam,canvas,ctx,format,add,sub,mul3,dot,cross,norm,glass,pitche
 // ---------------------------------------------------------------------------
 // Vessel meshes. Glass is stored in world space. Pitcher vertices stay in local space and
 // are transformed in the vertex shader every frame, so visuals and collision share one angle.
+// M8.8.9+ can register window.__v5PitcherVisualHook to replace only the pitcher drawing while
+// preserving this receiving-glass pass and the one-submit M8.8 render architecture.
 // ---------------------------------------------------------------------------
 const verts=[];
 function pushVertex(p,n,m,obj){verts.push(p[0],p[1],p[2],n[0],n[1],n[2],m,obj,0);}
@@ -44,8 +46,9 @@ addFrustum(glass.cx,glass.cz,glass.baseTop,glass.rim,glass.innerBottom,glass.inn
 addAnnulus(glass.cx,glass.cz,glass.rim,glass.innerTop,glass.outerTop,40,2,0,1);
 addAnnulus(glass.cx,glass.cz,glass.baseTop,0,glass.innerBottom,40,2,0,1);
 addFrustum(glass.cx,glass.cz,glass.bottom,glass.baseTop,glass.outerBottom,glass.outerBottom,40,2,0,false);
+const glassVertexCount=verts.length/9;
 
-// Pitcher: local-space outer/inner body, rim, bottom, spout and handle.
+// Pitcher fallback: local-space outer/inner body, rim, bottom, spout and handle.
 addProfile(outerProfile,44,1,1,false);addProfile(profile,44,1,1,true);
 addAnnulus(0,0,.222,.070,.090,44,2,1,1);addAnnulus(0,0,-.255,0,.095,44,2,1,-1);
 addTubePath(spoutPath,.047,14,1,1);
@@ -84,8 +87,14 @@ function matMul(a,b){const o=new Array(16).fill(0);for(let c=0;c<4;c++)for(let r
 function encodeVisual(enc){
   if(!scene.active)return;const eye=cam.eye(),aspect=Math.max(1,canvas.width)/Math.max(1,canvas.height),vp=matMul(perspective(Math.PI/4,aspect,.05,100),lookAt(eye,cam.target,[0,1,0]));
   RF.fill(0);RF.set(vp,0);RF[16]=eye[0];RF[17]=eye[1];RF[18]=eye[2];RF[19]=1;RF[20]=-.35;RF[21]=.82;RF[22]=.45;RF[23]=0;RF[24]=pitcher.cx;RF[25]=pitcher.cy;RF[26]=pitcher.cz;RF[27]=pitcher.angle;queue.writeBuffer(renderUni,0,RF);
+  const hook=window.__v5PitcherVisualHook;let useHook=false;
+  if(hook?.ready&&typeof hook.prepare==='function'&&typeof hook.render==='function'){
+    try{hook.prepare({vp,eye,pitcher});useHook=true;}catch(err){console.error('[M8.8.9 jug prepare]',err);useHook=false;}
+  }
   const target=ctx.getCurrentTexture().createView(),pass=enc.beginRenderPass({label:'m872TransparentVesselPass',colorAttachments:[{view:target,loadOp:'load',storeOp:'store'}]});
-  pass.setPipeline(renderPipe);pass.setBindGroup(0,renderBG);pass.setVertexBuffer(0,vertexBuf);pass.draw(vertexCount);pass.end();scene.renderPasses++;
+  pass.setPipeline(renderPipe);pass.setBindGroup(0,renderBG);pass.setVertexBuffer(0,vertexBuf);pass.draw(useHook?glassVertexCount:vertexCount);
+  if(useHook){try{hook.render(pass);}catch(err){console.error('[M8.8.9 jug render]',err);}}
+  pass.end();scene.renderPasses++;
 }
 
 export {encodeVisual};

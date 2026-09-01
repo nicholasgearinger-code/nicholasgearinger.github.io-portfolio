@@ -1,5 +1,5 @@
 Fluid V8 Pages preview checkpoint
-milestone: M8.9.3-glb-shell-volume-fill
+milestone: M8.9.3-bootstrap-hotfix
 source_branch: fluid-v5-development
-source_commit: ee457f3e791f988fb066f0d2da816e487c23d0d1
+source_commit: 6db76f2092f0ab312fb49fffb486d7e9c0f0ceba
 purpose: trigger main-only Pages workflow to stage the isolated Fluid V8 development preview without merging Fluid V8 source into main.

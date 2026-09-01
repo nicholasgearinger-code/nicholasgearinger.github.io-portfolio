@@ -276,6 +276,25 @@ jobs:
           p.write_text(html, encoding="utf-8")
           PY
 
+      # Fluid V8 remains isolated on fluid-v5-development. This main-only Pages workflow
+      # stages the branch into a review path without merging any Fluid V8 source to production.
+      - name: Checkout Fluid V8 development preview
+        uses: actions/checkout@v4
+        with:
+          ref: fluid-v5-development
+          path: .fluid-v5-preview-source
+
+      - name: Stage Fluid V8 development preview
+        shell: bash
+        run: |
+          rm -rf fluid-v5-preview
+          mkdir -p fluid-v5-preview
+          rsync -a \
+            --exclude='.git' \
+            --exclude='.github' \
+            .fluid-v5-preview-source/fluid-v5-pbf/ fluid-v5-preview/
+          rm -rf .fluid-v5-preview-source
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 

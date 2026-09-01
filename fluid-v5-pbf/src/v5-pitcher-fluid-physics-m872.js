@@ -27,7 +27,7 @@ const smooth=t=>{t=clamp(t,0,1);return t*t*(3-2*t)};
 
 const fullCapacity=Math.max(1,sim.cap||sim.n||1);
 const glass={cx:.705,cz:.370,bottom:.030,baseTop:.067,rim:.505,innerBottom:.122,innerTop:.134,outerBottom:.143,outerTop:.154};
-const pitcher={cx:.300,cy:.820,cz:.370,angle:0,prevAngle:0,omega:0,maxAngle:-1.30};
+const pitcher={cx:.300,cy:.820,cz:.370,angle:0,prevAngle:0,omega:0,maxAngle:-1.15};
 const profile=[[-.225,.074],[-.190,.105],[-.100,.137],[.020,.145],[.105,.127],[.165,.095],[.205,.070]];
 const outerProfile=[[-.255,.095],[-.220,.125],[-.135,.158],[-.020,.166],[.095,.147],[.165,.118],[.225,.090]];
 const spoutPath=[[.060,.145,0],[.105,.165,0],[.155,.192,0],[.205,.198,0],[.250,.182,0]];

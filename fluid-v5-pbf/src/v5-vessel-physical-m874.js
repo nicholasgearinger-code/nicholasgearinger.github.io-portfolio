@@ -32,8 +32,8 @@ function bodyRadius(y) {
 }
 
 function seedHydrostaticWater() {
-  // BCC lattice with exactly the same number density as a cubic lattice of spacing d:
-  // a^3 = 2 d^3 and two alternating half-height layers per BCC cell.
+  // BCC number density matches a cubic lattice at spacing d, so this dense seed keeps the
+  // upstream PBF rest-density/mass calibration instead of creating an artificially heavy fill.
   const d = Math.max(.001, Number(sim.params?.spacing) || .019);
   const a = Math.cbrt(2) * d;
   const dy = .5 * a;
@@ -72,7 +72,7 @@ function seedHydrostaticWater() {
   return n;
 }
 
-// Script only the rigid pitcher motion. Fluid motion is never scripted.
+// Only the rigid pitcher motion is prescribed. No fluid velocity or trajectory is prescribed.
 function physicalAngleAt(t) {
   if (t < 3.50) return 0;
   if (t < 6.20) return pitcher.maxAngle * smooth((t - 3.50) / 2.70);
@@ -143,6 +143,10 @@ fn spoutOpening(q: vec3f, pr: f32) -> bool {
   let f = spoutFloor(clamp(q.x, .060, .250));
   return q.y > f - .022 - pr * .15 && q.y < f + .105 + pr;
 }
+fn outletEscape(q: vec3f, pr: f32) -> bool {
+  let f = spoutFloor(.250);
+  return q.x > .238 && abs(q.z) < .078 + pr && q.y > f - .070 - pr && q.y < f + .125 + pr;
+}
 fn insideBody(q: vec3f, pr: f32) -> bool {
   if (q.y < -.225 + pr || q.y > .205 + pr * .4) { return false; }
   let r = length(q.xz);
@@ -165,23 +169,21 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   let p0 = pos[i].xyz;
   var p = pred[i].xyz;
 
-  // --- Moving pitcher -------------------------------------------------------
-  // Classify the old particle against both the previous and current pitcher pose.
-  // This makes the first substep of a moving frame continuous without tagging particles.
+  // Moving pitcher. The old position determines which side of the swept wall the particle
+  // belongs to, while the current predicted position is projected against the current pose.
   let oPrev = toLocal(p0, U.motion.x);
   let oCur  = toLocal(p0, U.pitch.w);
   var q = toLocal(p, U.pitch.w);
   let wasInside = insideBody(oPrev, pr) || insideBody(oCur, pr);
+  let escaped = outletEscape(q, pr);
 
-  if (wasInside) {
-    // Solid bottom.
+  if (wasInside && !escaped) {
     if (q.y < -.225 + pr) { q.y = -.225 + pr; }
 
-    let r = length(q.xz);
+    var r = length(q.xz);
     let yEval = clamp(q.y, -.225 + pr, .205 - pr * .25);
     let inner = max(.010, bodyR(yEval) - pr);
 
-    // Side wall, except for the real spout cut-out.
     if (q.y <= .205 + pr * .25 && r > inner && !spoutOpening(q, pr)) {
       let d = safe2(q.xz);
       q.x = d.x * inner;
@@ -189,15 +191,14 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       r = inner;
     }
 
-    // Shoulder/rim annulus. The central neck and the spout remain genuinely open.
     let neck = max(.010, bodyR(.205) - pr);
     if (q.y > .205 - pr * .35 && r > neck && !spoutOpening(q, pr)) {
       q.y = .205 - pr * .35;
     }
   }
 
-  // Open U-shaped spout trough. It exists whether or not a particle was previously in the
-  // pitcher; there is no logical portal. The body opening simply connects to this geometry.
+  // Open U-shaped spout. There is no logical portal: this is simply geometry connected to
+  // the hole in the pitcher wall. The top and the downstream end are open.
   let f = spoutFloor(clamp(q.x, .060, .250));
   let inSpoutBand = q.x > .044 && q.x < .258 + pr &&
                     q.y > f - .070 - pr && q.y < f + .120 + pr &&
@@ -214,9 +215,8 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   }
   p = toWorld(q);
 
-  // --- Static receiving glass ---------------------------------------------
-  // No capture state: falling water passes through the open center of the rim. Once its
-  // previous position is inside the cavity, ordinary swept wall/base collisions retain it.
+  // Static receiving glass. No capture flag is used: top entry is only a swept collision test
+  // for the current substep, while subsequent retention follows from the inner wall/base shape.
   let gc = vec2f(U.glass0.x, U.glass0.y);
   let baseTop = U.glass0.z;
   let rim = U.glass0.w;
@@ -228,8 +228,6 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   let oldInner = max(.008, glassInner(clamp(p0.y, baseTop, rim)) - pr);
   let wasInGlass = p0.y >= baseTop + pr * .35 && p0.y < rim + pr && r0 < oldInner;
 
-  // Detect a top-entry segment so a very fast jet cannot tunnel through the entire base in
-  // its first glass substep.
   var enteredTop = false;
   if (p0.y >= rim && p.y < rim) {
     let dy = p0.y - p.y;
@@ -252,7 +250,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       }
     }
   } else {
-    // Collision with the solid tapered shell from either side.
+    // Solid tapered shell from either side.
     if (p.y > baseTop - pr && p.y < rim + pr) {
       let inner = max(.008, glassInner(clamp(p.y, baseTop, rim)) - pr);
       let outer = glassOuter(clamp(p.y, baseTop, rim)) + pr;
@@ -268,7 +266,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       }
     }
 
-    // Solid bottom disk / underside.
+    // Solid base/underside.
     g = p.xz - gc; r = length(g);
     let baseOuter = U.glass1.z + pr;
     if (r < baseOuter && p.y < baseTop + pr && p.y > bottom - pr) {
@@ -276,7 +274,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       else if (p0.y <= bottom) { p.y = bottom - pr; }
     }
 
-    // Rim annulus; its center is open.
+    // Rim annulus; the center remains open.
     g = p.xz - gc; r = length(g);
     if (abs(p.y - rim) < pr && r > U.glass1.y - pr && r < U.glass1.w + pr) {
       p.y = select(rim - pr, rim + pr, p0.y >= rim);
@@ -349,8 +347,8 @@ function injectBoundary(enc, posParity, predParity, label) {
   scene.collisionPasses = passes;
 }
 
-// Insert the geometric boundary into the actual PBF loop. Prediction is constrained before the
-// neighbour grid is built, and every density iteration is constrained before the next iteration.
+// Inject into the solver itself: after gravity prediction and after every PBF density delta.
+// Therefore the next neighbour/pressure operation sees an already-valid vessel position.
 dev.createCommandEncoder = function(desc) {
   const enc = baseCreate(desc);
   if (!inStep) return enc;
@@ -392,8 +390,9 @@ dev.createCommandEncoder = function(desc) {
 sim.step = function(dt) {
   applyWaterParams();
   if (scene.started && !ui.paused) advancePhysicalMotion(dt);
-  // M8.7.2 remains underneath us for the moving vessel renderer only. Suppress its scripted
-  // motion and old pre/post clamp while the upstream PBF step is encoding.
+
+  // Keep M8.7.2 underneath only for its moving transparent-vessel renderer. Suppress its old
+  // whole-step collider and old motion curve while the upstream PBF step is encoded.
   const started = scene.started, active = scene.active;
   scene.started = false;
   scene.active = false;

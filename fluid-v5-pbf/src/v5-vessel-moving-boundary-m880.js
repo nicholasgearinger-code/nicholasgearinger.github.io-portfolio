@@ -183,7 +183,7 @@ fn main(@builtin(global_invocation_id) gid:vec3u){
   }
 
   let gc=vec2f(U.glass0.x,U.glass0.z);let base=U.glass2.x;let rim=U.glass1.w;
-  let q0=p0.xz-gc;let q=p.xz-gc;let gr0=length(q0);var gr=length(q);
+  let q0=p0.xz-gc;var q=p.xz-gc;let gr0=length(q0);var gr=length(q);
   let gi0=max(.008,glassInner(clamp(p0.y,base,rim))-pr);
   let inside0=p0.y>base-pr*1.4 && p0.y<rim+pr*.6 && gr0<gi0+pr*.35;
 

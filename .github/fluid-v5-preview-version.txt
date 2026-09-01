@@ -1,5 +1,5 @@
 Fluid V8 Pages preview checkpoint
-milestone: M8.8.6
+milestone: M8.8.7
 source_branch: fluid-v5-development
-source_commit: 9f5618f051f2d6fae6b147160f6415b9c1ee6589
+source_commit: a1f02284da4b3ce219796ebbe2175deb324d4ece
 purpose: trigger main-only Pages workflow to stage the isolated Fluid V8 development preview without merging Fluid V8 source into main.

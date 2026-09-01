@@ -52,7 +52,7 @@ function wgslProfile(name,pts){
   let s=`fn ${name}(y:f32)->f32{\n  if(y<=${f32(pts[0][0])}){return ${f32(pts[0][1])};}`;
   for(let i=1;i<pts.length;i++){
     const [y0,r0]=pts[i-1],[y1,r1]=pts[i],dy=Math.max(1e-6,y1-y0);
-    s+=`\n  if(y<${f32(y1)}){return mix(${f32(r0)},${f32(r1)},(y-${f32(y0)})/${f32(dy)});}`;
+    s+=`\n  if(y<${f32(y1)}){return mix(${f32(r0)},${f32(r1)},(y-(${f32(y0)}))/${f32(dy)});}`;
   }
   s+=`\n  return ${f32(pts.at(-1)[1])};\n}`;
   return s;
@@ -61,7 +61,7 @@ function wgslProfile(name,pts){
 function installShaderAdapter(spec){
   if(window.__v5M891ShaderAdapter)return;
   const oldBody=`fn bodyR(y:f32)->f32{\n  if(y<=-.225){return .074;} if(y<-.190){return mix(.074,.105,(y+.225)/.035);}\n  if(y<-.100){return mix(.105,.137,(y+.190)/.090);} if(y<.020){return mix(.137,.145,(y+.100)/.120);}\n  if(y<.105){return mix(.145,.127,(y-.020)/.085);} if(y<.165){return mix(.127,.095,(y-.105)/.060);}\n  if(y<.205){return mix(.095,.070,(y-.165)/.040);} return .070;\n}`;
-  const oldOuter=`fn outerR(y:f32)->f32{\n  if(y<=-.255){return .095;} if(y<-.220){return mix(.095,.125,(y+.255)/.035);}\n  if(y<-.135){return mix(.125,.158,(y+.220)/.085);} if(y<-.020){return mix(.158,.166,(y+.135)/.115);}\n  if(y<.095){return mix(.166,.147,(y-.020)/.115);} if(y<.165){return mix(.147,.118,(y-.095)/.070);}\n  if(y<.225){return mix(.118,.090,(y-.165)/.060);} return .090;\n}`;
+  const oldOuter=`fn outerR(y:f32)->f32{\n  if(y<=-.255){return .095;} if(y<-.220){return mix(.095,.125,(y+.255)/.035);}\n  if(y<-.135){return mix(.125,.158,(y+.220)/.085);} if(y<-.020){return mix(.158,.166,(y+.135)/.115);}\n  if(y<.095){return mix(.166,.147,(y+.020)/.115);} if(y<.165){return mix(.147,.118,(y-.095)/.070);}\n  if(y<.225){return mix(.118,.090,(y-.165)/.060);} return .090;\n}`;
   const base=dev.createShaderModule.bind(dev),b0=f32(spec.bottom),b1=f32(spec.top),o0=f32(spec.outer[0][0]),o1=f32(spec.outer.at(-1)[0]);
   dev.createShaderModule=function(desc){
     if(desc?.label==='m880MovingBoundaryWGSL'&&typeof desc.code==='string'){

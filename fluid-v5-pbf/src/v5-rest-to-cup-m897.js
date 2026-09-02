@@ -33,7 +33,10 @@ if(phase==='pre'){
     let center=mix(lip.xz,gc,fall);
     let drift=p.xz-center;let driftR=length(drift);
     let corridor=mix(.052,.082,fall);
-    if(driftR<corridor){p.xz=mix(p.xz,center,mix(.08,.20,fall));}
+    if(driftR<corridor){
+      let guidedXZ=mix(p.xz,center,mix(.08,.20,fall));
+      p=vec3f(guidedXZ.x,p.y,guidedXZ.y);
+    }
   }
 
   let q0=p0.xz-gc;var q=p.xz-gc;let gr0=length(q0);var gr=length(q);`;

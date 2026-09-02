@@ -1,5 +1,5 @@
 Fluid V8 Pages preview checkpoint
-milestone: M8.9.4-pitcher-reservoir-glb-jug
+milestone: M8.9.6-controlled-pitcher-pour
 source_branch: fluid-v5-development
-source_commit: 4d1abf934725243d6403c8a40cfdb66e28225c8a
+source_commit: 1786a14b1e9550ec8b3fb7c2cc60471bd05d3d4f
 purpose: trigger main-only Pages workflow to stage the isolated Fluid V8 development preview without merging Fluid V8 source into main.

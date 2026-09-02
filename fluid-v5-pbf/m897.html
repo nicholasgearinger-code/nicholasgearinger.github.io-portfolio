@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no"><meta name="theme-color" content="#06131a"><title>Fluid V8 · M8.9.7 Rest-to-Cup Pour</title>
+<style>*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;background:#06131a;color:#dffcff;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}#boot{position:fixed;inset:0;display:grid;place-content:center;gap:12px;padding:30px;text-align:center}#boot b{color:#86f6ff;letter-spacing:.12em}#boot small{color:#8ba7b2;line-height:1.5;max-width:84vw}#boot.err{color:#ff9f9f;white-space:pre-wrap;text-align:left}</style></head><body><div id="boot"><b>FLUID V8 · M8.9.7</b><small>holding the reservoir motionless · starting water and pitcher together · guiding the released stream into the open glass…</small></div>
+<script>
+(async()=>{
+  const boot=document.getElementById('boot');
+  try{
+    const r=await fetch('./m896.html?m897base=1',{cache:'no-store'});if(!r.ok)throw new Error(`M8.9.6 base fetch failed: HTTP ${r.status}`);let html=await r.text();
+    const pre=" note.textContent='aligning cup + installing low-spill capture…';await import('./src/v5-controlled-pour-m896.js?pre=896');";
+    const post=" note.textContent='starting two-stage controlled pitcher pour…';await import('./src/v5-controlled-pour-m896.js?post=896');";
+    if(!html.includes(pre)||!html.includes(post))throw new Error('M8.9.7 bootstrap could not locate M8.9.6 control hooks.');
+    // These anchors are inside M8.9.6's quoted M8.9.5 bootstrap, which itself edits M8.9.2.
+    // Preserve three layers of literal backslashes so the final generated module imports run.
+    html=html.replace(pre,pre+"\\\\\\\\n note.textContent='locking hydrostatic rest + aiming the released stream…';await import('./src/v5-rest-to-cup-m897.js?pre=897');");
+    html=html.replace(post,post+"\\\\\\\\n note.textContent='starting synchronized pitcher and water motion…';await import('./src/v5-rest-to-cup-m897.js?post=897');");
+    html=html.replaceAll('M8.9.6','M8.9.7');
+    document.open();document.write(html);document.close();
+  }catch(err){console.error('[M8.9.7 bootstrap]',err);boot.className='err';boot.textContent='M8.9.7 BOOTSTRAP ERROR\n\n'+String(err?.message||err)+'\n\n'+String(err?.stack||'');}
+})();
+</script></body></html>

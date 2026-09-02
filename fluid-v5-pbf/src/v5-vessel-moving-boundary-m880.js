@@ -238,7 +238,11 @@ function bindFor(slot,posPar,predPar){
   ]});bindCache.set(key,bg);return bg;
 }
 
-let motionTime=0,activeSlot=0,slotCounter=0,boundaryPasses=0;
+// Later previews can begin at the visible-motion portion of the curve after holding an
+// untouched hydrostatic seed. The default remains zero, so every existing milestone keeps
+// its original three-second simulated settling phase.
+function motionStart(){return Math.max(0,Number(window.__v5VesselMotionStartTime)||0);}
+let motionTime=motionStart(),activeSlot=0,slotCounter=0,boundaryPasses=0;
 function prepareSlot(slot,dt){
   dt=clamp(Number(dt)||1/240,1/1000,.05);
   const prev=angleAt(motionTime),next=angleAt(motionTime+dt);
@@ -298,12 +302,17 @@ dev.createCommandEncoder=function(desc){
     const v=Reflect.get(target,prop,target);return typeof v==='function'?v.bind(target):v;
   }});
 };
-sim.step=function(dt){inStep=true;try{return baseStep(dt)}finally{inStep=false;expectRender=true;}};
+sim.step=function(dt){
+  // A later presentation layer may hold the seeded water without advancing physics while
+  // still asking this module to draw both vessels every frame.
+  if(window.__v5VesselFreezeSolver){expectRender=true;return;}
+  inStep=true;try{return baseStep(dt)}finally{inStep=false;expectRender=true;}
+};
 
 function frameCamera(){cam.az=-.57;cam.el=.25;cam.dist=1.72;cam.target=[.515,.650,.370];}
 function hardReset(){
   scene.active=true;scene.started=false;scene.clock=0;scene.collisionPasses=0;scene.renderPasses=0;
-  motionTime=0;slotCounter=0;boundaryPasses=0;solvePP=null;
+  motionTime=motionStart();slotCounter=0;boundaryPasses=0;solvePP=null;
   pitcher.angle=0;pitcher.prevAngle=0;pitcher.omega=0;
   ui.pouring=false;ui.pourLeft=0;ui.paused=false;
   tunePhysics();tuneSurface();seedHydrostaticVolume();frameCamera();scene.cycles++;scene.started=true;sync();

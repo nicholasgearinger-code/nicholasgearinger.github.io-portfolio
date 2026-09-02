@@ -1,6 +1,6 @@
-// Fluid V8 M8.9.9 — proven analytic containment with the high-poly GLB as visual skin only.
-// This deliberately restores M8.8.8's matching seed/boundary pair. No radius, water seed,
-// or collision decision is derived from the decorative mesh.
+// Fluid V8 M8.9.9 — measured GLB-profile containment with the high-poly jug as visual skin.
+// The moving boundary module uses a conservative interior sampled from the visual mesh,
+// while this controller holds the zero-velocity seed until the user explicitly pours.
 import {sim,glass,pitcher,scene,pitcherPoint,spoutPath,cam} from './v5-pitcher-fluid-physics-m872.js';
 
 if(!sim?.dev||!glass||!pitcher||!scene)throw new Error('M8.9.9 proven-pour runtime unavailable');
@@ -20,7 +20,7 @@ if(phase==='post'){
 
   // Restore the exact proven M8.8.8 receiver and low-energy tilt.
   pitcher.maxAngle=-1.055;
-  glass.cx=.942;glass.innerBottom=.132;glass.innerTop=.148;glass.outerBottom=.154;glass.outerTop=.170;
+  glass.cx=.942;glass.innerBottom=.140;glass.innerTop=.158;glass.outerBottom=.162;glass.outerTop=.182;
 
   function setButton(){if(!button)button=document.getElementById('m880Again');if(button)button.textContent=state==='rest'?'POUR':'RESET';}
   function hold(){
@@ -34,7 +34,7 @@ if(phase==='post'){
     window.__v5VesselHoldMotion=state!=='pour';
     window.__v5VesselFreezeSolver=false;
     const result=baseStep(dt);
-    if(state==='pour'&&scene.clock>=11.40){state='complete';window.__v5VesselHoldMotion=true;setButton();}
+    if(state==='pour'&&scene.clock>=13.20){state='complete';window.__v5VesselHoldMotion=true;setButton();}
     return result;
   };
 
@@ -59,9 +59,9 @@ if(phase==='post'){
   if(host){line=document.createElement('div');line.id='m899ProvenPourStatus';line.style.cssText='color:#9ff0d2;border-top:1px solid rgba(112,225,235,.20)';host.appendChild(line);}
 
   const forceLabels=()=>{
-    const h=document.querySelector('#m880Hud b');if(h&&h.textContent!=='M8.9.9 · PROVEN CONTAINMENT')h.textContent='M8.9.9 · PROVEN CONTAINMENT';
+    const h=document.querySelector('#m880Hud b');if(h&&h.textContent!=='M8.9.9 · GLB CONTAINMENT')h.textContent='M8.9.9 · GLB CONTAINMENT';
     const top=document.querySelector('.hud.card.title');if(top&&top.textContent!=='FLUID V8 · M8.9.9')top.textContent='FLUID V8 · M8.9.9';
-    if(document.title!=='Fluid V8 · M8.9.9 Proven Containment')document.title='Fluid V8 · M8.9.9 Proven Containment';
+    if(document.title!=='Fluid V8 · M8.9.9 GLB Containment')document.title='Fluid V8 · M8.9.9 GLB Containment';
   };
   const labels=new MutationObserver(forceLabels);labels.observe(document.documentElement,{subtree:true,childList:true,characterData:true});
 
@@ -71,16 +71,16 @@ if(phase==='post'){
     else if(state==='complete')line.textContent='POUR COMPLETE · PHYSICS FROZEN FOR INSPECTION';
     else{
       const lip=pitcherPoint(spoutPath.at(-1)),deg=-pitcher.angle*180/Math.PI;
-      const stage=scene.clock<5.7?'TIPPING':scene.clock<9.2?'GRAVITY POUR':scene.clock<11.4?'RETURNING':'COMPLETE';
-      line.textContent=`${stage} · ${deg.toFixed(0)}° · ANALYTIC WALL + GLB SKIN · lip ${lip[0].toFixed(2)}, ${lip[1].toFixed(2)}`;
+      const stage=scene.clock<5.7?'TIPPING':scene.clock<10.7?'GRAVITY POUR':scene.clock<13.2?'RETURNING':'COMPLETE';
+      line.textContent=`${stage} · ${deg.toFixed(0)}° · GLB-FIT WALL + GLB SKIN · lip ${lip[0].toFixed(2)}, ${lip[1].toFixed(2)}`;
     }
   }
   hold();sync();setInterval(sync,120);
 
-  window.__v5M899ProvenPour={online:true,physics:'m888-analytic-warm',visual:'m890-glb-only',start:pour,reset:()=>{api?.restart?.();hold();},get state(){return state;}};
+  window.__v5M899ProvenPour={online:true,physics:'m899-glb-profile-warm',visual:'m890-glb-only',start:pour,reset:()=>{api?.restart?.();hold();},get state(){return state;}};
 }
 
 window.__fluidV5Version='8.9.9';
-window.__fluidV5Build='M8.9.9 PROVEN M8.8.8 WARM PBF CONTAINMENT / FORWARD GLB VISUAL / MANUAL MOTION RELEASE';
-document.title='Fluid V8 · M8.9.9 Proven Containment';
-console.info(`[Fluid V8 M8.9.9] ${phase}: proven analytic water containment + GLB visual skin online.`);
+window.__fluidV5Build='M8.9.9 MEASURED GLB PBF CONTAINMENT / PHYSICAL RIM CAPTURE / MANUAL MOTION RELEASE';
+document.title='Fluid V8 · M8.9.9 GLB Containment';
+console.info(`[Fluid V8 M8.9.9] ${phase}: measured GLB-profile containment + no-spill receiver online.`);

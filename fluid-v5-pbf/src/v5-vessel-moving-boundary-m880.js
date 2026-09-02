@@ -5,7 +5,7 @@
 // pressure/incompressibility and vessel contact converge together inside every substep.
 
 import {
-  sim,ui,cam,ssfr,faucet,dev,queue,glass,pitcher,profile,pitcherPoint,spoutPath,scene
+  sim,ui,cam,ssfr,faucet,dev,queue,glass,pitcher,pitcherPoint,spoutPath,scene
 } from './v5-pitcher-fluid-physics-m872.js';
 import {encodeVisual} from './v5-pitcher-vessels-m872.js';
 
@@ -15,6 +15,9 @@ if(!sim?.dev||!ui||!cam||!ssfr||!faucet?.online||!window.__v5M739Unified?.online
 const WG=256,MAX_SLOTS=32;
 const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
 const smooth=t=>{t=clamp(t,0,1);return t*t*(3-2*t)};
+// Conservative interior measured from the centered high-poly GLB's rotational bowl.
+// It drives both seeding here and the matching bodyR function in the boundary shader.
+const vesselProfile=[[-.225,.112],[-.190,.136],[-.150,.138],[-.100,.123],[-.050,.111],[.000,.101],[.050,.093],[.100,.087],[.150,.086],[.180,.096],[.205,.103]];
 
 function tunePhysics(){
   if(!sim.params)return;
@@ -35,19 +38,19 @@ function tuneSurface(){
 }
 
 function profileRadius(y){
-  if(y<=profile[0][0])return profile[0][1];
-  if(y>=profile.at(-1)[0])return profile.at(-1)[1];
-  for(let i=0;i<profile.length-1;i++){
-    const [y0,r0]=profile[i],[y1,r1]=profile[i+1];
+  if(y<=vesselProfile[0][0])return vesselProfile[0][1];
+  if(y>=vesselProfile.at(-1)[0])return vesselProfile.at(-1)[1];
+  for(let i=0;i<vesselProfile.length-1;i++){
+    const [y0,r0]=vesselProfile[i],[y1,r1]=vesselProfile[i+1];
     if(y<=y1){const t=(y-y0)/(y1-y0);return r0+(r1-r0)*t;}
   }
-  return profile.at(-1)[1];
+  return vesselProfile.at(-1)[1];
 }
 
 function seedHydrostaticVolume(){
   const d=Math.max(.001,Number(sim.params?.spacing)||.019);
   const a=Math.cbrt(2)*d,dy=.5*a;
-  const minY=profile[0][0]+d*.74,fillY=.100;
+  const minY=vesselProfile[0][0]+d*.74,fillY=.100;
   const P=[],V=[];let layer=0;
   const limit=Math.min(sim.cap||6000,3600);
   outer:for(let y=minY;y<=fillY+1e-6;y+=dy,layer++){
@@ -76,15 +79,15 @@ pitcher.maxAngle=-1.18;
 function angleAt(t){
   if(t<3.00)return 0;
   if(t<5.70)return pitcher.maxAngle*smooth((t-3.00)/2.70);
-  if(t<9.20)return pitcher.maxAngle;
-  if(t<11.40)return pitcher.maxAngle*(1-smooth((t-9.20)/2.20));
+  if(t<10.70)return pitcher.maxAngle;
+  if(t<13.20)return pitcher.maxAngle*(1-smooth((t-10.70)/2.50));
   return 0;
 }
 function stageAt(t){
   if(t<3.00)return 'HYDROSTATIC REST';
   if(t<5.70)return 'TURNING — GRAVITY SETS FREE SURFACE';
-  if(t<9.20)return 'GRAVITY POUR';
-  if(t<11.40)return 'RETURNING UPRIGHT';
+  if(t<10.70)return 'GRAVITY POUR';
+  if(t<13.20)return 'RETURNING UPRIGHT';
   return 'POUR COMPLETE';
 }
 
@@ -111,16 +114,21 @@ fn toWorld(p:vec3f)->vec3f{
   return U.pitch.xyz+vec3f(c*p.x-s*p.y,s*p.x+c*p.y,p.z);
 }
 fn bodyR(y:f32)->f32{
-  if(y<=-.225){return .074;} if(y<-.190){return mix(.074,.105,(y+.225)/.035);}
-  if(y<-.100){return mix(.105,.137,(y+.190)/.090);} if(y<.020){return mix(.137,.145,(y+.100)/.120);}
-  if(y<.105){return mix(.145,.127,(y-.020)/.085);} if(y<.165){return mix(.127,.095,(y-.105)/.060);}
-  if(y<.205){return mix(.095,.070,(y-.165)/.040);} return .070;
+  if(y<=-.225){return .112;} if(y<-.190){return mix(.112,.136,(y+.225)/.035);}
+  if(y<-.150){return mix(.136,.138,(y+.190)/.040);} if(y<-.100){return mix(.138,.123,(y+.150)/.050);}
+  if(y<-.050){return mix(.123,.111,(y+.100)/.050);} if(y<.000){return mix(.111,.101,(y+.050)/.050);}
+  if(y<.050){return mix(.101,.093,y/.050);} if(y<.100){return mix(.093,.087,(y-.050)/.050);}
+  if(y<.150){return mix(.087,.086,(y-.100)/.050);} if(y<.180){return mix(.086,.096,(y-.150)/.030);}
+  if(y<.205){return mix(.096,.103,(y-.180)/.025);} return .103;
 }
 fn outerR(y:f32)->f32{
-  if(y<=-.255){return .095;} if(y<-.220){return mix(.095,.125,(y+.255)/.035);}
-  if(y<-.135){return mix(.125,.158,(y+.220)/.085);} if(y<-.020){return mix(.158,.166,(y+.135)/.115);}
-  if(y<.095){return mix(.166,.147,(y+.020)/.115);} if(y<.165){return mix(.147,.118,(y-.095)/.070);}
-  if(y<.225){return mix(.118,.090,(y-.165)/.060);} return .090;
+  if(y<=-.255){return .095;} if(y<-.225){return mix(.095,.136,(y+.255)/.030);}
+  if(y<-.190){return mix(.136,.159,(y+.225)/.035);} if(y<-.150){return mix(.159,.161,(y+.190)/.040);}
+  if(y<-.100){return mix(.161,.146,(y+.150)/.050);} if(y<-.050){return mix(.146,.134,(y+.100)/.050);}
+  if(y<.000){return mix(.134,.124,(y+.050)/.050);} if(y<.050){return mix(.124,.115,y/.050);}
+  if(y<.100){return mix(.115,.109,(y-.050)/.050);} if(y<.150){return mix(.109,.108,(y-.100)/.050);}
+  if(y<.180){return mix(.108,.119,(y-.150)/.030);} if(y<.220){return mix(.119,.132,(y-.180)/.040);}
+  return .132;
 }
 fn spoutY(x:f32)->f32{
   if(x<=.060){return .145;} if(x<.105){return mix(.145,.165,(x-.060)/.045);}

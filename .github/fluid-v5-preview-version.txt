@@ -1,5 +1,5 @@
 Fluid V8 Pages preview checkpoint
-milestone: M8.9.8-user-triggered-physics-only-pour
+milestone: M8.9.8.1-gentle-natural-cup-pour
 source_branch: fluid-v5-development
-source_commit: 611ab4ee9506c0485d6d19f4fecc365710755b2c
+source_commit: 946aef4f0f0665418d2e9e6288b25e035871c1a1
 purpose: trigger main-only Pages workflow to stage the isolated Fluid V8 development preview without merging Fluid V8 source into main.

@@ -1,4 +1,4 @@
-milestone: M8.9.9-warm-pbf-forward-glb
+milestone: M8.9.9-cache-safe-manual-pour
 source_branch: fluid-v5-development
-source_commit: cd0118799e4132993d598baaa8d6e9774324a3a0
-behavior: active resting PBF with held vessel motion; visible GLB spout faces receiver
+source_commit: b6d115aae81ea7f90053540057d604522ef9b3e7
+behavior: cache-busted held-motion PBF boundary; button and HUD own the pour timeline

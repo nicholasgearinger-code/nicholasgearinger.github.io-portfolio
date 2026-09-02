@@ -1,4 +1,4 @@
-milestone: M8.9.9-aligned-glb-shell
+milestone: M8.9.9-warm-pbf-forward-glb
 source_branch: fluid-v5-development
-source_commit: db5db82d83ff3ebe796936e3e1966886d77fc8e2
-behavior: proven analytic containment with lower-bowl-centered high-poly GLB visual
+source_commit: cd0118799e4132993d598baaa8d6e9774324a3a0
+behavior: active resting PBF with held vessel motion; visible GLB spout faces receiver

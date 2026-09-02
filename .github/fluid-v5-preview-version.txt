@@ -1,5 +1,4 @@
-Fluid V8 Pages preview checkpoint
-milestone: M8.9.9-proven-analytic-containment-glb-skin
+milestone: M8.9.9-aligned-glb-shell
 source_branch: fluid-v5-development
-source_commit: 83f28aae172c508061d7a0d2fe8cec9001c65034
-purpose: trigger main-only Pages workflow to stage the isolated Fluid V8 development preview without merging Fluid V8 source into main.
+source_commit: db5db82d83ff3ebe796936e3e1966886d77fc8e2
+behavior: proven analytic containment with lower-bowl-centered high-poly GLB visual

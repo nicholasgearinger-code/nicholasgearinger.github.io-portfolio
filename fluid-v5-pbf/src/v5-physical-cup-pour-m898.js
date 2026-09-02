@@ -1,9 +1,9 @@
-// Fluid V8 M8.9.8.1 — user-triggered, gently aligned physics-only pitcher-to-cup pour.
+// Fluid V8 M8.9.8.2 — contained, gently aligned physics-only pitcher-to-cup pour.
 // Water remains an untouched hydrostatic PBF reservoir until POUR is pressed. From that
 // point onward, gravity, momentum, density constraints, and vessel collisions own its path.
-import {sim,glass,pitcher,scene,pitcherPoint,spoutPath,cam} from './v5-pitcher-fluid-physics-m872.js';
+import {sim,dev,glass,pitcher,scene,pitcherPoint,spoutPath,cam} from './v5-pitcher-fluid-physics-m872.js';
 
-if(!sim?.dev||!glass||!pitcher||!scene)throw new Error('M8.9.8.1 physical-pour runtime unavailable');
+if(!sim?.dev||!glass||!pitcher||!scene)throw new Error('M8.9.8.2 physical-pour runtime unavailable');
 
 const phase=new URL(import.meta.url).searchParams.has('post')?'post':'pre';
 const q=new URLSearchParams(location.search);
@@ -25,6 +25,28 @@ if(phase==='pre'){
   glass.innerTop=clamp(Number(q.get('cupinnertop'))||.165,.150,.180);
   glass.outerBottom=Math.max(glass.innerBottom+.020,Number(q.get('cupouterbottom'))||.168);
   glass.outerTop=Math.max(glass.innerTop+.020,Number(q.get('cupoutertop'))||.190);
+
+  // The GLB-derived radial body ended at the shoulder but M8.8 still treated its complete
+  // top ring as an opening. Close that false aperture with a geometric lid and retain only
+  // the forward doorway/spout channel. This is a collision boundary, not particle steering.
+  const spec=window.__v5JugShell892;
+  if(!spec?.top)throw new Error('M8.9.8.2 GLB shell top unavailable');
+  const shellTop=Number(spec.top).toFixed(6);
+  const baseCreateShaderModule=dev.createShaderModule.bind(dev);
+  dev.createShaderModule=function(desc){
+    if(!desc||desc.label!=='m880MovingBoundaryWGSL'||typeof desc.code!=='string')return baseCreateShaderModule(desc);
+    const anchor=`  if(wasBody||wasSpout){
+    if(l.y<-.225+pr){l.y=-.225+pr;}`;
+    const closed=`  if(wasBody||wasSpout){
+    if(l.y<-.225+pr){l.y=-.225+pr;}
+
+    // GLB shoulder closure: only the real forward spout path remains open.
+    if(l.y>${shellTop}-pr*.18 && !doorway(l,pr) && !spoutSpace(l,pr)){
+      l.y=${shellTop}-pr*.18;
+    }`;
+    if(!desc.code.includes(anchor))throw new Error('M8.9.8.2 shoulder-closure shader anchor unavailable');
+    return baseCreateShaderModule({...desc,code:desc.code.replace(anchor,closed)});
+  };
 }
 
 if(phase==='post'){
@@ -58,7 +80,7 @@ if(phase==='post'){
   function holdReservoir(reason='rest'){
     state='rest';window.__v5VesselFreezeSolver=true;
     pitcher.angle=0;pitcher.prevAngle=0;pitcher.omega=0;scene.clock=0;
-    try{window.__v5M895JugReservoir?.reseed?.(`M8.9.8.1 ${reason}`);}catch(err){console.error('[M8.9.8.1 reservoir]',err);}
+    try{window.__v5M895JugReservoir?.reseed?.(`M8.9.8.2 ${reason}`);}catch(err){console.error('[M8.9.8.2 reservoir]',err);}
     setButton();
   }
 
@@ -107,15 +129,15 @@ if(phase==='post'){
     e.preventDefault();e.stopPropagation();
     if(state==='rest')startPour();
     else{
-      try{api?.restart?.();}catch(err){console.error('[M8.9.8.1 reset]',err);}
+      try{api?.restart?.();}catch(err){console.error('[M8.9.8.2 reset]',err);}
       lastCycle=scene.cycles;holdReservoir('manual reset');
     }
   };
 
   const forceLabels=()=>{
-    const h=document.querySelector('#m880Hud b');if(h&&h.textContent!=='M8.9.8.1 · NATURAL POUR')h.textContent='M8.9.8.1 · NATURAL POUR';
-    const top=document.querySelector('.hud.card.title');if(top&&top.textContent!=='FLUID V8 · M8.9.8.1')top.textContent='FLUID V8 · M8.9.8.1';
-    if(document.title!=='Fluid V8 · M8.9.8.1 Natural Cup Pour')document.title='Fluid V8 · M8.9.8.1 Natural Cup Pour';
+    const h=document.querySelector('#m880Hud b');if(h&&h.textContent!=='M8.9.8.2 · CONTAINED POUR')h.textContent='M8.9.8.2 · CONTAINED POUR';
+    const top=document.querySelector('.hud.card.title');if(top&&top.textContent!=='FLUID V8 · M8.9.8.2')top.textContent='FLUID V8 · M8.9.8.2';
+    if(document.title!=='Fluid V8 · M8.9.8.2 Contained Spout Pour')document.title='Fluid V8 · M8.9.8.2 Contained Spout Pour';
   };
   const labels=new MutationObserver(forceLabels);labels.observe(document.documentElement,{subtree:true,childList:true,characterData:true});
 
@@ -140,7 +162,7 @@ if(phase==='post'){
   };
 }
 
-window.__fluidV5Version='8.9.8.1';
-window.__fluidV5Build='M8.9.8.1 INDEFINITE REST / GENTLE PHYSICS-ONLY POUR / ALIGNED OPEN CUP';
-document.title='Fluid V8 · M8.9.8.1 Natural Cup Pour';
-console.info(`[Fluid V8 M8.9.8.1] ${phase}: gentle physics-only cup pour online.`);
+window.__fluidV5Version='8.9.8.2';
+window.__fluidV5Build='M8.9.8.2 INDEFINITE REST / GLB SHOULDER CONTAINMENT / OPEN SPOUT / GENTLE PHYSICS POUR';
+document.title='Fluid V8 · M8.9.8.2 Contained Spout Pour';
+console.info(`[Fluid V8 M8.9.8.2] ${phase}: GLB-contained physics-only spout pour online.`);

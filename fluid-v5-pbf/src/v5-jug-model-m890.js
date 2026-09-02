@@ -26,13 +26,19 @@ function fitToPitcher(src){
   const b=rawBounds(src),h=Math.max(1e-6,b.ext[1]);
   const targetH=Math.max(.46,Math.min(.60,Number(q.get('jugheight'))||.525));
   const scale=targetH/h;
-  const body=[];
+  // Anchor the model from its lower, rotationally symmetric bowl. Averaging the
+  // whole middle section includes the dense handle mesh and shifts the visible
+  // jug away from the analytic fluid volume by roughly 7 cm after fitting.
+  let coreLoX=Infinity,coreHiX=-Infinity,coreLoZ=Infinity,coreHiZ=-Infinity,coreN=0;
   for(let i=0;i<src.length;i+=6){
     const t=(src[i+1]-b.lo[1])/h;
-    if(t>.12&&t<.62)body.push([src[i],src[i+2]]);
+    if(t>.12&&t<.30){
+      coreLoX=Math.min(coreLoX,src[i]);coreHiX=Math.max(coreHiX,src[i]);
+      coreLoZ=Math.min(coreLoZ,src[i+2]);coreHiZ=Math.max(coreHiZ,src[i+2]);coreN++;
+    }
   }
-  const bodyX=body.length?body.reduce((a,p)=>a+p[0],0)/body.length:(b.lo[0]+b.hi[0])*.5;
-  const bodyZ=body.length?body.reduce((a,p)=>a+p[1],0)/body.length:(b.lo[2]+b.hi[2])*.5;
+  const bodyX=coreN?(coreLoX+coreHiX)*.5:(b.lo[0]+b.hi[0])*.5;
+  const bodyZ=coreN?(coreLoZ+coreHiZ)*.5:(b.lo[2]+b.hi[2])*.5;
   let spoutX=bodyX+1,spoutZ=bodyZ,best=-1;
   for(let i=0;i<src.length;i+=6){
     const t=(src[i+1]-b.lo[1])/h;if(t<.72)continue;
@@ -51,7 +57,7 @@ function fitToPitcher(src){
   }
   const f=rawBounds(out);
   if(!f.ext.every(Number.isFinite)||f.ext.some(v=>v>4)||f.ext[1]<.1)throw new Error(`invalid decoded jug bounds ${f.ext.join('x')}`);
-  return{data:out,sourceExt:b.ext,fittedExt:f.ext,targetH,yaw,bodyCenter:[bodyX,bodyZ]};
+  return{data:out,sourceExt:b.ext,fittedExt:f.ext,targetH,yaw,bodyCenter:[bodyX,bodyZ],alignment:'lower-bowl-extents'};
 }
 
 async function decodeGLB(){

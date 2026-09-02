@@ -1,5 +1,5 @@
 Fluid V8 Pages preview checkpoint
-milestone: M8.9.8.2-contained-glb-spout-pour
+milestone: M8.9.9-proven-analytic-containment-glb-skin
 source_branch: fluid-v5-development
-source_commit: 5e6d4eb74028f66b73f0b74db648dfa2ef29d9bb
+source_commit: 83f28aae172c508061d7a0d2fe8cec9001c65034
 purpose: trigger main-only Pages workflow to stage the isolated Fluid V8 development preview without merging Fluid V8 source into main.

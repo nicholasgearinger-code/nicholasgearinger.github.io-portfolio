@@ -9,10 +9,10 @@
     const pre=" note.textContent='decoding high-poly glass jug…';await import('./src/v5-jug-model-m890.js?pre=890');";
     const post=" note.textContent='attaching decoded jug renderer…';await import('./src/v5-jug-model-m890.js?post=890');";
     if(!html.includes(pre)||!html.includes(post))throw new Error('M8.9.9 bootstrap could not locate M8.9.0 visual hooks.');
-    const alignedPre=pre.replace('?pre=890','?pre=890align1');
-    const alignedPost=post.replace('?post=890','?post=890align1');
-    html=html.replace(pre,alignedPre+"\\n note.textContent='locking proven analytic reservoir…';await import('./src/v5-proven-pour-m899.js?pre=8991');");
-    html=html.replace(post,alignedPost+"\\n note.textContent='arming manual proven-physics pour…';await import('./src/v5-proven-pour-m899.js?post=8991');");
+    const alignedPre=pre.replace('?pre=890','?pre=890align2');
+    const alignedPost=post.replace('?post=890','?post=890align2');
+    html=html.replace(pre,alignedPre+"\\n note.textContent='warming proven analytic reservoir…';await import('./src/v5-proven-pour-m899.js?pre=8992');");
+    html=html.replace(post,alignedPost+"\\n note.textContent='arming manual vessel-motion release…';await import('./src/v5-proven-pour-m899.js?post=8992');");
     html=html.replaceAll('M8.9.0','M8.9.9');
     document.open();document.write(html);document.close();
   }catch(err){console.error('[M8.9.9 bootstrap]',err);boot.className='err';boot.textContent='M8.9.9 BOOTSTRAP ERROR\n\n'+String(err?.message||err)+'\n\n'+String(err?.stack||'');}

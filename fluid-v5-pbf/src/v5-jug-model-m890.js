@@ -45,8 +45,10 @@ function fitToPitcher(src){
     const dx=src[i]-bodyX,dz=src[i+2]-bodyZ,r=dx*dx+dz*dz;
     if(r>best){best=r;spoutX=src[i];spoutZ=src[i+2];}
   }
-  const autoYaw=Math.atan2(spoutZ-bodyZ,spoutX-bodyX);
-  const yaw=autoYaw+(Number(q.get('jugyaw'))||0)*Math.PI/180;
+  // The farthest upper feature in this asset is the handle, not the pouring lip.
+  // Face the opposite side (+local X) toward the receiver.
+  const handleYaw=Math.atan2(spoutZ-bodyZ,spoutX-bodyX);
+  const yaw=handleYaw+Math.PI+(Number(q.get('jugyaw'))||0)*Math.PI/180;
   const c=Math.cos(yaw),s=Math.sin(yaw),baseY=-.255,yOff=baseY-b.lo[1]*scale;
   const out=new Float32Array(src.length);
   for(let i=0;i<src.length;i+=6){

@@ -245,8 +245,10 @@ function motionStart(){return Math.max(0,Number(window.__v5VesselMotionStartTime
 let motionTime=motionStart(),activeSlot=0,slotCounter=0,boundaryPasses=0;
 function prepareSlot(slot,dt){
   dt=clamp(Number(dt)||1/240,1/1000,.05);
-  const prev=angleAt(motionTime),next=angleAt(motionTime+dt);
-  motionTime+=dt;scene.clock=motionTime;scene.lastDt=dt;
+  const prev=angleAt(motionTime);
+  const nextTime=window.__v5VesselHoldMotion?motionTime:motionTime+dt;
+  const next=angleAt(nextTime);
+  motionTime=nextTime;scene.clock=motionTime;scene.lastDt=dt;
   pitcher.prevAngle=prev;pitcher.angle=next;pitcher.omega=(next-prev)/dt;
   const F=new Float32Array(24),U=new Uint32Array(F.buffer);
   F[0]=pitcher.cx;F[1]=pitcher.cy;F[2]=pitcher.cz;F[3]=next;

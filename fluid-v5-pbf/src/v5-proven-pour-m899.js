@@ -7,10 +7,11 @@ if(!sim?.dev||!glass||!pitcher||!scene)throw new Error('M8.9.9 proven-pour runti
 const phase=new URL(import.meta.url).searchParams.has('post')?'post':'pre';
 
 if(phase==='pre'){
-  // Begin at the exact upright start of the old motion curve. The solver remains frozen
-  // until POUR, so seed positions and the visible pitcher cannot diverge beforehand.
+  // Begin at the exact upright start of the old motion curve. PBF and vessel collision
+  // keep running while only the pitcher motion clock is held, matching the proven warm-up.
   window.__v5VesselMotionStartTime=3.0;
-  window.__v5VesselFreezeSolver=true;
+  window.__v5VesselHoldMotion=true;
+  window.__v5VesselFreezeSolver=false;
 }
 
 if(phase==='post'){
@@ -23,21 +24,17 @@ if(phase==='post'){
 
   function setButton(){if(!button)button=document.getElementById('m880Again');if(button)button.textContent=state==='rest'?'POUR':'RESET';}
   function hold(){
-    state='rest';window.__v5VesselFreezeSolver=true;
-    pitcher.angle=0;pitcher.prevAngle=0;pitcher.omega=0;scene.clock=0;setButton();
+    state='rest';window.__v5VesselHoldMotion=true;window.__v5VesselFreezeSolver=false;
+    pitcher.angle=0;pitcher.prevAngle=0;pitcher.omega=0;scene.clock=3;setButton();
   }
-  function pour(){state='pour';window.__v5VesselFreezeSolver=false;setButton();}
+  function pour(){state='pour';window.__v5VesselHoldMotion=false;window.__v5VesselFreezeSolver=false;setButton();}
 
   sim.step=function(dt){
     if(scene.cycles!==lastCycle){lastCycle=scene.cycles;hold();}
-    if(state!=='pour'){
-      window.__v5VesselFreezeSolver=true;
-      pitcher.angle=0;pitcher.prevAngle=0;pitcher.omega=0;scene.clock=0;
-      return baseStep(dt);
-    }
+    window.__v5VesselHoldMotion=state!=='pour';
     window.__v5VesselFreezeSolver=false;
     const result=baseStep(dt);
-    if(scene.clock>=11.40){state='complete';window.__v5VesselFreezeSolver=true;setButton();}
+    if(state==='pour'&&scene.clock>=11.40){state='complete';window.__v5VesselHoldMotion=true;setButton();}
     return result;
   };
 
@@ -80,10 +77,10 @@ if(phase==='post'){
   }
   hold();sync();setInterval(sync,120);
 
-  window.__v5M899ProvenPour={online:true,physics:'m888-analytic',visual:'m890-glb-only',start:pour,reset:()=>{api?.restart?.();hold();},get state(){return state;}};
+  window.__v5M899ProvenPour={online:true,physics:'m888-analytic-warm',visual:'m890-glb-only',start:pour,reset:()=>{api?.restart?.();hold();},get state(){return state;}};
 }
 
 window.__fluidV5Version='8.9.9';
-window.__fluidV5Build='M8.9.9 PROVEN M8.8.8 ANALYTIC CONTAINMENT / M8.9.0 GLB VISUAL ONLY / MANUAL PHYSICS POUR';
+window.__fluidV5Build='M8.9.9 PROVEN M8.8.8 WARM PBF CONTAINMENT / FORWARD GLB VISUAL / MANUAL MOTION RELEASE';
 document.title='Fluid V8 · M8.9.9 Proven Containment';
 console.info(`[Fluid V8 M8.9.9] ${phase}: proven analytic water containment + GLB visual skin online.`);

@@ -1,6 +1,6 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no"><meta name="theme-color" content="#06131a"><title>Fluid V8 · M8.9.8 Physics-Only Cup Pour</title>
-<style>*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;background:#06131a;color:#dffcff;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}#boot{position:fixed;inset:0;display:grid;place-content:center;gap:12px;padding:30px;text-align:center}#boot b{color:#86f6ff;letter-spacing:.12em}#boot small{color:#8ba7b2;line-height:1.5;max-width:84vw}#boot.err{color:#ff9f9f;white-space:pre-wrap;text-align:left}</style></head><body><div id="boot"><b>FLUID V8 · M8.9.8</b><small>seeding motionless PBF water in the pitcher · waiting for POUR · releasing under gravity and vessel physics only…</small></div>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no"><meta name="theme-color" content="#06131a"><title>Fluid V8 · M8.9.8.1 Natural Cup Pour</title>
+<style>*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;background:#06131a;color:#dffcff;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}#boot{position:fixed;inset:0;display:grid;place-content:center;gap:12px;padding:30px;text-align:center}#boot b{color:#86f6ff;letter-spacing:.12em}#boot small{color:#8ba7b2;line-height:1.5;max-width:84vw}#boot.err{color:#ff9f9f;white-space:pre-wrap;text-align:left}</style></head><body><div id="boot"><b>FLUID V8 · M8.9.8.1</b><small>seeding motionless PBF water · waiting for POUR · releasing through a gentle physical tilt above the aligned glass…</small></div>
 <script>
 (async()=>{
   const boot=document.getElementById('boot');
@@ -8,13 +8,13 @@
     const r=await fetch('./m896.html?m898base=1',{cache:'no-store'});if(!r.ok)throw new Error(`M8.9.6 base fetch failed: HTTP ${r.status}`);let html=await r.text();
     const pre=" note.textContent='aligning cup + installing low-spill capture…';await import('./src/v5-controlled-pour-m896.js?pre=896');";
     const post=" note.textContent='starting two-stage controlled pitcher pour…';await import('./src/v5-controlled-pour-m896.js?post=896');";
-    if(!html.includes(pre)||!html.includes(post))throw new Error('M8.9.8 bootstrap could not locate M8.9.6 control hooks.');
-    // The M8.9.8 module does not alter the stream trajectory. Its pre phase only establishes
+    if(!html.includes(pre)||!html.includes(post))throw new Error('M8.9.8.1 bootstrap could not locate M8.9.6 control hooks.');
+    // The M8.9.8.1 module does not alter the stream trajectory. Its pre phase only establishes
     // the frozen hydrostatic start; its post phase releases the existing PBF particles.
-    html=html.replace(pre,pre+"\\\\\\\\n note.textContent='holding hydrostatic water until POUR…';await import('./src/v5-physical-cup-pour-m898.js?pre=8980');");
-    html=html.replace(post,post+"\\\\\\\\n note.textContent='arming physics-only pitcher release…';await import('./src/v5-physical-cup-pour-m898.js?post=8980');");
-    html=html.replaceAll('M8.9.6','M8.9.8');
+    html=html.replace(pre,pre+"\\\\\\\\n note.textContent='holding hydrostatic water until POUR…';await import('./src/v5-physical-cup-pour-m898.js?pre=8981');");
+    html=html.replace(post,post+"\\\\\\\\n note.textContent='arming gentle physics-only pitcher release…';await import('./src/v5-physical-cup-pour-m898.js?post=8981');");
+    html=html.replaceAll('M8.9.6','M8.9.8.1');
     document.open();document.write(html);document.close();
-  }catch(err){console.error('[M8.9.8 bootstrap]',err);boot.className='err';boot.textContent='M8.9.8 BOOTSTRAP ERROR\n\n'+String(err?.message||err)+'\n\n'+String(err?.stack||'');}
+  }catch(err){console.error('[M8.9.8.1 bootstrap]',err);boot.className='err';boot.textContent='M8.9.8.1 BOOTSTRAP ERROR\n\n'+String(err?.message||err)+'\n\n'+String(err?.stack||'');}
 })();
 </script></body></html>

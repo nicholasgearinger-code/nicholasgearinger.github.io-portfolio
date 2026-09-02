@@ -1,13 +1,15 @@
-// Fluid V8 M8.9.8 — user-triggered, physics-only pitcher-to-cup pour.
+// Fluid V8 M8.9.8.1 — user-triggered, gently aligned physics-only pitcher-to-cup pour.
 // Water remains an untouched hydrostatic PBF reservoir until POUR is pressed. From that
 // point onward, gravity, momentum, density constraints, and vessel collisions own its path.
 import {sim,glass,pitcher,scene,pitcherPoint,spoutPath,cam} from './v5-pitcher-fluid-physics-m872.js';
 
-if(!sim?.dev||!glass||!pitcher||!scene)throw new Error('M8.9.8 physical-pour runtime unavailable');
+if(!sim?.dev||!glass||!pitcher||!scene)throw new Error('M8.9.8.1 physical-pour runtime unavailable');
 
 const phase=new URL(import.meta.url).searchParams.has('post')?'post':'pre';
 const q=new URLSearchParams(location.search);
 const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
+const smooth=t=>{t=clamp(t,0,1);return t*t*(3-2*t);};
+const radians=d=>d*Math.PI/180;
 
 if(phase==='pre'){
   // M8.8 normally spends three simulated seconds settling while the pitcher is visibly
@@ -15,11 +17,35 @@ if(phase==='pre'){
   // frozen until the user explicitly begins the pour.
   window.__v5VesselMotionStartTime=clamp(Number(q.get('pourstart'))||3.42,3.18,3.75);
   window.__v5VesselFreezeSolver=true;
+
+  // Center the receiver beneath the 56–78 degree physical outlet arc. A modestly wider
+  // opening catches the coherent stream without exerting any force on nearby particles.
+  glass.cx=clamp(Number(q.get('cupx'))||.590,.54,.66);
+  glass.innerBottom=clamp(Number(q.get('cupinnerbottom'))||.145,.132,.160);
+  glass.innerTop=clamp(Number(q.get('cupinnertop'))||.165,.150,.180);
+  glass.outerBottom=Math.max(glass.innerBottom+.020,Number(q.get('cupouterbottom'))||.168);
+  glass.outerTop=Math.max(glass.innerTop+.020,Number(q.get('cupoutertop'))||.190);
 }
 
 if(phase==='post'){
   const baseStep=sim.step.bind(sim);
   const api=window.__v5M880MovingBoundary;
+  const mainAngle=-radians(clamp(Number(q.get('pourmain'))||56,52,62));
+  const middleAngle=-radians(clamp(Number(q.get('pourmiddle'))||66,62,71));
+  const drainAngle=-radians(clamp(Number(q.get('pourdrain'))||78,73,82));
+
+  // M8.8 samples maxAngle every substep. This getter creates a gentle real pour: reach the
+  // first flowing angle, hold a narrow stream, then progressively drain the remaining jug.
+  Object.defineProperty(pitcher,'maxAngle',{
+    configurable:true,
+    get(){
+      const t=Number(scene.clock)||0;
+      if(t<=5.70)return mainAngle;
+      if(t<=7.75)return mainAngle+(middleAngle-mainAngle)*smooth((t-5.70)/2.05);
+      return middleAngle+(drainAngle-middleAngle)*smooth((t-7.75)/1.45);
+    },
+    set(){}
+  });
   let state='rest';
   let lastCycle=scene.cycles;
   let button=null;
@@ -32,7 +58,7 @@ if(phase==='post'){
   function holdReservoir(reason='rest'){
     state='rest';window.__v5VesselFreezeSolver=true;
     pitcher.angle=0;pitcher.prevAngle=0;pitcher.omega=0;scene.clock=0;
-    try{window.__v5M895JugReservoir?.reseed?.(`M8.9.8 ${reason}`);}catch(err){console.error('[M8.9.8 reservoir]',err);}
+    try{window.__v5M895JugReservoir?.reseed?.(`M8.9.8.1 ${reason}`);}catch(err){console.error('[M8.9.8.1 reservoir]',err);}
     setButton();
   }
 
@@ -81,15 +107,15 @@ if(phase==='post'){
     e.preventDefault();e.stopPropagation();
     if(state==='rest')startPour();
     else{
-      try{api?.restart?.();}catch(err){console.error('[M8.9.8 reset]',err);}
+      try{api?.restart?.();}catch(err){console.error('[M8.9.8.1 reset]',err);}
       lastCycle=scene.cycles;holdReservoir('manual reset');
     }
   };
 
   const forceLabels=()=>{
-    const h=document.querySelector('#m880Hud b');if(h&&h.textContent!=='M8.9.8 · PHYSICS POUR')h.textContent='M8.9.8 · PHYSICS POUR';
-    const top=document.querySelector('.hud.card.title');if(top&&top.textContent!=='FLUID V8 · M8.9.8')top.textContent='FLUID V8 · M8.9.8';
-    if(document.title!=='Fluid V8 · M8.9.8 Physics-Only Cup Pour')document.title='Fluid V8 · M8.9.8 Physics-Only Cup Pour';
+    const h=document.querySelector('#m880Hud b');if(h&&h.textContent!=='M8.9.8.1 · NATURAL POUR')h.textContent='M8.9.8.1 · NATURAL POUR';
+    const top=document.querySelector('.hud.card.title');if(top&&top.textContent!=='FLUID V8 · M8.9.8.1')top.textContent='FLUID V8 · M8.9.8.1';
+    if(document.title!=='Fluid V8 · M8.9.8.1 Natural Cup Pour')document.title='Fluid V8 · M8.9.8.1 Natural Cup Pour';
   };
   const labels=new MutationObserver(forceLabels);labels.observe(document.documentElement,{subtree:true,childList:true,characterData:true});
 
@@ -114,7 +140,7 @@ if(phase==='post'){
   };
 }
 
-window.__fluidV5Version='8.9.8';
-window.__fluidV5Build='M8.9.8 INDEFINITE HYDROSTATIC REST / USER RELEASE / PHYSICS-ONLY TRAJECTORY / OPEN CUP';
-document.title='Fluid V8 · M8.9.8 Physics-Only Cup Pour';
-console.info(`[Fluid V8 M8.9.8] ${phase}: indefinite rest + physics-only cup pour online.`);
+window.__fluidV5Version='8.9.8.1';
+window.__fluidV5Build='M8.9.8.1 INDEFINITE REST / GENTLE PHYSICS-ONLY POUR / ALIGNED OPEN CUP';
+document.title='Fluid V8 · M8.9.8.1 Natural Cup Pour';
+console.info(`[Fluid V8 M8.9.8.1] ${phase}: gentle physics-only cup pour online.`);

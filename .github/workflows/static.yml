@@ -31,6 +31,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: main
+          fetch-depth: 2
 
       # Fluid review builds only replace the isolated fluid-v5-preview path.
       # Avoid spending ~40-60 minutes recompressing unrelated environment GLBs.

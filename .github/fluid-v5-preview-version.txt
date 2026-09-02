@@ -1,5 +1,5 @@
 Fluid V8 Pages preview checkpoint
-milestone: M8.9.8.1-gentle-natural-cup-pour
+milestone: M8.9.8.2-contained-glb-spout-pour
 source_branch: fluid-v5-development
-source_commit: 946aef4f0f0665418d2e9e6288b25e035871c1a1
+source_commit: 5e6d4eb74028f66b73f0b74db648dfa2ef29d9bb
 purpose: trigger main-only Pages workflow to stage the isolated Fluid V8 development preview without merging Fluid V8 source into main.

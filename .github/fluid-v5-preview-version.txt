@@ -1,5 +1,5 @@
 Fluid V8 Pages preview checkpoint
-milestone: M8.9.7-motionless-rest-to-cup-pour
+milestone: M8.9.7-wgsl-compatibility-hotfix
 source_branch: fluid-v5-development
-source_commit: 2c1b5627871bc93f480093774a063abe3c05c958
+source_commit: e2ff75fdc2371416bca1abee57ee1c77b90120e5
 purpose: trigger main-only Pages workflow to stage the isolated Fluid V8 development preview without merging Fluid V8 source into main.

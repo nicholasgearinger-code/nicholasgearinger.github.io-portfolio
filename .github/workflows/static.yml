@@ -32,6 +32,29 @@ jobs:
         with:
           ref: main
 
+      # Fluid review builds only replace the isolated fluid-v5-preview path.
+      # Avoid spending ~40-60 minutes recompressing unrelated environment GLBs.
+      - name: Detect fluid-only deployment
+        id: deploy-scope
+        shell: bash
+        env:
+          HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+
+          fluid_only=false
+          mapfile -t changed_paths < <(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA")
+
+          if [[ "$HEAD_COMMIT_MESSAGE" == *"[fluid-preview]"* ]]; then
+            fluid_only=true
+          elif [[ ${#changed_paths[@]} -eq 1 && "${changed_paths[0]}" == ".github/fluid-v5-preview-version.txt" ]]; then
+            fluid_only=true
+          fi
+
+          echo "fluid_only=$fluid_only" >> "$GITHUB_OUTPUT"
+          echo "Fluid-only deployment: $fluid_only"
+          printf 'Changed path: %s\n' "${changed_paths[@]}"
+
       - name: Promote known-good r185 runtime to production
         shell: bash
         run: |
@@ -167,6 +190,7 @@ jobs:
           path: .perf-environment-preview-source
 
       - name: Build KTX2 model textures for performance preview
+        if: steps.deploy-scope.outputs.fluid_only != 'true'
         shell: bash
         run: |
           set -u

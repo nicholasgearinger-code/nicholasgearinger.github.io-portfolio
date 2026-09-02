@@ -1,5 +1,5 @@
 Fluid V8 Pages preview checkpoint
-milestone: M8.9.7-mobile-module-cache-bust
+milestone: M8.9.8-user-triggered-physics-only-pour
 source_branch: fluid-v5-development
-source_commit: bf15959e73aba9b377a9d8c71dbc6441e815a7ab
+source_commit: 611ab4ee9506c0485d6d19f4fecc365710755b2c
 purpose: trigger main-only Pages workflow to stage the isolated Fluid V8 development preview without merging Fluid V8 source into main.

@@ -11,8 +11,10 @@
     if(!html.includes(pre)||!html.includes(post))throw new Error('M8.9.7 bootstrap could not locate M8.9.6 control hooks.');
     // These anchors are inside M8.9.6's quoted M8.9.5 bootstrap, which itself edits M8.9.2.
     // Preserve three layers of literal backslashes so the final generated module imports run.
-    html=html.replace(pre,pre+"\\\\\\\\n note.textContent='locking hydrostatic rest + aiming the released stream…';await import('./src/v5-rest-to-cup-m897.js?pre=897');");
-    html=html.replace(post,post+"\\\\\\\\n note.textContent='starting synchronized pitcher and water motion…';await import('./src/v5-rest-to-cup-m897.js?post=897');");
+    // 8971 deliberately changes the module URL so mobile Safari cannot reuse the original
+    // M8.9.7 shader from its module cache after the WGSL compatibility hotfix.
+    html=html.replace(pre,pre+"\\\\\\\\n note.textContent='locking hydrostatic rest + aiming the released stream…';await import('./src/v5-rest-to-cup-m897.js?pre=8971');");
+    html=html.replace(post,post+"\\\\\\\\n note.textContent='starting synchronized pitcher and water motion…';await import('./src/v5-rest-to-cup-m897.js?post=8971');");
     html=html.replaceAll('M8.9.6','M8.9.7');
     document.open();document.write(html);document.close();
   }catch(err){console.error('[M8.9.7 bootstrap]',err);boot.className='err';boot.textContent='M8.9.7 BOOTSTRAP ERROR\n\n'+String(err?.message||err)+'\n\n'+String(err?.stack||'');}

@@ -3337,7 +3337,7 @@
   }
   .fluid-lab-orb {
     position:absolute; width:min(38vw,280px); aspect-ratio:1; right:clamp(1.2rem,7vw,4.5rem); top:50%;
-    border-radius:50%; transform:translateY(-50%); opacity:.9;
+    border-radius:50%; transform:translateY(-50%); opacity:0; pointer-events:none;
     background:
       radial-gradient(circle at 36% 28%,rgba(255,255,255,.74) 0 1.3%,transparent 2.2%),
       radial-gradient(circle at 34% 28%,rgba(126,243,255,.45),transparent 19%),
@@ -3345,7 +3345,9 @@
       linear-gradient(145deg,rgba(127,252,255,.78),rgba(29,78,216,.24) 44%,rgba(129,140,248,.36));
     border:1px solid rgba(133,248,255,.56);
     box-shadow:inset -24px -28px 55px rgba(3,13,44,.62),inset 12px 12px 28px rgba(216,252,255,.22),0 0 38px rgba(34,211,238,.22),0 0 100px rgba(59,130,246,.12);
+    transition:opacity .45s ease;
   }
+  .fluid-lab-menu.is-orb .fluid-lab-orb { opacity:.9; }
   .fluid-lab-orb::before,.fluid-lab-orb::after {
     content:""; position:absolute; left:10%; right:10%; height:22%; border-radius:50%;
     border-top:2px solid rgba(217,253,255,.56); border-bottom:1px solid rgba(54,221,255,.28);
@@ -3369,14 +3371,71 @@
   .fluid-lab-launch:hover,.fluid-lab-launch:focus-visible { transform:translateY(-2px); filter:brightness(1.08); box-shadow:0 8px 32px rgba(34,211,238,.3); outline:none; }
   .fluid-lab-launch:hover b,.fluid-lab-launch:focus-visible b { transform:translate(2px,-2px); }
   .fluid-lab-note { display:block; margin-top:.48rem; color:#506c79; font-size:.55rem; letter-spacing:.05em; }
+  .fluid-lab-styles {
+    position:absolute; z-index:9; top:.9rem; right:.9rem; display:flex; gap:.25rem;
+    padding:.24rem; border:1px solid rgba(100,224,235,.2); border-radius:999px;
+    background:rgba(2,12,19,.68); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
+  }
+  .fluid-lab-style {
+    appearance:none; border:0; border-radius:999px; padding:.38rem .62rem;
+    color:#668692; background:transparent; font:700 .52rem 'JetBrains Mono',monospace;
+    letter-spacing:.08em; text-transform:uppercase; cursor:pointer; touch-action:manipulation;
+    transition:color .18s ease,background .18s ease,box-shadow .18s ease;
+  }
+  .fluid-lab-style[aria-pressed="true"] { color:#c9fbff; background:rgba(43,198,218,.18); box-shadow:inset 0 0 0 1px rgba(94,231,240,.22); }
+  .fluid-lab-style:focus-visible { outline:2px solid #72e8ef; outline-offset:2px; }
+  .fluid-lab-console { display:grid; gap:.32rem; margin:.15rem 0 .95rem; width:min(100%,330px); }
+  .fluid-lab-console span { display:flex; align-items:center; gap:.48rem; color:#64828e; font-size:.52rem; letter-spacing:.08em; text-transform:uppercase; }
+  .fluid-lab-console i { width:5px; height:5px; border-radius:50%; background:#29444d; box-shadow:0 0 0 transparent; transition:background .3s ease,box-shadow .3s ease; }
+  .fluid-lab-menu.is-awake .fluid-lab-console i { background:#42efbd; box-shadow:0 0 9px #42efbd; }
+  .fluid-lab-portal {
+    position:absolute; z-index:3; width:min(44vw,340px); aspect-ratio:1.22; right:clamp(.65rem,4vw,3.3rem); top:51%;
+    transform:translateY(-50%); opacity:1; cursor:crosshair; touch-action:manipulation;
+    filter:drop-shadow(0 22px 32px rgba(0,0,0,.48)); transition:opacity .45s ease,transform .45s ease;
+  }
+  .fluid-lab-menu.is-orb .fluid-lab-portal { opacity:0; pointer-events:none; transform:translateY(-47%) scale(.94); }
+  .fluid-portal-frame {
+    position:absolute; inset:7% 2%; border-radius:50%; transform:rotateX(62deg);
+    border:2px solid rgba(133,246,255,.55); background:rgba(3,18,31,.82);
+    box-shadow:0 0 0 7px rgba(17,93,112,.13),0 0 0 9px rgba(120,236,245,.13),0 0 46px rgba(34,211,238,.31),inset 0 0 35px rgba(10,185,220,.18);
+  }
+  .fluid-portal-frame::before {
+    content:""; position:absolute; inset:6%; border-radius:50%; overflow:hidden;
+    background:
+      repeating-radial-gradient(ellipse at 50% 48%,transparent 0 13px,rgba(173,249,255,.22) 14px 15px,transparent 16px 27px),
+      radial-gradient(ellipse at 36% 30%,rgba(214,255,255,.48),transparent 18%),
+      radial-gradient(ellipse at 50% 55%,rgba(25,201,231,.46),rgba(18,75,153,.38) 43%,rgba(4,16,44,.96) 78%);
+    border:1px solid rgba(150,246,255,.48); box-shadow:inset 0 0 25px rgba(3,6,29,.78);
+  }
+  .fluid-portal-frame::after {
+    content:""; position:absolute; inset:9%; border-radius:50%; opacity:.48; mix-blend-mode:screen;
+    background:conic-gradient(from 40deg,transparent,rgba(126,244,255,.4),transparent 18%,rgba(110,143,255,.35),transparent 42%,rgba(158,248,255,.35),transparent 64%);
+  }
+  .fluid-portal-depth { position:absolute; inset:25% 12% 9%; border-radius:50%; border-bottom:4px solid rgba(91,215,237,.24); filter:blur(1px); }
+  .fluid-portal-label {
+    position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); z-index:2;
+    color:rgba(205,252,255,.74); font:700 .52rem 'JetBrains Mono',monospace; letter-spacing:.22em;
+    text-transform:uppercase; white-space:nowrap; text-shadow:0 0 13px rgba(85,235,246,.9); pointer-events:none;
+  }
+  .fluid-portal-ripple {
+    position:absolute; z-index:4; width:12px; height:6px; margin:-3px 0 0 -6px; border-radius:50%;
+    border:1px solid rgba(190,251,255,.9); box-shadow:0 0 9px rgba(80,231,248,.65); pointer-events:none;
+    animation:fluidPortalTap .9s ease-out forwards;
+  }
   @media (prefers-reduced-motion:no-preference) {
     .fluid-lab-menu::before { animation:fluidGridDrift 11s linear infinite; }
     .fluid-lab-orb { animation:fluidOrbFloat 5.5s ease-in-out infinite; }
     .fluid-lab-orb::before { animation:fluidSurfaceA 4.2s ease-in-out infinite; }
     .fluid-lab-orb::after { animation:fluidSurfaceB 5s ease-in-out infinite reverse; }
+    .fluid-lab-portal { animation:fluidPortalFloat 6s ease-in-out infinite; }
+    .fluid-portal-frame::before { animation:fluidPortalWater 6.5s ease-in-out infinite; }
+    .fluid-portal-frame::after { animation:fluidPortalCaustic 8s linear infinite; }
     .fluid-bubble { animation:fluidBubbleRise 4s ease-in-out infinite; }
     .fluid-bubble.b2 { animation-delay:-1.4s; }.fluid-bubble.b3 { animation-delay:-2.6s; }
     .fluid-lab-status i { animation:fluidOnline 1.8s ease-in-out infinite; }
+    .fluid-lab-menu.is-awake .fluid-lab-console span:nth-child(1) i { animation:fluidConsoleReady .45s .25s both; }
+    .fluid-lab-menu.is-awake .fluid-lab-console span:nth-child(2) i { animation:fluidConsoleReady .45s .75s both; }
+    .fluid-lab-menu.is-awake .fluid-lab-console span:nth-child(3) i { animation:fluidConsoleReady .45s 1.25s both; }
   }
   @keyframes fluidGridDrift { to { transform:perspective(500px) rotateX(63deg) translateY(38%) rotate(3deg); } }
   @keyframes fluidOrbFloat { 0%,100%{transform:translateY(-50%) translateX(0) rotate(-1deg)} 50%{transform:translateY(calc(-50% - 9px)) translateX(-5px) rotate(2deg)} }
@@ -3384,13 +3443,22 @@
   @keyframes fluidSurfaceB { 0%,100%{transform:translateY(0) rotate(7deg) scaleX(.92)} 50%{transform:translateY(-6px) rotate(2deg) scaleX(1.04)} }
   @keyframes fluidBubbleRise { 0%,100%{transform:translateY(4px);opacity:.25} 50%{transform:translateY(-13px);opacity:.9} }
   @keyframes fluidOnline { 50%{opacity:.45;box-shadow:0 0 4px #42efbd} }
+  @keyframes fluidConsoleReady { from{background:#29444d;box-shadow:0 0 0 transparent} to{background:#42efbd;box-shadow:0 0 9px #42efbd} }
+  @keyframes fluidPortalFloat { 0%,100%{transform:translateY(-50%) rotate(-1deg)} 50%{transform:translateY(calc(-50% - 7px)) rotate(1.2deg)} }
+  @keyframes fluidPortalWater { 0%,100%{transform:rotate(-1deg) scale(1)} 50%{transform:rotate(2deg) scale(1.025)} }
+  @keyframes fluidPortalCaustic { to{transform:rotate(360deg)} }
+  @keyframes fluidPortalTap { 0%{opacity:1;transform:scale(1)} 100%{opacity:0;transform:scale(16,9)} }
   @media (max-width:640px) {
     #fluidsim-viewport { min-height:350px; aspect-ratio:auto; }
     .fluid-lab-menu { align-items:flex-end; padding:1.3rem 1.15rem 1.45rem; }
     .fluid-lab-copy { width:100%; }
-    .fluid-lab-orb { width:205px; right:-35px; top:36%; opacity:.54; }
+    .fluid-lab-orb { width:205px; right:-35px; top:36%; }
+    .fluid-lab-menu.is-orb .fluid-lab-orb { opacity:.54; }
+    .fluid-lab-portal { width:225px; right:-42px; top:34%; opacity:.67; }
     .fluid-lab-description { max-width:75%; }
     .fluid-lab-tags { max-width:78%; }
+    .fluid-lab-console { width:72%; }
+    .fluid-lab-styles { top:.7rem; right:.7rem; }
     .fluid-lab-launch { min-width:168px; }
   }
   #rift-viewport.rift-fullscreen {
@@ -4987,21 +5055,35 @@
       </div>
       <div class="algo-body" style="padding:0;">
         <div id="fluidsim-viewport">
-          <div class="fluid-lab-menu" aria-labelledby="fluid-lab-menu-title">
+          <div class="fluid-lab-menu is-portal" aria-labelledby="fluid-lab-menu-title">
             <div class="fluid-lab-glow" aria-hidden="true"></div>
+            <div class="fluid-lab-styles" role="group" aria-label="Start menu animation">
+              <button class="fluid-lab-style" type="button" data-fluid-style="portal" aria-pressed="true">Portal</button>
+              <button class="fluid-lab-style" type="button" data-fluid-style="orb" aria-pressed="false">Orb</button>
+            </div>
+            <div class="fluid-lab-portal" role="button" tabindex="0" aria-label="Interactive water portal. Tap to make a ripple.">
+              <div class="fluid-portal-frame" aria-hidden="true"></div>
+              <div class="fluid-portal-depth" aria-hidden="true"></div>
+              <span class="fluid-portal-label" aria-hidden="true">Touch the surface</span>
+            </div>
             <div class="fluid-lab-orb" aria-hidden="true">
               <span class="fluid-bubble b1"></span>
               <span class="fluid-bubble b2"></span>
               <span class="fluid-bubble b3"></span>
             </div>
             <div class="fluid-lab-copy">
-              <div class="fluid-lab-status"><i aria-hidden="true"></i> WebGPU system online</div>
+              <div class="fluid-lab-status"><i aria-hidden="true"></i> <span data-fluid-status>Initializing WebGPU</span></div>
               <h3 id="fluid-lab-menu-title" class="fluid-lab-title"><span>Fluid V8</span>Simulation Lab</h3>
               <p class="fluid-lab-description">Particle-based water, GLB vessel containment, and a natural gravity-only pour—computed live on the GPU.</p>
               <div class="fluid-lab-tags" aria-label="Lab features">
                 <span>PBF WATER</span>
                 <span>GLB COLLISION</span>
                 <span>WORLD GRAVITY</span>
+              </div>
+              <div class="fluid-lab-console" aria-label="Initialization status">
+                <span><i aria-hidden="true"></i>PBF solver ready</span>
+                <span><i aria-hidden="true"></i>Vessel boundary calibrated</span>
+                <span><i aria-hidden="true"></i>Gravity field stable</span>
               </div>
               <a class="fluid-lab-launch" href="fluid-v5-pbf/?launch=portfolio&amp;build=8996" target="_blank" rel="noopener" aria-label="Start Fluid Simulation Lab in a new window">
                 <span>Start Lab</span><b aria-hidden="true">↗</b>
@@ -5015,6 +5097,84 @@
     <p class="algo-hint">Built with WebGPU position-based fluids: particles begin at rest inside the pitcher, stay contained by the vessel boundary, then move under world gravity as the GLB pitcher rotates toward the glass. Opening the lab separately avoids iframe clipping and gives touch input, settings, and the simulation the full browser viewport.</p>
   </div>
 </section>
+
+<script>
+(() => {
+  const menu = document.querySelector('.fluid-lab-menu');
+  if (!menu) return;
+
+  const styleButtons = [...menu.querySelectorAll('[data-fluid-style]')];
+  const portal = menu.querySelector('.fluid-lab-portal');
+  const status = menu.querySelector('[data-fluid-status]');
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function selectStyle(style, remember = true) {
+    const selected = style === 'orb' ? 'orb' : 'portal';
+    menu.classList.toggle('is-orb', selected === 'orb');
+    menu.classList.toggle('is-portal', selected === 'portal');
+    styleButtons.forEach((button) => {
+      button.setAttribute('aria-pressed', String(button.dataset.fluidStyle === selected));
+    });
+    if (remember) {
+      try { localStorage.setItem('fluid-lab-menu-style', selected); } catch (_) {}
+    }
+  }
+
+  let savedStyle = 'portal';
+  try { savedStyle = localStorage.getItem('fluid-lab-menu-style') || 'portal'; } catch (_) {}
+  selectStyle(savedStyle, false);
+  styleButtons.forEach((button) => button.addEventListener('click', () => selectStyle(button.dataset.fluidStyle)));
+
+  function addRipple(clientX, clientY) {
+    if (!portal || reduceMotion || menu.classList.contains('is-orb')) return;
+    const rect = portal.getBoundingClientRect();
+    const ripple = document.createElement('i');
+    ripple.className = 'fluid-portal-ripple';
+    ripple.style.left = `${clientX - rect.left}px`;
+    ripple.style.top = `${clientY - rect.top}px`;
+    portal.appendChild(ripple);
+    ripple.addEventListener('animationend', () => ripple.remove(), { once: true });
+  }
+
+  portal?.addEventListener('pointerdown', (event) => addRipple(event.clientX, event.clientY));
+  portal?.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    const rect = portal.getBoundingClientRect();
+    addRipple(rect.left + rect.width / 2, rect.top + rect.height / 2);
+  });
+
+  let initialized = false;
+  function initializeMenu() {
+    if (initialized) return;
+    initialized = true;
+    menu.classList.add('is-awake');
+    if (!status) return;
+    if (reduceMotion) {
+      status.textContent = 'Lab interface ready';
+      return;
+    }
+    const sequence = [
+      [350, 'Starting PBF solver'],
+      [850, 'Calibrating vessel boundary'],
+      [1350, 'Stabilizing gravity field'],
+      [1900, 'Lab interface ready']
+    ];
+    sequence.forEach(([delay, message]) => window.setTimeout(() => { status.textContent = message; }, delay));
+  }
+
+  if ('IntersectionObserver' in window) {
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      observer.disconnect();
+      initializeMenu();
+    }, { threshold: 0.22 });
+    observer.observe(menu);
+  } else {
+    initializeMenu();
+  }
+})();
+</script>
 
 
 <!-- PHOTOGRAPHY -->

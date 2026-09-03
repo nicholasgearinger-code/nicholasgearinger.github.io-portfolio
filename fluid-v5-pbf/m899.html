@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no"><meta name="theme-color" content="#06131a"><title>Fluid V8 · M8.9.9 GLB Containment</title>
+<style>*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;background:#06131a;color:#dffcff;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}#boot{position:fixed;inset:0;display:grid;place-content:center;gap:12px;padding:30px;text-align:center}#boot b{color:#86f6ff;letter-spacing:.12em}#boot small{color:#8ba7b2;line-height:1.5;max-width:84vw}#boot.err{color:#ff9f9f;white-space:pre-wrap;text-align:left}</style></head><body><div id="boot"><b>FLUID V8 · M8.9.9</b><small>fitting the PBF reservoir to the measured GLB interior · arming a physical no-spill pour…</small></div>
+<script>
+(async()=>{
+  const boot=document.getElementById('boot');
+  try{
+    const r=await fetch('./m890.html?m899base=1',{cache:'no-store'});if(!r.ok)throw new Error(`M8.9.0 base fetch failed: HTTP ${r.status}`);let html=await r.text();
+    const pre=" note.textContent='decoding high-poly glass jug…';await import('./src/v5-jug-model-m890.js?pre=890');";
+    const post=" note.textContent='attaching decoded jug renderer…';await import('./src/v5-jug-model-m890.js?post=890');";
+    const boundary=" note.textContent='building M8.8 moving-boundary vessels…';await import('./src/v5-moving-boundary-vessel-m880.js?v=880fix1');";
+    const catchPre=" note.textContent='installing M8.8.8 clean-catch boundary…';await import('./src/v5-vessel-capture-m888.js?pre=888');";
+    const catchPost=" note.textContent='finalizing M8.8.8 pour tuning…';await import('./src/v5-vessel-capture-m888.js?post=888');";
+    if(!html.includes(pre)||!html.includes(post)||!html.includes(boundary)||!html.includes(catchPre)||!html.includes(catchPost))throw new Error('M8.9.9 bootstrap could not locate M8.9.0 vessel hooks.');
+    const alignedPre=pre.replace('?pre=890','?pre=890align2');
+    const alignedPost=post.replace('?post=890','?post=890align2');
+    const heldBoundary=" note.textContent='building GLB-profile PBF vessel…';await import('./src/v5-vessel-moving-boundary-m880.js?v=899shape1');";
+    html=html.replace(catchPre,catchPre.replace('?pre=888','?pre=888nospill1'));
+    html=html.replace(pre,alignedPre+"\\n note.textContent='warming measured GLB reservoir…';await import('./src/v5-proven-pour-m899.js?pre=8994');");
+    html=html.replace(boundary,heldBoundary);
+    html=html.replace(catchPost,catchPost.replace('?post=888','?post=888nospill1'));
+    html=html.replace(post,alignedPost+"\\n note.textContent='arming manual vessel-motion release…';await import('./src/v5-proven-pour-m899.js?post=8994');");
+    html=html.replaceAll('M8.9.0','M8.9.9');
+    document.open();document.write(html);document.close();
+  }catch(err){console.error('[M8.9.9 bootstrap]',err);boot.className='err';boot.textContent='M8.9.9 BOOTSTRAP ERROR\n\n'+String(err?.message||err)+'\n\n'+String(err?.stack||'');}
+})();
+</script></body></html>

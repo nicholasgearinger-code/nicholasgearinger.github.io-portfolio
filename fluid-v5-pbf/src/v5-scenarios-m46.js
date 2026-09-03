@@ -1,0 +1,25 @@
+// Fluid V5 M4.6 advanced physical scenarios.
+// Faucet, waterfall and fountain append real fluid particles; paddle and whirlpool inject velocity
+// into the real PBF solve. All source scenarios have conservative particle budgets for mobile.
+
+const sim=window.__sim,ui=window.__ui,state=window.__v5State;
+if(!sim?.appendFluid||!sim?.applyRayImpulse||!state)throw new Error('Fluid V5 M4.6 scenarios: runtime unavailable.');
+const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
+const custom=['faucet','waterfall','paddle','whirlpool','fountain'];let added=0,last=0,start=performance.now(),seed=0x31415926;
+const rnd=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296};
+const save=()=>{try{localStorage.setItem('fluidV5LabStateV1',JSON.stringify(state))}catch{}};
+function stopOldWave(){const t=document.getElementById('v4WaveToggle');if(t?.classList.contains('active'))t.click();}
+function reset(){document.getElementById('reset')?.click();added=0;start=performance.now();}
+function choose(name){if(!custom.includes(name))return;state.scenario=name;save();stopOldWave();ui.pouring=false;reset();sync();}
+function budget(){return Math.max(0,Math.min(4200,(sim.cap||sim.n)-sim.n-32));}
+function appendCloud(points,vels){const room=budget();if(room<=0)return 0;const n=Math.min(room,points.length/3);if(n<=0)return 0;const a=sim.appendFluid(points.slice(0,n*3),vels.slice(0,n*3));added+=a;return a;}
+function sourceFaucet(){const b=sim.params.box,d=sim.params.spacing,p=[],v=[],n=6;for(let i=0;i<n;i++){p.push(b[0]*.14+(rnd()-.5)*d*2.2,b[1]*.79+(rnd()-.5)*d,b[2]*.50+(rnd()-.5)*d*3.2);v.push(.72+(rnd()-.5)*.10,-.28-rnd()*.15,(rnd()-.5)*.12);}appendCloud(p,v);}
+function sourceWaterfall(){const b=sim.params.box,d=sim.params.spacing,p=[],v=[],n=12;for(let i=0;i<n;i++){let z=b[2]*(.18+.64*i/Math.max(1,n-1));p.push(b[0]*.10+(rnd()-.5)*d,b[1]*.82+(rnd()-.5)*d,z+(rnd()-.5)*d*.8);v.push(.48,-1.05-rnd()*.22,(rnd()-.5)*.04);}appendCloud(p,v);}
+function sourceFountain(){const b=sim.params.box,d=sim.params.spacing,p=[],v=[],n=5;for(let i=0;i<n;i++){const a=rnd()*Math.PI*2,r=d*(.4+rnd()*1.4);p.push(b[0]*.5+Math.cos(a)*r,b[1]*.16,b[2]*.5+Math.sin(a)*r);v.push(Math.cos(a)*.12,1.25+rnd()*.34,Math.sin(a)*.12);}appendCloud(p,v);}
+function drivePaddle(now){const b=sim.params.box,t=(now-start)*.001,phase=Math.sin(t*4.2),x=b[0]*.08,z=b[2]*.50,r=Math.max(.24,b[2]*.32),push=.22*phase;sim.applyRayImpulse([x,b[1]*.94,z],[0,-1,0],[push,.035*phase,.018*Math.sin(t*2.1)],r,2.0);}
+function driveWhirlpool(now){const b=sim.params.box,t=(now-start)*.001,cx=b[0]*.5,cz=b[2]*.5,y=b[1]*.34,R=Math.min(b[0],b[2])*.24,r=Math.max(.15,R*.62);for(let k=0;k<4;k++){const a=t*.45+k*Math.PI*.5,x=cx+Math.cos(a)*R,z=cz+Math.sin(a)*R,tx=-Math.sin(a),tz=Math.cos(a);sim.applyRayImpulse([x,y,z],[0,-1,0],[tx*.13,-.025,tz*.13],r,1.75);}}
+function loop(now){requestAnimationFrame(loop);if(document.hidden||ui.paused||!custom.includes(state.scenario))return;if(state.scenario==='paddle'){if(now-last>58){last=now;drivePaddle(now);}return;}if(state.scenario==='whirlpool'){if(now-last>70){last=now;driveWhirlpool(now);}return;}if(now-last<90||budget()<=0)return;last=now;if(state.scenario==='faucet')sourceFaucet();else if(state.scenario==='waterfall')sourceWaterfall();else if(state.scenario==='fountain')sourceFountain();}
+requestAnimationFrame(loop);
+function sync(){document.querySelectorAll('#v5ScenariosM46 [data-m46]').forEach(b=>b.classList.toggle('active',b.dataset.m46===state.scenario));const s=document.getElementById('v5ScenarioM46Status');if(s)s.textContent=`${String(state.scenario).toUpperCase()} · source +${added.toLocaleString()} · remaining ${budget().toLocaleString()}`;}
+function mount(){const panel=document.getElementById('settingsPanel');if(!panel||document.getElementById('v5ScenariosM46'))return;const w=document.createElement('div');w.id='v5ScenariosM46';w.innerHTML=`<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(78,214,220,.22)"><div style="font:800 10px ui-monospace;color:#8fffd1;letter-spacing:.12em">ADVANCED SCENARIOS · M4.6</div><div style="font:8px/1.45 ui-monospace;color:#8caeba;margin:6px 0">Real particle sources and physical forcing for testing jets, sheets, wakes and rotational flow.</div><div class="v5Grid"><button class="v5Btn" data-m46="faucet">FAUCET</button><button class="v5Btn" data-m46="waterfall">WATERFALL</button><button class="v5Btn" data-m46="paddle">PADDLE</button><button class="v5Btn" data-m46="whirlpool">WHIRLPOOL</button><button class="v5Btn" data-m46="fountain">FOUNTAIN</button></div><div id="v5ScenarioM46Status" style="font:8px/1.4 ui-monospace;color:#9fc5d0;margin-top:6px"></div></div>`;panel.appendChild(w);w.querySelectorAll('[data-m46]').forEach(b=>b.onclick=e=>{e.preventDefault();e.stopPropagation();choose(b.dataset.m46)});w.onpointerdown=e=>e.stopPropagation();setInterval(sync,700);sync();}
+mount();window.__v5ScenariosM46={online:true,backend:'physical-sources-m46',custom};console.info('[Fluid V5 M4.6] advanced physical scenarios online.');

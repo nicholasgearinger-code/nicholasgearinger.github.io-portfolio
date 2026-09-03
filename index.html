@@ -3306,18 +3306,93 @@
        standard defense against exactly that class of hijack. */
     overscroll-behavior: none;
   }
-  /* New "Fluid Sim" section — a genuinely separate, self-contained WebGPU
-     prototype page (its own import map, its own script), embedded via
-     iframe rather than inlined into this page's own scripts specifically
-     to keep it fully isolated from the Rift game's own module setup —
-     zero risk of the two conflicting. Same aspect-ratio/overflow approach
-     as #rift-viewport above, for visual consistency between the two card
-     embeds. */
+  /* Fluid Simulation Lab launcher. The WebGPU runtime opens in its own tab so
+     the portfolio never competes with the simulation for touch input or GPU work. */
   #fluidsim-viewport {
-    position: relative; width: 100%; aspect-ratio: 16 / 9;
-    background: #05070c; border-radius: 0 0 .4rem .4rem; overflow: hidden;
+    position: relative; width: 100%; aspect-ratio: 16 / 9; min-height: 330px;
+    background: #030a10; border-radius: 0 0 .4rem .4rem; overflow: hidden;
+    isolation: isolate;
   }
-  #fluidsim-viewport iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; }
+  .fluid-lab-menu {
+    position: absolute; inset: 0; z-index:0; isolation:isolate; display: flex; align-items: center;
+    padding: clamp(1.35rem,4vw,3rem); color: #e9fbff;
+    background:
+      radial-gradient(circle at 78% 50%,rgba(34,211,238,.13),transparent 34%),
+      radial-gradient(circle at 18% 18%,rgba(129,140,248,.12),transparent 30%),
+      linear-gradient(135deg,#02080e 0%,#051520 52%,#031019 100%);
+  }
+  .fluid-lab-menu::before {
+    content:""; position:absolute; inset:-55%; z-index:-1; opacity:.28;
+    background:repeating-radial-gradient(ellipse at 62% 50%,transparent 0 27px,rgba(82,231,239,.16) 28px 29px,transparent 30px 47px);
+    transform:perspective(500px) rotateX(63deg) translateY(33%);
+  }
+  .fluid-lab-menu::after {
+    content:""; position:absolute; inset:0; z-index:5; pointer-events:none; opacity:.11;
+    background:repeating-linear-gradient(180deg,transparent 0 3px,rgba(157,248,255,.18) 4px);
+    mix-blend-mode:screen;
+  }
+  .fluid-lab-glow {
+    position:absolute; left:0; right:0; bottom:-20%; height:60%; z-index:-1;
+    background:radial-gradient(ellipse at 50% 100%,rgba(34,211,238,.25),transparent 66%);
+  }
+  .fluid-lab-orb {
+    position:absolute; width:min(38vw,280px); aspect-ratio:1; right:clamp(1.2rem,7vw,4.5rem); top:50%;
+    border-radius:50%; transform:translateY(-50%); opacity:.9;
+    background:
+      radial-gradient(circle at 36% 28%,rgba(255,255,255,.74) 0 1.3%,transparent 2.2%),
+      radial-gradient(circle at 34% 28%,rgba(126,243,255,.45),transparent 19%),
+      radial-gradient(circle at 60% 70%,rgba(38,94,255,.54),transparent 48%),
+      linear-gradient(145deg,rgba(127,252,255,.78),rgba(29,78,216,.24) 44%,rgba(129,140,248,.36));
+    border:1px solid rgba(133,248,255,.56);
+    box-shadow:inset -24px -28px 55px rgba(3,13,44,.62),inset 12px 12px 28px rgba(216,252,255,.22),0 0 38px rgba(34,211,238,.22),0 0 100px rgba(59,130,246,.12);
+  }
+  .fluid-lab-orb::before,.fluid-lab-orb::after {
+    content:""; position:absolute; left:10%; right:10%; height:22%; border-radius:50%;
+    border-top:2px solid rgba(217,253,255,.56); border-bottom:1px solid rgba(54,221,255,.28);
+  }
+  .fluid-lab-orb::before { top:31%; transform:rotate(-8deg); }
+  .fluid-lab-orb::after { top:55%; transform:rotate(7deg); opacity:.72; }
+  .fluid-bubble { position:absolute; border-radius:50%; border:1px solid rgba(196,251,255,.65); background:rgba(78,224,255,.08); box-shadow:inset 2px 2px 5px rgba(255,255,255,.2); }
+  .fluid-bubble.b1 { width:9%; height:9%; left:26%; bottom:17%; }
+  .fluid-bubble.b2 { width:5%; height:5%; left:58%; bottom:24%; }
+  .fluid-bubble.b3 { width:3%; height:3%; left:44%; bottom:11%; }
+  .fluid-lab-copy { position:relative; z-index:6; width:min(56%,430px); text-align:left; }
+  .fluid-lab-status { display:inline-flex; align-items:center; gap:.48rem; margin-bottom:.7rem; color:#88dae5; font-size:.61rem; font-weight:700; letter-spacing:.17em; text-transform:uppercase; }
+  .fluid-lab-status i { width:7px; height:7px; border-radius:50%; background:#42efbd; box-shadow:0 0 12px #42efbd; }
+  .fluid-lab-title { margin:0; font-family:'JetBrains Mono',monospace; font-size:clamp(1.55rem,4.7vw,3.2rem); line-height:.96; letter-spacing:-.055em; text-transform:uppercase; text-shadow:0 0 28px rgba(34,211,238,.16); }
+  .fluid-lab-title span { display:block; color:#65e9f2; font-size:.49em; letter-spacing:.17em; margin-bottom:.35rem; }
+  .fluid-lab-description { margin:.85rem 0 1rem; max-width:390px; color:#91abb7; font-size:clamp(.68rem,1.5vw,.82rem); line-height:1.55; }
+  .fluid-lab-tags { display:flex; flex-wrap:wrap; gap:.38rem; margin-bottom:1.05rem; }
+  .fluid-lab-tags span { padding:.25rem .5rem; border:1px solid rgba(82,223,235,.24); border-radius:100px; color:#8fcbd4; background:rgba(2,15,22,.48); font-size:.54rem; letter-spacing:.08em; }
+  .fluid-lab-launch { display:inline-flex; align-items:center; justify-content:center; gap:.8rem; min-width:175px; padding:.78rem 1.15rem; border-radius:.55rem; border:1px solid rgba(99,238,246,.72); color:#031117; background:linear-gradient(100deg,#60e7ef,#7dd3fc 56%,#a5b4fc); font-size:.72rem; font-weight:900; letter-spacing:.16em; text-transform:uppercase; text-decoration:none; box-shadow:0 0 24px rgba(34,211,238,.17); touch-action:manipulation; transition:transform .18s ease,box-shadow .18s ease,filter .18s ease; }
+  .fluid-lab-launch b { font-size:1rem; transition:transform .18s ease; }
+  .fluid-lab-launch:hover,.fluid-lab-launch:focus-visible { transform:translateY(-2px); filter:brightness(1.08); box-shadow:0 8px 32px rgba(34,211,238,.3); outline:none; }
+  .fluid-lab-launch:hover b,.fluid-lab-launch:focus-visible b { transform:translate(2px,-2px); }
+  .fluid-lab-note { display:block; margin-top:.48rem; color:#506c79; font-size:.55rem; letter-spacing:.05em; }
+  @media (prefers-reduced-motion:no-preference) {
+    .fluid-lab-menu::before { animation:fluidGridDrift 11s linear infinite; }
+    .fluid-lab-orb { animation:fluidOrbFloat 5.5s ease-in-out infinite; }
+    .fluid-lab-orb::before { animation:fluidSurfaceA 4.2s ease-in-out infinite; }
+    .fluid-lab-orb::after { animation:fluidSurfaceB 5s ease-in-out infinite reverse; }
+    .fluid-bubble { animation:fluidBubbleRise 4s ease-in-out infinite; }
+    .fluid-bubble.b2 { animation-delay:-1.4s; }.fluid-bubble.b3 { animation-delay:-2.6s; }
+    .fluid-lab-status i { animation:fluidOnline 1.8s ease-in-out infinite; }
+  }
+  @keyframes fluidGridDrift { to { transform:perspective(500px) rotateX(63deg) translateY(38%) rotate(3deg); } }
+  @keyframes fluidOrbFloat { 0%,100%{transform:translateY(-50%) translateX(0) rotate(-1deg)} 50%{transform:translateY(calc(-50% - 9px)) translateX(-5px) rotate(2deg)} }
+  @keyframes fluidSurfaceA { 0%,100%{transform:translateY(0) rotate(-8deg) scaleX(1)} 50%{transform:translateY(7px) rotate(-3deg) scaleX(.9)} }
+  @keyframes fluidSurfaceB { 0%,100%{transform:translateY(0) rotate(7deg) scaleX(.92)} 50%{transform:translateY(-6px) rotate(2deg) scaleX(1.04)} }
+  @keyframes fluidBubbleRise { 0%,100%{transform:translateY(4px);opacity:.25} 50%{transform:translateY(-13px);opacity:.9} }
+  @keyframes fluidOnline { 50%{opacity:.45;box-shadow:0 0 4px #42efbd} }
+  @media (max-width:640px) {
+    #fluidsim-viewport { min-height:350px; aspect-ratio:auto; }
+    .fluid-lab-menu { align-items:flex-end; padding:1.3rem 1.15rem 1.45rem; }
+    .fluid-lab-copy { width:100%; }
+    .fluid-lab-orb { width:205px; right:-35px; top:36%; opacity:.54; }
+    .fluid-lab-description { max-width:75%; }
+    .fluid-lab-tags { max-width:78%; }
+    .fluid-lab-launch { min-width:168px; }
+  }
   #rift-viewport.rift-fullscreen {
     position: fixed; top: 0; left: 0; width: 100svw; height: 100svh;
     z-index: 9999; aspect-ratio: auto; border-radius: 0;
@@ -4895,12 +4970,12 @@
 </section>
 
 
-<!-- FLUID SIM PROTOTYPE -->
+<!-- FLUID SIMULATION LAB -->
 <section id="fluidsim" class="panel">
   <div class="panel-inner">
-    <span class="section-label">Experiment</span>
-    <h2>A real fluid simulation,<br>running on the GPU</h2>
-    <p class="lead" style="margin:0 auto 2.2rem;">A WebGPU compute-shader prototype β€” genuine finite-difference wave physics, not the animated-sine-wave trick most real-time water uses (including Rift Islands' own ocean above, for now). Each cell's height responds to its actual neighbors every frame, computed in parallel on the GPU. Click or drag on the water to push it and watch a real disturbance propagate and reflect off the edges.</p>
+    <span class="section-label">Interactive Lab</span>
+    <h2>Fluid Simulation Lab,<br>running on the GPU</h2>
+    <p class="lead" style="margin:0 auto 2.2rem;">A real-time particle-based water simulation with a high-poly GLB pitcher, measured vessel containment, and a gravity-driven pour into the receiving glass. The lab runs as its own full-window experience so the canvas, controls, and physics have room to breathe on desktop and mobile.</p>
     <div class="algo-card">
       <div class="cc-titlebar">
         <div class="cc-dots">
@@ -4908,15 +4983,36 @@
           <span class="cc-dot" style="background:#FFBD2E"></span>
           <span class="cc-dot" style="background:#28C840"></span>
         </div>
-        <span class="cc-filename">fluid-sim-prototype</span>
+        <span class="cc-filename">fluid-v8 · main</span>
       </div>
       <div class="algo-body" style="padding:0;">
         <div id="fluidsim-viewport">
-          <iframe src="fluid-sim-prototype.html?v=2" title="WebGPU fluid simulation prototype" loading="lazy" allow="fullscreen"></iframe>
+          <div class="fluid-lab-menu" aria-labelledby="fluid-lab-menu-title">
+            <div class="fluid-lab-glow" aria-hidden="true"></div>
+            <div class="fluid-lab-orb" aria-hidden="true">
+              <span class="fluid-bubble b1"></span>
+              <span class="fluid-bubble b2"></span>
+              <span class="fluid-bubble b3"></span>
+            </div>
+            <div class="fluid-lab-copy">
+              <div class="fluid-lab-status"><i aria-hidden="true"></i> WebGPU system online</div>
+              <h3 id="fluid-lab-menu-title" class="fluid-lab-title"><span>Fluid V8</span>Simulation Lab</h3>
+              <p class="fluid-lab-description">Particle-based water, GLB vessel containment, and a natural gravity-only pour—computed live on the GPU.</p>
+              <div class="fluid-lab-tags" aria-label="Lab features">
+                <span>PBF WATER</span>
+                <span>GLB COLLISION</span>
+                <span>WORLD GRAVITY</span>
+              </div>
+              <a class="fluid-lab-launch" href="fluid-v5-pbf/?launch=portfolio&amp;build=8996" target="_blank" rel="noopener" aria-label="Start Fluid Simulation Lab in a new window">
+                <span>Start Lab</span><b aria-hidden="true">↗</b>
+              </a>
+              <small class="fluid-lab-note">Opens in a dedicated full-window tab</small>
+            </div>
+          </div>
         </div>
       </div>
     </div>
-    <p class="algo-hint">Requires a browser with WebGPU support β€” current Chrome, Edge, or Firefox, and Safari 26+ on iOS/iPadOS/macOS. On an unsupported browser the embed will show a plain status message instead of a blank frame. This is a standalone proof of concept, not yet wired into the live game β€” see it as the first step toward eventually replacing Rift Islands' Gerstner-wave ocean with a real simulation driving the water, caustics, foam, and rain ripples together.</p>
+    <p class="algo-hint">Built with WebGPU position-based fluids: particles begin at rest inside the pitcher, stay contained by the vessel boundary, then move under world gravity as the GLB pitcher rotates toward the glass. Opening the lab separately avoids iframe clipping and gives touch input, settings, and the simulation the full browser viewport.</p>
   </div>
 </section>
 

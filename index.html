@@ -3314,7 +3314,9 @@
     isolation: isolate;
   }
   .fluid-lab-menu {
-    position: absolute; inset: 0; z-index:0; isolation:isolate; display: flex; align-items: center;
+    position: absolute; inset: 0; z-index:0; isolation:isolate; display:grid;
+    grid-template-columns:minmax(0,56%) minmax(0,44%); grid-template-rows:auto 1fr;
+    align-content:center; align-items:center;
     padding: clamp(1.35rem,4vw,3rem); color: #e9fbff;
     background:
       radial-gradient(circle at 78% 50%,rgba(34,211,238,.13),transparent 34%),
@@ -3336,8 +3338,8 @@
     background:radial-gradient(ellipse at 50% 100%,rgba(34,211,238,.25),transparent 66%);
   }
   .fluid-lab-orb {
-    position:absolute; width:min(38vw,280px); aspect-ratio:1; right:clamp(1.2rem,7vw,4.5rem); top:50%;
-    border-radius:50%; transform:translateY(-50%); opacity:0; pointer-events:none;
+    position:absolute; width:min(86%,280px); aspect-ratio:1; left:50%; top:50%;
+    border-radius:50%; transform:translate(-50%,-50%); opacity:0; pointer-events:none;
     background:
       radial-gradient(circle at 36% 28%,rgba(255,255,255,.74) 0 1.3%,transparent 2.2%),
       radial-gradient(circle at 34% 28%,rgba(126,243,255,.45),transparent 19%),
@@ -3358,7 +3360,9 @@
   .fluid-bubble.b1 { width:9%; height:9%; left:26%; bottom:17%; }
   .fluid-bubble.b2 { width:5%; height:5%; left:58%; bottom:24%; }
   .fluid-bubble.b3 { width:3%; height:3%; left:44%; bottom:11%; }
-  .fluid-lab-copy { position:relative; z-index:6; width:min(56%,430px); text-align:left; pointer-events:none; }
+  .fluid-lab-header { position:relative; z-index:6; grid-column:1; grid-row:1; text-align:left; pointer-events:none; align-self:end; }
+  .fluid-lab-controls { position:relative; z-index:6; grid-column:1; grid-row:2; text-align:left; pointer-events:none; align-self:start; }
+  .fluid-lab-visual { position:relative; z-index:3; grid-column:2; grid-row:1 / span 2; width:100%; height:100%; min-height:245px; }
   .fluid-lab-status { display:inline-flex; align-items:center; gap:.48rem; margin-bottom:.7rem; color:#88dae5; font-size:.61rem; font-weight:700; letter-spacing:.17em; text-transform:uppercase; }
   .fluid-lab-status i { width:7px; height:7px; border-radius:50%; background:#42efbd; box-shadow:0 0 12px #42efbd; }
   .fluid-lab-title { margin:0; font-family:'JetBrains Mono',monospace; font-size:clamp(1.55rem,4.7vw,3.2rem); line-height:.96; letter-spacing:-.055em; text-transform:uppercase; text-shadow:0 0 28px rgba(34,211,238,.16); }
@@ -3389,15 +3393,17 @@
   .fluid-lab-console i { width:5px; height:5px; border-radius:50%; background:#29444d; box-shadow:0 0 0 transparent; transition:background .3s ease,box-shadow .3s ease; }
   .fluid-lab-menu.is-awake .fluid-lab-console i { background:#42efbd; box-shadow:0 0 9px #42efbd; }
   .fluid-lab-liquid {
-    position:absolute; z-index:3; width:min(49vw,410px); height:min(75%,270px);
-    right:clamp(.25rem,2.8vw,2.4rem); top:50%; transform:translateY(-50%);
+    position:absolute; z-index:3; inset:0; width:100%; height:100%;
+    transform:none;
     opacity:1; transition:opacity .4s ease,transform .4s ease;
   }
-  .fluid-lab-menu.is-orb .fluid-lab-liquid { opacity:0; pointer-events:none; transform:translateY(-47%) scale(.96); }
+  .fluid-lab-menu.is-orb .fluid-lab-liquid { opacity:0; pointer-events:none; transform:scale(.96); }
   .fluid-type-canvas {
     display:block; width:100%; height:100%; cursor:crosshair; touch-action:none;
     filter:drop-shadow(0 14px 24px rgba(0,0,0,.42)) drop-shadow(0 0 22px rgba(35,213,239,.14));
   }
+  .fluid-lab-menu.is-droplet .fluid-type-canvas { cursor:grab; }
+  .fluid-lab-menu.is-droplet .fluid-type-canvas:active { cursor:grabbing; }
   .fluid-type-readout {
     position:absolute; left:50%; bottom:2%; transform:translateX(-50%); width:max-content; max-width:96%;
     color:rgba(151,224,233,.72); font:700 .5rem 'JetBrains Mono',monospace;
@@ -3417,24 +3423,30 @@
     .fluid-lab-menu.is-awake .fluid-lab-console span:nth-child(3) i { animation:fluidConsoleReady .45s 1.25s both; }
   }
   @keyframes fluidGridDrift { to { transform:perspective(500px) rotateX(63deg) translateY(38%) rotate(3deg); } }
-  @keyframes fluidOrbFloat { 0%,100%{transform:translateY(-50%) translateX(0) rotate(-1deg)} 50%{transform:translateY(calc(-50% - 9px)) translateX(-5px) rotate(2deg)} }
+  @keyframes fluidOrbFloat { 0%,100%{transform:translate(-50%,-50%) rotate(-1deg)} 50%{transform:translate(calc(-50% - 5px),calc(-50% - 9px)) rotate(2deg)} }
   @keyframes fluidSurfaceA { 0%,100%{transform:translateY(0) rotate(-8deg) scaleX(1)} 50%{transform:translateY(7px) rotate(-3deg) scaleX(.9)} }
   @keyframes fluidSurfaceB { 0%,100%{transform:translateY(0) rotate(7deg) scaleX(.92)} 50%{transform:translateY(-6px) rotate(2deg) scaleX(1.04)} }
   @keyframes fluidBubbleRise { 0%,100%{transform:translateY(4px);opacity:.25} 50%{transform:translateY(-13px);opacity:.9} }
   @keyframes fluidOnline { 50%{opacity:.45;box-shadow:0 0 4px #42efbd} }
   @keyframes fluidConsoleReady { from{background:#29444d;box-shadow:0 0 0 transparent} to{background:#42efbd;box-shadow:0 0 9px #42efbd} }
   @media (max-width:640px) {
-    #fluidsim-viewport { min-height:350px; aspect-ratio:auto; }
-    .fluid-lab-menu { align-items:flex-end; padding:1.3rem 1.15rem 1.45rem; }
-    .fluid-lab-copy { width:100%; }
-    .fluid-lab-orb { width:205px; right:-35px; top:36%; }
-    .fluid-lab-menu.is-orb .fluid-lab-orb { opacity:.54; }
-    .fluid-lab-liquid { width:290px; height:145px; right:-42px; top:23%; opacity:.82; }
-    .fluid-lab-description { max-width:75%; }
-    .fluid-lab-tags { max-width:78%; }
-    .fluid-lab-console { width:72%; }
+    #fluidsim-viewport { min-height:445px; aspect-ratio:auto; }
+    .fluid-lab-menu { grid-template-columns:1fr; grid-template-rows:auto 145px auto; align-content:start; align-items:stretch; gap:.25rem; padding:1rem 1.05rem 1.15rem; }
+    .fluid-lab-header { grid-column:1; grid-row:1; padding-top:2.15rem; align-self:start; }
+    .fluid-lab-visual { grid-column:1; grid-row:2; min-height:0; height:145px; }
+    .fluid-lab-controls { grid-column:1; grid-row:3; align-self:start; }
+    .fluid-lab-orb { width:138px; }
+    .fluid-lab-menu.is-orb .fluid-lab-orb { opacity:.66; }
+    .fluid-lab-liquid { opacity:1; }
+    .fluid-lab-status { margin-bottom:.42rem; }
+    .fluid-lab-title { font-size:1.62rem; }
+    .fluid-lab-description { max-width:100%; margin:.5rem 0 .25rem; font-size:.65rem; line-height:1.42; }
+    .fluid-lab-tags { max-width:100%; gap:.28rem; margin:.25rem 0 .65rem; }
+    .fluid-lab-tags span { padding:.2rem .4rem; font-size:.47rem; }
+    .fluid-lab-console { display:none; }
     .fluid-lab-styles { top:.7rem; right:.7rem; }
-    .fluid-lab-launch { min-width:168px; }
+    .fluid-lab-launch { width:100%; min-width:0; padding:.72rem 1rem; }
+    .fluid-lab-note { text-align:center; }
   }
   #rift-viewport.rift-fullscreen {
     position: fixed; top: 0; left: 0; width: 100svw; height: 100svh;
@@ -5034,21 +5046,26 @@
             <div class="fluid-lab-glow" aria-hidden="true"></div>
             <div class="fluid-lab-styles" role="group" aria-label="Start menu animation">
               <button class="fluid-lab-style" type="button" data-fluid-style="liquid" aria-pressed="true">Liquid</button>
+              <button class="fluid-lab-style" type="button" data-fluid-style="droplet" aria-pressed="false">Droplet</button>
               <button class="fluid-lab-style" type="button" data-fluid-style="orb" aria-pressed="false">Orb</button>
             </div>
-            <div class="fluid-lab-liquid">
-              <canvas class="fluid-type-canvas" role="img" tabindex="0" aria-label="The word Fluid partially filled with simulated water. Tap or drag across the letters to create waves."></canvas>
-              <span class="fluid-type-readout" aria-hidden="true">Live height field · touch + drag</span>
-            </div>
-            <div class="fluid-lab-orb" aria-hidden="true">
-              <span class="fluid-bubble b1"></span>
-              <span class="fluid-bubble b2"></span>
-              <span class="fluid-bubble b3"></span>
-            </div>
-            <div class="fluid-lab-copy">
+            <div class="fluid-lab-header">
               <div class="fluid-lab-status"><i aria-hidden="true"></i> <span data-fluid-status>Initializing WebGPU</span></div>
               <h3 id="fluid-lab-menu-title" class="fluid-lab-title"><span>Fluid V8</span>Simulation Lab</h3>
-              <p class="fluid-lab-description">Drag across the liquid letters to disturb the live surface, then enter the full PBF water and gravity-pour experiment.</p>
+              <p class="fluid-lab-description" data-fluid-description>Drag across the liquid letters to disturb the live surface, then enter the full PBF water and gravity-pour experiment.</p>
+            </div>
+            <div class="fluid-lab-visual">
+              <div class="fluid-lab-liquid">
+                <canvas class="fluid-type-canvas" role="img" tabindex="0" aria-label="The word Fluid partially filled with simulated water. Tap or drag across the letters to create waves."></canvas>
+                <span class="fluid-type-readout" data-fluid-readout aria-hidden="true">Live height field · touch + drag</span>
+              </div>
+              <div class="fluid-lab-orb" aria-hidden="true">
+                <span class="fluid-bubble b1"></span>
+                <span class="fluid-bubble b2"></span>
+                <span class="fluid-bubble b3"></span>
+              </div>
+            </div>
+            <div class="fluid-lab-controls">
               <div class="fluid-lab-tags" aria-label="Lab features">
                 <span>PBF WATER</span>
                 <span>GLB COLLISION</span>
@@ -5081,6 +5098,8 @@
   const canvas = menu.querySelector('.fluid-type-canvas');
   const ctx = canvas?.getContext('2d', { alpha: true });
   const status = menu.querySelector('[data-fluid-status]');
+  const readout = menu.querySelector('[data-fluid-readout]');
+  const description = menu.querySelector('[data-fluid-description]');
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const waterCanvas = document.createElement('canvas');
   const water = waterCanvas.getContext('2d', { alpha: true });
@@ -5095,6 +5114,11 @@
   let initialized = false;
   let lastPointerY = 0;
   let statusTimer = 0;
+  let selectedStyle = 'liquid';
+  let dropTracking = false;
+  const drop = { x:0, y:0, vx:0, vy:0, tx:0, ty:0, pulse:0, phase:0 };
+  const dropParticles = [];
+  const dropRings = [];
 
   function resizeLiquid() {
     if (!canvas || !ctx || !water) return;
@@ -5108,7 +5132,7 @@
       canvas.width = waterCanvas.width = pixelWidth;
       canvas.height = waterCanvas.height = pixelHeight;
     }
-    drawLiquid(performance.now());
+    drawSelected(performance.now());
   }
 
   function textMetrics(context) {
@@ -5212,6 +5236,120 @@
     ctx.restore();
   }
 
+  function drawDroplet(time) {
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, width, canvasHeight);
+    const centerX = width * .5 + drop.x;
+    const centerY = canvasHeight * .45 + drop.y;
+    const radius = Math.min(width, canvasHeight) * .245;
+    const speed = Math.hypot(drop.vx, drop.vy);
+    const wobble = Math.sin(drop.phase) * .035 + drop.pulse * Math.sin(drop.phase * 2.4) * .08;
+    const stretch = Math.min(.17, speed * .012 + drop.pulse * .08);
+
+    ctx.save();
+    ctx.globalAlpha = .4;
+    ctx.strokeStyle = 'rgba(97,226,240,.72)';
+    ctx.lineWidth = 1;
+    for (const ring of dropRings) {
+      const scale = 1 + ring.age * 2.4;
+      ctx.globalAlpha = Math.max(0, .5 - ring.age * .5);
+      ctx.beginPath();
+      ctx.ellipse(ring.x, canvasHeight * .82, radius * scale, radius * .16 * scale, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    ctx.save();
+    ctx.globalAlpha = .32;
+    const shadow = ctx.createRadialGradient(centerX, canvasHeight * .82, 0, centerX, canvasHeight * .82, radius * 1.25);
+    shadow.addColorStop(0, 'rgba(78,224,240,.42)');
+    shadow.addColorStop(1, 'rgba(78,224,240,0)');
+    ctx.fillStyle = shadow;
+    ctx.beginPath();
+    ctx.ellipse(centerX, canvasHeight * .82, radius * 1.25, radius * .22, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(centerX, centerY);
+    ctx.rotate(Math.max(-.14, Math.min(.14, drop.vx * .014)));
+    ctx.scale(1 + wobble - stretch * .35, 1 - wobble + stretch);
+    const fill = ctx.createRadialGradient(-radius * .3, -radius * .48, radius * .05, 0, 0, radius * 1.25);
+    fill.addColorStop(0, 'rgba(233,255,255,.97)');
+    fill.addColorStop(.13, 'rgba(125,243,250,.96)');
+    fill.addColorStop(.52, 'rgba(43,168,235,.92)');
+    fill.addColorStop(1, 'rgba(42,64,183,.94)');
+    ctx.beginPath();
+    ctx.moveTo(0, -radius * 1.2);
+    ctx.bezierCurveTo(radius * .62, -radius * .64, radius * .9, -radius * .04, radius * .66, radius * .48);
+    ctx.bezierCurveTo(radius * .43, radius * .93, -radius * .43, radius * .93, -radius * .66, radius * .48);
+    ctx.bezierCurveTo(-radius * .9, -radius * .04, -radius * .62, -radius * .64, 0, -radius * 1.2);
+    ctx.closePath();
+    ctx.fillStyle = fill;
+    ctx.shadowColor = 'rgba(53,220,242,.62)';
+    ctx.shadowBlur = 24;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = 'rgba(210,253,255,.82)';
+    ctx.lineWidth = 1.25;
+    ctx.stroke();
+
+    ctx.globalAlpha = .72;
+    ctx.strokeStyle = '#efffff';
+    ctx.lineWidth = Math.max(1.2, radius * .055);
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(-radius * .17, -radius * .3, radius * .43, Math.PI * 1.08, Math.PI * 1.52);
+    ctx.stroke();
+    ctx.globalAlpha = .36;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(radius * .21, radius * .2, radius * .1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    for (const particle of dropParticles) {
+      ctx.globalAlpha = Math.max(0, particle.life);
+      ctx.fillStyle = 'rgba(151,247,255,.9)';
+      ctx.beginPath();
+      ctx.arc(particle.x, particle.y, particle.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawSelected(time) {
+    if (selectedStyle === 'droplet') drawDroplet(time);
+    else drawLiquid(time);
+  }
+
+  function stepDroplet(time) {
+    drop.vx = (drop.vx + (drop.tx - drop.x) * .075) * .82;
+    drop.vy = (drop.vy + (drop.ty - drop.y) * .075) * .82;
+    drop.x += drop.vx;
+    drop.y += drop.vy;
+    drop.phase += .09 + Math.min(.08, Math.hypot(drop.vx, drop.vy) * .006);
+    drop.pulse *= .925;
+    for (let i = dropParticles.length - 1; i >= 0; i--) {
+      const particle = dropParticles[i];
+      particle.vy += .055;
+      particle.x += particle.vx;
+      particle.y += particle.vy;
+      particle.life -= .022;
+      if (particle.life <= 0) dropParticles.splice(i, 1);
+    }
+    for (let i = dropRings.length - 1; i >= 0; i--) {
+      dropRings[i].age += .028;
+      if (dropRings[i].age >= 1) dropRings.splice(i, 1);
+    }
+    if (!dropTracking) {
+      drop.tx = Math.sin(time * .0007) * 2.2;
+      drop.ty = Math.cos(time * .0011) * 2.4;
+    }
+  }
+
   function stepLiquid(time) {
     for (let substep = 0; substep < 2; substep++) {
       for (let i = 1; i < samples - 1; i++) {
@@ -5230,8 +5368,8 @@
 
   function frame(time) {
     if (!running) return;
-    stepLiquid(time);
-    drawLiquid(time);
+    if (selectedStyle === 'droplet') stepDroplet(time); else stepLiquid(time);
+    drawSelected(time);
     requestAnimationFrame(frame);
   }
 
@@ -5267,18 +5405,66 @@
     }
   }
 
+  function aimDroplet(clientX, clientY) {
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    dropTracking = true;
+    drop.tx = Math.max(-width * .16, Math.min(width * .16, (clientX - rect.left - rect.width * .5) * .28));
+    drop.ty = Math.max(-canvasHeight * .13, Math.min(canvasHeight * .13, (clientY - rect.top - rect.height * .45) * .2));
+  }
+
+  function reactDroplet(clientX, clientY, strong = true) {
+    if (!canvas || selectedStyle !== 'droplet') return;
+    aimDroplet(clientX, clientY);
+    drop.pulse = Math.max(drop.pulse, strong ? 1 : .45);
+    if (strong) {
+      drop.vy += 2.6;
+      dropRings.push({ age:0, x:width * .5 + drop.x });
+      const centerX = width * .5 + drop.x;
+      const centerY = canvasHeight * .45 + drop.y;
+      for (let i = 0; i < 7; i++) {
+        const angle = Math.PI * (1.08 + i / 7 * .84);
+        const speed = 1.1 + (i % 3) * .42;
+        dropParticles.push({ x:centerX, y:centerY, vx:Math.cos(angle) * speed, vy:Math.sin(angle) * speed - .5, r:1 + (i % 2), life:.85 });
+      }
+      if (status) {
+        status.textContent = 'Droplet response captured';
+        window.clearTimeout(statusTimer);
+        statusTimer = window.setTimeout(() => { status.textContent = 'Lab interface ready'; }, 900);
+      }
+    }
+    if (reduceMotion) {
+      for (let i = 0; i < 6; i++) stepDroplet(i * 16);
+      drawDroplet(performance.now());
+    } else {
+      startLiquid();
+    }
+  }
+
   function selectStyle(style, remember = true) {
-    const selected = style === 'orb' ? 'orb' : 'liquid';
+    const selected = style === 'orb' ? 'orb' : style === 'droplet' ? 'droplet' : 'liquid';
+    selectedStyle = selected;
     menu.classList.toggle('is-orb', selected === 'orb');
     menu.classList.toggle('is-liquid', selected === 'liquid');
+    menu.classList.toggle('is-droplet', selected === 'droplet');
     styleButtons.forEach((button) => {
       button.setAttribute('aria-pressed', String(button.dataset.fluidStyle === selected));
     });
     if (canvas) {
-      canvas.tabIndex = selected === 'liquid' ? 0 : -1;
-      canvas.setAttribute('aria-hidden', String(selected !== 'liquid'));
+      canvas.tabIndex = selected === 'orb' ? -1 : 0;
+      canvas.setAttribute('aria-hidden', String(selected === 'orb'));
+      canvas.setAttribute('aria-label', selected === 'droplet'
+        ? 'A reactive water droplet. Move, tap, or drag to deform it.'
+        : 'The word Fluid partially filled with simulated water. Tap or drag across the letters to create waves.');
     }
-    if (selected === 'liquid') startLiquid(); else stopLiquid();
+    if (readout) readout.textContent = selected === 'droplet' ? 'Elastic droplet · move + tap' : 'Live height field · touch + drag';
+    if (description) description.textContent = selected === 'droplet'
+      ? 'Move across the droplet to pull it with spring physics, then tap to make it wobble and shed tiny beads.'
+      : selected === 'orb'
+        ? 'The original ambient water-orb menu remains available as a calmer visual alternative.'
+        : 'Drag across the liquid letters to disturb the live surface, then enter the full PBF water and gravity-pour experiment.';
+    if (selected !== 'orb') startLiquid(); else stopLiquid();
+    drawSelected(performance.now());
     if (remember) {
       try { localStorage.setItem('fluid-lab-menu-style', selected); } catch (_) {}
     }
@@ -5292,21 +5478,33 @@
   canvas?.addEventListener('pointerdown', (event) => {
     canvas.setPointerCapture?.(event.pointerId);
     lastPointerY = event.clientY;
-    disturb(event.clientX, 3.2);
+    if (selectedStyle === 'droplet') reactDroplet(event.clientX, event.clientY, true);
+    else disturb(event.clientX, 3.2);
   });
   canvas?.addEventListener('pointermove', (event) => {
+    if (selectedStyle === 'droplet') {
+      aimDroplet(event.clientX, event.clientY);
+      if (canvas.hasPointerCapture?.(event.pointerId)) reactDroplet(event.clientX, event.clientY, false);
+      return;
+    }
     if (!canvas.hasPointerCapture?.(event.pointerId)) return;
     event.preventDefault();
     const vertical = Math.max(-4.5, Math.min(4.5, (lastPointerY - event.clientY) * .16));
     lastPointerY = event.clientY;
     disturb(event.clientX, vertical || 1.15);
   });
+  canvas?.addEventListener('pointerup', () => { dropTracking = false; });
+  canvas?.addEventListener('pointercancel', () => { dropTracking = false; });
+  canvas?.addEventListener('pointerleave', (event) => {
+    if (!canvas.hasPointerCapture?.(event.pointerId)) dropTracking = false;
+  });
   canvas?.addEventListener('keydown', (event) => {
     if (!['Enter', ' ', 'ArrowLeft', 'ArrowRight'].includes(event.key)) return;
     event.preventDefault();
     const rect = canvas.getBoundingClientRect();
     const x = event.key === 'ArrowLeft' ? rect.left + rect.width * .3 : event.key === 'ArrowRight' ? rect.left + rect.width * .7 : rect.left + rect.width * .5;
-    disturb(x, 3.2);
+    if (selectedStyle === 'droplet') reactDroplet(x, rect.top + rect.height * .45, true);
+    else disturb(x, 3.2);
   });
 
   function initializeMenu() {

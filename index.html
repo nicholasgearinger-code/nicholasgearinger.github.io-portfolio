@@ -3402,8 +3402,6 @@
     display:block; width:100%; height:100%; cursor:crosshair; touch-action:none;
     filter:drop-shadow(0 14px 24px rgba(0,0,0,.42)) drop-shadow(0 0 22px rgba(35,213,239,.14));
   }
-  .fluid-lab-menu.is-droplet .fluid-type-canvas { cursor:grab; }
-  .fluid-lab-menu.is-droplet .fluid-type-canvas:active { cursor:grabbing; }
   .fluid-type-readout {
     position:absolute; left:50%; bottom:2%; transform:translateX(-50%); width:max-content; max-width:96%;
     color:rgba(151,224,233,.72); font:700 .5rem 'JetBrains Mono',monospace;
@@ -3430,10 +3428,10 @@
   @keyframes fluidOnline { 50%{opacity:.45;box-shadow:0 0 4px #42efbd} }
   @keyframes fluidConsoleReady { from{background:#29444d;box-shadow:0 0 0 transparent} to{background:#42efbd;box-shadow:0 0 9px #42efbd} }
   @media (max-width:640px) {
-    #fluidsim-viewport { min-height:445px; aspect-ratio:auto; }
-    .fluid-lab-menu { grid-template-columns:1fr; grid-template-rows:auto 145px auto; align-content:start; align-items:stretch; gap:.25rem; padding:1rem 1.05rem 1.15rem; }
+    #fluidsim-viewport { min-height:465px; aspect-ratio:auto; }
+    .fluid-lab-menu { grid-template-columns:1fr; grid-template-rows:auto 165px auto; align-content:start; align-items:stretch; gap:.25rem; padding:1rem 1.05rem 1.15rem; }
     .fluid-lab-header { grid-column:1; grid-row:1; padding-top:2.15rem; align-self:start; }
-    .fluid-lab-visual { grid-column:1; grid-row:2; min-height:0; height:145px; }
+    .fluid-lab-visual { grid-column:1; grid-row:2; min-height:0; height:165px; }
     .fluid-lab-controls { grid-column:1; grid-row:3; align-self:start; }
     .fluid-lab-orb { width:138px; }
     .fluid-lab-menu.is-orb .fluid-lab-orb { opacity:.66; }
@@ -5045,8 +5043,7 @@
           <div class="fluid-lab-menu is-liquid" aria-labelledby="fluid-lab-menu-title">
             <div class="fluid-lab-glow" aria-hidden="true"></div>
             <div class="fluid-lab-styles" role="group" aria-label="Start menu animation">
-              <button class="fluid-lab-style" type="button" data-fluid-style="liquid" aria-pressed="true">Liquid</button>
-              <button class="fluid-lab-style" type="button" data-fluid-style="droplet" aria-pressed="false">Droplet</button>
+              <button class="fluid-lab-style" type="button" data-fluid-style="liquid" aria-pressed="true">Fluid</button>
               <button class="fluid-lab-style" type="button" data-fluid-style="orb" aria-pressed="false">Orb</button>
             </div>
             <div class="fluid-lab-header">
@@ -5057,7 +5054,7 @@
             <div class="fluid-lab-visual">
               <div class="fluid-lab-liquid">
                 <canvas class="fluid-type-canvas" role="img" tabindex="0" aria-label="The word Fluid partially filled with simulated water. Tap or drag across the letters to create waves."></canvas>
-                <span class="fluid-type-readout" data-fluid-readout aria-hidden="true">Live height field · touch + drag</span>
+                <span class="fluid-type-readout" data-fluid-readout aria-hidden="true">Simulated water · tap + drag</span>
               </div>
               <div class="fluid-lab-orb" aria-hidden="true">
                 <span class="fluid-bubble b1"></span>
@@ -5113,12 +5110,12 @@
   let running = false;
   let initialized = false;
   let lastPointerY = 0;
+  let lastPointerX = 0;
   let statusTimer = 0;
   let selectedStyle = 'liquid';
-  let dropTracking = false;
-  const drop = { x:0, y:0, vx:0, vy:0, tx:0, ty:0, pulse:0, phase:0 };
-  const dropParticles = [];
-  const dropRings = [];
+  let touchX = .5;
+  let touchEnergy = 0;
+  const splashParticles = [];
 
   function resizeLiquid() {
     if (!canvas || !ctx || !water) return;
@@ -5136,16 +5133,19 @@
   }
 
   function textMetrics(context) {
-    const fontSize = Math.min(canvasHeight * .61, width / 3.16);
+    let fontSize = canvasHeight * .68;
+    context.font = `900 ${fontSize}px "Arial Black", "JetBrains Mono", sans-serif`;
+    const measured = context.measureText('FLUID').width;
+    if (measured > width * .94) fontSize *= width * .94 / measured;
     context.font = `900 ${fontSize}px "Arial Black", "JetBrains Mono", sans-serif`;
     context.textAlign = 'center';
     context.textBaseline = 'middle';
     context.lineJoin = 'round';
-    return { fontSize, centerX: width * .5, centerY: canvasHeight * .47 };
+    return { fontSize, centerX: width * .5, centerY: canvasHeight * .48 };
   }
 
   function surfaceY(index) {
-    return canvasHeight * .49 + height[Math.max(0, Math.min(samples - 1, index))];
+    return canvasHeight * .445 + height[Math.max(0, Math.min(samples - 1, index))];
   }
 
   function drawLiquid(time) {
@@ -5186,12 +5186,37 @@
     water.beginPath();
     water.moveTo(0, surfaceY(0));
     for (let i = 1; i < samples; i++) water.lineTo(i * width / (samples - 1), surfaceY(i));
+    for (let i = samples - 1; i >= 0; i--) water.lineTo(i * width / (samples - 1), surfaceY(i) + 11);
+    water.closePath();
+    const surfaceBand = water.createLinearGradient(0, canvasHeight * .4, 0, canvasHeight * .57);
+    surfaceBand.addColorStop(0, 'rgba(228,255,255,.38)');
+    surfaceBand.addColorStop(1, 'rgba(85,220,246,0)');
+    water.fillStyle = surfaceBand;
+    water.fill();
+
+    water.beginPath();
+    water.moveTo(0, surfaceY(0));
+    for (let i = 1; i < samples; i++) water.lineTo(i * width / (samples - 1), surfaceY(i));
     water.strokeStyle = 'rgba(226,255,255,.95)';
     water.lineWidth = 1.4;
     water.shadowColor = '#67e8f9';
     water.shadowBlur = 9;
     water.stroke();
     water.shadowBlur = 0;
+
+    water.save();
+    for (let i = 2; i < samples - 2; i += 2) {
+      const curve = Math.abs(height[i - 1] + height[i + 1] - 2 * height[i]);
+      const contact = Math.max(0, 1 - Math.abs(i / (samples - 1) - touchX) * 9) * touchEnergy;
+      const foam = Math.min(1, curve * .42 + contact);
+      if (foam < .14) continue;
+      water.globalAlpha = .18 + foam * .62;
+      water.fillStyle = '#ecffff';
+      water.beginPath();
+      water.arc(i * width / (samples - 1), surfaceY(i) - foam * 1.8, .7 + foam * 1.55, 0, Math.PI * 2);
+      water.fill();
+    }
+    water.restore();
 
     water.save();
     water.globalAlpha = .23;
@@ -5220,6 +5245,18 @@
       water.stroke();
     }
 
+    water.save();
+    water.fillStyle = 'rgba(223,255,255,.9)';
+    water.strokeStyle = 'rgba(112,237,248,.8)';
+    for (const particle of splashParticles) {
+      water.globalAlpha = Math.max(0, particle.life);
+      water.beginPath();
+      water.arc(particle.x, particle.y, particle.r, 0, Math.PI * 2);
+      water.fill();
+      water.stroke();
+    }
+    water.restore();
+
     water.globalCompositeOperation = 'destination-in';
     water.fillStyle = '#fff';
     water.fillText('FLUID', metrics.centerX, metrics.centerY);
@@ -5236,119 +5273,7 @@
     ctx.restore();
   }
 
-  function drawDroplet(time) {
-    if (!ctx) return;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, width, canvasHeight);
-    const centerX = width * .5 + drop.x;
-    const centerY = canvasHeight * .45 + drop.y;
-    const radius = Math.min(width, canvasHeight) * .245;
-    const speed = Math.hypot(drop.vx, drop.vy);
-    const wobble = Math.sin(drop.phase) * .035 + drop.pulse * Math.sin(drop.phase * 2.4) * .08;
-    const stretch = Math.min(.17, speed * .012 + drop.pulse * .08);
-
-    ctx.save();
-    ctx.globalAlpha = .4;
-    ctx.strokeStyle = 'rgba(97,226,240,.72)';
-    ctx.lineWidth = 1;
-    for (const ring of dropRings) {
-      const scale = 1 + ring.age * 2.4;
-      ctx.globalAlpha = Math.max(0, .5 - ring.age * .5);
-      ctx.beginPath();
-      ctx.ellipse(ring.x, canvasHeight * .82, radius * scale, radius * .16 * scale, 0, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-    ctx.restore();
-
-    ctx.save();
-    ctx.globalAlpha = .32;
-    const shadow = ctx.createRadialGradient(centerX, canvasHeight * .82, 0, centerX, canvasHeight * .82, radius * 1.25);
-    shadow.addColorStop(0, 'rgba(78,224,240,.42)');
-    shadow.addColorStop(1, 'rgba(78,224,240,0)');
-    ctx.fillStyle = shadow;
-    ctx.beginPath();
-    ctx.ellipse(centerX, canvasHeight * .82, radius * 1.25, radius * .22, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-
-    ctx.save();
-    ctx.translate(centerX, centerY);
-    ctx.rotate(Math.max(-.14, Math.min(.14, drop.vx * .014)));
-    ctx.scale(1 + wobble - stretch * .35, 1 - wobble + stretch);
-    const fill = ctx.createRadialGradient(-radius * .3, -radius * .48, radius * .05, 0, 0, radius * 1.25);
-    fill.addColorStop(0, 'rgba(233,255,255,.97)');
-    fill.addColorStop(.13, 'rgba(125,243,250,.96)');
-    fill.addColorStop(.52, 'rgba(43,168,235,.92)');
-    fill.addColorStop(1, 'rgba(42,64,183,.94)');
-    ctx.beginPath();
-    ctx.moveTo(0, -radius * 1.2);
-    ctx.bezierCurveTo(radius * .62, -radius * .64, radius * .9, -radius * .04, radius * .66, radius * .48);
-    ctx.bezierCurveTo(radius * .43, radius * .93, -radius * .43, radius * .93, -radius * .66, radius * .48);
-    ctx.bezierCurveTo(-radius * .9, -radius * .04, -radius * .62, -radius * .64, 0, -radius * 1.2);
-    ctx.closePath();
-    ctx.fillStyle = fill;
-    ctx.shadowColor = 'rgba(53,220,242,.62)';
-    ctx.shadowBlur = 24;
-    ctx.fill();
-    ctx.shadowBlur = 0;
-    ctx.strokeStyle = 'rgba(210,253,255,.82)';
-    ctx.lineWidth = 1.25;
-    ctx.stroke();
-
-    ctx.globalAlpha = .72;
-    ctx.strokeStyle = '#efffff';
-    ctx.lineWidth = Math.max(1.2, radius * .055);
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.arc(-radius * .17, -radius * .3, radius * .43, Math.PI * 1.08, Math.PI * 1.52);
-    ctx.stroke();
-    ctx.globalAlpha = .36;
-    ctx.fillStyle = '#fff';
-    ctx.beginPath();
-    ctx.arc(radius * .21, radius * .2, radius * .1, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-
-    ctx.save();
-    for (const particle of dropParticles) {
-      ctx.globalAlpha = Math.max(0, particle.life);
-      ctx.fillStyle = 'rgba(151,247,255,.9)';
-      ctx.beginPath();
-      ctx.arc(particle.x, particle.y, particle.r, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.restore();
-  }
-
-  function drawSelected(time) {
-    if (selectedStyle === 'droplet') drawDroplet(time);
-    else drawLiquid(time);
-  }
-
-  function stepDroplet(time) {
-    drop.vx = (drop.vx + (drop.tx - drop.x) * .075) * .82;
-    drop.vy = (drop.vy + (drop.ty - drop.y) * .075) * .82;
-    drop.x += drop.vx;
-    drop.y += drop.vy;
-    drop.phase += .09 + Math.min(.08, Math.hypot(drop.vx, drop.vy) * .006);
-    drop.pulse *= .925;
-    for (let i = dropParticles.length - 1; i >= 0; i--) {
-      const particle = dropParticles[i];
-      particle.vy += .055;
-      particle.x += particle.vx;
-      particle.y += particle.vy;
-      particle.life -= .022;
-      if (particle.life <= 0) dropParticles.splice(i, 1);
-    }
-    for (let i = dropRings.length - 1; i >= 0; i--) {
-      dropRings[i].age += .028;
-      if (dropRings[i].age >= 1) dropRings.splice(i, 1);
-    }
-    if (!dropTracking) {
-      drop.tx = Math.sin(time * .0007) * 2.2;
-      drop.ty = Math.cos(time * .0011) * 2.4;
-    }
-  }
+  function drawSelected(time) { drawLiquid(time); }
 
   function stepLiquid(time) {
     for (let substep = 0; substep < 2; substep++) {
@@ -5362,13 +5287,23 @@
       height[0] = height[1] * .72;
       height[samples - 1] = height[samples - 2] * .72;
     }
+    touchEnergy *= .94;
+    for (let i = splashParticles.length - 1; i >= 0; i--) {
+      const particle = splashParticles[i];
+      particle.vy += .13;
+      particle.x += particle.vx;
+      particle.y += particle.vy;
+      particle.life -= .026;
+      const sample = Math.max(0, Math.min(samples - 1, Math.round(particle.x / width * (samples - 1))));
+      if (particle.life <= 0 || particle.y >= surfaceY(sample) + 2) splashParticles.splice(i, 1);
+    }
     const idle = Math.round((Math.sin(time * .00031) * .38 + .5) * (samples - 1));
     velocity[idle] += Math.sin(time * .0011) * .006;
   }
 
   function frame(time) {
     if (!running) return;
-    if (selectedStyle === 'droplet') stepDroplet(time); else stepLiquid(time);
+    stepLiquid(time);
     drawSelected(time);
     requestAnimationFrame(frame);
   }
@@ -5387,10 +5322,20 @@
     const rect = canvas.getBoundingClientRect();
     const center = Math.max(1, Math.min(samples - 2, Math.round((clientX - rect.left) / rect.width * (samples - 1))));
     const radius = 10;
+    touchX = center / (samples - 1);
+    touchEnergy = Math.min(1, touchEnergy + Math.abs(strength) * .22);
     for (let offset = -radius; offset <= radius; offset++) {
       const index = center + offset;
       if (index <= 0 || index >= samples - 1) continue;
       velocity[index] += strength * Math.cos(offset / radius * Math.PI * .5);
+    }
+    if (Math.abs(strength) > 2.1 && splashParticles.length < 48) {
+      const x = center * width / (samples - 1);
+      const y = surfaceY(center) - 1;
+      for (let i = 0; i < 5; i++) {
+        const spread = (i - 2) * .46;
+        splashParticles.push({ x, y, vx:spread + Math.sin(i * 2.3) * .18, vy:-1.2 - Math.abs(strength) * .34 - (i % 2) * .45, r:.8 + (i % 3) * .45, life:.88 });
+      }
     }
     if (status) {
       status.textContent = 'Water surface disturbed';
@@ -5405,62 +5350,21 @@
     }
   }
 
-  function aimDroplet(clientX, clientY) {
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    dropTracking = true;
-    drop.tx = Math.max(-width * .16, Math.min(width * .16, (clientX - rect.left - rect.width * .5) * .28));
-    drop.ty = Math.max(-canvasHeight * .13, Math.min(canvasHeight * .13, (clientY - rect.top - rect.height * .45) * .2));
-  }
-
-  function reactDroplet(clientX, clientY, strong = true) {
-    if (!canvas || selectedStyle !== 'droplet') return;
-    aimDroplet(clientX, clientY);
-    drop.pulse = Math.max(drop.pulse, strong ? 1 : .45);
-    if (strong) {
-      drop.vy += 2.6;
-      dropRings.push({ age:0, x:width * .5 + drop.x });
-      const centerX = width * .5 + drop.x;
-      const centerY = canvasHeight * .45 + drop.y;
-      for (let i = 0; i < 7; i++) {
-        const angle = Math.PI * (1.08 + i / 7 * .84);
-        const speed = 1.1 + (i % 3) * .42;
-        dropParticles.push({ x:centerX, y:centerY, vx:Math.cos(angle) * speed, vy:Math.sin(angle) * speed - .5, r:1 + (i % 2), life:.85 });
-      }
-      if (status) {
-        status.textContent = 'Droplet response captured';
-        window.clearTimeout(statusTimer);
-        statusTimer = window.setTimeout(() => { status.textContent = 'Lab interface ready'; }, 900);
-      }
-    }
-    if (reduceMotion) {
-      for (let i = 0; i < 6; i++) stepDroplet(i * 16);
-      drawDroplet(performance.now());
-    } else {
-      startLiquid();
-    }
-  }
-
   function selectStyle(style, remember = true) {
-    const selected = style === 'orb' ? 'orb' : style === 'droplet' ? 'droplet' : 'liquid';
+    const selected = style === 'orb' ? 'orb' : 'liquid';
     selectedStyle = selected;
     menu.classList.toggle('is-orb', selected === 'orb');
     menu.classList.toggle('is-liquid', selected === 'liquid');
-    menu.classList.toggle('is-droplet', selected === 'droplet');
     styleButtons.forEach((button) => {
       button.setAttribute('aria-pressed', String(button.dataset.fluidStyle === selected));
     });
     if (canvas) {
       canvas.tabIndex = selected === 'orb' ? -1 : 0;
       canvas.setAttribute('aria-hidden', String(selected === 'orb'));
-      canvas.setAttribute('aria-label', selected === 'droplet'
-        ? 'A reactive water droplet. Move, tap, or drag to deform it.'
-        : 'The word Fluid partially filled with simulated water. Tap or drag across the letters to create waves.');
+      canvas.setAttribute('aria-label', 'The word Fluid partially filled with simulated water. Tap or drag across the letters to create waves.');
     }
-    if (readout) readout.textContent = selected === 'droplet' ? 'Elastic droplet · move + tap' : 'Live height field · touch + drag';
-    if (description) description.textContent = selected === 'droplet'
-      ? 'Move across the droplet to pull it with spring physics, then tap to make it wobble and shed tiny beads.'
-      : selected === 'orb'
+    if (readout) readout.textContent = 'Simulated water · tap + drag';
+    if (description) description.textContent = selected === 'orb'
         ? 'The original ambient water-orb menu remains available as a calmer visual alternative.'
         : 'Drag across the liquid letters to disturb the live surface, then enter the full PBF water and gravity-pour experiment.';
     if (selected !== 'orb') startLiquid(); else stopLiquid();
@@ -5478,34 +5382,34 @@
   canvas?.addEventListener('pointerdown', (event) => {
     canvas.setPointerCapture?.(event.pointerId);
     lastPointerY = event.clientY;
-    if (selectedStyle === 'droplet') reactDroplet(event.clientX, event.clientY, true);
-    else disturb(event.clientX, 3.2);
+    lastPointerX = event.clientX;
+    disturb(event.clientX, 3.2);
   });
   canvas?.addEventListener('pointermove', (event) => {
-    if (selectedStyle === 'droplet') {
-      aimDroplet(event.clientX, event.clientY);
-      if (canvas.hasPointerCapture?.(event.pointerId)) reactDroplet(event.clientX, event.clientY, false);
-      return;
-    }
     if (!canvas.hasPointerCapture?.(event.pointerId)) return;
     event.preventDefault();
     const vertical = Math.max(-4.5, Math.min(4.5, (lastPointerY - event.clientY) * .16));
+    const horizontal = Math.max(-2.6, Math.min(2.6, (event.clientX - lastPointerX) * .11));
     lastPointerY = event.clientY;
-    disturb(event.clientX, vertical || 1.15);
-  });
-  canvas?.addEventListener('pointerup', () => { dropTracking = false; });
-  canvas?.addEventListener('pointercancel', () => { dropTracking = false; });
-  canvas?.addEventListener('pointerleave', (event) => {
-    if (!canvas.hasPointerCapture?.(event.pointerId)) dropTracking = false;
+    lastPointerX = event.clientX;
+    disturb(event.clientX, Math.abs(vertical) > .18 ? vertical : horizontal || 1.15);
   });
   canvas?.addEventListener('keydown', (event) => {
     if (!['Enter', ' ', 'ArrowLeft', 'ArrowRight'].includes(event.key)) return;
     event.preventDefault();
     const rect = canvas.getBoundingClientRect();
     const x = event.key === 'ArrowLeft' ? rect.left + rect.width * .3 : event.key === 'ArrowRight' ? rect.left + rect.width * .7 : rect.left + rect.width * .5;
-    if (selectedStyle === 'droplet') reactDroplet(x, rect.top + rect.height * .45, true);
-    else disturb(x, 3.2);
+    disturb(x, 3.2);
   });
+
+  function demonstrateSurface() {
+    if (selectedStyle !== 'liquid' || reduceMotion) return;
+    const center = Math.round(samples * .52);
+    for (let offset = -9; offset <= 9; offset++) velocity[center + offset] -= 2.1 * Math.cos(offset / 9 * Math.PI * .5);
+    touchX = center / (samples - 1);
+    touchEnergy = .75;
+    startLiquid();
+  }
 
   function initializeMenu() {
     if (initialized) return;
@@ -5523,6 +5427,7 @@
       [1900, 'Lab interface ready']
     ];
     sequence.forEach(([delay, message]) => window.setTimeout(() => { status.textContent = message; }, delay));
+    window.setTimeout(demonstrateSurface, 2200);
   }
 
   if ('IntersectionObserver' in window) {

@@ -3358,7 +3358,7 @@
   .fluid-bubble.b1 { width:9%; height:9%; left:26%; bottom:17%; }
   .fluid-bubble.b2 { width:5%; height:5%; left:58%; bottom:24%; }
   .fluid-bubble.b3 { width:3%; height:3%; left:44%; bottom:11%; }
-  .fluid-lab-copy { position:relative; z-index:6; width:min(56%,430px); text-align:left; }
+  .fluid-lab-copy { position:relative; z-index:6; width:min(56%,430px); text-align:left; pointer-events:none; }
   .fluid-lab-status { display:inline-flex; align-items:center; gap:.48rem; margin-bottom:.7rem; color:#88dae5; font-size:.61rem; font-weight:700; letter-spacing:.17em; text-transform:uppercase; }
   .fluid-lab-status i { width:7px; height:7px; border-radius:50%; background:#42efbd; box-shadow:0 0 12px #42efbd; }
   .fluid-lab-title { margin:0; font-family:'JetBrains Mono',monospace; font-size:clamp(1.55rem,4.7vw,3.2rem); line-height:.96; letter-spacing:-.055em; text-transform:uppercase; text-shadow:0 0 28px rgba(34,211,238,.16); }
@@ -3366,7 +3366,7 @@
   .fluid-lab-description { margin:.85rem 0 1rem; max-width:390px; color:#91abb7; font-size:clamp(.68rem,1.5vw,.82rem); line-height:1.55; }
   .fluid-lab-tags { display:flex; flex-wrap:wrap; gap:.38rem; margin-bottom:1.05rem; }
   .fluid-lab-tags span { padding:.25rem .5rem; border:1px solid rgba(82,223,235,.24); border-radius:100px; color:#8fcbd4; background:rgba(2,15,22,.48); font-size:.54rem; letter-spacing:.08em; }
-  .fluid-lab-launch { display:inline-flex; align-items:center; justify-content:center; gap:.8rem; min-width:175px; padding:.78rem 1.15rem; border-radius:.55rem; border:1px solid rgba(99,238,246,.72); color:#031117; background:linear-gradient(100deg,#60e7ef,#7dd3fc 56%,#a5b4fc); font-size:.72rem; font-weight:900; letter-spacing:.16em; text-transform:uppercase; text-decoration:none; box-shadow:0 0 24px rgba(34,211,238,.17); touch-action:manipulation; transition:transform .18s ease,box-shadow .18s ease,filter .18s ease; }
+  .fluid-lab-launch { display:inline-flex; align-items:center; justify-content:center; gap:.8rem; min-width:175px; padding:.78rem 1.15rem; border-radius:.55rem; border:1px solid rgba(99,238,246,.72); color:#031117; background:linear-gradient(100deg,#60e7ef,#7dd3fc 56%,#a5b4fc); font-size:.72rem; font-weight:900; letter-spacing:.16em; text-transform:uppercase; text-decoration:none; box-shadow:0 0 24px rgba(34,211,238,.17); touch-action:manipulation; pointer-events:auto; transition:transform .18s ease,box-shadow .18s ease,filter .18s ease; }
   .fluid-lab-launch b { font-size:1rem; transition:transform .18s ease; }
   .fluid-lab-launch:hover,.fluid-lab-launch:focus-visible { transform:translateY(-2px); filter:brightness(1.08); box-shadow:0 8px 32px rgba(34,211,238,.3); outline:none; }
   .fluid-lab-launch:hover b,.fluid-lab-launch:focus-visible b { transform:translate(2px,-2px); }
@@ -3388,48 +3388,27 @@
   .fluid-lab-console span { display:flex; align-items:center; gap:.48rem; color:#64828e; font-size:.52rem; letter-spacing:.08em; text-transform:uppercase; }
   .fluid-lab-console i { width:5px; height:5px; border-radius:50%; background:#29444d; box-shadow:0 0 0 transparent; transition:background .3s ease,box-shadow .3s ease; }
   .fluid-lab-menu.is-awake .fluid-lab-console i { background:#42efbd; box-shadow:0 0 9px #42efbd; }
-  .fluid-lab-portal {
-    position:absolute; z-index:3; width:min(44vw,340px); aspect-ratio:1.22; right:clamp(.65rem,4vw,3.3rem); top:51%;
-    transform:translateY(-50%); opacity:1; cursor:crosshair; touch-action:manipulation;
-    filter:drop-shadow(0 22px 32px rgba(0,0,0,.48)); transition:opacity .45s ease,transform .45s ease;
+  .fluid-lab-liquid {
+    position:absolute; z-index:3; width:min(49vw,410px); height:min(75%,270px);
+    right:clamp(.25rem,2.8vw,2.4rem); top:50%; transform:translateY(-50%);
+    opacity:1; transition:opacity .4s ease,transform .4s ease;
   }
-  .fluid-lab-menu.is-orb .fluid-lab-portal { opacity:0; pointer-events:none; transform:translateY(-47%) scale(.94); }
-  .fluid-portal-frame {
-    position:absolute; inset:7% 2%; border-radius:50%; transform:rotateX(62deg);
-    border:2px solid rgba(133,246,255,.55); background:rgba(3,18,31,.82);
-    box-shadow:0 0 0 7px rgba(17,93,112,.13),0 0 0 9px rgba(120,236,245,.13),0 0 46px rgba(34,211,238,.31),inset 0 0 35px rgba(10,185,220,.18);
+  .fluid-lab-menu.is-orb .fluid-lab-liquid { opacity:0; pointer-events:none; transform:translateY(-47%) scale(.96); }
+  .fluid-type-canvas {
+    display:block; width:100%; height:100%; cursor:crosshair; touch-action:none;
+    filter:drop-shadow(0 14px 24px rgba(0,0,0,.42)) drop-shadow(0 0 22px rgba(35,213,239,.14));
   }
-  .fluid-portal-frame::before {
-    content:""; position:absolute; inset:6%; border-radius:50%; overflow:hidden;
-    background:
-      repeating-radial-gradient(ellipse at 50% 48%,transparent 0 13px,rgba(173,249,255,.22) 14px 15px,transparent 16px 27px),
-      radial-gradient(ellipse at 36% 30%,rgba(214,255,255,.48),transparent 18%),
-      radial-gradient(ellipse at 50% 55%,rgba(25,201,231,.46),rgba(18,75,153,.38) 43%,rgba(4,16,44,.96) 78%);
-    border:1px solid rgba(150,246,255,.48); box-shadow:inset 0 0 25px rgba(3,6,29,.78);
+  .fluid-type-readout {
+    position:absolute; left:50%; bottom:2%; transform:translateX(-50%); width:max-content; max-width:96%;
+    color:rgba(151,224,233,.72); font:700 .5rem 'JetBrains Mono',monospace;
+    letter-spacing:.14em; text-transform:uppercase; text-align:center; pointer-events:none;
   }
-  .fluid-portal-frame::after {
-    content:""; position:absolute; inset:9%; border-radius:50%; opacity:.48; mix-blend-mode:screen;
-    background:conic-gradient(from 40deg,transparent,rgba(126,244,255,.4),transparent 18%,rgba(110,143,255,.35),transparent 42%,rgba(158,248,255,.35),transparent 64%);
-  }
-  .fluid-portal-depth { position:absolute; inset:25% 12% 9%; border-radius:50%; border-bottom:4px solid rgba(91,215,237,.24); filter:blur(1px); }
-  .fluid-portal-label {
-    position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); z-index:2;
-    color:rgba(205,252,255,.74); font:700 .52rem 'JetBrains Mono',monospace; letter-spacing:.22em;
-    text-transform:uppercase; white-space:nowrap; text-shadow:0 0 13px rgba(85,235,246,.9); pointer-events:none;
-  }
-  .fluid-portal-ripple {
-    position:absolute; z-index:4; width:12px; height:6px; margin:-3px 0 0 -6px; border-radius:50%;
-    border:1px solid rgba(190,251,255,.9); box-shadow:0 0 9px rgba(80,231,248,.65); pointer-events:none;
-    animation:fluidPortalTap .9s ease-out forwards;
-  }
+  .fluid-type-readout::before { content:""; display:inline-block; width:22px; height:1px; margin:0 .45rem .18rem 0; background:#59e2ee; box-shadow:0 0 8px #59e2ee; }
   @media (prefers-reduced-motion:no-preference) {
     .fluid-lab-menu::before { animation:fluidGridDrift 11s linear infinite; }
     .fluid-lab-orb { animation:fluidOrbFloat 5.5s ease-in-out infinite; }
     .fluid-lab-orb::before { animation:fluidSurfaceA 4.2s ease-in-out infinite; }
     .fluid-lab-orb::after { animation:fluidSurfaceB 5s ease-in-out infinite reverse; }
-    .fluid-lab-portal { animation:fluidPortalFloat 6s ease-in-out infinite; }
-    .fluid-portal-frame::before { animation:fluidPortalWater 6.5s ease-in-out infinite; }
-    .fluid-portal-frame::after { animation:fluidPortalCaustic 8s linear infinite; }
     .fluid-bubble { animation:fluidBubbleRise 4s ease-in-out infinite; }
     .fluid-bubble.b2 { animation-delay:-1.4s; }.fluid-bubble.b3 { animation-delay:-2.6s; }
     .fluid-lab-status i { animation:fluidOnline 1.8s ease-in-out infinite; }
@@ -3444,17 +3423,13 @@
   @keyframes fluidBubbleRise { 0%,100%{transform:translateY(4px);opacity:.25} 50%{transform:translateY(-13px);opacity:.9} }
   @keyframes fluidOnline { 50%{opacity:.45;box-shadow:0 0 4px #42efbd} }
   @keyframes fluidConsoleReady { from{background:#29444d;box-shadow:0 0 0 transparent} to{background:#42efbd;box-shadow:0 0 9px #42efbd} }
-  @keyframes fluidPortalFloat { 0%,100%{transform:translateY(-50%) rotate(-1deg)} 50%{transform:translateY(calc(-50% - 7px)) rotate(1.2deg)} }
-  @keyframes fluidPortalWater { 0%,100%{transform:rotate(-1deg) scale(1)} 50%{transform:rotate(2deg) scale(1.025)} }
-  @keyframes fluidPortalCaustic { to{transform:rotate(360deg)} }
-  @keyframes fluidPortalTap { 0%{opacity:1;transform:scale(1)} 100%{opacity:0;transform:scale(16,9)} }
   @media (max-width:640px) {
     #fluidsim-viewport { min-height:350px; aspect-ratio:auto; }
     .fluid-lab-menu { align-items:flex-end; padding:1.3rem 1.15rem 1.45rem; }
     .fluid-lab-copy { width:100%; }
     .fluid-lab-orb { width:205px; right:-35px; top:36%; }
     .fluid-lab-menu.is-orb .fluid-lab-orb { opacity:.54; }
-    .fluid-lab-portal { width:225px; right:-42px; top:34%; opacity:.67; }
+    .fluid-lab-liquid { width:290px; height:145px; right:-42px; top:23%; opacity:.82; }
     .fluid-lab-description { max-width:75%; }
     .fluid-lab-tags { max-width:78%; }
     .fluid-lab-console { width:72%; }
@@ -5055,16 +5030,15 @@
       </div>
       <div class="algo-body" style="padding:0;">
         <div id="fluidsim-viewport">
-          <div class="fluid-lab-menu is-portal" aria-labelledby="fluid-lab-menu-title">
+          <div class="fluid-lab-menu is-liquid" aria-labelledby="fluid-lab-menu-title">
             <div class="fluid-lab-glow" aria-hidden="true"></div>
             <div class="fluid-lab-styles" role="group" aria-label="Start menu animation">
-              <button class="fluid-lab-style" type="button" data-fluid-style="portal" aria-pressed="true">Portal</button>
+              <button class="fluid-lab-style" type="button" data-fluid-style="liquid" aria-pressed="true">Liquid</button>
               <button class="fluid-lab-style" type="button" data-fluid-style="orb" aria-pressed="false">Orb</button>
             </div>
-            <div class="fluid-lab-portal" role="button" tabindex="0" aria-label="Interactive water portal. Tap to make a ripple.">
-              <div class="fluid-portal-frame" aria-hidden="true"></div>
-              <div class="fluid-portal-depth" aria-hidden="true"></div>
-              <span class="fluid-portal-label" aria-hidden="true">Touch the surface</span>
+            <div class="fluid-lab-liquid">
+              <canvas class="fluid-type-canvas" role="img" tabindex="0" aria-label="The word Fluid partially filled with simulated water. Tap or drag across the letters to create waves."></canvas>
+              <span class="fluid-type-readout" aria-hidden="true">Live height field · touch + drag</span>
             </div>
             <div class="fluid-lab-orb" aria-hidden="true">
               <span class="fluid-bubble b1"></span>
@@ -5074,7 +5048,7 @@
             <div class="fluid-lab-copy">
               <div class="fluid-lab-status"><i aria-hidden="true"></i> <span data-fluid-status>Initializing WebGPU</span></div>
               <h3 id="fluid-lab-menu-title" class="fluid-lab-title"><span>Fluid V8</span>Simulation Lab</h3>
-              <p class="fluid-lab-description">Particle-based water, GLB vessel containment, and a natural gravity-only pour—computed live on the GPU.</p>
+              <p class="fluid-lab-description">Drag across the liquid letters to disturb the live surface, then enter the full PBF water and gravity-pour experiment.</p>
               <div class="fluid-lab-tags" aria-label="Lab features">
                 <span>PBF WATER</span>
                 <span>GLB COLLISION</span>
@@ -5104,47 +5078,237 @@
   if (!menu) return;
 
   const styleButtons = [...menu.querySelectorAll('[data-fluid-style]')];
-  const portal = menu.querySelector('.fluid-lab-portal');
+  const canvas = menu.querySelector('.fluid-type-canvas');
+  const ctx = canvas?.getContext('2d', { alpha: true });
   const status = menu.querySelector('[data-fluid-status]');
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const waterCanvas = document.createElement('canvas');
+  const water = waterCanvas.getContext('2d', { alpha: true });
+  const samples = 128;
+  const height = new Float32Array(samples);
+  const velocity = new Float32Array(samples);
+  let width = 1;
+  let canvasHeight = 1;
+  let dpr = 1;
+  let visible = false;
+  let running = false;
+  let initialized = false;
+  let lastPointerY = 0;
+  let statusTimer = 0;
+
+  function resizeLiquid() {
+    if (!canvas || !ctx || !water) return;
+    const rect = canvas.getBoundingClientRect();
+    width = Math.max(1, rect.width);
+    canvasHeight = Math.max(1, rect.height);
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const pixelWidth = Math.max(1, Math.round(width * dpr));
+    const pixelHeight = Math.max(1, Math.round(canvasHeight * dpr));
+    if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+      canvas.width = waterCanvas.width = pixelWidth;
+      canvas.height = waterCanvas.height = pixelHeight;
+    }
+    drawLiquid(performance.now());
+  }
+
+  function textMetrics(context) {
+    const fontSize = Math.min(canvasHeight * .61, width / 3.16);
+    context.font = `900 ${fontSize}px "Arial Black", "JetBrains Mono", sans-serif`;
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.lineJoin = 'round';
+    return { fontSize, centerX: width * .5, centerY: canvasHeight * .47 };
+  }
+
+  function surfaceY(index) {
+    return canvasHeight * .49 + height[Math.max(0, Math.min(samples - 1, index))];
+  }
+
+  function drawLiquid(time) {
+    if (!ctx || !water) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    water.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, width, canvasHeight);
+    water.clearRect(0, 0, width, canvasHeight);
+    water.globalCompositeOperation = 'source-over';
+
+    const metrics = textMetrics(ctx);
+    textMetrics(water);
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(5,28,42,.7)';
+    ctx.strokeStyle = 'rgba(105,228,239,.28)';
+    ctx.lineWidth = Math.max(1.2, metrics.fontSize * .018);
+    ctx.shadowColor = 'rgba(32,211,235,.35)';
+    ctx.shadowBlur = 18;
+    ctx.fillText('FLUID', metrics.centerX, metrics.centerY);
+    ctx.strokeText('FLUID', metrics.centerX, metrics.centerY);
+    ctx.restore();
+
+    const gradient = water.createLinearGradient(0, canvasHeight * .34, 0, canvasHeight * .9);
+    gradient.addColorStop(0, 'rgba(153,248,255,.92)');
+    gradient.addColorStop(.12, 'rgba(62,218,239,.94)');
+    gradient.addColorStop(.56, 'rgba(32,124,224,.9)');
+    gradient.addColorStop(1, 'rgba(31,53,153,.96)');
+    water.beginPath();
+    water.moveTo(0, surfaceY(0));
+    for (let i = 1; i < samples; i++) water.lineTo(i * width / (samples - 1), surfaceY(i));
+    water.lineTo(width, canvasHeight);
+    water.lineTo(0, canvasHeight);
+    water.closePath();
+    water.fillStyle = gradient;
+    water.fill();
+
+    water.beginPath();
+    water.moveTo(0, surfaceY(0));
+    for (let i = 1; i < samples; i++) water.lineTo(i * width / (samples - 1), surfaceY(i));
+    water.strokeStyle = 'rgba(226,255,255,.95)';
+    water.lineWidth = 1.4;
+    water.shadowColor = '#67e8f9';
+    water.shadowBlur = 9;
+    water.stroke();
+    water.shadowBlur = 0;
+
+    water.save();
+    water.globalAlpha = .23;
+    water.strokeStyle = '#c6fbff';
+    water.lineWidth = 1;
+    for (let band = 0; band < 4; band++) {
+      water.beginPath();
+      for (let x = -10; x <= width + 10; x += 8) {
+        const y = canvasHeight * (.61 + band * .075) + Math.sin(x * .045 + time * .0017 + band) * (3 + band);
+        if (x < 0) water.moveTo(x, y); else water.lineTo(x, y);
+      }
+      water.stroke();
+    }
+    water.restore();
+
+    water.fillStyle = 'rgba(218,253,255,.5)';
+    water.strokeStyle = 'rgba(233,255,255,.7)';
+    for (let i = 0; i < 11; i++) {
+      const x = ((i * 73) % 101) / 101 * width;
+      const phase = (time * (.000045 + (i % 3) * .000012) + i * .137) % 1;
+      const y = canvasHeight * .88 - phase * canvasHeight * .37;
+      const radius = 1 + (i % 3) * .75;
+      water.beginPath();
+      water.arc(x, y, radius, 0, Math.PI * 2);
+      water.fill();
+      water.stroke();
+    }
+
+    water.globalCompositeOperation = 'destination-in';
+    water.fillStyle = '#fff';
+    water.fillText('FLUID', metrics.centerX, metrics.centerY);
+    water.globalCompositeOperation = 'source-over';
+    ctx.drawImage(waterCanvas, 0, 0, width, canvasHeight);
+
+    ctx.save();
+    textMetrics(ctx);
+    ctx.strokeStyle = 'rgba(185,249,255,.72)';
+    ctx.lineWidth = Math.max(1, metrics.fontSize * .012);
+    ctx.shadowColor = 'rgba(72,226,243,.7)';
+    ctx.shadowBlur = 7;
+    ctx.strokeText('FLUID', metrics.centerX, metrics.centerY);
+    ctx.restore();
+  }
+
+  function stepLiquid(time) {
+    for (let substep = 0; substep < 2; substep++) {
+      for (let i = 1; i < samples - 1; i++) {
+        const curvature = height[i - 1] + height[i + 1] - 2 * height[i];
+        velocity[i] = Math.max(-6, Math.min(6, (velocity[i] + curvature * .085) * .985));
+      }
+      for (let i = 1; i < samples - 1; i++) {
+        height[i] = Math.max(-18, Math.min(18, height[i] + velocity[i]));
+      }
+      height[0] = height[1] * .72;
+      height[samples - 1] = height[samples - 2] * .72;
+    }
+    const idle = Math.round((Math.sin(time * .00031) * .38 + .5) * (samples - 1));
+    velocity[idle] += Math.sin(time * .0011) * .006;
+  }
+
+  function frame(time) {
+    if (!running) return;
+    stepLiquid(time);
+    drawLiquid(time);
+    requestAnimationFrame(frame);
+  }
+
+  function startLiquid() {
+    resizeLiquid();
+    if (!visible || reduceMotion || running || menu.classList.contains('is-orb')) return;
+    running = true;
+    requestAnimationFrame(frame);
+  }
+
+  function stopLiquid() { running = false; }
+
+  function disturb(clientX, strength = 2.8) {
+    if (!canvas || menu.classList.contains('is-orb')) return;
+    const rect = canvas.getBoundingClientRect();
+    const center = Math.max(1, Math.min(samples - 2, Math.round((clientX - rect.left) / rect.width * (samples - 1))));
+    const radius = 10;
+    for (let offset = -radius; offset <= radius; offset++) {
+      const index = center + offset;
+      if (index <= 0 || index >= samples - 1) continue;
+      velocity[index] += strength * Math.cos(offset / radius * Math.PI * .5);
+    }
+    if (status) {
+      status.textContent = 'Water surface disturbed';
+      window.clearTimeout(statusTimer);
+      statusTimer = window.setTimeout(() => { status.textContent = 'Lab interface ready'; }, 900);
+    }
+    if (reduceMotion) {
+      for (let i = 0; i < 8; i++) stepLiquid(i * 16);
+      drawLiquid(performance.now());
+    } else {
+      startLiquid();
+    }
+  }
 
   function selectStyle(style, remember = true) {
-    const selected = style === 'orb' ? 'orb' : 'portal';
+    const selected = style === 'orb' ? 'orb' : 'liquid';
     menu.classList.toggle('is-orb', selected === 'orb');
-    menu.classList.toggle('is-portal', selected === 'portal');
+    menu.classList.toggle('is-liquid', selected === 'liquid');
     styleButtons.forEach((button) => {
       button.setAttribute('aria-pressed', String(button.dataset.fluidStyle === selected));
     });
+    if (canvas) {
+      canvas.tabIndex = selected === 'liquid' ? 0 : -1;
+      canvas.setAttribute('aria-hidden', String(selected !== 'liquid'));
+    }
+    if (selected === 'liquid') startLiquid(); else stopLiquid();
     if (remember) {
       try { localStorage.setItem('fluid-lab-menu-style', selected); } catch (_) {}
     }
   }
 
-  let savedStyle = 'portal';
-  try { savedStyle = localStorage.getItem('fluid-lab-menu-style') || 'portal'; } catch (_) {}
+  let savedStyle = 'liquid';
+  try { savedStyle = localStorage.getItem('fluid-lab-menu-style') || 'liquid'; } catch (_) {}
   selectStyle(savedStyle, false);
   styleButtons.forEach((button) => button.addEventListener('click', () => selectStyle(button.dataset.fluidStyle)));
 
-  function addRipple(clientX, clientY) {
-    if (!portal || reduceMotion || menu.classList.contains('is-orb')) return;
-    const rect = portal.getBoundingClientRect();
-    const ripple = document.createElement('i');
-    ripple.className = 'fluid-portal-ripple';
-    ripple.style.left = `${clientX - rect.left}px`;
-    ripple.style.top = `${clientY - rect.top}px`;
-    portal.appendChild(ripple);
-    ripple.addEventListener('animationend', () => ripple.remove(), { once: true });
-  }
-
-  portal?.addEventListener('pointerdown', (event) => addRipple(event.clientX, event.clientY));
-  portal?.addEventListener('keydown', (event) => {
-    if (event.key !== 'Enter' && event.key !== ' ') return;
+  canvas?.addEventListener('pointerdown', (event) => {
+    canvas.setPointerCapture?.(event.pointerId);
+    lastPointerY = event.clientY;
+    disturb(event.clientX, 3.2);
+  });
+  canvas?.addEventListener('pointermove', (event) => {
+    if (!canvas.hasPointerCapture?.(event.pointerId)) return;
     event.preventDefault();
-    const rect = portal.getBoundingClientRect();
-    addRipple(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    const vertical = Math.max(-4.5, Math.min(4.5, (lastPointerY - event.clientY) * .16));
+    lastPointerY = event.clientY;
+    disturb(event.clientX, vertical || 1.15);
+  });
+  canvas?.addEventListener('keydown', (event) => {
+    if (!['Enter', ' ', 'ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+    event.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const x = event.key === 'ArrowLeft' ? rect.left + rect.width * .3 : event.key === 'ArrowRight' ? rect.left + rect.width * .7 : rect.left + rect.width * .5;
+    disturb(x, 3.2);
   });
 
-  let initialized = false;
   function initializeMenu() {
     if (initialized) return;
     initialized = true;
@@ -5165,14 +5329,24 @@
 
   if ('IntersectionObserver' in window) {
     const observer = new IntersectionObserver((entries) => {
-      if (!entries.some((entry) => entry.isIntersecting)) return;
-      observer.disconnect();
-      initializeMenu();
+      visible = entries.some((entry) => entry.isIntersecting);
+      if (visible) {
+        initializeMenu();
+        startLiquid();
+      } else {
+        stopLiquid();
+      }
     }, { threshold: 0.22 });
     observer.observe(menu);
   } else {
+    visible = true;
     initializeMenu();
+    startLiquid();
   }
+
+  if ('ResizeObserver' in window && canvas) new ResizeObserver(resizeLiquid).observe(canvas);
+  else window.addEventListener('resize', resizeLiquid, { passive: true });
+  resizeLiquid();
 })();
 </script>
 

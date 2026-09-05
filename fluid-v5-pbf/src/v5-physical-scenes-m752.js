@@ -205,7 +205,7 @@ const uni=dev.createBuffer({label:'fluidV5M752SceneUniform',size:96,usage:GPUBuf
 const F=new Float32Array(24), U32=new Uint32Array(F.buffer);
 
 const shuffleWGSL=`
-struct S { meta:vec4u }
+struct S { info:vec4u }
 @group(0) @binding(0) var<uniform> U:S;
 @group(0) @binding(1) var<storage,read> pos:array<vec4f>;
 @group(0) @binding(2) var<storage,read> vel:array<vec4f>;
@@ -215,8 +215,8 @@ struct S { meta:vec4u }
 @group(0) @binding(6) var<storage,read_write> outPred:array<vec4f>;
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid:vec3u){
-  let i=gid.x;let n=U.meta.x;if(i>=n||n==0u){return;}
-  let j=(i+U.meta.y)%n;
+  let i=gid.x;let n=U.info.x;if(i>=n||n==0u){return;}
+  let j=(i+U.info.y)%n;
   outPos[j]=pos[i];outVel[j]=vel[i];outPred[j]=pred[i];
 }`;
 const shuffleMod=dev.createShaderModule({code:shuffleWGSL,label:'fluidV5M752DrainShuffleWGSL'});

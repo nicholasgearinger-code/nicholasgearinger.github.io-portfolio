@@ -1,5 +1,7 @@
 // Fluid V8 M8.9.0 hotfix — standards GLB jug replacement.
-// Three.js decodes GLB/Draco/Meshopt only; rendering stays in the existing native WebGPU vessel pass.
+// The bundled jug is an uncompressed GLB 2.0 asset, so decode it locally instead
+// of waiting on Three.js/Draco/Meshopt CDNs during mobile startup. Rendering stays
+// in the existing native WebGPU vessel pass.
 import {dev,queue,format,pitcher,scene} from './v5-pitcher-fluid-physics-m872.js';
 if(!dev||!queue||!pitcher||!scene)throw new Error('M8.9.0 jug runtime unavailable');
 
@@ -7,12 +9,6 @@ const phase=new URL(import.meta.url).searchParams.has('post')?'post':'pre';
 const KEY='__v5M890JugState';
 const asset=new URL('../assets/glass_water_jug_high_poly.glb',import.meta.url);
 const q=new URLSearchParams(location.search);
-
-const THREE_URL='https://esm.sh/three@0.180.0';
-const GLTF_URL='https://esm.sh/three@0.180.0/examples/jsm/loaders/GLTFLoader.js';
-const DRACO_URL='https://esm.sh/three@0.180.0/examples/jsm/loaders/DRACOLoader.js';
-const MESHOPT_URL='https://esm.sh/three@0.180.0/examples/jsm/libs/meshopt_decoder.module.js';
-const DRACO_DECODER='https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/libs/draco/gltf/';
 
 function rawBounds(a){
   const lo=[Infinity,Infinity,Infinity],hi=[-Infinity,-Infinity,-Infinity];
@@ -62,48 +58,105 @@ function fitToPitcher(src){
   return{data:out,sourceExt:b.ext,fittedExt:f.ext,targetH,yaw,bodyCenter:[bodyX,bodyZ],alignment:'lower-bowl-extents'};
 }
 
-async function decodeGLB(){
-  const [THREE,{GLTFLoader},{DRACOLoader},{MeshoptDecoder}]=await Promise.all([
-    import(THREE_URL),import(GLTF_URL),import(DRACO_URL),import(MESHOPT_URL)
+const IDENTITY=new Float64Array([1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]);
+function multiply4(a,b){
+  const out=new Float64Array(16);
+  for(let col=0;col<4;col++)for(let row=0;row<4;row++){
+    let sum=0;for(let k=0;k<4;k++)sum+=a[k*4+row]*b[col*4+k];out[col*4+row]=sum;
+  }
+  return out;
+}
+function nodeMatrix(node){
+  if(node.matrix?.length===16)return Float64Array.from(node.matrix);
+  const [tx,ty,tz]=node.translation||[0,0,0], [x,y,z,w]=node.rotation||[0,0,0,1], [sx,sy,sz]=node.scale||[1,1,1];
+  const xx=x*x,yy=y*y,zz=z*z,xy=x*y,xz=x*z,yz=y*z,wx=w*x,wy=w*y,wz=w*z;
+  return new Float64Array([
+    (1-2*(yy+zz))*sx,2*(xy+wz)*sx,2*(xz-wy)*sx,0,
+    2*(xy-wz)*sy,(1-2*(xx+zz))*sy,2*(yz+wx)*sy,0,
+    2*(xz+wy)*sz,2*(yz-wx)*sz,(1-2*(xx+yy))*sz,0,
+    tx,ty,tz,1
   ]);
-  const r=await fetch(asset,{cache:'force-cache'});if(!r.ok)throw new Error(`jug HTTP ${r.status}`);
-  const ab=await r.arrayBuffer();
-  const loader=new GLTFLoader();
-  const draco=new DRACOLoader();
-  draco.setDecoderPath(DRACO_DECODER);draco.setDecoderConfig({type:'wasm'});
-  loader.setDRACOLoader(draco);loader.setMeshoptDecoder(MeshoptDecoder);
-  const gltf=await new Promise((resolve,reject)=>loader.parse(ab,new URL('.',asset).href,resolve,reject));
-  gltf.scene.updateMatrixWorld(true);
-  const vals=[];let meshes=0,triangles=0;
-  const p=new THREE.Vector3(),n=new THREE.Vector3(),normalMat=new THREE.Matrix3();
-  gltf.scene.traverse(obj=>{
-    if(!obj.isMesh||!obj.geometry?.attributes?.position)return;
-    const g=obj.geometry,pos=g.attributes.position,nor=g.attributes.normal,idx=g.index;
-    normalMat.getNormalMatrix(obj.matrixWorld);meshes++;
-    const count=idx?idx.count:pos.count;
-    const emit=i=>{
-      p.fromBufferAttribute(pos,i).applyMatrix4(obj.matrixWorld);
-      if(nor)n.fromBufferAttribute(nor,i).applyMatrix3(normalMat).normalize();else n.set(0,1,0);
-      vals.push(p.x,p.y,p.z,n.x,n.y,n.z);
-    };
-    if(nor){
-      for(let k=0;k<count;k++)emit(idx?idx.getX(k):k);
-      triangles+=Math.floor(count/3);
-    }else{
-      for(let k=0;k+2<count;k+=3){
-        const ia=idx?idx.getX(k):k,ib=idx?idx.getX(k+1):k+1,ic=idx?idx.getX(k+2):k+2;
-        const a=new THREE.Vector3().fromBufferAttribute(pos,ia).applyMatrix4(obj.matrixWorld);
-        const b=new THREE.Vector3().fromBufferAttribute(pos,ib).applyMatrix4(obj.matrixWorld);
-        const c=new THREE.Vector3().fromBufferAttribute(pos,ic).applyMatrix4(obj.matrixWorld);
-        const fn=new THREE.Vector3().subVectors(b,a).cross(new THREE.Vector3().subVectors(c,a)).normalize();
-        for(const v of [a,b,c])vals.push(v.x,v.y,v.z,fn.x,fn.y,fn.z);
-        triangles++;
-      }
+}
+function accessorReader(json,bin,index){
+  const a=json.accessors?.[index],view=json.bufferViews?.[a?.bufferView];
+  if(!a||!view)throw new Error(`jug accessor ${index} is incomplete`);
+  if(a.sparse)throw new Error('sparse GLB accessors are not supported by the local jug decoder');
+  const componentBytes={5120:1,5121:1,5122:2,5123:2,5125:4,5126:4}[a.componentType];
+  const components={SCALAR:1,VEC2:2,VEC3:3,VEC4:4,MAT2:4,MAT3:9,MAT4:16}[a.type];
+  if(!componentBytes||!components)throw new Error(`unsupported jug accessor ${a.componentType}/${a.type}`);
+  const stride=view.byteStride||componentBytes*components;
+  const start=(view.byteOffset||0)+(a.byteOffset||0);
+  const data=new DataView(bin.buffer,bin.byteOffset,bin.byteLength);
+  const readRaw=(offset)=>{
+    if(a.componentType===5120)return data.getInt8(offset);
+    if(a.componentType===5121)return data.getUint8(offset);
+    if(a.componentType===5122)return data.getInt16(offset,true);
+    if(a.componentType===5123)return data.getUint16(offset,true);
+    if(a.componentType===5125)return data.getUint32(offset,true);
+    return data.getFloat32(offset,true);
+  };
+  const read=(i,k=0)=>{
+    let value=readRaw(start+i*stride+k*componentBytes);
+    if(a.normalized&&a.componentType!==5126){
+      if(a.componentType===5120)value=Math.max(value/127,-1);else if(a.componentType===5121)value/=255;
+      else if(a.componentType===5122)value=Math.max(value/32767,-1);else if(a.componentType===5123)value/=65535;
+      else if(a.componentType===5125)value/=4294967295;
     }
-  });
-  draco.dispose();
+    return value;
+  };
+  return{count:a.count,components,read};
+}
+function parseGLB(ab){
+  const data=new DataView(ab);if(data.byteLength<20||data.getUint32(0,true)!==0x46546c67)throw new Error('jug is not a GLB file');
+  if(data.getUint32(4,true)!==2)throw new Error(`unsupported GLB version ${data.getUint32(4,true)}`);
+  let offset=12,json=null,bin=null;
+  while(offset+8<=data.byteLength){
+    const length=data.getUint32(offset,true),type=data.getUint32(offset+4,true),start=offset+8,end=start+length;
+    if(end>data.byteLength)throw new Error('truncated GLB chunk');
+    if(type===0x4e4f534a)json=JSON.parse(new TextDecoder().decode(new Uint8Array(ab,start,length)).replace(/\0+$/,'').trim());
+    else if(type===0x004e4942)bin=new Uint8Array(ab,start,length);
+    offset=end;
+  }
+  if(!json||!bin)throw new Error('GLB is missing JSON or binary data');
+  const required=json.extensionsRequired||[];
+  if(required.includes('KHR_draco_mesh_compression')||required.includes('EXT_meshopt_compression'))throw new Error('compressed jug requires an offline decoder');
+  const vals=[];let meshes=0,triangles=0;
+  const emitPrimitive=(primitive,world)=>{
+    if((primitive.mode??4)!==4)throw new Error('jug primitive is not a triangle list');
+    const pos=accessorReader(json,bin,primitive.attributes?.POSITION);
+    const nor=primitive.attributes?.NORMAL===undefined?null:accessorReader(json,bin,primitive.attributes.NORMAL);
+    const idx=primitive.indices===undefined?null:accessorReader(json,bin,primitive.indices);
+    const count=idx?.count||pos.count;meshes++;
+    for(let k=0;k<count;k++){
+      const i=idx?idx.read(k):k,x=pos.read(i,0),y=pos.read(i,1),z=pos.read(i,2);
+      const px=world[0]*x+world[4]*y+world[8]*z+world[12];
+      const py=world[1]*x+world[5]*y+world[9]*z+world[13];
+      const pz=world[2]*x+world[6]*y+world[10]*z+world[14];
+      let nx=0,ny=1,nz=0;
+      if(nor){
+        const ax=nor.read(i,0),ay=nor.read(i,1),az=nor.read(i,2);
+        nx=world[0]*ax+world[4]*ay+world[8]*az;
+        ny=world[1]*ax+world[5]*ay+world[9]*az;
+        nz=world[2]*ax+world[6]*ay+world[10]*az;
+        const length=Math.hypot(nx,ny,nz)||1;nx/=length;ny/=length;nz/=length;
+      }
+      vals.push(px,py,pz,nx,ny,nz);
+    }
+    triangles+=Math.floor(count/3);
+  };
+  const walk=(index,parent)=>{
+    const node=json.nodes?.[index];if(!node)return;
+    const world=multiply4(parent,nodeMatrix(node));
+    if(node.mesh!==undefined)for(const primitive of json.meshes?.[node.mesh]?.primitives||[])emitPrimitive(primitive,world);
+    for(const child of node.children||[])walk(child,world);
+  };
+  const sceneDef=json.scenes?.[json.scene||0];for(const root of sceneDef?.nodes||[])walk(root,IDENTITY);
   if(!vals.length)throw new Error('decoded GLB contains no renderable triangles');
   return{data:new Float32Array(vals),meshes,triangles};
+}
+async function decodeGLB(){
+  const r=await fetch(asset,{cache:'force-cache'});if(!r.ok)throw new Error(`jug HTTP ${r.status}`);
+  return parseGLB(await r.arrayBuffer());
 }
 
 async function build(){
@@ -156,7 +209,7 @@ struct O{@builtin(position) p:vec4f,@location(0) w:vec3f,@location(1) n:vec3f}
   const ub=dev.createBuffer({label:'m890JugUniform',size:112,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
   const bg=dev.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:ub}}]});
   const F=new Float32Array(28);
-  const state={ready:true,vb,count:g.data.length/6,pipe,ub,bg,F,g,draws:0,meshes:decoded.meshes,triangles:decoded.triangles,decoder:'GLTFLoader+Draco+Meshopt'};
+  const state={ready:true,vb,count:g.data.length/6,pipe,ub,bg,F,g,draws:0,meshes:decoded.meshes,triangles:decoded.triangles,decoder:'native-glb2'};
   state.prepare=({vp,eye})=>{
     F.fill(0);F.set(vp,0);F[16]=eye[0];F[17]=eye[1];F[18]=eye[2];F[19]=1;
     F[20]=-.35;F[21]=.82;F[22]=.45;F[24]=pitcher.cx;F[25]=pitcher.cy;F[26]=pitcher.cz;F[27]=pitcher.angle;
@@ -197,6 +250,6 @@ if(phase==='pre'){
 }
 
 window.__fluidV5Version='8.9.0';
-window.__fluidV5Build='M8.9.0 STANDARDS GLB JUG REPLACEMENT / WGSL HOTFIX / DRACO + MESHOPT / M8.8.8 CLEAN CATCH';
+window.__fluidV5Build='M8.9.0 LOCAL GLB JUG / ZERO DECODER CDNS / M8.8.8 CLEAN CATCH';
 window.__v5M890={online:true,phase,modelReady:!!S?.ready,error:S?.error||null,get vertexCount(){return S?.count||0},get draws(){return S?.draws||0},get meshes(){return S?.meshes||0},get triangles(){return S?.triangles||0}};
 document.title='Fluid V8 · M8.9.0 High-Poly Jug Replacement';

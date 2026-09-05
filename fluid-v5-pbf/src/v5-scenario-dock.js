@@ -36,6 +36,39 @@ const descriptions={
   pour:'Water starts at rest inside the measured GLB jug, then pours into the glass under world gravity only.',
 };
 
+// Each common-water scene gets a close, centered portrait-safe camera. GLB Pour
+// keeps its separately calibrated vessel camera and is never touched here.
+const cameraPresets={
+  pool:{az:-.72,el:.43,dist:3.05,y:.66},
+  wave:{az:-.92,el:.35,dist:3.02,y:.70},
+  dam:{az:-.78,el:.40,dist:2.95,y:.69},
+  rain:{az:-.70,el:.34,dist:3.18,y:.93},
+  faucet:{az:-.66,el:.35,dist:3.12,y:.91},
+  waterfall:{az:-.78,el:.34,dist:3.16,y:.88},
+  paddle:{az:-.91,el:.37,dist:3.02,y:.70},
+  whirlpool:{az:-.72,el:.62,dist:2.92,y:.64},
+  fountain:{az:-.70,el:.38,dist:3.10,y:.85},
+  drain:{az:-.72,el:.58,dist:2.92,y:.62},
+};
+let cameraMotion=0;
+function frameCamera(name,immediate=false){
+  const cam=window.__cam,preset=cameraPresets[name];if(!cam||!preset||name==='pour')return;
+  const box=window.__sim?.params?.box||[1.9,2.5,1.25];
+  const goal={az:preset.az,el:preset.el,dist:Math.max(preset.dist,box[0]*1.52),target:[box[0]*.5,preset.y,box[2]*.5]};
+  const token=++cameraMotion;
+  if(immediate){cam.az=goal.az;cam.el=goal.el;cam.dist=goal.dist;cam.target=[...goal.target];return;}
+  const from={az:Number(cam.az)||goal.az,el:Number(cam.el)||goal.el,dist:Number(cam.dist)||goal.dist,target:[...(cam.target||goal.target)]};
+  const started=performance.now(),duration=420;
+  const tick=now=>{
+    if(token!==cameraMotion)return;
+    const u=Math.min(1,(now-started)/duration),t=1-Math.pow(1-u,3);
+    cam.az=from.az+(goal.az-from.az)*t;cam.el=from.el+(goal.el-from.el)*t;cam.dist=from.dist+(goal.dist-from.dist)*t;
+    cam.target=goal.target.map((value,i)=>(from.target[i]??value)+(value-(from.target[i]??value))*t);
+    if(u<1)requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
 document.getElementById('fluidScenarioStyle')?.remove();
 const style=document.createElement('style');style.id='fluidScenarioStyle';style.textContent=`
 #fluidScenarioDock{position:fixed;z-index:240;left:50%;bottom:max(12px,env(safe-area-inset-bottom));width:min(760px,calc(100vw - 24px));transform:translateX(-50%);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#dffcff;pointer-events:none}
@@ -73,13 +106,16 @@ function sync(){
   dock.querySelector('.fsdPause').textContent=window.__ui?.paused?'RESUME':'PAUSE';
 }
 function navigate(name){
-  const next=new URLSearchParams(location.search);next.set('scenario',name);next.set('lab','9001');
+  // Crossing between the calibrated Pour runtime and the common lab must start
+  // with a clean query. Carrying Pour's small box/camera/particle values into Pool
+  // was what made the basin appear tiny and off-centre.
+  const next=new URLSearchParams();next.set('scenario',name);next.set('lab','9002');
   location.assign(location.pathname+'?'+next.toString()+location.hash);
 }
 function choose(name){
   if(name==='pour'||active==='pour'||!window.__v5M830Scenes?.choose){navigate(name);return}
-  window.__v5M830Scenes.choose(name);active=name;
-  const next=new URLSearchParams(location.search);next.set('scenario',name);next.set('lab','9001');history.replaceState(null,'',location.pathname+'?'+next.toString()+location.hash);
+  window.__v5M830Scenes.choose(name);active=name;frameCamera(name);
+  const next=new URLSearchParams(location.search);next.set('scenario',name);next.set('lab','9002');history.replaceState(null,'',location.pathname+'?'+next.toString()+location.hash);
   sync();dock.classList.remove('open');dock.querySelector('.fsdToggle').setAttribute('aria-expanded','false');
 }
 dock.querySelectorAll('[data-scene]').forEach(button=>button.onclick=()=>choose(button.dataset.scene));
@@ -89,7 +125,7 @@ dock.querySelector('.fsdClose').onclick=()=>setOpen(false);
 dock.querySelector('.fsdPause').onclick=()=>{document.getElementById('pauseV4')?.click();setTimeout(sync,40)};
 dock.querySelector('.fsdReset').onclick=()=>{
   if(active==='pour')window.__v5M899ProvenPour?.reset?.();
-  else if(window.__v5M830Scenes?.choose)window.__v5M830Scenes.choose(active);
+  else if(window.__v5M830Scenes?.choose){window.__v5M830Scenes.choose(active);frameCamera(active);}
   else document.getElementById('resetV4')?.click();
   setOpen(false);
 };
@@ -106,7 +142,10 @@ dock.querySelector('.fsdInteract').onclick=()=>{
 };
 
 if(window.__v5M899ProvenPour)active='pour';
-else if(window.__v5M830Scenes?.active)active=window.__v5M830Scenes.active;
-sync();setInterval(sync,450);
-window.__fluidScenarioDock={online:true,choose,get active(){return active},open:()=>setOpen(true)};
+else if(window.__v5M830Scenes?.choose){
+  active=valid.has(query.get('scenario'))?query.get('scenario'):'pool';
+  window.__v5M830Scenes.choose(active);
+}
+sync();frameCamera(active,true);setInterval(sync,450);
+window.__fluidScenarioDock={online:true,choose,frameCamera,get active(){return active},open:()=>setOpen(true)};
 console.info('[Fluid Simulation Lab M9.0] shared scenario dock online; DOM controls only, added GPU work 0.');

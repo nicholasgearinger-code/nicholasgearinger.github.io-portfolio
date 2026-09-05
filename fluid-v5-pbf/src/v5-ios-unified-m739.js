@@ -15,7 +15,7 @@ history.replaceState(null,'',location.pathname+'?'+q.toString()+location.hash);
 
 // main.js loads the pinned Particles4All core. Its first RAF is only scheduled during module
 // evaluation, so this continuation runs before that first RAF and can install the shim in time.
-await import('./main.js');
+await import('./main.js?v=maincam1');
 
 const sim = window.__sim;
 const ui = window.__ui;

@@ -37,7 +37,7 @@ const defaults = {
   ssfrradius: '0.76', ssfrdelta: '8.6', ssfrmu: '1.04',
   ssfrthickr: '1.82', ssfrthick: '0.82', ssfrthickblur: quality.ssfrthickblur,
   ior: '1.333', absorption: '0.68', transmit: '0.27 0.66 0.91', roughness: '0.032',
-  camera: '-0.72 0.49 4.15 0.95 1.00 0.625', floorplane: '1', cubemap: '', v4ui: '1'
+  camera: '-0.72 0.43 3.05 0.95 0.66 0.625', floorplane: '1', cubemap: '', v4ui: '1'
 };
 for (const [k, v] of Object.entries(defaults)) if (!q.has(k)) q.set(k, v);
 history.replaceState(null, '', location.pathname + '?' + q.toString() + location.hash);
@@ -116,7 +116,7 @@ let opticsEnabled = false;
 try { opticsEnabled = installOptics(); }
 catch (err) { console.error('[Fluid V4 optics]', err); }
 
-const CAMERA = { az: -0.72, el: 0.49, dist: 4.15, target: [0.95, 1.00, 0.625] };
+const CAMERA = { az: -0.72, el: 0.43, dist: 3.05, target: [0.95, 0.66, 0.625] };
 function resetCamera() {
   cam.az = CAMERA.az;
   cam.el = CAMERA.el;

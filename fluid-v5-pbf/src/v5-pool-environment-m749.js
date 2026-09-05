@@ -12,8 +12,9 @@ if(!ssfr?.env||!window.__v5M748PoolMaterial?.online||!window.__v5M739Unified?.on
   throw new Error('M7.4.9 pool environment: M7.4.8 clear-pool runtime unavailable.');
 }
 
-const ROOT='https://cdn.jsdelivr.net/gh/matsuoka-601/Particles4All@58d6fa6d2c50e3f58da5c7a6f9b885ce26c485f0/';
-const HDR=ROOT+'env/quarry_cloudy_1k.hdr';
+// Local 2048×1024 Poly Haven source. The upstream environment converter now
+// builds 512×512 cube faces instead of 256×256 faces from the former 1K HDR.
+const HDR='https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/2k/quarry_cloudy_2k.hdr';
 
 let loaded=false;
 let error='';
@@ -25,13 +26,15 @@ try{
   loaded=true;
 }catch(err){
   error=String(err?.message||err);
-  console.warn('[Fluid V5 M7.4.9] V4 quarry HDR failed; fallback sky remains active.',err);
+  console.warn('[Fluid V5 M7.4.9] 2K quarry HDR failed; fallback sky remains active.',err);
 }
 
 window.__v5M749PoolEnvironment={
   online:true,
   loaded,
   source:HDR,
+  sourceResolution:'2048x1024',
+  cubeFaceResolution:512,
   intensity:1.08,
   yaw:0.0,
   gpuPassesAdded:0,
@@ -42,4 +45,4 @@ window.__fluidV5Version='7.4.9';
 const title=document.querySelector('.hud.card.title');
 if(title)title.textContent='FLUID V5 · M7.4.9';
 document.title='Fluid V5 · M7.4.9 Clear Pool Reflection Fix';
-console.info(`[Fluid V5 M7.4.9] V4 neutral pool HDR ${loaded?'restored':'FAILED'}; steep splash reflections now use the intended environment.`);
+console.info(`[Fluid V5 M7.4.9] 2K neutral pool HDR ${loaded?'restored':'FAILED'}; 512px cube faces active.`);

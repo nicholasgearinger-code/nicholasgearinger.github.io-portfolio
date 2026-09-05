@@ -147,10 +147,10 @@ fn main(@builtin(global_invocation_id) gid:vec3u){
     let ramp=smoothstep(0.0,2.4,t);
     let spin=strength*1.28*clamp(r/max(R*.42,1.0e-4),0.0,1.0);
     let inward=strength*(.08+.20*(1.0-rn));
-    let target=tang*spin-dir*inward;
+    let targetVelocity=tang*spin-dir*inward;
     let blend=(.020+.070*(1.0-rn))*inside*wet*depthWeight*ramp;
-    v.x=mix(v.x,target.x,blend);
-    v.z=mix(v.z,target.y,blend);
+    v.x=mix(v.x,targetVelocity.x,blend);
+    v.z=mix(v.z,targetVelocity.y,blend);
     let core=1.0-smoothstep(0.0,R*.22,r);
     let collar=smoothstep(R*.20,R*.42,r)*(1.0-smoothstep(R*.42,R*.72,r));
     v.y-=core*strength*.050*wet*ramp;
@@ -181,10 +181,10 @@ fn main(@builtin(global_invocation_id) gid:vec3u){
     let ramp=smoothstep(0.0,1.2,t);
     let inward=strength*(.42+.52*(1.0-rn));
     let swirl=strength*(.10+.24*(1.0-rn));
-    let target=-dir*inward+tang*swirl;
+    let targetVelocity=-dir*inward+tang*swirl;
     let blend=(.035+.075*(1.0-rn))*w*wet*ramp;
-    v.x=mix(v.x,target.x,blend);
-    v.z=mix(v.z,target.y,blend);
+    v.x=mix(v.x,targetVelocity.x,blend);
+    v.z=mix(v.z,targetVelocity.y,blend);
     let core=1.0-smoothstep(0.0,R*.20,r);
     let sinkTarget=-strength*(.78+rn*.08);
     v.y=mix(v.y,sinkTarget,.10*core*wet*ramp);

@@ -148,9 +148,9 @@ fn main(@builtin(global_invocation_id) gid:vec3u){
   let ramp=smoothstep(0.0,.75,t);
   let inward=strength*(.34+.55*(1.0-rn));
   let swirl=strength*(.08+.22*(1.0-rn));
-  let target=-dir*inward+tang*swirl;
+  let targetVelocity=-dir*inward+tang*swirl;
   let blend=clamp((.032+.080*(1.0-rn))*radial*wet*ramp,0.0,.18);
-  v.x=mix(v.x,target.x,blend);v.z=mix(v.z,target.y,blend);
+  v.x=mix(v.x,targetVelocity.x,blend);v.z=mix(v.z,targetVelocity.y,blend);
   let core=1.0-smoothstep(0.0,R*.19,r);
   let down=clamp(.055+.16*floorBand,0.0,.22)*core*wet*ramp;
   v.y=mix(v.y,-strength*(.62+.28*(1.0-rn)),down);
@@ -166,7 +166,7 @@ const drainUni=dev.createBuffer({label:'fluidV5M830DrainUniform',size:48,usage:G
 const DF=new Float32Array(12), DU=new Uint32Array(DF.buffer);
 
 const shuffleWGSL=`
-struct S { meta:vec4u }
+struct S { info:vec4u }
 @group(0) @binding(0) var<uniform> U:S;
 @group(0) @binding(1) var<storage,read> pos:array<vec4f>;
 @group(0) @binding(2) var<storage,read> vel:array<vec4f>;
@@ -176,8 +176,8 @@ struct S { meta:vec4u }
 @group(0) @binding(6) var<storage,read_write> outPred:array<vec4f>;
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid:vec3u){
-  let i=gid.x;let n=U.meta.x;if(i>=n||n==0u){return;}
-  let j=(i+U.meta.y)%n;outPos[j]=pos[i];outVel[j]=vel[i];outPred[j]=pred[i];
+  let i=gid.x;let n=U.info.x;if(i>=n||n==0u){return;}
+  let j=(i+U.info.y)%n;outPos[j]=pos[i];outVel[j]=vel[i];outPred[j]=pred[i];
 }`;
 const shMod=dev.createShaderModule({code:shuffleWGSL,label:'fluidV5M830DrainShuffleWGSL'});
 if(typeof shMod.getCompilationInfo==='function'){

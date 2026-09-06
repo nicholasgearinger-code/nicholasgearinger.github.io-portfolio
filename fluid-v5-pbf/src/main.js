@@ -6,18 +6,18 @@ const q = new URLSearchParams(location.search);
 const QUALITY = {
   low: {
     label: 'LOW', short: 'LOW', particles: '18400', spacing: '0.044',
-    ssfrscale: '0.34', substeps: '2', iters: '3', ssfriters: '2', ssfrthickblur: '14',
-    note: 'Low · ~18K particles · 34% surface · same 3×-deep water volume, fastest mode.'
+    ssfrscale: '0.50', substeps: '2', iters: '3', ssfriters: '2', ssfrthickblur: '14',
+    note: 'Low · ~18K particles · 50% edge-aware surface · lighter physics with cleaner splashes.'
   },
   medium: {
     label: 'MEDIUM', short: 'MED', particles: '30000', spacing: '0.0375',
-    ssfrscale: '0.48', substeps: '2', iters: '4', ssfriters: '3', ssfrthickblur: '18',
-    note: 'Medium · ~30K particles · 48% surface · recommended mobile balance.'
+    ssfrscale: '0.58', substeps: '2', iters: '4', ssfriters: '3', ssfrthickblur: '18',
+    note: 'Medium · ~30K particles · 58% edge-aware surface · recommended mobile balance.'
   },
   high: {
     label: 'HIGH', short: 'HIGH', particles: '48600', spacing: '0.032',
-    ssfrscale: '0.62', substeps: '3', iters: '5', ssfriters: '4', ssfrthickblur: '22',
-    note: 'High · ~49K particles · 62% surface · denser/smoother water, heavier GPU load.'
+    ssfrscale: '0.68', substeps: '3', iters: '5', ssfriters: '4', ssfrthickblur: '22',
+    note: 'High · ~49K particles · 68% edge-aware surface · densest water, heavier GPU load.'
   }
 };
 const qualityName = QUALITY[q.get('quality')] ? q.get('quality') : 'medium';
@@ -73,6 +73,61 @@ function installOptics() {
   }
 
   let src = CW.compositePrelude + CW.compositeFS;
+
+  // The upstream composite reads the reduced-resolution eye-depth target with a single
+  // integer textureLoad. On a Retina display that exposes every SSFR texel as a square,
+  // especially around fast, thin splash sheets. Reconstruct depth from a 2x2 footprint,
+  // but reject samples across depth discontinuities so the pool, glass and jug edges stay
+  // crisp. r32float is not universally filterable on mobile WebGPU, so this is deliberately
+  // implemented with portable textureLoad calls instead of relying on float32 filtering.
+  const upscaleFunctionNeedle = `fn viewPos(ndc: vec2f, z: f32) -> vec3f {`;
+  const upscaleFunctionPatch = `fn edgeAwareEyeZ(mapP: vec2f, lim: vec2i) -> f32 {
+  let gridP = mapP - vec2f(0.5);
+  let baseP = vec2i(floor(gridP));
+  let blendP = fract(gridP);
+  let maxP = lim - vec2i(1);
+  let p00 = clamp(baseP, vec2i(0), maxP);
+  let p10 = clamp(baseP + vec2i(1, 0), vec2i(0), maxP);
+  let p01 = clamp(baseP + vec2i(0, 1), vec2i(0), maxP);
+  let p11 = clamp(baseP + vec2i(1, 1), vec2i(0), maxP);
+  let z00 = textureLoad(uEyeZ, p00, 0).r;
+  let z10 = textureLoad(uEyeZ, p10, 0).r;
+  let z01 = textureLoad(uEyeZ, p01, 0).r;
+  let z11 = textureLoad(uEyeZ, p11, 0).r;
+  var anchorZ = -1.0e4;
+  if (!isEmptyZ(z00)) { anchorZ = max(anchorZ, z00); }
+  if (!isEmptyZ(z10)) { anchorZ = max(anchorZ, z10); }
+  if (!isEmptyZ(z01)) { anchorZ = max(anchorZ, z01); }
+  if (!isEmptyZ(z11)) { anchorZ = max(anchorZ, z11); }
+  if (isEmptyZ(anchorZ)) { return anchorZ; }
+  let edgeBand = max(0.018, abs(anchorZ) * 0.012);
+  let w00 = (1.0 - blendP.x) * (1.0 - blendP.y);
+  let w10 = blendP.x * (1.0 - blendP.y);
+  let w01 = (1.0 - blendP.x) * blendP.y;
+  let w11 = blendP.x * blendP.y;
+  var sumZ = 0.0;
+  var sumW = 0.0;
+  if (!isEmptyZ(z00) && abs(z00 - anchorZ) <= edgeBand) { sumZ += z00 * w00; sumW += w00; }
+  if (!isEmptyZ(z10) && abs(z10 - anchorZ) <= edgeBand) { sumZ += z10 * w10; sumW += w10; }
+  if (!isEmptyZ(z01) && abs(z01 - anchorZ) <= edgeBand) { sumZ += z01 * w01; sumW += w01; }
+  if (!isEmptyZ(z11) && abs(z11 - anchorZ) <= edgeBand) { sumZ += z11 * w11; sumW += w11; }
+  if (sumW < 1.0e-5) { return anchorZ; }
+  return sumZ / sumW;
+}
+
+fn viewPos(ndc: vec2f, z: f32) -> vec3f {`;
+  if (!src.includes(upscaleFunctionNeedle)) throw new Error('Fluid V8 upscale: composite signature changed.');
+  src = src.replace(upscaleFunctionNeedle, upscaleFunctionPatch);
+
+  const upscaleLookupNeedle = `  let ip = vec2i(in.clip.xy * C.mapScale);
+  let lim = vec2i(textureDimensions(uEyeZ, 0));
+  let z = textureLoad(uEyeZ, ip, 0).r;`;
+  const upscaleLookupPatch = `  let mapP = in.clip.xy * C.mapScale;
+  let ip = vec2i(mapP);
+  let lim = vec2i(textureDimensions(uEyeZ, 0));
+  let z = edgeAwareEyeZ(mapP, lim);`;
+  if (!src.includes(upscaleLookupNeedle)) throw new Error('Fluid V8 upscale: depth lookup signature changed.');
+  src = src.replace(upscaleLookupNeedle, upscaleLookupPatch);
 
   // Underwater sphere shadow on the receiving floor. This uses the same packed rigid-body
   // data as the upstream SSFR renderer, but solves the single-sphere shadow analytically so

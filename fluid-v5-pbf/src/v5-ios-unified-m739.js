@@ -7,7 +7,7 @@
 const q = new URLSearchParams(location.search);
 const safe = {
   quality: 'low', timing: '0', bodies: '0', bodyphases: '0',
-  substeps: '2', iters: '3', tension: '0.12', ssfrscale: '0.34',
+  substeps: '2', iters: '3', tension: '0.12', ssfrscale: '0.50',
   ssfriters: '2', ssfrthickblur: '14'
 };
 for (const [k,v] of Object.entries(safe)) if (!q.has(k)) q.set(k,v);
@@ -15,7 +15,7 @@ history.replaceState(null,'',location.pathname+'?'+q.toString()+location.hash);
 
 // main.js loads the pinned Particles4All core. Its first RAF is only scheduled during module
 // evaluation, so this continuation runs before that first RAF and can install the shim in time.
-await import('./main.js?v=maincam1');
+await import('./main.js?v=mainssfr1');
 
 const sim = window.__sim;
 const ui = window.__ui;

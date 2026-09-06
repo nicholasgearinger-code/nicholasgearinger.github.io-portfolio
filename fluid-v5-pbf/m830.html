@@ -11,7 +11,7 @@
 <script type="module">
 const note=document.getElementById('loadnote'),fail=document.getElementById('nogpu'),loading=document.getElementById('loading'),hb=document.getElementById('heartbeat'),fps=document.getElementById('v4fps'),stats=document.getElementById('v4stats');let seconds=0,rafs=0,lastRafs=0;requestAnimationFrame(function tick(){rafs++;requestAnimationFrame(tick)});setInterval(()=>{seconds++;const delta=rafs-lastRafs;lastRafs=rafs;fps.textContent=`${delta} FPS`;const g=window.__v5M739Unified,c=window.__v5M820FluidCore,s=window.__v5M830Scenes,a=window.__v5M802Splash,w=window.__v5M820Whitewater;const scene=s?.active||'pool';hb.textContent=`JS ${seconds}s · RAF ${delta}/s · submits ${g?.submitted||0} · unified ${g?.unifiedFrames||0} · M8.2 frames ${c?.frames||0} · CFL ${c?.water?.substeps||'--'} @ ${(c?.water?.measuredMaxSpeed||0).toFixed?.(1)||'--'}m/s · spray ${a?.online?'fine':'--'} · whitewater ${w?.online?'on':'--'} · scene ${scene}`;if(stats&&c)stats.textContent=`M8.3 WATER · divergence ×${Math.round(c.water.divIterations)} · CFL · full scenarios · ${window.__sim?.n?.toLocaleString?.()||'--'} active particles`},1000);
 try{
- note.textContent='starting close-framed one-submit scheduler…';await import('./src/v5-ios-unified-m739.js?v=739cam1');
+ note.textContent='starting edge-aware one-submit scheduler…';await import('./src/v5-ios-unified-m739.js?v=739surf1');
  note.textContent='building settings…';await import('./src/v5-settings-only-m742.js');
  note.textContent='loading Pool + Dam Break seeds…';await import('./src/v5-scenes-only-m743.js');
  note.textContent='loading physical Wave Lab…';await import('./src/v5-wave-lab-m745.js');

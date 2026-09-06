@@ -31,6 +31,18 @@ patch(`  let trans = hitCol * exp(-C.absorb * thick);`,
 patch(`  if (any(n != n)) { n = -rd; }\n  if (dot(n, rd) > 0.0) { n = -n; }\n\n  if (C.debug == 1) { return vec4f(n * 0.5 + 0.5, 1.0); }`,
 `  if (any(n != n)) { n = -rd; }\n  if (dot(n, rd) > 0.0) { n = -n; }\n  let microN=realismMicro(p);\n  n=normalize(n+vec3f(microN.x,0.0,microN.y));\n  if(dot(n,rd)>0.0){n=-n;}\n\n  if (C.debug == 1) { return vec4f(n * 0.5 + 0.5, 1.0); }`,'micro normal');
 
+patch(`  return vec4f(tonemap(col), 1.0);`,
+`  // Linearly filtered thickness supplies sub-pixel coverage at the reconstructed edge.
+  // This hides the square depth texel and restores a round silhouette for sparse droplets.
+  var resolvedColor=tonemap(col);
+  let edgeWidth=max(fwidth(thick)*1.35,0.0015);
+  let waterCoverage=smoothstep(0.0,edgeWidth,max(thick,0.0));
+  if(waterCoverage<0.999){
+    let sceneBehind=tonemap(sceneColor(ro,rd));
+    resolvedColor=mix(sceneBehind,resolvedColor,vec3f(waterCoverage));
+  }
+  return vec4f(resolvedColor,1.0);`,'rounded sparse silhouette resolve');
+
 const shaderMod=dev.createShaderModule({code:src,label:'fluidV5M746RealismWGSL'});
 if(typeof shaderMod.getCompilationInfo==='function'){
   const info=await shaderMod.getCompilationInfo();

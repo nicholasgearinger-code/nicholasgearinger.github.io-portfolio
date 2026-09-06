@@ -6,6 +6,7 @@
 const sim=window.__sim,ssfr=window.__ssfr;
 const faucet=window.__v5M861Faucet||window.__v5M852Faucet;
 const realism=window.__fluidV44Realism;
+const pourMode=new URLSearchParams(location.search).get('scenario')==='pour';
 if(!sim||!ssfr||!faucet?.online||!window.__v5M746Realism?.online||!realism)
   throw new Error('M8.6.7 material: M8.6.1 + realism composite unavailable.');
 
@@ -41,10 +42,12 @@ function applySurface(){
 
   // At native resolution we can tighten the splat footprint slightly while preserving
   // overlap, which gives smoother contours and finer refraction detail without blockiness.
-  ssfr.splatRadius=1.24;
+  // The GLB vessel is rendered at native resolution, so it does not need the large faucet
+  // reconstruction footprint. The tighter values expose smaller, rounder ballistic droplets.
+  ssfr.splatRadius=pourMode?1.04:1.24;
   ssfr.filter=2;
   ssfr.filterIterations=2;
-  ssfr.filterSigma=.56;
+  ssfr.filterSigma=pourMode?.52:.56;
   ssfr.narrowDelta=9.8;
   ssfr.narrowMu=.97;
   ssfr.bilateralRange=1.34;
@@ -53,8 +56,8 @@ function applySurface(){
 
   // Thickness is also native resolution. Keeping filter size below 4 additionally prevents
   // the upstream half-resolution path even if another module toggles thicknessHalfRes later.
-  ssfr.thicknessRadius=1.05;
-  ssfr.thicknessScale=2.20;
+  ssfr.thicknessRadius=pourMode?.88:1.05;
+  ssfr.thicknessScale=pourMode?1.65:2.20;
   ssfr.thicknessFilterSize=3;
   ssfr.thicknessHalfRes=false;
   ssfr.bindCache=null;
@@ -64,7 +67,7 @@ function apply(){applyMaterial();applySurface();}
 apply();setTimeout(apply,180);setTimeout(apply,500);setTimeout(apply,1100);
 
 // M8.6.1 still owns faucet/PBF behavior and has its own legacy visual governor. Bracket every
-// simulation step so the native-resolution M8.6.7 reconstruction always wins before rendering.
+// simulation step so the native-resolution M8.6.8 reconstruction always wins before rendering.
 const previousStep=sim.step.bind(sim);
 sim.step=function(dt){
   apply();
@@ -83,19 +86,19 @@ if(tabs&&host){
   if(page){
     document.getElementById('m867MaterialStatus')?.remove();
     const box=document.createElement('div');box.id='m867MaterialStatus';box.className='m742Section';
-    box.innerHTML='<div class="m742SectionTitle">M8.6.7 · NATIVE-RES WATER</div><div class="m742Note">SSFR surface and thickness are locked at 100% native resolution. Adaptive downscaling is removed completely; the reference blue-water material and M8.6.1 faucet physics are unchanged.</div>';
+    box.innerHTML='<div class="m742SectionTitle">M8.6.8 · NATIVE-RES WATER</div><div class="m742Note">SSFR surface and thickness are locked at 100% native resolution. GLB Pour uses a finer native-resolution reconstruction so airborne water reads as droplets instead of oversized blobs.</div>';
     const st=document.createElement('div');st.className='m742Status';st.style.marginTop='10px';
-    st.textContent='SSFR 100% LOCKED · full-res thickness\nfilter mode 2 × 2 · radius 1.24 · thickness 2.20\nIOR 1.333 · roughness .036 · scatter .22\nresolution governor OFF · zero added passes/submits';
+    st.textContent=`SSFR 100% LOCKED · full-res thickness\nfilter mode 2 × 2 · radius ${pourMode?'1.04':'1.24'} · thickness ${pourMode?'1.65':'2.20'}\nIOR 1.333 · roughness .036 · scatter .22\nresolution governor OFF · zero added passes/submits`;
     box.appendChild(st);page.appendChild(box);
   }
 }
 
-const title=document.querySelector('.hud.card.title');if(title)title.textContent='FLUID V8 · M8.6.7';
-document.title='Fluid V8 · M8.6.7 Native-Resolution Water';
+const title=document.querySelector('.hud.card.title');if(title)title.textContent='FLUID V8 · M8.6.8';
+document.title='Fluid V8 · M8.6.8 Native-Resolution Water';
 window.__v5M867Material={
-  online:true,backend:'native-resolution-full-thickness-ssfr-m867',gpuPassesAdded:0,gpuSubmitsAdded:0,
+  online:true,backend:'native-resolution-fine-droplet-ssfr-m868',gpuPassesAdded:0,gpuSubmitsAdded:0,
   quality,get scale(){return 1.0}
 };
-window.__fluidV5Version='8.6.7';
-window.__fluidV5Build='M8.6.7 NATIVE-RES FULL-THICKNESS SSFR / M8.6.1 PHYSICS FROZEN / REFERENCE BODY WATER';
-console.info('[Fluid V8 M8.6.7] native-resolution full-thickness SSFR locked at 1.0x; physics unchanged.');
+window.__fluidV5Version='8.6.8';
+window.__fluidV5Build='M8.6.8 NATIVE-RES FINE DROPLETS / GRAVITY-ONLY PBF / REFERENCE BODY WATER';
+console.info(`[Fluid V8 M8.6.8] native-resolution SSFR locked at 1.0x; ${pourMode?'fine GLB droplets':'reference faucet surface'} active.`);

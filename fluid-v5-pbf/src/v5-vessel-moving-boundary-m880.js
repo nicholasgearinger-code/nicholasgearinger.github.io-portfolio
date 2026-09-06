@@ -29,10 +29,10 @@ function tunePhysics(){
 }
 function tuneSurface(){
   if(!ssfr)return;
-  ssfr.splatRadius=1.28;
+  ssfr.splatRadius=1.06;
   ssfr.filter=2;
   ssfr.filterIterations=3;
-  ssfr.thicknessRadius=1.28;
+  ssfr.thicknessRadius=.90;
   ssfr.thicknessFilterSize=4;
   ssfr.bindCache=null;
 }

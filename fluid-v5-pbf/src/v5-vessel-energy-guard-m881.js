@@ -78,7 +78,7 @@ sim.step=function(dt){
   if(sim.params){sim.params.xsphC=.045;sim.params.surfaceTensionK=.004;}
   inStep=true;try{return baseStep(dt)}finally{inStep=false;}
 };
-if(ssfr){ssfr.splatRadius=1.24;ssfr.thicknessRadius=1.26;ssfr.bindCache=null;}
+if(ssfr){ssfr.splatRadius=1.06;ssfr.thicknessRadius=.90;ssfr.bindCache=null;}
 
 const title=document.querySelector('#m880Hud b');if(title)title.textContent='M8.8.1 · ENERGY-SAFE MOVING BOUNDARY';
 const extra=document.createElement('div');extra.id='m881GuardStatus';extra.style.cssText='margin-top:5px;color:#9fe9c7';

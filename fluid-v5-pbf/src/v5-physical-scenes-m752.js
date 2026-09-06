@@ -1,13 +1,14 @@
-// Fluid V5 M7.5.2 — coherent faucet + free-surface vortex + real draining volume.
-// Builds on M7.5.1 while preserving the M7.3.9 one-submit iOS scheduler.
-// Faucet pulses overlap at sub-spacing cadence to reconstruct as one continuous jet.
+// Fluid V5 M7.5.3 — gravity-release faucet/waterfall + free-surface vortex + real drain.
+// Builds on M7.5.2 while preserving the M7.3.9 one-submit iOS scheduler.
+// Faucet and waterfall now release coherent PBF packets with only a small inlet velocity;
+// after crossing the outlet, world gravity and the same pressure solver used by Pour own motion.
 // Whirlpool drives a stable tangential/radial target field so centrifugal pressure can form a funnel.
 // Drain combines a sink/vortex field with gradual active-particle removal; a post-solve rotation
 // shuffles particle ordering so removal is distributed through the body instead of clipping one side.
 
 const sim=window.__sim, ui=window.__ui, scenes=window.__v5M743Scenes, wave=window.__v5M745WaveLab;
 if(!sim?.dev||!ui||!scenes?.online||!wave?.online||!window.__v5M739Unified?.online)
-  throw new Error('M7.5.2 scenes: stable unified scene runtime unavailable.');
+  throw new Error('M7.5.3 scenes: stable unified scene runtime unavailable.');
 const dev=sim.dev;
 const quality=new URLSearchParams(location.search).get('quality')||'low';
 const fullN=Math.max(1,sim.n||sim.scene?.nFluid||1);
@@ -90,30 +91,34 @@ fn main(@builtin(global_invocation_id) gid:vec3u){
     }
   }
 
-  // Dense 3x3 nozzle packets emitted faster than one spacing of travel => connected SSFR jet.
+  // Circular inlet packets. A small downward boundary velocity establishes flow; once released,
+  // the particles receive no scripted acceleration and fall under the shared world gravity/PBF.
   if(mode==3u && rank>=0){
     let r=u32(rank);
-    let gy=i32(r%3u)-1;
-    let gz=i32((r/3u)%3u)-1;
-    let j0=hash11(r*17u+seed*31u+3u)-.5;
-    let j1=hash11(r*23u+seed*37u+5u)-.5;
-    let nozzle=vec3f(bx*.115,by*.805,bz*.50);
-    p=vec4f(nozzle.x+j0*d*.10,
-            nozzle.y+f32(gy)*d*.56+j1*d*.08,
-            nozzle.z+f32(gz)*d*.56+j0*d*.08,1.0);
-    let speed=(.88+.18*amount)*strength;
-    v=vec4f(speed,-(.48+.12*amount)*strength,j1*.035*strength,0.0);
+    let total=max(count,1u);
+    let phase=2.39996323*f32(r);
+    let radial=d*1.18*sqrt((f32(r)+.5)/f32(total));
+    let jitter=hash11(r*23u+seed*37u+5u)-.5;
+    let nozzle=vec3f(bx*.50,by*.90,bz*.50);
+    p=vec4f(nozzle.x+cos(phase)*radial,
+            nozzle.y+jitter*d*.08,
+            nozzle.z+sin(phase)*radial,1.0);
+    let inlet=(.42+.16*amount)*strength;
+    v=vec4f(jitter*.012*strength,-inlet,-jitter*.012*strength,0.0);
     pred[i]=p;
   }
 
+  // A thin, broad release sheet. It is born almost at rest and immediately becomes ordinary
+  // simulated water, so gravity stretches the sheet and collisions create the splash.
   if(mode==4u && rank>=0){
     let r=u32(rank);
     let den=max(count-1u,1u);
     let lane=f32(r)/f32(den);
     let a=hash11(r*5u+seed*31u+7u);
     let b=hash11(r*7u+seed*37u+11u);
-    p=vec4f(bx*.10+(a-.5)*d,by*.82+(b-.5)*d,bz*(.18+.64*lane)+(a-.5)*d*.8,1.0);
-    v=vec4f(.48*strength,-(1.05+b*.22)*strength,(a-.5)*.04*strength,0.0);
+    p=vec4f(bx*.22+(a-.5)*d*.72,by*.89+(b-.5)*d*.08,bz*(.13+.74*lane),1.0);
+    let inlet=(.12+.08*amount)*strength;
+    v=vec4f((a-.5)*.010*strength,-inlet,(b-.5)*.010*strength,0.0);
     pred[i]=p;
   }
 
@@ -194,13 +199,13 @@ fn main(@builtin(global_invocation_id) gid:vec3u){
   vel[i]=v;
 }`;
 
-const mod=dev.createShaderModule({code:shader,label:'fluidV5M752ScenesWGSL'});
+const mod=dev.createShaderModule({code:shader,label:'fluidV5M753ScenesWGSL'});
 if(typeof mod.getCompilationInfo==='function'){
   const info=await mod.getCompilationInfo();
   const errors=(info.messages||[]).filter(m=>m.type==='error');
-  if(errors.length)throw new Error('M7.5.2 scene WGSL: '+errors.map(m=>`${m.lineNum||'?'}:${m.linePos||'?'} ${m.message}`).join(' | '));
+  if(errors.length)throw new Error('M7.5.3 scene WGSL: '+errors.map(m=>`${m.lineNum||'?'}:${m.linePos||'?'} ${m.message}`).join(' | '));
 }
-const pipe=await dev.createComputePipelineAsync({label:'fluidV5M752Scenes',layout:'auto',compute:{module:mod,entryPoint:'main'}});
+const pipe=await dev.createComputePipelineAsync({label:'fluidV5M753Scenes',layout:'auto',compute:{module:mod,entryPoint:'main'}});
 const uni=dev.createBuffer({label:'fluidV5M752SceneUniform',size:96,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
 const F=new Float32Array(24), U32=new Uint32Array(F.buffer);
 
@@ -261,16 +266,16 @@ function advanceDrain(dt){
   drained=fullN-sim.n;
 }
 function cadence(name){
-  if(name==='faucet')return quality==='high'?.020:quality==='medium'?.026:.032;
+  if(name==='faucet')return quality==='high'?.014:quality==='medium'?.019:.024;
   if(name==='rain')return quality==='high'?.038:quality==='medium'?.050:.068;
-  if(name==='waterfall')return quality==='high'?.044:quality==='medium'?.058:.072;
+  if(name==='waterfall')return quality==='high'?.022:quality==='medium'?.028:.034;
   return .070;
 }
 function pulseSize(name){
   const m=.78+.72*amount;
   if(name==='rain')return Math.max(1,Math.round((quality==='high'?5:quality==='medium'?3:2)*m));
-  if(name==='waterfall')return Math.max(8,Math.round((quality==='high'?20:quality==='medium'?16:12)*m));
-  if(name==='faucet')return Math.max(9,Math.round((quality==='high'?15:quality==='medium'?12:9)*m));
+  if(name==='waterfall')return Math.max(16,Math.round((quality==='high'?32:quality==='medium'?27:22)*m));
+  if(name==='faucet')return Math.max(10,Math.round((quality==='high'?19:quality==='medium'?16:13)*m));
   if(name==='fountain')return Math.max(4,Math.round(6*m));
   return 0;
 }
@@ -346,7 +351,7 @@ function postSolveProxy(enc){
 dev.createCommandEncoder=function(desc){
   const enc=baseCreate(desc);
   if(inStep&&active!=='none'){
-    try{encodeScene(enc)}catch(err){console.error('[M7.5.2 scene pass]',err);restoreFullCount();active='none';fresh=false;syncUI();}
+    try{encodeScene(enc)}catch(err){console.error('[M7.5.3 scene pass]',err);restoreFullCount();active='none';fresh=false;syncUI();}
     return active==='drain'?postSolveProxy(enc):enc;
   }
   return enc;
@@ -388,7 +393,7 @@ function syncUI(){
 if(scenePage){
   scenePage.querySelectorAll('.m742Locked').forEach(n=>n.remove());
   const sec=document.createElement('div');sec.className='m742Section';
-  sec.innerHTML='<div class="m742SectionTitle">COHERENT FLOW SCENES · M7.5.2</div><div class="m742Note">Faucet now emits overlapping nozzle packets so it reconstructs as a continuous jet. Whirlpool drives a full rotating body with inward flow and a downward core to form a visible free-surface vortex. Drain now removes active water over time while pulling the remaining fluid into a central intake. All work stays inside the one-submit frame.</div>';
+  sec.innerHTML='<div class="m742SectionTitle">GRAVITY-RELEASE FLOW · M7.5.3</div><div class="m742Note">Faucet and Waterfall release coherent water at their outlets with only a small inlet velocity. After release, the shared PBF pressure solver, world gravity, and collisions determine the stream and splash—the same physical model used by Pour. All work stays inside the one-submit frame.</div>';
   const grid=document.createElement('div');grid.className='m742Grid';
   for(const [name,label] of [['rain','RAIN'],['pour','GRAVITY POUR'],['faucet','FAUCET'],['waterfall','WATERFALL'],['paddle','PADDLE'],['whirlpool','WHIRLPOOL'],['fountain','FOUNTAIN'],['drain','DRAIN']]){
     const b=document.createElement('button');b.className='m742Btn';b.dataset.scene=name;b.textContent=label;
@@ -408,12 +413,12 @@ if(scenePage){
 }
 
 window.__v5M752PhysicalScenes={
-  online:true,backend:'coherent-jet-vortex-real-drain-m752',gpuPassesAddedWhenActive:1,gpuSubmitsAdded:0,
+  online:true,backend:'gravity-release-pbf-sources-m753',gpuPassesAddedWhenActive:1,gpuSubmitsAdded:0,
   choose,disable,get active(){return active},get passCount(){return passCount},get pulses(){return pulses},
   get recycled(){return recycled},get drained(){return drained},get remaining(){return sim.n/fullN},
   get strength(){return strength},get amount(){return amount},get drainRate(){return drainRate}
 };
-window.__fluidV5Version='7.5.2';window.__fluidV5Build='M7.5.2 COHERENT JET + VORTEX + REAL DRAIN / M7.3.9 ONE-SUBMIT CORE';
+window.__fluidV5Version='7.5.3';window.__fluidV5Build='M7.5.3 GRAVITY-RELEASE FAUCET + WATERFALL / M7.3.9 ONE-SUBMIT CORE';
 const title=document.querySelector('.hud.card.title');if(title)title.textContent='FLUID V5 · M7.5.2';
 document.title='Fluid V5 · M7.5.2 Coherent Flow Scenes';
-console.info('[Fluid V5 M7.5.2] continuous faucet, free-surface vortex and real draining volume online; zero added queue submits.');
+console.info('[Fluid V5 M7.5.3] gravity-release faucet/waterfall online; world gravity + PBF own motion after the inlet.');

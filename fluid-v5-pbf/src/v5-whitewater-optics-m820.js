@@ -112,6 +112,18 @@ patch(`  let trans = hitCol * exp(-C.absorb * thick);`,
 patch(`  if (any(n != n)) { n = -rd; }\n  if (dot(n, rd) > 0.0) { n = -n; }\n\n  if (C.debug == 1) { return vec4f(n * 0.5 + 0.5, 1.0); }`,
 `  if (any(n != n)) { n = -rd; }\n  if (dot(n, rd) > 0.0) { n = -n; }\n  let microN=realismMicro(p,n);n=normalize(n+vec3f(microN.x,0.0,microN.y));if(dot(n,rd)>0.0){n=-n;}\n\n  if (C.debug == 1) { return vec4f(n * 0.5 + 0.5, 1.0); }`,'capillary normal');
 
+patch(`  return vec4f(tonemap(col), 1.0);`,
+`  // Coverage-aware silhouette resolve keeps isolated spray circular even when it spans only
+  // a few reduced-resolution depth pixels.
+  var resolvedColor=tonemap(col);
+  let edgeWidth=max(fwidth(thick)*1.35,0.0015);
+  let waterCoverage=smoothstep(0.0,edgeWidth,max(thick,0.0));
+  if(waterCoverage<0.999){
+    let sceneBehind=tonemap(sceneColor(ro,rd));
+    resolvedColor=mix(sceneBehind,resolvedColor,vec3f(waterCoverage));
+  }
+  return vec4f(resolvedColor,1.0);`,'rounded sparse silhouette resolve');
+
 const shaderMod=dev.createShaderModule({code:src,label:'fluidV5M820WhitewaterWGSL'});
 if(typeof shaderMod.getCompilationInfo==='function'){const info=await shaderMod.getCompilationInfo();const errors=(info.messages||[]).filter(m=>m.type==='error');if(errors.length)throw new Error('M8.2 whitewater WGSL: '+errors.map(m=>`${m.lineNum||'?'}:${m.linePos||'?'} ${m.message}`).join(' | '));}
 ssfr.pipeComposite=await dev.createRenderPipelineAsync({label:'fluidV5M820WhitewaterComposite',layout:'auto',vertex:{module:shaderMod,entryPoint:'vs'},fragment:{module:shaderMod,entryPoint:'fs',targets:[{format:ssfr.format}]},primitive:{topology:'triangle-list'}});ssfr.bindCache=null;

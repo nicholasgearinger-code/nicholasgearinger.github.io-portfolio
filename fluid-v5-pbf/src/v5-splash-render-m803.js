@@ -68,11 +68,11 @@ function setScenario(name){
     ssfr.thicknessRadius=.72;
     ssfr.filterSigma=.58;
   }else if(name==='waterfall'){
-    // The falling curtain stretches under gravity. A slightly wider reconstruction
-    // kernel joins neighbouring stagger phases into one continuous optical sheet.
-    ssfr.splatRadius=1.26;
-    ssfr.thicknessRadius=1.00;
-    ssfr.filterSigma=.64;
+    // Join the denser stagger phases into one optical sheet while retaining a
+    // defined silhouette at the sides and at the plunge into the pool.
+    ssfr.splatRadius=1.34;
+    ssfr.thicknessRadius=1.06;
+    ssfr.filterSigma=.68;
   }else{
     // At reduced render scales, sparse droplets need several depth pixels of coverage so the
     // true ellipsoid intersection remains visibly round instead of collapsing to one square texel.

@@ -1,9 +1,10 @@
-// Fluid V8 M8.3.4 — gravity-release Faucet and continuous Waterfall curtain.
+// Fluid V8 M8.3.5 — gravity-release Faucet and continuous Waterfall curtain.
 //
 // Both sources reuse ordinary pool particles, place them in rest-spaced inlet
 // layers. Faucet begins at rest. Waterfall receives only its velocity at the lip;
 // below that lip, vertical motion comes from the same world-gravity + PBF solve
-// used by the successful GLB pour. Four stagger phases prevent visible row bands.
+// used by the successful GLB pour. Four stagger phases plus a light, spatially
+// local sheet-drag model prevent low-frame-rate emission rows from separating.
 
 const sim=window.__sim,ui=window.__ui;
 const scenes=window.__v5M743Scenes;
@@ -66,6 +67,20 @@ fn main(@builtin(global_invocation_id) gid:vec3u){
       v.z=mix(v.z,-sign(p.z-centre.y)*S.tune.x,.10+.24*edge);
     }
   }
+  // A broad real waterfall entrains air and reaches a terminal sheet speed. Without
+  // that drag, rows released at 20 FPS accelerate away from the next rows and the
+  // particle surface reconstructs separate floating slabs. This only acts in the
+  // falling curtain, never in the pool, and still lets gravity accelerate the water.
+  if(mode==2u && p.y>surface+d*.70 && p.y<=outletY){
+    let inside=abs(p.z-centre.y)<S.shape.x+d && abs(p.x-centre.x)<d*2.8;
+    if(inside){
+      let fall=clamp((outletY-p.y)/max(outletY-surface,d),0.0,1.0);
+      let terminal=mix(max(S.outlet.w,.1),S.tune.z,smoothstep(.05,.92,fall));
+      if(v.y < -terminal){v.y=mix(v.y,-terminal,.70);}
+      v.x=mix(v.x,(centre.x-p.x)*1.8,.16);
+      v.z=mix(v.z,0.0,.08);
+    }
+  }
   vel[j]=vec4f(v.xyz,0.0);
 
   if(S.counts.y==0u){return;}
@@ -98,7 +113,9 @@ function geometry(name){
     return {d,axial,cx:b[0]*.50,cz:b[2]*.50,outletY,topY,radius:d*1.72,mode:1,speed:0};
   }
   const outletY=b[1]*.74,topY=outletY+axial*7.5;
-  return {d,axial,cx:b[0]*.27,cz:b[2]*.50,outletY,topY,radius:b[2]*.245,mode:2,speed:.92};
+  // 1.55 m/s emits 1–2 rest-spaced layers per 20 FPS frame. That preserves
+  // particle density as the free sheet accelerates instead of releasing one slab/frame.
+  return {d,axial,cx:b[0]*.27,cz:b[2]*.50,outletY,topY,radius:b[2]*.245,mode:2,speed:1.55,terminal:1.82};
 }
 function appendPlane(P,V,start,g,y){
   let n=start;
@@ -134,7 +151,7 @@ function prepareSource(dt){
     // Distance cadence keeps the Waterfall inlet continuous even at 20 FPS.
     // Multiple missed layers are placed at distinct rest-spaced heights, never stacked.
     carry+=g.speed*Math.min(.05,Math.max(.001,Number.isFinite(dt)?dt:1/60));
-    const rows=Math.min(3,Math.floor(carry/g.axial));
+    const rows=Math.min(4,Math.floor(carry/g.axial));
     if(rows>0){carry-=rows*g.axial;for(let row=0;row<rows;row++)sourceN=appendPlane(P,V,sourceN,g,g.topY-row*g.axial);emissions+=rows;}
     carry=Math.min(carry,g.axial*.98);
   }else{
@@ -151,9 +168,9 @@ function encodeSource(enc){
   const n=Math.max(1,sim.n||1),b=sim.params.box,g=geometry(active),surface=poolSurface();
   F.fill(0);U[0]=n;U[1]=sourceN;U[2]=(Math.imul(serial++,2654435761)>>>0)%n;U[3]=g.mode;
   F[4]=b[0];F[5]=b[1];F[6]=b[2];F[7]=g.d;
-  F[8]=g.cx;F[9]=g.outletY;F[10]=g.cz;F[11]=0;
+  F[8]=g.cx;F[9]=g.outletY;F[10]=g.cz;F[11]=g.speed||0;
   F[12]=g.radius;F[13]=g.topY;F[14]=surface;F[15]=g.axial*2;
-  F[16]=.10;F[17]=2.8;F[18]=lastDt;F[19]=0;
+  F[16]=.10;F[17]=2.8;F[18]=g.terminal||0;F[19]=lastDt;
   dev.queue.writeBuffer(uniform,0,F);dev.queue.writeBuffer(counter,0,counterZero);
   const s=sim.parity===0?'A':'B';
   const bg=dev.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:[
@@ -179,8 +196,8 @@ function choose(name){
 function disable(){active='none';prime=true;carry=0;sourceN=0;}
 
 window.__v5M755GravitySources={
-  online:true,backend:'rest-spaced-open-boundary-world-gravity-m833',choose,disable,
+  online:true,backend:'continuous-sheet-terminal-drag-m835',choose,disable,
   get active(){return active},get passes(){return passes},get recycled(){return recycled},get emissions(){return emissions},
-  get model(){return 'rest-spaced staggered inlet layers + ordinary PBF + world gravity after release'},
+  get model(){return 'rest-spaced staggered inlet + ordinary PBF + gravity with local sheet drag'},
 };
-console.info('[Fluid V8 M8.3.4] Waterfall uses a four-phase rest-spaced curtain; Faucet remains zero-launch; world gravity controls both after release.');
+console.info('[Fluid V8 M8.3.5] Waterfall uses denser staggered release + local terminal sheet drag; Faucet remains zero-launch.');

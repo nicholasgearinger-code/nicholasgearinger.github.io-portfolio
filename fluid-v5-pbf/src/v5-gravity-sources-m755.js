@@ -1,4 +1,4 @@
-// Fluid V8 M8.3.5 — gravity-release Faucet and continuous Waterfall curtain.
+// Fluid V8 M8.3.7 — gravity-release Faucet and continuous Waterfall curtain.
 //
 // Both sources reuse ordinary pool particles, place them in rest-spaced inlet
 // layers. Faucet begins at rest. Waterfall receives only its velocity at the lip;
@@ -14,7 +14,7 @@ if(!sim?.dev||!ui||!scenes?.online||!legacy?.online)
 
 const dev=sim.dev;
 const MAX_SOURCE=256;
-let active='none',inStep=false,lastDt=1/60,prime=true,carry=0,serial=1;
+let active='none',inStep=false,lastDt=1/60,prime=true,carry=0,serial=1,sheetPhase=0;
 let sourceN=0,passes=0,recycled=0,emissions=0;
 
 const sourcePos=dev.createBuffer({label:'fluidV8M833SourcePositions',size:MAX_SOURCE*16,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
@@ -117,7 +117,7 @@ function geometry(name){
   // particle density as the free sheet accelerates instead of releasing one slab/frame.
   return {d,axial,cx:b[0]*.27,cz:b[2]*.50,outletY,topY,radius:b[2]*.245,mode:2,speed:1.55,terminal:1.82};
 }
-function appendPlane(P,V,start,g,y){
+function appendPlane(P,V,start,g,y,halfSheet=false,depthPhase=0){
   let n=start;
   if(g.mode===1){
     for(let ix=-1;ix<=1;ix++)for(let iz=-1;iz<=1;iz++){
@@ -127,12 +127,17 @@ function appendPlane(P,V,start,g,y){
     }
   }else{
     const lanes=Math.max(8,Math.floor((g.radius*2)/g.axial));
-    for(let row=-1;row<=1;row+=2)for(let lane=0;lane<lanes;lane++){
+    const firstRow=halfSheet?(depthPhase&1?1:-1):-1;
+    const lastRow=halfSheet?firstRow:1;
+    for(let row=firstRow;row<=lastRow;row+=2)for(let lane=0;lane<lanes;lane++){
       if(n>=MAX_SOURCE)return n;
       const z=g.cz-g.radius+(lane+.5)*(g.radius*2/lanes),k=n*4;
       // Adjacent lanes/depth rows occupy four streamwise phases. Every column
       // remains rest-spaced, but their projection fills the gaps between rows.
-      const phase=(lane&1)+(row>0?2:0);
+      // Half-sheet rows alternate in depth on successive emissions, so their
+      // streamwise phase only needs the lane stagger. Applying the old depth
+      // phase as well would place consecutive rows on top of one another.
+      const phase=halfSheet?(lane&1):(lane&1)+(row>0?2:0);
       P[k]=g.cx+row*g.axial*.52;P[k+1]=y+phase*g.axial*.25;P[k+2]=z;P[k+3]=1;
       V[k]=0;V[k+1]=-g.speed;V[k+2]=0;V[k+3]=0;n++;
     }
@@ -148,12 +153,20 @@ function prepareSource(dt){
     for(let layer=0;layer<layers;layer++)sourceN=appendPlane(P,V,sourceN,g,g.outletY+(layer+.55)*g.axial);
     prime=false;carry=0;
   }else if(g.mode===2){
-    // Distance cadence keeps the Waterfall inlet continuous even at 20 FPS.
-    // Multiple missed layers are placed at distinct rest-spaced heights, never stacked.
+    // Preserve the M8.3.5 mass flow, but release alternating half-thickness rows
+    // at about twice its cadence. At 20 FPS this yields 3–4 interleaved rows/frame
+    // instead of 1–2 full slabs, closing vertical gaps without adding water.
+    const microSpacing=g.axial*.52;
     carry+=g.speed*Math.min(.05,Math.max(.001,Number.isFinite(dt)?dt:1/60));
-    const rows=Math.min(4,Math.floor(carry/g.axial));
-    if(rows>0){carry-=rows*g.axial;for(let row=0;row<rows;row++)sourceN=appendPlane(P,V,sourceN,g,g.topY-row*g.axial);emissions+=rows;}
-    carry=Math.min(carry,g.axial*.98);
+    const rows=Math.min(5,Math.floor(carry/microSpacing));
+    if(rows>0){
+      carry-=rows*microSpacing;
+      for(let row=0;row<rows;row++){
+        sourceN=appendPlane(P,V,sourceN,g,g.topY-row*microSpacing,true,sheetPhase++);
+      }
+      emissions+=rows;
+    }
+    carry=Math.min(carry,microSpacing*.98);
   }else{
     const gravity=Math.max(.1,Number(sim.params.gravity)||9.81);
     const interval=Math.sqrt(2*g.axial/gravity);
@@ -190,14 +203,14 @@ sim.step=function(dt){lastDt=Number.isFinite(dt)?dt:lastDt;prepareSource(lastDt)
 function choose(name){
   if(name!=='faucet'&&name!=='waterfall')return false;
   try{legacy.disable?.()}catch{}
-  scenes.choose('pool');active=name;prime=true;carry=0;sourceN=0;serial++;
+  scenes.choose('pool');active=name;prime=true;carry=0;sourceN=0;serial++;sheetPhase=0;
   if(ui.paused)ui.paused=false;return true;
 }
-function disable(){active='none';prime=true;carry=0;sourceN=0;}
+function disable(){active='none';prime=true;carry=0;sourceN=0;sheetPhase=0;}
 
 window.__v5M755GravitySources={
-  online:true,backend:'continuous-sheet-terminal-drag-m835',choose,disable,
+  online:true,backend:'mass-neutral-interleaved-sheet-m837',choose,disable,
   get active(){return active},get passes(){return passes},get recycled(){return recycled},get emissions(){return emissions},
-  get model(){return 'rest-spaced staggered inlet + ordinary PBF + gravity with local sheet drag'},
+  get model(){return 'mass-neutral alternating half-sheet rows + ordinary PBF + local sheet drag'},
 };
-console.info('[Fluid V8 M8.3.5] Waterfall uses denser staggered release + local terminal sheet drag; Faucet remains zero-launch.');
+console.info('[Fluid V8 M8.3.7] Waterfall uses mass-neutral interleaved half-sheet rows + local terminal sheet drag; Faucet remains zero-launch.');

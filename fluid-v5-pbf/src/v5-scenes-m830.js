@@ -325,7 +325,7 @@ function slider(parent,label,min,max,step,value,onchange,fmt=v=>Number(v).toFixe
   input.oninput=e=>{e.stopPropagation();const n=Number(input.value);onchange(n);val.textContent=fmt(n);sync()};row.append(l,input,val);parent.appendChild(row);return input;
 }
 if(scenePage){
-  scenePage.innerHTML='<div class="m742Intro">M8.3 restores the complete scenario test set on the M8.2 common-water solver. Faucet and Waterfall recycle calm pool water into rest-spaced inlet layers, then release it with zero launch velocity. Drain compacts only particles inside its centre opening.</div>';
+  scenePage.innerHTML='<div class="m742Intro">M8.3 restores the complete scenario test set on the M8.2 common-water solver. Faucet starts from rest-spaced inlet layers; Waterfall uses a four-phase rest-spaced curtain with only lip velocity, then world gravity. Drain compacts only particles inside its centre opening.</div>';
   const sec=document.createElement('div');sec.className='m742Section';sec.innerHTML='<div class="m742SectionTitle">SCENARIO VALIDATION</div><div class="m742Note">Expected behavior: Faucet = narrow gravity-release stream · Waterfall = broad gravity-release sheet · Drain = centre-only volume removal · Fountain = tall recirculating jet with a radial crown.</div>';
   slider(sec,'DRAIN RATE',.020,.160,.005,drainRate,v=>drainRate=v,v=>`${Number(v).toFixed(3)}/s`);
   slider(sec,'DRAIN FORCE',.55,1.65,.05,drainStrength,v=>drainStrength=v);

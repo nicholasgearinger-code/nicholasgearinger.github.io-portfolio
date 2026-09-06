@@ -42,7 +42,7 @@
       html=html.replaceAll('M8.3','M8.9.9').replace("window.__fluidV5Version='8.9.9.0'","window.__fluidV5Version='8.9.9'").replace("window.__fluidV5Build='M8.9.9 FULL SCENARIO RESTORE / M8.2 COMMON WATER / ONE-SUBMIT CORE'","window.__fluidV5Build='M8.9.9 LOCAL GLB / MEASURED PBF CONTAINMENT / GRAVITY-ONLY POUR'");
     }else{
       boot.querySelector('small').textContent=`loading ${requested.toUpperCase()} · common PBF water · one GPU submission per frame…`;
-      const r=await fetch('./m830.html?main=9012',{cache:'no-store'});if(!r.ok)throw new Error(`Fluid V8 scenario fetch failed: HTTP ${r.status}`);html=await r.text();
+      const r=await fetch('./m830.html?main=9013',{cache:'no-store'});if(!r.ok)throw new Error(`Fluid V8 scenario fetch failed: HTTP ${r.status}`);html=await r.text();
     }
     if(!html.includes('</body>'))throw new Error('Fluid V8 scenario shell is incomplete.');
     html=html.replace('</body>',dock+'</body>');

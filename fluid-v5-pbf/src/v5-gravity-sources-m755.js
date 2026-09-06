@@ -1,9 +1,9 @@
-// Fluid V8 M8.3.3 — gravity-release Faucet and Waterfall.
+// Fluid V8 M8.3.4 — gravity-release Faucet and continuous Waterfall curtain.
 //
 // Both sources reuse ordinary pool particles, place them in rest-spaced inlet
-// layers, and give them zero launch velocity. The short numerical throat only
-// keeps the inlet cross-section together. Vertical motion comes from the same
-// world-gravity + PBF solve used by the successful GLB pour.
+// layers. Faucet begins at rest. Waterfall receives only its velocity at the lip;
+// below that lip, vertical motion comes from the same world-gravity + PBF solve
+// used by the successful GLB pour. Four stagger phases prevent visible row bands.
 
 const sim=window.__sim,ui=window.__ui;
 const scenes=window.__v5M743Scenes;
@@ -95,10 +95,10 @@ function geometry(name){
   const b=sim.params.box,d=sim.params.spacing||.044,axial=d*1.04;
   if(name==='faucet'){
     const outletY=b[1]*.76,topY=outletY+axial*4.5;
-    return {d,axial,cx:b[0]*.50,cz:b[2]*.50,outletY,topY,radius:d*1.72,mode:1};
+    return {d,axial,cx:b[0]*.50,cz:b[2]*.50,outletY,topY,radius:d*1.72,mode:1,speed:0};
   }
-  const outletY=b[1]*.74,topY=outletY+axial*4.5;
-  return {d,axial,cx:b[0]*.27,cz:b[2]*.50,outletY,topY,radius:b[2]*.245,mode:2};
+  const outletY=b[1]*.74,topY=outletY+axial*7.5;
+  return {d,axial,cx:b[0]*.27,cz:b[2]*.50,outletY,topY,radius:b[2]*.245,mode:2,speed:.92};
 }
 function appendPlane(P,V,start,g,y){
   let n=start;
@@ -113,8 +113,11 @@ function appendPlane(P,V,start,g,y){
     for(let row=-1;row<=1;row+=2)for(let lane=0;lane<lanes;lane++){
       if(n>=MAX_SOURCE)return n;
       const z=g.cz-g.radius+(lane+.5)*(g.radius*2/lanes),k=n*4;
-      P[k]=g.cx+row*g.axial*.52;P[k+1]=y;P[k+2]=z;P[k+3]=1;
-      V[k]=0;V[k+1]=0;V[k+2]=0;V[k+3]=0;n++;
+      // Adjacent lanes/depth rows occupy four streamwise phases. Every column
+      // remains rest-spaced, but their projection fills the gaps between rows.
+      const phase=(lane&1)+(row>0?2:0);
+      P[k]=g.cx+row*g.axial*.52;P[k+1]=y+phase*g.axial*.25;P[k+2]=z;P[k+3]=1;
+      V[k]=0;V[k+1]=-g.speed;V[k+2]=0;V[k+3]=0;n++;
     }
   }
   return n;
@@ -123,9 +126,17 @@ function prepareSource(dt){
   sourceN=0;if(active==='none'||ui.paused)return;
   const g=geometry(active),P=new Float32Array(MAX_SOURCE*4),V=new Float32Array(MAX_SOURCE*4);
   if(prime){
-    // A short, non-overlapping throat starts at rest exactly like Pour's reservoir.
-    for(let layer=0;layer<4;layer++)sourceN=appendPlane(P,V,sourceN,g,g.outletY+(layer+.55)*g.axial);
+    // Prefill a connected throat/curtain without overlapping any particle columns.
+    const layers=g.mode===2?7:4;
+    for(let layer=0;layer<layers;layer++)sourceN=appendPlane(P,V,sourceN,g,g.outletY+(layer+.55)*g.axial);
     prime=false;carry=0;
+  }else if(g.mode===2){
+    // Distance cadence keeps the Waterfall inlet continuous even at 20 FPS.
+    // Multiple missed layers are placed at distinct rest-spaced heights, never stacked.
+    carry+=g.speed*Math.min(.05,Math.max(.001,Number.isFinite(dt)?dt:1/60));
+    const rows=Math.min(3,Math.floor(carry/g.axial));
+    if(rows>0){carry-=rows*g.axial;for(let row=0;row<rows;row++)sourceN=appendPlane(P,V,sourceN,g,g.topY-row*g.axial);emissions+=rows;}
+    carry=Math.min(carry,g.axial*.98);
   }else{
     const gravity=Math.max(.1,Number(sim.params.gravity)||9.81);
     const interval=Math.sqrt(2*g.axial/gravity);
@@ -170,6 +181,6 @@ function disable(){active='none';prime=true;carry=0;sourceN=0;}
 window.__v5M755GravitySources={
   online:true,backend:'rest-spaced-open-boundary-world-gravity-m833',choose,disable,
   get active(){return active},get passes(){return passes},get recycled(){return recycled},get emissions(){return emissions},
-  get model(){return 'zero-launch inlet layers + ordinary PBF + world gravity after release'},
+  get model(){return 'rest-spaced staggered inlet layers + ordinary PBF + world gravity after release'},
 };
-console.info('[Fluid V8 M8.3.3] Faucet/Waterfall use zero-launch rest-spaced inlet layers and world gravity; no elevated tank or packet impulse.');
+console.info('[Fluid V8 M8.3.4] Waterfall uses a four-phase rest-spaced curtain; Faucet remains zero-launch; world gravity controls both after release.');

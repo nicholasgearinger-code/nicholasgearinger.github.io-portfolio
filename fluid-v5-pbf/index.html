@@ -18,7 +18,7 @@
       const r=await fetch('./m830.html?pour=9007',{cache:'no-store'});if(!r.ok)throw new Error(`Fluid V8 pour shell failed: HTTP ${r.status}`);html=await r.text();
       const sceneLine=" note.textContent='loading Pool + Dam Break seeds…';await import('./src/v5-scenes-only-m743.js');";
       if(!html.includes(sceneLine))throw new Error('Fluid V8 pour bootstrap could not locate the static scene import.');
-      const skipped=['v5-wave-lab-m745.js','v5-physical-scenes-m752.js','v5-scaled-scenes-m754.js','v5-realism-shader-m746.js','v5-water-appearance-m747.js','v5-pool-material-m748.js','v5-pool-environment-m749.js','v5-fluid-core-m820.js','v5-splash-render-m802.js','v5-splash-render-m803.js','v5-whitewater-optics-m820.js','v5-scenes-m830.js'];
+      const skipped=['v5-wave-lab-m745.js','v5-physical-scenes-m752.js','v5-gravity-sources-m755.js','v5-scaled-scenes-m754.js','v5-realism-shader-m746.js','v5-water-appearance-m747.js','v5-pool-material-m748.js','v5-pool-environment-m749.js','v5-fluid-core-m820.js','v5-splash-render-m802.js','v5-splash-render-m803.js','v5-whitewater-optics-m820.js','v5-scenes-m830.js'];
       html=html.split('\n').filter(line=>!skipped.some(file=>line.includes(`await import('./src/${file}`))).join('\n');
       const pourImports=[
         " note.textContent='installing source runtime…';await import('./src/v5-faucet-open-boundary-m861.js');",
@@ -42,7 +42,7 @@
       html=html.replaceAll('M8.3','M8.9.9').replace("window.__fluidV5Version='8.9.9.0'","window.__fluidV5Version='8.9.9'").replace("window.__fluidV5Build='M8.9.9 FULL SCENARIO RESTORE / M8.2 COMMON WATER / ONE-SUBMIT CORE'","window.__fluidV5Build='M8.9.9 LOCAL GLB / MEASURED PBF CONTAINMENT / GRAVITY-ONLY POUR'");
     }else{
       boot.querySelector('small').textContent=`loading ${requested.toUpperCase()} · common PBF water · one GPU submission per frame…`;
-      const r=await fetch('./m830.html?main=9008',{cache:'no-store'});if(!r.ok)throw new Error(`Fluid V8 scenario fetch failed: HTTP ${r.status}`);html=await r.text();
+      const r=await fetch('./m830.html?main=9009',{cache:'no-store'});if(!r.ok)throw new Error(`Fluid V8 scenario fetch failed: HTTP ${r.status}`);html=await r.text();
     }
     if(!html.includes('</body>'))throw new Error('Fluid V8 scenario shell is incomplete.');
     html=html.replace('</body>',dock+'</body>');

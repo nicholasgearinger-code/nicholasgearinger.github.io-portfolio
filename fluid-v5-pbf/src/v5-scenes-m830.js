@@ -8,9 +8,10 @@ const sim=window.__sim, ui=window.__ui;
 const scenes=window.__v5M743Scenes;
 const wave=window.__v5M745WaveLab;
 const modern=window.__v5M752PhysicalScenes;
+const gravitySources=window.__v5M755GravitySources;
 const scaled=window.__v5M754ScaledScenes;
 const core=window.__v5M820FluidCore;
-if(!sim?.dev||!ui||!scenes?.online||!wave?.online||!modern?.online||!scaled?.online||!core?.online)
+if(!sim?.dev||!ui||!scenes?.online||!wave?.online||!modern?.online||!gravitySources?.online||!scaled?.online||!core?.online)
   throw new Error('M8.3 scenes: required unified scene/runtime modules unavailable.');
 const dev=sim.dev;
 const fullN=Math.max(1,sim.scene?.nFluid||sim.n||1);
@@ -31,6 +32,7 @@ function restoreFullCount(){
 }
 function stopCustom(){pendingPour=false;drainActive=false;drainTime=0;drainCarry=0;drained=0;}
 function stopLegacy(){
+  try{gravitySources.disable?.()}catch{}
   try{scaled.disable?.()}catch{}
   try{modern.disable?.()}catch{}
   try{wave.disable?.()}catch{}
@@ -258,7 +260,9 @@ function choose(name){
     active=name;scenes.choose(name);
   }else if(name==='wave'){
     active='wave';wave.enable('regular');
-  }else if(['rain','faucet','waterfall','paddle'].includes(name)){
+  }else if(name==='faucet'||name==='waterfall'){
+    active=name;gravitySources.choose(name);
+  }else if(['rain','paddle'].includes(name)){
     active=name;modern.choose(name);
   }else if(name==='whirlpool'||name==='fountain'){
     active=name;scaled.choose(name);
@@ -319,7 +323,7 @@ function sync(){
   for(const [k,b] of Object.entries(buttons))b.classList.toggle('active',k===active);
   if(!status)return;
   const remain=100*Math.max(0,sim.n||0)/fullN;
-  const legacy=`wave ${wave.enabled?'on':'off'} · source ${modern.active||'none'} · refined ${scaled.active||'none'}`;
+  const legacy=`wave ${wave.enabled?'on':'off'} · gravity source ${gravitySources.active||'none'} · legacy ${modern.active||'none'} · refined ${scaled.active||'none'}`;
   status.textContent=`ACTIVE ${active.toUpperCase()}\n${legacy}\nM8 pour seeds ${pourSeeds} · drain passes ${drainPasses} · pre-solve shuffles ${drainShuffles}\nwater remaining ${remain.toFixed(1)}% · drained ${drained.toLocaleString()} · added queue submits 0`;
 }
 setInterval(sync,400);sync();

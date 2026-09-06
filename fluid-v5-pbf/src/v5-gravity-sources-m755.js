@@ -48,9 +48,13 @@ fn main(@builtin(global_invocation_id) gid:vec3u){
       p.y=min(p.y,topY-pr);
       let overHole=length(p.xz-ctr)<outletR-pr*.35;
       if(p.y<floorY+pr&&!overHole){p.y=floorY+pr;}
-      if(p.y<floorY+pr&&overHole){p.xz=clampDisk(p.xz,ctr,outletR-pr*.20);}
+      if(p.y<floorY+pr&&overHole){
+        let clampedXZ=clampDisk(p.xz,ctr,outletR-pr*.20);
+        p.x=clampedXZ.x;p.z=clampedXZ.y;
+      }
     }else if(inNozzle){
-      p.xz=clampDisk(p.xz,ctr,outletR-pr*.20);
+      let clampedXZ=clampDisk(p.xz,ctr,outletR-pr*.20);
+      p.x=clampedXZ.x;p.z=clampedXZ.y;
     }
   }else if(U.info.y==2u){
     // Waterfall: a broad elevated trough draining through one continuous slot.
@@ -210,4 +214,3 @@ window.__v5M755GravitySources={
   get model(){return 'zero-velocity PBF reservoir + static outlet boundary + world gravity'},
 };
 console.info('[Fluid V8 M8.3.1] Faucet/Waterfall use finite at-rest reservoirs; no particle packets or launch acceleration.');
-

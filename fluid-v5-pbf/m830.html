@@ -16,7 +16,7 @@ try{
  note.textContent='loading Pool + Dam Break seeds…';await import('./src/v5-scenes-only-m743.js');
  note.textContent='loading physical Wave Lab…';await import('./src/v5-wave-lab-m745.js');
  note.textContent='loading legacy physical scenes…';await import('./src/v5-physical-scenes-m752.js?v=754stream2');
- note.textContent='building settled finite gravity reservoirs…';await import('./src/v5-gravity-sources-m755.js?v=755gravity4');
+ note.textContent='building gravity-release inlet streams…';await import('./src/v5-gravity-sources-m755.js?v=755gravity5');
  note.textContent='loading radial-crown fountain and whirlpool…';await import('./src/v5-scaled-scenes-m754.js?v=754crown1');
  note.textContent='restoring realism controls…';await import('./src/v5-realism-shader-m746.js?v=746droplet1');
  note.textContent='restoring water materials…';await import('./src/v5-water-appearance-m747.js');
@@ -25,7 +25,7 @@ try{
  note.textContent='installing M8.2 iterative divergence + adaptive CFL…';await import('./src/v5-fluid-core-m820.js');
  note.textContent='installing rounded continuous spray…';await import('./src/v5-splash-render-m803.js?v=803stream2');
  note.textContent='installing ripples, caustics, foam and bubbles…';await import('./src/v5-whitewater-optics-m820.js?v=820droplet1');
- note.textContent='installing M8.3 scenario compatibility layer…';await import('./src/v5-scenes-m830.js?v=830centre1');
+ note.textContent='installing M8.3 scenario compatibility layer…';await import('./src/v5-scenes-m830.js?v=830centre2');
  window.__fluidV5Version='8.3.0';window.__fluidV5Build='M8.3 FULL SCENARIO RESTORE / M8.2 COMMON WATER / ONE-SUBMIT CORE';
  const dev=window.__sim?.dev;if(dev?.lost)dev.lost.then(info=>{hb.style.color='#ff9f9f';hb.textContent=`DEVICE LOST: ${info?.reason||'unknown'} ${info?.message||''}`});loading.classList.add('gone');
 }catch(err){console.error('[M8.3 boot]',err);loading.classList.add('gone');fail.style.display='block';fail.textContent='M8.3 ERROR\n\n'+String(err?.message||err)+'\n\n'+String(err?.stack||'')}

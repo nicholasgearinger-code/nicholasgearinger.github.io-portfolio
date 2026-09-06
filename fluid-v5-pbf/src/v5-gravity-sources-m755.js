@@ -1,223 +1,175 @@
-// Fluid V8 M8.3.2 — settled finite gravity reservoirs for Faucet and Waterfall.
-// Unlike the legacy source scenes, this module never injects overlapping packets.
-// It seeds one coherent PBF volume at rest and constrains it inside an elevated
-// reservoir with an open outlet. World gravity alone establishes the stream.
+// Fluid V8 M8.3.3 — gravity-release Faucet and Waterfall.
+//
+// Both sources reuse ordinary pool particles, place them in rest-spaced inlet
+// layers, and give them zero launch velocity. The short numerical throat only
+// keeps the inlet cross-section together. Vertical motion comes from the same
+// world-gravity + PBF solve used by the successful GLB pour.
 
 const sim=window.__sim,ui=window.__ui;
 const scenes=window.__v5M743Scenes;
 const legacy=window.__v5M752PhysicalScenes;
 if(!sim?.dev||!ui||!scenes?.online||!legacy?.online)
-  throw new Error('M8.3 gravity sources: required solver/scenes unavailable.');
+  throw new Error('M8.3.3 gravity release: required solver/scenes unavailable.');
 
 const dev=sim.dev;
-const fullN=Math.max(1,sim.scene?.nFluid||sim.n||1);
-let active='none',pendingSeed=false,inStep=false,seeds=0,boundaryPasses=0,sourceFrames=0;
+const MAX_SOURCE=256;
+let active='none',inStep=false,lastDt=1/60,prime=true,carry=0,serial=1;
+let sourceN=0,passes=0,recycled=0,emissions=0;
 
-const boundaryWGSL=`
-struct SourceU { boxSpacing:vec4f, info:vec4u }
-@group(0) @binding(0) var<uniform> U:SourceU;
-@group(0) @binding(1) var<storage,read> pos:array<vec4f>;
-@group(0) @binding(2) var<storage,read_write> pred:array<vec4f>;
+const sourcePos=dev.createBuffer({label:'fluidV8M833SourcePositions',size:MAX_SOURCE*16,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
+const sourceVel=dev.createBuffer({label:'fluidV8M833SourceVelocities',size:MAX_SOURCE*16,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
+const counter=dev.createBuffer({label:'fluidV8M833SourceCounter',size:16,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
+const uniform=dev.createBuffer({label:'fluidV8M833SourceUniform',size:80,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
+const F=new Float32Array(20),U=new Uint32Array(F.buffer),counterZero=new Uint32Array(4);
 
-fn clampDisk(q:vec2f,c:vec2f,r:f32)->vec2f{
-  let v=q-c;let l=length(v);
-  if(l<=r){return q;}
-  return c+v/max(l,1e-6)*r;
+const sourceWGSL=`
+struct SourceU {
+  counts:vec4u,
+  boxSpacing:vec4f,
+  outlet:vec4f,
+  shape:vec4f,
+  tune:vec4f,
 }
+struct Counter { claim:atomic<u32>, emitted:atomic<u32>, pad0:u32, pad1:u32 }
+@group(0) @binding(0) var<uniform> S:SourceU;
+@group(0) @binding(1) var<storage,read> sourcePos:array<vec4f>;
+@group(0) @binding(2) var<storage,read> sourceVel:array<vec4f>;
+@group(0) @binding(3) var<storage,read_write> pos:array<vec4f>;
+@group(0) @binding(4) var<storage,read_write> vel:array<vec4f>;
+@group(0) @binding(5) var<storage,read_write> pred:array<vec4f>;
+@group(0) @binding(6) var<storage,read_write> C:Counter;
 
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid:vec3u){
-  let i=gid.x;if(i>=U.info.x){return;}
-  let b=U.boxSpacing.xyz;let d=U.boxSpacing.w;let pr=d*.48;
-  let p0=pos[i].xyz;var p=pred[i].xyz;
+  let i=gid.x;let n=S.counts.x;if(i>=n||n==0u){return;}
+  let j=(i+S.counts.z)%n;let mode=S.counts.w;
+  let d=S.boxSpacing.w;let centre=vec2f(S.outlet.x,S.outlet.z);
+  let outletY=S.outlet.y;let guideTop=S.shape.y;let surface=S.shape.z;
+  var p=pos[j];var v=vel[j];let q=p.xz-centre;
 
-  if(U.info.y==1u){
-    // Faucet: hidden upper cistern plus a short round nozzle.
-    let ctr=vec2f(b.x*.50,b.z*.50);
-    let hx=b.x*.21;let hz=b.z*.32;
-    let floorY=b.y*.86;let topY=b.y*.98;
-    let outletR=d*2.45;let nozzleY=floorY-d*5.0;
-    let inTank=p0.x>=ctr.x-hx-pr&&p0.x<=ctr.x+hx+pr&&
-               p0.z>=ctr.y-hz-pr&&p0.z<=ctr.y+hz+pr&&
-               p0.y>=floorY-pr&&p0.y<=topY+pr;
-    let inNozzle=p0.y>=nozzleY-pr&&p0.y<floorY+pr&&
-                 length(p0.xz-ctr)<=outletR+pr;
-    if(inTank){
-      p.x=clamp(p.x,ctr.x-hx+pr,ctr.x+hx-pr);
-      p.z=clamp(p.z,ctr.y-hz+pr,ctr.y+hz-pr);
-      p.y=min(p.y,topY-pr);
-      // Give the freshly seeded reservoir time to find hydrostatic equilibrium.
-      // Opening immediately turns ordinary overlap correction into a pressure blast.
-      let outletOpen=U.info.z>20u;
-      let overHole=outletOpen&&length(p.xz-ctr)<outletR-pr*.35;
-      if(p.y<floorY+pr&&!overHole){p.y=floorY+pr;}
-      if(p.y<floorY+pr&&overHole){
-        let clampedXZ=clampDisk(p.xz,ctr,outletR-pr*.20);
-        p.x=clampedXZ.x;p.z=clampedXZ.y;
-      }
-    }else if(inNozzle){
-      let clampedXZ=clampDisk(p.xz,ctr,outletR-pr*.20);
-      p.x=clampedXZ.x;p.z=clampedXZ.y;
-    }
-  }else if(U.info.y==2u){
-    // Waterfall: a broad elevated trough draining through one continuous slot.
-    let cx=b.x*.22;let cz=b.z*.50;
-    let hx=b.x*.21;let hz=b.z*.37;
-    let floorY=b.y*.82;let topY=b.y*.98;
-    let slotX=d*1.35;let slotZ=hz-d*1.15;let chuteY=floorY-d*4.5;
-    let inTank=p0.x>=cx-hx-pr&&p0.x<=cx+hx+pr&&
-               p0.z>=cz-hz-pr&&p0.z<=cz+hz+pr&&
-               p0.y>=floorY-pr&&p0.y<=topY+pr;
-    let inChute=p0.y>=chuteY-pr&&p0.y<floorY+pr&&
-                abs(p0.x-cx)<=slotX+pr&&abs(p0.z-cz)<=slotZ+pr;
-    if(inTank){
-      p.x=clamp(p.x,cx-hx+pr,cx+hx-pr);
-      p.z=clamp(p.z,cz-hz+pr,cz+hz-pr);
-      p.y=min(p.y,topY-pr);
-      let outletOpen=U.info.z>20u;
-      let overSlot=outletOpen&&abs(p.x-cx)<slotX-pr*.20&&abs(p.z-cz)<slotZ-pr*.20;
-      if(p.y<floorY+pr&&!overSlot){p.y=floorY+pr;}
-      if(p.y<floorY+pr&&overSlot){
-        p.x=clamp(p.x,cx-slotX+pr*.15,cx+slotX-pr*.15);
-        p.z=clamp(p.z,cz-slotZ+pr*.15,cz+slotZ-pr*.15);
-      }
-    }else if(inChute){
-      p.x=clamp(p.x,cx-slotX+pr*.15,cx+slotX-pr*.15);
-      p.z=clamp(p.z,cz-slotZ+pr*.15,cz+slotZ-pr*.15);
+  // A numerical spout wall: it only removes sideways drift above the outlet.
+  // It never sets vertical velocity, and has no influence after release.
+  if(mode==1u && p.y>outletY && p.y<guideTop+d){
+    let r=length(q);let radius=S.shape.x;
+    if(r<radius*1.55){
+      let radial=select(vec2f(0.0),q/max(r,1.0e-6),r>1.0e-6);
+      let edge=smoothstep(radius*.58,radius*1.42,r);
+      v.x=mix(v.x,-radial.x*S.tune.x,.16+.20*edge);
+      v.z=mix(v.z,-radial.y*S.tune.x,.16+.20*edge);
     }
   }
-  pred[i]=vec4f(p,1.0);
+  if(mode==2u && p.y>outletY && p.y<guideTop+d){
+    let halfWidth=S.shape.x;
+    if(abs(p.z-centre.y)<halfWidth+d && abs(p.x-centre.x)<d*2.2){
+      v.x=mix(v.x,0.0,.32);
+      let edge=smoothstep(halfWidth*.78,halfWidth+d,abs(p.z-centre.y));
+      v.z=mix(v.z,-sign(p.z-centre.y)*S.tune.x,.10+.24*edge);
+    }
+  }
+  vel[j]=vec4f(v.xyz,0.0);
+
+  if(S.counts.y==0u){return;}
+  // Recycle calm water from below the free surface. Dynamic atomic claiming avoids
+  // stealing particles already in either falling stream and keeps total mass fixed.
+  let inThroat=p.y>outletY-d && p.y<guideTop+d*1.5;
+  let calmDonor=p.y<surface-d*1.25 && length(v.xyz)<S.tune.y && !inThroat;
+  if(!calmDonor){return;}
+  let slot=atomicAdd(&C.claim,1u);if(slot>=S.counts.y){return;}
+  let np=sourcePos[slot];pos[j]=np;pred[j]=np;vel[j]=sourceVel[slot];
+  atomicAdd(&C.emitted,1u);
 }`;
 
-const shaderModule=dev.createShaderModule({code:boundaryWGSL,label:'fluidV8M831GravitySourceBoundaryWGSL'});
-if(typeof shaderModule.getCompilationInfo==='function'){
-  const info=await shaderModule.getCompilationInfo();
-  const errors=(info.messages||[]).filter(m=>m.type==='error');
-  if(errors.length)throw new Error('M8.3 gravity source WGSL: '+errors.map(m=>`${m.lineNum||'?'}:${m.linePos||'?'} ${m.message}`).join(' | '));
+const module=dev.createShaderModule({code:sourceWGSL,label:'fluidV8M833GravityReleaseWGSL'});
+if(typeof module.getCompilationInfo==='function'){
+  const info=await module.getCompilationInfo();const errors=(info.messages||[]).filter(m=>m.type==='error');
+  if(errors.length)throw new Error('M8.3.3 gravity release WGSL: '+errors.map(m=>`${m.lineNum||'?'}:${m.linePos||'?'} ${m.message}`).join(' | '));
 }
-const boundaryPipe=await dev.createComputePipelineAsync({label:'fluidV8M831GravitySourceBoundary',layout:'auto',compute:{module:shaderModule,entryPoint:'main'}});
-const boundaryUni=dev.createBuffer({label:'fluidV8M831GravitySourceUniform',size:32,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
-const BF=new Float32Array(8),BU=new Uint32Array(BF.buffer);
-const bindGroups=new Map();
+const pipe=await dev.createComputePipelineAsync({label:'fluidV8M833GravityRelease',layout:'auto',compute:{module,entryPoint:'main'}});
 
-function buffersFor(parity){
-  return {
-    pos:sim.buf?.[parity===0?'posA':'posB'],
-    pred:sim.buf?.[parity===0?'predA':'predB'],
-  };
+function poolSurface(){
+  const b=sim.params.box,d=sim.params.spacing||.044,n=Math.max(1,sim.n||1);
+  const nx=Math.max(1,Math.floor((b[0]-2*d)/d)),nz=Math.max(1,Math.floor((b[2]-2*d)/d));
+  return Math.min(b[1]-2*d,d+Math.ceil(n/(nx*nz))*d);
 }
-function bindGroup(parity){
-  const key=parity|0;if(bindGroups.has(key))return bindGroups.get(key);
-  const b=buffersFor(key);if(!b.pos||!b.pred)return null;
-  const bg=dev.createBindGroup({layout:boundaryPipe.getBindGroupLayout(0),entries:[
-    {binding:0,resource:{buffer:boundaryUni}},
-    {binding:1,resource:{buffer:b.pos}},
-    {binding:2,resource:{buffer:b.pred}},
-  ]});
-  bindGroups.set(key,bg);return bg;
-}
-function uploadBoundary(){
-  const b=sim.params.box,d=sim.params.spacing||.044;
-  BF.fill(0);BF[0]=b[0];BF[1]=b[1];BF[2]=b[2];BF[3]=d;
-  BU[4]=sim.n||fullN;BU[5]=active==='faucet'?1:active==='waterfall'?2:0;BU[6]=sourceFrames;
-  dev.queue.writeBuffer(boundaryUni,0,BF);
-}
-function encodeBoundary(enc,parity){
-  if(active==='none')return;
-  const bg=bindGroup(parity);if(!bg)return;
-  const pass=enc.beginComputePass({label:'fluidV8M831GravitySourceBoundaryPass'});
-  pass.setPipeline(boundaryPipe);pass.setBindGroup(0,bg);
-  pass.dispatchWorkgroups(Math.ceil(Math.max(1,sim.n||fullN)/256));pass.end();
-  boundaryPasses++;
-}
-
-function latticeSpec(bounds,d){
-  // The solver's rest distance is `d`. The old half-height BCC rows put vertical
-  // neighbours only ~0.63d apart, so every particle began over-compressed.
-  const step=d*1.04;
-  const nx=Math.max(2,Math.floor((bounds.maxX-bounds.minX)/step));
-  const nz=Math.max(2,Math.floor((bounds.maxZ-bounds.minZ)/step));
-  const ny=Math.max(1,Math.floor((bounds.maxY-bounds.minY)/step));
-  return {step,nx,nz,ny,capacity:nx*nz*ny};
-}
-function fillRestLattice(out,start,count,bounds,d){
-  const s=latticeSpec(bounds,d),layer=s.nx*s.nz;
-  for(let j=0;j<count;j++){
-    const iy=Math.floor(j/layer),r=j-iy*layer,iz=Math.floor(r/s.nx),ix=r-iz*s.nx;
-    const k=(start+j)*4;
-    out[k]=bounds.minX+(ix+.5)*s.step;
-    out[k+1]=bounds.minY+(iy+.5)*s.step;
-    out[k+2]=bounds.minZ+(iz+.5)*s.step;
-    out[k+3]=1;
+function geometry(name){
+  const b=sim.params.box,d=sim.params.spacing||.044,axial=d*1.04;
+  if(name==='faucet'){
+    const outletY=b[1]*.76,topY=outletY+axial*4.5;
+    return {d,axial,cx:b[0]*.50,cz:b[2]*.50,outletY,topY,radius:d*1.72,mode:1};
   }
-  return s;
+  const outletY=b[1]*.74,topY=outletY+axial*4.5;
+  return {d,axial,cx:b[0]*.27,cz:b[2]*.50,outletY,topY,radius:b[2]*.245,mode:2};
 }
-function zeroVelocity(buf){for(let i=3;i<buf.length;i+=4)buf[i]=0;}
-
-function seedScenario(){
-  const b=sim.params.box,d=sim.params.spacing||.044,n=fullN;
-  const margin=d*.95;
-  const upper=active==='faucet'
-    ?{minX:b[0]*.29,maxX:b[0]*.71,minY:b[1]*.86,maxY:b[1]*.98,minZ:b[2]*.18,maxZ:b[2]*.82,fraction:.08}
-    :{minX:Math.max(margin,b[0]*.01),maxX:b[0]*.43,minY:b[1]*.82,maxY:b[1]*.98,minZ:b[2]*.13,maxZ:b[2]*.87,fraction:.12};
-  const upperSpec=latticeSpec(upper,d);
-  const sourceN=Math.max(1,Math.min(Math.round(n*upper.fraction),Math.floor(upperSpec.capacity*.94)));
-  const lowerN=n-sourceN;
-  const lower={minX:margin,maxX:b[0]-margin,minY:margin,maxY:b[1]*.62,minZ:margin,maxZ:b[2]-margin};
-  const P=new Float32Array(n*4),V=new Float32Array(n*4);
-  fillRestLattice(P,0,lowerN,lower,d);fillRestLattice(P,lowerN,sourceN,upper,d);zeroVelocity(V);
-  const names=['posA','posB','predA','predB'];
-  for(const name of names){const target=sim.buf?.[name];if(target)dev.queue.writeBuffer(target,0,P);}
-  for(const name of ['velA','velB']){const target=sim.buf?.[name];if(target)dev.queue.writeBuffer(target,0,V);}
-  sim.n=n;if(sim.scene){sim.scene.n=n;sim.scene.nFluid=n;}sourceFrames=0;
-  sim.uploadParams?.(1/240);sim.bindCache=null;bindGroups.clear();seeds++;
+function appendPlane(P,V,start,g,y){
+  let n=start;
+  if(g.mode===1){
+    for(let ix=-1;ix<=1;ix++)for(let iz=-1;iz<=1;iz++){
+      if(n>=MAX_SOURCE)return n;
+      const k=n*4;P[k]=g.cx+ix*g.axial;P[k+1]=y;P[k+2]=g.cz+iz*g.axial;P[k+3]=1;
+      V[k]=0;V[k+1]=0;V[k+2]=0;V[k+3]=0;n++;
+    }
+  }else{
+    const lanes=Math.max(8,Math.floor((g.radius*2)/g.axial));
+    for(let row=-1;row<=1;row+=2)for(let lane=0;lane<lanes;lane++){
+      if(n>=MAX_SOURCE)return n;
+      const z=g.cz-g.radius+(lane+.5)*(g.radius*2/lanes),k=n*4;
+      P[k]=g.cx+row*g.axial*.52;P[k+1]=y;P[k+2]=z;P[k+3]=1;
+      V[k]=0;V[k+1]=0;V[k+2]=0;V[k+3]=0;n++;
+    }
+  }
+  return n;
+}
+function prepareSource(dt){
+  sourceN=0;if(active==='none'||ui.paused)return;
+  const g=geometry(active),P=new Float32Array(MAX_SOURCE*4),V=new Float32Array(MAX_SOURCE*4);
+  if(prime){
+    // A short, non-overlapping throat starts at rest exactly like Pour's reservoir.
+    for(let layer=0;layer<4;layer++)sourceN=appendPlane(P,V,sourceN,g,g.outletY+(layer+.55)*g.axial);
+    prime=false;carry=0;
+  }else{
+    const gravity=Math.max(.1,Number(sim.params.gravity)||9.81);
+    const interval=Math.sqrt(2*g.axial/gravity);
+    carry+=Math.min(.05,Math.max(.001,Number.isFinite(dt)?dt:1/60));
+    if(carry>=interval){carry-=interval;sourceN=appendPlane(P,V,0,g,g.topY);emissions++;}
+    carry=Math.min(carry,interval*.98);
+  }
+  if(sourceN>0){dev.queue.writeBuffer(sourcePos,0,P);dev.queue.writeBuffer(sourceVel,0,V);recycled+=sourceN;}
+}
+function encodeSource(enc){
+  if(active==='none')return false;
+  const n=Math.max(1,sim.n||1),b=sim.params.box,g=geometry(active),surface=poolSurface();
+  F.fill(0);U[0]=n;U[1]=sourceN;U[2]=(Math.imul(serial++,2654435761)>>>0)%n;U[3]=g.mode;
+  F[4]=b[0];F[5]=b[1];F[6]=b[2];F[7]=g.d;
+  F[8]=g.cx;F[9]=g.outletY;F[10]=g.cz;F[11]=0;
+  F[12]=g.radius;F[13]=g.topY;F[14]=surface;F[15]=g.axial*2;
+  F[16]=.10;F[17]=2.8;F[18]=lastDt;F[19]=0;
+  dev.queue.writeBuffer(uniform,0,F);dev.queue.writeBuffer(counter,0,counterZero);
+  const s=sim.parity===0?'A':'B';
+  const bg=dev.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:[
+    {binding:0,resource:{buffer:uniform}},{binding:1,resource:{buffer:sourcePos}},{binding:2,resource:{buffer:sourceVel}},
+    {binding:3,resource:{buffer:sim.buf['pos'+s]}},{binding:4,resource:{buffer:sim.buf['vel'+s]}},
+    {binding:5,resource:{buffer:sim.buf['pred'+s]}},{binding:6,resource:{buffer:counter}},
+  ]});
+  const pass=enc.beginComputePass({label:active==='faucet'?'fluidV8M833FaucetRelease':'fluidV8M833WaterfallRelease'});
+  pass.setPipeline(pipe);pass.setBindGroup(0,bg);pass.dispatchWorkgroups(Math.ceil(n/256));pass.end();
+  sourceN=0;passes++;sim.bindCache=null;return true;
 }
 
 const baseCreate=dev.createCommandEncoder.bind(dev),baseStep=sim.step.bind(sim);
-dev.createCommandEncoder=function(desc){
-  const enc=baseCreate(desc);
-  if(!inStep||active==='none')return enc;
-  let parity=sim.parity|0;
-  return new Proxy(enc,{get(target,prop){
-    if(prop==='beginComputePass')return function(passDesc){
-      const pass=target.beginComputePass(passDesc);
-      let pipeline=null;
-      return new Proxy(pass,{get(passTarget,passProp){
-        if(passProp==='setPipeline')return function(p){pipeline=p;return passTarget.setPipeline(p)};
-        if(passProp==='end')return function(){
-          const result=passTarget.end();
-          if(pipeline===sim.pipe?.predict)encodeBoundary(target,parity);
-          else if(pipeline===sim.pipe?.delta)encodeBoundary(target,parity);
-          return result;
-        };
-        const value=passTarget[passProp];return typeof value==='function'?value.bind(passTarget):value;
-      }});
-    };
-    const value=target[prop];return typeof value==='function'?value.bind(target):value;
-  }});
-};
-sim.step=function(dt){
-  if(active!=='none'){
-    if(pendingSeed){pendingSeed=false;seedScenario();}
-    uploadBoundary();sourceFrames=Math.min(1000000,sourceFrames+1);
-  }
-  inStep=true;try{return baseStep(dt)}finally{inStep=false;}
-};
+dev.createCommandEncoder=function(desc){const enc=baseCreate(desc);if(inStep&&active!=='none')encodeSource(enc);return enc;};
+sim.step=function(dt){lastDt=Number.isFinite(dt)?dt:lastDt;prepareSource(lastDt);inStep=true;try{return baseStep(dt)}finally{inStep=false;}};
 
 function choose(name){
   if(name!=='faucet'&&name!=='waterfall')return false;
   try{legacy.disable?.()}catch{}
-  // seedScenario writes a complete pool + upper reservoir. Queuing the ordinary Pool
-  // seed here would execute afterward and erase the reservoir before its first frame.
-  active=name;pendingSeed=true;sourceFrames=0;bindGroups.clear();
-  if(ui.paused)ui.paused=false;
-  return true;
+  scenes.choose('pool');active=name;prime=true;carry=0;sourceN=0;serial++;
+  if(ui.paused)ui.paused=false;return true;
 }
-function disable(){active='none';pendingSeed=false;sourceFrames=0;bindGroups.clear();}
+function disable(){active='none';prime=true;carry=0;sourceN=0;}
 
 window.__v5M755GravitySources={
-  online:true,backend:'settled-rest-lattice-world-gravity-m832',choose,disable,
-  get active(){return active},get seeds(){return seeds},get boundaryPasses(){return boundaryPasses},
-  get model(){return 'zero-velocity PBF reservoir + static outlet boundary + world gravity'},
+  online:true,backend:'rest-spaced-open-boundary-world-gravity-m833',choose,disable,
+  get active(){return active},get passes(){return passes},get recycled(){return recycled},get emissions(){return emissions},
+  get model(){return 'zero-launch inlet layers + ordinary PBF + world gravity after release'},
 };
-console.info('[Fluid V8 M8.3.2] Faucet/Waterfall use settled rest-lattice reservoirs; no overlapping packets or launch acceleration.');
+console.info('[Fluid V8 M8.3.3] Faucet/Waterfall use zero-launch rest-spaced inlet layers and world gravity; no elevated tank or packet impulse.');

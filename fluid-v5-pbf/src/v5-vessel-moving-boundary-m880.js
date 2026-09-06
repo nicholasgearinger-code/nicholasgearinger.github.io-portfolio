@@ -48,7 +48,7 @@ function profileRadius(y){
 }
 
 function seedHydrostaticVolume(){
-  const d=Math.max(.001,Number(sim.params?.spacing)||.019);
+  const d=Math.max(.001,Number(sim.params?.spacing)||.016);
   const a=Math.cbrt(2)*d,dy=.5*a;
   const minY=vesselProfile[0][0]+d*.74,fillY=.100;
   const P=[],V=[];let layer=0;
@@ -260,7 +260,7 @@ function prepareSlot(slot,dt){
   pitcher.prevAngle=prev;pitcher.angle=next;pitcher.omega=(next-prev)/dt;
   const F=new Float32Array(24),U=new Uint32Array(F.buffer);
   F[0]=pitcher.cx;F[1]=pitcher.cy;F[2]=pitcher.cz;F[3]=next;
-  F[4]=prev;F[5]=dt;F[6]=Number(sim.params?.spacing)||.019;F[7]=pitcher.omega;
+  F[4]=prev;F[5]=dt;F[6]=Number(sim.params?.spacing)||.016;F[7]=pitcher.omega;
   F[8]=glass.cx;F[9]=glass.bottom;F[10]=glass.cz;F[11]=glass.innerBottom;
   F[12]=glass.innerTop;F[13]=glass.outerBottom;F[14]=glass.outerTop;F[15]=glass.rim;
   F[16]=glass.baseTop;U[20]=sim.n;

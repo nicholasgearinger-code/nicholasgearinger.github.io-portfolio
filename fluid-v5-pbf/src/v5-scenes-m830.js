@@ -253,6 +253,7 @@ sim.step=function(dt){lastDt=Number.isFinite(dt)?dt:lastDt;advanceDrain(lastDt);
 
 function choose(name){
   resetControllers();
+  window.__v5M803Splash?.setScenario?.(name);
   if(name==='pool'||name==='dam'){
     active=name;scenes.choose(name);
   }else if(name==='wave'){

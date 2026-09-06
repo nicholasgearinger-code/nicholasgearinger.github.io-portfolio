@@ -74,8 +74,9 @@ dev.createCommandEncoder=function(desc){
   }});
 };
 sim.step=function(dt){
-  // Keep cohesion low and use neighbour viscosity rather than droplet-forming tension.
-  if(sim.params){sim.params.xsphC=.045;sim.params.surfaceTensionK=.004;}
+  // Keep surface tension low enough to avoid large blobs, while modest neighbour viscosity
+  // aligns nearby velocities so the denser outlet particles form a coherent water stream.
+  if(sim.params){sim.params.xsphC=.062;sim.params.surfaceTensionK=.005;}
   inStep=true;try{return baseStep(dt)}finally{inStep=false;}
 };
 if(ssfr){ssfr.splatRadius=1.06;ssfr.thicknessRadius=.90;ssfr.bindCache=null;}

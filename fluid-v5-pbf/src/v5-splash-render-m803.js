@@ -7,8 +7,8 @@ const ssfr=window.__ssfr;
 if(!ssfr?.dev||!ssfr?.format) throw new Error('M8.0.3 splash render: SSFR runtime unavailable.');
 const dev=ssfr.dev;
 const pourMode=new URLSearchParams(location.search).get('scenario')==='pour';
-const sparseScale=pourMode?.27:.52;
-const sparseAspect=pourMode?1.24:1.42;
+const sparseScale=pourMode?.34:.82;
+const sparseAspect=1.25;
 
 const UPSTREAM='https://cdn.jsdelivr.net/gh/matsuoka-601/Particles4All@58d6fa6d2c50e3f58da5c7a6f9b885ce26c485f0/src/';
 const SW=await import(UPSTREAM+'ssfr_wgsl.js');
@@ -58,21 +58,32 @@ ssfr.pipeThick=await dev.createRenderPipelineAsync({
   primitive:{topology:'triangle-strip'},
 });
 
-if(pourMode){
-  ssfr.splatRadius=Math.min(ssfr.splatRadius,1.04);
-  ssfr.thicknessRadius=Math.min(ssfr.thicknessRadius,.88);
-  ssfr.filterSigma=Math.min(ssfr.filterSigma,.52);
-}else{
-  // At reduced render scales, sub-pixel droplets need a slightly larger footprint so the
-  // composite can anti-alias their circular silhouette instead of exposing one square texel.
-  ssfr.splatRadius=Math.min(ssfr.splatRadius,.88);
-  ssfr.thicknessRadius=Math.min(ssfr.thicknessRadius,.56);
-  ssfr.filterSigma=Math.min(ssfr.filterSigma,.60);
+function setScenario(name){
+  if(pourMode||name==='pour'){
+    ssfr.splatRadius=1.04;
+    ssfr.thicknessRadius=.88;
+    ssfr.filterSigma=Math.min(ssfr.filterSigma,.52);
+  }else if(name==='faucet'){
+    ssfr.splatRadius=.92;
+    ssfr.thicknessRadius=.72;
+    ssfr.filterSigma=.58;
+  }else if(name==='waterfall'){
+    ssfr.splatRadius=.95;
+    ssfr.thicknessRadius=.76;
+    ssfr.filterSigma=.58;
+  }else{
+    // At reduced render scales, sparse droplets need several depth pixels of coverage so the
+    // true ellipsoid intersection remains visibly round instead of collapsing to one square texel.
+    ssfr.splatRadius=.88;
+    ssfr.thicknessRadius=.56;
+    ssfr.filterSigma=Math.min(ssfr.filterSigma,.60);
+  }
+  ssfr.bindCache=null;
 }
-ssfr.bindCache=null;
+setScenario(new URLSearchParams(location.search).get('scenario')||'pool');
 
 const api={online:true,backend:'scenario-aware-rounded-ssfr-m803',gpuPassesAdded:0,gpuSubmitsAdded:0,
-  pourMode,minScale:sparseScale,denseScale:1.0,sparseAspect};
+  pourMode,minScale:sparseScale,denseScale:1.0,sparseAspect,setScenario};
 window.__v5M802Splash=api;
 window.__v5M803Splash=api;
 window.__fluidV5Version='8.0.3';

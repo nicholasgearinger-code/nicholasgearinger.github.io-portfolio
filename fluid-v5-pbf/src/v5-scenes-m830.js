@@ -341,8 +341,12 @@ function sync(){
 }
 setInterval(sync,400);sync();
 
-const requested=new URLSearchParams(location.search).get('scene');
-if(requested&&buttons[requested])setTimeout(()=>choose(requested),350);else setTimeout(()=>choose('pool'),220);
+// The public lab uses `scenario`; older standalone previews used `scene`.
+// Reading only the legacy key scheduled Pool 220 ms after the dock had already
+// selected Waterfall, silently disabling its source while leaving the label stale.
+const initialQuery=new URLSearchParams(location.search);
+const requested=initialQuery.get('scenario')||initialQuery.get('scene');
+if(requested&&buttons[requested])setTimeout(()=>choose(requested),220);else setTimeout(()=>choose('pool'),220);
 window.__v5M830Scenes={
   online:true,backend:'full-scenario-restore-m830',gpuSubmitsAdded:0,choose,
   get active(){return active},get pourSeeds(){return pourSeeds},get drainPasses(){return drainPasses},

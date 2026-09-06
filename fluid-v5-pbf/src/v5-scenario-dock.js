@@ -97,6 +97,10 @@ for(const [key,label,note] of scenarios){
 }
 const labelFor=key=>scenarios.find(item=>item[0]===key)?.[1]||key.toUpperCase();
 function sync(){
+  // Reflect the actual common-water controller state. This prevents the dock from
+  // claiming Waterfall is active if another initializer/controller selected Pool.
+  const live=window.__v5M830Scenes?.active;
+  if(active!=='pour'&&valid.has(live))active=live;
   dock.querySelector('.fsdActive').textContent=labelFor(active);
   dock.querySelector('.fsdHelp').textContent=descriptions[active]||'';
   dock.querySelectorAll('[data-scene]').forEach(button=>button.classList.toggle('active',button.dataset.scene===active));

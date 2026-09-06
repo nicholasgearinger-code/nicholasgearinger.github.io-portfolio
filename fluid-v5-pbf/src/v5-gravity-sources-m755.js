@@ -1,4 +1,4 @@
-// Fluid V8 M8.3.1 — finite gravity reservoirs for Faucet and Waterfall.
+// Fluid V8 M8.3.2 — settled finite gravity reservoirs for Faucet and Waterfall.
 // Unlike the legacy source scenes, this module never injects overlapping packets.
 // It seeds one coherent PBF volume at rest and constrains it inside an elevated
 // reservoir with an open outlet. World gravity alone establishes the stream.
@@ -11,7 +11,7 @@ if(!sim?.dev||!ui||!scenes?.online||!legacy?.online)
 
 const dev=sim.dev;
 const fullN=Math.max(1,sim.scene?.nFluid||sim.n||1);
-let active='none',pendingSeed=false,inStep=false,seeds=0,boundaryPasses=0;
+let active='none',pendingSeed=false,inStep=false,seeds=0,boundaryPasses=0,sourceFrames=0;
 
 const boundaryWGSL=`
 struct SourceU { boxSpacing:vec4f, info:vec4u }
@@ -46,7 +46,10 @@ fn main(@builtin(global_invocation_id) gid:vec3u){
       p.x=clamp(p.x,ctr.x-hx+pr,ctr.x+hx-pr);
       p.z=clamp(p.z,ctr.y-hz+pr,ctr.y+hz-pr);
       p.y=min(p.y,topY-pr);
-      let overHole=length(p.xz-ctr)<outletR-pr*.35;
+      // Give the freshly seeded reservoir time to find hydrostatic equilibrium.
+      // Opening immediately turns ordinary overlap correction into a pressure blast.
+      let outletOpen=U.info.z>20u;
+      let overHole=outletOpen&&length(p.xz-ctr)<outletR-pr*.35;
       if(p.y<floorY+pr&&!overHole){p.y=floorY+pr;}
       if(p.y<floorY+pr&&overHole){
         let clampedXZ=clampDisk(p.xz,ctr,outletR-pr*.20);
@@ -71,7 +74,8 @@ fn main(@builtin(global_invocation_id) gid:vec3u){
       p.x=clamp(p.x,cx-hx+pr,cx+hx-pr);
       p.z=clamp(p.z,cz-hz+pr,cz+hz-pr);
       p.y=min(p.y,topY-pr);
-      let overSlot=abs(p.x-cx)<slotX-pr*.20&&abs(p.z-cz)<slotZ-pr*.20;
+      let outletOpen=U.info.z>20u;
+      let overSlot=outletOpen&&abs(p.x-cx)<slotX-pr*.20&&abs(p.z-cz)<slotZ-pr*.20;
       if(p.y<floorY+pr&&!overSlot){p.y=floorY+pr;}
       if(p.y<floorY+pr&&overSlot){
         p.x=clamp(p.x,cx-slotX+pr*.15,cx+slotX-pr*.15);
@@ -115,7 +119,7 @@ function bindGroup(parity){
 function uploadBoundary(){
   const b=sim.params.box,d=sim.params.spacing||.044;
   BF.fill(0);BF[0]=b[0];BF[1]=b[1];BF[2]=b[2];BF[3]=d;
-  BU[4]=sim.n||fullN;BU[5]=active==='faucet'?1:active==='waterfall'?2:0;
+  BU[4]=sim.n||fullN;BU[5]=active==='faucet'?1:active==='waterfall'?2:0;BU[6]=sourceFrames;
   dev.queue.writeBuffer(boundaryUni,0,BF);
 }
 function encodeBoundary(enc,parity){
@@ -128,21 +132,22 @@ function encodeBoundary(enc,parity){
 }
 
 function latticeSpec(bounds,d){
-  const a=Math.cbrt(2)*d,dy=.5*a;
-  const nx=Math.max(2,Math.floor((bounds.maxX-bounds.minX)/a)-1);
-  const nz=Math.max(2,Math.floor((bounds.maxZ-bounds.minZ)/a)-1);
-  const ny=Math.max(1,Math.floor((bounds.maxY-bounds.minY)/dy)-1);
-  return {a,dy,nx,nz,ny,capacity:nx*nz*ny};
+  // The solver's rest distance is `d`. The old half-height BCC rows put vertical
+  // neighbours only ~0.63d apart, so every particle began over-compressed.
+  const step=d*1.04;
+  const nx=Math.max(2,Math.floor((bounds.maxX-bounds.minX)/step));
+  const nz=Math.max(2,Math.floor((bounds.maxZ-bounds.minZ)/step));
+  const ny=Math.max(1,Math.floor((bounds.maxY-bounds.minY)/step));
+  return {step,nx,nz,ny,capacity:nx*nz*ny};
 }
-function fillBCC(out,start,count,bounds,d){
+function fillRestLattice(out,start,count,bounds,d){
   const s=latticeSpec(bounds,d),layer=s.nx*s.nz;
   for(let j=0;j<count;j++){
     const iy=Math.floor(j/layer),r=j-iy*layer,iz=Math.floor(r/s.nx),ix=r-iz*s.nx;
-    const off=(iy&1)*s.a*.5;
     const k=(start+j)*4;
-    out[k]=bounds.minX+(ix+.55)*s.a+off;
-    out[k+1]=bounds.minY+(iy+.65)*s.dy;
-    out[k+2]=bounds.minZ+(iz+.55)*s.a+off;
+    out[k]=bounds.minX+(ix+.5)*s.step;
+    out[k+1]=bounds.minY+(iy+.5)*s.step;
+    out[k+2]=bounds.minZ+(iz+.5)*s.step;
     out[k+3]=1;
   }
   return s;
@@ -160,11 +165,11 @@ function seedScenario(){
   const lowerN=n-sourceN;
   const lower={minX:margin,maxX:b[0]-margin,minY:margin,maxY:b[1]*.62,minZ:margin,maxZ:b[2]-margin};
   const P=new Float32Array(n*4),V=new Float32Array(n*4);
-  fillBCC(P,0,lowerN,lower,d);fillBCC(P,lowerN,sourceN,upper,d);zeroVelocity(V);
+  fillRestLattice(P,0,lowerN,lower,d);fillRestLattice(P,lowerN,sourceN,upper,d);zeroVelocity(V);
   const names=['posA','posB','predA','predB'];
   for(const name of names){const target=sim.buf?.[name];if(target)dev.queue.writeBuffer(target,0,P);}
   for(const name of ['velA','velB']){const target=sim.buf?.[name];if(target)dev.queue.writeBuffer(target,0,V);}
-  sim.n=n;if(sim.scene){sim.scene.n=n;sim.scene.nFluid=n;}
+  sim.n=n;if(sim.scene){sim.scene.n=n;sim.scene.nFluid=n;}sourceFrames=0;
   sim.uploadParams?.(1/240);sim.bindCache=null;bindGroups.clear();seeds++;
 }
 
@@ -194,7 +199,7 @@ dev.createCommandEncoder=function(desc){
 sim.step=function(dt){
   if(active!=='none'){
     if(pendingSeed){pendingSeed=false;seedScenario();}
-    uploadBoundary();
+    uploadBoundary();sourceFrames=Math.min(1000000,sourceFrames+1);
   }
   inStep=true;try{return baseStep(dt)}finally{inStep=false;}
 };
@@ -204,15 +209,15 @@ function choose(name){
   try{legacy.disable?.()}catch{}
   // seedScenario writes a complete pool + upper reservoir. Queuing the ordinary Pool
   // seed here would execute afterward and erase the reservoir before its first frame.
-  active=name;pendingSeed=true;bindGroups.clear();
+  active=name;pendingSeed=true;sourceFrames=0;bindGroups.clear();
   if(ui.paused)ui.paused=false;
   return true;
 }
-function disable(){active='none';pendingSeed=false;bindGroups.clear();}
+function disable(){active='none';pendingSeed=false;sourceFrames=0;bindGroups.clear();}
 
 window.__v5M755GravitySources={
-  online:true,backend:'finite-reservoir-world-gravity-m831',choose,disable,
+  online:true,backend:'settled-rest-lattice-world-gravity-m832',choose,disable,
   get active(){return active},get seeds(){return seeds},get boundaryPasses(){return boundaryPasses},
   get model(){return 'zero-velocity PBF reservoir + static outlet boundary + world gravity'},
 };
-console.info('[Fluid V8 M8.3.1] Faucet/Waterfall use finite at-rest reservoirs; no particle packets or launch acceleration.');
+console.info('[Fluid V8 M8.3.2] Faucet/Waterfall use settled rest-lattice reservoirs; no overlapping packets or launch acceleration.');

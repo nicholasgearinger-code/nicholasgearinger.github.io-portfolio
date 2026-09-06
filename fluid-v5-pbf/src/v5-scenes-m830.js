@@ -18,8 +18,8 @@ const fullN=Math.max(1,sim.scene?.nFluid||sim.n||1);
 
 let active='pool', inStep=false, lastDt=1/60;
 let pendingPour=false, pourSeeds=0, pourFraction=.38;
-let drainActive=false, drainTime=0, drainCarry=0, drained=0, drainRate=.075, drainStrength=1.0;
-let drainPasses=0, drainShuffles=0, serial=1;
+let drainActive=false, drainTime=0, drainCarry=0, drainTake=0, drained=0, drainRate=.075, drainStrength=1.0;
+let drainPasses=0, drainShuffles=0;
 
 function restoreFullCount(){
   if(sim.n!==fullN){
@@ -28,9 +28,9 @@ function restoreFullCount(){
     sim.uploadParams?.(1/240);
     sim.bindCache=null;
   }
-  drained=0;drainCarry=0;
+  drained=0;drainCarry=0;drainTake=0;
 }
-function stopCustom(){pendingPour=false;drainActive=false;drainTime=0;drainCarry=0;drained=0;}
+function stopCustom(){pendingPour=false;drainActive=false;drainTime=0;drainCarry=0;drainTake=0;drained=0;}
 function stopLegacy(){
   try{gravitySources.disable?.()}catch{}
   try{scaled.disable?.()}catch{}
@@ -168,7 +168,7 @@ const drainUni=dev.createBuffer({label:'fluidV5M830DrainUniform',size:48,usage:G
 const DF=new Float32Array(12), DU=new Uint32Array(DF.buffer);
 
 const shuffleWGSL=`
-struct S { info:vec4u }
+struct S { info:vec4u, geom:vec4f }
 @group(0) @binding(0) var<uniform> U:S;
 @group(0) @binding(1) var<storage,read> pos:array<vec4f>;
 @group(0) @binding(2) var<storage,read> vel:array<vec4f>;
@@ -176,19 +176,30 @@ struct S { info:vec4u }
 @group(0) @binding(4) var<storage,read_write> outPos:array<vec4f>;
 @group(0) @binding(5) var<storage,read_write> outVel:array<vec4f>;
 @group(0) @binding(6) var<storage,read_write> outPred:array<vec4f>;
+@group(0) @binding(7) var<storage,read_write> counters:array<atomic<u32>>;
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid:vec3u){
   let i=gid.x;let n=U.info.x;if(i>=n||n==0u){return;}
-  let j=(i+U.info.y)%n;outPos[j]=pos[i];outVel[j]=vel[i];outPred[j]=pred[i];
+  let p=pos[i];let centre=vec2f(U.geom.x*.5,U.geom.y*.5);
+  let radius=min(U.geom.x,U.geom.y)*.22;
+  let inCore=length(p.xz-centre)<radius&&p.y<U.geom.z+2.0*U.geom.w;
+  var sinkParticle=false;
+  if(inCore){let ticket=atomicAdd(&counters[1],1u);sinkParticle=ticket<U.info.y;}
+  if(!sinkParticle){
+    let j=atomicAdd(&counters[0],1u);
+    outPos[j]=p;outVel[j]=vel[i];outPred[j]=pred[i];
+  }
 }`;
-const shMod=dev.createShaderModule({code:shuffleWGSL,label:'fluidV5M830DrainShuffleWGSL'});
+const shMod=dev.createShaderModule({code:shuffleWGSL,label:'fluidV5M832CentreDrainCompactionWGSL'});
 if(typeof shMod.getCompilationInfo==='function'){
   const info=await shMod.getCompilationInfo();const errors=(info.messages||[]).filter(m=>m.type==='error');
   if(errors.length)throw new Error('M8.3 drain shuffle WGSL: '+errors.map(m=>`${m.lineNum||'?'}:${m.linePos||'?'} ${m.message}`).join(' | '));
 }
-const shPipe=await dev.createComputePipelineAsync({label:'fluidV5M830DrainShuffle',layout:'auto',compute:{module:shMod,entryPoint:'main'}});
-const shUni=dev.createBuffer({label:'fluidV5M830DrainShuffleUniform',size:16,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
-const SU=new Uint32Array(4);
+const shPipe=await dev.createComputePipelineAsync({label:'fluidV5M832CentreDrainCompaction',layout:'auto',compute:{module:shMod,entryPoint:'main'}});
+const shUni=dev.createBuffer({label:'fluidV5M832CentreDrainUniform',size:32,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
+const SF=new Float32Array(8),SU=new Uint32Array(SF.buffer);
+const counterBuf=dev.createBuffer({label:'fluidV5M832CentreDrainCounters',size:16,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
+const counterZero=new Uint32Array(4);
 const scratchUsage=GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC|GPUBufferUsage.COPY_DST;
 const scratchBytes=Math.max(16,fullN*16);
 const scratchPos=dev.createBuffer({label:'fluidV5M830DrainScratchPos',size:scratchBytes,usage:scratchUsage});
@@ -210,27 +221,29 @@ function advanceDrain(dt){
   if(sim.n<=minN)return;
   drainCarry+=fullN*drainRate*Math.min(.05,Math.max(.001,dt||1/60));
   const take=Math.floor(drainCarry);if(take<1)return;drainCarry-=take;
-  sim.n=Math.max(minN,sim.n-take);drained=fullN-sim.n;sim.uploadParams?.(1/240);
+  drainTake=Math.min(Math.max(0,sim.n-minN),drainTake+take);
 }
 function encodeDrain(enc){
-  const n=Math.max(1,sim.n||1),b=sim.params.box,d=sim.params.spacing||.044;
+  let n=Math.max(1,sim.n||1);const b=sim.params.box,d=sim.params.spacing||.044;
   const pos=sim.livePos?.(),vel=sim.liveVel?.(),pred=sim.buf?.[sim.parity===0?'predA':'predB'];
   if(!pos||!vel||!pred)return false;
-  // Shuffle first. Because this is pre-solve, the normal PBF grid build that follows
-  // sees the new ordering and M8.2's later cellStart use remains valid.
-  if(n>1){
-    serial=(serial+1)>>>0;let offset=(Math.imul(serial,2654435761)>>>0)%n;
-    if(offset===0)offset=Math.max(1,Math.floor(n*.381966));
-    SU[0]=n;SU[1]=offset;SU[2]=0;SU[3]=0;dev.queue.writeBuffer(shUni,0,SU);
+  // Atomically compact survivors and discard only particles physically inside the
+  // centre drain. Shrinking the array by index made the pool vanish at its sides.
+  const take=Math.min(drainTake,Math.max(1,Math.floor(n*.0125)),Math.max(0,n-64));
+  if(take>0){
+    const oldN=n,newN=n-take;SF.fill(0);SU[0]=oldN;SU[1]=take;
+    SF[4]=b[0];SF[5]=b[2];SF[6]=poolSurface();SF[7]=d;
+    dev.queue.writeBuffer(shUni,0,SF);dev.queue.writeBuffer(counterBuf,0,counterZero);
     const sbg=dev.createBindGroup({layout:shPipe.getBindGroupLayout(0),entries:[
       {binding:0,resource:{buffer:shUni}},{binding:1,resource:{buffer:pos}},
       {binding:2,resource:{buffer:vel}},{binding:3,resource:{buffer:pred}},
       {binding:4,resource:{buffer:scratchPos}},{binding:5,resource:{buffer:scratchVel}},
-      {binding:6,resource:{buffer:scratchPred}},
+      {binding:6,resource:{buffer:scratchPred}},{binding:7,resource:{buffer:counterBuf}},
     ]});
-    let p=enc.beginComputePass({label:'fluidV5M830DrainPreSolveShuffle'});
-    p.setPipeline(shPipe);p.setBindGroup(0,sbg);p.dispatchWorkgroups(Math.ceil(n/256));p.end();
-    const bytes=n*16;enc.copyBufferToBuffer(scratchPos,0,pos,0,bytes);enc.copyBufferToBuffer(scratchVel,0,vel,0,bytes);enc.copyBufferToBuffer(scratchPred,0,pred,0,bytes);drainShuffles++;
+    let p=enc.beginComputePass({label:'fluidV5M832CentreDrainCompaction'});
+    p.setPipeline(shPipe);p.setBindGroup(0,sbg);p.dispatchWorkgroups(Math.ceil(oldN/256));p.end();
+    const bytes=newN*16;enc.copyBufferToBuffer(scratchPos,0,pos,0,bytes);enc.copyBufferToBuffer(scratchVel,0,vel,0,bytes);enc.copyBufferToBuffer(scratchPred,0,pred,0,bytes);
+    n=newN;sim.n=newN;drainTake=Math.max(0,drainTake-take);drained=fullN-newN;sim.uploadParams?.(1/240);drainShuffles++;
   }
   DF.fill(0);DF[0]=b[0];DF[1]=b[1];DF[2]=b[2];DF[3]=d;DF[4]=drainTime;DF[5]=drainStrength;DF[6]=poolSurface();DF[7]=drainRate;DU[8]=n;
   dev.queue.writeBuffer(drainUni,0,DF);
@@ -269,7 +282,7 @@ function choose(name){
   }else if(name==='pour'){
     active='pour';scenes.choose('pool');pendingPour=true;
   }else if(name==='drain'){
-    active='drain';scenes.choose('pool');drainActive=true;drainTime=0;drainCarry=0;drained=0;serial++;
+    active='drain';scenes.choose('pool');drainActive=true;drainTime=0;drainCarry=0;drainTake=0;drained=0;
   }else return;
   if(ui.paused)ui.paused=false;
   sync();
@@ -312,8 +325,8 @@ function slider(parent,label,min,max,step,value,onchange,fmt=v=>Number(v).toFixe
   input.oninput=e=>{e.stopPropagation();const n=Number(input.value);onchange(n);val.textContent=fmt(n);sync()};row.append(l,input,val);parent.appendChild(row);return input;
 }
 if(scenePage){
-  scenePage.innerHTML='<div class="m742Intro">M8.3 restores the complete scenario test set on the M8.2 common-water solver. Continuous source scenes reuse the last proven one-submit mechanics. Drain is rebuilt for M8 so particle permutation happens before the solver rebuilds its spatial grid.</div>';
-  const sec=document.createElement('div');sec.className='m742Section';sec.innerHTML='<div class="m742SectionTitle">SCENARIO VALIDATION</div><div class="m742Note">Expected behavior: Faucet = connected stream · Whirlpool = circular free-surface funnel · Drain = visible sink that actually lowers water volume · Fountain = mass-conserving recirculating jet.</div>';
+  scenePage.innerHTML='<div class="m742Intro">M8.3 restores the complete scenario test set on the M8.2 common-water solver. Faucet and Waterfall now drain finite at-rest reservoirs under gravity. Drain compacts only particles inside its centre opening.</div>';
+  const sec=document.createElement('div');sec.className='m742Section';sec.innerHTML='<div class="m742SectionTitle">SCENARIO VALIDATION</div><div class="m742Note">Expected behavior: Faucet = gravity-fed stream · Waterfall = continuous falling sheet · Drain = centre-only volume removal · Fountain = tall recirculating jet with a radial crown.</div>';
   slider(sec,'DRAIN RATE',.020,.160,.005,drainRate,v=>drainRate=v,v=>`${Number(v).toFixed(3)}/s`);
   slider(sec,'DRAIN FORCE',.55,1.65,.05,drainStrength,v=>drainStrength=v);
   slider(sec,'POUR FRACTION',.18,.58,.02,pourFraction,v=>pourFraction=v,v=>`${Math.round(Number(v)*100)}%`);

@@ -202,7 +202,9 @@ sim.step=function(dt){
 function choose(name){
   if(name!=='faucet'&&name!=='waterfall')return false;
   try{legacy.disable?.()}catch{}
-  scenes.choose('pool');active=name;pendingSeed=true;bindGroups.clear();
+  // seedScenario writes a complete pool + upper reservoir. Queuing the ordinary Pool
+  // seed here would execute afterward and erase the reservoir before its first frame.
+  active=name;pendingSeed=true;bindGroups.clear();
   if(ui.paused)ui.paused=false;
   return true;
 }

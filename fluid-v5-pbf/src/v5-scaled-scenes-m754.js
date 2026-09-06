@@ -14,7 +14,7 @@ const dev=sim.dev;
 const baseN=Math.max(1,sim.scene?.nFluid||sim.n||1);
 const baseSplat=ssfr?.splatRadius??1.0;
 let active='none',passes=0,start=performance.now();
-let fountainHeight=.28,fountainGain=1.0,vortexOmega=6.8,vortexGain=1.0,vortexCore=.25;
+let fountainHeight=.85,fountainGain=1.25,vortexOmega=6.8,vortexGain=1.0,vortexCore=.25;
 
 function poolSurface(){
   const b=sim.params.box,d=sim.params.spacing||.044;
@@ -51,6 +51,12 @@ fn safeDir(q:vec2f)->vec2f {
   let m=length(q);
   return select(vec2f(0.0),q/m,m>1.0e-6);
 }
+fn hash11(x:u32)->f32{
+  var h=x*747796405u+2891336453u;
+  h=((h>>((h>>28u)+4u))^h)*277803737u;
+  h=(h>>22u)^h;
+  return f32(h & 0x00ffffffu)/16777215.0;
+}
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid:vec3u){
   let i=gid.x;
@@ -73,26 +79,40 @@ fn main(@builtin(global_invocation_id) gid:vec3u){
   let ramp=smoothstep(0.0,1.5,t);
 
   // MODE 1: recirculating fountain pump. Existing water is accelerated through a narrow
-  // near-surface nozzle; surrounding water feeds inward. No particles are created.
+  // nozzle, then the high part of the jet opens into an umbrella-shaped radial crown.
   if(mode==1u){
-    let nozzleR=max(1.20*d,min(b.x,b.z)*.038);
-    let feedR=max(4.8*d,nozzleR*3.8);
-    let column=1.0-smoothstep(nozzleR*.58,nozzleR,r);
+    let peak=max(U.params.y,6.0*d);
+    let nozzleR=max(1.35*d,min(b.x,b.z)*.050);
+    let feedR=max(7.0*d,nozzleR*5.5);
+    let column=1.0-smoothstep(nozzleR*.62,nozzleR,r);
     let feed=(1.0-smoothstep(nozzleR,feedR,r))*(1.0-column);
-    let nozzleBottom=max(2.0*d,surface-max(.20,5.0*d));
-    let topWeight=smoothstep(nozzleBottom,surface+.25*d,p.y);
-    let exitMask=1.0-smoothstep(surface+.40*d,surface+1.65*d,p.y);
-    let wet=1.0-smoothstep(surface+2.0*d,surface+5.0*d,p.y);
+    let nozzleBottom=max(2.0*d,surface-max(.34,7.0*d));
+    let topWeight=smoothstep(nozzleBottom,surface+.12*d,p.y);
+    let exitMask=1.0-smoothstep(surface+.35*d,surface+2.2*d,p.y);
+    let wet=1.0-smoothstep(surface+peak*.92,surface+peak*1.12,p.y);
     let pump=column*topWeight*exitMask*wet*ramp;
-    let blend=clamp((.12+.16*topWeight)*gain*pump,0.0,.34);
+    let blend=clamp((.30+.42*topWeight)*gain*pump,0.0,.74);
     v.y=mix(v.y,drive,blend);
-    // Gentle submerged lift keeps the nozzle supplied without forcing the entire pool upward.
+    // A submerged riser and broad intake continuously feed the visible nozzle.
     let stem=column*(1.0-topWeight)*wet*ramp;
-    v.y=mix(v.y,drive*.22,.025*gain*stem);
-    // Physically plausible intake around the nozzle: small radial convergence below the surface.
+    v.y=mix(v.y,drive*.58,clamp(.12*gain*stem,0.0,.22));
     let intake=feed*(1.0-smoothstep(surface-.10,surface+.08,p.y))*wet*ramp;
-    v.x-=dir.x*.055*gain*intake;
-    v.z-=dir.y*.055*gain*intake;
+    v.x-=dir.x*.18*gain*intake;
+    v.z-=dir.y*.18*gain*intake;
+
+    // Near the crest, turn the coherent vertical jet into the photographed fountain fan.
+    let rise=clamp((p.y-surface)/peak,0.0,1.0);
+    let crownBand=smoothstep(.28,.53,rise)*(1.0-smoothstep(.80,1.0,rise));
+    let crownCore=1.0-smoothstep(nozzleR*.85,nozzleR*3.5,r);
+    let crown=crownBand*crownCore*wet*ramp;
+    let angle=6.2831853*hash11(i*31u+17u);
+    let seedDir=vec2f(cos(angle),sin(angle));
+    let crownDir=select(dir,seedDir,r<d*.25);
+    let radialSpeed=drive*(.52+.18*rise);
+    let crownBlend=clamp(.16*gain*crown,0.0,.26);
+    v.x=mix(v.x,crownDir.x*radialSpeed,crownBlend);
+    v.z=mix(v.z,crownDir.y*radialSpeed,crownBlend);
+    v.y=mix(v.y,drive*(.52-.18*rise),clamp(.10*gain*crown,0.0,.18));
   }
 
   // MODE 2: circular Rankine vortex. Forced-vortex core (v_theta = omega r), then
@@ -139,7 +159,7 @@ function encodeEffect(enc){
   F.fill(0);
   F[0]=b[0];F[1]=b[1];F[2]=b[2];F[3]=d;
   F[4]=s;F[5]=active==='fountain'?jetSpeed():vortexOmega;F[6]=active==='fountain'?fountainGain:vortexGain;F[7]=t;
-  F[8]=vortexCore;F[9]=0;F[10]=0;F[11]=0;
+  F[8]=vortexCore;F[9]=fountainHeight;F[10]=0;F[11]=0;
   I[12]=Math.max(1,sim.n||1);I[13]=active==='fountain'?1:2;I[14]=0;I[15]=0;
   dev.queue.writeBuffer(uni,0,F);
   const pos=sim.livePos?.(),vel=sim.liveVel?.();if(!pos||!vel)return false;
@@ -191,8 +211,8 @@ if(scenePage){
   fBtn=rewire('fountain',()=>choose('fountain'));wBtn=rewire('whirlpool',()=>choose('whirlpool'));
   scenePage.addEventListener('click',e=>{const b=e.target.closest?.('button');if(!b)return;const n=b.dataset?.scene;if(n!=='fountain'&&n!=='whirlpool'&&active!=='none')disable();},true);
   const sec=document.createElement('div');sec.className='m742Section';
-  sec.innerHTML='<div class="m742SectionTitle">FINE FOUNTAIN + CIRCULAR VORTEX · M7.5.5</div><div class="m742Note">Fountain now recirculates the existing pool instead of adding mass, which removes the overfill/spray explosion. Whirlpool uses a circular Rankine vortex: solid-body core plus 1/r outer swirl. The surface depression comes from centrifugal pressure, not an artificial downward funnel force. LOW still uses 4.4 cm physical particle spacing; the smaller fountain droplets use a tighter SSFR reconstruction only.</div>';
-  slider(sec,'FOUNTAIN PEAK',.12,.55,.02,fountainHeight,v=>fountainHeight=v,v=>`${Number(v).toFixed(2)} m`);
+  sec.innerHTML='<div class="m742SectionTitle">RADIAL-CROWN FOUNTAIN + CIRCULAR VORTEX</div><div class="m742Note">Fountain recirculates the pool through a submerged riser, forms a coherent vertical jet, then spreads near the crest into an umbrella-shaped radial spray. Whirlpool retains its circular Rankine pressure field.</div>';
+  slider(sec,'FOUNTAIN PEAK',.30,1.15,.05,fountainHeight,v=>fountainHeight=v,v=>`${Number(v).toFixed(2)} m`);
   slider(sec,'FOUNTAIN GAIN',.55,1.60,.05,fountainGain,v=>fountainGain=v);
   slider(sec,'VORTEX OMEGA',3.0,10.0,.2,vortexOmega,v=>vortexOmega=v,v=>`${Number(v).toFixed(1)} rad/s`);
   slider(sec,'VORTEX CORE',.14,.38,.01,vortexCore,v=>vortexCore=v,v=>`${Math.round(Number(v)*100)}%`);

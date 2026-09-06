@@ -1,4 +1,4 @@
-// Fluid V8 M8.3.6 — gravity-release Faucet and continuous Waterfall curtain.
+// Fluid V8 M8.3.5 — gravity-release Faucet and continuous Waterfall curtain.
 //
 // Both sources reuse ordinary pool particles, place them in rest-spaced inlet
 // layers. Faucet begins at rest. Waterfall receives only its velocity at the lip;
@@ -117,7 +117,7 @@ function geometry(name){
   // particle density as the free sheet accelerates instead of releasing one slab/frame.
   return {d,axial,cx:b[0]*.27,cz:b[2]*.50,outletY,topY,radius:b[2]*.245,mode:2,speed:1.55,terminal:1.82};
 }
-function appendPlane(P,V,start,g,y,downSpeed=g.speed||0){
+function appendPlane(P,V,start,g,y){
   let n=start;
   if(g.mode===1){
     for(let ix=-1;ix<=1;ix++)for(let iz=-1;iz<=1;iz++){
@@ -134,7 +134,7 @@ function appendPlane(P,V,start,g,y,downSpeed=g.speed||0){
       // remains rest-spaced, but their projection fills the gaps between rows.
       const phase=(lane&1)+(row>0?2:0);
       P[k]=g.cx+row*g.axial*.52;P[k+1]=y+phase*g.axial*.25;P[k+2]=z;P[k+3]=1;
-      V[k]=0;V[k+1]=-downSpeed;V[k+2]=0;V[k+3]=0;n++;
+      V[k]=0;V[k+1]=-g.speed;V[k+2]=0;V[k+3]=0;n++;
     }
   }
   return n;
@@ -148,21 +148,12 @@ function prepareSource(dt){
     for(let layer=0;layer<layers;layer++)sourceN=appendPlane(P,V,sourceN,g,g.outletY+(layer+.55)*g.axial);
     prime=false;carry=0;
   }else if(g.mode===2){
-    // Reconstruct the water released during the previous rendered frame as
-    // ballistic micro-layers. At 20 FPS this is normally three layers, at 30 FPS
-    // two, and at 60 FPS one. Their positions and velocities correspond to evenly
-    // spaced sub-frame ages, so there is no frame-sized empty band in the sheet.
-    const stepDt=Math.min(.05,Math.max(.001,Number.isFinite(dt)?dt:1/60));
-    const gravity=Math.max(.1,Number(sim.params.gravity)||9.81);
-    const travel=g.speed*stepDt+.5*gravity*stepDt*stepDt;
-    const rows=Math.max(1,Math.min(4,Math.ceil(travel/(g.axial*.86))));
-    for(let row=0;row<rows;row++){
-      const age=stepDt*row/rows;
-      const distance=g.speed*age+.5*gravity*age*age;
-      const downSpeed=Math.min(g.terminal,g.speed+gravity*age);
-      sourceN=appendPlane(P,V,sourceN,g,g.topY-distance,downSpeed);
-    }
-    emissions+=rows;carry=0;
+    // Distance cadence keeps the Waterfall inlet continuous even at 20 FPS.
+    // Multiple missed layers are placed at distinct rest-spaced heights, never stacked.
+    carry+=g.speed*Math.min(.05,Math.max(.001,Number.isFinite(dt)?dt:1/60));
+    const rows=Math.min(4,Math.floor(carry/g.axial));
+    if(rows>0){carry-=rows*g.axial;for(let row=0;row<rows;row++)sourceN=appendPlane(P,V,sourceN,g,g.topY-row*g.axial);emissions+=rows;}
+    carry=Math.min(carry,g.axial*.98);
   }else{
     const gravity=Math.max(.1,Number(sim.params.gravity)||9.81);
     const interval=Math.sqrt(2*g.axial/gravity);
@@ -205,8 +196,8 @@ function choose(name){
 function disable(){active='none';prime=true;carry=0;sourceN=0;}
 
 window.__v5M755GravitySources={
-  online:true,backend:'ballistic-microlayer-sheet-m836',choose,disable,
+  online:true,backend:'continuous-sheet-terminal-drag-m835',choose,disable,
   get active(){return active},get passes(){return passes},get recycled(){return recycled},get emissions(){return emissions},
-  get model(){return 'frame-distance ballistic micro-layers + ordinary PBF + local sheet drag'},
+  get model(){return 'rest-spaced staggered inlet + ordinary PBF + gravity with local sheet drag'},
 };
-console.info('[Fluid V8 M8.3.6] Waterfall uses frame-distance ballistic micro-layers + local terminal sheet drag; Faucet remains zero-launch.');
+console.info('[Fluid V8 M8.3.5] Waterfall uses denser staggered release + local terminal sheet drag; Faucet remains zero-launch.');

@@ -7,8 +7,10 @@ const ssfr=window.__ssfr;
 if(!ssfr?.dev||!ssfr?.format) throw new Error('M8.0.3 splash render: SSFR runtime unavailable.');
 const dev=ssfr.dev;
 const pourMode=new URLSearchParams(location.search).get('scenario')==='pour';
-const sparseScale=pourMode?.34:.82;
-const sparseAspect=1.25;
+// Dense regions still reconstruct at full size. Sparse particles stay much smaller,
+// so the curtain keeps its body while edge spray reads as droplets instead of blocks.
+const sparseScale=pourMode?.34:.46;
+const sparseAspect=pourMode?1.25:1.14;
 
 const UPSTREAM='https://cdn.jsdelivr.net/gh/matsuoka-601/Particles4All@58d6fa6d2c50e3f58da5c7a6f9b885ce26c485f0/src/';
 const SW=await import(UPSTREAM+'ssfr_wgsl.js');
@@ -68,12 +70,11 @@ function setScenario(name){
     ssfr.thicknessRadius=.72;
     ssfr.filterSigma=.58;
   }else if(name==='waterfall'){
-    // M8.3.8's tightly spaced micro-rows no longer need oversized reconstruction.
-    // Keep the central sheet joined while making detached edge parcels smaller,
-    // thinner and less blurred so they read as droplets instead of large blobs.
-    ssfr.splatRadius=1.08;
-    ssfr.thicknessRadius=.82;
-    ssfr.filterSigma=.58;
+    // Full-lane inlet rows now supply continuity, so reconstruction can stay thin.
+    // Dense curtain particles remain full-size while sparse edge parcels use 0.46x.
+    ssfr.splatRadius=1.02;
+    ssfr.thicknessRadius=.70;
+    ssfr.filterSigma=.52;
   }else{
     // At reduced render scales, sparse droplets need several depth pixels of coverage so the
     // true ellipsoid intersection remains visibly round instead of collapsing to one square texel.

@@ -1,4 +1,4 @@
-// Fluid V8 M8.3.8 — gravity-release Faucet and near-gapless Waterfall curtain.
+// Fluid V8 M8.3.9 — gravity-release Faucet and continuous Waterfall curtain.
 //
 // Both sources reuse ordinary pool particles, place them in rest-spaced inlet
 // layers. Faucet begins at rest. Waterfall receives only its velocity at the lip;
@@ -130,10 +130,8 @@ function appendPlane(P,V,start,g,y,halfSheet=false,depthPhase=0){
     const firstRow=halfSheet?(depthPhase&1?1:-1):-1;
     const lastRow=halfSheet?firstRow:1;
     for(let row=firstRow;row<=lastRow;row+=2)for(let lane=0;lane<lanes;lane++){
-      // Rotate a one-in-three lane opening through successive micro-rows. This
-      // trades depth redundancy for tighter vertical coverage without increasing
-      // particle flow; neighbouring rows fill every omitted lane.
-      if(halfSheet&&(lane+depthPhase)%3===0)continue;
+      // Keep every lateral lane populated. Vertical micro-spacing and alternating
+      // depth phases form a broad, thin curtain instead of detached parcels.
       if(n>=MAX_SOURCE)return n;
       const z=g.cz-g.radius+(lane+.5)*(g.radius*2/lanes),k=n*4;
       // Adjacent lanes/depth rows occupy four streamwise phases. Every column
@@ -157,10 +155,10 @@ function prepareSource(dt){
     for(let layer=0;layer<layers;layer++)sourceN=appendPlane(P,V,sourceN,g,g.outletY+(layer+.55)*g.axial);
     prime=false;carry=0;
   }else if(g.mode===2){
-    // Preserve essentially the M8.3.5 mass flow, but distribute it across narrow
-    // rotating micro-rows. At 20 FPS this yields 4–5 interleaved rows rather than
-    // 1–2 full slabs, keeping fall spacing below the reconstruction support.
-    const microSpacing=g.axial*.36;
+    // Distribute the curtain across tightly spaced full-width micro-rows. At 20 FPS
+    // this yields about five interleaved rows rather than one or two full slabs,
+    // keeping fall spacing below the reconstruction support.
+    const microSpacing=g.axial*.32;
     carry+=g.speed*Math.min(.05,Math.max(.001,Number.isFinite(dt)?dt:1/60));
     const rows=Math.min(5,Math.floor(carry/microSpacing));
     if(rows>0){
@@ -213,8 +211,8 @@ function choose(name){
 function disable(){active='none';prime=true;carry=0;sourceN=0;sheetPhase=0;}
 
 window.__v5M755GravitySources={
-  online:true,backend:'near-gapless-rotating-sheet-m838',choose,disable,
+  online:true,backend:'continuous-full-lane-sheet-m839',choose,disable,
   get active(){return active},get passes(){return passes},get recycled(){return recycled},get emissions(){return emissions},
-  get model(){return 'mass-neutral rotating micro-rows + ordinary PBF + local sheet drag'},
+  get model(){return 'mass-neutral full-lane micro-rows + ordinary PBF + local sheet drag'},
 };
-console.info('[Fluid V8 M8.3.8] Waterfall uses near-gapless mass-neutral rotating micro-rows + local terminal sheet drag; Faucet remains zero-launch.');
+console.info('[Fluid V8 M8.3.9] Waterfall uses continuous full-lane micro-rows + local terminal sheet drag; Faucet remains zero-launch.');

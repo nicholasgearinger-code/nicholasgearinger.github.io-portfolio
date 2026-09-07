@@ -68,11 +68,12 @@ function setScenario(name){
     ssfr.thicknessRadius=.72;
     ssfr.filterSigma=.58;
   }else if(name==='waterfall'){
-    // Join the denser stagger phases into one optical sheet while retaining a
-    // defined silhouette at the sides and at the plunge into the pool.
-    ssfr.splatRadius=1.34;
-    ssfr.thicknessRadius=1.06;
-    ssfr.filterSigma=.68;
+    // M8.3.8's tightly spaced micro-rows no longer need oversized reconstruction.
+    // Keep the central sheet joined while making detached edge parcels smaller,
+    // thinner and less blurred so they read as droplets instead of large blobs.
+    ssfr.splatRadius=1.08;
+    ssfr.thicknessRadius=.82;
+    ssfr.filterSigma=.58;
   }else{
     // At reduced render scales, sparse droplets need several depth pixels of coverage so the
     // true ellipsoid intersection remains visibly round instead of collapsing to one square texel.

@@ -187,6 +187,11 @@ const godRayUpdate = `
 
 const extraEdits = [
   [
+    'if (distFromCenter > WORLD_BOUND_RADIUS) {\n    const scale = WORLD_BOUND_RADIUS / distFromCenter;',
+    'const activeWorldBound = currentLevelIdx >= 0 && LEVELS[currentLevelIdx].biome === "crystal" ? 205 : WORLD_BOUND_RADIUS;\n  if (distFromCenter > activeWorldBound) {\n    const scale = activeWorldBound / distFromCenter;',
+    "Coral extended playable radius",
+  ],
+  [
     'const reflectionEnabled = getGraphicsSettings().reflectionEnabled !== false;',
     'const reflectionEnabled = false; // WebGPU: legacy manual reflection/refraction renderer.render() passes invalidate command encoders; the r185 SSR pipeline remains available.',
     "disable legacy offscreen water passes on WebGPU",

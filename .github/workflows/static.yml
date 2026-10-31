@@ -10,6 +10,12 @@ on:
   push:
     branches: ["main"]
   workflow_dispatch:
+    inputs:
+      build_ktx2:
+        description: "Rebuild compressed textures for the isolated environment performance preview (slow)"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -26,6 +32,7 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout production site
         uses: actions/checkout@v4
@@ -190,8 +197,10 @@ jobs:
           ref: perf-environment-1
           path: .perf-environment-preview-source
 
+      # Recompression takes tens of minutes and is NOT needed to publish code.
+      # Keep it available only as an explicit manual performance experiment.
       - name: Build KTX2 model textures for performance preview
-        if: steps.deploy-scope.outputs.fluid_only != 'true'
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_ktx2 == true && steps.deploy-scope.outputs.fluid_only != 'true' }}
         shell: bash
         run: |
           set -u

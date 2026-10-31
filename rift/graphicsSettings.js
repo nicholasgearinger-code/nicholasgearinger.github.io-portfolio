@@ -100,5 +100,9 @@ export function getGraphicsSettings() {
 export function getEffectiveValue(key) {
   if (key === "volumetricCloudsEnabled" && lowGetsAdaptiveClouds()) return true;
   if (key === "shadowsEnabled" && lowGetsEfficientShadows()) return true;
-  if (RIFT_IOS && base.getGraphicsTier() === "medium" && Object.hasOwn(IOS_MEDIUM_BUDGET, key)) {\n    const value = base.getEffectiveValue(key);\n    return Number.isFinite(value) ? Math.min(value, IOS_MEDIUM_BUDGET[key]) : value;\n  }\n  return base.getEffectiveValue(key);
+  if (RIFT_IOS && base.getGraphicsTier() === "medium" && Object.hasOwn(IOS_MEDIUM_BUDGET, key)) {
+    const value = base.getEffectiveValue(key);
+    return Number.isFinite(value) ? Math.min(value, IOS_MEDIUM_BUDGET[key]) : value;
+  }
+  return base.getEffectiveValue(key);
 }

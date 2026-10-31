@@ -488,7 +488,10 @@ function finalizeInstancedMeshes(meshes) {
 // result, just computed once instead of 220 times.
 // Static instance partitions: each batch gets its own real bounding sphere,
 // allowing the renderer to cull offscreen portions of the reef.
-function groupStaticPlacements(placements, cellSize = 36) {
+function groupStaticPlacements(placements, cellSize = 48) {
+  // Preserve the original single-batch behavior on desktop and other tiers.
+  const iosMedium = /iPhone|iPad|iPod/i.test(navigator.userAgent || "") && getGraphicsSettings().label === "Medium";
+  if (!iosMedium) return [placements];
   const cells = new Map();
   for (const placement of placements) {
     const key = Math.floor(placement.x / cellSize) + ":" + Math.floor(placement.z / cellSize);

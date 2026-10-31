@@ -187,6 +187,11 @@ const godRayUpdate = `
 
 const extraEdits = [
   [
+    'const reflectionEnabled = getGraphicsSettings().reflectionEnabled !== false;',
+    'const reflectionEnabled = false; // WebGPU: legacy manual reflection/refraction renderer.render() passes invalidate command encoders; the r185 SSR pipeline remains available.',
+    "disable legacy offscreen water passes on WebGPU",
+  ],
+  [
     'import { createVolumetricClouds, updateVolumetricClouds } from "./volumetricClouds.js";',
     'import { createVolumetricClouds, updateVolumetricClouds } from "./volumetricClouds_reference_v2.js";',
     "progressive low-resolution volumetric cloud renderer import",

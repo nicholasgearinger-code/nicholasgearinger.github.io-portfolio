@@ -186,6 +186,7 @@ const godRayUpdate = `
 `;
 
 const extraEdits = [
+  ["window.addEventListener(\"error\", (e) => showError(\"Uncaught error:\", e.error || e.message));", "window.addEventListener(\"error\", (e) => {\n    const message = String(e.message || \"\");\n    // Safari reports unrelated cross-origin failures simply as \"Script error.\"\n    // That opaque event has no stack, filename or usable diagnosis; it must\n    // not cover a functioning level menu with a false fatal overlay.\n    if (!e.error && (!message || message === \"Script error.\")) {\n      console.warn(\"[rift] Opaque browser script error (no actionable stack)\", e.filename || \"unknown source\");\n      return;\n    }\n    showError(\"Uncaught error:\", e.error || message);\n  });", "ignore opaque cross-origin browser errors in game overlay"],
   ["if (distFromCenter > WORLD_BOUND_RADIUS) {\n    const scale = WORLD_BOUND_RADIUS / distFromCenter;", "const activeWorldBound = currentLevelIdx >= 0 && LEVELS[currentLevelIdx].biome === \"crystal\" ? 205 : WORLD_BOUND_RADIUS;\n  if (distFromCenter > activeWorldBound) {\n    const scale = activeWorldBound / distFromCenter;", "Coral extended playable radius"],
   [
     'const reflectionEnabled = getGraphicsSettings().reflectionEnabled !== false;',

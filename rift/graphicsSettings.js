@@ -10,6 +10,36 @@ export * from "./graphicsSettings_fft_base.js";
 
 const OVERRIDES_STORAGE_KEY = "riftGraphicsOverrides";
 
+// iPhone/WebKit performance budget for the standalone r185 game.
+// Medium retains the same water renderer and shading features, but avoids
+// desktop-sized raster, shadow, terrain and particle workloads on older GPUs.
+// Apply only to iOS-class devices and only to Medium; desktop and Low/High
+// keep their existing user-selected presets.
+const RIFT_IOS = typeof navigator !== "undefined" && (
+  /iPhone|iPad|iPod/i.test(navigator.userAgent || "") ||
+  ((navigator.platform || "") === "MacIntel" && navigator.maxTouchPoints > 1)
+);
+const IOS_MEDIUM_BUDGET = Object.freeze({
+  pixelRatioCap: 0.85,
+  terrainSegments: 150,
+  shadowMapSize: 512,
+  grassMultiplier: 0.5,
+  particleMultiplier: 0.45,
+  cloudMultiplier: 0.55,
+  wildlifeMultiplier: 0.5,
+  seaLifeMultiplier: 0.5,
+  silhouetteMultiplier: 0.7,
+});
+function applyMobileMediumBudget(settings) {
+  if (!RIFT_IOS || base.getGraphicsTier() !== "medium") return settings;
+  const limited = { ...settings };
+  for (const [key, ceiling] of Object.entries(IOS_MEDIUM_BUDGET)) {
+    // Respect a lower user setting, but keep a safe ceiling for Medium.
+    if (Number.isFinite(limited[key])) limited[key] = Math.min(limited[key], ceiling);
+  }
+  return limited;
+}
+
 function fftOwnsWaterReflections() {
   return typeof globalThis !== "undefined" &&
     globalThis.__riftFFTUsesEnvironmentReflections === true;
@@ -39,7 +69,7 @@ function lowGetsEfficientShadows() {
 }
 
 export function getGraphicsSettings() {
-  let settings = base.getGraphicsSettings();
+  let settings = applyMobileMediumBudget(base.getGraphicsSettings());
 
   // Low used to disable both of these outright. Under the r185 migration they
   // each have a dedicated mobile budget, so they are part of the visual baseline
@@ -70,5 +100,5 @@ export function getGraphicsSettings() {
 export function getEffectiveValue(key) {
   if (key === "volumetricCloudsEnabled" && lowGetsAdaptiveClouds()) return true;
   if (key === "shadowsEnabled" && lowGetsEfficientShadows()) return true;
-  return base.getEffectiveValue(key);
+  if (RIFT_IOS && base.getGraphicsTier() === "medium" && Object.hasOwn(IOS_MEDIUM_BUDGET, key)) {\n    const value = base.getEffectiveValue(key);\n    return Number.isFinite(value) ? Math.min(value, IOS_MEDIUM_BUDGET[key]) : value;\n  }\n  return base.getEffectiveValue(key);
 }

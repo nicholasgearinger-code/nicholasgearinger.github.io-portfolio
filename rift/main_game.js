@@ -334,6 +334,31 @@ if (!source.includes(loaderBaseLine) || !source.includes(loaderModuleLine)) {
 }
 source = source.replace(loaderBaseLine, resolvedBaseLine);
 source = source.replace(loaderModuleLine, resolvedModuleLine);
+// The final game is evaluated from a blob: URL, outside the /rift/ import-map
+// scope registered by main.js. Resolve all Three.js bare imports to the SAME
+// r185 release as Rift's WebGPU dependencies. Otherwise the blob silently
+// falls back to index.html's global r182 mapping (two incompatible Three
+// runtimes, especially problematic for RenderPipeline/TSL/WebGPU nodes).
+// Rewrite only actual import declarations; never replace arbitrary strings.
+const riftThreeBase = "https://cdn.jsdelivr.net/npm/three@0.185.1/";
+const threeSpecifiers = {
+  "three": riftThreeBase + "build/three.webgpu.js",
+  "three/webgpu": riftThreeBase + "build/three.webgpu.js",
+  "three/tsl": riftThreeBase + "build/three.tsl.js",
+};
+function resolveRiftThreeSpecifier(specifier) {
+  if (threeSpecifiers[specifier]) return threeSpecifiers[specifier];
+  if (specifier.startsWith("three/addons/")) {
+    return riftThreeBase + "examples/jsm/" + specifier.slice("three/addons/".length);
+  }
+  return specifier;
+}
+source = source.replace(
+  /(\\bfrom\\s*|\\bimport\\s*)(["'])(three(?:\\/[^"']*)?)\\2/g,
+  (_, prefix, quote, specifier) =>
+    prefix + quote + resolveRiftThreeSpecifier(specifier) + quote,
+);
+
 source += "\n//# sourceURL=rift/main_game_water_pro.loader.js\n";
 
 const blob = new Blob([source], { type: "text/javascript" });

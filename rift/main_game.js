@@ -354,7 +354,7 @@ function resolveRiftThreeSpecifier(specifier) {
   return specifier;
 }
 source = source.replace(
-  /(\\bfrom\\s*|\\bimport\\s*)(["'])(three(?:\\/[^"']*)?)\\2/g,
+  /(\bfrom\s*|\bimport\s*)(["'])(three(?:\/[^"']*)?)\2/g,
   (_, prefix, quote, specifier) =>
     prefix + quote + resolveRiftThreeSpecifier(specifier) + quote,
 );

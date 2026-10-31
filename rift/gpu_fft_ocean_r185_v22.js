@@ -40,6 +40,21 @@ function freezeUnsafeMobileMicroFFT(handle) {
   return true;
 }
 
+function stopFailedIOSFFT(handle, error) {
+  handle.__riftIOSFFTDisabled = true;
+  handle.fluidSimBroken = true;
+  handle.__riftIOSFFTFailureCount = (handle.__riftIOSFFTFailureCount || 0) + 1;
+  const message = error?.message || String(error);
+  globalThis.__riftIOSFFTSafeV22 = {
+    ...(globalThis.__riftIOSFFTSafeV22 || {}),
+    active: true,
+    failed: true,
+    message,
+    computeDisabledForSession: true,
+  };
+  console.error("[rift-water] FFT submission failed; future FFT work stopped for this session", error);
+}
+
 function installIOSSafeState(handle) {
   if (!IOS_WEBKIT || !handle?.gpuFFT || handle.__riftIOSFFTSafeV22) return;
 
@@ -99,6 +114,16 @@ export function updateGPUFFTOcean(handle, renderer, elapsedTime = 0) {
     if (stats.count % 120 === 0) {
       globalThis.__riftFFTProfile = { ...stats, note: "CPU submission only; not GPU execution timing" };
       console.info("[rift-fft] CPU compute dispatch profile", globalThis.__riftFFTProfile);
+    }
+    // renderer.compute() can fail asynchronously on WebKit. A synchronous
+    // try/catch does not intercept rejected error-scope/device promises.
+    // Attach rejection handling at the FFT call site, never globally
+    // suppressing errors from unrelated renderer systems.
+    if (result && typeof result.then === "function") {
+      return result.catch((error) => {
+        stopFailedIOSFFT(handle, error);
+        return undefined;
+      });
     }
     return result;
   } catch (error) {

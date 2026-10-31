@@ -752,6 +752,23 @@ const BIOME_SHAPERS = {
  * decorations/crystals/spawn points consistently with the actual surface.
  */
 function biomeHeight(biome, worldX, worldZ, seed) {
+  // Preserve the original island/reef shape within 100 units, then extend
+  // the tropical seabed smoothly instead of exposing the 240-unit mesh edge.
+  // The outer floor is intentionally cheap: no additional GPU passes or
+  // high-frequency noise, just gentle sandy undulation.
+  if (biome === "crystal" && Math.hypot(worldX, worldZ) > 102) {
+    const distance = Math.hypot(worldX, worldZ);
+    const angle = Math.atan2(worldZ, worldX);
+    const seabed = LIQUID_LEVEL.crystal - 9.5
+      + Math.sin(worldX * 0.042 + seed) * Math.cos(worldZ * 0.036 - seed) * 0.65
+      + Math.sin(angle * 9 + distance * 0.024) * 0.32;
+    const blend = Math.min(1, Math.max(0, (distance - 102) / 20));
+    const t = blend * blend * (3 - 2 * blend);
+    const uInner = worldX / (TERRAIN_SIZE / 2);
+    const vInner = worldZ / (TERRAIN_SIZE / 2);
+    const original = BIOME_SHAPERS.crystal(uInner, vInner, seed);
+    return original * (1 - t) + seabed * t;
+  }
   const u = worldX / (TERRAIN_SIZE / 2);
   const v = worldZ / (TERRAIN_SIZE / 2);
   const shaper = BIOME_SHAPERS[biome] || BIOME_SHAPERS.verdant;
@@ -1010,7 +1027,10 @@ function applyHeightShading(geo, colorHex, minY, maxY, biome, seed) {
 function buildPlanetTerrain(level, seedStr) {
   const seed = hashStringToSeed(seedStr + "::" + level.biome) * 1000;
   const segments = getGraphicsSettings().terrainSegments || TERRAIN_SEGMENTS_DEFAULT; // reverted the earlier ×1.4 workaround — terrainSegments itself is now increased directly in graphicsSettings.js, which wasn't available to edit in the round that added the workaround
-  const geo = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, segments, segments);
+  const crystalExtended = level.biome === "crystal";
+  const terrainExtent = crystalExtended ? 480 : TERRAIN_SIZE;
+  const terrainSegments = crystalExtended ? Math.max(segments, 160) : segments;
+  const geo = new THREE.PlaneGeometry(terrainExtent, terrainExtent, terrainSegments, terrainSegments);
   geo.rotateX(-Math.PI / 2); // lie flat in the XZ plane, +Y up
 
   const posAttr = geo.attributes.position;

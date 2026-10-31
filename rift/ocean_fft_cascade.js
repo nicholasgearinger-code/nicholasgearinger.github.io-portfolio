@@ -219,7 +219,28 @@ export function createOceanFFTCascade(options = {}) {
 export function updateOceanFFTCascade(handle, renderer, elapsedTime = 0) {
   if (!handle?.gpuFFTStandalone || !renderer || typeof renderer.compute !== "function") return;
   handle.fftTime.value = Number.isFinite(elapsedTime) ? elapsedTime : 0;
-  for (const node of handle.computeFrame) renderer.compute(node);
+  for (const node of handle.computeFrame) {
+    if (handle.__riftComputeRejected) break;
+    try {
+      const submission = renderer.compute(node);
+      // WebGPU validation/error-scope failures may reject AFTER compute()
+      // returns. The old fire-and-forget loop leaked those rejections into
+      // window.unhandledrejection, even if the scene kept rendering.
+      if (submission && typeof submission.catch === "function") {
+        submission.catch(error => {
+          handle.__riftComputeRejected = true;
+          handle.gpuFFTStandalone = false;
+          globalThis.__riftFFTComputeError = String(error?.message || error);
+          console.error("[rift-fft] Asynchronous compute rejected; cascade disabled", error);
+        });
+      }
+    } catch (error) {
+      handle.__riftComputeRejected = true;
+      handle.gpuFFTStandalone = false;
+      console.error("[rift-fft] Compute submission failed; cascade disabled", error);
+      break;
+    }
+  }
 }
 
 export function disposeOceanFFTCascade(handle) {

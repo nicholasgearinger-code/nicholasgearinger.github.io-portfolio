@@ -20,15 +20,15 @@ const RIFT_IOS = typeof navigator !== "undefined" && (
   ((navigator.platform || "") === "MacIntel" && navigator.maxTouchPoints > 1)
 );
 const IOS_MEDIUM_BUDGET = Object.freeze({
-  pixelRatioCap: 0.85,
-  terrainSegments: 150,
-  shadowMapSize: 512,
-  grassMultiplier: 0.5,
-  particleMultiplier: 0.45,
-  cloudMultiplier: 0.55,
-  wildlifeMultiplier: 0.5,
-  seaLifeMultiplier: 0.5,
-  silhouetteMultiplier: 0.7,
+  pixelRatioCap: 0.75,
+  terrainSegments: 140,
+  shadowMapSize: 384,
+  grassMultiplier: 0.35,
+  particleMultiplier: 0.3,
+  cloudMultiplier: 0.35,
+  wildlifeMultiplier: 0.4,
+  seaLifeMultiplier: 0.45,
+  silhouetteMultiplier: 0.5,
 });
 function applyMobileMediumBudget(settings) {
   if (!RIFT_IOS || base.getGraphicsTier() !== "medium") return settings;
@@ -37,6 +37,13 @@ function applyMobileMediumBudget(settings) {
     // Respect a lower user setting, but keep a safe ceiling for Medium.
     if (Number.isFinite(limited[key])) limited[key] = Math.min(limited[key], ceiling);
   }
+  // Preserve ocean, terrain and local shadows, but avoid expensive
+  // full-screen post effects on older iPhones. These features are
+  // particularly costly at the current 10 FPS baseline.
+  limited.ssaoEnabled = false;
+  limited.bloomLevel = "off";
+  limited.aaMethod = "off";
+  limited.volumetricCloudsEnabled = false;
   return limited;
 }
 

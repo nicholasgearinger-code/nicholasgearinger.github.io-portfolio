@@ -105,6 +105,10 @@ export function getGraphicsSettings() {
 }
 
 export function getEffectiveValue(key) {
+  if (RIFT_IOS && base.getGraphicsTier() === "medium") {
+    if (key === "volumetricCloudsEnabled" || key === "ssaoEnabled") return false;
+    if (key === "bloomLevel" || key === "aaMethod") return "off";
+  }
   if (key === "volumetricCloudsEnabled" && lowGetsAdaptiveClouds()) return true;
   if (key === "shadowsEnabled" && lowGetsEfficientShadows()) return true;
   if (RIFT_IOS && base.getGraphicsTier() === "medium" && Object.hasOwn(IOS_MEDIUM_BUDGET, key)) {

@@ -82,12 +82,24 @@ export function updateGPUFFTOcean(handle, renderer, elapsedTime = 0) {
   if (Number.isFinite(last) && t >= last && (t - last) < IOS_FFT_MIN_INTERVAL) return;
   handle.__riftIOSFFTLastTime = t;
 
+  const profileStart = performance.now();
   try {
     // IMPORTANT: call v19 directly so r185 v20's renderer.compute([...]) monkey
     // patch is bypassed on iOS. v19 ultimately submits each FFT kernel through
     // renderer.compute(node), which is the older stable mobile path.
     const result = oceanV19.updateGPUFFTOcean(handle, renderer, t);
     handle.__riftIOSFFTFailureCount = 0;
+    // CPU dispatch time only, not GPU execution time. Useful to tell
+    // whether JS command submission dominates; never stall GPU with readback.
+    const sample = performance.now() - profileStart;
+    const stats = handle.__riftFFTProfile || (handle.__riftFFTProfile = { count: 0, avgDispatchMs: 0, maxDispatchMs: 0 });
+    stats.count++;
+    stats.avgDispatchMs += (sample - stats.avgDispatchMs) / Math.min(stats.count, 120);
+    stats.maxDispatchMs = Math.max(stats.maxDispatchMs, sample);
+    if (stats.count % 120 === 0) {
+      globalThis.__riftFFTProfile = { ...stats, note: "CPU submission only; not GPU execution timing" };
+      console.info("[rift-fft] CPU compute dispatch profile", globalThis.__riftFFTProfile);
+    }
     return result;
   } catch (error) {
     const failures = (Number(handle.__riftIOSFFTFailureCount) || 0) + 1;

@@ -486,25 +486,7 @@ function finalizeInstancedMeshes(meshes) {
 // (instanceGroundOffsetCache) and multiplied by each instance's own scale
 // below, which is mathematically identical to the original per-instance
 // result, just computed once instead of 220 times.
-// Static instance partitions: each batch gets its own real bounding sphere,
-// allowing the renderer to cull offscreen portions of the reef.
-function groupStaticPlacements(placements, cellSize = 48) {
-  // Preserve the original single-batch behavior on desktop and other tiers.
-  const iosMedium = /iPhone|iPad|iPod/i.test(navigator.userAgent || "") && getGraphicsSettings().label === "Medium";
-  if (!iosMedium) return [placements];
-  const cells = new Map();
-  for (const placement of placements) {
-    const key = Math.floor(placement.x / cellSize) + ":" + Math.floor(placement.z / cellSize);
-    if (!cells.has(key)) cells.set(key, []);
-    cells.get(key).push(placement);
-  }
-  return [...cells.values()];
-}
 function buildCoralInstances(species, placements) {
-  if (placements.length <= 12) return buildCoralInstancesBatch(species, placements);
-  return groupStaticPlacements(placements).flatMap(batch => buildCoralInstancesBatch(species, batch));
-}
-function buildCoralInstancesBatch(species, placements) {
   const cacheKey = `coral:${species}`;
   const parts = getInstanceParts(cacheKey, () => createRealCoral(species));
   if (!parts || placements.length === 0) return [];
@@ -555,15 +537,11 @@ function buildNormalizedInstances(cacheKey, buildReferenceFn, placements, embedF
 }
 
 function buildSpongeInstances(placements) {
-  return groupStaticPlacements(placements).flatMap(batch => {
-    return buildNormalizedInstances("sponge", () => createRealSponge(), placements, 0.5);
-  });
+  return buildNormalizedInstances("sponge", () => createRealSponge(), placements, 0.5);
 }
 
 function buildPlantInstances(placements) {
-  return groupStaticPlacements(placements).flatMap(batch => {
-    return buildNormalizedInstances("plant", () => createRealPlant(), placements, 1.0);
-  });
+  return buildNormalizedInstances("plant", () => createRealPlant(), placements, 1.0);
 }
 
 // Real tree instancing, WITH per-frame wind-sway support (trees are not

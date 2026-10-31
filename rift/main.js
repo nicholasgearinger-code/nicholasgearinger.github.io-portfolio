@@ -270,7 +270,7 @@ async function loadRiftAndOpenMenu() {
     }
 
     setProgress(95, "Assets ready", "Loading Rift game module");
-    gameImport = gameImport || import("./main_game.js");
+    gameImport = gameImport || import("./main_game.js?build=9b87a47");
     await gameImport;
 
     if (driftTimer) {

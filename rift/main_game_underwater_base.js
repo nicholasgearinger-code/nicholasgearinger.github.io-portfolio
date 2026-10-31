@@ -69,6 +69,26 @@ for (const [from, to, label] of edits) source = replaceExactlyOnce(source, from,
 source = source.replace(/(\bfrom\s*)(["'])(\.{1,2}\/[^"']+)\2/g, (_, prefix, quote, specifier) => `${prefix}${quote}${new URL(specifier, moduleBaseUrl).href}${quote}`);
 source = source.replace(/(\bimport\s*)(["'])(\.{1,2}\/[^"']+)\2/g, (_, prefix, quote, specifier) => `${prefix}${quote}${new URL(specifier, moduleBaseUrl).href}${quote}`);
 source = source.replaceAll("import.meta.url", JSON.stringify(moduleBaseUrl.href));
+// The next import executes from a blob: URL rather than /rift/, so Rift's
+// directory-scoped r185 import map does not apply. Pin the final game's bare
+// Three.js imports to the same version as its r185 WebGPU support modules.
+const riftThreeBase = "https://cdn.jsdelivr.net/npm/three@0.185.1/";
+const riftThreeImports = {
+  "three": riftThreeBase + "build/three.webgpu.js",
+  "three/webgpu": riftThreeBase + "build/three.webgpu.js",
+  "three/tsl": riftThreeBase + "build/three.tsl.js",
+};
+source = source.replace(
+  /(\bfrom\s*|\bimport\s*)(["'])(three(?:\/[^"']*)?)\2/g,
+  (_, prefix, quote, specifier) => {
+    const url = riftThreeImports[specifier] ||
+      (specifier.startsWith("three/addons/")
+        ? riftThreeBase + "examples/jsm/" + specifier.slice("three/addons/".length)
+        : specifier);
+    return prefix + quote + url + quote;
+  },
+);
+
 source += "\n//# sourceURL=rift/main_game_rain_underwater_tuned.runtime.js\n";
 
 const blob = new Blob([source], { type: "text/javascript" });

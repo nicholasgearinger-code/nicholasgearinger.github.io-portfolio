@@ -124,3 +124,62 @@ export function buildPlanetTerrain(level, seedStr) {
   }
   return geometry;
 }
+
+
+// Build render-only terrain chunks from the EXISTING collision geometry.
+// Original terrain geometry stays untouched: physics/height sampling continues
+// to use it, while the renderer culls individual spatial tiles. All tiles use
+// original vertex samples and UVs, so there is no procedural mismatch.
+// Adjacent tiles meet at their exact original border vertices.
+export function buildTerrainRenderChunks(sourceGeometry, material, divisions = 4) {
+  const position = sourceGeometry.getAttribute("position");
+  const uv = sourceGeometry.getAttribute("uv");
+  const color = sourceGeometry.getAttribute("color");
+  const normal = sourceGeometry.getAttribute("normal");
+  if (!position || !uv || !normal || !color) return null;
+  const stride = Math.round(Math.sqrt(position.count));
+  const segments = stride - 1;
+  if (stride * stride !== position.count || segments % divisions !== 0) return null;
+  const cells = segments / divisions;
+  const tiles = [];
+  for (let tz = 0; tz < divisions; tz++) for (let tx = 0; tx < divisions; tx++) {
+    function makeGeometry(step) {
+      const coords = [];
+      for (let n = 0; n <= cells; n += step) coords.push(n);
+      if (coords[coords.length - 1] !== cells) coords.push(cells);
+      const count = coords.length;
+      const positions = [], uvs = [], colors = [], normals = [], indices = [];
+      for (const z of coords) for (const x of coords) {
+        const idx = (tz * cells + z) * stride + tx * cells + x;
+        positions.push(position.getX(idx), position.getY(idx), position.getZ(idx));
+        uvs.push(uv.getX(idx), uv.getY(idx));
+        colors.push(color.getX(idx), color.getY(idx), color.getZ(idx));
+        normals.push(normal.getX(idx), normal.getY(idx), normal.getZ(idx));
+      }
+      for (let z = 0; z < count - 1; z++) for (let x = 0; x < count - 1; x++) {
+        const a = z * count + x, b = a + count;
+        indices.push(a, b, a + 1, b, b + 1, a + 1);
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+      geo.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+      geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+      geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+      geo.setIndex(indices);
+      geo.computeBoundingSphere();
+      return geo;
+    }
+    const near = new THREE.Mesh(makeGeometry(1), material);
+    const far = new THREE.Mesh(makeGeometry(4), material);
+    const center = near.geometry.boundingSphere.center.clone();
+    for (const mesh of [near, far]) {
+      mesh.receiveShadow = true;
+      mesh.castShadow = false; // avoid multiplying shadow draw calls for distant terrain
+      mesh.frustumCulled = true;
+    }
+    near.visible = true;
+    far.visible = false;
+    tiles.push({ near, far, center, detailed: true });
+  }
+  return tiles;
+}

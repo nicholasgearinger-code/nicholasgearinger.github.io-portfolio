@@ -7,6 +7,7 @@ import {
 } from "three/tsl";
 import * as oceanV7 from "./gpu_fft_ocean_v7.js";
 import * as oceanV8 from "./gpu_fft_ocean_v8.js";
+import { getRealisticCloudTexture } from "./clouds_storm_base.js";
 import {
   getGraphicsTier,
   getEffectiveValue,
@@ -63,50 +64,6 @@ function chooseBackend() {
   return TOUCH_DEVICE ? oceanV7 : oceanV8;
 }
 
-// Small CPU-painted sky approximation for the Low mobile water underside.
-// Unlike scene capture, this needs no additional WebGPU render pass.
-// It follows the live sky color and includes soft cloud shapes for refraction.
-function createUnderwaterSkyAtlas() {
-  const canvas = document.createElement("canvas");
-  canvas.width = canvas.height = 256;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return null;
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.generateMipmaps = false;
-  tex.minFilter = tex.magFilter = THREE.LinearFilter;
-  return { canvas, ctx, tex, lastTime: -100 };
-}
-
-function paintUnderwaterSkyAtlas(atlas, sky, elapsed, storm) {
-  if (!atlas || elapsed - atlas.lastTime < 0.65) return;
-  atlas.lastTime = elapsed;
-  const { ctx, canvas, tex } = atlas;
-  const hex = sky?.isColor ? "#" + sky.getHexString() : "#78b8d6";
-  ctx.fillStyle = hex;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  const cloudOpacity = Math.max(0.10, 0.28 - storm * 0.12);
-  // Fixed irregular cloud positions; animate sampling in the material,
-  // avoiding large per-frame CPU texture writes.
-  for (let i = 0; i < 15; i++) {
-    const x = ((i * 97 + 23) % 290) - 16;
-    const y = ((i * 53 + 43) % 270) - 7;
-    const rx = 18 + ((i * 17) % 38), ry = 7 + ((i * 7) % 14);
-    const grad = ctx.createRadialGradient(x, y, 1, x, y, rx);
-    grad.addColorStop(0, "rgba(255,255,246," + cloudOpacity + ")");
-    grad.addColorStop(1, "rgba(255,255,246,0)");
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.scale(1, ry / rx);
-    ctx.translate(-x, -y);
-    ctx.fillStyle = grad;
-    ctx.fillRect(x - rx, y - rx, rx * 2, rx * 2);
-    ctx.restore();
-  }
-  tex.needsUpdate = true;
-}
-
 function installWaterProOptics(handle) {
   if (!handle?.gpuFFT || handle.fftWaterProV9Installed) return;
 
@@ -126,9 +83,9 @@ function installWaterProOptics(handle) {
   const midColor = uniform(color(0x167f99));
   const deepColor = uniform(color(0x07384f));
   const skyColor = uniform(color(0x78b8d6));
-  const skyAtlas = TOUCH_DEVICE && getGraphicsTier() === "low"
-    ? createUnderwaterSkyAtlas() : null;
-  if (skyAtlas) paintUnderwaterSkyAtlas(skyAtlas, new THREE.Color(0x78b8d6), 0, 0);
+  // Share the exact cloud panorama already rendered by the sky dome.
+  // The texture is globally cached by the cloud module and not owned here.
+  const cloudSkyTexture = getRealisticCloudTexture();
 
   const sunColor = uniform(color(0xffedd0));
   const crestColor = uniform(color(0xa8eee0));
@@ -294,9 +251,9 @@ function installWaterProOptics(handle) {
       viewDir.x.mul(-0.36).add(worldNormal.x.mul(0.27)).add(time.mul(0.003)),
       viewDir.z.mul(-0.36).add(worldNormal.z.mul(0.27)).add(float(0.50))
     ).add(vec2(0.5, 0));
-    const skyRadiance = skyAtlas
-      ? texture(skyAtlas.tex, skyUV).rgb
-      : skyColor;
+    const cloudSample = texture(cloudSkyTexture, skyUV);
+    const skyRadiance = mix(skyColor, cloudSample.rgb,
+      cloudSample.a.mul(0.52));
     const refractedSky = mix(color(0x267c96), skyRadiance, skyWindow);
     const transmitted = mix(refractedSky, color(0x7fd9db),
       clamp(float(1).sub(clearWater).mul(0.27), 0, 0.27))
@@ -347,7 +304,6 @@ function installWaterProOptics(handle) {
   handle.fftV9MidColor = midColor;
   handle.fftV9DeepColor = deepColor;
   handle.fftV9SkyColor = skyColor;
-  handle.fftV9SkyAtlas = skyAtlas;
   handle.fftV9SunColor = sunColor;
   handle.fftV9CrestColor = crestColor;
   handle.fftWaterProV9Installed = true;
@@ -366,7 +322,6 @@ function tuneWaterProState(handle, elapsed = 0, sky = null, storm = 0, day = 1) 
     if (sky?.isColor) handle.fftV9SkyColor.value.copy(sky);
     else handle.fftV9SkyColor.value.set(0x78b8d6);
   }
-  paintUnderwaterSkyAtlas(handle.fftV9SkyAtlas, sky, elapsed, stormT);
   if (handle.fftV9SunColor?.value) {
     handle.fftV9SunColor.value
       .set(0xbad8ef)
@@ -469,7 +424,5 @@ export function updateGPUFFTOceanRipples(handle, playerPos, cameraY, dt = 1 / 60
 }
 
 export function disposeGPUFFTOcean(scene, handle) {
-  handle?.fftV9SkyAtlas?.tex?.dispose();
-  if (handle) handle.fftV9SkyAtlas = null;
   return backendForHandle(handle).disposeGPUFFTOcean(scene, handle);
 }

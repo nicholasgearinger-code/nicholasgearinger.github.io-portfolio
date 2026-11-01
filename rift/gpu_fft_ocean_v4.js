@@ -377,7 +377,8 @@ export function updateGPUFFTOceanVisuals(
   // Refit the central vertex density only on substantial player movement;
   // never change FFT simulation coordinates, grid vertex count, or boundaries.
   // Do not rebuild every frame: generating depth attributes is CPU expensive.
-  if (handle?.fftMobileGeometryApplied && playerPos &&
+  if (typeof window !== "undefined" && window.__riftAdaptiveWaterMesh !== false &&
+      handle?.fftMobileGeometryApplied && playerPos &&
       Number.isFinite(playerPos.x) && Number.isFinite(playerPos.z) &&
       handle.fftFocusSize > 0 &&
       Math.abs(playerPos.x) < handle.fftFocusSize * 0.12 &&

@@ -25,7 +25,7 @@ const IOS_MEDIUM_BUDGET = Object.freeze({
   shadowMapSize: 384,
   grassMultiplier: 0.35,
   particleMultiplier: 0.3,
-  cloudMultiplier: 0.35,
+  cloudMultiplier: 0.65, // Lightweight existing cloud layers; heavy volumetrics remain off on iOS Medium.
   wildlifeMultiplier: 0.4,
   seaLifeMultiplier: 0.45,
   silhouetteMultiplier: 0.5,

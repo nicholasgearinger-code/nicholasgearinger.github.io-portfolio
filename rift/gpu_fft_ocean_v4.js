@@ -15,7 +15,12 @@ const FFT_N = 128;
 const DETAIL_DOMAIN = 260;
 const SHALLOW_N = 256;
 const SHALLOW_DOMAIN = 360;
-const MOBILE_RENDER_N = 320;
+// Moderate additional overhead mesh density without modifying FFT compute.
+// This is a uniform grid, NOT a camera-centered adaptive LOD patch.
+const MOBILE_RENDER_N = typeof navigator !== "undefined" &&
+  /iPhone|iPad|iPod/i.test(navigator.userAgent || "") &&
+  (() => { try { return localStorage.getItem("riftGraphicsSettings") === "low"; }
+    catch (_) { return false; } })() ? 352 : 320;
 const TOUCH_DEVICE = typeof window !== "undefined" && (
   "ontouchstart" in window || (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0)
 );

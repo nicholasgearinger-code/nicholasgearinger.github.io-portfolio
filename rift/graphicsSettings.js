@@ -68,11 +68,11 @@ function isLowTier() {
 }
 
 function lowGetsAdaptiveClouds() {
-  return isLowTier() && !hasExplicitOverride("volumetricCloudsEnabled");
+  return !RIFT_IOS && isLowTier() && !hasExplicitOverride("volumetricCloudsEnabled");
 }
 
 function lowGetsEfficientShadows() {
-  return isLowTier() && !hasExplicitOverride("shadowsEnabled");
+  return !RIFT_IOS && isLowTier() && !hasExplicitOverride("shadowsEnabled");
 }
 
 export function getGraphicsSettings() {

@@ -192,6 +192,7 @@ const godRayUpdate = `
 `;
 
 const extraEdits = [
+  ["      const focusMask = float(0.15).add(focusZone.mul(0.85));","      // Shallow tropical caustics remain faint offshore but gain a wider,\n      // more natural pool of light near the swimmer and sun focus. This\n      // reuses the same procedural caustic samples without extra passes.\n      const focusMask = float(0.24).add(focusZone.mul(0.76));","soften distant underwater caustic falloff"],
   ["      return color(0xfff8e0).mul(finalCaustic).mul(0.55);","      return color(0xe8fff5).mul(finalCaustic).mul(0.67);","soft cyan-white seabed caustics"],
   ["  dayNightCycle.sun.intensity *= Math.max(0.3, stormSunDim);","  dayNightCycle.sun.intensity *= Math.max(0.3, stormSunDim);\n  // Low iPhone uses unshadowed direct sunlight. Limit the resulting peak\n  // on bright textured sand/palm leaf materials to avoid hard white clipping,\n  // without affecting sun direction, cloud drift or the water optics.\n  if (isTouchDevice && getGraphicsTier() === \"low\") {\n    dayNightCycle.sun.intensity = Math.min(dayNightCycle.sun.intensity, 2.4);\n  }","cap unshadowed mobile Low sun intensity"],
   ["let elapsedTime = 0;","let elapsedTime = 0;\nlet riftSmoothedCloudSun = 1;","mobile atmospheric sunlight smoothing state"],

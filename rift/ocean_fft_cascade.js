@@ -34,7 +34,7 @@ function reverseBits(value, bits) {
   return out >>> 0;
 }
 
-function buildSpectrumData({ N, domain, seed, windSpeed, windDirection, amplitude, highFrequencyDamping }) {
+function buildSpectrumData({ N, domain, seed, windSpeed, windDirection, amplitude, highFrequencyDamping, waterDepth }) {
   const count = N * N;
   const h0 = new Float32Array(count * 4);
   const meta = new Float32Array(count * 4);
@@ -64,7 +64,13 @@ function buildSpectrumData({ N, domain, seed, windSpeed, windDirection, amplitud
       if (k > 1e-7) {
         nx = kx / k;
         nz = kz / k;
-        omega = Math.sqrt(GRAVITY * k);
+        // Finite-depth linear gravity-wave dispersion:
+        // omega² = g*k*tanh(k*h), converging to deep-water behavior as
+        // k*h grows. Spectrum is computed once on CPU, so this adds no
+        // shader cost or GPU dispatches. Keep waterDepth representative
+        // of the offshore FFT domain; the separate shallow solver handles
+        // the last few metres near shore.
+        omega = Math.sqrt(GRAVITY * k * Math.tanh(k * waterDepth));
         const kw = nx * windX + nz * windZ;
         const forward = Math.max(0, kw);
         const crossSea = 1 - Math.min(1, Math.abs(kw));
@@ -170,6 +176,7 @@ export function createOceanFFTCascade(options = {}) {
     windDirection: options.windDirection ?? [1, 0.23],
     amplitude: options.amplitude ?? 0.00016,
     highFrequencyDamping: options.highFrequencyDamping ?? 0.00055,
+    waterDepth: Math.max(8, options.waterDepth ?? 32),
   });
   const h0Buffer = instancedArray(data.h0, "vec4");
   const metaBuffer = instancedArray(data.meta, "vec4");

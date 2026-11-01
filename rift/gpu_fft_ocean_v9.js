@@ -227,14 +227,22 @@ function installWaterProOptics(handle) {
     // Underwater: diffuse transmitted skylight from the real displaced
     // FFT normal. Avoid screen-derivative curvature and thresholded bands,
     // which magnified the regular mesh sampling into diamond patterns.
-    const overheadView = smoothstep(float(0.18), float(0.90), ndv);
+    // Snell-inspired water-to-air transmission based on the REAL FFT
+    // face normal. Use broad, low-contrast angular transitions only;
+    // sharp thresholds revealed the periodic FFT sampling grid.
+    const overheadView = smoothstep(float(0.14), float(0.91), ndv);
     const sunFacing = clamp(dot(worldNormal, lightDir), 0, 1);
-    const clearWater = clamp(shallow.mul(0.42).add(day.mul(0.22))
-      .add(overheadView.mul(0.30)), 0, 1);
-    const transmitted = mix(color(0x267c96), color(0x78d6dc), clearWater)
-      .add(color(0xd5eee8).mul(sunFacing.mul(day).mul(0.08)));
-    const grazing = float(1).sub(smoothstep(float(0.33), float(0.94), ndv));
-    const underside = mix(transmitted, color(0x246b83), grazing.mul(0.22));
+    const clearWater = clamp(shallow.mul(0.42).add(day.mul(0.20))
+      .add(overheadView.mul(0.32)), 0, 1);
+    const transmitted = mix(color(0x267c96), color(0x7fd9db), clearWater)
+      .add(color(0xfff3df).mul(sunFacing.mul(sunFacing).mul(day).mul(0.11)));
+    // nWater/nAir=1.333. Critical cosine ~0.661; widen and soften this
+    // approximate transition to avoid creating faceted bright/dark cells.
+    const internalReflection = float(1).sub(
+      smoothstep(float(0.40), float(0.92), ndv));
+    const angleReflection = clamp(fresnel.mul(0.24)
+      .add(internalReflection.mul(0.20)), 0, 0.34);
+    const underside = mix(transmitted, color(0x246b83), angleReflection);
     return mix(body.add(sunColor.mul(glitter.mul(0.42))), underside,
       underwater.mul(float(0.97)));
 

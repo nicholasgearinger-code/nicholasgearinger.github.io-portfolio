@@ -156,6 +156,12 @@ const godRayUpdate = `
       (isTouchDevice ? 0.12 : 0.10);
   }
 
+  // Mobile sprite rays are screen-facing additive billboards; WebGPU can
+  // composite them over foreground palm fronds and sand, bleaching pixels
+  // white rather than producing real occluded light shafts. Keep the sun
+  // disk, normal sunlight and underwater caustics; omit only these
+  // above-water decorative beams on touch devices.
+  if (isTouchDevice) riftRayStrength = 0;
   const riftLowSunWarmth = 1 - THREE.MathUtils.smoothstep(riftRayDay, 0.30, 0.72);
   const riftTime = performance.now() * 0.001;
 

@@ -20,6 +20,12 @@ import {
 } from "three/tsl";
 
 const FFT_N = 128;
+// Low iPhone: retain a little FFT displacement in shallow water rather than
+// fading both cascades to zero directly above the swimmer.
+const MOBILE_LOW_SHALLOW_WAVES = typeof navigator !== "undefined" &&
+  /iPhone|iPad|iPod/i.test(navigator.userAgent || "") &&
+  (() => { try { return localStorage.getItem("riftGraphicsSettings") === "low"; }
+    catch (_) { return false; } })();
 // Keep render density high, but reconstruct displacement with bounded smooth
 // interpolation. The previous Catmull-Rom displacement could overshoot sparse
 // FFT/shallow samples and create needle-like peaks even on a dense render mesh.
@@ -194,10 +200,15 @@ function installCoupledGeometry(handle, detailHandle, shallowHandle, size, sampl
     // Broad offshore swell survives into intermediate depth. The shorter detail
     // cascade now contributes much more medium/short-wave structure while still
     // fading before the beach so the stable finite-depth solver owns the surf.
-    const longAmp = smoothstep(float(2.5), float(11.5), depth);
-    const detailAmp = smoothstep(float(6.5), float(18.0), depth);
+    const offshoreLong = smoothstep(float(2.5), float(11.5), depth);
+    const offshoreDetail = smoothstep(float(6.5), float(18.0), depth);
+    const longAmp = MOBILE_LOW_SHALLOW_WAVES
+      ? mix(float(0.33), float(1), offshoreLong) : offshoreLong;
+    const detailAmp = MOBILE_LOW_SHALLOW_WAVES
+      ? mix(float(0.18), float(1), offshoreDetail) : offshoreDetail;
     const shallowDepthBlend = float(1).sub(smoothstep(float(6.5), float(15.0), depth));
-    const shallowBlend = shallowDepthBlend.mul(coverage);
+    const shallowBlend = shallowDepthBlend.mul(coverage)
+      .mul(MOBILE_LOW_SHALLOW_WAVES ? float(0.72) : float(1));
 
     // Stronger but still bounded choppiness. The detail contribution is kept far
     // below the old spike-producing values, while vertical energy is high enough

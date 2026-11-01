@@ -192,6 +192,7 @@ const godRayUpdate = `
 `;
 
 const extraEdits = [
+  ["      return color(0xfff8e0).mul(finalCaustic).mul(0.55);","      return color(0xe8fff5).mul(finalCaustic).mul(0.67);","soft cyan-white seabed caustics"],
   ["  dayNightCycle.sun.intensity *= Math.max(0.3, stormSunDim);","  dayNightCycle.sun.intensity *= Math.max(0.3, stormSunDim);\n  // Low iPhone uses unshadowed direct sunlight. Limit the resulting peak\n  // on bright textured sand/palm leaf materials to avoid hard white clipping,\n  // without affecting sun direction, cloud drift or the water optics.\n  if (isTouchDevice && getGraphicsTier() === \"low\") {\n    dayNightCycle.sun.intensity = Math.min(dayNightCycle.sun.intensity, 2.4);\n  }","cap unshadowed mobile Low sun intensity"],
   ["let elapsedTime = 0;","let elapsedTime = 0;\nlet riftSmoothedCloudSun = 1;","mobile atmospheric sunlight smoothing state"],
   ["    dayNightCycle.sun.intensity *= Math.max(0.35, sunOcclusion);","    // Mobile atmospheric shafts: modulate real directional sunlight smoothly\n    // rather than drawing additive billboards across palms and sand.\n    if (isTouchDevice) {\n      const targetSun = Math.max(0.50, sunOcclusion);\n      riftSmoothedCloudSun = THREE.MathUtils.damp(riftSmoothedCloudSun, targetSun, 2.2, dt);\n      dayNightCycle.sun.intensity *= riftSmoothedCloudSun;\n    } else {\n      dayNightCycle.sun.intensity *= Math.max(0.35, sunOcclusion);\n    }","mobile atmosphere without bleaching sun-ray sprites"],

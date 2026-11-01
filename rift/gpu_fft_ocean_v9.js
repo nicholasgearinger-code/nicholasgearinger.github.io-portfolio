@@ -255,9 +255,21 @@ function installWaterProOptics(handle) {
       .add(brokenHighlights.mul(0.15))
       .mul(day)
       .mul(float(1).sub(storm.mul(0.7)));
-    const underside = undersideBase
+    // Water-to-air critical-angle response (n=1.333 -> critical angle
+    // approximately 48.6 degrees). Near-normal rays transmit skylight;
+    // grazing angles reflect a darker underwater environment. Distortion
+    // is driven by the actual FFT-derived optical normal, not screen UVs.
+    const totalInternalReflection = float(1).sub(
+      smoothstep(float(0.61), float(0.72), ndv)
+    );
+    const transmittedFraction = float(1).sub(totalInternalReflection);
+    const refractedSky = undersideBase
       .add(color(0xd8fff5).mul(underwaterLight))
       .add(color(0xfff9e5).mul(sunWindow.mul(0.22)));
+    const undersideReflection = mix(color(0x11536e), skyColor,
+      clamp(fresnel.mul(0.34), 0, 0.30));
+    const underside = mix(refractedSky, undersideReflection,
+      totalInternalReflection.mul(0.82));
     return mix(body.add(sunColor.mul(glitter.mul(0.42))), underside,
       underwater.mul(float(0.97)));
 

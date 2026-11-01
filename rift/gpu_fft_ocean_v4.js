@@ -56,17 +56,27 @@ function installMobileRenderGeometry(handle, size, sampleHeight) {
   const shore = new Float32Array(count);
   const depthWorld = new Float32Array(count);
   const pos = geometry.attributes.position;
+  // Center-weighted presentation grid: allocate more of the *same* mobile
+  // vertex budget over the central playable water without adding triangles.
+  // Must remap FFT coordinates consistently with the nonuniform positions.
+  // Fixed at world center for now; moving the mesh with the camera would also
+  // require correctly updating shore/depth attributes and spatial coverage.
+  const centerWeighted = /iPhone|iPad|iPod/i.test(navigator.userAgent || "") &&
+    (() => { try { return localStorage.getItem("riftGraphicsSettings") === "low"; }
+      catch (_) { return false; } })();
+  const warp = t => centerWeighted ? Math.sign(t) * Math.pow(Math.abs(t), 1.32) : t;
 
   for (let rz = 0; rz < n; rz++) {
-    const fz = rz * (FFT_N - 1) / (n - 1);
     for (let rx = 0; rx < n; rx++) {
-      const fx = rx * (FFT_N - 1) / (n - 1);
       const i = rz * n + rx;
-      longCoords[i * 2] = fx;
-      longCoords[i * 2 + 1] = fz;
-
+      if (centerWeighted) {
+        pos.setXYZ(i, warp(pos.getX(i) / (size * 0.5)) * size * 0.5,
+          pos.getY(i), warp(pos.getZ(i) / (size * 0.5)) * size * 0.5);
+      }
       const x = pos.getX(i);
       const z = pos.getZ(i);
+      longCoords[i * 2] = THREE.MathUtils.clamp((x / size + 0.5) * (FFT_N - 1), 0, FFT_N - 1);
+      longCoords[i * 2 + 1] = THREE.MathUtils.clamp((z / size + 0.5) * (FFT_N - 1), 0, FFT_N - 1);
       detailCoords[i * 2] = positiveFract(x / DETAIL_DOMAIN + 0.5) * FFT_N;
       detailCoords[i * 2 + 1] = positiveFract(z / DETAIL_DOMAIN + 0.5) * FFT_N;
 

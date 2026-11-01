@@ -241,15 +241,15 @@ function installWaterProOptics(handle) {
     // Near-normal viewing remains transparent and blue-green; shallow water
     // becomes brighter with daylight. Grazing views retain darker teal so
     // the surface has depth instead of an opaque cyan slab.
-    const undersideBase = mix(color(0x1687af), color(0x65d6e1),
-      clamp(shallow.mul(0.62).add(day.mul(0.24)).add(ndv.mul(0.09)), 0, 1));
-    const underwaterLight = luminousWeb.mul(0.29)
-      .add(brokenHighlights.mul(0.11))
+    const undersideBase = mix(color(0x258cb0), color(0x9beeea),
+      clamp(shallow.mul(0.68).add(day.mul(0.28)).add(ndv.mul(0.06)), 0, 1));
+    const underwaterLight = luminousWeb.mul(0.42)
+      .add(brokenHighlights.mul(0.16))
       .mul(day)
       .mul(float(1).sub(storm.mul(0.7)));
-    const underside = undersideBase.add(color(0xc6fff2).mul(underwaterLight));
+    const underside = undersideBase.add(color(0xd8fff5).mul(underwaterLight));
     return mix(body.add(sunColor.mul(glitter.mul(0.42))), underside,
-      underwater.mul(float(0.92)));
+      underwater.mul(float(0.97)));
 
   })();
 

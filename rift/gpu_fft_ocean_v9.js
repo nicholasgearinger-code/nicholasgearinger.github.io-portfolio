@@ -105,6 +105,15 @@ function installWaterProOptics(handle) {
   // perturb only the optical calculations with three tiny crossing ripple
   // bands. No new FFT buffers, compute dispatches, textures or draw calls.
   const worldNormal = Fn(() => cross(dFdx(positionWorld), dFdy(positionWorld)).normalize())();
+  // The densely tessellated FFT mesh still has a finite sampling pitch.
+  // Avoid amplifying face-to-face derivative changes into broad underwater
+  // reflection polygons. Keep the real normal above water and preserve a
+  // moderated slope beneath it for continuous, stable sky distortion.
+  const underwaterOpticalNormal = mix(
+    worldNormal,
+    vec3(0, 1, 0),
+    underwater.mul(0.32)
+  ).normalize();
 
   const phaseA = positionWorld.x.mul(2.15)
     .add(positionWorld.z.mul(1.07))
@@ -250,8 +259,8 @@ function installWaterProOptics(handle) {
     // Refraction follows the *relative* view and FFT face direction.
     // Use a smooth slope-dependent offset rather than independent periodic
     // waves, which previously produced tiled diamond artifacts.
-    const slopeX = clamp(worldNormal.x, -0.65, 0.65);
-    const slopeZ = clamp(worldNormal.z, -0.65, 0.65);
+    const slopeX = clamp(underwaterOpticalNormal.x, -0.65, 0.65);
+    const slopeZ = clamp(underwaterOpticalNormal.z, -0.65, 0.65);
     const skyUV = vec2(
       viewDir.x.mul(-0.36).add(slopeX.mul(0.34)).add(time.mul(0.003)),
       viewDir.z.mul(-0.18).add(slopeZ.mul(0.24)).add(float(0.30))

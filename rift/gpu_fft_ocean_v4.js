@@ -40,8 +40,8 @@ function smooth01(t) {
 // using the exact same named attributes the existing TSL displacement graph
 // reads. The simulation, interpolation, normals, shallow-water coupling and
 // physics remain unchanged; only rasterized vertex density drops (~61%).
-function installMobileRenderGeometry(handle, size, sampleHeight) {
-  if (!TOUCH_DEVICE || !handle?.mesh || handle.fftMobileGeometryApplied) return;
+function installMobileRenderGeometry(handle, size, sampleHeight, focusX = 0, focusZ = 0, replacing = false) {
+  if (!TOUCH_DEVICE || !handle?.mesh || (handle.fftMobileGeometryApplied && !replacing)) return;
 
   const n = MOBILE_RENDER_N;
   const waterY = handle.waterY ?? 0;
@@ -65,13 +65,24 @@ function installMobileRenderGeometry(handle, size, sampleHeight) {
     (() => { try { return localStorage.getItem("riftGraphicsSettings") === "low"; }
       catch (_) { return false; } })();
   const warp = t => centerWeighted ? Math.sign(t) * Math.pow(Math.abs(t), 1.32) : t;
+  // Keep the original water-plane boundaries fixed (no gaps at ocean edge),
+  // while translating only INTERIOR sampling density toward the swimmer.
+  // A smooth zero-at-edges displacement keeps vertices ordered and avoids
+  // changing the world-space origin of the FFT/shallow-water simulations.
+  const half = size * 0.5;
+  const shiftX = THREE.MathUtils.clamp(focusX / half, -0.24, 0.24);
+  const shiftZ = THREE.MathUtils.clamp(focusZ / half, -0.24, 0.24);
+  const focusWarp = (t, shift) => {
+    const u = warp(t);
+    return u + shift * Math.pow(1 - Math.abs(u), 2);
+  };
 
   for (let rz = 0; rz < n; rz++) {
     for (let rx = 0; rx < n; rx++) {
       const i = rz * n + rx;
       if (centerWeighted) {
-        pos.setXYZ(i, warp(pos.getX(i) / (size * 0.5)) * size * 0.5,
-          pos.getY(i), warp(pos.getZ(i) / (size * 0.5)) * size * 0.5);
+        pos.setXYZ(i, focusWarp(pos.getX(i) / half, shiftX) * half,
+          pos.getY(i), focusWarp(pos.getZ(i) / half, shiftZ) * half);
       }
       const x = pos.getX(i);
       const z = pos.getZ(i);
@@ -115,6 +126,10 @@ function installMobileRenderGeometry(handle, size, sampleHeight) {
   handle.mesh.geometry = geometry;
   try { oldGeometry?.dispose?.(); } catch (_) {}
   handle.fftMobileGeometryApplied = true;
+  handle.fftFocusX = focusX;
+  handle.fftFocusZ = focusZ;
+  handle.fftFocusSize = size;
+  handle.fftFocusSampleHeight = sampleHeight;
   handle.mesh.material.needsUpdate = true;
 }
 
@@ -358,6 +373,23 @@ export function updateGPUFFTOceanVisuals(
     storm,
     day,
   );
+
+  // Refit the central vertex density only on substantial player movement;
+  // never change FFT simulation coordinates, grid vertex count, or boundaries.
+  // Do not rebuild every frame: generating depth attributes is CPU expensive.
+  if (handle?.fftMobileGeometryApplied && playerPos &&
+      Number.isFinite(playerPos.x) && Number.isFinite(playerPos.z) &&
+      handle.fftFocusSize > 0 &&
+      Math.abs(playerPos.x) < handle.fftFocusSize * 0.12 &&
+      Math.abs(playerPos.z) < handle.fftFocusSize * 0.12) {
+    const dx = playerPos.x - (handle.fftFocusX ?? 0);
+    const dz = playerPos.z - (handle.fftFocusZ ?? 0);
+    const threshold = Math.max(36, handle.fftFocusSize * 0.045);
+    if (dx * dx + dz * dz > threshold * threshold) {
+      installMobileRenderGeometry(handle, handle.fftFocusSize,
+        handle.fftFocusSampleHeight, playerPos.x, playerPos.z, true);
+    }
+  }
 
   tuneWaveEnergy(handle, elapsed, storm);
   installPhysicalWaterOptics(handle);

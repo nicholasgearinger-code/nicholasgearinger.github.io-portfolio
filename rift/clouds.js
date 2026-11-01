@@ -72,7 +72,14 @@ export function updateRealisticCloudDome(
   _phaseT = 0,
 ) {
   if (_handle && !_handle.__riftProceduralPlaceholder) {
-    updateLiteDome(_handle, _dt, _dayAmount, _skyHorizonColor, _skyZenithColor, _stormAmount, _phaseT);
+    // Throttle cosmetic cloud updates to 15 Hz on iOS Low. The dome
+    // remains rendered normally between updates; only UV drift/color
+    // adjustments are reduced. Pass accumulated dt to keep wind speed.
+    _handle.__riftCloudUpdateAccum = (_handle.__riftCloudUpdateAccum || 0) + Math.max(0, _dt);
+    if (_handle.__riftCloudUpdateAccum < 1 / 15) return;
+    const cloudDt = Math.min(_handle.__riftCloudUpdateAccum, 0.25);
+    _handle.__riftCloudUpdateAccum = 0;
+    updateLiteDome(_handle, cloudDt, _dayAmount, _skyHorizonColor, _skyZenithColor, _stormAmount, _phaseT);
   }
 }
 

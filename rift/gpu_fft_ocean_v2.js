@@ -213,9 +213,13 @@ function installCoupledGeometry(handle, detailHandle, shallowHandle, size, sampl
     // Stronger but still bounded choppiness. The detail contribution is kept far
     // below the old spike-producing values, while vertical energy is high enough
     // to break up the broad swell into believable wind-driven wave faces.
-    const fftX = la.z.mul(longAmp).mul(0.42).add(da.z.mul(0.18).mul(detailAmp));
+    // Preserve a stronger genuine X/Z FFT chop when viewed beneath shallow water.
+    // Slight horizontal emphasis forms inclined wave faces without creating
+    // extra geometry or changing the shoreline solver's timing.
+    const nearChop = MOBILE_LOW_SHALLOW_WAVES ? float(1.16) : float(1);
+    const fftX = la.z.mul(longAmp).mul(0.42).add(da.z.mul(0.18).mul(detailAmp)).mul(nearChop);
     const fftY = la.x.mul(longAmp).mul(1.08).add(da.x.mul(0.58).mul(detailAmp));
-    const fftZ = ldz.mul(longAmp).mul(0.42).add(ddz.mul(0.18).mul(detailAmp));
+    const fftZ = ldz.mul(longAmp).mul(0.42).add(ddz.mul(0.18).mul(detailAmp)).mul(nearChop);
 
     const horizontalFade = float(1).sub(shallowBlend.mul(0.98));
     const yDisp = mix(fftY, shallow.x, shallowBlend);

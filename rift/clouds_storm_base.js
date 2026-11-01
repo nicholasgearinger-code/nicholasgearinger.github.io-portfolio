@@ -912,3 +912,4 @@ function disposeRealisticCloudDome(scene, handle) {
 }
 
 export { createClouds, updateClouds, disposeClouds, getCloudOcclusionFactor, createCloudLayer, updateCloudLayer, disposeCloudLayer, createRealisticCloudDome, updateRealisticCloudDome, disposeRealisticCloudDome };
+export { getRealisticCloudTexture };

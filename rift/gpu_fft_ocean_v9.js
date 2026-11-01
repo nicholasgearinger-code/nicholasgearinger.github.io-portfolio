@@ -221,57 +221,33 @@ function installWaterProOptics(handle) {
     );
     body = mix(body, crestColor, clamp(translucency, 0, 0.20));
     body = mix(body, foamColor, whitecap.mul(0.94));
-    // Mobile-friendly refractive underside: broad moving wave cells bend the
-    // finer ripple coordinates so the ceiling no longer resembles a rigid
-    // repeating checkerboard. The REAL FFT surface geometry/normal remains
-    // responsible for silhouette and view-dependent shape.
-    const waveWarpX = sin(positionWorld.z.mul(0.115).add(time.mul(0.31)))
-      .mul(1.8).add(opticalNormal.x.mul(2.1));
-    const waveWarpZ = cos(positionWorld.x.mul(0.097).sub(time.mul(0.27)))
-      .mul(1.6).add(opticalNormal.z.mul(2.1));
-    const refractX = positionWorld.x.add(waveWarpX);
-    const refractZ = positionWorld.z.add(waveWarpZ);
-    const waveCellA = sin(refractX.mul(0.61).add(refractZ.mul(0.28)).add(time.mul(0.67)));
-    const waveCellB = cos(refractZ.mul(0.74).sub(refractX.mul(0.23)).sub(time.mul(0.53)));
-    const waveCellC = sin(refractX.mul(0.19).sub(refractZ.mul(0.43)).add(time.mul(0.24)));
-    const cellInterference = abs(waveCellA.add(waveCellB.mul(0.78)).add(waveCellC.mul(0.55)));
-    const luminousWeb = float(1).sub(smoothstep(float(0.13), float(0.43), cellInterference));
-    const brokenHighlights = smoothstep(float(0.40), float(0.90),
-      abs(waveCellA.mul(waveCellB)).add(microEnergy.mul(0.24)));
-    // Near-normal viewing remains transparent and blue-green; shallow water
-    // becomes brighter with daylight. Grazing views retain darker teal so
-    // the surface has depth instead of an opaque cyan slab.
-    // Approximate Snell-window transmission with the actual deformed
-    // surface/view directions. This is a local optics approximation, not
-    // screen-space refraction: it adds no render target or texture fetch.
-    const upTransmission = smoothstep(float(0.15), float(0.88), ndv);
+    // Derive underwater light solely from the displaced FFT surface:
+    // normal tilt controls transmission and grazing reflection, while
+    // changes of normal between nearby fragments approximate wave
+    // curvature / light focusing. No repeating sin/cos interference grids.
+    const surfaceTilt = clamp(abs(worldNormal.x).add(abs(worldNormal.z)), 0, 1);
+    const normalChange = abs(dFdx(worldNormal.x)).add(abs(dFdy(worldNormal.x)))
+      .add(abs(dFdx(worldNormal.z))).add(abs(dFdy(worldNormal.z)));
+    const curvatureFocus = smoothstep(float(0.035), float(0.26), normalChange);
+    const overheadView = smoothstep(float(0.15), float(0.89), ndv);
     const sunFacing = clamp(dot(opticalNormal, lightDir), 0, 1);
-    const sunWindow = pow(sunFacing, float(5)).mul(day)
-      .mul(float(1).sub(storm.mul(0.8)));
-    const undersideBase = mix(color(0x166f93), color(0x9beeea),
-      clamp(shallow.mul(0.47).add(day.mul(0.16))
-        .add(upTransmission.mul(0.31)), 0, 1));
-    const underwaterLight = luminousWeb.mul(0.39)
-      .add(brokenHighlights.mul(0.15))
-      .mul(day)
-      .mul(float(1).sub(storm.mul(0.7)));
-    // Water-to-air critical-angle response (n=1.333 -> critical angle
-    // approximately 48.6 degrees). Near-normal rays transmit skylight;
-    // grazing angles reflect a darker underwater environment. Distortion
-    // is driven by the actual FFT-derived optical normal, not screen UVs.
-    // Smooth the highly contrasted threshold that revealed regular FFT
-    // sampling as a dark diamond grid. Preserve the angle trend, but avoid
-    // treating every adjacent normal crossing as a binary reflection tile.
-    const totalInternalReflection = float(1).sub(
-      smoothstep(float(0.43), float(0.86), ndv)
-    );
-    const refractedSky = undersideBase
-      .add(color(0xd8fff5).mul(underwaterLight))
-      .add(color(0xfff9e5).mul(sunWindow.mul(0.22)));
-    const undersideReflection = mix(color(0x11536e), skyColor,
-      clamp(fresnel.mul(0.34), 0, 0.30));
-    const underside = mix(refractedSky, undersideReflection,
-      totalInternalReflection.mul(0.38));
+    const transmittedSun = pow(sunFacing, float(5)).mul(day)
+      .mul(float(1).sub(storm.mul(0.78)));
+    const clearWater = clamp(shallow.mul(0.48).add(day.mul(0.17))
+      .add(overheadView.mul(0.30)), 0, 1);
+    const refractedBase = mix(color(0x176f91), color(0x8ddfdf), clearWater);
+    const focusing = curvatureFocus.mul(0.18)
+      .add(surfaceTilt.mul(0.06))
+      .mul(day).mul(float(1).sub(storm.mul(0.6)));
+    const transmitted = refractedBase
+      .add(color(0xd9f8ec).mul(focusing))
+      .add(color(0xfff9e5).mul(transmittedSun.mul(0.16)));
+    // The exact critical angle depends on the two media. Use a wide,
+    // low-contrast transition here to avoid revealing FFT grid facets.
+    const grazing = float(1).sub(smoothstep(float(0.40), float(0.86), ndv));
+    const reflected = mix(color(0x155c77), skyColor,
+      clamp(fresnel.mul(0.20), 0, 0.18));
+    const underside = mix(transmitted, reflected, grazing.mul(0.42));
     return mix(body.add(sunColor.mul(glitter.mul(0.42))), underside,
       underwater.mul(float(0.97)));
 

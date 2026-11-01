@@ -492,7 +492,31 @@ function getRealisticCloudTexture() {
   const url = new URL("textures/sky_clouds.png", import.meta.url).href;
   realisticCloudTexture = new THREE.TextureLoader().load(
     url,
-    () => console.log("[clouds] realistic cloud texture loaded:", url),
+    (loadedTexture) => {
+      // The iPhone Low dome does not need a full-size panorama on GPU.
+      // Downsample only the image upload (not the original asset) and
+      // disable mipmaps. Leave Medium/Desktop textures untouched.
+      const iosLow = /iPhone|iPad|iPod/i.test(navigator.userAgent || "") &&
+        getGraphicsSettings().label === "Low";
+      const img = loadedTexture.image;
+      if (iosLow && img?.width > 1024 && img?.height > 0) {
+        const scale = Math.min(1024 / img.width, 512 / img.height, 1);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        canvas.getContext("2d")?.drawImage(img, 0, 0, canvas.width, canvas.height);
+        loadedTexture.image = canvas;
+        loadedTexture.needsUpdate = true;
+      }
+      if (iosLow) {
+        loadedTexture.generateMipmaps = false;
+        loadedTexture.minFilter = THREE.LinearFilter;
+        loadedTexture.magFilter = THREE.LinearFilter;
+        loadedTexture.anisotropy = 1;
+        loadedTexture.needsUpdate = true;
+      }
+      console.log("[clouds] realistic cloud texture loaded:", url);
+    },
     undefined,
     (err) => console.error("[clouds] realistic cloud texture FAILED to load:", url, err)
   );

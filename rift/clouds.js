@@ -6,7 +6,18 @@ import * as THREE from "three";
 // returning inert compatibility handles lets us remove all three visual stacks
 // without rewriting the giant preserved runtime source. Visible clouds now come
 // exclusively from proceduralClouds.js via volumetricClouds.js.
+import { getGraphicsTier } from "./graphicsSettings.js";
+import {
+  createRealisticCloudDome as createLiteDome,
+  updateRealisticCloudDome as updateLiteDome,
+  disposeRealisticCloudDome as disposeLiteDome,
+} from "./clouds_storm_base.js";
 export * from "./clouds_storm_base.js";
+
+const useMobileLowCloudDome = () =>
+  typeof navigator !== "undefined" &&
+  /iPhone|iPad|iPod/i.test(navigator.userAgent || "") &&
+  getGraphicsTier() === "low";
 
 function makePlaceholder(kind) {
   const mesh = new THREE.Object3D();
@@ -45,6 +56,7 @@ export function disposeCloudLayer(_scene, _handle) {
 }
 
 export function createRealisticCloudDome(_scene) {
+  if (useMobileLowCloudDome()) return createLiteDome(_scene);
   // main_game_rain_base.js toggles `.mesh.visible` while submerged, so preserve
   // that shape even though the old panorama dome is no longer drawn.
   return makePlaceholder("cloud-dome");
@@ -59,11 +71,13 @@ export function updateRealisticCloudDome(
   _stormAmount = 0,
   _phaseT = 0,
 ) {
-  // Intentionally empty. Day/night/storm coloring is computed inside the volume.
+  if (_handle && !_handle.__riftProceduralPlaceholder) {
+    updateLiteDome(_handle, _dt, _dayAmount, _skyHorizonColor, _skyZenithColor, _stormAmount, _phaseT);
+  }
 }
 
 export function disposeRealisticCloudDome(_scene, _handle) {
-  // Placeholder owns no GPU resources.
+  if (_handle && !_handle.__riftProceduralPlaceholder) disposeLiteDome(_scene, _handle);
 }
 
 export function getCloudOcclusionFactor(_handle, _cameraPosition, _lightPosition) {

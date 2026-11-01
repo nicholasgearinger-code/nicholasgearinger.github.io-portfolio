@@ -22,11 +22,11 @@ const IOS_WEBKIT = typeof navigator !== "undefined" && (
   ((navigator.platform || "") === "MacIntel" && (navigator.maxTouchPoints || 0) > 1)
 );
 
-// Low keeps the same stable sequential FFT path, with fewer dispatches.
+// Low keeps the same stable sequential FFT path, targeting 18 updates/sec.
 // The rendered water still updates each frame via the latest FFT buffers.
 function iosFFTInterval() {
   try {
-    return localStorage.getItem("riftGraphicsSettings") === "low" ? 1 / 24 : 1 / 30;
+    return localStorage.getItem("riftGraphicsSettings") === "low" ? 1 / 18 : 1 / 30;
   } catch (_) {
     return 1 / 30;
   }

@@ -221,17 +221,35 @@ function installWaterProOptics(handle) {
     );
     body = mix(body, crestColor, clamp(translucency, 0, 0.20));
     body = mix(body, foamColor, whitecap.mul(0.94));
-    // Viewed from beneath, shallow tropical water is a luminous, rippled
-    // transmission window rather than the dark reflected upper ocean.
-    // Reuse the existing micro-wave phases; no texture samples or new passes.
-    const undersideRipples = abs(sin(phaseA.mul(0.64).add(phaseB.mul(0.47))))
-      .mul(abs(cos(phaseB.mul(0.58).sub(phaseA.mul(0.31)))));
-    const undersideLines = smoothstep(float(0.38), float(0.86), undersideRipples);
-    const undersideBase = mix(color(0x2aa8c7), color(0x7de4e8), shallow.mul(0.72).add(day.mul(0.18)));
-    const underside = undersideBase.add(
-      color(0xb9fff0).mul(undersideLines.mul(day).mul(float(0.20)))
-    );
-    return mix(body.add(sunColor.mul(glitter.mul(0.42))), underside, underwater);
+    // Mobile-friendly refractive underside: broad moving wave cells bend the
+    // finer ripple coordinates so the ceiling no longer resembles a rigid
+    // repeating checkerboard. The REAL FFT surface geometry/normal remains
+    // responsible for silhouette and view-dependent shape.
+    const waveWarpX = sin(positionWorld.z.mul(0.115).add(time.mul(0.31)))
+      .mul(1.8).add(opticalNormal.x.mul(2.1));
+    const waveWarpZ = cos(positionWorld.x.mul(0.097).sub(time.mul(0.27)))
+      .mul(1.6).add(opticalNormal.z.mul(2.1));
+    const refractX = positionWorld.x.add(waveWarpX);
+    const refractZ = positionWorld.z.add(waveWarpZ);
+    const waveCellA = sin(refractX.mul(0.61).add(refractZ.mul(0.28)).add(time.mul(0.67)));
+    const waveCellB = cos(refractZ.mul(0.74).sub(refractX.mul(0.23)).sub(time.mul(0.53)));
+    const waveCellC = sin(refractX.mul(0.19).sub(refractZ.mul(0.43)).add(time.mul(0.24)));
+    const cellInterference = abs(waveCellA.add(waveCellB.mul(0.78)).add(waveCellC.mul(0.55)));
+    const luminousWeb = float(1).sub(smoothstep(float(0.13), float(0.43), cellInterference));
+    const brokenHighlights = smoothstep(float(0.40), float(0.90),
+      abs(waveCellA.mul(waveCellB)).add(microEnergy.mul(0.24)));
+    // Near-normal viewing remains transparent and blue-green; shallow water
+    // becomes brighter with daylight. Grazing views retain darker teal so
+    // the surface has depth instead of an opaque cyan slab.
+    const undersideBase = mix(color(0x1687af), color(0x65d6e1),
+      clamp(shallow.mul(0.62).add(day.mul(0.24)).add(ndv.mul(0.09)), 0, 1));
+    const underwaterLight = luminousWeb.mul(0.29)
+      .add(brokenHighlights.mul(0.11))
+      .mul(day)
+      .mul(float(1).sub(storm.mul(0.7)));
+    const underside = undersideBase.add(color(0xc6fff2).mul(underwaterLight));
+    return mix(body.add(sunColor.mul(glitter.mul(0.42))), underside,
+      underwater.mul(float(0.92)));
 
   })();
 

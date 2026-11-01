@@ -192,6 +192,7 @@ const godRayUpdate = `
 `;
 
 const extraEdits = [
+  ["      const worldXZ = positionWorld.xz.mul(0.15);","      // Shared broad-wave warp for both existing caustic layers. Wave-phase\n      // drift moves their focus lines with the swell without extra samples.\n      const broadWaveWarp = vec2(\n        sin(positionWorld.z.mul(0.11).add(t.mul(0.31))),\n        cos(positionWorld.x.mul(0.097).sub(t.mul(0.27)))\n      ).mul(0.16);\n      const worldXZ = positionWorld.xz.mul(0.15).add(broadWaveWarp);","wave-coupled seabed caustic domain"],
   ["      const netPrimary = clamp(tslMin(s1, s2).mul(1.7).sub(0.55), 0, 1);","      const netPrimary = clamp(tslMin(s1, s2).mul(1.95).sub(0.67), 0, 1);","sharper surface-linked primary caustics"],
   ["      const netSecondary = clamp(tslMin(s3, s4).mul(1.6).sub(0.5), 0, 1);","      const netSecondary = clamp(tslMin(s3, s4).mul(1.8).sub(0.60), 0, 1);","sharper surface-linked secondary caustics"],
   ["      const focusMask = float(0.15).add(focusZone.mul(0.85));","      // Shallow tropical caustics remain faint offshore but gain a wider,\n      // more natural pool of light near the swimmer and sun focus. This\n      // reuses the same procedural caustic samples without extra passes.\n      const focusMask = float(0.24).add(focusZone.mul(0.76));","soften distant underwater caustic falloff"],

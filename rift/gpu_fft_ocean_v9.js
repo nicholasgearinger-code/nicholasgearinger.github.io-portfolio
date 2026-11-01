@@ -249,7 +249,7 @@ function installWaterProOptics(handle) {
     // directional sky refraction, not a capture of the above-water scene.
     const skyUV = vec2(
       viewDir.x.mul(-0.36).add(worldNormal.x.mul(0.27)).add(time.mul(0.003)),
-      viewDir.z.mul(-0.36).add(worldNormal.z.mul(0.27)).add(float(0.50))
+      viewDir.z.mul(-0.18).add(worldNormal.z.mul(0.18)).add(float(0.30))
     ).add(vec2(0.5, 0));
     const cloudSample = texture(cloudSkyTexture, skyUV);
     const skyRadiance = mix(skyColor, cloudSample.rgb,

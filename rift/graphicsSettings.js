@@ -19,6 +19,9 @@ const RIFT_IOS = typeof navigator !== "undefined" && (
   /iPhone|iPad|iPod/i.test(navigator.userAgent || "") ||
   ((navigator.platform || "") === "MacIntel" && navigator.maxTouchPoints > 1)
 );
+// Low keeps its animated sky and FFT ocean, but renders fewer pixels.
+// Applied only at startup: changing tiers already reloads the renderer.
+const IOS_LOW_PIXEL_CAP = 0.8;
 const IOS_MEDIUM_BUDGET = Object.freeze({
   pixelRatioCap: 0.75,
   terrainSegments: 140,
@@ -77,6 +80,9 @@ function lowGetsEfficientShadows() {
 
 export function getGraphicsSettings() {
   let settings = applyMobileMediumBudget(base.getGraphicsSettings());
+  if (RIFT_IOS && isLowTier()) {
+    settings = { ...settings, pixelRatioCap: Math.min(settings.pixelRatioCap, IOS_LOW_PIXEL_CAP) };
+  }
 
   // Low used to disable both of these outright. Under the r185 migration they
   // each have a dedicated mobile budget, so they are part of the visual baseline
@@ -105,6 +111,9 @@ export function getGraphicsSettings() {
 }
 
 export function getEffectiveValue(key) {
+  if (RIFT_IOS && isLowTier() && key === "pixelRatioCap") {
+    return Math.min(base.getEffectiveValue(key), IOS_LOW_PIXEL_CAP);
+  }
   if (RIFT_IOS && base.getGraphicsTier() === "medium") {
     if (key === "volumetricCloudsEnabled" || key === "ssaoEnabled") return false;
     if (key === "bloomLevel" || key === "aaMethod") return "off";

@@ -260,9 +260,16 @@ function installWaterProOptics(handle) {
     const skyRadiance = mix(skyColor, cloudSample.rgb,
       cloudSample.a.mul(0.52));
     const refractedSky = mix(color(0x267c96), skyRadiance, skyWindow);
+    // Refracted illumination: projected sunlight is stronger where the
+    // deformed FFT face bends toward the sun. Keep the lobe broad and
+    // energy-limited; sharp thresholds previously exposed a diamond grid.
+    const projectedSun = clamp(dot(worldNormal, lightDir), 0, 1);
+    const sunFlux = projectedSun.mul(projectedSun)
+      .mul(float(0.70).add(overheadView.mul(0.30)))
+      .mul(day).mul(float(1).sub(storm.mul(0.65)));
     const transmitted = mix(refractedSky, color(0x7fd9db),
       clamp(float(1).sub(clearWater).mul(0.27), 0, 0.27))
-      .add(color(0xfff3df).mul(sunFacing.mul(sunFacing).mul(day).mul(0.10)));
+      .add(color(0xfff3df).mul(sunFlux.mul(0.16)));
     // Soft water-to-air reflection at grazing incidence, preserving sky
     // transmission overhead without accentuating regular FFT sampling.
     const internalReflection = float(1).sub(

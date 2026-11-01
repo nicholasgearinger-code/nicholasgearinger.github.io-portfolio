@@ -247,9 +247,14 @@ function installWaterProOptics(handle) {
       .add(sunFacing.mul(0.22)).add(shallow.mul(0.10)), 0, 0.92);
     // Distort the cloud-bearing sky atlas with genuine FFT slope. This is
     // directional sky refraction, not a capture of the above-water scene.
+    // Refraction follows the *relative* view and FFT face direction.
+    // Use a smooth slope-dependent offset rather than independent periodic
+    // waves, which previously produced tiled diamond artifacts.
+    const slopeX = clamp(worldNormal.x, -0.65, 0.65);
+    const slopeZ = clamp(worldNormal.z, -0.65, 0.65);
     const skyUV = vec2(
-      viewDir.x.mul(-0.36).add(worldNormal.x.mul(0.27)).add(time.mul(0.003)),
-      viewDir.z.mul(-0.18).add(worldNormal.z.mul(0.18)).add(float(0.30))
+      viewDir.x.mul(-0.36).add(slopeX.mul(0.34)).add(time.mul(0.003)),
+      viewDir.z.mul(-0.18).add(slopeZ.mul(0.24)).add(float(0.30))
     ).add(vec2(0.5, 0));
     const cloudSample = texture(cloudSkyTexture, skyUV);
     const skyRadiance = mix(skyColor, cloudSample.rgb,
@@ -264,8 +269,15 @@ function installWaterProOptics(handle) {
       smoothstep(float(0.38), float(0.93), ndv));
     const angleReflection = clamp(fresnel.mul(0.20)
       .add(internalReflection.mul(0.30)), 0, 0.42);
-    const reflectedUnderwater = mix(color(0x19536b), skyColor,
-      clamp(sunFacing.mul(0.08), 0, 0.08));
+    // The reflection samples the same real cloud panorama with a distinct
+    // slope-driven direction; at grazing angles it becomes more apparent.
+    const reflectedUV = vec2(
+      viewDir.x.mul(0.26).sub(slopeX.mul(0.20)).add(time.mul(0.002)),
+      viewDir.z.mul(0.14).sub(slopeZ.mul(0.14)).add(0.80)
+    ).add(vec2(0.5, 0));
+    const reflectedSample = texture(cloudSkyTexture, reflectedUV);
+    const reflectedUnderwater = mix(color(0x19536b), skyColor, float(0.25))
+      .add(reflectedSample.rgb.mul(reflectedSample.a).mul(0.18));
     const underside = mix(transmitted, reflectedUnderwater, angleReflection);
     return mix(body.add(sunColor.mul(glitter.mul(0.42))), underside,
       underwater.mul(float(0.97)));

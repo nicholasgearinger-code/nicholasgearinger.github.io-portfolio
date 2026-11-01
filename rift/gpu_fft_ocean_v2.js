@@ -207,8 +207,11 @@ function installCoupledGeometry(handle, detailHandle, shallowHandle, size, sampl
     const detailAmp = MOBILE_LOW_SHALLOW_WAVES
       ? mix(float(0.18), float(1), offshoreDetail) : offshoreDetail;
     const shallowDepthBlend = float(1).sub(smoothstep(float(6.5), float(15.0), depth));
+    // Preserve the shoreline solver, but allow real FFT wave curvature to
+    // remain visible directly overhead in shallow Coral Shallows water.
+    // Previously 72% shoreline blending suppressed much of the mesh motion.
     const shallowBlend = shallowDepthBlend.mul(coverage)
-      .mul(MOBILE_LOW_SHALLOW_WAVES ? float(0.72) : float(1));
+      .mul(MOBILE_LOW_SHALLOW_WAVES ? float(0.48) : float(1));
 
     // Stronger but still bounded choppiness. The detail contribution is kept far
     // below the old spike-producing values, while vertical energy is high enough

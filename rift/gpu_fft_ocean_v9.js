@@ -255,22 +255,9 @@ function installWaterProOptics(handle) {
       .add(brokenHighlights.mul(0.15))
       .mul(day)
       .mul(float(1).sub(storm.mul(0.7)));
-    // Wide refracted skylight patches, bounded by finely broken wave edges.
-    // Reference: broad luminous areas rather than uniformly blue ripple cells.
-    // Uses the existing warped FFT phase fields: no extra texture fetches.
-    const broadWindow = smoothstep(float(-0.32), float(0.54),
-      waveCellA.mul(0.50).add(waveCellC.mul(0.50))
-        .add(sunFacing.mul(0.18)));
-    const edgeBreakup = brokenHighlights.mul(0.34)
-      .add(luminousWeb.mul(0.24));
-    const transmittedPatch = broadWindow.mul(float(0.44).add(edgeBreakup))
-      .mul(day)
-      .mul(float(1).sub(storm.mul(0.45)))
-      .mul(float(0.55).add(upTransmission.mul(0.45)));
     const underside = undersideBase
       .add(color(0xd8fff5).mul(underwaterLight))
-      .add(color(0xfffbec).mul(transmittedPatch))
-      .add(color(0xfff9e5).mul(sunWindow.mul(0.26)));
+      .add(color(0xfff9e5).mul(sunWindow.mul(0.22)));
     return mix(body.add(sunColor.mul(glitter.mul(0.42))), underside,
       underwater.mul(float(0.97)));
 

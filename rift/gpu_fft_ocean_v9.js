@@ -234,15 +234,25 @@ function installWaterProOptics(handle) {
     const sunFacing = clamp(dot(worldNormal, lightDir), 0, 1);
     const clearWater = clamp(shallow.mul(0.42).add(day.mul(0.20))
       .add(overheadView.mul(0.32)), 0, 1);
-    const transmitted = mix(color(0x267c96), color(0x7fd9db), clearWater)
-      .add(color(0xfff3df).mul(sunFacing.mul(sunFacing).mul(day).mul(0.11)));
-    // nWater/nAir=1.333. Critical cosine ~0.661; widen and soften this
-    // approximate transition to avoid creating faceted bright/dark cells.
+    // Approximate transmitted SKY radiance through a wave-normal-warped
+    // underwater view. This uses the live skyColor uniform and real FFT
+    // geometry: unlike a painted highlight, it changes with the sky cycle.
+    // No extra scene capture or WebGPU pass is required.
+    const skyWindow = clamp(overheadView.mul(0.62)
+      .add(sunFacing.mul(0.22)).add(shallow.mul(0.10)), 0, 0.92);
+    const refractedSky = mix(color(0x267c96), skyColor, skyWindow);
+    const transmitted = mix(refractedSky, color(0x7fd9db),
+      clamp(float(1).sub(clearWater).mul(0.27), 0, 0.27))
+      .add(color(0xfff3df).mul(sunFacing.mul(sunFacing).mul(day).mul(0.10)));
+    // Soft water-to-air reflection at grazing incidence, preserving sky
+    // transmission overhead without accentuating regular FFT sampling.
     const internalReflection = float(1).sub(
-      smoothstep(float(0.40), float(0.92), ndv));
-    const angleReflection = clamp(fresnel.mul(0.24)
-      .add(internalReflection.mul(0.20)), 0, 0.34);
-    const underside = mix(transmitted, color(0x246b83), angleReflection);
+      smoothstep(float(0.38), float(0.93), ndv));
+    const angleReflection = clamp(fresnel.mul(0.20)
+      .add(internalReflection.mul(0.30)), 0, 0.42);
+    const reflectedUnderwater = mix(color(0x19536b), skyColor,
+      clamp(sunFacing.mul(0.08), 0, 0.08));
+    const underside = mix(transmitted, reflectedUnderwater, angleReflection);
     return mix(body.add(sunColor.mul(glitter.mul(0.42))), underside,
       underwater.mul(float(0.97)));
 

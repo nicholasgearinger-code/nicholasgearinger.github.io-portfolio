@@ -316,9 +316,19 @@ function tuneWaterProState(handle, elapsed = 0, sky = null, storm = 0, day = 1) 
 
   // Make both real FFT bands more legible on mobile. Desktop additionally has
   // v8's genuine third 64x64 micro cascade; tune it here after the base update.
-  if (handle.waveScale) handle.waveScale.value = 25.2 + stormT * 6.4;
+  // Phase A: preserve the original FFT's genuine 3D vertex displacement
+  // (height + X/Z chop) and enhance its scale modestly on iPhone Low.
+  // Long, gentle amplitude variation yields readable moving swell without
+  // extra FFT cascades, mesh vertices, render passes or command encoders.
+  const mobileLowSwell = TOUCH_DEVICE && getGraphicsTier() === "low";
+  const broadBreath = mobileLowSwell
+    ? Math.sin(elapsed * 0.24) * 0.8 + Math.sin(elapsed * 0.11 + 1.4) * 0.45
+    : 0;
+  if (handle.waveScale) handle.waveScale.value =
+    (mobileLowSwell ? 27.0 : 25.2) + broadBreath + stormT * 6.4;
   if (handle.fftDetailHandle?.waveScale) {
-    handle.fftDetailHandle.waveScale.value = 24.4 + stormT * 7.0;
+    handle.fftDetailHandle.waveScale.value =
+      (mobileLowSwell ? 25.7 : 24.4) + broadBreath * 0.28 + stormT * 7.0;
   }
   if (handle.fftMicroHandle?.waveScale) {
     handle.fftMicroHandle.waveScale.value = 12.4 + stormT * 4.0;

@@ -221,7 +221,18 @@ function installWaterProOptics(handle) {
     );
     body = mix(body, crestColor, clamp(translucency, 0, 0.20));
     body = mix(body, foamColor, whitecap.mul(0.94));
-    return body.add(sunColor.mul(glitter.mul(0.42)));
+    // Viewed from beneath, shallow tropical water is a luminous, rippled
+    // transmission window rather than the dark reflected upper ocean.
+    // Reuse the existing micro-wave phases; no texture samples or new passes.
+    const undersideRipples = abs(sin(phaseA.mul(0.64).add(phaseB.mul(0.47))))
+      .mul(abs(cos(phaseB.mul(0.58).sub(phaseA.mul(0.31)))));
+    const undersideLines = smoothstep(float(0.38), float(0.86), undersideRipples);
+    const undersideBase = mix(color(0x2aa8c7), color(0x7de4e8), shallow.mul(0.72).add(day.mul(0.18)));
+    const underside = undersideBase.add(
+      color(0xb9fff0).mul(undersideLines.mul(day).mul(float(0.20)))
+    );
+    return mix(body.add(sunColor.mul(glitter.mul(0.42))), underside, underwater);
+
   })();
 
   const microRoughness = mix(

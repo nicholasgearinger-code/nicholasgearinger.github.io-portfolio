@@ -15,6 +15,14 @@ const TMP_SUN = new THREE.Color();
 const TMP_CREST = new THREE.Color();
 const BASE_CREST = new THREE.Color(0xb7f4ef);
 const GOLD_CREST = new THREE.Color(0xffddaa);
+const IOS_LOW = typeof navigator !== "undefined" &&
+  /iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+function useSoftMobileOptics() {
+  if (!IOS_LOW) return false;
+  try { return localStorage.getItem("riftGraphicsSettings") === "low"; }
+  catch (_) { return false; }
+}
+
 
 function clamp01(v) {
   return Math.max(0, Math.min(1, Number(v) || 0));
@@ -42,6 +50,10 @@ function applySunsetOceanOptics(handle, stormAmount = 0) {
       // Fresnel term still lets deeper body color show at near-normal angles.
       TMP_SKY.copy(sunset.horizonColor)
         .lerp(sunset.upperMidColor, THREE.MathUtils.lerp(0.22, 0.34, sunset.highSun || 0));
+      // Avoid a bright tinted strip at the water horizon on Low iPhone.
+      if (useSoftMobileOptics() && atmosphere?.horizonColor?.isColor) {
+        TMP_SKY.lerp(atmosphere.horizonColor, 0.28);
+      }
       handle.fftV9SkyColor.value.copy(TMP_SKY);
     } else if (atmosphere?.horizonColor?.isColor) {
       handle.fftV9SkyColor.value.copy(atmosphere.horizonColor)
@@ -64,7 +76,11 @@ function applySunsetOceanOptics(handle, stormAmount = 0) {
     const glintEnergy = THREE.MathUtils.lerp(0.88, 1.34, solarEnergy)
       * THREE.MathUtils.lerp(1.0, 1.48, lowSun)
       * THREE.MathUtils.lerp(0.46, 1.0, Math.pow(cloudT, 0.42));
-    handle.fftV9SunColor.value.copy(TMP_SUN).multiplyScalar(glintEnergy);
+    // Limit the overexposed vertical sun streak on small mobile displays,
+    // preserving its warm color and motion from the FFT surface normals.
+    handle.fftV9SunColor.value.copy(TMP_SUN).multiplyScalar(
+      useSoftMobileOptics() ? Math.min(glintEnergy * 0.62, 0.78) : glintEnergy
+    );
   }
 
   if (handle.fftV9CrestColor?.value?.isColor) {
@@ -83,11 +99,12 @@ function applySunsetOceanOptics(handle, stormAmount = 0) {
       0.085 + storm * 0.045,
       lowSun * clear,
     );
+    if (useSoftMobileOptics()) physical.clearcoatRoughness = Math.max(0.16, physical.clearcoatRoughness);
     if ((Number(physical.envMapIntensity) || 0) > 0) {
-      physical.envMapIntensity = Math.max(
-        Number(physical.envMapIntensity) || 0,
-        THREE.MathUtils.lerp(1.0 - storm * 0.12, 1.38 - storm * 0.20, lowSun),
-      );
+      const targetEnvIntensity = THREE.MathUtils.lerp(1.0 - storm * 0.12, 1.38 - storm * 0.20, lowSun);
+      physical.envMapIntensity = useSoftMobileOptics()
+        ? Math.min(targetEnvIntensity, 0.92)
+        : Math.max(Number(physical.envMapIntensity) || 0, targetEnvIntensity);
     }
   }
 

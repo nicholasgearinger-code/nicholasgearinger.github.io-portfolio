@@ -125,10 +125,13 @@ function installWaterProOptics(handle) {
       .add(sin(phaseC).mul(0.020));
   const microEnergy = clamp(abs(microX).add(abs(microZ)).mul(5.6), 0, 1);
 
+  // Preserve micro ripple normals above water, but use the displaced FFT
+  // geometry itself underwater. Analytic sine micro normals were making
+  // repetitive diamonds visible even after highlight patterns were removed.
   const opticalNormal = vec3(
-    worldNormal.x.add(microX),
+    worldNormal.x.add(microX.mul(float(1).sub(underwater))),
     max(worldNormal.y, float(0.12)),
-    worldNormal.z.add(microZ),
+    worldNormal.z.add(microZ.mul(float(1).sub(underwater))),
   ).normalize();
 
   const viewDir = cameraPosition.sub(positionWorld).normalize();
@@ -221,33 +224,17 @@ function installWaterProOptics(handle) {
     );
     body = mix(body, crestColor, clamp(translucency, 0, 0.20));
     body = mix(body, foamColor, whitecap.mul(0.94));
-    // Derive underwater light solely from the displaced FFT surface:
-    // normal tilt controls transmission and grazing reflection, while
-    // changes of normal between nearby fragments approximate wave
-    // curvature / light focusing. No repeating sin/cos interference grids.
-    const surfaceTilt = clamp(abs(worldNormal.x).add(abs(worldNormal.z)), 0, 1);
-    const normalChange = abs(dFdx(worldNormal.x)).add(abs(dFdy(worldNormal.x)))
-      .add(abs(dFdx(worldNormal.z))).add(abs(dFdy(worldNormal.z)));
-    const curvatureFocus = smoothstep(float(0.035), float(0.26), normalChange);
-    const overheadView = smoothstep(float(0.15), float(0.89), ndv);
-    const sunFacing = clamp(dot(opticalNormal, lightDir), 0, 1);
-    const transmittedSun = pow(sunFacing, float(5)).mul(day)
-      .mul(float(1).sub(storm.mul(0.78)));
-    const clearWater = clamp(shallow.mul(0.48).add(day.mul(0.17))
+    // Underwater: diffuse transmitted skylight from the real displaced
+    // FFT normal. Avoid screen-derivative curvature and thresholded bands,
+    // which magnified the regular mesh sampling into diamond patterns.
+    const overheadView = smoothstep(float(0.18), float(0.90), ndv);
+    const sunFacing = clamp(dot(worldNormal, lightDir), 0, 1);
+    const clearWater = clamp(shallow.mul(0.42).add(day.mul(0.22))
       .add(overheadView.mul(0.30)), 0, 1);
-    const refractedBase = mix(color(0x176f91), color(0x8ddfdf), clearWater);
-    const focusing = curvatureFocus.mul(0.18)
-      .add(surfaceTilt.mul(0.06))
-      .mul(day).mul(float(1).sub(storm.mul(0.6)));
-    const transmitted = refractedBase
-      .add(color(0xd9f8ec).mul(focusing))
-      .add(color(0xfff9e5).mul(transmittedSun.mul(0.16)));
-    // The exact critical angle depends on the two media. Use a wide,
-    // low-contrast transition here to avoid revealing FFT grid facets.
-    const grazing = float(1).sub(smoothstep(float(0.40), float(0.86), ndv));
-    const reflected = mix(color(0x155c77), skyColor,
-      clamp(fresnel.mul(0.20), 0, 0.18));
-    const underside = mix(transmitted, reflected, grazing.mul(0.42));
+    const transmitted = mix(color(0x267c96), color(0x78d6dc), clearWater)
+      .add(color(0xd5eee8).mul(sunFacing.mul(day).mul(0.08)));
+    const grazing = float(1).sub(smoothstep(float(0.33), float(0.94), ndv));
+    const underside = mix(transmitted, color(0x246b83), grazing.mul(0.22));
     return mix(body.add(sunColor.mul(glitter.mul(0.42))), underside,
       underwater.mul(float(0.97)));
 

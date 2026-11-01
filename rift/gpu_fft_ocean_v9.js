@@ -241,13 +241,23 @@ function installWaterProOptics(handle) {
     // Near-normal viewing remains transparent and blue-green; shallow water
     // becomes brighter with daylight. Grazing views retain darker teal so
     // the surface has depth instead of an opaque cyan slab.
-    const undersideBase = mix(color(0x258cb0), color(0x9beeea),
-      clamp(shallow.mul(0.68).add(day.mul(0.28)).add(ndv.mul(0.06)), 0, 1));
-    const underwaterLight = luminousWeb.mul(0.42)
-      .add(brokenHighlights.mul(0.16))
+    // Approximate Snell-window transmission with the actual deformed
+    // surface/view directions. This is a local optics approximation, not
+    // screen-space refraction: it adds no render target or texture fetch.
+    const upTransmission = smoothstep(float(0.15), float(0.88), ndv);
+    const sunFacing = clamp(dot(opticalNormal, lightDir), 0, 1);
+    const sunWindow = pow(sunFacing, float(5)).mul(day)
+      .mul(float(1).sub(storm.mul(0.8)));
+    const undersideBase = mix(color(0x166f93), color(0x9beeea),
+      clamp(shallow.mul(0.47).add(day.mul(0.16))
+        .add(upTransmission.mul(0.31)), 0, 1));
+    const underwaterLight = luminousWeb.mul(0.39)
+      .add(brokenHighlights.mul(0.15))
       .mul(day)
       .mul(float(1).sub(storm.mul(0.7)));
-    const underside = undersideBase.add(color(0xd8fff5).mul(underwaterLight));
+    const underside = undersideBase
+      .add(color(0xd8fff5).mul(underwaterLight))
+      .add(color(0xfff9e5).mul(sunWindow.mul(0.22)));
     return mix(body.add(sunColor.mul(glitter.mul(0.42))), underside,
       underwater.mul(float(0.97)));
 

@@ -22,7 +22,15 @@ const IOS_WEBKIT = typeof navigator !== "undefined" && (
   ((navigator.platform || "") === "MacIntel" && (navigator.maxTouchPoints || 0) > 1)
 );
 
-const IOS_FFT_MIN_INTERVAL = 1 / 30;
+// Low keeps the same stable sequential FFT path, with fewer dispatches.
+// The rendered water still updates each frame via the latest FFT buffers.
+function iosFFTInterval() {
+  try {
+    return localStorage.getItem("riftGraphicsSettings") === "low" ? 1 / 24 : 1 / 30;
+  } catch (_) {
+    return 1 / 30;
+  }
+}
 
 function freezeUnsafeMobileMicroFFT(handle) {
   const micro = handle?.fftMobileMicroHandle;
@@ -94,7 +102,7 @@ export function updateGPUFFTOcean(handle, renderer, elapsedTime = 0) {
 
   const t = Number.isFinite(elapsedTime) ? elapsedTime : 0;
   const last = Number(handle.__riftIOSFFTLastTime);
-  if (Number.isFinite(last) && t >= last && (t - last) < IOS_FFT_MIN_INTERVAL) return;
+  if (Number.isFinite(last) && t >= last && (t - last) < iosFFTInterval()) return;
   handle.__riftIOSFFTLastTime = t;
 
   const profileStart = performance.now();

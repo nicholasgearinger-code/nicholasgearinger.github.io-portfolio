@@ -76,6 +76,12 @@ export function createWaterGeometryAdapter({ mesh, field, shoreSolver = null }) 
     normalNode = field.sampleNormal(sampleXZ);
   }
   const adaptive = createAdaptiveOceanMesh(mesh);
+  // On iOS, reuse the proven production normal shader where present.
+  // The full five-point shallow-water stencil can cost dozens of extra
+  // storage-buffer fetches per vertex and significantly reduce mobile FPS.
+  const isIOS = typeof navigator !== "undefined" &&
+    /iPad|iPhone|iPod/i.test(navigator.userAgent || "");
+  if (isIOS && savedNormalNode) normalNode = savedNormalNode;
   let active = false;
   return {
     mesh, field, positionNode: heightNode, normalNode,

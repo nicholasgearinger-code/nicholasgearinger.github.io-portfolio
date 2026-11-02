@@ -1,4 +1,5 @@
 import * as legacy from "./liquid_legacy.js";
+import { createNextWaterSystem } from "./water_next/index.js";
 import * as oceanV19 from "./gpu_fft_ocean_r185_v22.js";
 import { getEffectiveValue as getBaseGraphicsEffectiveValue } from "./graphicsSettings_fft_base.js";
 
@@ -64,6 +65,25 @@ export function createLiquidPlane(
     const handle = oceanV19.createGPUFFTOceanPlane(scene, y, size, sampleHeight);
     if (handle?.gpuFFT) {
       handle.__riftOceanBackend = "v19-water-pro";
+      // Experimental renderer is opt-in and isolated per water handle.
+      // Reloading in Current mode restores the untouched production shader.
+      let experimental = false;
+      try { experimental = localStorage.getItem("riftWaterGraphicsMode") === "experimental"; } catch (_) {}
+      if (experimental) {
+        try {
+          handle.__riftNextWater = createNextWaterSystem({
+            simulation: handle, mesh: handle.mesh, material: handle.mesh.material,
+            shoreSolver: handle.fftShallowHandle,
+            fftDomain: size,
+            enableExperimentalGeometry: true, enableExperimentalOptics: true,
+          });
+          console.info("[rift-water] Experimental unified FFT geometry/optics enabled");
+        } catch (error) {
+          try { handle.__riftNextWater?.dispose(); } catch (_) {}
+          handle.__riftNextWater = null;
+          console.warn("[rift-water] Experimental setup failed; current renderer retained", error);
+        }
+      }
       setFFTReflectionOwnership(true);
       applyFFTReflectionPreference(handle);
       console.info(
@@ -121,6 +141,7 @@ export function updateLiquidPlane(
     applyFFTReflectionPreference(handle);
     tuneAtmosphereWaterMaterial(handle, atmospheric.atmosphere, stormAmount);
 
+    handle.__riftNextWater?.update({ cameraY, skyColor: atmospheric.skyColor, waterY: handle.waterY });
     oceanV19.updateGPUFFTOceanVisuals(
       handle,
       elapsed,
@@ -174,6 +195,7 @@ export function updateRippleLayer(handle, renderer, cameraPos, cameraY, dt) {
 export function disposeLiquidPlane(scene, handle) {
   if (handle?.gpuFFT) {
     setFFTReflectionOwnership(false);
+    try { handle.__riftNextWater?.dispose(); } catch (error) { console.warn(error); }
     return oceanV19.disposeGPUFFTOcean(scene, handle);
   }
   return legacy.disposeLiquidPlane(scene, handle);

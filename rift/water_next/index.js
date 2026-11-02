@@ -10,10 +10,17 @@ export function createNextWaterSystem({ simulation, mesh, material, terrainMater
   const field = createWaveField(simulation, { domain: fftDomain });
   if (!validateWaveField(field)) throw new Error("Invalid wave field");
   const geometry = createWaterGeometryAdapter({ mesh, field, shoreSolver });
-  if (enableExperimentalGeometry) geometry.apply();
-  const optics = createOpticsAdapter({ field, material: material ?? mesh.material, geometry,
-    reflectionTexture, reflectionMatrix, refractionTexture });
-  if (enableExperimentalGeometry && enableExperimentalOptics) optics.apply();
+  let optics;
+  try {
+    optics = createOpticsAdapter({ field, material: material ?? mesh.material, geometry,
+      reflectionTexture, reflectionMatrix, refractionTexture });
+    if (enableExperimentalGeometry) geometry.apply();
+    if (enableExperimentalGeometry && enableExperimentalOptics) optics.apply();
+  } catch (error) {
+    try { optics?.restore(); } catch (_) {}
+    try { geometry.restore(); } catch (_) {}
+    throw error;
+  }
   const caustics = createCausticsAdapter({ field, terrainMaterial });
   const foam = createFoamAdapter({ field, shoreSolver });
   return {

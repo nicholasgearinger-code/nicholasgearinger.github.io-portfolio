@@ -141,7 +141,7 @@ export function updateLiquidPlane(
     applyFFTReflectionPreference(handle);
     tuneAtmosphereWaterMaterial(handle, atmospheric.atmosphere, stormAmount);
 
-    handle.__riftNextWater?.update({ cameraY, skyColor: atmospheric.skyColor, waterY: handle.waterY });
+    handle.__riftNextWater?.update({ camera: playerPos ? { position: playerPos } : null, cameraY, skyColor: atmospheric.skyColor, waterY: handle.waterY });
     oceanV19.updateGPUFFTOceanVisuals(
       handle,
       elapsed,

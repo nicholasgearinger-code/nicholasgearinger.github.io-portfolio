@@ -76,7 +76,16 @@ function buildSpectrumData(N, size, seed = 1337) {
         const directional = kw * kw;
         const large = Math.exp(-1 / Math.max(1e-12, k2 * L * L));
         const small = Math.exp(-k2 * dampingLength * dampingLength);
-        const phillips = amplitude * large * directional * small / Math.max(1e-12, k2 * k2);
+        // Mild JONSWAP-inspired peak enhancement to create more coherent
+        // wind-driven wave groups. Retain the legacy Phillips spectrum's
+        // overall shape and seeded randomness to avoid drastic sea-state
+        // changes on mobile. Computed once, not in the GPU frame loop.
+        const peakK = GRAVITY / (windSpeed * windSpeed);
+        const ratio = k / peakK;
+        const sigma = ratio <= 1 ? 0.07 : 0.09;
+        const peakCurve = Math.exp(-0.5 * Math.pow((ratio - 1) / sigma, 2));
+        const peakGain = Math.pow(1.25, peakCurve);
+        const phillips = amplitude * large * directional * small * peakGain / Math.max(1e-12, k2 * k2);
         const [g0, g1] = gaussianPair(rand);
         const s = Math.sqrt(Math.max(0, phillips) * 0.5);
         re = g0 * s;

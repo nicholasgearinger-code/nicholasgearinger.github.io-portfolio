@@ -247,16 +247,17 @@ function installFFTDrivenCaustics(handle) {
       0,
       1,
     );
-    const curvature = abs(r.add(l).sub(c.mul(2)))
-      .add(abs(u.add(d).sub(c.mul(2))));
-    const bend = clamp(curvature.mul(1.45), 0, 1);
-
+    // Signed finite-difference curvature: unlike absolute curvature,
+    // distinguish converging and diverging wave sections. Keep the
+    // focusing contrast restrained to prevent harsh tiled caustics.
+    const laplacian = r.add(l).add(u).add(d).sub(c.mul(4));
+    const focus = clamp(laplacian.mul(0.45), -0.20, 0.32);
     return clamp(
-      float(0.82)
-        .add(slope.mul(0.32))
-        .add(bend.mul(0.58)),
-      0.82,
-      1.48,
+      float(1.0)
+        .add(focus)
+        .add(slope.mul(0.10)),
+      0.80,
+      1.36,
     );
   })();
 

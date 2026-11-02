@@ -21,10 +21,27 @@ export function createNextWaterSystem({ simulation, mesh, material, terrainMater
     try { geometry.restore(); } catch (_) {}
     throw error;
   }
+  let sceneCaptureEnabled = false;
+  function attachSceneCaptures({ reflectionTexture, reflectionMatrix, refractionTexture } = {}) {
+    if (sceneCaptureEnabled || !geometry.active) return false;
+    if (!reflectionTexture?.isTexture || !reflectionMatrix?.isMatrix4 ||
+        !refractionTexture?.isTexture) return false;
+    // Replace the lightweight fallback graph with scene-based optics once
+    // textures are populated. Never switch the current production renderer.
+    const replacement = createOpticsAdapter({ field, material: material ?? mesh.material,
+      geometry, reflectionTexture, reflectionMatrix, refractionTexture });
+    optics.restore();
+    optics = replacement;
+    optics.apply();
+    sceneCaptureEnabled = true;
+    return true;
+  }
   const caustics = createCausticsAdapter({ field, terrainMaterial });
   const foam = createFoamAdapter({ field, shoreSolver });
   return {
-    field, geometry, optics, caustics, foam,
+    field, geometry, get optics() { return optics; }, caustics, foam,
+    get sceneCaptureEnabled() { return sceneCaptureEnabled; },
+    attachSceneCaptures,
     update(context = {}) {
       geometry.update(context);
       optics.update(context);

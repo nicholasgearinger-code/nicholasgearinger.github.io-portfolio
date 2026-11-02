@@ -224,8 +224,13 @@ function installCoupledGeometry(handle, detailHandle, shallowHandle, size, sampl
     const fftY = la.x.mul(longAmp).mul(1.08).add(da.x.mul(0.58).mul(detailAmp));
     const fftZ = ldz.mul(longAmp).mul(0.42).add(ddz.mul(0.18).mul(detailAmp)).mul(nearChop);
 
-    const horizontalFade = float(1).sub(shallowBlend.mul(0.98));
-    const yDisp = mix(fftY, shallow.x, shallowBlend);
+    // Retain part of the offshore long-wave carrier as shallow dynamics take
+    // over. This limits abrupt loss of swell at the blend boundary without
+    // increasing the FFT amplitude or introducing extra spectral frequencies.
+    // The shallow solver still supplies the nearshore height correction.
+    const transfer = shallowBlend.mul(0.82);
+    const horizontalFade = float(1).sub(transfer.mul(0.98));
+    const yDisp = mix(fftY, shallow.x, transfer);
 
     return positionLocal.add(vec3(
       fftX.mul(shore).mul(horizontalFade),

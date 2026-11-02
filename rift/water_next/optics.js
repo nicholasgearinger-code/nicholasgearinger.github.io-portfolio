@@ -2,7 +2,7 @@
 // No new rendering passes, target allocations or production activation.
 import * as THREE from "three";
 import { float, color, uniform, dot, abs, clamp, pow, mix, vec2, vec4,
-  texture, screenUV, cameraPosition, positionWorld, attribute, exp } from "three/tsl";
+  texture, screenUV, cameraPosition, positionWorld, attribute, exp, sin, cos, vec3 } from "three/tsl";
 export const WATER_IOR = 1.333;
 export function fresnelSchlick(cosTheta, ior = WATER_IOR) {
   const c = Math.max(0, Math.min(1, cosTheta));
@@ -21,14 +21,25 @@ export function createOpticsAdapter({
   const sky = uniform(new THREE.Color(0x8bc4e1));
   const cameraHeight = uniform(5);
   const waterHeight = uniform(field.source.waterY ?? 0);
-  const normal = geometry.normalNode.normalize();
+  const waveTime = uniform(0);
+  const sunDirection = uniform(new THREE.Vector3(0.2,0.9,0.3).normalize());
+  const sunlight = uniform(1);
+  // Two inexpensive moving ripple bands perturb the physically displaced
+  // wave normal without adding FFT compute or texture fetches.
+  const p = positionWorld;
+  const phaseA = p.x.mul(0.62).add(p.z.mul(0.41)).add(waveTime.mul(1.18));
+  const phaseB = p.x.mul(-1.09).add(p.z.mul(0.73)).sub(waveTime.mul(1.63));
+  const rippleX = cos(phaseA).mul(0.045).sub(sin(phaseB).mul(0.024));
+  const rippleZ = sin(phaseA).mul(0.035).add(cos(phaseB).mul(0.026));
+  const normal = geometry.normalNode.add(vec3(rippleX, float(0), rippleZ)).normalize();
   const view = cameraPosition.sub(positionWorld).normalize();
   const facing = clamp(abs(dot(normal, view)), 0, 1);
   const r0 = float(Math.pow((WATER_IOR - 1) / (WATER_IOR + 1), 2));
   const reflectance = r0.add(float(1).sub(r0).mul(pow(float(1).sub(facing), float(5))));
   const underwater = float(1).sub(clamp(cameraHeight.sub(waterHeight).mul(4).add(0.5), 0, 1));
   const slope = vec2(normal.x, normal.z);
-  const distortion = slope.mul(0.035);
+  const distortion = slope.mul(mix(float(0.009), float(0.026), underwater))
+    .mul(float(0.6).add(float(1).sub(facing).mul(0.4)));
   const skyApprox = mix(originalColor, sky, reflectance.mul(0.65));
 
   // The primary-camera refraction capture is screen aligned.
@@ -59,10 +70,16 @@ export function createOpticsAdapter({
   const shallowTint = color(0x4faeb2);
   const waterBody = mix(deepTint, shallowTint, exp(depth.mul(-0.12)));
   const sceneBase = mix(waterBody, refracted, transmission.mul(refractionTexture ? 0.80 : 0.35));
-  const opticsColor = mix(sceneBase, reflected, reflectance.mul(0.75));
-  const opticalColor = reflectionTexture || refractionTexture
+  // Underwater glancing incidence strengthens internal reflection, while
+  // overhead sunlight transmits through the local wave orientation.
+  const underwaterReflect = mix(reflectance, clamp(float(1).sub(facing).mul(0.68), 0, 0.72), underwater);
+  const opticsColor = mix(sceneBase, reflected, underwaterReflect.mul(0.75));
+  const transmittedSun = pow(clamp(dot(normal, sunDirection), 0, 1), float(4))
+    .mul(sunlight).mul(underwater).mul(0.21);
+  const opticalColor = (reflectionTexture || refractionTexture
     ? opticsColor
-    : mix(waterBody, sky, reflectance.mul(0.55));
+    : mix(waterBody, sky, underwaterReflect.mul(0.55)))
+    .add(color(0xb9e7ed).mul(transmittedSun));
   let active = false;
   return {
     field, material, reflectance, normalNode: geometry.normalNode,
@@ -76,7 +93,10 @@ export function createOpticsAdapter({
       material.needsUpdate = true;
       active = true;
     },
-    update({ cameraY, skyColor, waterY, reflectionMatrix: nextMatrix } = {}) {
+    update({ cameraY, skyColor, waterY, elapsed, sunDir, dayAmount, reflectionMatrix: nextMatrix } = {}) {
+      if (Number.isFinite(elapsed)) waveTime.value = elapsed;
+      if (sunDir?.isVector3) sunDirection.value.copy(sunDir).normalize();
+      if (Number.isFinite(dayAmount)) sunlight.value = Math.max(0, Math.min(1, dayAmount));
       if (Number.isFinite(cameraY)) cameraHeight.value = cameraY;
       if (Number.isFinite(waterY)) waterHeight.value = waterY;
       if (skyColor?.isColor) sky.value.copy(skyColor);

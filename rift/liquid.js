@@ -141,12 +141,14 @@ export function updateLiquidPlane(
     applyFFTReflectionPreference(handle);
     tuneAtmosphereWaterMaterial(handle, atmospheric.atmosphere, stormAmount);
 
-    // Reuse capture textures only when the actual reflection/refraction passes
-    // are enabled. Never introduce extra passes on iOS where WebGPU command
-    // encoder failures have already been observed.
-    const canUseSceneCapture = !/iPad|iPhone|iPod/i.test(navigator.userAgent || "") &&
-      Boolean(reflectionTexture?.isTexture && refractionTexture?.isTexture &&
-        reflectionMatrix?.isMatrix4 && getBaseGraphicsEffectiveValue("reflectionEnabled") !== false);
+    // Scene-based optics are enabled by default in Experimental Mode on all
+    // platforms, including iOS, once existing scene captures are available.
+    // Do not add render passes: the runtime still controls capture cadence and
+    // may disable captures on resource-limited devices. Current Mode is intact.
+    const canUseSceneCapture = Boolean(handle.__riftNextWater &&
+      reflectionTexture?.isTexture && refractionTexture?.isTexture &&
+      reflectionMatrix?.isMatrix4 &&
+      getBaseGraphicsEffectiveValue("reflectionEnabled") !== false);
     if (canUseSceneCapture) {
       try { handle.__riftNextWater?.attachSceneCaptures({
         reflectionTexture, reflectionMatrix, refractionTexture

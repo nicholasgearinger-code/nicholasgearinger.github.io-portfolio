@@ -308,6 +308,8 @@ button{font:inherit;cursor:pointer}
   }
   #rift-menu-btn:hover, #rift-menu-btn:active { color: #e8ecf1; border-color: rgba(232,236,241,.4); }
 
+  #rift-water-mode-ingame { position:absolute;top:3rem;right:10rem;z-index:16;padding:6px 10px;font-size:10px;background:#123544;color:#ecffff;border:1px solid #4fd1c5;border-radius:8px;pointer-events:auto;touch-action:manipulation; }
+  #rift-viewport.rift-fullscreen #rift-water-mode-ingame {top:calc(3rem + env(safe-area-inset-top));right:calc(10rem + env(safe-area-inset-right));}
   #rift-graphics-btn {
     /* right widened 8.6rem->10rem — per "GRAPHICS and RESONANCE
        overlapping in fullscreen" screenshot: at 8.6rem, this button's
@@ -636,7 +638,7 @@ button{font:inherit;cursor:pointer}
 
           <button type="button" class="game-fullscreen-btn" id="rift-fullscreen-btn" aria-label="Enter fullscreen"><span class="gfs-icon"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg></span><span class="gfs-label">Full Screen</span></button>
 
-          <button type="button" id="rift-water-mode-btn" class="rift-mono" aria-label="Switch water graphics renderer" style="padding:8px 11px;border:1px solid #4fd1c5;border-radius:8px;background:#123544;color:#ecffff;min-height:38px">WATER: CURRENT</button>
+          <button type="button" id="rift-water-mode-ingame" class="rift-mono" aria-label="Switch water graphics renderer during gameplay">WATER: CURRENT</button>
           <button type="button" id="rift-graphics-btn" class="rift-mono" aria-label="Graphics settings">⚙ GRAPHICS</button>
           <div id="rift-graphics-panel" class="rift-mono" hidden>
             <span id="rift-graphics-label">Graphics quality</span>
@@ -657,6 +659,7 @@ button{font:inherit;cursor:pointer}
             <div class="rift-title-mark" aria-hidden="true"><span class="rift-title-mark-shard"></span></div>
             <h3 class="rift-title-word">RIFT ISLANDS</h3>
             <p class="rift-title-tagline">A 3D biome-hopping exploration adventure</p>
+            <button type="button" id="rift-water-mode-btn" class="rift-mono" aria-label="Switch between current and experimental water" style="position:relative;z-index:30;pointer-events:auto;min-height:44px;padding:10px 18px;background:#123544;color:#ecffff;border:1px solid #4fd1c5;border-radius:10px;font-size:12px;font-weight:700;touch-action:manipulation">WATER: CURRENT</button>
             <button type="button" id="rift-title-play-btn" class="rift-title-play-btn">▶ Play</button>
           </div>
 
@@ -685,11 +688,11 @@ button{font:inherit;cursor:pointer}
 <div id="rift-launch-note">Dedicated Rift runtime · Fullscreen available from the game controls</div>
 <script>
 document.addEventListener("visibilitychange",()=>{if(document.hidden&&document.pointerLockElement)document.exitPointerLock?.()});
-const waterModeButton=document.getElementById("rift-water-mode-btn");
+const waterModeButtons=[document.getElementById("rift-water-mode-btn"),document.getElementById("rift-water-mode-ingame")].filter(Boolean);
 function readWaterMode(){try{return localStorage.getItem("riftWaterGraphicsMode")==="experimental"?"experimental":"current";}catch(_){return "current";}}
-function paintWaterMode(){if(waterModeButton)waterModeButton.textContent="WATER: "+readWaterMode().toUpperCase();}
+function paintWaterMode(){for(const button of waterModeButtons)button.textContent="WATER: "+readWaterMode().toUpperCase();}
 paintWaterMode();
-waterModeButton?.addEventListener("click",()=>{
+for(const button of waterModeButtons)button.addEventListener("click",()=>{
   const next=readWaterMode()==="experimental"?"current":"experimental";
   try{localStorage.setItem("riftWaterGraphicsMode",next);}catch(error){console.warn("Cannot save water mode",error);return;}
   paintWaterMode();

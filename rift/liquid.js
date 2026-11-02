@@ -141,7 +141,20 @@ export function updateLiquidPlane(
     applyFFTReflectionPreference(handle);
     tuneAtmosphereWaterMaterial(handle, atmospheric.atmosphere, stormAmount);
 
-    handle.__riftNextWater?.update({ camera: playerPos ? { position: playerPos } : null, cameraY, skyColor: atmospheric.skyColor, waterY: handle.waterY });
+    // Reuse capture textures only when the actual reflection/refraction passes
+    // are enabled. Never introduce extra passes on iOS where WebGPU command
+    // encoder failures have already been observed.
+    const canUseSceneCapture = !/iPad|iPhone|iPod/i.test(navigator.userAgent || "") &&
+      Boolean(reflectionTexture?.isTexture && refractionTexture?.isTexture &&
+        reflectionMatrix?.isMatrix4 && getBaseGraphicsEffectiveValue("reflectionEnabled") !== false);
+    if (canUseSceneCapture) {
+      try { handle.__riftNextWater?.attachSceneCaptures({
+        reflectionTexture, reflectionMatrix, refractionTexture
+      }); } catch (error) { console.warn("[rift-water] Capture optics activation failed",error); }
+    }
+    handle.__riftNextWater?.update({ camera: playerPos ? { position: playerPos } : null,
+      cameraY, skyColor: atmospheric.skyColor, waterY: handle.waterY,
+      reflectionMatrix: canUseSceneCapture ? reflectionMatrix : null });
     oceanV19.updateGPUFFTOceanVisuals(
       handle,
       elapsed,

@@ -707,6 +707,19 @@ function reportRiftFailure(label,detail){
   const text=String(detail?.stack||detail?.message||detail||"Unknown failure");
   // Opaque cross-origin errors are not actionable and need not hide gameplay.
   if(text==="Script error."){console.warn("[rift-standalone] Opaque cross-origin error");return;}
+  // Preserve failure information for the next launch and quarantine the
+  // experimental shader after a GPU encoder/device failure.
+  if (/GPUValidationError|encoder state is not valid|GPUDevice|device lost/i.test(text)) {
+    try {
+      sessionStorage.setItem("riftLastGPUFailure", JSON.stringify({
+        mode:readWaterMode(), time:Date.now(), message:text.slice(0,350)
+      }));
+      if (readWaterMode()==="experimental") {
+        localStorage.setItem("riftWaterGraphicsMode","current");
+        sessionStorage.setItem("riftExperimentalWaterQuarantined","1");
+      }
+    } catch (_) {}
+  }
   diagText.textContent=label+": "+text;
   diag.hidden=false;
   console.error("[rift-standalone]",label,detail);

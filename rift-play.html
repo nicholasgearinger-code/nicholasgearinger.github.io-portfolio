@@ -681,6 +681,7 @@ button{font:inherit;cursor:pointer}
   <strong>Rift Islands needs attention</strong>
   <div id="rift-standalone-error-text"></div>
   <a href="index.html#rift">Open embedded game</a>
+  <button id="rift-safe-retry" type="button">Safe recovery (Low + Current)</button>
   <button id="rift-retry" type="button">Reload game</button>
   <button id="rift-dismiss" type="button">Dismiss</button>
 </div>
@@ -710,6 +711,13 @@ function reportRiftFailure(label,detail){
   diag.hidden=false;
   console.error("[rift-standalone]",label,detail);
 }
+document.getElementById("rift-safe-retry").onclick=()=>{
+  try {
+    localStorage.setItem("riftWaterGraphicsMode","current");
+    localStorage.setItem("riftGraphicsSettings","low");
+  } catch (error) { console.warn("[rift-recovery] Could not persist safe graphics settings",error); }
+  location.reload();
+};
 document.getElementById("rift-retry").onclick=()=>location.reload();
 document.getElementById("rift-dismiss").onclick=()=>{diag.hidden=true;};
 window.addEventListener("error",e=>reportRiftFailure("JavaScript error",e.error||e.message));

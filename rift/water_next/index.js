@@ -6,12 +6,13 @@ import { createOpticsAdapter } from "./optics.js";
 import { createCausticsAdapter } from "./caustics.js";
 import { createFoamAdapter } from "./foam.js";
 
-export function createNextWaterSystem({ simulation, mesh, material, terrainMaterial, shoreSolver, fftDomain = null, enableExperimentalGeometry = false } = {}) {
+export function createNextWaterSystem({ simulation, mesh, material, terrainMaterial, shoreSolver, fftDomain = null, enableExperimentalGeometry = false, enableExperimentalOptics = false } = {}) {
   const field = createWaveField(simulation, { domain: fftDomain });
   if (!validateWaveField(field)) throw new Error("Invalid wave field");
   const geometry = createWaterGeometryAdapter({ mesh, field, shoreSolver });
   if (enableExperimentalGeometry) geometry.apply();
-  const optics = createOpticsAdapter({ field, material: material ?? mesh.material });
+  const optics = createOpticsAdapter({ field, material: material ?? mesh.material, geometry });
+  if (enableExperimentalGeometry && enableExperimentalOptics) optics.apply();
   const caustics = createCausticsAdapter({ field, terrainMaterial });
   const foam = createFoamAdapter({ field, shoreSolver });
   return {

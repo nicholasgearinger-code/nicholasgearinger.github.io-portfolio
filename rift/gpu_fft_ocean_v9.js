@@ -263,9 +263,19 @@ function installWaterProOptics(handle) {
     // waves, which previously produced tiled diamond artifacts.
     const slopeX = clamp(underwaterOpticalNormal.x, -0.65, 0.65);
     const slopeZ = clamp(underwaterOpticalNormal.z, -0.65, 0.65);
+    // Water -> air refraction (Snell's law). Derive a real outgoing
+    // direction from the FFT normal rather than shifting the sky by slope.
+    // The cloud panorama remains an approximation of the exterior scene.
+    const cosI = clamp(dot(underwaterOpticalNormal, viewDir), 0, 1);
+    const eta = float(1.333);
+    const sinT2 = eta.mul(eta).mul(float(1).sub(cosI.mul(cosI)));
+    const cosT = float(1).sub(clamp(sinT2, 0, 1)).sqrt();
+    const exitRay = underwaterOpticalNormal.mul(
+      eta.mul(cosI).sub(cosT)
+    ).sub(viewDir.mul(eta)).normalize();
     const skyUV = vec2(
-      viewDir.x.mul(-0.36).add(slopeX.mul(0.34)).add(time.mul(0.003)),
-      viewDir.z.mul(-0.18).add(slopeZ.mul(0.24)).add(float(0.30))
+      exitRay.x.mul(0.36).add(time.mul(0.003)),
+      exitRay.z.mul(0.22).add(float(0.30))
     ).add(vec2(0.5, 0));
     const cloudSample = texture(cloudSkyTexture, skyUV);
     const skyRadiance = mix(skyColor, cloudSample.rgb,
@@ -283,10 +293,15 @@ function installWaterProOptics(handle) {
       .add(color(0xfff3df).mul(sunFlux.mul(0.16)));
     // Soft water-to-air reflection at grazing incidence, preserving sky
     // transmission overhead without accentuating regular FFT sampling.
-    const internalReflection = float(1).sub(
-      smoothstep(float(0.38), float(0.93), ndv));
-    const angleReflection = clamp(fresnel.mul(0.20)
-      .add(internalReflection.mul(0.30)), 0, 0.42);
+    // Schlick approximation for water/air, with total internal reflection
+    // at the critical angle (sin(theta_c)=1/1.333). A narrow soft band
+    // helps prevent abrupt aliasing on the mobile presentation mesh.
+    const r0 = float(0.0204);
+    const fresnelWaterAir = r0.add(float(1).sub(r0).mul(
+      pow(float(1).sub(cosI), float(5))
+    ));
+    const tir = smoothstep(float(0.965), float(1.015), sinT2);
+    const angleReflection = mix(fresnelWaterAir, float(0.88), tir);
     // The reflection samples the same real cloud panorama with a distinct
     // slope-driven direction; at grazing angles it becomes more apparent.
     const reflectedUV = vec2(

@@ -9,7 +9,7 @@ import { createFoamAdapter } from "./foam.js";
 export function createNextWaterSystem({ simulation, mesh, material, terrainMaterial, shoreSolver, fftDomain = null, enableExperimentalGeometry = false } = {}) {
   const field = createWaveField(simulation, { domain: fftDomain });
   if (!validateWaveField(field)) throw new Error("Invalid wave field");
-  const geometry = createWaterGeometryAdapter({ mesh, field });
+  const geometry = createWaterGeometryAdapter({ mesh, field, shoreSolver });
   if (enableExperimentalGeometry) geometry.apply();
   const optics = createOpticsAdapter({ field, material: material ?? mesh.material });
   const caustics = createCausticsAdapter({ field, terrainMaterial });

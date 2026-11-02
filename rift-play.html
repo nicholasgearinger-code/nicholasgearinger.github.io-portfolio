@@ -636,6 +636,7 @@ button{font:inherit;cursor:pointer}
 
           <button type="button" class="game-fullscreen-btn" id="rift-fullscreen-btn" aria-label="Enter fullscreen"><span class="gfs-icon"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg></span><span class="gfs-label">Full Screen</span></button>
 
+          <button type="button" id="rift-water-mode-btn" class="rift-mono" aria-label="Switch water graphics renderer" style="padding:8px 11px;border:1px solid #4fd1c5;border-radius:8px;background:#123544;color:#ecffff;min-height:38px">WATER: CURRENT</button>
           <button type="button" id="rift-graphics-btn" class="rift-mono" aria-label="Graphics settings">⚙ GRAPHICS</button>
           <div id="rift-graphics-panel" class="rift-mono" hidden>
             <span id="rift-graphics-label">Graphics quality</span>
@@ -684,6 +685,16 @@ button{font:inherit;cursor:pointer}
 <div id="rift-launch-note">Dedicated Rift runtime · Fullscreen available from the game controls</div>
 <script>
 document.addEventListener("visibilitychange",()=>{if(document.hidden&&document.pointerLockElement)document.exitPointerLock?.()});
+const waterModeButton=document.getElementById("rift-water-mode-btn");
+function readWaterMode(){try{return localStorage.getItem("riftWaterGraphicsMode")==="experimental"?"experimental":"current";}catch(_){return "current";}}
+function paintWaterMode(){if(waterModeButton)waterModeButton.textContent="WATER: "+readWaterMode().toUpperCase();}
+paintWaterMode();
+waterModeButton?.addEventListener("click",()=>{
+  const next=readWaterMode()==="experimental"?"current":"experimental";
+  try{localStorage.setItem("riftWaterGraphicsMode",next);}catch(error){console.warn("Cannot save water mode",error);return;}
+  paintWaterMode();
+  location.reload();
+});
 const fullButton=document.getElementById("rift-fullscreen-btn");
 if(fullButton){fullButton.addEventListener("click",()=>{document.documentElement.requestFullscreen?.().catch(()=>{});});}
 const diag=document.getElementById("rift-standalone-diagnostics");

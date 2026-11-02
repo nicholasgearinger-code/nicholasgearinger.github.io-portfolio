@@ -245,7 +245,9 @@ function installWaterProOptics(handle) {
     // face normal. Use broad, low-contrast angular transitions only;
     // sharp thresholds revealed the periodic FFT sampling grid.
     const overheadView = smoothstep(float(0.14), float(0.91), ndv);
-    const sunFacing = clamp(dot(worldNormal, lightDir), 0, 1);
+    // Shared, moderated FFT surface normal: transmitted sunlight, sky
+    // refraction and reflected sky all follow the same displaced geometry.
+    const sunFacing = clamp(dot(underwaterOpticalNormal, lightDir), 0, 1);
     const clearWater = clamp(shallow.mul(0.42).add(day.mul(0.20))
       .add(overheadView.mul(0.32)), 0, 1);
     // Approximate transmitted SKY radiance through a wave-normal-warped
@@ -272,7 +274,7 @@ function installWaterProOptics(handle) {
     // Refracted illumination: projected sunlight is stronger where the
     // deformed FFT face bends toward the sun. Keep the lobe broad and
     // energy-limited; sharp thresholds previously exposed a diamond grid.
-    const projectedSun = clamp(dot(worldNormal, lightDir), 0, 1);
+    const projectedSun = clamp(dot(underwaterOpticalNormal, lightDir), 0, 1);
     const sunFlux = projectedSun.mul(projectedSun)
       .mul(float(0.70).add(overheadView.mul(0.30)))
       .mul(day).mul(float(1).sub(storm.mul(0.65)));

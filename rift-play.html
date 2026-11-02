@@ -691,7 +691,24 @@ button{font:inherit;cursor:pointer}
 document.addEventListener("visibilitychange",()=>{if(document.hidden&&document.pointerLockElement)document.exitPointerLock?.()});
 const waterModeButtons=[document.getElementById("rift-water-mode-btn"),document.getElementById("rift-water-mode-ingame")].filter(Boolean);
 function readWaterMode(){try{return localStorage.getItem("riftWaterGraphicsMode")==="experimental"?"experimental":"current";}catch(_){return "current";}}
-function paintWaterMode(){for(const button of waterModeButtons)button.textContent="WATER: "+readWaterMode().toUpperCase();}
+function paintWaterMode(){
+  const mode=readWaterMode();
+  for(const button of waterModeButtons)button.textContent="WATER: "+mode.toUpperCase();
+}
+try {
+  const raw=sessionStorage.getItem("riftLastGPUFailure");
+  const failure=raw ? JSON.parse(raw) : null;
+  if (failure && Date.now()-failure.time < 3600000) {
+    const notice=document.createElement("div");
+    notice.setAttribute("role","status");
+    notice.style.cssText="position:relative;z-index:31;max-width:320px;font:11px/1.4 system-ui,sans-serif;padding:8px 12px;border:1px solid #e8a25f;border-radius:9px;background:#33261e;color:#fff5df";
+    notice.textContent=failure.mode==="experimental"
+      ? "Experimental water hit a GPU error. Current mode selected for your next launch."
+      : "A GPU error occurred in Current mode too. Try Low graphics or Safe recovery.";
+    document.getElementById("rift-title-play-btn")?.insertAdjacentElement("afterend",notice);
+    sessionStorage.removeItem("riftLastGPUFailure");
+  }
+} catch (error) { console.warn("[rift-recovery] Could not read previous failure",error); }
 paintWaterMode();
 for(const button of waterModeButtons)button.addEventListener("click",()=>{
   const next=readWaterMode()==="experimental"?"current":"experimental";

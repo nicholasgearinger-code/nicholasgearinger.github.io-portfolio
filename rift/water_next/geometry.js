@@ -3,12 +3,15 @@
 import { positionLocal, attribute, vec2, vec3, float, uint, floor, min, mix, smoothstep, clamp } from "three/tsl";
 
 function sampleShallowHeight(buffer, coord, n = 256) {
-  const x0 = floor(coord.x);
-  const y0 = floor(coord.y);
+  // Clamp before conversion to unsigned indices: finite-difference normals
+  // deliberately sample on both sides of the current vertex.
+  const bounded = clamp(coord, vec2(0, 0), vec2(n - 1, n - 1));
+  const x0 = floor(bounded.x);
+  const y0 = floor(bounded.y);
   const x1 = min(x0.add(1), float(n - 1));
   const y1 = min(y0.add(1), float(n - 1));
-  const tx = coord.x.sub(x0);
-  const ty = coord.y.sub(y0);
+  const tx = bounded.x.sub(x0);
+  const ty = bounded.y.sub(y0);
   const row = uint(n);
   const fetch = (x, y) => buffer.element(y.toUint().mul(row).add(x.toUint())).x;
   return mix(mix(fetch(x0, y0), fetch(x1, y0), tx),

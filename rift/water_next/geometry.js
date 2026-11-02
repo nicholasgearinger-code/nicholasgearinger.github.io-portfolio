@@ -30,6 +30,7 @@ export function createWaterGeometryAdapter({ mesh, field, shoreSolver = null }) 
     mesh.geometry?.getAttribute?.("fftDepthWorld") &&
     mesh.geometry?.getAttribute?.("fftShoreDense"));
   let heightNode;
+  let normalNode;
   if (hasShore) {
     const coord = attribute("shallowCoord", "vec2");
     const coverage = attribute("shallowCoverage", "float");
@@ -37,17 +38,39 @@ export function createWaterGeometryAdapter({ mesh, field, shoreSolver = null }) 
     const shore = attribute("fftShoreDense", "float");
     const depthBlend = float(1).sub(smoothstep(float(6.5), float(15), depth));
     const transfer = depthBlend.mul(coverage).mul(0.48 * 0.82);
+    const chopFade = float(1).sub(transfer.mul(0.98));
     const shallowHeight = sampleShallowHeight(shoreSolver.state, coord);
     const fftHeight = mix(displacement.y, shallowHeight, transfer);
-    const chopFade = float(1).sub(transfer.mul(0.98));
     heightNode = position.add(vec3(displacement.x.mul(chopFade),
       fftHeight, displacement.z.mul(chopFade)).mul(shore));
+
+    // Calculate the gradient of the SAME blended height used for displacement,
+    // including local shallow-water variation. Do not rely on triangle-face
+    // derivatives or the offshore-only FFT normal near the shoreline.
+    // Transfer, coverage and wetness are treated as locally constant: their
+    // per-vertex gradients require terrain sampling and are not available in
+    // this GPU adapter yet. This is a first-order surface normal.
+    const dx = float(field.domain / field.resolution);
+    const shallowCell = float(256 / 360).mul(dx);
+    const xStep = vec2(dx, 0);
+    const zStep = vec2(0, dx);
+    const sampleHeight = (xz, sc) => mix(
+      field.sampleDisplacement(xz).y,
+      sampleShallowHeight(shoreSolver.state, sc),
+      transfer
+    );
+    const hl = sampleHeight(sampleXZ.sub(xStep), coord.sub(vec2(shallowCell, 0)));
+    const hr = sampleHeight(sampleXZ.add(xStep), coord.add(vec2(shallowCell, 0)));
+    const hd = sampleHeight(sampleXZ.sub(zStep), coord.sub(vec2(0, shallowCell)));
+    const hu = sampleHeight(sampleXZ.add(zStep), coord.add(vec2(0, shallowCell)));
+    const inv2dx = float(0.5).div(dx);
+    const slopeX = hr.sub(hl).mul(inv2dx).mul(shore);
+    const slopeZ = hu.sub(hd).mul(inv2dx).mul(shore);
+    normalNode = vec3(slopeX.negate(), float(1), slopeZ.negate()).normalize();
   } else {
     heightNode = position.add(displacement);
+    normalNode = field.sampleNormal(sampleXZ);
   }
-  // FFT normal is only an approximation in the shallow blending region.
-  // Leave the established shader normal intact when the shoreline contributes.
-  const normalNode = hasShore ? savedNormalNode : field.sampleNormal(sampleXZ);
   let active = false;
   return {
     mesh, field, positionNode: heightNode, normalNode,

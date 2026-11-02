@@ -1,3 +1,4 @@
+import { createAdaptiveOceanMesh } from "./adaptive_mesh.js";
 // Experimental combined FFT/shallow-water vertex binding. Opt-in only.
 // Uses existing GPU buffers; does not allocate or dispatch a new solver.
 import { positionLocal, attribute, vec2, vec3, float, uint, floor, min, mix, smoothstep, clamp } from "three/tsl";
@@ -74,21 +75,25 @@ export function createWaterGeometryAdapter({ mesh, field, shoreSolver = null }) 
     heightNode = position.add(displacement);
     normalNode = field.sampleNormal(sampleXZ);
   }
+  const adaptive = createAdaptiveOceanMesh(mesh);
   let active = false;
   return {
     mesh, field, positionNode: heightNode, normalNode,
     get active() { return active; },
     get coupledShoreline() { return hasShore; },
+    get adaptiveMeshEnabled() { return Boolean(adaptive?.enabled); },
     apply() {
       if (active) return;
       material.positionNode = heightNode;
       if (normalNode) material.normalNode = normalNode;
       material.needsUpdate = true;
+      adaptive?.enable();
       active = true;
     },
-    update() { return active; },
+    update({ camera } = {}) { if(active) adaptive?.update(camera); return active; },
     restore() {
       if (!active) return;
+      adaptive?.restore();
       material.positionNode = savedPositionNode ?? null;
       material.normalNode = savedNormalNode ?? null;
       material.needsUpdate = true;

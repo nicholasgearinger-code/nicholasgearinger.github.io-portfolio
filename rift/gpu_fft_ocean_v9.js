@@ -304,9 +304,13 @@ function installWaterProOptics(handle) {
     const angleReflection = mix(fresnelWaterAir, float(0.88), tir);
     // The reflection samples the same real cloud panorama with a distinct
     // slope-driven direction; at grazing angles it becomes more apparent.
+    // Specular direction from the SAME wave normal as the transmitted ray.
+    // This avoids the old independently tuned reflection slope offsets.
+    const reflectedRay = underwaterOpticalNormal.mul(cosI.mul(2))
+      .sub(viewDir).normalize();
     const reflectedUV = vec2(
-      viewDir.x.mul(0.26).sub(slopeX.mul(0.20)).add(time.mul(0.002)),
-      viewDir.z.mul(0.14).sub(slopeZ.mul(0.14)).add(0.80)
+      reflectedRay.x.mul(0.26).add(time.mul(0.002)),
+      reflectedRay.z.mul(0.14).add(0.80)
     ).add(vec2(0.5, 0));
     const reflectedSample = texture(cloudSkyTexture, reflectedUV);
     const reflectedUnderwater = mix(color(0x19536b), skyColor, float(0.25))

@@ -2,7 +2,7 @@
 // No new rendering passes, target allocations or production activation.
 import * as THREE from "three";
 import { float, color, uniform, dot, abs, clamp, pow, mix, vec2, vec4,
-  texture, screenUV, cameraPosition, positionWorld } from "three/tsl";
+  texture, screenUV, cameraPosition, positionWorld, attribute, exp } from "three/tsl";
 export const WATER_IOR = 1.333;
 export function fresnelSchlick(cosTheta, ior = WATER_IOR) {
   const c = Math.max(0, Math.min(1, cosTheta));
@@ -49,10 +49,20 @@ export function createOpticsAdapter({
   const reflected = reflectionTexture && reflectedUV
     ? texture(reflectionTexture, clamp(reflectedUV, vec2(0.002), vec2(0.998))).rgb
     : sky;
-  const sceneBase = mix(originalColor, refracted, refractionTexture ? float(0.68) : float(0));
-  const opticsColor = mix(sceneBase, reflected, reflectance.mul(0.82));
-  const opticalColor = mix(skyApprox, opticsColor,
-    reflectionTexture || refractionTexture ? float(1) : float(0));
+  // Beer–Lambert-inspired attenuation derived from existing seabed depth.
+  // No depth texture, ray marching or additional render pass. Clear in the
+  // shallows; progressively blue/teal in deeper water.
+  const hasDepth = Boolean(geometry.mesh?.geometry?.getAttribute?.("fftDepthWorld"));
+  const depth = hasDepth ? clamp(attribute("fftDepthWorld", "float"), 0, 45) : float(12);
+  const transmission = exp(depth.mul(-0.055));
+  const deepTint = color(0x07526e);
+  const shallowTint = color(0x4faeb2);
+  const waterBody = mix(deepTint, shallowTint, exp(depth.mul(-0.12)));
+  const sceneBase = mix(waterBody, refracted, transmission.mul(refractionTexture ? 0.80 : 0.35));
+  const opticsColor = mix(sceneBase, reflected, reflectance.mul(0.75));
+  const opticalColor = reflectionTexture || refractionTexture
+    ? opticsColor
+    : mix(waterBody, sky, reflectance.mul(0.55));
   let active = false;
   return {
     field, material, reflectance, normalNode: geometry.normalNode,

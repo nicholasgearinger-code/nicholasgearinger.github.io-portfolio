@@ -156,6 +156,7 @@ export function updateLiquidPlane(
     }
     handle.__riftNextWater?.update({ camera: playerPos ? { position: playerPos } : null,
       cameraY, skyColor: atmospheric.skyColor, waterY: handle.waterY,
+      elapsed, sunDir: atmospheric.sunDir, dayAmount,
       reflectionMatrix: canUseSceneCapture ? reflectionMatrix : null });
     oceanV19.updateGPUFFTOceanVisuals(
       handle,

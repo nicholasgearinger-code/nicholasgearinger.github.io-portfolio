@@ -112,7 +112,7 @@ function installWaterProOptics(handle) {
   const underwaterOpticalNormal = mix(
     worldNormal,
     vec3(0, 1, 0),
-    underwater.mul(0.32)
+    underwater.mul(0.55)
   ).normalize();
 
   const phaseA = positionWorld.x.mul(2.15)
@@ -300,8 +300,8 @@ function installWaterProOptics(handle) {
     const fresnelWaterAir = r0.add(float(1).sub(r0).mul(
       pow(float(1).sub(cosI), float(5))
     ));
-    const tir = smoothstep(float(0.965), float(1.015), sinT2);
-    const angleReflection = mix(fresnelWaterAir, float(0.88), tir);
+    const tir = smoothstep(float(0.91), float(1.045), sinT2);
+    const angleReflection = mix(fresnelWaterAir, float(0.64), tir);
     // The reflection samples the same real cloud panorama with a distinct
     // slope-driven direction; at grazing angles it becomes more apparent.
     // Specular direction from the SAME wave normal as the transmitted ray.

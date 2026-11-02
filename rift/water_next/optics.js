@@ -46,8 +46,8 @@ export function createOpticsAdapter({
     ? projected.xy.div(projected.w.abs().max(float(0.0001)))
         .add(distortion.mul(0.5))
     : null;
-  const reflected = reflectionTexture
-    ? texture(reflectionTexture, clamp(reflectedUV ?? screenUV, vec2(0.002), vec2(0.998))).rgb
+  const reflected = reflectionTexture && reflectedUV
+    ? texture(reflectionTexture, clamp(reflectedUV, vec2(0.002), vec2(0.998))).rgb
     : sky;
   const sceneBase = mix(originalColor, refracted, refractionTexture ? float(0.68) : float(0));
   const opticsColor = mix(sceneBase, reflected, reflectance.mul(0.82));

@@ -28,11 +28,11 @@ export function createNextWaterSystem({ simulation, mesh, material, terrainMater
         !refractionTexture?.isTexture) return false;
     // Replace the lightweight fallback graph with scene-based optics once
     // textures are populated. Never switch the current production renderer.
+    optics.restore();
     const replacement = createOpticsAdapter({ field, material: material ?? mesh.material,
       geometry, reflectionTexture, reflectionMatrix, refractionTexture });
-    optics.restore();
+    replacement.apply();
     optics = replacement;
-    optics.apply();
     sceneCaptureEnabled = true;
     return true;
   }

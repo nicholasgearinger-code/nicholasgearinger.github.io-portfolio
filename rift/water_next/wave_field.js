@@ -58,12 +58,12 @@ export function createWaveField(source, { domain = null, resolution = 128 } = {}
     get displacement() { return spatialA; },
     get horizontalDisplacement() { return spatialB; },
     get waveScale() { return source.waveScale?.value ?? 1; },
-    sampleDisplacement: Fn(worldXZ => displacementAt(worldXZ)),
-    sampleNormal: Fn(worldXZ => {
+    sampleDisplacement: Fn(([worldXZ]) => displacementAt(worldXZ)),
+    sampleNormal: Fn(([worldXZ]) => {
       const { dx, dz } = derivativesAt(worldXZ);
       return vec3(dx.negate(), float(1), dz.negate()).normalize();
     }),
-    sampleCurvature: Fn(worldXZ => derivativesAt(worldXZ).curvature),
+    sampleCurvature: Fn(([worldXZ]) => derivativesAt(worldXZ).curvature),
   });
 }
 export function validateWaveField(field) {

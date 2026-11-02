@@ -34,7 +34,7 @@ function reverseBits(value, bits) {
   return out >>> 0;
 }
 
-function buildSpectrumData({ N, domain, seed, windSpeed, windDirection, amplitude, highFrequencyDamping, waterDepth }) {
+function buildSpectrumData({ N, domain, seed, windSpeed, windDirection, amplitude, highFrequencyDamping, waterDepth, peakEnhancement }) {
   const count = N * N;
   const h0 = new Float32Array(count * 4);
   const meta = new Float32Array(count * 4);
@@ -77,7 +77,17 @@ function buildSpectrumData({ N, domain, seed, windSpeed, windDirection, amplitud
         const directional = 0.055 + 0.865 * forward * forward + 0.080 * crossSea;
         const large = Math.exp(-1 / Math.max(1e-12, k2 * L * L));
         const small = Math.exp(-k2 * dampingLength * dampingLength);
-        const phillips = amplitude * large * directional * small / Math.max(1e-12, k2 * k2);
+        // Optional JONSWAP-style peak sharpening on the established
+        // Phillips spectrum. Emphasizes coherent wind sea without creating
+        // extra FFT passes or changing the random-phase symmetry.
+        // gamma=1 retains the original spectrum exactly.
+        const peakK = GRAVITY / Math.max(1, windSpeed * windSpeed);
+        const ratio = k / Math.max(1e-7, peakK);
+        const sigma = ratio <= 1 ? 0.07 : 0.09;
+        const distanceFromPeak = (ratio - 1) / sigma;
+        const peakShape = Math.exp(-0.5 * distanceFromPeak * distanceFromPeak);
+        const peakGain = Math.pow(peakEnhancement, peakShape);
+        const phillips = amplitude * large * directional * small * peakGain / Math.max(1e-12, k2 * k2);
         const [g0, g1] = gaussianPair(rand);
         const s = Math.sqrt(Math.max(0, phillips) * 0.5);
         re = g0 * s;
@@ -177,6 +187,7 @@ export function createOceanFFTCascade(options = {}) {
     amplitude: options.amplitude ?? 0.00016,
     highFrequencyDamping: options.highFrequencyDamping ?? 0.00055,
     waterDepth: Math.max(8, options.waterDepth ?? 32),
+    peakEnhancement: Math.max(1, Math.min(2.0, options.peakEnhancement ?? 1.35)),
   });
   const h0Buffer = instancedArray(data.h0, "vec4");
   const metaBuffer = instancedArray(data.meta, "vec4");

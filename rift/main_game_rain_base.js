@@ -500,14 +500,30 @@ riftLoadingEl.remove();
 const riftGpuDevice = renderer.backend && renderer.backend.device;
 if (riftGpuDevice && typeof riftGpuDevice.addEventListener === "function") {
   riftGpuDevice.addEventListener("uncapturederror", (event) => {
-    const msg = "[Real WebGPU device error]\n" + event.error.constructor.name + ": " + event.error.message;
-    console.error(msg);
+    const kind = event.error?.constructor?.name || "GPU error";
+    const detail = String(event.error?.message || event.error || "unknown");
+    const state = globalThis.__riftGPUFailureState || (globalThis.__riftGPUFailureState = {
+      first: null, count: 0
+    });
+    state.count++;
+    if (!state.first) {
+      state.first = { kind, detail, when: performance.now(),
+        debugMode: new URLSearchParams(location.search).get("riftDebug") || "normal",
+        fft: globalThis.__riftIOSFFTSafeV22 || null };
+      console.error("[rift] FIRST GPU error", state.first, event.error);
+    } else {
+      console.warn("[rift] Additional GPU error after first failure", kind, detail);
+    }
+    const first = state.first;
+    const msg = "[WebGPU error " + state.count + "] First: " + first.kind
+      + ": " + first.detail + "\\nDiagnostic: " + first.debugMode
+      + "\\nLater errors may be cascading failures.";
     const existingOverlay = document.getElementById("rift-module-error-overlay");
     if (existingOverlay) {
       existingOverlay.style.display = "block";
       existingOverlay.textContent = msg;
     } else {
-      alert(msg); // fallback if index.html's overlay isn't present for some reason
+      console.error(msg); // Avoid native alert storms on an invalid encoder.
     }
   });
 } else {

@@ -69,6 +69,12 @@ export function createLiquidPlane(
       // Reloading in Current mode restores the untouched production shader.
       let experimental = false;
       try { experimental = localStorage.getItem("riftWaterGraphicsMode") === "experimental"; } catch (_) {}
+      // A/B GPU debugging: keep the game's FFT ocean but bypass experimental
+      // geometry/material graph entirely. Never rewrite persisted user choice.
+      if (typeof location !== "undefined" &&
+          new URLSearchParams(location.search).get("riftDebug") === "noexp") {
+        experimental = false;
+      }
       if (experimental) {
         try {
           handle.__riftNextWater = createNextWaterSystem({
@@ -195,6 +201,14 @@ export function updateLiquidPlane(
 
 export function updateFluidSimWater(handle, renderer, elapsedTime) {
   if (handle?.gpuFFT) {
+    // Diagnostic mode freezes existing FFT buffers without destroying them.
+    // If the GPU error disappears, focus on FFT/shallow-water compute dispatch.
+    // Other GPU compute subsystems (e.g. rain) still run independently.
+    if (typeof location !== "undefined" &&
+        new URLSearchParams(location.search).get("riftDebug") === "nofft") {
+      handle.__riftDiagnosticFFTDisabled = true;
+      return;
+    }
     return oceanV19.updateGPUFFTOcean(handle, renderer, elapsedTime);
   }
   return legacy.updateFluidSimWater(handle, renderer, elapsedTime);

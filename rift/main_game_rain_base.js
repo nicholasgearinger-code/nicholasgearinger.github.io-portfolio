@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { Fn, instanceIndex, instancedArray, hash, uniform, vec3, vec2, vec4, float, uint, If, texture, uv, floor, fract, smoothstep, clamp, abs, pass, color, positionWorld, max as tslMax, min as tslMin, vertexColor, normalWorld, sin, cos, dot, mix, pow } from "three/tsl";
+import { Fn, instanceIndex, instancedArray, hash, uniform, vec3, vec2, vec4, float, uint, If, texture, uv, floor, fract, smoothstep, clamp, abs, pass, color, positionWorld, max as tslMax, min as tslMin, vertexColor, normalWorld, sin, cos, dot, mix, pow, exp } from "three/tsl";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
 import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH, POND_Z, POND_RADIUS, POND_LEVEL, RAMP_CENTER_X, RAMP_CENTER_Z, RAMP_LENGTH, RAMP_HALF_WIDTH, ROOM_FLOOR_Y, ROOM_WIDTH, ROOM_LENGTH, BRANCH_START_X, BRANCH_LENGTH, BRANCH_HALF_WIDTH, BRANCH_Z, CHAMBER_RADIUS } from "./terrain.js";
 import { LEVELS, generateLevelLayout } from "./levels.js";
@@ -1310,7 +1310,54 @@ const lensDistortedOutput = Fn(() => {
 // removed). Reads the static Lens FX graphics setting once, same
 // requires-a-reload-to-apply convention as every other graphics toggle
 // in this project — NOT re-checked or re-assigned per frame.
-postProcessing.outputNode = (getGraphicsSettings().lensEffectEnabled !== false) ? lensDistortedOutput : scenePass;
+// Ocean System 2.0: reuse the *same* scene pass depth attachment rather
+// than submitting an additional scene render or raw WebGL render-target pass.
+// This is an Experimental-only, fixed-at-start pipeline choice. The per-frame
+// underwater transition and tuning are uniform updates; no graph rebuild.
+const oceanDepthPassEnabled = (() => {
+  try {
+    const debug = new URLSearchParams(location.search).get("riftDebug");
+    return localStorage.getItem("riftWaterGraphicsMode") === "experimental" &&
+      debug !== "noexp" && debug !== "nodepth";
+  } catch (_) { return false; }
+})();
+const oceanDepthUnderwaterMix = uniform(0);
+const oceanDepthAbsorption = uniform(1);
+const oceanDepthScattering = uniform(1);
+const oceanDepthDaylight = uniform(1);
+const scenePassDepth = oceanDepthPassEnabled
+  ? scenePass.getTextureNode("depth") : null;
+const lensOutputEnabled = getGraphicsSettings().lensEffectEnabled !== false;
+const underwaterDepthOutput = oceanDepthPassEnabled ? Fn(() => {
+  const coord = uv();
+  const base = lensOutputEnabled ? lensDistortedOutput : texture(scenePassColor, coord);
+  const rawDepth = texture(scenePassDepth, coord).r;
+  // Perspective depth buffer 0=near, 1=far (reversedDepthBuffer is not set).
+  // Eye-space distance is reconstructed independently for every visible pixel.
+  const near = float(camera.near);
+  const far = float(camera.far);
+  const eyeDistance = clamp(near.mul(far).div(
+    far.sub(rawDepth.mul(far.sub(near))).max(float(0.0001))
+  ), 0, 90);
+  // No per-pixel depth at the cleared background; keep it at the bounded
+  // maximum distance instead of allowing an unbounded opaque haze.
+  const length = eyeDistance.mul(oceanDepthAbsorption);
+  // Wavelength-dependent Beer-Lambert absorption, tuned for a shallow reef.
+  const throughput = exp(vec3(-0.065, -0.033, -0.018).mul(length));
+  const inScatter = vec3(0.025, 0.17, 0.27)
+    .mul(float(0.60).add(oceanDepthDaylight.mul(0.40)))
+    .mul(oceanDepthScattering);
+  const absorbedColor = base.rgb.mul(throughput)
+    .add(inScatter.mul(vec3(1).sub(throughput)));
+  const blend = oceanDepthUnderwaterMix.mul(
+    smoothstep(float(0.22), float(1.55), eyeDistance)
+  );
+  return vec4(mix(base.rgb, absorbedColor, blend), base.a);
+})() : null;
+postProcessing.outputNode = oceanDepthPassEnabled
+  ? underwaterDepthOutput
+  : (lensOutputEnabled ? lensDistortedOutput : scenePass);
+console.info("[rift-ocean] Scene-depth underwater compositor:", oceanDepthPassEnabled ? "enabled" : "off");
 
 
 // A large sphere enclosing the camera, rendered from the inside
@@ -5199,6 +5246,24 @@ function animate() {
   } else {
     submergedState = false;
   }
+  // Smooth transitions even when the player's camera crosses the moving
+  // ocean near its hysteresis threshold. This avoids flashing between full
+  // underwater absorption and normal air colors.
+  if (oceanDepthPassEnabled) {
+    const target = currentBiome === "crystal" && submergedState ? 1 : 0;
+    oceanDepthUnderwaterMix.value += (target - oceanDepthUnderwaterMix.value) *
+      Math.min(1, dt * 3.5);
+    const tune = globalThis.__riftOceanTuning ?? {};
+    const clarity = Number(tune.clarity);
+    const haze = Number(tune.haze);
+    const sun = Number(tune.sunlight);
+    oceanDepthAbsorption.value = 1 / THREE.MathUtils.clamp(
+      Number.isFinite(clarity) ? clarity : 1.45, 0.35, 3);
+    oceanDepthScattering.value = THREE.MathUtils.clamp(
+      Number.isFinite(haze) ? haze : 1.35, 0, 3);
+    oceanDepthDaylight.value = THREE.MathUtils.clamp(
+      (dayNight.dayAmount || 0) * (Number.isFinite(sun) ? sun / 1.8 : 1), 0, 1.5);
+  }
   const isFullySubmerged = submergedState; // was 0.6 — still narrower than the ocean's own ~0.85-unit wave amplitude, so waves washing over the camera near the surface could still cross both edges of the dead zone repeatedly, flipping the underwater post-process (fog/distortion/render-target pass) on and off every couple frames. 1.1 comfortably exceeds the max wave amplitude, so only an actual sustained surface crossing (not wave bob) flips the state now.
 
   // Ocean Engine 2.0 / Experimental only: depth-dependent underwater
@@ -5239,7 +5304,10 @@ function animate() {
     const depthFog = THREE.MathUtils.lerp(0.0052, 0.0175, depthT);
     const daylightClarity = 1 - 0.18 * Math.min(1, irradiance);
     scene.fog.density = THREE.MathUtils.clamp(
-      (depthFog * daylightClarity + storm * 0.0025) * hazeGain,
+      // Depth compositor already supplies distance attenuation in Experimental.
+      // Keep the existing fog for lighting/particles, but prevent double haze.
+      (depthFog * daylightClarity + storm * 0.0025) * hazeGain *
+        (oceanDepthPassEnabled ? 0.24 : 1),
       0.0008, 0.045
     );
     scene.fog.color.setRGB(

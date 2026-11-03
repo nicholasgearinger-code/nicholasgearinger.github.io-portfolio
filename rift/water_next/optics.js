@@ -123,27 +123,27 @@ export function createOpticsAdapter({
     .mul(underwater).mul(ambientTransmission).mul(0.19).mul(sunlightGain);
   const undersideAmbient = clamp(dot(normal, vec3(0,1,0)), 0, 1)
     .mul(underwater).mul(nightAmbient).mul(ambientTransmission).mul(0.09);
-  // Physically motivated Snell window: the water-to-air critical angle
-  // is asin(1/1.333), about 48.6 degrees from vertical. Use the same
-  // displaced FFT normal for the view angle, transmission and reflection.
-  // A softened boundary avoids ugly hard circular rings on the mobile mesh.
-  const undersideView = view.negate();
-  const upwardFacing = clamp(dot(normal, undersideView), 0, 1);
-  const snellWindow = smoothstep(float(0.60), float(0.73), upwardFacing);
-  const criticalReflect = float(1).sub(snellWindow);
-  const undersideWaterTint = color(0x10536a);
-  const undersideSky = mix(undersideWaterTint, sky,
-    snellWindow.mul(ambientTransmission).mul(0.84));
-  // The sun is brightest where upward-facing wave facets transmit its
-  // direction, and fades naturally when viewed deep below the surface.
-  const sunlightThroughSurface = pow(clamp(dot(normal, sunDirection), 0, 1), float(3))
-    .mul(snellWindow).mul(daylightTransmission).mul(sunlight)
-    .mul(undersideGain).mul(0.27);
-  const underwaterSurface = mix(
-    originalColor, undersideSky,
-    clamp(underwater.mul(float(0.30).add(snellWindow.mul(0.46))), 0, 0.82)
-  ).add(color(0xa8e6dd).mul(sunlightThroughSurface).mul(underwater))
-    .add(undersideWaterTint.mul(criticalReflect.mul(underwater).mul(0.07)));
+  // View-space Snell window of the animated FFT surface. Crucially,
+  // retain the existing multi-band Water Pro underside shading: replacing
+  // it with a solid sky mix destroys normal/reflection structure.
+  // n points toward air; -view points from the camera below toward air.
+  const outgoing = view.negate();
+  const incidence = clamp(dot(normal, outgoing), 0, 1);
+  // Underwater critical angle ~48.6 degrees from the local normal.
+  const snellWindow = smoothstep(float(0.645), float(0.70), incidence);
+  const internalReflection = float(1).sub(snellWindow);
+  const refractedSkyLight = sky.mul(snellWindow)
+    .mul(ambientTransmission).mul(0.17).mul(undersideGain);
+  // The same FFT normal modulates transmitted sunlight and caustic
+  // focusing, while the lower-angle underside retains dark reflection.
+  const sunlightThroughSurface = pow(
+    clamp(dot(normal, sunDirection), 0, 1), float(4)
+  ).mul(snellWindow).mul(daylightTransmission).mul(sunlight)
+    .mul(undersideGain).mul(0.32);
+  const underwaterSurface = originalColor
+    .add(refractedSkyLight.mul(underwater))
+    .add(color(0xb8eee1).mul(sunlightThroughSurface).mul(underwater))
+    .add(color(0x053247).mul(internalReflection.mul(underwater).mul(0.045)));
   // Brighter wave crest transmission and fractured solar glints track the
   // same displaced FFT normal, not a scrolling decorative reflection texture.
   const sunHalf = sunDirection.add(view).normalize();

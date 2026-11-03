@@ -271,13 +271,26 @@ function installFFTDrivenCaustics(handle) {
     // No extra storage fetches: all five wave samples above are reused.
     // Preserve production contrast exactly unless Experimental was selected.
     if (!experimentalCaustics) return legacyFocus;
-    const convergence = smoothstep(float(-0.11), float(0.28), laplacian);
-    const crestFocus = smoothstep(float(0.10), float(0.75), slope);
+    // Wave focusing comes from spatial curvature in the real FFT surface.
+    // Use two soft ridge widths to avoid a binary tiled net. The original
+    // painted caustic texture remains as microstructure, not the main motion.
+    const convergence = smoothstep(float(-0.16), float(0.34), laplacian);
+    const fineConvergence = smoothstep(float(0.07), float(0.46), laplacian);
+    const crestFocus = smoothstep(float(0.10), float(0.70), slope);
     const waveFocus = clamp(
-      float(0.58).add(convergence.mul(1.06))
-        .add(crestFocus.mul(0.25)), 0.58, 1.92
+      float(0.28).add(convergence.mul(0.96))
+        .add(fineConvergence.mul(1.15))
+        .add(crestFocus.mul(0.18)), 0.28, 2.57
     );
-    return clamp(mix(float(1), mix(legacyFocus, waveFocus, float(0.92)), causticGain), 0.10, 3.0);
+    // Light loses energy as it travels from the moving water surface to
+    // the floor; shallow sand retains the brightest focused networks.
+    const seabedDepth = clamp(float(handle.waterY ?? 0).sub(positionWorld.y), 0, 70);
+    const lightAttenuation = float(0.20).add(
+      float(0.80).mul(float(1).sub(smoothstep(float(5), float(42), seabedDepth)))
+    );
+    const focusMix = mix(legacyFocus, waveFocus, float(0.94));
+    return clamp(mix(float(1), focusMix, causticGain)
+      .mul(lightAttenuation), 0.06, 3.5);
   })();
 
   mat.emissiveNode = data.fftOriginalCausticEmissive.mul(fftFocus);

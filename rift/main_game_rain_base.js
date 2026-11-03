@@ -399,6 +399,15 @@ function getRainStreakTexture() {
 
 function updateRainParticles(handle, renderer, camera, dt, rainIntensity, isUnderwater) {
   if (!handle || handle.broken) return;
+  // Do not dispatch rain GPU compute on every clear-sky frame. This used to
+  // submit an init/update compute workload even at intensity=0, on top of
+  // two ocean FFTs and the shallow-water solver. iOS Safari can invalidate
+  // its WebGPU command encoder under heavy mixed compute/render workloads.
+  // Park the rain positions while invisible; resume when rain is visible.
+  if (!(rainIntensity > 0.003) || isUnderwater) {
+    handle.rainOpacity.value = 0;
+    return;
+  }
   handle.camPos.value.copy(camera.position);
   handle.rainDt.value = Math.min(dt, 0.05);
   // Per "rain is seen while underwater" — real rain doesn't fall visibly

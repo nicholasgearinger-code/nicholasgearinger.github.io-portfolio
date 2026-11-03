@@ -1344,7 +1344,7 @@ const scenePassDepth = oceanDepthPassEnabled
 const lensOutputEnabled = getGraphicsSettings().lensEffectEnabled !== false;
 // A new graph is installed only when the user enters Crystal Shallows, not
 // each frame. If FFT storage is not ready, retain the tested procedural path.
-function createUnderwaterDepthGraph(fftWaveField = null) {
+function createUnderwaterDepthGraph(fftWaveField = null, detailWaveField = null, detailSlopes = false) {
 return Fn(() => {
   const coord = uv();
   const base = lensOutputEnabled ? lensDistortedOutput : texture(scenePassColor, coord);
@@ -1389,8 +1389,7 @@ return Fn(() => {
   // Three samples create a height and finite-difference surface gradient.
   // The optional procedural path is retained as a safe GPU fallback.
   const fftHeight = fftWaveField
-    ? fftWaveField.sampleDisplacement(flatHitXZ).y
-    : null;
+    ? fftWaveField.sampleDisplacement(flatHitXZ).y : null;
   const fftStep = float(fftWaveField ? fftWaveField.domain / fftWaveField.resolution : 1);
   const fftSlopeX = fftWaveField ? fftWaveField.sampleDisplacement(
     flatHitXZ.add(vec2(fftStep, 0))
@@ -1398,8 +1397,26 @@ return Fn(() => {
   const fftSlopeZ = fftWaveField ? fftWaveField.sampleDisplacement(
     flatHitXZ.add(vec2(0, fftStep))
   ).y.sub(fftHeight).div(fftStep) : null;
+  // Multiband waterline: same height weights as the v8 FFT surface.
+  // One center sample for the 260m detail cascade on mobile; only desktop
+  // computes additional detail derivatives to reduce phone storage reads.
+  const detailHeight = detailWaveField
+    ? detailWaveField.sampleDisplacement(flatHitXZ).y : null;
+  const detailStep = float(detailWaveField
+    ? detailWaveField.domain / detailWaveField.resolution : 1);
+  const detailSlopeX = detailWaveField && detailSlopes
+    ? detailWaveField.sampleDisplacement(flatHitXZ.add(vec2(detailStep, 0)))
+      .y.sub(detailHeight).div(detailStep)
+    : null;
+  const detailSlopeZ = detailWaveField && detailSlopes
+    ? detailWaveField.sampleDisplacement(flatHitXZ.add(vec2(0, detailStep)))
+      .y.sub(detailHeight).div(detailStep)
+    : null;
+  const combinedFFTHeight = fftWaveField
+    ? fftHeight.mul(1.02).add(detailWaveField ? detailHeight.mul(0.47) : float(0))
+    : null;
   const heightOffset = fftWaveField
-    ? clamp(fftHeight.mul(oceanWaveMotion), -1.2, 1.2)
+    ? clamp(combinedFFTHeight.mul(oceanWaveMotion), -1.7, 1.7)
     : sin(phaseOne).mul(0.34)
       .add(sin(phaseTwo).mul(0.19)).mul(oceanWaveMotion);
   const exitDistance = clamp(
@@ -1414,11 +1431,13 @@ return Fn(() => {
     fragmentDistance.sub(exitDistance));
   const upwardView = smoothstep(float(0.10), float(0.4), rayY);
   const waveSlopeX = fftWaveField
-    ? clamp(fftSlopeX.mul(oceanWaveMotion), -0.30, 0.30)
+    ? clamp(fftSlopeX.mul(1.02).add(detailSlopeX
+        ? detailSlopeX.mul(0.47) : float(0)).mul(oceanWaveMotion), -0.35, 0.35)
     : cos(phaseOne).mul(0.0391)
       .sub(cos(phaseTwo).mul(0.0165)).mul(oceanWaveMotion);
   const waveSlopeZ = fftWaveField
-    ? clamp(fftSlopeZ.mul(oceanWaveMotion), -0.30, 0.30)
+    ? clamp(fftSlopeZ.mul(1.02).add(detailSlopeZ
+        ? detailSlopeZ.mul(0.47) : float(0)).mul(oceanWaveMotion), -0.35, 0.35)
     : cos(phaseOne).mul(0.0231)
       .add(cos(phaseTwo).mul(0.0287)).mul(oceanWaveMotion);
   const bend = vec2(waveSlopeX, waveSlopeZ).mul(oceanSurfaceRefraction)
@@ -1448,7 +1467,15 @@ function installUnderwaterFFTDepthGraph(handle) {
   if (!oceanDepthPassEnabled || !handle?.__riftNextWater?.field) return;
   if (new URLSearchParams(location.search).get("riftDebug") === "nofftdepth") return;
   try {
-    oceanActiveDepthOutput = createUnderwaterDepthGraph(handle.__riftNextWater.field);
+    const field = handle.__riftNextWater.field;
+    const detail = handle.fftDetailHandle;
+    const detailWaveField = detail?.resources?.[8]?.element &&
+      detail?.resources?.[9]?.element &&
+      typeof field.createSiblingField === "function"
+        ? field.createSiblingField(detail, { domain: 260, resolution: 128 })
+        : null;
+    oceanActiveDepthOutput = createUnderwaterDepthGraph(
+      field, detailWaveField, !isTouchDevice);
     // The r185 runtime loader composes desktop SSR around the water output.
     // This function is supplied by that loader; the base game's fallback
     // uses the standard scene output if it is not present.

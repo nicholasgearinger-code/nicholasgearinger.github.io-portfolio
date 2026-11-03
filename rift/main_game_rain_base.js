@@ -1334,7 +1334,11 @@ const oceanRayUp = uniform(new THREE.Vector3(0, 1, 0));
 const oceanRayTanHalfFov = uniform(Math.tan(THREE.MathUtils.degToRad(camera.fov) * 0.5));
 const oceanRayAspect = uniform(camera.aspect);
 const oceanCameraHeight = uniform(0);
+const oceanCameraXZ = uniform(new THREE.Vector2());
 const oceanSurfaceHeight = uniform(LIQUID_LEVEL.crystal ?? 0);
+const oceanSurfaceTime = uniform(0);
+const oceanSurfaceRefraction = uniform(1.0);
+const oceanWaveMotion = uniform(1.0);
 const scenePassDepth = oceanDepthPassEnabled
   ? scenePass.getTextureNode("depth") : null;
 const lensOutputEnabled = getGraphicsSettings().lensEffectEnabled !== false;
@@ -1364,18 +1368,50 @@ const underwaterDepthOutput = oceanDepthPassEnabled ? Fn(() => {
   // A ray looking upward exits the water at this distance. Downward rays
   // stay submerged through the scene fragment. Near-horizontal directions
   // are bounded to the same 90m maximum as the depth reconstruction.
+  // First solve the flat-surface intersection, then displace its height
+  // with two slow coherent waves. This is a cheap animated approximation
+  // of the surface intersection, NOT an FFT readback. It has no extra GPU
+  // storage buffers/passes and is automatically bypassed for downward rays.
+  const rayXZ = vec2(ray.x, ray.z).div(rayLength.max(float(0.0001)));
+  const safeUp = rayY.max(float(0.035));
+  const flatExit = clamp(
+    oceanSurfaceHeight.sub(oceanCameraHeight).div(safeUp), 0, 90
+  );
+  const flatHitXZ = oceanCameraXZ.add(rayXZ.mul(flatExit));
+  const phaseOne = flatHitXZ.x.mul(0.115).add(flatHitXZ.y.mul(0.068))
+    .sub(oceanSurfaceTime.mul(0.73));
+  const phaseTwo = flatHitXZ.x.mul(-0.087).add(flatHitXZ.y.mul(0.151))
+    .add(oceanSurfaceTime.mul(0.92));
+  const heightOffset = sin(phaseOne).mul(0.34)
+    .add(sin(phaseTwo).mul(0.19)).mul(oceanWaveMotion);
   const exitDistance = clamp(
-    oceanSurfaceHeight.sub(oceanCameraHeight)
-      .div(rayY.max(float(0.001))), 0, 90
+    oceanSurfaceHeight.add(heightOffset).sub(oceanCameraHeight)
+      .div(safeUp), 0, 90
   );
   const pathThroughWater = tslMin(fragmentDistance, exitDistance);
+  // Perturb only rays that cross the water surface into above-water
+  // geometry/sky. Refracting the entire underwater image would make rocks
+  // and fish wobble unnaturally and obscure the depth absorption.
+  const crossing = smoothstep(float(-0.25), float(0.8),
+    fragmentDistance.sub(exitDistance));
+  const upwardView = smoothstep(float(0.10), float(0.4), rayY);
+  const waveSlopeX = cos(phaseOne).mul(0.0391)
+    .sub(cos(phaseTwo).mul(0.0165)).mul(oceanWaveMotion);
+  const waveSlopeZ = cos(phaseOne).mul(0.0231)
+    .add(cos(phaseTwo).mul(0.0287)).mul(oceanWaveMotion);
+  const bend = vec2(waveSlopeX, waveSlopeZ).mul(oceanSurfaceRefraction)
+    .mul(oceanDepthUnderwaterMix).mul(crossing).mul(upwardView).mul(0.15);
+  const bentUV = clamp(coord.add(bend), vec2(0.002), vec2(0.998));
+  const bentView = texture(scenePassColor, bentUV).rgb;
+  const refractedColor = mix(base.rgb, bentView,
+    clamp(oceanDepthUnderwaterMix.mul(crossing).mul(upwardView), 0, 0.78));
   const length = pathThroughWater.mul(oceanDepthAbsorption);
   // Wavelength-dependent Beer-Lambert absorption, tuned for a shallow reef.
   const throughput = exp(vec3(-0.065, -0.033, -0.018).mul(length));
   const inScatter = vec3(0.025, 0.17, 0.27)
     .mul(float(0.60).add(oceanDepthDaylight.mul(0.40)))
     .mul(oceanDepthScattering);
-  const absorbedColor = base.rgb.mul(throughput)
+  const absorbedColor = refractedColor.mul(throughput)
     .add(inScatter.mul(vec3(1).sub(throughput)));
   const blend = oceanDepthUnderwaterMix.mul(
     smoothstep(float(0.22), float(1.55), pathThroughWater)
@@ -5296,11 +5332,19 @@ function animate() {
     oceanRayAspect.value = camera.aspect;
     oceanRayTanHalfFov.value = Math.tan(THREE.MathUtils.degToRad(camera.fov) * 0.5);
     oceanCameraHeight.value = camera.position.y;
+    oceanCameraXZ.value.set(camera.position.x, camera.position.z);
     oceanSurfaceHeight.value = surface;
+    oceanSurfaceTime.value = elapsedTime;
     const tune = globalThis.__riftOceanTuning ?? {};
     const clarity = Number(tune.clarity);
     const haze = Number(tune.haze);
     const sun = Number(tune.sunlight);
+    const refraction = Number(tune.refraction);
+    const swell = Number(tune.swell);
+    oceanSurfaceRefraction.value = THREE.MathUtils.clamp(
+      Number.isFinite(refraction) ? refraction / 1.8 : 1, 0, 1.65);
+    oceanWaveMotion.value = THREE.MathUtils.clamp(
+      Number.isFinite(swell) ? swell / 1.65 : 1, 0.4, 1.65);
     oceanDepthAbsorption.value = 1 / THREE.MathUtils.clamp(
       Number.isFinite(clarity) ? clarity : 1.45, 0.35, 3);
     oceanDepthScattering.value = THREE.MathUtils.clamp(

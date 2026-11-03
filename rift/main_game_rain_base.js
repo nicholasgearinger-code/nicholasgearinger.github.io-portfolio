@@ -1415,10 +1415,13 @@ return Fn(() => {
   const combinedFFTHeight = fftWaveField
     ? fftHeight.mul(1.02).add(detailWaveField ? detailHeight.mul(0.47) : float(0))
     : null;
+  const phaseThree = flatHitXZ.x.mul(0.28).sub(flatHitXZ.y.mul(0.19))
+    .add(oceanSurfaceTime.mul(1.31));
   const heightOffset = fftWaveField
     ? clamp(combinedFFTHeight.mul(oceanWaveMotion), -1.7, 1.7)
-    : sin(phaseOne).mul(0.34)
-      .add(sin(phaseTwo).mul(0.19)).mul(oceanWaveMotion);
+    : sin(phaseOne).mul(0.30)
+      .add(sin(phaseTwo).mul(0.16))
+      .add(sin(phaseThree).mul(0.055)).mul(oceanWaveMotion);
   const exitDistance = clamp(
     oceanSurfaceHeight.add(heightOffset).sub(oceanCameraHeight)
       .div(safeUp), 0, 90
@@ -1433,13 +1436,15 @@ return Fn(() => {
   const waveSlopeX = fftWaveField
     ? clamp(fftSlopeX.mul(1.02).add(detailSlopeX
         ? detailSlopeX.mul(0.47) : float(0)).mul(oceanWaveMotion), -0.35, 0.35)
-    : cos(phaseOne).mul(0.0391)
-      .sub(cos(phaseTwo).mul(0.0165)).mul(oceanWaveMotion);
+    : cos(phaseOne).mul(0.0345)
+      .sub(cos(phaseTwo).mul(0.0139))
+      .add(cos(phaseThree).mul(0.0154)).mul(oceanWaveMotion);
   const waveSlopeZ = fftWaveField
     ? clamp(fftSlopeZ.mul(1.02).add(detailSlopeZ
         ? detailSlopeZ.mul(0.47) : float(0)).mul(oceanWaveMotion), -0.35, 0.35)
-    : cos(phaseOne).mul(0.0231)
-      .add(cos(phaseTwo).mul(0.0287)).mul(oceanWaveMotion);
+    : cos(phaseOne).mul(0.0204)
+      .add(cos(phaseTwo).mul(0.0242))
+      .sub(cos(phaseThree).mul(0.0105)).mul(oceanWaveMotion);
   const bend = vec2(waveSlopeX, waveSlopeZ).mul(oceanSurfaceRefraction)
     .mul(oceanDepthUnderwaterMix).mul(crossing).mul(upwardView).mul(0.15);
   const bentUV = clamp(coord.add(bend), vec2(0.002), vec2(0.998));
@@ -1465,7 +1470,18 @@ const underwaterDepthOutput = oceanDepthPassEnabled
 let oceanActiveDepthOutput = underwaterDepthOutput;
 function installUnderwaterFFTDepthGraph(handle) {
   if (!oceanDepthPassEnabled || !handle?.__riftNextWater?.field) return;
-  if (new URLSearchParams(location.search).get("riftDebug") === "nofftdepth") return;
+  const debugMode = new URLSearchParams(location.search).get("riftDebug");
+  // A screen-sized FFT sample graph performs several bilinear STORAGE reads
+  // per pixel. On iPhone that is materially more expensive than a few
+  // analytic waves, and in testing the mobile screenshots showed 14-16 FPS.
+  // The true FFT still animates the physical surface mesh and caustics.
+  // Keep full screen-space FFT sampling opt-in on touch hardware.
+  const touchHardware = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent || "") ||
+    navigator.maxTouchPoints > 0;
+  if (debugMode === "nofftdepth" || (touchHardware && debugMode !== "forcefftdepth")) {
+    console.info("[rift-ocean] Mobile fast underwater depth: analytic screen waves, native mesh FFT retained");
+    return;
+  }
   try {
     const field = handle.__riftNextWater.field;
     const detail = handle.fftDetailHandle;

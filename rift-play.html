@@ -650,6 +650,13 @@ button{font:inherit;cursor:pointer}
             <span id="rift-graphics-hint">Applies immediately — rebuilds the current landmass</span>
           </div>
 
+          <button type="button" id="rift-ocean-tune-btn" class="rift-mono" aria-expanded="false" style="position:absolute;right:12px;top:106px;z-index:45;min-height:38px;padding:7px 11px;background:#07313c;border:1px solid #5ee5db;border-radius:9px;color:#efffff;font-size:12px;touch-action:manipulation">🌊 OCEAN TUNING</button>
+          <div id="rift-ocean-tune-panel" class="rift-mono" hidden style="position:absolute;right:10px;top:150px;z-index:46;width:min(340px,calc(100% - 20px));max-height:min(66vh,540px);overflow-y:auto;overscroll-behavior:contain;padding:14px;border:1px solid #64e4da;border-radius:12px;background:rgba(4,22,32,.97);box-shadow:0 10px 38px #000a;color:#e5fcff;font-size:12px;touch-action:pan-y">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><strong>OCEAN SYSTEM 2.0</strong><button type="button" id="rift-ocean-tune-close" aria-label="Close ocean tuning" style="padding:6px 10px;background:#174857;color:white;border:1px solid #56848c;border-radius:7px">✕</button></div>
+            <p id="rift-ocean-tune-hint" style="margin:8px 0;color:#a5d9de;line-height:1.4">Experimental mode only · Live controls · Saved automatically</p>
+            <div id="rift-ocean-tune-sliders"></div>
+            <div style="display:flex;gap:8px;margin-top:12px"><button id="rift-ocean-preset-dramatic" type="button" style="flex:1;min-height:36px;background:#127a77;color:white;border:1px solid #65d7d3;border-radius:8px">Dramatic preset</button><button id="rift-ocean-reset" type="button" style="flex:1;min-height:36px;background:#263846;color:white;border:1px solid #75919e;border-radius:8px">Reset</button></div>
+          </div>
           <div id="rift-title-gate" class="rift-mono">
             <div class="rift-title-starfield" aria-hidden="true"></div>
             <div class="rift-title-frame-corner rift-title-corner-tl" aria-hidden="true"></div>
@@ -716,6 +723,69 @@ for(const button of waterModeButtons)button.addEventListener("click",()=>{
   paintWaterMode();
   location.reload();
 });
+
+// Persistent manual tuning for Experimental Ocean System 2.0. Existing mode
+// and shader paths remain untouched when Current is selected.
+const oceanControls = [
+  ["swell","Rolling swells",0.5,2.8,1.65],
+  ["chop","Wave detail / chop",0.5,2.6,1.5],
+  ["ripples","Animated surface normals",0,3,1.7],
+  ["reflection","Sky / sun reflections",0,3,1.8],
+  ["refraction","Refraction / distortion",0,3,1.8],
+  ["caustics","Seabed caustics",0,3,1.8],
+  ["sunlight","Underwater light transmission",0,3,1.8],
+  ["haze","Underwater depth haze",0,3,1.35]
+];
+const oceanDefaults=Object.fromEntries(oceanControls.map(([key,,, ,value])=>[key,value]));
+function loadOceanTuning(){
+  let stored={};try{stored=JSON.parse(localStorage.getItem("riftOceanTuningV2")||"{}")||{};}catch(_){}
+  return Object.fromEntries(oceanControls.map(([key,min,max,,])=>{
+    const n=Number(stored[key]);
+    return [key,Number.isFinite(n)?Math.max(min,Math.min(max,n)):oceanDefaults[key]];
+  }));
+}
+window.__riftOceanTuning=loadOceanTuning();
+const tuningPanel=document.getElementById("rift-ocean-tune-panel");
+const tuningButton=document.getElementById("rift-ocean-tune-btn");
+const tuningSliders=document.getElementById("rift-ocean-tune-sliders");
+function paintOceanControls(){
+  for(const [key] of oceanControls){
+    const input=tuningSliders.querySelector('[data-ocean-slider="'+key+'"]');
+    if(input){input.value=window.__riftOceanTuning[key];input.parentNode.querySelector("output").textContent=Number(input.value).toFixed(2)+"×";}
+  }
+  const active=readWaterMode()==="experimental";
+  document.getElementById("rift-ocean-tune-hint").textContent=active
+    ?"Experimental mode · Adjustments apply live · Saved automatically"
+    :"Switch WATER to EXPERIMENTAL to activate these effects";
+}
+function setOceanTuning(key,value){
+  window.__riftOceanTuning[key]=value;
+  try{localStorage.setItem("riftOceanTuningV2",JSON.stringify(window.__riftOceanTuning));}catch(_){}
+  window.dispatchEvent(new CustomEvent("rift-ocean-tuning",{detail:{key,value}}));
+}
+for(const [key,label,min,max] of oceanControls){
+  const row=document.createElement("label");
+  row.style.cssText="display:block;margin:11px 0;touch-action:pan-y";
+  const title=document.createElement("span");
+  title.style.cssText="display:flex;justify-content:space-between;gap:8px;margin-bottom:5px";
+  const name=document.createElement("span");name.textContent=label;
+  const output=document.createElement("output");
+  output.style.color="#7ef5e0";
+  title.append(name,output);
+  const slider=document.createElement("input");
+  slider.type="range";slider.min=min;slider.max=max;slider.step="0.05";
+  slider.dataset.oceanSlider=key;
+  slider.style.cssText="display:block;width:100%;height:26px;accent-color:#5ce5d1;touch-action:pan-x";
+  slider.addEventListener("input",()=>{setOceanTuning(key,Number(slider.value));output.textContent=Number(slider.value).toFixed(2)+"×";});
+  row.append(title,slider);tuningSliders.append(row);
+}
+tuningButton?.addEventListener("click",()=>{tuningPanel.hidden=!tuningPanel.hidden;tuningButton.setAttribute("aria-expanded",String(!tuningPanel.hidden));paintOceanControls();});
+document.getElementById("rift-ocean-tune-close")?.addEventListener("click",()=>{tuningPanel.hidden=true;tuningButton.setAttribute("aria-expanded","false");});
+function applyOceanPreset(values){for(const [key,value] of Object.entries(values))setOceanTuning(key,value);paintOceanControls();}
+document.getElementById("rift-ocean-reset")?.addEventListener("click",()=>applyOceanPreset(oceanDefaults));
+document.getElementById("rift-ocean-preset-dramatic")?.addEventListener("click",()=>applyOceanPreset({swell:2.2,chop:1.9,ripples:2.2,reflection:2.3,refraction:2.3,caustics:2.2,sunlight:2.2,haze:1.6}));
+paintOceanControls();
+
 const fullButton=document.getElementById("rift-fullscreen-btn");
 if(fullButton){fullButton.addEventListener("click",()=>{document.documentElement.requestFullscreen?.().catch(()=>{});});}
 const diag=document.getElementById("rift-standalone-diagnostics");

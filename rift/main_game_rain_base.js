@@ -1453,9 +1453,12 @@ return Fn(() => {
     clamp(oceanDepthUnderwaterMix.mul(crossing).mul(upwardView), 0, 0.78));
   const length = pathThroughWater.mul(oceanDepthAbsorption);
   // Wavelength-dependent Beer-Lambert absorption, tuned for a shallow reef.
-  const throughput = exp(vec3(-0.065, -0.033, -0.018).mul(length));
-  const inScatter = vec3(0.025, 0.17, 0.27)
-    .mul(float(0.60).add(oceanDepthDaylight.mul(0.40)))
+  // Clear Caribbean shallows: preserve visible sand and coral near the
+  // camera while maintaining stronger red absorption over longer paths.
+  // This is still a single-pass approximation, not volumetric ray marching.
+  const throughput = exp(vec3(-0.061, -0.029, -0.016).mul(length));
+  const inScatter = vec3(0.035, 0.215, 0.295)
+    .mul(float(0.55).add(oceanDepthDaylight.mul(0.45)))
     .mul(oceanDepthScattering);
   const absorbedColor = refractedColor.mul(throughput)
     .add(inScatter.mul(vec3(1).sub(throughput)));

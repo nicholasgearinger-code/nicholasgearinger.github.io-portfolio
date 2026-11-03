@@ -54,6 +54,7 @@ export function createWaveField(source, { domain = null, resolution = 128 } = {}
   };
   return Object.freeze({
     source, resolution: n, domain: size,
+    createSiblingField: (other, options) => createWaveField(other, options),
     get time() { return source.fftTime?.value ?? 0; },
     get displacement() { return spatialA; },
     get horizontalDisplacement() { return spatialB; },

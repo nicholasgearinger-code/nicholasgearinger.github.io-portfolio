@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import {
-  Fn, float, uint, positionWorld, floor, fract, clamp, abs, mix, smoothstep,
+  Fn, float, uint, positionWorld, floor, fract, clamp, abs, mix, smoothstep, uniform,
 } from "three/tsl";
 import {
   createGPUFFTOceanPlane as createBaseOcean,
@@ -224,6 +224,8 @@ function installFFTDrivenCaustics(handle) {
         new URLSearchParams(location.search).get("riftDebug") !== "noexp";
     } catch (_) { return false; }
   })();
+  const causticGain = uniform(1.8);
+  data.fftOceanCausticGain = causticGain;
   data.fftOriginalCausticEmissive = mat.emissiveNode;
   data.fftOriginalCausticBeforeRender = mat.onBeforeRender;
 
@@ -275,7 +277,7 @@ function installFFTDrivenCaustics(handle) {
       float(0.58).add(convergence.mul(1.06))
         .add(crestFocus.mul(0.25)), 0.58, 1.92
     );
-    return mix(legacyFocus, waveFocus, float(0.92));
+    return mix(float(1), mix(legacyFocus, waveFocus, float(0.92)), causticGain);
   })();
 
   mat.emissiveNode = data.fftOriginalCausticEmissive.mul(fftFocus);
@@ -288,6 +290,10 @@ function installFFTDrivenCaustics(handle) {
 
     const ud = this.userData;
     if (!ud) return;
+    if (ud.fftOceanCausticGain) {
+      const gain = Number(globalThis.__riftOceanTuning?.caustics);
+      ud.fftOceanCausticGain.value = Number.isFinite(gain) ? Math.max(0, Math.min(3, gain)) : 1.8;
+    }
 
     if (ud.causticTimeUniform && handle.fftTime) {
       ud.causticTimeUniform.value = handle.fftTime.value;

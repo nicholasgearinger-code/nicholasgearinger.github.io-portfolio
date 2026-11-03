@@ -22,9 +22,12 @@ permissions:
   pages: write
   id-token: write
 
+# Never terminate an active Pages upload just because another Rift edit lands.
+# GitHub may coalesce queued runs; each run checks out the latest main commit,
+# so the newest ocean and site files are still included.
 concurrency:
   group: "pages"
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:

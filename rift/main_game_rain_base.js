@@ -5216,15 +5216,20 @@ function animate() {
     })();
   if (experimentalUnderwaterAtmosphere) {
     const depthBelowSurface = Math.max(0, LIQUID_LEVEL.crystal - camera.position.y);
+    const waterTune = globalThis.__riftOceanTuning ?? {};
+    const hazeSetting = Number(waterTune.haze);
+    const sunlightSetting = Number(waterTune.sunlight);
+    const hazeGain = Number.isFinite(hazeSetting) ? THREE.MathUtils.clamp(hazeSetting, 0, 3) : 1.35;
+    const lightGain = Number.isFinite(sunlightSetting) ? THREE.MathUtils.clamp(sunlightSetting, 0, 3) : 1.8;
     const daylight = THREE.MathUtils.clamp(dayNight.dayAmount, 0, 1);
     const storm = THREE.MathUtils.clamp(weatherHandle?.rainIntensity || 0, 0, 1);
     const depthT = THREE.MathUtils.clamp(depthBelowSurface / 28, 0, 1);
     const lightThroughWater = daylight * (1 - storm * 0.55) *
-      Math.exp(-depthBelowSurface * 0.055);
+      Math.exp(-depthBelowSurface * 0.055) * lightGain;
     // Close water remains legible; deep distant reef dissolves gradually.
     // FogExp2 applies to normal terrain/fish rendering, not just the ocean mesh.
-    scene.fog.density = THREE.MathUtils.lerp(0.0065, 0.018, depthT) +
-      storm * 0.0025;
+    scene.fog.density = (THREE.MathUtils.lerp(0.0065, 0.018, depthT) +
+      storm * 0.0025) * hazeGain;
     scene.fog.color.setRGB(
       THREE.MathUtils.lerp(0.025, 0.105, lightThroughWater),
       THREE.MathUtils.lerp(0.145, 0.36, lightThroughWater),

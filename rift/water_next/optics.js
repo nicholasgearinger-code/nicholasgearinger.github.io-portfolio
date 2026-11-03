@@ -101,7 +101,9 @@ export function createOpticsAdapter({
     : mix(originalColor, waterBody, fallbackTransmission);
   // Fallback sky Fresnel creates visible reflection response even where iOS
   // disables expensive scene capture render targets.
-  const reflectedBase = mix(composedBase, sky, clamp(reflectance.mul(reflectionGain).mul(0.23), 0, 0.58));
+  // Stronger grazing reflection, but no extra capture on mobile. Sky
+  // contribution remains Fresnel-driven and vanishes near normal incidence.
+  const reflectedBase = mix(composedBase, sky, clamp(reflectance.mul(reflectionGain).mul(0.31), 0, 0.64));
   // Fine animated normals steer subtle transmitted sun and sky glimmer.
   // The low amplitude avoids repeating diamond patterns and leaves the
   // FFT-derived broad shading to the original physically-based shader.
@@ -147,20 +149,28 @@ export function createOpticsAdapter({
   const facetLight = clamp(dot(normal, sunDirection), 0, 1);
   const broadTransmission = smoothstep(float(0.12), float(0.88),
     facetLight.mul(0.74).add(incidence.mul(0.26)));
-  const waveIllumination = float(0.72)
-    .add(sin(phaseA.mul(0.31)).mul(0.13))
-    .add(cos(phaseB.mul(0.27)).mul(0.10));
+  // Large light pools roll with the actual FFT normal, while fine ripples
+  // only fracture the light. Avoid the previous nearly uniform turquoise
+  // lift that made the whole underside resemble a flat blue ceiling.
+  const waveIllumination = float(0.56)
+    .add(sin(phaseA.mul(0.31)).mul(0.18))
+    .add(cos(phaseB.mul(0.27)).mul(0.13));
   const lightShaftFootprint = broadTransmission.mul(waveIllumination)
     .mul(sunlight).mul(daylightTransmission).mul(undersideGain);
-  // Total internal reflection leaves the grazing underside darker, while
-  // overhead facets admit the actual sky and daytime wave highlights.
+  const focusedTransmission = pow(
+    clamp(dot(normal, sunDirection), 0, 1), float(9)
+  ).mul(snellWindow).mul(sunlight).mul(daylightTransmission)
+    .mul(undersideGain);
+  // Darker outer Snell window. The sky and lower-frequency wave shading
+  // from the production material remain underneath the added highlights.
   const lowAngleShade = internalReflection.mul(float(1).sub(incidence))
-    .mul(underwater).mul(0.22);
-  const underwaterSurface = originalColor
-    .mul(float(1).sub(lowAngleShade))
+    .mul(underwater).mul(0.35);
+  const undersideBase = originalColor.mul(float(1).sub(lowAngleShade));
+  const underwaterSurface = undersideBase
     .add(refractedSkyLight.mul(underwater))
-    .add(color(0x83dedb).mul(lightShaftFootprint).mul(underwater).mul(0.24))
-    .add(color(0xb8eee1).mul(sunlightThroughSurface).mul(underwater));
+    .add(color(0x4aa9b9).mul(lightShaftFootprint).mul(underwater).mul(0.20))
+    .add(color(0x8bded8).mul(focusedTransmission).mul(underwater).mul(0.22))
+    .add(color(0xb8eee1).mul(sunlightThroughSurface).mul(underwater).mul(0.72));
   // Brighter wave crest transmission and fractured solar glints track the
   // same displaced FFT normal, not a scrolling decorative reflection texture.
   const sunHalf = sunDirection.add(view).normalize();

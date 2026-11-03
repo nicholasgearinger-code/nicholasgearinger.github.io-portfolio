@@ -295,11 +295,18 @@ if (riftSSREnabled) {
     "r185 Water Pro WebGPU SSR setup",
   ],
   [
-    'postProcessing.outputNode = (getGraphicsSettings().lensEffectEnabled !== false) ? lensDistortedOutput : scenePass;',
-    `const riftBasePostOutput = (getGraphicsSettings().lensEffectEnabled !== false) ? lensDistortedOutput : scenePassColor;
-// r183+ SSRNode returns premultiplied reflection color. Add RGB to the beauty
-// pass instead of using the old blendColor() path.
-postProcessing.outputNode = (riftSSREnabled && riftSSRPass) ? riftBasePostOutput.add(riftSSRPass.rgb) : riftBasePostOutput;`,
+    `postProcessing.outputNode = oceanDepthPassEnabled
+  ? underwaterDepthOutput
+  : (lensOutputEnabled ? lensDistortedOutput : scenePass);`,
+    `// Compose optional desktop SSR on top of the current scene output.
+ // The Experimental underwater depth node is already part of this output;
+ // do not replace it or recreate the old manual render-target path.
+ const riftBasePostOutput = oceanDepthPassEnabled
+   ? underwaterDepthOutput
+   : (lensOutputEnabled ? lensDistortedOutput : scenePassColor);
+ postProcessing.outputNode = (riftSSREnabled && riftSSRPass)
+   ? riftBasePostOutput.add(riftSSRPass.rgb)
+   : riftBasePostOutput;`,
     "r185 Water Pro additive SSR composition",
   ],
   [

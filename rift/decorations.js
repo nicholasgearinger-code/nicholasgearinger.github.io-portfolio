@@ -146,6 +146,14 @@ export function updateLightShafts(shafts, dayAmount) {
   const cloudSculpt = 0.72 + partialCloud * 0.28;
   const strength = daylight * sourceVisibility * altitudeShape * cloudSculpt;
   const t = performance.now() * 0.001;
+  // Experimental-only: light shafts share the ocean's underwater sunlight
+  // control; keep the existing Current renderer unchanged.
+  let experimentalWater = false;
+  try { experimentalWater = localStorage.getItem("riftWaterGraphicsMode") === "experimental"; } catch (_) {}
+  const requestedLight = Number(globalThis.__riftOceanTuning?.sunlight);
+  const underwaterBeamGain = experimentalWater
+    ? THREE.MathUtils.clamp(Number.isFinite(requestedLight) ? requestedLight / 1.8 : 1, 0, 1.65)
+    : 1;
 
   const directionalTilt = sunDir
     ? THREE.MathUtils.clamp(Math.atan2(-sunDir.x, Math.max(0.18, sunDir.y)), -0.58, 0.58)
@@ -175,14 +183,19 @@ export function updateLightShafts(shafts, dayAmount) {
       ? THREE.MathUtils.lerp(1, 0.55, clamp01((shaft.depth || 0) / 34))
       : 1;
     const underwaterStrength = shaft.underwater
-      ? strength * depthFade * (0.82 + cloudTransmission * 0.18)
+      ? strength * depthFade * (0.82 + cloudTransmission * 0.18) * underwaterBeamGain
       : strength;
 
     for (let i = 0; i < shaft.layers.length; i++) {
       const layer = shaft.layers[i];
       const sprite = layer.sprite;
       const material = sprite.material;
-      material.opacity = shaft.baseOpacity * layer.weight * underwaterStrength * breathe;
+      // Very slow modulation suggests shifting wave focusing without
+      // flashing or introducing any screen-space/light-volume passes.
+      const waveFocus = shaft.underwater && experimentalWater
+        ? 0.90 + 0.10 * Math.sin(t * 0.56 + shaft.phase * 2.1)
+        : 1;
+      material.opacity = Math.min(0.30, shaft.baseOpacity * layer.weight * underwaterStrength * breathe * waveFocus);
 
       const baseRotation = shaft.baseRotations?.[i] ?? (Number(material.rotation) || 0);
       material.rotation = baseRotation + directionalTilt * (shaft.underwater ? 0.48 : 0.75);

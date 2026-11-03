@@ -103,7 +103,13 @@ export function createOpticsAdapter({
   // disables expensive scene capture render targets.
   // Stronger grazing reflection, but no extra capture on mobile. Sky
   // contribution remains Fresnel-driven and vanishes near normal incidence.
-  const reflectedBase = mix(composedBase, sky, clamp(reflectance.mul(reflectionGain).mul(0.31), 0, 0.64));
+  // Preserve existing physically shaded cloud panorama from the production
+  // water material. This sky term represents extra grazing reflection only;
+  // it must not wash out the actual reflected cloud and wave structure.
+  const grazing = pow(float(1).sub(facing), float(3));
+  const reflectionWeight = clamp(reflectance.mul(reflectionGain)
+    .mul(float(0.14).add(grazing.mul(0.44))), 0, 0.70);
+  const reflectedBase = mix(composedBase, sky, reflectionWeight);
   // Fine animated normals steer subtle transmitted sun and sky glimmer.
   // The low amplitude avoids repeating diamond patterns and leaves the
   // FFT-derived broad shading to the original physically-based shader.
@@ -177,6 +183,13 @@ export function createOpticsAdapter({
   const sunFacet = clamp(dot(normal, sunHalf), 0, 1);
   const glitterBreakup = smoothstep(float(0.24), float(0.86),
     sin(phaseA.mul(2.71)).mul(sin(phaseB.mul(1.89))).abs());
+  // Two specular lobes: broad moving reflection on the swell plus
+  // fractured sharp sparkles on the tiny wave facets. Both use the same
+  // normals and sun vector as the water surface; no fake static light strip.
+  const broadSunReflection = pow(sunFacet, float(29))
+    .mul(float(0.12).add(grazing.mul(0.42)))
+    .mul(sunlight).mul(glitterGain)
+    .mul(float(1).sub(underwater)).mul(0.32);
   const glints = pow(sunFacet, float(105)).mul(glitterBreakup)
     .mul(sunlight).mul(glitterGain).mul(float(1).sub(underwater))
     .mul(0.45);
@@ -191,20 +204,32 @@ export function createOpticsAdapter({
   // foam and FFT wave physics remain authoritative; this adds optical texture
   // to the surface, without another mesh or pass.
   const faceSlope = clamp(normal.x.abs().add(normal.z.abs()), 0, 1);
-  const slopeFoam = smoothstep(float(0.35), float(0.78), faceSlope)
-    .mul(smoothstep(waterHeight.add(0.06), waterHeight.add(0.85), positionWorld.y));
+  // Whitecaps emerge only on elevated, sufficiently steep facets.
+  // The smoothly varying thresholds avoid turning the whole ocean white.
+  const risingCrest = smoothstep(waterHeight.add(0.10),
+    waterHeight.add(0.90), positionWorld.y);
+  const breakingSteepness = smoothstep(float(0.30), float(0.76), faceSlope);
+  const slopeFoam = breakingSteepness.mul(risingCrest);
   const foamBreakup = smoothstep(float(0.23), float(0.81),
     sin(phaseA.mul(0.73).add(phaseB.mul(0.37)))
       .mul(cos(phaseB.mul(0.84))).abs());
   const shoreline = float(1).sub(smoothstep(float(1.4), float(9.5), depth));
   const movingShore = smoothstep(float(0.52), float(0.91),
     sin(phaseA.mul(0.48).add(phaseB.mul(0.22))).mul(0.5).add(0.5));
-  const foamMask = clamp(
-    slopeFoam.mul(float(0.34).add(foamBreakup.mul(0.66)))
-      .add(shoreline.mul(movingShore).mul(0.18))
-      .mul(foamGain).mul(float(1).sub(underwater)),
-    0, 0.78);
+  // Three foam scales: dense breaking crown, detached flecks on its
+  // downwind side, and a restrained shallow-water surf wash. The production
+  // persistent shoreline solver remains in charge of actual swash.
+  const crestCrown = slopeFoam.mul(foamBreakup)
+    .mul(float(0.54).add(breakingSteepness.mul(0.46)));
+  const sprayFlecks = smoothstep(float(0.70), float(0.96),
+    sin(phaseA.mul(1.62).sub(phaseB.mul(0.87))).abs())
+    .mul(risingCrest).mul(breakingSteepness).mul(0.17);
+  const shorelineFoam = shoreline.mul(movingShore).mul(0.13);
+  const foamMask = clamp(crestCrown.add(sprayFlecks)
+    .add(shorelineFoam).mul(foamGain)
+    .mul(float(1).sub(underwater)), 0, 0.86);
   const surfaceColor = reflectedBase
+    .add(color(0xffe5bd).mul(broadSunReflection))
     .add(color(0xffedc4).mul(glints))
     .add(color(0x6fe8d2).mul(crestGlow));
   const opticalColor = mix(mix(surfaceColor, underwaterSurface, underwater), color(0xe5f6ee), foamMask)

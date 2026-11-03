@@ -184,12 +184,18 @@ export function updateLiquidPlane(
     // depth-aware shoreline blend still suppresses offshore energy near land.
     // Current Mode and the native GPU compute workload remain unchanged.
     if (handle.__riftNextWater) {
+      // These values are applied AFTER the production visual updater, so
+      // adjustments are absolute relative to each frame's baseline, not
+      // compounding endlessly. They never alter FFT compute resolution.
+      const tuning = globalThis.__riftOceanTuning ?? {};
+      const swell = Math.max(0.5, Math.min(2.8, Number(tuning.swell) || 1.65));
+      const chop = Math.max(0.5, Math.min(2.6, Number(tuning.chop) || 1.5));
       if (handle.waveScale?.value != null) {
-        handle.waveScale.value = Math.min(37, handle.waveScale.value * 1.075);
+        handle.waveScale.value = Math.min(75, handle.waveScale.value * swell);
       }
       if (handle.fftDetailHandle?.waveScale?.value != null) {
         handle.fftDetailHandle.waveScale.value =
-          Math.min(39, handle.fftDetailHandle.waveScale.value * 1.085);
+          Math.min(70, handle.fftDetailHandle.waveScale.value * chop);
       }
     }
     return;

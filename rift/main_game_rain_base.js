@@ -5224,16 +5224,28 @@ function animate() {
     const daylight = THREE.MathUtils.clamp(dayNight.dayAmount, 0, 1);
     const storm = THREE.MathUtils.clamp(weatherHandle?.rainIntensity || 0, 0, 1);
     const depthT = THREE.MathUtils.clamp(depthBelowSurface / 28, 0, 1);
-    const lightThroughWater = daylight * (1 - storm * 0.55) *
-      Math.exp(-depthBelowSurface * 0.055) * lightGain;
-    // Close water remains legible; deep distant reef dissolves gradually.
-    // FogExp2 applies to normal terrain/fish rendering, not just the ocean mesh.
-    scene.fog.density = (THREE.MathUtils.lerp(0.0065, 0.018, depthT) +
-      storm * 0.0025) * hazeGain;
+    // Approximate wavelength-selective attenuation in the water volume:
+    // red light disappears first, green next, blue survives longest.
+    // Normalize the sunlight slider rather than multiplying the color above
+    // display range, which could make underwater fog nearly white.
+    const irradiance = THREE.MathUtils.clamp(
+      daylight * (1 - storm * 0.55) * lightGain / 1.8, 0, 1.6);
+    const redLight = Math.exp(-depthBelowSurface * 0.145) * irradiance;
+    const greenLight = Math.exp(-depthBelowSurface * 0.066) * irradiance;
+    const blueLight = Math.exp(-depthBelowSurface * 0.031) * irradiance;
+    // Depth increases the scattering coefficient, while midday tropical
+    // water stays clearer close to the surface. All scene objects share this
+    // fog rather than getting an opaque overlay in front of the camera.
+    const depthFog = THREE.MathUtils.lerp(0.0052, 0.0175, depthT);
+    const daylightClarity = 1 - 0.18 * Math.min(1, irradiance);
+    scene.fog.density = THREE.MathUtils.clamp(
+      (depthFog * daylightClarity + storm * 0.0025) * hazeGain,
+      0.0008, 0.045
+    );
     scene.fog.color.setRGB(
-      THREE.MathUtils.lerp(0.025, 0.105, lightThroughWater),
-      THREE.MathUtils.lerp(0.145, 0.36, lightThroughWater),
-      THREE.MathUtils.lerp(0.205, 0.43, lightThroughWater)
+      THREE.MathUtils.clamp(0.018 + redLight * 0.055, 0, 0.24),
+      THREE.MathUtils.clamp(0.11 + greenLight * 0.20, 0, 0.42),
+      THREE.MathUtils.clamp(0.18 + blueLight * 0.21, 0, 0.49)
     );
   } else if (isFullySubmerged && currentBiome === "crystal") {
     // Do not leak Experimental fog into Current or diagnostic mode.

@@ -65,9 +65,17 @@ const HARDWARE_WATER_PROFILE = (
     (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0))
 ) ? "mobile" : "desktop";
 
+// Safari/WebKit's mobile GPU must not silently inherit a persisted Desktop
+// rendering profile from earlier development tests. The developer can still
+// opt in explicitly with ?riftDesktopWater=1 for controlled diagnostics.
+const ALLOW_MOBILE_DESKTOP_TEST = new URLSearchParams(location.search).get("riftDesktopWater") === "1";
 function readWaterTestSelection() {
   try {
     const saved = localStorage.getItem(WATER_TEST_MODE_KEY);
+    if (HARDWARE_WATER_PROFILE === "mobile" && !ALLOW_MOBILE_DESKTOP_TEST && saved === "desktop") {
+      localStorage.removeItem(WATER_TEST_MODE_KEY);
+      return "auto";
+    }
     return saved === "mobile" || saved === "desktop" ? saved : "auto";
   } catch (_) {
     return "auto";
@@ -79,6 +87,9 @@ function resolveWaterProfile(selection) {
 }
 
 function nextWaterTestSelection(selection) {
+  if (HARDWARE_WATER_PROFILE === "mobile" && !ALLOW_MOBILE_DESKTOP_TEST) {
+    return selection === "auto" ? "mobile" : "auto";
+  }
   const alternate = HARDWARE_WATER_PROFILE === "mobile" ? "desktop" : "mobile";
   if (selection === "auto") return alternate;
   if (selection === alternate) return HARDWARE_WATER_PROFILE;
@@ -107,7 +118,9 @@ function persistWaterTestSelection() {
 const waterProfileButton = document.createElement("button");
 waterProfileButton.type = "button";
 waterProfileButton.id = "rift-water-profile-test";
-waterProfileButton.title = "Switch Water Pro between the mobile and desktop rendering backends.";
+waterProfileButton.title = HARDWARE_WATER_PROFILE === "mobile" && !ALLOW_MOBILE_DESKTOP_TEST
+  ? "Mobile GPU safety: Desktop water is disabled. Use ?riftDesktopWater=1 only for developer testing."
+  : "Switch Water Pro between the mobile and desktop rendering backends.";
 waterProfileButton.style.cssText =
   "position:absolute;top:96px;left:8px;z-index:99999;padding:5px 9px;" +
   "border:1px solid rgba(90,235,226,.55);border-radius:999px;" +

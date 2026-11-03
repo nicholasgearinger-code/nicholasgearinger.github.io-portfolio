@@ -61,19 +61,26 @@ function createUnifiedSurfaceAdapter({
   const depthAvailable = Boolean(geometry.mesh?.geometry?.getAttribute?.("fftDepthWorld"));
   const seaDepth = depthAvailable
     ? clamp(attribute("fftDepthWorld", "float"), 0, 80) : float(18);
-  const path = seaDepth.div(clarityGain);
-  const absorption = exp(path.mul(-0.068));
-  const shallow = color(0x3fa6a6);
-  const deep = color(0x073c59);
-  const refractedBody = mix(deep, shallow, absorption);
-  const actualRefraction = refractionTexture
-    ? texture(refractionTexture, clamp(screenUV.add(
-      vec2(n.x, n.z).mul(refractionGain).mul(0.011)
-    ), vec2(0.002), vec2(0.998))).rgb
-    : refractedBody;
-  const transmitted = refractionTexture
-    ? mix(refractedBody, actualRefraction, absorption.mul(0.54))
-    : refractedBody;
+  // Estimated water-column path accounts for slant angle and water depth.
+  // Wavelength-dependent Beer-Lambert: red attenuates before green/blue.
+  const waterPath = seaDepth.div(ndv.max(float(0.22)))
+    .div(clarityGain.max(float(0.35)));
+  const throughput = exp(vec3(-0.105, -0.047, -0.023).mul(waterPath));
+  const shallowInfluence = exp(waterPath.mul(-0.060));
+  const inScatter = mix(color(0x06506b), color(0x2a8d9c), shallowInfluence);
+  // Wave normal bends capture coordinates; bounded UVs avoid screen-edge tears.
+  const slant = float(1).sub(ndv);
+  const refractionOffset = vec2(n.x, n.z).mul(refractionGain)
+    .mul(slant.mul(0.013).add(0.004));
+  const refractedUV = clamp(screenUV.add(refractionOffset),
+    vec2(0.003), vec2(0.997));
+  const bottomRadiance = refractionTexture
+    ? texture(refractionTexture, refractedUV).rgb
+    : color(0x92bdb0);
+  const bottomVisibility = refractionTexture ? float(1) : float(0.36);
+  const visibleBottom = throughput.mul(bottomVisibility);
+  const transmitted = inScatter.mul(vec3(1).sub(visibleBottom))
+    .add(bottomRadiance.mul(visibleBottom));
 
   // Reflect the viewer around the SAME moving optical normal. No other
   // sky-glint or faux specular strip is added to the surface albedo.
@@ -92,8 +99,13 @@ function createUnifiedSurfaceAdapter({
     ? texture(reflectionTexture,
       clamp(captureUV, vec2(0.002), vec2(0.998))).rgb
     : skyRadiance;
-  const reflectionBlend = clamp(fresnel.mul(reflectionGain).mul(0.62), 0, 0.72);
-  const surface = mix(transmitted, environment, reflectionBlend);
+  // Exactly one Fresnel blend between transmitted and reflected light.
+  // The shoulder reduces the stacked overexposed sun column on mobile.
+  const reflectionBlend = clamp(fresnel.mul(reflectionGain), 0.01, 0.94);
+  const reflectionRadiance = environment.div(
+    float(1).add(environment.mul(0.18))
+  );
+  const surface = mix(transmitted, reflectionRadiance, reflectionBlend);
 
   // Rising and compressed wave faces determine where breaking crowns start.
   // Thin fractured crests are lit by sun and then blended as surface foam.
@@ -117,16 +129,19 @@ function createUnifiedSurfaceAdapter({
   const transmittedSun = pow(ndl, float(3))
     .mul(day).mul(sunlightGain)
     .mul(exp(cameraDepth.mul(-0.065)));
-  const underside = mix(color(0x08445c), skyRadiance,
-    snell.mul(exp(cameraDepth.mul(-0.028))).mul(0.70))
+  const undersideThroughput = exp(vec3(-0.105, -0.047, -0.023)
+    .mul(cameraDepth.div(clarityGain.max(float(0.35)))));
+  const undersideSky = skyRadiance.mul(undersideThroughput)
+    .add(color(0x08445c).mul(vec3(1).sub(undersideThroughput)));
+  const underside = mix(color(0x06394e), undersideSky, snell.mul(0.84))
     .add(color(0x64c9c0).mul(transmittedSun)
       .mul(snell).mul(undersideGain).mul(0.19));
   const total = mix(underside, waterSurface, above);
 
   // Native physical BRDF handles the direct sunlight specular highlight.
   // Foam roughens the surface, and wave slopes affect roughness smoothly.
-  const roughness = mix(float(0.07), float(0.40), foam)
-    .add(slope.mul(0.025));
+  const roughness = mix(float(0.055), float(0.47), foam)
+    .add(slope.mul(0.036));
   let active = false;
   return {
     field, material, reflectance: fresnel, normalNode: n,

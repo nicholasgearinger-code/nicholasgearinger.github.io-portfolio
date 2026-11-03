@@ -301,12 +301,12 @@ if (riftSSREnabled) {
     `// Compose optional desktop SSR on top of the current scene output.
  // The Experimental underwater depth node is already part of this output;
  // do not replace it or recreate the old manual render-target path.
+ const riftComposePostOutput = (base) => (riftSSREnabled && riftSSRPass)
+   ? base.add(riftSSRPass.rgb) : base;
  const riftBasePostOutput = oceanDepthPassEnabled
    ? underwaterDepthOutput
    : (lensOutputEnabled ? lensDistortedOutput : scenePassColor);
- postProcessing.outputNode = (riftSSREnabled && riftSSRPass)
-   ? riftBasePostOutput.add(riftSSRPass.rgb)
-   : riftBasePostOutput;`,
+ postProcessing.outputNode = riftComposePostOutput(riftBasePostOutput);`,
     "r185 Water Pro additive SSR composition",
   ],
   [

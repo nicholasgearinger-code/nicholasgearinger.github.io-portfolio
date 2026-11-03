@@ -89,9 +89,12 @@ export function createOpticsAdapter({
   // the surface; from below they show stale/incorrect projection. Preserve
   // the v9 underwater optics rather than mixing in those textures.
   const captureWeight = clamp(float(1).sub(underwater).mul(0.45).mul(reflectionGain), 0, 0.94);
+  // When mobile capture textures are unavailable, wave-dependent color
+  // transmission still makes the refraction slider visibly responsive.
+  const fallbackTransmission = clamp(slope.x.abs().add(slope.y.abs()).mul(refractionGain).mul(0.85), 0, 0.65);
   const composedBase = (reflectionTexture || refractionTexture)
     ? mix(originalColor, captureColor, captureWeight)
-    : originalColor;
+    : mix(originalColor, waterBody, fallbackTransmission);
   // Fallback sky Fresnel creates visible reflection response even where iOS
   // disables expensive scene capture render targets.
   const reflectedBase = mix(composedBase, sky, clamp(reflectance.mul(reflectionGain).mul(0.23), 0, 0.58));

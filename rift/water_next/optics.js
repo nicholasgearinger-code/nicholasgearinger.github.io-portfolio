@@ -17,6 +17,12 @@ export function createOpticsAdapter({
     throw new TypeError("Wave field, material, and coupled geometry normal required");
   }
   const originalColor = material.colorNode ?? uniform(color(0x267b91));
+  // The production FFT shader already renders broad sun and sky glints.
+  // Compress just its brightest peaks before Experimental adds reflection
+  // and foam, preventing stacked highlights from forming a white column.
+  const highlightThreshold = float(0.65);
+  const basePeaks = clamp(originalColor.sub(vec3(highlightThreshold)), 0, 12);
+  const balancedBase = originalColor.sub(basePeaks.mul(0.68));
   const originalIOR = material.ior;
   const sky = uniform(new THREE.Color(0x8bc4e1));
   const cameraHeight = uniform(5);
@@ -97,8 +103,8 @@ export function createOpticsAdapter({
   // transmission still makes the refraction slider visibly responsive.
   const fallbackTransmission = clamp(slope.x.abs().add(slope.y.abs()).mul(refractionGain).mul(0.85), 0, 0.65);
   const composedBase = (reflectionTexture || refractionTexture)
-    ? mix(originalColor, captureColor, captureWeight)
-    : mix(originalColor, waterBody, fallbackTransmission);
+    ? mix(balancedBase, captureColor, captureWeight)
+    : mix(balancedBase, waterBody, fallbackTransmission.mul(0.50));
   // Fallback sky Fresnel creates visible reflection response even where iOS
   // disables expensive scene capture render targets.
   // Stronger grazing reflection, but no extra capture on mobile. Sky
@@ -171,7 +177,7 @@ export function createOpticsAdapter({
   // from the production material remain underneath the added highlights.
   const lowAngleShade = internalReflection.mul(float(1).sub(incidence))
     .mul(underwater).mul(0.35);
-  const undersideBase = originalColor.mul(float(1).sub(lowAngleShade));
+  const undersideBase = balancedBase.mul(float(1).sub(lowAngleShade));
   const underwaterSurface = undersideBase
     .add(refractedSkyLight.mul(underwater))
     .add(color(0x4aa9b9).mul(lightShaftFootprint).mul(underwater).mul(0.20))
@@ -186,13 +192,16 @@ export function createOpticsAdapter({
   // Two specular lobes: broad moving reflection on the swell plus
   // fractured sharp sparkles on the tiny wave facets. Both use the same
   // normals and sun vector as the water surface; no fake static light strip.
-  const broadSunReflection = pow(sunFacet, float(29))
-    .mul(float(0.12).add(grazing.mul(0.42)))
+  // Keep the native Water Pro specular path as the primary sun glint.
+  // These small secondary lobes restore broken wave facets without
+  // producing a second saturated stripe across the whole horizon.
+  const broadSunReflection = pow(sunFacet, float(40))
+    .mul(float(0.06).add(grazing.mul(0.15)))
     .mul(sunlight).mul(glitterGain)
-    .mul(float(1).sub(underwater)).mul(0.32);
-  const glints = pow(sunFacet, float(105)).mul(glitterBreakup)
+    .mul(float(1).sub(underwater)).mul(0.12);
+  const glints = pow(sunFacet, float(125)).mul(glitterBreakup)
     .mul(sunlight).mul(glitterGain).mul(float(1).sub(underwater))
-    .mul(0.45);
+    .mul(0.16);
   const crest = smoothstep(waterHeight.add(0.12), waterHeight.add(1.35),
     positionWorld.y);
   const backlit = float(1).sub(clamp(dot(normal, sunDirection), 0, 1));
@@ -219,12 +228,15 @@ export function createOpticsAdapter({
   // Three foam scales: dense breaking crown, detached flecks on its
   // downwind side, and a restrained shallow-water surf wash. The production
   // persistent shoreline solver remains in charge of actual swash.
+  // Use the actual displaced crest height to avoid spraying equally
+  // across calm shallow flats. Whitecap crowns stay attached to steep
+  // wave tops and leave breakup gaps rather than continuous white stripes.
   const crestCrown = slopeFoam.mul(foamBreakup)
-    .mul(float(0.54).add(breakingSteepness.mul(0.46)));
+    .mul(float(0.36).add(breakingSteepness.mul(0.64)));
   const sprayFlecks = smoothstep(float(0.70), float(0.96),
     sin(phaseA.mul(1.62).sub(phaseB.mul(0.87))).abs())
     .mul(risingCrest).mul(breakingSteepness).mul(0.17);
-  const shorelineFoam = shoreline.mul(movingShore).mul(0.13);
+  const shorelineFoam = shoreline.mul(movingShore).mul(0.09);
   const foamMask = clamp(crestCrown.add(sprayFlecks)
     .add(shorelineFoam).mul(foamGain)
     .mul(float(1).sub(underwater)), 0, 0.86);
@@ -236,6 +248,10 @@ export function createOpticsAdapter({
     .add(color(0xb9e7ed).mul(transmittedSun))
     .add(sky.mul(rippleLight))
     .add(color(0x75b5c3).mul(undersideAmbient));
+  // Prevent additive contributions from exceeding physically plausible
+  // display luminance on mobile without clipping already-dark water.
+  const shoulder = clamp(opticalColor.sub(vec3(0.83)), 0, 8);
+  const displayBalancedColor = opticalColor.sub(shoulder.mul(0.58));
   let active = false;
   return {
     field, material, reflectance, normalNode: geometry.normalNode,
@@ -244,7 +260,7 @@ export function createOpticsAdapter({
     get active() { return active; },
     apply() {
       if (active) return;
-      material.colorNode = opticalColor;
+      material.colorNode = displayBalancedColor;
       material.ior = WATER_IOR;
       material.needsUpdate = true;
       active = true;

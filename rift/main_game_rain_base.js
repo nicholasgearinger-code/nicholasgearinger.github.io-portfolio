@@ -2790,7 +2790,13 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
         sin(positionWorld.z.mul(0.071).add(t.mul(0.21))),
         cos(positionWorld.x.mul(0.063).sub(t.mul(0.17)))
       ).mul(0.29);
-      const organicXZ = worldXZ.add(causticWarp);
+      // Converging caustic ribbons drift with the wave height and move
+      // obliquely along the dominant swell, without a new FFT texture read.
+      const movingFocus = vec2(
+        waveH.mul(0.032).add(sin(t.mul(0.22)).mul(0.04)),
+        waveH.mul(-0.021).add(cos(t.mul(0.17)).mul(0.035))
+      );
+      const organicXZ = worldXZ.add(causticWarp).add(movingFocus);
       const uv1 = organicXZ.add(vec2(t.mul(0.065), t.mul(0.03)).mul(waveSpeedFactor)).add(waveH.mul(0.05));
       // Fixed rotation angles — precomputed as plain JS constants (not
       // TSL trig calls) since these never change per-fragment; avoids
@@ -2824,9 +2830,14 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
       // Blend sparse light filaments with a soft broad component instead of
       // only selecting the brightest hard-edged tile. Avoid checker squares
       // while preserving high-energy ridges from overlapping wave samples.
+      // A broad low-contrast lens field underlies thin, concentrated light
+      // filaments. Smooth the threshold to prevent rectangular bright patches
+      // from popping out of the repeating caustic texture.
+      const focusRibbons = smoothstep(float(0.10), float(0.82),
+        netPrimary.mul(0.78).add(netSecondary.mul(0.30)));
+      const softPools = netSecondary.mul(0.29);
       const causticPattern = clamp(
-        tslMax(netPrimary.mul(0.82), netSecondary.mul(0.48))
-          .add(netPrimary.mul(netSecondary).mul(0.19)), 0, 0.92);
+        focusRibbons.mul(0.69).add(softPools), 0, 0.86);
       // Gated to submerged, upward-facing sand only — dry island terrain
       // and vertical rock faces stay untouched, matching the old (now-
       // removed) block's own explicit intent. underwaterMask uses the
@@ -2852,7 +2863,11 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
       const depthAttenuation = float(1).sub(
         smoothstep(float(6), float(48), seabedWaterDepth).mul(0.75)
       );
-      const finalCaustic = causticPattern.mul(underwaterMask).mul(upwardMask)
+      // Sun/cloud gating and the actual depth-to-water fade stay shared
+      // with the ocean. No additional render target or independent solver.
+      const crestFocusing = float(0.76).add(waveNorm.mul(0.24));
+      const finalCaustic = causticPattern.mul(crestFocusing)
+        .mul(underwaterMask).mul(upwardMask)
         .mul(focusMask).mul(depthAttenuation)
         .mul(terrainCausticIntensityUniform).mul(terrainCausticSunGlowUniform);
       // Per "might be a little too strong" — pulled back from 0.85 to

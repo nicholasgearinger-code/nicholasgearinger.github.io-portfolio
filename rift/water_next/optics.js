@@ -24,6 +24,7 @@ export function createOpticsAdapter({
   const waveTime = uniform(0);
   const sunDirection = uniform(new THREE.Vector3(0.2,0.9,0.3).normalize());
   const sunlight = uniform(1);
+  const nightAmbient = uniform(0.20);
   // Two inexpensive moving ripple bands perturb the physically displaced
   // wave normal without adding FFT compute or texture fetches.
   const p = positionWorld;
@@ -67,19 +68,26 @@ export function createOpticsAdapter({
   const depth = hasDepth ? clamp(attribute("fftDepthWorld", "float"), 0, 45) : float(12);
   const transmission = exp(depth.mul(-0.055));
   const deepTint = color(0x07526e);
-  const shallowTint = color(0x4faeb2);
-  const waterBody = mix(deepTint, shallowTint, exp(depth.mul(-0.12)));
+  const shallowTint = color(0x389ca9);
+  // Wide transition prevents a near-white, hard-looking depth boundary.
+  const shallowFactor = exp(depth.mul(-0.075));
+  const waterBody = mix(deepTint, shallowTint, shallowFactor);
   const sceneBase = mix(waterBody, refracted, transmission.mul(refractionTexture ? 0.80 : 0.35));
   // Underwater glancing incidence strengthens internal reflection, while
   // overhead sunlight transmits through the local wave orientation.
   const underwaterReflect = mix(reflectance, clamp(float(1).sub(facing).mul(0.68), 0, 0.72), underwater);
   const opticsColor = mix(sceneBase, reflected, underwaterReflect.mul(0.75));
   const transmittedSun = pow(clamp(dot(normal, sunDirection), 0, 1), float(4))
-    .mul(sunlight).mul(underwater).mul(0.21);
+    .mul(sunlight).mul(underwater).mul(0.14);
+  // A dim, broad ambient sky component keeps moving wave relief readable
+  // under cloud cover and at dusk, instead of a featureless black ceiling.
+  const undersideAmbient = clamp(dot(normal, vec3(0,1,0)), 0, 1)
+    .mul(underwater).mul(nightAmbient).mul(0.35);
   const opticalColor = (reflectionTexture || refractionTexture
     ? opticsColor
     : mix(waterBody, sky, underwaterReflect.mul(0.55)))
-    .add(color(0xb9e7ed).mul(transmittedSun));
+    .add(color(0xb9e7ed).mul(transmittedSun))
+    .add(color(0x75b5c3).mul(undersideAmbient));
   let active = false;
   return {
     field, material, reflectance, normalNode: geometry.normalNode,
@@ -96,7 +104,10 @@ export function createOpticsAdapter({
     update({ cameraY, skyColor, waterY, elapsed, sunDir, dayAmount, reflectionMatrix: nextMatrix } = {}) {
       if (Number.isFinite(elapsed)) waveTime.value = elapsed;
       if (sunDir?.isVector3) sunDirection.value.copy(sunDir).normalize();
-      if (Number.isFinite(dayAmount)) sunlight.value = Math.max(0, Math.min(1, dayAmount));
+      if (Number.isFinite(dayAmount)) {
+        sunlight.value = Math.max(0, Math.min(1, dayAmount));
+        nightAmbient.value = 0.22 + 0.26 * sunlight.value;
+      }
       if (Number.isFinite(cameraY)) cameraHeight.value = cameraY;
       if (Number.isFinite(waterY)) waterHeight.value = waterY;
       if (skyColor?.isColor) sky.value.copy(skyColor);

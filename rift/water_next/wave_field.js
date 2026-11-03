@@ -1,7 +1,7 @@
 // Rift Next: a read-only GPU wave field backed by the EXISTING FFT buffers.
 // All TSL nodes sample the already-dispatched spatial arrays. No CPU readback,
 // second solver, new render pass, or ownership of the source buffers.
-import { Fn, float, uint, vec2, vec3, floor, fract, mix, clamp } from "three/tsl";
+import { Fn, float, uint, vec2, vec3, floor, fract, mix, clamp, cross } from "three/tsl";
 
 export function createWaveField(source, { domain = null, resolution = 128 } = {}) {
   if (!source || typeof source !== "object") throw new TypeError("wave source required");
@@ -60,8 +60,17 @@ export function createWaveField(source, { domain = null, resolution = 128 } = {}
     get waveScale() { return source.waveScale?.value ?? 1; },
     sampleDisplacement: Fn(([worldXZ]) => displacementAt(worldXZ)),
     sampleNormal: Fn(([worldXZ]) => {
-      const { dx, dz } = derivativesAt(worldXZ);
-      return vec3(dx.negate(), float(1), dz.negate()).normalize();
+      // The ocean FFT displaces vertices horizontally as well as vertically.
+      // Normals must follow the resulting 3D surface, not height alone.
+      const uv = uvAt(worldXZ);
+      const sx = vec2(step, 0);
+      const sz = vec2(0, step);
+      const spacing = float(size / n);
+      const tangentX = sampleAt(uv.add(sx)).sub(sampleAt(uv.sub(sx)))
+        .add(vec3(spacing.mul(2), 0, 0));
+      const tangentZ = sampleAt(uv.add(sz)).sub(sampleAt(uv.sub(sz)))
+        .add(vec3(0, 0, spacing.mul(2)));
+      return cross(tangentZ, tangentX).normalize();
     }),
     sampleCurvature: Fn(([worldXZ]) => derivativesAt(worldXZ).curvature),
   });

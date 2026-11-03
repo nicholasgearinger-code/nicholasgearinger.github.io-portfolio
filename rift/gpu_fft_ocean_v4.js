@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import {
-  Fn, float, uint, positionWorld, floor, fract, clamp, abs,
+  Fn, float, uint, positionWorld, floor, fract, clamp, abs, mix, smoothstep,
 } from "three/tsl";
 import {
   createGPUFFTOceanPlane as createBaseOcean,
@@ -216,6 +216,14 @@ function installFFTDrivenCaustics(handle) {
 
   delete data.fftCausticTuneInstalled;
 
+  // Set once during material creation; water mode switches reload the game.
+  // This keeps the Current profile on its established low-cost shader.
+  const experimentalCaustics = (() => {
+    try {
+      return localStorage.getItem("riftWaterGraphicsMode") === "experimental" &&
+        new URLSearchParams(location.search).get("riftDebug") !== "noexp";
+    } catch (_) { return false; }
+  })();
   data.fftOriginalCausticEmissive = mat.emissiveNode;
   data.fftOriginalCausticBeforeRender = mat.onBeforeRender;
 
@@ -252,13 +260,22 @@ function installFFTDrivenCaustics(handle) {
     // focusing contrast restrained to prevent harsh tiled caustics.
     const laplacian = r.add(l).add(u).add(d).sub(c.mul(4));
     const focus = clamp(laplacian.mul(0.45), -0.20, 0.32);
-    return clamp(
-      float(1.0)
-        .add(focus)
-        .add(slope.mul(0.10)),
-      0.80,
-      1.36,
+    const legacyFocus = clamp(
+      float(1.0).add(focus).add(slope.mul(0.10)), 0.80, 1.36
     );
+    // Experimental: wave-caustic focal bands come from the *same live FFT
+    // spatial buffer* as the surface geometry. Smooth convergence thresholds
+    // emphasize connected moving ridges, not scrolling tiled noise.
+    // No extra storage fetches: all five wave samples above are reused.
+    // Preserve production contrast exactly unless Experimental was selected.
+    if (!experimentalCaustics) return legacyFocus;
+    const convergence = smoothstep(float(-0.11), float(0.28), laplacian);
+    const crestFocus = smoothstep(float(0.10), float(0.75), slope);
+    const waveFocus = clamp(
+      float(0.58).add(convergence.mul(1.06))
+        .add(crestFocus.mul(0.25)), 0.58, 1.92
+    );
+    return mix(legacyFocus, waveFocus, float(0.92));
   })();
 
   mat.emissiveNode = data.fftOriginalCausticEmissive.mul(fftFocus);

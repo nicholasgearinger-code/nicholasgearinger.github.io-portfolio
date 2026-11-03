@@ -75,6 +75,17 @@ export function createWaterGeometryAdapter({ mesh, field, shoreSolver = null }) 
     heightNode = position.add(displacement);
     normalNode = field.sampleNormal(sampleXZ);
   }
+  // The active Rift ocean already composes long, detail, shallow and (on
+  // supported devices) micro FFT bands in its production positionNode.
+  // Replacing that node with our single-primary-FFT adapter removed the
+  // smaller scales and made Experimental water noticeably flatter.
+  // Preserve the existing displacement composition whenever it is present.
+  const preserveMultiband = Boolean(field.source?.fftDetailHandle?.gpuFFT && savedPositionNode);
+  if (preserveMultiband) {
+    heightNode = savedPositionNode;
+    // Existing normal is coupled to that full multiband displacement.
+    if (savedNormalNode) normalNode = savedNormalNode;
+  }
   const adaptive = createAdaptiveOceanMesh(mesh);
   // On iOS, reuse the proven production normal shader where present.
   // The full five-point shallow-water stencil can cost dozens of extra
@@ -90,10 +101,11 @@ export function createWaterGeometryAdapter({ mesh, field, shoreSolver = null }) 
     mesh, field, positionNode: heightNode, normalNode,
     get active() { return active; },
     get coupledShoreline() { return hasShore; },
+    get preservesMultibandDisplacement() { return preserveMultiband; },
     get adaptiveMeshEnabled() { return Boolean(adaptive?.enabled); },
     apply() {
       if (active) return;
-      material.positionNode = heightNode;
+      if (!preserveMultiband) material.positionNode = heightNode;
       if (normalNode) material.normalNode = normalNode;
       material.needsUpdate = true;
       adaptive?.enable();

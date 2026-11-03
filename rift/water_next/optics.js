@@ -10,6 +10,173 @@ export function fresnelSchlick(cosTheta, ior = WATER_IOR) {
   const r0 = Math.pow((ior - 1) / (ior + 1), 2);
   return r0 + (1 - r0) * Math.pow(1 - c, 5);
 }
+// Ocean 3.0 — one optical response from one wave normal. Unlike the old
+// layered shader this starts from the water-column body color and does NOT
+// add another sun-glitter lobe on top of the MeshPhysicalMaterial's BRDF.
+// The native water geometry, FFT compute and shoreline solver stay intact.
+function createUnifiedSurfaceAdapter({
+  field, material, geometry, reflectionTexture, reflectionMatrix, refractionTexture
+}) {
+  const priorColor = material.colorNode;
+  const priorRoughness = material.roughnessNode;
+  const priorIOR = material.ior;
+  const priorTransmission = material.transmissionNode;
+  const time = uniform(0);
+  const waterY = uniform(field.source.waterY ?? 0);
+  const cameraYUniform = uniform(5);
+  const skyColor = uniform(new THREE.Color(0x82c3dc));
+  const sunDir = uniform(new THREE.Vector3(0.2, 0.9, 0.3).normalize());
+  const day = uniform(1);
+  const rippleGain = uniform(1);
+  const reflectionGain = uniform(1);
+  const refractionGain = uniform(1);
+  const foamGain = uniform(1);
+  const breakerGain = uniform(1);
+  const clarityGain = uniform(1);
+  const undersideGain = uniform(1);
+  const sunlightGain = uniform(1);
+  const cloudPanorama = getRealisticCloudTexture();
+
+  const p = positionWorld;
+  const phaseA = p.x.mul(0.88).add(p.z.mul(0.51)).add(time.mul(1.17));
+  const phaseB = p.x.mul(-1.22).add(p.z.mul(0.67)).sub(time.mul(1.55));
+  // These are detail normal perturbations, not independent wave motion:
+  // large-scale orientation comes exclusively from the displaced mesh.
+  const microX = cos(phaseA).mul(0.025).add(sin(phaseB).mul(0.018));
+  const microZ = sin(phaseA).mul(0.022).sub(cos(phaseB).mul(0.015));
+  const n = geometry.normalNode.add(vec3(
+    microX.mul(rippleGain), float(0), microZ.mul(rippleGain)
+  )).normalize();
+  const view = cameraPosition.sub(p).normalize();
+  const ndv = clamp(abs(dot(n, view)), 0, 1);
+  const sun = sunDir.normalize();
+  const ndl = clamp(dot(n, sun), 0, 1);
+  const above = clamp(cameraYUniform.sub(waterY).mul(3).add(0.5), 0, 1);
+  const submerged = float(1).sub(above);
+
+  // Fresnel from the water/air interface; use ONE reflectance weighting.
+  const f0 = float(Math.pow((WATER_IOR - 1) / (WATER_IOR + 1), 2));
+  const fresnel = f0.add(float(1).sub(f0)
+    .mul(pow(float(1).sub(ndv), float(5))));
+  const depthAvailable = Boolean(geometry.mesh?.geometry?.getAttribute?.("fftDepthWorld"));
+  const seaDepth = depthAvailable
+    ? clamp(attribute("fftDepthWorld", "float"), 0, 80) : float(18);
+  const path = seaDepth.div(clarityGain);
+  const absorption = exp(path.mul(-0.068));
+  const shallow = color(0x3fa6a6);
+  const deep = color(0x073c59);
+  const refractedBody = mix(deep, shallow, absorption);
+  const actualRefraction = refractionTexture
+    ? texture(refractionTexture, clamp(screenUV.add(
+      vec2(n.x, n.z).mul(refractionGain).mul(0.011)
+    ), vec2(0.002), vec2(0.998))).rgb
+    : refractedBody;
+  const transmitted = refractionTexture
+    ? mix(refractedBody, actualRefraction, absorption.mul(0.54))
+    : refractedBody;
+
+  // Reflect the viewer around the SAME moving optical normal. No other
+  // sky-glint or faux specular strip is added to the surface albedo.
+  const reflectionRay = n.mul(dot(n, view).mul(2)).sub(view).normalize();
+  const panoramaUV = vec2(
+    reflectionRay.x.mul(0.26).add(time.mul(0.002)),
+    reflectionRay.z.mul(0.14).add(0.80)
+  ).add(vec2(0.5, 0));
+  const sample = texture(cloudPanorama, panoramaUV);
+  const skyRadiance = mix(skyColor, sample.rgb, sample.a.mul(0.70));
+  const matrixUniform = reflectionMatrix ? uniform(reflectionMatrix.clone()) : null;
+  const projection = matrixUniform ? matrixUniform.mul(vec4(p, 1)) : null;
+  const captureUV = projection ? projection.xy
+    .div(projection.w.abs().max(float(0.0001))) : null;
+  const environment = reflectionTexture && captureUV
+    ? texture(reflectionTexture,
+      clamp(captureUV, vec2(0.002), vec2(0.998))).rgb
+    : skyRadiance;
+  const reflectionBlend = clamp(fresnel.mul(reflectionGain).mul(0.62), 0, 0.72);
+  const surface = mix(transmitted, environment, reflectionBlend);
+
+  // Rising and compressed wave faces determine where breaking crowns start.
+  // Thin fractured crests are lit by sun and then blended as surface foam.
+  const slope = clamp(abs(n.x).add(abs(n.z)), 0, 1);
+  const rising = smoothstep(waterY.add(0.12), waterY.add(1.05), p.y);
+  const breaking = smoothstep(float(0.34), float(0.78), slope).mul(rising);
+  const breakup = smoothstep(float(0.22), float(0.80),
+    abs(sin(phaseA.mul(0.76)).mul(cos(phaseB.mul(0.91)))));
+  const foam = clamp(breaking.mul(breakup)
+    .mul(foamGain).mul(breakerGain), 0, 0.78);
+  const crestTransmission = rising.mul(float(1).sub(ndl))
+    .mul(day).mul(sunlightGain).mul(0.12);
+  const waterSurface = mix(surface.add(color(0x4dafa8).mul(crestTransmission)),
+    color(0xe4f2eb), foam);
+
+  // Water-to-air Snell window: retain detailed surface orientation looking
+  // upward, and diminish light at internal-reflection grazing angles.
+  const undersideIncidence = clamp(dot(n, view.negate()), 0, 1);
+  const snell = smoothstep(float(0.63), float(0.72), undersideIncidence);
+  const cameraDepth = clamp(waterY.sub(cameraYUniform), 0, 80);
+  const transmittedSun = pow(ndl, float(3))
+    .mul(day).mul(sunlightGain)
+    .mul(exp(cameraDepth.mul(-0.065)));
+  const underside = mix(color(0x08445c), skyRadiance,
+    snell.mul(exp(cameraDepth.mul(-0.028))).mul(0.70))
+    .add(color(0x64c9c0).mul(transmittedSun)
+      .mul(snell).mul(undersideGain).mul(0.19));
+  const total = mix(underside, waterSurface, above);
+
+  // Native physical BRDF handles the direct sunlight specular highlight.
+  // Foam roughens the surface, and wave slopes affect roughness smoothly.
+  const roughness = mix(float(0.07), float(0.40), foam)
+    .add(slope.mul(0.025));
+  let active = false;
+  return {
+    field, material, reflectance: fresnel, normalNode: n,
+    usesSceneReflection: Boolean(reflectionTexture && reflectionMatrix),
+    usesSceneRefraction: Boolean(refractionTexture),
+    get active() { return active; },
+    apply() {
+      if (active) return;
+      material.colorNode = total;
+      material.roughnessNode = roughness;
+      material.ior = WATER_IOR;
+      material.needsUpdate = true;
+      active = true;
+    },
+    update({ cameraY, skyColor: nextSky, waterY: nextY, elapsed,
+      sunDir: nextSun, dayAmount, reflectionMatrix: nextMatrix } = {}) {
+      const tune = globalThis.__riftOceanTuning ?? {};
+      const value = (key, fallback) => {
+        const v = Number(tune[key]);
+        return Number.isFinite(v) ? Math.max(0, Math.min(3, v)) : fallback;
+      };
+      if (Number.isFinite(elapsed)) time.value = elapsed;
+      if (Number.isFinite(cameraY)) cameraYUniform.value = cameraY;
+      if (Number.isFinite(nextY)) waterY.value = nextY;
+      if (nextSky?.isColor) skyColor.value.copy(nextSky);
+      if (nextSun?.isVector3) sunDir.value.copy(nextSun).normalize();
+      if (Number.isFinite(dayAmount)) day.value = Math.max(0, Math.min(1, dayAmount));
+      rippleGain.value = value("ripples", 1.7) / 1.7;
+      reflectionGain.value = value("reflection", 1.8) / 1.8;
+      refractionGain.value = value("refraction", 1.8) / 1.8;
+      foamGain.value = value("foam", 1.55) / 1.55;
+      breakerGain.value = value("breakers", 1.05) / 1.05;
+      clarityGain.value = Math.max(0.35, value("clarity", 1.45) / 1.45);
+      undersideGain.value = value("underside", 1.45) / 1.45;
+      sunlightGain.value = value("sunlight", 1.8) / 1.8;
+      if (matrixUniform && nextMatrix?.isMatrix4) matrixUniform.value.copy(nextMatrix);
+    },
+    restore() {
+      if (!active) return;
+      material.colorNode = priorColor;
+      material.roughnessNode = priorRoughness;
+      material.ior = priorIOR;
+      material.transmissionNode = priorTransmission;
+      material.needsUpdate = true;
+      active = false;
+    },
+    dispose() { this.restore(); },
+  };
+}
+
 export function createOpticsAdapter({
   field, material, geometry, reflectionTexture = null,
   reflectionMatrix = null, refractionTexture = null
@@ -17,6 +184,13 @@ export function createOpticsAdapter({
   if (!field?.source || !material || !geometry?.normalNode) {
     throw new TypeError("Wave field, material, and coupled geometry normal required");
   }
+  // Opt-in unified material. Diagnostic rollback: ?riftDebug=stackedoptics
+  // does not alter stored water mode or the production rendering path.
+  const legacyStack = typeof location !== "undefined" &&
+    new URLSearchParams(location.search).get("riftDebug") === "stackedoptics";
+  if (!legacyStack) return createUnifiedSurfaceAdapter({
+    field, material, geometry, reflectionTexture, reflectionMatrix, refractionTexture
+  });
   const originalColor = material.colorNode ?? uniform(color(0x267b91));
   // The production FFT shader already renders broad sun and sky glints.
   // Compress just its brightest peaks before Experimental adds reflection

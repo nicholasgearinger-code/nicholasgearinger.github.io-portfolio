@@ -91,13 +91,24 @@ export function createOpticsAdapter({
   // Fine animated normals steer subtle transmitted sun and sky glimmer.
   // The low amplitude avoids repeating diamond patterns and leaves the
   // FFT-derived broad shading to the original physically-based shader.
+  // Water depth governs the *distance light travels to the player*, not
+  // the terrain-depth vertex attribute used by the shoreline palette.
+  // The moving FFT normal decides how strongly the surface admits sunlight;
+  // Beer-Lambert attenuates that contribution with actual camera submersion.
+  const submersionDepth = clamp(waterHeight.sub(cameraHeight), 0, 80);
+  const daylightTransmission = exp(submersionDepth.mul(-0.065));
+  const ambientTransmission = exp(submersionDepth.mul(-0.026));
   const facingSun = clamp(dot(normal, sunDirection), 0, 1);
-  const transmittedSun = pow(facingSun, float(5))
-    .mul(sunlight).mul(underwater).mul(0.115);
+  const refractiveFocus = pow(facingSun, float(5))
+    .mul(float(0.55).add(float(1).sub(facing).mul(0.45)));
+  const transmittedSun = refractiveFocus
+    .mul(sunlight).mul(underwater).mul(daylightTransmission).mul(0.19);
+  // Fine, low-contrast radiance variation is tied to the SAME optical
+  // normal as refraction and sun focusing, rather than a separate texture.
   const rippleLight = clamp(rippleX.mul(0.48).add(rippleZ.mul(0.36)).add(0.1), 0, 0.2)
-    .mul(underwater).mul(0.17);
+    .mul(underwater).mul(ambientTransmission).mul(0.19);
   const undersideAmbient = clamp(dot(normal, vec3(0,1,0)), 0, 1)
-    .mul(underwater).mul(nightAmbient).mul(0.075);
+    .mul(underwater).mul(nightAmbient).mul(ambientTransmission).mul(0.09);
   const opticalColor = composedBase
     .add(color(0xb9e7ed).mul(transmittedSun))
     .add(sky.mul(rippleLight))

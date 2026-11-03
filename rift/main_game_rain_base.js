@@ -5200,6 +5200,41 @@ function animate() {
     submergedState = false;
   }
   const isFullySubmerged = submergedState; // was 0.6 — still narrower than the ocean's own ~0.85-unit wave amplitude, so waves washing over the camera near the surface could still cross both edges of the dead zone repeatedly, flipping the underwater post-process (fog/distortion/render-target pass) on and off every couple frames. 1.1 comfortably exceeds the max wave amplitude, so only an actual sustained surface crossing (not wave bob) flips the state now.
+
+  // Ocean Engine 2.0 / Experimental only: depth-dependent underwater
+  // participating-media approximation using the EXISTING scene FogExp2.
+  // No screen-space capture, render target, pass, or additional GPU compute.
+  // Above-water rain fog continues to be managed by the existing weather path.
+  const experimentalUnderwaterAtmosphere =
+    currentBiome === "crystal" && isFullySubmerged &&
+    globalThis.__riftWaterSubmerged !== "disable" &&
+    (() => {
+      try {
+        return localStorage.getItem("riftWaterGraphicsMode") === "experimental" &&
+          new URLSearchParams(location.search).get("riftDebug") !== "noexp";
+      } catch (_) { return false; }
+    })();
+  if (experimentalUnderwaterAtmosphere) {
+    const depthBelowSurface = Math.max(0, LIQUID_LEVEL.crystal - camera.position.y);
+    const daylight = THREE.MathUtils.clamp(dayNight.dayAmount, 0, 1);
+    const storm = THREE.MathUtils.clamp(weatherHandle?.rainIntensity || 0, 0, 1);
+    const depthT = THREE.MathUtils.clamp(depthBelowSurface / 28, 0, 1);
+    const lightThroughWater = daylight * (1 - storm * 0.55) *
+      Math.exp(-depthBelowSurface * 0.055);
+    // Close water remains legible; deep distant reef dissolves gradually.
+    // FogExp2 applies to normal terrain/fish rendering, not just the ocean mesh.
+    scene.fog.density = THREE.MathUtils.lerp(0.0065, 0.018, depthT) +
+      storm * 0.0025;
+    scene.fog.color.setRGB(
+      THREE.MathUtils.lerp(0.025, 0.105, lightThroughWater),
+      THREE.MathUtils.lerp(0.145, 0.36, lightThroughWater),
+      THREE.MathUtils.lerp(0.205, 0.43, lightThroughWater)
+    );
+  } else if (isFullySubmerged && currentBiome === "crystal") {
+    // Do not leak Experimental fog into Current or diagnostic mode.
+    scene.fog.density = 0.0032;
+    scene.fog.color.setHex(0x0a0e14);
+  }
   // Per explicit "when we get out of the ocean it should also look like
   // this for a minute until it fades away" — the same lens-rain shader,
   // just triggered by surfacing instead of real weather. Detects the

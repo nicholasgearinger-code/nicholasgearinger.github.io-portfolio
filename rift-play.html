@@ -577,6 +577,41 @@ button{font:inherit;cursor:pointer}
 #rift-module-error-overlay{display:none!important}
 #rift-launch-note{position:fixed;bottom:calc(env(safe-area-inset-bottom) + 10px);left:50%;transform:translateX(-50%);z-index:99990;text-align:center;color:#a7c7cc;font:11px ui-monospace,monospace;pointer-events:none;white-space:nowrap}
 @media(max-width:600px){#rift-return-link{font-size:10px;top:calc(env(safe-area-inset-top) + 68px)}#rift-launch-note{font-size:9px;bottom:calc(env(safe-area-inset-bottom) + 5px)}}
+
+/* Ocean 2.0 tuning: viewport-height sheet instead of a tiny game-canvas popup.
+   The independently scrolling slider area leaves the presets visible. */
+#rift-ocean-tune-panel[hidden]{display:none!important}
+#rift-ocean-tune-panel{
+  position:fixed!important;top:calc(env(safe-area-inset-top) + 10px)!important;
+  right:10px!important;bottom:calc(env(safe-area-inset-bottom) + 10px)!important;
+  left:auto!important;width:min(420px,calc(100vw - 20px))!important;
+  height:auto!important;max-height:none!important;
+  display:flex;flex-direction:column;gap:8px;
+  z-index:10000!important;overflow:hidden!important;
+}
+#rift-ocean-tune-sliders{
+  min-height:0;flex:1;overflow-y:auto;overflow-x:hidden;
+  overscroll-behavior:contain;-webkit-overflow-scrolling:touch;
+  padding:2px 7px 20px 2px;touch-action:pan-y;
+}
+#rift-ocean-tune-sliders input[type=range]{touch-action:pan-x}
+#rift-ocean-preset-actions{flex:none;padding-top:9px;border-top:1px solid #375a64}
+#rift-ocean-tune-tabs{display:flex;flex:none;gap:5px;flex-wrap:wrap}
+#rift-ocean-tune-tabs button{
+  flex:1;min-height:36px;border:1px solid #43747d;
+  border-radius:8px;background:#16323f;color:#d9fbff;font-size:11px;padding:5px 4px;
+}
+#rift-ocean-tune-tabs button[aria-pressed=true]{
+  background:#126b73;border-color:#79ece0;color:#fff;
+}
+@media(max-width:600px){
+  #rift-ocean-tune-panel{
+    left:6px!important;right:6px!important;
+    width:calc(100vw - 12px)!important;
+    top:calc(env(safe-area-inset-top) + 6px)!important;
+    bottom:calc(env(safe-area-inset-bottom) + 6px)!important;
+  }
+}
 </style>
 <script type="importmap">
 {
@@ -654,8 +689,9 @@ button{font:inherit;cursor:pointer}
           <div id="rift-ocean-tune-panel" class="rift-mono" hidden style="position:absolute;right:10px;top:150px;z-index:46;width:min(340px,calc(100% - 20px));max-height:min(66vh,540px);overflow-y:auto;overscroll-behavior:contain;padding:14px;border:1px solid #64e4da;border-radius:12px;background:rgba(4,22,32,.97);box-shadow:0 10px 38px #000a;color:#e5fcff;font-size:12px;touch-action:pan-y">
             <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><strong>OCEAN SYSTEM 2.0</strong><button type="button" id="rift-ocean-tune-close" aria-label="Close ocean tuning" style="padding:6px 10px;background:#174857;color:white;border:1px solid #56848c;border-radius:7px">✕</button></div>
             <p id="rift-ocean-tune-hint" style="margin:8px 0;color:#a5d9de;line-height:1.4">Experimental mode only · Live controls · Saved automatically</p>
-            <div id="rift-ocean-tune-sliders"></div>
-            <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button id="rift-ocean-preset-tropical" type="button" style="flex:1 1 100%;min-height:36px;background:#0a6685;color:white;border:1px solid #72d7ed;border-radius:8px">Tropical Water Pro look</button><button id="rift-ocean-preset-dramatic" type="button" style="flex:1;min-height:36px;background:#127a77;color:white;border:1px solid #65d7d3;border-radius:8px">Dramatic preset</button><button id="rift-ocean-reset" type="button" style="flex:1;min-height:36px;background:#263846;color:white;border:1px solid #75919e;border-radius:8px">Reset</button></div>
+            <div id="rift-ocean-tune-tabs" role="group" aria-label="Ocean effect groups"></div>
+            <div id="rift-ocean-tune-sliders" role="region" aria-label="Scrollable ocean effect sliders" tabindex="0"></div>
+            <div id="rift-ocean-preset-actions" style="display:flex;gap:8px;margin-top:2px;flex-wrap:wrap"><button id="rift-ocean-preset-tropical" type="button" style="flex:1 1 100%;min-height:36px;background:#0a6685;color:white;border:1px solid #72d7ed;border-radius:8px">Tropical Water Pro look</button><button id="rift-ocean-preset-dramatic" type="button" style="flex:1;min-height:36px;background:#127a77;color:white;border:1px solid #65d7d3;border-radius:8px">Dramatic preset</button><button id="rift-ocean-reset" type="button" style="flex:1;min-height:36px;background:#263846;color:white;border:1px solid #75919e;border-radius:8px">Reset</button></div>
           </div>
           <div id="rift-title-gate" class="rift-mono">
             <div class="rift-title-starfield" aria-hidden="true"></div>
@@ -766,8 +802,35 @@ function setOceanTuning(key,value){
   try{localStorage.setItem("riftOceanTuningV2",JSON.stringify(window.__riftOceanTuning));}catch(_){}
   window.dispatchEvent(new CustomEvent("rift-ocean-tuning",{detail:{key,value}}));
 }
+// One-tap category navigation keeps all 11 controls easy to reach on a phone.
+const oceanGroups = [
+  ["all","All 11",null],
+  ["waves","Waves",["swell","chop","ripples","foam"]],
+  ["surface","Surface",["reflection","refraction","clarity","glitter"]],
+  ["underwater","Underwater",["caustics","sunlight","haze"]]
+];
+const oceanTabs=document.getElementById("rift-ocean-tune-tabs");
+let selectedOceanGroup="all";
+function showOceanGroup(group){
+  selectedOceanGroup=group;
+  const groupDef=oceanGroups.find(([id])=>id===group);
+  for(const row of tuningSliders.children){
+    row.hidden=Boolean(groupDef?.[2] && !groupDef[2].includes(row.dataset.effect));
+  }
+  for(const button of oceanTabs.children){
+    button.setAttribute("aria-pressed",String(button.dataset.group===group));
+  }
+  tuningSliders.scrollTop=0;
+}
+for(const [id,name] of oceanGroups){
+  const button=document.createElement("button");
+  button.type="button";button.textContent=name;button.dataset.group=id;
+  button.addEventListener("click",()=>showOceanGroup(id));
+  oceanTabs.append(button);
+}
 for(const [key,label,min,max] of oceanControls){
   const row=document.createElement("label");
+  row.dataset.effect=key;
   row.style.cssText="display:block;margin:11px 0;touch-action:pan-y";
   const title=document.createElement("span");
   title.style.cssText="display:flex;justify-content:space-between;gap:8px;margin-bottom:5px";
@@ -782,6 +845,7 @@ for(const [key,label,min,max] of oceanControls){
   slider.addEventListener("input",()=>{setOceanTuning(key,Number(slider.value));output.textContent=Number(slider.value).toFixed(2)+"×";});
   row.append(title,slider);tuningSliders.append(row);
 }
+showOceanGroup("all");
 tuningButton?.addEventListener("click",()=>{tuningPanel.hidden=!tuningPanel.hidden;tuningButton.setAttribute("aria-expanded",String(!tuningPanel.hidden));paintOceanControls();});
 document.getElementById("rift-ocean-tune-close")?.addEventListener("click",()=>{tuningPanel.hidden=true;tuningButton.setAttribute("aria-expanded","false");});
 function applyOceanPreset(values){for(const [key,value] of Object.entries(values))setOceanTuning(key,value);paintOceanControls();}

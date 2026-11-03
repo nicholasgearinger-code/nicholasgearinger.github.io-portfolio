@@ -22,6 +22,10 @@ export function createOpticsAdapter({
   const cameraHeight = uniform(5);
   const waterHeight = uniform(field.source.waterY ?? 0);
   const waveTime = uniform(0);
+  const rippleGain = uniform(1.7);
+  const reflectionGain = uniform(1.8);
+  const refractionGain = uniform(1.8);
+  const sunlightGain = uniform(1.8);
   const sunDirection = uniform(new THREE.Vector3(0.2,0.9,0.3).normalize());
   const sunlight = uniform(1);
   const nightAmbient = uniform(0.20);
@@ -32,14 +36,14 @@ export function createOpticsAdapter({
   const phaseB = p.x.mul(-1.09).add(p.z.mul(0.73)).sub(waveTime.mul(1.63));
   const rippleX = cos(phaseA).mul(0.045).sub(sin(phaseB).mul(0.024));
   const rippleZ = sin(phaseA).mul(0.035).add(cos(phaseB).mul(0.026));
-  const normal = geometry.normalNode.add(vec3(rippleX, float(0), rippleZ)).normalize();
+  const normal = geometry.normalNode.add(vec3(rippleX.mul(rippleGain), float(0), rippleZ.mul(rippleGain))).normalize();
   const view = cameraPosition.sub(positionWorld).normalize();
   const facing = clamp(abs(dot(normal, view)), 0, 1);
   const r0 = float(Math.pow((WATER_IOR - 1) / (WATER_IOR + 1), 2));
   const reflectance = r0.add(float(1).sub(r0).mul(pow(float(1).sub(facing), float(5))));
   const underwater = float(1).sub(clamp(cameraHeight.sub(waterHeight).mul(4).add(0.5), 0, 1));
   const slope = vec2(normal.x, normal.z);
-  const distortion = slope.mul(mix(float(0.009), float(0.026), underwater))
+  const distortion = slope.mul(mix(float(0.009), float(0.026), underwater)).mul(refractionGain)
     .mul(float(0.6).add(float(1).sub(facing).mul(0.4)));
   const skyApprox = mix(originalColor, sky, reflectance.mul(0.65));
 
@@ -84,10 +88,13 @@ export function createOpticsAdapter({
   // Existing reflection and refraction captures are only valid from above
   // the surface; from below they show stale/incorrect projection. Preserve
   // the v9 underwater optics rather than mixing in those textures.
-  const captureWeight = float(1).sub(underwater).mul(0.82);
+  const captureWeight = clamp(float(1).sub(underwater).mul(0.45).mul(reflectionGain), 0, 0.94);
   const composedBase = (reflectionTexture || refractionTexture)
     ? mix(originalColor, captureColor, captureWeight)
     : originalColor;
+  // Fallback sky Fresnel creates visible reflection response even where iOS
+  // disables expensive scene capture render targets.
+  const reflectedBase = mix(composedBase, sky, clamp(reflectance.mul(reflectionGain).mul(0.23), 0, 0.58));
   // Fine animated normals steer subtle transmitted sun and sky glimmer.
   // The low amplitude avoids repeating diamond patterns and leaves the
   // FFT-derived broad shading to the original physically-based shader.
@@ -102,14 +109,14 @@ export function createOpticsAdapter({
   const refractiveFocus = pow(facingSun, float(5))
     .mul(float(0.55).add(float(1).sub(facing).mul(0.45)));
   const transmittedSun = refractiveFocus
-    .mul(sunlight).mul(underwater).mul(daylightTransmission).mul(0.19);
+    .mul(sunlight).mul(underwater).mul(daylightTransmission).mul(0.19).mul(sunlightGain);
   // Fine, low-contrast radiance variation is tied to the SAME optical
   // normal as refraction and sun focusing, rather than a separate texture.
   const rippleLight = clamp(rippleX.mul(0.48).add(rippleZ.mul(0.36)).add(0.1), 0, 0.2)
-    .mul(underwater).mul(ambientTransmission).mul(0.19);
+    .mul(underwater).mul(ambientTransmission).mul(0.19).mul(sunlightGain);
   const undersideAmbient = clamp(dot(normal, vec3(0,1,0)), 0, 1)
     .mul(underwater).mul(nightAmbient).mul(ambientTransmission).mul(0.09);
-  const opticalColor = composedBase
+  const opticalColor = reflectedBase
     .add(color(0xb9e7ed).mul(transmittedSun))
     .add(sky.mul(rippleLight))
     .add(color(0x75b5c3).mul(undersideAmbient));
@@ -127,6 +134,12 @@ export function createOpticsAdapter({
       active = true;
     },
     update({ cameraY, skyColor, waterY, elapsed, sunDir, dayAmount, reflectionMatrix: nextMatrix } = {}) {
+      const tune = globalThis.__riftOceanTuning ?? {};
+      const limit = (key, fallback) => Number.isFinite(Number(tune[key])) ? Math.max(0, Math.min(3, Number(tune[key]))) : fallback;
+      rippleGain.value = limit("ripples", 1.7);
+      reflectionGain.value = limit("reflection", 1.8);
+      refractionGain.value = limit("refraction", 1.8);
+      sunlightGain.value = limit("sunlight", 1.8);
       if (Number.isFinite(elapsed)) waveTime.value = elapsed;
       if (sunDir?.isVector3) sunDirection.value.copy(sunDir).normalize();
       if (Number.isFinite(dayAmount)) {

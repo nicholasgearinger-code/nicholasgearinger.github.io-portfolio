@@ -29,6 +29,7 @@ export function createOpticsAdapter({
   const foamGain = uniform(1.55);
   const clarityGain = uniform(1.45);
   const glitterGain = uniform(1.65);
+  const undersideGain = uniform(1.45);
   const sunDirection = uniform(new THREE.Vector3(0.2,0.9,0.3).normalize());
   const sunlight = uniform(1);
   const nightAmbient = uniform(0.20);
@@ -122,6 +123,27 @@ export function createOpticsAdapter({
     .mul(underwater).mul(ambientTransmission).mul(0.19).mul(sunlightGain);
   const undersideAmbient = clamp(dot(normal, vec3(0,1,0)), 0, 1)
     .mul(underwater).mul(nightAmbient).mul(ambientTransmission).mul(0.09);
+  // Physically motivated Snell window: the water-to-air critical angle
+  // is asin(1/1.333), about 48.6 degrees from vertical. Use the same
+  // displaced FFT normal for the view angle, transmission and reflection.
+  // A softened boundary avoids ugly hard circular rings on the mobile mesh.
+  const undersideView = view.negate();
+  const upwardFacing = clamp(dot(normal, undersideView), 0, 1);
+  const snellWindow = smoothstep(float(0.60), float(0.73), upwardFacing);
+  const criticalReflect = float(1).sub(snellWindow);
+  const undersideWaterTint = color(0x10536a);
+  const undersideSky = mix(undersideWaterTint, sky,
+    snellWindow.mul(ambientTransmission).mul(0.84));
+  // The sun is brightest where upward-facing wave facets transmit its
+  // direction, and fades naturally when viewed deep below the surface.
+  const sunlightThroughSurface = pow(clamp(dot(normal, sunDirection), 0, 1), float(3))
+    .mul(snellWindow).mul(daylightTransmission).mul(sunlight)
+    .mul(undersideGain).mul(0.27);
+  const underwaterSurface = mix(
+    originalColor, undersideSky,
+    clamp(underwater.mul(float(0.30).add(snellWindow.mul(0.46))), 0, 0.82)
+  ).add(color(0xa8e6dd).mul(sunlightThroughSurface).mul(underwater))
+    .add(undersideWaterTint.mul(criticalReflect.mul(underwater).mul(0.07)));
   // Brighter wave crest transmission and fractured solar glints track the
   // same displaced FFT normal, not a scrolling decorative reflection texture.
   const sunHalf = sunDirection.add(view).normalize();
@@ -158,7 +180,7 @@ export function createOpticsAdapter({
   const surfaceColor = reflectedBase
     .add(color(0xffedc4).mul(glints))
     .add(color(0x6fe8d2).mul(crestGlow));
-  const opticalColor = mix(surfaceColor, color(0xe5f6ee), foamMask)
+  const opticalColor = mix(mix(surfaceColor, underwaterSurface, underwater), color(0xe5f6ee), foamMask)
     .add(color(0xb9e7ed).mul(transmittedSun))
     .add(sky.mul(rippleLight))
     .add(color(0x75b5c3).mul(undersideAmbient));
@@ -185,6 +207,7 @@ export function createOpticsAdapter({
       foamGain.value = limit("foam", 1.55);
       clarityGain.value = Math.max(0.35, limit("clarity", 1.45));
       glitterGain.value = limit("glitter", 1.65);
+      undersideGain.value = limit("underside", 1.45);
       if (Number.isFinite(elapsed)) waveTime.value = elapsed;
       if (sunDir?.isVector3) sunDirection.value.copy(sunDir).normalize();
       if (Number.isFinite(dayAmount)) {

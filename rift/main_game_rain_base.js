@@ -5325,8 +5325,12 @@ function animate() {
   }
   // The enclosing "water volume" sphere — follows the camera every
   // frame, only visible while actually fully submerged.
-  waterVolumeMesh.visible = isFullySubmerged;
-  if (isFullySubmerged) waterVolumeMesh.position.copy(camera.position);
+  // The original camera-following blue sphere adds an equal tint to every
+  // pixel regardless of distance. Experimental water already uses real
+  // distance/depth-dependent fog, so this overlay erases underwater contrast
+  // and makes the view resemble a flat filter. Retain it in Current mode.
+  waterVolumeMesh.visible = isFullySubmerged && !experimentalUnderwaterAtmosphere;
+  if (waterVolumeMesh.visible) waterVolumeMesh.position.copy(camera.position);
   // Ocean surface glitter/whitecaps (createOceanSurfaceDetail) sit right
   // at the water plane and were never gated on submersion — from
   // underwater looking up at the surface, those foam/glint points read

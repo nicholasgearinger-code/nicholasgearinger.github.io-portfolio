@@ -2780,13 +2780,21 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
       const waveSpeedFactor = float(0.4).add(float(1.0).sub(abs(waveNorm.sub(0.5)).mul(2.0)).mul(0.9));
 
       const worldXZ = positionWorld.xz.mul(0.15);
-      const uv1 = worldXZ.add(vec2(t.mul(0.065), t.mul(0.03)).mul(waveSpeedFactor)).add(waveH.mul(0.05));
+      // Organic world-space domain warp prevents the repeated caustic texture
+      // from revealing its square tile boundaries. Uses cheap wave phases,
+      // smooth periodic offsets and the existing two texture samples.
+      const causticWarp = vec2(
+        sin(positionWorld.z.mul(0.071).add(t.mul(0.21))),
+        cos(positionWorld.x.mul(0.063).sub(t.mul(0.17)))
+      ).mul(0.29);
+      const organicXZ = worldXZ.add(causticWarp);
+      const uv1 = organicXZ.add(vec2(t.mul(0.065), t.mul(0.03)).mul(waveSpeedFactor)).add(waveH.mul(0.05));
       // Fixed rotation angles — precomputed as plain JS constants (not
       // TSL trig calls) since these never change per-fragment; avoids
       // relying on any uncertain TSL sin()/cos() node-method syntax for
       // values that are really just two fixed numbers.
       const rotCos = Math.cos(0.9), rotSin = Math.sin(0.9);
-      const uv2raw = worldXZ.mul(1.35).sub(vec2(t.mul(0.045), t.mul(0.07)).mul(waveSpeedFactor)).sub(waveH.mul(0.04));
+      const uv2raw = organicXZ.mul(1.35).sub(vec2(t.mul(0.045), t.mul(0.07)).mul(waveSpeedFactor)).sub(waveH.mul(0.04));
       const uv2 = vec2(
         uv2raw.x.mul(rotCos).sub(uv2raw.y.mul(rotSin)),
         uv2raw.x.mul(rotSin).add(uv2raw.y.mul(rotCos))
@@ -2795,7 +2803,10 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
       const s2 = texture(getCausticPatternTexture(), uv2).r;
       const netPrimary = clamp(tslMin(s1, s2).mul(1.7).sub(0.55), 0, 1);
 
-      const worldXZ2 = positionWorld.xz.mul(0.045);
+      // The broad caustic pool receives a related but slower, independently
+      // warped domain so both scales never lock to the same visible grid.
+      const worldXZ2 = positionWorld.xz.mul(0.045)
+        .add(causticWarp.mul(0.38));
       const uv3 = worldXZ2.add(vec2(t.mul(-0.018), t.mul(0.026)).mul(waveSpeedFactor)).add(waveH.mul(0.02));
       const rot2Cos = Math.cos(-1.4), rot2Sin = Math.sin(-1.4);
       const uv4raw = worldXZ2.mul(1.6).sub(vec2(t.mul(0.012), t.mul(-0.02)).mul(waveSpeedFactor)).sub(waveH.mul(0.015));
@@ -2807,7 +2818,12 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
       const s4 = texture(getCausticPatternTexture(), uv4).r;
       const netSecondary = clamp(tslMin(s3, s4).mul(1.6).sub(0.5), 0, 1);
 
-      const causticPattern = tslMax(netPrimary, netSecondary.mul(0.75));
+      // Blend sparse light filaments with a soft broad component instead of
+      // only selecting the brightest hard-edged tile. Avoid checker squares
+      // while preserving high-energy ridges from overlapping wave samples.
+      const causticPattern = clamp(
+        tslMax(netPrimary.mul(0.82), netSecondary.mul(0.48))
+          .add(netPrimary.mul(netSecondary).mul(0.19)), 0, 0.92);
       // Gated to submerged, upward-facing sand only — dry island terrain
       // and vertical rock faces stay untouched, matching the old (now-
       // removed) block's own explicit intent. underwaterMask uses the
@@ -2829,7 +2845,13 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
       const distFromFocus = positionWorld.xz.sub(terrainCausticFocusXZUniform).length();
       const focusZone = float(1.0).sub(smoothstep(float(0.0), terrainCausticFocusRadiusUniform, distFromFocus));
       const focusMask = float(0.15).add(focusZone.mul(0.85));
-      const finalCaustic = causticPattern.mul(underwaterMask).mul(upwardMask).mul(focusMask).mul(terrainCausticIntensityUniform).mul(terrainCausticSunGlowUniform);
+      const seabedWaterDepth = clamp(float(LIQUID_LEVEL.crystal).sub(positionWorld.y), 0, 60);
+      const depthAttenuation = float(1).sub(
+        smoothstep(float(6), float(48), seabedWaterDepth).mul(0.75)
+      );
+      const finalCaustic = causticPattern.mul(underwaterMask).mul(upwardMask)
+        .mul(focusMask).mul(depthAttenuation)
+        .mul(terrainCausticIntensityUniform).mul(terrainCausticSunGlowUniform);
       // Per "might be a little too strong" — pulled back from 0.85 to
       // 0.55, a real, easily-reversible tuning number, not a structural
       // change.

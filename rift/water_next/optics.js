@@ -1,6 +1,7 @@
 // Experimental scene-capture optics. Uses EXISTING Rift render targets.
 // No new rendering passes, target allocations or production activation.
 import * as THREE from "three";
+import { getRealisticCloudTexture } from "../clouds_storm_base.js";
 import { float, color, uniform, dot, abs, clamp, pow, mix, vec2, vec4,
   texture, screenUV, cameraPosition, positionWorld, attribute, exp, sin, cos, vec3, smoothstep } from "three/tsl";
 export const WATER_IOR = 1.333;
@@ -25,6 +26,10 @@ export function createOpticsAdapter({
   const balancedBase = originalColor.sub(basePeaks.mul(0.68));
   const originalIOR = material.ior;
   const sky = uniform(new THREE.Color(0x8bc4e1));
+  // Share the cloud panorama already used by the sky dome / Water Pro base.
+  // One existing texture lookup, no mirrored camera or second scene pass.
+  const skyPanorama = getRealisticCloudTexture();
+  const breakerGain = uniform(1.05);
   const cameraHeight = uniform(5);
   const waterHeight = uniform(field.source.waterY ?? 0);
   const waveTime = uniform(0);
@@ -72,9 +77,19 @@ export function createOpticsAdapter({
     ? projected.xy.div(projected.w.abs().max(float(0.0001)))
         .add(distortion.mul(0.5))
     : null;
+  // Fallback reflection: reflect the current eye vector across the
+  // displaced FFT normal, then query the SAME moving cloud panorama as the
+  // production sky. Flat sky mixing previously looked like painted water.
+  const reflectionRay = normal.mul(dot(normal, view).mul(2)).sub(view).normalize();
+  const panoramaUV = vec2(
+    reflectionRay.x.mul(0.26).add(waveTime.mul(0.002)),
+    reflectionRay.z.mul(0.14).add(0.80)
+  ).add(vec2(0.5, 0));
+  const panoramaSample = texture(skyPanorama, panoramaUV);
+  const skyReflection = mix(sky, panoramaSample.rgb, panoramaSample.a.mul(0.65));
   const reflected = reflectionTexture && reflectedUV
     ? texture(reflectionTexture, clamp(reflectedUV, vec2(0.002), vec2(0.998))).rgb
-    : sky;
+    : skyReflection;
   // Beer–Lambert-inspired attenuation derived from existing seabed depth.
   // No depth texture, ray marching or additional render pass. Clear in the
   // shallows; progressively blue/teal in deeper water.
@@ -115,7 +130,10 @@ export function createOpticsAdapter({
   const grazing = pow(float(1).sub(facing), float(3));
   const reflectionWeight = clamp(reflectance.mul(reflectionGain)
     .mul(float(0.14).add(grazing.mul(0.44))), 0, 0.70);
-  const reflectedBase = mix(composedBase, sky, reflectionWeight);
+  // This is a directional environment reflection. The existing v9 shader
+  // remains underneath; keep the added lobe restrained to avoid solar
+  // overexposure where both reflection models overlap.
+  const reflectedBase = mix(composedBase, reflected, reflectionWeight.mul(0.72));
   // Fine animated normals steer subtle transmitted sun and sky glimmer.
   // The low amplitude avoids repeating diamond patterns and leaves the
   // FFT-derived broad shading to the original physically-based shader.
@@ -217,8 +235,14 @@ export function createOpticsAdapter({
   // The smoothly varying thresholds avoid turning the whole ocean white.
   const risingCrest = smoothstep(waterHeight.add(0.10),
     waterHeight.add(0.90), positionWorld.y);
-  const breakingSteepness = smoothstep(float(0.30), float(0.76), faceSlope);
-  const slopeFoam = breakingSteepness.mul(risingCrest);
+  const breakingSteepness = smoothstep(float(0.27), float(0.70), faceSlope);
+  // At higher incidence the front face of the breaking wave turns white,
+  // but not its entire back face. Use projected movement along the dominant
+  // swell direction for a wave-aligned crown rather than scattered patches.
+  const advancingFace = smoothstep(float(-0.13), float(0.38),
+    normal.x.mul(-0.79).add(normal.z.mul(-0.61)));
+  const slopeFoam = breakingSteepness.mul(risingCrest)
+    .mul(float(0.40).add(advancingFace.mul(0.60)));
   const foamBreakup = smoothstep(float(0.23), float(0.81),
     sin(phaseA.mul(0.73).add(phaseB.mul(0.37)))
       .mul(cos(phaseB.mul(0.84))).abs());
@@ -231,8 +255,11 @@ export function createOpticsAdapter({
   // Use the actual displaced crest height to avoid spraying equally
   // across calm shallow flats. Whitecap crowns stay attached to steep
   // wave tops and leave breakup gaps rather than continuous white stripes.
+  // Breaker crowns with a slightly darker shoulder and torn white tips.
+  // Still a surface/foam approximation, not actual overturning geometry.
   const crestCrown = slopeFoam.mul(foamBreakup)
-    .mul(float(0.36).add(breakingSteepness.mul(0.64)));
+    .mul(float(0.44).add(breakingSteepness.mul(0.56)))
+    .mul(breakerGain);
   const sprayFlecks = smoothstep(float(0.70), float(0.96),
     sin(phaseA.mul(1.62).sub(phaseB.mul(0.87))).abs())
     .mul(risingCrest).mul(breakingSteepness).mul(0.17);
@@ -240,10 +267,13 @@ export function createOpticsAdapter({
   const foamMask = clamp(crestCrown.add(sprayFlecks)
     .add(shorelineFoam).mul(foamGain)
     .mul(float(1).sub(underwater)), 0, 0.86);
+  const crestShoulder = risingCrest.mul(breakingSteepness)
+    .mul(float(1).sub(foamBreakup)).mul(0.17);
   const surfaceColor = reflectedBase
     .add(color(0xffe5bd).mul(broadSunReflection))
     .add(color(0xffedc4).mul(glints))
-    .add(color(0x6fe8d2).mul(crestGlow));
+    .add(color(0x6fe8d2).mul(crestGlow))
+    .add(color(0x76c5c6).mul(crestShoulder));
   const opticalColor = mix(mix(surfaceColor, underwaterSurface, underwater), color(0xe5f6ee), foamMask)
     .add(color(0xb9e7ed).mul(transmittedSun))
     .add(sky.mul(rippleLight))
@@ -273,6 +303,7 @@ export function createOpticsAdapter({
       refractionGain.value = limit("refraction", 1.8);
       sunlightGain.value = limit("sunlight", 1.8);
       foamGain.value = limit("foam", 1.55);
+      breakerGain.value = limit("breakers", 1.05);
       clarityGain.value = Math.max(0.35, limit("clarity", 1.45));
       glitterGain.value = limit("glitter", 1.65);
       undersideGain.value = limit("underside", 1.45);

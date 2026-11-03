@@ -81,7 +81,10 @@ export function createWaterGeometryAdapter({ mesh, field, shoreSolver = null }) 
   // storage-buffer fetches per vertex and significantly reduce mobile FPS.
   const isIOS = typeof navigator !== "undefined" &&
     /iPad|iPhone|iPod/i.test(navigator.userAgent || "");
-  if (isIOS && savedNormalNode) normalNode = savedNormalNode;
+  // Keep the production normal on iOS for the shoreline-coupled surface:
+  // its source already handles surf masks, and a second shallow-water stencil
+  // is prohibitively expensive. Offshore experimental water uses FFT tangents.
+  if (isIOS && hasShore && savedNormalNode) normalNode = savedNormalNode;
   let active = false;
   return {
     mesh, field, positionNode: heightNode, normalNode,

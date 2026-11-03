@@ -516,8 +516,8 @@ if (riftGpuDevice && typeof riftGpuDevice.addEventListener === "function") {
     }
     const first = state.first;
     const msg = "[WebGPU error " + state.count + "] First: " + first.kind
-      + ": " + first.detail + "\\nDiagnostic: " + first.debugMode
-      + "\\nLater errors may be cascading failures.";
+      + ": " + first.detail + "\nDiagnostic: " + first.debugMode
+      + "\nLater errors may be cascading failures.";
     const existingOverlay = document.getElementById("rift-module-error-overlay");
     if (existingOverlay) {
       existingOverlay.style.display = "block";

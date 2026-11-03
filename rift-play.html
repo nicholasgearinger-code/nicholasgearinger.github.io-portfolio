@@ -734,7 +734,10 @@ const oceanControls = [
   ["refraction","Refraction / distortion",0,3,1.8],
   ["caustics","Seabed caustics",0,3,1.8],
   ["sunlight","Underwater light transmission",0,3,1.8],
-  ["haze","Underwater depth haze",0,3,1.35]
+  ["haze","Underwater depth haze",0,3,1.35],
+  ["foam","Breaking / shoreline foam",0,3,1.55],
+  ["clarity","Shallow water clarity",0.35,3,1.45],
+  ["glitter","Sun glitter / sparkle",0,3,1.65]
 ];
 const oceanDefaults=Object.fromEntries(oceanControls.map(([key,,, ,value])=>[key,value]));
 function loadOceanTuning(){
@@ -755,7 +758,7 @@ function paintOceanControls(){
   }
   const active=readWaterMode()==="experimental";
   document.getElementById("rift-ocean-tune-hint").textContent=active
-    ?"Experimental mode · Adjustments apply live · Saved automatically"
+    ?"Experimental mode · Live effects · Saved automatically · Strong settings may lower FPS"
     :"Switch WATER to EXPERIMENTAL to activate these effects";
 }
 function setOceanTuning(key,value){
@@ -783,7 +786,7 @@ tuningButton?.addEventListener("click",()=>{tuningPanel.hidden=!tuningPanel.hidd
 document.getElementById("rift-ocean-tune-close")?.addEventListener("click",()=>{tuningPanel.hidden=true;tuningButton.setAttribute("aria-expanded","false");});
 function applyOceanPreset(values){for(const [key,value] of Object.entries(values))setOceanTuning(key,value);paintOceanControls();}
 document.getElementById("rift-ocean-reset")?.addEventListener("click",()=>applyOceanPreset(oceanDefaults));
-document.getElementById("rift-ocean-preset-dramatic")?.addEventListener("click",()=>applyOceanPreset({swell:2.2,chop:1.9,ripples:2.2,reflection:2.3,refraction:2.3,caustics:2.2,sunlight:2.2,haze:1.6}));
+document.getElementById("rift-ocean-preset-dramatic")?.addEventListener("click",()=>applyOceanPreset({swell:2.2,chop:1.9,ripples:2.2,reflection:2.3,refraction:2.3,caustics:2.2,sunlight:2.2,haze:1.6,foam:2.15,clarity:1.85,glitter:2.2}));
 paintOceanControls();
 
 const fullButton=document.getElementById("rift-fullscreen-btn");

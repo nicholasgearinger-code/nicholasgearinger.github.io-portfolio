@@ -655,7 +655,7 @@ button{font:inherit;cursor:pointer}
             <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><strong>OCEAN SYSTEM 2.0</strong><button type="button" id="rift-ocean-tune-close" aria-label="Close ocean tuning" style="padding:6px 10px;background:#174857;color:white;border:1px solid #56848c;border-radius:7px">✕</button></div>
             <p id="rift-ocean-tune-hint" style="margin:8px 0;color:#a5d9de;line-height:1.4">Experimental mode only · Live controls · Saved automatically</p>
             <div id="rift-ocean-tune-sliders"></div>
-            <div style="display:flex;gap:8px;margin-top:12px"><button id="rift-ocean-preset-dramatic" type="button" style="flex:1;min-height:36px;background:#127a77;color:white;border:1px solid #65d7d3;border-radius:8px">Dramatic preset</button><button id="rift-ocean-reset" type="button" style="flex:1;min-height:36px;background:#263846;color:white;border:1px solid #75919e;border-radius:8px">Reset</button></div>
+            <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button id="rift-ocean-preset-tropical" type="button" style="flex:1 1 100%;min-height:36px;background:#0a6685;color:white;border:1px solid #72d7ed;border-radius:8px">Tropical Water Pro look</button><button id="rift-ocean-preset-dramatic" type="button" style="flex:1;min-height:36px;background:#127a77;color:white;border:1px solid #65d7d3;border-radius:8px">Dramatic preset</button><button id="rift-ocean-reset" type="button" style="flex:1;min-height:36px;background:#263846;color:white;border:1px solid #75919e;border-radius:8px">Reset</button></div>
           </div>
           <div id="rift-title-gate" class="rift-mono">
             <div class="rift-title-starfield" aria-hidden="true"></div>
@@ -786,6 +786,7 @@ tuningButton?.addEventListener("click",()=>{tuningPanel.hidden=!tuningPanel.hidd
 document.getElementById("rift-ocean-tune-close")?.addEventListener("click",()=>{tuningPanel.hidden=true;tuningButton.setAttribute("aria-expanded","false");});
 function applyOceanPreset(values){for(const [key,value] of Object.entries(values))setOceanTuning(key,value);paintOceanControls();}
 document.getElementById("rift-ocean-reset")?.addEventListener("click",()=>applyOceanPreset(oceanDefaults));
+document.getElementById("rift-ocean-preset-tropical")?.addEventListener("click",()=>applyOceanPreset({swell:1.5,chop:1.3,ripples:1.7,reflection:2.0,refraction:2.0,caustics:2.2,sunlight:2.15,haze:0.95,foam:1.35,clarity:2.3,glitter:2.1}));
 document.getElementById("rift-ocean-preset-dramatic")?.addEventListener("click",()=>applyOceanPreset({swell:2.2,chop:1.9,ripples:2.2,reflection:2.3,refraction:2.3,caustics:2.2,sunlight:2.2,haze:1.6,foam:2.15,clarity:1.85,glitter:2.2}));
 paintOceanControls();
 

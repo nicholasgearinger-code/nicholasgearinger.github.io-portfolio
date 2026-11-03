@@ -22,13 +22,19 @@ const IOS_WEBKIT = typeof navigator !== "undefined" && (
   ((navigator.platform || "") === "MacIntel" && (navigator.maxTouchPoints || 0) > 1)
 );
 
-// Low keeps the same stable sequential FFT path, targeting 18 updates/sec.
-// The rendered water still updates each frame via the latest FFT buffers.
+// iOS/WebKit: a full ocean update dispatches many compute kernels for the
+// long FFT, detail FFT and shallow-water solver. Reduce the number of separate
+// command encoders before increasing visual complexity. The water mesh still
+// renders every frame from the most recently computed FFT buffers.
+// Conservative cadence is intentional until actual GPU-device testing.
 function iosFFTInterval() {
   try {
-    return localStorage.getItem("riftGraphicsSettings") === "low" ? 1 / 18 : 1 / 30;
+    const quality = localStorage.getItem("riftGraphicsSettings");
+    const experimental = localStorage.getItem("riftWaterGraphicsMode") === "experimental";
+    if (quality === "low") return 1 / 15;
+    return experimental ? 1 / 18 : 1 / 24;
   } catch (_) {
-    return 1 / 30;
+    return 1 / 18;
   }
 }
 
@@ -51,6 +57,8 @@ function freezeUnsafeMobileMicroFFT(handle) {
 function stopFailedIOSFFT(handle, error) {
   handle.__riftIOSFFTDisabled = true;
   handle.fluidSimBroken = true;
+  // Prevent a corrupted encoder from being used for additional FFT frames.
+  // This does not restore the GPU device; a full reload is required.
   handle.__riftIOSFFTFailureCount = (handle.__riftIOSFFTFailureCount || 0) + 1;
   const message = error?.message || String(error);
   globalThis.__riftIOSFFTSafeV22 = {
@@ -60,7 +68,11 @@ function stopFailedIOSFFT(handle, error) {
     message,
     computeDisabledForSession: true,
   };
-  console.error("[rift-water] FFT submission failed; future FFT work stopped for this session", error);
+  console.error("[rift-water] FFT submission failed; future FFT work stopped for this session", {
+    error, dispatchCount: handle.__riftIOSFFTDispatchCount ?? 0,
+    time: handle.__riftIOSFFTLastTime,
+    experimental: (() => { try { return localStorage.getItem("riftWaterGraphicsMode")==="experimental"; } catch(_) { return false; } })(),
+  });
 }
 
 function installIOSSafeState(handle) {
@@ -76,7 +88,7 @@ function installIOSSafeState(handle) {
   globalThis.__riftIOSFFTSafeV22 = {
     active: true,
     sequentialSubmission: true,
-    targetHz: 30,
+    targetHz: Math.round(1 / iosFFTInterval()),
     frozenMicroFFT,
     waterBackend: handle.__riftWaterProBackend ?? null,
   };
@@ -104,6 +116,7 @@ export function updateGPUFFTOcean(handle, renderer, elapsedTime = 0) {
   const last = Number(handle.__riftIOSFFTLastTime);
   if (Number.isFinite(last) && t >= last && (t - last) < iosFFTInterval()) return;
   handle.__riftIOSFFTLastTime = t;
+  handle.__riftIOSFFTDispatchCount = (handle.__riftIOSFFTDispatchCount ?? 0) + 1;
 
   const profileStart = performance.now();
   try {
@@ -157,7 +170,7 @@ export function updateGPUFFTOcean(handle, renderer, elapsedTime = 0) {
 
     console.error(
       "[gpu-fft-ocean:r185:v22] iOS sequential FFT failed; ocean compute disabled for this session to protect the WebGPU device",
-      error,
+      { error, dispatchCount: handle.__riftIOSFFTDispatchCount ?? 0, time: t },
     );
     return;
   }

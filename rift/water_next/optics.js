@@ -21,6 +21,9 @@ function createUnifiedSurfaceAdapter({
   const priorRoughness = material.roughnessNode;
   const priorIOR = material.ior;
   const priorTransmission = material.transmissionNode;
+  const priorThickness = material.thicknessNode;
+  const originalTransmissionScalar = Number.isFinite(material.transmission) ? material.transmission : 0.7;
+  const originalThicknessScalar = Number.isFinite(material.thickness) ? material.thickness : 0.24;
   const time = uniform(0);
   const waterY = uniform(field.source.waterY ?? 0);
   const cameraYUniform = uniform(5);
@@ -74,13 +77,18 @@ function createUnifiedSurfaceAdapter({
     .mul(slant.mul(0.013).add(0.004));
   const refractedUV = clamp(screenUV.add(refractionOffset),
     vec2(0.003), vec2(0.997));
+  // The WebGPU loader disables legacy offscreen capture renders on iOS
+  // because they invalidate the command encoder. Never pretend a constant
+  // pale color is the seabed. Without a capture, physically based material
+  // transmission supplies real background visibility; this color node
+  // supplies only the wavelength-filtered water-column scattering.
   const bottomRadiance = refractionTexture
     ? texture(refractionTexture, refractedUV).rgb
-    : color(0x92bdb0);
-  const bottomVisibility = refractionTexture ? float(1) : float(0.36);
-  const visibleBottom = throughput.mul(bottomVisibility);
-  const transmitted = inScatter.mul(vec3(1).sub(visibleBottom))
-    .add(bottomRadiance.mul(visibleBottom));
+    : inScatter;
+  const captureVisibility = refractionTexture ? float(1) : float(0);
+  const transmitted = inScatter.mul(vec3(1).sub(throughput))
+    .add(bottomRadiance.mul(throughput).mul(captureVisibility))
+    .add(inScatter.mul(throughput).mul(float(1).sub(captureVisibility)).mul(0.43));
 
   // Reflect the viewer around the SAME moving optical normal. No other
   // sky-glint or faux specular strip is added to the surface albedo.
@@ -101,9 +109,11 @@ function createUnifiedSurfaceAdapter({
     : skyRadiance;
   // Exactly one Fresnel blend between transmitted and reflected light.
   // The shoulder reduces the stacked overexposed sun column on mobile.
-  const reflectionBlend = clamp(fresnel.mul(reflectionGain), 0.01, 0.94);
+  const reflectionBlend = clamp(fresnel.mul(reflectionGain), 0.015, 0.91);
+  // Preserve cloud shape but compress the high-luminance cloud/sun peaks.
+  // Break reflection up with geometry normals rather than fake white bands.
   const reflectionRadiance = environment.div(
-    float(1).add(environment.mul(0.18))
+    float(1).add(environment.mul(0.24))
   );
   const surface = mix(transmitted, reflectionRadiance, reflectionBlend);
 
@@ -120,6 +130,18 @@ function createUnifiedSurfaceAdapter({
     .mul(day).mul(sunlightGain).mul(0.12);
   const waterSurface = mix(surface.add(color(0x4dafa8).mul(crestTransmission)),
     color(0xe4f2eb), foam);
+  // The same seabed-depth value controls both transmitted background and
+  // absorption. Underwater rocks/sand are real scene objects, not a sky tint.
+  const shallowTransmittance = float(1).sub(
+    smoothstep(float(2), float(25), seaDepth));
+  const physicalTransmission = mix(
+    priorTransmission ?? float(originalTransmissionScalar),
+    float(0.96), shallowTransmittance.mul(0.76)
+  ).mul(float(1).sub(foam.mul(0.94)));
+  const physicalThickness = mix(
+    priorThickness ?? float(originalThicknessScalar),
+    float(0.055), shallowTransmittance.mul(0.85)
+  );
 
   // Water-to-air Snell window: retain detailed surface orientation looking
   // upward, and diminish light at internal-reflection grazing angles.
@@ -152,6 +174,8 @@ function createUnifiedSurfaceAdapter({
       if (active) return;
       material.colorNode = total;
       material.roughnessNode = roughness;
+      material.transmissionNode = physicalTransmission;
+      material.thicknessNode = physicalThickness;
       material.ior = WATER_IOR;
       material.needsUpdate = true;
       active = true;
@@ -185,6 +209,7 @@ function createUnifiedSurfaceAdapter({
       material.roughnessNode = priorRoughness;
       material.ior = priorIOR;
       material.transmissionNode = priorTransmission;
+      material.thicknessNode = priorThickness;
       material.needsUpdate = true;
       active = false;
     },

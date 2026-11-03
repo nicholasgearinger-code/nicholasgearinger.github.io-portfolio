@@ -1325,6 +1325,16 @@ const oceanDepthUnderwaterMix = uniform(0);
 const oceanDepthAbsorption = uniform(1);
 const oceanDepthScattering = uniform(1);
 const oceanDepthDaylight = uniform(1);
+// Reconstruct each view ray from the live camera orientation and projection.
+// This lets the depth compositor stop accumulating underwater color exactly
+// where an upward ray exits into air, instead of tinting sky as distant ocean.
+const oceanRayForward = uniform(new THREE.Vector3(0, 0, -1));
+const oceanRayRight = uniform(new THREE.Vector3(1, 0, 0));
+const oceanRayUp = uniform(new THREE.Vector3(0, 1, 0));
+const oceanRayTanHalfFov = uniform(Math.tan(THREE.MathUtils.degToRad(camera.fov) * 0.5));
+const oceanRayAspect = uniform(camera.aspect);
+const oceanCameraHeight = uniform(0);
+const oceanSurfaceHeight = uniform(LIQUID_LEVEL.crystal ?? 0);
 const scenePassDepth = oceanDepthPassEnabled
   ? scenePass.getTextureNode("depth") : null;
 const lensOutputEnabled = getGraphicsSettings().lensEffectEnabled !== false;
@@ -1341,7 +1351,25 @@ const underwaterDepthOutput = oceanDepthPassEnabled ? Fn(() => {
   ), 0, 90);
   // No per-pixel depth at the cleared background; keep it at the bounded
   // maximum distance instead of allowing an unbounded opaque haze.
-  const length = eyeDistance.mul(oceanDepthAbsorption);
+  // Camera-space ray from the actual viewport UV and world-space camera
+  // axes. Near-plane eyeDistance is along forward, so convert it into the
+  // true camera-to-fragment path length for oblique pixels.
+  const centered = coord.mul(2).sub(1);
+  const ray = oceanRayForward.add(
+    oceanRayRight.mul(centered.x.mul(oceanRayTanHalfFov).mul(oceanRayAspect))
+  ).add(oceanRayUp.mul(centered.y.mul(oceanRayTanHalfFov)));
+  const rayLength = ray.length();
+  const rayY = ray.y.div(rayLength.max(float(0.0001)));
+  const fragmentDistance = eyeDistance.mul(rayLength);
+  // A ray looking upward exits the water at this distance. Downward rays
+  // stay submerged through the scene fragment. Near-horizontal directions
+  // are bounded to the same 90m maximum as the depth reconstruction.
+  const exitDistance = clamp(
+    oceanSurfaceHeight.sub(oceanCameraHeight)
+      .div(rayY.max(float(0.001))), 0, 90
+  );
+  const pathThroughWater = tslMin(fragmentDistance, exitDistance);
+  const length = pathThroughWater.mul(oceanDepthAbsorption);
   // Wavelength-dependent Beer-Lambert absorption, tuned for a shallow reef.
   const throughput = exp(vec3(-0.065, -0.033, -0.018).mul(length));
   const inScatter = vec3(0.025, 0.17, 0.27)
@@ -1350,7 +1378,7 @@ const underwaterDepthOutput = oceanDepthPassEnabled ? Fn(() => {
   const absorbedColor = base.rgb.mul(throughput)
     .add(inScatter.mul(vec3(1).sub(throughput)));
   const blend = oceanDepthUnderwaterMix.mul(
-    smoothstep(float(0.22), float(1.55), eyeDistance)
+    smoothstep(float(0.22), float(1.55), pathThroughWater)
   );
   return vec4(mix(base.rgb, absorbedColor, blend), base.a);
 })() : null;
@@ -5250,9 +5278,25 @@ function animate() {
   // ocean near its hysteresis threshold. This avoids flashing between full
   // underwater absorption and normal air colors.
   if (oceanDepthPassEnabled) {
-    const target = currentBiome === "crystal" && submergedState ? 1 : 0;
+    // Avoid the older +/-1.1m hysteresis controlling the optical waterline:
+    // it is appropriate for gameplay fog/audio but makes visual submersion
+    // appear too late. Blend over a short height band around the surface.
+    const surface = LIQUID_LEVEL.crystal ?? 0;
+    const depthToSurface = surface - camera.position.y;
+    const target = currentBiome === "crystal"
+      ? THREE.MathUtils.smoothstep(depthToSurface, -0.35, 0.35)
+      : 0;
     oceanDepthUnderwaterMix.value += (target - oceanDepthUnderwaterMix.value) *
-      Math.min(1, dt * 3.5);
+      Math.min(1, dt * 5.0);
+    camera.updateMatrixWorld();
+    const axes = camera.matrixWorld.elements;
+    oceanRayRight.value.set(axes[0], axes[1], axes[2]);
+    oceanRayUp.value.set(axes[4], axes[5], axes[6]);
+    oceanRayForward.value.set(-axes[8], -axes[9], -axes[10]);
+    oceanRayAspect.value = camera.aspect;
+    oceanRayTanHalfFov.value = Math.tan(THREE.MathUtils.degToRad(camera.fov) * 0.5);
+    oceanCameraHeight.value = camera.position.y;
+    oceanSurfaceHeight.value = surface;
     const tune = globalThis.__riftOceanTuning ?? {};
     const clarity = Number(tune.clarity);
     const haze = Number(tune.haze);

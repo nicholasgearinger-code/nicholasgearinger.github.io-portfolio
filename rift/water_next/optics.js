@@ -133,17 +133,34 @@ export function createOpticsAdapter({
   const snellWindow = smoothstep(float(0.645), float(0.70), incidence);
   const internalReflection = float(1).sub(snellWindow);
   const refractedSkyLight = sky.mul(snellWindow)
-    .mul(ambientTransmission).mul(0.17).mul(undersideGain);
+    .mul(ambientTransmission).mul(0.12).mul(undersideGain);
   // The same FFT normal modulates transmitted sunlight and caustic
   // focusing, while the lower-angle underside retains dark reflection.
   const sunlightThroughSurface = pow(
     clamp(dot(normal, sunDirection), 0, 1), float(4)
   ).mul(snellWindow).mul(daylightTransmission).mul(sunlight)
     .mul(undersideGain).mul(0.32);
+  // The production shader already samples the sky and models the wave
+  // underside. Modulate that detailed signal with broad FFT-facing light
+  // instead of replacing it with a uniform turquoise ceiling. The two
+  // slow bands alter transmitted brightness, not the wave geometry.
+  const facetLight = clamp(dot(normal, sunDirection), 0, 1);
+  const broadTransmission = smoothstep(float(0.12), float(0.88),
+    facetLight.mul(0.74).add(incidence.mul(0.26)));
+  const waveIllumination = float(0.72)
+    .add(sin(phaseA.mul(0.31)).mul(0.13))
+    .add(cos(phaseB.mul(0.27)).mul(0.10));
+  const lightShaftFootprint = broadTransmission.mul(waveIllumination)
+    .mul(sunlight).mul(daylightTransmission).mul(undersideGain);
+  // Total internal reflection leaves the grazing underside darker, while
+  // overhead facets admit the actual sky and daytime wave highlights.
+  const lowAngleShade = internalReflection.mul(float(1).sub(incidence))
+    .mul(underwater).mul(0.22);
   const underwaterSurface = originalColor
+    .mul(float(1).sub(lowAngleShade))
     .add(refractedSkyLight.mul(underwater))
-    .add(color(0xb8eee1).mul(sunlightThroughSurface).mul(underwater))
-    .add(color(0x053247).mul(internalReflection.mul(underwater).mul(0.045)));
+    .add(color(0x83dedb).mul(lightShaftFootprint).mul(underwater).mul(0.24))
+    .add(color(0xb8eee1).mul(sunlightThroughSurface).mul(underwater));
   // Brighter wave crest transmission and fractured solar glints track the
   // same displaced FFT normal, not a scrolling decorative reflection texture.
   const sunHalf = sunDirection.add(view).normalize();

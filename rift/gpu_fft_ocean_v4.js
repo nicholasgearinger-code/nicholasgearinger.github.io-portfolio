@@ -230,6 +230,13 @@ function installFFTDrivenCaustics(handle) {
   data.fftOriginalCausticBeforeRender = mat.onBeforeRender;
 
   const fftFocus = Fn(() => {
+    // A 128² FFT curvature field sampled at each terrain fragment can
+    // reveal its sampling lattice as checkerboard light on iPhone, and
+    // requires five storage buffer reads per fragment. The normal animated,
+    // world-space caustic material beneath this modifier already handles
+    // shallow reef light patterns. Avoid doubling/aliasing it on mobile.
+    // Desktop retains FFT curvature focusing for higher fidelity.
+    if (TOUCH_DEVICE && experimentalCaustics) return float(1);
     const n = uint(FFT_N);
     const nF = float(FFT_N);
     const gx = fract(positionWorld.x.div(float(domain)).add(0.5)).mul(nF);

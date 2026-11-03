@@ -179,6 +179,19 @@ export function updateLiquidPlane(
       stormAmount,
       dayAmount,
     );
+    // Experimental Mode: modestly strengthen both LIVE FFT bands after the
+    // normal v9 visual update has set their baseline scales. The existing
+    // depth-aware shoreline blend still suppresses offshore energy near land.
+    // Current Mode and the native GPU compute workload remain unchanged.
+    if (handle.__riftNextWater) {
+      if (handle.waveScale?.value != null) {
+        handle.waveScale.value = Math.min(37, handle.waveScale.value * 1.075);
+      }
+      if (handle.fftDetailHandle?.waveScale?.value != null) {
+        handle.fftDetailHandle.waveScale.value =
+          Math.min(39, handle.fftDetailHandle.waveScale.value * 1.085);
+      }
+    }
     return;
   }
 

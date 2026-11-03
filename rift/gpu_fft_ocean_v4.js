@@ -277,7 +277,7 @@ function installFFTDrivenCaustics(handle) {
       float(0.58).add(convergence.mul(1.06))
         .add(crestFocus.mul(0.25)), 0.58, 1.92
     );
-    return mix(float(1), mix(legacyFocus, waveFocus, float(0.92)), causticGain);
+    return clamp(mix(float(1), mix(legacyFocus, waveFocus, float(0.92)), causticGain), 0.10, 3.0);
   })();
 
   mat.emissiveNode = data.fftOriginalCausticEmissive.mul(fftFocus);

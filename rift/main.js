@@ -283,7 +283,7 @@ async function loadRiftAndOpenMenu() {
     }
 
     setProgress(95, "Assets ready", "Loading Rift game module");
-    gameImport = gameImport || import("./main_game.js?build=fftdepth-20261103");
+    gameImport = gameImport || import("./main_game.js?build=fftmultiband-20261103");
     await gameImport;
 
     if (driftTimer) {

@@ -2,7 +2,7 @@
 // No new rendering passes, target allocations or production activation.
 import * as THREE from "three";
 import { float, color, uniform, dot, abs, clamp, pow, mix, vec2, vec4,
-  texture, screenUV, cameraPosition, positionWorld, attribute, exp, sin, cos, vec3 } from "three/tsl";
+  texture, screenUV, cameraPosition, positionWorld, attribute, exp, sin, cos, vec3, smoothstep } from "three/tsl";
 export const WATER_IOR = 1.333;
 export function fresnelSchlick(cosTheta, ior = WATER_IOR) {
   const c = Math.max(0, Math.min(1, cosTheta));
@@ -26,6 +26,9 @@ export function createOpticsAdapter({
   const reflectionGain = uniform(1.8);
   const refractionGain = uniform(1.8);
   const sunlightGain = uniform(1.8);
+  const foamGain = uniform(1.55);
+  const clarityGain = uniform(1.45);
+  const glitterGain = uniform(1.65);
   const sunDirection = uniform(new THREE.Vector3(0.2,0.9,0.3).normalize());
   const sunlight = uniform(1);
   const nightAmbient = uniform(0.20);
@@ -70,11 +73,11 @@ export function createOpticsAdapter({
   // shallows; progressively blue/teal in deeper water.
   const hasDepth = Boolean(geometry.mesh?.geometry?.getAttribute?.("fftDepthWorld"));
   const depth = hasDepth ? clamp(attribute("fftDepthWorld", "float"), 0, 45) : float(12);
-  const transmission = exp(depth.mul(-0.055));
+  const transmission = exp(depth.mul(-0.055).div(clarityGain));
   const deepTint = color(0x07526e);
   const shallowTint = color(0x389ca9);
   // Wide transition prevents a near-white, hard-looking depth boundary.
-  const shallowFactor = exp(depth.mul(-0.075));
+  const shallowFactor = exp(depth.mul(-0.075).div(clarityGain));
   const waterBody = mix(deepTint, shallowTint, shallowFactor);
   // The active Water Pro v9 shader ALREADY contains the animated cloud-sky
   // transmission, total-internal-reflection approximation, FFT facet breakup
@@ -119,7 +122,43 @@ export function createOpticsAdapter({
     .mul(underwater).mul(ambientTransmission).mul(0.19).mul(sunlightGain);
   const undersideAmbient = clamp(dot(normal, vec3(0,1,0)), 0, 1)
     .mul(underwater).mul(nightAmbient).mul(ambientTransmission).mul(0.09);
-  const opticalColor = reflectedBase
+  // Brighter wave crest transmission and fractured solar glints track the
+  // same displaced FFT normal, not a scrolling decorative reflection texture.
+  const sunHalf = sunDirection.add(view).normalize();
+  const sunFacet = clamp(dot(normal, sunHalf), 0, 1);
+  const glitterBreakup = smoothstep(float(0.24), float(0.86),
+    sin(phaseA.mul(2.71)).mul(sin(phaseB.mul(1.89))).abs());
+  const glints = pow(sunFacet, float(105)).mul(glitterBreakup)
+    .mul(sunlight).mul(glitterGain).mul(float(1).sub(underwater))
+    .mul(0.45);
+  const crest = smoothstep(waterHeight.add(0.12), waterHeight.add(1.35),
+    positionWorld.y);
+  const backlit = float(1).sub(clamp(dot(normal, sunDirection), 0, 1));
+  const crestGlow = crest.mul(backlit).mul(sunlight)
+    .mul(float(1).sub(underwater)).mul(0.27);
+
+  // Two-part breaking foam: slope/crest whitecaps offshore, with a
+  // depth-limited, noise-broken band for the shallow surf. Existing shoreline
+  // foam and FFT wave physics remain authoritative; this adds optical texture
+  // to the surface, without another mesh or pass.
+  const faceSlope = clamp(normal.x.abs().add(normal.z.abs()), 0, 1);
+  const slopeFoam = smoothstep(float(0.35), float(0.78), faceSlope)
+    .mul(smoothstep(waterHeight.add(0.06), waterHeight.add(0.85), positionWorld.y));
+  const foamBreakup = smoothstep(float(0.23), float(0.81),
+    sin(phaseA.mul(0.73).add(phaseB.mul(0.37)))
+      .mul(cos(phaseB.mul(0.84))).abs());
+  const shoreline = float(1).sub(smoothstep(float(1.4), float(9.5), depth));
+  const movingShore = smoothstep(float(0.52), float(0.91),
+    sin(phaseA.mul(0.48).add(phaseB.mul(0.22))).mul(0.5).add(0.5));
+  const foamMask = clamp(
+    slopeFoam.mul(float(0.34).add(foamBreakup.mul(0.66)))
+      .add(shoreline.mul(movingShore).mul(0.18))
+      .mul(foamGain).mul(float(1).sub(underwater)),
+    0, 0.78);
+  const surfaceColor = reflectedBase
+    .add(color(0xffedc4).mul(glints))
+    .add(color(0x6fe8d2).mul(crestGlow));
+  const opticalColor = mix(surfaceColor, color(0xe5f6ee), foamMask)
     .add(color(0xb9e7ed).mul(transmittedSun))
     .add(sky.mul(rippleLight))
     .add(color(0x75b5c3).mul(undersideAmbient));
@@ -143,6 +182,9 @@ export function createOpticsAdapter({
       reflectionGain.value = limit("reflection", 1.8);
       refractionGain.value = limit("refraction", 1.8);
       sunlightGain.value = limit("sunlight", 1.8);
+      foamGain.value = limit("foam", 1.55);
+      clarityGain.value = Math.max(0.35, limit("clarity", 1.45));
+      glitterGain.value = limit("glitter", 1.65);
       if (Number.isFinite(elapsed)) waveTime.value = elapsed;
       if (sunDir?.isVector3) sunDirection.value.copy(sunDir).normalize();
       if (Number.isFinite(dayAmount)) {

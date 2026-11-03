@@ -1342,7 +1342,10 @@ const oceanWaveMotion = uniform(1.0);
 const scenePassDepth = oceanDepthPassEnabled
   ? scenePass.getTextureNode("depth") : null;
 const lensOutputEnabled = getGraphicsSettings().lensEffectEnabled !== false;
-const underwaterDepthOutput = oceanDepthPassEnabled ? Fn(() => {
+// A new graph is installed only when the user enters Crystal Shallows, not
+// each frame. If FFT storage is not ready, retain the tested procedural path.
+function createUnderwaterDepthGraph(fftWaveField = null) {
+return Fn(() => {
   const coord = uv();
   const base = lensOutputEnabled ? lensDistortedOutput : texture(scenePassColor, coord);
   const rawDepth = texture(scenePassDepth, coord).r;
@@ -1382,8 +1385,23 @@ const underwaterDepthOutput = oceanDepthPassEnabled ? Fn(() => {
     .sub(oceanSurfaceTime.mul(0.73));
   const phaseTwo = flatHitXZ.x.mul(-0.087).add(flatHitXZ.y.mul(0.151))
     .add(oceanSurfaceTime.mul(0.92));
-  const heightOffset = sin(phaseOne).mul(0.34)
-    .add(sin(phaseTwo).mul(0.19)).mul(oceanWaveMotion);
+  // Sample the same primary FFT spatial storage as the real water mesh.
+  // Three samples create a height and finite-difference surface gradient.
+  // The optional procedural path is retained as a safe GPU fallback.
+  const fftHeight = fftWaveField
+    ? fftWaveField.sampleDisplacement(flatHitXZ).y
+    : null;
+  const fftStep = float(fftWaveField ? fftWaveField.domain / fftWaveField.resolution : 1);
+  const fftSlopeX = fftWaveField ? fftWaveField.sampleDisplacement(
+    flatHitXZ.add(vec2(fftStep, 0))
+  ).y.sub(fftHeight).div(fftStep) : null;
+  const fftSlopeZ = fftWaveField ? fftWaveField.sampleDisplacement(
+    flatHitXZ.add(vec2(0, fftStep))
+  ).y.sub(fftHeight).div(fftStep) : null;
+  const heightOffset = fftWaveField
+    ? clamp(fftHeight.mul(oceanWaveMotion), -1.2, 1.2)
+    : sin(phaseOne).mul(0.34)
+      .add(sin(phaseTwo).mul(0.19)).mul(oceanWaveMotion);
   const exitDistance = clamp(
     oceanSurfaceHeight.add(heightOffset).sub(oceanCameraHeight)
       .div(safeUp), 0, 90
@@ -1395,10 +1413,14 @@ const underwaterDepthOutput = oceanDepthPassEnabled ? Fn(() => {
   const crossing = smoothstep(float(-0.25), float(0.8),
     fragmentDistance.sub(exitDistance));
   const upwardView = smoothstep(float(0.10), float(0.4), rayY);
-  const waveSlopeX = cos(phaseOne).mul(0.0391)
-    .sub(cos(phaseTwo).mul(0.0165)).mul(oceanWaveMotion);
-  const waveSlopeZ = cos(phaseOne).mul(0.0231)
-    .add(cos(phaseTwo).mul(0.0287)).mul(oceanWaveMotion);
+  const waveSlopeX = fftWaveField
+    ? clamp(fftSlopeX.mul(oceanWaveMotion), -0.30, 0.30)
+    : cos(phaseOne).mul(0.0391)
+      .sub(cos(phaseTwo).mul(0.0165)).mul(oceanWaveMotion);
+  const waveSlopeZ = fftWaveField
+    ? clamp(fftSlopeZ.mul(oceanWaveMotion), -0.30, 0.30)
+    : cos(phaseOne).mul(0.0231)
+      .add(cos(phaseTwo).mul(0.0287)).mul(oceanWaveMotion);
   const bend = vec2(waveSlopeX, waveSlopeZ).mul(oceanSurfaceRefraction)
     .mul(oceanDepthUnderwaterMix).mul(crossing).mul(upwardView).mul(0.15);
   const bentUV = clamp(coord.add(bend), vec2(0.002), vec2(0.998));
@@ -1417,7 +1439,35 @@ const underwaterDepthOutput = oceanDepthPassEnabled ? Fn(() => {
     smoothstep(float(0.22), float(1.55), pathThroughWater)
   );
   return vec4(mix(base.rgb, absorbedColor, blend), base.a);
-})() : null;
+})();
+}
+const underwaterDepthOutput = oceanDepthPassEnabled
+  ? createUnderwaterDepthGraph() : null;
+let oceanActiveDepthOutput = underwaterDepthOutput;
+function installUnderwaterFFTDepthGraph(handle) {
+  if (!oceanDepthPassEnabled || !handle?.__riftNextWater?.field) return;
+  if (new URLSearchParams(location.search).get("riftDebug") === "nofftdepth") return;
+  try {
+    oceanActiveDepthOutput = createUnderwaterDepthGraph(handle.__riftNextWater.field);
+    // The r185 runtime loader composes desktop SSR around the water output.
+    // This function is supplied by that loader; the base game's fallback
+    // uses the standard scene output if it is not present.
+    postProcessing.outputNode = typeof riftComposePostOutput === "function"
+      ? riftComposePostOutput(oceanActiveDepthOutput)
+      : oceanActiveDepthOutput;
+    console.info("[rift-ocean] FFT depth surface sampling installed");
+  } catch (error) {
+    console.warn("[rift-ocean] FFT depth sampling unavailable; procedural fallback", error);
+    oceanActiveDepthOutput = underwaterDepthOutput;
+  }
+}
+function restoreUnderwaterDepthGraph() {
+  if (!oceanDepthPassEnabled) return;
+  oceanActiveDepthOutput = underwaterDepthOutput;
+  postProcessing.outputNode = typeof riftComposePostOutput === "function"
+    ? riftComposePostOutput(underwaterDepthOutput)
+    : underwaterDepthOutput;
+}
 postProcessing.outputNode = oceanDepthPassEnabled
   ? underwaterDepthOutput
   : (lensOutputEnabled ? lensDistortedOutput : scenePass);
@@ -1870,6 +1920,7 @@ function teardownLevel() {
     });
     terrainMesh = null;
   }
+  restoreUnderwaterDepthGraph();
   disposeLiquidPlane(scene, liquidHandle);
   liquidHandle = null;
   disposeBreakingWave(scene, breakingWaveHandle);
@@ -3111,6 +3162,7 @@ vec2 causticVoronoiF1F2(vec2 p) {
     // up close.
     const waterPlaneSize = level.biome === "crystal" ? 2000 : TERRAIN_SIZE;
     liquidHandle = createLiquidPlane(scene, level.biome, LIQUID_LEVEL[level.biome], waterPlaneSize, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
+    if (level.biome === "crystal") installUnderwaterFFTDepthGraph(liquidHandle);
     // Real 3D curling wave-crest geometry — per explicit "genuine 3D
     // breaking wave geometry," additive to (not replacing) the ocean
     // plane just created above. Coral Shallows only, same scoping as

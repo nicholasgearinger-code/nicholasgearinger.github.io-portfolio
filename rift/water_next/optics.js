@@ -72,21 +72,35 @@ export function createOpticsAdapter({
   // Wide transition prevents a near-white, hard-looking depth boundary.
   const shallowFactor = exp(depth.mul(-0.075));
   const waterBody = mix(deepTint, shallowTint, shallowFactor);
-  const sceneBase = mix(waterBody, refracted, transmission.mul(refractionTexture ? 0.80 : 0.35));
-  // Underwater glancing incidence strengthens internal reflection, while
-  // overhead sunlight transmits through the local wave orientation.
-  const underwaterReflect = mix(reflectance, clamp(float(1).sub(facing).mul(0.68), 0, 0.72), underwater);
-  const opticsColor = mix(sceneBase, reflected, underwaterReflect.mul(0.75));
-  const transmittedSun = pow(clamp(dot(normal, sunDirection), 0, 1), float(4))
-    .mul(sunlight).mul(underwater).mul(0.14);
-  // A dim, broad ambient sky component keeps moving wave relief readable
-  // under cloud cover and at dusk, instead of a featureless black ceiling.
+  // The active Water Pro v9 shader ALREADY contains the animated cloud-sky
+  // transmission, total-internal-reflection approximation, FFT facet breakup
+  // and underwater radiance. Previous Experimental code discarded all of it
+  // by replacing the entire color with a flat tint. Keep that base shader,
+  // then layer scene captures and small wave-dependent highlights on top.
+  const underwaterReflect = mix(reflectance,
+    clamp(float(1).sub(facing).mul(0.68), 0, 0.72), underwater);
+  const capturedBody = mix(waterBody, refracted, transmission.mul(0.84));
+  const captureColor = mix(capturedBody, reflected, underwaterReflect.mul(0.84));
+  // Existing reflection and refraction captures are only valid from above
+  // the surface; from below they show stale/incorrect projection. Preserve
+  // the v9 underwater optics rather than mixing in those textures.
+  const captureWeight = float(1).sub(underwater).mul(0.82);
+  const composedBase = (reflectionTexture || refractionTexture)
+    ? mix(originalColor, captureColor, captureWeight)
+    : originalColor;
+  // Fine animated normals steer subtle transmitted sun and sky glimmer.
+  // The low amplitude avoids repeating diamond patterns and leaves the
+  // FFT-derived broad shading to the original physically-based shader.
+  const facingSun = clamp(dot(normal, sunDirection), 0, 1);
+  const transmittedSun = pow(facingSun, float(5))
+    .mul(sunlight).mul(underwater).mul(0.115);
+  const rippleLight = clamp(rippleX.mul(0.48).add(rippleZ.mul(0.36)).add(0.1), 0, 0.2)
+    .mul(underwater).mul(0.17);
   const undersideAmbient = clamp(dot(normal, vec3(0,1,0)), 0, 1)
-    .mul(underwater).mul(nightAmbient).mul(0.35);
-  const opticalColor = (reflectionTexture || refractionTexture
-    ? opticsColor
-    : mix(waterBody, sky, underwaterReflect.mul(0.55)))
+    .mul(underwater).mul(nightAmbient).mul(0.075);
+  const opticalColor = composedBase
     .add(color(0xb9e7ed).mul(transmittedSun))
+    .add(sky.mul(rippleLight))
     .add(color(0x75b5c3).mul(undersideAmbient));
   let active = false;
   return {

@@ -22,19 +22,13 @@ const IOS_WEBKIT = typeof navigator !== "undefined" && (
   ((navigator.platform || "") === "MacIntel" && (navigator.maxTouchPoints || 0) > 1)
 );
 
-// iOS/WebKit: a full ocean update dispatches many compute kernels for the
-// long FFT, detail FFT and shallow-water solver. Reduce the number of separate
-// command encoders before increasing visual complexity. The water mesh still
-// renders every frame from the most recently computed FFT buffers.
-// Conservative cadence is intentional until actual GPU-device testing.
+// Restore the previous proven cadence; throttling did not eliminate
+// the native encoder failure, so keep isolation tests independent of it.
 function iosFFTInterval() {
   try {
-    const quality = localStorage.getItem("riftGraphicsSettings");
-    const experimental = localStorage.getItem("riftWaterGraphicsMode") === "experimental";
-    if (quality === "low") return 1 / 15;
-    return experimental ? 1 / 18 : 1 / 24;
+    return localStorage.getItem("riftGraphicsSettings") === "low" ? 1 / 18 : 1 / 30;
   } catch (_) {
-    return 1 / 18;
+    return 1 / 30;
   }
 }
 

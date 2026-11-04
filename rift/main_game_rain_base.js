@@ -1333,6 +1333,10 @@ const oceanDepthPhaseCEnabled = (() => {
   try { return new URLSearchParams(location.search).get("riftDebug") !== "oldatmosphere"; }
   catch (_) { return true; }
 })();
+const oceanDepthIndirectEnabled = (() => {
+  try { return new URLSearchParams(location.search).get("riftDebug") !== "oldindirect"; }
+  catch (_) { return true; }
+})();
 const oceanDepthRichCeilingEnabled = (() => {
   try { return new URLSearchParams(location.search).get("riftDebug") !== "oldceiling"; }
   catch (_) { return true; }
@@ -1542,8 +1546,23 @@ return Fn(() => {
     .mul(oceanDepthUnderwaterMix)
     .mul(oceanDepthRichCeilingEnabled ? 0.17 : 0.13);
   const shaftRadiance = vec3(0.36, 0.66, 0.67).mul(shaftEnergy);
+  // Low-frequency indirect color bleed from shallow reef/sand. Approximate
+  // a single diffuse bounce using existing scene depth, outgoing ray and
+  // water path — no neighborhood samples, probes or ray marching. Limit
+  // it to nearby, downward-facing sand/water views so the ocean ceiling
+  // doesn't acquire an artificial gold overlay.
+  const nearSeabed = float(1).sub(
+    smoothstep(float(3.0), float(23.0), fragmentDistance));
+  const downwardView = smoothstep(float(-0.10), float(-0.70), rayY);
+  const sandReturn = nearSeabed.mul(downwardView)
+    .mul(exp(cameraSubmersion.mul(-0.12)))
+    .mul(oceanDepthDaylight).mul(oceanDepthSunVisibility)
+    .mul(oceanDepthUnderwaterMix);
+  const bounceLight = oceanDepthIndirectEnabled
+    ? vec3(0.16, 0.125, 0.075).mul(sandReturn.mul(0.092))
+    : vec3(0);
   const composited = mix(base.rgb, absorbedColor, blend)
-    .add(shaftRadiance);
+    .add(shaftRadiance).add(bounceLight);
   return vec4(composited, base.a);
 })();
 }
@@ -1689,6 +1708,15 @@ const riftOceanSkyFillEnabled = (() => {
   try { return new URLSearchParams(location.search).get("riftDebug") !== "oldskylight"; }
   catch (_) { return true; }
 })();
+// Cheap indirect-light / color-bleeding approximation for the tropical
+// island. Reuses the existing hemisphere light and scene-depth compositor.
+// This is NOT ray-traced GI and never introduces additional render passes.
+const riftOceanIndirectEnabled = (() => {
+  try { return new URLSearchParams(location.search).get("riftDebug") !== "oldindirect"; }
+  catch (_) { return true; }
+})();
+const riftOceanSandBounce = new THREE.Color(0xceb68c);
+const riftOceanWaterBounce = new THREE.Color(0x246b78);
 const sun = new THREE.DirectionalLight(0xffffff, 1.1);
 sun.position.set(60, 100, 40);
 sun.castShadow = true;
@@ -6126,6 +6154,23 @@ function animate() {
       .lerp(dayNight.skyHorizon, 0.38);
     riftOceanSkyFill.groundColor.copy(dayNight.skyHorizon)
       .lerp(dayNight.skyZenith, 0.24).multiplyScalar(0.33);
+    if (riftOceanIndirectEnabled) {
+      // Diffuse ground-return illumination, not an extra light. Warm sand
+      // leaks upward into downward-facing surfaces near shallow water;
+      // submerged and deeper water progressively filter that warm bounce
+      // into blue-green. Preserve daylight/cloud fading from the sky fill.
+      const depthBelowWater = Math.max(0, LIQUID_LEVEL.crystal - camera.position.y);
+      const underwaterFraction = THREE.MathUtils.smoothstep(depthBelowWater, 0.0, 9.0);
+      const sandFactor = 1 - underwaterFraction;
+      const bounceMix = THREE.MathUtils.clamp(0.32 + sandFactor * 0.53, 0, 1);
+      riftOceanSkyFill.groundColor
+        .lerp(riftOceanSandBounce, bounceMix * 0.49 * skyDay)
+        .lerp(riftOceanWaterBounce, underwaterFraction * 0.42);
+      // Soft diffuse skylight over dark-facing reef faces and water; do
+      // not brighten directional sun highlights or the existing caustics.
+      riftOceanSkyFill.intensity *= 1.0 + 0.08 * skyDay *
+        (1 - skyWeather * 0.5);
+    }
   }
   // Per explicit "definitely major issues aligning the sun with the
   // skybox... let's make it invisible but still retain all effects and

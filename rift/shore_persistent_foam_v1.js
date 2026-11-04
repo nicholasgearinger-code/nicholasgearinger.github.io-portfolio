@@ -12,8 +12,9 @@ const TOUCH_DEVICE = typeof window !== "undefined" && (
 
 const RADIAL_CELLS = TOUCH_DEVICE ? 24 : 32;
 const LAND_RADIAL = -3.6;
-const SEA_RADIAL = 1.9;
+const SEA_RADIAL = 3.8; // Give animated surf a wider offshore approach.
 const FIXED_DT = 1 / 30;
+const BREAKER_GEOMETRY_HZ = TOUCH_DEVICE ? 18 : 30;
 const MAX_STEPS = 3;
 
 const DAY_FOAM = new THREE.Color(0xfffffb);
@@ -158,8 +159,9 @@ function breakerPulse(simTime, storm) {
   const period = Math.max(4.4, 5.7 - storm * 1.0);
   const p = ((simTime / period) % 1 + 1) % 1;
   const primary = pulse01(p, 0.10, 0.105);
-  const secondary = pulse01(p, 0.56, 0.075) * 0.24;
-  return clamp01(primary + secondary);
+  const secondary = pulse01(p, 0.49, 0.105) * 0.58;
+  const third = pulse01(p, 0.78, 0.068) * 0.22;
+  return clamp01(primary + secondary + third);
 }
 
 function stepPersistentField(handle, dt, storm, oceanHandle) {
@@ -204,28 +206,77 @@ function stepPersistentField(handle, dt, storm, oceanHandle) {
       + Math.sin(simTime * 0.91 + phase * 0.77 + 1.9) * 0.09;
     const slope = clamp01(Math.max(0, sample.landY - sample.shoreY) / 1.15);
     const depth = clamp01(Math.max(0, handle.waterY - sample.seaY) / 1.65);
-    const localBreak = Math.pow(Math.max(0, Math.sin(simTime * 1.64 + phase * 0.61 + 0.5)), 8) * 0.22;
+    const localBreak = Math.pow(Math.max(0, Math.sin(simTime * 1.64 + phase * 0.61 + 0.5)), 6) * 0.36;
     const energy = clamp01((pulse * alongEnergy + localBreak) * (0.76 + slope * 0.18 + depth * 0.12) * amplitudeFactor * (1 + storm * 0.55));
 
     if (energy <= 0.002) continue;
-    const centerR = 0.58 + Math.sin(phase * 0.41) * 0.10;
+    const centerR = 1.12 + Math.sin(phase * 0.41 + simTime * 0.18) * 0.34;
     const centerJ = THREE.MathUtils.clamp(
       Math.round((centerR - LAND_RADIAL) / (SEA_RADIAL - LAND_RADIAL) * (m - 1)),
       0,
       m - 1,
     );
-    const radius = storm > 0.55 ? 3 : 2;
+    const radius = storm > 0.55 ? 5 : 4;
     for (let dj = -radius; dj <= radius; dj++) {
       const j = Math.max(0, Math.min(m - 1, centerJ + dj));
       const w = Math.exp(-(dj * dj) / (radius * radius * 0.85 + 0.01));
       const idx = i * m + j;
-      dst[idx] = Math.min(1.25, dst[idx] + energy * w * dt * (2.6 + storm * 1.6));
+      dst[idx] = Math.min(1.5, dst[idx] + energy * w * dt * (4.2 + storm * 1.8));
     }
   }
 
   const tmp = handle.foam;
   handle.foam = handle.next;
   handle.next = tmp;
+}
+
+
+/**
+ * Animate the EXISTING shoreline foam mesh into a low, forward-pitching
+ * breaker ridge. This deliberately reuses both foam draw calls and their
+ * shared geometry; no FFT/compute nodes, extra textures or render passes.
+ * Geometry is updated at a capped rate on iOS to protect the GPU budget.
+ */
+function updateBreakerGeometry(handle) {
+  const attribute = handle.geometry.getAttribute("position");
+  const base = handle.basePositions;
+  const positions = attribute.array;
+  const columns = handle.radial + 1;
+  const n = handle.along;
+  const phaseTime = handle.simTime;
+  const storm = handle.currentStorm || 0;
+  const crestHeight = 0.46 + storm * 0.31;
+  for (let i = 0; i <= n; i++) {
+    const sample = handle.samples[i % n];
+    const phase = sample.phase || 0;
+    const along = i / Math.max(1, n);
+    // Two staggered surf trains; modulation breaks the perfectly circular
+    // uniformity without introducing high-frequency vertex noise.
+    const modulation = Math.sin(phaseTime * 0.59 + phase * 0.33) * 0.18
+      + Math.sin(along * 31.4 - phaseTime * 0.37) * 0.12;
+    const cycle = ((phaseTime / (5.7 - storm) + phase * 0.009) % 1 + 1) % 1;
+    for (let j = 0; j <= handle.radial; j++) {
+      const v = j / handle.radial;
+      const radial = LAND_RADIAL + (SEA_RADIAL - LAND_RADIAL) * v;
+      let lift = 0;
+      for (let train = 0; train < 2; train++) {
+        const progress = (cycle + train * 0.49) % 1;
+        // Starts offshore, steepens near the lip and collapses at the beach.
+        const front = 3.3 - progress * 4.2 + modulation;
+        const width = 0.46 + progress * 0.21;
+        const d = (radial - front) / width;
+        const ridge = Math.exp(-d * d * 2.8);
+        const steepness = Math.sin(Math.PI * Math.min(1, progress * 1.28));
+        lift += ridge * Math.max(0, steepness) *
+          (train === 0 ? 1 : 0.54) * crestHeight;
+      }
+      const vertex = (i * columns + j) * 3;
+      positions[vertex + 1] = base[vertex + 1] + lift;
+    }
+  }
+  attribute.needsUpdate = true;
+  // Position-only deform: keep existing static normals; foam remains matte.
+  handle.geometry.computeBoundingSphere();
 }
 
 function writeTextures(handle, day, storm) {
@@ -240,12 +291,12 @@ function writeTextures(handle, day, storm) {
       const idx = i * m + j;
       const f = foam[idx];
       const porous = 0.76 + handle.breakup[idx] * 0.24;
-      let alpha = smooth01((f * porous - 0.035) / 0.52);
+      let alpha = smooth01((f * porous - 0.025) / 0.37);
       alpha = Math.pow(alpha, 0.72);
 
       const landNeighbor = foam[i * m + Math.max(0, j - 1)];
       const gradient = Math.max(0, f - landNeighbor);
-      let edge = smooth01((gradient - 0.012) / 0.20) * smooth01((f - 0.04) / 0.42);
+      let edge = smooth01((gradient - 0.008) / 0.13) * smooth01((f - 0.035) / 0.33);
       edge = Math.pow(edge, 0.65);
 
       const a = Math.round(clamp01(alpha) * 255);
@@ -292,6 +343,7 @@ export function installPersistentShoreFoam(surfHandle) {
   const foamTex = makeTexture(along, radial);
   const edgeTex = makeTexture(along, radial);
   const geometry = makeFieldGeometry(samples, surfHandle.waterY);
+  const basePositions = geometry.getAttribute("position").array.slice();
 
   const foamMaterial = new THREE.MeshStandardMaterial({
     color: DAY_FOAM,
@@ -348,6 +400,9 @@ export function installPersistentShoreFoam(surfHandle) {
     foamMesh,
     edgeMesh,
     geometry,
+    basePositions,
+    lastGeometryTime: -Infinity,
+    currentStorm: 0,
     foamMaterial,
     edgeMaterial,
     foamTexture: foamTex.texture,
@@ -390,7 +445,12 @@ export function updatePersistentShoreFoam(surfHandle, elapsed = 0, cameraY = Inf
     steps++;
   }
 
+  handle.currentStorm = stormT;
   if (steps > 0) writeTextures(handle, day, stormT);
+  if (steps > 0 && t - handle.lastGeometryTime >= 1 / BREAKER_GEOMETRY_HZ) {
+    updateBreakerGeometry(handle);
+    handle.lastGeometryTime = t;
+  }
 }
 
 export function disposePersistentShoreFoam(surfHandle) {

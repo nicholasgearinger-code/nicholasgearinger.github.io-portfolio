@@ -114,7 +114,7 @@ function hideLegacyFoam(surfHandle) {
   if (old.__riftBubbleOverlay?.mesh) old.__riftBubbleOverlay.mesh.visible = false;
   const wash = old.layers.find((layer) => layer.kind === "wash");
   if (wash?.material) {
-    wash.material.opacity = Math.min(wash.material.opacity ?? 0.16, 0.16);
+    wash.material.opacity = Math.min(wash.material.opacity ?? 0.16, 0.26);
   }
 }
 

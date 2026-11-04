@@ -39,6 +39,12 @@ function createUnifiedSurfaceAdapter({
   const undersideGain = uniform(1);
   const sunlightGain = uniform(1);
   const cloudPanorama = getRealisticCloudTexture();
+  // Before/after comparison without changing any saved graphics settings.
+  // Water remains physically coupled to the same FFT surface normal.
+  const daylightWaterFillEnabled = (() => {
+    try { return new URLSearchParams(location.search).get("riftDebug") !== "oldwaterlight"; }
+    catch (_) { return true; }
+  })();
 
   const p = positionWorld;
   const phaseA = p.x.mul(0.88).add(p.z.mul(0.51)).add(time.mul(1.17));
@@ -81,6 +87,19 @@ function createUnifiedSurfaceAdapter({
   const throughput = exp(vec3(-0.105, -0.047, -0.023).mul(waterPath));
   const shallowInfluence = exp(waterPath.mul(-0.060));
   const inScatter = mix(color(0x06506b), color(0x2a8d9c), shallowInfluence);
+  // Physically motivated diffuse sky irradiance: the broad sky remains
+  // bright when the sun direction changes. Avoid using sunFacing for this
+  // term, or half the rolling water goes nearly black away from the Sun.
+  // Daylight gating preserves night and does not wash out deep-water color.
+  const skyDaylight = smoothstep(float(0.07), float(0.62), day);
+  const skyIrradiance = skyColor.mul(0.24)
+    .add(color(0x38b6c4).mul(0.16))
+    .mul(skyDaylight);
+  const skyWaterFill = daylightWaterFillEnabled
+    ? skyIrradiance.mul(
+        float(0.40).add(shallowInfluence.mul(0.44))
+      ).mul(float(0.48).add(clamp(n.y, 0, 1).mul(0.52)))
+    : vec3(0, 0, 0);
   // Wave normal bends capture coordinates; bounded UVs avoid screen-edge tears.
   const slant = float(1).sub(ndv);
   // Distortion comes from the SAME surface normal as the Fresnel term.
@@ -103,7 +122,8 @@ function createUnifiedSurfaceAdapter({
   const captureVisibility = refractionTexture ? float(1) : float(0);
   const transmitted = inScatter.mul(vec3(1).sub(throughput))
     .add(bottomRadiance.mul(throughput).mul(captureVisibility))
-    .add(inScatter.mul(throughput).mul(float(1).sub(captureVisibility)).mul(0.43));
+    .add(inScatter.mul(throughput).mul(float(1).sub(captureVisibility)).mul(0.43))
+    .add(skyWaterFill.mul(float(1).sub(captureVisibility.mul(0.65))));
 
   // Reflect the viewer around the SAME moving optical normal. No other
   // sky-glint or faux specular strip is added to the surface albedo.
@@ -113,7 +133,13 @@ function createUnifiedSurfaceAdapter({
     reflectionRay.z.mul(0.14).add(0.80)
   ).add(vec2(0.5, 0));
   const sample = texture(cloudPanorama, panoramaUV);
+  // Keep directional cloud structure, but provide diffuse sky radiance
+  // under cloud occlusion and on facets angled away from the direct sun.
+  // The angular/cloud part remains wave-normal driven; no extra lookup.
   const skyRadiance = mix(skyColor, sample.rgb, sample.a.mul(0.70));
+  const ambientSkyReflection = daylightWaterFillEnabled
+    ? skyColor.mul(skyDaylight).mul(0.13)
+    : vec3(0, 0, 0);
   const matrixUniform = reflectionMatrix ? uniform(reflectionMatrix.clone()) : null;
   const projection = matrixUniform ? matrixUniform.mul(vec4(p, 1)) : null;
   const captureUV = projection ? projection.xy
@@ -135,9 +161,8 @@ function createUnifiedSurfaceAdapter({
   );
   // Preserve cloud shape but compress the high-luminance cloud/sun peaks.
   // Break reflection up with geometry normals rather than fake white bands.
-  const reflectionRadiance = environment.div(
-    float(1).add(environment.mul(0.24))
-  );
+  const reflectionRadiance = environment.add(ambientSkyReflection)
+    .div(float(1).add(environment.mul(0.24)));
   const surface = mix(transmitted, reflectionRadiance, reflectionBlend);
 
   // Rising and compressed wave faces determine where breaking crowns start.

@@ -688,7 +688,7 @@ button{font:inherit;cursor:pointer}
 
           <button type="button" id="rift-ocean-tune-btn" class="rift-mono" aria-expanded="false" style="position:absolute;right:12px;top:106px;z-index:45;min-height:38px;padding:7px 11px;background:#07313c;border:1px solid #5ee5db;border-radius:9px;color:#efffff;font-size:12px;touch-action:manipulation">🌊 OCEAN TUNING</button>
           <div id="rift-ocean-tune-panel" class="rift-mono" hidden style="position:absolute;right:10px;top:150px;z-index:46;width:min(340px,calc(100% - 20px));max-height:min(66vh,540px);overflow-y:auto;overscroll-behavior:contain;padding:14px;border:1px solid #64e4da;border-radius:12px;background:rgba(4,22,32,.97);box-shadow:0 10px 38px #000a;color:#e5fcff;font-size:12px;touch-action:pan-y">
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><strong>OCEAN SYSTEM 2.0</strong><button type="button" id="rift-ocean-tune-close" aria-label="Close ocean tuning" style="padding:6px 10px;background:#174857;color:white;border:1px solid #56848c;border-radius:7px">✕</button></div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><strong>OCEAN SYSTEM 3.0</strong><button type="button" id="rift-ocean-tune-close" aria-label="Close ocean tuning" style="padding:6px 10px;background:#174857;color:white;border:1px solid #56848c;border-radius:7px">✕</button></div>
             <p id="rift-ocean-tune-hint" style="margin:8px 0;color:#a5d9de;line-height:1.4">Experimental mode only · Live controls · Saved automatically</p>
             <div id="rift-ocean-tune-tabs" role="group" aria-label="Ocean effect groups"></div>
             <div id="rift-ocean-tune-sliders" role="region" aria-label="Scrollable ocean effect sliders" tabindex="0"></div>
@@ -776,7 +776,13 @@ const oceanControls = [
   ["clarity","Shallow water clarity",0.35,3,1.45],
   ["glitter","Sun glitter / sparkle",0,3,1.65],
   ["underside","Underwater surface glow",0,3,1.45],
-  ["breakers","Breaking crest coverage",0,2.5,1.05]
+  ["breakers","Breaking crest coverage",0,2.5,1.05],
+  ["sunManual","Manual sun position",0,1,0],
+  ["sunElevation","Sun elevation",5,85,48],
+  ["sunAzimuth","Sun azimuth",0,360,205],
+  ["sunPower","Direct sunlight",0,3,1],
+  ["skyFill","Sky ambient light",0,3,1],
+  ["globalIllumination","Indirect bounce / GI",0,3,1]
 ];
 const oceanDefaults=Object.fromEntries(oceanControls.map(([key,,, ,value])=>[key,value]));
 function loadOceanTuning(){
@@ -793,7 +799,14 @@ const tuningSliders=document.getElementById("rift-ocean-tune-sliders");
 function paintOceanControls(){
   for(const [key] of oceanControls){
     const input=tuningSliders.querySelector('[data-ocean-slider="'+key+'"]');
-    if(input){input.value=window.__riftOceanTuning[key];input.parentNode.querySelector("output").textContent=Number(input.value).toFixed(2)+"×";}
+    if(input){
+      input.value=window.__riftOceanTuning[key];
+      const numeric=Number(input.value);
+      input.parentNode.querySelector("output").textContent=key==="sunManual"
+        ? (numeric>=0.5?"Manual":"Auto")
+        : (key==="sunElevation"||key==="sunAzimuth")
+          ? Math.round(numeric)+"°" : numeric.toFixed(2)+"×";
+    }
   }
   const active=readWaterMode()==="experimental";
   document.getElementById("rift-ocean-tune-hint").textContent=active
@@ -805,12 +818,13 @@ function setOceanTuning(key,value){
   try{localStorage.setItem("riftOceanTuningV2",JSON.stringify(window.__riftOceanTuning));}catch(_){}
   window.dispatchEvent(new CustomEvent("rift-ocean-tuning",{detail:{key,value}}));
 }
-// One-tap category navigation keeps all 11 controls easy to reach on a phone.
+// One-tap categories keep sun/lighting controls reachable on a phone.
 const oceanGroups = [
-  ["all","All 13",null],
+  ["all","All 19",null],
   ["waves","Waves",["swell","chop","ripples","foam","breakers"]],
   ["surface","Surface",["reflection","refraction","clarity","glitter"]],
-  ["underwater","Underwater",["caustics","sunlight","haze","underside"]]
+  ["underwater","Underwater",["caustics","sunlight","haze","underside"]],
+  ["lighting","☀ Lighting",["sunManual","sunElevation","sunAzimuth","sunPower","skyFill","globalIllumination"]]
 ];
 const oceanTabs=document.getElementById("rift-ocean-tune-tabs");
 let selectedOceanGroup="all";
@@ -842,10 +856,16 @@ for(const [key,label,min,max] of oceanControls){
   output.style.color="#7ef5e0";
   title.append(name,output);
   const slider=document.createElement("input");
-  slider.type="range";slider.min=min;slider.max=max;slider.step="0.05";
+  slider.type="range";slider.min=min;slider.max=max;
+  slider.step=key==="sunManual"?"1":(key==="sunElevation"||key==="sunAzimuth"?"1":"0.05");
   slider.dataset.oceanSlider=key;
   slider.style.cssText="display:block;width:100%;height:26px;accent-color:#5ce5d1;touch-action:pan-x";
-  slider.addEventListener("input",()=>{setOceanTuning(key,Number(slider.value));output.textContent=Number(slider.value).toFixed(2)+"×";});
+  slider.addEventListener("input",()=>{
+    const value=Number(slider.value);
+    setOceanTuning(key,value);
+    output.textContent=key==="sunManual"?(value>=0.5?"Manual":"Auto"):
+      (key==="sunElevation"||key==="sunAzimuth"?Math.round(value)+"°":value.toFixed(2)+"×");
+  });
   row.append(title,slider);tuningSliders.append(row);
 }
 showOceanGroup("all");

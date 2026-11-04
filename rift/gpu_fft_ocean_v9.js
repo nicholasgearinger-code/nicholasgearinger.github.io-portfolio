@@ -229,6 +229,31 @@ function installWaterProOptics(handle) {
     0.86,
   );
 
+  // Option B / Part 2: cheap, depth-gated breaker shading.
+  // fftDepthWorld comes from the existing terrain sampler (same seabed source
+  // used by the surf solver). Restrict this response to the inner surf zone:
+  // distant/open water stays on the original Water Pro optics.
+  // The set frequencies mirror shore_persistent_foam_v1.js. Individual crest
+  // positions are an approximation until a shared breaker phase is provided.
+  const surfZone = float(1).sub(smoothstep(float(0.55), float(4.2), depth));
+  const setEnergy = clamp(float(0.73)
+    .add(sin(time.mul(0.11)).mul(0.19))
+    .add(sin(time.mul(0.047).add(1.9)).mul(0.11)), 0.4, 1.03);
+  // Broad wave motion plus the *actual* displaced FFT slope. This prevents
+  // the breaker from appearing as a uniform bright ring along the coast.
+  const travellingFront = sin(positionWorld.x.mul(0.22)
+    .add(positionWorld.z.mul(0.16)).sub(time.mul(1.10)));
+  const crestGate = smoothstep(float(0.13), float(0.78), travellingFront);
+  const breakerSlope = smoothstep(float(0.18), float(0.67), geometricSlope);
+  const breakerEnergy = clamp(surfZone.mul(setEnergy)
+    .mul(float(0.24).add(crestGate.mul(0.52)).add(breakerSlope.mul(0.28)))
+    .mul(float(0.55).add(storm.mul(0.60)))
+    .mul(float(1).sub(underwater)), 0, 0.90);
+  const brokenFoam = clamp(breakerEnergy
+    .mul(float(0.40).add(capBreakup.mul(0.60)))
+    .mul(float(0.22).add(steep.mul(0.78))), 0, 0.68);
+  const combinedFoam = clamp(whitecap.add(brokenFoam.mul(0.82)), 0, 0.92);
+
   material.colorNode = Fn(() => {
     let body = mix(originalColor, depthColor, depthMix);
     body = mix(
@@ -236,8 +261,14 @@ function installWaterProOptics(handle) {
       skyColor,
       clamp(fresnel.mul(float(0.09).add(day.mul(0.18))), 0, 0.28),
     );
-    body = mix(body, crestColor, clamp(translucency, 0, 0.20));
-    body = mix(body, foamColor, whitecap.mul(0.94));
+    // Backlit shoaling wave faces gain a restrained green-blue translucency
+    // before the breaking lip transitions into opaque, scattering whitewater.
+    const lipGlow = breakerEnergy.mul(crestHeight).mul(backLight).mul(day)
+      .mul(float(1).sub(brokenFoam));
+    body = mix(body, shallowColor, clamp(lipGlow.mul(0.23), 0, 0.19));
+    body = mix(body, crestColor,
+      clamp(translucency.add(lipGlow.mul(0.13)), 0, 0.26));
+    body = mix(body, foamColor, combinedFoam.mul(0.90));
     // Underwater: diffuse transmitted skylight from the real displaced
     // FFT normal. Avoid screen-derivative curvature and thresholded bands,
     // which magnified the regular mesh sampling into diamond patterns.
@@ -340,10 +371,12 @@ function installWaterProOptics(handle) {
     float(0.082),
     microEnergy.mul(0.20),
   );
-  material.roughnessNode = mix(microRoughness, float(0.46), whitecap.mul(0.86));
+  material.roughnessNode = mix(microRoughness, float(0.62),
+    combinedFoam.mul(0.90));
   material.emissiveNode = originalEmissive
     .add(crestColor.mul(translucency.mul(0.012)))
-    .add(sunColor.mul(glitter.mul(0.014)));
+    .add(sunColor.mul(glitter.mul(0.014)))
+    .add(foamColor.mul(brokenFoam.mul(day).mul(0.016)));
 
   // MeshPhysicalNodeMaterial supports per-pixel transmission/thickness. Shallow
   // and back-lit crests become clearer, while foam suppresses transmission.
@@ -351,7 +384,7 @@ function installWaterProOptics(handle) {
     originalTransmission,
     float(0.86),
     clamp(shallow.mul(0.46).add(translucency.mul(0.75)), 0, 0.72),
-  ).mul(float(1).sub(whitecap.mul(0.86)));
+  ).mul(float(1).sub(combinedFoam.mul(0.94)));
   material.transmissionNode = mix(aboveTransmission, float(0.94), underwater);
   material.thicknessNode = mix(
     mix(originalThickness, float(0.075), shallow.mul(0.66)),

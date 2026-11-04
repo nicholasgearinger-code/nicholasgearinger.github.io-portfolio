@@ -1333,6 +1333,10 @@ const oceanDepthPhaseCEnabled = (() => {
   try { return new URLSearchParams(location.search).get("riftDebug") !== "oldatmosphere"; }
   catch (_) { return true; }
 })();
+const oceanDepthRichCeilingEnabled = (() => {
+  try { return new URLSearchParams(location.search).get("riftDebug") !== "oldceiling"; }
+  catch (_) { return true; }
+})();
 // Reconstruct each view ray from the live camera orientation and projection.
 // This lets the depth compositor stop accumulating underwater color exactly
 // where an upward ray exits into air, instead of tinting sky as distant ocean.
@@ -1485,8 +1489,10 @@ return Fn(() => {
   const throughput = exp(vec3(-0.058, -0.026, -0.014).mul(density));
   // Preserve coral and sand contrast nearby; the scene's existing fog
   // already runs at ~24% strength to avoid double absorption.
-  const upperWater = vec3(0.040, 0.255, 0.305);
-  const deepWater = vec3(0.018, 0.112, 0.203);
+  // Brighter water near the ceiling; gradually reduce transmitted skylight
+  // as the swimmer descends, without obscuring nearby reef geometry.
+  const upperWater = vec3(0.050, 0.275, 0.325);
+  const deepWater = vec3(0.017, 0.093, 0.187);
   const scatterHue = mix(upperWater, deepWater,
     clamp(depthLayer.mul(0.58).add(farLayer.mul(0.34)), 0, 1));
   const daylightIrradiance = float(0.52)
@@ -1503,16 +1509,33 @@ return Fn(() => {
   // They use the SAME crossing phases as the overhead wave distortion.
   const rayDirection = ray.div(rayLength.max(float(0.0001)));
   const towardSun = clamp(dot(rayDirection, oceanDepthSunDirection), 0, 1);
-  const shaftCone = pow(towardSun, float(6));
-  const waveFocus = float(0.58)
-    .add(sin(phaseOne.mul(0.80)).mul(0.24))
-    .add(sin(phaseTwo.mul(0.64)).mul(0.18));
+  const shaftCone = pow(towardSun,
+    oceanDepthRichCeilingEnabled ? float(4.5) : float(6));
+  // Match the broad surface-ceiling light-field directions from optics.js.
+  // The screen depth pass uses flatHitXZ (the intersected surface point),
+  // not the pixel's screen coordinates. This makes shafts move together
+  // with the surface instead of displaying a screen-space repeating grid.
+  const ceilingPhaseA = flatHitXZ.x.mul(0.37)
+    .add(flatHitXZ.y.mul(0.19)).sub(oceanSurfaceTime.mul(0.43));
+  const ceilingPhaseB = flatHitXZ.x.mul(-0.23)
+    .add(flatHitXZ.y.mul(0.41)).add(oceanSurfaceTime.mul(0.36));
+  const ceilingPhaseC = flatHitXZ.x.mul(0.91)
+    .sub(flatHitXZ.y.mul(0.76)).add(oceanSurfaceTime.mul(0.79));
+  const ceilingLight = clamp(
+    sin(ceilingPhaseA).mul(cos(ceilingPhaseB)).mul(0.23)
+      .add(sin(ceilingPhaseC).mul(0.08)).add(0.67), 0, 1
+  );
+  const waveFocus = oceanDepthRichCeilingEnabled
+    ? float(0.44).add(ceilingLight.mul(0.55))
+    : float(0.58).add(sin(phaseOne.mul(0.80)).mul(0.24))
+      .add(sin(phaseTwo.mul(0.64)).mul(0.18));
   const shaftPath = smoothstep(float(1.5), float(11), pathThroughWater)
     .mul(float(1).sub(smoothstep(float(24), float(85), pathThroughWater)));
   const shaftEnergy = shaftCone.mul(waveFocus)
     .mul(shaftPath).mul(exp(cameraSubmersion.mul(-0.062)))
     .mul(oceanDepthDaylight).mul(oceanDepthSunVisibility)
-    .mul(oceanDepthUnderwaterMix).mul(0.13);
+    .mul(oceanDepthUnderwaterMix)
+    .mul(oceanDepthRichCeilingEnabled ? 0.17 : 0.13);
   const shaftRadiance = vec3(0.36, 0.66, 0.67).mul(shaftEnergy);
   const composited = mix(base.rgb, absorbedColor, blend)
     .add(shaftRadiance);

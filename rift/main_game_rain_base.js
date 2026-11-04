@@ -1325,6 +1325,14 @@ const oceanDepthUnderwaterMix = uniform(0);
 const oceanDepthAbsorption = uniform(1);
 const oceanDepthScattering = uniform(1);
 const oceanDepthDaylight = uniform(1);
+// Phase C: single-pass approximated participating medium, coupled to the
+// already-computed surface crossing and ocean sun/cloud orientation.
+const oceanDepthSunDirection = uniform(new THREE.Vector3(0.3, 0.85, 0.25).normalize());
+const oceanDepthSunVisibility = uniform(1);
+const oceanDepthPhaseCEnabled = (() => {
+  try { return new URLSearchParams(location.search).get("riftDebug") !== "oldatmosphere"; }
+  catch (_) { return true; }
+})();
 // Reconstruct each view ray from the live camera orientation and projection.
 // This lets the depth compositor stop accumulating underwater color exactly
 // where an upward ray exits into air, instead of tinting sky as distant ocean.
@@ -1452,20 +1460,63 @@ return Fn(() => {
   const refractedColor = mix(base.rgb, bentView,
     clamp(oceanDepthUnderwaterMix.mul(crossing).mul(upwardView), 0, 0.78));
   const length = pathThroughWater.mul(oceanDepthAbsorption);
-  // Wavelength-dependent Beer-Lambert absorption, tuned for a shallow reef.
-  // Clear Caribbean shallows: preserve visible sand and coral near the
-  // camera while maintaining stronger red absorption over longer paths.
-  // This is still a single-pass approximation, not volumetric ray marching.
-  const throughput = exp(vec3(-0.061, -0.029, -0.016).mul(length));
-  const inScatter = vec3(0.035, 0.215, 0.295)
-    .mul(float(0.55).add(oceanDepthDaylight.mul(0.45)))
-    .mul(oceanDepthScattering);
-  const absorbedColor = refractedColor.mul(throughput)
-    .add(inScatter.mul(vec3(1).sub(throughput)));
+  // Keep the original stable atmosphere available for a controlled
+  // comparison, without rebuilding the post-processing graph at runtime.
+  if (!oceanDepthPhaseCEnabled) {
+    const oldThroughput = exp(vec3(-0.061, -0.029, -0.016).mul(length));
+    const oldScatter = vec3(0.035, 0.215, 0.295)
+      .mul(float(0.55).add(oceanDepthDaylight.mul(0.45)))
+      .mul(oceanDepthScattering);
+    const oldAbsorbed = refractedColor.mul(oldThroughput)
+      .add(oldScatter.mul(vec3(1).sub(oldThroughput)));
+    const oldBlend = oceanDepthUnderwaterMix.mul(
+      smoothstep(float(0.22), float(1.55), pathThroughWater));
+    return vec4(mix(base.rgb, oldAbsorbed, oldBlend), base.a);
+  }
+
+  // Phase C: true visible-scene depth controls visibility. The first few
+  // metres remain clear; the far reef moves toward blue-green scattering.
+  // The waterpath already stops at the moving water-to-air intersection.
+  const cameraSubmersion = clamp(
+    oceanSurfaceHeight.sub(oceanCameraHeight), 0, 65);
+  const depthLayer = smoothstep(float(2), float(31), cameraSubmersion);
+  const farLayer = smoothstep(float(4), float(53), pathThroughWater);
+  const density = length.mul(float(0.92).add(depthLayer.mul(0.28)));
+  const throughput = exp(vec3(-0.058, -0.026, -0.014).mul(density));
+  // Preserve coral and sand contrast nearby; the scene's existing fog
+  // already runs at ~24% strength to avoid double absorption.
+  const upperWater = vec3(0.040, 0.255, 0.305);
+  const deepWater = vec3(0.018, 0.112, 0.203);
+  const scatterHue = mix(upperWater, deepWater,
+    clamp(depthLayer.mul(0.58).add(farLayer.mul(0.34)), 0, 1));
+  const daylightIrradiance = float(0.52)
+    .add(oceanDepthDaylight.mul(0.48));
+  const scattered = scatterHue.mul(daylightIrradiance)
+    .mul(oceanDepthScattering)
+    .mul(vec3(1).sub(throughput));
+  const absorbedColor = refractedColor.mul(throughput).add(scattered);
   const blend = oceanDepthUnderwaterMix.mul(
-    smoothstep(float(0.22), float(1.55), pathThroughWater)
-  );
-  return vec4(mix(base.rgb, absorbedColor, blend), base.a);
+    smoothstep(float(0.5), float(2.5), pathThroughWater));
+
+  // Broad, gently rippling sunlight shafts are an analytic approximation
+  // of forward scattering, NOT ray-marched volumes or another texture pass.
+  // They use the SAME crossing phases as the overhead wave distortion.
+  const rayDirection = ray.div(rayLength.max(float(0.0001)));
+  const towardSun = clamp(dot(rayDirection, oceanDepthSunDirection), 0, 1);
+  const shaftCone = pow(towardSun, float(6));
+  const waveFocus = float(0.58)
+    .add(sin(phaseOne.mul(0.80)).mul(0.24))
+    .add(sin(phaseTwo.mul(0.64)).mul(0.18));
+  const shaftPath = smoothstep(float(1.5), float(11), pathThroughWater)
+    .mul(float(1).sub(smoothstep(float(24), float(85), pathThroughWater)));
+  const shaftEnergy = shaftCone.mul(waveFocus)
+    .mul(shaftPath).mul(exp(cameraSubmersion.mul(-0.062)))
+    .mul(oceanDepthDaylight).mul(oceanDepthSunVisibility)
+    .mul(oceanDepthUnderwaterMix).mul(0.13);
+  const shaftRadiance = vec3(0.36, 0.66, 0.67).mul(shaftEnergy);
+  const composited = mix(base.rgb, absorbedColor, blend)
+    .add(shaftRadiance);
+  return vec4(composited, base.a);
 })();
 }
 const underwaterDepthOutput = oceanDepthPassEnabled
@@ -5479,6 +5530,9 @@ function animate() {
     oceanCameraXZ.value.set(camera.position.x, camera.position.z);
     oceanSurfaceHeight.value = surface;
     oceanSurfaceTime.value = elapsedTime;
+    // Directional light is expressed in world space, matching reconstructed
+    // camera rays. No new per-frame allocations, shadows or GPU dispatches.
+    oceanDepthSunDirection.value.copy(dayNightCycle.sunBody.group.position).normalize();
     const tune = globalThis.__riftOceanTuning ?? {};
     const clarity = Number(tune.clarity);
     const haze = Number(tune.haze);
@@ -5906,6 +5960,11 @@ function animate() {
     dayNightCycle.moonBody.core.material.opacity *= moonOcclusion;
     dayNightCycle.moonBody.glow.material.opacity *= moonOcclusion;
   }
+  // Keep underwater shafts weather-coupled to the *same* sky occlusion
+  // that controls the sunlight and seabed caustics. At night the daylight
+  // uniform already fades the shafts independently of this value.
+  oceanDepthSunVisibility.value = THREE.MathUtils.clamp(
+    sunOcclusionForCaustics, 0.15, 1);
   // Per explicit "[caustics] glow with sunlight like real ones do" — the
   // same real cloud-occlusion value just computed above for the visible
   // sun sprite/light now also reaches the underwater caustic shader,

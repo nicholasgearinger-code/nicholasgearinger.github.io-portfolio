@@ -74,6 +74,13 @@ function installWaterProOptics(handle) {
   const depth = attribute("fftDepthWorld", "float");
   const time = uniform(0.0);
   const storm = uniform(0.0);
+  // Driven by the shoreline solver after each visual update. These are
+  // scalar uniforms, not a new texture, buffer, or WebGPU compute pass.
+  const surfPhase = uniform(0.0);
+  const surfSetStrength = uniform(0.73);
+  const surfPulse = uniform(0.0);
+  const surfFront = uniform(3.3);
+  const surfStrength = uniform(0.73);
   const day = handle.fftDaylight ?? uniform(1.0);
   const underwater = handle.fftUnderwaterMix ?? uniform(0.0);
   const lightDirection = handle.fftLightDirection ?? uniform(new THREE.Vector3(0.35, 0.8, 0.3));
@@ -229,29 +236,35 @@ function installWaterProOptics(handle) {
     0.86,
   );
 
-  // Option B / Part 2: cheap, depth-gated breaker shading.
-  // fftDepthWorld comes from the existing terrain sampler (same seabed source
-  // used by the surf solver). Restrict this response to the inner surf zone:
-  // distant/open water stays on the original Water Pro optics.
-  // The set frequencies mirror shore_persistent_foam_v1.js. Individual crest
-  // positions are an approximation until a shared breaker phase is provided.
+  // Option B / Part 3: shared shoreline timing. Both the pitching foam mesh
+  // and the surface shader read the same authoritative surf cycle (v19 syncs
+  // the uniforms after the persistent foam simulation). The existing depth
+  // attribute supplies a cheap approximation of offshore distance: this is
+  // shading synchronization, not a new FFT displacement simulation.
   const surfZone = float(1).sub(smoothstep(float(0.55), float(4.2), depth));
-  const setEnergy = clamp(float(0.73)
-    .add(sin(time.mul(0.11)).mul(0.19))
-    .add(sin(time.mul(0.047).add(1.9)).mul(0.11)), 0.4, 1.03);
-  // Broad wave motion plus the *actual* displaced FFT slope. This prevents
-  // the breaker from appearing as a uniform bright ring along the coast.
-  const travellingFront = sin(positionWorld.x.mul(0.22)
-    .add(positionWorld.z.mul(0.16)).sub(time.mul(1.10)));
-  const crestGate = smoothstep(float(0.13), float(0.78), travellingFront);
+  // Approximate shore-normal distance from the already sampled seabed depth.
+  // The crest's front position comes directly from the active shoreline wave.
+  const offshoreDistance = clamp(depth.mul(1.0), 0, 3.8);
+  const distanceToCrest = abs(offshoreDistance.sub(surfFront));
+  const crestGate = float(1).sub(smoothstep(
+    float(0.15), float(1.05), distanceToCrest));
+  // Foam follows the crest but lingers after the raised lip has passed.
+  const wakeDistance = offshoreDistance.sub(surfFront);
+  const foamWake = smoothstep(float(-0.25), float(0.75), wakeDistance)
+    .mul(float(1).sub(smoothstep(float(1.0), float(3.2), wakeDistance)));
   const breakerSlope = smoothstep(float(0.18), float(0.67), geometricSlope);
-  const breakerEnergy = clamp(surfZone.mul(setEnergy)
-    .mul(float(0.24).add(crestGate.mul(0.52)).add(breakerSlope.mul(0.28)))
-    .mul(float(0.55).add(storm.mul(0.60)))
+  const crestActivity = clamp(surfPulse.mul(0.65)
+    .add(crestGate.mul(0.55)).add(foamWake.mul(0.24)), 0, 1);
+  const breakerEnergy = clamp(surfZone.mul(surfSetStrength)
+    .mul(surfStrength)
+    .mul(float(0.12).add(crestActivity.mul(0.65))
+      .add(breakerSlope.mul(0.23)))
+    .mul(float(0.70).add(storm.mul(0.42)))
     .mul(float(1).sub(underwater)), 0, 0.90);
   const brokenFoam = clamp(breakerEnergy
     .mul(float(0.40).add(capBreakup.mul(0.60)))
-    .mul(float(0.22).add(steep.mul(0.78))), 0, 0.68);
+    .mul(float(0.25).add(steep.mul(0.50))
+      .add(foamWake.mul(0.36))), 0, 0.68);
   const combinedFoam = clamp(whitecap.add(brokenFoam.mul(0.82)), 0, 0.92);
 
   material.colorNode = Fn(() => {
@@ -395,6 +408,11 @@ function installWaterProOptics(handle) {
   material.needsUpdate = true;
 
   handle.fftV9Time = time;
+  handle.fftV9SurfPhase = surfPhase;
+  handle.fftV9SurfSet = surfSetStrength;
+  handle.fftV9SurfPulse = surfPulse;
+  handle.fftV9SurfFront = surfFront;
+  handle.fftV9SurfStrength = surfStrength;
   handle.fftV9Storm = storm;
   handle.fftV9ShallowColor = shallowColor;
   handle.fftV9MidColor = midColor;

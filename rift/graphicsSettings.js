@@ -22,6 +22,20 @@ const RIFT_IOS = typeof navigator !== "undefined" && (
 // Low keeps its animated sky and FFT ocean, but renders fewer pixels.
 // Applied only at startup: changing tiers already reloads the renderer.
 const IOS_LOW_PIXEL_CAP = 0.8;
+// Limit Experimental fill rate on iOS Low/Medium only, keeping Current and
+// user-chosen exact-resolution overrides unchanged. Bypass for comparison
+// using ?riftDebug=fullreswater. No extra GPU passes or simulation changes.
+const IOS_EXPERIMENTAL_PIXEL_CAP = 0.68;
+function experimentalMobileWaterCap() {
+  if (!RIFT_IOS) return null;
+  const tier = base.getGraphicsTier();
+  if (tier !== "low" && tier !== "medium") return null;
+  try {
+    if (new URLSearchParams(location.search).get("riftDebug") === "fullreswater") return null;
+    if (localStorage.getItem("riftWaterGraphicsMode") !== "experimental") return null;
+  } catch (_) { return null; }
+  return IOS_EXPERIMENTAL_PIXEL_CAP;
+}
 const IOS_MEDIUM_BUDGET = Object.freeze({
   pixelRatioCap: 0.75,
   terrainSegments: 140,
@@ -83,6 +97,10 @@ export function getGraphicsSettings() {
   if (RIFT_IOS && isLowTier()) {
     settings = { ...settings, pixelRatioCap: Math.min(settings.pixelRatioCap, IOS_LOW_PIXEL_CAP) };
   }
+  const waterCap = experimentalMobileWaterCap();
+  if (waterCap !== null) {
+    settings = { ...settings, pixelRatioCap: Math.min(settings.pixelRatioCap, waterCap) };
+  }
 
   // Low used to disable both of these outright. Under the r185 migration they
   // each have a dedicated mobile budget, so they are part of the visual baseline
@@ -111,6 +129,10 @@ export function getGraphicsSettings() {
 }
 
 export function getEffectiveValue(key) {
+  if (key === "pixelRatioCap") {
+    const cap = experimentalMobileWaterCap();
+    if (cap !== null) return Math.min(base.getEffectiveValue(key), cap);
+  }
   if (RIFT_IOS && isLowTier() && key === "pixelRatioCap") {
     return Math.min(base.getEffectiveValue(key), IOS_LOW_PIXEL_CAP);
   }

@@ -164,8 +164,13 @@ function animateLayerGeometry(handle, elapsed, storm = 0) {
   if (!handle?.layers?.length || !handle.samples?.length) return;
   const stormT = clamp01(storm);
   const count = handle.samples.length;
-  const period = Math.max(3.9, 5.8 - stormT * 1.35);
-  const basePhase = elapsed / period;
+  // The persistent shoreline solver publishes this cycle before the swash
+  // sheet updates. Fallback keeps legacy behavior if that layer is unavailable.
+  const shared = handle.__riftPersistentFoamField?.breakerState;
+  const period = Math.max(4.4, 5.7 - stormT);
+  const basePhase = shared ? shared.phase : elapsed / period;
+  const setEnergy = shared ? shared.set : 0.73 +
+    0.19 * Math.sin(elapsed * 0.11) + 0.11 * Math.sin(elapsed * 0.047 + 1.9);
 
   const wash = handle.layers.find((layer) => layer.kind === "wash");
   const body = handle.layers.find((layer) => layer.kind === "body");
@@ -178,22 +183,27 @@ function animateLayerGeometry(handle, elapsed, storm = 0) {
     for (let i = 0; i <= count; i++) {
       const s = handle.samples[i % count];
       const u = (i % count) / count;
-      const localPhase =
-        Math.sin(u * Math.PI * 2 * 1.7 + 0.6) * 0.022 +
-        Math.sin(u * Math.PI * 2 * 3.1 + 2.0) * 0.010;
-      const surge = cycleEnvelope(basePhase + localPhase);
-      const secondary = cycleEnvelope(basePhase + 0.47 + localPhase * 0.55) * 0.20;
-      const runup = clamp01(surge + secondary);
+      // Match the same per-shore phase offset used by the crest/foam solver.
+      const localPhase = (s.phase || 0) * 0.009;
+      // Run-up follows breaker collapse rather than crest arrival. The
+      // secondary wave is weaker, with a brief gravity-driven drawdown.
+      const primary = cycleEnvelope(basePhase + localPhase - 0.14);
+      const secondary = cycleEnvelope(basePhase + localPhase + 0.35) * 0.22;
+      const runup = clamp01((primary + secondary) * (0.64 + setEnergy * 0.40));
       const frontNoise =
         Math.sin(u * Math.PI * 2 * 5.0 + elapsed * 0.16 + s.phase * 0.10) * 0.075 +
         Math.sin(u * Math.PI * 2 * 9.0 - elapsed * 0.11) * 0.035;
 
-      const front = -0.16 - runup * (1.78 + stormT * 0.78) + frontNoise;
+      const backwash = smooth01(((((basePhase + localPhase) % 1) + 1) % 1 - 0.44) / 0.56);
+      const front = -0.12 - runup * (1.96 + stormT * 0.84) +
+        backwash * 0.26 + frontNoise;
       const v0 = i * 2;
 
       if (layer.kind === "wash") {
-        const landEdge = front - 0.34 - runup * 0.20;
-        const seaEdge = 1.30 - runup * 0.22;
+        // Wet sheet trails the foam as the beach drains; it stays behind
+        // the leading wash edge instead of snapping to dry immediately.
+        const landEdge = Math.max(-3.15, front - 0.42 - runup * 0.18);
+        const seaEdge = 1.36 - runup * 0.24;
         writeVertex(arr, v0, s, seaEdge, handle.waterY, elapsed, 0.008);
         writeVertex(arr, v0 + 1, s, landEdge, handle.waterY, elapsed, 0.010);
       } else if (layer.kind === "body") {
@@ -231,7 +241,11 @@ export function updateReferenceSwashSheet(surfHandle, elapsed = 0, storm = 0, da
 
   if (wash?.material) {
     wash.material.color.copy(NIGHT_WASH).lerp(DAY_WASH, dayT);
-    wash.material.opacity = 0.10 + dayT * 0.08 + stormT * 0.03;
+    // Transparent green-blue water wash: modest persistence after each
+    // breaker, while the true foam is drawn by the persistent foam field.
+    const set = handle.__riftPersistentFoamField?.breakerState?.set ?? 0.73;
+    wash.material.opacity = Math.min(0.26, 0.11 + dayT * 0.065 +
+      stormT * 0.035 + set * 0.035);
   }
 
   if (body?.material) {

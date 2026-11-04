@@ -45,10 +45,23 @@ function createUnifiedSurfaceAdapter({
   const phaseB = p.x.mul(-1.22).add(p.z.mul(0.67)).sub(time.mul(1.55));
   // These are detail normal perturbations, not independent wave motion:
   // large-scale orientation comes exclusively from the displaced mesh.
+  const depthAvailable = Boolean(geometry.mesh?.geometry?.getAttribute?.("fftDepthWorld"));
+  const seaDepth = depthAvailable
+    ? clamp(attribute("fftDepthWorld", "float"), 0, 80) : float(18);
+  // In very shallow water, wave energy dissipates against the bottom.
+  // Retain real FFT displacement but soften the normal's sharpest slopes
+  // to avoid the glittering wall / reflective seam at the shoreline.
+  const shoreDamping = float(1).sub(
+    smoothstep(float(0.25), float(5.5), seaDepth)
+  );
+  const smoothShoreNormal = mix(geometry.normalNode, vec3(0, 1, 0),
+    shoreDamping.mul(0.24)).normalize();
   const microX = cos(phaseA).mul(0.025).add(sin(phaseB).mul(0.018));
   const microZ = sin(phaseA).mul(0.022).sub(cos(phaseB).mul(0.015));
-  const n = geometry.normalNode.add(vec3(
-    microX.mul(rippleGain), float(0), microZ.mul(rippleGain)
+  const n = smoothShoreNormal.add(vec3(
+    microX.mul(rippleGain).mul(float(1).sub(shoreDamping.mul(0.46))),
+    float(0),
+    microZ.mul(rippleGain).mul(float(1).sub(shoreDamping.mul(0.46)))
   )).normalize();
   const view = cameraPosition.sub(p).normalize();
   const ndv = clamp(abs(dot(n, view)), 0, 1);
@@ -61,9 +74,6 @@ function createUnifiedSurfaceAdapter({
   const f0 = float(Math.pow((WATER_IOR - 1) / (WATER_IOR + 1), 2));
   const fresnel = f0.add(float(1).sub(f0)
     .mul(pow(float(1).sub(ndv), float(5))));
-  const depthAvailable = Boolean(geometry.mesh?.geometry?.getAttribute?.("fftDepthWorld"));
-  const seaDepth = depthAvailable
-    ? clamp(attribute("fftDepthWorld", "float"), 0, 80) : float(18);
   // Estimated water-column path accounts for slant angle and water depth.
   // Wavelength-dependent Beer-Lambert: red attenuates before green/blue.
   const waterPath = seaDepth.div(ndv.max(float(0.22)))
@@ -73,8 +83,13 @@ function createUnifiedSurfaceAdapter({
   const inScatter = mix(color(0x06506b), color(0x2a8d9c), shallowInfluence);
   // Wave normal bends capture coordinates; bounded UVs avoid screen-edge tears.
   const slant = float(1).sub(ndv);
+  // Distortion comes from the SAME surface normal as the Fresnel term.
+  // Scale it with optical path length: thin water near shore should not
+  // bend the seabed as much as several metres of water farther offshore.
+  const distortionDepth = smoothstep(float(0.15), float(7.5), seaDepth);
   const refractionOffset = vec2(n.x, n.z).mul(refractionGain)
-    .mul(slant.mul(0.013).add(0.004));
+    .mul(slant.mul(0.012).add(0.003))
+    .mul(distortionDepth.mul(0.86).add(0.14));
   const refractedUV = clamp(screenUV.add(refractionOffset),
     vec2(0.003), vec2(0.997));
   // The WebGPU loader disables legacy offscreen capture renders on iOS
@@ -109,7 +124,15 @@ function createUnifiedSurfaceAdapter({
     : skyRadiance;
   // Exactly one Fresnel blend between transmitted and reflected light.
   // The shoulder reduces the stacked overexposed sun column on mobile.
-  const reflectionBlend = clamp(fresnel.mul(reflectionGain), 0.015, 0.91);
+  // Fresnel remains the sole reflection/transmission blend. Suppress
+  // exaggerated shallow-water glare without eliminating realistic
+  // grazing-angle reflection near the beach.
+  const shallowReflectionDamping = float(1).sub(
+    shoreDamping.mul(float(1).sub(slant)).mul(0.26)
+  );
+  const reflectionBlend = clamp(
+    fresnel.mul(reflectionGain).mul(shallowReflectionDamping), 0.015, 0.91
+  );
   // Preserve cloud shape but compress the high-luminance cloud/sun peaks.
   // Break reflection up with geometry normals rather than fake white bands.
   const reflectionRadiance = environment.div(
@@ -134,14 +157,21 @@ function createUnifiedSurfaceAdapter({
   // absorption. Underwater rocks/sand are real scene objects, not a sky tint.
   const shallowTransmittance = float(1).sub(
     smoothstep(float(2), float(25), seaDepth));
+  // The physical transmission path is what reveals *actual* sand, rocks,
+  // and corals on WebGPU/mobile where old mirror/refraction captures are
+  // disabled. Gently bias transparent shallow water toward clarity rather
+  // than layering synthetic bottom colors over the scene.
   const physicalTransmission = mix(
     priorTransmission ?? float(originalTransmissionScalar),
-    float(0.96), shallowTransmittance.mul(0.76)
+    float(0.985), shallowTransmittance.mul(0.87)
   ).mul(float(1).sub(foam.mul(0.94)));
+  // Effective thickness controls built-in refraction/attenuation: thin
+  // shallow water, thicker deeper water. The refraction slider now also
+  // influences this path even without any off-screen capture.
   const physicalThickness = mix(
     priorThickness ?? float(originalThicknessScalar),
-    float(0.055), shallowTransmittance.mul(0.85)
-  );
+    float(0.038), shallowTransmittance.mul(0.90)
+  ).mul(float(0.70).add(refractionGain.mul(0.30)));
 
   // Water-to-air Snell window: retain detailed surface orientation looking
   // upward, and diminish light at internal-reflection grazing angles.
@@ -163,7 +193,8 @@ function createUnifiedSurfaceAdapter({
   // Native physical BRDF handles the direct sunlight specular highlight.
   // Foam roughens the surface, and wave slopes affect roughness smoothly.
   const roughness = mix(float(0.055), float(0.47), foam)
-    .add(slope.mul(0.036));
+    .add(slope.mul(0.036))
+    .add(shoreDamping.mul(0.045));
   let active = false;
   return {
     field, material, reflectance: fresnel, normalNode: n,

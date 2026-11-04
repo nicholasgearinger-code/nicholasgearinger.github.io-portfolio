@@ -399,7 +399,6 @@ function updateCurlingFace(face, t, storm, day, oceanHandle) {
       // Thin backlit crest -> turquoise; collapsing lip -> scattering foam.
       // The breakup field is already calculated for the persistent foam mesh.
       const lip = smooth01((v - 0.66) / 0.34);
-      const cells = Math.max(1, Math.floor(samples.length / along));
       const foamIndex = (index % samples.length) * face.foamRadial +
         Math.max(0, Math.min(face.foamRadial - 1,
           Math.round((radial - LAND_RADIAL) /

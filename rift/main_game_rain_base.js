@@ -1329,6 +1329,7 @@ const oceanDepthDaylight = uniform(1);
 // already-computed surface crossing and ocean sun/cloud orientation.
 const oceanDepthSunDirection = uniform(new THREE.Vector3(0.3, 0.85, 0.25).normalize());
 const oceanDepthSunVisibility = uniform(1);
+const oceanDepthIndirectGain = uniform(1);
 const oceanDepthPhaseCEnabled = (() => {
   try { return new URLSearchParams(location.search).get("riftDebug") !== "oldatmosphere"; }
   catch (_) { return true; }
@@ -1559,7 +1560,7 @@ return Fn(() => {
     .mul(oceanDepthDaylight).mul(oceanDepthSunVisibility)
     .mul(oceanDepthUnderwaterMix);
   const bounceLight = oceanDepthIndirectEnabled
-    ? vec3(0.16, 0.125, 0.075).mul(sandReturn.mul(0.092))
+    ? vec3(0.16, 0.125, 0.075).mul(sandReturn.mul(0.092)).mul(oceanDepthIndirectGain)
     : vec3(0);
   const composited = mix(base.rgb, absorbedColor, blend)
     .add(shaftRadiance).add(bounceLight);
@@ -5278,7 +5279,8 @@ function animate() {
   // but BEFORE shadow-follow recentering, so all sun-dependent effects see
   // the same light direction. Auto restores the regular day/night orbit.
   const lightTune = globalThis.__riftOceanTuning ?? {};
-  const isOceanLightingMode = currentBiome === "crystal" && (() => {
+  const isOceanLightingMode = currentLevelIdx >= 0 &&
+    LEVELS[currentLevelIdx].biome === "crystal" && (() => {
     try { return localStorage.getItem("riftWaterGraphicsMode") === "experimental"; }
     catch (_) { return false; }
   })();
@@ -5668,6 +5670,9 @@ function animate() {
     const sun = Number(tune.sunlight);
     const refraction = Number(tune.refraction);
     const swell = Number(tune.swell);
+    const gi = Number(tune.globalIllumination);
+    oceanDepthIndirectGain.value = THREE.MathUtils.clamp(
+      Number.isFinite(gi) ? gi : 1, 0, 3);
     oceanSurfaceRefraction.value = THREE.MathUtils.clamp(
       Number.isFinite(refraction) ? refraction / 1.8 : 1, 0, 1.65);
     oceanWaveMotion.value = THREE.MathUtils.clamp(

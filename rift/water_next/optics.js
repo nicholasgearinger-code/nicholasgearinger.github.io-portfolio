@@ -103,7 +103,32 @@ function createUnifiedSurfaceAdapter({
     try { return new URLSearchParams(location.search).get("riftDebug") !== "oldceiling"; }
     catch (_) { return true; }
   })();
+  // Independent optics A/B: ?riftDebug=oldskytransmission retains the
+  // previous sky atlas sampling while leaving all other ceiling changes on.
+  const refractedSkyEnabled = (() => {
+    try { return new URLSearchParams(location.search).get("riftDebug") !== "oldskytransmission"; }
+    catch (_) { return true; }
+  })();
   const ceilingNormal = richCeilingEnabled ? undersideNormal : oldUndersideNormal;
+  // From inside water, bend the view ray toward the air using Snell's law.
+  // Water-to-air eta=1.333. Reject rays beyond the critical angle with a
+  // smooth Snell window below, rather than sampling invalid exit directions.
+  const undersideRay = view.negate();
+  const undersideIncidence = clamp(dot(ceilingNormal, undersideRay), 0, 1);
+  const etaWaterAir = float(1.333);
+  const sinRefractedSq = etaWaterAir.mul(etaWaterAir)
+    .mul(float(1).sub(undersideIncidence.mul(undersideIncidence)));
+  const cosRefracted = float(1).sub(clamp(sinRefractedSq, 0, 1)).sqrt();
+  const exitSkyRay = undersideRay.mul(etaWaterAir)
+    .add(ceilingNormal.mul(cosRefracted.sub(etaWaterAir.mul(undersideIncidence))))
+    .normalize();
+  const snell = richCeilingEnabled
+    ? smoothstep(float(0.607), float(0.745), undersideIncidence)
+      .mul(0.78).add(
+        smoothstep(float(0.52), float(0.87), undersideIncidence).mul(0.22)
+      )
+    : smoothstep(float(0.635), float(0.705), undersideIncidence);
+  const tir = float(1).sub(snell);
 
   // Fresnel from the water/air interface; use ONE reflectance weighting.
   const f0 = float(Math.pow((WATER_IOR - 1) / (WATER_IOR + 1), 2));
@@ -157,9 +182,18 @@ function createUnifiedSurfaceAdapter({
   // Reflect the viewer around the SAME moving optical normal. No other
   // sky-glint or faux specular strip is added to the surface albedo.
   const reflectionRay = n.mul(dot(n, view).mul(2)).sub(view).normalize();
+  // One sky atlas read handles BOTH above-water reflected sky and
+  // below-water refracted sky. The exit direction is only meaningful
+  // inside the water-to-air transmission cone; outer angles use the
+  // stable reflection ray as they approach total internal reflection.
+  const ceilingSkyDir = mix(reflectionRay, exitSkyRay,
+    clamp(snell.mul(1.22), 0, 1)).normalize();
+  const sampledSkyDir = refractedSkyEnabled
+    ? mix(reflectionRay, ceilingSkyDir, submerged).normalize()
+    : reflectionRay;
   const panoramaUV = vec2(
-    reflectionRay.x.mul(0.26).add(time.mul(0.002)),
-    reflectionRay.z.mul(0.14).add(0.80)
+    sampledSkyDir.x.mul(0.26).add(time.mul(0.002)),
+    sampledSkyDir.z.mul(0.14).add(0.80)
   ).add(vec2(0.5, 0));
   const sample = texture(cloudPanorama, panoramaUV);
   // Keep directional cloud structure, but provide diffuse sky radiance
@@ -169,8 +203,14 @@ function createUnifiedSurfaceAdapter({
   // its high-frequency detail through the coarse mobile FFT slopes made
   // repeating oval/diamond patches visible below the surface. Above water
   // keep the detailed sky; below transition to smooth sky radiance.
+  // The old global 15% cloud transmission made the entire ceiling
+  // featureless. Recover cloud detail ONLY inside the Snell window;
+  // reflection/TIR regions retain a smooth sky to prevent FFT oval grids.
+  const undersideSkyDetail = refractedSkyEnabled
+    ? float(0.09).add(snell.mul(0.43))
+    : float(0.15);
   const skyRadiance = mix(skyColor, sample.rgb,
-    sample.a.mul(0.70).mul(float(0.15).add(above.mul(0.85))));
+    sample.a.mul(0.70).mul(mix(undersideSkyDetail, float(1), above)));
   const ambientSkyReflection = daylightWaterFillEnabled
     ? skyColor.mul(skyDaylight).mul(0.13)
     : vec3(0, 0, 0);
@@ -239,15 +279,6 @@ function createUnifiedSurfaceAdapter({
   // At n_water=1.333 the critical incidence is cos(theta_c)~0.661.
   // The FFT normal bends this boundary; small surface facets modulate it
   // instead of animating an unrelated blue overlay over the whole scene.
-  const undersideRay = view.negate();
-  const undersideIncidence = clamp(dot(ceilingNormal, undersideRay), 0, 1);
-  const snell = richCeilingEnabled
-    ? smoothstep(float(0.607), float(0.745), undersideIncidence)
-      .mul(0.78).add(
-        smoothstep(float(0.52), float(0.87), undersideIncidence).mul(0.22)
-      )
-    : smoothstep(float(0.635), float(0.705), undersideIncidence);
-  const tir = float(1).sub(snell);
   const cameraDepth = clamp(waterY.sub(cameraYUniform), 0, 80);
   const nearSurface = exp(cameraDepth.mul(-0.048));
   const undersideThroughput = exp(vec3(-0.105, -0.047, -0.023)

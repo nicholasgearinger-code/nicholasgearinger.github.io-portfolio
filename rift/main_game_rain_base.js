@@ -1442,9 +1442,12 @@ return Fn(() => {
   // Perturb only rays that cross the water surface into above-water
   // geometry/sky. Refracting the entire underwater image would make rocks
   // and fish wobble unnaturally and obscure the depth absorption.
-  const crossing = smoothstep(float(-0.25), float(0.8),
+  // The camera ray gradually enters the water-to-air transition.
+  // Widening the old narrow crossing eliminates a hard horizontal seam
+  // when the moving wave ceiling is nearly level with the camera.
+  const crossing = smoothstep(float(-0.65), float(1.45),
     fragmentDistance.sub(exitDistance));
-  const upwardView = smoothstep(float(0.10), float(0.4), rayY);
+  const upwardView = smoothstep(float(0.045), float(0.32), rayY);
   const waveSlopeX = fftWaveField
     ? clamp(fftSlopeX.mul(1.02).add(detailSlopeX
         ? detailSlopeX.mul(0.47) : float(0)).mul(oceanWaveMotion), -0.35, 0.35)
@@ -1501,8 +1504,10 @@ return Fn(() => {
     .mul(oceanDepthScattering)
     .mul(vec3(1).sub(throughput));
   const absorbedColor = refractedColor.mul(throughput).add(scattered);
+  // The atmospheric color should rise smoothly from the camera,
+  // not appear as an abrupt flat band at a fixed water-path distance.
   const blend = oceanDepthUnderwaterMix.mul(
-    smoothstep(float(0.5), float(2.5), pathThroughWater));
+    smoothstep(float(0.28), float(4.6), pathThroughWater));
 
   // Broad, gently rippling sunlight shafts are an analytic approximation
   // of forward scattering, NOT ray-marched volumes or another texture pass.
@@ -1529,8 +1534,8 @@ return Fn(() => {
     ? float(0.44).add(ceilingLight.mul(0.55))
     : float(0.58).add(sin(phaseOne.mul(0.80)).mul(0.24))
       .add(sin(phaseTwo.mul(0.64)).mul(0.18));
-  const shaftPath = smoothstep(float(1.5), float(11), pathThroughWater)
-    .mul(float(1).sub(smoothstep(float(24), float(85), pathThroughWater)));
+  const shaftPath = smoothstep(float(1.0), float(12), pathThroughWater)
+    .mul(float(1).sub(smoothstep(float(23), float(82), pathThroughWater)));
   const shaftEnergy = shaftCone.mul(waveFocus)
     .mul(shaftPath).mul(exp(cameraSubmersion.mul(-0.062)))
     .mul(oceanDepthDaylight).mul(oceanDepthSunVisibility)

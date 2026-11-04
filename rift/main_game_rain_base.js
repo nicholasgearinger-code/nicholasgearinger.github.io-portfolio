@@ -1553,7 +1553,7 @@ return Fn(() => {
   // doesn't acquire an artificial gold overlay.
   const nearSeabed = float(1).sub(
     smoothstep(float(3.0), float(23.0), fragmentDistance));
-  const downwardView = smoothstep(float(-0.10), float(-0.70), rayY);
+  const downwardView = float(1).sub(smoothstep(float(-0.70), float(-0.10), rayY));
   const sandReturn = nearSeabed.mul(downwardView)
     .mul(exp(cameraSubmersion.mul(-0.12)))
     .mul(oceanDepthDaylight).mul(oceanDepthSunVisibility)

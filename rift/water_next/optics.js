@@ -75,6 +75,12 @@ function createUnifiedSurfaceAdapter({
   const ndl = clamp(dot(n, sun), 0, 1);
   const above = clamp(cameraYUniform.sub(waterY).mul(3).add(0.5), 0, 1);
   const submerged = float(1).sub(above);
+  // The iPhone FFT presentation mesh has regular cell spacing. A sharply
+  // varying underside normal can turn those cells into a bright oval grid.
+  // Keep full wave normals above water; below use a broader optical normal
+  // for sky transmission and internal reflection (geometry stays untouched).
+  const undersideNormal = mix(n, vec3(0, 1, 0),
+    submerged.mul(0.50)).normalize();
 
   // Fresnel from the water/air interface; use ONE reflectance weighting.
   const f0 = float(Math.pow((WATER_IOR - 1) / (WATER_IOR + 1), 2));
@@ -136,7 +142,12 @@ function createUnifiedSurfaceAdapter({
   // Keep directional cloud structure, but provide diffuse sky radiance
   // under cloud occlusion and on facets angled away from the direct sun.
   // The angular/cloud part remains wave-normal driven; no extra lookup.
-  const skyRadiance = mix(skyColor, sample.rgb, sample.a.mul(0.70));
+  // The cloud atlas is not a true reflected underside capture. Sampling
+  // its high-frequency detail through the coarse mobile FFT slopes made
+  // repeating oval/diamond patches visible below the surface. Above water
+  // keep the detailed sky; below transition to smooth sky radiance.
+  const skyRadiance = mix(skyColor, sample.rgb,
+    sample.a.mul(0.70).mul(float(0.15).add(above.mul(0.85))));
   const ambientSkyReflection = daylightWaterFillEnabled
     ? skyColor.mul(skyDaylight).mul(0.13)
     : vec3(0, 0, 0);
@@ -174,10 +185,13 @@ function createUnifiedSurfaceAdapter({
     abs(sin(phaseA.mul(0.76)).mul(cos(phaseB.mul(0.91)))));
   const foam = clamp(breaking.mul(breakup)
     .mul(foamGain).mul(breakerGain), 0, 0.78);
+  // Whitecaps are seen from above. Do not imprint their regular threshold
+  // pattern onto the underside's transmission and roughness.
+  const visibleFoam = foam.mul(above);
   const crestTransmission = rising.mul(float(1).sub(ndl))
     .mul(day).mul(sunlightGain).mul(0.12);
   const waterSurface = mix(surface.add(color(0x4dafa8).mul(crestTransmission)),
-    color(0xe4f2eb), foam);
+    color(0xe4f2eb), visibleFoam);
   // The same seabed-depth value controls both transmitted background and
   // absorption. Underwater rocks/sand are real scene objects, not a sky tint.
   const shallowTransmittance = float(1).sub(
@@ -189,7 +203,7 @@ function createUnifiedSurfaceAdapter({
   const physicalTransmission = mix(
     priorTransmission ?? float(originalTransmissionScalar),
     float(0.985), shallowTransmittance.mul(0.87)
-  ).mul(float(1).sub(foam.mul(0.94)));
+  ).mul(float(1).sub(visibleFoam.mul(0.94)));
   // Effective thickness controls built-in refraction/attenuation: thin
   // shallow water, thicker deeper water. The refraction slider now also
   // influences this path even without any off-screen capture.
@@ -203,7 +217,7 @@ function createUnifiedSurfaceAdapter({
   // The FFT normal bends this boundary; small surface facets modulate it
   // instead of animating an unrelated blue overlay over the whole scene.
   const undersideRay = view.negate();
-  const undersideIncidence = clamp(dot(n, undersideRay), 0, 1);
+  const undersideIncidence = clamp(dot(undersideNormal, undersideRay), 0, 1);
   const snell = smoothstep(float(0.635), float(0.705), undersideIncidence);
   const tir = float(1).sub(snell);
   const cameraDepth = clamp(waterY.sub(cameraYUniform), 0, 80);
@@ -213,7 +227,8 @@ function createUnifiedSurfaceAdapter({
   // FFT-facing normal determines sky transmission. The fine waves only
   // fracture that image and its light bands, rather than increasing opacity.
   const waveFacet = clamp(
-    n.y.mul(0.77).add(abs(n.x).mul(0.12)).add(abs(n.z).mul(0.11)), 0, 1);
+    undersideNormal.y.mul(0.77).add(abs(undersideNormal.x).mul(0.12))
+      .add(abs(undersideNormal.z).mul(0.11)), 0, 1);
   const transmissionDetail = smoothstep(float(0.36), float(0.94), waveFacet);
   const overheadColor = skyRadiance.mul(undersideThroughput)
     .add(color(0x0b6478).mul(vec3(1).sub(undersideThroughput)));
@@ -226,7 +241,7 @@ function createUnifiedSurfaceAdapter({
     .mul(float(0.66).add(transmissionDetail.mul(0.24)));
   // Sun transmission is a wide, soft cone with moving bright wave facets;
   // avoid narrow white strips and the previous additive highlight stacking.
-  const sunFacets = pow(clamp(dot(n, sun), 0, 1), float(5));
+  const sunFacets = pow(clamp(dot(undersideNormal, sun), 0, 1), float(5));
   const transmittedSun = sunFacets.mul(day).mul(sunlightGain)
     .mul(nearSurface).mul(snell).mul(undersideGain);
   const underside = mix(internalReflection, overheadColor, skylightWindow)
@@ -235,9 +250,11 @@ function createUnifiedSurfaceAdapter({
 
   // Native physical BRDF handles the direct sunlight specular highlight.
   // Foam roughens the surface, and wave slopes affect roughness smoothly.
-  const roughness = mix(float(0.055), float(0.47), foam)
-    .add(slope.mul(0.036))
-    .add(shoreDamping.mul(0.045));
+  const roughness = mix(
+    mix(float(0.055), float(0.47), visibleFoam)
+      .add(slope.mul(0.036)).add(shoreDamping.mul(0.045)),
+    float(0.33), submerged
+  );
   let active = false;
   return {
     field, material, reflectance: fresnel, normalNode: n,

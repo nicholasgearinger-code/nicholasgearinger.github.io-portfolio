@@ -171,6 +171,14 @@ function animateLayerGeometry(handle, elapsed, storm = 0) {
   const basePhase = shared ? shared.phase : elapsed / period;
   const setEnergy = shared ? shared.set : 0.73 +
     0.19 * Math.sin(elapsed * 0.11) + 0.11 * Math.sin(elapsed * 0.047 + 1.9);
+  // Tiny per-shoreline wetness memory persists after the breaking front
+  // retreats. No extra mesh or render pass; only the existing wash ribbon.
+  const memory = handle.__riftWetMemory ??
+    (handle.__riftWetMemory = new Float32Array(count));
+  const prevTime = Number.isFinite(handle.__riftWetMemoryTime) ?
+    handle.__riftWetMemoryTime : elapsed;
+  const dt = Math.max(0, Math.min(0.10, elapsed - prevTime));
+  handle.__riftWetMemoryTime = elapsed;
 
   const wash = handle.layers.find((layer) => layer.kind === "wash");
   const body = handle.layers.find((layer) => layer.kind === "body");
@@ -190,6 +198,11 @@ function animateLayerGeometry(handle, elapsed, storm = 0) {
       const primary = cycleEnvelope(basePhase + localPhase - 0.14);
       const secondary = cycleEnvelope(basePhase + localPhase + 0.35) * 0.22;
       const runup = clamp01((primary + secondary) * (0.64 + setEnergy * 0.40));
+      if (layer === wash) {
+        memory[i % count] = Math.max(runup,
+          memory[i % count] * Math.exp(-dt * (0.26 + stormT * 0.10)));
+      }
+      const retainedWet = memory[i % count];
       const frontNoise =
         Math.sin(u * Math.PI * 2 * 5.0 + elapsed * 0.16 + s.phase * 0.10) * 0.075 +
         Math.sin(u * Math.PI * 2 * 9.0 - elapsed * 0.11) * 0.035;
@@ -202,7 +215,10 @@ function animateLayerGeometry(handle, elapsed, storm = 0) {
       if (layer.kind === "wash") {
         // Wet sheet trails the foam as the beach drains; it stays behind
         // the leading wash edge instead of snapping to dry immediately.
-        const landEdge = Math.max(-3.15, front - 0.42 - runup * 0.18);
+        const wetFront = Math.min(front, -0.12 -
+          retainedWet * (1.96 + stormT * 0.84) + frontNoise);
+        const landEdge = Math.max(-3.15, wetFront - 0.42 -
+          retainedWet * 0.18);
         const seaEdge = 1.36 - runup * 0.24;
         writeVertex(arr, v0, s, seaEdge, handle.waterY, elapsed, 0.008);
         writeVertex(arr, v0 + 1, s, landEdge, handle.waterY, elapsed, 0.010);

@@ -2804,6 +2804,13 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
     const terrainCausticFocusXZUniform = uniform(vec2(0, 0));
     const terrainCausticFocusRadiusUniform = uniform(22.0);
     const terrainCausticSunGlowUniform = uniform(1.0);
+    // Project the same overhead light field as the unified water ceiling
+    // along the real solar direction onto the seabed. No new textures/passes.
+    const terrainCausticSunDirectionUniform = uniform(new THREE.Vector3(0.2, 0.9, 0.3).normalize());
+    const coupledCausticsEnabled = (() => {
+      try { return new URLSearchParams(location.search).get("riftDebug") !== "oldcaustics"; }
+      catch (_) { return true; }
+    })();
     simpleTerrainMat.emissiveNode = Fn(() => {
       // Per explicit "using what we wrote in the prototype" — ported
       // from the old (still-present, safely disabled via
@@ -2951,10 +2958,46 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
       const depthAttenuation = float(1).sub(
         smoothstep(float(6), float(48), seabedWaterDepth).mul(0.75)
       );
-      // Sun/cloud gating and the actual depth-to-water fade stay shared
-      // with the ocean. No additional render target or independent solver.
+      // Sunlight reaches the floor from an offset point on the ceiling.
+      // Limit the effective projection depth near the horizon so a low
+      // sun never makes the light field jump hundreds of metres.
+      const projectedWaterPath = clamp(
+        seabedWaterDepth.div(terrainCausticSunDirectionUniform.y.max(float(0.35))), 0, 38
+      );
+      const projectedSurfaceXZ = positionWorld.xz.sub(
+        terrainCausticSunDirectionUniform.xz.mul(projectedWaterPath)
+      );
+      // These coefficients and velocities match optics.js and the Phase C
+      // shaft compositor. The thin caustic network still comes from the
+      // existing four samples; only its slow illumination varies with
+      // the moving ceiling. This does NOT claim ray-traced focusing.
+      const ceilingA = projectedSurfaceXZ.x.mul(0.37)
+        .add(projectedSurfaceXZ.y.mul(0.19)).sub(t.mul(0.43));
+      const ceilingB = projectedSurfaceXZ.x.mul(-0.23)
+        .add(projectedSurfaceXZ.y.mul(0.41)).add(t.mul(0.36));
+      const ceilingC = projectedSurfaceXZ.x.mul(0.91)
+        .sub(projectedSurfaceXZ.y.mul(0.76)).add(t.mul(0.79));
+      const projectedCeilingLight = clamp(
+        sin(ceilingA).mul(cos(ceilingB)).mul(0.30)
+          .add(sin(ceilingC).mul(0.095)).add(0.605), 0, 1
+      );
+      const projectedFocus = smoothstep(float(0.20), float(0.87),
+        projectedCeilingLight);
+      // Low-contrast illumination: preserve organic caustic ribbons
+      // without the formerly visible grid of overbright oval patches.
+      const causticCoupling = coupledCausticsEnabled
+        ? float(0.72).add(projectedFocus.mul(0.44))
+        : float(1);
+      const sunElevation = smoothstep(float(0.04), float(0.58),
+        terrainCausticSunDirectionUniform.y);
+      const causticSunAngle = coupledCausticsEnabled
+        ? float(0.18).add(sunElevation.mul(0.82))
+        : float(1);
+      // Existing local focus, distance fade, sky occlusion, and day/night
+      // controls remain active; no additional render target or solver.
       const crestFocusing = float(0.76).add(waveNorm.mul(0.24));
       const finalCaustic = causticPattern.mul(crestFocusing)
+        .mul(causticCoupling).mul(causticSunAngle)
         .mul(underwaterMask).mul(upwardMask)
         .mul(focusMask).mul(depthAttenuation)
         .mul(terrainCausticIntensityUniform).mul(terrainCausticSunGlowUniform);
@@ -2968,6 +3011,7 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
     simpleTerrainMat.userData.causticFocusXZUniform = terrainCausticFocusXZUniform;
     simpleTerrainMat.userData.causticFocusRadiusUniform = terrainCausticFocusRadiusUniform;
     simpleTerrainMat.userData.causticSunGlowUniform = terrainCausticSunGlowUniform;
+    simpleTerrainMat.userData.causticSunDirectionUniform = terrainCausticSunDirectionUniform;
     // NEW seafloor caustics, deliberately NOT a revival of terrainMat's old
     // onBeforeCompile block above (which is the one implicated in the
     // honeycomb saga — the pattern persisted even with THAT block's own
@@ -6006,6 +6050,12 @@ function animate() {
   // now actually reaching the TSL caustic shader that's really running.
   if (terrainMesh && terrainMesh.material.userData.causticSunGlowUniform) {
     terrainMesh.material.userData.causticSunGlowUniform.value = sunOcclusionForCaustics;
+  }
+  // Align seabed projection with the SAME sun orbit as the underwater
+  // compositor, not a separately animated pseudo-light direction.
+  if (terrainMesh?.material?.userData?.causticSunDirectionUniform) {
+    terrainMesh.material.userData.causticSunDirectionUniform.value
+      .copy(dayNightCycle.sunBody.group.position).normalize();
   }
   // Per explicit "light should light up at a certain place, not the
   // whole net" — the sun/moon's own world position is scaled for the sky

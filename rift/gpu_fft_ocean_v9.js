@@ -112,8 +112,8 @@ function installWaterProOptics(handle) {
   const underwaterOpticalNormal = mix(
     worldNormal,
     vec3(0, 1, 0),
-    underwater.mul(0.55)
-  ).normalize();
+    underwater.mul(0.38)
+  ).normalize(); // retain more live FFT slope below water for undulating overhead waves
 
   const phaseA = positionWorld.x.mul(2.15)
     .add(positionWorld.z.mul(1.07))
@@ -288,9 +288,18 @@ function installWaterProOptics(handle) {
     const sunFlux = projectedSun.mul(projectedSun)
       .mul(float(0.70).add(overheadView.mul(0.30)))
       .mul(day).mul(float(1).sub(storm.mul(0.65)));
+    // Continuous wave-phase glints: driven by the actual FFT surface normal
+    // plus restrained moving ripples; no new noise textures or passes.
+    const rippleLight = clamp(
+      sin(phaseA.mul(0.73)).mul(cos(phaseB.mul(0.66)))
+        .mul(0.5).add(0.5), 0, 1);
+    const lightFocus = smoothstep(float(0.28), float(0.88), rippleLight)
+      .mul(sunFlux).mul(overheadView)
+      .mul(float(1).sub(storm.mul(0.6)));
     const transmitted = mix(refractedSky, color(0x7fd9db),
       clamp(float(1).sub(clearWater).mul(0.27), 0, 0.27))
-      .add(color(0xfff3df).mul(sunFlux.mul(0.16)));
+      .add(color(0xfff3df).mul(sunFlux.mul(0.20)))
+       .add(sunColor.mul(lightFocus.mul(0.10)));
     // Soft water-to-air reflection at grazing incidence, preserving sky
     // transmission overhead without accentuating regular FFT sampling.
     // Schlick approximation for water/air, with total internal reflection
@@ -316,7 +325,12 @@ function installWaterProOptics(handle) {
     const reflectedUnderwater = mix(color(0x19536b), skyColor, float(0.25))
       .add(reflectedSample.rgb.mul(reflectedSample.a).mul(0.18));
     const underside = mix(transmitted, reflectedUnderwater, angleReflection);
-    return mix(body.add(sunColor.mul(glitter.mul(0.42))), underside,
+    // Soft fragmented refraction shimmer is strongest toward the surface.
+    // This shares the exact FFT-driven transmission/reflection normal.
+    const undersideShimmer = lightFocus.mul(float(0.065))
+      .mul(float(1).sub(angleReflection));
+    const illuminatedUnderside = underside.add(sunColor.mul(undersideShimmer));
+    return mix(body.add(sunColor.mul(glitter.mul(0.42))), illuminatedUnderside,
       underwater.mul(float(0.97)));
 
   })();

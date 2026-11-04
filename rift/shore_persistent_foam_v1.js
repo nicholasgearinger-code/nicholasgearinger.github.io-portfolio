@@ -306,8 +306,8 @@ function updateBreakerGeometry(handle) {
  * water face/lip. A single dynamic draw call, no GPU compute or offscreen pass.
  * A sparse alongshore grid avoids duplicating the heavy FFT mesh on iOS.
  */
-function createCurlingFace(samples, waterY, parent) {
-  const along = Math.min(96, samples.length);
+function createCurlingFace(samples, waterY, parent, trainOffset = 0) {
+  const along = Math.min(TOUCH_DEVICE ? 64 : 96, samples.length);
   const rows = TOUCH_DEVICE ? 7 : 10;
   const positions = new Float32Array((along + 1) * (rows + 1) * 3);
   const uvs = new Float32Array((along + 1) * (rows + 1) * 2);
@@ -345,11 +345,11 @@ function createCurlingFace(samples, waterY, parent) {
     depthWrite: false,
   });
   const mesh = new THREE.Mesh(geometry, material);
-  mesh.name = "rift-animated-curling-breaker";
+  mesh.name = trainOffset ? "rift-animated-secondary-breaker" : "rift-animated-curling-breaker";
   mesh.renderOrder = 12;
   mesh.frustumCulled = false;
   parent.add(mesh);
-  return { mesh, geometry, material, along, rows, samples, waterY };
+  return { mesh, geometry, material, along, rows, samples, waterY, trainOffset };
 }
 
 function updateCurlingFace(face, t, storm, day, oceanHandle) {
@@ -373,14 +373,16 @@ function updateCurlingFace(face, t, storm, day, oceanHandle) {
   for (let i = 0; i <= along; i++) {
     const index = Math.floor((i % along) * samples.length / along);
     const sample = samples[index];
-    const localPhase = surfPhase(t, storm, (sample.phase || 0) * 0.009);
+    const localPhase = surfPhase(t, storm, (sample.phase || 0) * 0.009 + face.trainOffset);
     const shoaling = shoal(sample, waterY);
     const modulation = Math.sin(t * 0.59 + (sample.phase || 0) * 0.33) * 0.19 +
       Math.sin(i / along * 31.4 - t * 0.37) * 0.12;
     const front = 3.3 - localPhase * 4.2 + modulation;
+    // Separate staggered set: secondary wave is lower and becomes foam later.
+    const trainStrength = face.trainOffset ? 0.57 : 1.0;
     const growth = Math.max(0, Math.sin(Math.PI * Math.min(1, localPhase * 1.16)));
     const collapse = 1 - smooth01((localPhase - 0.64) / 0.32);
-    const height = (0.48 + storm * 0.33) * set *
+    const height = (0.66 + storm * 0.39) * trainStrength * set *
       (0.35 + shoaling * 0.65) * growth * collapse;
     const breaking = smooth01((localPhase - 0.38) / 0.30) *
       (1 - smooth01((localPhase - 0.83) / 0.17));
@@ -391,7 +393,8 @@ function updateCurlingFace(face, t, storm, day, oceanHandle) {
       // shoreward as the lip pitches. It stays above the water plane.
       const curl = smooth01((v - 0.48) / 0.52) *
         smooth01((localPhase - 0.24) / 0.34);
-      const radial = front + (1 - v) * 0.43 - curl * height * 0.40;
+      // Broad green face, curling pitch at the lip, and lower trailing foot.
+      const radial = front + (1 - v) * 0.57 - curl * height * 0.58;
       const k = (i * (rows + 1) + j) * 3;
       array[k] = sample.x + sample.outwardX * radial;
       array[k + 1] = waterY + 0.018 + height * v;
@@ -404,12 +407,23 @@ function updateCurlingFace(face, t, storm, day, oceanHandle) {
           Math.round((radial - LAND_RADIAL) /
             (SEA_RADIAL - LAND_RADIAL) * (face.foamRadial - 1))));
       const foam = clamp01(face.foamField?.[foamIndex] || 0);
-      const scatter = clamp01(breaking * lip * 0.77 + foam * lip * 0.26);
-      const transmission = sunlight * (0.15 + lip * 0.47) * (1 - scatter);
-      const shade = 0.58 + sunlight * 0.27 + v * 0.09;
-      rgb[k] = Math.min(1, waterR * shade + transmission * 0.16 + scatter * 0.82);
-      rgb[k + 1] = Math.min(1, waterG * shade + transmission * 0.43 + scatter * 0.88);
-      rgb[k + 2] = Math.min(1, waterB * shade + transmission * 0.36 + scatter * 0.89);
+      // Broken bands are fragmented alongshore rather than a uniform white
+      // stripe. Vertex colors remain GPU-interpolated and require no texture.
+      const fragments = 0.65 + 0.35 * Math.sin(i * 0.67 + t * 1.7) *
+        Math.sin(i * 1.37 - t * 0.91);
+      const scatter = clamp01((breaking * lip * 0.74 + foam * lip * 0.32) *
+        fragments);
+      const transmission = sunlight * (0.14 + lip * 0.62) * (1 - scatter);
+      const trough = 0.65 + 0.35 * smooth01(v * 1.4);
+      const shade = (0.46 + sunlight * 0.29 + v * 0.12) * trough;
+      const warmGlint = sunlight * Math.pow(Math.max(0, sunY), 2) *
+        (0.03 + lip * 0.07) * (1 - scatter);
+      rgb[k] = Math.min(1, waterR * shade + transmission * 0.13 +
+        warmGlint * 0.95 + scatter * 0.91);
+      rgb[k + 1] = Math.min(1, waterG * shade + transmission * 0.42 +
+        warmGlint * 0.72 + scatter * 0.95);
+      rgb[k + 2] = Math.min(1, waterB * shade + transmission * 0.34 +
+        warmGlint * 0.47 + scatter * 0.96);
     }
   }
   pos.needsUpdate = true;
@@ -532,6 +546,7 @@ export function installPersistentShoreFoam(surfHandle) {
   old.group.add(foamMesh);
   old.group.add(edgeMesh);
   const curlingFace = createCurlingFace(samples, surfHandle.waterY, old.group);
+  const secondaryFace = createCurlingFace(samples, surfHandle.waterY, old.group, 0.49);
 
   const handle = {
     samples,
@@ -544,6 +559,7 @@ export function installPersistentShoreFoam(surfHandle) {
     foamMesh,
     edgeMesh,
     curlingFace,
+    secondaryFace,
     geometry,
     basePositions,
     lastGeometryTime: -Infinity,
@@ -561,9 +577,9 @@ export function installPersistentShoreFoam(surfHandle) {
   };
 
   // Reuse the foam simulation buffer for whitewater development on the lip.
-  if (curlingFace) {
-    curlingFace.foamField = foam;
-    curlingFace.foamRadial = radial;
+  for (const face of [curlingFace, secondaryFace]) {
+    face.foamField = foam;
+    face.foamRadial = radial;
   }
   surfHandle.__riftPersistentFoamField = handle;
   writeTextures(handle, 1, 0);
@@ -596,6 +612,7 @@ export function updatePersistentShoreFoam(surfHandle, elapsed = 0, cameraY = Inf
   handle.foamMesh.visible = !underwater;
   handle.edgeMesh.visible = !underwater;
   if (handle.curlingFace) handle.curlingFace.mesh.visible = !underwater;
+  if (handle.secondaryFace) handle.secondaryFace.mesh.visible = !underwater;
   if (underwater) {
     // Avoid a huge catch-up after surfacing; still publish the active clock.
     handle.lastTime = t;
@@ -619,9 +636,10 @@ export function updatePersistentShoreFoam(surfHandle, elapsed = 0, cameraY = Inf
   if (steps > 0) writeTextures(handle, day, stormT);
   if (steps > 0 && t - handle.lastGeometryTime >= 1 / BREAKER_GEOMETRY_HZ) {
     updateBreakerGeometry(handle);
-    if (handle.curlingFace) {
-      handle.curlingFace.foamField = handle.foam; // buffer swaps every solver step
-      updateCurlingFace(handle.curlingFace, t, stormT, day, oceanHandle);
+    for (const face of [handle.curlingFace, handle.secondaryFace]) {
+      if (!face) continue;
+      face.foamField = handle.foam; // field ping-pongs each solver step
+      updateCurlingFace(face, t, stormT, day, oceanHandle);
     }
     handle.lastGeometryTime = t;
   }
@@ -635,6 +653,9 @@ export function disposePersistentShoreFoam(surfHandle) {
   try { handle.curlingFace?.mesh?.parent?.remove?.(handle.curlingFace.mesh); } catch (_) {}
   try { handle.curlingFace?.geometry?.dispose?.(); } catch (_) {}
   try { handle.curlingFace?.material?.dispose?.(); } catch (_) {}
+  try { handle.secondaryFace?.mesh?.parent?.remove?.(handle.secondaryFace.mesh); } catch (_) {}
+  try { handle.secondaryFace?.geometry?.dispose?.(); } catch (_) {}
+  try { handle.secondaryFace?.material?.dispose?.(); } catch (_) {}
   try { handle.geometry?.dispose?.(); } catch (_) {}
   try { handle.foamTexture?.dispose?.(); } catch (_) {}
   try { handle.edgeTexture?.dispose?.(); } catch (_) {}

@@ -5273,6 +5273,35 @@ function animate() {
   for (let i = 0; i < debugTimeScale; i++) {
     dayNight = updateDayNightCycle(dayNightCycle, dt);
   }
+  // Ocean Tuning sun controls are read live, never baked into the sky or
+  // shadow renderer. Manual mode overrides position AFTER the orbit updates
+  // but BEFORE shadow-follow recentering, so all sun-dependent effects see
+  // the same light direction. Auto restores the regular day/night orbit.
+  const lightTune = globalThis.__riftOceanTuning ?? {};
+  const isOceanLightingMode = currentBiome === "crystal" && (() => {
+    try { return localStorage.getItem("riftWaterGraphicsMode") === "experimental"; }
+    catch (_) { return false; }
+  })();
+  const tunedLighting = (key, fallback, min, max) => {
+    const n = Number(lightTune[key]);
+    return Number.isFinite(n) ? THREE.MathUtils.clamp(n, min, max) : fallback;
+  };
+  const manualSun = isOceanLightingMode &&
+    tunedLighting("sunManual", 0, 0, 1) >= 0.5;
+  const manualElevation = tunedLighting("sunElevation", 48, 5, 85);
+  if (manualSun) {
+    const azimuth = THREE.MathUtils.degToRad(
+      tunedLighting("sunAzimuth", 205, 0, 360));
+    const elevation = THREE.MathUtils.degToRad(manualElevation);
+    const orbitRadius = Math.max(100, dayNightCycle.sunBody.group.position.length());
+    const horizontal = Math.cos(elevation) * orbitRadius;
+    dayNightCycle.sunBody.group.position.set(
+      Math.sin(azimuth) * horizontal,
+      Math.sin(elevation) * orbitRadius,
+      Math.cos(azimuth) * horizontal
+    );
+    sun.position.copy(dayNightCycle.sunBody.group.position);
+  }
   // Fallback sky background — mutated in place (scene.background already
   // references this same Color object, set once at module init above),
   // blended from the day/night cycle's own current colors so it stays
@@ -6128,6 +6157,19 @@ function animate() {
   dayNightCycle.sunBody.core.material.opacity *= stormSunDim;
   dayNightCycle.sunBody.glow.material.opacity *= stormSunDim;
   dayNightCycle.sun.intensity *= Math.max(0.3, stormSunDim);
+  if (isOceanLightingMode) {
+    // Direct sunlight obeys the slider even if manual azimuth/elevation
+    // does not alter the clock or cloud-photo palette.
+    const sunPower = tunedLighting("sunPower", 1, 0, 3);
+    if (manualSun) {
+      // The automatic night cycle might otherwise leave sunlight at zero
+      // despite the manual sun visibly being above the horizon.
+      const manualDay = THREE.MathUtils.smoothstep(manualElevation, 5, 32);
+      dayNightCycle.sun.intensity = Math.max(
+        dayNightCycle.sun.intensity, manualDay * 1.35 * Math.max(0.3, stormSunDim));
+    }
+    dayNightCycle.sun.intensity *= sunPower;
+  }
   // Light scattered by the entire sky remains even when a cloud passes
   // across the directional sun. Supply that missing sky hemisphere only
   // in Crystal Shallows Experimental; keep Current and other levels exact.
@@ -6145,8 +6187,16 @@ function animate() {
   const skyWeather = THREE.MathUtils.clamp(wind.rainIntensity, 0, 1);
   const scatteredSky = (0.74 + 0.26 * skyCloud) *
     (1 - skyWeather * 0.34);
+  const skyFillScale = isOceanLightingMode
+    ? tunedLighting("skyFill", 1, 0, 3) : 1;
+  const indirectScale = isOceanLightingMode
+    ? tunedLighting("globalIllumination", 1, 0, 3) : 1;
+  // Manual sun supports sky lighting during an automatic-cycle night,
+  // without mutating the day/night clock, stars or skybox itself.
+  const lightDay = manualSun
+    ? THREE.MathUtils.smoothstep(manualElevation, 5, 32) : skyDay;
   riftOceanSkyFill.intensity = oceanSkyActive
-    ? skyDay * scatteredSky * 1.15 : 0;
+    ? lightDay * scatteredSky * 1.15 * skyFillScale : 0;
   if (oceanSkyActive && dayNight.skyZenith?.isColor &&
       dayNight.skyHorizon?.isColor) {
     // Hemisphere colors follow the real cycle instead of a fixed blue fill.
@@ -6164,12 +6214,14 @@ function animate() {
       const sandFactor = 1 - underwaterFraction;
       const bounceMix = THREE.MathUtils.clamp(0.32 + sandFactor * 0.53, 0, 1);
       riftOceanSkyFill.groundColor
-        .lerp(riftOceanSandBounce, bounceMix * 0.49 * skyDay)
-        .lerp(riftOceanWaterBounce, underwaterFraction * 0.42);
+        .lerp(riftOceanSandBounce,
+          THREE.MathUtils.clamp(bounceMix * 0.49 * lightDay * indirectScale, 0, 1))
+        .lerp(riftOceanWaterBounce,
+          THREE.MathUtils.clamp(underwaterFraction * 0.42 * indirectScale, 0, 1));
       // Soft diffuse skylight over dark-facing reef faces and water; do
       // not brighten directional sun highlights or the existing caustics.
-      riftOceanSkyFill.intensity *= 1.0 + 0.08 * skyDay *
-        (1 - skyWeather * 0.5);
+      riftOceanSkyFill.intensity *= 1.0 + 0.08 * lightDay *
+        (1 - skyWeather * 0.5) * indirectScale;
     }
   }
   // Per explicit "definitely major issues aligning the sun with the

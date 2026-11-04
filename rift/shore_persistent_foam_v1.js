@@ -16,6 +16,8 @@ const SEA_RADIAL = 3.8; // Give animated surf a wider offshore approach.
 const FIXED_DT = 1 / 30;
 const BREAKER_GEOMETRY_HZ = TOUCH_DEVICE ? 18 : 30;
 const MAX_STEPS = 3;
+const SHALLOW_START = 3.4;
+const SHALLOW_PEAK = 0.35;
 
 const DAY_FOAM = new THREE.Color(0xfffffb);
 const NIGHT_FOAM = new THREE.Color(0xb8c4c7);
@@ -143,9 +145,23 @@ function pulse01(p, center, halfWidth) {
   return 1 - smooth01(d / Math.max(halfWidth, 1e-4));
 }
 
+function surfPhase(t, storm, offset = 0) {
+  return ((t / Math.max(4.4, 5.7 - storm) + offset) % 1 + 1) % 1;
+}
+function surfSet(t) {
+  return THREE.MathUtils.clamp(0.73 + 0.19 * Math.sin(t * 0.11) +
+    0.11 * Math.sin(t * 0.047 + 1.9), 0.4, 1.03);
+}
+function shoal(sample, waterY) {
+  const depth = Math.max(0, waterY - sample.seaY);
+  const shallow = 1 - smooth01((depth - SHALLOW_PEAK) /
+    (SHALLOW_START - SHALLOW_PEAK));
+  const slope = clamp01(Math.max(0, sample.landY - sample.seaY) / 4);
+  return 0.22 + shallow * 0.65 + slope * 0.13;
+}
 function swashVelocity(simTime, storm) {
   const period = Math.max(4.4, 5.7 - storm * 1.0);
-  const p = ((simTime / period) % 1 + 1) % 1;
+  const p = surfPhase(simTime, storm);
   if (p < 0.22) {
     return -2.15 * smooth01(p / 0.22) * (1 + storm * 0.18);
   }
@@ -157,11 +173,11 @@ function swashVelocity(simTime, storm) {
 
 function breakerPulse(simTime, storm) {
   const period = Math.max(4.4, 5.7 - storm * 1.0);
-  const p = ((simTime / period) % 1 + 1) % 1;
+  const p = surfPhase(simTime, storm);
   const primary = pulse01(p, 0.10, 0.105);
   const secondary = pulse01(p, 0.49, 0.105) * 0.58;
   const third = pulse01(p, 0.78, 0.068) * 0.22;
-  return clamp01(primary + secondary + third);
+  return clamp01((primary + secondary + third) * surfSet(simTime));
 }
 
 function stepPersistentField(handle, dt, storm, oceanHandle) {
@@ -187,7 +203,7 @@ function stepPersistentField(handle, dt, storm, oceanHandle) {
       const v = j / (m - 1);
       const landness = 1 - v;
       const breakup = handle.breakup[i * m + j];
-      const decayRate = 0.115 + landness * 0.075 + (crossVel > 0 ? 0.020 : 0) + breakup * 0.018;
+      const decayRate = 0.085 + landness * 0.08 + (crossVel > 0 ? 0.026 : 0) + breakup * 0.022;
       const mixed = adv + (avg - adv) * (0.085 + storm * 0.025);
       dst[i * m + j] = Math.max(0, mixed * Math.exp(-decayRate * dt));
     }
@@ -207,10 +223,10 @@ function stepPersistentField(handle, dt, storm, oceanHandle) {
     const slope = clamp01(Math.max(0, sample.landY - sample.shoreY) / 1.15);
     const depth = clamp01(Math.max(0, handle.waterY - sample.seaY) / 1.65);
     const localBreak = Math.pow(Math.max(0, Math.sin(simTime * 1.64 + phase * 0.61 + 0.5)), 6) * 0.36;
-    const energy = clamp01((pulse * alongEnergy + localBreak) * (0.76 + slope * 0.18 + depth * 0.12) * amplitudeFactor * (1 + storm * 0.55));
+    const energy = clamp01((pulse * alongEnergy + localBreak * 0.75) * (0.44 + shoal(sample, handle.waterY) * 0.82 + slope * 0.10 + depth * 0.05) * amplitudeFactor * (1 + storm * 0.55));
 
     if (energy <= 0.002) continue;
-    const centerR = 1.12 + Math.sin(phase * 0.41 + simTime * 0.18) * 0.34;
+    const centerR = 3.1 - surfPhase(simTime, storm, phase * 0.009) * 4.35 + Math.sin(phase * 0.41 + simTime * 0.18) * 0.23;
     const centerJ = THREE.MathUtils.clamp(
       Math.round((centerR - LAND_RADIAL) / (SEA_RADIAL - LAND_RADIAL) * (m - 1)),
       0,
@@ -221,7 +237,7 @@ function stepPersistentField(handle, dt, storm, oceanHandle) {
       const j = Math.max(0, Math.min(m - 1, centerJ + dj));
       const w = Math.exp(-(dj * dj) / (radius * radius * 0.85 + 0.01));
       const idx = i * m + j;
-      dst[idx] = Math.min(1.5, dst[idx] + energy * w * dt * (4.2 + storm * 1.8));
+      dst[idx] = Math.min(1.5, dst[idx] + energy * w * (dj > 0 ? 0.48 : 1) * dt * (4.0 + storm * 1.8));
     }
   }
 
@@ -243,39 +259,43 @@ function updateBreakerGeometry(handle) {
   const positions = attribute.array;
   const columns = handle.radial + 1;
   const n = handle.along;
-  const phaseTime = handle.simTime;
+  const t = handle.simTime;
   const storm = handle.currentStorm || 0;
-  const crestHeight = 0.46 + storm * 0.31;
   for (let i = 0; i <= n; i++) {
     const sample = handle.samples[i % n];
     const phase = sample.phase || 0;
     const along = i / Math.max(1, n);
-    // Two staggered surf trains; modulation breaks the perfectly circular
-    // uniformity without introducing high-frequency vertex noise.
-    const modulation = Math.sin(phaseTime * 0.59 + phase * 0.33) * 0.18
-      + Math.sin(along * 31.4 - phaseTime * 0.37) * 0.12;
-    const cycle = ((phaseTime / (5.7 - storm) + phase * 0.009) % 1 + 1) % 1;
+    const energyDepth = shoal(sample, handle.waterY);
+    const modulation = Math.sin(t * 0.59 + phase * 0.33) * 0.19 +
+      Math.sin(along * 31.4 - t * 0.37) * 0.12;
+    const cycle = surfPhase(t, storm, phase * 0.009);
     for (let j = 0; j <= handle.radial; j++) {
-      const v = j / handle.radial;
-      const radial = LAND_RADIAL + (SEA_RADIAL - LAND_RADIAL) * v;
+      const radial = LAND_RADIAL + (SEA_RADIAL - LAND_RADIAL) * j / handle.radial;
       let lift = 0;
+      let pitch = 0;
       for (let train = 0; train < 2; train++) {
         const progress = (cycle + train * 0.49) % 1;
-        // Starts offshore, steepens near the lip and collapses at the beach.
         const front = 3.3 - progress * 4.2 + modulation;
-        const width = 0.46 + progress * 0.21;
-        const d = (radial - front) / width;
-        const ridge = Math.exp(-d * d * 2.8);
-        const steepness = Math.sin(Math.PI * Math.min(1, progress * 1.28));
-        lift += ridge * Math.max(0, steepness) *
-          (train === 0 ? 1 : 0.54) * crestHeight;
+        const d = (radial - front) / (0.48 + progress * 0.13);
+        // Asymmetric face: broad rear shoulder, narrow steep offshore lip.
+        const shoulder = Math.exp(-Math.pow(Math.min(d, 0) * 1.1, 2) * 1.7);
+        const lip = Math.exp(-Math.pow(Math.max(d, 0) * 2.25, 2) * 3);
+        const profile = d < 0 ? shoulder * 0.68 : lip;
+        const growth = Math.max(0, Math.sin(Math.PI * Math.min(1, progress * 1.16)));
+        const collapse = 1 - smooth01((progress - 0.64) / 0.32);
+        const energy = growth * collapse * surfSet(t) * (0.35 + energyDepth * 0.65) *
+          (train === 0 ? 1 : 0.57);
+        lift += profile * energy * (0.53 + storm * 0.34);
+        pitch += Math.exp(-d * d * 5) * energy *
+          smooth01((progress - 0.28) / 0.43) * 0.15;
       }
       const vertex = (i * columns + j) * 3;
+      positions[vertex] = base[vertex] - sample.outwardX * pitch;
       positions[vertex + 1] = base[vertex + 1] + lift;
+      positions[vertex + 2] = base[vertex + 2] - sample.outwardZ * pitch;
     }
   }
   attribute.needsUpdate = true;
-  // Position-only deform: keep existing static normals; foam remains matte.
   handle.geometry.computeBoundingSphere();
 }
 
@@ -291,7 +311,7 @@ function writeTextures(handle, day, storm) {
       const idx = i * m + j;
       const f = foam[idx];
       const porous = 0.76 + handle.breakup[idx] * 0.24;
-      let alpha = smooth01((f * porous - 0.025) / 0.37);
+      let alpha = smooth01((f * porous - 0.025) / 0.44);
       alpha = Math.pow(alpha, 0.72);
 
       const landNeighbor = foam[i * m + Math.max(0, j - 1)];

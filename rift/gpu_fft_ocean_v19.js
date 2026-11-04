@@ -65,6 +65,8 @@ export function updateGPUFFTOceanVisuals(
   storm = 0,
   day = 1,
 ) {
+  // Advance the authoritative surf state before the older swash sheet reads it.
+  updatePersistentShoreFoam(handle?.fftSurfSystem, elapsed, cameraY, storm, day, handle);
   oceanV18.updateGPUFFTOceanVisuals(
     handle,
     elapsed,
@@ -81,7 +83,6 @@ export function updateGPUFFTOceanVisuals(
     day,
   );
   applyReferenceOceanPalette(handle);
-  updatePersistentShoreFoam(handle?.fftSurfSystem, elapsed, cameraY, storm, day, handle);
   // Publish the shoreline solver's live wave state to the already compiled
   // Water Pro shader. Same phase drives crest geometry, persistent whitewater,
   // and depth-localized breaker shading, without recompiling shader nodes.

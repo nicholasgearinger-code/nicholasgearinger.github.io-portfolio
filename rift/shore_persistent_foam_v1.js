@@ -311,6 +311,8 @@ function createCurlingFace(samples, waterY, parent) {
   const rows = TOUCH_DEVICE ? 7 : 10;
   const positions = new Float32Array((along + 1) * (rows + 1) * 3);
   const uvs = new Float32Array((along + 1) * (rows + 1) * 2);
+  const colors = new Float32Array((along + 1) * (rows + 1) * 3);
+  colors.fill(0.75);
   const indices = [];
   for (let i = 0; i <= along; i++) {
     for (let j = 0; j <= rows; j++) {
@@ -326,16 +328,18 @@ function createCurlingFace(samples, waterY, parent) {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   geometry.setIndex(indices);
   // Physical translucency from ordinary alpha blending: no screen capture,
   // true volumetric refraction, or expensive transmission render path.
   const material = new THREE.MeshStandardMaterial({
-    color: 0x4cb8b3,
-    emissive: 0x07363e,
-    emissiveIntensity: 0.09,
+    color: 0xffffff,
+    vertexColors: true,
+    emissive: 0x062c32,
+    emissiveIntensity: 0.055,
     transparent: true,
-    opacity: TOUCH_DEVICE ? 0.61 : 0.69,
-    roughness: 0.28,
+    opacity: TOUCH_DEVICE ? 0.68 : 0.75,
+    roughness: 0.21,
     metalness: 0,
     side: THREE.DoubleSide,
     depthWrite: false,
@@ -348,12 +352,24 @@ function createCurlingFace(samples, waterY, parent) {
   return { mesh, geometry, material, along, rows, samples, waterY };
 }
 
-function updateCurlingFace(face, t, storm, day) {
+function updateCurlingFace(face, t, storm, day, oceanHandle) {
   if (!face) return;
   const { along, rows, samples, geometry, waterY } = face;
   const pos = geometry.getAttribute("position");
   const array = pos.array;
+  const colors = geometry.getAttribute("color");
+  const rgb = colors.array;
   const set = surfSet(t);
+  // Use the same sun vector and tropical palette that drive the FFT water.
+  // No texture captures, extra shader variants, or mobile transmission pass.
+  const sun = oceanHandle?.fftLightDirection?.value;
+  const sunY = sun ? clamp01(Math.max(0, sun.y)) : 0.7;
+  const sunlight = clamp01(day) * (0.32 + 0.68 * sunY) * (1 - storm * 0.48);
+  const shallow = oceanHandle?.fftV9ShallowColor?.value;
+  const waterR = shallow?.isColor ? shallow.r : 0.22;
+  const waterG = shallow?.isColor ? shallow.g : 0.69;
+  const waterB = shallow?.isColor ? shallow.b : 0.68;
+  let totalBreak = 0;
   for (let i = 0; i <= along; i++) {
     const index = Math.floor((i % along) * samples.length / along);
     const sample = samples[index];
@@ -366,6 +382,9 @@ function updateCurlingFace(face, t, storm, day) {
     const collapse = 1 - smooth01((localPhase - 0.64) / 0.32);
     const height = (0.48 + storm * 0.33) * set *
       (0.35 + shoaling * 0.65) * growth * collapse;
+    const breaking = smooth01((localPhase - 0.38) / 0.30) *
+      (1 - smooth01((localPhase - 0.83) / 0.17));
+    totalBreak += breaking * height;
     for (let j = 0; j <= rows; j++) {
       const v = j / rows;
       // A connected wave face bends inward at its top, then spills
@@ -377,12 +396,30 @@ function updateCurlingFace(face, t, storm, day) {
       array[k] = sample.x + sample.outwardX * radial;
       array[k + 1] = waterY + 0.018 + height * v;
       array[k + 2] = sample.z + sample.outwardZ * radial;
+      // Thin backlit crest -> turquoise; collapsing lip -> scattering foam.
+      // The breakup field is already calculated for the persistent foam mesh.
+      const lip = smooth01((v - 0.66) / 0.34);
+      const cells = Math.max(1, Math.floor(samples.length / along));
+      const foamIndex = (index % samples.length) * face.foamRadial +
+        Math.max(0, Math.min(face.foamRadial - 1,
+          Math.round((radial - LAND_RADIAL) /
+            (SEA_RADIAL - LAND_RADIAL) * (face.foamRadial - 1))));
+      const foam = clamp01(face.foamField?.[foamIndex] || 0);
+      const scatter = clamp01(breaking * lip * 0.77 + foam * lip * 0.26);
+      const transmission = sunlight * (0.15 + lip * 0.47) * (1 - scatter);
+      const shade = 0.58 + sunlight * 0.27 + v * 0.09;
+      rgb[k] = Math.min(1, waterR * shade + transmission * 0.16 + scatter * 0.82);
+      rgb[k + 1] = Math.min(1, waterG * shade + transmission * 0.43 + scatter * 0.88);
+      rgb[k + 2] = Math.min(1, waterB * shade + transmission * 0.36 + scatter * 0.89);
     }
   }
   pos.needsUpdate = true;
-  geometry.computeVertexNormals();
+  colors.needsUpdate = true;
+  geometry.computeVertexNormals(); // updated face normals drive actual sun highlights
   geometry.computeBoundingSphere();
-  face.material.opacity = (TOUCH_DEVICE ? 0.61 : 0.69) *
+  const foamFactor = clamp01(totalBreak / Math.max(1, along));
+  face.material.roughness = THREE.MathUtils.lerp(0.21, 0.49, foamFactor);
+  face.material.opacity = (TOUCH_DEVICE ? 0.68 : 0.75) *
     (0.38 + 0.62 * clamp01(day));
 }
 
@@ -524,6 +561,11 @@ export function installPersistentShoreFoam(surfHandle) {
     breakerState: { phase: 0, set: 0.73, front: 3.3, pulse: 0, strength: 0 },
   };
 
+  // Reuse the foam simulation buffer for whitewater development on the lip.
+  if (curlingFace) {
+    curlingFace.foamField = foam;
+    curlingFace.foamRadial = radial;
+  }
   surfHandle.__riftPersistentFoamField = handle;
   writeTextures(handle, 1, 0);
   return handle;
@@ -578,7 +620,10 @@ export function updatePersistentShoreFoam(surfHandle, elapsed = 0, cameraY = Inf
   if (steps > 0) writeTextures(handle, day, stormT);
   if (steps > 0 && t - handle.lastGeometryTime >= 1 / BREAKER_GEOMETRY_HZ) {
     updateBreakerGeometry(handle);
-    updateCurlingFace(handle.curlingFace, t, stormT, day);
+    if (handle.curlingFace) {
+      handle.curlingFace.foamField = handle.foam; // buffer swaps every solver step
+      updateCurlingFace(handle.curlingFace, t, stormT, day, oceanHandle);
+    }
     handle.lastGeometryTime = t;
   }
 }

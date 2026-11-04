@@ -146,8 +146,9 @@ function configureSheetMaterials(handle) {
 
   if (wash?.material) {
     wash.material.opacity = 0.16;
-    wash.material.roughness = 0.16;
-    wash.material.envMapIntensity = 0.28;
+    wash.material.roughness = 0.12;
+    wash.material.metalness = 0;
+    wash.material.envMapIntensity = 0.48;
   }
 
   const bubbles = handle.__riftBubbleOverlay;
@@ -263,8 +264,12 @@ export function updateReferenceSwashSheet(surfHandle, elapsed = 0, storm = 0, da
     // Transparent green-blue water wash: modest persistence after each
     // breaker, while the true foam is drawn by the persistent foam field.
     const set = handle.__riftPersistentFoamField?.breakerState?.set ?? 0.73;
-    wash.material.opacity = Math.min(0.26, 0.11 + dayT * 0.065 +
+    const sunEnergy = clamp01((globalThis.__riftSolarState?.directSunIntensity ?? 4) / 6);
+    wash.material.opacity = Math.min(0.28, 0.11 + dayT * 0.075 +
       stormT * 0.035 + set * 0.035);
+    // Thin film receives glancing warm sky highlights; no reflection target.
+    wash.material.roughness = THREE.MathUtils.lerp(0.18, 0.09, sunEnergy * dayT);
+    wash.material.envMapIntensity = 0.36 + dayT * 0.17;
   }
 
   if (body?.material) {

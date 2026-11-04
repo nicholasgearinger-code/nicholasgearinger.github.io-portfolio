@@ -261,24 +261,30 @@ function createUnifiedSurfaceAdapter({
   // Sky and soft cloud structure are transmitted through the aperture,
   // modulated by a broad caustic-like field at the actual water surface.
   // Avoid thresholding the repeating triangle normals into isolated ovals.
+  // Gently expand the broad ceiling shapes without letting the FFT cell
+  // slope turn into bright spot thresholds. Continuous, world-space waves.
   const ceilingField = clamp(
-    sin(ceilingA).mul(cos(ceilingB)).mul(0.23)
-      .add(sin(ceilingC).mul(0.08))
-      .add(waveFacet.mul(0.29)).add(0.47), 0, 1
+    sin(ceilingA).mul(cos(ceilingB)).mul(0.30)
+      .add(sin(ceilingC).mul(0.095))
+      .add(waveFacet.mul(0.21)).add(0.50), 0, 1
   );
+  // Continuous modulation, not the hard threshold that caused oval grids.
   const ceilingGlow = richCeilingEnabled
-    ? float(0.82).add(smoothstep(float(0.20), float(0.82), ceilingField).mul(0.38))
+    ? float(0.80).add(ceilingField.mul(0.50))
     : float(1);
   const overheadColor = skyRadiance.mul(undersideThroughput)
     .add(color(0x0b6478).mul(vec3(1).sub(undersideThroughput)))
     .mul(ceilingGlow);
   // Outside the Snell cone, mostly see the water's dark internal reflection
   // plus a restrained reflected cloud contribution. No solid black cutoff.
-  const internalReflection = mix(color(0x063a50),
-    reflectionRadiance.mul(0.48).add(color(0x074458)),
-    clamp(tir.mul(nearSurface), 0, 0.55));
+  const internalReflection = mix(color(0x08475b),
+    reflectionRadiance.mul(0.39).add(color(0x10556a)),
+    clamp(tir.mul(nearSurface), 0, 0.46));
+  // Preserve a trace of diffuse light beyond the Snell window; hard
+  // zeroing transmitted sky created a flat horizontal dark/bright band.
   const skylightWindow = snell.mul(nearSurface)
-    .mul(float(0.70).add(transmissionDetail.mul(0.25)));
+    .mul(float(0.74).add(transmissionDetail.mul(0.23)))
+    .add(float(0.055).mul(nearSurface).mul(skyDaylight));
   // Sun transmission is a wide, soft cone with moving bright wave facets;
   // avoid narrow white strips and the previous additive highlight stacking.
   const sunFacets = pow(clamp(dot(ceilingNormal, sun), 0, 1), float(4));

@@ -1601,6 +1601,15 @@ window.addEventListener("keydown", (e) => {
 
 const ambientLight = new THREE.AmbientLight(0x8899bb, 0.65);
 scene.add(ambientLight);
+// Experimental ocean: a hemispheric sky/ground fill reproduces light from
+// the broad sky dome. Unlike raising exposure, it lifts dark-facing water,
+// reef and terrain without clipping sunny wave glints. No shadows or passes.
+const riftOceanSkyFill = new THREE.HemisphereLight(0xb9e8f7, 0x1b5263, 0);
+scene.add(riftOceanSkyFill);
+const riftOceanSkyFillEnabled = (() => {
+  try { return new URLSearchParams(location.search).get("riftDebug") !== "oldskylight"; }
+  catch (_) { return true; }
+})();
 const sun = new THREE.DirectionalLight(0xffffff, 1.1);
 sun.position.set(60, 100, 40);
 sun.castShadow = true;
@@ -5954,6 +5963,33 @@ function animate() {
   dayNightCycle.sunBody.core.material.opacity *= stormSunDim;
   dayNightCycle.sunBody.glow.material.opacity *= stormSunDim;
   dayNightCycle.sun.intensity *= Math.max(0.3, stormSunDim);
+  // Light scattered by the entire sky remains even when a cloud passes
+  // across the directional sun. Supply that missing sky hemisphere only
+  // in Crystal Shallows Experimental; keep Current and other levels exact.
+  // Smooth daylight horizon so nighttime isn't artificially illuminated.
+  const oceanSkyMode = (() => {
+    try { return localStorage.getItem("riftWaterGraphicsMode") === "experimental"; }
+    catch (_) { return false; }
+  })();
+  const oceanSkyActive = riftOceanSkyFillEnabled &&
+    currentBiome === "crystal" && oceanSkyMode;
+  const skyDay = THREE.MathUtils.smoothstep(
+    THREE.MathUtils.clamp(dayNight.dayAmount, 0, 1), 0.07, 0.58
+  );
+  const skyCloud = THREE.MathUtils.clamp(sunOcclusionForCaustics, 0, 1);
+  const skyWeather = THREE.MathUtils.clamp(wind.rainIntensity, 0, 1);
+  const scatteredSky = (0.74 + 0.26 * skyCloud) *
+    (1 - skyWeather * 0.34);
+  riftOceanSkyFill.intensity = oceanSkyActive
+    ? skyDay * scatteredSky * 1.15 : 0;
+  if (oceanSkyActive && dayNight.skyZenith?.isColor &&
+      dayNight.skyHorizon?.isColor) {
+    // Hemisphere colors follow the real cycle instead of a fixed blue fill.
+    riftOceanSkyFill.color.copy(dayNight.skyZenith)
+      .lerp(dayNight.skyHorizon, 0.38);
+    riftOceanSkyFill.groundColor.copy(dayNight.skyHorizon)
+      .lerp(dayNight.skyZenith, 0.24).multiplyScalar(0.33);
+  }
   // Per explicit "definitely major issues aligning the sun with the
   // skybox... let's make it invisible but still retain all effects and
   // let the background sun fake it" — the real sun's drawn disc/glow/

@@ -229,6 +229,9 @@ export function updateReferenceSwashSheet(surfHandle, elapsed = 0, storm = 0, da
   polishMilkyBase(surfHandle, elapsed, storm, day);
   const handle = surfHandle?.__riftShoreFoamLayers;
   if (!handle) return;
+  // Surf-level field lives on surfHandle, not on the nested layer group.
+  // Pass the live state through before deforming the wash ribbon.
+  handle.__riftPersistentFoamField = surfHandle.__riftPersistentFoamField ?? null;
 
   configureSheetMaterials(handle);
   animateLayerGeometry(handle, Number.isFinite(elapsed) ? elapsed : 0, storm);

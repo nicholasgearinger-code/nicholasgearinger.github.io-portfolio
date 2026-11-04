@@ -82,6 +82,17 @@ export function updateGPUFFTOceanVisuals(
   );
   applyReferenceOceanPalette(handle);
   updatePersistentShoreFoam(handle?.fftSurfSystem, elapsed, cameraY, storm, day, handle);
+  // Publish the shoreline solver's live wave state to the already compiled
+  // Water Pro shader. Same phase drives crest geometry, persistent whitewater,
+  // and depth-localized breaker shading, without recompiling shader nodes.
+  const surf = handle?.__riftBreakerState;
+  if (surf) {
+    if (handle.fftV9SurfPhase) handle.fftV9SurfPhase.value = surf.phase;
+    if (handle.fftV9SurfSet) handle.fftV9SurfSet.value = surf.set;
+    if (handle.fftV9SurfPulse) handle.fftV9SurfPulse.value = surf.pulse;
+    if (handle.fftV9SurfFront) handle.fftV9SurfFront.value = surf.front;
+    if (handle.fftV9SurfStrength) handle.fftV9SurfStrength.value = surf.strength;
+  }
 }
 
 export function updateGPUFFTOceanRipples(handle, playerPos, cameraY, dt = 1 / 60) {

@@ -251,7 +251,23 @@ const riftWaterProfile = globalThis.__riftWaterTestMode === "desktop"
 const riftSSRIsMobile = riftWaterProfile === "mobile";
 const riftForcedDesktopWater = globalThis.__riftWaterTestForced === true && riftWaterProfile === "desktop";
 const riftSSRQualityTier = riftForcedDesktopWater && riftSSRTier === "low" ? "medium" : riftSSRTier;
-const riftSSREnabled = riftWaterProfile === "desktop" && riftSSRQualityTier !== "low" && getEffectiveValue("reflectionEnabled") !== false;
+// Scene-aware mobile reflections are a deliberately opt-in WebGPU trial.
+// The earlier legacy mirror/refraction renderer.render() path caused encoder
+// failures on iPhone; this uses the existing r185 scene pass SSR node instead.
+// Enable: ?riftDebug=scenereflections  Disable: remove the parameter.
+// Do not increase the default mobile GPU budget until on-device testing.
+const riftMobileSSRTrial = (() => {
+  try {
+    return riftSSRIsMobile &&
+      localStorage.getItem("riftWaterGraphicsMode") === "experimental" &&
+      new URLSearchParams(location.search).get("riftDebug") === "scenereflections";
+  } catch (_) { return false; }
+})();
+const riftSSREnabled = (
+  (riftWaterProfile === "desktop" && riftSSRQualityTier !== "low" &&
+    getEffectiveValue("reflectionEnabled") !== false) ||
+  riftMobileSSRTrial
+);
 let riftSSRPass = null;
 let riftSSRBaseIntensity = 0;
 if (riftSSREnabled) {
@@ -276,13 +292,15 @@ if (riftSSREnabled) {
     roughnessNode: riftSceneMetalRough.g,
   });
   if (riftSSRIsMobile) {
-    riftSSRBaseIntensity = 0.30;
-    riftSSRPass.resolutionScale = 0.30;
-    riftSSRPass.quality.value = 0.14;
+    // Conservative quarter-resolution SSR, short rays and minimal tracing
+    // quality. Limited to above-water viewing by the existing submerged gate.
+    riftSSRBaseIntensity = 0.20;
+    riftSSRPass.resolutionScale = 0.25;
+    riftSSRPass.quality.value = 0.10;
     riftSSRPass.blurQuality = 1;
-    riftSSRPass.maxDistance.value = 0.30;
+    riftSSRPass.maxDistance.value = 0.22;
     riftSSRPass.intensity.value = riftSSRBaseIntensity;
-    riftSSRPass.thickness.value = 0.036;
+    riftSSRPass.thickness.value = 0.032;
   } else {
     riftSSRBaseIntensity = riftSSRQualityTier === "high" ? 0.82 : 0.58;
     riftSSRPass.quality.value = riftSSRQualityTier === "high" ? 0.48 : 0.28;

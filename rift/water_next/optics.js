@@ -79,8 +79,31 @@ function createUnifiedSurfaceAdapter({
   // varying underside normal can turn those cells into a bright oval grid.
   // Keep full wave normals above water; below use a broader optical normal
   // for sky transmission and internal reflection (geometry stays untouched).
-  const undersideNormal = mix(n, vec3(0, 1, 0),
+  const oldUndersideNormal = mix(n, vec3(0, 1, 0),
     submerged.mul(0.50)).normalize();
+  // Phase B/C ceiling: three wave scales, one coherent optical normal.
+  // Low-frequency phase directions are deliberately oblique, not aligned
+  // to the grid. Neither a tiling texture nor extra FFT fetches are used.
+  const ceilingA = p.x.mul(0.37).add(p.z.mul(0.19)).sub(time.mul(0.43));
+  const ceilingB = p.x.mul(-0.23).add(p.z.mul(0.41)).add(time.mul(0.36));
+  const ceilingC = p.x.mul(0.91).sub(p.z.mul(0.76)).add(time.mul(0.79));
+  const broadCeiling = vec3(
+    sin(ceilingA).mul(0.066).add(cos(ceilingB).mul(0.048)),
+    float(0),
+    cos(ceilingA.mul(0.88)).mul(0.061).sub(sin(ceilingB).mul(0.044))
+  );
+  const smallCeiling = vec3(
+    sin(ceilingC).mul(0.015),
+    float(0),
+    cos(ceilingC.mul(0.83)).mul(0.014)
+  );
+  const undersideNormal = oldUndersideNormal
+    .add(broadCeiling).add(smallCeiling).normalize();
+  const richCeilingEnabled = (() => {
+    try { return new URLSearchParams(location.search).get("riftDebug") !== "oldceiling"; }
+    catch (_) { return true; }
+  })();
+  const ceilingNormal = richCeilingEnabled ? undersideNormal : oldUndersideNormal;
 
   // Fresnel from the water/air interface; use ONE reflectance weighting.
   const f0 = float(Math.pow((WATER_IOR - 1) / (WATER_IOR + 1), 2));
@@ -217,8 +240,13 @@ function createUnifiedSurfaceAdapter({
   // The FFT normal bends this boundary; small surface facets modulate it
   // instead of animating an unrelated blue overlay over the whole scene.
   const undersideRay = view.negate();
-  const undersideIncidence = clamp(dot(undersideNormal, undersideRay), 0, 1);
-  const snell = smoothstep(float(0.635), float(0.705), undersideIncidence);
+  const undersideIncidence = clamp(dot(ceilingNormal, undersideRay), 0, 1);
+  const snell = richCeilingEnabled
+    ? smoothstep(float(0.607), float(0.745), undersideIncidence)
+      .mul(0.78).add(
+        smoothstep(float(0.52), float(0.87), undersideIncidence).mul(0.22)
+      )
+    : smoothstep(float(0.635), float(0.705), undersideIncidence);
   const tir = float(1).sub(snell);
   const cameraDepth = clamp(waterY.sub(cameraYUniform), 0, 80);
   const nearSurface = exp(cameraDepth.mul(-0.048));
@@ -227,25 +255,38 @@ function createUnifiedSurfaceAdapter({
   // FFT-facing normal determines sky transmission. The fine waves only
   // fracture that image and its light bands, rather than increasing opacity.
   const waveFacet = clamp(
-    undersideNormal.y.mul(0.77).add(abs(undersideNormal.x).mul(0.12))
-      .add(abs(undersideNormal.z).mul(0.11)), 0, 1);
+    ceilingNormal.y.mul(0.77).add(abs(ceilingNormal.x).mul(0.12))
+      .add(abs(ceilingNormal.z).mul(0.11)), 0, 1);
   const transmissionDetail = smoothstep(float(0.36), float(0.94), waveFacet);
+  // Sky and soft cloud structure are transmitted through the aperture,
+  // modulated by a broad caustic-like field at the actual water surface.
+  // Avoid thresholding the repeating triangle normals into isolated ovals.
+  const ceilingField = clamp(
+    sin(ceilingA).mul(cos(ceilingB)).mul(0.23)
+      .add(sin(ceilingC).mul(0.08))
+      .add(waveFacet.mul(0.29)).add(0.47), 0, 1
+  );
+  const ceilingGlow = richCeilingEnabled
+    ? float(0.82).add(smoothstep(float(0.20), float(0.82), ceilingField).mul(0.38))
+    : float(1);
   const overheadColor = skyRadiance.mul(undersideThroughput)
-    .add(color(0x0b6478).mul(vec3(1).sub(undersideThroughput)));
+    .add(color(0x0b6478).mul(vec3(1).sub(undersideThroughput)))
+    .mul(ceilingGlow);
   // Outside the Snell cone, mostly see the water's dark internal reflection
   // plus a restrained reflected cloud contribution. No solid black cutoff.
   const internalReflection = mix(color(0x063a50),
     reflectionRadiance.mul(0.48).add(color(0x074458)),
     clamp(tir.mul(nearSurface), 0, 0.55));
   const skylightWindow = snell.mul(nearSurface)
-    .mul(float(0.66).add(transmissionDetail.mul(0.24)));
+    .mul(float(0.70).add(transmissionDetail.mul(0.25)));
   // Sun transmission is a wide, soft cone with moving bright wave facets;
   // avoid narrow white strips and the previous additive highlight stacking.
-  const sunFacets = pow(clamp(dot(undersideNormal, sun), 0, 1), float(5));
+  const sunFacets = pow(clamp(dot(ceilingNormal, sun), 0, 1), float(4));
   const transmittedSun = sunFacets.mul(day).mul(sunlightGain)
     .mul(nearSurface).mul(snell).mul(undersideGain);
   const underside = mix(internalReflection, overheadColor, skylightWindow)
-    .add(color(0x80cfc9).mul(transmittedSun).mul(0.24));
+    .add(color(0x80cfc9).mul(transmittedSun)
+      .mul(ceilingGlow).mul(0.24));
   const total = mix(underside, waterSurface, above);
 
   // Native physical BRDF handles the direct sunlight specular highlight.

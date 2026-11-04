@@ -432,6 +432,7 @@ export function installPersistentShoreFoam(surfHandle) {
     lastTime: null,
     accumulator: 0,
     simTime: 0,
+    breakerState: { phase: 0, set: 0.73, front: 3.3, pulse: 0, strength: 0 },
   };
 
   surfHandle.__riftPersistentFoamField = handle;
@@ -445,21 +446,39 @@ export function updatePersistentShoreFoam(surfHandle, elapsed = 0, cameraY = Inf
 
   hideLegacyFoam(surfHandle);
 
+  const t = Number.isFinite(elapsed) ? elapsed : 0;
+  // One authoritative surf clock for the foam, pitching geometry and the
+  // FFT material uniforms. Keep advancing even while the camera is submerged.
+  handle.simTime = t;
+  const stormT = clamp01(storm);
+  const phase = surfPhase(t, stormT);
+  const set = surfSet(t);
+  const pulse = breakerPulse(t, stormT);
+  const state = handle.breakerState;
+  state.phase = phase;
+  state.set = set;
+  state.front = 3.3 - phase * 4.2;
+  state.pulse = pulse;
+  state.strength = clamp01(set * (0.55 + pulse * 0.45) * (1 + stormT * 0.25));
+  if (oceanHandle) oceanHandle.__riftBreakerState = state;
+
   const underwater = Number.isFinite(cameraY) && cameraY < handle.waterY - 0.10;
   handle.foamMesh.visible = !underwater;
   handle.edgeMesh.visible = !underwater;
-  if (underwater) return;
+  if (underwater) {
+    // Avoid a huge catch-up after surfacing; still publish the active clock.
+    handle.lastTime = t;
+    handle.accumulator = 0;
+    return;
+  }
 
-  const t = Number.isFinite(elapsed) ? elapsed : 0;
   if (handle.lastTime == null) handle.lastTime = t;
   const frameDt = Math.max(0, Math.min(0.10, t - handle.lastTime));
   handle.lastTime = t;
   handle.accumulator += frameDt;
 
   let steps = 0;
-  const stormT = clamp01(storm);
   while (handle.accumulator >= FIXED_DT && steps < MAX_STEPS) {
-    handle.simTime += FIXED_DT;
     stepPersistentField(handle, FIXED_DT, stormT, oceanHandle);
     handle.accumulator -= FIXED_DT;
     steps++;

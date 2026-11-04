@@ -173,21 +173,39 @@ function createUnifiedSurfaceAdapter({
     float(0.038), shallowTransmittance.mul(0.90)
   ).mul(float(0.70).add(refractionGain.mul(0.30)));
 
-  // Water-to-air Snell window: retain detailed surface orientation looking
-  // upward, and diminish light at internal-reflection grazing angles.
-  const undersideIncidence = clamp(dot(n, view.negate()), 0, 1);
-  const snell = smoothstep(float(0.63), float(0.72), undersideIncidence);
+  // Phase B: a water-to-air Snell window seen from beneath the surface.
+  // At n_water=1.333 the critical incidence is cos(theta_c)~0.661.
+  // The FFT normal bends this boundary; small surface facets modulate it
+  // instead of animating an unrelated blue overlay over the whole scene.
+  const undersideRay = view.negate();
+  const undersideIncidence = clamp(dot(n, undersideRay), 0, 1);
+  const snell = smoothstep(float(0.635), float(0.705), undersideIncidence);
+  const tir = float(1).sub(snell);
   const cameraDepth = clamp(waterY.sub(cameraYUniform), 0, 80);
-  const transmittedSun = pow(ndl, float(3))
-    .mul(day).mul(sunlightGain)
-    .mul(exp(cameraDepth.mul(-0.065)));
+  const nearSurface = exp(cameraDepth.mul(-0.048));
   const undersideThroughput = exp(vec3(-0.105, -0.047, -0.023)
     .mul(cameraDepth.div(clarityGain.max(float(0.35)))));
-  const undersideSky = skyRadiance.mul(undersideThroughput)
-    .add(color(0x08445c).mul(vec3(1).sub(undersideThroughput)));
-  const underside = mix(color(0x06394e), undersideSky, snell.mul(0.84))
-    .add(color(0x64c9c0).mul(transmittedSun)
-      .mul(snell).mul(undersideGain).mul(0.19));
+  // FFT-facing normal determines sky transmission. The fine waves only
+  // fracture that image and its light bands, rather than increasing opacity.
+  const waveFacet = clamp(
+    n.y.mul(0.77).add(abs(n.x).mul(0.12)).add(abs(n.z).mul(0.11)), 0, 1);
+  const transmissionDetail = smoothstep(float(0.36), float(0.94), waveFacet);
+  const overheadColor = skyRadiance.mul(undersideThroughput)
+    .add(color(0x0b6478).mul(vec3(1).sub(undersideThroughput)));
+  // Outside the Snell cone, mostly see the water's dark internal reflection
+  // plus a restrained reflected cloud contribution. No solid black cutoff.
+  const internalReflection = mix(color(0x063a50),
+    reflectionRadiance.mul(0.48).add(color(0x074458)),
+    clamp(tir.mul(nearSurface), 0, 0.55));
+  const skylightWindow = snell.mul(nearSurface)
+    .mul(float(0.66).add(transmissionDetail.mul(0.24)));
+  // Sun transmission is a wide, soft cone with moving bright wave facets;
+  // avoid narrow white strips and the previous additive highlight stacking.
+  const sunFacets = pow(clamp(dot(n, sun), 0, 1), float(5));
+  const transmittedSun = sunFacets.mul(day).mul(sunlightGain)
+    .mul(nearSurface).mul(snell).mul(undersideGain);
+  const underside = mix(internalReflection, overheadColor, skylightWindow)
+    .add(color(0x80cfc9).mul(transmittedSun).mul(0.24));
   const total = mix(underside, waterSurface, above);
 
   // Native physical BRDF handles the direct sunlight specular highlight.

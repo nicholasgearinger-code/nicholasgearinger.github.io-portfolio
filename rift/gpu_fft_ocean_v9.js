@@ -386,9 +386,16 @@ function installWaterProOptics(handle) {
   );
   material.roughnessNode = mix(microRoughness, float(0.62),
     combinedFoam.mul(0.90));
+  // A restrained daylight volume-fill prevents the body from becoming a
+  // black mirror on iOS when no scene refraction texture is supplied. It
+  // follows the same depth palette and does not brighten night/underwater.
+  const daylightFill = depthColor.mul(day)
+    .mul(float(0.22).add(shallow.mul(0.12)))
+    .mul(float(1).sub(underwater));
   material.emissiveNode = originalEmissive
+    .add(daylightFill)
     .add(crestColor.mul(translucency.mul(0.012)))
-    .add(sunColor.mul(glitter.mul(0.014)))
+    .add(sunColor.mul(glitter.mul(0.012)))
     .add(foamColor.mul(brokenFoam.mul(day).mul(0.016)));
 
   // MeshPhysicalNodeMaterial supports per-pixel transmission/thickness. Shallow
@@ -398,7 +405,14 @@ function installWaterProOptics(handle) {
     float(0.86),
     clamp(shallow.mul(0.46).add(translucency.mul(0.75)), 0, 0.72),
   ).mul(float(1).sub(combinedFoam.mul(0.94)));
-  material.transmissionNode = mix(aboveTransmission, float(0.94), underwater);
+  // WebKit/mobile uses the direct shaded surface. Physical transmission
+  // without a dependable scene-color refraction path darkens the entire
+  // ocean while leaving only the solar reflection visible. Keep physically
+  // detailed transmission on desktop; the underwater view already has its
+  // own explicit FFT normal/refraction shading in colorNode.
+  material.transmissionNode = TOUCH_DEVICE
+    ? float(0.0)
+    : mix(aboveTransmission, float(0.94), underwater);
   material.thicknessNode = mix(
     mix(originalThickness, float(0.075), shallow.mul(0.66)),
     float(0.045),
@@ -471,7 +485,10 @@ function tuneWaterProState(handle, elapsed = 0, sky = null, storm = 0, day = 1) 
   if (physical) {
     physical.ior = 1.333;
     physical.attenuationDistance = TOUCH_DEVICE ? 52 : 64;
-    physical.attenuationColor.set(0x86cbc6);
+    physical.attenuationColor.set(0xa3e7dd);
+    // Match the node-material transmission mode on mobile. It must not
+    // compile a hidden high-transmission path when refraction is unavailable.
+    if (TOUCH_DEVICE) physical.transmission = 0;
     physical.clearcoat = TOUCH_DEVICE ? 0.34 : 0.48;
     physical.clearcoatRoughness = 0.10 + stormT * 0.045;
 

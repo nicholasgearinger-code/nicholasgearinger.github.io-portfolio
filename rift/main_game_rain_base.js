@@ -1054,6 +1054,36 @@ const scenePassColor = scenePass.getTextureNode("output");
 const lensTimeUniform = uniform(0);
 const lensIntensityUniform = uniform(0);
 const lensSunScreenPos = uniform(vec2(-10, -10));
+
+// Underwater camera refraction — a moving, deliberately small full-view lens
+// that mimics light wobbling through the water between the player's camera
+// and the reef. No new scene capture, render target, FFT read or GPU pass.
+// Shared between Current and Experimental and updated by scalar uniforms.
+// The screen warp is inactive out of Coral Shallows or when resurfacing.
+// A/B: ?riftCameraWater=off. Ocean Tuning > Refraction controls its strength.
+const CAMERA_WATER_ENABLED = (() => {
+  try { return new URLSearchParams(location.search).get("riftCameraWater") !== "off"; }
+  catch (_) { return true; }
+})();
+const cameraWaterTime = uniform(0);
+const cameraWaterMix = uniform(0);
+const cameraWaterStrength = uniform(1);
+function cameraWaterUV(coord) {
+  if (!CAMERA_WATER_ENABLED) return coord;
+  const waveA = sin(coord.y.mul(33).add(coord.x.mul(9.4))
+    .sub(cameraWaterTime.mul(1.12)));
+  const waveB = sin(coord.y.mul(71).sub(coord.x.mul(13.0))
+    .add(cameraWaterTime.mul(1.52)));
+  const waveC = sin(coord.x.mul(43).add(coord.y.mul(24))
+    .sub(cameraWaterTime.mul(0.88)));
+  const motion = vec2(
+    waveA.mul(0.0052).add(waveB.mul(0.0025)),
+    waveC.mul(0.0021).add(waveA.mul(0.0011))
+  ).mul(cameraWaterMix).mul(cameraWaterStrength);
+  // UV clamps prevent black wraparound edges and keep UI canvas geometry
+  // unaffected (only the rendered 3D scene is sampled through this lens).
+  return clamp(coord.add(motion), vec2(0.005), vec2(0.995));
+}
 // Per explicit "here's what we need" — rebuilt as a REAL 3D mesh (a big
 // box added directly to the scene) with a raymarching node material,
 // rather than a full-screen post-process pass. This is a genuinely
@@ -1298,7 +1328,11 @@ const lensDistortedOutput = Fn(() => {
   // a raw WebGLRenderTarget and sampled it back by hand. pass()'s own
   // texture output is designed specifically for exactly this "read the
   // rendered scene back" use case and handles orientation internally.
-  const distortedUV = clamp(screenUV.sub(vec2(distortX, distortY)), zero, one);
+  // Share the same scene-color lookup with the underwater camera wobble.
+  // Lens droplets remain in screen coordinates; only the scene behind the
+  // camera's "glass" is refracted while submerged.
+  const distortedUV = clamp(
+    cameraWaterUV(screenUV).sub(vec2(distortX, distortY)), zero, one);
   const sceneColor = texture(scenePassColor, distortedUV);
   // Per "here's what we need" — volumetric clouds are now a real mesh in
   // the scene (see volumetricCloudsHandle's own setup in main.js and
@@ -1307,6 +1341,13 @@ const lensDistortedOutput = Fn(() => {
   // here anymore, unlike the old post-process version.
   const finalColor = sceneColor.rgb.add(vec3(lightBoost.mul(lensIntensityUniform))).add(sunGlintColor.mul(0.9).mul(lensIntensityUniform));
   return vec4(finalColor, one);
+})();
+// Low-cost Current-mode path when rain Lens FX is disabled: still refract
+// the already rendered scene through the camera underwater. In Current mode
+// with Lens FX enabled, lensDistortedOutput already owns the SAME warped
+// scene fetch, so no second color sample is introduced.
+const underwaterCameraSceneOutput = Fn(() => {
+  return texture(scenePassColor, cameraWaterUV(uv()));
 })();
 // Per explicit "add a button... to turn off just the Lens effect" — this
 // is now the ONLY place outputNode is ever assigned (see this whole
@@ -1383,7 +1424,12 @@ const lensOutputEnabled = getGraphicsSettings().lensEffectEnabled !== false;
 // each frame. If FFT storage is not ready, retain the tested procedural path.
 function createUnderwaterDepthGraph(fftWaveField = null, detailWaveField = null, detailSlopes = false) {
 return Fn(() => {
-  const coord = uv();
+  // Distort the camera's entire UNDERWATER view, not only the refracted
+  // sky at the moving surface. Apply the same screen UV to color and depth,
+  // keeping fish, rocks and sand aligned as the light wavers. When Lens FX
+  // is enabled it samples the identically warped scene through its existing
+  // output node. The later surface-crossing refraction remains separate.
+  const coord = cameraWaterUV(uv());
   const base = lensOutputEnabled ? lensDistortedOutput : texture(scenePassColor, coord);
   const rawDepth = texture(scenePassDepth, coord).r;
   // Perspective depth buffer 0=near, 1=far (reversedDepthBuffer is not set).
@@ -5795,6 +5841,21 @@ function animate() {
   } else {
     submergedState = false;
   }
+  // Separate visual submersion from the +/-1.1m gameplay/audio hysteresis.
+  // A narrow 0.9m waterline blend gives a continuous refracted-camera entry
+  // and removes the on/off flash when small waves wash across the viewpoint.
+  const cameraWaterDepth = currentBiome === "crystal" &&
+    Number.isFinite(currentLiquidLevel)
+    ? currentLiquidLevel - camera.position.y : -100;
+  const cameraWaterTarget = CAMERA_WATER_ENABLED
+    ? THREE.MathUtils.smoothstep(cameraWaterDepth, -0.32, 0.58) : 0;
+  cameraWaterMix.value += (cameraWaterTarget - cameraWaterMix.value) *
+    Math.min(1, dt * 5.0);
+  cameraWaterTime.value = elapsedTime;
+  const cameraRefractionTune = Number(globalThis.__riftOceanTuning?.refraction);
+  cameraWaterStrength.value = THREE.MathUtils.clamp(
+    Number.isFinite(cameraRefractionTune) ? cameraRefractionTune / 1.8 : 1,
+    0.30, 1.65);
   // Smooth transitions even when the player's camera crosses the moving
   // ocean near its hysteresis threshold. This avoids flashing between full
   // underwater absorption and normal air colors.

@@ -68,6 +68,11 @@ const WATER_IOR = 1.333;
 // REAL geometry FFT cascades; ?riftWaves2=off restores legacy optical chop.
 const PHASE2_WAVE_MOTION = typeof location === "undefined" ||
   new URLSearchParams(location.search).get("riftWaves2") !== "off";
+// Phase 3 acts ONLY on the underside light transport; it is independent of
+// the failed Phase 1 physical optics branch, which remains opt-in.
+// ?riftUnderwater3=off restores the prior underwater surface illumination.
+const PHASE3_UNDERWATER_TRANSPORT = typeof location === "undefined" ||
+  new URLSearchParams(location.search).get("riftUnderwater3") !== "off";
 const AIR_WATER_R0 = ((WATER_IOR - 1) / (WATER_IOR + 1)) ** 2;
 
 if (typeof globalThis !== "undefined") {
@@ -498,8 +503,11 @@ function installWaterProOptics(handle) {
     // underwater view. This uses the live skyColor uniform and real FFT
     // geometry: unlike a painted highlight, it changes with the sky cycle.
     // No extra scene capture or WebGPU pass is required.
-    const skyWindow = clamp(overheadView.mul(0.62)
-      .add(sunFacing.mul(0.22)).add(shallow.mul(0.10)), 0, 0.92);
+    const skyWindow = PHASE3_UNDERWATER_TRANSPORT
+      ? clamp(overheadView.mul(0.72)
+          .add(sunFacing.mul(0.16)).add(shallow.mul(0.08)), 0, 0.94)
+      : clamp(overheadView.mul(0.62)
+          .add(sunFacing.mul(0.22)).add(shallow.mul(0.10)), 0, 0.92);
     // Distort the cloud-bearing sky atlas with genuine FFT slope. This is
     // directional sky refraction, not a capture of the above-water scene.
     // Refraction follows the *relative* view and FFT face direction.
@@ -542,8 +550,10 @@ function installWaterProOptics(handle) {
       .mul(float(1).sub(storm.mul(0.6)));
     const transmitted = mix(refractedSky, color(0x7fd9db),
       clamp(float(1).sub(clearWater).mul(0.27), 0, 0.27))
-      .add(color(0xfff3df).mul(sunFlux.mul(0.20)))
-       .add(sunColor.mul(lightFocus.mul(0.10)));
+      .add(color(0xfff3df).mul(sunFlux.mul(
+        PHASE3_UNDERWATER_TRANSPORT ? 0.26 : 0.20)))
+      .add(sunColor.mul(lightFocus.mul(
+        PHASE3_UNDERWATER_TRANSPORT ? 0.13 : 0.10)));
     // Soft water-to-air reflection at grazing incidence, preserving sky
     // transmission overhead without accentuating regular FFT sampling.
     // Schlick approximation for water/air, with total internal reflection
@@ -554,7 +564,11 @@ function installWaterProOptics(handle) {
       pow(float(1).sub(cosI), float(5))
     ));
     const tir = smoothstep(float(0.91), float(1.045), sinT2);
-    const angleReflection = mix(fresnelWaterAir, float(0.64), tir);
+    // At the underwater critical angle light cannot escape into air:
+    // preserve the existing smooth mobile-safe transition but approach
+    // genuinely strong total internal reflection instead of stopping at 64%.
+    const angleReflection = mix(fresnelWaterAir,
+      float(PHASE3_UNDERWATER_TRANSPORT ? 0.92 : 0.64), tir);
     // The reflection samples the same real cloud panorama with a distinct
     // slope-driven direction; at grazing angles it becomes more apparent.
     // Specular direction from the SAME wave normal as the transmitted ray.
@@ -571,7 +585,8 @@ function installWaterProOptics(handle) {
     const underside = mix(transmitted, reflectedUnderwater, angleReflection);
     // Soft fragmented refraction shimmer is strongest toward the surface.
     // This shares the exact FFT-driven transmission/reflection normal.
-    const undersideShimmer = lightFocus.mul(float(0.065))
+    const undersideShimmer = lightFocus.mul(float(
+      PHASE3_UNDERWATER_TRANSPORT ? 0.080 : 0.065))
       .mul(float(1).sub(angleReflection));
     const illuminatedUnderside = underside.add(sunColor.mul(undersideShimmer));
     return mix(body.add(sunColor.mul(glitter.mul(REFERENCE_GLASS_LOOK ? 0.29 : 0.24)))
@@ -741,6 +756,7 @@ function installWaterProOptics(handle) {
       referenceGlassLook: REFERENCE_GLASS_LOOK,
       physicalOpticsPhase1: PHYSICAL_OPTICS_PHASE1,
       phase2WaveMotion: PHASE2_WAVE_MOTION,
+      phase3UnderwaterTransport: PHASE3_UNDERWATER_TRANSPORT,
       disabledByQuery: typeof location !== "undefined" &&
         new URLSearchParams(location.search).get("riftRefraction") === "off",
     };

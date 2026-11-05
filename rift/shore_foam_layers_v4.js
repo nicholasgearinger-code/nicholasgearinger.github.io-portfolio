@@ -265,11 +265,15 @@ export function updateReferenceSwashSheet(surfHandle, elapsed = 0, storm = 0, da
     // breaker, while the true foam is drawn by the persistent foam field.
     const set = handle.__riftPersistentFoamField?.breakerState?.set ?? 0.73;
     const sunEnergy = clamp01((globalThis.__riftSolarState?.directSunIntensity ?? 4) / 6);
-    wash.material.opacity = Math.min(0.28, 0.11 + dayT * 0.075 +
-      stormT * 0.035 + set * 0.035);
+    // Previous broad gray/white band resulted from the entire wash ribbon
+    // being blended at high opacity. Keep the film subtle on mobile; the
+    // detailed persistent foam layer provides the visible whitewater.
+    const mobile = typeof navigator !== "undefined" && navigator.maxTouchPoints > 0;
+    wash.material.opacity = mobile ? 0.045 : Math.min(0.11,
+      0.045 + dayT * 0.028 + stormT * 0.018 + set * 0.014);
     // Thin film receives glancing warm sky highlights; no reflection target.
     wash.material.roughness = THREE.MathUtils.lerp(0.18, 0.09, sunEnergy * dayT);
-    wash.material.envMapIntensity = 0.36 + dayT * 0.17;
+    wash.material.envMapIntensity = mobile ? 0.20 : 0.31 + dayT * 0.12;
   }
 
   if (body?.material) {

@@ -79,6 +79,11 @@ const PHASE3_UNDERWATER_TRANSPORT = typeof location === "undefined" ||
 // ?riftWaveLens=off keeps the last working Phases 2/3 water unmodified.
 const WAVE_LENS_LAYER = typeof location === "undefined" ||
   new URLSearchParams(location.search).get("riftWaveLens") !== "off";
+// Stronger, camera-stable refraction on BOTH sides of the real FFT surface.
+// A separate switch makes it possible to isolate refraction from PBR normal
+// shading and foam: ?riftDistortion2=off restores the original bend amounts.
+const WAVE_DISTORTION_2 = typeof location === "undefined" ||
+  new URLSearchParams(location.search).get("riftDistortion2") !== "off";
 const AIR_WATER_R0 = ((WATER_IOR - 1) / (WATER_IOR + 1)) ** 2;
 
 if (typeof globalThis !== "undefined") {
@@ -225,7 +230,8 @@ function installWaterProOptics(handle) {
   // wavelet slope now affects surface refraction and reflected sky on both
   // sides without exposing high-frequency diamonds from the old optics.
   const opticalDetail = PHASE2_WAVE_MOTION
-    ? mix(float(1), float(0.26), underwater).mul(detailVisibility)
+    ? mix(float(1), float(WAVE_DISTORTION_2 ? 0.51 : 0.26), underwater)
+        .mul(detailVisibility)
     : float(1).sub(underwater);
   const opticalNormal = vec3(
     worldNormal.x.add(microX.mul(opticalDetail)),
@@ -245,7 +251,8 @@ function installWaterProOptics(handle) {
   // blends them with the moderated FFT surface to avoid underwater gridding.
   // This also affects Snell's exit ray and reflected cloud direction.
   const undersideWaveNormal = PHASE2_WAVE_MOTION
-    ? mix(underwaterOpticalNormal, opticalNormal, float(0.42)).normalize()
+    ? mix(underwaterOpticalNormal, opticalNormal,
+        float(WAVE_DISTORTION_2 ? 0.68 : 0.42)).normalize()
     : underwaterOpticalNormal;
 
   const viewDir = cameraPosition.sub(positionWorld).normalize();
@@ -563,7 +570,7 @@ function installWaterProOptics(handle) {
     ).add(vec2(0.5, 0));
     const cloudSample = texture(cloudSkyTexture, skyUV);
     const skyRadiance = mix(skyColor, cloudSample.rgb,
-      cloudSample.a.mul(0.52));
+      cloudSample.a.mul(WAVE_DISTORTION_2 ? 0.68 : 0.52));
     const refractedSky = mix(color(0x267c96), skyRadiance, skyWindow);
     // Refracted illumination: projected sunlight is stronger where the
     // deformed FFT face bends toward the sun. Keep the lobe broad and
@@ -612,8 +619,10 @@ function installWaterProOptics(handle) {
       reflectedRay.z.mul(0.14).add(0.80)
     ).add(vec2(0.5, 0));
     const reflectedSample = texture(cloudSkyTexture, reflectedUV);
-    const reflectedUnderwater = mix(color(0x19536b), skyColor, float(0.25))
-      .add(reflectedSample.rgb.mul(reflectedSample.a).mul(0.18));
+    const reflectedUnderwater = mix(color(0x19536b), skyColor,
+        float(WAVE_DISTORTION_2 ? 0.32 : 0.25))
+      .add(reflectedSample.rgb.mul(reflectedSample.a)
+        .mul(WAVE_DISTORTION_2 ? 0.28 : 0.18));
     const underside = mix(transmitted, reflectedUnderwater, angleReflection);
     // Soft fragmented refraction shimmer is strongest toward the surface.
     // This shares the exact FFT-driven transmission/reflection normal.
@@ -679,16 +688,33 @@ function installWaterProOptics(handle) {
           WaterTSL.normalView.x.add(microX.mul(REFERENCE_GLASS_LOOK ? 0.32 : 0.26)),
           WaterTSL.normalView.y.add(microZ.mul(REFERENCE_GLASS_LOOK ? 0.32 : 0.26))
         );
-    const offset = distortionNormal.mul(
-      clamp(float(0.003)
-        .add(shallow.mul(WAVE_LENS_LAYER ? 0.013 : REFERENCE_GLASS_LOOK ? 0.012 : 0.010))
-        .add(microEnergy.mul(WAVE_LENS_LAYER ? 0.005 : REFERENCE_GLASS_LOOK ? 0.0035 : 0.003)),
-        0.003, WAVE_LENS_LAYER ? 0.021 : REFERENCE_GLASS_LOOK ? 0.020 : 0.018)
-      .mul(float(1).sub(combinedFoam.mul(0.86)))
+    // Subtract the FLAT surface normal in view space. Warping with the full
+    // normal dragged the background uniformly when the camera pitched and
+    // hardly showed the small wavelets in the screenshots. Difference slopes
+    // isolate actual changing FFT faces and short-wave lensing.
+    const flatViewNormal = vec3(0, 1, 0)
+      .transformNormalByViewMatrix(WaterTSL.cameraViewMatrix).normalize();
+    const movingNormal = WAVE_DISTORTION_2 && WAVE_LENS_LAYER
+      ? vec2(
+          WaterTSL.normalView.x.sub(flatViewNormal.x),
+          WaterTSL.normalView.y.sub(flatViewNormal.y))
+      : distortionNormal;
+    const bendStrength = WAVE_DISTORTION_2 && WAVE_LENS_LAYER
+      ? clamp(float(0.090).add(shallow.mul(0.060))
+          .add(microEnergy.mul(0.018)), 0.075, 0.168)
+      : clamp(float(0.003)
+          .add(shallow.mul(WAVE_LENS_LAYER ? 0.013 : REFERENCE_GLASS_LOOK ? 0.012 : 0.010))
+          .add(microEnergy.mul(WAVE_LENS_LAYER ? 0.005 : REFERENCE_GLASS_LOOK ? 0.0035 : 0.003)),
+          0.003, WAVE_LENS_LAYER ? 0.021 : REFERENCE_GLASS_LOOK ? 0.020 : 0.018);
+    // More visible when looking down into shallow water; foam suppresses
+    // distortion as air bubbles obscure the clear refracting face.
+    const offset = clamp(movingNormal.mul(bendStrength)
+      .mul(float(1).sub(combinedFoam.mul(0.88)))
       .mul(PHYSICAL_OPTICS_PHASE1
         ? clamp(float(1.12).sub(fresnel.mul(0.42)), 0.75, 1.12)
-        : float(1))
-    );
+        : float(1)),
+      vec2(WAVE_DISTORTION_2 && WAVE_LENS_LAYER ? -0.055 : -0.020),
+      vec2(WAVE_DISTORTION_2 && WAVE_LENS_LAYER ? 0.055 : 0.020));
     const warpedUV = clamp(WaterTSL.screenUV.add(offset),
       vec2(0.006), vec2(0.994));
     // Depth-aware UVs avoid sampling foreground objects across water edges.
@@ -797,6 +823,7 @@ function installWaterProOptics(handle) {
       phase2WaveMotion: PHASE2_WAVE_MOTION,
       phase3UnderwaterTransport: PHASE3_UNDERWATER_TRANSPORT,
       waveLensLayer: WAVE_LENS_LAYER,
+      strongerWaveDistortion: WAVE_DISTORTION_2,
       disabledByQuery: typeof location !== "undefined" &&
         new URLSearchParams(location.search).get("riftRefraction") === "off",
     };

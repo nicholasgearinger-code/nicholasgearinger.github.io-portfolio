@@ -22,6 +22,41 @@ const IOS_WEBKIT = typeof navigator !== "undefined" && (
   ((navigator.platform || "") === "MacIntel" && (navigator.maxTouchPoints || 0) > 1)
 );
 
+// Phase 2 is intentionally a final uniform-only adjustment AFTER all the
+// layered production visual updaters. Earlier modules repeatedly overwrite
+// FFT amplitudes; apply this last so swell and wind waves stay distinct.
+// ?riftWaves2=off leaves the previous amplitude curves unchanged.
+const PHASE2_WAVE_MOTION = typeof location === "undefined" ||
+  new URLSearchParams(location.search).get("riftWaves2") !== "off";
+
+function tunePhase2FFTWaveBands(handle, elapsed = 0, storm = 0) {
+  if (!PHASE2_WAVE_MOTION || !handle?.gpuFFT) return;
+  const t = Number.isFinite(elapsed) ? elapsed : 0;
+  const stormT = Math.max(0, Math.min(1, Number(storm) || 0));
+
+  // The large and medium waves are still TRUE simulated FFT displacement
+  // (including the existing horizontal chop): these values only reshape the
+  // amplitude envelopes of the already active 128x128 cascades.
+  // Slow, weak modulation avoids the entire sea breathing in lockstep.
+  const longSet = Math.sin(t * 0.059 + 0.71) * 0.44 +
+    Math.sin(t * 0.026 + 2.31) * 0.22;
+  const windSet = Math.sin(t * 0.183 + 1.17) * 0.68 +
+    Math.sin(t * 0.317 + 2.47) * 0.27;
+
+  if (handle.waveScale) {
+    handle.waveScale.value = (IOS_WEBKIT ? 27.2 : 27.8) +
+      longSet + stormT * 6.5;
+  }
+  if (handle.fftDetailHandle?.waveScale) {
+    handle.fftDetailHandle.waveScale.value = (IOS_WEBKIT ? 28.8 : 29.6) +
+      windSet + stormT * 7.4;
+  }
+  // iOS intentionally keeps its unsafe third micro FFT frozen. Micro detail
+  // comes exclusively from the cheap normal field in gpu_fft_ocean_v9.js.
+  // Do not change the compute cadence, resolution, resource bindings or
+  // the experimental graphics mode's separately controlled swell/chop.
+}
+
 // Restore the previous proven cadence; throttling did not eliminate
 // the native encoder failure, so keep isolation tests independent of it.
 function iosFFTInterval() {
@@ -95,6 +130,15 @@ function installIOSSafeState(handle) {
 export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   const handle = oceanV21.createGPUFFTOceanPlane(scene, y, size, sampleHeight);
   installIOSSafeState(handle);
+  tunePhase2FFTWaveBands(handle, 0, 0);
+  if (handle?.gpuFFT) {
+    handle.__riftPhase2WaveMotion = PHASE2_WAVE_MOTION;
+    console.info(
+      "[rift-water] Phase 2 " + (PHASE2_WAVE_MOTION
+        ? "active: 2 physical FFT bands + directional short-wave normals"
+        : "disabled: legacy wave animation"),
+    );
+  }
   return handle;
 }
 
@@ -171,7 +215,10 @@ export function updateGPUFFTOcean(handle, renderer, elapsedTime = 0) {
 }
 
 export function updateGPUFFTOceanVisuals(...args) {
-  return oceanV21.updateGPUFFTOceanVisuals(...args);
+  const result = oceanV21.updateGPUFFTOceanVisuals(...args);
+  // args: handle, elapsed, sky, cameraY, ..., storm=0, day=1
+  tunePhase2FFTWaveBands(args[0], args[1], args[11]);
+  return result;
 }
 
 export function updateGPUFFTOceanRipples(...args) {

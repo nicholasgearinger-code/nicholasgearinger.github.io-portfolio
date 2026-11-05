@@ -1338,6 +1338,14 @@ const oceanDepthPhaseCEnabled = (() => {
   try { return new URLSearchParams(location.search).get("riftDebug") !== "oldatmosphere"; }
   catch (_) { return true; }
 })();
+// Phase 3: use the already installed scene-depth compositor in Experimental
+// mode, plus the already active seafloor caustic material in all modes.
+// No additional render target, ray marching, geometry, or FFT cascade.
+// ?riftUnderwater3=off returns to the previous transport and caustic tuning.
+const PHASE3_UNDERWATER_TRANSPORT = (() => {
+  try { return new URLSearchParams(location.search).get("riftUnderwater3") !== "off"; }
+  catch (_) { return true; }
+})();
 const oceanDepthIndirectEnabled = (() => {
   try { return new URLSearchParams(location.search).get("riftDebug") !== "oldindirect"; }
   catch (_) { return true; }
@@ -1498,7 +1506,13 @@ return Fn(() => {
   const depthLayer = smoothstep(float(2), float(31), cameraSubmersion);
   const farLayer = smoothstep(float(4), float(53), pathThroughWater);
   const density = length.mul(float(0.92).add(depthLayer.mul(0.28)));
-  const throughput = exp(vec3(-0.058, -0.026, -0.014).mul(density));
+  // Spectral attenuation along the actual scene-depth water path.
+  // Slightly faster red extinction makes the distant reef cyan-blue while
+  // retaining near-field sand/vegetation detail. The depth compositor only
+  // runs in Experimental graphics mode, as before.
+  const throughput = exp((PHASE3_UNDERWATER_TRANSPORT
+    ? vec3(-0.072, -0.031, -0.016)
+    : vec3(-0.058, -0.026, -0.014)).mul(density));
   // Preserve coral and sand contrast nearby; the scene's existing fog
   // already runs at ~24% strength to avoid double absorption.
   // Brighter water near the ceiling; gradually reduce transmitted skylight
@@ -1508,7 +1522,10 @@ return Fn(() => {
   const scatterHue = mix(upperWater, deepWater,
     clamp(depthLayer.mul(0.58).add(farLayer.mul(0.34)), 0, 1));
   const daylightIrradiance = float(0.52)
-    .add(oceanDepthDaylight.mul(0.48));
+    .add(oceanDepthDaylight.mul(0.48))
+    .mul(PHASE3_UNDERWATER_TRANSPORT
+      ? float(0.67).add(oceanDepthSunVisibility.mul(0.33))
+      : float(1));
   const scattered = scatterHue.mul(daylightIrradiance)
     .mul(oceanDepthScattering)
     .mul(vec3(1).sub(throughput));
@@ -1524,7 +1541,8 @@ return Fn(() => {
   const rayDirection = ray.div(rayLength.max(float(0.0001)));
   const towardSun = clamp(dot(rayDirection, oceanDepthSunDirection), 0, 1);
   const shaftCone = pow(towardSun,
-    oceanDepthRichCeilingEnabled ? float(4.5) : float(6));
+    PHASE3_UNDERWATER_TRANSPORT ? float(3.6)
+      : oceanDepthRichCeilingEnabled ? float(4.5) : float(6));
   // Match the broad surface-ceiling light-field directions from optics.js.
   // The screen depth pass uses flatHitXZ (the intersected surface point),
   // not the pixel's screen coordinates. This makes shafts move together
@@ -1549,7 +1567,8 @@ return Fn(() => {
     .mul(shaftPath).mul(exp(cameraSubmersion.mul(-0.062)))
     .mul(oceanDepthDaylight).mul(oceanDepthSunVisibility)
     .mul(oceanDepthUnderwaterMix)
-    .mul(oceanDepthRichCeilingEnabled ? 0.17 : 0.13);
+    .mul(PHASE3_UNDERWATER_TRANSPORT
+      ? 0.18 : oceanDepthRichCeilingEnabled ? 0.17 : 0.13);
   const shaftRadiance = vec3(0.36, 0.66, 0.67).mul(shaftEnergy);
   // Low-frequency indirect color bleed from shallow reef/sand. Approximate
   // a single diffuse bounce using existing scene depth, outgoing ray and
@@ -2995,9 +3014,14 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
       const focusZone = float(1.0).sub(smoothstep(float(0.0), terrainCausticFocusRadiusUniform, distFromFocus));
       const focusMask = float(0.15).add(focusZone.mul(0.85));
       const seabedWaterDepth = clamp(float(LIQUID_LEVEL.crystal).sub(positionWorld.y), 0, 60);
-      const depthAttenuation = float(1).sub(
-        smoothstep(float(6), float(48), seabedWaterDepth).mul(0.75)
-      );
+      // Moving caustics require direct sunlight and attenuate quickly as
+      // the light path grows. Fade their contrast with actual depth rather
+      // than leaving the older 25% intensity floor at arbitrary great depth.
+      const depthAttenuation = PHASE3_UNDERWATER_TRANSPORT
+        ? exp(seabedWaterDepth.mul(-0.062)).mul(1.10)
+        : float(1).sub(
+            smoothstep(float(6), float(48), seabedWaterDepth).mul(0.75)
+          );
       // Sunlight reaches the floor from an offset point on the ceiling.
       // Limit the effective projection depth near the horizon so a low
       // sun never makes the light field jump hundreds of metres.

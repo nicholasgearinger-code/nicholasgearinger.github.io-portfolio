@@ -340,7 +340,7 @@ function createCurlingFace(samples, waterY, parent, trainOffset = 0) {
     emissive: 0x062c32,
     emissiveIntensity: 0.055,
     transparent: true,
-    opacity: TOUCH_DEVICE ? 0.49 : 0.75,
+    opacity: TOUCH_DEVICE ? 0.66 : 0.77,
     roughness: 0.21,
     metalness: 0,
     side: THREE.DoubleSide,
@@ -384,8 +384,8 @@ function updateCurlingFace(face, t, storm, day, oceanHandle) {
     const trainStrength = face.trainOffset ? 0.57 : 1.0;
     const growth = Math.max(0, Math.sin(Math.PI * Math.min(1, localPhase * 1.16)));
     const collapse = 1 - smooth01((localPhase - 0.64) / 0.32);
-    const height = (0.66 + storm * 0.39) * trainStrength * set *
-      (0.35 + shoaling * 0.65) * growth * collapse;
+    const height = (0.78 + storm * 0.28) * trainStrength * set *
+      (0.40 + shoaling * 0.72) * growth * collapse;
     const breaking = smooth01((localPhase - 0.38) / 0.30) *
       (1 - smooth01((localPhase - 0.83) / 0.17));
     totalBreak += breaking * height;
@@ -396,7 +396,7 @@ function updateCurlingFace(face, t, storm, day, oceanHandle) {
       const curl = smooth01((v - 0.48) / 0.52) *
         smooth01((localPhase - 0.24) / 0.34);
       // Broad green face, curling pitch at the lip, and lower trailing foot.
-      const radial = front + (1 - v) * 0.57 - curl * height * 0.58;
+      const radial = front + (1 - v) * 0.62 - curl * height * 0.68;
       const k = (i * (rows + 1) + j) * 3;
       array[k] = sample.x + sample.outwardX * radial;
       array[k + 1] = waterY + 0.018 + height * v;
@@ -413,11 +413,11 @@ function updateCurlingFace(face, t, storm, day, oceanHandle) {
       // stripe. Vertex colors remain GPU-interpolated and require no texture.
       const fragments = 0.65 + 0.35 * Math.sin(i * 0.67 + t * 1.7) *
         Math.sin(i * 1.37 - t * 0.91);
-      const scatter = clamp01((breaking * lip * 0.74 + foam * lip * 0.32) *
+      const scatter = clamp01((breaking * lip * 0.78 + foam * lip * 0.34) *
         fragments);
-      const transmission = sunlight * (0.14 + lip * 0.62) * (1 - scatter);
-      const trough = 0.65 + 0.35 * smooth01(v * 1.4);
-      const shade = (0.46 + sunlight * 0.29 + v * 0.12) * trough;
+      const transmission = sunlight * (0.18 + lip * 0.72) * (1 - scatter);
+      const trough = 0.79 + 0.21 * smooth01(v * 1.4);
+      const shade = (0.65 + sunlight * 0.30 + v * 0.12) * trough;
       const warmGlint = sunlight * Math.pow(Math.max(0, sunY), 2) *
         (0.03 + lip * 0.07) * (1 - scatter);
       rgb[k] = Math.min(1, waterR * shade + transmission * 0.13 +
@@ -436,7 +436,7 @@ function updateCurlingFace(face, t, storm, day, oceanHandle) {
   geometry.computeBoundingSphere();
   const foamFactor = clamp01(totalBreak / Math.max(1, along));
   face.material.roughness = THREE.MathUtils.lerp(0.21, 0.49, foamFactor);
-  face.material.opacity = (TOUCH_DEVICE ? 0.49 : 0.75) *
+  face.material.opacity = (TOUCH_DEVICE ? 0.66 : 0.77) *
     (0.38 + 0.62 * clamp01(day));
 }
 

@@ -73,6 +73,12 @@ const PHASE2_WAVE_MOTION = typeof location === "undefined" ||
 // ?riftUnderwater3=off restores the prior underwater surface illumination.
 const PHASE3_UNDERWATER_TRANSPORT = typeof location === "undefined" ||
   new URLSearchParams(location.search).get("riftUnderwater3") !== "off";
+// A/B switch for coherent small-wave reflection, refracted distortion,
+// and crest-localized microfoam. Uses the existing FFT material and wave
+// phases: no extra mesh, texture, compute step or render pass.
+// ?riftWaveLens=off keeps the last working Phases 2/3 water unmodified.
+const WAVE_LENS_LAYER = typeof location === "undefined" ||
+  new URLSearchParams(location.search).get("riftWaveLens") !== "off";
 const AIR_WATER_R0 = ((WATER_IOR - 1) / (WATER_IOR + 1)) ** 2;
 
 if (typeof globalThis !== "undefined") {
@@ -226,6 +232,15 @@ function installWaterProOptics(handle) {
     max(worldNormal.y, float(0.12)),
     worldNormal.z.add(microZ.mul(opticalDetail)),
   ).normalize();
+  // Critical optical link: the moving directional wavelets must affect the
+  // PBR surface normal as well as our custom color/refraction calculations.
+  // The normal input is in VIEW space; opticalNormal is a WORLD derivative.
+  // Existing shader code can keep worldNormal for slope-driven foam gating.
+  // This uses the existing computed slopes, not an extra normal texture.
+  if (WAVE_LENS_LAYER) {
+    material.normalNode = opticalNormal
+      .transformNormalByViewMatrix(WaterTSL.cameraViewMatrix).normalize();
+  }
   // The underside samples the SAME travelling directional normals, but
   // blends them with the moderated FFT surface to avoid underwater gridding.
   // This also affects Snell's exit ray and reflected cloud direction.
@@ -410,9 +425,24 @@ function installWaterProOptics(handle) {
       .mul(crestGate.mul(0.70).add(foamWake.mul(0.30)))
       .mul(float(0.10).add(steep.mul(0.29))),
     0, 0.25);
+  // Thin, animated spindrift on the tops of individual rolling wavelets.
+  // Gate it by the actual FFT crest, displacement slope and existing
+  // irregular foam breakup, then fade outside the shallow surf zone.
+  // Avoid opaque horizontal stripes: open water retains clear glassy faces.
+  const waveLensFoam = WAVE_LENS_LAYER ? clamp(
+    float(1).sub(smoothstep(float(3), float(24), depth))
+      .mul(smoothstep(float(0.22), float(0.65),
+        geometricSlope.add(microEnergy.mul(0.06))))
+      .mul(float(0.22).add(crestHeight.mul(0.55))
+        .add(crestGate.mul(0.30)).add(foamWake.mul(0.20)))
+      .mul(smoothstep(float(0.30), float(0.81),
+        capBreakup.mul(0.68).add(facetMask.mul(0.32))))
+      .mul(float(0.22).add(storm.mul(0.14)))
+      .mul(float(1).sub(underwater)),
+    0, 0.19) : float(0);
   const combinedFoam = clamp(
     whitecap.add(openSeaFoam).add(brokenFoam.mul(0.87))
-      .add(shoreSpill), 0, 0.97);
+      .add(shoreSpill).add(waveLensFoam), 0, 0.97);
 
   // View-dependent Fresnel / wavelet sky reflection. This uses the already
   // available sky and FFT normals, avoiding additional sky texture fetches
@@ -456,7 +486,9 @@ function installWaterProOptics(handle) {
       // optical distortion, and the sun glints. No artificial white stripes.
       const slopeLighting = clamp(
         dot(opticalNormal, lightDir).sub(dot(worldNormal, lightDir))
-          .mul(0.19), -0.060, 0.060);
+          .mul(WAVE_LENS_LAYER ? 0.28 : 0.19),
+        WAVE_LENS_LAYER ? -0.08 : -0.060,
+        WAVE_LENS_LAYER ? 0.08 : 0.060);
       body = body.mul(float(1).add(slopeLighting.mul(day)
         .mul(float(1).sub(combinedFoam.mul(0.85)))));
     }
@@ -638,13 +670,20 @@ function installWaterProOptics(handle) {
     // Distort screen-space objects with the live wave normal; a small ripple
     // contribution adds moving refraction without looking like a tiled grid.
     // Screen-space UV shift is intentionally limited for iPhone stability.
-    const offset = vec2(
-      WaterTSL.normalView.x.add(microX.mul(REFERENCE_GLASS_LOOK ? 0.32 : 0.26)),
-      WaterTSL.normalView.y.add(microZ.mul(REFERENCE_GLASS_LOOK ? 0.32 : 0.26))
-    ).mul(
-      clamp(float(0.003).add(shallow.mul(REFERENCE_GLASS_LOOK ? 0.012 : 0.010))
-        .add(microEnergy.mul(REFERENCE_GLASS_LOOK ? 0.0035 : 0.003)),
-        0.003, REFERENCE_GLASS_LOOK ? 0.020 : 0.018)
+    // When the new PBR normal is active it already contains the short
+    // travelling wave slopes in camera space. Do not add the old WORLD X/Z
+    // ripple offsets a second time to the screen X/Y components.
+    const distortionNormal = WAVE_LENS_LAYER
+      ? vec2(WaterTSL.normalView.x, WaterTSL.normalView.y)
+      : vec2(
+          WaterTSL.normalView.x.add(microX.mul(REFERENCE_GLASS_LOOK ? 0.32 : 0.26)),
+          WaterTSL.normalView.y.add(microZ.mul(REFERENCE_GLASS_LOOK ? 0.32 : 0.26))
+        );
+    const offset = distortionNormal.mul(
+      clamp(float(0.003)
+        .add(shallow.mul(WAVE_LENS_LAYER ? 0.013 : REFERENCE_GLASS_LOOK ? 0.012 : 0.010))
+        .add(microEnergy.mul(WAVE_LENS_LAYER ? 0.005 : REFERENCE_GLASS_LOOK ? 0.0035 : 0.003)),
+        0.003, WAVE_LENS_LAYER ? 0.021 : REFERENCE_GLASS_LOOK ? 0.020 : 0.018)
       .mul(float(1).sub(combinedFoam.mul(0.86)))
       .mul(PHYSICAL_OPTICS_PHASE1
         ? clamp(float(1.12).sub(fresnel.mul(0.42)), 0.75, 1.12)
@@ -757,6 +796,7 @@ function installWaterProOptics(handle) {
       physicalOpticsPhase1: PHYSICAL_OPTICS_PHASE1,
       phase2WaveMotion: PHASE2_WAVE_MOTION,
       phase3UnderwaterTransport: PHASE3_UNDERWATER_TRANSPORT,
+      waveLensLayer: WAVE_LENS_LAYER,
       disabledByQuery: typeof location !== "undefined" &&
         new URLSearchParams(location.search).get("riftRefraction") === "off",
     };

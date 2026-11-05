@@ -574,6 +574,18 @@ function installWaterProOptics(handle) {
       float(0.90).sub(fresnel.mul(0.68)), 0.16, 0.91);
     material.backdropAlphaNode = mix(aboveClarity, belowClarity,
       underwater).mul(float(1).sub(combinedFoam.mul(0.89)));
+    // Conservative alpha fallback inside the same draw. If a mobile backend
+    // cannot sample its backdrop after a RenderPipeline scene pass, the ocean
+    // must still expose genuine sand / reef / sky behind the surface instead
+    // of becoming an opaque cyan ceiling. The screen sample provides the
+    // moving refraction where available; regular blending protects visibility.
+    const realSceneClarity = mix(
+      clamp(float(0.38).add(shallow.mul(0.37))
+        .add(ndv.mul(0.08)), 0.31, 0.82),
+      clamp(float(0.83).sub(fresnel.mul(0.54)), 0.20, 0.87),
+      underwater,
+    ).mul(float(1).sub(combinedFoam.mul(0.82)));
+    material.opacityNode = float(1).sub(realSceneClarity.mul(0.55));
     material.transparent = true;
     material.depthWrite = false;
     material.forceSinglePass = true; // thin double-sided plane, never two transparent draws

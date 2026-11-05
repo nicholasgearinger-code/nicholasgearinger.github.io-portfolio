@@ -539,6 +539,7 @@ function installWaterProOptics(handle) {
   // dark opaque mirror, while the viewport samples the real scene already
   // behind this transparent water in the same render (no second scene pass).
   const backdropAvailable =
+    globalThis.__riftNativeWebGPUActive === true &&
     typeof WaterTSL.viewportSharedTexture === "function" &&
     WaterTSL.screenUV && WaterTSL.normalView &&
     "backdropNode" in material && "backdropAlphaNode" in material &&

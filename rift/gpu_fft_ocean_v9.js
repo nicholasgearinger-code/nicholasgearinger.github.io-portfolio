@@ -63,6 +63,10 @@ const REFERENCE_GLASS_LOOK = typeof location === "undefined" ||
 const PHYSICAL_OPTICS_PHASE1 = typeof location === "undefined" ||
   new URLSearchParams(location.search).get("riftPhysics1") !== "off";
 const WATER_IOR = 1.333;
+// Phase 2 adds a coherent multi-scale normal field over the existing two
+// REAL geometry FFT cascades; ?riftWaves2=off restores legacy optical chop.
+const PHASE2_WAVE_MOTION = typeof location === "undefined" ||
+  new URLSearchParams(location.search).get("riftWaves2") !== "off";
 const AIR_WATER_R0 = ((WATER_IOR - 1) / (WATER_IOR + 1)) ** 2;
 
 if (typeof globalThis !== "undefined") {
@@ -153,36 +157,68 @@ function installWaterProOptics(handle) {
     .add(time.mul(2.08))
     .add(4.21);
 
-  // Two differently directed medium wavelets sit between the real FFT
-  // displacement and existing small-scale optical chop. Reuse the previous
-  // two analytic phase evaluations instead of adding new mobile trig work.
-  // Unlike narrow micro stripes these lower frequencies read as individual
-  // moving wave faces when viewed close to the water.
+  // Phase 2: coherent directional waves with mathematically matched X/Z
+  // gradients. The two existing FFT cascades carry LARGE and MEDIUM geometry.
+  // These two crossing bands supply short wavelets; phaseA/B contribute
+  // finer capillary-scale normal slopes. Both slope components are derived
+  // from the SAME wave phases, unlike the old unrelated sine/cosine ripple
+  // offsets. No new FFT kernels, material textures or surface vertices.
   const fineRippleA = sin(phaseA.mul(0.66).sub(phaseB.mul(0.29)));
   const fineRippleB = cos(phaseB.mul(0.73).add(phaseA.mul(0.22)));
-  const microX = TOUCH_DEVICE
-    ? cos(phaseA).mul(0.054).add(cos(phaseB).mul(0.037))
+  const shortSlopeA = cos(phaseA);
+  const shortSlopeB = cos(phaseB);
+  // Wave vectors approximately (1.25,-0.08) and (0.04,1.29) rad/m.
+  // 0.056m / 0.048m virtual ripple heights produce modest coherent slopes.
+  const mediumA = cos(phaseA.mul(0.46).sub(phaseB.mul(0.21)));
+  const mediumB = sin(phaseA.mul(0.24).add(phaseB.mul(0.38)));
+  const phase2SlopeX = mediumA.mul(0.071)
+    .add(mediumB.mul(-0.002))
+    .add(shortSlopeA.mul(0.043))
+    .add(shortSlopeB.mul(-0.019))
+    .add(TOUCH_DEVICE ? float(0) : cos(phaseC).mul(0.009));
+  const phase2SlopeZ = mediumA.mul(-0.0045)
+    .add(mediumB.mul(0.062))
+    .add(shortSlopeA.mul(0.021))
+    .add(shortSlopeB.mul(0.042))
+    .add(TOUCH_DEVICE ? float(0) : cos(phaseC).mul(-0.006));
+  const legacyX = TOUCH_DEVICE
+    ? shortSlopeA.mul(0.054).add(shortSlopeB.mul(0.037))
       .add(fineRippleA.mul(0.040))
-    : cos(phaseA).mul(0.054)
-      .add(cos(phaseB).mul(0.037))
+    : shortSlopeA.mul(0.054)
+      .add(shortSlopeB.mul(0.037))
       .add(cos(phaseC).mul(0.021))
       .add(fineRippleA.mul(0.043));
-  const microZ = TOUCH_DEVICE
+  const legacyZ = TOUCH_DEVICE
     ? sin(phaseA).mul(0.049).add(sin(phaseB).mul(0.035))
       .add(fineRippleB.mul(0.036))
     : sin(phaseA).mul(0.049)
       .add(sin(phaseB).mul(0.035))
       .add(sin(phaseC).mul(0.022))
       .add(fineRippleB.mul(0.041));
-  const microEnergy = clamp(abs(microX).add(abs(microZ)).mul(5.1), 0, 1);
+  const microX = PHASE2_WAVE_MOTION ? phase2SlopeX : legacyX;
+  const microZ = PHASE2_WAVE_MOTION ? phase2SlopeZ : legacyZ;
+  const microEnergy = clamp(abs(microX).add(abs(microZ)).mul(
+    PHASE2_WAVE_MOTION ? 4.65 : 5.1), 0, 1);
 
-  // Preserve micro ripple normals above water, but use the displaced FFT
-  // geometry itself underwater. Analytic sine micro normals were making
-  // repetitive diamonds visible even after highlight patterns were removed.
+  // Anti-alias distant optical chop so the horizon has broad swells but does
+  // not turn into a dense moving stripe grid. L1 distance avoids per-pixel
+  // square roots on mobile; the wavelet effect is strongest close to the eye.
+  const horizontalRange = abs(positionWorld.x.sub(cameraPosition.x))
+    .add(abs(positionWorld.z.sub(cameraPosition.z)));
+  const detailVisibility = PHASE2_WAVE_MOTION
+    ? mix(float(0.32), float(1),
+      float(1).sub(smoothstep(float(24), float(145), horizontalRange)))
+    : float(1);
+  // Underwater keeps the real displaced surface primary; a fraction of the
+  // wavelet slope now affects surface refraction and reflected sky on both
+  // sides without exposing high-frequency diamonds from the old optics.
+  const opticalDetail = PHASE2_WAVE_MOTION
+    ? mix(float(1), float(0.26), underwater).mul(detailVisibility)
+    : float(1).sub(underwater);
   const opticalNormal = vec3(
-    worldNormal.x.add(microX.mul(float(1).sub(underwater))),
+    worldNormal.x.add(microX.mul(opticalDetail)),
     max(worldNormal.y, float(0.12)),
-    worldNormal.z.add(microZ.mul(float(1).sub(underwater))),
+    worldNormal.z.add(microZ.mul(opticalDetail)),
   ).normalize();
 
   const viewDir = cameraPosition.sub(positionWorld).normalize();
@@ -399,6 +435,15 @@ function installWaterProOptics(handle) {
     // Reflected sky is strongest at grazing view angles. Its intensity
     // changes with the actual displaced FFT slope and the smaller wavelets.
     body = mix(body, skyColor, reflectionGain);
+    if (PHASE2_WAVE_MOTION) {
+      // Wave-face illumination tracks the same coherent slopes as Fresnel,
+      // optical distortion, and the sun glints. No artificial white stripes.
+      const slopeLighting = clamp(
+        dot(opticalNormal, lightDir).sub(dot(worldNormal, lightDir))
+          .mul(0.19), -0.060, 0.060);
+      body = body.mul(float(1).add(slopeLighting.mul(day)
+        .mul(float(1).sub(combinedFoam.mul(0.85)))));
+    }
     // Backlit shoaling wave faces gain a restrained green-blue translucency
     // before the breaking lip transitions into opaque, scattering whitewater.
     const lipGlow = breakerEnergy.mul(crestHeight).mul(backLight).mul(day)
@@ -684,6 +729,7 @@ function installWaterProOptics(handle) {
       noExtraSceneRender: true,
       referenceGlassLook: REFERENCE_GLASS_LOOK,
       physicalOpticsPhase1: PHYSICAL_OPTICS_PHASE1,
+      phase2WaveMotion: PHASE2_WAVE_MOTION,
       disabledByQuery: typeof location !== "undefined" &&
         new URLSearchParams(location.search).get("riftRefraction") === "off",
     };

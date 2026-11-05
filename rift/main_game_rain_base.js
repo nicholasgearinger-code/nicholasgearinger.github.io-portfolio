@@ -3019,12 +3019,21 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
       const lensA = sin(ceilingA);
       const lensB = sin(ceilingB);
       const lensC = isTouchDevice ? float(0) : sin(ceilingC);
+      // The short lens wave shares the exact dominant optical phase from
+      // gpu_fft_ocean_v9.js. Caustics react to the same small surface ripples
+      // that visibly distort reflections and the refracted seabed.
+      const ripplePhase = projectedSurfaceXZ.x.mul(2.15)
+        .add(projectedSurfaceXZ.y.mul(1.07)).add(t.mul(1.24));
+      const rippleHeight = sin(ripplePhase).mul(0.055);
+      const rippleGradient = cos(ripplePhase).mul(0.055);
       const slopeX = cos(ceilingA).mul(0.20 * 0.37)
         .add(cos(ceilingB).mul(0.13 * -0.23))
-        .add(isTouchDevice ? float(0) : cos(ceilingC).mul(0.045 * 0.91));
+        .add(isTouchDevice ? float(0) : cos(ceilingC).mul(0.045 * 0.91))
+        .add(rippleGradient.mul(2.15));
       const slopeZ = cos(ceilingA).mul(0.20 * 0.19)
         .add(cos(ceilingB).mul(0.13 * 0.41))
-        .add(isTouchDevice ? float(0) : cos(ceilingC).mul(0.045 * -0.76));
+        .add(isTouchDevice ? float(0) : cos(ceilingC).mul(0.045 * -0.76))
+        .add(rippleGradient.mul(1.07));
       const refractingNormal = vec3(
         slopeX.mul(-1), float(1), slopeZ.mul(-1)).normalize();
       const eta = float(0.750);
@@ -3064,13 +3073,16 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
       // This is a local slope/curvature approximation, not ray tracing.
       const curvatureXX = lensA.mul(-0.20 * 0.37 * 0.37)
         .add(lensB.mul(-0.13 * 0.23 * 0.23))
-        .add(lensC.mul(-0.045 * 0.91 * 0.91));
+        .add(lensC.mul(-0.045 * 0.91 * 0.91))
+        .add(rippleHeight.mul(-2.15 * 2.15));
       const curvatureZZ = lensA.mul(-0.20 * 0.19 * 0.19)
         .add(lensB.mul(-0.13 * 0.41 * 0.41))
-        .add(lensC.mul(-0.045 * 0.76 * 0.76));
+        .add(lensC.mul(-0.045 * 0.76 * 0.76))
+        .add(rippleHeight.mul(-1.07 * 1.07));
       const curvatureXZ = lensA.mul(-0.20 * 0.37 * 0.19)
         .add(lensB.mul(0.13 * 0.23 * 0.41))
-        .add(lensC.mul(0.045 * 0.91 * 0.76));
+        .add(lensC.mul(0.045 * 0.91 * 0.76))
+        .add(rippleHeight.mul(-2.15 * 1.07));
       const focalDepth = seabedWaterDepth.min(float(15)).mul(0.25);
       const jxx = float(1).add(curvatureXX.mul(focalDepth));
       const jzz = float(1).add(curvatureZZ.mul(focalDepth));

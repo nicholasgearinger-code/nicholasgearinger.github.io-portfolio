@@ -84,6 +84,12 @@ const WAVE_LENS_LAYER = typeof location === "undefined" ||
 // shading and foam: ?riftDistortion2=off restores the original bend amounts.
 const WAVE_DISTORTION_2 = typeof location === "undefined" ||
   new URLSearchParams(location.search).get("riftDistortion2") !== "off";
+// Stage: one coherent glossy surface + actively spilling, matte foam crests.
+// The reflected sky reuses the underside's EXISTING cloud texture sample;
+// no extra render passes, FFT cascades, texture fetches or draw calls.
+// ?riftCrestReflect=off restores the prior shading/foam and breaker mesh.
+const REFLECTIVE_CRESTS = typeof location === "undefined" ||
+  new URLSearchParams(location.search).get("riftCrestReflect") !== "off";
 const AIR_WATER_R0 = ((WATER_IOR - 1) / (WATER_IOR + 1)) ** 2;
 
 if (typeof globalThis !== "undefined") {
@@ -447,9 +453,25 @@ function installWaterProOptics(handle) {
       .mul(float(0.22).add(storm.mul(0.14)))
       .mul(float(1).sub(underwater)),
     0, 0.19) : float(0);
+  // Breaking white ridge: require the REAL FFT surface to be both high and
+  // steep, AND the active shoreline breaker to be spilling. The shoreline
+  // phase, residual wake and noisy cap mask prevent solid white stripes.
+  // The existing persistent swash solver still handles downstream foam life.
+  const crestCrown = smoothstep(waterLevel.add(0.10),
+    waterLevel.add(0.70), positionWorld.y);
+  const breakingLip = REFLECTIVE_CRESTS ? clamp(
+    crestCrown.mul(smoothstep(float(0.16), float(0.55), geometricSlope))
+      .mul(surfZone.mul(0.86).add(storm.mul(0.18)))
+      .mul(clamp(surfPulse.mul(0.62).add(crestGate.mul(0.42))
+        .add(foamWake.mul(0.22)), 0, 1))
+      .mul(smoothstep(float(0.35), float(0.78),
+        capBreakup.mul(0.72).add(facetMask.mul(0.28))))
+      .mul(float(1).sub(underwater))
+      .mul(0.66),
+    0, 0.66) : float(0);
   const combinedFoam = clamp(
     whitecap.add(openSeaFoam).add(brokenFoam.mul(0.87))
-      .add(shoreSpill).add(waveLensFoam), 0, 0.97);
+      .add(shoreSpill).add(waveLensFoam).add(breakingLip), 0, 0.97);
 
   // View-dependent Fresnel / wavelet sky reflection. This uses the already
   // available sky and FFT normals, avoiding additional sky texture fetches
@@ -469,9 +491,20 @@ function installWaterProOptics(handle) {
           .add(geometricSlope.mul(REFERENCE_GLASS_LOOK ? 0.060 : 0.040)),
         0, REFERENCE_GLASS_LOOK ? 0.44 : 0.39,
       );
-  const reflectionGain = reflectionBase.mul(day.mul(0.72).add(0.28))
+  // The steep but clean *face* of the rolling FFT wave reads as a glossy
+  // tilted mirror. Foam reverses that response. Schlick Fresnel still owns
+  // the grazing-angle part; this adds a restrained visible face response.
+  const glossyFace = REFLECTIVE_CRESTS
+    ? smoothstep(float(0.16), float(0.58), geometricSlope)
+        .mul(float(0.20).add(crestHeight.mul(0.80)))
+        .mul(float(1).sub(combinedFoam))
+    : float(0);
+  const reflectionGain = clamp(
+      reflectionBase.add(glossyFace.mul(0.16)), 0,
+      REFLECTIVE_CRESTS ? 0.59 : 0.44)
+    .mul(day.mul(0.72).add(0.28))
     .mul(reflectionStrength)
-    .mul(float(1).sub(combinedFoam.mul(0.88)))
+    .mul(float(1).sub(combinedFoam.mul(REFLECTIVE_CRESTS ? 0.97 : 0.88)))
     .mul(float(1).sub(underwater));
   // Make nearby individual FFT crests readable without painting dark
   // stripes over the entire ocean.
@@ -483,11 +516,40 @@ function installWaterProOptics(handle) {
     waterLevel.sub(0.26), waterLevel.add(0.18), positionWorld.y))
     .mul(day).mul(float(1).sub(underwater));
 
+  // One shared sky-cloud lookup for glossy surface faces and the existing
+  // underside reflection. Previously the water body reflected a FLAT skyColor
+  // regardless of wave direction. The moving normal now controls a real
+  // sky panorama lookup. Reusing the underside sample avoids extra iPhone
+  // texture fetches; angular reflection remains suppressed under white foam.
+  const cosI = clamp(dot(undersideWaveNormal, viewDir), 0, 1);
+  const underwaterMirrorRay = undersideWaveNormal.mul(cosI.mul(2))
+    .sub(viewDir).normalize();
+  const aboveMirrorRay = opticalNormal.mul(ndv.mul(2))
+    .sub(viewDir).normalize();
+  const mirrorRay = REFLECTIVE_CRESTS
+    ? mix(underwaterMirrorRay, aboveMirrorRay,
+        float(1).sub(underwater)).normalize()
+    : underwaterMirrorRay;
+  const reflectedUV = REFLECTIVE_CRESTS
+    ? vec2(
+        mirrorRay.x.mul(0.255).add(time.mul(0.002)).add(0.5),
+        clamp(float(0.64).add(mirrorRay.y.mul(0.24)),
+          float(0.45), float(0.92)))
+    : vec2(
+        mirrorRay.x.mul(0.26).add(time.mul(0.002)),
+        mirrorRay.z.mul(0.14).add(0.80)
+      ).add(vec2(0.5, 0));
+  const reflectedSample = texture(cloudSkyTexture, reflectedUV);
+  const movingSkyReflection = REFLECTIVE_CRESTS
+    ? mix(skyColor, reflectedSample.rgb,
+        reflectedSample.a.mul(0.72))
+    : skyColor;
+
   material.colorNode = Fn(() => {
     let body = mix(originalColor, depthColor, depthMix);
     // Reflected sky is strongest at grazing view angles. Its intensity
     // changes with the actual displaced FFT slope and the smaller wavelets.
-    body = mix(body, skyColor, reflectionGain);
+    body = mix(body, movingSkyReflection, reflectionGain);
     if (PHASE2_WAVE_MOTION) {
       // Wave-face illumination tracks the same coherent slopes as Fresnel,
       // optical distortion, and the sun glints. No artificial white stripes.
@@ -557,7 +619,6 @@ function installWaterProOptics(handle) {
     // Water -> air refraction (Snell's law). Derive a real outgoing
     // direction from the FFT normal rather than shifting the sky by slope.
     // The cloud panorama remains an approximation of the exterior scene.
-    const cosI = clamp(dot(undersideWaveNormal, viewDir), 0, 1);
     const eta = float(1.333);
     const sinT2 = eta.mul(eta).mul(float(1).sub(cosI.mul(cosI)));
     const cosT = float(1).sub(clamp(sinT2, 0, 1)).sqrt();
@@ -608,17 +669,8 @@ function installWaterProOptics(handle) {
     // genuinely strong total internal reflection instead of stopping at 64%.
     const angleReflection = mix(fresnelWaterAir,
       float(PHASE3_UNDERWATER_TRANSPORT ? 0.92 : 0.64), tir);
-    // The reflection samples the same real cloud panorama with a distinct
-    // slope-driven direction; at grazing angles it becomes more apparent.
-    // Specular direction from the SAME wave normal as the transmitted ray.
-    // This avoids the old independently tuned reflection slope offsets.
-    const reflectedRay = undersideWaveNormal.mul(cosI.mul(2))
-      .sub(viewDir).normalize();
-    const reflectedUV = vec2(
-      reflectedRay.x.mul(0.26).add(time.mul(0.002)),
-      reflectedRay.z.mul(0.14).add(0.80)
-    ).add(vec2(0.5, 0));
-    const reflectedSample = texture(cloudSkyTexture, reflectedUV);
+    // Reuse the same reflectedSample from the above-water glossy face;
+    // underwater total-internal reflection still uses the underside normal.
     const reflectedUnderwater = mix(color(0x19536b), skyColor,
         float(WAVE_DISTORTION_2 ? 0.32 : 0.25))
       .add(reflectedSample.rgb.mul(reflectedSample.a)
@@ -630,8 +682,15 @@ function installWaterProOptics(handle) {
       PHASE3_UNDERWATER_TRANSPORT ? 0.080 : 0.065))
       .mul(float(1).sub(angleReflection));
     const illuminatedUnderside = underside.add(sunColor.mul(undersideShimmer));
-    return mix(body.add(sunColor.mul(glitter.mul(REFERENCE_GLASS_LOOK ? 0.29 : 0.24)))
-        .add(sunColor.mul(sparkleFlecks.mul(REFERENCE_GLASS_LOOK ? 0.078 : 0.060))), illuminatedUnderside,
+    const nonFoamGlint = REFLECTIVE_CRESTS
+      ? float(1).sub(combinedFoam.mul(0.96))
+      : float(1);
+    return mix(body.add(sunColor.mul(glitter.mul(
+        REFLECTIVE_CRESTS ? 0.36 : REFERENCE_GLASS_LOOK ? 0.29 : 0.24)
+        .mul(nonFoamGlint)))
+        .add(sunColor.mul(sparkleFlecks.mul(
+          REFLECTIVE_CRESTS ? 0.095 : REFERENCE_GLASS_LOOK ? 0.078 : 0.060)
+          .mul(nonFoamGlint))), illuminatedUnderside,
       underwater.mul(float(0.97)));
 
   })();
@@ -642,8 +701,15 @@ function installWaterProOptics(handle) {
     clamp(microEnergy.mul(REFERENCE_GLASS_LOOK ? 0.34 : 0.31)
       .add(geometricSlope.mul(0.08)), 0, 0.45),
   );
-  material.roughnessNode = mix(microRoughness, float(0.62),
-    combinedFoam.mul(0.90));
+  // Water faces are mirror-smooth; aerated foam is a diffuse, rough layer.
+  // Preserve the pre-change roughness mix behind ?riftCrestReflect=off.
+  const glossyRoughness = REFLECTIVE_CRESTS
+    ? mix(microRoughness, float(0.052), glossyFace.mul(0.75))
+    : microRoughness;
+  material.roughnessNode = REFLECTIVE_CRESTS
+    ? mix(glossyRoughness, float(0.89),
+        combinedFoam.mul(0.97))
+    : mix(microRoughness, float(0.62), combinedFoam.mul(0.90));
   // A restrained daylight volume-fill prevents the body from becoming a
   // black mirror on iOS when no scene refraction texture is supplied. It
   // follows the same depth palette and does not brighten night/underwater.
@@ -824,6 +890,7 @@ function installWaterProOptics(handle) {
       phase3UnderwaterTransport: PHASE3_UNDERWATER_TRANSPORT,
       waveLensLayer: WAVE_LENS_LAYER,
       strongerWaveDistortion: WAVE_DISTORTION_2,
+      reflectiveBreakingCrests: REFLECTIVE_CRESTS,
       disabledByQuery: typeof location !== "undefined" &&
         new URLSearchParams(location.search).get("riftRefraction") === "off",
     };

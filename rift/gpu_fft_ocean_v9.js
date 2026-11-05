@@ -134,17 +134,27 @@ function installWaterProOptics(handle) {
     .add(time.mul(2.08))
     .add(4.21);
 
+  // Reference-detail pass: add two oblique short ripples to the two
+  // travelling micro bands (three on desktop). Crossed phase directions
+  // avoid obvious parallel sine stripes and reuse the same analytic normal.
+  // No new normal maps, FFT cascades, sampling passes or GPU buffers.
+  const fineRippleA = sin(phaseA.mul(1.73).sub(phaseB.mul(0.37)));
+  const fineRippleB = cos(phaseB.mul(1.61).add(phaseA.mul(0.23)));
   const microX = TOUCH_DEVICE
-    ? cos(phaseA).mul(0.050).add(cos(phaseB).mul(0.036))
-    : cos(phaseA).mul(0.050)
-      .add(cos(phaseB).mul(0.036))
-      .add(cos(phaseC).mul(0.018));
+    ? cos(phaseA).mul(0.054).add(cos(phaseB).mul(0.037))
+      .add(fineRippleA.mul(0.020))
+    : cos(phaseA).mul(0.054)
+      .add(cos(phaseB).mul(0.037))
+      .add(cos(phaseC).mul(0.021))
+      .add(fineRippleA.mul(0.025));
   const microZ = TOUCH_DEVICE
-    ? sin(phaseA).mul(0.047).add(sin(phaseB).mul(0.034))
-    : sin(phaseA).mul(0.047)
-      .add(sin(phaseB).mul(0.034))
-      .add(sin(phaseC).mul(0.020));
-  const microEnergy = clamp(abs(microX).add(abs(microZ)).mul(5.6), 0, 1);
+    ? sin(phaseA).mul(0.049).add(sin(phaseB).mul(0.035))
+      .add(fineRippleB.mul(0.018))
+    : sin(phaseA).mul(0.049)
+      .add(sin(phaseB).mul(0.035))
+      .add(sin(phaseC).mul(0.022))
+      .add(fineRippleB.mul(0.024));
+  const microEnergy = clamp(abs(microX).add(abs(microZ)).mul(5.1), 0, 1);
 
   // Preserve micro ripple normals above water, but use the displaced FFT
   // geometry itself underwater. Analytic sine micro normals were making
@@ -177,6 +187,20 @@ function installWaterProOptics(handle) {
     0.88,
   );
 
+  // Low-frequency, depth-gated tropical seabed marbling. Two oblique
+  // travelling patterns blend gently rather than making tiled diamonds.
+  // The detail only tints above-water shallow water, never deep sea or the
+  // overhead underwater sky/refraction shading.
+  const marbleA = sin(positionWorld.x.mul(0.39)
+    .add(positionWorld.z.mul(0.57)).add(time.mul(0.065)));
+  const marbleB = sin(positionWorld.x.mul(-0.71)
+    .add(positionWorld.z.mul(0.27)).sub(time.mul(0.08)));
+  const depthMarble = marbleA.mul(0.60).add(marbleB.mul(0.40));
+  const marbleMask = smoothstep(float(-0.52), float(0.65), depthMarble)
+    .mul(shallow).mul(day).mul(float(1).sub(underwater));
+  const broadTone = depthMarble.mul(0.052)
+    .mul(float(1).sub(underwater));
+
   // Thousands of tiny sun facets rather than one painted streak. The facet mask
   // breaks the highlight into discrete sparkling patches while two BRDF lobes
   // keep a softer solar path underneath them.
@@ -195,6 +219,15 @@ function installWaterProOptics(handle) {
   const glitter = tightGlitter.add(broadGlitter)
     .mul(day)
     .mul(float(1).sub(storm.mul(0.52)))
+    .mul(float(1).sub(underwater));
+
+  // Sparse, sharp sunlight pinpricks. Require both sun-facing optical normal
+  // and fragmented ripple energy so this cannot become a long white stripe.
+  const sparkleFlecks = smoothstep(float(0.70), float(0.94),
+      facetMask.mul(0.62).add(microEnergy.mul(0.20))
+        .add(ndh.mul(0.25)))
+    .mul(pow(ndh, float(38)))
+    .mul(day).mul(float(1).sub(storm.mul(0.50)))
     .mul(float(1).sub(underwater));
 
   // Thin crests transmit warm daylight through the blue water volume. This is
@@ -303,6 +336,10 @@ function installWaterProOptics(handle) {
     body = mix(body, shallowColor,
       clamp(lipGlow.mul(0.38).add(rollingFace.mul(float(0.08)
         .add(shallow.mul(0.16)))), 0, 0.30));
+    // Broad tonal patches and shallow-water light focusing: continuous
+    // gradients, no coarse grid, no separate caustic texture.
+    body = body.mul(float(1).add(broadTone));
+    body = mix(body, crestColor, marbleMask.mul(0.16));
     body = mix(body, crestColor,
       clamp(translucency.add(lipGlow.mul(0.20)), 0, 0.34));
     body = mix(body, foamColor, combinedFoam.mul(0.97));
@@ -398,7 +435,8 @@ function installWaterProOptics(handle) {
     const undersideShimmer = lightFocus.mul(float(0.065))
       .mul(float(1).sub(angleReflection));
     const illuminatedUnderside = underside.add(sunColor.mul(undersideShimmer));
-    return mix(body.add(sunColor.mul(glitter.mul(0.24))), illuminatedUnderside,
+    return mix(body.add(sunColor.mul(glitter.mul(0.24)))
+        .add(sunColor.mul(sparkleFlecks.mul(0.048))), illuminatedUnderside,
       underwater.mul(float(0.97)));
 
   })();
@@ -406,7 +444,7 @@ function installWaterProOptics(handle) {
   const microRoughness = mix(
     originalRoughness,
     float(0.082),
-    microEnergy.mul(0.20),
+    microEnergy.mul(0.27),
   );
   material.roughnessNode = mix(microRoughness, float(0.62),
     combinedFoam.mul(0.90));

@@ -6,6 +6,11 @@ export * from "./decorations_underwater_base.js";
 
 let underwaterShaftTexture = null;
 let shaftOrdinal = 0;
+// Phase 3 adds soft, wave-linked brightness modulation to existing rays.
+// This is independent of the failed Phase 1 optics and costs no draw calls.
+// ?riftUnderwater3=off retains the original Current/Experimental behavior.
+const PHASE3_UNDERWATER_TRANSPORT = typeof location === "undefined" ||
+  new URLSearchParams(location.search).get("riftUnderwater3") !== "off";
 
 const SHAFT_DAY = new THREE.Color(0xe8f7d0);
 const SHAFT_GOLD = new THREE.Color(0xffd39b);
@@ -192,8 +197,11 @@ export function updateLightShafts(shafts, dayAmount) {
       const material = sprite.material;
       // Very slow modulation suggests shifting wave focusing without
       // flashing or introducing any screen-space/light-volume passes.
-      const waveFocus = shaft.underwater && experimentalWater
-        ? 0.90 + 0.10 * Math.sin(t * 0.56 + shaft.phase * 2.1)
+      const waveFocus = shaft.underwater &&
+        (PHASE3_UNDERWATER_TRANSPORT || experimentalWater)
+        ? (PHASE3_UNDERWATER_TRANSPORT ? 0.87 : 0.90) +
+          (PHASE3_UNDERWATER_TRANSPORT ? 0.13 : 0.10) *
+          Math.sin(t * 0.56 + shaft.phase * 2.1)
         : 1;
       material.opacity = Math.min(0.30, shaft.baseOpacity * layer.weight * underwaterStrength * breathe * waveFocus);
 

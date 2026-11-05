@@ -93,6 +93,28 @@ function createSheetTexture(seed = 11) {
   }
   ctx.restore();
 
+  // Fine perforations and winding tear lines create natural lacy whitewater.
+  // Generated only once during material setup; no runtime texture paints or
+  // extra mobile render passes. The broad wash remains very transparent.
+  ctx.save();
+  ctx.globalCompositeOperation = "destination-out";
+  ctx.filter = "blur(0.8px)";
+  for (let i = 0; i < 74; i++) {
+    const x = rnd() * canvas.width;
+    const y = canvas.height * (0.16 + rnd() * 0.67);
+    const length = 9 + rnd() * 37;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.quadraticCurveTo(
+      x + length * 0.52, y + (rnd() - 0.5) * 9,
+      x + length, y + (rnd() - 0.5) * 7,
+    );
+    ctx.lineWidth = 0.9 + rnd() * 2.5;
+    ctx.strokeStyle = "rgba(0,0,0," + (0.30 + rnd() * 0.54) + ")";
+    ctx.stroke();
+  }
+  ctx.restore();
+
   ctx.save();
   ctx.globalCompositeOperation = "destination-in";
   const edge = ctx.createLinearGradient(0, 0, 0, canvas.height);
@@ -232,8 +254,9 @@ function animateLayerGeometry(handle, elapsed, storm = 0) {
         writeVertex(arr, v0 + 1, s, landEdge, handle.waterY, elapsed, 0.030);
       } else {
         const brokenEdge = 0.5 + 0.5 * Math.sin(s.phase * 0.45 + elapsed * 1.10);
-        const width = 0.11 + runup * (0.12 + 0.09 * brokenEdge) + stormT * 0.04;
-        const landEdge = front - 0.025;
+        const width = 0.10 + runup * (0.10 + 0.13 * brokenEdge) +
+          stormT * 0.04;
+        const landEdge = front - 0.025 - (brokenEdge - 0.5) * 0.045;
         const seaEdge = landEdge + width;
         writeVertex(arr, v0, s, seaEdge, handle.waterY, elapsed, 0.070);
         writeVertex(arr, v0 + 1, s, landEdge, handle.waterY, elapsed, 0.052);
@@ -282,13 +305,13 @@ export function updateReferenceSwashSheet(surfHandle, elapsed = 0, storm = 0, da
   if (body?.material) {
     body.material.color.copy(NIGHT_FOAM).lerp(DAY_FOAM, dayT);
     body.material.opacity = Math.min(1, 0.96 + dayT * 0.05 + stormT * 0.02);
-    if (body.material.alphaMap) body.material.alphaMap.offset.x = (elapsed * -0.0015) % 1;
+    if (body.material.alphaMap) body.material.alphaMap.offset.x = (elapsed * -0.0085) % 1;
   }
 
   if (edge?.material) {
     edge.material.color.copy(NIGHT_FOAM).lerp(DAY_FOAM, dayT);
     edge.material.opacity = Math.min(1, 0.99 + dayT * 0.02 + stormT * 0.01);
-    if (edge.material.alphaMap) edge.material.alphaMap.offset.x = (elapsed * 0.0020) % 1;
+    if (edge.material.alphaMap) edge.material.alphaMap.offset.x = (elapsed * 0.011) % 1;
   }
 
   const bubbles = handle.__riftBubbleOverlay;

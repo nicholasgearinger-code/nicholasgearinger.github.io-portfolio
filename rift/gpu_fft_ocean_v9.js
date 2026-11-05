@@ -1,4 +1,7 @@
 import * as THREE from "three";
+// Namespace import allows a clean fallback when the r182 TSL viewport
+// features are unavailable on a device, without a missing-export crash.
+import * as WaterTSL from "three/tsl";
 import {
   Fn, uniform, color, float, vec2, vec3, texture,
   positionWorld, cameraPosition,
@@ -531,9 +534,71 @@ function installWaterProOptics(handle) {
   // ocean while leaving only the solar reflection visible. Keep physically
   // detailed transmission on desktop; the underwater view already has its
   // own explicit FFT normal/refraction shading in colorNode.
-  material.transmissionNode = TOUCH_DEVICE
-    ? float(0.0)
-    : mix(aboveTransmission, float(0.94), underwater);
+  // Scene-aware backdrop refraction, when supported, replaces native physical
+  // transmission. Mobile physical transmission previously made the ocean a
+  // dark opaque mirror, while the viewport samples the real scene already
+  // behind this transparent water in the same render (no second scene pass).
+  const backdropAvailable =
+    typeof WaterTSL.viewportSharedTexture === "function" &&
+    WaterTSL.screenUV && WaterTSL.normalView &&
+    typeof location !== "undefined" &&
+    new URLSearchParams(location.search).get("riftRefraction") !== "off";
+  if (backdropAvailable) {
+    // Distort screen-space objects with the live wave normal; a small ripple
+    // contribution adds moving refraction without looking like a tiled grid.
+    // Screen-space UV shift is intentionally limited for iPhone stability.
+    const offset = vec2(
+      WaterTSL.normalView.x.add(microX.mul(0.26)),
+      WaterTSL.normalView.y.add(microZ.mul(0.26))
+    ).mul(
+      clamp(float(0.003).add(shallow.mul(0.010))
+        .add(microEnergy.mul(0.003)), 0.003, 0.018)
+      .mul(float(1).sub(combinedFoam.mul(0.86)))
+    );
+    const warpedUV = clamp(WaterTSL.screenUV.add(offset),
+      vec2(0.006), vec2(0.994));
+    // Depth-aware UVs avoid sampling foreground objects across water edges.
+    const safeUV = typeof WaterTSL.viewportSafeUV === "function"
+      ? WaterTSL.viewportSafeUV(warpedUV) : warpedUV;
+    const backdrop = WaterTSL.viewportSharedTexture(safeUV).rgb;
+    // Beer-Lambert-inspired tint, without hiding nearby real sand, fish, or
+    // above-water clouds. Deep water retains some body color and Fresnel sky.
+    const tint = mix(color(0x8cbac7), color(0xd8f4e8),
+      shallow.mul(0.78).add(day.mul(0.16)));
+    material.backdropNode = backdrop.mul(tint);
+    const aboveClarity = clamp(
+      float(0.22).add(shallow.mul(0.64))
+        .add(float(1).sub(ndv).mul(-0.12)),
+      0.18, 0.88
+    );
+    // Looking upward underwater should reveal the actual sky behind the
+    // FFT surface; grazing angles keep reflected cyan wave facets.
+    const belowClarity = clamp(
+      float(0.90).sub(fresnel.mul(0.68)), 0.16, 0.91);
+    material.backdropAlphaNode = mix(aboveClarity, belowClarity,
+      underwater).mul(float(1).sub(combinedFoam.mul(0.89)));
+    material.transparent = true;
+    material.depthWrite = false;
+    material.opacity = 1;
+    handle.mesh.renderOrder = 10; // after opaque terrain/sky, before foam
+    handle.fftViewportRefractionActive = true;
+    material.transmissionNode = float(0);
+  } else {
+    // Supported fallback: alpha-blended real scene, but no warped background.
+    // Crucially, the player can still see through the surface from both sides.
+    const clear = mix(
+      clamp(float(0.29).add(shallow.mul(0.40)), 0.29, 0.72),
+      clamp(float(0.85).sub(fresnel.mul(0.60)), 0.22, 0.86),
+      underwater
+    ).mul(float(1).sub(combinedFoam.mul(0.80)));
+    material.opacityNode = float(1).sub(clear);
+    material.transparent = true;
+    material.depthWrite = false;
+    material.opacity = 1;
+    handle.mesh.renderOrder = 10;
+    handle.fftViewportRefractionActive = false;
+    material.transmissionNode = float(0);
+  }
   material.thicknessNode = mix(
     mix(originalThickness, float(0.075), shallow.mul(0.66)),
     float(0.045),
@@ -612,9 +677,11 @@ function tuneWaterProState(handle, elapsed = 0, sky = null, storm = 0, day = 1) 
     physical.ior = 1.333;
     physical.attenuationDistance = TOUCH_DEVICE ? 52 : 64;
     physical.attenuationColor.set(0xa3e7dd);
-    // Match the node-material transmission mode on mobile. It must not
-    // compile a hidden high-transmission path when refraction is unavailable.
-    if (TOUCH_DEVICE) physical.transmission = 0;
+    // Backdrop or alpha compositing owns scene visibility; avoid mixing a
+    // second built-in physical transmission render path into its color.
+    physical.transmission = 0;
+    physical.transparent = true;
+    physical.depthWrite = false;
     physical.clearcoat = TOUCH_DEVICE ? 0.34 : 0.48;
     physical.clearcoatRoughness = 0.10 + stormT * 0.045;
 

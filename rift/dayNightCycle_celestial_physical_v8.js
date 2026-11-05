@@ -23,10 +23,19 @@ const forceV12 = params?.has("atmosphereV12") === true;
 const forceV15 = params?.has("celestialV15") === true;
 const active = forceLegacy ? legacy : (forceV12 ? v12 : (forceV15 ? v15 : physical));
 
+// Rift Islands bright-day presentation. Keep a query override for testing the
+// full celestial cycle (?naturalCycle=1). At default the sun, sky dome, clouds'
+// lighting and day/night material uniforms all agree on daytime illumination.
+const BRIGHT_DAY = params?.has("naturalCycle") !== true;
+const CYCLE_DAY_SECONDS = 1800 * 0.48; // sun high and slightly off zenith
+
 export function createDayNightCycle(...args) {
-  return active.createDayNightCycle(...args);
+  const cycle = active.createDayNightCycle(...args);
+  if (BRIGHT_DAY && cycle) cycle.elapsed = CYCLE_DAY_SECONDS;
+  return cycle;
 }
 
-export function updateDayNightCycle(...args) {
-  return active.updateDayNightCycle(...args);
+export function updateDayNightCycle(cycle, dt, ...rest) {
+  if (BRIGHT_DAY && cycle) cycle.elapsed = CYCLE_DAY_SECONDS - Math.max(0, dt || 0);
+  return active.updateDayNightCycle(cycle, dt, ...rest);
 }

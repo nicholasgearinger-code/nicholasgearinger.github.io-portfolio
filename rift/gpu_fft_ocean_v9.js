@@ -6,7 +6,7 @@ import {
   Fn, uniform, color, float, vec2, vec3, texture,
   positionWorld, cameraPosition,
   attribute, dFdx, dFdy, cross, dot, pow, mix, clamp, smoothstep,
-  sin, cos, abs, max,
+  sin, cos, abs, max, exp,
 } from "three/tsl";
 import * as oceanV7 from "./gpu_fft_ocean_v7.js";
 import * as oceanV8 from "./gpu_fft_ocean_v8.js";
@@ -55,6 +55,15 @@ const TOUCH_DEVICE = WATER_TEST_MODE === "mobile";
 // ?riftGlassLook=off reverts this pass for direct visual A/B comparisons.
 const REFERENCE_GLASS_LOOK = typeof location === "undefined" ||
   new URLSearchParams(location.search).get("riftGlassLook") !== "off";
+
+// Phase 1: use a single air/water IOR to balance angular reflection and
+// light transmission, plus wavelength-dependent Beer-Lambert attenuation.
+// Do not add any scene renders or FFT passes. Query switch preserves the
+// previously verified glass preset for a controlled A/B test.
+const PHYSICAL_OPTICS_PHASE1 = typeof location === "undefined" ||
+  new URLSearchParams(location.search).get("riftPhysics1") !== "off";
+const WATER_IOR = 1.333;
+const AIR_WATER_R0 = ((WATER_IOR - 1) / (WATER_IOR + 1)) ** 2;
 
 if (typeof globalThis !== "undefined") {
   globalThis.__riftWaterTestMode = WATER_TEST_MODE;
@@ -182,8 +191,9 @@ function installWaterProOptics(handle) {
   const ndv = clamp(abs(dot(opticalNormal, viewDir)), 0, 1);
   const ndh = clamp(dot(opticalNormal, halfDir), 0, 1);
   const ndl = clamp(dot(opticalNormal, lightDir), 0, 1);
-  const fresnel = float(0.02037)
-    .add(float(0.97963).mul(pow(float(1).sub(ndv), float(5))));
+  const fresnel = float(AIR_WATER_R0)
+    .add(float(1 - AIR_WATER_R0).mul(
+      pow(float(1).sub(ndv), float(5))));
 
   // Depth-driven tropical water color. Near-shore water reads turquoise because
   // the sand contributes strongly; offshore water loses red/green energy and
@@ -359,12 +369,18 @@ function installWaterProOptics(handle) {
   // View-dependent Fresnel / wavelet sky reflection. This uses the already
   // available sky and FFT normals, avoiding additional sky texture fetches
   // or a separate mobile scene-reflection target. Foam suppresses the mirror.
-  const reflectionGain = clamp(
-    fresnel.mul(REFERENCE_GLASS_LOOK ? 0.38 : 0.32)
-      .add(microEnergy.mul(REFERENCE_GLASS_LOOK ? 0.055 : 0.050))
-      .add(geometricSlope.mul(REFERENCE_GLASS_LOOK ? 0.060 : 0.040)),
-    0, REFERENCE_GLASS_LOOK ? 0.44 : 0.39,
-  ).mul(day.mul(0.72).add(0.28))
+  const reflectionGain = PHYSICAL_OPTICS_PHASE1
+    ? clamp(
+        fresnel.mul(0.62).add(microEnergy.mul(0.022))
+          .add(geometricSlope.mul(0.024)),
+        0, 0.60,
+      ).mul(day.mul(0.72).add(0.28))
+    : clamp(
+        fresnel.mul(REFERENCE_GLASS_LOOK ? 0.38 : 0.32)
+          .add(microEnergy.mul(REFERENCE_GLASS_LOOK ? 0.055 : 0.050))
+          .add(geometricSlope.mul(REFERENCE_GLASS_LOOK ? 0.060 : 0.040)),
+        0, REFERENCE_GLASS_LOOK ? 0.44 : 0.39,
+      ).mul(day.mul(0.72).add(0.28))
     .mul(reflectionStrength)
     .mul(float(1).sub(combinedFoam.mul(0.88)))
     .mul(float(1).sub(underwater));
@@ -520,7 +536,8 @@ function installWaterProOptics(handle) {
   // black mirror on iOS when no scene refraction texture is supplied. It
   // follows the same depth palette and does not brighten night/underwater.
   const daylightFill = depthColor.mul(day)
-    .mul(float(0.22).add(shallow.mul(0.12)))
+    .mul(float(PHYSICAL_OPTICS_PHASE1 ? 0.15 : 0.22)
+      .add(shallow.mul(PHYSICAL_OPTICS_PHASE1 ? 0.08 : 0.12)))
     .mul(float(1).sub(underwater));
   material.emissiveNode = originalEmissive
     .add(daylightFill)
@@ -558,6 +575,9 @@ function installWaterProOptics(handle) {
         .add(microEnergy.mul(REFERENCE_GLASS_LOOK ? 0.0035 : 0.003)),
         0.003, REFERENCE_GLASS_LOOK ? 0.020 : 0.018)
       .mul(float(1).sub(combinedFoam.mul(0.86)))
+      .mul(PHYSICAL_OPTICS_PHASE1
+        ? clamp(float(1.12).sub(fresnel.mul(0.42)), 0.75, 1.12)
+        : float(1))
     );
     const warpedUV = clamp(WaterTSL.screenUV.add(offset),
       vec2(0.006), vec2(0.994));
@@ -565,22 +585,43 @@ function installWaterProOptics(handle) {
     const safeUV = typeof WaterTSL.viewportSafeUV === "function"
       ? WaterTSL.viewportSafeUV(warpedUV) : warpedUV;
     const backdrop = WaterTSL.viewportSharedTexture(safeUV).rgb;
-    // Beer-Lambert-inspired tint, without hiding nearby real sand, fish, or
-    // above-water clouds. Deep water retains some body color and Fresnel sky.
+    // Water absorption is wavelength dependent. The ocean absorbs red
+    // faster than green and blue, while weak in-scattering keeps the water
+    // visibly cyan rather than a black cutout at greater optical depths.
+    // "depth" is the existing seabed-depth attribute, not an extra scene
+    // depth texture. Its approximation is most accurate in shallow water.
     const tint = mix(color(0x8cbac7), color(0xd8f4e8),
       shallow.mul(0.78).add(day.mul(0.16)));
-    material.backdropNode = backdrop.mul(tint);
-    const aboveClarity = REFERENCE_GLASS_LOOK
-      ? clamp(float(0.23).add(shallow.mul(0.42))
-          .sub(fresnel.mul(0.13)), 0.18, 0.70)
-      : clamp(float(0.22).add(shallow.mul(0.64))
-          .add(float(1).sub(ndv).mul(-0.12)), 0.18, 0.88);
+    if (PHYSICAL_OPTICS_PHASE1) {
+      const waterPath = clamp(
+        depth.div(max(ndv, float(0.40))), 0, 24,
+      );
+      const absorption = exp(vec3(-0.145, -0.063, -0.026)
+        .mul(waterPath));
+      const inScatter = color(0x287d99)
+        .mul(float(1).sub(absorption)).mul(0.31);
+      material.backdropNode = backdrop.mul(absorption).add(inScatter);
+    } else {
+      material.backdropNode = backdrop.mul(tint);
+    }
+    const aboveClarity = PHYSICAL_OPTICS_PHASE1
+      ? clamp(float(0.28).add(shallow.mul(0.44)), 0.23, 0.72)
+          .mul(float(1).sub(fresnel))
+      : REFERENCE_GLASS_LOOK
+        ? clamp(float(0.23).add(shallow.mul(0.42))
+            .sub(fresnel.mul(0.13)), 0.18, 0.70)
+        : clamp(float(0.22).add(shallow.mul(0.64))
+            .add(float(1).sub(ndv).mul(-0.12)), 0.18, 0.88);
     // Looking upward underwater should reveal the actual sky behind the
     // FFT surface; grazing angles keep reflected cyan wave facets.
-    const belowClarity = clamp(
-      float(REFERENCE_GLASS_LOOK ? 0.80 : 0.90)
-        .sub(fresnel.mul(REFERENCE_GLASS_LOOK ? 0.60 : 0.68)),
-      0.16, REFERENCE_GLASS_LOOK ? 0.82 : 0.91);
+    // Water-to-air light transmission collapses below the critical angle
+    // (cos theta ~= 0.661). Soften the edge to avoid flickering on mobile.
+    const belowClarity = PHYSICAL_OPTICS_PHASE1
+      ? clamp(float(0.84).mul(smoothstep(float(0.57),
+          float(0.73), ndv)).mul(float(1).sub(fresnel)), 0.03, 0.82)
+      : clamp(float(REFERENCE_GLASS_LOOK ? 0.80 : 0.90)
+          .sub(fresnel.mul(REFERENCE_GLASS_LOOK ? 0.60 : 0.68)),
+        0.16, REFERENCE_GLASS_LOOK ? 0.82 : 0.91);
     material.backdropAlphaNode = mix(aboveClarity, belowClarity,
       underwater).mul(float(1).sub(combinedFoam.mul(0.89)));
     // Conservative alpha fallback inside the same draw. If a mobile backend
@@ -599,7 +640,11 @@ function installWaterProOptics(handle) {
         : clamp(float(0.83).sub(fresnel.mul(0.54)), 0.20, 0.87),
       underwater,
     ).mul(float(1).sub(combinedFoam.mul(0.82)));
-    material.opacityNode = float(1).sub(realSceneClarity.mul(0.55));
+    // The backdrop samples the scene once; blending additionally at full
+    // clarity would double-count transmitted light and wash the ocean out.
+    // Preserve a modest genuine-alpha fallback for WebGPU compositor quirks.
+    material.opacityNode = float(1).sub(realSceneClarity.mul(
+      PHYSICAL_OPTICS_PHASE1 ? 0.34 : 0.55));
     material.transparent = true;
     material.depthWrite = false;
     material.forceSinglePass = true; // thin double-sided plane, never two transparent draws
@@ -619,7 +664,8 @@ function installWaterProOptics(handle) {
         : clamp(float(0.85).sub(fresnel.mul(0.60)), 0.22, 0.86),
       underwater
     ).mul(float(1).sub(combinedFoam.mul(0.80)));
-    material.opacityNode = float(1).sub(clear);
+    material.opacityNode = float(1).sub(PHYSICAL_OPTICS_PHASE1
+      ? clear.mul(float(1).sub(fresnel)).mul(0.92) : clear);
     material.transparent = true;
     material.depthWrite = false;
     material.forceSinglePass = true; // thin double-sided plane, never two transparent draws
@@ -634,6 +680,7 @@ function installWaterProOptics(handle) {
         ? "webgpu-viewport-refraction" : "alpha-transparency-fallback",
       noExtraSceneRender: true,
       referenceGlassLook: REFERENCE_GLASS_LOOK,
+      physicalOpticsPhase1: PHYSICAL_OPTICS_PHASE1,
       disabledByQuery: typeof location !== "undefined" &&
         new URLSearchParams(location.search).get("riftRefraction") === "off",
     };
@@ -713,7 +760,7 @@ function tuneWaterProState(handle, elapsed = 0, sky = null, storm = 0, day = 1) 
 
   const physical = handle.fftPhysicalMaterial;
   if (physical) {
-    physical.ior = 1.333;
+    physical.ior = WATER_IOR;
     physical.attenuationDistance = TOUCH_DEVICE ? 52 : 64;
     physical.attenuationColor.set(0xa3e7dd);
     // Backdrop or alpha compositing owns scene visibility; avoid mixing a

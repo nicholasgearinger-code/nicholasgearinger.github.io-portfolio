@@ -90,6 +90,8 @@ function installWaterProOptics(handle) {
   const midColor = uniform(color(0x16689d));
   const deepColor = uniform(color(0x0c4f83));
   const skyColor = uniform(color(0xa9ddf6));
+  // Respect the existing Graphics > Reflections switch at runtime.
+  const reflectionStrength = uniform(1.0);
   // Share the exact cloud panorama already rendered by the sky dome.
   // The texture is globally cached by the cloud module and not owned here.
   const cloudSkyTexture = getRealisticCloudTexture();
@@ -355,6 +357,7 @@ function installWaterProOptics(handle) {
       .add(geometricSlope.mul(0.040)),
     0, 0.39,
   ).mul(day.mul(0.72).add(0.28))
+    .mul(reflectionStrength)
     .mul(float(1).sub(combinedFoam.mul(0.88)))
     .mul(float(1).sub(underwater));
   // Make nearby individual FFT crests readable without painting dark
@@ -550,6 +553,7 @@ function installWaterProOptics(handle) {
   handle.fftV9MidColor = midColor;
   handle.fftV9DeepColor = deepColor;
   handle.fftV9SkyColor = skyColor;
+  handle.fftV9ReflectionStrength = reflectionStrength;
   handle.fftV9SunColor = sunColor;
   handle.fftV9CrestColor = crestColor;
   handle.fftWaterProV9Installed = true;
@@ -563,6 +567,10 @@ function tuneWaterProState(handle, elapsed = 0, sky = null, storm = 0, day = 1) 
   const dayT = THREE.MathUtils.clamp(Number(day) || 0, 0, 1);
   if (handle.fftV9Time) handle.fftV9Time.value = Number.isFinite(elapsed) ? elapsed : 0;
   if (handle.fftV9Storm) handle.fftV9Storm.value = stormT;
+  if (handle.fftV9ReflectionStrength) {
+    handle.fftV9ReflectionStrength.value =
+      getEffectiveValue("reflectionEnabled") === false ? 0.0 : 1.0;
+  }
 
   if (handle.fftV9SkyColor?.value) {
     if (sky?.isColor) handle.fftV9SkyColor.value.copy(sky);

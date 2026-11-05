@@ -9,30 +9,38 @@ import {
 // Breaker energy deposits foam near shore, then a tiny CPU field advects,
 // diffuses, and decays it through run-up/backwash. No new GPU compute work.
 
+// Daylight color grading is applied AFTER the reference-atmosphere palette.
+// The previous dynamic palette could push deep water nearly black and restore
+// sunset colors even after the shader defaults were brightened.
+const BRIGHT_WATER = typeof location === "undefined" ||
+  !new URLSearchParams(location.search).has("naturalCycle");
+const SHALLOW_BLUE = 0x2fc6c7;
+const MID_BLUE = 0x16689d;
+const DEEP_BLUE = 0x0c4f83;
 function applyReferenceOceanPalette(handle) {
-  const atmosphere = typeof globalThis !== "undefined"
-    ? globalThis.__riftReferenceAtmosphere
-    : null;
-  if (!handle?.gpuFFT || !atmosphere) return;
-
-  if (handle.fftV9ShallowColor?.value?.isColor && atmosphere.waterShallowColor?.isColor) {
+  if (!handle?.gpuFFT) return;
+  const atmosphere = globalThis.__riftReferenceAtmosphere;
+  if (BRIGHT_WATER) {
+    handle.fftV9ShallowColor?.value?.set?.(SHALLOW_BLUE);
+    handle.fftV9MidColor?.value?.set?.(MID_BLUE);
+    handle.fftV9DeepColor?.value?.set?.(DEEP_BLUE);
+    handle.fftV9SkyColor?.value?.set?.(0xa9ddf6);
+    handle.fftV9CrestColor?.value?.set?.(0x71ead5);
+    return;
+  }
+  if (!atmosphere) return;
+  if (handle.fftV9ShallowColor?.value?.isColor && atmosphere.waterShallowColor?.isColor)
     handle.fftV9ShallowColor.value.copy(atmosphere.waterShallowColor);
-  }
-  if (handle.fftV9MidColor?.value?.isColor && atmosphere.waterMidColor?.isColor) {
+  if (handle.fftV9MidColor?.value?.isColor && atmosphere.waterMidColor?.isColor)
     handle.fftV9MidColor.value.copy(atmosphere.waterMidColor);
-  }
-  if (handle.fftV9DeepColor?.value?.isColor && atmosphere.waterDeepColor?.isColor) {
+  if (handle.fftV9DeepColor?.value?.isColor && atmosphere.waterDeepColor?.isColor)
     handle.fftV9DeepColor.value.copy(atmosphere.waterDeepColor);
-  }
-  if (handle.fftV9SkyColor?.value?.isColor && atmosphere.horizonColor?.isColor) {
+  if (handle.fftV9SkyColor?.value?.isColor && atmosphere.horizonColor?.isColor)
     handle.fftV9SkyColor.value.copy(atmosphere.horizonColor).lerp(atmosphere.zenithColor, 0.42);
-  }
-  if (handle.fftV9SunColor?.value?.isColor && atmosphere.sunColor?.isColor) {
+  if (handle.fftV9SunColor?.value?.isColor && atmosphere.sunColor?.isColor)
     handle.fftV9SunColor.value.copy(atmosphere.sunColor);
-  }
-  if (handle.fftV9CrestColor?.value?.isColor) {
+  if (handle.fftV9CrestColor?.value?.isColor)
     handle.fftV9CrestColor.value.set(0xb7f4ef);
-  }
 }
 
 export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {

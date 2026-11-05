@@ -56,12 +56,13 @@ const TOUCH_DEVICE = WATER_TEST_MODE === "mobile";
 const REFERENCE_GLASS_LOOK = typeof location === "undefined" ||
   new URLSearchParams(location.search).get("riftGlassLook") !== "off";
 
-// Phase 1: use a single air/water IOR to balance angular reflection and
-// light transmission, plus wavelength-dependent Beer-Lambert attenuation.
-// Do not add any scene renders or FFT passes. Query switch preserves the
-// previously verified glass preset for a controlled A/B test.
-const PHYSICAL_OPTICS_PHASE1 = typeof location === "undefined" ||
-  new URLSearchParams(location.search).get("riftPhysics1") !== "off";
+// Phase 1's experimental Beer-Lambert/viewport transparency branch caused
+// a regression on the live iPhone path. Restore the previously working glass
+// optics by default; Phase 2 animation remains active independently.
+// Explicitly opt in with ?riftPhysics1=on to test the isolated Phase 1 path.
+// Keep ?riftPhysics1=off as a backwards-compatible safe setting.
+const PHYSICAL_OPTICS_PHASE1 = typeof location !== "undefined" &&
+  new URLSearchParams(location.search).get("riftPhysics1") === "on";
 const WATER_IOR = 1.333;
 // Phase 2 adds a coherent multi-scale normal field over the existing two
 // REAL geometry FFT cascades; ?riftWaves2=off restores legacy optical chop.
@@ -411,18 +412,22 @@ function installWaterProOptics(handle) {
   // View-dependent Fresnel / wavelet sky reflection. This uses the already
   // available sky and FFT normals, avoiding additional sky texture fetches
   // or a separate mobile scene-reflection target. Foam suppresses the mirror.
-  const reflectionGain = PHYSICAL_OPTICS_PHASE1
+  // Common controls must apply to BOTH branches. Previously the new
+  // Phase 1 branch escaped the reflection toggle, foam suppression, and
+  // underwater mask due to JS ternary/operator precedence.
+  const reflectionBase = PHYSICAL_OPTICS_PHASE1
     ? clamp(
         fresnel.mul(0.62).add(microEnergy.mul(0.022))
           .add(geometricSlope.mul(0.024)),
         0, 0.60,
-      ).mul(day.mul(0.72).add(0.28))
+      )
     : clamp(
         fresnel.mul(REFERENCE_GLASS_LOOK ? 0.38 : 0.32)
           .add(microEnergy.mul(REFERENCE_GLASS_LOOK ? 0.055 : 0.050))
           .add(geometricSlope.mul(REFERENCE_GLASS_LOOK ? 0.060 : 0.040)),
         0, REFERENCE_GLASS_LOOK ? 0.44 : 0.39,
-      ).mul(day.mul(0.72).add(0.28))
+      );
+  const reflectionGain = reflectionBase.mul(day.mul(0.72).add(0.28))
     .mul(reflectionStrength)
     .mul(float(1).sub(combinedFoam.mul(0.88)))
     .mul(float(1).sub(underwater));

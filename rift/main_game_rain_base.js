@@ -1346,6 +1346,14 @@ const PHASE3_UNDERWATER_TRANSPORT = (() => {
   try { return new URLSearchParams(location.search).get("riftUnderwater3") !== "off"; }
   catch (_) { return true; }
 })();
+// Same A/B switch used by gpu_fft_ocean_v9.js. The underwater scene-depth
+// compositor already owns the scene texture: strengthen refraction in its
+// EXISTING sample, without adding a render pass, buffer, or texture read.
+// The old underwater distortion remains with ?riftDistortion2=off.
+const WAVE_DISTORTION_2 = (() => {
+  try { return new URLSearchParams(location.search).get("riftDistortion2") !== "off"; }
+  catch (_) { return true; }
+})();
 const oceanDepthIndirectEnabled = (() => {
   try { return new URLSearchParams(location.search).get("riftDebug") !== "oldindirect"; }
   catch (_) { return true; }
@@ -1464,7 +1472,12 @@ return Fn(() => {
   // when the moving wave ceiling is nearly level with the camera.
   const crossing = smoothstep(float(-0.65), float(1.45),
     fragmentDistance.sub(exitDistance));
-  const upwardView = smoothstep(float(0.045), float(0.32), rayY);
+  // A low, near-horizontal view should still reveal a moving optical
+  // ceiling; previously the bend almost disappeared until looking straight
+  // upward. The crossing gate continues to protect submerged reef details.
+  const upwardView = WAVE_DISTORTION_2
+    ? smoothstep(float(0.004), float(0.25), rayY)
+    : smoothstep(float(0.045), float(0.32), rayY);
   const waveSlopeX = fftWaveField
     ? clamp(fftSlopeX.mul(1.02).add(detailSlopeX
         ? detailSlopeX.mul(0.47) : float(0)).mul(oceanWaveMotion), -0.35, 0.35)
@@ -1477,12 +1490,31 @@ return Fn(() => {
     : cos(phaseOne).mul(0.0204)
       .add(cos(phaseTwo).mul(0.0242))
       .sub(cos(phaseThree).mul(0.0105)).mul(oceanWaveMotion);
-  const bend = vec2(waveSlopeX, waveSlopeZ).mul(oceanSurfaceRefraction)
-    .mul(oceanDepthUnderwaterMix).mul(crossing).mul(upwardView).mul(0.15);
+  // Convert world-space wave slopes to the camera's actual right/up axes.
+  // The older vec2(worldX,worldZ) shift rotated incorrectly with camera yaw
+  // and could read like flat scrolling rather than wave refraction.
+  // The two broad phases already exist for the moving surface intersection;
+  // no new noise field or FFT sample is needed on touch devices.
+  const refractiveSlopes = WAVE_DISTORTION_2
+    ? vec2(
+        waveSlopeX.mul(oceanRayRight.x).add(waveSlopeZ.mul(oceanRayRight.z)),
+        waveSlopeX.mul(oceanRayUp.x).add(waveSlopeZ.mul(oceanRayUp.z))
+      )
+    : vec2(waveSlopeX, waveSlopeZ);
+  const waveLensFocus = WAVE_DISTORTION_2
+    ? float(0.84).add(abs(sin(phaseThree)).mul(0.32))
+    : float(1);
+  const bend = clamp(refractiveSlopes.mul(oceanSurfaceRefraction)
+      .mul(oceanDepthUnderwaterMix).mul(crossing).mul(upwardView)
+      .mul(WAVE_DISTORTION_2 ? 0.42 : 0.15)
+      .mul(waveLensFocus),
+    vec2(WAVE_DISTORTION_2 ? -0.052 : -0.020),
+    vec2(WAVE_DISTORTION_2 ? 0.052 : 0.020));
   const bentUV = clamp(coord.add(bend), vec2(0.002), vec2(0.998));
   const bentView = texture(scenePassColor, bentUV).rgb;
   const refractedColor = mix(base.rgb, bentView,
-    clamp(oceanDepthUnderwaterMix.mul(crossing).mul(upwardView), 0, 0.78));
+    clamp(oceanDepthUnderwaterMix.mul(crossing).mul(upwardView),
+      0, WAVE_DISTORTION_2 ? 0.94 : 0.78));
   const length = pathThroughWater.mul(oceanDepthAbsorption);
   // Keep the original stable atmosphere available for a controlled
   // comparison, without rebuilding the post-processing graph at runtime.

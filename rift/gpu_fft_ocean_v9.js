@@ -541,6 +541,7 @@ function installWaterProOptics(handle) {
   const backdropAvailable =
     typeof WaterTSL.viewportSharedTexture === "function" &&
     WaterTSL.screenUV && WaterTSL.normalView &&
+    "backdropNode" in material && "backdropAlphaNode" in material &&
     typeof location !== "undefined" &&
     new URLSearchParams(location.search).get("riftRefraction") !== "off";
   if (backdropAvailable) {
@@ -579,6 +580,7 @@ function installWaterProOptics(handle) {
       underwater).mul(float(1).sub(combinedFoam.mul(0.89)));
     material.transparent = true;
     material.depthWrite = false;
+    material.forceSinglePass = true; // thin double-sided plane, never two transparent draws
     material.opacity = 1;
     handle.mesh.renderOrder = 10; // after opaque terrain/sky, before foam
     handle.fftViewportRefractionActive = true;
@@ -594,10 +596,20 @@ function installWaterProOptics(handle) {
     material.opacityNode = float(1).sub(clear);
     material.transparent = true;
     material.depthWrite = false;
+    material.forceSinglePass = true; // thin double-sided plane, never two transparent draws
     material.opacity = 1;
     handle.mesh.renderOrder = 10;
     handle.fftViewportRefractionActive = false;
     material.transmissionNode = float(0);
+  }
+  if (typeof globalThis !== "undefined") {
+    globalThis.__riftWaterSceneOptics = {
+      mode: handle.fftViewportRefractionActive
+        ? "webgpu-viewport-refraction" : "alpha-transparency-fallback",
+      noExtraSceneRender: true,
+      disabledByQuery: typeof location !== "undefined" &&
+        new URLSearchParams(location.search).get("riftRefraction") === "off",
+    };
   }
   material.thicknessNode = mix(
     mix(originalThickness, float(0.075), shallow.mul(0.66)),

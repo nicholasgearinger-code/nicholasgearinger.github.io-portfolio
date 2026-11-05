@@ -2844,6 +2844,13 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
       try { return new URLSearchParams(location.search).get("riftDebug") !== "oldcaustics"; }
       catch (_) { return true; }
     })();
+    // Isolate the Snell/curvature experiment from the existing whitewater
+    // and light-net systems for straightforward visual/performance A/B tests.
+    // ?riftSolarCaustics=off preserves the previous seafloor illumination.
+    const solarLensCausticsEnabled = (() => {
+      try { return new URLSearchParams(location.search).get("riftSolarCaustics") !== "off"; }
+      catch (_) { return true; }
+    })();
     simpleTerrainMat.emissiveNode = Fn(() => {
       // Per explicit "using what we wrote in the prototype" — ported
       // from the old (still-present, safely disabled via
@@ -3094,8 +3101,10 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
         float(0.50).add(rayConvergence.mul(0.58)), 0.50, 1.81);
 
       const projectedCeilingLight = clamp(
-        sin(bentA).mul(cos(bentB)).mul(0.30)
-          .add(sin(bentC).mul(0.095)).add(0.605), 0, 1
+        sin(solarLensCausticsEnabled ? bentA : ceilingA)
+          .mul(cos(solarLensCausticsEnabled ? bentB : ceilingB)).mul(0.30)
+          .add(sin(solarLensCausticsEnabled ? bentC : ceilingC).mul(0.095))
+          .add(0.605), 0, 1
       );
       const projectedFocus = smoothstep(float(0.20), float(0.87),
         projectedCeilingLight);
@@ -3115,8 +3124,8 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
       // The same wave slope now controls both the refracted footprint and
       // solar energy concentration. Preserve the existing fractured net as
       // fine optical texture, but make its intensity physically responsive.
-      const opticalFocus = coupledCausticsEnabled
-        ? refractedFocusGain : float(1);
+      const opticalFocus = coupledCausticsEnabled &&
+        solarLensCausticsEnabled ? refractedFocusGain : float(1);
       const finalCaustic = causticPattern.mul(crestFocusing)
         .mul(causticCoupling).mul(opticalFocus).mul(causticSunAngle)
         .mul(underwaterMask).mul(upwardMask)

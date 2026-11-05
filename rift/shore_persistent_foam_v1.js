@@ -204,8 +204,11 @@ function stepPersistentField(handle, dt, storm, oceanHandle) {
       const v = j / (m - 1);
       const landness = 1 - v;
       const breakup = handle.breakup[i * m + j];
-      const decayRate = 0.085 + landness * 0.08 + (crossVel > 0 ? 0.026 : 0) + breakup * 0.022;
-      const mixed = adv + (avg - adv) * (0.085 + storm * 0.025);
+      // Aerated foam drains relatively quickly on the upper sand; an older
+      // low-decay field was building a solid opaque white shoreline carpet.
+      const decayRate = 0.20 + landness * 0.17 +
+        (crossVel > 0 ? 0.045 : 0) + breakup * 0.07;
+      const mixed = adv + (avg - adv) * (0.045 + storm * 0.018);
       dst[i * m + j] = Math.max(0, mixed * Math.exp(-decayRate * dt));
     }
   }
@@ -249,8 +252,8 @@ function stepPersistentField(handle, dt, storm, oceanHandle) {
       const idx = i * m + j;
       // Aerated body lingers shoreward; offshore leading edge stays narrow.
       const bodyBehind = dj < 0 ? 1.0 : 0.35;
-      dst[idx] = Math.min(1.5, dst[idx] + energy * w * bodyBehind *
-        dt * (5.0 + storm * 1.9));
+      dst[idx] = Math.min(1.05, dst[idx] + energy * w * bodyBehind *
+        dt * (3.5 + storm * 1.5));
     }
   }
 
@@ -290,14 +293,18 @@ function updateBreakerGeometry(handle) {
         const progress = (cycle + train * 0.49) % 1;
         const front = 3.3 - progress * 4.2 + modulation;
         const d = (radial - front) / (0.48 + progress * 0.13);
-        // Asymmetric face: broad rear shoulder, narrow steep offshore lip.
-        const shoulder = Math.exp(-Math.pow(Math.min(d, 0) * 1.1, 2) * 1.7);
-        const lip = Math.exp(-Math.pow(Math.max(d, 0) * 2.25, 2) * 3);
-        const profile = d < 0 ? shoulder * 0.68 : lip;
+        // Gentle shallow-water spill: low rising shoulder, short steep lip.
+        // Break its continuity alongshore rather than raising a long ribbon.
+        const shoulder = Math.exp(-Math.pow(Math.min(d, 0) * 1.15, 2) * 1.8);
+        const lip = Math.exp(-Math.pow(Math.max(d, 0) * 2.5, 2) * 3.2);
+        const profile = d < 0 ? shoulder * 0.58 : lip;
         const growth = Math.max(0, Math.sin(Math.PI * Math.min(1, progress * 1.16)));
         const collapse = 1 - smooth01((progress - 0.64) / 0.32);
-        const energy = growth * collapse * surfSet(t) * (0.35 + energyDepth * 0.65) *
-          (train === 0 ? 1 : 0.57);
+        const alongBreak = 0.79 + 0.12 * Math.sin(along * 29.3 + t * 0.78) +
+          0.09 * Math.sin(along * 63.1 - t * 0.51);
+        const energy = growth * collapse * surfSet(t) *
+          (0.35 + energyDepth * 0.65) * alongBreak *
+          (train === 0 ? 1 : 0.52);
         lift += profile * energy * (0.53 + storm * 0.34);
         pitch += Math.exp(-d * d * 5) * energy *
           smooth01((progress - 0.28) / 0.43) * 0.11;
@@ -309,7 +316,8 @@ function updateBreakerGeometry(handle) {
     }
   }
   attribute.needsUpdate = true;
-  handle.geometry.computeBoundingSphere();
+  // Both foam meshes are intentionally frustumCulled=false, so repeated
+  // CPU bounding-sphere reconstruction buys nothing on the mobile path.
 }
 
 
@@ -395,19 +403,22 @@ function updateCurlingFace(face, t, storm, day, oceanHandle) {
     const trainStrength = face.trainOffset ? 0.57 : 1.0;
     const growth = Math.max(0, Math.sin(Math.PI * Math.min(1, localPhase * 1.16)));
     const collapse = 1 - smooth01((localPhase - 0.64) / 0.32);
-    const height = (0.55 + storm * 0.20) * trainStrength * set *
-      (0.43 + shoaling * 0.66) * growth * collapse;
-    const breaking = smooth01((localPhase - 0.30) / 0.19) *
+    const alongHeight = 0.82 +
+      0.11 * Math.sin(i * 0.33 + t * 0.55) +
+      0.07 * Math.sin(i * 0.87 - t * 0.32);
+    const height = (0.49 + storm * 0.19) * trainStrength * set *
+      (0.43 + shoaling * 0.66) * growth * collapse * alongHeight;
+    const breaking = smooth01((localPhase - 0.28) / 0.16) *
       (1 - smooth01((localPhase - 0.79) / 0.19));
     totalBreak += breaking * height;
     for (let j = 0; j <= rows; j++) {
       const v = j / rows;
       // A connected wave face bends inward at its top, then spills
       // shoreward as the lip pitches. It stays above the water plane.
-      const curl = smooth01((v - 0.48) / 0.52) *
+      const curl = smooth01((v - 0.58) / 0.42) *
         smooth01((localPhase - 0.24) / 0.34);
-      // Broad green face, curling pitch at the lip, and lower trailing foot.
-      const radial = front + (1 - v) * 0.56 - curl * height * 0.46;
+      // A small falling lip rather than an exaggerated breaking tube.
+      const radial = front + (1 - v) * 0.48 - curl * height * 0.38;
       const k = (i * (rows + 1) + j) * 3;
       array[k] = sample.x + sample.outwardX * radial;
       array[k + 1] = waterY + 0.018 + height * v;
@@ -426,12 +437,15 @@ function updateCurlingFace(face, t, storm, day, oceanHandle) {
         0.20 * Math.sin(i * 0.73 + t * 1.5) +
         0.14 * Math.sin(i * 1.61 - t * 0.97) +
         0.08 * Math.sin(i * 2.47 + t * 0.63));
-      // White lip spills down the wave face and trails into the foam field.
-      const spill = smooth01((localPhase - 0.34) / 0.18) *
-        (1 - smooth01((localPhase - 0.82) / 0.18));
-      const scatter = clamp01((breaking * lip * 0.90 +
-        foam * lip * 0.48 + spill * lip * 0.32) * fragments);
-      const transmission = sunlight * (0.16 + lip * 0.54) * (1 - scatter);
+      // The crest spills downward over time: the upper lip whitens first,
+      // then thin froth reaches the mid-face, leaving green water beneath.
+      const spill = smooth01((localPhase - 0.32) / 0.15) *
+        (1 - smooth01((localPhase - 0.81) / 0.16));
+      const spillingEdge = smooth01((v - (0.84 - spill * 0.37)) / 0.17);
+      const scatter = clamp01((breaking * lip * 0.55 +
+        foam * lip * 0.30 + spill * spillingEdge * 0.86) *
+        (0.58 + fragments * 0.42));
+      const transmission = sunlight * (0.22 + lip * 0.53) * (1 - scatter);
       const trough = 0.79 + 0.21 * smooth01(v * 1.4);
       const shade = (0.65 + sunlight * 0.30 + v * 0.12) * trough;
       const warmGlint = sunlight * Math.pow(Math.max(0, sunY), 2) *
@@ -449,7 +463,7 @@ function updateCurlingFace(face, t, storm, day, oceanHandle) {
   // Preserve moving sunlight on desktop, but skip CPU normal regeneration on
   // touch; static material lighting plus vertex-color highlights is cheaper.
   if (!TOUCH_DEVICE) geometry.computeVertexNormals();
-  geometry.computeBoundingSphere();
+  // This mesh is frustumCulled=false; skip unnecessary bounding recompute.
   const foamFactor = clamp01(totalBreak / Math.max(1, along));
   face.material.roughness = THREE.MathUtils.lerp(0.21, 0.49, foamFactor);
   face.material.opacity = (TOUCH_DEVICE ? 0.66 : 0.77) *
@@ -483,17 +497,23 @@ function writeTextures(handle, day, storm) {
       const localBreakup = handle.breakup[idx];
       const laceMask = clamp01(alongStreak * radialLace[j] *
         (0.77 + localBreakup * 0.37));
-      const porous = (0.64 + localBreakup * 0.36);
-      let alpha = smooth01((f * porous - 0.014) / 0.32);
-      alpha = Math.pow(alpha, 0.75) * (0.60 + 0.40 * laceMask);
+      // Multi-scale perforations and a shoreline falloff keep whitewater
+      // lacy even when the simulation deposits several waves in succession.
+      const laceHoles = smooth01((laceMask - 0.51) / 0.42);
+      const radialMeters = LAND_RADIAL +
+        (SEA_RADIAL - LAND_RADIAL) * j / Math.max(1, m - 1);
+      const beachFade = smooth01((radialMeters + 3.0) / 1.25);
+      const porous = 0.64 + localBreakup * 0.36;
+      let alpha = smooth01((f * porous - 0.037) / 0.47);
+      alpha = Math.pow(alpha, 0.88) * laceHoles * beachFade;
 
       const landNeighbor = foam[i * m + Math.max(0, j - 1)];
       const gradient = Math.max(0, f - landNeighbor);
       let edge = smooth01((gradient - 0.006) / 0.105) *
         smooth01((f - 0.025) / 0.28);
       edge = Math.pow(edge, 0.65) *
-        (0.52 + 0.48 * laceMask) *
-        (0.79 + localBreakup * 0.21);
+        (0.31 + 0.69 * laceHoles) *
+        (0.70 + localBreakup * 0.30) * beachFade;
 
       const a = Math.round(clamp01(alpha) * 255);
       const e = Math.round(clamp01(edge) * 255);

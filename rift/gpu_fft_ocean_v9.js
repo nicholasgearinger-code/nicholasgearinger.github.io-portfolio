@@ -261,10 +261,12 @@ function installWaterProOptics(handle) {
       .add(breakerSlope.mul(0.23)))
     .mul(float(0.70).add(storm.mul(0.42)))
     .mul(float(1).sub(underwater)), 0, 0.90);
+  // Spilling crests turn into aerated whitewater, particularly on the
+  // shallow FFT facets that coincide with the shared shoreline breaker.
   const brokenFoam = clamp(breakerEnergy
-    .mul(float(0.40).add(capBreakup.mul(0.60)))
-    .mul(float(0.25).add(steep.mul(0.50))
-      .add(foamWake.mul(0.36))), 0, 0.68);
+    .mul(float(0.52).add(capBreakup.mul(0.72)))
+    .mul(float(0.34).add(steep.mul(0.62))
+      .add(foamWake.mul(0.48))), 0, 0.84);
   // The cinematic breaking-wave reference has rolling whitecaps far beyond
   // the beach. Use existing FFT slope, crest height and breakup noise to add
   // scattered foam across the whole ocean, with NO additional sin(), texture
@@ -273,8 +275,15 @@ function installWaterProOptics(handle) {
     .mul(float(0.11).add(day.mul(0.20)))
     .mul(float(1).sub(surfZone.mul(0.55)))
     .mul(float(1).sub(underwater)), 0, 0.32);
+  // Animated broken-up white flecks in the active surf zone. Existing
+  // FFT slope and cap noise prevent flat parallel bands along the beach.
+  const shoreSpill = clamp(
+    surfZone.mul(crestActivity).mul(capBreakup)
+      .mul(float(0.12).add(steep.mul(0.29))),
+    0, 0.30);
   const combinedFoam = clamp(
-    whitecap.add(openSeaFoam).add(brokenFoam.mul(0.82)), 0, 0.92);
+    whitecap.add(openSeaFoam).add(brokenFoam.mul(0.87))
+      .add(shoreSpill), 0, 0.97);
 
   material.colorNode = Fn(() => {
     let body = mix(originalColor, depthColor, depthMix);
@@ -296,7 +305,7 @@ function installWaterProOptics(handle) {
         .add(shallow.mul(0.16)))), 0, 0.30));
     body = mix(body, crestColor,
       clamp(translucency.add(lipGlow.mul(0.20)), 0, 0.34));
-    body = mix(body, foamColor, combinedFoam.mul(0.90));
+    body = mix(body, foamColor, combinedFoam.mul(0.97));
     // Underwater: diffuse transmitted skylight from the real displaced
     // FFT normal. Avoid screen-derivative curvature and thresholded bands,
     // which magnified the regular mesh sampling into diamond patterns.

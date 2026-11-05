@@ -168,7 +168,7 @@ function animateLayerGeometry(handle, elapsed, storm = 0) {
   // The persistent shoreline solver publishes this cycle before the swash
   // sheet updates. Fallback keeps legacy behavior if that layer is unavailable.
   const shared = handle.__riftPersistentFoamField?.breakerState;
-  const period = Math.max(4.4, 5.7 - stormT);
+  const period = Math.max(3.7, 4.8 - stormT * 0.7);
   const basePhase = shared ? shared.phase : elapsed / period;
   const setEnergy = shared ? shared.set : 0.73 +
     0.19 * Math.sin(elapsed * 0.11) + 0.11 * Math.sin(elapsed * 0.047 + 1.9);
@@ -204,9 +204,11 @@ function animateLayerGeometry(handle, elapsed, storm = 0) {
           memory[i % count] * Math.exp(-dt * (0.26 + stormT * 0.10)));
       }
       const retainedWet = memory[i % count];
+      // Local run-up fingers: break a perfectly straight white wash line
+      // without increasing shoreline mesh resolution or draw calls.
       const frontNoise =
-        Math.sin(u * Math.PI * 2 * 5.0 + elapsed * 0.16 + s.phase * 0.10) * 0.075 +
-        Math.sin(u * Math.PI * 2 * 9.0 - elapsed * 0.11) * 0.035;
+        Math.sin(u * Math.PI * 2 * 5.0 + elapsed * 0.16 + s.phase * 0.10) * 0.105 +
+        Math.sin(u * Math.PI * 2 * 9.0 - elapsed * 0.11) * 0.052;
 
       const backwash = smooth01(((((basePhase + localPhase) % 1) + 1) % 1 - 0.44) / 0.56);
       const front = -0.12 - runup * (1.96 + stormT * 0.84) +
@@ -229,7 +231,8 @@ function animateLayerGeometry(handle, elapsed, storm = 0) {
         writeVertex(arr, v0, s, seaEdge, handle.waterY, elapsed, 0.042);
         writeVertex(arr, v0 + 1, s, landEdge, handle.waterY, elapsed, 0.030);
       } else {
-        const width = 0.16 + runup * 0.16 + stormT * 0.05;
+        const brokenEdge = 0.5 + 0.5 * Math.sin(s.phase * 0.45 + elapsed * 1.10);
+        const width = 0.11 + runup * (0.12 + 0.09 * brokenEdge) + stormT * 0.04;
         const landEdge = front - 0.025;
         const seaEdge = landEdge + width;
         writeVertex(arr, v0, s, seaEdge, handle.waterY, elapsed, 0.070);
@@ -269,22 +272,22 @@ export function updateReferenceSwashSheet(surfHandle, elapsed = 0, storm = 0, da
     // being blended at high opacity. Keep the film subtle on mobile; the
     // detailed persistent foam layer provides the visible whitewater.
     const mobile = typeof navigator !== "undefined" && navigator.maxTouchPoints > 0;
-    wash.material.opacity = mobile ? 0.04 : Math.min(0.10,
-      0.04 + dayT * 0.025 + stormT * 0.015 + set * 0.012);
+    wash.material.opacity = mobile ? 0.028 : Math.min(0.075,
+      0.03 + dayT * 0.018 + stormT * 0.010 + set * 0.008);
     // Thin film receives glancing warm sky highlights; no reflection target.
-    wash.material.roughness = THREE.MathUtils.lerp(0.16, 0.07, sunEnergy * dayT);
-    wash.material.envMapIntensity = mobile ? 0.22 : 0.34 + dayT * 0.12;
+    wash.material.roughness = THREE.MathUtils.lerp(0.15, 0.06, sunEnergy * dayT);
+    wash.material.envMapIntensity = mobile ? 0.24 : 0.36 + dayT * 0.10;
   }
 
   if (body?.material) {
     body.material.color.copy(NIGHT_FOAM).lerp(DAY_FOAM, dayT);
-    body.material.opacity = Math.min(0.995, 0.92 + dayT * 0.06 + stormT * 0.015);
+    body.material.opacity = Math.min(1, 0.96 + dayT * 0.05 + stormT * 0.02);
     if (body.material.alphaMap) body.material.alphaMap.offset.x = (elapsed * -0.0015) % 1;
   }
 
   if (edge?.material) {
     edge.material.color.copy(NIGHT_FOAM).lerp(DAY_FOAM, dayT);
-    edge.material.opacity = Math.min(1, 0.96 + dayT * 0.04 + stormT * 0.01);
+    edge.material.opacity = Math.min(1, 0.99 + dayT * 0.02 + stormT * 0.01);
     if (edge.material.alphaMap) edge.material.alphaMap.offset.x = (elapsed * 0.0020) % 1;
   }
 

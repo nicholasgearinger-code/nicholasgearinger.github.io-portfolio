@@ -463,21 +463,37 @@ function writeTextures(handle, day, storm) {
   const foamData = handle.foamTextureData;
   const edgeData = handle.edgeTextureData;
 
+  // Each wave deposits uneven sheets, bubbles and threadlike foam streaks.
+  // Compute the tiny radial modulation once per update (24 cells on iPhone),
+  // not a trigonometric function for every foam texel.
+  const radialLace = handle.radialLace ||
+    (handle.radialLace = new Float32Array(m));
+  for (let j = 0; j < m; j++) {
+    radialLace[j] = 0.86 + 0.14 *
+      Math.sin(j * 0.91 - handle.simTime * 0.44);
+  }
+
   for (let i = 0; i < n; i++) {
-    // One animated variation per shoreline slice (not per texture pixel).
-    // The existing breakup table supplies the fine grain for every radial cell.
-    const alongStreak = 0.86 + 0.14 * Math.sin(i * 0.31 + handle.simTime * 0.67);
+    const alongStreak = 0.89
+      + 0.13 * Math.sin(i * 0.31 + handle.simTime * 0.67)
+      + 0.10 * Math.sin(i * 0.79 - handle.simTime * 0.36);
     for (let j = 0; j < m; j++) {
       const idx = i * m + j;
       const f = foam[idx];
-      const porous = (0.58 + handle.breakup[idx] * 0.42) * alongStreak;
+      const localBreakup = handle.breakup[idx];
+      const laceMask = clamp01(alongStreak * radialLace[j] *
+        (0.77 + localBreakup * 0.37));
+      const porous = (0.64 + localBreakup * 0.36);
       let alpha = smooth01((f * porous - 0.014) / 0.32);
-      alpha = Math.pow(alpha, 0.75);
+      alpha = Math.pow(alpha, 0.75) * (0.60 + 0.40 * laceMask);
 
       const landNeighbor = foam[i * m + Math.max(0, j - 1)];
       const gradient = Math.max(0, f - landNeighbor);
-      let edge = smooth01((gradient - 0.006) / 0.105) * smooth01((f - 0.025) / 0.28);
-      edge = Math.pow(edge, 0.65);
+      let edge = smooth01((gradient - 0.006) / 0.105) *
+        smooth01((f - 0.025) / 0.28);
+      edge = Math.pow(edge, 0.65) *
+        (0.52 + 0.48 * laceMask) *
+        (0.79 + localBreakup * 0.21);
 
       const a = Math.round(clamp01(alpha) * 255);
       const e = Math.round(clamp01(edge) * 255);

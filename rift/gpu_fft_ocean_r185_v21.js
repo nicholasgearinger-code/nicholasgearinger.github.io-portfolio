@@ -30,6 +30,23 @@ function clamp01(v) {
 
 function applySunsetOceanOptics(handle, stormAmount = 0) {
   if (!handle?.gpuFFT) return;
+  // Bright daytime ocean should never inherit HDR gold sunset optics.
+  if (typeof location === "undefined" ||
+      !new URLSearchParams(location.search).has("naturalCycle")) {
+    handle.fftV9SkyColor?.value?.set?.(0xa9ddf6);
+    handle.fftV9SunColor?.value?.set?.(0xfff6de);
+    handle.fftV9CrestColor?.value?.set?.(0x71ead5);
+    if (handle.fftV9SunColor?.value?.multiplyScalar)
+      handle.fftV9SunColor.value.multiplyScalar(0.62);
+    const physical = handle.fftPhysicalMaterial;
+    if (physical) {
+      physical.clearcoat = 0.36;
+      physical.clearcoatRoughness = 0.19;
+      if ((Number(physical.envMapIntensity) || 0) > 0)
+        physical.envMapIntensity = Math.min(physical.envMapIntensity, 0.67);
+    }
+    return;
+  }
 
   const sunset = globalThis.__riftSunsetAtmosphereV8;
   const atmosphere = globalThis.__riftReferenceAtmosphere;

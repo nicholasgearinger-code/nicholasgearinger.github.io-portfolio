@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { attribute, float, mix } from "three/tsl";
 
 // WaveWorks-inspired Stage 1 persistent foam field.
 // CPU-side only: no WebGPU compute, storage buffers, MRT, SSR, or node-graph changes.
@@ -16,6 +17,10 @@ const SEA_RADIAL = 3.8; // Give animated surf a wider offshore approach.
 const FIXED_DT = 1 / 30;
 // Dynamic geometry and normal rebuilds are CPU-bound on older iPhones.
 const BREAKER_GEOMETRY_HZ = TOUCH_DEVICE ? 12 : 30;
+// Preserves the existing breaker shape/material when ?riftCrestReflect=off.
+// On mobile the same sparse mesh is still updated only at 12 Hz.
+const REFLECTIVE_CRESTS = typeof location === "undefined" ||
+  new URLSearchParams(location.search).get("riftCrestReflect") !== "off";
 const MAX_STEPS = 3;
 const SHALLOW_START = 3.4;
 const SHALLOW_PEAK = 0.35;
@@ -350,27 +355,47 @@ function createCurlingFace(samples, waterY, parent, trainOffset = 0) {
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
   geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  // Per-vertex aeration: light foam is matte; the green/blue wave face is
+  // glassy. Both responses share this existing dynamic wave mesh/draw call.
+  const aeration = new Float32Array((along + 1) * (rows + 1));
+  if (REFLECTIVE_CRESTS) {
+    geometry.setAttribute("riftBreakerAeration",
+      new THREE.BufferAttribute(aeration, 1));
+  }
   geometry.setIndex(indices);
   // Physical translucency from ordinary alpha blending: no screen capture,
   // true volumetric refraction, or expensive transmission render path.
-  const material = new THREE.MeshStandardMaterial({
+  const materialOptions = {
     color: 0xffffff,
     vertexColors: true,
     emissive: 0x062c32,
     emissiveIntensity: 0.055,
     transparent: true,
     opacity: TOUCH_DEVICE ? 0.66 : 0.77,
-    roughness: 0.21,
+    roughness: REFLECTIVE_CRESTS ? 0.075 : 0.21,
     metalness: 0,
     side: THREE.DoubleSide,
     depthWrite: false,
-  });
+  };
+  const nodeSupported = REFLECTIVE_CRESTS &&
+    typeof THREE.MeshStandardNodeMaterial === "function";
+  const material = nodeSupported
+    ? new THREE.MeshStandardNodeMaterial(materialOptions)
+    : new THREE.MeshStandardMaterial(materialOptions);
+  if (nodeSupported) {
+    // r185 TSL AttributeNode interpolates this geometry float across each
+    // face. A single material now changes roughness from smooth refracting
+    // wave face to matte aerated foam at the rolling lip.
+    material.roughnessNode = mix(float(0.070), float(0.90),
+      attribute("riftBreakerAeration", "float"));
+  }
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = trainOffset ? "rift-animated-secondary-breaker" : "rift-animated-curling-breaker";
   mesh.renderOrder = 12;
   mesh.frustumCulled = false;
   parent.add(mesh);
-  return { mesh, geometry, material, along, rows, samples, waterY, trainOffset };
+  return { mesh, geometry, material, along, rows, samples, waterY,
+    trainOffset, aeration };
 }
 
 function updateCurlingFace(face, t, storm, day, oceanHandle) {
@@ -380,6 +405,7 @@ function updateCurlingFace(face, t, storm, day, oceanHandle) {
   const array = pos.array;
   const colors = geometry.getAttribute("color");
   const rgb = colors.array;
+  const aeration = geometry.getAttribute("riftBreakerAeration");
   const set = surfSet(t);
   // Use the same sun vector and tropical palette that drive the FFT water.
   // No texture captures, extra shader variants, or mobile transmission pass.
@@ -418,7 +444,8 @@ function updateCurlingFace(face, t, storm, day, oceanHandle) {
       const curl = smooth01((v - 0.58) / 0.42) *
         smooth01((localPhase - 0.24) / 0.34);
       // A small falling lip rather than an exaggerated breaking tube.
-      const radial = front + (1 - v) * 0.48 - curl * height * 0.38;
+      const radial = front + (1 - v) * 0.48 - curl * height *
+        (REFLECTIVE_CRESTS ? 0.54 : 0.38);
       const k = (i * (rows + 1) + j) * 3;
       array[k] = sample.x + sample.outwardX * radial;
       array[k + 1] = waterY + 0.018 + height * v;
@@ -442,9 +469,12 @@ function updateCurlingFace(face, t, storm, day, oceanHandle) {
       const spill = smooth01((localPhase - 0.32) / 0.15) *
         (1 - smooth01((localPhase - 0.81) / 0.16));
       const spillingEdge = smooth01((v - (0.84 - spill * 0.37)) / 0.17);
-      const scatter = clamp01((breaking * lip * 0.55 +
-        foam * lip * 0.30 + spill * spillingEdge * 0.86) *
+      const scatter = clamp01((breaking * lip *
+        (REFLECTIVE_CRESTS ? 0.72 : 0.55) +
+        foam * lip * 0.30 + spill * spillingEdge *
+        (REFLECTIVE_CRESTS ? 1.05 : 0.86)) *
         (0.58 + fragments * 0.42));
+      if (aeration) aeration.array[k / 3] = scatter;
       const transmission = sunlight * (0.22 + lip * 0.53) * (1 - scatter);
       const trough = 0.79 + 0.21 * smooth01(v * 1.4);
       const shade = (0.65 + sunlight * 0.30 + v * 0.12) * trough;
@@ -460,16 +490,22 @@ function updateCurlingFace(face, t, storm, day, oceanHandle) {
   }
   pos.needsUpdate = true;
   colors.needsUpdate = true;
-  // Compute real face normals once on mobile, and update continuously on
-  // desktop. Before this the touch mesh could have no normal attribute at
-  // all, making standard-material lighting unpredictable.
-  if (!TOUCH_DEVICE || !face.normalsInitialized) {
+  if (aeration) aeration.needsUpdate = true;
+  // The breaker curls and pitches EVERY update. On iPhone normals used to
+  // be frozen after the first frame: even correct specular BRDFs then failed
+  // to reflect the motion. Rebuild normals only at the existing 12 Hz
+  // geometry update cadence (this sparse mesh is ~455 vertices on mobile).
+  if (REFLECTIVE_CRESTS || !TOUCH_DEVICE || !face.normalsInitialized) {
     geometry.computeVertexNormals();
     face.normalsInitialized = true;
   }
   // This mesh is frustumCulled=false; skip unnecessary bounding recompute.
   const foamFactor = clamp01(totalBreak / Math.max(1, along));
-  face.material.roughness = THREE.MathUtils.lerp(0.21, 0.49, foamFactor);
+  if (!face.material.isMeshStandardNodeMaterial) {
+    face.material.roughness = REFLECTIVE_CRESTS
+      ? THREE.MathUtils.lerp(0.09, 0.60, foamFactor)
+      : THREE.MathUtils.lerp(0.21, 0.49, foamFactor);
+  }
   face.material.opacity = (TOUCH_DEVICE ? 0.66 : 0.77) *
     (0.38 + 0.62 * clamp01(day));
 }

@@ -134,26 +134,27 @@ function installWaterProOptics(handle) {
     .add(time.mul(2.08))
     .add(4.21);
 
-  // Reference-detail pass: add two oblique short ripples to the two
-  // travelling micro bands (three on desktop). Crossed phase directions
-  // avoid obvious parallel sine stripes and reuse the same analytic normal.
-  // No new normal maps, FFT cascades, sampling passes or GPU buffers.
-  const fineRippleA = sin(phaseA.mul(1.73).sub(phaseB.mul(0.37)));
-  const fineRippleB = cos(phaseB.mul(1.61).add(phaseA.mul(0.23)));
+  // Two differently directed medium wavelets sit between the real FFT
+  // displacement and existing small-scale optical chop. Reuse the previous
+  // two analytic phase evaluations instead of adding new mobile trig work.
+  // Unlike narrow micro stripes these lower frequencies read as individual
+  // moving wave faces when viewed close to the water.
+  const fineRippleA = sin(phaseA.mul(0.66).sub(phaseB.mul(0.29)));
+  const fineRippleB = cos(phaseB.mul(0.73).add(phaseA.mul(0.22)));
   const microX = TOUCH_DEVICE
     ? cos(phaseA).mul(0.054).add(cos(phaseB).mul(0.037))
-      .add(fineRippleA.mul(0.020))
+      .add(fineRippleA.mul(0.040))
     : cos(phaseA).mul(0.054)
       .add(cos(phaseB).mul(0.037))
       .add(cos(phaseC).mul(0.021))
-      .add(fineRippleA.mul(0.025));
+      .add(fineRippleA.mul(0.043));
   const microZ = TOUCH_DEVICE
     ? sin(phaseA).mul(0.049).add(sin(phaseB).mul(0.035))
-      .add(fineRippleB.mul(0.018))
+      .add(fineRippleB.mul(0.036))
     : sin(phaseA).mul(0.049)
       .add(sin(phaseB).mul(0.035))
       .add(sin(phaseC).mul(0.022))
-      .add(fineRippleB.mul(0.024));
+      .add(fineRippleB.mul(0.041));
   const microEnergy = clamp(abs(microX).add(abs(microZ)).mul(5.1), 0, 1);
 
   // Preserve micro ripple normals above water, but use the displaced FFT
@@ -187,14 +188,24 @@ function installWaterProOptics(handle) {
     0.88,
   );
 
-  // Low-frequency, depth-gated tropical seabed marbling. Two oblique
-  // travelling patterns blend gently rather than making tiled diamonds.
-  // The detail only tints above-water shallow water, never deep sea or the
-  // overhead underwater sky/refraction shading.
-  const marbleA = sin(positionWorld.x.mul(0.39)
-    .add(positionWorld.z.mul(0.57)).add(time.mul(0.065)));
-  const marbleB = sin(positionWorld.x.mul(-0.71)
-    .add(positionWorld.z.mul(0.27)).sub(time.mul(0.08)));
+  // Approximate shallow refraction without scene-color captures on iOS.
+  // The normal-dependent offset bends the visible seabed/marble pattern as
+  // each FFT wave and analytic wavelet travels past. Above water only; the
+  // underwater sky keeps its separate physical Snell-inspired path.
+  const distortionGain = clamp(
+    shallow.mul(0.16).add(microEnergy.mul(0.045)),
+    0.018, 0.23,
+  ).mul(float(1).sub(underwater));
+  const warpedX = positionWorld.x.add(
+    opticalNormal.x.mul(distortionGain.mul(2.4)));
+  const warpedZ = positionWorld.z.add(
+    opticalNormal.z.mul(distortionGain.mul(2.4)));
+  // Oblique shallow-water patterns; keep low spatial frequency to avoid the
+  // obvious regular FFT diamonds seen in older mobile versions.
+  const marbleA = sin(warpedX.mul(0.39)
+    .add(warpedZ.mul(0.57)).add(time.mul(0.065)));
+  const marbleB = sin(warpedX.mul(-0.71)
+    .add(warpedZ.mul(0.27)).sub(time.mul(0.08)));
   const depthMarble = marbleA.mul(0.60).add(marbleB.mul(0.40));
   const marbleMask = smoothstep(float(-0.52), float(0.65), depthMarble)
     .mul(shallow).mul(day).mul(float(1).sub(underwater));
@@ -207,6 +218,14 @@ function installWaterProOptics(handle) {
   const sunlitSand = float(1).sub(smoothstep(
     float(0.20), float(3.1), depth))
     .mul(day).mul(float(1).sub(underwater));
+  // Refracted sunlight and pale seabed are most visible from overhead.
+  // On iPhone this is an optical approximation, not a sampled scene refraction.
+  const shallowVisibility = float(1).sub(smoothstep(
+    float(0.15), float(5.0), depth))
+    .mul(day).mul(float(1).sub(underwater))
+    .mul(smoothstep(float(0.12), float(0.85), ndv));
+  const refractedShallow = mix(color(0x399caa), color(0xc4ebdb),
+    smoothstep(float(-0.40), float(0.72), depthMarble));
 
   // Thousands of tiny sun facets rather than one painted streak. The facet mask
   // breaks the highlight into discrete sparkling patches while two BRDF lobes
@@ -230,11 +249,11 @@ function installWaterProOptics(handle) {
 
   // Sparse, sharp sunlight pinpricks. Require both sun-facing optical normal
   // and fragmented ripple energy so this cannot become a long white stripe.
-  const sparkleFlecks = smoothstep(float(0.70), float(0.94),
-      facetMask.mul(0.62).add(microEnergy.mul(0.20))
-        .add(ndh.mul(0.25)))
-    .mul(pow(ndh, float(38)))
-    .mul(day).mul(float(1).sub(storm.mul(0.50)))
+  const sparkleFlecks = smoothstep(float(0.73), float(0.95),
+      facetMask.mul(0.60).add(microEnergy.mul(0.23))
+        .add(ndh.mul(0.23)))
+    .mul(pow(ndh, float(42)))
+    .mul(day).mul(float(1).sub(storm.mul(0.48)))
     .mul(float(1).sub(underwater));
 
   // Thin crests transmit warm daylight through the blue water volume. This is
@@ -327,13 +346,32 @@ function installWaterProOptics(handle) {
     whitecap.add(openSeaFoam).add(brokenFoam.mul(0.87))
       .add(shoreSpill), 0, 0.97);
 
+  // View-dependent Fresnel / wavelet sky reflection. This uses the already
+  // available sky and FFT normals, avoiding additional sky texture fetches
+  // or a separate mobile scene-reflection target. Foam suppresses the mirror.
+  const reflectionGain = clamp(
+    fresnel.mul(0.32)
+      .add(microEnergy.mul(0.050))
+      .add(geometricSlope.mul(0.040)),
+    0, 0.39,
+  ).mul(day.mul(0.72).add(0.28))
+    .mul(float(1).sub(combinedFoam.mul(0.88)))
+    .mul(float(1).sub(underwater));
+  // Make nearby individual FFT crests readable without painting dark
+  // stripes over the entire ocean.
+  const waveFace = smoothstep(float(0.14), float(0.61), geometricSlope)
+    .mul(smoothstep(waterLevel.add(0.02),
+      waterLevel.add(0.86), positionWorld.y))
+    .mul(day).mul(float(1).sub(underwater));
+  const troughShadow = float(1).sub(smoothstep(
+    waterLevel.sub(0.26), waterLevel.add(0.18), positionWorld.y))
+    .mul(day).mul(float(1).sub(underwater));
+
   material.colorNode = Fn(() => {
     let body = mix(originalColor, depthColor, depthMix);
-    body = mix(
-      body,
-      skyColor,
-      clamp(fresnel.mul(float(0.045).add(day.mul(0.09))), 0, 0.13),
-    );
+    // Reflected sky is strongest at grazing view angles. Its intensity
+    // changes with the actual displaced FFT slope and the smaller wavelets.
+    body = mix(body, skyColor, reflectionGain);
     // Backlit shoaling wave faces gain a restrained green-blue translucency
     // before the breaking lip transitions into opaque, scattering whitewater.
     const lipGlow = breakerEnergy.mul(crestHeight).mul(backLight).mul(day)
@@ -345,10 +383,16 @@ function installWaterProOptics(handle) {
     body = mix(body, shallowColor,
       clamp(lipGlow.mul(0.38).add(rollingFace.mul(float(0.08)
         .add(shallow.mul(0.16)))), 0, 0.30));
-    // Broad tonal patches, transmitted sunlight and a pale sand tint.
-    // The soft aqua around a spilling crest is not solid white foam.
+    // Subtle trough darkening and a brighter inclined face reveal the
+    // moving wave shape, even when no foam is produced.
+    body = mix(body, deepColor, troughShadow.mul(0.065));
+    body = mix(body, shallowColor, waveFace.mul(0.16));
+    // Warped shallow light transmission is strongest at overhead angles;
+    // keep the existing whitewater masks separate to avoid broad white bands.
     body = body.mul(float(1).add(broadTone));
-    body = mix(body, color(0xa8e9dc), sunlitSand.mul(0.19));
+    body = mix(body, refractedShallow,
+      shallowVisibility.mul(float(1).sub(combinedFoam.mul(0.72))).mul(0.24));
+    body = mix(body, color(0xa8e9dc), sunlitSand.mul(0.13));
     body = mix(body, crestColor, marbleMask.mul(0.16));
     body = mix(body, crestColor,
       clamp(translucency.add(lipGlow.mul(0.20)), 0, 0.34));
@@ -448,15 +492,15 @@ function installWaterProOptics(handle) {
       .mul(float(1).sub(angleReflection));
     const illuminatedUnderside = underside.add(sunColor.mul(undersideShimmer));
     return mix(body.add(sunColor.mul(glitter.mul(0.24)))
-        .add(sunColor.mul(sparkleFlecks.mul(0.048))), illuminatedUnderside,
+        .add(sunColor.mul(sparkleFlecks.mul(0.060))), illuminatedUnderside,
       underwater.mul(float(0.97)));
 
   })();
 
   const microRoughness = mix(
     originalRoughness,
-    float(0.082),
-    microEnergy.mul(0.27),
+    float(0.096),
+    clamp(microEnergy.mul(0.31).add(geometricSlope.mul(0.08)), 0, 0.45),
   );
   material.roughnessNode = mix(microRoughness, float(0.62),
     combinedFoam.mul(0.90));

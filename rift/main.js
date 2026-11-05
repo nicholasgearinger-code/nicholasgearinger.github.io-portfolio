@@ -156,8 +156,8 @@ if (viewport) viewport.appendChild(waterProfileButton);
 const oceanClipButton = document.createElement("button");
 oceanClipButton.type = "button";
 oceanClipButton.id = "rift-ocean-cinematic-preview-btn";
-oceanClipButton.textContent = "▶ OCEAN CLIP";
-oceanClipButton.title = "Play the animated six-second ocean reference loop.";
+oceanClipButton.textContent = "▶ BREAKING WAVES";
+oceanClipButton.title = "Watch the smooth four-second breaking-wave loop used as the game ocean motion reference.";
 oceanClipButton.style.cssText =
   "position:absolute;top:128px;left:8px;z-index:99999;padding:6px 10px;" +
   "border:1px solid rgba(90,235,226,.5);border-radius:999px;" +
@@ -170,7 +170,7 @@ oceanClipButton.addEventListener("click", async () => {
     await openOceanReferencePreview(viewport);
   } catch (error) {
     console.error("[rift-ocean-reference] Preview failed:", error);
-    oceanClipButton.textContent = "OCEAN CLIP ERROR";
+    oceanClipButton.textContent = "WAVE LOOP ERROR";
   }
 });
 if (viewport) viewport.appendChild(oceanClipButton);

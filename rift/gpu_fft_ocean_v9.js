@@ -265,7 +265,16 @@ function installWaterProOptics(handle) {
     .mul(float(0.40).add(capBreakup.mul(0.60)))
     .mul(float(0.25).add(steep.mul(0.50))
       .add(foamWake.mul(0.36))), 0, 0.68);
-  const combinedFoam = clamp(whitecap.add(brokenFoam.mul(0.82)), 0, 0.92);
+  // The cinematic breaking-wave reference has rolling whitecaps far beyond
+  // the beach. Use existing FFT slope, crest height and breakup noise to add
+  // scattered foam across the whole ocean, with NO additional sin(), texture
+  // fetch, FFT cascade, geometry or draw call on iPhone.
+  const openSeaFoam = clamp(steep.mul(capBreakup).mul(crestHeight)
+    .mul(float(0.11).add(day.mul(0.20)))
+    .mul(float(1).sub(surfZone.mul(0.55)))
+    .mul(float(1).sub(underwater)), 0, 0.32);
+  const combinedFoam = clamp(
+    whitecap.add(openSeaFoam).add(brokenFoam.mul(0.82)), 0, 0.92);
 
   material.colorNode = Fn(() => {
     let body = mix(originalColor, depthColor, depthMix);
@@ -278,7 +287,13 @@ function installWaterProOptics(handle) {
     // before the breaking lip transitions into opaque, scattering whitewater.
     const lipGlow = breakerEnergy.mul(crestHeight).mul(backLight).mul(day)
       .mul(float(1).sub(brokenFoam));
-    body = mix(body, shallowColor, clamp(lipGlow.mul(0.38), 0, 0.30));
+    // Lit, sloping wave faces stay blue-green rather than only whitening
+    // once they break. The animated FFT normal drives every highlight.
+    const rollingFace = smoothstep(float(0.16), float(0.68), geometricSlope)
+      .mul(crestHeight).mul(day).mul(float(1).sub(underwater));
+    body = mix(body, shallowColor,
+      clamp(lipGlow.mul(0.38).add(rollingFace.mul(float(0.08)
+        .add(shallow.mul(0.16)))), 0, 0.30));
     body = mix(body, crestColor,
       clamp(translucency.add(lipGlow.mul(0.20)), 0, 0.34));
     body = mix(body, foamColor, combinedFoam.mul(0.90));

@@ -220,6 +220,12 @@ function installWaterProOptics(handle) {
     max(worldNormal.y, float(0.12)),
     worldNormal.z.add(microZ.mul(opticalDetail)),
   ).normalize();
+  // The underside samples the SAME travelling directional normals, but
+  // blends them with the moderated FFT surface to avoid underwater gridding.
+  // This also affects Snell's exit ray and reflected cloud direction.
+  const undersideWaveNormal = PHASE2_WAVE_MOTION
+    ? mix(underwaterOpticalNormal, opticalNormal, float(0.42)).normalize()
+    : underwaterOpticalNormal;
 
   const viewDir = cameraPosition.sub(positionWorld).normalize();
   const lightDir = lightDirection.normalize();
@@ -480,7 +486,7 @@ function installWaterProOptics(handle) {
     const overheadView = smoothstep(float(0.14), float(0.91), ndv);
     // Shared, moderated FFT surface normal: transmitted sunlight, sky
     // refraction and reflected sky all follow the same displaced geometry.
-    const sunFacing = clamp(dot(underwaterOpticalNormal, lightDir), 0, 1);
+    const sunFacing = clamp(dot(undersideWaveNormal, lightDir), 0, 1);
     const clearWater = clamp(shallow.mul(0.42).add(day.mul(0.20))
       .add(overheadView.mul(0.32)), 0, 1);
     // Approximate transmitted SKY radiance through a wave-normal-warped
@@ -494,16 +500,16 @@ function installWaterProOptics(handle) {
     // Refraction follows the *relative* view and FFT face direction.
     // Use a smooth slope-dependent offset rather than independent periodic
     // waves, which previously produced tiled diamond artifacts.
-    const slopeX = clamp(underwaterOpticalNormal.x, -0.65, 0.65);
-    const slopeZ = clamp(underwaterOpticalNormal.z, -0.65, 0.65);
+    const slopeX = clamp(undersideWaveNormal.x, -0.65, 0.65);
+    const slopeZ = clamp(undersideWaveNormal.z, -0.65, 0.65);
     // Water -> air refraction (Snell's law). Derive a real outgoing
     // direction from the FFT normal rather than shifting the sky by slope.
     // The cloud panorama remains an approximation of the exterior scene.
-    const cosI = clamp(dot(underwaterOpticalNormal, viewDir), 0, 1);
+    const cosI = clamp(dot(undersideWaveNormal, viewDir), 0, 1);
     const eta = float(1.333);
     const sinT2 = eta.mul(eta).mul(float(1).sub(cosI.mul(cosI)));
     const cosT = float(1).sub(clamp(sinT2, 0, 1)).sqrt();
-    const exitRay = underwaterOpticalNormal.mul(
+    const exitRay = undersideWaveNormal.mul(
       eta.mul(cosI).sub(cosT)
     ).sub(viewDir.mul(eta)).normalize();
     const skyUV = vec2(
@@ -517,7 +523,7 @@ function installWaterProOptics(handle) {
     // Refracted illumination: projected sunlight is stronger where the
     // deformed FFT face bends toward the sun. Keep the lobe broad and
     // energy-limited; sharp thresholds previously exposed a diamond grid.
-    const projectedSun = clamp(dot(underwaterOpticalNormal, lightDir), 0, 1);
+    const projectedSun = clamp(dot(undersideWaveNormal, lightDir), 0, 1);
     const sunFlux = projectedSun.mul(projectedSun)
       .mul(float(0.70).add(overheadView.mul(0.30)))
       .mul(day).mul(float(1).sub(storm.mul(0.65)));
@@ -548,7 +554,7 @@ function installWaterProOptics(handle) {
     // slope-driven direction; at grazing angles it becomes more apparent.
     // Specular direction from the SAME wave normal as the transmitted ray.
     // This avoids the old independently tuned reflection slope offsets.
-    const reflectedRay = underwaterOpticalNormal.mul(cosI.mul(2))
+    const reflectedRay = undersideWaveNormal.mul(cosI.mul(2))
       .sub(viewDir).normalize();
     const reflectedUV = vec2(
       reflectedRay.x.mul(0.26).add(time.mul(0.002)),

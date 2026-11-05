@@ -150,6 +150,31 @@ waterProfileButton.addEventListener("click", () => {
 refreshWaterProfileButton();
 if (viewport) viewport.appendChild(waterProfileButton);
 
+// Optional animated water reference. It loads neither the video nor its base64
+// module until tapped, so the already GPU-limited iPhone scene pays no cost
+// during normal Rift gameplay.
+const oceanClipButton = document.createElement("button");
+oceanClipButton.type = "button";
+oceanClipButton.id = "rift-ocean-cinematic-preview-btn";
+oceanClipButton.textContent = "▶ OCEAN CLIP";
+oceanClipButton.title = "Play the animated six-second ocean reference loop.";
+oceanClipButton.style.cssText =
+  "position:absolute;top:128px;left:8px;z-index:99999;padding:6px 10px;" +
+  "border:1px solid rgba(90,235,226,.5);border-radius:999px;" +
+  "background:rgba(3,12,20,.84);color:#9de8ee;" +
+  "font:10px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;" +
+  "letter-spacing:.07em;cursor:pointer;touch-action:manipulation;";
+oceanClipButton.addEventListener("click", async () => {
+  try {
+    const { openOceanReferencePreview } = await import("./ocean_reference_preview.js");
+    await openOceanReferencePreview(viewport);
+  } catch (error) {
+    console.error("[rift-ocean-reference] Preview failed:", error);
+    oceanClipButton.textContent = "OCEAN CLIP ERROR";
+  }
+});
+if (viewport) viewport.appendChild(oceanClipButton);
+
 
 window.__riftLazyLauncherReady = true;
 window.__riftLoadAttempted = false;

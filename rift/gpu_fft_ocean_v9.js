@@ -86,19 +86,19 @@ function installWaterProOptics(handle) {
   const lightDirection = handle.fftLightDirection ?? uniform(new THREE.Vector3(0.35, 0.8, 0.3));
   const waterLevel = uniform(handle.waterY ?? 0);
 
-  const shallowColor = uniform(color(0x58d7d2));
-  const midColor = uniform(color(0x167f99));
-  const deepColor = uniform(color(0x07384f));
-  const skyColor = uniform(color(0x78b8d6));
+  const shallowColor = uniform(color(0x2fc6c7));
+  const midColor = uniform(color(0x16689d));
+  const deepColor = uniform(color(0x0c4f83));
+  const skyColor = uniform(color(0xa9ddf6));
   // Share the exact cloud panorama already rendered by the sky dome.
   // The texture is globally cached by the cloud module and not owned here.
   const cloudSkyTexture = getRealisticCloudTexture();
 
-  const sunColor = uniform(color(0xffedd0));
-  const crestColor = uniform(color(0xa8eee0));
+  const sunColor = uniform(color(0xfff6de));
+  const crestColor = uniform(color(0x71ead5));
   const foamColor = handle.fftFoamColor ?? uniform(color(0xfafcf8));
 
-  const originalColor = material.colorNode ?? uniform(color(0x246c78));
+  const originalColor = material.colorNode ?? uniform(color(0x247b99));
   const originalRoughness = material.roughnessNode ?? float(0.05);
   const originalEmissive = material.emissiveNode ?? uniform(color(0x000000));
   const originalTransmission = material.transmissionNode ?? float(
@@ -172,9 +172,9 @@ function installWaterProOptics(handle) {
   const depthBody = mix(midColor, shallowColor, shallow);
   const depthColor = mix(depthBody, deepColor, deep);
   const depthMix = clamp(
-    float(0.28).add(shallow.mul(0.34)).add(deep.mul(0.18)),
+    float(0.57).add(shallow.mul(0.22)).add(deep.mul(0.10)),
     0,
-    0.72,
+    0.88,
   );
 
   // Thousands of tiny sun facets rather than one painted streak. The facet mask
@@ -272,15 +272,15 @@ function installWaterProOptics(handle) {
     body = mix(
       body,
       skyColor,
-      clamp(fresnel.mul(float(0.09).add(day.mul(0.18))), 0, 0.28),
+      clamp(fresnel.mul(float(0.045).add(day.mul(0.09))), 0, 0.13),
     );
     // Backlit shoaling wave faces gain a restrained green-blue translucency
     // before the breaking lip transitions into opaque, scattering whitewater.
     const lipGlow = breakerEnergy.mul(crestHeight).mul(backLight).mul(day)
       .mul(float(1).sub(brokenFoam));
-    body = mix(body, shallowColor, clamp(lipGlow.mul(0.23), 0, 0.19));
+    body = mix(body, shallowColor, clamp(lipGlow.mul(0.38), 0, 0.30));
     body = mix(body, crestColor,
-      clamp(translucency.add(lipGlow.mul(0.13)), 0, 0.26));
+      clamp(translucency.add(lipGlow.mul(0.20)), 0, 0.34));
     body = mix(body, foamColor, combinedFoam.mul(0.90));
     // Underwater: diffuse transmitted skylight from the real displaced
     // FFT normal. Avoid screen-derivative curvature and thresholded bands,
@@ -374,7 +374,7 @@ function installWaterProOptics(handle) {
     const undersideShimmer = lightFocus.mul(float(0.065))
       .mul(float(1).sub(angleReflection));
     const illuminatedUnderside = underside.add(sunColor.mul(undersideShimmer));
-    return mix(body.add(sunColor.mul(glitter.mul(0.42))), illuminatedUnderside,
+    return mix(body.add(sunColor.mul(glitter.mul(0.24))), illuminatedUnderside,
       underwater.mul(float(0.97)));
 
   })();
@@ -434,17 +434,17 @@ function tuneWaterProState(handle, elapsed = 0, sky = null, storm = 0, day = 1) 
 
   if (handle.fftV9SkyColor?.value) {
     if (sky?.isColor) handle.fftV9SkyColor.value.copy(sky);
-    else handle.fftV9SkyColor.value.set(0x78b8d6);
+    else handle.fftV9SkyColor.value.set(0xa9ddf6);
   }
   if (handle.fftV9SunColor?.value) {
     handle.fftV9SunColor.value
       .set(0xbad8ef)
-      .lerp(new THREE.Color(0xffedd0), dayT);
+      .lerp(new THREE.Color(0xfff6de), dayT);
   }
   if (handle.fftV9CrestColor?.value) {
     handle.fftV9CrestColor.value
       .set(0x5b9fb0)
-      .lerp(new THREE.Color(0xa8eee0), dayT);
+      .lerp(new THREE.Color(0x71ead5), dayT);
   }
 
   // Make both real FFT bands more legible on mobile. Desktop additionally has

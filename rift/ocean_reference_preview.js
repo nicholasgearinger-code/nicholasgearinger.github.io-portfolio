@@ -1,15 +1,15 @@
-// Optional cinematic ocean reference clip for Rift Islands.
-// A 6-second loop is embedded as compact MP4 data in ocean_reference_loop_data.js,
-// so the preview works on GitHub Pages without extra binary-hosting setup.
+// Reference-guided animated breaking-wave loop for Rift Islands.
+// A 4-second, 24 FPS shorebreak video ships as a real MP4 in ./media/.
+// The previous tiny embedded preview remains available as an offline fallback.
 // The playable FFT ocean remains the physically navigable water simulation.
 let overlay = null;
 let video = null;
 let videoBlobUrl = null;
 
 async function loadLoopUrl() {
-  // Upgrade path: if a higher-quality MP4 is later committed under media/,
-  // use it automatically; otherwise fall back to the included lightweight clip.
-  const hdUrl = new URL("./media/rift_ocean_reference_loop.mp4", import.meta.url).href;
+  // Prefer the smoother 24 FPS crashing-surf asset. A real file lets mobile
+  // browsers stream/decode efficiently instead of constructing a base64 Blob.
+  const hdUrl = new URL("./media/rift_breaking_waves_loop.mp4", import.meta.url).href;
   try {
     const response = await fetch(hdUrl, { method: "HEAD", cache: "no-store" });
     if (response.ok && (response.headers.get("content-type") || "").includes("video")) {
@@ -45,7 +45,7 @@ export async function openOceanReferencePreview(viewport) {
     const top = document.createElement("div");
     top.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;";
     const title = document.createElement("strong");
-    title.textContent = "OCEAN MOTION REFERENCE";
+    title.textContent = "BREAKING WAVES · 24 FPS";
     title.style.cssText = "letter-spacing:.1em;color:#a4f4e9;font-size:12px;";
     const close = document.createElement("button");
     close.type = "button";
@@ -67,7 +67,7 @@ export async function openOceanReferencePreview(viewport) {
 
     const note = document.createElement("p");
     note.style.cssText = "margin:9px 0 0;color:#b9dce5;font-size:12px;";
-    note.textContent = "Six-second looping cinematic ocean reference. The interactive world continues to use the real-time FFT water system; a flat video cannot replace 3D water physics or underwater views.";
+    note.textContent = "Smooth four-second looping shorebreak video. The playable world uses the real-time 3D FFT ocean and procedural breakers, so swimming, reflections and underwater views remain interactive.";
 
     function hide() {
       video.pause();

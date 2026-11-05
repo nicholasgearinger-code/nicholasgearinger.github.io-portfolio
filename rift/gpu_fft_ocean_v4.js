@@ -236,7 +236,12 @@ function installFFTDrivenCaustics(handle) {
     // world-space caustic material beneath this modifier already handles
     // shallow reef light patterns. Avoid doubling/aliasing it on mobile.
     // Desktop retains FFT curvature focusing for higher fidelity.
-    if (TOUCH_DEVICE && experimentalCaustics) return float(1);
+    // The seabed's own TSL caustic now refracts sunlight through the same
+    // travelling surface ripple field. On touch hardware the old FIVE FFT
+    // storage-buffer reads per terrain fragment were redundant even in
+    // Current mode (the previous guard only skipped Experimental). Avoid
+    // that expensive mobile readback entirely; desktop keeps full FFT focus.
+    if (TOUCH_DEVICE) return float(1);
     const n = uint(FFT_N);
     const nF = float(FFT_N);
     const gx = fract(positionWorld.x.div(float(domain)).add(0.5)).mul(nF);

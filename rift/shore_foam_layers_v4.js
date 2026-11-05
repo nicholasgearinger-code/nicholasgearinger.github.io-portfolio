@@ -220,10 +220,16 @@ function animateLayerGeometry(handle, elapsed, storm = 0) {
       // secondary wave is weaker, with a brief gravity-driven drawdown.
       const primary = cycleEnvelope(basePhase + localPhase - 0.14);
       const secondary = cycleEnvelope(basePhase + localPhase + 0.35) * 0.22;
-      const runup = clamp01((primary + secondary) * (0.64 + setEnergy * 0.40));
+      // Small surf reaches the upper beach in uneven tongues, not one
+      // solid body extending the same distance along the entire shore.
+      const alongEnergy = 0.83 +
+        0.10 * Math.sin(u * Math.PI * 2 * 6.0 + elapsed * 0.36) +
+        0.07 * Math.sin(u * Math.PI * 2 * 11.0 - elapsed * 0.22);
+      const runup = clamp01((primary + secondary) *
+        (0.58 + setEnergy * 0.34) * alongEnergy);
       if (layer === wash) {
         memory[i % count] = Math.max(runup,
-          memory[i % count] * Math.exp(-dt * (0.26 + stormT * 0.10)));
+          memory[i % count] * Math.exp(-dt * (0.40 + stormT * 0.13)));
       }
       const retainedWet = memory[i % count];
       // Local run-up fingers: break a perfectly straight white wash line
@@ -233,30 +239,34 @@ function animateLayerGeometry(handle, elapsed, storm = 0) {
         Math.sin(u * Math.PI * 2 * 9.0 - elapsed * 0.11) * 0.052;
 
       const backwash = smooth01(((((basePhase + localPhase) % 1) + 1) % 1 - 0.44) / 0.56);
-      const front = -0.12 - runup * (1.96 + stormT * 0.84) +
-        backwash * 0.26 + frontNoise;
+      const front = -0.12 - runup * (1.63 + stormT * 0.64) +
+        backwash * 0.25 + frontNoise;
       const v0 = i * 2;
 
       if (layer.kind === "wash") {
         // Wet sheet trails the foam as the beach drains; it stays behind
         // the leading wash edge instead of snapping to dry immediately.
         const wetFront = Math.min(front, -0.12 -
-          retainedWet * (1.96 + stormT * 0.84) + frontNoise);
-        const landEdge = Math.max(-3.15, wetFront - 0.42 -
-          retainedWet * 0.18);
-        const seaEdge = 1.36 - runup * 0.24;
-        writeVertex(arr, v0, s, seaEdge, handle.waterY, elapsed, 0.008);
-        writeVertex(arr, v0 + 1, s, landEdge, handle.waterY, elapsed, 0.010);
+          retainedWet * (1.64 + stormT * 0.64) + frontNoise);
+        // Keep the water film physically thin and close to the advancing
+        // foam edge; the lingering gloss remains when the foam draws back.
+        const landEdge = Math.max(-2.95, wetFront - 0.23 -
+          retainedWet * 0.10);
+        const seaEdge = 0.99 - runup * 0.15;
+        writeVertex(arr, v0, s, seaEdge, handle.waterY, elapsed, 0.006);
+        writeVertex(arr, v0 + 1, s, landEdge, handle.waterY, elapsed, 0.009);
       } else if (layer.kind === "body") {
-        const seaEdge = 1.10 - runup * 0.10;
-        const landEdge = front + 0.08;
+        const seaEdge = 0.90 - runup * 0.09;
+        const landEdge = front + 0.06;
         writeVertex(arr, v0, s, seaEdge, handle.waterY, elapsed, 0.042);
         writeVertex(arr, v0 + 1, s, landEdge, handle.waterY, elapsed, 0.030);
       } else {
         const brokenEdge = 0.5 + 0.5 * Math.sin(s.phase * 0.45 + elapsed * 1.10);
-        const width = 0.10 + runup * (0.10 + 0.13 * brokenEdge) +
-          stormT * 0.04;
-        const landEdge = front - 0.025 - (brokenEdge - 0.5) * 0.045;
+        const laceFine = 0.5 + 0.5 * Math.sin(s.phase * 1.12 - elapsed * 0.71);
+        const width = 0.075 + runup * (0.095 + 0.11 * brokenEdge) +
+          stormT * 0.035;
+        const landEdge = front - 0.016 -
+          (brokenEdge - 0.5) * 0.05 - (laceFine - 0.5) * 0.028;
         const seaEdge = landEdge + width;
         writeVertex(arr, v0, s, seaEdge, handle.waterY, elapsed, 0.070);
         writeVertex(arr, v0 + 1, s, landEdge, handle.waterY, elapsed, 0.052);
@@ -264,7 +274,12 @@ function animateLayerGeometry(handle, elapsed, storm = 0) {
     }
 
     layer.geometry.attributes.position.needsUpdate = true;
-    layer.geometry.computeBoundingSphere();
+    // Shore ribbons follow their sample coordinates and are camera-adjacent.
+    // Recomputing all ribbon bounds every frame wastes mobile CPU. Only skip
+    // when frustum culling was explicitly disabled for this mesh.
+    if (layer.mesh?.frustumCulled !== false) {
+      layer.geometry.computeBoundingSphere();
+    }
   }
 }
 

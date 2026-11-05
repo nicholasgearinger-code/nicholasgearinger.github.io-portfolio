@@ -14,7 +14,8 @@ const RADIAL_CELLS = TOUCH_DEVICE ? 24 : 32;
 const LAND_RADIAL = -3.6;
 const SEA_RADIAL = 3.8; // Give animated surf a wider offshore approach.
 const FIXED_DT = 1 / 30;
-const BREAKER_GEOMETRY_HZ = TOUCH_DEVICE ? 18 : 30;
+// Dynamic geometry and normal rebuilds are CPU-bound on older iPhones.
+const BREAKER_GEOMETRY_HZ = TOUCH_DEVICE ? 12 : 30;
 const MAX_STEPS = 3;
 const SHALLOW_START = 3.4;
 const SHALLOW_PEAK = 0.35;
@@ -114,7 +115,8 @@ function hideLegacyFoam(surfHandle) {
   if (old.__riftBubbleOverlay?.mesh) old.__riftBubbleOverlay.mesh.visible = false;
   const wash = old.layers.find((layer) => layer.kind === "wash");
   if (wash?.material) {
-    wash.material.opacity = Math.min(wash.material.opacity ?? 0.16, 0.26);
+    // Avoid the opaque gray ribbon visible from low camera angles.
+    wash.material.opacity = Math.min(wash.material.opacity ?? 0.16, 0.09);
   }
 }
 
@@ -338,7 +340,7 @@ function createCurlingFace(samples, waterY, parent, trainOffset = 0) {
     emissive: 0x062c32,
     emissiveIntensity: 0.055,
     transparent: true,
-    opacity: TOUCH_DEVICE ? 0.68 : 0.75,
+    opacity: TOUCH_DEVICE ? 0.49 : 0.75,
     roughness: 0.21,
     metalness: 0,
     side: THREE.DoubleSide,
@@ -428,11 +430,13 @@ function updateCurlingFace(face, t, storm, day, oceanHandle) {
   }
   pos.needsUpdate = true;
   colors.needsUpdate = true;
-  geometry.computeVertexNormals(); // updated face normals drive actual sun highlights
+  // Preserve moving sunlight on desktop, but skip CPU normal regeneration on
+  // touch; static material lighting plus vertex-color highlights is cheaper.
+  if (!TOUCH_DEVICE) geometry.computeVertexNormals();
   geometry.computeBoundingSphere();
   const foamFactor = clamp01(totalBreak / Math.max(1, along));
   face.material.roughness = THREE.MathUtils.lerp(0.21, 0.49, foamFactor);
-  face.material.opacity = (TOUCH_DEVICE ? 0.68 : 0.75) *
+  face.material.opacity = (TOUCH_DEVICE ? 0.49 : 0.75) *
     (0.38 + 0.62 * clamp01(day));
 }
 
@@ -546,7 +550,11 @@ export function installPersistentShoreFoam(surfHandle) {
   old.group.add(foamMesh);
   old.group.add(edgeMesh);
   const curlingFace = createCurlingFace(samples, surfHandle.waterY, old.group);
-  const secondaryFace = createCurlingFace(samples, surfHandle.waterY, old.group, 0.49);
+  // One face on touch devices: the second transparent overdraw and per-frame
+  // normal reconstruction was too expensive on mobile. Foam still carries
+  // several independent breaker pulses; desktop retains the second face.
+  const secondaryFace = TOUCH_DEVICE ? null :
+    createCurlingFace(samples, surfHandle.waterY, old.group, 0.49);
 
   const handle = {
     samples,
@@ -578,6 +586,7 @@ export function installPersistentShoreFoam(surfHandle) {
 
   // Reuse the foam simulation buffer for whitewater development on the lip.
   for (const face of [curlingFace, secondaryFace]) {
+    if (!face) continue;
     face.foamField = foam;
     face.foamRadial = radial;
   }

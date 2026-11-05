@@ -522,18 +522,13 @@ function installWaterProOptics(handle) {
     .add(sunColor.mul(glitter.mul(0.012)))
     .add(foamColor.mul(brokenFoam.mul(day).mul(0.016)));
 
-  // MeshPhysicalNodeMaterial supports per-pixel transmission/thickness. Shallow
-  // and back-lit crests become clearer, while foam suppresses transmission.
-  const aboveTransmission = mix(
-    originalTransmission,
-    float(0.86),
-    clamp(shallow.mul(0.46).add(translucency.mul(0.75)), 0, 0.72),
-  ).mul(float(1).sub(combinedFoam.mul(0.94)));
-  // WebKit/mobile uses the direct shaded surface. Physical transmission
-  // without a dependable scene-color refraction path darkens the entire
-  // ocean while leaving only the solar reflection visible. Keep physically
-  // detailed transmission on desktop; the underwater view already has its
-  // own explicit FFT normal/refraction shading in colorNode.
+  // r182 critical: MeshPhysicalNodeMaterial.useTransmission is TRUE whenever
+  // transmissionNode is non-null, EVEN when set to float(0). That silently
+  // overrides lightingContext.backdrop and prevents our scene refraction.
+  // Remove the node altogether and disable the physical path *before*
+  // shader graph compilation; backdrop and alpha fallback own refraction.
+  material.transmission = 0;
+  material.transmissionNode = null;
   // Scene-aware backdrop refraction, when supported, replaces native physical
   // transmission. Mobile physical transmission previously made the ocean a
   // dark opaque mirror, while the viewport samples the real scene already
@@ -585,7 +580,7 @@ function installWaterProOptics(handle) {
     material.opacity = 1;
     handle.mesh.renderOrder = 10; // after opaque terrain/sky, before foam
     handle.fftViewportRefractionActive = true;
-    material.transmissionNode = float(0);
+    material.transmissionNode = null;
   } else {
     // Supported fallback: alpha-blended real scene, but no warped background.
     // Crucially, the player can still see through the surface from both sides.
@@ -601,7 +596,7 @@ function installWaterProOptics(handle) {
     material.opacity = 1;
     handle.mesh.renderOrder = 10;
     handle.fftViewportRefractionActive = false;
-    material.transmissionNode = float(0);
+    material.transmissionNode = null;
   }
   if (typeof globalThis !== "undefined") {
     globalThis.__riftWaterSceneOptics = {

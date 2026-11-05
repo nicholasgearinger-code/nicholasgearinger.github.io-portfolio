@@ -201,6 +201,13 @@ function installWaterProOptics(handle) {
   const broadTone = depthMarble.mul(0.052)
     .mul(float(1).sub(underwater));
 
+  // Thin water over pale sand transmits more turquoise-white daylight.
+  // Constrain it to the final few meters of seabed depth, avoiding the flat
+  // milky surface band that occurred when all shallow water was tinted.
+  const sunlitSand = float(1).sub(smoothstep(
+    float(0.20), float(3.1), depth))
+    .mul(day).mul(float(1).sub(underwater));
+
   // Thousands of tiny sun facets rather than one painted streak. The facet mask
   // breaks the highlight into discrete sparkling patches while two BRDF lobes
   // keep a softer solar path underneath them.
@@ -308,12 +315,14 @@ function installWaterProOptics(handle) {
     .mul(float(0.11).add(day.mul(0.20)))
     .mul(float(1).sub(surfZone.mul(0.55)))
     .mul(float(1).sub(underwater)), 0, 0.32);
-  // Animated broken-up white flecks in the active surf zone. Existing
-  // FFT slope and cap noise prevent flat parallel bands along the beach.
+  // Crest-gated white flecks: reduce foam from the uniform pulse across
+  // an entire depth band. Each fleck follows an actual moving crest or its
+  // collapsing wake, broken up by the FFT slope and cap noise.
   const shoreSpill = clamp(
-    surfZone.mul(crestActivity).mul(capBreakup)
-      .mul(float(0.12).add(steep.mul(0.29))),
-    0, 0.30);
+    surfZone.mul(capBreakup)
+      .mul(crestGate.mul(0.70).add(foamWake.mul(0.30)))
+      .mul(float(0.10).add(steep.mul(0.29))),
+    0, 0.25);
   const combinedFoam = clamp(
     whitecap.add(openSeaFoam).add(brokenFoam.mul(0.87))
       .add(shoreSpill), 0, 0.97);
@@ -336,13 +345,16 @@ function installWaterProOptics(handle) {
     body = mix(body, shallowColor,
       clamp(lipGlow.mul(0.38).add(rollingFace.mul(float(0.08)
         .add(shallow.mul(0.16)))), 0, 0.30));
-    // Broad tonal patches and shallow-water light focusing: continuous
-    // gradients, no coarse grid, no separate caustic texture.
+    // Broad tonal patches, transmitted sunlight and a pale sand tint.
+    // The soft aqua around a spilling crest is not solid white foam.
     body = body.mul(float(1).add(broadTone));
+    body = mix(body, color(0xa8e9dc), sunlitSand.mul(0.19));
     body = mix(body, crestColor, marbleMask.mul(0.16));
     body = mix(body, crestColor,
       clamp(translucency.add(lipGlow.mul(0.20)), 0, 0.34));
-    body = mix(body, foamColor, combinedFoam.mul(0.97));
+    body = mix(body, color(0xb6ebe6),
+      brokenFoam.mul(foamWake).mul(0.14));
+    body = mix(body, foamColor, combinedFoam.mul(0.94));
     // Underwater: diffuse transmitted skylight from the real displaced
     // FFT normal. Avoid screen-derivative curvature and thresholded bands,
     // which magnified the regular mesh sampling into diamond patterns.

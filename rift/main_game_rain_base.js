@@ -1504,12 +1504,14 @@ return Fn(() => {
   const waveLensFocus = WAVE_DISTORTION_2
     ? float(0.84).add(abs(sin(phaseThree)).mul(0.32))
     : float(1);
-  const bend = clamp(refractiveSlopes.mul(oceanSurfaceRefraction)
-      .mul(oceanDepthUnderwaterMix).mul(crossing).mul(upwardView)
-      .mul(WAVE_DISTORTION_2 ? 0.42 : 0.15)
-      .mul(waveLensFocus),
-    vec2(WAVE_DISTORTION_2 ? -0.052 : -0.020),
-    vec2(WAVE_DISTORTION_2 ? 0.052 : 0.020));
+  const bend = WAVE_DISTORTION_2
+    ? clamp(refractiveSlopes.mul(oceanSurfaceRefraction)
+        .mul(oceanDepthUnderwaterMix).mul(crossing).mul(upwardView)
+        .mul(0.42).mul(waveLensFocus),
+      vec2(-0.052), vec2(0.052))
+    : vec2(waveSlopeX, waveSlopeZ).mul(oceanSurfaceRefraction)
+        .mul(oceanDepthUnderwaterMix).mul(crossing).mul(upwardView)
+        .mul(0.15);
   const bentUV = clamp(coord.add(bend), vec2(0.002), vec2(0.998));
   const bentView = texture(scenePassColor, bentUV).rgb;
   const refractedColor = mix(base.rgb, bentView,

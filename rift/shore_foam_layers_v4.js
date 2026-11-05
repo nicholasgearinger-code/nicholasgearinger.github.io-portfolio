@@ -269,22 +269,22 @@ export function updateReferenceSwashSheet(surfHandle, elapsed = 0, storm = 0, da
     // being blended at high opacity. Keep the film subtle on mobile; the
     // detailed persistent foam layer provides the visible whitewater.
     const mobile = typeof navigator !== "undefined" && navigator.maxTouchPoints > 0;
-    wash.material.opacity = mobile ? 0.045 : Math.min(0.11,
-      0.045 + dayT * 0.028 + stormT * 0.018 + set * 0.014);
+    wash.material.opacity = mobile ? 0.04 : Math.min(0.10,
+      0.04 + dayT * 0.025 + stormT * 0.015 + set * 0.012);
     // Thin film receives glancing warm sky highlights; no reflection target.
-    wash.material.roughness = THREE.MathUtils.lerp(0.18, 0.09, sunEnergy * dayT);
-    wash.material.envMapIntensity = mobile ? 0.20 : 0.31 + dayT * 0.12;
+    wash.material.roughness = THREE.MathUtils.lerp(0.16, 0.07, sunEnergy * dayT);
+    wash.material.envMapIntensity = mobile ? 0.22 : 0.34 + dayT * 0.12;
   }
 
   if (body?.material) {
     body.material.color.copy(NIGHT_FOAM).lerp(DAY_FOAM, dayT);
-    body.material.opacity = Math.min(0.99, 0.90 + dayT * 0.07 + stormT * 0.02);
+    body.material.opacity = Math.min(0.995, 0.92 + dayT * 0.06 + stormT * 0.015);
     if (body.material.alphaMap) body.material.alphaMap.offset.x = (elapsed * -0.0015) % 1;
   }
 
   if (edge?.material) {
     edge.material.color.copy(NIGHT_FOAM).lerp(DAY_FOAM, dayT);
-    edge.material.opacity = Math.min(1, 0.95 + dayT * 0.045 + stormT * 0.015);
+    edge.material.opacity = Math.min(1, 0.96 + dayT * 0.04 + stormT * 0.01);
     if (edge.material.alphaMap) edge.material.alphaMap.offset.x = (elapsed * 0.0020) % 1;
   }
 

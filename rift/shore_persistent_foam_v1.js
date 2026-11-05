@@ -464,13 +464,13 @@ function writeTextures(handle, day, storm) {
   const edgeData = handle.edgeTextureData;
 
   for (let i = 0; i < n; i++) {
+    // One animated variation per shoreline slice (not per texture pixel).
+    // The existing breakup table supplies the fine grain for every radial cell.
+    const alongStreak = 0.86 + 0.14 * Math.sin(i * 0.31 + handle.simTime * 0.67);
     for (let j = 0; j < m; j++) {
       const idx = i * m + j;
       const f = foam[idx];
-      // Multi-scale breakup reuses the existing tiny foam alpha texture.
-      const streaks = 0.82 + 0.16 * Math.sin(i * 0.29 + j * 0.77 + handle.simTime * 0.62) +
-        0.12 * Math.sin(i * 0.83 - j * 0.43 - handle.simTime * 0.47);
-      const porous = (0.67 + handle.breakup[idx] * 0.33) * streaks;
+      const porous = (0.58 + handle.breakup[idx] * 0.42) * alongStreak;
       let alpha = smooth01((f * porous - 0.014) / 0.32);
       alpha = Math.pow(alpha, 0.75);
 

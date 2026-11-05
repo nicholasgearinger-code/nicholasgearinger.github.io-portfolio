@@ -323,7 +323,7 @@ if (riftSSREnabled) {
    ? base.add(riftSSRPass.rgb) : base;
  const riftBasePostOutput = oceanDepthPassEnabled
    ? underwaterDepthOutput
-   : (lensOutputEnabled ? lensDistortedOutput : scenePassColor);
+   : (lensOutputEnabled ? lensDistortedOutput : underwaterCameraSceneOutput);
  postProcessing.outputNode = riftComposePostOutput(riftBasePostOutput);`,
     "r185 Water Pro additive SSR composition",
   ],

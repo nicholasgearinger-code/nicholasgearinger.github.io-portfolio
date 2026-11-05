@@ -3010,9 +3010,80 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
         .add(projectedSurfaceXZ.y.mul(0.41)).add(t.mul(0.36));
       const ceilingC = projectedSurfaceXZ.x.mul(0.91)
         .sub(projectedSurfaceXZ.y.mul(0.76)).add(t.mul(0.79));
+
+      // Sunlight refraction by the overhead wave height field (air -> water,
+      // n_air / n_water ~= 0.750). This makes real directional sunlight
+      // bend with the moving wave slope instead of merely fading a static
+      // projected texture. Use only the two broad surface waves on mobile;
+      // the third, shorter wave adds optical detail on desktop.
+      const lensA = sin(ceilingA);
+      const lensB = sin(ceilingB);
+      const lensC = isTouchDevice ? float(0) : sin(ceilingC);
+      const slopeX = cos(ceilingA).mul(0.20 * 0.37)
+        .add(cos(ceilingB).mul(0.13 * -0.23))
+        .add(isTouchDevice ? float(0) : cos(ceilingC).mul(0.045 * 0.91));
+      const slopeZ = cos(ceilingA).mul(0.20 * 0.19)
+        .add(cos(ceilingB).mul(0.13 * 0.41))
+        .add(isTouchDevice ? float(0) : cos(ceilingC).mul(0.045 * -0.76));
+      const refractingNormal = vec3(
+        slopeX.mul(-1), float(1), slopeZ.mul(-1)).normalize();
+      const eta = float(0.750);
+      const cosIncidence = clamp(dot(terrainCausticSunDirectionUniform,
+        refractingNormal), 0.04, 1);
+      const cosTransmission = pow(
+        float(1).sub(eta.mul(eta).mul(
+          float(1).sub(cosIncidence.mul(cosIncidence)))).max(float(0.01)),
+        float(0.5));
+      const refractedSunRay = terrainCausticSunDirectionUniform.mul(-0.750)
+        .add(refractingNormal.mul(
+          eta.mul(cosIncidence).sub(cosTransmission)));
+      const rayXZ = refractedSunRay.xz.div(
+        refractedSunRay.y.mul(-1).max(float(0.30)));
+      const flatTransmissionCos = pow(
+        float(1).sub(eta.mul(eta).mul(
+          float(1).sub(terrainCausticSunDirectionUniform.y.mul(
+            terrainCausticSunDirectionUniform.y)))).max(float(0.01)),
+        float(0.5));
+      const flatRayXZ = terrainCausticSunDirectionUniform.xz.mul(-0.750)
+        .div(flatTransmissionCos);
+      // Difference from the flat-water refracted ray: bend the projected
+      // sunlight footprint without jumping when the sun changes altitude.
+      const opticalShift = flatRayXZ.sub(rayXZ)
+        .mul(seabedWaterDepth.min(float(16)))
+        .clamp(vec2(-1.35), vec2(1.35));
+      const bentA = ceilingA.add(opticalShift.x.mul(0.37))
+        .add(opticalShift.y.mul(0.19));
+      const bentB = ceilingB.add(opticalShift.x.mul(-0.23))
+        .add(opticalShift.y.mul(0.41));
+      const bentC = ceilingC.add(opticalShift.x.mul(0.91))
+        .sub(opticalShift.y.mul(0.76));
+
+      // Approximate the determinant of the refracted ray footprint on
+      // the seabed. A converging family of rays (Jacobian < 1) is brighter,
+      // while diverging rays spread the same sunlight into darker regions.
+      // This is a local slope/curvature approximation, not ray tracing.
+      const curvatureXX = lensA.mul(-0.20 * 0.37 * 0.37)
+        .add(lensB.mul(-0.13 * 0.23 * 0.23))
+        .add(lensC.mul(-0.045 * 0.91 * 0.91));
+      const curvatureZZ = lensA.mul(-0.20 * 0.19 * 0.19)
+        .add(lensB.mul(-0.13 * 0.41 * 0.41))
+        .add(lensC.mul(-0.045 * 0.76 * 0.76));
+      const curvatureXZ = lensA.mul(-0.20 * 0.37 * 0.19)
+        .add(lensB.mul(0.13 * 0.23 * 0.41))
+        .add(lensC.mul(0.045 * 0.91 * 0.76));
+      const focalDepth = seabedWaterDepth.min(float(15)).mul(0.25);
+      const jxx = float(1).add(curvatureXX.mul(focalDepth));
+      const jzz = float(1).add(curvatureZZ.mul(focalDepth));
+      const jxz = curvatureXZ.mul(focalDepth);
+      const rayJacobian = jxx.mul(jzz).sub(jxz.mul(jxz));
+      const rayConvergence = clamp(
+        float(1).div(abs(rayJacobian).max(float(0.44))), 0.52, 2.25);
+      const refractedFocusGain = clamp(
+        float(0.50).add(rayConvergence.mul(0.58)), 0.50, 1.81);
+
       const projectedCeilingLight = clamp(
-        sin(ceilingA).mul(cos(ceilingB)).mul(0.30)
-          .add(sin(ceilingC).mul(0.095)).add(0.605), 0, 1
+        sin(bentA).mul(cos(bentB)).mul(0.30)
+          .add(sin(bentC).mul(0.095)).add(0.605), 0, 1
       );
       const projectedFocus = smoothstep(float(0.20), float(0.87),
         projectedCeilingLight);
@@ -3029,8 +3100,13 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
       // Existing local focus, distance fade, sky occlusion, and day/night
       // controls remain active; no additional render target or solver.
       const crestFocusing = float(0.76).add(waveNorm.mul(0.24));
+      // The same wave slope now controls both the refracted footprint and
+      // solar energy concentration. Preserve the existing fractured net as
+      // fine optical texture, but make its intensity physically responsive.
+      const opticalFocus = coupledCausticsEnabled
+        ? refractedFocusGain : float(1);
       const finalCaustic = causticPattern.mul(crestFocusing)
-        .mul(causticCoupling).mul(causticSunAngle)
+        .mul(causticCoupling).mul(opticalFocus).mul(causticSunAngle)
         .mul(underwaterMask).mul(upwardMask)
         .mul(focusMask).mul(depthAttenuation)
         .mul(terrainCausticIntensityUniform).mul(terrainCausticSunGlowUniform);

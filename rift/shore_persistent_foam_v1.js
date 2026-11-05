@@ -148,7 +148,8 @@ function pulse01(p, center, halfWidth) {
 }
 
 function surfPhase(t, storm, offset = 0) {
-  return ((t / Math.max(4.4, 5.7 - storm) + offset) % 1 + 1) % 1;
+  // Short, spilling shorebreak rather than long cinematic tube sets.
+  return ((t / Math.max(3.7, 4.8 - storm * 0.7) + offset) % 1 + 1) % 1;
 }
 function surfSet(t) {
   return THREE.MathUtils.clamp(0.73 + 0.19 * Math.sin(t * 0.11) +
@@ -162,7 +163,6 @@ function shoal(sample, waterY) {
   return 0.22 + shallow * 0.65 + slope * 0.13;
 }
 function swashVelocity(simTime, storm) {
-  const period = Math.max(4.4, 5.7 - storm * 1.0);
   const p = surfPhase(simTime, storm);
   if (p < 0.22) {
     return -2.15 * smooth01(p / 0.22) * (1 + storm * 0.18);
@@ -174,11 +174,10 @@ function swashVelocity(simTime, storm) {
 }
 
 function breakerPulse(simTime, storm) {
-  const period = Math.max(4.4, 5.7 - storm * 1.0);
   const p = surfPhase(simTime, storm);
-  const primary = pulse01(p, 0.10, 0.105);
-  const secondary = pulse01(p, 0.49, 0.105) * 0.58;
-  const third = pulse01(p, 0.78, 0.068) * 0.22;
+  const primary = pulse01(p, 0.16, 0.14);
+  const secondary = pulse01(p, 0.51, 0.13) * 0.64;
+  const third = pulse01(p, 0.80, 0.085) * 0.28;
   return clamp01((primary + secondary + third) * surfSet(simTime));
 }
 
@@ -224,8 +223,17 @@ function stepPersistentField(handle, dt, storm, oceanHandle) {
       + Math.sin(simTime * 0.91 + phase * 0.77 + 1.9) * 0.09;
     const slope = clamp01(Math.max(0, sample.landY - sample.shoreY) / 1.15);
     const depth = clamp01(Math.max(0, handle.waterY - sample.seaY) / 1.65);
-    const localBreak = Math.pow(Math.max(0, Math.sin(simTime * 1.64 + phase * 0.61 + 0.5)), 6) * 0.36;
-    const energy = clamp01((pulse * alongEnergy + localBreak * 0.75) * (0.44 + shoal(sample, handle.waterY) * 0.82 + slope * 0.10 + depth * 0.05) * amplitudeFactor * (1 + storm * 0.55));
+    const localBreak = Math.pow(Math.max(0, Math.sin(simTime * 1.64 + phase * 0.61 + 0.5)), 6) * 0.28;
+    const progress = surfPhase(simTime, storm, phase * 0.009);
+    // Crest collapse continues generating whitewater after the initial pulse.
+    const spill = smooth01((progress - 0.30) / 0.19) *
+      (1 - smooth01((progress - 0.76) / 0.22));
+    const fragmented = 0.70 + 0.17 * Math.sin(phase * 0.37 + simTime * 1.11) +
+      0.13 * Math.sin(phase * 0.89 - simTime * 0.63);
+    const energy = clamp01((pulse * alongEnergy * 0.78 +
+      spill * fragmented * 0.88 + localBreak * 0.65) *
+      (0.40 + shoal(sample, handle.waterY) * 0.85 + slope * 0.10 + depth * 0.05) *
+      amplitudeFactor * (1 + storm * 0.42));
 
     if (energy <= 0.002) continue;
     const centerR = 3.1 - surfPhase(simTime, storm, phase * 0.009) * 4.35 + Math.sin(phase * 0.41 + simTime * 0.18) * 0.23;
@@ -237,9 +245,12 @@ function stepPersistentField(handle, dt, storm, oceanHandle) {
     const radius = storm > 0.55 ? 5 : 4;
     for (let dj = -radius; dj <= radius; dj++) {
       const j = Math.max(0, Math.min(m - 1, centerJ + dj));
-      const w = Math.exp(-(dj * dj) / (radius * radius * 0.85 + 0.01));
+      const w = Math.exp(-(dj * dj) / (radius * radius * 0.90 + 0.01));
       const idx = i * m + j;
-      dst[idx] = Math.min(1.5, dst[idx] + energy * w * (dj > 0 ? 0.48 : 1) * dt * (4.0 + storm * 1.8));
+      // Aerated body lingers shoreward; offshore leading edge stays narrow.
+      const bodyBehind = dj < 0 ? 1.0 : 0.35;
+      dst[idx] = Math.min(1.5, dst[idx] + energy * w * bodyBehind *
+        dt * (5.0 + storm * 1.9));
     }
   }
 
@@ -289,7 +300,7 @@ function updateBreakerGeometry(handle) {
           (train === 0 ? 1 : 0.57);
         lift += profile * energy * (0.53 + storm * 0.34);
         pitch += Math.exp(-d * d * 5) * energy *
-          smooth01((progress - 0.28) / 0.43) * 0.15;
+          smooth01((progress - 0.28) / 0.43) * 0.11;
       }
       const vertex = (i * columns + j) * 3;
       positions[vertex] = base[vertex] - sample.outwardX * pitch;
@@ -384,10 +395,10 @@ function updateCurlingFace(face, t, storm, day, oceanHandle) {
     const trainStrength = face.trainOffset ? 0.57 : 1.0;
     const growth = Math.max(0, Math.sin(Math.PI * Math.min(1, localPhase * 1.16)));
     const collapse = 1 - smooth01((localPhase - 0.64) / 0.32);
-    const height = (0.78 + storm * 0.28) * trainStrength * set *
-      (0.40 + shoaling * 0.72) * growth * collapse;
-    const breaking = smooth01((localPhase - 0.38) / 0.30) *
-      (1 - smooth01((localPhase - 0.83) / 0.17));
+    const height = (0.55 + storm * 0.20) * trainStrength * set *
+      (0.43 + shoaling * 0.66) * growth * collapse;
+    const breaking = smooth01((localPhase - 0.30) / 0.19) *
+      (1 - smooth01((localPhase - 0.79) / 0.19));
     totalBreak += breaking * height;
     for (let j = 0; j <= rows; j++) {
       const v = j / rows;
@@ -396,7 +407,7 @@ function updateCurlingFace(face, t, storm, day, oceanHandle) {
       const curl = smooth01((v - 0.48) / 0.52) *
         smooth01((localPhase - 0.24) / 0.34);
       // Broad green face, curling pitch at the lip, and lower trailing foot.
-      const radial = front + (1 - v) * 0.62 - curl * height * 0.68;
+      const radial = front + (1 - v) * 0.56 - curl * height * 0.46;
       const k = (i * (rows + 1) + j) * 3;
       array[k] = sample.x + sample.outwardX * radial;
       array[k + 1] = waterY + 0.018 + height * v;
@@ -411,11 +422,16 @@ function updateCurlingFace(face, t, storm, day, oceanHandle) {
       const foam = clamp01(face.foamField?.[foamIndex] || 0);
       // Broken bands are fragmented alongshore rather than a uniform white
       // stripe. Vertex colors remain GPU-interpolated and require no texture.
-      const fragments = 0.65 + 0.35 * Math.sin(i * 0.67 + t * 1.7) *
-        Math.sin(i * 1.37 - t * 0.91);
-      const scatter = clamp01((breaking * lip * 0.78 + foam * lip * 0.34) *
-        fragments);
-      const transmission = sunlight * (0.18 + lip * 0.72) * (1 - scatter);
+      const fragments = clamp01(0.58 +
+        0.20 * Math.sin(i * 0.73 + t * 1.5) +
+        0.14 * Math.sin(i * 1.61 - t * 0.97) +
+        0.08 * Math.sin(i * 2.47 + t * 0.63));
+      // White lip spills down the wave face and trails into the foam field.
+      const spill = smooth01((localPhase - 0.34) / 0.18) *
+        (1 - smooth01((localPhase - 0.82) / 0.18));
+      const scatter = clamp01((breaking * lip * 0.90 +
+        foam * lip * 0.48 + spill * lip * 0.32) * fragments);
+      const transmission = sunlight * (0.16 + lip * 0.54) * (1 - scatter);
       const trough = 0.79 + 0.21 * smooth01(v * 1.4);
       const shade = (0.65 + sunlight * 0.30 + v * 0.12) * trough;
       const warmGlint = sunlight * Math.pow(Math.max(0, sunY), 2) *
@@ -451,13 +467,16 @@ function writeTextures(handle, day, storm) {
     for (let j = 0; j < m; j++) {
       const idx = i * m + j;
       const f = foam[idx];
-      const porous = 0.76 + handle.breakup[idx] * 0.24;
-      let alpha = smooth01((f * porous - 0.025) / 0.44);
-      alpha = Math.pow(alpha, 0.72);
+      // Multi-scale breakup reuses the existing tiny foam alpha texture.
+      const streaks = 0.82 + 0.16 * Math.sin(i * 0.29 + j * 0.77 + handle.simTime * 0.62) +
+        0.12 * Math.sin(i * 0.83 - j * 0.43 - handle.simTime * 0.47);
+      const porous = (0.67 + handle.breakup[idx] * 0.33) * streaks;
+      let alpha = smooth01((f * porous - 0.014) / 0.32);
+      alpha = Math.pow(alpha, 0.75);
 
       const landNeighbor = foam[i * m + Math.max(0, j - 1)];
       const gradient = Math.max(0, f - landNeighbor);
-      let edge = smooth01((gradient - 0.008) / 0.13) * smooth01((f - 0.035) / 0.33);
+      let edge = smooth01((gradient - 0.006) / 0.105) * smooth01((f - 0.025) / 0.28);
       edge = Math.pow(edge, 0.65);
 
       const a = Math.round(clamp01(alpha) * 255);
@@ -474,9 +493,9 @@ function writeTextures(handle, day, storm) {
   const dayT = clamp01(day);
   const stormT = clamp01(storm);
   handle.foamMaterial.color.copy(NIGHT_FOAM).lerp(DAY_FOAM, dayT);
-  handle.foamMaterial.opacity = Math.min(0.985, 0.84 + dayT * 0.11 + stormT * 0.025);
+  handle.foamMaterial.opacity = Math.min(1, 0.88 + dayT * 0.10 + stormT * 0.02);
   handle.edgeMaterial.color.copy(NIGHT_FOAM).lerp(DAY_FOAM, dayT);
-  handle.edgeMaterial.opacity = Math.min(1, 0.92 + dayT * 0.07 + stormT * 0.02);
+  handle.edgeMaterial.opacity = Math.min(1, 0.94 + dayT * 0.06 + stormT * 0.02);
 }
 
 export function installPersistentShoreFoam(surfHandle) {

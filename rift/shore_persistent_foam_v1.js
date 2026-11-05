@@ -460,9 +460,13 @@ function updateCurlingFace(face, t, storm, day, oceanHandle) {
   }
   pos.needsUpdate = true;
   colors.needsUpdate = true;
-  // Preserve moving sunlight on desktop, but skip CPU normal regeneration on
-  // touch; static material lighting plus vertex-color highlights is cheaper.
-  if (!TOUCH_DEVICE) geometry.computeVertexNormals();
+  // Compute real face normals once on mobile, and update continuously on
+  // desktop. Before this the touch mesh could have no normal attribute at
+  // all, making standard-material lighting unpredictable.
+  if (!TOUCH_DEVICE || !face.normalsInitialized) {
+    geometry.computeVertexNormals();
+    face.normalsInitialized = true;
+  }
   // This mesh is frustumCulled=false; skip unnecessary bounding recompute.
   const foamFactor = clamp01(totalBreak / Math.max(1, along));
   face.material.roughness = THREE.MathUtils.lerp(0.21, 0.49, foamFactor);

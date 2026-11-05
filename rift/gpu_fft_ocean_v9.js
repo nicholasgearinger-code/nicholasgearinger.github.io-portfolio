@@ -593,8 +593,11 @@ function installWaterProOptics(handle) {
     const tint = mix(color(0x8cbac7), color(0xd8f4e8),
       shallow.mul(0.78).add(day.mul(0.16)));
     if (PHYSICAL_OPTICS_PHASE1) {
+      const submergedCameraDepth = max(
+        waterLevel.sub(cameraPosition.y), float(0));
+      const opticalDepth = mix(depth, submergedCameraDepth, underwater);
       const waterPath = clamp(
-        depth.div(max(ndv, float(0.40))), 0, 24,
+        opticalDepth.div(max(ndv, float(0.40))), 0, 24,
       );
       const absorption = exp(vec3(-0.145, -0.063, -0.026)
         .mul(waterPath));

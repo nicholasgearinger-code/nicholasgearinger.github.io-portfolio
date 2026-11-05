@@ -483,6 +483,10 @@ function riftInitWithTimeout(promise, ms, label) {
 }
 await riftInitWithTimeout(renderer.init(), 10000, "renderer.init()");
 riftLoadingEl.remove();
+// The water shader needs to know whether a genuine WebGPU backend is active.
+// WebGPURenderer can fall back to WebGL2 on supported browsers; viewport
+// backdrop sampling is only enabled on the initialized native WebGPU device.
+globalThis.__riftNativeWebGPUActive = Boolean(renderer.backend?.device);
 // Real WebGPU error surfacing — per "Script error." with no details on
 // the index.html-level overlay. Root cause (confirmed via Three.js's own
 // GitHub issues, not guessed): WebGPURenderer genuinely cannot propagate

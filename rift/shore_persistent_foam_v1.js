@@ -21,6 +21,8 @@ const BREAKER_GEOMETRY_HZ = TOUCH_DEVICE ? 12 : 30;
 // On mobile the same sparse mesh is still updated only at 12 Hz.
 const REFLECTIVE_CRESTS = typeof location === "undefined" ||
   new URLSearchParams(location.search).get("riftCrestReflect") !== "off";
+const SURF_REALISM_V2 = typeof location === "undefined" ||
+  new URLSearchParams(location.search).get("riftSurf2") !== "off";
 const MAX_STEPS = 3;
 const SHALLOW_START = 3.4;
 const SHALLOW_PEAK = 0.35;
@@ -238,10 +240,18 @@ function stepPersistentField(handle, dt, storm, oceanHandle) {
       (1 - smooth01((progress - 0.76) / 0.22));
     const fragmented = 0.70 + 0.17 * Math.sin(phase * 0.37 + simTime * 1.11) +
       0.13 * Math.sin(phase * 0.89 - simTime * 0.63);
+    // Real shorebreak collapses in groups: local wave crests peel along
+    // the coast and release separate foam tongues rather than depositing
+    // identical white ribbons around the entire beach circumference.
+    const alongTongue = SURF_REALISM_V2
+      ? smooth01((0.52 + 0.28 * Math.sin(phase * 0.23 + simTime * 0.46) +
+          0.22 * Math.sin(phase * 0.79 - simTime * 0.69) - 0.26) / 0.60)
+      : 1;
     const energy = clamp01((pulse * alongEnergy * 0.78 +
       spill * fragmented * 0.88 + localBreak * 0.65) *
       (0.40 + shoal(sample, handle.waterY) * 0.85 + slope * 0.10 + depth * 0.05) *
-      amplitudeFactor * (1 + storm * 0.42));
+      amplitudeFactor * (1 + storm * 0.42) *
+      (SURF_REALISM_V2 ? 0.28 + 0.84 * alongTongue : 1));
 
     if (energy <= 0.002) continue;
     const centerR = 3.1 - surfPhase(simTime, storm, phase * 0.009) * 4.35 + Math.sin(phase * 0.41 + simTime * 0.18) * 0.23;
@@ -429,10 +439,20 @@ function updateCurlingFace(face, t, storm, day, oceanHandle) {
     const trainStrength = face.trainOffset ? 0.57 : 1.0;
     const growth = Math.max(0, Math.sin(Math.PI * Math.min(1, localPhase * 1.16)));
     const collapse = 1 - smooth01((localPhase - 0.64) / 0.32);
-    const alongHeight = 0.82 +
-      0.11 * Math.sin(i * 0.33 + t * 0.55) +
-      0.07 * Math.sin(i * 0.87 - t * 0.32);
-    const height = (0.49 + storm * 0.19) * trainStrength * set *
+    // Height and spill intensity vary in connected stretches, not a
+    // constant wall around the coastline. Smooth modulation retains
+    // one continuous mesh even as adjacent sections stop breaking.
+    const crestGroup = SURF_REALISM_V2
+      ? smooth01((0.54 + 0.33 * Math.sin(i * 0.17 + t * 0.48) +
+          0.24 * Math.sin(i * 0.49 - t * 0.61) - 0.22) / 0.73)
+      : 1;
+    const alongHeight = SURF_REALISM_V2
+      ? 0.53 + crestGroup * 0.55 +
+        0.08 * Math.sin(i * 0.87 - t * 0.32)
+      : 0.82 + 0.11 * Math.sin(i * 0.33 + t * 0.55) +
+        0.07 * Math.sin(i * 0.87 - t * 0.32);
+    const height = (SURF_REALISM_V2 ? 0.56 : 0.49) *
+      (1 + storm * 0.38) * trainStrength * set *
       (0.43 + shoaling * 0.66) * growth * collapse * alongHeight;
     const breaking = smooth01((localPhase - 0.28) / 0.16) *
       (1 - smooth01((localPhase - 0.79) / 0.19));
@@ -469,11 +489,18 @@ function updateCurlingFace(face, t, storm, day, oceanHandle) {
       const spill = smooth01((localPhase - 0.32) / 0.15) *
         (1 - smooth01((localPhase - 0.81) / 0.16));
       const spillingEdge = smooth01((v - (0.84 - spill * 0.37)) / 0.17);
+      // Keep the sloping front glassy until it aerates at the actual
+      // breaking lip. Whitecap fragments peel in short irregular spans,
+      // leaving transparent turquoise gaps to see through the front.
+      const crestGap = SURF_REALISM_V2
+        ? 0.27 + 0.85 * smooth01((crestGroup +
+            fragments * 0.36 - 0.33) / 0.82)
+        : 1;
       const scatter = clamp01((breaking * lip *
         (REFLECTIVE_CRESTS ? 0.72 : 0.55) +
         foam * lip * 0.30 + spill * spillingEdge *
         (REFLECTIVE_CRESTS ? 1.05 : 0.86)) *
-        (0.58 + fragments * 0.42));
+        (0.58 + fragments * 0.42) * crestGap);
       if (aeration) aeration.array[k / 3] = scatter;
       const transmission = sunlight * (0.22 + lip * 0.53) * (1 - scatter);
       const trough = 0.79 + 0.21 * smooth01(v * 1.4);
@@ -531,6 +558,14 @@ function writeTextures(handle, day, storm) {
     const alongStreak = 0.89
       + 0.13 * Math.sin(i * 0.31 + handle.simTime * 0.67)
       + 0.10 * Math.sin(i * 0.79 - handle.simTime * 0.36);
+    // Modulate alpha once per alongshore sample, not per pixel, preserving
+    // the cheap 24-cell CPU foam update on iPhone.
+    const foamTongue = SURF_REALISM_V2
+      ? smooth01((0.48 + 0.30 * Math.sin(i * 0.13 +
+          handle.simTime * 0.31) +
+          0.23 * Math.sin(i * 0.37 - handle.simTime * 0.57) -
+          0.18) / 0.65)
+      : 1;
     for (let j = 0; j < m; j++) {
       const idx = i * m + j;
       const f = foam[idx];
@@ -545,7 +580,8 @@ function writeTextures(handle, day, storm) {
       const beachFade = smooth01((radialMeters + 3.0) / 1.25);
       const porous = 0.64 + localBreakup * 0.36;
       let alpha = smooth01((f * porous - 0.037) / 0.47);
-      alpha = Math.pow(alpha, 0.88) * laceHoles * beachFade;
+      alpha = Math.pow(alpha, 0.88) * laceHoles * beachFade *
+        (SURF_REALISM_V2 ? 0.19 + 0.81 * foamTongue : 1);
 
       const landNeighbor = foam[i * m + Math.max(0, j - 1)];
       const gradient = Math.max(0, f - landNeighbor);
@@ -553,7 +589,8 @@ function writeTextures(handle, day, storm) {
         smooth01((f - 0.025) / 0.28);
       edge = Math.pow(edge, 0.65) *
         (0.31 + 0.69 * laceHoles) *
-        (0.70 + localBreakup * 0.30) * beachFade;
+        (0.70 + localBreakup * 0.30) * beachFade *
+        (SURF_REALISM_V2 ? 0.22 + 0.78 * foamTongue : 1);
 
       const a = Math.round(clamp01(alpha) * 255);
       const e = Math.round(clamp01(edge) * 255);

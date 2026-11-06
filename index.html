@@ -3578,22 +3578,26 @@
      Position the switch ABOVE the mobile up/down/fire cluster rather than
      competing with the menu, graphics, or Ocean Tuning controls. */
   #rift-drone-btn {
-    position: absolute; right: 20px; bottom: 136px; z-index: 23;
-    background: rgba(7,30,42,.85); color: #9cf8ed;
-    border: 1px solid rgba(79,209,197,.75); border-radius: 100px;
-    padding: 9px 13px; min-height: 38px;
-    font: 600 11px/1.2 'IBM Plex Mono', monospace; letter-spacing: .09em;
+    position: absolute; right: 16px; bottom: 148px; z-index: 32;
+    background: rgba(5,29,41,.96); color: #dcfffa;
+    border: 2px solid #4fd1c5; border-radius: 14px;
+    padding: 12px 15px; min-height: 44px;
+    font: 700 12px/1.25 'IBM Plex Mono', monospace; letter-spacing: .07em;
     cursor: pointer; touch-action: manipulation; pointer-events: auto;
-    box-shadow: 0 0 14px rgba(10,40,55,.32);
+    text-shadow: 0 0 7px rgba(79,209,197,.55);
+    box-shadow: 0 4px 20px rgba(0,0,0,.55), inset 0 0 12px rgba(79,209,197,.12);
   }
+  /* Keep the button VISIBLE even before a level has started. A disabled
+     button is discoverable; a hidden button cannot be found or debugged. */
+  #rift-drone-btn:disabled { opacity: .65; cursor: not-allowed; }
   #rift-drone-btn[hidden] { display: none; }
   #rift-drone-btn[aria-pressed="true"] {
     background: rgba(79,209,197,.22); color: #e8ffff;
     border-color: #9cf8ed;
   }
   #rift-viewport.rift-fullscreen #rift-drone-btn {
-    right: calc(20px + env(safe-area-inset-right));
-    bottom: calc(136px + env(safe-area-inset-bottom));
+    right: calc(16px + env(safe-area-inset-right));
+    bottom: calc(148px + env(safe-area-inset-bottom));
   }
   #rift-viewport.rift-drone-active #rift-touch-fire { display: none; }
 
@@ -4997,7 +5001,8 @@
             </div>
             <button type="button" id="rift-menu-btn" class="rift-mono">MENU</button>
             <button type="button" id="rift-drone-btn" class="rift-mono"
-              aria-label="Switch to free-flight drone camera" aria-pressed="false" hidden>◈ DRONE VIEW</button>
+              aria-label="Switch to free-flight drone camera" aria-pressed="false"
+              title="Free-flight camera · G on desktop">◈ DRONE VIEW</button>
           </div>
 
           <div id="rift-touch-controls">

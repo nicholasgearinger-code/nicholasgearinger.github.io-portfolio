@@ -4,7 +4,7 @@ import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERF
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
 import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, createUnderwaterLightShaft, updateLightShafts, disposeLightShafts, createRockCluster, createCaveMouth, applyVerticalGradient } from "./decorations.js";
-import { createWaterInteractions, updateWaterInteractions, disposeWaterInteractions } from "./waterInteractions.js";
+import { createWaterInteractions, updateWaterInteractions, disposeWaterInteractions, positionDemoBoatNearSpawn } from "./waterInteractions.js";
 import { createBoatGameplay } from "./boatGameplay.js";
 import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, updateFluidSimWater, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail } from "./liquid.js";
 import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
@@ -3340,6 +3340,8 @@ vec2 causticVoronoiF1F2(vec2 p) {
   const spawnGroundY = sampleGroundHeight(layout.spawn.x, layout.spawn.z, terrainMesh) ?? 0;
   spawnPosition = { x: layout.spawn.x, y: spawnGroundY + PLAYER_EYE_HEIGHT + 2, z: layout.spawn.z };
   camera.position.set(spawnPosition.x, spawnPosition.y, spawnPosition.z);
+  // Select reachable nearby water once per level so the boat is discoverable.
+  positionDemoBoatNearSpawn(waterInteractionState, spawnPosition.x, spawnPosition.z);
   faceAwayFromLandmark(spawnPosition.x, spawnPosition.z);
   playerPhysics.verticalVelocity = 0;
   playerPhysics.grounded = false;

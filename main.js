@@ -5,6 +5,7 @@ import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
 import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, createUnderwaterLightShaft, updateLightShafts, disposeLightShafts, createRockCluster, createCaveMouth, applyVerticalGradient } from "./decorations.js";
 import { createWaterInteractions, updateWaterInteractions, disposeWaterInteractions } from "./waterInteractions.js";
+import { createBoatGameplay } from "./boatGameplay.js";
 import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, updateFluidSimWater, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail } from "./liquid.js";
 import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
@@ -1011,6 +1012,8 @@ function showLevelSelect() {
   startOverlay.style.display = "flex";
   levelSelectEl.hidden = false;
   touchGameActive = false;
+  desktopGameActive = false;
+  boatGameplay?.reset();
 }
 controls.addEventListener("unlock", showLevelSelect);
 
@@ -1031,6 +1034,11 @@ window.addEventListener("keydown", (e) => {
   setKey(e.code, true);
 });
 window.addEventListener("keyup", (e) => setKey(e.code, false));
+window.addEventListener("keydown", (e) => {
+  if (e.code !== "KeyE" || e.repeat || !isGameActive()) return;
+  e.preventDefault();
+  boatGameplay.toggle();
+});
 
 function setKey(code, value) {
   switch (code) {
@@ -1200,8 +1208,17 @@ let wasErupting = false; // edge-detects eruption start/stop for audio — see t
 const MAX_DYNAMIC_FIRES = 10; // defensive cap so spawns can never outpace burnouts and pile up indefinitely
 
 let waterInteractionState = null;
+const boatGameplay = createBoatGameplay({
+  viewport, camera, keys, isActive: isGameActive, isTouchDevice,
+  getInteractions: () => waterInteractionState,
+  getGroundHeight: (x, z) => currentLevelIdx >= 0
+    ? terrainHeightAt(LEVELS[currentLevelIdx], x, z, WORLD_SEED) : -Infinity,
+  eyeHeight: PLAYER_EYE_HEIGHT, playerPhysics,
+  onMessage: logDiscovery,
+});
 
 function teardownLevel() {
+  boatGameplay.reset();
   disposeWaterInteractions(waterInteractionState);
   waterInteractionState = null;
   if (scene.environment) {
@@ -4165,6 +4182,13 @@ function animate() {
     // a river), not something the whole level is submerged in, so swim
     // mode stays scoped to the one biome it actually describes rather
     // than triggering for every biome that happens to have ANY liquid.
+    if (boatGameplay.isRiding()) {
+      // Boats own the camera while boarded; don't apply walking/swim physics.
+      boatGameplay.updateControls();
+      playerMovingThisFrame = false;
+      setWalkSoundsActive(false);
+      jumpQueued = false;
+    } else {
     const swimLevel = LEVELS[currentLevelIdx].biome === "crystal" ? LIQUID_LEVEL[LEVELS[currentLevelIdx].biome] : undefined;
     // Same "eye height below the surface" check physics.js uses
     // internally to decide swim mode — computed once here so movement
@@ -4205,9 +4229,14 @@ function animate() {
       camera.rotation.z += (Math.sin(walkBobPhase * 0.5) * WALK_SHAKE_ROLL + (Math.random() - 0.5) * WALK_SHAKE_ROLL * 0.4) * walkBobStrength;
     }
     jumpQueued = false;
-    if (camera.position.y < spawnPosition.y - FALL_RESPAWN_OFFSET) respawnInLevel();
+    }
+    if (!boatGameplay.isRiding() && camera.position.y < spawnPosition.y - FALL_RESPAWN_OFFSET) respawnInLevel();
     checkLoreProximity();
   }
+
+  // Advance hull motion before the water rendering and camera-dependent effects.
+  updateWaterInteractions(waterInteractionState, dt, elapsedTime, camera.position, playerSwimmingThisFrame);
+  boatGameplay.afterPhysics(dt);
 
   for (const [, handle] of crystalHandles) updateCrystalMesh(handle, elapsedTime);
   for (let i = decorationHandles.length - 1; i >= 0; i--) {
@@ -4309,7 +4338,6 @@ function animate() {
   // specifically because the buffer-disposal timing fix already applied
   // elsewhere prevents this from ever racing against a level teardown.
   if (liquidHandle && liquidHandle.fluidSim) updateFluidSimWater(liquidHandle, renderer);
-  updateWaterInteractions(waterInteractionState, dt, elapsedTime, camera.position, playerSwimmingThisFrame);
   updateWaterfall(waterfallHandle, dt, elapsedTime);
   updateOceanSurfaceDetail(oceanSurfaceDetailHandle, elapsedTime, dayNight.dayAmount);
   // Real angelfish (models.js) — AnimationMixer drives the loaded skeletal

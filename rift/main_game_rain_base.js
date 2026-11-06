@@ -1955,11 +1955,12 @@ const controls = new PointerLockControls(camera, document.body);
 
 function showLevelSelect() {
   if (droneModeActive) leaveDroneMode();
-  if (droneButton) droneButton.hidden = true;
   startOverlay.style.display = "flex";
   levelSelectEl.hidden = false;
   touchGameActive = false;
   desktopGameActive = false;
+  // Keep the toggle visible and clearly disabled rather than hiding it.
+  refreshDroneHUD();
 }
 controls.addEventListener("unlock", showLevelSelect);
 
@@ -2186,7 +2187,11 @@ function resetDroneInputs() {
 }
 function refreshDroneHUD() {
   if (droneButton) {
-    droneButton.hidden = currentLevelIdx < 0 || !isGameActive();
+    // Do not hide Drone View behind a level-entry callback. Some mobile
+    // browsers can skip or interrupt a visibility refresh even when the
+    // scene is running, making an otherwise working feature undiscoverable.
+    droneButton.hidden = false;
+    droneButton.disabled = currentLevelIdx < 0 || !isGameActive();
     droneButton.setAttribute("aria-pressed", String(droneModeActive));
     droneButton.setAttribute("aria-label", droneModeActive
       ? "Return to player view" : "Switch to free-flight drone camera");

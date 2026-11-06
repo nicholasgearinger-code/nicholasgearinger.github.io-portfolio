@@ -202,6 +202,32 @@ export function findRowboatSpawnNearShore(getGroundHeight, waterY, spawnX, spawn
   return nearest;
 }
 
+/**
+ * Conservative minimum pivot height for a floating hull, not a substitute
+ * for FFT readback. The near-shore GPU solver can generate crests up to
+ * roughly 0.95 world units above its static waterline. The previous CPU
+ * swell approximation could fall below that and let the entire gunwale
+ * disappear. This enforces freeboard at the LOWEST side of the angled rim.
+ *
+ * The hull is still partly immersed: the floor sits near the visual keel at
+ * calm water, rather than artificially lifting the whole boat far offshore.
+ */
+export function minimumRowboatPivotHeight({
+  waterY, sampleMax, visualHeight, length, beam, pitch, roll, storm = 0,
+  minFreeboard = 0.16,
+}) {
+  const safeSurface = Math.max(
+    Number.isFinite(sampleMax) ? sampleMax : waterY,
+    waterY + 0.70 + clamp(storm, 0, 1) * 0.17,
+  );
+  // Lower of the two side gunwales / bow-stern corners in rough seas.
+  const uprightRim = visualHeight * 0.5 * Math.cos(pitch) * Math.cos(roll);
+  const lowerRim = uprightRim -
+    Math.abs(Math.sin(pitch)) * length * 0.39 -
+    Math.abs(Math.sin(roll)) * beam * 0.41;
+  return safeSurface + minFreeboard - Math.max(-0.2, lowerRim);
+}
+
 export function createOldRowboatVehicle({
   scene, camera, viewport, keys, isActive, isTouchDevice,
   getGroundHeight, eyeHeight, playerPhysics, onMessage, isDroneMode,
@@ -461,7 +487,17 @@ export function createOldRowboatVehicle({
       const mass = Math.min(300, Math.max(180, area * shape.hullHeight * RHO * 0.27));
       const draft = mass / (RHO * area);
       const bottomOffset = -shape.visualHeight * 0.5 + 0.045;
-      shape.root.position.set(spot.x, waterY - bottomOffset - draft, spot.z);
+      // An initial freeboard check prevents the boat from appearing sunk
+      // during the first frame while the GLB is being attached to the scene.
+      const initialSurface = sampleRowboatWater(waterHandle, spot.x, spot.z, 0);
+      const initialY = Math.max(
+        waterY - bottomOffset - draft,
+        minimumRowboatPivotHeight({
+          waterY, sampleMax: initialSurface, visualHeight: shape.visualHeight,
+          length: shape.length, beam: shape.beam, pitch: 0, roll: 0,
+        }),
+      );
+      shape.root.position.set(spot.x, initialY, spot.z);
       shape.root.rotation.y = spot.yaw; // bow points toward open water
       scene.add(shape.root);
       boat = {
@@ -546,6 +582,7 @@ export function createOldRowboatVehicle({
 
       const cy = Math.cos(root.rotation.y), sy = Math.sin(root.rotation.y);
       let fy = -b.mass * G, tx = 0, tz = 0;
+      let maxSurface = -Infinity;
       const cellArea = b.area / 9;
       // Hydrostatic pressure on nine submerged hull columns. Forces on
       // the bow, stern, and each side create genuine pitch/roll torques.
@@ -557,6 +594,7 @@ export function createOldRowboatVehicle({
           const pointY = root.position.y + b.bottomOffset +
             root.rotation.z * lx - root.rotation.x * lz;
           const water = sampleRowboatWater(b.handle, wx, wz, t);
+          if (water > maxSurface) maxSurface = water;
           const depth = clamp(water - pointY, 0, b.hullHeight);
           if (depth <= 0) continue;
           const lift = RHO * G * cellArea * depth;
@@ -574,6 +612,20 @@ export function createOldRowboatVehicle({
       b.pitchSpeed = clamp(b.pitchSpeed + clamp(tz / inertiaZ, -11, 11) * h, -1.0, 1.0);
       root.rotation.x = clamp(root.rotation.x + b.rollSpeed * h, -0.29, 0.29);
       root.rotation.z = clamp(root.rotation.z + b.pitchSpeed * h, -0.29, 0.29);
+      // Safety constraint AFTER buoyancy and angular integration: the hull
+      // retains heave/pitch/roll inertia but its low gunwale can't be dragged
+      // underneath a passing crest, even after a large mobile frame hitch.
+      const minPivotY = minimumRowboatPivotHeight({
+        waterY: b.handle.waterY,
+        sampleMax: maxSurface,
+        visualHeight: b.visualHeight, length: b.length, beam: b.beam,
+        pitch: root.rotation.z, roll: root.rotation.x,
+        storm: b.handle.stormAmount?.value ?? 0,
+      });
+      if (root.position.y < minPivotY) {
+        root.position.y = minPivotY;
+        if (b.ySpeed < 0) b.ySpeed = 0;
+      }
     }
   }
 

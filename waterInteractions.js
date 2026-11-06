@@ -89,30 +89,141 @@ function makeRing() {
   return mesh;
 }
 
+// Pooled bow spray: one draw call for all droplets, no per-frame allocations.
+function createSpray(state) {
+  const count = 48;
+  const positions = new Float32Array(count * 3);
+  positions.fill(-10000);
+  const geometry = new THREE.BufferGeometry();
+  const attribute = new THREE.BufferAttribute(positions, 3);
+  attribute.setUsage(THREE.DynamicDrawUsage);
+  geometry.setAttribute("position", attribute);
+  const material = new THREE.PointsMaterial({
+    color: 0xe6ffff, size: 0.19, transparent: true, opacity: 0.82,
+    depthWrite: false, sizeAttenuation: true,
+  });
+  const mesh = new THREE.Points(geometry, material);
+  mesh.frustumCulled = false;
+  mesh.renderOrder = 5;
+  state.scene.add(mesh);
+  state.spray = { mesh, geometry, material, positions, attribute,
+    particles: Array.from({ length: count }, () => ({
+      x: 0, y: -10000, z: 0, vx: 0, vy: 0, vz: 0, life: 0,
+    })), cursor: 0 };
+}
+
+function emitBowSpray(state, body, t) {
+  if (!state.spray || t - body.lastSpray < 0.085) return;
+  const speed = Math.hypot(body.velocityX, body.velocityZ);
+  if (speed < 1.8 || body.previousImmersion < 0.03) return;
+  body.lastSpray = t;
+  const yaw = body.mesh.rotation.y;
+  const fx = Math.cos(yaw), fz = -Math.sin(yaw);
+  const sx = Math.sin(yaw), sz = Math.cos(yaw);
+  for (const side of [-1, 1]) {
+    const p = state.spray.particles[state.spray.cursor++ % state.spray.particles.length];
+    p.x = body.mesh.position.x + fx * body.length * 0.50 + sx * side * body.beam * 0.4;
+    p.z = body.mesh.position.z + fz * body.length * 0.50 + sz * side * body.beam * 0.4;
+    p.y = sampleGameplayWater(state.handle, p.x, p.z, t, state.sample).height + 0.1;
+    p.vx = fx * speed * 0.2 + sx * side * (1 + speed * 0.2);
+    p.vz = fz * speed * 0.2 + sz * side * (1 + speed * 0.2);
+    p.vy = 1.1 + speed * 0.35;
+    p.life = 0.55;
+  }
+}
+
+function updateSpray(state, dt) {
+  if (!state.spray) return;
+  const { particles, positions, attribute } = state.spray;
+  for (let i = 0; i < particles.length; i++) {
+    const p = particles[i], j = i * 3;
+    if (p.life > 0) {
+      p.life -= dt;
+      p.vy -= 9.81 * dt;
+      p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+    }
+    positions[j] = p.life > 0 ? p.x : -10000;
+    positions[j + 1] = p.life > 0 ? p.y : -10000;
+    positions[j + 2] = p.life > 0 ? p.z : -10000;
+  }
+  attribute.needsUpdate = true;
+}
+
+function createWakeTracks(state, body) {
+  if (!body.boat) return;
+  body.wakeTracks = [-1, 1].map(side => {
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(11 * 3);
+    const attribute = new THREE.BufferAttribute(positions, 3);
+    attribute.setUsage(THREE.DynamicDrawUsage);
+    geometry.setAttribute("position", attribute);
+    const material = new THREE.LineBasicMaterial({
+      color: 0xd9fdf7, transparent: true, opacity: 0.0, depthWrite: false,
+    });
+    const line = new THREE.Line(geometry, material);
+    line.visible = false;
+    line.frustumCulled = false;
+    line.renderOrder = 4;
+    state.scene.add(line);
+    return { side, line, geometry, material, positions, attribute };
+  });
+}
+
+function updateWakeTracks(state, body, t) {
+  if (!body.wakeTracks) return;
+  const speed = Math.hypot(body.velocityX, body.velocityZ);
+  const active = speed > 0.75 && body.previousImmersion > 0.03;
+  const yaw = body.mesh.rotation.y, fx = Math.cos(yaw), fz = -Math.sin(yaw);
+  const sx = Math.sin(yaw), sz = Math.cos(yaw);
+  for (const track of body.wakeTracks) {
+    track.line.visible = active;
+    if (!active) continue;
+    const totalLength = Math.min(12, 2 + speed * 1.8);
+    track.material.opacity = Math.min(0.7, 0.2 + speed * 0.10);
+    for (let i = 0; i < 11; i++) {
+      const u = i / 10;
+      const backward = body.length * 0.55 + totalLength * u;
+      const lateral = track.side * (body.beam * 0.55 + u * totalLength * 0.33);
+      const x = body.mesh.position.x - fx * backward + sx * lateral;
+      const z = body.mesh.position.z - fz * backward + sz * lateral;
+      const idx = i * 3;
+      track.positions[idx] = x;
+      track.positions[idx + 1] = sampleGameplayWater(state.handle, x, z, t, state.sample).height + 0.09;
+      track.positions[idx + 2] = z;
+    }
+    track.attribute.needsUpdate = true;
+  }
+}
+
 export function createWaterInteractions(scene, handle, groundHeight) {
   if (!handle || !Number.isFinite(handle.waterY) || !handle.gpuFFT) return null;
-  const state = { scene, handle, objects: [], rings: [], cursor: 0, previousPlayer: null, lastSplash: -100, sample: {} };
+  const state = { scene, handle, groundHeight, objects: [], rings: [], cursor: 0, previousPlayer: null, lastSplash: -100, sample: {} };
+  createSpray(state);
   // Small demonstrator vessels. The same sampler/update path can be attached
   // to GLTF boats and pickups later using registerFloatingObject().
-  const candidates = [[-17, -21], [14, -30], [30, 12], [-36, 17], [7, 42]];
+  const candidates = [[-17, -21], [14, -30], [30, 12], [-36, 17], [7, 42], [48, -31], [-43, -35]];
+  let boatCreated = false;
   for (let i = 0; i < candidates.length; i++) {
     const [x, z] = candidates[i];
     if (typeof groundHeight === "function" && groundHeight(x, z) > handle.waterY - 1.6) continue;
-    const root = i === 0 ? makeBoat() : new THREE.Mesh(
+    const isBoat = !boatCreated;
+    const root = isBoat ? makeBoat() : new THREE.Mesh(
       new THREE.IcosahedronGeometry(i % 2 ? 0.55 : 0.8, 1),
       new THREE.MeshStandardMaterial({ color: i % 2 ? 0xd2b58a : 0x8b7557, roughness: 0.9 }),
     );
     root.position.set(x, handle.waterY, z);
     scene.add(root);
     registerFloatingObject(state, root, {
-      length: i === 0 ? 3.5 : 1.15,
-      beam: i === 0 ? 1.55 : 1.15,
-      hullHeight: i === 0 ? 0.7 : 1.25,
-      mass: i === 0 ? 750 : (i % 2 ? 340 : 630),
-      hullFill: i === 0 ? 0.75 : 0.72,
+      length: isBoat ? 3.5 : 1.15,
+      beam: isBoat ? 1.55 : 1.15,
+      hullHeight: isBoat ? 0.7 : 1.25,
+      mass: isBoat ? 750 : (i % 2 ? 340 : 630),
+      hullFill: isBoat ? 0.75 : 0.72,
+      boat: isBoat,
       owned: true,
       initialize: true,
     });
+    if (isBoat) boatCreated = true;
   }
   for (let i = 0; i < MAX_RIPPLES; i++) {
     const ring = makeRing();
@@ -131,7 +242,7 @@ export function createWaterInteractions(scene, handle, groundHeight) {
 export function registerFloatingObject(state, mesh, {
   mass = 500, length = 2, beam = 1, hullHeight = 0.8,
   hullFill = 0.72, linearDamping = 1.5, angularDamping = 2.4,
-  draft, owned = false, initialize = false,
+  draft, owned = false, initialize = false, boat = false,
 } = {}) {
   if (!state || !mesh || state.objects.some(body => body.mesh === mesh)) return null;
   mass = Math.max(0.01, mass);
@@ -151,7 +262,7 @@ export function registerFloatingObject(state, mesh, {
   }
   const body = {
     mesh, mass, length, beam, hullHeight, hullFill, area, offsets,
-    owned, velocityY: 0, angularVelocityX: 0, angularVelocityZ: 0,
+    owned, boat, velocityY: 0, angularVelocityX: 0, angularVelocityZ: 0,
     linearDamping, angularDamping, previousImmersion: 0, lastImpact: -100,
     // Height of the bottom of the buoyant volume relative to the mesh pivot.
     bottomOffset: -hullHeight * 0.5,
@@ -173,6 +284,8 @@ export function registerFloatingObject(state, mesh, {
   body.maxThrust = 0; // inactive unless explicitly configured for a powered vessel
   body.waterDrag = 0.65;
   body.lastWake = -100;
+  body.lastSpray = -100;
+  createWakeTracks(state, body);
   state.objects.push(body);
   return body;
 }
@@ -188,7 +301,12 @@ export function unregisterFloatingObject(state, mesh) {
   if (!state) return false;
   const index = state.objects.findIndex(body => body.mesh === mesh);
   if (index < 0) return false;
-  state.objects.splice(index, 1);
+  const [body] = state.objects.splice(index, 1);
+  for (const track of body.wakeTracks || []) {
+    state.scene.remove(track.line);
+    track.geometry.dispose();
+    track.material.dispose();
+  }
   return true;
 }
 
@@ -206,8 +324,16 @@ function stepBuoyancy(state, body, step, t) {
   body.velocityZ += ((-Math.sin(heading) * thrust / mass) - body.velocityZ * drag) * step;
   body.velocityX = THREE.MathUtils.clamp(body.velocityX, -8, 8);
   body.velocityZ = THREE.MathUtils.clamp(body.velocityZ, -8, 8);
-  mesh.position.x += body.velocityX * step;
-  mesh.position.z += body.velocityZ * step;
+  const nextX = mesh.position.x + body.velocityX * step;
+  const nextZ = mesh.position.z + body.velocityZ * step;
+  const ground = typeof state.groundHeight === "function"
+    ? state.groundHeight(nextX, nextZ) : -Infinity;
+  if (body.boat && Number.isFinite(ground) && ground > state.handle.waterY - 0.45) {
+    // Run aground gently rather than sailing straight through the island.
+    body.velocityX *= -0.08; body.velocityZ *= -0.08;
+  } else {
+    mesh.position.x = nextX; mesh.position.z = nextZ;
+  }
   mesh.rotation.y += body.rudder * Math.min(speed, 5) * 0.22 * step;
   const yaw = mesh.rotation.y;
   const cy = Math.cos(yaw), sy = Math.sin(yaw);
@@ -285,6 +411,12 @@ export function updateWaterInteractions(state, dt, t, playerPosition, swimming =
     const sampleTime = t - dt + (i + 1) * h;
     for (const body of state.objects) stepBuoyancy(state, body, h, sampleTime);
   }
+  for (const body of state.objects) {
+    if (!body.boat) continue;
+    updateWakeTracks(state, body, t);
+    emitBowSpray(state, body, t);
+  }
+  updateSpray(state, dt);
   if (playerPosition && swimming) {
     const prev = state.previousPlayer;
     const distance = prev ? Math.hypot(playerPosition.x - prev.x, playerPosition.z - prev.z) : 0;
@@ -310,6 +442,11 @@ export function updateWaterInteractions(state, dt, t, playerPosition, swimming =
 export function disposeWaterInteractions(state) {
   if (!state) return;
   for (const body of state.objects) {
+    for (const track of body.wakeTracks || []) {
+      state.scene.remove(track.line);
+      track.geometry.dispose();
+      track.material.dispose();
+    }
     if (!body.owned) continue;
     state.scene.remove(body.mesh);
     body.mesh.traverse?.(obj => {
@@ -322,6 +459,12 @@ export function disposeWaterInteractions(state) {
     state.scene.remove(ripple.mesh);
     ripple.mesh.geometry.dispose();
     ripple.mesh.material.dispose();
+  }
+  if (state.spray) {
+    state.scene.remove(state.spray.mesh);
+    state.spray.geometry.dispose();
+    state.spray.material.dispose();
+    state.spray = null;
   }
   state.objects.length = 0;
   state.rings.length = 0;

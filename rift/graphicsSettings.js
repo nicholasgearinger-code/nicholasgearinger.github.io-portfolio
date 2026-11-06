@@ -21,11 +21,11 @@ const RIFT_IOS = typeof navigator !== "undefined" && (
 );
 // Low keeps its animated sky and FFT ocean, but renders fewer pixels.
 // Applied only at startup: changing tiers already reloads the renderer.
-const IOS_LOW_PIXEL_CAP = 0.8;
+const IOS_LOW_PIXEL_CAP = 0.65; // 34% fewer shaded pixels than the previous 0.80 cap
 // Limit Experimental fill rate on iOS Low/Medium only, keeping Current and
 // user-chosen exact-resolution overrides unchanged. Bypass for comparison
 // using ?riftDebug=fullreswater. No extra GPU passes or simulation changes.
-const IOS_EXPERIMENTAL_PIXEL_CAP = 0.68;
+const IOS_EXPERIMENTAL_PIXEL_CAP = 0.58; // ~27% fewer pixels than the previous 0.68 cap
 function experimentalMobileWaterCap() {
   if (!RIFT_IOS) return null;
   const tier = base.getGraphicsTier();
@@ -37,7 +37,7 @@ function experimentalMobileWaterCap() {
   return IOS_EXPERIMENTAL_PIXEL_CAP;
 }
 const IOS_MEDIUM_BUDGET = Object.freeze({
-  pixelRatioCap: 0.75,
+  pixelRatioCap: 0.69, // cheaper ocean and full-screen post on iOS Medium
   terrainSegments: 140,
   shadowMapSize: 384,
   grassMultiplier: 0.35,

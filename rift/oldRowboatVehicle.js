@@ -6,7 +6,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 const MODEL_URL = new URL("./models/old_rowboat.glb", import.meta.url).href;
 const G = 9.81;
 const RHO = 1025;
-const BOARD_RADIUS = 5.5;
+const BOARD_RADIUS = 7.0; // reachable at the spawn beach without swimming far
 const MAX_STEP = 1 / 60;
 let cachedModelPromise = null;
 
@@ -81,6 +81,7 @@ function buildVisual(gltf) {
     length: clamp(dims.x, 2.5, 5.2),
     beam: clamp(dims.z, 0.9, 2.6),
     hullHeight: clamp(dims.y * 0.72, 0.45, 1.1),
+    visualHeight: dims.y,
   };
 }
 
@@ -225,13 +226,96 @@ export function createOldRowboatVehicle({
     "padding:8px 12px", "border-radius:12px", "white-space:nowrap",
     "background:rgba(9,42,58,.85)", "color:#eafff6",
   ].join(";");
-  viewport.append(button, hint);
+  // Dedicated, large touch controls while rowing. The walking joystick,
+  // jump and fire HUD are hidden only during this mode, not removed.
+  const controlStyle = document.createElement("style");
+  controlStyle.textContent = `
+    .rift-rowboat-driving #rift-touch-joystick,
+    .rift-rowboat-driving #rift-touch-fire,
+    .rift-rowboat-driving #rift-touch-up,
+    .rift-rowboat-driving #rift-touch-down { opacity:0!important; pointer-events:none!important; }
+    .rift-rowboat-hud { display:none; position:absolute; left:0; right:0; bottom:12px;
+      z-index:95; pointer-events:none; align-items:end; justify-content:space-between;
+      gap:8px; padding:0 12px; font:600 12px system-ui,sans-serif; color:white; }
+    .rift-rowboat-pad { display:flex; flex-direction:column; gap:5px; min-width:0; pointer-events:none; }
+    .rift-rowboat-pad > span { text-align:center; color:#d8fff8; text-shadow:0 1px 3px #000; }
+    .rift-rowboat-keys { display:flex; gap:6px; pointer-events:none; }
+    .rift-rowboat-keys button { display:flex; align-items:center; justify-content:center;
+      touch-action:none; pointer-events:auto; border:1px solid #a7f4ef;
+      border-radius:15px; min-width:61px; height:62px; padding:0 9px;
+      background:rgba(9,48,61,.88); color:#ecffff; font:700 15px system-ui,sans-serif;
+      box-shadow:0 3px 12px #0008; user-select:none; -webkit-user-select:none; }
+    .rift-rowboat-keys button:active, .rift-rowboat-keys button[data-held="1"] {
+      background:rgba(52,157,161,.98); transform:scale(.97); }
+    .rift-rowboat-speed { align-self:end; pointer-events:none; white-space:nowrap;
+      text-align:center; margin-bottom:8px; color:#e8fffa; font-size:11px; }
+    @media (max-width:370px) {
+      .rift-rowboat-hud { padding:0 6px; gap:4px; }
+      .rift-rowboat-keys button { min-width:53px; height:58px; font-size:13px; }
+    }
+  `;
+  document.head.appendChild(controlStyle);
+  const controlsHUD = document.createElement("div");
+  controlsHUD.className = "rift-rowboat-hud";
+  controlsHUD.dataset.riftRowboatAction = "";
+  const leftPad = document.createElement("div");
+  leftPad.className = "rift-rowboat-pad";
+  const leftCaption = document.createElement("span");
+  leftCaption.textContent = "STEER";
+  const leftButtons = document.createElement("div");
+  leftButtons.className = "rift-rowboat-keys";
+  const rightPad = document.createElement("div");
+  rightPad.className = "rift-rowboat-pad";
+  const rightCaption = document.createElement("span");
+  rightCaption.textContent = "ROW";
+  const rightButtons = document.createElement("div");
+  rightButtons.className = "rift-rowboat-keys";
+  const speedDisplay = document.createElement("div");
+  speedDisplay.className = "rift-rowboat-speed";
+  speedDisplay.textContent = "0.0 m/s";
+  leftPad.append(leftCaption, leftButtons);
+  rightPad.append(rightCaption, rightButtons);
+  controlsHUD.append(leftPad, speedDisplay, rightPad);
+  const held = { left: false, right: false, forward: false, back: false };
+  const clearHeld = () => {
+    for (const key of Object.keys(held)) held[key] = false;
+    for (const element of controlsHUD.querySelectorAll("button")) element.removeAttribute("data-held");
+  };
+  function createHoldButton(group, label, key, description) {
+    const target = document.createElement("button");
+    target.type = "button";
+    target.textContent = label;
+    target.setAttribute("aria-label", description);
+    const release = event => {
+      if (event) event.preventDefault();
+      held[key] = false;
+      target.removeAttribute("data-held");
+    };
+    target.addEventListener("pointerdown", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!isActive()) return;
+      held[key] = true;
+      target.dataset.held = "1";
+      target.setPointerCapture?.(event.pointerId);
+    });
+    for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) {
+      target.addEventListener(type, release);
+    }
+    group.appendChild(target);
+  }
+  createHoldButton(leftButtons, "◀", "left", "Turn rowboat left");
+  createHoldButton(leftButtons, "▶", "right", "Turn rowboat right");
+  createHoldButton(rightButtons, "▲", "forward", "Row forward");
+  createHoldButton(rightButtons, "▼", "back", "Row backward");
+  viewport.append(button, hint, controlsHUD);
 
   let levelVersion = 0;
   let boat = null;
   let riding = false;
   let previousYaw = 0;
   const followTarget = new THREE.Vector3();
+  const seatOffset = new THREE.Vector3();
   const sampleOffsets = [-1, 0, 1];
   const sampleTimeFallback = () => performance.now() * 0.001;
 
@@ -246,9 +330,16 @@ export function createOldRowboatVehicle({
 
   function updateHUD() {
     const active = boat && isActive() && !isDroneMode();
+    controlsHUD.style.display = riding && active && isTouchDevice ? "flex" : "none";
+    document.documentElement.classList.toggle("rift-rowboat-driving", !!(riding && active && isTouchDevice));
     const canBoard = active && (riding || nearEnough());
     button.style.display = canBoard ? "block" : "none";
-    hint.style.display = riding ? "block" : "none";
+    hint.style.display = riding && !isTouchDevice ? "block" : "none";
+    if (riding && boat) {
+      const speed = Math.hypot(boat.vx, boat.vz);
+      speedDisplay.textContent = speed.toFixed(1) + " m/s";
+    }
+    button.style.bottom = riding ? (isTouchDevice ? "156px" : "28px") : (isTouchDevice ? "150px" : "30px");
     if (canBoard) {
       const label = riding ? "Exit Rowboat" : (isTouchDevice ? "Ride Rowboat" : "Ride Rowboat [E]");
       if (button.textContent !== label) button.textContent = label;
@@ -268,10 +359,14 @@ export function createOldRowboatVehicle({
     const deltaYaw = yaw - previousYaw;
     camera.rotation.y += deltaYaw;
     previousYaw = yaw;
-    // Elevated camera DIRECTLY OVER the boat, not the former aft chase view.
-    followTarget.set(p.x, p.y + 3.6, p.z);
-    camera.position.lerp(followTarget, instant ? 1 : 1 - Math.exp(-16 * dt));
-    camera.rotation.z = 0;
+    // Occupant's viewpoint from inside the hull, just above the gunwale.
+    // The seat follows heave and a fraction of pitch/roll without a floating
+    // chase view or uncomfortable full camera roll.
+    seatOffset.set(-boat.length * 0.19, Math.max(0.62, boat.visualHeight * 0.66), 0);
+    seatOffset.applyEuler(boat.root.rotation);
+    followTarget.copy(p).add(seatOffset);
+    camera.position.lerp(followTarget, instant ? 1 : 1 - Math.exp(-12 * dt));
+    camera.rotation.z = clamp(boat.root.rotation.x * 0.12, -0.045, 0.045);
   }
 
   function board() {
@@ -279,12 +374,13 @@ export function createOldRowboatVehicle({
     riding = true;
     previousYaw = boat.root.rotation.y;
     camera.rotation.order = "YXZ";
-    camera.rotation.set(-1.16, previousYaw - Math.PI / 2, 0);
+    camera.rotation.set(-0.13, previousYaw - Math.PI / 2, 0);
     followCamera(1, true);
     playerPhysics.verticalVelocity = 0;
     playerPhysics.grounded = false;
+    clearHeld();
     window.dispatchEvent(new Event("rift-camera-reset-look"));
-    onMessage?.("Rowboat boarded — use movement controls to row and steer.");
+    onMessage?.("In rowboat — face forward and row with the controls.");
     updateHUD();
     return true;
   }
@@ -294,6 +390,8 @@ export function createOldRowboatVehicle({
     riding = false;
     boat.throttle = 0;
     boat.steering = 0;
+    boat.handle.__riftRowboatWake = null;
+    clearHeld();
     const p = boat.root.position, yaw = boat.root.rotation.y;
     const side = boat.beam / 2 + 1.7;
     const points = [1, -1].map(s => {
@@ -323,9 +421,13 @@ export function createOldRowboatVehicle({
   function stopLevel() {
     levelVersion++;
     riding = false;
+    clearHeld();
+    document.documentElement.classList.remove("rift-rowboat-driving");
+    controlsHUD.style.display = "none";
     button.style.display = "none";
     hint.style.display = "none";
     if (boat) {
+      boat.handle.__riftRowboatWake = null;
       scene.remove(boat.root);
       clearWake(scene, boat.wake);
       // GLTFLoader's cached geometry/materials remain shared and reusable.

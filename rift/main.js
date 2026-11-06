@@ -175,6 +175,35 @@ oceanClipButton.addEventListener("click", async () => {
 });
 if (viewport) viewport.appendChild(oceanClipButton);
 
+// This HUD switch must be as visible and reliable as WATER / BREAKING WAVES.
+// The game-specific HUD previously placed it inside #rift-hud (z-index:10,
+// pointer-events:none), where it could be obscured by other game overlays.
+// Promote the SAME button into the launcher-level viewport stacking context,
+// independent of whether the hosting page's HTML/CSS is up to date. The real
+// game runtime finds this ID and attaches its free-flight toggle handler.
+// While no level is active it stays visible but disabled, never hidden.
+const droneCameraButton = document.getElementById("rift-drone-btn") ||
+  document.createElement("button");
+droneCameraButton.type = "button";
+droneCameraButton.id = "rift-drone-btn";
+droneCameraButton.className = "rift-mono";
+droneCameraButton.textContent = "✈ DRONE CAMERA";
+droneCameraButton.title = "Free-flight camera · G on desktop";
+droneCameraButton.setAttribute("aria-label", "Switch to free-flight drone camera");
+droneCameraButton.setAttribute("aria-pressed", "false");
+droneCameraButton.hidden = false;
+droneCameraButton.disabled = true;
+droneCameraButton.style.cssText =
+  "position:absolute;right:16px;top:294px;bottom:auto;z-index:100000;" +
+  "display:block;min-width:164px;min-height:51px;padding:12px 14px;" +
+  "border:2px solid #7bfff1;border-radius:14px;" +
+  "background:rgba(3,29,42,.95);color:#eaffff;" +
+  "font:700 13px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;" +
+  "letter-spacing:.08em;text-shadow:0 0 7px #42d9ce;" +
+  "box-shadow:0 3px 20px rgba(0,0,0,.55),0 0 14px rgba(77,255,232,.30);" +
+  "cursor:pointer;touch-action:manipulation;pointer-events:auto;" +
+  "opacity:1;";
+if (viewport) viewport.appendChild(droneCameraButton);
 
 window.__riftLazyLauncherReady = true;
 window.__riftLoadAttempted = false;

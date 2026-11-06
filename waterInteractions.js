@@ -225,6 +225,17 @@ export function createWaterInteractions(scene, handle, groundHeight) {
     });
     if (isBoat) boatCreated = true;
   }
+  // Keep an interactable vessel available even if the preset positions
+  // happen to land on shallow terrain in a different world generation.
+  if (!boatCreated) {
+    const root = makeBoat();
+    root.position.set(-17, handle.waterY, -21);
+    scene.add(root);
+    registerFloatingObject(state, root, {
+      boat: true, mass: 750, length: 3.5, beam: 1.55,
+      hullHeight: 0.7, hullFill: 0.75, owned: true, initialize: true,
+    });
+  }
   for (let i = 0; i < MAX_RIPPLES; i++) {
     const ring = makeRing();
     scene.add(ring);
@@ -239,6 +250,48 @@ export function createWaterInteractions(scene, handle, groundHeight) {
  * The body uses a rectangular distributed-volume hull approximation.
  * The visible mesh is never modified or owned unless owned=true.
  */
+/**
+ * Move the demo vessel to accessible water near the player spawn.
+ * Invoked only when the level is built. Never respawns/moves the boat
+ * after the player has started exploring.
+ */
+export function positionDemoBoatNearSpawn(state, spawnX, spawnZ) {
+  if (!state || !Number.isFinite(spawnX) || !Number.isFinite(spawnZ)) return false;
+  const body = state.objects.find(item => item.boat);
+  if (!body || typeof state.groundHeight !== "function") return false;
+  const waterY = state.handle.waterY;
+  let best = null;
+  const radii = [8, 12, 18, 24, 32, 42, 55, 70];
+  for (const radius of radii) {
+    let nearestOnThisRing = null;
+    for (let i = 0; i < 20; i++) {
+      const angle = i * Math.PI * 2 / 20;
+      const x = spawnX + Math.cos(angle) * radius;
+      const z = spawnZ + Math.sin(angle) * radius;
+      const ground = state.groundHeight(x, z);
+      const depth = waterY - ground;
+      if (!Number.isFinite(depth) || depth < 1.15 || depth > 9) continue;
+      // Prefer a gently shelving approach while keeping room beneath the hull.
+      const score = Math.abs(depth - 2.8);
+      if (!nearestOnThisRing || score < nearestOnThisRing.score) {
+        nearestOnThisRing = { x, z, score };
+      }
+    }
+    if (nearestOnThisRing) {
+      best = nearestOnThisRing;
+      break;
+    }
+  }
+  if (!best) return false;
+  const { mesh } = body;
+  mesh.position.set(best.x, waterY - body.bottomOffset -
+    Math.min(body.hullHeight, body.mass / (WATER_DENSITY * body.area)), best.z);
+  mesh.rotation.set(0, 0, 0);
+  body.velocityX = body.velocityY = body.velocityZ = 0;
+  body.angularVelocityX = body.angularVelocityZ = 0;
+  return true;
+}
+
 export function registerFloatingObject(state, mesh, {
   mass = 500, length = 2, beam = 1, hullHeight = 0.8,
   hullFill = 0.72, linearDamping = 1.5, angularDamping = 2.4,

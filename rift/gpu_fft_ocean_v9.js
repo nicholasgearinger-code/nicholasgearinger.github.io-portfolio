@@ -96,6 +96,14 @@ const REFLECTIVE_CRESTS = typeof location === "undefined" ||
 // ?riftSurf2=off restores previous offshore/shoreline surface shading.
 const SURF_REALISM_V2 = typeof location === "undefined" ||
   new URLSearchParams(location.search).get("riftSurf2") !== "off";
+// Fix drone-view rows of white oval reflections: the old MOBILE facet mask
+// multiplied two spatially periodic sinusoids. Their intersections formed
+// a mathematically regular lattice, emphasized by the 0.052 glossy BRDF.
+// This replaces that synthetic sparkle grid with wave-normal highlights,
+// gently dithered facet response, and distance-dependent roughness/LOD.
+// No new texture fetches/compute/geometry. A/B: ?riftGridFix=off.
+const GRID_FREE_WATER_HIGHLIGHTS = typeof location === "undefined" ||
+  new URLSearchParams(location.search).get("riftGridFix") !== "off";
 const AIR_WATER_R0 = ((WATER_IOR - 1) / (WATER_IOR + 1)) ** 2;
 
 if (typeof globalThis !== "undefined") {
@@ -235,8 +243,12 @@ function installWaterProOptics(handle) {
   const horizontalRange = abs(positionWorld.x.sub(cameraPosition.x))
     .add(abs(positionWorld.z.sub(cameraPosition.z)));
   const detailVisibility = PHASE2_WAVE_MOTION
-    ? mix(float(0.32), float(1),
-      float(1).sub(smoothstep(float(24), float(145), horizontalRange)))
+    ? mix(float(GRID_FREE_WATER_HIGHLIGHTS && TOUCH_DEVICE ? 0.045 : 0.32),
+        float(1),
+        float(1).sub(smoothstep(
+          float(GRID_FREE_WATER_HIGHLIGHTS && TOUCH_DEVICE ? 15 : 24),
+          float(GRID_FREE_WATER_HIGHLIGHTS && TOUCH_DEVICE ? 95 : 145),
+          horizontalRange)))
     : float(1);
   // Underwater keeps the real displaced surface primary; a fraction of the
   // wavelet slope now affects surface refraction and reflected sky on both
@@ -329,32 +341,47 @@ function installWaterProOptics(handle) {
   const refractedShallow = mix(color(0x399caa), color(0xc4ebdb),
     smoothstep(float(-0.40), float(0.72), depthMarble));
 
-  // Thousands of tiny sun facets rather than one painted streak. The facet mask
-  // breaks the highlight into discrete sparkling patches while two BRDF lobes
-  // keep a softer solar path underneath them.
-  const facetNoise = TOUCH_DEVICE
-    ? abs(sin(phaseA.mul(1.37)).mul(sin(phaseB.mul(1.21))))
-    : abs(
-      sin(phaseA.mul(1.37).add(phaseC.mul(0.31)))
-        .mul(sin(phaseB.mul(1.21).sub(phaseC.mul(0.23)))),
-    );
-  const facetMask = smoothstep(float(0.35), float(0.92), facetNoise);
+  // The old mobile formula abs(sin(A) * sin(B)) created a PERFECT
+  // rectangular lattice of bright ellipses from the drone: it is a pattern
+  // generator, not a statistical model of water glints. Vary one single
+  // wave phase with an existing second-order swell. Do not multiply two
+  // periodic signals into discs. Keep the prior mode for A/B comparisons.
+  const facetNoise = GRID_FREE_WATER_HIGHLIGHTS && TOUCH_DEVICE
+    ? abs(sin(phaseA.mul(0.83).add(phaseB.mul(0.37))
+        .add(mediumB.mul(1.19))))
+    : TOUCH_DEVICE
+      ? abs(sin(phaseA.mul(1.37)).mul(sin(phaseB.mul(1.21))))
+      : abs(
+          sin(phaseA.mul(1.37).add(phaseC.mul(0.31)))
+            .mul(sin(phaseB.mul(1.21).sub(phaseC.mul(0.23))))
+        );
+  const facetMask = smoothstep(
+    float(GRID_FREE_WATER_HIGHLIGHTS && TOUCH_DEVICE ? 0.57 : 0.35),
+    float(0.92), facetNoise);
+  // The clean moving FFT normal and actual sun-facing half-vector own the
+  // highlight. Fade the synthetic pinpricks with existing distance LOD.
+  const sparkleDistanceFade = GRID_FREE_WATER_HIGHLIGHTS && TOUCH_DEVICE
+    ? detailVisibility.mul(0.62)
+    : float(1);
   const tightGlitter = pow(ndh, float(190))
     .mul(float(0.28).add(microEnergy.mul(1.45)))
-    .mul(float(0.42).add(facetMask.mul(0.92)));
+    .mul(float(0.42).add(facetMask.mul(
+      GRID_FREE_WATER_HIGHLIGHTS && TOUCH_DEVICE ? 0.16 : 0.92)));
   const broadGlitter = pow(ndh, float(34))
     .mul(float(0.085).add(microEnergy.mul(0.055)));
-  const glitter = tightGlitter.add(broadGlitter)
+  const glitter = tightGlitter.mul(sparkleDistanceFade)
+    .add(broadGlitter)
     .mul(day)
     .mul(float(1).sub(storm.mul(0.52)))
     .mul(float(1).sub(underwater));
 
-  // Sparse, sharp sunlight pinpricks. Require both sun-facing optical normal
-  // and fragmented ripple energy so this cannot become a long white stripe.
+  // No separate dot field at drone heights. A restrained sparkle remains
+  // near the camera, where its spacing cannot form a broad visible grid.
   const sparkleFlecks = smoothstep(float(0.73), float(0.95),
       facetMask.mul(0.60).add(microEnergy.mul(0.23))
         .add(ndh.mul(0.23)))
     .mul(pow(ndh, float(42)))
+    .mul(sparkleDistanceFade)
     .mul(day).mul(float(1).sub(storm.mul(0.48)))
     .mul(float(1).sub(underwater));
 
@@ -737,10 +764,19 @@ function installWaterProOptics(handle) {
   const glossyRoughness = REFLECTIVE_CRESTS
     ? mix(microRoughness, float(0.052), glossyFace.mul(0.75))
     : microRoughness;
+  // The PBR BRDF itself can alias on a nearly-perfect mirror populated by
+  // periodic micro-normals at aerial distances. Increase the footprint of
+  // distant specular reflections (microfacet anti-aliasing approximation)
+  // while preserving near-surface sharp glassy wave faces.
+  const glintFootprint = GRID_FREE_WATER_HIGHLIGHTS && TOUCH_DEVICE
+    ? smoothstep(float(13), float(95), horizontalRange)
+    : float(0);
+  const antiAliasedRoughness = mix(glossyRoughness,
+    float(TOUCH_DEVICE ? 0.17 : 0.12), glintFootprint);
   material.roughnessNode = REFLECTIVE_CRESTS
-    ? mix(glossyRoughness, float(0.89),
+    ? mix(antiAliasedRoughness, float(0.89),
         combinedFoam.mul(0.97))
-    : mix(microRoughness, float(0.62), combinedFoam.mul(0.90));
+    : mix(antiAliasedRoughness, float(0.62), combinedFoam.mul(0.90));
   // A restrained daylight volume-fill prevents the body from becoming a
   // black mirror on iOS when no scene refraction texture is supplied. It
   // follows the same depth palette and does not brighten night/underwater.
@@ -923,6 +959,7 @@ function installWaterProOptics(handle) {
       strongerWaveDistortion: WAVE_DISTORTION_2,
       reflectiveBreakingCrests: REFLECTIVE_CRESTS,
       shallowSurfRealismV2: SURF_REALISM_V2,
+      gridFreeWaterHighlights: GRID_FREE_WATER_HIGHLIGHTS,
       disabledByQuery: typeof location !== "undefined" &&
         new URLSearchParams(location.search).get("riftRefraction") === "off",
     };

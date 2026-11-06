@@ -216,6 +216,31 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   const N = FFT_N;
   const count = N * N;
   const spectrumData = buildSpectrumData(N, size, 1337);
+  // Retain the strongest low-frequency components as a tiny CPU-side,
+  // deterministic approximation of THIS exact seeded spectral field.
+  // No GPU readback, and no separately invented wave directions/phases.
+  const gameplayModes = [];
+  for (let iz = 0; iz < N; iz++) {
+    const nz = iz <= N / 2 ? iz : iz - N;
+    for (let ix = 0; ix < N; ix++) {
+      const nx = ix <= N / 2 ? ix : ix - N;
+      if (!nx && !nz) continue;
+      // Frequencies too short for hull motions are intentionally excluded.
+      if (Math.hypot(nx, nz) > 18) continue;
+      const i = iz * N + ix;
+      const re = spectrumData.h0[i * 4], im = spectrumData.h0[i * 4 + 1];
+      const amplitude = Math.hypot(re, im);
+      if (amplitude < 1e-7) continue;
+      gameplayModes.push({
+        kx: nx * TAU / size, kz: nz * TAU / size,
+        re, im, omega: spectrumData.meta[i * 4 + 3], amplitude,
+        mirror: spectrumData.mirror[i] | 0,
+      });
+    }
+  }
+  gameplayModes.sort((a, b) => b.amplitude - a.amplitude);
+  gameplayModes.length = Math.min(48, gameplayModes.length);
+
 
   const h0Buffer = instancedArray(spectrumData.h0, "vec4");
   const metaBuffer = instancedArray(spectrumData.meta, "vec4");
@@ -358,6 +383,8 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
     gpuFFT: true,
     mesh,
     waterY: y,
+    gameplayModes,
+    spectrumSize: size,
     computeFrame,
     waveScale,
     stormAmount,

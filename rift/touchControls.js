@@ -96,6 +96,10 @@ function createTouchControls({ camera, keys, onFire, onJump, viewport, isActive 
     // game's own viewport, so scrolling the rest of the page is untouched.
     if (!isActive()) return;
     for (const touch of e.changedTouches) {
+      // A touch on the drone toggle or other HUD button is a button press,
+      // not a camera-look gesture. The dedicated ▲/▼ hold handlers below
+      // continue receiving their own touchstart events normally.
+      if (touch.target?.closest?.("button, a, input, select")) continue;
       const joyRect = expandRect(joystickBase.getBoundingClientRect(), TOUCH_CAPTURE_MARGIN);
       const fireRect = expandRect(fireButton.getBoundingClientRect(), TOUCH_CAPTURE_MARGIN);
       const viewportRect = viewport.getBoundingClientRect();
@@ -148,6 +152,16 @@ function createTouchControls({ camera, keys, onFire, onJump, viewport, isActive 
   document.addEventListener("touchmove", handleTouchMove, { passive: false });
   document.addEventListener("touchend", handleTouchEnd, { passive: true });
   document.addEventListener("touchcancel", handleTouchEnd, { passive: true });
+
+  // Player↔drone toggles reposition and repitch the SAME camera. Re-sync
+  // our private pitch accumulator or the next touch drag would snap back
+  // to the previous mode's last angle.
+  window.addEventListener("rift-camera-reset-look", () => {
+    pitch = camera.rotation.x;
+    lookTouchId = null;
+    joystickTouchId = null;
+    resetJoystick();
+  });
 
   // Jump is a discrete tap, not a hold — matches how Space is edge-triggered
   // on desktop (see main.js), rather than the old hold-to-ascend flight

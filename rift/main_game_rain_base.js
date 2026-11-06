@@ -3036,7 +3036,40 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
     // have silently dropped the sand detail texture entirely — this
     // explicitly reproduces the multiply instead of assuming it still
     // happens automatically.
-    simpleTerrainMat.colorNode = vertexColor().mul(texture(seafloorColorTex, uv()));
+    // Surf v2 uses the ACTIVE seafloor material for wet sand. An older
+    // onBeforeCompile wet-band block below is no longer the material drawn
+    // on mobile/WebGPU, so changing it had no visible effect. A single
+    // low-frequency moving shore pulse breaks up the wet line along the
+    // beach without another render pass, wetness texture, or geometry.
+    const shoreWetEnabled = (() => {
+      try { return new URLSearchParams(location.search).get("riftSurf2") !== "off"; }
+      catch (_) { return true; }
+    })();
+    const shoreWetTime = uniform(0.0);
+    const baseSand = vertexColor().mul(texture(seafloorColorTex, uv()));
+    if (shoreWetEnabled) {
+      const aboveSea = positionWorld.y.sub(float(LIQUID_LEVEL.crystal));
+      const drySide = smoothstep(float(-0.06), float(0.10), aboveSea);
+      // Keep rocky/vertical faces clean; sand just above sea level darkens.
+      const sandFacing = smoothstep(float(0.48), float(0.82), normalWorld.y);
+      const runupPulse = sin(positionWorld.x.mul(0.10)
+        .add(positionWorld.z.mul(0.067))
+        .sub(shoreWetTime.mul(1.24)));
+      const activeReach = smoothstep(float(-0.36), float(0.68), runupPulse);
+      const wetLimit = float(0.18).add(activeReach.mul(0.47));
+      const temporaryWet = float(1).sub(smoothstep(
+        wetLimit.sub(0.12), wetLimit.add(0.16), aboveSea));
+      const lastingEdge = float(1).sub(smoothstep(
+        float(0.11), float(0.32), aboveSea));
+      const wetness = clamp(tslMax(temporaryWet.mul(0.67),
+          lastingEdge.mul(0.82)).mul(drySide).mul(sandFacing), 0, 1);
+      // 28–34% less brightness at the wet edge; retains the sand texture.
+      simpleTerrainMat.colorNode = baseSand.mul(
+        float(1).sub(wetness.mul(0.39)));
+      simpleTerrainMat.userData.shoreWetTimeUniform = shoreWetTime;
+    } else {
+      simpleTerrainMat.colorNode = baseSand;
+    }
     // Real seafloor caustics — per explicit request, replacing the OLD
     // onBeforeCompile version (raw GLSL, WebGPU-incompatible, already
     // disabled — see this block's own surrounding comments for the full
@@ -5791,6 +5824,9 @@ function animate() {
   // old dead code above, a real player-facing toggle distinct from the
   // broader oceanEffectsEnabled) — same dayAmount*(1-rainIntensity)
   // "clarity" concept as the water surface's own caustics.
+  if (terrainMesh?.material?.userData?.shoreWetTimeUniform) {
+    terrainMesh.material.userData.shoreWetTimeUniform.value = elapsedTime;
+  }
   if (terrainMesh && terrainMesh.material.userData.causticTimeUniform) {
     terrainMesh.material.userData.causticTimeUniform.value = elapsedTime;
     const terrainCausticIntensity = getGraphicsSettings().causticsEnabled !== false

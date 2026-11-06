@@ -3574,6 +3574,28 @@
     background: rgba(255,107,74,.25); border: 2px solid rgba(255,107,74,.7); pointer-events: auto; touch-action: none;
   }
   #rift-touch-fire:active { background: rgba(255,107,74,.5); }
+  /* Free-fly drone mode shares the existing camera and touch controls.
+     Position the switch ABOVE the mobile up/down/fire cluster rather than
+     competing with the menu, graphics, or Ocean Tuning controls. */
+  #rift-drone-btn {
+    position: absolute; right: 20px; bottom: 136px; z-index: 23;
+    background: rgba(7,30,42,.85); color: #9cf8ed;
+    border: 1px solid rgba(79,209,197,.75); border-radius: 100px;
+    padding: 9px 13px; min-height: 38px;
+    font: 600 11px/1.2 'IBM Plex Mono', monospace; letter-spacing: .09em;
+    cursor: pointer; touch-action: manipulation; pointer-events: auto;
+    box-shadow: 0 0 14px rgba(10,40,55,.32);
+  }
+  #rift-drone-btn[hidden] { display: none; }
+  #rift-drone-btn[aria-pressed="true"] {
+    background: rgba(79,209,197,.22); color: #e8ffff;
+    border-color: #9cf8ed;
+  }
+  #rift-viewport.rift-fullscreen #rift-drone-btn {
+    right: calc(20px + env(safe-area-inset-right));
+    bottom: calc(136px + env(safe-area-inset-bottom));
+  }
+  #rift-viewport.rift-drone-active #rift-touch-fire { display: none; }
 
   #rift-menu-btn {
     position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
@@ -4970,10 +4992,12 @@
             <div id="rift-lore-ticker" class="rift-mono"></div>
             <div id="rift-discovery-log" class="rift-mono"></div>
             <div id="rift-hud-bottomleft" class="rift-mono">
-              <span id="rift-hint-desktop">WASD to move · Space to jump/swim up · Shift to swim down · Click to shoot · M to mute · Esc for menu</span>
+              <span id="rift-hint-desktop">WASD to move · Space to jump/swim up · Shift to swim down · Click to shoot · G for drone · M to mute · Esc for menu</span>
               <span id="rift-hint-touch">Left stick to move · ▲/▼ to swim · Drag to look · Fire to shoot</span>
             </div>
             <button type="button" id="rift-menu-btn" class="rift-mono">MENU</button>
+            <button type="button" id="rift-drone-btn" class="rift-mono"
+              aria-label="Switch to free-flight drone camera" aria-pressed="false" hidden>◈ DRONE VIEW</button>
           </div>
 
           <div id="rift-touch-controls">

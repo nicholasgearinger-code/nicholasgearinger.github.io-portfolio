@@ -22,15 +22,35 @@ export function sampleGameplayWater(handle, x, z, t, out = {}) {
     out.nx = 0; out.nz = 0;
     return out;
   }
-  // Low-frequency, multi-directional swells approximate the dominant
-  // spectral bands. The precise FFT displacement stays on the GPU.
   let h = base, dx = 0, dz = 0;
-  const gain = 1 + storm * 0.7;
-  for (const [kx, kz, amp, rate] of SWELLS) {
-    const phase = x * kx + z * kz - t * rate;
-    h += amp * gain * Math.sin(phase);
-    dx += amp * gain * kx * Math.cos(phase);
-    dz += amp * gain * kz * Math.cos(phase);
+  // Low-frequency reconstruction of the ocean's actual seeded spectrum.
+  // The GPU resolves all 16,384 coefficients; gameplay only resolves its
+  // strongest 48 low modes. The full visible FFT still differs in detail.
+  const modes = handle.gameplayModes;
+  if (modes?.length) {
+    const size = handle.spectrumSize || 2000;
+    const gain = handle.waveScale?.value ?? (1 + storm * 0.7);
+    for (const m of modes) {
+      const phase = m.kx * (x + size * 0.5) + m.kz * (size * 0.5 - z);
+      const w = m.omega * t, cw = Math.cos(w), sw = Math.sin(w);
+      const real = (m.re + m.mirrorRe) * cw + (m.mirrorIm - m.im) * sw;
+      const imag = (m.re - m.mirrorRe) * sw + (m.im + m.mirrorIm) * cw;
+      const cp = Math.cos(phase), sp = Math.sin(phase);
+      const v = (real * cp - imag * sp) * gain / (128 * 128);
+      h += v;
+      const slope = (-real * sp - imag * cp) * gain / (128 * 128);
+      dx += slope * m.kx;
+      dz -= slope * m.kz;
+    }
+  } else {
+    // Fallback for water handles built before spectral gameplay modes.
+    const gain = 1 + storm * 0.7;
+    for (const [kx, kz, amp, rate] of SWELLS) {
+      const phase = x * kx + z * kz - t * rate;
+      h += amp * gain * Math.sin(phase);
+      dx += amp * gain * kx * Math.cos(phase);
+      dz += amp * gain * kz * Math.cos(phase);
+    }
   }
   out.height = h;
   out.nx = -dx;
@@ -146,8 +166,22 @@ export function registerFloatingObject(state, mesh, {
   if (initialize) {
     mesh.position.y = state.handle.waterY - body.bottomOffset - equilibriumDraft;
   }
+  body.velocityX = 0;
+  body.velocityZ = 0;
+  body.throttle = 0;
+  body.rudder = 0;
+  body.maxThrust = 0; // inactive unless explicitly configured for a powered vessel
+  body.waterDrag = 0.65;
+  body.lastWake = -100;
   state.objects.push(body);
   return body;
+}
+/** Enable optional boat navigation. Throttle and rudder are normalized [-1,1]. */
+export function setBoatControls(body, { throttle, rudder, maxThrust } = {}) {
+  if (!body) return;
+  if (Number.isFinite(throttle)) body.throttle = THREE.MathUtils.clamp(throttle, -1, 1);
+  if (Number.isFinite(rudder)) body.rudder = THREE.MathUtils.clamp(rudder, -1, 1);
+  if (Number.isFinite(maxThrust)) body.maxThrust = Math.max(0, maxThrust);
 }
 
 export function unregisterFloatingObject(state, mesh) {
@@ -162,6 +196,19 @@ export function unregisterFloatingObject(state, mesh) {
 // pitch/roll torques. No JS allocation per cell, no GPU readback, no physics lib.
 function stepBuoyancy(state, body, step, t) {
   const { mesh, offsets, hullHeight, mass, area } = body;
+  // Horizontal water drag and opt-in propulsion; boats with no controls
+  // settle naturally instead of drifting away. Heading uses local +X.
+  const thrust = body.throttle * body.maxThrust;
+  const speed = Math.hypot(body.velocityX, body.velocityZ);
+  const drag = body.waterDrag * speed;
+  const heading = mesh.rotation.y;
+  body.velocityX += ((Math.cos(heading) * thrust / mass) - body.velocityX * drag) * step;
+  body.velocityZ += ((-Math.sin(heading) * thrust / mass) - body.velocityZ * drag) * step;
+  body.velocityX = THREE.MathUtils.clamp(body.velocityX, -8, 8);
+  body.velocityZ = THREE.MathUtils.clamp(body.velocityZ, -8, 8);
+  mesh.position.x += body.velocityX * step;
+  mesh.position.z += body.velocityZ * step;
+  mesh.rotation.y += body.rudder * Math.min(speed, 5) * 0.22 * step;
   const yaw = mesh.rotation.y;
   const cy = Math.cos(yaw), sy = Math.sin(yaw);
   const cellArea = area / offsets.length;
@@ -208,6 +255,12 @@ function stepBuoyancy(state, body, step, t) {
       body.velocityY < -1.1 && t - body.lastImpact > 0.6) {
     emitWaterSplash(state, mesh.position.x, mesh.position.z, t, Math.min(2, 0.7 + Math.abs(body.velocityY) * 0.2));
     body.lastImpact = t;
+  }
+  if (immersion > 0.05 && Math.hypot(body.velocityX, body.velocityZ) > 0.9 && t - body.lastWake > 0.33) {
+    const aft = body.length * 0.55;
+    emitWaterSplash(state, mesh.position.x - Math.cos(mesh.rotation.y) * aft,
+      mesh.position.z + Math.sin(mesh.rotation.y) * aft, t, 0.45);
+    body.lastWake = t;
   }
   body.previousImmersion = immersion;
 }

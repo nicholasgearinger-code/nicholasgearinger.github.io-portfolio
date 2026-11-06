@@ -284,6 +284,12 @@ const realisticCloudDomeHandle = createRealisticCloudDome(scene);
 
 const camera = new THREE.PerspectiveCamera(70, viewport.clientWidth / viewport.clientHeight, 0.1, 2000);
 camera.rotation.order = "YXZ";
+// One camera for the entire r185 rendering pipeline. Drone mode temporarily
+// moves it through the world; the player's exact position/rotation/physics
+// are saved and restored rather than creating a second render pipeline.
+const droneButton = document.getElementById("rift-drone-btn");
+let droneModeActive = false;
+let savedDronePlayerState = null;
 
 // -----------------------------------------------------------------------------
 // Real GPU-compute rain particles — per explicit "a lot of rain particles...
@@ -1948,9 +1954,12 @@ const dayNightCycle = createDayNightCycle(scene, sun, ambientLight, starfieldPoi
 const controls = new PointerLockControls(camera, document.body);
 
 function showLevelSelect() {
+  if (droneModeActive) leaveDroneMode();
+  if (droneButton) droneButton.hidden = true;
   startOverlay.style.display = "flex";
   levelSelectEl.hidden = false;
   touchGameActive = false;
+  desktopGameActive = false;
 }
 controls.addEventListener("unlock", showLevelSelect);
 
@@ -1966,8 +1975,14 @@ let jumpQueued = false;
 const MOVE_KEYS = new Set(["KeyW", "KeyS", "KeyA", "KeyD", "Space", "ShiftLeft", "ShiftRight"]);
 
 window.addEventListener("keydown", (e) => {
+  if (e.code === "KeyG" && !e.repeat && isGameActive() &&
+      currentLevelIdx >= 0 && !e.target?.closest?.("input, textarea, select")) {
+    e.preventDefault();
+    toggleDroneMode();
+    return;
+  }
   if (isGameActive() && MOVE_KEYS.has(e.code)) e.preventDefault();
-  if (e.code === "Space" && !e.repeat) jumpQueued = true;
+  if (e.code === "Space" && !e.repeat && !droneModeActive) jumpQueued = true;
   setKey(e.code, true);
 });
 window.addEventListener("keyup", (e) => setKey(e.code, false));
@@ -2150,6 +2165,110 @@ let loreMarkers = []; // {id, x, z, y, shown}
 let currentLevelIdx = -1;
 let spawnPosition = { x: 0, y: 5, z: 0 };
 const playerPhysics = createPlayerPhysicsState();
+
+// Free-flight camera mode: same live camera and scene, but no player physics.
+// Existing joystick/WASD look controls automatically steer its yaw; ▲/▼
+// and Space/Shift fly vertically. No new scene pass or world duplication.
+const droneTouchHint = document.getElementById("rift-hint-touch");
+const droneDesktopHint = document.getElementById("rift-hint-desktop");
+const defaultTouchHint = droneTouchHint?.textContent ?? "";
+const defaultDesktopHint = droneDesktopHint?.textContent ?? "";
+function resetDroneInputs() {
+  keys.forward = keys.back = keys.left = keys.right = false;
+  keys.up = keys.down = false;
+  jumpQueued = false;
+  velocity.set(0, 0, 0);
+  playerMovingThisFrame = false;
+  setWalkSoundsActive(false);
+  // touchControls.js keeps an internal pitch value. Resync when we change
+  // the camera's Euler so the next finger drag does not snap to old pitch.
+  window.dispatchEvent(new Event("rift-camera-reset-look"));
+}
+function refreshDroneHUD() {
+  if (droneButton) {
+    droneButton.hidden = currentLevelIdx < 0 || !isGameActive();
+    droneButton.setAttribute("aria-pressed", String(droneModeActive));
+    droneButton.setAttribute("aria-label", droneModeActive
+      ? "Return to player view" : "Switch to free-flight drone camera");
+    droneButton.textContent = droneModeActive ? "↩ PLAYER VIEW" : "◈ DRONE VIEW";
+  }
+  viewport.classList.toggle("rift-drone-active", droneModeActive);
+  if (droneTouchHint) droneTouchHint.textContent = droneModeActive
+    ? "DRONE · Stick to fly · ▲ rise · ▼ descend · Drag to look"
+    : defaultTouchHint;
+  if (droneDesktopHint) droneDesktopHint.textContent = droneModeActive
+    ? "DRONE · WASD fly · Space rise · Shift descend · Mouse look · G return"
+    : defaultDesktopHint;
+}
+function leaveDroneMode() {
+  if (!droneModeActive) return;
+  droneModeActive = false;
+  if (savedDronePlayerState) {
+    camera.position.copy(savedDronePlayerState.position);
+    camera.rotation.copy(savedDronePlayerState.rotation);
+    playerPhysics.verticalVelocity = savedDronePlayerState.verticalVelocity;
+    playerPhysics.grounded = savedDronePlayerState.grounded;
+    playerPhysics.wasSwimming = savedDronePlayerState.wasSwimming;
+  }
+  savedDronePlayerState = null;
+  walkBobStrength = 0;
+  camera.rotation.z = 0;
+  resetDroneInputs();
+  refreshDroneHUD();
+}
+function toggleDroneMode() {
+  if (!isGameActive() || currentLevelIdx < 0) return;
+  if (droneModeActive) { leaveDroneMode(); return; }
+  savedDronePlayerState = {
+    position: camera.position.clone(),
+    rotation: camera.rotation.clone(),
+    verticalVelocity: playerPhysics.verticalVelocity,
+    grounded: playerPhysics.grounded,
+    wasSwimming: playerPhysics.wasSwimming,
+  };
+  droneModeActive = true;
+  // Start above the player's position, angled down for an aerial overview.
+  // The same player remains stationary until they return to first-person.
+  const level = LEVELS[currentLevelIdx];
+  const waterY = level.biome === "crystal" ? LIQUID_LEVEL.crystal : -Infinity;
+  camera.position.y = Math.max(camera.position.y + 16, waterY + 13);
+  camera.rotation.x = -0.58;
+  camera.rotation.z = 0;
+  walkBobStrength = 0;
+  resetDroneInputs();
+  refreshDroneHUD();
+}
+function updateDroneFlight(dt) {
+  if (!droneModeActive) return;
+  const forward = Number(keys.forward) - Number(keys.back);
+  const right = Number(keys.right) - Number(keys.left);
+  const rise = Number(keys.up) - Number(keys.down);
+  const length = Math.hypot(forward, right, rise);
+  if (length > 0) {
+    const stride = Math.min(dt, 0.1) * 24 / length;
+    controls.moveForward(forward * stride);
+    controls.moveRight(right * stride);
+    camera.position.y += rise * stride * 0.80;
+  }
+  // Avoid empty-world boundaries and terrain collisions while flying.
+  const radius = Math.hypot(camera.position.x, camera.position.z);
+  if (radius > WORLD_BOUND_RADIUS) {
+    const scale = WORLD_BOUND_RADIUS / radius;
+    camera.position.x *= scale;
+    camera.position.z *= scale;
+  }
+  const level = LEVELS[currentLevelIdx];
+  const ground = terrainHeightAt(level,
+    camera.position.x, camera.position.z, WORLD_SEED);
+  const floor = Math.max(Number.isFinite(ground) ? ground + 3 : -40,
+    level.biome === "crystal" ? LIQUID_LEVEL.crystal + 2.5 : -40);
+  camera.position.y = THREE.MathUtils.clamp(camera.position.y, floor, 210);
+}
+droneButton?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  toggleDroneMode();
+});
+refreshDroneHUD();
 
 // ---------------------------------------------------------------------------
 // Ember fire spawner — Ember Reach only. Fires that were placed as part of
@@ -2450,6 +2569,7 @@ function getCausticPatternTexture() {
 }
 
 function buildLevel(levelIdx) {
+  if (droneModeActive) leaveDroneMode();
   teardownLevel();
   currentLevelIdx = levelIdx;
   const level = LEVELS[levelIdx];
@@ -5133,6 +5253,7 @@ function enterLevel(levelIdx) {
     // browsers where this silently does nothing.
     controls.lock();
   }
+  refreshDroneHUD();
 }
 
 function buildLevelSelectButtons() {
@@ -5234,7 +5355,7 @@ function updateProjectiles(dt) {
 }
 
 function fireShot() {
-  if (!isGameActive()) return;
+  if (!isGameActive() || droneModeActive) return;
   const direction = new THREE.Vector3();
   camera.getWorldDirection(direction);
   const dir = { x: direction.x, y: direction.y, z: direction.z };
@@ -5574,10 +5695,19 @@ function animate() {
     // speed and vertical swim control can't ever disagree about whether
     // the player is currently swimming.
     const swimming = swimLevel !== undefined && camera.position.y < swimLevel;
-    playerSwimmingThisFrame = swimming;
-    updateMovement(dt, playerPhysics.grounded, swimming);
-    const swimVertical = (keys.up ? 1 : 0) - (keys.down ? 1 : 0);
-    updatePlayerPhysics(camera, terrainMesh, playerPhysics, dt, PLAYER_EYE_HEIGHT, jumpQueued, caveFloorMeshes.length ? caveFloorMeshes : undefined, swimLevel, swimVertical);
+    playerSwimmingThisFrame = !droneModeActive && swimming;
+    if (droneModeActive) {
+      // Player physics, footsteps, bobbing, jumping and collecting remain
+      // suspended. Only the camera travels; saved player state is untouched.
+      updateDroneFlight(dt);
+      walkBobStrength = 0;
+    } else {
+      updateMovement(dt, playerPhysics.grounded, swimming);
+      const swimVertical = (keys.up ? 1 : 0) - (keys.down ? 1 : 0);
+      updatePlayerPhysics(camera, terrainMesh, playerPhysics, dt, PLAYER_EYE_HEIGHT,
+        jumpQueued, caveFloorMeshes.length ? caveFloorMeshes : undefined,
+        swimLevel, swimVertical);
+    }
     // Camera bob/shake — per explicit "simulate a walking cycle with
     // camera shake and going up and down slightly." Applied AFTER
     // updatePlayerPhysics sets the real camera position/rotation for
@@ -5600,7 +5730,7 @@ function animate() {
     // apply while wading/swimming at all, not just once fully
     // underwater, and isFullySubmerged isn't even computed yet at this
     // point in the frame (it's set much later in animate()).
-    const bobActive = playerMovingThisFrame && playerPhysics.grounded && !swimming;
+    const bobActive = !droneModeActive && playerMovingThisFrame && playerPhysics.grounded && !swimming;
     walkBobStrength += ((bobActive ? 1 : 0) - walkBobStrength) * Math.min(1, dt * 8);
     if (walkBobStrength > 0.001) {
       if (bobActive) walkBobPhase += dt * WALK_BOB_SPEED;
@@ -5608,8 +5738,10 @@ function animate() {
       camera.rotation.z += (Math.sin(walkBobPhase * 0.5) * WALK_SHAKE_ROLL + (Math.random() - 0.5) * WALK_SHAKE_ROLL * 0.4) * walkBobStrength;
     }
     jumpQueued = false;
-    if (camera.position.y < spawnPosition.y - FALL_RESPAWN_OFFSET) respawnInLevel();
-    checkLoreProximity();
+    if (!droneModeActive) {
+      if (camera.position.y < spawnPosition.y - FALL_RESPAWN_OFFSET) respawnInLevel();
+      checkLoreProximity();
+    }
   }
 
   for (const [, handle] of crystalHandles) updateCrystalMesh(handle, elapsedTime);

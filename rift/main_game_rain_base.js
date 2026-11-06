@@ -2195,7 +2195,7 @@ function refreshDroneHUD() {
     droneButton.setAttribute("aria-pressed", String(droneModeActive));
     droneButton.setAttribute("aria-label", droneModeActive
       ? "Return to player view" : "Switch to free-flight drone camera");
-    droneButton.textContent = droneModeActive ? "↩ PLAYER VIEW" : "◈ DRONE VIEW";
+    droneButton.textContent = droneModeActive ? "↩ RETURN TO PLAYER" : "✈ DRONE CAMERA";
   }
   viewport.classList.toggle("rift-drone-active", droneModeActive);
   if (droneTouchHint) droneTouchHint.textContent = droneModeActive

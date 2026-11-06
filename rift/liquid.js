@@ -2,6 +2,7 @@ import * as legacy from "./liquid_legacy.js";
 import { createNextWaterSystem } from "./water_next/index.js";
 import * as oceanV19 from "./gpu_fft_ocean_r185_v22.js";
 import { getEffectiveValue as getBaseGraphicsEffectiveValue } from "./graphicsSettings_fft_base.js";
+import { setGPUShallowWaterInteraction } from "./gpu_shallow_water.js";
 
 function setFFTReflectionOwnership(active) {
   if (typeof globalThis !== "undefined") {
@@ -235,6 +236,32 @@ export function updateFluidSimWater(handle, renderer, elapsedTime) {
 
 export function updateRippleLayer(handle, renderer, cameraPos, cameraY, dt) {
   if (handle?.gpuFFT) {
+    const boatWake = handle.__riftRowboatWake;
+    if (boatWake?.riding) {
+      // The camera is seated within a moving boat. Do not mistake camera
+      // motion for a swimmer and inject a second, exaggerated player wake.
+      // Feed the SAME existing shallow solver's interaction uniform with
+      // the stern displacement instead. The solver will advect/dissipate
+      // it on its normal compute dispatch; this adds zero new GPU passes.
+      if (boatWake.strength > 0.02 && handle.fftShallowHandle?.gpuShallowWater) {
+        setGPUShallowWaterInteraction(
+          handle.fftShallowHandle, boatWake.x, boatWake.z,
+          boatWake.strength, boatWake.radius,
+        );
+      }
+      // Keep the player ripple tracker current for a smooth exit from
+      // boat mode, without treating its last land position as a splash.
+      if (cameraPos) {
+        if (!handle.fftInteractionPrev) {
+          handle.fftInteractionPrev = { x: cameraPos.x, z: cameraPos.z };
+        } else {
+          handle.fftInteractionPrev.x = cameraPos.x;
+          handle.fftInteractionPrev.z = cameraPos.z;
+        }
+        handle.fftInteractionPrevY = cameraY;
+      }
+      return;
+    }
     oceanV19.updateGPUFFTOceanRipples(handle, cameraPos, cameraY, dt);
     return;
   }

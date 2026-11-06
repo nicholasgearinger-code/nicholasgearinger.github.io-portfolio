@@ -26,6 +26,7 @@ import { initAudio, toggleMuted, playShoot, playShatter, playLoreChime, startAmb
 import { getIslandLore } from "./lore.js";
 import { findClosestHit } from "./hitPrediction.js";
 import { createTouchControls } from "./touchControls.js";
+import { createOldRowboatVehicle } from "./oldRowboatVehicle.js";
 import { createPlayerPhysicsState, updatePlayerPhysics, sampleGroundHeight, WALK_SPEED, AIR_CONTROL, SWIM_SPEED_MULTIPLIER } from "./physics.js";
 import { mulberry32, hashStringToSeed } from "./worldgen.js";
 
@@ -1955,6 +1956,7 @@ const controls = new PointerLockControls(camera, document.body);
 
 function showLevelSelect() {
   if (droneModeActive) leaveDroneMode();
+  oldRowboat.exit();
   startOverlay.style.display = "flex";
   levelSelectEl.hidden = false;
   touchGameActive = false;
@@ -2167,6 +2169,17 @@ let currentLevelIdx = -1;
 let spawnPosition = { x: 0, y: 5, z: 0 };
 const playerPhysics = createPlayerPhysicsState();
 
+// Authored old_rowboat.glb vehicle. Construct once; its GLB loads on entering
+// Coral Shallows and is removed on level teardown. The existing FFT stays intact.
+const oldRowboat = createOldRowboatVehicle({
+  scene, camera, viewport, keys, isActive: isGameActive, isTouchDevice,
+  getGroundHeight: (x, z) => currentLevelIdx >= 0
+    ? terrainHeightAt(LEVELS[currentLevelIdx], x, z, WORLD_SEED) : -Infinity,
+  eyeHeight: PLAYER_EYE_HEIGHT, playerPhysics,
+  onMessage: logDiscovery,
+  isDroneMode: () => droneModeActive,
+});
+
 // Free-flight camera mode: same live camera and scene, but no player physics.
 // Existing joystick/WASD look controls automatically steer its yaw; ▲/▼
 // and Space/Shift fly vertically. No new scene pass or world duplication.
@@ -2223,6 +2236,7 @@ function leaveDroneMode() {
 }
 function toggleDroneMode() {
   if (!isGameActive() || currentLevelIdx < 0) return;
+  if (oldRowboat.isRiding()) oldRowboat.exit();
   if (droneModeActive) { leaveDroneMode(); return; }
   savedDronePlayerState = {
     position: camera.position.clone(),
@@ -2286,6 +2300,7 @@ let wasErupting = false; // edge-detects eruption start/stop for audio — see t
 const MAX_DYNAMIC_FIRES = 10; // defensive cap so spawns can never outpace burnouts and pile up indefinitely
 
 function teardownLevel() {
+  oldRowboat.stopLevel();
   if (scene.environment) {
     scene.environment = null;
     if (skyEnvRenderTarget) {
@@ -4835,6 +4850,8 @@ vec2 causticVoronoiF1F2(vec2 p) {
   faceAwayFromLandmark(spawnPosition.x, spawnPosition.z);
   playerPhysics.verticalVelocity = 0;
   playerPhysics.grounded = false;
+  // Lazy-load the real GLB only when this level actually has an ocean.
+  oldRowboat.startLevel(level.biome, liquidHandle, spawnPosition);
   fireSpawnTimer = 3 + Math.random() * 5; // harmless on non-Ember biomes, the spawner below gates on biome anyway
 }
 
@@ -5754,8 +5771,13 @@ function animate() {
     // speed and vertical swim control can't ever disagree about whether
     // the player is currently swimming.
     const swimming = swimLevel !== undefined && camera.position.y < swimLevel;
-    playerSwimmingThisFrame = !droneModeActive && swimming;
-    if (droneModeActive) {
+    playerSwimmingThisFrame = !droneModeActive && !oldRowboat.isRiding() && swimming;
+    if (oldRowboat.isRiding()) {
+      // Boat owns the camera and locomotion until the player exits.
+      playerMovingThisFrame = false;
+      walkBobStrength = 0;
+      setWalkSoundsActive(false);
+    } else if (droneModeActive) {
       // Player physics, footsteps, bobbing, jumping and collecting remain
       // suspended. Only the camera travels; saved player state is untouched.
       updateDroneFlight(dt);
@@ -5789,7 +5811,7 @@ function animate() {
     // apply while wading/swimming at all, not just once fully
     // underwater, and isFullySubmerged isn't even computed yet at this
     // point in the frame (it's set much later in animate()).
-    const bobActive = !droneModeActive && playerMovingThisFrame && playerPhysics.grounded && !swimming;
+    const bobActive = !droneModeActive && !oldRowboat.isRiding() && playerMovingThisFrame && playerPhysics.grounded && !swimming;
     walkBobStrength += ((bobActive ? 1 : 0) - walkBobStrength) * Math.min(1, dt * 8);
     if (walkBobStrength > 0.001) {
       if (bobActive) walkBobPhase += dt * WALK_BOB_SPEED;
@@ -5797,11 +5819,15 @@ function animate() {
       camera.rotation.z += (Math.sin(walkBobPhase * 0.5) * WALK_SHAKE_ROLL + (Math.random() - 0.5) * WALK_SHAKE_ROLL * 0.4) * walkBobStrength;
     }
     jumpQueued = false;
-    if (!droneModeActive) {
+    if (!droneModeActive && !oldRowboat.isRiding()) {
       if (camera.position.y < spawnPosition.y - FALL_RESPAWN_OFFSET) respawnInLevel();
       checkLoreProximity();
     }
   }
+
+  // Nine-point hull buoyancy, rowing physics and directly-overhead ride camera.
+  // No GPU readback, second water pass or changes to FFT command encoders.
+  oldRowboat.update(dt, elapsedTime);
 
   for (const [, handle] of crystalHandles) updateCrystalMesh(handle, elapsedTime);
   for (let i = decorationHandles.length - 1; i >= 0; i--) {

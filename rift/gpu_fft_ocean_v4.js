@@ -17,10 +17,19 @@ const SHALLOW_N = 256;
 const SHALLOW_DOMAIN = 360;
 // Moderate additional overhead mesh density without modifying FFT compute.
 // This is a uniform grid, NOT a camera-centered adaptive LOD patch.
-const MOBILE_RENDER_N = typeof navigator !== "undefined" &&
-  /iPhone|iPad|iPod/i.test(navigator.userAgent || "") &&
-  (() => { try { return localStorage.getItem("riftGraphicsSettings") === "low"; }
-    catch (_) { return false; } })() ? 352 : 320;
+// Draw the exact same GPU wave buffers on fewer PRESENTATION vertices.
+// On iOS Low a denser center-weighted mesh keeps shore/boat detail while
+// cutting distant-water vertex work. The FFT/shallow buffer sizes, and safe
+// sequential command submission, remain completely unchanged.
+const IOS_WATER_DEVICE = typeof navigator !== "undefined" &&
+  /iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+const IOS_WATER_TIER = (() => {
+  if (!IOS_WATER_DEVICE) return "desktop";
+  try { return localStorage.getItem("riftGraphicsSettings") || "low"; }
+  catch (_) { return "low"; }
+})();
+const MOBILE_RENDER_N = IOS_WATER_TIER === "low" ? 240 :
+  IOS_WATER_TIER === "medium" ? 288 : 320;
 const TOUCH_DEVICE = typeof window !== "undefined" && (
   "ontouchstart" in window || (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0)
 );
@@ -61,10 +70,11 @@ function installMobileRenderGeometry(handle, size, sampleHeight, focusX = 0, foc
   // Must remap FFT coordinates consistently with the nonuniform positions.
   // Fixed at world center for now; moving the mesh with the camera would also
   // require correctly updating shore/depth attributes and spatial coverage.
-  const centerWeighted = /iPhone|iPad|iPod/i.test(navigator.userAgent || "") &&
-    (() => { try { return localStorage.getItem("riftGraphicsSettings") === "low"; }
-      catch (_) { return false; } })();
-  const warp = t => centerWeighted ? Math.sign(t) * Math.pow(Math.abs(t), 1.32) : t;
+  const centerWeighted = IOS_WATER_TIER === "low";
+  // 1.86 concentrates the reduced 240² mesh around the island. Around the
+  // spawning shoreline (z≈55), world-space cell spacing stays comparable
+  // to the previous 352² mesh using 1.32: nearshore surf remains resolved.
+  const warp = t => centerWeighted ? Math.sign(t) * Math.pow(Math.abs(t), 1.86) : t;
   // Keep the original water-plane boundaries fixed (no gaps at ocean edge),
   // while translating only INTERIOR sampling density toward the swimmer.
   // A smooth zero-at-edges displacement keeps vertices ordered and avoids

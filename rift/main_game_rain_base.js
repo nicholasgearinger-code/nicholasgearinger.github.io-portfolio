@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { Fn, instanceIndex, instancedArray, hash, uniform, vec3, vec2, vec4, float, uint, If, texture, uv, floor, fract, smoothstep, clamp, abs, pass, color, positionWorld, max as tslMax, min as tslMin, vertexColor, normalWorld, sin, cos, dot, mix, pow, exp } from "three/tsl";
+import { Fn, instanceIndex, instancedArray, hash, uniform, vec3, vec2, vec4, float, uint, If, texture, uv, floor, fract, smoothstep, clamp, abs, pass, color, positionWorld, cameraPosition, max as tslMax, min as tslMin, vertexColor, normalWorld, sin, cos, dot, mix, pow, exp } from "three/tsl";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
 import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERFALL_Z, RIVER_WIDTH, POND_Z, POND_RADIUS, POND_LEVEL, RAMP_CENTER_X, RAMP_CENTER_Z, RAMP_LENGTH, RAMP_HALF_WIDTH, ROOM_FLOOR_Y, ROOM_WIDTH, ROOM_LENGTH, BRANCH_START_X, BRANCH_LENGTH, BRANCH_HALF_WIDTH, BRANCH_Z, CHAMBER_RADIUS } from "./terrain.js";
 import { LEVELS, generateLevelLayout } from "./levels.js";
@@ -3108,6 +3108,15 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
       try { return new URLSearchParams(location.search).get("riftSolarCaustics") !== "off"; }
       catch (_) { return true; }
     })();
+    // The user-visible drone grid can also come from the legacy repeating
+    // 256px cellular caustic texture projected onto the sandy seabed. Keep
+    // the light-net pronounced for a submerged observer, but limit its
+    // contrast from above the water, particularly at aerial viewpoints.
+    // Both water and terrain fixes use ?riftGridFix=off as an A/B switch.
+    const gridFreeSeabedLight = (() => {
+      try { return new URLSearchParams(location.search).get("riftGridFix") !== "off"; }
+      catch (_) { return true; }
+    })();
     simpleTerrainMat.emissiveNode = Fn(() => {
       // Per explicit "using what we wrote in the prototype" — ported
       // from the old (still-present, safely disabled via
@@ -3388,10 +3397,22 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
       // fine optical texture, but make its intensity physically responsive.
       const opticalFocus = coupledCausticsEnabled &&
         solarLensCausticsEnabled ? refractedFocusGain : float(1);
+      // From the drone, repeated caustic spots were brighter than the
+      // surface reflection and formed a visible light lattice. Camera
+      // height changes only the PRESENTATION of seabed caustics, not their
+      // underlying wave-driven simulation or in-water visibility.
+      // Underwater: multiplier 1. At 15m above: ~0.38, fading smooth.
+      const aerialCausticFade = gridFreeSeabedLight
+        ? float(1).sub(
+            smoothstep(float(1.2), float(19.0),
+              cameraPosition.y.sub(float(LIQUID_LEVEL.crystal)))
+              .mul(0.68))
+        : float(1);
       const finalCaustic = causticPattern.mul(crestFocusing)
         .mul(causticCoupling).mul(opticalFocus).mul(causticSunAngle)
         .mul(underwaterMask).mul(upwardMask)
         .mul(focusMask).mul(depthAttenuation)
+        .mul(aerialCausticFade)
         .mul(terrainCausticIntensityUniform).mul(terrainCausticSunGlowUniform);
       // Per "might be a little too strong" — pulled back from 0.85 to
       // 0.55, a real, easily-reversible tuning number, not a structural

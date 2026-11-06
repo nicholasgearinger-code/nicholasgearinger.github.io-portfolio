@@ -86,6 +86,8 @@ function createTouchControls({ camera, keys, onFire, onJump, viewport, isActive 
   }
 
   function handleTouchStart(e) {
+    // Dedicated boat HUD buttons must not also start a camera-look drag.
+    if (e.target?.closest?.("[data-rift-boat-control]")) return;
     // This is a document-level listener (see the bottom of this function) —
     // it used to be safe to claim any touch anywhere as a "look" drag
     // because this game WAS the whole page. Now that it's embedded in a

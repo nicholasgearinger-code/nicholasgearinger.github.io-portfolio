@@ -5,6 +5,10 @@ const DAY_FOAM = new THREE.Color(0xfffffb);
 const NIGHT_FOAM = new THREE.Color(0xb7c2c5);
 const DAY_WASH = new THREE.Color(0xa8eee7);
 const NIGHT_WASH = new THREE.Color(0x47777d);
+// Animated wash fingers, synchronized to the persistent breaker solver.
+// ?riftSurf2=off restores the prior shoreline ribbon geometry/material.
+const SURF_REALISM_V2 = typeof location === "undefined" ||
+  new URLSearchParams(location.search).get("riftSurf2") !== "off";
 
 function clamp01(v) {
   return Math.max(0, Math.min(1, Number(v) || 0));
@@ -225,8 +229,18 @@ function animateLayerGeometry(handle, elapsed, storm = 0) {
       const alongEnergy = 0.83 +
         0.10 * Math.sin(u * Math.PI * 2 * 6.0 + elapsed * 0.36) +
         0.07 * Math.sin(u * Math.PI * 2 * 11.0 - elapsed * 0.22);
+      // Connected alongshore swash fingers: neighbouring patches reach
+      // different heights up the sand instead of painting one continuous
+      // white/beige ribbon. Keep it in the existing 2-vertex ribbon mesh.
+      const tongueReach = SURF_REALISM_V2
+        ? smooth01((0.50 +
+            0.31 * Math.sin(u * Math.PI * 2 * 5.0 + elapsed * 0.30) +
+            0.22 * Math.sin(u * Math.PI * 2 * 12.0 - elapsed * 0.39) -
+            0.22) / 0.65)
+        : 1;
       const runup = clamp01((primary + secondary) *
-        (0.58 + setEnergy * 0.34) * alongEnergy);
+        (0.58 + setEnergy * 0.34) * alongEnergy *
+        (SURF_REALISM_V2 ? 0.38 + 0.82 * tongueReach : 1));
       if (layer === wash) {
         memory[i % count] = Math.max(runup,
           memory[i % count] * Math.exp(-dt * (0.40 + stormT * 0.13)));
@@ -235,8 +249,10 @@ function animateLayerGeometry(handle, elapsed, storm = 0) {
       // Local run-up fingers: break a perfectly straight white wash line
       // without increasing shoreline mesh resolution or draw calls.
       const frontNoise =
-        Math.sin(u * Math.PI * 2 * 5.0 + elapsed * 0.16 + s.phase * 0.10) * 0.105 +
-        Math.sin(u * Math.PI * 2 * 9.0 - elapsed * 0.11) * 0.052;
+        Math.sin(u * Math.PI * 2 * 5.0 + elapsed * 0.16 + s.phase * 0.10) *
+          (SURF_REALISM_V2 ? 0.18 : 0.105) +
+        Math.sin(u * Math.PI * 2 * 9.0 - elapsed * 0.11) *
+          (SURF_REALISM_V2 ? 0.09 : 0.052);
 
       const backwash = smooth01(((((basePhase + localPhase) % 1) + 1) % 1 - 0.44) / 0.56);
       const front = -0.12 - runup * (1.63 + stormT * 0.64) +
@@ -251,7 +267,7 @@ function animateLayerGeometry(handle, elapsed, storm = 0) {
         // Keep the water film physically thin and close to the advancing
         // foam edge; the lingering gloss remains when the foam draws back.
         const landEdge = Math.max(-2.95, wetFront - 0.23 -
-          retainedWet * 0.10);
+          retainedWet * (SURF_REALISM_V2 ? 0.24 : 0.10));
         const seaEdge = 0.99 - runup * 0.15;
         writeVertex(arr, v0, s, seaEdge, handle.waterY, elapsed, 0.006);
         writeVertex(arr, v0 + 1, s, landEdge, handle.waterY, elapsed, 0.009);
@@ -310,8 +326,11 @@ export function updateReferenceSwashSheet(surfHandle, elapsed = 0, storm = 0, da
     // being blended at high opacity. Keep the film subtle on mobile; the
     // detailed persistent foam layer provides the visible whitewater.
     const mobile = typeof navigator !== "undefined" && navigator.maxTouchPoints > 0;
-    wash.material.opacity = mobile ? 0.028 : Math.min(0.075,
-      0.03 + dayT * 0.018 + stormT * 0.010 + set * 0.008);
+    wash.material.opacity = SURF_REALISM_V2
+      ? (mobile ? 0.042 : Math.min(0.095,
+          0.035 + dayT * 0.022 + stormT * 0.012 + set * 0.012))
+      : mobile ? 0.028 : Math.min(0.075,
+          0.03 + dayT * 0.018 + stormT * 0.010 + set * 0.008);
     // Thin film receives glancing warm sky highlights; no reflection target.
     wash.material.roughness = THREE.MathUtils.lerp(0.15, 0.06, sunEnergy * dayT);
     wash.material.envMapIntensity = mobile ? 0.24 : 0.36 + dayT * 0.10;

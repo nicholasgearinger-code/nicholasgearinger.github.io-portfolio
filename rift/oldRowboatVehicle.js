@@ -225,7 +225,7 @@ export function minimumRowboatPivotHeight({
   const lowerRim = uprightRim -
     Math.abs(Math.sin(pitch)) * length * 0.39 -
     Math.abs(Math.sin(roll)) * beam * 0.41;
-  return safeSurface + minFreeboard - Math.max(-0.2, lowerRim);
+  return safeSurface + minFreeboard - lowerRim;
 }
 
 export function createOldRowboatVehicle({

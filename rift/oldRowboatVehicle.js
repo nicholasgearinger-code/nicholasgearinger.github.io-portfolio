@@ -111,6 +111,95 @@ function clearWake(scene, wake) {
   }
 }
 
+/**
+ * Locate the shoreline that is approached from the actual player start.
+ * Coral Shallows' beach cove opens in +Z from spawn; prefer this beach
+ * and only search other directions when it is not a viable shoreline.
+ *
+ * Returns the boat center in safely submerged water, 5-10 m from the
+ * waterline, rather than an arbitrary deep-water ring around the player.
+ * Terrain is sampled only once on level load, never during rendering.
+ */
+export function findRowboatSpawnNearShore(getGroundHeight, waterY, spawnX, spawnZ) {
+  if (typeof getGroundHeight !== "function" ||
+      ![waterY, spawnX, spawnZ].every(Number.isFinite)) return null;
+
+  // Boat aligns lengthwise with the waterward direction. Check the stern
+  // and both sides so the submerged hull cannot spawn halfway into sand.
+  function hullHasClearance(x, z, dx, dz) {
+    const sideX = -dz, sideZ = dx;
+    let minDepth = Infinity;
+    for (const fore of [-2.35, 0, 2.35]) {
+      for (const side of [-1.05, 0, 1.05]) {
+        const h = getGroundHeight(x + dx * fore + sideX * side,
+          z + dz * fore + sideZ * side);
+        if (!Number.isFinite(h)) return false;
+        minDepth = Math.min(minDepth, waterY - h);
+      }
+    }
+    return minDepth >= 0.95;
+  }
+
+  function tryDirection(dx, dz) {
+    const startY = getGroundHeight(spawnX, spawnZ);
+    if (!Number.isFinite(startY) || startY <= waterY - 0.15) return null;
+    const step = 2.5;
+    let prevDistance = 0, prevHeight = startY;
+    let steepness = 0;
+
+    for (let distance = step; distance <= 105; distance += step) {
+      const x = spawnX + dx * distance, z = spawnZ + dz * distance;
+      const height = getGroundHeight(x, z);
+      if (!Number.isFinite(height)) break;
+      // Prefer approachable beach paths over steep, cliff-like dropoffs.
+      if (prevHeight > waterY && height > waterY) {
+        steepness += Math.max(0, Math.abs(prevHeight - height) / step - 0.35);
+      }
+      if (prevHeight >= waterY && height < waterY - 0.15) {
+        // Refine the land/water crossing for a stable center offset.
+        let low = prevDistance, high = distance;
+        for (let i = 0; i < 5; i++) {
+          const middle = (low + high) * 0.5;
+          const h = getGroundHeight(spawnX + dx * middle, spawnZ + dz * middle);
+          if (!Number.isFinite(h)) return null;
+          if (h >= waterY) low = middle;
+          else high = middle;
+        }
+        const shoreDistance = (low + high) * 0.5;
+        for (const offshore of [4.5, 5.2, 5.8, 6.8, 8, 10, 12]) {
+          const cx = spawnX + dx * (shoreDistance + offshore);
+          const cz = spawnZ + dz * (shoreDistance + offshore);
+          if (Math.hypot(cx, cz) > 190) continue;
+          if (!hullHasClearance(cx, cz, dx, dz)) continue;
+          const depth = waterY - getGroundHeight(cx, cz);
+          return {
+            x: cx, z: cz, shoreDistance, offshore, depth,
+            // Hull local +X is its forward direction; aim out to sea.
+            yaw: Math.atan2(-dz, dx),
+            score: shoreDistance + offshore * 0.8 + steepness * 12,
+          };
+        }
+        return null;
+      }
+      prevDistance = distance;
+      prevHeight = height;
+    }
+    return null;
+  }
+
+  // The guaranteed beach opening is toward +Z, directly ahead of the
+  // Coral Shallows spawn camera, so use it when navigable.
+  const cove = tryDirection(0, 1);
+  if (cove) return cove;
+  let nearest = null;
+  for (let i = 0; i < 48; i++) {
+    const a = (i / 48) * Math.PI * 2;
+    const candidate = tryDirection(Math.cos(a), Math.sin(a));
+    if (candidate && (!nearest || candidate.score < nearest.score)) nearest = candidate;
+  }
+  return nearest;
+}
+
 export function createOldRowboatVehicle({
   scene, camera, viewport, keys, isActive, isTouchDevice,
   getGroundHeight, eyeHeight, playerPhysics, onMessage, isDroneMode,
@@ -249,25 +338,13 @@ export function createOldRowboatVehicle({
     if (biome !== "crystal" || !waterHandle?.gpuFFT) return;
     const thisLevel = levelVersion;
     const waterY = Number(waterHandle.waterY) || 0;
-    // Search nearby reachable shallow water rather than arbitrary offshore coords.
-    let spot = null;
-    for (const radius of [8, 12, 17, 23, 31, 42, 56, 72]) {
-      for (let i = 0; i < 24; i++) {
-        const a = i * Math.PI * 2 / 24;
-        const x = spawnPosition.x + radius * Math.cos(a);
-        const z = spawnPosition.z + radius * Math.sin(a);
-        const ground = getGroundHeight(x, z);
-        const depth = waterY - ground;
-        if (!Number.isFinite(depth) || depth < 1.3 || depth > 12) continue;
-        // Choose the first ring with navigable depth, ideally in 2-6 m water.
-        if (!spot || Math.abs(depth - 3.2) < spot.score) {
-          spot = { x, z, score: Math.abs(depth - 3.2) };
-        }
-      }
-      if (spot) break;
-    }
+    // Place the boat just offshore of the actual spawn-side beach.
+    const spot = findRowboatSpawnNearShore(
+      getGroundHeight, waterY, spawnPosition.x, spawnPosition.z,
+    );
     if (!spot) {
-      console.warn("[rift-rowboat] No navigable water near the spawn");
+      console.warn("[rift-rowboat] No safe, reachable shoreline found near player spawn");
+      onMessage?.("Rowboat could not find a safe shoreline.");
       return;
     }
     try {
@@ -279,7 +356,7 @@ export function createOldRowboatVehicle({
       const draft = mass / (RHO * area);
       const bottomOffset = -shape.hullHeight * 0.5;
       shape.root.position.set(spot.x, waterY - bottomOffset - draft, spot.z);
-      shape.root.rotation.y = Math.atan2(spawnPosition.z - spot.z, spawnPosition.x - spot.x);
+      shape.root.rotation.y = spot.yaw; // bow points toward open water
       scene.add(shape.root);
       boat = {
         ...shape, handle: waterHandle, mass, area, bottomOffset,
@@ -288,7 +365,10 @@ export function createOldRowboatVehicle({
         lastWaveHit: 0,
         wake: makeWake(scene),
       };
-      console.info("[rift-rowboat] Loaded authored old_rowboat.glb as buoyant player vehicle", MODEL_URL);
+      console.info("[rift-rowboat] Spawned near player beach", {
+        model: MODEL_URL, x: spot.x, z: spot.z,
+        shoreDistance: spot.shoreDistance, offshore: spot.offshore,
+      });
       updateHUD();
     } catch (error) {
       console.error("[rift-rowboat] Model failed to load", error);

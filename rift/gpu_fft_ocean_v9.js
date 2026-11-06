@@ -90,6 +90,12 @@ const WAVE_DISTORTION_2 = typeof location === "undefined" ||
 // ?riftCrestReflect=off restores the prior shading/foam and breaker mesh.
 const REFLECTIVE_CRESTS = typeof location === "undefined" ||
   new URLSearchParams(location.search).get("riftCrestReflect") !== "off";
+// Shallow breaking surf v2: depth-localized wave faces and fractured crest
+// foam rather than a uniform white band at the sand line. The existing
+// seafloor-depth vertex attribute and shoreline clock are reused.
+// ?riftSurf2=off restores previous offshore/shoreline surface shading.
+const SURF_REALISM_V2 = typeof location === "undefined" ||
+  new URLSearchParams(location.search).get("riftSurf2") !== "off";
 const AIR_WATER_R0 = ((WATER_IOR - 1) / (WATER_IOR + 1)) ** 2;
 
 if (typeof globalThis !== "undefined") {
@@ -396,7 +402,15 @@ function installWaterProOptics(handle) {
   // the uniforms after the persistent foam simulation). The existing depth
   // attribute supplies a cheap approximation of offshore distance: this is
   // shading synchronization, not a new FFT displacement simulation.
-  const surfZone = float(1).sub(smoothstep(float(0.55), float(4.2), depth));
+  const surfZone = float(1).sub(smoothstep(
+    float(SURF_REALISM_V2 ? 0.30 : 0.55),
+    float(SURF_REALISM_V2 ? 5.2 : 4.2), depth));
+  // There is no breaking lip in dry sand or fully submerged deep water.
+  // Shift maximum whitewater toward actual shoaling water 0.4–2.5m deep.
+  const surfBreakBand = SURF_REALISM_V2
+    ? smoothstep(float(0.12), float(0.52), depth)
+        .mul(float(1).sub(smoothstep(float(2.25), float(5.0), depth)))
+    : surfZone;
   // Approximate shore-normal distance from the already sampled seabed depth.
   // The crest's front position comes directly from the active shoreline wave.
   const offshoreDistance = clamp(depth.mul(1.0), 0, 3.8);
@@ -410,18 +424,26 @@ function installWaterProOptics(handle) {
   const breakerSlope = smoothstep(float(0.18), float(0.67), geometricSlope);
   const crestActivity = clamp(surfPulse.mul(0.65)
     .add(crestGate.mul(0.55)).add(foamWake.mul(0.24)), 0, 1);
-  const breakerEnergy = clamp(surfZone.mul(surfSetStrength)
+  const breakerEnergy = clamp(surfBreakBand.mul(surfSetStrength)
     .mul(surfStrength)
-    .mul(float(0.12).add(crestActivity.mul(0.65))
-      .add(breakerSlope.mul(0.23)))
+    .mul(float(SURF_REALISM_V2 ? 0.045 : 0.12)
+      .add(crestActivity.mul(SURF_REALISM_V2 ? 0.51 : 0.65))
+      .add(breakerSlope.mul(SURF_REALISM_V2 ? 0.37 : 0.23)))
     .mul(float(0.70).add(storm.mul(0.42)))
     .mul(float(1).sub(underwater)), 0, 0.90);
   // Spilling crests turn into aerated whitewater, particularly on the
   // shallow FFT facets that coincide with the shared shoreline breaker.
+  // Crumpled whitewater exists only on steep, noisy, advancing crests and
+  // their trailing wash. Don't tint an entire shoreline depth band white.
+  const crestBreakup = SURF_REALISM_V2
+    ? smoothstep(float(0.27), float(0.70),
+        capBreakup.mul(0.72).add(facetMask.mul(0.28)))
+    : float(1);
   const brokenFoam = clamp(breakerEnergy
     .mul(float(0.52).add(capBreakup.mul(0.72)))
     .mul(float(0.34).add(steep.mul(0.62))
-      .add(foamWake.mul(0.48))), 0, 0.84);
+      .add(foamWake.mul(0.48)))
+    .mul(crestBreakup), 0, 0.84);
   // The cinematic breaking-wave reference has rolling whitecaps far beyond
   // the beach. Use existing FFT slope, crest height and breakup noise to add
   // scattered foam across the whole ocean, with NO additional sin(), texture
@@ -434,9 +456,10 @@ function installWaterProOptics(handle) {
   // an entire depth band. Each fleck follows an actual moving crest or its
   // collapsing wake, broken up by the FFT slope and cap noise.
   const shoreSpill = clamp(
-    surfZone.mul(capBreakup)
+    (SURF_REALISM_V2 ? surfBreakBand : surfZone).mul(capBreakup)
       .mul(crestGate.mul(0.70).add(foamWake.mul(0.30)))
-      .mul(float(0.10).add(steep.mul(0.29))),
+      .mul(float(SURF_REALISM_V2 ? 0.05 : 0.10)
+        .add(steep.mul(SURF_REALISM_V2 ? 0.39 : 0.29))),
     0, 0.25);
   // Thin, animated spindrift on the tops of individual rolling wavelets.
   // Gate it by the actual FFT crest, displacement slope and existing
@@ -461,7 +484,8 @@ function installWaterProOptics(handle) {
     waterLevel.add(0.70), positionWorld.y);
   const breakingLip = REFLECTIVE_CRESTS ? clamp(
     crestCrown.mul(smoothstep(float(0.16), float(0.55), geometricSlope))
-      .mul(surfZone.mul(0.86).add(storm.mul(0.18)))
+      .mul((SURF_REALISM_V2 ? surfBreakBand : surfZone)
+        .mul(0.86).add(storm.mul(0.18)))
       .mul(clamp(surfPulse.mul(0.62).add(crestGate.mul(0.42))
         .add(foamWake.mul(0.22)), 0, 1))
       .mul(smoothstep(float(0.35), float(0.78),
@@ -561,17 +585,24 @@ function installWaterProOptics(handle) {
       body = body.mul(float(1).add(slopeLighting.mul(day)
         .mul(float(1).sub(combinedFoam.mul(0.85)))));
     }
-    // Backlit shoaling wave faces gain a restrained green-blue translucency
-    // before the breaking lip transitions into opaque, scattering whitewater.
+    // Under a spilling crest the front remains a translucent turquoise
+    // sheet while aerated bubbles scatter white light at the narrow lip.
     const lipGlow = breakerEnergy.mul(crestHeight).mul(backLight).mul(day)
       .mul(float(1).sub(brokenFoam));
+    const shoalFace = SURF_REALISM_V2
+      ? surfBreakBand.mul(crestHeight)
+          .mul(smoothstep(float(0.12), float(0.56), geometricSlope))
+          .mul(float(1).sub(combinedFoam))
+          .mul(day).mul(float(1).sub(underwater))
+      : float(0);
     // Lit, sloping wave faces stay blue-green rather than only whitening
     // once they break. The animated FFT normal drives every highlight.
     const rollingFace = smoothstep(float(0.16), float(0.68), geometricSlope)
       .mul(crestHeight).mul(day).mul(float(1).sub(underwater));
     body = mix(body, shallowColor,
-      clamp(lipGlow.mul(0.38).add(rollingFace.mul(float(0.08)
-        .add(shallow.mul(0.16)))), 0, 0.30));
+      clamp(lipGlow.mul(SURF_REALISM_V2 ? 0.52 : 0.38)
+        .add(rollingFace.mul(float(0.08).add(shallow.mul(0.16))))
+        .add(shoalFace.mul(0.26)), 0, 0.36));
     // Subtle trough darkening and a brighter inclined face reveal the
     // moving wave shape, even when no foam is produced.
     body = mix(body, deepColor, troughShadow.mul(0.065));
@@ -891,6 +922,7 @@ function installWaterProOptics(handle) {
       waveLensLayer: WAVE_LENS_LAYER,
       strongerWaveDistortion: WAVE_DISTORTION_2,
       reflectiveBreakingCrests: REFLECTIVE_CRESTS,
+      shallowSurfRealismV2: SURF_REALISM_V2,
       disabledByQuery: typeof location !== "undefined" &&
         new URLSearchParams(location.search).get("riftRefraction") === "off",
     };

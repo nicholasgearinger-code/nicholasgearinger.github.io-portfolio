@@ -335,11 +335,19 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
+      # Artifacts are scoped to a workflow RUN, not to its individual
+      # rerun attempts. A rerun can therefore leave two default-named
+      # "github-pages" artifacts, which deploy-pages rejects as ambiguous.
+      # Pair a unique upload name with its exact deploy input so each run
+      # and each attempt selects only the artifact created in that attempt.
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v4
         with:
+          name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
           path: '.'
 
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
+        with:
+          artifact_name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}

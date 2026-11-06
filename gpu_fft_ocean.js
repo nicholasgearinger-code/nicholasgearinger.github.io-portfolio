@@ -234,7 +234,8 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
       gameplayModes.push({
         kx: nx * TAU / size, kz: nz * TAU / size,
         re, im, omega: spectrumData.meta[i * 4 + 3], amplitude,
-        mirror: spectrumData.mirror[i] | 0,
+        mirrorRe: spectrumData.h0[(spectrumData.mirror[i] | 0) * 4],
+        mirrorIm: spectrumData.h0[(spectrumData.mirror[i] | 0) * 4 + 1],
       });
     }
   }

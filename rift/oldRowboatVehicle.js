@@ -7,7 +7,8 @@ const MODEL_URL = new URL("./models/old_rowboat.glb", import.meta.url).href;
 const G = 9.81;
 const RHO = 1025;
 const BOARD_RADIUS = 7.0; // reachable at the spawn beach without swimming far
-const MAX_STEP = 1 / 60;
+const MAX_STEP = 1 / 50; // stable even when mobile rendering is slow
+const RIDER_MASS = 85;
 let cachedModelPromise = null;
 
 function loadModel() {
@@ -453,19 +454,23 @@ export function createOldRowboatVehicle({
       const gltf = await loadModel();
       if (levelVersion !== thisLevel) return; // level changed during download
       const shape = buildVisual(gltf);
-      const area = shape.length * shape.beam * 0.65;
-      const mass = Math.min(570, area * shape.hullHeight * RHO * 0.6);
+      // A narrow wooden keel displaces less water than a solid box. Match
+      // the buoyant volume's bottom to the ACTUAL visible model bottom;
+      // the old higher collision bottom placed the gunwale too deep.
+      const area = shape.length * shape.beam * 0.45;
+      const mass = Math.min(300, Math.max(180, area * shape.hullHeight * RHO * 0.27));
       const draft = mass / (RHO * area);
-      const bottomOffset = -shape.hullHeight * 0.5;
+      const bottomOffset = -shape.visualHeight * 0.5 + 0.045;
       shape.root.position.set(spot.x, waterY - bottomOffset - draft, spot.z);
       shape.root.rotation.y = spot.yaw; // bow points toward open water
       scene.add(shape.root);
       boat = {
-        ...shape, handle: waterHandle, mass, area, bottomOffset,
+        ...shape, handle: waterHandle, mass, dryMass: mass, area, bottomOffset,
         ySpeed: 0, rollSpeed: 0, pitchSpeed: 0,
         vx: 0, vz: 0, throttle: 0, steering: 0,
         lastWaveHit: 0,
         wake: makeWake(scene),
+        wakeImpulse: { riding: false, x: 0, z: 0, strength: 0, radius: 2 },
       };
       console.info("[rift-rowboat] Spawned near player beach", {
         model: MODEL_URL, x: spot.x, z: spot.z,
@@ -480,59 +485,95 @@ export function createOldRowboatVehicle({
 
   function updatePhysics(dt, time) {
     if (!boat) return;
-    dt = Math.min(0.05, Math.max(0, dt));
+    // In heavy iOS scenes the game can render around 10-15 fps. Advance the
+    // whole real frame with bounded substeps instead of silently dropping the
+    // extra 40-50 ms and making the boat move in slow motion.
+    dt = Math.min(0.09, Math.max(0, dt));
+    if (!dt) return;
     const n = Math.max(1, Math.ceil(dt / MAX_STEP));
     const h = dt / n, b = boat, root = b.root;
-    b.throttle = riding ? (Number(keys.forward) - Number(keys.back)) : 0;
-    b.steering = riding ? (Number(keys.left) - Number(keys.right)) : 0;
+    // The rider contributes actual displaced weight, so the boat settles
+    // slightly deeper when boarded and rises again when unloaded.
+    b.mass = b.dryMass + (riding ? RIDER_MASS : 0);
+    const targetThrottle = riding
+      ? (Number(keys.forward || held.forward) - Number(keys.back || held.back)) : 0;
+    const targetSteering = riding
+      ? (Number(keys.left || held.left) - Number(keys.right || held.right)) : 0;
+    const inertiaX = b.mass * (b.beam ** 2 + b.hullHeight ** 2) / 12;
+    const inertiaZ = b.mass * (b.length ** 2 + b.hullHeight ** 2) / 12;
+    const hydroK = RHO * G * b.area;
+    // Critical-damping-inspired forces for a stiff but responsive hull.
+    const heaveDamping = 2 * 0.86 * Math.sqrt(hydroK * b.mass);
+    const rollK = hydroK * b.beam * b.beam / 9;
+    const pitchK = hydroK * b.length * b.length / 9;
+    const rollDamping = 2 * 0.82 * Math.sqrt(rollK * inertiaX);
+    const pitchDamping = 2 * 0.84 * Math.sqrt(pitchK * inertiaZ);
+
     for (let tick = 0; tick < n; tick++) {
       const t = time - dt + h * (tick + 1);
+      b.throttle += (targetThrottle - b.throttle) * Math.min(1, h * 5.2);
+      b.steering += (targetSteering - b.steering) * Math.min(1, h * 6);
       const speed = Math.hypot(b.vx, b.vz);
       const yaw = root.rotation.y;
-      // Rowing: momentum and drag, not engine-like acceleration.
-      const thrust = b.throttle * 1700;
-      b.vx += (thrust * Math.cos(yaw) / b.mass - b.vx * (0.45 + speed * 0.12)) * h;
-      b.vz += (-thrust * Math.sin(yaw) / b.mass - b.vz * (0.45 + speed * 0.12)) * h;
-      b.vx = clamp(b.vx, -5.5, 5.5);
-      b.vz = clamp(b.vz, -5.5, 5.5);
-      root.rotation.y += b.steering * Math.min(3.3, speed) * 0.40 * h;
+      // Rowing produces sustained stroke momentum rather than motor-speed
+      // snapping. Water drag is quadratic with a smaller linear component.
+      const thrust = b.throttle * 880;
+      const horizontalDrag = 0.20 + 0.13 * speed;
+      b.vx += (thrust * Math.cos(yaw) / b.mass - b.vx * horizontalDrag) * h;
+      b.vz += (-thrust * Math.sin(yaw) / b.mass - b.vz * horizontalDrag) * h;
+      const maxSpeed = 3.8;
+      const v = Math.hypot(b.vx, b.vz);
+      if (v > maxSpeed) { b.vx *= maxSpeed / v; b.vz *= maxSpeed / v; }
+      // Allow slow maneuvering and turning in either direction.
+      const reverse = b.throttle < -0.15 ? -1 : 1;
+      root.rotation.y += b.steering * reverse *
+        (0.28 + Math.min(2.6, speed) * 0.28) * h;
+
       const nextX = root.position.x + b.vx * h;
       const nextZ = root.position.z + b.vz * h;
       const bottom = getGroundHeight(nextX, nextZ);
       const extent = Math.hypot(nextX, nextZ);
-      if (extent > 192 || (Number.isFinite(bottom) && bottom > b.handle.waterY - 0.65)) {
-        b.vx *= -0.06;
-        b.vz *= -0.06;
+      if (extent > 192 ||
+          (Number.isFinite(bottom) && bottom > b.handle.waterY - 0.72)) {
+        // Run aground without exploding the velocity or drilling through
+        // the sandy shoreline.
+        b.vx *= -0.04;
+        b.vz *= -0.04;
       } else {
         root.position.x = nextX;
         root.position.z = nextZ;
       }
+
       const cy = Math.cos(root.rotation.y), sy = Math.sin(root.rotation.y);
       let fy = -b.mass * G, tx = 0, tz = 0;
       const cellArea = b.area / 9;
-      for (const ix of sampleOffsets) for (const iz of sampleOffsets) {
-        const lx = ix * b.length / 3, lz = iz * b.beam / 3;
-        const wx = root.position.x + cy * lx + sy * lz;
-        const wz = root.position.z - sy * lx + cy * lz;
-        const pointY = root.position.y + b.bottomOffset +
-          root.rotation.z * lx - root.rotation.x * lz;
-        const depth = clamp(sampleRowboatWater(b.handle, wx, wz, t) - pointY, 0, b.hullHeight);
-        if (!depth) continue;
-        const pointVy = b.ySpeed + b.pitchSpeed * lx - b.rollSpeed * lz;
-        const force = RHO * G * cellArea * depth -
-          2.1 * RHO * cellArea * depth * pointVy;
-        fy += force;
-        tx -= lz * force;
-        tz += lx * force;
+      // Hydrostatic pressure on nine submerged hull columns. Forces on
+      // the bow, stern, and each side create genuine pitch/roll torques.
+      for (const ix of sampleOffsets) {
+        for (const iz of sampleOffsets) {
+          const lx = ix * b.length / 3, lz = iz * b.beam / 3;
+          const wx = root.position.x + cy * lx + sy * lz;
+          const wz = root.position.z - sy * lx + cy * lz;
+          const pointY = root.position.y + b.bottomOffset +
+            root.rotation.z * lx - root.rotation.x * lz;
+          const water = sampleRowboatWater(b.handle, wx, wz, t);
+          const depth = clamp(water - pointY, 0, b.hullHeight);
+          if (depth <= 0) continue;
+          const lift = RHO * G * cellArea * depth;
+          fy += lift;
+          tx -= lz * lift;
+          tz += lx * lift;
+        }
       }
-      b.ySpeed = clamp(b.ySpeed + clamp(fy / b.mass, -22, 28) * h, -5, 5);
+      fy -= heaveDamping * b.ySpeed;
+      tx -= rollDamping * b.rollSpeed;
+      tz -= pitchDamping * b.pitchSpeed;
+      b.ySpeed = clamp(b.ySpeed + clamp(fy / b.mass, -20, 26) * h, -4, 4);
       root.position.y += b.ySpeed * h;
-      const ix = b.mass * (b.beam * b.beam + b.hullHeight * b.hullHeight) / 12;
-      const iz = b.mass * (b.length * b.length + b.hullHeight * b.hullHeight) / 12;
-      b.rollSpeed = clamp(b.rollSpeed + (clamp(tx / ix, -12, 12) - b.rollSpeed * 3.5) * h, -1.2, 1.2);
-      b.pitchSpeed = clamp(b.pitchSpeed + (clamp(tz / iz, -12, 12) - b.pitchSpeed * 3.5) * h, -1.2, 1.2);
-      root.rotation.x = clamp(root.rotation.x + b.rollSpeed * h, -0.32, 0.32);
-      root.rotation.z = clamp(root.rotation.z + b.pitchSpeed * h, -0.32, 0.32);
+      b.rollSpeed = clamp(b.rollSpeed + clamp(tx / inertiaX, -13, 13) * h, -1.0, 1.0);
+      b.pitchSpeed = clamp(b.pitchSpeed + clamp(tz / inertiaZ, -11, 11) * h, -1.0, 1.0);
+      root.rotation.x = clamp(root.rotation.x + b.rollSpeed * h, -0.29, 0.29);
+      root.rotation.z = clamp(root.rotation.z + b.pitchSpeed * h, -0.29, 0.29);
     }
   }
 
@@ -566,6 +607,16 @@ export function createOldRowboatVehicle({
     if (riding && (!isActive() || isDroneMode())) exit();
     updatePhysics(dt, time);
     updateWake(time);
+    // Feed the existing GPU shallow-water solver with a single compact
+    // boat disturbance. No extra compute pass or GPU readback is needed.
+    const speed = Math.hypot(boat.vx, boat.vz);
+    const wake = boat.wakeImpulse;
+    wake.riding = riding;
+    wake.x = boat.root.position.x - Math.cos(boat.root.rotation.y) * boat.length * 0.48;
+    wake.z = boat.root.position.z + Math.sin(boat.root.rotation.y) * boat.length * 0.48;
+    wake.strength = riding && speed > 0.22 ? clamp(speed * 0.34, 0.1, 1.3) : 0;
+    wake.radius = clamp(boat.beam * 1.3 + speed * 0.18, 1.5, 3.4);
+    boat.handle.__riftRowboatWake = riding ? wake : null;
     if (riding) followCamera(dt);
     updateHUD();
   }

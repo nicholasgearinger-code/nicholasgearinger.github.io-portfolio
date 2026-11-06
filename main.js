@@ -4,6 +4,7 @@ import { buildPlanetTerrain, terrainHeightAt, TERRAIN_SIZE, LIQUID_LEVEL, WATERF
 import { LEVELS, generateLevelLayout } from "./levels.js";
 import { createCrystalMesh, updateCrystalMesh, disposeCrystalMesh, CRYSTAL_RADIUS } from "./crystals.js";
 import { createDecoration, updateDecoration, createEmberFire, createLivingTree, createLightShaft, createUnderwaterLightShaft, updateLightShafts, disposeLightShafts, createRockCluster, createCaveMouth, applyVerticalGradient } from "./decorations.js";
+import { createWaterInteractions, updateWaterInteractions, disposeWaterInteractions } from "./waterInteractions.js";
 import { createLiquidPlane, updateLiquidPlane, disposeLiquidPlane, updateFluidSimWater, createWaterfall, updateWaterfall, disposeWaterfall, createRiverCurrent, updateRiverCurrent, disposeRiverCurrent, createRiverFlowStrip, updateRiverFlowStrip, disposeRiverFlowStrip, createCliffWall, disposeCliffWall, createSourcePond, updateSourcePond, disposeSourcePond, createOceanSurfaceDetail, updateOceanSurfaceDetail, disposeOceanSurfaceDetail } from "./liquid.js";
 import { createDayNightCycle, updateDayNightCycle } from "./dayNightCycle.js";
 import { createAtmosphericParticles, updateAtmosphericParticles, disposeAtmosphericParticles } from "./atmosphericParticles.js";
@@ -1198,7 +1199,11 @@ let fireSpawnTimer = 0;
 let wasErupting = false; // edge-detects eruption start/stop for audio — see the animate loop
 const MAX_DYNAMIC_FIRES = 10; // defensive cap so spawns can never outpace burnouts and pile up indefinitely
 
+let waterInteractionState = null;
+
 function teardownLevel() {
+  disposeWaterInteractions(waterInteractionState);
+  waterInteractionState = null;
   if (scene.environment) {
     scene.environment = null;
     if (skyEnvRenderTarget) {
@@ -2280,6 +2285,7 @@ vec2 causticVoronoiF1F2(vec2 p) {
     // up close.
     const waterPlaneSize = level.biome === "crystal" ? 2000 : TERRAIN_SIZE;
     liquidHandle = createLiquidPlane(scene, level.biome, LIQUID_LEVEL[level.biome], waterPlaneSize, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
+    waterInteractionState = createWaterInteractions(scene, liquidHandle, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
   }
 
   if (level.biome === "crystal") {
@@ -4303,6 +4309,7 @@ function animate() {
   // specifically because the buffer-disposal timing fix already applied
   // elsewhere prevents this from ever racing against a level teardown.
   if (liquidHandle && liquidHandle.fluidSim) updateFluidSimWater(liquidHandle, renderer);
+  updateWaterInteractions(waterInteractionState, dt, elapsedTime, camera.position, playerSwimmingThisFrame);
   updateWaterfall(waterfallHandle, dt, elapsedTime);
   updateOceanSurfaceDetail(oceanSurfaceDetailHandle, elapsedTime, dayNight.dayAmount);
   // Real angelfish (models.js) — AnimationMixer drives the loaded skeletal

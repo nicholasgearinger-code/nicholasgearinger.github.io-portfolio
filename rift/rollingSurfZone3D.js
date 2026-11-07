@@ -444,7 +444,7 @@ export function createVolumetricSurfZone(scene, ocean, groundHeight) {
         21, 43);
       const x = sample.x + sample.outwardX * distance;
       const z = sample.z + sample.outwardZ * distance;
-      if (Math.hypot(camera.x - x, camera.z - z) < 118) {
+      if (Math.hypot(camera.x - x, camera.z - z) < 155) {
         volume.centerShoreX = -sample.outwardX;
         volume.centerShoreZ = -sample.outwardZ;
         volume.originX = x; volume.originZ = z;

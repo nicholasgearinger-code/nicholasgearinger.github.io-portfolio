@@ -29,6 +29,10 @@ const WAVES = [
   { far: 71, near: 26, period: 12.8, phase: 0.41, height: 3.6, width: 6.5 },
   { far: 93, near: 41, period: 15.0, phase: 0.78, height: 3.9, width: 7.6 },
 ];
+// A/B test natural sets and coastline-anchored peeling against the older
+// synchronized waves. Default is on; ?riftSurfIrregular=off disables it.
+const NATURAL_SURF=typeof location==="undefined" ||
+  new URLSearchParams(location.search).get("riftSurfIrregular")!=="off";
 const clamp01 = x => Math.max(0, Math.min(1, x));
 const lerp = (a,b,t)=>a+(b-a)*t;
 const fract = x=>x-Math.floor(x);
@@ -39,14 +43,20 @@ const smooth=(a,b,x)=>{const t=clamp01((x-a)/(b-a));return t*t*(3-2*t);};
 // while the low/high harmonics make neighboring crests peel and interfere.
 // Unlike per-vertex random noise this cannot tear adjacent mesh columns,
 // and the offshore/nearshore water do not need extra GPU passes.
-export function irregularSurfPhase(t,band,index,sampleCount,columnOffset=0){
+export function irregularSurfPhase(t,band,index,sampleCount){
   const wave=WAVES[band];
+  if(!NATURAL_SURF){
+    const raw=t/wave.period+wave.phase;
+    return {phase:fract(raw),cycle:Math.floor(raw),
+      heightScale:1,breakOffset:0,peel:0};
+  }
   const theta=2*Math.PI*index/Math.max(1,sampleCount);
   const warped=t+
     .85*Math.sin(t*.16+band*2.0)+
     .42*Math.sin(t*.37+band*.83);
-  const peel=columnOffset*.0017+
-    .052*Math.sin(theta*3-t*.115+band*1.7)+
+  // No screen-column term: moving the drone must not change a wave's
+  // phase or trigger a duplicate foam wake at the same world location.
+  const peel=.052*Math.sin(theta*3-t*.115+band*1.7)+
     .022*Math.sin(theta*9+t*.072+band*1.9);
   const raw=warped/wave.period+wave.phase+peel;
   const cycle=Math.floor(raw);
@@ -302,16 +312,17 @@ export function createCinematicSurfZone(scene,ocean,groundHeight){
         const along=i/COLS;
         const taper=smooth(0,.10,along)*(1-smooth(.90,1,along));
         const irregular=irregularSurfPhase(
-          t,w,index,sampleCount,i-COLS*.5);
+          t,w,index,sampleCount);
         const {phase,cycle,heightScale,breakOffset}=irregular;
         const travelled=smooth(0,1,phase);
         // Two oblique swell trains interfere along the coastline. Their
         // world-periodic spatial waves bend a crest naturally while
         // leaving its adjacent columns connected and continuous.
         const theta=2*Math.PI*index/sampleCount;
-        const crossSwell=
+        const crossSwell=NATURAL_SURF ? (
           .76*Math.sin(theta*4-t*.13+w*1.25)+
-          .37*Math.sin(theta*11+t*.08+w*.69);
+          .37*Math.sin(theta*11+t*.08+w*.69)
+        ) : 0;
         const distance=lerp(wave.far,wave.near,travelled)+crossSwell;
         const depth=Math.max(0,sea-groundAt(index,distance));
         const shoal=clamp01((12-depth)/11);
@@ -326,14 +337,17 @@ export function createCinematicSurfZone(scene,ocean,groundHeight){
           .048*Math.max(0,heightScale-1);
         const curl=smooth(breakOnset-.14,breakOnset+.12,phase)*
           (1-smooth(.83,.985,phase));
-        const breakingPatch=Math.max(.54,Math.min(1,
-          .69+.24*Math.sin(theta*7-t*.29+w*.85)+
-          .17*Math.sin(theta*15+t*.11+w*1.57)));
+        const breakingPatch=NATURAL_SURF
+          ? Math.max(.54,Math.min(1,
+            .69+.24*Math.sin(theta*7-t*.29+w*.85)+
+            .17*Math.sin(theta*15+t*.11+w*1.57)))
+          : 1;
         const broken=smooth(breakOnset,breakOnset+.25,phase)*
           (1-smooth(.94,1,phase))*breakingPatch;
-        const variation=1+
-          .08*Math.sin(theta*7+w*1.7+t*.23)+
-          .055*Math.sin(theta*17-w*.83-t*.11);
+        const variation=NATURAL_SURF
+          ? 1+.08*Math.sin(theta*7+w*1.7+t*.23)+
+            .055*Math.sin(theta*17-w*.83-t*.11)
+          : 1;
         const H=height*heightScale*variation;
         const plunge=smooth(.55,.79,phase);
         // Store wake by WORLD shoreline index, not screen column:

@@ -11,6 +11,7 @@ import {
 import * as oceanV7 from "./gpu_fft_ocean_v7.js";
 import * as oceanV8 from "./gpu_fft_ocean_v8.js";
 import { getRealisticCloudTexture } from "./clouds_storm_base.js";
+import { createFluidLabShoreFlow } from "./fluidLabShoreFlow.js";
 import {
   getGraphicsTier,
   getEffectiveValue,
@@ -68,6 +69,10 @@ const WATER_IOR = 1.333;
 // ?riftLabOptics=off to compile out the lab-derived local foam math.
 const RIFT_LAB_OPTICS = typeof location === "undefined" ||
   new URLSearchParams(location.search).get("riftLabOptics") !== "off";
+// Fluid Lab-derived surface hydrodynamics: read solved shallow water velocity
+// and aeration in the vertex stage. Revert with ?riftFluidLab=off.
+const RIFT_FLUID_LAB_SURFACE = typeof location === "undefined" ||
+  new URLSearchParams(location.search).get("riftFluidLab") !== "off";
 // Pool-inspired shore optics: clear thin-water absorption, water-column
 // transmission, and normal-based focusing instead of tiled marble bands.
 // ?riftPoolShore=off compiles the previous shoreline look for A/B testing.
@@ -139,6 +144,8 @@ function installWaterProOptics(handle) {
   if (!geometry || !material || !geometry.getAttribute?.("fftDepthWorld")) return;
 
   const depth = attribute("fftDepthWorld", "float");
+  const labHydro = RIFT_FLUID_LAB_SURFACE
+    ? createFluidLabShoreFlow(handle, geometry) : null;
   const time = uniform(0.0);
   const storm = uniform(0.0);
   // Driven by the shoreline solver after each visual update. These are
@@ -568,10 +575,29 @@ function installWaterProOptics(handle) {
       .mul(labImpactEnergy)
       .mul(float(1).sub(underwater))
     : float(0);
+  // Physically coupled nearshore whitewater: the M8/M5 lab behavior
+  // follows the actual finite-depth solver's aeration (W), height (X)
+  // and horizontal flow (Y/Z), not periodic painted wave bands.
+  // Sampling was performed per-vertex; no storage-buffer reads per pixel.
+  const labDepthGate = float(1).sub(smoothstep(float(1.1), float(6.2), depth));
+  const labHydroFlow = labHydro
+    ? clamp(abs(labHydro.state.y).add(abs(labHydro.state.z)), 0, 4)
+    : float(0);
+  const labHydroFoam = labHydro
+    ? clamp(
+        labHydro.state.w.mul(0.72)
+          .add(smoothstep(float(0.28), float(1.35), labHydroFlow)
+            .mul(0.12))
+          .add(smoothstep(float(0.075), float(0.32), abs(labHydro.state.x))
+            .mul(0.075)),
+        0, 0.75,
+      ).mul(labHydro.coverage).mul(labDepthGate)
+        .mul(float(1).sub(underwater.mul(0.9)))
+    : float(0);
   const combinedFoam = clamp(
     whitecap.add(openSeaFoam).add(brokenFoam.mul(0.87))
       .add(shoreSpill).add(waveLensFoam).add(breakingLip)
-      .add(labFoam), 0, 0.97);
+      .add(labFoam).add(labHydroFoam), 0, 0.97);
 
   // View-dependent Fresnel / wavelet sky reflection. This uses the already
   // available sky and FFT normals, avoiding additional sky texture fetches
@@ -688,7 +714,11 @@ function installWaterProOptics(handle) {
     body = body.mul(float(1).add(broadTone));
     body = mix(body, refractedShallow,
       shallowVisibility.mul(float(1).sub(combinedFoam.mul(0.72)))
-        .mul(POOL_SHORE_OPTICS ? float(0.32) : float(0.24)));
+        .mul(POOL_SHORE_OPTICS ? float(0.32) : float(0.24))
+        .add(labHydro
+          ? smoothstep(float(0.20), float(1.65), labHydroFlow)
+            .mul(labDepthGate).mul(labHydro.coverage).mul(0.065)
+          : float(0)));
     // At the sand-water interface, clarity comes from the visible
     // seabed, not an opaque turquoise stripe painted across the surface.
     body = mix(body, color(0xa8e9dc),

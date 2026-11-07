@@ -6,6 +6,7 @@ import { setGPUShallowWaterInteraction } from "./gpu_shallow_water.js";
 import { consumeRiftWaterImpact, resetRiftWaterImpacts, emitRiftWaterImpact } from "./waterLabInteractions.js";
 import { createFluidLabNearfield } from "./fluidLabNearfield.js";
 import { updateFluidLabLocalOptics } from "./fluidLabLocalOptics.js";
+import { createGPUFluidBreakers } from "./gpuFluidBreakers.js";
 
 function setFFTReflectionOwnership(active) {
   if (typeof globalThis !== "undefined") {
@@ -92,6 +93,21 @@ export function createLiquidPlane(
           try { handle.__riftNextWater?.dispose(); } catch (_) {}
           handle.__riftNextWater = null;
           console.warn("[rift-water] Experimental setup failed; current renderer retained", error);
+        }
+      }
+      // Physical breaking crest: the shallow solver's hydraulic jump
+      // dissipates momentum and drives an overturning lip/whitewater mesh.
+      // Explicit A/B flag or API fallback keeps the old scripted curl.
+      const fluidBreakingEnabled = typeof location === "undefined" ||
+        new URLSearchParams(location.search).get("riftBreakFluid") !== "off";
+      if (fluidBreakingEnabled) {
+        try {
+          handle.__riftBreakFluid = createGPUFluidBreakers(scene, handle);
+          if (handle.__riftBreakFluid) console.info(
+            "[rift-water] Live GPU shallow-fluid breaking crest active",
+          );
+        } catch (error) {
+          console.warn("[rift-water] GPU breaker unavailable; scripted curl retained", error);
         }
       }
       // Localized Fluid Lab PBF interaction mesh. One instanced draw with
@@ -324,6 +340,8 @@ export function disposeLiquidPlane(scene, handle) {
   if (handle?.gpuFFT) {
     setFFTReflectionOwnership(false);
     resetRiftWaterImpacts(handle);
+    try { handle.__riftBreakFluid?.dispose(); } catch (error) { console.warn(error); }
+    handle.__riftBreakFluid = null;
     try { handle.__riftFluidLabNearfield?.dispose(); } catch (error) { console.warn(error); }
     handle.__riftFluidLabNearfield = null;
     handle.__riftFluidLabSwimmer = null;

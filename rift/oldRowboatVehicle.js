@@ -553,12 +553,19 @@ export function createOldRowboatVehicle({
       b.steering += (targetSteering - b.steering) * Math.min(1, h * 6);
       const speed = Math.hypot(b.vx, b.vz);
       const yaw = root.rotation.y;
-      // Rowing produces sustained stroke momentum rather than motor-speed
-      // snapping. Water drag is quadratic with a smaller linear component.
+      // Shape-aware hydrodynamic drag from Fluid Lab M5.1's principle:
+      // a long narrow hull slips more easily forward than sideways. Keep
+      // this on CPU; transferring the lab's particle-neighbour GPU passes
+      // would cost far too much on iPhone.
       const thrust = b.throttle * 880;
-      const horizontalDrag = 0.20 + 0.13 * speed;
-      b.vx += (thrust * Math.cos(yaw) / b.mass - b.vx * horizontalDrag) * h;
-      b.vz += (-thrust * Math.sin(yaw) / b.mass - b.vz * horizontalDrag) * h;
+      const fx = Math.cos(yaw), fz = -Math.sin(yaw);
+      const sx = Math.sin(yaw), sz = Math.cos(yaw);
+      const forwardSpeed = b.vx * fx + b.vz * fz;
+      const sideSpeed = b.vx * sx + b.vz * sz;
+      const forwardDrag = forwardSpeed * (0.16 + 0.09 * Math.abs(forwardSpeed));
+      const lateralDrag = sideSpeed * (1.05 + 0.26 * Math.abs(sideSpeed));
+      b.vx += (thrust * fx / b.mass - fx * forwardDrag - sx * lateralDrag) * h;
+      b.vz += (thrust * fz / b.mass - fz * forwardDrag - sz * lateralDrag) * h;
       const maxSpeed = 3.8;
       const v = Math.hypot(b.vx, b.vz);
       if (v > maxSpeed) { b.vx *= maxSpeed / v; b.vz *= maxSpeed / v; }

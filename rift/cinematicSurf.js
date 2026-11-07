@@ -177,6 +177,7 @@ export function createCinematicSurfZone(scene,ocean,groundHeight){
   const surfHandle=ocean.fftSurfSystem;
   const priorCurlOwner=surfHandle.__riftGPUFluidBreaker === true;
   surfHandle.__riftGPUFluidBreaker=true;
+  surfHandle.__riftCinematicSurfActive=true;
 
   const sea=ocean.waterY??8;
   // Opt-in visual proof for testing cache/deployment. No overlay by default.
@@ -366,6 +367,7 @@ export function createCinematicSurfZone(scene,ocean,groundHeight){
     scene.remove(faceMesh,foamMesh);
     monitor?.remove();
     surfHandle.__riftGPUFluidBreaker=priorCurlOwner;
+    surfHandle.__riftCinematicSurfActive=false;
     const release=()=>{
       face.geometry.dispose();whitewater.geometry.dispose();
       faceMaterial.dispose();foamMaterial.dispose();

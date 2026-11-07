@@ -655,7 +655,11 @@ export function createOldRowboatVehicle({
           if (depth <= 0) continue;
 
           const pointVy = b.ySpeed + b.pitchSpeed * lx - b.rollSpeed * lz;
-          const closingSpeed = surface.velocityY - pointVy;
+          // Encounter velocity: travelling into a rising slope increases
+          // relative water contact even if the wave itself barely moves.
+          const encounterVelocity = surface.velocityY +
+            b.vx * surface.slopeX + b.vz * surface.slopeZ;
+          const closingSpeed = encounterVelocity - pointVy;
           const hydrostatic = RHO * G * cellArea * depth;
           // Motion relative to water matters more than motion relative
           // to an arbitrary stationary world frame.
@@ -783,7 +787,7 @@ export function createOldRowboatVehicle({
     // Real relative water/hull contact pressure, rather than world-space
     // downward velocity, triggers the hull slap. A rising wave can hit a
     // stationary boat; a boat descending with the water does NOT splash.
-    if (boat.waveImpact > 0.10 && time - boat.labLastSlap > 0.75) {
+    if (boat.waveImpact > 0.018 && time - boat.labLastSlap > 0.85) {
       boat.labLastSlap = time;
       emitRiftWaterImpact(boat.handle, boat.impactX, boat.impactZ, {
         strength: clamp(0.35 + boat.waveImpact * 3.0, 0.4, 1.7),

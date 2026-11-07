@@ -122,15 +122,35 @@ patch(`  return vec4f(tonemap(col), 1.0);`,
   }
   return vec4f(resolvedColor,1.0);`,'rounded sparse silhouette resolve');
 
-const shaderMod=dev.createShaderModule({code:src,label:'fluidV5M820WhitewaterWGSL'});
-if(typeof shaderMod.getCompilationInfo==='function'){const info=await shaderMod.getCompilationInfo();const errors=(info.messages||[]).filter(m=>m.type==='error');if(errors.length)throw new Error('M8.2 whitewater WGSL: '+errors.map(m=>`${m.lineNum||'?'}:${m.linePos||'?'} ${m.message}`).join(' | '));}
-ssfr.pipeComposite=await dev.createRenderPipelineAsync({label:'fluidV5M820WhitewaterComposite',layout:'auto',vertex:{module:shaderMod,entryPoint:'vs'},fragment:{module:shaderMod,entryPoint:'fs',targets:[{format:ssfr.format}]},primitive:{topology:'triangle-list'}});ssfr.bindCache=null;
+// Preserve the currently working M7.4.6 (or M7.3.9 fallback) shader
+// when this optional whitewater composite cannot compile on WebKit.
+let whitewaterShaderReady=false;
+try {
+  const shaderMod=dev.createShaderModule({code:src,label:'fluidV5M820WhitewaterWGSL'});
+  if(typeof shaderMod.getCompilationInfo==='function'){
+    const info=await shaderMod.getCompilationInfo();
+    const errors=(info.messages||[]).filter(m=>m.type==='error');
+    if(errors.length)throw new Error('M8.2 whitewater WGSL: '+errors.map(m=>`${m.lineNum||'?'}:${m.linePos||'?'} ${m.message}`).join(' | '));
+  }
+  const pipeline=await dev.createRenderPipelineAsync({
+    label:'fluidV5M820WhitewaterComposite',layout:'auto',
+    vertex:{module:shaderMod,entryPoint:'vs'},
+    fragment:{module:shaderMod,entryPoint:'fs',targets:[{format:ssfr.format}]},
+    primitive:{topology:'triangle-list'},
+  });
+  ssfr.pipeComposite=pipeline;
+  ssfr.bindCache=null;
+  whitewaterShaderReady=true;
+}catch(error){
+  console.warn('[Fluid V5 M8.2] Whitewater WGSL unavailable; retaining previous SSFR shader',error);
+}
+
 realism.micro=Math.max(realism.micro,.42);realism.scattering=Math.max(realism.scattering,.20);realism.foam=Math.max(realism.foam,.50);realism.shafts=Math.max(realism.shafts,.16);ssfr.groundReflection=Math.max(ssfr.groundReflection,1.45);
 
 // Rename the existing foam slider so the UI reflects that it now controls both surface foam and entrained bubbles.
 for(const label of document.querySelectorAll('.m742Row label')){if(label.textContent==='EDGE FOAM')label.textContent='WHITEWATER';}
 const tabbar=document.getElementById('m742Tabs'),host=document.getElementById('m742Host');if(tabbar&&host){const tabs=[...tabbar.children],idx=tabs.findIndex(b=>b.dataset.key==='realism');const page=idx>=0?host.children[idx]:null;if(page){const note=document.createElement('div');note.className='m742Status';note.style.marginTop='10px';note.textContent='M8.2 WHITEWATER\nSurface foam and entrained micro-bubbles are generated from reconstructed curvature, thin sheets and steep breaking regions. This is a one-way diffuse-material layer: it improves visual realism without pushing the primary fluid or adding another GPU submission.';page.appendChild(note);}}
 
-window.__v5M820Whitewater={online:true,backend:'activity-driven-foam-bubbles-plus-capillary-caustics-m820',gpuPassesAdded:0,gpuSubmitsAdded:0};
+window.__v5M820Whitewater={online:whitewaterShaderReady,shaderReady:whitewaterShaderReady,backend:whitewaterShaderReady?'activity-driven-foam-bubbles-plus-capillary-caustics-m820':'fallback-previous-composite',gpuPassesAdded:0,gpuSubmitsAdded:0};
 window.__fluidV5Version='8.2.0';
-console.info('[Fluid V5 M8.2] capillary ripples + Jacobian caustics + whitewater foam/bubbles online; zero added passes/submits.');
+console.info(whitewaterShaderReady?'[Fluid V5 M8.2] capillary and whitewater optics active; zero added passes/submits.':'[Fluid V5 M8.2] previous water shader retained (whitewater fallback).');

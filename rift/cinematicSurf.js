@@ -356,7 +356,11 @@ export function createCinematicSurfZone(scene,ocean,groundHeight){
         // the coast for several seconds even after its parent wave
         // collapses and resets offshore. The procedural foam atlas cuts
         // the sheet into branching strands, islands and dissolving holes.
-        const foamFront=wake.origin-foamAge*(2.0+.22*w);
+        // Never feed infinite coordinates into a GPU vertex buffer before
+        // the first break event (birth starts at -Infinity).
+        const foamFront=foamLife>0
+          ? wake.origin-foamAge*(2.0+.22*w)
+          : distance;
         const trail=(7+w*2.4)+Math.min(5,Math.max(0,foamAge)*1.25);
         for(let j=0;j<=FOAM_ROWS;j++){
           const v=j/FOAM_ROWS;

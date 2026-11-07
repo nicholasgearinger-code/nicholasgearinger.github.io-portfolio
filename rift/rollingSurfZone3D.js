@@ -180,7 +180,10 @@ export function createVolumetricSurfZone(scene, ocean, groundHeight) {
   let lastFrameTime = null, surfaceAccum = 0;
   let centerIndex = 0, disposed = false;
   const lastEmit = [-100, -100, -100], lastContact = [-100, -100, -100];
-  const lastEmitParticle = [0, 0, 0], lastCamera = { x: Infinity, z: Infinity };
+  const lastCamera = { x: Infinity, z: Infinity };
+  // Adaptive surf CPU budget. Preserve the large wave faces even if the
+  // existing island/ocean falls to ~11 fps; trim droplet bursts first.
+  let slowFrameCount = 0;
   const geometryPeriod = MOBILE ? (1 / 13) : (1 / 22);
 
   function rebuildSurface(time, camera) {
@@ -303,7 +306,8 @@ export function createVolumetricSurfZone(scene, ocean, groundHeight) {
         shoreX: -ox, shoreZ: -oz,
         speed: 1.6 + profile.amplitude * 0.85,
         height: 1.2 + profile.amplitude * 0.64,
-        count: MOBILE ? 7 : 15, spread: MOBILE ? 1.5 : 2.4,
+        count: MOBILE ? (slowFrameCount > 7 ? 4 : 7) : 15,
+        spread: MOBILE ? 1.5 : 2.4,
       });
       // A collapsing 3D wave feeds its re-entry pressure back to the
       // existing GPU shallow-water solver. Rate-limited, one event
@@ -350,8 +354,12 @@ export function createVolumetricSurfZone(scene, ocean, groundHeight) {
       lastFrameTime = time; surfaceAccum = geometryPeriod;
     }
     lastFrameTime = time;
+    slowFrameCount = MOBILE
+      ? clamp(slowFrameCount + (dt > 0.055 ? 1 : -2), 0, 24) : 0;
+    const period = MOBILE && slowFrameCount > 7
+      ? 1 / 10 : geometryPeriod;
     surfaceAccum += Math.min(0.09, Math.max(0, dt));
-    if (surfaceAccum >= geometryPeriod) {
+    if (surfaceAccum >= period) {
       rebuildSurface(time, camera);
       surfaceAccum = 0;
     }

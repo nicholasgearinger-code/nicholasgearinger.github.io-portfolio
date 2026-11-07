@@ -64,6 +64,10 @@ const REFERENCE_GLASS_LOOK = typeof location === "undefined" ||
 const PHYSICAL_OPTICS_PHASE1 = typeof location !== "undefined" &&
   new URLSearchParams(location.search).get("riftPhysics1") === "on";
 const WATER_IOR = 1.333;
+// Fallback for the fragile mobile/WebGPU shader path: append
+// ?riftLabOptics=off to compile out the lab-derived local foam math.
+const RIFT_LAB_OPTICS = typeof location === "undefined" ||
+  new URLSearchParams(location.search).get("riftLabOptics") !== "off";
 // Phase 2 adds a coherent multi-scale normal field over the existing two
 // REAL geometry FFT cascades; ?riftWaves2=off restores legacy optical chop.
 const PHASE2_WAVE_MOTION = typeof location === "undefined" ||
@@ -535,9 +539,11 @@ function installWaterProOptics(handle) {
   const labDz = positionWorld.z.sub(labImpactCenter.y);
   const labDistSq = labDx.mul(labDx).add(labDz.mul(labDz))
     .mul(labImpactInvRadiusSq);
-  const labFoam = float(1).sub(smoothstep(float(0.08), float(1), labDistSq))
-    .mul(labImpactEnergy)
-    .mul(float(1).sub(underwater));
+  const labFoam = RIFT_LAB_OPTICS
+    ? float(1).sub(smoothstep(float(0.08), float(1), labDistSq))
+      .mul(labImpactEnergy)
+      .mul(float(1).sub(underwater))
+    : float(0);
   const combinedFoam = clamp(
     whitecap.add(openSeaFoam).add(brokenFoam.mul(0.87))
       .add(shoreSpill).add(waveLensFoam).add(breakingLip)

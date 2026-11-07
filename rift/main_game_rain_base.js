@@ -3205,9 +3205,10 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
       // zero. Floored at 0.4 so the net never fully stops.
       const waveSpeedFactor = float(0.4).add(float(1.0).sub(abs(waveNorm.sub(0.5)).mul(2.0)).mul(0.9));
 
-      // Lower spatial frequency avoids exposing repeated 256px caustic
-      // tiles as the aligned grid visible through the very shallow surf.
-      const worldXZ = positionWorld.xz.mul(0.11);
+      // Preserve the loader's caustic-domain patch signature. The pool
+      // shoreline attenuation and expanded warp below soften tiling without
+      // breaking the existing post-loader wave-coupled caustic update.
+      const worldXZ = positionWorld.xz.mul(0.15);
       // Organic world-space domain warp prevents the repeated caustic texture
       // from revealing its square tile boundaries. Uses cheap wave phases,
       // smooth periodic offsets and the existing two texture samples.

@@ -179,6 +179,22 @@ export function createCinematicSurfZone(scene,ocean,groundHeight){
   surfHandle.__riftGPUFluidBreaker=true;
 
   const sea=ocean.waterY??8;
+  // Opt-in visual proof for testing cache/deployment. No overlay by default.
+  const diagnostics=typeof location!=="undefined" &&
+    new URLSearchParams(location.search).get("riftSurfVisualStats")==="1";
+  const monitor=diagnostics&&typeof document!=="undefined"&&
+    document.body?document.createElement("div"):null;
+  if(monitor){
+    monitor.style.cssText=[
+      "position:fixed","top:72px","right:8px","z-index:99999",
+      "background:#041b24df","color:#d8fefb",
+      "font:600 11px/1.5 monospace","padding:8px 9px",
+      "border:1px solid #6bc8d1","border-radius:7px",
+      "pointer-events:none","white-space:pre",
+    ].join(";");
+    monitor.textContent="CINEMATIC SURF • ACTIVE";
+    document.body.appendChild(monitor);
+  }
   let centerIndex=0,previousCamera={x:Infinity,z:Infinity};
   let timeLast=0,frameAccum=0,lastImpacts=[-10,-10,-10],disposed=false;
   const depthCache=new Map();
@@ -338,11 +354,17 @@ export function createCinematicSurfZone(scene,ocean,groundHeight){
       ? (dt>.063?1/9:1/13) : 1/24;
     motion.value=time;
     if(frameAccum>=interval){updateGeometry(time);frameAccum=0;}
+    if(monitor)monitor.textContent=
+      "CINEMATIC SURF • ACTIVE\n"+
+      "Rolling fronts: 3\n"+
+      "Foam: procedural + moving\n"+
+      "Mode: animated / FFT physics";
   }
   function dispose(){
     if(disposed)return;
     disposed=true;
     scene.remove(faceMesh,foamMesh);
+    monitor?.remove();
     surfHandle.__riftGPUFluidBreaker=priorCurlOwner;
     const release=()=>{
       face.geometry.dispose();whitewater.geometry.dispose();

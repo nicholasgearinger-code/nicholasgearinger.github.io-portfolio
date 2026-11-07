@@ -19,6 +19,24 @@ function createUnifiedSurfaceAdapter({
 }) {
   const priorColor = material.colorNode;
   const priorRoughness = material.roughnessNode;
+  // The Experimental optical adapter previously replaced both of these
+  // node graphs wholesale. On iPhone that silently hid Rift's Fluid Lab
+  // shoreline: bilinearly solved foam, flow normals, local optical thickness
+  // and water-column refraction from the existing GPU shallow-water solver.
+  //
+  // Preserve the full already-compiled production graph on mobile instead
+  // of blending two large fragment graphs (which would hurt ~13 fps).
+  // Offshore geometry, surf simulation and shared capture logic still run.
+  // A/B fallback: ?riftExperimentalFluid=off restores the prior renderer.
+  const preserveMobileFluidLab = Boolean(
+    field.source?.fftLocalLabOpticsActive &&
+    priorColor && priorRoughness &&
+    typeof navigator !== "undefined" &&
+    (/iPhone|iPad|iPod/i.test(navigator.userAgent || "") ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)) &&
+    (typeof location === "undefined" ||
+      new URLSearchParams(location.search).get("riftExperimentalFluid") !== "off")
+  );
   const priorIOR = material.ior;
   const priorTransmission = material.transmissionNode;
   const priorThickness = material.thicknessNode;
@@ -341,10 +359,15 @@ function createUnifiedSurfaceAdapter({
     get active() { return active; },
     apply() {
       if (active) return;
-      material.colorNode = total;
-      material.roughnessNode = roughness;
-      material.transmissionNode = physicalTransmission;
-      material.thicknessNode = physicalThickness;
+      material.colorNode = preserveMobileFluidLab ? priorColor : total;
+      material.roughnessNode = preserveMobileFluidLab ? priorRoughness : roughness;
+      material.transmissionNode = preserveMobileFluidLab
+        ? priorTransmission : physicalTransmission;
+      material.thicknessNode = preserveMobileFluidLab
+        ? priorThickness : physicalThickness;
+      if (preserveMobileFluidLab) {
+        field.source.__riftExperimentalFluidPreserved = true;
+      }
       material.ior = WATER_IOR;
       material.needsUpdate = true;
       active = true;
@@ -376,6 +399,9 @@ function createUnifiedSurfaceAdapter({
       if (!active) return;
       material.colorNode = priorColor;
       material.roughnessNode = priorRoughness;
+      if (preserveMobileFluidLab) {
+        field.source.__riftExperimentalFluidPreserved = false;
+      }
       material.ior = priorIOR;
       material.transmissionNode = priorTransmission;
       material.thicknessNode = priorThickness;

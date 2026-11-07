@@ -10,7 +10,13 @@
 // Disable with ?riftSurf3D=off and compare with previous FFT+shore breakers.
 import * as THREE from "three";
 import { attribute } from "three/tsl";
-import { createSurfParticlePool, emitSurfFluid, advanceSurfFluid } from "./surfZoneFluid3D.js";
+import {
+  createSurfParticlePool, emitSurfFluid, advanceSurfFluid,
+  seedSurfWaveBody,
+} from "./surfZoneFluid3D.js";
+import {
+  createSurfVolumeField, buildSurfVolumeField,
+} from "./surfWaveVolumeMesh.js";
 import { emitRiftWaterImpact } from "./waterLabInteractions.js";
 
 const MOBILE = typeof navigator !== "undefined" &&
@@ -141,7 +147,46 @@ export function createVolumetricSurfZone(scene, ocean, groundHeight) {
   foamMesh.renderOrder = 14;
   scene.add(bodyMesh, foamMesh);
 
-  const particlePool = createSurfParticlePool(MOBILE ? 160 : 460);
+  // Legacy spray remains light. A separate, dense PBF body now provides
+  // the visible overturning wave *volume*, not just disconnected droplets.
+  const particlePool = createSurfParticlePool(MOBILE ? 112 : 320);
+  const volumeEnabled = typeof location === "undefined" ||
+    new URLSearchParams(location.search).get("riftSurfVolume") !== "off";
+  const volumePool = volumeEnabled
+    ? createSurfParticlePool(MOBILE ? 240 : 420, {
+        supportRadius: MOBILE ? 0.95 : 0.82,
+        restSpacing: MOBILE ? 0.54 : 0.45,
+      })
+    : null;
+  const volumeField = volumePool ? createSurfVolumeField(MOBILE) : null;
+  let volumeMesh = null, volumeGeometry = null, volumeMaterial = null;
+  if (volumeField) {
+    // One closed implicit surface from live SPH/PBF particles. The mesh is
+    // reconstructed at <=9Hz on iPhone, with no GPU readback or SSFR pass.
+    volumeGeometry = new THREE.BufferGeometry();
+    for (const [name, values] of [
+      ["position", volumeField.positions],
+      ["normal", volumeField.normals],
+      ["color", volumeField.colors],
+    ]) {
+      volumeGeometry.setAttribute(name,
+        new THREE.BufferAttribute(values, 3).setUsage(THREE.DynamicDrawUsage));
+    }
+    volumeGeometry.setDrawRange(0, 0);
+    volumeMaterial = new THREE.MeshStandardNodeMaterial({
+      color: 0xffffff, vertexColors: true,
+      roughness: 0.11, metalness: 0.015,
+      transparent: true, opacity: 0.78, depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    volumeMaterial.forceSinglePass = true;
+    volumeMesh = new THREE.Mesh(volumeGeometry, volumeMaterial);
+    volumeMesh.name = "rift-simulated-3d-breaking-wave-volume";
+    volumeMesh.renderOrder = 12;
+    volumeMesh.frustumCulled = false; // mutable fluid surface
+    volumeMesh.visible = false;
+    scene.add(volumeMesh);
+  }
   const dropletGeometry = new THREE.IcosahedronGeometry(0.10, 0);
   const dropletMaterial = new THREE.MeshBasicNodeMaterial({
     color: 0xf0fffb, transparent: true, opacity: 0.76,
@@ -196,6 +241,15 @@ export function createVolumetricSurfZone(scene, ocean, groundHeight) {
   // existing island/ocean falls to ~11 fps; trim droplet bursts first.
   let slowFrameCount = 0;
   const geometryPeriod = MOBILE ? (1 / 13) : (1 / 22);
+  // Exactly ONE near-field wave is volumetric. Other ocean-scale wave
+  // fronts remain the cheaper FFT/rolling faces; each volume collapses
+  // and re-enters the existing shallow-water solver when it breaks.
+  const volume = {
+    active: false, band: 1, center: 0, started: 0,
+    nextSpawn: 0.15, lastImpact: -10, previousCount: 0,
+    originX: 0, originZ: 0, centerShoreX: 0, centerShoreZ: -1,
+    lastMeshUpdate: -10, initialCount: 0,
+  };
 
   function rebuildSurface(time, camera) {
     if (camera && (Math.hypot(camera.x - lastCamera.x,
@@ -243,8 +297,15 @@ export function createVolumetricSurfZone(scene, ocean, groundHeight) {
           const foamCrest = smooth(0.63, 0.98, v) * profile.foam;
           const waveFade = smooth(0.0, 0.10, phase) *
             (1 - smooth(0.84, 0.99, phase));
+          const volumeBlend = volume.active && bandIndex === volume.band
+            ? clamp(volume.previousCount / Math.max(1, volume.initialCount),
+                0, 1) *
+              smooth(0.12, 0.50, time - volume.started) *
+              (1 - smooth(5, 11, Math.abs(i - COLUMNS * 0.5)))
+            : 0;
           const faceAlpha = clamp(waveFade * 0.85 *
-            (0.15 + smooth(0.035, 0.28, v) * 0.85), 0, 0.85);
+            (0.15 + smooth(0.035, 0.28, v) * 0.85) *
+            (1 - volumeBlend * 0.93), 0, 0.85);
           for (let shell = 0; shell < 2; shell++) {
             const shellOffset = shell === 0 ? 0 : 0.42 +
               (1 - v) * 1.15;
@@ -287,7 +348,8 @@ export function createVolumetricSurfZone(scene, ocean, groundHeight) {
             0.51 + foamColor * 0.48,
             clamp(profile.foam * (0.42 + 0.51 *
               Math.sin(v * Math.PI)) *
-              (0.85 + Math.sin(i * 1.6 + time * 1.9) * 0.13),
+              (0.85 + Math.sin(i * 1.6 + time * 1.9) * 0.13) *
+              (1 - volumeBlend * 0.60),
               0, 0.93));
         }
       }
@@ -345,6 +407,84 @@ export function createVolumetricSurfZone(scene, ocean, groundHeight) {
     }
   }
 
+  function updateVolumetricBreaker(dt, time, camera) {
+    if (!volumePool || !volumeField || !camera ||
+        !Number.isFinite(camera.x)) return;
+
+    if (!volume.active && time >= volume.nextSpawn) {
+      // Attach the local volume to the wave segment nearest the player.
+      // The initial shape is only the starting condition; from here its
+      // geometry follows particle pressure, viscosity and gravity.
+      const sample = samples[centerIndex];
+      const wave = WAVES[volume.band];
+      const phase = fract(time / wave.period + wave.phase +
+        (Number(sample.liftRand) || 0) * 0.014);
+      const distance = clamp(wave.far - (wave.far - wave.near) * phase,
+        21, 43);
+      const x = sample.x + sample.outwardX * distance;
+      const z = sample.z + sample.outwardZ * distance;
+      if (Math.hypot(camera.x - x, camera.z - z) < 118) {
+        volume.centerShoreX = -sample.outwardX;
+        volume.centerShoreZ = -sample.outwardZ;
+        volume.originX = x; volume.originZ = z;
+        volume.initialCount = seedSurfWaveBody(volumePool, x, z, {
+          seaY: sea, shoreX: volume.centerShoreX,
+          shoreZ: volume.centerShoreZ,
+          height: MOBILE ? 3.05 : 3.65,
+          width: MOBILE ? 8.1 : 11.2,
+          thickness: MOBILE ? 2.3 : 2.6,
+          columns: MOBILE ? 12 : 14,
+          levels: MOBILE ? 5 : 6,
+          layers: MOBILE ? 4 : 5,
+        });
+        volume.previousCount = volume.initialCount;
+        volume.started = time;
+        volume.active = volume.initialCount > 0;
+        volume.lastMeshUpdate = -10;
+        volume.nextSpawn = time + (MOBILE ? 4.2 : 3.4);
+      } else {
+        volume.nextSpawn = time + 0.7;
+      }
+    }
+    if (!volume.active) return;
+    const count = advanceSurfFluid(volumePool, dt, sea, groundHeight);
+    const absorbed = volume.previousCount - count;
+    if (absorbed >= 8 && time - volume.lastImpact > 0.40) {
+      volume.lastImpact = time;
+      emitRiftWaterImpact(ocean, volume.originX +
+        volume.centerShoreX * 2.6,
+        volume.originZ + volume.centerShoreZ * 2.6, {
+          strength: clamp(absorbed * 0.052, 0.45, 2.0),
+          radius: 3.9, foam: 0.22, kind: "3d-crest-collapse",
+        }, time);
+    }
+    volume.previousCount = count;
+    if (count < 7 || time - volume.started > 2.5) {
+      volume.active = false;
+      volumeMesh.visible = false;
+      volume.nextSpawn = Math.max(volume.nextSpawn, time + 1.5);
+      volumeGeometry.setDrawRange(0, 0);
+      return;
+    }
+    const meshPeriod = MOBILE
+      ? (slowFrameCount > 7 ? 1 / 5 : 1 / 9)
+      : 1 / 16;
+    if (time - volume.lastMeshUpdate >= meshPeriod) {
+      const result = buildSurfVolumeField(volumeField, volumePool, {
+        seaY: sea, shoreX: volume.centerShoreX,
+        shoreZ: volume.centerShoreZ,
+      });
+      volumeGeometry.setDrawRange(0, result.triangles * 3);
+      volumeMesh.visible = result.triangles > 0;
+      if (volumeMesh.visible) {
+        for (const key of ["position", "normal", "color"]) {
+          volumeGeometry.attributes[key].needsUpdate = true;
+        }
+      }
+      volume.lastMeshUpdate = time;
+    }
+  }
+
   function drawParticles() {
     let alive = 0;
     for (let i = 0; i < particlePool.particles.length; i++) {
@@ -369,6 +509,8 @@ export function createVolumetricSurfZone(scene, ocean, groundHeight) {
       cameraY < sea - 0.12;
     bodyMesh.visible = foamMesh.visible = !underwater;
     particleMesh.visible = !underwater && particlePool.visible > 0;
+    if (volumeMesh) volumeMesh.visible = !underwater &&
+      volume.active && volumeField.vertexCount > 0;
     if (underwater) return;
     const time = Number.isFinite(elapsedTime)
       ? elapsedTime : (lastFrameTime ?? 0) + Math.max(0, dt);
@@ -385,6 +527,7 @@ export function createVolumetricSurfZone(scene, ocean, groundHeight) {
       rebuildSurface(time, camera);
       surfaceAccum = 0;
     }
+    updateVolumetricBreaker(dt, time, camera);
     release3DFluid(time, camera);
     const alive = advanceSurfFluid(particlePool, dt, sea, groundHeight);
     if (alive || particleMesh.visible) drawParticles();
@@ -394,10 +537,13 @@ export function createVolumetricSurfZone(scene, ocean, groundHeight) {
     if (disposed) return;
     disposed = true;
     scene.remove(bodyMesh, foamMesh, particleMesh);
+    if (volumeMesh) scene.remove(volumeMesh);
     const cleanup = () => {
       body.geometry.dispose(); foam.geometry.dispose();
       bodyMaterial.dispose(); foamMaterial.dispose();
       dropletGeometry.dispose(); dropletMaterial.dispose();
+      volumeGeometry?.dispose();
+      volumeMaterial?.dispose();
     };
     // Avoid freeing GPU resources still referenced by the current frame.
     if (typeof requestAnimationFrame === "function") {
@@ -411,5 +557,6 @@ export function createVolumetricSurfZone(scene, ocean, groundHeight) {
     update, dispose, particlePool, bodyMesh, foamMesh,
     waveFaceVertices: body.positions.length / 3,
     foamVertices: foam.positions.length / 3,
+    volumePool, volumeField, volumeMesh, volumeState: volume,
   };
 }

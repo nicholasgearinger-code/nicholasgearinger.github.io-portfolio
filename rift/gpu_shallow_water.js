@@ -103,9 +103,15 @@ export function createGPUShallowWater(sampleHeight, waterY, fftSpatialA, fftDoma
     // Pool lab-inspired fluid/solid contact: a shore cell becomes wetter as
     // a crest arrives and drains as the flow recedes. Previously wetness was
     // frozen at the mean sea level and created a very abrupt flat boundary.
-    const localWetDepth = max(bc.x.add(c.x), float(0));
+    // Pool-inspired moving wet/dry front: a neighboring positive crest
+    // wets the next sand cell BEFORE its own eta has become positive.
+    // The old local-only test zeroed dry eta every frame, preventing
+    // shoreline run-up and making an unnaturally sharp straight edge.
+    const incomingCrest = max(max(l.x, r.x), max(d.x, u.x));
+    const localWetDepth = max(bc.x.add(c.x)
+      .add(max(incomingCrest, float(0)).mul(0.24)), float(0));
     const wet = POOL_SHORE_SWASH
-      ? smoothstep(float(0.025), float(0.32), localWetDepth)
+      ? smoothstep(float(0.012), float(0.23), localWetDepth)
       : smoothstep(float(0.05), float(0.34), bc.x);
     const hL = max(bL.add(l.x), float(0.05));
     const hR = max(bR.add(r.x), float(0.05));
@@ -181,7 +187,10 @@ export function createGPUShallowWater(sampleHeight, waterY, fftSpatialA, fftDoma
     velX = velX.add(ix.mul(invDist).mul(impulse).mul(dt).mul(0.95));
     velZ = velZ.add(iz.mul(invDist).mul(impulse).mul(dt).mul(0.95));
 
-    const etaLimit = min(float(0.95), bc.x.mul(0.34).add(0.10));
+    // Newly wetted sand needs enough positive depth for a gentle run-up,
+    // but no unbounded puddles may form inland.
+    const etaLimit = min(float(0.95), bc.x.mul(0.34)
+      .add(POOL_SHORE_SWASH ? float(0.17) : float(0.10)));
     eta = clamp(eta, etaLimit.negate(), etaLimit);
 
     const localDepth = max(bc.x.add(eta), float(0.08));

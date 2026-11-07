@@ -54,13 +54,13 @@ export function irregularSurfPhase(t,band,index,sampleCount,columnOffset=0){
   // Sets of small and large waves, overlaid with broad and finer
   // variation along the coast. The cycle change occurs offscreen while
   // the faded wave resets, never during a visible crest.
-  const group=.69+.56*(.5+.5*Math.sin(
+  const group=.80+.52*(.5+.5*Math.sin(
     cycle*2.399963+band*1.67));
-  const spatial=clamp01(
-    .80+.15*Math.sin(theta*3-t*.092+band*1.4)+
-    .11*Math.sin(theta*7+t*.052+band*.7)
-  );
-  const heightScale=Math.max(.55,Math.min(1.40,group*spatial));
+  const spatial=Math.max(.68,Math.min(1.23,
+    .90+.17*Math.sin(theta*3-t*.092+band*1.4)+
+    .13*Math.sin(theta*7+t*.052+band*.7)
+  ));
+  const heightScale=Math.max(.56,Math.min(1.50,group*spatial));
   const breakOffset=.028*Math.sin(
     theta*5+t*.051+band*1.23);
   return {phase,cycle,heightScale,breakOffset,peel};
@@ -305,7 +305,14 @@ export function createCinematicSurfZone(scene,ocean,groundHeight){
           t,w,index,sampleCount,i-COLS*.5);
         const {phase,cycle,heightScale,breakOffset}=irregular;
         const travelled=smooth(0,1,phase);
-        const distance=lerp(wave.far,wave.near,travelled);
+        // Two oblique swell trains interfere along the coastline. Their
+        // world-periodic spatial waves bend a crest naturally while
+        // leaving its adjacent columns connected and continuous.
+        const theta=2*Math.PI*index/sampleCount;
+        const crossSwell=
+          .76*Math.sin(theta*4-t*.13+w*1.25)+
+          .37*Math.sin(theta*11+t*.08+w*.69);
+        const distance=lerp(wave.far,wave.near,travelled)+crossSwell;
         const depth=Math.max(0,sea-groundAt(index,distance));
         const shoal=clamp01((12-depth)/11);
         const rising=smooth(.04,.52,phase);
@@ -315,14 +322,18 @@ export function createCinematicSurfZone(scene,ocean,groundHeight){
         // Bathymetry changes where individual crest sections steepen.
         // Adjacent columns phase-shift smoothly, so the crash rolls
         // alongshore instead of happening along one uniform line.
-        const breakOnset=.50-breakOffset-shoal*.07;
+        const breakOnset=.50-breakOffset-shoal*.07-
+          .048*Math.max(0,heightScale-1);
         const curl=smooth(breakOnset-.14,breakOnset+.12,phase)*
           (1-smooth(.83,.985,phase));
+        const breakingPatch=Math.max(.54,Math.min(1,
+          .69+.24*Math.sin(theta*7-t*.29+w*.85)+
+          .17*Math.sin(theta*15+t*.11+w*1.57)));
         const broken=smooth(breakOnset,breakOnset+.25,phase)*
-          (1-smooth(.94,1,phase));
+          (1-smooth(.94,1,phase))*breakingPatch;
         const variation=1+
-          .07*Math.sin(index*.34+w*1.7+t*.23)+
-          .045*Math.sin(index*.61-w*.83-t*.11);
+          .08*Math.sin(theta*7+w*1.7+t*.23)+
+          .055*Math.sin(theta*17-w*.83-t*.11);
         const H=height*heightScale*variation;
         const plunge=smooth(.55,.79,phase);
         // Store wake by WORLD shoreline index, not screen column:
@@ -336,7 +347,7 @@ export function createCinematicSurfZone(scene,ocean,groundHeight){
           wake.origin=distance-Math.max(0,H)*.45;
           wake.strength=clamp01(.50+.34*heightScale+
             .12*Math.sin(index*.21+w));
-          wake.speed=1.5+Math.min(1.5,H*.32)+.16*w;
+          wake.speed=1.3+Math.min(1.7,H*.37)+.16*w;
         }
         const foamAge=t-wake.birth;
         const foamLife=foamAge>=0 && foamAge<FOAM_LIFETIME
@@ -351,7 +362,9 @@ export function createCinematicSurfZone(scene,ocean,groundHeight){
             v,distance,H,wave.width,curl,plunge);
           const faceH=shape.y;
           const curved=shape.radial;
-          const brokenEdge=0.11*Math.sin(i*1.83+j*.79+t*.9);
+          const brokenEdge=
+            .19*Math.sin(theta*11+v*5.7+t*.55+w)+
+            .09*Math.sin(theta*23-v*10.8-t*.38);
           const X=p.x+ox*(curved+brokenEdge*curl),
             Z=p.z+oz*(curved+brokenEdge*curl);
           const heightY=sea+0.035+faceH+

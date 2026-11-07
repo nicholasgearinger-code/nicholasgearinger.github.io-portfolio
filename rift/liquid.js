@@ -5,6 +5,7 @@ import { getEffectiveValue as getBaseGraphicsEffectiveValue } from "./graphicsSe
 import { setGPUShallowWaterInteraction } from "./gpu_shallow_water.js";
 import { consumeRiftWaterImpact, resetRiftWaterImpacts, emitRiftWaterImpact } from "./waterLabInteractions.js";
 import { createFluidLabNearfield } from "./fluidLabNearfield.js";
+import { updateFluidLabLocalOptics } from "./fluidLabLocalOptics.js";
 
 function setFFTReflectionOwnership(active) {
   if (typeof globalThis !== "undefined") {
@@ -193,6 +194,9 @@ export function updateLiquidPlane(
       stormAmount,
       dayAmount,
     );
+    // Keep the local fluid lens centered on the live boat/rower rather
+    // than a fixed world coordinate. The camera itself is sampled by TSL.
+    updateFluidLabLocalOptics(handle, handle.__riftRowboatWake);
     // Experimental Mode: modestly strengthen both LIVE FFT bands after the
     // normal v9 visual update has set their baseline scales. The existing
     // depth-aware shoreline blend still suppresses offshore energy near land.

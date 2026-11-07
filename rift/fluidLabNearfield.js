@@ -93,11 +93,26 @@ export function createFluidLabNearfield(scene, handle) {
           const d2 = dx * dx + dy * dy + dz * dz;
           if (d2 < 1e-9 || d2 >= SMOOTHING_RADIUS * SMOOTHING_RADIUS) continue;
           const distance = Math.sqrt(d2);
-          const push = Math.min(0.035, (SMOOTHING_RADIUS - distance) * 0.11)
-            / distance;
+          // Exactly the compact q² neighbor weight used by the Fluid
+          // Simulation Lab M5.1 hydrodynamics kernel, specialized here for
+          // a tiny, mobile-safe position-based droplet neighborhood.
+          const q = 1 - distance / SMOOTHING_RADIUS;
+          const weight = q * q;
+          const push = Math.min(0.035, weight * 0.041) / distance;
           const px = dx * push, py = dy * push, pz = dz * push;
           a.x -= px; a.y -= py; a.z -= pz;
           b.x += px; b.y += py; b.z += pz;
+          if (iteration === 0) {
+            // XSPH viscosity relaxes velocity differences without damping
+            // the whole splash: neighboring droplets flow together.
+            const viscosity = weight * 0.065;
+            const vx = (b.vx - a.vx) * viscosity;
+            const vy = (b.vy - a.vy) * viscosity;
+            const vz = (b.vz - a.vz) * viscosity;
+            a.vx += vx; b.vx -= vx;
+            a.vy += vy; b.vy -= vy;
+            a.vz += vz; b.vz -= vz;
+          }
         }
       }
     }

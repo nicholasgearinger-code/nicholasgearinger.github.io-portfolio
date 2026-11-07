@@ -3,7 +3,8 @@ import { createNextWaterSystem } from "./water_next/index.js";
 import * as oceanV19 from "./gpu_fft_ocean_r185_v22.js";
 import { getEffectiveValue as getBaseGraphicsEffectiveValue } from "./graphicsSettings_fft_base.js";
 import { setGPUShallowWaterInteraction } from "./gpu_shallow_water.js";
-import { consumeRiftWaterImpact, resetRiftWaterImpacts } from "./waterLabInteractions.js";
+import { consumeRiftWaterImpact, resetRiftWaterImpacts, emitRiftWaterImpact } from "./waterLabInteractions.js";
+import { createFluidLabNearfield } from "./fluidLabNearfield.js";
 
 function setFFTReflectionOwnership(active) {
   if (typeof globalThis !== "undefined") {
@@ -90,6 +91,17 @@ export function createLiquidPlane(
           try { handle.__riftNextWater?.dispose(); } catch (_) {}
           handle.__riftNextWater = null;
           console.warn("[rift-water] Experimental setup failed; current renderer retained", error);
+        }
+      }
+      // Localized Fluid Lab PBF interaction mesh. One instanced draw with
+      // ≤64 droplets on touch hardware. Ocean and distant sea stay FFT.
+      const fluidLabEnabled = typeof location === "undefined" ||
+        new URLSearchParams(location.search).get("riftFluidLab") !== "off";
+      if (fluidLabEnabled) {
+        try {
+          handle.__riftFluidLabNearfield = createFluidLabNearfield(scene, handle);
+        } catch (error) {
+          console.warn("[rift-water] Nearfield lab splash layer disabled", error);
         }
       }
       setFFTReflectionOwnership(true);
@@ -238,7 +250,33 @@ export function updateFluidSimWater(handle, renderer, elapsedTime) {
 export function updateRippleLayer(handle, renderer, cameraPos, cameraY, dt) {
   if (handle?.gpuFFT) {
     const boatWake = handle.__riftRowboatWake;
-    const lab = consumeRiftWaterImpact(handle, handle.fftV9Time?.value ?? 0);
+    const now = handle.fftV9Time?.value ?? 0;
+    // Fluid Lab M5.7: swimmer contact seeds the same event queue as
+    // boat/oar impacts. The nearfield PBF spray and the GPU shallow solver
+    // both receive this event without adding an ocean simulation pass.
+    if (!boatWake?.riding && cameraPos && dt > 0 &&
+        Math.abs(cameraY - handle.waterY) < 0.85) {
+      const prev = handle.__riftFluidLabSwimmer;
+      if (prev) {
+        const d = Math.hypot(cameraPos.x - prev.x, cameraPos.z - prev.z);
+        const speed = d / Math.max(0.008, dt);
+        if (d > 0.055 && speed > 0.6 && speed < 8.5 &&
+            now - prev.lastEmit > 0.40) {
+          emitRiftWaterImpact(handle, cameraPos.x, cameraPos.z, {
+            strength: Math.min(0.9, 0.24 + speed * 0.085),
+            radius: 1.35, foam: 0.09, kind: "swim",
+          }, now);
+          prev.lastEmit = now;
+        }
+        prev.x = cameraPos.x; prev.z = cameraPos.z;
+      } else {
+        handle.__riftFluidLabSwimmer = { x: cameraPos.x, z: cameraPos.z, lastEmit: now };
+      }
+    } else if (handle.__riftFluidLabSwimmer) {
+      handle.__riftFluidLabSwimmer = null;
+    }
+    const lab = consumeRiftWaterImpact(handle, now);
+    handle.__riftFluidLabNearfield?.update(dt, now, cameraPos);
     if (boatWake?.riding) {
       // The camera is seated within a moving boat. Do not mistake camera
       // motion for a swimmer and inject a second, exaggerated player wake.
@@ -282,6 +320,9 @@ export function disposeLiquidPlane(scene, handle) {
   if (handle?.gpuFFT) {
     setFFTReflectionOwnership(false);
     resetRiftWaterImpacts(handle);
+    try { handle.__riftFluidLabNearfield?.dispose(); } catch (error) { console.warn(error); }
+    handle.__riftFluidLabNearfield = null;
+    handle.__riftFluidLabSwimmer = null;
     try { handle.__riftNextWater?.dispose(); } catch (error) { console.warn(error); }
     return oceanV19.disposeGPUFFTOcean(scene, handle);
   }

@@ -3,6 +3,7 @@ import { createNextWaterSystem } from "./water_next/index.js";
 import * as oceanV19 from "./gpu_fft_ocean_r185_v22.js";
 import { getEffectiveValue as getBaseGraphicsEffectiveValue } from "./graphicsSettings_fft_base.js";
 import { setGPUShallowWaterInteraction } from "./gpu_shallow_water.js";
+import { consumeRiftWaterImpact, resetRiftWaterImpacts } from "./waterLabInteractions.js";
 
 function setFFTReflectionOwnership(active) {
   if (typeof globalThis !== "undefined") {
@@ -237,16 +238,18 @@ export function updateFluidSimWater(handle, renderer, elapsedTime) {
 export function updateRippleLayer(handle, renderer, cameraPos, cameraY, dt) {
   if (handle?.gpuFFT) {
     const boatWake = handle.__riftRowboatWake;
+    const lab = consumeRiftWaterImpact(handle, handle.fftV9Time?.value ?? 0);
     if (boatWake?.riding) {
       // The camera is seated within a moving boat. Do not mistake camera
       // motion for a swimmer and inject a second, exaggerated player wake.
       // Feed the SAME existing shallow solver's interaction uniform with
       // the stern displacement instead. The solver will advect/dissipate
       // it on its normal compute dispatch; this adds zero new GPU passes.
-      if (boatWake.strength > 0.02 && handle.fftShallowHandle?.gpuShallowWater) {
+      const impact = lab ?? (boatWake.strength > 0.02 ? boatWake : null);
+      if (impact?.strength > 0.02 && handle.fftShallowHandle?.gpuShallowWater) {
         setGPUShallowWaterInteraction(
-          handle.fftShallowHandle, boatWake.x, boatWake.z,
-          boatWake.strength, boatWake.radius,
+          handle.fftShallowHandle, impact.x, impact.z,
+          impact.strength, impact.radius,
         );
       }
       // Keep the player ripple tracker current for a smooth exit from
@@ -263,6 +266,13 @@ export function updateRippleLayer(handle, renderer, cameraPos, cameraY, dt) {
       return;
     }
     oceanV19.updateGPUFFTOceanRipples(handle, cameraPos, cameraY, dt);
+    // Discrete lab-style drops/impacts can override the continuous swimmer
+    // wake in the SAME interaction uniform. No additional GPU dispatch.
+    if (lab?.strength > 0.02 && handle.fftShallowHandle?.gpuShallowWater) {
+      setGPUShallowWaterInteraction(
+        handle.fftShallowHandle, lab.x, lab.z, lab.strength, lab.radius,
+      );
+    }
     return;
   }
   return legacy.updateRippleLayer(handle, renderer, cameraPos, cameraY, dt);
@@ -271,6 +281,7 @@ export function updateRippleLayer(handle, renderer, cameraPos, cameraY, dt) {
 export function disposeLiquidPlane(scene, handle) {
   if (handle?.gpuFFT) {
     setFFTReflectionOwnership(false);
+    resetRiftWaterImpacts(handle);
     try { handle.__riftNextWater?.dispose(); } catch (error) { console.warn(error); }
     return oceanV19.disposeGPUFFTOcean(scene, handle);
   }

@@ -284,6 +284,14 @@ export function createVolumetricSurfZone(scene, ocean, groundHeight) {
         const amplitude = profile.amplitude * (1 + swell);
         const breakRoll = profile.roll;
         const bodyWidth = wave.width;
+        // Shared by body AND foam loops; fading only the area occupied by
+        // the real 3D particle volume prevents double-rendered water walls.
+          const volumeBlend = volume.active && bandIndex === volume.band
+            ? clamp(volume.previousCount / Math.max(1, volume.initialCount),
+                0, 1) *
+              smooth(0.12, 0.50, time - volume.started) *
+              (1 - smooth(5, 11, Math.abs(i - COLUMNS * 0.5)))
+            : 0;
         // Color follows face slope, edge aeration and collapsing curl.
         // Vertex colors are interpolated across both shell faces.
         for (let j = 0; j <= ROWS; j++) {
@@ -297,12 +305,6 @@ export function createVolumetricSurfZone(scene, ocean, groundHeight) {
           const foamCrest = smooth(0.63, 0.98, v) * profile.foam;
           const waveFade = smooth(0.0, 0.10, phase) *
             (1 - smooth(0.84, 0.99, phase));
-          const volumeBlend = volume.active && bandIndex === volume.band
-            ? clamp(volume.previousCount / Math.max(1, volume.initialCount),
-                0, 1) *
-              smooth(0.12, 0.50, time - volume.started) *
-              (1 - smooth(5, 11, Math.abs(i - COLUMNS * 0.5)))
-            : 0;
           const faceAlpha = clamp(waveFade * 0.85 *
             (0.15 + smooth(0.035, 0.28, v) * 0.85) *
             (1 - volumeBlend * 0.93), 0, 0.85);

@@ -131,7 +131,7 @@ export function advanceSurfFluid(pool, frameDt, seaY, groundHeight) {
       }
       // On mobile don't sample full fractal island terrain for every
       // airborne particle; only check the seabed when near water level.
-      const floorY = p.y < seaY + 1.25 &&
+      const floorY = p.y < seaY + 0.20 &&
         typeof groundHeight === "function"
         ? groundHeight(p.x, p.z) : seaY - 4;
       // Landing returns droplets into the underlying FFT/shallow water.

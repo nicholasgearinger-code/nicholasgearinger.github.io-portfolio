@@ -43,18 +43,28 @@ patch(`  return vec4f(tonemap(col), 1.0);`,
   }
   return vec4f(resolvedColor,1.0);`,'rounded sparse silhouette resolve');
 
-const shaderMod=dev.createShaderModule({code:src,label:'fluidV5M746RealismWGSL'});
-if(typeof shaderMod.getCompilationInfo==='function'){
-  const info=await shaderMod.getCompilationInfo();
-  const errors=(info.messages||[]).filter(m=>m.type==='error');
-  if(errors.length) throw new Error('M7.4.6 realism WGSL: '+errors.map(m=>`${m.lineNum||'?'}:${m.linePos||'?'} ${m.message}`).join(' | '));
+// A shader feature must never take down the entire Fluid Lab. Preserve the
+// proven M7.3.9 composite when Safari rejects an optional optical branch.
+let pipe=ssfr.pipeComposite;
+let realismShaderReady=false;
+try {
+  const shaderMod=dev.createShaderModule({code:src,label:'fluidV5M746RealismWGSL'});
+  if(typeof shaderMod.getCompilationInfo==='function'){
+    const info=await shaderMod.getCompilationInfo();
+    const errors=(info.messages||[]).filter(m=>m.type==='error');
+    if(errors.length) throw new Error('M7.4.6 realism WGSL: '+errors.map(m=>`${m.lineNum||'?'}:${m.linePos||'?'} ${m.message}`).join(' | '));
+  }
+  pipe=await dev.createRenderPipelineAsync({
+    label:'fluidV5M746RealismComposite',layout:'auto',
+    vertex:{module:shaderMod,entryPoint:'vs'},
+    fragment:{module:shaderMod,entryPoint:'fs',targets:[{format:ssfr.format}]},
+    primitive:{topology:'triangle-list'},
+  });
+  realismShaderReady=true;
+}catch(error){
+  console.warn('[Fluid V5 M7.4.6] Optional realism unsupported; keeping previous composite',error);
 }
-const pipe=await dev.createRenderPipelineAsync({
-  label:'fluidV5M746RealismComposite',layout:'auto',
-  vertex:{module:shaderMod,entryPoint:'vs'},
-  fragment:{module:shaderMod,entryPoint:'fs',targets:[{format:ssfr.format}]},
-  primitive:{topology:'triangle-list'},
-});
+if(!pipe) throw new Error('M7.4.6 cannot fall back: base SSFR composite missing');
 
 const oldCompUni=ssfr.compUni;
 ssfr.compUni=dev.createBuffer({label:'fluidV5M746CompositeUniform',size:288,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
@@ -97,7 +107,7 @@ function preset(name){
 const inputs={};
 function sync(refresh=false){
   if(refresh){for(const [k,input] of Object.entries(inputs)){input.value=realism[k];const v=input.parentElement?.querySelector('.m742Val');if(v)v.textContent=realism[k].toFixed(2)}}
-  if(status)status.textContent=`REALISM SHADER ACTIVE · zero extra passes · zero extra queue submits\nmicro ${realism.micro.toFixed(2)} · dispersion ${realism.dispersion.toFixed(2)} · scatter ${realism.scattering.toFixed(2)}\nedge foam ${realism.foam.toFixed(2)} · shafts ${realism.shafts.toFixed(2)} · shadow ${realism.shadow.toFixed(2)}\nTemporal history and the old Blob-module shader path remain disabled.`;
+  if(status)status.textContent=realismShaderReady?`REALISM SHADER ACTIVE · zero extra passes · zero extra queue submits\nmicro ${realism.micro.toFixed(2)} · dispersion ${realism.dispersion.toFixed(2)} · scatter ${realism.scattering.toFixed(2)}\nedge foam ${realism.foam.toFixed(2)} · shafts ${realism.shafts.toFixed(2)} · shadow ${realism.shadow.toFixed(2)}\nTemporal history and the old Blob-module shader path remain disabled.`:'REALISM SHADER FALLBACK · device rejected enhanced WGSL; preserving the base M7.3.9 water renderer.';
 }
 if(page){
   page.querySelectorAll('.m742Locked').forEach(n=>n.remove());
@@ -116,8 +126,8 @@ if(page){
 }
 
 window.__fluidV44Realism=realism;
-window.__v5M746Realism={online:true,backend:'single-composite-shader-m746',gpuPassesAdded:0,gpuSubmitsAdded:0,realism};
+window.__v5M746Realism={online:true,shaderReady:realismShaderReady,backend:realismShaderReady?'single-composite-shader-m746':'fallback-m739',gpuPassesAdded:0,gpuSubmitsAdded:0,realism};
 window.__fluidV5Version='7.4.6';
 const title=document.querySelector('.hud.card.title');if(title)title.textContent='FLUID V5 · M7.4.6';
 document.title='Fluid V5 · M7.4.6 Wave Lab + Realism';
-console.info('[Fluid V5 M7.4.6] shader-only realism restored; zero added GPU passes/submits.');
+console.info(realismShaderReady?'[Fluid V5 M7.4.6] shader-only realism restored; zero added GPU passes/submits.':'[Fluid V5 M7.4.6] base composite fallback active');

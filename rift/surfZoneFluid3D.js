@@ -114,6 +114,11 @@ export function advanceSurfFluid(pool, frameDt, seaY, groundHeight) {
                   const vdx = (b.vx - a.vx) * viscosity;
                   const vdy = (b.vy - a.vy) * viscosity;
                   const vdz = (b.vz - a.vz) * viscosity;
+                  // Position reconstruction below would discard pure
+                  // velocity edits. Convert XSPH into pairwise position
+                  // impulses too, retaining its actual smoothing effect.
+                  a.x += vdx * h; a.y += vdy * h; a.z += vdz * h;
+                  b.x -= vdx * h; b.y -= vdy * h; b.z -= vdz * h;
                   a.vx += vdx; a.vy += vdy; a.vz += vdz;
                   b.vx -= vdx; b.vy -= vdy; b.vz -= vdz;
                 }

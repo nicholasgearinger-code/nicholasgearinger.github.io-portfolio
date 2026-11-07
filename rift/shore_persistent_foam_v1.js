@@ -752,8 +752,11 @@ export function updatePersistentShoreFoam(surfHandle, elapsed = 0, cameraY = Inf
   const underwater = Number.isFinite(cameraY) && cameraY < handle.waterY - 0.10;
   handle.foamMesh.visible = !underwater;
   handle.edgeMesh.visible = !underwater;
-  if (handle.curlingFace) handle.curlingFace.mesh.visible = !underwater;
-  if (handle.secondaryFace) handle.secondaryFace.mesh.visible = !underwater;
+  // Replaced by GPU-solved curl when active. Keep only the persistent
+  // foam/wash sheets, avoiding duplicate transparent breaker walls.
+  const gpuBreak = surfHandle.__riftGPUFluidBreaker === true;
+  if (handle.curlingFace) handle.curlingFace.mesh.visible = !underwater && !gpuBreak;
+  if (handle.secondaryFace) handle.secondaryFace.mesh.visible = !underwater && !gpuBreak;
   if (underwater) {
     // Avoid a huge catch-up after surfacing; still publish the active clock.
     handle.lastTime = t;
@@ -777,10 +780,12 @@ export function updatePersistentShoreFoam(surfHandle, elapsed = 0, cameraY = Inf
   if (steps > 0) writeTextures(handle, day, stormT);
   if (steps > 0 && t - handle.lastGeometryTime >= 1 / BREAKER_GEOMETRY_HZ) {
     updateBreakerGeometry(handle);
-    for (const face of [handle.curlingFace, handle.secondaryFace]) {
-      if (!face) continue;
-      face.foamField = handle.foam; // field ping-pongs each solver step
-      updateCurlingFace(face, t, stormT, day, oceanHandle);
+    if (!gpuBreak) {
+      for (const face of [handle.curlingFace, handle.secondaryFace]) {
+        if (!face) continue;
+        face.foamField = handle.foam; // field ping-pongs each solver step
+        updateCurlingFace(face, t, stormT, day, oceanHandle);
+      }
     }
     handle.lastGeometryTime = t;
   }

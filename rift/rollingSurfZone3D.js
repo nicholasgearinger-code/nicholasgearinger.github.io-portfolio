@@ -152,6 +152,31 @@ export function createVolumetricSurfZone(scene, ocean, groundHeight) {
   particleMesh.instanceMatrix.needsUpdate = true;
 
   const sea = ocean.waterY ?? 0;
+  // Moving breakers require seabed depth for shoaling. Fractal terrain
+  // queries are expensive on iPhone, so sample each coast-normal transect
+  // once at 3m spacing and reuse it for every animated crest.
+  const groundProfiles = new Map();
+  function coastalGround(sampleIndex, distance) {
+    const sample = samples[sampleIndex];
+    if (typeof groundHeight !== "function") return sea - 5;
+    let profile = groundProfiles.get(sampleIndex);
+    if (!profile) {
+      profile = new Float32Array(34);
+      profile.fill(NaN);
+      groundProfiles.set(sampleIndex, profile);
+    }
+    const f = clamp(distance / 3, 0, profile.length - 1.001);
+    const a = Math.floor(f), b = Math.min(a + 1, profile.length - 1);
+    if (!Number.isFinite(profile[a])) {
+      profile[a] = groundHeight(sample.x + sample.outwardX * a * 3,
+        sample.z + sample.outwardZ * a * 3);
+    }
+    if (!Number.isFinite(profile[b])) {
+      profile[b] = groundHeight(sample.x + sample.outwardX * b * 3,
+        sample.z + sample.outwardZ * b * 3);
+    }
+    return profile[a] * (1 - (f - a)) + profile[b] * (f - a);
+  }
   let lastFrameTime = null, surfaceAccum = 0;
   let centerIndex = 0, disposed = false;
   const lastEmit = [-100, -100, -100], lastContact = [-100, -100, -100];
@@ -169,8 +194,9 @@ export function createVolumetricSurfZone(scene, ocean, groundHeight) {
     for (let bandIndex = 0; bandIndex < WAVES.length; bandIndex++) {
       const wave = WAVES[bandIndex];
       for (let i = 0; i <= COLUMNS; i++) {
-        const p = samples[(centerIndex + i - Math.floor(COLUMNS / 2) +
-          samples.length * 3) % samples.length];
+        const sampleIndex = (centerIndex + i - Math.floor(COLUMNS / 2) +
+          samples.length * 3) % samples.length;
+        const p = samples[sampleIndex];
         const outerX = Number(p.outwardX) || 0,
           outerZ = Number(p.outwardZ) || 0;
         const l = Math.hypot(outerX, outerZ) || 1;
@@ -182,8 +208,7 @@ export function createVolumetricSurfZone(scene, ocean, groundHeight) {
           (Number(p.liftRand) || 0) * 0.014);
         const distance = wave.far - (wave.far - wave.near) * phase;
         const x = p.x + ox * distance, z = p.z + oz * distance;
-        const ground = typeof groundHeight === "function" ?
-          groundHeight(x, z) : sea - 5;
+        const ground = coastalGround(sampleIndex, distance);
         const depth = Number.isFinite(ground)
           ? Math.max(0, sea - ground) : 5;
         const profile = surfWaveProfile(phase, depth, wave);
@@ -230,7 +255,9 @@ export function createVolumetricSurfZone(scene, ocean, groundHeight) {
             Math.sin(v * 9.1 + i * 0.51 + time) * 0.11;
           const intensity = profile.foam * (0.65 +
             Math.sin(i * 1.69 + v * 10.2 + time * 1.6) * 0.21);
-          const rippleY = sea + 0.09 + Math.max(0, amplitude * 0.05)
+          // Raise collapsing foam above the conservative FFT stillwater
+          // line, avoiding a flat foam decal hidden under rolling crests.
+          const rippleY = sea + 0.23 + Math.max(0, amplitude * 0.13)
             + rippling * profile.foam;
           const foamColor = clamp(intensity, 0, 1);
           putVertex(foam, bandIndex, i, j, 0, FOAM_ROWS,
@@ -257,8 +284,9 @@ export function createVolumetricSurfZone(scene, ocean, groundHeight) {
       if (time - lastEmit[band] < (MOBILE ? 0.18 : 0.095)) continue;
       const index = Math.floor((Math.sin(time * 0.73 + band * 2.9) * 0.36 +
         0.5) * (COLUMNS - 1));
-      const p = samples[(centerIndex + index -
-        Math.floor(COLUMNS / 2) + samples.length * 3) % samples.length];
+      const sampleIndex = (centerIndex + index -
+        Math.floor(COLUMNS / 2) + samples.length * 3) % samples.length;
+      const p = samples[sampleIndex];
       const ox = p.outwardX, oz = p.outwardZ;
       const phase = fract(time / wave.period + wave.phase +
         (index - COLUMNS / 2) * 0.005 +
@@ -266,8 +294,7 @@ export function createVolumetricSurfZone(scene, ocean, groundHeight) {
       if (phase < 0.48 || phase > 0.86) continue;
       const dist = wave.far - (wave.far - wave.near) * phase;
       const x = p.x + ox * dist, z = p.z + oz * dist;
-      const ground = typeof groundHeight === "function"
-        ? groundHeight(x, z) : sea - 5;
+      const ground = coastalGround(sampleIndex, dist);
       const profile = surfWaveProfile(phase,
         Number.isFinite(ground) ? Math.max(0, sea - ground) : 5, wave);
       if (Math.hypot(camera.x - x, camera.z - z) > 135) continue;

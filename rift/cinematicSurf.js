@@ -171,6 +171,12 @@ export function createCinematicSurfZone(scene,ocean,groundHeight){
   faceMesh.renderOrder=11;
   foamMesh.renderOrder=13;
   scene.add(faceMesh,foamMesh);
+  // Existing persistent wash/shoreline hydraulics stay enabled, but hide
+  // the previous time-scripted curling wall so it cannot draw a straight
+  // bar beneath these continuous surf faces.
+  const surfHandle=ocean.fftSurfSystem;
+  const priorCurlOwner=surfHandle.__riftGPUFluidBreaker === true;
+  surfHandle.__riftGPUFluidBreaker=true;
 
   const sea=ocean.waterY??8;
   let centerIndex=0,previousCamera={x:Infinity,z:Infinity};
@@ -337,6 +343,7 @@ export function createCinematicSurfZone(scene,ocean,groundHeight){
     if(disposed)return;
     disposed=true;
     scene.remove(faceMesh,foamMesh);
+    surfHandle.__riftGPUFluidBreaker=priorCurlOwner;
     const release=()=>{
       face.geometry.dispose();whitewater.geometry.dispose();
       faceMaterial.dispose();foamMaterial.dispose();

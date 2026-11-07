@@ -281,10 +281,22 @@ function installWaterProOptics(handle) {
     ? mix(float(1), float(WAVE_DISTORTION_2 ? 0.51 : 0.26), underwater)
         .mul(detailVisibility)
     : float(1).sub(underwater);
+  // Fluid Lab M5 principle: the real solved nearshore flow participates
+  // in optical normals. This shifts refraction and sun glints with the
+  // shallow solver's moving water, not only the FFT wave pattern. Limit
+  // the gradient to avoid sharp grid-cell seams on low-quality phones.
+  const labFlowNormalX = labHydro
+    ? clamp(labHydro.state.y.mul(0.020), -0.045, 0.045)
+        .mul(labHydro.coverage)
+    : float(0);
+  const labFlowNormalZ = labHydro
+    ? clamp(labHydro.state.z.mul(0.020), -0.045, 0.045)
+        .mul(labHydro.coverage)
+    : float(0);
   const opticalNormal = vec3(
-    worldNormal.x.add(microX.mul(opticalDetail)),
+    worldNormal.x.add(microX.mul(opticalDetail)).add(labFlowNormalX),
     max(worldNormal.y, float(0.12)),
-    worldNormal.z.add(microZ.mul(opticalDetail)),
+    worldNormal.z.add(microZ.mul(opticalDetail)).add(labFlowNormalZ),
   ).normalize();
   // Critical optical link: the moving directional wavelets must affect the
   // PBR surface normal as well as our custom color/refraction calculations.

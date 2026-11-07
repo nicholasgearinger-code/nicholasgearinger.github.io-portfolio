@@ -125,7 +125,14 @@ export function createGPUFluidBreakers(scene, ocean) {
     // aeration originate in the same hydraulic-break energy as the foam.
     const baseline = float(0.61).mul(float(1).sub(v));
     const forwardCurl = lip.mul(height).mul(0.80);
-    const radial = baseline.sub(forwardCurl);
+    // Advect the whole breaker shoreward with the solved water velocity.
+    // A fixed x/z curl would simply stand still and fade, even if fluid
+    // crossed it. Outward is the coast normal pointing toward the sea.
+    const shorewardFlow = sim.y.mul(direction.x)
+      .add(sim.z.mul(direction.y)).negate();
+    const travel = clamp(shorewardFlow.mul(0.23)
+      .add(sim.x.mul(0.27)), -0.27, 0.54).mul(crest);
+    const radial = baseline.sub(forwardCurl).sub(travel);
     const y = max(sim.x, float(0)).mul(0.72)
       .add(v.mul(height))
       .sub(lip.mul(height).mul(smoothstep(float(0.78), float(1), v)).mul(0.35));

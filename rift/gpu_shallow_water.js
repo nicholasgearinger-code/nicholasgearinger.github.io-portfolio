@@ -26,6 +26,12 @@ const TOUCH_DEVICE = typeof window !== "undefined" && (
 // step per display frame: the scheme is already dissipative/bounded, and this
 // halves the biggest finite-depth compute cost without lowering the 256² grid.
 const SUBSTEPS = TOUCH_DEVICE ? 1 : 2;
+// Pool-lab principle adapted to ocean swash: resist shallow flow according
+// to fluid speed and bottom contact, and let cells wet/dry with water height.
+// Keep the SAME solver resolution and number of compute dispatches.
+// A/B: ?riftPoolShore=off uses the previous fixed-wetness shore transport.
+const POOL_SHORE_SWASH = typeof location === "undefined" ||
+  new URLSearchParams(location.search).get("riftPoolShore") !== "off";
 
 function buildBathymetry(sampleHeight, waterY, domain, N) {
   const data = new Float32Array(N * N * 4);
@@ -94,7 +100,13 @@ export function createGPUShallowWater(sampleHeight, waterY, fftSpatialA, fftDoma
     const bD = bathymetry.element(iD).x;
     const bU = bathymetry.element(iU).x;
 
-    const wet = smoothstep(float(0.05), float(0.34), bc.x);
+    // Pool lab-inspired fluid/solid contact: a shore cell becomes wetter as
+    // a crest arrives and drains as the flow recedes. Previously wetness was
+    // frozen at the mean sea level and created a very abrupt flat boundary.
+    const localWetDepth = max(bc.x.add(c.x), float(0));
+    const wet = POOL_SHORE_SWASH
+      ? smoothstep(float(0.025), float(0.32), localWetDepth)
+      : smoothstep(float(0.05), float(0.34), bc.x);
     const hL = max(bL.add(l.x), float(0.05));
     const hR = max(bR.add(r.x), float(0.05));
     const hD = max(bD.add(d.x), float(0.05));
@@ -121,7 +133,14 @@ export function createGPUShallowWater(sampleHeight, waterY, fftSpatialA, fftDoma
     let velZ = velZAverage.sub(dEtaDz.mul(float(GRAVITY)).mul(dt));
 
     const shallowDrag = float(1).sub(smoothstep(float(0.55), float(3.8), bc.x));
-    const drag = float(0.34).add(shallowDrag.mul(2.6));
+    // Hydrodynamic bottom friction: moving water loses more energy against
+    // shallow sand, while weak movement can still spread and drain.
+    // L1 flow speed avoids an additional GPU sqrt per solver cell.
+    const bedShear = abs(velXAverage).add(abs(velZAverage))
+      .mul(shallowDrag).mul(0.28);
+    const drag = POOL_SHORE_SWASH
+      ? float(0.30).add(shallowDrag.mul(1.95)).add(bedShear)
+      : float(0.34).add(shallowDrag.mul(2.6));
     const damp = float(1).div(float(1).add(drag.mul(dt)));
     velX = velX.mul(damp);
     velZ = velZ.mul(damp);
@@ -181,9 +200,23 @@ export function createGPUShallowWater(sampleHeight, waterY, fftSpatialA, fftDoma
       smoothstep(float(0.62), float(0.90), froude),
     ).mul(depthBand).mul(wet);
 
-    const foamDecay = max(float(0), float(1).sub(dt.mul(0.48)));
+    // M8.2 lab idea adapted to shoreline foam: aerated water lingers
+    // momentarily in shallow swash and dissipates more quickly offshore.
+    // Only create whitewater where the moving front actually steepens.
+    const deepFlow = smoothstep(float(3), float(9), bc.x);
+    const foamDecay = POOL_SHORE_SWASH
+      ? float(1).div(float(1).add(dt.mul(float(0.40).add(deepFlow.mul(0.85)))))
+      : max(float(0), float(1).sub(dt.mul(0.48)));
+    const swashActivity = POOL_SHORE_SWASH
+      ? smoothstep(float(0.56), float(0.93), froude)
+          .mul(smoothstep(float(0.07), float(0.26), abs(eta)))
+          .mul(smoothstep(float(0.11), float(0.46), bc.x))
+          .mul(float(1).sub(smoothstep(float(2.6), float(5.3), bc.x)))
+          .mul(wet)
+      : float(0);
     const interactionFoam = impulseMask.mul(clamp(interactionStrength.mul(0.16), 0, 0.75));
-    const foam = max(max(c.w.mul(foamDecay), breaker), interactionFoam);
+    const foam = max(max(max(c.w.mul(foamDecay), breaker),
+      swashActivity.mul(0.68)), interactionFoam);
 
     eta = eta.mul(wet);
     velX = velX.mul(wet);

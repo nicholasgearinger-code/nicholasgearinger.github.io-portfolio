@@ -10,7 +10,7 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 function stateFor(handle) {
   if (!handle.__riftLabInteractions) {
     handle.__riftLabInteractions = {
-      pending: [], active: null, lastEventTime: -100,
+      pending: [], visualPending: [], active: null, lastEventTime: -100,
     };
   }
   return handle.__riftLabInteractions;
@@ -37,6 +37,10 @@ export function emitRiftWaterImpact(handle, x, z, {
   // Avoid unbounded queues during an 11-fps hitch or repeated fast taps.
   if (s.pending.length === MAX_EVENTS) s.pending.shift();
   s.pending.push(item);
+  // A separate bounded queue feeds the real-time lab-derived SPH spray.
+  // Physics impulses and visible droplets consume independently.
+  if (s.visualPending.length === MAX_EVENTS) s.visualPending.shift();
+  s.visualPending.push(item);
   return true;
 }
 
@@ -68,6 +72,11 @@ export function consumeRiftWaterImpact(handle, time = 0) {
   }
   if (!life) s.active = null;
   return next;
+}
+
+export function consumeRiftWaterVisualImpact(handle) {
+  const queue = handle?.__riftLabInteractions?.visualPending;
+  return queue?.length ? queue.shift() : null;
 }
 
 export function resetRiftWaterImpacts(handle) {

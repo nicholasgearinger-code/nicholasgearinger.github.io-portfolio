@@ -9,6 +9,7 @@
 // This is deliberately not 3D particle simulation of the entire ocean.
 // Disable with ?riftSurf3D=off and compare with previous FFT+shore breakers.
 import * as THREE from "three";
+import { attribute } from "three/tsl";
 import { createSurfParticlePool, emitSurfFluid, advanceSurfFluid } from "./surfZoneFluid3D.js";
 import { emitRiftWaterImpact } from "./waterLabInteractions.js";
 
@@ -55,6 +56,7 @@ function createRibbon(countColumns, countRows, doubleShell) {
   const n = WAVES.length * (countColumns + 1) * stride;
   const positions = new Float32Array(n * 3);
   const colors = new Float32Array(n * 3);
+  const alpha = new Float32Array(n);
   const triangles = [];
   for (let wave = 0; wave < WAVES.length; wave++) {
     const base = wave * (countColumns + 1) * stride;
@@ -74,11 +76,14 @@ function createRibbon(countColumns, countRows, doubleShell) {
     .setUsage(THREE.DynamicDrawUsage));
   geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3)
     .setUsage(THREE.DynamicDrawUsage));
+  geometry.setAttribute("riftSurfOpacity", new THREE.BufferAttribute(alpha, 1)
+    .setUsage(THREE.DynamicDrawUsage));
   geometry.setIndex(triangles);
-  return { geometry, positions, colors, stride, shellCount };
+  return { geometry, positions, colors, alpha, stride, shellCount };
 }
 
-function putVertex(target, wave, i, j, shell, rowCount, x, y, z, r, g, b) {
+function putVertex(target, wave, i, j, shell, rowCount,
+  x, y, z, r, g, b, opacity) {
   const vertex = wave * (COLUMNS + 1) * target.stride +
     i * target.stride + j * target.shellCount + shell;
   const idx = vertex * 3;
@@ -88,6 +93,7 @@ function putVertex(target, wave, i, j, shell, rowCount, x, y, z, r, g, b) {
   target.colors[idx] = r;
   target.colors[idx + 1] = g;
   target.colors[idx + 2] = b;
+  target.alpha[vertex] = clamp(opacity, 0, 1);
 }
 
 function nearestCoast(samples, camera, previousIndex = 0) {
@@ -120,6 +126,11 @@ export function createVolumetricSurfZone(scene, ocean, groundHeight) {
   });
   bodyMaterial.forceSinglePass = true;
   foamMaterial.forceSinglePass = true;
+  // Each rolling band fades as it forms, crashes and resets. Without
+  // per-vertex alpha the thin face would leave rectangular turquoise
+  // sheets over the FFT water even when its amplitude reached zero.
+  bodyMaterial.opacityNode = attribute("riftSurfOpacity", "float");
+  foamMaterial.opacityNode = attribute("riftSurfOpacity", "float");
   const bodyMesh = new THREE.Mesh(body.geometry, bodyMaterial);
   const foamMesh = new THREE.Mesh(foam.geometry, foamMaterial);
   bodyMesh.name = "rift-rolling-surf-3d-water-faces";
@@ -230,6 +241,10 @@ export function createVolumetricSurfZone(scene, ocean, groundHeight) {
           const radial = distance + (1 - v) * bodyWidth -
             lip * amplitude * 0.85;
           const foamCrest = smooth(0.63, 0.98, v) * profile.foam;
+          const waveFade = smooth(0.0, 0.10, phase) *
+            (1 - smooth(0.84, 0.99, phase));
+          const faceAlpha = clamp(waveFade * 0.85 *
+            (0.15 + smooth(0.035, 0.28, v) * 0.85), 0, 0.85);
           for (let shell = 0; shell < 2; shell++) {
             const shellOffset = shell === 0 ? 0 : 0.42 +
               (1 - v) * 1.15;
@@ -243,7 +258,8 @@ export function createVolumetricSurfZone(scene, ocean, groundHeight) {
               p.x + ox * rr, waveHeight, p.z + oz * rr,
               0.045 + white * 0.89,
               0.36 + white * 0.62,
-              0.48 + white * 0.49);
+              0.48 + white * 0.49,
+              faceAlpha * (shell ? 0.75 : 1));
           }
         }
 
@@ -268,15 +284,21 @@ export function createVolumetricSurfZone(scene, ocean, groundHeight) {
             p.z + oz * rr,
             0.20 + foamColor * 0.80,
             0.48 + foamColor * 0.50,
-            0.51 + foamColor * 0.48);
+            0.51 + foamColor * 0.48,
+            clamp(profile.foam * (0.42 + 0.51 *
+              Math.sin(v * Math.PI)) *
+              (0.85 + Math.sin(i * 1.6 + time * 1.9) * 0.13),
+              0, 0.93));
         }
       }
     }
     body.geometry.attributes.position.needsUpdate = true;
     body.geometry.attributes.color.needsUpdate = true;
+    body.geometry.attributes.riftSurfOpacity.needsUpdate = true;
     body.geometry.computeVertexNormals();
     foam.geometry.attributes.position.needsUpdate = true;
     foam.geometry.attributes.color.needsUpdate = true;
+    foam.geometry.attributes.riftSurfOpacity.needsUpdate = true;
     // No normal recompute for unlit whitewater; preserves mobile budget.
   }
 

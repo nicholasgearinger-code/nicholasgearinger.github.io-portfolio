@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { emitRiftWaterImpact } from "./waterLabInteractions.js";
 
 // This is the authored model already in the Rift repository, not a primitive
 // placeholder. Load only when Coral Shallows starts (12 MB GLB).
@@ -507,6 +508,7 @@ export function createOldRowboatVehicle({
         lastWaveHit: 0,
         wake: makeWake(scene),
         wakeImpulse: { riding: false, x: 0, z: 0, strength: 0, radius: 2 },
+        labLastStroke: -100, labStrokeSide: 1, labLastSlap: -100,
       };
       console.info("[rift-rowboat] Spawned near player beach", {
         model: MODEL_URL, x: spot.x, z: spot.z,
@@ -669,6 +671,36 @@ export function createOldRowboatVehicle({
     wake.strength = riding && speed > 0.22 ? clamp(speed * 0.34, 0.1, 1.3) : 0;
     wake.radius = clamp(boat.beam * 1.3 + speed * 0.18, 1.5, 3.4);
     boat.handle.__riftRowboatWake = riding ? wake : null;
+
+    // Fluid Lab M5.7 principle: real contact events seed the fluid,
+    // not continuously spawned decorative particle clouds. A rower strikes
+    // alternate port/starboard oars in a bounded ~0.45s rhythm.
+    if (riding && Math.abs(boat.throttle) > 0.27 &&
+        time - boat.labLastStroke > 0.46) {
+      boat.labLastStroke = time;
+      boat.labStrokeSide *= -1;
+      const yaw = boat.root.rotation.y, side = boat.labStrokeSide;
+      const x = boat.root.position.x + Math.cos(yaw) * boat.length * -0.09
+        + Math.sin(yaw) * side * (boat.beam * 0.78);
+      const z = boat.root.position.z - Math.sin(yaw) * boat.length * -0.09
+        + Math.cos(yaw) * side * (boat.beam * 0.78);
+      emitRiftWaterImpact(boat.handle, x, z, {
+        strength: 0.6 + Math.abs(boat.throttle) * 0.54,
+        radius: 1.35 + Math.abs(boat.throttle) * 0.4,
+        foam: 0.17, kind: "oar",
+      }, time);
+    }
+    // A wave slapping the hull produces a stronger, short-lived impact.
+    // Rate-limited to prevent the low-FPS update from flooding the event bus.
+    if (boat.ySpeed < -0.78 && time - boat.labLastSlap > 0.85) {
+      boat.labLastSlap = time;
+      emitRiftWaterImpact(boat.handle, boat.root.position.x,
+        boat.root.position.z, {
+          strength: clamp(-boat.ySpeed * 0.8, 0.4, 1.6),
+          radius: boat.beam * 1.15,
+          foam: 0.12, kind: "hull",
+        }, time);
+    }
     if (riding) followCamera(dt);
     updateHUD();
   }

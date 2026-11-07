@@ -358,8 +358,24 @@ function installWaterProOptics(handle) {
     .mul(day).mul(float(1).sub(underwater))
     .mul(smoothstep(float(0.12), float(0.85), ndv))
     .mul(POOL_SHORE_OPTICS ? shoreTransmission : float(1));
+  // Clear-pool optics adapted to a sandy shoreline, not a tiled pool liner:
+  // attenuate seabed light with Beer-Lambert absorption and make the
+  // transmitted brightness track the actual moving surface normal.
+  // Irregular wave phases already exist in this shader; reuse them without
+  // new texture fetches or passes. Gentle variation interrupts broad
+  // mechanically straight aqua bands on a slowly shelving beach.
+  const poolSurfaceLensing = clamp(
+    dot(opticalNormal, lightDir).mul(0.60)
+      .add(ndv.mul(0.20))
+      .add(mediumA.mul(0.045))
+      .add(mediumB.mul(0.035)), 0, 1);
+  const thinWaterTransmission = exp(depth.mul(float(-0.23)))
+    .mul(float(0.76).add(poolSurfaceLensing.mul(0.24)));
   const refractedShallow = mix(color(0x399caa), color(0xc4ebdb),
-    smoothstep(float(-0.40), float(0.72), depthMarble));
+    POOL_SHORE_OPTICS
+      ? clamp(thinWaterTransmission.mul(0.78)
+        .add(poolFocus.mul(0.14)), 0, 1)
+      : smoothstep(float(-0.40), float(0.72), depthMarble));
 
   // The old mobile formula abs(sin(A) * sin(B)) created a PERFECT
   // rectangular lattice of bright ellipses from the drone: it is a pattern
@@ -671,8 +687,13 @@ function installWaterProOptics(handle) {
     // keep the existing whitewater masks separate to avoid broad white bands.
     body = body.mul(float(1).add(broadTone));
     body = mix(body, refractedShallow,
-      shallowVisibility.mul(float(1).sub(combinedFoam.mul(0.72))).mul(0.24));
-    body = mix(body, color(0xa8e9dc), sunlitSand.mul(0.13));
+      shallowVisibility.mul(float(1).sub(combinedFoam.mul(0.72)))
+        .mul(POOL_SHORE_OPTICS ? float(0.32) : float(0.24)));
+    // At the sand-water interface, clarity comes from the visible
+    // seabed, not an opaque turquoise stripe painted across the surface.
+    body = mix(body, color(0xa8e9dc),
+      sunlitSand.mul(POOL_SHORE_OPTICS
+        ? thinWaterTransmission.mul(0.075) : float(0.13)));
     body = mix(body, crestColor, marbleMask.mul(POOL_SHORE_OPTICS ? 0.065 : 0.16));
     body = mix(body, crestColor,
       clamp(translucency.add(lipGlow.mul(0.20)), 0, 0.34));

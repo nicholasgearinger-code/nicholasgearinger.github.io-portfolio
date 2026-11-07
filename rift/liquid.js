@@ -8,6 +8,7 @@ import { createFluidLabNearfield } from "./fluidLabNearfield.js";
 import { updateFluidLabLocalOptics } from "./fluidLabLocalOptics.js";
 import { createGPUFluidBreakers } from "./gpuFluidBreakers.js";
 import { createVolumetricSurfZone } from "./rollingSurfZone3D.js";
+import { createCinematicSurfZone } from "./cinematicSurf.js";
 
 function setFFTReflectionOwnership(active) {
   if (typeof globalThis !== "undefined") {
@@ -96,11 +97,16 @@ export function createLiquidPlane(
           console.warn("[rift-water] Experimental setup failed; current renderer retained", error);
         }
       }
-      // Physical breaking crest: the shallow solver's hydraulic jump
-      // dissipates momentum and drives an overturning lip/whitewater mesh.
-      // Explicit A/B flag or API fallback keeps the old scripted curl.
-      const fluidBreakingEnabled = typeof location === "undefined" ||
-        new URLSearchParams(location.search).get("riftBreakFluid") !== "off";
+      // The earlier sparse GPU curling crest formed unnatural straight
+      // shoreline lines next to the rolling-surf meshes. Cinematic mode
+      // replaces those visible overlays while leaving the shallow solver,
+      // shore swash and impact response running.
+      const surfVisualMode = typeof location !== "undefined"
+        ? new URLSearchParams(location.search).get("riftSurfVisual") : null;
+      const useLegacySurf = surfVisualMode === "legacy";
+      const fluidBreakingEnabled = useLegacySurf &&
+        (typeof location === "undefined" ||
+          new URLSearchParams(location.search).get("riftBreakFluid") !== "off");
       if (fluidBreakingEnabled) {
         try {
           handle.__riftBreakFluid = createGPUFluidBreakers(scene, handle);
@@ -119,20 +125,21 @@ export function createLiquidPlane(
         new URLSearchParams(location.search).get("riftSurf3D") !== "off";
       if (surf3DEnabled) {
         try {
-          handle.__riftSurfZone3D = createVolumetricSurfZone(
-            scene, handle, sampleHeight,
-          );
+          handle.__riftSurfZone3D = useLegacySurf
+            ? createVolumetricSurfZone(scene, handle, sampleHeight)
+            : createCinematicSurfZone(scene, handle, sampleHeight);
           if (handle.__riftSurfZone3D) {
-            console.info("[rift-water] 3D midshore rolling surf active", {
+            console.info("[rift-water] Surf renderer active", {
+              mode: handle.__riftSurfZone3D.mode ?? "legacy",
               waveFaceVertices: handle.__riftSurfZone3D.waveFaceVertices,
               foamVertices: handle.__riftSurfZone3D.foamVertices,
               particleBudget: handle.__riftSurfZone3D.particlePool.particles.length,
             });
           } else {
-            console.warn("[rift-water] 3D surf initialization unavailable: shoreline samples missing");
+            console.warn("[rift-water] Surf initialization unavailable: shoreline samples missing");
           }
         } catch (error) {
-          console.warn("[rift-water] 3D surf fallback to FFT/shallow", error);
+          console.warn("[rift-water] Surf renderer fallback to FFT/shallow", error);
         }
       }
       // Localized Fluid Lab PBF interaction mesh. One instanced draw with

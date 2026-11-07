@@ -12,6 +12,7 @@ import * as oceanV7 from "./gpu_fft_ocean_v7.js";
 import * as oceanV8 from "./gpu_fft_ocean_v8.js";
 import { getRealisticCloudTexture } from "./clouds_storm_base.js";
 import { createFluidLabShoreFlow } from "./fluidLabShoreFlow.js";
+import { createFluidLabLocalOptics } from "./fluidLabLocalOptics.js";
 import {
   getGraphicsTier,
   getEffectiveValue,
@@ -73,6 +74,11 @@ const RIFT_LAB_OPTICS = typeof location === "undefined" ||
 // and aeration in the vertex stage. Revert with ?riftFluidLab=off.
 const RIFT_FLUID_LAB_SURFACE = typeof location === "undefined" ||
   new URLSearchParams(location.search).get("riftFluidLab") !== "off";
+// Near-field fluid thickness and solved-flow screen refraction; opt out
+// with ?riftLocalSSFR=off (no change to offshore FFT rendering).
+const RIFT_LOCAL_SSFR = RIFT_FLUID_LAB_SURFACE &&
+  (typeof location === "undefined" ||
+    new URLSearchParams(location.search).get("riftLocalSSFR") !== "off");
 // Pool-inspired shore optics: clear thin-water absorption, water-column
 // transmission, and normal-based focusing instead of tiled marble bands.
 // ?riftPoolShore=off compiles the previous shoreline look for A/B testing.
@@ -157,6 +163,10 @@ function installWaterProOptics(handle) {
   const surfStrength = uniform(0.73);
   const day = handle.fftDaylight ?? uniform(1.0);
   const underwater = handle.fftUnderwaterMix ?? uniform(0.0);
+  // Reconstruct near-field fluid optical thickness from the EXISTING
+  // shallow-water solver. One original backdrop sample, no SSFR prepass.
+  const localSSFR = RIFT_LOCAL_SSFR && labHydro
+    ? createFluidLabLocalOptics(handle, depth, labHydro, underwater) : null;
   const lightDirection = handle.fftLightDirection ?? uniform(new THREE.Vector3(0.35, 0.8, 0.3));
   const waterLevel = uniform(handle.waterY ?? 0);
 
@@ -609,7 +619,8 @@ function installWaterProOptics(handle) {
   const combinedFoam = clamp(
     whitecap.add(openSeaFoam).add(brokenFoam.mul(0.87))
       .add(shoreSpill).add(waveLensFoam).add(breakingLip)
-      .add(labFoam).add(labHydroFoam), 0, 0.97);
+      .add(labFoam).add(labHydroFoam)
+      .add(localSSFR ? localSSFR.aeration.mul(0.11) : float(0)), 0, 0.97);
 
   // View-dependent Fresnel / wavelet sky reflection. This uses the already
   // available sky and FFT normals, avoiding additional sky texture fetches
@@ -736,6 +747,14 @@ function installWaterProOptics(handle) {
     body = mix(body, color(0xa8e9dc),
       sunlitSand.mul(POOL_SHORE_OPTICS
         ? thinWaterTransmission.mul(0.075) : float(0.13)));
+    if (localSSFR) {
+      // Thin, physically moving water over sand retains pale transmitted
+      // light; deeper local pockets accumulate aqua volume scattering.
+      const poolBody = mix(color(0x77beb4), color(0x218e9f),
+        smoothstep(float(0.65), float(5.5), localSSFR.opticalThickness));
+      body = mix(body, poolBody, localSSFR.mask.mul(0.10)
+        .mul(float(1).sub(localSSFR.aeration.mul(0.6))));
+    }
     body = mix(body, crestColor, marbleMask.mul(POOL_SHORE_OPTICS ? 0.065 : 0.16));
     body = mix(body, crestColor,
       clamp(translucency.add(lipGlow.mul(0.20)), 0, 0.34));
@@ -869,10 +888,13 @@ function installWaterProOptics(handle) {
     : float(0);
   const antiAliasedRoughness = mix(glossyRoughness,
     float(TOUCH_DEVICE ? 0.17 : 0.12), glintFootprint);
-  material.roughnessNode = REFLECTIVE_CRESTS
+  const waterRoughness = REFLECTIVE_CRESTS
     ? mix(antiAliasedRoughness, float(0.89),
         combinedFoam.mul(0.97))
     : mix(antiAliasedRoughness, float(0.62), combinedFoam.mul(0.90));
+  material.roughnessNode = localSSFR
+    ? clamp(waterRoughness.add(localSSFR.foamRoughness), 0.035, 0.96)
+    : waterRoughness;
   // A restrained daylight volume-fill prevents the body from becoming a
   // black mirror on iOS when no scene refraction texture is supplied. It
   // follows the same depth palette and does not brighten night/underwater.
@@ -941,7 +963,8 @@ function installWaterProOptics(handle) {
       .mul(float(1).sub(combinedFoam.mul(0.88)))
       .mul(PHYSICAL_OPTICS_PHASE1
         ? clamp(float(1.12).sub(fresnel.mul(0.42)), 0.75, 1.12)
-        : float(1)),
+        : float(1))
+      .add(localSSFR ? localSSFR.lensOffset : vec2(0)),
       vec2(WAVE_DISTORTION_2 && WAVE_LENS_LAYER ? -0.055 : -0.020),
       vec2(WAVE_DISTORTION_2 && WAVE_LENS_LAYER ? 0.055 : 0.020));
     const warpedUV = clamp(WaterTSL.screenUV.add(offset),
@@ -964,8 +987,11 @@ function installWaterProOptics(handle) {
       const waterPath = clamp(
         opticalDepth.div(max(ndv, float(0.40))), 0, 24,
       );
-      const absorption = exp(vec3(-0.145, -0.063, -0.026)
+      const regularAbsorption = exp(vec3(-0.145, -0.063, -0.026)
         .mul(waterPath));
+      const absorption = localSSFR
+        ? mix(regularAbsorption, localSSFR.transmittance, localSSFR.mask)
+        : regularAbsorption;
       const inScatter = color(0x287d99)
         .mul(float(1).sub(absorption)).mul(0.31);
       material.backdropNode = backdrop.mul(absorption).add(inScatter);
@@ -990,8 +1016,12 @@ function installWaterProOptics(handle) {
       : clamp(float(REFERENCE_GLASS_LOOK ? 0.80 : 0.90)
           .sub(fresnel.mul(REFERENCE_GLASS_LOOK ? 0.60 : 0.68)),
         0.16, REFERENCE_GLASS_LOOK ? 0.82 : 0.91);
-    material.backdropAlphaNode = mix(aboveClarity, belowClarity,
+    const originalBackdropClarity = mix(aboveClarity, belowClarity,
       underwater).mul(float(1).sub(combinedFoam.mul(0.89)));
+    material.backdropAlphaNode = localSSFR
+      ? mix(originalBackdropClarity, localSSFR.clarity,
+          localSSFR.mask.mul(0.80))
+      : originalBackdropClarity;
     // Conservative alpha fallback inside the same draw. If a mobile backend
     // cannot sample its backdrop after a RenderPipeline scene pass, the ocean
     // must still expose genuine sand / reef / sky behind the surface instead
@@ -1020,8 +1050,13 @@ function installWaterProOptics(handle) {
       .add(combinedFoam.mul(0.54)), 0.20, 0.98);
     const shoreSheet = float(1).sub(smoothstep(float(0.12), float(2.6), depth))
       .mul(float(1).sub(underwater));
-    material.opacityNode = POOL_SHORE_OPTICS
+    const shorelineOpacity = POOL_SHORE_OPTICS
       ? mix(baseOpacity, thinSheet, shoreSheet) : baseOpacity;
+    material.opacityNode = localSSFR
+      ? mix(shorelineOpacity, clamp(float(1).sub(localSSFR.clarity)
+          .add(combinedFoam.mul(0.26)), 0.12, 0.99),
+          localSSFR.mask.mul(0.85))
+      : shorelineOpacity;
     material.transparent = true;
     material.depthWrite = false;
     material.forceSinglePass = true; // thin double-sided plane, never two transparent draws
@@ -1048,8 +1083,13 @@ function installWaterProOptics(handle) {
       .add(combinedFoam.mul(0.54)), 0.20, 0.98);
     const shoreSheet = float(1).sub(smoothstep(float(0.12), float(2.6), depth))
       .mul(float(1).sub(underwater));
-    material.opacityNode = POOL_SHORE_OPTICS
+    const shorelineOpacity = POOL_SHORE_OPTICS
       ? mix(baseOpacity, thinSheet, shoreSheet) : baseOpacity;
+    material.opacityNode = localSSFR
+      ? mix(shorelineOpacity, clamp(float(1).sub(localSSFR.clarity)
+          .add(combinedFoam.mul(0.26)), 0.12, 0.99),
+          localSSFR.mask.mul(0.85))
+      : shorelineOpacity;
     material.transparent = true;
     material.depthWrite = false;
     material.forceSinglePass = true; // thin double-sided plane, never two transparent draws
@@ -1073,6 +1113,7 @@ function installWaterProOptics(handle) {
       shallowSurfRealismV2: SURF_REALISM_V2,
       gridFreeWaterHighlights: GRID_FREE_WATER_HIGHLIGHTS,
       poolShoreOptics: POOL_SHORE_OPTICS,
+      fluidLabLocalSSFR: !!localSSFR,
       disabledByQuery: typeof location !== "undefined" &&
         new URLSearchParams(location.search).get("riftRefraction") === "off",
     };

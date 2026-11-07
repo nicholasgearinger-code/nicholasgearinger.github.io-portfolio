@@ -337,7 +337,7 @@ async function loadRiftAndOpenMenu() {
     }
 
     setProgress(95, "Assets ready", "Loading Rift game module");
-    gameImport = gameImport || import("./main_game.js?build=underwaterceiling-20261103");
+    gameImport = gameImport || import("./main_game.js?build=fluid-lab-shoreline-20261107");
     await gameImport;
 
     if (driftTimer) {

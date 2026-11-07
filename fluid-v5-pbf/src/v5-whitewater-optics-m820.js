@@ -27,7 +27,7 @@ const helpers=`fn capWave(p:vec3f,dir:vec2f,k:f32,omega:f32,phase:f32)->vec2f{
   let th=dot(p.xz,dir)*k-C.realism0.x*omega+phase;return dir*cos(th);
 }
 fn realismMicro(p:vec3f,n:vec3f)->vec2f{
-  let activity=clamp((length(dpdx(n))+length(dpdy(n)))*8.0,0.0,1.0);
+  // Surface slope is available everywhere, unlike dpdx/dpdy after\n  // the composite fragment shader's divergent early returns.\n  let activity=clamp(length(n.xz)*1.4,0.0,1.0);
   let amp=0.0105*C.realism0.y*(0.26+0.74*activity);var s=vec2f(0.0);
   s+=capWave(p,normalize(vec2f(1.0,.31)),38.0,19.41,0.0);
   s+=capWave(p,normalize(vec2f(-.42,1.0)),55.0,23.48,1.7)*.76;
@@ -89,9 +89,7 @@ patch(bgNeedle,`fn background(o:vec3f,d:vec3f)->vec3f{if(C.floorPlane!=0){let ph
 
 patch(`  let trans = hitCol * exp(-C.absorb * thick);`,
 `  let poolHit=tracePool(ro2,refrDir);if(poolHit.t<1e29){thick=min(thick,poolHit.t);}
-  let sdx=dpdx(p.xz);let sdy=dpdy(p.xz);let ddx=dpdx(poolHit.p.xz);let ddy=dpdy(poolHit.p.xz);
-  let srcArea=abs(sdx.x*sdy.y-sdx.y*sdy.x);let dstArea=abs(ddx.x*ddy.y-ddx.y*ddy.x);let receiver=select(0.0,1.0,poolHit.t<1e29);
-  let jacFocus=max(0.0,clamp(srcArea/max(dstArea,1e-7),0.0,6.0)-1.0);let refrDx=dpdx(refrDir);let refrDy=dpdy(refrDir);let angularFocus=max(0.0,-(refrDx.x+refrDy.y));
+  // Reuse the explicit neighboring depth loads already used to rebuild\n  // the surface normal. This is a bounded caustic curvature proxy, not\n  // a screen-derivative Jacobian (which is illegal after dynamic returns).\n  let validNeighbours=!isEmptyZ(zxp)&&!isEmptyZ(zxm)&&!isEmptyZ(zyp)&&!isEmptyZ(zym);\n  let depthBend=abs(dxr.z-dxl.z)+abs(dyt.z-dyb.z);\n  let localCurvature=select(0.0,clamp(depthBend*.24,0.0,1.0),validNeighbours);\n  let receiver=select(0.0,1.0,poolHit.t<1e29);\n  let jacFocus=localCurvature*.70;\n  let angularFocus=clamp(length(n.xz)*.045,0.0,.06);
   let causticDepth=smoothstep(.02,.32,thick);let causticDown=smoothstep(.03,.88,-refrDir.y);let focus=min(3.4,jacFocus*.72+angularFocus*24.0)*causticDepth*causticDown*receiver;
   let causticGain=.42+1.05*clamp(C.groundReflection,0.0,2.0);hitCol*=vec3f(1.0+focus*causticGain*.82,1.0+focus*causticGain*.77,1.0+focus*causticGain*.58);hitCol+=vec3f(1.0,.97,.84)*focus*causticGain*.12;
   var trans=hitCol*exp(-C.absorb*thick);
@@ -100,7 +98,7 @@ patch(`  let trans = hitCol * exp(-C.absorb * thick);`,
 
   // Diffuse water-air mixture: foam at thin/curved/steep surface regions, plus small entrained
   // bubbles below those active regions. This is deliberately one-way visual detail.
-  let activity=clamp((length(dpdx(n))+length(dpdy(n)))*7.5,0.0,1.0);
+  let activity=clamp(length(n.xz)*1.1+localCurvature*.72,0.0,1.0);
   let thinEdge=1.0-smoothstep(.020,.125,max(thick,0.0));let steep=pow(clamp(1.0-abs(n.y),0.0,1.0),1.25);
   let whiteStrength=clamp(C.realism1.x,0.0,1.25);let noise=.48+.52*foamNoise(p);
   let foamMask=clamp((activity*.72+thinEdge*steep*.88)*whiteStrength*noise,0.0,.90);
@@ -116,7 +114,7 @@ patch(`  return vec4f(tonemap(col), 1.0);`,
 `  // Coverage-aware silhouette resolve keeps isolated spray circular even when it spans only
   // a few reduced-resolution depth pixels.
   var resolvedColor=tonemap(col);
-  let edgeWidth=max(fwidth(thick)*1.35,0.0015);
+  // Explicit thickness-based AA width; fwidth requires uniform control\n  // flow, which this composite fragment shader cannot guarantee.\n  let edgeWidth=max(0.0035,0.018*C.thicknessScale);
   let waterCoverage=smoothstep(0.0,edgeWidth,max(thick,0.0));
   if(waterCoverage<0.999){
     let sceneBehind=tonemap(sceneColor(ro,rd));

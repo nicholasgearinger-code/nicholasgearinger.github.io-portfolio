@@ -21,6 +21,9 @@ const MOBILE = typeof navigator !== "undefined" &&
 const COLS = MOBILE ? 40 : 64;
 const FACE_ROWS = MOBILE ? 15 : 21;
 const FOAM_ROWS = MOBILE ? 13 : 19;
+// Whitewater survives the wave cycle that created it; it is carried
+// shoreward and fades naturally rather than snapping back offshore.
+const FOAM_LIFETIME = 6.4;
 const WAVES = [
   { far: 49, near: 14, period: 10.7, phase: 0.07, height: 2.5, width: 4.5 },
   { far: 71, near: 26, period: 12.8, phase: 0.41, height: 3.6, width: 6.5 },
@@ -30,6 +33,20 @@ const clamp01 = x => Math.max(0, Math.min(1, x));
 const lerp = (a,b,t)=>a+(b-a)*t;
 const fract = x=>x-Math.floor(x);
 const smooth=(a,b,x)=>{const t=clamp01((x-a)/(b-a));return t*t*(3-2*t);};
+
+// Both the translucent water and its frothy cap use this same overturning
+// profile. The tip leans shoreward and plunges down as the wave collapses;
+// independent cap geometry was previously producing floating white sheets.
+export function plungingCrestProfile(v, distance, height, width, curl, plunge) {
+  const lip=smooth(.56,.98,v);
+  const tip=smooth(.77,1,v);
+  return {
+    radial: distance + (1-v)*(width+height*.21)
+      - curl*lip*lip*height*(.87+.18*plunge),
+    y: height*Math.sin(v*Math.PI*.5)
+      - height*curl*tip*(.21+.41*plunge),
+  };
+}
 const h=(x,y,seed=0)=>fract(Math.sin(x*127.1+y*311.7+seed*81.7)*43758.5453);
 function tileNoise(u,v,f,seed=0){
   const x=u*f,y=v*f,ix=Math.floor(x),iy=Math.floor(y);
@@ -153,6 +170,10 @@ export function createCinematicSurfZone(scene,ocean,groundHeight){
     attribute("color","vec3"),color(0xf3fcf6),
     clamp(cellular.a.mul(attribute("riftFoam","float")).mul(1.5),0,1));
   faceMaterial.opacityNode=attribute("riftOpacity","float");
+  // Aerated lip is microscopically rough. A clear wave face should retain
+  // sharp specular glints while the white break disperses reflected light.
+  faceMaterial.roughnessNode=mix(float(.105),float(.79),
+    clamp(attribute("riftFoam","float"),0,1));
   const foamMaterial=new THREE.MeshBasicNodeMaterial({
     color:0xffffff,transparent:true,opacity:1,
     side:THREE.DoubleSide,depthWrite:false,
@@ -200,6 +221,13 @@ export function createCinematicSurfZone(scene,ocean,groundHeight){
   let timeLast=0,frameAccum=0,lastImpacts=[-10,-10,-10],disposed=false;
   const depthCache=new Map();
   const sampleCount=samples.length;
+  // World-positioned wake events, one per wave/shoreline column. A crest
+  // deposits foam ONCE when it breaks. That foam has its own lifetime and
+  // propagation; the next wave reset cannot teleport or erase it.
+  const foamWake=WAVES.map(()=>Array.from({length:COLS+1},()=>({
+    cycle:-Infinity, birth:-Infinity, origin:0, strength:0,
+  })));
+  let activeFoamWakes=0;
   function groundAt(index,distance){
     if(typeof groundHeight!=="function")return sea-6;
     let line=depthCache.get(index);
@@ -231,6 +259,7 @@ export function createCinematicSurfZone(scene,ocean,groundHeight){
     sampleCount*4)%sampleCount;return {p:samples[index],index};};
   function updateGeometry(t){
     motion.value=t;
+    activeFoamWakes=0;
     for(let w=0;w<WAVES.length;w++){
       const wave=WAVES[w];
       for(let i=0;i<=COLS;i++){
@@ -257,15 +286,28 @@ export function createCinematicSurfZone(scene,ocean,groundHeight){
         const variation=1+.11*Math.sin(i*.52+w*1.7+t*.37)+
           .06*Math.sin(i*1.43-w*.83);
         const H=height*variation;
+        const plunge=smooth(.55,.79,phase);
+        const wake=foamWake[w][i];
+        const cycle=Math.floor(t/wave.period+wave.phase+stagger);
+        if(phase>=.66 && phase<.92 && wake.cycle!==cycle){
+          wake.cycle=cycle;
+          wake.birth=t;
+          wake.origin=distance-Math.max(0,H)*.45;
+          wake.strength=clamp01(.80+.13*Math.sin(i*.67+w));
+        }
+        const foamAge=t-wake.birth;
+        const foamLife=foamAge>=0 && foamAge<FOAM_LIFETIME
+          ? smooth(0,.28,foamAge)*
+            (1-smooth(2.0,FOAM_LIFETIME,foamAge)) : 0;
+        if(foamLife>.02)activeFoamWakes++;
         const waveAlpha=taper*smooth(.015,.10,phase)*
           (1-smooth(.89,1,phase));
         for(let j=0;j<=FACE_ROWS;j++){
           const v=j/FACE_ROWS;
-          const lip=smooth(.59,.98,v);
-          const faceH=H*Math.sin(v*Math.PI*.5) -
-            curl*H*smooth(.83,1,v)*.42;
-          const curved=distance+(1-v)*(wave.width+H*.21)-
-            curl*lip*lip*H*.85;
+          const shape=plungingCrestProfile(
+            v,distance,H,wave.width,curl,plunge);
+          const faceH=shape.y;
+          const curved=shape.radial;
           const brokenEdge=0.11*Math.sin(i*1.83+j*.79+t*.9);
           const X=p.x+ox*(curved+brokenEdge*curl),
             Z=p.z+oz*(curved+brokenEdge*curl);
@@ -273,8 +315,11 @@ export function createCinematicSurfZone(scene,ocean,groundHeight){
             .052*Math.sin(i*.83+v*9.0+t*1.1)*curl;
           const foamEdge=smooth(.66,.96,v)*broken+
             curl*smooth(.88,1,v)*.46;
-          const alpha=waveAlpha*smooth(.02,.37,v)*
-            (.82-.15*broken);
+          // The heel disappears into the FFT sea. An overturning thin
+          // lip transmits more light than the thick, steep wave face.
+          const sheetThin=smooth(.74,1,v)*curl;
+          const alpha=waveAlpha*smooth(.015,.34,v)*
+            (.86-.15*broken-.29*sheetThin);
           const shade=clamp01(v*.64+shoal*.18);
           setPoint(face,w,0,i,j,X,heightY,Z,
             lerp(.026,.080,shade),
@@ -287,37 +332,43 @@ export function createCinematicSurfZone(scene,ocean,groundHeight){
         // as an isolated whitewater particle blob.
         for(let j=0;j<=FOAM_ROWS;j++){
           const v=j/FOAM_ROWS;
-          const lip=smooth(.76,.98,v);
-          const crestX=distance-H*curl*(.52+.55*v);
-          const capY=sea+.035+H*(.95-.50*v)-
-            H*.10*curl*lip;
-          const irregular=Math.sin(i*1.23+j*.42+t*2.1)*.12+
-            Math.sin(i*.29+j*1.9-t*.7)*.09;
+          // The foam is bound to the upper THIRD of the water face,
+          // following the exact same plunge profile as the body. It cannot
+          // hover at a separate height as the crest folds over.
+          const fv=.67+.33*v;
+          const shape=plungingCrestProfile(
+            fv,distance,H,wave.width,curl,plunge);
+          const cascade=smooth(.53,.95,v)*broken*curl;
+          const irregular=Math.sin(i*1.23+j*.42+t*2.1)*.085+
+            Math.sin(i*.29+j*1.9-t*.7)*.07;
           setPoint(whitewater,w,0,i,j,
-            p.x+ox*(crestX+irregular),
-            capY+irregular*.35,
-            p.z+oz*(crestX+irregular),
+            p.x+ox*(shape.radial-cascade*H*.13+irregular),
+            sea+.050+shape.y-cascade*H*.10+irregular*.20,
+            p.z+oz*(shape.radial-cascade*H*.13+irregular),
             .86,.96,.94,
-            taper*broken*(.25+.70*smooth(.20,.65,v))*
-              (1-smooth(.86,1,v))*.95,
+            taper*broken*(.26+.68*smooth(.18,.72,v))*
+              (1-smooth(.95,1,v))*.96,
             1);
         }
         // Part 1: wide shoreward-whitewater wash, curling filaments and
         // broken foam islands extending naturally toward the sand.
-        const trail=(8+w*3.8)*(0.32+.68*broken);
+        // Part 1: an INDEPENDENT whitewater wake. It travels toward
+        // the coast for several seconds even after its parent wave
+        // collapses and resets offshore. The procedural foam atlas cuts
+        // the sheet into branching strands, islands and dissolving holes.
+        const foamFront=wake.origin-foamAge*(2.0+.22*w);
+        const trail=(7+w*2.4)+Math.min(5,Math.max(0,foamAge)*1.25);
         for(let j=0;j<=FOAM_ROWS;j++){
           const v=j/FOAM_ROWS;
-          const radial=distance-v*trail;
-          const stream=.33*Math.sin(i*.27+t*.63+v*2.7)+
-            .15*Math.sin(i*1.12-v*8.5+t*.95);
-          const shade=clamp01(broken*(1-.30*v));
-          const nearshoreFoam=1-smooth(.76,1,v);
-          const opacity=taper*shade*nearshoreFoam*
-            (.78+.22*Math.sin(i*.78+v*8.3+t*.67));
-          // Thin sheet follows the low nearshore swell and avoids the
-          // previous rigid, straight, turquoise band against the shore.
-          const y=sea+.11+H*.09*(1-v)+
-            .07*Math.sin(i*.65+v*10+t*1.6);
+          const radial=foamFront+v*trail;
+          const stream=(.45*Math.sin(i*.31+t*.63+v*2.7)+
+            .21*Math.sin(i*1.12-v*8.5+t*.95))*foamLife;
+          const edge=smooth(0,.12,v)*(1-smooth(.79,1,v));
+          const branch=.77+.23*Math.sin(
+            i*.78+v*8.3+t*.67+w*1.5);
+          const opacity=taper*foamLife*wake.strength*edge*branch;
+          const y=sea+.10+.035*Math.sin(i*.65+v*10+t*1.6)+
+            .07*foamLife*(1-v);
           setPoint(whitewater,w,1,i,j,
             p.x+ox*(radial+stream),y,
             p.z+oz*(radial+stream),.91,.97,.94,
@@ -358,7 +409,7 @@ export function createCinematicSurfZone(scene,ocean,groundHeight){
     if(monitor)monitor.textContent=
       "CINEMATIC SURF • ACTIVE\n"+
       "Rolling fronts: 3\n"+
-      "Foam: procedural + moving\n"+
+      "Foam wakes: "+activeFoamWakes+"\n"+
       "Mode: animated / FFT physics";
   }
   function dispose(){

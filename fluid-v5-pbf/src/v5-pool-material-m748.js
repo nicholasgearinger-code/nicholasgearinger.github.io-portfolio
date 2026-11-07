@@ -163,10 +163,12 @@ patch(`  let trans = hitCol * exp(-C.absorb * thick);`,
   let poolHit=tracePool(ro2,refrDir);
   if(poolHit.t<1.0e29){thick=min(thick,poolHit.t);}
 
-  // M7.4.6 reconstructed-surface caustic focusing, now landing on the restored tiles.
-  let refrDx=dpdx(refrDir);
-  let refrDy=dpdy(refrDir);
-  let convergence=max(0.0,-(refrDx.x+refrDy.y));
+  // Safari/WebGPU: derivatives are invalid after per-fragment early returns.
+  // Estimate local focusing from explicitly sampled neighbor depths already
+  // reconstructed above; no dpdx/dpdy and no additional texture fetches.
+  let validNeighbours=!isEmptyZ(zxp)&&!isEmptyZ(zxm)&&!isEmptyZ(zyp)&&!isEmptyZ(zym);
+  let bending=(dxr.z-dxl.z)+(dyt.z-dyb.z);
+  let convergence=select(0.0,clamp(max(0.0,-bending)*0.18,0.0,0.045),validNeighbours);
   let receiver=select(0.0,1.0,poolHit.t<1.0e29);
   let causticDepth=smoothstep(0.025,0.30,thick);
   let causticDown=smoothstep(0.04,0.86,-refrDir.y);
@@ -198,20 +200,28 @@ patch(`  let trans = hitCol * exp(-C.absorb * thick);`,
 patch(`  if (any(n != n)) { n = -rd; }\n  if (dot(n, rd) > 0.0) { n = -n; }\n\n  if (C.debug == 1) { return vec4f(n * 0.5 + 0.5, 1.0); }`,
 `  if (any(n != n)) { n = -rd; }\n  if (dot(n, rd) > 0.0) { n = -n; }\n  let microN=realismMicro(p);\n  n=normalize(n+vec3f(microN.x,0.0,microN.y));\n  if(dot(n,rd)>0.0){n=-n;}\n\n  if (C.debug == 1) { return vec4f(n * 0.5 + 0.5, 1.0); }`,'micro normal');
 
-const shaderMod=dev.createShaderModule({code:src,label:'fluidV5M748PoolRealismWGSL'});
-if(typeof shaderMod.getCompilationInfo==='function'){
-  const info=await shaderMod.getCompilationInfo();
-  const errors=(info.messages||[]).filter(m=>m.type==='error');
-  if(errors.length)throw new Error('M7.4.8 pool WGSL: '+errors.map(m=>`${m.lineNum||'?'}:${m.linePos||'?'} ${m.message}`).join(' | '));
+// The optional V4 pool optics must not prevent the Lab from loading on
+// Safari. Retain the earlier working SSFR material on compilation failure.
+let poolShaderReady=false;
+try {
+  const shaderMod=dev.createShaderModule({code:src,label:'fluidV5M748PoolRealismWGSL'});
+  if(typeof shaderMod.getCompilationInfo==='function'){
+    const info=await shaderMod.getCompilationInfo();
+    const errors=(info.messages||[]).filter(m=>m.type==='error');
+    if(errors.length)throw new Error('M7.4.8 pool WGSL: '+errors.map(m=>`${m.lineNum||'?'}:${m.linePos||'?'} ${m.message}`).join(' | '));
+  }
+  const pipe=await dev.createRenderPipelineAsync({
+    label:'fluidV5M748PoolComposite',layout:'auto',
+    vertex:{module:shaderMod,entryPoint:'vs'},
+    fragment:{module:shaderMod,entryPoint:'fs',targets:[{format:ssfr.format}]},
+    primitive:{topology:'triangle-list'},
+  });
+  ssfr.pipeComposite=pipe;
+  ssfr.bindCache=null;
+  poolShaderReady=true;
+}catch(error){
+  console.warn('[Fluid V5 M7.4.8] Pool shader unsupported; retaining previous SSFR composite',error);
 }
-const pipe=await dev.createRenderPipelineAsync({
-  label:'fluidV5M748PoolComposite',layout:'auto',
-  vertex:{module:shaderMod,entryPoint:'vs'},
-  fragment:{module:shaderMod,entryPoint:'fs',targets:[{format:ssfr.format}]},
-  primitive:{topology:'triangle-list'},
-});
-ssfr.pipeComposite=pipe;
-ssfr.bindCache=null;
 
 // Restore the actual tuned V4 pool material, not merely a screen tint.
 const restored={
@@ -298,10 +308,10 @@ if(waterTab){
 }
 
 window.__v5M748PoolMaterial={
-  online:true,backend:'single-ssfr-composite-v4-tiles-plus-m746-realism',
+  online:true,shaderReady:poolShaderReady,backend:poolShaderReady?'single-ssfr-composite-v4-tiles-plus-m746-realism':'fallback-previous-composite',
   gpuPassesAdded:0,gpuSubmitsAdded:0,restored
 };
 window.__fluidV5Version='7.4.8';
 const title=document.querySelector('.hud.card.title');if(title)title.textContent='FLUID V5 · M7.4.8';
 document.title='Fluid V5 · M7.4.8 Clear Pool Restore';
-console.info('[Fluid V5 M7.4.8] V4 clear-pool material + tiled liner restored; zero added GPU passes/submits.');
+console.info(poolShaderReady?'[Fluid V5 M7.4.8] Clear-pool material active; no new passes.':'[Fluid V5 M7.4.8] Previous composite retained on device.');

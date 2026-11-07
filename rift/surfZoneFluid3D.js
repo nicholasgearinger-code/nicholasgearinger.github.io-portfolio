@@ -15,9 +15,11 @@ function hash(ix, iy, iz) {
     Math.imul(iz, 83492791)) | 0;
 }
 
-export function createSurfParticlePool(maxParticles = 160) {
+export function createSurfParticlePool(maxParticles = 160, settings = {}) {
   const count = Math.max(16, Math.min(1200, Math.floor(maxParticles)));
   return {
+    supportRadius: clamp(Number(settings.supportRadius) || H, 0.40, 1.35),
+    restSpacing: clamp(Number(settings.restSpacing) || MIN_SEPARATION, 0.18, 0.82),
     particles: Array.from({ length: count }, () => ({
       x: 0, y: -1000, z: 0, px: 0, py: 0, pz: 0,
       vx: 0, vy: 0, vz: 0, life: 0, radius: 0.09,
@@ -27,6 +29,54 @@ export function createSurfParticlePool(maxParticles = 160) {
     indexes: new Int16Array(count),
     cursor: 0, emitted: 0, visible: 0,
   };
+}
+
+/** Initialize a SOLID three-dimensional crest of moving water particles.
+ * Unlike the scattered spray emitter, this fills a volume. The particle
+ * solver then determines its deformation and collapse; no crest animation
+ * overrides particle positions after emission.
+ */
+export function seedSurfWaveBody(pool, x, z, {
+  seaY = 8, shoreX = 0, shoreZ = -1,
+  height = 3.4, width = 8.8, thickness = 2.4,
+  columns = 12, levels = 5, layers = 4,
+} = {}) {
+  if (!pool || ![x, z, seaY, shoreX, shoreZ].every(Number.isFinite)) return 0;
+  const n = Math.hypot(shoreX, shoreZ) || 1;
+  const nx = shoreX / n, nz = shoreZ / n;
+  const tx = -nz, tz = nx;
+  const count = Math.min(pool.particles.length, columns * levels * layers);
+  let emitted = 0;
+  for (let i = 0; i < count; i++) {
+    const ix = i % columns;
+    const iy = Math.floor(i / columns) % levels;
+    const iz = Math.floor(i / (columns * levels));
+    const across = (ix / Math.max(1, columns - 1) - 0.5) * width;
+    const vertical = iy / Math.max(1, levels - 1);
+    const depth = (iz / Math.max(1, layers - 1) - 0.5) * thickness;
+    // A curved, rounded initial slug of incompressible moving water.
+    const taper = 0.84 + 0.16 * Math.cos(across / width * Math.PI);
+    const leading = depth + vertical * vertical * 0.68;
+    const p = pool.particles[i];
+    p.x = x + tx * across + nx * leading;
+    p.z = z + tz * across + nz * leading;
+    p.y = seaY + 0.26 + vertical * height * taper;
+    const crestSpeed = 1.8 + vertical * 3.0;
+    p.vx = nx * crestSpeed + tx * Math.sin(across * 0.48) * 0.16;
+    p.vz = nz * crestSpeed + tz * Math.sin(across * 0.48) * 0.16;
+    p.vy = 0.70 - vertical * 1.5;
+    p.life = 2.25;
+    p.radius = 0.27;
+    p.px = p.x; p.py = p.y; p.pz = p.z;
+    emitted++;
+  }
+  for (let i = emitted; i < pool.particles.length; i++) {
+    pool.particles[i].life = 0;
+  }
+  pool.visible = emitted;
+  pool.cursor = emitted % pool.particles.length;
+  pool.emitted += emitted;
+  return emitted;
 }
 
 export function emitSurfFluid(pool, x, y, z, {
@@ -65,6 +115,9 @@ export function advanceSurfFluid(pool, frameDt, seaY, groundHeight) {
   const steps = dt > 0.026 ? 2 : 1;
   const h = dt / steps;
   const dots = pool.particles, grid = pool.heads;
+  const support = pool.supportRadius || H;
+  const supportSq = support * support;
+  const restSpacing = pool.restSpacing || MIN_SEPARATION;
   for (let tick = 0; tick < steps; tick++) {
     grid.clear();
     let active = 0;
@@ -76,8 +129,8 @@ export function advanceSurfFluid(pool, frameDt, seaY, groundHeight) {
       p.px = p.x; p.py = p.y; p.pz = p.z;
       p.vy = clamp(p.vy - G * h, -8.5, 8);
       p.x += p.vx * h; p.y += p.vy * h; p.z += p.vz * h;
-      const key = hash(Math.floor(p.x / H), Math.floor(p.y / H),
-        Math.floor(p.z / H));
+      const key = hash(Math.floor(p.x / support), Math.floor(p.y / support),
+        Math.floor(p.z / support));
       pool.next[i] = grid.get(key) ?? -1;
       grid.set(key, i);
       pool.indexes[active++] = i;
@@ -86,8 +139,8 @@ export function advanceSurfFluid(pool, frameDt, seaY, groundHeight) {
     // in three dimensions. Each pair visited once with a 27-cell search.
     for (let k = 0; k < active; k++) {
       const index = pool.indexes[k], a = dots[index];
-      const cx = Math.floor(a.x / H), cy = Math.floor(a.y / H),
-        cz = Math.floor(a.z / H);
+      const cx = Math.floor(a.x / support), cy = Math.floor(a.y / support),
+        cz = Math.floor(a.z / support);
       for (let ox = -1; ox <= 1; ox++) {
         for (let oy = -1; oy <= 1; oy++) {
           for (let oz = -1; oz <= 1; oz++) {
@@ -98,11 +151,11 @@ export function advanceSurfFluid(pool, frameDt, seaY, groundHeight) {
                 const b = dots[bIdx];
                 const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
                 const distSq = dx * dx + dy * dy + dz * dz;
-                if (distSq > 1e-8 && distSq < H2) {
+                if (distSq > 1e-8 && distSq < supportSq) {
                   const distance = Math.sqrt(distSq);
-                  const q = 1 - distance / H, weight = q * q;
+                  const q = 1 - distance / support, weight = q * q;
                   const correction = Math.min(0.07,
-                    Math.max(0, MIN_SEPARATION - distance) * 0.25
+                    Math.max(0, restSpacing - distance) * 0.25
                       + weight * 0.008) / distance;
                   a.x -= dx * correction; a.y -= dy * correction;
                   a.z -= dz * correction;

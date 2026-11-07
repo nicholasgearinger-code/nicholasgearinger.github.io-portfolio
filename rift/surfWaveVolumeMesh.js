@@ -20,17 +20,18 @@ const TETS = [
  * unindexed triangles (smooth normals are sampled from the density field).
  */
 export function createSurfVolumeField(mobile = true) {
-  const nx = mobile ? 17 : 23, ny = mobile ? 12 : 16,
-    nz = mobile ? 15 : 19;
-  const dx = mobile ? 0.72 : 0.53, dy = mobile ? 0.55 : 0.42,
-    dz = mobile ? 0.72 : 0.56;
-  const n = nx * ny * nz, maxVerts = mobile ? 16500 : 28000;
+  const nx = mobile ? 14 : 23, ny = mobile ? 10 : 16,
+    nz = mobile ? 12 : 19;
+  const dx = mobile ? 0.88 : 0.53, dy = mobile ? 0.70 : 0.42,
+    dz = mobile ? 0.92 : 0.56;
+  const n = nx * ny * nz, maxVerts = mobile ? 12000 : 28000;
   return {
     nx, ny, nz, dx, dy, dz,
     baseX: -(nx - 1) * dx * 0.5,
     baseY: -0.38,
     baseZ: -(nz - 1) * dz * 0.5,
-    iso: 0.39, kernelRadius: mobile ? 1.04 : 0.84,
+    iso: mobile ? 0.32 : 0.39,
+    kernelRadius: mobile ? 1.16 : 0.84,
     density: new Float32Array(n),
     gx: new Float32Array(n), gy: new Float32Array(n),
     gz: new Float32Array(n),

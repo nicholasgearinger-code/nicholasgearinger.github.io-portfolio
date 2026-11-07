@@ -204,10 +204,30 @@ export function createGPUShallowWater(sampleHeight, waterY, fftSpatialA, fftDoma
     const relativeHeight = abs(eta).div(max(bc.x, float(0.30)));
     const depthBand = smoothstep(float(0.28), float(0.95), bc.x)
       .mul(float(1).sub(smoothstep(float(4.0), float(7.0), bc.x)));
+    // Fluid breaking criterion: a positive crest entering convergent flow
+    // forms a hydraulic jump. Dissipate the resolved momentum into aeration,
+    // instead of keeping the crest moving while painting decorative foam.
+    // This remains inside the EXISTING computeUpdate, without a new GPU pass.
+    const compression = max(float(0), divergence.negate());
+    const breakingCrest = smoothstep(float(0.065), float(0.27),
+      max(eta, float(0)));
+    const compressionFront = smoothstep(float(0.085), float(0.40), compression)
+      .mul(breakingCrest);
     const breaker = max(
-      smoothstep(float(0.38), float(0.68), relativeHeight),
-      smoothstep(float(0.62), float(0.90), froude),
+      smoothstep(float(0.28), float(0.64), relativeHeight)
+        .mul(breakingCrest),
+      smoothstep(float(0.60), float(0.90), froude)
+        .mul(breakingCrest),
     ).mul(depthBand).mul(wet);
+    const overturnEnergy = clamp(max(breaker, compressionFront
+        .mul(depthBand).mul(wet)), 0, 1);
+    // Shock-capturing energy loss, bounded under mobile's larger dt:
+    // flow slows as the front breaks; mass/eta is still conserved by
+    // the divergence update above. No extra storage allocation.
+    const breakDrag = float(1).div(
+      float(1).add(overturnEnergy.mul(dt).mul(3.5)));
+    velX = velX.mul(breakDrag);
+    velZ = velZ.mul(breakDrag);
 
     // M8.2 lab idea adapted to shoreline foam: aerated water lingers
     // momentarily in shallow swash and dissipates more quickly offshore.
@@ -224,8 +244,11 @@ export function createGPUShallowWater(sampleHeight, waterY, fftSpatialA, fftDoma
           .mul(wet)
       : float(0);
     const interactionFoam = impulseMask.mul(clamp(interactionStrength.mul(0.16), 0, 0.75));
-    const foam = max(max(max(c.w.mul(foamDecay), breaker),
-      swashActivity.mul(0.68)), interactionFoam);
+    // The state W channel stores the dissipated breaking energy plus
+    // residual bubbles. Crest meshes read this SAME value, so the rolling
+    // lip and foam appear where the solver actually loses momentum.
+    const foam = clamp(max(max(max(c.w.mul(foamDecay), overturnEnergy),
+      swashActivity.mul(0.68)), interactionFoam), 0, 1);
 
     eta = eta.mul(wet);
     velX = velX.mul(wet);

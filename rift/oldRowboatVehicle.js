@@ -45,6 +45,39 @@ export function sampleRowboatWater(handle, x, z, time) {
   return y;
 }
 
+/**
+ * Local free-surface height, velocity, acceleration and slope.
+ * Uses the same analytic wave bands as sampleRowboatWater, so the fluid
+ * pressure calculation and the waterline test cannot disagree about time.
+ * All four values are written into a reused cell object (no frame garbage).
+ *
+ * This is still a low-frequency CPU proxy of the FFT ocean. We deliberately
+ * avoid reading GPU textures on iPhone, which would stall the renderer.
+ */
+export function sampleRowboatWaterKinematics(handle, x, z, time, out = {}) {
+  const storm = clamp(handle?.stormAmount?.value ?? 0, 0, 1);
+  const gain = 1 + 0.28 * storm;
+  let height = handle?.waterY ?? 0;
+  let velocityY = 0, accelerationY = 0, slopeX = 0, slopeZ = 0;
+  for (let i = 0; i < SWELLS.length; i++) {
+    const [kx, kz, amplitude, omega] = SWELLS[i];
+    const phase = kx * x + kz * z - time * omega;
+    const s = Math.sin(phase), co = Math.cos(phase);
+    const a = amplitude * gain;
+    height += a * s;
+    velocityY -= a * omega * co;
+    accelerationY -= a * omega * omega * s;
+    slopeX += a * kx * co;
+    slopeZ += a * kz * co;
+  }
+  out.height = height;
+  out.velocityY = velocityY;
+  out.accelerationY = accelerationY;
+  out.slopeX = slopeX;
+  out.slopeZ = slopeZ;
+  return out;
+}
+
 // Align the GLB's longest horizontal dimension with boat-local +X,
 // uniformly scale it to a world-sized hull, and center the physics pivot.
 function buildVisual(gltf) {
@@ -509,6 +542,12 @@ export function createOldRowboatVehicle({
         wake: makeWake(scene),
         wakeImpulse: { riding: false, x: 0, z: 0, strength: 0, radius: 2 },
         labLastStroke: -100, labStrokeSide: 1, labLastSlap: -100,
+        // Lab M5.1 concept: relative fluid/rigid velocity at each hull cell
+        // creates independent contact pressure and pitch/roll torque.
+        cellWater: Array.from({ length: 9 }, () => ({
+          height: 0, velocityY: 0, accelerationY: 0, slopeX: 0, slopeZ: 0,
+        })),
+        waveImpact: 0, impactX: spot.x, impactZ: spot.z,
       };
       console.info("[rift-rowboat] Spawned near player beach", {
         model: MODEL_URL, x: spot.x, z: spot.z,
@@ -540,12 +579,15 @@ export function createOldRowboatVehicle({
     const inertiaX = b.mass * (b.beam ** 2 + b.hullHeight ** 2) / 12;
     const inertiaZ = b.mass * (b.length ** 2 + b.hullHeight ** 2) / 12;
     const hydroK = RHO * G * b.area;
-    // Critical-damping-inspired forces for a stiff but responsive hull.
-    const heaveDamping = 2 * 0.86 * Math.sqrt(hydroK * b.mass);
+    // The prior damping was applied to the hull as a whole, making waves
+    // look disconnected. Retain a smaller global stabilizer; most of the
+    // resistance now comes from each cell's motion RELATIVE to its water.
+    const heaveDamping = 2 * 0.38 * Math.sqrt(hydroK * b.mass);
     const rollK = hydroK * b.beam * b.beam / 9;
     const pitchK = hydroK * b.length * b.length / 9;
-    const rollDamping = 2 * 0.82 * Math.sqrt(rollK * inertiaX);
-    const pitchDamping = 2 * 0.84 * Math.sqrt(pitchK * inertiaZ);
+    const rollDamping = 2 * 0.52 * Math.sqrt(rollK * inertiaX);
+    const pitchDamping = 2 * 0.55 * Math.sqrt(pitchK * inertiaZ);
+    let peakImpact = 0, impactX = root.position.x, impactZ = root.position.z;
 
     for (let tick = 0; tick < n; tick++) {
       const t = time - dt + h * (tick + 1);
@@ -593,8 +635,11 @@ export function createOldRowboatVehicle({
       let fy = -b.mass * G, tx = 0, tz = 0;
       let maxSurface = -Infinity;
       const cellArea = b.area / 9;
-      // Hydrostatic pressure on nine submerged hull columns. Forces on
-      // the bow, stern, and each side create genuine pitch/roll torques.
+      // Fluid Lab M5.1-inspired *pressure response*: nine wetted columns
+      // receive hydrostatic lift plus fluid-relative drag, water vertical
+      // acceleration and a capped slamming impulse when a crest catches up.
+      // Opposing sides therefore produce real roll and pitch torques.
+      let cellIndex = 0;
       for (const ix of sampleOffsets) {
         for (const iz of sampleOffsets) {
           const lx = ix * b.length / 3, lz = iz * b.beam / 3;
@@ -602,14 +647,47 @@ export function createOldRowboatVehicle({
           const wz = root.position.z - sy * lx + cy * lz;
           const pointY = root.position.y + b.bottomOffset +
             root.rotation.z * lx - root.rotation.x * lz;
-          const water = sampleRowboatWater(b.handle, wx, wz, t);
-          if (water > maxSurface) maxSurface = water;
-          const depth = clamp(water - pointY, 0, b.hullHeight);
+          const surface = sampleRowboatWaterKinematics(
+            b.handle, wx, wz, t, b.cellWater[cellIndex++],
+          );
+          if (surface.height > maxSurface) maxSurface = surface.height;
+          const depth = clamp(surface.height - pointY, 0, b.hullHeight);
           if (depth <= 0) continue;
-          const lift = RHO * G * cellArea * depth;
+
+          const pointVy = b.ySpeed + b.pitchSpeed * lx - b.rollSpeed * lz;
+          const closingSpeed = surface.velocityY - pointVy;
+          const hydrostatic = RHO * G * cellArea * depth;
+          // Motion relative to water matters more than motion relative
+          // to an arbitrary stationary world frame.
+          const contactDrag = clamp(
+            RHO * cellArea * depth * closingSpeed * 1.60,
+            -hydrostatic * 0.72, hydrostatic * 0.85,
+          );
+          const waveInertia = clamp(
+            RHO * cellArea * depth * surface.accelerationY * 0.20,
+            -hydrostatic * 0.15, hydrostatic * 0.15,
+          );
+          const wetFraction = clamp(depth / (b.hullHeight * 0.30), 0, 1);
+          const slam = closingSpeed > 0.55
+            ? Math.min(
+              RHO * cellArea * closingSpeed * closingSpeed * 0.32 * wetFraction,
+              RHO * G * cellArea * b.hullHeight * 0.55,
+            )
+            : 0;
+          // Water never pulls on a hull that is leaving the free surface.
+          const lift = Math.max(0, hydrostatic + contactDrag + waveInertia + slam);
           fy += lift;
           tx -= lz * lift;
           tz += lx * lift;
+
+          // Keep only the strongest discrete impact for this frame.
+          // It seeds the existing shallow-water interaction slot, not a
+          // second solver or an unbounded particle emitter.
+          if (slam > peakImpact && closingSpeed > 0.70) {
+            peakImpact = slam;
+            impactX = wx;
+            impactZ = wz;
+          }
         }
       }
       fy -= heaveDamping * b.ySpeed;
@@ -636,6 +714,11 @@ export function createOldRowboatVehicle({
         if (b.ySpeed < 0) b.ySpeed = 0;
       }
     }
+    // Use force normalized by hull weight, so the impact signal adapts
+    // if a rider boards or the boat mass changes.
+    b.waveImpact = clamp(peakImpact / Math.max(1, b.mass * G), 0, 1);
+    b.impactX = impactX;
+    b.impactZ = impactZ;
   }
 
   function updateWake(time) {
@@ -697,16 +780,17 @@ export function createOldRowboatVehicle({
         foam: 0.17, kind: "oar",
       }, time);
     }
-    // A wave slapping the hull produces a stronger, short-lived impact.
-    // Rate-limited to prevent the low-FPS update from flooding the event bus.
-    if (boat.ySpeed < -0.78 && time - boat.labLastSlap > 0.85) {
+    // Real relative water/hull contact pressure, rather than world-space
+    // downward velocity, triggers the hull slap. A rising wave can hit a
+    // stationary boat; a boat descending with the water does NOT splash.
+    if (boat.waveImpact > 0.10 && time - boat.labLastSlap > 0.75) {
       boat.labLastSlap = time;
-      emitRiftWaterImpact(boat.handle, boat.root.position.x,
-        boat.root.position.z, {
-          strength: clamp(-boat.ySpeed * 0.8, 0.4, 1.6),
-          radius: boat.beam * 1.15,
-          foam: 0.12, kind: "hull",
-        }, time);
+      emitRiftWaterImpact(boat.handle, boat.impactX, boat.impactZ, {
+        strength: clamp(0.35 + boat.waveImpact * 3.0, 0.4, 1.7),
+        radius: clamp(boat.beam * (0.9 + boat.waveImpact), 1.2, 2.5),
+        foam: clamp(boat.waveImpact * 0.32, 0.04, 0.20),
+        kind: "hull",
+      }, time);
     }
     if (riding) followCamera(dt);
     updateHUD();

@@ -3032,8 +3032,15 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
       map: seafloorColorTex,
       normalMap: getSeafloorSandNormalTexture(),
       roughnessMap: getSeafloorSandRoughnessTexture(),
+      // Pool-clearwater lesson: excessively strong normals on a repeating
+      // sand map read as a tiled grid when viewed through a refracting
+      // surface. Full-strength normals also sparkle/alias on iPhone Low.
+      normalScale: new THREE.Vector2(0.38, 0.38),
     });
-    simpleTerrainMat.map.repeat.set(Math.max(6, Math.round(TERRAIN_SIZE / 6)), Math.max(6, Math.round(TERRAIN_SIZE / 6)));
+    // Reduce the spatial repeat frequency without adding any textures,
+    // shader fetches or geometry to the existing PBR seabed material.
+    const seabedRepeat = Math.max(6, Math.round(TERRAIN_SIZE / 8.5));
+    simpleTerrainMat.map.repeat.set(seabedRepeat, seabedRepeat);
     simpleTerrainMat.normalMap.repeat.copy(simpleTerrainMat.map.repeat);
     simpleTerrainMat.roughnessMap.repeat.copy(simpleTerrainMat.map.repeat);
     // Per "I want this on the seafloor as it's light reflecting and

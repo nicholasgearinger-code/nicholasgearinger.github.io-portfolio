@@ -51,7 +51,7 @@ function buildBathymetry(sampleHeight, waterY, domain, N) {
   return data;
 }
 
-export function createGPUShallowWater(sampleHeight, waterY, fftSpatialA, fftDomain, domain = SHALLOW_DOMAIN) {
+export function createGPUShallowWater(sampleHeight, waterY, fftSpatialA, fftDomain, domain = SHALLOW_DOMAIN, fftWaveScale = null) {
   if (!fftSpatialA) return null;
 
   const N = SHALLOW_N;
@@ -172,8 +172,24 @@ export function createGPUShallowWater(sampleHeight, waterY, fftSpatialA, fftDoma
     const fh0 = mix(fftSpatialA.element(fi00).x, fftSpatialA.element(fi10).x, ftx);
     const fh1 = mix(fftSpatialA.element(fi01).x, fftSpatialA.element(fi11).x, ftx);
     const fftEta = mix(fh0, fh1, ftz);
-    const coupling = boundary.mul(forcingStrength).mul(smoothstep(float(1.4), float(5.0), bc.x));
-    eta = mix(eta, fftEta.mul(0.46), coupling.mul(0.16));
+    // Wave-energy handoff: the FFT's raw spatial displacement is in its
+    // unscaled spectral units. Couple its LIVE waveScale into finite-depth
+    // water before shoaling. Boundary-only forcing used to reach the beach
+    // severely attenuated and left the physically driven breaker dormant.
+    //
+    // Inject gently into an offshore 5-12m depth band, then propagate with
+    // the shallow solver's conserved eta and velocity toward the swash.
+    // Never directly paint the final surf face from FFT texture values.
+    const incoming = clamp(fftEta.mul(fftWaveScale ?? float(28))
+      .mul(0.36), -0.58, 0.58);
+    const outerCoupling = boundary.mul(smoothstep(
+      float(1.4), float(5.0), bc.x)).mul(0.13);
+    const shoalingFeed = smoothstep(float(4.4), float(7.0), bc.x)
+      .mul(float(1).sub(smoothstep(float(10.5), float(14.0), bc.x)))
+      .mul(0.060);
+    const coupling = clamp(outerCoupling.add(shoalingFeed)
+      .mul(forcingStrength), 0, 0.22);
+    eta = mix(eta, incoming, coupling);
 
     const ix = bc.y.sub(interactionPosition.x);
     const iz = bc.z.sub(interactionPosition.y);

@@ -3205,14 +3205,16 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
       // zero. Floored at 0.4 so the net never fully stops.
       const waveSpeedFactor = float(0.4).add(float(1.0).sub(abs(waveNorm.sub(0.5)).mul(2.0)).mul(0.9));
 
-      const worldXZ = positionWorld.xz.mul(0.15);
+      // Lower spatial frequency avoids exposing repeated 256px caustic
+      // tiles as the aligned grid visible through the very shallow surf.
+      const worldXZ = positionWorld.xz.mul(0.11);
       // Organic world-space domain warp prevents the repeated caustic texture
       // from revealing its square tile boundaries. Uses cheap wave phases,
       // smooth periodic offsets and the existing two texture samples.
       const causticWarp = vec2(
         sin(positionWorld.z.mul(0.071).add(t.mul(0.21))),
         cos(positionWorld.x.mul(0.063).sub(t.mul(0.17)))
-      ).mul(0.29);
+      ).mul(0.39);
       // Converging caustic ribbons drift with the wave height and move
       // obliquely along the dominant swell, without a new FFT texture read.
       const movingFocus = vec2(
@@ -3430,10 +3432,18 @@ totalEmissiveRadiance += vec3(0.85, 0.95, 1.0) * gFoamMask * 0.9;`);
               cameraPosition.y.sub(float(LIQUID_LEVEL.crystal)))
               .mul(0.68))
         : float(1);
+      // The Fluid Lab's clear-pool look is governed by light path length:
+      // in the final meter of surf the sand should be visible through
+      // transparent water, rather than covered by a full-strength caustic
+      // lattice. Keep stronger focusing a little farther offshore.
+      const poolShoreCausticFade = smoothstep(
+        float(0.15), float(3.5), seabedWaterDepth)
+        .mul(0.83).add(0.12);
       const finalCaustic = causticPattern.mul(crestFocusing)
         .mul(causticCoupling).mul(opticalFocus).mul(causticSunAngle)
         .mul(underwaterMask).mul(upwardMask)
         .mul(focusMask).mul(depthAttenuation)
+        .mul(poolShoreCausticFade)
         .mul(aerialCausticFade)
         .mul(terrainCausticIntensityUniform).mul(terrainCausticSunGlowUniform);
       // Per "might be a little too strong" — pulled back from 0.85 to

@@ -68,6 +68,11 @@ const WATER_IOR = 1.333;
 // ?riftLabOptics=off to compile out the lab-derived local foam math.
 const RIFT_LAB_OPTICS = typeof location === "undefined" ||
   new URLSearchParams(location.search).get("riftLabOptics") !== "off";
+// Pool-inspired shore optics: clear thin-water absorption, water-column
+// transmission, and normal-based focusing instead of tiled marble bands.
+// ?riftPoolShore=off compiles the previous shoreline look for A/B testing.
+const POOL_SHORE_OPTICS = typeof location === "undefined" ||
+  new URLSearchParams(location.search).get("riftPoolShore") !== "off";
 // Phase 2 adds a coherent multi-scale normal field over the existing two
 // REAL geometry FFT cascades; ?riftWaves2=off restores legacy optical chop.
 const PHASE2_WAVE_MOTION = typeof location === "undefined" ||
@@ -314,28 +319,30 @@ function installWaterProOptics(handle) {
     0.88,
   );
 
-  // Approximate shallow refraction without scene-color captures on iOS.
-  // The normal-dependent offset bends the visible seabed/marble pattern as
-  // each FFT wave and analytic wavelet travels past. Above water only; the
-  // underwater sky keeps its separate physical Snell-inspired path.
-  const distortionGain = clamp(
-    shallow.mul(0.16).add(microEnergy.mul(0.045)),
-    0.018, 0.23,
-  ).mul(float(1).sub(underwater));
-  const warpedX = positionWorld.x.add(
-    opticalNormal.x.mul(distortionGain.mul(2.4)));
-  const warpedZ = positionWorld.z.add(
-    opticalNormal.z.mul(distortionGain.mul(2.4)));
-  // Oblique shallow-water patterns; keep low spatial frequency to avoid the
-  // obvious regular FFT diamonds seen in older mobile versions.
-  const marbleA = sin(warpedX.mul(0.39)
-    .add(warpedZ.mul(0.57)).add(time.mul(0.065)));
-  const marbleB = sin(warpedX.mul(-0.71)
-    .add(warpedZ.mul(0.27)).sub(time.mul(0.08)));
-  const depthMarble = marbleA.mul(0.60).add(marbleB.mul(0.40));
+  // Fluid Lab M7.4.8 clear-pool optical approach adapted to the ocean:
+  // Beer-Lambert attenuation controls how much sand light survives a shallow
+  // water path. Normal/sun alignment focuses light rather than painting a
+  // repeating pair of world-space sine grids over every beach.
+  // We reuse the existing FFT/TSL optical normal, sun and depth attribute:
+  // no caustic textures, additional screen capture or GPU compute passes.
+  const shoreTransmission = exp(depth.mul(float(-0.17)));
+  const poolFocus = clamp(
+    dot(opticalNormal, lightDir).mul(0.67)
+      .add(ndv.mul(0.12)).add(surfPulse.mul(0.08))
+      .sub(float(0.42)), -0.5, 0.62,
+  );
+  // Legacy marble for A/B only. The default clear-pool shore path compiles
+  // out these periodic crossing sinusoids on mobile.
+  const depthMarble = POOL_SHORE_OPTICS ? poolFocus : (
+    sin(positionWorld.x.mul(0.39).add(positionWorld.z.mul(0.57))
+      .add(time.mul(0.065))).mul(0.60)
+    .add(sin(positionWorld.x.mul(-0.71).add(positionWorld.z.mul(0.27))
+      .sub(time.mul(0.08))).mul(0.40))
+  );
   const marbleMask = smoothstep(float(-0.52), float(0.65), depthMarble)
-    .mul(shallow).mul(day).mul(float(1).sub(underwater));
-  const broadTone = depthMarble.mul(0.052)
+    .mul(shallow).mul(day).mul(float(1).sub(underwater))
+    .mul(POOL_SHORE_OPTICS ? shoreTransmission : float(1));
+  const broadTone = depthMarble.mul(POOL_SHORE_OPTICS ? 0.022 : 0.052)
     .mul(float(1).sub(underwater));
 
   // Thin water over pale sand transmits more turquoise-white daylight.
@@ -349,7 +356,8 @@ function installWaterProOptics(handle) {
   const shallowVisibility = float(1).sub(smoothstep(
     float(0.15), float(5.0), depth))
     .mul(day).mul(float(1).sub(underwater))
-    .mul(smoothstep(float(0.12), float(0.85), ndv));
+    .mul(smoothstep(float(0.12), float(0.85), ndv))
+    .mul(POOL_SHORE_OPTICS ? shoreTransmission : float(1));
   const refractedShallow = mix(color(0x399caa), color(0xc4ebdb),
     smoothstep(float(-0.40), float(0.72), depthMarble));
 
@@ -665,7 +673,7 @@ function installWaterProOptics(handle) {
     body = mix(body, refractedShallow,
       shallowVisibility.mul(float(1).sub(combinedFoam.mul(0.72))).mul(0.24));
     body = mix(body, color(0xa8e9dc), sunlitSand.mul(0.13));
-    body = mix(body, crestColor, marbleMask.mul(0.16));
+    body = mix(body, crestColor, marbleMask.mul(POOL_SHORE_OPTICS ? 0.065 : 0.16));
     body = mix(body, crestColor,
       clamp(translucency.add(lipGlow.mul(0.20)), 0, 0.34));
     body = mix(body, color(0xb6ebe6),
@@ -940,8 +948,17 @@ function installWaterProOptics(handle) {
     // The backdrop samples the scene once; blending additionally at full
     // clarity would double-count transmitted light and wash the ocean out.
     // Preserve a modest genuine-alpha fallback for WebGPU compositor quirks.
-    material.opacityNode = float(1).sub(realSceneClarity.mul(
+    const baseOpacity = float(1).sub(realSceneClarity.mul(
       PHYSICAL_OPTICS_PHASE1 ? 0.34 : 0.55));
+    // The last ~2m of water over sand must be optically thin, not a
+    // continuous opaque turquoise wall. Keep aerated foam visible.
+    const thinSheet = clamp(float(0.25)
+      .add(float(1).sub(shoreTransmission).mul(0.38))
+      .add(combinedFoam.mul(0.54)), 0.20, 0.98);
+    const shoreSheet = float(1).sub(smoothstep(float(0.12), float(2.6), depth))
+      .mul(float(1).sub(underwater));
+    material.opacityNode = POOL_SHORE_OPTICS
+      ? mix(baseOpacity, thinSheet, shoreSheet) : baseOpacity;
     material.transparent = true;
     material.depthWrite = false;
     material.forceSinglePass = true; // thin double-sided plane, never two transparent draws
@@ -961,8 +978,15 @@ function installWaterProOptics(handle) {
         : clamp(float(0.85).sub(fresnel.mul(0.60)), 0.22, 0.86),
       underwater
     ).mul(float(1).sub(combinedFoam.mul(0.80)));
-    material.opacityNode = float(1).sub(PHYSICAL_OPTICS_PHASE1
+    const baseOpacity = float(1).sub(PHYSICAL_OPTICS_PHASE1
       ? clear.mul(float(1).sub(fresnel)).mul(0.92) : clear);
+    const thinSheet = clamp(float(0.25)
+      .add(float(1).sub(shoreTransmission).mul(0.38))
+      .add(combinedFoam.mul(0.54)), 0.20, 0.98);
+    const shoreSheet = float(1).sub(smoothstep(float(0.12), float(2.6), depth))
+      .mul(float(1).sub(underwater));
+    material.opacityNode = POOL_SHORE_OPTICS
+      ? mix(baseOpacity, thinSheet, shoreSheet) : baseOpacity;
     material.transparent = true;
     material.depthWrite = false;
     material.forceSinglePass = true; // thin double-sided plane, never two transparent draws
@@ -985,6 +1009,7 @@ function installWaterProOptics(handle) {
       reflectiveBreakingCrests: REFLECTIVE_CRESTS,
       shallowSurfRealismV2: SURF_REALISM_V2,
       gridFreeWaterHighlights: GRID_FREE_WATER_HIGHLIGHTS,
+      poolShoreOptics: POOL_SHORE_OPTICS,
       disabledByQuery: typeof location !== "undefined" &&
         new URLSearchParams(location.search).get("riftRefraction") === "off",
     };

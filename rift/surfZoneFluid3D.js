@@ -129,11 +129,12 @@ export function advanceSurfFluid(pool, frameDt, seaY, groundHeight) {
       if (![p.x, p.y, p.z].every(Number.isFinite)) {
         p.life = 0; continue;
       }
-      const floorY = typeof groundHeight === "function"
+      // On mobile don't sample full fractal island terrain for every
+      // airborne particle; only check the seabed when near water level.
+      const floorY = p.y < seaY + 1.25 &&
+        typeof groundHeight === "function"
         ? groundHeight(p.x, p.z) : seaY - 4;
       // Landing returns droplets into the underlying FFT/shallow water.
-      // This particle solver is the dynamic overturning volume, not the
-      // infinitely extending pool beneath it.
       if (p.y <= Math.max(seaY + 0.045,
         Number.isFinite(floorY) ? floorY + 0.075 : seaY)) {
         p.life = 0; continue;

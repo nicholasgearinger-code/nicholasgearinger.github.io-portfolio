@@ -251,6 +251,24 @@ export function createVolumetricSurfZone(scene, ocean, groundHeight) {
     originX: 0, originZ: 0, centerShoreX: 0, centerShoreZ: -1,
     lastMeshUpdate: -10, initialCount: 0,
   };
+  // Optional on-screen proof that real fluid reconstruction is running:
+  // ?riftSurfVolumeStats=1. It is not displayed during normal gameplay.
+  const showStats = typeof location !== "undefined" &&
+    new URLSearchParams(location.search).get("riftSurfVolumeStats") === "1";
+  const debug = showStats && typeof document !== "undefined" &&
+    document.body ? document.createElement("div") : null;
+  if (debug) {
+    debug.style.cssText = [
+      "position:fixed", "top:72px", "right:8px", "z-index:99999",
+      "pointer-events:none", "background:#061c24dd", "color:#d9fffd",
+      "font:600 11px/1.55 monospace", "padding:8px 10px",
+      "border:1px solid #78cbc0", "border-radius:8px",
+      "white-space:pre",
+    ].join(";");
+    debug.textContent = "3D SURF — initializing";
+    document.body.appendChild(debug);
+  }
+  let lastDebugUpdate = -10;
 
   function rebuildSurface(time, camera) {
     if (camera && (Math.hypot(camera.x - lastCamera.x,
@@ -553,12 +571,22 @@ export function createVolumetricSurfZone(scene, ocean, groundHeight) {
     release3DFluid(time, camera);
     const alive = advanceSurfFluid(particlePool, dt, sea, groundHeight);
     if (alive || particleMesh.visible) drawParticles();
+    if (debug && time - lastDebugUpdate > 0.35) {
+      lastDebugUpdate = time;
+      debug.textContent =
+        "3D SURF • " + (volume.active ? "ACTIVE" : "BETWEEN WAVES") +
+        "\nVolume particles: " + (volume.active ? volume.previousCount : 0) +
+        "\nSurface triangles: " +
+          (volumeGeometry?.drawRange.count ?? 0) / 3 +
+        "\nSpray particles: " + alive;
+    }
   }
 
   function dispose() {
     if (disposed) return;
     disposed = true;
     scene.remove(bodyMesh, foamMesh, particleMesh);
+    debug?.remove();
     if (volumeMesh) scene.remove(volumeMesh);
     const cleanup = () => {
       body.geometry.dispose(); foam.geometry.dispose();

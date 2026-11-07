@@ -489,7 +489,7 @@ export function createVolumetricSurfZone(scene, ocean, groundHeight) {
       return;
     }
     const meshPeriod = MOBILE
-      ? (slowFrameCount > 7 ? 1 / 5 : 1 / 9)
+      ? (slowFrameCount > 7 ? 1 / 4 : 1 / 7)
       : 1 / 16;
     if (time - volume.lastMeshUpdate >= meshPeriod) {
       const result = buildSurfVolumeField(volumeField, volumePool, {

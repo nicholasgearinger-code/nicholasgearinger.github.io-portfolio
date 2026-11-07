@@ -751,7 +751,11 @@ export function updatePersistentShoreFoam(surfHandle, elapsed = 0, cameraY = Inf
 
   const underwater = Number.isFinite(cameraY) && cameraY < handle.waterY - 0.10;
   handle.foamMesh.visible = !underwater;
-  handle.edgeMesh.visible = !underwater;
+  // Cinematic surf supplies a naturally broken foamy edge. The old
+  // independent outline was a visibly straight strip in drone view;
+  // retain the foam field itself and the full shoreline swash solver.
+  handle.edgeMesh.visible = !underwater &&
+    surfHandle.__riftCinematicSurfActive !== true;
   // Replaced by GPU-solved curl when active. Keep only the persistent
   // foam/wash sheets, avoiding duplicate transparent breaker walls.
   const gpuBreak = surfHandle.__riftGPUFluidBreaker === true;

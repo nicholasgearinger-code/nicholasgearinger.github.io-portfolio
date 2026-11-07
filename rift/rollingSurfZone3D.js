@@ -12,7 +12,7 @@ import * as THREE from "three";
 import { attribute } from "three/tsl";
 import {
   createSurfParticlePool, emitSurfFluid, advanceSurfFluid,
-  seedSurfWaveBody,
+  seedSurfWaveBody, injectSurfWaveBody,
 } from "./surfZoneFluid3D.js";
 import {
   createSurfVolumeField, buildSurfVolumeField,
@@ -246,7 +246,8 @@ export function createVolumetricSurfZone(scene, ocean, groundHeight) {
   // and re-enters the existing shallow-water solver when it breaks.
   const volume = {
     active: false, band: 1, center: 0, started: 0,
-    nextSpawn: 0.15, lastImpact: -10, previousCount: 0,
+    nextSpawn: 0.15, lastImpact: -10, lastInflow: -10,
+    previousCount: 0,
     originX: 0, originZ: 0, centerShoreX: 0, centerShoreZ: -1,
     lastMeshUpdate: -10, initialCount: 0,
   };
@@ -443,14 +444,33 @@ export function createVolumetricSurfZone(scene, ocean, groundHeight) {
         volume.started = time;
         volume.active = volume.initialCount > 0;
         volume.lastMeshUpdate = -10;
-        volume.nextSpawn = time + (MOBILE ? 4.2 : 3.4);
+        volume.lastInflow = time;
+        volume.nextSpawn = time + (MOBILE ? 3.2 : 2.9);
       } else {
         volume.nextSpawn = time + 0.7;
       }
     }
     if (!volume.active) return;
-    const count = advanceSurfFluid(volumePool, dt, sea, groundHeight);
+    let count = advanceSurfFluid(volumePool, dt, sea, groundHeight);
     const absorbed = volume.previousCount - count;
+    // Incoming FFT swells replenish the lip as its leading fluid falls
+    // into the sea. Only absorbed particle slots are reused, keeping a
+    // strictly bounded mass/CPU budget while making the crash sustained.
+    const age = time - volume.started;
+    if (age > 0.24 && age < 1.25 &&
+        time - volume.lastInflow > (MOBILE ? 0.25 : 0.19)) {
+      volume.lastInflow = time;
+      count += injectSurfWaveBody(volumePool,
+        volume.originX, volume.originZ, {
+          seaY: sea,
+          shoreX: volume.centerShoreX,
+          shoreZ: volume.centerShoreZ,
+          height: MOBILE ? 3.05 : 3.65,
+          width: MOBILE ? 8.1 : 11.2,
+          count: MOBILE ? 12 : 20,
+        });
+      volumePool.visible = count;
+    }
     if (absorbed >= 8 && time - volume.lastImpact > 0.40) {
       volume.lastImpact = time;
       emitRiftWaterImpact(ocean, volume.originX +

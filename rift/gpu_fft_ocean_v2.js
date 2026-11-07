@@ -392,7 +392,10 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
   }
   handle.fftDetailHandle = detailHandle;
 
-  const shallowHandle = createGPUShallowWater(sampleHeight, y, handle.resources?.[8], size, SHALLOW_DOMAIN);
+  const shallowHandle = createGPUShallowWater(
+    sampleHeight, y, handle.resources?.[8], size, SHALLOW_DOMAIN,
+    handle.waveScale, // the same live FFT amplitude used by the ocean mesh
+  );
   handle.fftShallowHandle = shallowHandle;
 
   handle.waveScale.value = 28.0;

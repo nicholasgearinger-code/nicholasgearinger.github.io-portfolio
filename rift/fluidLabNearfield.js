@@ -6,6 +6,10 @@
 // ?riftFluidLab=off disables both this and the solver-based surface optics.
 import * as THREE from "three";
 import { consumeRiftWaterVisualImpact } from "./waterLabInteractions.js";
+import {
+  normalWorld, cameraPosition, positionWorld, color, float,
+  clamp as nodeClamp, dot, abs, pow, mix,
+} from "three/tsl";
 
 const TOUCH = typeof navigator !== "undefined" &&
   (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent || "") ||
@@ -17,11 +21,22 @@ const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
 export function createFluidLabNearfield(scene, handle) {
   if (!handle?.gpuFFT || !scene) return null;
-  const geometry = new THREE.SphereGeometry(0.076, 6, 4);
+  const geometry = new THREE.SphereGeometry(0.076, 8, 6);
   const material = new THREE.MeshBasicNodeMaterial({
-    color: 0xd2faf5, transparent: true, opacity: 0.72,
+    color: 0xd2faf5, transparent: true, opacity: 1,
     depthWrite: false, side: THREE.DoubleSide,
   });
+  // Fluid Lab SSFR-inspired droplet reconstruction: translucent center,
+  // brighter Fresnel rim. Unlike opaque foam spheres, the scattered droplets
+  // transmit the actual background via standard blending. One material,
+  // one instanced draw; no render targets or extra composite passes.
+  const viewRay = cameraPosition.sub(positionWorld).normalize();
+  const ndv = nodeClamp(abs(dot(normalWorld, viewRay)), 0, 1);
+  const rim = pow(float(1).sub(ndv), float(2.3));
+  material.colorNode = mix(color(0x81c6d0), color(0xf1ffff),
+    rim.mul(0.84));
+  material.opacityNode = nodeClamp(float(0.24).add(rim.mul(0.53)), 0.20, 0.78);
+  material.forceSinglePass = true;
   const mesh = new THREE.InstancedMesh(geometry, material, MAX_PARTICLES);
   mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   mesh.frustumCulled = false;

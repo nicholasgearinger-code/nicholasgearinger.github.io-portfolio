@@ -34,6 +34,38 @@ const lerp = (a,b,t)=>a+(b-a)*t;
 const fract = x=>x-Math.floor(x);
 const smooth=(a,b,x)=>{const t=clamp01((x-a)/(b-a));return t*t*(3-2*t);};
 
+// Coherent multi-scale, coastline-periodic wave groups. The phase warp
+// changes continuously in time (its time derivative remains positive),
+// while the low/high harmonics make neighboring crests peel and interfere.
+// Unlike per-vertex random noise this cannot tear adjacent mesh columns,
+// and the offshore/nearshore water do not need extra GPU passes.
+export function irregularSurfPhase(t,band,index,sampleCount,columnOffset=0){
+  const wave=WAVES[band];
+  const theta=2*Math.PI*index/Math.max(1,sampleCount);
+  const warped=t+
+    .85*Math.sin(t*.16+band*2.0)+
+    .42*Math.sin(t*.37+band*.83);
+  const peel=columnOffset*.0017+
+    .052*Math.sin(theta*3-t*.115+band*1.7)+
+    .022*Math.sin(theta*9+t*.072+band*1.9);
+  const raw=warped/wave.period+wave.phase+peel;
+  const cycle=Math.floor(raw);
+  const phase=fract(raw);
+  // Sets of small and large waves, overlaid with broad and finer
+  // variation along the coast. The cycle change occurs offscreen while
+  // the faded wave resets, never during a visible crest.
+  const group=.69+.56*(.5+.5*Math.sin(
+    cycle*2.399963+band*1.67));
+  const spatial=clamp01(
+    .80+.15*Math.sin(theta*3-t*.092+band*1.4)+
+    .11*Math.sin(theta*7+t*.052+band*.7)
+  );
+  const heightScale=Math.max(.55,Math.min(1.40,group*spatial));
+  const breakOffset=.028*Math.sin(
+    theta*5+t*.051+band*1.23);
+  return {phase,cycle,heightScale,breakOffset,peel};
+}
+
 // Both the translucent water and its frothy cap use this same overturning
 // profile. The tip leans shoreward and plunges down as the wave collapses;
 // independent cap geometry was previously producing floating white sheets.
@@ -224,8 +256,9 @@ export function createCinematicSurfZone(scene,ocean,groundHeight){
   // World-positioned wake events, one per wave/shoreline column. A crest
   // deposits foam ONCE when it breaks. That foam has its own lifetime and
   // propagation; the next wave reset cannot teleport or erase it.
-  const foamWake=WAVES.map(()=>Array.from({length:COLS+1},()=>({
+  const foamWake=WAVES.map(()=>Array.from({length:sampleCount},()=>({
     cycle:-Infinity, birth:-Infinity, origin:0, strength:0,
+    speed:2,
   })));
   let activeFoamWakes=0;
   function groundAt(index,distance){
@@ -268,9 +301,9 @@ export function createCinematicSurfZone(scene,ocean,groundHeight){
         const ox=p.outwardX/norm,oz=p.outwardZ/norm;
         const along=i/COLS;
         const taper=smooth(0,.10,along)*(1-smooth(.90,1,along));
-        const stagger=(i-COLS*.5)*.0039+
-          (p.liftRand||0)*.012;
-        const phase=fract(t/wave.period+wave.phase+stagger);
+        const irregular=irregularSurfPhase(
+          t,w,index,sampleCount,i-COLS*.5);
+        const {phase,cycle,heightScale,breakOffset}=irregular;
         const travelled=smooth(0,1,phase);
         const distance=lerp(wave.far,wave.near,travelled);
         const depth=Math.max(0,sea-groundAt(index,distance));
@@ -279,21 +312,31 @@ export function createCinematicSurfZone(scene,ocean,groundHeight){
         const crash=1-smooth(.79,.98,phase);
         const height=wave.height*(.60+.56*shoal)*
           (.53+.47*rising)*crash;
-        const curl=smooth(.35,.69,phase)*
-          (1-smooth(.84,.99,phase));
-        const broken=smooth(.48,.77,phase)*
+        // Bathymetry changes where individual crest sections steepen.
+        // Adjacent columns phase-shift smoothly, so the crash rolls
+        // alongshore instead of happening along one uniform line.
+        const breakOnset=.50-breakOffset-shoal*.07;
+        const curl=smooth(breakOnset-.14,breakOnset+.12,phase)*
+          (1-smooth(.83,.985,phase));
+        const broken=smooth(breakOnset,breakOnset+.25,phase)*
           (1-smooth(.94,1,phase));
-        const variation=1+.11*Math.sin(i*.52+w*1.7+t*.37)+
-          .06*Math.sin(i*1.43-w*.83);
-        const H=height*variation;
+        const variation=1+
+          .07*Math.sin(index*.34+w*1.7+t*.23)+
+          .045*Math.sin(index*.61-w*.83-t*.11);
+        const H=height*heightScale*variation;
         const plunge=smooth(.55,.79,phase);
-        const wake=foamWake[w][i];
-        const cycle=Math.floor(t/wave.period+wave.phase+stagger);
-        if(phase>=.66 && phase<.92 && wake.cycle!==cycle){
+        // Store wake by WORLD shoreline index, not screen column:
+        // moving the drone must not teleport the whitewater.
+        const wake=foamWake[w][index];
+        const releasePhase=Math.max(.57,breakOnset+.18);
+        if(phase>=releasePhase && phase<.94 &&
+            broken>.20 && wake.cycle!==cycle){
           wake.cycle=cycle;
           wake.birth=t;
           wake.origin=distance-Math.max(0,H)*.45;
-          wake.strength=clamp01(.80+.13*Math.sin(i*.67+w));
+          wake.strength=clamp01(.50+.34*heightScale+
+            .12*Math.sin(index*.21+w));
+          wake.speed=1.5+Math.min(1.5,H*.32)+.16*w;
         }
         const foamAge=t-wake.birth;
         const foamLife=foamAge>=0 && foamAge<FOAM_LIFETIME
@@ -320,7 +363,8 @@ export function createCinematicSurfZone(scene,ocean,groundHeight){
           const sheetThin=smooth(.74,1,v)*curl;
           const alpha=waveAlpha*smooth(.015,.34,v)*
             (.86-.15*broken-.29*sheetThin);
-          const shade=clamp01(v*.64+shoal*.18);
+          const shade=clamp01(v*.64+shoal*.18+
+            .08*Math.sin(index*.13+t*.27+w));
           setPoint(face,w,0,i,j,X,heightY,Z,
             lerp(.026,.080,shade),
             lerp(.29,.60,shade),
@@ -359,7 +403,7 @@ export function createCinematicSurfZone(scene,ocean,groundHeight){
         // Never feed infinite coordinates into a GPU vertex buffer before
         // the first break event (birth starts at -Infinity).
         const foamFront=foamLife>0
-          ? wake.origin-foamAge*(2.0+.22*w)
+          ? wake.origin-foamAge*wake.speed
           : distance;
         const trail=(7+w*2.4)+Math.min(5,Math.max(0,foamAge)*1.25);
         for(let j=0;j<=FOAM_ROWS;j++){
@@ -368,8 +412,9 @@ export function createCinematicSurfZone(scene,ocean,groundHeight){
           const stream=(.45*Math.sin(i*.31+t*.63+v*2.7)+
             .21*Math.sin(i*1.12-v*8.5+t*.95))*foamLife;
           const edge=smooth(0,.12,v)*(1-smooth(.79,1,v));
-          const branch=.77+.23*Math.sin(
-            i*.78+v*8.3+t*.67+w*1.5);
+          const branch=.70+.25*Math.sin(
+            index*.31+v*8.3+t*.67+w*1.5)+
+            .08*Math.sin(index*.93-v*13.2-t*.27);
           const opacity=taper*foamLife*wake.strength*edge*branch;
           const y=sea+.10+.035*Math.sin(i*.65+v*10+t*1.6)+
             .07*foamLife*(1-v);

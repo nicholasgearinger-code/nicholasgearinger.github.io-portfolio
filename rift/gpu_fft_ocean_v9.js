@@ -157,6 +157,14 @@ function installWaterProOptics(handle) {
   const sunColor = uniform(color(0xfff6de));
   const crestColor = uniform(color(0x71ead5));
   const foamColor = handle.fftFoamColor ?? uniform(color(0xfafcf8));
+  // Fluid Lab M5.7/M4.1: a short-lived, event-driven whitened patch at
+  // paddle/splash impact points. The actual propagating wave is injected
+  // into Rift's existing GPU shallow-water solver, not this shader.
+  // Only three uniforms and simple squared-distance math; no textures,
+  // render targets, compute dispatches or shader replacement.
+  const labImpactCenter = uniform(new THREE.Vector2(0, 0));
+  const labImpactEnergy = uniform(0);
+  const labImpactInvRadiusSq = uniform(0.25);
 
   const originalColor = material.colorNode ?? uniform(color(0x247b99));
   const originalRoughness = material.roughnessNode ?? float(0.05);
@@ -520,9 +528,20 @@ function installWaterProOptics(handle) {
       .mul(float(1).sub(underwater))
       .mul(0.66),
     0, 0.66) : float(0);
+  // One localized optical foam response shared with the physical
+  // shallow-water ripple. Squared distance avoids sqrt() per fragment.
+  // Smooth falloff prevents hard circular decals and disappears quickly.
+  const labDx = positionWorld.x.sub(labImpactCenter.x);
+  const labDz = positionWorld.z.sub(labImpactCenter.y);
+  const labDistSq = labDx.mul(labDx).add(labDz.mul(labDz))
+    .mul(labImpactInvRadiusSq);
+  const labFoam = float(1).sub(smoothstep(float(0.08), float(1), labDistSq))
+    .mul(labImpactEnergy)
+    .mul(float(1).sub(underwater));
   const combinedFoam = clamp(
     whitecap.add(openSeaFoam).add(brokenFoam.mul(0.87))
-      .add(shoreSpill).add(waveLensFoam).add(breakingLip), 0, 0.97);
+      .add(shoreSpill).add(waveLensFoam).add(breakingLip)
+      .add(labFoam), 0, 0.97);
 
   // View-dependent Fresnel / wavelet sky reflection. This uses the already
   // available sky and FFT normals, avoiding additional sky texture fetches
@@ -972,6 +991,9 @@ function installWaterProOptics(handle) {
 
   material.needsUpdate = true;
 
+  handle.fftLabImpactCenter = labImpactCenter;
+  handle.fftLabImpactEnergy = labImpactEnergy;
+  handle.fftLabImpactInvRadiusSq = labImpactInvRadiusSq;
   handle.fftV9Time = time;
   handle.fftV9SurfPhase = surfPhase;
   handle.fftV9SurfSet = surfSetStrength;

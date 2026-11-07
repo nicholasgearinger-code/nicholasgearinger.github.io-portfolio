@@ -79,6 +79,45 @@ export function seedSurfWaveBody(pool, x, z, {
   return emitted;
 }
 
+/**
+ * Replenish the top of the active water mass from the incoming swell.
+ * This is a boundary inflow, not resetting particle positions each frame:
+ * only particles already absorbed by the sea can be recycled. It allows
+ * a rolling crest to remain a fluid volume as the first water falls away.
+ */
+export function injectSurfWaveBody(pool, x, z, {
+  seaY = 8, shoreX = 0, shoreZ = -1,
+  height = 3.2, width = 8.5, count = 14,
+} = {}) {
+  if (!pool || ![x,z,seaY,shoreX,shoreZ].every(Number.isFinite)) return 0;
+  const norm = Math.hypot(shoreX,shoreZ)||1;
+  const nx=shoreX/norm,nz=shoreZ/norm,tx=-nz,tz=nx;
+  let injected=0;
+  for(let i=0;i<Math.max(0,Math.min(count,24));i++){
+    let p=null;
+    for(let j=0;j<pool.particles.length;j++){
+      const target=pool.particles[pool.cursor++%pool.particles.length];
+      if(target.life<=0){p=target;break;}
+    }
+    if(!p)break;
+    const seed=pool.emitted++ * 0.61803398875;
+    const across=(seed-Math.floor(seed)-0.5)*width;
+    const level=0.50+(Math.sin(seed*4.9)*0.5+0.5)*0.50;
+    const inDepth=Math.cos(seed*7.4)*0.67+level*.54;
+    p.x=x+tx*across+nx*inDepth;
+    p.z=z+tz*across+nz*inDepth;
+    p.y=seaY+0.25+height*level;
+    const forward=2.6+2.0*level;
+    p.vx=nx*forward;p.vz=nz*forward;
+    p.vy=0.25-0.95*level;
+    p.life=1.45;
+    p.radius=0.26;
+    p.px=p.x;p.py=p.y;p.pz=p.z;
+    injected++;
+  }
+  return injected;
+}
+
 export function emitSurfFluid(pool, x, y, z, {
   shoreX = 0, shoreZ = -1, speed = 3, height = 2,
   count = 8, spread = 1.5,

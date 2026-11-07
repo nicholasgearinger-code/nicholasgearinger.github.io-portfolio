@@ -7,6 +7,7 @@ import { consumeRiftWaterImpact, resetRiftWaterImpacts, emitRiftWaterImpact } fr
 import { createFluidLabNearfield } from "./fluidLabNearfield.js";
 import { updateFluidLabLocalOptics } from "./fluidLabLocalOptics.js";
 import { createGPUFluidBreakers } from "./gpuFluidBreakers.js";
+import { createVolumetricSurfZone } from "./rollingSurfZone3D.js";
 
 function setFFTReflectionOwnership(active) {
   if (typeof globalThis !== "undefined") {
@@ -108,6 +109,30 @@ export function createLiquidPlane(
           );
         } catch (error) {
           console.warn("[rift-water] GPU breaker unavailable; scripted curl retained", error);
+        }
+      }
+      // Midshore breaking waves: 3 physically shoaling, rolling water
+      // fronts with broad, moving whitewater and a bounded 3D PBF/SPH
+      // spray volume. The nearshore GPU hydraulic break remains in place.
+      // Use ?riftSurf3D=off to compare the older FFT+shallow setup.
+      const surf3DEnabled = typeof location === "undefined" ||
+        new URLSearchParams(location.search).get("riftSurf3D") !== "off";
+      if (surf3DEnabled) {
+        try {
+          handle.__riftSurfZone3D = createVolumetricSurfZone(
+            scene, handle, sampleHeight,
+          );
+          if (handle.__riftSurfZone3D) {
+            console.info("[rift-water] 3D midshore rolling surf active", {
+              waveFaceVertices: handle.__riftSurfZone3D.waveFaceVertices,
+              foamVertices: handle.__riftSurfZone3D.foamVertices,
+              particleBudget: handle.__riftSurfZone3D.particlePool.particles.length,
+            });
+          } else {
+            console.warn("[rift-water] 3D surf initialization unavailable: shoreline samples missing");
+          }
+        } catch (error) {
+          console.warn("[rift-water] 3D surf fallback to FFT/shallow", error);
         }
       }
       // Localized Fluid Lab PBF interaction mesh. One instanced draw with
@@ -271,6 +296,9 @@ export function updateRippleLayer(handle, renderer, cameraPos, cameraY, dt) {
   if (handle?.gpuFFT) {
     const boatWake = handle.__riftRowboatWake;
     const now = handle.fftV9Time?.value ?? 0;
+    // Advance the localized 3D surf before consuming its wave-collapse
+    // impulses, allowing the existing 2D solver to receive them this frame.
+    handle.__riftSurfZone3D?.update(dt, now, cameraPos, cameraY);
     // Fluid Lab M5.7: swimmer contact seeds the same event queue as
     // boat/oar impacts. The nearfield PBF spray and the GPU shallow solver
     // both receive this event without adding an ocean simulation pass.
@@ -340,6 +368,8 @@ export function disposeLiquidPlane(scene, handle) {
   if (handle?.gpuFFT) {
     setFFTReflectionOwnership(false);
     resetRiftWaterImpacts(handle);
+    try { handle.__riftSurfZone3D?.dispose(); } catch (error) { console.warn(error); }
+    handle.__riftSurfZone3D = null;
     try { handle.__riftBreakFluid?.dispose(); } catch (error) { console.warn(error); }
     handle.__riftBreakFluid = null;
     try { handle.__riftFluidLabNearfield?.dispose(); } catch (error) { console.warn(error); }

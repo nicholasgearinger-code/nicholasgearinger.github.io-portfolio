@@ -244,11 +244,21 @@ export function createGPUShallowWater(sampleHeight, waterY, fftSpatialA, fftDoma
           .mul(wet)
       : float(0);
     const interactionFoam = impulseMask.mul(clamp(interactionStrength.mul(0.16), 0, 0.75));
-    // The state W channel stores the dissipated breaking energy plus
-    // residual bubbles. Crest meshes read this SAME value, so the rolling
-    // lip and foam appear where the solver actually loses momentum.
-    const foam = clamp(max(max(max(c.w.mul(foamDecay), overturnEnergy),
-      swashActivity.mul(0.68)), interactionFoam), 0, 1);
+    // Move aerated water with the SOLVED horizontal flow using a stable
+    // first-order upwind transport step (CFL < 0.11 at the mobile dt cap).
+    // Earlier foam stayed attached to grid cells: the water slid underneath
+    // stationary white patches instead of carrying the spent breaker ashore.
+    const foamFluxX = max(velX, float(0)).mul(c.w.sub(l.w))
+      .add(min(velX, float(0)).mul(r.w.sub(c.w)));
+    const foamFluxZ = max(velZ, float(0)).mul(c.w.sub(d.w))
+      .add(min(velZ, float(0)).mul(u.w.sub(c.w)));
+    const transportedFoam = clamp(c.w.sub(
+      foamFluxX.add(foamFluxZ).mul(dt / cellSize)), 0, 1);
+
+    // The W channel carries both advected spent whitewater and fresh
+    // breaking energy. Visible curls, surface aeration and swash share it.
+    const foam = clamp(max(max(max(transportedFoam.mul(foamDecay),
+      overturnEnergy), swashActivity.mul(0.68)), interactionFoam), 0, 1);
 
     eta = eta.mul(wet);
     velX = velX.mul(wet);

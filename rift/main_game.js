@@ -196,7 +196,7 @@ const extraEdits = [
   // procedural filler trees); previously it could spawn enormous fronds
   // directly in front of the player at the fixed world-origin spawn.
   [
-    "        const z = Math.sin(angle) * dist;\\n        // reject candidates too close to an already-placed tree",
+    "        const z = Math.sin(angle) * dist;\n        // reject candidates too close to an already-placed tree",
     `        const z = Math.sin(angle) * dist;
         if (Math.hypot(x, z) < 34) continue; // clear camera + palm canopy at origin
         // reject candidates too close to an already-placed tree`,
@@ -206,7 +206,7 @@ const extraEdits = [
   // on mobile and uses the live scene depth buffer. Disable by default on
   // touch devices, but allow explicit ?riftDepth=on comparison.
   [
-    '    return localStorage.getItem("riftWaterGraphicsMode") === "experimental" &&\\n      debug !== "noexp" && debug !== "nodepth";',
+    '    return localStorage.getItem("riftWaterGraphicsMode") === "experimental" &&\n      debug !== "noexp" && debug !== "nodepth";',
     `    const mobileDepthOptIn = !isTouchDevice ||
       new URLSearchParams(location.search).get("riftDepth") === "on";
     return mobileDepthOptIn &&
@@ -230,7 +230,7 @@ const extraEdits = [
     "Coral Shallows expanded tree-free spawn clearing",
   ],
   [
-    "  spawnPosition = { x: layout.spawn.x, y: spawnGroundY + PLAYER_EYE_HEIGHT + 2, z: layout.spawn.z };\\n  camera.position.set(spawnPosition.x, spawnPosition.y, spawnPosition.z);\\n  faceAwayFromLandmark(spawnPosition.x, spawnPosition.z);\\n  playerPhysics.verticalVelocity = 0;",
+    "  spawnPosition = { x: layout.spawn.x, y: spawnGroundY + PLAYER_EYE_HEIGHT + 2, z: layout.spawn.z };\n  camera.position.set(spawnPosition.x, spawnPosition.y, spawnPosition.z);\n  faceAwayFromLandmark(spawnPosition.x, spawnPosition.z);\n  playerPhysics.verticalVelocity = 0;",
     `  spawnPosition = { x: layout.spawn.x, y: spawnGroundY + PLAYER_EYE_HEIGHT + 2, z: layout.spawn.z };
   camera.position.set(spawnPosition.x, spawnPosition.y, spawnPosition.z);
   faceAwayFromLandmark(spawnPosition.x, spawnPosition.z);

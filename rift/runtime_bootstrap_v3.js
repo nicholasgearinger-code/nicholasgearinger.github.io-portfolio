@@ -294,6 +294,7 @@ function updateRiftPerfOverlay(stats) {
       " | Reduced " + (stats.reducedEffects ? "on" : "off"),
     "FFT cap " + (globalThis.__riftIOSFFTSafeV22?.targetHz ?? "-") + " Hz",
     "Swash compute " + (globalThis.__riftSwashPerf?.targetHz ?? "-") + " Hz",
+    "Shallow compute " + (globalThis.__riftShallowPerf?.targetHz ?? "-") + " Hz",
     "Ocean LOD " + (globalThis.__riftOceanLOD?.active ?
       globalThis.__riftOceanLOD.vertices + " verts" : "legacy")
   ].join(String.fromCharCode(10));

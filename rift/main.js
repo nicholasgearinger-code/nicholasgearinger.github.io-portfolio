@@ -337,7 +337,7 @@ async function loadRiftAndOpenMenu() {
     }
 
     setProgress(95, "Assets ready", "Loading Rift game module");
-    gameImport = gameImport || import("./main_game.js?build=natural-surf-v3-20261107");
+    gameImport = gameImport || import("./main_game.js?build=phase-a-mobile-v1-20261108");
     await gameImport;
 
     if (driftTimer) {

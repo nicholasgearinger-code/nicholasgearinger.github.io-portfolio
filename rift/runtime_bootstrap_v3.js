@@ -296,7 +296,11 @@ function updateRiftPerfOverlay(stats) {
     "Swash compute " + (globalThis.__riftSwashPerf?.targetHz ?? "-") + " Hz",
     "Shallow compute " + (globalThis.__riftShallowPerf?.targetHz ?? "-") + " Hz",
     "Ocean LOD " + (globalThis.__riftOceanLOD?.active ?
-      globalThis.__riftOceanLOD.vertices + " verts" : "legacy")
+      globalThis.__riftOceanLOD.vertices + " verts" : "legacy"),
+    "Terrain " + (globalThis.__riftSceneProbe?.terrainSafe ? "safe" : "full") +
+      " / Ocean " + (globalThis.__riftSceneProbe?.oceanVisible ? "visible" : "hidden"),
+    "Cam-water " + (globalThis.__riftSceneProbe?.cameraAboveWater ?? "-") +
+      "m / Submerged " + (globalThis.__riftSceneProbe?.submerged ?? "-")
   ].join(String.fromCharCode(10));
 }
 

@@ -57,8 +57,12 @@ function installMobileRenderGeometry(handle, size, sampleHeight, focusX = 0, foc
   // Phase A: a single crack-free indexed quadtree with more triangles near
   // the swimmer and reef. No independent tiles / seam-prone chunk edges.
   // The old center-weighted grid remains available as a safe A/B fallback.
-  const adaptiveLOD = typeof location === "undefined" ||
-    new URLSearchParams(location.search).get("riftOceanLOD") !== "off";
+  // The experimental sparse quadtree can undersample tall FFT displacement
+  // during initial ocean warmup on mobile. Keep the stable, center-weighted
+  // geometry by default until the irregular-wave silhouette is validated.
+  // Opt in with ?riftOceanLOD=on for side-by-side comparisons.
+  const adaptiveLOD = typeof location !== "undefined" &&
+    new URLSearchParams(location.search).get("riftOceanLOD") === "on";
   if (adaptiveLOD) {
     try {
       const geometry = createAdaptiveOceanGeometry(size, waterY, sampleHeight, focusX, focusZ);
@@ -93,6 +97,11 @@ function installMobileRenderGeometry(handle, size, sampleHeight, focusX = 0, foc
       }
     }
   }
+  globalThis.__riftOceanLOD = {
+    active: false, mode: "stable-mobile-grid",
+    baselineVertices: MOBILE_RENDER_N * MOBILE_RENDER_N,
+    presentationOnly: true,
+  };
   const n = MOBILE_RENDER_N;
   const geometry = new THREE.PlaneGeometry(size, size, n - 1, n - 1);
   geometry.rotateX(-Math.PI / 2);

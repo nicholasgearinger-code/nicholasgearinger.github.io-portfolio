@@ -9,6 +9,7 @@ import {
   disposeGPUFFTOcean as disposeBaseOcean,
 } from "./gpu_fft_ocean_v3.js";
 import { setGPUShallowWaterInteraction } from "./gpu_shallow_water.js";
+import { createAdaptiveOceanGeometry } from "./ocean_adaptive_lod.js";
 
 const WATER_IOR = 1.333;
 const FFT_N = 128;
@@ -52,8 +53,47 @@ function smooth01(t) {
 function installMobileRenderGeometry(handle, size, sampleHeight, focusX = 0, focusZ = 0, replacing = false) {
   if (!TOUCH_DEVICE || !handle?.mesh || (handle.fftMobileGeometryApplied && !replacing)) return;
 
-  const n = MOBILE_RENDER_N;
   const waterY = handle.waterY ?? 0;
+  // Phase A: a single crack-free indexed quadtree with more triangles near
+  // the swimmer and reef. No independent tiles / seam-prone chunk edges.
+  // The old center-weighted grid remains available as a safe A/B fallback.
+  const adaptiveLOD = typeof location === "undefined" ||
+    new URLSearchParams(location.search).get("riftOceanLOD") !== "off";
+  if (adaptiveLOD) {
+    try {
+      const geometry = createAdaptiveOceanGeometry(size, waterY, sampleHeight, focusX, focusZ);
+      const oldGeometry = handle.mesh.geometry;
+      handle.mesh.geometry = geometry;
+      // Deferring disposal prevents a queued render referencing a freed buffer.
+      if (oldGeometry) {
+        if (typeof requestAnimationFrame === "function")
+          requestAnimationFrame(() => requestAnimationFrame(() => oldGeometry.dispose()));
+        else oldGeometry.dispose();
+      }
+      handle.fftMobileGeometryApplied = true;
+      handle.fftFocusX = focusX;
+      handle.fftFocusZ = focusZ;
+      handle.fftFocusSize = size;
+      handle.fftFocusSampleHeight = sampleHeight;
+      handle.fftLODLastRebuild = performance.now();
+      globalThis.__riftOceanLOD = {
+        active: true, ...geometry.userData.riftLOD,
+        baselineVertices: MOBILE_RENDER_N * MOBILE_RENDER_N,
+        simulationResolution: 128,
+        presentationOnly: true,
+      };
+      return;
+    } catch (error) {
+      console.warn("[rift-ocean-lod] quadtree generation failed; keeping legacy mesh", error);
+      // On failed rebuild, preserve the existing valid mesh and retry only
+      // after a level reload instead of provoking repeated GPU allocations.
+      if (replacing) {
+        handle.fftLODLastRebuild = performance.now();
+        return;
+      }
+    }
+  }
+  const n = MOBILE_RENDER_N;
   const geometry = new THREE.PlaneGeometry(size, size, n - 1, n - 1);
   geometry.rotateX(-Math.PI / 2);
 
@@ -444,8 +484,11 @@ export function updateGPUFFTOceanVisuals(
       Math.abs(playerPos.z) < handle.fftFocusSize * 0.12) {
     const dx = playerPos.x - (handle.fftFocusX ?? 0);
     const dz = playerPos.z - (handle.fftFocusZ ?? 0);
-    const threshold = Math.max(36, handle.fftFocusSize * 0.045);
-    if (dx * dx + dz * dz > threshold * threshold) {
+    const threshold = Math.max(48, handle.fftFocusSize * 0.045);
+    // Rebuild only after meaningful traversal, and never during a rapid
+    // camera burst. Existing GPU FFT buffers are never touched.
+    const rebuildCooldown = performance.now() - (handle.fftLODLastRebuild ?? 0) > 9000;
+    if (rebuildCooldown && dx * dx + dz * dz > threshold * threshold) {
       installMobileRenderGeometry(handle, handle.fftFocusSize,
         handle.fftFocusSampleHeight, playerPos.x, playerPos.z, true);
     }

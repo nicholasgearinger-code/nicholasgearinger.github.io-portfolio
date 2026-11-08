@@ -192,6 +192,15 @@ const godRayUpdate = `
 `;
 
 const extraEdits = [
+  // Mobile GPU fill-rate: disable the multi-sampled WebGPU framebuffer.
+  // Query ?riftMSAA=on restores the previous renderer for visual comparison.
+  [
+    "const renderer = new THREE.WebGPURenderer({ canvas, antialias: true });",
+    `const riftMobileMSAA = !isTouchDevice || new URLSearchParams(location.search).get("riftMSAA") === "on";
+const renderer = new THREE.WebGPURenderer({ canvas, antialias: riftMobileMSAA });
+globalThis.__riftMobileMSAA = riftMobileMSAA;`,
+    "Phase A mobile MSAA fill-rate reduction",
+  ],
 
   // Phase A safety: no adaptive renderer resize on WebGPU. The existing
   // runtime bootstrap adjusts water detail without touching swapchain textures.

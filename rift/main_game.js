@@ -230,8 +230,9 @@ const extraEdits = [
     "Coral Shallows expanded tree-free spawn clearing",
   ],
   [
-    "  camera.position.set(spawnPosition.x, spawnPosition.y, spawnPosition.z);\\n  faceAwayFromLandmark(spawnPosition.x, spawnPosition.z);\\n  playerPhysics.verticalVelocity = 0;",
-    `  camera.position.set(spawnPosition.x, spawnPosition.y, spawnPosition.z);
+    "  spawnPosition = { x: layout.spawn.x, y: spawnGroundY + PLAYER_EYE_HEIGHT + 2, z: layout.spawn.z };\\n  camera.position.set(spawnPosition.x, spawnPosition.y, spawnPosition.z);\\n  faceAwayFromLandmark(spawnPosition.x, spawnPosition.z);\\n  playerPhysics.verticalVelocity = 0;",
+    `  spawnPosition = { x: layout.spawn.x, y: spawnGroundY + PLAYER_EYE_HEIGHT + 2, z: layout.spawn.z };
+  camera.position.set(spawnPosition.x, spawnPosition.y, spawnPosition.z);
   faceAwayFromLandmark(spawnPosition.x, spawnPosition.z);
   if (level.biome === "crystal") {
     // Start with a slightly downward, stable eye-level view instead of

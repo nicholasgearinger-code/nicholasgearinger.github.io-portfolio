@@ -192,6 +192,26 @@ const godRayUpdate = `
 `;
 
 const extraEdits = [
+  // Startup visibility: keep palm trunks and broad fronds outside the
+  // immediate Coral Shallows spawn view, not merely 8 world units away.
+  [
+    "if (Math.hypot(x - layout.spawn.x, z - layout.spawn.z) < 8) continue;",
+    `if (Math.hypot(x - layout.spawn.x, z - layout.spawn.z) <
+        (level.biome === "crystal" ? 28 : 8)) continue;`,
+    "Coral Shallows expanded tree-free spawn clearing",
+  ],
+  [
+    "  faceAwayFromLandmark(spawnPosition.x, spawnPosition.z);\\n  playerPhysics.verticalVelocity = 0;",
+    `  faceAwayFromLandmark(spawnPosition.x, spawnPosition.z);
+  if (level.biome === "crystal") {
+    // Start with a slightly downward, stable eye-level view instead of
+    // looking through the nearest canopy or into the high sky.
+    camera.rotation.x = -0.09;
+    camera.rotation.z = 0;
+  }
+  playerPhysics.verticalVelocity = 0;`,
+    "Coral Shallows stable initial camera pitch",
+  ],
   // Diagnostic only: isolate cloud cost without changing saved quality settings.
   // ?riftPerfClouds=off keeps the rest of the scene and FFT identical.
   [

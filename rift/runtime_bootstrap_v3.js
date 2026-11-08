@@ -186,6 +186,12 @@ async function runPreflight() {
   );
 }
 
+// Frame-scoped CPU submission counts, enabled only by ?riftPerf=1.
+const riftPerfProbe = typeof location !== "undefined" &&
+  new URLSearchParams(location.search).get("riftPerf") === "1";
+let riftRenderSubmitCalls = 0;
+let riftComputeSubmitCalls = 0;
+let riftSubmitCPUms = 0;
 const proto = THREE.WebGPURenderer?.prototype;
 if (proto && !proto.__riftBootstrapV3Patched) {
   proto.__riftBootstrapV3Patched = true;
@@ -203,7 +209,12 @@ if (proto && !proto.__riftBootstrapV3Patched) {
   const originalRender = proto.render;
   if (typeof originalRender === "function") {
     proto.render = function (...args) {
+      const started = riftPerfProbe ? performance.now() : 0;
       const result = originalRender.apply(this, args);
+      if (riftPerfProbe && state.gameStarted) {
+        riftRenderSubmitCalls++;
+        riftSubmitCPUms += performance.now() - started;
+      }
       state.renderer = this;
 
       if (state.levelWarming) {
@@ -237,7 +248,13 @@ if (proto && !proto.__riftBootstrapV3Patched) {
     if (typeof original !== "function") continue;
     proto[methodName] = function (...args) {
       if (state.levelWarming) state.warmComputeCalls++;
-      return original.apply(this, args);
+      const started = riftPerfProbe ? performance.now() : 0;
+      const result = original.apply(this, args);
+      if (riftPerfProbe && state.gameStarted) {
+        riftComputeSubmitCalls++;
+        riftSubmitCPUms += performance.now() - started;
+      }
+      return result;
     };
   }
 
@@ -266,7 +283,10 @@ function updateRiftPerfOverlay(stats) {
   riftPerfOverlay.textContent =
     "PHASE A • MOBILE PERF\\n" +
     stats.avgFPS + " FPS  /  " + stats.avgFrameMs + " ms\\n" +
-    "Water detail stride: " + stats.waterDetailStride + "\\n" +
+    "Render submissions: " + (stats.renderSubmitCalls ?? "-") +
+      "  compute: " + (stats.computeSubmitCalls ?? "-") + "\\n" +
+    "CPU submit/frame: " + (stats.cpuSubmitMsPerFrame ?? "-") + " ms\\n" +
+        "Water detail stride: " + stats.waterDetailStride + "\\n" +
     "Reduced effects: " + (stats.reducedEffects ? "on" : "off") +
     "\\nOcean LOD: " + (globalThis.__riftOceanLOD?.active ? globalThis.__riftOceanLOD.vertices + " verts / " + globalThis.__riftOceanLOD.triangles + " tris" : "legacy") +
     "\\nWebGPU buffer: fixed";
@@ -322,7 +342,17 @@ function monitorPerformance(now) {
       canvasResizingDuringFrames: false,
       sampleFrames: perfFrames,
       gpuTimingAvailable: false,
+      renderSubmitCalls: riftPerfProbe ? riftRenderSubmitCalls : null,
+      computeSubmitCalls: riftPerfProbe ? riftComputeSubmitCalls : null,
+      cpuSubmitMsPerFrame: riftPerfProbe
+        ? Math.round(riftSubmitCPUms / Math.max(1,perfFrames) * 10) / 10
+        : null,
+      renderDrawCalls: state.renderer?.info?.render?.calls ?? null,
+      renderTriangles: state.renderer?.info?.render?.triangles ?? null,
     };
+    riftRenderSubmitCalls = 0;
+    riftComputeSubmitCalls = 0;
+    riftSubmitCPUms = 0;
     updateRiftPerfOverlay(window.__riftPerfA);
 
     // No live renderer.setPixelRatio()/setSize() calls here. Adaptive quality is

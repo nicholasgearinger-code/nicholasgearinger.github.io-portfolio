@@ -246,6 +246,31 @@ if (proto && !proto.__riftBootstrapV3Patched) {
   // swapchain texture before the encoded command buffer was submitted.
 }
 
+// Optional mobile performance overlay: ?riftPerf=1. Frame cadence measures
+// total browser/renderer workload, not a GPU timestamp. No GPU readbacks.
+const riftPerfOverlayEnabled = typeof location !== "undefined" &&
+  new URLSearchParams(location.search).get("riftPerf") === "1";
+let riftPerfOverlay = null;
+function updateRiftPerfOverlay(stats) {
+  if (!riftPerfOverlayEnabled || !document.body) return;
+  if (!riftPerfOverlay) {
+    riftPerfOverlay = document.createElement("div");
+    riftPerfOverlay.id = "rift-phase-a-perf";
+    riftPerfOverlay.style.cssText =
+      "position:fixed;right:8px;bottom:88px;z-index:99990;" +
+      "background:rgba(2,20,30,.88);border:1px solid #55d5cf;" +
+      "border-radius:8px;padding:7px 9px;color:#d5fffc;" +
+      "font:11px/1.45 monospace;pointer-events:none;white-space:pre";
+    document.body.appendChild(riftPerfOverlay);
+  }
+  riftPerfOverlay.textContent =
+    "PHASE A • MOBILE PERF\\n" +
+    stats.avgFPS + " FPS  /  " + stats.avgFrameMs + " ms\\n" +
+    "Water detail stride: " + stats.waterDetailStride + "\\n" +
+    "Reduced effects: " + (stats.reducedEffects ? "on" : "off") +
+    "\\nWebGPU buffer: fixed";
+}
+
 let perfStart = performance.now();
 let perfFrames = 0;
 let goodWindows = 0;
@@ -297,6 +322,7 @@ function monitorPerformance(now) {
       sampleFrames: perfFrames,
       gpuTimingAvailable: false,
     };
+    updateRiftPerfOverlay(window.__riftPerfA);
 
     // No live renderer.setPixelRatio()/setSize() calls here. Adaptive quality is
     // intentionally restricted to shader/compute/effect cost so the active

@@ -192,6 +192,30 @@ const godRayUpdate = `
 `;
 
 const extraEdits = [
+  // The mobile terrain shader currently contains ten analytic waves,
+  // multiple caustic samples and extensive TSL branching. On WebGPU
+  // iPhone, prefer a known-good single-texture terrain baseline until
+  // the black foreground and 12 FPS regression is isolated.
+  // ?riftTerrainSafe=off restores the full material for A/B testing.
+  [
+    "    terrainMesh.material = simpleTerrainMat;",
+    `    // Keep the original material available; this changes only the
+    // Coral Shallows presentation material on touch hardware.
+    const safeCoralTerrain = isTouchDevice &&
+      new URLSearchParams(location.search).get("riftTerrainSafe") !== "off";
+    terrainMesh.material = safeCoralTerrain
+      ? new THREE.MeshBasicMaterial({
+          map: seafloorColorTex, color: 0xf3e4c7,
+          fog: true, side: THREE.DoubleSide, depthWrite: true
+        })
+      : simpleTerrainMat;
+    globalThis.__riftTerrainSafe = {
+      enabled: safeCoralTerrain,
+      biome: level.biome,
+      mode: safeCoralTerrain ? "textured-basic" : "full-caustics"
+    };`,
+    "Mobile Coral Shallows textured terrain safety baseline",
+  ],
   // This is the actual instanced GLTF palm placement loop (separate from
   // procedural filler trees); previously it could spawn enormous fronds
   // directly in front of the player at the fixed world-origin spawn.

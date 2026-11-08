@@ -192,6 +192,16 @@ const godRayUpdate = `
 `;
 
 const extraEdits = [
+  // This is the actual instanced GLTF palm placement loop (separate from
+  // procedural filler trees); previously it could spawn enormous fronds
+  // directly in front of the player at the fixed world-origin spawn.
+  [
+    "        const z = Math.sin(angle) * dist;\\n        // reject candidates too close to an already-placed tree",
+    `        const z = Math.sin(angle) * dist;
+        if (Math.hypot(x, z) < 34) continue; // clear camera + palm canopy at origin
+        // reject candidates too close to an already-placed tree`,
+    "Keep GLTF palm canopies clear of Coral Shallows player spawn",
+  ],
   // Startup-safe iOS path: the Experimental depth compositor is unverified
   // on mobile and uses the live scene depth buffer. Disable by default on
   // touch devices, but allow explicit ?riftDepth=on comparison.

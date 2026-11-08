@@ -286,9 +286,10 @@ function updateRiftPerfOverlay(stats) {
   riftPerfOverlay.textContent = [
     "Build: coral-isolation-v6",
     "PERF  " + stats.avgFPS + " fps / " + stats.avgFrameMs + " ms",
-    "Render " + (stats.renderSubmitCalls ?? "-") +
-      " / Compute " + (stats.computeSubmitCalls ?? "-"),
-    "CPU submit " + (stats.cpuSubmitMsPerFrame ?? "-") + " ms/frame",
+    "Render/frame " + (stats.renderSubmitsPerFrame ?? "-") +
+      "  Compute/frame " + (stats.computeSubmitsPerFrame ?? "-"),
+    "CPU submit/frame " + (stats.cpuSubmitMsPerFrame ?? "-") + " ms",
+    "FFT dispatches " + (globalThis.__riftIOSFFTSafeV22?.dispatchCount ?? "-"),
     "Water stride " + stats.waterDetailStride +
       " | Reduced " + (stats.reducedEffects ? "on" : "off"),
     "FFT cap " + (globalThis.__riftIOSFFTSafeV22?.targetHz ?? "-") + " Hz",
@@ -350,6 +351,10 @@ function monitorPerformance(now) {
       gpuTimingAvailable: false,
       renderSubmitCalls: riftPerfProbe ? riftRenderSubmitCalls : null,
       computeSubmitCalls: riftPerfProbe ? riftComputeSubmitCalls : null,
+      renderSubmitsPerFrame: riftPerfProbe
+        ? Math.round(riftRenderSubmitCalls / Math.max(1, perfFrames) * 10) / 10 : null,
+      computeSubmitsPerFrame: riftPerfProbe
+        ? Math.round(riftComputeSubmitCalls / Math.max(1, perfFrames) * 10) / 10 : null,
       cpuSubmitMsPerFrame: riftPerfProbe
         ? Math.round(riftSubmitCPUms / Math.max(1,perfFrames) * 10) / 10
         : null,

@@ -284,6 +284,7 @@ function updateRiftPerfOverlay(stats) {
     document.body.appendChild(riftPerfOverlay);
   }
   riftPerfOverlay.textContent = [
+    "Build: coral-isolation-v6",
     "PERF  " + stats.avgFPS + " fps / " + stats.avgFrameMs + " ms",
     "Render " + (stats.renderSubmitCalls ?? "-") +
       " / Compute " + (stats.computeSubmitCalls ?? "-"),

@@ -283,6 +283,21 @@ function monitorPerformance(now) {
       goodWindows = 0;
     }
 
+    // Phase A diagnostic: sampled frame cadence and adaptive simulation budget.
+    // This is NOT a GPU timestamp measurement and does not resize the swapchain.
+    window.__riftPerfA = {
+      enabled: true,
+      targetFPS: 30,
+      avgFPS: Math.round(fps * 10) / 10,
+      avgFrameMs: Math.round(elapsed / perfFrames * 10) / 10,
+      waterDetailStride: window.__riftWaterDetailStride,
+      reducedEffects: window.__riftReducedEffects,
+      adaptiveQuality: Math.round(state.adaptiveScale * 100) / 100,
+      canvasResizingDuringFrames: false,
+      sampleFrames: perfFrames,
+      gpuTimingAvailable: false,
+    };
+
     // No live renderer.setPixelRatio()/setSize() calls here. Adaptive quality is
     // intentionally restricted to shader/compute/effect cost so the active
     // WebGPU canvas texture remains valid until the frame is submitted.

@@ -418,7 +418,38 @@ export function updateGPUFFTOcean(handle, renderer, elapsedTime = 0) {
   if (!handle?.gpuFFT) return;
   updateBaseOcean(handle, renderer, elapsedTime);
   if (handle.fftDetailHandle?.gpuFFT) updateBaseOcean(handle.fftDetailHandle, renderer, elapsedTime);
-  if (handle.fftShallowHandle?.gpuShallowWater) updateGPUShallowWater(handle.fftShallowHandle, renderer, elapsedTime);
+  if (handle.fftShallowHandle?.gpuShallowWater) {
+    // iOS Phase A: the shallow-water solver is a separate compute workload
+    // from FFT displacement. Run it at a lower cadence on mobile Low,
+    // retaining its buffers and visual sampling between updates.
+    // ?riftShallowHz=full restores the previous every-FFT-update path.
+    const mobile = typeof navigator !== "undefined" &&
+      (/iPad|iPhone|iPod/i.test(navigator.userAgent || "") ||
+       ((navigator.platform || "") === "MacIntel" && navigator.maxTouchPoints > 1));
+    let hz = 0;
+    if (mobile) {
+      let tier = "low";
+      try { tier = localStorage.getItem("riftGraphicsSettings") || "low"; } catch (_) {}
+      hz = tier === "low" ? 5 : tier === "medium" ? 10 : 0;
+    }
+    const override = typeof location !== "undefined"
+      ? new URLSearchParams(location.search).get("riftShallowHz") : null;
+    if (override === "full") hz = 0;
+    else if (override !== null && override !== "" &&
+             Number.isFinite(Number(override)) &&
+             Number(override) >= 1 && Number(override) <= 30) hz = Number(override);
+    const t = Number.isFinite(elapsedTime) ? elapsedTime : 0;
+    const last = handle.__riftShallowLastUpdate;
+    if (!hz || last === undefined || t < last || t - last >= 1 / hz) {
+      updateGPUShallowWater(handle.fftShallowHandle, renderer, elapsedTime);
+      handle.__riftShallowLastUpdate = t;
+      handle.__riftShallowUpdates = (handle.__riftShallowUpdates || 0) + 1;
+    }
+    globalThis.__riftShallowPerf = {
+      targetHz: hz || "full",
+      updates: handle.__riftShallowUpdates || 0
+    };
+  }
 }
 
 export function updateGPUFFTOceanVisuals(

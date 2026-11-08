@@ -197,7 +197,7 @@ const extraEdits = [
   // Native mobile pixel density is expensive; adapt the scene buffer without
   // creating an additional render pass or changing water simulation fidelity.
   [
-    "let resolutionOverride = null;\\nfunction resizeToViewport() {",
+    "let resolutionOverride = null;\nfunction resizeToViewport() {",
     `const riftAdaptiveMobile = isTouchDevice && !new URLSearchParams(location.search).has("riftNoAdaptive");
 let riftAdaptiveScale = riftAdaptiveMobile ? 0.80 : 1;
 let riftAdaptiveFrames = 0;
@@ -211,14 +211,14 @@ function resizeToViewport() {`,
     "Phase A adaptive mobile render scale state",
   ],
   [
-    "    renderer.setPixelRatio(Math.min(window.devicePixelRatio, getGraphicsSettings().pixelRatioCap));\\n    renderer.setSize(w, h);",
+    "    renderer.setPixelRatio(Math.min(window.devicePixelRatio, getGraphicsSettings().pixelRatioCap));\n    renderer.setSize(w, h);",
     `    // Scale only the internal drawing buffer; CSS/controls stay unchanged.
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, getGraphicsSettings().pixelRatioCap) * riftAdaptiveScale);
     renderer.setSize(w, h);`,
     "Phase A adaptive drawing buffer resolution",
   ],
   [
-    "  elapsedTime += dt;\\n  let playerSwimmingThisFrame = false;",
+    "  elapsedTime += dt;\n  let playerSwimmingThisFrame = false;",
     `  elapsedTime += dt;
   // Wall-clock frame cadence is a proxy, not a GPU timer; use long windows,
   // hysteresis and conservative steps to prevent visible resolution pumping.

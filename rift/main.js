@@ -10,6 +10,8 @@
 // the rest of the portfolio on its known-good dependency while the migration
 // branch runs the game on 0.185.1.
 const RIFT_THREE_VERSION = "0.185.1";
+const RIFT_BUILD_ID = "coral-cachefix-v9-20261108";
+window.__riftBuildId = RIFT_BUILD_ID;
 const riftModuleScope = new URL("./", import.meta.url).href;
 const riftThreeBase = `https://cdn.jsdelivr.net/npm/three@${RIFT_THREE_VERSION}/`;
 const r185ImportMap = document.createElement("script");
@@ -327,7 +329,7 @@ async function loadRiftAndOpenMenu() {
     // Import the runtime controller first. This installs the WebGPU performance
     // hooks before the full game creates its renderer, and preloads all shared
     // textures/models before the level menu becomes available.
-    runtimeImport = runtimeImport || import("./runtime_bootstrap_v3.js?build=coral-shallow-budget-v8-20261108");
+    runtimeImport = runtimeImport || import("./runtime_bootstrap_v3.js?build=coral-cachefix-v9-20261108");
     const runtime = await runtimeImport;
     setProgress(24, "Runtime ready", "Loading all shared level assets");
 
@@ -337,7 +339,7 @@ async function loadRiftAndOpenMenu() {
     }
 
     setProgress(95, "Assets ready", "Loading Rift game module");
-    gameImport = gameImport || import("./main_game.js?build=coral-shallow-budget-v8-20261108");
+    gameImport = gameImport || import("./main_game.js?build=coral-cachefix-v9-20261108");
     await gameImport;
 
     if (driftTimer) {

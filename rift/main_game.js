@@ -192,6 +192,25 @@ const godRayUpdate = `
 `;
 
 const extraEdits = [
+  // Startup-safe iOS path: the Experimental depth compositor is unverified
+  // on mobile and uses the live scene depth buffer. Disable by default on
+  // touch devices, but allow explicit ?riftDepth=on comparison.
+  [
+    '    return localStorage.getItem("riftWaterGraphicsMode") === "experimental" &&\\n      debug !== "noexp" && debug !== "nodepth";',
+    `    const mobileDepthOptIn = !isTouchDevice ||
+      new URLSearchParams(location.search).get("riftDepth") === "on";
+    return mobileDepthOptIn &&
+      localStorage.getItem("riftWaterGraphicsMode") === "experimental" &&
+      debug !== "noexp" && debug !== "nodepth";`,
+    "Mobile-safe experimental scene-depth compositor default",
+  ],
+  // Lens diagnostic text was enabled unconditionally over the horizon.
+  // Keep its underlying state, show text only in explicit ?riftDebug=lens.
+  [
+    'lensDiagEl.style.cssText = "position:fixed;top:56px;left:8px;z-index:9999;font:11px/1.4 monospace;color:#ffb37f;background:rgba(0,0,0,0.55);padding:3px 7px;border-radius:4px;pointer-events:none;";',
+    `lensDiagEl.style.cssText = "position:fixed;top:56px;left:8px;z-index:9999;font:11px/1.4 monospace;color:#ffb37f;background:rgba(0,0,0,0.55);padding:3px 7px;border-radius:4px;pointer-events:none;display:" + (new URLSearchParams(location.search).get("riftDebug")==="lens" ? "block" : "none") + ";";`,
+    "Hide lens developer diagnostics in normal gameplay",
+  ],
   // Startup visibility: keep palm trunks and broad fronds outside the
   // immediate Coral Shallows spawn view, not merely 8 world units away.
   [

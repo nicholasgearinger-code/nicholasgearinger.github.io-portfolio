@@ -57,14 +57,24 @@ function tunePhase2FFTWaveBands(handle, elapsed = 0, storm = 0) {
   // the experimental graphics mode's separately controlled swell/chop.
 }
 
-// Restore the previous proven cadence; throttling did not eliminate
-// the native encoder failure, so keep isolation tests independent of it.
+// Mobile phase A: cap the CPU/GPU FFT submission cadence independently of
+// the scene renderer. The 128² FFT storage buffers and safe sequential
+// compute order are unchanged. At ~12 FPS a nominal 18 Hz cap still runs on
+// every render; a 10 Hz budget deliberately skips compute on some frames.
+// ?riftFFTCap=18 compares the old Low cadence; ?riftFFTCap=off removes cap.
 function iosFFTInterval() {
-  try {
-    return localStorage.getItem("riftGraphicsSettings") === "low" ? 1 / 18 : 1 / 30;
-  } catch (_) {
-    return 1 / 30;
+  const params = typeof location !== "undefined"
+    ? new URLSearchParams(location.search) : null;
+  const requested = params?.get("riftFFTCap");
+  if (requested === "off") return 0;
+  const explicit = Number(requested);
+  if (requested !== null && requested !== "" &&
+      Number.isFinite(explicit) && explicit >= 5 && explicit <= 60) {
+    return 1 / explicit;
   }
+  let tier = "low";
+  try { tier = localStorage.getItem("riftGraphicsSettings") || "low"; } catch (_) {}
+  return tier === "low" ? 1 / 10 : tier === "medium" ? 1 / 20 : 1 / 30;
 }
 
 function freezeUnsafeMobileMicroFFT(handle) {
@@ -117,13 +127,13 @@ function installIOSSafeState(handle) {
   globalThis.__riftIOSFFTSafeV22 = {
     active: true,
     sequentialSubmission: true,
-    targetHz: Math.round(1 / iosFFTInterval()),
+    targetHz: iosFFTInterval() > 0 ? Math.round(1 / iosFFTInterval()) : "uncapped",
     frozenMicroFFT,
     waterBackend: handle.__riftWaterProBackend ?? null,
   };
 
   console.info(
-    `[gpu-fft-ocean:r185:v22] iOS safe FFT active: sequential two-cascade submission @ <=30 Hz${frozenMicroFFT ? "; mobile micro FFT compute frozen" : ""}`,
+    `[gpu-fft-ocean:r185:v22] iOS safe sequential FFT target: ${globalThis.__riftIOSFFTSafeV22.targetHz} Hz${frozenMicroFFT ? "; mobile micro FFT frozen" : ""}`,
   );
 }
 

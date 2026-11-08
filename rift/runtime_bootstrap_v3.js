@@ -290,6 +290,7 @@ function updateRiftPerfOverlay(stats) {
     "CPU submit " + (stats.cpuSubmitMsPerFrame ?? "-") + " ms/frame",
     "Water stride " + stats.waterDetailStride +
       " | Reduced " + (stats.reducedEffects ? "on" : "off"),
+    "FFT cap " + (globalThis.__riftIOSFFTSafeV22?.targetHz ?? "-") + " Hz",
     "Ocean LOD " + (globalThis.__riftOceanLOD?.active ?
       globalThis.__riftOceanLOD.vertices + " verts" : "legacy")
   ].join(String.fromCharCode(10));

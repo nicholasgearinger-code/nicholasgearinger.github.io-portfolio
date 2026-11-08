@@ -192,6 +192,15 @@ const godRayUpdate = `
 `;
 
 const extraEdits = [
+  // Diagnostic only: isolate cloud cost without changing saved quality settings.
+  // ?riftPerfClouds=off keeps the rest of the scene and FFT identical.
+  [
+    "const VOLUMETRIC_CLOUDS_ENABLED = getGraphicsSettings().volumetricCloudsEnabled !== false;",
+    `const VOLUMETRIC_CLOUDS_ENABLED =
+  getGraphicsSettings().volumetricCloudsEnabled !== false &&
+  new URLSearchParams(location.search).get("riftPerfClouds") !== "off";`,
+    "Phase A A/B cloud GPU cost isolation",
+  ],
   // Mobile GPU fill-rate: disable the multi-sampled WebGPU framebuffer.
   // Query ?riftMSAA=on restores the previous renderer for visual comparison.
   [

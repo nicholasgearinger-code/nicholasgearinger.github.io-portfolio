@@ -478,8 +478,14 @@ export function createCinematicSurfZone(scene,ocean,groundHeight){
     // Keep the expensive CPU ribbon updates bounded when iPhone is at
     // 11–13fps. Shaders move foam texture continuously between updates.
     frameAccum+=Math.max(0,Math.min(.10,dt));
-    const interval=MOBILE
-      ? (dt>.063?1/9:1/13) : 1/24;
+    // Phase A: use the existing safe workload adaptation from the runtime
+    // bootstrap. Only CPU mesh-update cadence changes; shader motion remains
+    // frame-smooth and FFT/buoyancy simulation remains untouched.
+    const stride = Math.max(1, Number(globalThis.__riftWaterDetailStride) || 1);
+    const reduced = MOBILE && globalThis.__riftReducedEffects === true;
+    const interval = MOBILE
+      ? reduced ? (stride >= 3 ? 1/8 : 1/10) : (dt > .063 ? 1/9 : 1/13)
+      : 1/24;
     motion.value=time;
     if(frameAccum>=interval){updateGeometry(time);frameAccum=0;}
     if(monitor)monitor.textContent=

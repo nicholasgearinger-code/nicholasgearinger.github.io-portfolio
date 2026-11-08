@@ -16,7 +16,10 @@ function replaceExactlyOnce(source, from, to, label) {
   return source.slice(0, first) + to + source.slice(first + from.length);
 }
 
-const response = await fetch(baseModuleUrl, { cache: "reload" });
+// The base runtime is assembled dynamically. Never reuse a stale source
+// response with a newly versioned tuned loader.
+baseModuleUrl.searchParams.set("riftBuild", globalThis.__riftBuildId || "unversioned");
+const response = await fetch(baseModuleUrl, { cache: "no-store" });
 if (!response.ok) throw new Error(`[rift-rain-tune] Failed to load base game: HTTP ${response.status}`);
 let source = await response.text();
 

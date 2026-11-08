@@ -291,6 +291,7 @@ function updateRiftPerfOverlay(stats) {
     "Water stride " + stats.waterDetailStride +
       " | Reduced " + (stats.reducedEffects ? "on" : "off"),
     "FFT cap " + (globalThis.__riftIOSFFTSafeV22?.targetHz ?? "-") + " Hz",
+    "Swash compute " + (globalThis.__riftSwashPerf?.targetHz ?? "-") + " Hz",
     "Ocean LOD " + (globalThis.__riftOceanLOD?.active ?
       globalThis.__riftOceanLOD.vertices + " verts" : "legacy")
   ].join(String.fromCharCode(10));

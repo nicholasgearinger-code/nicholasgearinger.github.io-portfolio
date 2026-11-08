@@ -255,7 +255,37 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
 export function updateGPUFFTOcean(handle, renderer, elapsedTime = 0) {
   const result = updateBaseOcean(handle, renderer, elapsedTime);
   if (handle?.fftSurfSystem?.gpuSurfSystem) {
-    updateGPUSurfCompute(handle.fftSurfSystem, renderer, elapsedTime);
+    // Phase A: swash simulation is a separate compute workload from the
+    // ocean's two FFT cascades. On mobile Low it need not dispatch at the
+    // full ocean cadence. Leave all GPU resources and sequencing intact.
+    const mobile = typeof navigator !== "undefined" &&
+      (/iPhone|iPad|iPod/i.test(navigator.userAgent || "") ||
+       ((navigator.platform || "") === "MacIntel" && navigator.maxTouchPoints > 1));
+    const param = typeof location !== "undefined"
+      ? new URLSearchParams(location.search).get("riftSwashHz") : null;
+    let cadenceHz = 0;
+    if (mobile) {
+      let tier = "low";
+      try { tier = localStorage.getItem("riftGraphicsSettings") || "low"; } catch (_) {}
+      cadenceHz = tier === "low" ? 5 : tier === "medium" ? 10 : 0;
+    }
+    if (param === "full") cadenceHz = 0;
+    else if (param !== null && param !== "" &&
+             Number.isFinite(Number(param)) &&
+             Number(param) >= 1 && Number(param) <= 30) cadenceHz = Number(param);
+    const t = Number.isFinite(elapsedTime) ? elapsedTime : 0;
+    const previous = handle.__riftSwashLastCompute;
+    if (!cadenceHz || previous === undefined ||
+        t < previous || t - previous >= 1 / cadenceHz) {
+      handle.__riftSwashLastCompute = t;
+      updateGPUSurfCompute(handle.fftSurfSystem, renderer, elapsedTime);
+      handle.__riftSwashComputeCount = (handle.__riftSwashComputeCount || 0) + 1;
+    }
+    globalThis.__riftSwashPerf = {
+      targetHz: cadenceHz || "full",
+      computeCount: handle.__riftSwashComputeCount || 0,
+      enabled: true
+    };
   }
   return result;
 }

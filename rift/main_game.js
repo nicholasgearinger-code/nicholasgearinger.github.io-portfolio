@@ -192,6 +192,69 @@ const godRayUpdate = `
 `;
 
 const extraEdits = [
+
+  // Phase A: performance scaffolding, injected into the stable runtime.
+  // Native mobile pixel density is expensive; adapt the scene buffer without
+  // creating an additional render pass or changing water simulation fidelity.
+  [
+    "let resolutionOverride = null;\\nfunction resizeToViewport() {",
+    `const riftAdaptiveMobile = isTouchDevice && !new URLSearchParams(location.search).has("riftNoAdaptive");
+let riftAdaptiveScale = riftAdaptiveMobile ? 0.80 : 1;
+let riftAdaptiveFrames = 0;
+let riftAdaptiveSeconds = 0;
+let riftAdaptiveSlowWindows = 0;
+let riftAdaptiveFastWindows = 0;
+const riftTargetFrameMs = 1000 / 30;
+globalThis.__riftPerfA = { enabled: riftAdaptiveMobile, targetFPS: 30, scale: riftAdaptiveScale, avgFPS: 0, sampleFrames: 0 };
+let resolutionOverride = null;
+function resizeToViewport() {`,
+    "Phase A adaptive mobile render scale state",
+  ],
+  [
+    "    renderer.setPixelRatio(Math.min(window.devicePixelRatio, getGraphicsSettings().pixelRatioCap));\\n    renderer.setSize(w, h);",
+    `    // Scale only the internal drawing buffer; CSS/controls stay unchanged.
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, getGraphicsSettings().pixelRatioCap) * riftAdaptiveScale);
+    renderer.setSize(w, h);`,
+    "Phase A adaptive drawing buffer resolution",
+  ],
+  [
+    "  elapsedTime += dt;\\n  let playerSwimmingThisFrame = false;",
+    `  elapsedTime += dt;
+  // Wall-clock frame cadence is a proxy, not a GPU timer; use long windows,
+  // hysteresis and conservative steps to prevent visible resolution pumping.
+  // Explicit 720p/1080p/etc selections always take priority over this scaler.
+  if (riftAdaptiveMobile && !resolutionOverride && dt > 0 && dt < 0.11) {
+    riftAdaptiveFrames++;
+    riftAdaptiveSeconds += dt;
+    if (riftAdaptiveSeconds >= 2.5) {
+      const avgMs = 1000 * riftAdaptiveSeconds / Math.max(1, riftAdaptiveFrames);
+      const fps = 1000 / avgMs;
+      riftAdaptiveSlowWindows = avgMs > riftTargetFrameMs * 1.18 ? riftAdaptiveSlowWindows + 1 : 0;
+      riftAdaptiveFastWindows = avgMs < riftTargetFrameMs * 0.83 ? riftAdaptiveFastWindows + 1 : 0;
+      let nextScale = riftAdaptiveScale;
+      if (riftAdaptiveSlowWindows >= 2) {
+        nextScale = Math.max(0.65, Math.round((riftAdaptiveScale - 0.08) * 100) / 100);
+        riftAdaptiveSlowWindows = 0;
+      } else if (riftAdaptiveFastWindows >= 3) {
+        nextScale = Math.min(1, Math.round((riftAdaptiveScale + 0.05) * 100) / 100);
+        riftAdaptiveFastWindows = 0;
+      }
+      globalThis.__riftPerfA = { enabled: true, targetFPS: 30,
+        scale: nextScale, avgFPS: Math.round(fps * 10) / 10,
+        avgFrameMs: Math.round(avgMs * 10) / 10, sampleFrames: riftAdaptiveFrames,
+        effectivePixelRatio: Math.min(window.devicePixelRatio, getGraphicsSettings().pixelRatioCap) * nextScale };
+      riftAdaptiveFrames = 0;
+      riftAdaptiveSeconds = 0;
+      if (nextScale !== riftAdaptiveScale) {
+        riftAdaptiveScale = nextScale;
+        resizeToViewport();
+      }
+    }
+  }
+  let playerSwimmingThisFrame = false;`,
+    "Phase A frame cadence sampling and adaptive resolution",
+  ],
+
   ["      const worldXZ = positionWorld.xz.mul(0.15);","      // Shared broad-wave warp for both existing caustic layers. Wave-phase\n      // drift moves their focus lines with the swell without extra samples.\n      const broadWaveWarp = vec2(\n        sin(positionWorld.z.mul(0.11).add(t.mul(0.31))),\n        cos(positionWorld.x.mul(0.097).sub(t.mul(0.27)))\n      ).mul(0.16);\n      const worldXZ = positionWorld.xz.mul(0.15).add(broadWaveWarp);","wave-coupled seabed caustic domain"],
   ["      const netPrimary = clamp(tslMin(s1, s2).mul(1.7).sub(0.55), 0, 1);","      const netPrimary = clamp(tslMin(s1, s2).mul(1.95).sub(0.67), 0, 1);","sharper surface-linked primary caustics"],
   ["      const netSecondary = clamp(tslMin(s3, s4).mul(1.6).sub(0.5), 0, 1);","      const netSecondary = clamp(tslMin(s3, s4).mul(1.8).sub(0.60), 0, 1);","sharper surface-linked secondary caustics"],

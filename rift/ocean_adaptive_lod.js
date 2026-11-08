@@ -84,11 +84,14 @@ export function createAdaptiveOceanGeometry(size, waterY, sampleHeight, focusX =
     for(const cell of leaves){
       if(cell.n <= 1)continue;
       const h=cell.n/2;
+      // Sample both halves of every edge. A neighbor can be finer at
+      // one corner but not the midpoint, especially near the camera zone.
+      const q=cell.n*.25, tq=cell.n*.75;
       const neighbors=[
-        lookup(cell.x+h,cell.z-.5),
-        lookup(cell.x+cell.n+.5,cell.z+h),
-        lookup(cell.x+h,cell.z+cell.n+.5),
-        lookup(cell.x-.5,cell.z+h)
+        lookup(cell.x+q,cell.z-.5),lookup(cell.x+tq,cell.z-.5),
+        lookup(cell.x+cell.n+.5,cell.z+q),lookup(cell.x+cell.n+.5,cell.z+tq),
+        lookup(cell.x+q,cell.z+cell.n+.5),lookup(cell.x+tq,cell.z+cell.n+.5),
+        lookup(cell.x-.5,cell.z+q),lookup(cell.x-.5,cell.z+tq)
       ];
       if(neighbors.some(n=>n && n.n<cell.n/2)) splitThese.push(cell);
     }

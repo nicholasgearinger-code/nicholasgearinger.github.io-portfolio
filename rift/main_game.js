@@ -204,6 +204,19 @@ const extraEdits = [
       if (liquidHandle?.mesh) liquidHandle.mesh.visible = false;
       if (liquidHandle?.backMesh) liquidHandle.backMesh.visible = false;
     }
+    // Read-only scene probe: no texture readback, shader recompilation,
+    // visibility change, new render pass or GPU work.
+    if (new URLSearchParams(location.search).get("riftPerf") === "1") {
+      globalThis.__riftSceneProbe = {
+        terrainSafe: globalThis.__riftTerrainSafe?.enabled ?? false,
+        terrainMaterial: terrainMesh?.material?.type ?? "none",
+        cameraAboveWater: liquidHandle?.waterY == null
+          ? "n/a" : Math.round((camera.position.y - liquidHandle.waterY) * 10) / 10,
+        submerged: isFullySubmerged,
+        oceanVisible: liquidHandle?.mesh?.visible ?? false,
+        oceanMaterial: liquidHandle?.mesh?.material?.type ?? "none"
+      };
+    }
     postProcessing.render();`,
     "Diagnostic ocean-surface visibility isolation",
   ],

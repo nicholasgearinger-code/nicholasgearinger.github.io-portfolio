@@ -165,6 +165,8 @@ export function updateGPUFFTOcean(handle, renderer, elapsedTime = 0) {
   if (Number.isFinite(last) && t >= last && (t - last) < iosFFTInterval()) return;
   handle.__riftIOSFFTLastTime = t;
   handle.__riftIOSFFTDispatchCount = (handle.__riftIOSFFTDispatchCount ?? 0) + 1;
+  if (globalThis.__riftIOSFFTSafeV22)
+    globalThis.__riftIOSFFTSafeV22.dispatchCount = handle.__riftIOSFFTDispatchCount;
 
   const profileStart = performance.now();
   try {

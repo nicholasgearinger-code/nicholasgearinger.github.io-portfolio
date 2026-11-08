@@ -268,6 +268,7 @@ function updateRiftPerfOverlay(stats) {
     stats.avgFPS + " FPS  /  " + stats.avgFrameMs + " ms\\n" +
     "Water detail stride: " + stats.waterDetailStride + "\\n" +
     "Reduced effects: " + (stats.reducedEffects ? "on" : "off") +
+    "\\nOcean LOD: " + (globalThis.__riftOceanLOD?.active ? globalThis.__riftOceanLOD.vertices + " verts / " + globalThis.__riftOceanLOD.triangles + " tris" : "legacy") +
     "\\nWebGPU buffer: fixed";
 }
 

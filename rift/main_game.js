@@ -192,6 +192,18 @@ const godRayUpdate = `
 `;
 
 const extraEdits = [
+  // A/B test: whether the ocean draw or its optical material is covering
+  // the foreground black. Only the ocean's visible surface is suppressed;
+  // terrain and FFT simulation remain active. ?riftHideOcean=1 to enable.
+  [
+    "    postProcessing.render();",
+    `    if (isTouchDevice && new URLSearchParams(location.search).get("riftHideOcean") === "1") {
+      if (liquidHandle?.mesh) liquidHandle.mesh.visible = false;
+      if (liquidHandle?.backMesh) liquidHandle.backMesh.visible = false;
+    }
+    postProcessing.render();`,
+    "Diagnostic ocean-surface visibility isolation",
+  ],
   // The mobile terrain shader currently contains ten analytic waves,
   // multiple caustic samples and extensive TSL branching. On WebGPU
   // iPhone, prefer a known-good single-texture terrain baseline until
@@ -420,7 +432,11 @@ if (riftSSREnabled) {
  const riftBasePostOutput = oceanDepthPassEnabled
    ? underwaterDepthOutput
    : (lensOutputEnabled ? lensDistortedOutput : underwaterCameraSceneOutput);
- postProcessing.outputNode = riftComposePostOutput(riftBasePostOutput);`,
+ // Compare a bare scene pass against the full experimental screen optics.
+ // No change unless ?riftBarePost=1; the ocean/terrain meshes stay intact.
+ postProcessing.outputNode = isTouchDevice &&
+   new URLSearchParams(location.search).get("riftBarePost") === "1"
+     ? scenePass : riftComposePostOutput(riftBasePostOutput);`,
     "r185 Water Pro additive SSR composition",
   ],
   [

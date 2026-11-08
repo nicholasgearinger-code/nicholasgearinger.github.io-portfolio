@@ -327,7 +327,7 @@ async function loadRiftAndOpenMenu() {
     // Import the runtime controller first. This installs the WebGPU performance
     // hooks before the full game creates its renderer, and preloads all shared
     // textures/models before the level menu becomes available.
-    runtimeImport = runtimeImport || import("./runtime_bootstrap_v3.js?build=coral-isolation-v6-20261108");
+    runtimeImport = runtimeImport || import("./runtime_bootstrap_v3.js?build=coral-perframe-v7-20261108");
     const runtime = await runtimeImport;
     setProgress(24, "Runtime ready", "Loading all shared level assets");
 
@@ -337,7 +337,7 @@ async function loadRiftAndOpenMenu() {
     }
 
     setProgress(95, "Assets ready", "Loading Rift game module");
-    gameImport = gameImport || import("./main_game.js?build=coral-isolation-v6-20261108");
+    gameImport = gameImport || import("./main_game.js?build=coral-perframe-v7-20261108");
     await gameImport;
 
     if (driftTimer) {

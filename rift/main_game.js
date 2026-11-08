@@ -6,7 +6,10 @@
 const tunedLoaderUrl = new URL("./main_game_underwater_base.js", import.meta.url);
 const moduleBaseUrl = new URL("./", import.meta.url);
 
-const response = await fetch(tunedLoaderUrl, { cache: "reload" });
+// Keep each tuned source layer from accidentally reusing a stale GitHub Pages
+// text response after a new release. Does not touch WebGPU resource caching.
+tunedLoaderUrl.searchParams.set("riftBuild", globalThis.__riftBuildId || "unversioned");
+const response = await fetch(tunedLoaderUrl, { cache: "no-store" });
 if (!response.ok) {
   throw new Error(`[rift-water-pro] Failed to load tuned runtime loader: HTTP ${response.status}`);
 }

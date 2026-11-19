@@ -29,8 +29,15 @@ const IOS_WATER_TIER = (() => {
   try { return localStorage.getItem("riftGraphicsSettings") || "low"; }
   catch (_) { return "low"; }
 })();
-const MOBILE_RENDER_N = IOS_WATER_TIER === "low" ? 240 :
-  IOS_WATER_TIER === "medium" ? 288 : 320;
+// Optional startup-only fidelity test. This changes presentation vertices,
+// not FFT simulation or WebGPU buffer resizing during gameplay. Keep the
+// stable 240x240 Low default because iPhone frame time is already constrained.
+// ?riftOceanMesh=detail allocates 288x288 at level initialization only.
+const MOBILE_DETAIL_MESH = typeof location !== "undefined" &&
+  new URLSearchParams(location.search).get("riftOceanMesh") === "detail";
+const MOBILE_RENDER_N = IOS_WATER_TIER === "low"
+  ? (MOBILE_DETAIL_MESH ? 288 : 240)
+  : IOS_WATER_TIER === "medium" ? 288 : 320;
 const TOUCH_DEVICE = typeof window !== "undefined" && (
   "ontouchstart" in window || (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0)
 );

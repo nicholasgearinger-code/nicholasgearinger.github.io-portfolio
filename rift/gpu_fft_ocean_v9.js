@@ -349,11 +349,11 @@ function installWaterProOptics(handle) {
   const deep = max(offshoreBlue.mul(0.84), depthFade);
   const depthBody = mix(midColor, shallowColor, shallow);
   const deepBody = mix(depthBody, deepColor, deep);
-  const depthColor = mix(deepBody, color(0x041d3a),
-    abyssBlue.mul(0.75));
+  const depthColor = mix(deepBody, color(0x031932),
+    abyssBlue.mul(0.90));
   const depthMix = clamp(
-    float(0.58).add(shallow.mul(0.21)).add(deep.mul(0.16)),
-    0, 0.94,
+    float(0.58).add(shallow.mul(0.20)).add(deep.mul(0.21)),
+    0, 0.97,
   );
 
   // Fluid Lab M7.4.8 clear-pool optical approach adapted to the ocean:
@@ -1050,7 +1050,8 @@ function installWaterProOptics(handle) {
     // clarity would double-count transmitted light and wash the ocean out.
     // Preserve a modest genuine-alpha fallback for WebGPU compositor quirks.
     const baseOpacity = float(1).sub(realSceneClarity.mul(
-      PHYSICAL_OPTICS_PHASE1 ? 0.34 : 0.55));
+      PHYSICAL_OPTICS_PHASE1 ? 0.34 : 0.55)
+      .mul(float(1).sub(deep.mul(0.40))));
     // The last ~2m of water over sand must be optically thin, not a
     // continuous opaque turquoise wall. Keep aerated foam visible.
     const thinSheet = clamp(float(0.25)
@@ -1084,8 +1085,9 @@ function installWaterProOptics(handle) {
         : clamp(float(0.85).sub(fresnel.mul(0.60)), 0.22, 0.86),
       underwater
     ).mul(float(1).sub(combinedFoam.mul(0.80)));
-    const baseOpacity = float(1).sub(PHYSICAL_OPTICS_PHASE1
-      ? clear.mul(float(1).sub(fresnel)).mul(0.92) : clear);
+    const baseOpacity = float(1).sub((PHYSICAL_OPTICS_PHASE1
+      ? clear.mul(float(1).sub(fresnel)).mul(0.92) : clear)
+      .mul(float(1).sub(deep.mul(0.40))));
     const thinSheet = clamp(float(0.25)
       .add(float(1).sub(shoreTransmission).mul(0.38))
       .add(combinedFoam.mul(0.54)), 0.20, 0.98);

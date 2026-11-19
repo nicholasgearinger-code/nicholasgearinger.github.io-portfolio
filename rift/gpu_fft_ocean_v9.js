@@ -339,7 +339,14 @@ function installWaterProOptics(handle) {
   // the sand contributes strongly; offshore water loses red/green energy and
   // settles into a much darker blue body color.
   const shallow = float(1).sub(smoothstep(float(3.0), float(17.0), depth));
-  const deep = smoothstep(float(18.0), float(52.0), depth);
+  // The outer Coral shelf now reaches ~21m and the near-shore ocean stays
+  // turquoise. Use the existing world position and depth (no textures or
+  // extra render passes) to transition to Water Pro-like sapphire offshore.
+  // Squared radial distance avoids a fragment sqrt on mobile WebGPU.
+  const offshoreR2 = dot(positionWorld.xz, positionWorld.xz);
+  const offshoreBlue = smoothstep(float(135 * 135), float(220 * 220), offshoreR2);
+  const deep = max(smoothstep(float(11.0), float(25.0), depth),
+    offshoreBlue.mul(0.88));
   const depthBody = mix(midColor, shallowColor, shallow);
   const depthColor = mix(depthBody, deepColor, deep);
   const depthMix = clamp(

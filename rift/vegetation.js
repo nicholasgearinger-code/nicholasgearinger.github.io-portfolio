@@ -289,6 +289,19 @@ function updateGrass(handle, elapsed, windX = 0, windZ = 0, dayAmount = 1) {
     material.emissive.setHex(0x5a30d0);
     material.emissiveIntensity = nightAmount * 0.9;
   }
+  // Updating every instanced blade matrix causes a CPU loop plus a
+  // full instance-buffer upload every display frame. On iOS Low, the grass
+  // keeps its full density/material but recomposes wind sway at 12 Hz.
+  // No new buffers, geometry, shader passes or timers are introduced.
+  const isIOS = typeof navigator !== "undefined" &&
+    (/iPhone|iPad|iPod/.test(navigator.userAgent || "") ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
+  if (isIOS && typeof localStorage !== "undefined" &&
+      localStorage.getItem("riftGraphicsSettings") === "low") {
+    const last = handle.__riftLastGrassSway;
+    if (Number.isFinite(last) && elapsed >= last && elapsed - last < 1 / 12) return;
+    handle.__riftLastGrassSway = elapsed;
+  }
   const windLean = Math.min(0.5, Math.hypot(windX, windZ) * 0.15); // caps how far wind alone can bend a blade, idle sway still layers on top
   const windAngle = Math.atan2(windZ, windX);
   for (let i = 0; i < count; i++) {

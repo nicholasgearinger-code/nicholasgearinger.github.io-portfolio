@@ -3,7 +3,7 @@
 // 2000-unit FFT water and 480-unit island mesh are intentionally untouched.
 // Ocean geometry, not the FFT storage buffers, is streamed on coarse cells.
 import * as THREE from "three";
-import { uniform, float, sin, clamp, mix, color, vec3, smoothstep, positionLocal } from "three/tsl";
+import { uniform, float, sin, cos, clamp, mix, color, vec3, dot, smoothstep, positionLocal, positionWorld, cameraPosition } from "three/tsl";
 
 const FLOOR_SIZE = 832;
 const FLOOR_GRID = 52; // 17-ish world units per cell, ~2.7k vertices
@@ -92,14 +92,34 @@ function createFarWaterMaterial() {
   const sea = mix(color(0x17668b), color(0x093b66), offshore);
   const abyssal = mix(sea, color(0x031c38), abyss.mul(0.82));
   const deepUnder = smoothstep(float(2), float(38), cameraDepth);
+  // Reuse the moving long-wave phases for an approximate analytic normal.
+  // This gives the distance sea broad slanted, light-catching faces rather
+  // than a flat painted band. No extra texture lookups or compute passes.
+  const slopeX = cos(a.add(t.mul(0.28))).mul(0.0062)
+    .add(cos(b.sub(t.mul(0.22))).mul(-0.0047))
+    .mul(mix(float(0.5), float(2.1), offshore));
+  const slopeZ = cos(a.add(t.mul(0.28))).mul(0.0031)
+    .add(cos(b.sub(t.mul(0.22))).mul(0.0091))
+    .mul(mix(float(0.5), float(2.1), offshore));
+  const facetNormal = vec3(slopeX.negate(), float(1), slopeZ.negate()).normalize();
+  const towardCamera = cameraPosition.sub(positionWorld).normalize();
+  const ndv = clamp(dot(facetNormal, towardCamera), 0, 1);
+  const grazing = float(1).sub(ndv);
+  const fresnel = grazing.mul(grazing).mul(grazing).mul(grazing);
   const light = sin(a.mul(1.6).sub(t.mul(0.34)))
     .mul(sin(b.mul(1.42).add(t.mul(0.27))))
-    .mul(0.08).add(0.08);
-  const glint = clamp(light, 0, 0.17).mul(float(1).sub(abyss.mul(0.55)))
-    .mul(float(1).sub(deepUnder.mul(0.9)));
+    .mul(0.085).add(0.085);
+  const glint = clamp(light, 0, 0.18)
+    .mul(float(1).sub(abyss.mul(0.38)))
+    .mul(float(1).sub(deepUnder.mul(0.94)));
+  const waveFace = clamp(slopeX.mul(2.5).add(slopeZ.mul(1.9))
+    .add(0.15), 0, 0.34);
+  const reflectance = clamp(fresnel.mul(0.23)
+    .add(waveFace.mul(0.09)).add(glint.mul(0.23)), 0, 0.25)
+    .mul(float(1).sub(deepUnder.mul(0.95)));
   material.colorNode = mix(
-    mix(abyssal, color(0x021327), deepUnder.mul(0.85)),
-    color(0x6baabd), glint,
+    mix(abyssal, color(0x021327), deepUnder.mul(0.88)),
+    color(0x79b7ce), reflectance,
   );
   material.side = THREE.DoubleSide;
   material.depthWrite = true;

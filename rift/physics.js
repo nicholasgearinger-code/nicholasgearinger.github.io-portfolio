@@ -27,6 +27,16 @@ function createPlayerPhysicsState() {
 }
 
 function sampleGroundHeight(x, z, terrainMesh, extraMeshes, preferredY) {
+  // Beyond the finite 480x480 Coral terrain mesh, the streaming offshore
+  // seabed is generated from the same analytic bathymetry. Sample it directly
+  // so swimming, diving and buoyancy still work no matter how far offshore
+  // the player travels. Do not change physics for the other levels.
+  const oceanSample = globalThis.__riftOceanStreamGround;
+  if (typeof oceanSample === "function" &&
+      (Math.abs(x) > 238 || Math.abs(z) > 238)) {
+    const h = oceanSample(x, z);
+    return Number.isFinite(h) ? h : null;
+  }
   if (!terrainMesh) return null;
   raycaster.set(new THREE.Vector3(x, CAST_HEIGHT, z), DOWN);
   raycaster.far = CAST_HEIGHT + 50;

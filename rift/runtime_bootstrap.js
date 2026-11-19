@@ -35,6 +35,28 @@ const state = {
   corePromise: null,
 };
 
+// Optional non-blocking performance probe (?riftPerf=1).
+// Measures JavaScript submission costs, NOT GPU execution times. A 30 FPS
+// reading cannot be diagnosed as GPU-bound from these values alone.
+const PERF_PROBE = typeof location !== "undefined" &&
+  new URLSearchParams(location.search).get("riftPerf") === "1";
+const perfProbe = {
+  renderCalls: 0, computeCalls: 0,
+  renderSubmitMs: 0, computeSubmitMs: 0,
+};
+let perfProbeOverlay = null;
+if (PERF_PROBE && typeof document !== "undefined") {
+  perfProbeOverlay = document.createElement("div");
+  perfProbeOverlay.style.cssText =
+    "position:fixed;right:6px;bottom:55px;z-index:99998;" +
+    "font:10px/1.45 ui-monospace,monospace;color:#e6fff5;" +
+    "background:rgba(4,18,23,.82);padding:7px 9px;border-radius:7px;" +
+    "pointer-events:none;white-space:pre";
+  perfProbeOverlay.textContent = "Profiling…";
+  document.addEventListener("DOMContentLoaded", () => document.body.appendChild(perfProbeOverlay), { once: true });
+  if (document.body) document.body.appendChild(perfProbeOverlay);
+}
+
 window.__riftRuntimePreloader = state;
 window.__riftWaterDetailStride = isTouch ? 2 : 1;
 window.__riftReducedEffects = false;
@@ -278,7 +300,12 @@ if (proto && !proto.__riftBootstrapPatched) {
   const originalRender = proto.render;
   if (typeof originalRender === "function") {
     proto.render = function (...args) {
+      const profileStart = PERF_PROBE ? performance.now() : 0;
       const result = originalRender.apply(this, args);
+      if (PERF_PROBE) {
+        perfProbe.renderCalls++;
+        perfProbe.renderSubmitMs += performance.now() - profileStart;
+      }
       state.renderer = this;
 
       if (state.levelWarming) {
@@ -335,7 +362,13 @@ if (proto && !proto.__riftBootstrapPatched) {
     if (typeof original !== "function") continue;
     proto[methodName] = function (...args) {
       if (state.levelWarming) state.warmComputeCalls++;
-      return original.apply(this, args);
+      if (!PERF_PROBE) return original.apply(this, args);
+      const started = performance.now();
+      try { return original.apply(this, args); }
+      finally {
+        perfProbe.computeCalls++;
+        perfProbe.computeSubmitMs += performance.now() - started;
+      }
     };
   }
 
@@ -430,6 +463,28 @@ function monitorPerformance(now) {
   if (elapsed >= 2200) {
     const fps = perfFrames * 1000 / elapsed;
     const renderer = state.renderer;
+    if (PERF_PROBE) {
+      const seconds = elapsed / 1000;
+      const snapshot = {
+        fps: Math.round(fps * 10) / 10,
+        frameMs: Math.round(10000 / fps) / 10,
+        computeCallsPerSec: Math.round(perfProbe.computeCalls / seconds),
+        renderCallsPerSec: Math.round(perfProbe.renderCalls / seconds),
+        computeSubmitMsPerSec: Math.round(perfProbe.computeSubmitMs / seconds * 10) / 10,
+        renderSubmitMsPerSec: Math.round(perfProbe.renderSubmitMs / seconds * 10) / 10,
+        note: "CPU submission only. Does not measure GPU kernel execution.",
+      };
+      globalThis.__riftLowPerf = snapshot;
+      if (perfProbeOverlay) perfProbeOverlay.textContent =
+        "Rift Low profiler (CPU submission)\n" +
+        snapshot.fps + " FPS · " + snapshot.frameMs + "ms/frame\n" +
+        "Compute: " + snapshot.computeCallsPerSec + "/s · " +
+          snapshot.computeSubmitMsPerSec + "ms CPU/s\n" +
+        "Render: " + snapshot.renderCallsPerSec + "/s · " +
+          snapshot.renderSubmitMsPerSec + "ms CPU/s";
+      perfProbe.computeCalls = perfProbe.renderCalls = 0;
+      perfProbe.computeSubmitMs = perfProbe.renderSubmitMs = 0;
+    }
 
     if (fps < 18) {
       state.adaptiveScale = Math.max(isTouch ? 0.84 : 0.76, state.adaptiveScale - 0.08);

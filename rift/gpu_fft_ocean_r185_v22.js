@@ -80,14 +80,18 @@ function iosFFTInterval() {
     // The previous/next FFT results remain bound; no WebGPU buffer resizes,
     // cascade batching, shader recompilation or renderer size changes.
     // Explicit ?riftFFTCap=10 disables this auto behavior for A/B tests.
-    const fps = Number(globalThis.__riftPerfA?.avgFPS);
-    if (Number.isFinite(fps) && fps > 0) {
-      // WebKit spends considerable CPU time submitting dozens of FFT kernels.
-      // Below 22 FPS prioritize rendering responsiveness, while the existing
-      // shader normal field continues to animate every display frame.
-      if (fps < 18) return 1 / 5;
-      if (fps < 25) return 1 / 6;
-      if (fps < 30) return 1 / 8;
+    // Read the active renderer's own FPS sampler. The older optional perf
+    // HUD is often disabled; relying on it left the FFT at 10Hz regardless
+    // of how much the iPhone was struggling. Explicit ?riftFFTCap=10 still
+    // forces the old cadence for A/B comparison.
+    const measuredFPS = Number(globalThis.__riftAdaptiveClarity?.fps) ||
+      Number(globalThis.__riftLowPerf?.fps) ||
+      Number(globalThis.__riftPerfA?.avgFPS);
+    if (Number.isFinite(measuredFPS) && measuredFPS > 0) {
+      if (measuredFPS < 18) return 1 / 5;
+      if (measuredFPS < 25) return 1 / 6;
+      if (measuredFPS < 36) return 1 / 8;
+      if (measuredFPS < 48) return 1 / 9;
     }
     return 1 / 10;
   }

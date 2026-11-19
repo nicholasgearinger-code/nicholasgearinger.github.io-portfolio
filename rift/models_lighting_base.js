@@ -501,24 +501,105 @@ function finalizeInstancedMeshes(meshes) {
 // (instanceGroundOffsetCache) and multiplied by each instance's own scale
 // below, which is mathematically identical to the original per-instance
 // result, just computed once instead of 220 times.
+// Mobile spatial-instancing: 48m cells allow frustum and range culling
+// independently. The close-range GLB geometry/materials are unchanged.
+// The cells use stable world coordinates, so there is no per-frame rebuild.
+const RIFT_CHUNK_SIZE = 48;
+const riftVegetationChunks = new Set();
+function chunkPlacementGroups(placements) {
+  const groups = new Map();
+  for (const p of placements) {
+    const cx = Math.floor(p.x / RIFT_CHUNK_SIZE);
+    const cz = Math.floor(p.z / RIFT_CHUNK_SIZE);
+    const key = cx + ":" + cz;
+    if (!groups.has(key)) groups.set(key, { cx, cz, placements: [] });
+    groups.get(key).placements.push(p);
+  }
+  return groups.values();
+}
+function registerVegetationChunk(meshes, group, kind) {
+  const chunk = {
+    meshes, kind, cx: group.cx, cz: group.cz,
+    // Store an enclosing world-space rectangle. LOD tests use distance to
+    // the closest point of the cell, not its center, avoiding premature
+    // disappearance as the camera crosses boundaries.
+    minX: group.cx * RIFT_CHUNK_SIZE,
+    minZ: group.cz * RIFT_CHUNK_SIZE,
+    maxX: (group.cx + 1) * RIFT_CHUNK_SIZE,
+    maxZ: (group.cz + 1) * RIFT_CHUNK_SIZE,
+    band: 0,
+  };
+  for (const mesh of meshes) {
+    mesh.userData.riftVegetationChunk = chunk;
+  }
+  riftVegetationChunks.add(chunk);
+  return chunk;
+}
+function updateSpatialVegetation(cameraPosition) {
+  if (!RIFT_MOBILE_GPU || !cameraPosition) return;
+  // Reset stale entries when moving to a different world. The scene's normal
+  // teardown owns mesh disposal; the Set only holds metadata.
+  const limits = {
+    tree: [92, 260],
+    coral: [92, 142],
+    sponge: [72, 112],
+    plant: [58, 94],
+  };
+  let active = 0, culled = 0, mid = 0;
+  for (const chunk of riftVegetationChunks) {
+    if (!chunk.meshes.some(mesh => mesh.parent)) {
+      riftVegetationChunks.delete(chunk);
+      continue;
+    }
+    const dx = Math.max(chunk.minX - cameraPosition.x, 0, cameraPosition.x - chunk.maxX);
+    const dz = Math.max(chunk.minZ - cameraPosition.z, 0, cameraPosition.z - chunk.maxZ);
+    const dist = Math.hypot(dx, dz);
+    const [near, far] = limits[chunk.kind] || [85, 130];
+    // Hysteresis avoids flicker when the player is right on an LOD boundary.
+    const hysteresis = 8;
+    let band = dist > far + (chunk.band === 2 ? -hysteresis : hysteresis) ? 2 :
+      dist > near + (chunk.band >= 1 ? -hysteresis : hysteresis) ? 1 : 0;
+    chunk.band = band;
+    for (const mesh of chunk.meshes) {
+      mesh.visible = band !== 2;
+      // Trees keep contact shadows nearby; distant trees cost no shadow-pass
+      // triangles. Coral and ground plants already have mobile shadows off.
+      if (chunk.kind === "tree") mesh.castShadow = band === 0;
+    }
+    if (band === 2) culled++;
+    else if (band === 1) mid++;
+    else active++;
+  }
+  globalThis.__riftSpatialVegetationStats = {
+    nearChunks: active, midChunks: mid, culledChunks: culled,
+    chunkSize: RIFT_CHUNK_SIZE, totalChunks: active + mid + culled,
+  };
+}
+globalThis.__riftUpdateSpatialVegetation = updateSpatialVegetation;
+
 function buildCoralInstances(species, placements) {
   const cacheKey = `coral:${species}`;
   const parts = getInstanceParts(cacheKey, () => createRealCoral(species));
   if (!parts || placements.length === 0) return [];
   const groundOffset = instanceGroundOffsetCache[cacheKey];
-  const meshes = buildInstancedMeshesFromParts(parts, placements.length);
-  mobileReefShadowBudget(meshes);
-  for (let i = 0; i < placements.length; i++) {
-    const p = placements[i];
-    const belowOrigin = groundOffset * p.scale;
-    _instTempPos.set(p.x, p.groundY + belowOrigin * 0.4, p.z);
-    _instTempEuler.set(0, p.rotationY, 0);
-    _instTempQuat.setFromEuler(_instTempEuler);
-    _instTempScale.setScalar(p.scale);
-    setInstanceMatrixAt(meshes, parts, i, _instTempPos, _instTempQuat, _instTempScale);
+  const allMeshes = [];
+  const groups = RIFT_MOBILE_GPU ? chunkPlacementGroups(placements) :
+    [{ cx: 0, cz: 0, placements }];
+  for (const group of groups) {
+    const meshes = buildInstancedMeshesFromParts(parts, group.placements.length);
+    mobileReefShadowBudget(meshes);
+    group.placements.forEach((p, i) => {
+      _instTempPos.set(p.x, p.groundY + groundOffset * p.scale * 0.4, p.z);
+      _instTempEuler.set(0, p.rotationY, 0);
+      _instTempQuat.setFromEuler(_instTempEuler);
+      _instTempScale.setScalar(p.scale);
+      setInstanceMatrixAt(meshes, parts, i, _instTempPos, _instTempQuat, _instTempScale);
+    });
+    finalizeInstancedMeshes(meshes);
+    if (RIFT_MOBILE_GPU) registerVegetationChunk(meshes, group, "coral");
+    allMeshes.push(...meshes);
   }
-  finalizeInstancedMeshes(meshes);
-  return meshes;
+  return allMeshes;
 }
 
 // Real static instancing for any HEIGHT-NORMALIZED single-species model —
@@ -538,19 +619,25 @@ function buildNormalizedInstances(cacheKey, buildReferenceFn, placements, embedF
   const parts = getInstanceParts(cacheKey, buildReferenceFn);
   if (!parts || placements.length === 0) return [];
   const groundOffset = instanceGroundOffsetCache[cacheKey];
-  const meshes = buildInstancedMeshesFromParts(parts, placements.length);
-  mobileReefShadowBudget(meshes);
-  for (let i = 0; i < placements.length; i++) {
-    const p = placements[i];
-    const y = p.groundY + groundOffset * p.scale * embedFraction;
-    _instTempPos.set(p.x, y, p.z);
-    _instTempEuler.set(0, p.rotationY, 0);
-    _instTempQuat.setFromEuler(_instTempEuler);
-    _instTempScale.setScalar(p.scale);
-    setInstanceMatrixAt(meshes, parts, i, _instTempPos, _instTempQuat, _instTempScale);
+  const allMeshes = [];
+  const groups = RIFT_MOBILE_GPU ? chunkPlacementGroups(placements) :
+    [{ cx: 0, cz: 0, placements }];
+  for (const group of groups) {
+    const meshes = buildInstancedMeshesFromParts(parts, group.placements.length);
+    mobileReefShadowBudget(meshes);
+    group.placements.forEach((p, i) => {
+      _instTempPos.set(p.x, p.groundY + groundOffset * p.scale * embedFraction, p.z);
+      _instTempEuler.set(0, p.rotationY, 0);
+      _instTempQuat.setFromEuler(_instTempEuler);
+      _instTempScale.setScalar(p.scale);
+      setInstanceMatrixAt(meshes, parts, i, _instTempPos, _instTempQuat, _instTempScale);
+    });
+    finalizeInstancedMeshes(meshes);
+    if (RIFT_MOBILE_GPU) registerVegetationChunk(meshes, group,
+      cacheKey === "sponge" ? "sponge" : "plant");
+    allMeshes.push(...meshes);
   }
-  finalizeInstancedMeshes(meshes);
-  return meshes;
+  return allMeshes;
 }
 
 function buildSpongeInstances(placements) {
@@ -576,24 +663,32 @@ function buildTreeInstances(speciesPlacements) {
   const instances = [];
   for (const species in speciesPlacements) {
     const placements = speciesPlacements[species];
-    if (placements.length === 0) continue;
+    if (!placements.length) continue;
     const cacheKey = `tree:${species}`;
     const parts = getInstanceParts(cacheKey, () => createRealTree(species));
     if (!parts) continue;
     const groundOffset = instanceGroundOffsetCache[cacheKey];
-    const meshes = buildInstancedMeshesFromParts(parts, placements.length);
-    meshesBySpecies[species] = meshes;
-    for (let i = 0; i < placements.length; i++) {
-      const p = placements[i];
-      const y = p.groundY + groundOffset * p.scale;
-      _instTempPos.set(p.x, y, p.z);
-      _instTempEuler.set(0, p.rotationY, 0);
-      _instTempQuat.setFromEuler(_instTempEuler);
-      _instTempScale.setScalar(p.scale);
-      setInstanceMatrixAt(meshes, parts, i, _instTempPos, _instTempQuat, _instTempScale);
-      instances.push({ meshes, parts, indexInSpecies: i, position: _instTempPos.clone(), baseYaw: p.rotationY, scale: p.scale, swaySeed: p.swaySeed });
+    const allMeshes = [];
+    const groups = RIFT_MOBILE_GPU ? chunkPlacementGroups(placements) :
+      [{ cx: 0, cz: 0, placements }];
+    for (const group of groups) {
+      const meshes = buildInstancedMeshesFromParts(parts, group.placements.length);
+      group.placements.forEach((p, i) => {
+        const y = p.groundY + groundOffset * p.scale;
+        _instTempPos.set(p.x, y, p.z);
+        _instTempEuler.set(0, p.rotationY, 0);
+        _instTempQuat.setFromEuler(_instTempEuler);
+        _instTempScale.setScalar(p.scale);
+        setInstanceMatrixAt(meshes, parts, i, _instTempPos, _instTempQuat, _instTempScale);
+        instances.push({ meshes, parts, indexInSpecies: i,
+          position: _instTempPos.clone(), baseYaw: p.rotationY,
+          scale: p.scale, swaySeed: p.swaySeed });
+      });
+      finalizeInstancedMeshes(meshes);
+      if (RIFT_MOBILE_GPU) registerVegetationChunk(meshes, group, "tree");
+      allMeshes.push(...meshes);
     }
-    finalizeInstancedMeshes(meshes);
+    meshesBySpecies[species] = allMeshes;
   }
   return { meshesBySpecies, instances };
 }
@@ -624,6 +719,7 @@ function updateTreeInstanceSway(treeInstanceHandle, elapsedTime, wind) {
   const swayAmount = Math.min(0.05, wind.windStrength * 0.012);
   const touchedMeshSets = new Set();
   for (const inst of treeInstanceHandle.instances) {
+    if (RIFT_MOBILE_GPU && !inst.meshes[0]?.visible) continue;
     const phase = elapsedTime * 1.4 + (inst.swaySeed || 0);
     const totalTilt = leanAmount + Math.sin(phase) * swayAmount;
     const tiltX = -windDirZ * totalTilt;

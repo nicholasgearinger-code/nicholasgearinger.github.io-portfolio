@@ -10,7 +10,7 @@
 // the rest of the portfolio on its known-good dependency while the migration
 // branch runs the game on 0.185.1.
 const RIFT_THREE_VERSION = "0.185.1";
-const RIFT_BUILD_ID = "coral-bottomless-v14-20261119";
+const RIFT_BUILD_ID = "coral-optical-depth-v15-20261119";
 window.__riftBuildId = RIFT_BUILD_ID;
 const riftModuleScope = new URL("./", import.meta.url).href;
 const riftThreeBase = `https://cdn.jsdelivr.net/npm/three@${RIFT_THREE_VERSION}/`;
@@ -329,7 +329,7 @@ async function loadRiftAndOpenMenu() {
     // Import the runtime controller first. This installs the WebGPU performance
     // hooks before the full game creates its renderer, and preloads all shared
     // textures/models before the level menu becomes available.
-    runtimeImport = runtimeImport || import("./runtime_bootstrap_v3.js?build=coral-bottomless-v14-20261119");
+    runtimeImport = runtimeImport || import("./runtime_bootstrap_v3.js?build=coral-optical-depth-v15-20261119");
     const runtime = await runtimeImport;
     setProgress(24, "Runtime ready", "Loading all shared level assets");
 
@@ -339,7 +339,7 @@ async function loadRiftAndOpenMenu() {
     }
 
     setProgress(95, "Assets ready", "Loading Rift game module");
-    gameImport = gameImport || import("./main_game.js?build=coral-bottomless-v14-20261119");
+    gameImport = gameImport || import("./main_game.js?build=coral-optical-depth-v15-20261119");
     await gameImport;
 
     if (driftTimer) {

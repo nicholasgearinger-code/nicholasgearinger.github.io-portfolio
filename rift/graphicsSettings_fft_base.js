@@ -263,22 +263,49 @@ function persistOverrides() {
   try { localStorage.setItem(OVERRIDES_STORAGE_KEY, JSON.stringify(overrides)); } catch (_) { /* best effort */ }
 }
 
-// Startup-only supersampling A/B test. Mobile Low normally uses DPR 1,
-// which has visibly coarser silhouettes on retina screens. This opt-in
-// changes only the initial render buffer size; NEVER resize a live WebGPU
-// canvas from the adaptive performance monitor (encoder safety).
-// ?riftPixelScale=1.25: 56% more pixels than Low's default.
-// ?riftPixelScale=1.5: 125% more pixels, potentially too costly on iPhone.
+// Automatic startup resolution budget for touch devices. The browser may
+// only change WebGPU swapchain dimensions *before* rendering begins; the
+// performance monitor measures stable gameplay and stores the NEXT launch
+// setting. Rendering stays at a constant pixel ratio within this session.
+const SHARPNESS_STORAGE_KEY = "riftAdaptiveSharpnessV1";
+const SHARPNESS_STEPS = [1, 1.1, 1.2, 1.3, 1.4];
+const startupSharpParams = typeof location !== "undefined"
+  ? new URLSearchParams(location.search) : null;
+const startupAutoSharpDisabled = startupSharpParams?.get("riftAutoSharp") === "off";
 const startupPixelCap = (() => {
-  if (typeof location === "undefined") return null;
-  const v = Number(new URLSearchParams(location.search).get("riftPixelScale"));
+  const requested = startupSharpParams?.get("riftPixelScale");
+  if (requested === null || requested === undefined || requested === "") return null;
+  const v = Number(requested);
   return Number.isFinite(v) && v >= 1 && v <= 1.5 ? v : null;
 })();
+const sharpnessTouchDevice = typeof navigator !== "undefined" &&
+  (/iPhone|iPad|iPod/.test(navigator.userAgent || "") ||
+    navigator.maxTouchPoints > 0);
+let storedSharpness = 1;
+if (sharpnessTouchDevice && !startupAutoSharpDisabled) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SHARPNESS_STORAGE_KEY) || "{}");
+    if (parsed.version === 1 && SHARPNESS_STEPS.includes(parsed.pixelRatio))
+      storedSharpness = parsed.pixelRatio;
+  } catch (_) { /* private browsing / invalid local state */ }
+}
+const sessionSharpness = startupPixelCap ??
+  (sharpnessTouchDevice && !startupAutoSharpDisabled ? storedSharpness : null);
+// The profile is intentionally separate from Rift's existing quality
+// settings and overrides, so it cannot mutate another user's chosen tier.
+if (typeof globalThis !== "undefined") globalThis.__riftStartupSharpness = {
+  enabled: sharpnessTouchDevice && !startupAutoSharpDisabled && startupPixelCap === null,
+  pixelRatio: sessionSharpness,
+  manual: startupPixelCap !== null,
+  nextPixelRatio: sessionSharpness ?? 1,
+  steps: SHARPNESS_STEPS,
+  key: SHARPNESS_STORAGE_KEY,
+};
 
 function getGraphicsSettings() {
   const settings = { ...TIERS[currentTier], ...overrides };
-  if (startupPixelCap !== null) {
-    settings.pixelRatioCap = Math.max(settings.pixelRatioCap, startupPixelCap);
+  if (sessionSharpness !== null) {
+    settings.pixelRatioCap = Math.max(settings.pixelRatioCap, sessionSharpness);
   }
   return settings;
 }

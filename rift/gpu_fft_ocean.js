@@ -403,12 +403,18 @@ export function createGPUFFTOceanPlane(scene, y, size, sampleHeight) {
 export function updateGPUFFTOcean(handle, renderer, elapsedTime = 0) {
   if (!handle?.gpuFFT || !renderer || typeof renderer.compute !== "function") return;
   handle.fftTime.value = Number.isFinite(elapsedTime) ? elapsedTime : 0;
+  const profileCompute = typeof location !== "undefined" &&
+    new URLSearchParams(location.search).get("riftPerf") === "1";
+  const previousPhase = profileCompute ? globalThis.__riftComputePhase : null;
+  if (profileCompute) globalThis.__riftComputePhase = "fft";
   try {
     for (const computeNode of handle.computeFrame) renderer.compute(computeNode);
   } catch (err) {
     console.error("[gpu-fft-ocean] compute dispatch failed:", err);
     handle.fluidSimBroken = true;
     throw err;
+  } finally {
+    if (profileCompute) globalThis.__riftComputePhase = previousPhase;
   }
 }
 

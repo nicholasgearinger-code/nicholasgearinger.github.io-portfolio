@@ -309,6 +309,11 @@ function updateRiftPerfOverlay(stats) {
     "Shallow compute " + (globalThis.__riftShallowPerf?.targetHz ?? "-") + " Hz",
     "Ocean LOD " + (globalThis.__riftOceanLOD?.active ?
       globalThis.__riftOceanLOD.vertices + " verts" : "legacy"),
+    "Ocean stream " + (globalThis.__riftOceanStream?.active
+      ? globalThis.__riftOceanStream.distance + "m / floor " +
+        globalThis.__riftOceanStream.floorBuilds + " water " +
+        globalThis.__riftOceanStream.waterBuilds
+      : "off"),
     "Terrain " + (globalThis.__riftSceneProbe?.terrainSafe ? "safe" : "full") +
       " / Ocean " + (globalThis.__riftSceneProbe?.oceanVisible ? "visible" : "hidden"),
     "Experimental engine " + (globalThis.__riftSceneProbe?.experimentalActive ? "ACTIVE" : "not active"),

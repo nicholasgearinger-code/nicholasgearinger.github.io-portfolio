@@ -296,8 +296,12 @@ function updateGrass(handle, elapsed, windX = 0, windZ = 0, dayAmount = 1) {
   const isIOS = typeof navigator !== "undefined" &&
     (/iPhone|iPad|iPod/.test(navigator.userAgent || "") ||
       (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
-  if (isIOS && typeof localStorage !== "undefined" &&
-      localStorage.getItem("riftGraphicsSettings") === "low") {
+  let lowTier = false;
+  if (isIOS) {
+    try { lowTier = localStorage.getItem("riftGraphicsSettings") === "low"; }
+    catch (_) { lowTier = false; }
+  }
+  if (isIOS && lowTier) {
     const last = handle.__riftLastGrassSway;
     if (Number.isFinite(last) && elapsed >= last && elapsed - last < 1 / 12) return;
     handle.__riftLastGrassSway = elapsed;

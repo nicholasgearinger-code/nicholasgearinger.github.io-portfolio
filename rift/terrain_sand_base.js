@@ -766,7 +766,14 @@ function biomeHeight(biome, worldX, worldZ, seed) {
     // no additional GPU geometry, draw passes or compute submissions.
     const offshore = THREE.MathUtils.clamp((distance - 135) / 85, 0, 1);
     const deepShelf = offshore * offshore * (3 - 2 * offshore);
-    const seabed = LIQUID_LEVEL.crystal - 9.5 - deepShelf * 11.5
+    // Beyond the original finite island, a broad continental shelf gives
+    // way to genuinely deep ocean. Height remains finite for physics at any
+    // distance, and both streamed geometry and collisions sample this same
+    // deterministic function. The existing reef and 220m test area are
+    // unchanged.
+    const abyssT = THREE.MathUtils.clamp((distance - 220) / 520, 0, 1);
+    const abyssShelf = abyssT * abyssT * (3 - 2 * abyssT);
+    const seabed = LIQUID_LEVEL.crystal - 9.5 - deepShelf * 11.5 - abyssShelf * 54
       + Math.sin(worldX * 0.042 + seed) * Math.cos(worldZ * 0.036 - seed) * 0.65
       + Math.sin(angle * 9 + distance * 0.024) * 0.32;
     const blend = Math.min(1, Math.max(0, (distance - 102) / 20));

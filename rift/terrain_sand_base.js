@@ -759,7 +759,14 @@ function biomeHeight(biome, worldX, worldZ, seed) {
   if (biome === "crystal" && Math.hypot(worldX, worldZ) > 102) {
     const distance = Math.hypot(worldX, worldZ);
     const angle = Math.atan2(worldZ, worldX);
-    const seabed = LIQUID_LEVEL.crystal - 9.5
+    // Offshore deep-water shelf: begin beyond the reef without changing
+    // the original beach or snorkeling shallows. The signed depth grows
+    // smoothly from ~9.5 m to ~21 m by radius 220, all inside the existing
+    // 480-unit seabed mesh. CPU-only height shaping at level creation;
+    // no additional GPU geometry, draw passes or compute submissions.
+    const offshore = THREE.MathUtils.clamp((distance - 135) / 85, 0, 1);
+    const deepShelf = offshore * offshore * (3 - 2 * offshore);
+    const seabed = LIQUID_LEVEL.crystal - 9.5 - deepShelf * 11.5
       + Math.sin(worldX * 0.042 + seed) * Math.cos(worldZ * 0.036 - seed) * 0.65
       + Math.sin(angle * 9 + distance * 0.024) * 0.32;
     const blend = Math.min(1, Math.max(0, (distance - 102) / 20));

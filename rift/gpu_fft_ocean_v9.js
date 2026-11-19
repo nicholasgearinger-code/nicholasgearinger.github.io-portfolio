@@ -57,6 +57,11 @@ const TOUCH_DEVICE = WATER_TEST_MODE === "mobile";
 // ?riftGlassLook=off reverts this pass for direct visual A/B comparisons.
 const REFERENCE_GLASS_LOOK = typeof location === "undefined" ||
   new URLSearchParams(location.search).get("riftGlassLook") !== "off";
+// v16: brighten physically informed, broad specular wave faces and fragmented
+// whitecaps without new FFT stages or renderer passes. Switch back using
+// ?riftOceanLook=classic for a fair iPhone visual/performance comparison.
+const WATER_PRO_LOOK_V16 = typeof location === "undefined" ||
+  new URLSearchParams(location.search).get("riftOceanLook") !== "classic";
 
 // Phase 1's experimental Beer-Lambert/viewport transparency branch caused
 // a regression on the live iPhone path. Restore the previously working glass
@@ -436,12 +441,13 @@ function installWaterProOptics(handle) {
   const sparkleDistanceFade = GRID_FREE_WATER_HIGHLIGHTS && TOUCH_DEVICE
     ? detailVisibility.mul(0.62)
     : float(1);
-  const tightGlitter = pow(ndh, float(190))
+  const tightGlitter = pow(ndh, float(WATER_PRO_LOOK_V16 ? 155 : 190))
     .mul(float(0.28).add(microEnergy.mul(1.45)))
     .mul(float(0.42).add(facetMask.mul(
       GRID_FREE_WATER_HIGHLIGHTS && TOUCH_DEVICE ? 0.16 : 0.92)));
-  const broadGlitter = pow(ndh, float(34))
-    .mul(float(0.085).add(microEnergy.mul(0.055)));
+  const broadGlitter = pow(ndh, float(WATER_PRO_LOOK_V16 ? 27 : 34))
+    .mul(float(WATER_PRO_LOOK_V16 ? 0.135 : 0.085)
+      .add(microEnergy.mul(WATER_PRO_LOOK_V16 ? 0.070 : 0.055)));
   const glitter = tightGlitter.mul(sparkleDistanceFade)
     .add(broadGlitter)
     .mul(day)
@@ -549,9 +555,9 @@ function installWaterProOptics(handle) {
   // scattered foam across the whole ocean, with NO additional sin(), texture
   // fetch, FFT cascade, geometry or draw call on iPhone.
   const openSeaFoam = clamp(steep.mul(capBreakup).mul(crestHeight)
-    .mul(float(0.11).add(day.mul(0.20)))
+    .mul(float(0.11).add(day.mul(WATER_PRO_LOOK_V16 ? 0.26 : 0.20)))
     .mul(float(1).sub(surfZone.mul(0.55)))
-    .mul(float(1).sub(underwater)), 0, 0.32);
+    .mul(float(1).sub(underwater)), 0, WATER_PRO_LOOK_V16 ? 0.38 : 0.32);
   // Crest-gated white flecks: reduce foam from the uniform pulse across
   // an entire depth band. Each fleck follows an actual moving crest or its
   // collapsing wake, broken up by the FFT slope and cap noise.
@@ -657,8 +663,8 @@ function installWaterProOptics(handle) {
         .mul(float(1).sub(combinedFoam))
     : float(0);
   const reflectionGain = clamp(
-      reflectionBase.add(glossyFace.mul(0.16)), 0,
-      REFLECTIVE_CRESTS ? 0.59 : 0.44)
+      reflectionBase.add(glossyFace.mul(WATER_PRO_LOOK_V16 ? 0.22 : 0.16)), 0,
+      REFLECTIVE_CRESTS ? (WATER_PRO_LOOK_V16 ? 0.66 : 0.59) : 0.44)
     .mul(day.mul(0.72).add(0.28))
     .mul(reflectionStrength)
     .mul(float(1).sub(combinedFoam.mul(REFLECTIVE_CRESTS ? 0.97 : 0.88)))

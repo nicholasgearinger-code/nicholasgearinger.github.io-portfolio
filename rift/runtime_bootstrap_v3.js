@@ -192,6 +192,8 @@ const riftPerfProbe = typeof location !== "undefined" &&
 let riftRenderSubmitCalls = 0;
 let riftComputeSubmitCalls = 0;
 let riftSubmitCPUms = 0;
+const riftComputeBuckets = Object.create(null);
+const riftComputeCPUms = Object.create(null);
 const proto = THREE.WebGPURenderer?.prototype;
 if (proto && !proto.__riftBootstrapV3Patched) {
   proto.__riftBootstrapV3Patched = true;
@@ -251,8 +253,12 @@ if (proto && !proto.__riftBootstrapV3Patched) {
       const started = riftPerfProbe ? performance.now() : 0;
       const result = original.apply(this, args);
       if (riftPerfProbe && state.gameStarted) {
+        const cpuMs = performance.now() - started;
         riftComputeSubmitCalls++;
-        riftSubmitCPUms += performance.now() - started;
+        riftSubmitCPUms += cpuMs;
+        const phase = globalThis.__riftComputePhase || "other";
+        riftComputeBuckets[phase] = (riftComputeBuckets[phase] || 0) + 1;
+        riftComputeCPUms[phase] = (riftComputeCPUms[phase] || 0) + cpuMs;
       }
       return result;
     };
@@ -289,7 +295,13 @@ function updateRiftPerfOverlay(stats) {
     "Render/frame " + (stats.renderSubmitsPerFrame ?? "-") +
       "  Compute/frame " + (stats.computeSubmitsPerFrame ?? "-"),
     "CPU submit/frame " + (stats.cpuSubmitMsPerFrame ?? "-") + " ms",
-    "FFT dispatches " + (globalThis.__riftIOSFFTSafeV22?.dispatchCount ?? "-"),
+    "FFT updates " + (globalThis.__riftIOSFFTSafeV22?.dispatchCount ?? "-"),
+    "Compute/frame FFT " + (stats.computeBySystem?.fft ?? 0) +
+      " Shallow " + (stats.computeBySystem?.shallow ?? 0),
+    "Compute/frame Swash " + (stats.computeBySystem?.swash ?? 0) +
+      " Other " + (stats.computeBySystem?.other ?? 0),
+    "CPU/frame FFT " + (stats.computeCPUBySystem?.fft ?? 0) +
+      "ms Shallow " + (stats.computeCPUBySystem?.shallow ?? 0) + "ms",
     "Water stride " + stats.waterDetailStride +
       " | Reduced " + (stats.reducedEffects ? "on" : "off"),
     "FFT cap " + (globalThis.__riftIOSFFTSafeV22?.targetHz ?? "-") + " Hz",
@@ -356,6 +368,14 @@ function monitorPerformance(now) {
       gpuTimingAvailable: false,
       renderSubmitCalls: riftPerfProbe ? riftRenderSubmitCalls : null,
       computeSubmitCalls: riftPerfProbe ? riftComputeSubmitCalls : null,
+      computeBySystem: riftPerfProbe
+        ? Object.fromEntries(Object.entries(riftComputeBuckets).map(
+          ([key, count]) => [key, Math.round(count / Math.max(1, perfFrames) * 10) / 10]
+        )) : null,
+      computeCPUBySystem: riftPerfProbe
+        ? Object.fromEntries(Object.entries(riftComputeCPUms).map(
+          ([key, ms]) => [key, Math.round(ms / Math.max(1, perfFrames) * 10) / 10]
+        )) : null,
       renderSubmitsPerFrame: riftPerfProbe
         ? Math.round(riftRenderSubmitCalls / Math.max(1, perfFrames) * 10) / 10 : null,
       computeSubmitsPerFrame: riftPerfProbe
@@ -369,6 +389,8 @@ function monitorPerformance(now) {
     riftRenderSubmitCalls = 0;
     riftComputeSubmitCalls = 0;
     riftSubmitCPUms = 0;
+    for (const key of Object.keys(riftComputeBuckets)) delete riftComputeBuckets[key];
+    for (const key of Object.keys(riftComputeCPUms)) delete riftComputeCPUms[key];
     updateRiftPerfOverlay(window.__riftPerfA);
 
     // No live renderer.setPixelRatio()/setSize() calls here. Adaptive quality is

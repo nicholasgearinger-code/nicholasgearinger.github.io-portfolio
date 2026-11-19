@@ -63,7 +63,7 @@ const edits = [
   ["underwaterDistortionMaterial.uniforms.tintStrength.value = uwStyle.tintStrength * (1 - clarity * 0.75);", "underwaterDistortionMaterial.uniforms.tintStrength.value = 0.008 + depthFactor * 0.035;", "underwater tint strength"],
   ["waterVolumeMesh.material.color.setHex(uwStyle.volumeColor).lerp(UNDERWATER_NEUTRAL_TINT, clarity * 0.6);", "waterVolumeMesh.material.color.copy(UNDERWATER_SURFACE_TINT).lerp(UNDERWATER_DEEP_TINT, depthFactor);", "water volume color by depth"],
   ["waterVolumeMesh.material.opacity = 0.12 * (1 - clarity * 0.6);", "waterVolumeMesh.material.opacity = 0.011 + depthFactor * 0.028 + (1 - clarity) * 0.006;", "water volume opacity by depth"],
-  ["(0.22 + crestFocus * 0.2) * dayCausticBoost", "(0.39 + crestFocus * 0.28) * dayCausticBoost", "seafloor caustic brightness"],
+  ["(0.22 + crestFocus * 0.2) * dayCausticBoost * focusMask * uCausticsEnabled", "(0.39 + crestFocus * 0.28) * dayCausticBoost * focusMask * uCausticsEnabled", "seafloor caustic brightness"],
   ["updateLightShafts(underwaterShaftHandles, dayNight.dayAmount);", "const underwaterRayDepth = Math.max(0, currentLiquidLevel - camera.position.y);\n  const underwaterRayDepthFade = 1 - THREE.MathUtils.clamp(underwaterRayDepth / 30, 0, 1) * 0.50;\n  const underwaterRayStorm = weatherHandle ? weatherHandle.rainIntensity : 0;\n  updateLightShafts(underwaterShaftHandles, Math.min(1, dayNight.dayAmount * 1.13) * (1 - underwaterRayStorm * 0.56) * underwaterRayDepthFade);", "underwater god ray attenuation"],
 ];
 

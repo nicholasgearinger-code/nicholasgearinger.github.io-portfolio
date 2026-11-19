@@ -294,7 +294,8 @@ const sessionSharpness = startupPixelCap ??
 // The profile is intentionally separate from Rift's existing quality
 // settings and overrides, so it cannot mutate another user's chosen tier.
 if (typeof globalThis !== "undefined") globalThis.__riftStartupSharpness = {
-  enabled: sharpnessTouchDevice && !startupAutoSharpDisabled && startupPixelCap === null,
+  enabled: sharpnessTouchDevice && currentTier === "low" &&
+    !startupAutoSharpDisabled && startupPixelCap === null,
   pixelRatio: sessionSharpness,
   manual: startupPixelCap !== null,
   nextPixelRatio: sessionSharpness ?? 1,

@@ -718,18 +718,17 @@ function buildCoralInstances(species, placements) {
   const groups = RIFT_MOBILE_GPU ? chunkPlacementGroups(placements) :
     [{ cx: 0, cz: 0, placements }];
   for (const group of groups) {
-    const meshes = buildInstancedMeshesFromParts(parts, group.placements.length);
-    mobileReefShadowBudget(meshes);
+    const batch = buildRiftChunkMeshes(parts, group, "coral");
+    mobileReefShadowBudget(batch.high);
+    if (batch.mid) mobileReefShadowBudget(batch.mid);
     group.placements.forEach((p, i) => {
       _instTempPos.set(p.x, p.groundY + groundOffset * p.scale * 0.4, p.z);
       _instTempEuler.set(0, p.rotationY, 0);
       _instTempQuat.setFromEuler(_instTempEuler);
       _instTempScale.setScalar(p.scale);
-      setInstanceMatrixAt(meshes, parts, i, _instTempPos, _instTempQuat, _instTempScale);
+      fillRiftChunkMeshes(batch, parts, i, _instTempPos, _instTempQuat, _instTempScale);
     });
-    finalizeInstancedMeshes(meshes);
-    if (RIFT_MOBILE_GPU) registerVegetationChunk(meshes, group, "coral");
-    allMeshes.push(...meshes);
+    allMeshes.push(...finishRiftChunkMeshes(batch, group, "coral"));
   }
   return allMeshes;
 }
@@ -752,22 +751,22 @@ function buildNormalizedInstances(cacheKey, buildReferenceFn, placements, embedF
   if (!parts || placements.length === 0) return [];
   const groundOffset = instanceGroundOffsetCache[cacheKey];
   const allMeshes = [];
+  const kind = cacheKey === "sponge" ? "sponge" : "plant";
   const groups = RIFT_MOBILE_GPU ? chunkPlacementGroups(placements) :
     [{ cx: 0, cz: 0, placements }];
   for (const group of groups) {
-    const meshes = buildInstancedMeshesFromParts(parts, group.placements.length);
-    mobileReefShadowBudget(meshes);
+    const batch = buildRiftChunkMeshes(parts, group, kind);
+    mobileReefShadowBudget(batch.high);
+    if (batch.mid) mobileReefShadowBudget(batch.mid);
     group.placements.forEach((p, i) => {
-      _instTempPos.set(p.x, p.groundY + groundOffset * p.scale * embedFraction, p.z);
+      const y = p.groundY + groundOffset * p.scale * embedFraction;
+      _instTempPos.set(p.x, y, p.z);
       _instTempEuler.set(0, p.rotationY, 0);
       _instTempQuat.setFromEuler(_instTempEuler);
       _instTempScale.setScalar(p.scale);
-      setInstanceMatrixAt(meshes, parts, i, _instTempPos, _instTempQuat, _instTempScale);
+      fillRiftChunkMeshes(batch, parts, i, _instTempPos, _instTempQuat, _instTempScale);
     });
-    finalizeInstancedMeshes(meshes);
-    if (RIFT_MOBILE_GPU) registerVegetationChunk(meshes, group,
-      cacheKey === "sponge" ? "sponge" : "plant");
-    allMeshes.push(...meshes);
+    allMeshes.push(...finishRiftChunkMeshes(batch, group, kind));
   }
   return allMeshes;
 }
@@ -804,21 +803,20 @@ function buildTreeInstances(speciesPlacements) {
     const groups = RIFT_MOBILE_GPU ? chunkPlacementGroups(placements) :
       [{ cx: 0, cz: 0, placements }];
     for (const group of groups) {
-      const meshes = buildInstancedMeshesFromParts(parts, group.placements.length);
+      const batch = buildRiftChunkMeshes(parts, group, "tree");
+      const meshes = batch.high;
       group.placements.forEach((p, i) => {
         const y = p.groundY + groundOffset * p.scale;
         _instTempPos.set(p.x, y, p.z);
         _instTempEuler.set(0, p.rotationY, 0);
         _instTempQuat.setFromEuler(_instTempEuler);
         _instTempScale.setScalar(p.scale);
-        setInstanceMatrixAt(meshes, parts, i, _instTempPos, _instTempQuat, _instTempScale);
-        instances.push({ meshes, parts, indexInSpecies: i,
-          position: _instTempPos.clone(), baseYaw: p.rotationY,
+        fillRiftChunkMeshes(batch, parts, i, _instTempPos, _instTempQuat, _instTempScale);
+        instances.push({ meshes, parts, midMeshes: batch.mid, lowParts: batch.lowParts,
+          indexInSpecies: i, position: _instTempPos.clone(), baseYaw: p.rotationY,
           scale: p.scale, swaySeed: p.swaySeed });
       });
-      finalizeInstancedMeshes(meshes);
-      if (RIFT_MOBILE_GPU) registerVegetationChunk(meshes, group, "tree");
-      allMeshes.push(...meshes);
+      allMeshes.push(...finishRiftChunkMeshes(batch, group, "tree"));
     }
     meshesBySpecies[species] = allMeshes;
   }
@@ -851,8 +849,10 @@ function updateTreeInstanceSway(treeInstanceHandle, elapsedTime, wind) {
   const swayAmount = Math.min(0.05, wind.windStrength * 0.012);
   const touchedMeshSets = new Set();
   for (const inst of treeInstanceHandle.instances) {
+    const activeMeshes = inst.midMeshes?.[0]?.visible ? inst.midMeshes : inst.meshes;
+    const activeParts = activeMeshes === inst.midMeshes ? inst.lowParts : inst.parts;
     if (RIFT_MOBILE_GPU &&
-        (!inst.meshes[0]?.visible || inst.indexInSpecies >= inst.meshes[0].count)) continue;
+        (!activeMeshes[0]?.visible || inst.indexInSpecies >= activeMeshes[0].count)) continue;
     const phase = elapsedTime * 1.4 + (inst.swaySeed || 0);
     const totalTilt = leanAmount + Math.sin(phase) * swayAmount;
     const tiltX = -windDirZ * totalTilt;
@@ -860,8 +860,8 @@ function updateTreeInstanceSway(treeInstanceHandle, elapsedTime, wind) {
     _instTempEuler.set(tiltX, inst.baseYaw, tiltZ, "XYZ");
     _instTempQuat.setFromEuler(_instTempEuler);
     _instTempScale.setScalar(inst.scale);
-    setInstanceMatrixAt(inst.meshes, inst.parts, inst.indexInSpecies, inst.position, _instTempQuat, _instTempScale);
-    touchedMeshSets.add(inst.meshes);
+    setInstanceMatrixAt(activeMeshes, activeParts, inst.indexInSpecies, inst.position, _instTempQuat, _instTempScale);
+    touchedMeshSets.add(activeMeshes);
   }
   for (const meshes of touchedMeshSets) finalizeInstancedMeshes(meshes);
 }

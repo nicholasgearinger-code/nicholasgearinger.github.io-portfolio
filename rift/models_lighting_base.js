@@ -520,6 +520,7 @@ function chunkPlacementGroups(placements) {
 function registerVegetationChunk(meshes, group, kind) {
   const chunk = {
     meshes, kind, cx: group.cx, cz: group.cz,
+    fullCount: group.placements.length,
     // Store an enclosing world-space rectangle. LOD tests use distance to
     // the closest point of the cell, not its center, avoiding premature
     // disappearance as the camera crosses boundaries.
@@ -567,8 +568,18 @@ function updateSpatialVegetation(cameraPosition) {
       dist > near + (chunk.band >= 1 ? -hysteresis : hysteresis) ? 1 : 0;
     if (band !== chunk.band) {
       chunk.band = band;
+      // Mid-distance geometry LOD: decrease the number of high-polygon
+      // instances actually submitted, not the resolution of the whole frame.
+      // InstancedMesh.count is cheap to change and reversible; original
+      // geometry, placement matrices, and material stay untouched.
+      const midDensity = {
+        tree: 0.75, coral: 0.60, sponge: 0.65, plant: 0.58,
+      }[chunk.kind] ?? 0.7;
+      const targetCount = band === 0 ? chunk.fullCount :
+        band === 1 ? Math.max(1, Math.ceil(chunk.fullCount * midDensity)) : 0;
       for (const mesh of chunk.meshes) {
-        mesh.visible = band !== 2;
+        mesh.count = targetCount;
+        mesh.visible = targetCount > 0;
         // Trees keep contact shadows nearby; distant trees cost no shadow-pass
         // triangles. Coral and ground plants already have mobile shadows off.
         if (chunk.kind === "tree") mesh.castShadow = band === 0;
@@ -727,7 +738,8 @@ function updateTreeInstanceSway(treeInstanceHandle, elapsedTime, wind) {
   const swayAmount = Math.min(0.05, wind.windStrength * 0.012);
   const touchedMeshSets = new Set();
   for (const inst of treeInstanceHandle.instances) {
-    if (RIFT_MOBILE_GPU && !inst.meshes[0]?.visible) continue;
+    if (RIFT_MOBILE_GPU &&
+        (!inst.meshes[0]?.visible || inst.indexInSpecies >= inst.meshes[0].count)) continue;
     const phase = elapsedTime * 1.4 + (inst.swaySeed || 0);
     const totalTilt = leanAmount + Math.sin(phase) * swayAmount;
     const tiltX = -windDirZ * totalTilt;

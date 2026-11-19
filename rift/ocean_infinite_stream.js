@@ -3,7 +3,7 @@
 // 2000-unit FFT water and 480-unit island mesh are intentionally untouched.
 // Ocean geometry, not the FFT storage buffers, is streamed on coarse cells.
 import * as THREE from "three";
-import { uniform, float, sin, clamp, mix, color, vec3, positionLocal, positionWorld } from "three/tsl";
+import { uniform, float, sin, clamp, mix, color, vec3, smoothstep, positionLocal } from "three/tsl";
 
 const FLOOR_SIZE = 832;
 const FLOOR_GRID = 52; // 17-ish world units per cell, ~2.7k vertices
@@ -63,32 +63,57 @@ function buildGrid(centerX, centerZ, size, segments, heightAt, omitCell, colorAt
 }
 
 function createFarWaterMaterial() {
-  // MeshBasicNodeMaterial prevents costly extra PBR lights/shadows in the
-  // distance. Two travelling wave bands; no new FFT, textures or render passes.
+  // Cheap non-FFT far-field ocean: three irregular, long rolling swells in
+  // the *vertex* stage, driven by distance offshore. No additional compute,
+  // textures, screen captures or draw calls. Keep phase in world coordinates
+  // so streamed cells do not visibly restart their motion.
   const material = new THREE.MeshBasicNodeMaterial();
   const t = uniform(0);
-  const waveX = positionLocal.x.mul(0.010).add(positionLocal.z.mul(0.005));
-  const waveZ = positionLocal.z.mul(0.018).sub(positionLocal.x.mul(0.006));
-  const rolling = sin(waveX.add(t.mul(0.43))).mul(0.52)
-    .add(sin(waveZ.sub(t.mul(0.31))).mul(0.22));
-  material.positionNode = positionLocal.add(vec3(float(0), rolling, float(0)));
-  const sparkle = clamp(sin(waveX.mul(1.9).sub(t.mul(0.49)))
-    .mul(sin(waveZ.mul(1.7).add(t.mul(0.38))))
-    .mul(0.11).add(0.17), 0, 0.32);
-  // Match the dark ocean beyond the existing FFT boundary; keep the
-  // highlight subtle, without strong uniform stripes or cheap white foam.
-  material.colorNode = mix(color(0x083d6b), color(0x176b8d), sparkle);
+  const cameraDepth = uniform(0);
+  const p = positionLocal;
+  const radius2 = p.x.mul(p.x).add(p.z.mul(p.z));
+  const offshore = smoothstep(float(210 * 210), float(1600 * 1600), radius2);
+  const abyss = smoothstep(float(600 * 600), float(1600 * 1600), radius2);
+  const a = p.x.mul(0.0062).add(p.z.mul(0.0031));
+  const b = p.z.mul(0.0091).sub(p.x.mul(0.0047));
+  const c = p.x.mul(0.0036).sub(p.z.mul(0.0067));
+  const roll1 = sin(a.add(t.mul(0.28)))
+    .mul(mix(float(0.40), float(2.35), offshore));
+  const roll2 = sin(b.sub(t.mul(0.22)))
+    .mul(mix(float(0.24), float(1.10), offshore));
+  const roll3 = sin(c.add(t.mul(0.14)).add(sin(b.mul(0.31)).mul(0.8)))
+    .mul(mix(float(0.13), float(0.78), offshore));
+  const swell = roll1.add(roll2).add(roll3);
+  material.positionNode = p.add(vec3(float(0), swell, float(0)));
+
+  // Increasing blue-water light absorption follows the same staged
+  // continental shelf as the seabed. Underwater camera depth further dims
+  // the underside so the outer ocean no longer looks like a bright ceiling.
+  const sea = mix(color(0x17668b), color(0x093b66), offshore);
+  const abyssal = mix(sea, color(0x031c38), abyss.mul(0.82));
+  const deepUnder = smoothstep(float(2), float(38), cameraDepth);
+  const light = sin(a.mul(1.6).sub(t.mul(0.34)))
+    .mul(sin(b.mul(1.42).add(t.mul(0.27))))
+    .mul(0.08).add(0.08);
+  const glint = clamp(light, 0, 0.17).mul(float(1).sub(abyss.mul(0.55)))
+    .mul(float(1).sub(deepUnder.mul(0.9)));
+  material.colorNode = mix(
+    mix(abyssal, color(0x021327), deepUnder.mul(0.85)),
+    color(0x6baabd), glint,
+  );
   material.side = THREE.DoubleSide;
   material.depthWrite = true;
   material.fog = true;
   material.transparent = false;
   material.userData.riftTime = t;
+  material.userData.riftCameraDepth = cameraDepth;
   return material;
 }
 
 export function createInfiniteOceanStream(scene, waterY, sampleHeight, options = {}) {
   const deferredDispose = typeof options.deferDispose === "function"
     ? options.deferDispose : fn => fn();
+  const deepFloorColor = new THREE.Color(0x081f35);
   const floorMat = new THREE.MeshBasicMaterial({
     vertexColors: true, side: THREE.DoubleSide, fog: true,
     depthWrite: true,
@@ -115,6 +140,7 @@ export function createInfiniteOceanStream(scene, waterY, sampleHeight, options =
   const update = (playerPos, time) => {
     if (disposed || !playerPos) return;
     waterMat.userData.riftTime.value = Number.isFinite(time) ? time : 0;
+    waterMat.userData.riftCameraDepth.value = Math.max(0, waterY - (playerPos.y ?? waterY));
     const fx = snap(playerPos.x, FLOOR_SNAP);
     const fz = snap(playerPos.z, FLOOR_SNAP);
     if (fx !== lastFloorX || fz !== lastFloorZ) {
@@ -125,8 +151,11 @@ export function createInfiniteOceanStream(scene, waterY, sampleHeight, options =
           Math.abs(z) < ISLAND_MESH_HALF,
         (out, x, z, y) => {
           const depth = Math.max(0, waterY - y);
-          const blue = smooth((depth - 12) / 58);
-          out.set(0xc5c5b2).lerp(new THREE.Color(0x234b62), blue * 0.93);
+          // The seabed gently disappears into the abyss palette as
+          // sunlight can no longer reach it. Colors are computed only when
+          // a tile is regenerated, never per frame.
+          const blue = smooth((depth - 14) / 88);
+          out.set(0xc5c5b2).lerp(deepFloorColor, blue * 0.98);
         },
       );
       const previous = floorMesh.geometry;

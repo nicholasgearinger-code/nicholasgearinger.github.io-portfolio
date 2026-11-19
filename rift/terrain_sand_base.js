@@ -764,18 +764,22 @@ function biomeHeight(biome, worldX, worldZ, seed) {
     // smoothly from ~9.5 m to ~21 m by radius 220, all inside the existing
     // 480-unit seabed mesh. CPU-only height shaping at level creation;
     // no additional GPU geometry, draw passes or compute submissions.
-    const offshore = THREE.MathUtils.clamp((distance - 135) / 85, 0, 1);
-    const deepShelf = offshore * offshore * (3 - 2 * offshore);
-    // Beyond the original finite island, a broad continental shelf gives
-    // way to genuinely deep ocean. Height remains finite for physics at any
-    // distance, and both streamed geometry and collisions sample this same
-    // deterministic function. The existing reef and 220m test area are
-    // unchanged.
-    const abyssT = THREE.MathUtils.clamp((distance - 220) / 520, 0, 1);
-    const abyssShelf = abyssT * abyssT * (3 - 2 * abyssT);
-    const seabed = LIQUID_LEVEL.crystal - 9.5 - deepShelf * 11.5 - abyssShelf * 54
-      + Math.sin(worldX * 0.042 + seed) * Math.cos(worldZ * 0.036 - seed) * 0.65
-      + Math.sin(angle * 9 + distance * 0.024) * 0.32;
+    // Four connected bathymetric regions: the existing reef (within 110m),
+    // shelf (110–240m), continental slope (240–620m), then abyss
+    // (620–1520m). Use smoothstep at each transition for continuous
+    // derivatives; the same deterministic height works for streamed
+    // geometry and swimmer collision, even kilometres offshore.
+    const ease = (start, end) => {
+      const v = THREE.MathUtils.clamp((distance - start) / (end - start), 0, 1);
+      return v * v * (3 - 2 * v);
+    };
+    const shelfT = ease(110, 240);
+    const slopeT = ease(240, 620);
+    const abyssT = ease(620, 1520);
+    const seabed = LIQUID_LEVEL.crystal - 9.5
+      - shelfT * 10.5 - slopeT * 35 - abyssT * 72
+      + Math.sin(worldX * 0.032 + seed) * Math.cos(worldZ * 0.027 - seed) * 0.58
+      + Math.sin(angle * 7 + distance * 0.017) * 0.38;
     const blend = Math.min(1, Math.max(0, (distance - 102) / 20));
     const t = blend * blend * (3 - 2 * blend);
     const uInner = worldX / (TERRAIN_SIZE / 2);

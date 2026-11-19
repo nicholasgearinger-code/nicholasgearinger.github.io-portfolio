@@ -307,6 +307,10 @@ function updateRiftPerfOverlay(stats) {
     "Sharpness " + (globalThis.__riftStartupSharpness?.pixelRatio ?? "tier") +
       "x / next " + (globalThis.__riftStartupSharpness?.nextPixelRatio ?? "tier") + "x",
     "FFT cap " + (globalThis.__riftIOSFFTSafeV22?.targetHz ?? "-") + " Hz",
+    "FFT fusion " + (globalThis.__riftFastFFT?.enabled
+      ? "TEST / " + (globalThis.__riftFastFFT?.optimizedPerUpdate ?? "-") +
+        " calls vs " + (globalThis.__riftFastFFT?.baselinePerUpdate ?? "-")
+      : "off (reference)"),
     "Swash compute " + (globalThis.__riftSwashPerf?.targetHz ?? "-") + " Hz",
     "Shallow compute " + (globalThis.__riftShallowPerf?.targetHz ?? "-") + " Hz",
     "Ocean LOD " + (globalThis.__riftOceanLOD?.active ?

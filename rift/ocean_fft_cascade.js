@@ -118,7 +118,7 @@ function createPackedFFTKernelSet(N, source, destination, ping, pong, bitReverse
     output.element(i).assign(input.element(sourceIndex));
   })().compute(count);
 
-  const makeButterfly = (input, output, horizontal, stage) => {
+  const makeButterfly = (input, output, horizontal, stage, scale = 1) => {
     const span = 1 << (stage + 1);
     const half = span >> 1;
     return Fn(() => {
@@ -144,16 +144,76 @@ function createPackedFFTKernelSet(N, source, destination, ping, pong, bitReverse
       const b1i = B.z.mul(wi).add(B.w.mul(wr));
       const halfFlag = axis.div(uint(half)).mod(uint(2)).toFloat();
       const sign = float(1).sub(halfFlag.mul(2));
-      output.element(i).assign(vec4(
+      const butterflyValue = vec4(
         A.x.add(b0r.mul(sign)), A.y.add(b0i.mul(sign)),
         A.z.add(b1r.mul(sign)), A.w.add(b1i.mul(sign)),
-      ));
+      );
+      output.element(i).assign(scale === 1 ? butterflyValue : butterflyValue.mul(float(scale)));
     })().compute(count);
   };
 
   const makeCopy = (input, output, scale) => Fn(() => {
     output.element(instanceIndex).assign(input.element(instanceIndex).mul(float(scale)));
   })().compute(count);
+
+
+  // This is a literal FFT algebra refactor, not a visual approximation:
+  // fold bit-reversal + stage-0 butterfly into one dispatch, and fold the
+  // final inverse normalization into the last vertical butterfly.
+  // 128²: 35 -> 29 compute calls per two-field FFT update (17% fewer).
+  // Opt-in on iOS: test shader compilation/encoder before making default.
+  const fastFFT = typeof location !== "undefined" &&
+    new URLSearchParams(location.search).get("riftFastFFT") === "1";
+  if (fastFFT && typeof globalThis !== "undefined") {
+    globalThis.__riftFastFFT = { enabled: true, version: 1,
+      baselinePerUpdate: 1 + 2 * (2 + 2 * Math.log2(N) + 1),
+      optimizedPerUpdate: 1 + 2 * (2 * Math.log2(N)) };
+  }
+  const makeFusedReverseFirst = (input, output, horizontal) => Fn(() => {
+    const i = instanceIndex;
+    const x = i.mod(uint(N));
+    const y = i.div(uint(N));
+    const axis = horizontal ? x : y;
+    const fixed = horizontal ? y : x;
+    const firstAxis = axis.div(uint(2)).mul(uint(2));
+    const reversed0 = bitReverseBuffer.element(firstAxis).toUint();
+    const reversed1 = bitReverseBuffer.element(firstAxis.add(uint(1))).toUint();
+    const index0 = horizontal
+      ? fixed.mul(uint(N)).add(reversed0)
+      : reversed0.mul(uint(N)).add(fixed);
+    const index1 = horizontal
+      ? fixed.mul(uint(N)).add(reversed1)
+      : reversed1.mul(uint(N)).add(fixed);
+    const A = input.element(index0);
+    const B = input.element(index1);
+    const sign = float(1).sub(axis.mod(uint(2)).toFloat().mul(2));
+    output.element(i).assign(vec4(
+      A.x.add(B.x.mul(sign)), A.y.add(B.y.mul(sign)),
+      A.z.add(B.z.mul(sign)), A.w.add(B.w.mul(sign)),
+    ));
+  })().compute(count);
+
+  if (fastFFT) {
+    let read = ping, write = pong;
+    kernels.push(makeFusedReverseFirst(source, write, true));
+    [read, write] = [write, read];
+    for (let stage = 1; stage < Math.log2(N); stage++) {
+      kernels.push(makeButterfly(read, write, true, stage));
+      [read, write] = [write, read];
+    }
+    write = read === ping ? pong : ping;
+    kernels.push(makeFusedReverseFirst(read, write, false));
+    [read, write] = [write, read];
+    for (let stage = 1; stage < Math.log2(N); stage++) {
+      if (stage === Math.log2(N) - 1) {
+        kernels.push(makeButterfly(read, destination, false, stage, 1 / (N * N)));
+      } else {
+        kernels.push(makeButterfly(read, write, false, stage));
+        [read, write] = [write, read];
+      }
+    }
+    return kernels;
+  }
 
   let read = ping;
   let write = pong;

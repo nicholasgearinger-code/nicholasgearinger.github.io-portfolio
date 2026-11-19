@@ -405,7 +405,7 @@ document.addEventListener("click", (event) => {
   })();
 }, true);
 
-// Independent FPS sampler so adaptive resolution still works with the HUD off.
+// Keep the iOS adaptive scaler from multiplying the already-reduced mobile\n// graphics cap into a severely pixelated image. Expensive FFT work is throttled\n// separately by the ocean controller when FPS drops.\n// Independent FPS sampler so adaptive resolution still works with the HUD off.
 // It reacts over multi-second windows, not frame-by-frame, to avoid resolution
 // oscillation and visual pumping.
 let perfStart = performance.now();
@@ -426,12 +426,12 @@ function monitorPerformance(now) {
     const renderer = state.renderer;
 
     if (fps < 18) {
-      state.adaptiveScale = Math.max(isTouch ? 0.68 : 0.76, state.adaptiveScale - 0.12);
+      state.adaptiveScale = Math.max(isTouch ? 0.84 : 0.76, state.adaptiveScale - 0.08);
       window.__riftWaterDetailStride = 3;
       window.__riftReducedEffects = true;
       goodWindows = 0;
     } else if (fps < 25) {
-      state.adaptiveScale = Math.max(isTouch ? 0.74 : 0.82, state.adaptiveScale - 0.07);
+      state.adaptiveScale = Math.max(isTouch ? 0.88 : 0.82, state.adaptiveScale - 0.04);
       window.__riftWaterDetailStride = 2;
       window.__riftReducedEffects = true;
       goodWindows = 0;

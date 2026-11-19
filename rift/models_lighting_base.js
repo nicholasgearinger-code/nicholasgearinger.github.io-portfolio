@@ -504,6 +504,112 @@ function finalizeInstancedMeshes(meshes) {
 // Mobile spatial-instancing: 48m cells allow frustum and range culling
 // independently. The close-range GLB geometry/materials are unchanged.
 // The cells use stable world coordinates, so there is no per-frame rebuild.
+// Cache simplified geometry per original mesh, not per chunk. Attribute
+// arrays are cloned only once per species-part; chunks reuse these resources.
+// Pure CPU index clustering retains authored UVs, normals and materials.
+// Non-triangle and morph/skinned meshes safely retain the original.
+const riftLODGeometryCache = new WeakMap();
+function makeRiftMidGeometry(original) {
+  if (!RIFT_MOBILE_GPU || !original?.isBufferGeometry) return original;
+  const cached = riftLODGeometryCache.get(original);
+  if (cached) return cached;
+  const position = original.getAttribute("position");
+  const index = original.getIndex();
+  const count = position?.count || 0;
+  const triangles = Math.floor((index ? index.count : count) / 3);
+  if (!position || triangles < 120 || original.morphAttributes?.position?.length ||
+      original.getAttribute("skinIndex")) {
+    riftLODGeometryCache.set(original, original);
+    return original;
+  }
+  original.computeBoundingBox();
+  const bbox = original.boundingBox;
+  const span = Math.max(bbox.max.x - bbox.min.x, bbox.max.y - bbox.min.y,
+    bbox.max.z - bbox.min.z);
+  if (!(span > 0.0001)) {
+    riftLODGeometryCache.set(original, original);
+    return original;
+  }
+  // Cluster fine nearby vertices into a 34-cell resolution while preserving
+  // UV seams and markedly different surface normals. This avoids mesh holes:
+  // collapsed triangles are skipped, remaining triangles stay connected.
+  const step = span / 34;
+  const uv = original.getAttribute("uv");
+  const normal = original.getAttribute("normal");
+  const first = new Map();
+  const remap = new Uint32Array(count);
+  for (let i = 0; i < count; i++) {
+    const x = Math.round((position.getX(i) - bbox.min.x) / step);
+    const y = Math.round((position.getY(i) - bbox.min.y) / step);
+    const z = Math.round((position.getZ(i) - bbox.min.z) / step);
+    const u = uv ? Math.floor(uv.getX(i) * 24) : 0;
+    const v = uv ? Math.floor(uv.getY(i) * 24) : 0;
+    const nx = normal ? Math.round(normal.getX(i) * 2) : 0;
+    const ny = normal ? Math.round(normal.getY(i) * 2) : 0;
+    const nz = normal ? Math.round(normal.getZ(i) * 2) : 0;
+    const key = x + "," + y + "," + z + "," + u + "," + v +
+      "," + nx + "," + ny + "," + nz;
+    if (!first.has(key)) first.set(key, i);
+    remap[i] = first.get(key);
+  }
+  const next = [];
+  for (let t = 0; t < triangles; t++) {
+    const i = t * 3;
+    const a = remap[index ? index.getX(i) : i];
+    const b = remap[index ? index.getX(i + 1) : i + 1];
+    const c = remap[index ? index.getX(i + 2) : i + 2];
+    if (a !== b && b !== c && c !== a) next.push(a, b, c);
+  }
+  // Skip tiny reductions; do not disrupt multi-material groups whose indexed
+  // ranges refer to the original triangle sequence.
+  if (next.length > triangles * 3 * 0.88 || original.groups.length > 1 ||
+      next.length < 9) {
+    riftLODGeometryCache.set(original, original);
+    return original;
+  }
+  const simplified = original.clone();
+  simplified.setIndex(next);
+  simplified.computeBoundingSphere();
+  simplified.computeBoundingBox();
+  riftLODGeometryCache.set(original, simplified);
+  return simplified;
+}
+function makeRiftLODParts(parts) {
+  return parts.map(part => ({
+    geometry: makeRiftMidGeometry(part.geometry),
+    material: part.material,
+    localMatrix: part.localMatrix,
+  }));
+}
+function buildRiftChunkMeshes(parts, group, kind) {
+  const high = buildInstancedMeshesFromParts(parts, group.placements.length);
+  const lowParts = RIFT_MOBILE_GPU ? makeRiftLODParts(parts) : parts;
+  // Only create an alternate mesh if it actually saves triangles. When it
+  // cannot safely simplify, use the existing instance-count LOD instead.
+  const hasSimplification = RIFT_MOBILE_GPU &&
+    lowParts.some((part, i) => part.geometry !== parts[i].geometry);
+  const mid = hasSimplification ?
+    buildInstancedMeshesFromParts(lowParts, group.placements.length) : null;
+  if (mid) for (const mesh of mid) {
+    mesh.visible = false;
+    mesh.castShadow = false;
+  }
+  return { high, mid, lowParts };
+}
+function fillRiftChunkMeshes(batch, parts, i, position, quaternion, scale) {
+  setInstanceMatrixAt(batch.high, parts, i, position, quaternion, scale);
+  if (batch.mid) setInstanceMatrixAt(batch.mid, batch.lowParts, i,
+    position, quaternion, scale);
+}
+function finishRiftChunkMeshes(batch, group, kind) {
+  finalizeInstancedMeshes(batch.high);
+  if (batch.mid) finalizeInstancedMeshes(batch.mid);
+  if (RIFT_MOBILE_GPU) {
+    registerVegetationChunk(batch.high, group, kind, batch.mid);
+  }
+  return batch.mid ? [...batch.high, ...batch.mid] : batch.high;
+}
+
 const RIFT_CHUNK_SIZE = 48;
 const riftVegetationChunks = new Set();
 function chunkPlacementGroups(placements) {
@@ -517,9 +623,9 @@ function chunkPlacementGroups(placements) {
   }
   return groups.values();
 }
-function registerVegetationChunk(meshes, group, kind) {
+function registerVegetationChunk(meshes, group, kind, midMeshes = null) {
   const chunk = {
-    meshes, kind, cx: group.cx, cz: group.cz,
+    meshes, midMeshes, kind, cx: group.cx, cz: group.cz,
     fullCount: group.placements.length,
     // Store an enclosing world-space rectangle. LOD tests use distance to
     // the closest point of the cell, not its center, avoiding premature
@@ -530,7 +636,7 @@ function registerVegetationChunk(meshes, group, kind) {
     maxZ: (group.cz + 1) * RIFT_CHUNK_SIZE,
     band: 0,
   };
-  for (const mesh of meshes) {
+  for (const mesh of [...meshes, ...(midMeshes || [])]) {
     mesh.userData.riftVegetationChunk = chunk;
   }
   riftVegetationChunks.add(chunk);
@@ -577,12 +683,19 @@ function updateSpatialVegetation(cameraPosition) {
       }[chunk.kind] ?? 0.7;
       const targetCount = band === 0 ? chunk.fullCount :
         band === 1 ? Math.max(1, Math.ceil(chunk.fullCount * midDensity)) : 0;
+      // Switch whole multi-part species meshes as a unit. At medium range,
+      // use lower-triangle meshes where supported, otherwise reduce instance
+      // count without altering texture/material or full-resolution assets.
+      const useMid = band === 1 && !!chunk.midMeshes;
       for (const mesh of chunk.meshes) {
         mesh.count = targetCount;
-        mesh.visible = targetCount > 0;
-        // Trees keep contact shadows nearby; distant trees cost no shadow-pass
-        // triangles. Coral and ground plants already have mobile shadows off.
+        mesh.visible = targetCount > 0 && !useMid;
         if (chunk.kind === "tree") mesh.castShadow = band === 0;
+      }
+      if (chunk.midMeshes) for (const mesh of chunk.midMeshes) {
+        mesh.count = targetCount;
+        mesh.visible = targetCount > 0 && useMid;
+        mesh.castShadow = false;
       }
     }
     if (band === 2) culled++;

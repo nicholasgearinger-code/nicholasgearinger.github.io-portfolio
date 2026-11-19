@@ -322,8 +322,16 @@ export function updateGPUShallowWater(handle, renderer, elapsedTime = 0) {
   handle.lastElapsed = Number.isFinite(elapsedTime) ? elapsedTime : 0;
   handle.dtUniform.value = frameDt / SUBSTEPS;
 
-  for (let substep = 0; substep < SUBSTEPS; substep++) {
-    for (const node of handle.computeFrame) renderer.compute(node);
+  const profileCompute = typeof location !== "undefined" &&
+    new URLSearchParams(location.search).get("riftPerf") === "1";
+  const previousPhase = profileCompute ? globalThis.__riftComputePhase : null;
+  if (profileCompute) globalThis.__riftComputePhase = "shallow";
+  try {
+    for (let substep = 0; substep < SUBSTEPS; substep++) {
+      for (const node of handle.computeFrame) renderer.compute(node);
+    }
+  } finally {
+    if (profileCompute) globalThis.__riftComputePhase = previousPhase;
   }
 
   if (handle.interactionStrength) handle.interactionStrength.value *= 0.72;

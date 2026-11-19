@@ -338,21 +338,22 @@ function installWaterProOptics(handle) {
   // Depth-driven tropical water color. Near-shore water reads turquoise because
   // the sand contributes strongly; offshore water loses red/green energy and
   // settles into a much darker blue body color.
+  // One continuous, squared-distance offshore gradient drives both the
+  // local FFT color and the cheaper streamed ocean. Preserve turquoise
+  // on the reef; blue increases through the shelf and continental slope.
   const shallow = float(1).sub(smoothstep(float(3.0), float(17.0), depth));
-  // The outer Coral shelf now reaches ~21m and the near-shore ocean stays
-  // turquoise. Use the existing world position and depth (no textures or
-  // extra render passes) to transition to Water Pro-like sapphire offshore.
-  // Squared radial distance avoids a fragment sqrt on mobile WebGPU.
   const offshoreR2 = dot(positionWorld.xz, positionWorld.xz);
-  const offshoreBlue = smoothstep(float(135 * 135), float(220 * 220), offshoreR2);
-  const deep = max(smoothstep(float(11.0), float(25.0), depth),
-    offshoreBlue.mul(0.88));
+  const offshoreBlue = smoothstep(float(140 * 140), float(850 * 850), offshoreR2);
+  const abyssBlue = smoothstep(float(450 * 450), float(1400 * 1400), offshoreR2);
+  const depthFade = smoothstep(float(9), float(78), depth);
+  const deep = max(offshoreBlue.mul(0.84), depthFade);
   const depthBody = mix(midColor, shallowColor, shallow);
-  const depthColor = mix(depthBody, deepColor, deep);
+  const deepBody = mix(depthBody, deepColor, deep);
+  const depthColor = mix(deepBody, color(0x041d3a),
+    abyssBlue.mul(0.75));
   const depthMix = clamp(
-    float(0.57).add(shallow.mul(0.22)).add(deep.mul(0.10)),
-    0,
-    0.88,
+    float(0.58).add(shallow.mul(0.21)).add(deep.mul(0.16)),
+    0, 0.94,
   );
 
   // Fluid Lab M7.4.8 clear-pool optical approach adapted to the ocean:

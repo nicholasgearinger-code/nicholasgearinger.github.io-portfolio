@@ -24,6 +24,7 @@ const state = {
   compileReady: false,
   requestedPixelRatio: 1,
   adaptiveScale: 1,
+  clarityScale: 1,
   renderer: null,
   overlay: null,
   bar: null,
@@ -346,7 +347,8 @@ if (proto && !proto.__riftBootstrapPatched) {
     proto.setPixelRatio = function (ratio) {
       state.renderer = this;
       if (Number.isFinite(ratio) && ratio > 0) state.requestedPixelRatio = ratio;
-      const effective = Math.max(0.65, state.requestedPixelRatio * state.adaptiveScale);
+      const effective = Math.max(0.65, state.requestedPixelRatio * state.adaptiveScale *
+        (isTouch && state.requestedPixelRatio <= 0.75 ? state.clarityScale : 1));
       return originalSetPixelRatio.call(this, effective);
     };
   }
@@ -405,12 +407,16 @@ document.addEventListener("click", (event) => {
   })();
 }, true);
 
-// Keep the iOS adaptive scaler from multiplying the already-reduced mobile\n// graphics cap into a severely pixelated image. Expensive FFT work is throttled\n// separately by the ocean controller when FPS drops.\n// Independent FPS sampler so adaptive resolution still works with the HUD off.
+// Keep the iOS adaptive scaler from multiplying the already-reduced mobile
+// graphics cap into a severely pixelated image. Expensive FFT work is throttled
+// separately by the ocean controller when FPS drops.
+// Independent FPS sampler so adaptive resolution still works with the HUD off.
 // It reacts over multi-second windows, not frame-by-frame, to avoid resolution
 // oscillation and visual pumping.
 let perfStart = performance.now();
 let perfFrames = 0;
 let goodWindows = 0;
+let clarityWindows = 0;
 function monitorPerformance(now) {
   if (!state.coreReady || state.levelWarming) {
     perfStart = now;
@@ -447,6 +453,28 @@ function monitorPerformance(now) {
       goodWindows = 0;
     }
 
+    // Mobile visual headroom: increase raster sharpness only after three
+    // stable 2.2-second windows near 30 FPS. Back down quickly under load.
+    // No resolution multiplier for explicit high-res user settings.
+    if (isTouch) {
+      if (fps < 28.5) {
+        clarityWindows = 0;
+        state.clarityScale = Math.max(1, state.clarityScale - 0.05);
+      } else if (fps >= 29.8 && state.adaptiveScale >= 0.99) {
+        clarityWindows++;
+        if (clarityWindows >= 3) {
+          state.clarityScale = Math.min(1.15, state.clarityScale + 0.025);
+          clarityWindows = 0;
+        }
+      } else {
+        clarityWindows = 0;
+      }
+    }
+    globalThis.__riftAdaptiveClarity = {
+      fps: Math.round(fps * 10) / 10,
+      multiplier: state.clarityScale,
+      requestedPixelRatio: state.requestedPixelRatio,
+    };
     if (renderer && typeof renderer.setPixelRatio === "function") {
       renderer.setPixelRatio(state.requestedPixelRatio);
     }

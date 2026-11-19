@@ -195,6 +195,7 @@ const godRayUpdate = `
 `;
 
 const extraEdits = [
+  ["  updateTreeInstanceSway(realTreeInstanceHandle, elapsedTime, wind);", "  // Update spatial vegetation LOD before animating only nearby palm batches.\\n  globalThis.__riftUpdateSpatialVegetation?.(camera.position);\\n  updateTreeInstanceSway(realTreeInstanceHandle, elapsedTime, wind);", "Spatially chunked vegetation distance LOD"],
   ["    tempRainFogColor.setHex(0x0a0e14).lerp(RAIN_FOG_COLOR, wind.rainIntensity * 0.5);","    // The old fixed near-black air fog turned distant daylight water into\n    // a hard black strip below a bright sky. Match the actual sky horizon\n    // each frame; fog then blends far ocean to the same atmospheric color.\n    // Storms smoothly converge to the existing dark storm palette.\n    tempRainFogColor.copy(dayNight.skyHorizon)\n      .multiplyScalar(0.84)\n      .lerp(RAIN_FOG_COLOR, THREE.MathUtils.clamp(wind.rainIntensity * 0.78, 0, 1));","Match daylight horizon fog to sky instead of opaque black sea band"],
 
   ["const oceanDepthDaylight = uniform(1);","const oceanDepthDaylight = uniform(1);\n// Cached once per frame: offshore shelf and bottomless water optical depth.\nconst oceanDepthOffshore = uniform(0);","Ocean optical depth scalar for actual offshore bathymetry"],

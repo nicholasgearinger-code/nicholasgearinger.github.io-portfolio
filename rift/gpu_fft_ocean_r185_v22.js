@@ -82,8 +82,12 @@ function iosFFTInterval() {
     // Explicit ?riftFFTCap=10 disables this auto behavior for A/B tests.
     const fps = Number(globalThis.__riftPerfA?.avgFPS);
     if (Number.isFinite(fps) && fps > 0) {
-      if (fps < 22) return 1 / 7;
-      if (fps < 29) return 1 / 8;
+      // WebKit spends considerable CPU time submitting dozens of FFT kernels.
+      // Below 22 FPS prioritize rendering responsiveness, while the existing
+      // shader normal field continues to animate every display frame.
+      if (fps < 18) return 1 / 5;
+      if (fps < 25) return 1 / 6;
+      if (fps < 30) return 1 / 8;
     }
     return 1 / 10;
   }

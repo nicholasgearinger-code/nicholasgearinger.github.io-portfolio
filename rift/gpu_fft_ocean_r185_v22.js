@@ -74,7 +74,20 @@ function iosFFTInterval() {
   }
   let tier = "low";
   try { tier = localStorage.getItem("riftGraphicsSettings") || "low"; } catch (_) {}
-  return tier === "low" ? 1 / 10 : tier === "medium" ? 1 / 20 : 1 / 30;
+  if (tier === "low") {
+    // Keep normal 10Hz waves at good FPS, reduce only simulation SUBMISSION
+    // frequency when sustained mobile frame rate falls below target.
+    // The previous/next FFT results remain bound; no WebGPU buffer resizes,
+    // cascade batching, shader recompilation or renderer size changes.
+    // Explicit ?riftFFTCap=10 disables this auto behavior for A/B tests.
+    const fps = Number(globalThis.__riftPerfA?.avgFPS);
+    if (Number.isFinite(fps) && fps > 0) {
+      if (fps < 22) return 1 / 7;
+      if (fps < 29) return 1 / 8;
+    }
+    return 1 / 10;
+  }
+  return tier === "medium" ? 1 / 20 : 1 / 30;
 }
 
 function freezeUnsafeMobileMicroFFT(handle) {
@@ -162,7 +175,12 @@ export function updateGPUFFTOcean(handle, renderer, elapsedTime = 0) {
 
   const t = Number.isFinite(elapsedTime) ? elapsedTime : 0;
   const last = Number(handle.__riftIOSFFTLastTime);
-  if (Number.isFinite(last) && t >= last && (t - last) < iosFFTInterval()) return;
+  const interval = iosFFTInterval();
+  if (globalThis.__riftIOSFFTSafeV22) {
+    globalThis.__riftIOSFFTSafeV22.targetHz =
+      interval > 0 ? Math.round(1 / interval) : "uncapped";
+  }
+  if (Number.isFinite(last) && t >= last && (t - last) < interval) return;
   handle.__riftIOSFFTLastTime = t;
   handle.__riftIOSFFTDispatchCount = (handle.__riftIOSFFTDispatchCount ?? 0) + 1;
   if (globalThis.__riftIOSFFTSafeV22)

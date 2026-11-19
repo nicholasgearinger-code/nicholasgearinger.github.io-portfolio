@@ -569,6 +569,13 @@ function makeRiftMidGeometry(original) {
   }
   const simplified = original.clone();
   simplified.setIndex(next);
+  // One material group may retain the original index count. Remap it to the
+  // reduced index range so WebGPU never reads beyond the new index buffer.
+  if (simplified.groups.length === 1) {
+    const materialIndex = simplified.groups[0].materialIndex;
+    simplified.clearGroups();
+    simplified.addGroup(0, next.length, materialIndex);
+  }
   simplified.computeBoundingSphere();
   simplified.computeBoundingBox();
   riftLODGeometryCache.set(original, simplified);

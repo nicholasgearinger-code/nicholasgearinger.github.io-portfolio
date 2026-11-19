@@ -304,6 +304,8 @@ function updateRiftPerfOverlay(stats) {
       "ms Shallow " + (stats.computeCPUBySystem?.shallow ?? 0) + "ms",
     "Water stride " + stats.waterDetailStride +
       " | Reduced " + (stats.reducedEffects ? "on" : "off"),
+    "Sharpness " + (globalThis.__riftStartupSharpness?.pixelRatio ?? "tier") +
+      "x / next " + (globalThis.__riftStartupSharpness?.nextPixelRatio ?? "tier") + "x",
     "FFT cap " + (globalThis.__riftIOSFFTSafeV22?.targetHz ?? "-") + " Hz",
     "Swash compute " + (globalThis.__riftSwashPerf?.targetHz ?? "-") + " Hz",
     "Shallow compute " + (globalThis.__riftShallowPerf?.targetHz ?? "-") + " Hz",
@@ -328,10 +330,44 @@ function updateRiftPerfOverlay(stats) {
 let perfStart = performance.now();
 let perfFrames = 0;
 let goodWindows = 0;
+// Auto sharpness learns across stable gameplay windows. It NEVER resizes
+// a live WebGPU canvas (which caused iOS encoder errors in earlier builds).
+let sharpFPSWindows = [];
+let sharpnessProfileSaved = false;
+function trainNextLaunchSharpness(fps) {
+  const cfg = globalThis.__riftStartupSharpness;
+  if (!isTouch || !cfg?.enabled || sharpnessProfileSaved) return;
+  sharpFPSWindows.push(fps);
+  if (sharpFPSWindows.length > 10) sharpFPSWindows.shift();
+  if (sharpFPSWindows.length < 10) return;
+  const steady = sharpFPSWindows.slice(3);
+  const mean = steady.reduce((sum, n) => sum + n, 0) / steady.length;
+  const slowest = Math.min(...steady);
+  const steps = cfg.steps || [1, 1.1, 1.2, 1.3, 1.4];
+  const current = Number(cfg.pixelRatio) || 1;
+  const index = Math.max(0, steps.findIndex(x => Math.abs(x - current) < 0.005));
+  let next = index;
+  // 30 FPS target with a margin for heat and scene variation.
+  if (mean >= 41 && slowest >= 34 && index < steps.length - 1) next++;
+  else if ((mean < 29 || slowest < 23) && index > 0) next--;
+  cfg.nextPixelRatio = steps[next];
+  cfg.training = {
+    averageFPS: Math.round(mean * 10) / 10,
+    minimumWindowFPS: Math.round(slowest * 10) / 10,
+    nextLaunchOnly: true,
+  };
+  try {
+    localStorage.setItem(cfg.key, JSON.stringify({
+      version: 1, pixelRatio: steps[next],
+    }));
+  } catch (_) { /* private browsing or unavailable storage */ }
+  sharpnessProfileSaved = true;
+}
 function monitorPerformance(now) {
   if (!state.gameStarted || state.levelWarming || document.visibilityState === "hidden") {
     perfStart = now;
     perfFrames = 0;
+    sharpFPSWindows.length = 0;
     requestAnimationFrame(monitorPerformance);
     return;
   }
@@ -362,6 +398,7 @@ function monitorPerformance(now) {
       goodWindows = 0;
     }
 
+    trainNextLaunchSharpness(fps);
     // Phase A diagnostic: sampled frame cadence and adaptive simulation budget.
     // This is NOT a GPU timestamp measurement and does not resize the swapchain.
     window.__riftPerfA = {

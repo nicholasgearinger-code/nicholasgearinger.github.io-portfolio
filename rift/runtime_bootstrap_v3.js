@@ -311,6 +311,7 @@ function updateRiftPerfOverlay(stats) {
       globalThis.__riftOceanLOD.vertices + " verts" : "legacy"),
     "Terrain " + (globalThis.__riftSceneProbe?.terrainSafe ? "safe" : "full") +
       " / Ocean " + (globalThis.__riftSceneProbe?.oceanVisible ? "visible" : "hidden"),
+    "Experimental engine " + (globalThis.__riftSceneProbe?.experimentalActive ? "ACTIVE" : "not active"),
     "Cam-water " + (globalThis.__riftSceneProbe?.cameraAboveWater ?? "-") +
       "m / Submerged " + (globalThis.__riftSceneProbe?.submerged ?? "-")
   ].join(String.fromCharCode(10));

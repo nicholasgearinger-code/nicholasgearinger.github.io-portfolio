@@ -420,6 +420,21 @@ const _instTempQuat = new THREE.Quaternion();
 const _instTempScale = new THREE.Vector3();
 const _instTempEuler = new THREE.Euler();
 
+
+// On iOS, reefs, sponges and seabed plants are illuminated by water
+// caustics and directional/ambient light. Their expensive instanced shadow
+// casters add little above-water readability and duplicate hundreds of
+// thousands of triangles in the sun/moon shadow passes. Preserve tree
+// shadows and all receiveShadow/material behavior.
+const RIFT_MOBILE_GPU = typeof navigator !== "undefined" && (
+  /iPhone|iPad|iPod/i.test(navigator.userAgent || "") ||
+  ((navigator.platform || "") === "MacIntel" && navigator.maxTouchPoints > 1)
+);
+function mobileReefShadowBudget(meshes) {
+  if (!RIFT_MOBILE_GPU) return;
+  for (const mesh of meshes) mesh.castShadow = false;
+}
+
 function buildInstancedMeshesFromParts(parts, count) {
   return parts.map((part) => {
     const mesh = new THREE.InstancedMesh(part.geometry, part.material, count);
@@ -492,6 +507,7 @@ function buildCoralInstances(species, placements) {
   if (!parts || placements.length === 0) return [];
   const groundOffset = instanceGroundOffsetCache[cacheKey];
   const meshes = buildInstancedMeshesFromParts(parts, placements.length);
+  mobileReefShadowBudget(meshes);
   for (let i = 0; i < placements.length; i++) {
     const p = placements[i];
     const belowOrigin = groundOffset * p.scale;
@@ -523,6 +539,7 @@ function buildNormalizedInstances(cacheKey, buildReferenceFn, placements, embedF
   if (!parts || placements.length === 0) return [];
   const groundOffset = instanceGroundOffsetCache[cacheKey];
   const meshes = buildInstancedMeshesFromParts(parts, placements.length);
+  mobileReefShadowBudget(meshes);
   for (let i = 0; i < placements.length; i++) {
     const p = placements[i];
     const y = p.groundY + groundOffset * p.scale * embedFraction;
@@ -592,6 +609,15 @@ function buildTreeInstances(speciesPlacements) {
 // assignment would have, not just a visually-similar approximation.
 function updateTreeInstanceSway(treeInstanceHandle, elapsedTime, wind) {
   if (!treeInstanceHandle || wind.windStrength <= 0.001) return;
+  // GPU instance-matrix upload is costly on iPhone. At 12Hz the slow palm
+  // sway remains perceptually fluid and the scene continues rendering every
+  // display frame. Keep a separate timestamp per level handle.
+  if (RIFT_MOBILE_GPU) {
+    const last = treeInstanceHandle.__lastSwayUpdate;
+    if (Number.isFinite(last) && elapsedTime >= last &&
+        elapsedTime - last < 1 / 12) return;
+    treeInstanceHandle.__lastSwayUpdate = elapsedTime;
+  }
   const windDirX = wind.windX / wind.windStrength;
   const windDirZ = wind.windZ / wind.windStrength;
   const leanAmount = Math.min(0.11, wind.windStrength * 0.02);

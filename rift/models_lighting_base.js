@@ -535,8 +535,14 @@ function registerVegetationChunk(meshes, group, kind) {
   riftVegetationChunks.add(chunk);
   return chunk;
 }
+let riftLastVegetationLODTime = 0;
 function updateSpatialVegetation(cameraPosition) {
   if (!RIFT_MOBILE_GPU || !cameraPosition) return;
+  // Four range checks per second are sufficient for walking/swimming; leave
+  // render frustum culling to Three.js every frame.
+  const now = performance.now();
+  if (now - riftLastVegetationLODTime < 250) return;
+  riftLastVegetationLODTime = now;
   // Reset stale entries when moving to a different world. The scene's normal
   // teardown owns mesh disposal; the Set only holds metadata.
   const limits = {
@@ -559,12 +565,14 @@ function updateSpatialVegetation(cameraPosition) {
     const hysteresis = 8;
     let band = dist > far + (chunk.band === 2 ? -hysteresis : hysteresis) ? 2 :
       dist > near + (chunk.band >= 1 ? -hysteresis : hysteresis) ? 1 : 0;
-    chunk.band = band;
-    for (const mesh of chunk.meshes) {
-      mesh.visible = band !== 2;
-      // Trees keep contact shadows nearby; distant trees cost no shadow-pass
-      // triangles. Coral and ground plants already have mobile shadows off.
-      if (chunk.kind === "tree") mesh.castShadow = band === 0;
+    if (band !== chunk.band) {
+      chunk.band = band;
+      for (const mesh of chunk.meshes) {
+        mesh.visible = band !== 2;
+        // Trees keep contact shadows nearby; distant trees cost no shadow-pass
+        // triangles. Coral and ground plants already have mobile shadows off.
+        if (chunk.kind === "tree") mesh.castShadow = band === 0;
+      }
     }
     if (band === 2) culled++;
     else if (band === 1) mid++;

@@ -25,7 +25,7 @@ const IOS_LOW_PIXEL_CAP = 0.65; // 34% fewer shaded pixels than the previous 0.8
 // Limit Experimental fill rate on iOS Low/Medium only, keeping Current and
 // user-chosen exact-resolution overrides unchanged. Bypass for comparison
 // using ?riftDebug=fullreswater. No extra GPU passes or simulation changes.
-const IOS_EXPERIMENTAL_PIXEL_CAP = 0.58; // ~27% fewer pixels than the previous 0.68 cap
+const IOS_EXPERIMENTAL_PIXEL_CAP = 0.66; // Recover water detail; adaptive runtime scale now has a higher mobile floor
 function experimentalMobileWaterCap() {
   if (!RIFT_IOS) return null;
   const tier = base.getGraphicsTier();

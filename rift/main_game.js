@@ -214,6 +214,7 @@ const extraEdits = [
           ? "n/a" : Math.round((camera.position.y - liquidHandle.waterY) * 10) / 10,
         submerged: isFullySubmerged,
         oceanVisible: liquidHandle?.mesh?.visible ?? false,
+        experimentalActive: Boolean(liquidHandle?.__riftNextWater),
         oceanMaterial: liquidHandle?.mesh?.material?.type ?? "none"
       };
     }

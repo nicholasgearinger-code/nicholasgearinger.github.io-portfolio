@@ -251,7 +251,15 @@ export function createGPUSurfSystem(scene, sampleHeight, waterY, shallowHandle) 
 
 export function updateGPUSurfCompute(handle, renderer, elapsedTime = 0) {
   if (!handle?.gpuSurfSystem || !handle.fluidSwash?.gpuSwash) return;
-  updateGPUSwashSolver(handle.fluidSwash, renderer, elapsedTime);
+  const profileCompute = typeof location !== "undefined" &&
+    new URLSearchParams(location.search).get("riftPerf") === "1";
+  const previousPhase = profileCompute ? globalThis.__riftComputePhase : null;
+  if (profileCompute) globalThis.__riftComputePhase = "swash";
+  try {
+    updateGPUSwashSolver(handle.fluidSwash, renderer, elapsedTime);
+  } finally {
+    if (profileCompute) globalThis.__riftComputePhase = previousPhase;
+  }
 }
 
 export function updateGPUSurfSystem(handle, elapsed, cameraY, storm = 0, day = 1, sunDir = null) {

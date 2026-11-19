@@ -222,6 +222,13 @@ const extraEdits = [
         submerged: isFullySubmerged,
         oceanVisible: liquidHandle?.mesh?.visible ?? false,
         experimentalActive: Boolean(liquidHandle?.__riftNextWater),
+        deepOceanRadius: currentLevelIdx >= 0 && LEVELS[currentLevelIdx].biome === "crystal"
+          ? Math.round(Math.hypot(camera.position.x, camera.position.z)) : 0,
+        deepOceanFloor: currentLevelIdx >= 0 && LEVELS[currentLevelIdx].biome === "crystal"
+          ? Math.round((LIQUID_LEVEL.crystal - terrainHeightAt(LEVELS[currentLevelIdx], camera.position.x, camera.position.z, WORLD_SEED)) * 10) / 10
+          : 0,
+        deepCameraDepth: currentLevelIdx >= 0 && LEVELS[currentLevelIdx].biome === "crystal"
+          ? Math.round(Math.max(0, LIQUID_LEVEL.crystal - camera.position.y) * 10) / 10 : 0,
         oceanMaterial: liquidHandle?.mesh?.material?.type ?? "none"
       };
     }

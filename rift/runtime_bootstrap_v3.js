@@ -318,7 +318,10 @@ function updateRiftPerfOverlay(stats) {
       " / Ocean " + (globalThis.__riftSceneProbe?.oceanVisible ? "visible" : "hidden"),
     "Experimental engine " + (globalThis.__riftSceneProbe?.experimentalActive ? "ACTIVE" : "not active"),
     "Cam-water " + (globalThis.__riftSceneProbe?.cameraAboveWater ?? "-") +
-      "m / Submerged " + (globalThis.__riftSceneProbe?.submerged ?? "-")
+      "m / Submerged " + (globalThis.__riftSceneProbe?.submerged ?? "-"),
+    "Deep ocean " + (globalThis.__riftSceneProbe?.deepOceanRadius ?? "-") +
+      "m / Floor " + (globalThis.__riftSceneProbe?.deepOceanFloor ?? "-") + "m",
+    "Dive depth " + (globalThis.__riftSceneProbe?.deepCameraDepth ?? "-") + "m"
   ].join(String.fromCharCode(10));
 }
 

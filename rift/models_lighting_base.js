@@ -509,8 +509,11 @@ function finalizeInstancedMeshes(meshes) {
 // Pure CPU index clustering retains authored UVs, normals and materials.
 // Non-triangle and morph/skinned meshes safely retain the original.
 const riftLODGeometryCache = new WeakMap();
+const RIFT_MESH_LOD_ENABLED = typeof location === "undefined" ||
+  new URLSearchParams(location.search).get("riftMeshLOD") !== "off";
 function makeRiftMidGeometry(original) {
-  if (!RIFT_MOBILE_GPU || !original?.isBufferGeometry) return original;
+  if (!RIFT_MOBILE_GPU || !RIFT_MESH_LOD_ENABLED ||
+      !original?.isBufferGeometry) return original;
   const cached = riftLODGeometryCache.get(original);
   if (cached) return cached;
   const position = original.getAttribute("position");
@@ -712,6 +715,9 @@ function updateSpatialVegetation(cameraPosition) {
   globalThis.__riftSpatialVegetationStats = {
     nearChunks: active, midChunks: mid, culledChunks: culled,
     chunkSize: RIFT_CHUNK_SIZE, totalChunks: active + mid + culled,
+    geometryLOD: RIFT_MESH_LOD_ENABLED,
+    simplifiedMeshes: [...riftVegetationChunks].reduce(
+      (n, item) => n + (item.band === 1 ? (item.midMeshes?.length || 0) : 0), 0),
   };
 }
 globalThis.__riftUpdateSpatialVegetation = updateSpatialVegetation;

@@ -295,6 +295,9 @@ function updateRiftPerfOverlay(stats) {
     "Render/frame " + (stats.renderSubmitsPerFrame ?? "-") +
       "  Compute/frame " + (stats.computeSubmitsPerFrame ?? "-"),
     "CPU submit/frame " + (stats.cpuSubmitMsPerFrame ?? "-") + " ms",
+    "CPU render submit/frame ~" + (stats.cpuRenderSubmitMsPerFrame ?? "-") + " ms",
+    "GPU scene draws " + (stats.renderDrawCalls ?? "-") +
+      " | triangles " + (stats.renderTriangles ?? "-"),
     "FFT updates " + (globalThis.__riftIOSFFTSafeV22?.dispatchCount ?? "-"),
     "Compute/frame FFT " + (stats.computeBySystem?.fft ?? 0) +
       " Shallow " + (stats.computeBySystem?.shallow ?? 0),
@@ -434,6 +437,9 @@ function monitorPerformance(now) {
         ? Math.round(riftSubmitCPUms / Math.max(1,perfFrames) * 10) / 10
         : null,
       renderDrawCalls: state.renderer?.info?.render?.calls ?? null,
+      cpuRenderSubmitMsPerFrame: riftPerfProbe
+        ? Math.round((riftSubmitCPUms - Object.values(riftComputeCPUms).reduce((sum, ms) => sum + ms, 0)) / Math.max(1, perfFrames) * 10) / 10
+        : null,
       renderTriangles: state.renderer?.info?.render?.triangles ?? null,
     };
     riftRenderSubmitCalls = 0;

@@ -263,13 +263,24 @@ function persistOverrides() {
   try { localStorage.setItem(OVERRIDES_STORAGE_KEY, JSON.stringify(overrides)); } catch (_) { /* best effort */ }
 }
 
+// Startup-only supersampling A/B test. Mobile Low normally uses DPR 1,
+// which has visibly coarser silhouettes on retina screens. This opt-in
+// changes only the initial render buffer size; NEVER resize a live WebGPU
+// canvas from the adaptive performance monitor (encoder safety).
+// ?riftPixelScale=1.25: 56% more pixels than Low's default.
+// ?riftPixelScale=1.5: 125% more pixels, potentially too costly on iPhone.
+const startupPixelCap = (() => {
+  if (typeof location === "undefined") return null;
+  const v = Number(new URLSearchParams(location.search).get("riftPixelScale"));
+  return Number.isFinite(v) && v >= 1 && v <= 1.5 ? v : null;
+})();
+
 function getGraphicsSettings() {
-  // Merge tier defaults with any active overrides — every existing call
-  // site in the project (main.js, liquid.js, etc.) already reads settings
-  // exclusively through this one function, so this merge is the ONLY
-  // change needed for individual toggles to actually take effect
-  // everywhere; nothing downstream needs to know overrides exist at all.
-  return { ...TIERS[currentTier], ...overrides };
+  const settings = { ...TIERS[currentTier], ...overrides };
+  if (startupPixelCap !== null) {
+    settings.pixelRatioCap = Math.max(settings.pixelRatioCap, startupPixelCap);
+  }
+  return settings;
 }
 
 function getGraphicsTier() {

@@ -6755,10 +6755,36 @@ function animate() {
         for (const child of scene.children) child.visible = false;
         globalThis.__riftRenderIsolation = "empty-scene";
       } else if (diagnosticScene === "flat") {
-        // Keep all drawables and their original geometry while using an
-        // inexpensive unlit shader. Restore by reloading without the flag.
+        // WebGPU RenderPipeline does not guarantee that overrideMaterial
+        // applies to every scene-pass node; this is only a tentative test.
         scene.overrideMaterial = riftFlatPerfMaterial;
-        globalThis.__riftRenderIsolation = "flat-shader";
+        globalThis.__riftRenderIsolation = "flat-shader-unverified";
+      } else if (diagnosticScene === "noinstances" ||
+                 diagnosticScene === "instancesonly") {
+        // Collect only drawable leaf objects, not Groups, to avoid hiding
+        // an unrelated tree of children when a parent happens to be nested.
+        // These tests keep gameplay, water compute and all timing intact.
+        if (!globalThis.__riftGeometryPerfObjects ||
+            performance.now() - (globalThis.__riftGeometryPerfScanTime || 0) > 2500) {
+          const drawables = [];
+          let instanced = 0, regular = 0;
+          scene.traverse((obj) => {
+            if (!obj.isMesh && !obj.isPoints && !obj.isLine && !obj.isSprite) return;
+            drawables.push(obj);
+            if (obj.isInstancedMesh) instanced++;
+            else regular++;
+          });
+          globalThis.__riftGeometryPerfObjects = drawables;
+          globalThis.__riftGeometryPerfScanTime = performance.now();
+          globalThis.__riftGeometryPerfCounts = { instanced, regular, total: drawables.length };
+        }
+        for (const obj of globalThis.__riftGeometryPerfObjects) {
+          if (diagnosticScene === "noinstances" && obj.isInstancedMesh)
+            obj.visible = false;
+          if (diagnosticScene === "instancesonly" && !obj.isInstancedMesh)
+            obj.visible = false;
+        }
+        globalThis.__riftRenderIsolation = diagnosticScene;
       }
     }
     if (typeof location !== "undefined" &&

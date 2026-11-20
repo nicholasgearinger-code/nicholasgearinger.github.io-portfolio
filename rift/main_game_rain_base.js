@@ -1,3 +1,4 @@
+import { createTerrainRenderChunks } from "./terrain_chunk_renderer.js";
 import * as THREE from "three";
 import { Fn, instanceIndex, instancedArray, hash, uniform, vec3, vec2, vec4, float, uint, If, texture, uv, floor, fract, smoothstep, clamp, abs, pass, color, positionWorld, cameraPosition, max as tslMax, min as tslMin, vertexColor, normalWorld, sin, cos, dot, mix, pow, exp } from "three/tsl";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
@@ -2089,6 +2090,7 @@ function updateMovement(dt, grounded, swimming) {
 // simple instead of diffing old vs new state.
 // ---------------------------------------------------------------------------
 let terrainMesh = null;
+let riftTerrainRenderChunks = null;
 let liquidHandle = null;
 let breakingWaveHandle = null; // real 3D curling wave crest geometry — Coral Shallows only, see createBreakingWave (liquid.js)
 let reflectionFrameCounter = 999; // starts high so the first eligible frame always renders immediately, not a blank/stale texture
@@ -2309,6 +2311,10 @@ function teardownLevel() {
       skyEnvRenderTarget = null;
     }
     lastSkyEnvZenith = null; lastSkyEnvHorizon = null; // forces a fresh regenerate next time crystal loads, rather than comparing against a stale color from the previous visit
+  }
+  if (riftTerrainRenderChunks) {
+    riftTerrainRenderChunks.dispose();
+    riftTerrainRenderChunks = null;
   }
   if (terrainMesh) {
     scene.remove(terrainMesh);
@@ -3801,6 +3807,20 @@ vec2 causticVoronoiF1F2(vec2 p) {
     terrainMesh.material = simpleTerrainMat;
   }
   scene.add(terrainMesh);
+  // A/B only: split the same island triangles into independent frustum-culled
+  // draw tiles while preserving the untouched original for physics/raycasting.
+  // No changes to default rendering or persisted quality settings.
+  if (level.biome === "crystal" &&
+      new URLSearchParams(location.search).get("riftTerrainChunks") === "on") {
+    try {
+      riftTerrainRenderChunks = createTerrainRenderChunks(terrainMesh, scene, 4);
+    } catch (error) {
+      console.warn("[rift-terrain] chunk probe failed; restoring full terrain", error);
+      if (riftTerrainRenderChunks) riftTerrainRenderChunks.dispose();
+      riftTerrainRenderChunks = null;
+      terrainMesh.visible = true;
+    }
+  }
 
   if (LIQUID_LEVEL[level.biome] !== undefined) {
     // Crystal's water plane is sized much larger than the landmass

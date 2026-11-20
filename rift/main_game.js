@@ -499,9 +499,11 @@ clock.connect(document);`,
   ],
   [
     `function animate() {
+  riftFrameCpuStart = performance.now();
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.1);`,
     `function animate(timestamp) {
+  riftFrameCpuStart = performance.now();
   requestAnimationFrame(animate);
   clock.update(timestamp);
   const dt = Math.min(clock.getDelta(), 0.1);`,

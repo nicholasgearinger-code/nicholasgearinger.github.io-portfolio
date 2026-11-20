@@ -10,7 +10,7 @@
 // the rest of the portfolio on its known-good dependency while the migration
 // branch runs the game on 0.185.1.
 const RIFT_THREE_VERSION = "0.185.1";
-const RIFT_BUILD_ID = "coral-render-profile-v20-20261119";
+const RIFT_BUILD_ID = "coral-render-profile-v21-20261120";
 window.__riftBuildId = RIFT_BUILD_ID;
 const riftModuleScope = new URL("./", import.meta.url).href;
 const riftThreeBase = `https://cdn.jsdelivr.net/npm/three@${RIFT_THREE_VERSION}/`;

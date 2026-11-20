@@ -6489,6 +6489,29 @@ function animate() {
     tempRainFogColor.setHex(0x0a0e14).lerp(RAIN_FOG_COLOR, wind.rainIntensity * 0.5); // was 0.7 — even at full storm, blends WITH the scene's own natural fog tone rather than fully replacing it
     scene.fog.color.copy(tempRainFogColor);
   }
+  // Opt-in continuous underwater light extinction. The ocean floor used
+  // to remain pale/fully visible as the diver moved offshore; this
+  // distance/depth fog removes the hard cut-off and builds an abyss.
+  // Applied after the earlier underwater lighting branch and after the
+  // weather fog update, so both systems remain intact outside this mode.
+  // Scene FogExp2 is already in use; this adds no draw or compute pass.
+  if (currentBiome === "crystal" && isFullySubmerged &&
+      new URLSearchParams(location.search).get("riftAbyss") === "on" &&
+      scene.fog) {
+    const dive = Math.max(0, LIQUID_LEVEL.crystal - camera.position.y);
+    const offshore = Math.hypot(camera.position.x, camera.position.z);
+    const depthFactor = THREE.MathUtils.smoothstep(dive, 2, 42);
+    const distanceFactor = THREE.MathUtils.smoothstep(offshore, 115, 850);
+    const extinction = Math.max(depthFactor, distanceFactor * 0.76);
+    // Keep snorkeling areas bright and readable; increase absorption
+    // smoothly with dive depth and distance from land.
+    scene.fog.density = THREE.MathUtils.lerp(0.005, 0.030, extinction);
+    scene.fog.color.setRGB(
+      THREE.MathUtils.lerp(0.025, 0.003, extinction),
+      THREE.MathUtils.lerp(0.21, 0.026, extinction),
+      THREE.MathUtils.lerp(0.25, 0.066, extinction)
+    );
+  }
   // Lens raindrops — real TSL two-pass screen-space effect (see its own
   // setup comment above for why this replaced the old inert raw-GLSL
   // stub). Same enable/threshold logic already established here — skipped

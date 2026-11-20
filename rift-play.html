@@ -694,6 +694,7 @@ button{font:inherit;cursor:pointer}
               <button type="button" class="rift-graphics-opt" data-rift-render-test="post" style="flex:1 1 100%;min-height:32px">Bare post-processing</button>
               <button type="button" class="rift-graphics-opt" data-rift-render-test="no-compute" style="flex:1 1 100%;min-height:32px">Freeze ocean GPU compute</button>
               <button type="button" class="rift-graphics-opt" data-rift-render-test="empty-scene" style="flex:1 1 100%;min-height:32px">Empty 3D scene (diagnostic)</button>
+              <button type="button" class="rift-graphics-opt" data-rift-render-test="flat-scene" style="flex:1 1 100%;min-height:32px">Full scene / flat shaders</button>
             </div>
             <span style="font-size:9px;color:#9dc6cb;line-height:1.4">Temporary diagnostics, not permanent visual changes. Keep camera angle and Low setting the same for FPS comparison.</span>
           </div>
@@ -914,6 +915,7 @@ const riftRenderTests = document.getElementById("rift-render-tests");
 if (riftRenderTests) {
   const flags = new URLSearchParams(location.search);
   const mode = flags.get("riftPerfScene") === "empty" ? "empty-scene" :
+    flags.get("riftPerfScene") === "flat" ? "flat-scene" :
     flags.get("riftPerfCompute") === "off" ? "no-compute" :
     flags.get("riftHideOcean") === "1" ? "ocean" :
     flags.get("riftBarePost") === "1" ? "post" : "normal";
@@ -932,6 +934,7 @@ if (riftRenderTests) {
       if (button.dataset.riftRenderTest === "post") url.searchParams.set("riftBarePost", "1");
       if (button.dataset.riftRenderTest === "no-compute") url.searchParams.set("riftPerfCompute", "off");
       if (button.dataset.riftRenderTest === "empty-scene") url.searchParams.set("riftPerfScene", "empty");
+      if (button.dataset.riftRenderTest === "flat-scene") url.searchParams.set("riftPerfScene", "flat");
       location.assign(url.href);
     });
   }

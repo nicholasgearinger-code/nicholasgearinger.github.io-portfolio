@@ -294,6 +294,15 @@ export function updateFluidSimWater(handle, renderer, elapsedTime) {
       handle.__riftDiagnosticFFTDisabled = true;
       return;
     }
+    // Isolation test: run an initial FFT update to initialize GPU resources,
+    // then freeze subsequent FFT + shallow compute dispatches. Rendering,
+    // scene simulation, physics and shader updates remain active. This is
+    // diagnostic-only and deliberately freezes visible wave motion.
+    if (typeof location !== "undefined" &&
+        new URLSearchParams(location.search).get("riftPerfCompute") === "off") {
+      if (handle.__riftPerfComputeInitialized) return;
+      handle.__riftPerfComputeInitialized = true;
+    }
     return oceanV19.updateGPUFFTOcean(handle, renderer, elapsedTime);
   }
   return legacy.updateFluidSimWater(handle, renderer, elapsedTime);

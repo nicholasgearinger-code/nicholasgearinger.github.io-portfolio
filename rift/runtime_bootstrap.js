@@ -500,6 +500,8 @@ function monitorPerformance(now) {
            new URLSearchParams(location.search).get("riftPerfScene") === "noextras" ? "NO EXTRAS" :
            new URLSearchParams(location.search).get("riftPerfScene") === "noterrainwater" ? "NO TERRAIN/WATER" :
            new URLSearchParams(location.search).get("riftPerfScene") === "noterrain" ? "NO TERRAIN" :
+           new URLSearchParams(location.search).get("riftPerfScene") === "noisland" ? "NO ISLAND" :
+           new URLSearchParams(location.search).get("riftPerfScene") === "nooffshorefloor" ? "NO OFFSHORE FLOOR" :
            new URLSearchParams(location.search).get("riftPerfScene") === "nowater" ? "NO WATER SURFACES" :
            new URLSearchParams(location.search).get("riftPerfCompute") === "off" ? "NO OCEAN COMPUTE" :
            new URLSearchParams(location.search).get("riftHideOcean") === "1" ? "OCEAN HIDDEN" :

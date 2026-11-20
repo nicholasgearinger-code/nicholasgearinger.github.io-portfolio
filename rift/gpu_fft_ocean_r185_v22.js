@@ -199,7 +199,16 @@ export function updateGPUFFTOcean(handle, renderer, elapsedTime = 0) {
     // IMPORTANT: call v19 directly so r185 v20's renderer.compute([...]) monkey
     // patch is bypassed on iOS. v19 ultimately submits each FFT kernel through
     // renderer.compute(node), which is the older stable mobile path.
-    const result = oceanV19.updateGPUFFTOcean(handle, renderer, t);
+    const phaseProfile = typeof location !== "undefined" &&
+      new URLSearchParams(location.search).get("riftPerf") === "1";
+    const priorPhase = phaseProfile ? globalThis.__riftComputePhase : null;
+    if (phaseProfile) globalThis.__riftComputePhase = "fft";
+    let result;
+    try {
+      result = oceanV19.updateGPUFFTOcean(handle, renderer, t);
+    } finally {
+      if (phaseProfile) globalThis.__riftComputePhase = priorPhase;
+    }
     handle.__riftIOSFFTFailureCount = 0;
     // CPU dispatch time only, not GPU execution time. Useful to tell
     // whether JS command submission dominates; never stall GPU with readback.

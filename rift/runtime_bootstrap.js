@@ -46,7 +46,71 @@ const perfProbe = {
   computePhases: Object.create(null),
 };
 let perfProbeOverlay = null;
+const perfHistory = [];
+const perfSessionStartedAt = performance.now();
+let perfReportButton = null;
+function formatRiftPerfReport() {
+  const latest = globalThis.__riftLowPerf || null;
+  const samples = perfHistory.slice(-60);
+  const fmt = n => Number.isFinite(n) ? n.toFixed(1) : "n/a";
+  const fps = samples.map(sample => sample.fps);
+  const avg = fps.length ? fps.reduce((sum, x) => sum + x, 0) / fps.length : NaN;
+  const url = new URL(location.href);
+  const flags = {};
+  for (const [key, value] of url.searchParams) if (key.startsWith("rift")) flags[key] = value;
+  return [
+    "Rift Islands · sustained performance report",
+    "Elapsed: " + fmt((performance.now() - perfSessionStartedAt) / 1000) + " seconds",
+    "Flags: " + JSON.stringify(flags),
+    "Samples: " + fps.length + " · avg FPS: " + fmt(avg) +
+      " · min: " + fmt(fps.length ? Math.min(...fps) : NaN) +
+      " · max: " + fmt(fps.length ? Math.max(...fps) : NaN),
+    "Latest: " + JSON.stringify(latest),
+    "History (seconds,FPS,game CPU ms,compute calls/s,render calls/s,pixel ratio,pixel ratio changes,stream floor builds,stream water builds)",
+    ...samples.map(v => [
+      fmt(v.elapsedSec), fmt(v.fps), fmt(v.gameUpdateCpuMs),
+      v.computeCallsPerSec, v.renderCallsPerSec,
+      v.resolution?.applied ?? "n/a", v.resolution?.changes ?? 0,
+      v.oceanStream?.floorBuilds ?? "n/a", v.oceanStream?.waterBuilds ?? "n/a"
+    ].join(","))
+  ].join("\n");
+}
 if (PERF_PROBE && typeof document !== "undefined") {
+  perfReportButton = document.createElement("button");
+  perfReportButton.type = "button";
+  perfReportButton.textContent = "Copy FPS report";
+  perfReportButton.style.cssText =
+    "position:fixed;left:8px;bottom:55px;z-index:99998;" +
+    "padding:9px 12px;min-height:36px;border:1px solid #58d7c9;" +
+    "border-radius:9px;color:#e5fffc;background:#09323c;" +
+    "font:600 11px system-ui,sans-serif;cursor:pointer;touch-action:manipulation;";
+  perfReportButton.addEventListener("click", async () => {
+    const report = formatRiftPerfReport();
+    try {
+      await navigator.clipboard.writeText(report);
+      perfReportButton.textContent = "Copied FPS report";
+    } catch (error) {
+      // On browsers that deny clipboard access, display selectable report text
+      // without relying on a second tool or an external service.
+      let field = document.getElementById("rift-perf-report-text");
+      if (!field) {
+        field = document.createElement("textarea");
+        field.id = "rift-perf-report-text";
+        field.readOnly = true;
+        field.style.cssText =
+          "position:fixed;left:8px;right:8px;bottom:100px;width:calc(100% - 16px);" +
+          "height:180px;z-index:99999;background:#081820;color:#fff;" +
+          "font:11px monospace;border:1px solid #58d7c9;border-radius:8px;";
+        document.body.appendChild(field);
+      }
+      field.value = report;
+      field.focus();
+      field.select();
+      perfReportButton.textContent = "Select and copy report";
+    }
+  });
+  if (document.body) document.body.appendChild(perfReportButton);
+  else document.addEventListener("DOMContentLoaded", () => document.body.appendChild(perfReportButton), { once: true });
   perfProbeOverlay = document.createElement("div");
   perfProbeOverlay.style.cssText =
     "position:fixed;right:6px;bottom:55px;z-index:99998;" +
@@ -510,7 +574,17 @@ function monitorPerformance(now) {
         oceanStream: globalThis.__riftOceanStream || null,
         note: "CPU submission only. Does not measure GPU kernel execution.",
       };
+      snapshot.elapsedSec = Math.round((performance.now() - perfSessionStartedAt) / 100) / 10;
       globalThis.__riftLowPerf = snapshot;
+      perfHistory.push({
+        elapsedSec: snapshot.elapsedSec, fps: snapshot.fps,
+        gameUpdateCpuMs: snapshot.gameUpdateCpuMs,
+        computeCallsPerSec: snapshot.computeCallsPerSec,
+        renderCallsPerSec: snapshot.renderCallsPerSec,
+        resolution: snapshot.resolution, oceanStream: snapshot.oceanStream,
+      });
+      if (perfHistory.length > 60) perfHistory.shift();
+      globalThis.__riftPerfReport = formatRiftPerfReport;
       if (perfProbeOverlay) perfProbeOverlay.textContent =
         "Rift profiler · " +
           (new URLSearchParams(location.search).get("riftPerfScene") === "empty" ? "EMPTY SCENE" :

@@ -382,13 +382,25 @@ if (proto && !proto.__riftBootstrapPatched) {
   // main.js remains authoritative about the graphics tier. This wrapper only
   // scales its requested pixel ratio downward after sustained missed frame
   // budgets; it never changes or persists the user's chosen quality tier.
+  // Fixed-resolution diagnostic avoids adaptive resizing and keeps exactly
+  // the quality tier's requested pixel ratio. It never persists a setting.
+  const fixedPerfResolution = typeof location !== "undefined" &&
+    new URLSearchParams(location.search).get("riftPerfFixedScale") === "1";
   const originalSetPixelRatio = proto.setPixelRatio;
   if (typeof originalSetPixelRatio === "function") {
     proto.setPixelRatio = function (ratio) {
       state.renderer = this;
       if (Number.isFinite(ratio) && ratio > 0) state.requestedPixelRatio = ratio;
-      const effective = Math.max(0.65, state.requestedPixelRatio * state.adaptiveScale *
-        (isTouch && state.requestedPixelRatio <= 0.75 ? state.clarityScale : 1));
+      const effective = fixedPerfResolution
+        ? state.requestedPixelRatio
+        : Math.max(0.65, state.requestedPixelRatio * state.adaptiveScale *
+          (isTouch && state.requestedPixelRatio <= 0.75 ? state.clarityScale : 1));
+      // Avoid unnecessarily resetting the renderer's drawing buffer every
+      // 2.2-second monitor window when the scale is unchanged.
+      if (Number.isFinite(state._appliedPixelRatio) &&
+          Math.abs(state._appliedPixelRatio - effective) < 0.0001) return;
+      state._appliedPixelRatio = effective;
+      state.pixelRatioChanges = (state.pixelRatioChanges || 0) + 1;
       return originalSetPixelRatio.call(this, effective);
     };
   }
@@ -489,6 +501,13 @@ function monitorPerformance(now) {
         gameUpdateCpuMs: Math.round((globalThis.__riftGameCPUWorkMs ?? 0) * 10) / 10,
         drawableCounts: globalThis.__riftGeometryPerfCounts || null,
         terrainGrid: globalThis.__riftTerrainGrid || null,
+        resolution: {
+          requested: Math.round(state.requestedPixelRatio * 1000) / 1000,
+          applied: Math.round((state._appliedPixelRatio || 0) * 1000) / 1000,
+          changes: state.pixelRatioChanges || 0,
+          fixed: new URLSearchParams(location.search).get("riftPerfFixedScale") === "1",
+        },
+        oceanStream: globalThis.__riftOceanStream || null,
         note: "CPU submission only. Does not measure GPU kernel execution.",
       };
       globalThis.__riftLowPerf = snapshot;
@@ -510,6 +529,10 @@ function monitorPerformance(now) {
           "\nGame update CPU: " + snapshot.gameUpdateCpuMs + " ms/frame\n" +
           "CPU submission only\n" +
         snapshot.fps + " FPS · " + snapshot.frameMs + " ms/frame (total)\n" +
+        "Pixel ratio: " + snapshot.resolution.applied + " · changes: " +
+          snapshot.resolution.changes + (snapshot.resolution.fixed ? " · FIXED" : " · adaptive") + "\n" +
+        (snapshot.oceanStream ? "Stream builds: floor " + snapshot.oceanStream.floorBuilds +
+          " · water " + snapshot.oceanStream.waterBuilds + "\n" : "") +
         "Compute: " + snapshot.computeCallsPerSec + " calls/s · " +
           snapshot.computeSubmitMsPerSec + " ms CPU PER SECOND\n" +
         "Render: " + snapshot.renderCallsPerSec + " calls/s · " +

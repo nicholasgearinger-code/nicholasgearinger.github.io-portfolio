@@ -70,6 +70,13 @@ const WATER_PRO_LOOK_V16 = typeof location === "undefined" ||
 // Keep ?riftPhysics1=off as a backwards-compatible safe setting.
 const PHYSICAL_OPTICS_PHASE1 = typeof location !== "undefined" &&
   new URLSearchParams(location.search).get("riftPhysics1") === "on";
+// Water Pro reference color/reflectance tuning: intentionally separate
+// from the historical riftPhysics1 path that regressed on iPhone.
+// This pass reuses the existing normal, sky sample, depth attribute,
+// and refraction branches; no additional GPU passes, compute or meshes.
+// Start as opt-in for iPhone validation. ?riftWaterPhase1=on / off.
+const WATER_REFERENCE_PHASE1 = typeof location !== "undefined" &&
+  new URLSearchParams(location.search).get("riftWaterPhase1") === "on";
 const WATER_IOR = 1.333;
 // Fallback for the fragile mobile/WebGPU shader path: append
 // ?riftLabOptics=off to compile out the lab-derived local foam math.
@@ -357,9 +364,20 @@ function installWaterProOptics(handle) {
   const depthColor = mix(deepBody, color(0x031932),
     abyssBlue.mul(0.90));
   const depthMix = clamp(
-    float(0.58).add(shallow.mul(0.20)).add(deep.mul(0.21)),
+    float(WATER_REFERENCE_PHASE1 ? 0.66 : 0.58)
+      .add(shallow.mul(WATER_REFERENCE_PHASE1 ? 0.17 : 0.20))
+      .add(deep.mul(WATER_REFERENCE_PHASE1 ? 0.16 : 0.21)),
     0, 0.97,
   );
+  // The reference images show lighter sunlit shelf water against naturally
+  // saturated blue offshore. Reuse the existing depth ramps and avoid any
+  // extra bathymetry samples or expensive per-fragment exponential.
+  const referenceDepthColor = WATER_REFERENCE_PHASE1
+    ? mix(
+        mix(depthColor, color(0x2c9aa8), shallow.mul(0.24)),
+        color(0x073b67), deep.mul(0.12),
+      )
+    : depthColor;
 
   // Fluid Lab M7.4.8 clear-pool optical approach adapted to the ocean:
   // Beer-Lambert attenuation controls how much sand light survives a shallow
@@ -649,10 +667,14 @@ function installWaterProOptics(handle) {
         0, 0.60,
       )
     : clamp(
-        fresnel.mul(REFERENCE_GLASS_LOOK ? 0.38 : 0.32)
-          .add(microEnergy.mul(REFERENCE_GLASS_LOOK ? 0.055 : 0.050))
-          .add(geometricSlope.mul(REFERENCE_GLASS_LOOK ? 0.060 : 0.040)),
-        0, REFERENCE_GLASS_LOOK ? 0.44 : 0.39,
+        fresnel.mul(WATER_REFERENCE_PHASE1 ? 0.53 :
+            REFERENCE_GLASS_LOOK ? 0.38 : 0.32)
+          .add(microEnergy.mul(WATER_REFERENCE_PHASE1 ? 0.045 :
+            REFERENCE_GLASS_LOOK ? 0.055 : 0.050))
+          .add(geometricSlope.mul(WATER_REFERENCE_PHASE1 ? 0.055 :
+            REFERENCE_GLASS_LOOK ? 0.060 : 0.040)),
+        0, WATER_REFERENCE_PHASE1 ? 0.52 :
+          REFERENCE_GLASS_LOOK ? 0.44 : 0.39,
       );
   // The steep but clean *face* of the rolling FFT wave reads as a glossy
   // tilted mirror. Foam reverses that response. Schlick Fresnel still owns
@@ -709,7 +731,7 @@ function installWaterProOptics(handle) {
     : skyColor;
 
   material.colorNode = Fn(() => {
-    let body = mix(originalColor, depthColor, depthMix);
+    let body = mix(originalColor, referenceDepthColor, depthMix);
     // Reflected sky is strongest at grazing view angles. Its intensity
     // changes with the actual displaced FFT slope and the smaller wavelets.
     body = mix(body, movingSkyReflection, reflectionGain);
@@ -891,7 +913,8 @@ function installWaterProOptics(handle) {
   // Water faces are mirror-smooth; aerated foam is a diffuse, rough layer.
   // Preserve the pre-change roughness mix behind ?riftCrestReflect=off.
   const glossyRoughness = REFLECTIVE_CRESTS
-    ? mix(microRoughness, float(0.052), glossyFace.mul(0.75))
+    ? mix(microRoughness, float(WATER_REFERENCE_PHASE1 ? 0.065 : 0.052),
+        glossyFace.mul(0.75))
     : microRoughness;
   // The PBR BRDF itself can alias on a nearly-perfect mirror populated by
   // periodic micro-normals at aerial distances. Increase the footprint of
@@ -965,8 +988,10 @@ function installWaterProOptics(handle) {
           WaterTSL.normalView.y.sub(flatViewNormal.y))
       : distortionNormal;
     const bendStrength = WAVE_DISTORTION_2 && WAVE_LENS_LAYER
-      ? clamp(float(0.090).add(shallow.mul(0.060))
-          .add(microEnergy.mul(0.018)), 0.075, 0.168)
+      ? clamp(float(WATER_REFERENCE_PHASE1 ? 0.084 : 0.090)
+          .add(shallow.mul(WATER_REFERENCE_PHASE1 ? 0.055 : 0.060))
+          .add(microEnergy.mul(0.018)), 0.075,
+            WATER_REFERENCE_PHASE1 ? 0.155 : 0.168)
       : clamp(float(0.003)
           .add(shallow.mul(WAVE_LENS_LAYER ? 0.013 : REFERENCE_GLASS_LOOK ? 0.012 : 0.010))
           .add(microEnergy.mul(WAVE_LENS_LAYER ? 0.005 : REFERENCE_GLASS_LOOK ? 0.0035 : 0.003)),
@@ -1121,6 +1146,7 @@ function installWaterProOptics(handle) {
       noExtraSceneRender: true,
       referenceGlassLook: REFERENCE_GLASS_LOOK,
       physicalOpticsPhase1: PHYSICAL_OPTICS_PHASE1,
+      referencePhase1: WATER_REFERENCE_PHASE1,
       phase2WaveMotion: PHASE2_WAVE_MOTION,
       phase3UnderwaterTransport: PHASE3_UNDERWATER_TRANSPORT,
       waveLensLayer: WAVE_LENS_LAYER,

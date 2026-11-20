@@ -13,6 +13,9 @@ const ISLAND_MESH_HALF = 240;
 const FFT_WATER_HALF = 1000;
 const FLOOR_SNAP = 128;
 const WATER_SNAP = 256;
+// Structural abyss experiment: keep stable production sea untouched.
+const ABYSS_TRIAL = typeof location !== "undefined" &&
+  new URLSearchParams(location.search).get("riftAbyss") === "on";
 
 const smooth = t => {
   const x = THREE.MathUtils.clamp(t, 0, 1);
@@ -77,11 +80,19 @@ function createFarWaterMaterial() {
   const a = p.x.mul(0.0062).add(p.z.mul(0.0031));
   const b = p.z.mul(0.0091).sub(p.x.mul(0.0047));
   const c = p.x.mul(0.0036).sub(p.z.mul(0.0067));
-  const roll1 = sin(a.add(t.mul(0.28)))
+  // Warp phase by a second, incommensurate swell so distant ridges do
+  // not form the three evenly spaced sine-wave rows visible underwater.
+  // Vertex-only arithmetic; no textures, extra meshes or GPU dispatches.
+  const irregular = ABYSS_TRIAL
+    ? sin(c.mul(0.71).add(t.mul(0.083))).mul(0.78)
+        .add(sin(b.mul(0.43).sub(t.mul(0.117))).mul(0.39))
+    : float(0);
+  const roll1 = sin(a.add(t.mul(0.28)).add(irregular))
     .mul(mix(float(0.40), float(2.35), offshore));
-  const roll2 = sin(b.sub(t.mul(0.22)))
+  const roll2 = sin(b.sub(t.mul(0.22)).sub(irregular.mul(0.66)))
     .mul(mix(float(0.24), float(1.10), offshore));
-  const roll3 = sin(c.add(t.mul(0.14)).add(sin(b.mul(0.31)).mul(0.8)))
+  const roll3 = sin(c.add(t.mul(0.14)).add(sin(b.mul(0.31)).mul(0.8))
+    .add(irregular.mul(0.33)))
     .mul(mix(float(0.13), float(0.78), offshore));
   const swell = roll1.add(roll2).add(roll3);
   material.positionNode = p.add(vec3(float(0), swell, float(0)));
@@ -90,7 +101,8 @@ function createFarWaterMaterial() {
   // continental shelf as the seabed. Underwater camera depth further dims
   // the underside so the outer ocean no longer looks like a bright ceiling.
   const sea = mix(color(0x17668b), color(0x093b66), offshore);
-  const abyssal = mix(sea, color(0x031c38), abyss.mul(0.82));
+  const abyssal = mix(sea, color(ABYSS_TRIAL ? 0x021126 : 0x031c38),
+    abyss.mul(ABYSS_TRIAL ? 0.94 : 0.82));
   const deepUnder = smoothstep(float(2), float(38), cameraDepth);
   // Reuse the moving long-wave phases for an approximate analytic normal.
   // This gives the distance sea broad slanted, light-catching faces rather
@@ -166,16 +178,24 @@ export function createInfiniteOceanStream(scene, waterY, sampleHeight, options =
     if (fx !== lastFloorX || fz !== lastFloorZ) {
       const geom = buildGrid(
         fx, fz, FLOOR_SIZE, FLOOR_GRID,
-        (x, z) => sampleHeight(x, z) - 0.18,
-        (x, z) => Math.abs(x) < ISLAND_MESH_HALF &&
-          Math.abs(z) < ISLAND_MESH_HALF,
+        (x, z) => sampleHeight(x, z) - (ABYSS_TRIAL ? 0.65 : 0.18),
+        // The coarse 16m streaming-floor cells previously cut away
+        // everything whose *centre* landed within +/-240m, exposing a
+        // geometric square seam at the fine island mesh edge. Under the
+        // new profile overlap the edge by one cell instead (floor is
+        // slightly lower to keep the fine terrain foremost).
+        (x, z) => Math.abs(x) < (ABYSS_TRIAL ? ISLAND_MESH_HALF - 19 : ISLAND_MESH_HALF) &&
+          Math.abs(z) < (ABYSS_TRIAL ? ISLAND_MESH_HALF - 19 : ISLAND_MESH_HALF),
         (out, x, z, y) => {
           const depth = Math.max(0, waterY - y);
           // The seabed gently disappears into the abyss palette as
           // sunlight can no longer reach it. Colors are computed only when
           // a tile is regenerated, never per frame.
-          const blue = smooth((depth - 14) / 88);
-          out.set(0xc5c5b2).lerp(deepFloorColor, blue * 0.98);
+          const blue = ABYSS_TRIAL
+            ? smooth((depth - 5) / 48)
+            : smooth((depth - 14) / 88);
+          out.set(ABYSS_TRIAL ? 0x8fa89e : 0xc5c5b2)
+            .lerp(deepFloorColor, blue * (ABYSS_TRIAL ? 1 : 0.98));
         },
       );
       const previous = floorMesh.geometry;
@@ -205,7 +225,7 @@ export function createInfiniteOceanStream(scene, waterY, sampleHeight, options =
         floorVertices: floorMesh.geometry.attributes.position?.count ?? 0,
         waterVertices: farMesh.geometry.attributes.position?.count ?? 0,
         distance: Math.round(Math.hypot(playerPos.x, playerPos.z)),
-        mode: "streaming-two-meshes",
+        mode: ABYSS_TRIAL ? "abyss-streaming-overlap" : "streaming-two-meshes",
       };
     }
   };

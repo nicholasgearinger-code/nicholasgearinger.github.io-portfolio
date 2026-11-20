@@ -780,12 +780,25 @@ function biomeHeight(biome, worldX, worldZ, seed) {
     // original bathymetry behind ?riftShelf=original. This exact height
     // function serves the 480m island mesh, streaming seafloor, and
     // offshore collision so there is no physics/render disagreement.
-    const gradualShelf = typeof location !== "undefined" &&
-      new URLSearchParams(location.search).get("riftShelf") === "gradual";
+    const abyssTrial = typeof location !== "undefined" &&
+      new URLSearchParams(location.search).get("riftAbyss") === "on";
+    const gradualShelf = abyssTrial || (typeof location !== "undefined" &&
+      new URLSearchParams(location.search).get("riftShelf") === "gradual");
     const shelfT = ease(110, 240);
     const slopeT = ease(240, 620);
     const abyssT = ease(620, 1520);
-    const seabed = gradualShelf
+    const seabed = abyssTrial
+      ? LIQUID_LEVEL.crystal - 2.8
+          // Wide shoaling shelf then a real continental drop; begin the
+          // descent BEFORE the 240m island-mesh boundary rather than
+          // revealing a nearly horizontal sand slab at 250m offshore.
+          - ease(122, 290) * 23
+          - ease(240, 780) * 65
+          - ease(640, 1680) * 105
+          + Math.sin(worldX * 0.022 + seed) *
+            Math.cos(worldZ * 0.017 - seed) * 0.72
+          + Math.sin(angle * 5 + distance * 0.009) * 0.38
+      : gradualShelf
       ? LIQUID_LEVEL.crystal - 2.2
           - ease(125, 300) * 10.0
           - ease(300, 720) * 44
@@ -801,7 +814,7 @@ function biomeHeight(biome, worldX, worldZ, seed) {
     // A broad C1-continuous transition replaces the earlier 20m ramp,
     // not the actual coastline: the emergent beach remains untouched.
     const blend = Math.min(1, Math.max(0,
-      (distance - 102) / (gradualShelf ? 113 : 20)));
+      (distance - 102) / (abyssTrial ? 70 : gradualShelf ? 113 : 20)));
     const t = blend * blend * (3 - 2 * blend);
     const uInner = worldX / (TERRAIN_SIZE / 2);
     const vInner = worldZ / (TERRAIN_SIZE / 2);

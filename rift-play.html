@@ -692,6 +692,8 @@ button{font:inherit;cursor:pointer}
               <button type="button" class="rift-graphics-opt" data-rift-render-test="normal" style="flex:1 1 100%;min-height:32px">Normal rendering</button>
               <button type="button" class="rift-graphics-opt" data-rift-render-test="ocean" style="flex:1 1 100%;min-height:32px">Hide ocean surface</button>
               <button type="button" class="rift-graphics-opt" data-rift-render-test="post" style="flex:1 1 100%;min-height:32px">Bare post-processing</button>
+              <button type="button" class="rift-graphics-opt" data-rift-render-test="no-compute" style="flex:1 1 100%;min-height:32px">Freeze ocean GPU compute</button>
+              <button type="button" class="rift-graphics-opt" data-rift-render-test="empty-scene" style="flex:1 1 100%;min-height:32px">Empty 3D scene (diagnostic)</button>
             </div>
             <span style="font-size:9px;color:#9dc6cb;line-height:1.4">Temporary diagnostics, not permanent visual changes. Keep camera angle and Low setting the same for FPS comparison.</span>
           </div>
@@ -911,7 +913,9 @@ if (riftPerfButton) {
 const riftRenderTests = document.getElementById("rift-render-tests");
 if (riftRenderTests) {
   const flags = new URLSearchParams(location.search);
-  const mode = flags.get("riftHideOcean") === "1" ? "ocean" :
+  const mode = flags.get("riftPerfScene") === "empty" ? "empty-scene" :
+    flags.get("riftPerfCompute") === "off" ? "no-compute" :
+    flags.get("riftHideOcean") === "1" ? "ocean" :
     flags.get("riftBarePost") === "1" ? "post" : "normal";
   for (const button of riftRenderTests.querySelectorAll("[data-rift-render-test]")) {
     const selected = button.dataset.riftRenderTest === mode;
@@ -921,9 +925,13 @@ if (riftRenderTests) {
       const url = new URL(location.href);
       url.searchParams.delete("riftHideOcean");
       url.searchParams.delete("riftBarePost");
+      url.searchParams.delete("riftPerfScene");
+      url.searchParams.delete("riftPerfCompute");
       url.searchParams.set("riftPerf", "1");
       if (button.dataset.riftRenderTest === "ocean") url.searchParams.set("riftHideOcean", "1");
       if (button.dataset.riftRenderTest === "post") url.searchParams.set("riftBarePost", "1");
+      if (button.dataset.riftRenderTest === "no-compute") url.searchParams.set("riftPerfCompute", "off");
+      if (button.dataset.riftRenderTest === "empty-scene") url.searchParams.set("riftPerfScene", "empty");
       location.assign(url.href);
     });
   }

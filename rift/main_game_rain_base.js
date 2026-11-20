@@ -6762,7 +6762,9 @@ function animate() {
       } else if (diagnosticScene === "noinstances" ||
                  diagnosticScene === "instancesonly" ||
                  diagnosticScene === "noextras" ||
-                 diagnosticScene === "noterrainwater") {
+                 diagnosticScene === "noterrainwater" ||
+                 diagnosticScene === "noterrain" ||
+                 diagnosticScene === "nowater") {
         // Collect only drawable leaf objects, not Groups, to avoid hiding
         // an unrelated tree of children when a parent happens to be nested.
         // These tests keep gameplay, water compute and all timing intact.
@@ -6803,6 +6805,17 @@ function animate() {
                obj === liquidHandle?.backMesh ||
                obj.name === "rift-streaming-distant-ocean" ||
                obj.name === "rift-streaming-deep-seafloor"))
+            obj.visible = false;
+          // Terrain test includes the streaming seafloor extension. Ocean test
+          // includes both FFT surface and the streaming distant ocean surface.
+          // Neither mode disables physics, FFT, interaction, or other scenery.
+          if (diagnosticScene === "noterrain" &&
+              (obj === terrainMesh ||
+               obj.name === "rift-streaming-deep-seafloor"))
+            obj.visible = false;
+          if (diagnosticScene === "nowater" &&
+              (obj === liquidHandle?.mesh || obj === liquidHandle?.backMesh ||
+               obj.name === "rift-streaming-distant-ocean"))
             obj.visible = false;
         }
         globalThis.__riftRenderIsolation = diagnosticScene;

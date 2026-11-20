@@ -480,6 +480,10 @@ function finalizeInstancedMeshes(meshes) {
   for (const mesh of meshes) {
     mesh.instanceMatrix.needsUpdate = true;
     mesh.computeBoundingSphere();
+    // Conservative wind-sway margin. Keeps moving tree foliage inside the
+    // static instanced batch bounds between animation frames.
+    if (RIFT_MOBILE_GPU && mesh.boundingSphere)
+      mesh.boundingSphere.radius += 2;
   }
 }
 
@@ -509,8 +513,11 @@ function finalizeInstancedMeshes(meshes) {
 // Pure CPU index clustering retains authored UVs, normals and materials.
 // Non-triangle and morph/skinned meshes safely retain the original.
 const riftLODGeometryCache = new WeakMap();
-const RIFT_MESH_LOD_ENABLED = typeof location === "undefined" ||
-  new URLSearchParams(location.search).get("riftMeshLOD") !== "off";
+// The duplicated full + simplified mesh buffers caused a memory/draw-setup
+// regression on mobile. Preserve the previously proven 48m chunked instancing
+// by default and allow an explicit A/B comparison with ?riftMeshLOD=on.
+const RIFT_MESH_LOD_ENABLED = typeof location !== "undefined" &&
+  new URLSearchParams(location.search).get("riftMeshLOD") === "on";
 function makeRiftMidGeometry(original) {
   if (!RIFT_MOBILE_GPU || !RIFT_MESH_LOD_ENABLED ||
       !original?.isBufferGeometry) return original;
@@ -876,7 +883,14 @@ function updateTreeInstanceSway(treeInstanceHandle, elapsedTime, wind) {
     setInstanceMatrixAt(activeMeshes, activeParts, inst.indexInSpecies, inst.position, _instTempQuat, _instTempScale);
     touchedMeshSets.add(activeMeshes);
   }
-  for (const meshes of touchedMeshSets) finalizeInstancedMeshes(meshes);
+  // Sway is a bounded rotation, not a move to a new chunk. The instance
+  // bounding sphere was calculated during chunk construction, so repeating
+  // computeBoundingSphere() after every 12Hz sway update costs CPU without
+  // changing culling materially. Keep a small radius margin on construction
+  // to cover the tilt of palm fronds.
+  for (const meshes of touchedMeshSets) {
+    for (const mesh of meshes) mesh.instanceMatrix.needsUpdate = true;
+  }
 }
 
 let spongeGLTF = null;

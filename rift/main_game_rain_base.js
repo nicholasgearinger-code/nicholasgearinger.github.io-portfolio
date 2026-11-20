@@ -6737,6 +6737,15 @@ function animate() {
     // actually re-triggered on every storm/surfacing cycle, which is the
     // most likely place a "works the first time, not after" bug could
     // live.
+    // Diagnostic GPU render isolation: preserve the WebGPU pipeline, loop,
+    // physics and ocean compute, but remove all scene-object draw calls. It
+    // deliberately shows a blank view and is only activated by a URL flag.
+    // Normal navigation/reload restores the unmodified scene.
+    if (typeof location !== "undefined" &&
+        new URLSearchParams(location.search).get("riftPerfScene") === "empty") {
+      for (const child of scene.children) child.visible = false;
+      globalThis.__riftRenderIsolation = "empty-scene";
+    }
     postProcessing.render();
   }
 }

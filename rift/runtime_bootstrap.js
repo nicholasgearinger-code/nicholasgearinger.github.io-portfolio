@@ -476,12 +476,13 @@ function monitorPerformance(now) {
       };
       globalThis.__riftLowPerf = snapshot;
       if (perfProbeOverlay) perfProbeOverlay.textContent =
-        "Rift Low profiler (CPU submission)\n" +
-        snapshot.fps + " FPS · " + snapshot.frameMs + "ms/frame\n" +
-        "Compute: " + snapshot.computeCallsPerSec + "/s · " +
-          snapshot.computeSubmitMsPerSec + "ms CPU/s\n" +
-        "Render: " + snapshot.renderCallsPerSec + "/s · " +
-          snapshot.renderSubmitMsPerSec + "ms CPU/s";
+        "Rift profiler · CPU submission only\n" +
+        snapshot.fps + " FPS · " + snapshot.frameMs + " ms/frame (total)\n" +
+        "Compute: " + snapshot.computeCallsPerSec + " calls/s · " +
+          snapshot.computeSubmitMsPerSec + " ms CPU PER SECOND\n" +
+        "Render: " + snapshot.renderCallsPerSec + " calls/s · " +
+          snapshot.renderSubmitMsPerSec + " ms CPU PER SECOND\n" +
+        "GPU shader/compute execution: not measured";
       perfProbe.computeCalls = perfProbe.renderCalls = 0;
       perfProbe.computeSubmitMs = perfProbe.renderSubmitMs = 0;
     }

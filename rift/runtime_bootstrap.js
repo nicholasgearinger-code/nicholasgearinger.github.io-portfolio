@@ -488,6 +488,7 @@ function monitorPerformance(now) {
         shallowGrid: globalThis.__riftShallowGrid?.grid ?? null,
         gameUpdateCpuMs: Math.round((globalThis.__riftGameCPUWorkMs ?? 0) * 10) / 10,
         drawableCounts: globalThis.__riftGeometryPerfCounts || null,
+        terrainGrid: globalThis.__riftTerrainGrid || null,
         note: "CPU submission only. Does not measure GPU kernel execution.",
       };
       globalThis.__riftLowPerf = snapshot;
@@ -516,7 +517,9 @@ function monitorPerformance(now) {
         "GPU shader/compute execution: not measured\n" +
         "FFT: " + (snapshot.computePhases.fft?.callsPerSec || 0) + "/s · shallow: " +
         (snapshot.computePhases.shallow?.callsPerSec || 0) + "/s" +
-        (snapshot.shallowGrid ? " · grid: " + snapshot.shallowGrid + "²" : "") +
+        (snapshot.shallowGrid ? " · shallow: " + snapshot.shallowGrid + "²" : "") +
+        (snapshot.terrainGrid ? "\nTerrain: " + snapshot.terrainGrid.segments +
+          "² · " + snapshot.terrainGrid.triangles + " triangles" : "") +
         (snapshot.drawableCounts
           ? "\nMeshes: " + snapshot.drawableCounts.instanced + " instanced · " +
             snapshot.drawableCounts.regular + " other" +

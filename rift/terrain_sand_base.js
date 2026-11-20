@@ -773,14 +773,35 @@ function biomeHeight(biome, worldX, worldZ, seed) {
       const v = THREE.MathUtils.clamp((distance - start) / (end - start), 0, 1);
       return v * v * (3 - 2 * v);
     };
+    // Gradual continental shelf A/B: earlier profile blended the reef
+    // into a 9.5m-deep bottom over only 20m (radius 102..122), making
+    // a visual "water box" wall at the turquoise-to-blue boundary.
+    // Keep the beach/reef inside radius 102 unchanged, and preserve the
+    // original bathymetry behind ?riftShelf=original. This exact height
+    // function serves the 480m island mesh, streaming seafloor, and
+    // offshore collision so there is no physics/render disagreement.
+    const gradualShelf = typeof location !== "undefined" &&
+      new URLSearchParams(location.search).get("riftShelf") === "gradual";
     const shelfT = ease(110, 240);
     const slopeT = ease(240, 620);
     const abyssT = ease(620, 1520);
-    const seabed = LIQUID_LEVEL.crystal - 9.5
-      - shelfT * 10.5 - slopeT * 35 - abyssT * 72
-      + Math.sin(worldX * 0.032 + seed) * Math.cos(worldZ * 0.027 - seed) * 0.58
-      + Math.sin(angle * 7 + distance * 0.017) * 0.38;
-    const blend = Math.min(1, Math.max(0, (distance - 102) / 20));
+    const seabed = gradualShelf
+      ? LIQUID_LEVEL.crystal - 2.2
+          - ease(125, 300) * 10.0
+          - ease(300, 720) * 44
+          - ease(720, 1600) * 72
+          + Math.sin(worldX * 0.032 + seed) *
+            Math.cos(worldZ * 0.027 - seed) * 0.42
+          + Math.sin(angle * 7 + distance * 0.017) * 0.22
+      : LIQUID_LEVEL.crystal - 9.5
+          - shelfT * 10.5 - slopeT * 35 - abyssT * 72
+          + Math.sin(worldX * 0.032 + seed) *
+            Math.cos(worldZ * 0.027 - seed) * 0.58
+          + Math.sin(angle * 7 + distance * 0.017) * 0.38;
+    // A broad C1-continuous transition replaces the earlier 20m ramp,
+    // not the actual coastline: the emergent beach remains untouched.
+    const blend = Math.min(1, Math.max(0,
+      (distance - 102) / (gradualShelf ? 113 : 20)));
     const t = blend * blend * (3 - 2 * blend);
     const uInner = worldX / (TERRAIN_SIZE / 2);
     const vInner = worldZ / (TERRAIN_SIZE / 2);

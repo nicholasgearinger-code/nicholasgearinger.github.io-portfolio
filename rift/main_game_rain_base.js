@@ -5661,9 +5661,17 @@ function updateFireAudio() {
 // ---------------------------------------------------------------------------
 const clock = new THREE.Clock();
 let elapsedTime = 0;
+// One fixed, unlit material allows a temporary GPU diagnostic that preserves
+// all scene geometry while bypassing costly per-object lighting/shader nodes.
+// Never used during normal play; no materials are replaced or disposed.
+const riftFlatPerfMaterial = new THREE.MeshBasicMaterial({
+  color: 0x75c8c5, fog: false, side: THREE.DoubleSide,
+});
+let riftFrameCpuStart = 0;
 const FALL_RESPAWN_OFFSET = 80; // generous — the world-bounds clamp above should make this a rare last-resort safety net, not the primary way players learn there's an edge
 
 function animate() {
+  riftFrameCpuStart = performance.now();
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.1);
   elapsedTime += dt;
@@ -6741,10 +6749,24 @@ function animate() {
     // physics and ocean compute, but remove all scene-object draw calls. It
     // deliberately shows a blank view and is only activated by a URL flag.
     // Normal navigation/reload restores the unmodified scene.
+    if (typeof location !== "undefined") {
+      const diagnosticScene = new URLSearchParams(location.search).get("riftPerfScene");
+      if (diagnosticScene === "empty") {
+        for (const child of scene.children) child.visible = false;
+        globalThis.__riftRenderIsolation = "empty-scene";
+      } else if (diagnosticScene === "flat") {
+        // Keep all drawables and their original geometry while using an
+        // inexpensive unlit shader. Restore by reloading without the flag.
+        scene.overrideMaterial = riftFlatPerfMaterial;
+        globalThis.__riftRenderIsolation = "flat-shader";
+      }
+    }
     if (typeof location !== "undefined" &&
-        new URLSearchParams(location.search).get("riftPerfScene") === "empty") {
-      for (const child of scene.children) child.visible = false;
-      globalThis.__riftRenderIsolation = "empty-scene";
+        new URLSearchParams(location.search).get("riftPerf") === "1") {
+      const cpuMs = performance.now() - riftFrameCpuStart;
+      const existing = globalThis.__riftGameCPUWorkMs;
+      globalThis.__riftGameCPUWorkMs = Number.isFinite(existing)
+        ? existing * 0.88 + cpuMs * 0.12 : cpuMs;
     }
     postProcessing.render();
   }

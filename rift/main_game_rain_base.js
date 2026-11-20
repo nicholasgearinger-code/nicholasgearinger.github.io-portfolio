@@ -6760,28 +6760,49 @@ function animate() {
         scene.overrideMaterial = riftFlatPerfMaterial;
         globalThis.__riftRenderIsolation = "flat-shader-unverified";
       } else if (diagnosticScene === "noinstances" ||
-                 diagnosticScene === "instancesonly") {
+                 diagnosticScene === "instancesonly" ||
+                 diagnosticScene === "noextras" ||
+                 diagnosticScene === "noterrainwater") {
         // Collect only drawable leaf objects, not Groups, to avoid hiding
         // an unrelated tree of children when a parent happens to be nested.
         // These tests keep gameplay, water compute and all timing intact.
         if (!globalThis.__riftGeometryPerfObjects ||
             performance.now() - (globalThis.__riftGeometryPerfScanTime || 0) > 2500) {
           const drawables = [];
-          let instanced = 0, regular = 0;
+          let instanced = 0, regular = 0, world = 0, extras = 0;
           scene.traverse((obj) => {
             if (!obj.isMesh && !obj.isPoints && !obj.isLine && !obj.isSprite) return;
             drawables.push(obj);
             if (obj.isInstancedMesh) instanced++;
-            else regular++;
+            else {
+              regular++;
+              if (obj === terrainMesh || obj === liquidHandle?.mesh ||
+                  obj === liquidHandle?.backMesh ||
+                  obj.name === "rift-streaming-distant-ocean" ||
+                  obj.name === "rift-streaming-deep-seafloor") world++;
+              else extras++;
+            }
           });
           globalThis.__riftGeometryPerfObjects = drawables;
           globalThis.__riftGeometryPerfScanTime = performance.now();
-          globalThis.__riftGeometryPerfCounts = { instanced, regular, total: drawables.length };
+          globalThis.__riftGeometryPerfCounts = { instanced, regular, world, extras, total: drawables.length };
         }
         for (const obj of globalThis.__riftGeometryPerfObjects) {
           if (diagnosticScene === "noinstances" && obj.isInstancedMesh)
             obj.visible = false;
           if (diagnosticScene === "instancesonly" && !obj.isInstancedMesh)
+            obj.visible = false;
+          if (diagnosticScene === "noextras" && !obj.isInstancedMesh &&
+              obj !== terrainMesh && obj !== liquidHandle?.mesh &&
+              obj !== liquidHandle?.backMesh &&
+              obj.name !== "rift-streaming-distant-ocean" &&
+              obj.name !== "rift-streaming-deep-seafloor")
+            obj.visible = false;
+          if (diagnosticScene === "noterrainwater" &&
+              (obj === terrainMesh || obj === liquidHandle?.mesh ||
+               obj === liquidHandle?.backMesh ||
+               obj.name === "rift-streaming-distant-ocean" ||
+               obj.name === "rift-streaming-deep-seafloor"))
             obj.visible = false;
         }
         globalThis.__riftRenderIsolation = diagnosticScene;

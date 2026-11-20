@@ -1047,7 +1047,34 @@ function buildPlanetTerrain(level, seedStr) {
   const segments = getGraphicsSettings().terrainSegments || TERRAIN_SEGMENTS_DEFAULT; // reverted the earlier ×1.4 workaround — terrainSegments itself is now increased directly in graphicsSettings.js, which wasn't available to edit in the round that added the workaround
   const crystalExtended = level.biome === "crystal";
   const terrainExtent = crystalExtended ? 480 : TERRAIN_SIZE;
-  const terrainSegments = crystalExtended ? Math.max(segments, 160) : segments;
+  // Coral Shallows previously forced a 160x160 mesh even when Low
+  // explicitly requested only 40 subdivisions. On iPhone Low this
+  // spends 51,200 triangles on a single continuous land/seafloor mesh.
+  // A 96x96 grid preserves the existing height function and sand vertex
+  // colors while reducing island triangle work by 64%. Leave Medium,
+  // High and desktop unchanged. Use ?riftTerrainGrid=160 or =64 for
+  // device A/B profiling without changing the persisted graphics tier.
+  let terrainSegments = crystalExtended ? Math.max(segments, 160) : segments;
+  const perfGridParam = typeof location === "undefined" ? null :
+    new URLSearchParams(location.search).get("riftTerrainGrid");
+  const isIOS = typeof navigator !== "undefined" && (
+    /iPhone|iPad|iPod/i.test(navigator.userAgent || "") ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  );
+  const mobileLowTerrain = crystalExtended && isIOS && segments <= 40;
+  if (mobileLowTerrain) terrainSegments = 96;
+  if (crystalExtended && perfGridParam !== null &&
+      ["64", "80", "96", "112", "160"].includes(perfGridParam)) {
+    terrainSegments = Number(perfGridParam);
+  }
+  if (crystalExtended && typeof globalThis !== "undefined") {
+    globalThis.__riftTerrainGrid = {
+      segments: terrainSegments,
+      triangles: 2 * terrainSegments * terrainSegments,
+      forcedOriginalMinimum: 160,
+      mode: perfGridParam || (mobileLowTerrain ? "ios-low" : "standard"),
+    };
+  }
   const geo = new THREE.PlaneGeometry(terrainExtent, terrainExtent, terrainSegments, terrainSegments);
   geo.rotateX(-Math.PI / 2); // lie flat in the XZ plane, +Y up
 

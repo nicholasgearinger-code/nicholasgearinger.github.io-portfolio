@@ -574,6 +574,7 @@ function monitorPerformance(now) {
         oceanStream: globalThis.__riftOceanStream || null,
         swim: globalThis.__riftSwimProbe || null,
         surfMode: globalThis.__riftSurf3DMode || "not initialized",
+        playable: globalThis.__riftPlayableState || null,
         note: "CPU submission only. Does not measure GPU kernel execution.",
       };
       snapshot.elapsedSec = Math.round((performance.now() - perfSessionStartedAt) / 100) / 10;
@@ -605,6 +606,11 @@ function monitorPerformance(now) {
           "\nGame update CPU: " + snapshot.gameUpdateCpuMs + " ms/frame\n" +
           "CPU submission only\n" +
         snapshot.fps + " FPS · " + snapshot.frameMs + " ms/frame (total)\n" +
+        "GAME: " + (snapshot.playable
+          ? (snapshot.playable.active ? "PLAYING" : "MENU / NOT ACTIVE") +
+            " · " + snapshot.playable.level +
+            " · terrain " + snapshot.playable.terrainDraw
+          : (globalThis.__riftModuleLoaded ? "LOADED / WAITING FOR LEVEL" : "GAME MODULE NOT READY")) + "\n" +
         "Surf visuals: " + snapshot.surfMode + "\n" +
         (snapshot.swim ? "Swim: " + (snapshot.swim.swimming ? "YES" : "no") +
           " · submerged: " + (snapshot.swim.submerged ? "YES" : "no") +

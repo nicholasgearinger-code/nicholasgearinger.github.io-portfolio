@@ -486,16 +486,19 @@ function monitorPerformance(now) {
           }]
         )),
         shallowGrid: globalThis.__riftShallowGrid?.grid ?? null,
+        gameUpdateCpuMs: Math.round((globalThis.__riftGameCPUWorkMs ?? 0) * 10) / 10,
         note: "CPU submission only. Does not measure GPU kernel execution.",
       };
       globalThis.__riftLowPerf = snapshot;
       if (perfProbeOverlay) perfProbeOverlay.textContent =
         "Rift profiler · " +
           (new URLSearchParams(location.search).get("riftPerfScene") === "empty" ? "EMPTY SCENE" :
+           new URLSearchParams(location.search).get("riftPerfScene") === "flat" ? "FLAT SHADERS" :
            new URLSearchParams(location.search).get("riftPerfCompute") === "off" ? "NO OCEAN COMPUTE" :
            new URLSearchParams(location.search).get("riftHideOcean") === "1" ? "OCEAN HIDDEN" :
            new URLSearchParams(location.search).get("riftBarePost") === "1" ? "BARE POST" : "NORMAL") +
-          "\nCPU submission only\n" +
+          "\nGame update CPU: " + snapshot.gameUpdateCpuMs + " ms/frame\n" +
+          "CPU submission only\n" +
         snapshot.fps + " FPS · " + snapshot.frameMs + " ms/frame (total)\n" +
         "Compute: " + snapshot.computeCallsPerSec + " calls/s · " +
           snapshot.computeSubmitMsPerSec + " ms CPU PER SECOND\n" +

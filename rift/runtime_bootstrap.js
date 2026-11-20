@@ -497,6 +497,8 @@ function monitorPerformance(now) {
            new URLSearchParams(location.search).get("riftPerfScene") === "flat" ? "FLAT SHADERS" :
            new URLSearchParams(location.search).get("riftPerfScene") === "noinstances" ? "NO INSTANCES" :
            new URLSearchParams(location.search).get("riftPerfScene") === "instancesonly" ? "INSTANCES ONLY" :
+           new URLSearchParams(location.search).get("riftPerfScene") === "noextras" ? "NO EXTRAS" :
+           new URLSearchParams(location.search).get("riftPerfScene") === "noterrainwater" ? "NO TERRAIN/WATER" :
            new URLSearchParams(location.search).get("riftPerfCompute") === "off" ? "NO OCEAN COMPUTE" :
            new URLSearchParams(location.search).get("riftHideOcean") === "1" ? "OCEAN HIDDEN" :
            new URLSearchParams(location.search).get("riftBarePost") === "1" ? "BARE POST" : "NORMAL") +
@@ -513,7 +515,9 @@ function monitorPerformance(now) {
         (snapshot.shallowGrid ? " · grid: " + snapshot.shallowGrid + "²" : "") +
         (snapshot.drawableCounts
           ? "\nMeshes: " + snapshot.drawableCounts.instanced + " instanced · " +
-            snapshot.drawableCounts.regular + " other"
+            snapshot.drawableCounts.regular + " other" +
+            "\nOther meshes: " + (snapshot.drawableCounts.world || 0) +
+            " terrain/water · " + (snapshot.drawableCounts.extras || 0) + " extras"
           : "");
       perfProbe.computePhases = Object.create(null);
       perfProbe.computeCalls = perfProbe.renderCalls = 0;

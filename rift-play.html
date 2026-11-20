@@ -687,6 +687,13 @@ button{font:inherit;cursor:pointer}
             <button type="button" id="rift-perf-toggle" class="rift-graphics-opt"
               style="flex:none;min-height:34px;padding:8px 10px;text-align:center"
               aria-label="Toggle detailed rendering performance profiler">Profiler: OFF</button>
+            <span class="rift-mono" style="font-size:10px;color:#9ddcd8;margin-top:5px">GPU bottleneck tests (reloads)</span>
+            <div id="rift-render-tests" style="display:flex;flex-wrap:wrap;gap:5px">
+              <button type="button" class="rift-graphics-opt" data-rift-render-test="normal" style="flex:1 1 100%;min-height:32px">Normal rendering</button>
+              <button type="button" class="rift-graphics-opt" data-rift-render-test="ocean" style="flex:1 1 100%;min-height:32px">Hide ocean surface</button>
+              <button type="button" class="rift-graphics-opt" data-rift-render-test="post" style="flex:1 1 100%;min-height:32px">Bare post-processing</button>
+            </div>
+            <span style="font-size:9px;color:#9dc6cb;line-height:1.4">Temporary diagnostics, not permanent visual changes. Keep camera angle and Low setting the same for FPS comparison.</span>
           </div>
 
           <button type="button" id="rift-ocean-tune-btn" class="rift-mono" aria-expanded="false" style="position:absolute;right:12px;top:106px;z-index:45;min-height:38px;padding:7px 11px;background:#07313c;border:1px solid #5ee5db;border-radius:9px;color:#efffff;font-size:12px;touch-action:manipulation">🌊 OCEAN TUNING</button>
@@ -895,6 +902,31 @@ if (riftPerfButton) {
     else url.searchParams.set("riftPerf", "1");
     location.assign(url.href);
   });
+}
+
+// Diagnose the GPU-side rendering budget by changing one dimension at a time.
+// Buttons preserve profiler flag and existing quality tier; the "normal"
+// button restores the baseline. Hiding the ocean keeps its compute active,
+// whereas bare post removes screen optical composition only.
+const riftRenderTests = document.getElementById("rift-render-tests");
+if (riftRenderTests) {
+  const flags = new URLSearchParams(location.search);
+  const mode = flags.get("riftHideOcean") === "1" ? "ocean" :
+    flags.get("riftBarePost") === "1" ? "post" : "normal";
+  for (const button of riftRenderTests.querySelectorAll("[data-rift-render-test]")) {
+    const selected = button.dataset.riftRenderTest === mode;
+    button.classList.toggle("active", selected);
+    button.setAttribute("aria-pressed", String(selected));
+    button.addEventListener("click", () => {
+      const url = new URL(location.href);
+      url.searchParams.delete("riftHideOcean");
+      url.searchParams.delete("riftBarePost");
+      url.searchParams.set("riftPerf", "1");
+      if (button.dataset.riftRenderTest === "ocean") url.searchParams.set("riftHideOcean", "1");
+      if (button.dataset.riftRenderTest === "post") url.searchParams.set("riftBarePost", "1");
+      location.assign(url.href);
+    });
+  }
 }
 
 const fullButton=document.getElementById("rift-fullscreen-btn");

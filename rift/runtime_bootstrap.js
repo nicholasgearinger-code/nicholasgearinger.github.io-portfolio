@@ -43,6 +43,7 @@ const PERF_PROBE = typeof location !== "undefined" &&
 const perfProbe = {
   renderCalls: 0, computeCalls: 0,
   renderSubmitMs: 0, computeSubmitMs: 0,
+  computePhases: Object.create(null),
 };
 let perfProbeOverlay = null;
 if (PERF_PROBE && typeof document !== "undefined") {
@@ -366,8 +367,14 @@ if (proto && !proto.__riftBootstrapPatched) {
       const started = performance.now();
       try { return original.apply(this, args); }
       finally {
+        const duration = performance.now() - started;
         perfProbe.computeCalls++;
-        perfProbe.computeSubmitMs += performance.now() - started;
+        perfProbe.computeSubmitMs += duration;
+        const phase = globalThis.__riftComputePhase || "other";
+        const entry = perfProbe.computePhases[phase] ||
+          (perfProbe.computePhases[phase] = { calls: 0, cpuMs: 0 });
+        entry.calls++;
+        entry.cpuMs += duration;
       }
     };
   }
@@ -472,6 +479,13 @@ function monitorPerformance(now) {
         renderCallsPerSec: Math.round(perfProbe.renderCalls / seconds),
         computeSubmitMsPerSec: Math.round(perfProbe.computeSubmitMs / seconds * 10) / 10,
         renderSubmitMsPerSec: Math.round(perfProbe.renderSubmitMs / seconds * 10) / 10,
+        computePhases: Object.fromEntries(Object.entries(perfProbe.computePhases).map(
+          ([phase, value]) => [phase, {
+            callsPerSec: Math.round(value.calls / seconds),
+            cpuMsPerSec: Math.round(value.cpuMs / seconds * 10) / 10,
+          }]
+        )),
+        shallowGrid: globalThis.__riftShallowGrid?.grid ?? null,
         note: "CPU submission only. Does not measure GPU kernel execution.",
       };
       globalThis.__riftLowPerf = snapshot;
@@ -482,7 +496,11 @@ function monitorPerformance(now) {
           snapshot.computeSubmitMsPerSec + " ms CPU PER SECOND\n" +
         "Render: " + snapshot.renderCallsPerSec + " calls/s · " +
           snapshot.renderSubmitMsPerSec + " ms CPU PER SECOND\n" +
-        "GPU shader/compute execution: not measured";
+        "GPU shader/compute execution: not measured\n" +
+        "FFT: " + (snapshot.computePhases.fft?.callsPerSec || 0) + "/s · shallow: " +
+        (snapshot.computePhases.shallow?.callsPerSec || 0) + "/s" +
+        (snapshot.shallowGrid ? " · grid: " + snapshot.shallowGrid + "²" : "");
+      perfProbe.computePhases = Object.create(null);
       perfProbe.computeCalls = perfProbe.renderCalls = 0;
       perfProbe.computeSubmitMs = perfProbe.renderSubmitMs = 0;
     }

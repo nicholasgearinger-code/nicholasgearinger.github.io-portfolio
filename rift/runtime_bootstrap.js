@@ -490,7 +490,12 @@ function monitorPerformance(now) {
       };
       globalThis.__riftLowPerf = snapshot;
       if (perfProbeOverlay) perfProbeOverlay.textContent =
-        "Rift profiler · CPU submission only\n" +
+        "Rift profiler · " +
+          (new URLSearchParams(location.search).get("riftPerfScene") === "empty" ? "EMPTY SCENE" :
+           new URLSearchParams(location.search).get("riftPerfCompute") === "off" ? "NO OCEAN COMPUTE" :
+           new URLSearchParams(location.search).get("riftHideOcean") === "1" ? "OCEAN HIDDEN" :
+           new URLSearchParams(location.search).get("riftBarePost") === "1" ? "BARE POST" : "NORMAL") +
+          "\nCPU submission only\n" +
         snapshot.fps + " FPS · " + snapshot.frameMs + " ms/frame (total)\n" +
         "Compute: " + snapshot.computeCallsPerSec + " calls/s · " +
           snapshot.computeSubmitMsPerSec + " ms CPU PER SECOND\n" +

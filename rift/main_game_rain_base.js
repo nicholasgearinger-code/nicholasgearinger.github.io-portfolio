@@ -6941,6 +6941,14 @@ function animate() {
     }
     if (typeof location !== "undefined" &&
         new URLSearchParams(location.search).get("riftPerf") === "1") {
+      globalThis.__riftPlayableState = {
+        active: Boolean(isGameActive() && currentLevelIdx >= 0),
+        level: currentLevelIdx >= 0 ? LEVELS[currentLevelIdx]?.biome : "none",
+        terrainDraw: terrainMesh ? (riftTerrainRenderChunks
+          ? "chunked-" + riftTerrainRenderChunks.chunkMeshes.length
+          : (terrainMesh.visible ? "original-visible" : "original-hidden")) : "none",
+        sceneChildren: scene.children.length,
+      };
       const cpuMs = performance.now() - riftFrameCpuStart;
       const existing = globalThis.__riftGameCPUWorkMs;
       globalThis.__riftGameCPUWorkMs = Number.isFinite(existing)

@@ -6248,6 +6248,15 @@ function animate() {
   // there).
   setUnderwaterAmbience(isFullySubmerged);
   setSwimSoundsActive(playerSwimmingThisFrame && !isFullySubmerged);
+  if (new URLSearchParams(location.search).get("riftPerf") === "1") {
+    globalThis.__riftSwimProbe = {
+      swimming: Boolean(playerSwimmingThisFrame),
+      submerged: Boolean(isFullySubmerged),
+      depth: Math.round(Math.max(0, cameraWaterDepth) * 10) / 10,
+      waterlineBlend: Math.round((cameraWaterMix.value || 0) * 100) / 100,
+      swimmerImpactsDisabled: new URLSearchParams(location.search).get("riftSwimPerf") === "noimpact",
+    };
+  }
   // Per explicit "remove underwater lighting and fog" — same toggle
   // pattern as UNDERWATER_EFFECTS_ENABLED below (single flag, not a
   // deletion, for a clean revert). This one specifically gates the

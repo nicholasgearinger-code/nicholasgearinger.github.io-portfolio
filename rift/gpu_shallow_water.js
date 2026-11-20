@@ -15,7 +15,23 @@ import {
 // than being rendered as a disconnected decal.
 // -----------------------------------------------------------------------------
 
-export const SHALLOW_N = 256;
+// This is the simulation state grid, NOT the visible water mesh or screen
+// render resolution. On iOS Low, a 192² solver reduces per-dispatch cell
+// processing from 65,536 to 36,864 (-43.75%). All sampling uses handle.N.
+// ?riftShallowGrid=256 is a like-for-like A/B control; higher tiers retain 256.
+const isIOSShallow = typeof navigator !== "undefined" &&
+  (/iPhone|iPad|iPod/i.test(navigator.userAgent || "") ||
+  (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
+const riftShallowGridChoice = typeof location !== "undefined"
+  ? new URLSearchParams(location.search).get("riftShallowGrid") : null;
+let riftLowShallow = false;
+if (isIOSShallow) {
+  try { riftLowShallow = (localStorage.getItem("riftGraphicsSettings") || "low") === "low"; }
+  catch (_) { riftLowShallow = false; }
+}
+export const SHALLOW_N = riftShallowGridChoice === "256" ? 256 :
+  riftShallowGridChoice === "192" ? 192 :
+  isIOSShallow && riftLowShallow ? 192 : 256;
 export const SHALLOW_DOMAIN = 360;
 const GRAVITY = 9.81;
 const FFT_SOURCE_N = 128;
@@ -56,6 +72,11 @@ export function createGPUShallowWater(sampleHeight, waterY, fftSpatialA, fftDoma
 
   const N = SHALLOW_N;
   const count = N * N;
+  globalThis.__riftShallowGrid = {
+    grid: N, cells: count, defaultGrid: 256,
+    estimatedCellReduction: Math.round((1 - count / (256 * 256)) * 1000) / 10,
+    mode: riftShallowGridChoice || (isIOSShallow && riftLowShallow ? "mobile-low" : "full"),
+  };
   const cellSize = domain / (N - 1);
   const bathymetryData = buildBathymetry(sampleHeight, waterY, domain, N);
   const zeroState = new Float32Array(count * 4);

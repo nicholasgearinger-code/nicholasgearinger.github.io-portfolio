@@ -6764,7 +6764,9 @@ function animate() {
                  diagnosticScene === "noextras" ||
                  diagnosticScene === "noterrainwater" ||
                  diagnosticScene === "noterrain" ||
-                 diagnosticScene === "nowater") {
+                 diagnosticScene === "nowater" ||
+                 diagnosticScene === "noisland" ||
+                 diagnosticScene === "nooffshorefloor") {
         // Collect only drawable leaf objects, not Groups, to avoid hiding
         // an unrelated tree of children when a parent happens to be nested.
         // These tests keep gameplay, water compute and all timing intact.
@@ -6812,6 +6814,11 @@ function animate() {
           if (diagnosticScene === "noterrain" &&
               (obj === terrainMesh ||
                obj.name === "rift-streaming-deep-seafloor"))
+            obj.visible = false;
+          if (diagnosticScene === "noisland" && obj === terrainMesh)
+            obj.visible = false;
+          if (diagnosticScene === "nooffshorefloor" &&
+              obj.name === "rift-streaming-deep-seafloor")
             obj.visible = false;
           if (diagnosticScene === "nowater" &&
               (obj === liquidHandle?.mesh || obj === liquidHandle?.backMesh ||

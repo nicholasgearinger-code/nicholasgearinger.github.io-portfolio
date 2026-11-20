@@ -572,6 +572,7 @@ function monitorPerformance(now) {
           fixed: new URLSearchParams(location.search).get("riftPerfFixedScale") === "1",
         },
         oceanStream: globalThis.__riftOceanStream || null,
+        swim: globalThis.__riftSwimProbe || null,
         note: "CPU submission only. Does not measure GPU kernel execution.",
       };
       snapshot.elapsedSec = Math.round((performance.now() - perfSessionStartedAt) / 100) / 10;
@@ -603,6 +604,11 @@ function monitorPerformance(now) {
           "\nGame update CPU: " + snapshot.gameUpdateCpuMs + " ms/frame\n" +
           "CPU submission only\n" +
         snapshot.fps + " FPS · " + snapshot.frameMs + " ms/frame (total)\n" +
+        (snapshot.swim ? "Swim: " + (snapshot.swim.swimming ? "YES" : "no") +
+          " · submerged: " + (snapshot.swim.submerged ? "YES" : "no") +
+          " · depth " + snapshot.swim.depth +
+          " · waterline " + snapshot.swim.waterlineBlend +
+          (snapshot.swim.swimmerImpactsDisabled ? " · NO IMPACTS" : "") + "\n" : "") +
         "Pixel ratio: " + snapshot.resolution.applied + " · changes: " +
           snapshot.resolution.changes + (snapshot.resolution.fixed ? " · FIXED" : " · adaptive") + "\n" +
         (snapshot.oceanStream ? "Stream builds: floor " + snapshot.oceanStream.floorBuilds +

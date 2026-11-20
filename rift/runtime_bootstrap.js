@@ -487,6 +487,7 @@ function monitorPerformance(now) {
         )),
         shallowGrid: globalThis.__riftShallowGrid?.grid ?? null,
         gameUpdateCpuMs: Math.round((globalThis.__riftGameCPUWorkMs ?? 0) * 10) / 10,
+        drawableCounts: globalThis.__riftGeometryPerfCounts || null,
         note: "CPU submission only. Does not measure GPU kernel execution.",
       };
       globalThis.__riftLowPerf = snapshot;
@@ -494,6 +495,8 @@ function monitorPerformance(now) {
         "Rift profiler · " +
           (new URLSearchParams(location.search).get("riftPerfScene") === "empty" ? "EMPTY SCENE" :
            new URLSearchParams(location.search).get("riftPerfScene") === "flat" ? "FLAT SHADERS" :
+           new URLSearchParams(location.search).get("riftPerfScene") === "noinstances" ? "NO INSTANCES" :
+           new URLSearchParams(location.search).get("riftPerfScene") === "instancesonly" ? "INSTANCES ONLY" :
            new URLSearchParams(location.search).get("riftPerfCompute") === "off" ? "NO OCEAN COMPUTE" :
            new URLSearchParams(location.search).get("riftHideOcean") === "1" ? "OCEAN HIDDEN" :
            new URLSearchParams(location.search).get("riftBarePost") === "1" ? "BARE POST" : "NORMAL") +
@@ -507,7 +510,11 @@ function monitorPerformance(now) {
         "GPU shader/compute execution: not measured\n" +
         "FFT: " + (snapshot.computePhases.fft?.callsPerSec || 0) + "/s · shallow: " +
         (snapshot.computePhases.shallow?.callsPerSec || 0) + "/s" +
-        (snapshot.shallowGrid ? " · grid: " + snapshot.shallowGrid + "²" : "");
+        (snapshot.shallowGrid ? " · grid: " + snapshot.shallowGrid + "²" : "") +
+        (snapshot.drawableCounts
+          ? "\nMeshes: " + snapshot.drawableCounts.instanced + " instanced · " +
+            snapshot.drawableCounts.regular + " other"
+          : "");
       perfProbe.computePhases = Object.create(null);
       perfProbe.computeCalls = perfProbe.renderCalls = 0;
       perfProbe.computeSubmitMs = perfProbe.renderSubmitMs = 0;

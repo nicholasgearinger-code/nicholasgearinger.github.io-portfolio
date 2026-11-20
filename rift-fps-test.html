@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#061722">
+<title>Rift Islands — Display Frame Test</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}
+body{margin:0;min-height:100svh;background:#061722;color:#e5f6f3;font:16px/1.5 system-ui,-apple-system,sans-serif;display:grid;place-items:center;padding:22px}
+main{width:min(100%,460px);padding:24px;border:1px solid #375d67;border-radius:17px;background:#0a2530}
+h1{font-size:22px;margin:0 0 12px}
+#fps{font-size:64px;line-height:1.1;font-variant-numeric:tabular-nums;color:#83f4d7;font-weight:760;margin:13px 0}
+#detail{color:#adc8ce;font-size:14px}
+.pill{display:inline-block;padding:4px 10px;border:1px solid #375d67;border-radius:100px;font-size:12px;color:#bde8e2}
+a{color:#7aeade}
+</style>
+</head>
+<body>
+<main>
+<span class="pill">No WebGPU · No game engine · No 3D drawing</span>
+<h1>Rift Islands — browser refresh test</h1>
+<div id="fps">Measuring…</div>
+<div id="detail">Leave this page visible for five seconds.</div>
+<p id="result" aria-live="polite">This tests the browser's animation callback frequency, not GPU shader performance.</p>
+<p>For iPhone 12 Pro Max, approximately 60 FPS is expected without browser or power-saving throttling. If this stays near 30 FPS, check <strong>Settings → Battery → Low Power Mode</strong> and retest with it off.</p>
+<p><a href="rift-play.html?riftPerf=1">Return to Coral Shallows profiler</a></p>
+</main>
+<script>
+(function(){
+  "use strict";
+  const fps=document.getElementById("fps");
+  const detail=document.getElementById("detail");
+  const result=document.getElementById("result");
+  let last=performance.now(),start=last,frames=0,measurements=[],total=0;
+  function tick(now){
+    frames++;
+    const elapsed=now-last;
+    if(elapsed>=1000){
+      const sample=frames*1000/elapsed;
+      measurements.push(sample);
+      if(measurements.length>6)measurements.shift();
+      const avg=measurements.reduce((a,b)=>a+b,0)/measurements.length;
+      fps.textContent=avg.toFixed(1)+" FPS";
+      detail.textContent="Measured callback rate: "+sample.toFixed(1)+
+        "/s · "+(1000/avg).toFixed(1)+" ms per callback";
+      if(now-start>3500){
+        result.textContent=avg>=48?
+          "Browser is allowing roughly 60 FPS. Rift Islands' remaining limit is in the game workload or GPU pipeline.":
+          avg>=26&&avg<=35?
+          "Browser callbacks are near 30 FPS even without the game. This is consistent with Low Power Mode or browser-level frame throttling; check the phone's battery setting.":
+          "Browser callback rate is limited or inconsistent with no game running. Check power mode, device temperature, background activity and retest.";
+      }
+      last=now;frames=0;total++;
+    }
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>

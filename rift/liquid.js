@@ -312,13 +312,17 @@ export function updateRippleLayer(handle, renderer, cameraPos, cameraY, dt) {
   if (handle?.gpuFFT) {
     const boatWake = handle.__riftRowboatWake;
     const now = handle.fftV9Time?.value ?? 0;
+    // A/B test swimmer-generated nearfield fluid contact without changing
+    // the normal sea surface, boat physics, or FFT ocean compute.
+    const skipSwimmerContact = typeof location !== "undefined" &&
+      new URLSearchParams(location.search).get("riftSwimPerf") === "noimpact";
     // Advance the localized 3D surf before consuming its wave-collapse
     // impulses, allowing the existing 2D solver to receive them this frame.
     handle.__riftSurfZone3D?.update(dt, now, cameraPos, cameraY);
     // Fluid Lab M5.7: swimmer contact seeds the same event queue as
     // boat/oar impacts. The nearfield PBF spray and the GPU shallow solver
     // both receive this event without adding an ocean simulation pass.
-    if (!boatWake?.riding && cameraPos && dt > 0 &&
+    if (!skipSwimmerContact && !boatWake?.riding && cameraPos && dt > 0 &&
         Math.abs(cameraY - handle.waterY) < 0.85) {
       const prev = handle.__riftFluidLabSwimmer;
       if (prev) {

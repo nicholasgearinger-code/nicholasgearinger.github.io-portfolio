@@ -700,6 +700,8 @@ button{font:inherit;cursor:pointer}
               <button type="button" class="rift-graphics-opt" data-rift-render-test="no-extras" style="flex:1 1 100%;min-height:32px">Hide environmental extras</button>
               <button type="button" class="rift-graphics-opt" data-rift-render-test="no-world" style="flex:1 1 100%;min-height:32px">Hide terrain + ocean meshes</button>
               <button type="button" class="rift-graphics-opt" data-rift-render-test="no-terrain" style="flex:1 1 100%;min-height:32px">Hide terrain and offshore seafloor</button>
+              <button type="button" class="rift-graphics-opt" data-rift-render-test="no-island" style="flex:1 1 100%;min-height:32px">Hide island terrain only</button>
+              <button type="button" class="rift-graphics-opt" data-rift-render-test="no-offshore-floor" style="flex:1 1 100%;min-height:32px">Hide offshore seafloor only</button>
               <button type="button" class="rift-graphics-opt" data-rift-render-test="no-water" style="flex:1 1 100%;min-height:32px">Hide near + far ocean surfaces</button>
             </div>
             <span style="font-size:9px;color:#9dc6cb;line-height:1.4">Temporary diagnostics, not permanent visual changes. Keep camera angle and Low setting the same for FPS comparison.</span>
@@ -927,6 +929,8 @@ if (riftRenderTests) {
     flags.get("riftPerfScene") === "noextras" ? "no-extras" :
     flags.get("riftPerfScene") === "noterrainwater" ? "no-world" :
     flags.get("riftPerfScene") === "noterrain" ? "no-terrain" :
+    flags.get("riftPerfScene") === "noisland" ? "no-island" :
+    flags.get("riftPerfScene") === "nooffshorefloor" ? "no-offshore-floor" :
     flags.get("riftPerfScene") === "nowater" ? "no-water" :
     flags.get("riftPerfCompute") === "off" ? "no-compute" :
     flags.get("riftHideOcean") === "1" ? "ocean" :
@@ -952,6 +956,8 @@ if (riftRenderTests) {
       if (button.dataset.riftRenderTest === "no-extras") url.searchParams.set("riftPerfScene", "noextras");
       if (button.dataset.riftRenderTest === "no-world") url.searchParams.set("riftPerfScene", "noterrainwater");
       if (button.dataset.riftRenderTest === "no-terrain") url.searchParams.set("riftPerfScene", "noterrain");
+      if (button.dataset.riftRenderTest === "no-island") url.searchParams.set("riftPerfScene", "noisland");
+      if (button.dataset.riftRenderTest === "no-offshore-floor") url.searchParams.set("riftPerfScene", "nooffshorefloor");
       if (button.dataset.riftRenderTest === "no-water") url.searchParams.set("riftPerfScene", "nowater");
       location.assign(url.href);
     });

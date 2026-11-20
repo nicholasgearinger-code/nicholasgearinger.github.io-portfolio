@@ -121,8 +121,23 @@ export function createLiquidPlane(
       // fronts with broad, moving whitewater and a bounded 3D PBF/SPH
       // spray volume. The nearshore GPU hydraulic break remains in place.
       // Use ?riftSurf3D=off to compare the older FFT+shallow setup.
-      const surf3DEnabled = typeof location === "undefined" ||
-        new URLSearchParams(location.search).get("riftSurf3D") !== "off";
+      // iOS stability: opt in to the CPU-updated cinematic ribbons instead
+      // of forcing them during every waterline crossing. Device testing
+      // found ~60 FPS on land / ~50 FPS swimming with ?riftSurf3D=off,
+      // versus a crash with this layer enabled. Preserve the native FFT
+      // ocean, shallow solver, water physics, and other visual effects.
+      // Explicit ?riftSurf3D=on restores the full surf renderer for testing.
+      const surfChoice = typeof location !== "undefined"
+        ? new URLSearchParams(location.search).get("riftSurf3D") : null;
+      const isMobileWebKit = typeof navigator !== "undefined" &&
+        (/iPhone|iPad|iPod/i.test(navigator.userAgent || "") ||
+          (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
+      const surf3DEnabled = surfChoice === "on" ||
+        (surfChoice !== "off" && !isMobileWebKit);
+      if (typeof globalThis !== "undefined") {
+        globalThis.__riftSurf3DMode = surf3DEnabled
+          ? "cinematic-or-legacy" : "fft-shallow-only";
+      }
       if (surf3DEnabled) {
         try {
           handle.__riftSurfZone3D = useLegacySurf

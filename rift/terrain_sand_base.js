@@ -780,6 +780,8 @@ function biomeHeight(biome, worldX, worldZ, seed) {
     // original bathymetry behind ?riftShelf=original. This exact height
     // function serves the 480m island mesh, streaming seafloor, and
     // offshore collision so there is no physics/render disagreement.
+    const oceanGeo = typeof location !== "undefined" &&
+      new URLSearchParams(location.search).get("riftOceanGeo") === "on";
     const abyssTrial = typeof location !== "undefined" &&
       new URLSearchParams(location.search).get("riftAbyss") === "on";
     const gradualShelf = abyssTrial || (typeof location !== "undefined" &&
@@ -787,7 +789,41 @@ function biomeHeight(biome, worldX, worldZ, seed) {
     const shelfT = ease(110, 240);
     const slopeT = ease(240, 620);
     const abyssT = ease(620, 1520);
-    const seabed = abyssTrial
+    // Natural cross-shore seabed: broad sand shelf, sloping rocky lip,
+    // and an offset meandering abyssal canyon. The lip position changes
+    // smoothly with bearing; the canyon is formed in world XZ space and
+    // has asymmetrical walls. No extra draw calls or per-frame CPU work.
+    // The exact same sampler serves terrain mesh, offshore stream and physics.
+    const contourWarp = Math.sin(angle * 3.1 + 0.8) * 19
+      + Math.sin(angle * 7.2 - 1.2) * 8;
+    const shelfEdge = 172 + contourWarp;
+    const shelfDrop = ease(shelfEdge - 35, shelfEdge + 260);
+    const cliffLip = ease(shelfEdge + 58, shelfEdge + 410);
+    const ravineCenter = 62 +
+      Math.sin(worldZ * 0.004 + 1.2) * 68 +
+      Math.sin(worldZ * 0.011 - 0.4) * 24;
+    const ravineWidth = 95 +
+      22 * Math.sin(worldZ * 0.0032 + 0.7);
+    const ravineAcross = Math.abs((worldX - ravineCenter) / ravineWidth);
+    // Deep channel runs diagonally through the offshore shelf while
+    // remaining below the existing island/reef. Its wall is smooth and
+    // slightly asymmetric, with rounded shoulders instead of square cliffs.
+    const channelT = 1 - THREE.MathUtils.smoothstep(
+      ravineAcross + Math.sin(worldZ * 0.009 + worldX * 0.004) * 0.10,
+      0.25, 1.30);
+    const channelEnvelope = ease(235, 610);
+    const erosion = Math.sin(worldX * 0.013 + worldZ * 0.006 + seed) *
+      Math.sin(worldZ * 0.018 - seed) * 3.8 +
+      Math.sin(worldX * 0.037 - worldZ * 0.012) * 1.4;
+    const organicSeabed = LIQUID_LEVEL.crystal - 4.2
+      - shelfDrop * 42
+      - cliffLip * 105
+      - ease(550, 1350) * 115
+      - channelT * channelEnvelope * 102
+      + erosion * ease(125, 230);
+    const seabed = oceanGeo
+      ? organicSeabed
+      : abyssTrial
       ? LIQUID_LEVEL.crystal - 2.8
           // Wide shoaling shelf then a real continental drop; begin the
           // descent BEFORE the 240m island-mesh boundary rather than
@@ -814,7 +850,7 @@ function biomeHeight(biome, worldX, worldZ, seed) {
     // A broad C1-continuous transition replaces the earlier 20m ramp,
     // not the actual coastline: the emergent beach remains untouched.
     const blend = Math.min(1, Math.max(0,
-      (distance - 102) / (abyssTrial ? 70 : gradualShelf ? 113 : 20)));
+      (distance - 102) / (oceanGeo ? 108 : abyssTrial ? 70 : gradualShelf ? 113 : 20)));
     const t = blend * blend * (3 - 2 * blend);
     const uInner = worldX / (TERRAIN_SIZE / 2);
     const vInner = worldZ / (TERRAIN_SIZE / 2);

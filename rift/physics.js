@@ -71,8 +71,20 @@ function updatePlayerPhysics(camera, terrainMesh, state, dt, playerEyeHeight, ju
       state.verticalVelocity *= WATER_ENTRY_MOMENTUM_RETENTION;
     }
 
+    // Free-swim mode: retain the original upward buoyancy in stable play,
+    // but permit neutral hovering and analog vertical travel when enabled.
+    // Look+forward and touch buttons share the same signed swimVertical.
+    const freeSwim = typeof location !== "undefined" &&
+      new URLSearchParams(location.search).get("riftSwim3D") === "on";
     let targetVelocity;
-    if (swimVertical > 0) targetVelocity = SWIM_UP_VELOCITY;
+    if (freeSwim) {
+      const input = THREE.MathUtils.clamp(swimVertical, -1, 1);
+      targetVelocity = input >= 0
+        ? input * SWIM_UP_VELOCITY : input * SWIM_DOWN_VELOCITY;
+      // A tiny positive buoyancy makes releasing controls gently drift
+      // upward, but doesn't force the camera straight back to the surface.
+      if (Math.abs(input) < 0.04) targetVelocity = 0.18;
+    } else if (swimVertical > 0) targetVelocity = SWIM_UP_VELOCITY;
     else if (swimVertical < 0) targetVelocity = -SWIM_DOWN_VELOCITY;
     else targetVelocity = BUOYANCY_VELOCITY;
 

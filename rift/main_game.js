@@ -486,9 +486,20 @@ if (riftSSREnabled) {
    : (lensOutputEnabled ? lensDistortedOutput : underwaterCameraSceneOutput);
  // Compare a bare scene pass against the full experimental screen optics.
  // No change unless ?riftBarePost=1; the ocean/terrain meshes stay intact.
- postProcessing.outputNode = isTouchDevice &&
-   new URLSearchParams(location.search).get("riftBarePost") === "1"
-     ? scenePass : riftComposePostOutput(riftBasePostOutput);`,
+ // On iOS the experimental screen-space output has intermittently
+ // produced a fully black frame even though the scene draw/compute counters
+ // advance. Use the direct, known-good scene pass by default on touch
+ // devices. Keep the full optics path available for controlled testing with
+ // ?riftFullPost=1 (and retain ?riftBarePost=1 as an explicit override).
+ // This changes neither FFT compute nor scene materials/draw geometry.
+ const riftMobileDirectScene = isTouchDevice &&
+   new URLSearchParams(location.search).get("riftFullPost") !== "1";
+ const riftForceBarePost =
+   new URLSearchParams(location.search).get("riftBarePost") === "1";
+ globalThis.__riftCompositeMode =
+   riftMobileDirectScene || riftForceBarePost ? "direct-scene" : "full-optics";
+ postProcessing.outputNode = (riftMobileDirectScene || riftForceBarePost)
+   ? scenePass : riftComposePostOutput(riftBasePostOutput);`,
     "r185 Water Pro additive SSR composition",
   ],
   [

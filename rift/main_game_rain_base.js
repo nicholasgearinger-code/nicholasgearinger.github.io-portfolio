@@ -6573,6 +6573,52 @@ function animate() {
       };
     }
   }
+  // Beer–Lambert-style underwater incident light. Unlike the earlier
+  // artificial floor-distance darkening, only actual VERTICAL depth from
+  // the sea surface attenuates the sunlight reaching the camera region.
+  // Each RGB band travels differently (red is absorbed first, blue last).
+  // The existing scene-depth compositor handles the SECOND water path,
+  // from objects to the viewer, without an additional render pass.
+  const waterTransport = currentBiome === "crystal" &&
+    new URLSearchParams(location.search).get("riftWaterTransport") === "on";
+  if (waterTransport && isFullySubmerged) {
+    const dive = Math.max(0, LIQUID_LEVEL.crystal - camera.position.y);
+    const sunRed = Math.exp(-0.155 * dive);
+    const sunGreen = Math.exp(-0.069 * dive);
+    const sunBlue = Math.exp(-0.035 * dive);
+    // The normal sun/sky cycle has already set these values for this
+    // frame. Apply spectral transmission without compounding frame to frame.
+    sun.color.setRGB(sun.color.r * sunRed,
+      sun.color.g * sunGreen, sun.color.b * sunBlue);
+    const solarEnergy = 0.12 * sunRed + 0.36 * sunGreen + 0.52 * sunBlue;
+    sun.intensity *= solarEnergy;
+    ambientLight.color.setRGB(ambientLight.color.r * sunRed,
+      ambientLight.color.g * sunGreen, ambientLight.color.b * sunBlue);
+    ambientLight.intensity *= Math.sqrt(Math.max(0, solarEnergy));
+    // Transparent water itself darkens by depth. Scene fog remains weak
+    // because the view-ray path is handled by the one active depth pass;
+    // otherwise absorption is incorrectly counted twice.
+    const blueIrradiance = Math.exp(-0.042 * dive);
+    const greenIrradiance = Math.exp(-0.075 * dive);
+    sceneBackgroundColor.setRGB(
+      0.014 * Math.exp(-0.14 * dive),
+      0.16 * greenIrradiance,
+      0.22 * blueIrradiance
+    );
+    if (scene.fog) {
+      scene.fog.color.copy(sceneBackgroundColor);
+      scene.fog.density = oceanDepthPassEnabled ? 0.0018 :
+        THREE.MathUtils.lerp(0.008, 0.022,
+          THREE.MathUtils.smoothstep(dive, 4, 110));
+    }
+    if (new URLSearchParams(location.search).get("riftPerf") === "1") {
+      globalThis.__riftTransportProbe = {
+        depth: Math.round(dive),
+        sunlightPercent: Math.round(solarEnergy * 100),
+        bluePercent: Math.round(blueIrradiance * 100),
+      };
+    }
+  }
   // Lens raindrops — real TSL two-pass screen-space effect (see its own
   // setup comment above for why this replaced the old inert raw-GLSL
   // stub). Same enable/threshold logic already established here — skipped

@@ -5023,8 +5023,12 @@ vec2 causticVoronoiF1F2(vec2 p) {
   if (level.biome === "crystal" && LIQUID_LEVEL.crystal !== undefined) {
     const uwWaterLevel = LIQUID_LEVEL.crystal; // own local lookup — the `waterLevel` above is block-scoped to the Verdant `if` and isn't visible here
     const uwShaftRand = mulberry32(hashStringToSeed(WORLD_SEED + "-uw-light-shafts-" + level.biome));
-    const uwShaftBound = WORLD_BOUND_RADIUS * 0.85;
-    const uwShaftCount = 18;
+    // Concentrate inexpensive scene-space sunlight shafts around the
+    // Coral Shallows swim/start area. The old 18 shafts were scattered
+    // across nearly the entire 240m map, leaving most camera views empty.
+    // Keep the same sprite material: no volumetric raymarch or extra pass.
+    const uwShaftBound = Math.min(48, WORLD_BOUND_RADIUS * 0.85);
+    const uwShaftCount = 26;
     for (let i = 0; i < uwShaftCount; i++) {
       const x = (uwShaftRand() * 2 - 1) * uwShaftBound;
       const z = (uwShaftRand() * 2 - 1) * uwShaftBound;

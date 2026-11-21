@@ -230,9 +230,9 @@ const extraEdits = [
       Math.sqrt(ambientEnergy), waterVolumeBlend);
     sun.intensity *= sunAttenuation;
     ambientLight.intensity *= skyAttenuation;
-    sun.color.lerp(new THREE.Color(0x75cae1),
+    const riftVolumeColors = globalThis.__riftVolumeColors ??= {\n      sun: new THREE.Color(0x75cae1),\n      ambient: new THREE.Color(0x5cc5da),\n      fog: new THREE.Color(),\n    };\n    sun.color.lerp(riftVolumeColors.sun,
       waterVolumeBlend * (1 - redT) * 0.60);
-    ambientLight.color.lerp(new THREE.Color(0x5cc5da),
+    ambientLight.color.lerp(riftVolumeColors.ambient,
       waterVolumeBlend * 0.38);
     // Fog is participating-medium extinction: distant surfaces fade
     // into the color of the WATER, not an unfiltered sky or white void.
@@ -240,7 +240,7 @@ const extraEdits = [
     const seaR = THREE.MathUtils.lerp(0.022, 0.003, depthT);
     const seaG = THREE.MathUtils.lerp(0.205, 0.020, depthT);
     const seaB = THREE.MathUtils.lerp(0.265, 0.060, depthT);
-    const volumeFogColor = new THREE.Color().setRGB(seaR, seaG, seaB);
+    const volumeFogColor = riftVolumeColors.fog.setRGB(seaR, seaG, seaB);
     sceneBackgroundColor.lerp(volumeFogColor, waterVolumeBlend);
     scene.fog.color.lerp(volumeFogColor, waterVolumeBlend);
     // When the scene-depth compositor owns sight-ray attenuation, fog

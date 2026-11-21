@@ -292,11 +292,16 @@ const extraEdits = [
   // touch devices, but allow explicit ?riftDepth=on comparison.
   [
     '    return (RIFT_ATMOSPHERE_V2 ||\n      localStorage.getItem("riftWaterGraphicsMode") === "experimental") &&\n      debug !== "noexp" && debug !== "nodepth";',
-    `    // Explicit atmosphere test bypasses the old mobile depth gate.
-    // No flag still preserves the previously tested iOS default.
-    const mobileDepthOptIn = RIFT_ATMOSPHERE_V2 || !isTouchDevice ||
-      new URLSearchParams(location.search).get("riftDepth") === "on";
-    return mobileDepthOptIn &&
+    `    // The old mobile gate kept the depth compositor OFF for every normal
+    // iPhone visit, even with WATER: EXPERIMENTAL selected. Consequently
+    // underwater output switching only sampled the base scene color and
+    // all the underwater depth/scattering edits were invisible.
+    // Enable the existing single-scene-pass compositor for Experimental
+    // on iOS. ?riftDepth=off is the emergency fallback if a WebGPU driver
+    // cannot compile the additional TSL graph.
+    const depthOverride = new URLSearchParams(location.search).get("riftDepth");
+    const mobileDepthEnabled = !isTouchDevice || depthOverride !== "off";
+    return mobileDepthEnabled &&
       (RIFT_ATMOSPHERE_V2 ||
         localStorage.getItem("riftWaterGraphicsMode") === "experimental") &&
       debug !== "noexp" && debug !== "nodepth";`,

@@ -1449,12 +1449,18 @@ const underwaterCameraSceneOutput = Fn(() => {
 // than submitting an additional scene render or raw WebGL render-target pass.
 // This is an Experimental-only, fixed-at-start pipeline choice. The per-frame
 // underwater transition and tuning are uniform updates; no graph rebuild.
+// A/B: this experiment must enable the actual depth compositor even if
+// the phone has the saved Water Graphics mode set to "Current". Previous
+// URL-only optics changes could silently do nothing in that situation.
+const RIFT_ATMOSPHERE_V2 = typeof location !== "undefined" &&
+  new URLSearchParams(location.search).get("riftWaterAtmosphere") === "on";
 const oceanDepthPassEnabled = (() => {
   try {
     const debug = new URLSearchParams(location.search).get("riftDebug");
-    return localStorage.getItem("riftWaterGraphicsMode") === "experimental" &&
+    return (RIFT_ATMOSPHERE_V2 ||
+      localStorage.getItem("riftWaterGraphicsMode") === "experimental") &&
       debug !== "noexp" && debug !== "nodepth";
-  } catch (_) { return false; }
+  } catch (_) { return RIFT_ATMOSPHERE_V2; }
 })();
 const oceanDepthUnderwaterMix = uniform(0);
 const oceanDepthAbsorption = uniform(1);
@@ -1654,6 +1660,74 @@ return Fn(() => {
     clamp(oceanDepthUnderwaterMix.mul(crossing).mul(upwardView),
       0, WAVE_DISTORTION_2 ? 0.94 : 0.78));
   const length = pathThroughWater.mul(oceanDepthAbsorption);
+  // New water-column optics: compiled only for ?riftWaterAtmosphere=on.
+  // This replaces the older mixture of offshore color overlays, scene fog
+  // and bright-background blending with one distance-and-depth model.
+  // No secondary scene pass, FFT storage samples, or ray marching.
+  if (RIFT_ATMOSPHERE_V2) {
+    const cameraDepth = clamp(oceanSurfaceHeight.sub(oceanCameraHeight),
+      0, 300);
+    const fragmentDepth = clamp(oceanSurfaceHeight.sub(
+      oceanCameraHeight.add(rayY.mul(fragmentDistance))), 0, 300);
+    const additionalDownwardDepth = max(fragmentDepth.sub(cameraDepth),
+      float(0));
+    // Underwater view distance is the relevant second path through water.
+    // An unobstructed background pixel is treated as water at 90 metres
+    // rather than retaining the browser's clear-sky color.
+    const isBackground = smoothstep(float(0.995),
+      float(0.99995), rawDepth);
+    const waterPath = mix(pathThroughWater, float(90),
+      isBackground.mul(float(1).sub(smoothstep(float(0.25),
+        float(0.67), rayY))));
+    const sightLength = waterPath.mul(oceanDepthAbsorption);
+    const viewTransmission = exp(vec3(-0.14, -0.066, -0.033)
+      .mul(sightLength));
+    // Incoming sunlight has been attenuated at camera depth by the
+    // existing per-frame world lighting when transport mode is enabled.
+    // Extra depth below the camera is handled separately for the fragment.
+    const incidentAtFragment = exp(
+      vec3(-0.13, -0.064, -0.034).mul(additionalDownwardDepth));
+    const localLight = exp(vec3(-0.13, -0.057, -0.028)
+      .mul(cameraDepth)).mul(oceanDepthDaylight);
+    const daylightTint = vec3(0.055, 0.30, 0.43);
+    const scatteredWater = daylightTint.mul(localLight)
+      .mul(vec3(1).sub(viewTransmission))
+      .mul(oceanDepthScattering.mul(0.87));
+    // Distant fragments become water-colored rather than abruptly
+    // black; near objects retain contrast until light truly disappears.
+    const sceneLit = refractedColor.mul(viewTransmission)
+      .mul(incidentAtFragment);
+    const waterColor = sceneLit.add(scatteredWater);
+    const waterBlend = oceanDepthUnderwaterMix.mul(
+      smoothstep(float(0.18), float(1.8), waterPath));
+    // Waterline glare fix: a bright sky pixel missing geometry must not
+    // remain a white horizontal stripe when the camera is submerged.
+    // Above-water rays looking sharply up still show the surface itself.
+    const horizonOrDown = float(1).sub(smoothstep(
+      float(0.09), float(0.52), rayY));
+    const missingSky = isBackground.mul(horizonOrDown);
+    const fullyUnder = smoothstep(float(0.6), float(3.2),
+      cameraDepth).mul(oceanDepthUnderwaterMix);
+    const backgroundWater = scatteredWater.add(
+      daylightTint.mul(localLight).mul(0.028));
+    const filled = mix(mix(base.rgb, waterColor, waterBlend),
+      backgroundWater, missingSky.mul(fullyUnder));
+    // Very inexpensive, broad wavering shafts, visible near the
+    // surface only: depth attenuation makes them vanish in the abyss.
+    const lightAngle = clamp(dot(ray.div(rayLength.max(float(0.001))),
+      oceanDepthSunDirection), 0, 1);
+    const shaftBand = sin(phaseOne.mul(0.59).add(
+      sin(phaseTwo.mul(0.67)).mul(0.7))).mul(0.5).add(0.5);
+    const shaftAmount = lightAngle.mul(lightAngle).mul(
+      shaftBand.mul(0.7).add(0.3))
+      .mul(exp(cameraDepth.mul(-0.072)))
+      .mul(smoothstep(float(2), float(16), waterPath))
+      .mul(oceanDepthDaylight).mul(oceanDepthSunVisibility)
+      .mul(oceanDepthUnderwaterMix).mul(0.09);
+    const shaftColor = vec3(0.12, 0.43, 0.52).mul(shaftAmount);
+    return vec4(filled.add(shaftColor), base.a);
+  }
+
   // Keep the original stable atmosphere available for a controlled
   // comparison, without rebuilding the post-processing graph at runtime.
   if (!oceanDepthPhaseCEnabled) {

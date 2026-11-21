@@ -10,7 +10,7 @@
 // the rest of the portfolio on its known-good dependency while the migration
 // branch runs the game on 0.185.1.
 const RIFT_THREE_VERSION = "0.185.1";
-const RIFT_BUILD_ID = "coral-mobile-underwater-optics-v23-20261121";
+const RIFT_BUILD_ID = "coral-reference-depth-ceiling-v24-20261121";
 window.__riftBuildId = RIFT_BUILD_ID;
 const riftModuleScope = new URL("./", import.meta.url).href;
 const riftThreeBase = `https://cdn.jsdelivr.net/npm/three@${RIFT_THREE_VERSION}/`;

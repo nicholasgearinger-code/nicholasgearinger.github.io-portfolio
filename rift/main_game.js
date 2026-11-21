@@ -508,15 +508,46 @@ if (riftSSREnabled) {
     "const isFullySubmerged = submergedState;",
     `const isFullySubmerged = submergedState;
   if (riftSSRPass) riftSSRPass.intensity.value = isFullySubmerged ? 0 : riftSSRBaseIntensity;
-  // Reconfigure the output graph only on a surface crossing, never each frame.
-  // Fully submerged views retain the existing mobile underwater depth optics.
-  // The fallback remains available for isolating mobile GPU regressions.
+  // The gameplay underwater state has a +/-1.1m hysteresis. Visual water
+  // submersion begins much nearer the surface, so using the gameplay gate
+  // left a conspicuous unprocessed horizontal strip while swimming near
+  // the ceiling. Use the visual camera water depth with a small deadband.
+  // Change the RenderPipeline graph only on state crossings.
+  const riftWasVisualUnderwater = globalThis.__riftVisualUnderwater === true;
+  const riftVisualUnderwater = currentBiome === "crystal" &&
+    Number.isFinite(cameraWaterDepth) &&
+    (riftWasVisualUnderwater ? cameraWaterDepth > -0.18 : cameraWaterDepth > 0.32);
+  globalThis.__riftVisualUnderwater = riftVisualUnderwater;
   const riftDirectNow = riftForceBarePost ||
-    (riftMobileDirectScene && !isFullySubmerged);
+    (riftMobileDirectScene && !riftVisualUnderwater);
   const riftWantedComposite = riftDirectNow ? "direct-scene" : "full-optics";
   if (globalThis.__riftCompositeMode !== riftWantedComposite) {
     postProcessing.outputNode = riftDirectNow ? scenePass : riftFullUnderwaterOutput;
     globalThis.__riftCompositeMode = riftWantedComposite;
+  }
+  // Opt-in proof of which shaders are actually running on the phone.
+  // This is diagnostic HTML only; it does not add a GPU pass or shader.
+  if (new URLSearchParams(location.search).get("riftWaterDiag") === "1") {
+    if (!globalThis.__riftWaterDiagnosticEl) {
+      const el = document.createElement("pre");
+      el.style.cssText = "position:absolute;left:8px;top:28%;z-index:99998;" +
+        "padding:7px 9px;max-width:62vw;white-space:pre-wrap;pointer-events:none;" +
+        "font:11px/1.4 monospace;color:#d8ffff;background:rgba(0,13,24,.84);" +
+        "border:1px solid #47c7cb;border-radius:8px";
+      viewport.appendChild(el);
+      globalThis.__riftWaterDiagnosticEl = el;
+    }
+    const diag = globalThis.__riftWaterDiagnosticEl;
+    const cameraDepth = Number.isFinite(cameraWaterDepth) ? cameraWaterDepth.toFixed(2) : "n/a";
+    diag.textContent = "Build: " + (globalThis.__riftBuildId || "unknown") +
+      "\\nDepth: " + cameraDepth + "m / visual: " + riftVisualUnderwater +
+      "\\nGameplay submerged: " + isFullySubmerged +
+      "\\nDepth pass compiled: " + oceanDepthPassEnabled +
+      "\\nDepth blend: " + oceanDepthUnderwaterMix.value.toFixed(2) +
+      "\\nCompositor: " + globalThis.__riftCompositeMode +
+      "\\nOutput: " + (postProcessing.outputNode === scenePass ? "direct-scene" :
+        postProcessing.outputNode === riftFullUnderwaterOutput ? "water-optics" : "other") +
+      "\\nWater shader: " + (liquidHandle?.__riftNextWater ? "experimental" : "current");
   }`,
     "disable SSR while submerged",
   ],

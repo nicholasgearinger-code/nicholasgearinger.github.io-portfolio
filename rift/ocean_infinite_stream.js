@@ -3,7 +3,7 @@
 // 2000-unit FFT water and 480-unit island mesh are intentionally untouched.
 // Ocean geometry, not the FFT storage buffers, is streamed on coarse cells.
 import * as THREE from "three";
-import { uniform, float, sin, cos, clamp, mix, color, vec3, dot, smoothstep, positionLocal, positionWorld, cameraPosition } from "three/tsl";
+import { uniform, float, sin, cos, clamp, mix, color, vec3, dot, smoothstep, max, abs, positionLocal, positionWorld, cameraPosition } from "three/tsl";
 
 const FLOOR_SIZE = 832;
 const FLOOR_GRID = 52; // 17-ish world units per cell, ~2.7k vertices
@@ -16,6 +16,10 @@ const WATER_SNAP = 256;
 // Structural abyss experiment: keep stable production sea untouched.
 const ABYSS_TRIAL = typeof location !== "undefined" &&
   new URLSearchParams(location.search).get("riftAbyss") === "on";
+// Unlike the previous hard square hole around the near FFT mesh, overlap
+// the meshes and feather the far surface's alpha across the perimeter.
+const BLEND_OCEAN = typeof location !== "undefined" &&
+  new URLSearchParams(location.search).get("riftOceanBlend") === "on";
 
 const smooth = t => {
   const x = THREE.MathUtils.clamp(t, 0, 1);
@@ -75,6 +79,17 @@ function createFarWaterMaterial() {
   const cameraDepth = uniform(0);
   const p = positionLocal;
   const radius2 = p.x.mul(p.x).add(p.z.mul(p.z));
+  // A single square-distance ramp follows the FFT's actual mesh footprint.
+  // Blend inside the footprint so the far surface does not visibly begin
+  // as a hard dark rectangular rim. This costs no extra mesh or pass.
+  if (BLEND_OCEAN) {
+    const boxDistance = max(abs(p.x), abs(p.z));
+    const edgeWeight = smoothstep(float(760), float(1110), boxDistance);
+    material.opacityNode = edgeWeight;
+    material.transparent = true;
+    material.depthWrite = false;
+    material.forceSinglePass = true;
+  }
   const offshore = smoothstep(float(210 * 210), float(1600 * 1600), radius2);
   const abyss = smoothstep(float(600 * 600), float(1600 * 1600), radius2);
   const a = p.x.mul(0.0062).add(p.z.mul(0.0031));
@@ -134,9 +149,9 @@ function createFarWaterMaterial() {
     color(0x79b7ce), reflectance,
   );
   material.side = THREE.DoubleSide;
-  material.depthWrite = true;
+  material.depthWrite = !BLEND_OCEAN;
   material.fog = true;
-  material.transparent = false;
+  material.transparent = BLEND_OCEAN;
   material.userData.riftTime = t;
   material.userData.riftCameraDepth = cameraDepth;
   return material;
@@ -210,7 +225,8 @@ export function createInfiniteOceanStream(scene, waterY, sampleHeight, options =
       const geom = buildGrid(
         wx, wz, WATER_SIZE, WATER_GRID,
         () => waterY - 0.15,
-        (x, z) => Math.abs(x) < FFT_WATER_HALF &&
+        (x, z) => !BLEND_OCEAN &&
+          Math.abs(x) < FFT_WATER_HALF &&
           Math.abs(z) < FFT_WATER_HALF,
         out => out.set(0xffffff),
       );
@@ -225,7 +241,8 @@ export function createInfiniteOceanStream(scene, waterY, sampleHeight, options =
         floorVertices: floorMesh.geometry.attributes.position?.count ?? 0,
         waterVertices: farMesh.geometry.attributes.position?.count ?? 0,
         distance: Math.round(Math.hypot(playerPos.x, playerPos.z)),
-        mode: ABYSS_TRIAL ? "abyss-streaming-overlap" : "streaming-two-meshes",
+        mode: BLEND_OCEAN ? "feathered-fft-outer-ocean" :
+          ABYSS_TRIAL ? "abyss-streaming-overlap" : "streaming-two-meshes",
       };
     }
   };

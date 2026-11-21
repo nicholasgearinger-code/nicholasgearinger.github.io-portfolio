@@ -195,6 +195,73 @@ const godRayUpdate = `
 `;
 
 const extraEdits = [
+  [
+    "  setAmbientDayAmount(dayNight.dayAmount);",
+    `  // Final scene-lighting stage: the camera is INSIDE a participating
+  // water medium, not looking through a detached transparent plane.
+  // Apply this after day/night, weather, cloud occlusion and manual-sun
+  // updates so subsequent land-lighting writes cannot erase the effect.
+  // Underwater shading is active only in Coral / Experimental mode.
+  // ?riftWaterVolume=off restores the previous lighting for A/B testing.
+  const waterVolumeMode = (() => {
+    try {
+      return currentBiome === "crystal" &&
+        localStorage.getItem("riftWaterGraphicsMode") === "experimental" &&
+        new URLSearchParams(location.search).get("riftWaterVolume") !== "off";
+    } catch (_) { return false; }
+  })();
+  const waterColumnDepth = waterVolumeMode
+    ? Math.max(0, LIQUID_LEVEL.crystal - camera.position.y) : 0;
+  const waterVolumeBlend = waterVolumeMode
+    ? THREE.MathUtils.smoothstep(
+        LIQUID_LEVEL.crystal - camera.position.y, -0.25, 0.80) : 0;
+  if (waterVolumeBlend > 0.001) {
+    const depth = waterColumnDepth;
+    // Wavelength-dependent illumination along the vertical down path.
+    // Apply to this frame's solar/ambient light only; no accumulation.
+    const redT = Math.exp(-0.135 * depth);
+    const greenT = Math.exp(-0.060 * depth);
+    const blueT = Math.exp(-0.027 * depth);
+    const ambientEnergy = 0.13 * redT + 0.39 * greenT + 0.48 * blueT;
+    const solarEnergy = 0.16 * redT + 0.40 * greenT + 0.44 * blueT;
+    const sunAttenuation = THREE.MathUtils.lerp(1, solarEnergy,
+      waterVolumeBlend);
+    const skyAttenuation = THREE.MathUtils.lerp(1,
+      Math.sqrt(ambientEnergy), waterVolumeBlend);
+    sun.intensity *= sunAttenuation;
+    ambientLight.intensity *= skyAttenuation;
+    sun.color.lerp(new THREE.Color(0x75cae1),
+      waterVolumeBlend * (1 - redT) * 0.60);
+    ambientLight.color.lerp(new THREE.Color(0x5cc5da),
+      waterVolumeBlend * 0.38);
+    // Fog is participating-medium extinction: distant surfaces fade
+    // into the color of the WATER, not an unfiltered sky or white void.
+    const depthT = THREE.MathUtils.smoothstep(depth, 0.8, 70);
+    const seaR = THREE.MathUtils.lerp(0.022, 0.003, depthT);
+    const seaG = THREE.MathUtils.lerp(0.205, 0.020, depthT);
+    const seaB = THREE.MathUtils.lerp(0.265, 0.060, depthT);
+    const volumeFogColor = new THREE.Color().setRGB(seaR, seaG, seaB);
+    sceneBackgroundColor.lerp(volumeFogColor, waterVolumeBlend);
+    scene.fog.color.lerp(volumeFogColor, waterVolumeBlend);
+    // When the scene-depth compositor owns sight-ray attenuation, fog
+    // stays subtle to avoid double counting. Otherwise use real scene fog.
+    const depthFogAvailable = oceanDepthPassEnabled &&
+      globalThis.__riftCompositeMode === "full-optics";
+    const targetFog = depthFogAvailable
+      ? THREE.MathUtils.lerp(0.0035, 0.010, depthT)
+      : THREE.MathUtils.lerp(0.009, 0.028, depthT);
+    scene.fog.density = THREE.MathUtils.lerp(scene.fog.density,
+      targetFog, waterVolumeBlend);
+  }
+  globalThis.__riftWaterVolumeProbe = {
+    active: waterVolumeBlend > 0.5,
+    depth: Math.round(waterColumnDepth * 10) / 10,
+    blend: Math.round(waterVolumeBlend * 100) / 100,
+    fog: Math.round(scene.fog.density * 10000) / 10000,
+  };
+  setAmbientDayAmount(dayNight.dayAmount);`,
+    "Unified Coral underwater volumetric light extinction and color medium",
+  ],
   ["  updateTreeInstanceSway(realTreeInstanceHandle, elapsedTime, wind);", "  // Update spatial vegetation LOD before animating only nearby palm batches.\\n  globalThis.__riftUpdateSpatialVegetation?.(camera.position);\\n  updateTreeInstanceSway(realTreeInstanceHandle, elapsedTime, wind);", "Spatially chunked vegetation distance LOD"],
   ["    tempRainFogColor.setHex(0x0a0e14).lerp(RAIN_FOG_COLOR, wind.rainIntensity * 0.5);","    // The old fixed near-black air fog turned distant daylight water into\n    // a hard black strip below a bright sky. Match the actual sky horizon\n    // each frame; fog then blends far ocean to the same atmospheric color.\n    // Storms smoothly converge to the existing dark storm palette.\n    tempRainFogColor.copy(dayNight.skyHorizon)\n      .multiplyScalar(0.84)\n      .lerp(RAIN_FOG_COLOR, THREE.MathUtils.clamp(wind.rainIntensity * 0.78, 0, 1));","Match daylight horizon fog to sky instead of opaque black sea band"],
 

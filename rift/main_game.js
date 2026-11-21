@@ -484,28 +484,35 @@ if (riftSSREnabled) {
  const riftBasePostOutput = oceanDepthPassEnabled
    ? underwaterDepthOutput
    : (lensOutputEnabled ? lensDistortedOutput : underwaterCameraSceneOutput);
- // Compare a bare scene pass against the full experimental screen optics.
- // No change unless ?riftBarePost=1; the ocean/terrain meshes stay intact.
- // On iOS the experimental screen-space output has intermittently
- // produced a fully black frame even though the scene draw/compute counters
- // advance. Use the direct, known-good scene pass by default on touch
- // devices. Keep the full optics path available for controlled testing with
- // ?riftFullPost=1 (and retain ?riftBarePost=1 as an explicit override).
- // This changes neither FFT compute nor scene materials/draw geometry.
+ // Above water, preserve the iPhone-safe direct scene output.
+ // Underwater, restore the existing volumetric depth compositor and
+ // transmission rather than dropping the entire water optical stack.
+ // ?riftBarePost=1 forces the safe output at all depths.
+ // ?riftFullPost=1 enables the experimental optics at all depths.
+ const riftQuery = new URLSearchParams(location.search);
  const riftMobileDirectScene = isTouchDevice &&
-   new URLSearchParams(location.search).get("riftFullPost") !== "1";
- const riftForceBarePost =
-   new URLSearchParams(location.search).get("riftBarePost") === "1";
- globalThis.__riftCompositeMode =
-   riftMobileDirectScene || riftForceBarePost ? "direct-scene" : "full-optics";
- postProcessing.outputNode = (riftMobileDirectScene || riftForceBarePost)
-   ? scenePass : riftComposePostOutput(riftBasePostOutput);`,
+   riftQuery.get("riftFullPost") !== "1";
+ const riftForceBarePost = riftQuery.get("riftBarePost") === "1";
+ const riftFullUnderwaterOutput = riftComposePostOutput(riftBasePostOutput);
+ const riftInitialDirect = riftForceBarePost || riftMobileDirectScene;
+ globalThis.__riftCompositeMode = riftInitialDirect ? "direct-scene" : "full-optics";
+ postProcessing.outputNode = riftInitialDirect ? scenePass : riftFullUnderwaterOutput;`,
     "r185 Water Pro additive SSR composition",
   ],
   [
     "const isFullySubmerged = submergedState;",
     `const isFullySubmerged = submergedState;
-  if (riftSSRPass) riftSSRPass.intensity.value = isFullySubmerged ? 0 : riftSSRBaseIntensity;`,
+  if (riftSSRPass) riftSSRPass.intensity.value = isFullySubmerged ? 0 : riftSSRBaseIntensity;
+  // Reconfigure the output graph only on a surface crossing, never each frame.
+  // Fully submerged views retain the existing mobile underwater depth optics.
+  // The fallback remains available for isolating mobile GPU regressions.
+  const riftDirectNow = riftForceBarePost ||
+    (riftMobileDirectScene && !isFullySubmerged);
+  const riftWantedComposite = riftDirectNow ? "direct-scene" : "full-optics";
+  if (globalThis.__riftCompositeMode !== riftWantedComposite) {
+    postProcessing.outputNode = riftDirectNow ? scenePass : riftFullUnderwaterOutput;
+    globalThis.__riftCompositeMode = riftWantedComposite;
+  }`,
     "disable SSR while submerged",
   ],
   [

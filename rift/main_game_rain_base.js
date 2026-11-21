@@ -5912,7 +5912,17 @@ function animate() {
       walkBobStrength = 0;
     } else {
       updateMovement(dt, playerPhysics.grounded, swimming);
-      const swimVertical = (keys.up ? 1 : 0) - (keys.down ? 1 : 0);
+      // Optional free 3D swimming: forward motion follows look elevation
+      // for climbing and diving, while UP/DOWN buttons override pitch.
+      // Original horizontal speed and collision remain untouched.
+      const freeSwim = swimming &&
+        new URLSearchParams(location.search).get("riftSwim3D") === "on";
+      const swimPitch = freeSwim
+        ? Math.sin(camera.rotation.x) *
+            ((keys.forward ? 1 : 0) - (keys.back ? 1 : 0))
+        : 0;
+      const swimVertical = THREE.MathUtils.clamp(
+        (keys.up ? 1 : 0) - (keys.down ? 1 : 0) + swimPitch, -1, 1);
       updatePlayerPhysics(camera, terrainMesh, playerPhysics, dt, PLAYER_EYE_HEIGHT,
         jumpQueued, caveFloorMeshes.length ? caveFloorMeshes : undefined,
         swimLevel, swimVertical);

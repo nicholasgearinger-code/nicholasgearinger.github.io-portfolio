@@ -6522,6 +6522,28 @@ function animate() {
       THREE.MathUtils.lerp(0.25, 0.066, extinction)
     );
   }
+  // Ocean-volume experiment: distant camera rays must terminate in WATER,
+  // not the photo sky background. Existing fog shades actual geometry but
+  // cannot fill pixels with no geometry: that produced a glaring pale band
+  // underwater. Reuse the same color for the background and the existing
+  // FogExp2 extinction (no new render target or full-screen pass).
+  if (new URLSearchParams(location.search).get("riftOceanVolume") === "on" &&
+      currentBiome === "crystal" && isFullySubmerged) {
+    const dive = Math.max(0, LIQUID_LEVEL.crystal - camera.position.y);
+    const offshore = Math.hypot(camera.position.x, camera.position.z);
+    const depthT = THREE.MathUtils.smoothstep(dive, 2.5, 72);
+    const awayT = THREE.MathUtils.smoothstep(offshore, 170, 1200);
+    const abyssT = Math.max(depthT, awayT * 0.70);
+    // Daylight shallow snorkelling remains cyan; deeper water becomes
+    // dark blue rather than uniformly black or pale grey.
+    sceneBackgroundColor.setRGB(
+      THREE.MathUtils.lerp(0.014, 0.002, abyssT),
+      THREE.MathUtils.lerp(0.134, 0.012, abyssT),
+      THREE.MathUtils.lerp(0.171, 0.042, abyssT)
+    );
+    scene.fog.color.copy(sceneBackgroundColor);
+    scene.fog.density = THREE.MathUtils.lerp(0.010, 0.038, abyssT);
+  }
   // Lens raindrops — real TSL two-pass screen-space effect (see its own
   // setup comment above for why this replaced the old inert raw-GLSL
   // stub). Same enable/threshold logic already established here — skipped

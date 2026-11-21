@@ -814,8 +814,8 @@ function installWaterProOptics(handle) {
     // geometry: unlike a painted highlight, it changes with the sky cycle.
     // No extra scene capture or WebGPU pass is required.
     const skyWindow = PHASE3_UNDERWATER_TRANSPORT
-      ? clamp(overheadView.mul(0.72)
-          .add(sunFacing.mul(0.16)).add(shallow.mul(0.08)), 0, 0.94)
+      ? clamp(overheadView.mul(0.80)
+          .add(sunFacing.mul(0.15)).add(shallow.mul(0.08)), 0, 0.97)
       : clamp(overheadView.mul(0.62)
           .add(sunFacing.mul(0.22)).add(shallow.mul(0.10)), 0, 0.92);
     // Distort the cloud-bearing sky atlas with genuine FFT slope. This is
@@ -840,7 +840,7 @@ function installWaterProOptics(handle) {
     ).add(vec2(0.5, 0));
     const cloudSample = texture(cloudSkyTexture, skyUV);
     const skyRadiance = mix(skyColor, cloudSample.rgb,
-      cloudSample.a.mul(WAVE_DISTORTION_2 ? 0.68 : 0.52));
+      cloudSample.a.mul(WAVE_DISTORTION_2 ? 0.80 : 0.64));
     const refractedSky = mix(color(0x267c96), skyRadiance, skyWindow);
     // Refracted illumination: projected sunlight is stronger where the
     // deformed FFT face bends toward the sun. Keep the lobe broad and
@@ -888,7 +888,7 @@ function installWaterProOptics(handle) {
     // Soft fragmented refraction shimmer is strongest toward the surface.
     // This shares the exact FFT-driven transmission/reflection normal.
     const undersideShimmer = lightFocus.mul(float(
-      PHASE3_UNDERWATER_TRANSPORT ? 0.080 : 0.065))
+      PHASE3_UNDERWATER_TRANSPORT ? 0.12 : 0.075))
       .mul(float(1).sub(angleReflection));
     const illuminatedUnderside = underside.add(sunColor.mul(undersideShimmer));
     const nonFoamGlint = REFLECTIVE_CRESTS

@@ -291,11 +291,14 @@ const extraEdits = [
   // on mobile and uses the live scene depth buffer. Disable by default on
   // touch devices, but allow explicit ?riftDepth=on comparison.
   [
-    '    return localStorage.getItem("riftWaterGraphicsMode") === "experimental" &&\n      debug !== "noexp" && debug !== "nodepth";',
-    `    const mobileDepthOptIn = !isTouchDevice ||
+    '    return (RIFT_ATMOSPHERE_V2 ||\n      localStorage.getItem("riftWaterGraphicsMode") === "experimental") &&\n      debug !== "noexp" && debug !== "nodepth";',
+    `    // Explicit atmosphere test bypasses the old mobile depth gate.
+    // No flag still preserves the previously tested iOS default.
+    const mobileDepthOptIn = RIFT_ATMOSPHERE_V2 || !isTouchDevice ||
       new URLSearchParams(location.search).get("riftDepth") === "on";
     return mobileDepthOptIn &&
-      localStorage.getItem("riftWaterGraphicsMode") === "experimental" &&
+      (RIFT_ATMOSPHERE_V2 ||
+        localStorage.getItem("riftWaterGraphicsMode") === "experimental") &&
       debug !== "noexp" && debug !== "nodepth";`,
     "Mobile-safe experimental scene-depth compositor default",
   ],

@@ -14,6 +14,8 @@ const FFT_WATER_HALF = 1000;
 const FLOOR_SNAP = 128;
 const WATER_SNAP = 256;
 // Structural abyss experiment: keep stable production sea untouched.
+const ORGANIC_GEO = typeof location !== "undefined" &&
+  new URLSearchParams(location.search).get("riftOceanGeo") === "on";
 const ABYSS_TRIAL = typeof location !== "undefined" &&
   new URLSearchParams(location.search).get("riftAbyss") === "on";
 // Unlike the previous hard square hole around the near FFT mesh, overlap
@@ -202,24 +204,24 @@ export function createInfiniteOceanStream(scene, waterY, sampleHeight, options =
     if (fx !== lastFloorX || fz !== lastFloorZ) {
       const geom = buildGrid(
         fx, fz, FLOOR_SIZE, FLOOR_GRID,
-        (x, z) => sampleHeight(x, z) - (ABYSS_TRIAL ? 0.65 : 0.18),
+        (x, z) => sampleHeight(x, z) - (ABYSS_TRIAL || ORGANIC_GEO ? 0.65 : 0.18),
         // The coarse 16m streaming-floor cells previously cut away
         // everything whose *centre* landed within +/-240m, exposing a
         // geometric square seam at the fine island mesh edge. Under the
         // new profile overlap the edge by one cell instead (floor is
         // slightly lower to keep the fine terrain foremost).
-        (x, z) => Math.abs(x) < (ABYSS_TRIAL ? ISLAND_MESH_HALF - 19 : ISLAND_MESH_HALF) &&
-          Math.abs(z) < (ABYSS_TRIAL ? ISLAND_MESH_HALF - 19 : ISLAND_MESH_HALF),
+        (x, z) => Math.abs(x) < (ABYSS_TRIAL || ORGANIC_GEO ? ISLAND_MESH_HALF - 19 : ISLAND_MESH_HALF) &&
+          Math.abs(z) < (ABYSS_TRIAL || ORGANIC_GEO ? ISLAND_MESH_HALF - 19 : ISLAND_MESH_HALF),
         (out, x, z, y) => {
           const depth = Math.max(0, waterY - y);
           // The seabed gently disappears into the abyss palette as
           // sunlight can no longer reach it. Colors are computed only when
           // a tile is regenerated, never per frame.
-          const blue = ABYSS_TRIAL
+          const blue = ABYSS_TRIAL || ORGANIC_GEO
             ? smooth((depth - 5) / 48)
             : smooth((depth - 14) / 88);
-          out.set(ABYSS_TRIAL ? 0x8fa89e : 0xc5c5b2)
-            .lerp(deepFloorColor, blue * (ABYSS_TRIAL ? 1 : 0.98));
+          out.set(ABYSS_TRIAL || ORGANIC_GEO ? 0x8fa89e : 0xc5c5b2)
+            .lerp(deepFloorColor, blue * (ABYSS_TRIAL || ORGANIC_GEO ? 1 : 0.98));
         },
       );
       const previous = floorMesh.geometry;
@@ -250,7 +252,8 @@ export function createInfiniteOceanStream(scene, waterY, sampleHeight, options =
         floorVertices: floorMesh.geometry.attributes.position?.count ?? 0,
         waterVertices: farMesh.geometry.attributes.position?.count ?? 0,
         distance: Math.round(Math.hypot(playerPos.x, playerPos.z)),
-        mode: BLEND_OCEAN ? "feathered-fft-outer-ocean" :
+        mode: ORGANIC_GEO ? "organic-shelf-and-chasm" :
+          BLEND_OCEAN ? "feathered-fft-outer-ocean" :
           ABYSS_TRIAL ? "abyss-streaming-overlap" : "streaming-two-meshes",
       };
     }

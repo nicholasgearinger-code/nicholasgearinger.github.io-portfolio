@@ -1705,7 +1705,15 @@ return Fn(() => {
     // Above-water rays looking sharply up still show the surface itself.
     const horizonOrDown = float(1).sub(smoothstep(
       float(0.09), float(0.52), rayY));
-    const missingSky = isBackground.mul(horizonOrDown);
+    const horizonAngle = float(1).sub(smoothstep(
+      float(0.025), float(0.22), abs(rayY)));
+    // Even when an incorrect far-water mesh writes a plausible depth,
+    // it should not create a solid pale wall at the underwater horizon.
+    // Suppress only distant near-horizontal pixels, never nearby reefs.
+    const farHorizon = smoothstep(float(28), float(84),
+      fragmentDistance).mul(horizonAngle).mul(0.92);
+    const missingSky = max(isBackground.mul(horizonOrDown),
+      farHorizon);
     const fullyUnder = smoothstep(float(0.6), float(3.2),
       cameraDepth).mul(oceanDepthUnderwaterMix);
     const backgroundWater = scatteredWater.add(

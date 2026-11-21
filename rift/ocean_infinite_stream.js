@@ -85,7 +85,16 @@ function createFarWaterMaterial() {
   if (BLEND_OCEAN) {
     const boxDistance = max(abs(p.x), abs(p.z));
     const edgeWeight = smoothstep(float(760), float(1110), boxDistance);
-    material.opacityNode = edgeWeight;
+    // Below the surface, transparent holes exposed the sky-colored
+    // background as a sharp white ribbon. The distant sea is now an
+    // actual ceiling behind the near FFT underside; fade its opacity
+    // across the same overlap region before reaching the outer mesh.
+    const volumeBlend = typeof location !== "undefined" &&
+      new URLSearchParams(location.search).get("riftOceanVolume") === "on";
+    const submerged = volumeBlend
+      ? smoothstep(float(0.5), float(2.5), cameraDepth) : float(0);
+    material.opacityNode = max(edgeWeight,
+      submerged.mul(smoothstep(float(610), float(940), boxDistance)));
     material.transparent = true;
     material.depthWrite = false;
     material.forceSinglePass = true;

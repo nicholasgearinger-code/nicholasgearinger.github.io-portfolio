@@ -1160,6 +1160,22 @@ function installWaterProOptics(handle) {
         new URLSearchParams(location.search).get("riftRefraction") === "off",
     };
   }
+  // Ocean-volume trial: shallow transparent water was exposing the sandy
+  // seabed almost as if no water existed. Add a small absorption envelope
+  // to the existing alpha node (both backdrop and fallback variants),
+  // leaving underwater looking-up transparency and foam intact.
+  // No new texture or scene read; full fallback with flag absent.
+  if (typeof location !== "undefined" &&
+      new URLSearchParams(location.search).get("riftOceanVolume") === "on") {
+    const shallowWaterThickness = float(1).sub(smoothstep(
+      float(0.3), float(12), depth));
+    const bodyAlpha = clamp(
+      float(0.12).add(shallowWaterThickness.mul(0.09)),
+      0, 0.23).mul(float(1).sub(underwater));
+    material.opacityNode = clamp(
+      material.opacityNode.add(bodyAlpha)
+        .add(combinedFoam.mul(0.025)), 0, 0.96);
+  }
   material.thicknessNode = mix(
     mix(originalThickness, float(0.075), shallow.mul(0.66)),
     float(0.045),

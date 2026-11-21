@@ -6544,6 +6544,35 @@ function animate() {
     scene.fog.color.copy(sceneBackgroundColor);
     scene.fog.density = THREE.MathUtils.lerp(0.010, 0.038, abyssT);
   }
+  // Organic ocean mode: water-column extinction is driven by VERTICAL
+  // dive depth. Offshore distance shapes the terrain only; it no longer
+  // forces the entire underwater scene dark when swimming horizontally.
+  // Reuse existing fog/background; do not allocate new draw passes.
+  if (currentBiome === "crystal" && isFullySubmerged &&
+      new URLSearchParams(location.search).get("riftOceanGeo") === "on") {
+    const dive = Math.max(0, LIQUID_LEVEL.crystal - camera.position.y);
+    const depthT = THREE.MathUtils.smoothstep(dive, 3, 105);
+    const lowerT = THREE.MathUtils.smoothstep(dive, 24, 210);
+    sceneBackgroundColor.setRGB(
+      THREE.MathUtils.lerp(0.013, 0.0012, depthT),
+      THREE.MathUtils.lerp(0.133, 0.009, depthT),
+      THREE.MathUtils.lerp(0.167, 0.027, depthT)
+    );
+    sceneBackgroundColor.multiplyScalar(1 - lowerT * 0.57);
+    scene.fog.color.copy(sceneBackgroundColor);
+    scene.fog.density = THREE.MathUtils.lerp(0.008, 0.039, depthT);
+    // Ground clearance, not just depth below sea level, is the useful
+    // readout for free diving. This uses the same deterministic sampler.
+    if (new URLSearchParams(location.search).get("riftPerf") === "1") {
+      const floorY = terrainHeightAt(LEVELS[currentLevelIdx],
+        camera.position.x, camera.position.z, WORLD_SEED);
+      globalThis.__riftOceanGeometryProbe = {
+        depth: Math.round(dive),
+        floorDepth: Math.round(Math.max(0, LIQUID_LEVEL.crystal - floorY)),
+        clearance: Math.round(Math.max(0, camera.position.y - floorY)),
+      };
+    }
+  }
   // Lens raindrops — real TSL two-pass screen-space effect (see its own
   // setup comment above for why this replaced the old inert raw-GLSL
   // stub). Same enable/threshold logic already established here — skipped

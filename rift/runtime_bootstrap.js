@@ -574,6 +574,7 @@ function monitorPerformance(now) {
         oceanStream: globalThis.__riftOceanStream || null,
         swim: globalThis.__riftSwimProbe || null,
         surfMode: globalThis.__riftSurf3DMode || "not initialized",
+        oceanGeometry: globalThis.__riftOceanGeometryProbe || null,
         playable: globalThis.__riftPlayableState || null,
         note: "CPU submission only. Does not measure GPU kernel execution.",
       };
@@ -611,6 +612,9 @@ function monitorPerformance(now) {
             " · " + snapshot.playable.level +
             " · terrain " + snapshot.playable.terrainDraw
           : (globalThis.__riftModuleLoaded ? "LOADED / WAITING FOR LEVEL" : "GAME MODULE NOT READY")) + "\n" +
+        (snapshot.oceanGeometry ? "Ocean: depth " + snapshot.oceanGeometry.depth +
+          "m · seabed " + snapshot.oceanGeometry.floorDepth +
+          "m · floor clearance " + snapshot.oceanGeometry.clearance + "m\n" : "") +
         "Surf visuals: " + snapshot.surfMode + "\n" +
         (snapshot.swim ? "Swim: " + (snapshot.swim.swimming ? "YES" : "no") +
           " · submerged: " + (snapshot.swim.submerged ? "YES" : "no") +

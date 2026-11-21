@@ -796,9 +796,12 @@ function biomeHeight(biome, worldX, worldZ, seed) {
     // The exact same sampler serves terrain mesh, offshore stream and physics.
     const contourWarp = Math.sin(angle * 3.1 + 0.8) * 19
       + Math.sin(angle * 7.2 - 1.2) * 8;
-    const shelfEdge = 172 + contourWarp;
-    const shelfDrop = ease(shelfEdge - 35, shelfEdge + 260);
-    const cliffLip = ease(shelfEdge + 58, shelfEdge + 410);
+    // Bring the reef-to-chasm drop into view within a few minutes of
+    // swimming from the beach. This profile belongs only to the opt-in
+    // organic ocean and leaves the original Coral Shallows unchanged.
+    const shelfEdge = 156 + contourWarp;
+    const shelfDrop = ease(shelfEdge - 22, shelfEdge + 175);
+    const cliffLip = ease(shelfEdge + 95, shelfEdge + 375);
     const ravineCenter = 62 +
       Math.sin(worldZ * 0.004 + 1.2) * 68 +
       Math.sin(worldZ * 0.011 - 0.4) * 24;
@@ -816,10 +819,10 @@ function biomeHeight(biome, worldX, worldZ, seed) {
       Math.sin(worldZ * 0.018 - seed) * 3.8 +
       Math.sin(worldX * 0.037 - worldZ * 0.012) * 1.4;
     const organicSeabed = LIQUID_LEVEL.crystal - 4.2
-      - shelfDrop * 42
-      - cliffLip * 105
-      - ease(550, 1350) * 115
-      - channelT * channelEnvelope * 102
+      - shelfDrop * 78
+      - cliffLip * 112
+      - ease(550, 1350) * 128
+      - channelT * channelEnvelope * 108
       + erosion * ease(125, 230);
     const seabed = oceanGeo
       ? organicSeabed

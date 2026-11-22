@@ -226,7 +226,7 @@ float focusedCellBoundaries(vec2 pos,float time){
   // Small difference between two closest wave-lens regions indicates
   // a focused network boundary. Smooth widths avoid hard pixel grids.
   float distanceToLine=max(0.,sqrt(second)-sqrt(first));
-  float line=smoothstep(.16,.012,distanceToLine);
+  float line=1.-smoothstep(.012,.16,distanceToLine);
   return line;
 }
 float waveSunCaustics(vec2 position,float t){

@@ -58,7 +58,7 @@ void main(){
   vCrest=smoothstep(.68,1.28,delta.y)*smoothstep(.15,.65,length(slope));
   gl_Position=projectionMatrix*viewMatrix*vec4(vWorld,1.);
 }`;
-const waterFrag="\nprecision highp float;\nuniform float uTime,uSun,uClarity,uRefraction;\nuniform vec3 uEye;\nuniform vec2 uViewport;\nuniform sampler2D uSceneTex;\nvarying vec3 vWorld,vWaveNormal;\nvarying float vCrest;\nvec3 sky(vec3 dir){\n float h=clamp(dir.y*.8+.28,0.,1.);\n vec3 base=mix(vec3(.65,.81,.91),vec3(.10,.36,.68),pow(h,.64));\n float clouds=sin(dir.x*21.+uTime*.002)*sin(dir.z*24.-dir.x*11.);\n clouds=smoothstep(.30,.76,clouds)*(.35+.65*smoothstep(.1,.65,dir.y));\n base=mix(base,vec3(.95,.98,1.),clouds*.58);\n float solar=pow(max(dot(dir,normalize(vec3(.37,.54,-.7))),0.),240.);\n return base+vec3(1.,.81,.54)*solar*2.2*uSun;\n}\nvoid main(){\n vec3 n=normalize(vWaveNormal);\n vec3 V=normalize(uEye-vWorld);\n bool underwater=!gl_FrontFacing;\n if(underwater)n=-n;\n vec2 p=vWorld.xz;\n vec2 mini=vec2(sin(p.x*2.3+p.y*.65+uTime*1.7),cos(p.y*2.8-p.x*.45+uTime*1.5));\n n=normalize(n+vec3(mini.x,0.,mini.y)*.036);\n float cosTheta=clamp(dot(n,V),0.,1.);\n float f0=pow((1.333-1.)/(1.333+1.),2.);\n float fresnel=f0+(1.-f0)*pow(1.-cosTheta,5.);\n float eta=underwater?1.333:1./1.333;\n vec3 exitRay=refract(-V,n,eta);\n bool totalInternalReflection=dot(exitRay,exitRay)<.00001;\n if(totalInternalReflection)fresnel=1.;\n float sunSpark=pow(max(dot(reflect(-normalize(vec3(.37,.54,-.7)),n),V),0.),90.);\n if(!underwater){\n  // Real scene-color sample contains seabed and rocks. Normal deflection\n  // refracts that scene image at reduced resolution; no recursive render.\n  vec2 uv=gl_FragCoord.xy/max(uViewport,vec2(1.));\n  vec2 lens=vec2(n.x,n.z)*(.020+.025*(1.-cosTheta));\n  vec2 warped=clamp(uv+lens*uRefraction,vec2(.005),vec2(.995));\n  vec3 behind=mix(vec3(.014,.20,.27),texture2D(uSceneTex,warped).rgb,clamp(uRefraction,0.,1.));\n  vec3 body=vec3(.014,.20,.27);\n  vec3 absorption=exp(vec3(-.18,-.075,-.035)*max(1.,3.0/uClarity));\n  vec3 transmitted=mix(behind*absorption+vec3(.018,.064,.077),body,.22);\n  vec3 reflection=sky(reflect(-V,n));\n  vec3 outColor=mix(transmitted,reflection,fresnel);\n  float slope=1.-clamp(abs(n.y),0.,1.);\n  float foam=vCrest*smoothstep(.40,.78,slope);\n  outColor=mix(outColor,vec3(.80,.95,.93),foam*.45);\n  outColor+=vec3(1.,.87,.62)*sunSpark*.69*uSun;\n  float distanceToEye=length(uEye-vWorld);\n  outColor=mix(outColor,vec3(.53,.72,.80),1.-exp(-distanceToEye*.0027));\n  gl_FragColor=vec4(outColor,1.);\n }else{\n  // Underwater-to-air transmission obeys Snell and total internal reflection.\n  vec3 transmitted=sky(normalize(exitRay+vec3(0.,.0001,0.)));\n  vec3 internalReflection=vec3(.014,.15,.20);\n  float depth=max(0.,-uEye.y);\n  float transmission=exp(-depth*.048/max(uClarity,.25));\n  vec3 outColor=mix(transmitted*transmission,internalReflection,fresnel);\n  outColor+=vec3(.015,.095,.14)*(1.-transmission)*uSun;\n  gl_FragColor=vec4(outColor,1.);\n }\n}";
+const waterFrag="\nprecision highp float;\nuniform float uTime,uSun,uClarity,uRefraction;\nuniform vec3 uEye;\nuniform vec2 uViewport;\nuniform sampler2D uSceneTex;\nvarying vec3 vWorld,vWaveNormal;\nvarying float vCrest;\nvec3 sky(vec3 dir){\n float h=clamp(dir.y*.8+.28,0.,1.);\n vec3 base=mix(vec3(.65,.81,.91),vec3(.10,.36,.68),pow(h,.64));\n float clouds=sin(dir.x*21.+uTime*.002)*sin(dir.z*24.-dir.x*11.);\n clouds=smoothstep(.30,.76,clouds)*(.35+.65*smoothstep(.1,.65,dir.y));\n base=mix(base,vec3(.95,.98,1.),clouds*.58);\n float solar=pow(max(dot(dir,normalize(vec3(.37,.54,-.7))),0.),240.);\n return base+vec3(1.,.81,.54)*solar*2.2*uSun;\n}\nvoid main(){\n vec3 n=normalize(vWaveNormal);\n vec3 V=normalize(uEye-vWorld);\n bool underwater=!gl_FrontFacing;\n if(underwater)n=-n;\n vec2 p=vWorld.xz;\n vec2 mini=vec2(sin(p.x*2.3+p.y*.65+uTime*1.7),cos(p.y*2.8-p.x*.45+uTime*1.5));\n n=normalize(n+vec3(mini.x,0.,mini.y)*.036);\n float cosTheta=clamp(dot(n,V),0.,1.);\n float f0=pow((1.333-1.)/(1.333+1.),2.);\n float fresnel=f0+(1.-f0)*pow(1.-cosTheta,5.);\n float eta=underwater?1.333:1./1.333;\n vec3 exitRay=refract(-V,n,eta);\n bool totalInternalReflection=dot(exitRay,exitRay)<.00001;\n if(totalInternalReflection)fresnel=1.;\n float sunSpark=pow(max(dot(reflect(-normalize(vec3(.37,.54,-.7)),n),V),0.),90.);\n if(!underwater){\n  // Real scene-color sample contains seabed and rocks. Normal deflection\n  // refracts that scene image at reduced resolution; no recursive render.\n  vec2 uv=gl_FragCoord.xy/max(uViewport,vec2(1.));\n  vec2 lens=vec2(n.x,n.z)*(.020+.025*(1.-cosTheta));\n  vec2 warped=clamp(uv+lens*uRefraction,vec2(.005),vec2(.995));\n  vec3 behind=mix(vec3(.014,.20,.27),texture2D(uSceneTex,warped).rgb,clamp(uRefraction,0.,1.));\n  vec3 body=vec3(.014,.20,.27);\n  vec3 absorption=exp(vec3(-.18,-.075,-.035)*max(1.,3.0/uClarity));\n  vec3 transmitted=mix(behind*absorption+vec3(.018,.064,.077),body,.22);\n  vec3 reflection=sky(reflect(-V,n));\n  vec3 outColor=mix(transmitted,reflection,fresnel);\n  float slope=1.-clamp(abs(n.y),0.,1.);\n  float foam=vCrest*smoothstep(.40,.78,slope);\n  outColor=mix(outColor,vec3(.80,.95,.93),foam*.45);\n  outColor+=vec3(1.,.87,.62)*sunSpark*.69*uSun;\n  float distanceToEye=length(uEye-vWorld);\n  outColor=mix(outColor,vec3(.53,.72,.80),1.-exp(-distanceToEye*.0027));\n  gl_FragColor=vec4(outColor,1.);\n }else{\n  // Underwater-to-air transmission obeys Snell and total internal reflection.\n  vec3 transmitted=sky(normalize(exitRay+vec3(0.,.0001,0.)));\n  vec3 internalReflection=vec3(.017,.18,.23);\n  float depth=max(0.,-uEye.y);\n  float transmission=exp(-depth*.048/max(uClarity,.25));\n  // Preserve a bright real sky window through the underside wherever the\n  // refracted ray escapes the surface; preserve TIR at grazing angles.\n  float upward=clamp(exitRay.y,0.,1.);\n  float skyStrength=(.75+.30*upward)*uSun;\n  vec3 skyTransmission=transmitted*transmission*skyStrength;\n  vec3 outColor=mix(skyTransmission,internalReflection,fresnel);\n  outColor+=vec3(.017,.093,.13)*(1.-transmission)*uSun;\n  gl_FragColor=vec4(outColor,1.);\n }\n}";
 const geom=new THREE.PlaneGeometry(560,560,mobile?170:244,mobile?170:244);
 geom.rotateX(-Math.PI/2);
 const ocean=new THREE.Mesh(geom,new THREE.ShaderMaterial({
@@ -82,16 +82,31 @@ function resizeRefraction(){
 }
 resizeRefraction();
 const backdrop=new THREE.Mesh(new THREE.SphereGeometry(700,24,16),new THREE.ShaderMaterial({
- uniforms:{uUnder:{value:0},uTime:waterUniforms.uTime},
+ uniforms:{uUnder:{value:0},uTime:waterUniforms.uTime,uSun:waterUniforms.uSun,uClarity:waterUniforms.uClarity,uDepth:{value:0}},
  side:THREE.BackSide,depthWrite:false,
  vertexShader:`varying vec3 vDir;void main(){vDir=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
- fragmentShader:`precision mediump float;varying vec3 vDir;uniform float uUnder;uniform float uTime;
- void main(){vec3 d=normalize(vDir);float h=clamp(d.y*.5+.5,0.,1.);
- vec3 air=mix(vec3(.67,.84,.93),vec3(.12,.40,.75),pow(h,.75));
- float cloud=sin(d.x*28.+d.z*13.+uTime*.004)*sin(d.z*31.-d.x*17.);
- air=mix(air,vec3(.94,.96,.97),smoothstep(.25,.85,cloud)*.38);
- vec3 sea=mix(vec3(.013,.085,.14),vec3(.03,.31,.43),smoothstep(.12,.93,h));
- gl_FragColor=vec4(mix(air,sea,uUnder),1.);}`
+ fragmentShader:`precision highp float;
+ varying vec3 vDir;
+ uniform float uUnder,uTime,uSun,uClarity,uDepth;
+ void main(){
+   vec3 d=normalize(vDir);
+   float h=clamp(d.y*.5+.5,0.,1.);
+   vec3 air=mix(vec3(.67,.84,.93),vec3(.12,.40,.75),pow(h,.75));
+   float cloud=sin(d.x*28.+d.z*13.+uTime*.004)*sin(d.z*31.-d.x*17.);
+   air=mix(air,vec3(.94,.96,.97),smoothstep(.25,.85,cloud)*.38);
+   // Underwater: an upward-directed sky light field attenuated by the
+   // vertical water column. This fills missing distant surface pixels,
+   // without replacing the actual refracting 3D ceiling.
+   float up=smoothstep(-.18,.88,d.y);
+   float depthFade=exp(-uDepth*.066/max(uClarity,.25));
+   vec3 water=vec3(.009,.070,.114);
+   vec3 skylight=vec3(.075,.40,.47)*up*depthFade*uSun;
+   vec3 skyWindow=vec3(.026,.11,.16)*pow(max(d.y,0.),1.5);
+   float ripple=sin(d.x*18.+uTime*.41)*sin(d.z*21.-uTime*.53);
+   vec3 sea=water+skylight+skyWindow+vec3(.009,.032,.038)*ripple*up;
+   sea=mix(sea,vec3(.005,.028,.052),smoothstep(26.,100.,uDepth));
+   gl_FragColor=vec4(mix(air,sea,uUnder),1.);
+ }`
 }));
 backdrop.renderOrder=-100;
 scene.add(backdrop);
@@ -157,7 +172,7 @@ function setView(v){
  for(const b of document.querySelectorAll("[data-view]"))b.setAttribute("aria-pressed",String(b.dataset.view===v));
  if(v==="surface"){camera.position.set(0,4.6,14);pitch=-.07;}
  if(v==="waterline"){camera.position.set(0,.23,14);pitch=-.015;}
- if(v==="underwater"){camera.position.set(0,-4,14);pitch=-.22;}
+ if(v==="underwater"){camera.position.set(0,-4,14);pitch=.24;}
  yaw=0;rotate();backdrop.material.uniforms.uUnder.value=v==="underwater"?1:0;
 }
 function rotate(){camera.rotation.order="YXZ";camera.rotation.y=yaw;camera.rotation.x=pitch;}
@@ -194,6 +209,7 @@ function animate(){
  }
  ocean.position.x=camera.position.x;ocean.position.z=camera.position.z;
  backdrop.position.copy(camera.position);
+ backdrop.material.uniforms.uDepth.value=Math.max(0,-camera.position.y);
  waterUniforms.uRefraction.value=params.refraction;
  if(view!=="underwater"&&params.refraction>.001){
    ocean.visible=false;

@@ -4005,7 +4005,22 @@ vec2 causticVoronoiF1F2(vec2 p) {
     // before. Bumping liquidSegments up (in graphicsSettings.js) would
     // restore the old near-shore density if this reads too blocky
     // up close.
-    const waterPlaneSize = level.biome === "crystal" ? 2000 : TERRAIN_SIZE;
+    // Focus the existing 240x240 iPhone FFT presentation grid on the
+    // playable sea instead of stretching it over two kilometres.
+    // The distant streamed ocean covers beyond this footprint. No extra
+    // simulation grids or per-frame geometry are allocated.
+    const mobileCinematicOcean = level.biome === "crystal" &&
+      (/iPhone|iPad|iPod/i.test(navigator.userAgent || "") ||
+        (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)) &&
+      (() => {
+        try {
+          return localStorage.getItem("riftWaterGraphicsMode") === "experimental" &&
+            new URLSearchParams(location.search).get("riftWideOcean") !== "1";
+        } catch (_) { return false; }
+      })();
+    const waterPlaneSize = level.biome === "crystal"
+      ? (mobileCinematicOcean ? 1400 : 2000) : TERRAIN_SIZE;
+    globalThis.__riftOceanPresentationSize = waterPlaneSize;
     liquidHandle = createLiquidPlane(scene, level.biome, LIQUID_LEVEL[level.biome], waterPlaneSize, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
     if (level.biome === "crystal") installUnderwaterFFTDepthGraph(liquidHandle);
     // Real 3D curling wave-crest geometry — per explicit "genuine 3D

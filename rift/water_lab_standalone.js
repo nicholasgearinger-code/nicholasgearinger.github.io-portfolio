@@ -29,6 +29,16 @@ const mobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || navigato
 let renderer;
 try {
   renderer = new THREE.WebGLRenderer({canvas, antialias:false, powerPreference:"high-performance", alpha:false});
+  // Report GLSL compile/link failures on mobile (previously silent black
+  // geometry while the ocean and FPS counter continued to run).
+  renderer.debug.onShaderError=(gl,program,vs,fs)=>{
+    const message=[
+      gl.getProgramInfoLog(program),
+      gl.getShaderInfoLog(vs),
+      gl.getShaderInfoLog(fs)
+    ].filter(Boolean).join(" | ");
+    showLabFailure(new Error("GLSL compile/link: "+message.slice(0,550)));
+  };
   renderer.setPixelRatio(Math.min(devicePixelRatio, mobile?1.25:1.75));
   renderer.setSize(window.innerWidth,window.innerHeight);
   renderer.outputColorSpace=THREE.SRGBColorSpace;

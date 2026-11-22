@@ -4052,8 +4052,16 @@ vec2 causticVoronoiF1F2(vec2 p) {
             new URLSearchParams(location.search).get("riftWideOcean") !== "1";
         } catch (_) { return false; }
       })();
+    // Dedicated reference-surface A/B: concentrate the existing FFT mesh
+    // around the playable coastline. No increase in geometry or FFT compute.
+    // Far water must use the matching overlap transition in
+    // ocean_infinite_stream.js; the stable 1400m path remains default.
+    const referenceSurface = mobileCinematicOcean &&
+      new URLSearchParams(location.search).get("riftWaterReference") === "1";
     const waterPlaneSize = level.biome === "crystal"
-      ? (mobileCinematicOcean ? 1400 : 2000) : TERRAIN_SIZE;
+      ? (referenceSurface ? 1100 : mobileCinematicOcean ? 1400 : 2000)
+      : TERRAIN_SIZE;
+    globalThis.__riftReferenceSurface = referenceSurface;
     globalThis.__riftOceanPresentationSize = waterPlaneSize;
     liquidHandle = createLiquidPlane(scene, level.biome, LIQUID_LEVEL[level.biome], waterPlaneSize, (x, z) => terrainHeightAt(level, x, z, WORLD_SEED));
     if (level.biome === "crystal") installUnderwaterFFTDepthGraph(liquidHandle);

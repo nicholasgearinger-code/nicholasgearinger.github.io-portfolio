@@ -12,7 +12,7 @@ h1{font-size:15px;margin:0;font-weight:700;letter-spacing:.025em}small{display:b
 #hint{position:absolute;top:25%;left:50%;transform:translateX(-50%);font-size:11px;color:#d7eff9aa;pointer-events:none;text-align:center;white-space:nowrap}a{color:#a5f2ef;text-decoration:none}#status{color:#f8cda3;font-size:11px;display:none;margin-top:6px}
 @media(max-height:680px){.inputs{grid-template-columns:repeat(4,1fr)}#hint{display:none}.panel{padding:8px 10px}}
 </style></head>
-<body><canvas id="scene"></canvas><header id="top"><div class="panel"><h1>Rift · Water Lab <span style="color:#78e8ef">10.20</span></h1><small>Independent ocean research · no game changes</small><div id="status"></div></div><div class="panel stat"><span id="fps">FPS —</span><br><span id="tri">Triangles —</span><br><a href="rift-play.html">Back to Rift</a></div></header>
+<body><canvas id="scene"></canvas><header id="top"><div class="panel"><h1>Rift · Water Lab <span style="color:#78e8ef">10.21</span></h1><small>Independent ocean research · no game changes</small><div id="status"></div></div><div class="panel stat"><span id="fps">FPS —</span><br><span id="tri">Triangles —</span><br><a href="rift-play.html">Back to Rift</a></div></header>
 <div id="hint">Drag to look around · experiment with wave motion</div>
 <section id="controls"><div class="panel controls"><div class="segment" id="views"><button data-view="surface" aria-pressed="true">Ocean surface</button><button data-view="waterline" aria-pressed="false">Waterline</button><button data-view="underwater" aria-pressed="false">Underwater</button></div></div><details class="panel controls" id="lab-settings"><summary>Adjust water settings</summary><div class="inputs">
 <label>Wave height <output id="heightOut">1.0</output><input id="height" type="range" min=".25" max="2.6" step=".05" value="1"></label>
@@ -38,4 +38,4 @@ h1{font-size:15px;margin:0;font-weight:700;letter-spacing:.025em}small{display:b
 <label>Underwater shimmer <output id="undersideShimmerOut">1.0</output><input id="undersideShimmer" type="range" min="0" max="2" step=".05" value="1"></label>
 <label>Physical light coupling <output id="physicalLightOut">1.0</output><input id="physicalLight" type="range" min="0" max="1" step=".05" value="1"></label>
 </div></details></section>
-<script type="module" src="./rift/water_lab_standalone.js?lab=shallow-sunlight-transport-v10-20"></script></body></html>
+<script type="module" src="./rift/water_lab_standalone.js?lab=forward-sunlight-v10-21"></script></body></html>

@@ -161,6 +161,23 @@ for(let i=0;i<46;i++){
  dummy.scale.set(.65+(i%4)*.35,.40+(i%3)*.28,.75+(i%6)*.38);
  dummy.updateMatrix();rocks.setMatrixAt(i,dummy.matrix);
 }scene.add(rocks);
+// Scene isolation probe: no shader uniforms, caustics or shadow sampling.
+// This is opt-in and never modifies the normal Water Lab materials.
+const sceneProbe=new URLSearchParams(location.search).get("labSceneProbe")==="1";
+if(sceneProbe){
+  bottom.material=new THREE.MeshBasicMaterial({color:0xf5e7a3,side:THREE.DoubleSide});
+  rocks.material=new THREE.MeshBasicMaterial({color:0xff637d});
+  const marker=new THREE.Mesh(
+    new THREE.SphereGeometry(1.2,12,8),
+    new THREE.MeshBasicMaterial({color:0x8aff55})
+  );
+  marker.position.set(0,-5.5,-8);
+  scene.add(marker);
+  const label=document.createElement("div");
+  label.textContent="SCENE PROBE: yellow sand / pink rocks / green marker";
+  label.style.cssText="position:absolute;top:12px;left:8px;right:8px;z-index:100;color:#fff;background:#122f45e8;padding:8px 10px;border-radius:8px;font:12px monospace;pointer-events:none";
+  document.body.appendChild(label);
+}
 // Light-space rock shadow capture: reuses the existing instanced geometry,
 // no additional CPU ray tests or per-object shadow meshes.
 const shadowResolution=512;
@@ -208,7 +225,7 @@ canvas.addEventListener("pointerup",()=>dragging=false);
 canvas.addEventListener("pointercancel",()=>dragging=false);
 function resize(){camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);resizeRefraction()}
 window.addEventListener("resize",resize);
-setView("surface");
+setView(sceneProbe?"underwater":"surface");
 let last=performance.now(),count=0,smoothed=60;
 function animate(){
  requestAnimationFrame(animate);
@@ -225,7 +242,7 @@ function animate(){
  bottomMat.uniforms.uPhysicalLight.value=params.physicalLight;
  bottomMat.uniforms.uShafts.value=params.shafts;
  bottomMat.uniforms.uOcclusion.value=params.occlusion;
- if((shadowFrame++ % (mobile?3:2))===0&&params.occlusion>.001){
+ if(!sceneProbe&&(shadowFrame++ % (mobile?3:2))===0&&params.occlusion>.001){
    renderer.setRenderTarget(shadowTarget);
    renderer.clear();
    renderer.render(shadowScene,shadowCamera);

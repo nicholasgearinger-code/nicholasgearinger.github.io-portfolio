@@ -19,6 +19,10 @@ function createUnifiedSurfaceAdapter({
 }) {
   const priorColor = material.colorNode;
   const priorRoughness = material.roughnessNode;
+  // Opt-in mobile reference surface uses real FFT facets plus a stronger
+  // coherent optical normal. No second scene capture, simulation or pass.
+  const referenceSurfaceMode = typeof location !== "undefined" &&
+    new URLSearchParams(location.search).get("riftWaterReference") === "1";
   // The Experimental optical adapter previously replaced both of these
   // node graphs wholesale. On iPhone that silently hid Rift's Fluid Lab
   // shoreline: bilinearly solved foam, flow normals, local optical thickness
@@ -80,8 +84,10 @@ function createUnifiedSurfaceAdapter({
   );
   const smoothShoreNormal = mix(geometry.normalNode, vec3(0, 1, 0),
     shoreDamping.mul(0.24)).normalize();
-  const microX = cos(phaseA).mul(0.025).add(sin(phaseB).mul(0.018));
-  const microZ = sin(phaseA).mul(0.022).sub(cos(phaseB).mul(0.015));
+  const microX = cos(phaseA).mul(referenceSurfaceMode ? 0.065 : 0.025)
+    .add(sin(phaseB).mul(referenceSurfaceMode ? 0.045 : 0.018));
+  const microZ = sin(phaseA).mul(referenceSurfaceMode ? 0.059 : 0.022)
+    .sub(cos(phaseB).mul(referenceSurfaceMode ? 0.041 : 0.015));
   const n = smoothShoreNormal.add(vec3(
     microX.mul(rippleGain).mul(float(1).sub(shoreDamping.mul(0.46))),
     float(0),
@@ -362,16 +368,18 @@ function createUnifiedSurfaceAdapter({
       new URLSearchParams(location.search).get("riftMobileOptics") !== "off");
   const mobileGrazing = pow(float(1).sub(ndv), float(3));
   const mobileReflectionWeight = clamp(
-    fresnel.mul(reflectionGain).mul(0.54)
-      .add(mobileGrazing.mul(0.20)),
-    0.015, 0.53
+    fresnel.mul(reflectionGain)
+      .mul(referenceSurfaceMode ? 1.22 : 0.54)
+      .add(mobileGrazing.mul(referenceSurfaceMode ? 0.37 : 0.20)),
+    0.015, referenceSurfaceMode ? 0.76 : 0.53
   ).mul(above).mul(float(1).sub(visibleFoam.mul(0.90)));
-  const mobileSkyReflection = skyRadiance.mul(0.82)
-    .add(color(0x237c96).mul(0.07));
+  const mobileSkyReflection = skyRadiance.mul(
+    referenceSurfaceMode ? 1.08 : 0.82)
+    .add(color(0x237c96).mul(referenceSurfaceMode ? 0.035 : 0.07));
   const mobileWaveGlint = pow(clamp(
     dot(n, sun.add(view).normalize()), 0, 1), float(58)
   ).mul(day).mul(above).mul(float(1).sub(visibleFoam))
-    .mul(sunlightGain).mul(0.11);
+    .mul(sunlightGain).mul(referenceSurfaceMode ? 0.24 : 0.11);
   const mobileCinematicColor = mix(priorColor ?? total,
     mobileSkyReflection, mobileReflectionWeight)
     .add(color(0xffeacf).mul(mobileWaveGlint));
@@ -394,6 +402,7 @@ function createUnifiedSurfaceAdapter({
       if (preserveMobileFluidLab) {
         field.source.__riftExperimentalFluidPreserved = true;
         field.source.__riftMobileCinematicOptics = mobileOpticsEnabled;
+        field.source.__riftReferenceSurfaceOptics = referenceSurfaceMode;
       }
       material.ior = WATER_IOR;
       material.needsUpdate = true;

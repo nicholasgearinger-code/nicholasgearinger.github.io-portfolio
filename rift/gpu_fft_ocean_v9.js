@@ -1087,13 +1087,17 @@ function installWaterProOptics(handle) {
       .mul(float(1).sub(deep.mul(0.40))));
     // The last ~2m of water over sand must be optically thin, not a
     // continuous opaque turquoise wall. Keep aerated foam visible.
-    // Eliminate the opaque cyan strip at the beach-water intersection.
-    // Shallow clear water should transmit the real sand color; only
-    // aerated breaking foam should remain visibly opaque.
-    const thinSheet = clamp(float(0.025)
-      .add(float(1).sub(shoreTransmission).mul(0.10))
-      .add(combinedFoam.mul(0.46)), 0.015, 0.90);
-    const shoreSheet = float(1).sub(smoothstep(float(0.12), float(2.6), depth))
+    // Real shallow surf has a visible water body, even over sand.
+    // Thin-water alpha rises smoothly with optical path length and
+    // Fresnel at grazing angles, while breakers add opaque aerated foam.
+    // Unlike the previous near-zero alpha, this preserves readable swash;
+    // unlike the old fixed turquoise strip, it fades into deeper water
+    // over a broad bathymetric transition rather than a hard depth band.
+    const thinSheet = clamp(float(0.19)
+      .add(float(1).sub(shoreTransmission).mul(0.22))
+      .add(fresnel.mul(0.15))
+      .add(combinedFoam.mul(0.55)), 0.18, 0.92);
+    const shoreSheet = float(1).sub(smoothstep(float(0.0), float(5.0), depth))
       .mul(float(1).sub(underwater));
     const shorelineOpacity = POOL_SHORE_OPTICS
       ? mix(baseOpacity, thinSheet, shoreSheet) : baseOpacity;
@@ -1124,13 +1128,17 @@ function installWaterProOptics(handle) {
     const baseOpacity = float(1).sub((PHYSICAL_OPTICS_PHASE1
       ? clear.mul(float(1).sub(fresnel)).mul(0.92) : clear)
       .mul(float(1).sub(deep.mul(0.40))));
-    // Eliminate the opaque cyan strip at the beach-water intersection.
-    // Shallow clear water should transmit the real sand color; only
-    // aerated breaking foam should remain visibly opaque.
-    const thinSheet = clamp(float(0.025)
-      .add(float(1).sub(shoreTransmission).mul(0.10))
-      .add(combinedFoam.mul(0.46)), 0.015, 0.90);
-    const shoreSheet = float(1).sub(smoothstep(float(0.12), float(2.6), depth))
+    // Real shallow surf has a visible water body, even over sand.
+    // Thin-water alpha rises smoothly with optical path length and
+    // Fresnel at grazing angles, while breakers add opaque aerated foam.
+    // Unlike the previous near-zero alpha, this preserves readable swash;
+    // unlike the old fixed turquoise strip, it fades into deeper water
+    // over a broad bathymetric transition rather than a hard depth band.
+    const thinSheet = clamp(float(0.19)
+      .add(float(1).sub(shoreTransmission).mul(0.22))
+      .add(fresnel.mul(0.15))
+      .add(combinedFoam.mul(0.55)), 0.18, 0.92);
+    const shoreSheet = float(1).sub(smoothstep(float(0.0), float(5.0), depth))
       .mul(float(1).sub(underwater));
     const shorelineOpacity = POOL_SHORE_OPTICS
       ? mix(baseOpacity, thinSheet, shoreSheet) : baseOpacity;

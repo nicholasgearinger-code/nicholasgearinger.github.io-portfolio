@@ -194,30 +194,68 @@ void main(){
 const lightMaterialFragment=`
 precision highp float;
 uniform float uTime,uSun,uClarity,uCaustics,uHeight,uPhysicalLight;
+uniform float uCausticSpeed,uCausticCurvature,uCausticFocus;
 uniform vec3 uEye;
 uniform float uIsRock;
 varying vec3 vWorld;
 varying vec3 vNormal;
-float waveSunCaustics(vec2 p,float t){
- // Direction and frequency follow the dominant swell directions.
- // Smooth narrow refracted-ridge intersections, with moving phase
- // and slight local bending to avoid a repetitive straight grid.
- vec2 d1=normalize(vec2(.96,.28));
- vec2 d2=normalize(vec2(.40,.91));
- vec2 d3=normalize(vec2(-.71,.70));
- float depth=max(0.,-vWorld.y);
- vec2 sunlightShift=vec2(.18,-.34)*depth;
- p+=sunlightShift;
- float warp=.38*sin(dot(p,vec2(.11,.19))-t*.52);
- float a=dot(p,d1)*.72-t*1.04+warp;
- float b=dot(p,d2)*.89-t*1.47+.57*sin(dot(p,vec2(.21,-.12))+t*.43);
- float c=dot(p,d3)*1.16+t*.74+.23*sin(a);
- float lines=pow(.5+.5*cos(a),16.)*.52+
-             pow(.5+.5*cos(b),18.)*.39+
-             pow(.5+.5*cos(c),19.)*.22;
- float interacting=.50+.50*sin(dot(p,d1)*.095-t*.70)
-                    *cos(dot(p,d2)*.16-t*1.16);
- return clamp(lines*(.55+.72*interacting),0.,1.4);
+
+// 10.18: coherent wave-bent focusing, not three independent cosine bands.
+// Jittered Voronoi cell boundaries act as refractive caustic envelopes;
+// crossing wave directions warp and animate the line network smoothly.
+// Project in world space so the sand and instanced rocks share the same light.
+vec2 lightCellHash(vec2 cell){
+  return fract(sin(vec2(dot(cell,vec2(127.1,311.7)),
+                        dot(cell,vec2(269.5,183.3))))*43758.5453);
+}
+float focusedCellBoundaries(vec2 pos,float time){
+  vec2 tile=floor(pos),uv=fract(pos);
+  float first=12.,second=12.;
+  for(int y=-1;y<=1;y++){
+    for(int x=-1;x<=1;x++){
+      vec2 offset=vec2(float(x),float(y));
+      vec2 hash=lightCellHash(tile+offset);
+      vec2 motion=.5+.34*sin(time*.38+6.28318*hash+
+                        vec2(1.9,3.7));
+      vec2 delta=offset+motion-uv;
+      float d=dot(delta,delta);
+      if(d<first){second=first;first=d;}
+      else if(d<second){second=d;}
+    }
+  }
+  // Small difference between two closest wave-lens regions indicates
+  // a focused network boundary. Smooth widths avoid hard pixel grids.
+  float distanceToLine=max(0.,sqrt(second)-sqrt(first));
+  float line=smoothstep(.16,.012,distanceToLine);
+  return line;
+}
+float waveSunCaustics(vec2 position,float t){
+  float depth=max(0.,-vWorld.y);
+  float clarity=max(uClarity,.35);
+  float speed=max(.05,uCausticSpeed);
+  float phase=t*speed;
+  vec2 downSun=normalize(vec2(-.37,.70));
+  vec2 q=position+downSun*depth*.48;
+  // The broad surface swells bend the caustic-cell coordinates;
+  // two oblique, unequal frequency terms avoid a uniform square grid.
+  float a=dot(q,normalize(vec2(.96,.28)))*.12-phase*.62;
+  float b=dot(q,normalize(vec2(.40,.91)))*.17-phase*.94;
+  float c=dot(q,normalize(vec2(-.71,.70)))*.25+phase*.74;
+  float warpAmount=clamp(uCausticCurvature,0.,2.);
+  q+=vec2(
+     .85*sin(a)+.53*sin(b+.35*sin(c)),
+     .72*cos(b)+.41*sin(c+.24*cos(a))
+  )*warpAmount;
+  float line=focusedCellBoundaries(q*.66,phase);
+  // Subtle narrow highlights at intersections of refracted wave fronts.
+  float fine=pow(.5+.5*cos(dot(q,vec2(.83,-.45))*1.70-phase*1.13
+                  +.63*sin(b)),14.);
+  // A changing focus envelope responds to the same major wave phases.
+  float waveFocus=.70+.30*sin(a)*sin(b);
+  float focused=pow(clamp(line,0.,1.),mix(1.25,.74,clamp(uCausticFocus*.5,0.,1.)));
+  float intensity=focused*(.52+.58*waveFocus)+fine*line*.14;
+  // Physical light loss from water column, without darkening albedo itself.
+  return clamp(intensity,0.,1.35)*exp(-depth*.052/clarity);
 }
 void main(){
  float depth=max(0.,-vWorld.y),clarity=max(uClarity,.35);
@@ -234,7 +272,7 @@ void main(){
  // Use existing caustic intensity, not unbounded glow.
  float caustic=focus*uCaustics*sunThrough*clamp(uPhysicalLight,.3,1.);
  vec3 lit=base*(.56+.65*sunThrough*exposed*uSun);
- lit+=vec3(.68,.87,.72)*caustic*.70*uSun*exposed;
+ lit+=vec3(.78,.93,.79)*caustic*1.10*uSun*exposed;
  vec3 trans=exp(-vec3(.062,.032,.019)*range/clarity);
  vec3 scattering=vec3(.026,.16,.19)*(vec3(1.)-trans)*uSun;
  gl_FragColor=vec4(lit*trans+scattering,1.);
@@ -247,6 +285,9 @@ if(useSimpleUnderwaterMaterials){
   uTime:waterUniforms.uTime,uSun:waterUniforms.uSun,
   uClarity:waterUniforms.uClarity,uCaustics:bottomMat.uniforms.uCaustics,
   uHeight:waterUniforms.uHeight,uPhysicalLight:bottomMat.uniforms.uPhysicalLight,
+  uCausticSpeed:bottomMat.uniforms.uCausticSpeed,
+  uCausticCurvature:bottomMat.uniforms.uCausticCurvature,
+  uCausticFocus:bottomMat.uniforms.uCausticFocus,
   uEye:waterUniforms.uEye
  };
  bottom.material=new THREE.ShaderMaterial({

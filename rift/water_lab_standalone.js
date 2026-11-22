@@ -171,6 +171,95 @@ for(let i=0;i<46;i++){
  dummy.scale.set(.65+(i%4)*.35,.40+(i%3)*.28,.75+(i%6)*.38);
  dummy.updateMatrix();rocks.setMatrixAt(i,dummy.matrix);
 }scene.add(rocks);
+// Mobile-friendly surface-driven shallow-water lighting. Keep the original
+// complex materials intact for explicit ?labDetailedMaterials=1 comparisons.
+// Two world-space crossing wave fields produce drifting focused caustic bands;
+// spectral attenuation comes from actual light travel distance and depth.
+const lightMaterialVertex=`
+precision highp float;
+varying vec3 vWorld;
+varying vec3 vNormal;
+void main(){
+ vec4 local=vec4(position,1.);
+ vec3 n=normal;
+ #ifdef USE_INSTANCING
+ local=instanceMatrix*local;
+ n=mat3(instanceMatrix)*n;
+ #endif
+ vec4 world=modelMatrix*local;
+ vWorld=world.xyz;
+ vNormal=normalize(mat3(modelMatrix)*n);
+ gl_Position=projectionMatrix*viewMatrix*world;
+}`;
+const lightMaterialFragment=`
+precision highp float;
+uniform float uTime,uSun,uClarity,uCaustics,uHeight,uPhysicalLight;
+uniform vec3 uEye;
+uniform float uIsRock;
+varying vec3 vWorld;
+varying vec3 vNormal;
+float waveSunCaustics(vec2 p,float t){
+ // Direction and frequency follow the dominant swell directions.
+ // Smooth narrow refracted-ridge intersections, with moving phase
+ // and slight local bending to avoid a repetitive straight grid.
+ vec2 d1=normalize(vec2(.96,.28));
+ vec2 d2=normalize(vec2(.40,.91));
+ vec2 d3=normalize(vec2(-.71,.70));
+ float depth=max(0.,-vWorld.y);
+ vec2 sunlightShift=vec2(.18,-.34)*depth;
+ p+=sunlightShift;
+ float warp=.38*sin(dot(p,vec2(.11,.19))-t*.52);
+ float a=dot(p,d1)*.72-t*1.04+warp;
+ float b=dot(p,d2)*.89-t*1.47+.57*sin(dot(p,vec2(.21,-.12))+t*.43);
+ float c=dot(p,d3)*1.16+t*.74+.23*sin(a);
+ float lines=pow(.5+.5*cos(a),16.)*.52+
+             pow(.5+.5*cos(b),18.)*.39+
+             pow(.5+.5*cos(c),19.)*.22;
+ float interacting=.50+.50*sin(dot(p,d1)*.095-t*.70)
+                    *cos(dot(p,d2)*.16-t*1.16);
+ return clamp(lines*(.55+.72*interacting),0.,1.4);
+}
+void main(){
+ float depth=max(0.,-vWorld.y),clarity=max(uClarity,.35);
+ float range=length(vWorld-uEye);
+ vec3 sunDir=normalize(vec3(.37,.54,-.7));
+ vec3 normal=normalize(vNormal);
+ float exposed=.42+.58*max(dot(normal,sunDir),0.);
+ float mineral=sin(vWorld.x*1.17+vWorld.z*.42)*
+               cos(vWorld.z*1.43-vWorld.x*.30)*.026;
+ vec3 base=mix(vec3(.32,.42,.35),vec3(.20,.29,.29),uIsRock);
+ base+=vec3(mineral);
+ float sunThrough=exp(-depth*.080/clarity);
+ float focus=waveSunCaustics(vWorld.xz,uTime);
+ // Use existing caustic intensity, not unbounded glow.
+ float caustic=focus*uCaustics*sunThrough*clamp(uPhysicalLight,.3,1.);
+ vec3 lit=base*(.56+.65*sunThrough*exposed*uSun);
+ lit+=vec3(.68,.87,.72)*caustic*.70*uSun*exposed;
+ vec3 trans=exp(-vec3(.062,.032,.019)*range/clarity);
+ vec3 scattering=vec3(.026,.16,.19)*(vec3(1.)-trans)*uSun;
+ gl_FragColor=vec4(lit*trans+scattering,1.);
+}`;
+const detailedMaterialsRequested=new URLSearchParams(location.search)
+  .get("labDetailedMaterials")==="1";
+const useSimpleUnderwaterMaterials=!detailedMaterialsRequested;
+if(useSimpleUnderwaterMaterials){
+ const common={
+  uTime:waterUniforms.uTime,uSun:waterUniforms.uSun,
+  uClarity:waterUniforms.uClarity,uCaustics:bottomMat.uniforms.uCaustics,
+  uHeight:waterUniforms.uHeight,uPhysicalLight:bottomMat.uniforms.uPhysicalLight,
+  uEye:waterUniforms.uEye
+ };
+ bottom.material=new THREE.ShaderMaterial({
+   uniforms:{...common,uIsRock:{value:0}},
+   vertexShader:lightMaterialVertex,fragmentShader:lightMaterialFragment,
+   side:THREE.DoubleSide
+ });
+ rocks.material=new THREE.ShaderMaterial({
+   uniforms:{...common,uIsRock:{value:1}},
+   vertexShader:lightMaterialVertex,fragmentShader:lightMaterialFragment
+ });
+}
+
 // Scene isolation probe: no shader uniforms, caustics or shadow sampling.
 // This is opt-in and never modifies the normal Water Lab materials.
 const sceneProbe=new URLSearchParams(location.search).get("labSceneProbe")==="1";
@@ -252,7 +341,7 @@ function animate(){
  bottomMat.uniforms.uPhysicalLight.value=params.physicalLight;
  bottomMat.uniforms.uShafts.value=params.shafts;
  bottomMat.uniforms.uOcclusion.value=params.occlusion;
- if(!sceneProbe&&(shadowFrame++ % (mobile?3:2))===0&&params.occlusion>.001){
+ if(!useSimpleUnderwaterMaterials&&!sceneProbe&&(shadowFrame++ % (mobile?3:2))===0&&params.occlusion>.001){
    renderer.setRenderTarget(shadowTarget);
    renderer.clear();
    renderer.render(shadowScene,shadowCamera);

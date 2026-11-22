@@ -614,7 +614,9 @@ if (riftSSREnabled) {
       "\\nCompositor: " + globalThis.__riftCompositeMode +
       "\\nOutput: " + (postProcessing.outputNode === scenePass ? "direct-scene" :
         postProcessing.outputNode === riftFullUnderwaterOutput ? "water-optics" : "other") +
-      "\\nWater shader: " + (liquidHandle?.__riftNextWater ? "experimental" : "current");
+      "\\nWater shader: " + (liquidHandle?.__riftNextWater ? "experimental" : "current") +
+      "\\nFFT mesh span: " + (globalThis.__riftOceanPresentationSize || "n/a") + "m" +
+      "\\nMobile optics: " + (liquidHandle?.__riftMobileCinematicOptics ? "cinematic" : "legacy/full");
   }`,
     "disable SSR while submerged",
   ],

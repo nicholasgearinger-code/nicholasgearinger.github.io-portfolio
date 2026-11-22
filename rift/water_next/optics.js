@@ -351,6 +351,30 @@ function createUnifiedSurfaceAdapter({
       .add(slope.mul(0.036)).add(shoreDamping.mul(0.045)),
     float(0.33), submerged
   );
+  // Preserve the expensive Fluid Lab shoreline graph on iPhone, but no
+  // longer preserve its old optical output unchanged. Add ONE light-weight,
+  // view-angle-based environment reflection on top of the genuine FFT
+  // surface and foam. This reuses the sky atlas already sampled above
+  // rather than compiling the separate full capture/refraction pipeline.
+  // ?riftMobileOptics=off restores the exact older mobile material.
+  const mobileOpticsEnabled = preserveMobileFluidLab &&
+    (typeof location === "undefined" ||
+      new URLSearchParams(location.search).get("riftMobileOptics") !== "off");
+  const mobileGrazing = pow(float(1).sub(ndv), float(3));
+  const mobileReflectionWeight = clamp(
+    fresnel.mul(reflectionGain).mul(0.54)
+      .add(mobileGrazing.mul(0.20)),
+    0.015, 0.53
+  ).mul(above).mul(float(1).sub(visibleFoam.mul(0.90)));
+  const mobileSkyReflection = skyRadiance.mul(0.82)
+    .add(color(0x237c96).mul(0.07));
+  const mobileWaveGlint = pow(clamp(
+    dot(n, sun.add(view).normalize()), 0, 1), float(58)
+  ).mul(day).mul(above).mul(float(1).sub(visibleFoam))
+    .mul(sunlightGain).mul(0.11);
+  const mobileCinematicColor = mix(priorColor ?? total,
+    mobileSkyReflection, mobileReflectionWeight)
+    .add(color(0xffeacf).mul(mobileWaveGlint));
   let active = false;
   return {
     field, material, reflectance: fresnel, normalNode: n,
@@ -359,7 +383,9 @@ function createUnifiedSurfaceAdapter({
     get active() { return active; },
     apply() {
       if (active) return;
-      material.colorNode = preserveMobileFluidLab ? priorColor : total;
+      material.colorNode = preserveMobileFluidLab
+        ? (mobileOpticsEnabled ? mobileCinematicColor : priorColor)
+        : total;
       material.roughnessNode = preserveMobileFluidLab ? priorRoughness : roughness;
       material.transmissionNode = preserveMobileFluidLab
         ? priorTransmission : physicalTransmission;
@@ -367,6 +393,7 @@ function createUnifiedSurfaceAdapter({
         ? priorThickness : physicalThickness;
       if (preserveMobileFluidLab) {
         field.source.__riftExperimentalFluidPreserved = true;
+        field.source.__riftMobileCinematicOptics = mobileOpticsEnabled;
       }
       material.ior = WATER_IOR;
       material.needsUpdate = true;

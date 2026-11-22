@@ -565,22 +565,15 @@ if (riftSSREnabled) {
  const riftMobileDirectScene = isTouchDevice &&
    riftQuery.get("riftFullPost") !== "1";
  const riftForceBarePost = riftQuery.get("riftBarePost") === "1";
- // Three.js PostProcessing compiles the output graph on first render.
- // Reassigning outputNode after submerging does NOT guarantee the GPU
- // pipeline recompiles (and previously made mobile appear unchanged).
- // On Experimental mobile, compile the underwater graph ONCE at startup,
- // with depth uniforms blending it back to the normal scene above water.
- // ?riftBarePost=1 is the explicit recovery path for WebGPU devices.
- const riftExperimentalGraph = oceanDepthPassEnabled &&
-   !riftForceBarePost;
+ // v33's full-depth graph at startup produced an all-black image on
+ // iPhone even when the camera was 4m ABOVE water. Restore the v32 safe
+ // direct scene for startup and above-water gameplay. Allow underwater
+ // compositor testing ONLY after a camera submersion transition.
+ // ?riftBarePost=1 remains a permanent all-depth safe recovery.
  const riftFullUnderwaterOutput = riftComposePostOutput(riftBasePostOutput);
- const riftStaticOutput = riftExperimentalGraph
-   ? riftFullUnderwaterOutput
-   : (riftForceBarePost || riftMobileDirectScene
-     ? scenePass : riftFullUnderwaterOutput);
- globalThis.__riftCompositeMode = riftStaticOutput === scenePass
-   ? "direct-scene" : "full-optics-fixed";
- postProcessing.outputNode = riftStaticOutput;`,
+ const riftInitialDirect = riftForceBarePost || riftMobileDirectScene;
+ globalThis.__riftCompositeMode = riftInitialDirect ? "direct-scene" : "full-optics";
+ postProcessing.outputNode = riftInitialDirect ? scenePass : riftFullUnderwaterOutput;`,
     "r185 Water Pro additive SSR composition",
   ],
   [
@@ -597,9 +590,16 @@ if (riftSSREnabled) {
     Number.isFinite(cameraWaterDepth) &&
     (riftWasVisualUnderwater ? cameraWaterDepth > -0.18 : cameraWaterDepth > 0.32);
   globalThis.__riftVisualUnderwater = riftVisualUnderwater;
-  // Intentionally do NOT switch outputNode when swimming. Keep the
-  // graph that was compiled at startup; depth uniforms already interpolate
-  // between dry and immersed pixels in the water shader.
+  // The direct-scene path is confirmed visible on the user's phone.
+  // Only attempt the underwater experimental output after submerging.
+  // Never compile the full-water graph above the surface at startup.
+  const riftDirectNow = riftForceBarePost ||
+    (riftMobileDirectScene && !riftVisualUnderwater);
+  const riftWantedComposite = riftDirectNow ? "direct-scene" : "full-optics";
+  if (globalThis.__riftCompositeMode !== riftWantedComposite) {
+    postProcessing.outputNode = riftDirectNow ? scenePass : riftFullUnderwaterOutput;
+    globalThis.__riftCompositeMode = riftWantedComposite;
+  }
   globalThis.__riftExpectedComposite = riftVisualUnderwater
     ? "water-volume" : "above-water";
   // Opt-in proof of which shaders are actually running on the phone.
@@ -629,7 +629,8 @@ if (riftSSREnabled) {
       "\\nMobile optics: " + (liquidHandle?.__riftMobileCinematicOptics ? "cinematic" : "legacy/full") +
       "\\nWater volume model: " + (globalThis.__riftWaterAtmosphereModel || "unknown") +
       "\\nProof URL flag: " + (riftQuery.get("riftWaterProof") === "1" ? "ON" : "off") +
-      "\\nFixed GPU graph: " + (riftExperimentalGraph ? "underwater at startup" : "safe/direct");
+      "\\nStartup path: safe above-water" +
+      "\\nProof only visible underwater";
   }`,
     "disable SSR while submerged",
   ],

@@ -1452,8 +1452,21 @@ const underwaterCameraSceneOutput = Fn(() => {
 // A/B: this experiment must enable the actual depth compositor even if
 // the phone has the saved Water Graphics mode set to "Current". Previous
 // URL-only optics changes could silently do nothing in that situation.
-const RIFT_ATMOSPHERE_V2 = typeof location !== "undefined" &&
-  new URLSearchParams(location.search).get("riftWaterAtmosphere") === "on";
+// Experimental water now defaults to the actual water-column transport
+// graph, not the legacy scene-color/tint blend. The latter failed the
+// visible submerged comparison despite successful depth-pass activation.
+// Use ?riftWaterAtmosphere=off to A/B or recover the previous mobile look.
+// No additional scene pass, FFT dispatch or storage-buffer read.
+const RIFT_ATMOSPHERE_V2 = (() => {
+  try {
+    const option = new URLSearchParams(location.search).get("riftWaterAtmosphere");
+    if (option === "off") return false;
+    if (option === "on") return true;
+    return localStorage.getItem("riftWaterGraphicsMode") === "experimental";
+  } catch (_) { return false; }
+})();
+globalThis.__riftWaterAtmosphereModel = RIFT_ATMOSPHERE_V2
+  ? "spectral-water-column" : "legacy-depth";
 const oceanDepthPassEnabled = (() => {
   try {
     const debug = new URLSearchParams(location.search).get("riftDebug");

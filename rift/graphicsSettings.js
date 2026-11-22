@@ -19,6 +19,25 @@ const RIFT_IOS = typeof navigator !== "undefined" && (
   /iPhone|iPad|iPod/i.test(navigator.userAgent || "") ||
   ((navigator.platform || "") === "MacIntel" && navigator.maxTouchPoints > 1)
 );
+// iOS/WebKit uses the single proven mobile budget. Do not allow saved
+// Medium/High tiers to silently resurrect heavy geometry or shadow costs.
+if (RIFT_IOS && base.getGraphicsTier() !== "low") {
+  base.setGraphicsTier("low");
+}
+export function getGraphicsTier() {
+  return RIFT_IOS ? "low" : base.getGraphicsTier();
+}
+export function listGraphicsTiers() {
+  return RIFT_IOS ? [{ id: "low", label: "Low · Mobile" }] : base.listGraphicsTiers();
+}
+export function setGraphicsTier(tier) {
+  if (RIFT_IOS) {
+    if (tier !== "low") return false;
+    return base.setGraphicsTier("low");
+  }
+  return base.setGraphicsTier(tier);
+}
+
 // Low keeps its animated sky and FFT ocean, but renders fewer pixels.
 // Applied only at startup: changing tiers already reloads the renderer.
 const IOS_LOW_PIXEL_CAP = 0.65; // 34% fewer shaded pixels than the previous 0.80 cap

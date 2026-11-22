@@ -10,7 +10,7 @@
 // the rest of the portfolio on its known-good dependency while the migration
 // branch runs the game on 0.185.1.
 const RIFT_THREE_VERSION = "0.185.1";
-const RIFT_BUILD_ID = "coral-mobile-volume-lab-v35-20261122";
+const RIFT_BUILD_ID = "coral-reference-surface-v36-20261122";
 window.__riftBuildId = RIFT_BUILD_ID;
 const riftModuleScope = new URL("./", import.meta.url).href;
 const riftThreeBase = `https://cdn.jsdelivr.net/npm/three@${RIFT_THREE_VERSION}/`;
@@ -329,7 +329,7 @@ async function loadRiftAndOpenMenu() {
     // Import the runtime controller first. This installs the WebGPU performance
     // hooks before the full game creates its renderer, and preloads all shared
     // textures/models before the level menu becomes available.
-    runtimeImport = runtimeImport || import("./runtime_bootstrap_v3.js?build=coral-mobile-volume-lab-v35-20261122");
+    runtimeImport = runtimeImport || import("./runtime_bootstrap_v3.js?build=coral-reference-surface-v36-20261122");
     const runtime = await runtimeImport;
     setProgress(24, "Runtime ready", "Loading all shared level assets");
 
@@ -339,13 +339,13 @@ async function loadRiftAndOpenMenu() {
     }
 
     setProgress(95, "Assets ready", "Loading Rift game module");
-    gameImport = gameImport || import("./main_game.js?build=coral-mobile-volume-lab-v35-20261122");
+    gameImport = gameImport || import("./main_game.js?build=coral-reference-surface-v36-20261122");
     await gameImport;
     // Separate opt-in mobile presentation path: does not replace the
     // recovered native WebGPU renderer or its PostProcessing output.
     if (new URLSearchParams(location.search).get("riftMobileVolume") === "1") {
       try {
-        const lab = await import("./mobile_underwater_volume_lab.js?build=coral-mobile-volume-lab-v35-20261122");
+        const lab = await import("./mobile_underwater_volume_lab.js?build=coral-reference-surface-v36-20261122");
         lab.startMobileVolumeLab();
       } catch (error) {
         console.warn("[rift-volume-lab] Optional overlay unavailable; stable renderer retained", error);

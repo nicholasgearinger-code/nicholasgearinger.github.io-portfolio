@@ -136,7 +136,7 @@ const backdrop=new THREE.Mesh(new THREE.SphereGeometry(700,24,16),new THREE.Shad
  uniforms:{uUnder:{value:0},uTime:waterUniforms.uTime,uSun:waterUniforms.uSun,uClarity:waterUniforms.uClarity,uDepth:{value:0},uVolume:{value:1},uShafts:{value:1},uPenetration:waterUniforms.uPenetration,uUndersideWindow:waterUniforms.uUndersideWindow},
  side:THREE.BackSide,depthWrite:false,
  vertexShader:`varying vec3 vDir;void main(){vDir=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
- fragmentShader:"precision highp float;\nvarying vec3 vDir;\nuniform float uUnder,uTime,uSun,uClarity,uDepth,uVolume,uShafts,uPenetration,uUndersideWindow;\nfloat cloudHash(vec2 p){\n return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);\n}\nfloat cloudNoise(vec2 p){\n vec2 i=floor(p),f=fract(p);\n vec2 u=f*f*(3.-2.*f);\n return mix(mix(cloudHash(i),cloudHash(i+vec2(1.,0.)),u.x),\n            mix(cloudHash(i+vec2(0.,1.)),cloudHash(i+vec2(1.,1.)),u.x),u.y);\n}\n// Project cloud layers on an overhead sky plane rather than repeating\n// sinusoids on the sphere (which made vertical white bands).\nfloat cloudCoverage(vec3 dir,float t){\n float altitude=max(dir.y,.025);\n vec2 q=dir.xz/(altitude+.25)*1.75+vec2(t*.004,-t*.0014);\n float low=cloudNoise(q*.73);\n float medium=cloudNoise(q*1.45+vec2(11.2,-7.9));\n float fine=cloudNoise(q*2.9+vec2(-6.1,4.7));\n float mass=low*.53+medium*.34+fine*.13;\n float cloud=smoothstep(.46,.64,mass);\n return cloud*smoothstep(-.015,.16,dir.y)*.65;\n}\nvoid main(){\n vec3 d=normalize(vDir);\n float h=clamp(d.y*.5+.5,0.,1.);\n vec3 air=mix(vec3(.67,.84,.93),vec3(.12,.40,.75),pow(h,.75));\n \nfloat cloud=cloudCoverage(d,uTime);\n air=mix(air,vec3(.91,.93,.95),cloud);\n float up=smoothstep(-.18,.88,d.y);\n vec3 sigma=vec3(.115,.056,.027)/max(uClarity,.25);\n vec3 sunlight=exp(-sigma*uDepth);\n // Shallow water receives diffuse sunlight from the whole upper\n // hemisphere, including horizontal sightlines, not only straight up.\n // Retain exponential extinction, so deep water remains dark.\n float nearSurface=exp(-uDepth*.065/max(uClarity,.25));\n float skyHemisphere=.42+.58*up;\n vec3 base=vec3(.024,.11,.15)*nearSurface*uSun;\n vec3 upwardSky=vec3(.15,.42,.46)*sunlight*skyHemisphere*uSun*\n   mix(.75,1.20,clamp(uPenetration,0.,2.)*.5);\n vec3 scattered=vec3(.026,.145,.175)*(1.-exp(-uDepth*.095/\n   max(uClarity,.25)))*uSun;\n float a=sin(d.x*14.+d.z*9.+uTime*.43);\n float b=sin(d.z*16.-d.x*6.-uTime*.51);\n float beam=pow(clamp(.5+.5*a*b,0.,1.),3.);\n float shaftDepth=exp(-uDepth*.072/max(uClarity,.25));\n vec3 shafts=vec3(.065,.15,.14)*beam*up*shaftDepth*uShafts*uSun*uPenetration;\n float surfaceGlow=exp(-uDepth*.24/max(uClarity,.25))*up;\n vec3 windowScatter=vec3(.040,.16,.19)*surfaceGlow*uSun*\n   clamp(uUndersideWindow,0.,2.)*\n   clamp(uPenetration,0.,2.);\n vec3 volumetric=base+upwardSky+scattered+shafts+windowScatter;\n vec3 legacy=vec3(.009,.070,.114)+vec3(.075,.40,.47)*up*\n   exp(-uDepth*.066/max(uClarity,.25))*uSun;\n vec3 sea=mix(legacy,volumetric,clamp(uVolume,0.,1.));\n sea=mix(sea,vec3(.003,.019,.04),smoothstep(35.,130.,uDepth));\n gl_FragColor=vec4(mix(air,sea,uUnder),1.);\n}"
+ fragmentShader:"precision highp float;\nvarying vec3 vDir;\nuniform float uUnder,uTime,uSun,uClarity,uDepth,uVolume,uShafts,uPenetration,uUndersideWindow;\nfloat cloudHash(vec2 p){\n return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);\n}\nfloat cloudNoise(vec2 p){\n vec2 i=floor(p),f=fract(p);\n vec2 u=f*f*(3.-2.*f);\n return mix(mix(cloudHash(i),cloudHash(i+vec2(1.,0.)),u.x),\n            mix(cloudHash(i+vec2(0.,1.)),cloudHash(i+vec2(1.,1.)),u.x),u.y);\n}\n// Project cloud layers on an overhead sky plane rather than repeating\n// sinusoids on the sphere (which made vertical white bands).\nfloat cloudCoverage(vec3 dir,float t){\n float altitude=max(dir.y,.025);\n vec2 q=dir.xz/(altitude+.25)*1.75+vec2(t*.004,-t*.0014);\n float low=cloudNoise(q*.73);\n float medium=cloudNoise(q*1.45+vec2(11.2,-7.9));\n float fine=cloudNoise(q*2.9+vec2(-6.1,4.7));\n float mass=low*.53+medium*.34+fine*.13;\n float cloud=smoothstep(.46,.64,mass);\n return cloud*smoothstep(-.015,.16,dir.y)*.65;\n}\nvoid main(){\n vec3 d=normalize(vDir);\n float h=clamp(d.y*.5+.5,0.,1.);\n vec3 air=mix(vec3(.67,.84,.93),vec3(.12,.40,.75),pow(h,.75));\n \nfloat cloud=cloudCoverage(d,uTime);\n air=mix(air,vec3(.91,.93,.95),cloud);\n float up=smoothstep(-.18,.88,d.y);\n vec3 sigma=vec3(.115,.056,.027)/max(uClarity,.25);\n vec3 sunlight=exp(-sigma*uDepth);\n // Shallow water receives diffuse sunlight from the whole upper\n // hemisphere, including horizontal sightlines, not only straight up.\n // Retain exponential extinction, so deep water remains dark.\n float nearSurface=exp(-uDepth*.065/max(uClarity,.25));\n float skyHemisphere=.42+.58*up;\n vec3 base=vec3(.024,.11,.15)*nearSurface*uSun;\n vec3 upwardSky=vec3(.15,.42,.46)*sunlight*skyHemisphere*uSun*\n   mix(.75,1.20,clamp(uPenetration,0.,2.)*.5);\n vec3 scattered=vec3(.026,.145,.175)*(1.-exp(-uDepth*.095/\n   max(uClarity,.25)))*uSun;\n float a=sin(d.x*14.+d.z*9.+uTime*.43);\n float b=sin(d.z*16.-d.x*6.-uTime*.51);\n float beam=pow(clamp(.5+.5*a*b,0.,1.),3.);\n float shaftDepth=exp(-uDepth*.072/max(uClarity,.25));\n vec3 shafts=vec3(.065,.15,.14)*beam*up*shaftDepth*uShafts*uSun*uPenetration;\n float surfaceGlow=exp(-uDepth*.24/max(uClarity,.25))*up;\n vec3 windowScatter=vec3(.040,.16,.19)*surfaceGlow*uSun*\n   clamp(uUndersideWindow,0.,2.)*\n   clamp(uPenetration,0.,2.);\n vec3 volumetric=base+upwardSky+scattered+shafts+windowScatter;\n vec3 legacy=vec3(.009,.070,.114)+vec3(.075,.40,.47)*up*\n   exp(-uDepth*.066/max(uClarity,.25))*uSun;\n vec3 sea=mix(legacy,volumetric,clamp(uVolume,0.,1.));\n // A distant horizontal sightline spans a long water path even when\n // the camera is shallow. Use a consistent dim blue-green water column,\n // rather than showing near-surface skylight at infinite distance.\n float horizontal=1.-smoothstep(-.10,.24,d.y);\n float farWater=horizontal*(1.-exp(-uDepth*.20/max(uClarity,.25)));\n vec3 horizonColor=vec3(.012,.065,.082)*uSun;\n sea=mix(sea,horizonColor,max(horizontal*.66,farWater*.78));\n sea=mix(sea,vec3(.003,.019,.04),smoothstep(35.,130.,uDepth));\n gl_FragColor=vec4(mix(air,sea,uUnder),1.);\n}"
 }));
 backdrop.renderOrder=-100;
 scene.add(backdrop);
@@ -270,12 +270,28 @@ void main(){
  float sunThrough=exp(-depth*.080/clarity);
  float focus=waveSunCaustics(vWorld.xz,uTime);
  // Use existing caustic intensity, not unbounded glow.
- float caustic=focus*uCaustics*sunThrough*clamp(uPhysicalLight,.3,1.);
+ // The caustic field is light traveling down from the surface and
+ // back through the water to the viewer; distant caustic contrast fades
+ // well before the seabed itself disappears.
+ float causticDistance=exp(-max(0.,range-9.)*.085/clarity);
+ float caustic=focus*uCaustics*sunThrough*causticDistance*
+   clamp(uPhysicalLight,.3,1.);
  vec3 lit=base*(.56+.65*sunThrough*exposed*uSun);
  lit+=vec3(.78,.93,.79)*caustic*1.10*uSun*exposed;
- vec3 trans=exp(-vec3(.062,.032,.019)*range/clarity);
- vec3 scattering=vec3(.026,.16,.19)*(vec3(1.)-trans)*uSun;
- gl_FragColor=vec4(lit*trans+scattering,1.);
+ // Beer-Lambert extinction over CAMERA-TO-OBJECT travel distance.
+ // Nonzero blue/green extinction prevents a bright turquoise horizon.
+ vec3 extinction=vec3(.115,.078,.063)/clarity;
+ vec3 transmission=exp(-extinction*range);
+ // The water column scatters a bounded amount of ambient daylight.
+ // It does not add constant bright color for every distant fragment.
+ float nearbyLight=exp(-depth*.11/clarity);
+ vec3 waterColumn=vec3(.012,.069,.088)*(.58+.42*nearbyLight)*uSun;
+ vec3 outputColor=lit*transmission+waterColumn*(vec3(1.)-transmission);
+ // Distant geometry loses contrast into the same darker water column as
+ // the background; preserve full detail within the first several metres.
+ float visibilityFog=1.-exp(-pow(max(0.,range-5.)*.027/clarity,1.15));
+ outputColor=mix(outputColor,waterColumn,visibilityFog*.52);
+ gl_FragColor=vec4(outputColor,1.);
 }`;
 const detailedMaterialsRequested=new URLSearchParams(location.search)
   .get("labDetailedMaterials")==="1";

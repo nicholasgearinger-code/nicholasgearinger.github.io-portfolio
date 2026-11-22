@@ -36,9 +36,6 @@ concurrency:
 
 jobs:
   deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -375,6 +372,16 @@ jobs:
           name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
           path: '.'
 
+  # Run publication only after the artifact-upload job finishes.
+  # This removes the within-job artifact metadata race seen in run 45053103198.
+  publish:
+    name: Publish Pages artifact
+    needs: deploy
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5

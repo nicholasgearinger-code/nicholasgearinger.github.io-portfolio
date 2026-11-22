@@ -1708,9 +1708,21 @@ return Fn(() => {
       .mul(oceanDepthScattering.mul(0.87));
     // Distant fragments become water-colored rather than abruptly
     // black; near objects retain contrast until light truly disappears.
+    // A diver carries the spectral filtering of the water above them,
+    // even when looking at sand only 1m away. Earlier versions applied
+    // nearly all attenuation to CAMERA->OBJECT distance; close sand
+    // therefore remained unnaturally dry/orange after submerging.
+    // This is a single existing screen-pass grade, not another render.
+    const immersion = smoothstep(float(0.15), float(7.5), cameraDepth)
+      .mul(oceanDepthUnderwaterMix);
+    const depthIrradiance = exp(vec3(-0.11, -0.034, -0.015)
+      .mul(cameraDepth));
     const sceneLit = refractedColor.mul(viewTransmission)
-      .mul(incidentAtFragment);
-    const waterColor = sceneLit.add(scatteredWater);
+      .mul(incidentAtFragment).mul(
+        mix(vec3(1), depthIrradiance, immersion));
+    const localBlueBounce = vec3(0.027, 0.16, 0.21)
+      .mul(immersion).mul(oceanDepthDaylight).mul(0.16);
+    const waterColor = sceneLit.add(scatteredWater).add(localBlueBounce);
     const waterBlend = oceanDepthUnderwaterMix.mul(
       smoothstep(float(0.18), float(1.8), waterPath));
     // Waterline glare fix: a bright sky pixel missing geometry must not
@@ -1746,7 +1758,16 @@ return Fn(() => {
       .mul(oceanDepthDaylight).mul(oceanDepthSunVisibility)
       .mul(oceanDepthUnderwaterMix).mul(0.09);
     const shaftColor = vec3(0.12, 0.43, 0.52).mul(shaftAmount);
-    return vec4(filled.add(shaftColor), base.a);
+    // Optional unmistakable compositor proof: underwater pixels must
+    // turn violet when ?riftWaterProof=1. If they do not, the scene
+    // graph is not reaching the display regardless of diagnostics.
+    const waterProof = typeof location !== "undefined" &&
+      new URLSearchParams(location.search).get("riftWaterProof") === "1";
+    const spectralOutput = filled.add(shaftColor);
+    return vec4(waterProof
+      ? mix(spectralOutput, vec3(0.80, 0.10, 0.72),
+          oceanDepthUnderwaterMix.mul(0.85))
+      : spectralOutput, base.a);
   }
 
   // Keep the original stable atmosphere available for a controlled

@@ -780,9 +780,11 @@ function installWaterProOptics(handle) {
           : float(0)));
     // At the sand-water interface, clarity comes from the visible
     // seabed, not an opaque turquoise stripe painted across the surface.
+    // Preserve true sand transmission instead of a persistent turquoise
+    // paint strip where the moving FFT plane meets the dry beach.
     body = mix(body, color(0xa8e9dc),
       sunlitSand.mul(POOL_SHORE_OPTICS
-        ? thinWaterTransmission.mul(0.075) : float(0.13)));
+        ? thinWaterTransmission.mul(0.012) : float(0.035)));
     if (localSSFR) {
       // Thin, physically moving water over sand retains pale transmitted
       // light; deeper local pockets accumulate aqua volume scattering.
@@ -1085,9 +1087,12 @@ function installWaterProOptics(handle) {
       .mul(float(1).sub(deep.mul(0.40))));
     // The last ~2m of water over sand must be optically thin, not a
     // continuous opaque turquoise wall. Keep aerated foam visible.
-    const thinSheet = clamp(float(0.25)
-      .add(float(1).sub(shoreTransmission).mul(0.38))
-      .add(combinedFoam.mul(0.54)), 0.20, 0.98);
+    // Eliminate the opaque cyan strip at the beach-water intersection.
+    // Shallow clear water should transmit the real sand color; only
+    // aerated breaking foam should remain visibly opaque.
+    const thinSheet = clamp(float(0.025)
+      .add(float(1).sub(shoreTransmission).mul(0.10))
+      .add(combinedFoam.mul(0.46)), 0.015, 0.90);
     const shoreSheet = float(1).sub(smoothstep(float(0.12), float(2.6), depth))
       .mul(float(1).sub(underwater));
     const shorelineOpacity = POOL_SHORE_OPTICS
@@ -1119,9 +1124,12 @@ function installWaterProOptics(handle) {
     const baseOpacity = float(1).sub((PHYSICAL_OPTICS_PHASE1
       ? clear.mul(float(1).sub(fresnel)).mul(0.92) : clear)
       .mul(float(1).sub(deep.mul(0.40))));
-    const thinSheet = clamp(float(0.25)
-      .add(float(1).sub(shoreTransmission).mul(0.38))
-      .add(combinedFoam.mul(0.54)), 0.20, 0.98);
+    // Eliminate the opaque cyan strip at the beach-water intersection.
+    // Shallow clear water should transmit the real sand color; only
+    // aerated breaking foam should remain visibly opaque.
+    const thinSheet = clamp(float(0.025)
+      .add(float(1).sub(shoreTransmission).mul(0.10))
+      .add(combinedFoam.mul(0.46)), 0.015, 0.90);
     const shoreSheet = float(1).sub(smoothstep(float(0.12), float(2.6), depth))
       .mul(float(1).sub(underwater));
     const shorelineOpacity = POOL_SHORE_OPTICS

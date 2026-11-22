@@ -16,8 +16,8 @@ export function startMobileVolumeLab() {
   // independent of the fragile WebGPU post-processing output graph.
   const absorption = document.createElement("div");
   absorption.style.cssText = [
-    "position:absolute","inset:0","mix-blend-mode:multiply",
-    "background:linear-gradient(180deg,rgba(21,158,193,.66) 0%,rgba(6,104,145,.76) 47%,rgba(2,49,88,.91) 100%)"
+    "position:absolute","inset:0",
+    "background:linear-gradient(180deg,rgba(21,146,180,.29) 0%,rgba(4,87,128,.38) 47%,rgba(1,27,68,.57) 100%)"
   ].join(";");
   const haze = document.createElement("div");
   haze.style.cssText = [

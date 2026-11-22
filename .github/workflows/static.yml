@@ -1,7 +1,7 @@
-# Deploy production plus isolated renderer/lighting previews.
+# Deploy compact production by default; historical large previews are optional manual builds.
 #
 # IMPORTANT: only main publishes to the protected github-pages environment.
-# Review branches are staged by this main workflow below, so pushes to those
+# Review branches can be staged manually, so pushes to those
 # branches must not start their own Pages deployment jobs (GitHub rejects those
 # before any steps run when the environment only permits main).
 name: Deploy static content to Pages
@@ -13,6 +13,11 @@ on:
     inputs:
       build_ktx2:
         description: "Rebuild compressed textures for the isolated environment performance preview (slow)"
+        required: false
+        type: boolean
+        default: false
+      include_previews:
+        description: "Stage the six large historical experiment previews (may exceed Pages artifact size limits)"
         required: false
         type: boolean
         default: false
@@ -81,12 +86,14 @@ jobs:
           PY
 
       - name: Checkout r185 migration preview
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.include_previews == true }}
         uses: actions/checkout@v4
         with:
           ref: three-r185-migration
           path: .r185-preview-source
 
       - name: Stage r185 preview
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.include_previews == true }}
         shell: bash
         run: |
           rm -rf r185-build
@@ -98,12 +105,14 @@ jobs:
           rm -rf .r185-preview-source
 
       - name: Checkout shadow v11 experiment
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.include_previews == true }}
         uses: actions/checkout@v4
         with:
           ref: shadow-v11-experiment
           path: .shadow-v11-preview-source
 
       - name: Stage shadow v11 experiment
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.include_previews == true }}
         shell: bash
         run: |
           rm -rf shadow-v11-build
@@ -115,12 +124,14 @@ jobs:
           rm -rf .shadow-v11-preview-source
 
       - name: Checkout Rift Lighting 2.0 experiment
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.include_previews == true }}
         uses: actions/checkout@v4
         with:
           ref: rift-lighting-v20-experiment
           path: .lighting-v20-preview-source
 
       - name: Stage Rift Lighting 2.0 experiment
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.include_previews == true }}
         shell: bash
         run: |
           rm -rf lighting-v20-build
@@ -133,12 +144,14 @@ jobs:
 
       # Cloud Model 3 stays isolated from production while it is reviewed.
       - name: Checkout Cloud Model 3 preview
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.include_previews == true }}
         uses: actions/checkout@v4
         with:
           ref: cloud-model3-reference-volumetrics-v2
           path: .cloud-model3-preview-source
 
       - name: Stage Cloud Model 3 preview
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.include_previews == true }}
         shell: bash
         run: |
           rm -rf cloud-model3-build
@@ -162,12 +175,14 @@ jobs:
       # Model 4 reconstructs the volumetric macro density from the sky reference
       # textures and therefore gets its own isolated Pages path for iPhone review.
       - name: Checkout Cloud Model 4 preview
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.include_previews == true }}
         uses: actions/checkout@v4
         with:
           ref: cloud-model4-reference-reconstruction-v1
           path: .cloud-model4-preview-source
 
       - name: Stage Cloud Model 4 preview
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.include_previews == true }}
         shell: bash
         run: |
           rm -rf cloud-model4-build
@@ -195,6 +210,7 @@ jobs:
       # source branch binaries. That keeps the experiment reversible and lets us
       # measure GPU-memory/bandwidth effects independently.
       - name: Checkout Environment Performance preview
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.include_previews == true }}
         uses: actions/checkout@v4
         with:
           ref: perf-environment-1
@@ -203,7 +219,7 @@ jobs:
       # Recompression takes tens of minutes and is NOT needed to publish code.
       # Keep it available only as an explicit manual performance experiment.
       - name: Build KTX2 model textures for performance preview
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_ktx2 == true && steps.deploy-scope.outputs.fluid_only != 'true' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.include_previews == true && inputs.build_ktx2 == true && steps.deploy-scope.outputs.fluid_only != 'true' }}
         shell: bash
         run: |
           set -u
@@ -293,6 +309,7 @@ jobs:
           if command -v toktx >/dev/null 2>&1; then toktx --version || true; fi
 
       - name: Stage Environment Performance preview
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.include_previews == true }}
         shell: bash
         run: |
           rm -rf perf-environment-build
@@ -316,12 +333,14 @@ jobs:
       # Fluid V8 remains isolated on fluid-v5-development. This main-only Pages workflow
       # stages the branch into a review path without merging any Fluid V8 source to production.
       - name: Checkout Fluid V8 development preview
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.include_previews == true }}
         uses: actions/checkout@v4
         with:
           ref: fluid-v5-development
           path: .fluid-v5-preview-source
 
       - name: Stage Fluid V8 development preview
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.include_previews == true }}
         shell: bash
         run: |
           rm -rf fluid-v5-preview
@@ -334,6 +353,16 @@ jobs:
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
+
+      # Normal pushes publish only tracked production files. Six staged
+      # historical build copies previously inflated the Pages artifact to
+      # 2.32 GB, and deploy-pages failed to retrieve that upload. Keep the
+      # source branches intact; opt in to staging previews on manual runs.
+      - name: Report deployment payload size
+        shell: bash
+        run: |
+          du -sh . || true
+          du -sh rift fluid-v4-preview 2>/dev/null || true
 
       # Artifacts are scoped to a workflow RUN, not to its individual
       # rerun attempts. A rerun can therefore leave two default-named

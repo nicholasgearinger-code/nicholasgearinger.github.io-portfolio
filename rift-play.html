@@ -688,7 +688,11 @@ button{font:inherit;cursor:pointer}
               <button type="button" class="rift-graphics-opt" data-tier="medium">Medium</button>
               <button type="button" class="rift-graphics-opt" data-tier="high">High</button>
             </div>
-            <span id="rift-graphics-hint">Applies immediately — rebuilds the current landmass</span>
+            <span id="rift-graphics-hint">Mobile uses the Low graphics budget</span>
+            <button type="button" id="rift-mobile-volume-toggle" class="rift-graphics-opt"
+              style="flex:none;min-height:35px;padding:8px 10px;text-align:center"
+              aria-label="Toggle independent experimental underwater atmosphere">Underwater Volume Lab: OFF</button>
+            <span class="rift-mono" style="font-size:10px;color:#9ddcd8;line-height:1.4">Test-only mobile water atmosphere. Uses a separate overlay; removing it restores stable rendering.</span>
             <button type="button" id="rift-perf-toggle" class="rift-graphics-opt"
               style="flex:none;min-height:34px;padding:8px 10px;text-align:center"
               aria-label="Toggle detailed rendering performance profiler">Profiler: OFF</button>
@@ -780,6 +784,19 @@ try {
   }
 } catch (error) { console.warn("[rift-recovery] Could not read previous failure",error); }
 paintWaterMode();
+// Independent visual test; never changes the native WebGPU pipeline.
+const mobileVolumeButton=document.getElementById("rift-mobile-volume-toggle");
+if(mobileVolumeButton){
+  const isOn=new URLSearchParams(location.search).get("riftMobileVolume")==="1";
+  mobileVolumeButton.textContent="Underwater Volume Lab: "+(isOn?"ON":"OFF");
+  mobileVolumeButton.classList.toggle("active",isOn);
+  mobileVolumeButton.addEventListener("click",()=>{
+    const u=new URL(location.href);
+    if(isOn)u.searchParams.delete("riftMobileVolume");
+    else u.searchParams.set("riftMobileVolume","1");
+    location.assign(u.href);
+  });
+}
 for(const button of waterModeButtons)button.addEventListener("click",()=>{
   const next=readWaterMode()==="experimental"?"current":"experimental";
   try{localStorage.setItem("riftWaterGraphicsMode",next);}catch(error){console.warn("Cannot save water mode",error);return;}
@@ -1015,6 +1032,6 @@ new MutationObserver(()=>{
 }).observe(gpuErrorOverlay,{attributes:true,childList:true,characterData:true,subtree:true});
 </script>
 <script>window.__riftStandaloneSafeRender = true;</script>
-<script type="module" src="rift/main.js?build=coral-safe-scene-recovery-v34-20261122"></script>
+<script type="module" src="rift/main.js?build=coral-mobile-volume-lab-v35-20261122"></script>
 </body>
 </html>

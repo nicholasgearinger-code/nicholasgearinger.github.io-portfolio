@@ -626,6 +626,7 @@ if (riftSSREnabled) {
         postProcessing.outputNode === riftFullUnderwaterOutput ? "water-optics" : "other") +
       "\\nWater shader: " + (liquidHandle?.__riftNextWater ? "experimental" : "current") +
       "\\nFFT mesh span: " + (globalThis.__riftOceanPresentationSize || "n/a") + "m" +
+      "\\nReference surface: " + (liquidHandle?.__riftReferenceSurfaceOptics ? "ON" : "off") +
       "\\nMobile optics: " + (liquidHandle?.__riftMobileCinematicOptics ? "cinematic" : "legacy/full") +
       "\\nWater volume model: " + (globalThis.__riftWaterAtmosphereModel || "unknown") +
       "\\nProof URL flag: " + (riftQuery.get("riftWaterProof") === "1" ? "ON" : "off") +

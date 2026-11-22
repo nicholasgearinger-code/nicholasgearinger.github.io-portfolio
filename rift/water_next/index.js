@@ -2,7 +2,7 @@
 // Safe to initialize alongside legacy water; this does not modify GPU state.
 import { createWaveField, validateWaveField } from "./wave_field.js";
 import { createWaterGeometryAdapter } from "./geometry.js";
-import { createOpticsAdapter } from "./optics.js";
+import { createOpticsAdapter } from "./optics.js?build=reference-surface-v36";
 import { createCausticsAdapter } from "./caustics.js";
 import { createFoamAdapter } from "./foam.js";
 

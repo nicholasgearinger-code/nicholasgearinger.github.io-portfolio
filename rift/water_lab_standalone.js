@@ -82,31 +82,10 @@ function resizeRefraction(){
 }
 resizeRefraction();
 const backdrop=new THREE.Mesh(new THREE.SphereGeometry(700,24,16),new THREE.ShaderMaterial({
- uniforms:{uUnder:{value:0},uTime:waterUniforms.uTime,uSun:waterUniforms.uSun,uClarity:waterUniforms.uClarity,uDepth:{value:0}},
+ uniforms:{uUnder:{value:0},uTime:waterUniforms.uTime,uSun:waterUniforms.uSun,uClarity:waterUniforms.uClarity,uDepth:{value:0},uVolume:{value:1},uShafts:{value:1}},
  side:THREE.BackSide,depthWrite:false,
  vertexShader:`varying vec3 vDir;void main(){vDir=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
- fragmentShader:`precision highp float;
- varying vec3 vDir;
- uniform float uUnder,uTime,uSun,uClarity,uDepth;
- void main(){
-   vec3 d=normalize(vDir);
-   float h=clamp(d.y*.5+.5,0.,1.);
-   vec3 air=mix(vec3(.67,.84,.93),vec3(.12,.40,.75),pow(h,.75));
-   float cloud=sin(d.x*28.+d.z*13.+uTime*.004)*sin(d.z*31.-d.x*17.);
-   air=mix(air,vec3(.94,.96,.97),smoothstep(.25,.85,cloud)*.38);
-   // Underwater: an upward-directed sky light field attenuated by the
-   // vertical water column. This fills missing distant surface pixels,
-   // without replacing the actual refracting 3D ceiling.
-   float up=smoothstep(-.18,.88,d.y);
-   float depthFade=exp(-uDepth*.066/max(uClarity,.25));
-   vec3 water=vec3(.009,.070,.114);
-   vec3 skylight=vec3(.075,.40,.47)*up*depthFade*uSun;
-   vec3 skyWindow=vec3(.026,.11,.16)*pow(max(d.y,0.),1.5);
-   float ripple=sin(d.x*18.+uTime*.41)*sin(d.z*21.-uTime*.53);
-   vec3 sea=water+skylight+skyWindow+vec3(.009,.032,.038)*ripple*up;
-   sea=mix(sea,vec3(.005,.028,.052),smoothstep(26.,100.,uDepth));
-   gl_FragColor=vec4(mix(air,sea,uUnder),1.);
- }`
+ fragmentShader:"precision highp float;\nvarying vec3 vDir;\nuniform float uUnder,uTime,uSun,uClarity,uDepth,uVolume,uShafts;\nvoid main(){\n vec3 d=normalize(vDir);\n float h=clamp(d.y*.5+.5,0.,1.);\n vec3 air=mix(vec3(.67,.84,.93),vec3(.12,.40,.75),pow(h,.75));\n float cloud=sin(d.x*28.+d.z*13.+uTime*.004)*sin(d.z*31.-d.x*17.);\n air=mix(air,vec3(.94,.96,.97),smoothstep(.25,.85,cloud)*.38);\n float up=smoothstep(-.18,.88,d.y);\n vec3 sigma=vec3(.115,.056,.027)/max(uClarity,.25);\n vec3 sunlight=exp(-sigma*uDepth);\n vec3 base=vec3(.010,.066,.10);\n vec3 upwardSky=vec3(.14,.43,.47)*sunlight*up*uSun;\n vec3 scattered=vec3(.018,.115,.155)*(1.-exp(-uDepth*.065/\n   max(uClarity,.25)))*uSun;\n float a=sin(d.x*14.+d.z*9.+uTime*.43);\n float b=sin(d.z*16.-d.x*6.-uTime*.51);\n float beam=pow(clamp(.5+.5*a*b,0.,1.),3.);\n float shaftDepth=exp(-uDepth*.072/max(uClarity,.25));\n vec3 shafts=vec3(.045,.12,.125)*beam*up*shaftDepth*uShafts*uSun;\n vec3 volumetric=base+upwardSky+scattered+shafts;\n vec3 legacy=vec3(.009,.070,.114)+vec3(.075,.40,.47)*up*\n   exp(-uDepth*.066/max(uClarity,.25))*uSun;\n vec3 sea=mix(legacy,volumetric,clamp(uVolume,0.,1.));\n sea=mix(sea,vec3(.003,.019,.04),smoothstep(35.,130.,uDepth));\n gl_FragColor=vec4(mix(air,sea,uUnder),1.);\n}"
 }));
 backdrop.renderOrder=-100;
 scene.add(backdrop);
@@ -212,6 +191,8 @@ function animate(){
  ocean.position.x=camera.position.x;ocean.position.z=camera.position.z;
  backdrop.position.copy(camera.position);
  backdrop.material.uniforms.uDepth.value=Math.max(0,-camera.position.y);
+ backdrop.material.uniforms.uVolume.value=params.volume;
+ backdrop.material.uniforms.uShafts.value=params.shafts;
  waterUniforms.uRefraction.value=params.refraction;
  waterUniforms.uCeilingDetail.value=params.ceilingDetail;
  waterUniforms.uCeilingLight.value=params.ceilingLight;

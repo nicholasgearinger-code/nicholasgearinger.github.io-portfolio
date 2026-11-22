@@ -21,7 +21,11 @@ const MOBILE_CINEMATIC_OCEAN = typeof navigator !== "undefined" &&
         new URLSearchParams(location.search).get("riftWideOcean") !== "1";
     } catch (_) { return false; }
   })();
-const FFT_WATER_HALF = MOBILE_CINEMATIC_OCEAN ? 700 : 1000;
+const REFERENCE_SURFACE = MOBILE_CINEMATIC_OCEAN &&
+  typeof location !== "undefined" &&
+  new URLSearchParams(location.search).get("riftWaterReference") === "1";
+const FFT_WATER_HALF = REFERENCE_SURFACE ? 550
+  : MOBILE_CINEMATIC_OCEAN ? 700 : 1000;
 const FLOOR_SNAP = 128;
 const WATER_SNAP = 256;
 // Structural abyss experiment: keep stable production sea untouched.
@@ -98,9 +102,11 @@ function createFarWaterMaterial() {
   // as a hard dark rectangular rim. This costs no extra mesh or pass.
   if (BLEND_OCEAN) {
     const boxDistance = max(abs(p.x), abs(p.z));
-    const edgeWeight = MOBILE_CINEMATIC_OCEAN
-      ? smoothstep(float(585), float(700), boxDistance)
-      : smoothstep(float(760), float(1110), boxDistance);
+    const edgeWeight = REFERENCE_SURFACE
+      ? smoothstep(float(435), float(550), boxDistance)
+      : MOBILE_CINEMATIC_OCEAN
+        ? smoothstep(float(585), float(700), boxDistance)
+        : smoothstep(float(760), float(1110), boxDistance);
     // Below the surface, transparent holes exposed the sky-colored
     // background as a sharp white ribbon. The distant sea is now an
     // actual ceiling behind the near FFT underside; fade its opacity
@@ -110,9 +116,11 @@ function createFarWaterMaterial() {
     const submerged = volumeBlend
       ? smoothstep(float(0.5), float(2.5), cameraDepth) : float(0);
     material.opacityNode = max(edgeWeight,
-      submerged.mul(MOBILE_CINEMATIC_OCEAN
-        ? smoothstep(float(510), float(700), boxDistance)
-        : smoothstep(float(610), float(940), boxDistance)));
+      submerged.mul(REFERENCE_SURFACE
+        ? smoothstep(float(365), float(550), boxDistance)
+        : MOBILE_CINEMATIC_OCEAN
+          ? smoothstep(float(510), float(700), boxDistance)
+          : smoothstep(float(610), float(940), boxDistance)));
     material.transparent = true;
     material.depthWrite = false;
     material.forceSinglePass = true;

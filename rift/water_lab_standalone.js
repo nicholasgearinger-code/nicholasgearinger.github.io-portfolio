@@ -6,7 +6,7 @@ const canvas = document.getElementById("scene");
 const status = document.getElementById("status");
 const fpsLabel = document.getElementById("fps");
 const triLabel = document.getElementById("tri");
-const params = {height:1, chop:1, sun:1, clarity:1};
+const params = {height:1, chop:1, sun:1, clarity:1, caustics:1};
 const mobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || navigator.maxTouchPoints>0;
 let renderer;
 try {
@@ -133,14 +133,9 @@ const backdrop=new THREE.Mesh(new THREE.SphereGeometry(700,24,16),new THREE.Shad
 backdrop.renderOrder=-100;
 scene.add(backdrop);
 const bottomMat=new THREE.ShaderMaterial({
- uniforms:{uTime:waterUniforms.uTime,uClarity:waterUniforms.uClarity},
- vertexShader:`varying vec3 vP;void main(){vP=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
- fragmentShader:`precision mediump float;varying vec3 vP;uniform float uTime,uClarity;
- void main(){vec2 p=vP.xz;float ripple=sin(p.x*.65+sin(p.y*.28+uTime*.21)*1.5)*sin(p.y*.8-uTime*.26);
- float caustic=pow(max(0.,sin(p.x*1.25+sin(p.y*.7+uTime*.7))*sin(p.y*1.4-uTime*.9)),8.);
- vec3 sand=vec3(.26,.36,.33)+ripple*.015+caustic*.14;
- float dist=length(p);float fog=1.-exp(-dist*.016/uClarity);
- gl_FragColor=vec4(mix(sand,vec3(.014,.11,.16),fog),1.);}`
+ uniforms:{uTime:waterUniforms.uTime,uClarity:waterUniforms.uClarity,uHeight:waterUniforms.uHeight,uChop:waterUniforms.uChop,uSun:waterUniforms.uSun,uCaustics:{value:1},uEye:waterUniforms.uEye},
+ vertexShader:"varying vec3 vWorld;\nvoid main(){\n  vec4 world=modelMatrix*vec4(position,1.0);\n  vWorld=world.xyz;\n  gl_Position=projectionMatrix*viewMatrix*world;\n}",
+ fragmentShader:"\n precision highp float;\n varying vec3 vWorld;\n uniform float uTime,uClarity,uHeight,uChop,uSun,uCaustics;\n uniform vec3 uEye;\n vec2 cellHash(vec2 p){\n   p=vec2(dot(p,vec2(127.1,311.7)),dot(p,vec2(269.5,183.3)));\n   return fract(sin(p)*43758.5453);\n }\n // A small dynamic Voronoi network models wave-lens intersections instead\n // of regular sine-grid dots. F2-F1 approaches zero along cell boundaries.\n float lensFilaments(vec2 p,float phase){\n   vec2 cell=floor(p),sub=fract(p);\n   float d1=100.0,d2=100.0;\n   for(int y=-1;y<=1;y++){\n     for(int x=-1;x<=1;x++){\n       vec2 offset=vec2(float(x),float(y));\n       vec2 rnd=cellHash(cell+offset);\n       vec2 center=offset+0.5+0.34*sin(phase+6.283185*rnd);\n       vec2 d=center-sub;\n       float r=dot(d,d);\n       if(r<d1){d2=d1;d1=r;}\n       else if(r<d2){d2=r;}\n     }\n   }\n   float gap=max(0.0,sqrt(d2)-sqrt(d1));\n   return 1.0-smoothstep(0.014,0.105,gap);\n }\n void main(){\n   vec2 p=vWorld.xz;\n   float t=uTime;\n   // Slowly moving interference from two differently traveling swells.\n   vec2 warp=vec2(\n     sin(p.y*0.26-t*0.44)+0.55*sin(p.x*0.47+p.y*0.16+t*0.31),\n     cos(p.x*0.31+t*0.37)+0.45*cos(p.y*0.53-p.x*0.12-t*0.28)\n   );\n   vec2 flow=p+warp*(0.55+0.24*uChop)+vec2(t*0.08,-t*0.055);\n   float wide=lensFilaments(flow*0.30,t*0.19);\n   float fine=lensFilaments((flow+vec2(9.3,-12.7))*0.49,-t*0.13);\n   float flicker=0.83+0.17*sin(flow.x*.38-flow.y*.29+t*1.15);\n   float network=pow(clamp(wide*.77+fine*.32,0.0,1.0),1.30)*flicker;\n   float focus=clamp(1.08-0.16*max(0.0,uChop-1.0),0.58,1.08);\n   float transport=exp(-13.0*0.052/max(uClarity,0.25));\n   float caustic=network*uCaustics*uSun*focus*(0.62+0.24*uHeight)*transport;\n   float sandGrain=sin(p.x*1.7+sin(p.y*.28)*1.3)*sin(p.y*1.4-p.x*.27)*.008;\n   vec3 sand=vec3(.225,.329,.305)+sandGrain;\n   sand+=vec3(.74,.91,.81)*caustic;\n   float distanceToCamera=length(vWorld-uEye);\n   float fog=1.0-exp(-distanceToCamera*0.016/max(uClarity,0.25));\n   gl_FragColor=vec4(mix(sand,vec3(.014,.11,.16),clamp(fog,0.0,1.0)),1.0);\n }"
 });
 const bottom=new THREE.Mesh(new THREE.PlaneGeometry(1100,1100,4,4),bottomMat);
 bottom.rotation.x=-Math.PI/2;bottom.position.y=-13;scene.add(bottom);
@@ -183,6 +178,7 @@ function animate(){
  waterUniforms.uTime.value=t;waterUniforms.uHeight.value=params.height;
  waterUniforms.uChop.value=params.chop;waterUniforms.uSun.value=params.sun;
  waterUniforms.uClarity.value=params.clarity;
+ bottomMat.uniforms.uCaustics.value=params.caustics;
  ocean.position.x=camera.position.x;ocean.position.z=camera.position.z;
  backdrop.position.copy(camera.position);
  renderer.render(scene,camera);

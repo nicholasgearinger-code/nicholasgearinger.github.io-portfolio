@@ -1,5 +1,5 @@
 import * as legacy from "./liquid_legacy.js";
-import { createNextWaterSystem } from "./water_next/index.js";
+import { createNextWaterSystem } from "./water_next/index.js?build=reference-surface-v36";
 import * as oceanV19 from "./gpu_fft_ocean_r185_v22.js";
 import { getEffectiveValue as getBaseGraphicsEffectiveValue } from "./graphicsSettings_fft_base.js";
 import { setGPUShallowWaterInteraction } from "./gpu_shallow_water.js";

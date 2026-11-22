@@ -231,8 +231,9 @@ function createUnifiedSurfaceAdapter({
   // featureless. Recover cloud detail ONLY inside the Snell window;
   // reflection/TIR regions retain a smooth sky to prevent FFT oval grids.
   const undersideSkyDetail = refractedSkyEnabled
-    ? float(0.09).add(snell.mul(0.43))
-    : float(0.15);
+    ? float(referenceSurfaceMode ? 0.19 : 0.09)
+        .add(snell.mul(referenceSurfaceMode ? 0.64 : 0.43))
+    : float(referenceSurfaceMode ? 0.28 : 0.15);
   const skyRadiance = mix(skyColor, sample.rgb,
     sample.a.mul(0.70).mul(mix(undersideSkyDetail, float(1), above)));
   const ambientSkyReflection = daylightWaterFillEnabled
@@ -383,6 +384,14 @@ function createUnifiedSurfaceAdapter({
   const mobileCinematicColor = mix(priorColor ?? total,
     mobileSkyReflection, mobileReflectionWeight)
     .add(color(0xffeacf).mul(mobileWaveGlint));
+  // Unlike the old mobile branch, Reference Surface also affects the
+  // underside. Blend the existing stable water material with a brighter
+  // Snell-window/transmitted sky model below the real displaced ceiling.
+  // No extra passes; both are TSL nodes in the same water material.
+  const referenceMobileColor = referenceSurfaceMode
+    ? mix(mobileCinematicColor, underside,
+        submerged.mul(0.62).mul(nearSurface))
+    : mobileCinematicColor;
   let active = false;
   return {
     field, material, reflectance: fresnel, normalNode: n,
@@ -392,7 +401,7 @@ function createUnifiedSurfaceAdapter({
     apply() {
       if (active) return;
       material.colorNode = preserveMobileFluidLab
-        ? (mobileOpticsEnabled ? mobileCinematicColor : priorColor)
+        ? (mobileOpticsEnabled ? referenceMobileColor : priorColor)
         : total;
       material.roughnessNode = preserveMobileFluidLab ? priorRoughness : roughness;
       material.transmissionNode = preserveMobileFluidLab

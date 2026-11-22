@@ -10,7 +10,18 @@ const FLOOR_GRID = 52; // 17-ish world units per cell, ~2.7k vertices
 const WATER_SIZE = 5888;
 const WATER_GRID = 96; // distant visual geometry only, ~9.4k vertices
 const ISLAND_MESH_HALF = 240;
-const FFT_WATER_HALF = 1000;
+// Keep the distant-ocean handoff aligned with the smaller Experimental
+// iPhone FFT mesh. The standard and desktop 2000m footprint stay unchanged.
+const MOBILE_CINEMATIC_OCEAN = typeof navigator !== "undefined" &&
+  (/iPhone|iPad|iPod/i.test(navigator.userAgent || "") ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)) &&
+  (() => {
+    try {
+      return localStorage.getItem("riftWaterGraphicsMode") === "experimental" &&
+        new URLSearchParams(location.search).get("riftWideOcean") !== "1";
+    } catch (_) { return false; }
+  })();
+const FFT_WATER_HALF = MOBILE_CINEMATIC_OCEAN ? 700 : 1000;
 const FLOOR_SNAP = 128;
 const WATER_SNAP = 256;
 // Structural abyss experiment: keep stable production sea untouched.
@@ -20,8 +31,9 @@ const ABYSS_TRIAL = typeof location !== "undefined" &&
   new URLSearchParams(location.search).get("riftAbyss") === "on";
 // Unlike the previous hard square hole around the near FFT mesh, overlap
 // the meshes and feather the far surface's alpha across the perimeter.
-const BLEND_OCEAN = typeof location !== "undefined" &&
-  new URLSearchParams(location.search).get("riftOceanBlend") === "on";
+const BLEND_OCEAN = MOBILE_CINEMATIC_OCEAN || (
+  typeof location !== "undefined" &&
+  new URLSearchParams(location.search).get("riftOceanBlend") === "on");
 
 const smooth = t => {
   const x = THREE.MathUtils.clamp(t, 0, 1);
@@ -86,7 +98,9 @@ function createFarWaterMaterial() {
   // as a hard dark rectangular rim. This costs no extra mesh or pass.
   if (BLEND_OCEAN) {
     const boxDistance = max(abs(p.x), abs(p.z));
-    const edgeWeight = smoothstep(float(760), float(1110), boxDistance);
+    const edgeWeight = MOBILE_CINEMATIC_OCEAN
+      ? smoothstep(float(585), float(700), boxDistance)
+      : smoothstep(float(760), float(1110), boxDistance);
     // Below the surface, transparent holes exposed the sky-colored
     // background as a sharp white ribbon. The distant sea is now an
     // actual ceiling behind the near FFT underside; fade its opacity
@@ -96,7 +110,9 @@ function createFarWaterMaterial() {
     const submerged = volumeBlend
       ? smoothstep(float(0.5), float(2.5), cameraDepth) : float(0);
     material.opacityNode = max(edgeWeight,
-      submerged.mul(smoothstep(float(610), float(940), boxDistance)));
+      submerged.mul(MOBILE_CINEMATIC_OCEAN
+        ? smoothstep(float(510), float(700), boxDistance)
+        : smoothstep(float(610), float(940), boxDistance)));
     material.transparent = true;
     material.depthWrite = false;
     material.forceSinglePass = true;

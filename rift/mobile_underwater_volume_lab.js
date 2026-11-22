@@ -10,8 +10,7 @@ export function startMobileVolumeLab() {
   layer.setAttribute("aria-hidden", "true");
   layer.style.cssText = [
     "position:absolute","inset:0","z-index:2","pointer-events:none",
-    "overflow:hidden","opacity:0","transition:opacity 280ms ease",
-    "isolation:isolate"
+    "overflow:hidden","opacity:0","transition:opacity 280ms ease"
   ].join(";");
   // This tint acts on the ALREADY-rendered scene. It is deliberately
   // independent of the fragile WebGPU post-processing output graph.

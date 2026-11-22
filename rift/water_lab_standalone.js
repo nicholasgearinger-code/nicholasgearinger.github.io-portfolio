@@ -27,7 +27,7 @@ const clock=new THREE.Clock();
 let yaw=0,pitch=-.055, view="surface";
 const waterUniforms={
   uTime:{value:0},uHeight:{value:1},uChop:{value:1},
-  uSun:{value:1},uClarity:{value:1},uEye:{value:camera.position},uSceneTex:{value:null},uViewport:{value:new THREE.Vector2(1,1)},uRefraction:{value:1},uCeilingDetail:{value:1},uCeilingLight:{value:1},uGlint:{value:1},uPenetration:{value:1},uUndersideWindow:{value:1},uUndersideShimmer:{value:1},uSurfaceDetail:{value:1},uFoamAmount:{value:1},uSurfaceReflection:{value:1}
+  uSun:{value:1},uClarity:{value:1},uEye:{value:camera.position},uSceneTex:{value:null},uViewport:{value:new THREE.Vector2(1,1)},uRefraction:{value:1},uCeilingDetail:{value:1},uCeilingLight:{value:1},uGlint:{value:1},uPenetration:{value:1},uUndersideWindow:{value:1},uUndersideShimmer:{value:1},uSurfaceDetail:{value:1},uSwellComplexity:{value:1},uFoamAmount:{value:1},uSurfaceReflection:{value:1}
 };
 const waterVert=`
 precision highp float;

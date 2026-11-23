@@ -5,7 +5,7 @@ export function createSpectralOcean(THREE, renderer, {mobile=false}={}) {
   const supported = renderer.extensions.has('EXT_color_buffer_float') ||
     renderer.extensions.has('EXT_color_buffer_half_float');
   if (!supported) return {supported:false, reason:'Floating-point render targets unavailable'};
-  const n = mobile ? 64 : 128;
+  const n = mobile ? 64 : 128; // 128 on supported phones by default; 64 with labQuality=low
   const stages = Math.round(Math.log2(n));
   const texel = 1/n;
   // FFT butterfly stages must sample exact texel centres (nearest).
@@ -122,7 +122,7 @@ export function createSpectralOcean(THREE, renderer, {mobile=false}={}) {
         // Centered k coordinates induce checkerboard sign after IFFT.
         float checker=1.-2.*mod(i.x+i.y,2.);
         // Height textures are sampled with a common shader scale of 8.
-        float h=raw.x*checker/8.;
+        float h=raw.x*checker/(uN>96.?16.:8.);
         gl_FragColor=vec4(h,0.,0.,1.);
       }`
   });

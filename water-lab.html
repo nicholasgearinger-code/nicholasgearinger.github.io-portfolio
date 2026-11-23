@@ -12,7 +12,7 @@ h1{font-size:15px;margin:0;font-weight:700;letter-spacing:.025em}small{display:b
 #hint{position:absolute;top:25%;left:50%;transform:translateX(-50%);font-size:11px;color:#d7eff9aa;pointer-events:none;text-align:center;white-space:normal;width:min(90vw,370px);line-height:1.4}a{color:#a5f2ef;text-decoration:none}#status{color:#f8cda3;font-size:11px;display:none;margin-top:6px}
 @media(max-height:680px){.inputs{grid-template-columns:repeat(4,1fr)}#hint{display:none}.panel{padding:8px 10px}}
 </style></head>
-<body><canvas id="scene"></canvas><header id="top"><div class="panel"><h1>Rift · Water Lab <span style="color:#78e8ef">14.3</span></h1><small>Independent ocean research · no game changes</small><div id="status"></div></div><div class="panel stat"><span id="fps">FPS —</span><br><span id="tri">Triangles —</span><br><a href="rift-play.html">Back to Rift</a></div></header>
+<body><canvas id="scene"></canvas><header id="top"><div class="panel"><h1>Rift · Water Lab <span style="color:#78e8ef">15.0</span></h1><small>Independent ocean research · no game changes</small><div id="status"></div></div><div class="panel stat"><span id="fps">FPS —</span><br><span id="tri">Triangles —</span><br><a href="rift-play.html">Back to Rift</a></div></header>
 <div id="hint">Spectral ocean mode · compare engines in Settings · numerical mode: tap to create ripples</div>
 <section id="controls"><div class="panel controls"><div class="segment" id="views"><button data-view="surface" aria-pressed="true">Ocean surface</button><button data-view="waterline" aria-pressed="false">Waterline</button><button data-view="underwater" aria-pressed="false">Underwater</button></div></div><details class="panel controls" id="lab-settings"><summary>Adjust water settings</summary><div class="inputs">
 <label style="grid-column:1/-1">Wave engine
@@ -31,17 +31,6 @@ h1{font-size:15px;margin:0;font-weight:700;letter-spacing:.025em}small{display:b
 <label>Wind / chop <output id="chopOut">1.0</output><input id="chop" type="range" min=".2" max="2.5" step=".05" value="1"></label>
 <label>Surface detail <output id="surfaceDetailOut">1.0</output><input id="surfaceDetail" type="range" min="0" max="2" step=".05" value="1"></label>
 <label>Rolling swells <output id="swellComplexityOut">1.0</output><input id="swellComplexity" type="range" min="0" max="1.5" step=".05" value="1"></label>
-<label>Breaking crest foam <output id="crestFoamOut">1.0</output><input id="crestFoam" type="range" min="0" max="2" step=".05" value="1"></label>
-<label>Breaking wave intensity <output id="breakingWavesOut">0.80</output><input id="breakingWaves" type="range" min="0" max="2" step=".05" value=".8"></label>
-<label>Curling crest lip <output id="crestLipOut">0.85</output><input id="crestLip" type="range" min="0" max="2" step=".05" value=".85"></label>
-<label>Spray amount <output id="sprayAmountOut">0.80</output><input id="sprayAmount" type="range" min="0" max="2" step=".05" value=".8"></label>
-<label>Underwater bubbles <output id="bubbleAmountOut">0.80</output><input id="bubbleAmount" type="range" min="0" max="2" step=".05" value=".8"></label>
-<label>Experimental 3D particles <output id="fluidVolumeOut">0.00</output><input id="fluidVolume" type="range" min="0" max="1.5" step=".05" value="0"></label>
-<label>Fluid pressure <output id="fluidPressureOut">1.00</output><input id="fluidPressure" type="range" min=".2" max="3" step=".1" value="1"></label>
-<label>Fluid viscosity <output id="fluidViscosityOut">0.65</output><input id="fluidViscosity" type="range" min="0" max="2" step=".05" value=".65"></label>
-<label>Breaking threshold <output id="breakingThresholdOut">0.48</output><input id="breakingThreshold" type="range" min="0" max="1" step=".02" value=".48"></label>
-<label>Foam generation <output id="foamBreakupOut">1.00</output><input id="foamBreakup" type="range" min="0" max="2" step=".05" value="1"></label>
-<label>Foam persistence <output id="foamPersistenceOut">1.00</output><input id="foamPersistence" type="range" min=".2" max="2.5" step=".05" value="1"></label>
 <label>Sunlight <output id="sunOut">1.0</output><input id="sun" type="range" min=".2" max="1.9" step=".05" value="1"></label>
 <label>Shallow light <output id="shallowLightOut">1.0</output><input id="shallowLight" type="range" min="0" max="2" step=".05" value="1"></label>
 <label>Scene reflections <output id="sceneReflectionsOut">0.75</output><input id="sceneReflections" type="range" min="0" max="1" step=".05" value=".75"></label>
@@ -66,4 +55,4 @@ h1{font-size:15px;margin:0;font-weight:700;letter-spacing:.025em}small{display:b
 <label>Underwater shimmer <output id="undersideShimmerOut">1.0</output><input id="undersideShimmer" type="range" min="0" max="2" step=".05" value="1"></label>
 <label>Physical light coupling <output id="physicalLightOut">1.0</output><input id="physicalLight" type="range" min="0" max="1" step=".05" value="1"></label>
 </div></details></section>
-<script type="module" src="./rift/water_lab_standalone.js?lab=optical-rebalance-v14-3"></script></body></html>
+<script type="module" src="./rift/water_lab_standalone.js?lab=unified-spectral-medium-v15-0"></script></body></html>

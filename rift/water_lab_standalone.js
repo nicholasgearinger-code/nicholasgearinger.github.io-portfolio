@@ -407,10 +407,8 @@ float spectralSunCaustics(vec2 position){
   // Surface lens sampled in world coordinates, displaced to the sun's
   // incident footprint. The same height texture deforms ocean geometry.
   vec2 p=position+vec2(-.37,.70)*depth*.58;
-  vec2 uv=fract(p/512.+.5),stepUv=vec2(1./64. ,0.);
-  // 64-point mobile spectral texture; desktop uses 128. Derivative
-  // spacing is supplied by the FFT resolution uniform below.
-  stepUv=vec2(uSpectralTexel,0.);
+  vec2 uv=fract(p/512.+.5),stepUv=vec2(uSpectralTexel,0.);
+  // 64-point mobile / 128-point desktop spectral texel spacing.
   vec2 dz=stepUv.yx;
   float center=texture2D(uSimTex,uv).r;
   float xx=texture2D(uSimTex,uv+stepUv).r+

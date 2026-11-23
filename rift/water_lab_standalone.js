@@ -24,7 +24,7 @@ window.addEventListener("unhandledrejection",e=>showLabFailure(e.reason));
 
 const fpsLabel = document.getElementById("fps");
 const triLabel = document.getElementById("tri");
-const params = {height:1, chop:1, sun:1, clarity:1, caustics:1, causticSpeed:1, causticCurvature:1, causticFocus:1, refraction:1, occlusion:1, ceilingDetail:1, ceilingLight:1, volume:1, shafts:1, glint:1, penetration:1, undersideWindow:1, undersideShimmer:1, physicalLight:1, surfaceDetail:1, swellComplexity:1, crestFoam:1};
+const params = {height:1, chop:1, sun:1, clarity:1, caustics:1, causticSpeed:1, causticCurvature:1, causticFocus:1, refraction:1, occlusion:1, ceilingDetail:1, ceilingLight:1, volume:1, shafts:1, glint:1, penetration:1, undersideWindow:1, undersideShimmer:1, physicalLight:1, surfaceDetail:1, swellComplexity:1, crestFoam:1, shallowLight:1};
 const mobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || navigator.maxTouchPoints>0;
 let renderer;
 try {
@@ -195,6 +195,7 @@ const lightMaterialFragment=`
 precision highp float;
 uniform float uTime,uSun,uClarity,uCaustics,uHeight,uPhysicalLight;
 uniform float uCausticSpeed,uCausticCurvature,uCausticFocus;
+uniform float uShallowLight;
 uniform vec3 uEye;
 uniform float uIsRock;
 varying vec3 vWorld;
@@ -282,20 +283,28 @@ void main(){
  float skyIrradiance=exp(-depth*.115/clarity)*uSun;
  vec3 ambientSky=vec3(.16,.34,.33)*skyIrradiance;
  vec3 directSun=vec3(.59,.68,.49)*solarIrradiance*max(dot(normal,sunDir),0.);
- // In the shallow-water test, the sediment and rocks must be
- // discernible before underwater fog obscures them. Diffuse sun and sky
- // irradiance are evaluated at the receiver, with a near-field exposure
- // curve restricted to the first 20 metres of camera-to-surface path.
- float shallowDaylight=exp(-depth*.075/clarity);
- vec3 daylight=base*(vec3(.56,.62,.60)
-   +vec3(.35,.44,.40)*shallowDaylight*uSun
-   +directSun*.9);
- vec3 lit=daylight;
- lit+=vec3(.80,.95,.83)*caustic*1.00*uSun*exposed;
+ // Direct and diffuse irradiance depend on vertical travel from
+ // the surface, not distance to the camera. Let sun-facing sand and rocks
+ // be illuminated together by a single bounded daylight response.
+ float lightGain=clamp(uShallowLight,0.,2.);
+ float shallowDaylight=exp(-depth*.085/clarity);
+ vec3 solar=vec3(.62,.74,.60)*shallowDaylight*uSun;
+ vec3 diffuse=vec3(.33,.43,.42)*skyIrradiance;
+ vec3 radiance=vec3(.42,.47,.44)+diffuse+
+               solar*(.30+.70*max(dot(normal,sunDir),0.));
+ vec3 lit=base*radiance*mix(.88,1.42,lightGain*.5);
+ lit+=vec3(.80,.95,.83)*caustic*(.65+.55*lightGain)*uSun*exposed;
  // Beer-Lambert extinction over CAMERA-TO-OBJECT travel distance.
  // Nonzero blue/green extinction prevents a bright turquoise horizon.
+ // Two-scale optical path: clear, nearby shallow water and a
+ // denser far field. The transition is continuous, without a hard cutoff.
+ // At 0 the control preserves the original extinction law.
+ float nearMeters=min(range,24.);
+ float farMeters=max(0.,range-24.);
+ float nearOpticalFactor=mix(1.,.59,clamp(lightGain*.5,0.,1.));
+ float opticalLength=nearMeters*nearOpticalFactor+farMeters*1.20;
  vec3 extinction=vec3(.115,.078,.063)/clarity;
- vec3 transmission=exp(-extinction*range);
+ vec3 transmission=exp(-extinction*opticalLength);
  // The water column scatters a bounded amount of ambient daylight.
  // It does not add constant bright color for every distant fragment.
  float nearbyLight=exp(-depth*.11/clarity);
@@ -306,9 +315,13 @@ void main(){
  // Correct shallow exposure after scattering. Fade this enhancement to
  // zero BEFORE the far-distance extinction, preserving a dark horizon.
  // Only nearby surfaces are exposed; nothing is added to the background.
- float localVisibility=1.-smoothstep(7.,22.,range);
+ // Lift only the near visible scene, allowing the foreground reef
+ // to be evaluated without flattening the far water. No contribution
+ // is added to the environment background or horizon.
+ float localVisibility=1.-smoothstep(15.,42.,range);
  float surfaceLight=exp(-depth*.095/clarity)*uSun;
- vec3 lifted=lit*(vec3(.26,.32,.30)*localVisibility*surfaceLight);
+ vec3 lifted=lit*(vec3(.13,.16,.15)*localVisibility*surfaceLight*
+                  clamp(lightGain,0.,2.));
  outputColor+=lifted;
  // Distant geometry still loses contrast to the water-column color.
  float visibilityFog=1.-exp(-pow(max(0.,range-5.)*.027/clarity,1.15));
@@ -327,7 +340,7 @@ if(useSimpleUnderwaterMaterials){
   uCausticSpeed:bottomMat.uniforms.uCausticSpeed,
   uCausticCurvature:bottomMat.uniforms.uCausticCurvature,
   uCausticFocus:bottomMat.uniforms.uCausticFocus,
-  uEye:waterUniforms.uEye
+  uEye:waterUniforms.uEye,uShallowLight:{value:1}
  };
  bottom.material=new THREE.ShaderMaterial({
    uniforms:{...common,uIsRock:{value:0}},
@@ -414,6 +427,7 @@ function animate(){
  waterUniforms.uSwellComplexity.value=params.swellComplexity;waterUniforms.uSun.value=params.sun;
  waterUniforms.uClarity.value=params.clarity;
  bottomMat.uniforms.uCaustics.value=params.caustics;
+ if(useSimpleUnderwaterMaterials){bottom.material.uniforms.uShallowLight.value=params.shallowLight;rocks.material.uniforms.uShallowLight.value=params.shallowLight;}
  bottomMat.uniforms.uCausticSpeed.value=params.causticSpeed;
  bottomMat.uniforms.uCausticCurvature.value=params.causticCurvature;
  bottomMat.uniforms.uCausticFocus.value=params.causticFocus;

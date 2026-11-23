@@ -252,7 +252,8 @@ function advanceSimulation(t){
  // Only the selected solver runs; spectral does not overlay Gerstner waves.
  if(waveMode==="spectral"&&spectralOcean.supported){
    const tex=spectralOcean.update(t,Math.max(.1,params.chop));
-   if(swellOcean.supported){
+   // Avoid the extra FFT passes when the swell cascade is disabled.
+   if(swellOcean.supported&&params.swellCascade>.001){
      waterUniforms.uSwellTex.value=swellOcean.update(t*.93,Math.max(.1,params.chop));
      waterUniforms.uSwellTexel.value=swellOcean.texel;
    }

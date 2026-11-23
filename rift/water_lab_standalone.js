@@ -1,6 +1,7 @@
 // Standalone Rift Water Lab 01. NO imports from Rift gameplay or renderer.
 // The production game stays entirely untouched while new waves are evaluated.
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js";
+import { createSpectralOcean } from "./water_lab_spectral.js";
 
 const canvas = document.getElementById("scene");
 const status = document.getElementById("status");
@@ -24,6 +25,7 @@ window.addEventListener("unhandledrejection",e=>showLabFailure(e.reason));
 
 const fpsLabel = document.getElementById("fps");
 const triLabel = document.getElementById("tri");
+let waveMode="spectral";
 const params = {height:1, chop:1, sun:1, clarity:1, caustics:1, causticSpeed:1, causticCurvature:1, causticFocus:1, refraction:1, occlusion:1, ceilingDetail:1, ceilingLight:1, volume:1, shafts:1, glint:1, penetration:1, undersideWindow:1, undersideShimmer:1, physicalLight:1, surfaceDetail:1, swellComplexity:1, crestFoam:1, shallowLight:1, sceneReflections:0, depthRefraction:1, volumeScattering:1,simulation:1};
 const mobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || navigator.maxTouchPoints>0;
 let renderer;
@@ -125,6 +127,24 @@ const waterFrag="\nprecision highp float;\nuniform float uHeight,uTime,uSun,uCla
 // Water Lab 11.1: stable GPU wave-equation integration.
 // Half-float preserves subpixel water height and velocity, avoiding the
 // 8-bit round-trip quantization that caused standing jitter in 11.0.
+// Frequency-domain spectral waves use the same geometry and water optics.
+const spectralOcean=createSpectralOcean(THREE,renderer,{mobile});
+if(!spectralOcean.supported){
+  waveMode="numerical";
+  console.warn("[water-lab] Spectral mode unavailable:",spectralOcean.reason);
+}
+const waveModeControl=document.getElementById("waveMode");
+if(waveModeControl){
+  const spectralChoice=waveModeControl.querySelector('option[value="spectral"]');
+  if(spectralChoice&&!spectralOcean.supported){
+    spectralChoice.disabled=true;
+    spectralChoice.textContent="Spectral ocean (GPU unsupported)";
+  }
+  waveModeControl.value=waveMode;
+  waveModeControl.addEventListener("change",()=>{
+    waveMode=waveModeControl.value;
+  });
+}
 const simResolution=128;
 const simHalfFloat=renderer.extensions.has("EXT_color_buffer_float")||
  renderer.extensions.has("EXT_color_buffer_half_float");
@@ -201,8 +221,31 @@ stepSimulation(null,true);
 function splashAt(x,z,power=.12){pendingSplash={uv:new THREE.Vector2(
  ((x/512.+5e-1)%1+1)%1,((z/512.+5e-1)%1+1)%1),power};}
 function advanceSimulation(t){
+ // All three modes render through the same water material and optics.
+ // Only the selected solver runs; spectral does not overlay Gerstner waves.
+ if(waveMode==="spectral"&&spectralOcean.supported){
+   const tex=spectralOcean.update(t,Math.max(.1,params.chop));
+   waterUniforms.uSimTex.value=tex;
+   waterUniforms.uSimTexel.value=spectralOcean.texel;
+   waterUniforms.uSimZero.value=0;
+   waterUniforms.uSimDecode.value=1;
+   waterUniforms.uSimStrength.value=params.simulation;
+   waterUniforms.uProceduralWeight.value=0;
+   simLastTime=t;simAccumulator=0;
+   return;
+ }
+ waterUniforms.uSimTex.value=simTargets[simIndex].texture;
+ waterUniforms.uSimTexel.value=1/simResolution;
+ waterUniforms.uSimZero.value=simZero;
+ waterUniforms.uSimDecode.value=simDecode;
  simAccumulator+=Math.max(0,Math.min(.05,t-simLastTime));
  simLastTime=t;
+ if(waveMode==="procedural"){
+   waterUniforms.uProceduralWeight.value=1;
+   waterUniforms.uSimStrength.value=0;
+   simAccumulator=0;
+   return;
+ }
  let steps=0;
  while(simAccumulator>=1/60&&steps<2){
   simAccumulator-=1/60;
@@ -212,7 +255,7 @@ function advanceSimulation(t){
  }
  if(steps===2)simAccumulator=Math.min(simAccumulator,1/60);
  waterUniforms.uSimStrength.value=params.simulation;
- waterUniforms.uProceduralWeight.value=params.simulation>.001?0:1;
+ waterUniforms.uProceduralWeight.value=0;
 }
 
 const geom=new THREE.PlaneGeometry(560,560,mobile?170:244,mobile?170:244);
@@ -557,13 +600,14 @@ function rotate(){camera.rotation.order="YXZ";camera.rotation.y=yaw;camera.rotat
 document.querySelectorAll("[data-view]").forEach(b=>b.addEventListener("click",()=>setView(b.dataset.view)));
 for(const k of Object.keys(params)){
  const input=document.getElementById(k),out=document.getElementById(k+"Out");
+ if(!input||!out)continue;
  input.addEventListener("input",()=>{params[k]=Number(input.value);out.textContent=params[k].toFixed(2)});
 }
 let dragging=false,lastX=0,lastY=0;
 canvas.addEventListener("pointerdown",e=>{dragging=true;lastX=e.clientX;lastY=e.clientY;canvas.setPointerCapture(e.pointerId)});
 canvas.addEventListener("pointermove",e=>{if(!dragging)return;yaw-=(e.clientX-lastX)*.004;pitch=Math.max(-1.35,Math.min(1.35,pitch-(e.clientY-lastY)*.004));lastX=e.clientX;lastY=e.clientY;rotate()});
 canvas.addEventListener("pointerup",e=>{
- if(dragging){
+ if(dragging&&waveMode==="numerical"){
   const point=new THREE.Vector2(e.clientX/innerWidth*2-1,1-e.clientY/innerHeight*2);
   const ray=new THREE.Raycaster();ray.setFromCamera(point,camera);
   const hit=new THREE.Vector3();

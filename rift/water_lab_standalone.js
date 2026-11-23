@@ -3,6 +3,7 @@
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js";
 import { createSpectralOcean } from "./water_lab_spectral.js";
 import { createBreakingEffects } from "./water_lab_breaking_effects.js";
+import { createLocalFluidVolume } from "./water_lab_fluid_volume.js";
 
 const canvas = document.getElementById("scene");
 const status = document.getElementById("status");
@@ -27,7 +28,7 @@ window.addEventListener("unhandledrejection",e=>showLabFailure(e.reason));
 const fpsLabel = document.getElementById("fps");
 const triLabel = document.getElementById("tri");
 let waveMode="spectral";
-const params = {height:1, chop:1, sun:1, clarity:1, caustics:1, causticSpeed:1, causticCurvature:1, causticFocus:1, refraction:1, occlusion:1, ceilingDetail:1, ceilingLight:1, volume:1, shafts:1, glint:1, penetration:1, undersideWindow:1, undersideShimmer:1, physicalLight:1, surfaceDetail:1, swellComplexity:1, crestFoam:1, shallowLight:1, sceneReflections:.75, depthRefraction:1, volumeScattering:1,simulation:1,spectralChop:.6,spectralSwell:1.1,underwaterSkylight:1.35,underwaterExposure:1.25,swellCascade:1,windCascade:1,fineRipples:1.2,foamPersistence:1,foamBreakup:1,breakingWaves:.8,breakingThreshold:.48,crestLip:.85,sprayAmount:.8,bubbleAmount:.8};
+const params = {height:1, chop:1, sun:1, clarity:1, caustics:1, causticSpeed:1, causticCurvature:1, causticFocus:1, refraction:1, occlusion:1, ceilingDetail:1, ceilingLight:1, volume:1, shafts:1, glint:1, penetration:1, undersideWindow:1, undersideShimmer:1, physicalLight:1, surfaceDetail:1, swellComplexity:1, crestFoam:1, shallowLight:1, sceneReflections:.75, depthRefraction:1, volumeScattering:1,simulation:1,spectralChop:.6,spectralSwell:1.1,underwaterSkylight:1.35,underwaterExposure:1.25,swellCascade:1,windCascade:1,fineRipples:1.2,foamPersistence:1,foamBreakup:1,breakingWaves:.8,breakingThreshold:.48,crestLip:.85,sprayAmount:.8,bubbleAmount:.8,fluidVolume:0,fluidPressure:1,fluidViscosity:.65};
 const mobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || navigator.maxTouchPoints>0;
 let renderer;
 try {
@@ -433,6 +434,7 @@ const ocean=new THREE.Mesh(geom,new THREE.ShaderMaterial({
 ocean.frustumCulled=false;
 scene.add(ocean);
 const breakingEffects=createBreakingEffects(THREE,scene,waterUniforms,{mobile});
+const fluidVolume=createLocalFluidVolume(THREE,scene,{mobile});
 // Render a lower-resolution scene color without the water, once per visible
 // above-water frame, and refract it with the moving wave normal.
 const refractionTarget=new THREE.WebGLRenderTarget(16,16,{
@@ -850,6 +852,7 @@ function animate(){
  const t=clock.getElapsedTime(),now=performance.now();
  advanceSimulation(t);
  breakingEffects.update(camera,waveMode,params);
+ fluidVolume.update(t,camera,params,waveMode);
  waterUniforms.uSpectralChop.value=params.spectralChop;
  waterUniforms.uSpectralSwell.value=params.spectralSwell;
  waterUniforms.uFoamPersistence.value=params.foamPersistence;
@@ -909,7 +912,7 @@ function animate(){
    const underwaterCapture=view==="underwater";
    const previousUnder=backdrop.material.uniforms.uUnder.value;
    try {
-     ocean.visible=false;breakingEffects.group.visible=false;
+     ocean.visible=false;breakingEffects.group.visible=false;fluidVolume.mesh.visible=false;
      if(underwaterCapture){
        bottom.visible=false;rocks.visible=false;
        backdrop.material.uniforms.uUnder.value=0;
@@ -922,7 +925,7 @@ function animate(){
      console.warn("[water-lab] Scene transmission capture unavailable",error);
    }finally{
      renderer.setRenderTarget(null);
-     ocean.visible=true;breakingEffects.group.visible=(waveMode==='spectral'&&params.breakingWaves>.001);bottom.visible=true;rocks.visible=true;
+     ocean.visible=true;breakingEffects.group.visible=(waveMode==='spectral'&&params.breakingWaves>.001);fluidVolume.mesh.visible=(waveMode==='spectral'&&params.fluidVolume>.01&&params.breakingWaves>.001);bottom.visible=true;rocks.visible=true;
      backdrop.material.uniforms.uUnder.value=previousUnder;
    }
  }
@@ -943,7 +946,7 @@ function animate(){
      sceneReflectVP.multiplyMatrices(mirrorCamera.projectionMatrix,
        mirrorCamera.matrixWorldInverse);
      waterUniforms.uMirrorVP.value.copy(sceneReflectVP);
-     ocean.visible=false;breakingEffects.group.visible=false;
+     ocean.visible=false;breakingEffects.group.visible=false;fluidVolume.mesh.visible=false;
      // Above-water reflection captures the sky and reference object;
      // below-water reflection captures the *submerged* seabed and rocks.
      bottom.visible=below;rocks.visible=below;
@@ -960,7 +963,7 @@ function animate(){
      console.warn("[water-lab] Reflection capture unavailable; using stable water",error);
    }finally{
      renderer.setRenderTarget(null);
-     bottom.visible=true;rocks.visible=true;ocean.visible=true;breakingEffects.group.visible=(waveMode==='spectral'&&params.breakingWaves>.001);
+     bottom.visible=true;rocks.visible=true;ocean.visible=true;breakingEffects.group.visible=(waveMode==='spectral'&&params.breakingWaves>.001);fluidVolume.mesh.visible=(waveMode==='spectral'&&params.fluidVolume>.01&&params.breakingWaves>.001);
      opticalReference.visible=previousAbove;
      backdrop.position.copy(camera.position);
      backdrop.material.uniforms.uUnder.value=previousUnder;

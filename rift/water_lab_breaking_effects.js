@@ -6,7 +6,7 @@ export function createBreakingEffects(THREE, scene, water, { mobile=false }={}) 
   const cell=512;
   const count=mobile?52:115;
   const along=9, across=4;
-  const positions=[], patchIds=[];
+  const positions=[], patchIds=[], edgeProgress=[];
   const wind=new THREE.Vector2(.94,.34).normalize();
   const cross=new THREE.Vector2(-wind.y,wind.x);
   const seed=(id,j=0)=>{const x=Math.sin(id*127.17+j*74.41)*43758.5453;return x-Math.floor(x);};
@@ -22,6 +22,7 @@ export function createBreakingEffects(THREE, scene, water, { mobile=false }={}) 
       positions.push(cx+cross.x*acrossMeters+wind.x*forward,0,
                      cz+cross.y*acrossMeters+wind.y*forward);
       patchIds.push(i+1);
+      edgeProgress.push(y/(across-1));
     };
     const base=positions.length/3;
     for(let y=0;y<across;y++)for(let x=0;x<along;x++)add(x,y);
@@ -38,21 +39,22 @@ export function createBreakingEffects(THREE, scene, water, { mobile=false }={}) 
   const lipGeometry=new THREE.BufferGeometry();
   lipGeometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
   lipGeometry.setAttribute('aPatch',new THREE.Float32BufferAttribute(patchIds,1));
+  lipGeometry.setAttribute('aProgress',new THREE.Float32BufferAttribute(edgeProgress,1));
   lipGeometry.setIndex(indices);
   const uniforms={
     uTime:water.uTime,uWave:water.uSimTex,uTexel:water.uSimTexel,
     uHeight:water.uHeight,uSimStrength:water.uSimStrength,
     uSpectralSwell:water.uSpectralSwell,uWindCascade:water.uWindCascade,
     uBreaking:water.uBreakingWaves,uThreshold:water.uBreakingThreshold,
-    uCameraXZ:{value:new THREE.Vector2()}
+    uCameraXZ:{value:new THREE.Vector2()},uLip:{value:1}
   };
   const lipMaterial=new THREE.ShaderMaterial({
     uniforms,transparent:true,depthWrite:false,side:THREE.DoubleSide,
     vertexShader:`precision highp float;
-      attribute float aPatch;
+      attribute float aPatch,aProgress;
       uniform sampler2D uWave;
       uniform float uTexel,uHeight,uSimStrength,uSpectralSwell,uWindCascade;
-      uniform float uBreaking,uThreshold,uTime;
+      uniform float uBreaking,uThreshold,uTime,uLip;
       uniform vec2 uCameraXZ;
       varying float vBreak,vFront,vPatch;
       float h(vec2 uv){return texture2D(uWave,fract(uv)).r;}
@@ -71,14 +73,14 @@ export function createBreakingEffects(THREE, scene, water, { mobile=false }={}) 
         float trigger=high*smoothstep(limit,limit+.055,steep)*
                      clamp(uBreaking,0.,2.);
         // The sheet is most visible on the leading half of a crest.
-        float progress=fract(length(pos.xz)*.061+aPatch*.137);
-        // Across the narrow strip the lip rises then tips forward and falls.
+        // Real strip parameter: rise then tip down into a thin leading lip.
         vec2 wind=normalize(vec2(.94,.34));
-        float front=clamp(dot(pos.xz,wind)*.22+
-                    fract(aPatch*.381),0.,1.);
-        float fold=sin(front*3.14159265);
-        pos.y=waveHeight+trigger*(.10+.40*fold-.37*front*front);
-        pos.xz+=wind*trigger*(.20+.45*front*front);
+        float front=aProgress;
+        float rise=sin(front*3.14159265);
+        float collapse=smoothstep(.57,1.,front);
+        float curlStrength=trigger*clamp(uLip,0.,2.);
+        pos.y=waveHeight+curlStrength*(.05+.52*rise-.56*collapse);
+        pos.xz+=wind*curlStrength*(.12+.63*front*front);
         vBreak=clamp(trigger,0.,1.);
         vFront=front;vPatch=aPatch;
         gl_Position=projectionMatrix*modelViewMatrix*vec4(pos,1.);
@@ -123,14 +125,14 @@ export function createBreakingEffects(THREE, scene, water, { mobile=false }={}) 
         uSimStrength:water.uSimStrength,uHeight:water.uHeight,
         uSpectralSwell:water.uSpectralSwell,uWindCascade:water.uWindCascade,
         uBreaking:water.uBreakingWaves,uThreshold:water.uBreakingThreshold,
-        uUnder:{value:underwater?1:0},uCameraXZ:uniforms.uCameraXZ
+        uAmount:{value:1},uUnder:{value:underwater?1:0},uCameraXZ:uniforms.uCameraXZ
       },
       transparent:true,depthWrite:false,blending:THREE.NormalBlending,
       vertexShader:`precision highp float;
         attribute float aSeed;
         uniform sampler2D uWave;
         uniform float uTime,uTexel,uSimStrength,uHeight,uSpectralSwell;
-        uniform float uWindCascade,uBreaking,uThreshold,uUnder;
+        uniform float uWindCascade,uBreaking,uThreshold,uUnder,uAmount;
         uniform vec2 uCameraXZ;
         varying float vAlpha,vUnder;
         float wave(vec2 uv){return texture2D(uWave,fract(uv)).r;}
@@ -158,7 +160,7 @@ export function createBreakingEffects(THREE, scene, water, { mobile=false }={}) 
           gl_Position=projectionMatrix*eye;
           float scale=uUnder>.5?3.3:4.3;
           gl_PointSize=clamp(scale*(110./max(-eye.z,1.)),1.,9.);
-          vAlpha=birth*burst*(uUnder>.5?.56:.76);
+          vAlpha=birth*burst*(uUnder>.5?.56:.76)*clamp(uAmount,0.,2.);
           vUnder=uUnder;
         }`,
       fragmentShader:`precision highp float;
@@ -188,8 +190,11 @@ export function createBreakingEffects(THREE, scene, water, { mobile=false }={}) 
       const x=Math.round(camera.position.x/8)*8,z=Math.round(camera.position.z/8)*8;
       group.position.set(x,0,z);
       uniforms.uCameraXZ.value.set(x,z);
-      spray.visible=camera.position.y>=-.5;
-      bubbles.visible=camera.position.y<1.5;
+      spray.visible=camera.position.y>=-.5&&params.sprayAmount>.001;
+      bubbles.visible=camera.position.y<1.5&&params.bubbleAmount>.001;
+      lipMaterial.uniforms.uLip.value=params.crestLip;
+      spray.material.uniforms.uAmount.value=params.sprayAmount;
+      bubbles.material.uniforms.uAmount.value=params.bubbleAmount;
     },
     dispose(){
       scene.remove(group);

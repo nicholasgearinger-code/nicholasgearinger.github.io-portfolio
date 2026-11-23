@@ -515,17 +515,37 @@ function animate(){
  // Source depth is used only for an above-water refraction test.
  // The underwater material pipeline does not rely on a scene capture.
  waterUniforms.uVolumeScattering.value=params.volumeScattering;
- waterUniforms.uDepthRefraction.value=(view!=="underwater"?params.depthRefraction:0);
+ waterUniforms.uDepthRefraction.value=params.depthRefraction;
  waterUniforms.uMirrorStrength.value=0;
- if(view!=="underwater"&&params.refraction>.001){
-   ocean.visible=false;
-   renderer.setRenderTarget(refractionTarget);
-   renderer.clear();
-   renderer.render(scene,camera);
-   renderer.setRenderTarget(null);
-   ocean.visible=true;
+ // Both sides use the existing scene-color and depth capture. Underwater
+ // it captures the sky and objects above the surface, leaving the seafloor
+ // out of this *transmitted* scene. Always restore scene visibility.
+ if(params.refraction>.001 && params.depthRefraction>.001 ||
+    view!=="underwater" && params.refraction>.001){
+   const underwaterCapture=view==="underwater";
+   const previousUnder=backdrop.material.uniforms.uUnder.value;
+   try {
+     ocean.visible=false;
+     if(underwaterCapture){
+       bottom.visible=false;rocks.visible=false;
+       backdrop.material.uniforms.uUnder.value=0;
+     }
+     renderer.setRenderTarget(refractionTarget);
+     renderer.clear();
+     renderer.render(scene,camera);
+   }catch(error){
+     waterUniforms.uDepthRefraction.value=0;
+     console.warn("[water-lab] Scene transmission capture unavailable",error);
+   }finally{
+     renderer.setRenderTarget(null);
+     ocean.visible=true;bottom.visible=true;rocks.visible=true;
+     backdrop.material.uniforms.uUnder.value=previousUnder;
+   }
  }
- if(view!=="underwater"&&params.sceneReflections>.001&&reflectionSupported){
+ if(params.sceneReflections>.001&&reflectionSupported){
+   const below=view==="underwater";
+   const previousAbove=opticalReference.visible;
+   const previousUnder=backdrop.material.uniforms.uUnder.value;
    try {
      camera.getWorldDirection(mirrorDirection);
      mirrorCamera.position.copy(camera.position);
@@ -540,26 +560,26 @@ function animate(){
        mirrorCamera.matrixWorldInverse);
      waterUniforms.uMirrorVP.value.copy(sceneReflectVP);
      ocean.visible=false;
-     bottom.visible=false;
-     rocks.visible=false;
-     const oldBackdrop=backdrop.position.clone();
+     // Above-water reflection captures the sky and reference object;
+     // below-water reflection captures the *submerged* seabed and rocks.
+     bottom.visible=below;rocks.visible=below;
+     opticalReference.visible=!below&&previousAbove;
+     backdrop.material.uniforms.uUnder.value=below?1:0;
      backdrop.position.copy(mirrorCamera.position);
      renderer.setRenderTarget(reflectionTarget);
      renderer.clear();
      renderer.render(scene,mirrorCamera);
-     renderer.setRenderTarget(null);
-     backdrop.position.copy(oldBackdrop);
-     bottom.visible=true;
-     rocks.visible=true;
-     ocean.visible=true;
      waterUniforms.uMirrorStrength.value=params.sceneReflections;
    }catch(error){
-     renderer.setRenderTarget(null);
-     bottom.visible=true;rocks.visible=true;ocean.visible=true;
-     backdrop.position.copy(camera.position);
      reflectionSupported=false;
      waterUniforms.uMirrorStrength.value=0;
-     console.warn("[water-lab] Planar reflection unavailable; using stable sky",error);
+     console.warn("[water-lab] Reflection capture unavailable; using stable water",error);
+   }finally{
+     renderer.setRenderTarget(null);
+     bottom.visible=true;rocks.visible=true;ocean.visible=true;
+     opticalReference.visible=previousAbove;
+     backdrop.position.copy(camera.position);
+     backdrop.material.uniforms.uUnder.value=previousUnder;
    }
  }
  try {

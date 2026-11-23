@@ -199,7 +199,7 @@ function stepSimulation(splash=null,reset=false){
 }
 stepSimulation(null,true);
 function splashAt(x,z,power=.12){pendingSplash={uv:new THREE.Vector2(
- ((x/128+.5)%1+1)%1,((z/128+.5)%1+1)%1),power};}
+ ((x/512.+5e-1)%1+1)%1,((z/512.+5e-1)%1+1)%1),power};}
 function advanceSimulation(t){
  simAccumulator+=Math.max(0,Math.min(.05,t-simLastTime));
  simLastTime=t;

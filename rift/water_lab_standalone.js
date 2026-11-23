@@ -129,13 +129,13 @@ void main(){
   // Localized incipient breaking. Detect a high, steep crest with
   // compression of the horizontal wave map. The extra shoulder/lip
   // is capped: this is a geometric approximation, not a 3D Navier-Stokes solve.
-  float crestHeight=smoothstep(.04,.42,delta.y*uHeight);
+  float crestHeight=smoothstep(.008,.18,delta.y*uHeight);
   float steepness=length(coupledSlope)*uHeight;
-  float threshold=mix(.18,.48,clamp(uBreakingThreshold,0.,1.));
-  float slopeBreak=smoothstep(threshold,threshold+.16,steepness);
+  float threshold=mix(.025,.15,clamp(uBreakingThreshold,0.,1.));
+  float slopeBreak=smoothstep(threshold,threshold+.065,steepness);
   float compression=clamp(length(horizontal)*.45,0.,1.);
   float breaking=uSpectralMode*crestHeight*slopeBreak*
-     smoothstep(.08,.42,compression)*clamp(uBreakingWaves,0.,2.);
+     smoothstep(.006,.12,compression)*clamp(uBreakingWaves,0.,2.);
   breaking=clamp(breaking,0.,1.);
   // Deflect the thin leading shoulder downwind, slightly lifting the
   // crest. Keep the displacements smooth to avoid tearing the FFT grid.
@@ -310,9 +310,9 @@ const foamMaterial=new THREE.ShaderMaterial({
    float crest=smoothstep(.006,.035,h);
    float compression=smoothstep(.006,.045,abs(curvature));
    float steepness=smoothstep(.012,.055,slope);
-   float onset=mix(.006,.035,clamp(uBreakThreshold,0.,1.));
+   float onset=mix(.002,.025,clamp(uBreakThreshold,0.,1.));
    float energetic=max(slope,abs(curvature)*.75);
-   float breaking=crest*smoothstep(onset,onset+.038,energetic)*
+   float breaking=crest*smoothstep(onset,onset+.022,energetic)*
       (.40+.60*max(compression,steepness))*clamp(uBreakStrength,0.,2.);
    // Subgrid foam seeds vary in space but only appear where breaking starts.
    float seed=fract(sin(dot(floor(uv*512.),vec2(127.1,311.7)))*43758.5453);

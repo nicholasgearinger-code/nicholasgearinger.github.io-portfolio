@@ -2,6 +2,7 @@
 // The production game stays entirely untouched while new waves are evaluated.
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js";
 import { createSpectralOcean } from "./water_lab_spectral.js";
+import { createBreakingEffects } from "./water_lab_breaking_effects.js";
 
 const canvas = document.getElementById("scene");
 const status = document.getElementById("status");
@@ -431,6 +432,7 @@ const ocean=new THREE.Mesh(geom,new THREE.ShaderMaterial({
 }));
 ocean.frustumCulled=false;
 scene.add(ocean);
+const breakingEffects=createBreakingEffects(THREE,scene,waterUniforms,{mobile});
 // Render a lower-resolution scene color without the water, once per visible
 // above-water frame, and refract it with the moving wave normal.
 const refractionTarget=new THREE.WebGLRenderTarget(16,16,{
@@ -847,6 +849,7 @@ function animate(){
  requestAnimationFrame(animate);
  const t=clock.getElapsedTime(),now=performance.now();
  advanceSimulation(t);
+ breakingEffects.update(camera,waveMode,params);
  waterUniforms.uSpectralChop.value=params.spectralChop;
  waterUniforms.uSpectralSwell.value=params.spectralSwell;
  waterUniforms.uFoamPersistence.value=params.foamPersistence;
@@ -906,7 +909,7 @@ function animate(){
    const underwaterCapture=view==="underwater";
    const previousUnder=backdrop.material.uniforms.uUnder.value;
    try {
-     ocean.visible=false;
+     ocean.visible=false;breakingEffects.group.visible=false;
      if(underwaterCapture){
        bottom.visible=false;rocks.visible=false;
        backdrop.material.uniforms.uUnder.value=0;
@@ -919,7 +922,7 @@ function animate(){
      console.warn("[water-lab] Scene transmission capture unavailable",error);
    }finally{
      renderer.setRenderTarget(null);
-     ocean.visible=true;bottom.visible=true;rocks.visible=true;
+     ocean.visible=true;breakingEffects.group.visible=(waveMode==='spectral'&&params.breakingWaves>.001);bottom.visible=true;rocks.visible=true;
      backdrop.material.uniforms.uUnder.value=previousUnder;
    }
  }
@@ -940,7 +943,7 @@ function animate(){
      sceneReflectVP.multiplyMatrices(mirrorCamera.projectionMatrix,
        mirrorCamera.matrixWorldInverse);
      waterUniforms.uMirrorVP.value.copy(sceneReflectVP);
-     ocean.visible=false;
+     ocean.visible=false;breakingEffects.group.visible=false;
      // Above-water reflection captures the sky and reference object;
      // below-water reflection captures the *submerged* seabed and rocks.
      bottom.visible=below;rocks.visible=below;
@@ -957,7 +960,7 @@ function animate(){
      console.warn("[water-lab] Reflection capture unavailable; using stable water",error);
    }finally{
      renderer.setRenderTarget(null);
-     bottom.visible=true;rocks.visible=true;ocean.visible=true;
+     bottom.visible=true;rocks.visible=true;ocean.visible=true;breakingEffects.group.visible=(waveMode==='spectral'&&params.breakingWaves>.001);
      opticalReference.visible=previousAbove;
      backdrop.position.copy(camera.position);
      backdrop.material.uniforms.uUnder.value=previousUnder;

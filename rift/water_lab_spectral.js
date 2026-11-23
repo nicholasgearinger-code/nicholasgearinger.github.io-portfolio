@@ -8,14 +8,19 @@ export function createSpectralOcean(THREE, renderer, {mobile=false}={}) {
   const n = mobile ? 64 : 128;
   const stages = Math.round(Math.log2(n));
   const texel = 1/n;
-  const target = () => new THREE.WebGLRenderTarget(n,n,{
+  // FFT butterfly stages must sample exact texel centres (nearest).
+  // Only the final spatial height field can be interpolated smoothly.
+  const linearHeight=renderer.capabilities.isWebGL2 ||
+    renderer.extensions.has('OES_texture_half_float_linear');
+  const target = (filtered=false) => new THREE.WebGLRenderTarget(n,n,{
     type:THREE.HalfFloatType, format:THREE.RGBAFormat,
-    minFilter:THREE.NearestFilter, magFilter:THREE.NearestFilter,
+    minFilter:filtered&&linearHeight?THREE.LinearFilter:THREE.NearestFilter,
+    magFilter:filtered&&linearHeight?THREE.LinearFilter:THREE.NearestFilter,
     wrapS:THREE.RepeatWrapping, wrapT:THREE.RepeatWrapping,
     depthBuffer:false, stencilBuffer:false, generateMipmaps:false
   });
   const targets=[target(),target()];
-  const output=target();
+  const output=target(true);
   const camera=new THREE.OrthographicCamera(-1,1,1,-1,0,1);
   const scene=new THREE.Scene();
   const quad=new THREE.Mesh(new THREE.PlaneGeometry(2,2),null);

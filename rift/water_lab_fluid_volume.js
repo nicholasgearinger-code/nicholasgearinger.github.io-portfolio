@@ -14,7 +14,7 @@ export function createLocalFluidVolume(THREE,scene,{mobile=false}={}) {
   const particleIDs=new Float32Array(count);
   const hash=new Map();
   let active=0,carry=0,lastT=null,originX=0,originZ=0,spawnClock=0,frame=0,nextSpawn=0;
-  const range=radius*2.4,range2=range*range,restDensity=4.2;
+  const range=radius*2.4,range2=range*range;
   let enabled=false;
   // Viscous particle fluid remains in a finite domain: this is a local
   // falling-water breaking-volume sandbox rather than a whole-ocean solve.
@@ -135,7 +135,10 @@ export function createLocalFluidVolume(THREE,scene,{mobile=false}={}) {
           local+=w*w*w;
           // Paired pressure repulsion, conserving local impulse direction.
           const overlap=Math.max(0,spacing-len);
-          const strength=(overlap*.41+pressure*w*w*.024)/len;
+          // Short-range separation maintains liquid volume; weak cohesion
+          // keeps adjacent particles from becoming disconnected spray.
+          const cohesion=len>spacing?(len-spacing)*.027:0;
+          const strength=(overlap*.41+pressure*w*w*.024-cohesion)/len;
           correction[k]+=dx*strength;
           correction[k+1]+=dy*strength;
           correction[k+2]+=dz*strength;

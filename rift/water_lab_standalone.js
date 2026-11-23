@@ -27,7 +27,7 @@ window.addEventListener("unhandledrejection",e=>showLabFailure(e.reason));
 const fpsLabel = document.getElementById("fps");
 const triLabel = document.getElementById("tri");
 let waveMode="spectral";
-const params = {height:1, chop:1, sun:1, clarity:1, caustics:1, causticSpeed:1, causticCurvature:1, causticFocus:1, refraction:1, occlusion:1, ceilingDetail:1, ceilingLight:1, volume:1, shafts:1, glint:1, penetration:1, undersideWindow:1, undersideShimmer:1, physicalLight:1, surfaceDetail:1, swellComplexity:1, crestFoam:1, shallowLight:1, sceneReflections:.75, depthRefraction:1, volumeScattering:1,simulation:1,spectralChop:.6,spectralSwell:1.1,underwaterSkylight:1.35,underwaterExposure:1.25,swellCascade:1,windCascade:1,fineRipples:1.2,foamPersistence:1,foamBreakup:1,breakingWaves:.8,breakingThreshold:.48};
+const params = {height:1, chop:1, sun:1, clarity:1, caustics:1, causticSpeed:1, causticCurvature:1, causticFocus:1, refraction:1, occlusion:1, ceilingDetail:1, ceilingLight:1, volume:1, shafts:1, glint:1, penetration:1, undersideWindow:1, undersideShimmer:1, physicalLight:1, surfaceDetail:1, swellComplexity:1, crestFoam:1, shallowLight:1, sceneReflections:.75, depthRefraction:1, volumeScattering:1,simulation:1,spectralChop:.6,spectralSwell:1.1,underwaterSkylight:1.35,underwaterExposure:1.25,swellCascade:1,windCascade:1,fineRipples:1.2,foamPersistence:1,foamBreakup:1,breakingWaves:.8,breakingThreshold:.48,crestLip:.85,sprayAmount:.8,bubbleAmount:.8};
 const mobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || navigator.maxTouchPoints>0;
 let renderer;
 try {

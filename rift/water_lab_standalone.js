@@ -515,13 +515,12 @@ function animate(){
  // Source depth is used only for an above-water refraction test.
  // The underwater material pipeline does not rely on a scene capture.
  waterUniforms.uVolumeScattering.value=params.volumeScattering;
- waterUniforms.uDepthRefraction.value=params.depthRefraction;
+ waterUniforms.uDepthRefraction.value=params.refraction>.001?params.depthRefraction:0;
  waterUniforms.uMirrorStrength.value=0;
  // Both sides use the existing scene-color and depth capture. Underwater
  // it captures the sky and objects above the surface, leaving the seafloor
  // out of this *transmitted* scene. Always restore scene visibility.
- if(params.refraction>.001 && params.depthRefraction>.001 ||
-    view!=="underwater" && params.refraction>.001){
+ if(params.refraction>.001 && (view!=="underwater" || params.depthRefraction>.001)){
    const underwaterCapture=view==="underwater";
    const previousUnder=backdrop.material.uniforms.uUnder.value;
    try {

@@ -13,13 +13,16 @@ export function createLocalFluidVolume(THREE,scene,{mobile=false}={}) {
   const sourceAge=new Float32Array(count);
   const particleIDs=new Float32Array(count);
   const hash=new Map();
-  let active=0,carry=0,lastT=null,originX=0,originZ=0,spawnClock=0,frame=0;
+  let active=0,carry=0,lastT=null,originX=0,originZ=0,spawnClock=0,frame=0,nextSpawn=0;
   const range=radius*2.4,range2=range*range,restDensity=4.2;
   let enabled=false;
+  // Viscous particle fluid remains in a finite domain: this is a local
+  // falling-water breaking-volume sandbox rather than a whole-ocean solve.
   const key=(x,y,z)=>x+','+y+','+z;
   const seed=(i)=>{let x=Math.sin(i*127.17+9.83)*43758.5453;return x-Math.floor(x);};
   function spawn(p,seedIndex,force=1){
-    const i=active%count,k=i*3;
+    const i=nextSpawn,k=i*3;
+    nextSpawn=(nextSpawn+1)%count;
     const cross=(seed(seedIndex*7+1)-.5)*4.2;
     const depth=(seed(seedIndex*7+2)-.5)*2.3;
     p[k]=cross*.92;
@@ -63,7 +66,7 @@ export function createLocalFluidVolume(THREE,scene,{mobile=false}={}) {
        float glint=pow(max(dot(reflect(-light,normal),vec3(0.,0.,1.)),0.),22.);
        vec3 col=mix(vec3(.018,.22,.30),vec3(.18,.69,.72),.35+.65*diffuse);
        col+=vec3(.62,.86,.81)*glint*.65;
-       float alpha=uOpacity*(.25+.72*shade)*smoothstep(1.,.73,r2);
+       float alpha=uOpacity*(.25+.72*shade)*(1.-smoothstep(.73,1.,r2));
        gl_FragColor=vec4(col,alpha);
       }`
   });
@@ -196,7 +199,7 @@ export function createLocalFluidVolume(THREE,scene,{mobile=false}={}) {
     while(carry>=1/30&&steps<2){
       const step=1/30;
       spawnClock+=step*params.fluidVolume*8;
-      while(spawnClock>=1&&active<count){
+      while(spawnClock>=1){
         spawn(positions,frame++,params.breakingWaves);
         spawnClock-=1;
       }

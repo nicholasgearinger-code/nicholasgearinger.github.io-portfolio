@@ -12,7 +12,7 @@ h1{font-size:15px;margin:0;font-weight:700;letter-spacing:.025em}small{display:b
 #hint{position:absolute;top:25%;left:50%;transform:translateX(-50%);font-size:11px;color:#d7eff9aa;pointer-events:none;text-align:center;white-space:normal;width:min(90vw,370px);line-height:1.4}a{color:#a5f2ef;text-decoration:none}#status{color:#f8cda3;font-size:11px;display:none;margin-top:6px}
 @media(max-height:680px){.inputs{grid-template-columns:repeat(4,1fr)}#hint{display:none}.panel{padding:8px 10px}}
 </style></head>
-<body><canvas id="scene"></canvas><header id="top"><div class="panel"><h1>Rift · Water Lab <span style="color:#78e8ef">12.3</span></h1><small>Independent ocean research · no game changes</small><div id="status"></div></div><div class="panel stat"><span id="fps">FPS —</span><br><span id="tri">Triangles —</span><br><a href="rift-play.html">Back to Rift</a></div></header>
+<body><canvas id="scene"></canvas><header id="top"><div class="panel"><h1>Rift · Water Lab <span style="color:#78e8ef">12.4</span></h1><small>Independent ocean research · no game changes</small><div id="status"></div></div><div class="panel stat"><span id="fps">FPS —</span><br><span id="tri">Triangles —</span><br><a href="rift-play.html">Back to Rift</a></div></header>
 <div id="hint">Spectral ocean mode · compare engines in Settings · numerical mode: tap to create ripples</div>
 <section id="controls"><div class="panel controls"><div class="segment" id="views"><button data-view="surface" aria-pressed="true">Ocean surface</button><button data-view="waterline" aria-pressed="false">Waterline</button><button data-view="underwater" aria-pressed="false">Underwater</button></div></div><details class="panel controls" id="lab-settings"><summary>Adjust water settings</summary><div class="inputs">
 <label style="grid-column:1/-1">Wave engine
@@ -20,7 +20,7 @@ h1{font-size:15px;margin:0;font-weight:700;letter-spacing:.025em}small{display:b
 <option value="spectral">Spectral Ocean · GPU FFT</option>
 <option value="numerical">Numerical Ripple Solver</option>
 <option value="procedural">Original Procedural Ocean</option>
-</select><small>High detail: 128² FFT on mobile. If FPS falls, try <a href="?v=12-3&labQuality=low">Low GPU mode (64²)</a>. <a href="?v=12-3">Return to high detail</a>.</small></label>
+</select><small>High detail: 128² FFT on mobile. If FPS falls, try <a href="?v=12-4&labQuality=low">Low GPU mode (64²)</a>. <a href="?v=12-4">Return to high detail</a>.</small></label>
 <label>Spectral swell height <output id="spectralSwellOut">1.10</output><input id="spectralSwell" type="range" min=".5" max="2.5" step=".05" value="1.1"></label>
 <label>Spectral crest sharpness <output id="spectralChopOut">0.60</output><input id="spectralChop" type="range" min="0" max="2" step=".05" value=".6"></label>
 <label>Simulation amplitude <output id="simulationOut">1.0</output><input id="simulation" type="range" min="0" max="2" step=".1" value="1"></label>
@@ -41,6 +41,8 @@ h1{font-size:15px;margin:0;font-weight:700;letter-spacing:.025em}small{display:b
 <label>Line focus <output id="causticFocusOut">1.0</output><input id="causticFocus" type="range" min=".25" max="1.8" step=".05" value="1"></label>
 <label>Rock occlusion <output id="occlusionOut">1.0</output><input id="occlusion" type="range" min="0" max="1" step=".05" value="1"></label>
 <label>Refraction <output id="refractionOut">1.0</output><input id="refraction" type="range" min="0" max="1.8" step=".05" value="1"></label>
+<label>Underwater skylight <output id="underwaterSkylightOut">1.35</output><input id="underwaterSkylight" type="range" min="0" max="2.5" step=".05" value="1.35"></label>
+<label>Nearby reef exposure <output id="underwaterExposureOut">1.25</output><input id="underwaterExposure" type="range" min="0" max="2.5" step=".05" value="1.25"></label>
 <label>Ceiling detail <output id="ceilingDetailOut">1.0</output><input id="ceilingDetail" type="range" min="0" max="2.0" step=".05" value="1"></label>
 <label>Ceiling skylight <output id="ceilingLightOut">1.0</output><input id="ceilingLight" type="range" min=".35" max="2.0" step=".05" value="1"></label>
 <label>Water volume <output id="volumeOut">1.0</output><input id="volume" type="range" min="0" max="1" step=".05" value="1"></label>
@@ -51,4 +53,4 @@ h1{font-size:15px;margin:0;font-weight:700;letter-spacing:.025em}small{display:b
 <label>Underwater shimmer <output id="undersideShimmerOut">1.0</output><input id="undersideShimmer" type="range" min="0" max="2" step=".05" value="1"></label>
 <label>Physical light coupling <output id="physicalLightOut">1.0</output><input id="physicalLight" type="range" min="0" max="1" step=".05" value="1"></label>
 </div></details></section>
-<script type="module" src="./rift/water_lab_standalone.js?lab=adaptive-spectral-v12-3"></script></body></html>
+<script type="module" src="./rift/water_lab_standalone.js?lab=showcase-underside-v12-4"></script></body></html>

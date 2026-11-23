@@ -1,11 +1,12 @@
 // Independent Rift Water Lab spectral engine (not imported by Rift gameplay).
 // Frequency-domain gravity-wave evolution + GPU inverse FFT (DIF butterflies).
 // Float/half-float render targets are required; no lossy 8-bit FFT fallback.
-export function createSpectralOcean(THREE, renderer, {mobile=false}={}) {
+export function createSpectralOcean(THREE, renderer, {mobile=false, resolution=null, domain=512, band='wind'}={}) {
   const supported = renderer.extensions.has('EXT_color_buffer_float') ||
     renderer.extensions.has('EXT_color_buffer_half_float');
   if (!supported) return {supported:false, reason:'Floating-point render targets unavailable'};
-  const n = mobile ? 64 : 128; // 128 on supported phones by default; 64 with labQuality=low
+  const n = resolution || (mobile ? 64 : 128);
+  if ((n & (n - 1)) !== 0 || n < 32 || n > 256) throw Error('FFT resolution must be a power of two from 32 to 256');
   const stages = Math.round(Math.log2(n));
   const texel = 1/n;
   // FFT butterfly stages must sample exact texel centres (nearest).
@@ -29,10 +30,10 @@ export function createSpectralOcean(THREE, renderer, {mobile=false}={}) {
   const baseVertex='varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,0.,1.);}';
   const spectrum=new THREE.ShaderMaterial({
     depthTest:false,depthWrite:false,
-    uniforms:{uTime:{value:0},uWind:{value:1},uN:{value:n}},
+    uniforms:{uTime:{value:0},uWind:{value:1},uN:{value:n},uDomain:{value:domain},uBand:{value:band==='swell'?1:0}},
     vertexShader:baseVertex,
     fragmentShader:`precision highp float;
-      varying vec2 vUv;uniform float uTime,uWind,uN;
+      varying vec2 vUv;uniform float uTime,uWind,uN,uDomain,uBand;
       const float PI=3.141592653589793;
       float hash(vec2 p) {return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
       vec2 gaussian(vec2 i) {
@@ -42,21 +43,22 @@ export function createSpectralOcean(THREE, renderer, {mobile=false}={}) {
         return r*vec2(cos(2.*PI*b),sin(2.*PI*b));
       }
       float amplitude(vec2 p) {
-        vec2 k=(p-uN*.5)*(2.*PI/512.);
+        vec2 k=(p-uN*.5)*(2.*PI/uDomain);
         float m=length(k);
         if(m<.012||m>1.2)return 0.;
         vec2 direction=k/m;
         vec2 wind=normalize(vec2(.94,.34));
         float directional=.12+.88*pow(max(dot(direction,wind),0.),3.);
-        float primary=exp(-.5*pow((m-.105)/.062,2.))*.032;
-        float secondary=exp(-.5*pow((m-.32)/.16,2.))*.006;
-        return (primary+secondary)*directional*sqrt(max(.1,uWind));
+        float windMain=exp(-.5*pow((m-.105)/.062,2.))*.032;
+        float windDetail=exp(-.5*pow((m-.32)/.16,2.))*.006;
+        float longSwell=exp(-.5*pow((m-.028)/.019,2.))*.050;
+        return mix(windMain+windDetail,longSwell,uBand)*directional*sqrt(max(.1,uWind));
       }
       vec2 cmul(vec2 a,vec2 b){return vec2(a.x*b.x-a.y*b.y,a.x*b.y+a.y*b.x);}
       void main(){
         vec2 i=floor(gl_FragCoord.xy);
         vec2 minus=mod(uN-i,uN);
-        vec2 k=(i-uN*.5)*(2.*PI/512.);
+        vec2 k=(i-uN*.5)*(2.*PI/uDomain);
         float mag=length(k);
         float omega=sqrt(9.81*mag*tanh(mag*75.));
         // k and -k are a Hermitian pair. Real output after inverse FFT.
@@ -154,7 +156,7 @@ export function createSpectralOcean(THREE, renderer, {mobile=false}={}) {
     return output.texture;
   }
   return {
-    supported:true, resolution:n, texel, texture:output.texture, update,
+    supported:true, resolution:n, texel, domain, band, texture:output.texture, update,
     dispose(){targets.forEach(t=>t.dispose());output.dispose();
       spectrum.dispose();butterfly.dispose();finalPass.dispose();quad.geometry.dispose();}
   };

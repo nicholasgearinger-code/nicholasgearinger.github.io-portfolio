@@ -30,7 +30,7 @@ export function createSpectralOcean(THREE, renderer, {mobile=false, resolution=n
   const baseVertex='varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,0.,1.);}';
   const spectrum=new THREE.ShaderMaterial({
     depthTest:false,depthWrite:false,
-    uniforms:{uTime:{value:0},uWind:{value:1},uN:{value:n},uDomain:{value:domain},uBand:{value:band==='swell'?1:0}},
+    uniforms:{uTime:{value:0},uWind:{value:1},uN:{value:n},uDomain:{value:domain},uBand:{value:band==='swell'?1:band==='ripple'?2:0}},
     vertexShader:baseVertex,
     fragmentShader:`precision highp float;
       varying vec2 vUv;uniform float uTime,uWind,uN,uDomain,uBand;
@@ -52,7 +52,9 @@ export function createSpectralOcean(THREE, renderer, {mobile=false, resolution=n
         float windMain=exp(-.5*pow((m-.105)/.062,2.))*.032;
         float windDetail=exp(-.5*pow((m-.32)/.16,2.))*.006;
         float longSwell=exp(-.5*pow((m-.028)/.019,2.))*.050;
-        return mix(windMain+windDetail,longSwell,uBand)*directional*sqrt(max(.1,uWind));
+        float ripple=exp(-.5*pow((m-.78)/.31,2.))*.009;
+        float selected=uBand>1.5?ripple:mix(windMain+windDetail,longSwell,uBand);
+        return selected*directional*sqrt(max(.1,uWind));
       }
       vec2 cmul(vec2 a,vec2 b){return vec2(a.x*b.x-a.y*b.y,a.x*b.y+a.y*b.x);}
       void main(){

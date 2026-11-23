@@ -457,6 +457,24 @@ function resize(){camera.aspect=innerWidth/innerHeight;camera.updateProjectionMa
 window.addEventListener("resize",resize);
 setView(sceneProbe?"underwater":"surface");
 let last=performance.now(),count=0,smoothed=60;
+// Optional reference object above water: verifies that scene capture actually
+// reflects geometry, not just a procedural sky. The prototype stays isolated.
+const opticalReference=new THREE.Group();
+const markerHull=new THREE.Mesh(new THREE.CylinderGeometry(.55,.75,.8,12),
+ new THREE.MeshStandardMaterial({color:0xe46c3d,roughness:.7}));
+markerHull.position.y=.55;
+opticalReference.add(markerHull);
+const markerTop=new THREE.Mesh(new THREE.SphereGeometry(.36,12,8),
+ new THREE.MeshStandardMaterial({color:0xf6d9aa,roughness:.55}));
+markerTop.position.y=1.18;
+opticalReference.add(markerTop);
+opticalReference.position.set(-5,0,-16);
+scene.add(opticalReference);
+const sceneSun=new THREE.DirectionalLight(0xffffff,2.0);
+sceneSun.position.set(18,35,12);scene.add(sceneSun);
+scene.add(new THREE.AmbientLight(0xb7daee,.75));
+let reflectionSupported=true;
+
 function animate(){
  requestAnimationFrame(animate);
  const t=clock.getElapsedTime(),now=performance.now();
@@ -494,6 +512,11 @@ function animate(){
  waterUniforms.uSurfaceDetail.value=params.surfaceDetail;
  waterUniforms.uCrestFoam.value=params.crestFoam;
  waterUniforms.uUnderwaterOptics.value=improvedUnderwaterOptics?1:0;
+ // Source depth is used only for an above-water refraction test.
+ // The underwater material pipeline does not rely on a scene capture.
+ waterUniforms.uVolumeScattering.value=params.volumeScattering;
+ waterUniforms.uDepthRefraction.value=(view!=="underwater"?params.depthRefraction:0);
+ waterUniforms.uMirrorStrength.value=0;
  if(view!=="underwater"&&params.refraction>.001){
    ocean.visible=false;
    renderer.setRenderTarget(refractionTarget);
@@ -501,6 +524,43 @@ function animate(){
    renderer.render(scene,camera);
    renderer.setRenderTarget(null);
    ocean.visible=true;
+ }
+ if(view!=="underwater"&&params.sceneReflections>.001&&reflectionSupported){
+   try {
+     camera.getWorldDirection(mirrorDirection);
+     mirrorCamera.position.copy(camera.position);
+     mirrorCamera.position.y=-camera.position.y;
+     mirrorPoint.copy(camera.position).add(mirrorDirection);
+     mirrorPoint.y=-mirrorPoint.y;
+     mirrorCamera.up.set(0,-1,0);
+     mirrorCamera.lookAt(mirrorPoint);
+     mirrorCamera.updateProjectionMatrix();
+     mirrorCamera.updateMatrixWorld(true);
+     sceneReflectVP.multiplyMatrices(mirrorCamera.projectionMatrix,
+       mirrorCamera.matrixWorldInverse);
+     waterUniforms.uMirrorVP.value.copy(sceneReflectVP);
+     ocean.visible=false;
+     bottom.visible=false;
+     rocks.visible=false;
+     const oldBackdrop=backdrop.position.clone();
+     backdrop.position.copy(mirrorCamera.position);
+     renderer.setRenderTarget(reflectionTarget);
+     renderer.clear();
+     renderer.render(scene,mirrorCamera);
+     renderer.setRenderTarget(null);
+     backdrop.position.copy(oldBackdrop);
+     bottom.visible=true;
+     rocks.visible=true;
+     ocean.visible=true;
+     waterUniforms.uMirrorStrength.value=params.sceneReflections;
+   }catch(error){
+     renderer.setRenderTarget(null);
+     bottom.visible=true;rocks.visible=true;ocean.visible=true;
+     backdrop.position.copy(camera.position);
+     reflectionSupported=false;
+     waterUniforms.uMirrorStrength.value=0;
+     console.warn("[water-lab] Planar reflection unavailable; using stable sky",error);
+   }
  }
  try {
    renderer.render(scene,camera);

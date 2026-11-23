@@ -26,7 +26,7 @@ window.addEventListener("unhandledrejection",e=>showLabFailure(e.reason));
 const fpsLabel = document.getElementById("fps");
 const triLabel = document.getElementById("tri");
 let waveMode="spectral";
-const params = {height:1, chop:1, sun:1, clarity:1, caustics:1, causticSpeed:1, causticCurvature:1, causticFocus:1, refraction:1, occlusion:1, ceilingDetail:1, ceilingLight:1, volume:1, shafts:1, glint:1, penetration:1, undersideWindow:1, undersideShimmer:1, physicalLight:1, surfaceDetail:1, swellComplexity:1, crestFoam:1, shallowLight:1, sceneReflections:0, depthRefraction:1, volumeScattering:1,simulation:1,spectralChop:.6,spectralSwell:1.1,underwaterSkylight:1.35,underwaterExposure:1.25};
+const params = {height:1, chop:1, sun:1, clarity:1, caustics:1, causticSpeed:1, causticCurvature:1, causticFocus:1, refraction:1, occlusion:1, ceilingDetail:1, ceilingLight:1, volume:1, shafts:1, glint:1, penetration:1, undersideWindow:1, undersideShimmer:1, physicalLight:1, surfaceDetail:1, swellComplexity:1, crestFoam:1, shallowLight:1, sceneReflections:0, depthRefraction:1, volumeScattering:1,simulation:1,spectralChop:.6,spectralSwell:1.1,underwaterSkylight:1.35,underwaterExposure:1.25,swellCascade:1,windCascade:1};
 const mobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || navigator.maxTouchPoints>0;
 let renderer;
 try {
@@ -57,12 +57,12 @@ const clock=new THREE.Clock();
 let yaw=0,pitch=-.055, view="surface";
 const waterUniforms={
   uTime:{value:0},uHeight:{value:1},uChop:{value:1},uSwellComplexity:{value:1},
-  uSun:{value:1},uClarity:{value:1},uEye:{value:camera.position},uSceneTex:{value:null},uViewport:{value:new THREE.Vector2(1,1)},uRefraction:{value:1},uCeilingDetail:{value:1},uCeilingLight:{value:1},uGlint:{value:1},uPenetration:{value:1},uUndersideWindow:{value:1},uUndersideShimmer:{value:1},uSurfaceDetail:{value:1},uCrestFoam:{value:1},uUnderwaterOptics:{value:1},uMirrorTex:{value:null},uMirrorVP:{value:new THREE.Matrix4()},uMirrorStrength:{value:0},uUnderside31:{value:1},uUnderside32:{value:1},uUnderside33:{value:1},uSceneDepthTex:{value:null},uDepthRefraction:{value:0},uCameraNear:{value:camera.near},uCameraFar:{value:camera.far},uVolumeScattering:{value:1},uSimTex:{value:null},uSimStrength:{value:1},uSimTexel:{value:1/128},uSimZero:{value:0},uSimDecode:{value:1},uProceduralWeight:{value:0},uSpectralMode:{value:0},uSpectralChop:{value:.6},uSpectralSwell:{value:1.1},uUnderwaterSkylight:{value:1.35},uUnderwaterExposure:{value:1.25}
+  uSun:{value:1},uClarity:{value:1},uEye:{value:camera.position},uSceneTex:{value:null},uViewport:{value:new THREE.Vector2(1,1)},uRefraction:{value:1},uCeilingDetail:{value:1},uCeilingLight:{value:1},uGlint:{value:1},uPenetration:{value:1},uUndersideWindow:{value:1},uUndersideShimmer:{value:1},uSurfaceDetail:{value:1},uCrestFoam:{value:1},uUnderwaterOptics:{value:1},uMirrorTex:{value:null},uMirrorVP:{value:new THREE.Matrix4()},uMirrorStrength:{value:0},uUnderside31:{value:1},uUnderside32:{value:1},uUnderside33:{value:1},uSceneDepthTex:{value:null},uDepthRefraction:{value:0},uCameraNear:{value:camera.near},uCameraFar:{value:camera.far},uVolumeScattering:{value:1},uSimTex:{value:null},uSimStrength:{value:1},uSimTexel:{value:1/128},uSimZero:{value:0},uSimDecode:{value:1},uProceduralWeight:{value:0},uSpectralMode:{value:0},uSpectralChop:{value:.6},uSpectralSwell:{value:1.1},uUnderwaterSkylight:{value:1.35},uUnderwaterExposure:{value:1.25},uSwellTex:{value:null},uSwellTexel:{value:1/64},uSwellCascade:{value:1},uWindCascade:{value:1}
 };
 const waterVert=`
 precision highp float;
-uniform float uTime,uHeight,uChop,uSwellComplexity,uSimStrength,uSimTexel,uSimZero,uSimDecode,uProceduralWeight,uSpectralMode,uSpectralChop,uSpectralSwell;
-uniform sampler2D uSimTex;
+uniform float uTime,uHeight,uChop,uSwellComplexity,uSimStrength,uSimTexel,uSimZero,uSimDecode,uProceduralWeight,uSpectralMode,uSpectralChop,uSpectralSwell,uSwellTexel,uSwellCascade,uWindCascade;
+uniform sampler2D uSimTex,uSwellTex;
 varying vec3 vWorld,vWaveNormal;
 varying float vCrest;
 void wave(in vec2 p,in vec2 d,in float amp,in float freq,in float speed,inout vec3 displacement,inout vec2 gradient){
@@ -107,9 +107,20 @@ void main(){
   float hSim=(texture2D(uSimTex,uvSim).r-uSimZero)*uSimDecode*8.*uSimStrength*mix(1.,uSpectralSwell,uSpectralMode);
   float gradX=(texture2D(uSimTex,uvSim+dxSim).r-texture2D(uSimTex,uvSim-dxSim).r)*uSimDecode*8.*uSimStrength/(1024.*uSimTexel);
   float gradZ=(texture2D(uSimTex,uvSim+dzSim).r-texture2D(uSimTex,uvSim-dzSim).r)*uSimDecode*8.*uSimStrength/(1024.*uSimTexel);
+  // Cascade A: kilometre-scale low-frequency swells on a separate FFT,
+  // sampled in the same world coordinate frame as the wind cascade.
+  vec2 uvLong=fract(xz/1024.+.5);
+  vec2 longX=vec2(uSwellTexel,0.),longZ=vec2(0.,uSwellTexel);
+  float longHeight=texture2D(uSwellTex,uvLong).r*8.;
+  vec2 longSlope=vec2(
+   texture2D(uSwellTex,uvLong+longX).r-texture2D(uSwellTex,uvLong-longX).r,
+   texture2D(uSwellTex,uvLong+longZ).r-texture2D(uSwellTex,uvLong-longZ).r
+  )*8./(2048.*uSwellTexel);
+  float windWeight=mix(1.,uWindCascade,uSpectralMode);
+  float swellWeight=uSpectralMode*uSwellCascade;
   float swellGain=mix(1.,uSpectralSwell,uSpectralMode);
-  vec2 coupledSlope=vec2(gradX,gradZ)*swellGain;
-  delta.y+=hSim;
+  vec2 coupledSlope=(vec2(gradX,gradZ)*windWeight+longSlope*swellWeight)*swellGain;
+  delta.y+=hSim*windWeight+longHeight*swellWeight*uSpectralSwell;
   slope+=coupledSlope;
   // Compressed crests: displace in the direction of spectral slopes.
   // Limit the shift to keep triangles from folding at higher wind speeds.
@@ -136,7 +147,12 @@ const waterFrag="\nprecision highp float;\nuniform float uHeight,uTime,uSun,uCla
 // Frequency-domain spectral waves use the same geometry and water optics.
 // High FFT on phones; ?labQuality=low is a 64x64 fallback.
 const lowOceanQuality=new URLSearchParams(location.search).get("labQuality")==="low";
-const spectralOcean=createSpectralOcean(THREE,renderer,{mobile:mobile&&lowOceanQuality});
+const spectralOcean=createSpectralOcean(THREE,renderer,{mobile:mobile&&lowOceanQuality,domain:512,band:"wind"});
+// Secondary low-frequency FFT. Smaller grid keeps the extra passes affordable.
+const swellOcean=createSpectralOcean(THREE,renderer,{
+ mobile:mobile&&lowOceanQuality,resolution:lowOceanQuality?32:64,
+ domain:1024,band:"swell"
+});
 if(!spectralOcean.supported){
   waveMode="numerical";
   console.warn("[water-lab] Spectral mode unavailable:",spectralOcean.reason);
@@ -233,6 +249,10 @@ function advanceSimulation(t){
  // Only the selected solver runs; spectral does not overlay Gerstner waves.
  if(waveMode==="spectral"&&spectralOcean.supported){
    const tex=spectralOcean.update(t,Math.max(.1,params.chop));
+   if(swellOcean.supported){
+     waterUniforms.uSwellTex.value=swellOcean.update(t*.93,Math.max(.1,params.chop));
+     waterUniforms.uSwellTexel.value=swellOcean.texel;
+   }
    waterUniforms.uSimTex.value=tex;
    waterUniforms.uSimTexel.value=spectralOcean.texel;
    waterUniforms.uSimZero.value=0;
@@ -240,12 +260,16 @@ function advanceSimulation(t){
    waterUniforms.uSimStrength.value=params.simulation;
    waterUniforms.uProceduralWeight.value=0;
    waterUniforms.uSpectralMode.value=1;
+   waterUniforms.uSwellCascade.value=swellOcean.supported?params.swellCascade:0;
+   waterUniforms.uWindCascade.value=params.windCascade;
    simLastTime=t;simAccumulator=0;
    return;
  }
  waterUniforms.uSimTex.value=simTargets[simIndex].texture;
  waterUniforms.uSimTexel.value=1/simResolution;
  waterUniforms.uSpectralMode.value=0;
+ waterUniforms.uSwellCascade.value=0;
+ waterUniforms.uWindCascade.value=1;
  waterUniforms.uSimZero.value=simZero;
  waterUniforms.uSimDecode.value=simDecode;
  simAccumulator+=Math.max(0,Math.min(.05,t-simLastTime));
@@ -692,6 +716,8 @@ function animate(){
  advanceSimulation(t);
  waterUniforms.uSpectralChop.value=params.spectralChop;
  waterUniforms.uSpectralSwell.value=params.spectralSwell;
+ waterUniforms.uSwellCascade.value=(waveMode==='spectral'&&swellOcean.supported)?params.swellCascade:0;
+ waterUniforms.uWindCascade.value=params.windCascade;
  waterUniforms.uTime.value=t;waterUniforms.uHeight.value=params.height;
  waterUniforms.uChop.value=params.chop;
  waterUniforms.uSwellComplexity.value=params.swellComplexity;waterUniforms.uSun.value=params.sun;

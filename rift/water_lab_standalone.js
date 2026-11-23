@@ -366,7 +366,8 @@ const lightMaterialFragment=`
 precision highp float;
 uniform float uTime,uSun,uClarity,uCaustics,uHeight,uPhysicalLight;
 uniform float uCausticSpeed,uCausticCurvature,uCausticFocus;
-uniform float uShallowLight,uUnderwaterOptics;
+uniform float uShallowLight,uUnderwaterOptics,uSpectralMode,uSimStrength,uSimZero,uSimDecode,uSpectralSwell,uSpectralTexel;
+uniform sampler2D uSimTex;
 uniform vec3 uEye;
 uniform float uIsRock;
 varying vec3 vWorld;
@@ -401,7 +402,30 @@ float focusedCellBoundaries(vec2 pos,float time){
   float line=1.-smoothstep(.012,.16,distanceToLine);
   return line;
 }
+float spectralSunCaustics(vec2 position){
+  float depth=max(0.,-vWorld.y);
+  // Surface lens sampled in world coordinates, displaced to the sun's
+  // incident footprint. The same height texture deforms ocean geometry.
+  vec2 p=position+vec2(-.37,.70)*depth*.58;
+  vec2 uv=fract(p/512.+.5),stepUv=vec2(1./64. ,0.);
+  // 64-point mobile spectral texture; desktop uses 128. Derivative
+  // spacing is supplied by the FFT resolution uniform below.
+  stepUv=vec2(uSpectralTexel,0.);
+  vec2 dz=stepUv.yx;
+  float center=texture2D(uSimTex,uv).r;
+  float xx=texture2D(uSimTex,uv+stepUv).r+
+           texture2D(uSimTex,uv-stepUv).r-2.*center;
+  float zz=texture2D(uSimTex,uv+dz).r+
+           texture2D(uSimTex,uv-dz).r-2.*center;
+  // Approximate convergence of refracted ray bundles.
+  float waveCurvature=(xx+zz)*uSimDecode*8.*uSimStrength*uSpectralSwell;
+  float lens=1.-waveCurvature*depth*.20;
+  float concentration=1./max(.55,lens);
+  float focus=clamp((concentration-.83)*1.95,0.,1.35);
+  return focus*exp(-depth*.065/max(uClarity,.35));
+}
 float waveSunCaustics(vec2 position,float t){
+  if(uSpectralMode>.5)return spectralSunCaustics(position);
   float depth=max(0.,-vWorld.y);
   float clarity=max(uClarity,.35);
   float speed=max(.05,uCausticSpeed);
@@ -451,6 +475,8 @@ void main(){
  float mineral=sin(vWorld.x*1.17+vWorld.z*.42)*
                cos(vWorld.z*1.43-vWorld.x*.30)*.026;
  vec3 base=mix(vec3(.32,.42,.35),vec3(.20,.29,.29),uIsRock);
+ // Keep shallow sand legible without brightening distant water.
+ base=mix(base,vec3(.48,.48,.37),uSpectralMode*(1.-uIsRock)*.38);
  base+=vec3(mineral);
  float sunThrough=exp(-depth*.080/clarity);
  float focus=waveSunCaustics(vWorld.xz,uTime);
@@ -494,7 +520,7 @@ void main(){
  float nearbyLight=exp(-depth*.11/clarity);
  // Sunlit upper-water haze, bounded and shared with distant fog.
  // Keep far water blue-green rather than adding a bright white horizon.
- vec3 waterColumn=vec3(.021,.094,.111)*(.64+.36*nearbyLight)*uSun;
+ vec3 waterColumn=mix(vec3(.021,.094,.111),vec3(.030,.115,.134),uSpectralMode)*(.64+.36*nearbyLight)*uSun;
  vec3 outputColor=lit*transmission+waterColumn*(vec3(1.)-transmission);
  // Correct shallow exposure after scattering. Fade this enhancement to
  // zero BEFORE the far-distance extinction, preserving a dark horizon.
@@ -539,7 +565,7 @@ if(useSimpleUnderwaterMaterials){
   uCausticSpeed:bottomMat.uniforms.uCausticSpeed,
   uCausticCurvature:bottomMat.uniforms.uCausticCurvature,
   uCausticFocus:bottomMat.uniforms.uCausticFocus,
-  uEye:waterUniforms.uEye,uShallowLight:{value:1},uUnderwaterOptics:{value:improvedUnderwaterOptics?1:0}
+  uEye:waterUniforms.uEye,uSimTex:waterUniforms.uSimTex,uSpectralMode:waterUniforms.uSpectralMode,uSimStrength:waterUniforms.uSimStrength,uSimZero:waterUniforms.uSimZero,uSimDecode:waterUniforms.uSimDecode,uSpectralSwell:waterUniforms.uSpectralSwell,uSpectralTexel:waterUniforms.uSimTexel,uShallowLight:{value:1},uUnderwaterOptics:{value:improvedUnderwaterOptics?1:0}
  };
  bottom.material=new THREE.ShaderMaterial({
    uniforms:{...common,uIsRock:{value:0}},

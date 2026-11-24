@@ -114,7 +114,11 @@ export function createWakeSolver({segments=112,size=110}={}){
     // Apply an opposing displacement at each side of the hull to drive
     // compact concentric ripples without synthetic line geometry.
     if(Math.abs(bob)>.018&&dt>0&&amount>0){
-      const pulse=Math.max(-1,Math.min(1,bob))*18*dt*Math.min(amount,2);
+      // A stopped hull should send subtle ring ripples, not continuously
+      // pump ~0.5m waves back into its own flotation probes.
+      // Moving-hull bow/stern sources above remain untouched.
+      const heaveGain=2.8+Math.min(1,Math.max(0,boatSpeed)/4)*5.2;
+      const pulse=Math.max(-1,Math.min(1,bob))*heaveGain*dt*Math.min(amount,2);
       const sx=-Math.cos(heading),sz=Math.sin(heading);
       pressure(x+sx*.8,z+sz*.8,pulse,1.05);
       pressure(x-sx*.8,z-sz*.8,pulse,1.05);

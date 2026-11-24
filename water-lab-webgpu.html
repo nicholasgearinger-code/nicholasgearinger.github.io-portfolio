@@ -987,9 +987,10 @@ const hullSamples=[
  [-.83,-.72,.55],[.83,-.72,.55],
  [-.65,-.66,1.66],[.65,-.66,1.66]
 ];
-const boatProbeOffset=new THREE.Vector3();
+let boatProbeOffset=null;
 function stepBoat(dt,t){
  if(!boat||dt<=0)return;
+ if(!boatProbeOffset)boatProbeOffset=new THREE.Vector3();
  const steps=Math.max(1,Math.min(5,Math.ceil(dt/(1/100)))),h=dt/steps;
  const mass=320,inertiaX=mass*2.65,inertiaZ=mass*.95;
  const desiredRudder=(steeringRight?1:0)-(steeringLeft?1:0);

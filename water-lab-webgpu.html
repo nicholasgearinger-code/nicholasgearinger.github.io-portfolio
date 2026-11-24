@@ -93,7 +93,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <script type="module">
 import {createWakeSolver} from './rift/water_lab_wake_solver.js?v=17-0';
 const $=id=>document.getElementById(id);
-let renderer,scene,camera,water,geometry,base,THREE,boat,nearWater,nearGeometry,nearBase,nearColorData;
+let renderer,scene,camera,water,geometry,base,THREE,boat,nearWater,nearGeometry,nearBase,nearColorData,skyDome;
 let buoyancyStrength=1,vy=0,pitchV=0,rollV=0;
 let boatHeading=0,boatSpeed=0,rudder=0,sailPower=.85,driveMode='stop',steeringLeft=false,steeringRight=false,totalTravel=0;
 let wakeSolver=null,wakeAmount=1.1,waveChop=.45;
@@ -652,6 +652,32 @@ $('waveChop').oninput=()=>{
 };
 $('waveHeight').oninput=()=>{waveHeight=Number($('waveHeight').value);$('waveHeightOut').textContent=waveHeight.toFixed(2);};
 $('detail').onclick=()=>{detailIndex=(detailIndex+1)%levels.length;if(scene)makeSurface();$('detail').textContent=['Detail: low','Detail: medium','Detail: high'][detailIndex];};
+// Simple physically motivated atmosphere gradient: paler near the horizon,
+// deeper overhead, with a warm sunward haze. Shader-compatible vertex color
+// geometry is inexpensive and works in both WebGPU and WebGL.
+function createSkyDome(){
+ const g=new THREE.SphereGeometry(430,32,18),a=g.attributes.position;
+ const colors=new Float32Array(a.count*3);
+ const horizon=new THREE.Color(0x9bcddf),zenith=new THREE.Color(0x3484b9);
+ const warm=new THREE.Color(0xe5d0b5),c=new THREE.Color();
+ for(let i=0;i<a.count;i++){
+  const x=a.getX(i),y=a.getY(i),z=a.getZ(i),up=y/430;
+  const factor=Math.pow(Math.min(1,Math.max(0,up)),.52);
+  c.copy(horizon).lerp(zenith,factor);
+  const direction=Math.max(0,(x*.46+y*.74+z*.45)/430);
+  const glow=Math.pow(direction,18)*.38*(.5+.5*Math.min(1,Math.max(0,up*10)));
+  c.lerp(warm,glow);
+  const ii=i*3;colors[ii]=c.r;colors[ii+1]=c.g;colors[ii+2]=c.b;
+ }
+ g.setAttribute('color',new THREE.BufferAttribute(colors,3));
+ const material=new THREE.MeshBasicMaterial({
+  vertexColors:true,side:THREE.BackSide,depthWrite:false,fog:false
+ });
+ skyDome=new THREE.Mesh(g,material);
+ skyDome.frustumCulled=false;
+ skyDome.renderOrder=-10;
+ scene.add(skyDome);
+}
 async function init3D(forceWebGL=false){
  status((forceWebGL?'WebGL fallback':'WebGPU probe')+': loading Three.js…');
  // Dynamic imports let us display errors if a module or CDN request fails.
@@ -667,7 +693,9 @@ async function init3D(forceWebGL=false){
  isWebGPU=!forceWebGL&&/webgpu/i.test(backend);
  $('backend').textContent='Backend: '+backend;
  status('Renderer initialized. Drawing a simple lit surface. The original FFT lab is unchanged.');
- scene=new THREE.Scene();scene.background=new THREE.Color(0x78bde5);
+ scene=new THREE.Scene();scene.background=new THREE.Color(0x9bcddf);
+ scene.fog=new THREE.Fog(0x9bcddf,155,370);
+ createSkyDome();
  camera=new THREE.PerspectiveCamera(63,innerWidth/innerHeight,.1,550);
  camera.position.set(0,4.0,11);camera.lookAt(-2.3,.35,-13);
  const ambient=new THREE.HemisphereLight(0xc7eeff,0x0b3144,1.05);scene.add(ambient);
@@ -701,6 +729,7 @@ async function init3D(forceWebGL=false){
    }
   }
   updateCamera(dt);
+  if(skyDome)skyDome.position.copy(camera.position);
   const hint=$('cameraHint');
   if(hint){const opacity=Math.max(0,1-(performance.now()-cameraIntroStart-1600)/1300);hint.style.opacity=String(Math.max(0,opacity));}
   $('boatSpeed').textContent='Speed: '+boatSpeed.toFixed(1)+' m/s';

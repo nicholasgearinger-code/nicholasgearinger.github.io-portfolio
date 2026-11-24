@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 21.5 smooth ocean normals</title>
+<title>Rift Water Lab · WebGPU 21.6 reflection refraction scattering</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -33,7 +33,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 </script></head>
 <body>
 <div id="dashboard">
-<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">21.5 · continuous wave normals</span></h1>
+<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">21.6 · ocean light transport</span></h1>
 <p>This is a <strong>separate renderer test</strong>, not a port of the existing FFT ocean.</p>
 <div id="metrics"><span id="backend">Backend: detecting</span><span id="fps">FPS: —</span><span id="resolution">Resolution: —</span><span id="buoyancyState">Buoyancy: initializing</span><span id="boatSpeed">Speed: 0.0</span><span id="driveStatus">Drive: STOP</span><span id="distanceStatus">Travel: 0 m</span><span id="heading">Heading: 0°</span><span id="wakeStatus">Wake: dynamic</span><span id="fftStatus">FFT: initializing</span><span id="wakeSignal">Ripples: waiting</span><span id="foamStatus">Foam: initializing</span></div>
 <p id="log">Checking GPU access…</p></div></div>
@@ -51,6 +51,8 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Water optics <select id="opticalMode"><option value="lagoon" selected>Clear lagoon · physical transmission</option><option value="deep">Bluewater · deeper absorption</option><option value="legacy">Legacy · fastest / safest</option></select></label></div>
 <div class="row"><label>Water clarity <input id="waterClarity" aria-label="Water clarity" type="range" min=".2" max="1.8" step=".05" value="1.1"></label><output id="waterClarityOut">1.10</output><button id="opticsFallback">Safe water mode</button></div>
 <div class="row"><label>Depth refraction <input id="depthRefraction" aria-label="Depth refraction" type="range" min="0" max="1.6" step=".05" value="1"></label><output id="depthRefractionOut">1.00</output></div>
+<div class="row"><label>Reflection intensity <input id="reflectionStrength" aria-label="Reflection intensity" type="range" min="0" max="2" step=".05" value="1.00"></label><output id="reflectionStrengthOut">1.00</output></div>
+<div class="row"><label>Subsurface light <input id="subsurfaceLight" aria-label="Subsurface light" type="range" min="0" max="2" step=".05" value=".85"></label><output id="subsurfaceLightOut">0.85</output></div>
 <div class="row"><label>Underwater scattering <input id="underwaterScatter" aria-label="Underwater scattering" type="range" min="0" max="2" step=".05" value="1"></label><output id="underwaterScatterOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -114,14 +116,13 @@ let surfaceNormalMap=null,surfaceFineNormalMap=null,reflectionEnvironment=null;
 let surfaceDetail=.65,surfaceGlitter=.6,fineRipple=.70,reflectionMode='enhanced';
 let waterNearMaterial=null,waterFarMaterial=null;
 let opticalMode='lagoon',waterClarity=1.10,waterFloor=null,renderQuality='balanced';
-let depthRefraction=1,underwaterScatter=1,waveSmoothness=1;
+let depthRefraction=1,underwaterScatter=1,waveSmoothness=1,reflectionStrength=1,subsurfaceLight=.85;
 let thicknessTexture=null,thicknessPixels=null,lastThicknessX=Infinity,lastThicknessZ=Infinity;
 let underwaterActive=false,underwaterFog=null,dayFog=null,waterDepthAtBoat=4;
 let opticalFallbackTriggered=false;
 const safeStartup=new URLSearchParams(location.search).has('safe');
-if(safeStartup){reflectionMode='basic';opticalMode='legacy';waveEngine='analytic';}
-
-let gpuFFT=null,waveEngine='hybrid',fftEnergy=3,fftMix=0,fftStarting=false,fftFault='',fftAttempted=false,fftRecoveryCount=0;
+let gpuFFT=null,waveEngine=safeStartup?'analytic':'hybrid',fftEnergy=3,fftMix=0,fftStarting=false,fftFault='',fftAttempted=false,fftRecoveryCount=0;
+if(safeStartup){reflectionMode='basic';opticalMode='legacy';}
 let cameraMode='chase',orbitYaw=.12,orbitPitch=.31,orbitDistance=15;
 let cameraIntroStart=performance.now(),pointerOrigin=null,pinchDistance=null;
 const cameraTarget={x:-3.2,y:1,z:-13},activePointers=new Map();
@@ -256,7 +257,7 @@ function applyReflectionMode(){
   if(!material)continue;
   material.clearcoatNormalMap=reflectionMode==='enhanced'?surfaceFineNormalMap:null;
   material.clearcoatNormalScale?.set(fineRipple*.31,fineRipple*.31);
-  material.envMapIntensity=reflectionMode==='enhanced'?1.12+surfaceGlitter*.56:.75+surfaceGlitter*.55;
+  material.envMapIntensity=(reflectionMode==='enhanced'?1.12+surfaceGlitter*.56:.75+surfaceGlitter*.55)*reflectionStrength;
   material.needsUpdate=true;
  }
 }
@@ -337,7 +338,10 @@ function syncWaterDetail(){
   // Built-in physical transmission: refractive scene capture, dielectric
   // IOR and Beer-Lambert-style attenuation. Tunable and reversible.
   const isNear=mat===waterNearMaterial;
-  mat.transmission=physical?(isNear?.76:.25)*Math.min(1.65,waterClarity):0;
+  // The base dielectric layer supplies Fresnel reflection (IOR = 1.333).
+  // Transmission, reflection and optical attenuation remain independent
+  // controls so the user can compare clarity against surface reflection.
+  mat.transmission=physical?(isNear?.74:.28)*Math.min(1.5,waterClarity)*Math.min(1.6,depthRefraction):0;
   mat.ior=1.333;
   mat.thickness=isNear?(depthRefraction*30):4.2;
   mat.thicknessMap=(physical&&isNear&&depthRefraction>.01)?thicknessTexture:null;
@@ -348,7 +352,7 @@ function syncWaterDetail(){
   mat.color.setHex(physical?(isNear?0x90e5dc:0x278fa8):(isNear?0xffffff:0x148ba2));
   mat.vertexColors=isNear;
   mat.side=THREE.DoubleSide;
-  mat.envMapIntensity=reflectionMode==='enhanced'?1.12+surfaceGlitter*.56:.75+surfaceGlitter*.55;
+  mat.envMapIntensity=(reflectionMode==='enhanced'?1.12+surfaceGlitter*.56:.75+surfaceGlitter*.55)*reflectionStrength;
   mat.normalScale.set(surfaceDetail*(isNear?.47:.29),surfaceDetail*(isNear?.47:.29));
   mat.clearcoatNormalScale?.set(fineRipple*.31,fineRipple*.31);
   mat.clearcoat=surfaceGlitter*.65;
@@ -720,10 +724,23 @@ function animateWaves(t){
   const localX=wx-(waterFloor?.position.x||0),localZ=wz-(waterFloor?.position.z||0);
   const shelfRange=Math.hypot(localX*.83,(localZ+11)*.92);
   const shallow=Math.max(0,Math.min(1,(100-shelfRange)/84));
-  const glimmer=.02*Math.sin(wx*.8+wz*.42-t*3.2);
-  nearColorData[i]=Math.max(.025,Math.min(1,.045+shallow*.22+shine*.32+glimmer*.15+foam*.70));
-  nearColorData[i+1]=Math.max(.23,Math.min(1,.35+shallow*.23+shine*.43+glimmer*.2+foam*.58));
-  nearColorData[i+2]=Math.max(.30,Math.min(1,.46+shallow*.20+shine*.45+glimmer*.25+foam*.48));
+  // Approximate forward subsurface scattering through thin wave crests.
+  // Light travels through less water at high, backlit crests. This is a
+  // low-cost view/lighting approximation, not true volume path tracing.
+  const sunX=.407,sunY=.891,sunZ=.204;
+  const slopeDotSun=(-wave.slopeX*sunX+sunY-wave.slopeZ*sunZ)/
+       Math.hypot(wave.slopeX,1,wave.slopeZ);
+  const backlit=Math.max(0,Math.min(1,.45-slopeDotSun*.55));
+  const crest=Math.max(0,Math.min(1,(wave.height+.22)/2.4));
+  const thinness=Math.max(0,Math.min(1,1-shallow*.4));
+  const subsurface=subsurfaceLight*crest*backlit*(.12+.18*thinness);
+  const glimmer=.02*Math.sin(wx*.8+wz*.42-t*2.4);
+  // Shallow water transmits more green/blue seabed light, while deep
+  // water is more absorptive. Vertex color stays low-frequency; the
+  // separate normal maps own the small optical ripples.
+  nearColorData[i]=Math.max(.025,Math.min(1,.045+shallow*.18+shine*.24+glimmer*.11+foam*.70+subsurface*.21));
+  nearColorData[i+1]=Math.max(.23,Math.min(1,.35+shallow*.19+shine*.31+glimmer*.14+foam*.58+subsurface*.57));
+  nearColorData[i+2]=Math.max(.30,Math.min(1,.46+shallow*.17+shine*.34+glimmer*.16+foam*.48+subsurface*.38));
   rippleSum+=Math.abs(disturbance);rippleMax=Math.max(rippleMax,Math.abs(disturbance));
  }
  lastRipple=rippleMax;
@@ -979,6 +996,16 @@ $('waterClarity').oninput=()=>{
  syncWaterDetail();
 };
 $('opticsFallback').onclick=()=>chooseOptics('legacy');
+$('reflectionStrength').oninput=()=>{
+ reflectionStrength=Number($('reflectionStrength').value);
+ $('reflectionStrengthOut').textContent=reflectionStrength.toFixed(2);
+ syncWaterDetail();
+ applyReflectionMode();
+};
+$('subsurfaceLight').oninput=()=>{
+ subsurfaceLight=Number($('subsurfaceLight').value);
+ $('subsurfaceLightOut').textContent=subsurfaceLight.toFixed(2);
+};
 $('depthRefraction').oninput=()=>{
  depthRefraction=Number($('depthRefraction').value);
  $('depthRefractionOut').textContent=depthRefraction.toFixed(2);

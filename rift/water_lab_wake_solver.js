@@ -70,7 +70,7 @@ export function createWakeSolver({segments=112,size=110}={}){
     [velocity,nextVelocity]=[nextVelocity,velocity];
     // Edge cells remain zero (Dirichlet boundary).
   }
-  function advance(dt,{x,z,heading,speed:boatSpeed,bob=0,amount=1}){
+  function advance(dt,{x,z,heading,speed:boatSpeed,bob=0,turnRate=0,amount=1}){
     recenter(x,z);
     const movement=Math.min(1,Math.max(0,boatSpeed)/5)*Math.max(0,amount);
     if(movement>.015&&dt>0){
@@ -85,10 +85,30 @@ export function createWakeSolver({segments=112,size=110}={}){
       // Pressure tuned for the 0.30 m near-player grid; lower energy
       // avoids a saturated trough and preserves propagating ripples.
       const energy=Math.min(1,cell/.62);
+      const speedFactor=Math.max(.2,Math.min(1.5,(boatSpeed||0)/6));
+      const turn=Math.max(-1.5,Math.min(1.5,turnRate||0));
       pressure(x+dx*2.2,z+dz*2.2,96*energy*movement*dt,1.05);
       pressure(x-dx*1.2,z-dz*1.2,-108*energy*movement*dt,1.30);
-      pressure(x-dx*2.0+sx*1.1,z-dz*2.0+sz*1.1,68*energy*movement*dt,.82);
-      pressure(x-dx*2.0-sx*1.1,z-dz*2.0-sz*1.1,68*energy*movement*dt,.82);
+      // Stern corners generate diverging pressure trains. Faster hull
+      // motion widens their footprint; turning adds asymmetry and produces
+      // an outward-curving wake rather than identical mirrored lobes.
+      const spread=1.0+.16*speedFactor;
+      for(const side of [-1,1]){
+        const offset=side*spread;
+        const steeringGain=Math.max(.35,Math.min(1.9,1+side*turn*.42));
+        pressure(x-dx*2.0+sx*offset,z-dz*2.0+sz*offset,
+          68*energy*movement*dt*steeringGain,.76+.12*speedFactor);
+        pressure(x-dx*3.35+sx*offset*1.30,z-dz*3.35+sz*offset*1.30,
+          28*energy*movement*dt*steeringGain,.98);
+      }
+      // Turning hulls sweep the trailing water sideways. A separate
+      // pressure dipole transfers lateral angular momentum to the local
+      // height-field approximation (not full Navier-Stokes fluid dynamics).
+      if(Math.abs(turn)>.02){
+        const lateral=42*energy*movement*dt*turn;
+        pressure(x-dx*.3+sx*1.0,z-dz*.3+sz*1.0,lateral,.86);
+        pressure(x-dx*.3-sx*1.0,z-dz*.3-sz*1.0,-lateral,.86);
+      }
     }
     // A bobbing hull moves water even when no forward wake exists.
     // Apply an opposing displacement at each side of the hull to drive

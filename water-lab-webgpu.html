@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 24.5.2 projected natural caustics</title>
+<title>Rift Water Lab · WebGPU 24.5.3 efficient refracted ray caustics</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.5.2</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.5.3</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <details id="diagnostics">
@@ -123,10 +123,12 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Depth absorption <input id="depthAbsorption" aria-label="Underwater depth absorption" type="range" min="0" max="2" step=".05" value="1"></label><output id="depthAbsorptionOut">1.00</output></div>
 <div class="row"><label>Atmosphere preset <select id="atmospherePreset"><option value="lagoon" selected>Tropical lagoon</option><option value="coastal">Coastal haze</option><option value="deep">Deep blue</option><option value="off">Off · comparison</option></select></label></div>
 <div class="row"><label>Underwater environment <select id="underwaterScene"><option value="reef">Rocks and shipwreck</option><option value="sand">Sand only · performance</option></select></label></div>
-<div class="row"><label>Caustic model <select id="causticMode"><option value="wave" selected>24.5.2 · projected natural light</option><option value="classic">24.4 · tiled comparison</option><option value="off">Off</option></select></label></div>
+<div class="row"><label>Caustic model <select id="causticMode"><option value="wave" selected>24.5.3 · refracted ray network</option><option value="classic">24.4 · tiled comparison</option><option value="off">Off</option></select></label></div>
 <div class="row"><label>Wave caustics <input id="causticStrength" aria-label="Wave caustics" type="range" min="0" max="1.5" step=".05" value=".8"></label><output id="causticStrengthOut">0.80</output></div>
 <div class="row"><label>Caustic focusing <input id="causticFocus" aria-label="Caustic focusing" type="range" min=".4" max="2" step=".1" value="1.2"></label><output id="causticFocusOut">1.20</output></div>
 <div class="row"><label>Caustic contrast <input id="causticContrast" aria-label="Caustic contrast against sand" type="range" min="0" max="2.5" step=".05" value="1.45"></label><output id="causticContrastOut">1.45</output></div>
+<div class="row"><label>Caustic refresh <select id="causticRate"><option value="8">Battery saver · 8 Hz</option><option value="12" selected>Balanced · 12 Hz</option><option value="18">Smooth · 18 Hz</option></select></label></div>
+<div class="row"><label>Caustic line detail <select id="causticDetail"><option value="72">Low · fastest</option><option value="96" selected>Balanced</option><option value="120">Fine · more detail</option></select></label></div>
 <div class="row"><label>Volumetric sunlight <input id="volumetricStrength" aria-label="Volumetric sunlight strength" type="range" min="0" max="2" step=".05" value=".85"></label><output id="volumetricStrengthOut">0.85</output></div>
 <div class="row"><label>Light shaft detail <select id="shaftQuality"><option value="low">Low · 6 shafts</option><option value="medium" selected>Balanced · 12 shafts</option><option value="high">High · 20 shafts</option></select></label></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
@@ -208,7 +210,9 @@ let opticalMode='lagoon',waterClarity=1.10,waterFloor=null,renderQuality='balanc
 let depthRefraction=1,underwaterScatter=1,waveSmoothness=1,reflectionStrength=1,subsurfaceLight=.85;
 let thicknessTexture=null,thicknessPixels=null,lastThicknessX=Infinity,lastThicknessZ=Infinity;
 let underwaterActive=false,underwaterFog=null,dayFog=null,waterDepthAtBoat=4,underwaterBlend=0,underwaterSceneMode='reef',underwaterObjects=null,causticStrength=.8,causticMap=null,causticPixels=null,lastCausticUpdate=-100;
-let causticMode='wave',causticFocus=1.2,causticContrast=1.45,causticValidated=true,causticLastError='';
+let causticMode='wave',causticFocus=1.2,causticContrast=1.45,
+ causticRate=12,causticDetail=96,causticValidated=true,causticLastError='';
+let causticAccum=null,causticFiltered=null,causticCachedProfile=null;
 let causticBaseUV=null,causticProjectionWidth=64,causticProjectionX=NaN,
  causticProjectionZ=NaN,causticTextureMode='',causticDepthFactor=1;
 let depthAbsorption=1,distanceExtinction=1,atmospherePreset='lagoon';
@@ -703,7 +707,7 @@ function buildUnderwaterScene(){
  underwaterObjects=group;waterFloor.add(group);
 }
 function makeCausticTexture(){
- const n=160;causticPixels=new Uint8Array(n*n*4);
+ const n=128;causticPixels=new Uint8Array(n*n*4);
  const tex=new THREE.DataTexture(causticPixels,n,n,THREE.RGBAFormat);
  tex.wrapS=THREE.RepeatWrapping;tex.wrapT=THREE.RepeatWrapping;
  tex.repeat.set(10,10);tex.minFilter=THREE.LinearMipmapLinearFilter;
@@ -715,7 +719,7 @@ function makeCausticTexture(){
 // Moving lens-caustic approximation. Black texels emit no additional
 // light; unlike the former albedo map, they never darken the sand.
 function updateClassicCausticTexture(t){
- const n=160,tau=2*Math.PI;
+ const n=128,tau=2*Math.PI;
  for(let y=0;y<n;y++)for(let x=0;x<n;x++){
   const u=x/n,v=y/n;
   const warpU=.018*Math.sin(tau*(2*u+3*v)-t*.37);
@@ -822,34 +826,88 @@ function syncCausticProjection(force=false){
  }
  causticTextureMode='wave';
 }
+// Scatter/refract a low-resolution grid of sunlight rays into a 128²
+// illumination buffer. Concentrating neighboring rays produces thin,
+ // linked caustic filaments; no high-cost per-output-pixel Hessian/FFT.
 function updateWaveCausticTexture(t){
- const n=160,width=causticProjectionWidth;
+ const n=128,width=causticProjectionWidth,source=causticDetail;
+ const length=n*n;
+ if(!causticAccum||causticAccum.length!==length){
+  causticAccum=new Float32Array(length);
+  causticFiltered=new Float32Array(length);
+ }
+ const accumulation=causticAccum,filtered=causticFiltered;
+ accumulation.fill(0);
  const cx=causticProjectionX,cz=causticProjectionZ;
- const cell=width/n;
- // Solar direction tilts the projected footprint across the bottom.
+ const inv=1/source,scale=n/width;
  const sunX=16/39.3,sunZ=8/39.3;
- for(let y=0;y<n;y++)for(let x=0;x<n;x++){
-  const u=(x+.5)/n,v=(y+.5)/n;
-  const wx=cx+(u-.5)*width,wz=cz+(.5-v)*width;
+ const hasFFT=fftMix>.001&&gpuFFT?.ready&&!fftFault&&Number.isFinite(gpuFFT.rms);
+ const analyticWeight=1-(hasFFT?fftMix*(waveEngine==='fft'?.80:.30):0);
+ const waveList=waveComponents.slice(1).concat(opticalRipples);
+ // Use a bounded direction deflection; when the waves steepen there
+ // is a focusing/defocusing network but no division singularity.
+ const bend=(1-1/1.333)*causticFocus;
+ for(let row=0;row<source;row++)for(let column=0;column<source;column++){
+  const wx=cx+((column+.5)*inv-.5)*width;
+  const wz=cz+(.5-(row+.5)*inv)*width;
   const depth=Math.max(.6,seabedDepth(wx,wz));
-  const surfaceX=wx-sunX*depth*.27,surfaceZ=wz-sunZ*depth*.27;
-  const focus=sampleWaveCaustic(surfaceX,surfaceZ,t,depth);
-  // Feather the projection perimeter; remove square tile boundaries.
-  const edge=Math.min(u,1-u,v,1-v);
-  const feather=Math.min(1,Math.max(0,(edge-.02)*13));
-  const depthTransmittance=Math.exp(-depth*
-    (atmospherePreset==='coastal'?.11:.055)/Math.max(.4,waterClarity));
-  const local=Math.pow(focus,.75)*Math.min(1.25,depthTransmittance*1.45)*feather;
-  const light=Math.round(Math.min(255,255*Math.min(1,local)));
-  const i=(y*n+x)*4;
-  causticPixels[i]=light;
-  causticPixels[i+1]=Math.round(light*.95);
-  causticPixels[i+2]=Math.round(light*.78);
-  causticPixels[i+3]=255;
+  let sx=0,sz=0;
+  // The broadest swell changes the illumination direction gently,
+  // while intermediate waves and short ripples create fine folds.
+  for(const wave of waveList){
+   const phase=wave.kx*wx+wave.kz*wz-wave.omega*t+wave.phase;
+   const amp=wave.amplitude*waveHeight*
+     (wave.amplitude>.04?analyticWeight:1);
+   const v=amp*Math.cos(phase);
+   sx+=v*wave.kx;sz+=v*wave.kz;
+  }
+  if(hasFFT){
+   // Cache-backed GPU FFT sampling only at source ray points.
+   const step=.85,power=fftEnergy*waveHeight*fftMix/(2*step);
+   sx+=power*(gpuFFT.sample(wx+step,wz)-gpuFFT.sample(wx-step,wz));
+   sz+=power*(gpuFFT.sample(wx,wz+step)-gpuFFT.sample(wx,wz-step));
+  }
+  const shift=Math.min(depth,18)*bend;
+  const x=(wx-cx+(sx*shift+sunX*depth*.27))*scale+n*.5-.5;
+  const y=(cz-wz+(sz*shift+sunZ*depth*.27))*scale+n*.5-.5;
+  const ix=Math.floor(x),iy=Math.floor(y);
+  if(ix<1||ix>=n-2||iy<1||iy>=n-2)continue;
+  const fx=x-ix,fy=y-iy;
+  // Normalize against the expected ray density to make low/high
+  // quality settings visually comparable.
+  const transmission=Math.exp(-depth*
+    (atmospherePreset==='coastal'?.10:.045)/Math.max(.4,waterClarity));
+  const energy=transmission*(n/source)*(n/source);
+  const k=iy*n+ix;
+  accumulation[k]+=energy*(1-fx)*(1-fy);
+  accumulation[k+1]+=energy*fx*(1-fy);
+  accumulation[k+n]+=energy*(1-fx)*fy;
+  accumulation[k+n+1]+=energy*fx*fy;
+ }
+ // Small spatial filter repairs the sample grid and creates luminous
+ // ribbons instead of isolated points. One horizontal/vertical pass.
+ for(let y=1;y<n-1;y++)for(let x=1;x<n-1;x++){
+  const i=y*n+x;
+  filtered[i]=(accumulation[i-1]+2*accumulation[i]+accumulation[i+1])*.25;
+ }
+ for(let y=0;y<n;y++)for(let x=0;x<n;x++){
+  const i=y*n+x,u=(x+.5)/n,v=(y+.5)/n;
+  const smooth=y>0&&y<n-1?
+    (filtered[i-n]+2*filtered[i]+filtered[i+n])*.25:0;
+  // Ray conservation: ~1 represents no focusing. Only convergent
+  // bands remain bright; background stays dark.
+  const extra=Math.max(0,smooth-.80);
+  const filament=1-Math.exp(-extra*1.95);
+  const border=Math.min(u,1-u,v,1-v);
+  const feather=Math.max(0,Math.min(1,(border-.012)*14));
+  const light=Math.round(Math.min(255,255*Math.pow(filament,1.10)*feather));
+  const p=i*4;
+  causticPixels[p]=light;causticPixels[p+1]=Math.round(light*.96);
+  causticPixels[p+2]=Math.round(light*.81);causticPixels[p+3]=255;
  }
 }
 function updateCausticTexture(t,force=false){
- if(!causticMap||(!force&&t-lastCausticUpdate<(causticMode==='wave'?.16:.16)))return;
+ if(!causticMap||(!force&&t-lastCausticUpdate<(causticMode==='wave'?1/causticRate:.16)))return;
  lastCausticUpdate=t;
  try{
   syncCausticProjection(force);
@@ -1677,6 +1735,14 @@ $('causticMode').onchange=()=>{
 $('causticFocus').oninput=()=>{
  causticFocus=Number($('causticFocus').value);
  $('causticFocusOut').textContent=causticFocus.toFixed(2);
+ updateCausticTexture(clockTime,true);
+};
+$('causticRate').onchange=()=>{
+ causticRate=Number($('causticRate').value);
+ lastCausticUpdate=-100;
+};
+$('causticDetail').onchange=()=>{
+ causticDetail=Number($('causticDetail').value);
  updateCausticTexture(clockTime,true);
 };
 $('causticContrast').oninput=()=>{

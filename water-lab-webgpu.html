@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 19.0 water lighting and texture</title>
+<title>Rift Water Lab · WebGPU 20.0 optical water engine</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -33,7 +33,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 </script></head>
 <body>
 <div id="dashboard">
-<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">19.0 · optical water upgrade</span></h1>
+<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">20.0 · optical water engine</span></h1>
 <p>This is a <strong>separate renderer test</strong>, not a port of the existing FFT ocean.</p>
 <div id="metrics"><span id="backend">Backend: detecting</span><span id="fps">FPS: —</span><span id="resolution">Resolution: —</span><span id="buoyancyState">Buoyancy: initializing</span><span id="boatSpeed">Speed: 0.0</span><span id="driveStatus">Drive: STOP</span><span id="distanceStatus">Travel: 0 m</span><span id="heading">Heading: 0°</span><span id="wakeStatus">Wake: dynamic</span><span id="wakeSignal">Ripples: waiting</span><span id="foamStatus">Foam: initializing</span></div>
 <p id="log">Checking GPU access…</p></div></div>
@@ -43,6 +43,8 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Wave shape <input id="waveChop" aria-label="Wave crest sharpness" type="range" min="0" max="1.2" step=".05" value=".45"></label><output id="waveChopOut">0.45</output></div>
 <div class="row"><label>Surface detail <input id="surfaceDetail" aria-label="Surface detail intensity" type="range" min="0" max="1.5" step=".05" value=".65"></label><output id="surfaceDetailOut">0.65</output></div>
 <div class="row"><label>Sun reflections <input id="sunGlitter" aria-label="Sun reflection strength" type="range" min="0" max="1.5" step=".05" value=".6"></label><output id="sunGlitterOut">0.60</output></div>
+<div class="row"><label>Water optics <select id="opticalMode"><option value="lagoon" selected>Clear lagoon · physical transmission</option><option value="deep">Bluewater · deeper absorption</option><option value="legacy">Legacy · fastest / safest</option></select></label></div>
+<div class="row"><label>Water clarity <input id="waterClarity" aria-label="Water clarity" type="range" min=".2" max="1.8" step=".05" value="1.1"></label><output id="waterClarityOut">1.10</output><button id="opticsFallback">Safe water mode</button></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
 <div class="row"><label>Wake physics <input id="wakeAmount" aria-label="Boat wake strength" type="range" min="0" max="2" step=".05" value="1.1"></label><output id="wakeAmountOut">1.10</output><button id="resetWake">Clear wake</button></div>
 <div class="row"><label>Whitewater <input id="foamStrength" aria-label="Whitewater strength" type="range" min="0" max="2.5" step=".1" value="1.5"></label><output id="foamStrengthOut">1.5</output><button id="testFoam">Whitewater test: OFF</button></div>
@@ -100,6 +102,8 @@ let wakeSolver=null,wakeAmount=1.1,waveChop=.45;
 let lastRipple=0,propulsionMode='power',wakeTrail=[],trailElapsed=0;
 let foamMesh=null,foamPositions=null,foamColors=null,foamCapacity=280,foamStrength=1.5,foamDebug=false,foamPatchCount=0;
 let surfaceNormalMap=null,surfaceDetail=.65,surfaceGlitter=.6,waterNearMaterial=null,waterFarMaterial=null;
+let opticalMode='lagoon',waterClarity=1.10,waterFloor=null;
+let opticalFallbackTriggered=false;
 let cameraMode='chase',orbitYaw=.12,orbitPitch=.31,orbitDistance=15;
 let cameraIntroStart=performance.now(),pointerOrigin=null,pinchDistance=null;
 const cameraTarget={x:-3.2,y:1,z:-13},activePointers=new Map();
@@ -176,15 +180,68 @@ function createWaveNormalMap(){
  return tex;
 }
 function syncWaterDetail(){
+ const physical=opticalMode!=='legacy';
+ const absorption=opticalMode==='deep'?new THREE.Color(0x0a6175):new THREE.Color(0x48cbd1);
  for(const mat of [waterNearMaterial,waterFarMaterial]){
   if(!mat)continue;
-  mat.normalScale.set(surfaceDetail*.47,surfaceDetail*.47);
+  // Built-in physical transmission: refractive scene capture, dielectric
+  // IOR and Beer-Lambert-style attenuation. Tunable and reversible.
+  const isNear=mat===waterNearMaterial;
+  mat.transmission=physical?(isNear?.76:.25)*Math.min(1.65,waterClarity):0;
+  mat.ior=1.333;
+  mat.thickness=isNear?2.1:4.2;
+  mat.attenuationDistance=(opticalMode==='deep'?3.4:9.0)*waterClarity;
+  mat.attenuationColor.copy(absorption);
+  mat.depthWrite=!physical;
+  mat.transparent=false;
+  mat.color.setHex(physical?(isNear?0x90e5dc:0x278fa8):(isNear?0xffffff:0x148ba2));
+  mat.vertexColors=isNear;
+  mat.side=THREE.DoubleSide;
+  mat.envMapIntensity=.75+surfaceGlitter*.55;
+  mat.normalScale.set(surfaceDetail*(isNear?.47:.29),surfaceDetail*(isNear?.47:.29));
   mat.clearcoat=surfaceGlitter*.65;
   mat.clearcoatRoughness=.10+(.17*(1-surfaceGlitter/1.5));
   mat.roughness=.21-.085*Math.min(1,surfaceGlitter);
   mat.needsUpdate=true;
  }
 }
+function chooseOptics(mode){
+ opticalMode=mode;
+ $('opticalMode').value=mode;
+ syncWaterDetail();
+ $('opticsFallback').textContent=mode==='legacy'?'Safe mode active':'Safe water mode';
+}
+function seabedDepth(x,z){
+ const distance=Math.hypot(x*.83,(z+11)*.92);
+ const t=Math.max(0,Math.min(1,(distance-16)/95));
+ const shelf=t*t*(3-2*t);
+ return 3.8+27*shelf+.48*Math.sin(x*.085+z*.041)*Math.cos(z*.072-x*.028)*(1-t);
+}
+function createSeabed(){
+ const n=72,geo=new THREE.PlaneGeometry(250,250,n,n);
+ geo.rotateX(-Math.PI/2);
+ const a=geo.attributes.position,colors=new Float32Array(a.count*3);
+ const sand=new THREE.Color(0xd4d5a6),seaGrass=new THREE.Color(0x3a786a),deep=new THREE.Color(0x264950),color=new THREE.Color();
+ for(let i=0;i<a.count;i++){
+  const x=a.getX(i),z=a.getZ(i),d=seabedDepth(x,z);
+  a.setY(i,-d);
+  const mottling=Math.sin(x*.25+Math.cos(z*.19)*2.0)*Math.cos(z*.31-x*.15);
+  const grass=Math.max(0,Math.min(1,(mottling-.3)*1.5))*.45;
+  const fade=Math.max(0,Math.min(1,(d-8)/27));
+  color.copy(sand).lerp(seaGrass,grass).lerp(deep,fade*.65);
+  colors[i*3]=color.r;colors[i*3+1]=color.g;colors[i*3+2]=color.b;
+ }
+ a.needsUpdate=true;geo.computeVertexNormals();
+ geo.setAttribute('color',new THREE.BufferAttribute(colors,3));
+ const mat=new THREE.MeshStandardMaterial({
+  color:0xffffff,vertexColors:true,roughness:1,metalness:0,side:THREE.DoubleSide
+ });
+ waterFloor=new THREE.Mesh(geo,mat);
+ waterFloor.frustumCulled=false;
+ scene.add(waterFloor);
+ return waterFloor;
+}
+
 function makeSurface(){
  disposeSurface(water);disposeSurface(nearWater);
  const segments=levels[detailIndex];
@@ -644,6 +701,13 @@ $('propulsionMode').onchange=()=>{
  propulsionMode=$('propulsionMode').value;
  $('wakeStatus').textContent=propulsionMode==='power'?'Wake: powered':'Wake: sail';
 };
+$('opticalMode').onchange=()=>chooseOptics($('opticalMode').value);
+$('waterClarity').oninput=()=>{
+ waterClarity=Number($('waterClarity').value);
+ $('waterClarityOut').textContent=waterClarity.toFixed(2);
+ syncWaterDetail();
+};
+$('opticsFallback').onclick=()=>chooseOptics('legacy');
 $('surfaceDetail').oninput=()=>{surfaceDetail=Number($('surfaceDetail').value);$('surfaceDetailOut').textContent=surfaceDetail.toFixed(2);syncWaterDetail();};
 $('sunGlitter').oninput=()=>{surfaceGlitter=Number($('sunGlitter').value);$('sunGlitterOut').textContent=surfaceGlitter.toFixed(2);syncWaterDetail();};
 $('waveChop').oninput=()=>{
@@ -700,8 +764,7 @@ async function init3D(forceWebGL=false){
  camera.position.set(0,4.0,11);camera.lookAt(-2.3,.35,-13);
  const ambient=new THREE.HemisphereLight(0xc7eeff,0x0b3144,1.05);scene.add(ambient);
  const sun=new THREE.DirectionalLight(0xffeddb,3.5);sun.position.set(16,35,8);scene.add(sun);
- const floor=new THREE.Mesh(new THREE.PlaneGeometry(110,110),new THREE.MeshStandardMaterial({color:0xb9c7ae,roughness:1}));
- floor.rotation.x=-Math.PI/2;floor.position.y=-5;scene.add(floor);
+ const floor=createSeabed();
  makeBoat();makeSurface();createFoamField();resetCamera();
  $('buoyancyState').textContent='Boat: 4-point floating + sailing';
  renderer.domElement.id='threeCanvas';renderer.domElement.style.cssText='position:fixed;inset:0;width:100%;height:100%;z-index:1';
@@ -714,8 +777,10 @@ async function init3D(forceWebGL=false){
   if(!paused){
    time+=dt;stepBoat(dt,time);
    // High-resolution interaction follows the boat every frame.
-   floor.position.x=boat.position.x;
-   floor.position.z=boat.position.z;
+   // Seabed follows with the camera while preserving its world-relative
+   // shelf profile inside a large local radius.
+   floor.position.x=Math.round(boat.position.x/80)*80;
+   floor.position.z=Math.round(boat.position.z/80)*80;
    wakeSolver?.advance(dt,{x:boat.position.x,z:boat.position.z,
      heading:boatHeading,speed:boatSpeed,bob:vy,
      amount:wakeAmount*(propulsionMode==='power'?1.45:1)});

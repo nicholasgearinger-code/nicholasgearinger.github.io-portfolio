@@ -43,6 +43,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Wave shape <input id="waveChop" aria-label="Wave crest sharpness" type="range" min="0" max="1.2" step=".05" value=".45"></label><output id="waveChopOut">0.45</output></div>
 <div class="row"><label>Surface detail <input id="surfaceDetail" aria-label="Surface detail intensity" type="range" min="0" max="1.5" step=".05" value=".65"></label><output id="surfaceDetailOut">0.65</output></div>
 <div class="row"><label>Sun reflections <input id="sunGlitter" aria-label="Sun reflection strength" type="range" min="0" max="1.5" step=".05" value=".6"></label><output id="sunGlitterOut">0.60</output></div>
+<div class="row"><label>Rendering quality <select id="renderQuality"><option value="balanced" selected>Balanced · mobile</option><option value="ultra">Ultra · highest detail</option><option value="performance">Performance · prioritize FPS</option></select></label></div>
 <div class="row"><label>Water optics <select id="opticalMode"><option value="lagoon" selected>Clear lagoon · physical transmission</option><option value="deep">Bluewater · deeper absorption</option><option value="legacy">Legacy · fastest / safest</option></select></label></div>
 <div class="row"><label>Water clarity <input id="waterClarity" aria-label="Water clarity" type="range" min=".2" max="1.8" step=".05" value="1.1"></label><output id="waterClarityOut">1.10</output><button id="opticsFallback">Safe water mode</button></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -102,7 +103,7 @@ let wakeSolver=null,wakeAmount=1.1,waveChop=.45;
 let lastRipple=0,propulsionMode='power',wakeTrail=[],trailElapsed=0;
 let foamMesh=null,foamPositions=null,foamColors=null,foamCapacity=280,foamStrength=1.5,foamDebug=false,foamPatchCount=0;
 let surfaceNormalMap=null,surfaceDetail=.65,surfaceGlitter=.6,waterNearMaterial=null,waterFarMaterial=null;
-let opticalMode='lagoon',waterClarity=1.10,waterFloor=null;
+let opticalMode='lagoon',waterClarity=1.10,waterFloor=null,renderQuality='balanced';
 let opticalFallbackTriggered=false;
 let cameraMode='chase',orbitYaw=.12,orbitPitch=.31,orbitDistance=15;
 let cameraIntroStart=performance.now(),pointerOrigin=null,pinchDistance=null;
@@ -701,6 +702,20 @@ $('propulsionMode').onchange=()=>{
  propulsionMode=$('propulsionMode').value;
  $('wakeStatus').textContent=propulsionMode==='power'?'Wake: powered':'Wake: sail';
 };
+$('renderQuality').onchange=()=>{
+ renderQuality=$('renderQuality').value;
+ const next=renderQuality==='ultra'?2:renderQuality==='performance'?0:1;
+ const ratio=renderQuality==='ultra'?1.65:renderQuality==='performance'?1:1.25;
+ if(renderer){
+  renderer.setPixelRatio(Math.min(devicePixelRatio,ratio));
+  renderer.setSize(innerWidth,innerHeight);
+ }
+ if(detailIndex!==next){
+  detailIndex=next;
+  if(scene)makeSurface();
+  $('detail').textContent=['Detail: low','Detail: medium','Detail: high'][detailIndex];
+ }
+};
 $('opticalMode').onchange=()=>chooseOptics($('opticalMode').value);
 $('waterClarity').oninput=()=>{
  waterClarity=Number($('waterClarity').value);
@@ -756,7 +771,7 @@ async function init3D(forceWebGL=false){
  const backend=forceWebGL?'WebGLRenderer':renderer.backend?.constructor?.name||'WebGPU (unknown backend)';
  isWebGPU=!forceWebGL&&/webgpu/i.test(backend);
  $('backend').textContent='Backend: '+backend;
- status('Renderer initialized. Drawing a simple lit surface. The original FFT lab is unchanged.');
+ status('WebGPU optics experiment. Physical water has a safe fallback; original FFT lab is unchanged.');
  scene=new THREE.Scene();scene.background=new THREE.Color(0x9bcddf);
  scene.fog=new THREE.Fog(0x9bcddf,155,370);
  createSkyDome();
@@ -802,7 +817,18 @@ async function init3D(forceWebGL=false){
   $('wakeSignal').textContent='Peak ripple: '+(lastRipple*100).toFixed(0)+' cm';
   // Foam count is set by the whitewater generator, not by boat speed.
   $('heading').textContent='Heading: '+((boatHeading*180/Math.PI%360+360)%360).toFixed(0)+'°';
-  renderer.render(scene,camera);
+  try{
+   renderer.render(scene,camera);
+  }catch(error){
+   if(opticalMode!=='legacy'){
+    opticalFallbackTriggered=true;
+    chooseOptics('legacy');
+    status('Physical optics failed on this GPU; restored safe water: '+String(error?.message||error));
+   }else{
+    status('Rendering problem: '+String(error?.message||error));
+    console.error(error);
+   }
+  }
   samples++;
   const now=performance.now();
   if(now-last>1100){$('fps').textContent='FPS: '+Math.round(samples*1000/(now-last));last=now;samples=0;}

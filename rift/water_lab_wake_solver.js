@@ -11,7 +11,7 @@ export function createWakeSolver({segments=112,size=110}={}){
   const at=(x,z)=>z*n+x;
   function clear(){
     height.fill(0);velocity.fill(0);nextHeight.fill(0);nextVelocity.fill(0);
-    accumulator=0;
+    accumulator=0;previousSpeed=0;previousBob=0;initialized=false;
   }
   function recenter(x,z){
     const sx=Math.trunc((x-centerX)/(cell*4))*4;
@@ -29,15 +29,19 @@ export function createWakeSolver({segments=112,size=110}={}){
     height=hx;velocity=hv;nextHeight=new Float32Array(length);nextVelocity=new Float32Array(length);
     centerX+=sx*cell;centerZ+=sz*cell;
   }
-  function sample(x,z){
+  function interpolate(field,x,z){
     const fx=(x-centerX)/cell+segments*.5;
     const fz=(z-centerZ)/cell+segments*.5;
-    if(fx<1||fz<1||fx>=segments-1||fz>=segments-1)return 0;
+    if(!Number.isFinite(fx)||!Number.isFinite(fz)||fx<1||fz<1||
+       fx>=segments-1||fz>=segments-1)return 0;
     const ix=Math.floor(fx),iz=Math.floor(fz),tx=fx-ix,tz=fz-iz;
-    const a=height[at(ix,iz)],b=height[at(ix+1,iz)];
-    const c=height[at(ix,iz+1)],d=height[at(ix+1,iz+1)];
-    return (a+(b-a)*tx)*(1-tz)+(c+(d-c)*tx)*tz;
+    const a=field[at(ix,iz)],b=field[at(ix+1,iz)];
+    const c=field[at(ix,iz+1)],d=field[at(ix+1,iz+1)];
+    const result=(a+(b-a)*tx)*(1-tz)+(c+(d-c)*tx)*tz;
+    return Number.isFinite(result)?result:0;
   }
+  function sample(x,z){return interpolate(height,x,z);}
+  function sampleVelocity(x,z){return interpolate(velocity,x,z);}
   function pressure(x,z,magnitude,radius=1.8){
     const gx=(x-centerX)/cell+segments*.5,gz=(z-centerZ)/cell+segments*.5;
     const span=Math.ceil(radius*2/cell);
@@ -70,64 +74,66 @@ export function createWakeSolver({segments=112,size=110}={}){
     [velocity,nextVelocity]=[nextVelocity,velocity];
     // Edge cells remain zero (Dirichlet boundary).
   }
+  // 24.0: incremental hull forcing. The pressure sources are a simplified
+  // shallow-water response to moving displaced volume—not full Navier-Stokes.
+  // Fixed timestep CFL is kept below 1/sqrt(2); a speed-dependent forcing
+  // ramp prevents stationary hull bobbing from repeatedly pumping the grid.
+  let previousSpeed=0,previousHeading=0,previousBob=0,initialized=false;
   function advance(dt,{x,z,heading,speed:boatSpeed,bob=0,turnRate=0,amount=1}){
+    if(!Number.isFinite(x)||!Number.isFinite(z)||!Number.isFinite(dt)||dt<=0)return;
     recenter(x,z);
-    const movement=Math.min(1,Math.max(0,boatSpeed)/5)*Math.max(0,amount);
-    if(movement>.015&&dt>0){
-      const dx=-Math.sin(heading),dz=-Math.cos(heading);
-      const sx=-dz,sz=dx;
-      // A displaced hull produces a pressure rise near the bow and a
-      // trailing low-pressure hollow. Off-axis lobes generate diverging waves.
-      // Source velocity has units of m/s. The previous 12*dt source
-      // generated centimetre-scale waves that were invisible from the
-      // chase camera. Stronger, narrower displacement and bilateral
-      // sources create measurable wake crests without painted lines.
-      // Pressure tuned for the 0.30 m near-player grid; lower energy
-      // avoids a saturated trough and preserves propagating ripples.
-      const energy=Math.min(1,cell/.62);
-      const speedFactor=Math.max(.2,Math.min(1.5,(boatSpeed||0)/6));
-      const turn=Math.max(-1.5,Math.min(1.5,turnRate||0));
-      pressure(x+dx*2.2,z+dz*2.2,96*energy*movement*dt,1.05);
-      pressure(x-dx*1.2,z-dz*1.2,-108*energy*movement*dt,1.30);
-      // Stern corners generate diverging pressure trains. Faster hull
-      // motion widens their footprint; turning adds asymmetry and produces
-      // an outward-curving wake rather than identical mirrored lobes.
-      const spread=1.0+.16*speedFactor;
+    const s=Math.max(0,Math.min(15,Number.isFinite(boatSpeed)?boatSpeed:0));
+    const turn=Math.max(-1.5,Math.min(1.5,Number.isFinite(turnRate)?turnRate:0));
+    const strength=Math.max(0,Math.min(2,amount));
+    const accel=initialized?Math.max(-7,Math.min(7,(s-previousSpeed)/Math.max(dt,.008))):0;
+    const heave=initialized?Math.max(-2,Math.min(2,(bob-previousBob)/Math.max(dt,.008))):0;
+    previousSpeed=s;previousHeading=heading;previousBob=bob;initialized=true;
+    const forwardX=-Math.sin(heading),forwardZ=-Math.cos(heading);
+    const sideX=-forwardZ,sideZ=forwardX;
+    const flow=Math.min(1.35,s/7.5);
+    const energy=Math.min(1,cell/.62)*strength;
+    if(flow>.012&&energy>.001){
+      // Smooth Froude-like speed scaling and extra hull pressure under
+      // acceleration. The source respects frame dt and grid cell size.
+      const force=energy*flow*dt*(.82+.18*Math.min(2,Math.abs(accel)/3));
+      pressure(x+forwardX*2.15,z+forwardZ*2.15,79*force,1.18);
+      pressure(x-forwardX*1.30,z-forwardZ*1.30,-73*force,1.38);
+      const spread=1.00+.28*flow;
       for(const side of [-1,1]){
+        const shear=Math.max(.48,Math.min(1.65,1+side*turn*.52));
         const offset=side*spread;
-        const steeringGain=Math.max(.35,Math.min(1.9,1+side*turn*.42));
-        pressure(x-dx*2.0+sx*offset,z-dz*2.0+sz*offset,
-          68*energy*movement*dt*steeringGain,.76+.12*speedFactor);
-        pressure(x-dx*3.35+sx*offset*1.30,z-dz*3.35+sz*offset*1.30,
-          28*energy*movement*dt*steeringGain,.98);
+        pressure(x-forwardX*2.1+sideX*offset,
+          z-forwardZ*2.1+sideZ*offset,53*force*shear,.92);
+        pressure(x-forwardX*3.75+sideX*offset*1.40,
+          z-forwardZ*3.75+sideZ*offset*1.40,25*force*shear,1.18);
       }
-      // Turning hulls sweep the trailing water sideways. A separate
-      // pressure dipole transfers lateral angular momentum to the local
-      // height-field approximation (not full Navier-Stokes fluid dynamics).
-      if(Math.abs(turn)>.02){
-        const lateral=42*energy*movement*dt*turn;
-        pressure(x-dx*.3+sx*1.0,z-dz*.3+sz*1.0,lateral,.86);
-        pressure(x-dx*.3-sx*1.0,z-dz*.3-sz*1.0,-lateral,.86);
+      if(Math.abs(turn)>.025){
+        const lateral=30*energy*flow*dt*turn;
+        pressure(x+sideX*.95,z+sideZ*.95,lateral,1.05);
+        pressure(x-sideX*.95,z-sideZ*.95,-lateral,1.05);
+      }
+      if(Math.abs(accel)>.15){
+        // Starting/stopping produces a short stern/fore displacement, not
+        // a persistent stationary ring of equally strong wave pulses.
+        const impulse=4.2*energy*dt*accel;
+        pressure(x-forwardX*1.4,z-forwardZ*1.4,impulse,1.3);
       }
     }
-    // A bobbing hull moves water even when no forward wake exists.
-    // Apply an opposing displacement at each side of the hull to drive
-    // compact concentric ripples without synthetic line geometry.
-    if(Math.abs(bob)>.018&&dt>0&&amount>0){
-      // A stopped hull should send subtle ring ripples, not continuously
-      // pump ~0.5m waves back into its own flotation probes.
-      // Moving-hull bow/stern sources above remain untouched.
-      const heaveGain=2.8+Math.min(1,Math.max(0,boatSpeed)/4)*5.2;
-      const pulse=Math.max(-1,Math.min(1,bob))*heaveGain*dt*Math.min(amount,2);
-      const sx=-Math.cos(heading),sz=Math.sin(heading);
-      pressure(x+sx*.8,z+sz*.8,pulse,1.05);
-      pressure(x-sx*.8,z-sz*.8,pulse,1.05);
+    if(strength>.001&&Math.abs(bob)>.018){
+      const heaveForce=Math.max(-1.4,Math.min(1.4,bob))*strength*
+        (1.6+2.6*flow)*dt;
+      // Only heave a small amount of local water at rest.
+      const impulse=heaveForce+.35*heave*dt*strength;
+      pressure(x+sideX*.72,z+sideZ*.72,impulse,1.0);
+      pressure(x-sideX*.72,z-sideZ*.72,impulse,1.0);
     }
-    accumulator=Math.min(.10,accumulator+Math.max(0,dt));
+    accumulator=Math.min(.10,accumulator+Math.min(.05,dt));
     let steps=0;
-    while(accumulator>=stepTime&&steps<4){step(stepTime);accumulator-=stepTime;steps++;}
+    while(accumulator>=stepTime&&steps<4){
+      step(stepTime);accumulator-=stepTime;steps++;
+    }
     if(steps>=4)accumulator=Math.min(accumulator,stepTime);
   }
-  return {sample,advance,recenter,clear,get resolution(){return n;},get cellSize(){return cell;},
+  return {sample,sampleVelocity,advance,recenter,clear,get resolution(){return n;},get cellSize(){return cell;},
     get center(){return {x:centerX,z:centerZ};}};
 }

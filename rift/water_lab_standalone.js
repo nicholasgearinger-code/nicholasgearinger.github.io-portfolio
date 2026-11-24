@@ -732,6 +732,31 @@ for(const k of Object.keys(params)){
  if(!input||!out)continue;
  input.addEventListener("input",()=>{params[k]=Number(input.value);out.textContent=params[k].toFixed(2)});
 }
+const visualPresets={
+ tropical:{clarity:1.65,shallowLight:1.25,caustics:1.30,
+   swellCascade:.75,windCascade:1.00,spectralSwell:1.00,
+   fineRipples:1.30,glint:1.25,sceneReflections:.75},
+ open:{clarity:.85,shallowLight:.85,caustics:.70,
+   swellCascade:1.35,windCascade:1.20,spectralSwell:1.50,
+   fineRipples:1.10,glint:1.35,sceneReflections:.85}
+};
+const waterLook=document.getElementById("waterLook");
+function applyVisualPreset(name){
+ const preset=visualPresets[name];
+ if(!preset)return;
+ for(const [key,value] of Object.entries(preset)){
+   params[key]=value;
+   const input=document.getElementById(key);
+   const output=document.getElementById(key+"Out");
+   if(input)input.value=String(value);
+   if(output)output.textContent=value.toFixed(2);
+ }
+}
+if(waterLook){
+ waterLook.addEventListener("change",()=>applyVisualPreset(waterLook.value));
+ applyVisualPreset(waterLook.value);
+}
+
 let dragging=false,lastX=0,lastY=0;
 canvas.addEventListener("pointerdown",e=>{dragging=true;lastX=e.clientX;lastY=e.clientY;canvas.setPointerCapture(e.pointerId)});
 canvas.addEventListener("pointermove",e=>{if(!dragging)return;yaw-=(e.clientX-lastX)*.004;pitch=Math.max(-1.35,Math.min(1.35,pitch-(e.clientY-lastY)*.004));lastX=e.clientX;lastY=e.clientY;rotate()});

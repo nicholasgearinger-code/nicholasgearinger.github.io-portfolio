@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 24.9 unified ocean wave details</title>
+<title>Rift Water Lab · WebGPU 24.9.1 advected breaking waves and persistent foam</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.9</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.9.1</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <details id="diagnostics">
@@ -148,6 +148,8 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>24.9.1 · drifting foam + crest curl</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
 <div class="row"><label>Wake physics <input id="wakeAmount" aria-label="Boat wake strength" type="range" min="0" max="2" step=".05" value="1.1"></label><output id="wakeAmountOut">1.10</output><button id="resetWake">Clear wake</button></div>
@@ -219,6 +221,8 @@ let buoyancyStrength=1,vy=0,pitchV=0,rollV=0;
 let boatHeading=0,boatSpeed=0,rudder=0,sailPower=.85,driveMode='stop',steeringLeft=false,steeringRight=false,totalTravel=0,hullPhysics='dynamic',lastHullDrag=0;
 let wakeSolver=null,wakeAmount=1.1,waveChop=.45,previousBoatHeading=0,turnVelocity=0;
 let crestAsymmetry=.55,crossingSwell=1,windRipples=1,whitecapIntensity=.85;
+let breakingMode='advanced',breakingIntensity=1,
+ breakingFoam=[],lastBreakerEmit=-100,breakerCounter=0;
 let lastRipple=0,propulsionMode='power',wakeTrail=[],trailElapsed=0;
 let foamMesh=null,foamPositions=null,foamColors=null,foamCapacity=280,foamStrength=1.5,foamDebug=false,foamPatchCount=0;
 let surfaceNormalMap=null,surfaceFineNormalMap=null,reflectionEnvironment=null;
@@ -1453,6 +1457,15 @@ function waveField(x,z,t,out=waveState){
   slopeZ+=a*wave.kz*derivative;
   const lateral=waveChop*a*cosPhase*(1+crestAsymmetry*.20);
   dx+=wave.dirX*lateral;dz+=wave.dirZ*lateral;
+  // The forward curl is restricted to steep, upward-facing wave
+  // shoulders. It changes lateral motion only: no additional wave
+  // height displacement, no unstable simulation or extra mesh pass.
+  if(breakingMode==='advanced'&&breakingIntensity>.01){
+   const shoulder=Math.max(0,Math.min(1,(sharp-.32)*1.3));
+   const lip=shoulder*shoulder*breakingIntensity*
+       Math.min(.20,Math.abs(a)*.12)*Math.max(0,cosPhase);
+   dx+=wave.dirX*lip;dz+=wave.dirZ*lip;
+  }
   crest+=Math.max(0,sharp)*a;
   steepness+=Math.abs(a*wave.kz*derivative)+Math.abs(a*wave.kx*derivative);
  }
@@ -1582,22 +1595,74 @@ function createFoamField(){
  geo.setAttribute('color',new THREE.BufferAttribute(foamColors,3).setUsage(THREE.DynamicDrawUsage));
  geo.setIndex(indices);geo.setDrawRange(0,0);
  const mat=new THREE.MeshBasicMaterial({color:0xffffff,vertexColors:true,
-  transparent:false,depthTest:false,depthWrite:false,side:THREE.DoubleSide});
+  transparent:false,depthTest:true,depthWrite:false,side:THREE.DoubleSide});
  foamMesh=new THREE.Mesh(geo,mat);foamMesh.frustumCulled=false;foamMesh.renderOrder=3;scene.add(foamMesh);
+}
+// Persistent foam accumulates on steep wave faces and advects with wind.
+// Births are throttled independently of frame rate; particles are bounded
+// to a small pool, share the existing quad mesh, and expire by age.
+function advanceBreakingFoam(dt,t){
+ if(breakingMode!=='advanced'||breakingIntensity<.01){
+  breakingFoam.length=0;return;
+ }
+ for(let i=breakingFoam.length-1;i>=0;i--){
+  const f=breakingFoam[i];
+  f.age+=dt;
+  f.x+=f.vx*dt;f.z+=f.vz*dt;
+  if(f.age>f.life||!boat||
+    Math.hypot(f.x-boat.position.x,f.z-boat.position.z)>24)
+   breakingFoam.splice(i,1);
+ }
+ if(t-lastBreakerEmit<.13||breakingFoam.length>=80)return;
+ lastBreakerEmit=t;
+ // Deterministic golden-angle sampling keeps births spatially dispersed,
+ // rather than forming an obvious repeating grid around the boat.
+ for(let k=0;k<10&&breakingFoam.length<80;k++){
+  const seed=breakerCounter++;
+  const angle=seed*2.399963229728653;
+  const radius=2.5+Math.sqrt(((seed*37)%83+.5)/83)*14;
+  const x=boat.position.x+Math.cos(angle)*radius;
+  const z=boat.position.z+Math.sin(angle)*radius;
+  const field=waveField(x,z,t,{});
+  const sharp=Math.max(0,Math.min(1,(field.steepness-.28)/.42));
+  const elevated=Math.max(0,Math.min(1,(field.height+.18)/1.45));
+  const irregular=.5+.5*Math.sin(x*.87+z*.51+t*.43+seed*.37);
+  const propensity=sharp*elevated*irregular*whitecapIntensity*
+    breakingIntensity;
+  if(propensity<.28)continue;
+  const life=1.8+1.7*irregular;
+  // Wind drift + dominant wave direction, not permanent stationary decals.
+  const wave=waveComponents[0];
+  const flow=.36+.26*sharp;
+  breakingFoam.push({x,z,vx:wave.dirX*flow+.12,
+    vz:wave.dirZ*flow-.09,age:0,life,
+    strength:Math.min(1,propensity),seed});
+ }
 }
 function updateWhitewater(t){
  if(!foamMesh||!boat)return;
- if((foamStrength<.01||wakeAmount<.01)&&!foamDebug){foamMesh.geometry.setDrawRange(0,0);foamPatchCount=0;$('foamStatus').textContent='Foam: 0 patches';return;}
+ if((foamStrength<.01||wakeAmount<.01)&&!foamDebug&&breakingFoam.length===0){
+  foamMesh.geometry.setDrawRange(0,0);
+  foamPatchCount=0;$('foamStatus').textContent='Foam: 0 patches';return;
+ }
  let count=0;
  function emit(x,z,radius,strength,angle,seed){
   if(count>=foamCapacity||strength<.025)return;
   const cs=Math.cos(angle),sn=Math.sin(angle);
   const ratio=.39+.19*Math.sin(seed*1.43+t*.43);
   const offsets=[[-1,-1],[1,-1],[1,1],[-1,1]],vi=count*12;
+  // Four full oceanHeight() inversions per foam patch were costly.
+  // Use one center height plus the local analytic slope to approximate
+  // the small foam quad's surface. Wake contribution is sampled once.
+  const field=waveField(x,z,t,{});
+  const centerHeight=field.height+(wakeSolver?.sample(x,z)||0);
   for(let k=0;k<4;k++){
    const u=offsets[k][0]*radius*.70,v=offsets[k][1]*radius*ratio;
    const wx=x+u*cs-v*sn,wz=z+u*sn+v*cs,p=vi+k*3;
-   foamPositions[p]=wx;foamPositions[p+1]=oceanHeight(wx,wz,t)+.26;foamPositions[p+2]=wz;
+   foamPositions[p]=wx;
+   foamPositions[p+1]=centerHeight+
+    field.slopeX*(wx-x)+field.slopeZ*(wz-z)+.055;
+   foamPositions[p+2]=wz;
    const shade=foamDebug?1:Math.max(.60,Math.min(1,.64+.29*Math.sqrt(Math.min(1,strength))));
    foamColors[p]=shade;foamColors[p+1]=Math.min(1,shade+.045);foamColors[p+2]=1;
   }
@@ -1630,6 +1695,24 @@ function updateWhitewater(t){
    emit(boat.position.x-fx*back+sx*side*(.3+.13*back),
     boat.position.z-fz*back+sz*side*(.3+.13*back),
     .35+.065*Math.floor(i/2),power*(.95-i*.045),boatHeading+i*.31,i*4.3);
+  }
+ }
+ // Breaking foam fragments persist for a few seconds after a crest
+ // passes. Alpha is avoided to keep a single cheap opaque draw call.
+ if(breakingMode==='advanced'&&foamStrength>.01){
+  for(let i=0;i<breakingFoam.length&&count<foamCapacity-12;i++){
+   const f=breakingFoam[i];
+   const age=f.age/f.life;
+   const life=Math.pow(Math.max(0,1-age),1.3);
+   const fragment=.62+.38*Math.sin(f.seed*5.17+t*1.3);
+   const radius=(.22+age*.34)*(.8+.5*fragment);
+   const strength=f.strength*life*foamStrength;
+   const theta=Math.atan2(f.vz,f.vx);
+   emit(f.x,f.z,radius,strength,theta,f.seed);
+   if(i%3===0&&age>.15&&age<.75){
+    emit(f.x-f.vz*.25,f.z+f.vx*.25,radius*.53,
+      strength*.65,theta+.47,f.seed+7.3);
+   }
   }
  }
  if(foamDebug){
@@ -2263,6 +2346,14 @@ $('whitecapIntensity').oninput=()=>{
  whitecapIntensity=Number($('whitecapIntensity').value);
  $('whitecapIntensityOut').textContent=whitecapIntensity.toFixed(2);
 };
+$('breakingMode').onchange=()=>{
+ breakingMode=$('breakingMode').value;
+ if(breakingMode!=='advanced')breakingFoam.length=0;
+};
+$('breakingIntensity').oninput=()=>{
+ breakingIntensity=Number($('breakingIntensity').value);
+ $('breakingIntensityOut').textContent=breakingIntensity.toFixed(2);
+};
 $('waveSmoothness').oninput=()=>{
  waveSmoothness=Number($('waveSmoothness').value);
  $('waveSmoothnessOut').textContent=waveSmoothness.toFixed(2);
@@ -2536,6 +2627,7 @@ async function init3D(forceWebGL=false){
      amount:wakeAmount*(propulsionMode==='power'?1.45:1)});
    if(gpuFFT&&!fftFault&&waveEngine!=='analytic')gpuFFT.request(time,{power:1});
    trackWake(dt);
+   advanceBreakingFoam(dt,time);
    updateThicknessMap();
    updateCausticTexture(time);
    updateWaveTransmission(time);

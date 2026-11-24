@@ -507,10 +507,12 @@ function updateUnderwaterScattering(){
  if(!underwaterBackgroundColor)underwaterBackgroundColor=new THREE.Color();
  const surface=oceanHeight(camera.position.x,camera.position.z,clockTime);
  const depth=Math.max(0,surface-camera.position.y);
+ const enhanced=undersideMode==='enhanced'&&opticalMode!=='legacy';
  const width=Math.max(.2,waterlineSoftness);
  const normalized=Math.max(0,Math.min(1,((surface-camera.position.y)/width+.65)/1.30));
- const target=normalized*normalized*(3-2*normalized);
- const smoothing=1-Math.exp(-Math.max(.001,Math.min(.05,clockDelta))*11);
+ const target=enhanced?normalized*normalized*(3-2*normalized):
+   Math.max(0,Math.min(1,(surface+.18-camera.position.y)/.9));
+ const smoothing=enhanced?1-Math.exp(-Math.max(.001,Math.min(.05,clockDelta))*11):.18;
  underwaterBlend+=(target-underwaterBlend)*smoothing;
  underwaterActive=underwaterBlend>.005&&opticalMode!=='legacy'&&atmospherePreset!=='off'&&
    (underwaterScatter>.001||distanceExtinction>.001);
@@ -552,9 +554,7 @@ function updateUndersideOptics(){
   // Previously fog:false made the sky appear as an opaque blue ceiling.
   // Fade the dome to reveal the underwater fog/background continuously.
   skyDome.material.opacity=Math.max(.005,1-.995*blend);
-  skyDome.material.transparent=true;
   skyDome.material.depthWrite=false;
-  skyDome.material.needsUpdate=true;
  }
  for(const material of [waterNearMaterial,waterFarMaterial]){
   if(!material)continue;
@@ -1521,7 +1521,8 @@ function createSkyDome(){
  }
  g.setAttribute('color',new THREE.BufferAttribute(colors,3));
  const material=new THREE.MeshBasicMaterial({
-  vertexColors:true,side:THREE.BackSide,depthWrite:false,fog:false
+  vertexColors:true,side:THREE.BackSide,depthWrite:false,fog:false,
+  transparent:true,opacity:1
  });
  skyDome=new THREE.Mesh(g,material);
  skyDome.frustumCulled=false;

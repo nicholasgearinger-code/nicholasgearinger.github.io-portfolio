@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 21.8 sharper underwater optics</title>
+<title>Rift Water Lab · WebGPU 21.9 natural ripple shading</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -33,7 +33,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 </script></head>
 <body>
 <div id="dashboard">
-<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">21.8 · high-resolution smooth optics</span></h1>
+<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">21.9 · natural surface microdetail</span></h1>
 <p>This is a <strong>separate renderer test</strong>, not a port of the existing FFT ocean.</p>
 <div id="metrics"><span id="backend">Backend: detecting</span><span id="fps">FPS: —</span><span id="resolution">Resolution: —</span><span id="buoyancyState">Buoyancy: initializing</span><span id="boatSpeed">Speed: 0.0</span><span id="driveStatus">Drive: STOP</span><span id="distanceStatus">Travel: 0 m</span><span id="heading">Heading: 0°</span><span id="wakeStatus">Wake: dynamic</span><span id="fftStatus">FFT: initializing</span><span id="wakeSignal">Ripples: waiting</span><span id="foamStatus">Foam: initializing</span></div>
 <p id="log">Checking GPU access…</p></div></div>
@@ -43,10 +43,10 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Wave shape <input id="waveChop" aria-label="Wave crest sharpness" type="range" min="0" max="1.2" step=".05" value=".45"></label><output id="waveChopOut">0.45</output></div>
 <div class="row"><label>Wave engine <select id="waveEngine"><option value="hybrid" selected>GPU FFT + rolling swells</option><option value="fft">GPU FFT only (experimental)</option><option value="analytic">Previous waves · fallback</option></select></label></div>
 <div class="row"><label>FFT wave energy <input id="fftEnergy" aria-label="FFT energy" type="range" min="0" max="6" step=".25" value="3.0"></label><output id="fftEnergyOut">3.00</output></div>
-<div class="row"><label>Surface detail <input id="surfaceDetail" aria-label="Surface detail intensity" type="range" min="0" max="1.5" step=".05" value=".65"></label><output id="surfaceDetailOut">0.65</output></div>
-<div class="row"><label>Sun reflections <input id="sunGlitter" aria-label="Sun reflection strength" type="range" min="0" max="1.5" step=".05" value=".6"></label><output id="sunGlitterOut">0.60</output></div>
+<div class="row"><label>Surface detail <input id="surfaceDetail" aria-label="Surface detail intensity" type="range" min="0" max="1.25" step=".05" value=".90"></label><output id="surfaceDetailOut">0.90</output></div>
+<div class="row"><label>Sun reflections <input id="sunGlitter" aria-label="Sun reflection strength" type="range" min="0" max="1.25" step=".05" value="1"></label><output id="sunGlitterOut">1.00</output></div>
 <div class="row"><label>Reflection shader <select id="reflectionMode"><option value="enhanced" selected>Enhanced sky + fine ripple reflections</option><option value="basic">Basic · previous safe material</option></select></label></div>
-<div class="row"><label>Fine ripple strength <input id="fineRipple" aria-label="Fine ripple strength" type="range" min="0" max="1.5" step=".05" value=".7"></label><output id="fineRippleOut">0.70</output></div>
+<div class="row"><label>Fine ripple strength <input id="fineRipple" aria-label="Fine ripple strength" type="range" min="0" max=".90" step=".05" value=".45"></label><output id="fineRippleOut">0.45</output></div>
 <div class="row"><label>Rendering quality <select id="renderQuality"><option value="balanced" selected>Balanced · mobile</option><option value="ultra">Ultra · highest detail</option><option value="performance">Performance · prioritize FPS</option></select></label></div>
 <div class="row"><label>Render resolution <input id="renderScale" aria-label="Render resolution multiplier" type="range" min="1" max="2.25" step=".25" value="1.50"></label><output id="renderScaleOut">1.50×</output></div>
 <div class="row"><label>Water optics <select id="opticalMode"><option value="lagoon" selected>Clear lagoon · physical transmission</option><option value="deep">Bluewater · deeper absorption</option><option value="legacy">Legacy · fastest / safest</option></select></label></div>
@@ -116,7 +116,7 @@ let wakeSolver=null,wakeAmount=1.1,waveChop=.45,previousBoatHeading=0,turnVeloci
 let lastRipple=0,propulsionMode='power',wakeTrail=[],trailElapsed=0;
 let foamMesh=null,foamPositions=null,foamColors=null,foamCapacity=280,foamStrength=1.5,foamDebug=false,foamPatchCount=0;
 let surfaceNormalMap=null,surfaceFineNormalMap=null,reflectionEnvironment=null;
-let surfaceDetail=.65,surfaceGlitter=.6,fineRipple=.70,reflectionMode='enhanced';
+let surfaceDetail=.90,surfaceGlitter=1.0,fineRipple=.45,reflectionMode='enhanced';
 let waterNearMaterial=null,waterFarMaterial=null;
 let opticalMode='lagoon',waterClarity=1.10,waterFloor=null,renderQuality='balanced';
 let depthRefraction=1,underwaterScatter=1,waveSmoothness=1,reflectionStrength=1,subsurfaceLight=.85;
@@ -127,12 +127,12 @@ let volumetricStrength=.85,shaftQuality='medium',lightShafts=null,shaftMeshes=[]
 let opticalFallbackTriggered=false;
 const safeStartup=new URLSearchParams(location.search).has('safe');
 let gpuFFT=null,waveEngine=safeStartup?'analytic':'hybrid',fftEnergy=3,fftMix=0,fftStarting=false,fftFault='',fftAttempted=false,fftRecoveryCount=0;
-if(safeStartup){reflectionMode='basic';opticalMode='legacy';volumetricStrength=0;renderScale=1;}
+if(safeStartup){reflectionMode='basic';opticalMode='legacy';volumetricStrength=0;}
 let cameraMode='chase',orbitYaw=.12,orbitPitch=.31,orbitDistance=15;
 let cameraIntroStart=performance.now(),pointerOrigin=null,pinchDistance=null;
 const cameraTarget={x:-3.2,y:1,z:-13},activePointers=new Map();
 let cameraControlUntil=0;
-let paused=false,detailIndex=1,samples=0,last=performance.now(),waveHeight=1.5,renderScale=1.5;
+let paused=false,detailIndex=1,samples=0,last=performance.now(),waveHeight=1.5,renderScale=safeStartup?1:1.5;
 const levels=[64,88,112];let isWebGPU=false,clockTime=0,loopActive=false;
 function status(m){window.__waterFallback?.notice(m);}
 // A concentric two-zone mesh has no overlapping opaque water surface.
@@ -179,33 +179,44 @@ function disposeSurface(mesh){
 // Tiling procedural small-wave normal field. This is a normal-map shader
 // input, not another set of geometry waves: micro-slopes affect lighting
 // without adding vertices or increasing local solver resolution.
+// Seamless multi-octave water micro-normals. The previous five prominent
+// directional harmonics caused striped/embossed reflections. We blend
+// low-amplitude wavelets over several directions, with gentle modulation.
 function createWaveNormalMap(fine=false){
  const size=256,arr=new Uint8Array(size*size*4);
- const waves=fine?[
-  [8,13,.22,2.4],[-15,11,.20,5.2],[22,-19,.15,.7],
-  [28,25,.10,4.6],[-37,-31,.07,1.4]
+ const tau=2*Math.PI;
+ const sources=fine?[
+  [9,13,.12,.7],[17,-11,.095,3.1],[-23,19,.078,1.5],
+  [31,27,.056,4.2],[-39,35,.043,2.3],[47,-29,.033,5.1],
+  [12,-33,.042,2.8],[29,7,.035,.4]
  ]:[
-  [3,5,.34,.4],[7,-4,.19,1.8],[-9,11,.12,3.2],
-  [14,6,.09,4.1],[19,-17,.055,2.5]
+  [3,5,.18,.4],[7,-4,.13,1.8],[-9,11,.105,3.2],
+  [14,6,.082,4.1],[19,-17,.059,2.5],
+  [5,13,.065,1.0],[-17,8,.043,5.4],[11,-21,.035,2.7]
  ];
+ const sample=(u,v)=>{
+  // All spatial frequencies are integral for seamless repeat wrapping.
+  const envelope=.76+.14*Math.sin(tau*(u*2+v*3))+
+                  .10*Math.cos(tau*(u*3-v*2));
+  let h=0;
+  for(const [fx,fy,a,p]of sources)h+=a*Math.sin(tau*(fx*u+fy*v)+p);
+  return h*envelope;
+ };
+ const eps=1/size;
  for(let y=0;y<size;y++)for(let x=0;x<size;x++){
-  const u=x/size*2*Math.PI,v=y/size*2*Math.PI;
-  let gx=0,gy=0;
-  for(const [kx,ky,amp,phase]of waves){
-   const a=kx*u+ky*v+phase,scale=amp/Math.hypot(kx,ky);
-   gx+=Math.cos(a)*kx*scale;gy+=Math.cos(a)*ky*scale;
-  }
-  const l=Math.hypot(gx,gy,1),i=(y*size+x)*4;
-  arr[i]=Math.round(128+127*(-gx/l));
-  arr[i+1]=Math.round(128+127*(-gy/l));
-  arr[i+2]=Math.round(128+127*(1/l));
+  const u=x/size,v=y/size;
+  const gx=(sample(u+eps,v)-sample(u-eps,v))*.20;
+  const gy=(sample(u,v+eps)-sample(u,v-eps))*.20;
+  const inv=1/Math.hypot(gx,gy,1),i=(y*size+x)*4;
+  arr[i]=Math.round(127.5*(1-gx*inv));
+  arr[i+1]=Math.round(127.5*(1-gy*inv));
+  arr[i+2]=Math.round(127.5*(1+inv));
   arr[i+3]=255;
  }
  const tex=new THREE.DataTexture(arr,size,size,THREE.RGBAFormat);
  tex.wrapS=THREE.RepeatWrapping;tex.wrapT=THREE.RepeatWrapping;
  tex.minFilter=THREE.LinearMipmapLinearFilter;tex.magFilter=THREE.LinearFilter;
- tex.generateMipmaps=true;
- tex.needsUpdate=true;
+ tex.generateMipmaps=true;tex.needsUpdate=true;
  return tex;
 }
 // A small equirectangular sky environment supplies actual directional
@@ -261,7 +272,8 @@ function applyReflectionMode(){
  for(const material of [waterNearMaterial,waterFarMaterial]){
   if(!material)continue;
   material.clearcoatNormalMap=reflectionMode==='enhanced'?surfaceFineNormalMap:null;
-  material.clearcoatNormalScale?.set(fineRipple*.31,fineRipple*.31);
+  const nearby=material===waterNearMaterial;
+  material.clearcoatNormalScale?.set(fineRipple*(nearby?.23:.075),fineRipple*(nearby?.23:.075));
   material.envMapIntensity=(reflectionMode==='enhanced'?1.12+surfaceGlitter*.56:.75+surfaceGlitter*.55)*reflectionStrength;
   material.needsUpdate=true;
  }
@@ -448,11 +460,11 @@ function syncWaterDetail(){
   mat.vertexColors=isNear;
   mat.side=THREE.DoubleSide;
   mat.envMapIntensity=(reflectionMode==='enhanced'?1.12+surfaceGlitter*.56:.75+surfaceGlitter*.55)*reflectionStrength;
-  mat.normalScale.set(surfaceDetail*(isNear?.47:.29),surfaceDetail*(isNear?.47:.29));
-  mat.clearcoatNormalScale?.set(fineRipple*.31,fineRipple*.31);
-  mat.clearcoat=surfaceGlitter*.65;
-  mat.clearcoatRoughness=.10+(.17*(1-surfaceGlitter/1.5));
-  mat.roughness=.21-.085*Math.min(1,surfaceGlitter);
+  mat.normalScale.set(surfaceDetail*(isNear?.31:.095),surfaceDetail*(isNear?.31:.095));
+  mat.clearcoatNormalScale?.set(fineRipple*(isNear?.23:.075),fineRipple*(isNear?.23:.075));
+  mat.clearcoat=Math.min(.75,.45+surfaceGlitter*.16);
+  mat.clearcoatRoughness=isNear?.18:.22;
+  mat.roughness=isNear?.17:.22;
   mat.needsUpdate=true;
  }
 }

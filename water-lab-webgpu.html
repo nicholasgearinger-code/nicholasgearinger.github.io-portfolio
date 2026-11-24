@@ -982,10 +982,10 @@ function makeBoat(){
 // The four-point model remains selectable as a regression comparison.
 const flotation=[[-.85,-.72,-1.65],[.85,-.72,-1.65],[-.85,-.72,1.65],[.85,-.72,1.65]];
 const hullSamples=[
- [-.72,-.66,-1.65],[.72,-.66,-1.65],
+ [-.72,-.72,-1.65],[.72,-.72,-1.65],
  [-.83,-.72,-.50],[.83,-.72,-.50],
  [-.83,-.72,.55],[.83,-.72,.55],
- [-.65,-.66,1.66],[.65,-.66,1.66]
+ [-.65,-.72,1.65],[.65,-.72,1.65]
 ];
 let boatProbeOffset=null;
 function stepBoat(dt,t){
@@ -1038,7 +1038,7 @@ function stepBoat(dt,t){
   // but never creates buoyancy when the boat is completely airborne.
   if(dynamic&&immersed>1&&boatSpeed>3){
    const lift=Math.min(.18*mass*9.81,mass*.75*(boatSpeed-3));
-   fy+=lift;tx-=lift*.16;
+   fy+=lift;
   }
   vy=Math.max(-4.5,Math.min(4.5,vy+fy/mass*h));
   pitchV=Math.max(-.9,Math.min(.9,pitchV+tx/inertiaX*h));

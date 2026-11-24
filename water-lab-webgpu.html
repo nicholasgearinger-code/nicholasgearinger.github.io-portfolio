@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 16.5 camera + sailing</title>
+<title>Rift Water Lab · WebGPU 16.6 boat controls</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -13,12 +13,14 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}label{font-size:12px;display:flex;gap:7px;align-items:center}
 #log{font:11px/1.4 ui-monospace,monospace;word-break:break-word;color:#a8d2df}
 #sailControls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-#sailControls button{min-width:56px;min-height:48px;touch-action:none;user-select:none;-webkit-user-select:none}
+#sailControls button{min-width:56px;min-height:54px;touch-action:none;user-select:none;-webkit-user-select:none;flex:1;font-size:13px}
+#forward[aria-pressed="true"]{background:#24816f;border-color:#83f8c9}
+#stopBoat[aria-pressed="true"]{background:#7c4750;border-color:#ffbac2}
 #controls{bottom:calc(98px + env(safe-area-inset-bottom));max-height:24vh;overflow:auto}input{accent-color:#53d1df}
 .gameHelm{position:absolute;z-index:3;bottom:max(10px,env(safe-area-inset-bottom));left:12px;right:12px;display:flex;gap:9px;justify-content:space-between;align-items:center;pointer-events:auto}
 .gameHelm label{flex:1;min-width:0;display:flex;flex-wrap:wrap}
 .gameHelm input{max-width:100%;width:100%;min-width:75px}
-.gameHelm button{flex-shrink:0}
+.gameHelm button{flex-shrink:1}
 .gameHelm output{min-width:35px;font-size:12px}
 #threeCanvas{touch-action:none;overscroll-behavior:none;cursor:grab}
 #threeCanvas:active{cursor:grabbing}
@@ -31,7 +33,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 </script></head>
 <body>
 <div id="dashboard">
-<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">16.5 · free camera sailing</span></h1>
+<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">16.6 · boat controls</span></h1>
 <p>This is a <strong>separate renderer test</strong>, not a port of the existing FFT ocean.</p>
 <div id="metrics"><span id="backend">Backend: detecting</span><span id="fps">FPS: —</span><span id="resolution">Resolution: —</span><span id="buoyancyState">Buoyancy: initializing</span><span id="boatSpeed">Speed: 0.0</span><span id="heading">Heading: 0°</span></div>
 <p id="log">Checking GPU access…</p></div></div>
@@ -39,10 +41,16 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><button id="modeSwitch" aria-pressed="true">Camera: Chase</button><button id="resetCamera">Reset camera</button><button id="pause">Pause</button><button id="detail">Detail: medium</button><a href="water-lab.html?v=15-2">Old Water Lab</a></div>
 <div class="row"><label>Wave height <input id="waveHeight" aria-label="Wave height" type="range" min=".25" max="2.5" step=".05" value="1.5"></label><output id="waveHeightOut">1.50</output></div>
 <div class="row"><label>Buoyancy <input type="range" id="buoyancyStrength" min=".5" max="1.8" step=".05" value="1"></label><output id="buoyancyStrengthOut">1.00</output><button id="resetBoat">Reset boat</button></div>
+<div class="row"><label>Forward power <input id="sailPower" type="range" min="0" max="1" step=".05" value=".85"></label><output id="sailPowerOut">85%</output></div>
 
-<p>Drag the water to orbit the camera; pinch to zoom. Chase follows the boat's heading; Orbit keeps your viewing direction. Tap Reset camera to recenter. Hold Port or Starboard to steer; adjust Sail power to move. Desktop: drag, wheel, A/D + W/S.</p>
+<p>Tap Forward to sail; tap Stop to brake. Hold Left or Right to turn. Camera: drag to look, pinch to zoom, chase or orbit. Desktop: A/D or ←/→ to steer, W to go, S or Space to stop.</p>
 </div>
-<div id="sailControls" class="panel gameHelm"><button id="port" aria-label="Steer left">◀ Port</button><label>Sail power <input id="sailPower" type="range" min="0" max="1" step=".05" value=".65"></label><output id="sailPowerOut">65%</output><button id="starboard" aria-label="Steer right">Starboard ▶</button></div>
+<div id="sailControls" class="panel gameHelm">
+<button id="port" aria-label="Turn left">◀ Left</button>
+<button id="forward" aria-label="Move forward">▲ Forward</button>
+<button id="stopBoat" aria-label="Stop boat">■ Stop</button>
+<button id="starboard" aria-label="Turn right">Right ▶</button>
+</div>
 <div id="cameraHint">Drag to look around · Pinch to zoom</div>
 <script>
 (function(){
@@ -80,7 +88,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 const $=id=>document.getElementById(id);
 let renderer,scene,camera,water,geometry,base,THREE,boat;
 let buoyancyStrength=1,vy=0,pitchV=0,rollV=0;
-let boatHeading=0,boatSpeed=0,rudder=0,sailPower=.65,steeringLeft=false,steeringRight=false;
+let boatHeading=0,boatSpeed=0,rudder=0,sailPower=.85,driveMode='stop',steeringLeft=false,steeringRight=false;
 let wakeMesh=null,wakePositions=null,wakeEvents=[],wakeClock=0;
 let cameraMode='chase',orbitYaw=.12,orbitPitch=.31,orbitDistance=15;
 let cameraIntroStart=performance.now(),pointerOrigin=null,pinchDistance=null;
@@ -115,7 +123,8 @@ function resetBoat(){
  if(!boat)return;
  boat.position.set(-3.2,.6,-13);
  boat.rotation.set(0,0,0);vy=0;pitchV=0;rollV=0;
- boatHeading=0;boatSpeed=0;rudder=0;wakeEvents=[];wakeClock=0;
+ boatHeading=0;boatSpeed=0;rudder=0;driveMode='stop';wakeEvents=[];wakeClock=0;
+ if($('forward')){setDriveMode('stop');}
 }
 function makeBoat(){
  boat=new THREE.Group();boat.rotation.order='YXZ';
@@ -152,10 +161,15 @@ function stepBoat(dt,t){
  for(let k=0;k<steps;k++){
   // Simplified apparent-wind sailing: thrust, quadratic hull drag and rudder
   // effectiveness. The heading drives horizontal motion and wakes.
-  const thrust=sailPower*2.5*(.35+.65*Math.abs(Math.cos(boatHeading+.7)));
+  const advancing=driveMode==='forward';
+  const thrust=advancing?sailPower*3.15*(.35+.65*Math.abs(Math.cos(boatHeading+.7))):0;
   const drag=.16*boatSpeed+.082*boatSpeed*Math.abs(boatSpeed);
-  boatSpeed=Math.max(0,Math.min(8,boatSpeed+(thrust-drag)*h));
-  boatHeading+=rudder*(.12+.10*boatSpeed)*h;
+  // Stop is a true brake, not merely zero sail force.
+  const braking=advancing?0:Math.min(boatSpeed/h,2.7);
+  boatSpeed=Math.max(0,Math.min(8,boatSpeed+(thrust-drag-braking)*h));
+  // Rudder gets stronger with water flow; a small low-speed turn assist
+  // keeps the controls responsive in the interactive demo.
+  boatHeading+=rudder*(.24+.12*boatSpeed)*h;
   boat.position.x-=Math.sin(boatHeading)*boatSpeed*h;
   boat.position.z-=Math.cos(boatHeading)*boatSpeed*h;
   boat.rotation.y=boatHeading;
@@ -179,7 +193,19 @@ function stepBoat(dt,t){
  }
 }
 
-$('sailPower').oninput=()=>{sailPower=Number($('sailPower').value);$('sailPowerOut').textContent=Math.round(sailPower*100)+'%';};
+function setDriveMode(mode){
+ driveMode=mode==='forward'?'forward':'stop';
+ $('forward').setAttribute('aria-pressed',String(driveMode==='forward'));
+ $('stopBoat').setAttribute('aria-pressed',String(driveMode==='stop'));
+ $('buoyancyState').textContent=driveMode==='forward'?'Boat: sailing forward':'Boat: stopped / braking';
+}
+$('forward').onclick=()=>setDriveMode('forward');
+$('stopBoat').onclick=()=>setDriveMode('stop');
+$('sailPower').oninput=()=>{
+ sailPower=Number($('sailPower').value);
+ $('sailPowerOut').textContent=Math.round(sailPower*100)+'%';
+};
+setDriveMode('stop');
 function bindHelm(id,dir){
  const node=$(id);
  const hold=()=>{if(dir<0)steeringLeft=true;else steeringRight=true;};
@@ -192,16 +218,13 @@ function bindHelm(id,dir){
 bindHelm('port',-1);bindHelm('starboard',1);
 const pressed=new Set();
 window.addEventListener('keydown',e=>{
- if(['ArrowLeft','ArrowRight','KeyA','KeyD','KeyW','KeyS'].includes(e.code)){
-  if(e.target?.tagName==='INPUT')return;
-  e.preventDefault();pressed.add(e.code);
-  steeringLeft=pressed.has('ArrowLeft')||pressed.has('KeyA');
-  steeringRight=pressed.has('ArrowRight')||pressed.has('KeyD');
-  if(e.code==='KeyW'||e.code==='KeyS'){
-   sailPower=Math.max(0,Math.min(1,sailPower+(e.code==='KeyW'?.05:-.05)));
-   $('sailPower').value=sailPower;$('sailPowerOut').textContent=Math.round(sailPower*100)+'%';
-  }
- }
+ if(!['ArrowLeft','ArrowRight','KeyA','KeyD','KeyW','KeyS','Space'].includes(e.code))return;
+ if(e.target?.tagName==='INPUT')return;
+ e.preventDefault();pressed.add(e.code);
+ steeringLeft=pressed.has('ArrowLeft')||pressed.has('KeyA');
+ steeringRight=pressed.has('ArrowRight')||pressed.has('KeyD');
+ if(e.code==='KeyW')setDriveMode('forward');
+ if(e.code==='KeyS'||e.code==='Space')setDriveMode('stop');
 });
 window.addEventListener('keyup',e=>{
  pressed.delete(e.code);

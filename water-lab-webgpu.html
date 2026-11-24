@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 18.2 whitewater foam</title>
+<title>Rift Water Lab · WebGPU 18.3 foam rendering fix</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -33,9 +33,9 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 </script></head>
 <body>
 <div id="dashboard">
-<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">18.2 · whitewater foam</span></h1>
+<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">18.3 · foam rendering fix</span></h1>
 <p>This is a <strong>separate renderer test</strong>, not a port of the existing FFT ocean.</p>
-<div id="metrics"><span id="backend">Backend: detecting</span><span id="fps">FPS: —</span><span id="resolution">Resolution: —</span><span id="buoyancyState">Buoyancy: initializing</span><span id="boatSpeed">Speed: 0.0</span><span id="heading">Heading: 0°</span><span id="wakeStatus">Wake: dynamic</span><span id="wakeSignal">Ripples: waiting</span></div>
+<div id="metrics"><span id="backend">Backend: detecting</span><span id="fps">FPS: —</span><span id="resolution">Resolution: —</span><span id="buoyancyState">Buoyancy: initializing</span><span id="boatSpeed">Speed: 0.0</span><span id="heading">Heading: 0°</span><span id="wakeStatus">Wake: dynamic</span><span id="wakeSignal">Ripples: waiting</span><span id="foamStatus">Foam: 0 patches</span></div>
 <p id="log">Checking GPU access…</p></div></div>
 <div id="controls" class="panel">
 <div class="row"><button id="modeSwitch" aria-pressed="true">Camera: Chase</button><button id="resetCamera">Reset camera</button><button id="pause">Pause</button><button id="detail">Detail: medium</button><a href="water-lab.html?v=15-2">Old Water Lab</a></div>
@@ -43,7 +43,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Wave shape <input id="waveChop" aria-label="Wave crest sharpness" type="range" min="0" max="1.2" step=".05" value=".45"></label><output id="waveChopOut">0.45</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
 <div class="row"><label>Wake physics <input id="wakeAmount" aria-label="Boat wake strength" type="range" min="0" max="2" step=".05" value="1.1"></label><output id="wakeAmountOut">1.10</output><button id="resetWake">Clear wake</button></div>
-<div class="row"><label>Whitewater <input id="foamStrength" aria-label="Whitewater strength" type="range" min="0" max="2.5" step=".1" value="1.5"></label><output id="foamStrengthOut">1.5</output></div>
+<div class="row"><label>Whitewater <input id="foamStrength" aria-label="Whitewater strength" type="range" min="0" max="2.5" step=".1" value="1.5"></label><output id="foamStrengthOut">1.5</output><button id="testFoam">Test foam: Off</button></div>
 <div class="row"><label>Buoyancy <input type="range" id="buoyancyStrength" min=".5" max="1.8" step=".05" value="1"></label><output id="buoyancyStrengthOut">1.00</output><button id="resetBoat">Reset boat</button></div>
 <div class="row"><label>Forward power <input id="sailPower" type="range" min="0" max="1" step=".05" value=".85"></label><output id="sailPowerOut">85%</output></div>
 
@@ -96,7 +96,7 @@ let buoyancyStrength=1,vy=0,pitchV=0,rollV=0;
 let boatHeading=0,boatSpeed=0,rudder=0,sailPower=.85,driveMode='stop',steeringLeft=false,steeringRight=false;
 let wakeSolver=null,wakeAmount=1.1,waveChop=.45;
 let lastRipple=0,propulsionMode='power',wakeTrail=[],trailElapsed=0;
-let foamMesh=null,foamPositions=null,foamColors=null,foamCapacity=150,foamStrength=1.5;
+let foamMesh=null,foamPositions=null,foamColors=null,foamCapacity=150,foamStrength=1.5,foamDebug=false,foamPatchCount=0;
 let cameraMode='chase',orbitYaw=.12,orbitPitch=.31,orbitDistance=15;
 let cameraIntroStart=performance.now(),pointerOrigin=null,pinchDistance=null;
 const cameraTarget={x:-3.2,y:1,z:-13},activePointers=new Map();
@@ -285,7 +285,7 @@ function createFoamField(){
  if(foamMesh){scene.remove(foamMesh);foamMesh.geometry.dispose();foamMesh.material.map?.dispose();foamMesh.material.dispose();}
  const geo=new THREE.BufferGeometry();
  foamPositions=new Float32Array(foamCapacity*4*3);
- foamColors=new Float32Array(foamCapacity*4*4);
+ foamColors=new Float32Array(foamCapacity*4*3);
  const uv=new Float32Array(foamCapacity*4*2),indices=[];
  for(let i=0;i<foamCapacity;i++){
   const v=i*4,k=i*8;
@@ -293,13 +293,16 @@ function createFoamField(){
   indices.push(v,v+2,v+1,v,v+3,v+2);
  }
  geo.setAttribute('position',new THREE.BufferAttribute(foamPositions,3).setUsage(THREE.DynamicDrawUsage));
- geo.setAttribute('color',new THREE.BufferAttribute(foamColors,4).setUsage(THREE.DynamicDrawUsage));
+ geo.setAttribute('color',new THREE.BufferAttribute(foamColors,3).setUsage(THREE.DynamicDrawUsage));
  geo.setAttribute('uv',new THREE.BufferAttribute(uv,2));
  geo.setIndex(indices);geo.setDrawRange(0,0);
  const mat=new THREE.MeshBasicMaterial({
   map:createFoamTexture(),vertexColors:true,transparent:true,
-  depthWrite:false,side:THREE.DoubleSide,opacity:1,
-  polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1
+  // Water has a displaced surface. Depth-testing our separate foam layer
+  // against it hid patches on WebGPU as waves intersected the foam quads.
+  // Render the near-boat field after water, with alpha from the texture.
+  depthTest:false,depthWrite:false,side:THREE.DoubleSide,opacity:.96,
+  polygonOffset:false
  });
  foamMesh=new THREE.Mesh(geo,mat);
  foamMesh.frustumCulled=false;foamMesh.renderOrder=3;scene.add(foamMesh);
@@ -308,22 +311,24 @@ function createFoamField(){
 // Each patch uses four water-surface samples and a procedurally porous alpha.
 function updateWhitewater(t){
  if(!foamMesh||!boat)return;
- if(foamStrength<.01||wakeAmount<.01){foamMesh.geometry.setDrawRange(0,0);return;}
+ if((foamStrength<.01||wakeAmount<.01)&&!foamDebug){foamMesh.geometry.setDrawRange(0,0);foamPatchCount=0;return;}
  let count=0;
  const emit=(x,z,radius,alpha,rotation)=>{
   if(count>=foamCapacity||alpha<.035)return;
   const sin=Math.sin(rotation),cos=Math.cos(rotation);
   const verts=[[-1,-1],[1,-1],[1,1],[-1,1]];
-  const vi=count*12,ci=count*16;
+  const vi=count*12,ci=count*12;
   for(let k=0;k<4;k++){
    const a=verts[k][0]*radius,b=verts[k][1]*radius;
    const wx=x+a*cos-b*sin,wz=z+a*sin+b*cos;
-   const p=vi+k*3,c=ci+k*4;
+   const p=vi+k*3,c=ci+k*3;
    foamPositions[p]=wx;
-   foamPositions[p+1]=oceanHeight(wx,wz,t)+.09;
+   foamPositions[p+1]=oceanHeight(wx,wz,t)+.24;
    foamPositions[p+2]=wz;
-   foamColors[c]=.92;foamColors[c+1]=.97;foamColors[c+2]=1;
-   foamColors[c+3]=Math.min(.93,alpha);
+   // Three-channel vertex colors avoid a WebGPU alpha-channel compatibility
+   // issue. Opacity comes from the transparent texture; RGB fades by age.
+   const strength=Math.min(1,Math.max(.12,alpha));
+   foamColors[c]=strength;foamColors[c+1]=strength;foamColors[c+2]=strength;
   }
   count++;
  };
@@ -357,6 +362,16 @@ function updateWhitewater(t){
    emit(x,z,.45+i*.055,power*foamStrength*.72,boatHeading+i*.73);
   }
  }
+ if(foamDebug){
+  // High-contrast diagnostic: large, obviously white patterned patches
+  // next to the boat while stationary, independent of wake generation.
+  for(let i=0;i<8;i++){
+   const theta=i*Math.PI/4;
+   emit(boat.position.x+Math.cos(theta)*3.4,
+        boat.position.z+Math.sin(theta)*3.4,1.18,1,theta);
+  }
+ }
+ foamPatchCount=count;
  foamMesh.geometry.setDrawRange(0,count*6);
  foamMesh.geometry.attributes.position.needsUpdate=true;
  foamMesh.geometry.attributes.color.needsUpdate=true;
@@ -604,6 +619,10 @@ $('wakeAmount').oninput=()=>{
 };
 $('resetWake').onclick=()=>{wakeSolver?.clear();wakeTrail=[];if(foamMesh)foamMesh.geometry.setDrawRange(0,0);};
 $('foamStrength').oninput=()=>{foamStrength=Number($('foamStrength').value);$('foamStrengthOut').textContent=foamStrength.toFixed(1);};
+$('testFoam').onclick=()=>{
+ foamDebug=!foamDebug;
+ $('testFoam').textContent=foamDebug?'Test foam: On':'Test foam: Off';
+};
 $('propulsionMode').onchange=()=>{
  propulsionMode=$('propulsionMode').value;
  $('wakeStatus').textContent=propulsionMode==='power'?'Wake: powered':'Wake: sail';
@@ -662,6 +681,7 @@ async function init3D(forceWebGL=false){
   if(hint){const opacity=Math.max(0,1-(performance.now()-cameraIntroStart-1600)/1300);hint.style.opacity=String(Math.max(0,opacity));}
   $('boatSpeed').textContent='Speed: '+boatSpeed.toFixed(1)+' m/s';
   $('wakeSignal').textContent='Peak ripple: '+(lastRipple*100).toFixed(0)+' cm';
+  $('foamStatus').textContent='Foam: '+foamPatchCount+' patches';
   $('heading').textContent='Heading: '+((boatHeading*180/Math.PI%360+360)%360).toFixed(0)+'°';
   renderer.render(scene,camera);
   samples++;

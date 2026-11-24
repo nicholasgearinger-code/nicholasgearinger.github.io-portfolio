@@ -40,6 +40,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="controls" class="panel">
 <div class="row"><button id="modeSwitch" aria-pressed="true">Camera: Chase</button><button id="resetCamera">Reset camera</button><button id="pause">Pause</button><button id="detail">Detail: medium</button><a href="water-lab.html?v=15-2">Old Water Lab</a></div>
 <div class="row"><label>Wave height <input id="waveHeight" aria-label="Wave height" type="range" min=".25" max="2.5" step=".05" value="1.5"></label><output id="waveHeightOut">1.50</output></div>
+<div class="row"><label>Wave shape <input id="waveChop" aria-label="Wave crest sharpness" type="range" min="0" max="1.2" step=".05" value=".45"></label><output id="waveChopOut">0.45</output></div>
 <div class="row"><label>Wake physics <input id="wakeAmount" aria-label="Boat wake strength" type="range" min="0" max="2" step=".05" value="1.1"></label><output id="wakeAmountOut">1.10</output><button id="resetWake">Clear wake</button></div>
 <div class="row"><label>Buoyancy <input type="range" id="buoyancyStrength" min=".5" max="1.8" step=".05" value="1"></label><output id="buoyancyStrengthOut">1.00</output><button id="resetBoat">Reset boat</button></div>
 <div class="row"><label>Forward power <input id="sailPower" type="range" min="0" max="1" step=".05" value=".85"></label><output id="sailPowerOut">85%</output></div>
@@ -91,7 +92,7 @@ const $=id=>document.getElementById(id);
 let renderer,scene,camera,water,geometry,base,THREE,boat;
 let buoyancyStrength=1,vy=0,pitchV=0,rollV=0;
 let boatHeading=0,boatSpeed=0,rudder=0,sailPower=.85,driveMode='stop',steeringLeft=false,steeringRight=false;
-let wakeSolver=null,wakeAmount=1.1;
+let wakeSolver=null,wakeAmount=1.1,waveChop=.45;
 let cameraMode='chase',orbitYaw=.12,orbitPitch=.31,orbitDistance=15;
 let cameraIntroStart=performance.now(),pointerOrigin=null,pinchDistance=null;
 const cameraTarget={x:-3.2,y:1,z:-13},activePointers=new Map();
@@ -121,20 +122,46 @@ const waveComponents=[
 ].map(([amplitude,wavelength,direction,phase])=>{
  const k=2*Math.PI/wavelength;
  return {amplitude,kx:Math.sin(direction)*k,kz:Math.cos(direction)*k,
+         dirX:Math.sin(direction),dirZ:Math.cos(direction),
          omega:Math.sqrt(9.81*k),phase};
 });
-function oceanHeight(x,z,t){
- let y=0;
+// Gerstner-style horizontal motion sharpens crests without fake foam.
+// Point sampling inverts the horizontal warp approximately, keeping the
+// boat's four buoyancy probes aligned with the rendered surface.
+const waveState={height:0,dx:0,dz:0};
+function waveField(x,z,t,out=waveState){
+ let elevation=0,dx=0,dz=0;
  for(const wave of waveComponents){
-  y+=wave.amplitude*Math.sin(wave.kx*x+wave.kz*z-wave.omega*t+wave.phase);
+  const phase=wave.kx*x+wave.kz*z-wave.omega*t+wave.phase;
+  const amplitude=waveHeight*wave.amplitude;
+  elevation+=amplitude*Math.sin(phase);
+  const lateral=waveChop*amplitude*Math.cos(phase);
+  dx+=wave.dirX*lateral;dz+=wave.dirZ*lateral;
  }
- return waveHeight*y+(wakeSolver?wakeSolver.sample(x,z):0);
+ out.height=elevation;out.dx=dx;out.dz=dz;
+ return out;
+}
+function oceanHeight(x,z,t){
+ let bx=x,bz=z;
+ if(waveChop>.001){
+  // Two fixed-point passes are adequate for the modest 0.45 chop default.
+  for(let k=0;k<2;k++){
+   const result=waveField(bx,bz,t);
+   bx=x-result.dx;bz=z-result.dz;
+  }
+ }
+ const y=waveField(bx,bz,t).height;
+ return y+(wakeSolver?wakeSolver.sample(x,z):0);
 }
 function animateWaves(t){
  const position=geometry.attributes.position,arr=position.array;
  for(let i=0;i<arr.length;i+=3){
   const x=base[i]+water.position.x,z=base[i+2]+water.position.z;
-  arr[i+1]=oceanHeight(x,z,t);
+  const wave=waveField(x,z,t);
+  const displacedX=x+wave.dx,displacedZ=z+wave.dz;
+  arr[i]=base[i]+wave.dx;
+  arr[i+2]=base[i+2]+wave.dz;
+  arr[i+1]=wave.height+(wakeSolver?wakeSolver.sample(displacedX,displacedZ):0);
  }
  position.needsUpdate=true;geometry.computeVertexNormals();
 }
@@ -334,6 +361,10 @@ $('wakeAmount').oninput=()=>{
  $('wakeStatus').textContent=wakeAmount>.01?'Wake: dynamic':'Wake: off';
 };
 $('resetWake').onclick=()=>wakeSolver?.clear();
+$('waveChop').oninput=()=>{
+ waveChop=Number($('waveChop').value);
+ $('waveChopOut').textContent=waveChop.toFixed(2);
+};
 $('waveHeight').oninput=()=>{waveHeight=Number($('waveHeight').value);$('waveHeightOut').textContent=waveHeight.toFixed(2);};
 $('detail').onclick=()=>{detailIndex=(detailIndex+1)%levels.length;if(scene)makeSurface();$('detail').textContent=['Detail: low','Detail: medium','Detail: high'][detailIndex];};
 async function init3D(forceWebGL=false){

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 24.7.1 natural object and wave shadows</title>
+<title>Rift Water Lab · WebGPU 24.7.2 wave-transmitted underwater illumination</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.7.1</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.7.2</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <details id="diagnostics">
@@ -136,6 +136,8 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Object shadow quality <select id="objectShadowQuality"><option value="fast">Fast · 512px</option><option value="balanced" selected>Balanced · 768px</option><option value="high">Detailed · 1024px</option></select></label></div>
 <div class="row"><label>Shadow softness <input id="shadowSoftness" aria-label="Shadow softness" type="range" min=".5" max="4" step=".25" value="2"></label><output id="shadowSoftnessOut">2.00</output></div>
 <div class="row"><label>Wave self-shading <input id="waveShadowStrength" aria-label="Wave self shading" type="range" min="0" max="2" step=".1" value="1"></label><output id="waveShadowStrengthOut">1.00</output></div>
+<div class="row"><label>Transmitted wave shadows <select id="waveTransmissionMode"><option value="enhanced" selected>24.7.2 · moving light and shadow</option><option value="classic">24.7.1 · original lighting</option></select></label></div>
+<div class="row"><label>Water shadow depth <input id="waveTransmissionStrength" aria-label="Transmitted wave shadow depth" type="range" min="0" max="2" step=".05" value="1"></label><output id="waveTransmissionStrengthOut">1.00</output></div>
 <div class="row"><label>Light diffusion <input id="scatteringDiffusion" aria-label="Light diffusion" type="range" min=".4" max="2" step=".05" value="1.10"></label><output id="scatteringDiffusionOut">1.10</output></div>
 <div class="row"><label>Volume motion <input id="scatteringMotion" aria-label="Underwater volume motion" type="range" min="0" max="2" step=".05" value="1"></label><output id="scatteringMotionOut">1.00</output></div>
 <div class="row"><label>Suspended particles <input id="particleDensity" aria-label="Suspended underwater particle density" type="range" min="0" max="2" step=".1" value=".7"></label><output id="particleDensityOut">0.70</output></div>
@@ -243,6 +245,9 @@ let scatteringMode='screen',scatteringDiffusion=1.1,scatteringMotion=1,
 let particleDensity=.7,underwaterParticles=null;
 let screenScatteringQuality='balanced',scatteringShadows=1;
 let objectShadowQuality='balanced',shadowSoftness=2,waveShadowStrength=1;
+let waveTransmissionMode='enhanced',waveTransmissionStrength=1,
+ waveTransmissionTexture=null,waveTransmissionPixels=null,
+ lastWaveTransmissionUpdate=-100,waveTransmissionMaterialActive=false;
 let screenLightPipeline=null,screenGodrays=null,screenBlendColor=null,
     mainSun=null,screenSpaceFault='',screenSpaceReady=false,screenSpaceStarting=false,
     screenSpaceFailed=false;
@@ -250,7 +255,7 @@ let screenLightPipeline=null,screenGodrays=null,screenBlendColor=null,
 let opticalFallbackTriggered=false;
 const safeStartup=new URLSearchParams(location.search).has('safe');
 let gpuFFT=null,waveEngine=safeStartup?'analytic':'hybrid',fftEnergy=3,fftMix=0,fftStarting=false,fftFault='',fftAttempted=false,fftRecoveryCount=0,fftRuntimeInfo='';
-if(safeStartup){reflectionMode='basic';opticalMode='legacy';volumetricStrength=0;hullPhysics='classic';atmospherePreset='off';undersideMode='classic';visibilityMode='classic';causticMode='off';scatteringMode='off';}
+if(safeStartup){reflectionMode='basic';opticalMode='legacy';volumetricStrength=0;hullPhysics='classic';atmospherePreset='off';undersideMode='classic';visibilityMode='classic';causticMode='off';scatteringMode='off';waveTransmissionMode='classic';}
 let cameraMode='chase',orbitYaw=.12,orbitPitch=.31,orbitDistance=15;
 let cameraIntroStart=performance.now(),pointerOrigin=null,pinchDistance=null;
 const cameraTarget={x:-3.2,y:1,z:-13},activePointers=new Map();
@@ -1081,6 +1086,77 @@ function updateWaveCausticTexture(t){
  causticBuild=null;
  return true;
 }
+// 24.7.2: diffuse transmission shadowing from actual moving wave slopes.
+// The standard sand material multiplies this low-res map with its existing
+// vertex colors. The old emissive caustic texture stays separate; object
+// shadow maps from 24.7.1 are unaffected.
+function makeWaveTransmissionTexture(){
+ const n=64;
+ waveTransmissionPixels=new Uint8Array(n*n*4);
+ waveTransmissionPixels.fill(255);
+ const tex=new THREE.DataTexture(waveTransmissionPixels,n,n,THREE.RGBAFormat);
+ tex.wrapS=THREE.ClampToEdgeWrapping;tex.wrapT=THREE.ClampToEdgeWrapping;
+ tex.minFilter=THREE.LinearFilter;tex.magFilter=THREE.LinearFilter;
+ tex.generateMipmaps=false;tex.colorSpace=THREE.SRGBColorSpace;
+ tex.needsUpdate=true;return tex;
+}
+function syncWaveTransmissionMaterial(){
+ if(!floorCausticMaterial)return;
+ const active=waveTransmissionMode==='enhanced'&&
+   waveTransmissionStrength>.01&&causticMode==='wave'&&
+   opticalMode!=='legacy'&&atmospherePreset!=='off'&&
+   !!waveTransmissionTexture&&!safeStartup;
+ if(waveTransmissionMaterialActive===active)return;
+ waveTransmissionMaterialActive=active;
+ floorCausticMaterial.map=active?waveTransmissionTexture:null;
+ floorCausticMaterial.needsUpdate=true;
+ if(active)lastWaveTransmissionUpdate=-100;
+}
+function updateWaveTransmission(t,force=false){
+ if(!waveTransmissionTexture||!boat||!waterFloor)return;
+ syncWaveTransmissionMaterial();
+ if(!waveTransmissionMaterialActive)return;
+ if(!force&&t-lastWaveTransmissionUpdate<.135)return;
+ lastWaveTransmissionUpdate=t;
+ const n=64,width=causticProjectionWidth;
+ const cx=causticProjectionX,cz=causticProjectionZ;
+ if(!Number.isFinite(cx)||!Number.isFinite(cz))return;
+ const clarity=Math.max(.4,waterClarity);
+ const sunX=16/39.3,sunY=35/39.3,sunZ=8/39.3;
+ // Three interfering, directional swells produce soft, large-scale
+ // shadow folds; high-frequency focused caustics remain in emissiveMap.
+ const waves=[waveComponents[0],waveComponents[1],waveComponents[2]];
+ for(let y=0;y<n;y++)for(let x=0;x<n;x++){
+  const u=(x+.5)/n,v=(y+.5)/n;
+  const wx=cx+(u-.5)*width,wz=cz+(.5-v)*width;
+  const depth=seabedDepth(wx-waterFloor.position.x,
+                           wz-waterFloor.position.z);
+  const surfaceX=wx-sunX*depth*.25,surfaceZ=wz-sunZ*depth*.25;
+  let sx=0,sz=0,h=0;
+  for(const wave of waves){
+   const phase=wave.kx*surfaceX+wave.kz*surfaceZ-wave.omega*t+wave.phase;
+   const amplitude=wave.amplitude*waveHeight;
+   sx+=amplitude*wave.kx*Math.cos(phase);
+   sz+=amplitude*wave.kz*Math.cos(phase);
+   h+=amplitude*Math.sin(phase);
+  }
+  const facing=(-sx*sunX+sunY-sz*sunZ)/Math.sqrt(1+sx*sx+sz*sz);
+  const exposure=Math.max(0,Math.min(1,(facing-.55)/.4));
+  const fold=.5+.5*Math.sin(h*1.8+sx*1.7-sz*1.3);
+  const transmittance=Math.exp(-depth*.045/clarity);
+  const reduction=(.12+.17*(1-exposure)+.12*(1-fold))*
+   Math.min(1,transmittance*1.6)*waveTransmissionStrength;
+  const edge=Math.min(u,1-u,v,1-v);
+  const feather=Math.max(0,Math.min(1,(edge-.01)*14));
+  const value=Math.round(255*Math.max(.60,1-reduction*feather));
+  const i=(y*n+x)*4;
+  waveTransmissionPixels[i]=value;
+  waveTransmissionPixels[i+1]=value;
+  waveTransmissionPixels[i+2]=value;
+  waveTransmissionPixels[i+3]=255;
+ }
+ waveTransmissionTexture.needsUpdate=true;
+}
 function updateCausticTexture(t,force=false){
  if(!causticMap)return;
  if(force)causticBuild=null;
@@ -1211,7 +1287,9 @@ function createSeabed(){
   mat.emissiveMap=makeCausticTexture();
   mat.emissiveIntensity=.18;
   floorCausticMaterial=mat;
+  waveTransmissionTexture=makeWaveTransmissionTexture();
   syncCausticProjection(true);
+  syncWaveTransmissionMaterial();
  }
  buildUnderwaterScene();
  if(causticMap)for(const material of underwaterObjectMaterials){
@@ -1938,6 +2016,17 @@ $('waveShadowStrength').oninput=()=>{
  waveShadowStrength=Number($('waveShadowStrength').value);
  $('waveShadowStrengthOut').textContent=waveShadowStrength.toFixed(2);
 };
+$('waveTransmissionMode').onchange=()=>{
+ waveTransmissionMode=$('waveTransmissionMode').value;
+ syncWaveTransmissionMaterial();
+ updateWaveTransmission(clockTime,true);
+};
+$('waveTransmissionStrength').oninput=()=>{
+ waveTransmissionStrength=Number($('waveTransmissionStrength').value);
+ $('waveTransmissionStrengthOut').textContent=waveTransmissionStrength.toFixed(2);
+ syncWaveTransmissionMaterial();
+ updateWaveTransmission(clockTime,true);
+};
 $('scatteringDiffusion').oninput=()=>{
  scatteringDiffusion=Number($('scatteringDiffusion').value);
  $('scatteringDiffusionOut').textContent=scatteringDiffusion.toFixed(2);
@@ -1957,6 +2046,7 @@ $('underwaterScene').onchange=()=>{
 $('causticMode').onchange=()=>{
  causticMode=$('causticMode').value;
  causticBuild=null;
+ syncWaveTransmissionMaterial();
  syncCausticProjection(true);
  for(const material of underwaterObjectMaterials){
   material.emissiveMap=causticMode==='wave'?null:causticMap;
@@ -2277,6 +2367,7 @@ async function init3D(forceWebGL=false){
   $('undersideMode').value='classic';
   $('visibilityMode').value='classic';
   $('causticMode').value='off';
+  $('waveTransmissionMode').value='classic';
  }
  $('buoyancyState').textContent='Boat: 4-point floating + sailing';
  renderer.domElement.id='threeCanvas';renderer.domElement.style.cssText='position:fixed;inset:0;width:100%;height:100%;z-index:1';
@@ -2306,6 +2397,7 @@ async function init3D(forceWebGL=false){
    trackWake(dt);
    updateThicknessMap();
    updateCausticTexture(time);
+   updateWaveTransmission(time);
    animateWaves(time);
    try{updateWhitewater(time);}
    catch(error){

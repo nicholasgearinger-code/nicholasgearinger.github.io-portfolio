@@ -108,7 +108,7 @@ let foamMesh=null,foamPositions=null,foamColors=null,foamCapacity=280,foamStreng
 let surfaceNormalMap=null,surfaceDetail=.65,surfaceGlitter=.6,waterNearMaterial=null,waterFarMaterial=null;
 let opticalMode='lagoon',waterClarity=1.10,waterFloor=null,renderQuality='balanced';
 let opticalFallbackTriggered=false;
-let gpuFFT=null,waveEngine='hybrid',fftEnergy=3,fftStarting=false,fftFault='',fftAttempted=false;
+let gpuFFT=null,waveEngine='hybrid',fftEnergy=3,fftMix=0,fftStarting=false,fftFault='',fftAttempted=false;
 let cameraMode='chase',orbitYaw=.12,orbitPitch=.31,orbitDistance=15;
 let cameraIntroStart=performance.now(),pointerOrigin=null,pinchDistance=null;
 const cameraTarget={x:-3.2,y:1,z:-13},activePointers=new Map();
@@ -311,8 +311,8 @@ const waveState={height:0,dx:0,dz:0};
 // swell remains an automatic fallback when compute is not available.
 function waveField(x,z,t,out=waveState){
  let elevation=0,dx=0,dz=0;
- const hasFFT=waveEngine!=='analytic'&&!fftFault&&gpuFFT?.ready;
- const analyticWeight=hasFFT?(waveEngine==='fft'?.20:.70):1;
+ const hasFFT=fftMix>.0005&&gpuFFT?.ready&&!fftFault;
+ const analyticWeight=1-(hasFFT?fftMix*(waveEngine==='fft'?.80:.30):0);
  for(const wave of waveComponents){
   const phase=wave.kx*x+wave.kz*z-wave.omega*t+wave.phase;
   const amplitude=waveHeight*wave.amplitude*analyticWeight;
@@ -321,7 +321,7 @@ function waveField(x,z,t,out=waveState){
   dx+=wave.dirX*lateral;dz+=wave.dirZ*lateral;
  }
  if(hasFFT){
-  const scale=fftEnergy*waveHeight;
+  const scale=fftEnergy*waveHeight*fftMix;
   elevation+=gpuFFT.sample(x,z)*scale;
   // Use spectral height gradients to displace wave crests laterally.
   // These read cached CPU field data; no synchronous GPU readback.
@@ -841,6 +841,8 @@ async function init3D(forceWebGL=false){
   previousFrame=nowFrame;
   if(!paused){
    time+=dt;
+   const targetFFT=waveEngine!=='analytic'&&gpuFFT?.ready&&!fftFault?1:0;
+   fftMix+=(targetFFT-fftMix)*Math.min(1,dt*1.75);
    const headingBefore=boatHeading;
    stepBoat(dt,time);
    turnVelocity=dt>0?(boatHeading-headingBefore)/dt:0;

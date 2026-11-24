@@ -298,7 +298,7 @@ function createFoamField(){
  geo.setIndex(indices);geo.setDrawRange(0,0);
  foamPattern=createFoamTexture();
  const mat=new THREE.MeshBasicMaterial({
-  map:foamDebug?null:foamPattern,vertexColors:true,transparent:true,
+  map:foamDebug?null:foamPattern,vertexColors:true,transparent:!foamDebug,
   // Water has a displaced surface. Depth-testing our separate foam layer
   // against it hid patches on WebGPU as waves intersected the foam quads.
   // Render the near-boat field after water, with alpha from the texture.
@@ -628,7 +628,7 @@ function toggleFoamDebug(){
  // Diagnostic deliberately bypasses the alpha texture: if these solid
  // white patches are visible, geometry and draw order work and the
  // remaining issue is texture/foam pattern.
- if(foamMesh){foamMesh.material.map=foamDebug?null:foamPattern;foamMesh.material.needsUpdate=true;}
+ if(foamMesh){foamMesh.material.map=foamDebug?null:foamPattern;foamMesh.material.transparent=!foamDebug;foamMesh.material.needsUpdate=true;}
  $('testFoam').textContent=foamDebug?'Whitewater test: ON':'Whitewater test: OFF';
  $('testFoamTop').textContent=foamDebug?'Whitewater test: ON':'Whitewater test: OFF';
 }

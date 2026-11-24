@@ -70,7 +70,7 @@ export function createWakeSolver({segments=112,size=110}={}){
     [velocity,nextVelocity]=[nextVelocity,velocity];
     // Edge cells remain zero (Dirichlet boundary).
   }
-  function advance(dt,{x,z,heading,speed:boatSpeed,amount=1}){
+  function advance(dt,{x,z,heading,speed:boatSpeed,bob=0,amount=1}){
     recenter(x,z);
     const movement=Math.min(1,Math.max(0,boatSpeed)/5)*Math.max(0,amount);
     if(movement>.015&&dt>0){
@@ -86,6 +86,15 @@ export function createWakeSolver({segments=112,size=110}={}){
       pressure(x-dx*1.2,z-dz*1.2,-165*movement*dt,1.45);
       pressure(x-dx*2.0+sx*1.1,z-dz*2.0+sz*1.1,104*movement*dt,.95);
       pressure(x-dx*2.0-sx*1.1,z-dz*2.0-sz*1.1,104*movement*dt,.95);
+    }
+    // A bobbing hull moves water even when no forward wake exists.
+    // Apply an opposing displacement at each side of the hull to drive
+    // compact concentric ripples without synthetic line geometry.
+    if(Math.abs(bob)>.018&&dt>0&&amount>0){
+      const pulse=Math.max(-1,Math.min(1,bob))*18*dt*Math.min(amount,2);
+      const sx=-Math.cos(heading),sz=Math.sin(heading);
+      pressure(x+sx*.8,z+sz*.8,pulse,1.05);
+      pressure(x-sx*.8,z-sz*.8,pulse,1.05);
     }
     accumulator=Math.min(.10,accumulator+Math.max(0,dt));
     let steps=0;

@@ -282,6 +282,8 @@ async function init3D(forceWebGL=false){
    // Recenter finite test mesh near the sailing boat.
    water.position.x=Math.round(boat.position.x/8)*8;
    water.position.z=Math.round(boat.position.z/8)*8;
+   floor.position.x=water.position.x;
+   floor.position.z=water.position.z;
    animateWaves(time);updateWake(dt,time);
   }
   updateCamera(dt);

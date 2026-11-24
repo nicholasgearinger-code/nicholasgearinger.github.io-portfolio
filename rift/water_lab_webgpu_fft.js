@@ -33,10 +33,10 @@ fn main(@builtin(global_invocation_id) id:vec3u){
  let x=id.x;let y=id.y;
  if(x>=N||y>=N){return;}
  let j=select(x,y,cfg.axis==1u);
- let group=cfg.half*2u;
- let low=j%group;
+ let butterflyWidth=cfg.half*2u;
+ let low=j%butterflyWidth;
  let k=j%cfg.half;
- let base=(j/group)*group;
+ let base=(j/butterflyWidth)*butterflyWidth;
  let u=base+k;
  let v=u+cfg.half;
  var indexA:u32;var indexB:u32;
@@ -44,7 +44,7 @@ fn main(@builtin(global_invocation_id) id:vec3u){
  else{indexA=u*N+x;indexB=v*N+x;}
  let av=inputField[indexA];
  let bv=inputField[indexB];
- let angle=2.0*PI*f32(k)/f32(group);
+ let angle=2.0*PI*f32(k)/f32(butterflyWidth);
  let twiddle=vec2f(cos(angle),sin(angle));
  let rotated=cmul(bv,twiddle);
  let result=select(av+rotated,av-rotated,low>=cfg.half);
@@ -103,8 +103,13 @@ fn main(@builtin(global_invocation_id) id:vec3u){
  let raw=(a+b)*params.power*12.0;
  outputField[reversed(y)*N+reversed(x)]=raw;
 }`});
- const fftPipeline=device.createComputePipeline({layout:'auto',compute:{module:fftShader,entryPoint:'main'}});
- const initPipeline=device.createComputePipeline({layout:'auto',compute:{module:initShader,entryPoint:'main'}});
+ for(const [name,shader] of [['spectrum',initShader],['butterflies',fftShader]]){
+  const info=await shader.getCompilationInfo();
+  const errors=info.messages.filter(item=>item.type==='error');
+  if(errors.length)throw Error(name+' WGSL: '+errors.map(e=>e.message).join('; ').slice(0,300));
+ }
+ const fftPipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module:fftShader,entryPoint:'main'}});
+ const initPipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module:initShader,entryPoint:'main'}});
  const initBG=device.createBindGroup({layout:initPipeline.getBindGroupLayout(0),entries:[
   {binding:0,resource:{buffer:a}},{binding:1,resource:{buffer:timeBuffer}}
  ]});
@@ -119,7 +124,7 @@ fn main(@builtin(global_invocation_id) id:vec3u){
   ]}));
   [source,target]=[target,source];
  }
- let latest=null,busy=false,disposed=false,lastSampleTime=-1,frames=0,failures=0;
+ let latest=null,busy=false,disposed=false,lastSampleTime=-1,frames=0,failures=0,rms=0;
  device.lost.then(info=>{if(!disposed){disposed=true;onError('FFT device lost: '+info.message);}}).catch(()=>{});
  function request(t,{power=1}={}){
   if(disposed||busy||t-lastSampleTime<.105)return;
@@ -143,6 +148,12 @@ fn main(@builtin(global_invocation_id) id:vec3u){
     if(disposed)return;
     latest=new Float32Array(staging.getMappedRange()).slice();
     staging.unmap();
+    let squares=0;
+    for(let i=0;i<latest.length;i+=2){
+      const value=latest[i]/(n*n);
+      squares+=value*value;
+    }
+    rms=Math.sqrt(squares/(n*n));
     frames++;busy=false;
    }).catch(error=>{busy=false;failures++;if(failures===1)onError(String(error));});
   }catch(error){busy=false;failures++;if(failures===1)onError(String(error));}
@@ -163,5 +174,5 @@ fn main(@builtin(global_invocation_id) id:vec3u){
   if(!busy)staging.destroy();
   device.destroy();
  }
- return {request,sample,dispose,get ready(){return latest!==null;},get frameCount(){return frames;},get failures(){return failures;},size:n,domain};
+ return {request,sample,dispose,get ready(){return latest!==null;},get frameCount(){return frames;},get rms(){return rms;},get failures(){return failures;},size:n,domain};
 }

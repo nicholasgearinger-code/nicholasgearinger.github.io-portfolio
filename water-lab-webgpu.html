@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 24.2 underwater atmosphere</title>
+<title>Rift Water Lab · WebGPU 24.3 underwater surface optics</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.2</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.3</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <details id="diagnostics">
@@ -109,6 +109,12 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Depth refraction <input id="depthRefraction" aria-label="Depth refraction" type="range" min="0" max="1.6" step=".05" value="1"></label><output id="depthRefractionOut">1.00</output></div>
 <div class="row"><label>Reflection intensity <input id="reflectionStrength" aria-label="Reflection intensity" type="range" min="0" max="2" step=".05" value="1.00"></label><output id="reflectionStrengthOut">1.00</output></div>
 <div class="row"><label>Subsurface light <input id="subsurfaceLight" aria-label="Subsurface light" type="range" min="0" max="2" step=".05" value=".85"></label><output id="subsurfaceLightOut">0.85</output></div>
+<div class="row"><label>Underwater optics <select id="undersideMode"><option value="enhanced" selected>24.3 · illuminated underside</option><option value="classic">24.2 · original optics</option></select></label></div>
+<div class="row"><label>Underwater refraction <input id="underwaterRefraction" aria-label="Underwater refraction" type="range" min="0" max="2" step=".05" value="1.10"></label><output id="underwaterRefractionOut">1.10</output></div>
+<div class="row"><label>Underwater Fresnel <input id="underwaterFresnel" aria-label="Underwater Fresnel reflections" type="range" min="0" max="2" step=".05" value="1"></label><output id="underwaterFresnelOut">1.00</output></div>
+<div class="row"><label>Transmitted sunlight <input id="underwaterTransmission" aria-label="Transmitted sunlight" type="range" min="0" max="2" step=".05" value="1.15"></label><output id="underwaterTransmissionOut">1.15</output></div>
+<div class="row"><label>Waterline softness <input id="waterlineSoftness" aria-label="Waterline softness" type="range" min=".2" max="2" step=".05" value=".65"></label><output id="waterlineSoftnessOut">0.65 m</output></div>
+<div class="row"><label>Underside distortion <input id="undersideDistortion" aria-label="Underside distortion" type="range" min="0" max="2" step=".05" value="1"></label><output id="undersideDistortionOut">1.00</output></div>
 <div class="row"><label>Underwater scattering <input id="underwaterScatter" aria-label="Underwater scattering" type="range" min="0" max="2" step=".05" value="1"></label><output id="underwaterScatterOut">1.00</output></div>
 <div class="row"><label>Distance extinction <input id="distanceExtinction" aria-label="Underwater distance extinction" type="range" min="0" max="2" step=".05" value="1"></label><output id="distanceExtinctionOut">1.00</output></div>
 <div class="row"><label>Depth absorption <input id="depthAbsorption" aria-label="Underwater depth absorption" type="range" min="0" max="2" step=".05" value="1"></label><output id="depthAbsorptionOut">1.00</output></div>
@@ -197,6 +203,9 @@ let depthRefraction=1,underwaterScatter=1,waveSmoothness=1,reflectionStrength=1,
 let thicknessTexture=null,thicknessPixels=null,lastThicknessX=Infinity,lastThicknessZ=Infinity;
 let underwaterActive=false,underwaterFog=null,dayFog=null,waterDepthAtBoat=4,underwaterBlend=0,underwaterSceneMode='reef',underwaterObjects=null,causticStrength=.8,causticMap=null,causticPixels=null,lastCausticUpdate=-100;
 let depthAbsorption=1,distanceExtinction=1,atmospherePreset='lagoon';
+let undersideMode='enhanced',underwaterRefraction=1.10,underwaterFresnel=1,
+ underwaterTransmission=1.15,waterlineSoftness=.65,undersideDistortion=1;
+let lastUndersideMix=-1,underwaterSunlight=null,underwaterAmbient=null,clockDelta=1/60;
 let floorCausticMaterial=null,underwaterObjectMaterials=[],underwaterBackgroundColor=null;
 const waterProfiles={
  lagoon:{absorption:[.16,.064,.031],scattering:.022,color:0x237f87},
@@ -208,7 +217,7 @@ let volumetricStrength=.85,shaftQuality='medium',lightShafts=null,shaftMeshes=[]
 let opticalFallbackTriggered=false;
 const safeStartup=new URLSearchParams(location.search).has('safe');
 let gpuFFT=null,waveEngine=safeStartup?'analytic':'hybrid',fftEnergy=3,fftMix=0,fftStarting=false,fftFault='',fftAttempted=false,fftRecoveryCount=0,fftRuntimeInfo='';
-if(safeStartup){reflectionMode='basic';opticalMode='legacy';volumetricStrength=0;hullPhysics='classic';atmospherePreset='off';}
+if(safeStartup){reflectionMode='basic';opticalMode='legacy';volumetricStrength=0;hullPhysics='classic';atmospherePreset='off';undersideMode='classic';}
 let cameraMode='chase',orbitYaw=.12,orbitPitch=.31,orbitDistance=15;
 let cameraIntroStart=performance.now(),pointerOrigin=null,pinchDistance=null;
 const cameraTarget={x:-3.2,y:1,z:-13},activePointers=new Map();
@@ -498,8 +507,11 @@ function updateUnderwaterScattering(){
  if(!underwaterBackgroundColor)underwaterBackgroundColor=new THREE.Color();
  const surface=oceanHeight(camera.position.x,camera.position.z,clockTime);
  const depth=Math.max(0,surface-camera.position.y);
- const target=Math.max(0,Math.min(1,(surface+.18-camera.position.y)/.9));
- underwaterBlend+=(target-underwaterBlend)*.18;
+ const width=Math.max(.2,waterlineSoftness);
+ const normalized=Math.max(0,Math.min(1,((surface-camera.position.y)/width+.65)/1.30));
+ const target=normalized*normalized*(3-2*normalized);
+ const smoothing=1-Math.exp(-Math.max(.001,Math.min(.05,clockDelta))*11);
+ underwaterBlend+=(target-underwaterBlend)*smoothing;
  underwaterActive=underwaterBlend>.005&&opticalMode!=='legacy'&&atmospherePreset!=='off'&&
    (underwaterScatter>.001||distanceExtinction>.001);
  if(underwaterActive){
@@ -525,6 +537,49 @@ function updateUnderwaterScattering(){
   scene.background=scene.userData.dayBackground;
  }
  updateCausticLighting(depth);
+ updateUndersideOptics();
+}
+// The existing double-sided MeshPhysicalMaterial supplies dielectric Fresnel
+// via IOR=1.333. These camera-dependent adjustments increase light-through
+// and glancing reflections under water without a WebGPU-incompatible GLSL pass.
+function updateUndersideOptics(){
+ if(!scene||!camera)return;
+ const enhanced=undersideMode==='enhanced'&&opticalMode!=='legacy';
+ const blend=enhanced?underwaterBlend:0;
+ if(Math.abs(blend-lastUndersideMix)<.012)return;
+ lastUndersideMix=blend;
+ if(skyDome){
+  // Previously fog:false made the sky appear as an opaque blue ceiling.
+  // Fade the dome to reveal the underwater fog/background continuously.
+  skyDome.material.opacity=Math.max(.005,1-.995*blend);
+  skyDome.material.transparent=true;
+  skyDome.material.depthWrite=false;
+  skyDome.material.needsUpdate=true;
+ }
+ for(const material of [waterNearMaterial,waterFarMaterial]){
+  if(!material)continue;
+  const near=material===waterNearMaterial;
+  const baseEnv=(reflectionMode==='enhanced'?1.12+surfaceGlitter*.56:.75+surfaceGlitter*.55)*reflectionStrength;
+  material.envMapIntensity=baseEnv*(1+blend*.42*underwaterFresnel);
+  const baseTransmission=near?.74:.28;
+  const baseStrength=Math.min(1.5,waterClarity)*Math.min(1.6,depthRefraction);
+  material.transmission=opticalMode==='legacy'?0:Math.max(.015,
+    Math.min(.98,baseTransmission*baseStrength*(1+blend*.28*underwaterRefraction)));
+  material.attenuationDistance=(opticalMode==='deep'?5.2:13)*waterClarity*
+    (1+blend*.22*underwaterTransmission);
+  const normal=(near?.31:.095)*surfaceDetail*(1+blend*.45*undersideDistortion);
+  const clearcoat=(near?.23:.075)*fineRipple*(1+blend*.22*undersideDistortion);
+  material.normalScale.set(normal,normal);
+  material.clearcoatNormalScale?.set(clearcoat,clearcoat);
+  material.roughness=(near?.17:.22)*(1-blend*.23);
+  material.ior=1.333;
+ }
+ if(underwaterSunlight&&underwaterAmbient){
+  const depth=Math.max(0,-camera.position.y);
+  const transmitted=Math.exp(-depth*.09/Math.max(.4,waterClarity));
+  underwaterSunlight.intensity=blend*.52*underwaterTransmission*transmitted;
+  underwaterAmbient.intensity=blend*.16*underwaterTransmission*transmitted;
+ }
 }
 function smoothOceanRadii(){
  // Increase sampling where spatial wave curvature changes fastest.
@@ -568,11 +623,13 @@ function syncWaterDetail(){
   mat.roughness=isNear?.17:.22;
   mat.needsUpdate=true;
  }
+ lastUndersideMix=-1;
 }
 function chooseOptics(mode){
  opticalMode=mode;
  $('opticalMode').value=mode;
  syncWaterDetail();
+ lastUndersideMix=-1;
  $('opticsFallback').textContent=mode==='legacy'?'Safe mode active':'Safe water mode';
 }
 function seabedDepth(x,z){
@@ -1398,6 +1455,22 @@ $('atmospherePreset').onchange=()=>{
  atmospherePreset=$('atmospherePreset').value;
  updateCausticLighting();
 };
+$('undersideMode').onchange=()=>{
+ undersideMode=$('undersideMode').value;lastUndersideMix=-1;
+};
+for(const [id,out,assign] of [
+ ['underwaterRefraction','underwaterRefractionOut',v=>underwaterRefraction=v],
+ ['underwaterFresnel','underwaterFresnelOut',v=>underwaterFresnel=v],
+ ['underwaterTransmission','underwaterTransmissionOut',v=>underwaterTransmission=v],
+ ['waterlineSoftness','waterlineSoftnessOut',v=>waterlineSoftness=v],
+ ['undersideDistortion','undersideDistortionOut',v=>undersideDistortion=v]
+]){
+ $(id).oninput=()=>{
+  const value=Number($(id).value);assign(value);
+  lastUndersideMix=-1;
+  $(out).textContent=value.toFixed(2)+(id==='waterlineSoftness'?' m':'');
+ };
+}
 $('underwaterScatter').oninput=()=>{
  underwaterScatter=Number($('underwaterScatter').value);
  $('underwaterScatterOut').textContent=underwaterScatter.toFixed(2);
@@ -1482,6 +1555,10 @@ async function init3D(forceWebGL=false){
  camera.position.set(0,4.0,11);camera.lookAt(-2.3,.35,-13);
  const ambient=new THREE.HemisphereLight(0xc7eeff,0x0b3144,1.05);scene.add(ambient);
  const sun=new THREE.DirectionalLight(0xffeddb,3.5);sun.position.set(16,35,8);scene.add(sun);
+ underwaterSunlight=new THREE.DirectionalLight(0xbaf9ea,0);
+ underwaterSunlight.position.set(16,35,8);scene.add(underwaterSunlight);
+ underwaterAmbient=new THREE.HemisphereLight(0xb3ecf5,0x1b5b63,0);
+ scene.add(underwaterAmbient);
  const floor=createSeabed();
  makeBoat();makeSurface();createFoamField();createVolumetricShafts();resetCamera();
  if(safeStartup){underwaterSceneMode='sand';underwaterObjects.visible=false;$('underwaterScene').value='sand';}
@@ -1497,6 +1574,7 @@ async function init3D(forceWebGL=false){
   $('waveEngine').value='analytic';
   $('hullPhysics').value='classic';
   $('atmospherePreset').value='off';
+  $('undersideMode').value='classic';
  }
  $('buoyancyState').textContent='Boat: 4-point floating + sailing';
  renderer.domElement.id='threeCanvas';renderer.domElement.style.cssText='position:fixed;inset:0;width:100%;height:100%;z-index:1';
@@ -1506,6 +1584,7 @@ async function init3D(forceWebGL=false){
  const render=()=>{
   const nowFrame=performance.now(),dt=Math.min(.04,Math.max(0,(nowFrame-previousFrame)/1000));
   previousFrame=nowFrame;
+  clockDelta=dt;
   if(!paused){
    time+=dt;clockTime=time;
    const targetFFT=waveEngine!=='analytic'&&gpuFFT?.ready&&!fftFault&&Number.isFinite(gpuFFT.rms)?1:0;

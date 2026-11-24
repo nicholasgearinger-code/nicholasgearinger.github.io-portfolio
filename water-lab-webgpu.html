@@ -4,11 +4,11 @@
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
-#dashboard{position:absolute;top:max(12px,env(safe-area-inset-top));left:12px;right:12px;display:grid;gap:8px;pointer-events:none}
+#dashboard{z-index:2;position:absolute;top:max(12px,env(safe-area-inset-top));left:12px;right:12px;display:grid;gap:8px;pointer-events:none}
 .panel{background:#0a2535eb;border:1px solid #40899a;border-radius:15px;padding:12px;box-shadow:0 8px 28px #0015;backdrop-filter:blur(10px)}
 h1{font-size:16px;margin:0 0 5px}p{font-size:12px;margin:4px 0;color:#b4d8df;line-height:1.5}
 #metrics{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;font-variant-numeric:tabular-nums}
-#controls{position:absolute;bottom:max(16px,env(safe-area-inset-bottom));left:12px;right:12px;pointer-events:auto}
+#controls{z-index:2;position:absolute;bottom:max(16px,env(safe-area-inset-bottom));left:12px;right:12px;pointer-events:auto}
 button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;border:1px solid #55b6c5;font-weight:600;font-size:13px;text-decoration:none;cursor:pointer}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}label{font-size:12px;display:flex;gap:7px;align-items:center}
 #log{font:11px/1.4 ui-monospace,monospace;word-break:break-word;color:#a8d2df}
@@ -80,7 +80,7 @@ async function start(){
  $('backend').textContent='Backend: '+name;
  message(support+'. Renderer: '+name+'. The main Water Lab is unaffected.');
  document.body.prepend(renderer.domElement);
- renderer.domElement.style.zIndex='-1';
+ renderer.domElement.style.zIndex='0';
  scene=new THREE.Scene();
  scene.background=new THREE.Color(0x78b7d9);
  scene.fog=new THREE.FogExp2(0x579dbd,.008);

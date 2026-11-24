@@ -104,6 +104,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Fine ripple strength <input id="fineRipple" aria-label="Fine ripple strength" type="range" min="0" max=".90" step=".05" value=".45"></label><output id="fineRippleOut">0.45</output></div>
 <div class="row"><label>Rendering quality <select id="renderQuality"><option value="balanced" selected>Balanced · mobile</option><option value="ultra">Ultra · highest detail</option><option value="performance">Performance · prioritize FPS</option></select></label></div>
 <div class="row"><label>Render resolution <input id="renderScale" aria-label="Render resolution multiplier" type="range" min=".75" max="2.25" step=".25" value="1.25"></label><output id="renderScaleOut">1.25×</output></div>
+<div class="row"><label>Underwater wave lensing <input id="underwaterLensing" aria-label="Underwater transmitted wave light" type="range" min="0" max="2" step=".1" value="1"></label><output id="underwaterLensingOut">1.00</output></div>
 <div class="row"><label>Adaptive performance <select id="adaptivePerformance"><option value="on" selected>On · target steady 50 FPS</option><option value="off">Off · fixed resolution</option></select></label><output id="adaptivePerformanceOut">1.25×</output></div>
 <div class="row"><label>Water optics <select id="opticalMode"><option value="lagoon" selected>Clear lagoon · physical transmission</option><option value="deep">Bluewater · deeper absorption</option><option value="legacy">Legacy · fastest / safest</option></select></label></div>
 <div class="row"><label>Water clarity <input id="waterClarity" aria-label="Water clarity" type="range" min=".2" max="1.8" step=".05" value="1.1"></label><output id="waterClarityOut">1.10</output><button id="opticsFallback">Safe water mode</button></div>
@@ -234,6 +235,7 @@ let visibilityMode='unified',visibilityRange=34,seabedFade=1,underwaterSceneMate
 let undersideMode='enhanced',underwaterRefraction=1.10,underwaterFresnel=1,
  underwaterTransmission=1.15,waterlineSoftness=.65,undersideDistortion=1;
 let lastUndersideMix=-1,underwaterSunlight=null,underwaterAmbient=null,clockDelta=1/60;
+let underwaterLensing=1,lastWaveLensUpdate=-100,waveLensFactor=1;
 let floorCausticMaterial=null,underwaterObjectMaterials=[],underwaterBackgroundColor=null;
 const waterProfiles={
  lagoon:{absorption:[.16,.064,.031],scattering:.022,color:0x237f87},
@@ -746,15 +748,16 @@ function updateUndersideOptics(){
  if(!scene||!camera)return;
  const enhanced=undersideMode==='enhanced'&&opticalMode!=='legacy';
  const blend=enhanced?underwaterBlend:0;
- if(Math.abs(blend-lastUndersideMix)<.012)return;
- lastUndersideMix=blend;
- if(skyDome){
+ // Keep depth-dependent light current even when immersion is stable.
+ const updateMaterials=Math.abs(blend-lastUndersideMix)>=.012;
+ if(updateMaterials)lastUndersideMix=blend;
+ if(updateMaterials&&skyDome){
   // Previously fog:false made the sky appear as an opaque blue ceiling.
   // Fade the dome to reveal the underwater fog/background continuously.
   skyDome.material.opacity=Math.max(.005,1-.995*blend);
   skyDome.material.depthWrite=false;
  }
- for(const material of [waterNearMaterial,waterFarMaterial]){
+ if(updateMaterials)for(const material of [waterNearMaterial,waterFarMaterial]){
   if(!material)continue;
   const near=material===waterNearMaterial;
   const baseEnv=(reflectionMode==='enhanced'?1.12+surfaceGlitter*.56:.75+surfaceGlitter*.55)*reflectionStrength;
@@ -775,8 +778,17 @@ function updateUndersideOptics(){
  if(underwaterSunlight&&underwaterAmbient){
   const depth=Math.max(0,-camera.position.y);
   const transmitted=Math.exp(-depth*.09/Math.max(.4,waterClarity));
-  underwaterSunlight.intensity=blend*.52*underwaterTransmission*transmitted;
-  underwaterAmbient.intensity=blend*.16*underwaterTransmission*transmitted;
+  if(clockTime-lastWaveLensUpdate>.11){
+   lastWaveLensUpdate=clockTime;
+   const w=waveField(camera.position.x,camera.position.z,clockTime,{});
+   const tilt=Math.hypot(w.slopeX,w.slopeZ);
+   const target=Math.max(.76,Math.min(1.22,1+.16*w.height-.22*tilt));
+   waveLensFactor+=(target-waveLensFactor)*.22;
+  }
+  const lens=1+(waveLensFactor-1)*underwaterLensing;
+  underwaterSunlight.intensity=blend*.52*underwaterTransmission*transmitted*lens;
+  underwaterAmbient.intensity=blend*.16*underwaterTransmission*transmitted*
+    (.85+.15*lens);
  }
 }
 function smoothOceanRadii(){
@@ -1973,6 +1985,10 @@ $('renderScale').oninput=()=>{
   $('adaptivePerformanceOut').textContent=adaptivePixelRatio.toFixed(2)+'×';
   renderer.setSize(innerWidth,innerHeight);
  }
+};
+$('underwaterLensing').oninput=()=>{
+ underwaterLensing=Number($('underwaterLensing').value);
+ $('underwaterLensingOut').textContent=underwaterLensing.toFixed(2);
 };
 $('adaptivePerformance').onchange=()=>{
  adaptivePerformance=$('adaptivePerformance').value==='on';

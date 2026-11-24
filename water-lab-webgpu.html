@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 16.2 visible waves</title>
+<title>Rift Water Lab · WebGPU 16.4 sailing physics</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -12,21 +12,25 @@ h1{font-size:16px;margin:0 0 5px}p{font-size:12px;margin:4px 0;color:#b4d8df;lin
 button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;border:1px solid #55b6c5;font-weight:600;font-size:13px;text-decoration:none;cursor:pointer}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}label{font-size:12px;display:flex;gap:7px;align-items:center}
 #log{font:11px/1.4 ui-monospace,monospace;word-break:break-word;color:#a8d2df}
+#sailControls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+#sailControls button{min-width:56px;min-height:48px;touch-action:none;user-select:none;-webkit-user-select:none}
+#controls{max-height:40vh;overflow:auto}input{accent-color:#53d1df}
 </style>
 <script type="importmap">
 {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.webgpu.js","three/webgpu":"https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.webgpu.js","three/tsl":"https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.tsl.js"}}
 </script></head>
 <body>
 <div id="dashboard">
-<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">16.3 · buoyancy</span></h1>
+<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">16.4 · sailing physics</span></h1>
 <p>This is a <strong>separate renderer test</strong>, not a port of the existing FFT ocean.</p>
-<div id="metrics"><span id="backend">Backend: detecting</span><span id="fps">FPS: —</span><span id="resolution">Resolution: —</span><span id="buoyancyState">Buoyancy: initializing</span></div>
+<div id="metrics"><span id="backend">Backend: detecting</span><span id="fps">FPS: —</span><span id="resolution">Resolution: —</span><span id="buoyancyState">Buoyancy: initializing</span><span id="boatSpeed">Speed: 0.0</span><span id="heading">Heading: 0°</span></div>
 <p id="log">Checking GPU access…</p></div></div>
 <div id="controls" class="panel">
 <div class="row"><a href="water-lab.html?v=15-2">Return to existing Water Lab</a><button id="pause">Pause</button><button id="detail">Detail: medium</button></div>
 <div class="row"><label>Wave height <input id="waveHeight" aria-label="Wave height" type="range" min=".25" max="2.5" step=".05" value="1.5"></label><output id="waveHeightOut">1.50</output></div>
 <div class="row"><label>Buoyancy <input type="range" id="buoyancyStrength" min=".5" max="1.8" step=".05" value="1"></label><output id="buoyancyStrengthOut">1.00</output><button id="resetBoat">Reset boat</button></div>
-<p>Four-point boat buoyancy: gravity, spring pressure, vertical drag and pitch/roll torque follow the exact visible waves. Separate from the original FFT ocean.</p>
+<div class="row" id="sailControls"><button id="port" aria-label="Steer left">◀ Port</button><button id="starboard" aria-label="Steer right">Starboard ▶</button><label>Sail power <input id="sailPower" type="range" min="0" max="1" step=".05" value=".65"></label><output id="sailPowerOut">65%</output></div>
+<p>Sail around with the touch rudder or keyboard ← → / A D. Sail power controls forward thrust; the boat leaves a water-height-matched wake. Buoyancy and waves share one height function. Still a lightweight experiment, not the FFT ocean.</p>
 </div>
 <script>
 (function(){
@@ -64,6 +68,8 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 const $=id=>document.getElementById(id);
 let renderer,scene,camera,water,geometry,base,THREE,boat;
 let buoyancyStrength=1,vy=0,pitchV=0,rollV=0;
+let boatHeading=0,boatSpeed=0,rudder=0,sailPower=.65,steeringLeft=false,steeringRight=false;
+let wakeMesh=null,wakePositions=null,wakeEvents=[],wakeClock=0,followEnabled=true;
 let paused=false,detailIndex=1,samples=0,last=performance.now(),waveHeight=1.5;
 const levels=[48,80,120];let isWebGPU=false,clockTime=0,loopActive=false;
 function status(m){window.__waterFallback?.notice(m);}
@@ -83,7 +89,7 @@ function oceanHeight(x,z,t){return waveHeight*(.72*Math.sin(x*.092+z*.061-t*.95)
 function animateWaves(t){
  const position=geometry.attributes.position,arr=position.array;
  for(let i=0;i<arr.length;i+=3){
-  const x=base[i],z=base[i+2];
+  const x=base[i]+water.position.x,z=base[i+2]+water.position.z;
   arr[i+1]=oceanHeight(x,z,t);
  }
  position.needsUpdate=true;geometry.computeVertexNormals();
@@ -93,6 +99,7 @@ function resetBoat(){
  if(!boat)return;
  boat.position.set(-3.2,.6,-13);
  boat.rotation.set(0,0,0);vy=0;pitchV=0;rollV=0;
+ boatHeading=0;boatSpeed=0;rudder=0;wakeEvents=[];wakeClock=0;
 }
 function makeBoat(){
  boat=new THREE.Group();boat.rotation.order='YXZ';
@@ -124,7 +131,18 @@ function stepBoat(dt,t){
  if(!boat)return;
  const steps=Math.max(1,Math.min(4,Math.ceil(dt/(1/90)))),h=dt/steps;
  const mass=320, inertiaX=mass*2.65,inertiaZ=mass*.95;
+ const desiredRudder=(steeringRight?1:0)-(steeringLeft?1:0);
+ rudder+= (desiredRudder-rudder)*Math.min(1,dt*4.2);
  for(let k=0;k<steps;k++){
+  // Simplified apparent-wind sailing: thrust, quadratic hull drag and rudder
+  // effectiveness. The heading drives horizontal motion and wakes.
+  const thrust=sailPower*2.5*(.35+.65*Math.abs(Math.cos(boatHeading+.7)));
+  const drag=.16*boatSpeed+.082*boatSpeed*Math.abs(boatSpeed);
+  boatSpeed=Math.max(0,Math.min(8,boatSpeed+(thrust-drag)*h));
+  boatHeading+=rudder*(.12+.10*boatSpeed)*h;
+  boat.position.x-=Math.sin(boatHeading)*boatSpeed*h;
+  boat.position.z-=Math.cos(boatHeading)*boatSpeed*h;
+  boat.rotation.y=boatHeading;
   let fy=-mass*9.81-vy*mass*.4,tx=-pitchV*inertiaX*2.2,tz=-rollV*inertiaZ*2.5;
   const q=boat.quaternion;
   for(const point of flotation){
@@ -143,6 +161,86 @@ function stepBoat(dt,t){
   boat.rotation.x=Math.max(-.55,Math.min(.55,boat.rotation.x+pitchV*h));
   boat.rotation.z=Math.max(-.45,Math.min(.45,boat.rotation.z+rollV*h));
  }
+}
+
+$('sailPower').oninput=()=>{sailPower=Number($('sailPower').value);$('sailPowerOut').textContent=Math.round(sailPower*100)+'%';};
+function bindHelm(id,dir){
+ const node=$(id);
+ const hold=()=>{if(dir<0)steeringLeft=true;else steeringRight=true;};
+ const release=()=>{if(dir<0)steeringLeft=false;else steeringRight=false;};
+ node.addEventListener('pointerdown',e=>{e.preventDefault();node.setPointerCapture(e.pointerId);hold();});
+ node.addEventListener('pointerup',release);
+ node.addEventListener('pointercancel',release);
+ node.addEventListener('lostpointercapture',release);
+}
+bindHelm('port',-1);bindHelm('starboard',1);
+const pressed=new Set();
+window.addEventListener('keydown',e=>{
+ if(['ArrowLeft','ArrowRight','KeyA','KeyD','KeyW','KeyS'].includes(e.code)){
+  if(e.target?.tagName==='INPUT')return;
+  e.preventDefault();pressed.add(e.code);
+  steeringLeft=pressed.has('ArrowLeft')||pressed.has('KeyA');
+  steeringRight=pressed.has('ArrowRight')||pressed.has('KeyD');
+  if(e.code==='KeyW'||e.code==='KeyS'){
+   sailPower=Math.max(0,Math.min(1,sailPower+(e.code==='KeyW'?.05:-.05)));
+   $('sailPower').value=sailPower;$('sailPowerOut').textContent=Math.round(sailPower*100)+'%';
+  }
+ }
+});
+window.addEventListener('keyup',e=>{
+ pressed.delete(e.code);
+ steeringLeft=pressed.has('ArrowLeft')||pressed.has('KeyA');
+ steeringRight=pressed.has('ArrowRight')||pressed.has('KeyD');
+});
+window.addEventListener('blur',()=>{pressed.clear();steeringLeft=false;steeringRight=false;});
+function makeWake(){
+ // Low-cost procedural wake samples; no particles/foam simulation.
+ const n=40;wakePositions=new Float32Array(n*2*3);
+ const geo=new THREE.BufferGeometry();
+ geo.setAttribute('position',new THREE.BufferAttribute(wakePositions,3));
+ const mat=new THREE.LineBasicMaterial({color:0xb0e8e3,transparent:true,opacity:.50,depthWrite:false});
+ wakeMesh=new THREE.LineSegments(geo,mat);wakeMesh.frustumCulled=false;wakeMesh.renderOrder=2;
+ scene.add(wakeMesh);
+}
+function updateWake(dt,t){
+ if(!wakeMesh||!boat)return;
+ wakeClock+=dt;
+ if(boatSpeed>.35&&wakeClock>.12){
+  wakeClock=0;
+  wakeEvents.unshift({x:boat.position.x,z:boat.position.z,heading:boatHeading,age:0,speed:boatSpeed});
+ }
+ for(const e of wakeEvents)e.age+=dt;
+ wakeEvents=wakeEvents.filter(e=>e.age<7).slice(0,20);
+ let cursor=0;
+ for(const e of wakeEvents){
+  const dirX=-Math.sin(e.heading),dirZ=-Math.cos(e.heading);
+  const sideX=-dirZ,sideZ=dirX;
+  const spread=.3+e.age*(.25+.065*e.speed);
+  const trail=.7+e.age*(.5+.18*e.speed);
+  for(const side of [-1,1]){
+   const cx=e.x-dirX*trail+sideX*spread*side;
+   const cz=e.z-dirZ*trail+sideZ*spread*side;
+   const innerX=cx-sideX*.13*side,innerZ=cz-sideZ*.13*side;
+   const outerX=cx+sideX*.42*side,outerZ=cz+sideZ*.42*side;
+   for(const [x,z] of [[innerX,innerZ],[outerX,outerZ]]){
+    wakePositions[cursor++]=x;
+    wakePositions[cursor++]=oceanHeight(x,z,t)+.055;
+    wakePositions[cursor++]=z;
+   }
+  }
+ }
+ wakeMesh.geometry.setDrawRange(0,cursor/3);
+ wakeMesh.geometry.attributes.position.needsUpdate=true;
+}
+function updateCamera(dt){
+ if(!boat)return;
+ const behind=10,side=2;
+ const targetX=boat.position.x+Math.sin(boatHeading)*behind+Math.cos(boatHeading)*side;
+ const targetZ=boat.position.z+Math.cos(boatHeading)*behind-Math.sin(boatHeading)*side;
+ const follow=1-Math.exp(-dt*3.3);
+ camera.position.lerp(new THREE.Vector3(targetX,boat.position.y+6.0,targetZ),follow);
+ const look=new THREE.Vector3(boat.position.x,boat.position.y+.7,boat.position.z-1.5);
+ camera.lookAt(look);
 }
 $('pause').onclick=()=>{paused=!paused;$('pause').textContent=paused?'Resume':'Pause';};
 $('buoyancyStrength').oninput=()=>{buoyancyStrength=Number($('buoyancyStrength').value);$('buoyancyStrengthOut').textContent=buoyancyStrength.toFixed(2);};
@@ -171,16 +269,24 @@ async function init3D(forceWebGL=false){
  const sun=new THREE.DirectionalLight(0xffeddb,3.5);sun.position.set(16,35,8);scene.add(sun);
  const floor=new THREE.Mesh(new THREE.PlaneGeometry(110,110),new THREE.MeshStandardMaterial({color:0xb9c7ae,roughness:1}));
  floor.rotation.x=-Math.PI/2;floor.position.y=-5;scene.add(floor);
- makeBoat();makeSurface();
- $('buoyancyState').textContent='Boat: four floating points';
+ makeBoat();makeSurface();makeWake();
+ $('buoyancyState').textContent='Boat: 4-point floating + sailing';
  renderer.domElement.id='threeCanvas';renderer.domElement.style.cssText='position:fixed;inset:0;width:100%;height:100%;z-index:1';
  document.body.prepend(renderer.domElement);
  let time=0,previousFrame=performance.now();
  const render=()=>{
   const nowFrame=performance.now(),dt=Math.min(.04,Math.max(0,(nowFrame-previousFrame)/1000));
   previousFrame=nowFrame;
-  if(!paused){time+=dt;animateWaves(time);stepBoat(dt,time);}
-  camera.position.x=Math.sin(time*.12)*.6;
+  if(!paused){
+   time+=dt;stepBoat(dt,time);
+   // Recenter finite test mesh near the sailing boat.
+   water.position.x=Math.round(boat.position.x/8)*8;
+   water.position.z=Math.round(boat.position.z/8)*8;
+   animateWaves(time);updateWake(dt,time);
+  }
+  updateCamera(dt);
+  $('boatSpeed').textContent='Speed: '+boatSpeed.toFixed(1)+' m/s';
+  $('heading').textContent='Heading: '+((boatHeading*180/Math.PI%360+360)%360).toFixed(0)+'°';
   renderer.render(scene,camera);
   samples++;
   const now=performance.now();

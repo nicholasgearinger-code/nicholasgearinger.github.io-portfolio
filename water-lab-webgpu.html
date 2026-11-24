@@ -212,7 +212,7 @@ let thicknessTexture=null,thicknessPixels=null,lastThicknessX=Infinity,lastThick
 let underwaterActive=false,underwaterFog=null,dayFog=null,waterDepthAtBoat=4,underwaterBlend=0,underwaterSceneMode='reef',underwaterObjects=null,causticStrength=.8,causticMap=null,causticPixels=null,lastCausticUpdate=-100;
 let causticMode='wave',causticFocus=1.2,causticContrast=1.45,
  causticRate=12,causticDetail=96,causticValidated=true,causticLastError='';
-let causticAccum=null,causticFiltered=null,causticCachedProfile=null;
+let causticAccum=null,causticFiltered=null,causticBuild=null;
 let causticBaseUV=null,causticProjectionWidth=64,causticProjectionX=NaN,
  causticProjectionZ=NaN,causticTextureMode='',causticDepthFactor=1;
 let depthAbsorption=1,distanceExtinction=1,atmospherePreset='lagoon';
@@ -837,7 +837,13 @@ function updateWaveCausticTexture(t){
   causticFiltered=new Float32Array(length);
  }
  const accumulation=causticAccum,filtered=causticFiltered;
- accumulation.fill(0);
+ if(!Number.isFinite(causticProjectionX)||!Number.isFinite(causticProjectionZ))
+  return false;
+ if(!causticBuild||causticBuild.source!==source){
+  accumulation.fill(0);
+  causticBuild={row:0,time:t,source};
+ }
+ const sampleTime=causticBuild.time;
  const cx=causticProjectionX,cz=causticProjectionZ;
  const inv=1/source,scale=n/width;
  const sunX=16/39.3,sunZ=8/39.3;
@@ -847,7 +853,11 @@ function updateWaveCausticTexture(t){
  // Use a bounded direction deflection; when the waves steepen there
  // is a focusing/defocusing network but no division singularity.
  const bend=(1-1/1.333)*causticFocus;
- for(let row=0;row<source;row++)for(let column=0;column<source;column++){
+ // Distribute ray tracing over several game frames to avoid a single
+ // 20–40ms main-thread stall on mobile. Snapshot the animation time for
+ // each completed texture so lines remain temporally coherent.
+ const endRow=Math.min(source,causticBuild.row+Math.max(12,Math.ceil(source/5)));
+ for(let row=causticBuild.row;row<endRow;row++)for(let column=0;column<source;column++){
   const wx=cx+((column+.5)*inv-.5)*width;
   const wz=cz+(.5-(row+.5)*inv)*width;
   const depth=Math.max(.6,seabedDepth(wx,wz));
@@ -855,7 +865,7 @@ function updateWaveCausticTexture(t){
   // The broadest swell changes the illumination direction gently,
   // while intermediate waves and short ripples create fine folds.
   for(const wave of waveList){
-   const phase=wave.kx*wx+wave.kz*wz-wave.omega*t+wave.phase;
+   const phase=wave.kx*wx+wave.kz*wz-wave.omega*sampleTime+wave.phase;
    const amp=wave.amplitude*waveHeight*
      (wave.amplitude>.04?analyticWeight:1);
    const v=amp*Math.cos(phase);
@@ -884,6 +894,8 @@ function updateWaveCausticTexture(t){
   accumulation[k+n]+=energy*(1-fx)*fy;
   accumulation[k+n+1]+=energy*fx*fy;
  }
+ causticBuild.row=endRow;
+ if(endRow<source)return false;
  // Small spatial filter repairs the sample grid and creates luminous
  // ribbons instead of isolated points. One horizontal/vertical pass.
  for(let y=1;y<n-1;y++)for(let x=1;x<n-1;x++){
@@ -905,19 +917,24 @@ function updateWaveCausticTexture(t){
   causticPixels[p]=light;causticPixels[p+1]=Math.round(light*.96);
   causticPixels[p+2]=Math.round(light*.81);causticPixels[p+3]=255;
  }
+ causticBuild=null;
+ return true;
 }
 function updateCausticTexture(t,force=false){
- if(!causticMap||(!force&&t-lastCausticUpdate<(causticMode==='wave'?1/causticRate:.16)))return;
- lastCausticUpdate=t;
+ if(!causticMap)return;
+ if(force)causticBuild=null;
+ if(!force&&!causticBuild&&t-lastCausticUpdate<
+    (causticMode==='wave'?1/causticRate:.16))return;
  try{
   syncCausticProjection(force);
   if(causticMode==='off')causticPixels.fill(0);
   else if(causticMode==='classic')updateClassicCausticTexture(t);
-  else updateWaveCausticTexture(t);
+  else if(!updateWaveCausticTexture(t))return;
+  lastCausticUpdate=t;
   causticMap.needsUpdate=true;
   causticValidated=true;
  }catch(error){
-  causticValidated=false;causticMode='classic';
+  causticValidated=false;causticMode='classic';causticBuild=null;
   $('causticMode').value='classic';
   causticLastError=String(error?.message||error);
   console.warn('Wave caustics reverted to classic:',error);
@@ -1724,6 +1741,7 @@ $('underwaterScene').onchange=()=>{
 };
 $('causticMode').onchange=()=>{
  causticMode=$('causticMode').value;
+ causticBuild=null;
  syncCausticProjection(true);
  for(const material of underwaterObjectMaterials){
   material.emissiveMap=causticMode==='wave'?null:causticMap;
@@ -1739,10 +1757,11 @@ $('causticFocus').oninput=()=>{
 };
 $('causticRate').onchange=()=>{
  causticRate=Number($('causticRate').value);
- lastCausticUpdate=-100;
+ causticBuild=null;lastCausticUpdate=-100;
 };
 $('causticDetail').onchange=()=>{
  causticDetail=Number($('causticDetail').value);
+ causticBuild=null;
  updateCausticTexture(clockTime,true);
 };
 $('causticContrast').oninput=()=>{

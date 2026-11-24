@@ -133,6 +133,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Volumetric sunlight <input id="volumetricStrength" aria-label="Volumetric sunlight strength" type="range" min="0" max="2" step=".05" value=".85"></label><output id="volumetricStrengthOut">0.85</output></div>
 <div class="row"><label>Light diffusion <input id="scatteringDiffusion" aria-label="Light diffusion" type="range" min=".4" max="2" step=".05" value="1.10"></label><output id="scatteringDiffusionOut">1.10</output></div>
 <div class="row"><label>Volume motion <input id="scatteringMotion" aria-label="Underwater volume motion" type="range" min="0" max="2" step=".05" value="1"></label><output id="scatteringMotionOut">1.00</output></div>
+<div class="row"><label>Suspended particles <input id="particleDensity" aria-label="Suspended underwater particle density" type="range" min="0" max="2" step=".1" value=".7"></label><output id="particleDensityOut">0.70</output></div>
 <div class="row"><label>Light shaft detail <select id="shaftQuality"><option value="low">Low · 6 shafts</option><option value="medium" selected>Balanced · 12 shafts</option><option value="high">High · 20 shafts</option></select></label></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -234,6 +235,7 @@ const waterProfiles={
 let volumetricStrength=.85,shaftQuality='medium',lightShafts=null,shaftMeshes=[],volumetricFault=false;
 let scatteringMode='soft',scatteringDiffusion=1.1,scatteringMotion=1,
  softShaftTexture=null,softShaftGeometry=null,softShafts=null,softShaftMeshes=[],lastScatteringUpdate=-100;
+let particleDensity=.7,underwaterParticles=null;
 
 let opticalFallbackTriggered=false;
 const safeStartup=new URLSearchParams(location.search).has('safe');
@@ -569,6 +571,44 @@ function createSoftVolumetricShafts(){
  softShafts.visible=false;
  scene.add(softShafts);
 }
+function createUnderwaterParticles(){
+ const count=160,coords=new Float32Array(count*3);
+ // Deterministic, non-grid stratification. All particles share one
+ // Points draw call and are camera-local for an endless sparse field.
+ for(let i=0;i<count;i++){
+  const phi=i*2.399963229728653;
+  const radius=2.5+Math.sqrt((i+.5)/count)*15.5;
+  const j=i*3;
+  coords[j]=Math.cos(phi)*radius;
+  coords[j+1]=(Math.sin(i*8.97)*.5+.5)*13-7;
+  coords[j+2]=Math.sin(phi)*radius;
+ }
+ const geometry=new THREE.BufferGeometry();
+ geometry.setAttribute('position',new THREE.BufferAttribute(coords,3));
+ const material=new THREE.PointsMaterial({
+  color:0xc8f8e9,size:.045,sizeAttenuation:true,transparent:true,
+  opacity:.18,depthWrite:false,depthTest:true,fog:true
+ });
+ underwaterParticles=new THREE.Points(geometry,material);
+ underwaterParticles.frustumCulled=false;
+ underwaterParticles.visible=false;
+ scene.add(underwaterParticles);
+}
+function updateUnderwaterParticles(t){
+ if(!underwaterParticles||!camera)return;
+ const show=scatteringMode==='soft'&&underwaterActive&&
+  underwaterBlend>.15&&particleDensity>.01&&volumetricStrength>.01;
+ underwaterParticles.visible=show;
+ if(!show)return;
+ const material=underwaterParticles.material;
+ const attenuation=Math.exp(-Math.max(0,-camera.position.y)*.07/
+   Math.max(.4,waterClarity));
+ material.opacity=Math.min(.32,.12*particleDensity*
+   underwaterBlend*attenuation);
+ underwaterParticles.position.set(camera.position.x+Math.sin(t*.035)*.5,
+   camera.position.y+Math.sin(t*.11)*.3,
+   camera.position.z+Math.cos(t*.03)*.5);
+}
 function updateSoftVolumetricShafts(t){
  if(!softShafts||!camera)return;
  const enabled=scatteringMode==='soft'&&volumetricStrength>.01&&
@@ -614,6 +654,7 @@ const sunDirection={x:16/39.3,z:8/39.3};
 function createVolumetricShafts(){
  createClassicVolumetricShafts();
  createSoftVolumetricShafts();
+ createUnderwaterParticles();
  if(lightShafts)lightShafts.visible=false;
 }
 function updateVolumetricShafts(t){
@@ -621,6 +662,7 @@ function updateVolumetricShafts(t){
  if(scatteringMode!=='soft'&&softShafts)softShafts.visible=false;
  if(scatteringMode==='classic')updateClassicVolumetricShafts(t);
  else if(scatteringMode==='soft')updateSoftVolumetricShafts(t);
+ updateUnderwaterParticles(t);
 }
 // Exponential fog models scattering/visibility across the scene. The
 // background color uses per-channel Beer-Lambert depth attenuation to
@@ -1862,6 +1904,10 @@ $('scatteringMotion').oninput=()=>{
  scatteringMotion=Number($('scatteringMotion').value);
  $('scatteringMotionOut').textContent=scatteringMotion.toFixed(2);
 };
+$('particleDensity').oninput=()=>{
+ particleDensity=Number($('particleDensity').value);
+ $('particleDensityOut').textContent=particleDensity.toFixed(2);
+};
 $('underwaterScene').onchange=()=>{
  underwaterSceneMode=$('underwaterScene').value;
  if(underwaterObjects)underwaterObjects.visible=underwaterSceneMode==='reef';
@@ -2092,6 +2138,7 @@ async function init3D(forceWebGL=false){
     volumetricFault=true;volumetricStrength=0;
     if(lightShafts)lightShafts.visible=false;
     if(softShafts)softShafts.visible=false;
+    if(underwaterParticles)underwaterParticles.visible=false;
     $('volumetricStrength').value='0';
     $('volumetricStrengthOut').textContent='Off';
     status('Volumetric lighting disabled after rendering error: '+String(error?.message||error));

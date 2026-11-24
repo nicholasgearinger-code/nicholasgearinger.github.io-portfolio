@@ -96,7 +96,7 @@ let buoyancyStrength=1,vy=0,pitchV=0,rollV=0;
 let boatHeading=0,boatSpeed=0,rudder=0,sailPower=.85,driveMode='stop',steeringLeft=false,steeringRight=false;
 let wakeSolver=null,wakeAmount=1.1,waveChop=.45;
 let lastRipple=0,propulsionMode='power',wakeTrail=[],trailElapsed=0;
-let foamMesh=null,foamPositions=null,foamColors=null,foamCapacity=150,foamStrength=1.5,foamDebug=false,foamPatchCount=0;
+let foamMesh=null,foamPositions=null,foamColors=null,foamPattern=null,foamCapacity=150,foamStrength=1.5,foamDebug=false,foamPatchCount=0;
 let cameraMode='chase',orbitYaw=.12,orbitPitch=.31,orbitDistance=15;
 let cameraIntroStart=performance.now(),pointerOrigin=null,pinchDistance=null;
 const cameraTarget={x:-3.2,y:1,z:-13},activePointers=new Map();
@@ -282,7 +282,7 @@ function createFoamTexture(){
  return tex;
 }
 function createFoamField(){
- if(foamMesh){scene.remove(foamMesh);foamMesh.geometry.dispose();foamMesh.material.map?.dispose();foamMesh.material.dispose();}
+ if(foamMesh){scene.remove(foamMesh);foamMesh.geometry.dispose();foamPattern?.dispose();foamMesh.material.dispose();}
  const geo=new THREE.BufferGeometry();
  foamPositions=new Float32Array(foamCapacity*4*3);
  foamColors=new Float32Array(foamCapacity*4*3);
@@ -296,8 +296,9 @@ function createFoamField(){
  geo.setAttribute('color',new THREE.BufferAttribute(foamColors,3).setUsage(THREE.DynamicDrawUsage));
  geo.setAttribute('uv',new THREE.BufferAttribute(uv,2));
  geo.setIndex(indices);geo.setDrawRange(0,0);
+ foamPattern=createFoamTexture();
  const mat=new THREE.MeshBasicMaterial({
-  map:createFoamTexture(),vertexColors:true,transparent:true,
+  map:foamDebug?null:foamPattern,vertexColors:true,transparent:true,
   // Water has a displaced surface. Depth-testing our separate foam layer
   // against it hid patches on WebGPU as waves intersected the foam quads.
   // Render the near-boat field after water, with alpha from the texture.
@@ -621,6 +622,10 @@ $('resetWake').onclick=()=>{wakeSolver?.clear();wakeTrail=[];if(foamMesh)foamMes
 $('foamStrength').oninput=()=>{foamStrength=Number($('foamStrength').value);$('foamStrengthOut').textContent=foamStrength.toFixed(1);};
 $('testFoam').onclick=()=>{
  foamDebug=!foamDebug;
+ // Diagnostic deliberately bypasses the alpha texture: if these solid
+ // white patches are visible, geometry and draw order work and the
+ // remaining issue is texture/foam pattern.
+ if(foamMesh){foamMesh.material.map=foamDebug?null:foamPattern;foamMesh.material.needsUpdate=true;}
  $('testFoam').textContent=foamDebug?'Test foam: On':'Test foam: Off';
 };
 $('propulsionMode').onchange=()=>{

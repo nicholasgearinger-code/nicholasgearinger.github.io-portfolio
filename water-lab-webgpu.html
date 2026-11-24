@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 24.7 screen-space volumetric light and shadows</title>
+<title>Rift Water Lab · WebGPU 24.7.1 natural object and wave shadows</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.7</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.7.1</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <details id="diagnostics">
@@ -133,6 +133,9 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Volumetric sunlight <input id="volumetricStrength" aria-label="Volumetric sunlight strength" type="range" min="0" max="2" step=".05" value=".85"></label><output id="volumetricStrengthOut">0.85</output></div>
 <div class="row"><label>Screen-space quality <select id="screenScatteringQuality"><option value="low">Fast · 12 steps</option><option value="balanced" selected>Balanced · 18 steps</option><option value="high">Detailed · 28 steps</option></select></label></div>
 <div class="row"><label>Shadow influence <input id="scatteringShadows" aria-label="Screen-space shadow influence" type="range" min="0" max="2" step=".1" value="1"></label><output id="scatteringShadowsOut">1.00</output></div>
+<div class="row"><label>Object shadow quality <select id="objectShadowQuality"><option value="fast">Fast · 512px</option><option value="balanced" selected>Balanced · 768px</option><option value="high">Detailed · 1024px</option></select></label></div>
+<div class="row"><label>Shadow softness <input id="shadowSoftness" aria-label="Shadow softness" type="range" min=".5" max="4" step=".25" value="2"></label><output id="shadowSoftnessOut">2.00</output></div>
+<div class="row"><label>Wave self-shading <input id="waveShadowStrength" aria-label="Wave self shading" type="range" min="0" max="2" step=".1" value="1"></label><output id="waveShadowStrengthOut">1.00</output></div>
 <div class="row"><label>Light diffusion <input id="scatteringDiffusion" aria-label="Light diffusion" type="range" min=".4" max="2" step=".05" value="1.10"></label><output id="scatteringDiffusionOut">1.10</output></div>
 <div class="row"><label>Volume motion <input id="scatteringMotion" aria-label="Underwater volume motion" type="range" min="0" max="2" step=".05" value="1"></label><output id="scatteringMotionOut">1.00</output></div>
 <div class="row"><label>Suspended particles <input id="particleDensity" aria-label="Suspended underwater particle density" type="range" min="0" max="2" step=".1" value=".7"></label><output id="particleDensityOut">0.70</output></div>
@@ -239,6 +242,7 @@ let scatteringMode='screen',scatteringDiffusion=1.1,scatteringMotion=1,
  softShaftTexture=null,softShaftGeometry=null,softShafts=null,softShaftMeshes=[],lastScatteringUpdate=-100;
 let particleDensity=.7,underwaterParticles=null;
 let screenScatteringQuality='balanced',scatteringShadows=1;
+let objectShadowQuality='balanced',shadowSoftness=2,waveShadowStrength=1;
 let screenLightPipeline=null,screenGodrays=null,screenBlendColor=null,
     mainSun=null,screenSpaceFault='',screenSpaceReady=false,screenSpaceStarting=false,
     screenSpaceFailed=false;
@@ -1564,8 +1568,15 @@ function animateWaves(t){
   // Light travels through less water at high, backlit crests. This is a
   // low-cost view/lighting approximation, not true volume path tracing.
   const sunX=.407,sunY=.891,sunZ=.204;
-  const slopeDotSun=(-wave.slopeX*sunX+sunY-wave.slopeZ*sunZ)/
-       Math.hypot(wave.slopeX,1,wave.slopeZ);
+  const normalX=wave.slopeX+fade*wakeSlopeX;
+  const normalZ=wave.slopeZ+fade*wakeSlopeZ;
+  const slopeDotSun=(-normalX*sunX+sunY-normalZ*sunZ)/
+       Math.hypot(normalX,1,normalZ);
+  // Dark-facing wave flanks lose direct sunlight; near-normal facets
+  // remain bright. This modulates existing vertex color instead of
+  // producing an opaque shadow map over the transparent ocean.
+  const flank=Math.max(0,Math.min(1,(.96-slopeDotSun)*3.0));
+  const waveShade=1-Math.min(.52,flank*.43*waveShadowStrength);
   const backlit=Math.max(0,Math.min(1,.45-slopeDotSun*.55));
   const crest=Math.max(0,Math.min(1,(wave.height+.22)/2.4));
   const thinness=Math.max(0,Math.min(1,1-shallow*.4));
@@ -1574,9 +1585,9 @@ function animateWaves(t){
   // Shallow water transmits more green/blue seabed light, while deep
   // water is more absorptive. Vertex color stays low-frequency; the
   // separate normal maps own the small optical ripples.
-  nearColorData[i]=Math.max(.025,Math.min(1,.045+shallow*.18+shine*.24+glimmer*.11+foam*.70+subsurface*.21));
-  nearColorData[i+1]=Math.max(.23,Math.min(1,.35+shallow*.19+shine*.31+glimmer*.14+foam*.58+subsurface*.57));
-  nearColorData[i+2]=Math.max(.30,Math.min(1,.46+shallow*.17+shine*.34+glimmer*.16+foam*.48+subsurface*.38));
+  nearColorData[i]=Math.max(.025,Math.min(1,(.045+shallow*.18+shine*.24+glimmer*.11+foam*.70+subsurface*.21)*waveShade));
+  nearColorData[i+1]=Math.max(.18,Math.min(1,(.35+shallow*.19+shine*.31+glimmer*.14+foam*.58+subsurface*.57)*waveShade));
+  nearColorData[i+2]=Math.max(.23,Math.min(1,(.46+shallow*.17+shine*.34+glimmer*.16+foam*.48+subsurface*.38)*waveShade));
   rippleSum+=Math.abs(disturbance);rippleMax=Math.max(rippleMax,Math.abs(disturbance));
  }
  lastRipple=rippleMax;
@@ -1914,6 +1925,19 @@ $('scatteringShadows').oninput=()=>{
  scatteringShadows=Number($('scatteringShadows').value);
  $('scatteringShadowsOut').textContent=scatteringShadows.toFixed(2);
 };
+$('objectShadowQuality').onchange=()=>{
+ objectShadowQuality=$('objectShadowQuality').value;
+ applyObjectShadowQuality();
+};
+$('shadowSoftness').oninput=()=>{
+ shadowSoftness=Number($('shadowSoftness').value);
+ $('shadowSoftnessOut').textContent=shadowSoftness.toFixed(2);
+ applyObjectShadowQuality();
+};
+$('waveShadowStrength').oninput=()=>{
+ waveShadowStrength=Number($('waveShadowStrength').value);
+ $('waveShadowStrengthOut').textContent=waveShadowStrength.toFixed(2);
+};
 $('scatteringDiffusion').oninput=()=>{
  scatteringDiffusion=Number($('scatteringDiffusion').value);
  $('scatteringDiffusionOut').textContent=scatteringDiffusion.toFixed(2);
@@ -2048,14 +2072,31 @@ function applyScreenScatteringQuality(){
    screenScatteringQuality==='low'?12:18;
  screenGodrays.raymarchSteps.value=steps;
 }
+// Sunlight is filtered through one stable, boat-following PCF shadow map.
+// Translucent waves do not cast an opaque mask across the entire seabed;
+// their self-shadowing is handled by the existing animated wave normals.
+function applyObjectShadowQuality(){
+ if(!mainSun||!renderer)return;
+ const resolution=objectShadowQuality==='high'?1024:
+   objectShadowQuality==='fast'?512:768;
+ if(mainSun.shadow.mapSize.x!==resolution){
+  mainSun.shadow.map?.dispose();
+  mainSun.shadow.map=null;
+  mainSun.shadow.mapSize.set(resolution,resolution);
+  mainSun.shadow.needsUpdate=true;
+ }
+ renderer.shadowMap.type=THREE.PCFShadowMap;
+ mainSun.shadow.radius=shadowSoftness;
+}
 function setScreenShadowState(enabled){
  if(!renderer||!mainSun||!scene)return;
- const active=enabled&&isWebGPU&&opticalMode!=='legacy';
- renderer.shadowMap.enabled=active;
- mainSun.castShadow=active;
+ const active=enabled&&isWebGPU&&opticalMode!=='legacy'&&scatteringShadows>.01;
+ // Only change the renderer state when necessary; forcing shadow-map
+ // compilation on every frame would cause mobile stutters.
+ if(renderer.shadowMap.enabled!==active)renderer.shadowMap.enabled=active;
+ if(mainSun.castShadow!==active)mainSun.castShadow=active;
  if(!active)return;
- // Shadow-map geometry includes the seabed, wreck, and boat, but not
- // the endless water plane or sky. Those would block the entire volume.
+ applyObjectShadowQuality();
  if(waterFloor){waterFloor.receiveShadow=true;waterFloor.castShadow=false;}
  if(underwaterObjects)underwaterObjects.traverse(o=>{
   if(o.isMesh||o.isInstancedMesh){o.castShadow=true;o.receiveShadow=true;}
@@ -2063,8 +2104,10 @@ function setScreenShadowState(enabled){
  if(boat)boat.traverse(o=>{
   if(o.isMesh){o.castShadow=true;o.receiveShadow=true;}
  });
- if(nearWater)nearWater.castShadow=false;
- if(water)water.castShadow=false;
+ // Boat shadow can fall onto moving nearby waves; waves themselves
+ // cannot cast opaque shadows because water transmits sunlight.
+ if(nearWater){nearWater.castShadow=false;nearWater.receiveShadow=true;}
+ if(water){water.castShadow=false;water.receiveShadow=false;}
 }
 async function initScreenSpaceLighting(){
  if(screenSpaceReady||screenSpaceStarting||screenSpaceFailed||!isWebGPU||safeStartup)return;
@@ -2128,7 +2171,8 @@ function updateScreenSpaceLighting(){
   if(!screenSpaceStarting&&!screenSpaceFailed)initScreenSpaceLighting();
   return false;
  }
- if(!mainSun.castShadow)setScreenShadowState(true);
+ if(scatteringShadows>.01&&!mainSun.castShadow)setScreenShadowState(true);
+ else if(scatteringShadows<=.01&&mainSun.castShadow)setScreenShadowState(false);
  // The small shadow frustum tracks the boat with the sunlight direction.
  // The sun's world direction does not change with tracking.
  if(boat&&mainSun){
@@ -2201,11 +2245,13 @@ async function init3D(forceWebGL=false){
  sun.position.set(16,35,8);scene.add(sun);mainSun=sun;
  // Keep shadow allocation off until 24.7 is active on WebGPU.
  sun.castShadow=false;
- sun.shadow.mapSize.set(512,512);
- sun.shadow.camera.left=-34;sun.shadow.camera.right=34;
- sun.shadow.camera.top=34;sun.shadow.camera.bottom=-34;
+ sun.shadow.mapSize.set(768,768);
+ renderer.shadowMap.type=THREE.PCFShadowMap;
+ sun.shadow.radius=2;
+ sun.shadow.camera.left=-26;sun.shadow.camera.right=26;
+ sun.shadow.camera.top=26;sun.shadow.camera.bottom=-26;
  sun.shadow.camera.near=.5;sun.shadow.camera.far=110;
- sun.shadow.bias=-.00013;sun.shadow.normalBias=.028;
+ sun.shadow.bias=-.00020;sun.shadow.normalBias=.037;
  underwaterSunlight=new THREE.DirectionalLight(0xbaf9ea,0);
  underwaterSunlight.position.set(16,35,8);scene.add(underwaterSunlight);
  underwaterAmbient=new THREE.HemisphereLight(0xb3ecf5,0x1b5b63,0);

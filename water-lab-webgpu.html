@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 24.3 underwater surface optics</title>
+<title>Rift Water Lab · WebGPU 24.4 unified underwater visibility</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.3</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.4</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <details id="diagnostics">
@@ -116,6 +116,9 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Waterline softness <input id="waterlineSoftness" aria-label="Waterline softness" type="range" min=".2" max="2" step=".05" value=".65"></label><output id="waterlineSoftnessOut">0.65 m</output></div>
 <div class="row"><label>Underside distortion <input id="undersideDistortion" aria-label="Underside distortion" type="range" min="0" max="2" step=".05" value="1"></label><output id="undersideDistortionOut">1.00</output></div>
 <div class="row"><label>Underwater scattering <input id="underwaterScatter" aria-label="Underwater scattering" type="range" min="0" max="2" step=".05" value="1"></label><output id="underwaterScatterOut">1.00</output></div>
+<div class="row"><label>Underwater visibility <select id="visibilityMode"><option value="unified" selected>24.4 · unified depth and distance</option><option value="classic">24.3 · original visibility</option></select></label></div>
+<div class="row"><label>Visibility range <input id="visibilityRange" aria-label="Underwater visibility range" type="range" min="8" max="80" step="2" value="34"></label><output id="visibilityRangeOut">34 m</output></div>
+<div class="row"><label>Seabed distance fade <input id="seabedFade" aria-label="Seabed distance fade" type="range" min=".2" max="2" step=".05" value="1"></label><output id="seabedFadeOut">1.00</output></div>
 <div class="row"><label>Distance extinction <input id="distanceExtinction" aria-label="Underwater distance extinction" type="range" min="0" max="2" step=".05" value="1"></label><output id="distanceExtinctionOut">1.00</output></div>
 <div class="row"><label>Depth absorption <input id="depthAbsorption" aria-label="Underwater depth absorption" type="range" min="0" max="2" step=".05" value="1"></label><output id="depthAbsorptionOut">1.00</output></div>
 <div class="row"><label>Atmosphere preset <select id="atmospherePreset"><option value="lagoon" selected>Tropical lagoon</option><option value="coastal">Coastal haze</option><option value="deep">Deep blue</option><option value="off">Off · comparison</option></select></label></div>
@@ -203,6 +206,8 @@ let depthRefraction=1,underwaterScatter=1,waveSmoothness=1,reflectionStrength=1,
 let thicknessTexture=null,thicknessPixels=null,lastThicknessX=Infinity,lastThicknessZ=Infinity;
 let underwaterActive=false,underwaterFog=null,dayFog=null,waterDepthAtBoat=4,underwaterBlend=0,underwaterSceneMode='reef',underwaterObjects=null,causticStrength=.8,causticMap=null,causticPixels=null,lastCausticUpdate=-100;
 let depthAbsorption=1,distanceExtinction=1,atmospherePreset='lagoon';
+let visibilityMode='unified',visibilityRange=34,seabedFade=1,underwaterSceneMaterials=[],
+    seabedBaseColors=null,seabedMaterialColors=null,underwaterVisibilityColor=null;
 let undersideMode='enhanced',underwaterRefraction=1.10,underwaterFresnel=1,
  underwaterTransmission=1.15,waterlineSoftness=.65,undersideDistortion=1;
 let lastUndersideMix=-1,underwaterSunlight=null,underwaterAmbient=null,clockDelta=1/60;
@@ -217,7 +222,7 @@ let volumetricStrength=.85,shaftQuality='medium',lightShafts=null,shaftMeshes=[]
 let opticalFallbackTriggered=false;
 const safeStartup=new URLSearchParams(location.search).has('safe');
 let gpuFFT=null,waveEngine=safeStartup?'analytic':'hybrid',fftEnergy=3,fftMix=0,fftStarting=false,fftFault='',fftAttempted=false,fftRecoveryCount=0,fftRuntimeInfo='';
-if(safeStartup){reflectionMode='basic';opticalMode='legacy';volumetricStrength=0;hullPhysics='classic';atmospherePreset='off';undersideMode='classic';}
+if(safeStartup){reflectionMode='basic';opticalMode='legacy';volumetricStrength=0;hullPhysics='classic';atmospherePreset='off';undersideMode='classic';visibilityMode='classic';}
 let cameraMode='chase',orbitYaw=.12,orbitPitch=.31,orbitDistance=15;
 let cameraIntroStart=performance.now(),pointerOrigin=null,pinchDistance=null;
 const cameraTarget={x:-3.2,y:1,z:-13},activePointers=new Map();
@@ -530,8 +535,18 @@ function updateUnderwaterScattering(){
   // FogExp2 density increases smoothly with depth and suspended haze.
   const extinction=p.scattering*underwaterScatter+
     (.010+.00075*Math.min(depth,50))*distanceExtinction;
-  underwaterFog.density=Math.max(.00005,Math.min(.22,
-    extinction*Math.max(.04,underwaterBlend)/clarity));
+  if(visibilityMode==='unified'){
+   // E-fold distance defined in meters, with additional depth/turbidity
+   // penalties. A single camera-space fog acts on all scene materials.
+   const targetDensity=(1/Math.max(8,visibilityRange))*
+     (.50+.50*underwaterScatter)*Math.max(.15,distanceExtinction);
+   const depthFactor=1+Math.min(1.1,depth*.022*depthAbsorption);
+   underwaterFog.density=Math.max(.00005,Math.min(.18,
+     targetDensity*depthFactor*Math.pow(underwaterBlend,1.5)/clarity));
+  }else{
+   underwaterFog.density=Math.max(.00005,Math.min(.22,
+     extinction*Math.max(.04,underwaterBlend)/clarity));
+  }
   scene.fog=underwaterFog;
   scene.background=underwaterFog.color;
  }else{
@@ -539,6 +554,7 @@ function updateUnderwaterScattering(){
   scene.background=scene.userData.dayBackground;
  }
  updateCausticLighting(depth);
+ updateUnifiedVisibility(depth);
  updateUndersideOptics();
 }
 // The existing double-sided MeshPhysicalMaterial supplies dielectric Fresnel
@@ -645,6 +661,7 @@ function buildUnderwaterScene(){
  const rockGeometry=new THREE.IcosahedronGeometry(1,1);
  const rockMaterial=new THREE.MeshStandardMaterial({color:0x667b73,roughness:.95});
  underwaterObjectMaterials.push(rockMaterial);
+ underwaterSceneMaterials.push({material:rockMaterial,base:rockMaterial.color.clone()});
  const rocks=new THREE.InstancedMesh(rockGeometry,rockMaterial,40);
  const obj=new THREE.Object3D();
  for(let i=0;i<40;i++){
@@ -659,6 +676,7 @@ function buildUnderwaterScene(){
  rocks.instanceMatrix.needsUpdate=true;group.add(rocks);
  const wood=new THREE.MeshStandardMaterial({color:0x785c46,roughness:.95});
  underwaterObjectMaterials.push(wood);
+ underwaterSceneMaterials.push({material:wood,base:wood.color.clone()});
  const block=new THREE.BoxGeometry(1,1,1);
  const wreck=new THREE.Group();
  function timber(x,y,z,w,h,d){
@@ -709,6 +727,59 @@ function updateCausticTexture(t,force=false){
  }
  causticMap.needsUpdate=true;
 }
+// The atmospheric response must reach the sand, rocks, and wreck with
+// the same depth-sensitive coloration as camera fog. These are material
+// tints layered on top of scene.fog, not additional fake full-screen bands.
+function updateUnifiedVisibility(cameraDepth=0){
+ if(!waterFloor||!THREE)return;
+ const enhanced=visibilityMode==='unified'&&opticalMode!=='legacy'&&
+   atmospherePreset!=='off';
+ const profile=waterProfiles[atmospherePreset]||waterProfiles.lagoon;
+ const cameraUnderwater=enhanced?underwaterBlend:0;
+ const clarity=Math.max(.4,waterClarity);
+ const rgb=profile.absorption;
+ const depth=waterDepthAtBoat||6;
+ // Keep near objects readable: mostly reduce red, gently shift toward
+ // the water hue as the viewer travels farther underwater.
+ const attenuation=Math.max(0,Math.min(.78,cameraUnderwater*
+   (1-Math.exp(-cameraDepth*.06/clarity))*depthAbsorption));
+ if(!underwaterVisibilityColor)underwaterVisibilityColor=new THREE.Color();
+ const p=new THREE.Color(profile.color);
+ underwaterVisibilityColor.setRGB(
+   Math.exp(-rgb[0]*cameraDepth*.45/clarity),
+   Math.exp(-rgb[1]*cameraDepth*.45/clarity),
+   Math.exp(-rgb[2]*cameraDepth*.45/clarity)
+ );
+ underwaterVisibilityColor.lerp(p,attenuation*.45);
+ // These materials use their original calibrated base colors. We only
+ // apply mild absorption, avoiding the "uniform blue paint" failure.
+ for(const entry of underwaterSceneMaterials){
+  entry.material.color.copy(entry.base).multiply(underwaterVisibilityColor);
+ }
+ if(waterFloor.material && seabedMaterialColors){
+  const colors=waterFloor.geometry.attributes.color;
+  if(!colors)return;
+  const targetColor=p;
+  const soften=enhanced?seabedFade:0;
+  const len=colors.count;
+  for(let i=0;i<len;i++){
+   const x=waterFloor.geometry.attributes.position.getX(i);
+   const z=waterFloor.geometry.attributes.position.getZ(i);
+   // Radial fade avoids a bright abrupt rectangular plane boundary.
+   const edge=Math.max(Math.abs(x),Math.abs(z))/210;
+   const perimeter=Math.max(0,Math.min(1,(edge-.65)/.35));
+   const localDepth=Math.max(0,-waterFloor.geometry.attributes.position.getY(i));
+   const deepFade=enhanced?Math.max(0,Math.min(.72,
+     (1-Math.exp(-Math.max(0,localDepth-5)*.035))*soften)):0;
+   const blending=Math.min(.96,Math.max(deepFade,perimeter*.80*soften));
+   const index=i*3;
+   colors.array[index]=seabedBaseColors[index]*(1-blending)+targetColor.r*blending;
+   colors.array[index+1]=seabedBaseColors[index+1]*(1-blending)+targetColor.g*blending;
+   colors.array[index+2]=seabedBaseColors[index+2]*(1-blending)+targetColor.b*blending;
+  }
+  colors.needsUpdate=true;
+ }
+}
 function updateCausticLighting(cameraDepth=0){
  if(!floorCausticMaterial)return;
  const enabled=opticalMode!=='legacy'&&atmospherePreset!=='off';
@@ -722,7 +793,7 @@ function updateCausticLighting(cameraDepth=0){
  for(const material of underwaterObjectMaterials)material.emissiveIntensity=emission*.55;
 }
 function createSeabed(){
- const n=72,geo=new THREE.PlaneGeometry(250,250,n,n);
+ const n=88,geo=new THREE.PlaneGeometry(420,420,n,n);
  geo.rotateX(-Math.PI/2);
  const a=geo.attributes.position,colors=new Float32Array(a.count*3);
  const sand=new THREE.Color(0xd4d5a6),seaGrass=new THREE.Color(0x3a786a),deep=new THREE.Color(0x264950),color=new THREE.Color();
@@ -736,6 +807,7 @@ function createSeabed(){
   colors[i*3]=color.r;colors[i*3+1]=color.g;colors[i*3+2]=color.b;
  }
  a.needsUpdate=true;geo.computeVertexNormals();
+ seabedBaseColors=colors.slice();seabedMaterialColors=colors;
  geo.setAttribute('color',new THREE.BufferAttribute(colors,3));
  const mat=new THREE.MeshStandardMaterial({
   color:0xffffff,vertexColors:true,roughness:1,metalness:0,side:THREE.DoubleSide
@@ -1443,6 +1515,15 @@ $('causticStrength').oninput=()=>{
  $('causticStrengthOut').textContent=causticStrength.toFixed(2);
  updateCausticTexture(clockTime,true);
 };
+$('visibilityMode').onchange=()=>{visibilityMode=$('visibilityMode').value;};
+$('visibilityRange').oninput=()=>{
+ visibilityRange=Number($('visibilityRange').value);
+ $('visibilityRangeOut').textContent=visibilityRange+' m';
+};
+$('seabedFade').oninput=()=>{
+ seabedFade=Number($('seabedFade').value);
+ $('seabedFadeOut').textContent=seabedFade.toFixed(2);
+};
 $('distanceExtinction').oninput=()=>{
  distanceExtinction=Number($('distanceExtinction').value);
  $('distanceExtinctionOut').textContent=distanceExtinction.toFixed(2);
@@ -1576,6 +1657,7 @@ async function init3D(forceWebGL=false){
   $('hullPhysics').value='classic';
   $('atmospherePreset').value='off';
   $('undersideMode').value='classic';
+  $('visibilityMode').value='classic';
  }
  $('buoyancyState').textContent='Boat: 4-point floating + sailing';
  renderer.domElement.id='threeCanvas';renderer.domElement.style.cssText='position:fixed;inset:0;width:100%;height:100%;z-index:1';

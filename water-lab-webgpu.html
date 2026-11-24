@@ -311,7 +311,7 @@ const waveState={height:0,dx:0,dz:0};
 // swell remains an automatic fallback when compute is not available.
 function waveField(x,z,t,out=waveState){
  let elevation=0,dx=0,dz=0;
- const hasFFT=waveEngine!=='analytic'&&gpuFFT?.ready;
+ const hasFFT=waveEngine!=='analytic'&&!fftFault&&gpuFFT?.ready;
  const analyticWeight=hasFFT?(waveEngine==='fft'?.20:.70):1;
  for(const wave of waveComponents){
   const phase=wave.kx*x+wave.kz*z-wave.omega*t+wave.phase;
@@ -869,7 +869,9 @@ async function init3D(forceWebGL=false){
   $('boatSpeed').textContent='Speed: '+boatSpeed.toFixed(1)+' m/s';
   $('distanceStatus').textContent='Travel: '+totalTravel.toFixed(1)+' m';
   $('wakeSignal').textContent='Peak ripple: '+(lastRipple*100).toFixed(0)+' cm';
-  if(gpuFFT?.ready&&waveEngine!=='analytic')fftMessage('64² GPU FFT · '+gpuFFT.frameCount+' fields');
+  if(gpuFFT?.ready&&!fftFault&&waveEngine!=='analytic'){
+   fftMessage('64² GPU FFT · '+gpuFFT.frameCount+' fields · '+(gpuFFT.rms*100).toFixed(1)+' cm RMS');
+  }
   else if(gpuFFT&&!fftFault&&waveEngine!=='analytic')fftMessage('GPU initializing…');
   // Foam count is set by the whitewater generator, not by boat speed.
   $('heading').textContent='Heading: '+((boatHeading*180/Math.PI%360+360)%360).toFixed(0)+'°';

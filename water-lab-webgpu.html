@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 18.0 boat-centered ripples</title>
+<title>Rift Water Lab · WebGPU 18.1 turbulent boat wake</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -33,7 +33,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 </script></head>
 <body>
 <div id="dashboard">
-<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">18.0 · local interaction zone</span></h1>
+<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">18.1 · turbulent boat wake</span></h1>
 <p>This is a <strong>separate renderer test</strong>, not a port of the existing FFT ocean.</p>
 <div id="metrics"><span id="backend">Backend: detecting</span><span id="fps">FPS: —</span><span id="resolution">Resolution: —</span><span id="buoyancyState">Buoyancy: initializing</span><span id="boatSpeed">Speed: 0.0</span><span id="heading">Heading: 0°</span><span id="wakeStatus">Wake: dynamic</span><span id="wakeSignal">Ripples: waiting</span></div>
 <p id="log">Checking GPU access…</p></div></div>
@@ -41,6 +41,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><button id="modeSwitch" aria-pressed="true">Camera: Chase</button><button id="resetCamera">Reset camera</button><button id="pause">Pause</button><button id="detail">Detail: medium</button><a href="water-lab.html?v=15-2">Old Water Lab</a></div>
 <div class="row"><label>Wave height <input id="waveHeight" aria-label="Wave height" type="range" min=".25" max="2.5" step=".05" value="1.5"></label><output id="waveHeightOut">1.50</output></div>
 <div class="row"><label>Wave shape <input id="waveChop" aria-label="Wave crest sharpness" type="range" min="0" max="1.2" step=".05" value=".45"></label><output id="waveChopOut">0.45</output></div>
+<div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
 <div class="row"><label>Wake physics <input id="wakeAmount" aria-label="Boat wake strength" type="range" min="0" max="2" step=".05" value="1.1"></label><output id="wakeAmountOut">1.10</output><button id="resetWake">Clear wake</button></div>
 <div class="row"><label>Buoyancy <input type="range" id="buoyancyStrength" min=".5" max="1.8" step=".05" value="1"></label><output id="buoyancyStrengthOut">1.00</output><button id="resetBoat">Reset boat</button></div>
 <div class="row"><label>Forward power <input id="sailPower" type="range" min="0" max="1" step=".05" value=".85"></label><output id="sailPowerOut">85%</output></div>
@@ -93,7 +94,7 @@ let renderer,scene,camera,water,geometry,base,THREE,boat,nearWater,nearGeometry,
 let buoyancyStrength=1,vy=0,pitchV=0,rollV=0;
 let boatHeading=0,boatSpeed=0,rudder=0,sailPower=.85,driveMode='stop',steeringLeft=false,steeringRight=false;
 let wakeSolver=null,wakeAmount=1.1,waveChop=.45;
-let lastRipple=0;
+let lastRipple=0,propulsionMode='power',wakeTrail=[],trailElapsed=0;
 let cameraMode='chase',orbitYaw=.12,orbitPitch=.31,orbitDistance=15;
 let cameraIntroStart=performance.now(),pointerOrigin=null,pinchDistance=null;
 const cameraTarget={x:-3.2,y:1,z:-13},activePointers=new Map();
@@ -211,6 +212,42 @@ function oceanHeight(x,z,t){
 }
 // Both patches are re-centered on the player and use the same long waves.
 // Only the inner disk samples the 32 m wake field.
+// Motion history creates a turbulent, widening, physically anchored
+// near-hull trail. It modifies the local surface colors/height; there
+// are no flat foam planes or V-shaped line sprites.
+function trackWake(dt){
+ trailElapsed+=dt;
+ if(boatSpeed>.55&&wakeAmount>.01&&trailElapsed>.11){
+  trailElapsed=0;
+  wakeTrail.unshift({x:boat.position.x,z:boat.position.z,heading:boatHeading,
+    strength:Math.min(1,boatSpeed/(propulsionMode==='power'?7.5:5)),age:0});
+ }
+ for(let i=0;i<wakeTrail.length;i++)wakeTrail[i].age+=dt;
+ wakeTrail=wakeTrail.filter(p=>p.age<6.5&&Math.hypot(p.x-boat.position.x,p.z-boat.position.z)<19).slice(0,36);
+}
+function wakeAppearance(x,z,t){
+ if(!wakeTrail.length||wakeAmount<.01)return 0;
+ let foam=0;
+ // Each trail point produces an expanding centerline churn and two
+ // diverging shoulders; disturbances are tied to actual boat positions.
+ for(let j=0;j<wakeTrail.length;j++){
+  const p=wakeTrail[j],age=p.age;
+  const dx=x-p.x,dz=z-p.z;
+  if(Math.abs(dx)>9||Math.abs(dz)>9)continue;
+  const along=dx*-Math.sin(p.heading)+dz*-Math.cos(p.heading);
+  const sideways=dx*-Math.cos(p.heading)+dz*Math.sin(p.heading);
+  const distance=Math.hypot(dx,dz);
+  if(distance>7)continue;
+  const life=Math.max(0,1-age/6.5);
+  const spread=.55+age*.62;
+  const jitter=.12*Math.sin((sideways*7+along*6)+t*8)*Math.sin(along*4.5-t*3.9);
+  const center=Math.exp(-Math.pow(sideways/(spread*.6),2))*Math.exp(-distance*.48);
+  const shoulders=Math.exp(-Math.pow((Math.abs(sideways)-(spread+Math.abs(along)*.26))/.55,2))*Math.exp(-distance*.27);
+  const patch=life*p.strength*(center*.65+shoulders*.8)*( .68+.32*jitter*4);
+  foam=Math.max(foam,patch);
+ }
+ return Math.min(1,Math.max(0,foam*wakeAmount));
+}
 function animateWaves(t){
  if(!boat)return;
  const cx=boat.position.x,cz=boat.position.z;
@@ -243,11 +280,12 @@ function animateWaves(t){
   const slope=radial<12&&wakeSolver?
    Math.abs(wakeSolver.sample(wx+.33,wz)-wakeSolver.sample(wx-.33,wz))+
    Math.abs(wakeSolver.sample(wx,wz+.33)-wakeSolver.sample(wx,wz-.33)):0;
-  const shine=Math.min(1,Math.abs(disturbance)*.28+slope*.42);
+  const foam=radial<15?wakeAppearance(wx,wz,t)*fade:0;
+  const shine=Math.min(1,Math.abs(disturbance)*.28+slope*.42+foam*.62);
   const glimmer=.02*Math.sin(wx*.8+wz*.42-t*3.2);
-  nearColorData[i]=Math.max(.025,Math.min(.55,.03+shine*.33+glimmer*.15));
-  nearColorData[i+1]=Math.max(.23,Math.min(.95,.37+shine*.43+glimmer*.2));
-  nearColorData[i+2]=Math.max(.30,Math.min(1,.48+shine*.45+glimmer*.25));
+  nearColorData[i]=Math.max(.025,Math.min(1,.03+shine*.33+glimmer*.15+foam*.70));
+  nearColorData[i+1]=Math.max(.23,Math.min(1,.37+shine*.43+glimmer*.2+foam*.58));
+  nearColorData[i+2]=Math.max(.30,Math.min(1,.48+shine*.45+glimmer*.25+foam*.48));
   rippleSum+=Math.abs(disturbance);rippleMax=Math.max(rippleMax,Math.abs(disturbance));
  }
  lastRipple=rippleMax;
@@ -260,7 +298,7 @@ function resetBoat(){
  if(!boat)return;
  boat.position.set(-3.2,.6,-13);
  boat.rotation.set(0,0,0);vy=0;pitchV=0;rollV=0;
- boatHeading=0;boatSpeed=0;rudder=0;driveMode='stop';wakeSolver?.clear();
+ boatHeading=0;boatSpeed=0;rudder=0;driveMode='stop';wakeSolver?.clear();wakeTrail=[];trailElapsed=0;
  if($('forward')){setDriveMode('stop');}
 }
 function makeBoat(){
@@ -304,11 +342,12 @@ function stepBoat(dt,t){
   // Simplified apparent-wind sailing: thrust, quadratic hull drag and rudder
   // effectiveness. The heading drives horizontal motion and wakes.
   const advancing=driveMode==='forward';
-  const thrust=advancing?sailPower*3.15*(.35+.65*Math.abs(Math.cos(boatHeading+.7))):0;
-  const drag=.16*boatSpeed+.082*boatSpeed*Math.abs(boatSpeed);
+  const thrust=advancing?(propulsionMode==='power'?sailPower*10.0:
+    sailPower*3.15*(.35+.65*Math.abs(Math.cos(boatHeading+.7)))):0;
+  const drag=.12*boatSpeed+(propulsionMode==='power'?.045:.082)*boatSpeed*Math.abs(boatSpeed);
   // Stop is a true brake, not merely zero sail force.
   const braking=advancing?0:Math.min(boatSpeed/h,2.7);
-  boatSpeed=Math.max(0,Math.min(8,boatSpeed+(thrust-drag-braking)*h));
+  boatSpeed=Math.max(0,Math.min(propulsionMode==='power'?13:8,boatSpeed+(thrust-drag-braking)*h));
   // Rudder gets stronger with water flow; a small low-speed turn assist
   // keeps the controls responsive in the interactive demo.
   boatHeading+=rudder*(.24+.12*boatSpeed)*h;
@@ -450,7 +489,11 @@ $('wakeAmount').oninput=()=>{
  $('wakeAmountOut').textContent=wakeAmount.toFixed(2);
  $('wakeStatus').textContent=wakeAmount>.01?'Wake: dynamic':'Wake: off';
 };
-$('resetWake').onclick=()=>wakeSolver?.clear();
+$('resetWake').onclick=()=>{wakeSolver?.clear();wakeTrail=[];};
+$('propulsionMode').onchange=()=>{
+ propulsionMode=$('propulsionMode').value;
+ $('wakeStatus').textContent=propulsionMode==='power'?'Wake: powered':'Wake: sail';
+};
 $('waveChop').oninput=()=>{
  waveChop=Number($('waveChop').value);
  $('waveChopOut').textContent=waveChop.toFixed(2);
@@ -494,7 +537,9 @@ async function init3D(forceWebGL=false){
    floor.position.x=boat.position.x;
    floor.position.z=boat.position.z;
    wakeSolver?.advance(dt,{x:boat.position.x,z:boat.position.z,
-     heading:boatHeading,speed:boatSpeed,bob:vy,amount:wakeAmount});
+     heading:boatHeading,speed:boatSpeed,bob:vy,
+     amount:wakeAmount*(propulsionMode==='power'?1.45:1)});
+   trackWake(dt);
    animateWaves(time);
   }
   updateCamera(dt);

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 24.8 adaptive underwater optics and performance</title>
+<title>Rift Water Lab · WebGPU 24.9 unified ocean wave details</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.8</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.9</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <details id="diagnostics">
@@ -144,6 +144,10 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Volume motion <input id="scatteringMotion" aria-label="Underwater volume motion" type="range" min="0" max="2" step=".05" value="1"></label><output id="scatteringMotionOut">1.00</output></div>
 <div class="row"><label>Suspended particles <input id="particleDensity" aria-label="Suspended underwater particle density" type="range" min="0" max="2" step=".1" value=".7"></label><output id="particleDensityOut">0.70</output></div>
 <div class="row"><label>Light shaft detail <select id="shaftQuality"><option value="low">Low · 6 shafts</option><option value="medium" selected>Balanced · 12 shafts</option><option value="high">High · 20 shafts</option></select></label></div>
+<div class="row"><label>Crest asymmetry <input id="crestAsymmetry" aria-label="Sharper asymmetric crests" type="range" min="0" max="1" step=".05" value=".55"></label><output id="crestAsymmetryOut">0.55</output></div>
+<div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
+<div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
+<div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
 <div class="row"><label>Wake physics <input id="wakeAmount" aria-label="Boat wake strength" type="range" min="0" max="2" step=".05" value="1.1"></label><output id="wakeAmountOut">1.10</output><button id="resetWake">Clear wake</button></div>
@@ -214,6 +218,7 @@ let renderer,scene,camera,water,geometry,base,THREE,boat,nearWater,nearGeometry,
 let buoyancyStrength=1,vy=0,pitchV=0,rollV=0;
 let boatHeading=0,boatSpeed=0,rudder=0,sailPower=.85,driveMode='stop',steeringLeft=false,steeringRight=false,totalTravel=0,hullPhysics='dynamic',lastHullDrag=0;
 let wakeSolver=null,wakeAmount=1.1,waveChop=.45,previousBoatHeading=0,turnVelocity=0;
+let crestAsymmetry=.55,crossingSwell=1,windRipples=1,whitecapIntensity=.85;
 let lastRipple=0,propulsionMode='power',wakeTrail=[],trailElapsed=0;
 let foamMesh=null,foamPositions=null,foamColors=null,foamCapacity=280,foamStrength=1.5,foamDebug=false,foamPatchCount=0;
 let surfaceNormalMap=null,surfaceFineNormalMap=null,reflectionEnvironment=null;
@@ -826,8 +831,10 @@ function syncWaterDetail(){
   mat.vertexColors=isNear;
   mat.side=THREE.DoubleSide;
   mat.envMapIntensity=(reflectionMode==='enhanced'?1.12+surfaceGlitter*.56:.75+surfaceGlitter*.55)*reflectionStrength;
-  mat.normalScale.set(surfaceDetail*(isNear?.31:.095),surfaceDetail*(isNear?.31:.095));
-  mat.clearcoatNormalScale?.set(fineRipple*(isNear?.23:.075),fineRipple*(isNear?.23:.075));
+  mat.normalScale.set(surfaceDetail*(isNear?.31:.095)*(.4+.6*windRipples),
+    surfaceDetail*(isNear?.31:.095)*(.4+.6*windRipples));
+  mat.clearcoatNormalScale?.set(fineRipple*(isNear?.23:.075)*windRipples,
+    fineRipple*(isNear?.23:.075)*windRipples);
   mat.clearcoat=Math.min(.75,.45+surfaceGlitter*.16);
   mat.clearcoatRoughness=isNear?.18:.22;
   mat.roughness=isNear?.17:.22;
@@ -1421,24 +1428,33 @@ const waveComponents=[
 // Gerstner-style horizontal motion sharpens crests without fake foam.
 // Point sampling inverts the horizontal warp approximately, keeping the
 // boat's four buoyancy probes aligned with the rendered surface.
-const waveState={height:0,dx:0,dz:0,slopeX:0,slopeZ:0};
+const waveState={height:0,dx:0,dz:0,slopeX:0,slopeZ:0,crest:0,steepness:0};
 // All physical probes and water vertices call the same hybrid wave
 // function. Native WebGPU FFT supplies a time-evolved spectral height
 // field with asynchronous, throttled CPU readback; analytic rolling
 // swell remains an automatic fallback when compute is not available.
 function waveField(x,z,t,out=waveState){
- let elevation=0,dx=0,dz=0,slopeX=0,slopeZ=0;
+ let elevation=0,dx=0,dz=0,slopeX=0,slopeZ=0,crest=0,steepness=0;
  const hasFFT=fftMix>.0005&&gpuFFT?.ready&&!fftFault&&Number.isFinite(gpuFFT.rms);
  const analyticWeight=1-(hasFFT?fftMix*(waveEngine==='fft'?.80:.30):0);
  for(const wave of waveComponents){
   const phase=wave.kx*x+wave.kz*z-wave.omega*t+wave.phase;
   const amplitude=waveHeight*wave.amplitude*analyticWeight;
   const sinPhase=Math.sin(phase),cosPhase=Math.cos(phase);
-  elevation+=amplitude*sinPhase;
-  slopeX+=amplitude*wave.kx*cosPhase;
-  slopeZ+=amplitude*wave.kz*cosPhase;
-  const lateral=waveChop*amplitude*cosPhase;
+  // A second harmonic narrows crests and broadens troughs; its exact
+  // derivative keeps boat probes and rendered normals consistent.
+  const harmonic=crestAsymmetry*.13;
+  const sharp=sinPhase+harmonic*Math.cos(2*phase);
+  const derivative=cosPhase-harmonic*2*Math.sin(2*phase);
+  const crossFactor=wave.dirX<-.48?crossingSwell:1;
+  const a=amplitude*crossFactor;
+  elevation+=a*sharp;
+  slopeX+=a*wave.kx*derivative;
+  slopeZ+=a*wave.kz*derivative;
+  const lateral=waveChop*a*cosPhase*(1+crestAsymmetry*.20);
   dx+=wave.dirX*lateral;dz+=wave.dirZ*lateral;
+  crest+=Math.max(0,sharp)*a;
+  steepness+=Math.abs(a*wave.kz*derivative)+Math.abs(a*wave.kx*derivative);
  }
  if(hasFFT){
   const scale=fftEnergy*waveHeight*fftMix;
@@ -1465,10 +1481,11 @@ function waveField(x,z,t,out=waveState){
    fftMix=0;
    fftMessage('invalid data · analytic fallback');
   }
-  elevation=0;dx=0;dz=0;slopeX=0;slopeZ=0;
+  elevation=0;dx=0;dz=0;slopeX=0;slopeZ=0;crest=0;steepness=0;
   // The next frame safely recomputes all analytic swells.
  }
  out.height=elevation;out.dx=dx;out.dz=dz;out.slopeX=slopeX;out.slopeZ=slopeZ;
+ out.crest=crest;out.steepness=steepness;
  return out;
 }
 function fftMessage(message){$('fftStatus').textContent='FFT: '+message;}
@@ -1641,10 +1658,12 @@ function animateWaves(t){
  if(!boat)return;
  if(surfaceNormalMap){
   // Keep micro-ripples in world space while the radial ocean follows boat.
-  surfaceNormalMap.offset.set((boat.position.x+t*.20)/4,(boat.position.z-t*.31)/4);
+  surfaceNormalMap.offset.set((boat.position.x+t*(.20+.11*windRipples))/4,
+    (boat.position.z-t*(.31+.14*windRipples))/4);
  }
  if(surfaceFineNormalMap){
-  surfaceFineNormalMap.offset.set((boat.position.x-t*.46)/4,(boat.position.z+t*.62)/4);
+  surfaceFineNormalMap.offset.set((boat.position.x-t*(.46+.30*windRipples))/4,
+    (boat.position.z+t*(.62+.22*windRipples))/4);
  }
  const cx=boat.position.x,cz=boat.position.z;
  water.position.set(cx,0,cz);
@@ -1687,7 +1706,15 @@ function animateWaves(t){
      wave.slopeZ+fade*wakeSlopeZ);
   const slope=Math.abs(wakeSlopeX)+Math.abs(wakeSlopeZ);
   const foam=radial<15?wakeAppearance(wx,wz,t)*fade:0;
-  const shine=Math.min(1,Math.abs(disturbance)*.28+slope*.42+foam*.62);
+  // Foam is restricted to locally steep crests and intermittent folds,
+  // not stamped uniformly on every passing swell.
+  const breaking=Math.max(0,Math.min(1,
+    (wave.steepness-0.24)/.40))*Math.max(0,Math.min(1,(wave.height+.1)/1.7));
+  const irregular=.65+.35*Math.sin(wx*.73+wz*.41+t*.47)*
+                              Math.cos(wx*.32-wz*.61-t*.30);
+  const whitecap=whitecapIntensity*breaking*irregular;
+  const shine=Math.min(1,Math.abs(disturbance)*.28+slope*.42+
+    foam*.62+whitecap*.24);
   // Coastal-depth color modulation: deeper shelves absorb warm light,
   // while shallow water exposes brighter turquoise transmitted seafloor.
   // This is only coloration; geometry and wake physics are unchanged.
@@ -1710,14 +1737,18 @@ function animateWaves(t){
   const backlit=Math.max(0,Math.min(1,.45-slopeDotSun*.55));
   const crest=Math.max(0,Math.min(1,(wave.height+.22)/2.4));
   const thinness=Math.max(0,Math.min(1,1-shallow*.4));
-  const subsurface=subsurfaceLight*crest*backlit*(.12+.18*thinness);
-  const glimmer=.02*Math.sin(wx*.8+wz*.42-t*2.4);
+  const subsurface=subsurfaceLight*crest*backlit*(.12+.18*thinness)*
+    (1+.28*crestAsymmetry);
+  const glimmer=(.02+.024*windRipples)*Math.sin(
+    wx*.8+wz*.42-t*(2.4+.6*windRipples))+
+    .022*windRipples*Math.sin(wx*2.3-wz*3.4+t*3.1);
+  const capGlow=whitecap*.44;
   // Shallow water transmits more green/blue seabed light, while deep
   // water is more absorptive. Vertex color stays low-frequency; the
   // separate normal maps own the small optical ripples.
-  nearColorData[i]=Math.max(.025,Math.min(1,(.045+shallow*.18+shine*.24+glimmer*.11+foam*.70+subsurface*.21)*waveShade));
-  nearColorData[i+1]=Math.max(.18,Math.min(1,(.35+shallow*.19+shine*.31+glimmer*.14+foam*.58+subsurface*.57)*waveShade));
-  nearColorData[i+2]=Math.max(.23,Math.min(1,(.46+shallow*.17+shine*.34+glimmer*.16+foam*.48+subsurface*.38)*waveShade));
+  nearColorData[i]=Math.max(.025,Math.min(1,(.045+shallow*.18+shine*.24+glimmer*.11+foam*.70+subsurface*.21+capGlow*.64)*waveShade));
+  nearColorData[i+1]=Math.max(.18,Math.min(1,(.35+shallow*.19+shine*.31+glimmer*.14+foam*.58+subsurface*.57+capGlow*.73)*waveShade));
+  nearColorData[i+2]=Math.max(.23,Math.min(1,(.46+shallow*.17+shine*.34+glimmer*.16+foam*.48+subsurface*.38+capGlow*.90)*waveShade));
   rippleSum+=Math.abs(disturbance);rippleMax=Math.max(rippleMax,Math.abs(disturbance));
  }
  lastRipple=rippleMax;
@@ -2214,6 +2245,23 @@ $('underwaterScatter').oninput=()=>{
  underwaterScatter=Number($('underwaterScatter').value);
  $('underwaterScatterOut').textContent=underwaterScatter.toFixed(2);
  updateUnderwaterScattering();
+};
+$('crestAsymmetry').oninput=()=>{
+ crestAsymmetry=Number($('crestAsymmetry').value);
+ $('crestAsymmetryOut').textContent=crestAsymmetry.toFixed(2);
+};
+$('crossingSwell').oninput=()=>{
+ crossingSwell=Number($('crossingSwell').value);
+ $('crossingSwellOut').textContent=crossingSwell.toFixed(2);
+};
+$('windRipples').oninput=()=>{
+ windRipples=Number($('windRipples').value);
+ $('windRipplesOut').textContent=windRipples.toFixed(2);
+ syncWaterDetail();
+};
+$('whitecapIntensity').oninput=()=>{
+ whitecapIntensity=Number($('whitecapIntensity').value);
+ $('whitecapIntensityOut').textContent=whitecapIntensity.toFixed(2);
 };
 $('waveSmoothness').oninput=()=>{
  waveSmoothness=Number($('waveSmoothness').value);

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 18.5 whitewater geometry</title>
+<title>Rift Water Lab · WebGPU 18.6 foam and steering repair</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -33,7 +33,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 </script></head>
 <body>
 <div id="dashboard">
-<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">18.5 · visible geometric whitewater</span></h1>
+<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">18.6 · foam and steering repair</span></h1>
 <p>This is a <strong>separate renderer test</strong>, not a port of the existing FFT ocean.</p>
 <div id="metrics"><span id="backend">Backend: detecting</span><span id="fps">FPS: —</span><span id="resolution">Resolution: —</span><span id="buoyancyState">Buoyancy: initializing</span><span id="boatSpeed">Speed: 0.0</span><span id="heading">Heading: 0°</span><span id="wakeStatus">Wake: dynamic</span><span id="wakeSignal">Ripples: waiting</span><span id="foamStatus">Foam: initializing</span></div>
 <p id="log">Checking GPU access…</p></div></div>
@@ -252,124 +252,72 @@ function wakeAppearance(x,z,t){
  return Math.min(1,Math.max(0,foam*wakeAmount));
 }
 
-// WebGPU-compatible geometric whitewater. No alpha texture, no transparency:
-// 6 irregular triangles per patch are explicitly drawn as bright aerated
-// water fragments. This uses the same reliable opaque rendering path as the
-// diagnostic that was verified on the user's iPhone.
-const FOAM_VERTICES=7,FOAM_TRIANGLES=6;
+// Return to the proven four-vertex opaque foam geometry from 18.4.
+// Irregular angled fragments create whitewater without alpha textures.
 function createFoamField(){
- if(foamMesh){
-  scene.remove(foamMesh);
-  foamMesh.geometry.dispose();
-  foamMesh.material.dispose();
- }
+ if(foamMesh){scene.remove(foamMesh);foamMesh.geometry.dispose();foamMesh.material.dispose();}
  const geo=new THREE.BufferGeometry(),indices=[];
- foamPositions=new Float32Array(foamCapacity*FOAM_VERTICES*3);
- foamColors=new Float32Array(foamCapacity*FOAM_VERTICES*3);
- for(let i=0;i<foamCapacity;i++){
-  const start=i*FOAM_VERTICES;
-  for(let j=0;j<FOAM_TRIANGLES;j++){
-   indices.push(start,start+1+j,start+1+(j+1)%FOAM_TRIANGLES);
-  }
- }
+ foamPositions=new Float32Array(foamCapacity*4*3);
+ foamColors=new Float32Array(foamCapacity*4*3);
+ for(let i=0;i<foamCapacity;i++){const v=i*4;indices.push(v,v+2,v+1,v,v+3,v+2);}
  geo.setAttribute('position',new THREE.BufferAttribute(foamPositions,3).setUsage(THREE.DynamicDrawUsage));
  geo.setAttribute('color',new THREE.BufferAttribute(foamColors,3).setUsage(THREE.DynamicDrawUsage));
- geo.setIndex(indices);
- geo.setDrawRange(0,0);
- const mat=new THREE.MeshBasicMaterial({
-  color:0xffffff,vertexColors:true,transparent:false,
-  depthTest:false,depthWrite:false,side:THREE.DoubleSide
- });
- foamMesh=new THREE.Mesh(geo,mat);
- foamMesh.frustumCulled=false;foamMesh.renderOrder=3;
- scene.add(foamMesh);
+ geo.setIndex(indices);geo.setDrawRange(0,0);
+ const mat=new THREE.MeshBasicMaterial({color:0xffffff,vertexColors:true,
+  transparent:false,depthTest:false,depthWrite:false,side:THREE.DoubleSide});
+ foamMesh=new THREE.Mesh(geo,mat);foamMesh.frustumCulled=false;foamMesh.renderOrder=3;scene.add(foamMesh);
 }
 function updateWhitewater(t){
  if(!foamMesh||!boat)return;
- if((foamStrength<.01||wakeAmount<.01)&&!foamDebug){
-  foamMesh.geometry.setDrawRange(0,0);
-  foamPatchCount=0;
-  $('foamStatus').textContent='Foam: 0 patches';
-  return;
- }
+ if((foamStrength<.01||wakeAmount<.01)&&!foamDebug){foamMesh.geometry.setDrawRange(0,0);foamPatchCount=0;$('foamStatus').textContent='Foam: 0 patches';return;}
  let count=0;
- const emit=(x,z,radius,intensity,rotation,seed=0)=>{
-  if(count>=foamCapacity||intensity<.032)return;
-  const strength=Math.min(1,Math.max(0,intensity));
-  const start=count*FOAM_VERTICES*3;
-  const centerY=oceanHeight(x,z,t)+.14;
-  foamPositions[start]=x;
-  foamPositions[start+1]=centerY;
-  foamPositions[start+2]=z;
-  const color=foamDebug?1:Math.min(1,.78+.22*strength);
-  for(let j=0;j<FOAM_TRIANGLES;j++){
-   const angle=rotation+2*Math.PI*j/FOAM_TRIANGLES;
-   const jagged=.67+.3*Math.sin(seed*2.17+j*7.93+t*.45)+.12*Math.sin(seed*4.3+j*3.71);
-   const rr=Math.max(.35,radius*jagged);
-   const wx=x+Math.cos(angle)*rr,wz=z+Math.sin(angle)*rr;
-   const p=start+(j+1)*3;
-   foamPositions[p]=wx;
-   foamPositions[p+1]=oceanHeight(wx,wz,t)+.14;
-   foamPositions[p+2]=wz;
-  }
-  for(let j=0;j<FOAM_VERTICES;j++){
-   const p=start+j*3;
-   const k=foamDebug?1:Math.min(1,Math.max(.64,color*(.89+.09*Math.sin(seed*4.5+j*2.3))));
-   foamColors[p]=k;foamColors[p+1]=Math.min(1,k+.045);foamColors[p+2]=1;
+ function emit(x,z,radius,strength,angle,seed){
+  if(count>=foamCapacity||strength<.025)return;
+  const cs=Math.cos(angle),sn=Math.sin(angle);
+  const ratio=.68+.23*Math.sin(seed*1.43+t*.43);
+  const offsets=[[-1,-1],[1,-1],[1,1],[-1,1]],vi=count*12;
+  for(let k=0;k<4;k++){
+   const u=offsets[k][0]*radius,v=offsets[k][1]*radius*ratio;
+   const wx=x+u*cs-v*sn,wz=z+u*sn+v*cs,p=vi+k*3;
+   foamPositions[p]=wx;foamPositions[p+1]=oceanHeight(wx,wz,t)+.26;foamPositions[p+2]=wz;
+   const shade=foamDebug?1:Math.min(1,.8+.2*strength);
+   foamColors[p]=shade;foamColors[p+1]=Math.min(1,shade+.045);foamColors[p+2]=1;
   }
   count++;
- };
- // Wake history gives a boat-fixed, widening, aging trail. Each trail
- // sample spawns a central churn and offset breaking patches.
- for(let i=0;i<wakeTrail.length;i++){
-  const p=wakeTrail[i];
-  const life=Math.max(0,1-p.age/6.5);
-  if(life<=0)continue;
-  const power=propulsionMode==='power'?1:.46;
-  const intensity=life*p.strength*power*foamStrength;
-  const spread=.44+p.age*.55;
-  const sidewaysX=p.forwardZ,sidewaysZ=-p.forwardX;
-  const bx=p.x-p.forwardX*(.35+p.age*.42);
-  const bz=p.z-p.forwardZ*(.35+p.age*.42);
-  const wobble=Math.sin(i*2.17+p.age*3.4)*.17;
-  emit(bx,bz,.52+.25*life,intensity*.83,p.heading,i+.3);
+ }
+ for(let i=0;i<wakeTrail.length&&count<foamCapacity-12;i++){
+  const p=wakeTrail[i],life=Math.max(0,1-p.age/6.5),power=propulsionMode==='power'?1:.48;
+  const intensity=life*p.strength*foamStrength*power*wakeAmount;
+  if(intensity<.035)continue;
+  const sx=p.forwardZ,sz=-p.forwardX;
+  const x=p.x-p.forwardX*(.35+p.age*.25),z=p.z-p.forwardZ*(.35+p.age*.25),spread=.35+p.age*.47;
+  emit(x,z,.35+.25*life,intensity*.83,p.heading+i*.27,i);
   for(const side of [-1,1]){
-   const x=bx+sidewaysX*side*(spread+wobble);
-   const z=bz+sidewaysZ*side*(spread+wobble);
-   emit(x,z,.39+.32*life,intensity*.94,p.heading+side*.59,i+side*1.7);
-   if(i%2===0){
-    emit(x-sidewaysX*side*.42,z-sidewaysZ*side*.42,.26+.13*life,
-      intensity*.62,p.heading+i*.32,i+side*8.3);
-   }
+   emit(x+sx*side*spread,z+sz*side*spread,.40+.25*life,
+    intensity*.92,p.heading+side*.3+i*.17,i+side*3.71);
   }
  }
- // Fresh turbulent whitewater behind the stern is visible even before
- // enough path history has accumulated.
- if(boatSpeed>.4&&wakeAmount>.01){
-  const fX=-Math.sin(boatHeading),fZ=-Math.cos(boatHeading);
-  const sX=fZ,sZ=-fX;
-  const energy=Math.min(1,boatSpeed/5)*foamStrength*wakeAmount;
+ if(boatSpeed>.18&&wakeAmount>.01){
+  const fx=-Math.sin(boatHeading),fz=-Math.cos(boatHeading),sx=fz,sz=-fx;
+  const power=Math.min(1,boatSpeed/4)*foamStrength*wakeAmount;
   for(let i=0;i<12;i++){
-   const side=(i&1)?1:-1;
-   const back=.85+Math.floor(i/2)*.40;
-   const wx=boat.position.x-fX*back+sX*side*(.35+back*.16);
-   const wz=boat.position.z-fZ*back+sZ*side*(.35+back*.16);
-   emit(wx,wz,.30+.09*Math.floor(i/2),energy*(.91-i*.038),
-        boatHeading+i*.43,i*2.9);
+   const side=i%2?1:-1,back=.7+Math.floor(i/2)*.36;
+   emit(boat.position.x-fx*back+sx*side*(.3+.13*back),
+    boat.position.z-fz*back+sz*side*(.3+.13*back),
+    .35+.065*Math.floor(i/2),power*(.95-i*.045),boatHeading+i*.31,i*4.3);
   }
  }
  if(foamDebug){
   for(let i=0;i<8;i++){
-   const theta=i*Math.PI/4;
-   emit(boat.position.x+Math.cos(theta)*3.4,
-        boat.position.z+Math.sin(theta)*3.4,1.2,1,theta,i+1);
+   const a=i*Math.PI/4;
+   emit(boat.position.x+Math.cos(a)*3.4,boat.position.z+Math.sin(a)*3.4,1.22,1,a,i);
   }
  }
  foamPatchCount=count;
- foamMesh.geometry.setDrawRange(0,count*FOAM_TRIANGLES*3);
+ foamMesh.geometry.setDrawRange(0,count*6);
  foamMesh.geometry.attributes.position.needsUpdate=true;
  foamMesh.geometry.attributes.color.needsUpdate=true;
- $('foamStatus').textContent='Foam: '+count+' patches'+(foamDebug?' · TEST':'');
+ $('foamStatus').textContent='Foam: '+count+' patches'+(foamDebug?' TEST':'');
 }
 function animateWaves(t){
  if(!boat)return;
@@ -672,7 +620,12 @@ async function init3D(forceWebGL=false){
      amount:wakeAmount*(propulsionMode==='power'?1.45:1)});
    trackWake(dt);
    animateWaves(time);
-   updateWhitewater(time);
+   try{updateWhitewater(time);}
+   catch(error){
+    $('foamStatus').textContent='Foam error: '+String(error?.message||error);
+    if(foamMesh)foamMesh.visible=false;
+    console.error('Foam update failed',error);
+   }
   }
   updateCamera(dt);
   const hint=$('cameraHint');

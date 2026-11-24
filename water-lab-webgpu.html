@@ -127,7 +127,7 @@ let volumetricStrength=.85,shaftQuality='medium',lightShafts=null,shaftMeshes=[]
 let opticalFallbackTriggered=false;
 const safeStartup=new URLSearchParams(location.search).has('safe');
 let gpuFFT=null,waveEngine=safeStartup?'analytic':'hybrid',fftEnergy=3,fftMix=0,fftStarting=false,fftFault='',fftAttempted=false,fftRecoveryCount=0;
-if(safeStartup){reflectionMode='basic';opticalMode='legacy';volumetricStrength=0;}
+if(safeStartup){reflectionMode='basic';opticalMode='legacy';volumetricStrength=0;renderScale=1;}
 let cameraMode='chase',orbitYaw=.12,orbitPitch=.31,orbitDistance=15;
 let cameraIntroStart=performance.now(),pointerOrigin=null,pinchDistance=null;
 const cameraTarget={x:-3.2,y:1,z:-13},activePointers=new Map();
@@ -180,7 +180,7 @@ function disposeSurface(mesh){
 // input, not another set of geometry waves: micro-slopes affect lighting
 // without adding vertices or increasing local solver resolution.
 function createWaveNormalMap(fine=false){
- const size=fine?256:256,arr=new Uint8Array(size*size*4);
+ const size=256,arr=new Uint8Array(size*size*4);
  const waves=fine?[
   [8,13,.22,2.4],[-15,11,.20,5.2],[22,-19,.15,.7],
   [28,25,.10,4.6],[-37,-31,.07,1.4]
@@ -1183,8 +1183,8 @@ async function init3D(forceWebGL=false){
  status((forceWebGL?'WebGL fallback':'WebGPU probe')+': loading Three.js…');
  // Dynamic imports let us display errors if a module or CDN request fails.
  THREE=forceWebGL?await import('https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.module.js'):await import('three/webgpu');
- renderer=forceWebGL?new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'}):
-   new THREE.WebGPURenderer({antialias:true,powerPreference:'high-performance',forceWebGL:false});
+ renderer=forceWebGL?new THREE.WebGLRenderer({antialias:!safeStartup,powerPreference:'high-performance'}):
+   new THREE.WebGPURenderer({antialias:!safeStartup,powerPreference:'high-performance',forceWebGL:false});
  renderer.setPixelRatio(Math.min(devicePixelRatio,renderScale));
  renderer.setSize(innerWidth,innerHeight);
  renderer.outputColorSpace=THREE.SRGBColorSpace;
@@ -1208,7 +1208,10 @@ async function init3D(forceWebGL=false){
  const sun=new THREE.DirectionalLight(0xffeddb,3.5);sun.position.set(16,35,8);scene.add(sun);
  const floor=createSeabed();
  makeBoat();makeSurface();createFoamField();createVolumetricShafts();resetCamera();
- if(safeStartup){$('volumetricStrength').value='0';$('volumetricStrengthOut').textContent='0.00';}
+ if(safeStartup){
+  $('volumetricStrength').value='0';$('volumetricStrengthOut').textContent='0.00';
+  $('renderScale').value='1';$('renderScaleOut').textContent='1.00×';
+ }
  if(isWebGPU&&waveEngine!=='analytic')startFFT();
  else fftMessage(safeStartup?'safe startup · analytic waves':'WebGL fallback · procedural');
  if(safeStartup){

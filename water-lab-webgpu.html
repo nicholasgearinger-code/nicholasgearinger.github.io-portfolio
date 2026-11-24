@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 21.6 reflection refraction scattering</title>
+<title>Rift Water Lab · WebGPU 21.7 underwater volumetric light</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -33,7 +33,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 </script></head>
 <body>
 <div id="dashboard">
-<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">21.6 · ocean light transport</span></h1>
+<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">21.7 · underwater volumetric shafts</span></h1>
 <p>This is a <strong>separate renderer test</strong>, not a port of the existing FFT ocean.</p>
 <div id="metrics"><span id="backend">Backend: detecting</span><span id="fps">FPS: —</span><span id="resolution">Resolution: —</span><span id="buoyancyState">Buoyancy: initializing</span><span id="boatSpeed">Speed: 0.0</span><span id="driveStatus">Drive: STOP</span><span id="distanceStatus">Travel: 0 m</span><span id="heading">Heading: 0°</span><span id="wakeStatus">Wake: dynamic</span><span id="fftStatus">FFT: initializing</span><span id="wakeSignal">Ripples: waiting</span><span id="foamStatus">Foam: initializing</span></div>
 <p id="log">Checking GPU access…</p></div></div>
@@ -54,6 +54,8 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Reflection intensity <input id="reflectionStrength" aria-label="Reflection intensity" type="range" min="0" max="2" step=".05" value="1.00"></label><output id="reflectionStrengthOut">1.00</output></div>
 <div class="row"><label>Subsurface light <input id="subsurfaceLight" aria-label="Subsurface light" type="range" min="0" max="2" step=".05" value=".85"></label><output id="subsurfaceLightOut">0.85</output></div>
 <div class="row"><label>Underwater scattering <input id="underwaterScatter" aria-label="Underwater scattering" type="range" min="0" max="2" step=".05" value="1"></label><output id="underwaterScatterOut">1.00</output></div>
+<div class="row"><label>Volumetric sunlight <input id="volumetricStrength" aria-label="Volumetric sunlight strength" type="range" min="0" max="2" step=".05" value=".85"></label><output id="volumetricStrengthOut">0.85</output></div>
+<div class="row"><label>Light shaft detail <select id="shaftQuality"><option value="low">Low · 6 shafts</option><option value="medium" selected>Balanced · 12 shafts</option><option value="high">High · 20 shafts</option></select></label></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
 <div class="row"><label>Wake physics <input id="wakeAmount" aria-label="Boat wake strength" type="range" min="0" max="2" step=".05" value="1.1"></label><output id="wakeAmountOut">1.10</output><button id="resetWake">Clear wake</button></div>
@@ -119,6 +121,8 @@ let opticalMode='lagoon',waterClarity=1.10,waterFloor=null,renderQuality='balanc
 let depthRefraction=1,underwaterScatter=1,waveSmoothness=1,reflectionStrength=1,subsurfaceLight=.85;
 let thicknessTexture=null,thicknessPixels=null,lastThicknessX=Infinity,lastThicknessZ=Infinity;
 let underwaterActive=false,underwaterFog=null,dayFog=null,waterDepthAtBoat=4;
+let volumetricStrength=.85,shaftQuality='medium',lightShafts=null,shaftMeshes=[],volumetricStatus='';
+
 let opticalFallbackTriggered=false;
 const safeStartup=new URLSearchParams(location.search).has('safe');
 let gpuFFT=null,waveEngine=safeStartup?'analytic':'hybrid',fftEnergy=3,fftMix=0,fftStarting=false,fftFault='',fftAttempted=false,fftRecoveryCount=0;
@@ -299,6 +303,96 @@ function updateThicknessMap(force=false){
  }
  thicknessTexture.needsUpdate=true;
  waterDepthAtBoat=seabedDepth(cx,cz);
+}
+// Underwater volumetric-light approximation: camera-local light columns
+// with radial soft edges, animated modulation from the actual water surface,
+// depth attenuation and the same sun direction as the scene lighting.
+// Geometry is deliberately small (12 shafts × 8 sides × 8 levels).
+// Unlike full ray marching this is not a true volume integral; it allows
+// iPhone WebGPU to display moving underwater light shafts cheaply.
+function makeShaftGeometry(seed){
+ const sides=8,levels=8,positions=[],colors=[],indices=[];
+ for(let j=0;j<=levels;j++){
+  const v=j/levels;
+  const depth=14*v;
+  const width=(.4+depth*.075)*(1+Math.sin(seed*2.1)*.14);
+  for(let i=0;i<=sides;i++){
+   const a=i/sides*2*Math.PI;
+   const edge= i===sides?0:i/sides;
+   const radius=width*(.8+.2*Math.sin(a*3+seed));
+   const xx=Math.cos(a)*radius,zz=Math.sin(a)*radius;
+   positions.push(xx-depth*.45,-depth,zz-depth*.23);
+   // Each circular ring fades along the shaft; diffuse cyan white
+   // matches the attenuation profile of tropical coastal water.
+   const fade=Math.pow(1-v,.95);
+   colors.push((.34+.15*fade),(.64+.19*fade),(.72+.19*fade));
+  }
+ }
+ for(let j=0;j<levels;j++)for(let i=0;i<sides;i++){
+  const a=j*(sides+1)+i,b=a+sides+1;
+  indices.push(a,b,a+1,b,b+1,a+1);
+ }
+ const geo=new THREE.BufferGeometry();
+ geo.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
+ geo.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
+ geo.setIndex(indices);
+ geo.computeVertexNormals();
+ return geo;
+}
+function createVolumetricShafts(){
+ if(lightShafts){
+  scene.remove(lightShafts);
+  for(const mesh of shaftMeshes){mesh.geometry.dispose();mesh.material.dispose();}
+ }
+ lightShafts=new THREE.Group();shaftMeshes=[];
+ const count=20;
+ for(let i=0;i<count;i++){
+  const mat=new THREE.MeshBasicMaterial({
+   color:0xc6ffff,vertexColors:true,transparent:true,
+   opacity:.035,blending:THREE.AdditiveBlending,depthWrite:false,
+   depthTest:true,side:THREE.DoubleSide,fog:false
+  });
+  const mesh=new THREE.Mesh(makeShaftGeometry(i+.7),mat);
+  mesh.frustumCulled=false;
+  mesh.userData.seed=i*2.399963229728653;
+  mesh.userData.radius=3.3+Math.sqrt(i+.5)*2.4;
+  lightShafts.add(mesh);shaftMeshes.push(mesh);
+ }
+ lightShafts.visible=false;
+ scene.add(lightShafts);
+}
+function updateVolumetricShafts(t){
+ if(!lightShafts||!camera)return;
+ const enabled=volumetricStrength>.01&&underwaterActive&&opticalMode!=='legacy';
+ lightShafts.visible=enabled;
+ if(!enabled)return;
+ const max=shaftQuality==='high'?20:shaftQuality==='low'?6:12;
+ const depth=Math.max(0,-camera.position.y);
+ const waterFade=Math.exp(-depth*(opticalMode==='deep'?.16:.095)/Math.max(.45,waterClarity));
+ // Follow the camera at a coarse cadence; shafts drift with wave optics.
+ const cx=Math.round(camera.position.x/5)*5;
+ const cz=Math.round(camera.position.z/5)*5;
+ for(let i=0;i<shaftMeshes.length;i++){
+  const mesh=shaftMeshes[i];
+  if(i>=max){mesh.visible=false;continue;}
+  const phase=mesh.userData.seed;
+  const radius=mesh.userData.radius;
+  const x=cx+Math.cos(phase)*radius,z=cz+Math.sin(phase)*radius;
+  const surface=oceanHeight(x,z,t);
+  const floorX=x-(waterFloor?.position.x||0);
+  const floorZ=z-(waterFloor?.position.z||0);
+  const bottom=-seabedDepth(floorX,floorZ);
+  const depthRange=surface-bottom;
+  mesh.visible=depthRange>1.3;
+  if(!mesh.visible)continue;
+  // Periodic caustic focusing from the same moving wave field.
+  const wave=waveField(x,z,t,{});
+  const focusing=.65+.35*Math.sin(t*.95+phase*2.7+wave.height*1.6);
+  mesh.material.opacity=Math.min(.20,.024*volumetricStrength*waterFade*
+    focusing*(opticalMode==='deep'?.58:1));
+  mesh.position.set(x,surface-.06,z);
+  mesh.scale.y=Math.max(.16,Math.min(1,depthRange/14));
+ }
 }
 function updateUnderwaterScattering(){
  if(!camera||!scene)return;
@@ -1011,6 +1105,11 @@ $('depthRefraction').oninput=()=>{
  $('depthRefractionOut').textContent=depthRefraction.toFixed(2);
  syncWaterDetail();
 };
+$('volumetricStrength').oninput=()=>{
+ volumetricStrength=Number($('volumetricStrength').value);
+ $('volumetricStrengthOut').textContent=volumetricStrength.toFixed(2);
+};
+$('shaftQuality').onchange=()=>{shaftQuality=$('shaftQuality').value;};
 $('underwaterScatter').oninput=()=>{
  underwaterScatter=Number($('underwaterScatter').value);
  $('underwaterScatterOut').textContent=underwaterScatter.toFixed(2);
@@ -1096,7 +1195,7 @@ async function init3D(forceWebGL=false){
  const ambient=new THREE.HemisphereLight(0xc7eeff,0x0b3144,1.05);scene.add(ambient);
  const sun=new THREE.DirectionalLight(0xffeddb,3.5);sun.position.set(16,35,8);scene.add(sun);
  const floor=createSeabed();
- makeBoat();makeSurface();createFoamField();resetCamera();
+ makeBoat();makeSurface();createFoamField();createVolumetricShafts();resetCamera();
  if(isWebGPU&&waveEngine!=='analytic')startFFT();
  else fftMessage(safeStartup?'safe startup · analytic waves':'WebGL fallback · procedural');
  if(safeStartup){
@@ -1140,6 +1239,7 @@ async function init3D(forceWebGL=false){
   }
   updateCamera(dt);
   updateUnderwaterScattering();
+  updateVolumetricShafts(time);
   if(skyDome)skyDome.position.copy(camera.position);
   const hint=$('cameraHint');
   if(hint){const opacity=Math.max(0,1-(performance.now()-cameraIntroStart-1600)/1300);hint.style.opacity=String(Math.max(0,opacity));}

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 16.1 diagnostic</title>
+<title>Rift Water Lab · WebGPU 16.2 visible waves</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -18,13 +18,14 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 </script></head>
 <body>
 <div id="dashboard">
-<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">16.1 · GPU diagnostic</span></h1>
+<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">16.2 · visible waves</span></h1>
 <p>This is a <strong>separate renderer test</strong>, not a port of the existing FFT ocean.</p>
 <div id="metrics"><span id="backend">Backend: detecting</span><span id="fps">FPS: —</span><span id="resolution">Resolution: —</span></div>
 <p id="log">Checking GPU access…</p></div></div>
 <div id="controls" class="panel">
 <div class="row"><a href="water-lab.html?v=15-2">Return to existing Water Lab</a><button id="pause">Pause</button><button id="detail">Detail: medium</button></div>
-<p>Animated wave geometry, realistic light/shadow cues, and transparent material are placeholders for backend testing. No foam or particle effects.</p>
+<div class="row"><label>Wave height <input id="waveHeight" aria-label="Wave height" type="range" min=".25" max="2.5" step=".05" value="1.5"></label><output id="waveHeightOut">1.50</output></div>
+<p>Backend and wave-motion visibility test. This surface uses a simple physically lit material, not the full FFT ocean.</p>
 </div>
 <script>
 (function(){
@@ -61,17 +62,17 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <script type="module">
 const $=id=>document.getElementById(id);
 let renderer,scene,camera,water,geometry,base,THREE;
-let paused=false,detailIndex=1,samples=0,last=performance.now();
-const levels=[36,64,96];let isWebGPU=false,clockTime=0,loopActive=false;
+let paused=false,detailIndex=1,samples=0,last=performance.now(),waveHeight=1.5;
+const levels=[48,80,120];let isWebGPU=false,clockTime=0,loopActive=false;
 function status(m){window.__waterFallback?.notice(m);}
 function makeSurface(){
  if(water){scene.remove(water);water.geometry.dispose();water.material.dispose();}
  const n=levels[detailIndex];
- geometry=new THREE.PlaneGeometry(180,180,n,n);geometry.rotateX(-Math.PI/2);
+ geometry=new THREE.PlaneGeometry(110,110,n,n);geometry.rotateX(-Math.PI/2);
  base=Float32Array.from(geometry.attributes.position.array);
  // Standard material verifies PBR lights without a costly transmission subpass.
  const material=new THREE.MeshStandardMaterial({
-   color:0x12a6bd,roughness:.23,metalness:.05,side:THREE.DoubleSide
+   color:0x087c97,roughness:.18,metalness:.12,side:THREE.DoubleSide
  });
  water=new THREE.Mesh(geometry,material);water.frustumCulled=false;scene.add(water);
  $('resolution').textContent='Grid: '+n+' × '+n;
@@ -80,11 +81,15 @@ function animateWaves(t){
  const position=geometry.attributes.position,arr=position.array;
  for(let i=0;i<arr.length;i+=3){
   const x=base[i],z=base[i+2];
-  arr[i+1]=.38*Math.sin(x*.11+z*.03-t*.8)+.24*Math.sin(x*-.06+z*.10-t*.6);
+  const swell=x*.092+z*.061-t*.95;
+  const wind=x*-.073+z*.14-t*1.36;
+  const ripple=x*.24-z*.21-t*2.25;
+  arr[i+1]=waveHeight*(.72*Math.sin(swell)+.38*Math.sin(wind)+.12*Math.sin(ripple));
  }
  position.needsUpdate=true;geometry.computeVertexNormals();
 }
 $('pause').onclick=()=>{paused=!paused;$('pause').textContent=paused?'Resume':'Pause';};
+$('waveHeight').oninput=()=>{waveHeight=Number($('waveHeight').value);$('waveHeightOut').textContent=waveHeight.toFixed(2);};
 $('detail').onclick=()=>{detailIndex=(detailIndex+1)%levels.length;if(scene)makeSurface();$('detail').textContent=['Detail: low','Detail: medium','Detail: high'][detailIndex];};
 async function init3D(forceWebGL=false){
  status((forceWebGL?'WebGL fallback':'WebGPU probe')+': loading Three.js…');
@@ -103,10 +108,10 @@ async function init3D(forceWebGL=false){
  status('Renderer initialized. Drawing a simple lit surface. The original FFT lab is unchanged.');
  scene=new THREE.Scene();scene.background=new THREE.Color(0x78bde5);
  camera=new THREE.PerspectiveCamera(63,innerWidth/innerHeight,.1,550);
- camera.position.set(0,3,15);camera.lookAt(0,0,-20);
- const ambient=new THREE.HemisphereLight(0xc7eeff,0x165263,2.1);scene.add(ambient);
- const sun=new THREE.DirectionalLight(0xffeddb,2.9);sun.position.set(16,35,8);scene.add(sun);
- const floor=new THREE.Mesh(new THREE.PlaneGeometry(180,180),new THREE.MeshStandardMaterial({color:0xb9c7ae,roughness:1}));
+ camera.position.set(0,2.3,11);camera.lookAt(0,-.15,-13);
+ const ambient=new THREE.HemisphereLight(0xc7eeff,0x0b3144,1.05);scene.add(ambient);
+ const sun=new THREE.DirectionalLight(0xffeddb,3.5);sun.position.set(16,35,8);scene.add(sun);
+ const floor=new THREE.Mesh(new THREE.PlaneGeometry(110,110),new THREE.MeshStandardMaterial({color:0xb9c7ae,roughness:1}));
  floor.rotation.x=-Math.PI/2;floor.position.y=-5;scene.add(floor);
  const object=new THREE.Mesh(new THREE.IcosahedronGeometry(2,2),new THREE.MeshStandardMaterial({color:0xffba7c,roughness:.43}));
  object.position.set(-7,2,-20);scene.add(object);

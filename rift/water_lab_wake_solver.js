@@ -82,10 +82,13 @@ export function createWakeSolver({segments=112,size=110}={}){
       // generated centimetre-scale waves that were invisible from the
       // chase camera. Stronger, narrower displacement and bilateral
       // sources create measurable wake crests without painted lines.
-      pressure(x+dx*2.2,z+dz*2.2,145*movement*dt,1.18);
-      pressure(x-dx*1.2,z-dz*1.2,-165*movement*dt,1.45);
-      pressure(x-dx*2.0+sx*1.1,z-dz*2.0+sz*1.1,104*movement*dt,.95);
-      pressure(x-dx*2.0-sx*1.1,z-dz*2.0-sz*1.1,104*movement*dt,.95);
+      // Pressure tuned for the 0.30 m near-player grid; lower energy
+      // avoids a saturated trough and preserves propagating ripples.
+      const energy=Math.min(1,cell/.62);
+      pressure(x+dx*2.2,z+dz*2.2,96*energy*movement*dt,1.05);
+      pressure(x-dx*1.2,z-dz*1.2,-108*energy*movement*dt,1.30);
+      pressure(x-dx*2.0+sx*1.1,z-dz*2.0+sz*1.1,68*energy*movement*dt,.82);
+      pressure(x-dx*2.0-sx*1.1,z-dz*2.0-sz*1.1,68*energy*movement*dt,.82);
     }
     // A bobbing hull moves water even when no forward wake exists.
     // Apply an opposing displacement at each side of the hull to drive

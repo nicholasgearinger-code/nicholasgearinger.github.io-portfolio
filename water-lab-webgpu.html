@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 24.0 hull and fluid physics</title>
+<title>Rift Water Lab · WebGPU 24.1 streamlined interface</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -27,18 +27,73 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 #cameraHint{position:absolute;top:48%;left:50%;transform:translate(-50%,-50%);z-index:2;background:#0a2535d9;border:1px solid #4da0aa;border-radius:11px;padding:8px 12px;color:#e3ffff;font-size:12px;pointer-events:none;opacity:.9}
 #modeSwitch[aria-pressed="true"]{background:#247b8a;border-color:#78e5df}
 @media(max-width:640px){#controls{max-height:21vh}#dashboard .panel{padding:9px 11px}#dashboard p{font-size:11px}#sailControls button{min-height:54px}}
+/* 24.1: unobstructed mobile-first game HUD. All diagnostics and
+   tuning controls remain accessible but are collapsed by default. */
+#dashboard{top:max(8px,env(safe-area-inset-top));left:10px;right:10px;display:block}
+#dashboard .panel{padding:8px 11px;box-shadow:0 5px 20px #0016}
+#dashboard .hudRow{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+#dashboard .hudTitle{font-size:13px;letter-spacing:.01em;font-weight:750;color:#c9faff}
+#dashboard .hudReadout{margin-left:auto;display:flex;gap:12px;font-size:12px;font-variant-numeric:tabular-nums;color:#c8f4ed}
+#dashboard #fps,#dashboard #boatSpeed{white-space:nowrap}
+#dashboard details{margin-top:2px}
+#dashboard summary{font-size:11px;color:#a8d7e2;cursor:pointer;padding:4px 0;list-style-position:inside}
+#dashboard details:not([open]) summary{margin-top:-2px}
+#dashboard .diagnosticBody{border-top:1px solid #47778666;padding-top:5px}
+#dashboard #metrics{font-size:11px;gap:7px 12px}
+#dashboard #log{margin-top:6px}
+#controls{bottom:calc(88px + env(safe-area-inset-bottom));max-height:none;overflow:visible;
+ left:12px;right:12px;padding:8px 10px}
+#controls .quickBar{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+#controls .quickBar button{padding:9px 10px;flex:1;min-width:0;font-size:12px}
+#settingsToggle[aria-expanded="true"]{background:#237d87;border-color:#a0ebef}
+#settingsDrawer{position:absolute;bottom:calc(100% + 8px);left:0;right:0;
+ max-height:min(58vh,560px);overflow-y:auto;overscroll-behavior:contain;
+ background:#092737f5;border:1px solid #4b9eaa;border-radius:15px;
+ padding:11px;box-shadow:0 16px 34px #001a;backdrop-filter:blur(13px)}
+#settingsDrawer[hidden]{display:none}
+#settingsDrawer .row{margin-top:10px}
+#settingsDrawer .row:first-child{margin-top:0}
+#settingsDrawer input[type=range]{max-width:44vw}
+#settingsDrawer select{max-width:min(75vw,330px)}
+#settingsDrawer p{padding-top:6px}
+@media(max-width:640px){
+ #dashboard .panel{padding:6px 10px}
+ #dashboard .hudTitle{font-size:12px}
+ #dashboard .hudReadout{gap:9px;font-size:11px}
+ #controls{max-height:none;padding:7px}
+ #settingsDrawer{max-height:60vh}
+ #controls .quickBar button{font-size:12px;padding:8px 7px}
+}
 </style>
 <script type="importmap">
 {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.webgpu.js","three/webgpu":"https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.webgpu.js","three/tsl":"https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.tsl.js"}}
 </script></head>
 <body>
 <div id="dashboard">
-<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">24.0 · dynamic hull and fluid physics</span></h1>
-<p>This is a <strong>separate renderer test</strong>, not a port of the existing FFT ocean.</p>
-<div id="metrics"><span id="backend">Backend: detecting</span><span id="fps">FPS: —</span><span id="resolution">Resolution: —</span><span id="buoyancyState">Buoyancy: initializing</span><span id="boatSpeed">Speed: 0.0</span><span id="driveStatus">Drive: STOP</span><span id="distanceStatus">Travel: 0 m</span><span id="heading">Heading: 0°</span><span id="wakeStatus">Wake: dynamic</span><span id="fftStatus">FFT: initializing</span><span id="wakeSignal">Ripples: waiting</span><span id="foamStatus">Foam: initializing</span></div>
-<p id="log">Checking GPU access…</p></div></div>
+ <div class="panel" id="hudPanel">
+  <div class="hudRow">
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.1</span></span>
+   <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
+  </div>
+  <details id="diagnostics">
+   <summary>Diagnostics &amp; performance</summary>
+   <div class="diagnosticBody">
+    <p>Separate renderer test; the original FFT lab remains unchanged.</p>
+    <div id="metrics"><span id="backend">Backend: detecting</span><span id="resolution">Resolution: —</span><span id="buoyancyState">Buoyancy: initializing</span><span id="driveStatus">Drive: STOP</span><span id="distanceStatus">Travel: 0 m</span><span id="heading">Heading: 0°</span><span id="wakeStatus">Wake: dynamic</span><span id="fftStatus">FFT: initializing</span><span id="wakeSignal">Ripples: waiting</span><span id="foamStatus">Foam: initializing</span></div>
+    <p id="log" aria-live="polite">Checking GPU access…</p>
+   </div>
+  </details>
+ </div>
+</div>
 <div id="controls" class="panel">
-<div class="row"><button id="testFoamTop">Whitewater test: OFF</button><button id="modeSwitch" aria-pressed="true">Camera: Chase</button><button id="resetCamera">Reset camera</button><button id="pause">Pause</button><button id="detail">Detail: medium</button><a href="water-lab.html?v=15-2">Old Water Lab</a></div>
+ <div class="quickBar">
+  <button id="modeSwitch" aria-pressed="true">Camera: Chase</button>
+  <button id="pause">Pause</button>
+  <button id="settingsToggle" type="button" aria-controls="settingsDrawer" aria-expanded="false">⚙ Settings</button>
+ </div>
+ <div id="settingsDrawer" hidden>
+ <div class="row"><button id="testFoamTop">Whitewater test: OFF</button><button id="resetCamera">Reset camera</button><button id="detail">Detail: medium</button><a href="water-lab.html?v=15-2">Old Water Lab</a></div>
+ 
 <div class="row"><label>Wave height <input id="waveHeight" aria-label="Wave height" type="range" min=".25" max="2.5" step=".05" value="1.5"></label><output id="waveHeightOut">1.50</output></div>
 <div class="row"><label>Wave shape <input id="waveChop" aria-label="Wave crest sharpness" type="range" min="0" max="1.2" step=".05" value=".45"></label><output id="waveChopOut">0.45</output></div>
 <div class="row"><label>Wave engine <select id="waveEngine"><option value="hybrid" selected>Validated GPU FFT + swells</option><option value="fft">Validated FFT only</option><option value="analytic">Safe analytic waves</option></select></label><button id="retryFFT">Restart FFT verification</button></div>
@@ -68,6 +123,8 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Forward power <input id="sailPower" type="range" min="0" max="1" step=".05" value=".85"></label><output id="sailPowerOut">85%</output></div>
 
 <p>Drive through directional ocean swells and watch hull-generated waves propagate behind you. Forward / Stop control propulsion; hold Left / Right to steer. Drag to orbit, pinch to zoom. Wake strength 0 disables interaction.</p>
+
+ </div>
 </div>
 <div id="sailControls" class="panel gameHelm">
 <button id="port" aria-label="Turn left">◀ Left</button>
@@ -78,6 +135,17 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="cameraHint">Drag to look around · Pinch to zoom</div>
 <script>
 (function(){
+ const toggle=document.getElementById('settingsToggle');
+ const drawer=document.getElementById('settingsDrawer');
+ if(toggle&&drawer){
+  toggle.addEventListener('click',()=>{
+   const open=drawer.hidden;
+   drawer.hidden=!open;
+   toggle.setAttribute('aria-expanded',String(open));
+   toggle.textContent=open?'✕ Close settings':'⚙ Settings';
+  });
+ }
+
  const log=document.getElementById('log'),status=document.getElementById('backend');
  const note=(m)=>{log.textContent=m;};
  window.addEventListener('error',e=>{note('Startup error: '+(e.message||'unknown')+' — use the return link to continue in the existing Water Lab.');status.textContent='Backend: error';});

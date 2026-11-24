@@ -121,12 +121,12 @@ let opticalMode='lagoon',waterClarity=1.10,waterFloor=null,renderQuality='balanc
 let depthRefraction=1,underwaterScatter=1,waveSmoothness=1,reflectionStrength=1,subsurfaceLight=.85;
 let thicknessTexture=null,thicknessPixels=null,lastThicknessX=Infinity,lastThicknessZ=Infinity;
 let underwaterActive=false,underwaterFog=null,dayFog=null,waterDepthAtBoat=4;
-let volumetricStrength=.85,shaftQuality='medium',lightShafts=null,shaftMeshes=[],volumetricStatus='';
+let volumetricStrength=.85,shaftQuality='medium',lightShafts=null,shaftMeshes=[],volumetricFault=false;
 
 let opticalFallbackTriggered=false;
 const safeStartup=new URLSearchParams(location.search).has('safe');
 let gpuFFT=null,waveEngine=safeStartup?'analytic':'hybrid',fftEnergy=3,fftMix=0,fftStarting=false,fftFault='',fftAttempted=false,fftRecoveryCount=0;
-if(safeStartup){reflectionMode='basic';opticalMode='legacy';}
+if(safeStartup){reflectionMode='basic';opticalMode='legacy';volumetricStrength=0;}
 let cameraMode='chase',orbitYaw=.12,orbitPitch=.31,orbitDistance=15;
 let cameraIntroStart=performance.now(),pointerOrigin=null,pinchDistance=null;
 const cameraTarget={x:-3.2,y:1,z:-13},activePointers=new Map();
@@ -1107,6 +1107,7 @@ $('depthRefraction').oninput=()=>{
 };
 $('volumetricStrength').oninput=()=>{
  volumetricStrength=Number($('volumetricStrength').value);
+ if(volumetricStrength>0)volumetricFault=false;
  $('volumetricStrengthOut').textContent=volumetricStrength.toFixed(2);
 };
 $('shaftQuality').onchange=()=>{shaftQuality=$('shaftQuality').value;};
@@ -1196,6 +1197,7 @@ async function init3D(forceWebGL=false){
  const sun=new THREE.DirectionalLight(0xffeddb,3.5);sun.position.set(16,35,8);scene.add(sun);
  const floor=createSeabed();
  makeBoat();makeSurface();createFoamField();createVolumetricShafts();resetCamera();
+ if(safeStartup){$('volumetricStrength').value='0';$('volumetricStrengthOut').textContent='0.00';}
  if(isWebGPU&&waveEngine!=='analytic')startFFT();
  else fftMessage(safeStartup?'safe startup · analytic waves':'WebGL fallback · procedural');
  if(safeStartup){
@@ -1239,7 +1241,17 @@ async function init3D(forceWebGL=false){
   }
   updateCamera(dt);
   updateUnderwaterScattering();
-  updateVolumetricShafts(time);
+  if(!volumetricFault){
+   try{updateVolumetricShafts(time);}
+   catch(error){
+    volumetricFault=true;volumetricStrength=0;
+    if(lightShafts)lightShafts.visible=false;
+    $('volumetricStrength').value='0';
+    $('volumetricStrengthOut').textContent='Off';
+    status('Volumetric lighting disabled after rendering error: '+String(error?.message||error));
+    console.error('Underwater light shafts failed',error);
+   }
+  }
   if(skyDome)skyDome.position.copy(camera.position);
   const hint=$('cameraHint');
   if(hint){const opacity=Math.max(0,1-(performance.now()-cameraIntroStart-1600)/1300);hint.style.opacity=String(Math.max(0,opacity));}

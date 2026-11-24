@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 24.5 wave curvature caustics</title>
+<title>Rift Water Lab · WebGPU 24.5.1 caustic contrast</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.5</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.5.1</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <details id="diagnostics">
@@ -126,6 +126,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Caustic model <select id="causticMode"><option value="wave" selected>24.5 · wave curvature</option><option value="classic">24.4 · animated pattern</option><option value="off">Off</option></select></label></div>
 <div class="row"><label>Wave caustics <input id="causticStrength" aria-label="Wave caustics" type="range" min="0" max="1.5" step=".05" value=".8"></label><output id="causticStrengthOut">0.80</output></div>
 <div class="row"><label>Caustic focusing <input id="causticFocus" aria-label="Caustic focusing" type="range" min=".4" max="2" step=".1" value="1.2"></label><output id="causticFocusOut">1.20</output></div>
+<div class="row"><label>Caustic contrast <input id="causticContrast" aria-label="Caustic contrast against sand" type="range" min="0" max="2.5" step=".05" value="1.45"></label><output id="causticContrastOut">1.45</output></div>
 <div class="row"><label>Volumetric sunlight <input id="volumetricStrength" aria-label="Volumetric sunlight strength" type="range" min="0" max="2" step=".05" value=".85"></label><output id="volumetricStrengthOut">0.85</output></div>
 <div class="row"><label>Light shaft detail <select id="shaftQuality"><option value="low">Low · 6 shafts</option><option value="medium" selected>Balanced · 12 shafts</option><option value="high">High · 20 shafts</option></select></label></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
@@ -207,7 +208,7 @@ let opticalMode='lagoon',waterClarity=1.10,waterFloor=null,renderQuality='balanc
 let depthRefraction=1,underwaterScatter=1,waveSmoothness=1,reflectionStrength=1,subsurfaceLight=.85;
 let thicknessTexture=null,thicknessPixels=null,lastThicknessX=Infinity,lastThicknessZ=Infinity;
 let underwaterActive=false,underwaterFog=null,dayFog=null,waterDepthAtBoat=4,underwaterBlend=0,underwaterSceneMode='reef',underwaterObjects=null,causticStrength=.8,causticMap=null,causticPixels=null,lastCausticUpdate=-100;
-let causticMode='wave',causticFocus=1.2,causticValidated=true,causticLastError='';
+let causticMode='wave',causticFocus=1.2,causticContrast=1.45,causticValidated=true,causticLastError='';
 let depthAbsorption=1,distanceExtinction=1,atmospherePreset='lagoon';
 let visibilityMode='unified',visibilityRange=34,seabedFade=1,underwaterSceneMaterials=[],
     seabedBaseColors=null,seabedMaterialColors=null,underwaterVisibilityColor=null,
@@ -786,8 +787,8 @@ function updateWaveCausticTexture(t){
   const border=Math.min(u,1-u,v,1-v);
   const feather=Math.min(1,border*24);
   // Smooth compression avoids strobing or extreme white clipping.
-  const bright=Math.min(1,focus*.92)*feather;
-  const value=Math.round(238*bright),i=(y*n+x)*4;
+  const bright=Math.min(1,Math.pow(Math.max(0,focus),.72)*1.12)*feather;
+  const value=Math.round(250*bright),i=(y*n+x)*4;
   causticPixels[i]=value;
   causticPixels[i+1]=Math.round(value*.97);
   causticPixels[i+2]=Math.round(value*.81);
@@ -872,8 +873,13 @@ function updateCausticLighting(cameraDepth=0){
    Math.exp(-waterPath*(atmospherePreset==='coastal'?.083:.044)/
       Math.max(.4,waterClarity))*
    (1-.35*Math.min(1,cameraDepth/25)):0;
- const emission=Math.max(0,Math.min(.55,strength*.38));
+ // Boost only the focused light and lower the sand albedo slightly.
+ // Both changes are reversible when comparing the original caustics.
+ const emphasis=causticMode==='wave'?causticContrast:1;
+ const emission=Math.max(0,Math.min(1.5,strength*.75*emphasis));
  floorCausticMaterial.emissiveIntensity=emission;
+ floorCausticMaterial.color.setScalar(causticMode==='wave'&&enabled?
+   Math.max(.64,1-.18*causticContrast):1);
  for(const material of underwaterObjectMaterials)material.emissiveIntensity=emission*.55;
 }
 function createSeabed(){
@@ -899,7 +905,7 @@ function createSeabed(){
  waterFloor=new THREE.Mesh(geo,mat);
  waterFloor.frustumCulled=false;
  if(!safeStartup){
-  mat.emissive=new THREE.Color(0xc9ffef);
+  mat.emissive=new THREE.Color(0xe3fff0);
   mat.emissiveMap=makeCausticTexture();
   mat.emissiveIntensity=.18;
   floorCausticMaterial=mat;
@@ -1604,10 +1610,16 @@ $('causticFocus').oninput=()=>{
  $('causticFocusOut').textContent=causticFocus.toFixed(2);
  updateCausticTexture(clockTime,true);
 };
+$('causticContrast').oninput=()=>{
+ causticContrast=Number($('causticContrast').value);
+ $('causticContrastOut').textContent=causticContrast.toFixed(2);
+ updateCausticLighting();
+};
 $('causticStrength').oninput=()=>{
  causticStrength=Number($('causticStrength').value);
  $('causticStrengthOut').textContent=causticStrength.toFixed(2);
  updateCausticTexture(clockTime,true);
+ updateCausticLighting();
 };
 $('visibilityMode').onchange=()=>{visibilityMode=$('visibilityMode').value;};
 $('visibilityRange').oninput=()=>{

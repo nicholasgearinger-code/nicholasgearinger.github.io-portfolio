@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 21.4 hull stability</title>
+<title>Rift Water Lab · WebGPU 21.5 smooth ocean normals</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -33,7 +33,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 </script></head>
 <body>
 <div id="dashboard">
-<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">21.4 · hull stability and clarity</span></h1>
+<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">21.5 · continuous wave normals</span></h1>
 <p>This is a <strong>separate renderer test</strong>, not a port of the existing FFT ocean.</p>
 <div id="metrics"><span id="backend">Backend: detecting</span><span id="fps">FPS: —</span><span id="resolution">Resolution: —</span><span id="buoyancyState">Buoyancy: initializing</span><span id="boatSpeed">Speed: 0.0</span><span id="driveStatus">Drive: STOP</span><span id="distanceStatus">Travel: 0 m</span><span id="heading">Heading: 0°</span><span id="wakeStatus">Wake: dynamic</span><span id="fftStatus">FFT: initializing</span><span id="wakeSignal">Ripples: waiting</span><span id="foamStatus">Foam: initializing</span></div>
 <p id="log">Checking GPU access…</p></div></div>
@@ -460,20 +460,23 @@ const waveComponents=[
 // Gerstner-style horizontal motion sharpens crests without fake foam.
 // Point sampling inverts the horizontal warp approximately, keeping the
 // boat's four buoyancy probes aligned with the rendered surface.
-const waveState={height:0,dx:0,dz:0};
+const waveState={height:0,dx:0,dz:0,slopeX:0,slopeZ:0};
 // All physical probes and water vertices call the same hybrid wave
 // function. Native WebGPU FFT supplies a time-evolved spectral height
 // field with asynchronous, throttled CPU readback; analytic rolling
 // swell remains an automatic fallback when compute is not available.
 function waveField(x,z,t,out=waveState){
- let elevation=0,dx=0,dz=0;
+ let elevation=0,dx=0,dz=0,slopeX=0,slopeZ=0;
  const hasFFT=fftMix>.0005&&gpuFFT?.ready&&!fftFault&&Number.isFinite(gpuFFT.rms);
  const analyticWeight=1-(hasFFT?fftMix*(waveEngine==='fft'?.80:.30):0);
  for(const wave of waveComponents){
   const phase=wave.kx*x+wave.kz*z-wave.omega*t+wave.phase;
   const amplitude=waveHeight*wave.amplitude*analyticWeight;
-  elevation+=amplitude*Math.sin(phase);
-  const lateral=waveChop*amplitude*Math.cos(phase);
+  const sinPhase=Math.sin(phase),cosPhase=Math.cos(phase);
+  elevation+=amplitude*sinPhase;
+  slopeX+=amplitude*wave.kx*cosPhase;
+  slopeZ+=amplitude*wave.kz*cosPhase;
+  const lateral=waveChop*amplitude*cosPhase;
   dx+=wave.dirX*lateral;dz+=wave.dirZ*lateral;
  }
  if(hasFFT){
@@ -487,6 +490,8 @@ function waveField(x,z,t,out=waveState){
    const sx=(gpuFFT.sample(x+d,z)-gpuFFT.sample(x-d,z))/(2*d);
    const sz=(gpuFFT.sample(x,z+d)-gpuFFT.sample(x,z-d))/(2*d);
    if(Number.isFinite(sx)&&Number.isFinite(sz)){
+    slopeX+=scale*sx;
+    slopeZ+=scale*sz;
     dx-=waveChop*scale*sx*.35;
     dz-=waveChop*scale*sz*.35;
    }
@@ -499,10 +504,10 @@ function waveField(x,z,t,out=waveState){
    fftMix=0;
    fftMessage('invalid data · analytic fallback');
   }
-  elevation=0;dx=0;dz=0;
+  elevation=0;dx=0;dz=0;slopeX=0;slopeZ=0;
   // The next frame safely recomputes all analytic swells.
  }
- out.height=elevation;out.dx=dx;out.dz=dz;
+ out.height=elevation;out.dx=dx;out.dz=dz;out.slopeX=slopeX;out.slopeZ=slopeZ;
  return out;
 }
 function fftMessage(message){$('fftStatus').textContent='FFT: '+message;}
@@ -648,6 +653,16 @@ function updateWhitewater(t){
  foamMesh.geometry.attributes.color.needsUpdate=true;
  $('foamStatus').textContent='Foam: '+count+' patches'+(foamDebug?' TEST':'');
 }
+// Continuous analytic surface normals eliminate lighting facets from
+// polygon-face derivatives. The same phase and trigonometry that moves
+// the vertices supplies dHeight/dX and dHeight/dZ; wake slopes are added
+// only in the near-boat simulation zone.
+function smoothWaterNormal(output,index,sx,sz){
+ const length=1/Math.hypot(sx,1,sz);
+ output[index]=-sx*length;
+ output[index+1]=length;
+ output[index+2]=-sz*length;
+}
 function animateWaves(t){
  if(!boat)return;
  if(surfaceNormalMap){
@@ -661,16 +676,19 @@ function animateWaves(t){
  water.position.set(cx,0,cz);
  nearWater.position.set(cx,0,cz);
  const farArr=geometry.attributes.position.array;
+ const farNormals=geometry.attributes.normal.array;
  for(let i=0;i<farArr.length;i+=3){
   const x=base[i]+cx,z=base[i+2]+cz;
   const wave=waveField(x,z,t);
   farArr[i]=base[i]+wave.dx;
   farArr[i+1]=wave.height;
   farArr[i+2]=base[i+2]+wave.dz;
+  smoothWaterNormal(farNormals,i,wave.slopeX,wave.slopeZ);
  }
  geometry.attributes.position.needsUpdate=true;
- geometry.computeVertexNormals();
+ geometry.attributes.normal.needsUpdate=true;
  const arr=nearGeometry.attributes.position.array;
+ const nearNormals=nearGeometry.attributes.normal.array;
  let rippleSum=0,rippleMax=0;
  for(let i=0;i<arr.length;i+=3){
   const px=nearBase[i],pz=nearBase[i+2];
@@ -684,9 +702,16 @@ function animateWaves(t){
   arr[i+1]=wave.height+disturbance;
   // Local crest highlights follow the same pressure field; no fake
   // particle sprites or V-shaped lines.
-  const slope=radial<12&&wakeSolver?
-   Math.abs(wakeSolver.sample(wx+.33,wz)-wakeSolver.sample(wx-.33,wz))+
-   Math.abs(wakeSolver.sample(wx,wz+.33)-wakeSolver.sample(wx,wz-.33)):0;
+  let wakeSlopeX=0,wakeSlopeZ=0;
+  if(radial<13&&wakeSolver){
+   const dx=.33;
+   wakeSlopeX=(wakeSolver.sample(wx+dx,wz)-wakeSolver.sample(wx-dx,wz))/(2*dx);
+   wakeSlopeZ=(wakeSolver.sample(wx,wz+dx)-wakeSolver.sample(wx,wz-dx))/(2*dx);
+  }
+  // The wake influence fades near the seam between radial patches.
+  smoothWaterNormal(nearNormals,i,wave.slopeX+fade*wakeSlopeX,
+     wave.slopeZ+fade*wakeSlopeZ);
+  const slope=Math.abs(wakeSlopeX)+Math.abs(wakeSlopeZ);
   const foam=radial<15?wakeAppearance(wx,wz,t)*fade:0;
   const shine=Math.min(1,Math.abs(disturbance)*.28+slope*.42+foam*.62);
   // Coastal-depth color modulation: deeper shelves absorb warm light,
@@ -704,7 +729,7 @@ function animateWaves(t){
  lastRipple=rippleMax;
  nearGeometry.attributes.position.needsUpdate=true;
  nearGeometry.attributes.color.needsUpdate=true;
- nearGeometry.computeVertexNormals();
+ nearGeometry.attributes.normal.needsUpdate=true;
 }
 
 function resetBoat(){

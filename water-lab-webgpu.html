@@ -14,12 +14,17 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 #log{font:11px/1.4 ui-monospace,monospace;word-break:break-word;color:#a8d2df}
 #sailControls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 #sailControls button{min-width:56px;min-height:48px;touch-action:none;user-select:none;-webkit-user-select:none}
-#controls{max-height:37vh;overflow:auto}input{accent-color:#53d1df}
+#controls{bottom:calc(98px + env(safe-area-inset-bottom));max-height:24vh;overflow:auto}input{accent-color:#53d1df}
+.gameHelm{position:absolute;z-index:3;bottom:max(10px,env(safe-area-inset-bottom));left:12px;right:12px;display:flex;gap:9px;justify-content:space-between;align-items:center;pointer-events:auto}
+.gameHelm label{flex:1;min-width:0;display:flex;flex-wrap:wrap}
+.gameHelm input{max-width:100%;width:100%;min-width:75px}
+.gameHelm button{flex-shrink:0}
+.gameHelm output{min-width:35px;font-size:12px}
 #threeCanvas{touch-action:none;overscroll-behavior:none;cursor:grab}
 #threeCanvas:active{cursor:grabbing}
 #cameraHint{position:absolute;top:48%;left:50%;transform:translate(-50%,-50%);z-index:2;background:#0a2535d9;border:1px solid #4da0aa;border-radius:11px;padding:8px 12px;color:#e3ffff;font-size:12px;pointer-events:none;opacity:.9}
 #modeSwitch[aria-pressed="true"]{background:#247b8a;border-color:#78e5df}
-@media(max-width:640px){#controls{max-height:32vh}#dashboard .panel{padding:9px 11px}#dashboard p{font-size:11px}#sailControls button{min-height:54px}}
+@media(max-width:640px){#controls{max-height:21vh}#dashboard .panel{padding:9px 11px}#dashboard p{font-size:11px}#sailControls button{min-height:54px}}
 </style>
 <script type="importmap">
 {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.webgpu.js","three/webgpu":"https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.webgpu.js","three/tsl":"https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.tsl.js"}}
@@ -34,9 +39,10 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><button id="modeSwitch" aria-pressed="true">Camera: Chase</button><button id="resetCamera">Reset camera</button><button id="pause">Pause</button><button id="detail">Detail: medium</button><a href="water-lab.html?v=15-2">Old Water Lab</a></div>
 <div class="row"><label>Wave height <input id="waveHeight" aria-label="Wave height" type="range" min=".25" max="2.5" step=".05" value="1.5"></label><output id="waveHeightOut">1.50</output></div>
 <div class="row"><label>Buoyancy <input type="range" id="buoyancyStrength" min=".5" max="1.8" step=".05" value="1"></label><output id="buoyancyStrengthOut">1.00</output><button id="resetBoat">Reset boat</button></div>
-<div class="row" id="sailControls"><button id="port" aria-label="Steer left">◀ Port</button><button id="starboard" aria-label="Steer right">Starboard ▶</button><label>Sail power <input id="sailPower" type="range" min="0" max="1" step=".05" value=".65"></label><output id="sailPowerOut">65%</output></div>
+
 <p>Drag the water to orbit the camera; pinch to zoom. Chase follows the boat's heading; Orbit keeps your viewing direction. Tap Reset camera to recenter. Hold Port or Starboard to steer; adjust Sail power to move. Desktop: drag, wheel, A/D + W/S.</p>
 </div>
+<div id="sailControls" class="panel gameHelm"><button id="port" aria-label="Steer left">◀ Port</button><label>Sail power <input id="sailPower" type="range" min="0" max="1" step=".05" value=".65"></label><output id="sailPowerOut">65%</output><button id="starboard" aria-label="Steer right">Starboard ▶</button></div>
 <div id="cameraHint">Drag to look around · Pinch to zoom</div>
 <script>
 (function(){

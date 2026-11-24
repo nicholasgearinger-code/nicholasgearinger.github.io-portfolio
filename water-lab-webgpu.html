@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 21.0 spectral and wake engine</title>
+<title>Rift Water Lab · WebGPU 21.1 safe FFT recovery</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -33,7 +33,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 </script></head>
 <body>
 <div id="dashboard">
-<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">21.0 · GPU FFT + improved wake</span></h1>
+<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">21.1 · safe FFT recovery</span></h1>
 <p>This is a <strong>separate renderer test</strong>, not a port of the existing FFT ocean.</p>
 <div id="metrics"><span id="backend">Backend: detecting</span><span id="fps">FPS: —</span><span id="resolution">Resolution: —</span><span id="buoyancyState">Buoyancy: initializing</span><span id="boatSpeed">Speed: 0.0</span><span id="driveStatus">Drive: STOP</span><span id="distanceStatus">Travel: 0 m</span><span id="heading">Heading: 0°</span><span id="wakeStatus">Wake: dynamic</span><span id="fftStatus">FFT: initializing</span><span id="wakeSignal">Ripples: waiting</span><span id="foamStatus">Foam: initializing</span></div>
 <p id="log">Checking GPU access…</p></div></div>
@@ -97,7 +97,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 </script>
 <script type="module">
 import {createWakeSolver} from './rift/water_lab_wake_solver.js?v=17-0';
-import {createGPUFFTOcean} from './rift/water_lab_webgpu_fft.js?v=21-0';
+import {createGPUFFTOcean} from './rift/water_lab_webgpu_fft.js?v=21-1';
 const $=id=>document.getElementById(id);
 let renderer,scene,camera,water,geometry,base,THREE,boat,nearWater,nearGeometry,nearBase,nearColorData,skyDome;
 let buoyancyStrength=1,vy=0,pitchV=0,rollV=0;
@@ -108,7 +108,7 @@ let foamMesh=null,foamPositions=null,foamColors=null,foamCapacity=280,foamStreng
 let surfaceNormalMap=null,surfaceDetail=.65,surfaceGlitter=.6,waterNearMaterial=null,waterFarMaterial=null;
 let opticalMode='lagoon',waterClarity=1.10,waterFloor=null,renderQuality='balanced';
 let opticalFallbackTriggered=false;
-let gpuFFT=null,waveEngine='hybrid',fftEnergy=3,fftMix=0,fftStarting=false,fftFault='',fftAttempted=false;
+let gpuFFT=null,waveEngine='hybrid',fftEnergy=3,fftMix=0,fftStarting=false,fftFault='',fftAttempted=false,fftRecoveryCount=0;
 let cameraMode='chase',orbitYaw=.12,orbitPitch=.31,orbitDistance=15;
 let cameraIntroStart=performance.now(),pointerOrigin=null,pinchDistance=null;
 const cameraTarget={x:-3.2,y:1,z:-13},activePointers=new Map();
@@ -311,7 +311,7 @@ const waveState={height:0,dx:0,dz:0};
 // swell remains an automatic fallback when compute is not available.
 function waveField(x,z,t,out=waveState){
  let elevation=0,dx=0,dz=0;
- const hasFFT=fftMix>.0005&&gpuFFT?.ready&&!fftFault;
+ const hasFFT=fftMix>.0005&&gpuFFT?.ready&&!fftFault&&Number.isFinite(gpuFFT.rms);
  const analyticWeight=1-(hasFFT?fftMix*(waveEngine==='fft'?.80:.30):0);
  for(const wave of waveComponents){
   const phase=wave.kx*x+wave.kz*z-wave.omega*t+wave.phase;
@@ -322,16 +322,29 @@ function waveField(x,z,t,out=waveState){
  }
  if(hasFFT){
   const scale=fftEnergy*waveHeight*fftMix;
-  elevation+=gpuFFT.sample(x,z)*scale;
+  const value=gpuFFT.sample(x,z);
+  if(Number.isFinite(value))elevation+=value*scale;
   // Use spectral height gradients to displace wave crests laterally.
   // These read cached CPU field data; no synchronous GPU readback.
   if(waveChop>.005){
    const d=.72;
    const sx=(gpuFFT.sample(x+d,z)-gpuFFT.sample(x-d,z))/(2*d);
    const sz=(gpuFFT.sample(x,z+d)-gpuFFT.sample(x,z-d))/(2*d);
-   dx-=waveChop*scale*sx*.35;
-   dz-=waveChop*scale*sz*.35;
+   if(Number.isFinite(sx)&&Number.isFinite(sz)){
+    dx-=waveChop*scale*sx*.35;
+    dz-=waveChop*scale*sz*.35;
+   }
   }
+ }
+ if(!Number.isFinite(elevation)||!Number.isFinite(dx)||!Number.isFinite(dz)){
+  if(!fftFault){
+   fftFault='Invalid wave displacement detected; analytic fallback engaged';
+   fftRecoveryCount++;
+   fftMix=0;
+   fftMessage('invalid data · analytic fallback');
+  }
+  elevation=0;dx=0;dz=0;
+  // The next frame safely recomputes all analytic swells.
  }
  out.height=elevation;out.dx=dx;out.dz=dz;
  return out;
@@ -362,7 +375,8 @@ function oceanHeight(x,z,t){
   }
  }
  const y=waveField(bx,bz,t).height;
- return y+(wakeSolver?wakeSolver.sample(x,z):0);
+ const result=y+(wakeSolver?wakeSolver.sample(x,z):0);
+ return Number.isFinite(result)?result:0;
 }
 // Both patches are re-centered on the player and use the same long waves.
 // Only the inner disk samples the 32 m wake field.
@@ -841,7 +855,7 @@ async function init3D(forceWebGL=false){
   previousFrame=nowFrame;
   if(!paused){
    time+=dt;
-   const targetFFT=waveEngine!=='analytic'&&gpuFFT?.ready&&!fftFault?1:0;
+   const targetFFT=waveEngine!=='analytic'&&gpuFFT?.ready&&!fftFault&&Number.isFinite(gpuFFT.rms)?1:0;
    fftMix+=(targetFFT-fftMix)*Math.min(1,dt*1.75);
    const headingBefore=boatHeading;
    stepBoat(dt,time);
@@ -871,9 +885,10 @@ async function init3D(forceWebGL=false){
   $('boatSpeed').textContent='Speed: '+boatSpeed.toFixed(1)+' m/s';
   $('distanceStatus').textContent='Travel: '+totalTravel.toFixed(1)+' m';
   $('wakeSignal').textContent='Peak ripple: '+(lastRipple*100).toFixed(0)+' cm';
-  if(gpuFFT?.ready&&!fftFault&&waveEngine!=='analytic'){
+  if(gpuFFT?.ready&&!fftFault&&Number.isFinite(gpuFFT.rms)&&waveEngine!=='analytic'){
    fftMessage('64² GPU FFT · '+gpuFFT.frameCount+' fields · '+(gpuFFT.rms*100).toFixed(1)+' cm RMS');
   }
+  else if(fftFault&&waveEngine!=='analytic')fftMessage('analytic fallback · invalid GPU values');
   else if(gpuFFT&&!fftFault&&waveEngine!=='analytic')fftMessage('GPU initializing…');
   // Foam count is set by the whitewater generator, not by boat speed.
   $('heading').textContent='Heading: '+((boatHeading*180/Math.PI%360+360)%360).toFixed(0)+'°';

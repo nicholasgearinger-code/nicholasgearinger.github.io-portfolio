@@ -247,7 +247,8 @@ let screenScatteringQuality='balanced',scatteringShadows=1;
 let objectShadowQuality='balanced',shadowSoftness=2,waveShadowStrength=1;
 let waveTransmissionMode='enhanced',waveTransmissionStrength=1,
  waveTransmissionTexture=null,waveTransmissionPixels=null,
- lastWaveTransmissionUpdate=-100,waveTransmissionMaterialActive=false;
+ lastWaveTransmissionUpdate=-100,waveTransmissionMaterialActive=false,
+ underwaterRocks=null,underwaterRockLocations=[],waveInstanceTint=null;
 let screenLightPipeline=null,screenGodrays=null,screenBlendColor=null,
     mainSun=null,screenSpaceFault='',screenSpaceReady=false,screenSpaceStarting=false,
     screenSpaceFailed=false;
@@ -840,10 +841,12 @@ function buildUnderwaterScene(){
  underwaterObjectMaterials.push(rockMaterial);
  underwaterSceneMaterials.push({material:rockMaterial,base:rockMaterial.color.clone()});
  const rocks=new THREE.InstancedMesh(rockGeometry,rockMaterial,40);
+ underwaterRocks=rocks;underwaterRockLocations=[];
  const obj=new THREE.Object3D();
  for(let i=0;i<40;i++){
   const theta=i*2.3999632297,radius=7+Math.sqrt(i/40)*42;
   const x=Math.cos(theta)*radius,z=Math.sin(theta)*radius-12;
+  underwaterRockLocations.push([x,z]);
   const scale=.5+.9*(.5+.5*Math.sin(i*8.31));
   obj.position.set(x,-seabedDepth(x,z)+scale*.4,z);
   obj.rotation.set(i*.5,i*1.2,i*.3);
@@ -1112,50 +1115,80 @@ function syncWaveTransmissionMaterial(){
  floorCausticMaterial.needsUpdate=true;
  if(active)lastWaveTransmissionUpdate=-100;
 }
+// Deterministic, world-space wave transmission shared by seabed and
+// nearby underwater object shading.
+function sampleTransmittedSunlight(wx,wz,depth,t){
+ const sunX=16/39.3,sunY=35/39.3,sunZ=8/39.3;
+ const surfaceX=wx-sunX*depth*.25,surfaceZ=wz-sunZ*depth*.25;
+ let sx=0,sz=0,h=0;
+ for(let k=0;k<3;k++){
+  const wave=waveComponents[k];
+  const phase=wave.kx*surfaceX+wave.kz*surfaceZ-wave.omega*t+wave.phase;
+  const amp=wave.amplitude*waveHeight;
+  sx+=amp*wave.kx*Math.cos(phase);
+  sz+=amp*wave.kz*Math.cos(phase);
+  h+=amp*Math.sin(phase);
+ }
+ const facing=(-sx*sunX+sunY-sz*sunZ)/Math.sqrt(1+sx*sx+sz*sz);
+ const exposure=Math.max(0,Math.min(1,(facing-.55)/.4));
+ const fold=.5+.5*Math.sin(h*1.8+sx*1.7-sz*1.3);
+ const transmission=Math.exp(-depth*.045/Math.max(.4,waterClarity));
+ const reduction=(.12+.17*(1-exposure)+.12*(1-fold))*
+  Math.min(1,transmission*1.6)*waveTransmissionStrength;
+ return Math.max(.60,1-reduction);
+}
+function updateWaveTransmissionObjects(t){
+ if(!underwaterRocks||!waterFloor)return;
+ if(!waveInstanceTint)waveInstanceTint=new THREE.Color();
+ for(let i=0;i<underwaterRockLocations.length;i++){
+  const [lx,lz]=underwaterRockLocations[i];
+  const brightness=waveTransmissionMaterialActive?
+   sampleTransmittedSunlight(lx+waterFloor.position.x,
+     lz+waterFloor.position.z,seabedDepth(lx,lz),t):1;
+  waveInstanceTint.setRGB(brightness,brightness,brightness);
+  underwaterRocks.setColorAt(i,waveInstanceTint);
+ }
+ if(underwaterRocks.instanceColor)
+  underwaterRocks.instanceColor.needsUpdate=true;
+ // Wreck planks share one material and occupy a compact area.
+ const wood=underwaterSceneMaterials[1];
+ if(wood){
+  wood.transmission=waveTransmissionMaterialActive?
+   sampleTransmittedSunlight(13+waterFloor.position.x,
+    -25+waterFloor.position.z,seabedDepth(13,-25),t):1;
+  if(!underwaterVisibilityColor)
+   underwaterVisibilityColor=new THREE.Color(1,1,1);
+  wood.material.color.copy(wood.base).multiply(underwaterVisibilityColor)
+    .multiplyScalar(wood.transmission);
+ }
+}
 function updateWaveTransmission(t,force=false){
  if(!waveTransmissionTexture||!boat||!waterFloor)return;
  syncWaveTransmissionMaterial();
- if(!waveTransmissionMaterialActive)return;
+ if(!waveTransmissionMaterialActive){
+  if(force)updateWaveTransmissionObjects(t);
+  return;
+ }
  if(!force&&t-lastWaveTransmissionUpdate<.135)return;
  lastWaveTransmissionUpdate=t;
  const n=64,width=causticProjectionWidth;
  const cx=causticProjectionX,cz=causticProjectionZ;
  if(!Number.isFinite(cx)||!Number.isFinite(cz))return;
- const clarity=Math.max(.4,waterClarity);
- const sunX=16/39.3,sunY=35/39.3,sunZ=8/39.3;
- // Three interfering, directional swells produce soft, large-scale
- // shadow folds; high-frequency focused caustics remain in emissiveMap.
- const waves=[waveComponents[0],waveComponents[1],waveComponents[2]];
  for(let y=0;y<n;y++)for(let x=0;x<n;x++){
   const u=(x+.5)/n,v=(y+.5)/n;
   const wx=cx+(u-.5)*width,wz=cz+(.5-v)*width;
   const depth=seabedDepth(wx-waterFloor.position.x,
                            wz-waterFloor.position.z);
-  const surfaceX=wx-sunX*depth*.25,surfaceZ=wz-sunZ*depth*.25;
-  let sx=0,sz=0,h=0;
-  for(const wave of waves){
-   const phase=wave.kx*surfaceX+wave.kz*surfaceZ-wave.omega*t+wave.phase;
-   const amplitude=wave.amplitude*waveHeight;
-   sx+=amplitude*wave.kx*Math.cos(phase);
-   sz+=amplitude*wave.kz*Math.cos(phase);
-   h+=amplitude*Math.sin(phase);
-  }
-  const facing=(-sx*sunX+sunY-sz*sunZ)/Math.sqrt(1+sx*sx+sz*sz);
-  const exposure=Math.max(0,Math.min(1,(facing-.55)/.4));
-  const fold=.5+.5*Math.sin(h*1.8+sx*1.7-sz*1.3);
-  const transmittance=Math.exp(-depth*.045/clarity);
-  const reduction=(.12+.17*(1-exposure)+.12*(1-fold))*
-   Math.min(1,transmittance*1.6)*waveTransmissionStrength;
+  const brightness=sampleTransmittedSunlight(wx,wz,depth,t);
   const edge=Math.min(u,1-u,v,1-v);
   const feather=Math.max(0,Math.min(1,(edge-.01)*14));
-  const value=Math.round(255*Math.max(.60,1-reduction*feather));
+  const value=Math.round(255*(1-(1-brightness)*feather));
   const i=(y*n+x)*4;
-  waveTransmissionPixels[i]=value;
-  waveTransmissionPixels[i+1]=value;
-  waveTransmissionPixels[i+2]=value;
-  waveTransmissionPixels[i+3]=255;
+  waveTransmissionPixels[i]=value;waveTransmissionPixels[i+1]=value;
+  waveTransmissionPixels[i+2]=value;waveTransmissionPixels[i+3]=255;
  }
  waveTransmissionTexture.needsUpdate=true;
+ updateWaveTransmissionObjects(t);
 }
 function updateCausticTexture(t,force=false){
  if(!causticMap)return;
@@ -1217,7 +1250,8 @@ function updateUnifiedVisibility(cameraDepth=0){
   underwaterVisibilityColor.lerp(tint,attenuation*.45);
  }
  for(const entry of underwaterSceneMaterials){
-  entry.material.color.copy(entry.base).multiply(underwaterVisibilityColor);
+  entry.material.color.copy(entry.base).multiply(underwaterVisibilityColor)
+   .multiplyScalar(entry.transmission??1);
  }
  const colors=waterFloor.geometry.attributes.color;
  const positions=waterFloor.geometry.attributes.position;
@@ -2047,6 +2081,7 @@ $('causticMode').onchange=()=>{
  causticMode=$('causticMode').value;
  causticBuild=null;
  syncWaveTransmissionMaterial();
+ updateWaveTransmission(clockTime,true);
  syncCausticProjection(true);
  for(const material of underwaterObjectMaterials){
   material.emissiveMap=causticMode==='wave'?null:causticMap;

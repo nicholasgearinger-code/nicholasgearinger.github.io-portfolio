@@ -2160,25 +2160,24 @@ async function initScreenSpaceLighting(){
  }finally{screenSpaceStarting=false;}
 }
 function updateScreenSpaceLighting(){
- const desired=scatteringMode==='screen'&&isWebGPU&&
-  opticalMode!=='legacy'&&volumetricStrength>.01&&
-  underwaterActive&&underwaterBlend>.12;
- if(!desired){
-  if(mainSun?.castShadow)setScreenShadowState(false);
-  return false;
+ const enabled=scatteringMode==='screen'&&isWebGPU&&
+  opticalMode!=='legacy'&&volumetricStrength>.01;
+ const shadowEnabled=enabled&&scatteringShadows>.01;
+ if(mainSun?.castShadow!==shadowEnabled)setScreenShadowState(shadowEnabled);
+ // The shadow frustum tracks the boat above and below the waterline
+ // without reallocating the texture on each immersion transition.
+ if(enabled&&boat&&mainSun){
+  const x=Math.round(boat.position.x*2)/2;
+  const z=Math.round(boat.position.z*2)/2;
+  mainSun.position.set(x+16,35,z+8);
+  mainSun.target.position.set(x,0,z);
+  mainSun.target.updateMatrixWorld();
  }
+ const desired=enabled&&underwaterActive&&underwaterBlend>.12;
+ if(!desired)return false;
  if(!screenSpaceReady){
   if(!screenSpaceStarting&&!screenSpaceFailed)initScreenSpaceLighting();
   return false;
- }
- if(scatteringShadows>.01&&!mainSun.castShadow)setScreenShadowState(true);
- else if(scatteringShadows<=.01&&mainSun.castShadow)setScreenShadowState(false);
- // The small shadow frustum tracks the boat with the sunlight direction.
- // The sun's world direction does not change with tracking.
- if(boat&&mainSun){
-  mainSun.position.set(boat.position.x+16,boat.position.y+35,boat.position.z+8);
-  mainSun.target.position.set(boat.position.x,boat.position.y,boat.position.z);
-  mainSun.target.updateMatrixWorld();
  }
  const depth=Math.max(0,-camera.position.y),clarity=Math.max(.4,waterClarity);
  const extinction=Math.exp(-depth*(opticalMode==='deep'?.16:.085)/clarity);

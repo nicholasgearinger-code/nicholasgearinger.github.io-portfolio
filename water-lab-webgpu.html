@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 18.3 foam rendering fix</title>
+<title>Rift Water Lab · WebGPU 18.4 foam debug</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -33,17 +33,17 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 </script></head>
 <body>
 <div id="dashboard">
-<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">18.3 · foam rendering fix</span></h1>
+<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">18.4 · visible foam diagnostic</span></h1>
 <p>This is a <strong>separate renderer test</strong>, not a port of the existing FFT ocean.</p>
-<div id="metrics"><span id="backend">Backend: detecting</span><span id="fps">FPS: —</span><span id="resolution">Resolution: —</span><span id="buoyancyState">Buoyancy: initializing</span><span id="boatSpeed">Speed: 0.0</span><span id="heading">Heading: 0°</span><span id="wakeStatus">Wake: dynamic</span><span id="wakeSignal">Ripples: waiting</span><span id="foamStatus">Foam: 0 patches</span></div>
+<div id="metrics"><span id="backend">Backend: detecting</span><span id="fps">FPS: —</span><span id="resolution">Resolution: —</span><span id="buoyancyState">Buoyancy: initializing</span><span id="boatSpeed">Speed: 0.0</span><span id="heading">Heading: 0°</span><span id="wakeStatus">Wake: dynamic</span><span id="wakeSignal">Ripples: waiting</span><span id="foamStatus">Foam: initializing</span></div>
 <p id="log">Checking GPU access…</p></div></div>
 <div id="controls" class="panel">
-<div class="row"><button id="modeSwitch" aria-pressed="true">Camera: Chase</button><button id="resetCamera">Reset camera</button><button id="pause">Pause</button><button id="detail">Detail: medium</button><a href="water-lab.html?v=15-2">Old Water Lab</a></div>
+<div class="row"><button id="testFoamTop">Whitewater test: ON</button><button id="modeSwitch" aria-pressed="true">Camera: Chase</button><button id="resetCamera">Reset camera</button><button id="pause">Pause</button><button id="detail">Detail: medium</button><a href="water-lab.html?v=15-2">Old Water Lab</a></div>
 <div class="row"><label>Wave height <input id="waveHeight" aria-label="Wave height" type="range" min=".25" max="2.5" step=".05" value="1.5"></label><output id="waveHeightOut">1.50</output></div>
 <div class="row"><label>Wave shape <input id="waveChop" aria-label="Wave crest sharpness" type="range" min="0" max="1.2" step=".05" value=".45"></label><output id="waveChopOut">0.45</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
 <div class="row"><label>Wake physics <input id="wakeAmount" aria-label="Boat wake strength" type="range" min="0" max="2" step=".05" value="1.1"></label><output id="wakeAmountOut">1.10</output><button id="resetWake">Clear wake</button></div>
-<div class="row"><label>Whitewater <input id="foamStrength" aria-label="Whitewater strength" type="range" min="0" max="2.5" step=".1" value="1.5"></label><output id="foamStrengthOut">1.5</output><button id="testFoam">Test foam: Off</button></div>
+<div class="row"><label>Whitewater <input id="foamStrength" aria-label="Whitewater strength" type="range" min="0" max="2.5" step=".1" value="1.5"></label><output id="foamStrengthOut">1.5</output><button id="testFoam">Whitewater test: ON</button></div>
 <div class="row"><label>Buoyancy <input type="range" id="buoyancyStrength" min=".5" max="1.8" step=".05" value="1"></label><output id="buoyancyStrengthOut">1.00</output><button id="resetBoat">Reset boat</button></div>
 <div class="row"><label>Forward power <input id="sailPower" type="range" min="0" max="1" step=".05" value=".85"></label><output id="sailPowerOut">85%</output></div>
 
@@ -96,7 +96,7 @@ let buoyancyStrength=1,vy=0,pitchV=0,rollV=0;
 let boatHeading=0,boatSpeed=0,rudder=0,sailPower=.85,driveMode='stop',steeringLeft=false,steeringRight=false;
 let wakeSolver=null,wakeAmount=1.1,waveChop=.45;
 let lastRipple=0,propulsionMode='power',wakeTrail=[],trailElapsed=0;
-let foamMesh=null,foamPositions=null,foamColors=null,foamPattern=null,foamCapacity=150,foamStrength=1.5,foamDebug=false,foamPatchCount=0;
+let foamMesh=null,foamPositions=null,foamColors=null,foamPattern=null,foamCapacity=150,foamStrength=1.5,foamDebug=true,foamPatchCount=0;
 let cameraMode='chase',orbitYaw=.12,orbitPitch=.31,orbitDistance=15;
 let cameraIntroStart=performance.now(),pointerOrigin=null,pinchDistance=null;
 const cameraTarget={x:-3.2,y:1,z:-13},activePointers=new Map();
@@ -374,6 +374,9 @@ function updateWhitewater(t){
  }
  foamPatchCount=count;
  foamMesh.geometry.setDrawRange(0,count*6);
+ // Display the patch count even while the boat is stopped. It confirms
+ // whether the CPU generated quads, independent of actual GPU visibility.
+ $('foamStatus').textContent='Foam: '+count+' patches'+(foamDebug?' · TEST':'');
  foamMesh.geometry.attributes.position.needsUpdate=true;
  foamMesh.geometry.attributes.color.needsUpdate=true;
 }
@@ -620,14 +623,17 @@ $('wakeAmount').oninput=()=>{
 };
 $('resetWake').onclick=()=>{wakeSolver?.clear();wakeTrail=[];if(foamMesh)foamMesh.geometry.setDrawRange(0,0);};
 $('foamStrength').oninput=()=>{foamStrength=Number($('foamStrength').value);$('foamStrengthOut').textContent=foamStrength.toFixed(1);};
-$('testFoam').onclick=()=>{
+function toggleFoamDebug(){
  foamDebug=!foamDebug;
  // Diagnostic deliberately bypasses the alpha texture: if these solid
  // white patches are visible, geometry and draw order work and the
  // remaining issue is texture/foam pattern.
  if(foamMesh){foamMesh.material.map=foamDebug?null:foamPattern;foamMesh.material.needsUpdate=true;}
- $('testFoam').textContent=foamDebug?'Test foam: On':'Test foam: Off';
-};
+ $('testFoam').textContent=foamDebug?'Whitewater test: ON':'Whitewater test: OFF';
+ $('testFoamTop').textContent=foamDebug?'Whitewater test: ON':'Whitewater test: OFF';
+}
+$('testFoam').onclick=toggleFoamDebug;
+$('testFoamTop').onclick=toggleFoamDebug;
 $('propulsionMode').onchange=()=>{
  propulsionMode=$('propulsionMode').value;
  $('wakeStatus').textContent=propulsionMode==='power'?'Wake: powered':'Wake: sail';
@@ -686,7 +692,7 @@ async function init3D(forceWebGL=false){
   if(hint){const opacity=Math.max(0,1-(performance.now()-cameraIntroStart-1600)/1300);hint.style.opacity=String(Math.max(0,opacity));}
   $('boatSpeed').textContent='Speed: '+boatSpeed.toFixed(1)+' m/s';
   $('wakeSignal').textContent='Peak ripple: '+(lastRipple*100).toFixed(0)+' cm';
-  $('foamStatus').textContent='Foam: '+foamPatchCount+' patches';
+  // Foam count is set by the whitewater generator, not by boat speed.
   $('heading').textContent='Heading: '+((boatHeading*180/Math.PI%360+360)%360).toFixed(0)+'°';
   renderer.render(scene,camera);
   samples++;

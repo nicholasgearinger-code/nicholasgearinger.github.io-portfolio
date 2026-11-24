@@ -220,6 +220,7 @@ function trackWake(dt){
  if(boatSpeed>.55&&wakeAmount>.01&&trailElapsed>.11){
   trailElapsed=0;
   wakeTrail.unshift({x:boat.position.x,z:boat.position.z,heading:boatHeading,
+    forwardX:-Math.sin(boatHeading),forwardZ:-Math.cos(boatHeading),
     strength:Math.min(1,boatSpeed/(propulsionMode==='power'?7.5:5)),age:0});
  }
  for(let i=0;i<wakeTrail.length;i++)wakeTrail[i].age+=dt;
@@ -230,20 +231,20 @@ function wakeAppearance(x,z,t){
  let foam=0;
  // Each trail point produces an expanding centerline churn and two
  // diverging shoulders; disturbances are tied to actual boat positions.
- for(let j=0;j<wakeTrail.length;j++){
+ for(let j=0;j<wakeTrail.length;j+=2){
   const p=wakeTrail[j],age=p.age;
   const dx=x-p.x,dz=z-p.z;
   if(Math.abs(dx)>9||Math.abs(dz)>9)continue;
-  const along=dx*-Math.sin(p.heading)+dz*-Math.cos(p.heading);
-  const sideways=dx*-Math.cos(p.heading)+dz*Math.sin(p.heading);
+  const along=dx*p.forwardX+dz*p.forwardZ;
+  const sideways=dx*p.forwardZ-dz*p.forwardX;
   const distance=Math.hypot(dx,dz);
   if(distance>7)continue;
   const life=Math.max(0,1-age/6.5);
   const spread=.55+age*.62;
-  const jitter=.12*Math.sin((sideways*7+along*6)+t*8)*Math.sin(along*4.5-t*3.9);
+  const jitter=.13*Math.sin((sideways*7+along*6)+t*8);
   const center=Math.exp(-Math.pow(sideways/(spread*.6),2))*Math.exp(-distance*.48);
   const shoulders=Math.exp(-Math.pow((Math.abs(sideways)-(spread+Math.abs(along)*.26))/.55,2))*Math.exp(-distance*.27);
-  const patch=life*p.strength*(center*.65+shoulders*.8)*( .68+.32*jitter*4);
+  const patch=life*p.strength*(center*.65+shoulders*.8)*(.74+.26*jitter*4);
   foam=Math.max(foam,patch);
  }
  return Math.min(1,Math.max(0,foam*wakeAmount));

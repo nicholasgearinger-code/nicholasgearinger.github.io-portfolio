@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 24.7.2 wave-transmitted underwater illumination</title>
+<title>Rift Water Lab · WebGPU 24.8 adaptive underwater optics and performance</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.7.2</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.8</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <details id="diagnostics">
@@ -103,7 +103,8 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Reflection shader <select id="reflectionMode"><option value="enhanced" selected>Enhanced sky + fine ripple reflections</option><option value="basic">Basic · previous safe material</option></select></label></div>
 <div class="row"><label>Fine ripple strength <input id="fineRipple" aria-label="Fine ripple strength" type="range" min="0" max=".90" step=".05" value=".45"></label><output id="fineRippleOut">0.45</output></div>
 <div class="row"><label>Rendering quality <select id="renderQuality"><option value="balanced" selected>Balanced · mobile</option><option value="ultra">Ultra · highest detail</option><option value="performance">Performance · prioritize FPS</option></select></label></div>
-<div class="row"><label>Render resolution <input id="renderScale" aria-label="Render resolution multiplier" type="range" min="1" max="2.25" step=".25" value="1.50"></label><output id="renderScaleOut">1.50×</output></div>
+<div class="row"><label>Render resolution <input id="renderScale" aria-label="Render resolution multiplier" type="range" min=".75" max="2.25" step=".25" value="1.25"></label><output id="renderScaleOut">1.25×</output></div>
+<div class="row"><label>Adaptive performance <select id="adaptivePerformance"><option value="on" selected>On · target steady 50 FPS</option><option value="off">Off · fixed resolution</option></select></label><output id="adaptivePerformanceOut">1.25×</output></div>
 <div class="row"><label>Water optics <select id="opticalMode"><option value="lagoon" selected>Clear lagoon · physical transmission</option><option value="deep">Bluewater · deeper absorption</option><option value="legacy">Legacy · fastest / safest</option></select></label></div>
 <div class="row"><label>Water clarity <input id="waterClarity" aria-label="Water clarity" type="range" min=".2" max="1.8" step=".05" value="1.1"></label><output id="waterClarityOut">1.10</output><button id="opticsFallback">Safe water mode</button></div>
 <div class="row"><label>Depth refraction <input id="depthRefraction" aria-label="Depth refraction" type="range" min="0" max="1.6" step=".05" value="1"></label><output id="depthRefractionOut">1.00</output></div>
@@ -131,9 +132,9 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Caustic line detail <select id="causticDetail"><option value="72">Low · fastest</option><option value="96" selected>Balanced</option><option value="120">Fine · more detail</option></select></label></div>
 <div class="row"><label>Light scattering model <select id="scatteringMode"><option value="screen" selected>24.7 · screen-space light + shadows</option><option value="soft">24.6 · soft atmospheric volumes</option><option value="classic">Previous · geometric shafts</option><option value="off">Off</option></select></label></div>
 <div class="row"><label>Volumetric sunlight <input id="volumetricStrength" aria-label="Volumetric sunlight strength" type="range" min="0" max="2" step=".05" value=".85"></label><output id="volumetricStrengthOut">0.85</output></div>
-<div class="row"><label>Screen-space quality <select id="screenScatteringQuality"><option value="low">Fast · 12 steps</option><option value="balanced" selected>Balanced · 18 steps</option><option value="high">Detailed · 28 steps</option></select></label></div>
+<div class="row"><label>Screen-space quality <select id="screenScatteringQuality"><option value="low" selected>Fast · 12 steps</option><option value="balanced">Balanced · 18 steps</option><option value="high">Detailed · 28 steps</option></select></label></div>
 <div class="row"><label>Shadow influence <input id="scatteringShadows" aria-label="Screen-space shadow influence" type="range" min="0" max="2" step=".1" value="1"></label><output id="scatteringShadowsOut">1.00</output></div>
-<div class="row"><label>Object shadow quality <select id="objectShadowQuality"><option value="fast">Fast · 512px</option><option value="balanced" selected>Balanced · 768px</option><option value="high">Detailed · 1024px</option></select></label></div>
+<div class="row"><label>Object shadow quality <select id="objectShadowQuality"><option value="fast" selected>Fast · 512px</option><option value="balanced">Balanced · 768px</option><option value="high">Detailed · 1024px</option></select></label></div>
 <div class="row"><label>Shadow softness <input id="shadowSoftness" aria-label="Shadow softness" type="range" min=".5" max="4" step=".25" value="2"></label><output id="shadowSoftnessOut">2.00</output></div>
 <div class="row"><label>Wave self-shading <input id="waveShadowStrength" aria-label="Wave self shading" type="range" min="0" max="2" step=".1" value="1"></label><output id="waveShadowStrengthOut">1.00</output></div>
 <div class="row"><label>Transmitted wave shadows <select id="waveTransmissionMode"><option value="enhanced" selected>24.7.2 · moving light and shadow</option><option value="classic">24.7.1 · original lighting</option></select></label></div>
@@ -243,8 +244,8 @@ let volumetricStrength=.85,shaftQuality='medium',lightShafts=null,shaftMeshes=[]
 let scatteringMode='screen',scatteringDiffusion=1.1,scatteringMotion=1,
  softShaftTexture=null,softShaftGeometry=null,softShafts=null,softShaftMeshes=[],lastScatteringUpdate=-100;
 let particleDensity=.7,underwaterParticles=null;
-let screenScatteringQuality='balanced',scatteringShadows=1;
-let objectShadowQuality='balanced',shadowSoftness=2,waveShadowStrength=1;
+let screenScatteringQuality='low',scatteringShadows=1;
+let objectShadowQuality='fast',shadowSoftness=2,waveShadowStrength=1;
 let waveTransmissionMode='enhanced',waveTransmissionStrength=1,
  waveTransmissionTexture=null,waveTransmissionPixels=null,
  lastWaveTransmissionUpdate=-100,waveTransmissionMaterialActive=false,
@@ -261,7 +262,10 @@ let cameraMode='chase',orbitYaw=.12,orbitPitch=.31,orbitDistance=15;
 let cameraIntroStart=performance.now(),pointerOrigin=null,pinchDistance=null;
 const cameraTarget={x:-3.2,y:1,z:-13},activePointers=new Map();
 let cameraControlUntil=0;
-let paused=false,detailIndex=1,samples=0,last=performance.now(),waveHeight=1.5,renderScale=safeStartup?1:1.5;
+let paused=false,detailIndex=1,samples=0,last=performance.now(),
+ waveHeight=1.5,renderScale=safeStartup?1:1.25;
+let adaptivePerformance=!safeStartup,adaptivePixelRatio=renderScale,
+ adaptiveLastChange=performance.now(),adaptiveLowWindows=0,adaptiveHighWindows=0;
 const levels=[64,88,112];let isWebGPU=false,clockTime=0,loopActive=false;
 function status(m){window.__waterFallback?.notice(m);}
 // A concentric two-zone mesh has no overlapping opaque water surface.
@@ -1342,10 +1346,12 @@ function makeSurface(){
  const segments=levels[detailIndex];
  // Physics resolution is independent of distant scenery and stays near boat.
  if(!wakeSolver)wakeSolver=createWakeSolver({segments:112,size:34});
- const angularBase=detailIndex===0?64:detailIndex===1?80:96;
- const angular=angularBase+(waveSmoothness>0?Math.round(waveSmoothness*24):0);
- const nearStep=(detailIndex===0?.46:detailIndex===1?.35:.28)/
-   (1+Math.min(2,waveSmoothness)*.30);
+ // Reduced CPU wave samples while preserving high-frequency optical
+ // detail in the existing animated normal maps.
+ const angularBase=detailIndex===0?56:detailIndex===1?68:96;
+ const angular=angularBase+(waveSmoothness>0?Math.round(waveSmoothness*14):0);
+ const nearStep=(detailIndex===0?.52:detailIndex===1?.42:.28)/
+   (1+Math.min(2,waveSmoothness)*.18);
  const nearRadii=[];
  for(let radius=nearStep;radius<LOCAL_RADIUS;radius+=nearStep)nearRadii.push(radius);
  nearRadii.push(LOCAL_RADIUS);
@@ -1959,20 +1965,56 @@ $('propulsionMode').onchange=()=>{
 };
 $('renderScale').oninput=()=>{
  renderScale=Number($('renderScale').value);
+ adaptiveLastChange=performance.now();
  $('renderScaleOut').textContent=renderScale.toFixed(2)+'×';
  if(renderer){
   renderer.setPixelRatio(Math.min(devicePixelRatio,renderScale));
+  adaptivePixelRatio=Math.min(devicePixelRatio,renderScale);
+  $('adaptivePerformanceOut').textContent=adaptivePixelRatio.toFixed(2)+'×';
   renderer.setSize(innerWidth,innerHeight);
  }
 };
+$('adaptivePerformance').onchange=()=>{
+ adaptivePerformance=$('adaptivePerformance').value==='on';
+ adaptiveLowWindows=0;adaptiveHighWindows=0;
+ adaptiveLastChange=performance.now();
+ if(!adaptivePerformance)applyAdaptivePixelRatio(renderScale);
+};
+function applyAdaptivePixelRatio(value){
+ if(!renderer)return;
+ const next=Math.min(devicePixelRatio,Math.max(.75,Math.min(renderScale,value)));
+ if(Math.abs(adaptivePixelRatio-next)<.01)return;
+ adaptivePixelRatio=next;
+ renderer.setPixelRatio(next);
+ renderer.setSize(innerWidth,innerHeight);
+ $('adaptivePerformanceOut').textContent=next.toFixed(2)+'×';
+}
+function adjustAdaptivePerformance(fps,now){
+ if(!adaptivePerformance||paused||renderQuality==='ultra'||!renderer)return;
+ if(!Number.isFinite(fps)||fps<=0)return;
+ if(fps<43){adaptiveLowWindows++;adaptiveHighWindows=0;}
+ else if(fps>55){adaptiveHighWindows++;adaptiveLowWindows=0;}
+ else {adaptiveLowWindows=0;adaptiveHighWindows=0;}
+ if(now-adaptiveLastChange<7000)return;
+ if(adaptiveLowWindows>=3&&adaptivePixelRatio>.75){
+  applyAdaptivePixelRatio(adaptivePixelRatio-.25);
+  adaptiveLastChange=now;adaptiveLowWindows=0;
+ }else if(adaptiveHighWindows>=7&&adaptivePixelRatio<renderScale){
+  applyAdaptivePixelRatio(adaptivePixelRatio+.25);
+  adaptiveLastChange=now;adaptiveHighWindows=0;
+ }
+}
 $('renderQuality').onchange=()=>{
  renderQuality=$('renderQuality').value;
  const next=renderQuality==='ultra'?2:renderQuality==='performance'?0:1;
- renderScale=renderQuality==='ultra'?2:renderQuality==='performance'?1:1.5;
+ renderScale=renderQuality==='ultra'?2:renderQuality==='performance'?1:1.25;
+ adaptiveLastChange=performance.now();
  $('renderScale').value=String(renderScale);
  $('renderScaleOut').textContent=renderScale.toFixed(2)+'×';
  if(renderer){
   renderer.setPixelRatio(Math.min(devicePixelRatio,renderScale));
+  adaptivePixelRatio=Math.min(devicePixelRatio,renderScale);
+  $('adaptivePerformanceOut').textContent=adaptivePixelRatio.toFixed(2)+'×';
   renderer.setSize(innerWidth,innerHeight);
  }
  if(detailIndex!==next){
@@ -2369,7 +2411,7 @@ async function init3D(forceWebGL=false){
  sun.position.set(16,35,8);scene.add(sun);mainSun=sun;
  // Keep shadow allocation off until 24.7 is active on WebGPU.
  sun.castShadow=false;
- sun.shadow.mapSize.set(768,768);
+ sun.shadow.mapSize.set(512,512);
  renderer.shadowMap.type=THREE.PCFShadowMap;
  sun.shadow.radius=2;
  sun.shadow.camera.left=-26;sun.shadow.camera.right=26;
@@ -2510,7 +2552,12 @@ async function init3D(forceWebGL=false){
   }
   samples++;
   const now=performance.now();
-  if(now-last>1100){$('fps').textContent='FPS: '+Math.round(samples*1000/(now-last));last=now;samples=0;}
+  if(now-last>1100){
+   const measured=samples*1000/(now-last);
+   $('fps').textContent='FPS: '+Math.round(measured);
+   adjustAdaptivePerformance(measured,now);
+   last=now;samples=0;
+  }
  };
  renderer.setAnimationLoop(render);
  window.__waterFallback?.hide();

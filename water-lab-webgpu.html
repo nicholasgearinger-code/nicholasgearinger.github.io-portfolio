@@ -35,7 +35,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
 <div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">18.6 · foam and steering repair</span></h1>
 <p>This is a <strong>separate renderer test</strong>, not a port of the existing FFT ocean.</p>
-<div id="metrics"><span id="backend">Backend: detecting</span><span id="fps">FPS: —</span><span id="resolution">Resolution: —</span><span id="buoyancyState">Buoyancy: initializing</span><span id="boatSpeed">Speed: 0.0</span><span id="heading">Heading: 0°</span><span id="wakeStatus">Wake: dynamic</span><span id="wakeSignal">Ripples: waiting</span><span id="foamStatus">Foam: initializing</span></div>
+<div id="metrics"><span id="backend">Backend: detecting</span><span id="fps">FPS: —</span><span id="resolution">Resolution: —</span><span id="buoyancyState">Buoyancy: initializing</span><span id="boatSpeed">Speed: 0.0</span><span id="driveStatus">Drive: STOP</span><span id="distanceStatus">Travel: 0 m</span><span id="heading">Heading: 0°</span><span id="wakeStatus">Wake: dynamic</span><span id="wakeSignal">Ripples: waiting</span><span id="foamStatus">Foam: initializing</span></div>
 <p id="log">Checking GPU access…</p></div></div>
 <div id="controls" class="panel">
 <div class="row"><button id="testFoamTop">Whitewater test: OFF</button><button id="modeSwitch" aria-pressed="true">Camera: Chase</button><button id="resetCamera">Reset camera</button><button id="pause">Pause</button><button id="detail">Detail: medium</button><a href="water-lab.html?v=15-2">Old Water Lab</a></div>
@@ -93,7 +93,7 @@ import {createWakeSolver} from './rift/water_lab_wake_solver.js?v=17-0';
 const $=id=>document.getElementById(id);
 let renderer,scene,camera,water,geometry,base,THREE,boat,nearWater,nearGeometry,nearBase,nearColorData;
 let buoyancyStrength=1,vy=0,pitchV=0,rollV=0;
-let boatHeading=0,boatSpeed=0,rudder=0,sailPower=.85,driveMode='stop',steeringLeft=false,steeringRight=false;
+let boatHeading=0,boatSpeed=0,rudder=0,sailPower=.85,driveMode='stop',steeringLeft=false,steeringRight=false,totalTravel=0;
 let wakeSolver=null,wakeAmount=1.1,waveChop=.45;
 let lastRipple=0,propulsionMode='power',wakeTrail=[],trailElapsed=0;
 let foamMesh=null,foamPositions=null,foamColors=null,foamCapacity=220,foamStrength=1.5,foamDebug=false,foamPatchCount=0;
@@ -369,7 +369,7 @@ function resetBoat(){
  if(!boat)return;
  boat.position.set(-3.2,.6,-13);
  boat.rotation.set(0,0,0);vy=0;pitchV=0;rollV=0;
- boatHeading=0;boatSpeed=0;rudder=0;driveMode='stop';wakeSolver?.clear();wakeTrail=[];trailElapsed=0;
+ boatHeading=0;boatSpeed=0;rudder=0;driveMode='stop';totalTravel=0;wakeSolver?.clear();wakeTrail=[];trailElapsed=0;
  if($('forward')){setDriveMode('stop');}
 }
 function makeBoat(){
@@ -424,6 +424,7 @@ function stepBoat(dt,t){
   boatHeading+=rudder*(.24+.12*boatSpeed)*h;
   boat.position.x-=Math.sin(boatHeading)*boatSpeed*h;
   boat.position.z-=Math.cos(boatHeading)*boatSpeed*h;
+  totalTravel+=boatSpeed*h;
   boat.rotation.y=boatHeading;
   let fy=-mass*9.81-vy*mass*.4,tx=-pitchV*inertiaX*2.2,tz=-rollV*inertiaZ*2.5;
   const q=boat.quaternion;
@@ -450,9 +451,13 @@ function setDriveMode(mode){
  $('forward').setAttribute('aria-pressed',String(driveMode==='forward'));
  $('stopBoat').setAttribute('aria-pressed',String(driveMode==='stop'));
  $('buoyancyState').textContent=driveMode==='forward'?'Boat: sailing forward':'Boat: stopped / braking';
+ $('driveStatus').textContent='Drive: '+(driveMode==='forward'?'FORWARD':'STOP');
 }
 $('forward').onclick=()=>setDriveMode('forward');
 $('stopBoat').onclick=()=>setDriveMode('stop');
+// Immediate touch/pointer feedback, independent of synthesized click delays.
+$('forward').addEventListener('pointerdown',()=>setDriveMode('forward'));
+$('stopBoat').addEventListener('pointerdown',()=>setDriveMode('stop'));
 $('sailPower').oninput=()=>{
  sailPower=Number($('sailPower').value);
  $('sailPowerOut').textContent=Math.round(sailPower*100)+'%';
@@ -631,6 +636,7 @@ async function init3D(forceWebGL=false){
   const hint=$('cameraHint');
   if(hint){const opacity=Math.max(0,1-(performance.now()-cameraIntroStart-1600)/1300);hint.style.opacity=String(Math.max(0,opacity));}
   $('boatSpeed').textContent='Speed: '+boatSpeed.toFixed(1)+' m/s';
+  $('distanceStatus').textContent='Travel: '+totalTravel.toFixed(1)+' m';
   $('wakeSignal').textContent='Peak ripple: '+(lastRipple*100).toFixed(0)+' cm';
   // Foam count is set by the whitewater generator, not by boat speed.
   $('heading').textContent='Heading: '+((boatHeading*180/Math.PI%360+360)%360).toFixed(0)+'°';

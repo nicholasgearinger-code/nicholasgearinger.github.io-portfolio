@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 16.6 boat controls</title>
+<title>Rift Water Lab · WebGPU 16.7 corrected bow direction</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -33,7 +33,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 </script></head>
 <body>
 <div id="dashboard">
-<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">16.6 · boat controls</span></h1>
+<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">16.7 · forward direction fix</span></h1>
 <p>This is a <strong>separate renderer test</strong>, not a port of the existing FFT ocean.</p>
 <div id="metrics"><span id="backend">Backend: detecting</span><span id="fps">FPS: —</span><span id="resolution">Resolution: —</span><span id="buoyancyState">Buoyancy: initializing</span><span id="boatSpeed">Speed: 0.0</span><span id="heading">Heading: 0°</span></div>
 <p id="log">Checking GPU access…</p></div></div>
@@ -128,6 +128,11 @@ function resetBoat(){
 }
 function makeBoat(){
  boat=new THREE.Group();boat.rotation.order='YXZ';
+ // Hull was authored with its pointed bow toward local +Z, but the
+ // controller advances along local -Z. Turn only the visible model;
+ // leave the physics root, rudder, wake and chase camera coordinates intact.
+ const boatVisual=new THREE.Group();boatVisual.rotation.y=Math.PI;
+ boat.add(boatVisual);
  const hullMaterial=new THREE.MeshStandardMaterial({color:0x815138,roughness:.74});
  const trim=new THREE.MeshStandardMaterial({color:0xe7bc89,roughness:.67});
  const sailMaterial=new THREE.MeshStandardMaterial({color:0xf5e9ce,side:THREE.DoubleSide,roughness:.8});
@@ -137,18 +142,18 @@ function makeBoat(){
  outline.lineTo(1.05,-2.2);outline.closePath();
  const hullGeo=new THREE.ExtrudeGeometry(outline,{depth:.55,bevelEnabled:true,bevelThickness:.06,bevelSize:.05,bevelSegments:1});
  hullGeo.rotateX(Math.PI/2);
- const hull=new THREE.Mesh(hullGeo,hullMaterial);hull.position.y=.35;boat.add(hull);
- const deck=new THREE.Mesh(new THREE.BoxGeometry(1.7,.1,3.55),trim);deck.position.set(0,.38,-.25);boat.add(deck);
+ const hull=new THREE.Mesh(hullGeo,hullMaterial);hull.position.y=.35;boatVisual.add(hull);
+ const deck=new THREE.Mesh(new THREE.BoxGeometry(1.7,.1,3.55),trim);deck.position.set(0,.38,-.25);boatVisual.add(deck);
  for(const side of [-1,1]){
   const rail=new THREE.Mesh(new THREE.BoxGeometry(.085,.17,3.6),trim);
-  rail.position.set(side*.94,.54,-.25);boat.add(rail);
+  rail.position.set(side*.94,.54,-.25);boatVisual.add(rail);
  }
  const mast=new THREE.Mesh(new THREE.CylinderGeometry(.055,.095,3.1,8),hullMaterial);
- mast.position.set(0,1.92,.12);boat.add(mast);
+ mast.position.set(0,1.92,.12);boatVisual.add(mast);
  const sail=new THREE.Mesh(new THREE.PlaneGeometry(1.8,1.55),sailMaterial);
- sail.position.set(0,2.18,.12);sail.rotation.y=.22;boat.add(sail);
+ sail.position.set(0,2.18,.12);sail.rotation.y=.22;boatVisual.add(sail);
  const boom=new THREE.Mesh(new THREE.BoxGeometry(1.95,.075,.075),trim);
- boom.position.set(0,2.93,.12);boat.add(boom);
+ boom.position.set(0,2.93,.12);boatVisual.add(boom);
  scene.add(boat);resetBoat();
 }
 const flotation=[[ -.85,-.52,-1.65],[.85,-.52,-1.65],[-.85,-.52,1.65],[.85,-.52,1.65]];

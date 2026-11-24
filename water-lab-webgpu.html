@@ -864,6 +864,9 @@ function updateCausticTexture(t,force=false){
   causticLastError=String(error?.message||error);
   console.warn('Wave caustics reverted to classic:',error);
   syncCausticProjection(true);
+  for(const material of underwaterObjectMaterials){
+   material.emissiveMap=causticMap;material.needsUpdate=true;
+  }
   updateClassicCausticTexture(t);causticMap.needsUpdate=true;
  }
 }
@@ -935,7 +938,10 @@ function updateCausticLighting(cameraDepth=0){
  floorCausticMaterial.emissiveIntensity=emission;
  floorCausticMaterial.color.setScalar(causticMode==='wave'&&enabled?
    Math.max(.64,1-.18*causticContrast):1);
- for(const material of underwaterObjectMaterials)material.emissiveIntensity=emission*.55;
+ // This projection is mapped only onto the sand. Rock UVs do not
+ // represent the same world coordinates; avoid a uniform glow on them.
+ for(const material of underwaterObjectMaterials)
+  material.emissiveIntensity=causticMode==='wave'?0:emission*.55;
 }
 function createSeabed(){
  const n=120,geo=new THREE.PlaneGeometry(420,420,n,n);
@@ -972,7 +978,7 @@ function createSeabed(){
   material.emissive=new THREE.Color(0xb2eee5);
   // World-projected floor texture does not match the rock UVs.
   material.emissiveMap=causticMode==='wave'?null:causticMap;
-  material.emissiveIntensity=.1;
+  material.emissiveIntensity=causticMode==='wave'?0:.1;
   material.needsUpdate=true;
  }
  scene.add(waterFloor);

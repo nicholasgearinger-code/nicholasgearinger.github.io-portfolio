@@ -66,7 +66,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 }
 </style>
 <script type="importmap">
-{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.webgpu.js","three/webgpu":"https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.webgpu.js","three/tsl":"https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.tsl.js"}}
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.webgpu.js","three/webgpu":"https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.webgpu.js","three/tsl":"https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.tsl.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.187.0/examples/jsm/"}}
 </script></head>
 <body>
 <div id="dashboard">
@@ -240,7 +240,8 @@ let scatteringMode='screen',scatteringDiffusion=1.1,scatteringMotion=1,
 let particleDensity=.7,underwaterParticles=null;
 let screenScatteringQuality='balanced',scatteringShadows=1;
 let screenLightPipeline=null,screenGodrays=null,screenBlendColor=null,
-    mainSun=null,screenSpaceFault='',screenSpaceReady=false,screenSpaceStarting=false;
+    mainSun=null,screenSpaceFault='',screenSpaceReady=false,screenSpaceStarting=false,
+    screenSpaceFailed=false;
 
 let opticalFallbackTriggered=false;
 const safeStartup=new URLSearchParams(location.search).has('safe');
@@ -2066,7 +2067,7 @@ function setScreenShadowState(enabled){
  if(water)water.castShadow=false;
 }
 async function initScreenSpaceLighting(){
- if(screenSpaceReady||screenSpaceStarting||!isWebGPU||safeStartup)return;
+ if(screenSpaceReady||screenSpaceStarting||screenSpaceFailed||!isWebGPU||safeStartup)return;
  screenSpaceStarting=true;
  try{
   // Dynamic addon imports defer pipeline setup and leave existing
@@ -2107,6 +2108,7 @@ async function initScreenSpaceLighting(){
   status('24.7 depth-aware screen-space scattering initialized.');
  }catch(error){
   screenSpaceFault=String(error?.message||error);
+  screenSpaceFailed=true;
   scatteringMode='soft';
   $('scatteringMode').value='soft';
   setScreenShadowState(false);
@@ -2123,7 +2125,7 @@ function updateScreenSpaceLighting(){
   return false;
  }
  if(!screenSpaceReady){
-  if(!screenSpaceStarting)initScreenSpaceLighting();
+  if(!screenSpaceStarting&&!screenSpaceFailed)initScreenSpaceLighting();
   return false;
  }
  if(!mainSun.castShadow)setScreenShadowState(true);
@@ -2301,13 +2303,23 @@ async function init3D(forceWebGL=false){
   $('heading').textContent='Heading: '+((boatHeading*180/Math.PI%360+360)%360).toFixed(0)+'°';
   try{
    const useScreen=updateScreenSpaceLighting();
-   if(useScreen)screenLightPipeline.render();
-   else renderer.render(scene,camera);
+   const pending=useScreen?screenLightPipeline.render():renderer.render(scene,camera);
+   // WebGPU pipeline compilation errors often arrive as rejected promises,
+   // rather than synchronous exceptions. Handle either form.
+   if(useScreen&&pending?.catch)pending.catch(error=>{
+    if(scatteringMode!=='screen')return;
+    screenSpaceFault=String(error?.message||error);
+    screenSpaceReady=false;screenSpaceFailed=true;screenLightPipeline=null;
+    scatteringMode='soft';$('scatteringMode').value='soft';
+    setScreenShadowState(false);
+    status('24.7 GPU effect unavailable; 24.6 lighting restored: '+screenSpaceFault);
+    console.warn('24.7 asynchronous rendering fallback',error);
+   });
   }catch(error){
    if(scatteringMode==='screen'){
     screenSpaceFault=String(error?.message||error);
     scatteringMode='soft';$('scatteringMode').value='soft';
-    screenSpaceReady=false;screenLightPipeline=null;
+    screenSpaceReady=false;screenSpaceFailed=true;screenLightPipeline=null;
     setScreenShadowState(false);
     status('24.7 render failed; switched to 24.6 safe lighting: '+screenSpaceFault);
    }else

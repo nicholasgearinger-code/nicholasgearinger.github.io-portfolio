@@ -867,7 +867,7 @@ function bindCameraGestures(surface){
   }else{
    const dx=e.clientX-old.x,dy=e.clientY-old.y;
    orbitYaw-=dx*.0055;
-   orbitPitch=Math.max(-.05,Math.min(1.22,orbitPitch+dy*.0048));
+   orbitPitch=Math.max(-.68,Math.min(1.22,orbitPitch+dy*.0048));
   }
   cameraControlUntil=performance.now()+3500;
  });
@@ -894,7 +894,9 @@ function updateCamera(dt){
  const cy=cameraTarget.y+Math.sin(orbitPitch)*orbitDistance;
  const cz=cameraTarget.z+Math.cos(angle)*horizontal;
  const camFollow=1-Math.exp(-Math.max(dt,.001)*6.5);
- camera.position.lerp(new THREE.Vector3(cx,cy,cz),camFollow);
+ const floorX=cx-(waterFloor?.position.x||0),floorZ=cz-(waterFloor?.position.z||0);
+ const floorY=-seabedDepth(floorX,floorZ);
+ camera.position.lerp(new THREE.Vector3(cx,Math.max(cy,floorY+1.25),cz),camFollow);
  camera.lookAt(cameraTarget.x,cameraTarget.y,cameraTarget.z);
 }
 $('modeSwitch').onclick=setCameraMode;

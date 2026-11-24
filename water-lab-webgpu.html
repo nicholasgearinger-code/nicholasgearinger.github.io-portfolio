@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 21.3 optical water</title>
+<title>Rift Water Lab · WebGPU 21.4 hull stability</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -33,7 +33,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 </script></head>
 <body>
 <div id="dashboard">
-<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">21.3 · refraction scattering and smooth waves</span></h1>
+<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">21.4 · hull stability and clarity</span></h1>
 <p>This is a <strong>separate renderer test</strong>, not a port of the existing FFT ocean.</p>
 <div id="metrics"><span id="backend">Backend: detecting</span><span id="fps">FPS: —</span><span id="resolution">Resolution: —</span><span id="buoyancyState">Buoyancy: initializing</span><span id="boatSpeed">Speed: 0.0</span><span id="driveStatus">Drive: STOP</span><span id="distanceStatus">Travel: 0 m</span><span id="heading">Heading: 0°</span><span id="wakeStatus">Wake: dynamic</span><span id="fftStatus">FFT: initializing</span><span id="wakeSignal">Ripples: waiting</span><span id="foamStatus">Foam: initializing</span></div>
 <p id="log">Checking GPU access…</p></div></div>
@@ -744,7 +744,9 @@ function makeBoat(){
  boom.position.set(0,2.93,.12);boatVisual.add(boom);
  scene.add(boat);resetBoat();
 }
-const flotation=[[ -.85,-.52,-1.65],[.85,-.52,-1.65],[-.85,-.52,1.65],[.85,-.52,1.65]];
+// Slightly deeper buoyancy probes increase the equilibrium freeboard
+// without inflating wave heights or altering steering / wake dynamics.
+const flotation=[[-.85,-.72,-1.65],[.85,-.72,-1.65],[-.85,-.72,1.65],[.85,-.72,1.65]];
 function stepBoat(dt,t){
  if(!boat)return;
  const steps=Math.max(1,Math.min(4,Math.ceil(dt/(1/90)))),h=dt/steps;

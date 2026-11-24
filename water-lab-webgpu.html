@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 24.5.3 efficient refracted ray caustics</title>
+<title>Rift Water Lab · WebGPU 24.6 continuous underwater scattering</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.5.3</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.6</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <details id="diagnostics">
@@ -129,7 +129,10 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Caustic contrast <input id="causticContrast" aria-label="Caustic contrast against sand" type="range" min="0" max="2.5" step=".05" value="1.45"></label><output id="causticContrastOut">1.45</output></div>
 <div class="row"><label>Caustic refresh <select id="causticRate"><option value="8">Battery saver · 8 Hz</option><option value="12" selected>Balanced · 12 Hz</option><option value="18">Smooth · 18 Hz</option></select></label></div>
 <div class="row"><label>Caustic line detail <select id="causticDetail"><option value="72">Low · fastest</option><option value="96" selected>Balanced</option><option value="120">Fine · more detail</option></select></label></div>
+<div class="row"><label>Light scattering model <select id="scatteringMode"><option value="soft" selected>24.6 · soft atmospheric volumes</option><option value="classic">Previous · geometric shafts</option><option value="off">Off</option></select></label></div>
 <div class="row"><label>Volumetric sunlight <input id="volumetricStrength" aria-label="Volumetric sunlight strength" type="range" min="0" max="2" step=".05" value=".85"></label><output id="volumetricStrengthOut">0.85</output></div>
+<div class="row"><label>Light diffusion <input id="scatteringDiffusion" aria-label="Light diffusion" type="range" min=".4" max="2" step=".05" value="1.10"></label><output id="scatteringDiffusionOut">1.10</output></div>
+<div class="row"><label>Volume motion <input id="scatteringMotion" aria-label="Underwater volume motion" type="range" min="0" max="2" step=".05" value="1"></label><output id="scatteringMotionOut">1.00</output></div>
 <div class="row"><label>Light shaft detail <select id="shaftQuality"><option value="low">Low · 6 shafts</option><option value="medium" selected>Balanced · 12 shafts</option><option value="high">High · 20 shafts</option></select></label></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -229,11 +232,13 @@ const waterProfiles={
  deep:{absorption:[.24,.10,.036],scattering:.029,color:0x104963}
 };
 let volumetricStrength=.85,shaftQuality='medium',lightShafts=null,shaftMeshes=[],volumetricFault=false;
+let scatteringMode='soft',scatteringDiffusion=1.1,scatteringMotion=1,
+ softShaftTexture=null,softShaftGeometry=null,softShafts=null,softShaftMeshes=[],lastScatteringUpdate=-100;
 
 let opticalFallbackTriggered=false;
 const safeStartup=new URLSearchParams(location.search).has('safe');
 let gpuFFT=null,waveEngine=safeStartup?'analytic':'hybrid',fftEnergy=3,fftMix=0,fftStarting=false,fftFault='',fftAttempted=false,fftRecoveryCount=0,fftRuntimeInfo='';
-if(safeStartup){reflectionMode='basic';opticalMode='legacy';volumetricStrength=0;hullPhysics='classic';atmospherePreset='off';undersideMode='classic';visibilityMode='classic';causticMode='off';}
+if(safeStartup){reflectionMode='basic';opticalMode='legacy';volumetricStrength=0;hullPhysics='classic';atmospherePreset='off';undersideMode='classic';visibilityMode='classic';causticMode='off';scatteringMode='off';}
 let cameraMode='chase',orbitYaw=.12,orbitPitch=.31,orbitDistance=15;
 let cameraIntroStart=performance.now(),pointerOrigin=null,pinchDistance=null;
 const cameraTarget={x:-3.2,y:1,z:-13},activePointers=new Map();
@@ -458,7 +463,7 @@ function makeShaftGeometry(seed){
  geo.computeVertexNormals();
  return geo;
 }
-function createVolumetricShafts(){
+function createClassicVolumetricShafts(){
  if(lightShafts){
   scene.remove(lightShafts);
   for(const mesh of shaftMeshes){mesh.geometry.dispose();mesh.material.dispose();}
@@ -480,7 +485,7 @@ function createVolumetricShafts(){
  lightShafts.visible=false;
  scene.add(lightShafts);
 }
-function updateVolumetricShafts(t){
+function updateClassicVolumetricShafts(t){
  if(!lightShafts||!camera)return;
  const enabled=volumetricStrength>.01&&underwaterActive&&underwaterBlend>.12&&opticalMode!=='legacy';
  lightShafts.visible=enabled;
@@ -512,6 +517,110 @@ function updateVolumetricShafts(t){
   mesh.position.set(x,surface-.06,z);
   mesh.scale.y=Math.max(.16,Math.min(1,depthRange/14));
  }
+}
+
+function makeSoftShaftTexture(){
+ // Premultiplied-looking soft radiance envelope, independently faded
+ // across the ray and along its vertical extent. No hard polygon edges.
+ const n=64,pixels=new Uint8Array(n*n*4);
+ for(let y=0;y<n;y++)for(let x=0;x<n;x++){
+  const u=((x+.5)/n-.5)*2,v=(y+.5)/n;
+  const radial=Math.exp(-Math.pow(Math.abs(u)/.45,2)*2.1);
+  const length=Math.pow(Math.sin(Math.PI*v),1.25);
+  const wisps=.87+.13*Math.sin(u*9+v*11)*Math.cos(u*7-v*17);
+  const alpha=Math.min(1,radial*length*wisps);
+  const i=(y*n+x)*4;
+  pixels[i]=214;pixels[i+1]=247;pixels[i+2]=245;
+  pixels[i+3]=Math.round(alpha*255);
+ }
+ const texture=new THREE.DataTexture(pixels,n,n,THREE.RGBAFormat);
+ texture.colorSpace=THREE.SRGBColorSpace;
+ texture.minFilter=THREE.LinearFilter;texture.magFilter=THREE.LinearFilter;
+ texture.wrapS=THREE.ClampToEdgeWrapping;texture.wrapT=THREE.ClampToEdgeWrapping;
+ texture.generateMipmaps=false;
+ texture.needsUpdate=true;return texture;
+}
+function createSoftVolumetricShafts(){
+ if(softShafts){
+  scene.remove(softShafts);
+  for(const mesh of softShaftMeshes)mesh.material.dispose();
+ }
+ softShaftTexture ||=makeSoftShaftTexture();
+ softShaftGeometry ||=new THREE.PlaneGeometry(1,1,1,1);
+ softShafts=new THREE.Group();softShaftMeshes=[];
+ // Camera-facing translucent wisps are significantly cheaper than 20
+ // tessellated cones; all wisps share one four-vertex geometry and map.
+ const count=16;
+ for(let i=0;i<count;i++){
+  const material=new THREE.MeshBasicMaterial({
+   map:softShaftTexture,color:0xaff5ef,transparent:true,
+   opacity:0,blending:THREE.AdditiveBlending,depthWrite:false,
+   depthTest:true,side:THREE.DoubleSide,fog:false,
+   toneMapped:false
+  });
+  const mesh=new THREE.Mesh(softShaftGeometry,material);
+  mesh.frustumCulled=false;
+  mesh.renderOrder=2;
+  mesh.userData.seed=i*2.399963229728653;
+  mesh.userData.radius=3+Math.sqrt(i+.5)*2.25;
+  mesh.userData.smoothed=0;
+  softShafts.add(mesh);softShaftMeshes.push(mesh);
+ }
+ softShafts.visible=false;
+ scene.add(softShafts);
+}
+function updateSoftVolumetricShafts(t){
+ if(!softShafts||!camera)return;
+ const enabled=scatteringMode==='soft'&&volumetricStrength>.01&&
+  underwaterActive&&underwaterBlend>.08&&opticalMode!=='legacy';
+ softShafts.visible=enabled;
+ if(!enabled)return;
+ const max=shaftQuality==='high'?16:shaftQuality==='low'?6:11;
+ const cameraDepth=Math.max(0,-camera.position.y);
+ const clarity=Math.max(.45,waterClarity);
+ const waterFade=Math.exp(-cameraDepth*(opticalMode==='deep'?.13:.074)/clarity);
+ const cx=camera.position.x,cz=camera.position.z;
+ // One temporary quaternion per update, not per plane.
+ for(let i=0;i<softShaftMeshes.length;i++){
+  const mesh=softShaftMeshes[i];
+  if(i>=max){mesh.visible=false;continue;}
+  const phase=mesh.userData.seed,rad=mesh.userData.radius;
+  const x=cx+Math.cos(phase+t*.035*scatteringMotion)*rad;
+  const z=cz+Math.sin(phase+t*.032*scatteringMotion)*rad;
+  const surface=oceanHeight(x,z,t);
+  const depth=Math.max(0,surface+seabedDepth(
+    x-(waterFloor?.position.x||0),z-(waterFloor?.position.z||0)));
+  mesh.visible=depth>1.4;
+  if(!mesh.visible)continue;
+  const wave=waveField(x,z,t,{});
+  const focusing=.65+.35*Math.sin(phase*1.8+t*.35*scatteringMotion+
+    wave.height*.9);
+  const axial=Math.exp(-Math.pow(rad/23,2));
+  const target=Math.min(.16,.036*volumetricStrength*underwaterBlend*
+    waterFade*focusing*axial*(opticalMode==='deep'?.62:1));
+  mesh.userData.smoothed+=(target-mesh.userData.smoothed)*
+    (1-Math.exp(-Math.max(.001,clockDelta)*5));
+  mesh.material.opacity=mesh.userData.smoothed;
+  const span=Math.min(depth,15);
+  mesh.position.set(x-sunDirection.x*span*.24,surface-span*.49,
+    z-sunDirection.z*span*.24);
+  const width=(1.5+rad*.08)*scatteringDiffusion;
+  mesh.scale.set(width,span,1);
+  // Face the view while preserving the approximate direction of sunlight.
+  mesh.quaternion.copy(camera.quaternion);
+ }
+}
+const sunDirection={x:16/39.3,z:8/39.3};
+function createVolumetricShafts(){
+ createClassicVolumetricShafts();
+ createSoftVolumetricShafts();
+ if(lightShafts)lightShafts.visible=false;
+}
+function updateVolumetricShafts(t){
+ if(scatteringMode!=='classic'&&lightShafts)lightShafts.visible=false;
+ if(scatteringMode!=='soft'&&softShafts)softShafts.visible=false;
+ if(scatteringMode==='classic')updateClassicVolumetricShafts(t);
+ else if(scatteringMode==='soft')updateSoftVolumetricShafts(t);
 }
 // Exponential fog models scattering/visibility across the scene. The
 // background color uses per-channel Beer-Lambert depth attenuation to
@@ -1739,6 +1848,20 @@ $('volumetricStrength').oninput=()=>{
  $('volumetricStrengthOut').textContent=volumetricStrength.toFixed(2);
 };
 $('shaftQuality').onchange=()=>{shaftQuality=$('shaftQuality').value;};
+$('scatteringMode').onchange=()=>{
+ scatteringMode=$('scatteringMode').value;
+ volumetricFault=false;
+ if(scatteringMode!=='classic'&&lightShafts)lightShafts.visible=false;
+ if(scatteringMode!=='soft'&&softShafts)softShafts.visible=false;
+};
+$('scatteringDiffusion').oninput=()=>{
+ scatteringDiffusion=Number($('scatteringDiffusion').value);
+ $('scatteringDiffusionOut').textContent=scatteringDiffusion.toFixed(2);
+};
+$('scatteringMotion').oninput=()=>{
+ scatteringMotion=Number($('scatteringMotion').value);
+ $('scatteringMotionOut').textContent=scatteringMotion.toFixed(2);
+};
 $('underwaterScene').onchange=()=>{
  underwaterSceneMode=$('underwaterScene').value;
  if(underwaterObjects)underwaterObjects.visible=underwaterSceneMode==='reef';
@@ -1910,6 +2033,7 @@ async function init3D(forceWebGL=false){
  if(safeStartup){underwaterSceneMode='sand';underwaterObjects.visible=false;$('underwaterScene').value='sand';}
  if(safeStartup){
   $('volumetricStrength').value='0';$('volumetricStrengthOut').textContent='0.00';
+  scatteringMode='off';$('scatteringMode').value='off';
   $('renderScale').value='1';$('renderScaleOut').textContent='1.00×';
  }
  if(isWebGPU&&waveEngine!=='analytic')startFFT();
@@ -1967,6 +2091,7 @@ async function init3D(forceWebGL=false){
    catch(error){
     volumetricFault=true;volumetricStrength=0;
     if(lightShafts)lightShafts.visible=false;
+    if(softShafts)softShafts.visible=false;
     $('volumetricStrength').value='0';
     $('volumetricStrengthOut').textContent='Off';
     status('Volumetric lighting disabled after rendering error: '+String(error?.message||error));

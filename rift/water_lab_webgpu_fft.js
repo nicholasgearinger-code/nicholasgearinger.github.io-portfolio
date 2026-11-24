@@ -146,26 +146,39 @@ fn main(@builtin(global_invocation_id) id:vec3u){
    device.queue.submit([encoder.finish()]);
    staging.mapAsync(GPUMapMode.READ).then(()=>{
     if(disposed)return;
-    latest=new Float32Array(staging.getMappedRange()).slice();
+    const candidate=new Float32Array(staging.getMappedRange()).slice();
     staging.unmap();
-    let squares=0;
-    for(let i=0;i<latest.length;i+=2){
-      const value=latest[i]/(n*n);
+    // Strict GPU-to-CPU validation: one NaN is enough to destroy ocean
+    // geometry, boat buoyancy and every render following that frame.
+    // Never publish an unvalidated field to the live sampler.
+    let squares=0,valid=true,peak=0;
+    for(let i=0;i<candidate.length;i+=2){
+      const real=candidate[i],imag=candidate[i+1];
+      if(!Number.isFinite(real)||!Number.isFinite(imag)){valid=false;break;}
+      const value=real/(n*n);
+      peak=Math.max(peak,Math.abs(value));
       squares+=value*value;
     }
-    rms=Math.sqrt(squares/(n*n));
+    const nextRms=Math.sqrt(squares/(n*n));
+    if(!valid||!Number.isFinite(nextRms)||peak>20){
+      failures++;busy=false;latest=null;rms=0;
+      onError('Invalid FFT data ('+(!valid?'non-finite values':'out-of-range wave heights')+'); analytic ocean restored');
+      return;
+    }
+    latest=candidate;rms=nextRms;
     frames++;busy=false;
    }).catch(error=>{busy=false;failures++;if(failures===1)onError(String(error));});
   }catch(error){busy=false;failures++;if(failures===1)onError(String(error));}
  }
  function sample(x,z){
-  if(!latest)return 0;
+  if(!latest||!Number.isFinite(x)||!Number.isFinite(z))return 0;
   const ux=((x/domain)%1+1)%1*n,uz=((z/domain)%1+1)%1*n;
   const ix=Math.floor(ux),iz=Math.floor(uz),tx=ux-ix,tz=uz-iz;
   const ax=ix%n,bx=(ix+1)%n,az=iz%n,bz=(iz+1)%n;
   const a=latest[(az*n+ax)*2],b=latest[(az*n+bx)*2];
   const c=latest[(bz*n+ax)*2],d=latest[(bz*n+bx)*2];
-  return ((a+(b-a)*tx)*(1-tz)+(c+(d-c)*tx)*tz)/(n*n);
+  const value=((a+(b-a)*tx)*(1-tz)+(c+(d-c)*tx)*tz)/(n*n);
+  return Number.isFinite(value)?Math.max(-20,Math.min(20,value)):0;
  }
  function dispose(){
   disposed=true;

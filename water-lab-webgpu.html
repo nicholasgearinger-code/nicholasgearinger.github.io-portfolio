@@ -112,6 +112,9 @@ let surfaceDetail=.65,surfaceGlitter=.6,fineRipple=.70,reflectionMode='enhanced'
 let waterNearMaterial=null,waterFarMaterial=null;
 let opticalMode='lagoon',waterClarity=1.10,waterFloor=null,renderQuality='balanced';
 let opticalFallbackTriggered=false;
+const safeStartup=new URLSearchParams(location.search).has('safe');
+if(safeStartup){reflectionMode='basic';opticalMode='legacy';waveEngine='analytic';}
+
 let gpuFFT=null,waveEngine='hybrid',fftEnergy=3,fftMix=0,fftStarting=false,fftFault='',fftAttempted=false,fftRecoveryCount=0;
 let cameraMode='chase',orbitYaw=.12,orbitPitch=.31,orbitDistance=15;
 let cameraIntroStart=performance.now(),pointerOrigin=null,pinchDistance=null;
@@ -605,10 +608,16 @@ function animateWaves(t){
    Math.abs(wakeSolver.sample(wx,wz+.33)-wakeSolver.sample(wx,wz-.33)):0;
   const foam=radial<15?wakeAppearance(wx,wz,t)*fade:0;
   const shine=Math.min(1,Math.abs(disturbance)*.28+slope*.42+foam*.62);
+  // Coastal-depth color modulation: deeper shelves absorb warm light,
+  // while shallow water exposes brighter turquoise transmitted seafloor.
+  // This is only coloration; geometry and wake physics are unchanged.
+  const localX=wx-(waterFloor?.position.x||0),localZ=wz-(waterFloor?.position.z||0);
+  const shelfRange=Math.hypot(localX*.83,(localZ+11)*.92);
+  const shallow=Math.max(0,Math.min(1,(100-shelfRange)/84));
   const glimmer=.02*Math.sin(wx*.8+wz*.42-t*3.2);
-  nearColorData[i]=Math.max(.025,Math.min(1,.03+shine*.33+glimmer*.15+foam*.70));
-  nearColorData[i+1]=Math.max(.23,Math.min(1,.37+shine*.43+glimmer*.2+foam*.58));
-  nearColorData[i+2]=Math.max(.30,Math.min(1,.48+shine*.45+glimmer*.25+foam*.48));
+  nearColorData[i]=Math.max(.025,Math.min(1,.045+shallow*.22+shine*.32+glimmer*.15+foam*.70));
+  nearColorData[i+1]=Math.max(.23,Math.min(1,.35+shallow*.23+shine*.43+glimmer*.2+foam*.58));
+  nearColorData[i+2]=Math.max(.30,Math.min(1,.46+shallow*.20+shine*.45+glimmer*.25+foam*.48));
   rippleSum+=Math.abs(disturbance);rippleMax=Math.max(rippleMax,Math.abs(disturbance));
  }
  lastRipple=rippleMax;
@@ -936,8 +945,13 @@ async function init3D(forceWebGL=false){
  const sun=new THREE.DirectionalLight(0xffeddb,3.5);sun.position.set(16,35,8);scene.add(sun);
  const floor=createSeabed();
  makeBoat();makeSurface();createFoamField();resetCamera();
- if(isWebGPU)startFFT();
- else fftMessage('WebGL fallback · procedural');
+ if(isWebGPU&&waveEngine!=='analytic')startFFT();
+ else fftMessage(safeStartup?'safe startup · analytic waves':'WebGL fallback · procedural');
+ if(safeStartup){
+  $('reflectionMode').value='basic';
+  $('opticalMode').value='legacy';
+  $('waveEngine').value='analytic';
+ }
  $('buoyancyState').textContent='Boat: 4-point floating + sailing';
  renderer.domElement.id='threeCanvas';renderer.domElement.style.cssText='position:fixed;inset:0;width:100%;height:100%;z-index:1';
  document.body.prepend(renderer.domElement);

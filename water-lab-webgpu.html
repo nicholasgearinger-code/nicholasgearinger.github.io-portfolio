@@ -425,7 +425,7 @@ async function init3D(forceWebGL=false){
    floor.position.x=water.position.x;
    floor.position.z=water.position.z;
    wakeSolver?.advance(dt,{x:boat.position.x,z:boat.position.z,
-     heading:boatHeading,speed:boatSpeed,amount:wakeAmount});
+     heading:boatHeading,speed:boatSpeed,bob:vy,amount:wakeAmount});
    animateWaves(time);
   }
   updateCamera(dt);

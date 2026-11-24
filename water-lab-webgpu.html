@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 24.6 continuous underwater scattering</title>
+<title>Rift Water Lab · WebGPU 24.7 screen-space volumetric light and shadows</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.6</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.7</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <details id="diagnostics">
@@ -129,8 +129,10 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Caustic contrast <input id="causticContrast" aria-label="Caustic contrast against sand" type="range" min="0" max="2.5" step=".05" value="1.45"></label><output id="causticContrastOut">1.45</output></div>
 <div class="row"><label>Caustic refresh <select id="causticRate"><option value="8">Battery saver · 8 Hz</option><option value="12" selected>Balanced · 12 Hz</option><option value="18">Smooth · 18 Hz</option></select></label></div>
 <div class="row"><label>Caustic line detail <select id="causticDetail"><option value="72">Low · fastest</option><option value="96" selected>Balanced</option><option value="120">Fine · more detail</option></select></label></div>
-<div class="row"><label>Light scattering model <select id="scatteringMode"><option value="soft" selected>24.6 · soft atmospheric volumes</option><option value="classic">Previous · geometric shafts</option><option value="off">Off</option></select></label></div>
+<div class="row"><label>Light scattering model <select id="scatteringMode"><option value="screen" selected>24.7 · screen-space light + shadows</option><option value="soft">24.6 · soft atmospheric volumes</option><option value="classic">Previous · geometric shafts</option><option value="off">Off</option></select></label></div>
 <div class="row"><label>Volumetric sunlight <input id="volumetricStrength" aria-label="Volumetric sunlight strength" type="range" min="0" max="2" step=".05" value=".85"></label><output id="volumetricStrengthOut">0.85</output></div>
+<div class="row"><label>Screen-space quality <select id="screenScatteringQuality"><option value="low">Fast · 12 steps</option><option value="balanced" selected>Balanced · 18 steps</option><option value="high">Detailed · 28 steps</option></select></label></div>
+<div class="row"><label>Shadow influence <input id="scatteringShadows" aria-label="Screen-space shadow influence" type="range" min="0" max="2" step=".1" value="1"></label><output id="scatteringShadowsOut">1.00</output></div>
 <div class="row"><label>Light diffusion <input id="scatteringDiffusion" aria-label="Light diffusion" type="range" min=".4" max="2" step=".05" value="1.10"></label><output id="scatteringDiffusionOut">1.10</output></div>
 <div class="row"><label>Volume motion <input id="scatteringMotion" aria-label="Underwater volume motion" type="range" min="0" max="2" step=".05" value="1"></label><output id="scatteringMotionOut">1.00</output></div>
 <div class="row"><label>Suspended particles <input id="particleDensity" aria-label="Suspended underwater particle density" type="range" min="0" max="2" step=".1" value=".7"></label><output id="particleDensityOut">0.70</output></div>
@@ -233,9 +235,12 @@ const waterProfiles={
  deep:{absorption:[.24,.10,.036],scattering:.029,color:0x104963}
 };
 let volumetricStrength=.85,shaftQuality='medium',lightShafts=null,shaftMeshes=[],volumetricFault=false;
-let scatteringMode='soft',scatteringDiffusion=1.1,scatteringMotion=1,
+let scatteringMode='screen',scatteringDiffusion=1.1,scatteringMotion=1,
  softShaftTexture=null,softShaftGeometry=null,softShafts=null,softShaftMeshes=[],lastScatteringUpdate=-100;
 let particleDensity=.7,underwaterParticles=null;
+let screenScatteringQuality='balanced',scatteringShadows=1;
+let screenLightPipeline=null,screenGodrays=null,screenBlendColor=null,
+    mainSun=null,screenSpaceFault='',screenSpaceReady=false,screenSpaceStarting=false;
 
 let opticalFallbackTriggered=false;
 const safeStartup=new URLSearchParams(location.search).has('safe');
@@ -596,7 +601,7 @@ function createUnderwaterParticles(){
 }
 function updateUnderwaterParticles(t){
  if(!underwaterParticles||!camera)return;
- const show=scatteringMode==='soft'&&underwaterActive&&
+ const show=(scatteringMode==='soft'||scatteringMode==='screen')&&underwaterActive&&
   underwaterBlend>.15&&particleDensity>.01&&volumetricStrength>.01;
  underwaterParticles.visible=show;
  if(!show)return;
@@ -1892,9 +1897,21 @@ $('volumetricStrength').oninput=()=>{
 $('shaftQuality').onchange=()=>{shaftQuality=$('shaftQuality').value;};
 $('scatteringMode').onchange=()=>{
  scatteringMode=$('scatteringMode').value;
+ if(scatteringMode==='screen'&&!isWebGPU){
+  scatteringMode='soft';$('scatteringMode').value='soft';
+  status('Screen-space lighting requires WebGPU; using 24.6 soft-light mode.');
+ }
  volumetricFault=false;
  if(scatteringMode!=='classic'&&lightShafts)lightShafts.visible=false;
  if(scatteringMode!=='soft'&&softShafts)softShafts.visible=false;
+};
+$('screenScatteringQuality').onchange=()=>{
+ screenScatteringQuality=$('screenScatteringQuality').value;
+ applyScreenScatteringQuality();
+};
+$('scatteringShadows').oninput=()=>{
+ scatteringShadows=Number($('scatteringShadows').value);
+ $('scatteringShadowsOut').textContent=scatteringShadows.toFixed(2);
 };
 $('scatteringDiffusion').oninput=()=>{
  scatteringDiffusion=Number($('scatteringDiffusion').value);
@@ -2019,6 +2036,115 @@ $('detail').onclick=()=>{detailIndex=(detailIndex+1)%levels.length;if(scene)make
 // Simple physically motivated atmosphere gradient: paler near the horizon,
 // deeper overhead, with a warm sunward haze. Shader-compatible vertex color
 // geometry is inexpensive and works in both WebGPU and WebGL.
+
+// 24.7 native screen-space god-rays. The scene pass supplies geometry
+// depth; a low-resolution raymarch evaluates occlusion from a directional
+// shadow map, and depth-aware blending protects near silhouettes.
+// This is only used on WebGPU. WebGL continues to use 24.6 light planes.
+function applyScreenScatteringQuality(){
+ if(!screenGodrays)return;
+ const steps=screenScatteringQuality==='high'?28:
+   screenScatteringQuality==='low'?12:18;
+ screenGodrays.raymarchSteps.value=steps;
+}
+function setScreenShadowState(enabled){
+ if(!renderer||!mainSun||!scene)return;
+ const active=enabled&&isWebGPU&&opticalMode!=='legacy';
+ renderer.shadowMap.enabled=active;
+ mainSun.castShadow=active;
+ if(!active)return;
+ // Shadow-map geometry includes the seabed, wreck, and boat, but not
+ // the endless water plane or sky. Those would block the entire volume.
+ if(waterFloor){waterFloor.receiveShadow=true;waterFloor.castShadow=false;}
+ if(underwaterObjects)underwaterObjects.traverse(o=>{
+  if(o.isMesh||o.isInstancedMesh){o.castShadow=true;o.receiveShadow=true;}
+ });
+ if(boat)boat.traverse(o=>{
+  if(o.isMesh){o.castShadow=true;o.receiveShadow=true;}
+ });
+ if(nearWater)nearWater.castShadow=false;
+ if(water)water.castShadow=false;
+}
+async function initScreenSpaceLighting(){
+ if(screenSpaceReady||screenSpaceStarting||!isWebGPU||safeStartup)return;
+ screenSpaceStarting=true;
+ try{
+  // Dynamic addon imports defer pipeline setup and leave existing
+  // WebGL and safe-mode startup paths completely unchanged.
+  const [
+    {pass,uniform,color,float,int},
+    {godrays},
+    {bilateralBlur},
+    {depthAwareBlend}
+  ]=await Promise.all([
+    import('three/tsl'),
+    import('three/addons/tsl/display/GodraysNode.js'),
+    import('three/addons/tsl/display/BilateralBlurNode.js'),
+    import('three/addons/tsl/display/depthAwareBlend.js')
+  ]);
+  const pipeline=new THREE.RenderPipeline(renderer);
+  const beauty=pass(scene,camera);
+  const sceneColor=beauty.getTextureNode('output');
+  const sceneDepth=beauty.getTextureNode('depth');
+  const rays=godrays(sceneDepth,camera,mainSun);
+  rays.resolutionScale=.5; // half-res raymarch, cheap 12–28 taps.
+  rays.density.value=.32;
+  rays.maxDensity.value=.20;
+  rays.distanceAttenuation.value=1.6;
+  const blurred=bilateralBlur(rays.getTextureNode());
+  const blendColor=uniform(color(0x9be8de));
+  const composed=depthAwareBlend(
+    sceneColor,blurred.getTextureNode(),sceneDepth,camera,
+    {blendColor,edgeRadius:uniform(int(2)),
+     edgeStrength:uniform(float(1.6))}
+  );
+  pipeline.outputNode=composed;
+  screenLightPipeline=pipeline;
+  screenGodrays=rays;
+  screenBlendColor=blendColor;
+  screenSpaceReady=true;
+  applyScreenScatteringQuality();
+  status('24.7 depth-aware screen-space scattering initialized.');
+ }catch(error){
+  screenSpaceFault=String(error?.message||error);
+  scatteringMode='soft';
+  $('scatteringMode').value='soft';
+  setScreenShadowState(false);
+  status('24.7 unavailable on this device; reverted to 24.6: '+screenSpaceFault);
+  console.warn('Screen-space scattering unavailable:',error);
+ }finally{screenSpaceStarting=false;}
+}
+function updateScreenSpaceLighting(){
+ const desired=scatteringMode==='screen'&&isWebGPU&&
+  opticalMode!=='legacy'&&volumetricStrength>.01&&
+  underwaterActive&&underwaterBlend>.12;
+ if(!desired){
+  if(mainSun?.castShadow)setScreenShadowState(false);
+  return false;
+ }
+ if(!screenSpaceReady){
+  if(!screenSpaceStarting)initScreenSpaceLighting();
+  return false;
+ }
+ if(!mainSun.castShadow)setScreenShadowState(true);
+ // The small shadow frustum tracks the boat with the sunlight direction.
+ // The sun's world direction does not change with tracking.
+ if(boat&&mainSun){
+  mainSun.position.set(boat.position.x+16,boat.position.y+35,boat.position.z+8);
+  mainSun.target.position.set(boat.position.x,boat.position.y,boat.position.z);
+  mainSun.target.updateMatrixWorld();
+ }
+ const depth=Math.max(0,-camera.position.y),clarity=Math.max(.4,waterClarity);
+ const extinction=Math.exp(-depth*(opticalMode==='deep'?.16:.085)/clarity);
+ screenGodrays.density.value=Math.min(.9,.32*underwaterBlend*
+  volumetricStrength*extinction);
+ screenGodrays.maxDensity.value=Math.min(.65,.22*volumetricStrength);
+ screenGodrays.distanceAttenuation.value=1.1+scatteringDiffusion*.5;
+ // Shadow influence scales attenuation/fog contrast rather than a
+ // second, unbounded full-screen light pass.
+ screenGodrays.density.value*=Math.max(.1,scatteringShadows);
+ return true;
+}
 function createSkyDome(){
  const g=new THREE.SphereGeometry(430,32,18),a=g.attributes.position;
  const colors=new Float32Array(a.count*3);
@@ -2069,13 +2195,24 @@ async function init3D(forceWebGL=false){
  camera=new THREE.PerspectiveCamera(63,innerWidth/innerHeight,.1,550);
  camera.position.set(0,4.0,11);camera.lookAt(-2.3,.35,-13);
  const ambient=new THREE.HemisphereLight(0xc7eeff,0x0b3144,1.05);scene.add(ambient);
- const sun=new THREE.DirectionalLight(0xffeddb,3.5);sun.position.set(16,35,8);scene.add(sun);
+ const sun=new THREE.DirectionalLight(0xffeddb,3.5);
+ sun.position.set(16,35,8);scene.add(sun);mainSun=sun;
+ // Keep shadow allocation off until 24.7 is active on WebGPU.
+ sun.castShadow=false;
+ sun.shadow.mapSize.set(512,512);
+ sun.shadow.camera.left=-34;sun.shadow.camera.right=34;
+ sun.shadow.camera.top=34;sun.shadow.camera.bottom=-34;
+ sun.shadow.camera.near=.5;sun.shadow.camera.far=110;
+ sun.shadow.bias=-.00013;sun.shadow.normalBias=.028;
  underwaterSunlight=new THREE.DirectionalLight(0xbaf9ea,0);
  underwaterSunlight.position.set(16,35,8);scene.add(underwaterSunlight);
  underwaterAmbient=new THREE.HemisphereLight(0xb3ecf5,0x1b5b63,0);
  scene.add(underwaterAmbient);
  const floor=createSeabed();
  makeBoat();makeSurface();createFoamField();createVolumetricShafts();resetCamera();
+ if(!isWebGPU&&scatteringMode==='screen'){
+  scatteringMode='soft';$('scatteringMode').value='soft';
+ }
  if(safeStartup){underwaterSceneMode='sand';underwaterObjects.visible=false;$('underwaterScene').value='sand';}
  if(safeStartup){
   $('volumetricStrength').value='0';$('volumetricStrengthOut').textContent='0.00';
@@ -2163,8 +2300,17 @@ async function init3D(forceWebGL=false){
   // Foam count is set by the whitewater generator, not by boat speed.
   $('heading').textContent='Heading: '+((boatHeading*180/Math.PI%360+360)%360).toFixed(0)+'°';
   try{
-   renderer.render(scene,camera);
+   const useScreen=updateScreenSpaceLighting();
+   if(useScreen)screenLightPipeline.render();
+   else renderer.render(scene,camera);
   }catch(error){
+   if(scatteringMode==='screen'){
+    screenSpaceFault=String(error?.message||error);
+    scatteringMode='soft';$('scatteringMode').value='soft';
+    screenSpaceReady=false;screenLightPipeline=null;
+    setScreenShadowState(false);
+    status('24.7 render failed; switched to 24.6 safe lighting: '+screenSpaceFault);
+   }else
    if(reflectionMode==='enhanced'){
     reflectionMode='basic';$('reflectionMode').value='basic';
     applyReflectionMode();

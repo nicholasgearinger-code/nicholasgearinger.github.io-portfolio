@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 18.1 turbulent boat wake</title>
+<title>Rift Water Lab · WebGPU 18.2 whitewater foam</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -33,7 +33,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 </script></head>
 <body>
 <div id="dashboard">
-<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">18.1 · turbulent boat wake</span></h1>
+<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">18.2 · whitewater foam</span></h1>
 <p>This is a <strong>separate renderer test</strong>, not a port of the existing FFT ocean.</p>
 <div id="metrics"><span id="backend">Backend: detecting</span><span id="fps">FPS: —</span><span id="resolution">Resolution: —</span><span id="buoyancyState">Buoyancy: initializing</span><span id="boatSpeed">Speed: 0.0</span><span id="heading">Heading: 0°</span><span id="wakeStatus">Wake: dynamic</span><span id="wakeSignal">Ripples: waiting</span></div>
 <p id="log">Checking GPU access…</p></div></div>
@@ -43,6 +43,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Wave shape <input id="waveChop" aria-label="Wave crest sharpness" type="range" min="0" max="1.2" step=".05" value=".45"></label><output id="waveChopOut">0.45</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
 <div class="row"><label>Wake physics <input id="wakeAmount" aria-label="Boat wake strength" type="range" min="0" max="2" step=".05" value="1.1"></label><output id="wakeAmountOut">1.10</output><button id="resetWake">Clear wake</button></div>
+<div class="row"><label>Whitewater <input id="foamStrength" aria-label="Whitewater strength" type="range" min="0" max="2.5" step=".1" value="1.5"></label><output id="foamStrengthOut">1.5</output></div>
 <div class="row"><label>Buoyancy <input type="range" id="buoyancyStrength" min=".5" max="1.8" step=".05" value="1"></label><output id="buoyancyStrengthOut">1.00</output><button id="resetBoat">Reset boat</button></div>
 <div class="row"><label>Forward power <input id="sailPower" type="range" min="0" max="1" step=".05" value=".85"></label><output id="sailPowerOut">85%</output></div>
 
@@ -95,6 +96,7 @@ let buoyancyStrength=1,vy=0,pitchV=0,rollV=0;
 let boatHeading=0,boatSpeed=0,rudder=0,sailPower=.85,driveMode='stop',steeringLeft=false,steeringRight=false;
 let wakeSolver=null,wakeAmount=1.1,waveChop=.45;
 let lastRipple=0,propulsionMode='power',wakeTrail=[],trailElapsed=0;
+let foamMesh=null,foamPositions=null,foamColors=null,foamCapacity=150,foamStrength=1.5;
 let cameraMode='chase',orbitYaw=.12,orbitPitch=.31,orbitDistance=15;
 let cameraIntroStart=performance.now(),pointerOrigin=null,pinchDistance=null;
 const cameraTarget={x:-3.2,y:1,z:-13},activePointers=new Map();
@@ -248,6 +250,116 @@ function wakeAppearance(x,z,t){
   foam=Math.max(foam,patch);
  }
  return Math.min(1,Math.max(0,foam*wakeAmount));
+}
+
+// Whitewater is a separate, translucent foam field. The irregular alpha
+// texture represents aerated surface patches, while the underlying 2D
+// pressure solver continues to provide physical wave displacement.
+function createFoamTexture(){
+ const c=document.createElement('canvas');c.width=128;c.height=128;
+ const ctx=c.getContext('2d'),img=ctx.createImageData(128,128);
+ function hash(x,y){let k=(x*374761393+y*668265263)>>>0;k=Math.imul(k^(k>>>13),1274126177);return ((k^(k>>>16))>>>0)/4294967295;}
+ function smooth(t){return t*t*(3-2*t);}
+ function noise(x,y){
+  const ix=Math.floor(x),iy=Math.floor(y),fx=smooth(x-ix),fy=smooth(y-iy);
+  const a=hash(ix,iy),b=hash(ix+1,iy),d=hash(ix,iy+1),e=hash(ix+1,iy+1);
+  return (a+(b-a)*fx)*(1-fy)+(d+(e-d)*fx)*fy;
+ }
+ for(let y=0;y<128;y++)for(let x=0;x<128;x++){
+  const u=(x-63.5)/63.5,v=(y-63.5)/63.5,r=Math.hypot(u,v);
+  const n=.52*noise(x*.15,y*.15)+.33*noise(x*.4,y*.4)+.15*noise(x*.85,y*.85);
+  const edge=Math.max(0,Math.min(1,(1.0-r)*4.2));
+  const cut=Math.max(0,Math.min(1,(n-.34)*3.6));
+  const i=(y*128+x)*4,grey=228+Math.round(n*27);
+  img.data[i]=grey;img.data[i+1]=Math.min(255,grey+2);img.data[i+2]=255;
+  img.data[i+3]=Math.round(255*edge*cut);
+ }
+ ctx.putImageData(img,0,0);
+ const tex=new THREE.CanvasTexture(c);
+ tex.minFilter=THREE.LinearFilter;tex.magFilter=THREE.LinearFilter;
+ tex.wrapS=THREE.ClampToEdgeWrapping;tex.wrapT=THREE.ClampToEdgeWrapping;
+ tex.generateMipmaps=false;
+ return tex;
+}
+function createFoamField(){
+ if(foamMesh){scene.remove(foamMesh);foamMesh.geometry.dispose();foamMesh.material.map?.dispose();foamMesh.material.dispose();}
+ const geo=new THREE.BufferGeometry();
+ foamPositions=new Float32Array(foamCapacity*4*3);
+ foamColors=new Float32Array(foamCapacity*4*4);
+ const uv=new Float32Array(foamCapacity*4*2),indices=[];
+ for(let i=0;i<foamCapacity;i++){
+  const v=i*4,k=i*8;
+  uv.set([0,0,1,0,1,1,0,1],k);
+  indices.push(v,v+2,v+1,v,v+3,v+2);
+ }
+ geo.setAttribute('position',new THREE.BufferAttribute(foamPositions,3).setUsage(THREE.DynamicDrawUsage));
+ geo.setAttribute('color',new THREE.BufferAttribute(foamColors,4).setUsage(THREE.DynamicDrawUsage));
+ geo.setAttribute('uv',new THREE.BufferAttribute(uv,2));
+ geo.setIndex(indices);geo.setDrawRange(0,0);
+ const mat=new THREE.MeshBasicMaterial({
+  map:createFoamTexture(),vertexColors:true,transparent:true,
+  depthWrite:false,side:THREE.DoubleSide,opacity:1,
+  polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1
+ });
+ foamMesh=new THREE.Mesh(geo,mat);
+ foamMesh.frustumCulled=false;foamMesh.renderOrder=3;scene.add(foamMesh);
+}
+// Positions are kept in world space to preserve the long path when steering.
+// Each patch uses four water-surface samples and a procedurally porous alpha.
+function updateWhitewater(t){
+ if(!foamMesh||!boat)return;
+ if(foamStrength<.01||wakeAmount<.01){foamMesh.geometry.setDrawRange(0,0);return;}
+ let count=0;
+ const emit=(x,z,radius,alpha,rotation)=>{
+  if(count>=foamCapacity||alpha<.035)return;
+  const sin=Math.sin(rotation),cos=Math.cos(rotation);
+  const verts=[[-1,-1],[1,-1],[1,1],[-1,1]];
+  const vi=count*12,ci=count*16;
+  for(let k=0;k<4;k++){
+   const a=verts[k][0]*radius,b=verts[k][1]*radius;
+   const wx=x+a*cos-b*sin,wz=z+a*sin+b*cos;
+   const p=vi+k*3,c=ci+k*4;
+   foamPositions[p]=wx;
+   foamPositions[p+1]=oceanHeight(wx,wz,t)+.09;
+   foamPositions[p+2]=wz;
+   foamColors[c]=.92;foamColors[c+1]=.97;foamColors[c+2]=1;
+   foamColors[c+3]=Math.min(.93,alpha);
+  }
+  count++;
+ };
+ for(let i=0;i<wakeTrail.length;i++){
+  const p=wakeTrail[i],life=Math.max(0,1-p.age/6.5);
+  if(life<=0)continue;
+  const power=propulsionMode==='power'?1:.50;
+  const a=life*p.strength*power*foamStrength;
+  const sidewaysX=p.forwardZ,sidewaysZ=-p.forwardX;
+  const trailX=p.x-p.forwardX*(.6+p.age*.55);
+  const trailZ=p.z-p.forwardZ*(.6+p.age*.55);
+  const spread=.50+p.age*.62;
+  const ripple=Math.sin(i*2.73+p.age*3.4)*.23;
+  // Bright central prop wash and frothy port/starboard shoulders.
+  emit(trailX,trailZ,.9+p.age*.18,a*.75,p.heading+Math.sin(i*2.5)*.4);
+  for(const side of [-1,1]){
+   const x=trailX+sidewaysX*side*(spread+ripple);
+   const z=trailZ+sidewaysZ*side*(spread+ripple);
+   emit(x,z,.72+p.age*.10,a*.89,p.heading+side*.48+i*.3);
+  }
+ }
+ // Dense fresh froth around the transom even before history fills in.
+ if(boatSpeed>.6){
+  const fX=-Math.sin(boatHeading),fZ=-Math.cos(boatHeading);
+  const sX=fZ,sZ=-fX,power=Math.min(1,boatSpeed/5);
+  for(let i=0;i<6;i++){
+   const side=i%2===0?-1:1;
+   const back=1.2+Math.floor(i/2)*.60;
+   const x=boat.position.x-fX*back+sX*side*(.38+back*.16);
+   const z=boat.position.z-fZ*back+sZ*side*(.38+back*.16);
+   emit(x,z,.45+i*.055,power*foamStrength*.72,boatHeading+i*.73);
+  }
+ }
+ foamMesh.geometry.setDrawRange(0,count*6);
+ foamMesh.geometry.attributes.position.needsUpdate=true;
+ foamMesh.geometry.attributes.color.needsUpdate=true;
 }
 function animateWaves(t){
  if(!boat)return;
@@ -490,7 +602,8 @@ $('wakeAmount').oninput=()=>{
  $('wakeAmountOut').textContent=wakeAmount.toFixed(2);
  $('wakeStatus').textContent=wakeAmount>.01?'Wake: dynamic':'Wake: off';
 };
-$('resetWake').onclick=()=>{wakeSolver?.clear();wakeTrail=[];};
+$('resetWake').onclick=()=>{wakeSolver?.clear();wakeTrail=[];if(foamMesh)foamMesh.geometry.setDrawRange(0,0);};
+$('foamStrength').oninput=()=>{foamStrength=Number($('foamStrength').value);$('foamStrengthOut').textContent=foamStrength.toFixed(1);};
 $('propulsionMode').onchange=()=>{
  propulsionMode=$('propulsionMode').value;
  $('wakeStatus').textContent=propulsionMode==='power'?'Wake: powered':'Wake: sail';
@@ -523,7 +636,7 @@ async function init3D(forceWebGL=false){
  const sun=new THREE.DirectionalLight(0xffeddb,3.5);sun.position.set(16,35,8);scene.add(sun);
  const floor=new THREE.Mesh(new THREE.PlaneGeometry(110,110),new THREE.MeshStandardMaterial({color:0xb9c7ae,roughness:1}));
  floor.rotation.x=-Math.PI/2;floor.position.y=-5;scene.add(floor);
- makeBoat();makeSurface();resetCamera();
+ makeBoat();makeSurface();createFoamField();resetCamera();
  $('buoyancyState').textContent='Boat: 4-point floating + sailing';
  renderer.domElement.id='threeCanvas';renderer.domElement.style.cssText='position:fixed;inset:0;width:100%;height:100%;z-index:1';
  document.body.prepend(renderer.domElement);
@@ -542,6 +655,7 @@ async function init3D(forceWebGL=false){
      amount:wakeAmount*(propulsionMode==='power'?1.45:1)});
    trackWake(dt);
    animateWaves(time);
+   updateWhitewater(time);
   }
   updateCamera(dt);
   const hint=$('cameraHint');

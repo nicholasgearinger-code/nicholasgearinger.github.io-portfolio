@@ -98,7 +98,7 @@ let buoyancyStrength=1,vy=0,pitchV=0,rollV=0;
 let boatHeading=0,boatSpeed=0,rudder=0,sailPower=.85,driveMode='stop',steeringLeft=false,steeringRight=false,totalTravel=0;
 let wakeSolver=null,wakeAmount=1.1,waveChop=.45;
 let lastRipple=0,propulsionMode='power',wakeTrail=[],trailElapsed=0;
-let foamMesh=null,foamPositions=null,foamColors=null,foamCapacity=220,foamStrength=1.5,foamDebug=false,foamPatchCount=0;
+let foamMesh=null,foamPositions=null,foamColors=null,foamCapacity=280,foamStrength=1.5,foamDebug=false,foamPatchCount=0;
 let surfaceNormalMap=null,surfaceDetail=.65,surfaceGlitter=.6,waterNearMaterial=null,waterFarMaterial=null;
 let cameraMode='chase',orbitYaw=.12,orbitPitch=.31,orbitDistance=15;
 let cameraIntroStart=performance.now(),pointerOrigin=null,pinchDistance=null;
@@ -329,13 +329,13 @@ function updateWhitewater(t){
  function emit(x,z,radius,strength,angle,seed){
   if(count>=foamCapacity||strength<.025)return;
   const cs=Math.cos(angle),sn=Math.sin(angle);
-  const ratio=.68+.23*Math.sin(seed*1.43+t*.43);
+  const ratio=.39+.19*Math.sin(seed*1.43+t*.43);
   const offsets=[[-1,-1],[1,-1],[1,1],[-1,1]],vi=count*12;
   for(let k=0;k<4;k++){
-   const u=offsets[k][0]*radius,v=offsets[k][1]*radius*ratio;
+   const u=offsets[k][0]*radius*.70,v=offsets[k][1]*radius*ratio;
    const wx=x+u*cs-v*sn,wz=z+u*sn+v*cs,p=vi+k*3;
    foamPositions[p]=wx;foamPositions[p+1]=oceanHeight(wx,wz,t)+.26;foamPositions[p+2]=wz;
-   const shade=foamDebug?1:Math.min(1,.8+.2*strength);
+   const shade=foamDebug?1:Math.max(.60,Math.min(1,.64+.29*Math.sqrt(Math.min(1,strength))));
    foamColors[p]=shade;foamColors[p+1]=Math.min(1,shade+.045);foamColors[p+2]=1;
   }
   count++;
@@ -348,8 +348,15 @@ function updateWhitewater(t){
   const x=p.x-p.forwardX*(.35+p.age*.25),z=p.z-p.forwardZ*(.35+p.age*.25),spread=.35+p.age*.47;
   emit(x,z,.35+.25*life,intensity*.83,p.heading+i*.27,i);
   for(const side of [-1,1]){
-   emit(x+sx*side*spread,z+sz*side*spread,.40+.25*life,
+   const ax=x+sx*side*spread,az=z+sz*side*spread;
+   emit(ax,az,.40+.25*life,
     intensity*.92,p.heading+side*.3+i*.17,i+side*3.71);
+   // Secondary fragments leave small gaps between churned patches.
+   if((i&1)===0){
+    emit(ax+sx*side*.37+p.forwardX*.22,
+         az+sz*side*.37+p.forwardZ*.22,
+         .23+.10*life,intensity*.60,p.heading-side*.55+i*.13,i+side*6.7);
+   }
   }
  }
  if(boatSpeed>.18&&wakeAmount>.01){

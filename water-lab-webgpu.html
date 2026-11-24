@@ -927,10 +927,14 @@ function updateCausticTexture(t,force=false){
     (causticMode==='wave'?1/causticRate:.16))return;
  try{
   syncCausticProjection(force);
+  // Stamp the start of each wave solve, rather than the completed texture
+  // upload, so five incremental frames still give ~12Hz caustic animation
+  // instead of halving the requested refresh frequency.
+  if(causticMode==='wave'&&!causticBuild)lastCausticUpdate=t;
   if(causticMode==='off')causticPixels.fill(0);
   else if(causticMode==='classic')updateClassicCausticTexture(t);
   else if(!updateWaveCausticTexture(t))return;
-  lastCausticUpdate=t;
+  if(causticMode!=='wave')lastCausticUpdate=t;
   causticMap.needsUpdate=true;
   causticValidated=true;
  }catch(error){

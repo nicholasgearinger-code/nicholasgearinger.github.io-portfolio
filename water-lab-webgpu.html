@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 21.2 water shader realism</title>
+<title>Rift Water Lab · WebGPU 21.3 optical water</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -33,7 +33,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 </script></head>
 <body>
 <div id="dashboard">
-<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">21.2 · sky reflections and micro-ripples</span></h1>
+<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">21.3 · refraction scattering and smooth waves</span></h1>
 <p>This is a <strong>separate renderer test</strong>, not a port of the existing FFT ocean.</p>
 <div id="metrics"><span id="backend">Backend: detecting</span><span id="fps">FPS: —</span><span id="resolution">Resolution: —</span><span id="buoyancyState">Buoyancy: initializing</span><span id="boatSpeed">Speed: 0.0</span><span id="driveStatus">Drive: STOP</span><span id="distanceStatus">Travel: 0 m</span><span id="heading">Heading: 0°</span><span id="wakeStatus">Wake: dynamic</span><span id="fftStatus">FFT: initializing</span><span id="wakeSignal">Ripples: waiting</span><span id="foamStatus">Foam: initializing</span></div>
 <p id="log">Checking GPU access…</p></div></div>
@@ -50,6 +50,9 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Rendering quality <select id="renderQuality"><option value="balanced" selected>Balanced · mobile</option><option value="ultra">Ultra · highest detail</option><option value="performance">Performance · prioritize FPS</option></select></label></div>
 <div class="row"><label>Water optics <select id="opticalMode"><option value="lagoon" selected>Clear lagoon · physical transmission</option><option value="deep">Bluewater · deeper absorption</option><option value="legacy">Legacy · fastest / safest</option></select></label></div>
 <div class="row"><label>Water clarity <input id="waterClarity" aria-label="Water clarity" type="range" min=".2" max="1.8" step=".05" value="1.1"></label><output id="waterClarityOut">1.10</output><button id="opticsFallback">Safe water mode</button></div>
+<div class="row"><label>Depth refraction <input id="depthRefraction" aria-label="Depth refraction" type="range" min="0" max="1.6" step=".05" value="1"></label><output id="depthRefractionOut">1.00</output></div>
+<div class="row"><label>Underwater scattering <input id="underwaterScatter" aria-label="Underwater scattering" type="range" min="0" max="2" step=".05" value="1"></label><output id="underwaterScatterOut">1.00</output></div>
+<div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
 <div class="row"><label>Wake physics <input id="wakeAmount" aria-label="Boat wake strength" type="range" min="0" max="2" step=".05" value="1.1"></label><output id="wakeAmountOut">1.10</output><button id="resetWake">Clear wake</button></div>
 <div class="row"><label>Whitewater <input id="foamStrength" aria-label="Whitewater strength" type="range" min="0" max="2.5" step=".1" value="1.5"></label><output id="foamStrengthOut">1.5</output><button id="testFoam">Whitewater test: OFF</button></div>
@@ -111,6 +114,9 @@ let surfaceNormalMap=null,surfaceFineNormalMap=null,reflectionEnvironment=null;
 let surfaceDetail=.65,surfaceGlitter=.6,fineRipple=.70,reflectionMode='enhanced';
 let waterNearMaterial=null,waterFarMaterial=null;
 let opticalMode='lagoon',waterClarity=1.10,waterFloor=null,renderQuality='balanced';
+let depthRefraction=1,underwaterScatter=1,waveSmoothness=1;
+let thicknessTexture=null,thicknessPixels=null,lastThicknessX=Infinity,lastThicknessZ=Infinity;
+let underwaterActive=false,underwaterFog=null,dayFog=null,waterDepthAtBoat=4;
 let opticalFallbackTriggered=false;
 const safeStartup=new URLSearchParams(location.search).has('safe');
 if(safeStartup){reflectionMode='basic';opticalMode='legacy';waveEngine='analytic';}
@@ -128,8 +134,8 @@ function status(m){window.__waterFallback?.notice(m);}
 // carries inexpensive swells. Their shared radius is exactly 16 metres.
 const LOCAL_RADIUS=16,WAKE_FADE_START=11;
 function radialGeometry(radii,angular,withCenter=false){
- const positions=[],uvs=[],indices=[];
- if(withCenter){positions.push(0,0,0);uvs.push(0,0);}
+ const positions=[],uvs=[],secondaryUVs=[],indices=[];
+ if(withCenter){positions.push(0,0,0);uvs.push(0,0);secondaryUVs.push(.5,.5);}
  const ringStart=positions.length/3;
  for(const radius of radii){
   for(let j=0;j<angular;j++){
@@ -137,6 +143,7 @@ function radialGeometry(radii,angular,withCenter=false){
    const x=radius*Math.cos(theta),z=radius*Math.sin(theta);
    positions.push(x,0,z);
    uvs.push(x/4,z/4);
+   secondaryUVs.push(.5+x/(LOCAL_RADIUS*2),.5+z/(LOCAL_RADIUS*2));
   }
  }
  if(withCenter){
@@ -155,6 +162,7 @@ function radialGeometry(radii,angular,withCenter=false){
  const g=new THREE.BufferGeometry();
  g.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
  g.setAttribute('uv',new THREE.Float32BufferAttribute(uvs,2));
+ g.setAttribute('uv1',new THREE.Float32BufferAttribute(secondaryUVs,2));
  g.setIndex(indices);
  g.computeVertexNormals();
  return g;
@@ -252,6 +260,75 @@ function applyReflectionMode(){
   material.needsUpdate=true;
  }
 }
+// Red-channel thickness map is sampled through UV set 1. It stores
+// seabed depth beneath each local water vertex, not just distance from
+// camera. Only refreshed after the boat moves appreciably.
+function createThicknessMap(){
+ const n=96;
+ thicknessPixels=new Uint8Array(n*n*4);
+ const tex=new THREE.DataTexture(thicknessPixels,n,n,THREE.RGBAFormat);
+ tex.channel=1;
+ tex.wrapS=THREE.ClampToEdgeWrapping;
+ tex.wrapT=THREE.ClampToEdgeWrapping;
+ tex.minFilter=THREE.LinearFilter;
+ tex.magFilter=THREE.LinearFilter;
+ tex.generateMipmaps=false;
+ thicknessTexture=tex;
+ updateThicknessMap(true);
+ return tex;
+}
+function updateThicknessMap(force=false){
+ if(!thicknessTexture||!boat)return;
+ const cx=boat.position.x,cz=boat.position.z;
+ if(!force&&Math.hypot(cx-lastThicknessX,cz-lastThicknessZ)<2.2)return;
+ lastThicknessX=cx;lastThicknessZ=cz;
+ const n=96;
+ for(let y=0;y<n;y++)for(let x=0;x<n;x++){
+  const localX=((x+.5)/n-.5)*LOCAL_RADIUS*2;
+  const localZ=((y+.5)/n-.5)*LOCAL_RADIUS*2;
+  // Texture is sampled only in the near-water disk. Upper depth values
+  // saturate smoothly to the material's physical 30-m attenuation scale.
+  const depth=seabedDepth(cx+localX,cz+localZ);
+  const value=Math.round(255*Math.max(.03,Math.min(1,depth/30)));
+  const idx=(y*n+x)*4;
+  thicknessPixels[idx]=value;
+  thicknessPixels[idx+1]=value;
+  thicknessPixels[idx+2]=value;
+  thicknessPixels[idx+3]=255;
+ }
+ thicknessTexture.needsUpdate=true;
+ waterDepthAtBoat=seabedDepth(cx,cz);
+}
+function updateUnderwaterScattering(){
+ if(!camera||!scene)return;
+ const below=camera.position.y<-.15;
+ if(!dayFog)dayFog=scene.fog;
+ if(below&&underwaterScatter>.01&&opticalMode!=='legacy'){
+  if(!underwaterFog)underwaterFog=new THREE.FogExp2(0x197b89,.045);
+  const depth=Math.max(0,-camera.position.y);
+  const density=(.022+Math.min(.065,depth*.0028))*underwaterScatter/
+     Math.max(.45,waterClarity);
+  underwaterFog.density=density;
+  underwaterFog.color.set(opticalMode==='deep'?0x0a435b:0x247f85);
+  scene.fog=underwaterFog;
+  underwaterActive=true;
+ }else{
+  scene.fog=dayFog;
+  underwaterActive=false;
+ }
+}
+function smoothOceanRadii(){
+ // Increase sampling where spatial wave curvature changes fastest.
+ // The old 23 m outer ring gaps produced faceted, cubic-looking swells.
+ const radii=[LOCAL_RADIUS];
+ let r=LOCAL_RADIUS;
+ while(r<350){
+  const step=r<38?1.15:r<82?2.5:r<160?5.5:r<250?10:18;
+  r=Math.min(350,r+step);
+  radii.push(r);
+ }
+ return radii;
+}
 function syncWaterDetail(){
  const physical=opticalMode!=='legacy';
  const absorption=opticalMode==='deep'?new THREE.Color(0x0a6175):new THREE.Color(0x48cbd1);
@@ -262,8 +339,9 @@ function syncWaterDetail(){
   const isNear=mat===waterNearMaterial;
   mat.transmission=physical?(isNear?.76:.25)*Math.min(1.65,waterClarity):0;
   mat.ior=1.333;
-  mat.thickness=isNear?2.1:4.2;
-  mat.attenuationDistance=(opticalMode==='deep'?3.4:9.0)*waterClarity;
+  mat.thickness=isNear?(depthRefraction*30):4.2;
+  mat.thicknessMap=(physical&&isNear&&depthRefraction>.01)?thicknessTexture:null;
+  mat.attenuationDistance=(opticalMode==='deep'?5.2:13.0)*waterClarity;
   mat.attenuationColor.copy(absorption);
   mat.depthWrite=!physical;
   mat.transparent=false;
@@ -321,8 +399,10 @@ function makeSurface(){
  const segments=levels[detailIndex];
  // Physics resolution is independent of distant scenery and stays near boat.
  if(!wakeSolver)wakeSolver=createWakeSolver({segments:112,size:34});
- const angular=detailIndex===0?64:detailIndex===1?80:96;
- const nearStep=detailIndex===0?.46:detailIndex===1?.35:.28;
+ const angularBase=detailIndex===0?64:detailIndex===1?80:96;
+ const angular=angularBase+(waveSmoothness>0?Math.round(waveSmoothness*24):0);
+ const nearStep=(detailIndex===0?.46:detailIndex===1?.35:.28)/
+   (1+Math.min(2,waveSmoothness)*.30);
  const nearRadii=[];
  for(let radius=nearStep;radius<LOCAL_RADIUS;radius+=nearStep)nearRadii.push(radius);
  nearRadii.push(LOCAL_RADIUS);
@@ -332,6 +412,7 @@ function makeSurface(){
  nearGeometry.setAttribute('color',new THREE.BufferAttribute(nearColorData,3));
  if(!surfaceNormalMap)surfaceNormalMap=createWaveNormalMap();
  if(!surfaceFineNormalMap)surfaceFineNormalMap=createWaveNormalMap(true);
+ if(!thicknessTexture)createThicknessMap();
  const nearMat=new THREE.MeshPhysicalMaterial({
   color:0xffffff,vertexColors:true,roughness:.16,metalness:0,
   clearcoat:.45,clearcoatRoughness:.13,
@@ -345,7 +426,7 @@ function makeSurface(){
  nearWater.frustumCulled=false;scene.add(nearWater);
  // Identical boundary vertices/radius prevent z-fighting and reveal
  // troughs as well as raised wake crests.
- const farRadii=[16,17.5,19,21,23.5,26,29,32,36,40,45,51,58,66,75,85,97,111,128,150,178,215,270,350];
+ const farRadii=smoothOceanRadii();
  geometry=radialGeometry(farRadii,angular);
  base=Float32Array.from(geometry.attributes.position.array);
  const material=new THREE.MeshPhysicalMaterial({
@@ -869,6 +950,21 @@ $('waterClarity').oninput=()=>{
  syncWaterDetail();
 };
 $('opticsFallback').onclick=()=>chooseOptics('legacy');
+$('depthRefraction').oninput=()=>{
+ depthRefraction=Number($('depthRefraction').value);
+ $('depthRefractionOut').textContent=depthRefraction.toFixed(2);
+ syncWaterDetail();
+};
+$('underwaterScatter').oninput=()=>{
+ underwaterScatter=Number($('underwaterScatter').value);
+ $('underwaterScatterOut').textContent=underwaterScatter.toFixed(2);
+ updateUnderwaterScattering();
+};
+$('waveSmoothness').oninput=()=>{
+ waveSmoothness=Number($('waveSmoothness').value);
+ $('waveSmoothnessOut').textContent=waveSmoothness.toFixed(2);
+ if(scene)makeSurface();
+};
 $('reflectionMode').onchange=()=>{
  reflectionMode=$('reflectionMode').value;
  try{applyReflectionMode();}catch(error){
@@ -977,6 +1073,7 @@ async function init3D(forceWebGL=false){
      amount:wakeAmount*(propulsionMode==='power'?1.45:1)});
    if(gpuFFT&&!fftFault&&waveEngine!=='analytic')gpuFFT.request(time,{power:1});
    trackWake(dt);
+   updateThicknessMap();
    animateWaves(time);
    try{updateWhitewater(time);}
    catch(error){
@@ -986,6 +1083,7 @@ async function init3D(forceWebGL=false){
    }
   }
   updateCamera(dt);
+  updateUnderwaterScattering();
   if(skyDome)skyDome.position.copy(camera.position);
   const hint=$('cameraHint');
   if(hint){const opacity=Math.max(0,1-(performance.now()-cameraIntroStart-1600)/1300);hint.style.opacity=String(Math.max(0,opacity));}

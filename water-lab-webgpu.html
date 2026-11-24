@@ -130,7 +130,7 @@ let volumetricStrength=.85,shaftQuality='medium',lightShafts=null,shaftMeshes=[]
 let opticalFallbackTriggered=false;
 const safeStartup=new URLSearchParams(location.search).has('safe');
 let gpuFFT=null,waveEngine=safeStartup?'analytic':'hybrid',fftEnergy=3,fftMix=0,fftStarting=false,fftFault='',fftAttempted=false,fftRecoveryCount=0,fftRuntimeInfo='';
-if(safeStartup){reflectionMode='basic';opticalMode='legacy';volumetricStrength=0;}
+if(safeStartup){reflectionMode='basic';opticalMode='legacy';volumetricStrength=0;hullPhysics='classic';}
 let cameraMode='chase',orbitYaw=.12,orbitPitch=.31,orbitDistance=15;
 let cameraIntroStart=performance.now(),pointerOrigin=null,pinchDistance=null;
 const cameraTarget={x:-3.2,y:1,z:-13},activePointers=new Map();
@@ -1358,6 +1358,7 @@ async function init3D(forceWebGL=false){
   $('reflectionMode').value='basic';
   $('opticalMode').value='legacy';
   $('waveEngine').value='analytic';
+  $('hullPhysics').value='classic';
  }
  $('buoyancyState').textContent='Boat: 4-point floating + sailing';
  renderer.domElement.id='threeCanvas';renderer.domElement.style.cssText='position:fixed;inset:0;width:100%;height:100%;z-index:1';

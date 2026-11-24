@@ -7,7 +7,7 @@ export function createWakeSolver({segments=112,size=110}={}){
   let height=new Float32Array(length),velocity=new Float32Array(length);
   let nextHeight=new Float32Array(length),nextVelocity=new Float32Array(length);
   let centerX=-3.2,centerZ=-13,accumulator=0;
-  const speed=7.5,damping=.43,stepTime=1/60,cell2=cell*cell;
+  const speed=7.5,damping=.34,stepTime=1/60,cell2=cell*cell;
   const at=(x,z)=>z*n+x;
   function clear(){
     height.fill(0);velocity.fill(0);nextHeight.fill(0);nextVelocity.fill(0);
@@ -63,7 +63,7 @@ export function createWakeSolver({segments=112,size=110}={}){
         const edge=Math.min(rim,Math.min(x,segments-x)/(segments*.15));
         const absorb=Math.min(1,Math.max(.76,edge));
         nextVelocity[i]=(v+coeff*lap)*friction*absorb;
-        nextHeight[i]=Math.max(-1.5,Math.min(1.5,h+nextVelocity[i]*dt));
+        nextHeight[i]=Math.max(-1.25,Math.min(1.25,h+nextVelocity[i]*dt));
       }
     }
     [height,nextHeight]=[nextHeight,height];
@@ -78,10 +78,14 @@ export function createWakeSolver({segments=112,size=110}={}){
       const sx=-dz,sz=dx;
       // A displaced hull produces a pressure rise near the bow and a
       // trailing low-pressure hollow. Off-axis lobes generate diverging waves.
-      pressure(x+dx*2,z+dz*2,12*movement*dt,2.0);
-      pressure(x-dx*1.55,z-dz*1.55,-16*movement*dt,2.0);
-      pressure(x-dx*2.0+sx*1.05,z-dz*2.0+sz*1.05,9*movement*dt,1.35);
-      pressure(x-dx*2.0-sx*1.05,z-dz*2.0-sz*1.05,9*movement*dt,1.35);
+      // Source velocity has units of m/s. The previous 12*dt source
+      // generated centimetre-scale waves that were invisible from the
+      // chase camera. Stronger, narrower displacement and bilateral
+      // sources create measurable wake crests without painted lines.
+      pressure(x+dx*2.2,z+dz*2.2,145*movement*dt,1.18);
+      pressure(x-dx*1.2,z-dz*1.2,-165*movement*dt,1.45);
+      pressure(x-dx*2.0+sx*1.1,z-dz*2.0+sz*1.1,104*movement*dt,.95);
+      pressure(x-dx*2.0-sx*1.1,z-dz*2.0-sz*1.1,104*movement*dt,.95);
     }
     accumulator=Math.min(.10,accumulator+Math.max(0,dt));
     let steps=0;

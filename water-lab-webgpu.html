@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 23.0 underwater optics</title>
+<title>Rift Water Lab · WebGPU 24.0 hull and fluid physics</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -33,7 +33,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 </script></head>
 <body>
 <div id="dashboard">
-<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">23.0 · underwater optics and seabed</span></h1>
+<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">24.0 · dynamic hull and fluid physics</span></h1>
 <p>This is a <strong>separate renderer test</strong>, not a port of the existing FFT ocean.</p>
 <div id="metrics"><span id="backend">Backend: detecting</span><span id="fps">FPS: —</span><span id="resolution">Resolution: —</span><span id="buoyancyState">Buoyancy: initializing</span><span id="boatSpeed">Speed: 0.0</span><span id="driveStatus">Drive: STOP</span><span id="distanceStatus">Travel: 0 m</span><span id="heading">Heading: 0°</span><span id="wakeStatus">Wake: dynamic</span><span id="fftStatus">FFT: initializing</span><span id="wakeSignal">Ripples: waiting</span><span id="foamStatus">Foam: initializing</span></div>
 <p id="log">Checking GPU access…</p></div></div>
@@ -63,6 +63,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
 <div class="row"><label>Wake physics <input id="wakeAmount" aria-label="Boat wake strength" type="range" min="0" max="2" step=".05" value="1.1"></label><output id="wakeAmountOut">1.10</output><button id="resetWake">Clear wake</button></div>
 <div class="row"><label>Whitewater <input id="foamStrength" aria-label="Whitewater strength" type="range" min="0" max="2.5" step=".1" value="1.5"></label><output id="foamStrengthOut">1.5</output><button id="testFoam">Whitewater test: OFF</button></div>
+<div class="row"><label>Hull physics <select id="hullPhysics"><option value="dynamic" selected>Dynamic · eight hull samples</option><option value="classic">Classic · four samples</option></select></label></div>
 <div class="row"><label>Buoyancy <input type="range" id="buoyancyStrength" min=".5" max="1.8" step=".05" value="1"></label><output id="buoyancyStrengthOut">1.00</output><button id="resetBoat">Reset boat</button></div>
 <div class="row"><label>Forward power <input id="sailPower" type="range" min="0" max="1" step=".05" value=".85"></label><output id="sailPowerOut">85%</output></div>
 
@@ -108,12 +109,12 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 })();
 </script>
 <script type="module">
-import {createWakeSolver} from './rift/water_lab_wake_solver.js?v=17-0';
+import {createWakeSolver} from './rift/water_lab_wake_solver.js?v=24-0';
 import {createGPUFFTOcean} from './rift/water_lab_webgpu_fft_v22.js?v=22-0';
 const $=id=>document.getElementById(id);
 let renderer,scene,camera,water,geometry,base,THREE,boat,nearWater,nearGeometry,nearBase,nearColorData,skyDome;
 let buoyancyStrength=1,vy=0,pitchV=0,rollV=0;
-let boatHeading=0,boatSpeed=0,rudder=0,sailPower=.85,driveMode='stop',steeringLeft=false,steeringRight=false,totalTravel=0;
+let boatHeading=0,boatSpeed=0,rudder=0,sailPower=.85,driveMode='stop',steeringLeft=false,steeringRight=false,totalTravel=0,hullPhysics='dynamic',lastHullDrag=0;
 let wakeSolver=null,wakeAmount=1.1,waveChop=.45,previousBoatHeading=0,turnVelocity=0;
 let lastRipple=0,propulsionMode='power',wakeTrail=[],trailElapsed=0;
 let foamMesh=null,foamPositions=null,foamColors=null,foamCapacity=280,foamStrength=1.5,foamDebug=false,foamPatchCount=0;
@@ -977,52 +978,82 @@ function makeBoat(){
  boom.position.set(0,2.93,.12);boatVisual.add(boom);
  scene.add(boat);resetBoat();
 }
-// Slightly deeper buoyancy probes increase the equilibrium freeboard
-// without inflating wave heights or altering steering / wake dynamics.
+// Eight distributed points approximate the hull's displaced volume.
+// The four-point model remains selectable as a regression comparison.
 const flotation=[[-.85,-.72,-1.65],[.85,-.72,-1.65],[-.85,-.72,1.65],[.85,-.72,1.65]];
+const hullSamples=[
+ [-.72,-.66,-1.65],[.72,-.66,-1.65],
+ [-.83,-.72,-.50],[.83,-.72,-.50],
+ [-.83,-.72,.55],[.83,-.72,.55],
+ [-.65,-.66,1.66],[.65,-.66,1.66]
+];
+const boatProbeOffset=new THREE.Vector3();
 function stepBoat(dt,t){
- if(!boat)return;
- const steps=Math.max(1,Math.min(4,Math.ceil(dt/(1/90)))),h=dt/steps;
- const mass=320, inertiaX=mass*2.65,inertiaZ=mass*.95;
+ if(!boat||dt<=0)return;
+ const steps=Math.max(1,Math.min(5,Math.ceil(dt/(1/100)))),h=dt/steps;
+ const mass=320,inertiaX=mass*2.65,inertiaZ=mass*.95;
  const desiredRudder=(steeringRight?1:0)-(steeringLeft?1:0);
- rudder+= (desiredRudder-rudder)*Math.min(1,dt*4.2);
+ rudder+=(desiredRudder-rudder)*Math.min(1,dt*3.6);
  for(let k=0;k<steps;k++){
-  // Simplified apparent-wind sailing: thrust, quadratic hull drag and rudder
-  // effectiveness. The heading drives horizontal motion and wakes.
   const advancing=driveMode==='forward';
-  const thrust=advancing?(propulsionMode==='power'?sailPower*10.0:
-    sailPower*3.15*(.35+.65*Math.abs(Math.cos(boatHeading+.7)))):0;
+  const thrust=advancing?(propulsionMode==='power'?sailPower*10:
+   sailPower*3.15*(.35+.65*Math.abs(Math.cos(boatHeading+.7)))):0;
   const drag=.12*boatSpeed+(propulsionMode==='power'?.045:.082)*boatSpeed*Math.abs(boatSpeed);
-  // Stop is a true brake, not merely zero sail force.
   const braking=advancing?0:Math.min(boatSpeed/h,2.7);
-  boatSpeed=Math.max(0,Math.min(propulsionMode==='power'?13:8,boatSpeed+(thrust-drag-braking)*h));
-  // Rudder gets stronger with water flow; a small low-speed turn assist
-  // keeps the controls responsive in the interactive demo.
+  boatSpeed=Math.max(0,Math.min(propulsionMode==='power'?13:8,
+    boatSpeed+(thrust-drag-braking)*h));
+  // Rudder responds to forward flow; preserve low-speed steering assist.
   boatHeading+=rudder*(.24+.12*boatSpeed)*h;
   boat.position.x-=Math.sin(boatHeading)*boatSpeed*h;
   boat.position.z-=Math.cos(boatHeading)*boatSpeed*h;
   totalTravel+=boatSpeed*h;
   boat.rotation.y=boatHeading;
-  let fy=-mass*9.81-vy*mass*.4,tx=-pitchV*inertiaX*2.2,tz=-rollV*inertiaZ*2.5;
+  const dynamic=hullPhysics==='dynamic';
+  const probes=dynamic?hullSamples:flotation;
+  const stiffness=dynamic?960:2150;
+  const damping=dynamic?290:420;
+  let fy=-mass*9.81-vy*mass*(dynamic?.55:.4);
+  let tx=-pitchV*inertiaX*(dynamic?3.3:2.2);
+  let tz=-rollV*inertiaZ*(dynamic?3.5:2.5);
+  let immersionSum=0,immersed=0;
   const q=boat.quaternion;
-  for(const point of flotation){
-   const offset=new THREE.Vector3(...point).applyQuaternion(q);
-   const water=oceanHeight(boat.position.x+offset.x,boat.position.z+offset.z,t);
-   const immersion=water-(boat.position.y+offset.y);
-   if(immersion<=0)continue;
-   const pointVerticalSpeed=vy+rollV*offset.x-pitchV*offset.z;
-   const buoyancy=Math.max(0,Math.min(1.4,immersion)*2150*buoyancyStrength-420*pointVerticalSpeed);
-   fy+=buoyancy;tx-=offset.z*buoyancy;tz+=offset.x*buoyancy;
+  for(const point of probes){
+   boatProbeOffset.set(point[0],point[1],point[2]).applyQuaternion(q);
+   const ox=boatProbeOffset.x,oy=boatProbeOffset.y,oz=boatProbeOffset.z;
+   const wx=boat.position.x+ox,wz=boat.position.z+oz;
+   // Time coherent water height and local free-surface vertical velocity.
+   const water=oceanHeight(wx,wz,t+k*h);
+   const immersion=water-(boat.position.y+oy);
+   if(!Number.isFinite(immersion)||immersion<=0)continue;
+   const hullV=vy+rollV*ox-pitchV*oz;
+   const surfaceV=dynamic?(wakeSolver?.sampleVelocity(wx,wz)||0):0;
+   const relativeV=hullV-Math.max(-1.5,Math.min(1.5,surfaceV));
+   const force=Math.max(0,Math.min(dynamic?1.15:1.4,immersion)*stiffness*
+      buoyancyStrength-damping*relativeV);
+   fy+=force;tx-=oz*force;tz+=ox*force;
+   immersionSum+=immersion;immersed++;
   }
-  vy=Math.max(-6,Math.min(6,vy+fy/mass*h));
-  pitchV=Math.max(-1.4,Math.min(1.4,pitchV+tx/inertiaX*h));
-  rollV=Math.max(-1.4,Math.min(1.4,rollV+tz/inertiaZ*h));
+  // Gentle planing lift adds resistance to pitching the bow underwater,
+  // but never creates buoyancy when the boat is completely airborne.
+  if(dynamic&&immersed>1&&boatSpeed>3){
+   const lift=Math.min(.18*mass*9.81,mass*.75*(boatSpeed-3));
+   fy+=lift;tx-=lift*.16;
+  }
+  vy=Math.max(-4.5,Math.min(4.5,vy+fy/mass*h));
+  pitchV=Math.max(-.9,Math.min(.9,pitchV+tx/inertiaX*h));
+  rollV=Math.max(-.9,Math.min(.9,rollV+tz/inertiaZ*h));
   boat.position.y+=vy*h;
-  boat.rotation.x=Math.max(-.55,Math.min(.55,boat.rotation.x+pitchV*h));
-  boat.rotation.z=Math.max(-.45,Math.min(.45,boat.rotation.z+rollV*h));
+  boat.rotation.x=Math.max(-.38,Math.min(.38,boat.rotation.x+pitchV*h));
+  boat.rotation.z=Math.max(-.33,Math.min(.33,boat.rotation.z+rollV*h));
+  if(!Number.isFinite(boat.position.y)||!Number.isFinite(boat.rotation.x)||
+      !Number.isFinite(boat.rotation.z)){
+   // Recovery protects the sailing experience if an experimental physics
+   // configuration becomes unstable.
+   boat.position.y=.6;boat.rotation.x=0;boat.rotation.z=0;
+   vy=0;pitchV=0;rollV=0;
+  }
  }
 }
-
 function setDriveMode(mode){
  driveMode=mode==='forward'?'forward':'stop';
  $('forward').setAttribute('aria-pressed',String(driveMode==='forward'));
@@ -1137,6 +1168,7 @@ function updateCamera(dt){
 $('modeSwitch').onclick=setCameraMode;
 $('resetCamera').onclick=resetCamera;
 $('pause').onclick=()=>{paused=!paused;$('pause').textContent=paused?'Resume':'Pause';};
+$('hullPhysics').onchange=()=>{hullPhysics=$('hullPhysics').value;};
 $('buoyancyStrength').oninput=()=>{buoyancyStrength=Number($('buoyancyStrength').value);$('buoyancyStrengthOut').textContent=buoyancyStrength.toFixed(2);};
 $('resetBoat').onclick=resetBoat;
 $('wakeAmount').oninput=()=>{

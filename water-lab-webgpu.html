@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 21.1 safe FFT recovery</title>
+<title>Rift Water Lab · WebGPU 21.2 water shader realism</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -33,7 +33,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 </script></head>
 <body>
 <div id="dashboard">
-<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">21.1 · safe FFT recovery</span></h1>
+<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">21.2 · sky reflections and micro-ripples</span></h1>
 <p>This is a <strong>separate renderer test</strong>, not a port of the existing FFT ocean.</p>
 <div id="metrics"><span id="backend">Backend: detecting</span><span id="fps">FPS: —</span><span id="resolution">Resolution: —</span><span id="buoyancyState">Buoyancy: initializing</span><span id="boatSpeed">Speed: 0.0</span><span id="driveStatus">Drive: STOP</span><span id="distanceStatus">Travel: 0 m</span><span id="heading">Heading: 0°</span><span id="wakeStatus">Wake: dynamic</span><span id="fftStatus">FFT: initializing</span><span id="wakeSignal">Ripples: waiting</span><span id="foamStatus">Foam: initializing</span></div>
 <p id="log">Checking GPU access…</p></div></div>
@@ -45,6 +45,8 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>FFT wave energy <input id="fftEnergy" aria-label="FFT energy" type="range" min="0" max="6" step=".25" value="3.0"></label><output id="fftEnergyOut">3.00</output></div>
 <div class="row"><label>Surface detail <input id="surfaceDetail" aria-label="Surface detail intensity" type="range" min="0" max="1.5" step=".05" value=".65"></label><output id="surfaceDetailOut">0.65</output></div>
 <div class="row"><label>Sun reflections <input id="sunGlitter" aria-label="Sun reflection strength" type="range" min="0" max="1.5" step=".05" value=".6"></label><output id="sunGlitterOut">0.60</output></div>
+<div class="row"><label>Reflection shader <select id="reflectionMode"><option value="enhanced" selected>Enhanced sky + fine ripple reflections</option><option value="basic">Basic · previous safe material</option></select></label></div>
+<div class="row"><label>Fine ripple strength <input id="fineRipple" aria-label="Fine ripple strength" type="range" min="0" max="1.5" step=".05" value=".7"></label><output id="fineRippleOut">0.70</output></div>
 <div class="row"><label>Rendering quality <select id="renderQuality"><option value="balanced" selected>Balanced · mobile</option><option value="ultra">Ultra · highest detail</option><option value="performance">Performance · prioritize FPS</option></select></label></div>
 <div class="row"><label>Water optics <select id="opticalMode"><option value="lagoon" selected>Clear lagoon · physical transmission</option><option value="deep">Bluewater · deeper absorption</option><option value="legacy">Legacy · fastest / safest</option></select></label></div>
 <div class="row"><label>Water clarity <input id="waterClarity" aria-label="Water clarity" type="range" min=".2" max="1.8" step=".05" value="1.1"></label><output id="waterClarityOut">1.10</output><button id="opticsFallback">Safe water mode</button></div>
@@ -105,7 +107,9 @@ let boatHeading=0,boatSpeed=0,rudder=0,sailPower=.85,driveMode='stop',steeringLe
 let wakeSolver=null,wakeAmount=1.1,waveChop=.45,previousBoatHeading=0,turnVelocity=0;
 let lastRipple=0,propulsionMode='power',wakeTrail=[],trailElapsed=0;
 let foamMesh=null,foamPositions=null,foamColors=null,foamCapacity=280,foamStrength=1.5,foamDebug=false,foamPatchCount=0;
-let surfaceNormalMap=null,surfaceDetail=.65,surfaceGlitter=.6,waterNearMaterial=null,waterFarMaterial=null;
+let surfaceNormalMap=null,surfaceFineNormalMap=null,reflectionEnvironment=null;
+let surfaceDetail=.65,surfaceGlitter=.6,fineRipple=.70,reflectionMode='enhanced';
+let waterNearMaterial=null,waterFarMaterial=null;
 let opticalMode='lagoon',waterClarity=1.10,waterFloor=null,renderQuality='balanced';
 let opticalFallbackTriggered=false;
 let gpuFFT=null,waveEngine='hybrid',fftEnergy=3,fftMix=0,fftStarting=false,fftFault='',fftAttempted=false,fftRecoveryCount=0;
@@ -158,9 +162,12 @@ function disposeSurface(mesh){
 // Tiling procedural small-wave normal field. This is a normal-map shader
 // input, not another set of geometry waves: micro-slopes affect lighting
 // without adding vertices or increasing local solver resolution.
-function createWaveNormalMap(){
+function createWaveNormalMap(fine=false){
  const size=128,arr=new Uint8Array(size*size*4);
- const waves=[
+ const waves=fine?[
+  [8,13,.22,2.4],[-15,11,.20,5.2],[22,-19,.15,.7],
+  [28,25,.10,4.6],[-37,-31,.07,1.4]
+ ]:[
   [3,5,.34,.4],[7,-4,.19,1.8],[-9,11,.12,3.2],
   [14,6,.09,4.1],[19,-17,.055,2.5]
  ];
@@ -184,6 +191,64 @@ function createWaveNormalMap(){
  tex.needsUpdate=true;
  return tex;
 }
+// A small equirectangular sky environment supplies actual directional
+// image-based reflections to MeshPhysicalMaterial. Its colors are tied
+// to the same sun and atmosphere palette as the visible sky dome.
+// It is computed once on the CPU, not updated every frame.
+function createReflectionEnvironment(){
+ const width=512,height=256,pixels=new Uint8Array(width*height*4);
+ const sunX=16/39.3,sunY=35/39.3,sunZ=8/39.3;
+ const mix=(a,b,t)=>a*(1-t)+b*t;
+ const clamp=x=>Math.max(0,Math.min(1,x));
+ for(let y=0;y<height;y++){
+  const theta=Math.PI*(y+.5)/height;
+  const sy=Math.cos(theta),h=Math.sin(theta);
+  for(let x=0;x<width;x++){
+   const phi=(x+.5)*2*Math.PI/width;
+   const dx=Math.cos(phi)*h,dz=Math.sin(phi)*h;
+   const alt=clamp(sy);
+   const p=Math.pow(alt,.57);
+   let r=mix(.68,.17,p),g=mix(.83,.43,p),b=mix(.88,.74,p);
+   // Distinct broad cloud banks, with separate small-scale variations.
+   const cloudBand=Math.sin(phi*6+Math.sin(theta*8)*2.4)*.45+
+     Math.sin(phi*13-theta*17)*.25+Math.sin(phi*25+theta*10)*.15;
+   const cloud=clamp((cloudBand+.15)*2)*clamp((sy-.12)*4);
+   const cloudOpacity=cloud*.63;
+   r=mix(r,.94,cloudOpacity);g=mix(g,.95,cloudOpacity);b=mix(b,.96,cloudOpacity);
+   // Sharp sunny region is bright and directional in reflected wave facets.
+   const d=Math.max(0,dx*sunX+sy*sunY+dz*sunZ);
+   const glow=Math.pow(d,45)*.40+Math.pow(d,500)*.92;
+   r+=glow;g+=glow*.85;b+=glow*.58;
+   if(sy<0){const deep=clamp(-sy*5);r=mix(r,.025,deep);g=mix(g,.13,deep);b=mix(b,.18,deep);}
+   const idx=(y*width+x)*4;
+   pixels[idx]=Math.round(255*clamp(r));
+   pixels[idx+1]=Math.round(255*clamp(g));
+   pixels[idx+2]=Math.round(255*clamp(b));
+   pixels[idx+3]=255;
+  }
+ }
+ const texture=new THREE.DataTexture(pixels,width,height,THREE.RGBAFormat);
+ texture.mapping=THREE.EquirectangularReflectionMapping;
+ texture.colorSpace=THREE.SRGBColorSpace;
+ texture.wrapS=THREE.RepeatWrapping;
+ texture.wrapT=THREE.ClampToEdgeWrapping;
+ texture.magFilter=THREE.LinearFilter;
+ texture.minFilter=THREE.LinearMipmapLinearFilter;
+ texture.generateMipmaps=true;
+ texture.needsUpdate=true;
+ return texture;
+}
+function applyReflectionMode(){
+ if(!scene)return;
+ scene.environment=reflectionMode==='enhanced'?reflectionEnvironment:null;
+ for(const material of [waterNearMaterial,waterFarMaterial]){
+  if(!material)continue;
+  material.clearcoatNormalMap=reflectionMode==='enhanced'?surfaceFineNormalMap:null;
+  material.clearcoatNormalScale?.set(fineRipple*.31,fineRipple*.31);
+  material.envMapIntensity=reflectionMode==='enhanced'?1.12+surfaceGlitter*.56:.75+surfaceGlitter*.55;
+  material.needsUpdate=true;
+ }
+}
 function syncWaterDetail(){
  const physical=opticalMode!=='legacy';
  const absorption=opticalMode==='deep'?new THREE.Color(0x0a6175):new THREE.Color(0x48cbd1);
@@ -202,8 +267,9 @@ function syncWaterDetail(){
   mat.color.setHex(physical?(isNear?0x90e5dc:0x278fa8):(isNear?0xffffff:0x148ba2));
   mat.vertexColors=isNear;
   mat.side=THREE.DoubleSide;
-  mat.envMapIntensity=.75+surfaceGlitter*.55;
+  mat.envMapIntensity=reflectionMode==='enhanced'?1.12+surfaceGlitter*.56:.75+surfaceGlitter*.55;
   mat.normalScale.set(surfaceDetail*(isNear?.47:.29),surfaceDetail*(isNear?.47:.29));
+  mat.clearcoatNormalScale?.set(fineRipple*.31,fineRipple*.31);
   mat.clearcoat=surfaceGlitter*.65;
   mat.clearcoatRoughness=.10+(.17*(1-surfaceGlitter/1.5));
   mat.roughness=.21-.085*Math.min(1,surfaceGlitter);
@@ -262,10 +328,13 @@ function makeSurface(){
  nearColorData=new Float32Array(nearBase.length);
  nearGeometry.setAttribute('color',new THREE.BufferAttribute(nearColorData,3));
  if(!surfaceNormalMap)surfaceNormalMap=createWaveNormalMap();
+ if(!surfaceFineNormalMap)surfaceFineNormalMap=createWaveNormalMap(true);
  const nearMat=new THREE.MeshPhysicalMaterial({
   color:0xffffff,vertexColors:true,roughness:.16,metalness:0,
   clearcoat:.45,clearcoatRoughness:.13,
   normalMap:surfaceNormalMap,normalScale:new THREE.Vector2(.30,.30),
+  clearcoatNormalMap:reflectionMode==='enhanced'?surfaceFineNormalMap:null,
+  clearcoatNormalScale:new THREE.Vector2(.22,.22),
   side:THREE.DoubleSide
  });
  waterNearMaterial=nearMat;
@@ -280,12 +349,15 @@ function makeSurface(){
   color:0x148ba2,roughness:.18,metalness:0,
   clearcoat:.45,clearcoatRoughness:.13,
   normalMap:surfaceNormalMap,normalScale:new THREE.Vector2(.18,.18),
+  clearcoatNormalMap:reflectionMode==='enhanced'?surfaceFineNormalMap:null,
+  clearcoatNormalScale:new THREE.Vector2(.22,.22),
   side:THREE.DoubleSide
  });
  waterFarMaterial=material;
  water=new THREE.Mesh(geometry,material);
  water.frustumCulled=false;scene.add(water);
  syncWaterDetail();
+ applyReflectionMode();
  $('resolution').textContent='Near: '+nearGeometry.attributes.position.count.toLocaleString()+' verts';
  $('wakeStatus').textContent='Wake: local 32 m';
 }
@@ -497,6 +569,9 @@ function animateWaves(t){
  if(surfaceNormalMap){
   // Keep micro-ripples in world space while the radial ocean follows boat.
   surfaceNormalMap.offset.set((boat.position.x+t*.20)/4,(boat.position.z-t*.31)/4);
+ }
+ if(surfaceFineNormalMap){
+  surfaceFineNormalMap.offset.set((boat.position.x-t*.46)/4,(boat.position.z+t*.62)/4);
  }
  const cx=boat.position.x,cz=boat.position.z;
  water.position.set(cx,0,cz);
@@ -785,6 +860,19 @@ $('waterClarity').oninput=()=>{
  syncWaterDetail();
 };
 $('opticsFallback').onclick=()=>chooseOptics('legacy');
+$('reflectionMode').onchange=()=>{
+ reflectionMode=$('reflectionMode').value;
+ try{applyReflectionMode();}catch(error){
+  reflectionMode='basic';$('reflectionMode').value='basic';
+  applyReflectionMode();
+  status('Reflection environment unsupported; basic safe rendering restored');
+ }
+};
+$('fineRipple').oninput=()=>{
+ fineRipple=Number($('fineRipple').value);
+ $('fineRippleOut').textContent=fineRipple.toFixed(2);
+ syncWaterDetail();
+};
 $('surfaceDetail').oninput=()=>{surfaceDetail=Number($('surfaceDetail').value);$('surfaceDetailOut').textContent=surfaceDetail.toFixed(2);syncWaterDetail();};
 $('sunGlitter').oninput=()=>{surfaceGlitter=Number($('sunGlitter').value);$('sunGlitterOut').textContent=surfaceGlitter.toFixed(2);syncWaterDetail();};
 $('waveChop').oninput=()=>{
@@ -837,6 +925,11 @@ async function init3D(forceWebGL=false){
  scene=new THREE.Scene();scene.background=new THREE.Color(0x9bcddf);
  scene.fog=new THREE.Fog(0x9bcddf,155,370);
  createSkyDome();
+ try{reflectionEnvironment=createReflectionEnvironment();}
+ catch(error){
+  reflectionMode='basic';$('reflectionMode').value='basic';
+  console.error('Procedural reflection map unavailable',error);
+ }
  camera=new THREE.PerspectiveCamera(63,innerWidth/innerHeight,.1,550);
  camera.position.set(0,4.0,11);camera.lookAt(-2.3,.35,-13);
  const ambient=new THREE.HemisphereLight(0xc7eeff,0x0b3144,1.05);scene.add(ambient);
@@ -895,7 +988,11 @@ async function init3D(forceWebGL=false){
   try{
    renderer.render(scene,camera);
   }catch(error){
-   if(opticalMode!=='legacy'){
+   if(reflectionMode==='enhanced'){
+    reflectionMode='basic';$('reflectionMode').value='basic';
+    applyReflectionMode();
+    status('Enhanced reflection shader failed; basic rendering restored: '+String(error?.message||error));
+   }else if(opticalMode!=='legacy'){
     opticalFallbackTriggered=true;
     chooseOptics('legacy');
     status('Physical optics failed on this GPU; restored safe water: '+String(error?.message||error));

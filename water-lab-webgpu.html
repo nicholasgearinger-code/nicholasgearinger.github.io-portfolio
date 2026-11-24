@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 16.0 experimental</title>
+<title>Rift Water Lab · WebGPU 16.1 diagnostic</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -18,7 +18,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 </script></head>
 <body>
 <div id="dashboard">
-<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">16.0 · WebGPU test</span></h1>
+<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">16.1 · GPU diagnostic</span></h1>
 <p>This is a <strong>separate renderer test</strong>, not a port of the existing FFT ocean.</p>
 <div id="metrics"><span id="backend">Backend: detecting</span><span id="fps">FPS: —</span><span id="resolution">Resolution: —</span></div>
 <p id="log">Checking GPU access…</p></div></div>
@@ -26,92 +26,128 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><a href="water-lab.html?v=15-2">Return to existing Water Lab</a><button id="pause">Pause</button><button id="detail">Detail: medium</button></div>
 <p>Animated wave geometry, realistic light/shadow cues, and transparent material are placeholders for backend testing. No foam or particle effects.</p>
 </div>
+<script>
+(function(){
+ const log=document.getElementById('log'),status=document.getElementById('backend');
+ const note=(m)=>{log.textContent=m;};
+ window.addEventListener('error',e=>{note('Startup error: '+(e.message||'unknown')+' — use the return link to continue in the existing Water Lab.');status.textContent='Backend: error';});
+ window.addEventListener('unhandledrejection',e=>{note('GPU error: '+(e.reason?.message||e.reason||'unknown'));status.textContent='Backend: error';});
+ note('Page loaded. Checking browser and importing Three.js…');
+ // A lightweight 2D ocean keeps the scene visible even if GPU initialization fails.
+ const canvas=document.createElement('canvas');canvas.id='fallbackCanvas';
+ canvas.style.cssText='position:fixed;inset:0;width:100%;height:100%;z-index:0;display:block';
+ document.body.prepend(canvas);
+ const ctx=canvas.getContext('2d');
+ let fallbackActive=true;
+ function fallback(t){
+  if(!fallbackActive)return;
+  const w=canvas.width=Math.max(1,Math.floor(innerWidth*.7)),hh=canvas.height=Math.max(1,Math.floor(innerHeight*.7));
+  const sky=ctx.createLinearGradient(0,0,0,hh);
+  sky.addColorStop(0,'#62b6e8');sky.addColorStop(.50,'#b1dcf1');sky.addColorStop(.51,'#087f99');sky.addColorStop(1,'#003e57');
+  ctx.fillStyle=sky;ctx.fillRect(0,0,w,hh);
+  ctx.lineWidth=1;
+  for(let j=0;j<44;j++){
+   let z=j/44,y=hh*(.52+.48*z*z),amp=4+8*z;
+   ctx.beginPath();
+   for(let x=0;x<=w;x+=8){let v=Math.sin(x*(.018+.025*z)+t*.0011+j*.65)*amp*z; if(x===0)ctx.moveTo(x,y+v);else ctx.lineTo(x,y+v);}
+   ctx.strokeStyle='rgba(172,245,247,'+(.06+.17*z)+')';ctx.stroke();
+  }
+  requestAnimationFrame(fallback);
+ }
+ requestAnimationFrame(fallback);
+ window.__waterFallback={hide:()=>{fallbackActive=false;canvas.remove();},notice:note};
+})();
+</script>
 <script type="module">
-import * as THREE from 'three/webgpu';
 const $=id=>document.getElementById(id);
-let renderer=null,scene=null,camera=null,water=null,geometry=null,base=null;
-let paused=false,detailIndex=1,frame=0,samples=0,elapsed=0,last=performance.now();
-const levels=[48,80,120];let lastBuild=0;
-function message(str){$('log').textContent=str}
+let renderer,scene,camera,water,geometry,base,THREE;
+let paused=false,detailIndex=1,samples=0,last=performance.now();
+const levels=[36,64,96];let isWebGPU=false,clockTime=0,loopActive=false;
+function status(m){window.__waterFallback?.notice(m);}
 function makeSurface(){
  if(water){scene.remove(water);water.geometry.dispose();water.material.dispose();}
  const n=levels[detailIndex];
- geometry=new THREE.PlaneGeometry(220,220,n,n);
- geometry.rotateX(-Math.PI/2);
+ geometry=new THREE.PlaneGeometry(180,180,n,n);geometry.rotateX(-Math.PI/2);
  base=Float32Array.from(geometry.attributes.position.array);
- const material=new THREE.MeshPhysicalMaterial({
-  color:0x0b9da8,metalness:0,roughness:.19,
-  transmission:.28,thickness:1.5,ior:1.333,
-  transparent:true,opacity:.94,
-  side:THREE.DoubleSide,clearcoat:.4,clearcoatRoughness:.12
+ // Standard material verifies PBR lights without a costly transmission subpass.
+ const material=new THREE.MeshStandardMaterial({
+   color:0x12a6bd,roughness:.23,metalness:.05,side:THREE.DoubleSide
  });
- water=new THREE.Mesh(geometry,material);
- water.frustumCulled=false;
- scene.add(water);
- $('resolution').textContent='Wave grid: '+n+'²';
+ water=new THREE.Mesh(geometry,material);water.frustumCulled=false;scene.add(water);
+ $('resolution').textContent='Grid: '+n+' × '+n;
 }
-function animateWater(t){
- const arr=geometry.attributes.position.array;
+function animateWaves(t){
+ const position=geometry.attributes.position,arr=position.array;
  for(let i=0;i<arr.length;i+=3){
   const x=base[i],z=base[i+2];
-  const a=x*.105+z*.026-t*.88,b=x*-.045+z*.092-t*.56,c=x*.22-z*.18-t*1.63;
-  arr[i+1]=.50*Math.sin(a)+.32*Math.sin(b)+.085*Math.sin(c);
+  arr[i+1]=.38*Math.sin(x*.11+z*.03-t*.8)+.24*Math.sin(x*-.06+z*.10-t*.6);
  }
- geometry.attributes.position.needsUpdate=true;
- // Normals are recomputed for a valid lighting/back-end capability check.
- geometry.computeVertexNormals();
+ position.needsUpdate=true;geometry.computeVertexNormals();
 }
-$('pause').onclick=()=>{paused=!paused;$('pause').textContent=paused?'Resume':'Pause'};
-$('detail').onclick=()=>{detailIndex=(detailIndex+1)%levels.length;makeSurface();$('detail').textContent=['Detail: low','Detail: medium','Detail: high'][detailIndex]};
-async function start(){
- const webGPUAvailable=!!navigator.gpu;
- let adapter=null;
- if(webGPUAvailable)try{adapter=await navigator.gpu.requestAdapter({powerPreference:'high-performance'})}catch(e){message('Adapter request: '+e.message)}
- const support=adapter?'WebGPU adapter available':webGPUAvailable?'WebGPU API, no adapter':'WebGPU API unavailable';
- message(support+' — initializing Three.js renderer…');
- renderer=new THREE.WebGPURenderer({antialias:false,powerPreference:'high-performance'});
+$('pause').onclick=()=>{paused=!paused;$('pause').textContent=paused?'Resume':'Pause';};
+$('detail').onclick=()=>{detailIndex=(detailIndex+1)%levels.length;if(scene)makeSurface();$('detail').textContent=['Detail: low','Detail: medium','Detail: high'][detailIndex];};
+async function init3D(forceWebGL=false){
+ status((forceWebGL?'WebGL fallback':'WebGPU probe')+': loading Three.js…');
+ // Dynamic imports let us display errors if a module or CDN request fails.
+ THREE=forceWebGL?await import('https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.module.js'):await import('three/webgpu');
+ renderer=forceWebGL?new THREE.WebGLRenderer({antialias:false,powerPreference:'high-performance'}):
+   new THREE.WebGPURenderer({antialias:false,powerPreference:'high-performance',forceWebGL:false});
  renderer.setPixelRatio(Math.min(devicePixelRatio,1.25));
  renderer.setSize(innerWidth,innerHeight);
  renderer.outputColorSpace=THREE.SRGBColorSpace;
  renderer.toneMapping=THREE.ACESFilmicToneMapping;
- renderer.toneMappingExposure=1.15;
- await renderer.init();
- const name=renderer.backend?.constructor?.name || 'Unknown';
- $('backend').textContent='Backend: '+name;
- message(support+'. Renderer: '+name+'. The main Water Lab is unaffected.');
- document.body.prepend(renderer.domElement);
- renderer.domElement.style.zIndex='0';
- scene=new THREE.Scene();
- scene.background=new THREE.Color(0x78b7d9);
- scene.fog=new THREE.FogExp2(0x579dbd,.008);
- camera=new THREE.PerspectiveCamera(65,innerWidth/innerHeight,.1,650);
- camera.position.set(0,3.0,16);camera.lookAt(0,.15,-22);
- const sun=new THREE.DirectionalLight(0xfff1d7,3.2);
- sun.position.set(22,33,4);scene.add(sun);
- scene.add(new THREE.HemisphereLight(0xb7eaff,0x0b4154,2.1));
- const sand=new THREE.Mesh(new THREE.PlaneGeometry(220,220),new THREE.MeshStandardMaterial({color:0xc6ccb0,roughness:1}));
- sand.rotation.x=-Math.PI/2;sand.position.y=-7.2;scene.add(sand);
- const testObject=new THREE.Mesh(new THREE.IcosahedronGeometry(2.5,2),
- new THREE.MeshStandardMaterial({color:0xf2ac66,roughness:.4,metalness:.1}));
- testObject.position.set(-6,1.2,-19);scene.add(testObject);
+ if(typeof renderer.init==='function')await renderer.init();
+ const backend=forceWebGL?'WebGLRenderer':renderer.backend?.constructor?.name||'WebGPU (unknown backend)';
+ isWebGPU=!forceWebGL&&/webgpu/i.test(backend);
+ $('backend').textContent='Backend: '+backend;
+ status('Renderer initialized. Drawing a simple lit surface. The original FFT lab is unchanged.');
+ scene=new THREE.Scene();scene.background=new THREE.Color(0x78bde5);
+ camera=new THREE.PerspectiveCamera(63,innerWidth/innerHeight,.1,550);
+ camera.position.set(0,3,15);camera.lookAt(0,0,-20);
+ const ambient=new THREE.HemisphereLight(0xc7eeff,0x165263,2.1);scene.add(ambient);
+ const sun=new THREE.DirectionalLight(0xffeddb,2.9);sun.position.set(16,35,8);scene.add(sun);
+ const floor=new THREE.Mesh(new THREE.PlaneGeometry(180,180),new THREE.MeshStandardMaterial({color:0xb9c7ae,roughness:1}));
+ floor.rotation.x=-Math.PI/2;floor.position.y=-5;scene.add(floor);
+ const object=new THREE.Mesh(new THREE.IcosahedronGeometry(2,2),new THREE.MeshStandardMaterial({color:0xffba7c,roughness:.43}));
+ object.position.set(-7,2,-20);scene.add(object);
  makeSurface();
- const clock=new THREE.Clock();
- renderer.setAnimationLoop(()=>{
-  const t=clock.getElapsedTime(),now=performance.now();
-  if(!paused)animateWater(t);
-  camera.position.x=Math.sin(t*.07)*1.6;
+ renderer.domElement.id='threeCanvas';renderer.domElement.style.cssText='position:fixed;inset:0;width:100%;height:100%;z-index:1';
+ document.body.prepend(renderer.domElement);
+ const waveClock=new THREE.Clock();
+ const render=()=>{
+  const t=waveClock.getElapsedTime();
+  if(!paused)animateWaves(t);
+  camera.position.x=Math.sin(t*.12)*1.1;
   renderer.render(scene,camera);
   samples++;
-  if(now-last>=1000){
-   $('fps').textContent='FPS: '+Math.round(samples*1000/(now-last));
-   samples=0;last=now;
-  }
- });
- window.addEventListener('resize',()=>{
-  camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth,innerHeight);
- });
+  const now=performance.now();
+  if(now-last>1100){$('fps').textContent='FPS: '+Math.round(samples*1000/(now-last));last=now;samples=0;}
+ };
+ renderer.setAnimationLoop(render);
+ window.__waterFallback?.hide();
+ loopActive=true;
+ window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
 }
-start().catch(e=>{message('WebGPU experiment failed: '+(e?.message||e)+'. Existing WebGL lab is still available.');$('backend').textContent='Backend: failed';console.error(e);});
+async function begin(){
+ const api=!!navigator.gpu;
+ let adapter=null;
+ if(api)try{adapter=await navigator.gpu.requestAdapter({powerPreference:'high-performance'})}catch(e){status('Adapter error: '+e.message);}
+ if(!adapter){
+  status(api?'WebGPU adapter unavailable; trying WebGL':'WebGPU API unavailable; trying WebGL');
+  await init3D(true);return;
+ }
+ try{await init3D(false);}
+ catch(error){
+  status('WebGPU failed: '+(error?.message||error)+' — trying WebGL fallback');
+  if(renderer?.domElement)renderer.domElement.remove();
+  try{renderer?.setAnimationLoop(null);renderer?.dispose();}catch(e){}
+  await init3D(true);
+ }
+}
+begin().catch(error=>{
+ $('backend').textContent='Backend: failed';
+ status('WebGPU and WebGL failed: '+(error?.message||error)+'. Animated fallback remains visible.');
+ console.error(error);
+});
 </script>
 </body></html>

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 20.0 optical water engine</title>
+<title>Rift Water Lab · WebGPU 21.0 spectral and wake engine</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -33,14 +33,16 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 </script></head>
 <body>
 <div id="dashboard">
-<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">20.0 · optical water engine</span></h1>
+<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">21.0 · GPU FFT + improved wake</span></h1>
 <p>This is a <strong>separate renderer test</strong>, not a port of the existing FFT ocean.</p>
-<div id="metrics"><span id="backend">Backend: detecting</span><span id="fps">FPS: —</span><span id="resolution">Resolution: —</span><span id="buoyancyState">Buoyancy: initializing</span><span id="boatSpeed">Speed: 0.0</span><span id="driveStatus">Drive: STOP</span><span id="distanceStatus">Travel: 0 m</span><span id="heading">Heading: 0°</span><span id="wakeStatus">Wake: dynamic</span><span id="wakeSignal">Ripples: waiting</span><span id="foamStatus">Foam: initializing</span></div>
+<div id="metrics"><span id="backend">Backend: detecting</span><span id="fps">FPS: —</span><span id="resolution">Resolution: —</span><span id="buoyancyState">Buoyancy: initializing</span><span id="boatSpeed">Speed: 0.0</span><span id="driveStatus">Drive: STOP</span><span id="distanceStatus">Travel: 0 m</span><span id="heading">Heading: 0°</span><span id="wakeStatus">Wake: dynamic</span><span id="fftStatus">FFT: initializing</span><span id="wakeSignal">Ripples: waiting</span><span id="foamStatus">Foam: initializing</span></div>
 <p id="log">Checking GPU access…</p></div></div>
 <div id="controls" class="panel">
 <div class="row"><button id="testFoamTop">Whitewater test: OFF</button><button id="modeSwitch" aria-pressed="true">Camera: Chase</button><button id="resetCamera">Reset camera</button><button id="pause">Pause</button><button id="detail">Detail: medium</button><a href="water-lab.html?v=15-2">Old Water Lab</a></div>
 <div class="row"><label>Wave height <input id="waveHeight" aria-label="Wave height" type="range" min=".25" max="2.5" step=".05" value="1.5"></label><output id="waveHeightOut">1.50</output></div>
 <div class="row"><label>Wave shape <input id="waveChop" aria-label="Wave crest sharpness" type="range" min="0" max="1.2" step=".05" value=".45"></label><output id="waveChopOut">0.45</output></div>
+<div class="row"><label>Wave engine <select id="waveEngine"><option value="hybrid" selected>GPU FFT + rolling swells</option><option value="fft">GPU FFT only (experimental)</option><option value="analytic">Previous waves · fallback</option></select></label></div>
+<div class="row"><label>FFT wave energy <input id="fftEnergy" aria-label="FFT energy" type="range" min="0" max="6" step=".25" value="3.0"></label><output id="fftEnergyOut">3.00</output></div>
 <div class="row"><label>Surface detail <input id="surfaceDetail" aria-label="Surface detail intensity" type="range" min="0" max="1.5" step=".05" value=".65"></label><output id="surfaceDetailOut">0.65</output></div>
 <div class="row"><label>Sun reflections <input id="sunGlitter" aria-label="Sun reflection strength" type="range" min="0" max="1.5" step=".05" value=".6"></label><output id="sunGlitterOut">0.60</output></div>
 <div class="row"><label>Rendering quality <select id="renderQuality"><option value="balanced" selected>Balanced · mobile</option><option value="ultra">Ultra · highest detail</option><option value="performance">Performance · prioritize FPS</option></select></label></div>
@@ -95,16 +97,18 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 </script>
 <script type="module">
 import {createWakeSolver} from './rift/water_lab_wake_solver.js?v=17-0';
+import {createGPUFFTOcean} from './rift/water_lab_webgpu_fft.js?v=21-0';
 const $=id=>document.getElementById(id);
 let renderer,scene,camera,water,geometry,base,THREE,boat,nearWater,nearGeometry,nearBase,nearColorData,skyDome;
 let buoyancyStrength=1,vy=0,pitchV=0,rollV=0;
 let boatHeading=0,boatSpeed=0,rudder=0,sailPower=.85,driveMode='stop',steeringLeft=false,steeringRight=false,totalTravel=0;
-let wakeSolver=null,wakeAmount=1.1,waveChop=.45;
+let wakeSolver=null,wakeAmount=1.1,waveChop=.45,previousBoatHeading=0,turnVelocity=0;
 let lastRipple=0,propulsionMode='power',wakeTrail=[],trailElapsed=0;
 let foamMesh=null,foamPositions=null,foamColors=null,foamCapacity=280,foamStrength=1.5,foamDebug=false,foamPatchCount=0;
 let surfaceNormalMap=null,surfaceDetail=.65,surfaceGlitter=.6,waterNearMaterial=null,waterFarMaterial=null;
 let opticalMode='lagoon',waterClarity=1.10,waterFloor=null,renderQuality='balanced';
 let opticalFallbackTriggered=false;
+let gpuFFT=null,waveEngine='hybrid',fftEnergy=3,fftStarting=false,fftFault='',fftAttempted=false;
 let cameraMode='chase',orbitYaw=.12,orbitPitch=.31,orbitDistance=15;
 let cameraIntroStart=performance.now(),pointerOrigin=null,pinchDistance=null;
 const cameraTarget={x:-3.2,y:1,z:-13},activePointers=new Map();
@@ -301,17 +305,52 @@ const waveComponents=[
 // Point sampling inverts the horizontal warp approximately, keeping the
 // boat's four buoyancy probes aligned with the rendered surface.
 const waveState={height:0,dx:0,dz:0};
+// All physical probes and water vertices call the same hybrid wave
+// function. Native WebGPU FFT supplies a time-evolved spectral height
+// field with asynchronous, throttled CPU readback; analytic rolling
+// swell remains an automatic fallback when compute is not available.
 function waveField(x,z,t,out=waveState){
  let elevation=0,dx=0,dz=0;
+ const hasFFT=waveEngine!=='analytic'&&gpuFFT?.ready;
+ const analyticWeight=hasFFT?(waveEngine==='fft'?.20:.70):1;
  for(const wave of waveComponents){
   const phase=wave.kx*x+wave.kz*z-wave.omega*t+wave.phase;
-  const amplitude=waveHeight*wave.amplitude;
+  const amplitude=waveHeight*wave.amplitude*analyticWeight;
   elevation+=amplitude*Math.sin(phase);
   const lateral=waveChop*amplitude*Math.cos(phase);
   dx+=wave.dirX*lateral;dz+=wave.dirZ*lateral;
  }
+ if(hasFFT){
+  const scale=fftEnergy*waveHeight;
+  elevation+=gpuFFT.sample(x,z)*scale;
+  // Use spectral height gradients to displace wave crests laterally.
+  // These read cached CPU field data; no synchronous GPU readback.
+  if(waveChop>.005){
+   const d=.72;
+   const sx=(gpuFFT.sample(x+d,z)-gpuFFT.sample(x-d,z))/(2*d);
+   const sz=(gpuFFT.sample(x,z+d)-gpuFFT.sample(x,z-d))/(2*d);
+   dx-=waveChop*scale*sx*.35;
+   dz-=waveChop*scale*sz*.35;
+  }
+ }
  out.height=elevation;out.dx=dx;out.dz=dz;
  return out;
+}
+function fftMessage(message){$('fftStatus').textContent='FFT: '+message;}
+async function startFFT(){
+ if(fftStarting||gpuFFT||fftAttempted)return;
+ fftAttempted=true;fftStarting=true;fftMessage('compiling compute…');
+ try{
+  gpuFFT=await createGPUFFTOcean({
+   resolution:64,domain:96,
+   onError:(message)=>{fftFault=message;fftMessage('error · analytic fallback');console.error('FFT:',message);}
+  });
+  fftMessage('64² WGSL ready · pending readback');
+ }catch(error){
+  fftFault=String(error?.message||error);
+  fftMessage('fallback · '+fftFault.slice(0,45));
+  gpuFFT=null;
+ }finally{fftStarting=false;}
 }
 function oceanHeight(x,z,t){
  let bx=x,bz=z;
@@ -493,7 +532,7 @@ function resetBoat(){
  if(!boat)return;
  boat.position.set(-3.2,.6,-13);
  boat.rotation.set(0,0,0);vy=0;pitchV=0;rollV=0;
- boatHeading=0;boatSpeed=0;rudder=0;driveMode='stop';totalTravel=0;wakeSolver?.clear();wakeTrail=[];trailElapsed=0;
+ boatHeading=0;boatSpeed=0;rudder=0;driveMode='stop';totalTravel=0;previousBoatHeading=0;turnVelocity=0;wakeSolver?.clear();wakeTrail=[];trailElapsed=0;
  if($('forward')){setDriveMode('stop');}
 }
 function makeBoat(){
@@ -716,6 +755,15 @@ $('renderQuality').onchange=()=>{
   $('detail').textContent=['Detail: low','Detail: medium','Detail: high'][detailIndex];
  }
 };
+$('waveEngine').onchange=()=>{
+ waveEngine=$('waveEngine').value;
+ if(waveEngine!=='analytic'&&!gpuFFT&&!fftAttempted)startFFT();
+ if(waveEngine==='analytic')fftMessage('analytic mode');
+};
+$('fftEnergy').oninput=()=>{
+ fftEnergy=Number($('fftEnergy').value);
+ $('fftEnergyOut').textContent=fftEnergy.toFixed(2);
+};
 $('opticalMode').onchange=()=>chooseOptics($('opticalMode').value);
 $('waterClarity').oninput=()=>{
  waterClarity=Number($('waterClarity').value);
@@ -781,6 +829,8 @@ async function init3D(forceWebGL=false){
  const sun=new THREE.DirectionalLight(0xffeddb,3.5);sun.position.set(16,35,8);scene.add(sun);
  const floor=createSeabed();
  makeBoat();makeSurface();createFoamField();resetCamera();
+ if(isWebGPU)startFFT();
+ else fftMessage('WebGL fallback · procedural');
  $('buoyancyState').textContent='Boat: 4-point floating + sailing';
  renderer.domElement.id='threeCanvas';renderer.domElement.style.cssText='position:fixed;inset:0;width:100%;height:100%;z-index:1';
  document.body.prepend(renderer.domElement);
@@ -790,15 +840,19 @@ async function init3D(forceWebGL=false){
   const nowFrame=performance.now(),dt=Math.min(.04,Math.max(0,(nowFrame-previousFrame)/1000));
   previousFrame=nowFrame;
   if(!paused){
-   time+=dt;stepBoat(dt,time);
+   time+=dt;
+   const headingBefore=boatHeading;
+   stepBoat(dt,time);
+   turnVelocity=dt>0?(boatHeading-headingBefore)/dt:0;
    // High-resolution interaction follows the boat every frame.
    // Seabed follows with the camera while preserving its world-relative
    // shelf profile inside a large local radius.
    floor.position.x=Math.round(boat.position.x/80)*80;
    floor.position.z=Math.round(boat.position.z/80)*80;
    wakeSolver?.advance(dt,{x:boat.position.x,z:boat.position.z,
-     heading:boatHeading,speed:boatSpeed,bob:vy,
+     heading:boatHeading,speed:boatSpeed,bob:vy,turnRate:turnVelocity,
      amount:wakeAmount*(propulsionMode==='power'?1.45:1)});
+   if(gpuFFT&&!fftFault&&waveEngine!=='analytic')gpuFFT.request(time,{power:1});
    trackWake(dt);
    animateWaves(time);
    try{updateWhitewater(time);}
@@ -815,6 +869,8 @@ async function init3D(forceWebGL=false){
   $('boatSpeed').textContent='Speed: '+boatSpeed.toFixed(1)+' m/s';
   $('distanceStatus').textContent='Travel: '+totalTravel.toFixed(1)+' m';
   $('wakeSignal').textContent='Peak ripple: '+(lastRipple*100).toFixed(0)+' cm';
+  if(gpuFFT?.ready&&waveEngine!=='analytic')fftMessage('64² GPU FFT · '+gpuFFT.frameCount+' fields');
+  else if(gpuFFT&&!fftFault&&waveEngine!=='analytic')fftMessage('GPU initializing…');
   // Foam count is set by the whitewater generator, not by boat speed.
   $('heading').textContent='Heading: '+((boatHeading*180/Math.PI%360+360)%360).toFixed(0)+'°';
   try{

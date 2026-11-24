@@ -100,7 +100,7 @@ fn main(@builtin(global_invocation_id) id:vec3u){
  let a=vec2f(h0.x*e.x-h0.y*e.y,h0.x*e.y+h0.y*e.x);
  let b=vec2f(h0minus.x*e.x-h0minus.y*e.y,-h0minus.x*e.y-h0minus.y*e.x);
  // N² normalization is applied here to produce a bounded real height field.
- let raw=(a+b)*params.power*12.0;
+ let raw=(a+b)*params.power*36.0;
  outputField[reversed(y)*N+reversed(x)]=raw;
 }`});
  for(const [name,shader] of [['spectrum',initShader],['butterflies',fftShader]]){

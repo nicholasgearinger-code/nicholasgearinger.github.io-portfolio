@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 16.7 corrected bow direction</title>
+<title>Rift Water Lab · WebGPU 17.0 wave + wake physics</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -33,17 +33,18 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 </script></head>
 <body>
 <div id="dashboard">
-<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">16.7 · forward direction fix</span></h1>
+<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">17.0 · dynamic water wakes</span></h1>
 <p>This is a <strong>separate renderer test</strong>, not a port of the existing FFT ocean.</p>
-<div id="metrics"><span id="backend">Backend: detecting</span><span id="fps">FPS: —</span><span id="resolution">Resolution: —</span><span id="buoyancyState">Buoyancy: initializing</span><span id="boatSpeed">Speed: 0.0</span><span id="heading">Heading: 0°</span></div>
+<div id="metrics"><span id="backend">Backend: detecting</span><span id="fps">FPS: —</span><span id="resolution">Resolution: —</span><span id="buoyancyState">Buoyancy: initializing</span><span id="boatSpeed">Speed: 0.0</span><span id="heading">Heading: 0°</span><span id="wakeStatus">Wake: dynamic</span></div>
 <p id="log">Checking GPU access…</p></div></div>
 <div id="controls" class="panel">
 <div class="row"><button id="modeSwitch" aria-pressed="true">Camera: Chase</button><button id="resetCamera">Reset camera</button><button id="pause">Pause</button><button id="detail">Detail: medium</button><a href="water-lab.html?v=15-2">Old Water Lab</a></div>
 <div class="row"><label>Wave height <input id="waveHeight" aria-label="Wave height" type="range" min=".25" max="2.5" step=".05" value="1.5"></label><output id="waveHeightOut">1.50</output></div>
+<div class="row"><label>Wake physics <input id="wakeAmount" aria-label="Boat wake strength" type="range" min="0" max="2" step=".05" value="1.1"></label><output id="wakeAmountOut">1.10</output><button id="resetWake">Clear wake</button></div>
 <div class="row"><label>Buoyancy <input type="range" id="buoyancyStrength" min=".5" max="1.8" step=".05" value="1"></label><output id="buoyancyStrengthOut">1.00</output><button id="resetBoat">Reset boat</button></div>
 <div class="row"><label>Forward power <input id="sailPower" type="range" min="0" max="1" step=".05" value=".85"></label><output id="sailPowerOut">85%</output></div>
 
-<p>Tap Forward to sail; tap Stop to brake. Hold Left or Right to turn. Camera: drag to look, pinch to zoom, chase or orbit. Desktop: A/D or ←/→ to steer, W to go, S or Space to stop.</p>
+<p>Drive through directional ocean swells and watch hull-generated waves propagate behind you. Forward / Stop control propulsion; hold Left / Right to steer. Drag to orbit, pinch to zoom. Wake strength 0 disables interaction.</p>
 </div>
 <div id="sailControls" class="panel gameHelm">
 <button id="port" aria-label="Turn left">◀ Left</button>
@@ -85,21 +86,23 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 })();
 </script>
 <script type="module">
+import {createWakeSolver} from './rift/water_lab_wake_solver.js?v=17-0';
 const $=id=>document.getElementById(id);
 let renderer,scene,camera,water,geometry,base,THREE,boat;
 let buoyancyStrength=1,vy=0,pitchV=0,rollV=0;
 let boatHeading=0,boatSpeed=0,rudder=0,sailPower=.85,driveMode='stop',steeringLeft=false,steeringRight=false;
-let wakeMesh=null,wakePositions=null,wakeEvents=[],wakeClock=0;
+let wakeSolver=null,wakeAmount=1.1;
 let cameraMode='chase',orbitYaw=.12,orbitPitch=.31,orbitDistance=15;
 let cameraIntroStart=performance.now(),pointerOrigin=null,pinchDistance=null;
 const cameraTarget={x:-3.2,y:1,z:-13},activePointers=new Map();
 let cameraControlUntil=0;
 let paused=false,detailIndex=1,samples=0,last=performance.now(),waveHeight=1.5;
-const levels=[48,80,120];let isWebGPU=false,clockTime=0,loopActive=false;
+const levels=[64,112,144];let isWebGPU=false,clockTime=0,loopActive=false;
 function status(m){window.__waterFallback?.notice(m);}
 function makeSurface(){
  if(water){scene.remove(water);water.geometry.dispose();water.material.dispose();}
  const n=levels[detailIndex];
+ wakeSolver=createWakeSolver({segments:n,size:110});
  geometry=new THREE.PlaneGeometry(110,110,n,n);geometry.rotateX(-Math.PI/2);
  base=Float32Array.from(geometry.attributes.position.array);
  // Standard material verifies PBR lights without a costly transmission subpass.
@@ -109,7 +112,24 @@ function makeSurface(){
  water=new THREE.Mesh(geometry,material);water.frustumCulled=false;scene.add(water);
  $('resolution').textContent='Grid: '+n+' × '+n;
 }
-function oceanHeight(x,z,t){return waveHeight*(.72*Math.sin(x*.092+z*.061-t*.95)+.38*Math.sin(x*-.073+z*.14-t*1.36)+.12*Math.sin(x*.24-z*.21-t*2.25));}
+// Independent deep-water wave components use gravity-based dispersion.
+// This is a directional wave-spectrum approximation; true GPU FFT remains
+// a separate migration milestone.
+const waveComponents=[
+ [.69,46,.14,.7],[.43,28,-.30,2.3],[.26,18,.47,4.6],
+ [.16,11,-.60,.8],[.09,6.3,.93,3.1],[.045,3.9,-.93,5.7]
+].map(([amplitude,wavelength,direction,phase])=>{
+ const k=2*Math.PI/wavelength;
+ return {amplitude,kx:Math.sin(direction)*k,kz:Math.cos(direction)*k,
+         omega:Math.sqrt(9.81*k),phase};
+});
+function oceanHeight(x,z,t){
+ let y=0;
+ for(const wave of waveComponents){
+  y+=wave.amplitude*Math.sin(wave.kx*x+wave.kz*z-wave.omega*t+wave.phase);
+ }
+ return waveHeight*y+(wakeSolver?wakeSolver.sample(x,z):0);
+}
 function animateWaves(t){
  const position=geometry.attributes.position,arr=position.array;
  for(let i=0;i<arr.length;i+=3){
@@ -123,7 +143,7 @@ function resetBoat(){
  if(!boat)return;
  boat.position.set(-3.2,.6,-13);
  boat.rotation.set(0,0,0);vy=0;pitchV=0;rollV=0;
- boatHeading=0;boatSpeed=0;rudder=0;driveMode='stop';wakeEvents=[];wakeClock=0;
+ boatHeading=0;boatSpeed=0;rudder=0;driveMode='stop';wakeSolver?.clear();
  if($('forward')){setDriveMode('stop');}
 }
 function makeBoat(){
@@ -237,45 +257,6 @@ window.addEventListener('keyup',e=>{
  steeringRight=pressed.has('ArrowRight')||pressed.has('KeyD');
 });
 window.addEventListener('blur',()=>{pressed.clear();steeringLeft=false;steeringRight=false;});
-function makeWake(){
- // Low-cost procedural wake samples; no particles/foam simulation.
- const n=40;wakePositions=new Float32Array(n*2*3);
- const geo=new THREE.BufferGeometry();
- geo.setAttribute('position',new THREE.BufferAttribute(wakePositions,3));
- const mat=new THREE.LineBasicMaterial({color:0xb0e8e3,transparent:true,opacity:.50,depthWrite:false});
- wakeMesh=new THREE.LineSegments(geo,mat);wakeMesh.frustumCulled=false;wakeMesh.renderOrder=2;
- scene.add(wakeMesh);
-}
-function updateWake(dt,t){
- if(!wakeMesh||!boat)return;
- wakeClock+=dt;
- if(boatSpeed>.35&&wakeClock>.12){
-  wakeClock=0;
-  wakeEvents.unshift({x:boat.position.x,z:boat.position.z,heading:boatHeading,age:0,speed:boatSpeed});
- }
- for(const e of wakeEvents)e.age+=dt;
- wakeEvents=wakeEvents.filter(e=>e.age<7).slice(0,20);
- let cursor=0;
- for(const e of wakeEvents){
-  const dirX=-Math.sin(e.heading),dirZ=-Math.cos(e.heading);
-  const sideX=-dirZ,sideZ=dirX;
-  const spread=.3+e.age*(.25+.065*e.speed);
-  const trail=.7+e.age*(.5+.18*e.speed);
-  for(const side of [-1,1]){
-   const cx=e.x-dirX*trail+sideX*spread*side;
-   const cz=e.z-dirZ*trail+sideZ*spread*side;
-   const innerX=cx-sideX*.13*side,innerZ=cz-sideZ*.13*side;
-   const outerX=cx+sideX*.42*side,outerZ=cz+sideZ*.42*side;
-   for(const [x,z] of [[innerX,innerZ],[outerX,outerZ]]){
-    wakePositions[cursor++]=x;
-    wakePositions[cursor++]=oceanHeight(x,z,t)+.055;
-    wakePositions[cursor++]=z;
-   }
-  }
- }
- wakeMesh.geometry.setDrawRange(0,cursor/3);
- wakeMesh.geometry.attributes.position.needsUpdate=true;
-}
 // Third-person camera is independent from helm input. On mobile the
 // canvas captures gestures; UI buttons capture their own touch events.
 function resetCamera(){
@@ -347,6 +328,12 @@ $('resetCamera').onclick=resetCamera;
 $('pause').onclick=()=>{paused=!paused;$('pause').textContent=paused?'Resume':'Pause';};
 $('buoyancyStrength').oninput=()=>{buoyancyStrength=Number($('buoyancyStrength').value);$('buoyancyStrengthOut').textContent=buoyancyStrength.toFixed(2);};
 $('resetBoat').onclick=resetBoat;
+$('wakeAmount').oninput=()=>{
+ wakeAmount=Number($('wakeAmount').value);
+ $('wakeAmountOut').textContent=wakeAmount.toFixed(2);
+ $('wakeStatus').textContent=wakeAmount>.01?'Wake: dynamic':'Wake: off';
+};
+$('resetWake').onclick=()=>wakeSolver?.clear();
 $('waveHeight').oninput=()=>{waveHeight=Number($('waveHeight').value);$('waveHeightOut').textContent=waveHeight.toFixed(2);};
 $('detail').onclick=()=>{detailIndex=(detailIndex+1)%levels.length;if(scene)makeSurface();$('detail').textContent=['Detail: low','Detail: medium','Detail: high'][detailIndex];};
 async function init3D(forceWebGL=false){
@@ -371,7 +358,7 @@ async function init3D(forceWebGL=false){
  const sun=new THREE.DirectionalLight(0xffeddb,3.5);sun.position.set(16,35,8);scene.add(sun);
  const floor=new THREE.Mesh(new THREE.PlaneGeometry(110,110),new THREE.MeshStandardMaterial({color:0xb9c7ae,roughness:1}));
  floor.rotation.x=-Math.PI/2;floor.position.y=-5;scene.add(floor);
- makeBoat();makeSurface();makeWake();resetCamera();
+ makeBoat();makeSurface();resetCamera();
  $('buoyancyState').textContent='Boat: 4-point floating + sailing';
  renderer.domElement.id='threeCanvas';renderer.domElement.style.cssText='position:fixed;inset:0;width:100%;height:100%;z-index:1';
  document.body.prepend(renderer.domElement);
@@ -387,7 +374,9 @@ async function init3D(forceWebGL=false){
    water.position.z=Math.round(boat.position.z/8)*8;
    floor.position.x=water.position.x;
    floor.position.z=water.position.z;
-   animateWaves(time);updateWake(dt,time);
+   wakeSolver?.advance(dt,{x:boat.position.x,z:boat.position.z,
+     heading:boatHeading,speed:boatSpeed,amount:wakeAmount});
+   animateWaves(time);
   }
   updateCamera(dt);
   const hint=$('cameraHint');

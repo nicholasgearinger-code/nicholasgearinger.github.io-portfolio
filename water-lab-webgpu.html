@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 17.2 optimized wake view</title>
+<title>Rift Water Lab · WebGPU 18.0 boat-centered ripples</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -33,7 +33,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 </script></head>
 <body>
 <div id="dashboard">
-<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">17.2 · performance + hull contact</span></h1>
+<div class="panel"><h1>Rift Water Lab <span style="color:#6de3e4">18.0 · local interaction zone</span></h1>
 <p>This is a <strong>separate renderer test</strong>, not a port of the existing FFT ocean.</p>
 <div id="metrics"><span id="backend">Backend: detecting</span><span id="fps">FPS: —</span><span id="resolution">Resolution: —</span><span id="buoyancyState">Buoyancy: initializing</span><span id="boatSpeed">Speed: 0.0</span><span id="heading">Heading: 0°</span><span id="wakeStatus">Wake: dynamic</span><span id="wakeSignal">Ripples: waiting</span></div>
 <p id="log">Checking GPU access…</p></div></div>
@@ -89,11 +89,11 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <script type="module">
 import {createWakeSolver} from './rift/water_lab_wake_solver.js?v=17-0';
 const $=id=>document.getElementById(id);
-let renderer,scene,camera,water,geometry,base,THREE,boat;
+let renderer,scene,camera,water,geometry,base,THREE,boat,nearWater,nearGeometry,nearBase,nearColorData;
 let buoyancyStrength=1,vy=0,pitchV=0,rollV=0;
 let boatHeading=0,boatSpeed=0,rudder=0,sailPower=.85,driveMode='stop',steeringLeft=false,steeringRight=false;
 let wakeSolver=null,wakeAmount=1.1,waveChop=.45;
-let wakeColorData=null,lastRipple=0;
+let lastRipple=0;
 let cameraMode='chase',orbitYaw=.12,orbitPitch=.31,orbitDistance=15;
 let cameraIntroStart=performance.now(),pointerOrigin=null,pinchDistance=null;
 const cameraTarget={x:-3.2,y:1,z:-13},activePointers=new Map();
@@ -101,23 +101,73 @@ let cameraControlUntil=0;
 let paused=false,detailIndex=1,samples=0,last=performance.now(),waveHeight=1.5;
 const levels=[64,88,112];let isWebGPU=false,clockTime=0,loopActive=false;
 function status(m){window.__waterFallback?.notice(m);}
+// A concentric two-zone mesh has no overlapping opaque water surface.
+// The inner disk is finely tessellated around the boat; the outer annulus
+// carries inexpensive swells. Their shared radius is exactly 16 metres.
+const LOCAL_RADIUS=16,WAKE_FADE_START=11;
+function radialGeometry(radii,angular,withCenter=false){
+ const positions=[],indices=[];
+ if(withCenter)positions.push(0,0,0);
+ const ringStart=positions.length/3;
+ for(const radius of radii){
+  for(let j=0;j<angular;j++){
+   const theta=j*2*Math.PI/angular;
+   positions.push(radius*Math.cos(theta),0,radius*Math.sin(theta));
+  }
+ }
+ if(withCenter){
+  for(let j=0;j<angular;j++){
+   indices.push(0,ringStart+(j+1)%angular,ringStart+j);
+  }
+ }
+ for(let i=0;i<radii.length-1;i++){
+  const begin=ringStart+i*angular,next=begin+angular;
+  for(let j=0;j<angular;j++){
+   const k=(j+1)%angular;
+   indices.push(begin+j,begin+k,next+j);
+   indices.push(begin+k,next+k,next+j);
+  }
+ }
+ const g=new THREE.BufferGeometry();
+ g.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
+ g.setIndex(indices);
+ g.computeVertexNormals();
+ return g;
+}
+function disposeSurface(mesh){
+ if(mesh){scene.remove(mesh);mesh.geometry.dispose();mesh.material.dispose();}
+}
 function makeSurface(){
- if(water){scene.remove(water);water.geometry.dispose();water.material.dispose();}
- const n=levels[detailIndex];
- // Keep wake physics resolution independent from full ocean render detail.
- wakeSolver=createWakeSolver({segments:112,size:110});
- geometry=new THREE.PlaneGeometry(110,110,n,n);geometry.rotateX(-Math.PI/2);
- base=Float32Array.from(geometry.attributes.position.array);
- // Show the numerical crests and slopes through the water shading itself.
- wakeColorData=new Float32Array(geometry.attributes.position.count*3);
- wakeColorData.fill(.45);
- geometry.setAttribute('color',new THREE.BufferAttribute(wakeColorData,3));
- const material=new THREE.MeshStandardMaterial({
-   color:0xffffff,vertexColors:true,roughness:.22,metalness:.05,
-   side:THREE.DoubleSide
+ disposeSurface(water);disposeSurface(nearWater);
+ const segments=levels[detailIndex];
+ // Physics resolution is independent of distant scenery and stays near boat.
+ if(!wakeSolver)wakeSolver=createWakeSolver({segments:112,size:34});
+ const angular=detailIndex===0?64:detailIndex===1?80:96;
+ const nearStep=detailIndex===0?.46:detailIndex===1?.35:.28;
+ const nearRadii=[];
+ for(let radius=nearStep;radius<LOCAL_RADIUS;radius+=nearStep)nearRadii.push(radius);
+ nearRadii.push(LOCAL_RADIUS);
+ nearGeometry=radialGeometry(nearRadii,angular,true);
+ nearBase=Float32Array.from(nearGeometry.attributes.position.array);
+ nearColorData=new Float32Array(nearBase.length);
+ nearGeometry.setAttribute('color',new THREE.BufferAttribute(nearColorData,3));
+ const nearMat=new THREE.MeshStandardMaterial({
+  color:0xffffff,vertexColors:true,roughness:.21,metalness:.04,side:THREE.DoubleSide
  });
- water=new THREE.Mesh(geometry,material);water.frustumCulled=false;scene.add(water);
- $('resolution').textContent='Grid: '+n+' × '+n;
+ nearWater=new THREE.Mesh(nearGeometry,nearMat);
+ nearWater.frustumCulled=false;scene.add(nearWater);
+ // Identical boundary vertices/radius prevent z-fighting and reveal
+ // troughs as well as raised wake crests.
+ const farRadii=[16,17.5,19,21,23.5,26,29,32,36,40,45,51,58,66,75,85,97,111,128,150,178,215,270,350];
+ geometry=radialGeometry(farRadii,angular);
+ base=Float32Array.from(geometry.attributes.position.array);
+ const material=new THREE.MeshStandardMaterial({
+  color:0x087d98,roughness:.23,metalness:.04,side:THREE.DoubleSide
+ });
+ water=new THREE.Mesh(geometry,material);
+ water.frustumCulled=false;scene.add(water);
+ $('resolution').textContent='Near: '+nearGeometry.attributes.position.count.toLocaleString()+' verts';
+ $('wakeStatus').textContent='Wake: local 32 m';
 }
 // Independent deep-water wave components use gravity-based dispersion.
 // This is a directional wave-spectrum approximation; true GPU FFT remains
@@ -159,35 +209,51 @@ function oceanHeight(x,z,t){
  const y=waveField(bx,bz,t).height;
  return y+(wakeSolver?wakeSolver.sample(x,z):0);
 }
+// Both patches are re-centered on the player and use the same long waves.
+// Only the inner disk samples the 32 m wake field.
 function animateWaves(t){
- const position=geometry.attributes.position,arr=position.array;
- let rippleSum=0;
- for(let i=0;i<arr.length;i+=3){
-  const x=base[i]+water.position.x,z=base[i+2]+water.position.z;
+ if(!boat)return;
+ const cx=boat.position.x,cz=boat.position.z;
+ water.position.set(cx,0,cz);
+ nearWater.position.set(cx,0,cz);
+ const farArr=geometry.attributes.position.array;
+ for(let i=0;i<farArr.length;i+=3){
+  const x=base[i]+cx,z=base[i+2]+cz;
   const wave=waveField(x,z,t);
-  const displacedX=x+wave.dx,displacedZ=z+wave.dz;
-  const disturbance=wakeSolver?wakeSolver.sample(displacedX,displacedZ):0;
-  arr[i]=base[i]+wave.dx;
-  arr[i+2]=base[i+2]+wave.dz;
-  arr[i+1]=wave.height+disturbance;
-  // Central pressure field drives mesh height; nearby hull slopes receive
-  // extra visual contrast without doubling all full-scene solver lookups.
-  const nearHull=boat?Math.hypot(displacedX-boat.position.x,displacedZ-boat.position.z)<14:false;
-  const slope=nearHull&&wakeSolver?
-    Math.abs(wakeSolver.sample(displacedX+.65,displacedZ)-disturbance)+
-    Math.abs(wakeSolver.sample(displacedX,displacedZ+.65)-disturbance):0;
-  const shine=Math.min(1,Math.max(0,disturbance)*.37+slope*1.3);
-  const trough=Math.min(1,Math.max(0,-disturbance)*.24);
-  const windDetail=.06*Math.sin(displacedX*.65-displacedZ*.44+t*2.4);
-  wakeColorData[i]=Math.max(.018,Math.min(.55,.024+shine*.36+windDetail*.15-trough*.02));
-  wakeColorData[i+1]=Math.max(.18,Math.min(.95,.36+shine*.44+windDetail*.18-trough*.045));
-  wakeColorData[i+2]=Math.max(.24,Math.min(1,.47+shine*.45+windDetail*.22-trough*.06));
-  rippleSum+=Math.abs(disturbance);
+  farArr[i]=base[i]+wave.dx;
+  farArr[i+1]=wave.height;
+  farArr[i+2]=base[i+2]+wave.dz;
  }
- lastRipple=rippleSum/(arr.length/3);
- position.needsUpdate=true;
- geometry.attributes.color.needsUpdate=true;
+ geometry.attributes.position.needsUpdate=true;
  geometry.computeVertexNormals();
+ const arr=nearGeometry.attributes.position.array;
+ let rippleSum=0,rippleMax=0;
+ for(let i=0;i<arr.length;i+=3){
+  const px=nearBase[i],pz=nearBase[i+2];
+  const x=px+cx,z=pz+cz;
+  const wave=waveField(x,z,t);
+  const wx=x+wave.dx,wz=z+wave.dz;
+  const radial=Math.hypot(px,pz);
+  const fade=Math.max(0,Math.min(1,(LOCAL_RADIUS-radial)/(LOCAL_RADIUS-WAKE_FADE_START)));
+  const disturbance=fade*(wakeSolver?.sample(wx,wz)||0);
+  arr[i]=px+wave.dx;arr[i+2]=pz+wave.dz;
+  arr[i+1]=wave.height+disturbance;
+  // Local crest highlights follow the same pressure field; no fake
+  // particle sprites or V-shaped lines.
+  const slope=radial<12&&wakeSolver?
+   Math.abs(wakeSolver.sample(wx+.33,wz)-wakeSolver.sample(wx-.33,wz))+
+   Math.abs(wakeSolver.sample(wx,wz+.33)-wakeSolver.sample(wx,wz-.33)):0;
+  const shine=Math.min(1,Math.abs(disturbance)*.28+slope*.42);
+  const glimmer=.02*Math.sin(wx*.8+wz*.42-t*3.2);
+  nearColorData[i]=Math.max(.025,Math.min(.55,.03+shine*.33+glimmer*.15));
+  nearColorData[i+1]=Math.max(.23,Math.min(.95,.37+shine*.43+glimmer*.2));
+  nearColorData[i+2]=Math.max(.30,Math.min(1,.48+shine*.45+glimmer*.25));
+  rippleSum+=Math.abs(disturbance);rippleMax=Math.max(rippleMax,Math.abs(disturbance));
+ }
+ lastRipple=rippleMax;
+ nearGeometry.attributes.position.needsUpdate=true;
+ nearGeometry.attributes.color.needsUpdate=true;
+ nearGeometry.computeVertexNormals();
 }
 
 function resetBoat(){
@@ -424,11 +490,9 @@ async function init3D(forceWebGL=false){
   previousFrame=nowFrame;
   if(!paused){
    time+=dt;stepBoat(dt,time);
-   // Recenter finite test mesh near the sailing boat.
-   water.position.x=Math.round(boat.position.x/8)*8;
-   water.position.z=Math.round(boat.position.z/8)*8;
-   floor.position.x=water.position.x;
-   floor.position.z=water.position.z;
+   // High-resolution interaction follows the boat every frame.
+   floor.position.x=boat.position.x;
+   floor.position.z=boat.position.z;
    wakeSolver?.advance(dt,{x:boat.position.x,z:boat.position.z,
      heading:boatHeading,speed:boatSpeed,bob:vy,amount:wakeAmount});
    animateWaves(time);
@@ -437,7 +501,7 @@ async function init3D(forceWebGL=false){
   const hint=$('cameraHint');
   if(hint){const opacity=Math.max(0,1-(performance.now()-cameraIntroStart-1600)/1300);hint.style.opacity=String(Math.max(0,opacity));}
   $('boatSpeed').textContent='Speed: '+boatSpeed.toFixed(1)+' m/s';
-  $('wakeSignal').textContent='Ripples: '+(lastRipple*100).toFixed(0)+' cm avg';
+  $('wakeSignal').textContent='Peak ripple: '+(lastRipple*100).toFixed(0)+' cm';
   $('heading').textContent='Heading: '+((boatHeading*180/Math.PI%360+360)%360).toFixed(0)+'°';
   renderer.render(scene,camera);
   samples++;

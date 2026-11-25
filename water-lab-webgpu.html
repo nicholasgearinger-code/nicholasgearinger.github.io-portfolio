@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 27.6.0 moving hull fluid coupling</title>
+<title>Rift Water Lab · WebGPU 27.6.1 stable waterline and flotation</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.6.0</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.6.1</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.6.0 · moving hull boundary</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.6.1 · stable hull coupling</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -2605,13 +2605,13 @@ function hullClipSurface(arr,i,cx,cz){
  if(!hullWaveEnabled||!boat)return false;
  if(Math.abs(arr[i])>3.5||Math.abs(arr[i+2])>3.5)return false;
  hullClipP.set(arr[i]+cx-boat.position.x,arr[i+1]-boat.position.y,arr[i+2]+cz-boat.position.z).applyQuaternion(hullClipQ);
- if(!hullFootprint(hullClipP.x,hullClipP.z,.035)||hullClipP.y<-.27)return false;
+ if(!hullFootprint(hullClipP.x,hullClipP.z,-.06)||hullClipP.y<-.27||hullClipP.y>.12)return false;
  if(hullOpticsEnabled){
   // Ease the deformation inside the opaque hull; preserve exterior
   // slopes so they do not become a steep reflective trough.
   const edge=Math.min(hullHalfBeam(hullClipP.z)-Math.abs(hullClipP.x),hullClipP.z+2.65,2.20-hullClipP.z);
   const a=Math.max(0,Math.min(1,(edge+.035)/.20));
-  hullClipP.y+=(-.28-hullClipP.y)*a*a*(3-2*a);
+  hullClipP.y-=Math.min(.10,Math.max(0,hullClipP.y+.28))*a*a*(3-2*a);
  }else hullClipP.y=-.28;
  hullClipP.applyQuaternion(boat.quaternion);
  arr[i]=hullClipP.x+boat.position.x-cx;arr[i+1]=hullClipP.y+boat.position.y;arr[i+2]=hullClipP.z+boat.position.z-cz;
@@ -4557,13 +4557,20 @@ function stepBoat(dt,t){
   const forward=driveMode==='forward',powered=propulsionMode==='power';
   const vx=fx*boatSpeed+hullSlipX,vz=fz*boatSpeed+hullSlipZ;
   let fy=-mass*9.81,tx=0,tz=0,forceX=0,forceZ=0,yaw=0,wet=0,load=0,slam=0;
-  let entryX=0,entryZ=0,entryArea=0,entrySpeed=0;
+  let entryX=0,entryZ=0,entryArea=0,entrySpeed=0,exteriorSum=0,exteriorWeight=0;
   const q=boat.quaternion;
   for(const p of hydroProbes){
    boatProbeOffset.set(p[0],p[1],p[2]).applyQuaternion(q);
    const ox=boatProbeOffset.x,oy=boatProbeOffset.y,oz=boatProbeOffset.z;
    const x=boat.position.x+ox,z=boat.position.z+oz,y=boat.position.y+oy;
-   const surface=oceanHeight(x,z,t+k*h),depth=surface-y;
+   // Sample just outside the solid hull, not inside the numerical wake cavity.
+   const side=p[0]<0?-1:p[0]>0?1:0;
+   const beam=hullHalfBeam(p[2])+.30;
+   const left=oceanHeight(boat.position.x+Math.cos(boatHeading)*beam+ox-(Math.cos(boatHeading)*p[0]),boat.position.z-Math.sin(boatHeading)*beam+oz+Math.sin(boatHeading)*p[0],t+k*h);
+   const right=oceanHeight(boat.position.x-Math.cos(boatHeading)*beam+ox-Math.cos(boatHeading)*p[0],boat.position.z+Math.sin(boatHeading)*beam+oz+Math.sin(boatHeading)*p[0],t+k*h);
+   const exterior=side>0?left:side<0?right:(left+right)*.5;
+   const surface=exterior,depth=surface-y;
+   exteriorSum+=exterior*p[3];exteriorWeight+=p[3];
    if(!Number.isFinite(depth)||depth<=0)continue;
    const area=4.5*p[3]/hydroArea,sub=Math.min(.85,depth),fraction=Math.min(1,depth/.22);
    wet+=p[3]*fraction;
@@ -4610,6 +4617,10 @@ function stepBoat(dt,t){
   boat.position.x+=(-Math.sin(boatHeading)*boatSpeed+hullSlipX)*h;
   boat.position.z+=(-Math.cos(boatHeading)*boatSpeed+hullSlipZ)*h;
   totalTravel+=Math.hypot(boatSpeed,sideBound)*h;
+  // Reserve buoyancy represents enclosed displacement when the deck is awash.
+  // It is a bounded safety force, not a position snap.
+  const deckDepth=exteriorWeight>0?exteriorSum/exteriorWeight-(boat.position.y+.35):0;
+  if(deckDepth>0){fy+=mass*Math.min(12,deckDepth*18+Math.max(0,-vy)*3);tx-=pitchV*Ix*2;tz-=rollV*Iz*2;}
   const effectiveHeaveMass=mass*(1+.65*hullContact);
   vy=Math.max(-12,Math.min(8,vy+h*Math.max(-20,Math.min(20,fy/effectiveHeaveMass))));
   pitchV=Math.max(-1.1,Math.min(1.1,pitchV+tx/Ix*h));

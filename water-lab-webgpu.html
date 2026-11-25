@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 27.7.0 local hull FLIP APIC</title>
+<title>Rift Water Lab · WebGPU 27.7.1 WebGPU hull FLIP APIC</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.7.0</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.7.1</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.7.0 · local hull fluid</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.7.1 · GPU hull fluid</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -4146,9 +4146,106 @@ function hullAPWall(g,axis,x,y,z){
  const dx=g.ox+x-boat.position.x,dy=g.oy+y-boat.position.y,dz=g.oz+z-boat.position.z;
  return axis===0?-Math.sin(boatHeading)*boatSpeed+hullSlipX+hullYawRate*dz-rollV*dy:axis===1?vy+rollV*dx-pitchV*dz:-Math.cos(boatHeading)*boatSpeed+hullSlipZ-hullYawRate*dx+pitchV*dy;
 }
+
+let hullGPU=null,hullGPUStarting=false,hullGPUFault='',hullGPUPending=false,hullGPUFrames=0;
+async function initHullGPU(){
+ if(hullGPU||hullGPUStarting||hullGPUFault||!fluid3?.d||safeStartup||new URLSearchParams(location.search).has('cpuHullAP'))return;
+ hullGPUStarting=true;
+ const allocated=[];
+ try{
+  const d=fluid3.d;
+  // Reuse the established APIC kernels with a separate moving-solid field.
+  // Pack wall velocity and occupancy in the existing divergence buffer's
+  // separate binding; eight storage buffers stay within WebGPU minimums.
+  let source=apGPUCode;
+  source=source.replace('const N:i32=16;', '@group(0) @binding(8) var<storage,read> walls:array<vec4f>;\nconst N:i32=16;');
+  source=source.replace('return grid[idx(q)].w>.01;','return walls[idx(q)].w<.5&&grid[idx(q)].w>.01;');
+  source=source.replace('return grid[idx(q)].xyz;','if(walls[idx(q)].w>.5){return walls[idx(q)].xyz;}return grid[idx(q)].xyz;');
+  source=source.replace('if(!wet(q)){return 0.;}','if(walls[idx(q)].w>.5){return center;}if(!wet(q)){return 0.;}');
+  source=source.replace('let q=b+o;if(!inside(q)){continue;}','let q=b+o;if(!inside(q)){continue;}if(walls[idx(q)].w>.5){continue;}');
+  source=source.replace('old[i]=vec4f(v,m/4096.);','if(walls[i].w>.5){old[i]=vec4f(walls[i].xyz,0);grid[i]=old[i];return;}old[i]=vec4f(v,m/4096.);');
+  const m=d.createShaderModule({code:source}),info=await m.getCompilationInfo();
+  const errors=info.messages.filter(v=>v.type==='error');if(errors.length)throw Error(errors.map(v=>v.message).join('; '));
+  const layout=d.createBindGroupLayout({entries:Array.from({length:9},(_,binding)=>({binding,visibility:GPUShaderStage.COMPUTE,buffer:{type:binding===0?'uniform':binding===8?'read-only-storage':'storage'}}))});
+  const pl=d.createPipelineLayout({bindGroupLayouts:[layout]}),pipelines={};
+  for(const entryPoint of ['clear','deposit','normalizeGrid','divergence','jacobi','project','transfer'])pipelines[entryPoint]=await d.createComputePipelineAsync({layout:pl,compute:{module:m,entryPoint}});
+  const alloc=(size,usage)=>{const b=d.createBuffer({size,usage});allocated.push(b);return b;};
+  const storage=size=>alloc(size,GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST|GPUBufferUsage.COPY_SRC);
+  const params=alloc(16,GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST),particles=storage(240*80),walls=storage(AP_C*16);
+  const buffers=[params,particles,storage(AP_C*16),storage(AP_C*16),storage(AP_C*16),storage(AP_C*4),storage(AP_C*4),storage(AP_C*4),walls];
+  const bind=b=>d.createBindGroup({layout,entries:b.map((buffer,binding)=>({binding,resource:{buffer}}))});
+  const reverse=buffers.slice();[reverse[5],reverse[6]]=[reverse[6],reverse[5]];
+  hullGPU={d,pipelines,params,particles,walls,group:bind(buffers),alternate:bind(reverse),stage:alloc(240*80,GPUBufferUsage.MAP_READ|GPUBufferUsage.COPY_DST),allocated};
+ }catch(e){for(const b of allocated)b.destroy();hullGPUFault=String(e?.message||e);console.warn('Hull GPU fallback',e);}finally{hullGPUStarting=false;}
+}
+function dispatchHullGPU(g,elapsed,t){
+ const f=hullGPU;if(!f||hullGPUPending||!g.particles.length||g.particles.length>240)return false;
+ const d=f.d,count=g.particles.length,steps=Math.max(1,Math.ceil(elapsed/.035));
+ let scoped=false;
+ try{
+  const data=new Float32Array(count*20),wall=new Float32Array(AP_C*4);
+  for(let i=0;i<count;i++){const p=g.particles[i],k=i*20;data.set([p.x,p.y,p.z,1,...p.v,0],k);for(let j=0;j<3;j++)data.set(p.c.subarray(j*3,j*3+3),k+8+j*4);}
+  for(let k=0;k<AP_N;k++)for(let j=0;j<AP_N;j++)for(let i=0;i<AP_N;i++){const n=apCell(i,j,k);if(!g.solid[n])continue;const x=(i+.5)*AP_H,y=(j+.5)*AP_H,z=(k+.5)*AP_H;wall.set([hullAPWall(g,0,x,y,z),hullAPWall(g,1,x,y,z),hullAPWall(g,2,x,y,z),1],n*4);}
+  const u=new ArrayBuffer(16);new Uint32Array(u)[0]=count;new Float32Array(u).set([elapsed/steps,AP_H],1);
+  d.pushErrorScope('validation');scoped=true;
+  d.queue.writeBuffer(f.params,0,u);d.queue.writeBuffer(f.particles,0,data);d.queue.writeBuffer(f.walls,0,wall);
+  const enc=d.createCommandEncoder();
+  const pass=(name,groups,group=f.group)=>{const p=enc.beginComputePass();p.setPipeline(f.pipelines[name]);p.setBindGroup(0,group);p.dispatchWorkgroups(groups);p.end();};
+  for(let n=0;n<steps;n++){pass('clear',64);pass('deposit',Math.ceil(count/64));pass('normalizeGrid',64);pass('divergence',64);for(let j=0;j<(simTier===2?6:8);j++)pass('jacobi',64,j%2?f.alternate:f.group);pass('project',64);pass('transfer',Math.ceil(count/64));}
+  enc.copyBufferToBuffer(f.particles,0,f.stage,0,count*80);d.queue.submit([enc.finish()]);hullGPUPending=true;
+  const validation=d.popErrorScope();scoped=false;
+  Promise.allSettled([validation,f.stage.mapAsync(GPUMapMode.READ)]).then(results=>{
+   if(results[1].status==='rejected')throw results[1].reason;
+   const output=new Float32Array(f.stage.getMappedRange()).slice(0,count*20);f.stage.unmap();
+   if(results[0].status==='rejected')throw results[0].reason;if(results[0].value)throw results[0].value;
+   if(hullAP!==g)return;
+   if(!output.every(Number.isFinite))throw Error('Nonfinite hull GPU result');
+   for(let i=0;i<count;i++){const p=g.particles[i],k=i*20;p.x=output[k];p.y=output[k+1];p.z=output[k+2];for(let j=0;j<3;j++){p.v[j]=output[k+4+j];p.c.set(output.subarray(k+8+j*4,k+11+j*4),j*3);}}
+   hullGPUFrames++;finishHullAP(g,elapsed,clockTime);
+  }).catch(e=>{hullGPUFault=String(e?.message||e);hullGPU=null;for(const b of f.allocated)b.destroy();console.warn('Hull GPU runtime fallback',e);}).finally(()=>{hullGPUPending=false;});
+  return true;
+ }catch(e){if(scoped)d.popErrorScope().catch(()=>{});hullGPUFault=String(e?.message||e);hullGPU=null;hullGPUPending=false;for(const b of f.allocated)b.destroy();return false;}
+}
+
+function resolveHullAP(g){
+ const c=Math.cos(boatHeading),sn=Math.sin(boatHeading),span=AP_N*AP_H;
+   for(let i=g.particles.length-1;i>=0;i--){
+    const p=g.particles[i];if(!hullAPSolid(g,p.x,p.y,p.z))continue;
+    hullAPContacts++;
+    const dx=g.ox+p.x-boat.position.x,dz=g.oz+p.z-boat.position.z,lx=c*dx-sn*dz,lz=sn*dx+c*dz;
+    const sign=lx<0?-1:1,offset=Math.max(.06,hullHalfBeam(lz)+.10-Math.abs(lx));
+    p.x+=c*sign*offset;p.z-=sn*sign*offset;
+    const ux=hullAPWall(g,0,p.x,p.y,p.z),uz=hullAPWall(g,2,p.x,p.y,p.z);
+    const inward=(p.v[0]-ux)*c*sign-(p.v[2]-uz)*sn*sign;
+    if(inward<0){p.v[0]-=inward*c*sign;p.v[2]+=inward*sn*sign;}
+    p.c.fill(0);
+    if(hullAPSolid(g,p.x,p.y,p.z)||p.x<.08||p.z<.08||p.x>span-.08||p.z>span-.08)g.particles.splice(i,1);
+   }
+}
+function finishHullAP(g,elapsed,t){
+ const c=Math.cos(boatHeading),sn=Math.sin(boatHeading);
+ hullAPContacts=0;resolveHullAP(g);
+  const lift=new Float32Array(hullSplashProbes.length);let returns=0;
+  for(let i=g.particles.length-1;i>=0;i--){
+   const p=g.particles[i];p.age+=elapsed;
+   const x=g.ox+p.x,y=g.oy+p.y,z=g.oz+p.z,sea=oceanHeight(x,z,t);
+   if(!Number.isFinite(x+y+z+p.v[0]+p.v[1]+p.v[2]))throw Error('Nonfinite hull APIC particle');
+   if(y<sea-.06&&p.age>.12){
+    if(returns<3&&p.v[1]<-.35){const energy=Math.min(.55,-p.v[1]*.12);spawnFoamParcel(x,z,energy*foamStrength,p.v[0]*.25,p.v[2]*.25);if(sprayImpacts.length<128)sprayImpacts.push({x,z,energy});returns++;hullAPReturns++;}
+    g.particles.splice(i,1);continue;
+   }
+   const dx=x-boat.position.x,dz=z-boat.position.z,lx=c*dx-sn*dz,lz=sn*dx+c*dz;
+   for(let k=0;k<hullSplashProbes.length;k++){const q=hullSplashProbes[k],d=Math.hypot(lx-q.x,lz-q.z);if(d<.70)lift[k]=Math.max(lift[k],Math.min(.36,Math.max(0,y-sea))*(1-d/.70));}
+  }
+  for(let k=0;k<lift.length;k++){const q=hullSplashProbes[k];q.fluidLift=(q.fluidLift||0)*.55+lift[k]*.45;}
+
+}
+
 function updateHullAP(dt,t){
  if(!hullAPEnabled||hullAPFault||!boat||breakingMode!=='advanced'||!hullRunupEnabled||!hullSplashEnabled){if(hullAP)clearHullAP();return;}
- hullAPClock+=dt;const cadence=simTier===2?.14:simTier===1?.10:.075;
+ if(!hullGPU&&!hullGPUFault)initHullGPU();
+ hullAPClock+=dt;if(hullGPUPending){hullAPClock=Math.min(.15,hullAPClock);return;}
+ const cadence=simTier===2?.14:simTier===1?.10:.075;
  if(hullAPClock<cadence)return;
  const elapsed=Math.min(.15,hullAPClock);hullAPClock=0;
  try{
@@ -4175,37 +4272,10 @@ function updateHullAP(dt,t){
   g.solid.fill(0);
   for(let k=0;k<AP_N;k++)for(let j=0;j<AP_N;j++)for(let i=0;i<AP_N;i++)if(hullAPSolid(g,(i+.5)*AP_H,(j+.5)*AP_H,(k+.5)*AP_H))g.solid[apCell(i,j,k)]=1;
   g.wallVelocity=(axis,i,j,k)=>hullAPWall(g,axis,(i+(axis===0?0:.5))*AP_H,(j+(axis===1?0:.5))*AP_H,(k+(axis===2?0:.5))*AP_H);
+  if(hullGPU&&dispatchHullGPU(g,elapsed,t))return;
   const steps=Math.ceil(elapsed/.035);hullAPContacts=0;
-  for(let k=0;k<steps;k++){
-   hullAPStats=apStep(g,elapsed/steps,simTier===2?5:simTier===1?7:9);
-   // Resolve particle-wall penetration after advection. Reject cells that
-   // cannot be resolved safely rather than injecting momentum into the boat.
-   for(let i=g.particles.length-1;i>=0;i--){
-    const p=g.particles[i];if(!hullAPSolid(g,p.x,p.y,p.z))continue;
-    hullAPContacts++;
-    const dx=g.ox+p.x-boat.position.x,dz=g.oz+p.z-boat.position.z,lx=c*dx-sn*dz,lz=sn*dx+c*dz;
-    const sign=lx<0?-1:1,offset=Math.max(.06,hullHalfBeam(lz)+.10-Math.abs(lx));
-    p.x+=c*sign*offset;p.z-=sn*sign*offset;
-    const ux=hullAPWall(g,0,p.x,p.y,p.z),uz=hullAPWall(g,2,p.x,p.y,p.z);
-    const inward=(p.v[0]-ux)*c*sign-(p.v[2]-uz)*sn*sign;
-    if(inward<0){p.v[0]-=inward*c*sign;p.v[2]+=inward*sn*sign;}
-    p.c.fill(0);
-    if(hullAPSolid(g,p.x,p.y,p.z)||p.x<.08||p.z<.08||p.x>span-.08||p.z>span-.08)g.particles.splice(i,1);
-   }
-  }
-  const lift=new Float32Array(hullSplashProbes.length);let returns=0;
-  for(let i=g.particles.length-1;i>=0;i--){
-   const p=g.particles[i];p.age+=elapsed;
-   const x=g.ox+p.x,y=g.oy+p.y,z=g.oz+p.z,sea=oceanHeight(x,z,t);
-   if(!Number.isFinite(x+y+z+p.v[0]+p.v[1]+p.v[2]))throw Error('Nonfinite hull APIC particle');
-   if(y<sea-.06&&p.age>.12){
-    if(returns<3&&p.v[1]<-.35){const energy=Math.min(.55,-p.v[1]*.12);spawnFoamParcel(x,z,energy*foamStrength,p.v[0]*.25,p.v[2]*.25);if(sprayImpacts.length<128)sprayImpacts.push({x,z,energy});returns++;hullAPReturns++;}
-    g.particles.splice(i,1);continue;
-   }
-   const dx=x-boat.position.x,dz=z-boat.position.z,lx=c*dx-sn*dz,lz=sn*dx+c*dz;
-   for(let k=0;k<hullSplashProbes.length;k++){const q=hullSplashProbes[k],d=Math.hypot(lx-q.x,lz-q.z);if(d<.70)lift[k]=Math.max(lift[k],Math.min(.36,Math.max(0,y-sea))*(1-d/.70));}
-  }
-  for(let k=0;k<lift.length;k++){const q=hullSplashProbes[k];q.fluidLift=(q.fluidLift||0)*.55+lift[k]*.45;}
+  for(let k=0;k<steps;k++){hullAPStats=apStep(g,elapsed/steps,simTier===2?5:simTier===1?7:9);resolveHullAP(g);}
+  finishHullAP(g,elapsed,t);
  }catch(e){hullAPFault=String(e?.message||e);clearHullAP();console.warn('Hull APIC fallback',e);}
 }
 
@@ -5675,7 +5745,7 @@ async function init3D(forceWebGL=false){
   const now=performance.now();
   if(now-last>1100){
    const measured=samples*1000/(now-last);
-   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · rock waves '+(owPeak*100).toFixed(1)+' cm · run-up '+(runupPeak*100).toFixed(0)+' cm / '+runupSpills+' spills · hull wall '+hullWaveCells+' / '+hullClipCount+' clipped · hull splashes '+hullSplashHits+' · hull run-up '+(hullRunupPeak*100).toFixed(0)+' cm / '+hullOvertops+' spills · sheet '+hullSheetCells+' cells / '+hullSheetTears+' tears · hull APIC '+(hullAPFault?'fallback':hullAP?hullAP.particles.length+'p / '+hullAPContacts+' contacts / '+hullAPReturns+' returns':'idle')+' · rock eddies '+objectVortexCount+' · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?(apGPUFrames&&!apGPUFault?'GPU ':'CPU ')+apGrid.particles.length+'p '+(apGPUFrames&&!apGPUFault?apGPUFrames+' steps · mesh '+rcTriangles+' tris · '+(rcGPUFrames&&!rcGPUFault?'GPU density':'CPU density')+(rcThicknessEnabled?' · SS thickness':'')+(whitewaterVolumeEnabled?' · WW '+(wwGPUFrames&&!wwGPUFault?'GPU':'CPU'):''):apStats.after.toFixed(2)+' div'):'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
+   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · rock waves '+(owPeak*100).toFixed(1)+' cm · run-up '+(runupPeak*100).toFixed(0)+' cm / '+runupSpills+' spills · hull wall '+hullWaveCells+' / '+hullClipCount+' clipped · hull splashes '+hullSplashHits+' · hull run-up '+(hullRunupPeak*100).toFixed(0)+' cm / '+hullOvertops+' spills · sheet '+hullSheetCells+' cells / '+hullSheetTears+' tears · hull APIC '+(hullAPFault?'fallback':hullAP?(hullGPUFrames&&!hullGPUFault?'GPU ':'CPU ')+hullAP.particles.length+'p / '+hullAPContacts+' contacts / '+hullAPReturns+' returns':'idle')+' · rock eddies '+objectVortexCount+' · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?(apGPUFrames&&!apGPUFault?'GPU ':'CPU ')+apGrid.particles.length+'p '+(apGPUFrames&&!apGPUFault?apGPUFrames+' steps · mesh '+rcTriangles+' tris · '+(rcGPUFrames&&!rcGPUFault?'GPU density':'CPU density')+(rcThicknessEnabled?' · SS thickness':'')+(whitewaterVolumeEnabled?' · WW '+(wwGPUFrames&&!wwGPUFault?'GPU':'CPU'):''):apStats.after.toFixed(2)+' div'):'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
    $('fps').textContent='FPS: '+Math.round(measured);
    adjustSimulationBudget(measured,now);adjustAdaptivePerformance(measured,now);
    last=now;samples=0;

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 26.3 GPU-driven free-surface response</title>
+<title>Rift Water Lab · WebGPU 26.4 visible vortex trails and hull-fluid feedback</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.3</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.4</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.3 · fluid surface deformation</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.4 · vortex and hull coupling</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -2115,10 +2115,10 @@ function sharedFoamFlow(x,z,t,out){
 }
 // Persistent finite-core vortex pairs. Centers remain world anchored.
 // Lamb-Oseen-like rotation, bounded radius and exponential circulation loss.
-const foamVortices=[],vortexScratch={x:0,z:0,air:0,height:0,sx:0,sz:0};
+const foamVortices=[],vortexScratch={x:0,z:0,air:0,height:0,sx:0,sz:0,core:0};
 let vortexShed=0,vortexWaveShed=0,vortexSeed=0;
 function evaluateVortices(x,z,out){
- out.x=out.z=out.air=out.height=out.sx=out.sz=0;
+ out.x=out.z=out.air=out.height=out.sx=out.sz=out.core=0;
  for(const v of foamVortices){
   const dx=x-v.x,dz=z-v.z,r2=dx*dx+dz*dz,R=v.radius*v.radius;
   if(r2>R*16)continue;
@@ -2128,11 +2128,59 @@ function evaluateVortices(x,z,out){
   out.x-=dz*rot;out.z+=dx*rot;
   // Foam entrains around the shear layer, not a solid painted disk.
   out.air+=Math.min(1,Math.abs(strength)*.6)*Math.exp(-((q-.85)**2)*1.7)*.45;
-  const h=.035*strength*strength/(R+.3);
+  out.core=Math.max(out.core,core*Math.min(1,Math.abs(strength)*.5));
+  const h=.045*strength*strength/(R+.3);
   out.height-=h*core;out.sx+=2*h*dx/R*core;out.sz+=2*h*dz/R*core;
  }
  out.air=Math.min(1,out.air);out.height=Math.max(-.16,out.height);
  return out;
+}
+// Finite-lived foam filaments follow resolved flow and subgrid circulation.
+const vortexFilaments=[],filamentFlow={},filamentCurl={};
+let filamentMesh=null,filamentSeed=0,filamentClock=0;
+function updateVortexFilaments(dt,t){
+ if(!boat||breakingMode!=='advanced'||foamStrength<.01){
+  vortexFilaments.length=0;if(filamentMesh)filamentMesh.visible=false;return;
+ }
+ if(!filamentMesh){
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(new Float32Array(240*8*2*3),3).setUsage(THREE.DynamicDrawUsage));
+  g.setAttribute('color',new THREE.BufferAttribute(new Float32Array(240*8*2*4),4).setUsage(THREE.DynamicDrawUsage));
+  g.setDrawRange(0,0);
+  filamentMesh=new THREE.LineSegments(g,new THREE.LineBasicMaterial({vertexColors:true,transparent:true,opacity:.70,depthWrite:false,depthTest:true}));
+  filamentMesh.frustumCulled=false;filamentMesh.renderOrder=4;scene.add(filamentMesh);
+ }
+ filamentClock+=dt;
+ if(filamentClock>.10){
+  filamentClock=0;
+  for(const v of foamVortices){
+   if(vortexFilaments.length>=240)break;
+   if(v.age>5)continue;
+   for(let j=0;j<3&&vortexFilaments.length<240;j++){
+    const seed=++filamentSeed,a=seed*2.399963,r=v.radius*(.78+.45*bubbleHash(seed));
+    const x=v.x+Math.cos(a)*r,z=v.z+Math.sin(a)*r;
+    vortexFilaments.push({x,z,age:0,life:1.2+1.8*bubbleHash(seed+31),trail:[{x,z}],sample:0});
+   }
+  }
+ }
+ const g=filamentMesh.geometry,p=g.attributes.position.array,c=g.attributes.color.array;let n=0;
+ for(let i=vortexFilaments.length-1;i>=0;i--){
+  const f=vortexFilaments[i];f.age+=dt;
+  if(f.age>f.life||Math.hypot(f.x-boat.position.x,f.z-boat.position.z)>14){vortexFilaments.splice(i,1);continue;}
+  sharedFoamFlow(f.x,f.z,t,filamentFlow);
+  sampleFluid3(f.x,oceanHeight(f.x,f.z,t)-.12,f.z,filamentFlow);
+  evaluateVortices(f.x,f.z,filamentCurl);
+  f.x+=(filamentFlow.x*.65+filamentCurl.x*.9)*dt;f.z+=(filamentFlow.z*.65+filamentCurl.z*.9)*dt;
+  f.sample+=dt;if(f.sample>.075){f.sample=0;f.trail.push({x:f.x,z:f.z});if(f.trail.length>9)f.trail.shift();}
+  const fade=Math.min(1,f.age*6,(f.life-f.age)*2)*localWaterBlend(Math.hypot(f.x-boat.position.x,f.z-boat.position.z));
+  for(let j=1;j<f.trail.length;j++){
+   for(const q of [f.trail[j-1],f.trail[j]]){
+    p[n*3]=q.x;p[n*3+1]=oceanHeight(q.x,q.z,t)+.027;p[n*3+2]=q.z;
+    c[n*4]=.86;c[n*4+1]=.96;c[n*4+2]=.95;c[n*4+3]=fade*(.25+.75*j/f.trail.length);n++;
+   }
+  }
+ }
+ g.setDrawRange(0,n);g.attributes.position.needsUpdate=true;g.attributes.color.needsUpdate=true;filamentMesh.visible=n>0;
 }
 function advanceVortexCores(step,t){
  const fx=-Math.sin(boatHeading),fz=-Math.cos(boatHeading),speed=Math.abs(boatSpeed);
@@ -2149,7 +2197,7 @@ function advanceVortexCores(step,t){
   for(const side of [-1,1]){
    if(foamVortices.length>=18)foamVortices.shift();
    foamVortices.push({x:boat.position.x-fx*2.1+fz*side*1.25,z:boat.position.z-fz*2.1-fx*side*1.25,
-    radius:.82,spin:side*Math.min(3.2,speed*.75)*Math.min(1,wakeAmount),age:0});
+    radius:1.05,spin:side*Math.min(3.6,speed*.85)*Math.min(1,wakeAmount)*(1+side*rudder*.22),age:0});
   }
  }
  if(vortexWaveShed>1.1&&breakingIntensity>.1&&whitecapIntensity>.1&&foamVortices.length<18){
@@ -2254,10 +2302,11 @@ function advanceFoamDensity(dt,t){
   const hull=Math.exp(-along*along*.30-Math.pow(Math.abs(side)-.70,2)*4.2);
   const boatAir=power*(stern*1.8+hull*.9);
   const wakeFlow=Math.min(1,boatAir*.6);
-  const vortexAir=evaluateVortices(x,z,vortexScratch).air;
+  const vortexData=evaluateVortices(x,z,vortexScratch),vortexAir=vortexData.air,vortexCore=vortexData.core;
   for(let k=0;k<FOAM_LAYERS;k++){
    const gpu=sampleFluid3(x,w.height-k*FOAM_DZ,z,flowReadScratch);
-   const sx=x-(gpu?flowReadScratch.x:vx)*step*(1-k*.07),sz=z-(gpu?flowReadScratch.z:vz)*step*(1-k*.07);
+   const swirlMix=gpu?.45:.25;
+   const sx=x-((gpu?flowReadScratch.x:vx)+vortexData.x*swirlMix)*step*(1-k*.07),sz=z-((gpu?flowReadScratch.z:vz)+vortexData.z*swirlMix)*step*(1-k*.07);
    const here=foamLayer(sx,sz,k),below=foamLayer(sx,sz,k+1),above=k?foamLayer(sx,sz,k-1):0;
    const coalescence=Math.max(0,here-.25)*Math.max(0,below-.12);
    const vertical=gpu?flowReadScratch.y:0;
@@ -2276,13 +2325,14 @@ function advanceFoamDensity(dt,t){
    else if(k===1)d*=Math.exp(-step*.16);
    d*=Math.exp(-step*(.24+k*.09));
    const gpuAir=gpu?Math.min(.65,Math.max(0,flowReadScratch.curl-.14)*.30+Math.max(0,flowReadScratch.y-.08)*.14)*Math.exp(-k*.35):0;
-   const source=waveAir*foamWaveProfile[k]*1.65+power*(stern*1.8*foamSternProfile[k]+hull*.9*foamHullProfile[k])*2.1+vortexAir*foamWaveProfile[k]*1.3+gpuAir*.55;
+   const source=waveAir*foamWaveProfile[k]*1.65+power*(stern*1.8*foamSternProfile[k]+hull*.9*foamHullProfile[k])*2.1+vortexAir*foamWaveProfile[k]*2.1+gpuAir*.35;
    const index=k*FOAM_PLANE+p;
    const gasMixed=gasTransport+step*.14*(gasAbove+gasBelow-2*gas);
    const gasNew=Math.max(0,Math.min(.85,gasMixed*Math.exp(-step*(k===0?.75:.20))+step*source*(1-gas)));
    airNext[index]=gasNew;
    // Gas escaping at the surface feeds film; deeper film follows aeration.
-   const filmSource=k===0?gasNew*.95+source*.25:gasNew*.38;
+   const filmSource=k===0?(gasNew*.85+source*.22+vortexAir*.45)*(1-.65*vortexCore):gasNew*.38;
+   if(k===0)d*=Math.exp(-step*vortexCore*.9);
    foamNext[index]=Math.max(0,Math.min(1,d*Math.exp(-step*.18)+step*filmSource*(1-d)));
   }
  }
@@ -2389,7 +2439,7 @@ function updateFoamSkin(t){
    const shadow=1-Math.min(.28,column*.12+Math.max(0,upstream-d)*.28);
    const coverage=Math.max(0,Math.min(1,(d*foamStrength-.065)/.48));
    const breakup=.65+.35*Math.sin(wx*4.1+Math.sin(wz*2.9))*Math.cos(wz*3.7-Math.sin(wx*2.2));
-   const alpha=coverage*(.045+.65*lace+.16*scatter+.09*column)*breakup*fade;
+   const alpha=coverage*(.025+.75*lace+.10*scatter+.06*column)*breakup*fade;
    const bright=Math.min(1,(.83+.14*scatter+.08*lace)*shadow);
    data[k]=Math.round(255*bright);data[k+1]=Math.round(255*Math.min(1,bright+.025));data[k+2]=Math.round(255*Math.min(1,bright+.035));data[k+3]=Math.round(255*alpha);
   }
@@ -2459,7 +2509,7 @@ function advanceBreakingFoam(dt,t){
 }
 function updateWhitewater(t){
  if(!foamMesh||!boat)return;
- if(breakingMode==='advanced'&&!foamDebug){foamMesh.geometry.setDrawRange(0,0);$('foamStatus').textContent=fluid3Diagnostic()+' · vortices '+foamVortices.length+' · enstrophy '+fluid3Enstrophy.toFixed(3)+' · vertical '+fluid3Vertical.toFixed(2)+' m/s · surface '+(fsPeak*100).toFixed(1)+' cm';return;}
+ if(breakingMode==='advanced'&&!foamDebug){foamMesh.geometry.setDrawRange(0,0);$('foamStatus').textContent=fluid3Diagnostic()+' · vortices '+foamVortices.length+' · enstrophy '+fluid3Enstrophy.toFixed(3)+' · vertical '+fluid3Vertical.toFixed(2)+' m/s · surface '+(fsPeak*100).toFixed(1)+' cm'+' · hull load '+hullFluidLoad.toFixed(0)+' N · tracers '+vortexFilaments.length;return;}
  if((foamStrength<.01||wakeAmount<.01)&&!foamDebug&&breakingFoam.length===0){
   foamMesh.geometry.setDrawRange(0,0);
   foamPatchCount=0;$('foamStatus').textContent='Foam: 0 patches';return;
@@ -2695,7 +2745,7 @@ function resetBoat(){
  boat.position.set(-3.2,.6,-13);
  boat.rotation.set(0,0,0);vy=0;pitchV=0;rollV=0;
  boatHeading=0;boatSpeed=0;rudder=0;driveMode='stop';totalTravel=0;previousBoatHeading=0;turnVelocity=0;wakeSolver?.clear();wakeTrail=[];trailElapsed=0;
- clearFreeSurface();fluid3Epoch++;fluid3Frames=0;fluid3State='awaiting fresh field';if(fluid3){fluid3.cpu=null;fluid3.started=false;fluid3.d.queue.writeBuffer(fluid3.v[0],0,new Float32Array(F3C*4));}
+ hullSlipX=hullSlipZ=hullFluidLoad=0;vortexFilaments.length=0;clearFreeSurface();fluid3Epoch++;fluid3Frames=0;fluid3State='awaiting fresh field';if(fluid3){fluid3.cpu=null;fluid3.started=false;fluid3.d.queue.writeBuffer(fluid3.v[0],0,new Float32Array(F3C*4));}
  foamFieldReady=false;flowReady=false;foamVortices.length=0;vortexShed=0;vortexWaveShed=0;foamDensity.fill(0);foamNext.fill(0);entrainedAir.fill(0);airNext.fill(0);breakingFoam.length=0;foamBubbles.length=0;foamBubbleSpawn=0;whitewaterSpray.length=0;sprayImpacts.length=0;cloudSamples=[];cloudTime=-100;
  if($('forward')){setDriveMode('stop');}
 }
@@ -2739,6 +2789,7 @@ const hullSamples=[
  [-.65,-.72,1.65],[.65,-.72,1.65]
 ];
 let boatProbeOffset=null;
+let hullSlipX=0,hullSlipZ=0,hullFluidLoad=0;const hullFlowSample={};
 function stepBoat(dt,t){
  if(!boat||dt<=0)return;
  if(!boatProbeOffset)boatProbeOffset=new THREE.Vector3();
@@ -2756,8 +2807,8 @@ function stepBoat(dt,t){
     boatSpeed+(thrust-drag-braking)*h));
   // Rudder responds to forward flow; preserve low-speed steering assist.
   boatHeading+=rudder*(.24+.12*boatSpeed)*h;
-  boat.position.x-=Math.sin(boatHeading)*boatSpeed*h;
-  boat.position.z-=Math.cos(boatHeading)*boatSpeed*h;
+  boat.position.x+=(-Math.sin(boatHeading)*boatSpeed+hullSlipX)*h;
+  boat.position.z+=(-Math.cos(boatHeading)*boatSpeed+hullSlipZ)*h;
   totalTravel+=boatSpeed*h;
   boat.rotation.y=boatHeading;
   const dynamic=hullPhysics==='dynamic';
@@ -2767,7 +2818,7 @@ function stepBoat(dt,t){
   let fy=-mass*9.81-vy*mass*(dynamic?.55:.4);
   let tx=-pitchV*inertiaX*(dynamic?3.3:2.2);
   let tz=-rollV*inertiaZ*(dynamic?3.5:2.5);
-  let immersionSum=0,immersed=0;
+  let immersionSum=0,immersed=0,fluidX=0,fluidZ=0,fluidCount=0,fluidLoad=0;
   const q=boat.quaternion;
   for(const point of probes){
    boatProbeOffset.set(point[0],point[1],point[2]).applyQuaternion(q);
@@ -2779,12 +2830,24 @@ function stepBoat(dt,t){
    if(!Number.isFinite(immersion)||immersion<=0)continue;
    const hullV=vy+rollV*ox-pitchV*oz;
    const surfaceV=dynamic?(wakeSolver?.sampleVelocity(wx,wz)||0):0;
-   const relativeV=hullV-Math.max(-1.5,Math.min(1.5,surfaceV));
+   const hasFluid=breakingMode==='advanced'&&sampleFluid3(wx,boat.position.y+oy,wz,hullFlowSample);
+   if(hasFluid){fluidX+=hullFlowSample.x;fluidZ+=hullFlowSample.z;fluidCount++;}
+   const relativeV=hullV-Math.max(-2,Math.min(2,surfaceV+(hasFluid?hullFlowSample.y*.65:0)));
+   if(hasFluid)fluidLoad+=Math.abs(hullFlowSample.y)*damping;
    const force=Math.max(0,Math.min(dynamic?1.15:1.4,immersion)*stiffness*
       buoyancyStrength-damping*relativeV);
    fy+=force;tx-=oz*force;tz+=ox*force;
    immersionSum+=immersion;immersed++;
   }
+  if(fluidCount){
+   const fx=-Math.sin(boatHeading),fz=-Math.cos(boatHeading),side=(fluidX*fz-fluidZ*fx)/fluidCount;
+   const targetX=fz*side*.32,targetZ=-fx*side*.32;
+   hullSlipX+=(Math.max(-.8,Math.min(.8,targetX))-hullSlipX)*Math.min(1,h*2);
+   hullSlipZ+=(Math.max(-.8,Math.min(.8,targetZ))-hullSlipZ)*Math.min(1,h*2);
+   const along=(fluidX*fx+fluidZ*fz)/fluidCount;
+   boatSpeed=Math.max(0,boatSpeed+Math.max(-.45,Math.min(.25,(along-boatSpeed)*.035))*h);
+  }else{hullSlipX*=Math.exp(-h*2);hullSlipZ*=Math.exp(-h*2);}
+  hullFluidLoad=fluidLoad;
   // Gentle planing lift adds resistance to pitching the bow underwater,
   // but never creates buoyancy when the boat is completely airborne.
   if(dynamic&&immersed>1&&boatSpeed>3){
@@ -3489,7 +3552,7 @@ async function init3D(forceWebGL=false){
    updateCausticTexture(time);
    updateWaveTransmission(time);
    animateWaves(time);
-   try{updateFoamSkin(time);updateWhitewater(time);}
+   try{updateFoamSkin(time);updateWhitewater(time);updateVortexFilaments(dt,time);}
    catch(error){
     $('foamStatus').textContent='Foam error: '+String(error?.message||error);
     if(foamMesh)foamMesh.visible=false;

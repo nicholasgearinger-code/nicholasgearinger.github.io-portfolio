@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 27.1 GPU FLIP/APIC and volumetric whitewater</title>
+<title>Rift Water Lab · WebGPU 27.1.1 high frequency foam and GPU optimization</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.1</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.1.1</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.1 · GPU liquid and whitewater</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.1.1 · fine whitewater</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -2686,7 +2686,7 @@ function advanceFoamDensity(dt,t){
 }
 // Continuous lit foam skin shares the exact ocean mesh triangulation.
 // Its own rough dielectric material suppresses glossy water reflections.
-let foamSkin=null,foamSkinSource=null,foamOpticalMap=null,foamMicroNormal=null;
+let foamSkin=null,foamSkinSource=null,foamOpticalMap=null,foamMicroNormal=null,foamDetailAlpha=null;
 let FOAM_MASK=256;
 // Precomputed periodic Voronoi edge distances: transparent interiors, narrow membranes.
 const CELL_N=128,cellAtlas=new Float32Array(CELL_N*CELL_N);
@@ -2703,6 +2703,20 @@ function cellMembrane(x,z){const u=x*CELL_N/16,v=z*CELL_N/16,i=Math.floor(u),j=M
 let foamOpticalTime=-1e6,foamOpticalX=0,foamOpticalZ=0;
 const foamDriftX=new Float32Array(FOAM_PLANE),foamDriftZ=new Float32Array(FOAM_PLANE),foamDriftNextX=new Float32Array(FOAM_PLANE),foamDriftNextZ=new Float32Array(FOAM_PLANE);
 const foamOpticalFlow={x:0,z:0};
+function makeFoamDetailAlpha(){
+ const n=256,data=new Uint8Array(n*n*4);
+ for(let j=0;j<n;j++)for(let i=0;i<n;i++){
+  const u=i/n*16,v=j/n*16;
+  const a=cellMembrane(u,v),b=cellMembrane(u*2+5,v*2+7);
+  const value=Math.round(255*Math.min(1,.10+.78*a+.26*b));
+  const k=(j*n+i)*4;data[k]=data[k+1]=data[k+2]=value;data[k+3]=255;
+ }
+ const tex=new THREE.DataTexture(data,n,n,THREE.RGBAFormat);
+ tex.channel=1;tex.wrapS=tex.wrapT=THREE.RepeatWrapping;
+ tex.repeat.set(LOCAL_RADIUS*2/3.2,LOCAL_RADIUS*2/3.2);
+ tex.minFilter=THREE.LinearMipmapLinearFilter;tex.magFilter=THREE.LinearFilter;
+ tex.generateMipmaps=true;tex.anisotropy=4;tex.needsUpdate=true;return tex;
+}
 function makeFoamOpticalMap(){
  const data=new Uint8Array(FOAM_MASK*FOAM_MASK*4);
  const tex=new THREE.DataTexture(data,FOAM_MASK,FOAM_MASK,THREE.RGBAFormat);
@@ -2738,9 +2752,10 @@ function updateFoamSkin(t){
   geo.setAttribute('uv',nearGeometry.attributes.uv1.clone());
   if(!foamOpticalMap)foamOpticalMap=makeFoamOpticalMap();
   if(!foamMicroNormal)foamMicroNormal=makeFoamMicroNormal();
-  const mat=new THREE.MeshPhysicalMaterial({color:0xffffff,map:foamOpticalMap,
+  if(!foamDetailAlpha)foamDetailAlpha=makeFoamDetailAlpha();
+  const mat=new THREE.MeshPhysicalMaterial({color:0xffffff,map:foamOpticalMap,alphaMap:foamDetailAlpha,
    roughness:.86,metalness:0,ior:1.10,clearcoat:.025,
-   normalMap:foamMicroNormal,normalScale:new THREE.Vector2(.28,.28),
+   normalMap:foamMicroNormal,normalScale:new THREE.Vector2(.42,.42),
    transparent:true,alphaTest:.012,depthWrite:false,depthTest:true,side:THREE.DoubleSide,
    polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2});
   foamSkin=new THREE.Mesh(geo,mat);foamSkin.frustumCulled=false;foamSkin.renderOrder=3;
@@ -2750,7 +2765,7 @@ function updateFoamSkin(t){
  if(!foamSkin.visible){foamOpticalTime=-1e6;return;}
  foamSkin.position.copy(nearWater.position);
  const src=nearGeometry.attributes.position.array,norm=nearGeometry.attributes.normal.array;
- const geo=foamSkin.geometry,p=geo.attributes.position.array,uv=geo.attributes.uv.array;
+ const geo=foamSkin.geometry,p=geo.attributes.position.array,uv=geo.attributes.uv.array,detailUV=geo.attributes.uv1.array;
  // Evaluate optical microstructure in world coordinates. Reproject the
  // previous texture as the hull moves, rather than regenerate at frame rate.
  const desiredMask=simTier===2?128:simTier===1?160:192;
@@ -2771,24 +2786,14 @@ function updateFoamSkin(t){
    const sub=foamLayer(x,z,1,entrainedAir)+.75*foamLayer(x,z,2,entrainedAir)+.45*foamLayer(x,z,3,entrainedAir);
    const column=Math.min(1,(d+sub)*.65);
    
-   const along=lx*fx+lz*fz,side=lx*fz-lz*fx;
-   const wake=power*Math.exp(-Math.pow(side/(.9+Math.max(0,-along)*.2),2))*Math.exp(-Math.abs(along+2)*.12);
-   // Bounded world-space coordinate warp; stern streaks elongate downstream.
-   const wx=x-foamLayer(x,z,0,foamDriftX),wz=z-foamLayer(x,z,0,foamDriftZ);
-   const u=wx*3.1+Math.sin(wz*1.7)*.65,v=wz*3.4+Math.sin(wx*1.4)*.55;
-   const stretch=1+Math.min(.65,shear*.45+wake*.2);
-   const film=cellMembrane(u/stretch,v*stretch);
-   const micro=cellMembrane(u*2.1+5.3,v*2.1-7.1);
-   const lace=Math.min(1,film*.84+micro*.30);
    const scatter=1-Math.exp(-(d*.85+sub*.55)*1.5);
    // Approximate directional optical thickness using an upstream density sample.
    const upstream=foamLayer(x-.45,z-.24,0)+.55*foamLayer(x-.45,z-.24,1);
    const shadow=1-Math.min(.28,column*.12+Math.max(0,upstream-d)*.28);
    const coverage=Math.max(0,Math.min(1,(d*foamStrength-.035)/.43));
-   const breakup=.65+.35*Math.sin(wx*4.1+Math.sin(wz*2.9))*Math.cos(wz*3.7-Math.sin(wx*2.2));
-   const alpha=Math.min(.72,foamStrength*(young*(.12+.43*lace)+shear*(.025+.58*lace)+coverage*(.015+.28*lace)+sub*.035)*breakup*fade);
+   const alpha=Math.min(.91,foamStrength*(young*.68+shear*.64+coverage*.36+sub*.04)*fade);
    const sunVisibility=shadowReady?shadowSample(shadowField,x,z,1):1;
-   const bright=Math.min(1,(.82+.12*scatter+.14*lace+.08*young)*shadow*(1-Math.min(.32,(1-sunVisibility)*waveShadowStrength*.6)));
+   const bright=Math.min(1,(.84+.14*scatter+.08*young)*shadow*(1-Math.min(.32,(1-sunVisibility)*waveShadowStrength*.6)));
    data[k]=Math.round(255*bright);data[k+1]=Math.round(255*Math.min(1,bright+.025));data[k+2]=Math.round(255*Math.min(1,bright+.035));data[k+3]=Math.round(255*alpha);
   }
   foamOpticalMap.needsUpdate=true;
@@ -2797,8 +2802,9 @@ function updateFoamSkin(t){
   const x=src[i]+cx,z=src[i+2]+cz,d=sampleFoamDensity(x,z),sub=foamLayer(x,z,1);
   p[i]=src[i];p[i+1]=src[i+1]+.009+.024*Math.min(1,d*.8+sub*.35);p[i+2]=src[i+2];
   uv[j]=.5+(x-foamOpticalX)/(LOCAL_RADIUS*2);uv[j+1]=.5+(z-foamOpticalZ)/(LOCAL_RADIUS*2);
+  detailUV[j]=(x-foamLayer(x,z,0,foamDriftX))/(LOCAL_RADIUS*2);detailUV[j+1]=(z-foamLayer(x,z,0,foamDriftZ))/(LOCAL_RADIUS*2);
  }
- geo.attributes.position.needsUpdate=true;geo.attributes.uv.needsUpdate=true;
+ geo.attributes.position.needsUpdate=true;geo.attributes.uv.needsUpdate=true;geo.attributes.uv1.needsUpdate=true;
  geo.attributes.normal.array.set(norm);geo.attributes.normal.needsUpdate=true;
 }
 // Local parametric overturning sheets: independent of the single-valued
@@ -2970,12 +2976,14 @@ async function initAPGPU(){
   const errors=info.messages.filter(x=>x.type==='error');if(errors.length)throw Error(errors.map(x=>x.message).join('; '));
   const layout=d.createBindGroupLayout({entries:Array.from({length:8},(_,binding)=>({binding,visibility:GPUShaderStage.COMPUTE,buffer:{type:binding===0?'uniform':'storage'}}))});
   const pl=d.createPipelineLayout({bindGroupLayouts:[layout]}),pipelines={};
-  for(const entryPoint of ['clear','deposit','normalizeGrid','divergence','jacobi','copyPressure','project','transfer'])pipelines[entryPoint]=await d.createComputePipelineAsync({layout:pl,compute:{module:m,entryPoint}});
+  for(const entryPoint of ['clear','deposit','normalizeGrid','divergence','jacobi','project','transfer'])pipelines[entryPoint]=await d.createComputePipelineAsync({layout:pl,compute:{module:m,entryPoint}});
   const buf=size=>d.createBuffer({size,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST|GPUBufferUsage.COPY_SRC});
   const params=d.createBuffer({size:16,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
   const particles=buf(AP_MAX*80),buffers=[params,particles,buf(AP_C*16),buf(AP_C*16),buf(AP_C*16),buf(AP_C*4),buf(AP_C*4),buf(AP_C*4)];
   const group=d.createBindGroup({layout,entries:buffers.map((buffer,binding)=>({binding,resource:{buffer}}))});
-  apGPU={d,pipelines,params,particles,group,stage:d.createBuffer({size:AP_MAX*80,usage:GPUBufferUsage.MAP_READ|GPUBufferUsage.COPY_DST})};
+  const reverse=buffers.slice();[reverse[5],reverse[6]]=[reverse[6],reverse[5]];
+  const alternate=d.createBindGroup({layout,entries:reverse.map((buffer,binding)=>({binding,resource:{buffer}}))});
+  apGPU={d,pipelines,params,particles,group,alternate,stage:d.createBuffer({size:AP_MAX*80,usage:GPUBufferUsage.MAP_READ|GPUBufferUsage.COPY_DST})};
  }catch(e){apGPUFault=String(e?.message||e);console.warn('GPU FLIP fallback',e);}finally{apGPUStarting=false;}
 }
 function dispatchAPGPU(g,dt,t){
@@ -2990,8 +2998,8 @@ function dispatchAPGPU(g,dt,t){
  try{
   const enc=d.createCommandEncoder(),steps=Math.max(1,Math.ceil(dt/.035));
   new Float32Array(u)[1]=dt/steps;d.queue.writeBuffer(f.params,0,u);
-  const pass=(name,groups)=>{const p=enc.beginComputePass();p.setPipeline(f.pipelines[name]);p.setBindGroup(0,f.group);p.dispatchWorkgroups(groups);p.end();};
-  for(let n=0;n<steps;n++){pass('clear',64);pass('deposit',Math.ceil(count/64));pass('normalizeGrid',64);pass('divergence',64);for(let i=0;i<(simTier===2?8:12);i++){pass('jacobi',64);pass('copyPressure',64);}pass('project',64);pass('transfer',Math.ceil(count/64));}
+  const pass=(name,groups,group=f.group)=>{const p=enc.beginComputePass();p.setPipeline(f.pipelines[name]);p.setBindGroup(0,group);p.dispatchWorkgroups(groups);p.end();};
+  for(let n=0;n<steps;n++){pass('clear',64);pass('deposit',Math.ceil(count/64));pass('normalizeGrid',64);pass('divergence',64);for(let i=0;i<(simTier===2?8:12);i++)pass('jacobi',64,i%2?f.alternate:f.group);pass('project',64);pass('transfer',Math.ceil(count/64));}
   enc.copyBufferToBuffer(f.particles,0,f.stage,0,count*80);apGPUPending=true;d.queue.submit([enc.finish()]);
   const validation=d.popErrorScope();scoped=false;
   Promise.allSettled([validation,f.stage.mapAsync(GPUMapMode.READ)]).then(results=>{
@@ -3008,7 +3016,7 @@ function dispatchAPGPU(g,dt,t){
 let liquidFoamMesh=null,liquidFoamLast=-100;
 function updateLiquidFoam(t){
  if(!foamFieldReady||breakingMode!=='advanced'||foamStrength<.01){if(liquidFoamMesh)liquidFoamMesh.visible=false;return;}
- if(!liquidFoamMesh){liquidFoamMesh=new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1,1),new THREE.MeshStandardMaterial({color:0xffffff,roughness:.72,metalness:0}),300);liquidFoamMesh.frustumCulled=false;liquidFoamMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);scene.add(liquidFoamMesh);}
+ if(!liquidFoamMesh){liquidFoamMesh=new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1,0),new THREE.MeshStandardMaterial({color:0xffffff,roughness:.72,metalness:0}),300);liquidFoamMesh.frustumCulled=false;liquidFoamMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);scene.add(liquidFoamMesh);}
  const obj=new THREE.Object3D(),col=new THREE.Color();let count=0,budget=simTier===2?90:simTier===1?160:260;
  // Render actual lit, irregular bubble clusters only in young dense foam.
  for(let i=0;i<breakingFoam.length&&count<budget;i++){const p=breakingFoam[i],life=Math.max(0,1-p.age/p.life),d=foamLayer(p.x,p.z,0,breakerFilm);if(d<.055||life<.12)continue;

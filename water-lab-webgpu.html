@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 27.6.1 stable waterline and flotation</title>
+<title>Rift Water Lab · WebGPU 27.6.1.1 initialization repair</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.6.1</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.6.1.1</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.6.1 · stable hull coupling</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.6.1.1 · stable hull coupling</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -4564,11 +4564,11 @@ function stepBoat(dt,t){
    const ox=boatProbeOffset.x,oy=boatProbeOffset.y,oz=boatProbeOffset.z;
    const x=boat.position.x+ox,z=boat.position.z+oz,y=boat.position.y+oy;
    // Sample just outside the solid hull, not inside the numerical wake cavity.
-   const side=p[0]<0?-1:p[0]>0?1:0;
+   const probeSide=p[0]<0?-1:p[0]>0?1:0;
    const beam=hullHalfBeam(p[2])+.30;
    const left=oceanHeight(boat.position.x+Math.cos(boatHeading)*beam+ox-(Math.cos(boatHeading)*p[0]),boat.position.z-Math.sin(boatHeading)*beam+oz+Math.sin(boatHeading)*p[0],t+k*h);
    const right=oceanHeight(boat.position.x-Math.cos(boatHeading)*beam+ox-Math.cos(boatHeading)*p[0],boat.position.z+Math.sin(boatHeading)*beam+oz+Math.sin(boatHeading)*p[0],t+k*h);
-   const exterior=side>0?left:side<0?right:(left+right)*.5;
+   const exterior=probeSide>0?left:probeSide<0?right:(left+right)*.5;
    const surface=exterior,depth=surface-y;
    exteriorSum+=exterior*p[3];exteriorWeight+=p[3];
    if(!Number.isFinite(depth)||depth<=0)continue;

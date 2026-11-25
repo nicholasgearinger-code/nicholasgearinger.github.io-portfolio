@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 27.7.1 WebGPU hull FLIP APIC</title>
+<title>Rift Water Lab · WebGPU 27.7.2 GPU hull density and volumetric surface</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.7.1</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.7.2</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.7.1 · GPU hull fluid</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.7.2 · volumetric hull liquid</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -2196,7 +2196,9 @@ function updateHullWetness(dt){
  hullWetMesh.material.roughness=.74-.30*average/hullWetValues.length;
 }
 function updateHullSheet(t){
+ updateHullVolumeVisibility(t);
  hullSheetCells=0;hullSheetTears=0;
+ if(hullVolumeMesh?.visible&&hullVolumeTriangles>24){if(hullSheet)hullSheet.visible=false;return;}
  if(!hullSheetEnabled||!hullRunupEnabled||!hullSplashEnabled||!boat||breakingMode!=='advanced'||foamStrength<.01||hullRunupPeak<.025){
   if(hullSheet)hullSheet.visible=false;return;
  }
@@ -4128,7 +4130,102 @@ function updateReconstruction(g,t){
 const hullAPEnabled=!new URLSearchParams(location.search).has('noHullAP');
 let hullAP=null,hullAPClock=0,hullAPFault='',hullAPReturns=0,hullAPStats={after:0},hullAPContacts=0;
 const hullAPFlow={};
+
+const hullVolumeEnabled=!new URLSearchParams(location.search).has('noHullVolume');
+let hullDensityGPU=null,hullDensityStarting=false,hullDensityFault='',hullDensityFrames=0;
+let hullVolumeMesh=null,hullVolumeTriangles=0,hullVolumeLast=-100,hullVolumeFault='',hullVolumeFrame=null;
+const HULL_VOLUME_MAX=9000,hullDensityField=new Float32Array(RC_SIZE);
+async function initHullDensity(){
+ if(!hullVolumeEnabled||hullDensityGPU||hullDensityStarting||hullDensityFault||!hullGPU||new URLSearchParams(location.search).has('cpuHullDensity'))return;
+ hullDensityStarting=true;const allocated=[];
+ try{
+  const owner=hullGPU,d=owner.d;
+  const source=rcGPUCode.replace('if(min(min(p.x,p.z),min(5.6-p.x,5.6-p.z))<.75){return;}','if(min(min(p.x,p.z),min(5.6-p.x,5.6-p.z))<.10){return;}');
+  const m=d.createShaderModule({code:source}),info=await m.getCompilationInfo();
+  const errors=info.messages.filter(x=>x.type==='error');if(errors.length)throw Error(errors.map(x=>x.message).join('; '));
+  const layout=d.createBindGroupLayout({entries:[{binding:0,visibility:GPUShaderStage.COMPUTE,buffer:{type:'uniform'}},...['read-only-storage','read-only-storage','storage'].map((type,i)=>({binding:i+1,visibility:GPUShaderStage.COMPUTE,buffer:{type}}))]});
+  const pl=d.createPipelineLayout({bindGroupLayouts:[layout]});
+  const clear=await d.createComputePipelineAsync({layout:pl,compute:{module:m,entryPoint:'clear'}}),splat=await d.createComputePipelineAsync({layout:pl,compute:{module:m,entryPoint:'splat'}});
+  if(hullGPU!==owner)return;
+  const alloc=(size,usage)=>{const b=d.createBuffer({size,usage});allocated.push(b);return b;};
+  const params=alloc(16,GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST),tags=alloc(240*4,GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST),density=alloc(RC_SIZE*4,GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC),stage=alloc(RC_SIZE*4,GPUBufferUsage.MAP_READ|GPUBufferUsage.COPY_DST);
+  const group=d.createBindGroup({layout,entries:[params,owner.particles,tags,density].map((buffer,binding)=>({binding,resource:{buffer}}))});
+  hullDensityGPU={owner,d,clear,splat,params,tags,density,stage,group,pending:false,allocated};
+ }catch(e){for(const b of allocated)b.destroy();hullDensityFault=String(e?.message||e);console.warn('Hull density fallback',e);}finally{hullDensityStarting=false;}
+}
+function encodeHullDensity(enc,g,t){
+ const f=hullDensityGPU;if(!hullVolumeEnabled||!f||f.owner!==hullGPU||f.pending||t-hullVolumeLast<(simTier===2?.27:.18))return null;
+ const count=g.particles.length,u=new ArrayBuffer(16);new Uint32Array(u)[0]=count;new Float32Array(u)[1]=simTier===2?.46:.40;
+ f.d.queue.writeBuffer(f.params,0,u);f.d.queue.writeBuffer(f.tags,0,new Uint32Array(count).fill(1));
+ for(const [pipeline,n] of [[f.clear,Math.ceil(RC_SIZE/64)],[f.splat,Math.ceil(count/64)]]){const p=enc.beginComputePass();p.setPipeline(pipeline);p.setBindGroup(0,f.group);p.dispatchWorkgroups(n);p.end();}
+ enc.copyBufferToBuffer(f.density,0,f.stage,0,RC_SIZE*4);
+ return f;
+}
+async function readHullDensity(f,g){
+ if(!f)return null;f.pending=true;
+ try{await f.stage.mapAsync(GPUMapMode.READ);const data=Float32Array.from(new Uint32Array(f.stage.getMappedRange()),v=>v/65536);f.stage.unmap();if(hullAP!==g)return null;hullDensityFrames++;return data;}
+ catch(e){hullDensityFault=String(e?.message||e);hullDensityGPU=null;for(const b of f.allocated)b.destroy();return null;}finally{f.pending=false;}
+}
+function hideHullVolume(){hullVolumeTriangles=0;hullVolumeFrame=null;if(hullVolumeMesh)hullVolumeMesh.visible=false;}
+function createHullVolume(){
+ const geo=new THREE.BufferGeometry();
+ for(const name of ['position','normal','color'])geo.setAttribute(name,new THREE.BufferAttribute(new Float32Array(HULL_VOLUME_MAX*3),3).setUsage(THREE.DynamicDrawUsage));
+ geo.setDrawRange(0,0);
+ const mat=new THREE.MeshPhysicalMaterial({color:0xffffff,vertexColors:true,ior:1.333,metalness:0,roughness:.13,transmission:0,transparent:true,opacity:.48,depthWrite:false,depthTest:true,side:THREE.DoubleSide,forceSinglePass:true});
+ hullVolumeMesh=new THREE.Mesh(geo,mat);hullVolumeMesh.frustumCulled=false;hullVolumeMesh.renderOrder=1;hullVolumeMesh.visible=false;scene.add(hullVolumeMesh);
+}
+function reconstructHullVolume(g,t,gpuField=null){
+ if(!hullVolumeEnabled||hullVolumeFault||!boat||g.particles.length<6){hideHullVolume();return;}
+ if(!gpuField&&t-hullVolumeLast<(simTier===2?.27:.18))return;
+ hullVolumeLast=t;
+ try{
+  const n=RC_N,h=RC_H,field=hullDensityField;
+  if(gpuField)field.set(gpuField);else{
+   field.fill(0);const radius=simTier===2?.46:.40,r2=radius*radius;
+   for(const p of g.particles)for(let z=Math.max(1,Math.floor((p.z-radius)/h));z<=Math.min(n-2,Math.ceil((p.z+radius)/h));z++)for(let y=Math.max(1,Math.floor((p.y-radius)/h));y<=Math.min(n-2,Math.ceil((p.y+radius)/h));y++)for(let x=Math.max(1,Math.floor((p.x-radius)/h));x<=Math.min(n-2,Math.ceil((p.x+radius)/h));x++){
+    const q=((x*h-p.x)**2+(y*h-p.y)**2+(z*h-p.z)**2)/r2;if(q<1)field[rcIndex(x,y,z)]+=(1-q)**2;
+   }
+  }
+  // Remove density in the solid hull and deep below the receiving sea.
+  const sea=new Float32Array(n*n);
+  for(let z=0;z<n;z++)for(let x=0;x<n;x++)sea[z*n+x]=oceanHeight(g.ox+x*h,g.oz+z*h,t)-g.oy;
+  for(let z=1;z<n-1;z++)for(let y=1;y<n-1;y++)for(let x=1;x<n-1;x++){
+   const k=rcIndex(x,y,z);if(field[k]===0)continue;
+   if(y*h<sea[z*n+x]-.22||hullAPSolid(g,x*h,y*h,z*h))field[k]=0;
+  }
+  const seaAt=(x,z)=>sea[Math.max(0,Math.min(n-1,Math.round(z/h)))*n+Math.max(0,Math.min(n-1,Math.round(x/h)))];
+  const iso=.78,bounds=rcKeepAttached(field,iso,seaAt,10);
+  if(!bounds){hideHullVolume();return;}
+  if(!hullVolumeMesh)createHullVolume();
+  const geo=hullVolumeMesh.geometry,pos=geo.attributes.position.array,normal=geo.attributes.normal.array,col=geo.attributes.color.array;
+  let count=0;
+  const densityAt=(x,y,z)=>field[rcIndex(Math.max(0,Math.min(n-1,x)),Math.max(0,Math.min(n-1,y)),Math.max(0,Math.min(n-1,z)))];
+  rcExtract(field,iso,(a,b,c)=>{
+   if(count+3>HULL_VOLUME_MAX)return;
+   // Keep the receiving ocean in charge of the lower interface.
+   if([a,b,c].every(p=>p[1]<seaAt(p[0],p[2])-.035))return;
+   const center=[(a[0]+b[0]+c[0])/3,(a[1]+b[1]+c[1])/3,(a[2]+b[2]+c[2])/3];
+   if(hullAPSolid(g,...center))return;
+   for(const p of [a,b,c]){
+    const i=count++*3,x=Math.round(p[0]/h),y=Math.round(p[1]/h),z=Math.round(p[2]/h);
+    const nx=densityAt(x-1,y,z)-densityAt(x+1,y,z),ny=densityAt(x,y-1,z)-densityAt(x,y+1,z),nz=densityAt(x,y,z-1)-densityAt(x,y,z+1),len=Math.hypot(nx,ny,nz);
+    pos[i]=g.ox+p[0];pos[i+1]=g.oy+p[1];pos[i+2]=g.oz+p[2];normal[i]=len>.001?nx/len:0;normal[i+1]=len>.001?ny/len:1;normal[i+2]=len>.001?nz/len:0;
+    const foam=Math.min(.32,Math.max(0,p[1]-seaAt(p[0],p[2]))*.35);
+    col[i]=.46+foam;col[i+1]=.76+foam*.45;col[i+2]=.81+foam*.4;
+   }
+  },bounds);
+  geo.setDrawRange(0,count);for(const key of ['position','normal','color'])geo.attributes[key].needsUpdate=true;
+  hullVolumeTriangles=count/3;hullVolumeMesh.visible=count>0;hullVolumeFrame={t,x:boat.position.x,y:boat.position.y,z:boat.position.z};
+ }catch(e){hullVolumeFault=String(e?.message||e);hideHullVolume();console.warn('Hull volume mesh fallback',e);}
+}
+function updateHullVolumeVisibility(t){
+ if(!hullVolumeMesh?.visible)return;
+ const f=hullVolumeFrame;
+ if(!f||!boat||breakingMode!=='advanced'||!hullAP||t-f.t>.30||Math.hypot(boat.position.x-f.x,boat.position.y-f.y,boat.position.z-f.z)>.45)hideHullVolume();
+}
+
 function clearHullAP(){
+ hideHullVolume();
  hullAP=null;hullAPClock=0;hullAPContacts=0;hullAPReturns=0;hullAPStats={after:0};
  for(const p of hullSplashProbes)p.fluidLift=0;
 }
@@ -4192,16 +4289,17 @@ function dispatchHullGPU(g,elapsed,t){
   const enc=d.createCommandEncoder();
   const pass=(name,groups,group=f.group)=>{const p=enc.beginComputePass();p.setPipeline(f.pipelines[name]);p.setBindGroup(0,group);p.dispatchWorkgroups(groups);p.end();};
   for(let n=0;n<steps;n++){pass('clear',64);pass('deposit',Math.ceil(count/64));pass('normalizeGrid',64);pass('divergence',64);for(let j=0;j<(simTier===2?6:8);j++)pass('jacobi',64,j%2?f.alternate:f.group);pass('project',64);pass('transfer',Math.ceil(count/64));}
+  const densityJob=encodeHullDensity(enc,g,t);
   enc.copyBufferToBuffer(f.particles,0,f.stage,0,count*80);d.queue.submit([enc.finish()]);hullGPUPending=true;
   const validation=d.popErrorScope();scoped=false;
-  Promise.allSettled([validation,f.stage.mapAsync(GPUMapMode.READ)]).then(results=>{
+  Promise.allSettled([validation,f.stage.mapAsync(GPUMapMode.READ),readHullDensity(densityJob,g)]).then(results=>{
    if(results[1].status==='rejected')throw results[1].reason;
    const output=new Float32Array(f.stage.getMappedRange()).slice(0,count*20);f.stage.unmap();
    if(results[0].status==='rejected')throw results[0].reason;if(results[0].value)throw results[0].value;
    if(hullAP!==g)return;
    if(!output.every(Number.isFinite))throw Error('Nonfinite hull GPU result');
    for(let i=0;i<count;i++){const p=g.particles[i],k=i*20;p.x=output[k];p.y=output[k+1];p.z=output[k+2];for(let j=0;j<3;j++){p.v[j]=output[k+4+j];p.c.set(output.subarray(k+8+j*4,k+11+j*4),j*3);}}
-   hullGPUFrames++;finishHullAP(g,elapsed,clockTime);
+   hullGPUFrames++;finishHullAP(g,elapsed,clockTime);reconstructHullVolume(g,clockTime,results[2].status==='fulfilled'?results[2].value:null);
   }).catch(e=>{hullGPUFault=String(e?.message||e);hullGPU=null;for(const b of f.allocated)b.destroy();console.warn('Hull GPU runtime fallback',e);}).finally(()=>{hullGPUPending=false;});
   return true;
  }catch(e){if(scoped)d.popErrorScope().catch(()=>{});hullGPUFault=String(e?.message||e);hullGPU=null;hullGPUPending=false;for(const b of f.allocated)b.destroy();return false;}
@@ -4244,6 +4342,7 @@ function finishHullAP(g,elapsed,t){
 function updateHullAP(dt,t){
  if(!hullAPEnabled||hullAPFault||!boat||breakingMode!=='advanced'||!hullRunupEnabled||!hullSplashEnabled){if(hullAP)clearHullAP();return;}
  if(!hullGPU&&!hullGPUFault)initHullGPU();
+ if(hullGPU&&!hullDensityGPU&&!hullDensityFault)initHullDensity();
  hullAPClock+=dt;if(hullGPUPending){hullAPClock=Math.min(.15,hullAPClock);return;}
  const cadence=simTier===2?.14:simTier===1?.10:.075;
  if(hullAPClock<cadence)return;
@@ -4268,14 +4367,14 @@ function updateHullAP(dt,t){
     g.particles.push({x,y,z,v:[hullAPFlow.x+nx*.15,Math.min(2.4,.45+approach*.55+p.pool*1.2),hullAPFlow.z+nz*.15],c:new Float32Array(9),age:0,source:k});
    }
   }
-  if(!g.particles.length){for(const p of hullSplashProbes)p.fluidLift=(p.fluidLift||0)*.65;return;}
+  if(!g.particles.length){hideHullVolume();for(const p of hullSplashProbes)p.fluidLift=(p.fluidLift||0)*.65;return;}
   g.solid.fill(0);
   for(let k=0;k<AP_N;k++)for(let j=0;j<AP_N;j++)for(let i=0;i<AP_N;i++)if(hullAPSolid(g,(i+.5)*AP_H,(j+.5)*AP_H,(k+.5)*AP_H))g.solid[apCell(i,j,k)]=1;
   g.wallVelocity=(axis,i,j,k)=>hullAPWall(g,axis,(i+(axis===0?0:.5))*AP_H,(j+(axis===1?0:.5))*AP_H,(k+(axis===2?0:.5))*AP_H);
   if(hullGPU&&dispatchHullGPU(g,elapsed,t))return;
   const steps=Math.ceil(elapsed/.035);hullAPContacts=0;
   for(let k=0;k<steps;k++){hullAPStats=apStep(g,elapsed/steps,simTier===2?5:simTier===1?7:9);resolveHullAP(g);}
-  finishHullAP(g,elapsed,t);
+  finishHullAP(g,elapsed,t);reconstructHullVolume(g,t);
  }catch(e){hullAPFault=String(e?.message||e);clearHullAP();console.warn('Hull APIC fallback',e);}
 }
 
@@ -5745,7 +5844,7 @@ async function init3D(forceWebGL=false){
   const now=performance.now();
   if(now-last>1100){
    const measured=samples*1000/(now-last);
-   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · rock waves '+(owPeak*100).toFixed(1)+' cm · run-up '+(runupPeak*100).toFixed(0)+' cm / '+runupSpills+' spills · hull wall '+hullWaveCells+' / '+hullClipCount+' clipped · hull splashes '+hullSplashHits+' · hull run-up '+(hullRunupPeak*100).toFixed(0)+' cm / '+hullOvertops+' spills · sheet '+hullSheetCells+' cells / '+hullSheetTears+' tears · hull APIC '+(hullAPFault?'fallback':hullAP?(hullGPUFrames&&!hullGPUFault?'GPU ':'CPU ')+hullAP.particles.length+'p / '+hullAPContacts+' contacts / '+hullAPReturns+' returns':'idle')+' · rock eddies '+objectVortexCount+' · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?(apGPUFrames&&!apGPUFault?'GPU ':'CPU ')+apGrid.particles.length+'p '+(apGPUFrames&&!apGPUFault?apGPUFrames+' steps · mesh '+rcTriangles+' tris · '+(rcGPUFrames&&!rcGPUFault?'GPU density':'CPU density')+(rcThicknessEnabled?' · SS thickness':'')+(whitewaterVolumeEnabled?' · WW '+(wwGPUFrames&&!wwGPUFault?'GPU':'CPU'):''):apStats.after.toFixed(2)+' div'):'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
+   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · rock waves '+(owPeak*100).toFixed(1)+' cm · run-up '+(runupPeak*100).toFixed(0)+' cm / '+runupSpills+' spills · hull wall '+hullWaveCells+' / '+hullClipCount+' clipped · hull splashes '+hullSplashHits+' · hull run-up '+(hullRunupPeak*100).toFixed(0)+' cm / '+hullOvertops+' spills · sheet '+hullSheetCells+' cells / '+hullSheetTears+' tears · hull APIC '+(hullAPFault?'fallback':hullAP?(hullGPUFrames&&!hullGPUFault?'GPU ':'CPU ')+hullAP.particles.length+'p / '+hullAPContacts+' contacts / '+hullAPReturns+' returns':'idle')+' · hull volume '+hullVolumeTriangles+' tris / '+(hullDensityFrames&&!hullDensityFault?'GPU density':'CPU density')+' · rock eddies '+objectVortexCount+' · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?(apGPUFrames&&!apGPUFault?'GPU ':'CPU ')+apGrid.particles.length+'p '+(apGPUFrames&&!apGPUFault?apGPUFrames+' steps · mesh '+rcTriangles+' tris · '+(rcGPUFrames&&!rcGPUFault?'GPU density':'CPU density')+(rcThicknessEnabled?' · SS thickness':'')+(whitewaterVolumeEnabled?' · WW '+(wwGPUFrames&&!wwGPUFault?'GPU':'CPU'):''):apStats.after.toFixed(2)+' div'):'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
    $('fps').textContent='FPS: '+Math.round(measured);
    adjustSimulationBudget(measured,now);adjustAdaptivePerformance(measured,now);
    last=now;samples=0;

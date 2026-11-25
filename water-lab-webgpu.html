@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 27.1.2 localized organic whitewater</title>
+<title>Rift Water Lab · WebGPU 27.1.3 persistent aerated wake</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.1.2</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.1.3</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.1.2 · organic whitewater</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.1.3 · aerated wake</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -2645,7 +2645,7 @@ function advanceFoamDensity(dt,t){
     // Transport material coordinates with the density; do not scroll a texture in time.
     foamDriftNextX[p]=Math.max(-8,Math.min(8,(foamLayer(sx,sz,0,foamDriftX)+x-sx)*.995));
     foamDriftNextZ[p]=Math.max(-8,Math.min(8,(foamLayer(sx,sz,0,foamDriftZ)+z-sz)*.995));
-    const hit=waveAir*.85+boatAir*.22;
+    const hit=waveAir*.85+boatAir*.65;
     const stretch=vortexAir*.40+gpuAir*.12+boatAir*.32;
     breakerNext[p]=Math.max(0,Math.min(1,young*Math.exp(-step*1.6)+step*hit*(1-young)));
     shearNext[p]=Math.max(0,Math.min(1,shear*Math.exp(-step*.63)+step*(stretch+young*.42)*(1-shear)*(1-.5*vortexCore)));
@@ -2713,7 +2713,7 @@ function makeFoamDetailAlpha(){
   const a=cellMembrane(warpU,warpV),b=cellMembrane(warpU*3+5,warpV*3+7);
   const patch=.5+.24*Math.sin(3*x+2*z)+.16*Math.sin(5*z-4*x)+.1*Math.cos(9*x+7*z);
   const gate=Math.max(0,Math.min(1,(patch-.24)*2.4));
-  const value=Math.round(255*Math.min(1,gate*(.08+.26*a*a+.55*b*b+.32*Math.max(0,patch-.55)*3)));
+  const value=Math.round(255*Math.min(1,gate*(.14+.16*a*a+.40*b*b+.50*Math.max(0,patch-.46)*2.8)));
   const k=(j*n+i)*4;data[k]=data[k+1]=data[k+2]=value;data[k+3]=255;
  }
  const tex=new THREE.DataTexture(data,n,n,THREE.RGBAFormat);
@@ -2797,7 +2797,7 @@ function updateFoamSkin(t){
    const shadow=1-Math.min(.28,column*.12+Math.max(0,upstream-d)*.28);
    const coverage=Math.max(0,Math.min(1,(d*foamStrength-.22)/.48));
    const active=Math.max(0,Math.min(1,(young+.55*shear+.30*d-.13)/.30));
-   const alpha=Math.min(.92,foamStrength*(young*.96+shear*.34+coverage*.38)*active*fade);
+   const alpha=Math.min(.88,foamStrength*(young*1.12+shear*.40+coverage*.44)*active*fade);
    const sunVisibility=shadowReady?shadowSample(shadowField,x,z,1):1;
    const bright=Math.min(1,(.84+.14*scatter+.08*young)*shadow*(1-Math.min(.32,(1-sunVisibility)*waveShadowStrength*.6)));
    data[k]=Math.round(255*bright);data[k+1]=Math.round(255*Math.min(1,bright+.025));data[k+2]=Math.round(255*Math.min(1,bright+.035));data[k+3]=Math.round(255*alpha);
@@ -3019,21 +3019,56 @@ function dispatchAPGPU(g,dt,t){
   return true;
  }catch(e){if(scoped)d.popErrorScope().catch(()=>{});apGPUFault=String(e?.message||e);apGPU=null;apGPUPending=false;return false;}
 }
-let liquidFoamMesh=null,liquidFoamLast=-100;
+// Persistent aerated parcels: separate from the optical film, with
+// individual births, fluid advection, expansion and bubble drainage.
+let liquidFoamMesh=null,liquidFoamLast=-100,parcelClock=0,parcelSeed=0;
+const foamParcels=[],parcelFlow={},parcelVortex={};
+let parcelObject=null,parcelColor=null;
+function spawnFoamParcel(x,z,strength,vx=0,vz=0){
+ const budget=simTier===2?110:simTier===1?180:280;
+ if(foamParcels.length>=budget||strength<.04)return;
+ const seed=++parcelSeed,q=bubbleHash(seed+5);
+ foamParcels.push({x,z,vx,vz,age:0,life:1.2+2.1*q,strength:Math.min(1,strength),seed,r:.045+.10*bubbleHash(seed+17),surface:NaN,surfaceAt:-100});
+}
 function updateLiquidFoam(t){
- if(!foamFieldReady||breakingMode!=='advanced'||foamStrength<.01){if(liquidFoamMesh)liquidFoamMesh.visible=false;return;}
- if(!liquidFoamMesh){liquidFoamMesh=new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1,0),new THREE.MeshStandardMaterial({color:0xffffff,roughness:.72,metalness:0}),300);liquidFoamMesh.frustumCulled=false;liquidFoamMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);scene.add(liquidFoamMesh);}
- const obj=new THREE.Object3D(),col=new THREE.Color();let count=0,budget=simTier===2?90:simTier===1?160:260;
- // Render actual lit, irregular bubble clusters only in young dense foam.
- for(let i=0;i<breakingFoam.length&&count<budget;i++){const p=breakingFoam[i],life=Math.max(0,1-p.age/p.life),d=foamLayer(p.x,p.z,0,breakerFilm);if(d<.055||life<.12)continue;
-  const base=oceanHeight(p.x,p.z,t);for(let j=0;j<4&&count<budget;j++){
-   const seed=p.seed+j*31,angle=seed*2.39996323,r=.06+.16*bubbleHash(seed+8),size=(.045+.10*bubbleHash(seed+19))*Math.min(1,Math.sqrt(d)*2)*life;
-   obj.position.set(p.x+Math.cos(angle)*r,base+size*.28,p.z+Math.sin(angle)*r);obj.scale.set(size*1.3,size*.68,size);obj.rotation.y=angle;obj.updateMatrix();liquidFoamMesh.setMatrixAt(count,obj.matrix);col.setRGB(.65+.20*life,.81+.14*life,.84+.15*life);liquidFoamMesh.setColorAt(count++,col);
+ if(!foamFieldReady||breakingMode!=='advanced'||foamStrength<.01){foamParcels.length=0;liquidFoamLast=-100;if(liquidFoamMesh)liquidFoamMesh.visible=false;return;}
+ if(!liquidFoamMesh){liquidFoamMesh=new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1,1),new THREE.MeshStandardMaterial({color:0xffffff,roughness:.80,metalness:0}),300);liquidFoamMesh.frustumCulled=false;liquidFoamMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);scene.add(liquidFoamMesh);parcelObject=new THREE.Object3D();parcelColor=new THREE.Color();}
+ const dt=liquidFoamLast<0?0:Math.min(.05,Math.max(0,t-liquidFoamLast));liquidFoamLast=t;
+ parcelClock+=dt;
+ if(parcelClock>=.065){
+  parcelClock=0;
+  const speed=Math.abs(boatSpeed),power=Math.min(1,speed/4)*wakeAmount*hullContact*foamStrength;
+  if(power>.08){
+   const fx=-Math.sin(boatHeading),fz=-Math.cos(boatHeading);
+   for(let j=0;j<4;j++){
+    const seed=parcelSeed+j+1,side=(j%2?1:-1),offset=.2+bubbleHash(seed+71)*.75;
+    const back=1.8+bubbleHash(seed+13)*.85;
+    spawnFoamParcel(boat.position.x-fx*back+fz*side*offset,boat.position.z-fz*back-fx*side*offset,power,-fx*.22+fz*side*.24,-fz*.22-fx*side*.24);
+   }
   }
+  for(let i=0;i<Math.min(3,breakingFoam.length);i++){
+   const p=breakingFoam[(parcelSeed+i*7)%breakingFoam.length];
+   if(p.age>.55||p.strength<.32)continue;
+   spawnFoamParcel(p.x,p.z,p.strength*foamStrength,p.vx,p.vz);
+  }
+ }
+ const obj=parcelObject,col=parcelColor;let count=0;
+ for(let i=foamParcels.length-1;i>=0;i--){
+  const p=foamParcels[i];p.age+=dt;
+  if(p.age>=p.life||Math.hypot(p.x-boat.position.x,p.z-boat.position.z)>14){foamParcels.splice(i,1);continue;}
+  sharedFoamFlow(p.x,p.z,t,parcelFlow);evaluateVortices(p.x,p.z,parcelVortex);
+  const blend=1-Math.exp(-dt*2.8);
+  p.vx+=(parcelFlow.x+parcelVortex.x*.4-p.vx)*blend;p.vz+=(parcelFlow.z+parcelVortex.z*.4-p.vz)*blend;
+  p.x+=p.vx*dt;p.z+=p.vz*dt;
+  if(!Number.isFinite(p.surface)||t-p.surfaceAt>.045){p.surface=oceanHeight(p.x,p.z,t);p.surfaceAt=t;}
+  const life=Math.max(0,1-p.age/p.life),birth=Math.min(1,p.age*12+.1);
+  const size=p.r*(.65+.65*Math.min(1,p.age))*Math.sqrt(life*birth*p.strength);
+  if(size<.012)continue;
+  obj.position.set(p.x,p.surface+size*.22,p.z);obj.scale.set(size*1.45,size*.7,size);obj.rotation.y=Math.atan2(p.vx,p.vz);obj.updateMatrix();liquidFoamMesh.setMatrixAt(count,obj.matrix);
+  const shade=.78+.18*life;col.setRGB(shade,Math.min(1,shade+.05),Math.min(1,shade+.07));liquidFoamMesh.setColorAt(count++,col);
  }
  liquidFoamMesh.count=count;liquidFoamMesh.visible=count>0;liquidFoamMesh.instanceMatrix.needsUpdate=true;if(liquidFoamMesh.instanceColor)liquidFoamMesh.instanceColor.needsUpdate=true;
 }
-
 function clearAP(){apGrid=null;apOwner=null;apClock=0;if(apMesh)apMesh.visible=false;}
 function startAP(p,t){
  const g=makeAPGrid(),span=AP_N*AP_H,base=oceanHeight(p.x,p.z,t);
@@ -3058,11 +3093,12 @@ function processAPImpacts(g,t){
   let impacts=0;
   for(const p of g.particles){
    const x=p.x+g.ox,y=p.y+g.oy,z=p.z+g.oz;
-   const gap=y-(g.oy+2.1),previous=p.surfaceGap;p.surfaceGap=gap;
+   const reference=g.oy+2.1;
+   const gap=y-reference,previous=p.surfaceGap;p.surfaceGap=gap;
    if(Number.isFinite(previous)&&previous>0&&gap<=0&&p.v[1]<-.8&&impacts<8){
     const energy=Math.min(.55,-p.v[1]*.085);
     if(sprayImpacts.length<128)sprayImpacts.push({x,z,energy});
-    emitWhitewater(x,z,t,energy,p.v[0],p.v[2]);impacts++;
+    emitWhitewater(x,z,t,energy,p.v[0],p.v[2]);spawnFoamParcel(x,z,Math.min(1,energy*2),p.v[0]*.3,p.v[2]*.3);impacts++;
    }
   }
 }
@@ -3451,7 +3487,7 @@ function resetBoat(){
  boat.rotation.set(0,0,0);vy=0;pitchV=0;rollV=0;
  boatHeading=0;boatSpeed=0;rudder=0;driveMode='stop';totalTravel=0;previousBoatHeading=0;turnVelocity=0;wakeSolver?.clear();wakeTrail=[];trailElapsed=0;kelvinPackets.length=0;kelvinClock=kelvinPeak=0;kwReady=false;shadowReady=false;entryEvents.length=0;entryAirQueue.length=0;entryCooldown=entryCount=entryEnergy=entryImpulse=0;
  hullSlipX=hullSlipZ=hullFluidLoad=hullYawRate=hullWet=hullSlamming=hullContact=0;hullPressureX=hullPressureY=hullPressureZ=hullPressureLoad=hullBoundaryCells=0;vortexFilaments.length=0;clearFreeSurface();fluid3Epoch++;fluid3Frames=0;fluid3State='awaiting fresh field';if(fluid3){fluid3.cpu=null;fluid3.started=false;fluid3.d.queue.writeBuffer(fluid3.v[0],0,new Float32Array(F3C*4));}
- foamFieldReady=false;flowReady=false;foamVortices.length=0;vortexShed=0;vortexWaveShed=0;clearPlunges();clearAP();clearFoamFilms();foamDensity.fill(0);foamNext.fill(0);entrainedAir.fill(0);airNext.fill(0);breakingFoam.length=0;foamBubbles.length=0;foamBubbleSpawn=0;whitewaterSpray.length=0;sprayImpacts.length=0;cloudSamples=[];cloudTime=-100;
+ foamFieldReady=false;flowReady=false;foamVortices.length=0;vortexShed=0;vortexWaveShed=0;clearPlunges();clearAP();foamParcels.length=0;liquidFoamLast=-100;parcelClock=0;clearFoamFilms();foamDensity.fill(0);foamNext.fill(0);entrainedAir.fill(0);airNext.fill(0);breakingFoam.length=0;foamBubbles.length=0;foamBubbleSpawn=0;whitewaterSpray.length=0;sprayImpacts.length=0;cloudSamples=[];cloudTime=-100;
  if($('forward')){setDriveMode('stop');}
 }
 function makeBoat(){

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 26.2 coupled aeration physics and green-blue ocean</title>
+<title>Rift Water Lab · WebGPU 26.3 GPU-driven free-surface response</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.2</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.3</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.2 · coupled water-air physics</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.3 · fluid surface deformation</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -1503,6 +1503,11 @@ function waveField(x,z,t,out=waveState){
  if(breakingMode==='advanced'&&foamVortices.length){
   const v=evaluateVortices(x,z,vortexScratch);elevation+=v.height;slopeX+=v.sx;slopeZ+=v.sz;
  }
+ if(!fsBuilding&&fsReady&&breakingMode==='advanced'){
+  const f=sampleFreeSurface(x,z);
+  elevation+=f.height;slopeX+=f.sx;slopeZ+=f.sz;
+  steepness+=Math.abs(f.sx)+Math.abs(f.sz);
+ }
  out.height=elevation;out.dx=dx;out.dz=dz;out.slopeX=slopeX;out.slopeZ=slopeZ;
  out.crest=crest;out.steepness=steepness;
  return out;
@@ -2034,6 +2039,75 @@ function sampleFluid3(x,y,z,out){
  }return true;
 }
 
+// Local free-surface perturbation driven by the volumetric velocity field.
+// Height/vertical speed evolve on a world-anchored, damped gravity-wave grid.
+// The underlying FFT swell is retained; only the local perturbation is solved.
+const FS_N=33,FS_H=.5,FS_SIZE=FS_N*FS_N;
+let fsHeight=new Float32Array(FS_SIZE),fsSpeed=new Float32Array(FS_SIZE),
+ fsNextHeight=new Float32Array(FS_SIZE),fsNextSpeed=new Float32Array(FS_SIZE);
+const fsBase=new Float32Array(FS_SIZE),fsForce=new Float32Array(FS_SIZE);
+let fsOX=0,fsOZ=0,fsReady=false,fsBuilding=false,fsPeak=0;
+const fsWave={},fsVelocity={},fsSample={height:0,sx:0,sz:0};
+function fsRead(a,x,z){
+ const u=(x-fsOX)/FS_H,v=(z-fsOZ)/FS_H;
+ if(!fsReady||u<0||v<0||u>=FS_N-1||v>=FS_N-1)return 0;
+ const i=Math.floor(u),j=Math.floor(v),f=u-i,g=v-j,k=j*FS_N+i;
+ return (a[k]*(1-f)+a[k+1]*f)*(1-g)+(a[k+FS_N]*(1-f)+a[k+FS_N+1]*f)*g;
+}
+function sampleFreeSurface(x,z,out=fsSample){
+ out.height=out.sx=out.sz=0;
+ if(!fsReady||fsBuilding||breakingMode!=='advanced')return out;
+ const u=(x-fsOX)/FS_H,v=(z-fsOZ)/FS_H;
+ if(u<0||v<0||u>=FS_N-1||v>=FS_N-1)return out;
+ const i=Math.floor(u),j=Math.floor(v),a=u-i,b=v-j,k=j*FS_N+i;
+ const h00=fsHeight[k],h10=fsHeight[k+1],h01=fsHeight[k+FS_N],h11=fsHeight[k+FS_N+1];
+ out.height=(h00*(1-a)+h10*a)*(1-b)+(h01*(1-a)+h11*a)*b;
+ out.sx=((h10-h00)*(1-b)+(h11-h01)*b)/FS_H;
+ out.sz=((h01-h00)*(1-a)+(h11-h10)*a)/FS_H;
+ return out;
+}
+function clearFreeSurface(){fsReady=false;fsPeak=0;fsHeight.fill(0);fsSpeed.fill(0);fsNextHeight.fill(0);fsNextSpeed.fill(0);}
+function advanceFreeSurface(dt,t){
+ if(!boat||breakingMode!=='advanced'||!fluid3?.cpu){if(fsReady)clearFreeSurface();return;}
+ const ox=Math.floor(boat.position.x/FS_H)*FS_H-8,oz=Math.floor(boat.position.z/FS_H)*FS_H-8;
+ // Reproject before moving the grid so disturbances stay world anchored.
+ if(!fsReady||ox!==fsOX||oz!==fsOZ){
+  for(let j=0;j<FS_N;j++)for(let i=0;i<FS_N;i++){
+   const k=j*FS_N+i,x=ox+i*FS_H,z=oz+j*FS_H;
+   fsNextHeight[k]=fsRead(fsHeight,x,z);fsNextSpeed[k]=fsRead(fsSpeed,x,z);
+  }
+  let a=fsHeight;fsHeight=fsNextHeight;fsNextHeight=a;a=fsSpeed;fsSpeed=fsNextSpeed;fsNextSpeed=a;
+  fsOX=ox;fsOZ=oz;fsReady=true;
+ }
+ // Build forcing at the actual moving ocean surface, not fixed sea level.
+ // No recursion: waveField skips this perturbation while sampling the swell.
+ fsBuilding=true;
+ try{
+  for(let j=0;j<FS_N;j++)for(let i=0;i<FS_N;i++){
+   const k=j*FS_N+i,x=ox+i*FS_H,z=oz+j*FS_H;
+   const w=waveField(x,z,t,fsWave);fsBase[k]=w.height;
+   const ok=sampleFluid3(x,w.height-.22,z,fsVelocity);
+   const normal=ok?fsVelocity.y-fsVelocity.x*w.slopeX-fsVelocity.z*w.slopeZ:0;
+   const edge=Math.min(i,j,FS_N-1-i,FS_N-1-j),a=Math.min(1,edge/5),fade=a*a*(3-2*a);
+   // Kinematic normal velocity plus a bounded rotational pressure proxy.
+   const depression=ok?Math.min(.10,.012*fsVelocity.curl*fsVelocity.curl):0;
+   fsForce[k]=fade*(Math.max(-1.5,Math.min(1.5,normal))*1.9-depression*5);
+  }
+ }finally{fsBuilding=false;}
+ const steps=Math.max(1,Math.ceil(dt/.025)),h=dt/steps,c2=3.2,inv=1/(FS_H*FS_H);
+ for(let n=0;n<steps;n++){
+  fsNextHeight.fill(0);fsNextSpeed.fill(0);let peak=0;
+  for(let j=1;j<FS_N-1;j++)for(let i=1;i<FS_N-1;i++){
+   const k=j*FS_N+i,old=fsHeight[k];
+   const lap=(fsHeight[k-1]+fsHeight[k+1]+fsHeight[k-FS_N]+fsHeight[k+FS_N]-4*old)*inv;
+   const edge=Math.min(i,j,FS_N-1-i,FS_N-1-j),a=Math.min(1,edge/5),fade=a*a*(3-2*a);
+   const speed=Math.max(-1.5,Math.min(1.5,fsSpeed[k]+h*(c2*lap-4.2*old+fsForce[k]-(1.7+5*(1-fade))*fsSpeed[k])));
+   const elevation=Math.max(-.28,Math.min(.28,old+h*speed))*Math.pow(fade,h*4);
+   fsNextHeight[k]=elevation;fsNextSpeed[k]=speed;peak=Math.max(peak,Math.abs(elevation));
+  }
+  let a=fsHeight;fsHeight=fsNextHeight;fsNextHeight=a;a=fsSpeed;fsSpeed=fsNextSpeed;fsNextSpeed=a;fsPeak=peak;
+ }
+}
 function sharedFoamFlow(x,z,t,out){
  if(flowReady){out.x=flowSample(flowU,x,z);out.z=flowSample(flowV,x,z);}
  else{breakerCurl(x,z,t,out);out.x*=.5;out.z*=.5;}
@@ -2385,7 +2459,7 @@ function advanceBreakingFoam(dt,t){
 }
 function updateWhitewater(t){
  if(!foamMesh||!boat)return;
- if(breakingMode==='advanced'&&!foamDebug){foamMesh.geometry.setDrawRange(0,0);$('foamStatus').textContent=fluid3Diagnostic()+' · vortices '+foamVortices.length+' · enstrophy '+fluid3Enstrophy.toFixed(3)+' · vertical '+fluid3Vertical.toFixed(2)+' m/s';return;}
+ if(breakingMode==='advanced'&&!foamDebug){foamMesh.geometry.setDrawRange(0,0);$('foamStatus').textContent=fluid3Diagnostic()+' · vortices '+foamVortices.length+' · enstrophy '+fluid3Enstrophy.toFixed(3)+' · vertical '+fluid3Vertical.toFixed(2)+' m/s · surface '+(fsPeak*100).toFixed(1)+' cm';return;}
  if((foamStrength<.01||wakeAmount<.01)&&!foamDebug&&breakingFoam.length===0){
   foamMesh.geometry.setDrawRange(0,0);
   foamPatchCount=0;$('foamStatus').textContent='Foam: 0 patches';return;
@@ -2621,7 +2695,7 @@ function resetBoat(){
  boat.position.set(-3.2,.6,-13);
  boat.rotation.set(0,0,0);vy=0;pitchV=0;rollV=0;
  boatHeading=0;boatSpeed=0;rudder=0;driveMode='stop';totalTravel=0;previousBoatHeading=0;turnVelocity=0;wakeSolver?.clear();wakeTrail=[];trailElapsed=0;
- fluid3Epoch++;fluid3Frames=0;fluid3State='awaiting fresh field';if(fluid3){fluid3.cpu=null;fluid3.started=false;fluid3.d.queue.writeBuffer(fluid3.v[0],0,new Float32Array(F3C*4));}
+ clearFreeSurface();fluid3Epoch++;fluid3Frames=0;fluid3State='awaiting fresh field';if(fluid3){fluid3.cpu=null;fluid3.started=false;fluid3.d.queue.writeBuffer(fluid3.v[0],0,new Float32Array(F3C*4));}
  foamFieldReady=false;flowReady=false;foamVortices.length=0;vortexShed=0;vortexWaveShed=0;foamDensity.fill(0);foamNext.fill(0);entrainedAir.fill(0);airNext.fill(0);breakingFoam.length=0;foamBubbles.length=0;foamBubbleSpawn=0;whitewaterSpray.length=0;sprayImpacts.length=0;cloudSamples=[];cloudTime=-100;
  if($('forward')){setDriveMode('stop');}
 }
@@ -3408,6 +3482,7 @@ async function init3D(forceWebGL=false){
    trackWake(dt);
    advanceBreakingFoam(dt,time);
    stepFluid3(dt,time);
+   advanceFreeSurface(dt,time);
    advanceFoamDensity(dt,time);
    try{updateWhitewaterSpray(dt,time);}catch(error){if(sprayBatches)for(const b of sprayBatches)b.visible=false;console.error('Spray update',error);}
    updateThicknessMap();
@@ -3495,7 +3570,7 @@ async function init3D(forceWebGL=false){
   const now=performance.now();
   if(now-last>1100){
    const measured=samples*1000/(now-last);
-   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · eddies '+foamVortices.length:'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
+   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm':'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
    $('fps').textContent='FPS: '+Math.round(measured);
    adjustAdaptivePerformance(measured,now);
    last=now;samples=0;

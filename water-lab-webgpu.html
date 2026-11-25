@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 27.4 layered volumetric whitewater</title>
+<title>Rift Water Lab · WebGPU 27.4.1 GPU whitewater optical integration</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.4</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.4.1</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.4 · volumetric whitewater</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.4.1 · GPU whitewater</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -2864,13 +2864,13 @@ function makeFoamMicroNormal(){
 // Beer-Lambert extinction and a bounded diffuse multiple-scatter term.
 const whitewaterVolumeEnabled=!new URLSearchParams(location.search).has('flatFoam');
 function integrateWhitewater(layers,film,cosine,sunVisibility,strength,out){
- const mu=Math.max(.32,Math.min(1,Math.abs(cosine)));
+ const mu=Math.max(.45,Math.min(1,Math.abs(cosine)));
  const illumination=Math.max(0,Math.min(1,sunVisibility));
  let trans=1,sunTrans=1,red=0,green=0,blue=0,tau=0;
  for(let k=0;k<6;k++){
-  const gas=Math.max(0,Math.min(.85,layers[k]||0));
+  const gas=Math.max(0,Math.min(.85,((layers[k]||0)-.055)*1.15));
   const depth=(k+.5)*.30;
-  const extinction=(gas*4.8+(k===0?Math.max(0,film)*2.5:0))*.30*Math.max(0,strength);
+  const extinction=(gas*3.8+(k===0?Math.max(0,film)*1.5:0))*.30*Math.max(0,strength);
   const slice=1-Math.exp(-extinction/mu);
   const scatterAlbedo=.94;
   // Direct illumination is attenuated inside the bubble column.
@@ -2885,7 +2885,66 @@ function integrateWhitewater(layers,film,cosine,sunVisibility,strength,out){
  return out;
 }
 const whitewaterLayers=new Float32Array(6),whitewaterResult={};
+
+const wwGPUCode="struct Config {cosine:f32, strength:f32, pad0:f32,pad1:f32}\n@group(0) @binding(0) var<uniform> cfg:Config;\n@group(0) @binding(1) var<storage,read> air:array<f32>;\n@group(0) @binding(2) var<storage,read_write> optical:array<vec4f>;\n@compute @workgroup_size(64) fn integrate(@builtin(global_invocation_id) id:vec3u){\n let i=id.x;if(i>=4096u){return;}\n var tr=1.;var sunlight=1.;var radiance=vec3f(0);\n for(var k=0u;k<6u;k++){\n  let gas=clamp((air[k*4096u+i]-.055)*1.15,0.,.85);\n  let depth=(f32(k)+.5)*.30;\n  let ext=gas*3.8*.30*cfg.strength;\n  let slice=1.-exp(-ext/max(.45,cfg.cosine));\n  let direct=sunlight*exp(-ext*.55);\n  let diffuse=.33+.30*(1.-sunlight);\n  radiance+=tr*slice*(direct*.67+diffuse)*.94*exp(-depth*vec3f(.24,.075,.035));\n  tr*=1.-slice;sunlight*=exp(-ext/.891);\n }\n optical[i]=vec4f(radiance,1.-tr);\n}";
+let wwGPU=null,wwGPUStarting=false,wwGPUFault='',wwGPUFrames=0,wwGPUCache=null,wwGPULast=-100,wwGPUEpoch=0;
+async function initWWGPU(){
+ if(wwGPU||wwGPUStarting||wwGPUFault||!fluid3?.d||!whitewaterVolumeEnabled||new URLSearchParams(location.search).has('cpuWhitewater'))return;
+ wwGPUStarting=true;
+ try{
+  const d=fluid3.d,m=d.createShaderModule({code:wwGPUCode}),info=await m.getCompilationInfo();
+  const errors=info.messages.filter(x=>x.type==='error');if(errors.length)throw Error(errors.map(x=>x.message).join('; '));
+  const pipeline=await d.createComputePipelineAsync({layout:'auto',compute:{module:m,entryPoint:'integrate'}});
+  const params=d.createBuffer({size:16,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
+  const air=d.createBuffer({size:FOAM_PLANE*FOAM_LAYERS*4,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
+  const optical=d.createBuffer({size:FOAM_PLANE*16,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC});
+  const stage=d.createBuffer({size:FOAM_PLANE*16,usage:GPUBufferUsage.MAP_READ|GPUBufferUsage.COPY_DST});
+  const group=d.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[params,air,optical].map((buffer,binding)=>({binding,resource:{buffer}}))});
+  wwGPU={d,pipeline,params,air,optical,stage,group,pending:false};
+ }catch(e){wwGPUFault=String(e?.message||e);console.warn('Whitewater GPU fallback',e);}finally{wwGPUStarting=false;}
+}
+function updateWWGPU(t){
+ if(!whitewaterVolumeEnabled||!foamFieldReady||foamStrength<.01)return;
+ if(!wwGPU){initWWGPU();return;}
+ const f=wwGPU;if(f.pending||wwGPUFault||t-wwGPULast<(simTier===2?.22:.14))return;
+ wwGPULast=t;const d=f.d,ox=foamOriginX,oz=foamOriginZ,epoch=wwGPUEpoch;
+ // Integrate a vertical optical column once; view-angle correction is
+ // applied at sampling time rather than recomputing every foam texel.
+ let scoped=false;
+ try{
+  d.queue.writeBuffer(f.params,0,new Float32Array([1,foamStrength,0,0]));
+  d.queue.writeBuffer(f.air,0,entrainedAir);
+  d.pushErrorScope('validation');scoped=true;
+  const enc=d.createCommandEncoder(),p=enc.beginComputePass();p.setPipeline(f.pipeline);p.setBindGroup(0,f.group);p.dispatchWorkgroups(Math.ceil(FOAM_PLANE/64));p.end();
+  enc.copyBufferToBuffer(f.optical,0,f.stage,0,FOAM_PLANE*16);
+  d.queue.submit([enc.finish()]);f.pending=true;
+  const validation=d.popErrorScope();scoped=false;
+  Promise.allSettled([validation,f.stage.mapAsync(GPUMapMode.READ)]).then(results=>{
+   if(results[1].status==='rejected')throw results[1].reason;
+   const data=new Float32Array(f.stage.getMappedRange()).slice();f.stage.unmap();
+   if(results[0].status==='rejected')throw results[0].reason;if(results[0].value)throw results[0].value;
+   if(epoch===wwGPUEpoch&&foamFieldReady){wwGPUCache={data,ox,oz,t};wwGPUFrames++;}
+  }).catch(e=>{wwGPUFault=String(e?.message||e);wwGPUCache=null;console.warn('Whitewater GPU fallback',e);}).finally(()=>{f.pending=false;});
+ }catch(e){if(scoped)d.popErrorScope().catch(()=>{});wwGPUFault=String(e?.message||e);wwGPUCache=null;f.pending=false;}
+}
+function sampleWWGPU(x,z,cosine,visibility,film,out){
+ const c=wwGPUCache;if(!c||wwGPUFault||clockTime-c.t>.65)return false;
+ const u=(x-c.ox)/FOAM_STEP,v=(z-c.oz)/FOAM_STEP,n=FOAM_GRID;
+ if(u<0||v<0||u>=n-1||v>=n-1)return false;
+ const i=Math.floor(u),j=Math.floor(v),a=u-i,b=v-j,k=(j*n+i)*4;
+ const read=q=>(c.data[k+q]*(1-a)+c.data[k+4+q]*a)*(1-b)+(c.data[k+n*4+q]*(1-a)+c.data[k+n*4+4+q]*a)*b;
+ const base=Math.max(0,Math.min(.9999,read(3)));
+ const tau=-Math.log(1-base),mu=Math.max(.45,Math.min(1,Math.abs(cosine)));
+ const volumeAlpha=1-Math.exp(-tau/mu),filmAlpha=1-Math.exp(-Math.max(0,film)*.45*foamStrength/mu);
+ const scale=volumeAlpha/Math.max(.001,base)*(.45+.55*visibility)*(1-filmAlpha);
+ const lit=.55+.35*visibility;
+ out.alpha=filmAlpha+(1-filmAlpha)*volumeAlpha;
+ out.r=read(0)*scale+filmAlpha*lit*.94;out.g=read(1)*scale+filmAlpha*lit*.98;out.b=read(2)*scale+filmAlpha*lit;
+ out.tau=tau;return true;
+}
+
 function sampleWhitewaterVolume(x,z,film,cosine,visibility,strength,out){
+ if(sampleWWGPU(x,z,cosine,visibility,film,out))return out;
  // Offset deeper samples along the refracted view direction, bounded to
  // the local aeration grid. No extra rendering pass or 3D texture upload.
  const dx=camera.position.x-x,dz=camera.position.z-z;
@@ -2967,7 +3026,7 @@ function updateFoamSkin(t){
     rr=rr*(1-mix)+Math.min(1,v.r/den*1.18)*mix;
     gg=gg*(1-mix)+Math.min(1,v.g/den*1.18)*mix;
     bb=bb*(1-mix)+Math.min(1,v.b/den*1.18)*mix;
-    opacity=Math.max(opacity,Math.min(.93,v.alpha*fade*(.38+.62*packed)*(.65+.35*breakup)));
+    opacity=Math.max(opacity,Math.min(.90,v.alpha*fade*(.16+.84*packed)*(.55+.45*breakup)));
    }
    data[k]=Math.round(255*rr);data[k+1]=Math.round(255*gg);data[k+2]=Math.round(255*bb);data[k+3]=Math.round(255*opacity);
   }
@@ -3900,10 +3959,10 @@ function animateWaves(t){
    const a0=foamLayer(wx,wz,0,entrainedAir),a1=foamLayer(wx,wz,1,entrainedAir),a2=foamLayer(wx,wz,2,entrainedAir);
    let scatter=aeratedOpticalMix(a0,a1,a2,foamStrength)*fade;
    let cr=.72,cg=.83,cb=.86;
-   if(whitewaterVolumeEnabled&&a0+a1+a2>.12){
+   if(whitewaterVolumeEnabled&&a0+a1+a2>.20){
     const dy=Math.abs(camera.position.y-arr[i+1]),cosine=Math.max(.32,dy/Math.max(.01,Math.hypot(camera.position.x-wx,dy,camera.position.z-wz)));
     const vol=sampleWhitewaterVolume(wx,wz,0,cosine,shadowReady?shadowSample(shadowField,wx,wz,1):1,foamStrength,whitewaterResult);
-    scatter=Math.min(.72,vol.alpha*.78)*fade;
+    scatter=Math.min(.48,vol.alpha*.58)*fade;
     const den=Math.max(.08,vol.alpha);
     cr=Math.min(.88,vol.r/den*1.08);cg=Math.min(.93,vol.g/den*1.12);cb=Math.min(.97,vol.b/den*1.16);
    }
@@ -3926,7 +3985,7 @@ function resetBoat(){
  boat.rotation.set(0,0,0);vy=0;pitchV=0;rollV=0;
  boatHeading=0;boatSpeed=0;rudder=0;driveMode='stop';totalTravel=0;previousBoatHeading=0;turnVelocity=0;wakeSolver?.clear();wakeTrail=[];trailElapsed=0;kelvinPackets.length=0;kelvinClock=kelvinPeak=0;kwReady=false;shadowReady=false;entryEvents.length=0;entryAirQueue.length=0;entryCooldown=entryCount=entryEnergy=entryImpulse=0;
  hullSlipX=hullSlipZ=hullFluidLoad=hullYawRate=hullWet=hullSlamming=hullContact=0;hullPressureX=hullPressureY=hullPressureZ=hullPressureLoad=hullBoundaryCells=0;vortexFilaments.length=0;clearFreeSurface();fluid3Epoch++;fluid3Frames=0;fluid3State='awaiting fresh field';if(fluid3){fluid3.cpu=null;fluid3.started=false;fluid3.d.queue.writeBuffer(fluid3.v[0],0,new Float32Array(F3C*4));}
- foamFieldReady=false;flowReady=false;foamVortices.length=0;vortexShed=0;vortexWaveShed=0;clearPlunges();clearAP();activeObjectFoam.length=0;objectFoamLast=-100;objectFoamHits=0;for(const o of surfaceFoamObjects){o.wet=0;o.last=-100;o.prevSurface=NaN;o.sampleAt=-100;}foamParcels.length=0;liquidFoamLast=-100;parcelClock=0;clearFoamFilms();foamDensity.fill(0);foamNext.fill(0);entrainedAir.fill(0);airNext.fill(0);breakingFoam.length=0;foamBubbles.length=0;foamBubbleSpawn=0;whitewaterSpray.length=0;sprayImpacts.length=0;cloudSamples=[];cloudTime=-100;
+ wwGPUEpoch++;wwGPUCache=null;wwGPULast=-100;foamFieldReady=false;flowReady=false;foamVortices.length=0;vortexShed=0;vortexWaveShed=0;clearPlunges();clearAP();activeObjectFoam.length=0;objectFoamLast=-100;objectFoamHits=0;for(const o of surfaceFoamObjects){o.wet=0;o.last=-100;o.prevSurface=NaN;o.sampleAt=-100;}foamParcels.length=0;liquidFoamLast=-100;parcelClock=0;clearFoamFilms();foamDensity.fill(0);foamNext.fill(0);entrainedAir.fill(0);airNext.fill(0);breakingFoam.length=0;foamBubbles.length=0;foamBubbleSpawn=0;whitewaterSpray.length=0;sprayImpacts.length=0;cloudSamples=[];cloudTime=-100;
  if($('forward')){setDriveMode('stop');}
 }
 function makeBoat(){
@@ -4830,6 +4889,7 @@ async function init3D(forceWebGL=false){
    advanceFreeSurface(dt,time);
    updateObjectFoam(time);
    advanceFoamDensity(dt,time);
+   updateWWGPU(time);
    try{updateWhitewaterSpray(dt,time);}catch(error){if(sprayBatches)for(const b of sprayBatches)b.visible=false;console.error('Spray update',error);}
    // Thickness map is currently unbound from both physical materials.
    waterDepthAtBoat=seabedDepth(boat.position.x,boat.position.z);
@@ -4919,7 +4979,7 @@ async function init3D(forceWebGL=false){
   const now=performance.now();
   if(now-last>1100){
    const measured=samples*1000/(now-last);
-   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?(apGPUFrames&&!apGPUFault?'GPU ':'CPU ')+apGrid.particles.length+'p '+(apGPUFrames&&!apGPUFault?apGPUFrames+' steps · mesh '+rcTriangles+' tris · '+(rcGPUFrames&&!rcGPUFault?'GPU density':'CPU density')+(rcThicknessEnabled?' · SS thickness':''):apStats.after.toFixed(2)+' div'):'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
+   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?(apGPUFrames&&!apGPUFault?'GPU ':'CPU ')+apGrid.particles.length+'p '+(apGPUFrames&&!apGPUFault?apGPUFrames+' steps · mesh '+rcTriangles+' tris · '+(rcGPUFrames&&!rcGPUFault?'GPU density':'CPU density')+(rcThicknessEnabled?' · SS thickness':'')+(whitewaterVolumeEnabled?' · WW '+(wwGPUFrames&&!wwGPUFault?'GPU':'CPU'):''):apStats.after.toFixed(2)+' div'):'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
    $('fps').textContent='FPS: '+Math.round(measured);
    adjustSimulationBudget(measured,now);adjustAdaptivePerformance(measured,now);
    last=now;samples=0;

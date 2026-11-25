@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 27.2 reconstructed liquid and aerated volume</title>
+<title>Rift Water Lab · WebGPU 27.2.1 boundary-free liquid reconstruction</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.2</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.2.1</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.2 · reconstructed liquid</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.2.1 · localized liquid</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -2891,7 +2891,7 @@ function deformConnectedCrest(x,z,arr,i,fade){
  for(const p of plungePool){
   const dx=x-p.x,dz=z-p.z,along=dx*p.fx+dz*p.fz,side=dx*p.fz-dz*p.fx;
   if(!crestFold(along,side,p,crestOffset))continue;
-  const reconstructed=rcOwner===apGrid&&p===apOwner&&rcTriangles>0?.42:1;
+  const reconstructed=1; // Keep the continuous ocean intact beneath localized reconstructed liquid.
   arr[i]+=p.fx*crestOffset.forward*fade*reconstructed;arr[i+1]+=crestOffset.up*fade*reconstructed;arr[i+2]+=p.fz*crestOffset.forward*fade*reconstructed;changed=true;
  }
  return changed;
@@ -3111,35 +3111,42 @@ function rcCreate(){
  const geo=new THREE.BufferGeometry();
  for(const name of ['position','normal','color'])geo.setAttribute(name,new THREE.BufferAttribute(new Float32Array(RC_MAX*3),3).setUsage(THREE.DynamicDrawUsage));
  geo.setDrawRange(0,0);
- const mat=new THREE.MeshPhysicalMaterial({color:0xffffff,vertexColors:true,roughness:.16,metalness:0,ior:1.333,transmission:.45,thickness:.55,attenuationColor:0x63c8bf,attenuationDistance:4,side:THREE.DoubleSide});
+ const mat=new THREE.MeshPhysicalMaterial({color:0xffffff,vertexColors:true,roughness:.105,metalness:0,ior:1.333,transmission:.78,thickness:.42,attenuationColor:0x83d7d4,attenuationDistance:9,side:THREE.DoubleSide});
  rcMesh=new THREE.Mesh(geo,mat);rcMesh.frustumCulled=false;rcMesh.visible=false;scene.add(rcMesh);
 }
 function clearReconstruction(){rcOwner=null;rcLast=-100;rcTriangles=0;if(rcMesh)rcMesh.visible=false;}
 function updateReconstruction(g,t){
  if(rcFault||new URLSearchParams(location.search).has('noReconstruct'))return;
- if(rcOwner===g&&t-rcLast<(simTier===2?.14:.09))return;
+ if(rcOwner===g&&t-rcLast<(simTier===2?.18:.11))return;
  try{
   if(!rcMesh)rcCreate();rcOwner=g;rcLast=t;
   rcDensity.fill(0);rcAir.fill(0);
   const radius=simTier===2?.49:simTier===1?.43:.39;
+  // Sample the receiving ocean before depositing: the rectangular bed is
+  // a numerical boundary reservoir and must never become visible geometry.
+  const sea=new Float32Array(RC_N*RC_N);
+  for(let z=0;z<RC_N;z++)for(let x=0;x<RC_N;x++)sea[z*RC_N+x]=oceanHeight(g.ox+x*RC_H,g.oz+z*RC_H,t)-g.oy;
+  const seaAt=(x,z)=>{const u=Math.max(0,Math.min(RC_N-1.001,x/RC_H)),v=Math.max(0,Math.min(RC_N-1.001,z/RC_H)),i=Math.floor(u),j=Math.floor(v),a=u-i,b=v-j;return (sea[j*RC_N+i]*(1-a)+sea[j*RC_N+i+1]*a)*(1-b)+(sea[(j+1)*RC_N+i]*(1-a)+sea[(j+1)*RC_N+i+1]*a)*b;};
+  const span=5.6;
   for(const p of g.particles){
+   if(!p.crestLiquid||p.y<seaAt(p.x,p.z)-.12||Math.min(p.x,p.z,span-p.x,span-p.z)<.75)continue;
    const x=g.ox+p.x,z=g.oz+p.z;
    const gas=foamLayer(x,z,1,entrainedAir)+foamLayer(x,z,0,breakerFilm)*.6;
    const shear=Math.hypot(p.c[1]-p.c[3],p.c[2]-p.c[6],p.c[5]-p.c[7]);
-   rcSplat(p,Math.min(1,gas*.8+Math.max(0,shear-2)*.055),radius);
+   rcSplat(p,Math.min(.8,Math.max(0,gas-.12)*.75+Math.max(0,shear-5)*.012),radius);
   }
   // Keep the replacement local to liquid protruding above the ocean.
   // Cache the receiving ocean elevation by column.
-  const sea=new Float32Array(RC_N*RC_N);
-  for(let z=0;z<RC_N;z++)for(let x=0;x<RC_N;x++)sea[z*RC_N+x]=oceanHeight(g.ox+x*RC_H,g.oz+z*RC_H,t)-g.oy;
   const geo=rcMesh.geometry,pos=geo.attributes.position.array,norm=geo.attributes.normal.array,col=geo.attributes.color.array;
   let count=0;
   const sample=(field,x,y,z)=>{const i=Math.max(0,Math.min(RC_N-1,Math.round(x/RC_H))),j=Math.max(0,Math.min(RC_N-1,Math.round(y/RC_H))),k=Math.max(0,Math.min(RC_N-1,Math.round(z/RC_H)));return field[rcIndex(i,j,k)];};
   const iso=.38;
   rcExtract(rcDensity,iso,(a,b,c)=>{
    if(count+3>RC_MAX)return;
-   const above=v=>v[1]>sea[Math.max(0,Math.min(RC_N-1,Math.round(v[2]/RC_H)))*RC_N+Math.max(0,Math.min(RC_N-1,Math.round(v[0]/RC_H)))]-.04;
+   const above=v=>v[1]>seaAt(v[0],v[2])+.035;
    if(!above(a)&&!above(b)&&!above(c))return;
+   // Suppress domain-wall faces and triangles extending far beneath the sea.
+   if([a,b,c].some(v=>Math.min(v[0],v[2],span-v[0],span-v[2])<.42||v[1]<seaAt(v[0],v[2])-.24))return;
    for(const v of [a,b,c]){
     const [x,y,z]=v,k=count*3;
     pos[k]=g.ox+x;pos[k+1]=g.oy+y;pos[k+2]=g.oz+z;
@@ -3147,8 +3154,8 @@ function updateReconstruction(g,t){
     const len=Math.hypot(gx,gy,gz)||1;norm[k]=-gx/len;norm[k+1]=-gy/len;norm[k+2]=-gz/len;
     const air=Math.min(1,sample(rcAir,x,y,z)/Math.max(.12,sample(rcDensity,x,y,z)));
     // Effective scattering increases with gas fraction, not a flat foam mask.
-    const scatter=1-Math.exp(-air*3.1);
-    col[k]=.22+.72*scatter;col[k+1]=.62+.34*scatter;col[k+2]=.65+.33*scatter;count++;
+    const scatter=1-Math.exp(-air*1.8);
+    col[k]=.26+.66*scatter;col[k+1]=.66+.30*scatter;col[k+2]=.72+.25*scatter;count++;
    }
   });
   geo.setDrawRange(0,count);for(const name of ['position','normal','color'])geo.attributes[name].needsUpdate=true;
@@ -3170,7 +3177,7 @@ function startAP(p,t){
   for(let y=1.15;y<top;y+=stride){
    if(g.particles.length>=particleBudget)break;
    const speed=.45+crest*1.65,vy=crest*.65;
-   g.particles.push({x,y,z,v:[p.fx*speed,vy,p.fz*speed],c:new Float32Array(9)});
+   g.particles.push({x,y,z,v:[p.fx*speed,vy,p.fz*speed],c:new Float32Array(9),crestLiquid:crest>.16&&y>1.75});
   }
  }
  apGrid=g;apOwner=p;

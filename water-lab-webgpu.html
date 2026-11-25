@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 27.3.8 directional obstacle whitewater</title>
+<title>Rift Water Lab · WebGPU 27.4 layered volumetric whitewater</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.3.8</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.4</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.3.8 · obstacle flow</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.4 · volumetric whitewater</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -2859,6 +2859,45 @@ function makeFoamMicroNormal(){
  tex.channel=1;tex.wrapS=tex.wrapT=THREE.RepeatWrapping;tex.repeat.set(LOCAL_RADIUS*2/5.7,LOCAL_RADIUS*2/5.7);
  tex.minFilter=THREE.LinearMipmapLinearFilter;tex.magFilter=THREE.LinearFilter;tex.generateMipmaps=true;tex.needsUpdate=true;return tex;
 }
+// Reduced-order participating medium integration across the six
+// surface-relative aeration layers. Integrate front-to-back with
+// Beer-Lambert extinction and a bounded diffuse multiple-scatter term.
+const whitewaterVolumeEnabled=!new URLSearchParams(location.search).has('flatFoam');
+function integrateWhitewater(layers,film,cosine,sunVisibility,strength,out){
+ const mu=Math.max(.32,Math.min(1,Math.abs(cosine)));
+ const illumination=Math.max(0,Math.min(1,sunVisibility));
+ let trans=1,sunTrans=1,red=0,green=0,blue=0,tau=0;
+ for(let k=0;k<6;k++){
+  const gas=Math.max(0,Math.min(.85,layers[k]||0));
+  const depth=(k+.5)*.30;
+  const extinction=(gas*4.8+(k===0?Math.max(0,film)*2.5:0))*.30*Math.max(0,strength);
+  const slice=1-Math.exp(-extinction/mu);
+  const scatterAlbedo=.94;
+  // Direct illumination is attenuated inside the bubble column.
+  const direct=sunTrans*Math.exp(-extinction*.55)*illumination;
+  const diffuse=.33+.30*(1-sunTrans)*illumination;
+  const light=(direct*.67+diffuse)*scatterAlbedo;
+  const w=trans*slice*light;
+  red+=w*Math.exp(-depth*.24);green+=w*Math.exp(-depth*.075);blue+=w*Math.exp(-depth*.035);
+  trans*=1-slice;sunTrans*=Math.exp(-extinction/ .891);tau+=extinction;
+ }
+ out.alpha=1-trans;out.r=red;out.g=green;out.b=blue;out.tau=tau;
+ return out;
+}
+const whitewaterLayers=new Float32Array(6),whitewaterResult={};
+function sampleWhitewaterVolume(x,z,film,cosine,visibility,strength,out){
+ // Offset deeper samples along the refracted view direction, bounded to
+ // the local aeration grid. No extra rendering pass or 3D texture upload.
+ const dx=camera.position.x-x,dz=camera.position.z-z;
+ const horizontal=Math.hypot(dx,dz),inv=horizontal>.001?1/horizontal:0;
+ const bend=.55*Math.sqrt(Math.max(0,1-cosine*cosine));
+ for(let k=0;k<6;k++){
+  const travel=(k+.5)*FOAM_DZ*bend;
+  whitewaterLayers[k]=foamLayer(x-dx*inv*travel,z-dz*inv*travel,k,entrainedAir);
+ }
+ return integrateWhitewater(whitewaterLayers,film,cosine,visibility,strength,out);
+}
+
 function updateFoamSkin(t){
  if(!nearGeometry||!nearWater)return;
  if(foamSkinSource!==nearGeometry){
@@ -2920,7 +2959,17 @@ function updateFoamSkin(t){
    const sunVisibility=shadowReady?shadowSample(shadowField,x,z,1):1;
    const bright=Math.min(1,(.72+.24*scatter+.17*packed)*shadow*(1-Math.min(.32,(1-sunVisibility)*waveShadowStrength*.6)));
    const thin=1-packed;
-   data[k]=Math.round(255*bright*(1-.09*thin));data[k+1]=Math.round(255*Math.min(1,bright+.025));data[k+2]=Math.round(255*Math.min(1,bright+.035+.035*thin));data[k+3]=Math.round(255*alpha*(breakup+(1-breakup)*packed*.88));
+   let rr=bright*(1-.09*thin),gg=Math.min(1,bright+.025),bb=Math.min(1,bright+.035+.035*thin),opacity=alpha*(breakup+(1-breakup)*packed*.88);
+   if(whitewaterVolumeEnabled){
+    const dy=Math.abs(camera.position.y),cosine=Math.max(.32,dy/Math.max(.01,Math.hypot(camera.position.x-x,dy,camera.position.z-z)));
+    const v=sampleWhitewaterVolume(x,z,packed,cosine,sunVisibility,foamStrength,whitewaterResult);
+    const mix=Math.min(.72,v.alpha*.85),den=Math.max(.08,v.alpha);
+    rr=rr*(1-mix)+Math.min(1,v.r/den*1.18)*mix;
+    gg=gg*(1-mix)+Math.min(1,v.g/den*1.18)*mix;
+    bb=bb*(1-mix)+Math.min(1,v.b/den*1.18)*mix;
+    opacity=Math.max(opacity,Math.min(.93,v.alpha*fade*(.38+.62*packed)*(.65+.35*breakup)));
+   }
+   data[k]=Math.round(255*rr);data[k+1]=Math.round(255*gg);data[k+2]=Math.round(255*bb);data[k+3]=Math.round(255*opacity);
   }
   foamOpticalMap.needsUpdate=true;
  }
@@ -3849,10 +3898,18 @@ function animateWaves(t){
   // Approximate subsurface gas scattering in the continuous water surface.
   if(foamFieldReady&&fade>0&&foamStrength>.01){
    const a0=foamLayer(wx,wz,0,entrainedAir),a1=foamLayer(wx,wz,1,entrainedAir),a2=foamLayer(wx,wz,2,entrainedAir);
-   const scatter=aeratedOpticalMix(a0,a1,a2,foamStrength)*fade;
-   nearColorData[i]+=(.72-nearColorData[i])*scatter;
-   nearColorData[i+1]+=(.83-nearColorData[i+1])*scatter;
-   nearColorData[i+2]+=(.86-nearColorData[i+2])*scatter;
+   let scatter=aeratedOpticalMix(a0,a1,a2,foamStrength)*fade;
+   let cr=.72,cg=.83,cb=.86;
+   if(whitewaterVolumeEnabled&&a0+a1+a2>.12){
+    const dy=Math.abs(camera.position.y-arr[i+1]),cosine=Math.max(.32,dy/Math.max(.01,Math.hypot(camera.position.x-wx,dy,camera.position.z-wz)));
+    const vol=sampleWhitewaterVolume(wx,wz,0,cosine,shadowReady?shadowSample(shadowField,wx,wz,1):1,foamStrength,whitewaterResult);
+    scatter=Math.min(.72,vol.alpha*.78)*fade;
+    const den=Math.max(.08,vol.alpha);
+    cr=Math.min(.88,vol.r/den*1.08);cg=Math.min(.93,vol.g/den*1.12);cb=Math.min(.97,vol.b/den*1.16);
+   }
+   nearColorData[i]+=(cr-nearColorData[i])*scatter;
+   nearColorData[i+1]+=(cg-nearColorData[i+1])*scatter;
+   nearColorData[i+2]+=(cb-nearColorData[i+2])*scatter;
   }
   rippleSum+=Math.abs(disturbance);rippleMax=Math.max(rippleMax,Math.abs(disturbance));
  }

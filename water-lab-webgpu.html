@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 27.4.1 GPU whitewater optical integration</title>
+<title>Rift Water Lab · WebGPU 27.4.2 stochastic organic foam</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.4.1</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.4.2</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.4.1 · GPU whitewater</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.4.2 · organic foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -2648,7 +2648,7 @@ function objectFoamSource(x,z){
   const dx=x-o.x,dz=z-o.z,along=dx*o.fx+dz*o.fz,side=dx*o.fz-dz*o.fx,r=Math.hypot(dx,dz);
   if(r>o.r+4.5||r<o.r*.70)continue;
   const heading=along/Math.max(.05,r),angle=Math.atan2(side,along);
-  const patch=.58+.42*Math.sin(angle*3+o.phase)*Math.cos(angle*5-o.phase*.7);
+  const patch=.35+.65*wwNoise(x*1.4-o.fx*o.phase*.2,z*1.4-o.fz*o.phase*.2,59);
   const rim=Math.exp(-(((r-o.r*1.04)/.42)**2));
   const upstream=Math.max(0,-heading);
   const impact=rim*upstream*upstream*(.55+.45*patch);
@@ -2702,7 +2702,7 @@ function advanceFoamDensity(dt,t){
   const w=waveField(x,z,t,foamWaveScratch);
   const crest=Math.max(0,Math.min(1,(w.height-.42)/.85));
   const steep=Math.max(0,Math.min(1,(Math.hypot(w.slopeX,w.slopeZ)-.15)/.30));
-  const band=.65+.35*Math.sin(x*.52+z*.31-t*.56)*Math.cos(z*.43-x*.22+t*.31);
+  const band=.48+.52*wwNoise(x*.63-t*.18,z*.63-t*.11,71);
   const compression=Math.max(0,Math.min(1,(w.compression-.06)/.27));
   const crestSource=plungePool.length?crestFoamSource(x,z):0;
   const obstacleSource=activeObjectFoam.length?objectFoamSource(x,z):0;
@@ -2813,27 +2813,48 @@ const foamDriftX=new Float32Array(FOAM_PLANE),foamDriftZ=new Float32Array(FOAM_P
 const foamOpticalFlow={x:0,z:0};
 // Shared periodic, domain-warped cellular microstructure. Coarse open
 // films surround much smaller bubbles; alpha and normals share coordinates.
+// Nonperiodic material-space noise: hashed lattice with smooth interpolation.
+function wwHash(x,z,seed=0){
+ let h=Math.imul(x|0,374761393)^Math.imul(z|0,668265263)^Math.imul(seed+1,1442695041);
+ h=Math.imul(h^(h>>>13),1274126177);return ((h^(h>>>16))>>>0)/4294967295;
+}
+function wwNoise(x,z,seed=0){
+ const i=Math.floor(x),j=Math.floor(z);let a=x-i,b=z-j;a=a*a*(3-2*a);b=b*b*(3-2*b);
+ return (wwHash(i,j,seed)*(1-a)+wwHash(i+1,j,seed)*a)*(1-b)+(wwHash(i,j+1,seed)*(1-a)+wwHash(i+1,j+1,seed)*a)*b;
+}
+function wwOrganic(x,z){
+ const a=x+2.1*(wwNoise(x*.47,z*.47,3)-.5),b=z+2.1*(wwNoise(x*.47,z*.47,9)-.5);
+ const broad=wwNoise(a*1.15,b*1.15,12),fine=wwNoise(a*3.2,b*3.2,18);
+ const ridge=1-Math.abs(2*wwNoise(a*1.9,b*1.9,27)-1);
+ return Math.max(.08,Math.min(1,.10+.48*broad+.28*ridge*ridge+.24*fine));
+}
+// A large seamless stochastic atlas supplies only fine surface relief.
+// Macro foam shape is driven by nonperiodic transported noise.
 function foamBubbleDetail(u,v){
- const x=u*Math.PI*2,z=v*Math.PI*2;
- const a=u*16+1.35*Math.sin(3*z+2*x)+.48*Math.sin(7*z-5*x);
- const b=v*16+1.25*Math.cos(2*z-3*x)+.42*Math.sin(5*z+7*x);
- const large=cellMembrane(a,b),small=cellMembrane(a*3+5,b*3+7),fine=cellMembrane(a*6+9,b*6+3);
- const patch=.5+.23*Math.sin(3*x+2*z)+.18*Math.sin(5*z-4*x)+.09*Math.cos(9*x+7*z);
- const compact=Math.max(0,Math.min(1,(patch-.35)*3.6));
- const rim=large*large*.65+small*small*.24;
- const alpha=Math.min(1,.045+rim*(1-compact*.55)+compact*(.44+.35*fine));
- const height=.45*large+.26*small+.13*fine+compact*.26;
- return {alpha,height};
+ const x=u*64,z=v*64;
+ const wrap=(q)=>((q%64)+64)%64;
+ const hash=(i,j,k)=>wwHash(wrap(i),wrap(j),k);
+ const noise=(x,z,k)=>{const i=Math.floor(x),j=Math.floor(z);let a=x-i,b=z-j;a=a*a*(3-2*a);b=b*b*(3-2*b);return (hash(i,j,k)*(1-a)+hash(i+1,j,k)*a)*(1-b)+(hash(i,j+1,k)*(1-a)+hash(i+1,j+1,k)*a)*b;};
+ const X=x+2.5*(noise(x,z,3)-.5),Z=z+2.5*(noise(x,z,9)-.5);
+ const i=Math.floor(X),j=Math.floor(Z);let d1=9,d2=9;
+ for(let dz=-2;dz<=2;dz++)for(let dx=-2;dx<=2;dx++){
+  const cx=i+dx,cz=j+dz;
+  const q=(cx+.08+.84*hash(cx,cz,11)-X)**2+(cz+.08+.84*hash(cx,cz,17)-Z)**2;
+  if(q<d1){d2=d1;d1=q;}else if(q<d2)d2=q;
+ }
+ const membrane=Math.max(0,1-(Math.sqrt(d2)-Math.sqrt(d1))*5);
+ const cluster=noise(x,z,21),grain=noise(x*2,z*2,32);
+ return {alpha:Math.min(1,.30+.42*membrane*membrane+.28*cluster+.14*grain),height:.55*membrane+.25*grain+.20*cluster};
 }
 function makeFoamDetailAlpha(){
- const n=256,data=new Uint8Array(n*n*4);
+ const n=512,data=new Uint8Array(n*n*4);
  for(let j=0;j<n;j++)for(let i=0;i<n;i++){
   const value=Math.round(255*foamBubbleDetail(i/n,j/n).alpha);
   const k=(j*n+i)*4;data[k]=data[k+1]=data[k+2]=value;data[k+3]=255;
  }
  const tex=new THREE.DataTexture(data,n,n,THREE.RGBAFormat);
  tex.channel=1;tex.wrapS=tex.wrapT=THREE.RepeatWrapping;
- tex.repeat.set(LOCAL_RADIUS*2/5.7,LOCAL_RADIUS*2/5.7);
+ tex.repeat.set(LOCAL_RADIUS*2/17.3,LOCAL_RADIUS*2/17.3);
  tex.minFilter=THREE.LinearMipmapLinearFilter;tex.magFilter=THREE.LinearFilter;
  tex.generateMipmaps=true;tex.anisotropy=4;tex.needsUpdate=true;return tex;
 }
@@ -2845,7 +2866,7 @@ function makeFoamOpticalMap(){
 }
 // Tileable multi-scale bubble-film normal map, generated once.
 function makeFoamMicroNormal(){
- const n=128,h=new Float32Array(n*n),data=new Uint8Array(n*n*4);
+ const n=256,h=new Float32Array(n*n),data=new Uint8Array(n*n*4);
  for(let j=0;j<n;j++)for(let i=0;i<n;i++){
   h[j*n+i]=foamBubbleDetail(i/n,j/n).height;
  }
@@ -2856,7 +2877,7 @@ function makeFoamMicroNormal(){
   data[k]=Math.round(127.5*(1-dx*inv));data[k+1]=Math.round(127.5*(1-dz*inv));data[k+2]=Math.round(127.5*(1+inv));data[k+3]=255;
  }
  const tex=new THREE.DataTexture(data,n,n,THREE.RGBAFormat);
- tex.channel=1;tex.wrapS=tex.wrapT=THREE.RepeatWrapping;tex.repeat.set(LOCAL_RADIUS*2/5.7,LOCAL_RADIUS*2/5.7);
+ tex.channel=1;tex.wrapS=tex.wrapT=THREE.RepeatWrapping;tex.repeat.set(LOCAL_RADIUS*2/17.3,LOCAL_RADIUS*2/17.3);
  tex.minFilter=THREE.LinearMipmapLinearFilter;tex.magFilter=THREE.LinearFilter;tex.generateMipmaps=true;tex.needsUpdate=true;return tex;
 }
 // Reduced-order participating medium integration across the six
@@ -3014,11 +3035,13 @@ function updateFoamSkin(t){
    // Use transported material coordinates so fragments drift instead of
    // sliding across the water in a fixed world-space pattern.
    const mx=x-foamLayer(x,z,0,foamDriftX),mz=z-foamLayer(x,z,0,foamDriftZ);
-   const breakup=.55+.45*Math.sin(mx*2.2+Math.sin(mz*3.1))*Math.cos(mz*2.7+Math.sin(mx*1.9));
+   const breakup=wwOrganic(mx,mz);
+   const edgeNoise=wwNoise(mx*5.7,mz*5.7,41);
+   const fragmentation=Math.max(.04,Math.min(1,(breakup+.20*edgeNoise-.25+packed*.42)*1.65));
    const sunVisibility=shadowReady?shadowSample(shadowField,x,z,1):1;
    const bright=Math.min(1,(.72+.24*scatter+.17*packed)*shadow*(1-Math.min(.32,(1-sunVisibility)*waveShadowStrength*.6)));
    const thin=1-packed;
-   let rr=bright*(1-.09*thin),gg=Math.min(1,bright+.025),bb=Math.min(1,bright+.035+.035*thin),opacity=alpha*(breakup+(1-breakup)*packed*.88);
+   let rr=bright*(1-.09*thin),gg=Math.min(1,bright+.025),bb=Math.min(1,bright+.035+.035*thin),opacity=alpha*fragmentation;
    if(whitewaterVolumeEnabled){
     const dy=Math.abs(camera.position.y),cosine=Math.max(.32,dy/Math.max(.01,Math.hypot(camera.position.x-x,dy,camera.position.z-z)));
     const v=sampleWhitewaterVolume(x,z,packed,cosine,sunVisibility,foamStrength,whitewaterResult);
@@ -3026,7 +3049,7 @@ function updateFoamSkin(t){
     rr=rr*(1-mix)+Math.min(1,v.r/den*1.18)*mix;
     gg=gg*(1-mix)+Math.min(1,v.g/den*1.18)*mix;
     bb=bb*(1-mix)+Math.min(1,v.b/den*1.18)*mix;
-    opacity=Math.max(opacity,Math.min(.90,v.alpha*fade*(.16+.84*packed)*(.55+.45*breakup)));
+    opacity=Math.max(opacity,Math.min(.90,v.alpha*fade*(.16+.84*packed)*fragmentation));
    }
    data[k]=Math.round(255*rr);data[k+1]=Math.round(255*gg);data[k+2]=Math.round(255*bb);data[k+3]=Math.round(255*opacity);
   }

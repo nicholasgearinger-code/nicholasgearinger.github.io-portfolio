@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 27.5.3 moving hull wave boundary</title>
+<title>Rift Water Lab · WebGPU 27.5.4 contact-driven hull splashes</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.5.3</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.5.4</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.5.3 · solid hull waves</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.5.4 · hull impact spray</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -2014,10 +2014,81 @@ function emitWhitewater(x,z,t,energy,fx,fz,startY=null,spill=false){
   waterY:NaN,waterTime:-100,
   life:kind===0?1.3:2.0,energy});
 }
+// Sample the actual outside edge of the moving hull, rather than
+// firing spray at fixed points according to throttle alone.
+const hullSplashEnabled=!new URLSearchParams(location.search).has('noHullSplash');
+const hullSplashProbes=[];
+for(const z of [-2.38,-1.85,-1.05,-.15,.85,1.8])for(const side of [-1,1]){
+ const width=hullHalfBeam(z),slope=z< -2.15?1.24:z< -1.30?.51:0;
+ hullSplashProbes.push({x:side*width,z,nx:side/Math.hypot(1,slope),nz:-slope/Math.hypot(1,slope),depth:NaN,last:-100,charge:0});
+}
+hullSplashProbes.push({x:0,z:2.2,nx:0,nz:1,depth:NaN,last:-100,charge:0});
+let hullSplashClock=0,hullSplashHits=0,hullSplashPeak=0;
+const hsPoint=new THREE.Vector3(),hsNormal=new THREE.Vector3(),hsWave={},hsFlow={};
+function hullSplashResponse(depth,normalApproach,rise,previousDepth){
+ const wet=Math.max(0,Math.min(1,(depth+.035)/.16));
+ const exposed=Math.max(0,Math.min(1,(.72-depth)/.40));
+ const crossing=Number.isFinite(previousDepth)&&previousDepth<.04&&depth>=.04;
+ const hit=Math.max(0,normalApproach-.22)*.72+Math.max(0,rise-.20)*.9+(crossing?.35:0);
+ return Math.min(1.65,wet*exposed*hit);
+}
+function emitHullImpact(x,z,y,nx,nz,energy,t){
+ const limit=simTier===2?140:simTier===1?220:360;
+ const count=Math.min(simTier===2?10:18,Math.ceil(5+energy*10),limit-whitewaterSpray.length);
+ if(count<=0)return false;
+ for(let j=0;j<count;j++){
+  const seed=++spraySeed,u=bubbleHash(seed+17),v=bubbleHash(seed+29),w=bubbleHash(seed+41);
+  const tangent=(u-.5)*(.45+.20*energy),spread=(v-.5)*.75;
+  const outward=.5+energy*(.75+.95*w),up=.85+energy*(1.5+2.6*v);
+  const kind=w<.86?0:1;
+  whitewaterSpray.push({x:x-nz*tangent+nx*.07,y:y+.05+w*.09,z:z+nx*tangent+nz*.07,
+   vx:nx*outward-nz*spread,vz:nz*outward+nx*spread,vy:up,kind,age:0,
+   waterY:NaN,waterTime:-100,life:kind===0?1.35:1.7,energy,hullImpact:true});
+ }
+ spawnFoamParcel(x+nx*.15,z+nz*.15,Math.min(1,energy)*foamStrength,nx*.35,nz*.35);
+ if(entryAirQueue.length<12)entryAirQueue.push({x:x+nx*.24,z:z+nz*.24,energy:Math.min(1,energy)*.32,age:0});
+ return true;
+}
+function updateHullImpactSplashes(dt,t){
+ if(!hullSplashEnabled||!boat||breakingMode!=='advanced'||foamStrength<.01){
+  hullSplashClock=0;hullSplashPeak=0;for(const p of hullSplashProbes){p.depth=NaN;p.charge=0;}return;
+ }
+ hullSplashClock+=dt;if(hullSplashClock<(simTier===2?.075:.045))return;
+ const step=Math.max(.015,hullSplashClock);hullSplashClock=0;
+ hullSplashPeak*=Math.exp(-step*3);
+ const fx=-Math.sin(boatHeading),fz=-Math.cos(boatHeading);
+ let budget=simTier===2?2:3;
+ for(const p of hullSplashProbes){
+  hsNormal.set(p.nx,0,p.nz).applyQuaternion(boat.quaternion);const len=Math.hypot(hsNormal.x,hsNormal.z)||1;
+  const nx=hsNormal.x/len,nz=hsNormal.z/len;
+  hsPoint.set(p.x,-.19,p.z).applyQuaternion(boat.quaternion);
+  const x=boat.position.x+hsPoint.x+nx*.11,z=boat.position.z+hsPoint.z+nz*.11;
+  const y=boat.position.y+hsPoint.y,sea=oceanHeight(x,z,t);
+  const depth=sea-y,previous=p.depth;
+  const rise=Number.isFinite(previous)?(depth-previous)/step:0;p.depth=depth;
+  const w=waveField(x,z,t,hsWave);
+  sharedFoamFlow(x,z,t,hsFlow);
+  // Wave orbital velocity proxy from the surface gradient, augmented
+  // by the measured change in immersion at the moving contact point.
+  const ux=hsFlow.x-w.slopeX*1.4,uz=hsFlow.z-w.slopeZ*1.4;
+  const bx=fx*boatSpeed+hullSlipX+hullYawRate*hsPoint.z,bz=fz*boatSpeed+hullSlipZ-hullYawRate*hsPoint.x;
+  const approach=(bx-ux)*nx+(bz-uz)*nz;
+  const impact=hullSplashResponse(depth,approach,rise,previous);
+  p.charge=Math.min(1.5,p.charge*Math.exp(-step*4)+impact*step*6);
+  hullSplashPeak=Math.max(hullSplashPeak,impact);
+  if(budget>0&&impact>.18&&p.charge>.20&&t-p.last>.18){
+   if(emitHullImpact(x,z,Math.max(sea,y),nx,nz,Math.min(1.45,Math.max(impact,p.charge)),t)){
+    p.charge*=.2;p.last=t;hullSplashHits++;budget--;
+   }
+  }
+ }
+}
+
 function updateWhitewaterSpray(dt,t){
  const enabled=breakingMode==='advanced'&&foamStrength>.01&&boat;
- if(!enabled){whitewaterSpray.length=0;sprayImpacts.length=0;if(sprayBatches)for(const b of sprayBatches)b.visible=false;return;}
- if(!sprayBatches){sprayTexture=makeSprayTexture();sprayBatches=[makeSprayBatch(.032,.85),makeSprayBatch(.075,.10)];}
+ if(!enabled){whitewaterSpray.length=0;sprayImpacts.length=0;hullSplashClock=0;for(const p of hullSplashProbes){p.depth=NaN;p.charge=0;}if(sprayBatches)for(const b of sprayBatches)b.visible=false;return;}
+ if(!sprayBatches){sprayTexture=makeSprayTexture();sprayBatches=[makeSprayBatch(.040,.90),makeSprayBatch(.075,.10)];}
+ updateHullImpactSplashes(dt,t);
  sprayTimer+=dt;
  if(sprayTimer>=.065){
   sprayTimer=0;
@@ -2048,7 +2119,7 @@ function updateWhitewaterSpray(dt,t){
   const water=p.waterY;
   if(p.y<=water&&p.age>.04){
    if(p.kind===0&&sprayImpacts.length<128)sprayImpacts.push({x:p.x,z:p.z,energy:Math.min(1,Math.abs(p.vy)*.18*p.energy)});
-   if(p.spill){spawnFoamParcel(p.x,p.z,Math.min(1,p.energy)*foamStrength,p.vx*.3,p.vz*.3);if(entryAirQueue.length<12)entryAirQueue.push({x:p.x,z:p.z,energy:p.energy*.4,age:0});}
+   if(p.spill||p.hullImpact){spawnFoamParcel(p.x,p.z,Math.min(1,p.energy)*foamStrength,p.vx*.3,p.vz*.3);if(entryAirQueue.length<12)entryAirQueue.push({x:p.x,z:p.z,energy:p.energy*.4,age:0});}
    whitewaterSpray.splice(i,1);continue;
   }
   if(p.age>p.life||Math.hypot(p.x-boat.position.x,p.z-boat.position.z)>19){whitewaterSpray.splice(i,1);continue;}
@@ -4273,7 +4344,7 @@ function resetBoat(){
  boat.position.set(-3.2,.6,-13);
  boat.rotation.set(0,0,0);vy=0;pitchV=0;rollV=0;
  boatHeading=0;boatSpeed=0;rudder=0;driveMode='stop';totalTravel=0;previousBoatHeading=0;turnVelocity=0;wakeSolver?.clear();wakeTrail=[];trailElapsed=0;kelvinPackets.length=0;kelvinClock=kelvinPeak=0;kwReady=false;shadowReady=false;entryEvents.length=0;entryAirQueue.length=0;entryCooldown=entryCount=entryEnergy=entryImpulse=0;
- hullSlipX=hullSlipZ=hullFluidLoad=hullYawRate=hullWet=hullSlamming=hullContact=0;hullPressureX=hullPressureY=hullPressureZ=hullPressureLoad=hullBoundaryCells=0;vortexFilaments.length=0;clearFreeSurface();clearObjectWaves();runupPeak=runupSpills=objectVortexCount=0;fluid3Epoch++;fluid3Frames=0;fluid3State='awaiting fresh field';if(fluid3){fluid3.cpu=null;fluid3.started=false;fluid3.d.queue.writeBuffer(fluid3.v[0],0,new Float32Array(F3C*4));}
+ hullSlipX=hullSlipZ=hullFluidLoad=hullYawRate=hullWet=hullSlamming=hullContact=0;hullPressureX=hullPressureY=hullPressureZ=hullPressureLoad=hullBoundaryCells=0;vortexFilaments.length=0;clearFreeSurface();clearObjectWaves();runupPeak=runupSpills=objectVortexCount=0;hullSplashClock=hullSplashHits=hullSplashPeak=0;for(const p of hullSplashProbes){p.depth=NaN;p.last=-100;p.charge=0;}fluid3Epoch++;fluid3Frames=0;fluid3State='awaiting fresh field';if(fluid3){fluid3.cpu=null;fluid3.started=false;fluid3.d.queue.writeBuffer(fluid3.v[0],0,new Float32Array(F3C*4));}
  wwGPUEpoch++;wwGPUCache=null;wwGPULast=-100;foamFieldReady=false;flowReady=false;foamVortices.length=0;vortexShed=0;vortexWaveShed=0;clearPlunges();clearAP();activeObjectFoam.length=0;objectFoamLast=-100;objectFoamHits=0;for(const o of surfaceFoamObjects){o.wet=0;o.last=-100;o.prevSurface=NaN;o.sampleAt=-100;o.runup=0;o.runupSea=NaN;o.spillBudget=0;o.spillAt=-100;o.shedPhase=0;o.shedSide=0;}foamParcels.length=0;liquidFoamLast=-100;parcelClock=0;clearFoamFilms();foamDensity.fill(0);foamNext.fill(0);entrainedAir.fill(0);airNext.fill(0);breakingFoam.length=0;foamBubbles.length=0;foamBubbleSpawn=0;whitewaterSpray.length=0;sprayImpacts.length=0;cloudSamples=[];cloudTime=-100;
  if($('forward')){setDriveMode('stop');}
 }
@@ -5270,7 +5341,7 @@ async function init3D(forceWebGL=false){
   const now=performance.now();
   if(now-last>1100){
    const measured=samples*1000/(now-last);
-   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · rock waves '+(owPeak*100).toFixed(1)+' cm · run-up '+(runupPeak*100).toFixed(0)+' cm / '+runupSpills+' spills · hull wall '+hullWaveCells+' / '+hullClipCount+' clipped · rock eddies '+objectVortexCount+' · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?(apGPUFrames&&!apGPUFault?'GPU ':'CPU ')+apGrid.particles.length+'p '+(apGPUFrames&&!apGPUFault?apGPUFrames+' steps · mesh '+rcTriangles+' tris · '+(rcGPUFrames&&!rcGPUFault?'GPU density':'CPU density')+(rcThicknessEnabled?' · SS thickness':'')+(whitewaterVolumeEnabled?' · WW '+(wwGPUFrames&&!wwGPUFault?'GPU':'CPU'):''):apStats.after.toFixed(2)+' div'):'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
+   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · rock waves '+(owPeak*100).toFixed(1)+' cm · run-up '+(runupPeak*100).toFixed(0)+' cm / '+runupSpills+' spills · hull wall '+hullWaveCells+' / '+hullClipCount+' clipped · hull splashes '+hullSplashHits+' · rock eddies '+objectVortexCount+' · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?(apGPUFrames&&!apGPUFault?'GPU ':'CPU ')+apGrid.particles.length+'p '+(apGPUFrames&&!apGPUFault?apGPUFrames+' steps · mesh '+rcTriangles+' tris · '+(rcGPUFrames&&!rcGPUFault?'GPU density':'CPU density')+(rcThicknessEnabled?' · SS thickness':'')+(whitewaterVolumeEnabled?' · WW '+(wwGPUFrames&&!wwGPUFault?'GPU':'CPU'):''):apStats.after.toFixed(2)+' div'):'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
    $('fps').textContent='FPS: '+Math.round(measured);
    adjustSimulationBudget(measured,now);adjustAdaptivePerformance(measured,now);
    last=now;samples=0;

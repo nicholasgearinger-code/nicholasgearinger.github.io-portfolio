@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 27.4.3 evolving foam topology</title>
+<title>Rift Water Lab · WebGPU 27.5 object-coupled wave dynamics</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.4.3</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.5</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.4.3 · evolving foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.5 · object wave dynamics</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -1636,6 +1636,7 @@ function waveField(x,z,t,out=waveState){
   elevation+=f.height;slopeX+=f.sx;slopeZ+=f.sz;
   steepness+=Math.abs(f.sx)+Math.abs(f.sz);
  }
+ if(!owBuilding&&owReady&&breakingMode==='advanced'){const o=sampleObjectWave(x,z,owSample);elevation+=o.height;slopeX+=o.sx;slopeZ+=o.sz;steepness+=Math.abs(o.sx)+Math.abs(o.sz);}
  out.height=elevation;out.dx=dx;out.dz=dz;out.slopeX=slopeX;out.slopeZ=slopeZ;
  out.crest=crest;out.steepness=steepness;out.compression=Math.max(0,Math.min(1,1-(jxx*jzz-jxz*jxz)));
  return out;
@@ -2431,6 +2432,89 @@ function advanceFreeSurface(dt,t){
   let a=fsHeight;fsHeight=fsNextHeight;fsNextHeight=a;a=fsSpeed;fsSpeed=fsNextSpeed;fsNextSpeed=a;fsPeak=peak;
  }
 }
+// Local scattered-wave field, independent of foam intensity. Solve the
+// perturbation to the incoming swell with a reflecting solid boundary.
+const OW_N=65,OW_H=.25,OW_SIZE=OW_N*OW_N;
+let owH=new Float32Array(OW_SIZE),owV=new Float32Array(OW_SIZE),owNextH=new Float32Array(OW_SIZE),owNextV=new Float32Array(OW_SIZE);
+const owSolid=new Uint8Array(OW_SIZE),owIncident=new Float32Array(OW_SIZE),owForce=new Float32Array(OW_SIZE),owProbe={};
+let owX=0,owZ=0,owReady=false,owBuilding=false,owPeak=0,owLast=-100,owCells=0;
+const owEnabled=!new URLSearchParams(location.search).has('noObjectWaves');
+function owRead(field,x,z){
+ if(!owReady)return 0;
+ const u=(x-owX)/OW_H,v=(z-owZ)/OW_H;
+ if(u<0||v<0||u>=OW_N-1||v>=OW_N-1)return 0;
+ const i=Math.floor(u),j=Math.floor(v),a=u-i,b=v-j,k=j*OW_N+i;
+ return (field[k]*(1-a)+field[k+1]*a)*(1-b)+(field[k+OW_N]*(1-a)+field[k+OW_N+1]*a)*b;
+}
+function clearObjectWaves(){owReady=false;owLast=-100;owPeak=0;owCells=0;owH.fill(0);owV.fill(0);owSolid.fill(0);owForce.fill(0);}
+function objectWaveBoundaryForce(base,solid,n,h,c2,force){
+ force.fill(0);const inv=c2/(h*h);
+ for(let j=1;j<n-1;j++)for(let i=1;i<n-1;i++){
+  const k=j*n+i;if(solid[k])continue;
+  let f=0;
+  if(solid[k-1])f+=base[k]-base[k-1];
+  if(solid[k+1])f+=base[k]-base[k+1];
+  if(solid[k-n])f+=base[k]-base[k-n];
+  if(solid[k+n])f+=base[k]-base[k+n];
+  force[k]=Math.max(-12,Math.min(12,f*inv));
+ }
+}
+function objectWaveStep(height,velocity,nextH,nextV,solid,force,n,h,dt,c2){
+ nextH.fill(0);nextV.fill(0);let peak=0;const inv=1/(h*h);
+ for(let j=1;j<n-1;j++)for(let i=1;i<n-1;i++){
+  const k=j*n+i;if(solid[k])continue;const q=height[k];
+  const lap=((solid[k-1]?q:height[k-1])+(solid[k+1]?q:height[k+1])+(solid[k-n]?q:height[k-n])+(solid[k+n]?q:height[k+n])-4*q)*inv;
+  const edge=Math.min(i,j,n-1-i,n-1-j),fade=Math.min(1,edge/10);
+  const v=Math.max(-3,Math.min(3,velocity[k]+dt*(c2*lap+force[k]-(.48+7*(1-fade)**2)*velocity[k]-.22*q)));
+  const y=Math.max(-.65,Math.min(.65,q+v*dt))*Math.exp(-dt*4*(1-fade)**2);
+  nextH[k]=y;nextV[k]=v;peak=Math.max(peak,Math.abs(y));
+ }
+ return peak;
+}
+function advanceObjectWaves(dt,t){
+ if(!owEnabled||!boat||!waterFloor||!underwaterObjects?.visible||breakingMode!=='advanced'){if(owReady)clearObjectWaves();return;}
+ const rocks=surfaceFoamObjects.filter(o=>Math.hypot(o.x+waterFloor.position.x-boat.position.x,o.z+waterFloor.position.z-boat.position.z)<11);
+ if(!rocks.length){if(owReady)clearObjectWaves();return;}
+ const x=Math.floor(boat.position.x/OW_H)*OW_H-8,z=Math.floor(boat.position.z/OW_H)*OW_H-8;
+ const moved=!owReady||x!==owX||z!==owZ;
+ if(moved){
+  for(let j=0;j<OW_N;j++)for(let i=0;i<OW_N;i++){const k=j*OW_N+i;owNextH[k]=owRead(owH,x+i*OW_H,z+j*OW_H);owNextV[k]=owRead(owV,x+i*OW_H,z+j*OW_H);}
+  [owH,owNextH]=[owNextH,owH];[owV,owNextV]=[owNextV,owV];owX=x;owZ=z;owReady=true;
+ }
+ const c2=5.5;
+ if(moved||t-owLast>=.10){
+  owLast=t;owSolid.fill(0);owIncident.fill(0);owCells=0;owBuilding=true;
+  try{
+   for(const o of rocks){
+    const rx=o.x+waterFloor.position.x,rz=o.z+waterFloor.position.z,top=o.top+waterFloor.position.y;
+    const surface=waveField(rx,rz,t,owProbe).height;
+    if(surface>top+.20)continue;
+    const radius=o.r*Math.max(.35,Math.min(1,Math.sqrt(Math.max(0,top-surface+.35)/1.1)));
+    const cx=(rx-x)/OW_H,cz=(rz-z)/OW_H,reach=Math.ceil(radius/OW_H)+2;
+    for(let j=Math.max(1,Math.floor(cz)-reach);j<=Math.min(OW_N-2,Math.ceil(cz)+reach);j++)for(let i=Math.max(1,Math.floor(cx)-reach);i<=Math.min(OW_N-2,Math.ceil(cx)+reach);i++){
+     const k=j*OW_N+i,wx=x+i*OW_H,wz=z+j*OW_H;
+     if((wx-rx)**2+(wz-rz)**2<radius*radius){if(!owSolid[k])owCells++;owSolid[k]=1;}
+     owIncident[k]=waveField(wx,wz,t,owProbe).height;
+    }
+   }
+   objectWaveBoundaryForce(owIncident,owSolid,OW_N,OW_H,c2,owForce);
+  }finally{owBuilding=false;}
+ }
+ const steps=Math.max(1,Math.ceil(dt/.025)),h=dt/steps;
+ for(let i=0;i<steps;i++){owPeak=objectWaveStep(owH,owV,owNextH,owNextV,owSolid,owForce,OW_N,OW_H,h,c2);[owH,owNextH]=[owNextH,owH];[owV,owNextV]=[owNextV,owV];}
+}
+function sampleObjectWave(x,z,out){
+ out.height=out.sx=out.sz=0;
+ if(!owReady||owBuilding)return out;
+ const u=(x-owX)/OW_H,v=(z-owZ)/OW_H;
+ if(u<0||v<0||u>=OW_N-1||v>=OW_N-1)return out;
+ const i=Math.floor(u),j=Math.floor(v),a=u-i,b=v-j,k=j*OW_N+i;
+ const p=owH[k],q=owH[k+1],r=owH[k+OW_N],s=owH[k+OW_N+1];
+ out.height=(p*(1-a)+q*a)*(1-b)+(r*(1-a)+s*a)*b;
+ out.sx=((q-p)*(1-b)+(s-r)*b)/OW_H;out.sz=((r-p)*(1-a)+(s-q)*a)/OW_H;return out;
+}
+const owSample={height:0,sx:0,sz:0};
+
 function sharedFoamFlow(x,z,t,out){
  if(flowReady){out.x=flowSample(flowU,x,z);out.z=flowSample(flowV,x,z);}
  else{breakerCurl(x,z,t,out);out.x*=.5;out.z*=.5;}
@@ -2631,7 +2715,8 @@ function updateObjectFoam(t){
   o.prevSurface=surface;o.sampleAt=t;
   sharedFoamFlow(x,z,t,objectFlow);
   const wave=waveField(x,z,t,{}),vx=objectFlow.x,vz=objectFlow.z;
-  const speed=Math.hypot(vx,vz)+Math.hypot(wave.slopeX,wave.slopeZ)*1.3+Math.min(2,rise)*.85;
+  const reflected=sampleObjectWave(x,z,owSample);
+  const speed=Math.hypot(vx,vz)+Math.hypot(wave.slopeX,wave.slopeZ)*1.3+Math.min(2,rise)*.85+Math.min(.7,Math.abs(reflected.height)*2);
   const contact=objectContactStrength(surface,top,speed,o.wet);o.wet=contact.wet;
   if(contact.strength<.025)continue;
   const len=Math.hypot(vx,vz),fx=len>.08?vx/len:waveComponents[0].dirX,fz=len>.08?vz/len:waveComponents[0].dirZ;
@@ -4052,7 +4137,7 @@ function resetBoat(){
  boat.position.set(-3.2,.6,-13);
  boat.rotation.set(0,0,0);vy=0;pitchV=0;rollV=0;
  boatHeading=0;boatSpeed=0;rudder=0;driveMode='stop';totalTravel=0;previousBoatHeading=0;turnVelocity=0;wakeSolver?.clear();wakeTrail=[];trailElapsed=0;kelvinPackets.length=0;kelvinClock=kelvinPeak=0;kwReady=false;shadowReady=false;entryEvents.length=0;entryAirQueue.length=0;entryCooldown=entryCount=entryEnergy=entryImpulse=0;
- hullSlipX=hullSlipZ=hullFluidLoad=hullYawRate=hullWet=hullSlamming=hullContact=0;hullPressureX=hullPressureY=hullPressureZ=hullPressureLoad=hullBoundaryCells=0;vortexFilaments.length=0;clearFreeSurface();fluid3Epoch++;fluid3Frames=0;fluid3State='awaiting fresh field';if(fluid3){fluid3.cpu=null;fluid3.started=false;fluid3.d.queue.writeBuffer(fluid3.v[0],0,new Float32Array(F3C*4));}
+ hullSlipX=hullSlipZ=hullFluidLoad=hullYawRate=hullWet=hullSlamming=hullContact=0;hullPressureX=hullPressureY=hullPressureZ=hullPressureLoad=hullBoundaryCells=0;vortexFilaments.length=0;clearFreeSurface();clearObjectWaves();fluid3Epoch++;fluid3Frames=0;fluid3State='awaiting fresh field';if(fluid3){fluid3.cpu=null;fluid3.started=false;fluid3.d.queue.writeBuffer(fluid3.v[0],0,new Float32Array(F3C*4));}
  wwGPUEpoch++;wwGPUCache=null;wwGPULast=-100;foamFieldReady=false;flowReady=false;foamVortices.length=0;vortexShed=0;vortexWaveShed=0;clearPlunges();clearAP();activeObjectFoam.length=0;objectFoamLast=-100;objectFoamHits=0;for(const o of surfaceFoamObjects){o.wet=0;o.last=-100;o.prevSurface=NaN;o.sampleAt=-100;}foamParcels.length=0;liquidFoamLast=-100;parcelClock=0;clearFoamFilms();foamDensity.fill(0);foamNext.fill(0);entrainedAir.fill(0);airNext.fill(0);breakingFoam.length=0;foamBubbles.length=0;foamBubbleSpawn=0;whitewaterSpray.length=0;sprayImpacts.length=0;cloudSamples=[];cloudTime=-100;
  if($('forward')){setDriveMode('stop');}
 }
@@ -4955,6 +5040,7 @@ async function init3D(forceWebGL=false){
    kelvinPeak=0;advanceKelvin(dt);rebuildKelvinGrid();advanceEntryEvents(dt);
    stepFluid3(dt,time);
    advanceFreeSurface(dt,time);
+   advanceObjectWaves(dt,time);
    updateObjectFoam(time);
    advanceFoamDensity(dt,time);
    updateWWGPU(time);
@@ -5047,7 +5133,7 @@ async function init3D(forceWebGL=false){
   const now=performance.now();
   if(now-last>1100){
    const measured=samples*1000/(now-last);
-   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?(apGPUFrames&&!apGPUFault?'GPU ':'CPU ')+apGrid.particles.length+'p '+(apGPUFrames&&!apGPUFault?apGPUFrames+' steps · mesh '+rcTriangles+' tris · '+(rcGPUFrames&&!rcGPUFault?'GPU density':'CPU density')+(rcThicknessEnabled?' · SS thickness':'')+(whitewaterVolumeEnabled?' · WW '+(wwGPUFrames&&!wwGPUFault?'GPU':'CPU'):''):apStats.after.toFixed(2)+' div'):'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
+   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · rock waves '+(owPeak*100).toFixed(1)+' cm · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?(apGPUFrames&&!apGPUFault?'GPU ':'CPU ')+apGrid.particles.length+'p '+(apGPUFrames&&!apGPUFault?apGPUFrames+' steps · mesh '+rcTriangles+' tris · '+(rcGPUFrames&&!rcGPUFault?'GPU density':'CPU density')+(rcThicknessEnabled?' · SS thickness':'')+(whitewaterVolumeEnabled?' · WW '+(wwGPUFrames&&!wwGPUFault?'GPU':'CPU'):''):apStats.after.toFixed(2)+' div'):'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
    $('fps').textContent='FPS: '+Math.round(measured);
    adjustSimulationBudget(measured,now);adjustAdaptivePerformance(measured,now);
    last=now;samples=0;

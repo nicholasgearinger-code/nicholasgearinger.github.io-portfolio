@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 26.8 impact-driven water entry</title>
+<title>Rift Water Lab · WebGPU 26.8.1 coherent hull contact and cached wakes</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.8</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.8.1</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.8 · water-entry physics</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.8.1 · coherent hull and wakes</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -784,7 +784,7 @@ function updateUndersideOptics(){
   const clearcoat=.15*fineRipple*(1+blend*.22*undersideDistortion);
   material.normalScale.set(normal,normal);
   material.clearcoatNormalScale?.set(clearcoat,clearcoat);
-  material.roughness=.19*(1-blend*.23);
+  material.roughness=.145*(1-blend*.23);
   material.ior=1.333;
  }
  if(underwaterSunlight&&underwaterAmbient){
@@ -844,7 +844,7 @@ function syncWaterDetail(){
     fineRipple*.15*windRipples);
   mat.clearcoat=Math.min(.75,.45+surfaceGlitter*.16);
   mat.clearcoatRoughness=.20;
-  mat.roughness=.19;
+  mat.roughness=.145;
   mat.needsUpdate=true;
  }
  lastUndersideMix=-1;
@@ -1566,6 +1566,7 @@ function oceanHeight(x,z,t){
 // Compact world-space wake packets retain emission heading and speed.
 const kelvinPackets=[];let kelvinClock=0,kelvinPeak=0,bowPeak=0;
 const kelvinResult={height:0,sx:0,sz:0};
+const KW_N=65,KW_H=.5,kwField=new Float32Array(KW_N*KW_N);let kwX=0,kwZ=0,kwReady=false;
 function advanceKelvin(dt){
  if(!boat)return;
  kelvinClock+=dt;
@@ -1578,14 +1579,14 @@ function advanceKelvin(dt){
  }
  for(let i=kelvinPackets.length-1;i>=0;i--){const p=kelvinPackets[i];p.age+=dt;if(p.age>6||Math.hypot(p.x-boat.position.x,p.z-boat.position.z)>24)kelvinPackets.splice(i,1);}
 }
-function kelvinHeight(x,z){
+function kelvinHeightRaw(x,z){
  if(!boat||breakingMode!=='advanced'||wakeAmount<.01)return 0;
  const dx=x-boat.position.x,dz=z-boat.position.z,rad=Math.hypot(dx,dz);
  if(rad>=16)return 0;
  const fade=localWaterBlend(rad),fx=-Math.sin(boatHeading),fz=-Math.cos(boatHeading);
  const along=dx*fx+dz*fz,side=dx*fz-dz*fx;
  const speed=boatSpeed,fr=speed/Math.sqrt(9.81*4.8);
- const amp=Math.min(.24,.025+fr*fr*.15)*hullContact*Math.min(1.5,wakeAmount);
+ const amp=Math.min(.30,.025+fr*fr*.18)*hullContact*Math.min(1.5,wakeAmount);
  const pressure=Math.min(1,hullPressureLoad/350);
  const bow=amp*(.65+.35*pressure)*Math.exp(-((along-2.55)**2/.65+(Math.abs(side)-.42)**2/.85));
  const shoulder=amp*.42*Math.exp(-((along-.45)**2/3+(Math.abs(side)-1.18)**2/.19));
@@ -1596,7 +1597,7 @@ function kelvinHeight(x,z){
  for(const p of kelvinPackets){
   const px=x-p.x,pz=z-p.z;if(Math.abs(px)>15||Math.abs(pz)>15)continue;
   const a=px*p.fx+pz*p.fz,b=px*p.fz-pz*p.fx;
-  if(a>2||a< -13)continue;
+  if(a>2||a< -13||Math.abs(b)>9)continue;
   const life=Math.exp(-p.age*.65)*Math.min(1,p.age*5);
   for(const sign of [-1,0,1]){
    const angle=sign*.88,c=Math.cos(angle),sn=Math.sin(angle);
@@ -1608,12 +1609,25 @@ function kelvinHeight(x,z){
  }
  return fade*(bow+shoulder+stern+Math.max(-.30,Math.min(.30,waves)));
 }
+// Evaluate packet superposition once per grid node, then reuse for
+// geometry, foam, buoyancy and optical effects instead of five sums per sample.
+function rebuildKelvinGrid(){
+ kwReady=false;
+ if(!boat||breakingMode!=='advanced'||wakeAmount<.01)return;
+ kwX=boat.position.x-16;kwZ=boat.position.z-16;
+ for(let j=0;j<KW_N;j++)for(let i=0;i<KW_N;i++)kwField[j*KW_N+i]=kelvinHeightRaw(kwX+i*KW_H,kwZ+j*KW_H);
+ kwReady=true;
+}
 function sampleKelvin(x,z){
  const out=kelvinResult;out.height=out.sx=out.sz=0;
- if(!boat||breakingMode!=='advanced'||Math.abs(x-boat.position.x)>16||Math.abs(z-boat.position.z)>16)return out;
- const d=.25;out.height=kelvinHeight(x,z);
- out.sx=(kelvinHeight(x+d,z)-kelvinHeight(x-d,z))/(2*d);
- out.sz=(kelvinHeight(x,z+d)-kelvinHeight(x,z-d))/(2*d);
+ if(!kwReady||breakingMode!=='advanced')return out;
+ const u=(x-kwX)/KW_H,v=(z-kwZ)/KW_H;
+ if(u<0||v<0||u>=KW_N-1||v>=KW_N-1)return out;
+ const i=Math.floor(u),j=Math.floor(v),a=u-i,b=v-j,k=j*KW_N+i;
+ const h00=kwField[k],h10=kwField[k+1],h01=kwField[k+KW_N],h11=kwField[k+KW_N+1];
+ out.height=(h00*(1-a)+h10*a)*(1-b)+(h01*(1-a)+h11*a)*b;
+ out.sx=((h10-h00)*(1-b)+(h11-h01)*b)/KW_H;
+ out.sz=((h01-h00)*(1-a)+(h11-h10)*a)/KW_H;
  kelvinPeak=Math.max(kelvinPeak,Math.abs(out.height));return out;
 }
 function trackWake(dt){
@@ -2499,7 +2513,7 @@ function advanceFoamDensity(dt,t){
    const gasNew=Math.max(0,Math.min(.85,gasMixed*Math.exp(-step*(k===0?.75:.20))+step*source*(1-gas)));
    airNext[index]=gasNew;
    // Gas escaping at the surface feeds film; deeper film follows aeration.
-   const filmSource=k===0?(gasNew*.85+source*.22+vortexAir*.45)*(1-.65*vortexCore):gasNew*.38;
+   const filmSource=k===0?(gasNew*.95+source*.32+vortexAir*.48)*(1-.65*vortexCore):gasNew*.38;
    if(k===0)d*=Math.exp(-step*vortexCore*.9);
    foamNext[index]=Math.max(0,Math.min(1,d*Math.exp(-step*.18)+step*filmSource*(1-d)));
   }
@@ -2618,9 +2632,9 @@ function updateFoamSkin(t){
    // Approximate directional optical thickness using an upstream density sample.
    const upstream=foamLayer(x-.45,z-.24,0)+.55*foamLayer(x-.45,z-.24,1);
    const shadow=1-Math.min(.28,column*.12+Math.max(0,upstream-d)*.28);
-   const coverage=Math.max(0,Math.min(1,(d*foamStrength-.065)/.48));
+   const coverage=Math.max(0,Math.min(1,(d*foamStrength-.045)/.43));
    const breakup=.65+.35*Math.sin(wx*4.1+Math.sin(wz*2.9))*Math.cos(wz*3.7-Math.sin(wx*2.2));
-   const alpha=coverage*(.025+.75*lace+.10*scatter+.06*column)*breakup*fade;
+   const alpha=coverage*(.04+.72*lace+.16*scatter+.09*column)*breakup*fade;
    const bright=Math.min(1,(.83+.14*scatter+.08*lace)*shadow);
    data[k]=Math.round(255*bright);data[k+1]=Math.round(255*Math.min(1,bright+.025));data[k+2]=Math.round(255*Math.min(1,bright+.035));data[k+3]=Math.round(255*alpha);
   }
@@ -2925,7 +2939,7 @@ function resetBoat(){
  if(!boat)return;
  boat.position.set(-3.2,.6,-13);
  boat.rotation.set(0,0,0);vy=0;pitchV=0;rollV=0;
- boatHeading=0;boatSpeed=0;rudder=0;driveMode='stop';totalTravel=0;previousBoatHeading=0;turnVelocity=0;wakeSolver?.clear();wakeTrail=[];trailElapsed=0;kelvinPackets.length=0;kelvinClock=kelvinPeak=0;entryEvents.length=0;entryAirQueue.length=0;entryCooldown=entryCount=entryEnergy=entryImpulse=0;
+ boatHeading=0;boatSpeed=0;rudder=0;driveMode='stop';totalTravel=0;previousBoatHeading=0;turnVelocity=0;wakeSolver?.clear();wakeTrail=[];trailElapsed=0;kelvinPackets.length=0;kelvinClock=kelvinPeak=0;kwReady=false;entryEvents.length=0;entryAirQueue.length=0;entryCooldown=entryCount=entryEnergy=entryImpulse=0;
  hullSlipX=hullSlipZ=hullFluidLoad=hullYawRate=hullWet=hullSlamming=hullContact=0;hullPressureX=hullPressureY=hullPressureZ=hullPressureLoad=hullBoundaryCells=0;vortexFilaments.length=0;clearFreeSurface();fluid3Epoch++;fluid3Frames=0;fluid3State='awaiting fresh field';if(fluid3){fluid3.cpu=null;fluid3.started=false;fluid3.d.queue.writeBuffer(fluid3.v[0],0,new Float32Array(F3C*4));}
  foamFieldReady=false;flowReady=false;foamVortices.length=0;vortexShed=0;vortexWaveShed=0;foamDensity.fill(0);foamNext.fill(0);entrainedAir.fill(0);airNext.fill(0);breakingFoam.length=0;foamBubbles.length=0;foamBubbleSpawn=0;whitewaterSpray.length=0;sprayImpacts.length=0;cloudSamples=[];cloudTime=-100;
  if($('forward')){setDriveMode('stop');}
@@ -3078,7 +3092,7 @@ function stepBoat(dt,t){
    const x=boat.position.x+ox,z=boat.position.z+oz,y=boat.position.y+oy;
    const surface=oceanHeight(x,z,t+k*h),depth=surface-y;
    if(!Number.isFinite(depth)||depth<=0)continue;
-   const area=3.8*p[3]/hydroArea,sub=Math.min(.85,depth),fraction=Math.min(1,depth/.22);
+   const area=4.5*p[3]/hydroArea,sub=Math.min(.85,depth),fraction=Math.min(1,depth/.22);
    wet+=p[3]*fraction;
    const ok=breakingMode==='advanced'&&sampleFluid3(x,y,z,hullFlowSample);
    const ux=ok?hullFlowSample.x:0,uz=ok?hullFlowSample.z:0;
@@ -3090,7 +3104,7 @@ function stepBoat(dt,t){
    const damp=-area*1050*rideDamping*relY*fraction;
    const impact=area*75*Math.min(4,Math.max(0,-relY)**2)*fraction;
    if(depth<.20&&relY<-.65){const a=area*fraction;entryX+=x*a;entryZ+=z*a;entryArea+=a;entrySpeed=Math.max(entrySpeed,-relY);}
-   const force=Math.max(-buoy*.45,Math.min(buoy*1.65+area*180,buoy+damp+impact));
+   const force=Math.max(-buoy*.32,Math.min(buoy*2.1+area*220,buoy+damp+impact));
    fy+=force;tx-=oz*force;tz+=ox*force;slam+=impact;
    const relX=vx+hullYawRate*oz-ux,relZ=vz-hullYawRate*ox-uz;
    const along=relX*fx+relZ*fz,side=relX*rx+relZ*rz;
@@ -3810,7 +3824,7 @@ async function init3D(forceWebGL=false){
    if(gpuFFT&&!fftFault&&waveEngine!=='analytic')gpuFFT.request(time,{power:1});
    trackWake(dt);
    advanceBreakingFoam(dt,time);
-   kelvinPeak=0;advanceKelvin(dt);advanceEntryEvents(dt);
+   kelvinPeak=0;advanceKelvin(dt);rebuildKelvinGrid();advanceEntryEvents(dt);
    stepFluid3(dt,time);
    advanceFreeSurface(dt,time);
    advanceFoamDensity(dt,time);

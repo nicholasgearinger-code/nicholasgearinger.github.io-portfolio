@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 26.8.1 coherent hull contact and cached wakes</title>
+<title>Rift Water Lab · WebGPU 26.9 adaptive simulation budgets</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.8.1</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.9</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.8.1 · coherent hull and wakes</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.9 · adaptive simulation</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -1566,7 +1566,7 @@ function oceanHeight(x,z,t){
 // Compact world-space wake packets retain emission heading and speed.
 const kelvinPackets=[];let kelvinClock=0,kelvinPeak=0,bowPeak=0;
 const kelvinResult={height:0,sx:0,sz:0};
-const KW_N=65,KW_H=.5,kwField=new Float32Array(KW_N*KW_N);let kwX=0,kwZ=0,kwReady=false;
+const KW_N=65,KW_H=.5,kwField=new Float32Array(KW_N*KW_N);let kwX=0,kwZ=0,kwReady=false,kwLast=-100;
 function advanceKelvin(dt){
  if(!boat)return;
  kelvinClock+=dt;
@@ -1612,8 +1612,9 @@ function kelvinHeightRaw(x,z){
 // Evaluate packet superposition once per grid node, then reuse for
 // geometry, foam, buoyancy and optical effects instead of five sums per sample.
 function rebuildKelvinGrid(){
- kwReady=false;
- if(!boat||breakingMode!=='advanced'||wakeAmount<.01)return;
+ if(!boat||breakingMode!=='advanced'||wakeAmount<.01){kwReady=false;return;}
+ if(kwReady&&clockTime-kwLast<(simTier===2?.10:simTier===1?.065:.033)&&Math.hypot(boat.position.x-16-kwX,boat.position.z-16-kwZ)<1.2)return;
+ kwLast=clockTime;kwReady=false;
  kwX=boat.position.x-16;kwZ=boat.position.z-16;
  for(let j=0;j<KW_N;j++)for(let i=0;i<KW_N;i++)kwField[j*KW_N+i]=kelvinHeightRaw(kwX+i*KW_H,kwZ+j*KW_H);
  kwReady=true;
@@ -2165,7 +2166,7 @@ function readHullPressure(mask,pressure,step){
 }
 function stepFluid3(dt,t){
  const f=fluid3;if(!f||fluid3Pending||breakingMode!=='advanced'||!boat)return;
- fluid3Accum+=dt;if(fluid3Accum<.10)return;const step=Math.min(.15,fluid3Accum);fluid3Accum=0;
+ fluid3Accum+=dt;if(fluid3Accum<(simTier===2?.15:simTier===1?.125:.10))return;const step=Math.min(.18,fluid3Accum);fluid3Accum=0;
  const ox=Math.floor(boat.position.x/F3H)*F3H-8,oz=Math.floor(boat.position.z/F3H)*F3H-8,oy=-5;
  const shiftX=f.started?(ox-f.ox)/F3H:0,shiftZ=f.started?(oz-f.oz)/F3H:0;
  const d=f.d,epoch=fluid3Epoch,submitted=performance.now();
@@ -2179,7 +2180,7 @@ function stepFluid3(dt,t){
   const a=f.v[0],b=f.v[1],p=f.p[0],q=f.p[1];
   pass('advect',a,b,p,q);pass('confine',b,a,p,q);
   pass('divergence',a,b,q,p);
-  for(let i=0;i<12;i++)pass('jacobi',a,b,i%2?q:p,i%2?p:q);
+  for(let i=0;i<(simTier===2?8:simTier===1?10:12);i++)pass('jacobi',a,b,i%2?q:p,i%2?p:q);
   pass('project',a,b,p,q);
   enc.copyBufferToBuffer(b,0,a,0,F3C*16);
   enc.copyBufferToBuffer(b,0,f.stage,0,F3C*16);
@@ -2336,9 +2337,9 @@ function updateVortexFilaments(dt,t){
  if(filamentClock>.10){
   filamentClock=0;
   for(const v of foamVortices){
-   if(vortexFilaments.length>=240)break;
+   if(vortexFilaments.length>=(simTier===2?100:simTier===1?160:240))break;
    if(v.age>5)continue;
-   for(let j=0;j<3&&vortexFilaments.length<240;j++){
+   for(let j=0;j<3&&vortexFilaments.length<(simTier===2?100:simTier===1?160:240);j++){
     const seed=++filamentSeed,a=seed*2.399963,r=v.radius*(.78+.45*bubbleHash(seed));
     const x=v.x+Math.cos(a)*r,z=v.z+Math.sin(a)*r;
     vortexFilaments.push({x,z,age:0,life:1.2+1.8*bubbleHash(seed+31),trail:[{x,z}],sample:0});
@@ -2357,7 +2358,8 @@ function updateVortexFilaments(dt,t){
   const fade=Math.min(1,f.age*6,(f.life-f.age)*2)*localWaterBlend(Math.hypot(f.x-boat.position.x,f.z-boat.position.z));
   for(let j=1;j<f.trail.length;j++){
    for(const q of [f.trail[j-1],f.trail[j]]){
-    p[n*3]=q.x;p[n*3+1]=oceanHeight(q.x,q.z,t)+.027;p[n*3+2]=q.z;
+    if(q.renderTime!==t){q.renderTime=t;q.renderY=oceanHeight(q.x,q.z,t)+.027;}
+    p[n*3]=q.x;p[n*3+1]=q.renderY;p[n*3+2]=q.z;
     c[n*4]=.86;c[n*4+1]=.96;c[n*4+2]=.95;c[n*4+3]=fade*(.25+.75*j/f.trail.length);n++;
    }
   }
@@ -2463,8 +2465,8 @@ function advanceFoamDensity(dt,t){
   if(foamFieldReady){foamDensity.fill(0);entrainedAir.fill(0);}
   foamFieldReady=false;flowReady=false;foamVortices.length=0;foamElapsed=0;return;
  }
- foamElapsed+=dt;if(foamElapsed<.10)return;
- const step=Math.min(.15,foamElapsed);foamElapsed=0;
+ foamElapsed+=dt;if(foamElapsed<(simTier===2?.16:simTier===1?.125:.10))return;
+ const step=Math.min(.18,foamElapsed);foamElapsed=0;
  advanceFoamMomentum(step,t);
  const ox=Math.floor((boat.position.x-FOAM_SPAN*.5)/FOAM_STEP)*FOAM_STEP;
  const oz=Math.floor((boat.position.z-FOAM_SPAN*.5)/FOAM_STEP)*FOAM_STEP;
@@ -2602,7 +2604,7 @@ function updateFoamSkin(t){
  // previous texture as the hull moves, rather than regenerate at frame rate.
  const data=foamOpticalMap.image.data;
  const cx=nearWater.position.x,cz=nearWater.position.z;
- if(t-foamOpticalTime>=.085||Math.hypot(cx-foamOpticalX,cz-foamOpticalZ)>.48){
+ if(t-foamOpticalTime>=(simTier===2?.16:simTier===1?.12:.085)||Math.hypot(cx-foamOpticalX,cz-foamOpticalZ)>(simTier===2?1.35:simTier===1?.95:.60)){
   foamOpticalTime=t;foamOpticalX=cx;foamOpticalZ=cz;
   const dir=waveComponents[0],fx=-Math.sin(boatHeading),fz=-Math.cos(boatHeading);
   const speed=Math.abs(boatSpeed),power=Math.min(1,speed/3)*wakeAmount*hullContact;
@@ -3314,6 +3316,15 @@ function applyAdaptivePixelRatio(value){
  renderer.setSize(innerWidth,innerHeight);
  $('adaptivePerformanceOut').textContent=next.toFixed(2)+'×';
 }
+let simTier=0,simLow=0,simHigh=0,simChanged=0,simFPS=60;
+function adjustSimulationBudget(fps,now){
+ simFPS=fps;
+ if(!adaptivePerformance||renderQuality==='ultra'){simTier=0;simLow=simHigh=0;return;}
+ if(fps<48){simLow++;simHigh=0;}else if(fps>56){simHigh++;simLow=0;}else{simLow=simHigh=0;}
+ if(now-simChanged<3500)return;
+ if(simLow>=2&&simTier<2){simTier++;simLow=0;simChanged=now;}
+ else if(simHigh>=6&&simTier>0){simTier--;simHigh=0;simChanged=now;}
+}
 function adjustAdaptivePerformance(fps,now){
  if(!adaptivePerformance||paused||renderQuality==='ultra'||!renderer)return;
  if(!Number.isFinite(fps)||fps<=0)return;
@@ -3914,9 +3925,9 @@ async function init3D(forceWebGL=false){
   const now=performance.now();
   if(now-last>1100){
    const measured=samples*1000/(now-last);
-   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm':'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
+   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · '+['Full','Balanced','Reduced'][simTier]:'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
    $('fps').textContent='FPS: '+Math.round(measured);
-   adjustAdaptivePerformance(measured,now);
+   adjustSimulationBudget(measured,now);adjustAdaptivePerformance(measured,now);
    last=now;samples=0;
   }
  };

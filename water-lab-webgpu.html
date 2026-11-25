@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 24.13 persistent advected surface foam</title>
+<title>Rift Water Lab · WebGPU 24.14 continuous crest belts and optical foam</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.13</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.14</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <details id="diagnostics">
@@ -148,7 +148,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>24.13 · advected foam field</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>24.14 · continuous whitewater</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -1702,6 +1702,7 @@ const FOAM_GRID=80,FOAM_SPAN=36,FOAM_STEP=FOAM_SPAN/(FOAM_GRID-1);
 let foamDensity=new Float32Array(FOAM_GRID*FOAM_GRID);
 let foamNext=new Float32Array(foamDensity.length);
 let foamOriginX=0,foamOriginZ=0,foamFieldReady=false,foamElapsed=0;
+const foamWaveScratch={};
 function sampleFoamDensity(x,z){
  if(!foamFieldReady)return 0;
  const u=(x-foamOriginX)/FOAM_STEP,v=(z-foamOriginZ)/FOAM_STEP;
@@ -1718,20 +1719,28 @@ function advanceFoamDensity(dt,t){
  const step=Math.min(.15,foamElapsed);foamElapsed=0;
  const ox=Math.floor((boat.position.x-FOAM_SPAN*.5)/FOAM_STEP)*FOAM_STEP;
  const oz=Math.floor((boat.position.z-FOAM_SPAN*.5)/FOAM_STEP)*FOAM_STEP;
- const decay=Math.exp(-step*.38),dir=waveComponents[0];
+ const decay=Math.exp(-step*.20),dir=waveComponents[0];
  for(let j=0;j<FOAM_GRID;j++)for(let i=0;i<FOAM_GRID;i++){
   const x=ox+i*FOAM_STEP,z=oz+j*FOAM_STEP;
   breakerCurl(x,z,t,breakerFlowScratch);
   const vx=dir.dirX*.48+breakerFlowScratch.x*.65+.10;
   const vz=dir.dirZ*.48+breakerFlowScratch.z*.65-.07;
-  foamNext[j*FOAM_GRID+i]=sampleFoamDensity(x-vx*step,z-vz*step)*decay;
+  let density=sampleFoamDensity(x-vx*step,z-vz*step)*decay;
+  // Seed entire wave shoulders, independently of sparse particle births.
+  const w=waveField(x,z,t,foamWaveScratch);
+  const crest=Math.max(0,Math.min(1,(w.height-.12)/.65));
+  const steep=Math.max(0,Math.min(1,(w.steepness-.10)/.24));
+  const band=.62+.38*Math.sin(x*.52+z*.31-t*.56)*Math.cos(z*.43-x*.22+t*.31);
+  const source=crest*steep*band*whitecapIntensity*breakingIntensity;
+  density+=step*2.4*source*(1-density);
+  foamNext[j*FOAM_GRID+i]=Math.min(1,density);
  }
  // Deposit overlapping anisotropic kernels from active breakers.
  // Continuous density merges naturally; no separate surface decal required.
  for(const f of breakingFoam){
   const age=f.age/f.life;if(age>.72)continue;
   const strength=f.strength*Math.min(1,f.age*9+.15)*(1-age);
-  const r=f.kind===0?1.55:f.kind===1?1.05:.60;
+  const r=f.kind===0?2.2:f.kind===1?1.55:.85;
   const ix=Math.round((f.x-ox)/FOAM_STEP),iz=Math.round((f.z-oz)/FOAM_STEP);
   const range=Math.ceil(r*1.65/FOAM_STEP);
   const angle=Math.atan2(f.vz,f.vx),cs=Math.cos(angle),sn=Math.sin(angle);
@@ -1741,7 +1750,7 @@ function advanceFoamDensity(dt,t){
     const u=(dx*cs+dz*sn)/(r*1.5),v=(-dx*sn+dz*cs)/(r*.65);
     const d=u*u+v*v;if(d>=1)continue;
     const k=j*FOAM_GRID+i;
-    foamNext[k]=Math.min(1,foamNext[k]+step*2.8*strength*(1-d)*(1-d));
+    foamNext[k]=Math.min(1,foamNext[k]+step*4.0*strength*(1-d)*(1-d));
    }
  }
  const old=foamDensity;foamDensity=foamNext;foamNext=old;
@@ -1873,7 +1882,7 @@ function updateWhitewater(t){
  }
  // Breaking foam fragments persist for a few seconds after a crest
  // passes. Vertex alpha fades each fragment within one shared draw call.
- if(breakingMode==='advanced'&&foamStrength>.01){
+ if(foamDebug&&breakingMode==='advanced'&&foamStrength>.01){
   for(let i=0;i<breakingFoam.length&&count<foamCapacity-12;i++){
    const f=breakingFoam[i];
    const age=f.age/f.life;
@@ -2018,8 +2027,8 @@ function animateWaves(t){
   const laceX=foamFlowX+Math.sin(foamFlowZ*2.3)*.32;
   const laceZ=foamFlowZ+Math.sin(foamFlowX*2.1)*.30;
   const lace=Math.pow(Math.max(0,1-Math.min(Math.abs(Math.sin(laceX*2.8)),Math.abs(Math.sin(laceZ*3.2)))*2.1),2);
-  const persistent=breakingMode==='advanced'?Math.min(1,density*foamStrength*1.6)*(.30+.55*lace+.15*film)*fade:0;
-  const froth=Math.min(.92,Math.max(persistent,crestFoam*(.16+.38*film)*fade));
+  const persistent=breakingMode==='advanced'?Math.min(1,density*foamStrength*2.5)*(.52+.36*lace+.12*film)*fade:0;
+  const froth=Math.min(.96,Math.max(persistent,crestFoam*(.40+.45*film)*fade));
   nearColorData[i]+=(.96-nearColorData[i])*froth;
   nearColorData[i+1]+=(.98-nearColorData[i+1])*froth;
   nearColorData[i+2]+=(1-nearColorData[i+2])*froth;

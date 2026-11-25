@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 24.11.1 cellular seafoam startup fix</title>
+<title>Rift Water Lab · WebGPU 24.12 surface-integrated stable foam</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.11.1</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.12</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <details id="diagnostics">
@@ -148,7 +148,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>24.11.1 · cellular seafoam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>24.12 · surface-integrated foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -1629,12 +1629,14 @@ function createFoamAlphaTexture(){
 function createFoamField(){
  if(foamMesh){scene.remove(foamMesh);foamMesh.geometry.dispose();foamMesh.material.map?.dispose();foamMesh.material.dispose();}
  const geo=new THREE.BufferGeometry(),indices=[],uvs=[];
- foamPositions=new Float32Array(foamCapacity*4*3);
- foamColors=new Float32Array(foamCapacity*4*4);
+ foamPositions=new Float32Array(foamCapacity*9*3);
+ foamColors=new Float32Array(foamCapacity*9*4);
  for(let i=0;i<foamCapacity;i++){
-  const v=i*4;indices.push(v,v+2,v+1,v,v+3,v+2);
-  const tile=i%4, u=(tile%2)*.5, atlasV=Math.floor(tile/2)*.5,pad=1/256;
-  uvs.push(u+pad,atlasV+pad,u+.5-pad,atlasV+pad,u+.5-pad,atlasV+.5-pad,u+pad,atlasV+.5-pad);
+  const base=i*9;
+  for(let z=0;z<2;z++)for(let x=0;x<2;x++){
+   const v=base+z*3+x;indices.push(v,v+3,v+1,v+1,v+3,v+4);
+  }
+  for(let z=0;z<3;z++)for(let x=0;x<3;x++)uvs.push(x*.5,z*.5);
  }
  geo.setAttribute('position',new THREE.BufferAttribute(foamPositions,3).setUsage(THREE.DynamicDrawUsage));
  geo.setAttribute('color',new THREE.BufferAttribute(foamColors,4).setUsage(THREE.DynamicDrawUsage));
@@ -1643,7 +1645,7 @@ function createFoamField(){
  const mat=new THREE.MeshBasicMaterial({
   color:0xffffff,vertexColors:true,
   map:createFoamAlphaTexture(),transparent:true,opacity:.93,
-  alphaTest:.04,depthTest:true,depthWrite:false,
+  alphaTest:0,depthTest:true,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1,
   side:THREE.DoubleSide
  });
  foamMesh=new THREE.Mesh(geo,mat);foamMesh.frustumCulled=false;foamMesh.renderOrder=3;scene.add(foamMesh);
@@ -1759,24 +1761,32 @@ function updateWhitewater(t){
   if(count>=foamCapacity||strength<.025)return;
   const cs=Math.cos(angle),sn=Math.sin(angle);
   const ratio=(.48+.14*Math.sin(seed*1.43+t*.43))/Math.sqrt(stretch);
-  const offsets=[[-1,-1],[1,-1],[1,1],[-1,1]],vi=count*12;
-  // Four full oceanHeight() inversions per foam patch were costly.
-  // Use one center height plus the local analytic slope to approximate
-  // the small foam quad's surface. Wake contribution is sampled once.
+  // Evaluate the displaced ocean directly at a 3x3 patch lattice.
+  // This bends the foam with the wave rather than drawing a tangent quad.
+  const vi=count*27, uv=foamMesh.geometry.attributes.uv.array;
+  const tile=((Math.floor(Math.abs(seed)*11)%4)+4)%4;
+  const tileU=(tile%2)*.5,tileV=Math.floor(tile/2)*.5,pad=1/256;
   const initial=waveField(x,z,t,{});
-  const field=waveField(x-initial.dx,z-initial.dz,t,{});
-  const centerHeight=field.height+(wakeSolver?.sample(x,z)||0);
-  for(let k=0;k<4;k++){
-   const u=offsets[k][0]*radius*.70*Math.sqrt(stretch),v=offsets[k][1]*radius*ratio+u*.14*Math.sin(seed+t*.6);
-   const wx=x+u*cs-v*sn,wz=z+u*sn+v*cs,p=vi+k*3;
+  const bx=x-initial.dx,bz=z-initial.dz;
+  const shade=foamDebug?1:Math.max(.76,Math.min(1,.78+.22*Math.sqrt(Math.min(1,strength))));
+  for(let k=0;k<9;k++){
+   const gx=k%3,gz=Math.floor(k/3);
+   const u=(gx-1)*radius*.70*Math.sqrt(stretch);
+   const v=(gz-1)*radius*ratio+u*.14*Math.sin(seed+t*.6);
+   const qx=bx+u*cs-v*sn,qz=bz+u*sn+v*cs;
+   const field=waveField(qx,qz,t);
+   const wx=qx+field.dx,wz=qz+field.dz,p=vi+k*3;
+   const radial=Math.hypot(wx-boat.position.x,wz-boat.position.z);
+   const fade=Math.max(0,Math.min(1,(LOCAL_RADIUS-radial)/(LOCAL_RADIUS-WAKE_FADE_START)));
    foamPositions[p]=wx;
-   foamPositions[p+1]=centerHeight+
-    field.slopeX*(wx-x)+field.slopeZ*(wz-z)+.035;
+   foamPositions[p+1]=field.height+fade*(wakeSolver?.sample(wx,wz)||0)+.055;
    foamPositions[p+2]=wz;
-   const shade=foamDebug?1:Math.max(.70,Math.min(1,.75+.24*Math.sqrt(Math.min(1,strength))));
-   const c=(count*4+k)*4;
-   foamColors[c]=shade;foamColors[c+1]=Math.min(1,shade+.045);foamColors[c+2]=1;
-   foamColors[c+3]=foamDebug?1:Math.min(1,Math.sqrt(strength));
+   const c=(count*9+k)*4;
+   foamColors[c]=shade;foamColors[c+1]=Math.min(1,shade+.025);foamColors[c+2]=1;
+   foamColors[c+3]=foamDebug?1:Math.min(.94,Math.sqrt(strength));
+   const j=(count*9+k)*2;
+   uv[j]=tileU+pad+gx*.5*(.5-2*pad);
+   uv[j+1]=tileV+pad+gz*.5*(.5-2*pad);
   }
   count++;
  }
@@ -1817,15 +1827,15 @@ function updateWhitewater(t){
    const f=breakingFoam[i];
    const age=f.age/f.life;
    const life=Math.min(1,age*12+.12)*Math.pow(Math.max(0,1-age),1.5);
-   const fragment=.62+.38*Math.sin(f.seed*5.17+t*1.3);
+   const fragment=.82+.18*Math.sin(f.seed*5.17+t*.45);
    const radius=(f.kind===0?1.05:f.kind===1?.68:.25)*(1+age*.85)*(.8+.5*fragment);
    const strength=f.strength*life*foamStrength*1.6;
    const theta=Math.atan2(f.vz,f.vx);
    emit(f.x,f.z,radius,strength,theta,f.seed,f.kind===1?2.3+age*.8:f.kind===0?1.1:1.45);
-   if(i%2===0&&age>.12&&age<.85){
+   if(Math.floor(f.seed)%2===0&&age>.12&&age<.85){
     const drift=.28+age*.5;
     emit(f.x-Math.cos(theta)*radius*.48-Math.sin(theta)*drift,f.z-Math.sin(theta)*radius*.48+Math.cos(theta)*drift,radius*.72,
-      strength*.68,theta+.37,f.seed+7.3,2.1);
+      strength*.68*Math.min(1,(age-.12)*10,(.85-age)*10),theta+.37,f.seed+7.3,2.1);
    }
   }
  }
@@ -1836,7 +1846,8 @@ function updateWhitewater(t){
   }
  }
  foamPatchCount=count;
- foamMesh.geometry.setDrawRange(0,count*6);
+ foamMesh.geometry.setDrawRange(0,count*24);
+ foamMesh.geometry.attributes.uv.needsUpdate=true;
  foamMesh.geometry.attributes.position.needsUpdate=true;
  foamMesh.geometry.attributes.color.needsUpdate=true;
  $('foamStatus').textContent='Foam: '+count+' patches · '+breakingFoam.length+' breakers'+(foamDebug?' TEST':'');
@@ -1948,7 +1959,10 @@ function animateWaves(t){
   nearColorData[i+1]=Math.max(.18,Math.min(1,(.35+shallow*.19+shine*.31+glimmer*.14+foam*.58+subsurface*.57+capGlow*.73)*waveShade));
   nearColorData[i+2]=Math.max(.23,Math.min(1,(.46+shallow*.17+shine*.34+glimmer*.16+foam*.48+subsurface*.38+capGlow*.90)*waveShade));
   // Mix toward neutral whitewater rather than adding blue highlights.
-  const froth=Math.min(.64,crestFoam*.65);
+  const foamFlowX=wx*.85+Math.sin(wz*.7-t*.4)*.45-t*.24;
+  const foamFlowZ=wz*1.1+Math.sin(wx*.6+t*.3)*.5-t*.31;
+  const film=Math.pow(Math.max(0,1-Math.abs(Math.sin(foamFlowX*2.1+Math.sin(foamFlowZ*1.7)))),3);
+  const froth=Math.min(.7,crestFoam*(.23+.62*film));
   nearColorData[i]+=(.96-nearColorData[i])*froth;
   nearColorData[i+1]+=(.98-nearColorData[i+1])*froth;
   nearColorData[i+2]+=(1-nearColorData[i+2])*froth;

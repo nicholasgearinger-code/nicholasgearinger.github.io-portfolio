@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 27.4.2 stochastic organic foam</title>
+<title>Rift Water Lab · WebGPU 27.4.3 evolving foam topology</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.4.2</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.4.3</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.4.2 · organic foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.4.3 · evolving foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -2099,7 +2099,11 @@ const FOAM_PLANE=FOAM_GRID*FOAM_GRID;
 let foamDensity=new Float32Array(FOAM_PLANE*FOAM_LAYERS),foamNext=new Float32Array(foamDensity.length);
 let foamOriginX=0,foamOriginZ=0,foamFieldReady=false,foamElapsed=0;
 let breakerFilm=new Float32Array(FOAM_PLANE),breakerNext=new Float32Array(FOAM_PLANE),shearFilm=new Float32Array(FOAM_PLANE),shearNext=new Float32Array(FOAM_PLANE);
-function clearFoamFilms(){breakerFilm.fill(0);breakerNext.fill(0);shearFilm.fill(0);shearNext.fill(0);foamDriftX.fill(0);foamDriftZ.fill(0);foamDriftNextX.fill(0);foamDriftNextZ.fill(0);}
+const foamTopologyEnabled=!new URLSearchParams(location.search).has('staticFoam');
+const topoAge=new Float32Array(FOAM_PLANE),topoCohesion=new Float32Array(FOAM_PLANE),topoRupture=new Float32Array(FOAM_PLANE),topoThickness=new Float32Array(FOAM_PLANE);
+const topoAgeNext=new Float32Array(FOAM_PLANE),topoCohesionNext=new Float32Array(FOAM_PLANE),topoRuptureNext=new Float32Array(FOAM_PLANE),topoThicknessNext=new Float32Array(FOAM_PLANE);
+const topoScratch={};
+function clearFoamFilms(){for(const a of [topoAge,topoCohesion,topoRupture,topoThickness,topoAgeNext,topoCohesionNext,topoRuptureNext,topoThicknessNext])a.fill(0);breakerFilm.fill(0);breakerNext.fill(0);shearFilm.fill(0);shearNext.fill(0);foamDriftX.fill(0);foamDriftZ.fill(0);foamDriftNextX.fill(0);foamDriftNextZ.fill(0);}
  let entrainedAir=new Float32Array(FOAM_PLANE*FOAM_LAYERS),airNext=new Float32Array(entrainedAir.length);
 // Coarse horizontal momentum grid, shared by all six aeration layers.
 // Semi-Lagrangian transport + vorticity confinement + Jacobi projection.
@@ -2683,6 +2687,35 @@ function foamStrain(x,z){
  return Math.min(2,Math.hypot(a,b));
 }
 
+// Persistent mesoscopic foam state: transported with the same backtrace
+// as the film. Fresh injection rejuvenates old film, strain tears it,
+// and slow dense neighborhoods repair holes and retain thickness.
+function evolveFoamTopology(age,cohesion,rupture,thickness,density,neighbors,strain,hit,dt,out){
+ const clamp=v=>Math.max(0,Math.min(1,v));
+ const fresh=1-Math.exp(-Math.max(0,hit)*dt*1.8);
+ const present=clamp(density*3);
+ if(present<.015&&fresh<.005){out.age=out.cohesion=out.rupture=out.thickness=0;return out;}
+ const a=clamp((age+dt*.16)*(1-fresh));
+ const merge=clamp((neighbors-.12)*2.2)*(1-clamp(strain*.85));
+ const tear=clamp(strain*.95+.48*a)*present;
+ const drain=a*(1-.75*clamp(density))*.40;
+ out.age=a;
+ out.cohesion=clamp((cohesion+dt*(merge*(1-cohesion)*1.6-tear*cohesion*1.3))*(1-fresh)+fresh*.92);
+ out.rupture=clamp((rupture+dt*(tear*(1-rupture)*1.8-merge*rupture*.95))*(1-fresh));
+ out.thickness=clamp((thickness*Math.exp(-dt*(.18+drain+.25*tear))+dt*merge*.16)*(1-fresh)+fresh*Math.max(.35,present));
+ return out;
+}
+function foamTopologyMask(x,z,age,cohesion,rupture,thickness,packed,fresh){
+ const scale=2.1+age*1.4;
+ const warpX=wwNoise(x*.65,z*.65,93)-.5,warpZ=wwNoise(x*.65,z*.65,97)-.5;
+ const n=wwNoise((x+warpX*.9)*scale,(z+warpZ*.9)*scale,113);
+ const m=wwOrganic(x,z),fine=wwNoise(x*6.3,z*6.3,127);
+ const threshold=.25+rupture*.35+age*.16-cohesion*.24-thickness*.14;
+ const h=Math.max(0,Math.min(1,(n*.65+m*.35-threshold)*5+.5));
+ const repair=Math.min(1,cohesion*.55+fresh*.55);
+ return Math.max(.025,Math.min(1,(h*(.72+.28*fine)*(1-repair)+repair)*(.72+.28*Math.max(packed,thickness))));
+}
+
 function advanceFoamDensity(dt,t){
  if(!boat||breakingMode!=='advanced'||foamStrength<.01){
   if(foamFieldReady){foamDensity.fill(0);entrainedAir.fill(0);clearFoamFilms();}
@@ -2711,7 +2744,7 @@ function advanceFoamDensity(dt,t){
   const stern=Math.exp(-((along+2.25)*(along+2.25)*.30+side*side*.85));
   const hull=Math.exp(-along*along*.30-Math.pow(Math.abs(side)-.70,2)*4.2);
   const boatAir=power*(stern*1.8+hull*.9)*Math.min(1,speed/1.5);
-  const churn=boatAir*(.62+.38*Math.sin(x*2.31+z*1.74)*Math.cos(z*2.83-x*.92));
+  const churn=boatAir*(.55+.45*wwNoise(x*1.9,z*1.9,151));
   const wakeFlow=Math.min(1,boatAir*.6);
   const vortexData=evaluateVortices(x,z,vortexScratch),vortexAir=vortexData.air,vortexCore=vortexData.core;
   for(let k=0;k<FOAM_LAYERS;k++){
@@ -2749,6 +2782,13 @@ function advanceFoamDensity(dt,t){
     foamDriftNextZ[p]=Math.max(-8,Math.min(8,(foamLayer(sx,sz,0,foamDriftZ)+z-sz)*.995));
     const hit=waveAir*.85+churn*.52+crestSource*2.8+obstacleSource*3.0;
     const strain=(young+shear>.07&&flowReady)?foamStrain(x,z):0;
+    if(foamTopologyEnabled){
+     const density=Math.min(1,here+young*.65+shear*.35);
+     const neighbors=(foamLayer(sx-FOAM_STEP,sz,0,breakerFilm)+foamLayer(sx+FOAM_STEP,sz,0,breakerFilm)+foamLayer(sx,sz-FOAM_STEP,0,breakerFilm)+foamLayer(sx,sz+FOAM_STEP,0,breakerFilm))*.25;
+     const q=evolveFoamTopology(foamLayer(sx,sz,0,topoAge),foamLayer(sx,sz,0,topoCohesion),foamLayer(sx,sz,0,topoRupture),foamLayer(sx,sz,0,topoThickness),density,neighbors,strain,hit,step,topoScratch);
+     topoAgeNext[p]=q.age;topoCohesionNext[p]=q.cohesion;topoRuptureNext[p]=q.rupture;topoThicknessNext[p]=q.thickness;
+     d*=Math.exp(-step*q.age*(1-q.thickness)*.24);
+    }
     const stretch=vortexAir*.40+gpuAir*.12+boatAir*.32+crestSource*.25+obstacleSource*.24;
     const transfer=young*(1-Math.exp(-step*(.22+strain*.65)));
     breakerNext[p]=Math.max(0,Math.min(1,(young-transfer)*Math.exp(-step*1.15)+step*hit*(1-young)));
@@ -2790,6 +2830,7 @@ function advanceFoamDensity(dt,t){
  const oldBreaker=breakerFilm;breakerFilm=breakerNext;breakerNext=oldBreaker;
  const oldShear=shearFilm;shearFilm=shearNext;shearNext=oldShear;
  foamDriftX.set(foamDriftNextX);foamDriftZ.set(foamDriftNextZ);
+ if(foamTopologyEnabled){topoAge.set(topoAgeNext);topoCohesion.set(topoCohesionNext);topoRupture.set(topoRuptureNext);topoThickness.set(topoThicknessNext);}
  foamOriginX=ox;foamOriginZ=oz;foamFieldReady=true;
 }
 // Continuous lit foam skin shares the exact ocean mesh triangulation.
@@ -3037,7 +3078,11 @@ function updateFoamSkin(t){
    const mx=x-foamLayer(x,z,0,foamDriftX),mz=z-foamLayer(x,z,0,foamDriftZ);
    const breakup=wwOrganic(mx,mz);
    const edgeNoise=wwNoise(mx*5.7,mz*5.7,41);
-   const fragmentation=Math.max(.04,Math.min(1,(breakup+.20*edgeNoise-.25+packed*.42)*1.65));
+   let fragmentation=Math.max(.04,Math.min(1,(breakup+.20*edgeNoise-.25+packed*.42)*1.65));
+   if(foamTopologyEnabled){
+    const age=foamLayer(x,z,0,topoAge),cohesion=foamLayer(x,z,0,topoCohesion),rupture=foamLayer(x,z,0,topoRupture),thickness=foamLayer(x,z,0,topoThickness);
+    fragmentation=foamTopologyMask(mx,mz,age,cohesion,rupture,thickness,packed,fresh)*(.72+.28*Math.max(thickness,packed));
+   }
    const sunVisibility=shadowReady?shadowSample(shadowField,x,z,1):1;
    const bright=Math.min(1,(.72+.24*scatter+.17*packed)*shadow*(1-Math.min(.32,(1-sunVisibility)*waveShadowStrength*.6)));
    const thin=1-packed;

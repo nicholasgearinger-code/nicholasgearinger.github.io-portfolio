@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 26.15.2 dynamic underwater reflections</title>
+<title>Rift Water Lab · WebGPU 26.15.3 optimized ocean simulation</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.15.2</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.15.3</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.15.2 · underwater reflections</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.15.3 · optimized ocean</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -243,7 +243,7 @@ function setupUnderwaterMirror(){
 function updateUnderwaterMirror(t){
  if(!mirrorWeight)return;
  if(mirrorFailed||!underwaterActive||underwaterBlend<.12||opticalMode==='legacy'||undersideMode!=='enhanced'||reflectionMode!=='enhanced'||!waterFloor){mirrorWeight.value=0;return;}
- if(t-mirrorLast<(simTier===2?.28:simTier===1?.19:.13))return;
+ if(t-mirrorLast<(simTier===2?.33:simTier===1?.22:.15))return;
  const target=underwaterMirror,previous=renderer.getRenderTarget();
  const hidden=[];const prevShadow=mainSun?.castShadow;
  try{
@@ -1555,21 +1555,21 @@ function waveField(x,z,t,out=waveState){
  let elevation=0,dx=0,dz=0,slopeX=0,slopeZ=0,crest=0,steepness=0,jxx=1,jzz=1,jxz=0;
  const hasFFT=fftMix>.0005&&gpuFFT?.ready&&!fftFault&&Number.isFinite(gpuFFT.rms);
  const analyticWeight=1-(hasFFT?fftMix*(waveEngine==='fft'?.80:.30):0);
+ const harmonic=crestAsymmetry*.095, chopScale=1+crestAsymmetry*.12;
  for(const wave of waveComponents){
   const phase=wave.kx*x+wave.kz*z-wave.omega*t+wave.phase;
   const amplitude=waveHeight*wave.amplitude*analyticWeight;
   const sinPhase=Math.sin(phase),cosPhase=Math.cos(phase);
   // A second harmonic narrows crests and broadens troughs; its exact
   // derivative keeps boat probes and rendered normals consistent.
-  const harmonic=crestAsymmetry*.095;
-  const sharp=sinPhase+harmonic*Math.cos(2*phase);
-  const derivative=cosPhase-harmonic*2*Math.sin(2*phase);
+  const sharp=sinPhase+harmonic*(cosPhase*cosPhase-sinPhase*sinPhase);
+  const derivative=cosPhase-4*harmonic*sinPhase*cosPhase;
   const crossFactor=wave.dirX<-.48?crossingSwell:1;
   const a=amplitude*crossFactor;
   elevation+=a*sharp;
   slopeX+=a*wave.kx*derivative;
   slopeZ+=a*wave.kz*derivative;
-  const chop=Math.min(wave.chopLimit??(.22/Math.hypot(wave.kx,wave.kz)),Math.abs(waveChop*a))*Math.sign(a)*(1+crestAsymmetry*.12);
+  const chop=Math.min(wave.chopLimit??(.22/Math.hypot(wave.kx,wave.kz)),Math.abs(waveChop*a))*Math.sign(a)*chopScale;
   const lateral=chop*cosPhase;
   const derivativeChop=-chop*sinPhase;
   jxx+=derivativeChop*wave.dirX*wave.kx;jzz+=derivativeChop*wave.dirZ*wave.kz;jxz+=derivativeChop*wave.dirX*wave.kz;
@@ -2345,7 +2345,7 @@ const FS_N=33,FS_H=.5,FS_SIZE=FS_N*FS_N;
 let fsHeight=new Float32Array(FS_SIZE),fsSpeed=new Float32Array(FS_SIZE),
  fsNextHeight=new Float32Array(FS_SIZE),fsNextSpeed=new Float32Array(FS_SIZE);
 const fsBase=new Float32Array(FS_SIZE),fsForce=new Float32Array(FS_SIZE);
-let fsOX=0,fsOZ=0,fsReady=false,fsBuilding=false,fsPeak=0;
+let fsOX=0,fsOZ=0,fsReady=false,fsBuilding=false,fsPeak=0,fsForceTime=-100;
 const fsWave={},fsVelocity={},fsSample={height:0,sx:0,sz:0};
 function fsRead(a,x,z){
  const u=(x-fsOX)/FS_H,v=(z-fsOZ)/FS_H;
@@ -2365,10 +2365,11 @@ function sampleFreeSurface(x,z,out=fsSample){
  out.sz=((h01-h00)*(1-a)+(h11-h10)*a)/FS_H;
  return out;
 }
-function clearFreeSurface(){fsReady=false;fsPeak=0;fsHeight.fill(0);fsSpeed.fill(0);fsNextHeight.fill(0);fsNextSpeed.fill(0);}
+function clearFreeSurface(){fsForceTime=-100;fsReady=false;fsPeak=0;fsHeight.fill(0);fsSpeed.fill(0);fsNextHeight.fill(0);fsNextSpeed.fill(0);}
 function advanceFreeSurface(dt,t){
  if(!boat||breakingMode!=='advanced'||!fluid3?.cpu){if(fsReady)clearFreeSurface();return;}
  const ox=Math.floor(boat.position.x/FS_H)*FS_H-8,oz=Math.floor(boat.position.z/FS_H)*FS_H-8;
+ const moved=!fsReady||ox!==fsOX||oz!==fsOZ;
  // Reproject before moving the grid so disturbances stay world anchored.
  if(!fsReady||ox!==fsOX||oz!==fsOZ){
   for(let j=0;j<FS_N;j++)for(let i=0;i<FS_N;i++){
@@ -2380,7 +2381,8 @@ function advanceFreeSurface(dt,t){
  }
  // Build forcing at the actual moving ocean surface, not fixed sea level.
  // No recursion: waveField skips this perturbation while sampling the swell.
- fsBuilding=true;
+ if(moved||t-fsForceTime>=(simTier===2?.10:simTier===1?.065:.045)||entryEvents.length){
+ fsForceTime=t;fsBuilding=true;
  try{
   for(let j=0;j<FS_N;j++)for(let i=0;i<FS_N;i++){
    const k=j*FS_N+i,x=ox+i*FS_H,z=oz+j*FS_H;
@@ -2394,6 +2396,7 @@ function advanceFreeSurface(dt,t){
    fsForce[k]=fade*((Math.max(-1.15,Math.min(1.15,normal))*1.35-depression*3)*motion+entrySurfaceForce(x,z));
   }
  }finally{fsBuilding=false;}
+ }
  const steps=Math.max(1,Math.ceil(dt/.025)),h=dt/steps,c2=3.2,inv=1/(FS_H*FS_H);
  for(let n=0;n<steps;n++){
   fsNextHeight.fill(0);fsNextSpeed.fill(0);let peak=0;
@@ -2676,7 +2679,7 @@ function advanceFoamDensity(dt,t){
 // Continuous lit foam skin shares the exact ocean mesh triangulation.
 // Its own rough dielectric material suppresses glossy water reflections.
 let foamSkin=null,foamSkinSource=null,foamOpticalMap=null,foamMicroNormal=null;
-const FOAM_MASK=256;
+let FOAM_MASK=256;
 // Precomputed periodic Voronoi edge distances: transparent interiors, narrow membranes.
 const CELL_N=128,cellAtlas=new Float32Array(CELL_N*CELL_N);
 function buildCellAtlas(){
@@ -2741,6 +2744,8 @@ function updateFoamSkin(t){
  const geo=foamSkin.geometry,p=geo.attributes.position.array,uv=geo.attributes.uv.array;
  // Evaluate optical microstructure in world coordinates. Reproject the
  // previous texture as the hull moves, rather than regenerate at frame rate.
+ const desiredMask=simTier===2?160:simTier===1?192:256;
+ if(FOAM_MASK!==desiredMask){const old=foamOpticalMap;FOAM_MASK=desiredMask;foamOpticalMap=makeFoamOpticalMap();foamSkin.material.map=foamOpticalMap;foamSkin.material.needsUpdate=true;old.dispose();foamOpticalTime=-1e6;}
  const data=foamOpticalMap.image.data;
  const cx=nearWater.position.x,cz=nearWater.position.z;
  if(t-foamOpticalTime>=(simTier===2?.16:simTier===1?.12:.085)||Math.hypot(cx-foamOpticalX,cz-foamOpticalZ)>(simTier===2?1.35:simTier===1?.95:.60)){
@@ -2751,11 +2756,13 @@ function updateFoamSkin(t){
    const lx=((i+.5)/FOAM_MASK-.5)*LOCAL_RADIUS*2,lz=((j+.5)/FOAM_MASK-.5)*LOCAL_RADIUS*2;
    const x=cx+lx,z=cz+lz,k=(j*FOAM_MASK+i)*4;
    const fade=localWaterBlend(Math.hypot(lx,lz));
-   const d=foamLayer(x,z,0),young=foamLayer(x,z,0,breakerFilm),shear=foamLayer(x,z,0,shearFilm),sub=foamLayer(x,z,1,entrainedAir)+.75*foamLayer(x,z,2,entrainedAir)+.45*foamLayer(x,z,3,entrainedAir);
-   if(fade<=0||(d+young+shear)*foamStrength<.045){data[k]=data[k+1]=data[k+2]=255;data[k+3]=0;continue;}
+   if(fade<=0){data[k]=data[k+1]=data[k+2]=255;data[k+3]=0;continue;}
+   const d=foamLayer(x,z,0),young=foamLayer(x,z,0,breakerFilm),shear=foamLayer(x,z,0,shearFilm);
+   if((d+young+shear)*foamStrength<.045){data[k]=data[k+1]=data[k+2]=255;data[k+3]=0;continue;}
+   const sub=foamLayer(x,z,1,entrainedAir)+.75*foamLayer(x,z,2,entrainedAir)+.45*foamLayer(x,z,3,entrainedAir);
    const column=Math.min(1,(d+sub)*.65);
-   sharedFoamFlow(x,z,t,foamOpticalFlow);
    const gpuOptical=sampleFluid3(x,-.15,z,foamOpticalFlow);
+   if(!gpuOptical)sharedFoamFlow(x,z,t,foamOpticalFlow);
    const turbulence=gpuOptical?Math.min(1,foamOpticalFlow.curl*.65):0;
    const along=lx*fx+lz*fz,side=lx*fz-lz*fx;
    const wake=power*Math.exp(-Math.pow(side/(.9+Math.max(0,-along)*.2),2))*Math.exp(-Math.abs(along+2)*.12);
@@ -3086,14 +3093,13 @@ function animateWaves(t){
   smoothWaterNormal(nearNormals,i,wave.slopeX+fade*wakeSlopeX,
      wave.slopeZ+fade*wakeSlopeZ);
   const slope=(Math.abs(wakeSlopeX)+Math.abs(wakeSlopeZ))*fade;
-  const foam=radial<15?wakeAppearance(wx,wz,t)*fade:0;
+  const foam=radial<15?sampleFoamDensity(wx,wz)*fade:0;
   // Foam is restricted to locally steep crests and intermittent folds,
   // not stamped uniformly on every passing swell.
   const breaking=Math.max(0,Math.min(1,
     (wave.steepness-0.24)/.40))*Math.max(0,Math.min(1,(wave.height+.1)/1.7));
   const irregular=.65+.35*Math.sin(wx*.73+wz*.41+t*.47)*
                               Math.cos(wx*.32-wz*.61-t*.30);
-  const crestFoam=breakingMode==='advanced'?Math.min(1,Math.max(0,(wave.steepness-.13)/.32)*Math.max(0,Math.min(1,(wave.height+.24)/1.1))*irregular*whitecapIntensity*breakingIntensity*1.5):0;
   const whitecap=whitecapIntensity*breaking*irregular;
   const shine=Math.min(1,Math.abs(disturbance)*.28+slope*.42+
     foam*.62+whitecap*.24);
@@ -3121,10 +3127,6 @@ function animateWaves(t){
   const thinness=Math.max(0,Math.min(1,1-shallow*.4));
   const subsurface=subsurfaceLight*crest*backlit*(.12+.18*thinness)*
     (1+.28*crestAsymmetry);
-  const glimmer=(.02+.024*windRipples)*Math.sin(
-    wx*.8+wz*.42-t*(2.4+.6*windRipples))+
-    .022*windRipples*Math.sin(wx*2.3-wz*3.4+t*3.1);
-  const capGlow=whitecap*.44;
   // Shallow water transmits more green/blue seabed light, while deep
   // water is more absorptive. Vertex color stays low-frequency; the
   // separate normal maps own the small optical ripples.
@@ -4053,7 +4055,8 @@ async function init3D(forceWebGL=false){
    advanceFreeSurface(dt,time);
    advanceFoamDensity(dt,time);
    try{updateWhitewaterSpray(dt,time);}catch(error){if(sprayBatches)for(const b of sprayBatches)b.visible=false;console.error('Spray update',error);}
-   updateThicknessMap();
+   // Thickness map is currently unbound from both physical materials.
+   waterDepthAtBoat=seabedDepth(boat.position.x,boat.position.z);
    updateCausticTexture(time);
    updateWaveTransmission(time);
    animateWaves(time);
@@ -4139,7 +4142,7 @@ async function init3D(forceWebGL=false){
   const now=performance.now();
   if(now-last>1100){
    const measured=samples*1000/(now-last);
-   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · '+['Full','Balanced','Reduced'][simTier]:'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
+   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'²':'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
    $('fps').textContent='FPS: '+Math.round(measured);
    adjustSimulationBudget(measured,now);adjustAdaptivePerformance(measured,now);
    last=now;samples=0;

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 24.10 turbulent whitewater and submerged aeration</title>
+<title>Rift Water Lab · WebGPU 24.10.1 visible crest foam and turbulent whitewater</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.10</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.10.1</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <details id="diagnostics">
@@ -148,7 +148,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>24.10 · turbulent foam + aeration</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>24.10.1 · visible crest foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -1592,9 +1592,10 @@ function createFoamAlphaTexture(){
   const a=Math.atan2(v,u);
   const edge=.79+.12*Math.sin(a*5+1.3)+.09*Math.sin(a*9-1.7);
   const radius=Math.hypot(u,v*1.12);
-  const softness=Math.max(0,Math.min(1,(edge-radius)*8));
+  const softness=Math.max(0,Math.min(1,(edge-radius)*10));
   const textureNoise=.77+.23*Math.sin(u*15+v*10)*Math.cos(v*12-u*7);
-  const opacity=Math.pow(softness,1.4)*textureNoise;
+  const cells=Math.sin(u*19+Math.sin(v*11)*2)*Math.cos(v*17+Math.sin(u*9)*2);
+  const opacity=Math.pow(softness,.85)*textureNoise*(.68+.32*Math.abs(cells));
   const i=(y*size+x)*4;
   data[i]=255;data[i+1]=255;data[i+2]=255;
   data[i+3]=Math.round(255*opacity);
@@ -1689,11 +1690,11 @@ function advanceBreakingFoam(dt,t){
     Math.hypot(f.x-boat.position.x,f.z-boat.position.z)>24)
    breakingFoam.splice(i,1);
  }
- if(!boat||t-lastBreakerEmit<.13||breakingFoam.length>=96)return;
+ if(!boat||t-lastBreakerEmit<.09||breakingFoam.length>=96)return;
  lastBreakerEmit=t;
  // Deterministic golden-angle sampling keeps births spatially dispersed,
  // rather than forming an obvious repeating grid around the boat.
- for(let k=0;k<10&&breakingFoam.length<96;k++){
+ for(let k=0;k<24&&breakingFoam.length<96;k++){
   const seed=breakerCounter++;
   const angle=seed*2.399963229728653;
   const radius=2.5+Math.sqrt(((seed*37)%83+.5)/83)*14;
@@ -1701,12 +1702,12 @@ function advanceBreakingFoam(dt,t){
   const z=boat.position.z+Math.sin(angle)*radius;
   const field=waveField(x,z,t,{});
   const slope=Math.hypot(field.slopeX,field.slopeZ);
-  const sharp=Math.max(0,Math.min(1,(slope-.22)/.48));
-  const elevated=Math.max(0,Math.min(1,(field.height+.18)/1.45));
+  const sharp=Math.max(0,Math.min(1,(Math.max(slope,field.steepness*.72)-.11)/.30));
+  const elevated=Math.max(0,Math.min(1,(field.height+.35)/.95));
   const irregular=.5+.5*Math.sin(x*.87+z*.51+t*.43+seed*.37);
-  const propensity=sharp*elevated*irregular*whitecapIntensity*
+  const propensity=sharp*elevated*(.55+.45*irregular)*whitecapIntensity*
     breakingIntensity;
-  if(propensity<.23)continue;
+  if(propensity<.095)continue;
   const life=1.8+1.7*irregular;
   // Wind drift + dominant wave direction, not permanent stationary decals.
   const wave=waveComponents[0];
@@ -1715,10 +1716,10 @@ function advanceBreakingFoam(dt,t){
   const vx=wave.dirX*flow*.55-field.slopeX*inv*flow*.45+.12;
   const vz=wave.dirZ*flow*.55-field.slopeZ*inv*flow*.45-.09;
   const kind=seed%5===0?0:seed%3===0?2:1;
-  const strength=Math.min(1,propensity);
+  const strength=Math.min(1,propensity*1.7);
   breakingFoam.push({x:x+field.dx,z:z+field.dz,vx,vz,baseVX:vx,baseVZ:vz,age:0,
     life:life*(kind===2?.72:1.2),strength,seed,kind});
-  if(strength>.55&&breakingFoam.length<96){
+  if(strength>.28&&breakingFoam.length<96){
    const sign=seed%2?1:-1;
    breakingFoam.push({x:x+field.dx+sign*.22,z:z+field.dz-sign*.18,
     vx:vx+sign*.15,vz:vz-sign*.12,baseVX:vx+sign*.15,baseVZ:vz-sign*.12,
@@ -1796,8 +1797,8 @@ function updateWhitewater(t){
    const age=f.age/f.life;
    const life=Math.min(1,age*12+.12)*Math.pow(Math.max(0,1-age),1.5);
    const fragment=.62+.38*Math.sin(f.seed*5.17+t*1.3);
-   const radius=(f.kind===0?.48:f.kind===1?.29:.12)*(1+age*.85)*(.8+.5*fragment);
-   const strength=f.strength*life*foamStrength;
+   const radius=(f.kind===0?1.05:f.kind===1?.68:.25)*(1+age*.85)*(.8+.5*fragment);
+   const strength=f.strength*life*foamStrength*1.6;
    const theta=Math.atan2(f.vz,f.vx);
    emit(f.x,f.z,radius,strength,theta,f.seed,f.kind===1?2.3+age*.8:f.kind===0?1.1:1.45);
    if(i%3===0&&age>.15&&age<.75){
@@ -1816,7 +1817,7 @@ function updateWhitewater(t){
  foamMesh.geometry.setDrawRange(0,count*6);
  foamMesh.geometry.attributes.position.needsUpdate=true;
  foamMesh.geometry.attributes.color.needsUpdate=true;
- $('foamStatus').textContent='Foam: '+count+' patches'+(foamDebug?' TEST':'');
+ $('foamStatus').textContent='Foam: '+count+' patches · '+breakingFoam.length+' breakers'+(foamDebug?' TEST':'');
 }
 // Continuous analytic surface normals eliminate lighting facets from
 // polygon-face derivatives. The same phase and trigonometry that moves
@@ -1886,6 +1887,7 @@ function animateWaves(t){
     (wave.steepness-0.24)/.40))*Math.max(0,Math.min(1,(wave.height+.1)/1.7));
   const irregular=.65+.35*Math.sin(wx*.73+wz*.41+t*.47)*
                               Math.cos(wx*.32-wz*.61-t*.30);
+  const crestFoam=breakingMode==='advanced'?Math.min(1,Math.max(0,(wave.steepness-.13)/.32)*Math.max(0,Math.min(1,(wave.height+.24)/1.1))*irregular*whitecapIntensity*breakingIntensity*1.5):0;
   const whitecap=whitecapIntensity*breaking*irregular;
   const shine=Math.min(1,Math.abs(disturbance)*.28+slope*.42+
     foam*.62+whitecap*.24);
@@ -1923,6 +1925,11 @@ function animateWaves(t){
   nearColorData[i]=Math.max(.025,Math.min(1,(.045+shallow*.18+shine*.24+glimmer*.11+foam*.70+subsurface*.21+capGlow*.64)*waveShade));
   nearColorData[i+1]=Math.max(.18,Math.min(1,(.35+shallow*.19+shine*.31+glimmer*.14+foam*.58+subsurface*.57+capGlow*.73)*waveShade));
   nearColorData[i+2]=Math.max(.23,Math.min(1,(.46+shallow*.17+shine*.34+glimmer*.16+foam*.48+subsurface*.38+capGlow*.90)*waveShade));
+  // Mix toward neutral whitewater rather than adding blue highlights.
+  const froth=Math.min(.88,crestFoam*.83);
+  nearColorData[i]+=(.96-nearColorData[i])*froth;
+  nearColorData[i+1]+=(.98-nearColorData[i+1])*froth;
+  nearColorData[i+2]+=(1-nearColorData[i+2])*froth;
   rippleSum+=Math.abs(disturbance);rippleMax=Math.max(rippleMax,Math.abs(disturbance));
  }
  lastRipple=rippleMax;

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 26.13 cellular whitewater and compression foam</title>
+<title>Rift Water Lab · WebGPU 26.14 directional ocean lighting and crest shadows</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.13</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.14</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.13 · cellular whitewater</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.14 · directional ocean lighting</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -2667,7 +2667,8 @@ function updateFoamSkin(t){
    const coverage=Math.max(0,Math.min(1,(d*foamStrength-.035)/.43));
    const breakup=.65+.35*Math.sin(wx*4.1+Math.sin(wz*2.9))*Math.cos(wz*3.7-Math.sin(wx*2.2));
    const alpha=Math.min(.94,foamStrength*(young*(.36+.57*lace)+shear*(.035+.72*lace)+coverage*(.025+.36*lace)+sub*.065)*breakup*fade);
-   const bright=Math.min(1,(.82+.12*scatter+.14*lace+.08*young)*shadow);
+   const sunVisibility=shadowReady?shadowSample(shadowField,x,z,1):1;
+   const bright=Math.min(1,(.82+.12*scatter+.14*lace+.08*young)*shadow*(1-Math.min(.32,(1-sunVisibility)*waveShadowStrength*.6)));
    data[k]=Math.round(255*bright);data[k+1]=Math.round(255*Math.min(1,bright+.025));data[k+2]=Math.round(255*Math.min(1,bright+.035));data[k+3]=Math.round(255*alpha);
   }
   foamOpticalMap.needsUpdate=true;
@@ -2736,7 +2737,7 @@ function advanceBreakingFoam(dt,t){
 }
 function updateWhitewater(t){
  if(!foamMesh||!boat)return;
- if(breakingMode==='advanced'&&!foamDebug){foamMesh.geometry.setDrawRange(0,0);$('foamStatus').textContent=fluid3Diagnostic()+' · vortices '+foamVortices.length+' · enstrophy '+fluid3Enstrophy.toFixed(3)+' · vertical '+fluid3Vertical.toFixed(2)+' m/s · surface '+(fsPeak*100).toFixed(1)+' cm'+' · hull load '+hullFluidLoad.toFixed(0)+' N · wet '+Math.round(hullWet*100)+'% · '+(hullContact>.01?'CONTACT':'AIRBORNE')+' · slam '+hullSlamming.toFixed(0)+' N · solid cells '+hullBoundaryCells+' · pressure '+hullPressureLoad.toFixed(0)+' N · wake packets '+kelvinPackets.length+' · wake height '+(kelvinPeak*100).toFixed(1)+' cm · impacts '+entryCount+' · entry energy '+entryEnergy.toFixed(2)+' · tracers '+vortexFilaments.length;return;}
+ if(breakingMode==='advanced'&&!foamDebug){foamMesh.geometry.setDrawRange(0,0);$('foamStatus').textContent=fluid3Diagnostic()+' · vortices '+foamVortices.length+' · enstrophy '+fluid3Enstrophy.toFixed(3)+' · vertical '+fluid3Vertical.toFixed(2)+' m/s · surface '+(fsPeak*100).toFixed(1)+' cm'+' · hull load '+hullFluidLoad.toFixed(0)+' N · wet '+Math.round(hullWet*100)+'% · '+(hullContact>.01?'CONTACT':'AIRBORNE')+' · slam '+hullSlamming.toFixed(0)+' N · solid cells '+hullBoundaryCells+' · pressure '+hullPressureLoad.toFixed(0)+' N · wake packets '+kelvinPackets.length+' · wake height '+(kelvinPeak*100).toFixed(1)+' cm · wave occlusion '+Math.round(shadowPeak*100)+'% · impacts '+entryCount+' · entry energy '+entryEnergy.toFixed(2)+' · tracers '+vortexFilaments.length;return;}
  if((foamStrength<.01||wakeAmount<.01)&&!foamDebug&&breakingFoam.length===0){
   foamMesh.geometry.setDrawRange(0,0);
   foamPatchCount=0;$('foamStatus').textContent='Foam: 0 patches';return;
@@ -2864,6 +2865,44 @@ function refreshSpectralLUT(){
   for(let c=0;c<3;c++)spectralLUT[j*3+c]=Math.exp(-coefficients[c]*path);
  }
 }
+// Cached directional horizon visibility, shared by both radial meshes.
+// Sampling the moving height field once on a coarse grid avoids per-vertex ray marching.
+const SH_N=49,SH_STEP=1.5,shadowHeight=new Float32Array(SH_N*SH_N),shadowField=new Float32Array(SH_N*SH_N);
+let shadowOX=0,shadowOZ=0,shadowTime=-100,shadowReady=false,shadowPeak=0;
+const shadowWave={};
+function shadowSample(field,x,z,fallback){
+ const u=(x-shadowOX)/SH_STEP,v=(z-shadowOZ)/SH_STEP;
+ if(u<0||v<0||u>=SH_N-1||v>=SH_N-1)return fallback;
+ const i=Math.floor(u),j=Math.floor(v),a=u-i,b=v-j,k=j*SH_N+i;
+ return (field[k]*(1-a)+field[k+1]*a)*(1-b)+(field[k+SH_N]*(1-a)+field[k+SH_N+1]*a)*b;
+}
+function horizonVisibility(h,look){
+ let obstruction=0;
+ // Sun direction matches scene directional light (16,35,8).
+ for(const d of [1.5,3,6,9]){
+  const rise=look(d)-h-d*(35/Math.hypot(16,8));
+  obstruction=Math.max(obstruction,rise);
+ }
+ return 1-Math.min(.65,Math.max(0,obstruction*.65));
+}
+function rebuildWaveShadows(t){
+ if(!boat||opticalMode==='legacy'||waveShadowStrength<=0){shadowReady=false;shadowPeak=0;return;}
+ if(shadowReady&&t-shadowTime<(simTier===2?.25:simTier===1?.18:.12)&&Math.hypot(boat.position.x-shadowOX-36,boat.position.z-shadowOZ-36)<2.2)return;
+ shadowOX=Math.floor((boat.position.x-36)/SH_STEP)*SH_STEP;
+ shadowOZ=Math.floor((boat.position.z-36)/SH_STEP)*SH_STEP;
+ for(let j=0;j<SH_N;j++)for(let i=0;i<SH_N;i++)shadowHeight[j*SH_N+i]=waveField(shadowOX+i*SH_STEP,shadowOZ+j*SH_STEP,t,shadowWave).height;
+ shadowPeak=0;
+ for(let j=0;j<SH_N;j++)for(let i=0;i<SH_N;i++){
+  const x=shadowOX+i*SH_STEP,z=shadowOZ+j*SH_STEP,k=j*SH_N+i,h=shadowHeight[k];
+  let obstruction=0;
+  for(const d of [1.5,3,6,9]){
+   const rise=shadowSample(shadowHeight,x+d*.894427,z+d*.447214,h)-h-d*1.95656;
+   obstruction=Math.max(obstruction,rise);
+  }
+  shadowField[k]=1-Math.min(.65,obstruction*.65);shadowPeak=Math.max(shadowPeak,1-shadowField[k]);
+ }
+ shadowTime=t;shadowReady=true;
+}
 function oceanSpectralTint(x,z,h,sx,sz,out,i){
  if(opticalMode==='legacy'){out[i]=.75;out[i+1]=.92;out[i+2]=.94;return;}
  const lx=x-(waterFloor?.position.x||0),lz=z-(waterFloor?.position.z||0);
@@ -2874,18 +2913,22 @@ function oceanSpectralTint(x,z,h,sx,sz,out,i){
  const inv=1/Math.sqrt(1+sx*sx+sz*sz);
  const sunDot=(-sx*.407+.891-sz*.204)*inv;
  const backlight=Math.max(0,Math.min(1,(.91-sunDot)*2.8));
- const glow=Math.min(.65,crest*backlight*subsurfaceLight*.85);
+ const visibility=shadowReady?shadowSample(shadowField,x,z,1):1;
+ const direct=Math.max(0,Math.min(1,sunDot/.891));
+ const shade=Math.min(.56,Math.max(0,(1-direct)*.52+(1-visibility)*.8)*waveShadowStrength);
+ const glow=Math.min(.65,crest*backlight*subsurfaceLight*.95)*(1-.45*shade);
  const path=Math.max(.35,Math.min(12,2.0+(1-shallow)*5.4+trough*2.2-crest*1.25-glow));
  const k=Math.round(path*128/12)*3;
  const r=spectralLUT[k],g=spectralLUT[k+1],bl=spectralLUT[k+2];
  // A bounded turquoise forward-scatter term, strongest at thin backlit crests.
- out[i]=Math.min(1,.16+.57*r+glow*.11);
- out[i+1]=Math.min(1,.29+.65*g+glow*.30);
- out[i+2]=Math.min(1,.36+.58*bl+glow*.12);
+ // Ambient sky remains blue in shadow; direct sun warms exposed faces.
+ out[i]=Math.min(1,(.16+.57*r)*(1-shade)+glow*.11+direct*.025);
+ out[i+1]=Math.min(1,(.29+.65*g)*(1-shade*.84)+glow*.30);
+ out[i+2]=Math.min(1,(.36+.58*bl)*(1-shade*.67)+glow*.12);
 }
 function animateWaves(t){
  if(!boat)return;
- refreshSpectralLUT();
+ refreshSpectralLUT();rebuildWaveShadows(t);
  if(surfaceNormalMap){
   // Keep micro-ripples in world space while the radial ocean follows boat.
   surfaceNormalMap.offset.set((boat.position.x+t*(.16+.09*windRipples))/4,
@@ -2999,7 +3042,7 @@ function resetBoat(){
  if(!boat)return;
  boat.position.set(-3.2,.6,-13);
  boat.rotation.set(0,0,0);vy=0;pitchV=0;rollV=0;
- boatHeading=0;boatSpeed=0;rudder=0;driveMode='stop';totalTravel=0;previousBoatHeading=0;turnVelocity=0;wakeSolver?.clear();wakeTrail=[];trailElapsed=0;kelvinPackets.length=0;kelvinClock=kelvinPeak=0;kwReady=false;entryEvents.length=0;entryAirQueue.length=0;entryCooldown=entryCount=entryEnergy=entryImpulse=0;
+ boatHeading=0;boatSpeed=0;rudder=0;driveMode='stop';totalTravel=0;previousBoatHeading=0;turnVelocity=0;wakeSolver?.clear();wakeTrail=[];trailElapsed=0;kelvinPackets.length=0;kelvinClock=kelvinPeak=0;kwReady=false;shadowReady=false;entryEvents.length=0;entryAirQueue.length=0;entryCooldown=entryCount=entryEnergy=entryImpulse=0;
  hullSlipX=hullSlipZ=hullFluidLoad=hullYawRate=hullWet=hullSlamming=hullContact=0;hullPressureX=hullPressureY=hullPressureZ=hullPressureLoad=hullBoundaryCells=0;vortexFilaments.length=0;clearFreeSurface();fluid3Epoch++;fluid3Frames=0;fluid3State='awaiting fresh field';if(fluid3){fluid3.cpu=null;fluid3.started=false;fluid3.d.queue.writeBuffer(fluid3.v[0],0,new Float32Array(F3C*4));}
  foamFieldReady=false;flowReady=false;foamVortices.length=0;vortexShed=0;vortexWaveShed=0;clearFoamFilms();foamDensity.fill(0);foamNext.fill(0);entrainedAir.fill(0);airNext.fill(0);breakingFoam.length=0;foamBubbles.length=0;foamBubbleSpawn=0;whitewaterSpray.length=0;sprayImpacts.length=0;cloudSamples=[];cloudTime=-100;
  if($('forward')){setDriveMode('stop');}

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 27.3.7 multiscale bubble optics</title>
+<title>Rift Water Lab · WebGPU 27.3.8 directional obstacle whitewater</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.3.7</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.3.8</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.3.7 · bubble optics</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.3.8 · obstacle flow</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -2542,8 +2542,18 @@ function advanceFoamMomentum(step,t){
   const spread=Math.tanh(side*3)*shoulder*.7;
   const relax=Math.min(1,step*1.2);
   evaluateVortices(x,z,vortexScratch);
-  const targetU=wave.dirX*.48+flowForceScratch.x*.65-fx*jet*.85+fz*spread+vortexScratch.x*1.5;
-  const targetV=wave.dirZ*.48+flowForceScratch.z*.65-fz*jet*.85-fx*spread+vortexScratch.z*1.5;
+  let targetU=wave.dirX*.48+flowForceScratch.x*.65-fx*jet*.85+fz*spread+vortexScratch.x*1.5;
+  let targetV=wave.dirZ*.48+flowForceScratch.z*.65-fz*jet*.85-fx*spread+vortexScratch.z*1.5;
+  // Approximate cylinder flow outside the contact boundary; use a
+  // bounded correction rather than injecting a radial foam ring.
+  for(const o of activeObjectFoam){
+   const rx=x-o.x,rz=z-o.z,r2=rx*rx+rz*rz,R=o.r*o.r;
+   if(r2>R*16||r2<.001)continue;
+   const q=Math.min(1,R/r2),nx=rx/Math.sqrt(r2),nz=rz/Math.sqrt(r2);
+   const dot=o.fx*nx+o.fz*nz,scale=o.strength*.85*q;
+   targetU+=scale*(o.fx-2*dot*nx);targetV+=scale*(o.fz-2*dot*nz);
+   if(r2<R){targetU*=.15;targetV*=.15;}
+  }
   flowNextU[k]=a+(targetU-a)*relax;
   flowNextV[k]=b+(targetV-b)*relax;
  }
@@ -2621,7 +2631,8 @@ function updateObjectFoam(t){
   const contact=objectContactStrength(surface,top,speed,o.wet);o.wet=contact.wet;
   if(contact.strength<.025)continue;
   const len=Math.hypot(vx,vz),fx=len>.08?vx/len:waveComponents[0].dirX,fz=len>.08?vz/len:waveComponents[0].dirZ;
-  activeObjectFoam.push({x,z,r:o.r,fx,fz,strength:contact.strength});
+  const phase=t*1.8+o.x*.71+o.z*.29;
+  activeObjectFoam.push({x,z,r:o.r,fx,fz,strength:contact.strength,phase});
   if(contact.strength>.13&&t-o.last>.23){
    o.last=t;objectFoamHits++;
    const side=bubbleHash(objectFoamHits+17)>.5?1:-1;
@@ -2635,11 +2646,17 @@ function objectFoamSource(x,z){
  let total=0;
  for(const o of activeObjectFoam){
   const dx=x-o.x,dz=z-o.z,along=dx*o.fx+dz*o.fz,side=dx*o.fz-dz*o.fx,r=Math.hypot(dx,dz);
-  if(r>o.r+2.6||r<o.r*.68)continue;
-  const rim=Math.exp(-(((r-o.r)/.68)**2));
-  const upstream=Math.max(.15,Math.min(1,.55-along/(o.r*2)));
-  const wake=along>0?Math.exp(-along*.9-(((Math.abs(side)-o.r*.8)/.55)**2))*.45:0;
-  total+=o.strength*(rim*upstream+wake);
+  if(r>o.r+4.5||r<o.r*.70)continue;
+  const heading=along/Math.max(.05,r),angle=Math.atan2(side,along);
+  const patch=.58+.42*Math.sin(angle*3+o.phase)*Math.cos(angle*5-o.phase*.7);
+  const rim=Math.exp(-(((r-o.r*1.04)/.42)**2));
+  const upstream=Math.max(0,-heading);
+  const impact=rim*upstream*upstream*(.55+.45*patch);
+  const shoulder=rim*Math.exp(-((heading+.18)**2)*9)*.30*patch;
+  const distance=Math.max(0,along-o.r*.35);
+  const bend=.32*Math.sin(distance*1.6-o.phase);
+  const wake=along>o.r*.15?Math.exp(-distance*.48-(((Math.abs(side-bend)-o.r*.80-distance*.13)/(.30+distance*.11))**2))*.66*Math.min(1,distance*2+.12):0;
+  total+=o.strength*(impact+shoulder+wake);
  }
  return Math.min(1,total);
 }
@@ -2882,7 +2899,7 @@ function updateFoamSkin(t){
    const fade=localWaterBlend(Math.hypot(lx,lz));
    if(fade<=0){data[k]=data[k+1]=data[k+2]=255;data[k+3]=0;continue;}
    const d=foamLayer(x,z,0),young=foamLayer(x,z,0,breakerFilm),shear=foamLayer(x,z,0,shearFilm);
-   const fresh=Math.min(1,(plungePool.length?crestFoamSource(x,z):0)*1.4+(activeObjectFoam.length?objectFoamSource(x,z):0)*1.8);
+   const fresh=Math.min(1,(plungePool.length?crestFoamSource(x,z):0)*1.4+(activeObjectFoam.length?objectFoamSource(x,z):0)*1.4);
    if((d+young+shear+fresh)*foamStrength<.045){data[k]=data[k+1]=data[k+2]=255;data[k+3]=0;continue;}
    const sub=foamLayer(x,z,1,entrainedAir)+.75*foamLayer(x,z,2,entrainedAir)+.45*foamLayer(x,z,3,entrainedAir);
    const column=Math.min(1,(d+sub)*.65);

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 26.4 visible vortex trails and hull-fluid feedback</title>
+<title>Rift Water Lab · WebGPU 26.5 distributed hull hydrodynamics</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.4</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.5</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.4 · vortex and hull coupling</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.5 · distributed hull physics</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -2509,7 +2509,7 @@ function advanceBreakingFoam(dt,t){
 }
 function updateWhitewater(t){
  if(!foamMesh||!boat)return;
- if(breakingMode==='advanced'&&!foamDebug){foamMesh.geometry.setDrawRange(0,0);$('foamStatus').textContent=fluid3Diagnostic()+' · vortices '+foamVortices.length+' · enstrophy '+fluid3Enstrophy.toFixed(3)+' · vertical '+fluid3Vertical.toFixed(2)+' m/s · surface '+(fsPeak*100).toFixed(1)+' cm'+' · hull load '+hullFluidLoad.toFixed(0)+' N · tracers '+vortexFilaments.length;return;}
+ if(breakingMode==='advanced'&&!foamDebug){foamMesh.geometry.setDrawRange(0,0);$('foamStatus').textContent=fluid3Diagnostic()+' · vortices '+foamVortices.length+' · enstrophy '+fluid3Enstrophy.toFixed(3)+' · vertical '+fluid3Vertical.toFixed(2)+' m/s · surface '+(fsPeak*100).toFixed(1)+' cm'+' · hull load '+hullFluidLoad.toFixed(0)+' N · wet '+Math.round(hullWet*100)+'% · slam '+hullSlamming.toFixed(0)+' N · tracers '+vortexFilaments.length;return;}
  if((foamStrength<.01||wakeAmount<.01)&&!foamDebug&&breakingFoam.length===0){
   foamMesh.geometry.setDrawRange(0,0);
   foamPatchCount=0;$('foamStatus').textContent='Foam: 0 patches';return;
@@ -2745,7 +2745,7 @@ function resetBoat(){
  boat.position.set(-3.2,.6,-13);
  boat.rotation.set(0,0,0);vy=0;pitchV=0;rollV=0;
  boatHeading=0;boatSpeed=0;rudder=0;driveMode='stop';totalTravel=0;previousBoatHeading=0;turnVelocity=0;wakeSolver?.clear();wakeTrail=[];trailElapsed=0;
- hullSlipX=hullSlipZ=hullFluidLoad=0;vortexFilaments.length=0;clearFreeSurface();fluid3Epoch++;fluid3Frames=0;fluid3State='awaiting fresh field';if(fluid3){fluid3.cpu=null;fluid3.started=false;fluid3.d.queue.writeBuffer(fluid3.v[0],0,new Float32Array(F3C*4));}
+ hullSlipX=hullSlipZ=hullFluidLoad=hullYawRate=hullWet=hullSlamming=0;vortexFilaments.length=0;clearFreeSurface();fluid3Epoch++;fluid3Frames=0;fluid3State='awaiting fresh field';if(fluid3){fluid3.cpu=null;fluid3.started=false;fluid3.d.queue.writeBuffer(fluid3.v[0],0,new Float32Array(F3C*4));}
  foamFieldReady=false;flowReady=false;foamVortices.length=0;vortexShed=0;vortexWaveShed=0;foamDensity.fill(0);foamNext.fill(0);entrainedAir.fill(0);airNext.fill(0);breakingFoam.length=0;foamBubbles.length=0;foamBubbleSpawn=0;whitewaterSpray.length=0;sprayImpacts.length=0;cloudSamples=[];cloudTime=-100;
  if($('forward')){setDriveMode('stop');}
 }
@@ -2789,8 +2789,11 @@ const hullSamples=[
  [-.65,-.72,1.65],[.65,-.72,1.65]
 ];
 let boatProbeOffset=null;
-let hullSlipX=0,hullSlipZ=0,hullFluidLoad=0;const hullFlowSample={};
-function stepBoat(dt,t){
+let hullSlipX=0,hullSlipZ=0,hullFluidLoad=0,hullYawRate=0,hullWet=0,hullSlamming=0;const hullFlowSample={};
+// Weighted waterplane strips approximate a tapered hull (bow at negative Z).
+const hydroProbes=[];for(const [z,width] of [[-2.05,.37],[-1.35,.73],[-.5,.92],[.45,.94],[1.35,.87],[2,.69]])for(const side of [-1,0,1])hydroProbes.push([side*width*.82,side===0?-.29:-.18,z,width*(side===0?.50:.25)]);
+const hydroArea=hydroProbes.reduce((a,p)=>a+p[3],0);
+function stepBoatClassic(dt,t){
  if(!boat||dt<=0)return;
  if(!boatProbeOffset)boatProbeOffset=new THREE.Vector3();
  const steps=Math.max(1,Math.min(5,Math.ceil(dt/(1/100)))),h=dt/steps;
@@ -2867,6 +2870,78 @@ function stepBoat(dt,t){
    boat.position.y=.6;boat.rotation.x=0;boat.rotation.z=0;
    vy=0;pitchV=0;rollV=0;
   }
+ }
+}
+
+// Distributed hydrostatic displacement and relative-flow forces.
+// Bounded semi-implicit integration in small substeps for mobile stability.
+function stepBoat(dt,t){
+ if(hullPhysics!=='dynamic'){stepBoatClassic(dt,t);return;}
+ if(!boat||dt<=0)return;
+ if(!boatProbeOffset)boatProbeOffset=new THREE.Vector3();
+ const steps=Math.max(1,Math.min(6,Math.ceil(dt/.008))),h=dt/steps;
+ const mass=420,Ix=mass*2.0,Iz=mass*.50,Iy=mass*2.1;
+ const desired=(steeringRight?1:0)-(steeringLeft?1:0);
+ rudder+=(desired-rudder)*(1-Math.exp(-dt*3.8));
+ for(let k=0;k<steps;k++){
+  const fx=-Math.sin(boatHeading),fz=-Math.cos(boatHeading),rx=-fz,rz=fx;
+  const forward=driveMode==='forward',powered=propulsionMode==='power';
+  const vx=fx*boatSpeed+hullSlipX,vz=fz*boatSpeed+hullSlipZ;
+  let fy=-mass*9.81,tx=-pitchV*Ix*1.9,tz=-rollV*Iz*2.6,forceX=0,forceZ=0,yaw=0,wet=0,load=0,slam=0;
+  const q=boat.quaternion;
+  for(const p of hydroProbes){
+   boatProbeOffset.set(p[0],p[1],p[2]).applyQuaternion(q);
+   const ox=boatProbeOffset.x,oy=boatProbeOffset.y,oz=boatProbeOffset.z;
+   const x=boat.position.x+ox,z=boat.position.z+oz,y=boat.position.y+oy;
+   const surface=oceanHeight(x,z,t+k*h),depth=surface-y;
+   if(!Number.isFinite(depth)||depth<=0)continue;
+   const area=5.1*p[3]/hydroArea,sub=Math.min(.85,depth),fraction=Math.min(1,depth/.24);
+   wet+=p[3]*fraction;
+   const ok=breakingMode==='advanced'&&sampleFluid3(x,y,z,hullFlowSample);
+   const ux=ok?hullFlowSample.x:0,uz=ok?hullFlowSample.z:0;
+   const uy=(ok?hullFlowSample.y*.65:0)+(wakeSolver?.sampleVelocity(x,z)||0)*.45;
+   const localV=vy+rollV*ox-pitchV*oz;
+   const relY=localV-Math.max(-2.5,Math.min(2.5,uy));
+   const buoy=1000*9.81*area*sub*buoyancyStrength;
+   const damp=-area*650*relY*fraction;
+   const impact=area*230*Math.min(9,Math.max(0,-relY)**2)*fraction;
+   const force=Math.max(0,Math.min(6500,buoy+damp+impact));
+   fy+=force;tx-=oz*force;tz+=ox*force;slam+=impact;
+   const relX=vx+hullYawRate*oz-ux,relZ=vz-hullYawRate*ox-uz;
+   const along=relX*fx+relZ*fz,side=relX*rx+relZ*rz;
+   const dragAlong=-area*fraction*(14*along+3.8*along*Math.abs(along));
+   const dragSide=-area*fraction*(95*side+32*side*Math.abs(side));
+   const px=fx*dragAlong+rx*dragSide,pz=fz*dragAlong+rz*dragSide;
+   forceX+=px;forceZ+=pz;yaw+=oz*px-ox*pz;
+   if(ok)load+=Math.abs(damp)+Math.hypot(px,pz);
+  }
+  hullWet=Math.min(1,wet/hydroArea);hullFluidLoad=load;hullSlamming=slam;
+  const thrust=forward?mass*sailPower*(powered?8.2:3.0*(.35+.65*Math.abs(Math.cos(boatHeading+.7)))):0;
+  forceX+=fx*thrust;forceZ+=fz*thrust;
+  const steer=rudder*Math.min(1,boatSpeed/2+.15);
+  yaw+=Iy*steer*(.35+.10*boatSpeed)-Iy*hullYawRate*2.2;
+  // Lift acts under the stern, only while wetted.
+  const lift=mass*9.81*Math.min(.24,Math.max(0,boatSpeed-2.5)*.035)*hullWet;
+  fy+=lift;tx-=lift*.45;
+  const accelF=(forceX*fx+forceZ*fz)/mass-(forward?0:Math.min(boatSpeed/h,1.4));
+  boatSpeed=Math.max(0,Math.min(powered?13:8,boatSpeed+h*Math.max(-8,Math.min(8,accelF))));
+  const sideSpeed=(hullSlipX*rx+hullSlipZ*rz)+(forceX*rx+forceZ*rz)/mass*h;
+  const sideBound=Math.max(-1.8,Math.min(1.8,sideSpeed))*Math.exp(-h*.35);
+  hullYawRate=Math.max(-.9,Math.min(.9,hullYawRate+yaw/Iy*h));
+  boatHeading+=hullYawRate*h;
+  hullSlipX=Math.cos(boatHeading)*sideBound;hullSlipZ=-Math.sin(boatHeading)*sideBound;
+  boat.position.x+=(-Math.sin(boatHeading)*boatSpeed+hullSlipX)*h;
+  boat.position.z+=(-Math.cos(boatHeading)*boatSpeed+hullSlipZ)*h;
+  totalTravel+=Math.hypot(boatSpeed,sideBound)*h;
+  vy=Math.max(-3.8,Math.min(3.8,vy+h*Math.max(-20,Math.min(20,fy/mass))));
+  pitchV=Math.max(-1.1,Math.min(1.1,pitchV+tx/Ix*h));
+  rollV=Math.max(-1.1,Math.min(1.1,rollV+tz/Iz*h));
+  boat.position.y+=vy*h;
+  boat.rotation.y=boatHeading;
+  boat.rotation.x=Math.max(-.48,Math.min(.48,boat.rotation.x+pitchV*h));
+  boat.rotation.z=Math.max(-.42,Math.min(.42,boat.rotation.z+rollV*h));
+  if(Math.abs(boat.rotation.x)>=.48)pitchV*=.5;if(Math.abs(boat.rotation.z)>=.42)rollV*=.5;
+  if(!Number.isFinite(boat.position.y+boat.position.x+boat.position.z+boatHeading+vy+pitchV+rollV)){resetBoat();return;}
  }
 }
 function setDriveMode(mode){

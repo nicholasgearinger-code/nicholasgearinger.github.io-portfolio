@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 27.3.2 unified liquid surface coupling</title>
+<title>Rift Water Lab · WebGPU 27.3.3 shared crest whitewater</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.3.2</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.3.3</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.3.2 · unified surface</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.3.3 · crest whitewater</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -2606,7 +2606,8 @@ function advanceFoamDensity(dt,t){
   const steep=Math.max(0,Math.min(1,(Math.hypot(w.slopeX,w.slopeZ)-.15)/.30));
   const band=.65+.35*Math.sin(x*.52+z*.31-t*.56)*Math.cos(z*.43-x*.22+t*.31);
   const compression=Math.max(0,Math.min(1,(w.compression-.06)/.27));
-  const waveAir=(crest*steep*steep*.30+compression*compression*(.15+.85*crest)*.65)*band*whitecapIntensity*breakingIntensity;
+  const crestSource=plungePool.length?crestFoamSource(x,z):0;
+  const waveAir=(crest*steep*steep*.30+compression*compression*(.15+.85*crest)*.65)*band*whitecapIntensity*breakingIntensity+crestSource*.72;
   const dx=x-boat.position.x,dz=z-boat.position.z,along=dx*fx+dz*fz,side=dx*fz-dz*fx;
   const stern=Math.exp(-((along+2.25)*(along+2.25)*.30+side*side*.85));
   const hull=Math.exp(-along*along*.30-Math.pow(Math.abs(side)-.70,2)*4.2);
@@ -2647,8 +2648,8 @@ function advanceFoamDensity(dt,t){
     // Transport material coordinates with the density; do not scroll a texture in time.
     foamDriftNextX[p]=Math.max(-8,Math.min(8,(foamLayer(sx,sz,0,foamDriftX)+x-sx)*.995));
     foamDriftNextZ[p]=Math.max(-8,Math.min(8,(foamLayer(sx,sz,0,foamDriftZ)+z-sz)*.995));
-    const hit=waveAir*.85+churn*.52;
-    const stretch=vortexAir*.40+gpuAir*.12+boatAir*.32;
+    const hit=waveAir*.85+churn*.52+crestSource*1.05;
+    const stretch=vortexAir*.40+gpuAir*.12+boatAir*.32+crestSource*.25;
     breakerNext[p]=Math.max(0,Math.min(1,young*Math.exp(-step*1.6)+step*hit*(1-young)));
     shearNext[p]=Math.max(0,Math.min(1,shear*Math.exp(-step*.63)+step*(stretch+young*.42)*(1-shear)*(1-.5*vortexCore)));
    }
@@ -2850,7 +2851,51 @@ function crestFold(along,side,p,out){
 }
 const crestOffset={forward:0,up:0};
 let crestVertices=0;
-function clearPlunges(){plungePool.length=0;plungeClock=0;plungeImpacts=0;crestVertices=0;}
+function clearPlunges(){plungePool.length=0;plungeClock=0;plungeImpacts=0;crestVertices=0;crestFoamCount=0;}
+// Shared whitewater source: moving folded crest, impact, residual transport.
+const crestFoamScratch={forward:0,up:0};
+let crestFoamCount=0;
+function crestFoamPhase(a){
+ const rise=Math.max(0,Math.min(1,(a-.12)/.23));
+ const fall=Math.max(0,Math.min(1,(.98-a)/.22));
+ return rise*fall;
+}
+function crestFoamSource(x,z){
+ let total=0;
+ for(const p of plungePool){
+  const dx=x-p.x,dz=z-p.z,along=dx*p.fx+dz*p.fz,side=dx*p.fz-dz*p.fx;
+  const half=p.width*.5,L=Math.max(1.25,p.height*1.8),a=p.age/p.life;
+  if(Math.abs(side)>=half||Math.abs(along)>L+2)continue;
+  const root=-.16*L;
+  if(!crestFold(root,side,p,crestFoamScratch))continue;
+  const lip=root+crestFoamScratch.forward;
+  const span=Math.max(0,1-(side/half)**2);
+  const width=.30+.32*Math.max(0,(a-.55)/.45);
+  const ridge=Math.exp(-(((along-lip)/width)**2));
+  const collapse=a>.65?Math.exp(-(((along-lip-.38)/.85)**2))*Math.min(1,(a-.65)*5):0;
+  const irregular=.72+.28*Math.sin(side*3.7+p.x*.53+p.z*.31);
+  total+=crestFoamPhase(a)*span*span*irregular*(ridge*.95+collapse*.65)*Math.min(1,p.height);
+ }
+ return Math.min(1.4,total*breakingIntensity*whitecapIntensity);
+}
+function emitCrestParcels(p,t){
+ const a=p.age/p.life,phase=crestFoamPhase(a);
+ if(phase<.15||foamStrength<.01)return;
+ if(t-(p.foamAt??-100)<(simTier===2?.15:.10))return;
+ p.foamAt=t;
+ const n=simTier===2?2:3,L=Math.max(1.25,p.height*1.8),along=-.16*L;
+ for(let j=0;j<n;j++){
+  const seed=++plungeSeed,side=(bubbleHash(seed+21)-.5)*p.width*.78;
+  if(!crestFold(along,side,p,crestFoamScratch))continue;
+  const forward=along+crestFoamScratch.forward;
+  const x=p.x+p.fx*forward+p.fz*side,z=p.z+p.fz*forward-p.fx*side;
+  const strength=phase*Math.min(1,p.height)*foamStrength*breakingIntensity*whitecapIntensity;
+  spawnFoamParcel(x,z,strength,p.fx*p.speed*.5,p.fz*p.speed*.5);
+  crestFoamCount++;
+  if(a>.48&&a<.82&&j===0&&strength>.25)emitWhitewater(x,z,t,strength*.7,p.fx,p.fz);
+ }
+}
+
 function updatePlunges(dt,t){
  if(!boat||breakingMode!=='advanced'||breakingIntensity<.05){clearPlunges();return;}
  const budget=simTier===2?1:simTier===1?2:3;
@@ -2876,13 +2921,14 @@ function updatePlunges(dt,t){
   const p=plungePool[i];p.age+=dt;const a=p.age/p.life;
   if(a>=1||Math.hypot(p.x-boat.position.x,p.z-boat.position.z)>13){plungePool.splice(i,1);continue;}
   p.x+=p.fx*p.speed*dt;p.z+=p.fz*p.speed*dt;
+  emitCrestParcels(p,t);
   // Approximate collapse impulse; a reconstructed liquid surface is needed for exact contact.
   if(!p.hit&&a>.69){
    p.hit=true;plungeImpacts++;
    for(let k=-1;k<=1;k++){
     const x=p.x+p.fx*p.height+p.fz*k*p.width*.22,z=p.z+p.fz*p.height-p.fx*k*p.width*.22;
     const e={x,z,energy:Math.min(.7,p.height*.4),age:0,fx:p.fx,fz:p.fz,plunge:true};
-    entryEvents.push(e);entryAirQueue.push({...e});for(let n=0;n<4;n++)emitWhitewater(x,z,t,e.energy*1.8,p.fx,p.fz);
+    entryEvents.push(e);entryAirQueue.push({...e});spawnFoamParcel(x,z,Math.min(1,e.energy*1.8)*foamStrength,p.fx*p.speed*.35,p.fz*p.speed*.35);for(let n=0;n<4;n++)emitWhitewater(x,z,t,e.energy*1.8,p.fx,p.fz);
    }
    while(entryEvents.length>12)entryEvents.shift();while(entryAirQueue.length>12)entryAirQueue.shift();
   }

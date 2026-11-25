@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 26.0.1 validated WebGPU fluid diagnostics</title>
+<title>Rift Water Lab · WebGPU 26.0.2 seamless ocean and pinned fluid status</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,9 +72,10 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.0.1</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.0.2</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
+  <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
   <details id="diagnostics">
    <summary>Diagnostics &amp; performance</summary>
    <div class="diagnosticBody">
@@ -148,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.0.1 · validated 3D fluid</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.0.2 · seamless 3D fluid</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -282,7 +283,8 @@ function status(m){window.__waterFallback?.notice(m);}
 // A concentric two-zone mesh has no overlapping opaque water surface.
 // The inner disk is finely tessellated around the boat; the outer annulus
 // carries inexpensive swells. Their shared radius is exactly 16 metres.
-const LOCAL_RADIUS=16,WAKE_FADE_START=11;
+const LOCAL_RADIUS=16,WAKE_FADE_START=9;
+function localWaterBlend(r){const a=Math.max(0,Math.min(1,(LOCAL_RADIUS-r)/(LOCAL_RADIUS-WAKE_FADE_START)));return a*a*(3-2*a);}
 function radialGeometry(radii,angular,withCenter=false){
  const positions=[],uvs=[],secondaryUVs=[],indices=[];
  if(withCenter){positions.push(0,0,0);uvs.push(0,0);secondaryUVs.push(.5,.5);}
@@ -771,17 +773,17 @@ function updateUndersideOptics(){
   const near=material===waterNearMaterial;
   const baseEnv=(reflectionMode==='enhanced'?1.12+surfaceGlitter*.56:.75+surfaceGlitter*.55)*reflectionStrength;
   material.envMapIntensity=baseEnv*(1+blend*.42*underwaterFresnel);
-  const baseTransmission=near?.74:.28;
+  const baseTransmission=.48;
   const baseStrength=Math.min(1.5,waterClarity)*Math.min(1.6,depthRefraction);
   material.transmission=opticalMode==='legacy'?0:Math.max(.015,
     Math.min(.98,baseTransmission*baseStrength*(1+blend*.28*underwaterRefraction)));
   material.attenuationDistance=(opticalMode==='deep'?5.2:13)*waterClarity*
     (1+blend*.22*underwaterTransmission);
-  const normal=(near?.31:.095)*surfaceDetail*(1+blend*.45*undersideDistortion);
-  const clearcoat=(near?.23:.075)*fineRipple*(1+blend*.22*undersideDistortion);
+  const normal=.22*surfaceDetail*(1+blend*.45*undersideDistortion);
+  const clearcoat=.15*fineRipple*(1+blend*.22*undersideDistortion);
   material.normalScale.set(normal,normal);
   material.clearcoatNormalScale?.set(clearcoat,clearcoat);
-  material.roughness=(near?.17:.22)*(1-blend*.23);
+  material.roughness=.19*(1-blend*.23);
   material.ior=1.333;
  }
  if(underwaterSunlight&&underwaterAmbient){
@@ -823,25 +825,25 @@ function syncWaterDetail(){
   // The base dielectric layer supplies Fresnel reflection (IOR = 1.333).
   // Transmission, reflection and optical attenuation remain independent
   // controls so the user can compare clarity against surface reflection.
-  mat.transmission=physical?(isNear?.74:.28)*Math.min(1.5,waterClarity)*Math.min(1.6,depthRefraction):0;
+  mat.transmission=physical?.48*Math.min(1.5,waterClarity)*Math.min(1.6,depthRefraction):0;
   mat.ior=1.333;
-  mat.thickness=isNear?(depthRefraction*30):4.2;
-  mat.thicknessMap=(physical&&isNear&&depthRefraction>.01)?thicknessTexture:null;
+  mat.thickness=4.2;
+  mat.thicknessMap=null;
   mat.attenuationDistance=(opticalMode==='deep'?5.2:13.0)*waterClarity;
   mat.attenuationColor.copy(absorption);
   mat.depthWrite=!physical;
   mat.transparent=false;
-  mat.color.setHex(physical?(isNear?0x90e5dc:0x278fa8):(isNear?0xffffff:0x148ba2));
+  mat.color.setHex(physical?0x278fa8:0x148ba2);
   mat.vertexColors=isNear;
   mat.side=THREE.DoubleSide;
   mat.envMapIntensity=(reflectionMode==='enhanced'?1.12+surfaceGlitter*.56:.75+surfaceGlitter*.55)*reflectionStrength;
-  mat.normalScale.set(surfaceDetail*(isNear?.31:.095)*(.4+.6*windRipples),
-    surfaceDetail*(isNear?.31:.095)*(.4+.6*windRipples));
-  mat.clearcoatNormalScale?.set(fineRipple*(isNear?.23:.075)*windRipples,
-    fineRipple*(isNear?.23:.075)*windRipples);
+  mat.normalScale.set(surfaceDetail*.22*(.4+.6*windRipples),
+    surfaceDetail*.22*(.4+.6*windRipples));
+  mat.clearcoatNormalScale?.set(fineRipple*.15*windRipples,
+    fineRipple*.15*windRipples);
   mat.clearcoat=Math.min(.75,.45+surfaceGlitter*.16);
-  mat.clearcoatRoughness=isNear?.18:.22;
-  mat.roughness=isNear?.17:.22;
+  mat.clearcoatRoughness=.20;
+  mat.roughness=.19;
   mat.needsUpdate=true;
  }
  lastUndersideMix=-1;
@@ -2257,7 +2259,7 @@ function updateFoamSkin(t){
   for(let j=0;j<FOAM_MASK;j++)for(let i=0;i<FOAM_MASK;i++){
    const lx=((i+.5)/FOAM_MASK-.5)*LOCAL_RADIUS*2,lz=((j+.5)/FOAM_MASK-.5)*LOCAL_RADIUS*2;
    const x=cx+lx,z=cz+lz,k=(j*FOAM_MASK+i)*4;
-   const fade=Math.max(0,Math.min(1,(LOCAL_RADIUS-Math.hypot(lx,lz))/2.4));
+   const fade=localWaterBlend(Math.hypot(lx,lz));
    const d=foamLayer(x,z,0),sub=foamLayer(x,z,1)+.75*foamLayer(x,z,2)+.45*foamLayer(x,z,3);
    if(fade<=0||d*foamStrength<.045){data[k]=data[k+1]=data[k+2]=255;data[k+3]=0;continue;}
    const column=Math.min(1,(d+sub)*.65);
@@ -2375,7 +2377,7 @@ function updateWhitewater(t){
    const field=waveField(qx,qz,t);
    const wx=qx+field.dx,wz=qz+field.dz,p=vi+k*3;
    const radial=Math.hypot(wx-boat.position.x,wz-boat.position.z);
-   const fade=Math.max(0,Math.min(1,(LOCAL_RADIUS-radial)/(LOCAL_RADIUS-WAKE_FADE_START)));
+   const fade=localWaterBlend(radial);
    foamPositions[p]=wx;
    foamPositions[p+1]=field.height+fade*(wakeSolver?.sample(wx,wz)||0)+.055;
    foamPositions[p+2]=wz;
@@ -2496,14 +2498,14 @@ function animateWaves(t){
   const wave=waveField(x,z,t);
   const wx=x+wave.dx,wz=z+wave.dz;
   const radial=Math.hypot(px,pz);
-  const fade=Math.max(0,Math.min(1,(LOCAL_RADIUS-radial)/(LOCAL_RADIUS-WAKE_FADE_START)));
+  const fade=localWaterBlend(radial);
   const disturbance=fade*(wakeSolver?.sample(wx,wz)||0);
   arr[i]=px+wave.dx;arr[i+2]=pz+wave.dz;
   arr[i+1]=wave.height+disturbance;
   // Local crest highlights follow the same pressure field; no fake
   // particle sprites or V-shaped lines.
   let wakeSlopeX=0,wakeSlopeZ=0;
-  if(radial<13&&wakeSolver){
+  if(radial<LOCAL_RADIUS&&wakeSolver){
    const dx=.33;
    wakeSlopeX=(wakeSolver.sample(wx+dx,wz)-wakeSolver.sample(wx-dx,wz))/(2*dx);
    wakeSlopeZ=(wakeSolver.sample(wx,wz+dx)-wakeSolver.sample(wx,wz-dx))/(2*dx);
@@ -2511,7 +2513,7 @@ function animateWaves(t){
   // The wake influence fades near the seam between radial patches.
   smoothWaterNormal(nearNormals,i,wave.slopeX+fade*wakeSlopeX,
      wave.slopeZ+fade*wakeSlopeZ);
-  const slope=Math.abs(wakeSlopeX)+Math.abs(wakeSlopeZ);
+  const slope=(Math.abs(wakeSlopeX)+Math.abs(wakeSlopeZ))*fade;
   const foam=radial<15?wakeAppearance(wx,wz,t)*fade:0;
   // Foam is restricted to locally steep crests and intermittent folds,
   // not stamped uniformly on every passing swell.
@@ -2554,22 +2556,14 @@ function animateWaves(t){
   // Shallow water transmits more green/blue seabed light, while deep
   // water is more absorptive. Vertex color stays low-frequency; the
   // separate normal maps own the small optical ripples.
-  nearColorData[i]=Math.max(.025,Math.min(1,(.045+shallow*.18+shine*.24+glimmer*.11+foam*.70+subsurface*.21+capGlow*.64)*waveShade));
-  nearColorData[i+1]=Math.max(.18,Math.min(1,(.35+shallow*.19+shine*.31+glimmer*.14+foam*.58+subsurface*.57+capGlow*.73)*waveShade));
-  nearColorData[i+2]=Math.max(.23,Math.min(1,(.46+shallow*.17+shine*.34+glimmer*.16+foam*.48+subsurface*.38+capGlow*.90)*waveShade));
-  // Mix toward neutral whitewater rather than adding blue highlights.
-  const foamFlowX=wx*.85+Math.sin(wz*.7-t*.4)*.45-t*.24;
-  const foamFlowZ=wz*1.1+Math.sin(wx*.6+t*.3)*.5-t*.31;
-  const film=Math.pow(Math.max(0,1-Math.abs(Math.sin(foamFlowX*2.1+Math.sin(foamFlowZ*1.7)))),3);
-  const density=sampleFoamDensity(wx,wz);
-  const laceX=foamFlowX+Math.sin(foamFlowZ*2.3)*.32;
-  const laceZ=foamFlowZ+Math.sin(foamFlowX*2.1)*.30;
-  const lace=Math.pow(Math.max(0,1-Math.min(Math.abs(Math.sin(laceX*2.8)),Math.abs(Math.sin(laceZ*3.2)))*2.1),2);
-  const persistent=breakingMode==='advanced'?Math.min(1,density*foamStrength*2.5)*(.52+.36*lace+.12*film)*fade:0;
-  const froth=Math.min(.06,Math.max(persistent*.06,crestFoam*.045*fade));
-  nearColorData[i]+=(.96-nearColorData[i])*froth;
-  nearColorData[i+1]+=(.98-nearColorData[i+1])*froth;
-  nearColorData[i+2]+=(1-nearColorData[i+2])*froth;
+  // Both meshes now use identical base optical parameters. Vertex color
+  // is a subtle multiplier only; white at the shared ring is exact parity.
+  const light=Math.max(.86,Math.min(1,waveShade+shine*.12+subsurface*.12));
+  nearColorData[i]=1-fade*(1-light)*.60;
+  nearColorData[i+1]=1-fade*(1-light)*.45;
+  nearColorData[i+2]=1-fade*(1-light)*.30;
+  // Whitewater color is handled by the separate RGBA foam skin, avoiding
+  // a double tint of the base water and a green near-field disk.
   rippleSum+=Math.abs(disturbance);rippleMax=Math.max(rippleMax,Math.abs(disturbance));
  }
  lastRipple=rippleMax;
@@ -3457,6 +3451,7 @@ async function init3D(forceWebGL=false){
   const now=performance.now();
   if(now-last>1100){
    const measured=samples*1000/(now-last);
+   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · eddies '+foamVortices.length:'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
    $('fps').textContent='FPS: '+Math.round(measured);
    adjustAdaptivePerformance(measured,now);
    last=now;samples=0;

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 24.11 cellular seafoam and turbulent ribbons</title>
+<title>Rift Water Lab · WebGPU 24.11.1 cellular seafoam startup fix</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.11</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.11.1</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <details id="diagnostics">
@@ -148,7 +148,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>24.11 · cellular seafoam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>24.11.1 · cellular seafoam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -1622,8 +1622,8 @@ function createFoamAlphaTexture(){
  }
  const t=new THREE.DataTexture(data,size,size,THREE.RGBAFormat);
  t.wrapS=THREE.ClampToEdgeWrapping;t.wrapT=THREE.ClampToEdgeWrapping;
- t.minFilter=THREE.LinearMipmapLinearFilter;t.magFilter=THREE.LinearFilter;
- t.generateMipmaps=true;t.needsUpdate=true;
+ t.minFilter=THREE.LinearFilter;t.magFilter=THREE.LinearFilter;
+ t.generateMipmaps=false;t.needsUpdate=true;
  return t;
 }
 function createFoamField(){
@@ -1633,8 +1633,8 @@ function createFoamField(){
  foamColors=new Float32Array(foamCapacity*4*4);
  for(let i=0;i<foamCapacity;i++){
   const v=i*4;indices.push(v,v+2,v+1,v,v+3,v+2);
-  const tile=i%4, u=(tile%2)*.5,v=Math.floor(tile/2)*.5,pad=1/256;
-  uvs.push(u+pad,v+pad,u+.5-pad,v+pad,u+.5-pad,v+.5-pad,u+pad,v+.5-pad);
+  const tile=i%4, u=(tile%2)*.5, atlasV=Math.floor(tile/2)*.5,pad=1/256;
+  uvs.push(u+pad,atlasV+pad,u+.5-pad,atlasV+pad,u+.5-pad,atlasV+.5-pad,u+pad,atlasV+.5-pad);
  }
  geo.setAttribute('position',new THREE.BufferAttribute(foamPositions,3).setUsage(THREE.DynamicDrawUsage));
  geo.setAttribute('color',new THREE.BufferAttribute(foamColors,4).setUsage(THREE.DynamicDrawUsage));

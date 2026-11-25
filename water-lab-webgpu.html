@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 26.1 vortex stretching and turbulent energy</title>
+<title>Rift Water Lab · WebGPU 26.2 coupled aeration physics and green-blue ocean</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.1</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.2</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.1 · 3D vortex stretching</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.2 · coupled water-air physics</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -816,7 +816,7 @@ function smoothOceanRadii(){
 }
 function syncWaterDetail(){
  const physical=opticalMode!=='legacy';
- const absorption=opticalMode==='deep'?new THREE.Color(0x0a6175):new THREE.Color(0x48cbd1);
+ const absorption=opticalMode==='deep'?new THREE.Color(0x0a6175):new THREE.Color(0x55d0bc);
  for(const mat of [waterNearMaterial,waterFarMaterial]){
   if(!mat)continue;
   // Built-in physical transmission: refractive scene capture, dielectric
@@ -833,8 +833,8 @@ function syncWaterDetail(){
   mat.attenuationColor.copy(absorption);
   mat.depthWrite=!physical;
   mat.transparent=false;
-  mat.color.setHex(physical?0x278fa8:0x148ba2);
-  mat.vertexColors=isNear;
+  mat.color.setHex(physical?0x249e9c:0x168f90);
+  mat.vertexColors=true;
   mat.side=THREE.DoubleSide;
   mat.envMapIntensity=(reflectionMode==='enhanced'?1.12+surfaceGlitter*.56:.75+surfaceGlitter*.55)*reflectionStrength;
   mat.normalScale.set(surfaceDetail*.22*(.4+.6*windRipples),
@@ -1403,6 +1403,7 @@ function makeSurface(){
  const farRadii=smoothOceanRadii();
  geometry=radialGeometry(farRadii,angular);
  base=Float32Array.from(geometry.attributes.position.array);
+ geometry.setAttribute('color',new THREE.BufferAttribute(new Float32Array(base.length).fill(1),3));
  const material=new THREE.MeshPhysicalMaterial({
   color:0x148ba2,roughness:.18,metalness:0,
   clearcoat:.45,clearcoatRoughness:.13,
@@ -1720,7 +1721,7 @@ function updateBreakerAeration(t){
   const angle=seed*2.399963,radius=Math.sqrt(bubbleHash(seed))*13;
   const x=boat.position.x+Math.cos(angle)*radius,z=boat.position.z+Math.sin(angle)*radius;
   const k=1+Math.floor(bubbleHash(seed+31)*(FOAM_LAYERS-1));
-  const density=foamLayer(x,z,k);
+  const density=foamLayer(x,z,k,entrainedAir);
   if(density<.018||bubbleHash(seed+71)>Math.min(1,density*3))continue;
   const q=bubbleHash(seed+19),kind=q<.57?0:q<.88?1:2;
   foamBubbles.push({x,z,depth:(k+.25*bubbleHash(seed+7))*FOAM_DZ,kind,age:0,life:1.5+3*bubbleHash(seed+91)});
@@ -1851,6 +1852,7 @@ const FOAM_GRID=64,FOAM_LAYERS=6,FOAM_SPAN=36,FOAM_STEP=FOAM_SPAN/(FOAM_GRID-1),
 const FOAM_PLANE=FOAM_GRID*FOAM_GRID;
 let foamDensity=new Float32Array(FOAM_PLANE*FOAM_LAYERS),foamNext=new Float32Array(foamDensity.length);
 let foamOriginX=0,foamOriginZ=0,foamFieldReady=false,foamElapsed=0;
+ let entrainedAir=new Float32Array(FOAM_PLANE*FOAM_LAYERS),airNext=new Float32Array(entrainedAir.length);
 // Coarse horizontal momentum grid, shared by all six aeration layers.
 // Semi-Lagrangian transport + vorticity confinement + Jacobi projection.
 const FLOW_N=40,FLOW_SPAN=36,FLOW_H=FLOW_SPAN/(FLOW_N-1),FLOW_COUNT=FLOW_N*FLOW_N;
@@ -2143,18 +2145,18 @@ function advanceFoamMomentum(step,t){
 }
 const foamWaveScratch={};
 const foamWaveProfile=[1,.72,.38,.16,.06,.02],foamHullProfile=[.75,.85,.42,.16,.04,.01],foamSternProfile=[.22,1,.92,.46,.14,.03];
-function foamLayer(x,z,k){
+function foamLayer(x,z,k,field=foamDensity){
  if(!foamFieldReady||k<0||k>=FOAM_LAYERS)return 0;
  const u=(x-foamOriginX)/FOAM_STEP,v=(z-foamOriginZ)/FOAM_STEP;
  if(u<0||v<0||u>=FOAM_GRID-1||v>=FOAM_GRID-1)return 0;
  const i=Math.floor(u),j=Math.floor(v),a=u-i,b=v-j,p=k*FOAM_PLANE+j*FOAM_GRID+i;
- return (foamDensity[p]*(1-a)+foamDensity[p+1]*a)*(1-b)+
- (foamDensity[p+FOAM_GRID]*(1-a)+foamDensity[p+FOAM_GRID+1]*a)*b;
+ return (field[p]*(1-a)+field[p+1]*a)*(1-b)+
+ (field[p+FOAM_GRID]*(1-a)+field[p+FOAM_GRID+1]*a)*b;
 }
 function sampleFoamDensity(x,z){return foamLayer(x,z,0);}
 function advanceFoamDensity(dt,t){
  if(!boat||breakingMode!=='advanced'||foamStrength<.01){
-  if(foamFieldReady)foamDensity.fill(0);
+  if(foamFieldReady){foamDensity.fill(0);entrainedAir.fill(0);}
   foamFieldReady=false;flowReady=false;foamVortices.length=0;foamElapsed=0;return;
  }
  foamElapsed+=dt;if(foamElapsed<.10)return;
@@ -2185,6 +2187,11 @@ function advanceFoamDensity(dt,t){
    const here=foamLayer(sx,sz,k),below=foamLayer(sx,sz,k+1),above=k?foamLayer(sx,sz,k-1):0;
    const coalescence=Math.max(0,here-.25)*Math.max(0,below-.12);
    const vertical=gpu?flowReadScratch.y:0;
+   const gas=foamLayer(sx,sz,k,entrainedAir),gasBelow=foamLayer(sx,sz,k+1,entrainedAir),gasAbove=k?foamLayer(sx,sz,k-1,entrainedAir):gas;
+   // Separate entrained gas fraction from surface film concentration.
+   const buoyant=.17+.55*gas;
+   const vzGas=vertical+buoyant;
+   const gasTransport=gas+(vzGas>=0?gasBelow-gas:gasAbove-gas)*Math.min(.45,Math.abs(vzGas)*step/FOAM_DZ);
    const rise=Math.min(.45,step*Math.max(0,.22+k*.025+coalescence*.30+vertical)/FOAM_DZ);
    const mixing=step*(.18+.16*Math.min(1,waveAir+boatAir));
    let d=here+(below-here)*rise+(above+below-2*here)*mixing;
@@ -2195,8 +2202,14 @@ function advanceFoamDensity(dt,t){
    else if(k===1)d*=Math.exp(-step*.16);
    d*=Math.exp(-step*(.24+k*.09));
    const gpuAir=gpu?Math.min(.65,Math.max(0,flowReadScratch.curl-.14)*.30+Math.max(0,flowReadScratch.y-.08)*.14)*Math.exp(-k*.35):0;
-   const source=waveAir*foamWaveProfile[k]*2.2+power*(stern*1.8*foamSternProfile[k]+hull*.9*foamHullProfile[k])*3.1+vortexAir*foamWaveProfile[k]*1.8+gpuAir;
-   foamNext[k*FOAM_PLANE+p]=Math.max(0,Math.min(1,d+step*source*(1-d)));
+   const source=waveAir*foamWaveProfile[k]*1.65+power*(stern*1.8*foamSternProfile[k]+hull*.9*foamHullProfile[k])*2.1+vortexAir*foamWaveProfile[k]*1.3+gpuAir*.55;
+   const index=k*FOAM_PLANE+p;
+   const gasMixed=gasTransport+step*.14*(gasAbove+gasBelow-2*gas);
+   const gasNew=Math.max(0,Math.min(.85,gasMixed*Math.exp(-step*(k===0?.75:.20))+step*source*(1-gas)));
+   airNext[index]=gasNew;
+   // Gas escaping at the surface feeds film; deeper film follows aeration.
+   const filmSource=k===0?gasNew*.95+source*.25:gasNew*.38;
+   foamNext[index]=Math.max(0,Math.min(1,d*Math.exp(-step*.18)+step*filmSource*(1-d)));
   }
  }
  // Returning droplets re-entrain air into the top three layers.
@@ -2204,11 +2217,12 @@ function advanceFoamDensity(dt,t){
   const ix=Math.round((impact.x-ox)/FOAM_STEP),iz=Math.round((impact.z-oz)/FOAM_STEP);
   for(let j=Math.max(0,iz-1);j<=Math.min(FOAM_GRID-1,iz+1);j++)for(let i=Math.max(0,ix-1);i<=Math.min(FOAM_GRID-1,ix+1);i++){
    const weight=impact.energy*.14/(1+(i-ix)**2+(j-iz)**2);
-   for(let k=0;k<3;k++){const p=k*FOAM_PLANE+j*FOAM_GRID+i;foamNext[p]=Math.min(1,foamNext[p]+weight*(1-k*.3));}
+   for(let k=0;k<3;k++){const p=k*FOAM_PLANE+j*FOAM_GRID+i;foamNext[p]=Math.min(1,foamNext[p]+weight*(1-k*.3)*.45);airNext[p]=Math.min(.85,airNext[p]+weight*(1-k*.3));}
   }
  }
  sprayImpacts.length=0;
  const old=foamDensity;foamDensity=foamNext;foamNext=old;
+ const oldAir=entrainedAir;entrainedAir=airNext;airNext=oldAir;
  foamOriginX=ox;foamOriginZ=oz;foamFieldReady=true;
 }
 // Continuous lit foam skin shares the exact ocean mesh triangulation.
@@ -2299,8 +2313,9 @@ function updateFoamSkin(t){
    // Approximate directional optical thickness using an upstream density sample.
    const upstream=foamLayer(x-.45,z-.24,0)+.55*foamLayer(x-.45,z-.24,1);
    const shadow=1-Math.min(.28,column*.12+Math.max(0,upstream-d)*.28);
-   const coverage=Math.max(0,Math.min(1,(d*foamStrength-.055)/.40));
-   const alpha=coverage*(.08+.54*lace+.24*scatter+.14*column)*fade;
+   const coverage=Math.max(0,Math.min(1,(d*foamStrength-.065)/.48));
+   const breakup=.65+.35*Math.sin(wx*4.1+Math.sin(wz*2.9))*Math.cos(wz*3.7-Math.sin(wx*2.2));
+   const alpha=coverage*(.045+.65*lace+.16*scatter+.09*column)*breakup*fade;
    const bright=Math.min(1,(.83+.14*scatter+.08*lace)*shadow);
    data[k]=Math.round(255*bright);data[k+1]=Math.round(255*Math.min(1,bright+.025));data[k+2]=Math.round(255*Math.min(1,bright+.035));data[k+3]=Math.round(255*alpha);
   }
@@ -2482,6 +2497,14 @@ function smoothWaterNormal(output,index,sx,sz){
  output[index+1]=length;
  output[index+2]=-sz*length;
 }
+// World-space green-blue color, shared by both meshes. Never boat-radius based.
+function oceanSpectralTint(x,z,h,sx,sz,out,i){
+ const shallow=Math.max(0,Math.min(1,(100-Math.hypot(x*.83,(z+11)*.92))/84));
+ const crest=Math.max(0,Math.min(1,(h+.35)/1.8));
+ const shade=Math.max(0,Math.min(1,(sx*.407+sz*.204+.15)*.7));
+ const green=Math.max(0,Math.min(1,.2+.48*shallow+.26*crest-.12*shade));
+ out[i]=.72+.28*green;out[i+1]=.85+.15*green;out[i+2]=1-.23*green;
+}
 function animateWaves(t){
  if(!boat)return;
  if(surfaceNormalMap){
@@ -2497,7 +2520,7 @@ function animateWaves(t){
  water.position.set(cx,0,cz);
  nearWater.position.set(cx,0,cz);
  const farArr=geometry.attributes.position.array;
- const farNormals=geometry.attributes.normal.array;
+ const farNormals=geometry.attributes.normal.array,farColor=geometry.attributes.color.array;
  for(let i=0;i<farArr.length;i+=3){
   const x=base[i]+cx,z=base[i+2]+cz;
   const wave=waveField(x,z,t);
@@ -2505,9 +2528,10 @@ function animateWaves(t){
   farArr[i+1]=wave.height;
   farArr[i+2]=base[i+2]+wave.dz;
   smoothWaterNormal(farNormals,i,wave.slopeX,wave.slopeZ);
+  oceanSpectralTint(x,z,wave.height,wave.slopeX,wave.slopeZ,farColor,i);
  }
  geometry.attributes.position.needsUpdate=true;
- geometry.attributes.normal.needsUpdate=true;
+ geometry.attributes.normal.needsUpdate=true;geometry.attributes.color.needsUpdate=true;
  const arr=nearGeometry.attributes.position.array;
  const nearNormals=nearGeometry.attributes.normal.array;
  let rippleSum=0,rippleMax=0;
@@ -2578,9 +2602,10 @@ function animateWaves(t){
   // Both meshes now use identical base optical parameters. Vertex color
   // is a subtle multiplier only; white at the shared ring is exact parity.
   const light=Math.max(.86,Math.min(1,waveShade+shine*.12+subsurface*.12));
-  nearColorData[i]=1-fade*(1-light)*.60;
-  nearColorData[i+1]=1-fade*(1-light)*.45;
-  nearColorData[i+2]=1-fade*(1-light)*.30;
+  oceanSpectralTint(x,z,wave.height,wave.slopeX,wave.slopeZ,nearColorData,i);
+  nearColorData[i]*=1-fade*(1-light)*.20;
+  nearColorData[i+1]*=1-fade*(1-light)*.15;
+  nearColorData[i+2]*=1-fade*(1-light)*.10;
   // Whitewater color is handled by the separate RGBA foam skin, avoiding
   // a double tint of the base water and a green near-field disk.
   rippleSum+=Math.abs(disturbance);rippleMax=Math.max(rippleMax,Math.abs(disturbance));
@@ -2597,7 +2622,7 @@ function resetBoat(){
  boat.rotation.set(0,0,0);vy=0;pitchV=0;rollV=0;
  boatHeading=0;boatSpeed=0;rudder=0;driveMode='stop';totalTravel=0;previousBoatHeading=0;turnVelocity=0;wakeSolver?.clear();wakeTrail=[];trailElapsed=0;
  fluid3Epoch++;fluid3Frames=0;fluid3State='awaiting fresh field';if(fluid3){fluid3.cpu=null;fluid3.started=false;fluid3.d.queue.writeBuffer(fluid3.v[0],0,new Float32Array(F3C*4));}
- foamFieldReady=false;flowReady=false;foamVortices.length=0;vortexShed=0;vortexWaveShed=0;foamDensity.fill(0);foamNext.fill(0);breakingFoam.length=0;foamBubbles.length=0;foamBubbleSpawn=0;whitewaterSpray.length=0;sprayImpacts.length=0;cloudSamples=[];cloudTime=-100;
+ foamFieldReady=false;flowReady=false;foamVortices.length=0;vortexShed=0;vortexWaveShed=0;foamDensity.fill(0);foamNext.fill(0);entrainedAir.fill(0);airNext.fill(0);breakingFoam.length=0;foamBubbles.length=0;foamBubbleSpawn=0;whitewaterSpray.length=0;sprayImpacts.length=0;cloudSamples=[];cloudTime=-100;
  if($('forward')){setDriveMode('stop');}
 }
 function makeBoat(){

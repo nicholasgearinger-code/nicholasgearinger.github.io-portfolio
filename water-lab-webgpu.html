@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 26.16.2 integrated plunging crests</title>
+<title>Rift Water Lab · WebGPU 26.17 continuous ocean crest deformation</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.16.2</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.17</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.16.2 · integrated crests</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.17 · continuous crest geometry</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -2816,91 +2816,68 @@ function plungeProfile(v,age,height){
  return {x:radius*Math.sin(theta)+q*height*.30*curl,
  y:height*swell*(1-collapse*.85)+radius*(Math.cos(theta)-1)*curl*(1-collapse*.65)};
 }
-function makePlungeMesh(){
- const g=new THREE.BufferGeometry(),n=(PLUNGE_U+1)*(PLUNGE_V+1),indices=[];
- g.setAttribute('position',new THREE.BufferAttribute(new Float32Array(n*3),3).setUsage(THREE.DynamicDrawUsage));
- g.setAttribute('color',new THREE.BufferAttribute(new Float32Array(n*3),3).setUsage(THREE.DynamicDrawUsage));
- const uv=new Float32Array(n*2);
- for(let j=0;j<=PLUNGE_V;j++)for(let i=0;i<=PLUNGE_U;i++){const k=j*(PLUNGE_U+1)+i;uv[k*2]=i/PLUNGE_U;uv[k*2+1]=j/PLUNGE_V;if(j<PLUNGE_V&&i<PLUNGE_U){const b=k+PLUNGE_U+1;indices.push(k,b,k+1,k+1,b,b+1);}}
- g.setAttribute('uv',new THREE.BufferAttribute(uv,2));g.setIndex(indices);
- const mat=new THREE.MeshPhysicalMaterial({color:0x9ed6dc,vertexColors:true,roughness:.095,metalness:0,ior:1.333,transmission:.70,thickness:1.1,attenuationColor:new THREE.Color().setRGB(.32,.81,.88),attenuationDistance:13,side:THREE.DoubleSide,normalMap:surfaceNormalMap,normalScale:new THREE.Vector2(.40,.40),depthWrite:false});
- const mesh=new THREE.Mesh(g,mat);mesh.frustumCulled=false;mesh.visible=false;scene.add(mesh);
- return {mesh,active:false};
+// Connected parametric fold of the original ocean mesh, without a separate sheet.
+function crestFold(along,side,p,out){
+ const a=p.age/p.life,H=p.height,L=Math.max(1.25,H*1.8),half=p.width*.5;
+ if(Math.abs(along)>=L||Math.abs(side)>=half)return false;
+ const u=along/L,edge=1-u*u,span=1-(side/half)**2;
+ const ramp=Math.min(1,a/.25)*Math.min(1,(1-a)/.25);
+ const w=edge*edge*span*span*ramp;
+ const curl=Math.max(0,Math.min(1,(a-.18)/.42))*Math.min(1,(1-a)/.28);
+ const q=(u+.16)/.40,bell=Math.exp(-q*q);
+ out.forward=H*1.65*curl*bell*w;
+ out.up=H*w*(.35+.65*bell)*(1-.55*Math.max(0,(a-.65)/.35));
+ return true;
 }
-function clearPlunges(){for(const p of plungePool){p.active=false;p.mesh.visible=false;}plungeClock=0;plungeImpacts=0;}
+const crestOffset={forward:0,up:0};
+let crestVertices=0;
+function clearPlunges(){plungePool.length=0;plungeClock=0;plungeImpacts=0;crestVertices=0;}
 function updatePlunges(dt,t){
  if(!boat||breakingMode!=='advanced'||breakingIntensity<.05){clearPlunges();return;}
  const budget=simTier===2?1:simTier===1?2:3;
  plungeClock+=dt;
- if(plungeClock>.48&&plungePool.filter(p=>p.active).length<budget){
+ if(plungeClock>.55&&plungePool.length<budget){
   plungeClock=0;
-  let best=null,bestScore=.13;
-  for(let k=0;k<36;k++){
-   const seed=++plungeSeed,a=seed*2.39996323,r=4+((seed*37)%97)/97*10;
+  let best=null,bestScore=.115;
+  for(let k=0;k<40;k++){
+   const seed=++plungeSeed,a=seed*2.39996323,r=3.5+((seed*37)%97)/97*7.5;
    const x=boat.position.x+Math.cos(a)*r,z=boat.position.z+Math.sin(a)*r;
-   if(plungePool.some(p=>p.active&&Math.hypot(p.x-x,p.z-z)<4.5))continue;
+   if(plungePool.some(p=>Math.hypot(p.x-x,p.z-z)<6))continue;
    const w=waveField(x,z,t,{}),slope=Math.hypot(w.slopeX,w.slopeZ);
    const score=(w.compression*.85+slope*.28)*Math.max(0,Math.min(1,(w.height+.35)/1.1))*breakingIntensity;
-   if(score>bestScore){bestScore=score;best={x:x+w.dx,z:z+w.dz,score};}
+   if(score>bestScore){bestScore=score;best={x,z,score};}
   }
   if(best){
-   let p=plungePool.find(q=>!q.active);
-   if(!p){p=makePlungeMesh();plungePool.push(p);}
-   const d=waveComponents[0];Object.assign(p,{active:true,x:best.x,z:best.z,fx:d.dirX,fz:d.dirZ,age:0,life:2.0+Math.min(.65,best.score),height:Math.min(1.6,.58+best.score*2.1)*Math.min(1.4,Math.max(.55,waveHeight/1.5)),width:6.5+best.score*3,speed:2.1+best.score*2,hit:false,contactMask:0,lipGap:new Float32Array(5).fill(NaN)});
-   p.mesh.visible=true;
+   let d=waveComponents[0],strength=-Infinity;
+   for(const w of waveComponents){const v=w.amplitude*Math.sin(w.kx*best.x+w.kz*best.z-w.omega*t+w.phase);if(v>strength){strength=v;d=w;}}
+   plungePool.push({active:true,x:best.x,z:best.z,fx:d.dirX,fz:d.dirZ,age:0,life:2.6,height:Math.min(1.5,.65+best.score*2)*Math.min(1.25,Math.max(.55,waveHeight/1.5)),width:7+best.score*3,speed:Math.min(4.2,d.omega/Math.hypot(d.kx,d.kz)),hit:false});
   }
  }
- for(const p of plungePool){
-  if(!p.active)continue;
-  p.age+=dt;const a=p.age/p.life;
-  if(a>=1||Math.hypot(p.x-boat.position.x,p.z-boat.position.z)>22){p.active=false;p.mesh.visible=false;continue;}
+ for(let i=plungePool.length-1;i>=0;i--){
+  const p=plungePool[i];p.age+=dt;const a=p.age/p.life;
+  if(a>=1||Math.hypot(p.x-boat.position.x,p.z-boat.position.z)>13){plungePool.splice(i,1);continue;}
   p.x+=p.fx*p.speed*dt;p.z+=p.fz*p.speed*dt;
-  const g=p.mesh.geometry,pos=g.attributes.position.array,col=g.attributes.color.array;
-  const profile=Array.from({length:PLUNGE_V+1},(_,j)=>plungeProfile(j/PLUNGE_V,a,p.height));
-  for(let i=0;i<=PLUNGE_U;i++){
-   const u=i/PLUNGE_U,side=(u-.5)*p.width;
-   const taper=plungeTaper(u);
-   const bx=p.x+p.fz*side,bz=p.z-p.fx*side;
-   const base=oceanHeight(bx,bz,t);
-   const foot=oceanHeight(bx-p.fx*p.height*1.5*taper,bz-p.fz*p.height*1.5*taper,t);
-   const waveTint=waveField(bx,bz,t,{});
-   const lip=profile[PLUNGE_V],lipSea=oceanHeight(bx+p.fx*lip.x*taper,bz+p.fz*lip.x*taper,t);
-   for(let j=0;j<=PLUNGE_V;j++){
-    const v=j/PLUNGE_V,q=profile[j],k=(j*(PLUNGE_U+1)+i)*3;
-    const forward=q.x*taper;
-    pos[k]=bx+p.fx*forward;pos[k+2]=bz+p.fz*forward;
-    // Anchor feet and ends to the existing surface; lift the free lip.
-    const shoulderBlend=Math.max(0,1-v/.45);
-    const y0=base+(foot-base)*shoulderBlend+q.y*taper;
-    const birth=Math.min(1,a/.14),death=Math.min(1,(1-a)/.16),envelope=birth*death;
-    const contactBlend=Math.max(0,(v-.72)/.28)*Math.max(0,Math.min(1,(a-.67)/.20));
-    pos[k+1]=v===0?foot-.025:y0+(Math.max(lipSea-.04,y0)-y0)*contactBlend-q.y*taper*(1-envelope)-.025*(1-taper);
-    const uv=g.attributes.uv.array,ui=k/3*2;uv[ui]=pos[k]/4;uv[ui+1]=pos[k+2]/4;
-    oceanSpectralTint(bx,bz,waveTint.height,waveTint.slopeX,waveTint.slopeZ,col,k);
-    const white=Math.max(0,Math.min(.65,(v-.78)*3*(p.hit?1:.15)))*taper;col[k]+=(1-col[k])*white;col[k+1]+=(1-col[k+1])*white;col[k+2]+=(1-col[k+2])*white;
+  // Approximate collapse impulse; a reconstructed liquid surface is needed for exact contact.
+  if(!p.hit&&a>.69){
+   p.hit=true;plungeImpacts++;
+   for(let k=-1;k<=1;k++){
+    const x=p.x+p.fx*p.height+p.fz*k*p.width*.22,z=p.z+p.fz*p.height-p.fx*k*p.width*.22;
+    const e={x,z,energy:Math.min(.7,p.height*.4),age:0,fx:p.fx,fz:p.fz,plunge:true};
+    entryEvents.push(e);entryAirQueue.push({...e});for(let n=0;n<4;n++)emitWhitewater(x,z,t,e.energy*1.8,p.fx,p.fz);
    }
+   while(entryEvents.length>12)entryEvents.shift();while(entryAirQueue.length>12)entryAirQueue.shift();
   }
-  g.attributes.position.needsUpdate=true;g.attributes.color.needsUpdate=true;g.attributes.uv.needsUpdate=true;g.computeVertexNormals();
-  // Detect contact independently along five points of the moving lip.
-  // Relative gap velocity includes the motion of the receiving ocean.
-  const q=profile[PLUNGE_V];
-  for(let k=0;k<5;k++){
-   const u=.16+k*.17,side=(u-.5)*p.width,taper=plungeTaper(u);
-   const bx=p.x+p.fz*side,bz=p.z-p.fx*side;
-   const x=bx+p.fx*q.x*taper,z=bz+p.fz*q.x*taper;
-   const gap=oceanHeight(bx,bz,t)+q.y*taper-oceanHeight(x,z,t);
-   const previous=p.lipGap[k],fall=Number.isFinite(previous)?(previous-gap)/Math.max(.001,dt):0;
-   p.lipGap[k]=gap;
-   if((p.contactMask&(1<<k))||a<.48||gap>.055||fall<.15)continue;
-   p.contactMask|=1<<k;
-   if(!p.hit){p.hit=true;plungeImpacts++;}
-   const energy=Math.min(.85,Math.max(.08,.12*p.height+.065*fall*fall))*taper;
-   const e={x,z,energy,age:0,fx:p.fx,fz:p.fz,plunge:true};
-   entryEvents.push(e);entryAirQueue.push({...e});
-   for(let n=0;n<5;n++)emitWhitewater(x,z,t,energy*1.9,p.fx,p.fz);
-  }
-  while(entryEvents.length>12)entryEvents.shift();while(entryAirQueue.length>12)entryAirQueue.shift();
  }
+}
+function deformConnectedCrest(x,z,arr,i,fade){
+ if(fade<=0)return false;
+ let changed=false;
+ for(const p of plungePool){
+  const dx=x-p.x,dz=z-p.z,along=dx*p.fx+dz*p.fz,side=dx*p.fz-dz*p.fx;
+  if(!crestFold(along,side,p,crestOffset))continue;
+  arr[i]+=p.fx*crestOffset.forward*fade;arr[i+1]+=crestOffset.up*fade;arr[i+2]+=p.fz*crestOffset.forward*fade;changed=true;
+ }
+ return changed;
 }
 function advanceBreakingFoam(dt,t){
  if(breakingMode!=='advanced'||breakingIntensity<.01){
@@ -3177,7 +3154,7 @@ function animateWaves(t){
  geometry.attributes.normal.needsUpdate=true;geometry.attributes.color.needsUpdate=true;
  const arr=nearGeometry.attributes.position.array;
  const nearNormals=nearGeometry.attributes.normal.array;
- let rippleSum=0,rippleMax=0;
+ let rippleSum=0,rippleMax=0;crestVertices=0;
  for(let i=0;i<arr.length;i+=3){
   const px=nearBase[i],pz=nearBase[i+2];
   const x=px+cx,z=pz+cz;
@@ -3188,6 +3165,7 @@ function animateWaves(t){
   const disturbance=fade*(wakeSolver?.sample(wx,wz)||0);
   arr[i]=px+wave.dx;arr[i+2]=pz+wave.dz;
   arr[i+1]=wave.height+disturbance;
+  if(plungePool.length&&deformConnectedCrest(x,z,arr,i,fade))crestVertices++;
   // Local crest highlights follow the same pressure field; no fake
   // particle sprites or V-shaped lines.
   let wakeSlopeX=0,wakeSlopeZ=0;
@@ -3249,6 +3227,7 @@ function animateWaves(t){
   rippleSum+=Math.abs(disturbance);rippleMax=Math.max(rippleMax,Math.abs(disturbance));
  }
  lastRipple=rippleMax;
+ if(crestVertices>0)nearGeometry.computeVertexNormals();
  nearGeometry.attributes.position.needsUpdate=true;
  nearGeometry.attributes.color.needsUpdate=true;
  nearGeometry.attributes.normal.needsUpdate=true;

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 27.0 local FLIP/APIC liquid prototype</title>
+<title>Rift Water Lab · WebGPU 27.0.1 transported foam and adaptive liquid budget</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.0</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.0.1</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.0 · FLIP/APIC breakers</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.0.1 · transported whitewater</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -1991,20 +1991,21 @@ function makeSprayBatch(size,opacity){
  mesh.frustumCulled=false;scene.add(mesh);return mesh;
 }
 function emitWhitewater(x,z,t,energy,fx,fz){
- if(whitewaterSpray.length>=360)return;
+ if(whitewaterSpray.length>=(simTier===2?140:simTier===1?220:360))return;
  const seed=++spraySeed,q=bubbleHash(seed+9),kind=q<.70?0:1;
- const a=bubbleHash(seed+15)*Math.PI*2,spread=.35+.7*bubbleHash(seed+22);
+ const a=bubbleHash(seed+15)*Math.PI*2,spread=.16+.55*bubbleHash(seed+22);
  sharedFoamFlow(x,z,t,sprayFlow);
  whitewaterSpray.push({x,y:oceanHeight(x,z,t)+.06,z,
   vx:sprayFlow.x+fx*energy*.8+Math.cos(a)*spread,
   vz:sprayFlow.z+fz*energy*.8+Math.sin(a)*spread,
-  vy:(.7+2.1*bubbleHash(seed+37))*energy,kind,age:0,
+  vy:(.45+2.8*bubbleHash(seed+37))*energy,kind,age:0,
+  waterY:NaN,waterTime:-100,
   life:kind===0?1.3:2.0,energy});
 }
 function updateWhitewaterSpray(dt,t){
  const enabled=breakingMode==='advanced'&&foamStrength>.01&&boat;
  if(!enabled){whitewaterSpray.length=0;sprayImpacts.length=0;if(sprayBatches)for(const b of sprayBatches)b.visible=false;return;}
- if(!sprayBatches){sprayTexture=makeSprayTexture();sprayBatches=[makeSprayBatch(.075,.83),makeSprayBatch(.20,.22)];}
+ if(!sprayBatches){sprayTexture=makeSprayTexture();sprayBatches=[makeSprayBatch(.055,.9),makeSprayBatch(.13,.16)];}
  sprayTimer+=dt;
  if(sprayTimer>=.065){
   sprayTimer=0;
@@ -2016,7 +2017,7 @@ function updateWhitewaterSpray(dt,t){
     emitWhitewater(boat.position.x-fx*back+fz*side*.8,boat.position.z-fz*back-fx*side*.8,t,energy,-fx,-fz);
    }
   }
-  for(let k=0;k<Math.min(10,breakingFoam.length);k++){
+  for(let k=0;k<Math.min(apGrid?2:5,breakingFoam.length);k++){
    const f=breakingFoam[(spraySeed+k*7)%breakingFoam.length];
    if(f.age>.65||f.strength<.42||breakingIntensity<.1)continue;
    emitWhitewater(f.x,f.z,t,f.strength*.9,f.vx,f.vz);
@@ -2030,7 +2031,8 @@ function updateWhitewaterSpray(dt,t){
   p.vz+=(-.25-p.vz)*Math.min(1,dt*drag);
   p.vy-=9.81*dt*(p.kind===0?1:.35);
   p.x+=p.vx*dt;p.y+=p.vy*dt;p.z+=p.vz*dt;
-  const water=oceanHeight(p.x,p.z,t);
+  if(!Number.isFinite(p.waterY)||t-p.waterTime>.045||p.y<p.waterY+.18){p.waterY=oceanHeight(p.x,p.z,t);p.waterTime=t;}
+  const water=p.waterY;
   if(p.y<=water&&p.age>.04){
    if(p.kind===0&&sprayImpacts.length<128)sprayImpacts.push({x:p.x,z:p.z,energy:Math.min(1,Math.abs(p.vy)*.18*p.energy)});
    whitewaterSpray.splice(i,1);continue;
@@ -2085,7 +2087,7 @@ const FOAM_PLANE=FOAM_GRID*FOAM_GRID;
 let foamDensity=new Float32Array(FOAM_PLANE*FOAM_LAYERS),foamNext=new Float32Array(foamDensity.length);
 let foamOriginX=0,foamOriginZ=0,foamFieldReady=false,foamElapsed=0;
 let breakerFilm=new Float32Array(FOAM_PLANE),breakerNext=new Float32Array(FOAM_PLANE),shearFilm=new Float32Array(FOAM_PLANE),shearNext=new Float32Array(FOAM_PLANE);
-function clearFoamFilms(){breakerFilm.fill(0);breakerNext.fill(0);shearFilm.fill(0);shearNext.fill(0);}
+function clearFoamFilms(){breakerFilm.fill(0);breakerNext.fill(0);shearFilm.fill(0);shearNext.fill(0);foamDriftX.fill(0);foamDriftZ.fill(0);foamDriftNextX.fill(0);foamDriftNextZ.fill(0);}
  let entrainedAir=new Float32Array(FOAM_PLANE*FOAM_LAYERS),airNext=new Float32Array(entrainedAir.length);
 // Coarse horizontal momentum grid, shared by all six aeration layers.
 // Semi-Lagrangian transport + vorticity confinement + Jacobi projection.
@@ -2640,6 +2642,9 @@ function advanceFoamDensity(dt,t){
    // Gas escaping at the surface feeds film; deeper film follows aeration.
    if(k===0){
     const young=foamLayer(sx,sz,0,breakerFilm),shear=foamLayer(sx,sz,0,shearFilm);
+    // Transport material coordinates with the density; do not scroll a texture in time.
+    foamDriftNextX[p]=Math.max(-8,Math.min(8,(foamLayer(sx,sz,0,foamDriftX)+x-sx)*.995));
+    foamDriftNextZ[p]=Math.max(-8,Math.min(8,(foamLayer(sx,sz,0,foamDriftZ)+z-sz)*.995));
     const hit=waveAir*.85+boatAir*.22;
     const stretch=vortexAir*.75+gpuAir*.24+boatAir*.32;
     breakerNext[p]=Math.max(0,Math.min(1,young*Math.exp(-step*1.6)+step*hit*(1-young)));
@@ -2676,6 +2681,7 @@ function advanceFoamDensity(dt,t){
  const oldAir=entrainedAir;entrainedAir=airNext;airNext=oldAir;
  const oldBreaker=breakerFilm;breakerFilm=breakerNext;breakerNext=oldBreaker;
  const oldShear=shearFilm;shearFilm=shearNext;shearNext=oldShear;
+ foamDriftX.set(foamDriftNextX);foamDriftZ.set(foamDriftNextZ);
  foamOriginX=ox;foamOriginZ=oz;foamFieldReady=true;
 }
 // Continuous lit foam skin shares the exact ocean mesh triangulation.
@@ -2695,6 +2701,7 @@ function buildCellAtlas(){
 buildCellAtlas();
 function cellMembrane(x,z){const u=x*CELL_N/16,v=z*CELL_N/16,i=Math.floor(u),j=Math.floor(v),a=u-i,b=v-j;const at=(p,q)=>cellAtlas[(q&127)*CELL_N+(p&127)];return (at(i,j)*(1-a)+at(i+1,j)*a)*(1-b)+(at(i,j+1)*(1-a)+at(i+1,j+1)*a)*b;}
 let foamOpticalTime=-1e6,foamOpticalX=0,foamOpticalZ=0;
+const foamDriftX=new Float32Array(FOAM_PLANE),foamDriftZ=new Float32Array(FOAM_PLANE),foamDriftNextX=new Float32Array(FOAM_PLANE),foamDriftNextZ=new Float32Array(FOAM_PLANE);
 const foamOpticalFlow={x:0,z:0};
 function makeFoamOpticalMap(){
  const data=new Uint8Array(FOAM_MASK*FOAM_MASK*4);
@@ -2746,7 +2753,7 @@ function updateFoamSkin(t){
  const geo=foamSkin.geometry,p=geo.attributes.position.array,uv=geo.attributes.uv.array;
  // Evaluate optical microstructure in world coordinates. Reproject the
  // previous texture as the hull moves, rather than regenerate at frame rate.
- const desiredMask=simTier===2?160:simTier===1?192:256;
+ const desiredMask=simTier===2?128:simTier===1?160:192;
  if(FOAM_MASK!==desiredMask){const old=foamOpticalMap;FOAM_MASK=desiredMask;foamOpticalMap=makeFoamOpticalMap();foamSkin.material.map=foamOpticalMap;foamSkin.material.needsUpdate=true;old.dispose();foamOpticalTime=-1e6;}
  const data=foamOpticalMap.image.data;
  const cx=nearWater.position.x,cz=nearWater.position.z;
@@ -2763,16 +2770,13 @@ function updateFoamSkin(t){
    if((d+young+shear)*foamStrength<.045){data[k]=data[k+1]=data[k+2]=255;data[k+3]=0;continue;}
    const sub=foamLayer(x,z,1,entrainedAir)+.75*foamLayer(x,z,2,entrainedAir)+.45*foamLayer(x,z,3,entrainedAir);
    const column=Math.min(1,(d+sub)*.65);
-   const gpuOptical=sampleFluid3(x,-.15,z,foamOpticalFlow);
-   if(!gpuOptical)sharedFoamFlow(x,z,t,foamOpticalFlow);
-   const turbulence=gpuOptical?Math.min(1,foamOpticalFlow.curl*.65):0;
+   
    const along=lx*fx+lz*fz,side=lx*fz-lz*fx;
    const wake=power*Math.exp(-Math.pow(side/(.9+Math.max(0,-along)*.2),2))*Math.exp(-Math.abs(along+2)*.12);
    // Bounded world-space coordinate warp; stern streaks elongate downstream.
-   const wx=x-dir.dirX*t*.38-foamOpticalFlow.x*(.38+.34*turbulence)-wake*fx*.65;
-   const wz=z-dir.dirZ*t*.38-foamOpticalFlow.z*(.38+.34*turbulence)-wake*fz*.65;
-   const u=wx*3.1+Math.sin(wz*1.7-t*.3)*.65,v=wz*3.4+Math.sin(wx*1.4+t*.25)*.55;
-   const stretch=1+Math.min(1.3,shear+wake*.7);
+   const wx=x-foamLayer(x,z,0,foamDriftX),wz=z-foamLayer(x,z,0,foamDriftZ);
+   const u=wx*3.1+Math.sin(wz*1.7)*.65,v=wz*3.4+Math.sin(wx*1.4)*.55;
+   const stretch=1+Math.min(.65,shear*.45+wake*.2);
    const film=cellMembrane(u/stretch,v*stretch);
    const micro=cellMembrane(u*2.1+5.3,v*2.1-7.1);
    const lace=Math.min(1,film*.84+micro*.30);
@@ -2960,13 +2964,14 @@ function startAP(p,t){
  const g=makeAPGrid(),span=AP_N*AP_H,base=oceanHeight(p.x,p.z,t);
  g.ox=p.x-span*.5;g.oy=base-2.1;g.oz=p.z-span*.5;
  // Seed a liquid bed plus a raised, forward-moving crest, not spray alone.
- const stride=simTier===2?.32:.27;
+ const stride=simTier===2?.48:simTier===1?.40:.34;
+ const particleBudget=simTier===2?480:simTier===1?760:1200;
  for(let z=.35;z<span-.35;z+=stride)for(let x=.35;x<span-.35;x+=stride){
   const dx=x-span*.5,dz=z-span*.5,along=dx*p.fx+dz*p.fz,side=dx*p.fz-dz*p.fx;
   const crest=p.height*Math.exp(-along*along/.7-side*side/2.8);
   const top=2.1+crest*.8;
   for(let y=1.15;y<top;y+=stride){
-   if(g.particles.length>=AP_MAX)break;
+   if(g.particles.length>=particleBudget)break;
    const speed=.45+crest*1.65,vy=crest*.65;
    g.particles.push({x,y,z,v:[p.fx*speed,vy,p.fz*speed],c:new Float32Array(9)});
   }
@@ -2980,15 +2985,18 @@ function updateAP(dt,t){
  if(apClock<cadence)return;
  const elapsed=Math.min(.12,apClock);apClock=0;
  try{
-  const steps=Math.ceil(elapsed/.025);
-  for(let i=0;i<steps;i++)apStats=apStep(apGrid,elapsed/steps,simTier===2?10:14);
+  const steps=Math.ceil(elapsed/(simTier===2?.04:.032));
+  for(let i=0;i<steps;i++)apStats=apStep(apGrid,elapsed/steps,simTier===2?7:simTier===1?10:14);
   if(!Number.isFinite(apStats.after)||apGrid.particles.some(p=>!Number.isFinite(p.x+p.y+p.z)))throw Error('Nonfinite liquid state');
   // Return falling liquid momentum to existing surface/air transport.
   let impacts=0;
   for(const p of apGrid.particles){
    const x=p.x+apGrid.ox,y=p.y+apGrid.oy,z=p.z+apGrid.oz;
-   if(p.v[1]<-.8&&y<apGrid.oy+2.18&&y>apGrid.oy+1.9&&impacts<8){
-    sprayImpacts.push({x,z,energy:Math.min(.35,-p.v[1]*.055)});impacts++;
+   const gap=y-(apGrid.oy+2.1),previous=p.surfaceGap;p.surfaceGap=gap;
+   if(Number.isFinite(previous)&&previous>0&&gap<=0&&p.v[1]<-.8&&impacts<8){
+    const energy=Math.min(.55,-p.v[1]*.085);
+    if(sprayImpacts.length<128)sprayImpacts.push({x,z,energy});
+    emitWhitewater(x,z,t,energy,p.v[0],p.v[2]);impacts++;
    }
   }
   // Optional diagnostic particles, disabled by default; actual surface

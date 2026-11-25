@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 27.2.4 ocean-attached liquid surface</title>
+<title>Rift Water Lab · WebGPU 27.3 GPU density and screen-space liquid</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.2.4</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.3</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.2.4 · attached liquid</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.3 · GPU screen liquid</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -2308,7 +2308,7 @@ function stepFluid3(dt,t){
   enc.copyBufferToBuffer(p,0,f.stage,F3C*16,F3C*4);
   fluid3Pending=true;d.queue.submit([enc.finish()]);f.ox=ox;f.oz=oz;f.started=true;
   const validation=d.popErrorScope();scoped=false;
-  Promise.allSettled([validation,f.stage.mapAsync(GPUMapMode.READ)]).then(results=>{
+  Promise.allSettled([validation,f.stage.mapAsync(GPUMapMode.READ),densityEncoded?readRCGPU(g):Promise.resolve()]).then(results=>{
    if(results[1].status==='rejected')throw results[1].reason;
    const mapped=new Float32Array(f.stage.getMappedRange());const data=mapped.slice(0,F3C*4),pressureData=mapped.slice(F3C*4);f.stage.unmap();
    if(results[0].status==='rejected')throw results[0].reason;
@@ -3010,6 +3010,7 @@ function dispatchAPGPU(g,dt,t){
   new Float32Array(u)[1]=dt/steps;d.queue.writeBuffer(f.params,0,u);
   const pass=(name,groups,group=f.group)=>{const p=enc.beginComputePass();p.setPipeline(f.pipelines[name]);p.setBindGroup(0,group);p.dispatchWorkgroups(groups);p.end();};
   for(let n=0;n<steps;n++){pass('clear',64);pass('deposit',Math.ceil(count/64));pass('normalizeGrid',64);pass('divergence',64);for(let i=0;i<(simTier===2?8:12);i++)pass('jacobi',64,i%2?f.alternate:f.group);pass('project',64);pass('transfer',Math.ceil(count/64));}
+  const densityEncoded=encodeRCGPU(enc,g);
   enc.copyBufferToBuffer(f.particles,0,f.stage,0,count*80);apGPUPending=true;d.queue.submit([enc.finish()]);
   const validation=d.popErrorScope();scoped=false;
   Promise.allSettled([validation,f.stage.mapAsync(GPUMapMode.READ)]).then(results=>{
@@ -3135,8 +3136,74 @@ function rcCreate(){
  for(const name of ['position','normal','color'])geo.setAttribute(name,new THREE.BufferAttribute(new Float32Array(RC_MAX*3),3).setUsage(THREE.DynamicDrawUsage));
  geo.setDrawRange(0,0);
  const mat=new THREE.MeshPhysicalMaterial({color:0xffffff,vertexColors:true,roughness:.105,metalness:0,ior:1.333,transmission:.78,thickness:.42,attenuationColor:0x83d7d4,attenuationDistance:9,side:THREE.DoubleSide});
- rcMesh=new THREE.Mesh(geo,mat);rcMesh.frustumCulled=false;rcMesh.visible=false;scene.add(rcMesh);
+ rcMesh=new THREE.Mesh(geo,setupRCThickness(geo,mat));rcMesh.frustumCulled=false;rcMesh.visible=false;scene.add(rcMesh);
 }
+
+const rcGPUCode="struct P {pos:vec4f,vel:vec4f,c0:vec4f,c1:vec4f,c2:vec4f}\nstruct Cfg {count:u32, radius:f32, pad0:f32,pad1:f32}\n@group(0) @binding(0) var<uniform> cfg:Cfg;\n@group(0) @binding(1) var<storage,read> particles:array<P>;\n@group(0) @binding(2) var<storage,read> tags:array<u32>;\n@group(0) @binding(3) var<storage,read_write> density:array<atomic<u32>>;\n@compute @workgroup_size(64) fn clear(@builtin(global_invocation_id) id:vec3u){if(id.x<15625u){atomicStore(&density[id.x],0u);}}\n@compute @workgroup_size(64) fn splat(@builtin(global_invocation_id) id:vec3u){\n if(id.x>=cfg.count||tags[id.x]==0u){return;}\n let p=particles[id.x].pos.xyz;let h=5.6/24.;let b=vec3i(floor(p/h));let reach=i32(ceil(cfg.radius/h))+1;\n if(min(min(p.x,p.z),min(5.6-p.x,5.6-p.z))<.75){return;}\n for(var z=-reach;z<=reach;z++){for(var y=-reach;y<=reach;y++){for(var x=-reach;x<=reach;x++){\n  let q=b+vec3i(x,y,z);if(any(q<vec3i(1))||any(q>vec3i(23))){continue;}\n  let delta=vec3f(q)*h-p;let d=dot(delta,delta)/(cfg.radius*cfg.radius);\n  if(d<1.){let w=(1.-d)*(1.-d);atomicAdd(&density[u32((q.z*25+q.y)*25+q.x)],u32(round(w*65536.)));}\n }}}\n}";
+let rcGPU=null,rcGPUStarting=false,rcGPUFault='',rcGPUFrames=0,rcGPUData=null,rcGPUDataOwner=null;
+async function initRCGPU(){
+ if(rcGPU||rcGPUStarting||rcGPUFault||!apGPU||new URLSearchParams(location.search).has('cpuReconstruct'))return;
+ rcGPUStarting=true;
+ try{
+  const d=apGPU.d,m=d.createShaderModule({code:rcGPUCode}),info=await m.getCompilationInfo();
+  const errors=info.messages.filter(v=>v.type==='error');if(errors.length)throw Error(errors.map(v=>v.message).join('; '));
+  const layout=d.createBindGroupLayout({entries:[{binding:0,visibility:GPUShaderStage.COMPUTE,buffer:{type:'uniform'}},...['read-only-storage','read-only-storage','storage'].map((type,i)=>({binding:i+1,visibility:GPUShaderStage.COMPUTE,buffer:{type}}))]});
+  const pl=d.createPipelineLayout({bindGroupLayouts:[layout]});
+  const clear=await d.createComputePipelineAsync({layout:pl,compute:{module:m,entryPoint:'clear'}}),splat=await d.createComputePipelineAsync({layout:pl,compute:{module:m,entryPoint:'splat'}});
+  const params=d.createBuffer({size:16,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST}),tags=d.createBuffer({size:AP_MAX*4,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST}),density=d.createBuffer({size:RC_SIZE*4,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC}),stage=d.createBuffer({size:RC_SIZE*4,usage:GPUBufferUsage.MAP_READ|GPUBufferUsage.COPY_DST});
+  const group=d.createBindGroup({layout,entries:[params,apGPU.particles,tags,density].map((buffer,binding)=>({binding,resource:{buffer}}))});
+  rcGPU={d,clear,splat,params,tags,density,stage,group,owner:null,pending:false};
+ }catch(e){rcGPUFault=String(e?.message||e);console.warn('GPU density fallback',e);}finally{rcGPUStarting=false;}
+}
+function encodeRCGPU(enc,g){
+ const f=rcGPU;if(!f||f.pending||rcGPUFault)return false;
+ const d=f.d,count=g.particles.length,u=new ArrayBuffer(16);
+ new Uint32Array(u)[0]=count;new Float32Array(u)[1]=simTier===2?.55:simTier===1?.49:.44;
+ d.queue.writeBuffer(f.params,0,u);
+ if(f.owner!==g){d.queue.writeBuffer(f.tags,0,Uint32Array.from(g.particles,p=>p.crestLiquid?1:0));f.owner=g;}
+ for(const [pipeline,n] of [[f.clear,Math.ceil(RC_SIZE/64)],[f.splat,Math.ceil(count/64)]]){const pass=enc.beginComputePass();pass.setPipeline(pipeline);pass.setBindGroup(0,f.group);pass.dispatchWorkgroups(n);pass.end();}
+ enc.copyBufferToBuffer(f.density,0,f.stage,0,RC_SIZE*4);f.pending=true;return true;
+}
+async function readRCGPU(g){
+ const f=rcGPU;if(!f||!f.pending)return;
+ try{await f.stage.mapAsync(GPUMapMode.READ);const a=new Uint32Array(f.stage.getMappedRange());const values=Float32Array.from(a,v=>v/65536);f.stage.unmap();if(apGrid===g){rcGPUData=values;rcGPUDataOwner=g;rcGPUFrames++;}}catch(e){rcGPUFault=String(e?.message||e);console.warn('GPU density readback fallback',e);}finally{f.pending=false;}
+}
+// Screen-space optical thickness: render reconstructed front/back faces
+// into a small additive target, then sample the accumulated path length
+// in the physical material. This is not a full depth-composited fluid renderer.
+let rcThicknessTarget=null,rcThicknessScene=null,rcThicknessProxy=null,rcThicknessEnabled=false,rcThicknessFault='',rcThicknessLast=-100;
+function setupRCThickness(geo,mat){
+ if(!oceanTSL||!THREE.MeshPhysicalNodeMaterial||!THREE.MeshBasicNodeMaterial||new URLSearchParams(location.search).has('noScreenFluid'))return mat;
+ try{
+  const {float,vec3,texture,screenUV,positionView,frontFacing,materialTransmission}=oceanTSL;
+  if(!screenUV||!frontFacing||!positionView)return mat;
+  rcThicknessTarget=new THREE.RenderTarget(192,192,{type:THREE.HalfFloatType,depthBuffer:false,minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter});
+  rcThicknessScene=new THREE.Scene();
+  const tm=new THREE.MeshBasicNodeMaterial({side:THREE.DoubleSide,depthTest:false,depthWrite:false,transparent:true,blending:THREE.CustomBlending,blendSrc:THREE.OneFactor,blendDst:THREE.OneFactor,blendEquation:THREE.AddEquation,toneMapped:false});
+  // Encode positive front and back depths in separate channels.
+  const depth=positionView.z.negate().max(0);
+  tm.colorNode=frontFacing.select(vec3(depth,0,0),vec3(0,depth,0));tm.opacityNode=float(1);
+  rcThicknessProxy=new THREE.Mesh(geo,tm);rcThicknessProxy.frustumCulled=false;rcThicknessScene.add(rcThicknessProxy);
+  const node=new THREE.MeshPhysicalNodeMaterial();node.copy(mat);
+  const thickness=texture(rcThicknessTarget.texture,screenUV).g.sub(texture(rcThicknessTarget.texture,screenUV).r).max(0).min(2.5);
+  node.thicknessNode=thickness.max(.025);
+  node.transmissionNode=materialTransmission.mul(thickness.mul(-.28).exp());
+  rcThicknessEnabled=true;mat.dispose();return node;
+ }catch(e){rcThicknessFault=String(e?.message||e);rcThicknessEnabled=false;return mat;}
+}
+function updateRCThickness(t){
+ if(!rcThicknessEnabled||!rcMesh?.visible||!rcThicknessTarget||!rcThicknessProxy)return;
+ const prev=renderer.getRenderTarget(),prevColor=renderer.getClearColor(new THREE.Color()),prevAlpha=renderer.getClearAlpha();
+ try{
+  const w=simTier===2?160:224,h=Math.max(96,Math.round(w/camera.aspect));
+  if(rcThicknessTarget.width!==w||rcThicknessTarget.height!==h)rcThicknessTarget.setSize(w,h);
+  renderer.setRenderTarget(rcThicknessTarget);renderer.setClearColor(0,0);renderer.clear();
+  const pending=renderer.render(rcThicknessScene,camera);
+  if(pending?.catch)pending.catch(e=>{rcThicknessEnabled=false;rcThicknessFault=String(e);});
+ }catch(e){rcThicknessFault=String(e?.message||e);rcThicknessEnabled=false;console.warn('Screen fluid fallback',e);}
+ finally{renderer.setRenderTarget(prev);renderer.setClearColor(prevColor,prevAlpha);}
+}
+
 function clearReconstruction(){rcOwner=null;rcLast=-100;rcTriangles=0;if(rcMesh)rcMesh.visible=false;}
 function updateReconstruction(g,t){
  if(rcFault||new URLSearchParams(location.search).has('noReconstruct'))return;
@@ -3163,6 +3230,10 @@ function updateReconstruction(g,t){
   const geo=rcMesh.geometry,pos=geo.attributes.position.array,norm=geo.attributes.normal.array,col=geo.attributes.color.array;
   let count=0;
   const sample=(field,x,y,z)=>{const u=Math.max(0,Math.min(RC_N-1.001,x/RC_H)),v=Math.max(0,Math.min(RC_N-1.001,y/RC_H)),w=Math.max(0,Math.min(RC_N-1.001,z/RC_H)),i=Math.floor(u),j=Math.floor(v),k=Math.floor(w),a=u-i,b=v-j,c=w-k;let value=0;for(let dz=0;dz<2;dz++)for(let dy=0;dy<2;dy++)for(let dx=0;dx<2;dx++)value+=field[rcIndex(i+dx,j+dy,k+dz)]*(dx?a:1-a)*(dy?b:1-b)*(dz?c:1-c);return value;};
+  if(rcGPUDataOwner===g&&rcGPUData&&!rcGPUFault){
+   // GPU density is clipped against the receiving sea before extraction.
+   for(let z=0;z<RC_N;z++)for(let y=0;y<RC_N;y++)for(let x=0;x<RC_N;x++){const k=rcIndex(x,y,z);rcDensity[k]=y*RC_H>=seaAt(x*RC_H,z*RC_H)-.30?rcGPUData[k]:0;}
+  }
   const iso=.62;
   const bounds=rcKeepAttached(rcDensity,iso,seaAt,simTier===2?16:12);
   if(!bounds){rcMesh.visible=false;rcTriangles=0;geo.setDrawRange(0,0);return;}
@@ -3227,6 +3298,7 @@ function updateAP(dt,t){
  if(apFault||!boat||breakingMode!=='advanced'||!plungePool.length){clearAP();return;}
  if(!apOwner||!plungePool.includes(apOwner)){clearAP();startAP(plungePool[0],t);}
  if(!apGPU&&!apGPUFault)initAPGPU();
+ if(apGPU&&!rcGPU&&!rcGPUFault)initRCGPU();
  apClock+=dt;const cadence=simTier===2?.10:simTier===1?.067:.05;
  if(apGPUPending)return;
  if(apClock<cadence)return;
@@ -4569,6 +4641,7 @@ async function init3D(forceWebGL=false){
   try{
    const useScreen=updateScreenSpaceLighting();
    updateUnderwaterMirror(clockTime);
+   updateRCThickness(clockTime);
    const pending=useScreen?screenLightPipeline.render():renderer.render(scene,camera);
    // WebGPU pipeline compilation errors often arrive as rejected promises,
    // rather than synchronous exceptions. Handle either form.
@@ -4606,7 +4679,7 @@ async function init3D(forceWebGL=false){
   const now=performance.now();
   if(now-last>1100){
    const measured=samples*1000/(now-last);
-   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?(apGPUFrames&&!apGPUFault?'GPU ':'CPU ')+apGrid.particles.length+'p '+(apGPUFrames&&!apGPUFault?apGPUFrames+' steps · mesh '+rcTriangles+' tris':apStats.after.toFixed(2)+' div'):'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
+   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?(apGPUFrames&&!apGPUFault?'GPU ':'CPU ')+apGrid.particles.length+'p '+(apGPUFrames&&!apGPUFault?apGPUFrames+' steps · mesh '+rcTriangles+' tris · '+(rcGPUFrames&&!rcGPUFault?'GPU density':'CPU density')+(rcThicknessEnabled?' · SS thickness':''):apStats.after.toFixed(2)+' div'):'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
    $('fps').textContent='FPS: '+Math.round(measured);
    adjustSimulationBudget(measured,now);adjustAdaptivePerformance(measured,now);
    last=now;samples=0;

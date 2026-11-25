@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 26.5 distributed hull hydrodynamics</title>
+<title>Rift Water Lab · WebGPU 26.5.1 airborne contact and steering correction</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.5</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.5.1</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.5 · distributed hull physics</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.5.1 · contact-aware hull physics</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -1561,7 +1561,7 @@ function oceanHeight(x,z,t){
 // are no flat foam planes or V-shaped line sprites.
 function trackWake(dt){
  trailElapsed+=dt;
- if(boatSpeed>.55&&wakeAmount>.01&&trailElapsed>.11){
+ if(hullContact>.01&&boatSpeed>.55&&wakeAmount>.01&&trailElapsed>.11){
   trailElapsed=0;
   wakeTrail.unshift({x:boat.position.x,z:boat.position.z,heading:boatHeading,
     forwardX:-Math.sin(boatHeading),forwardZ:-Math.cos(boatHeading),
@@ -1783,8 +1783,8 @@ function updateWhitewaterSpray(dt,t){
  if(sprayTimer>=.065){
   sprayTimer=0;
   const fx=-Math.sin(boatHeading),fz=-Math.cos(boatHeading),speed=Math.abs(boatSpeed);
-  if(speed>.6&&wakeAmount>.01){
-   const energy=Math.min(1.5,speed*.22)*Math.min(1,wakeAmount);
+  if(hullContact>.01&&speed>.6&&wakeAmount>.01){
+   const energy=Math.min(1.5,speed*.22)*Math.min(1,wakeAmount)*hullContact;
    for(let k=0;k<6;k++){
     const side=k%2?1:-1,back=k<2?-.9:1.4+bubbleHash(spraySeed+k)*.9;
     emitWhitewater(boat.position.x-fx*back+fz*side*.8,boat.position.z-fz*back-fx*side*.8,t,energy,-fx,-fz);
@@ -1995,7 +1995,7 @@ function stepFluid3(dt,t){
  let scoped=false;
  try{
   d.pushErrorScope('validation');scoped=true;
-  d.queue.writeBuffer(f.uniform,0,new Float32Array([boat.position.x,boat.position.y,boat.position.z,step,-Math.sin(boatHeading),-Math.cos(boatHeading),Math.abs(boatSpeed),wakeAmount,shiftX,0,shiftZ,t,ox,oy,oz,Math.min(2,breakingIntensity*whitecapIntensity)]));
+  d.queue.writeBuffer(f.uniform,0,new Float32Array([boat.position.x,boat.position.y,boat.position.z,step,-Math.sin(boatHeading),-Math.cos(boatHeading),Math.abs(boatSpeed),wakeAmount*hullContact,shiftX,0,shiftZ,t,ox,oy,oz,Math.min(2,breakingIntensity*whitecapIntensity)]));
   const enc=d.createCommandEncoder();
   const pass=(name,a,b,p,np)=>{const group=d.createBindGroup({layout:f.layout,entries:[f.uniform,a,b,p,np,f.div].map((buffer,binding)=>({binding,resource:{buffer}}))});const cp=enc.beginComputePass();cp.setPipeline(f.pipelines[name]);cp.setBindGroup(0,group);cp.dispatchWorkgroups(8,4,8);cp.end();};
   const a=f.v[0],b=f.v[1],p=f.p[0],q=f.p[1];
@@ -2192,12 +2192,12 @@ function advanceVortexCores(step,t){
   if(v.age>9||Math.hypot(v.x-boat.position.x,v.z-boat.position.z)>17)foamVortices.splice(i,1);
  }
  vortexShed+=step;vortexWaveShed+=step;
- if(speed>.65&&wakeAmount>.05&&vortexShed>Math.max(.7,2.2/speed)){
+ if(hullContact>.01&&speed>.65&&wakeAmount>.05&&vortexShed>Math.max(.7,2.2/speed)){
   vortexShed=0;
   for(const side of [-1,1]){
    if(foamVortices.length>=18)foamVortices.shift();
    foamVortices.push({x:boat.position.x-fx*2.1+fz*side*1.25,z:boat.position.z-fz*2.1-fx*side*1.25,
-    radius:1.05,spin:side*Math.min(3.6,speed*.85)*Math.min(1,wakeAmount)*(1+side*rudder*.22),age:0});
+    radius:1.05,spin:side*Math.min(3.6,speed*.85)*Math.min(1,wakeAmount)*hullContact*(1+side*rudder*.22),age:0});
   }
  }
  if(vortexWaveShed>1.1&&breakingIntensity>.1&&whitecapIntensity>.1&&foamVortices.length<18){
@@ -2217,8 +2217,8 @@ function advanceFoamMomentum(step,t){
   const a=flowSample(flowU,x-u*step,z-v*step),b=flowSample(flowV,x-u*step,z-v*step);
   breakerCurl(x,z,t,flowForceScratch);
   const dx=x-boat.position.x,dz=z-boat.position.z,along=dx*fx+dz*fz,side=dx*fz-dz*fx;
-  const jet=Math.exp(-((along+2.3)**2*.27+side*side*.85))*speed*wakeAmount;
-  const shoulder=Math.exp(-along*along*.36-(Math.abs(side)-.85)**2*3)*speed*wakeAmount;
+  const jet=Math.exp(-((along+2.3)**2*.27+side*side*.85))*speed*wakeAmount*hullContact;
+  const shoulder=Math.exp(-along*along*.36-(Math.abs(side)-.85)**2*3)*speed*wakeAmount*hullContact;
   const spread=Math.tanh(side*3)*shoulder*.7;
   const relax=Math.min(1,step*1.2);
   evaluateVortices(x,z,vortexScratch);
@@ -2287,7 +2287,7 @@ function advanceFoamDensity(dt,t){
  const ox=Math.floor((boat.position.x-FOAM_SPAN*.5)/FOAM_STEP)*FOAM_STEP;
  const oz=Math.floor((boat.position.z-FOAM_SPAN*.5)/FOAM_STEP)*FOAM_STEP;
  const dir=waveComponents[0],fx=-Math.sin(boatHeading),fz=-Math.cos(boatHeading);
- const speed=Math.abs(boatSpeed),power=Math.min(1,speed/3)*wakeAmount*(propulsionMode==='power'?1:.65);
+ const speed=Math.abs(boatSpeed),power=Math.min(1,speed/3)*wakeAmount*hullContact*(propulsionMode==='power'?1:.65);
  for(let j=0;j<FOAM_GRID;j++)for(let i=0;i<FOAM_GRID;i++){
   const x=ox+i*FOAM_STEP,z=oz+j*FOAM_STEP,p=j*FOAM_GRID+i;
   sharedFoamFlow(x,z,t,flowReadScratch);
@@ -2410,7 +2410,7 @@ function updateFoamSkin(t){
  if(t-foamOpticalTime>=.085||Math.hypot(cx-foamOpticalX,cz-foamOpticalZ)>.48){
   foamOpticalTime=t;foamOpticalX=cx;foamOpticalZ=cz;
   const dir=waveComponents[0],fx=-Math.sin(boatHeading),fz=-Math.cos(boatHeading);
-  const speed=Math.abs(boatSpeed),power=Math.min(1,speed/3)*wakeAmount;
+  const speed=Math.abs(boatSpeed),power=Math.min(1,speed/3)*wakeAmount*hullContact;
   for(let j=0;j<FOAM_MASK;j++)for(let i=0;i<FOAM_MASK;i++){
    const lx=((i+.5)/FOAM_MASK-.5)*LOCAL_RADIUS*2,lz=((j+.5)/FOAM_MASK-.5)*LOCAL_RADIUS*2;
    const x=cx+lx,z=cz+lz,k=(j*FOAM_MASK+i)*4;
@@ -2509,7 +2509,7 @@ function advanceBreakingFoam(dt,t){
 }
 function updateWhitewater(t){
  if(!foamMesh||!boat)return;
- if(breakingMode==='advanced'&&!foamDebug){foamMesh.geometry.setDrawRange(0,0);$('foamStatus').textContent=fluid3Diagnostic()+' · vortices '+foamVortices.length+' · enstrophy '+fluid3Enstrophy.toFixed(3)+' · vertical '+fluid3Vertical.toFixed(2)+' m/s · surface '+(fsPeak*100).toFixed(1)+' cm'+' · hull load '+hullFluidLoad.toFixed(0)+' N · wet '+Math.round(hullWet*100)+'% · slam '+hullSlamming.toFixed(0)+' N · tracers '+vortexFilaments.length;return;}
+ if(breakingMode==='advanced'&&!foamDebug){foamMesh.geometry.setDrawRange(0,0);$('foamStatus').textContent=fluid3Diagnostic()+' · vortices '+foamVortices.length+' · enstrophy '+fluid3Enstrophy.toFixed(3)+' · vertical '+fluid3Vertical.toFixed(2)+' m/s · surface '+(fsPeak*100).toFixed(1)+' cm'+' · hull load '+hullFluidLoad.toFixed(0)+' N · wet '+Math.round(hullWet*100)+'% · '+(hullContact>.01?'CONTACT':'AIRBORNE')+' · slam '+hullSlamming.toFixed(0)+' N · tracers '+vortexFilaments.length;return;}
  if((foamStrength<.01||wakeAmount<.01)&&!foamDebug&&breakingFoam.length===0){
   foamMesh.geometry.setDrawRange(0,0);
   foamPatchCount=0;$('foamStatus').textContent='Foam: 0 patches';return;
@@ -2568,7 +2568,7 @@ function updateWhitewater(t){
    }
   }
  }
- if(boatSpeed>.18&&wakeAmount>.01){
+ if(hullContact>.01&&boatSpeed>.18&&wakeAmount>.01){
   const fx=-Math.sin(boatHeading),fz=-Math.cos(boatHeading),sx=fz,sz=-fx;
   const power=Math.min(1,boatSpeed/4)*foamStrength*wakeAmount;
   for(let i=0;i<12;i++){
@@ -2745,7 +2745,7 @@ function resetBoat(){
  boat.position.set(-3.2,.6,-13);
  boat.rotation.set(0,0,0);vy=0;pitchV=0;rollV=0;
  boatHeading=0;boatSpeed=0;rudder=0;driveMode='stop';totalTravel=0;previousBoatHeading=0;turnVelocity=0;wakeSolver?.clear();wakeTrail=[];trailElapsed=0;
- hullSlipX=hullSlipZ=hullFluidLoad=hullYawRate=hullWet=hullSlamming=0;vortexFilaments.length=0;clearFreeSurface();fluid3Epoch++;fluid3Frames=0;fluid3State='awaiting fresh field';if(fluid3){fluid3.cpu=null;fluid3.started=false;fluid3.d.queue.writeBuffer(fluid3.v[0],0,new Float32Array(F3C*4));}
+ hullSlipX=hullSlipZ=hullFluidLoad=hullYawRate=hullWet=hullSlamming=hullContact=0;vortexFilaments.length=0;clearFreeSurface();fluid3Epoch++;fluid3Frames=0;fluid3State='awaiting fresh field';if(fluid3){fluid3.cpu=null;fluid3.started=false;fluid3.d.queue.writeBuffer(fluid3.v[0],0,new Float32Array(F3C*4));}
  foamFieldReady=false;flowReady=false;foamVortices.length=0;vortexShed=0;vortexWaveShed=0;foamDensity.fill(0);foamNext.fill(0);entrainedAir.fill(0);airNext.fill(0);breakingFoam.length=0;foamBubbles.length=0;foamBubbleSpawn=0;whitewaterSpray.length=0;sprayImpacts.length=0;cloudSamples=[];cloudTime=-100;
  if($('forward')){setDriveMode('stop');}
 }
@@ -2789,7 +2789,7 @@ const hullSamples=[
  [-.65,-.72,1.65],[.65,-.72,1.65]
 ];
 let boatProbeOffset=null;
-let hullSlipX=0,hullSlipZ=0,hullFluidLoad=0,hullYawRate=0,hullWet=0,hullSlamming=0;const hullFlowSample={};
+let hullSlipX=0,hullSlipZ=0,hullFluidLoad=0,hullYawRate=0,hullWet=0,hullSlamming=0,hullContact=0;const hullFlowSample={};
 // Weighted waterplane strips approximate a tapered hull (bow at negative Z).
 const hydroProbes=[];for(const [z,width] of [[-2.05,.37],[-1.35,.73],[-.5,.92],[.45,.94],[1.35,.87],[2,.69]])for(const side of [-1,0,1])hydroProbes.push([side*width*.82,side===0?-.29:-.18,z,width*(side===0?.50:.25)]);
 const hydroArea=hydroProbes.reduce((a,p)=>a+p[3],0);
@@ -2798,7 +2798,7 @@ function stepBoatClassic(dt,t){
  if(!boatProbeOffset)boatProbeOffset=new THREE.Vector3();
  const steps=Math.max(1,Math.min(5,Math.ceil(dt/(1/100)))),h=dt/steps;
  const mass=320,inertiaX=mass*2.65,inertiaZ=mass*.95;
- const desiredRudder=(steeringRight?1:0)-(steeringLeft?1:0);
+ const desiredRudder=(steeringLeft?1:0)-(steeringRight?1:0);
  rudder+=(desiredRudder-rudder)*Math.min(1,dt*3.6);
  for(let k=0;k<steps;k++){
   const advancing=driveMode==='forward';
@@ -2850,7 +2850,7 @@ function stepBoatClassic(dt,t){
    const along=(fluidX*fx+fluidZ*fz)/fluidCount;
    boatSpeed=Math.max(0,boatSpeed+Math.max(-.45,Math.min(.25,(along-boatSpeed)*.035))*h);
   }else{hullSlipX*=Math.exp(-h*2);hullSlipZ*=Math.exp(-h*2);}
-  hullFluidLoad=fluidLoad;
+  hullFluidLoad=fluidLoad;hullWet=Math.min(1,immersionSum/probes.length/.24);hullContact=Math.min(1,hullWet*2.5);
   // Gentle planing lift adds resistance to pitching the bow underwater,
   // but never creates buoyancy when the boat is completely airborne.
   if(dynamic&&immersed>1&&boatSpeed>3){
@@ -2881,13 +2881,13 @@ function stepBoat(dt,t){
  if(!boatProbeOffset)boatProbeOffset=new THREE.Vector3();
  const steps=Math.max(1,Math.min(6,Math.ceil(dt/.008))),h=dt/steps;
  const mass=420,Ix=mass*2.0,Iz=mass*.50,Iy=mass*2.1;
- const desired=(steeringRight?1:0)-(steeringLeft?1:0);
+ const desired=(steeringLeft?1:0)-(steeringRight?1:0);
  rudder+=(desired-rudder)*(1-Math.exp(-dt*3.8));
  for(let k=0;k<steps;k++){
   const fx=-Math.sin(boatHeading),fz=-Math.cos(boatHeading),rx=-fz,rz=fx;
   const forward=driveMode==='forward',powered=propulsionMode==='power';
   const vx=fx*boatSpeed+hullSlipX,vz=fz*boatSpeed+hullSlipZ;
-  let fy=-mass*9.81,tx=-pitchV*Ix*1.9,tz=-rollV*Iz*2.6,forceX=0,forceZ=0,yaw=0,wet=0,load=0,slam=0;
+  let fy=-mass*9.81,tx=0,tz=0,forceX=0,forceZ=0,yaw=0,wet=0,load=0,slam=0;
   const q=boat.quaternion;
   for(const p of hydroProbes){
    boatProbeOffset.set(p[0],p[1],p[2]).applyQuaternion(q);
@@ -2915,25 +2915,27 @@ function stepBoat(dt,t){
    forceX+=px;forceZ+=pz;yaw+=oz*px-ox*pz;
    if(ok)load+=Math.abs(damp)+Math.hypot(px,pz);
   }
-  hullWet=Math.min(1,wet/hydroArea);hullFluidLoad=load;hullSlamming=slam;
+  hullWet=Math.min(1,wet/hydroArea);hullContact=Math.min(1,hullWet*2.5);hullFluidLoad=load;hullSlamming=slam;
+  // No hydrodynamic torque or thrust in free flight. Existing wake persists.
+  tx-=pitchV*Ix*(.04+1.86*hullContact);tz-=rollV*Iz*(.04+2.56*hullContact);
   const thrust=forward?mass*sailPower*(powered?8.2:3.0*(.35+.65*Math.abs(Math.cos(boatHeading+.7)))):0;
-  forceX+=fx*thrust;forceZ+=fz*thrust;
+  forceX+=fx*thrust*hullContact;forceZ+=fz*thrust*hullContact;
   const steer=rudder*Math.min(1,boatSpeed/2+.15);
-  yaw+=Iy*steer*(.35+.10*boatSpeed)-Iy*hullYawRate*2.2;
+  yaw+=Iy*steer*(.35+.10*boatSpeed)*hullContact-Iy*hullYawRate*(.08+2.12*hullContact);
   // Lift acts under the stern, only while wetted.
   const lift=mass*9.81*Math.min(.24,Math.max(0,boatSpeed-2.5)*.035)*hullWet;
   fy+=lift;tx-=lift*.45;
-  const accelF=(forceX*fx+forceZ*fz)/mass-(forward?0:Math.min(boatSpeed/h,1.4));
+  const accelF=(forceX*fx+forceZ*fz)/mass-(forward?0:Math.min(boatSpeed/h,1.4)*hullContact);
   boatSpeed=Math.max(0,Math.min(powered?13:8,boatSpeed+h*Math.max(-8,Math.min(8,accelF))));
   const sideSpeed=(hullSlipX*rx+hullSlipZ*rz)+(forceX*rx+forceZ*rz)/mass*h;
-  const sideBound=Math.max(-1.8,Math.min(1.8,sideSpeed))*Math.exp(-h*.35);
+  const sideBound=Math.max(-1.8,Math.min(1.8,sideSpeed))*Math.exp(-h*(.015+.335*hullContact));
   hullYawRate=Math.max(-.9,Math.min(.9,hullYawRate+yaw/Iy*h));
   boatHeading+=hullYawRate*h;
   hullSlipX=Math.cos(boatHeading)*sideBound;hullSlipZ=-Math.sin(boatHeading)*sideBound;
   boat.position.x+=(-Math.sin(boatHeading)*boatSpeed+hullSlipX)*h;
   boat.position.z+=(-Math.cos(boatHeading)*boatSpeed+hullSlipZ)*h;
   totalTravel+=Math.hypot(boatSpeed,sideBound)*h;
-  vy=Math.max(-3.8,Math.min(3.8,vy+h*Math.max(-20,Math.min(20,fy/mass))));
+  vy=Math.max(-12,Math.min(8,vy+h*Math.max(-20,Math.min(20,fy/mass))));
   pitchV=Math.max(-1.1,Math.min(1.1,pitchV+tx/Ix*h));
   rollV=Math.max(-1.1,Math.min(1.1,rollV+tz/Iz*h));
   boat.position.y+=vy*h;
@@ -3615,7 +3617,7 @@ async function init3D(forceWebGL=false){
    floor.position.z=Math.round(boat.position.z/80)*80;
    wakeSolver?.advance(dt,{x:boat.position.x,z:boat.position.z,
      heading:boatHeading,speed:boatSpeed,bob:vy,turnRate:turnVelocity,
-     amount:wakeAmount*(propulsionMode==='power'?1.45:1)});
+     amount:wakeAmount*hullContact*(propulsionMode==='power'?1.45:1)});
    if(gpuFFT&&!fftFault&&waveEngine!=='analytic')gpuFFT.request(time,{power:1});
    trackWake(dt);
    advanceBreakingFoam(dt,time);

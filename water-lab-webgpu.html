@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 26.15 underwater spectral transport and aerated optics</title>
+<title>Rift Water Lab · WebGPU 26.15.1 angle-dependent underwater surface</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.15</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.15.1</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.15 · underwater optics</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.15.1 · Snell window optics</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -230,6 +230,31 @@ let foamMesh=null,foamPositions=null,foamColors=null,foamCapacity=280,foamStreng
 let surfaceNormalMap=null,surfaceFineNormalMap=null,reflectionEnvironment=null;
 let surfaceDetail=.90,surfaceGlitter=1.0,fineRipple=.45,reflectionMode='enhanced';
 let waterNearMaterial=null,waterFarMaterial=null;
+let oceanTSL=null,oceanAngleBlend=null,oceanAngleDepth=null;
+function createOceanMaterial(options){
+ if(!oceanTSL||!THREE.MeshPhysicalNodeMaterial)return new THREE.MeshPhysicalMaterial(options);
+ let mat;
+ try{
+  const {uniform,float,vec3,normalWorld,cameraPosition,positionWorld,materialTransmission,materialEmissive}=oceanTSL;
+  if(!oceanAngleBlend){oceanAngleBlend=uniform(0);oceanAngleDepth=uniform(0);}
+  mat=new THREE.MeshPhysicalNodeMaterial(options);
+  const v=cameraPosition.sub(positionWorld).normalize();
+  const cosine=normalWorld.normalize().dot(v).abs().clamp(0,1);
+  const eta=float(1.333),sin2=eta.mul(eta).mul(float(1).sub(cosine.mul(cosine)));
+  const ct=float(1).sub(sin2).max(0).sqrt();
+  const ec=eta.mul(cosine),rs=ec.sub(ct).div(ec.add(ct).max(.0001));
+  const ect=eta.mul(ct),rp=cosine.sub(ect).div(cosine.add(ect).max(.0001));
+  const fresnel=rs.mul(rs).add(rp.mul(rp)).mul(.5).clamp(0,1);
+  const tir=oceanTSL.smoothstep(.985,1.015,sin2);
+  const reflectance=fresnel.mul(float(1).sub(tir)).add(tir);
+  const wet=oceanAngleBlend.mul(oceanTSL.smoothstep(-.02,.08,v.y.negate()));
+  mat.transmissionNode=materialTransmission.mul(float(1).sub(wet.mul(reflectance)));
+  // Approximate reflected underwater radiance, not a second scene capture.
+  const reflected=vec3(.045,.19,.24).mul(oceanAngleDepth.mul(-.065).exp()).mul(reflectance).mul(wet);
+  mat.emissiveNode=materialEmissive.add(reflected);
+  return mat;
+ }catch(e){mat?.dispose();console.warn('Angle optics fallback:',e);return new THREE.MeshPhysicalMaterial(options);}
+}
 let opticalMode='lagoon',waterClarity=1.10,waterFloor=null,renderQuality='balanced';
 let depthRefraction=1,underwaterScatter=1,waveSmoothness=1,reflectionStrength=1,subsurfaceLight=.85;
 let thicknessTexture=null,thicknessPixels=null,lastThicknessX=Infinity,lastThicknessZ=Infinity;
@@ -791,6 +816,7 @@ function updateUndersideOptics(){
  if(!scene||!camera)return;
  const enhanced=undersideMode==='enhanced'&&opticalMode!=='legacy';
  const blend=enhanced?underwaterBlend:0;
+ if(oceanAngleBlend){oceanAngleBlend.value=blend*Math.min(1,underwaterFresnel);oceanAngleDepth.value=opticalDepth;}
  // Keep depth-dependent light current even when immersion is stable.
  const updateMaterials=Math.abs(blend-lastUndersideMix)>=.012;
  if(updateMaterials)lastUndersideMix=blend;
@@ -1423,7 +1449,7 @@ function makeSurface(){
  if(!surfaceNormalMap)surfaceNormalMap=createWaveNormalMap();
  if(!surfaceFineNormalMap)surfaceFineNormalMap=createWaveNormalMap(true);
  if(!thicknessTexture)createThicknessMap();
- const nearMat=new THREE.MeshPhysicalMaterial({
+ const nearMat=createOceanMaterial({
   color:0xffffff,vertexColors:true,roughness:.16,metalness:0,
   clearcoat:.45,clearcoatRoughness:.13,
   normalMap:surfaceNormalMap,normalScale:new THREE.Vector2(.30,.30),
@@ -1440,7 +1466,7 @@ function makeSurface(){
  geometry=radialGeometry(farRadii,angular);
  base=Float32Array.from(geometry.attributes.position.array);
  geometry.setAttribute('color',new THREE.BufferAttribute(new Float32Array(base.length).fill(1),3));
- const material=new THREE.MeshPhysicalMaterial({
+ const material=createOceanMaterial({
   color:0x148ba2,roughness:.18,metalness:0,
   clearcoat:.45,clearcoatRoughness:.13,
   normalMap:surfaceNormalMap,normalScale:new THREE.Vector2(.18,.18),
@@ -3890,6 +3916,10 @@ async function init3D(forceWebGL=false){
  if(!forceWebGL)initFluid3();else fluid3State='WebGL fallback';
  const backend=forceWebGL?'WebGLRenderer':renderer.backend?.constructor?.name||'WebGPU (unknown backend)';
  isWebGPU=!forceWebGL&&/webgpu/i.test(backend);
+ oceanTSL=null;oceanAngleBlend=null;oceanAngleDepth=null;
+ if(isWebGPU&&!safeStartup&&!new URLSearchParams(location.search).has('classicOptics')){
+  try{oceanTSL=await import('three/tsl');}catch(e){console.warn('Angle optics unavailable',e);}
+ }
  $('backend').textContent='Backend: '+backend;
  status('WebGPU optics experiment. Physical water has a safe fallback; original FFT lab is unchanged.');
  scene=new THREE.Scene();scene.background=new THREE.Color(0x9bcddf);scene.userData.dayBackground=scene.background;

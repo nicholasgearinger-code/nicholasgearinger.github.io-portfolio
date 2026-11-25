@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 27.2.1 boundary-free liquid reconstruction</title>
+<title>Rift Water Lab · WebGPU 27.2.2 coupled aerated water optics</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.2.1</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.2.2</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.2.1 · localized liquid</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.2.2 · aerated water optics</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -2609,7 +2609,7 @@ function advanceFoamDensity(dt,t){
   const dx=x-boat.position.x,dz=z-boat.position.z,along=dx*fx+dz*fz,side=dx*fz-dz*fx;
   const stern=Math.exp(-((along+1.9)*(along+1.9)*.45+side*side*1.15));
   const hull=Math.exp(-along*along*.30-Math.pow(Math.abs(side)-.70,2)*4.2);
-  const boatAir=power*(stern*1.8+hull*.9);
+  const boatAir=power*(stern*1.8+hull*.9)*Math.min(1,speed/1.5);
   const wakeFlow=Math.min(1,boatAir*.6);
   const vortexData=evaluateVortices(x,z,vortexScratch),vortexAir=vortexData.air,vortexCore=vortexData.core;
   for(let k=0;k<FOAM_LAYERS;k++){
@@ -2645,7 +2645,7 @@ function advanceFoamDensity(dt,t){
     // Transport material coordinates with the density; do not scroll a texture in time.
     foamDriftNextX[p]=Math.max(-8,Math.min(8,(foamLayer(sx,sz,0,foamDriftX)+x-sx)*.995));
     foamDriftNextZ[p]=Math.max(-8,Math.min(8,(foamLayer(sx,sz,0,foamDriftZ)+z-sz)*.995));
-    const hit=waveAir*.85+boatAir*.65;
+    const hit=waveAir*.85+boatAir*.42;
     const stretch=vortexAir*.40+gpuAir*.12+boatAir*.32;
     breakerNext[p]=Math.max(0,Math.min(1,young*Math.exp(-step*1.6)+step*hit*(1-young)));
     shearNext[p]=Math.max(0,Math.min(1,shear*Math.exp(-step*.63)+step*(stretch+young*.42)*(1-shear)*(1-.5*vortexCore)));
@@ -2797,7 +2797,7 @@ function updateFoamSkin(t){
    const shadow=1-Math.min(.28,column*.12+Math.max(0,upstream-d)*.28);
    const coverage=Math.max(0,Math.min(1,(d*foamStrength-.22)/.48));
    const active=Math.max(0,Math.min(1,(young+.55*shear+.30*d-.13)/.30));
-   const alpha=Math.min(.88,foamStrength*(young*1.12+shear*.40+coverage*.44)*active*fade);
+   const alpha=Math.min(.68,foamStrength*(young*.85+shear*.27+coverage*.32)*active*fade);
    const sunVisibility=shadowReady?shadowSample(shadowField,x,z,1):1;
    const bright=Math.min(1,(.84+.14*scatter+.08*young)*shadow*(1-Math.min(.32,(1-sunVisibility)*waveShadowStrength*.6)));
    data[k]=Math.round(255*bright);data[k+1]=Math.round(255*Math.min(1,bright+.025));data[k+2]=Math.round(255*Math.min(1,bright+.035));data[k+3]=Math.round(255*alpha);
@@ -3038,7 +3038,7 @@ function updateLiquidFoam(t){
  parcelClock+=dt;
  if(parcelClock>=.065){
   parcelClock=0;
-  const speed=Math.abs(boatSpeed),power=Math.min(1,speed/4)*wakeAmount*hullContact*foamStrength;
+  const speed=Math.abs(boatSpeed),power=Math.min(1,speed/4)*wakeAmount*hullContact*foamStrength*Math.min(1,speed/1.5);
   if(power>.08){
    const fx=-Math.sin(boatHeading),fz=-Math.cos(boatHeading);
    for(let j=0;j<4;j++){
@@ -3065,8 +3065,8 @@ function updateLiquidFoam(t){
   const life=Math.max(0,1-p.age/p.life),birth=Math.min(1,p.age*12+.1);
   const size=p.r*(.65+.65*Math.min(1,p.age))*Math.sqrt(life*birth*p.strength);
   if(size<.012)continue;
-  obj.position.set(p.x,p.surface+size*.22,p.z);obj.scale.set(size*1.45,size*.7,size);obj.rotation.y=Math.atan2(p.vx,p.vz);obj.updateMatrix();liquidFoamMesh.setMatrixAt(count,obj.matrix);
-  const shade=.78+.18*life;col.setRGB(shade,Math.min(1,shade+.05),Math.min(1,shade+.07));liquidFoamMesh.setColorAt(count++,col);
+  obj.position.set(p.x,p.surface-size*.12,p.z);obj.scale.set(size*1.35,size*.42,size);obj.rotation.y=Math.atan2(p.vx,p.vz);obj.updateMatrix();liquidFoamMesh.setMatrixAt(count,obj.matrix);
+  const shade=.64+.26*life;col.setRGB(shade,Math.min(1,shade+.05),Math.min(1,shade+.07));liquidFoamMesh.setColorAt(count++,col);
  }
  liquidFoamMesh.count=count;liquidFoamMesh.visible=count>0;liquidFoamMesh.instanceMatrix.needsUpdate=true;if(liquidFoamMesh.instanceColor)liquidFoamMesh.instanceColor.needsUpdate=true;
 }
@@ -3139,7 +3139,7 @@ function updateReconstruction(g,t){
   // Cache the receiving ocean elevation by column.
   const geo=rcMesh.geometry,pos=geo.attributes.position.array,norm=geo.attributes.normal.array,col=geo.attributes.color.array;
   let count=0;
-  const sample=(field,x,y,z)=>{const i=Math.max(0,Math.min(RC_N-1,Math.round(x/RC_H))),j=Math.max(0,Math.min(RC_N-1,Math.round(y/RC_H))),k=Math.max(0,Math.min(RC_N-1,Math.round(z/RC_H)));return field[rcIndex(i,j,k)];};
+  const sample=(field,x,y,z)=>{const u=Math.max(0,Math.min(RC_N-1.001,x/RC_H)),v=Math.max(0,Math.min(RC_N-1.001,y/RC_H)),w=Math.max(0,Math.min(RC_N-1.001,z/RC_H)),i=Math.floor(u),j=Math.floor(v),k=Math.floor(w),a=u-i,b=v-j,c=w-k;let value=0;for(let dz=0;dz<2;dz++)for(let dy=0;dy<2;dy++)for(let dx=0;dx<2;dx++)value+=field[rcIndex(i+dx,j+dy,k+dz)]*(dx?a:1-a)*(dy?b:1-b)*(dz?c:1-c);return value;};
   const iso=.38;
   rcExtract(rcDensity,iso,(a,b,c)=>{
    if(count+3>RC_MAX)return;
@@ -3154,7 +3154,7 @@ function updateReconstruction(g,t){
     const len=Math.hypot(gx,gy,gz)||1;norm[k]=-gx/len;norm[k+1]=-gy/len;norm[k+2]=-gz/len;
     const air=Math.min(1,sample(rcAir,x,y,z)/Math.max(.12,sample(rcDensity,x,y,z)));
     // Effective scattering increases with gas fraction, not a flat foam mask.
-    const scatter=1-Math.exp(-air*1.8);
+    const scatter=1-Math.exp(-air*1.4);
     col[k]=.26+.66*scatter;col[k+1]=.66+.30*scatter;col[k+2]=.72+.25*scatter;count++;
    }
   });
@@ -3187,10 +3187,12 @@ function processAPImpacts(g,t){
   let impacts=0;
   for(const p of g.particles){
    const x=p.x+g.ox,y=p.y+g.oy,z=p.z+g.oz;
-   const reference=g.oy+2.1;
+   if(!p.crestLiquid)continue;
+   const reference=oceanHeight(x,z,t);
    const gap=y-reference,previous=p.surfaceGap;p.surfaceGap=gap;
    if(Number.isFinite(previous)&&previous>0&&gap<=0&&p.v[1]<-.8&&impacts<8){
-    const energy=Math.min(.55,-p.v[1]*.085);
+    const energy=Math.min(.65,-p.v[1]*.10);
+    if(entryAirQueue.length<12)entryAirQueue.push({x,z,energy:energy*.65,age:0});
     if(sprayImpacts.length<128)sprayImpacts.push({x,z,energy});
     emitWhitewater(x,z,t,energy,p.v[0],p.v[2]);spawnFoamParcel(x,z,Math.min(1,energy*2),p.v[0]*.3,p.v[2]*.3);impacts++;
    }
@@ -3466,6 +3468,7 @@ function oceanSpectralTint(x,z,h,sx,sz,out,i){
  out[i+1]=Math.min(1,(.29+.65*g)*(1-shade*.84)+glow*.30);
  out[i+2]=Math.min(1,(.36+.58*bl)*(1-shade*.67)+glow*.12);
 }
+function aeratedOpticalMix(a,b,c,strength){const opticalDepth=Math.max(0,a*.9+b*.65+c*.30-.11)*Math.max(0,strength);return Math.min(.72,1-Math.exp(-opticalDepth*1.6));}
 function animateWaves(t){
  if(!boat)return;
  refreshSpectralLUT();rebuildWaveShadows(t);
@@ -3564,8 +3567,14 @@ function animateWaves(t){
   nearColorData[i]*=1-fade*(1-light)*.20;
   nearColorData[i+1]*=1-fade*(1-light)*.15;
   nearColorData[i+2]*=1-fade*(1-light)*.10;
-  // Whitewater color is handled by the separate RGBA foam skin, avoiding
-  // a double tint of the base water and a green near-field disk.
+  // Approximate subsurface gas scattering in the continuous water surface.
+  if(foamFieldReady&&fade>0&&foamStrength>.01){
+   const a0=foamLayer(wx,wz,0,entrainedAir),a1=foamLayer(wx,wz,1,entrainedAir),a2=foamLayer(wx,wz,2,entrainedAir);
+   const scatter=aeratedOpticalMix(a0,a1,a2,foamStrength)*fade;
+   nearColorData[i]+=(.72-nearColorData[i])*scatter;
+   nearColorData[i+1]+=(.83-nearColorData[i+1])*scatter;
+   nearColorData[i+2]+=(.86-nearColorData[i+2])*scatter;
+  }
   rippleSum+=Math.abs(disturbance);rippleMax=Math.max(rippleMax,Math.abs(disturbance));
  }
  lastRipple=rippleMax;

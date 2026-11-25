@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 27.1.3 persistent aerated wake</title>
+<title>Rift Water Lab · WebGPU 27.2 reconstructed liquid and aerated volume</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.1.3</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.2</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.1.3 · aerated wake</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.2 · reconstructed liquid</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -2891,7 +2891,8 @@ function deformConnectedCrest(x,z,arr,i,fade){
  for(const p of plungePool){
   const dx=x-p.x,dz=z-p.z,along=dx*p.fx+dz*p.fz,side=dx*p.fz-dz*p.fx;
   if(!crestFold(along,side,p,crestOffset))continue;
-  arr[i]+=p.fx*crestOffset.forward*fade;arr[i+1]+=crestOffset.up*fade;arr[i+2]+=p.fz*crestOffset.forward*fade;changed=true;
+  const reconstructed=rcOwner===apGrid&&p===apOwner&&rcTriangles>0?.42:1;
+  arr[i]+=p.fx*crestOffset.forward*fade*reconstructed;arr[i+1]+=crestOffset.up*fade*reconstructed;arr[i+2]+=p.fz*crestOffset.forward*fade*reconstructed;changed=true;
  }
  return changed;
 }
@@ -3014,7 +3015,7 @@ function dispatchAPGPU(g,dt,t){
    if(results[0].status==='rejected')throw results[0].reason;if(results[0].value)throw results[0].value;
    if(apGrid!==g||apOwner!==owner)return;
    for(let i=0;i<count;i++){const p=g.particles[i],k=i*20;if(!Number.isFinite(data[k]+data[k+1]+data[k+2]+data[k+4]+data[k+5]+data[k+6]))throw Error('Invalid GPU liquid');p.x=data[k];p.y=data[k+1];p.z=data[k+2];for(let j=0;j<3;j++){p.v[j]=data[k+4+j];p.c.set(data.subarray(k+8+j*4,k+11+j*4),j*3);}}
-   apGPUFrames++;processAPImpacts(g,clockTime);
+   apGPUFrames++;processAPImpacts(g,clockTime);updateReconstruction(g,clockTime);
   }).catch(e=>{apGPUFault=String(e?.message||e);apGPU=null;console.warn('GPU liquid fallback',e);}).finally(()=>{apGPUPending=false;});
   return true;
  }catch(e){if(scoped)d.popErrorScope().catch(()=>{});apGPUFault=String(e?.message||e);apGPU=null;apGPUPending=false;return false;}
@@ -3069,7 +3070,93 @@ function updateLiquidFoam(t){
  }
  liquidFoamMesh.count=count;liquidFoamMesh.visible=count>0;liquidFoamMesh.instanceMatrix.needsUpdate=true;if(liquidFoamMesh.instanceColor)liquidFoamMesh.instanceColor.needsUpdate=true;
 }
-function clearAP(){apGrid=null;apOwner=null;apClock=0;if(apMesh)apMesh.visible=false;}
+// Local implicit liquid reconstruction. Compact particle kernels are
+// splatted to a scalar volume; marching tetrahedra extracts a connected
+// isosurface, including overhangs. No per-particle liquid spheres.
+const RC_N=25,RC_H=5.6/(RC_N-1),RC_SIZE=RC_N**3;
+const rcDensity=new Float32Array(RC_SIZE),rcAir=new Float32Array(RC_SIZE);
+const rcCorners=[[0,0,0],[1,0,0],[1,1,0],[0,1,0],[0,0,1],[1,0,1],[1,1,1],[0,1,1]];
+const rcTets=[[0,5,1,6],[0,1,2,6],[0,2,3,6],[0,3,7,6],[0,7,4,6],[0,4,5,6]];
+const rcIndex=(x,y,z)=>(z*RC_N+y)*RC_N+x;
+function rcSplat(p,air,radius){
+ const n=RC_N,h=RC_H,r2=radius*radius;
+ for(let z=Math.max(1,Math.floor((p.z-radius)/h));z<=Math.min(n-2,Math.ceil((p.z+radius)/h));z++)
+ for(let y=Math.max(1,Math.floor((p.y-radius)/h));y<=Math.min(n-2,Math.ceil((p.y+radius)/h));y++)
+ for(let x=Math.max(1,Math.floor((p.x-radius)/h));x<=Math.min(n-2,Math.ceil((p.x+radius)/h));x++){
+  const q=((x*h-p.x)**2+(y*h-p.y)**2+(z*h-p.z)**2)/r2;if(q>=1)continue;
+  const w=(1-q)**2,k=rcIndex(x,y,z);rcDensity[k]+=w;rcAir[k]+=w*air;
+ }
+}
+function rcExtract(field,iso,emit){
+ const n=RC_N,h=RC_H,vals=new Float32Array(8),pts=Array.from({length:8},()=>[0,0,0]);
+ for(let z=0;z<n-1;z++)for(let y=0;y<n-1;y++)for(let x=0;x<n-1;x++){
+  let mask=0;
+  for(let k=0;k<8;k++){const c=rcCorners[k],X=x+c[0],Y=y+c[1],Z=z+c[2];vals[k]=field[rcIndex(X,Y,Z)];if(vals[k]>=iso)mask|=1<<k;pts[k][0]=X*h;pts[k][1]=Y*h;pts[k][2]=Z*h;}
+  if(mask===0||mask===255)continue;
+  const cross=(a,b)=>{const f=(iso-vals[a])/(vals[b]-vals[a]);return pts[a].map((v,i)=>v+(pts[b][i]-v)*f);};
+  for(const tet of rcTets){
+   const inIds=[],outIds=[];for(const k of tet)(vals[k]>=iso?inIds:outIds).push(k);
+   if(!inIds.length||!outIds.length)continue;
+   const target=pts[outIds[0]],source=pts[inIds[0]],dir=target.map((v,i)=>v-source[i]);
+   const tri=(a,b,c)=>{const u=b.map((v,i)=>v-a[i]),v=c.map((v,i)=>v-a[i]),dot=(u[1]*v[2]-u[2]*v[1])*dir[0]+(u[2]*v[0]-u[0]*v[2])*dir[1]+(u[0]*v[1]-u[1]*v[0])*dir[2];if(dot<0)emit(a,c,b);else emit(a,b,c);};
+   if(inIds.length===1){const a=inIds[0];tri(...outIds.map(b=>cross(a,b)));}
+   else if(inIds.length===3){const b=outIds[0];tri(...inIds.map(a=>cross(a,b)));}
+   else{const [a,b]=inIds,[c,d]=outIds;const ac=cross(a,c),ad=cross(a,d),bc=cross(b,c),bd=cross(b,d);tri(ac,ad,bc);tri(ad,bd,bc);}
+  }
+ }
+}
+let rcMesh=null,rcOwner=null,rcLast=-100,rcTriangles=0,rcFault='';
+const RC_MAX=36000;
+function rcCreate(){
+ const geo=new THREE.BufferGeometry();
+ for(const name of ['position','normal','color'])geo.setAttribute(name,new THREE.BufferAttribute(new Float32Array(RC_MAX*3),3).setUsage(THREE.DynamicDrawUsage));
+ geo.setDrawRange(0,0);
+ const mat=new THREE.MeshPhysicalMaterial({color:0xffffff,vertexColors:true,roughness:.16,metalness:0,ior:1.333,transmission:.45,thickness:.55,attenuationColor:0x63c8bf,attenuationDistance:4,side:THREE.DoubleSide});
+ rcMesh=new THREE.Mesh(geo,mat);rcMesh.frustumCulled=false;rcMesh.visible=false;scene.add(rcMesh);
+}
+function clearReconstruction(){rcOwner=null;rcLast=-100;rcTriangles=0;if(rcMesh)rcMesh.visible=false;}
+function updateReconstruction(g,t){
+ if(rcFault||new URLSearchParams(location.search).has('noReconstruct'))return;
+ if(rcOwner===g&&t-rcLast<(simTier===2?.14:.09))return;
+ try{
+  if(!rcMesh)rcCreate();rcOwner=g;rcLast=t;
+  rcDensity.fill(0);rcAir.fill(0);
+  const radius=simTier===2?.49:simTier===1?.43:.39;
+  for(const p of g.particles){
+   const x=g.ox+p.x,z=g.oz+p.z;
+   const gas=foamLayer(x,z,1,entrainedAir)+foamLayer(x,z,0,breakerFilm)*.6;
+   const shear=Math.hypot(p.c[1]-p.c[3],p.c[2]-p.c[6],p.c[5]-p.c[7]);
+   rcSplat(p,Math.min(1,gas*.8+Math.max(0,shear-2)*.055),radius);
+  }
+  // Keep the replacement local to liquid protruding above the ocean.
+  // Cache the receiving ocean elevation by column.
+  const sea=new Float32Array(RC_N*RC_N);
+  for(let z=0;z<RC_N;z++)for(let x=0;x<RC_N;x++)sea[z*RC_N+x]=oceanHeight(g.ox+x*RC_H,g.oz+z*RC_H,t)-g.oy;
+  const geo=rcMesh.geometry,pos=geo.attributes.position.array,norm=geo.attributes.normal.array,col=geo.attributes.color.array;
+  let count=0;
+  const sample=(field,x,y,z)=>{const i=Math.max(0,Math.min(RC_N-1,Math.round(x/RC_H))),j=Math.max(0,Math.min(RC_N-1,Math.round(y/RC_H))),k=Math.max(0,Math.min(RC_N-1,Math.round(z/RC_H)));return field[rcIndex(i,j,k)];};
+  const iso=.38;
+  rcExtract(rcDensity,iso,(a,b,c)=>{
+   if(count+3>RC_MAX)return;
+   const above=v=>v[1]>sea[Math.max(0,Math.min(RC_N-1,Math.round(v[2]/RC_H)))*RC_N+Math.max(0,Math.min(RC_N-1,Math.round(v[0]/RC_H)))]-.04;
+   if(!above(a)&&!above(b)&&!above(c))return;
+   for(const v of [a,b,c]){
+    const [x,y,z]=v,k=count*3;
+    pos[k]=g.ox+x;pos[k+1]=g.oy+y;pos[k+2]=g.oz+z;
+    const gx=sample(rcDensity,x+RC_H,y,z)-sample(rcDensity,x-RC_H,y,z),gy=sample(rcDensity,x,y+RC_H,z)-sample(rcDensity,x,y-RC_H,z),gz=sample(rcDensity,x,y,z+RC_H)-sample(rcDensity,x,y,z-RC_H);
+    const len=Math.hypot(gx,gy,gz)||1;norm[k]=-gx/len;norm[k+1]=-gy/len;norm[k+2]=-gz/len;
+    const air=Math.min(1,sample(rcAir,x,y,z)/Math.max(.12,sample(rcDensity,x,y,z)));
+    // Effective scattering increases with gas fraction, not a flat foam mask.
+    const scatter=1-Math.exp(-air*3.1);
+    col[k]=.22+.72*scatter;col[k+1]=.62+.34*scatter;col[k+2]=.65+.33*scatter;count++;
+   }
+  });
+  geo.setDrawRange(0,count);for(const name of ['position','normal','color'])geo.attributes[name].needsUpdate=true;
+  rcTriangles=count/3;rcMesh.visible=count>0;
+ }catch(e){rcFault=String(e?.message||e);clearReconstruction();console.warn('Liquid reconstruction fallback',e);}
+}
+
+function clearAP(){clearReconstruction();apGrid=null;apOwner=null;apClock=0;if(apMesh)apMesh.visible=false;}
 function startAP(p,t){
  const g=makeAPGrid(),span=AP_N*AP_H,base=oceanHeight(p.x,p.z,t);
  g.ox=p.x-span*.5;g.oy=base-2.1;g.oz=p.z-span*.5;
@@ -3115,7 +3202,7 @@ function updateAP(dt,t){
   const steps=Math.ceil(elapsed/(simTier===2?.04:.032));
   for(let i=0;i<steps;i++)apStats=apStep(apGrid,elapsed/steps,simTier===2?7:simTier===1?10:14);
   if(!Number.isFinite(apStats.after)||apGrid.particles.some(p=>!Number.isFinite(p.x+p.y+p.z)))throw Error('Nonfinite liquid state');
-  processAPImpacts(apGrid,t);
+  processAPImpacts(apGrid,t);updateReconstruction(apGrid,t);
   // Optional diagnostic particles, disabled by default; actual surface
   // reconstruction follows in 27.1.
   if(new URLSearchParams(location.search).has('flipDebug')){
@@ -4478,7 +4565,7 @@ async function init3D(forceWebGL=false){
   const now=performance.now();
   if(now-last>1100){
    const measured=samples*1000/(now-last);
-   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?(apGPUFrames&&!apGPUFault?'GPU ':'CPU ')+apGrid.particles.length+'p '+(apGPUFrames&&!apGPUFault?apGPUFrames+' steps':apStats.after.toFixed(2)+' div'):'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
+   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?(apGPUFrames&&!apGPUFault?'GPU ':'CPU ')+apGrid.particles.length+'p '+(apGPUFrames&&!apGPUFault?apGPUFrames+' steps · mesh '+rcTriangles+' tris':apStats.after.toFixed(2)+' div'):'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
    $('fps').textContent='FPS: '+Math.round(measured);
    adjustSimulationBudget(measured,now);adjustAdaptivePerformance(measured,now);
    last=now;samples=0;

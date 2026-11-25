@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 27.3.1 isolated GPU readback fix</title>
+<title>Rift Water Lab · WebGPU 27.3.2 unified liquid surface coupling</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.3.1</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.3.2</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.3.1 · GPU readback fix</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.3.2 · unified surface</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -3065,7 +3065,7 @@ function updateLiquidFoam(t){
   const blend=1-Math.exp(-dt*2.8);
   p.vx+=(parcelFlow.x+parcelVortex.x*.4-p.vx)*blend;p.vz+=(parcelFlow.z+parcelVortex.z*.4-p.vz)*blend;
   p.x+=p.vx*dt;p.z+=p.vz*dt;
-  if(!Number.isFinite(p.surface)||t-p.surfaceAt>.045){p.surface=oceanHeight(p.x,p.z,t);p.surfaceAt=t;}
+  if(!Number.isFinite(p.surface)||t-p.surfaceAt>.045){p.surface=oceanHeight(p.x,p.z,t)+rcSurfaceOffset(p.x,p.z);p.surfaceAt=t;}
   const life=Math.max(0,1-p.age/p.life),birth=Math.min(1,p.age*12+.1);
   const size=p.r*(.65+.45*Math.min(1,p.age))*Math.sqrt(life*birth*p.strength);
   if(size<.012)continue;
@@ -3204,12 +3204,28 @@ function updateRCThickness(t){
  finally{renderer.setRenderTarget(prev);renderer.setClearColor(prevColor,prevAlpha);}
 }
 
-function clearReconstruction(){rcOwner=null;rcLast=-100;rcTriangles=0;if(rcMesh)rcMesh.visible=false;}
+const rcIntegrated=!new URLSearchParams(location.search).has('meshFluid');
+const rcHeight=new Float32Array(RC_N*RC_N),rcHeightTarget=new Float32Array(RC_N*RC_N),rcHeightScratch=new Float32Array(RC_N*RC_N);
+let rcHeightOwner=null,rcHeightTime=-100,rcPeak=0;
+function rcBuildHeight(field,sea,target){
+ const n=RC_N,h=RC_H;target.fill(0);
+ for(let z=2;z<n-2;z++)for(let x=2;x<n-2;x++){
+  const k=z*n+x,base=sea[k];let top=base;
+  for(let y=1;y<n-1;y++){const d=field[rcIndex(x,y,z)];if(d<.62)continue;top=Math.max(top,y*h);}
+  const edge=Math.min(1,Math.min(x,z,n-1-x,n-1-z)/5);target[k]=Math.min(.65,Math.max(0,top-base))*edge*edge;
+ }
+ for(let z=1;z<n-1;z++)for(let x=1;x<n-1;x++){const k=z*n+x;rcHeightScratch[k]=(target[k]*4+target[k-1]+target[k+1]+target[k-n]+target[k+n])/8;}
+ target.set(rcHeightScratch);
+}
+function rcAdvanceHeight(t){const dt=rcHeightTime<0?0:Math.max(0,Math.min(.05,t-rcHeightTime));rcHeightTime=t;const a=1-Math.exp(-dt*10);rcPeak=0;for(let i=0;i<rcHeight.length;i++){rcHeight[i]+=(rcHeightTarget[i]-rcHeight[i])*a;rcPeak=Math.max(rcPeak,rcHeight[i]);}}
+function rcSurfaceOffset(x,z){if(!rcIntegrated||!rcHeightOwner)return 0;const u=(x-rcHeightOwner.ox)/RC_H,v=(z-rcHeightOwner.oz)/RC_H,n=RC_N;if(u<0||v<0||u>=n-1||v>=n-1)return 0;const i=Math.floor(u),j=Math.floor(v),a=u-i,b=v-j,k=j*n+i;return (rcHeight[k]*(1-a)+rcHeight[k+1]*a)*(1-b)+(rcHeight[k+n]*(1-a)+rcHeight[k+n+1]*a)*b;}
+function clearReconstruction(){rcHeightTarget.fill(0);rcOwner=null;rcLast=-100;rcTriangles=0;if(rcMesh)rcMesh.visible=false;}
 function updateReconstruction(g,t){
  if(rcFault||new URLSearchParams(location.search).has('noReconstruct'))return;
  if(rcOwner===g&&t-rcLast<(simTier===2?.22:.13))return;
  try{
-  if(!rcMesh)rcCreate();rcOwner=g;rcLast=t;
+  if(!rcIntegrated&&!rcMesh)rcCreate();rcOwner=g;rcLast=t;
+  if(rcHeightOwner!==g){rcHeightOwner=g;rcHeight.fill(0);rcHeightTarget.fill(0);}
   rcDensity.fill(0);rcAir.fill(0);
   const radius=simTier===2?.55:simTier===1?.49:.44;
   // Sample the receiving ocean before depositing: the rectangular bed is
@@ -3227,7 +3243,6 @@ function updateReconstruction(g,t){
   }
   // Keep the replacement local to liquid protruding above the ocean.
   // Cache the receiving ocean elevation by column.
-  const geo=rcMesh.geometry,pos=geo.attributes.position.array,norm=geo.attributes.normal.array,col=geo.attributes.color.array;
   let count=0;
   const sample=(field,x,y,z)=>{const u=Math.max(0,Math.min(RC_N-1.001,x/RC_H)),v=Math.max(0,Math.min(RC_N-1.001,y/RC_H)),w=Math.max(0,Math.min(RC_N-1.001,z/RC_H)),i=Math.floor(u),j=Math.floor(v),k=Math.floor(w),a=u-i,b=v-j,c=w-k;let value=0;for(let dz=0;dz<2;dz++)for(let dy=0;dy<2;dy++)for(let dx=0;dx<2;dx++)value+=field[rcIndex(i+dx,j+dy,k+dz)]*(dx?a:1-a)*(dy?b:1-b)*(dz?c:1-c);return value;};
   if(rcGPUDataOwner===g&&rcGPUData&&!rcGPUFault){
@@ -3236,6 +3251,8 @@ function updateReconstruction(g,t){
   }
   const iso=.62;
   const bounds=rcKeepAttached(rcDensity,iso,seaAt,simTier===2?16:12);
+  if(rcIntegrated){rcBuildHeight(rcDensity,sea,rcHeightTarget);rcTriangles=0;if(rcMesh)rcMesh.visible=false;return;}
+  const geo=rcMesh.geometry,pos=geo.attributes.position.array,norm=geo.attributes.normal.array,col=geo.attributes.color.array;
   if(!bounds){rcMesh.visible=false;rcTriangles=0;geo.setDrawRange(0,0);return;}
   rcExtract(rcDensity,iso,(a,b,c)=>{
    if(count+3>RC_MAX)return;
@@ -3284,7 +3301,7 @@ function processAPImpacts(g,t){
   for(const p of g.particles){
    const x=p.x+g.ox,y=p.y+g.oy,z=p.z+g.oz;
    if(!p.crestLiquid)continue;
-   const reference=oceanHeight(x,z,t);
+   const reference=oceanHeight(x,z,t)+rcSurfaceOffset(x,z);
    const gap=y-reference,previous=p.surfaceGap;p.surfaceGap=gap;
    if(Number.isFinite(previous)&&previous>0&&gap<=0&&p.v[1]<-.8&&impacts<8){
     const energy=Math.min(.65,-p.v[1]*.10);
@@ -3568,7 +3585,7 @@ function oceanSpectralTint(x,z,h,sx,sz,out,i){
 function aeratedOpticalMix(a,b,c,strength){const opticalDepth=Math.max(0,a*.9+b*.65+c*.30-.11)*Math.max(0,strength);return Math.min(.72,1-Math.exp(-opticalDepth*1.6));}
 function animateWaves(t){
  if(!boat)return;
- refreshSpectralLUT();rebuildWaveShadows(t);
+ refreshSpectralLUT();rebuildWaveShadows(t);rcAdvanceHeight(t);
  if(surfaceNormalMap){
   // Keep micro-ripples in world space while the radial ocean follows boat.
   surfaceNormalMap.offset.set((boat.position.x+t*(.16+.09*windRipples))/4,
@@ -3606,7 +3623,9 @@ function animateWaves(t){
   const fade=localWaterBlend(radial);
   const disturbance=fade*(wakeSolver?.sample(wx,wz)||0);
   arr[i]=px+wave.dx;arr[i+2]=pz+wave.dz;
-  arr[i+1]=wave.height+disturbance;
+  const liquidLift=rcSurfaceOffset(wx,wz)*fade;
+  arr[i+1]=wave.height+disturbance+liquidLift;
+  if(liquidLift>.002)crestVertices++;
   if(plungePool.length&&deformConnectedCrest(x,z,arr,i,fade))crestVertices++;
   // Local crest highlights follow the same pressure field; no fake
   // particle sprites or V-shaped lines.

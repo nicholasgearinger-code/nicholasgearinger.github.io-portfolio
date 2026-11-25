@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 27.5.5 coupled hull spray and waterline</title>
+<title>Rift Water Lab · WebGPU 27.5.6 zero-offset surface optics</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.5.5</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.5.6</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.5.5 · coupled hull contact</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.5.6 · coupled hull contact</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -889,7 +889,8 @@ function updateUndersideOptics(){
   const clearcoat=.15*fineRipple*(1+blend*.22*undersideDistortion);
   material.normalScale.set(normal,normal);
   material.clearcoatNormalScale?.set(clearcoat,clearcoat);
-  material.roughness=.095*(1-blend*.18);
+  material.thickness=opticalPath(blend);
+  material.roughness=ghostSafeOptics?(.035+.043*blend):.095*(1-blend*.18);
   material.ior=1.333;
  }
  if(underwaterSunlight&&underwaterAmbient){
@@ -925,6 +926,15 @@ function smoothOceanRadii(){
 // refractor from projecting an offset copy of the opaque boat.
 const hullOpticsEnabled=!new URLSearchParams(location.search).has('oldHullOptics');
 let hullOpticalThickness=null;
+// The transmission buffer includes opaque boat pixels. Above water, use a
+// zero-offset interface so refraction cannot pull those pixels sideways.
+const ghostSafeOptics=!new URLSearchParams(location.search).has('oldRefraction');
+function opticalPath(blend){
+ const depth=opticalMode==='deep'?5.0:3.6;
+ if(!ghostSafeOptics)return depth;
+ const a=Math.max(0,Math.min(1,(blend-.15)/.70));
+ return depth*a*a*(3-2*a);
+}
 function hullTransmissionScale(r){
  const a=Math.max(0,Math.min(1,(r-3.1)/4.9));
  return .065+.935*a*a*(3-2*a);
@@ -956,7 +966,7 @@ function syncWaterDetail(){
   // controls so the user can compare clarity against surface reflection.
   mat.transmission=physical?Math.min(.98,.70*Math.min(1.5,waterClarity)*Math.min(1.6,depthRefraction)):0;
   mat.ior=1.333;mat.specularIntensity=1;mat.specularColor.setHex(0xffffff);
-  mat.thickness=opticalMode==='deep'?5.0:3.6;
+  mat.thickness=opticalPath(undersideMode==='enhanced'?underwaterBlend:0);
   if(isNear&&physical&&hullOpticsEnabled&&!hullOpticalThickness)hullOpticalThickness=createHullOpticalThickness();
   mat.thicknessMap=isNear&&physical&&hullOpticsEnabled?hullOpticalThickness:null;
   mat.attenuationDistance=(opticalMode==='deep'?5.2:13.0)*waterClarity;
@@ -973,7 +983,7 @@ function syncWaterDetail(){
     fineRipple*.15*windRipples);
   mat.clearcoat=physical?0:.12; // water is a single dielectric interface, not painted clearcoat
   mat.clearcoatRoughness=.20;
-  mat.roughness=.095;
+  mat.roughness=ghostSafeOptics?.035:.095;
   mat.needsUpdate=true;
  }
  lastUndersideMix=-1;

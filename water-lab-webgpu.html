@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 24.10.1 visible crest foam and turbulent whitewater</title>
+<title>Rift Water Lab · WebGPU 24.11 cellular seafoam and turbulent ribbons</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.10.1</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">24.11</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <details id="diagnostics">
@@ -148,7 +148,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>24.10.1 · visible crest foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>24.11 · cellular seafoam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -1585,25 +1585,45 @@ function wakeAppearance(x,z,t){
 
 // Soft irregular alpha footprint shared by all whitewater fragments.
 // One 48px procedural texture prevents visually obvious solid quad edges.
+// Four deterministic, warped Voronoi foam patterns in one small atlas.
+// Transparent cell interiors reveal water; thin films connect the bubbles.
 function createFoamAlphaTexture(){
- const size=48,data=new Uint8Array(size*size*4);
+ const tile=128,size=tile*2,data=new Uint8Array(size*size*4);
+ const hash=(x,y,k)=>{const n=Math.sin(x*127.1+y*311.7+k*74.7)*43758.5453;return n-Math.floor(n);};
+ function cellEdge(x,y,k){
+  const ix=Math.floor(x),iy=Math.floor(y);
+  let first=1e6,second=1e6;
+  for(let j=-1;j<=1;j++)for(let i=-1;i<=1;i++){
+   const a=ix+i,b=iy+j;
+   const dx=a+.15+.7*hash(a,b,k)-x,dy=b+.15+.7*hash(a,b,k+9)-y;
+   const d=dx*dx+dy*dy;
+   if(d<first){second=first;first=d;}else if(d<second)second=d;
+  }
+  return Math.sqrt(second)-Math.sqrt(first);
+ }
  for(let y=0;y<size;y++)for(let x=0;x<size;x++){
-  const u=(x+.5)/size*2-1,v=(y+.5)/size*2-1;
-  const a=Math.atan2(v,u);
-  const edge=.79+.12*Math.sin(a*5+1.3)+.09*Math.sin(a*9-1.7);
-  const radius=Math.hypot(u,v*1.12);
-  const softness=Math.max(0,Math.min(1,(edge-radius)*10));
-  const textureNoise=.77+.23*Math.sin(u*15+v*10)*Math.cos(v*12-u*7);
-  const cells=Math.sin(u*19+Math.sin(v*11)*2)*Math.cos(v*17+Math.sin(u*9)*2);
-  const opacity=Math.pow(softness,.85)*textureNoise*(.68+.32*Math.abs(cells));
+  const k=Math.floor(x/tile)+2*Math.floor(y/tile);
+  const u=((x%tile)+.5)/tile*2-1,v=((y%tile)+.5)/tile*2-1;
+  const a=Math.atan2(v,u),r=Math.hypot(u,v*1.04);
+  const edge=.77+.11*Math.sin(a*5+k)+.08*Math.sin(a*9-k*1.7);
+  const envelope=Math.max(0,Math.min(1,(edge-r)*7));
+  const wx=u+.10*Math.sin(v*6+k)+.045*Math.sin(u*17+v*9);
+  const wy=v+.12*Math.sin(u*5-k)+.04*Math.cos(v*15-u*8);
+  const d=cellEdge(wx*5.5+13,wy*6.5+17,k+1);
+  const fine=cellEdge(wx*12+33,wy*13+27,k+21);
+  const ridge=Math.max(0,1-d/.15),micro=Math.max(0,1-fine/.13);
+  const dense=Math.max(0,Math.min(1,.58+.55*Math.sin(wx*5+wy*3+k)-r*.62));
+  const film=Math.min(1,ridge*.94+micro*.36+dense*.40);
+  const alpha=envelope*film;
   const i=(y*size+x)*4;
-  data[i]=255;data[i+1]=255;data[i+2]=255;
-  data[i+3]=Math.round(255*opacity);
+  const white=Math.round(232+23*Math.min(1,ridge+micro));
+  data[i]=white;data[i+1]=Math.min(255,white+5);data[i+2]=255;
+  data[i+3]=Math.round(255*alpha);
  }
  const t=new THREE.DataTexture(data,size,size,THREE.RGBAFormat);
  t.wrapS=THREE.ClampToEdgeWrapping;t.wrapT=THREE.ClampToEdgeWrapping;
- t.minFilter=THREE.LinearFilter;t.magFilter=THREE.LinearFilter;
- t.generateMipmaps=false;t.needsUpdate=true;
+ t.minFilter=THREE.LinearMipmapLinearFilter;t.magFilter=THREE.LinearFilter;
+ t.generateMipmaps=true;t.needsUpdate=true;
  return t;
 }
 function createFoamField(){
@@ -1613,7 +1633,8 @@ function createFoamField(){
  foamColors=new Float32Array(foamCapacity*4*4);
  for(let i=0;i<foamCapacity;i++){
   const v=i*4;indices.push(v,v+2,v+1,v,v+3,v+2);
-  uvs.push(0,0,1,0,1,1,0,1);
+  const tile=i%4, u=(tile%2)*.5,v=Math.floor(tile/2)*.5,pad=1/256;
+  uvs.push(u+pad,v+pad,u+.5-pad,v+pad,u+.5-pad,v+.5-pad,u+pad,v+.5-pad);
  }
  geo.setAttribute('position',new THREE.BufferAttribute(foamPositions,3).setUsage(THREE.DynamicDrawUsage));
  geo.setAttribute('color',new THREE.BufferAttribute(foamColors,4).setUsage(THREE.DynamicDrawUsage));
@@ -1737,7 +1758,7 @@ function updateWhitewater(t){
  function emit(x,z,radius,strength,angle,seed,stretch=1){
   if(count>=foamCapacity||strength<.025)return;
   const cs=Math.cos(angle),sn=Math.sin(angle);
-  const ratio=(.39+.19*Math.sin(seed*1.43+t*.43))/Math.sqrt(stretch);
+  const ratio=(.48+.14*Math.sin(seed*1.43+t*.43))/Math.sqrt(stretch);
   const offsets=[[-1,-1],[1,-1],[1,1],[-1,1]],vi=count*12;
   // Four full oceanHeight() inversions per foam patch were costly.
   // Use one center height plus the local analytic slope to approximate
@@ -1746,13 +1767,13 @@ function updateWhitewater(t){
   const field=waveField(x-initial.dx,z-initial.dz,t,{});
   const centerHeight=field.height+(wakeSolver?.sample(x,z)||0);
   for(let k=0;k<4;k++){
-   const u=offsets[k][0]*radius*.70*Math.sqrt(stretch),v=offsets[k][1]*radius*ratio;
+   const u=offsets[k][0]*radius*.70*Math.sqrt(stretch),v=offsets[k][1]*radius*ratio+u*.14*Math.sin(seed+t*.6);
    const wx=x+u*cs-v*sn,wz=z+u*sn+v*cs,p=vi+k*3;
    foamPositions[p]=wx;
    foamPositions[p+1]=centerHeight+
     field.slopeX*(wx-x)+field.slopeZ*(wz-z)+.035;
    foamPositions[p+2]=wz;
-   const shade=foamDebug?1:Math.max(.60,Math.min(1,.64+.29*Math.sqrt(Math.min(1,strength))));
+   const shade=foamDebug?1:Math.max(.70,Math.min(1,.75+.24*Math.sqrt(Math.min(1,strength))));
    const c=(count*4+k)*4;
    foamColors[c]=shade;foamColors[c+1]=Math.min(1,shade+.045);foamColors[c+2]=1;
    foamColors[c+3]=foamDebug?1:Math.min(1,Math.sqrt(strength));
@@ -1801,9 +1822,10 @@ function updateWhitewater(t){
    const strength=f.strength*life*foamStrength*1.6;
    const theta=Math.atan2(f.vz,f.vx);
    emit(f.x,f.z,radius,strength,theta,f.seed,f.kind===1?2.3+age*.8:f.kind===0?1.1:1.45);
-   if(i%3===0&&age>.15&&age<.75){
-    emit(f.x-f.vz*.25,f.z+f.vx*.25,radius*.53,
-      strength*.65,theta+.47,f.seed+7.3);
+   if(i%2===0&&age>.12&&age<.85){
+    const drift=.28+age*.5;
+    emit(f.x-Math.cos(theta)*radius*.48-Math.sin(theta)*drift,f.z-Math.sin(theta)*radius*.48+Math.cos(theta)*drift,radius*.72,
+      strength*.68,theta+.37,f.seed+7.3,2.1);
    }
   }
  }
@@ -1926,7 +1948,7 @@ function animateWaves(t){
   nearColorData[i+1]=Math.max(.18,Math.min(1,(.35+shallow*.19+shine*.31+glimmer*.14+foam*.58+subsurface*.57+capGlow*.73)*waveShade));
   nearColorData[i+2]=Math.max(.23,Math.min(1,(.46+shallow*.17+shine*.34+glimmer*.16+foam*.48+subsurface*.38+capGlow*.90)*waveShade));
   // Mix toward neutral whitewater rather than adding blue highlights.
-  const froth=Math.min(.88,crestFoam*.83);
+  const froth=Math.min(.64,crestFoam*.65);
   nearColorData[i]+=(.96-nearColorData[i])*froth;
   nearColorData[i+1]+=(.98-nearColorData[i+1])*froth;
   nearColorData[i+2]+=(1-nearColorData[i+2])*froth;

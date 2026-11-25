@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 25.3 bubble microstructure and volumetric plumes</title>
+<title>Rift Water Lab · WebGPU 25.4 pressure-projected turbulence and hull coupling</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">25.3</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">25.4</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <details id="diagnostics">
@@ -148,7 +148,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>25.3 · bubble microstructure</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>25.4 · pressure-driven whitewater</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -1700,9 +1700,9 @@ function updateBreakerAeration(t){
  const dir=waveComponents[0];
  for(let i=foamBubbles.length-1;i>=0;i--){
   const b=foamBubbles[i];b.age+=dt;
-  breakerCurl(b.x,b.z,t,foamBubbleFlow);
-  b.x+=(dir.dirX*.40+foamBubbleFlow.x*.55)*dt;
-  b.z+=(dir.dirZ*.40+foamBubbleFlow.z*.55)*dt;
+  sharedFoamFlow(b.x,b.z,t,foamBubbleFlow);
+  b.x+=foamBubbleFlow.x*dt;
+  b.z+=foamBubbleFlow.z*dt;
   b.depth-=dt*(.14+b.kind*.18);
   if(b.depth<.08||b.age>b.life||Math.hypot(b.x-boat.position.x,b.z-boat.position.z)>17)foamBubbles.splice(i,1);
  }
@@ -1740,6 +1740,83 @@ const FOAM_GRID=64,FOAM_LAYERS=6,FOAM_SPAN=36,FOAM_STEP=FOAM_SPAN/(FOAM_GRID-1),
 const FOAM_PLANE=FOAM_GRID*FOAM_GRID;
 let foamDensity=new Float32Array(FOAM_PLANE*FOAM_LAYERS),foamNext=new Float32Array(foamDensity.length);
 let foamOriginX=0,foamOriginZ=0,foamFieldReady=false,foamElapsed=0;
+// Coarse horizontal momentum grid, shared by all six aeration layers.
+// Semi-Lagrangian transport + vorticity confinement + Jacobi projection.
+const FLOW_N=40,FLOW_SPAN=36,FLOW_H=FLOW_SPAN/(FLOW_N-1),FLOW_COUNT=FLOW_N*FLOW_N;
+let flowU=new Float32Array(FLOW_COUNT),flowV=new Float32Array(FLOW_COUNT);
+let flowNextU=new Float32Array(FLOW_COUNT),flowNextV=new Float32Array(FLOW_COUNT);
+let flowP=new Float32Array(FLOW_COUNT),flowPNext=new Float32Array(FLOW_COUNT);
+const flowDiv=new Float32Array(FLOW_COUNT),flowCurl=new Float32Array(FLOW_COUNT);
+let flowOX=0,flowOZ=0,flowReady=false,flowResidual=0;
+const flowForceScratch={x:0,z:0},flowReadScratch={x:0,z:0};
+function flowSample(a,x,z){
+ const u=(x-flowOX)/FLOW_H,v=(z-flowOZ)/FLOW_H;
+ if(!flowReady||u<0||v<0||u>=FLOW_N-1||v>=FLOW_N-1)return 0;
+ const i=Math.floor(u),j=Math.floor(v),f=u-i,g=v-j,k=j*FLOW_N+i;
+ return (a[k]*(1-f)+a[k+1]*f)*(1-g)+(a[k+FLOW_N]*(1-f)+a[k+FLOW_N+1]*f)*g;
+}
+function sharedFoamFlow(x,z,t,out){
+ if(flowReady){out.x=flowSample(flowU,x,z);out.z=flowSample(flowV,x,z);}
+ else{breakerCurl(x,z,t,out);out.x*=.5;out.z*=.5;}
+ return out;
+}
+function advanceFoamMomentum(step,t){
+ const ox=boat.position.x-FLOW_SPAN*.5,oz=boat.position.z-FLOW_SPAN*.5;
+ const fx=-Math.sin(boatHeading),fz=-Math.cos(boatHeading),speed=Math.abs(boatSpeed);
+ const wave=waveComponents[0],inv=1/(2*FLOW_H);
+ for(let j=0;j<FLOW_N;j++)for(let i=0;i<FLOW_N;i++){
+  const k=j*FLOW_N+i,x=ox+i*FLOW_H,z=oz+j*FLOW_H;
+  const u=flowSample(flowU,x,z),v=flowSample(flowV,x,z);
+  const a=flowSample(flowU,x-u*step,z-v*step),b=flowSample(flowV,x-u*step,z-v*step);
+  breakerCurl(x,z,t,flowForceScratch);
+  const dx=x-boat.position.x,dz=z-boat.position.z,along=dx*fx+dz*fz,side=dx*fz-dz*fx;
+  const jet=Math.exp(-((along+2.3)**2*.27+side*side*.85))*speed*wakeAmount;
+  const shoulder=Math.exp(-along*along*.36-(Math.abs(side)-.85)**2*3)*speed*wakeAmount;
+  const spread=Math.tanh(side*3)*shoulder*.7;
+  const relax=Math.min(1,step*1.2);
+  const targetU=wave.dirX*.48+flowForceScratch.x*.65-fx*jet*.85+fz*spread;
+  const targetV=wave.dirZ*.48+flowForceScratch.z*.65-fz*jet*.85-fx*spread;
+  flowNextU[k]=a+(targetU-a)*relax;
+  flowNextV[k]=b+(targetV-b)*relax;
+ }
+ flowCurl.fill(0);
+ for(let j=1;j<FLOW_N-1;j++)for(let i=1;i<FLOW_N-1;i++){
+  const k=j*FLOW_N+i;
+  flowCurl[k]=(flowNextV[k+1]-flowNextV[k-1]-flowNextU[k+FLOW_N]+flowNextU[k-FLOW_N])*inv;
+ }
+ for(let j=1;j<FLOW_N-1;j++)for(let i=1;i<FLOW_N-1;i++){
+  const k=j*FLOW_N+i,w=flowCurl[k];
+  const gx=(Math.abs(flowCurl[k+1])-Math.abs(flowCurl[k-1]))*inv;
+  const gz=(Math.abs(flowCurl[k+FLOW_N])-Math.abs(flowCurl[k-FLOW_N]))*inv;
+  const len=Math.hypot(gx,gz)+1e-5,force=Math.max(-2,Math.min(2,w*.65))*step;
+  flowNextU[k]+=gz/len*force;flowNextV[k]-=gx/len*force;
+ }
+ flowDiv.fill(0);flowP.fill(0);flowPNext.fill(0);
+ for(let j=1;j<FLOW_N-1;j++)for(let i=1;i<FLOW_N-1;i++){
+  const k=j*FLOW_N+i;
+  flowDiv[k]=(flowNextU[k+1]-flowNextU[k-1]+flowNextV[k+FLOW_N]-flowNextV[k-FLOW_N])*inv;
+ }
+ for(let n=0;n<16;n++){
+  for(let j=1;j<FLOW_N-1;j++)for(let i=1;i<FLOW_N-1;i++){
+   const k=j*FLOW_N+i;
+   flowPNext[k]=(flowP[k-1]+flowP[k+1]+flowP[k-FLOW_N]+flowP[k+FLOW_N]-FLOW_H*FLOW_H*flowDiv[k])*.25;
+  }
+  const tmp=flowP;flowP=flowPNext;flowPNext=tmp;
+ }
+ for(let j=1;j<FLOW_N-1;j++)for(let i=1;i<FLOW_N-1;i++){
+  const k=j*FLOW_N+i;
+  flowNextU[k]-=(flowP[k+1]-flowP[k-1])*inv;
+  flowNextV[k]-=(flowP[k+FLOW_N]-flowP[k-FLOW_N])*inv;
+ }
+ let residual=0;
+ for(let j=1;j<FLOW_N-1;j++)for(let i=1;i<FLOW_N-1;i++){
+  const k=j*FLOW_N+i;
+  residual+=Math.abs((flowNextU[k+1]-flowNextU[k-1]+flowNextV[k+FLOW_N]-flowNextV[k-FLOW_N])*inv);
+ }
+ flowResidual=residual/((FLOW_N-2)**2);
+ let tmp=flowU;flowU=flowNextU;flowNextU=tmp;tmp=flowV;flowV=flowNextV;flowNextV=tmp;
+ flowOX=ox;flowOZ=oz;flowReady=true;
+}
 const foamWaveScratch={};
 const foamWaveProfile=[1,.72,.38,.16,.06,.02],foamHullProfile=[.75,.85,.42,.16,.04,.01],foamSternProfile=[.22,1,.92,.46,.14,.03];
 function foamLayer(x,z,k){
@@ -1754,19 +1831,19 @@ function sampleFoamDensity(x,z){return foamLayer(x,z,0);}
 function advanceFoamDensity(dt,t){
  if(!boat||breakingMode!=='advanced'||foamStrength<.01){
   if(foamFieldReady)foamDensity.fill(0);
-  foamFieldReady=false;foamElapsed=0;return;
+  foamFieldReady=false;flowReady=false;foamElapsed=0;return;
  }
  foamElapsed+=dt;if(foamElapsed<.10)return;
  const step=Math.min(.15,foamElapsed);foamElapsed=0;
+ advanceFoamMomentum(step,t);
  const ox=Math.floor((boat.position.x-FOAM_SPAN*.5)/FOAM_STEP)*FOAM_STEP;
  const oz=Math.floor((boat.position.z-FOAM_SPAN*.5)/FOAM_STEP)*FOAM_STEP;
  const dir=waveComponents[0],fx=-Math.sin(boatHeading),fz=-Math.cos(boatHeading);
  const speed=Math.abs(boatSpeed),power=Math.min(1,speed/3)*wakeAmount*(propulsionMode==='power'?1:.65);
  for(let j=0;j<FOAM_GRID;j++)for(let i=0;i<FOAM_GRID;i++){
   const x=ox+i*FOAM_STEP,z=oz+j*FOAM_STEP,p=j*FOAM_GRID+i;
-  breakerCurl(x,z,t,breakerFlowScratch);
-  const vx=dir.dirX*.48+breakerFlowScratch.x*.65+.10;
-  const vz=dir.dirZ*.48+breakerFlowScratch.z*.65-.07;
+  sharedFoamFlow(x,z,t,flowReadScratch);
+  const vx=flowReadScratch.x,vz=flowReadScratch.z;
   const w=waveField(x,z,t,foamWaveScratch);
   const crest=Math.max(0,Math.min(1,(w.height-.42)/.85));
   const steep=Math.max(0,Math.min(1,(Math.hypot(w.slopeX,w.slopeZ)-.15)/.30));
@@ -1778,7 +1855,7 @@ function advanceFoamDensity(dt,t){
   const boatAir=power*(stern*1.8+hull*.9);
   const wakeFlow=Math.min(1,boatAir*.6);
   for(let k=0;k<FOAM_LAYERS;k++){
-   const sx=x-(vx-fx*speed*.38*wakeFlow)*step*(1-k*.07),sz=z-(vz-fz*speed*.38*wakeFlow)*step*(1-k*.07);
+   const sx=x-vx*step*(1-k*.07),sz=z-vz*step*(1-k*.07);
    const here=foamLayer(sx,sz,k),below=foamLayer(sx,sz,k+1),above=k?foamLayer(sx,sz,k-1):0;
    const coalescence=Math.max(0,here-.25)*Math.max(0,below-.12);
    const rise=Math.min(.45,step*(.22+k*.025+coalescence*.30)/FOAM_DZ);
@@ -1865,7 +1942,7 @@ function updateFoamSkin(t){
    const d=foamLayer(x,z,0),sub=foamLayer(x,z,1)+.75*foamLayer(x,z,2)+.45*foamLayer(x,z,3);
    if(fade<=0||d*foamStrength<.045){data[k]=data[k+1]=data[k+2]=255;data[k+3]=0;continue;}
    const column=Math.min(1,(d+sub)*.65);
-   breakerCurl(x,z,t,foamOpticalFlow);
+   sharedFoamFlow(x,z,t,foamOpticalFlow);
    const along=lx*fx+lz*fz,side=lx*fz-lz*fx;
    const wake=power*Math.exp(-Math.pow(side/(.9+Math.max(0,-along)*.2),2))*Math.exp(-Math.abs(along+2)*.12);
    // Bounded world-space coordinate warp; stern streaks elongate downstream.
@@ -1953,7 +2030,7 @@ function advanceBreakingFoam(dt,t){
 }
 function updateWhitewater(t){
  if(!foamMesh||!boat)return;
- if(breakingMode==='advanced'&&!foamDebug){foamMesh.geometry.setDrawRange(0,0);$('foamStatus').textContent='Foam: 64×64×6 volume · ocean + hull';return;}
+ if(breakingMode==='advanced'&&!foamDebug){foamMesh.geometry.setDrawRange(0,0);$('foamStatus').textContent='Foam: 64×64×6 · pressure flow';return;}
  if((foamStrength<.01||wakeAmount<.01)&&!foamDebug&&breakingFoam.length===0){
   foamMesh.geometry.setDrawRange(0,0);
   foamPatchCount=0;$('foamStatus').textContent='Foam: 0 patches';return;
@@ -2187,7 +2264,7 @@ function resetBoat(){
  boat.position.set(-3.2,.6,-13);
  boat.rotation.set(0,0,0);vy=0;pitchV=0;rollV=0;
  boatHeading=0;boatSpeed=0;rudder=0;driveMode='stop';totalTravel=0;previousBoatHeading=0;turnVelocity=0;wakeSolver?.clear();wakeTrail=[];trailElapsed=0;
- foamFieldReady=false;foamDensity.fill(0);foamNext.fill(0);breakingFoam.length=0;foamBubbles.length=0;foamBubbleSpawn=0;
+ foamFieldReady=false;flowReady=false;foamDensity.fill(0);foamNext.fill(0);breakingFoam.length=0;foamBubbles.length=0;foamBubbleSpawn=0;
  if($('forward')){setDriveMode('stop');}
 }
 function makeBoat(){

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 26.17 continuous ocean crest deformation</title>
+<title>Rift Water Lab · WebGPU 27.0 local FLIP/APIC liquid prototype</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.17</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.0</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.17 · continuous crest geometry</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.0 · FLIP/APIC breakers</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -2879,6 +2879,129 @@ function deformConnectedCrest(x,z,arr,i,fade){
  }
  return changed;
 }
+// 27.0: bounded CPU reference FLIP/APIC liquid patch. Staggered MAC
+// faces carry momentum; air cells have zero pressure. The GPU ocean
+// remains independent until this reference solver is validated on-device.
+const AP_N=16,AP_H=.35,AP_C=AP_N**3,AP_MAX=1200;
+function makeAPGrid(){
+ const n=AP_N,c=AP_C;
+ const face=()=>({v:new Float32Array((n+1)*n*n),old:new Float32Array((n+1)*n*n),w:new Float32Array((n+1)*n*n)});
+ return {f:[face(),face(),face()],wet:new Uint8Array(c),p:new Float32Array(c),q:new Float32Array(c),div:new Float32Array(c),particles:[],ox:0,oy:0,oz:0};
+}
+function apCell(i,j,k){return (k*AP_N+j)*AP_N+i;}
+function apFace(axis,i,j,k){const n=AP_N;return axis===0?(k*n+j)*(n+1)+i:axis===1?(k*(n+1)+j)*n+i:(k*n+j)*n+i;}
+function apStencil(axis,x,y,z,fn){
+ const n=AP_N,h=AP_H,u=x/h-(axis===0?0:.5),v=y/h-(axis===1?0:.5),w=z/h-(axis===2?0:.5);
+ const i=Math.floor(u),j=Math.floor(v),k=Math.floor(w),a=u-i,b=v-j,c=w-k;
+ for(let dz=0;dz<2;dz++)for(let dy=0;dy<2;dy++)for(let dx=0;dx<2;dx++){
+  const I=i+dx,J=j+dy,K=k+dz;
+  if(I<0||J<0||K<0||I>=n+(axis===0)||J>=n+(axis===1)||K>=n+(axis===2))continue;
+  const wt=(dx?a:1-a)*(dy?b:1-b)*(dz?c:1-c);
+  fn(apFace(axis,I,J,K),wt,(I+(axis===0?0:.5))*h-x,(J+(axis===1?0:.5))*h-y,(K+(axis===2?0:.5))*h-z);
+ }
+}
+function apStep(g,dt,iterations=16){
+ const n=AP_N,h=AP_H,particles=g.particles,faces=g.f;
+ g.wet.fill(0);g.p.fill(0);
+ for(const f of faces){f.v.fill(0);f.w.fill(0);}
+ for(const p of particles){
+  const i=Math.floor(p.x/h),j=Math.floor(p.y/h),k=Math.floor(p.z/h);
+  if(i<0||j<0||k<0||i>=n||j>=n||k>=n)continue;
+  g.wet[apCell(i,j,k)]=1;
+  for(let a=0;a<3;a++){const f=faces[a],row=a*3;apStencil(a,p.x,p.y,p.z,(idx,w,dx,dy,dz)=>{f.v[idx]+=w*(p.v[a]+p.c[row]*dx+p.c[row+1]*dy+p.c[row+2]*dz);f.w[idx]+=w;});}
+ }
+ const inside=(i,j,k)=>i>=0&&j>=0&&k>=0&&i<n&&j<n&&k<n;
+ const wet=(i,j,k)=>inside(i,j,k)&&g.wet[apCell(i,j,k)];
+ // Normalize, save pre-force velocity for FLIP, add gravity.
+ for(let a=0;a<3;a++){
+  const f=faces[a];
+  for(let k=0;k<n+(a===2);k++)for(let j=0;j<n+(a===1);j++)for(let i=0;i<n+(a===0);i++){
+   const idx=apFace(a,i,j,k),wall=(a===0&&(i===0||i===n))||(a===1&&(j===0||j===n))||(a===2&&(k===0||k===n));
+   f.v[idx]=wall?0:f.w[idx]>1e-6?f.v[idx]/f.w[idx]:0;f.old[idx]=f.v[idx];
+   if(!wall&&a===1&&(wet(i,j-1,k)||wet(i,j,k)))f.v[idx]-=9.81*dt;
+  }
+ }
+ const divergence=(i,j,k)=>(faces[0].v[apFace(0,i+1,j,k)]-faces[0].v[apFace(0,i,j,k)]+faces[1].v[apFace(1,i,j+1,k)]-faces[1].v[apFace(1,i,j,k)]+faces[2].v[apFace(2,i,j,k+1)]-faces[2].v[apFace(2,i,j,k)])/h;
+ let before=0,after=0,count=0;
+ for(let k=0;k<n;k++)for(let j=0;j<n;j++)for(let i=0;i<n;i++){const idx=apCell(i,j,k);if(!g.wet[idx])continue;const d=divergence(i,j,k);g.div[idx]=d;before+=d*d;count++;}
+ const dirs=[[-1,0,0],[1,0,0],[0,-1,0],[0,1,0],[0,0,-1],[0,0,1]];
+ for(let it=0;it<iterations;it++){
+  for(let k=0;k<n;k++)for(let j=0;j<n;j++)for(let i=0;i<n;i++){
+   const idx=apCell(i,j,k);if(!g.wet[idx]){g.q[idx]=0;continue;}
+   let sum=0,num=0;for(const d of dirs){const I=i+d[0],J=j+d[1],K=k+d[2];if(!inside(I,J,K))continue;num++;if(wet(I,J,K))sum+=g.p[apCell(I,J,K)];}
+   g.q[idx]=num?(sum-g.div[idx]*h*h/Math.max(dt,.001))/num:0;
+  }
+  const tmp=g.p;g.p=g.q;g.q=tmp;
+ }
+ const pressure=(i,j,k)=>wet(i,j,k)?g.p[apCell(i,j,k)]:0;
+ for(let a=0;a<3;a++){
+  const f=faces[a];
+  for(let k=0;k<n+(a===2);k++)for(let j=0;j<n+(a===1);j++)for(let i=0;i<n+(a===0);i++){
+   const I=i-(a===0),J=j-(a===1),K=k-(a===2),idx=apFace(a,i,j,k);
+   if(!inside(I,J,K)||!inside(i,j,k)){f.v[idx]=0;continue;}
+   if(wet(I,J,K)||wet(i,j,k))f.v[idx]-=dt*(pressure(i,j,k)-pressure(I,J,K))/h;
+  }
+ }
+ for(let k=0;k<n;k++)for(let j=0;j<n;j++)for(let i=0;i<n;i++)if(wet(i,j,k)){const d=divergence(i,j,k);after+=d*d;}
+ for(const p of particles){
+  for(let a=0;a<3;a++){
+   const f=faces[a];let pic=0,delta=0,wSum=0,gx=0,gy=0,gz=0,mx=0,my=0,mz=0;
+   apStencil(a,p.x,p.y,p.z,(idx,w,dx,dy,dz)=>{const v=f.v[idx];pic+=w*v;delta+=w*(v-f.old[idx]);wSum+=w;gx+=w*v*dx;gy+=w*v*dy;gz+=w*v*dz;mx+=w*dx*dx;my+=w*dy*dy;mz+=w*dz*dz;});
+   if(wSum>1e-6){p.v[a]=Math.max(-7,Math.min(7,.90*(p.v[a]+delta/wSum)+.10*pic/wSum));p.c[a*3]=Math.max(-12,Math.min(12,gx/Math.max(.012,mx)));p.c[a*3+1]=Math.max(-12,Math.min(12,gy/Math.max(.012,my)));p.c[a*3+2]=Math.max(-12,Math.min(12,gz/Math.max(.012,mz)));}
+  }
+  const bound=AP_N*AP_H-.08;
+  for(const [a,key] of ['x','y','z'].entries()){p[key]+=p.v[a]*dt;if(p[key]<.08||p[key]>bound){p[key]=Math.max(.08,Math.min(bound,p[key]));p.v[a]*=-.12;}}
+ }
+ return {before:Math.sqrt(before/Math.max(1,count)),after:Math.sqrt(after/Math.max(1,count)),cells:count};
+}
+let apGrid=null,apClock=0,apOwner=null,apStats={before:0,after:0,cells:0},apFault='',apMesh=null;
+function clearAP(){apGrid=null;apOwner=null;apClock=0;if(apMesh)apMesh.visible=false;}
+function startAP(p,t){
+ const g=makeAPGrid(),span=AP_N*AP_H,base=oceanHeight(p.x,p.z,t);
+ g.ox=p.x-span*.5;g.oy=base-2.1;g.oz=p.z-span*.5;
+ // Seed a liquid bed plus a raised, forward-moving crest, not spray alone.
+ const stride=simTier===2?.32:.27;
+ for(let z=.35;z<span-.35;z+=stride)for(let x=.35;x<span-.35;x+=stride){
+  const dx=x-span*.5,dz=z-span*.5,along=dx*p.fx+dz*p.fz,side=dx*p.fz-dz*p.fx;
+  const crest=p.height*Math.exp(-along*along/.7-side*side/2.8);
+  const top=2.1+crest*.8;
+  for(let y=1.15;y<top;y+=stride){
+   if(g.particles.length>=AP_MAX)break;
+   const speed=.45+crest*1.65,vy=crest*.65;
+   g.particles.push({x,y,z,v:[p.fx*speed,vy,p.fz*speed],c:new Float32Array(9)});
+  }
+ }
+ apGrid=g;apOwner=p;
+}
+function updateAP(dt,t){
+ if(apFault||!boat||breakingMode!=='advanced'||!plungePool.length){clearAP();return;}
+ if(!apOwner||!plungePool.includes(apOwner)){clearAP();startAP(plungePool[0],t);}
+ apClock+=dt;const cadence=simTier===2?.10:simTier===1?.067:.05;
+ if(apClock<cadence)return;
+ const elapsed=Math.min(.12,apClock);apClock=0;
+ try{
+  const steps=Math.ceil(elapsed/.025);
+  for(let i=0;i<steps;i++)apStats=apStep(apGrid,elapsed/steps,simTier===2?10:14);
+  if(!Number.isFinite(apStats.after)||apGrid.particles.some(p=>!Number.isFinite(p.x+p.y+p.z)))throw Error('Nonfinite liquid state');
+  // Return falling liquid momentum to existing surface/air transport.
+  let impacts=0;
+  for(const p of apGrid.particles){
+   const x=p.x+apGrid.ox,y=p.y+apGrid.oy,z=p.z+apGrid.oz;
+   if(p.v[1]<-.8&&y<apGrid.oy+2.18&&y>apGrid.oy+1.9&&impacts<8){
+    sprayImpacts.push({x,z,energy:Math.min(.35,-p.v[1]*.055)});impacts++;
+   }
+  }
+  // Optional diagnostic particles, disabled by default; actual surface
+  // reconstruction follows in 27.1.
+  if(new URLSearchParams(location.search).has('flipDebug')){
+   if(!apMesh){const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(AP_MAX*3),3));apMesh=new THREE.Points(geo,new THREE.PointsMaterial({color:0x7ff6e8,size:.075}));apMesh.frustumCulled=false;scene.add(apMesh);}
+   const pos=apMesh.geometry.attributes.position;let n=0;
+   for(const p of apGrid.particles){pos.setXYZ(n++,p.x+apGrid.ox,p.y+apGrid.oy,p.z+apGrid.oz);}
+   pos.needsUpdate=true;apMesh.geometry.setDrawRange(0,n);apMesh.visible=true;
+  }
+ }catch(e){apFault=String(e?.message||e);clearAP();console.warn('FLIP/APIC fallback',e);}
+}
+
 function advanceBreakingFoam(dt,t){
  if(breakingMode!=='advanced'||breakingIntensity<.01){
   breakingFoam.length=0;return;
@@ -3239,7 +3362,7 @@ function resetBoat(){
  boat.rotation.set(0,0,0);vy=0;pitchV=0;rollV=0;
  boatHeading=0;boatSpeed=0;rudder=0;driveMode='stop';totalTravel=0;previousBoatHeading=0;turnVelocity=0;wakeSolver?.clear();wakeTrail=[];trailElapsed=0;kelvinPackets.length=0;kelvinClock=kelvinPeak=0;kwReady=false;shadowReady=false;entryEvents.length=0;entryAirQueue.length=0;entryCooldown=entryCount=entryEnergy=entryImpulse=0;
  hullSlipX=hullSlipZ=hullFluidLoad=hullYawRate=hullWet=hullSlamming=hullContact=0;hullPressureX=hullPressureY=hullPressureZ=hullPressureLoad=hullBoundaryCells=0;vortexFilaments.length=0;clearFreeSurface();fluid3Epoch++;fluid3Frames=0;fluid3State='awaiting fresh field';if(fluid3){fluid3.cpu=null;fluid3.started=false;fluid3.d.queue.writeBuffer(fluid3.v[0],0,new Float32Array(F3C*4));}
- foamFieldReady=false;flowReady=false;foamVortices.length=0;vortexShed=0;vortexWaveShed=0;clearPlunges();clearFoamFilms();foamDensity.fill(0);foamNext.fill(0);entrainedAir.fill(0);airNext.fill(0);breakingFoam.length=0;foamBubbles.length=0;foamBubbleSpawn=0;whitewaterSpray.length=0;sprayImpacts.length=0;cloudSamples=[];cloudTime=-100;
+ foamFieldReady=false;flowReady=false;foamVortices.length=0;vortexShed=0;vortexWaveShed=0;clearPlunges();clearAP();clearFoamFilms();foamDensity.fill(0);foamNext.fill(0);entrainedAir.fill(0);airNext.fill(0);breakingFoam.length=0;foamBubbles.length=0;foamBubbleSpawn=0;whitewaterSpray.length=0;sprayImpacts.length=0;cloudSamples=[];cloudTime=-100;
  if($('forward')){setDriveMode('stop');}
 }
 function makeBoat(){
@@ -4137,6 +4260,7 @@ async function init3D(forceWebGL=false){
    trackWake(dt);
    advanceBreakingFoam(dt,time);
    updatePlunges(dt,time);
+   updateAP(dt,time);
    kelvinPeak=0;advanceKelvin(dt);rebuildKelvinGrid();advanceEntryEvents(dt);
    stepFluid3(dt,time);
    advanceFreeSurface(dt,time);
@@ -4229,7 +4353,7 @@ async function init3D(forceWebGL=false){
   const now=performance.now();
   if(now-last>1100){
    const measured=samples*1000/(now-last);
-   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts:'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
+   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?apGrid.particles.length+'p '+apStats.after.toFixed(2)+' div':'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
    $('fps').textContent='FPS: '+Math.round(measured);
    adjustSimulationBudget(measured,now);adjustAdaptivePerformance(measured,now);
    last=now;samples=0;

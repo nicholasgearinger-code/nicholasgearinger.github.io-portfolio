@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 27.3.5 visible crest and obstacle foam</title>
+<title>Rift Water Lab · WebGPU 27.3.6 turbulent whitewater transport</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.3.5</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.3.6</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.3.5 · visible whitewater</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.3.6 · turbulent foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -2644,6 +2644,28 @@ function objectFoamSource(x,z){
  return Math.min(1,total);
 }
 
+// Bounded horizontal film diffusion and strain-dependent drainage.
+// A convex stencil conserves the sum on a closed uniform grid.
+function diffuseFoamFilm(field,n,amount,scratch){
+ scratch.set(field);
+ for(let z=1;z<n-1;z++)for(let x=1;x<n-1;x++){
+  const k=z*n+x;const v=field[k];
+  const lap=field[k-1]+field[k+1]+field[k-n]+field[k+n]-4*v;
+  scratch[k]=Math.max(0,Math.min(1,v+amount*lap));
+ }
+ field.set(scratch);
+}
+const foamDiffuseScratch=new Float32Array(FOAM_PLANE);
+function foamStrain(x,z){
+ const h=FLOW_H,inv=1/(2*h);
+ const ux=(flowSample(flowU,x+h,z)-flowSample(flowU,x-h,z))*inv;
+ const uz=(flowSample(flowU,x,z+h)-flowSample(flowU,x,z-h))*inv;
+ const vx=(flowSample(flowV,x+h,z)-flowSample(flowV,x-h,z))*inv;
+ const vz=(flowSample(flowV,x,z+h)-flowSample(flowV,x,z-h))*inv;
+ const a=(ux-vz)*.5,b=(uz+vx)*.5;
+ return Math.min(2,Math.hypot(a,b));
+}
+
 function advanceFoamDensity(dt,t){
  if(!boat||breakingMode!=='advanced'||foamStrength<.01){
   if(foamFieldReady){foamDensity.fill(0);entrainedAir.fill(0);clearFoamFilms();}
@@ -2709,9 +2731,11 @@ function advanceFoamDensity(dt,t){
     foamDriftNextX[p]=Math.max(-8,Math.min(8,(foamLayer(sx,sz,0,foamDriftX)+x-sx)*.995));
     foamDriftNextZ[p]=Math.max(-8,Math.min(8,(foamLayer(sx,sz,0,foamDriftZ)+z-sz)*.995));
     const hit=waveAir*.85+churn*.52+crestSource*2.8+obstacleSource*3.0;
-    const stretch=vortexAir*.40+gpuAir*.12+boatAir*.32+crestSource*.25;
-    breakerNext[p]=Math.max(0,Math.min(1,young*Math.exp(-step*1.6)+step*hit*(1-young)));
-    shearNext[p]=Math.max(0,Math.min(1,shear*Math.exp(-step*.63)+step*(stretch+young*.42)*(1-shear)*(1-.5*vortexCore)));
+    const strain=(young+shear>.07&&flowReady)?foamStrain(x,z):0;
+    const stretch=vortexAir*.40+gpuAir*.12+boatAir*.32+crestSource*.25+obstacleSource*.24;
+    const transfer=young*(1-Math.exp(-step*(.22+strain*.65)));
+    breakerNext[p]=Math.max(0,Math.min(1,(young-transfer)*Math.exp(-step*1.15)+step*hit*(1-young)));
+    shearNext[p]=Math.max(0,Math.min(1,shear*Math.exp(-step*(.42+.11*strain))+transfer*.75*(1-shear)+step*(stretch+young*.32)*(1-shear)*(1-.5*vortexCore)));
    }
    const filmSource=k===0?(gasNew*.30+source*.10+vortexAir*.08+breakerNext[p]*.28+shearNext[p]*.17)*(1-.65*vortexCore):gasNew*.38;
    if(k===0)d*=Math.exp(-step*vortexCore*.9);
@@ -2740,6 +2764,10 @@ function advanceFoamDensity(dt,t){
   }
  }
  sprayImpacts.length=0;
+ // Diffuse films separately: young bubbles remain compact while older
+ // whitewater spreads into thinner streaks. No additional render pass.
+ diffuseFoamFilm(breakerNext,FOAM_GRID,Math.min(.10,step*.30),foamDiffuseScratch);
+ diffuseFoamFilm(shearNext,FOAM_GRID,Math.min(.15,step*.55),foamDiffuseScratch);
  const old=foamDensity;foamDensity=foamNext;foamNext=old;
  const oldAir=entrainedAir;entrainedAir=airNext;airNext=oldAir;
  const oldBreaker=breakerFilm;breakerFilm=breakerNext;breakerNext=oldBreaker;
@@ -2862,7 +2890,10 @@ function updateFoamSkin(t){
    const coverage=Math.max(0,Math.min(1,(d*foamStrength-.22)/.48));
    const active=Math.max(0,Math.min(1,(young+.55*shear+.30*d-.13)/.30));
    const alpha=Math.min(.88,foamStrength*((young*.85+shear*.27+coverage*.32)*active+fresh*.85)*fade);
-   const breakup=.55+.45*Math.sin(x*2.2+Math.sin(z*3.1))*Math.cos(z*2.7+Math.sin(x*1.9));
+   // Use transported material coordinates so fragments drift instead of
+   // sliding across the water in a fixed world-space pattern.
+   const mx=x-foamLayer(x,z,0,foamDriftX),mz=z-foamLayer(x,z,0,foamDriftZ);
+   const breakup=.55+.45*Math.sin(mx*2.2+Math.sin(mz*3.1))*Math.cos(mz*2.7+Math.sin(mx*1.9));
    const sunVisibility=shadowReady?shadowSample(shadowField,x,z,1):1;
    const bright=Math.min(1,(.84+.14*scatter+.08*young)*shadow*(1-Math.min(.32,(1-sunVisibility)*waveShadowStrength*.6)));
    data[k]=Math.round(255*bright);data[k+1]=Math.round(255*Math.min(1,bright+.025));data[k+2]=Math.round(255*Math.min(1,bright+.035));data[k+3]=Math.round(255*alpha*(breakup+(1-breakup)*fresh*.8));
@@ -3174,9 +3205,10 @@ function updateLiquidFoam(t){
   p.x+=p.vx*dt;p.z+=p.vz*dt;
   if(!Number.isFinite(p.surface)||t-p.surfaceAt>.045){p.surface=oceanHeight(p.x,p.z,t)+rcSurfaceOffset(p.x,p.z);p.surfaceAt=t;}
   const life=Math.max(0,1-p.age/p.life),birth=Math.min(1,p.age*12+.1);
-  const size=p.r*(.65+.45*Math.min(1,p.age))*Math.sqrt(life*birth*p.strength);
+  const size=p.r*(.65+.60*Math.min(1,p.age))*Math.sqrt(life*birth*p.strength);
+  const elongation=1+Math.min(.65,Math.hypot(p.vx,p.vz)*.18)*Math.min(1,p.age*2);
   if(size<.012)continue;
-  obj.position.set(p.x,p.surface-size*.28,p.z);obj.scale.set(size*.85,size*.36,size*.8);obj.rotation.y=Math.atan2(p.vx,p.vz);obj.updateMatrix();liquidFoamMesh.setMatrixAt(count,obj.matrix);
+  obj.position.set(p.x,p.surface-size*.28,p.z);obj.scale.set(size*.85/Math.sqrt(elongation),size*.36,size*.8*Math.sqrt(elongation));obj.rotation.y=Math.atan2(p.vx,p.vz);obj.updateMatrix();liquidFoamMesh.setMatrixAt(count,obj.matrix);
   const shade=.64+.26*life;col.setRGB(shade,Math.min(1,shade+.05),Math.min(1,shade+.07));liquidFoamMesh.setColorAt(count++,col);
  }
  liquidFoamMesh.count=count;liquidFoamMesh.visible=count>0;liquidFoamMesh.instanceMatrix.needsUpdate=true;if(liquidFoamMesh.instanceColor)liquidFoamMesh.instanceColor.needsUpdate=true;

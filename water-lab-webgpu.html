@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 27.5.6 zero-offset surface optics</title>
+<title>Rift Water Lab · WebGPU 27.6.0 moving hull fluid coupling</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.5.6</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.6.0</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.5.6 · coupled hull contact</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.6.0 · moving hull boundary</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -2588,6 +2588,9 @@ function objectWaveStep(height,velocity,nextH,nextV,solid,force,n,h,dt,c2){
 }
 const hullWaveEnabled=!new URLSearchParams(location.search).has('noHullWaves');
 let hullWaveCells=0,hullClipCount=0;
+const hullCouplingEnabled=!new URLSearchParams(location.search).has('noHullCoupling');
+const owHull=new Uint8Array(OW_SIZE),couplingFlow={};
+let couplingX=0,couplingZ=0,couplingYaw=0,couplingPeak=0;
 function hullHalfBeam(z){
  if(z< -2.70||z>2.25)return 0;
  if(z< -2.15)return .05+.62*Math.max(0,(z+2.65)/.50);
@@ -2627,7 +2630,7 @@ function advanceObjectWaves(dt,t){
  }
  const c2=5.5;
  if(moved||t-owLast>=.10){
-  owLast=t;owSolid.fill(0);owIncident.fill(0);owCells=0;hullWaveCells=0;owBuilding=true;
+  owLast=t;owSolid.fill(0);owHull.fill(0);owIncident.fill(0);owCells=0;hullWaveCells=0;owBuilding=true;
   try{
    for(const o of rocks){
     const rx=o.x+waterFloor.position.x,rz=o.z+waterFloor.position.z,top=o.top+waterFloor.position.y;
@@ -2650,21 +2653,38 @@ function advanceObjectWaves(dt,t){
      const sea=waveField(wx,wz,t,owProbe).height+(wakeSolver?.sample(wx,wz)||0);
      owIncident[k]=sea;
      const bottom=boat.position.y-.26-Math.sin(boat.rotation.x)*lz+Math.sin(boat.rotation.z)*lx;
-     if(sea>bottom-.10&&hullFootprint(lx,lz)){if(!owSolid[k])owCells++;owSolid[k]=1;hullWaveCells++;}
+     if(sea>bottom-.10&&hullFootprint(lx,lz)){if(!owSolid[k])owCells++;owSolid[k]=1;owHull[k]=1;hullWaveCells++;}
     }
    }
    objectWaveBoundaryForce(owIncident,owSolid,OW_N,OW_H,c2,owForce);
    if(hullWaveEnabled&&hullWaveCells){
     const fx=-Math.sin(boatHeading),fz=-Math.cos(boatHeading),speed=Math.min(5,Math.abs(boatSpeed));
+    let reactionX=0,reactionZ=0,reactionYaw=0,peak=0;
     for(let j=1;j<OW_N-1;j++)for(let i=1;i<OW_N-1;i++){
      const k=j*OW_N+i;if(owSolid[k])continue;
-     const nx=Number(owSolid[k-1])-Number(owSolid[k+1]),nz=Number(owSolid[k-OW_N])-Number(owSolid[k+OW_N]);
-     const toward=nx*fx+nz*fz;
-     if(Math.abs(toward)>.01&&Math.hypot(x+i*OW_H-boat.position.x,z+j*OW_H-boat.position.z)<3.3)owForce[k]=Math.max(-12,Math.min(12,owForce[k]+toward*speed*.95));
+     let nx=Number(owHull[k-1])-Number(owHull[k+1]),nz=Number(owHull[k-OW_N])-Number(owHull[k+OW_N]);
+     const len=Math.hypot(nx,nz);if(len<.01)continue;
+     if(!hullCouplingEnabled){owForce[k]=Math.max(-12,Math.min(12,owForce[k]+(nx*fx+nz*fz)*speed*.95));continue;}
+     nx/=len;nz/=len;
+     const wx=x+i*OW_H,wz=z+j*OW_H,dx=wx-boat.position.x,dz=wz-boat.position.z;
+     sharedFoamFlow(wx,wz,t,couplingFlow);
+     const vx=fx*boatSpeed+hullSlipX+hullYawRate*dz,vz=fz*boatSpeed+hullSlipZ-hullYawRate*dx;
+     const un=Math.max(-4,Math.min(4,(vx-couplingFlow.x)*nx+(vz-couplingFlow.z)*nz));
+     const head=Math.max(-.16,Math.min(.42,un*Math.abs(un)/(2*9.81)));
+     // Moving wall drives a positive bow wave and a stern deficit. The
+     // same bounded head exerts an opposing reaction on the rigid body.
+     owForce[k]=Math.max(-12,Math.min(12,owForce[k]+un*1.45+head*2.5));
+     const pressure=1000*9.81*OW_H*.20*head*hullContact;
+     const px=-nx*pressure,pz=-nz*pressure;
+     reactionX+=px;reactionZ+=pz;reactionYaw+=dz*px-dx*pz;peak=Math.max(peak,Math.abs(head));
     }
+    const cap=(v,m)=>Math.max(-m,Math.min(m,v));
+    couplingX+=.35*(cap(reactionX,450)-couplingX);couplingZ+=.35*(cap(reactionZ,450)-couplingZ);
+    couplingYaw+=.35*(cap(reactionYaw,350)-couplingYaw);couplingPeak=peak;
    }
   }finally{owBuilding=false;}
  }
+ if(!hullWaveCells||!hullCouplingEnabled){const decay=Math.exp(-dt*8);couplingX*=decay;couplingZ*=decay;couplingYaw*=decay;couplingPeak*=decay;}
  const steps=Math.max(1,Math.ceil(dt/.025)),h=dt/steps;
  for(let i=0;i<steps;i++){owPeak=objectWaveStep(owH,owV,owNextH,owNextV,owSolid,owForce,OW_N,OW_H,h,c2);[owH,owNextH]=[owNextH,owH];[owV,owNextV]=[owNextV,owV];}
 }
@@ -4393,7 +4413,7 @@ function resetBoat(){
  boat.position.set(-3.2,.6,-13);
  boat.rotation.set(0,0,0);vy=0;pitchV=0;rollV=0;
  boatHeading=0;boatSpeed=0;rudder=0;driveMode='stop';totalTravel=0;previousBoatHeading=0;turnVelocity=0;wakeSolver?.clear();wakeTrail=[];trailElapsed=0;kelvinPackets.length=0;kelvinClock=kelvinPeak=0;kwReady=false;shadowReady=false;entryEvents.length=0;entryAirQueue.length=0;entryCooldown=entryCount=entryEnergy=entryImpulse=0;
- hullSlipX=hullSlipZ=hullFluidLoad=hullYawRate=hullWet=hullSlamming=hullContact=0;hullPressureX=hullPressureY=hullPressureZ=hullPressureLoad=hullBoundaryCells=0;vortexFilaments.length=0;clearFreeSurface();clearObjectWaves();runupPeak=runupSpills=objectVortexCount=0;hullSplashClock=hullSplashHits=hullSplashPeak=0;for(const p of hullSplashProbes){p.depth=NaN;p.last=-100;p.charge=0;}fluid3Epoch++;fluid3Frames=0;fluid3State='awaiting fresh field';if(fluid3){fluid3.cpu=null;fluid3.started=false;fluid3.d.queue.writeBuffer(fluid3.v[0],0,new Float32Array(F3C*4));}
+ hullSlipX=hullSlipZ=hullFluidLoad=hullYawRate=hullWet=hullSlamming=hullContact=0;hullPressureX=hullPressureY=hullPressureZ=hullPressureLoad=hullBoundaryCells=0;couplingX=couplingZ=couplingYaw=couplingPeak=0;vortexFilaments.length=0;clearFreeSurface();clearObjectWaves();runupPeak=runupSpills=objectVortexCount=0;hullSplashClock=hullSplashHits=hullSplashPeak=0;for(const p of hullSplashProbes){p.depth=NaN;p.last=-100;p.charge=0;}fluid3Epoch++;fluid3Frames=0;fluid3State='awaiting fresh field';if(fluid3){fluid3.cpu=null;fluid3.started=false;fluid3.d.queue.writeBuffer(fluid3.v[0],0,new Float32Array(F3C*4));}
  wwGPUEpoch++;wwGPUCache=null;wwGPULast=-100;foamFieldReady=false;flowReady=false;foamVortices.length=0;vortexShed=0;vortexWaveShed=0;clearPlunges();clearAP();activeObjectFoam.length=0;objectFoamLast=-100;objectFoamHits=0;for(const o of surfaceFoamObjects){o.wet=0;o.last=-100;o.prevSurface=NaN;o.sampleAt=-100;o.runup=0;o.runupSea=NaN;o.spillBudget=0;o.spillAt=-100;o.shedPhase=0;o.shedSide=0;}foamParcels.length=0;liquidFoamLast=-100;parcelClock=0;clearFoamFilms();foamDensity.fill(0);foamNext.fill(0);entrainedAir.fill(0);airNext.fill(0);breakingFoam.length=0;foamBubbles.length=0;foamBubbleSpawn=0;whitewaterSpray.length=0;sprayImpacts.length=0;cloudSamples=[];cloudTime=-100;
  if($('forward')){setDriveMode('stop');}
 }
@@ -4570,6 +4590,7 @@ function stepBoat(dt,t){
   hullWet=Math.min(1,wet/hydroArea);hullContact=Math.min(1,hullWet*2.5);hullFluidLoad=load;hullSlamming=slam;
   if(entryArea>.035&&hullContact>.01)recordWaterEntry(entryX/entryArea,entryZ/entryArea,entrySpeed,entryArea,t+k*h);
   if(fluid3?.cpu&&breakingMode==='advanced'){forceX+=hullPressureX*hullContact;forceZ+=hullPressureZ*hullContact;fy+=hullPressureY*hullContact*.35;}
+  if(hullCouplingEnabled&&hullWaveEnabled&&breakingMode==='advanced'&&owReady){forceX+=couplingX*hullContact;forceZ+=couplingZ*hullContact;yaw+=couplingYaw*hullContact;}
   // No hydrodynamic torque or thrust in free flight. Existing wake persists.
   tx-=pitchV*Ix*(.04+3.2*rideDamping*hullContact);tz-=rollV*Iz*(.04+3.1*rideDamping*hullContact);
   const thrust=forward?mass*sailPower*(powered?8.2:3.0*(.35+.65*Math.abs(Math.cos(boatHeading+.7)))):0;

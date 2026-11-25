@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 26.15.1 angle-dependent underwater surface</title>
+<title>Rift Water Lab · WebGPU 26.15.2 dynamic underwater reflections</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.15.1</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.15.2</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.15.1 · Snell window optics</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.15.2 · underwater reflections</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -231,6 +231,42 @@ let surfaceNormalMap=null,surfaceFineNormalMap=null,reflectionEnvironment=null;
 let surfaceDetail=.90,surfaceGlitter=1.0,fineRipple=.45,reflectionMode='enhanced';
 let waterNearMaterial=null,waterFarMaterial=null;
 let oceanTSL=null,oceanAngleBlend=null,oceanAngleDepth=null;
+let underwaterMirror=null,mirrorCamera=null,mirrorMatrix=null,mirrorWeight=null,mirrorLast=-100,mirrorFailed=false;
+function setupUnderwaterMirror(){
+ if(underwaterMirror||mirrorFailed||!oceanTSL||new URLSearchParams(location.search).has('noMirror'))return;
+ try{
+  underwaterMirror=new THREE.RenderTarget(320,180,{depthBuffer:true,generateMipmaps:false,minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter});
+  mirrorCamera=new THREE.PerspectiveCamera();
+  mirrorMatrix=oceanTSL.uniform(new THREE.Matrix4());mirrorWeight=oceanTSL.uniform(0);
+ }catch(e){mirrorFailed=true;console.warn('Underwater mirror unavailable',e);}
+}
+function updateUnderwaterMirror(t){
+ if(!mirrorWeight)return;
+ if(mirrorFailed||!underwaterActive||underwaterBlend<.12||opticalMode==='legacy'||undersideMode!=='enhanced'||reflectionMode!=='enhanced'||!waterFloor){mirrorWeight.value=0;return;}
+ if(t-mirrorLast<(simTier===2?.28:simTier===1?.19:.13))return;
+ const target=underwaterMirror,previous=renderer.getRenderTarget();
+ const hidden=[];const prevShadow=mainSun?.castShadow;
+ try{
+  const plane=oceanHeight(camera.position.x,camera.position.z,t);
+  camera.updateMatrixWorld();mirrorCamera.copy(camera,false);
+  mirrorCamera.position.y=2*plane-camera.position.y;
+  const direction=camera.getWorldDirection(new THREE.Vector3());direction.y=-direction.y;
+  const up=new THREE.Vector3(0,1,0).applyQuaternion(camera.quaternion);up.y=-up.y;
+  mirrorCamera.up.copy(up);mirrorCamera.lookAt(mirrorCamera.position.clone().add(direction));
+  mirrorCamera.updateMatrixWorld(true);mirrorCamera.updateProjectionMatrix();
+  const w=simTier===2?224:simTier===1?288:384,h=Math.max(96,Math.round(w/camera.aspect));
+  if(target.width!==w||target.height!==h)target.setSize(w,h);
+  // Render the actual underwater scene only, preventing recursive water capture.
+  for(const obj of scene.children){if(obj!==waterFloor&&!obj.isLight&&!obj.isCamera&&obj.visible){hidden.push(obj);obj.visible=false;}}
+  if(mainSun)mainSun.castShadow=false;
+  renderer.setRenderTarget(target);
+  const pending=renderer.render(scene,mirrorCamera);
+  if(pending?.catch)pending.catch(e=>{mirrorFailed=true;mirrorWeight.value=0;console.warn('Mirror render rejected',e);});
+  mirrorMatrix.value.multiplyMatrices(mirrorCamera.projectionMatrix,mirrorCamera.matrixWorldInverse);
+  mirrorWeight.value=1;mirrorLast=t;
+ }catch(e){mirrorFailed=true;mirrorWeight.value=0;console.warn('Mirror capture fallback',e);}
+ finally{renderer.setRenderTarget(previous);for(const obj of hidden)obj.visible=true;if(mainSun)mainSun.castShadow=prevShadow;}
+}
 function createOceanMaterial(options){
  if(!oceanTSL||!THREE.MeshPhysicalNodeMaterial)return new THREE.MeshPhysicalMaterial(options);
  let mat;
@@ -238,6 +274,7 @@ function createOceanMaterial(options){
   const {uniform,float,vec3,normalWorld,cameraPosition,positionWorld,materialTransmission,materialEmissive}=oceanTSL;
   if(!oceanAngleBlend){oceanAngleBlend=uniform(0);oceanAngleDepth=uniform(0);}
   mat=new THREE.MeshPhysicalNodeMaterial(options);
+  setupUnderwaterMirror();
   const v=cameraPosition.sub(positionWorld).normalize();
   const cosine=normalWorld.normalize().dot(v).abs().clamp(0,1);
   const eta=float(1.333),sin2=eta.mul(eta).mul(float(1).sub(cosine.mul(cosine)));
@@ -250,8 +287,19 @@ function createOceanMaterial(options){
   const wet=oceanAngleBlend.mul(oceanTSL.smoothstep(-.02,.08,v.y.negate()));
   mat.transmissionNode=materialTransmission.mul(float(1).sub(wet.mul(reflectance)));
   // Approximate reflected underwater radiance, not a second scene capture.
-  const reflected=vec3(.045,.19,.24).mul(oceanAngleDepth.mul(-.065).exp()).mul(reflectance).mul(wet);
-  mat.emissiveNode=materialEmissive.add(reflected);
+  let radiance=vec3(.045,.19,.24).mul(oceanAngleDepth.mul(-.065).exp());
+  if(underwaterMirror&&mirrorMatrix&&mirrorWeight){
+   const {vec2,vec4,texture}=oceanTSL;
+   const clip=mirrorMatrix.mul(vec4(positionWorld,1));
+   const projected=clip.xy.div(clip.w.max(.001));
+   const uv=vec2(projected.x.mul(.5).add(.5),float(.5).sub(projected.y.mul(.5)));
+   const distorted=uv.add(normalWorld.xz.mul(.045));
+   const edge=distorted.min(float(1).sub(distorted));
+   const mask=oceanTSL.smoothstep(0,.055,edge.x.min(edge.y)).mul(oceanTSL.smoothstep(0,.1,clip.w)).mul(mirrorWeight);
+   const capture=texture(underwaterMirror.texture,distorted.clamp(.001,.999)).rgb;
+   radiance=radiance.mul(float(1).sub(mask)).add(capture.mul(mask).mul(.85));
+  }
+  mat.emissiveNode=materialEmissive.add(radiance.mul(reflectance).mul(wet));
   return mat;
  }catch(e){mat?.dispose();console.warn('Angle optics fallback:',e);return new THREE.MeshPhysicalMaterial(options);}
 }
@@ -3917,6 +3965,7 @@ async function init3D(forceWebGL=false){
  const backend=forceWebGL?'WebGLRenderer':renderer.backend?.constructor?.name||'WebGPU (unknown backend)';
  isWebGPU=!forceWebGL&&/webgpu/i.test(backend);
  oceanTSL=null;oceanAngleBlend=null;oceanAngleDepth=null;
+ underwaterMirror=null;mirrorCamera=null;mirrorMatrix=null;mirrorWeight=null;mirrorFailed=false;mirrorLast=-100;
  if(isWebGPU&&!safeStartup&&!new URLSearchParams(location.search).has('classicOptics')){
   try{oceanTSL=await import('three/tsl');}catch(e){console.warn('Angle optics unavailable',e);}
  }
@@ -4052,6 +4101,7 @@ async function init3D(forceWebGL=false){
   $('heading').textContent='Heading: '+((boatHeading*180/Math.PI%360+360)%360).toFixed(0)+'°';
   try{
    const useScreen=updateScreenSpaceLighting();
+   updateUnderwaterMirror(clockTime);
    const pending=useScreen?screenLightPipeline.render():renderer.render(scene,camera);
    // WebGPU pipeline compilation errors often arrive as rejected promises,
    // rather than synchronous exceptions. Handle either form.

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 27.5.4.2 hull optical contact fix</title>
+<title>Rift Water Lab · WebGPU 27.5.5 coupled hull spray and waterline</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.5.4.2</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.5.5</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.5.4.2 · hull impact optics</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.5.5 · coupled hull contact</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -2062,10 +2062,10 @@ function emitHullImpact(x,z,y,nx,nz,energy,t){
  for(let j=0;j<count;j++){
   const seed=++spraySeed,u=bubbleHash(seed+17),v=bubbleHash(seed+29),w=bubbleHash(seed+41);
   const tangent=(u-.5)*(.45+.20*energy),spread=(v-.5)*.75;
-  const outward=.5+energy*(.75+.95*w),up=.85+energy*(1.5+2.6*v);
+  const outward=.65+energy*(.75+1.25*w),up=.55+energy*(1.2+2.8*v);
   const kind=w<.86?0:1;
   whitewaterSpray.push({x:x-nz*tangent+nx*.07,y:y+.05+w*.09,z:z+nx*tangent+nz*.07,
-   vx:nx*outward-nz*spread,vz:nz*outward+nx*spread,vy:up,kind,age:0,
+   vx:nx*outward-nz*spread+(-Math.sin(boatHeading)*boatSpeed+hullSlipX)*.35,vz:nz*outward+nx*spread+(-Math.cos(boatHeading)*boatSpeed+hullSlipZ)*.35,vy:up,kind,age:0,
    waterY:NaN,waterTime:-100,life:kind===0?1.35:1.7,energy,hullImpact:true});
  }
  spawnFoamParcel(x+nx*.15,z+nz*.15,Math.min(1,energy)*foamStrength,nx*.35,nz*.35);
@@ -2087,7 +2087,7 @@ function updateHullImpactSplashes(dt,t){
   const nx=hsNormal.x/len,nz=hsNormal.z/len;
   hsPoint.set(p.x,-.19,p.z).applyQuaternion(boat.quaternion);
   const x=boat.position.x+hsPoint.x+nx*.11,z=boat.position.z+hsPoint.z+nz*.11;
-  const y=boat.position.y+hsPoint.y,sea=oceanHeight(x,z,t);
+  const y=boat.position.y+hsPoint.y,sea=oceanHeight(x,z,t)+rcSurfaceOffset(x,z)*localWaterBlend(Math.hypot(x-boat.position.x,z-boat.position.z));
   const depth=sea-y,previous=p.depth;
   const rise=Number.isFinite(previous)?(depth-previous)/step:0;p.depth=depth;
   const w=waveField(x,z,t,hsWave);
@@ -2139,7 +2139,15 @@ function updateWhitewaterSpray(dt,t){
   p.vz+=(-.25-p.vz)*Math.min(1,dt*drag);
   p.vy-=9.81*dt*(p.kind===0?1:.35);
   p.x+=p.vx*dt;p.y+=p.vy*dt;p.z+=p.vz*dt;
-  if(!Number.isFinite(p.waterY)||t-p.waterTime>.045||p.y<p.waterY+.18){p.waterY=oceanHeight(p.x,p.z,t);p.waterTime=t;}
+  // Reject whitewater entering the solid hull at the waterline, using the
+  // current boat orientation rather than a world-aligned bounding box.
+  if(hullSplashEnabled&&Math.abs(p.x-boat.position.x)<3.3&&Math.abs(p.z-boat.position.z)<3.3&&Math.abs(p.y-boat.position.y)<1.2){
+   if(!hsPoint){hsPoint=new THREE.Vector3();hsNormal=new THREE.Vector3();}
+   const dx=p.x-boat.position.x,dz=p.z-boat.position.z,c=Math.cos(boatHeading),sn=Math.sin(boatHeading);
+   const lx=c*dx-sn*dz,lz=sn*dx+c*dz;
+   if(p.y<boat.position.y+.15&&p.y>boat.position.y-.65&&hullFootprint(lx,lz,-.12)){whitewaterSpray.splice(i,1);continue;}
+  }
+  if(!Number.isFinite(p.waterY)||t-p.waterTime>.045||p.y<p.waterY+.18){p.waterY=oceanHeight(p.x,p.z,t)+rcSurfaceOffset(p.x,p.z)*localWaterBlend(Math.hypot(p.x-boat.position.x,p.z-boat.position.z));p.waterTime=t;}
   const water=p.waterY;
   if(p.y<=water&&p.age>.04){
    if(p.kind===0&&sprayImpacts.length<128)sprayImpacts.push({x:p.x,z:p.z,energy:Math.min(1,Math.abs(p.vy)*.18*p.energy)});

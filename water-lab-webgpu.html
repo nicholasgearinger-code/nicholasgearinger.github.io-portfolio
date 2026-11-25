@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 25.2 optical whitewater scattering and deformation</title>
+<title>Rift Water Lab · WebGPU 25.3 bubble microstructure and volumetric plumes</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">25.2</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">25.3</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <details id="diagnostics">
@@ -148,7 +148,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>25.2 · optical volumetric foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>25.3 · bubble microstructure</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -1662,40 +1662,75 @@ function breakerCurl(x,z,t,out){
  out.z=-.83*Math.cos(a)-.39*.55*Math.cos(b)-2.1*.13*Math.cos(c);
 }
 const breakerFlowScratch={x:0,z:0};
-let aerationPoints=null;
-function updateBreakerAeration(t){
- if(!aerationPoints){
-  const geo=new THREE.BufferGeometry();
-  geo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(240*3),3).setUsage(THREE.DynamicDrawUsage));
-  geo.setAttribute('color',new THREE.BufferAttribute(new Float32Array(240*4),4).setUsage(THREE.DynamicDrawUsage));
-  geo.setDrawRange(0,0);
-  aerationPoints=new THREE.Points(geo,new THREE.PointsMaterial({
-   color:0xffffff,vertexColors:true,size:.075,sizeAttenuation:true,
-   transparent:true,opacity:.65,depthWrite:false,depthTest:true,fog:true
-  }));
-  aerationPoints.frustumCulled=false;scene.add(aerationPoints);
+// Persistent bubble tracers seeded from the shared six-layer aeration field.
+// Three point batches represent distinct bubble radii and rise speeds.
+let aerationPoints=null,foamBubbleTexture=null,foamBubbleTime=-1,foamBubbleSpawn=0;
+const foamBubbles=[],foamBubbleFlow={x:0,z:0};
+function bubbleHash(n){const v=Math.sin(n*127.1+17.7)*43758.5453;return v-Math.floor(v);}
+function makeBubbleTexture(){
+ const n=48,data=new Uint8Array(n*n*4);
+ for(let j=0;j<n;j++)for(let i=0;i<n;i++){
+  const x=(i+.5)/n*2-1,y=(j+.5)/n*2-1,r=Math.hypot(x,y);
+  const edge=Math.max(0,Math.min(1,(1-r)*10));
+  const rim=Math.exp(-Math.pow((r-.77)/.16,2));
+  const highlight=Math.exp(-((x+.28)**2+(y-.30)**2)*18);
+  const k=(j*n+i)*4;
+  data[k]=218+Math.round(37*highlight);data[k+1]=241;data[k+2]=255;
+  data[k+3]=Math.round(255*edge*Math.min(1,.12+.63*rim+.55*highlight));
  }
- aerationPoints.visible=underwaterActive&&breakingMode==='advanced'&&foamStrength>.01&&breakingFoam.length>0;
- if(!aerationPoints.visible)return;
- const geo=aerationPoints.geometry,p=geo.attributes.position.array,c=geo.attributes.color.array;
- let n=0;
- for(const f of breakingFoam){
-  if(f.kind===2||f.age>2.8||n>=237)continue;
-  const u=f.age/f.life, fade=Math.min(1,f.age*5)*Math.max(0,1-u)*f.strength;
-  const surface=oceanHeight(f.x,f.z,t);
-  for(let k=0;k<3;k++){
-   const phase=f.seed*2.399+k*2.094;
-   const spread=.14+f.age*.17;
-   const depth=Math.max(.12,(.45+k*.31)*Math.sin(Math.min(1,f.age/.65)*Math.PI*.5)-Math.max(0,f.age-.65)*.23);
-   p[n*3]=f.x+Math.cos(phase+t*.7)*spread;
-   p[n*3+1]=surface-depth;
-   p[n*3+2]=f.z+Math.sin(phase+t*.7)*spread;
-   c[n*4]=.78;c[n*4+1]=.93;c[n*4+2]=.97;c[n*4+3]=Math.min(1,fade*1.6);
-   n++;
-  }
- }
- geo.setDrawRange(0,n);geo.attributes.position.needsUpdate=true;geo.attributes.color.needsUpdate=true;
+ const tex=new THREE.DataTexture(data,n,n,THREE.RGBAFormat);
+ tex.minFilter=THREE.LinearFilter;tex.magFilter=THREE.LinearFilter;tex.generateMipmaps=false;tex.needsUpdate=true;return tex;
 }
+function updateBreakerAeration(t){
+ const enabled=underwaterActive&&breakingMode==='advanced'&&foamStrength>.01&&foamFieldReady;
+ if(!enabled){if(aerationPoints)for(const batch of aerationPoints)batch.visible=false;foamBubbles.length=0;foamBubbleTime=t;return;}
+ if(!aerationPoints){
+  foamBubbleTexture=makeBubbleTexture();
+  aerationPoints=[.035,.085,.17].map(size=>{
+   const geo=new THREE.BufferGeometry();
+   geo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(220*3),3).setUsage(THREE.DynamicDrawUsage));
+   geo.setAttribute('color',new THREE.BufferAttribute(new Float32Array(220*3),3).setUsage(THREE.DynamicDrawUsage));
+   geo.setDrawRange(0,0);
+   const points=new THREE.Points(geo,new THREE.PointsMaterial({color:0xffffff,vertexColors:true,map:foamBubbleTexture,
+    size,sizeAttenuation:true,transparent:true,opacity:.68,depthWrite:false,depthTest:true,fog:true}));
+   points.frustumCulled=false;scene.add(points);return points;
+  });
+ }
+ const dt=Math.max(0,Math.min(.05,t-foamBubbleTime));foamBubbleTime=t;
+ const dir=waveComponents[0];
+ for(let i=foamBubbles.length-1;i>=0;i--){
+  const b=foamBubbles[i];b.age+=dt;
+  breakerCurl(b.x,b.z,t,foamBubbleFlow);
+  b.x+=(dir.dirX*.40+foamBubbleFlow.x*.55)*dt;
+  b.z+=(dir.dirZ*.40+foamBubbleFlow.z*.55)*dt;
+  b.depth-=dt*(.14+b.kind*.18);
+  if(b.depth<.08||b.age>b.life||Math.hypot(b.x-boat.position.x,b.z-boat.position.z)>17)foamBubbles.splice(i,1);
+ }
+ // Sample volume concentrations, including the stern and hull sources.
+ foamBubbleSpawn+=dt*75;
+ const births=Math.min(12,Math.floor(foamBubbleSpawn));foamBubbleSpawn-=births;
+ for(let i=0;i<births*4&&foamBubbles.length<540&&i<48;i++){
+  const seed=++foamBubbleSeed;
+  const angle=seed*2.399963,radius=Math.sqrt(bubbleHash(seed))*13;
+  const x=boat.position.x+Math.cos(angle)*radius,z=boat.position.z+Math.sin(angle)*radius;
+  const k=1+Math.floor(bubbleHash(seed+31)*(FOAM_LAYERS-1));
+  const density=foamLayer(x,z,k);
+  if(density<.018||bubbleHash(seed+71)>Math.min(1,density*3))continue;
+  const q=bubbleHash(seed+19),kind=q<.57?0:q<.88?1:2;
+  foamBubbles.push({x,z,depth:(k+.25*bubbleHash(seed+7))*FOAM_DZ,kind,age:0,life:1.5+3*bubbleHash(seed+91)});
+ }
+ const counts=[0,0,0];
+ for(const b of foamBubbles){
+  const n=counts[b.kind];if(n>=220)continue;
+  const geo=aerationPoints[b.kind].geometry,p=geo.attributes.position.array,c=geo.attributes.color.array;
+  const surface=oceanHeight(b.x,b.z,t),fade=Math.min(1,b.age*5,Math.max(0,(b.life-b.age)*2),b.depth*8);
+  const q=n*3;p[q]=b.x;p[q+1]=surface-b.depth;p[q+2]=b.z;
+  c[q]=.55+.40*fade;c[q+1]=.65+.35*fade;c[q+2]=.75+.25*fade;
+  counts[b.kind]++;
+ }
+ aerationPoints.forEach((batch,k)=>{batch.visible=counts[k]>0;batch.geometry.setDrawRange(0,counts[k]);batch.geometry.attributes.position.needsUpdate=true;batch.geometry.attributes.color.needsUpdate=true;});
+}
+let foamBubbleSeed=0;
 // Persistent world-anchored density, transported on a small CPU grid.
 // The moving window samples the previous world coordinates, not boat UVs.
 // Surface-relative 3D Eulerian aeration transport. Six depth layers share
@@ -1745,8 +1780,9 @@ function advanceFoamDensity(dt,t){
   for(let k=0;k<FOAM_LAYERS;k++){
    const sx=x-(vx-fx*speed*.38*wakeFlow)*step*(1-k*.07),sz=z-(vz-fz*speed*.38*wakeFlow)*step*(1-k*.07);
    const here=foamLayer(sx,sz,k),below=foamLayer(sx,sz,k+1),above=k?foamLayer(sx,sz,k-1):0;
-   const rise=Math.min(.45,step*(.28+k*.025)/FOAM_DZ);
-   const mixing=step*.22;
+   const coalescence=Math.max(0,here-.25)*Math.max(0,below-.12);
+   const rise=Math.min(.45,step*(.22+k*.025+coalescence*.30)/FOAM_DZ);
+   const mixing=step*(.18+.16*Math.min(1,waveAir+boatAir));
    let d=here+(below-here)*rise+(above+below-2*here)*mixing;
    if(k===0)d=here+below*rise+(below-here)*mixing;
    // Surface films burst and drain faster than submerged air.
@@ -1762,7 +1798,7 @@ function advanceFoamDensity(dt,t){
 }
 // Continuous lit foam skin shares the exact ocean mesh triangulation.
 // Its own rough dielectric material suppresses glossy water reflections.
-let foamSkin=null,foamSkinSource=null,foamOpticalMap=null;
+let foamSkin=null,foamSkinSource=null,foamOpticalMap=null,foamMicroNormal=null;
 const FOAM_MASK=192;
 let foamOpticalTime=-1e6,foamOpticalX=0,foamOpticalZ=0;
 const foamOpticalFlow={x:0,z:0};
@@ -1771,6 +1807,25 @@ function makeFoamOpticalMap(){
  const tex=new THREE.DataTexture(data,FOAM_MASK,FOAM_MASK,THREE.RGBAFormat);
  tex.minFilter=THREE.LinearFilter;tex.magFilter=THREE.LinearFilter;
  tex.generateMipmaps=false;tex.needsUpdate=true;return tex;
+}
+// Tileable multi-scale bubble-film normal map, generated once.
+function makeFoamMicroNormal(){
+ const n=128,h=new Float32Array(n*n),data=new Uint8Array(n*n*4);
+ for(let j=0;j<n;j++)for(let i=0;i<n;i++){
+  const u=i/n*Math.PI*2,v=j/n*Math.PI*2;
+  const a=Math.sin(u*9+Math.sin(v*5)*1.2),b=Math.sin(v*11+Math.sin(u*4)*1.4);
+  h[j*n+i]=Math.exp(-Math.min(a*a,b*b)*12)*.65+
+   Math.sin(u*23+v*17)*Math.sin(v*19-u*13)*.14;
+ }
+ for(let j=0;j<n;j++)for(let i=0;i<n;i++){
+  const dx=(h[j*n+(i+1)%n]-h[j*n+(i+n-1)%n])*.65;
+  const dz=(h[((j+1)%n)*n+i]-h[((j+n-1)%n)*n+i])*.65;
+  const inv=1/Math.hypot(dx,dz,1),k=(j*n+i)*4;
+  data[k]=Math.round(127.5*(1-dx*inv));data[k+1]=Math.round(127.5*(1-dz*inv));data[k+2]=Math.round(127.5*(1+inv));data[k+3]=255;
+ }
+ const tex=new THREE.DataTexture(data,n,n,THREE.RGBAFormat);
+ tex.wrapS=tex.wrapT=THREE.RepeatWrapping;tex.repeat.set(13,13);
+ tex.minFilter=THREE.LinearFilter;tex.magFilter=THREE.LinearFilter;tex.generateMipmaps=false;tex.needsUpdate=true;return tex;
 }
 function updateFoamSkin(t){
  if(!nearGeometry||!nearWater)return;
@@ -1781,8 +1836,10 @@ function updateFoamSkin(t){
   geo.deleteAttribute('color');
   geo.setAttribute('uv',nearGeometry.attributes.uv1.clone());
   if(!foamOpticalMap)foamOpticalMap=makeFoamOpticalMap();
+  if(!foamMicroNormal)foamMicroNormal=makeFoamMicroNormal();
   const mat=new THREE.MeshPhysicalMaterial({color:0xffffff,map:foamOpticalMap,
-   roughness:.92,metalness:0,ior:1.10,clearcoat:.02,
+   roughness:.86,metalness:0,ior:1.10,clearcoat:.025,
+   normalMap:foamMicroNormal,normalScale:new THREE.Vector2(.28,.28),
    transparent:true,alphaTest:.012,depthWrite:false,depthTest:true,side:THREE.DoubleSide,
    polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2});
   foamSkin=new THREE.Mesh(geo,mat);foamSkin.frustumCulled=false;foamSkin.renderOrder=3;
@@ -1818,14 +1875,15 @@ function updateFoamSkin(t){
    const v=wz*3.5+Math.sin(wx*1.4+t*.25)*.75;
    const film=Math.pow(Math.max(0,1-Math.min(Math.abs(Math.sin(u+Math.sin(v*.8))),Math.abs(Math.sin(v+Math.sin(u*.7))))*2.8),2);
    const micro=Math.pow(Math.max(0,1-Math.abs(Math.sin(u*2.8+Math.sin(v*2.1)))),3);
+   const coarse=Math.pow(Math.max(0,1-Math.min(Math.abs(Math.sin(u*.58+Math.sin(v*.8))),Math.abs(Math.sin(v*.72+Math.sin(u*.6))))*2.2),2);
    const ribbon=Math.pow(Math.max(0,1-Math.abs(Math.sin(side*7+Math.sin(along*.8)*.8))),2);
-   const lace=Math.min(1,film*.78+micro*.32+wake*ribbon*.35);
+   const lace=Math.min(1,film*(.65-.18*column)+micro*(.30+.20*column)+coarse*.24+wake*ribbon*.35);
    const scatter=1-Math.exp(-(d*.85+sub*.55)*1.5);
    // Approximate directional optical thickness using an upstream density sample.
    const upstream=foamLayer(x-.45,z-.24,0)+.55*foamLayer(x-.45,z-.24,1);
    const shadow=1-Math.min(.28,column*.12+Math.max(0,upstream-d)*.28);
    const coverage=Math.max(0,Math.min(1,(d*foamStrength-.055)/.40));
-   const alpha=coverage*(.10+.53*lace+.23*scatter+.12*column)*fade;
+   const alpha=coverage*(.08+.54*lace+.24*scatter+.14*column)*fade;
    const bright=Math.min(1,(.83+.14*scatter+.08*lace)*shadow);
    data[k]=Math.round(255*bright);data[k+1]=Math.round(255*Math.min(1,bright+.025));data[k+2]=Math.round(255*Math.min(1,bright+.035));data[k+3]=Math.round(255*alpha);
   }
@@ -2129,7 +2187,7 @@ function resetBoat(){
  boat.position.set(-3.2,.6,-13);
  boat.rotation.set(0,0,0);vy=0;pitchV=0;rollV=0;
  boatHeading=0;boatSpeed=0;rudder=0;driveMode='stop';totalTravel=0;previousBoatHeading=0;turnVelocity=0;wakeSolver?.clear();wakeTrail=[];trailElapsed=0;
- foamFieldReady=false;foamDensity.fill(0);foamNext.fill(0);breakingFoam.length=0;
+ foamFieldReady=false;foamDensity.fill(0);foamNext.fill(0);breakingFoam.length=0;foamBubbles.length=0;foamBubbleSpawn=0;
  if($('forward')){setDriveMode('stop');}
 }
 function makeBoat(){

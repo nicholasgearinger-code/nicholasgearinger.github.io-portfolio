@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 26.14 directional ocean lighting and crest shadows</title>
+<title>Rift Water Lab · WebGPU 26.15 underwater spectral transport and aerated optics</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.14</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.15</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.14 · directional ocean lighting</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.15 · underwater optics</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -652,7 +652,7 @@ function updateSoftVolumetricShafts(t){
  softShafts.visible=enabled;
  if(!enabled)return;
  const max=shaftQuality==='high'?16:shaftQuality==='low'?6:11;
- const cameraDepth=Math.max(0,-camera.position.y);
+ const cameraDepth=opticalDepth;
  const clarity=Math.max(.45,waterClarity);
  const waterFade=Math.exp(-cameraDepth*(opticalMode==='deep'?.13:.074)/clarity);
  const cx=camera.position.x,cz=camera.position.z;
@@ -669,8 +669,9 @@ function updateSoftVolumetricShafts(t){
   mesh.visible=depth>1.4;
   if(!mesh.visible)continue;
   const wave=waveField(x,z,t,{});
-  const focusing=.65+.35*Math.sin(phase*1.8+t*.35*scatteringMotion+
-    wave.height*.9);
+  const exposure=shadowReady?shadowSample(shadowField,x,z,1):1;
+  const facing=Math.max(0,(-wave.slopeX*.407+.891-wave.slopeZ*.204)/Math.hypot(1,wave.slopeX,wave.slopeZ));
+  const focusing=(.45+.55*facing)*exposure*(.75+.25*Math.sin(phase*1.8+t*.35*scatteringMotion+wave.height*.9));
   const axial=Math.exp(-Math.pow(rad/23,2));
   const target=Math.min(.16,.036*volumetricStrength*underwaterBlend*
     waterFade*focusing*axial*(opticalMode==='deep'?.62:1));
@@ -704,12 +705,33 @@ function updateVolumetricShafts(t){
 // background color uses per-channel Beer-Lambert depth attenuation to
 // distinguish red absorption from blue/green transmission. This is an
 // inexpensive approximation, not a full spectral volume raymarch.
+// Shared underwater optical state, evaluated against the actual moving surface.
+let opticalDepth=0,opticalAir=0,opticalSun=1;
+function waterTransmittance(distance,coefficient,clarity=1){
+ return Math.exp(-Math.max(0,distance)*Math.max(0,coefficient)/Math.max(.35,clarity));
+}
+function underwaterFresnelReflectance(cosine){
+ const c=Math.max(0,Math.min(1,cosine)),eta=1.333;
+ const sin2=eta*eta*(1-c*c);
+ if(sin2>=1)return 1;
+ const ct=Math.sqrt(1-sin2),rs=(eta*c-ct)/(eta*c+ct),rp=(c-eta*ct)/(c+eta*ct);
+ return .5*(rs*rs+rp*rp);
+}
+function localAirFraction(x,z,depth){
+ const k=depth/FOAM_DZ;
+ if(k<0||k>=FOAM_LAYERS)return 0;
+ const a=Math.floor(k),f=k-a;
+ return foamLayer(x,z,a,entrainedAir)*(1-f)+foamLayer(x,z,a+1,entrainedAir)*f;
+}
 function updateUnderwaterScattering(){
  if(!camera||!scene)return;
  if(!dayFog)dayFog=scene.fog;
  if(!underwaterBackgroundColor)underwaterBackgroundColor=new THREE.Color();
  const surface=oceanHeight(camera.position.x,camera.position.z,clockTime);
  const depth=Math.max(0,surface-camera.position.y);
+ opticalDepth=depth;
+ const targetAir=localAirFraction(camera.position.x,camera.position.z,depth);
+ opticalAir+=(targetAir-opticalAir)*(1-Math.exp(-Math.max(.001,clockDelta)*4));
  const enhanced=undersideMode==='enhanced'&&opticalMode!=='legacy';
  const width=Math.max(.2,waterlineSoftness);
  const normalized=Math.max(0,Math.min(1,((surface-camera.position.y)/width+.65)/1.30));
@@ -728,7 +750,10 @@ function updateUnderwaterScattering(){
   const tint=new THREE.Color(p.color);
   underwaterBackgroundColor.setRGB(tint.r*Math.exp(-a[0]*path),
     tint.g*Math.exp(-a[1]*path),tint.b*Math.exp(-a[2]*path));
-  underwaterBackgroundColor.lerp(tint,.40);
+  // No permanent bright color floor: ambient light fades with depth.
+  underwaterBackgroundColor.lerp(tint,.16*waterTransmittance(depth,.085,clarity));
+  const haze=Math.min(.23,opticalAir*.36)*waterTransmittance(depth,.12,clarity);
+  underwaterBackgroundColor.r+=haze*.42;underwaterBackgroundColor.g+=haze*.72;underwaterBackgroundColor.b+=haze*.80;
   underwaterFog.color.set(0x9bcddf).lerp(underwaterBackgroundColor,underwaterBlend);
   // FogExp2 density increases smoothly with depth and suspended haze.
   const extinction=p.scattering*underwaterScatter+
@@ -738,12 +763,12 @@ function updateUnderwaterScattering(){
    // penalties. A single camera-space fog acts on all scene materials.
    const targetDensity=(1/Math.max(8,visibilityRange))*
      (.50+.50*underwaterScatter)*Math.max(.15,distanceExtinction);
-   const depthFactor=1+Math.min(1.1,depth*.022*depthAbsorption);
+   const depthFactor=1+Math.min(1.5,depth*.035*depthAbsorption)+opticalAir*1.6;
    underwaterFog.density=Math.max(.00005,Math.min(.18,
      targetDensity*depthFactor*Math.pow(underwaterBlend,1.5)/clarity));
   }else{
    underwaterFog.density=Math.max(.00005,Math.min(.22,
-     extinction*Math.max(.04,underwaterBlend)/clarity));
+     (extinction+opticalAir*.065)*Math.max(.04,underwaterBlend)/clarity));
   }
   scene.fog=underwaterFog;
   scene.background=underwaterFog.color;
@@ -751,6 +776,10 @@ function updateUnderwaterScattering(){
   scene.fog=dayFog;
   scene.background=scene.userData.dayBackground;
  }
+ const profile=waterProfiles[atmospherePreset]||waterProfiles.lagoon;
+ const wet=underwaterActive?underwaterBlend:0;
+ opticalSun=waterTransmittance(depth,(profile.absorption[1]+profile.scattering)*Math.max(0,depthAbsorption),waterClarity);
+ if(mainSun)mainSun.intensity=3.5*(1-wet+wet*opticalSun*(1-.42*opticalAir));
  updateCausticLighting(depth);
  updateUnifiedVisibility(depth);
  updateUndersideOptics();
@@ -790,8 +819,8 @@ function updateUndersideOptics(){
   material.ior=1.333;
  }
  if(underwaterSunlight&&underwaterAmbient){
-  const depth=Math.max(0,-camera.position.y);
-  const transmitted=Math.exp(-depth*.09/Math.max(.4,waterClarity));
+  const depth=opticalDepth;
+  const transmitted=opticalSun*(1-.45*opticalAir);
   if(clockTime-lastWaveLensUpdate>.11){
    lastWaveLensUpdate=clockTime;
    const w=waveField(camera.position.x,camera.position.z,clockTime,{});
@@ -1152,7 +1181,8 @@ function syncWaveTransmissionMaterial(){
 // nearby underwater object shading.
 function sampleTransmittedSunlight(wx,wz,depth,t){
  const sunX=16/39.3,sunY=35/39.3,sunZ=8/39.3;
- const surfaceX=wx-sunX*depth*.25,surfaceZ=wz-sunZ*depth*.25;
+ const tx=sunX/1.333,tz=sunZ/1.333,ty=Math.sqrt(1-tx*tx-tz*tz);
+ const surfaceX=wx+tx/ty*depth,surfaceZ=wz+tz/ty*depth;
  let sx=0,sz=0,h=0;
  for(let k=0;k<3;k++){
   const wave=waveComponents[k];
@@ -1168,7 +1198,9 @@ function sampleTransmittedSunlight(wx,wz,depth,t){
  const transmission=Math.exp(-depth*.045/Math.max(.4,waterClarity));
  const reduction=(.12+.17*(1-exposure)+.12*(1-fold))*
   Math.min(1,transmission*1.6)*waveTransmissionStrength;
- return Math.max(.60,1-reduction);
+ const visibility=shadowReady?shadowSample(shadowField,surfaceX,surfaceZ,1):1;
+ const air=localAirFraction(surfaceX,surfaceZ,.45);
+ return Math.max(.22,(1-reduction)*visibility*(1-.45*air));
 }
 function updateWaveTransmissionObjects(t){
  if(!underwaterRocks||!waterFloor)return;
@@ -1310,7 +1342,7 @@ function updateCausticLighting(cameraDepth=0){
  if(!floorCausticMaterial)return;
  const enabled=opticalMode!=='legacy'&&atmospherePreset!=='off'&&causticMode!=='off';
  const waterPath=Math.max(1,waterDepthAtBoat||6);
- const strength=enabled?causticStrength*
+ const strength=enabled?causticStrength*(1-.55*opticalAir)*
    Math.exp(-waterPath*(atmospherePreset==='coastal'?.083:.044)/
       Math.max(.4,waterClarity))*
    (1-.35*Math.min(1,cameraDepth/25)):0;
@@ -1950,7 +1982,7 @@ function updateAerationCloud(t){
   for(let j=1;j<FOAM_GRID-1;j+=3)for(let i=1;i<FOAM_GRID-1;i+=3){
    if(cloudSamples.length>=330)break;
    const x=foamOriginX+i*FOAM_STEP,z=foamOriginZ+j*FOAM_STEP;
-   const d=foamLayer(x,z,1)+foamLayer(x,z,2)*.7+foamLayer(x,z,3)*.4;
+   const d=foamLayer(x,z,1,entrainedAir)+foamLayer(x,z,2,entrainedAir)*.7+foamLayer(x,z,3,entrainedAir)*.4;
    if(d<.12)continue;
    const seed=j*FOAM_GRID+i;
    cloudSamples.push({x:x+(bubbleHash(seed)-.5)*.5,z:z+(bubbleHash(seed+13)-.5)*.5,depth:.35+bubbleHash(seed+22)*.85,d});
@@ -1959,10 +1991,11 @@ function updateAerationCloud(t){
  const geo=aerationCloud.geometry,p=geo.attributes.position.array,c=geo.attributes.color.array;
  let n=0;
  for(const q of cloudSamples){
-  const d=foamLayer(q.x,q.z,1)+foamLayer(q.x,q.z,2)*.7;
+  const d=foamLayer(q.x,q.z,1,entrainedAir)+foamLayer(q.x,q.z,2,entrainedAir)*.7;
   if(d<.055)continue;
   p[n*3]=q.x;p[n*3+1]=oceanHeight(q.x,q.z,t)-q.depth;p[n*3+2]=q.z;
-  c[n*4]=.70;c[n*4+1]=.89;c[n*4+2]=.94;c[n*4+3]=Math.min(.7,d*.55)*underwaterBlend;n++;
+  const lit=waterTransmittance(q.depth,.13,waterClarity)*(shadowReady?shadowSample(shadowField,q.x,q.z,1):1);
+  c[n*4]=.42+.28*lit;c[n*4+1]=.62+.28*lit;c[n*4+2]=.73+.23*lit;c[n*4+3]=Math.min(.75,d*.72)*underwaterBlend;n++;
  }
  aerationCloud.visible=n>0;geo.setDrawRange(0,n);geo.attributes.position.needsUpdate=true;geo.attributes.color.needsUpdate=true;
 }

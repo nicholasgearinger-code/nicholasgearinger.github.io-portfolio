@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 26.0.2 seamless ocean and pinned fluid status</title>
+<title>Rift Water Lab · WebGPU 26.1 vortex stretching and turbulent energy</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.0.2</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.1</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.0.2 · seamless 3D fluid</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.1 · 3D vortex stretching</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -1870,7 +1870,7 @@ function flowSample(a,x,z){
 // Local 3D incompressible velocity solver. Independent device, asynchronous
 // staging readback; the existing horizontal solver remains the safe fallback.
 const F3N=32,F3Y=16,F3C=F3N*F3N*F3Y,F3H=.5;
-let fluid3Frames=0,fluid3Peak=0,fluid3RMS=0,fluid3Curl=0,fluid3Latency=0,fluid3State='starting';
+let fluid3Frames=0,fluid3Peak=0,fluid3RMS=0,fluid3Curl=0,fluid3Latency=0,fluid3Enstrophy=0,fluid3Vertical=0,fluid3State='starting';
 let fluid3=null,fluid3Fault='',fluid3Pending=false,fluid3Epoch=0,fluid3Accum=0;
 const fluid3WGSL=`
 struct Params { boat:vec4f, heading:vec4f, shift:vec4f, wave:vec4f };
@@ -1894,6 +1894,12 @@ fn sampleV(q:vec3f)->vec3f{
  let x3=mix(vel(i+vec3i(0,1,1)),vel(i+vec3i(1,1,1)),f.x);
  return mix(mix(x0,x1,f.y),mix(x2,x3,f.y),f.z);
 }
+fn strainAlong(q:vec3i,w:vec3f)->vec3f{
+ let dx=vel(q+vec3i(1,0,0))-vel(q-vec3i(1,0,0));
+ let dy=vel(q+vec3i(0,1,0))-vel(q-vec3i(0,1,0));
+ let dz=vel(q+vec3i(0,0,1))-vel(q-vec3i(0,0,1));
+ return dx*w.x+dy*w.y+dz*w.z;
+}
 fn curl(q:vec3i)->vec3f{
  let x=vel(q+vec3i(1,0,0))-vel(q-vec3i(1,0,0));
  let y=vel(q+vec3i(0,1,0))-vel(q-vec3i(0,1,0));
@@ -1912,18 +1918,28 @@ fn advect(@builtin(global_invocation_id) g:vec3u){
  let jet=exp(-((along+2.0)*(along+2.0)*0.36+side*side*0.9+(r.y+0.55)*(r.y+0.55)*1.5));
  let strength=p.heading.z*p.heading.w;
  let spin=exp(-((along+2.2)*(along+2.2)*0.35+(abs(side)-1.0)*(abs(side)-1.0)*1.7+(r.y+0.7)*(r.y+0.7)*1.5));
- let tangent=vec3f(f.y*(r.y+0.7),-side+sign(side),-f.x*(r.y+0.7))*sign(side);
+ let radial=side-sign(side);
+ // Counter-rotating tubes parallel to the hull travel direction.
+ let tangent=vec3f(-f.y*(r.y+0.7),radial,f.x*(r.y+0.7))*sign(side);
  u+=dt*(vec3f(-f.x,-0.35,-f.y)*jet*strength*2.0+tangent*spin*strength*1.2);
- u+=dt*vec3f(0.12*sin(pos.z*0.8+p.shift.w),0.11*sin(pos.x*1.3+p.shift.w)*exp(-abs(pos.y)*0.7),0.10*cos(pos.x*0.7-p.shift.w));
+ // Surface breaker forcing: intermittent rolling cross-wave circulation.
+ let phase=pos.x*0.86+pos.z*0.51-p.shift.w*1.45;
+ let envelope=exp(-abs(pos.y+0.35)*1.7)*pow(max(0.0,sin(phase)),3.0)*p.wave.w;
+ u+=dt*(vec3f(0.12*sin(pos.z*0.8+p.shift.w),0.11*sin(pos.x*1.3+p.shift.w)*exp(-abs(pos.y)*0.7),0.10*cos(pos.x*0.7-p.shift.w))+envelope*vec3f(0.44*cos(phase),0.8*sin(phase),0.26*cos(phase)));
  b[k]=vec4f(clamp(u,vec3f(-5),vec3f(5)),0);
 }
 @compute @workgroup_size(4,4,4)
 fn confine(@builtin(global_invocation_id) g:vec3u){
  let q=vec3i(g);if(!inside(q)){return;}let k=idx(q);
  let w=curl(q);
+ // Predict vortex stretching and tilting using (omega dot grad)u.
+ // This is a bounded confinement enhancement, not a second vorticity PDE.
+ let stretched=w+clamp(strainAlong(q,w)*p.boat.w,vec3f(-1.5),vec3f(1.5));
  let grad=vec3f(length(curl(q+vec3i(1,0,0)))-length(curl(q-vec3i(1,0,0))),length(curl(q+vec3i(0,1,0)))-length(curl(q-vec3i(0,1,0))),length(curl(q+vec3i(0,0,1)))-length(curl(q-vec3i(0,0,1))));
  let n=grad/max(length(grad),0.001);
- b[k]=vec4f(clamp(vel(q)+cross(n,w)*p.boat.w*0.35,vec3f(-5),vec3f(5)),length(w));
+ let energy=min(2.0,0.5*dot(w,w));
+ let force=cross(n,stretched)*(0.42+0.18*energy);
+ b[k]=vec4f(clamp(vel(q)+clamp(force,vec3f(-3),vec3f(3))*p.boat.w,vec3f(-5),vec3f(5)),length(stretched));
 }
 @compute @workgroup_size(4,4,4)
 fn divergence(@builtin(global_invocation_id) g:vec3u){
@@ -1972,7 +1988,7 @@ function stepFluid3(dt,t){
  let scoped=false;
  try{
   d.pushErrorScope('validation');scoped=true;
-  d.queue.writeBuffer(f.uniform,0,new Float32Array([boat.position.x,boat.position.y,boat.position.z,step,-Math.sin(boatHeading),-Math.cos(boatHeading),Math.abs(boatSpeed),wakeAmount,shiftX,0,shiftZ,t,ox,oy,oz,0]));
+  d.queue.writeBuffer(f.uniform,0,new Float32Array([boat.position.x,boat.position.y,boat.position.z,step,-Math.sin(boatHeading),-Math.cos(boatHeading),Math.abs(boatSpeed),wakeAmount,shiftX,0,shiftZ,t,ox,oy,oz,Math.min(2,breakingIntensity*whitecapIntensity)]));
   const enc=d.createCommandEncoder();
   const pass=(name,a,b,p,np)=>{const group=d.createBindGroup({layout:f.layout,entries:[f.uniform,a,b,p,np,f.div].map((buffer,binding)=>({binding,resource:{buffer}}))});const cp=enc.beginComputePass();cp.setPipeline(f.pipelines[name]);cp.setBindGroup(0,group);cp.dispatchWorkgroups(8,4,8);cp.end();};
   const a=f.v[0],b=f.v[1],p=f.p[0],q=f.p[1];
@@ -1990,8 +2006,9 @@ function stepFluid3(dt,t){
    if(results[0].status==='rejected')throw results[0].reason;
    if(results[0].value)throw results[0].value;
    if(epoch!==fluid3Epoch||fluid3!==f)return;
-   let sum=0,peak=0,curl=0;
-   for(let i=0;i<data.length;i+=4){const v=data[i]**2+data[i+1]**2+data[i+2]**2;if(!Number.isFinite(v)||!Number.isFinite(data[i+3]))throw Error('Non-finite GPU field');sum+=v;peak=Math.max(peak,v);curl=Math.max(curl,data[i+3]);}
+   let sum=0,peak=0,curl=0,enstrophy=0,vertical=0;
+   for(let i=0;i<data.length;i+=4){const v=data[i]**2+data[i+1]**2+data[i+2]**2;if(!Number.isFinite(v)||!Number.isFinite(data[i+3]))throw Error('Non-finite GPU field');sum+=v;peak=Math.max(peak,v);curl=Math.max(curl,data[i+3]);enstrophy+=data[i+3]**2;vertical=Math.max(vertical,Math.abs(data[i+1]));}
+   fluid3Enstrophy=.5*enstrophy/F3C;fluid3Vertical=vertical;
    fluid3Peak=Math.sqrt(peak);fluid3RMS=Math.sqrt(sum/F3C);fluid3Curl=curl;fluid3Latency=performance.now()-submitted;
    if(fluid3Peak<1e-6)throw Error('GPU returned an empty velocity field');
    f.cpu=data;f.cx=ox;f.cz=oz;fluid3Frames++;fluid3State='validated';
@@ -2177,7 +2194,7 @@ function advanceFoamDensity(dt,t){
    if(k===0)d*=Math.exp(-step*(.30+.25*(1-here)));
    else if(k===1)d*=Math.exp(-step*.16);
    d*=Math.exp(-step*(.24+k*.09));
-   const gpuAir=gpu?Math.min(.6,Math.max(0,flowReadScratch.curl-.12)*.25)*Math.exp(-k*.35):0;
+   const gpuAir=gpu?Math.min(.65,Math.max(0,flowReadScratch.curl-.14)*.30+Math.max(0,flowReadScratch.y-.08)*.14)*Math.exp(-k*.35):0;
    const source=waveAir*foamWaveProfile[k]*2.2+power*(stern*1.8*foamSternProfile[k]+hull*.9*foamHullProfile[k])*3.1+vortexAir*foamWaveProfile[k]*1.8+gpuAir;
    foamNext[k*FOAM_PLANE+p]=Math.max(0,Math.min(1,d+step*source*(1-d)));
   }
@@ -2264,18 +2281,20 @@ function updateFoamSkin(t){
    if(fade<=0||d*foamStrength<.045){data[k]=data[k+1]=data[k+2]=255;data[k+3]=0;continue;}
    const column=Math.min(1,(d+sub)*.65);
    sharedFoamFlow(x,z,t,foamOpticalFlow);
+   const gpuOptical=sampleFluid3(x,-.15,z,foamOpticalFlow);
+   const turbulence=gpuOptical?Math.min(1,foamOpticalFlow.curl*.65):0;
    const along=lx*fx+lz*fz,side=lx*fz-lz*fx;
    const wake=power*Math.exp(-Math.pow(side/(.9+Math.max(0,-along)*.2),2))*Math.exp(-Math.abs(along+2)*.12);
    // Bounded world-space coordinate warp; stern streaks elongate downstream.
-   const wx=x-dir.dirX*t*.38+foamOpticalFlow.x*.38-wake*fx*.65;
-   const wz=z-dir.dirZ*t*.38+foamOpticalFlow.z*.38-wake*fz*.65;
+   const wx=x-dir.dirX*t*.38-foamOpticalFlow.x*(.38+.34*turbulence)-wake*fx*.65;
+   const wz=z-dir.dirZ*t*.38-foamOpticalFlow.z*(.38+.34*turbulence)-wake*fz*.65;
    const u=wx*2.8+Math.sin(wz*1.7-t*.3)*.85;
    const v=wz*3.5+Math.sin(wx*1.4+t*.25)*.75;
    const film=Math.pow(Math.max(0,1-Math.min(Math.abs(Math.sin(u+Math.sin(v*.8))),Math.abs(Math.sin(v+Math.sin(u*.7))))*2.8),2);
    const micro=Math.pow(Math.max(0,1-Math.abs(Math.sin(u*2.8+Math.sin(v*2.1)))),3);
    const coarse=Math.pow(Math.max(0,1-Math.min(Math.abs(Math.sin(u*.58+Math.sin(v*.8))),Math.abs(Math.sin(v*.72+Math.sin(u*.6))))*2.2),2);
    const ribbon=Math.pow(Math.max(0,1-Math.abs(Math.sin(side*7+Math.sin(along*.8)*.8))),2);
-   const lace=Math.min(1,film*(.65-.18*column)+micro*(.30+.20*column)+coarse*.24+wake*ribbon*.35);
+   const lace=Math.min(1,film*(.65-.18*column)+micro*(.30+.20*column+.18*turbulence)+coarse*.24+wake*ribbon*.35);
    const scatter=1-Math.exp(-(d*.85+sub*.55)*1.5);
    // Approximate directional optical thickness using an upstream density sample.
    const upstream=foamLayer(x-.45,z-.24,0)+.55*foamLayer(x-.45,z-.24,1);
@@ -2351,7 +2370,7 @@ function advanceBreakingFoam(dt,t){
 }
 function updateWhitewater(t){
  if(!foamMesh||!boat)return;
- if(breakingMode==='advanced'&&!foamDebug){foamMesh.geometry.setDrawRange(0,0);$('foamStatus').textContent=fluid3Diagnostic()+' · vortices '+foamVortices.length;return;}
+ if(breakingMode==='advanced'&&!foamDebug){foamMesh.geometry.setDrawRange(0,0);$('foamStatus').textContent=fluid3Diagnostic()+' · vortices '+foamVortices.length+' · enstrophy '+fluid3Enstrophy.toFixed(3)+' · vertical '+fluid3Vertical.toFixed(2)+' m/s';return;}
  if((foamStrength<.01||wakeAmount<.01)&&!foamDebug&&breakingFoam.length===0){
   foamMesh.geometry.setDrawRange(0,0);
   foamPatchCount=0;$('foamStatus').textContent='Foam: 0 patches';return;

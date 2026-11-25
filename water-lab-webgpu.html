@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 27.0.1 transported foam and adaptive liquid budget</title>
+<title>Rift Water Lab · WebGPU 27.1 GPU FLIP/APIC and volumetric whitewater</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.0.1</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.1</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.0.1 · transported whitewater</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.1 · GPU liquid and whitewater</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -2005,7 +2005,7 @@ function emitWhitewater(x,z,t,energy,fx,fz){
 function updateWhitewaterSpray(dt,t){
  const enabled=breakingMode==='advanced'&&foamStrength>.01&&boat;
  if(!enabled){whitewaterSpray.length=0;sprayImpacts.length=0;if(sprayBatches)for(const b of sprayBatches)b.visible=false;return;}
- if(!sprayBatches){sprayTexture=makeSprayTexture();sprayBatches=[makeSprayBatch(.055,.9),makeSprayBatch(.13,.16)];}
+ if(!sprayBatches){sprayTexture=makeSprayTexture();sprayBatches=[makeSprayBatch(.045,.92),makeSprayBatch(.10,.12)];}
  sprayTimer+=dt;
  if(sprayTimer>=.065){
   sprayTimer=0;
@@ -2040,7 +2040,7 @@ function updateWhitewaterSpray(dt,t){
   if(p.age>p.life||Math.hypot(p.x-boat.position.x,p.z-boat.position.z)>19){whitewaterSpray.splice(i,1);continue;}
   const n=counts[p.kind]++,geo=sprayBatches[p.kind].geometry,a=geo.attributes.position.array,c=geo.attributes.color.array;
   a[n*3]=p.x;a[n*3+1]=p.y;a[n*3+2]=p.z;
-  c[n*4]=.88;c[n*4+1]=.96;c[n*4+2]=1;c[n*4+3]=Math.max(0,Math.min(1,p.age*18,(p.life-p.age)*3));
+  const light=shadowReady?shadowSample(shadowField,p.x,p.z,1):1;c[n*4]=.68+.22*light;c[n*4+1]=.81+.15*light;c[n*4+2]=.86+.14*light;c[n*4+3]=Math.max(0,Math.min(1,p.age*18,(p.life-p.age)*3));
  }
  sprayBatches.forEach((b,k)=>{b.visible=counts[k]>0;b.geometry.setDrawRange(0,counts[k]);b.geometry.attributes.position.needsUpdate=true;b.geometry.attributes.color.needsUpdate=true;});
 }
@@ -2786,7 +2786,7 @@ function updateFoamSkin(t){
    const shadow=1-Math.min(.28,column*.12+Math.max(0,upstream-d)*.28);
    const coverage=Math.max(0,Math.min(1,(d*foamStrength-.035)/.43));
    const breakup=.65+.35*Math.sin(wx*4.1+Math.sin(wz*2.9))*Math.cos(wz*3.7-Math.sin(wx*2.2));
-   const alpha=Math.min(.94,foamStrength*(young*(.36+.57*lace)+shear*(.035+.72*lace)+coverage*(.025+.36*lace)+sub*.065)*breakup*fade);
+   const alpha=Math.min(.72,foamStrength*(young*(.12+.43*lace)+shear*(.025+.58*lace)+coverage*(.015+.28*lace)+sub*.035)*breakup*fade);
    const sunVisibility=shadowReady?shadowSample(shadowField,x,z,1):1;
    const bright=Math.min(1,(.82+.12*scatter+.14*lace+.08*young)*shadow*(1-Math.min(.32,(1-sunVisibility)*waveShadowStrength*.6)));
    data[k]=Math.round(255*bright);data[k+1]=Math.round(255*Math.min(1,bright+.025));data[k+2]=Math.round(255*Math.min(1,bright+.035));data[k+3]=Math.round(255*alpha);
@@ -2959,6 +2959,67 @@ function apStep(g,dt,iterations=16){
  return {before:Math.sqrt(before/Math.max(1,count)),after:Math.sqrt(after/Math.max(1,count)),cells:count};
 }
 let apGrid=null,apClock=0,apOwner=null,apStats={before:0,after:0,cells:0},apFault='',apMesh=null;
+
+const apGPUCode="\nstruct Particle { pos:vec4f, vel:vec4f, c0:vec4f, c1:vec4f, c2:vec4f }\nstruct Acc { mass:atomic<i32>, x:atomic<i32>, y:atomic<i32>, z:atomic<i32> }\nstruct Params { count:u32, dt:f32, h:f32, pad:f32 }\n@group(0) @binding(0) var<uniform> cfg:Params;\n@group(0) @binding(1) var<storage,read_write> particles:array<Particle>;\n@group(0) @binding(2) var<storage,read_write> acc:array<Acc>;\n@group(0) @binding(3) var<storage,read_write> grid:array<vec4f>;\n@group(0) @binding(4) var<storage,read_write> old:array<vec4f>;\n@group(0) @binding(5) var<storage,read_write> pressure:array<f32>;\n@group(0) @binding(6) var<storage,read_write> nextP:array<f32>;\n@group(0) @binding(7) var<storage,read_write> div:array<f32>;\nconst N:i32=16; const C:u32=4096u;\nfn inside(q:vec3i)->bool{return all(q>=vec3i(0))&&all(q<vec3i(N));}\nfn idx(q:vec3i)->u32{return u32((q.z*N+q.y)*N+q.x);}\nfn coord(i:u32)->vec3i{return vec3i(i32(i%16u),i32((i/16u)%16u),i32(i/256u));}\nfn wet(q:vec3i)->bool{if(!inside(q)){return false;}return grid[idx(q)].w>.01;}\nfn vAt(q:vec3i)->vec3f{if(!inside(q)){return vec3f(0);}return grid[idx(q)].xyz;}\nfn pAt(q:vec3i,center:f32)->f32{if(!inside(q)){return center;}if(!wet(q)){return 0.;}return pressure[idx(q)];}\n@compute @workgroup_size(64) fn clear(@builtin(global_invocation_id) id:vec3u){\n let i=id.x;if(i>=C){return;}atomicStore(&acc[i].mass,0);atomicStore(&acc[i].x,0);atomicStore(&acc[i].y,0);atomicStore(&acc[i].z,0);pressure[i]=0.;nextP[i]=0.;div[i]=0.;\n}\n@compute @workgroup_size(64) fn deposit(@builtin(global_invocation_id) id:vec3u){\n let i=id.x;if(i>=cfg.count){return;}let p=particles[i];let u=p.pos.xyz/cfg.h-vec3f(.5);let b=vec3i(floor(u));let a=fract(u);\n for(var z=0;z<2;z++){for(var y=0;y<2;y++){for(var x=0;x<2;x++){\n let o=vec3i(x,y,z);let q=b+o;if(!inside(q)){continue;}let wv=mix(vec3f(1)-a,a,vec3f(o));let w=wv.x*wv.y*wv.z;let d=(vec3f(q)+.5)*cfg.h-p.pos.xyz;\n let v=clamp(p.vel.xyz+vec3f(dot(p.c0.xyz,d),dot(p.c1.xyz,d),dot(p.c2.xyz,d)),vec3f(-12),vec3f(12));let j=idx(q);\n atomicAdd(&acc[j].mass,i32(round(w*4096.)));atomicAdd(&acc[j].x,i32(round(w*v.x*4096.)));atomicAdd(&acc[j].y,i32(round(w*v.y*4096.)));atomicAdd(&acc[j].z,i32(round(w*v.z*4096.)));\n }}}\n}\n@compute @workgroup_size(64) fn normalizeGrid(@builtin(global_invocation_id) id:vec3u){\n let i=id.x;if(i>=C){return;}let m=f32(atomicLoad(&acc[i].mass));var v=vec3f(0);if(m>1.){v=vec3f(f32(atomicLoad(&acc[i].x)),f32(atomicLoad(&acc[i].y)),f32(atomicLoad(&acc[i].z)))/m;}\n old[i]=vec4f(v,m/4096.);if(m>1.){v.y-=9.81*cfg.dt;}grid[i]=vec4f(v,m/4096.);\n}\n@compute @workgroup_size(64) fn divergence(@builtin(global_invocation_id) id:vec3u){\n let i=id.x;if(i>=C){return;}let q=coord(i);if(!wet(q)){return;}div[i]=(vAt(q+vec3i(1,0,0)).x-vAt(q-vec3i(1,0,0)).x+vAt(q+vec3i(0,1,0)).y-vAt(q-vec3i(0,1,0)).y+vAt(q+vec3i(0,0,1)).z-vAt(q-vec3i(0,0,1)).z)/(2.*cfg.h);\n}\n@compute @workgroup_size(64) fn jacobi(@builtin(global_invocation_id) id:vec3u){\n let i=id.x;if(i>=C){return;}let q=coord(i);if(!wet(q)){nextP[i]=0.;return;}let p=pressure[i];let sum=pAt(q+vec3i(1,0,0),p)+pAt(q-vec3i(1,0,0),p)+pAt(q+vec3i(0,1,0),p)+pAt(q-vec3i(0,1,0),p)+pAt(q+vec3i(0,0,1),p)+pAt(q-vec3i(0,0,1),p);nextP[i]=(sum-div[i]*cfg.h*cfg.h/max(.001,cfg.dt))/6.;\n}\n@compute @workgroup_size(64) fn copyPressure(@builtin(global_invocation_id) id:vec3u){if(id.x<C){pressure[id.x]=nextP[id.x];}}\n@compute @workgroup_size(64) fn project(@builtin(global_invocation_id) id:vec3u){\n let i=id.x;if(i>=C){return;}let q=coord(i);if(!wet(q)){return;}let p=pressure[i];let grad=vec3f(pAt(q+vec3i(1,0,0),p)-pAt(q-vec3i(1,0,0),p),pAt(q+vec3i(0,1,0),p)-pAt(q-vec3i(0,1,0),p),pAt(q+vec3i(0,0,1),p)-pAt(q-vec3i(0,0,1),p))/(2.*cfg.h);grid[i]=vec4f(clamp(grid[i].xyz-cfg.dt*grad,vec3f(-7),vec3f(7)),grid[i].w);\n}\n@compute @workgroup_size(64) fn transfer(@builtin(global_invocation_id) id:vec3u){\n let i=id.x;if(i>=cfg.count){return;}var p=particles[i];let u=p.pos.xyz/cfg.h-vec3f(.5);let b=vec3i(floor(u));let a=fract(u);var pic=vec3f(0);var change=vec3f(0);var ws=0.;var c0=vec3f(0);var c1=vec3f(0);var c2=vec3f(0);var moment=vec3f(0);\n for(var z=0;z<2;z++){for(var y=0;y<2;y++){for(var x=0;x<2;x++){\n let o=vec3i(x,y,z);let q=b+o;if(!wet(q)){continue;}let wv=mix(vec3f(1)-a,a,vec3f(o));let w=wv.x*wv.y*wv.z;let j=idx(q);let v=grid[j].xyz;let d=(vec3f(q)+.5)*cfg.h-p.pos.xyz;\n pic+=w*v;change+=w*(v-old[j].xyz);ws+=w;c0+=w*v.x*d;c1+=w*v.y*d;c2+=w*v.z*d;moment+=w*d*d;\n }}}\n if(ws>.0001){p.vel=vec4f(clamp(.9*(p.vel.xyz+change/ws)+.1*pic/ws,vec3f(-7),vec3f(7)),0);let m=max(moment,vec3f(.012));p.c0=vec4f(clamp(c0/m,vec3f(-12),vec3f(12)),0);p.c1=vec4f(clamp(c1/m,vec3f(-12),vec3f(12)),0);p.c2=vec4f(clamp(c2/m,vec3f(-12),vec3f(12)),0);}\n let next=p.pos.xyz+p.vel.xyz*cfg.dt;let bounded=clamp(next,vec3f(.08),vec3f(16.*cfg.h-.08));p.vel=vec4f(select(p.vel.xyz,-.12*p.vel.xyz,next!=bounded),0);p.pos=vec4f(bounded,1);particles[i]=p;\n}\n";
+let apGPU=null,apGPUStarting=false,apGPUFault='',apGPUFrames=0,apGPUOwner=null,apGPUPending=false;
+async function initAPGPU(){
+ if(apGPU||apGPUStarting||apGPUFault||!fluid3?.d||safeStartup||new URLSearchParams(location.search).has('cpuFLIP'))return;
+ apGPUStarting=true;
+ try{
+  const d=fluid3.d,m=d.createShaderModule({code:apGPUCode}),info=await m.getCompilationInfo();
+  const errors=info.messages.filter(x=>x.type==='error');if(errors.length)throw Error(errors.map(x=>x.message).join('; '));
+  const layout=d.createBindGroupLayout({entries:Array.from({length:8},(_,binding)=>({binding,visibility:GPUShaderStage.COMPUTE,buffer:{type:binding===0?'uniform':'storage'}}))});
+  const pl=d.createPipelineLayout({bindGroupLayouts:[layout]}),pipelines={};
+  for(const entryPoint of ['clear','deposit','normalizeGrid','divergence','jacobi','copyPressure','project','transfer'])pipelines[entryPoint]=await d.createComputePipelineAsync({layout:pl,compute:{module:m,entryPoint}});
+  const buf=size=>d.createBuffer({size,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST|GPUBufferUsage.COPY_SRC});
+  const params=d.createBuffer({size:16,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
+  const particles=buf(AP_MAX*80),buffers=[params,particles,buf(AP_C*16),buf(AP_C*16),buf(AP_C*16),buf(AP_C*4),buf(AP_C*4),buf(AP_C*4)];
+  const group=d.createBindGroup({layout,entries:buffers.map((buffer,binding)=>({binding,resource:{buffer}}))});
+  apGPU={d,pipelines,params,particles,group,stage:d.createBuffer({size:AP_MAX*80,usage:GPUBufferUsage.MAP_READ|GPUBufferUsage.COPY_DST})};
+ }catch(e){apGPUFault=String(e?.message||e);console.warn('GPU FLIP fallback',e);}finally{apGPUStarting=false;}
+}
+function dispatchAPGPU(g,dt,t){
+ const f=apGPU;if(!f||apGPUPending)return false;
+ const d=f.d,count=g.particles.length,owner=apOwner;
+ if(apGPUOwner!==g){
+  const data=new Float32Array(count*20);for(let i=0;i<count;i++){const p=g.particles[i],k=i*20;data.set([p.x,p.y,p.z,1,...p.v,0],k);for(let j=0;j<3;j++)data.set(p.c.subarray(j*3,j*3+3),k+8+j*4);}
+  d.queue.writeBuffer(f.particles,0,data);apGPUOwner=g;
+ }
+ const u=new ArrayBuffer(16);new Uint32Array(u)[0]=count;new Float32Array(u).set([dt,AP_H],1);d.queue.writeBuffer(f.params,0,u);
+ d.pushErrorScope('validation');let scoped=true;
+ try{
+  const enc=d.createCommandEncoder(),steps=Math.max(1,Math.ceil(dt/.035));
+  new Float32Array(u)[1]=dt/steps;d.queue.writeBuffer(f.params,0,u);
+  const pass=(name,groups)=>{const p=enc.beginComputePass();p.setPipeline(f.pipelines[name]);p.setBindGroup(0,f.group);p.dispatchWorkgroups(groups);p.end();};
+  for(let n=0;n<steps;n++){pass('clear',64);pass('deposit',Math.ceil(count/64));pass('normalizeGrid',64);pass('divergence',64);for(let i=0;i<(simTier===2?8:12);i++){pass('jacobi',64);pass('copyPressure',64);}pass('project',64);pass('transfer',Math.ceil(count/64));}
+  enc.copyBufferToBuffer(f.particles,0,f.stage,0,count*80);apGPUPending=true;d.queue.submit([enc.finish()]);
+  const validation=d.popErrorScope();scoped=false;
+  Promise.allSettled([validation,f.stage.mapAsync(GPUMapMode.READ)]).then(results=>{
+   if(results[1].status==='rejected')throw results[1].reason;
+   const data=new Float32Array(f.stage.getMappedRange()).slice(0,count*20);f.stage.unmap();
+   if(results[0].status==='rejected')throw results[0].reason;if(results[0].value)throw results[0].value;
+   if(apGrid!==g||apOwner!==owner)return;
+   for(let i=0;i<count;i++){const p=g.particles[i],k=i*20;if(!Number.isFinite(data[k]+data[k+1]+data[k+2]+data[k+4]+data[k+5]+data[k+6]))throw Error('Invalid GPU liquid');p.x=data[k];p.y=data[k+1];p.z=data[k+2];for(let j=0;j<3;j++){p.v[j]=data[k+4+j];p.c.set(data.subarray(k+8+j*4,k+11+j*4),j*3);}}
+   apGPUFrames++;processAPImpacts(g,clockTime);
+  }).catch(e=>{apGPUFault=String(e?.message||e);apGPU=null;console.warn('GPU liquid fallback',e);}).finally(()=>{apGPUPending=false;});
+  return true;
+ }catch(e){if(scoped)d.popErrorScope().catch(()=>{});apGPUFault=String(e?.message||e);apGPU=null;apGPUPending=false;return false;}
+}
+let liquidFoamMesh=null,liquidFoamLast=-100;
+function updateLiquidFoam(t){
+ if(!foamFieldReady||breakingMode!=='advanced'||foamStrength<.01){if(liquidFoamMesh)liquidFoamMesh.visible=false;return;}
+ if(!liquidFoamMesh){liquidFoamMesh=new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1,1),new THREE.MeshStandardMaterial({color:0xffffff,roughness:.72,metalness:0}),300);liquidFoamMesh.frustumCulled=false;liquidFoamMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);scene.add(liquidFoamMesh);}
+ const obj=new THREE.Object3D(),col=new THREE.Color();let count=0,budget=simTier===2?90:simTier===1?160:260;
+ // Render actual lit, irregular bubble clusters only in young dense foam.
+ for(let i=0;i<breakingFoam.length&&count<budget;i++){const p=breakingFoam[i],life=Math.max(0,1-p.age/p.life),d=foamLayer(p.x,p.z,0,breakerFilm);if(d<.055||life<.12)continue;
+  const base=oceanHeight(p.x,p.z,t);for(let j=0;j<3&&count<budget;j++){
+   const seed=p.seed+j*31,angle=seed*2.39996323,r=.06+.16*bubbleHash(seed+8),size=(.045+.10*bubbleHash(seed+19))*Math.min(1,Math.sqrt(d)*2)*life;
+   obj.position.set(p.x+Math.cos(angle)*r,base+size*.28,p.z+Math.sin(angle)*r);obj.scale.set(size*1.5,size*.48,size);obj.rotation.y=angle;obj.updateMatrix();liquidFoamMesh.setMatrixAt(count,obj.matrix);col.setRGB(.65+.20*life,.81+.14*life,.84+.15*life);liquidFoamMesh.setColorAt(count++,col);
+  }
+ }
+ liquidFoamMesh.count=count;liquidFoamMesh.visible=count>0;liquidFoamMesh.instanceMatrix.needsUpdate=true;if(liquidFoamMesh.instanceColor)liquidFoamMesh.instanceColor.needsUpdate=true;
+}
+
 function clearAP(){apGrid=null;apOwner=null;apClock=0;if(apMesh)apMesh.visible=false;}
 function startAP(p,t){
  const g=makeAPGrid(),span=AP_N*AP_H,base=oceanHeight(p.x,p.z,t);
@@ -2978,27 +3039,33 @@ function startAP(p,t){
  }
  apGrid=g;apOwner=p;
 }
-function updateAP(dt,t){
- if(apFault||!boat||breakingMode!=='advanced'||!plungePool.length){clearAP();return;}
- if(!apOwner||!plungePool.includes(apOwner)){clearAP();startAP(plungePool[0],t);}
- apClock+=dt;const cadence=simTier===2?.10:simTier===1?.067:.05;
- if(apClock<cadence)return;
- const elapsed=Math.min(.12,apClock);apClock=0;
- try{
-  const steps=Math.ceil(elapsed/(simTier===2?.04:.032));
-  for(let i=0;i<steps;i++)apStats=apStep(apGrid,elapsed/steps,simTier===2?7:simTier===1?10:14);
-  if(!Number.isFinite(apStats.after)||apGrid.particles.some(p=>!Number.isFinite(p.x+p.y+p.z)))throw Error('Nonfinite liquid state');
+function processAPImpacts(g,t){
   // Return falling liquid momentum to existing surface/air transport.
   let impacts=0;
-  for(const p of apGrid.particles){
-   const x=p.x+apGrid.ox,y=p.y+apGrid.oy,z=p.z+apGrid.oz;
-   const gap=y-(apGrid.oy+2.1),previous=p.surfaceGap;p.surfaceGap=gap;
+  for(const p of g.particles){
+   const x=p.x+g.ox,y=p.y+g.oy,z=p.z+g.oz;
+   const gap=y-(g.oy+2.1),previous=p.surfaceGap;p.surfaceGap=gap;
    if(Number.isFinite(previous)&&previous>0&&gap<=0&&p.v[1]<-.8&&impacts<8){
     const energy=Math.min(.55,-p.v[1]*.085);
     if(sprayImpacts.length<128)sprayImpacts.push({x,z,energy});
     emitWhitewater(x,z,t,energy,p.v[0],p.v[2]);impacts++;
    }
   }
+}
+function updateAP(dt,t){
+ if(apFault||!boat||breakingMode!=='advanced'||!plungePool.length){clearAP();return;}
+ if(!apOwner||!plungePool.includes(apOwner)){clearAP();startAP(plungePool[0],t);}
+ if(!apGPU&&!apGPUFault)initAPGPU();
+ apClock+=dt;const cadence=simTier===2?.10:simTier===1?.067:.05;
+ if(apGPUPending)return;
+ if(apClock<cadence)return;
+ const elapsed=Math.min(.12,apClock);apClock=0;
+ if(apGPU&&dispatchAPGPU(apGrid,elapsed,t))return;
+ try{
+  const steps=Math.ceil(elapsed/(simTier===2?.04:.032));
+  for(let i=0;i<steps;i++)apStats=apStep(apGrid,elapsed/steps,simTier===2?7:simTier===1?10:14);
+  if(!Number.isFinite(apStats.after)||apGrid.particles.some(p=>!Number.isFinite(p.x+p.y+p.z)))throw Error('Nonfinite liquid state');
+  processAPImpacts(apGrid,t);
   // Optional diagnostic particles, disabled by default; actual surface
   // reconstruction follows in 27.1.
   if(new URLSearchParams(location.search).has('flipDebug')){
@@ -4279,7 +4346,7 @@ async function init3D(forceWebGL=false){
    updateCausticTexture(time);
    updateWaveTransmission(time);
    animateWaves(time);
-   try{updateFoamSkin(time);updateWhitewater(time);updateVortexFilaments(dt,time);}
+   try{updateFoamSkin(time);updateLiquidFoam(time);updateWhitewater(time);updateVortexFilaments(dt,time);}
    catch(error){
     $('foamStatus').textContent='Foam error: '+String(error?.message||error);
     if(foamMesh)foamMesh.visible=false;
@@ -4361,7 +4428,7 @@ async function init3D(forceWebGL=false){
   const now=performance.now();
   if(now-last>1100){
    const measured=samples*1000/(now-last);
-   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?apGrid.particles.length+'p '+apStats.after.toFixed(2)+' div':'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
+   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?(apGPUFrames&&!apGPUFault?'GPU ':'CPU ')+apGrid.particles.length+'p '+(apGPUFrames&&!apGPUFault?apGPUFrames+' steps':apStats.after.toFixed(2)+' div'):'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
    $('fps').textContent='FPS: '+Math.round(measured);
    adjustSimulationBudget(measured,now);adjustAdaptivePerformance(measured,now);
    last=now;samples=0;

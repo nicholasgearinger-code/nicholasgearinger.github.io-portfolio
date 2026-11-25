@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 26.16 dynamic plunging breakers</title>
+<title>Rift Water Lab · WebGPU 26.16.1 collision-coupled plunging breakers</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.16</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">26.16.1</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.16 · plunging breakers</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>26.16.1 · breaker impact</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -1965,7 +1965,9 @@ function entrySurfaceForce(x,z){
   const life=Math.exp(-e.age*5);
   // Short downward cavity surrounded by an outward displacement rim.
   const core=Math.exp(-r*r/.28),rim=Math.exp(-((r-.65-e.age*.65)**2)/.14);
-  force+=e.energy*life*(-4.2*core+2.1*rim);
+  const forward=e.plunge?(x-e.x)*e.fx+(z-e.z)*e.fz:0;
+  const directional=e.plunge?1+.45*Math.tanh(forward*2):1;
+  force+=e.energy*life*(-4.2*core+2.1*rim*directional);
  }
  return Math.max(-4,Math.min(3,force));
 }
@@ -2843,7 +2845,7 @@ function updatePlunges(dt,t){
   if(best){
    let p=plungePool.find(q=>!q.active);
    if(!p){p=makePlungeMesh();plungePool.push(p);}
-   const d=waveComponents[0];Object.assign(p,{active:true,x:best.x,z:best.z,fx:d.dirX,fz:d.dirZ,age:0,life:2.0+Math.min(.65,best.score),height:Math.min(1.6,.58+best.score*2.1)*Math.min(1.4,Math.max(.55,waveHeight/1.5)),width:4.8+best.score*3,speed:2.1+best.score*2,hit:false});
+   const d=waveComponents[0];Object.assign(p,{active:true,x:best.x,z:best.z,fx:d.dirX,fz:d.dirZ,age:0,life:2.0+Math.min(.65,best.score),height:Math.min(1.6,.58+best.score*2.1)*Math.min(1.4,Math.max(.55,waveHeight/1.5)),width:4.8+best.score*3,speed:2.1+best.score*2,hit:false,contactMask:0,lipGap:new Float32Array(5).fill(NaN)});
    p.mesh.visible=true;
   }
  }
@@ -2853,34 +2855,47 @@ function updatePlunges(dt,t){
   if(a>=1||Math.hypot(p.x-boat.position.x,p.z-boat.position.z)>22){p.active=false;p.mesh.visible=false;continue;}
   p.x+=p.fx*p.speed*dt;p.z+=p.fz*p.speed*dt;
   const g=p.mesh.geometry,pos=g.attributes.position.array,col=g.attributes.color.array;
+  const profile=Array.from({length:PLUNGE_V+1},(_,j)=>plungeProfile(j/PLUNGE_V,a,p.height));
   for(let i=0;i<=PLUNGE_U;i++){
    const u=i/PLUNGE_U,side=(u-.5)*p.width;
    const taper=Math.pow(Math.max(0,Math.sin(Math.PI*u)),.65);
    const bx=p.x+p.fz*side,bz=p.z-p.fx*side;
    const base=oceanHeight(bx,bz,t);
+   const foot=oceanHeight(bx-p.fx*p.height*1.5*taper,bz-p.fz*p.height*1.5*taper,t);
+   const lip=profile[PLUNGE_V],lipSea=oceanHeight(bx+p.fx*lip.x*taper,bz+p.fz*lip.x*taper,t);
    for(let j=0;j<=PLUNGE_V;j++){
-    const v=j/PLUNGE_V,q=plungeProfile(v,a,p.height),k=(j*(PLUNGE_U+1)+i)*3;
+    const v=j/PLUNGE_V,q=profile[j],k=(j*(PLUNGE_U+1)+i)*3;
     const forward=q.x*taper;
     pos[k]=bx+p.fx*forward;pos[k+2]=bz+p.fz*forward;
     // Anchor feet and ends to the existing surface; lift the free lip.
-    const y0=base+q.y*taper;
-    const edgeSea=base+Math.min(0,q.y)*taper;
-    pos[k+1]=v<.05?edgeSea-.015:y0+.015*taper;
+    const shoulderBlend=Math.max(0,1-v/.45);
+    const y0=base+(foot-base)*shoulderBlend+q.y*taper;
+    const contactBlend=Math.max(0,(v-.72)/.28)*Math.max(0,Math.min(1,(a-.67)/.20));
+    pos[k+1]=v===0?foot-.018:y0+(Math.max(lipSea-.04,y0)-y0)*contactBlend+.015*taper;
     const white=Math.max(0,Math.min(.88,(v-.66)*3*(a>.65?1:.35)+Math.max(0,a-.72)*2));
     col[k]=.56+.44*white;col[k+1]=.87+.13*white;col[k+2]=.86+.14*white;
    }
   }
   g.attributes.position.needsUpdate=true;g.attributes.color.needsUpdate=true;g.computeVertexNormals();
-  if(!p.hit&&a>.71){
-   p.hit=true;plungeImpacts++;
-   const q=plungeProfile(1,a,p.height),x=p.x+p.fx*q.x,z=p.z+p.fz*q.x;
-   for(let k=-2;k<=2;k++){
-    const e={x:x+p.fz*k*p.width*.17,z:z-p.fx*k*p.width*.17,energy:Math.min(.65,p.height*.32),age:0};
-    entryEvents.push(e);entryAirQueue.push({...e});
-    for(let n=0;n<3;n++)emitWhitewater(e.x,e.z,t,e.energy*1.8,p.fx,p.fz);
-   }
-   while(entryEvents.length>12)entryEvents.shift();while(entryAirQueue.length>12)entryAirQueue.shift();
+  // Detect contact independently along five points of the moving lip.
+  // Relative gap velocity includes the motion of the receiving ocean.
+  const q=profile[PLUNGE_V];
+  for(let k=0;k<5;k++){
+   const u=.16+k*.17,side=(u-.5)*p.width,taper=Math.pow(Math.sin(Math.PI*u),.65);
+   const bx=p.x+p.fz*side,bz=p.z-p.fx*side;
+   const x=bx+p.fx*q.x*taper,z=bz+p.fz*q.x*taper;
+   const gap=oceanHeight(bx,bz,t)+q.y*taper-oceanHeight(x,z,t);
+   const previous=p.lipGap[k],fall=Number.isFinite(previous)?(previous-gap)/Math.max(.001,dt):0;
+   p.lipGap[k]=gap;
+   if((p.contactMask&(1<<k))||a<.48||gap>.055||fall<.15)continue;
+   p.contactMask|=1<<k;
+   if(!p.hit){p.hit=true;plungeImpacts++;}
+   const energy=Math.min(.85,Math.max(.08,.12*p.height+.065*fall*fall))*taper;
+   const e={x,z,energy,age:0,fx:p.fx,fz:p.fz,plunge:true};
+   entryEvents.push(e);entryAirQueue.push({...e});
+   for(let n=0;n<5;n++)emitWhitewater(x,z,t,energy*1.9,p.fx,p.fz);
   }
+  while(entryEvents.length>12)entryEvents.shift();while(entryAirQueue.length>12)entryAirQueue.shift();
  }
 }
 function advanceBreakingFoam(dt,t){

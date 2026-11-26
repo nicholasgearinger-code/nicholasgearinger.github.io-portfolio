@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.3 GPU foam fragment shading and geometry sharing</title>
+<title>Rift Water Lab · WebGPU 28.5.4 restored cellular foam optics</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.3</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.4</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.3 · GPU foam shading</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.4 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -3729,9 +3729,9 @@ function sampleWhitewaterVolume(x,z,film,cosine,visibility,strength,out){
 
  // Compact CPU bridge to the renderer's GPU device. Optical evaluation,
  // fragmentation and interpolated field sampling run in the fragment shader.
- let foamShaderFields=null,foamShaderOrigin=null,foamShaderControls=null,foamShaderFrame=-1,foamShaderFault='';
+ let foamShaderFields=null,foamShaderOrigin=null,foamShaderControls=null,foamShaderFrame=-1,foamShaderFault='',foamOrganicAtlas=null;
  function createFoamShaderMaterial(){
-  if(!oceanTSL||!THREE.MeshPhysicalNodeMaterial||foamShaderFault||new URLSearchParams(location.search).has('cpuFoamSkin'))return null;
+  if(!oceanTSL||!THREE.MeshPhysicalNodeMaterial||foamShaderFault||(!new URLSearchParams(location.search).has('gpuFoamSkin')||new URLSearchParams(location.search).has('cpuFoamSkin')))return null;
   try{
    const {uniform,float,vec2,vec3,vec4,texture,positionWorld,smoothstep}=oceanTSL;
    const make=()=>{const t=new THREE.DataTexture(new Uint8Array(FOAM_PLANE*4),FOAM_GRID,FOAM_GRID,THREE.RGBAFormat);t.minFilter=t.magFilter=THREE.LinearFilter;t.generateMipmaps=false;t.needsUpdate=true;return t;};
@@ -3748,11 +3748,25 @@ function sampleWhitewaterVolume(x,z,film,cosine,visibility,strength,out){
    const coverage=density.mul(foamShaderControls.x).sub(.22).div(.48).clamp(0,1);
    const depth=packed.mul(1.8).add(shear.mul(.55)).add(coverage.mul(.35)).mul(foamShaderControls.x).mul(fade).mul(b.r.mul(.48).add(1));
    const mx=positionWorld.x.sub(c.r.sub(.5).mul(16)),mz=positionWorld.z.sub(c.g.sub(.5).mul(16));
-   // Irregular drifting interference at two scales, filtered in distant views.
-   const noise=mx.mul(7.7).add(mz.mul(4.2)).add(mx.mul(2.1).sub(mz.mul(3.6)).sin().mul(2)).sin().mul(.5).add(.5);
-   const fine=mx.mul(22.1).sub(mz.mul(17.3)).add(mz.mul(8.5).sin()).sin().mul(.5).add(.5);
+   // Reuse the original stochastic cellular bubble-film atlas rather
+   // than sinusoidal stripes. Advect coordinates with the fluid.
+   if(!foamDetailAlpha)foamDetailAlpha=makeFoamDetailAlpha();
+   if(!foamMicroNormal)foamMicroNormal=makeFoamMicroNormal();
+   if(!foamOrganicAtlas){
+    const n=256,pixels=new Uint8Array(n*n*4);
+    for(let j=0;j<n;j++)for(let i=0;i<n;i++){
+     const x=i/n*32,z=j/n*32,q=(j*n+i)*4;
+     pixels[q]=Math.round(255*wwOrganic(x,z));pixels[q+1]=Math.round(255*wwNoise(x*5.7,z*5.7,41));pixels[q+2]=pixels[q];pixels[q+3]=255;
+    }
+    foamOrganicAtlas=new THREE.DataTexture(pixels,n,n,THREE.RGBAFormat);foamOrganicAtlas.wrapS=foamOrganicAtlas.wrapT=THREE.RepeatWrapping;foamOrganicAtlas.minFilter=THREE.LinearMipmapLinearFilter;foamOrganicAtlas.magFilter=THREE.LinearFilter;foamOrganicAtlas.generateMipmaps=true;foamOrganicAtlas.needsUpdate=true;
+   }
+   const materialUV=vec2(mx,mz).div(17.3);
+   const cells=texture(foamDetailAlpha,materialUV).g;
+   const organic=texture(foamOrganicAtlas,vec2(mx,mz).div(32));
    const threshold=b.b.mul(.35).add(b.g.mul(.16)).sub(b.a.mul(.24)).add(.25);
-   const fragment=noise.mul(.65).add(fine.mul(.35)).sub(threshold).mul(4).add(.5).clamp(.04,1).mul(float(.72).add(packed.mul(.28)));
+   const repair=b.a.mul(.55).add(young.mul(.55)).clamp(0,1);
+   const holes=organic.r.mul(.65).add(organic.g.mul(.35)).sub(threshold).mul(5).add(.5).clamp(0,1);
+   const fragment=holes.mul(float(1).sub(repair)).add(repair).mul(float(.72).add(packed.mul(.28))).mul(cells).clamp(.025,1);
    const film=float(1).sub(depth.negate().exp()).mul(active.max(packed.mul(2).clamp(0,1)));
    const volume=float(1).sub(gas.mul(-2.2).mul(foamShaderControls.x).exp()).mul(packed.mul(.84).add(.16)).mul(foamShaderControls.y).mul(fade);
    const opacity=film.max(volume).mul(fragment).mul(c.b).clamp(0,.94);

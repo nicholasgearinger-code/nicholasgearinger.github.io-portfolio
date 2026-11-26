@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.36 Stratified photon reconstruction</title>
+<title>Rift Water Lab · WebGPU 28.5.37 Depth-aware 3D caustic receivers</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.36</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.37</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -150,7 +150,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.36 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.37 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -1201,26 +1201,47 @@ function createUnderwaterReceiver(options){
  if(!enhancedUnderwaterLight||!oceanTSL||!THREE.MeshStandardNodeMaterial||!causticMap)return new THREE.MeshStandardMaterial(options);
  let mat;
  try{
-  const {uniform,float,vec2,vec3,texture,positionWorld,normalWorld,materialEmissive,smoothstep}=oceanTSL;
-  if(!causticObjectUniforms)causticObjectUniforms={origin:uniform(new THREE.Vector2()),controls:uniform(new THREE.Vector4(64,0,1,1))};
+  const {uniform,float,vec2,vec3,texture,positionWorld,normalWorld,materialColor,materialEmissive,smoothstep}=oceanTSL;
+  if(!causticObjectUniforms)causticObjectUniforms={origin:uniform(new THREE.Vector2()),controls:uniform(new THREE.Vector4(64,0,1,1)),floorOrigin:uniform(new THREE.Vector2()),optics:uniform(new THREE.Vector4(0,1,1.2,0))};
   const u=causticObjectUniforms;
-  // Project the focused light in world coordinates, not each object's UVs.
-  // Shift the receiver footprint along the refracted sun direction according to its height above the seabed.
-  const lx=positionWorld.x.sub(0),lz=positionWorld.z;
+  const local=positionWorld.xz.sub(u.floorOrigin);
+  const lx=local.x,lz=local.y;
   const shelf=smoothstep(16,111,vec2(lx.mul(.83),lz.add(11).mul(.92)).length());
-  const floorDepth=float(3.8).add(shelf.mul(27));
-  const height=positionWorld.y.add(floorDepth).max(0).min(30);
-  const projected=positionWorld.xz.add(vec2(.115,.058).mul(height));
+  const floorDepth=float(3.8).add(shelf.mul(27)).add(lx.mul(.085).add(lz.mul(.041)).sin().mul(lz.mul(.072).sub(lx.mul(.028)).cos()).mul(.48).mul(float(1).sub(shelf)));
+  const depth=positionWorld.y.negate().max(0);
+  const height=floorDepth.sub(depth).max(0).min(30);
+  // Follow the refracted sunlight toward the floor, using the receiver's
+  // actual world height rather than stretching the texture over its UVs.
+  const projected=positionWorld.xz.sub(vec2(.326,.163).mul(height));
   const q=projected.sub(u.origin).div(u.controls.x);
   const uv=vec2(q.x.add(.5),float(.5).sub(q.y));
   const edge=uv.min(float(1).sub(uv));
-  const inside=smoothstep(.005,.06,edge.x.min(edge.y));
-  const receiverNormal=normalWorld.normalize();
-  const incidence=receiverNormal.dot(vec3(16,35,8).normalize()).max(0).mul(receiverNormal.y.max(0).pow(.55));
-  const depth=positionWorld.y.negate().max(0);
-  const submerged=smoothstep(.05,.4,depth);
-  const light=texture(causticMap,uv.clamp(.001,.999)).rgb.mul(inside).mul(incidence).mul(submerged).mul(u.controls.y);
-  mat=new THREE.MeshStandardNodeMaterial(options);mat.emissiveNode=materialEmissive.add(light.mul(vec3(.82,.96,1)));
+  const inside=smoothstep(.005,.08,edge.x.min(edge.y));
+  const sx=positionWorld.x.add(depth.mul(.326)),sz=positionWorld.z.add(depth.mul(.163));
+  let xx=float(0),zz=float(0),xz=float(0),surface=float(0);
+  for(const w of waveComponents.concat(opticalRipples)){
+   const phase=sx.mul(w.kx).add(sz.mul(w.kz)).sub(u.optics.x.mul(w.omega)).add(w.phase);
+   const h=phase.sin().mul(w.amplitude).mul(u.optics.y);
+   xx=xx.sub(h.mul(w.kx*w.kx));zz=zz.sub(h.mul(w.kz*w.kz));xz=xz.sub(h.mul(w.kx*w.kz));
+   // A separate wave elevation at the receiver gates surface-piercing objects.
+   const wp=positionWorld.x.mul(w.kx).add(positionWorld.z.mul(w.kz)).sub(u.optics.x.mul(w.omega)).add(w.phase);
+   surface=surface.add(wp.sin().mul(w.amplitude).mul(u.optics.y));
+  }
+  const bend=depth.min(18).mul(1-1/1.333).mul(u.optics.z);
+  const det=float(1).sub(xx.mul(bend)).mul(float(1).sub(zz.mul(bend))).sub(xz.mul(xz).mul(bend).mul(bend));
+  const focus=float(1).sub(det.abs().div(.48).clamp(0,1)).pow(1.5);
+  const analytic=vec3(.93,.99,1).mul(focus).mul(depth.mul(-.055).div(u.controls.z).exp());
+  // Floor photons become a less reliable proxy higher in the water.
+  const floorWeight=inside.mul(height.mul(-.65).exp());
+  const rayLight=texture(causticMap,uv.clamp(.001,.999)).rgb;
+  const light=analytic.mul(float(1).sub(floorWeight)).mul(1.2).add(rayLight.mul(floorWeight));
+  const incidence=normalWorld.normalize().dot(vec3(16,35,8).normalize()).max(0);
+  const submerged=smoothstep(.04,.32,surface.sub(positionWorld.y));
+  const transmission=waveTransmissionTexture?texture(waveTransmissionTexture,uv.clamp(.001,.999)).r:float(1);
+  const visibility=float(1).sub(float(1).sub(transmission).mul(inside).mul(u.optics.w));
+  const irradiance=light.mul(incidence).mul(submerged).mul(visibility).mul(u.controls.y);
+  mat=new THREE.MeshStandardNodeMaterial(options);
+  mat.emissiveNode=materialEmissive.add(irradiance.mul(materialColor.rgb.mul(.65).add(vec3(.35))));
   mat.userData.projectedCaustics=true;return mat;
  }catch(e){mat?.dispose();console.warn('Projected object caustics fallback',e);return new THREE.MeshStandardMaterial(options);}
 }
@@ -1738,7 +1759,7 @@ function updateWaveTransmissionObjects(t){
  }
 }
 
-// 28.5.36: same transmission model in a parallel compute pass.
+// 28.5.37: same transmission model in a parallel compute pass.
 // Keep the existing texture and CPU fallback; no blocking GPU readback.
 let transmissionGPU=null,transmissionGPUStarting=false,transmissionGPUFault='',transmissionGPUFrames=0;
 const transmissionWGSL=`
@@ -1972,7 +1993,7 @@ function updateCausticLighting(cameraDepth=0){
  // represent the same world coordinates; avoid a uniform glow on them.
  for(const material of underwaterObjectMaterials)
   material.emissiveIntensity=causticMode==='wave'?0:emission*.55;
- if(causticObjectUniforms){const u=causticObjectUniforms;u.origin.value.set(Number.isFinite(causticProjectionX)?causticProjectionX:0,Number.isFinite(causticProjectionZ)?causticProjectionZ:0);u.controls.value.set(causticProjectionWidth,enabled&&causticMode==='wave'?emission*.72:0,Math.max(.4,waterClarity),depthAbsorption);}
+ if(causticObjectUniforms){const u=causticObjectUniforms;u.origin.value.set(Number.isFinite(causticProjectionX)?causticProjectionX:0,Number.isFinite(causticProjectionZ)?causticProjectionZ:0);u.controls.value.set(causticProjectionWidth,enabled&&causticMode==='wave'?emission*.72:0,Math.max(.4,waterClarity),depthAbsorption);u.floorOrigin.value.set(waterFloor?.position.x||0,waterFloor?.position.z||0);u.optics.value.set(clockTime,waveHeight,causticFocus,waveTransmissionMaterialActive?1:0);}
 }
 // Static, tileable sand microstructure. Independent UV channel keeps
 // grain detail stationary when the moving caustic projection is recentered.
@@ -6118,7 +6139,7 @@ function makeBoat(){
  outline.lineTo(1.05,-2.2);outline.closePath();
  const hullGeo=new THREE.ExtrudeGeometry(outline,{depth:.55,bevelEnabled:true,bevelThickness:.06,bevelSize:.05,bevelSegments:1});
  hullGeo.rotateX(Math.PI/2);
- const wetMaterial=hullMaterial.clone();wetMaterial.vertexColors=true;
+ const wetMaterial=createUnderwaterReceiver({color:0x815138,roughness:.74,vertexColors:true});
  const wetColors=new Float32Array(hullGeo.attributes.position.count*3).fill(1);hullGeo.setAttribute('color',new THREE.BufferAttribute(wetColors,3).setUsage(THREE.DynamicDrawUsage));
  const hull=new THREE.Mesh(hullGeo,wetMaterial);hull.position.y=.35;boatVisual.add(hull);hullWetMesh=hull;
  const deck=new THREE.Mesh(new THREE.BoxGeometry(1.7,.1,3.55),trim.clone());deck.position.set(0,.38,-.25);boatVisual.add(deck);deckWoodMesh=deck;

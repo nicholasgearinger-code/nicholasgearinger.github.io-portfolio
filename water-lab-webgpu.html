@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.65 Fine photon reconstruction on objects</title>
+<title>Rift Water Lab · WebGPU 28.5.66 Visible object caustic recovery</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.65</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.66</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -152,7 +152,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.65 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.66 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -480,6 +480,7 @@ const tensorCaustics=new URLSearchParams(location.search).has('experimentalTenso
 const improvedObjectCaustics=!new URLSearchParams(location.search).has('legacyObjectCaustics');
 const directionalObjectLight=improvedObjectCaustics&&!new URLSearchParams(location.search).has('noDirectionalObjectLight');
 const detailedObjectPhotons=directionalObjectLight&&!new URLSearchParams(location.search).has('noDetailedObjectPhotons');
+const visibleObjectCaustics=improvedObjectCaustics&&!new URLSearchParams(location.search).has('oldObjectResponse');
 const waterProfiles={
  lagoon:photoOptics?{absorption:[.155,.058,.031],scattering:.026,color:0x2589bc}:{absorption:[.19,.070,.040],scattering:.022,color:0x175e8a},
  coastal:{absorption:[.30,.135,.080],scattering:.043,color:0x285a65},
@@ -1436,7 +1437,7 @@ function createUnderwaterReceiver(options){
    const sideA=n.dot(localSun.add(vec3(.45,0,-.22)).normalize()).max(0);
    const sideB=n.dot(localSun.add(vec3(-.40,0,.28)).normalize()).max(0);
    const angular=direct.mul(.62).add(sideA.add(sideB).mul(.19));
-   incidence=angular.pow(.72);
+   incidence=visibleObjectCaustics?angular.mul(.70).add(n.dot(localSun).add(.55).div(1.55).clamp(0,1).mul(.30)).pow(.65):angular.pow(.72);
    // Keep focused variation rather than a uniform additive wash.
    light=light.mul(light.r.mul(.45).add(.78).clamp(.78,1.65));
   }
@@ -1458,7 +1459,21 @@ function createUnderwaterReceiver(options){
    const facing=smoothstep(.02,.72,receiverCos);
    solid=solid.max(biased.mul(facing)).max(facing.mul(.48));
   }
-  const irradiance=light.mul(spectralTint).mul(incidence).mul(submerged).mul(visibility.pow(.85)).mul(solid).mul(u.controls.y);
+  let irradiance=light.mul(spectralTint).mul(incidence).mul(submerged).mul(visibility.pow(.85)).mul(solid).mul(u.controls.y);
+  if(visibleObjectCaustics){
+   // Surface-piercing rocks were losing nearly all light from shallow
+   // propagation distance plus the product of three visibility terms.
+   // Project the existing resolved floor photon field along the solar ray
+   // onto each actual world-space receiver, with height-dependent confidence.
+   const projectedPeak=rayLight.r.mul(inside).mul(radial);
+   const shape=projectedPeak.mul(1.9).clamp(0,1).pow(1.6);
+   const depthConfidence=height.mul(-.16).exp().mul(.65).add(.35);
+   const facing=receiverCos.add(.65).div(1.65).clamp(0,1).pow(.8);
+   const transport=visibility.mul(.45).add(.55).mul(solid.max(facing.mul(.50)));
+   const wet=smoothstep(-.03,.18,surface.sub(positionWorld.y));
+   const projectedLight=vec3(.98,1,1).mul(shape).mul(depthConfidence).mul(facing).mul(transport).mul(wet).mul(spectralTint).mul(u.controls.y);
+   irradiance=irradiance.mul(1.28).add(projectedLight.mul(1.65));
+  }
   mat=new THREE.MeshStandardNodeMaterial(options);
   if(directionalObjectLight){
    // Diffuse response follows receiver albedo. A restrained view-dependent
@@ -1467,7 +1482,7 @@ function createUnderwaterReceiver(options){
    const halfVector=localSun.add(v).normalize();
    const roughness=Number.isFinite(options.roughness)?options.roughness:.9;
    const spec=n.dot(halfVector).max(0).pow(8+24*(1-roughness)).mul(.10*(1-roughness)+.025);
-   const diffuse=materialColor.rgb.mul(.85).add(vec3(.15));
+   const diffuse=visibleObjectCaustics?materialColor.rgb.mul(.60).add(vec3(.40)):materialColor.rgb.mul(.85).add(vec3(.15));
    mat.emissiveNode=materialEmissive.add(irradiance.mul(diffuse.mul(1.35).add(vec3(spec))));
   }else mat.emissiveNode=materialEmissive.add(irradiance.mul(materialColor.rgb.mul(.40).add(vec3(.60))));
   mat.userData.projectedCaustics=true;return mat;
@@ -2478,7 +2493,8 @@ function updateCausticLighting(cameraDepth=0){
  // This projection is mapped only onto the sand. Rock UVs do not
  // represent the same world coordinates; avoid a uniform glow on them.
  for(const material of underwaterObjectMaterials)
-  material.emissiveIntensity=causticMode==='wave'?0:emission*.55;
+  material.emissiveIntensity=causticMode==='wave'?(visibleObjectCaustics&&material.userData.projectedCaustics?1:0):emission*.55;
+ if(visibleObjectCaustics&&causticMode==='wave')for(const material of underwaterObjectMaterials)if(material.userData.projectedCaustics)material.emissive.set(0x000000);
  if(causticObjectUniforms){const u=causticObjectUniforms;u.origin.value.set(Number.isFinite(causticProjectionX)?causticProjectionX:0,Number.isFinite(causticProjectionZ)?causticProjectionZ:0);u.controls.value.set(causticProjectionWidth,enabled&&causticMode==='wave'?emission*objectCausticStrength:0,Math.max(.4,waterClarity),depthAbsorption);u.floorOrigin.value.set(waterFloor?.position.x||0,waterFloor?.position.z||0);u.optics.value.set(clockTime,waveHeight,causticFocus,waveTransmissionMaterialActive?1:0);}
 }
 // Static, tileable sand microstructure. Independent UV channel keeps
@@ -2715,7 +2731,8 @@ function createSeabed(){
   material.emissive=new THREE.Color(0xb2eee5);
   // World-projected floor texture does not match the rock UVs.
   material.emissiveMap=causticMode==='wave'?null:causticMap;
-  material.emissiveIntensity=causticMode==='wave'?0:.1;
+  material.emissiveIntensity=causticMode==='wave'?(visibleObjectCaustics&&material.userData.projectedCaustics?1:0):.1;
+  if(visibleObjectCaustics&&causticMode==='wave'&&material.userData.projectedCaustics)material.emissive.set(0x000000);
   material.needsUpdate=true;
  }
  scene.add(waterFloor);
@@ -7489,7 +7506,7 @@ function disableVolumeMarch(error){
  volumeMarchFault=String(error?.message||error);volumeMarchActive=false;
  screenLightPipeline.outputNode=volumeMarchBase;screenLightPipeline.needsUpdate=true;
  console.warn('Volume march fallback to existing screen scattering',error);
- status('28.5.65 volumetric fallback: '+volumeMarchFault);
+ status('28.5.66 volumetric fallback: '+volumeMarchFault);
  return true;
 }
 async function initScreenSpaceLighting(){
@@ -7532,7 +7549,7 @@ async function initScreenSpaceLighting(){
   screenBlendColor=blendColor;
   screenSpaceReady=true;
   applyScreenScatteringQuality();
-  status(volumeMarchActive?'28.5.65 fine object photon reconstruction initialized.':'24.7 depth-aware screen-space scattering initialized.');
+  status(volumeMarchActive?'28.5.66 visible object caustic recovery initialized.':'24.7 depth-aware screen-space scattering initialized.');
  }catch(error){
   screenSpaceFault=String(error?.message||error);
   screenSpaceFailed=true;

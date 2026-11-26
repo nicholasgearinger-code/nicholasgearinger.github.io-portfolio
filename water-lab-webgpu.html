@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.13 GPU local guard rings and wake optimization</title>
+<title>Rift Water Lab · WebGPU 28.5.14 GPU caustic ray focusing</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.13</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.14</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -150,7 +150,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.13 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.14 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -1292,6 +1292,120 @@ function syncCausticProjection(force=false){
 // Scatter/refract a low-resolution grid of sunlight rays into a 128²
 // illumination buffer. Concentrating neighboring rays produces thin,
  // linked caustic filaments; no high-cost per-output-pixel Hessian/FFT.
+
+let causticGPU=null,causticGPUStarting=false,causticGPUFault='',causticGPUFrames=0;
+const causticGPUCode=`
+@group(0) @binding(0) var<storage,read> p:array<f32>;
+@group(0) @binding(1) var<storage,read> fft:array<f32>;
+@group(0) @binding(2) var<storage,read_write> energy:array<atomic<u32>>;
+@group(0) @binding(3) var<storage,read_write> result:array<u32>;
+fn spectral(xz:vec2f)->f32{
+ let uv=fract(xz/96.0)*64.0;let ij=vec2u(floor(uv));let f=fract(uv);
+ let x=ij.x%64u;let y=ij.y%64u;let xx=(x+1u)%64u;let yy=(y+1u)%64u;
+ return mix(mix(fft[y*64u+x],fft[y*64u+xx],f.x),mix(fft[yy*64u+x],fft[yy*64u+xx],f.x),f.y);
+}
+fn deposit(k:u32,v:f32){atomicAdd(&energy[k],u32(round(max(0.0,v)*65536.0)));}
+@compute @workgroup_size(8,8)
+fn trace(@builtin(global_invocation_id) id:vec3u){
+ let source=u32(p[0]);if(id.x>=source||id.y>=source){return;}
+ let uv=(vec2f(id.xy)+0.5)/p[0];
+ let world=vec2f(p[1],p[2])+vec2f(uv.x-0.5,0.5-uv.y)*p[3];
+ let dist=length(vec2f(world.x*0.83,(world.y+11.0)*0.92));
+ let t=clamp((dist-16.0)/95.0,0.0,1.0);
+ let depth=max(0.6,3.8+27.0*t*t*(3.0-2.0*t)+0.48*sin(world.x*0.085+world.y*0.041)*cos(world.y*0.072-world.x*0.028)*(1.0-t));
+ var slope=vec2f(0.0);
+ for(var k=0u;k<12u;k++){
+  let q=16u+k*5u;let wave=vec2f(p[q],p[q+1u]);
+  let phase=dot(wave,world)-p[q+2u]*p[4]+p[q+3u];
+  slope+=wave*p[q+4u]*cos(phase);
+ }
+ if(p[7]>0.0){
+  slope+=vec2f(spectral(world+vec2f(0.85,0.0))-spectral(world-vec2f(0.85,0.0)),spectral(world+vec2f(0.0,0.85))-spectral(world-vec2f(0.0,0.85)))*p[7]/1.7;
+ }
+ let shift=min(depth,18.0)*p[5];
+ let hit=(vec2f(world.x-p[1],p[2]-world.y)+slope*shift+vec2f(16.0,8.0)/39.3*depth*0.27)*128.0/p[3]+63.5;
+ let ij=vec2i(floor(hit));if(any(ij<vec2i(1))||any(ij>=vec2i(126))){return;}
+ let f=fract(hit);let k=u32(ij.y*128+ij.x);let e=exp(-depth*p[6])*(128.0/p[0])*(128.0/p[0]);
+ deposit(k,e*(1.0-f.x)*(1.0-f.y));deposit(k+1u,e*f.x*(1.0-f.y));
+ deposit(k+128u,e*(1.0-f.x)*f.y);deposit(k+129u,e*f.x*f.y);
+}
+@compute @workgroup_size(8,8)
+fn shade(@builtin(global_invocation_id) id:vec3u){
+ if(id.x>=128u||id.y>=128u){return;}
+ let k=id.y*128u+id.x;var smooth=0.0;
+ if(id.x>0u&&id.x<127u&&id.y>0u&&id.y<127u){
+  for(var j=-1;j<=1;j++){for(var i=-1;i<=1;i++){
+   let weight=select(1.0,2.0,i==0)*select(1.0,2.0,j==0);
+   smooth+=f32(atomicLoad(&energy[u32(i32(k)+j*128+i)]))*weight/1048576.0;
+  }}
+ }
+ let uv=(vec2f(id.xy)+0.5)/128.0;let border=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
+ let filament=1.0-exp(-max(0.0,smooth-0.80)*1.95);
+ let l=u32(round(clamp(255.0*pow(filament,1.10)*clamp((border-0.012)*14.0,0.0,1.0),0.0,255.0)));
+ result[k]=l|(u32(round(f32(l)*0.96))<<8u)|(u32(round(f32(l)*0.81))<<16u)|0xff000000u;
+}
+`;
+async function initCausticGPU(){
+ if(causticGPU||causticGPUStarting||causticGPUFault||!isWebGPU||new URLSearchParams(location.search).has('cpuCaustics'))return;
+ const d=rendererGPUDevice();if(!d)return;
+ causticGPUStarting=true;
+ try{
+  const m=d.createShaderModule({code:causticGPUCode}),info=await m.getCompilationInfo();
+  if(info.messages.some(v=>v.type==='error'))throw Error(info.messages.filter(v=>v.type==='error').map(v=>v.message).join('; '));
+  const layout=d.createBindGroupLayout({entries:[0,1,2,3].map(binding=>({binding,visibility:GPUShaderStage.COMPUTE,buffer:{type:binding<2?'read-only-storage':'storage'}}))});
+  const pl=d.createPipelineLayout({bindGroupLayouts:[layout]});
+  const trace=await d.createComputePipelineAsync({layout:pl,compute:{module:m,entryPoint:'trace'}});
+  const shade=await d.createComputePipelineAsync({layout:pl,compute:{module:m,entryPoint:'shade'}});
+  const alloc=(size,usage)=>d.createBuffer({size,usage});
+  const input=GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST;
+  const params=alloc(80*4,input),fft=alloc(4096*4,input),energy=alloc(65536,input);
+  const result=alloc(65536,GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC);
+  const stage=alloc(65536,GPUBufferUsage.MAP_READ|GPUBufferUsage.COPY_DST);
+  const group=d.createBindGroup({layout,entries:[params,fft,energy,result].map((buffer,binding)=>({binding,resource:{buffer}}))});
+  causticGPU={d,trace,shade,params,fft,energy,result,stage,group,p:new Float32Array(80),field:new Float32Array(4096),fftFrame:-1,fftOwner:null,pending:false};
+  d.lost.then(()=>{causticGPUFault='device lost';causticGPU=null;});
+ }catch(e){causticGPUFault=String(e?.message||e);console.warn('GPU caustics fallback',e);}
+ finally{causticGPUStarting=false;}
+}
+function dispatchCausticGPU(t){
+ const f=causticGPU;
+ if(!f){void initCausticGPU();return false;}
+ if(f.pending)return true;
+ const cx=causticProjectionX,cz=causticProjectionZ,source=causticDetail,width=causticProjectionWidth;
+ if(!Number.isFinite(cx)||!Number.isFinite(cz))return false;
+ const hasFFT=fftMix>.001&&gpuFFT?.ready&&!fftFault&&Number.isFinite(gpuFFT.rms);
+ const analyticWeight=1-(hasFFT?fftMix*(waveEngine==='fft'?.80:.30):0);
+ const a=f.p;a.set([source,cx,cz,width,t,(1-1/1.333)*causticFocus,(atmospherePreset==='coastal'?.10:.045)/Math.max(.4,waterClarity),hasFFT?fftEnergy*waveHeight*fftMix:0]);
+ const waves=waveComponents.slice(1).concat(opticalRipples);
+ for(let k=0;k<waves.length;k++){const w=waves[k];a.set([w.kx,w.kz,w.omega,w.phase,w.amplitude*waveHeight*(w.amplitude>.04?analyticWeight:1)],16+k*5);}
+ let scoped=false;
+ try{
+  const d=f.d;
+  if(hasFFT&&(f.fftFrame!==gpuFFT.frameCount||f.fftOwner!==gpuFFT)){
+   for(let y=0;y<64;y++)for(let x=0;x<64;x++)f.field[y*64+x]=gpuFFT.sample(x*1.5,y*1.5);
+   d.queue.writeBuffer(f.fft,0,f.field);f.fftFrame=gpuFFT.frameCount;f.fftOwner=gpuFFT;
+  }
+  d.queue.writeBuffer(f.params,0,a);d.pushErrorScope('validation');scoped=true;
+  const enc=d.createCommandEncoder();enc.clearBuffer(f.energy);
+  for(const [pipeline,n] of [[f.trace,Math.ceil(source/8)],[f.shade,16]]){
+   const pass=enc.beginComputePass();pass.setPipeline(pipeline);pass.setBindGroup(0,f.group);pass.dispatchWorkgroups(n,n);pass.end();
+  }
+  enc.copyBufferToBuffer(f.result,0,f.stage,0,65536);d.queue.submit([enc.finish()]);f.pending=true;
+  const validation=d.popErrorScope();scoped=false;
+  Promise.allSettled([validation,f.stage.mapAsync(GPUMapMode.READ)]).then(results=>{
+   if(results[1].status==='rejected')throw results[1].reason;
+   try{
+    if(results[0].status==='rejected')throw results[0].reason;
+    if(results[0].value)throw results[0].value;
+    if(causticGPU===f&&causticMode==='wave'&&source===causticDetail&&cx===causticProjectionX&&cz===causticProjectionZ){
+     causticPixels.set(new Uint8Array(f.stage.getMappedRange()));causticMap.needsUpdate=true;causticGPUFrames++;causticValidated=true;
+    }
+   }finally{f.stage.unmap();}
+  }).catch(e=>{causticGPUFault=String(e?.message||e);causticGPU=null;lastCausticUpdate=-100;console.warn('GPU caustics fallback',e);}).finally(()=>{f.pending=false;});
+  return true;
+ }catch(e){if(scoped)f.d.popErrorScope().catch(()=>{});causticGPUFault=String(e?.message||e);causticGPU=null;return false;}
+}
+
 function updateWaveCausticTexture(t){
  const n=128,width=causticProjectionWidth,source=causticDetail;
  const length=n*n;
@@ -1460,7 +1574,7 @@ function updateWaveTransmissionObjects(t){
  }
 }
 
-// 28.5.13: same transmission model in a parallel compute pass.
+// 28.5.14: same transmission model in a parallel compute pass.
 // Keep the existing texture and CPU fallback; no blocking GPU readback.
 let transmissionGPU=null,transmissionGPUStarting=false,transmissionGPUFault='',transmissionGPUFrames=0;
 const transmissionWGSL=`
@@ -1602,6 +1716,7 @@ function updateCausticTexture(t,force=false){
   if(causticMode==='wave'&&!causticBuild)lastCausticUpdate=t;
   if(causticMode==='off')causticPixels.fill(0);
   else if(causticMode==='classic')updateClassicCausticTexture(t);
+  else if(!force&&!causticGPUFault&&dispatchCausticGPU(t)){causticBuild=null;return;}
   else if(!updateWaveCausticTexture(t))return;
   if(causticMode!=='wave')lastCausticUpdate=t;
   causticMap.needsUpdate=true;
@@ -6747,7 +6862,7 @@ async function init3D(forceWebGL=false){
   const now=performance.now();
   if(now-last>1100){
    const measured=samples*1000/(now-last);
-   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · device '+(fluid3?.shared&&gpuFFT?.shared?'shared':fluid3?.shared?'fluid shared':'separate')+' · mesh '+(offshoreGPU?'GPU rings '+offshoreGPU.cutoff+'m / CPU interaction':offshoreGPUFault?'CPU fallback':'CPU')+' · FFT '+(offshoreGPU?.directAttached&&gpuFFT?.renderFrames>0&&!gpuFFT?.renderFault?'direct GPU':'CPU bridge')+' · foam '+(foamSkin?.material?.userData?.gpuFoamSkin?'GPU shader':'CPU texture')+' · aeration '+(turbulenceGPUFault?'CPU fallback':turbulenceGPUFrames?(turbulenceGPU?.resident?'GPU resident ':'GPU hybrid ')+turbulenceGPUFrames:'CPU')+' / '+turbulencePeak.toFixed(2)+' · sunlight '+(transmissionGPUFault?'CPU fallback':transmissionGPUFrames?'GPU '+transmissionGPUFrames:'CPU')+' · topology '+(turbulenceGPUFault?'CPU fallback':topologyGPUFrames?'GPU validated '+topologyGPUFrames:gpuTopologyEnabled?'GPU pending / CPU':'CPU')+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · rock waves '+(owPeak*100).toFixed(1)+' cm · run-up '+(runupPeak*100).toFixed(0)+' cm / '+runupSpills+' spills · hull wall '+hullWaveCells+' / '+hullClipCount+' clipped · hull splashes '+hullSplashHits+' · hull run-up '+(hullRunupPeak*100).toFixed(0)+' cm / '+hullOvertops+' spills · sheet '+hullSheetCells+' cells / '+hullSheetTears+' tears · hull APIC '+(hullAPFault?'fallback':hullAP?(hullGPUFrames&&!hullGPUFault?'GPU ':'CPU ')+hullAP.particles.length+'p / '+hullAPContacts+' contacts / '+hullAPReturns+' returns':'idle')+' · AP load '+Math.hypot(hullReaction.x,hullReaction.y,hullReaction.z).toFixed(0)+' N · deck '+deckMass.toFixed(1)+' kg / '+deckFlowPeak.toFixed(2)+' m/s / '+deckSpills+' drains · screen hull '+hullVolumeTriangles+' tris / '+(hullDensityFrames&&!hullDensityFault?'GPU density':'CPU density')+' / '+(hullScreenFault?'mesh fallback':hullScreenFrames?'SS normals '+hullScreenFrames:'SS idle')+' · rock eddies '+objectVortexCount+' · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?(apGPUFrames&&!apGPUFault?'GPU ':'CPU ')+apGrid.particles.length+'p '+(apGPUFrames&&!apGPUFault?apGPUFrames+' steps · mesh '+rcTriangles+' tris · '+(rcGPUFrames&&!rcGPUFault?'GPU density':'CPU density')+(rcThicknessEnabled?' · SS thickness':'')+(whitewaterVolumeEnabled?' · WW '+(wwGPUFrames&&!wwGPUFault?'GPU':'CPU'):''):apStats.after.toFixed(2)+' div'):'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
+   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · device '+(fluid3?.shared&&gpuFFT?.shared?'shared':fluid3?.shared?'fluid shared':'separate')+' · mesh '+(offshoreGPU?'GPU rings '+offshoreGPU.cutoff+'m / CPU interaction':offshoreGPUFault?'CPU fallback':'CPU')+' · FFT '+(offshoreGPU?.directAttached&&gpuFFT?.renderFrames>0&&!gpuFFT?.renderFault?'direct GPU':'CPU bridge')+' · foam '+(foamSkin?.material?.userData?.gpuFoamSkin?'GPU shader':'CPU texture')+' · aeration '+(turbulenceGPUFault?'CPU fallback':turbulenceGPUFrames?(turbulenceGPU?.resident?'GPU resident ':'GPU hybrid ')+turbulenceGPUFrames:'CPU')+' / '+turbulencePeak.toFixed(2)+' · caustics '+(causticGPUFault?'CPU fallback':causticGPUFrames?'GPU '+causticGPUFrames:'CPU')+' · sunlight '+(transmissionGPUFault?'CPU fallback':transmissionGPUFrames?'GPU '+transmissionGPUFrames:'CPU')+' · topology '+(turbulenceGPUFault?'CPU fallback':topologyGPUFrames?'GPU validated '+topologyGPUFrames:gpuTopologyEnabled?'GPU pending / CPU':'CPU')+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · rock waves '+(owPeak*100).toFixed(1)+' cm · run-up '+(runupPeak*100).toFixed(0)+' cm / '+runupSpills+' spills · hull wall '+hullWaveCells+' / '+hullClipCount+' clipped · hull splashes '+hullSplashHits+' · hull run-up '+(hullRunupPeak*100).toFixed(0)+' cm / '+hullOvertops+' spills · sheet '+hullSheetCells+' cells / '+hullSheetTears+' tears · hull APIC '+(hullAPFault?'fallback':hullAP?(hullGPUFrames&&!hullGPUFault?'GPU ':'CPU ')+hullAP.particles.length+'p / '+hullAPContacts+' contacts / '+hullAPReturns+' returns':'idle')+' · AP load '+Math.hypot(hullReaction.x,hullReaction.y,hullReaction.z).toFixed(0)+' N · deck '+deckMass.toFixed(1)+' kg / '+deckFlowPeak.toFixed(2)+' m/s / '+deckSpills+' drains · screen hull '+hullVolumeTriangles+' tris / '+(hullDensityFrames&&!hullDensityFault?'GPU density':'CPU density')+' / '+(hullScreenFault?'mesh fallback':hullScreenFrames?'SS normals '+hullScreenFrames:'SS idle')+' · rock eddies '+objectVortexCount+' · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?(apGPUFrames&&!apGPUFault?'GPU ':'CPU ')+apGrid.particles.length+'p '+(apGPUFrames&&!apGPUFault?apGPUFrames+' steps · mesh '+rcTriangles+' tris · '+(rcGPUFrames&&!rcGPUFault?'GPU density':'CPU density')+(rcThicknessEnabled?' · SS thickness':'')+(whitewaterVolumeEnabled?' · WW '+(wwGPUFrames&&!wwGPUFault?'GPU':'CPU'):''):apStats.after.toFixed(2)+' div'):'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
    $('fps').textContent='FPS: '+Math.round(measured);
    const avg=k=>(profile[k]/Math.max(1,profile.count)).toFixed(1);
    const ph=$('frameProfile');if(ph)ph.textContent='ms/frame: '+avg('total')+' | physics '+avg('physics')+' | aeration '+avg('aeration')+' | mesh '+avg('geometry')+' | foam '+avg('foam')+' | lighting/other '+avg('lighting')+' | render submit '+avg('submit')+' | queue drain '+(profile.queueCount?(profile.queue/profile.queueCount).toFixed(1)+' ms':'—')+' (not GPU timer)';

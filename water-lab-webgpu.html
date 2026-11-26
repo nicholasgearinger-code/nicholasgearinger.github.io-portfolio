@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.24 Continuous bright caustics and underwater capture cleanup</title>
+<title>Rift Water Lab · WebGPU 28.5.25 Organic branching caustics and blue distance extinction</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.24</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.25</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -150,7 +150,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.24 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.25 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -461,7 +461,7 @@ let floorCausticMaterial=null,underwaterObjectMaterials=[],underwaterBackgroundC
 let underwaterPathOptics=null,causticObjectUniforms=null,undersideLensControls=null;
 const enhancedUnderwaterLight=!new URLSearchParams(location.search).has('classicUnderwater');
 const waterProfiles={
- lagoon:{absorption:[.19,.070,.040],scattering:.022,color:0x175b67},
+ lagoon:{absorption:[.19,.070,.040],scattering:.022,color:0x124e73},
  coastal:{absorption:[.30,.135,.080],scattering:.043,color:0x285a65},
  deep:{absorption:[.28,.13,.040],scattering:.029,color:0x103f66}
 };
@@ -987,7 +987,7 @@ function updateUnderwaterScattering(){
      (.50+.50*underwaterScatter)*Math.max(.15,distanceExtinction);
    const depthFactor=1+Math.min(1.5,depth*.035*depthAbsorption)+opticalAir*1.6;
    underwaterFog.density=Math.max(.00005,Math.min(.14,
-     targetDensity*.90*depthFactor*Math.pow(underwaterBlend,1.5)/clarity));
+     targetDensity*1.10*depthFactor*Math.pow(underwaterBlend,1.5)/clarity));
   }else{
    underwaterFog.density=Math.max(.00005,Math.min(.22,
      (extinction+opticalAir*.065)*Math.max(.04,underwaterBlend)/clarity));
@@ -1682,7 +1682,7 @@ function updateWaveTransmissionObjects(t){
  }
 }
 
-// 28.5.24: same transmission model in a parallel compute pass.
+// 28.5.25: same transmission model in a parallel compute pass.
 // Keep the existing texture and CPU fallback; no blocking GPU readback.
 let transmissionGPU=null,transmissionGPUStarting=false,transmissionGPUFault='',transmissionGPUFrames=0;
 const transmissionWGSL=`
@@ -1961,13 +1961,17 @@ function setupContinuousFloor(mat,detail){
   const a=x.mul(2.1).add(z.mul(.72)).add(warp).sub(t.mul(1.25)).cos();
   const b=z.mul(2.45).sub(x.mul(.84)).add(warp.mul(.8)).add(t.mul(.91)).cos();
   const c=x.mul(1.35).sub(z.mul(1.62)).sub(t.mul(.76)).cos();
-  const fold=a.add(b).add(c.mul(.65));
-  const ribbon=float(1).sub(fold.abs().div(.55).clamp(0,1)).pow(1.6);
-  const outer=vec3(.82,.96,1).mul(ribbon).mul(depth.mul(-.055).div(controls.w).exp()).mul(1.25);
+  const ripple=x.mul(5.7).add(z.mul(3.8)).add(warp.mul(2)).sub(t.mul(2.1)).sin();
+  const cross=z.mul(4.9).sub(x.mul(3.3)).add(t.mul(1.7)).sin();
+  const fold=a.add(b).add(c.mul(.65)).add(ripple.mul(.22)).add(cross.mul(.16));
+  const width=ripple.mul(.12).add(.39);
+  const ribbon=float(1).sub(fold.abs().div(width).clamp(0,1)).pow(1.35);
+  const branches=float(1).sub(fold.add(cross.mul(.38)).abs().div(.23).clamp(0,1)).pow(2).mul(c.mul(.5).add(.5));
+  const outer=vec3(.82,.96,1).mul(ribbon.mul(ripple.mul(.24).add(.76)).add(branches.mul(.35))).mul(depth.mul(-.055).div(controls.w).exp()).mul(1.35);
   // Retain a continuous optical network even where the sparse ray field is dark.
   const light=outer.mul(.82).add(local.mul(localMask).mul(1.35));
   const sandA=texture(detail.albedo,xz.div(5.5)).r;
-  const grain=sandA.mul(.17).add(.83);
+  const grain=sandA.mul(.29).add(.71);
   const transmission=texture(waveTransmissionTexture,uv.clamp(.001,.999)).r;
   const shaded=float(1).sub(float(1).sub(transmission).mul(localMask).mul(shadow));
   mat.colorNode=materialColor.rgb.mul(grain).mul(shaded);
@@ -2004,7 +2008,7 @@ function createSeabed(){
   const sandUV=new Float32Array(a.count*2);
   for(let i=0;i<a.count;i++){sandUV[i*2]=a.getX(i)/5.5;sandUV[i*2+1]=-a.getZ(i)/5.5;}
   geo.setAttribute('uv1',new THREE.BufferAttribute(sandUV,2));
-  const detail=makeSeabedDetail();mat.normalMap=detail.normal;mat.normalScale.set(.23,.23);
+  const detail=makeSeabedDetail();mat.normalMap=detail.normal;mat.normalScale.set(.34,.34);
   // The transmission map occupies the base-color slot; use a separate
   // ambient-occlusion texture for subtle sand grain without replacing it.
   detail.albedo.colorSpace=THREE.NoColorSpace;mat.aoMap=detail.albedo;mat.aoMapIntensity=.20;

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.15 Underwater spectral optics and projected caustics</title>
+<title>Rift Water Lab · WebGPU 28.5.16 Dual caustics and underwater wave lensing</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.15</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.16</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -150,7 +150,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.15 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.16 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -371,8 +371,41 @@ function createOceanMaterial(options){
   const eyeTransmission=underwaterPathOptics.xyz.mul(eyePath).negate().exp();
   const opticalFog=vec3(.025,.16,.22).mul(float(1).sub(eyePath.mul(underwaterPathOptics.w).negate().exp()));
   const reflected=enhancedUnderwaterLight?radiance.mul(eyeTransmission).add(opticalFog):radiance;
+  // Separate underside lens field: broad curvature cells, evaluated directly
+  // on the moving interface. No CPU texture, extra mesh or render pass.
+  undersideLensControls=uniform(new THREE.Vector4(waveHeight,.65,1,1));
+  const {Fn,If,vec4}=oceanTSL;
+  const lensGlow=Fn(()=>{
+   const result=vec3(0).toVar();
+   If(wet.greaterThan(.002),()=>{
+    const xx=float(0).toVar(),zz=float(0).toVar(),xz=float(0).toVar();
+    // Use the longer and intermediate components of the actual ocean spectrum.
+    for(const w of waveComponents){
+     if(w.amplitude<.06)continue;
+     const phase=x.mul(w.kx).add(z.mul(w.kz)).sub(time.mul(w.omega)).add(w.phase);
+     const curvature=phase.sin().negate().mul(w.amplitude).mul(undersideLensControls.x);
+     xx.addAssign(curvature.mul(w.kx*w.kx));zz.addAssign(curvature.mul(w.kz*w.kz));xz.addAssign(curvature.mul(w.kx*w.kz));
+    }
+    // Bounded lens Jacobian, with a broad shoulder instead of a singular focus.
+    const bend=undersideLensControls.y.mul(3.8);
+    const determinant=float(1).add(xx.mul(bend)).mul(float(1).add(zz.mul(bend))).sub(xz.mul(xz).mul(bend).mul(bend));
+    const focus=float(1).div(determinant.abs().max(.30)).sub(.77).max(0);
+    const broad=float(1).sub(focus.mul(-1.25).exp());
+    // Fine refracted glints follow the moving surface normal; broad cells
+    // remain the dominant structure rather than a repeating line texture.
+    const facet=microNormal.dot(sun).abs().clamp(0,1).pow(5);
+    const rim=oceanTSL.smoothstep(.12,.74,slope).mul(.16);
+    const upward=oceanTSL.smoothstep(.02,.48,v.y.negate());
+    const window=float(1).sub(reflectance).mul(.72).add(reflectance.mul(.28));
+    const illumination=broad.mul(.72).add(broad.mul(facet).mul(.24)).add(rim).mul(window);
+    const depthFade=oceanAngleDepth.mul(-.035).exp();
+    const spectral=vec3(.18,.74,1).mul(eyeTransmission);
+    result.assign(spectral.mul(illumination).mul(upward).mul(wet).mul(depthFade).mul(undersideLensControls.z).mul(undersideLensControls.w));
+   });
+   return result;
+  })();
   mat.emissiveNode=materialEmissive.add(reflected.mul(reflectance).mul(wet))
-   .add(vec3(1,.96,.88).mul(glint)).add(vec3(.045,.33,.38).mul(thin));
+   .add(vec3(1,.96,.88).mul(glint)).add(vec3(.045,.33,.38).mul(thin)).add(lensGlow);
   return mat;
  }catch(e){mat?.dispose();console.warn('Angle optics fallback:',e);return new THREE.MeshPhysicalMaterial(options);}
 }
@@ -394,7 +427,7 @@ let undersideMode='enhanced',underwaterRefraction=1.10,underwaterFresnel=1,
 let lastUndersideMix=-1,underwaterSunlight=null,underwaterAmbient=null,clockDelta=1/60;
 let underwaterLensing=1,lastWaveLensUpdate=-100,waveLensFactor=1;
 let floorCausticMaterial=null,underwaterObjectMaterials=[],underwaterBackgroundColor=null;
-let underwaterPathOptics=null,causticObjectUniforms=null;
+let underwaterPathOptics=null,causticObjectUniforms=null,undersideLensControls=null;
 const enhancedUnderwaterLight=!new URLSearchParams(location.search).has('classicUnderwater');
 const waterProfiles={
  lagoon:{absorption:[.19,.070,.040],scattering:.022,color:0x175b67},
@@ -909,8 +942,8 @@ function updateUnderwaterScattering(){
   // No permanent bright color floor: ambient light fades with depth.
   underwaterBackgroundColor.lerp(tint,.16*waterTransmittance(depth,.085,clarity));
   // Deep water receives progressively less downwelling diffuse irradiance.
-  if(enhancedUnderwaterLight)underwaterBackgroundColor.multiplyScalar(Math.exp(-depth*.035*Math.max(0,depthAbsorption)/clarity));
-  const haze=Math.min(.23,opticalAir*.36)*waterTransmittance(depth,.12,clarity);
+  if(enhancedUnderwaterLight)underwaterBackgroundColor.multiplyScalar(Math.exp(-depth*.022*Math.max(0,depthAbsorption)/clarity));
+  const haze=Math.min(.16,opticalAir*.26)*waterTransmittance(depth,.11,clarity);
   underwaterBackgroundColor.r+=haze*.42;underwaterBackgroundColor.g+=haze*.72;underwaterBackgroundColor.b+=haze*.80;
   underwaterFog.color.set(0x9bcddf).lerp(underwaterBackgroundColor,underwaterBlend);
   // FogExp2 density increases smoothly with depth and suspended haze.
@@ -922,8 +955,8 @@ function updateUnderwaterScattering(){
    const targetDensity=(1/Math.max(8,visibilityRange))*
      (.50+.50*underwaterScatter)*Math.max(.15,distanceExtinction);
    const depthFactor=1+Math.min(1.5,depth*.035*depthAbsorption)+opticalAir*1.6;
-   underwaterFog.density=Math.max(.00005,Math.min(.18,
-     targetDensity*depthFactor*Math.pow(underwaterBlend,1.5)/clarity));
+   underwaterFog.density=Math.max(.00005,Math.min(.14,
+     targetDensity*.90*depthFactor*Math.pow(underwaterBlend,1.5)/clarity));
   }else{
    underwaterFog.density=Math.max(.00005,Math.min(.22,
      (extinction+opticalAir*.065)*Math.max(.04,underwaterBlend)/clarity));
@@ -951,6 +984,7 @@ function updateUndersideOptics(){
  const blend=enhanced?underwaterBlend:0;
  if(oceanAngleBlend){oceanAngleBlend.value=blend*Math.min(1,underwaterFresnel);oceanAngleDepth.value=opticalDepth;}
  if(underwaterPathOptics){const p=waterProfiles[atmospherePreset]||waterProfiles.lagoon,c=Math.max(.4,waterClarity),a=depthAbsorption/c;underwaterPathOptics.value.set(p.absorption[0]*a,p.absorption[1]*a,p.absorption[2]*a,p.scattering*underwaterScatter/c);}
+ if(undersideLensControls)undersideLensControls.value.set(waveHeight,.65,Math.min(1.6,underwaterLensing*underwaterTransmission),enhancedUnderwaterLight&&atmospherePreset!=='off'?1:0);
  if(oceanGlintControls)oceanGlintControls.value.set(clockTime,reflectionMode==='enhanced'?surfaceGlitter*reflectionStrength:0,fineRipple*windRipples,subsurfaceLight);
  if(oceanRoughnessControls)oceanRoughnessControls.value.set(windRipples,blend,1);
  if(oceanColumnSigma&&oceanColumnEnabled){const p=waterOpticalProfile();oceanColumnSigma.value=p.sigma[0]*.2126+p.sigma[1]*.7152+p.sigma[2]*.0722+.065/Math.max(.4,waterClarity);oceanColumnEnabled.value=opticalMode==='legacy'?0:1;}
@@ -1148,7 +1182,8 @@ function createUnderwaterReceiver(options){
   const uv=vec2(q.x.add(.5),float(.5).sub(q.y));
   const edge=uv.min(float(1).sub(uv));
   const inside=smoothstep(.005,.06,edge.x.min(edge.y));
-  const incidence=normalWorld.normalize().dot(vec3(16,35,8).normalize()).max(0);
+  const receiverNormal=normalWorld.normalize();
+  const incidence=receiverNormal.dot(vec3(16,35,8).normalize()).max(0).mul(receiverNormal.y.max(0).pow(.55));
   const depth=positionWorld.y.negate().max(0);
   const submerged=smoothstep(.05,.4,depth);
   const light=texture(causticMap,uv.clamp(.001,.999)).rgb.mul(inside).mul(incidence).mul(submerged).mul(u.controls.y);
@@ -1378,8 +1413,8 @@ fn shade(@builtin(global_invocation_id) id:vec3u){
   }}
  }
  let uv=(vec2f(id.xy)+0.5)/128.0;let border=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
- let filament=1.0-exp(-max(0.0,smooth-0.80)*1.95);
- let l=u32(round(clamp(255.0*pow(filament,1.10)*clamp((border-0.012)*14.0,0.0,1.0),0.0,255.0)));
+ let filament=1.0-exp(-max(0.0,smooth-0.72)*2.45);
+ let l=u32(round(clamp(255.0*pow(filament,1.28)*clamp((border-0.012)*14.0,0.0,1.0),0.0,255.0)));
  result[k]=l|(u32(round(f32(l)*0.96))<<8u)|(u32(round(f32(l)*0.81))<<16u)|0xff000000u;
 }
 `;
@@ -1524,11 +1559,11 @@ function updateWaveCausticTexture(t){
     (filtered[i-n]+2*filtered[i]+filtered[i+n])*.25:0;
   // Ray conservation: ~1 represents no focusing. Only convergent
   // bands remain bright; background stays dark.
-  const extra=Math.max(0,smooth-.80);
-  const filament=1-Math.exp(-extra*1.95);
+  const extra=Math.max(0,smooth-.72);
+  const filament=1-Math.exp(-extra*2.45);
   const border=Math.min(u,1-u,v,1-v);
   const feather=Math.max(0,Math.min(1,(border-.012)*14));
-  const light=Math.round(Math.min(255,255*Math.pow(filament,1.10)*feather));
+  const light=Math.round(Math.min(255,255*Math.pow(filament,1.28)*feather));
   const p=i*4;
   causticPixels[p]=light;causticPixels[p+1]=Math.round(light*.96);
   causticPixels[p+2]=Math.round(light*.81);causticPixels[p+3]=255;
@@ -1613,7 +1648,7 @@ function updateWaveTransmissionObjects(t){
  }
 }
 
-// 28.5.15: same transmission model in a parallel compute pass.
+// 28.5.16: same transmission model in a parallel compute pass.
 // Keep the existing texture and CPU fallback; no blocking GPU readback.
 let transmissionGPU=null,transmissionGPUStarting=false,transmissionGPUFault='',transmissionGPUFrames=0;
 const transmissionWGSL=`
@@ -6691,7 +6726,7 @@ async function init3D(forceWebGL=false){
  const backend=forceWebGL?'WebGLRenderer':renderer.backend?.constructor?.name||'WebGPU (unknown backend)';
  isWebGPU=!forceWebGL&&/webgpu/i.test(backend);
  oceanTSL=null;oceanAngleBlend=null;oceanAngleDepth=null;oceanColumnSigma=null;oceanColumnEnabled=null;oceanGlintControls=null;oceanRoughnessControls=null;
- underwaterMirror=null;mirrorCamera=null;mirrorMatrix=null;mirrorWeight=null;mirrorFailed=false;mirrorLast=-100;underwaterPathOptics=null;causticObjectUniforms=null;
+ underwaterMirror=null;mirrorCamera=null;mirrorMatrix=null;mirrorWeight=null;mirrorFailed=false;mirrorLast=-100;underwaterPathOptics=null;causticObjectUniforms=null;undersideLensControls=null;
  if(isWebGPU&&!safeStartup&&!new URLSearchParams(location.search).has('classicOptics')){
   try{oceanTSL=await import('three/tsl');}catch(e){console.warn('Angle optics unavailable',e);}
  }

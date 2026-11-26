@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.60 Shared fine-scale caustic optics</title>
+<title>Rift Water Lab · WebGPU 28.5.61 Dynamic optical compression and stretching</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.60</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.61</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -152,7 +152,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.60 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.61 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -476,6 +476,7 @@ const photoOptics=!new URLSearchParams(location.search).has('legacyPhotoOptics')
 const recoveredRadiance=!new URLSearchParams(location.search).has('legacyRadiance');
 const multiscaleRadiance=!new URLSearchParams(location.search).has('baselineRadiance');
 const fineCausticOptics=!new URLSearchParams(location.search).has('noFineCaustics');
+const tensorCaustics=!new URLSearchParams(location.search).has('noTensorCaustics');
 const waterProfiles={
  lagoon:photoOptics?{absorption:[.155,.058,.031],scattering:.026,color:0x2589bc}:{absorption:[.19,.070,.040],scattering:.022,color:0x175e8a},
  coastal:{absorption:[.30,.135,.080],scattering:.043,color:0x285a65},
@@ -1286,6 +1287,32 @@ function fineCausticRadiance(sx,sz,t,amplitude,bend,a,b,shear,warpX,warpZ,det,so
  const fade=float(1).sub(smoothstep(5,23,eyeDistance)).mul(float(1).sub(softDepth.mul(.80)));
  return detail.sub(base).mul(.24).add(base.mul(detail).mul(.23)).mul(fade);
 }
+// Principal stretches of the symmetric surface-to-receiver Jacobian.
+// A fold forms when one principal stretch approaches zero; a cusp-like
+// concentration occurs when both stretches are small. Finite angular width
+// regularizes the inverse area and prevents singular radiance.
+function tensorCausticResponse(a,b,shear,softDepth,eyeDistance){
+ const {float,smoothstep}=oceanTSL;
+ const mean=a.add(b).mul(.5);
+ const halfDifference=a.sub(b).mul(.5);
+ const radius=halfDifference.mul(halfDifference).add(shear.mul(shear)).add(.00001).sqrt();
+ const e1=mean.add(radius).abs(),e2=mean.sub(radius).abs();
+ const compressed=e1.min(e2),stretched=e1.max(e2);
+ const distanceFade=smoothstep(6,35,eyeDistance);
+ const width=softDepth.mul(.14).add(distanceFade.mul(.085)).add(.075);
+ const narrow=compressed.mul(compressed).add(width.mul(width)).sqrt();
+ const wide=stretched.mul(stretched).add(width.mul(width)).sqrt();
+ const flux=float(1).div(narrow.mul(wide).max(.018)).sub(.92).max(0);
+ const fold=float(1).sub(compressed.div(width.mul(2.2)).clamp(0,1)).pow(1.65);
+ const anisotropy=stretched.sub(compressed).div(stretched.add(compressed).add(.12)).clamp(0,1);
+ const convergence=float(1).sub(smoothstep(.20,.85,stretched));
+ const intensity=float(1).sub(flux.mul(-.22).exp());
+ const filament=fold.mul(anisotropy.mul(.60).add(.40)).mul(intensity).mul(1.65);
+ const knot=fold.mul(convergence).mul(intensity).mul(.85);
+ const pool=float(1).sub(flux.mul(-.075).exp()).mul(.38);
+ const expansion=smoothstep(.95,2.2,compressed).mul(.22);
+ return {radiance:filament.add(knot).add(pool).mul(float(1).sub(distanceFade.mul(.45))),expansion};
+}
 function createUnderwaterReceiver(options){
  if(!enhancedUnderwaterLight||!oceanTSL||!THREE.MeshStandardNodeMaterial||!causticMap)return new THREE.MeshStandardMaterial(options);
  let mat;
@@ -1350,6 +1377,11 @@ function createUnderwaterReceiver(options){
    const eyeDistance=oceanTSL.cameraPosition.sub(positionWorld).length();
    const detail=fineCausticRadiance(sx,sz,u.optics.x,u.optics.y,bend,a,b,shear,warpX,warpZ,detailedDet,softDepth,eyeDistance);
    analytic=analytic.add(vec3(.98,1,1).mul(detail).mul(depth.mul(-.055).div(u.controls.z).exp())).max(vec3(0));
+  }
+  if(tensorCaustics){
+   const shape=tensorCausticResponse(float(1).sub(fineXX.mul(bend)),float(1).sub(fineZZ.mul(bend)),fineXZ.mul(bend),softDepth,oceanTSL.cameraPosition.sub(positionWorld).length());
+   const energy=vec3(.98,1,1).mul(shape.radiance).mul(depth.mul(-.055).div(u.controls.z).exp());
+   analytic=analytic.mul(float(.72).sub(shape.expansion)).add(energy.mul(.80));
   }
   // Floor photons become a less reliable proxy higher in the water.
   // Match the floor's radial transition, so receivers do not reveal the square photon tile.
@@ -2543,6 +2575,13 @@ function setupContinuousFloor(mat,detail){
      light=light.add(vec3(.98,1,1).mul(micro).mul(.78).mul(depth.mul(-.055).div(controls.w).exp())).max(vec3(0));
     }
    }
+  }
+  if(tensorCaustics&&recoveredRadiance){
+   const shape=tensorCausticResponse(float(1).sub(xx.mul(bend)),float(1).sub(zz.mul(bend)),xzCurvature.mul(bend),softDepth,eyeDistance);
+   const energy=vec3(.98,1,1).mul(shape.radiance).mul(envelope.mul(.35).add(.65)).mul(depth.mul(-.055).div(controls.w).exp());
+   // Deliberately stronger redistribution than the micro-detail passes:
+   // retain the baseline but replace part of its broad response with folds.
+   light=light.mul(float(.68).sub(shape.expansion)).add(energy.mul(1.15));
   }
   const sandA=texture(detail.albedo,xz.div(5.5)).r;
   const grain=sandA.mul(.24).add(.76);
@@ -7380,7 +7419,7 @@ function disableVolumeMarch(error){
  volumeMarchFault=String(error?.message||error);volumeMarchActive=false;
  screenLightPipeline.outputNode=volumeMarchBase;screenLightPipeline.needsUpdate=true;
  console.warn('Volume march fallback to existing screen scattering',error);
- status('28.5.60 volumetric fallback: '+volumeMarchFault);
+ status('28.5.61 volumetric fallback: '+volumeMarchFault);
  return true;
 }
 async function initScreenSpaceLighting(){
@@ -7423,7 +7462,7 @@ async function initScreenSpaceLighting(){
   screenBlendColor=blendColor;
   screenSpaceReady=true;
   applyScreenScatteringQuality();
-  status(volumeMarchActive?'28.5.60 shared fine-scale caustic optics initialized.':'24.7 depth-aware screen-space scattering initialized.');
+  status(volumeMarchActive?'28.5.61 dynamic optical compression initialized.':'24.7 depth-aware screen-space scattering initialized.');
  }catch(error){
   screenSpaceFault=String(error?.message||error);
   screenSpaceFailed=true;

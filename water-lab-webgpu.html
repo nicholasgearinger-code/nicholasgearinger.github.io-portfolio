@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.3.8 directional sunlight glitter and translucent crests</title>
+<title>Rift Water Lab · WebGPU 28.3.9 shared cloud reflections and dynamic roughness</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.3.8</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.3.9</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.3.8 · sunlight and crest optics</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.3.9 · sky reflection optics</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -230,7 +230,7 @@ let foamMesh=null,foamPositions=null,foamColors=null,foamCapacity=280,foamStreng
 let surfaceNormalMap=null,surfaceFineNormalMap=null,reflectionEnvironment=null;
 let surfaceDetail=.90,surfaceGlitter=1.0,fineRipple=.45,reflectionMode='enhanced';
 let waterNearMaterial=null,waterFarMaterial=null;
-let oceanTSL=null,oceanAngleBlend=null,oceanAngleDepth=null,oceanColumnSigma=null,oceanColumnEnabled=null,oceanGlintControls=null;
+let oceanTSL=null,oceanAngleBlend=null,oceanAngleDepth=null,oceanColumnSigma=null,oceanColumnEnabled=null,oceanGlintControls=null,oceanRoughnessControls=null;
 let underwaterMirror=null,mirrorCamera=null,mirrorMatrix=null,mirrorWeight=null,mirrorLast=-100,mirrorFailed=false;
 function setupUnderwaterMirror(){
  if(underwaterMirror||mirrorFailed||!oceanTSL||new URLSearchParams(location.search).has('noMirror'))return;
@@ -342,7 +342,16 @@ function createOceanMaterial(options){
   const vh=v.dot(halfVector).clamp(0,1);
   const f=float(.02037).add(float(.97963).mul(float(1).sub(vh).pow(5)));
   // Broadens unresolved glints offshore to reduce temporal aliasing.
-  const alpha=float(.055).add(float(1).sub(detailFade).mul(.085));
+  oceanRoughnessControls=uniform(new THREE.Vector3(windRipples,underwaterBlend,1));
+  const slope=float(1).sub(n.y.abs().clamp(0,1));
+  const microVariance=microX.mul(microX).add(microZ.mul(microZ)).clamp(0,1);
+  const wind=oceanRoughnessControls.x.clamp(0,2);
+  const physicalRoughness=float(.047).add(wind.mul(.025)).add(slope.mul(.085))
+   .add(microVariance.mul(detailFade).mul(wind).mul(.018))
+   .add(float(1).sub(detailFade).mul(.055))
+   .add(oceanRoughnessControls.y.mul(.022)).clamp(.045,.24);
+  mat.roughnessNode=physicalRoughness;
+  const alpha=physicalRoughness;
   const a2=alpha.mul(alpha);
   const denom=nh.mul(nh).mul(a2.sub(1)).add(1);
   const distribution=a2.div(denom.mul(denom).mul(Math.PI).max(.000001));
@@ -505,6 +514,26 @@ function createWaveNormalMap(fine=false){
 // image-based reflections to MeshPhysicalMaterial. Its colors are tied
 // to the same sun and atmosphere palette as the visible sky dome.
 // It is computed once on the CPU, not updated every frame.
+// Shared direction-space sky radiance for visible sky and reflected sky.
+function oceanSkyRadiance(dx,sy,dz){
+ const sat=x=>Math.max(0,Math.min(1,x)),mix=(a,b,t)=>a+(b-a)*t;
+ const up=sat(sy),p=Math.pow(up,.55);
+ let r=mix(.65,.16,p),g=mix(.82,.42,p),b=mix(.91,.75,p);
+ // Continuous 3D directional harmonics avoid polar seams and striping.
+ const a=Math.sin(8*dx+3*dz+5*sy+1.1)*Math.cos(7*dz-4*sy);
+ const c=Math.sin(17*dx-11*dz+8*sy+2.3)*Math.cos(13*dz+7*sy);
+ const e=Math.sin(31*dx+23*dz-17*sy)*Math.cos(29*dz-19*dx);
+ const cloud=sat((.56*a+.29*c+.15*e+.18)*2.25)*sat((sy-.035)*6);
+ const shade=sat(.76+.19*Math.sin(8*dx+3*dz+5*sy+1.6)+.05*c);
+ const opacity=cloud*.79;
+ r=mix(r,.90*shade+.06,opacity);g=mix(g,.93*shade+.05,opacity);b=mix(b,.97*shade+.03,opacity);
+ const d=Math.max(0,(16*dx+35*sy+8*dz)/Math.hypot(16,35,8));
+ const glow=Math.pow(d,65)*.22+Math.pow(d,1100)*4.2;
+ r+=glow;g+=glow*.92;b+=glow*.77;
+ if(sy<0){const q=sat(-sy*5);r=mix(r,.025,q);g=mix(g,.13,q);b=mix(b,.18,q);}
+ return [r,g,b];
+}
+
 function createReflectionEnvironment(){
  const width=512,height=256,pixels=new Float32Array(width*height*4);
  const sunLength=Math.hypot(16,35,8),sunX=16/sunLength,sunY=35/sunLength,sunZ=8/sunLength;
@@ -516,20 +545,7 @@ function createReflectionEnvironment(){
   for(let x=0;x<width;x++){
    const phi=(x+.5)*2*Math.PI/width;
    const dx=Math.cos(phi)*h,dz=Math.sin(phi)*h;
-   const alt=clamp(sy);
-   const p=Math.pow(alt,.57);
-   let r=mix(.68,.17,p),g=mix(.83,.43,p),b=mix(.88,.74,p);
-   // Distinct broad cloud banks, with separate small-scale variations.
-   const cloudBand=Math.sin(phi*6+Math.sin(theta*8)*2.4)*.45+
-     Math.sin(phi*13-theta*17)*.25+Math.sin(phi*25+theta*10)*.15;
-   const cloud=clamp((cloudBand+.15)*2)*clamp((sy-.12)*4);
-   const cloudOpacity=cloud*.53;
-   r=mix(r,.94,cloudOpacity);g=mix(g,.95,cloudOpacity);b=mix(b,.96,cloudOpacity);
-   // Sharp sunny region is bright and directional in reflected wave facets.
-   const d=Math.max(0,dx*sunX+sy*sunY+dz*sunZ);
-   const glow=Math.pow(d,65)*.25+Math.pow(d,1100)*4.2;
-   r+=glow;g+=glow*.85;b+=glow*.58;
-   if(sy<0){const deep=clamp(-sy*5);r=mix(r,.025,deep);g=mix(g,.13,deep);b=mix(b,.18,deep);}
+   const [r,g,b]=oceanSkyRadiance(dx,sy,dz);
    const idx=(y*width+x)*4;
    // Linear HDR radiance preserves the sun rather than clipping to white.
    pixels[idx]=Math.pow(Math.max(0,r),2.2);pixels[idx+1]=Math.pow(Math.max(0,g),2.2);pixels[idx+2]=Math.pow(Math.max(0,b),2.2);pixels[idx+3]=1;
@@ -924,6 +940,7 @@ function updateUndersideOptics(){
  const blend=enhanced?underwaterBlend:0;
  if(oceanAngleBlend){oceanAngleBlend.value=blend*Math.min(1,underwaterFresnel);oceanAngleDepth.value=opticalDepth;}
  if(oceanGlintControls)oceanGlintControls.value.set(clockTime,reflectionMode==='enhanced'?surfaceGlitter*reflectionStrength:0,fineRipple*windRipples,subsurfaceLight);
+ if(oceanRoughnessControls)oceanRoughnessControls.value.set(windRipples,blend,1);
  if(oceanColumnSigma&&oceanColumnEnabled){const p=waterOpticalProfile();oceanColumnSigma.value=p.sigma[0]*.2126+p.sigma[1]*.7152+p.sigma[2]*.0722+.065/Math.max(.4,waterClarity);oceanColumnEnabled.value=opticalMode==='legacy'?0:1;}
  // Keep depth-dependent light current even when immersion is stable.
  const updateMaterials=Math.abs(blend-lastUndersideMix)>=.012;
@@ -6079,28 +6096,33 @@ function updateScreenSpaceLighting(){
  return true;
 }
 function createSkyDome(){
- const g=new THREE.SphereGeometry(430,32,18),a=g.attributes.position;
- const colors=new Float32Array(a.count*3);
- const horizon=new THREE.Color(0x9bcddf),zenith=new THREE.Color(0x3484b9);
- const warm=new THREE.Color(0xe5d0b5),c=new THREE.Color();
- for(let i=0;i<a.count;i++){
-  const x=a.getX(i),y=a.getY(i),z=a.getZ(i),up=y/430;
-  const factor=Math.pow(Math.min(1,Math.max(0,up)),.52);
-  c.copy(horizon).lerp(zenith,factor);
-  const direction=Math.max(0,(x*.46+y*.74+z*.45)/430);
-  const glow=Math.pow(direction,18)*.38*(.5+.5*Math.min(1,Math.max(0,up*10)));
-  c.lerp(warm,glow);
-  const ii=i*3;colors[ii]=c.r;colors[ii+1]=c.g;colors[ii+2]=c.b;
+ // Use the same radiance function as the HDR reflection environment.
+ // A small precomputed texture supplies cloud detail without per-frame
+ // cloud ray marching or extra render passes.
+ const w=512,h=256,pixels=new Uint8Array(w*h*4);
+ for(let j=0;j<h;j++){
+  const theta=Math.PI*(j+.5)/h,sy=Math.cos(theta),r=Math.sin(theta);
+  for(let i=0;i<w;i++){
+   const phi=(i+.5)*2*Math.PI/w;
+   const rgb=oceanSkyRadiance(Math.cos(phi)*r,sy,Math.sin(phi)*r),k=(j*w+i)*4;
+   for(let c=0;c<3;c++)pixels[k+c]=Math.round(255*Math.max(0,Math.min(1,rgb[c])));
+   pixels[k+3]=255;
+  }
  }
- g.setAttribute('color',new THREE.BufferAttribute(colors,3));
- const material=new THREE.MeshBasicMaterial({
-  vertexColors:true,side:THREE.BackSide,depthWrite:false,fog:false,
-  transparent:true,opacity:1
- });
- skyDome=new THREE.Mesh(g,material);
- skyDome.frustumCulled=false;
- skyDome.renderOrder=-10;
- scene.add(skyDome);
+ const tex=new THREE.DataTexture(pixels,w,h,THREE.RGBAFormat);
+ tex.colorSpace=THREE.SRGBColorSpace;tex.wrapS=THREE.RepeatWrapping;tex.wrapT=THREE.ClampToEdgeWrapping;
+ tex.minFilter=tex.magFilter=THREE.LinearFilter;tex.generateMipmaps=false;tex.needsUpdate=true;
+ const g=new THREE.SphereGeometry(430,64,32),p=g.attributes.position,uv=g.attributes.uv;
+ for(let i=0;i<p.count;i++){
+  const x=p.getX(i),y=p.getY(i),z=p.getZ(i);
+  uv.setXY(i,(Math.atan2(z,x)/(2*Math.PI)+1)%1,Math.acos(Math.max(-1,Math.min(1,y/430)))/Math.PI);
+ }
+ // Preserve the native sphere seam duplication rather than interpolating
+ // across the equirectangular wrap; use native UVs with matching transform.
+ for(let i=0;i<uv.count;i++){const col=i%65,row=Math.floor(i/65);uv.setXY(i,.5-col/64,row/32);}
+ uv.needsUpdate=true;
+ const material=new THREE.MeshBasicMaterial({map:tex,side:THREE.BackSide,depthWrite:false,fog:false,transparent:true,opacity:1});
+ skyDome=new THREE.Mesh(g,material);skyDome.frustumCulled=false;skyDome.renderOrder=-10;scene.add(skyDome);
 }
 async function init3D(forceWebGL=false){
  status((forceWebGL?'WebGL fallback':'WebGPU probe')+': loading Three.js…');
@@ -6116,7 +6138,7 @@ async function init3D(forceWebGL=false){
  if(!forceWebGL)initFluid3();else fluid3State='WebGL fallback';
  const backend=forceWebGL?'WebGLRenderer':renderer.backend?.constructor?.name||'WebGPU (unknown backend)';
  isWebGPU=!forceWebGL&&/webgpu/i.test(backend);
- oceanTSL=null;oceanAngleBlend=null;oceanAngleDepth=null;oceanColumnSigma=null;oceanColumnEnabled=null;oceanGlintControls=null;
+ oceanTSL=null;oceanAngleBlend=null;oceanAngleDepth=null;oceanColumnSigma=null;oceanColumnEnabled=null;oceanGlintControls=null;oceanRoughnessControls=null;
  underwaterMirror=null;mirrorCamera=null;mirrorMatrix=null;mirrorWeight=null;mirrorFailed=false;mirrorLast=-100;
  if(isWebGPU&&!safeStartup&&!new URLSearchParams(location.search).has('classicOptics')){
   try{oceanTSL=await import('three/tsl');}catch(e){console.warn('Angle optics unavailable',e);}

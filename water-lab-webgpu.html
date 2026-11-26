@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.40 Eight-layer refracted volumetric light field</title>
+<title>Rift Water Lab · WebGPU 28.5.41 Original 28.5.37 optical baseline restored</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.40</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.41</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -150,7 +150,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.40 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.41 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -447,11 +447,6 @@ let causticMode='wave',causticFocus=1.2,causticContrast=1.45,
  causticRate=12,causticDetail=96,causticValidated=true,causticLastError='';
 const CAUSTIC_SIZE=new URLSearchParams(location.search).has('caustics128')?128:256;
 const CAUSTIC_BYTES=CAUSTIC_SIZE*CAUSTIC_SIZE*4;
-const VOLUME_N=128,VOLUME_LAYERS=8,VOLUME_BYTES=128*128*8*4;
-const depthVolumeEnabled=!new URLSearchParams(location.search).has('flatVolumeCaustics');
-let volumeMap=null,volumePixels=null,volumeOriginX=0,volumeOriginZ=0,volumeWidth=64,volumeReady=false;
-const triangleCaustics=!new URLSearchParams(location.search).has('pointCaustics');
-const multiscaleCaustics=triangleCaustics&&!new URLSearchParams(location.search).has('singleScaleCaustics');
 let causticAccum=null,causticFiltered=null,causticBuild=null;
 let continuousFloor=null;
 let causticBaseUV=null,causticProjectionWidth=64,causticProjectionX=NaN,
@@ -482,8 +477,7 @@ let waveTransmissionMode='enhanced',waveTransmissionStrength=1,
  waveTransmissionTexture=null,waveTransmissionPixels=null,
  lastWaveTransmissionUpdate=-100,waveTransmissionMaterialActive=false,
  underwaterRocks=null,underwaterRockLocations=[],waveInstanceTint=null;
-let screenLightPipeline=null,screenGodrays=null,screenBlendColor=null,screenCausticVolume=null,
-
+let screenLightPipeline=null,screenGodrays=null,screenBlendColor=null,
     mainSun=null,screenSpaceFault='',screenSpaceReady=false,screenSpaceStarting=false,
     screenSpaceFailed=false;
 
@@ -497,7 +491,7 @@ const cameraTarget={x:-3.2,y:1,z:-13},activePointers=new Map();
 let cameraControlUntil=0;
 let paused=false,detailIndex=1,samples=0,last=performance.now(),
  waveHeight=1.5,renderScale=safeStartup?1:1.25;
-let adaptivePerformance=!safeStartup&&!new URLSearchParams(location.search).has('fixedResolution'),adaptivePixelRatio=renderScale,
+let adaptivePerformance=!safeStartup,adaptivePixelRatio=renderScale,
  adaptiveLastChange=performance.now(),adaptiveLowWindows=0,adaptiveHighWindows=0;
 const levels=[64,88,112];let isWebGPU=false,clockTime=0,loopActive=false;
 function status(m){window.__waterFallback?.notice(m);}
@@ -1238,17 +1232,16 @@ function createUnderwaterReceiver(options){
   const focus=float(1).sub(det.abs().div(.48).clamp(0,1)).pow(1.5);
   const analytic=vec3(.93,.99,1).mul(focus).mul(depth.mul(-.055).div(u.controls.z).exp());
   // Floor photons become a less reliable proxy higher in the water.
-  const floorWeight=inside.mul(height.mul(-.22).exp());
+  const floorWeight=inside.mul(height.mul(-.65).exp());
   const rayLight=texture(causticMap,uv.clamp(.001,.999)).rgb;
-  const light=analytic.mul(float(1).sub(floorWeight)).mul(1.2).add(rayLight.mul(floorWeight).mul(2.4));
-  const normal=normalWorld.normalize();
-  const incidence=normal.dot(vec3(16,35,8).normalize()).max(0).mul(.85).add(.18);
+  const light=analytic.mul(float(1).sub(floorWeight)).mul(1.2).add(rayLight.mul(floorWeight));
+  const incidence=normalWorld.normalize().dot(vec3(16,35,8).normalize()).max(0);
   const submerged=smoothstep(.04,.32,surface.sub(positionWorld.y));
   const transmission=waveTransmissionTexture?texture(waveTransmissionTexture,uv.clamp(.001,.999)).r:float(1);
   const visibility=float(1).sub(float(1).sub(transmission).mul(inside).mul(u.optics.w));
   const irradiance=light.mul(incidence).mul(submerged).mul(visibility).mul(u.controls.y);
   mat=new THREE.MeshStandardNodeMaterial(options);
-  mat.emissiveNode=materialEmissive.add(irradiance.mul(materialColor.rgb.mul(.4).add(vec3(.6))));
+  mat.emissiveNode=materialEmissive.add(irradiance.mul(materialColor.rgb.mul(.65).add(vec3(.35))));
   mat.userData.projectedCaustics=true;return mat;
  }catch(e){mat?.dispose();console.warn('Projected object caustics fallback',e);return new THREE.MeshStandardMaterial(options);}
 }
@@ -1434,9 +1427,6 @@ const NF:f32=${CAUSTIC_SIZE}.0;
 @group(0) @binding(1) var<storage,read> fft:array<f32>;
 @group(0) @binding(2) var<storage,read_write> energy:array<atomic<u32>>;
 @group(0) @binding(3) var<storage,read_write> result:array<u32>;
-@group(0) @binding(4) var<storage,read_write> vertices:array<vec4f>;
-@group(0) @binding(5) var<storage,read_write> volumeEnergy:array<atomic<u32>>;
-@group(0) @binding(6) var<storage,read_write> volumeResult:array<u32>;
 fn spectral(xz:vec2f)->f32{
  let uv=fract(xz/96.0)*64.0;let ij=vec2u(floor(uv));let f=fract(uv);
  let x=ij.x%64u;let y=ij.y%64u;let xx=(x+1u)%64u;let yy=(y+1u)%64u;
@@ -1450,7 +1440,7 @@ fn trace(@builtin(global_invocation_id) id:vec3u){
  // One ray per stratum with persistent independent offsets; no frame noise.
  let key=id.x+id.y*source;
  let jitter=vec2f(rayHash(key*2u+17u),rayHash(key*2u+18u));
- let uv=(vec2f(id.xy)+mix(vec2f(0.5),jitter,select(0.92,0.32,p[10]>0.5)))/p[0];
+ let uv=(vec2f(id.xy)+mix(vec2f(0.5),jitter,0.92))/p[0];
  let world=vec2f(p[1],p[2])+vec2f(uv.x-0.5,0.5-uv.y)*p[3];
  let local=world-vec2f(p[8],p[9]);
  let dist=length(vec2f(local.x*0.83,(local.y+11.0)*0.92));
@@ -1478,142 +1468,14 @@ fn trace(@builtin(global_invocation_id) id:vec3u){
  let offset=flatShift*travel+(rayShift-flatShift)*min(travel,18.0)*p[5]/(1.0-1.0/1.333);
  let receiver=world+offset;
  let hit=vec2f(receiver.x-p[1],p[2]-receiver.y)*NF/p[3]+(NF*0.5-0.5);
+ let ij=vec2i(floor(hit));if(any(ij<vec2i(1))||any(ij>=vec2i(i32(N)-2))){return;}
+ let f=fract(hit);let k=u32(ij.y*i32(N)+ij.x);
  let incidence=clamp(dot(-incident,normal),0.0,1.0);
  // Fresnel transmission, with per-stratum energy normalized by area.
  let fresnel=0.0204+0.9796*pow(1.0-incidence,5.0);
  let e=exp(-travel*p[6]/max(0.25,-ray.y))*(1.0-fresnel)*incidence*(NF/p[0])*(NF/p[0]);
- if(p[10]>0.5){
-  vertices[key]=vec4f(hit,e,1.0);
-  if(p[11]>0.5){
-   // A separate fine-scale optical surface, with lower amplitudes and
-   // directionally spread gravity-capillary ripples. Split the available
-   // transmitted energy between the two reconstructions downstream.
-   var micro=vec2f(0.0);
-   let warp=sin(dot(world,vec2f(0.71,0.37))-p[4]*0.83);
-   let envelope=0.72+0.28*sin(dot(world,vec2f(-0.43,0.59))+p[4]*0.69);
-   let dirs=array<vec2f,4>(vec2f(4.13,-2.57),vec2f(-1.42,3.63),vec2f(0.83,5.19),vec2f(-4.91,-1.67));
-   let amps=array<f32,4>(0.0075,0.012,0.0048,0.0042);
-   for(var j=0u;j<4u;j++){
-    let k=dirs[j];let km=length(k);let omega=sqrt(9.81*km+0.000074*km*km*km);
-    let phase=dot(k,world)+warp*0.7-p[4]*omega+f32(j)*2.399963;
-    micro+=k*amps[j]*cos(phase)*envelope*p[12];
-   }
-   let fineNormal=normalize(vec3f(-slope.x-micro.x,1.0,-slope.y-micro.y));
-   let fineRay=refract(incident,fineNormal,1.0/1.333);
-   let fineShift=fineRay.xz/max(0.15,-fineRay.y);
-   let fineReceiver=world+flatShift*travel+(fineShift-flatShift)*min(travel,18.0)*p[5]/(1.0-1.0/1.333);
-   let fineHit=vec2f(fineReceiver.x-p[1],p[2]-fineReceiver.y)*NF/p[3]+(NF*0.5-0.5);
-   vertices[source*source+key]=vec4f(fineHit,e,1.0);
-   if(p[13]>0.5){vertices[2u*source*source+key]=vec4f(fineShift,elevation,(1.0-fresnel)*incidence);}
-  }else if(p[13]>0.5){vertices[2u*source*source+key]=vec4f(rayShift,elevation,(1.0-fresnel)*incidence);
-  }
-  return;
- }
- splat(hit,e);
-}
-fn splat(hit:vec2f,e:f32){
- let ij=vec2i(floor(hit));if(any(ij<vec2i(1))||any(ij>=vec2i(i32(N)-2))){return;}
- let f=fract(hit);let k=u32(ij.y*i32(N)+ij.x);
  deposit(k,e*(1.0-f.x)*(1.0-f.y));deposit(k+1u,e*f.x*(1.0-f.y));
  deposit(k+N,e*(1.0-f.x)*f.y);deposit(k+N+1u,e*f.x*f.y);
-}
-fn cross2(a:vec2f,b:vec2f)->f32{return a.x*b.y-a.y*b.x;}
-// Integrate each refracted triangle with bounded, equal-area quadrature.
-// Small triangles converge into concentrated energy; stretched triangles
-// distribute it over their footprint. No inverse-area multiplier is needed.
-fn footprint(a:vec4f,b:vec4f,c:vec4f,share:f32,fine:bool){
- let e=(a.z+b.z+c.z)/6.0*share;
- let area=abs(cross2(b.xy-a.xy,c.xy-a.xy))*0.5;
- // Retain only the excess above unfocused irradiance. The footprint
- // already concentrates energy geometrically, so do not multiply by
- // inverse area again. Bound the retained fraction to [0,1].
- let cell=NF/p[0];
- let referenceArea=0.5*cell*cell;
- let ratio=area/max(referenceArea,0.0001);
- // Retain a soft shoulder of moderately focused footprints, not only tight folds.
- let retained=1.0-smoothstep(select(0.28,0.18,fine),select(1.12,0.92,fine),ratio);
- let focusedEnergy=e*retained;
- if(focusedEnergy<=0.00002){return;}
- let longest=max(length(a.xy-b.xy),max(length(b.xy-c.xy),length(c.xy-a.xy)));
- let steps=u32(clamp(ceil(max(sqrt(area)*0.9,longest*0.55)),1.0,select(4.0,3.0,fine)));
- let weight=focusedEnergy/f32(steps*steps);
- for(var i=0u;i<steps;i++){
-  for(var j=0u;j<steps-i;j++){
-   let u=(f32(i)+1.0/3.0)/f32(steps);let v=(f32(j)+1.0/3.0)/f32(steps);
-   splat(a.xy+(b.xy-a.xy)*u+(c.xy-a.xy)*v,weight);
-   if(i+j+1u<steps){
-    let u2=(f32(i)+2.0/3.0)/f32(steps);let v2=(f32(j)+2.0/3.0)/f32(steps);
-    splat(a.xy+(b.xy-a.xy)*u2+(c.xy-a.xy)*v2,weight);
-   }
-  }
- }
-}
-@compute @workgroup_size(8,8)
-fn triangles(@builtin(global_invocation_id) id:vec3u){
- let n=u32(p[0]);if(id.x+1u>=n||id.y+1u>=n){return;}
- let k=id.y*n+id.x;
- let a=vertices[k];let b=vertices[k+1u];let c=vertices[k+n];let d=vertices[k+n+1u];
- let split=p[11]>0.5;let primary=select(1.0,0.72,split);
- if((id.x+id.y)%2u==0u){footprint(a,b,c,primary,false);footprint(b,d,c,primary,false);}
- else{footprint(a,b,d,primary,false);footprint(a,d,c,primary,false);}
- if(split){
-  let o=n*n;let fa=vertices[o+k];let fb=vertices[o+k+1u];let fc=vertices[o+k+n];let fd=vertices[o+k+n+1u];
-  if((id.x+id.y)%2u==0u){footprint(fa,fb,fd,0.28,true);footprint(fa,fd,fc,0.28,true);}
-  else{footprint(fa,fb,fc,0.28,true);footprint(fb,fd,fc,0.28,true);}
- }
-}
-// Eight independent horizontal receiver planes, at 0.5, 1.5 ... 7.5m.
-fn volumeVertex(id:vec2u,layer:u32)->vec3f{
- let n=u32(p[0]);let key=id.y*n+id.x;
- let jitter=vec2f(rayHash(key*2u+17u),rayHash(key*2u+18u));
- let uv=(vec2f(id)+mix(vec2f(0.5),jitter,0.32))/p[0];
- let world=vec2f(p[1],p[2])+vec2f(uv.x-0.5,0.5-uv.y)*p[3];
- let v=vertices[2u*n*n+key];
- let travel=max(0.0,f32(layer)+0.5+v.z);
- let flatRay=refract(normalize(vec3f(-16.0,-35.0,-8.0)),vec3f(0.0,1.0,0.0),1.0/1.333);
- let flatShift=flatRay.xz/-flatRay.y;
- let receiver=world+flatShift*travel+(v.xy-flatShift)*travel*p[5]/(1.0-1.0/1.333);
- let hit=vec2f(receiver.x-p[1],p[2]-receiver.y)*128.0/p[3]+63.5;
- return vec3f(hit,v.w*select(0.0,1.0,travel>0.05));
-}
-fn volumeDeposit(hit:vec2f,e:f32,layer:u32){
- let ij=vec2i(floor(hit));if(any(ij<vec2i(0))||any(ij>=vec2i(127))){return;}
- let f=fract(hit);let k=layer*16384u+u32(ij.y*128+ij.x);
- atomicAdd(&volumeEnergy[k],u32(round(e*(1.0-f.x)*(1.0-f.y)*65536.0)));
- atomicAdd(&volumeEnergy[k+1u],u32(round(e*f.x*(1.0-f.y)*65536.0)));
- atomicAdd(&volumeEnergy[k+128u],u32(round(e*(1.0-f.x)*f.y*65536.0)));
- atomicAdd(&volumeEnergy[k+129u],u32(round(e*f.x*f.y*65536.0)));
-}
-fn volumeTriangle(a:vec3f,b:vec3f,c:vec3f,layer:u32){
- let cell=128.0/p[0];let area=abs(cross2(b.xy-a.xy,c.xy-a.xy))*0.5;
- let ratio=area/max(0.5*cell*cell,0.0001);
- let e=(a.z+b.z+c.z)/6.0*cell*cell*(1.0-smoothstep(0.25,1.05,ratio));
- if(e<0.00002){return;}
- // Four equal-area samples, fixed cost; compressed footprints overlap naturally.
- volumeDeposit((a.xy*4.0+b.xy+c.xy)/6.0,e*0.25,layer);
- volumeDeposit((a.xy+b.xy*4.0+c.xy)/6.0,e*0.25,layer);
- volumeDeposit((a.xy+b.xy+c.xy*4.0)/6.0,e*0.25,layer);
- volumeDeposit((a.xy+b.xy+c.xy)/3.0,e*0.25,layer);
-}
-@compute @workgroup_size(8,8,1)
-fn volumeTrace(@builtin(global_invocation_id) id:vec3u){
- let n=u32(p[0]);if(id.x+1u>=n||id.y+1u>=n||id.z>=8u){return;}
- let a=volumeVertex(id.xy,id.z);let b=volumeVertex(id.xy+vec2u(1,0),id.z);
- let c=volumeVertex(id.xy+vec2u(0,1),id.z);let d=volumeVertex(id.xy+vec2u(1,1),id.z);
- volumeTriangle(a,b,c,id.z);volumeTriangle(b,d,c,id.z);
-}
-@compute @workgroup_size(8,8,1)
-fn volumeShade(@builtin(global_invocation_id) id:vec3u){
- if(id.x>=128u||id.y>=128u||id.z>=8u){return;}
- let k=id.z*16384u+id.y*128u+id.x;
- let center=f32(atomicLoad(&volumeEnergy[k]))/65536.0;
- var mean=center;
- if(id.x>0u&&id.x<127u&&id.y>0u&&id.y<127u){
-  mean=(center*4.0+f32(atomicLoad(&volumeEnergy[k-1u])+atomicLoad(&volumeEnergy[k+1u])+atomicLoad(&volumeEnergy[k-128u])+atomicLoad(&volumeEnergy[k+128u]))/65536.0)/8.0;
- }
- let peak=max(0.0,mix(mean,center,0.65)-max(0.055,mean*0.65));
- let l=u32(round(255.0*clamp(1.0-exp(-peak*3.4),0.0,1.0)));
- volumeResult[k]=l|(l<<8u)|(l<<16u)|0xff000000u;
 }
 @compute @workgroup_size(8,8)
 fn shade(@builtin(global_invocation_id) id:vec3u){
@@ -1630,16 +1492,13 @@ fn shade(@builtin(global_invocation_id) id:vec3u){
  let centerEnergy=f32(atomicLoad(&energy[k]))/65536.0;
  // Sparse ray sets need more neighborhood support; dense sets preserve peaks.
  let support=clamp(filteredEnergy/(centerEnergy+0.0001),0.0,1.0);
- let centerWeight=select(mix(0.12,0.40,smoothstep(0.45,0.85,p[0]/NF))*mix(0.35,1.0,smoothstep(0.22,0.65,support)),0.58,p[10]>0.5);
+ let centerWeight=mix(0.12,0.40,smoothstep(0.45,0.85,p[0]/NF))*mix(0.35,1.0,smoothstep(0.22,0.65,support));
  let focused=mix(filteredEnergy,clamp(centerEnergy,0.0,filteredEnergy*3.0+0.35),centerWeight);
  // Extract local concentration above diffuse ray density, retaining a soft shoulder.
  // Reject diffuse background using expected attenuated flat-water irradiance.
- let pointExcess=max(0.0,focused-max(0.34,filteredEnergy*0.86));
- // Preserve connected ridges and moderately focused neighbors; reject flat fill.
- let triangleExcess=max(0.0,focused-max(0.075,filteredEnergy*0.72+0.012));
- let excess=select(pointExcess,triangleExcess,p[10]>0.5);
- let filament=1.0-exp(-excess*select(4.7,5.8,p[10]>0.5));
- let l=u32(round(clamp(255.0*pow(filament,select(1.32,1.15,p[10]>0.5))*clamp((border-0.012)*14.0,0.0,1.0),0.0,255.0)));
+ let excess=max(0.0,focused-max(0.34,filteredEnergy*0.86));
+ let filament=1.0-exp(-excess*4.7);
+ let l=u32(round(clamp(255.0*pow(filament,1.32)*clamp((border-0.012)*14.0,0.0,1.0),0.0,255.0)));
  result[k]=u32(round(f32(l)*0.88))|(u32(round(f32(l)*0.97))<<8u)|(l<<16u)|0xff000000u;
 }
 `;
@@ -1650,23 +1509,17 @@ async function initCausticGPU(){
  try{
   const m=d.createShaderModule({code:causticGPUCode}),info=await m.getCompilationInfo();
   if(info.messages.some(v=>v.type==='error'))throw Error(info.messages.filter(v=>v.type==='error').map(v=>v.message).join('; '));
-  const layout=d.createBindGroupLayout({entries:[0,1,2,3,4,5,6].map(binding=>({binding,visibility:GPUShaderStage.COMPUTE,buffer:{type:binding<2?'read-only-storage':'storage'}}))});
+  const layout=d.createBindGroupLayout({entries:[0,1,2,3].map(binding=>({binding,visibility:GPUShaderStage.COMPUTE,buffer:{type:binding<2?'read-only-storage':'storage'}}))});
   const pl=d.createPipelineLayout({bindGroupLayouts:[layout]});
   const trace=await d.createComputePipelineAsync({layout:pl,compute:{module:m,entryPoint:'trace'}});
   const shade=await d.createComputePipelineAsync({layout:pl,compute:{module:m,entryPoint:'shade'}});
-  const triangles=await d.createComputePipelineAsync({layout:pl,compute:{module:m,entryPoint:'triangles'}});
-  const volumeTrace=await d.createComputePipelineAsync({layout:pl,compute:{module:m,entryPoint:'volumeTrace'}});
-  const volumeShade=await d.createComputePipelineAsync({layout:pl,compute:{module:m,entryPoint:'volumeShade'}});
   const alloc=(size,usage)=>d.createBuffer({size,usage});
   const input=GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST;
   const params=alloc(84*4,input),fft=alloc(4096*4,input),energy=alloc(CAUSTIC_BYTES,input);
   const result=alloc(CAUSTIC_BYTES,GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC);
   const stage=alloc(CAUSTIC_BYTES,GPUBufferUsage.MAP_READ|GPUBufferUsage.COPY_DST);
-  const vertices=alloc(3*200*200*16,GPUBufferUsage.STORAGE);
-  const volumeEnergy=alloc(VOLUME_BYTES,input),volumeResult=alloc(VOLUME_BYTES,GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC),volumeStage=alloc(VOLUME_BYTES,GPUBufferUsage.MAP_READ|GPUBufferUsage.COPY_DST);
-  if(!volumeMap){volumePixels=new Uint8Array(VOLUME_BYTES);volumeMap=new THREE.DataTexture(volumePixels,VOLUME_N,VOLUME_N*VOLUME_LAYERS,THREE.RGBAFormat);volumeMap.minFilter=volumeMap.magFilter=THREE.LinearFilter;volumeMap.generateMipmaps=false;volumeMap.needsUpdate=true;}
-  const group=d.createBindGroup({layout,entries:[params,fft,energy,result,vertices,volumeEnergy,volumeResult].map((buffer,binding)=>({binding,resource:{buffer}}))});
-  causticGPU={d,trace,shade,triangles,vertices,params,fft,energy,result,stage,group,volumeTrace,volumeShade,volumeEnergy,volumeResult,volumeStage,volumePending:false,volumeTick:0,p:new Float32Array(84),historyX:NaN,historyZ:NaN,historySource:0,field:new Float32Array(4096),fftFrame:-1,fftOwner:null,pending:false};
+  const group=d.createBindGroup({layout,entries:[params,fft,energy,result].map((buffer,binding)=>({binding,resource:{buffer}}))});
+  causticGPU={d,trace,shade,params,fft,energy,result,stage,group,p:new Float32Array(84),historyX:NaN,historyZ:NaN,historySource:0,field:new Float32Array(4096),fftFrame:-1,fftOwner:null,pending:false};
   d.lost.then(()=>{causticGPUFault='device lost';causticGPU=null;});
  }catch(e){causticGPUFault=String(e?.message||e);console.warn('GPU caustics fallback',e);}
  finally{causticGPUStarting=false;}
@@ -1677,14 +1530,12 @@ function dispatchCausticGPU(t){
  if(f.pending)return true;
  const cx=causticProjectionX,cz=causticProjectionZ,quality=causticDetail,width=causticProjectionWidth;
  // Scale the source grid moderately, not fourfold: 120/160/200 on 256.
- const source=triangleCaustics?Math.min(144,Math.round(quality*1.2)):CAUSTIC_SIZE===256?Math.round(quality*5/3):quality;
+ const source=CAUSTIC_SIZE===256?Math.round(quality*5/3):quality;
  if(!Number.isFinite(cx)||!Number.isFinite(cz))return false;
  const hasFFT=fftMix>.001&&gpuFFT?.ready&&!fftFault&&Number.isFinite(gpuFFT.rms);
  const analyticWeight=1-(hasFFT?fftMix*(waveEngine==='fft'?.80:.30):0);
  const a=f.p;a.set([source,cx,cz,width,t,(1-1/1.333)*causticFocus,(atmospherePreset==='coastal'?.10:.045)/Math.max(.4,waterClarity),hasFFT?fftEnergy*waveHeight*fftMix:0]);
- a[8]=waterFloor?.position.x||0;a[9]=waterFloor?.position.z||0;a[10]=triangleCaustics?1:0;a[11]=multiscaleCaustics?1:0;a[12]=waveHeight;
- const buildVolume=depthVolumeEnabled&&triangleCaustics&&underwaterActive&&volumetricStrength>.01&&!f.volumePending&&++f.volumeTick%3===1;
- a[13]=buildVolume?1:0;
+ a[8]=waterFloor?.position.x||0;a[9]=waterFloor?.position.z||0;
  const waves=waveComponents.concat(opticalRipples);
  for(let k=0;k<waves.length;k++){const w=waves[k];a.set([w.kx,w.kz,w.omega,w.phase,w.amplitude*waveHeight*(w.amplitude>.04?analyticWeight:1)],16+k*5);}
  let scoped=false;
@@ -1696,19 +1547,10 @@ function dispatchCausticGPU(t){
   }
   d.queue.writeBuffer(f.params,0,a);d.pushErrorScope('validation');scoped=true;
   const enc=d.createCommandEncoder();enc.clearBuffer(f.energy);
-  const passes=[[f.trace,Math.ceil(source/8)]];
-  if(triangleCaustics)passes.push([f.triangles,Math.ceil(source/8)]);
-  passes.push([f.shade,Math.ceil(CAUSTIC_SIZE/8)]);
-  for(const [pipeline,n] of passes){
+  for(const [pipeline,n] of [[f.trace,Math.ceil(source/8)],[f.shade,Math.ceil(CAUSTIC_SIZE/8)]]){
    const pass=enc.beginComputePass();pass.setPipeline(pipeline);pass.setBindGroup(0,f.group);pass.dispatchWorkgroups(n,n);pass.end();
   }
-  if(buildVolume){
-   enc.clearBuffer(f.volumeEnergy);
-   for(const [pipeline,n] of [[f.volumeTrace,Math.ceil(source/8)],[f.volumeShade,16]]){const pass=enc.beginComputePass();pass.setPipeline(pipeline);pass.setBindGroup(0,f.group);pass.dispatchWorkgroups(n,n,8);pass.end();}
-   enc.copyBufferToBuffer(f.volumeResult,0,f.volumeStage,0,VOLUME_BYTES);
-  }
   enc.copyBufferToBuffer(f.result,0,f.stage,0,CAUSTIC_BYTES);d.queue.submit([enc.finish()]);f.pending=true;
-  if(buildVolume){f.volumePending=true;f.volumeStage.mapAsync(GPUMapMode.READ).then(()=>{try{if(causticGPU===f&&volumeMap){volumePixels.set(new Uint8Array(f.volumeStage.getMappedRange()));volumeMap.needsUpdate=true;volumeOriginX=cx;volumeOriginZ=cz;volumeWidth=width;volumeReady=true;}}finally{f.volumeStage.unmap();}}).catch(e=>{volumeReady=false;console.warn('Volume field unavailable',e);}).finally(()=>{f.volumePending=false;});}
   const validation=d.popErrorScope();scoped=false;
   Promise.allSettled([validation,f.stage.mapAsync(GPUMapMode.READ)]).then(results=>{
    if(results[1].status==='rejected')throw results[1].reason;
@@ -1917,7 +1759,7 @@ function updateWaveTransmissionObjects(t){
  }
 }
 
-// 28.5.40: same transmission model in a parallel compute pass.
+// 28.5.41: same transmission model in a parallel compute pass.
 // Keep the existing texture and CPU fallback; no blocking GPU readback.
 let transmissionGPU=null,transmissionGPUStarting=false,transmissionGPUFault='',transmissionGPUFrames=0;
 const transmissionWGSL=`
@@ -2144,7 +1986,7 @@ function updateCausticLighting(cameraDepth=0){
  const emphasis=causticMode==='wave'?causticContrast:1;
  const emission=Math.max(0,Math.min(1.8,strength*(causticMode==='wave'?1.05:.75)*emphasis));
  floorCausticMaterial.emissiveIntensity=emission;
- if(continuousFloor){continuousFloor.origin.value.set(Number.isFinite(causticProjectionX)?causticProjectionX:0,Number.isFinite(causticProjectionZ)?causticProjectionZ:0);continuousFloor.controls.value.set(causticProjectionWidth,causticMode==='wave'&&enabled?emission:0,clockTime,Math.max(.4,waterClarity));continuousFloor.wave.value=causticMode==='wave'?1:0;continuousFloor.shadow.value=waveTransmissionMaterialActive?1:0;continuousFloor.lens.value.set(waveHeight,causticFocus);continuousFloor.triangleWeight.value=triangleCaustics&&causticGPU&&!causticGPUFault&&causticGPUFrames>0?1:0;updateFloorFFTCurvature();}
+ if(continuousFloor){continuousFloor.origin.value.set(Number.isFinite(causticProjectionX)?causticProjectionX:0,Number.isFinite(causticProjectionZ)?causticProjectionZ:0);continuousFloor.controls.value.set(causticProjectionWidth,causticMode==='wave'&&enabled?emission:0,clockTime,Math.max(.4,waterClarity));continuousFloor.wave.value=causticMode==='wave'?1:0;continuousFloor.shadow.value=waveTransmissionMaterialActive?1:0;continuousFloor.lens.value.set(waveHeight,causticFocus);updateFloorFFTCurvature();}
  floorCausticMaterial.color.setScalar(causticMode==='wave'&&enabled?
    Math.max(.72,1-.12*causticContrast):1);
  // This projection is mapped only onto the sand. Rock UVs do not
@@ -2255,32 +2097,24 @@ function setupContinuousFloor(mat,detail){
   // Separate the low-frequency convergence from the narrow fold highlight.
   // A second, smaller optical fold splits and reconnects with the primary.
   const fine=sx.mul(7.13).sub(sz.mul(3.81)).add(warpZ.mul(1.6)).sub(t.mul(8.9)).sin();
-  const core=float(1).sub(smoothstep(.06,.48,det.abs())).pow(1.8);
-  const secondary=float(1).sub(smoothstep(.025,.25,det.add(fine.mul(.19)).abs())).pow(2.2);
+  const core=float(1).sub(det.abs().div(.44).clamp(0,1)).pow(1.65);
+  const secondary=float(1).sub(det.add(fine.mul(.19)).abs().div(.23).clamp(0,1)).pow(2);
   const shoulder=float(1).sub(focus.mul(-.22).exp()).pow(2);
-  const band=core.mul(.94).add(secondary.mul(.36)).add(shoulder.mul(.035)).mul(envelope.mul(.45).add(.55));
+  const band=core.mul(.87).add(secondary.mul(.38)).add(shoulder.mul(.10)).mul(envelope.mul(.45).add(.55));
   const outer=vec3(.93,.99,1).mul(band).mul(depth.mul(-.055).div(controls.w).exp());
-  // Keep the continuous fold network prominent; sparse ray deposits add highlights, not diffuse fill.
-  const rayPeak=local.sub(vec3(.075)).max(vec3(0)).pow(1.25);
-  const triangleWeight=uniform(0);
-  const sparsePeak=local.sub(vec3(.065)).max(vec3(0)).pow(1.15);
-  // Keep the point-ray comparison unchanged; triangle highlights are bounded.
-  const pointLight=outer.mul(2.35).add(rayPeak.mul(localMask).mul(.65));
-  const triLight=outer.mul(2.05).add(sparsePeak.mul(localMask).mul(1.25));
-  const light=pointLight.mul(float(1).sub(triangleWeight)).add(triLight.mul(triangleWeight));
+  const light=outer.mul(float(1).sub(localMask.mul(.20))).mul(2.1).add(local.mul(localMask).mul(.95));
   const sandA=texture(detail.albedo,xz.div(5.5)).r;
   const grain=sandA.mul(.24).add(.76);
   const transmission=texture(waveTransmissionTexture,uv.clamp(.001,.999)).r;
   const shaded=float(1).sub(float(1).sub(transmission).mul(localMask).mul(shadow));
-  const ambientSeparation=float(1).sub(wave.mul(controls.y.min(1)).mul(float(.12).add(triangleWeight.mul(.02))));
-  mat.colorNode=materialColor.rgb.mul(grain).mul(shaded).mul(ambientSeparation);
+  mat.colorNode=materialColor.rgb.mul(grain).mul(shaded);
   // Classic mode retains the existing emissive map; wave mode replaces it.
   // Focused light must obey the same occlusion as diffuse sunlight.
   const litCaustic=light.mul(shaded.pow(.85)).mul(grain).mul(controls.y);
   // Approximate added diffuse irradiance using receiver albedo and orientation.
   const receiver=oceanTSL.normalWorld.normalize().dot(vec3(16,35,8).normalize()).max(0);
   mat.emissiveNode=materialEmissive.mul(float(1).sub(wave)).add(litCaustic.mul(materialColor.rgb.mul(.55).add(vec3(.45))).mul(receiver.mul(.75).add(.25)).mul(vec3(.90,.98,1)));
-  mat.userData.continuousFloor=true;continuousFloor={origin,controls,wave,shadow,lens,curvatureTex,curvaturePixels,fftCurvatureMix,triangleWeight,fftFrame:-1,fftOwner:null};
+  mat.userData.continuousFloor=true;continuousFloor={origin,controls,wave,shadow,lens,curvatureTex,curvaturePixels,fftCurvatureMix,fftFrame:-1,fftOwner:null};
   mat.needsUpdate=true;
  }catch(e){continuousFloor=null;mat.colorNode=null;mat.emissiveNode=null;console.warn('Continuous floor fallback',e);}
 }
@@ -7018,7 +6852,7 @@ async function initScreenSpaceLighting(){
   // Dynamic addon imports defer pipeline setup and leave existing
   // WebGL and safe-mode startup paths completely unchanged.
   const [
-    {pass,uniform,color,float,int,vec2,vec3,vec4,texture,screenUV,getViewPosition,cameraProjectionMatrixInverse,cameraWorldMatrix,smoothstep,mix},
+    {pass,uniform,color,float,int},
     {godrays},
     {bilateralBlur},
     {depthAwareBlend}
@@ -7044,52 +6878,7 @@ async function initScreenSpaceLighting(){
     {blendColor,edgeRadius:uniform(int(2)),
      edgeStrength:uniform(float(1.6))}
   );
-  // Integrate focused sunlight along the visible underwater camera segment.
-  // The existing shadow-aware godray pass remains responsible for broad shafts.
-  // This additional term uses the reconstructed floor field as a depth-warped
-  // proxy for the incident beam distribution, not an independent scrolling map.
-  screenCausticVolume=null;
-  if(depthVolumeEnabled&&!volumeMap){volumePixels=new Uint8Array(VOLUME_BYTES);volumeMap=new THREE.DataTexture(volumePixels,VOLUME_N,VOLUME_N*VOLUME_LAYERS,THREE.RGBAFormat);volumeMap.minFilter=volumeMap.magFilter=THREE.LinearFilter;volumeMap.generateMipmaps=false;volumeMap.needsUpdate=true;}
-  if(causticMap&&!new URLSearchParams(location.search).has('noVolumeCaustics')&&getViewPosition&&cameraProjectionMatrixInverse&&cameraWorldMatrix){
-   const origin=uniform(new THREE.Vector2()),params=uniform(new THREE.Vector4(64,0,0.08,0.022));
-   const eye=uniform(new THREE.Vector3());
-   const atlasOrigin=uniform(new THREE.Vector2()),atlasInfo=uniform(new THREE.Vector2(64,0));
-   const useAtlas=depthVolumeEnabled&&!!volumeMap;
-   const view=getViewPosition(screenUV,sceneDepth.sample(screenUV).r,cameraProjectionMatrixInverse);
-   const endpoint=cameraWorldMatrix.mul(vec4(view,1)).xyz;
-   const delta=endpoint.sub(eye),distance=delta.length().max(.001);
-   const direction=delta.div(distance);
-   const exit=eye.y.negate().div(direction.y.max(.001)).max(0);
-   const length=distance.min(32).min(mix(float(32),exit,smoothstep(.001,.025,direction.y)));
-   const taps=useAtlas?12:6;
-   const step=length.div(taps);
-   const phase=direction.dot(vec3(-.326,-.931,-.163).normalize()).clamp(-1,1);
-   // Bounded Henyey-Greenstein-like forward scattering, with no singular sun glare.
-   const angular=float(1).sub(phase.mul(.84)).max(.25).pow(-1.5).mul(.36).min(2.0);
-   let light=float(0);
-   for(let k=0;k<taps;k++){
-    const travel=step.mul(k+.5),point=eye.add(direction.mul(travel));
-    const depth=point.y.negate().max(0);
-    const projected=point.xz.sub(vec2(.326,.163).mul(float(3.8).sub(depth)));
-    const q=projected.sub(origin).div(params.x);
-    const uv=vec2(q.x.add(.5),float(.5).sub(q.y));
-    const inside=float(1).sub(smoothstep(.25,.47,q.length()));
-    let focus=texture(causticMap,uv.clamp(.001,.999)).rgb.dot(vec3(.2126,.7152,.0722)).sub(.08).max(0);
-    if(useAtlas){
-     const aq=point.xz.sub(atlasOrigin).div(atlasInfo.x),auv=vec2(aq.x.add(.5),float(.5).sub(aq.y));
-     const z=depth.sub(.5).clamp(0,7),lo=z.floor(),hi=lo.add(1).min(7);
-     const u=auv.x.clamp(.004,.996),v=auv.y.clamp(.004,.996);
-     const a=texture(volumeMap,vec2(u,v.add(lo).div(8))).r,b=texture(volumeMap,vec2(u,v.add(hi).div(8))).r;
-     const detail=mix(a,b,z.sub(lo)).mul(float(1).sub(smoothstep(.28,.48,aq.length()))).mul(float(1).sub(smoothstep(7,9,depth)));
-     focus=mix(focus,detail.mul(2.2),atlasInfo.y);
-    }
-    const trans=travel.add(depth).mul(params.z.negate()).exp();
-    light=light.add(focus.mul(inside).mul(trans).mul(step).mul(params.w).mul(float(1).sub(smoothstep(-.15,.05,point.y))));
-   }
-   const volume=light.mul(angular).mul(params.y).min(.12);
-   pipeline.outputNode=vec4(composed.rgb.add(vec3(.42,.82,1).mul(volume)),composed.a);
-   screenCausticVolume={origin,params,eye,atlasOrigin,atlasInfo};
-  }else pipeline.outputNode=composed;
+  pipeline.outputNode=composed;
   screenLightPipeline=pipeline;
   screenGodrays=rays;
   screenBlendColor=blendColor;
@@ -7135,13 +6924,6 @@ function updateScreenSpaceLighting(){
  // Shadow influence scales attenuation/fog contrast rather than a
  // second, unbounded full-screen light pass.
  screenGodrays.density.value*=Math.max(.1,scatteringShadows);
- if(screenCausticVolume){
-  const v=screenCausticVolume,p=waterProfiles[atmospherePreset]||waterProfiles.lagoon;
-  v.origin.value.set(Number.isFinite(causticProjectionX)?causticProjectionX:0,Number.isFinite(causticProjectionZ)?causticProjectionZ:0);
-  v.eye.value.copy(camera.position);
-  v.atlasOrigin.value.set(volumeOriginX,volumeOriginZ);v.atlasInfo.value.set(volumeWidth,volumeReady&&causticGPU&&!causticGPUFault?1:0);
-  v.params.value.set(causticProjectionWidth,causticMode==='wave'&&causticValidated?Math.min(1.5,volumetricStrength)*underwaterBlend:0,Math.max(.015,(p.absorption[1]*depthAbsorption+p.scattering*underwaterScatter)/clarity),p.scattering*Math.max(.1,underwaterScatter)/clarity);
- }
  return true;
 }
 function createSkyDome(){

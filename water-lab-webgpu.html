@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.35 High resolution GPU caustic reconstruction</title>
+<title>Rift Water Lab · WebGPU 28.5.36 Stratified photon reconstruction</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.35</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.36</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -150,7 +150,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.35 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.36 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -1412,10 +1412,14 @@ fn spectral(xz:vec2f)->f32{
  return mix(mix(fft[y*64u+x],fft[y*64u+xx],f.x),mix(fft[yy*64u+x],fft[yy*64u+xx],f.x),f.y);
 }
 fn deposit(k:u32,v:f32){atomicAdd(&energy[k],u32(round(max(0.0,v)*65536.0)));}
+fn rayHash(v:u32)->f32{var h=v;h=(h^(h>>16u))*0x7feb352du;h=(h^(h>>15u))*0x846ca68bu;h=h^(h>>16u);return f32(h&0x00ffffffu)/16777216.0;}
 @compute @workgroup_size(8,8)
 fn trace(@builtin(global_invocation_id) id:vec3u){
  let source=u32(p[0]);if(id.x>=source||id.y>=source){return;}
- let uv=(vec2f(id.xy)+0.5)/p[0];
+ // One ray per stratum with persistent independent offsets; no frame noise.
+ let key=id.x+id.y*source;
+ let jitter=vec2f(rayHash(key*2u+17u),rayHash(key*2u+18u));
+ let uv=(vec2f(id.xy)+mix(vec2f(0.5),jitter,0.92))/p[0];
  let world=vec2f(p[1],p[2])+vec2f(uv.x-0.5,0.5-uv.y)*p[3];
  let local=world-vec2f(p[8],p[9]);
  let dist=length(vec2f(local.x*0.83,(local.y+11.0)*0.92));
@@ -1446,7 +1450,9 @@ fn trace(@builtin(global_invocation_id) id:vec3u){
  let ij=vec2i(floor(hit));if(any(ij<vec2i(1))||any(ij>=vec2i(i32(N)-2))){return;}
  let f=fract(hit);let k=u32(ij.y*i32(N)+ij.x);
  let incidence=clamp(dot(-incident,normal),0.0,1.0);
- let e=exp(-travel*p[6]/max(0.25,-ray.y))*incidence*(NF/p[0])*(NF/p[0]);
+ // Fresnel transmission, with per-stratum energy normalized by area.
+ let fresnel=0.0204+0.9796*pow(1.0-incidence,5.0);
+ let e=exp(-travel*p[6]/max(0.25,-ray.y))*(1.0-fresnel)*incidence*(NF/p[0])*(NF/p[0]);
  deposit(k,e*(1.0-f.x)*(1.0-f.y));deposit(k+1u,e*f.x*(1.0-f.y));
  deposit(k+N,e*(1.0-f.x)*f.y);deposit(k+N+1u,e*f.x*f.y);
 }
@@ -1456,6 +1462,7 @@ fn shade(@builtin(global_invocation_id) id:vec3u){
  let k=id.y*N+id.x;var filteredEnergy=0.0;
  if(id.x>0u&&id.x<N-1u&&id.y>0u&&id.y<N-1u){
   for(var j=-1;j<=1;j++){for(var i=-1;i<=1;i++){
+   // Rotationally symmetric discrete kernel: center 4, axial 2, diagonal 1.
    let weight=select(1.0,2.0,i==0)*select(1.0,2.0,j==0);
    filteredEnergy+=f32(atomicLoad(&energy[u32(i32(k)+j*i32(N)+i)]))*weight/1048576.0;
   }}
@@ -1463,11 +1470,13 @@ fn shade(@builtin(global_invocation_id) id:vec3u){
  let uv=(vec2f(id.xy)+0.5)/NF;let border=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
  let centerEnergy=f32(atomicLoad(&energy[k]))/65536.0;
  // Sparse ray sets need more neighborhood support; dense sets preserve peaks.
- let centerWeight=mix(0.20,0.48,smoothstep(0.45,0.85,p[0]/NF));
+ let support=clamp(filteredEnergy/(centerEnergy+0.0001),0.0,1.0);
+ let centerWeight=mix(0.12,0.40,smoothstep(0.45,0.85,p[0]/NF))*mix(0.35,1.0,smoothstep(0.22,0.65,support));
  let focused=mix(filteredEnergy,clamp(centerEnergy,0.0,filteredEnergy*3.0+0.35),centerWeight);
  // Extract local concentration above diffuse ray density, retaining a soft shoulder.
- let excess=max(0.0,focused-max(0.22,filteredEnergy*0.80));
- let filament=1.0-exp(-excess*5.4);
+ // Reject diffuse background using expected attenuated flat-water irradiance.
+ let excess=max(0.0,focused-max(0.34,filteredEnergy*0.86));
+ let filament=1.0-exp(-excess*4.7);
  let l=u32(round(clamp(255.0*pow(filament,1.32)*clamp((border-0.012)*14.0,0.0,1.0),0.0,255.0)));
  result[k]=u32(round(f32(l)*0.88))|(u32(round(f32(l)*0.97))<<8u)|(l<<16u)|0xff000000u;
 }
@@ -1541,6 +1550,7 @@ function dispatchCausticGPU(t){
  }catch(e){if(scoped)f.d.popErrorScope().catch(()=>{});causticGPUFault=String(e?.message||e);causticGPU=null;return false;}
 }
 
+function causticRayHash(v){let h=v>>>0;h=Math.imul(h^(h>>>16),0x7feb352d);h=Math.imul(h^(h>>>15),0x846ca68b);h=(h^(h>>>16))>>>0;return (h&0xffffff)/16777216;}
 function updateWaveCausticTexture(t){
  const n=CAUSTIC_SIZE,width=causticProjectionWidth,source=causticDetail;
  const length=n*n;
@@ -1570,8 +1580,10 @@ function updateWaveCausticTexture(t){
  // each completed texture so lines remain temporally coherent.
  const endRow=Math.min(source,causticBuild.row+Math.max(12,Math.ceil(source/5)));
  for(let row=causticBuild.row;row<endRow;row++)for(let column=0;column<source;column++){
-  const wx=cx+((column+.5)*inv-.5)*width;
-  const wz=cz+(.5-(row+.5)*inv)*width;
+  const key=column+row*source;
+  const jx=.04+.92*causticRayHash(key*2+17),jz=.04+.92*causticRayHash(key*2+18);
+  const wx=cx+((column+jx)*inv-.5)*width;
+  const wz=cz+(.5-(row+jz)*inv)*width;
   const depth=Math.max(.6,seabedDepth(wx-(waterFloor?.position.x||0),wz-(waterFloor?.position.z||0)));
   let sx=0,sz=0,elevation=0;
   // The broadest swell changes the illumination direction gently,
@@ -1610,7 +1622,8 @@ function updateWaveCausticTexture(t){
   // quality settings visually comparable.
   const transmission=Math.exp(-travel*
     (atmospherePreset==='coastal'?.10:.045)/Math.max(.4,waterClarity));
-  const energy=Math.pow(transmission,1/Math.max(.25,-ry))*Math.max(0,-dot)*(n/source)*(n/source);
+  const incidence=Math.max(0,Math.min(1,-dot)),fresnel=.0204+.9796*Math.pow(1-incidence,5);
+  const energy=Math.pow(transmission,1/Math.max(.25,-ry))*(1-fresnel)*incidence*(n/source)*(n/source);
   const k=iy*n+ix;
   accumulation[k]+=energy*(1-fx)*(1-fy);
   accumulation[k+1]+=energy*fx*(1-fy);
@@ -1632,10 +1645,12 @@ function updateWaveCausticTexture(t){
   // Ray conservation: ~1 represents no focusing. Only convergent
   // bands remain bright; background stays dark.
   const density=Math.max(0,Math.min(1,(source/n-.45)/.40));
-  const centerWeight=.20+.28*density*density*(3-2*density);
+  const support=Math.max(0,Math.min(1,smooth/(accumulation[i]+.0001)));
+  const uSupport=Math.max(0,Math.min(1,(support-.22)/.43));
+  const centerWeight=(.12+.28*density*density*(3-2*density))*(.35+.65*uSupport*uSupport*(3-2*uSupport));
   const focused=smooth*(1-centerWeight)+Math.min(Math.max(0,accumulation[i]),smooth*3+.35)*centerWeight;
-  const extra=Math.max(0,focused-Math.max(.22,smooth*.80));
-  const filament=1-Math.exp(-extra*5.4);
+  const extra=Math.max(0,focused-Math.max(.34,smooth*.86));
+  const filament=1-Math.exp(-extra*4.7);
   const border=Math.min(u,1-u,v,1-v);
   const feather=Math.max(0,Math.min(1,(border-.012)*14));
   const light=Math.round(Math.min(255,255*Math.pow(filament,1.32)*feather));
@@ -1723,7 +1738,7 @@ function updateWaveTransmissionObjects(t){
  }
 }
 
-// 28.5.35: same transmission model in a parallel compute pass.
+// 28.5.36: same transmission model in a parallel compute pass.
 // Keep the existing texture and CPU fallback; no blocking GPU readback.
 let transmissionGPU=null,transmissionGPUStarting=false,transmissionGPUFault='',transmissionGPUFrames=0;
 const transmissionWGSL=`
@@ -2066,7 +2081,7 @@ function setupContinuousFloor(mat,detail){
   const shoulder=float(1).sub(focus.mul(-.22).exp()).pow(2);
   const band=core.mul(.87).add(secondary.mul(.38)).add(shoulder.mul(.10)).mul(envelope.mul(.45).add(.55));
   const outer=vec3(.93,.99,1).mul(band).mul(depth.mul(-.055).div(controls.w).exp());
-  const light=outer.mul(float(1).sub(localMask.mul(.35))).mul(2.1).add(local.mul(localMask).mul(1.55));
+  const light=outer.mul(float(1).sub(localMask.mul(.20))).mul(2.1).add(local.mul(localMask).mul(.95));
   const sandA=texture(detail.albedo,xz.div(5.5)).r;
   const grain=sandA.mul(.24).add(.76);
   const transmission=texture(waveTransmissionTexture,uv.clamp(.001,.999)).r;

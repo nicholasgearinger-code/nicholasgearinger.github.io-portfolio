@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.57 Connected caustic network reconstruction</title>
+<title>Rift Water Lab · WebGPU 28.5.58 Wave-focused radiance recovery</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.57</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.58</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -152,7 +152,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.57 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.58 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -473,7 +473,7 @@ let floorCausticMaterial=null,underwaterObjectMaterials=[],underwaterBackgroundC
 let underwaterPathOptics=null,causticObjectUniforms=null,undersideLensControls=null;
 const enhancedUnderwaterLight=!new URLSearchParams(location.search).has('classicUnderwater');
 const photoOptics=!new URLSearchParams(location.search).has('legacyPhotoOptics');
-const connectedCaustics=!new URLSearchParams(location.search).has('legacyCausticNetwork');
+const recoveredRadiance=!new URLSearchParams(location.search).has('legacyRadiance');
 const waterProfiles={
  lagoon:photoOptics?{absorption:[.155,.058,.031],scattering:.026,color:0x2589bc}:{absorption:[.19,.070,.040],scattering:.022,color:0x175e8a},
  coastal:{absorption:[.30,.135,.080],scattering:.043,color:0x285a65},
@@ -2399,37 +2399,6 @@ function updateFloorFFTCurvature(){
  }
  f.curvatureTex.needsUpdate=true;f.fftFrame=g.fftFrame;f.fftOwner=gpuFFT;
 }
-// Reference-inspired connected focal-cell approximation, not a photon solver.
-// Irregular moving sites and continuous optical warping produce closed,
-// interconnected filaments rather than isolated Jacobian patches.
-function connectedOpticalNetwork(sx,sz,t,depth,warpX,warpZ,eyeDistance){
- const {float,vec2,smoothstep}=oceanTSL;
- const scale=float(1.12).div(depth.mul(.045).add(1));
- const p=vec2(sx.mul(scale).add(warpX.mul(.38)),sz.mul(scale).add(warpZ.mul(.38)));
- const cell=p.floor(),f=p.sub(cell);
- let d1=float(100),d2=float(100),d3=float(100);
- for(let j=-1;j<=1;j++)for(let i=-1;i<=1;i++){
-  const off=vec2(i,j),id=cell.add(off);
-  const h1=id.dot(vec2(127.1,311.7)).sin().mul(43758.5453).fract();
-  const h2=id.dot(vec2(269.5,183.3)).sin().mul(43758.5453).fract();
-  // Site movement is phase coherent and bounded inside the cell.
-  const site=vec2(h1.mul(6.2831853).add(t.mul(.75)).sin(),h2.mul(6.2831853).sub(t.mul(.63)).cos()).mul(.30).add(.5);
-  const delta=off.add(site).sub(f),d=delta.dot(delta);
-  const old1=d1,old2=d2;
-  d1=old1.min(d);
-  d2=old2.min(old1.max(d));
-  d3=d3.min(old2.max(old1.max(d)));
- }
- const edge=d2.sqrt().sub(d1.sqrt()).max(0);
- const junction=float(1).sub(d3.sqrt().sub(d1.sqrt()).div(.24).clamp(0,1)).pow(2);
- const width=warpX.mul(warpZ).mul(.016).add(.055);
- const distant=smoothstep(8,38,eyeDistance);
- const core=float(1).sub(smoothstep(width.mul(.32),width.add(distant.mul(.025)),edge));
- const shoulder=float(1).sub(smoothstep(width, width.mul(2.5).add(.025),edge)).pow(1.7);
- const modulation=warpX.mul(.21).add(warpZ.mul(.15)).add(.70).clamp(.35,1.1);
- return core.mul(.92).add(shoulder.mul(.24)).add(junction.mul(core).mul(.58))
-  .mul(modulation).mul(float(1).sub(distant.mul(.48)));
-}
 function setupContinuousFloor(mat,detail){
  if(!mat.isNodeMaterial||!oceanTSL||!causticMap||!waveTransmissionTexture)return;
  try{
@@ -2499,12 +2468,24 @@ function setupContinuousFloor(mat,detail){
   const outer=vec3(.93,.99,1).mul(band).mul(depth.mul(-.055).div(controls.w).exp());
   const originalLight=outer.mul(float(1).sub(localMask.mul(.20))).mul(photoOptics?2.15:2.1).add(local.mul(localMask).mul(.95));
   let light=originalLight;
-  if(connectedCaustics){
-   const network=connectedOpticalNetwork(sx,sz,t,depth,warpX,warpZ,eyeDistance);
-   const networkLight=vec3(.98,1,1).mul(network).mul(depth.mul(-.055).div(controls.w).exp()).mul(2.55);
-   // Dominant connected topology, with the original physical solver retained
-   // as a secondary source of irregular focal highlights.
-   light=networkLight.mul(.80).add(originalLight.mul(.30));
+  if(recoveredRadiance){
+   // Finite-source filtering of the optical Jacobian: sample a small
+   // angular bundle rather than drawing a cell boundary. The signed
+   // determinant is perturbed by the actual directional Hessian.
+   const a=float(1).sub(xx.mul(bend)),b=float(1).sub(zz.mul(bend));
+   const shear=xzCurvature.mul(bend);
+   const spread=softDepth.mul(.11).add(.065);
+   const grad=a.sub(b).mul(.5).add(shear.mul(.37)).clamp(-2,2);
+   const delta=grad.mul(spread);
+   const jacobianRadiance=d=>float(1).div(d.mul(d).add(.065).sqrt()).sub(1.12).max(0);
+   const flux=jacobianRadiance(det).mul(.50)
+    .add(jacobianRadiance(det.add(delta)).mul(.25))
+    .add(jacobianRadiance(det.sub(delta)).mul(.25));
+   const focused=float(1).sub(flux.mul(-.64).exp()).pow(1.55);
+   const broadFlux=float(1).sub(flux.mul(-.19).exp()).pow(2);
+   const radiance=focused.mul(.90).add(broadFlux.mul(.32)).mul(envelope.mul(.35).add(.65));
+   const transmitted=vec3(.98,1,1).mul(radiance).mul(depth.mul(-.055).div(controls.w).exp());
+   light=transmitted.mul(1.35).add(originalLight.mul(.65));
   }
   const sandA=texture(detail.albedo,xz.div(5.5)).r;
   const grain=sandA.mul(.24).add(.76);
@@ -7342,7 +7323,7 @@ function disableVolumeMarch(error){
  volumeMarchFault=String(error?.message||error);volumeMarchActive=false;
  screenLightPipeline.outputNode=volumeMarchBase;screenLightPipeline.needsUpdate=true;
  console.warn('Volume march fallback to existing screen scattering',error);
- status('28.5.57 volumetric fallback: '+volumeMarchFault);
+ status('28.5.58 volumetric fallback: '+volumeMarchFault);
  return true;
 }
 async function initScreenSpaceLighting(){
@@ -7385,7 +7366,7 @@ async function initScreenSpaceLighting(){
   screenBlendColor=blendColor;
   screenSpaceReady=true;
   applyScreenScatteringQuality();
-  status(volumeMarchActive?'28.5.57 connected caustic network initialized.':'24.7 depth-aware screen-space scattering initialized.');
+  status(volumeMarchActive?'28.5.58 wave-focused radiance initialized.':'24.7 depth-aware screen-space scattering initialized.');
  }catch(error){
   screenSpaceFault=String(error?.message||error);
   screenSpaceFailed=true;

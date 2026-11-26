@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.34 FFT coupled wave curvature caustics</title>
+<title>Rift Water Lab · WebGPU 28.5.35 High resolution GPU caustic reconstruction</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.34</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.35</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -150,7 +150,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.34 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.35 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -445,6 +445,8 @@ let thicknessTexture=null,thicknessPixels=null,lastThicknessX=Infinity,lastThick
 let underwaterActive=false,underwaterFog=null,dayFog=null,waterDepthAtBoat=4,underwaterBlend=0,underwaterSceneMode='reef',underwaterObjects=null,causticStrength=.8,causticMap=null,causticPixels=null,lastCausticUpdate=-100;
 let causticMode='wave',causticFocus=1.2,causticContrast=1.45,
  causticRate=12,causticDetail=96,causticValidated=true,causticLastError='';
+const CAUSTIC_SIZE=new URLSearchParams(location.search).has('caustics128')?128:256;
+const CAUSTIC_BYTES=CAUSTIC_SIZE*CAUSTIC_SIZE*4;
 let causticAccum=null,causticFiltered=null,causticBuild=null;
 let continuousFloor=null;
 let causticBaseUV=null,causticProjectionWidth=64,causticProjectionX=NaN,
@@ -1273,7 +1275,7 @@ function buildUnderwaterScene(){
  underwaterObjects=group;waterFloor.add(group);
 }
 function makeCausticTexture(){
- const n=128;causticPixels=new Uint8Array(n*n*4);
+ const n=CAUSTIC_SIZE;causticPixels=new Uint8Array(n*n*4);
  const tex=new THREE.DataTexture(causticPixels,n,n,THREE.RGBAFormat);
  tex.wrapS=THREE.RepeatWrapping;tex.wrapT=THREE.RepeatWrapping;
  tex.repeat.set(10,10);tex.minFilter=THREE.LinearMipmapLinearFilter;
@@ -1285,7 +1287,7 @@ function makeCausticTexture(){
 // Moving lens-caustic approximation. Black texels emit no additional
 // light; unlike the former albedo map, they never darken the sand.
 function updateClassicCausticTexture(t){
- const n=128,tau=2*Math.PI;
+ const n=CAUSTIC_SIZE,tau=2*Math.PI;
  for(let y=0;y<n;y++)for(let x=0;x<n;x++){
   const u=x/n,v=y/n;
   const warpU=.018*Math.sin(tau*(2*u+3*v)-t*.37);
@@ -1398,6 +1400,8 @@ function syncCausticProjection(force=false){
 
 let causticGPU=null,causticGPUStarting=false,causticGPUFault='',causticGPUFrames=0;
 const causticGPUCode=`
+const N:u32=${CAUSTIC_SIZE}u;
+const NF:f32=${CAUSTIC_SIZE}.0;
 @group(0) @binding(0) var<storage,read> p:array<f32>;
 @group(0) @binding(1) var<storage,read> fft:array<f32>;
 @group(0) @binding(2) var<storage,read_write> energy:array<atomic<u32>>;
@@ -1438,27 +1442,29 @@ fn trace(@builtin(global_invocation_id) id:vec3u){
  let travel=max(0.6,depth+elevation);
  let offset=flatShift*travel+(rayShift-flatShift)*min(travel,18.0)*p[5]/(1.0-1.0/1.333);
  let receiver=world+offset;
- let hit=vec2f(receiver.x-p[1],p[2]-receiver.y)*128.0/p[3]+63.5;
- let ij=vec2i(floor(hit));if(any(ij<vec2i(1))||any(ij>=vec2i(126))){return;}
- let f=fract(hit);let k=u32(ij.y*128+ij.x);
+ let hit=vec2f(receiver.x-p[1],p[2]-receiver.y)*NF/p[3]+(NF*0.5-0.5);
+ let ij=vec2i(floor(hit));if(any(ij<vec2i(1))||any(ij>=vec2i(i32(N)-2))){return;}
+ let f=fract(hit);let k=u32(ij.y*i32(N)+ij.x);
  let incidence=clamp(dot(-incident,normal),0.0,1.0);
- let e=exp(-travel*p[6]/max(0.25,-ray.y))*incidence*(128.0/p[0])*(128.0/p[0]);
+ let e=exp(-travel*p[6]/max(0.25,-ray.y))*incidence*(NF/p[0])*(NF/p[0]);
  deposit(k,e*(1.0-f.x)*(1.0-f.y));deposit(k+1u,e*f.x*(1.0-f.y));
- deposit(k+128u,e*(1.0-f.x)*f.y);deposit(k+129u,e*f.x*f.y);
+ deposit(k+N,e*(1.0-f.x)*f.y);deposit(k+N+1u,e*f.x*f.y);
 }
 @compute @workgroup_size(8,8)
 fn shade(@builtin(global_invocation_id) id:vec3u){
- if(id.x>=128u||id.y>=128u){return;}
- let k=id.y*128u+id.x;var filteredEnergy=0.0;
- if(id.x>0u&&id.x<127u&&id.y>0u&&id.y<127u){
+ if(id.x>=N||id.y>=N){return;}
+ let k=id.y*N+id.x;var filteredEnergy=0.0;
+ if(id.x>0u&&id.x<N-1u&&id.y>0u&&id.y<N-1u){
   for(var j=-1;j<=1;j++){for(var i=-1;i<=1;i++){
    let weight=select(1.0,2.0,i==0)*select(1.0,2.0,j==0);
-   filteredEnergy+=f32(atomicLoad(&energy[u32(i32(k)+j*128+i)]))*weight/1048576.0;
+   filteredEnergy+=f32(atomicLoad(&energy[u32(i32(k)+j*i32(N)+i)]))*weight/1048576.0;
   }}
  }
- let uv=(vec2f(id.xy)+0.5)/128.0;let border=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
+ let uv=(vec2f(id.xy)+0.5)/NF;let border=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
  let centerEnergy=f32(atomicLoad(&energy[k]))/65536.0;
- let focused=mix(filteredEnergy,clamp(centerEnergy,0.0,filteredEnergy*3.0+0.35),0.48);
+ // Sparse ray sets need more neighborhood support; dense sets preserve peaks.
+ let centerWeight=mix(0.20,0.48,smoothstep(0.45,0.85,p[0]/NF));
+ let focused=mix(filteredEnergy,clamp(centerEnergy,0.0,filteredEnergy*3.0+0.35),centerWeight);
  // Extract local concentration above diffuse ray density, retaining a soft shoulder.
  let excess=max(0.0,focused-max(0.22,filteredEnergy*0.80));
  let filament=1.0-exp(-excess*5.4);
@@ -1479,9 +1485,9 @@ async function initCausticGPU(){
   const shade=await d.createComputePipelineAsync({layout:pl,compute:{module:m,entryPoint:'shade'}});
   const alloc=(size,usage)=>d.createBuffer({size,usage});
   const input=GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST;
-  const params=alloc(84*4,input),fft=alloc(4096*4,input),energy=alloc(65536,input);
-  const result=alloc(65536,GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC);
-  const stage=alloc(65536,GPUBufferUsage.MAP_READ|GPUBufferUsage.COPY_DST);
+  const params=alloc(84*4,input),fft=alloc(4096*4,input),energy=alloc(CAUSTIC_BYTES,input);
+  const result=alloc(CAUSTIC_BYTES,GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC);
+  const stage=alloc(CAUSTIC_BYTES,GPUBufferUsage.MAP_READ|GPUBufferUsage.COPY_DST);
   const group=d.createBindGroup({layout,entries:[params,fft,energy,result].map((buffer,binding)=>({binding,resource:{buffer}}))});
   causticGPU={d,trace,shade,params,fft,energy,result,stage,group,p:new Float32Array(84),historyX:NaN,historyZ:NaN,historySource:0,field:new Float32Array(4096),fftFrame:-1,fftOwner:null,pending:false};
   d.lost.then(()=>{causticGPUFault='device lost';causticGPU=null;});
@@ -1492,7 +1498,9 @@ function dispatchCausticGPU(t){
  const f=causticGPU;
  if(!f){void initCausticGPU();return false;}
  if(f.pending)return true;
- const cx=causticProjectionX,cz=causticProjectionZ,source=causticDetail,width=causticProjectionWidth;
+ const cx=causticProjectionX,cz=causticProjectionZ,quality=causticDetail,width=causticProjectionWidth;
+ // Scale the source grid moderately, not fourfold: 120/160/200 on 256.
+ const source=CAUSTIC_SIZE===256?Math.round(quality*5/3):quality;
  if(!Number.isFinite(cx)||!Number.isFinite(cz))return false;
  const hasFFT=fftMix>.001&&gpuFFT?.ready&&!fftFault&&Number.isFinite(gpuFFT.rms);
  const analyticWeight=1-(hasFFT?fftMix*(waveEngine==='fft'?.80:.30):0);
@@ -1509,20 +1517,20 @@ function dispatchCausticGPU(t){
   }
   d.queue.writeBuffer(f.params,0,a);d.pushErrorScope('validation');scoped=true;
   const enc=d.createCommandEncoder();enc.clearBuffer(f.energy);
-  for(const [pipeline,n] of [[f.trace,Math.ceil(source/8)],[f.shade,16]]){
+  for(const [pipeline,n] of [[f.trace,Math.ceil(source/8)],[f.shade,Math.ceil(CAUSTIC_SIZE/8)]]){
    const pass=enc.beginComputePass();pass.setPipeline(pipeline);pass.setBindGroup(0,f.group);pass.dispatchWorkgroups(n,n);pass.end();
   }
-  enc.copyBufferToBuffer(f.result,0,f.stage,0,65536);d.queue.submit([enc.finish()]);f.pending=true;
+  enc.copyBufferToBuffer(f.result,0,f.stage,0,CAUSTIC_BYTES);d.queue.submit([enc.finish()]);f.pending=true;
   const validation=d.popErrorScope();scoped=false;
   Promise.allSettled([validation,f.stage.mapAsync(GPUMapMode.READ)]).then(results=>{
    if(results[1].status==='rejected')throw results[1].reason;
    try{
     if(results[0].status==='rejected')throw results[0].reason;
     if(results[0].value)throw results[0].value;
-    if(causticGPU===f&&causticMode==='wave'&&source===causticDetail&&cx===causticProjectionX&&cz===causticProjectionZ){
+    if(causticGPU===f&&causticMode==='wave'&&quality===causticDetail&&cx===causticProjectionX&&cz===causticProjectionZ){
      const next=new Uint8Array(f.stage.getMappedRange());
      // Blend only in a matching world-space projection; never drag history with the boat.
-     if(f.historyX===cx&&f.historyZ===cz&&f.historySource===source){for(let i=0;i<next.length;i+=4){for(let c=0;c<3;c++)causticPixels[i+c]=Math.round(causticPixels[i+c]*.22+next[i+c]*.78);causticPixels[i+3]=255;}}
+     if(f.historyX===cx&&f.historyZ===cz&&f.historySource===source){for(let i=0;i<next.length;i+=4){causticPixels[i]=(causticPixels[i]+next[i]*3+2)>>2;causticPixels[i+1]=(causticPixels[i+1]+next[i+1]*3+2)>>2;causticPixels[i+2]=(causticPixels[i+2]+next[i+2]*3+2)>>2;causticPixels[i+3]=255;}}
      else causticPixels.set(next);
      f.historyX=cx;f.historyZ=cz;f.historySource=source;
      causticMap.needsUpdate=true;causticGPUFrames++;causticValidated=true;
@@ -1534,7 +1542,7 @@ function dispatchCausticGPU(t){
 }
 
 function updateWaveCausticTexture(t){
- const n=128,width=causticProjectionWidth,source=causticDetail;
+ const n=CAUSTIC_SIZE,width=causticProjectionWidth,source=causticDetail;
  const length=n*n;
  if(!causticAccum||causticAccum.length!==length){
   causticAccum=new Float32Array(length);
@@ -1623,7 +1631,9 @@ function updateWaveCausticTexture(t){
     (filtered[i-n]+2*filtered[i]+filtered[i+n])*.25:0;
   // Ray conservation: ~1 represents no focusing. Only convergent
   // bands remain bright; background stays dark.
-  const focused=smooth*.52+Math.min(Math.max(0,accumulation[i]),smooth*3+.35)*.48;
+  const density=Math.max(0,Math.min(1,(source/n-.45)/.40));
+  const centerWeight=.20+.28*density*density*(3-2*density);
+  const focused=smooth*(1-centerWeight)+Math.min(Math.max(0,accumulation[i]),smooth*3+.35)*centerWeight;
   const extra=Math.max(0,focused-Math.max(.22,smooth*.80));
   const filament=1-Math.exp(-extra*5.4);
   const border=Math.min(u,1-u,v,1-v);
@@ -1713,7 +1723,7 @@ function updateWaveTransmissionObjects(t){
  }
 }
 
-// 28.5.34: same transmission model in a parallel compute pass.
+// 28.5.35: same transmission model in a parallel compute pass.
 // Keep the existing texture and CPU fallback; no blocking GPU readback.
 let transmissionGPU=null,transmissionGPUStarting=false,transmissionGPUFault='',transmissionGPUFrames=0;
 const transmissionWGSL=`
@@ -7136,7 +7146,7 @@ async function init3D(forceWebGL=false){
   const now=performance.now();
   if(now-last>1100){
    const measured=samples*1000/(now-last);
-   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · device '+(fluid3?.shared&&gpuFFT?.shared?'shared':fluid3?.shared?'fluid shared':'separate')+' · mesh '+(offshoreGPU?'GPU rings '+offshoreGPU.cutoff+'m / CPU interaction':offshoreGPUFault?'CPU fallback':'CPU')+' · FFT '+(offshoreGPU?.directAttached&&gpuFFT?.renderFrames>0&&!gpuFFT?.renderFault?'direct GPU':'CPU bridge')+' · foam '+(foamSkin?.material?.userData?.gpuFoamSkin?'GPU shader':'CPU texture')+' · aeration '+(turbulenceGPUFault?'CPU fallback':turbulenceGPUFrames?(turbulenceGPU?.resident?'GPU resident ':'GPU hybrid ')+turbulenceGPUFrames:'CPU')+' / '+turbulencePeak.toFixed(2)+' · floor '+(continuousFloor?(continuousFloor.fftCurvatureMix.value>0?'FFT curvature':'continuous'):'standard')+' · underside '+(undersideLensControls?'lens shader':'standard')+' · caustics '+(causticGPUFault?'CPU fallback ('+causticGPUFault.slice(0,100)+')':causticGPUFrames?'GPU '+causticGPUFrames:'CPU')+' · sunlight '+(transmissionGPUFault?'CPU fallback':transmissionGPUFrames?'GPU '+transmissionGPUFrames:'CPU')+' · topology '+(turbulenceGPUFault?'CPU fallback':topologyGPUFrames?'GPU validated '+topologyGPUFrames:gpuTopologyEnabled?'GPU pending / CPU':'CPU')+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · rock waves '+(owPeak*100).toFixed(1)+' cm · run-up '+(runupPeak*100).toFixed(0)+' cm / '+runupSpills+' spills · hull wall '+hullWaveCells+' / '+hullClipCount+' clipped · hull splashes '+hullSplashHits+' · hull run-up '+(hullRunupPeak*100).toFixed(0)+' cm / '+hullOvertops+' spills · sheet '+hullSheetCells+' cells / '+hullSheetTears+' tears · hull APIC '+(hullAPFault?'fallback':hullAP?(hullGPUFrames&&!hullGPUFault?'GPU ':'CPU ')+hullAP.particles.length+'p / '+hullAPContacts+' contacts / '+hullAPReturns+' returns':'idle')+' · AP load '+Math.hypot(hullReaction.x,hullReaction.y,hullReaction.z).toFixed(0)+' N · deck '+deckMass.toFixed(1)+' kg / '+deckFlowPeak.toFixed(2)+' m/s / '+deckSpills+' drains · screen hull '+hullVolumeTriangles+' tris / '+(hullDensityFrames&&!hullDensityFault?'GPU density':'CPU density')+' / '+(hullScreenFault?'mesh fallback':hullScreenFrames?'SS normals '+hullScreenFrames:'SS idle')+' · rock eddies '+objectVortexCount+' · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?(apGPUFrames&&!apGPUFault?'GPU ':'CPU ')+apGrid.particles.length+'p '+(apGPUFrames&&!apGPUFault?apGPUFrames+' steps · mesh '+rcTriangles+' tris · '+(rcGPUFrames&&!rcGPUFault?'GPU density':'CPU density')+(rcThicknessEnabled?' · SS thickness':'')+(whitewaterVolumeEnabled?' · WW '+(wwGPUFrames&&!wwGPUFault?'GPU':'CPU'):''):apStats.after.toFixed(2)+' div'):'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
+   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · device '+(fluid3?.shared&&gpuFFT?.shared?'shared':fluid3?.shared?'fluid shared':'separate')+' · mesh '+(offshoreGPU?'GPU rings '+offshoreGPU.cutoff+'m / CPU interaction':offshoreGPUFault?'CPU fallback':'CPU')+' · FFT '+(offshoreGPU?.directAttached&&gpuFFT?.renderFrames>0&&!gpuFFT?.renderFault?'direct GPU':'CPU bridge')+' · foam '+(foamSkin?.material?.userData?.gpuFoamSkin?'GPU shader':'CPU texture')+' · aeration '+(turbulenceGPUFault?'CPU fallback':turbulenceGPUFrames?(turbulenceGPU?.resident?'GPU resident ':'GPU hybrid ')+turbulenceGPUFrames:'CPU')+' / '+turbulencePeak.toFixed(2)+' · floor '+(continuousFloor?(continuousFloor.fftCurvatureMix.value>0?'FFT curvature':'continuous'):'standard')+' · underside '+(undersideLensControls?'lens shader':'standard')+' · caustics '+CAUSTIC_SIZE+'² '+(causticGPUFault?'CPU fallback ('+causticGPUFault.slice(0,100)+')':causticGPUFrames?'GPU '+causticGPUFrames:'CPU')+' · sunlight '+(transmissionGPUFault?'CPU fallback':transmissionGPUFrames?'GPU '+transmissionGPUFrames:'CPU')+' · topology '+(turbulenceGPUFault?'CPU fallback':topologyGPUFrames?'GPU validated '+topologyGPUFrames:gpuTopologyEnabled?'GPU pending / CPU':'CPU')+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · rock waves '+(owPeak*100).toFixed(1)+' cm · run-up '+(runupPeak*100).toFixed(0)+' cm / '+runupSpills+' spills · hull wall '+hullWaveCells+' / '+hullClipCount+' clipped · hull splashes '+hullSplashHits+' · hull run-up '+(hullRunupPeak*100).toFixed(0)+' cm / '+hullOvertops+' spills · sheet '+hullSheetCells+' cells / '+hullSheetTears+' tears · hull APIC '+(hullAPFault?'fallback':hullAP?(hullGPUFrames&&!hullGPUFault?'GPU ':'CPU ')+hullAP.particles.length+'p / '+hullAPContacts+' contacts / '+hullAPReturns+' returns':'idle')+' · AP load '+Math.hypot(hullReaction.x,hullReaction.y,hullReaction.z).toFixed(0)+' N · deck '+deckMass.toFixed(1)+' kg / '+deckFlowPeak.toFixed(2)+' m/s / '+deckSpills+' drains · screen hull '+hullVolumeTriangles+' tris / '+(hullDensityFrames&&!hullDensityFault?'GPU density':'CPU density')+' / '+(hullScreenFault?'mesh fallback':hullScreenFrames?'SS normals '+hullScreenFrames:'SS idle')+' · rock eddies '+objectVortexCount+' · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?(apGPUFrames&&!apGPUFault?'GPU ':'CPU ')+apGrid.particles.length+'p '+(apGPUFrames&&!apGPUFault?apGPUFrames+' steps · mesh '+rcTriangles+' tris · '+(rcGPUFrames&&!rcGPUFault?'GPU density':'CPU density')+(rcThicknessEnabled?' · SS thickness':'')+(whitewaterVolumeEnabled?' · WW '+(wwGPUFrames&&!wwGPUFault?'GPU':'CPU'):''):apStats.after.toFixed(2)+' div'):'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
    $('fps').textContent='FPS: '+Math.round(measured);
    const avg=k=>(profile[k]/Math.max(1,profile.count)).toFixed(1);
    const ph=$('frameProfile');if(ph)ph.textContent='ms/frame: '+avg('total')+' | physics '+avg('physics')+' | aeration '+avg('aeration')+' | mesh '+avg('geometry')+' | foam '+avg('foam')+' | lighting/other '+avg('lighting')+' | render submit '+avg('submit')+' | queue drain '+(profile.queueCount?(profile.queue/profile.queueCount).toFixed(1)+' ms':'—')+' (not GPU timer)';

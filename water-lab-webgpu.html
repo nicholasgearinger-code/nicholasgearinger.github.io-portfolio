@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.42 Baseline caustics with detailed object optics</title>
+<title>Rift Water Lab · WebGPU 28.5.43 FFT-synchronized receiver caustics</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.42</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.43</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -150,7 +150,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.42 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.43 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -1227,6 +1227,11 @@ function createUnderwaterReceiver(options){
    const wp=positionWorld.x.mul(w.kx).add(positionWorld.z.mul(w.kz)).sub(u.optics.x.mul(w.omega)).add(w.phase);
    surface=surface.add(wp.sin().mul(w.amplitude).mul(u.optics.y));
   }
+  // Share the floor's existing FFT curvature texture; no additional readback or compute dispatch.
+  if(continuousFloor){
+   const fftHessian=texture(continuousFloor.curvatureTex,vec2(sx,sz).div(96).add(1/128)).rgb.sub(128/255).mul(2).mul(continuousFloor.fftCurvatureMix);
+   xx=xx.add(fftHessian.r);zz=zz.add(fftHessian.g);xz=xz.add(fftHessian.b);
+  }
   const bend=depth.min(18).mul(1-1/1.333).mul(u.optics.z);
   const det=float(1).sub(xx.mul(bend)).mul(float(1).sub(zz.mul(bend))).sub(xz.mul(xz).mul(bend).mul(bend));
   // Match the floor's optical fold structure without replacing its shader.
@@ -1248,15 +1253,18 @@ function createUnderwaterReceiver(options){
   const focus=primary.mul(.22).add(core.mul(.72)).add(secondary.mul(.30)).mul(envelope.mul(.45).add(.55));
   const analytic=vec3(.93,.99,1).mul(focus).mul(depth.mul(-.055).div(u.controls.z).exp());
   // Floor photons become a less reliable proxy higher in the water.
-  const floorWeight=inside.mul(height.mul(-.42).exp());
+  // Match the floor's radial transition, so receivers do not reveal the square photon tile.
+  const radial=float(1).sub(smoothstep(.27,.47,q.length()));
+  const floorWeight=inside.mul(radial).mul(height.mul(-.42).exp());
   const rayLight=texture(causticMap,uv.clamp(.001,.999)).rgb;
   const light=analytic.mul(float(1).sub(floorWeight)).mul(1.35).add(rayLight.mul(floorWeight).mul(1.12));
   // Refracted sunlight is closer to vertical than the incident air ray.
   const incidence=normalWorld.normalize().dot(vec3(.326,1,.163).normalize()).max(0);
   const submerged=smoothstep(.04,.32,surface.sub(positionWorld.y));
   const transmission=waveTransmissionTexture?texture(waveTransmissionTexture,uv.clamp(.001,.999)).r:float(1);
-  const visibility=float(1).sub(float(1).sub(transmission).mul(inside).mul(u.optics.w));
-  const irradiance=light.mul(incidence).mul(submerged).mul(visibility).mul(u.controls.y);
+  const visibility=float(1).sub(float(1).sub(transmission).mul(inside).mul(radial).mul(u.optics.w));
+  // Apply the same soft occlusion response as the sand; preserve surface gating.
+  const irradiance=light.mul(incidence).mul(submerged).mul(visibility.pow(.85)).mul(u.controls.y);
   mat=new THREE.MeshStandardNodeMaterial(options);
   mat.emissiveNode=materialEmissive.add(irradiance.mul(materialColor.rgb.mul(.65).add(vec3(.35))));
   mat.userData.projectedCaustics=true;return mat;

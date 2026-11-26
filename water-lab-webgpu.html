@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.69 Aperiodic refractive microstructure</title>
+<title>Rift Water Lab · WebGPU 28.5.70 Photon-led seabed illumination</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.69</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.70</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -152,7 +152,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.69 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.70 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -484,6 +484,7 @@ const visibleObjectCaustics=improvedObjectCaustics&&!new URLSearchParams(locatio
 const reefMicrostructure=!new URLSearchParams(location.search).has('simpleReef');
 const floorMicrostructure=!new URLSearchParams(location.search).has('noFloorMicrostructure');
 const aperiodicFloorOptics=!new URLSearchParams(location.search).has('regularFloorOptics');
+const photonLedFloor=!new URLSearchParams(location.search).has('analyticFloor');
 const waterProfiles={
  lagoon:photoOptics?{absorption:[.155,.058,.031],scattering:.026,color:0x2589bc}:{absorption:[.19,.070,.040],scattering:.022,color:0x175e8a},
  coastal:{absorption:[.30,.135,.080],scattering:.043,color:0x285a65},
@@ -2544,6 +2545,7 @@ function updateCausticLighting(cameraDepth=0){
  const emphasis=causticMode==='wave'?causticContrast:1;
  const emission=Math.max(0,Math.min(1.8,strength*(causticMode==='wave'?1.05:.75)*emphasis));
  floorCausticMaterial.emissiveIntensity=emission;
+ if(floorCausticMaterial.userData.floorPhotonValid)floorCausticMaterial.userData.floorPhotonValid.value=causticGPUFrames>0&&causticGPU&&!causticGPUFault&&causticMode==='wave'?1:0;
  if(continuousFloor){continuousFloor.origin.value.set(Number.isFinite(causticProjectionX)?causticProjectionX:0,Number.isFinite(causticProjectionZ)?causticProjectionZ:0);continuousFloor.controls.value.set(causticProjectionWidth,causticMode==='wave'&&enabled?emission:0,clockTime,Math.max(.4,waterClarity));continuousFloor.wave.value=causticMode==='wave'?1:0;continuousFloor.shadow.value=waveTransmissionMaterialActive?1:0;continuousFloor.lens.value.set(waveHeight,causticFocus);continuousFloor.absorption.value=Math.max(0,depthAbsorption);updateFloorFFTCurvature();}
  floorCausticMaterial.color.setScalar(causticMode==='wave'&&enabled?
    Math.max(.72,1-.12*causticContrast):1);
@@ -2734,6 +2736,20 @@ function setupContinuousFloor(mat,detail){
    const nearFade=float(1).sub(smoothstep(7,32,eyeDistance));
    const micro=vec3(.98,1,1).mul(optical).mul(depthFade).mul(depth.mul(-.055).div(controls.w).exp());
    light=light.mul(float(1).sub(nearFade.mul(depthFade).mul(.20))).add(micro.mul(1.10));
+  }
+  if(photonLedFloor&&recoveredRadiance){
+   // Prefer deposited refracted rays where the local photon projection is
+   // valid. Suppress the analytical pattern there, rather than stacking
+   // another set of periodic folds. Keep the original response outside.
+   const photonValid=uniform(0);
+   const coverage=float(1).sub(smoothstep(.30,.45,q.length())).mul(photonValid);
+   const photonPeak=local.r.max(local.g).max(local.b);
+   const photonCore=photonPeak.pow(.82);
+   const photonShoulder=photonPeak.pow(.48).mul(.20);
+   const photonLight=vec3(.97,1,1).mul(photonCore.mul(2.65).add(photonShoulder));
+   const physicalMix=coverage.mul(.76);
+   light=light.mul(float(1).sub(physicalMix)).add(photonLight.mul(physicalMix));
+   mat.userData.floorPhotonValid=photonValid;
   }
   const sandA=texture(detail.albedo,xz.div(5.5)).r;
   const grain=sandA.mul(.24).add(.76);
@@ -7572,7 +7588,7 @@ function disableVolumeMarch(error){
  volumeMarchFault=String(error?.message||error);volumeMarchActive=false;
  screenLightPipeline.outputNode=volumeMarchBase;screenLightPipeline.needsUpdate=true;
  console.warn('Volume march fallback to existing screen scattering',error);
- status('28.5.69 volumetric fallback: '+volumeMarchFault);
+ status('28.5.70 volumetric fallback: '+volumeMarchFault);
  return true;
 }
 async function initScreenSpaceLighting(){
@@ -7615,7 +7631,7 @@ async function initScreenSpaceLighting(){
   screenBlendColor=blendColor;
   screenSpaceReady=true;
   applyScreenScatteringQuality();
-  status(volumeMarchActive?'28.5.69 aperiodic refractive microstructure initialized.':'24.7 depth-aware screen-space scattering initialized.');
+  status(volumeMarchActive?'28.5.70 photon-led seabed illumination initialized.':'24.7 depth-aware screen-space scattering initialized.');
  }catch(error){
   screenSpaceFault=String(error?.message||error);
   screenSpaceFailed=true;

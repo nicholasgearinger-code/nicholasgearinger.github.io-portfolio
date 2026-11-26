@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.33 High contrast multiscale shallow water caustics</title>
+<title>Rift Water Lab · WebGPU 28.5.34 FFT coupled wave curvature caustics</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.33</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.34</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -150,7 +150,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.33 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.34 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -1713,7 +1713,7 @@ function updateWaveTransmissionObjects(t){
  }
 }
 
-// 28.5.33: same transmission model in a parallel compute pass.
+// 28.5.34: same transmission model in a parallel compute pass.
 // Keep the existing texture and CPU fallback; no blocking GPU readback.
 let transmissionGPU=null,transmissionGPUStarting=false,transmissionGPUFault='',transmissionGPUFrames=0;
 const transmissionWGSL=`
@@ -1940,7 +1940,7 @@ function updateCausticLighting(cameraDepth=0){
  const emphasis=causticMode==='wave'?causticContrast:1;
  const emission=Math.max(0,Math.min(1.8,strength*(causticMode==='wave'?1.05:.75)*emphasis));
  floorCausticMaterial.emissiveIntensity=emission;
- if(continuousFloor){continuousFloor.origin.value.set(Number.isFinite(causticProjectionX)?causticProjectionX:0,Number.isFinite(causticProjectionZ)?causticProjectionZ:0);continuousFloor.controls.value.set(causticProjectionWidth,causticMode==='wave'&&enabled?emission:0,clockTime,Math.max(.4,waterClarity));continuousFloor.wave.value=causticMode==='wave'?1:0;continuousFloor.shadow.value=waveTransmissionMaterialActive?1:0;continuousFloor.lens.value.set(waveHeight,causticFocus);}
+ if(continuousFloor){continuousFloor.origin.value.set(Number.isFinite(causticProjectionX)?causticProjectionX:0,Number.isFinite(causticProjectionZ)?causticProjectionZ:0);continuousFloor.controls.value.set(causticProjectionWidth,causticMode==='wave'&&enabled?emission:0,clockTime,Math.max(.4,waterClarity));continuousFloor.wave.value=causticMode==='wave'?1:0;continuousFloor.shadow.value=waveTransmissionMaterialActive?1:0;continuousFloor.lens.value.set(waveHeight,causticFocus);updateFloorFFTCurvature();}
  floorCausticMaterial.color.setScalar(causticMode==='wave'&&enabled?
    Math.max(.72,1-.12*causticContrast):1);
  // This projection is mapped only onto the sand. Rock UVs do not
@@ -1977,11 +1977,37 @@ function makeSeabedDetail(){
 }
 // Continuous floor optics: radial crossfade from ray-traced local light
 // to a cheap world-anchored curvature approximation beyond its footprint.
+function updateFloorFFTCurvature(){
+ const f=continuousFloor;if(!f)return;
+ const valid=fftMix>.0005&&gpuFFT?.ready&&!fftFault&&Number.isFinite(gpuFFT.rms)&&!new URLSearchParams(location.search).has('analyticCaustics');
+ f.fftCurvatureMix.value=valid?Math.min(2,fftEnergy*waveHeight*fftMix)*.65:0;
+ if(!valid||f.fftFrame===gpuFFT.frameCount&&f.fftOwner===gpuFFT)return;
+ // Reuse the height samples already collected by the GPU ray solver.
+ // No extra FFT readback or height-field sampling loop.
+ const g=causticGPU;
+ if(!g||g.fftOwner!==gpuFFT||g.fftFrame<0){f.fftCurvatureMix.value=0;return;}
+ if(f.fftFrame===g.fftFrame&&f.fftOwner===gpuFFT)return;
+ const a=g.field,p=f.curvaturePixels,n=64,inv=1/(1.5*1.5);
+ const encode=v=>Math.round(Math.max(0,Math.min(255,128+v*127.5)));
+ for(let j=0;j<n;j++)for(let i=0;i<n;i++){
+  const l=(i+63)&63,r=(i+1)&63,u=(j+63)&63,d=(j+1)&63,k=j*n+i,c=a[k];
+  p[k*4]=encode((a[j*n+l]+a[j*n+r]-2*c)*inv);
+  p[k*4+1]=encode((a[u*n+i]+a[d*n+i]-2*c)*inv);
+  p[k*4+2]=encode((a[d*n+r]-a[d*n+l]-a[u*n+r]+a[u*n+l])*inv*.25);
+  p[k*4+3]=255;
+ }
+ f.curvatureTex.needsUpdate=true;f.fftFrame=g.fftFrame;f.fftOwner=gpuFFT;
+}
 function setupContinuousFloor(mat,detail){
  if(!mat.isNodeMaterial||!oceanTSL||!causticMap||!waveTransmissionTexture)return;
  try{
   const {uniform,float,vec2,vec3,texture,positionWorld,materialColor,materialEmissive,smoothstep}=oceanTSL;
   const origin=uniform(new THREE.Vector2()),controls=uniform(new THREE.Vector4(64,0,0,1)),wave=uniform(1),shadow=uniform(0),lens=uniform(new THREE.Vector2(1,1.2));
+  // Independent persistent texture avoids dangling references when ocean LOD is rebuilt.
+  const curvaturePixels=new Uint8Array(64*64*4);curvaturePixels.fill(128);
+  const curvatureTex=new THREE.DataTexture(curvaturePixels,64,64,THREE.RGBAFormat);
+  curvatureTex.wrapS=curvatureTex.wrapT=THREE.RepeatWrapping;curvatureTex.minFilter=curvatureTex.magFilter=THREE.LinearFilter;curvatureTex.generateMipmaps=false;curvatureTex.needsUpdate=true;
+  const fftCurvatureMix=uniform(0);
   const xz=positionWorld.xz,q=xz.sub(origin).div(controls.x);
   const uv=vec2(q.x.add(.5),float(.5).sub(q.y));
   const localMask=float(1).sub(smoothstep(.27,.47,q.length()));
@@ -2016,6 +2042,9 @@ function setupContinuousFloor(mat,detail){
    const h=phase.sin().mul(-amp).mul(lens.x).mul(envelope);
    xx=xx.add(h.mul(kx*kx));zz=zz.add(h.mul(kz*kz));xzCurvature=xzCurvature.add(h.mul(kx*kz));
   }
+  // Sample the Hessian of the same FFT height field used by the ocean.
+  const fftHessian=texture(curvatureTex,vec2(sx,sz).div(96).add(1/128)).rgb.sub(128/255).mul(2).mul(fftCurvatureMix);
+  xx=xx.add(fftHessian.r);zz=zz.add(fftHessian.g);xzCurvature=xzCurvature.add(fftHessian.b);
   const det=float(1).sub(xx.mul(bend)).mul(float(1).sub(zz.mul(bend))).sub(xzCurvature.mul(xzCurvature).mul(bend).mul(bend));
   const focus=float(1).div(det.abs().max(.095)).sub(1.12).max(0);
   // Narrow focal cores with a low-energy shoulder instead of broad white cells.
@@ -2039,7 +2068,7 @@ function setupContinuousFloor(mat,detail){
   // Approximate added diffuse irradiance using receiver albedo and orientation.
   const receiver=oceanTSL.normalWorld.normalize().dot(vec3(16,35,8).normalize()).max(0);
   mat.emissiveNode=materialEmissive.mul(float(1).sub(wave)).add(litCaustic.mul(materialColor.rgb.mul(.55).add(vec3(.45))).mul(receiver.mul(.75).add(.25)).mul(vec3(.90,.98,1)));
-  mat.userData.continuousFloor=true;continuousFloor={origin,controls,wave,shadow,lens};
+  mat.userData.continuousFloor=true;continuousFloor={origin,controls,wave,shadow,lens,curvatureTex,curvaturePixels,fftCurvatureMix,fftFrame:-1,fftOwner:null};
   mat.needsUpdate=true;
  }catch(e){continuousFloor=null;mat.colorNode=null;mat.emissiveNode=null;console.warn('Continuous floor fallback',e);}
 }
@@ -6895,7 +6924,7 @@ async function init3D(forceWebGL=false){
  const backend=forceWebGL?'WebGLRenderer':renderer.backend?.constructor?.name||'WebGPU (unknown backend)';
  isWebGPU=!forceWebGL&&/webgpu/i.test(backend);
  oceanTSL=null;oceanAngleBlend=null;oceanAngleDepth=null;oceanColumnSigma=null;oceanColumnEnabled=null;oceanGlintControls=null;oceanRoughnessControls=null;
- underwaterMirror=null;mirrorCamera=null;mirrorMatrix=null;mirrorWeight=null;mirrorFailed=false;mirrorLast=-100;underwaterPathOptics=null;causticObjectUniforms=null;undersideLensControls=null;continuousFloor=null;
+ underwaterMirror=null;mirrorCamera=null;mirrorMatrix=null;mirrorWeight=null;mirrorFailed=false;mirrorLast=-100;underwaterPathOptics=null;causticObjectUniforms=null;undersideLensControls=null;continuousFloor?.curvatureTex?.dispose();continuousFloor=null;
  if(isWebGPU&&!safeStartup&&!new URLSearchParams(location.search).has('classicOptics')){
   try{oceanTSL=await import('three/tsl');}catch(e){console.warn('Angle optics unavailable',e);}
  }
@@ -7107,7 +7136,7 @@ async function init3D(forceWebGL=false){
   const now=performance.now();
   if(now-last>1100){
    const measured=samples*1000/(now-last);
-   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · device '+(fluid3?.shared&&gpuFFT?.shared?'shared':fluid3?.shared?'fluid shared':'separate')+' · mesh '+(offshoreGPU?'GPU rings '+offshoreGPU.cutoff+'m / CPU interaction':offshoreGPUFault?'CPU fallback':'CPU')+' · FFT '+(offshoreGPU?.directAttached&&gpuFFT?.renderFrames>0&&!gpuFFT?.renderFault?'direct GPU':'CPU bridge')+' · foam '+(foamSkin?.material?.userData?.gpuFoamSkin?'GPU shader':'CPU texture')+' · aeration '+(turbulenceGPUFault?'CPU fallback':turbulenceGPUFrames?(turbulenceGPU?.resident?'GPU resident ':'GPU hybrid ')+turbulenceGPUFrames:'CPU')+' / '+turbulencePeak.toFixed(2)+' · floor '+(continuousFloor?'continuous':'standard')+' · underside '+(undersideLensControls?'lens shader':'standard')+' · caustics '+(causticGPUFault?'CPU fallback ('+causticGPUFault.slice(0,100)+')':causticGPUFrames?'GPU '+causticGPUFrames:'CPU')+' · sunlight '+(transmissionGPUFault?'CPU fallback':transmissionGPUFrames?'GPU '+transmissionGPUFrames:'CPU')+' · topology '+(turbulenceGPUFault?'CPU fallback':topologyGPUFrames?'GPU validated '+topologyGPUFrames:gpuTopologyEnabled?'GPU pending / CPU':'CPU')+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · rock waves '+(owPeak*100).toFixed(1)+' cm · run-up '+(runupPeak*100).toFixed(0)+' cm / '+runupSpills+' spills · hull wall '+hullWaveCells+' / '+hullClipCount+' clipped · hull splashes '+hullSplashHits+' · hull run-up '+(hullRunupPeak*100).toFixed(0)+' cm / '+hullOvertops+' spills · sheet '+hullSheetCells+' cells / '+hullSheetTears+' tears · hull APIC '+(hullAPFault?'fallback':hullAP?(hullGPUFrames&&!hullGPUFault?'GPU ':'CPU ')+hullAP.particles.length+'p / '+hullAPContacts+' contacts / '+hullAPReturns+' returns':'idle')+' · AP load '+Math.hypot(hullReaction.x,hullReaction.y,hullReaction.z).toFixed(0)+' N · deck '+deckMass.toFixed(1)+' kg / '+deckFlowPeak.toFixed(2)+' m/s / '+deckSpills+' drains · screen hull '+hullVolumeTriangles+' tris / '+(hullDensityFrames&&!hullDensityFault?'GPU density':'CPU density')+' / '+(hullScreenFault?'mesh fallback':hullScreenFrames?'SS normals '+hullScreenFrames:'SS idle')+' · rock eddies '+objectVortexCount+' · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?(apGPUFrames&&!apGPUFault?'GPU ':'CPU ')+apGrid.particles.length+'p '+(apGPUFrames&&!apGPUFault?apGPUFrames+' steps · mesh '+rcTriangles+' tris · '+(rcGPUFrames&&!rcGPUFault?'GPU density':'CPU density')+(rcThicknessEnabled?' · SS thickness':'')+(whitewaterVolumeEnabled?' · WW '+(wwGPUFrames&&!wwGPUFault?'GPU':'CPU'):''):apStats.after.toFixed(2)+' div'):'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
+   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · device '+(fluid3?.shared&&gpuFFT?.shared?'shared':fluid3?.shared?'fluid shared':'separate')+' · mesh '+(offshoreGPU?'GPU rings '+offshoreGPU.cutoff+'m / CPU interaction':offshoreGPUFault?'CPU fallback':'CPU')+' · FFT '+(offshoreGPU?.directAttached&&gpuFFT?.renderFrames>0&&!gpuFFT?.renderFault?'direct GPU':'CPU bridge')+' · foam '+(foamSkin?.material?.userData?.gpuFoamSkin?'GPU shader':'CPU texture')+' · aeration '+(turbulenceGPUFault?'CPU fallback':turbulenceGPUFrames?(turbulenceGPU?.resident?'GPU resident ':'GPU hybrid ')+turbulenceGPUFrames:'CPU')+' / '+turbulencePeak.toFixed(2)+' · floor '+(continuousFloor?(continuousFloor.fftCurvatureMix.value>0?'FFT curvature':'continuous'):'standard')+' · underside '+(undersideLensControls?'lens shader':'standard')+' · caustics '+(causticGPUFault?'CPU fallback ('+causticGPUFault.slice(0,100)+')':causticGPUFrames?'GPU '+causticGPUFrames:'CPU')+' · sunlight '+(transmissionGPUFault?'CPU fallback':transmissionGPUFrames?'GPU '+transmissionGPUFrames:'CPU')+' · topology '+(turbulenceGPUFault?'CPU fallback':topologyGPUFrames?'GPU validated '+topologyGPUFrames:gpuTopologyEnabled?'GPU pending / CPU':'CPU')+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · rock waves '+(owPeak*100).toFixed(1)+' cm · run-up '+(runupPeak*100).toFixed(0)+' cm / '+runupSpills+' spills · hull wall '+hullWaveCells+' / '+hullClipCount+' clipped · hull splashes '+hullSplashHits+' · hull run-up '+(hullRunupPeak*100).toFixed(0)+' cm / '+hullOvertops+' spills · sheet '+hullSheetCells+' cells / '+hullSheetTears+' tears · hull APIC '+(hullAPFault?'fallback':hullAP?(hullGPUFrames&&!hullGPUFault?'GPU ':'CPU ')+hullAP.particles.length+'p / '+hullAPContacts+' contacts / '+hullAPReturns+' returns':'idle')+' · AP load '+Math.hypot(hullReaction.x,hullReaction.y,hullReaction.z).toFixed(0)+' N · deck '+deckMass.toFixed(1)+' kg / '+deckFlowPeak.toFixed(2)+' m/s / '+deckSpills+' drains · screen hull '+hullVolumeTriangles+' tris / '+(hullDensityFrames&&!hullDensityFault?'GPU density':'CPU density')+' / '+(hullScreenFault?'mesh fallback':hullScreenFrames?'SS normals '+hullScreenFrames:'SS idle')+' · rock eddies '+objectVortexCount+' · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?(apGPUFrames&&!apGPUFault?'GPU ':'CPU ')+apGrid.particles.length+'p '+(apGPUFrames&&!apGPUFault?apGPUFrames+' steps · mesh '+rcTriangles+' tris · '+(rcGPUFrames&&!rcGPUFault?'GPU density':'CPU density')+(rcThicknessEnabled?' · SS thickness':'')+(whitewaterVolumeEnabled?' · WW '+(wwGPUFrames&&!wwGPUFault?'GPU':'CPU'):''):apStats.after.toFixed(2)+' div'):'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
    $('fps').textContent='FPS: '+Math.round(measured);
    const avg=k=>(profile[k]/Math.max(1,profile.count)).toFixed(1);
    const ph=$('frameProfile');if(ph)ph.textContent='ms/frame: '+avg('total')+' | physics '+avg('physics')+' | aeration '+avg('aeration')+' | mesh '+avg('geometry')+' | foam '+avg('foam')+' | lighting/other '+avg('lighting')+' | render submit '+avg('submit')+' | queue drain '+(profile.queueCount?(profile.queue/profile.queueCount).toFixed(1)+' ms':'—')+' (not GPU timer)';

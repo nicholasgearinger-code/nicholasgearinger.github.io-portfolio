@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.52 Depth-resolved solid light occlusion</title>
+<title>Rift Water Lab · WebGPU 28.5.53 Indirect underwater light scattering</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.52</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.53</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -120,6 +120,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Waterline softness <input id="waterlineSoftness" aria-label="Waterline softness" type="range" min=".2" max="2" step=".05" value=".65"></label><output id="waterlineSoftnessOut">0.65 m</output></div>
 <div class="row"><label>Underside distortion <input id="undersideDistortion" aria-label="Underside distortion" type="range" min="0" max="2" step=".05" value="1"></label><output id="undersideDistortionOut">1.00</output></div>
 <div class="row"><label>Underwater scattering <input id="underwaterScatter" aria-label="Underwater scattering" type="range" min="0" max="2" step=".05" value="1"></label><output id="underwaterScatterOut">1.00</output></div>
+<div class="row"><label>Indirect scattering <input id="indirectScatter" aria-label="Indirect underwater light scattering" type="range" min="0" max="1.5" step=".05" value=".65"></label><output id="indirectScatterOut">0.65</output></div>
 <div class="row"><label>Underwater visibility <select id="visibilityMode"><option value="unified" selected>24.4 · unified depth and distance</option><option value="classic">24.3 · original visibility</option></select></label></div>
 <div class="row"><label>Visibility range <input id="visibilityRange" aria-label="Underwater visibility range" type="range" min="8" max="80" step="2" value="34"></label><output id="visibilityRangeOut">34 m</output></div>
 <div class="row"><label>Seabed distance fade <input id="seabedFade" aria-label="Seabed distance fade" type="range" min=".2" max="2" step=".05" value="1"></label><output id="seabedFadeOut">1.00</output></div>
@@ -151,7 +152,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.52 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.53 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -1125,7 +1126,7 @@ function updateUndersideOptics(){
   const lens=1+(waveLensFactor-1)*underwaterLensing;
   underwaterSunlight.intensity=blend*.38*underwaterTransmission*transmitted*lens;
   underwaterAmbient.intensity=blend*.16*underwaterTransmission*transmitted*
-    (.85+.15*lens);
+    (.85+.15*lens)*(1+.16*indirectScatterStrength*Math.min(1.5,underwaterScatter));
  }
 }
 function smoothOceanRadii(){
@@ -1395,6 +1396,8 @@ function buildUnderwaterScene(){
  underwaterObjects=group;waterFloor.add(group);
 }
 const LIGHT_N=96,LIGHT_LAYERS=6,LIGHT_BYTES=96*96*6*4;
+let indirectScatterStrength=new URLSearchParams(location.search).has('noIndirectScatter')?0:.65;
+let indirectScatterNode=null;
 let lightAtlas=null,lightPixels=null,lightControls=null,lightGPU=null,lightStarting=false,lightFault='',lightFrames=0;
 const lightFieldEnabled=!new URLSearchParams(location.search).has('noLightField');
 function initLightAtlas(){
@@ -1404,6 +1407,7 @@ function initLightAtlas(){
  lightAtlas.minFilter=lightAtlas.magFilter=THREE.LinearFilter;
  lightAtlas.wrapS=lightAtlas.wrapT=THREE.ClampToEdgeWrapping;lightAtlas.generateMipmaps=false;lightAtlas.needsUpdate=true;
  lightControls=oceanTSL.uniform(new THREE.Vector4(0,0,64,0));
+ indirectScatterNode=oceanTSL.uniform(0);
 }
 function sampleLightField(position){
  if(!lightAtlas||!lightControls)return null;
@@ -1412,11 +1416,14 @@ function sampleLightField(position){
  const uv=vec2(q.x.add(.5),float(.5).sub(q.y)).clamp(0,1);
  const depth=position.y.negate(),layer=depth.sub(.75).div(2).clamp(0,5);
  const lo=layer.floor(),hi=lo.add(1).min(5),px=uv.mul(95).add(.5);
- const a=texture(lightAtlas,vec2(px.x.div(96),px.y.add(lo.mul(96)).div(576))).r;
- const b=texture(lightAtlas,vec2(px.x.div(96),px.y.add(hi.mul(96)).div(576))).r;
- const energy=a.add(b.sub(a).mul(layer.sub(lo)));
+ const a=texture(lightAtlas,vec2(px.x.div(96),px.y.add(lo.mul(96)).div(576)));
+ const b=texture(lightAtlas,vec2(px.x.div(96),px.y.add(hi.mul(96)).div(576)));
+ const energy=a.r.add(b.r.sub(a.r).mul(layer.sub(lo)));
+ // The green channel stores a broad local irradiance estimate from the same
+ // photon reconstruction. Interpolate both fields identically in world depth.
+ const diffuse=a.g.add(b.g.sub(a.g).mul(layer.sub(lo)));
  const mask=float(1).sub(smoothstep(.28,.46,q.length())).mul(smoothstep(.25,.75,depth)).mul(float(1).sub(smoothstep(9.5,11.75,depth))).mul(u.w);
- return {energy,mask};
+ return {energy,mask,diffuse};
 }
 // A small orthographic optical blocker atlas. Each texel stores the highest
 // solid intersection along the mean refracted sunlight direction.
@@ -1726,7 +1733,15 @@ fn shade(@builtin(global_invocation_id) id:vec3u){
  let expected=0.9*exp(-(0.75+2.0*f32(id.z))*p[6]);
  let excess=max(0.0,mix(mean,center,0.38)-max(expected*0.82,mean*0.78));
  let v=u32(round(255.0*clamp(1.0-exp(-excess*3.6),0.0,1.0)));
- result[k]=v|(v<<8u)|(v<<16u)|0xff000000u;
+ // Estimate locally scattered irradiance using a wider spatial kernel.
+ // Keep it independent of the sharp red-channel focal reconstruction.
+ var broad=mean;
+ if(id.x>=3u&&id.x<93u&&id.y>=3u&&id.y<93u){
+  let ring=f32(atomicLoad(&energy[k-3u])+atomicLoad(&energy[k+3u])+atomicLoad(&energy[k-3u*N])+atomicLoad(&energy[k+3u*N]))/262144.0;
+  broad=mean*0.45+ring*0.55;
+ }
+ let diffuse=u32(round(255.0*clamp(1.0-exp(-broad*0.75),0.0,1.0)));
+ result[k]=v|(diffuse<<8u)|(v<<16u)|0xff000000u;
 }
 `;
 }
@@ -7021,6 +7036,8 @@ for(const [id,out,assign] of [
   $(out).textContent=value.toFixed(2)+(id==='waterlineSoftness'?' m':'');
  };
 }
+$('indirectScatter').value=String(indirectScatterStrength);$('indirectScatterOut').textContent=indirectScatterStrength.toFixed(2);
+$('indirectScatter').oninput=()=>{indirectScatterStrength=Number($('indirectScatter').value);$('indirectScatterOut').textContent=indirectScatterStrength.toFixed(2);};
 $('underwaterScatter').oninput=()=>{
  underwaterScatter=Number($('underwaterScatter').value);
  $('underwaterScatterOut').textContent=underwaterScatter.toFixed(2);
@@ -7185,8 +7202,16 @@ function buildVolumeMarch(composed,sceneDepth){
    // Integrate the extinction over the whole step, not just its midpoint.
    const integral=float(1).sub(step.mul(controls.y).negate().exp()).div(controls.y.max(.0001));
    const startTransmission=distance.sub(step.mul(jitter)).max(0).mul(controls.y).negate().exp();
-   const energy=field.energy.pow(1.25).mul(field.mask).mul(wet).mul(phase).mul(startTransmission).mul(integral).mul(controls.x).mul(solidLightVisibility(point));
-   accumulated.addAssign(vec3(.72,.96,1).mul(spectral).mul(energy));
+   const visibility=solidLightVisibility(point);
+   const transport=field.mask.mul(wet).mul(startTransmission).mul(integral).mul(controls.x);
+   const energy=field.energy.pow(1.25).mul(phase).mul(transport).mul(visibility);
+   // Second-order scattering surrogate: broad local irradiance redistributed
+   // into a nearly isotropic lobe, including a bounded fill behind blockers.
+   const scatterProbability=float(1).sub(depth.div(controls.z).add(distance.mul(.35)).mul(-.065).exp());
+   const indirect=field.diffuse.mul(scatterProbability).mul(indirectScatterNode)
+    .mul(float(.32).add(visibility.mul(.35))).mul(transport).mul(.28);
+   accumulated.addAssign(vec3(.72,.96,1).mul(spectral).mul(energy)
+    .add(vec3(.38,.78,.89).mul(spectral).mul(indirect)));
   });
   });
   return accumulated.clamp(0,.48);
@@ -7196,6 +7221,7 @@ function buildVolumeMarch(composed,sceneDepth){
 }
 function updateVolumeMarch(){
  if(!volumeMarchActive||!volumeMarchControls)return;
+ if(indirectScatterNode)indirectScatterNode.value=Math.max(0,indirectScatterStrength)*Math.min(2,underwaterScatter);
  const clarity=Math.max(.4,waterClarity);
  const strength=underwaterActive&&causticMode==='wave'&&lightFrames>0&&!lightFault?Math.min(.24,.085*volumetricStrength*underwaterBlend):0;
  volumeMarchControls.value.set(strength,(.045+.035*Math.max(0,depthAbsorption)+.025*underwaterScatter)/clarity,clarity,Math.max(0,depthAbsorption));
@@ -7209,7 +7235,7 @@ function disableVolumeMarch(error){
  volumeMarchFault=String(error?.message||error);volumeMarchActive=false;
  screenLightPipeline.outputNode=volumeMarchBase;screenLightPipeline.needsUpdate=true;
  console.warn('Volume march fallback to existing screen scattering',error);
- status('28.5.52 volumetric fallback: '+volumeMarchFault);
+ status('28.5.53 volumetric fallback: '+volumeMarchFault);
  return true;
 }
 async function initScreenSpaceLighting(){
@@ -7252,7 +7278,7 @@ async function initScreenSpaceLighting(){
   screenBlendColor=blendColor;
   screenSpaceReady=true;
   applyScreenScatteringQuality();
-  status(volumeMarchActive?'28.5.52 depth-resolved solid light occlusion initialized.':'24.7 depth-aware screen-space scattering initialized.');
+  status(volumeMarchActive?'28.5.53 indirect underwater scattering initialized.':'24.7 depth-aware screen-space scattering initialized.');
  }catch(error){
   screenSpaceFault=String(error?.message||error);
   screenSpaceFailed=true;

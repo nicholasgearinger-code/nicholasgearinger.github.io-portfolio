@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.10 GPU sunlight transmission</title>
+<title>Rift Water Lab · WebGPU 28.5.11 GPU offshore geometry</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.10</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.11</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -150,7 +150,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.10 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.11 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -1460,7 +1460,7 @@ function updateWaveTransmissionObjects(t){
  }
 }
 
-// 28.5.10: same transmission model in a parallel compute pass.
+// 28.5.11: same transmission model in a parallel compute pass.
 // Keep the existing texture and CPU fallback; no blocking GPU readback.
 let transmissionGPU=null,transmissionGPUStarting=false,transmissionGPUFault='',transmissionGPUFrames=0;
 const transmissionWGSL=`
@@ -1740,11 +1740,11 @@ function createSeabed(){
 let offshoreGPU=null,offshoreGPUFault='';
 function setupOffshoreGPU(mat,geo){
  offshoreGPU=null;
- if(!oceanTSL||!mat.isNodeMaterial||!new URLSearchParams(location.search).has('gpuOcean'))return;
+ if(!oceanTSL||!mat.isNodeMaterial||offshoreGPUFault||new URLSearchParams(location.search).has('cpuOcean'))return;
  try{
   const {Fn,If,float,vec2,vec3,vec4,uniform,attribute,positionGeometry,normalLocal,texture}=oceanTSL;
   const count=geo.attributes.position.count,mask=new Float32Array(count);
-  const cutoff=new URLSearchParams(location.search).has('gpuLocal')?29:38;
+  const cutoff=new URLSearchParams(location.search).has('wideCPUOcean')?38:29;
   for(let i=0;i<count;i++)mask[i]=Math.hypot(nearBase[i*3],nearBase[i*3+2])>=cutoff?1:0;
   geo.setAttribute('offshoreMask',new THREE.BufferAttribute(mask,1));
   const fftTex=new THREE.DataTexture(new Uint8Array(64*64*4),64,64,THREE.RGBAFormat);
@@ -5597,7 +5597,6 @@ function animateWaves(t){
   if(offshoreGPU?.mask[i/3]){if(offshoreTint){const w=waveField(x,z,t);oceanSpectralTint(x,z,w.height,w.slopeX,w.slopeZ,nearColorData,i);}deformationWeights[i/3]=0;continue;}
   const wave=waveField(x,z,t);
   const wx=x+wave.dx,wz=z+wave.dz;
-  const radial=Math.hypot(px,pz);
   const fade=oceanFieldSupport(wx,wz,36,4);
   if(fade<=0){arr[i]=px+wave.dx;arr[i+1]=wave.height;arr[i+2]=pz+wave.dz;smoothWaterNormal(nearNormals,i,wave.slopeX,wave.slopeZ);oceanSpectralTint(x,z,wave.height,wave.slopeX,wave.slopeZ,nearColorData,i);deformationWeights[i/3]=0;continue;}
   const disturbance=oceanWakeOffset(wx,wz);
@@ -5622,7 +5621,8 @@ function animateWaves(t){
   oceanSpectralTint(x,z,wave.height,wave.slopeX,wave.slopeZ,nearColorData,i);
   // Approximate subsurface gas scattering in the continuous water surface.
   if(foamFieldReady&&fade>0&&foamStrength>.01){
-   const a0=foamLayer(wx,wz,0,entrainedAir),a1=foamLayer(wx,wz,1,entrainedAir),a2=foamLayer(wx,wz,2,entrainedAir);
+   foamStencil(wx,wz,opticalStencil);
+   const a0=foamAtStencil(opticalStencil,0,entrainedAir),a1=foamAtStencil(opticalStencil,1,entrainedAir),a2=foamAtStencil(opticalStencil,2,entrainedAir);
    const support=oceanFoamSupport(wx,wz);let scatter=aeratedOpticalMix(a0,a1,a2,foamStrength)*support*.32;
    let cr=.86,cg=.88,cb=.90;
    if(whitewaterVolumeEnabled&&a0+a1+a2>.20){
@@ -6703,7 +6703,11 @@ async function init3D(forceWebGL=false){
     console.warn('24.7 asynchronous rendering fallback',error);
    });
   }catch(error){
-   if(scatteringMode==='screen'){
+   if(offshoreGPU){
+    offshoreGPUFault=String(error?.message||error);gpuFFT?.detachRenderTexture?.(offshoreGPU.directTexture);offshoreGPU.fftTex.dispose();offshoreGPU=null;
+    waterNearMaterial.positionNode=null;waterNearMaterial.needsUpdate=true;
+    status('GPU ocean fallback: '+offshoreGPUFault);console.warn('GPU ocean fallback',error);
+   }else if(scatteringMode==='screen'){
     screenSpaceFault=String(error?.message||error);
     scatteringMode='soft';$('scatteringMode').value='soft';
     screenSpaceReady=false;screenSpaceFailed=true;screenLightPipeline=null;
@@ -6730,7 +6734,7 @@ async function init3D(forceWebGL=false){
   const now=performance.now();
   if(now-last>1100){
    const measured=samples*1000/(now-last);
-   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · device '+(fluid3?.shared&&gpuFFT?.shared?'shared':fluid3?.shared?'fluid shared':'separate')+' · FFT '+(offshoreGPU?.directAttached&&gpuFFT?.renderFrames>0&&!gpuFFT?.renderFault?'direct GPU':'CPU bridge')+' · foam '+(foamSkin?.material?.userData?.gpuFoamSkin?'GPU shader':'CPU texture')+' · aeration '+(turbulenceGPUFault?'CPU fallback':turbulenceGPUFrames?(turbulenceGPU?.resident?'GPU resident ':'GPU hybrid ')+turbulenceGPUFrames:'CPU')+' / '+turbulencePeak.toFixed(2)+' · sunlight '+(transmissionGPUFault?'CPU fallback':transmissionGPUFrames?'GPU '+transmissionGPUFrames:'CPU')+' · topology '+(topologyGPUFrames?'GPU validated '+topologyGPUFrames:'CPU')+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · rock waves '+(owPeak*100).toFixed(1)+' cm · run-up '+(runupPeak*100).toFixed(0)+' cm / '+runupSpills+' spills · hull wall '+hullWaveCells+' / '+hullClipCount+' clipped · hull splashes '+hullSplashHits+' · hull run-up '+(hullRunupPeak*100).toFixed(0)+' cm / '+hullOvertops+' spills · sheet '+hullSheetCells+' cells / '+hullSheetTears+' tears · hull APIC '+(hullAPFault?'fallback':hullAP?(hullGPUFrames&&!hullGPUFault?'GPU ':'CPU ')+hullAP.particles.length+'p / '+hullAPContacts+' contacts / '+hullAPReturns+' returns':'idle')+' · AP load '+Math.hypot(hullReaction.x,hullReaction.y,hullReaction.z).toFixed(0)+' N · deck '+deckMass.toFixed(1)+' kg / '+deckFlowPeak.toFixed(2)+' m/s / '+deckSpills+' drains · screen hull '+hullVolumeTriangles+' tris / '+(hullDensityFrames&&!hullDensityFault?'GPU density':'CPU density')+' / '+(hullScreenFault?'mesh fallback':hullScreenFrames?'SS normals '+hullScreenFrames:'SS idle')+' · rock eddies '+objectVortexCount+' · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?(apGPUFrames&&!apGPUFault?'GPU ':'CPU ')+apGrid.particles.length+'p '+(apGPUFrames&&!apGPUFault?apGPUFrames+' steps · mesh '+rcTriangles+' tris · '+(rcGPUFrames&&!rcGPUFault?'GPU density':'CPU density')+(rcThicknessEnabled?' · SS thickness':'')+(whitewaterVolumeEnabled?' · WW '+(wwGPUFrames&&!wwGPUFault?'GPU':'CPU'):''):apStats.after.toFixed(2)+' div'):'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
+   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · device '+(fluid3?.shared&&gpuFFT?.shared?'shared':fluid3?.shared?'fluid shared':'separate')+' · mesh '+(offshoreGPU?'GPU outer / CPU local':offshoreGPUFault?'CPU fallback':'CPU')+' · FFT '+(offshoreGPU?.directAttached&&gpuFFT?.renderFrames>0&&!gpuFFT?.renderFault?'direct GPU':'CPU bridge')+' · foam '+(foamSkin?.material?.userData?.gpuFoamSkin?'GPU shader':'CPU texture')+' · aeration '+(turbulenceGPUFault?'CPU fallback':turbulenceGPUFrames?(turbulenceGPU?.resident?'GPU resident ':'GPU hybrid ')+turbulenceGPUFrames:'CPU')+' / '+turbulencePeak.toFixed(2)+' · sunlight '+(transmissionGPUFault?'CPU fallback':transmissionGPUFrames?'GPU '+transmissionGPUFrames:'CPU')+' · topology '+(topologyGPUFrames?'GPU validated '+topologyGPUFrames:'CPU')+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · rock waves '+(owPeak*100).toFixed(1)+' cm · run-up '+(runupPeak*100).toFixed(0)+' cm / '+runupSpills+' spills · hull wall '+hullWaveCells+' / '+hullClipCount+' clipped · hull splashes '+hullSplashHits+' · hull run-up '+(hullRunupPeak*100).toFixed(0)+' cm / '+hullOvertops+' spills · sheet '+hullSheetCells+' cells / '+hullSheetTears+' tears · hull APIC '+(hullAPFault?'fallback':hullAP?(hullGPUFrames&&!hullGPUFault?'GPU ':'CPU ')+hullAP.particles.length+'p / '+hullAPContacts+' contacts / '+hullAPReturns+' returns':'idle')+' · AP load '+Math.hypot(hullReaction.x,hullReaction.y,hullReaction.z).toFixed(0)+' N · deck '+deckMass.toFixed(1)+' kg / '+deckFlowPeak.toFixed(2)+' m/s / '+deckSpills+' drains · screen hull '+hullVolumeTriangles+' tris / '+(hullDensityFrames&&!hullDensityFault?'GPU density':'CPU density')+' / '+(hullScreenFault?'mesh fallback':hullScreenFrames?'SS normals '+hullScreenFrames:'SS idle')+' · rock eddies '+objectVortexCount+' · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?(apGPUFrames&&!apGPUFault?'GPU ':'CPU ')+apGrid.particles.length+'p '+(apGPUFrames&&!apGPUFault?apGPUFrames+' steps · mesh '+rcTriangles+' tris · '+(rcGPUFrames&&!rcGPUFault?'GPU density':'CPU density')+(rcThicknessEnabled?' · SS thickness':'')+(whitewaterVolumeEnabled?' · WW '+(wwGPUFrames&&!wwGPUFault?'GPU':'CPU'):''):apStats.after.toFixed(2)+' div'):'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
    $('fps').textContent='FPS: '+Math.round(measured);
    const avg=k=>(profile[k]/Math.max(1,profile.count)).toFixed(1);
    const ph=$('frameProfile');if(ph)ph.textContent='ms/frame: '+avg('total')+' | physics '+avg('physics')+' | aeration '+avg('aeration')+' | mesh '+avg('geometry')+' | foam '+avg('foam')+' | lighting/other '+avg('lighting')+' | render submit '+avg('submit')+' | queue drain '+(profile.queueCount?(profile.queue/profile.queueCount).toFixed(1)+' ms':'—')+' (not GPU timer)';

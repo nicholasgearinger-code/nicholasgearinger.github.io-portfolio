@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.2 GPU surface depth and normal reconstruction</title>
+<title>Rift Water Lab · WebGPU 28.3 unified dielectric water optics</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.2</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.3</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.2 · reconstructed normals</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.3 · unified water optics</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -891,7 +891,7 @@ function updateUndersideOptics(){
   material.clearcoatNormalScale?.set(clearcoat,clearcoat);
   material.thickness=opticalPath(blend);
   material.roughness=ghostSafeOptics?(.035+.043*blend):.095*(1-blend*.18);
-  material.ior=1.333;
+  material.ior=WATER_IOR;
  }
  if(underwaterSunlight&&underwaterAmbient){
   const depth=opticalDepth;
@@ -952,10 +952,42 @@ function createHullOpticalThickness(){
  return tex;
 }
 
+
+ // Common linear RGB Beer-Lambert coefficients, derived from the ocean's
+ // existing reference transmittance. No scene capture for local liquid.
+const WATER_IOR=1.333;
+const WATER_F0=((WATER_IOR-1)/(WATER_IOR+1))**2;
+let localOpticalUniforms=null,localOpticsKey='';
+function waterOpticalProfile(){
+ const deep=opticalMode==='deep',distance=Math.max(.35,(deep?5.2:13)*Math.max(.05,waterClarity));
+ const reference=deep?[.12,.64,.85]:[.32,.81,.88];
+ return {reference,distance,sigma:reference.map(v=>-Math.log(v)/distance),env:(reflectionMode==='enhanced'?1.12+surfaceGlitter*.56:.75+surfaceGlitter*.55)*reflectionStrength};
+}
+function waterFilmColor(path,profile){
+ return profile.sigma.map(v=>Math.exp(-v*Math.max(0,path)));
+}
+function applyLocalWaterOptics(material,roughness){
+ if(!material)return;
+ const p=waterOpticalProfile();
+ material.ior=WATER_IOR;material.specularIntensity=1;material.clearcoat=0;
+ material.roughness=roughness;material.envMapIntensity=p.env;
+ if(material.attenuationColor)material.attenuationColor.setRGB(...p.reference);
+ material.attenuationDistance=p.distance;
+}
+function syncLocalWaterOptics(){
+ const p=waterOpticalProfile(),key=[...p.sigma,p.env,opticalMode].join('/');
+ if(key===localOpticsKey)return;localOpticsKey=key;
+ if(localOpticalUniforms)localOpticalUniforms.value.set(...p.sigma);
+ if(hullSheet)applyLocalWaterOptics(hullSheet.material,.13);
+ if(deckWaterMesh)applyLocalWaterOptics(deckWaterMesh.material,.19);
+ if(hullVolumeMesh)applyLocalWaterOptics(hullVolumeMesh.material,.13);
+ if(hullScreen?.fallback)applyLocalWaterOptics(hullScreen.fallback,.13);
+}
+
 function syncWaterDetail(){
  const physical=opticalMode!=='legacy';
  // Linear RGB transmittance at the material attenuation reference distance.
- const absorption=new THREE.Color().setRGB(...(opticalMode==='deep'?[.12,.64,.85]:[.32,.81,.88]));
+ const profile=waterOpticalProfile(),absorption=new THREE.Color().setRGB(...profile.reference);
  for(const mat of [waterNearMaterial,waterFarMaterial]){
   if(!mat)continue;
   // Built-in physical transmission: refractive scene capture, dielectric
@@ -965,11 +997,11 @@ function syncWaterDetail(){
   // Transmission, reflection and optical attenuation remain independent
   // controls so the user can compare clarity against surface reflection.
   mat.transmission=physical?Math.min(.98,.70*Math.min(1.5,waterClarity)*Math.min(1.6,depthRefraction)):0;
-  mat.ior=1.333;mat.specularIntensity=1;mat.specularColor.setHex(0xffffff);
+  mat.ior=WATER_IOR;mat.specularIntensity=1;mat.specularColor.setHex(0xffffff);
   mat.thickness=opticalPath(undersideMode==='enhanced'?underwaterBlend:0);
   if(isNear&&physical&&hullOpticsEnabled&&!hullOpticalThickness)hullOpticalThickness=createHullOpticalThickness();
   mat.thicknessMap=isNear&&physical&&hullOpticsEnabled?hullOpticalThickness:null;
-  mat.attenuationDistance=(opticalMode==='deep'?5.2:13.0)*waterClarity;
+  mat.attenuationDistance=profile.distance;
   mat.attenuationColor.copy(absorption);
   mat.depthWrite=!physical;
   mat.transparent=false;
@@ -2166,7 +2198,7 @@ function createHullSheet(){
  // Single transparent, non-transmissive draw: dielectric specular cues,
  // vertex alpha and fine normals without a second scene capture.
  const m=new THREE.MeshPhysicalMaterial({color:0xffffff,vertexColors:true,roughness:.13,metalness:0,ior:1.333,clearcoat:0,transmission:0,transparent:true,opacity:.86,depthWrite:false,depthTest:true,side:THREE.DoubleSide,forceSinglePass:true,normalMap:surfaceFineNormalMap||null,normalScale:new THREE.Vector2(.12,.12)});
- hullSheet=new THREE.Mesh(g,m);hullSheet.frustumCulled=false;hullSheet.renderOrder=1;hullSheet.visible=false;scene.add(hullSheet);
+ applyLocalWaterOptics(m,.13);hullSheet=new THREE.Mesh(g,m);hullSheet.frustumCulled=false;hullSheet.renderOrder=1;hullSheet.visible=false;scene.add(hullSheet);
  hullSheetPoint=new THREE.Vector3();hullSheetNormal=new THREE.Vector3();
 }
 function updateHullWetness(dt){
@@ -4222,11 +4254,16 @@ function setupHullScreen(geo,fallback){
   }
   const smoothDepth=sum.div(weight.max(.001)),path=thickness.div(tw.max(.001)).clamp(.012,.85);
   const valid=ready.mul(center.g).mul(centerBack.g).mul(center.r.sub(positionView.z.negate()).abs().lessThan(.28).select(1,0));
-  const extinction=path.mul(-.38).exp(),tint=mix(vec3(.62,.88,.91),vec3(.95,.99,1),extinction);
+  const profile=waterOpticalProfile();
+  localOpticalUniforms=uniform(new THREE.Vector3(...profile.sigma));
+  const extinction=localOpticalUniforms.mul(path).negate().exp(),tint=extinction.mul(vec3(.97,.99,1));
   // Keep geometry depth testing against the boat and ocean. No scene-color
   // capture or transmission sampling, avoiding the earlier boat ghosts.
   material.colorNode=mix(vec3(.88,.96,.98),tint,valid);
-  material.opacityNode=mix(float(.36),float(1).sub(path.mul(-2.4).exp()).mul(.64).add(.10),valid);
+  const cosine=normalView.dot(positionView.negate().normalize()).abs().clamp(0,1);
+  const fresnel=float(WATER_F0).add(float(1-WATER_F0).mul(float(1).sub(cosine).pow(5)));
+  const loss=float(1).sub(extinction.dot(vec3(.2126,.7152,.0722)));
+  material.opacityNode=mix(float(.23),fresnel.mul(.68).add(loss.mul(.85)).add(.06).clamp(.06,.82),valid);
   material.roughnessNode=mix(float(.15),smoothDepth.sub(center.r).abs().mul(1.5).add(.075).clamp(.075,.23),valid);
 
   // A dedicated full-screen pass stores smoothed front depth, coverage
@@ -4286,7 +4323,7 @@ function createHullVolume(){
  for(const name of ['position','normal','color'])geo.setAttribute(name,new THREE.BufferAttribute(new Float32Array(HULL_VOLUME_MAX*3),3).setUsage(THREE.DynamicDrawUsage));
  geo.setDrawRange(0,0);
  const mat=new THREE.MeshPhysicalMaterial({color:0xffffff,vertexColors:true,ior:1.333,metalness:0,roughness:.13,transmission:0,transparent:true,opacity:.48,depthWrite:false,depthTest:true,side:THREE.DoubleSide,forceSinglePass:true});
- hullVolumeMesh=new THREE.Mesh(geo,setupHullScreen(geo,mat));hullVolumeMesh.frustumCulled=false;hullVolumeMesh.renderOrder=1;hullVolumeMesh.visible=false;scene.add(hullVolumeMesh);
+ applyLocalWaterOptics(mat,.13);hullVolumeMesh=new THREE.Mesh(geo,setupHullScreen(geo,mat));applyLocalWaterOptics(hullVolumeMesh.material,.13);hullVolumeMesh.frustumCulled=false;hullVolumeMesh.renderOrder=1;hullVolumeMesh.visible=false;scene.add(hullVolumeMesh);
 }
 function reconstructHullVolume(g,t,gpuField=null){
  if(!hullVolumeEnabled||hullVolumeFault||!boat||g.particles.length<6){hideHullVolume();return;}
@@ -4451,12 +4488,12 @@ function makeDeckWater(){
  for(let j=0;j<DECK_RENDER_Z;j++)for(let i=0;i<DECK_RENDER_X;i++){const a=j*(DECK_RENDER_X+1)+i,b=a+DECK_RENDER_X+1;idx.push(a,b,a+1,a+1,b,b+1);}
  g.setAttribute('position',new THREE.BufferAttribute(p,3).setUsage(THREE.DynamicDrawUsage));g.setAttribute('color',new THREE.BufferAttribute(color,4).setUsage(THREE.DynamicDrawUsage));g.setAttribute('uv',new THREE.BufferAttribute(uv,2).setUsage(THREE.DynamicDrawUsage));g.setIndex(idx);g.computeVertexNormals();
  const m=new THREE.MeshPhysicalMaterial({color:0xffffff,vertexColors:true,ior:1.333,roughness:.19,metalness:0,transmission:0,transparent:true,opacity:.58,depthWrite:false,side:THREE.FrontSide});
- deckWaterMesh=new THREE.Mesh(g,m);deckWaterMesh.frustumCulled=false;deckWaterMesh.renderOrder=2;deckWaterMesh.visible=false;boat.add(deckWaterMesh);
+ applyLocalWaterOptics(m,.19);deckWaterMesh=new THREE.Mesh(g,m);deckWaterMesh.frustumCulled=false;deckWaterMesh.renderOrder=2;deckWaterMesh.visible=false;boat.add(deckWaterMesh);
 }
 function renderDeckFilm(t){
  if(!deckWaterMesh)makeDeckWater();
  const g=deckWaterMesh.geometry,p=g.attributes.position.array,c=g.attributes.color.array,uv=g.attributes.uv.array;
- const sx=Math.sin(boat.rotation.z),sz=-Math.sin(boat.rotation.x);
+ const sx=Math.sin(boat.rotation.z),sz=-Math.sin(boat.rotation.x),profile=waterOpticalProfile();
  for(let k=0;k<g.attributes.position.count;k++){
   const x=p[k*3],z=p[k*3+2],d=deckSample(x,z);
   const dx=(deckSample(x+.06,z)-deckSample(x-.06,z))/.12,dz=(deckSample(x,z+.06)-deckSample(x,z-.06))/.12;
@@ -4469,7 +4506,7 @@ function renderDeckFilm(t){
   p[k*3+1]=.432+height+wet*ripple*.00025;
   // Clear film with gently feathered contact line, rather than cyan lumps.
   const rim=Math.min(.025,Math.hypot(dx,dz)*.06);
-  c[k*4]=.97;c[k*4+1]=.985;c[k*4+2]=1;
+  const trans=waterFilmColor(d,profile);c[k*4]=trans[0];c[k*4+1]=trans[1];c[k*4+2]=trans[2];
   c[k*4+3]=wet*Math.min(.22,.025+d*3+rim)*(.97+.03*ripple);
   uv[k*2]=x*2-t*u*.25;uv[k*2+1]=z*2-t*v*.25;
  }
@@ -6135,6 +6172,7 @@ async function init3D(forceWebGL=false){
    const useScreen=updateScreenSpaceLighting();
    updateUnderwaterMirror(clockTime);
    updateRCThickness(clockTime);
+   syncLocalWaterOptics();
    updateHullScreen(clockTime);
    const pending=useScreen?screenLightPipeline.render():renderer.render(scene,camera);
    // WebGPU pipeline compilation errors often arrive as rejected promises,

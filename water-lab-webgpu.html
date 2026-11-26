@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.38 GPU refracted triangle light reconstruction</title>
+<title>Rift Water Lab · WebGPU 28.5.38.1 Focused excess-energy caustic reconstruction</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.38</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.38.1</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -150,7 +150,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.38 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.38.1 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -1491,9 +1491,18 @@ fn cross2(a:vec2f,b:vec2f)->f32{return a.x*b.y-a.y*b.x;}
 fn footprint(a:vec4f,b:vec4f,c:vec4f){
  let e=(a.z+b.z+c.z)/6.0;
  let area=abs(cross2(b.xy-a.xy,c.xy-a.xy))*0.5;
+ // Retain only the excess above unfocused irradiance. The footprint
+ // already concentrates energy geometrically, so do not multiply by
+ // inverse area again. Bound the retained fraction to [0,1].
+ let cell=NF/p[0];
+ let referenceArea=0.5*cell*cell;
+ let ratio=area/max(referenceArea,0.0001);
+ let retained=1.0-smoothstep(0.08,0.92,ratio);
+ let focusedEnergy=e*retained;
+ if(focusedEnergy<=0.00002){return;}
  let longest=max(length(a.xy-b.xy),max(length(b.xy-c.xy),length(c.xy-a.xy)));
- let steps=u32(clamp(ceil(max(sqrt(area)*1.2,longest*0.65)),1.0,5.0));
- let weight=e/f32(steps*steps);
+ let steps=u32(clamp(ceil(max(sqrt(area)*0.9,longest*0.55)),1.0,4.0));
+ let weight=focusedEnergy/f32(steps*steps);
  for(var i=0u;i<steps;i++){
   for(var j=0u;j<steps-i;j++){
    let u=(f32(i)+1.0/3.0)/f32(steps);let v=(f32(j)+1.0/3.0)/f32(steps);
@@ -1528,12 +1537,14 @@ fn shade(@builtin(global_invocation_id) id:vec3u){
  let centerEnergy=f32(atomicLoad(&energy[k]))/65536.0;
  // Sparse ray sets need more neighborhood support; dense sets preserve peaks.
  let support=clamp(filteredEnergy/(centerEnergy+0.0001),0.0,1.0);
- let centerWeight=select(mix(0.12,0.40,smoothstep(0.45,0.85,p[0]/NF))*mix(0.35,1.0,smoothstep(0.22,0.65,support)),0.68,p[10]>0.5);
+ let centerWeight=select(mix(0.12,0.40,smoothstep(0.45,0.85,p[0]/NF))*mix(0.35,1.0,smoothstep(0.22,0.65,support)),0.74,p[10]>0.5);
  let focused=mix(filteredEnergy,clamp(centerEnergy,0.0,filteredEnergy*3.0+0.35),centerWeight);
  // Extract local concentration above diffuse ray density, retaining a soft shoulder.
  // Reject diffuse background using expected attenuated flat-water irradiance.
- let excess=max(0.0,focused-max(select(0.34,0.40,p[10]>0.5),filteredEnergy*select(0.86,0.58,p[10]>0.5)));
- let filament=1.0-exp(-excess*4.7);
+ let pointExcess=max(0.0,focused-max(0.34,filteredEnergy*0.86));
+ let triangleExcess=max(0.0,focused-max(0.14,filteredEnergy*1.08+0.028));
+ let excess=select(pointExcess,triangleExcess,p[10]>0.5);
+ let filament=1.0-exp(-excess*select(4.7,5.8,p[10]>0.5));
  let l=u32(round(clamp(255.0*pow(filament,1.32)*clamp((border-0.012)*14.0,0.0,1.0),0.0,255.0)));
  result[k]=u32(round(f32(l)*0.88))|(u32(round(f32(l)*0.97))<<8u)|(l<<16u)|0xff000000u;
 }
@@ -1800,7 +1811,7 @@ function updateWaveTransmissionObjects(t){
  }
 }
 
-// 28.5.38: same transmission model in a parallel compute pass.
+// 28.5.38.1: same transmission model in a parallel compute pass.
 // Keep the existing texture and CPU fallback; no blocking GPU readback.
 let transmissionGPU=null,transmissionGPUStarting=false,transmissionGPUFault='',transmissionGPUFrames=0;
 const transmissionWGSL=`
@@ -2146,12 +2157,16 @@ function setupContinuousFloor(mat,detail){
   // Keep the continuous fold network prominent; sparse ray deposits add highlights, not diffuse fill.
   const rayPeak=local.sub(vec3(.075)).max(vec3(0)).pow(1.25);
   const triangleWeight=uniform(0);
-  const light=outer.mul(float(2.35).sub(localMask.mul(triangleWeight).mul(1.25))).add(rayPeak.mul(localMask).mul(float(.65).add(triangleWeight.mul(2.1))));
+  const sparsePeak=local.sub(vec3(.14)).max(vec3(0)).pow(1.5);
+  // Keep the point-ray comparison unchanged; triangle highlights are bounded.
+  const pointLight=outer.mul(2.35).add(rayPeak.mul(localMask).mul(.65));
+  const triLight=outer.mul(1.95).add(sparsePeak.mul(localMask).mul(.85));
+  const light=pointLight.mul(float(1).sub(triangleWeight)).add(triLight.mul(triangleWeight));
   const sandA=texture(detail.albedo,xz.div(5.5)).r;
   const grain=sandA.mul(.24).add(.76);
   const transmission=texture(waveTransmissionTexture,uv.clamp(.001,.999)).r;
   const shaded=float(1).sub(float(1).sub(transmission).mul(localMask).mul(shadow));
-  const ambientSeparation=float(1).sub(wave.mul(controls.y.min(1)).mul(.12));
+  const ambientSeparation=float(1).sub(wave.mul(controls.y.min(1)).mul(float(.12).add(triangleWeight.mul(.04))));
   mat.colorNode=materialColor.rgb.mul(grain).mul(shaded).mul(ambientSeparation);
   // Classic mode retains the existing emissive map; wave mode replaces it.
   // Focused light must obey the same occlusion as diffuse sunlight.

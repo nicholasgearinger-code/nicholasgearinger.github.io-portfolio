@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.0 screen-space hull liquid optics</title>
+<title>Rift Water Lab · WebGPU 28.1 capillary hull liquid</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.0</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.1</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.0 · screen-space liquid</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.1 · surface tension</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -4518,6 +4518,19 @@ function hullAPWall(g,axis,x,y,z){
 }
 
 let hullGPU=null,hullGPUStarting=false,hullGPUFault='',hullGPUPending=false,hullGPUFrames=0;
+
+const hullCapillaryEnabled=!new URLSearchParams(location.search).has('noCapillary');
+function hullCohesion(g,dt){
+ if(!hullCapillaryEnabled)return;
+ const ps=g.particles,r=.43,rest=.17;
+ for(let i=0;i<ps.length;i++)for(let j=i+1;j<ps.length;j++){
+  const a=ps[i],b=ps[j],x=b.x-a.x,y=b.y-a.y,z=b.z-a.z,d=Math.hypot(x,y,z);
+  if(d<.025||d>=r)continue;
+  const f=Math.max(-.45,Math.min(.45,(d-rest)*2.2))*(1-d/r)**2*dt/d;
+  a.v[0]+=x*f;a.v[1]+=y*f;a.v[2]+=z*f;b.v[0]-=x*f;b.v[1]-=y*f;b.v[2]-=z*f;
+ }
+}
+
 async function initHullGPU(){
  if(hullGPU||hullGPUStarting||hullGPUFault||!fluid3?.d||safeStartup||new URLSearchParams(location.search).has('cpuHullAP'))return;
  hullGPUStarting=true;
@@ -4534,11 +4547,12 @@ async function initHullGPU(){
   source=source.replace('if(!wet(q)){return 0.;}','if(walls[idx(q)].w>.5){return center;}if(!wet(q)){return 0.;}');
   source=source.replace('let q=b+o;if(!inside(q)){continue;}','let q=b+o;if(!inside(q)){continue;}if(walls[idx(q)].w>.5){continue;}');
   source=source.replace('old[i]=vec4f(v,m/4096.);','if(walls[i].w>.5){old[i]=vec4f(walls[i].xyz,0);grid[i]=old[i];return;}old[i]=vec4f(v,m/4096.);');
+  source+="\nfn capDensity(q:vec3i)->f32{\n if(!inside(q)){return 0.;}if(walls[idx(q)].w>.5){return 0.;}\n return clamp(old[idx(q)].w,0.,2.);\n}\nfn capNormal(q:vec3i)->vec3f{\n let d=vec3f(capDensity(q+vec3i(1,0,0))-capDensity(q-vec3i(1,0,0)),capDensity(q+vec3i(0,1,0))-capDensity(q-vec3i(0,1,0)),capDensity(q+vec3i(0,0,1))-capDensity(q-vec3i(0,0,1)));\n return d/max(length(d),.12);\n}\n@compute @workgroup_size(64) fn capillary(@builtin(global_invocation_id) id:vec3u){\n let i=id.x;if(i>=C){return;}let q=coord(i);if(old[i].w<.01||walls[i].w>.5||cfg.pad<.5){div[i]=0.;return;}\n let n=capNormal(q);let curvature=-(capNormal(q+vec3i(1,0,0)).x-capNormal(q-vec3i(1,0,0)).x+capNormal(q+vec3i(0,1,0)).y-capNormal(q-vec3i(0,1,0)).y+capNormal(q+vec3i(0,0,1)).z-capNormal(q-vec3i(0,0,1)).z)/(2.*cfg.h);\n div[i]=clamp(curvature,-5.,5.)*.045*min(1.,length(n));\n}\n@compute @workgroup_size(64) fn capApply(@builtin(global_invocation_id) id:vec3u){\n let i=id.x;if(i>=C||cfg.pad<.5){return;}let q=coord(i);if(old[i].w<.01||walls[i].w>.5){return;}\n let n=capNormal(q);let a=clamp(div[i]*n,vec3f(-.8),vec3f(.8));\n grid[i]=vec4f(grid[i].xyz+a*cfg.dt,grid[i].w);\n}\n";
   const m=d.createShaderModule({code:source}),info=await m.getCompilationInfo();
   const errors=info.messages.filter(v=>v.type==='error');if(errors.length)throw Error(errors.map(v=>v.message).join('; '));
   const layout=d.createBindGroupLayout({entries:Array.from({length:9},(_,binding)=>({binding,visibility:GPUShaderStage.COMPUTE,buffer:{type:binding===0?'uniform':binding===8?'read-only-storage':'storage'}}))});
   const pl=d.createPipelineLayout({bindGroupLayouts:[layout]}),pipelines={};
-  for(const entryPoint of ['clear','deposit','normalizeGrid','divergence','jacobi','project','transfer'])pipelines[entryPoint]=await d.createComputePipelineAsync({layout:pl,compute:{module:m,entryPoint}});
+  for(const entryPoint of ['clear','deposit','normalizeGrid','capillary','capApply','divergence','jacobi','project','transfer'])pipelines[entryPoint]=await d.createComputePipelineAsync({layout:pl,compute:{module:m,entryPoint}});
   const alloc=(size,usage)=>{const b=d.createBuffer({size,usage});allocated.push(b);return b;};
   const storage=size=>alloc(size,GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST|GPUBufferUsage.COPY_SRC);
   const params=alloc(16,GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST),particles=storage(240*80),walls=storage(AP_C*16);
@@ -4556,12 +4570,12 @@ function dispatchHullGPU(g,elapsed,t){
   const data=new Float32Array(count*20),wall=new Float32Array(AP_C*4);
   for(let i=0;i<count;i++){const p=g.particles[i],k=i*20;data.set([p.x,p.y,p.z,1,...p.v,0],k);for(let j=0;j<3;j++)data.set(p.c.subarray(j*3,j*3+3),k+8+j*4);}
   for(let k=0;k<AP_N;k++)for(let j=0;j<AP_N;j++)for(let i=0;i<AP_N;i++){const n=apCell(i,j,k);if(!g.solid[n])continue;const x=(i+.5)*AP_H,y=(j+.5)*AP_H,z=(k+.5)*AP_H;wall.set([hullAPWall(g,0,x,y,z),hullAPWall(g,1,x,y,z),hullAPWall(g,2,x,y,z),1],n*4);}
-  const u=new ArrayBuffer(16);new Uint32Array(u)[0]=count;new Float32Array(u).set([elapsed/steps,AP_H],1);
+  const u=new ArrayBuffer(16);new Uint32Array(u)[0]=count;new Float32Array(u).set([elapsed/steps,AP_H,hullCapillaryEnabled?1:0],1);
   d.pushErrorScope('validation');scoped=true;
   d.queue.writeBuffer(f.params,0,u);d.queue.writeBuffer(f.particles,0,data);d.queue.writeBuffer(f.walls,0,wall);
   const enc=d.createCommandEncoder();
   const pass=(name,groups,group=f.group)=>{const p=enc.beginComputePass();p.setPipeline(f.pipelines[name]);p.setBindGroup(0,group);p.dispatchWorkgroups(groups);p.end();};
-  for(let n=0;n<steps;n++){pass('clear',64);pass('deposit',Math.ceil(count/64));pass('normalizeGrid',64);pass('divergence',64);for(let j=0;j<(simTier===2?6:8);j++)pass('jacobi',64,j%2?f.alternate:f.group);pass('project',64);pass('transfer',Math.ceil(count/64));}
+  for(let n=0;n<steps;n++){pass('clear',64);pass('deposit',Math.ceil(count/64));pass('normalizeGrid',64);if(hullCapillaryEnabled){pass('capillary',64);pass('capApply',64);}pass('divergence',64);for(let j=0;j<(simTier===2?6:8);j++)pass('jacobi',64,j%2?f.alternate:f.group);pass('project',64);pass('transfer',Math.ceil(count/64));}
   const densityJob=encodeHullDensity(enc,g,t);
   enc.copyBufferToBuffer(f.pressure,0,f.pressureStage,0,AP_C*4);
   enc.copyBufferToBuffer(f.particles,0,f.stage,0,count*80);d.queue.submit([enc.finish()]);hullGPUPending=true;
@@ -4648,6 +4662,7 @@ function updateHullAP(dt,t){
   g.solid.fill(0);
   for(let k=0;k<AP_N;k++)for(let j=0;j<AP_N;j++)for(let i=0;i<AP_N;i++)if(hullAPSolid(g,(i+.5)*AP_H,(j+.5)*AP_H,(k+.5)*AP_H))g.solid[apCell(i,j,k)]=1;
   g.wallVelocity=(axis,i,j,k)=>hullAPWall(g,axis,(i+(axis===0?0:.5))*AP_H,(j+(axis===1?0:.5))*AP_H,(k+(axis===2?0:.5))*AP_H);
+  hullCohesion(g,elapsed);
   if(hullGPU&&dispatchHullGPU(g,elapsed,t))return;
   const steps=Math.ceil(elapsed/.035);hullAPContacts=0;
   for(let k=0;k<steps;k++){hullAPStats=apStep(g,elapsed/steps,simTier===2?5:simTier===1?7:9);resolveHullAP(g);}

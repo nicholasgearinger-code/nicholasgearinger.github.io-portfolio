@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.38.3 Multiscale refracted triangle caustics</title>
+<title>Rift Water Lab · WebGPU 28.5.39 Caustic-coupled volumetric sunlight</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.38.3</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.39</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -150,7 +150,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.38.3 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.39 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -479,7 +479,8 @@ let waveTransmissionMode='enhanced',waveTransmissionStrength=1,
  waveTransmissionTexture=null,waveTransmissionPixels=null,
  lastWaveTransmissionUpdate=-100,waveTransmissionMaterialActive=false,
  underwaterRocks=null,underwaterRockLocations=[],waveInstanceTint=null;
-let screenLightPipeline=null,screenGodrays=null,screenBlendColor=null,
+let screenLightPipeline=null,screenGodrays=null,screenBlendColor=null,screenCausticVolume=null,
+
     mainSun=null,screenSpaceFault='',screenSpaceReady=false,screenSpaceStarting=false,
     screenSpaceFailed=false;
 
@@ -1844,7 +1845,7 @@ function updateWaveTransmissionObjects(t){
  }
 }
 
-// 28.5.38.3: same transmission model in a parallel compute pass.
+// 28.5.39: same transmission model in a parallel compute pass.
 // Keep the existing texture and CPU fallback; no blocking GPU readback.
 let transmissionGPU=null,transmissionGPUStarting=false,transmissionGPUFault='',transmissionGPUFrames=0;
 const transmissionWGSL=`
@@ -6945,7 +6946,7 @@ async function initScreenSpaceLighting(){
   // Dynamic addon imports defer pipeline setup and leave existing
   // WebGL and safe-mode startup paths completely unchanged.
   const [
-    {pass,uniform,color,float,int},
+    {pass,uniform,color,float,int,vec2,vec3,vec4,texture,screenUV,getViewPosition,cameraProjectionMatrixInverse,cameraWorldMatrix,smoothstep,mix},
     {godrays},
     {bilateralBlur},
     {depthAwareBlend}
@@ -6971,7 +6972,40 @@ async function initScreenSpaceLighting(){
     {blendColor,edgeRadius:uniform(int(2)),
      edgeStrength:uniform(float(1.6))}
   );
-  pipeline.outputNode=composed;
+  // Integrate focused sunlight along the visible underwater camera segment.
+  // The existing shadow-aware godray pass remains responsible for broad shafts.
+  // This additional term uses the reconstructed floor field as a depth-warped
+  // proxy for the incident beam distribution, not an independent scrolling map.
+  screenCausticVolume=null;
+  if(causticMap&&!new URLSearchParams(location.search).has('noVolumeCaustics')&&getViewPosition&&cameraProjectionMatrixInverse&&cameraWorldMatrix){
+   const origin=uniform(new THREE.Vector2()),params=uniform(new THREE.Vector4(64,0,0.08,0.022));
+   const eye=uniform(new THREE.Vector3());
+   const view=getViewPosition(screenUV,sceneDepth.sample(screenUV).r,cameraProjectionMatrixInverse);
+   const endpoint=cameraWorldMatrix.mul(vec4(view,1)).xyz;
+   const delta=endpoint.sub(eye),distance=delta.length().max(.001);
+   const direction=delta.div(distance);
+   const exit=eye.y.negate().div(direction.y.max(.001)).max(0);
+   const length=distance.min(32).min(mix(float(32),exit,smoothstep(.001,.025,direction.y)));
+   const step=length.div(6);
+   const phase=direction.dot(vec3(-.326,-.931,-.163).normalize()).clamp(-1,1);
+   // Bounded Henyey-Greenstein-like forward scattering, with no singular sun glare.
+   const angular=float(1).sub(phase.mul(.84)).max(.25).pow(-1.5).mul(.36).min(2.0);
+   let light=float(0);
+   for(let k=0;k<6;k++){
+    const travel=step.mul(k+.5),point=eye.add(direction.mul(travel));
+    const depth=point.y.negate().max(0);
+    const projected=point.xz.sub(vec2(.326,.163).mul(float(3.8).sub(depth)));
+    const q=projected.sub(origin).div(params.x);
+    const uv=vec2(q.x.add(.5),float(.5).sub(q.y));
+    const inside=float(1).sub(smoothstep(.25,.47,q.length()));
+    const focus=texture(causticMap,uv.clamp(.001,.999)).rgb.dot(vec3(.2126,.7152,.0722)).sub(.08).max(0);
+    const trans=travel.add(depth).mul(params.z.negate()).exp();
+    light=light.add(focus.mul(inside).mul(trans).mul(step).mul(params.w).mul(float(1).sub(smoothstep(-.15,.05,point.y))));
+   }
+   const volume=light.mul(angular).mul(params.y).min(.12);
+   pipeline.outputNode=vec4(composed.rgb.add(vec3(.42,.82,1).mul(volume)),composed.a);
+   screenCausticVolume={origin,params,eye};
+  }else pipeline.outputNode=composed;
   screenLightPipeline=pipeline;
   screenGodrays=rays;
   screenBlendColor=blendColor;
@@ -7017,6 +7051,12 @@ function updateScreenSpaceLighting(){
  // Shadow influence scales attenuation/fog contrast rather than a
  // second, unbounded full-screen light pass.
  screenGodrays.density.value*=Math.max(.1,scatteringShadows);
+ if(screenCausticVolume){
+  const v=screenCausticVolume,p=waterProfiles[atmospherePreset]||waterProfiles.lagoon;
+  v.origin.value.set(Number.isFinite(causticProjectionX)?causticProjectionX:0,Number.isFinite(causticProjectionZ)?causticProjectionZ:0);
+  v.eye.value.copy(camera.position);
+  v.params.value.set(causticProjectionWidth,causticMode==='wave'&&causticValidated?Math.min(1.5,volumetricStrength)*underwaterBlend:0,Math.max(.015,(p.absorption[1]*depthAbsorption+p.scattering*underwaterScatter)/clarity),p.scattering*Math.max(.1,underwaterScatter)/clarity);
+ }
  return true;
 }
 function createSkyDome(){

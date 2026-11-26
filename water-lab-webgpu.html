@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.38.2 Balanced connected triangle caustics</title>
+<title>Rift Water Lab · WebGPU 28.5.38.3 Multiscale refracted triangle caustics</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.38.2</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.38.3</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -150,7 +150,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.38.2 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.38.3 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -448,6 +448,7 @@ let causticMode='wave',causticFocus=1.2,causticContrast=1.45,
 const CAUSTIC_SIZE=new URLSearchParams(location.search).has('caustics128')?128:256;
 const CAUSTIC_BYTES=CAUSTIC_SIZE*CAUSTIC_SIZE*4;
 const triangleCaustics=!new URLSearchParams(location.search).has('pointCaustics');
+const multiscaleCaustics=triangleCaustics&&!new URLSearchParams(location.search).has('singleScaleCaustics');
 let causticAccum=null,causticFiltered=null,causticBuild=null;
 let continuousFloor=null;
 let causticBaseUV=null,causticProjectionWidth=64,causticProjectionX=NaN,
@@ -1475,7 +1476,31 @@ fn trace(@builtin(global_invocation_id) id:vec3u){
  // Fresnel transmission, with per-stratum energy normalized by area.
  let fresnel=0.0204+0.9796*pow(1.0-incidence,5.0);
  let e=exp(-travel*p[6]/max(0.25,-ray.y))*(1.0-fresnel)*incidence*(NF/p[0])*(NF/p[0]);
- if(p[10]>0.5){vertices[key]=vec4f(hit,e,1.0);return;}
+ if(p[10]>0.5){
+  vertices[key]=vec4f(hit,e,1.0);
+  if(p[11]>0.5){
+   // A separate fine-scale optical surface, with lower amplitudes and
+   // directionally spread gravity-capillary ripples. Split the available
+   // transmitted energy between the two reconstructions downstream.
+   var micro=vec2f(0.0);
+   let warp=sin(dot(world,vec2f(0.71,0.37))-p[4]*0.83);
+   let envelope=0.72+0.28*sin(dot(world,vec2f(-0.43,0.59))+p[4]*0.69);
+   let dirs=array<vec2f,4>(vec2f(4.13,-2.57),vec2f(-1.42,3.63),vec2f(0.83,5.19),vec2f(-4.91,-1.67));
+   let amps=array<f32,4>(0.0075,0.012,0.0048,0.0042);
+   for(var j=0u;j<4u;j++){
+    let k=dirs[j];let km=length(k);let omega=sqrt(9.81*km+0.000074*km*km*km);
+    let phase=dot(k,world)+warp*0.7-p[4]*omega+f32(j)*2.399963;
+    micro+=k*amps[j]*cos(phase)*envelope*p[12];
+   }
+   let fineNormal=normalize(vec3f(-slope.x-micro.x,1.0,-slope.y-micro.y));
+   let fineRay=refract(incident,fineNormal,1.0/1.333);
+   let fineShift=fineRay.xz/max(0.15,-fineRay.y);
+   let fineReceiver=world+flatShift*travel+(fineShift-flatShift)*min(travel,18.0)*p[5]/(1.0-1.0/1.333);
+   let fineHit=vec2f(fineReceiver.x-p[1],p[2]-fineReceiver.y)*NF/p[3]+(NF*0.5-0.5);
+   vertices[source*source+key]=vec4f(fineHit,e,1.0);
+  }
+  return;
+ }
  splat(hit,e);
 }
 fn splat(hit:vec2f,e:f32){
@@ -1488,8 +1513,8 @@ fn cross2(a:vec2f,b:vec2f)->f32{return a.x*b.y-a.y*b.x;}
 // Integrate each refracted triangle with bounded, equal-area quadrature.
 // Small triangles converge into concentrated energy; stretched triangles
 // distribute it over their footprint. No inverse-area multiplier is needed.
-fn footprint(a:vec4f,b:vec4f,c:vec4f){
- let e=(a.z+b.z+c.z)/6.0;
+fn footprint(a:vec4f,b:vec4f,c:vec4f,share:f32,fine:bool){
+ let e=(a.z+b.z+c.z)/6.0*share;
  let area=abs(cross2(b.xy-a.xy,c.xy-a.xy))*0.5;
  // Retain only the excess above unfocused irradiance. The footprint
  // already concentrates energy geometrically, so do not multiply by
@@ -1498,11 +1523,11 @@ fn footprint(a:vec4f,b:vec4f,c:vec4f){
  let referenceArea=0.5*cell*cell;
  let ratio=area/max(referenceArea,0.0001);
  // Retain a soft shoulder of moderately focused footprints, not only tight folds.
- let retained=1.0-smoothstep(0.28,1.12,ratio);
+ let retained=1.0-smoothstep(select(0.28,0.18,fine),select(1.12,0.92,fine),ratio);
  let focusedEnergy=e*retained;
  if(focusedEnergy<=0.00002){return;}
  let longest=max(length(a.xy-b.xy),max(length(b.xy-c.xy),length(c.xy-a.xy)));
- let steps=u32(clamp(ceil(max(sqrt(area)*0.9,longest*0.55)),1.0,4.0));
+ let steps=u32(clamp(ceil(max(sqrt(area)*0.9,longest*0.55)),1.0,select(4.0,3.0,fine)));
  let weight=focusedEnergy/f32(steps*steps);
  for(var i=0u;i<steps;i++){
   for(var j=0u;j<steps-i;j++){
@@ -1520,8 +1545,14 @@ fn triangles(@builtin(global_invocation_id) id:vec3u){
  let n=u32(p[0]);if(id.x+1u>=n||id.y+1u>=n){return;}
  let k=id.y*n+id.x;
  let a=vertices[k];let b=vertices[k+1u];let c=vertices[k+n];let d=vertices[k+n+1u];
- if((id.x+id.y)%2u==0u){footprint(a,b,c);footprint(b,d,c);}
- else{footprint(a,b,d);footprint(a,d,c);}
+ let split=p[11]>0.5;let primary=select(1.0,0.72,split);
+ if((id.x+id.y)%2u==0u){footprint(a,b,c,primary,false);footprint(b,d,c,primary,false);}
+ else{footprint(a,b,d,primary,false);footprint(a,d,c,primary,false);}
+ if(split){
+  let o=n*n;let fa=vertices[o+k];let fb=vertices[o+k+1u];let fc=vertices[o+k+n];let fd=vertices[o+k+n+1u];
+  if((id.x+id.y)%2u==0u){footprint(fa,fb,fd,0.28,true);footprint(fa,fd,fc,0.28,true);}
+  else{footprint(fa,fb,fc,0.28,true);footprint(fb,fd,fc,0.28,true);}
+ }
 }
 @compute @workgroup_size(8,8)
 fn shade(@builtin(global_invocation_id) id:vec3u){
@@ -1568,7 +1599,7 @@ async function initCausticGPU(){
   const params=alloc(84*4,input),fft=alloc(4096*4,input),energy=alloc(CAUSTIC_BYTES,input);
   const result=alloc(CAUSTIC_BYTES,GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC);
   const stage=alloc(CAUSTIC_BYTES,GPUBufferUsage.MAP_READ|GPUBufferUsage.COPY_DST);
-  const vertices=alloc(200*200*16,GPUBufferUsage.STORAGE);
+  const vertices=alloc(2*200*200*16,GPUBufferUsage.STORAGE);
   const group=d.createBindGroup({layout,entries:[params,fft,energy,result,vertices].map((buffer,binding)=>({binding,resource:{buffer}}))});
   causticGPU={d,trace,shade,triangles,vertices,params,fft,energy,result,stage,group,p:new Float32Array(84),historyX:NaN,historyZ:NaN,historySource:0,field:new Float32Array(4096),fftFrame:-1,fftOwner:null,pending:false};
   d.lost.then(()=>{causticGPUFault='device lost';causticGPU=null;});
@@ -1586,7 +1617,7 @@ function dispatchCausticGPU(t){
  const hasFFT=fftMix>.001&&gpuFFT?.ready&&!fftFault&&Number.isFinite(gpuFFT.rms);
  const analyticWeight=1-(hasFFT?fftMix*(waveEngine==='fft'?.80:.30):0);
  const a=f.p;a.set([source,cx,cz,width,t,(1-1/1.333)*causticFocus,(atmospherePreset==='coastal'?.10:.045)/Math.max(.4,waterClarity),hasFFT?fftEnergy*waveHeight*fftMix:0]);
- a[8]=waterFloor?.position.x||0;a[9]=waterFloor?.position.z||0;a[10]=triangleCaustics?1:0;
+ a[8]=waterFloor?.position.x||0;a[9]=waterFloor?.position.z||0;a[10]=triangleCaustics?1:0;a[11]=multiscaleCaustics?1:0;a[12]=waveHeight;
  const waves=waveComponents.concat(opticalRipples);
  for(let k=0;k<waves.length;k++){const w=waves[k];a.set([w.kx,w.kz,w.omega,w.phase,w.amplitude*waveHeight*(w.amplitude>.04?analyticWeight:1)],16+k*5);}
  let scoped=false;
@@ -1813,7 +1844,7 @@ function updateWaveTransmissionObjects(t){
  }
 }
 
-// 28.5.38.2: same transmission model in a parallel compute pass.
+// 28.5.38.3: same transmission model in a parallel compute pass.
 // Keep the existing texture and CPU fallback; no blocking GPU readback.
 let transmissionGPU=null,transmissionGPUStarting=false,transmissionGPUFault='',transmissionGPUFrames=0;
 const transmissionWGSL=`

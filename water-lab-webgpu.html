@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 27.7.3.1 deck initialization hotfix</title>
+<title>Rift Water Lab · WebGPU 27.7.4 resolved hull pressure and deck load</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.7.3.1</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.7.4</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.7.3.1 · deck flooding</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.7.4 · pressure coupling</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -4234,7 +4234,7 @@ let deckWaterMesh=null,deckWoodMesh=null,deckMass=0,deckSpills=0,deckClock=0,dec
 // THREE is imported asynchronously in init3D; allocate only after startup.
 let deckWorld=null;
 function clearDeckFlood(){
- deckDepths.fill(0);deckDelta.fill(0);deckWet.fill(0);deckMass=deckSpills=deckClock=deckWetMean=0;
+ deckDepths.fill(0);deckDelta.fill(0);deckWet.fill(0);deckMass=deckSpills=deckClock=deckWetMean=0;deckMomentX=deckMomentZ=0;
  if(deckWaterMesh)deckWaterMesh.visible=false;
 }
 function deckLocal(g,p){
@@ -4300,7 +4300,7 @@ function updateDeckFlood(dt,t){
  }
  let total=0,wetSum=0;
  for(let k=0;k<deckDepths.length;k++){total+=deckDepths[k];const target=Math.min(1,deckDepths[k]*110);deckWet[k]+=(target-deckWet[k])*(1-Math.exp(-elapsed*(target>deckWet[k]?8:.22)));wetSum+=deckWet[k];}
- deckMass=Math.min(24,total*DECK_AREA*1000);deckWetMean=wetSum/deckWet.length;
+ deckMass=Math.min(24,total*DECK_AREA*1000);deckWetMean=wetSum/deckWet.length;applyDeckMoments();
  if(deckWoodMesh){deckWoodMesh.material.color.setRGB(1-.22*deckWetMean,.737*(1-.29*deckWetMean),.537*(1-.32*deckWetMean));deckWoodMesh.material.roughness=.67-.29*deckWetMean;}
  if(deckMass<.10){if(deckWaterMesh)deckWaterMesh.visible=false;return;}
  if(!deckWaterMesh)makeDeckWater();
@@ -4312,7 +4312,45 @@ function updateDeckFlood(dt,t){
  g.attributes.position.needsUpdate=true;g.attributes.color.needsUpdate=true;g.computeVertexNormals();deckWaterMesh.visible=true;
 }
 
+
+const hullReactionEnabled=!new URLSearchParams(location.search).has('noHullReaction');
+const hullReaction={x:0,y:0,z:0,pitch:0,roll:0,yaw:0,last:-100};
+let deckMomentX=0,deckMomentZ=0;
+function resetHullReaction(){hullReaction.x=hullReaction.y=hullReaction.z=hullReaction.pitch=hullReaction.roll=hullReaction.yaw=0;hullReaction.last=-100;deckMomentX=deckMomentZ=0;}
+function integrateHullReaction(g,pressure,t){
+ if(!hullReactionEnabled||!boat||!pressure||!g.solid)return;
+ const n=AP_N,h=AP_H,area=h*h,c=Math.cos(boatHeading),sn=Math.sin(boatHeading);
+ let fx=0,fy=0,fz=0,tx=0,tz=0,ty=0;
+ for(let k=1;k<n-1;k++)for(let j=1;j<n-1;j++)for(let i=1;i<n-1;i++){
+  const index=apCell(i,j,k);if(!g.solid[index])continue;
+  const x=g.ox+(i+.5)*h-boat.position.x,y=g.oy+(j+.5)*h-boat.position.y,z=g.oz+(k+.5)*h-boat.position.z;
+  for(const [dx,dy,dz] of [[-1,0,0],[1,0,0],[0,-1,0],[0,1,0],[0,0,-1],[0,0,1]]){
+   const q=apCell(i+dx,j+dy,k+dz);if(g.solid[q])continue;
+   const p=pressure[q];if(!Number.isFinite(p)||p<=0)continue;
+   // Solver pressure is kinematic (m²/s²). Convert to force with density
+   // and face area; discount sparse tracer coverage to avoid double
+   // counting the background hydrostatic and object-wave forces.
+   const f=Math.min(120,p*1000*area*.12),a=-dx*f,b=-dy*f,d=-dz*f;
+   fx+=a;fy+=b;fz+=d;
+   const mx=y*d-z*b,my=z*a-x*d,mz=x*b-y*a;
+   tx+=c*mx-sn*mz;tz+=sn*mx+c*mz;ty+=my;
+  }
+ }
+ const limit=(v,m)=>Math.max(-m,Math.min(m,v));
+ for(const [key,value,cap] of [['x',fx,260],['y',fy,160],['z',fz,260],['pitch',tx,115],['roll',tz,85],['yaw',ty,100]])hullReaction[key]+=(limit(value,cap)-hullReaction[key])*.30;
+ hullReaction.last=t;
+}
+function applyDeckMoments(){
+ let mx=0,mz=0;
+ for(let j=0;j<DECK_Z;j++)for(let i=0;i<DECK_X;i++){
+  const mass=deckDepths[j*DECK_X+i]*DECK_AREA*1000;
+  mx+=mass*(-.85+(i+.5)*DECK_DX);mz+=mass*(-1.525+(j+.5)*DECK_DZ);
+ }
+ deckMomentX=mx;deckMomentZ=mz;
+}
+
 function clearHullAP(){
+ resetHullReaction();
  clearDeckFlood();
  hideHullVolume();
  hullAP=null;hullAPClock=0;hullAPContacts=0;hullAPReturns=0;hullAPStats={after:0};
@@ -4362,7 +4400,7 @@ async function initHullGPU(){
   const buffers=[params,particles,storage(AP_C*16),storage(AP_C*16),storage(AP_C*16),storage(AP_C*4),storage(AP_C*4),storage(AP_C*4),walls];
   const bind=b=>d.createBindGroup({layout,entries:b.map((buffer,binding)=>({binding,resource:{buffer}}))});
   const reverse=buffers.slice();[reverse[5],reverse[6]]=[reverse[6],reverse[5]];
-  hullGPU={d,pipelines,params,particles,walls,group:bind(buffers),alternate:bind(reverse),stage:alloc(240*80,GPUBufferUsage.MAP_READ|GPUBufferUsage.COPY_DST),allocated};
+  hullGPU={d,pipelines,params,particles,walls,group:bind(buffers),alternate:bind(reverse),stage:alloc(240*80,GPUBufferUsage.MAP_READ|GPUBufferUsage.COPY_DST),pressure:buffers[5],pressureStage:alloc(AP_C*4,GPUBufferUsage.MAP_READ|GPUBufferUsage.COPY_DST),allocated};
  }catch(e){for(const b of allocated)b.destroy();hullGPUFault=String(e?.message||e);console.warn('Hull GPU fallback',e);}finally{hullGPUStarting=false;}
 }
 function dispatchHullGPU(g,elapsed,t){
@@ -4380,16 +4418,18 @@ function dispatchHullGPU(g,elapsed,t){
   const pass=(name,groups,group=f.group)=>{const p=enc.beginComputePass();p.setPipeline(f.pipelines[name]);p.setBindGroup(0,group);p.dispatchWorkgroups(groups);p.end();};
   for(let n=0;n<steps;n++){pass('clear',64);pass('deposit',Math.ceil(count/64));pass('normalizeGrid',64);pass('divergence',64);for(let j=0;j<(simTier===2?6:8);j++)pass('jacobi',64,j%2?f.alternate:f.group);pass('project',64);pass('transfer',Math.ceil(count/64));}
   const densityJob=encodeHullDensity(enc,g,t);
+  enc.copyBufferToBuffer(f.pressure,0,f.pressureStage,0,AP_C*4);
   enc.copyBufferToBuffer(f.particles,0,f.stage,0,count*80);d.queue.submit([enc.finish()]);hullGPUPending=true;
   const validation=d.popErrorScope();scoped=false;
-  Promise.allSettled([validation,f.stage.mapAsync(GPUMapMode.READ),readHullDensity(densityJob,g)]).then(results=>{
+  Promise.allSettled([validation,f.stage.mapAsync(GPUMapMode.READ),readHullDensity(densityJob,g),f.pressureStage.mapAsync(GPUMapMode.READ)]).then(results=>{
+   let pressure=null;if(results[3].status==='fulfilled'){pressure=new Float32Array(f.pressureStage.getMappedRange()).slice();f.pressureStage.unmap();}
    if(results[1].status==='rejected')throw results[1].reason;
    const output=new Float32Array(f.stage.getMappedRange()).slice(0,count*20);f.stage.unmap();
    if(results[0].status==='rejected')throw results[0].reason;if(results[0].value)throw results[0].value;
    if(hullAP!==g)return;
    if(!output.every(Number.isFinite))throw Error('Nonfinite hull GPU result');
    for(let i=0;i<count;i++){const p=g.particles[i],k=i*20;p.x=output[k];p.y=output[k+1];p.z=output[k+2];for(let j=0;j<3;j++){p.v[j]=output[k+4+j];p.c.set(output.subarray(k+8+j*4,k+11+j*4),j*3);}}
-   hullGPUFrames++;finishHullAP(g,elapsed,clockTime);reconstructHullVolume(g,clockTime,results[2].status==='fulfilled'?results[2].value:null);
+   hullGPUFrames++;integrateHullReaction(g,pressure,clockTime);finishHullAP(g,elapsed,clockTime);reconstructHullVolume(g,clockTime,results[2].status==='fulfilled'?results[2].value:null);
   }).catch(e=>{hullGPUFault=String(e?.message||e);hullGPU=null;for(const b of f.allocated)b.destroy();console.warn('Hull GPU runtime fallback',e);}).finally(()=>{hullGPUPending=false;});
   return true;
  }catch(e){if(scoped)d.popErrorScope().catch(()=>{});hullGPUFault=String(e?.message||e);hullGPU=null;hullGPUPending=false;for(const b of f.allocated)b.destroy();return false;}
@@ -4466,6 +4506,7 @@ function updateHullAP(dt,t){
   if(hullGPU&&dispatchHullGPU(g,elapsed,t))return;
   const steps=Math.ceil(elapsed/.035);hullAPContacts=0;
   for(let k=0;k<steps;k++){hullAPStats=apStep(g,elapsed/steps,simTier===2?5:simTier===1?7:9);resolveHullAP(g);}
+  integrateHullReaction(g,g.p,t);
   finishHullAP(g,elapsed,t);reconstructHullVolume(g,t);
  }catch(e){hullAPFault=String(e?.message||e);clearHullAP();console.warn('Hull APIC fallback',e);}
 }
@@ -5095,6 +5136,8 @@ function stepBoat(dt,t){
   if(entryArea>.035&&hullContact>.01)recordWaterEntry(entryX/entryArea,entryZ/entryArea,entrySpeed,entryArea,t+k*h);
   if(fluid3?.cpu&&breakingMode==='advanced'){forceX+=hullPressureX*hullContact;forceZ+=hullPressureZ*hullContact;fy+=hullPressureY*hullContact*.35;}
   if(hullCouplingEnabled&&hullWaveEnabled&&breakingMode==='advanced'&&owReady){forceX+=couplingX*hullContact;forceZ+=couplingZ*hullContact;yaw+=couplingYaw*hullContact;}
+  if(hullReactionEnabled&&breakingMode==='advanced'&&hullAP){const freshness=Math.exp(-Math.max(0,t-hullReaction.last-.10)*9),gain=freshness*hullContact;forceX+=hullReaction.x*gain;forceZ+=hullReaction.z*gain;fy+=hullReaction.y*gain;tx+=hullReaction.pitch*gain;tz+=hullReaction.roll*gain;yaw+=hullReaction.yaw*gain;}
+  if(deckFloodEnabled&&breakingMode==='advanced'){tx+=Math.max(-100,Math.min(100,deckMomentZ*9.81));tz-=Math.max(-75,Math.min(75,deckMomentX*9.81));}
   // No hydrodynamic torque or thrust in free flight. Existing wake persists.
   tx-=pitchV*Ix*(.04+3.2*rideDamping*hullContact);tz-=rollV*Iz*(.04+3.1*rideDamping*hullContact);
   const thrust=forward?mass*sailPower*(powered?8.2:3.0*(.35+.65*Math.abs(Math.cos(boatHeading+.7)))):0;
@@ -5937,7 +5980,7 @@ async function init3D(forceWebGL=false){
   const now=performance.now();
   if(now-last>1100){
    const measured=samples*1000/(now-last);
-   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · rock waves '+(owPeak*100).toFixed(1)+' cm · run-up '+(runupPeak*100).toFixed(0)+' cm / '+runupSpills+' spills · hull wall '+hullWaveCells+' / '+hullClipCount+' clipped · hull splashes '+hullSplashHits+' · hull run-up '+(hullRunupPeak*100).toFixed(0)+' cm / '+hullOvertops+' spills · sheet '+hullSheetCells+' cells / '+hullSheetTears+' tears · hull APIC '+(hullAPFault?'fallback':hullAP?(hullGPUFrames&&!hullGPUFault?'GPU ':'CPU ')+hullAP.particles.length+'p / '+hullAPContacts+' contacts / '+hullAPReturns+' returns':'idle')+' · deck '+deckMass.toFixed(1)+' kg / '+deckSpills+' drains · hull volume '+hullVolumeTriangles+' tris / '+(hullDensityFrames&&!hullDensityFault?'GPU density':'CPU density')+' · rock eddies '+objectVortexCount+' · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?(apGPUFrames&&!apGPUFault?'GPU ':'CPU ')+apGrid.particles.length+'p '+(apGPUFrames&&!apGPUFault?apGPUFrames+' steps · mesh '+rcTriangles+' tris · '+(rcGPUFrames&&!rcGPUFault?'GPU density':'CPU density')+(rcThicknessEnabled?' · SS thickness':'')+(whitewaterVolumeEnabled?' · WW '+(wwGPUFrames&&!wwGPUFault?'GPU':'CPU'):''):apStats.after.toFixed(2)+' div'):'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
+   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · rock waves '+(owPeak*100).toFixed(1)+' cm · run-up '+(runupPeak*100).toFixed(0)+' cm / '+runupSpills+' spills · hull wall '+hullWaveCells+' / '+hullClipCount+' clipped · hull splashes '+hullSplashHits+' · hull run-up '+(hullRunupPeak*100).toFixed(0)+' cm / '+hullOvertops+' spills · sheet '+hullSheetCells+' cells / '+hullSheetTears+' tears · hull APIC '+(hullAPFault?'fallback':hullAP?(hullGPUFrames&&!hullGPUFault?'GPU ':'CPU ')+hullAP.particles.length+'p / '+hullAPContacts+' contacts / '+hullAPReturns+' returns':'idle')+' · AP load '+Math.hypot(hullReaction.x,hullReaction.y,hullReaction.z).toFixed(0)+' N · deck '+deckMass.toFixed(1)+' kg / '+deckSpills+' drains · hull volume '+hullVolumeTriangles+' tris / '+(hullDensityFrames&&!hullDensityFault?'GPU density':'CPU density')+' · rock eddies '+objectVortexCount+' · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?(apGPUFrames&&!apGPUFault?'GPU ':'CPU ')+apGrid.particles.length+'p '+(apGPUFrames&&!apGPUFault?apGPUFrames+' steps · mesh '+rcTriangles+' tris · '+(rcGPUFrames&&!rcGPUFault?'GPU density':'CPU density')+(rcThicknessEnabled?' · SS thickness':'')+(whitewaterVolumeEnabled?' · WW '+(wwGPUFrames&&!wwGPUFault?'GPU':'CPU'):''):apStats.after.toFixed(2)+' div'):'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
    $('fps').textContent='FPS: '+Math.round(measured);
    adjustSimulationBudget(measured,now);adjustAdaptivePerformance(measured,now);
    last=now;samples=0;

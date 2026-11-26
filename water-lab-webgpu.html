@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.47 High-contrast object caustics</title>
+<title>Rift Water Lab · WebGPU 28.5.48 Depth-resolved refractive light field</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.47</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.48</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -151,7 +151,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.47 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.48 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -834,7 +834,9 @@ function makeCausticShaftMaterial(options){
   mat=new THREE.MeshBasicNodeMaterial({...options,map:null});
   mat.colorNode=vec3(.66,.92,.93).mul(spectral);
   // Keep a subtle continuous shaft outside the local photon field.
-  const structure=float(.55).add(photon.mul(1.35).mul(radial)).clamp(.55,1.9);
+  let structure=float(.55).add(photon.mul(1.35).mul(radial)).clamp(.55,1.9);
+  const field=sampleLightField(positionWorld);
+  if(field)structure=structure.mul(float(1).sub(field.mask.mul(.65))).add(float(.32).add(field.energy.mul(2.2)).mul(field.mask).mul(.65));
   mat.opacityNode=texture(softShaftTexture,uv()).a.mul(materialOpacity).mul(structure).mul(visibility).mul(gate).mul(path.mul(-.035).exp());
   return mat;
  }catch(e){mat?.dispose();console.warn('Caustic shaft material fallback',e);return new THREE.MeshBasicMaterial(options);}
@@ -1321,7 +1323,9 @@ function createUnderwaterReceiver(options){
   // Retain independent fine folds even on receivers close to the sand.
   const floorWeight=inside.mul(radial).mul(height.mul(-.42).exp()).mul(.72);
   const rayLight=texture(causticMap,uv.clamp(.001,.999)).rgb;
-  const light=analytic.mul(float(1).sub(floorWeight)).mul(1.45).add(rayLight.mul(floorWeight).mul(1.35));
+  let light=analytic.mul(float(1).sub(floorWeight)).mul(1.45).add(rayLight.mul(floorWeight).mul(1.35));
+  const field=sampleLightField(positionWorld);
+  if(field)light=light.mul(float(1).sub(field.mask.mul(.30))).add(vec3(.93,.99,1).mul(field.energy).mul(field.mask).mul(.85));
   // Refracted sunlight is closer to vertical than the incident air ray.
   const receiverCos=normalWorld.normalize().dot(vec3(.326,1,.163).normalize());
   // Refracted angular spread illuminates near-vertical facets without lighting backsides.
@@ -1389,7 +1393,32 @@ function buildUnderwaterScene(){
  group.visible=underwaterSceneMode==='reef';
  underwaterObjects=group;waterFloor.add(group);
 }
+const LIGHT_N=96,LIGHT_LAYERS=6,LIGHT_BYTES=96*96*6*4;
+let lightAtlas=null,lightPixels=null,lightControls=null,lightGPU=null,lightStarting=false,lightFault='',lightFrames=0;
+const lightFieldEnabled=!new URLSearchParams(location.search).has('noLightField');
+function initLightAtlas(){
+ if(!lightFieldEnabled||!oceanTSL||lightAtlas)return;
+ lightPixels=new Uint8Array(LIGHT_BYTES);
+ lightAtlas=new THREE.DataTexture(lightPixels,96,576,THREE.RGBAFormat);
+ lightAtlas.minFilter=lightAtlas.magFilter=THREE.LinearFilter;
+ lightAtlas.wrapS=lightAtlas.wrapT=THREE.ClampToEdgeWrapping;lightAtlas.generateMipmaps=false;lightAtlas.needsUpdate=true;
+ lightControls=oceanTSL.uniform(new THREE.Vector4(0,0,64,0));
+}
+function sampleLightField(position){
+ if(!lightAtlas||!lightControls)return null;
+ const {float,vec2,texture,smoothstep}=oceanTSL,u=lightControls;
+ const q=position.xz.sub(u.xy).div(u.z);
+ const uv=vec2(q.x.add(.5),float(.5).sub(q.y)).clamp(0,1);
+ const depth=position.y.negate(),layer=depth.sub(.75).div(2).clamp(0,5);
+ const lo=layer.floor(),hi=lo.add(1).min(5),px=uv.mul(95).add(.5);
+ const a=texture(lightAtlas,vec2(px.x.div(96),px.y.add(lo.mul(96)).div(576))).r;
+ const b=texture(lightAtlas,vec2(px.x.div(96),px.y.add(hi.mul(96)).div(576))).r;
+ const energy=a.add(b.sub(a).mul(layer.sub(lo)));
+ const mask=float(1).sub(smoothstep(.28,.46,q.length())).mul(smoothstep(.25,.75,depth)).mul(float(1).sub(smoothstep(9.5,11.75,depth))).mul(u.w);
+ return {energy,mask};
+}
 function makeCausticTexture(){
+ initLightAtlas();
  const n=CAUSTIC_SIZE;causticPixels=new Uint8Array(n*n*4);
  const tex=new THREE.DataTexture(causticPixels,n,n,THREE.RGBAFormat);
  tex.wrapS=THREE.RepeatWrapping;tex.wrapT=THREE.RepeatWrapping;
@@ -1597,6 +1626,88 @@ fn shade(@builtin(global_invocation_id) id:vec3u){
  result[k]=u32(round(f32(l)*0.88))|(u32(round(f32(l)*0.97))<<8u)|(l<<16u)|0xff000000u;
 }
 `;
+// Separate light field pipeline: errors leave the original floor solver intact.
+function lightFieldCode(){
+ const cut=causticGPUCode.indexOf(' let travel=max(0.6,depth+elevation);');
+ if(cut<0)throw Error('Missing refraction source');
+ return causticGPUCode.slice(0,cut).replace(/const N:u32=[^;]+;/,'const N:u32=96u;').replace(/const NF:f32=[^;]+;/,'const NF:f32=96.0;')+`
+ let incidence=clamp(dot(-incident,normal),0.0,1.0);
+ let fresnel=0.0204+0.9796*pow(1.0-incidence,5.0);
+ for(var layer=0u;layer<6u;layer++){
+  let travel=0.75+2.0*f32(layer)+elevation;
+  if(travel<=0.05){continue;}
+  let receiver=world+flatShift*travel+(rayShift-flatShift)*min(travel,18.0)*p[5]/(1.0-1.0/1.333);
+  let hit=vec2f(receiver.x-p[1],p[2]-receiver.y)*NF/p[3]+(NF*0.5-0.5);
+  let ij=vec2i(floor(hit));if(any(ij<vec2i(1))||any(ij>=vec2i(95))){continue;}
+  let f=fract(hit);let k=layer*N*N+u32(ij.y)*N+u32(ij.x);
+  let e=exp(-travel*p[6]/max(0.25,-ray.y))*(1.0-fresnel)*incidence*(NF/p[0])*(NF/p[0]);
+  deposit(k,e*(1.0-f.x)*(1.0-f.y));deposit(k+1u,e*f.x*(1.0-f.y));
+  deposit(k+N,e*(1.0-f.x)*f.y);deposit(k+N+1u,e*f.x*f.y);
+ }
+}
+@compute @workgroup_size(8,8,1)
+fn shade(@builtin(global_invocation_id) id:vec3u){
+ if(id.x>=N||id.y>=N||id.z>=6u){return;}
+ let k=id.z*N*N+id.y*N+id.x;
+ let center=f32(atomicLoad(&energy[k]))/65536.0;
+ var mean=center;
+ if(id.x>0u&&id.x<95u&&id.y>0u&&id.y<95u){
+  mean=(center*4.0+f32(atomicLoad(&energy[k-1u])+atomicLoad(&energy[k+1u])+atomicLoad(&energy[k-N])+atomicLoad(&energy[k+N]))/65536.0)/8.0;
+ }
+ let expected=0.9*exp(-(0.75+2.0*f32(id.z))*p[6]);
+ let excess=max(0.0,mix(mean,center,0.38)-max(expected*0.82,mean*0.78));
+ let v=u32(round(255.0*clamp(1.0-exp(-excess*3.6),0.0,1.0)));
+ result[k]=v|(v<<8u)|(v<<16u)|0xff000000u;
+}
+`;
+}
+async function initLightGPU(f){
+ if(!lightAtlas||lightGPU||lightStarting||lightFault)return;
+ lightStarting=true;
+ try{
+  const d=f.d,m=d.createShaderModule({code:lightFieldCode()}),info=await m.getCompilationInfo();
+  if(info.messages.some(v=>v.type==='error'))throw Error(info.messages.filter(v=>v.type==='error').map(v=>v.message).join('; '));
+  const layout=d.createBindGroupLayout({entries:[0,1,2,3].map(binding=>({binding,visibility:GPUShaderStage.COMPUTE,buffer:{type:binding<2?'read-only-storage':'storage'}}))});
+  const pl=d.createPipelineLayout({bindGroupLayouts:[layout]});
+  const trace=await d.createComputePipelineAsync({layout:pl,compute:{module:m,entryPoint:'trace'}});
+  const shade=await d.createComputePipelineAsync({layout:pl,compute:{module:m,entryPoint:'shade'}});
+  const energy=d.createBuffer({size:LIGHT_BYTES,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
+  const result=d.createBuffer({size:LIGHT_BYTES,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC});
+  const stage=d.createBuffer({size:LIGHT_BYTES,usage:GPUBufferUsage.MAP_READ|GPUBufferUsage.COPY_DST});
+  const params=d.createBuffer({size:84*4,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
+  const group=d.createBindGroup({layout,entries:[params,f.fft,energy,result].map((buffer,binding)=>({binding,resource:{buffer}}))});
+  lightGPU={owner:f,d,trace,shade,energy,result,stage,params,group,pending:false,last:-100};
+ }catch(e){lightFault=String(e?.message||e);console.warn('3D light field fallback',e);}
+ finally{lightStarting=false;}
+}
+function dispatchLightGPU(f,t,cx,cz,width){
+ if(!lightAtlas||lightFault||!underwaterActive)return;
+ if(!lightGPU){void initLightGPU(f);return;}
+ const g=lightGPU;
+ if(g.owner!==f){lightFault='floor GPU changed';lightControls.value.w=0;return;}
+ if(g.pending||t-g.last<1/6)return;
+ const d=g.d,p=new Float32Array(f.p);p[0]=Math.min(112,p[0]);
+ let scoped=false;
+ try{
+  d.queue.writeBuffer(g.params,0,p);d.pushErrorScope('validation');scoped=true;
+  const enc=d.createCommandEncoder();enc.clearBuffer(g.energy);
+  let pass=enc.beginComputePass();pass.setPipeline(g.trace);pass.setBindGroup(0,g.group);pass.dispatchWorkgroups(Math.ceil(p[0]/8),Math.ceil(p[0]/8));pass.end();
+  pass=enc.beginComputePass();pass.setPipeline(g.shade);pass.setBindGroup(0,g.group);pass.dispatchWorkgroups(12,12,6);pass.end();
+  enc.copyBufferToBuffer(g.result,0,g.stage,0,LIGHT_BYTES);d.queue.submit([enc.finish()]);g.pending=true;g.last=t;
+  const validation=d.popErrorScope();scoped=false;
+  Promise.allSettled([validation,g.stage.mapAsync(GPUMapMode.READ)]).then(results=>{
+   if(results[1].status==='rejected')throw results[1].reason;
+   try{
+    if(results[0].status==='rejected')throw results[0].reason;
+    if(results[0].value)throw results[0].value;
+    if(lightGPU===g&&causticMode==='wave'){
+     lightPixels.set(new Uint8Array(g.stage.getMappedRange()));lightAtlas.needsUpdate=true;
+     lightControls.value.set(cx,cz,width,1);lightFrames++;
+    }
+   }finally{g.stage.unmap();}
+  }).catch(e=>{lightFault=String(e?.message||e);lightControls.value.w=0;console.warn('3D light field fallback',e);}).finally(()=>{g.pending=false;});
+ }catch(e){if(scoped)d.popErrorScope().catch(()=>{});lightFault=String(e?.message||e);lightControls.value.w=0;}
+}
 async function initCausticGPU(){
  if(causticGPU||causticGPUStarting||causticGPUFault||!isWebGPU||new URLSearchParams(location.search).has('cpuCaustics'))return;
  const d=rendererGPUDevice();if(!d)return;
@@ -1647,6 +1758,7 @@ function dispatchCausticGPU(t){
   }
   enc.copyBufferToBuffer(f.result,0,f.stage,0,CAUSTIC_BYTES);d.queue.submit([enc.finish()]);f.pending=true;
   const validation=d.popErrorScope();scoped=false;
+  dispatchLightGPU(f,t,cx,cz,width);
   Promise.allSettled([validation,f.stage.mapAsync(GPUMapMode.READ)]).then(results=>{
    if(results[1].status==='rejected')throw results[1].reason;
    try{
@@ -2068,6 +2180,7 @@ function updateUnifiedVisibility(cameraDepth=0){
  colors.needsUpdate=true;
 }
 function updateCausticLighting(cameraDepth=0){
+ if(lightControls)lightControls.value.w=lightFrames>0&&!lightFault&&causticGPU===lightGPU?.owner&&causticMode==='wave'&&underwaterActive&&opticalMode!=='legacy'&&atmospherePreset!=='off'?1:0;
  if(!floorCausticMaterial)return;
  const enabled=opticalMode!=='legacy'&&atmospherePreset!=='off'&&causticMode!=='off';
  const waterPath=Math.max(1,waterDepthAtBoat||6);

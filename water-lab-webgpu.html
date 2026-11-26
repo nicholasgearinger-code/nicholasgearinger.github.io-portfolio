@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.29 Contrast-preserving caustic reconstruction</title>
+<title>Rift Water Lab · WebGPU 28.5.30 Wave-lens caustics and receiver irradiance</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.29</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.30</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -150,7 +150,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.29 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.30 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -1417,13 +1417,15 @@ fn trace(@builtin(global_invocation_id) id:vec3u){
  let dist=length(vec2f(local.x*0.83,(local.y+11.0)*0.92));
  let t=clamp((dist-16.0)/95.0,0.0,1.0);
  let depth=max(0.6,3.8+27.0*t*t*(3.0-2.0*t)+0.48*sin(local.x*0.085+local.y*0.041)*cos(local.y*0.072-local.x*0.028)*(1.0-t));
- var slope=vec2f(0.0);
- for(var k=0u;k<12u;k++){
+ var slope=vec2f(0.0);var elevation=0.0;
+ for(var k=0u;k<13u;k++){
   let q=16u+k*5u;let wave=vec2f(p[q],p[q+1u]);
   let phase=dot(wave,world)-p[q+2u]*p[4]+p[q+3u];
   slope+=wave*p[q+4u]*cos(phase);
+  elevation+=p[q+4u]*sin(phase);
  }
  if(p[7]>0.0){
+  elevation+=spectral(world)*p[7];
   slope+=vec2f(spectral(world+vec2f(0.85,0.0))-spectral(world-vec2f(0.85,0.0)),spectral(world+vec2f(0.0,0.85))-spectral(world-vec2f(0.0,0.85)))*p[7]/1.7;
  }
  // Refract the incident sunlight at the actual wave normal.
@@ -1433,13 +1435,14 @@ fn trace(@builtin(global_invocation_id) id:vec3u){
  let flatRay=refract(incident,vec3f(0.0,1.0,0.0),1.0/1.333);
  let flatShift=flatRay.xz/max(0.15,-flatRay.y);
  let rayShift=ray.xz/max(0.15,-ray.y);
- let offset=flatShift*depth+(rayShift-flatShift)*min(depth,18.0)*p[5]/(1.0-1.0/1.333);
+ let travel=max(0.6,depth+elevation);
+ let offset=flatShift*travel+(rayShift-flatShift)*min(travel,18.0)*p[5]/(1.0-1.0/1.333);
  let receiver=world+offset;
  let hit=vec2f(receiver.x-p[1],p[2]-receiver.y)*128.0/p[3]+63.5;
  let ij=vec2i(floor(hit));if(any(ij<vec2i(1))||any(ij>=vec2i(126))){return;}
  let f=fract(hit);let k=u32(ij.y*128+ij.x);
  let incidence=clamp(dot(-incident,normal),0.0,1.0);
- let e=exp(-depth*p[6]/max(0.25,-ray.y))*incidence*(128.0/p[0])*(128.0/p[0]);
+ let e=exp(-travel*p[6]/max(0.25,-ray.y))*incidence*(128.0/p[0])*(128.0/p[0]);
  deposit(k,e*(1.0-f.x)*(1.0-f.y));deposit(k+1u,e*f.x*(1.0-f.y));
  deposit(k+128u,e*(1.0-f.x)*f.y);deposit(k+129u,e*f.x*f.y);
 }
@@ -1476,11 +1479,11 @@ async function initCausticGPU(){
   const shade=await d.createComputePipelineAsync({layout:pl,compute:{module:m,entryPoint:'shade'}});
   const alloc=(size,usage)=>d.createBuffer({size,usage});
   const input=GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST;
-  const params=alloc(80*4,input),fft=alloc(4096*4,input),energy=alloc(65536,input);
+  const params=alloc(84*4,input),fft=alloc(4096*4,input),energy=alloc(65536,input);
   const result=alloc(65536,GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC);
   const stage=alloc(65536,GPUBufferUsage.MAP_READ|GPUBufferUsage.COPY_DST);
   const group=d.createBindGroup({layout,entries:[params,fft,energy,result].map((buffer,binding)=>({binding,resource:{buffer}}))});
-  causticGPU={d,trace,shade,params,fft,energy,result,stage,group,p:new Float32Array(80),field:new Float32Array(4096),fftFrame:-1,fftOwner:null,pending:false};
+  causticGPU={d,trace,shade,params,fft,energy,result,stage,group,p:new Float32Array(84),historyX:NaN,historyZ:NaN,historySource:0,field:new Float32Array(4096),fftFrame:-1,fftOwner:null,pending:false};
   d.lost.then(()=>{causticGPUFault='device lost';causticGPU=null;});
  }catch(e){causticGPUFault=String(e?.message||e);console.warn('GPU caustics fallback',e);}
  finally{causticGPUStarting=false;}
@@ -1495,7 +1498,7 @@ function dispatchCausticGPU(t){
  const analyticWeight=1-(hasFFT?fftMix*(waveEngine==='fft'?.80:.30):0);
  const a=f.p;a.set([source,cx,cz,width,t,(1-1/1.333)*causticFocus,(atmospherePreset==='coastal'?.10:.045)/Math.max(.4,waterClarity),hasFFT?fftEnergy*waveHeight*fftMix:0]);
  a[8]=waterFloor?.position.x||0;a[9]=waterFloor?.position.z||0;
- const waves=waveComponents.slice(1).concat(opticalRipples);
+ const waves=waveComponents.concat(opticalRipples);
  for(let k=0;k<waves.length;k++){const w=waves[k];a.set([w.kx,w.kz,w.omega,w.phase,w.amplitude*waveHeight*(w.amplitude>.04?analyticWeight:1)],16+k*5);}
  let scoped=false;
  try{
@@ -1517,7 +1520,12 @@ function dispatchCausticGPU(t){
     if(results[0].status==='rejected')throw results[0].reason;
     if(results[0].value)throw results[0].value;
     if(causticGPU===f&&causticMode==='wave'&&source===causticDetail&&cx===causticProjectionX&&cz===causticProjectionZ){
-     causticPixels.set(new Uint8Array(f.stage.getMappedRange()));causticMap.needsUpdate=true;causticGPUFrames++;causticValidated=true;
+     const next=new Uint8Array(f.stage.getMappedRange());
+     // Blend only in a matching world-space projection; never drag history with the boat.
+     if(f.historyX===cx&&f.historyZ===cz&&f.historySource===source){for(let i=0;i<next.length;i+=4){for(let c=0;c<3;c++)causticPixels[i+c]=Math.round(causticPixels[i+c]*.22+next[i+c]*.78);causticPixels[i+3]=255;}}
+     else causticPixels.set(next);
+     f.historyX=cx;f.historyZ=cz;f.historySource=source;
+     causticMap.needsUpdate=true;causticGPUFrames++;causticValidated=true;
     }
    }finally{f.stage.unmap();}
   }).catch(e=>{causticGPUFault=String(e?.message||e);causticGPU=null;lastCausticUpdate=-100;console.warn('GPU caustics fallback',e);}).finally(()=>{f.pending=false;});
@@ -1545,7 +1553,7 @@ function updateWaveCausticTexture(t){
  const sunX=16/39.3,sunZ=8/39.3;
  const hasFFT=fftMix>.001&&gpuFFT?.ready&&!fftFault&&Number.isFinite(gpuFFT.rms);
  const analyticWeight=1-(hasFFT?fftMix*(waveEngine==='fft'?.80:.30):0);
- const waveList=waveComponents.slice(1).concat(opticalRipples);
+ const waveList=waveComponents.concat(opticalRipples);
  // Use a bounded direction deflection; when the waves steepen there
  // is a focusing/defocusing network but no division singularity.
  const bend=(1-1/1.333)*causticFocus;
@@ -1557,7 +1565,7 @@ function updateWaveCausticTexture(t){
   const wx=cx+((column+.5)*inv-.5)*width;
   const wz=cz+(.5-(row+.5)*inv)*width;
   const depth=Math.max(.6,seabedDepth(wx-(waterFloor?.position.x||0),wz-(waterFloor?.position.z||0)));
-  let sx=0,sz=0;
+  let sx=0,sz=0,elevation=0;
   // The broadest swell changes the illumination direction gently,
   // while intermediate waves and short ripples create fine folds.
   for(const wave of waveList){
@@ -1565,11 +1573,13 @@ function updateWaveCausticTexture(t){
    const amp=wave.amplitude*waveHeight*
      (wave.amplitude>.04?analyticWeight:1);
    const v=amp*Math.cos(phase);
+   elevation+=amp*Math.sin(phase);
    sx+=v*wave.kx;sz+=v*wave.kz;
   }
   if(hasFFT){
    // Cache-backed GPU FFT sampling only at source ray points.
    const step=.85,power=fftEnergy*waveHeight*fftMix/(2*step);
+   elevation+=gpuFFT.sample(wx,wz)*fftEnergy*waveHeight*fftMix;
    sx+=power*(gpuFFT.sample(wx+step,wz)-gpuFFT.sample(wx-step,wz));
    sz+=power*(gpuFFT.sample(wx,wz+step)-gpuFFT.sample(wx,wz-step));
   }
@@ -1580,9 +1590,9 @@ function updateWaveCausticTexture(t){
   const rx=eta*ixSun-kRef*nx,ry=eta*iySun-kRef*ny,rz=eta*izSun-kRef*nz;
   const flatY=Math.sqrt(Math.max(.01,1-eta*eta*(sunX*sunX+sunZ*sunZ)));
   const flatX=-eta*sunX/flatY,flatZ=-eta*sunZ/flatY;
-  const focusPath=Math.min(depth,18)*bend/(1-eta);
-  const offsetX=flatX*depth+(rx/Math.max(.15,-ry)-flatX)*focusPath;
-  const offsetZ=flatZ*depth+(rz/Math.max(.15,-ry)-flatZ)*focusPath;
+  const travel=Math.max(.6,depth+elevation),focusPath=Math.min(travel,18)*bend/(1-eta);
+  const offsetX=flatX*travel+(rx/Math.max(.15,-ry)-flatX)*focusPath;
+  const offsetZ=flatZ*travel+(rz/Math.max(.15,-ry)-flatZ)*focusPath;
   const x=(wx-cx+offsetX)*scale+n*.5-.5;
   const y=(cz-wz-offsetZ)*scale+n*.5-.5;
   const ix=Math.floor(x),iy=Math.floor(y);
@@ -1590,7 +1600,7 @@ function updateWaveCausticTexture(t){
   const fx=x-ix,fy=y-iy;
   // Normalize against the expected ray density to make low/high
   // quality settings visually comparable.
-  const transmission=Math.exp(-depth*
+  const transmission=Math.exp(-travel*
     (atmospherePreset==='coastal'?.10:.045)/Math.max(.4,waterClarity));
   const energy=Math.pow(transmission,1/Math.max(.25,-ry))*Math.max(0,-dot)*(n/source)*(n/source);
   const k=iy*n+ix;
@@ -1703,7 +1713,7 @@ function updateWaveTransmissionObjects(t){
  }
 }
 
-// 28.5.29: same transmission model in a parallel compute pass.
+// 28.5.30: same transmission model in a parallel compute pass.
 // Keep the existing texture and CPU fallback; no blocking GPU readback.
 let transmissionGPU=null,transmissionGPUStarting=false,transmissionGPUFault='',transmissionGPUFrames=0;
 const transmissionWGSL=`
@@ -1930,7 +1940,7 @@ function updateCausticLighting(cameraDepth=0){
  const emphasis=causticMode==='wave'?causticContrast:1;
  const emission=Math.max(0,Math.min(1.8,strength*(causticMode==='wave'?1.05:.75)*emphasis));
  floorCausticMaterial.emissiveIntensity=emission;
- if(continuousFloor){continuousFloor.origin.value.set(Number.isFinite(causticProjectionX)?causticProjectionX:0,Number.isFinite(causticProjectionZ)?causticProjectionZ:0);continuousFloor.controls.value.set(causticProjectionWidth,causticMode==='wave'&&enabled?emission:0,clockTime,Math.max(.4,waterClarity));continuousFloor.wave.value=causticMode==='wave'?1:0;continuousFloor.shadow.value=waveTransmissionMaterialActive?1:0;}
+ if(continuousFloor){continuousFloor.origin.value.set(Number.isFinite(causticProjectionX)?causticProjectionX:0,Number.isFinite(causticProjectionZ)?causticProjectionZ:0);continuousFloor.controls.value.set(causticProjectionWidth,causticMode==='wave'&&enabled?emission:0,clockTime,Math.max(.4,waterClarity));continuousFloor.wave.value=causticMode==='wave'?1:0;continuousFloor.shadow.value=waveTransmissionMaterialActive?1:0;continuousFloor.lens.value.set(waveHeight,causticFocus);}
  floorCausticMaterial.color.setScalar(causticMode==='wave'&&enabled?
    Math.max(.72,1-.12*causticContrast):1);
  // This projection is mapped only onto the sand. Rock UVs do not
@@ -1971,26 +1981,29 @@ function setupContinuousFloor(mat,detail){
  if(!mat.isNodeMaterial||!oceanTSL||!causticMap||!waveTransmissionTexture)return;
  try{
   const {uniform,float,vec2,vec3,texture,positionWorld,materialColor,materialEmissive,smoothstep}=oceanTSL;
-  const origin=uniform(new THREE.Vector2()),controls=uniform(new THREE.Vector4(64,0,0,1)),wave=uniform(1),shadow=uniform(0);
+  const origin=uniform(new THREE.Vector2()),controls=uniform(new THREE.Vector4(64,0,0,1)),wave=uniform(1),shadow=uniform(0),lens=uniform(new THREE.Vector2(1,1.2));
   const xz=positionWorld.xz,q=xz.sub(origin).div(controls.x);
   const uv=vec2(q.x.add(.5),float(.5).sub(q.y));
   const localMask=float(1).sub(smoothstep(.27,.47,q.length()));
   const local=texture(causticMap,uv.clamp(.001,.999)).rgb;
   const x=xz.x,z=xz.y,t=controls.z;
   const depth=positionWorld.y.negate().max(0);
-  const warp=x.mul(.53).add(z.mul(.31)).sub(t.mul(.54)).sin().mul(.72);
-  const a=x.mul(2.1).add(z.mul(.72)).add(warp).sub(t.mul(1.25)).cos();
-  const b=z.mul(2.45).sub(x.mul(.84)).add(warp.mul(.8)).add(t.mul(.91)).cos();
-  const c=x.mul(1.35).sub(z.mul(1.62)).sub(t.mul(.76)).cos();
-  const ripple=x.mul(5.7).add(z.mul(3.8)).add(warp.mul(2)).sub(t.mul(2.1)).sin();
-  const cross=z.mul(4.9).sub(x.mul(3.3)).add(t.mul(1.7)).sin();
-  const fold=a.add(b).add(c.mul(.65)).add(ripple.mul(.22)).add(cross.mul(.16));
-  const width=ripple.mul(.09).add(.31);
-  const ribbon=float(1).sub(fold.abs().div(width).clamp(0,1)).pow(1.35);
-  const branches=float(1).sub(fold.add(cross.mul(.48)).abs().div(.19).clamp(0,1)).pow(2).mul(c.mul(.5).add(.5));
-  const outer=vec3(.82,.96,1).mul(ribbon.mul(ripple.mul(.24).add(.76)).add(branches.mul(.35))).mul(depth.mul(-.055).div(controls.w).exp()).mul(1.35);
-  // Retain a continuous optical network even where the sparse ray field is dark.
-  const light=outer.mul(float(1).sub(localMask.mul(.35))).mul(.82).add(local.mul(localMask).mul(1.5));
+  // Evaluate the analytical wave-to-receiver Jacobian at an approximate
+  // back-projected surface point. This is a continuous wave-derived
+  // supplement, not an independent scrolling ribbon pattern.
+  const sx=x.add(depth.mul(.32)),sz=z.add(depth.mul(.16));
+  let xx=float(0),zz=float(0),xzCurvature=float(0);
+  for(const w of waveComponents.concat(opticalRipples)){
+   const phase=sx.mul(w.kx).add(sz.mul(w.kz)).sub(t.mul(w.omega)).add(w.phase);
+   const h=phase.sin().mul(-w.amplitude).mul(lens.x);
+   xx=xx.add(h.mul(w.kx*w.kx));zz=zz.add(h.mul(w.kz*w.kz));xzCurvature=xzCurvature.add(h.mul(w.kx*w.kz));
+  }
+  const bend=depth.min(18).mul(1-1/1.333).mul(lens.y);
+  const det=float(1).add(xx.mul(bend)).mul(float(1).add(zz.mul(bend))).sub(xzCurvature.mul(xzCurvature).mul(bend).mul(bend));
+  const focus=float(1).div(det.abs().max(.16)).sub(1.12).max(0);
+  const band=float(1).sub(focus.mul(-.65).exp()).pow(1.5);
+  const outer=vec3(.82,.96,1).mul(band).mul(depth.mul(-.055).div(controls.w).exp());
+  const light=outer.mul(float(1).sub(localMask.mul(.7))).mul(.8).add(local.mul(localMask).mul(1.65));
   const sandA=texture(detail.albedo,xz.div(5.5)).r;
   const grain=sandA.mul(.38).add(.62);
   const transmission=texture(waveTransmissionTexture,uv.clamp(.001,.999)).r;
@@ -1999,8 +2012,10 @@ function setupContinuousFloor(mat,detail){
   // Classic mode retains the existing emissive map; wave mode replaces it.
   // Focused light must obey the same occlusion as diffuse sunlight.
   const litCaustic=light.mul(shaded.pow(1.6)).mul(grain).mul(controls.y);
-  mat.emissiveNode=materialEmissive.mul(float(1).sub(wave)).add(litCaustic.mul(vec3(.90,.98,1)));
-  mat.userData.continuousFloor=true;continuousFloor={origin,controls,wave,shadow};
+  // Approximate added diffuse irradiance using receiver albedo and orientation.
+  const receiver=oceanTSL.normalWorld.normalize().dot(vec3(16,35,8).normalize()).max(0);
+  mat.emissiveNode=materialEmissive.mul(float(1).sub(wave)).add(litCaustic.mul(materialColor.rgb).mul(receiver).mul(vec3(.90,.98,1)));
+  mat.userData.continuousFloor=true;continuousFloor={origin,controls,wave,shadow,lens};
   mat.needsUpdate=true;
  }catch(e){continuousFloor=null;mat.colorNode=null;mat.emissiveNode=null;console.warn('Continuous floor fallback',e);}
 }

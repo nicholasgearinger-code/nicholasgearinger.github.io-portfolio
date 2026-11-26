@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.1 fused GPU aeration and foam transport</title>
+<title>Rift Water Lab · WebGPU 28.5.2 persistent GPU aeration and direct optical integration</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.1</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.2</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.1 · GPU aeration</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.2 · resident GPU aeration</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -3338,24 +3338,29 @@ async function initTurbulenceGPU(){
   const pipeline=await d.createComputePipelineAsync({layout:'auto',compute:{module:m,entryPoint:'transport'}});
   const n=FOAM_PLANE*FOAM_LAYERS*16,alloc=(size,usage)=>d.createBuffer({size,usage});
   const params=alloc(16,GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST);
-  const previous=alloc(n,GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST);
+  const previous=alloc(n,GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST|GPUBufferUsage.COPY_SRC);
   const forcing=alloc(n*3,GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST);
-  const next=alloc(n,GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC);
+  const next=alloc(n,GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC|GPUBufferUsage.COPY_DST);
   const stage=alloc(n,GPUBufferUsage.MAP_READ|GPUBufferUsage.COPY_DST);
-  const group=d.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[params,previous,forcing,next].map((buffer,binding)=>({binding,resource:{buffer}}))});
-  turbulenceGPU={d,pipeline,params,previous,forcing,next,stage,group,pending:false,n};
+  const buffers=[previous,next];
+  const groups=buffers.map((buffer,i)=>d.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[params,buffer,forcing,buffers[1-i]].map((buffer,binding)=>({binding,resource:{buffer}}))}));
+  turbulenceGPU={d,pipeline,params,buffers,forcing,stage,groups,index:0,resident:false,ox:0,oz:0,pending:false,n};
  }catch(e){turbulenceGPUFault=String(e?.message||e);console.warn('Turbulence GPU fallback',e);}finally{turbulenceGPUStarting=false;}
 }
-function dispatchTurbulenceGPU(step,generation,valid){
+function dispatchTurbulenceGPU(step,generation,valid,ox,oz){
  const f=turbulenceGPU;if(!f||f.pending||turbulenceGPUFault)return;
  const d=f.d;let scoped=false;
  try{
   d.queue.writeBuffer(f.params,0,new Float32Array([step,valid?1:0,0,0]));
-  for(let i=0;i<turbulenceField.length;i++){const q=i*4;turbulencePacked[q]=turbulenceField[i];turbulencePacked[q+1]=entrainedAir[i];turbulencePacked[q+2]=foamDensity[i];}
-  d.queue.writeBuffer(f.previous,0,turbulencePacked);d.queue.writeBuffer(f.forcing,0,turbulenceForcing);
+  // Seed only after startup/reset or a CPU fallback step. Normal steps keep the previous state on the GPU.
+  if(!f.resident||f.ox!==foamOriginX||f.oz!==foamOriginZ){
+   for(let i=0;i<turbulenceField.length;i++){const q=i*4;turbulencePacked[q]=turbulenceField[i];turbulencePacked[q+1]=entrainedAir[i];turbulencePacked[q+2]=foamDensity[i];}
+   d.queue.writeBuffer(f.buffers[f.index],0,turbulencePacked);
+  }
+  d.queue.writeBuffer(f.forcing,0,turbulenceForcing);
   d.pushErrorScope('validation');scoped=true;
-  const enc=d.createCommandEncoder(),p=enc.beginComputePass();p.setPipeline(f.pipeline);p.setBindGroup(0,f.group);p.dispatchWorkgroups(Math.ceil(FOAM_PLANE*FOAM_LAYERS/64));p.end();
-  enc.copyBufferToBuffer(f.next,0,f.stage,0,f.n);d.queue.submit([enc.finish()]);f.pending=true;
+  const enc=d.createCommandEncoder(),p=enc.beginComputePass();p.setPipeline(f.pipeline);p.setBindGroup(0,f.groups[f.index]);p.dispatchWorkgroups(Math.ceil(FOAM_PLANE*FOAM_LAYERS/64));p.end();
+  const nextIndex=1-f.index;enc.copyBufferToBuffer(f.buffers[nextIndex],0,f.stage,0,f.n);d.queue.submit([enc.finish()]);f.pending=true;f.index=nextIndex;f.resident=true;f.ox=ox;f.oz=oz;
   const validation=d.popErrorScope();scoped=false;
   Promise.allSettled([validation,f.stage.mapAsync(GPUMapMode.READ)]).then(results=>{
    if(results[1].status==='rejected')throw results[1].reason;
@@ -3363,11 +3368,11 @@ function dispatchTurbulenceGPU(step,generation,valid){
    if(results[0].status==='rejected')throw results[0].reason;if(results[0].value)throw results[0].value;
    if(!data.every(Number.isFinite))throw Error('Nonfinite turbulence field');
    if(generation===turbulenceGeneration&&foamFieldReady){let peak=0;for(let i=0;i<turbulenceField.length;i++){const q=i*4;turbulenceField[i]=data[q];entrainedAir[i]=data[q+1];foamDensity[i]=data[q+2];peak=Math.max(peak,data[q]);}turbulencePeak=peak;turbulenceGPUFrames++;}
-  }).catch(e=>{turbulenceGPUFault=String(e?.message||e);console.warn('Turbulence GPU fallback',e);}).finally(()=>{f.pending=false;});
- }catch(e){if(scoped)d.popErrorScope().catch(()=>{});turbulenceGPUFault=String(e?.message||e);f.pending=false;}
+  }).catch(e=>{f.resident=false;turbulenceGPUFault=String(e?.message||e);console.warn('Turbulence GPU fallback',e);}).finally(()=>{f.pending=false;});
+ }catch(e){if(scoped)d.popErrorScope().catch(()=>{});f.resident=false;turbulenceGPUFault=String(e?.message||e);f.pending=false;}
 }
 
-function clearTurbulence(){turbulenceGeneration++;turbulenceField.fill(0);turbulenceNext.fill(0);turbulencePeak=turbulenceAir=0;}
+function clearTurbulence(){if(turbulenceGPU)turbulenceGPU.resident=false;turbulenceGeneration++;turbulenceField.fill(0);turbulenceNext.fill(0);turbulencePeak=turbulenceAir=0;}
 function turbulenceUpdate(old,production,dt){
  return Math.min(3,Math.max(0,old+dt*(production-.72*old-.42*old*Math.sqrt(Math.max(0,old)))));
 }
@@ -3386,7 +3391,9 @@ function advanceFoamDensity(dt,t){
  advanceFoamMomentum(step,t);
  if(!turbulenceGPU)initTurbulenceGPU();
  const gpuTurbulence=turbulenceEnabled&&!!turbulenceGPU&&!turbulenceGPU.pending&&!turbulenceGPUFault;
+ if(!gpuTurbulence&&turbulenceGPU)turbulenceGPU.resident=false;
  const generation=++turbulenceGeneration,previousValid=foamFieldReady;
+ const gpuDeepOnly=gpuTurbulence&&turbulenceGPU.resident&&turbulenceGPUFrames>0;
  turbulencePeak=0;turbulenceAir=0;
  const ox=Math.floor((boat.position.x-FOAM_SPAN*.5)/FOAM_STEP)*FOAM_STEP;
  const oz=Math.floor((boat.position.z-FOAM_SPAN*.5)/FOAM_STEP)*FOAM_STEP;
@@ -3417,6 +3424,20 @@ function advanceFoamDensity(dt,t){
    const gpu=sampleFluid3(x,w.height-k*FOAM_DZ,z,flowReadScratch);
    const swirlMix=gpu?.45:.25;
    const sx=x-((gpu?flowReadScratch.x:vx)+vortexData.x*swirlMix)*step*(1-k*.07),sz=z-((gpu?flowReadScratch.z:vz)+vortexData.z*swirlMix)*step*(1-k*.07);
+   // The validated resident path needs no duplicate subsurface density evolution.
+   // Surface film topology still consumes CPU data and is retained below.
+   if(gpuDeepOnly&&k>0){
+    const index=k*FOAM_PLANE+p,q=index*12,vertical=gpu?flowReadScratch.y:0;
+    const curl=gpu?Math.max(0,Math.min(4,flowReadScratch.curl||0)):0;
+    const production=(activity*(.65*localStrain*localStrain+.16*curl*curl)+crestSource*.9+obstacleSource*.75+churn*.55)*Math.exp(-k*.30);
+    const gpuAir=gpu?Math.min(.65,Math.max(0,flowReadScratch.curl-.65)*.18+Math.max(0,vertical-.28)*.14)*Math.exp(-k*.35)*Math.min(1,waveAir*2+boatAir+vortexAir):0;
+    const source=waveAir*foamWaveProfile[k]*1.65+churn*(stern*foamSternProfile[k]+hull*foamHullProfile[k])*2.4+vortexAir*foamWaveProfile[k]*2.1+gpuAir*.35;
+    turbulenceForcing[q]=(sx-foamOriginX)/FOAM_STEP;turbulenceForcing[q+1]=(sz-foamOriginZ)/FOAM_STEP;turbulenceForcing[q+2]=production;turbulenceForcing[q+3]=0;
+    turbulenceForcing[q+4]=vertical;turbulenceForcing[q+5]=activity;turbulenceForcing[q+6]=source;turbulenceForcing[q+7]=Math.min(1,waveAir+boatAir);
+    turbulenceForcing[q+8]=0;turbulenceForcing[q+9]=vortexCore;turbulenceForcing[q+10]=1;turbulenceForcing[q+11]=0;
+    // Lightweight advected mirror until readback arrives; no duplicate reaction solver.
+    turbulenceNext[index]=foamLayer(sx,sz,k,turbulenceField);airNext[index]=foamLayer(sx,sz,k,entrainedAir);foamNext[index]=foamLayer(sx,sz,k);continue;
+   }
    const here=foamLayer(sx,sz,k),below=foamLayer(sx,sz,k+1),above=k?foamLayer(sx,sz,k-1):0;
    const coalescence=Math.max(0,here-.25)*Math.max(0,below-.12);
    const vertical=gpu?flowReadScratch.y:0;
@@ -3503,7 +3524,7 @@ function advanceFoamDensity(dt,t){
  // whitewater spreads into thinner streaks. No additional render pass.
  diffuseFoamFilm(breakerNext,FOAM_GRID,Math.min(.10,step*.30),foamDiffuseScratch);
  diffuseFoamFilm(shearNext,FOAM_GRID,Math.min(.15,step*.55),foamDiffuseScratch);
- if(gpuTurbulence)dispatchTurbulenceGPU(step,generation,previousValid);
+ if(gpuTurbulence)dispatchTurbulenceGPU(step,generation,previousValid,ox,oz);
  const old=foamDensity;foamDensity=foamNext;foamNext=old;
  const oldAir=entrainedAir;entrainedAir=airNext;airNext=oldAir;
  const oldTurbulence=turbulenceField;turbulenceField=turbulenceNext;turbulenceNext=oldTurbulence;
@@ -3643,7 +3664,9 @@ async function initWWGPU(){
   const optical=d.createBuffer({size:FOAM_PLANE*16,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC});
   const stage=d.createBuffer({size:FOAM_PLANE*16,usage:GPUBufferUsage.MAP_READ|GPUBufferUsage.COPY_DST});
   const group=d.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[params,air,optical].map((buffer,binding)=>({binding,resource:{buffer}}))});
-  wwGPU={d,pipeline,params,air,optical,stage,group,pending:false};
+  // Same optical integrator, reading gas directly from the packed GPU state.
+  let residentPipeline=null;try{const residentCode=wwGPUCode.replace('air:array<f32>','air:array<vec4f>').replace('air[k*4096u+i]-.055','air[k*4096u+i].y-.055');const rm=d.createShaderModule({code:residentCode});const ri=await rm.getCompilationInfo();if(ri.messages.some(m=>m.type==='error'))throw Error('Resident optical shader compilation');residentPipeline=await d.createComputePipelineAsync({layout:'auto',compute:{module:rm,entryPoint:'integrate'}});}catch(e){console.warn('Resident whitewater fallback',e);}
+  wwGPU={d,pipeline,params,air,optical,stage,group,pending:false,residentPipeline,residentGroups:new Map()};
  }catch(e){wwGPUFault=String(e?.message||e);console.warn('Whitewater GPU fallback',e);}finally{wwGPUStarting=false;}
 }
 function updateWWGPU(t){
@@ -3656,9 +3679,12 @@ function updateWWGPU(t){
  let scoped=false;
  try{
   d.queue.writeBuffer(f.params,0,new Float32Array([1,foamStrength,0,0]));
-  d.queue.writeBuffer(f.air,0,entrainedAir);
+  const tg=turbulenceGPU;const direct=!!(f.residentPipeline&&tg?.resident&&!turbulenceGPUFault&&tg.d===d&&tg.ox===ox&&tg.oz===oz);
+  let pipeline=f.pipeline,group=f.group;
+  if(direct){const buffer=tg.buffers[tg.index];pipeline=f.residentPipeline;group=f.residentGroups.get(buffer);if(!group){group=d.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[f.params,buffer,f.optical].map((buffer,binding)=>({binding,resource:{buffer}}))});f.residentGroups.set(buffer,group);}}
+  else d.queue.writeBuffer(f.air,0,entrainedAir);
   d.pushErrorScope('validation');scoped=true;
-  const enc=d.createCommandEncoder(),p=enc.beginComputePass();p.setPipeline(f.pipeline);p.setBindGroup(0,f.group);p.dispatchWorkgroups(Math.ceil(FOAM_PLANE/64));p.end();
+  const enc=d.createCommandEncoder(),p=enc.beginComputePass();p.setPipeline(pipeline);p.setBindGroup(0,group);p.dispatchWorkgroups(Math.ceil(FOAM_PLANE/64));p.end();
   enc.copyBufferToBuffer(f.optical,0,f.stage,0,FOAM_PLANE*16);
   d.queue.submit([enc.finish()]);f.pending=true;
   const validation=d.popErrorScope();scoped=false;
@@ -6403,7 +6429,7 @@ async function init3D(forceWebGL=false){
   const now=performance.now();
   if(now-last>1100){
    const measured=samples*1000/(now-last);
-   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · aeration '+(turbulenceGPUFault?'CPU fallback':turbulenceGPUFrames?'GPU '+turbulenceGPUFrames:'CPU')+' / '+turbulencePeak.toFixed(2)+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · rock waves '+(owPeak*100).toFixed(1)+' cm · run-up '+(runupPeak*100).toFixed(0)+' cm / '+runupSpills+' spills · hull wall '+hullWaveCells+' / '+hullClipCount+' clipped · hull splashes '+hullSplashHits+' · hull run-up '+(hullRunupPeak*100).toFixed(0)+' cm / '+hullOvertops+' spills · sheet '+hullSheetCells+' cells / '+hullSheetTears+' tears · hull APIC '+(hullAPFault?'fallback':hullAP?(hullGPUFrames&&!hullGPUFault?'GPU ':'CPU ')+hullAP.particles.length+'p / '+hullAPContacts+' contacts / '+hullAPReturns+' returns':'idle')+' · AP load '+Math.hypot(hullReaction.x,hullReaction.y,hullReaction.z).toFixed(0)+' N · deck '+deckMass.toFixed(1)+' kg / '+deckFlowPeak.toFixed(2)+' m/s / '+deckSpills+' drains · screen hull '+hullVolumeTriangles+' tris / '+(hullDensityFrames&&!hullDensityFault?'GPU density':'CPU density')+' / '+(hullScreenFault?'mesh fallback':hullScreenFrames?'SS normals '+hullScreenFrames:'SS idle')+' · rock eddies '+objectVortexCount+' · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?(apGPUFrames&&!apGPUFault?'GPU ':'CPU ')+apGrid.particles.length+'p '+(apGPUFrames&&!apGPUFault?apGPUFrames+' steps · mesh '+rcTriangles+' tris · '+(rcGPUFrames&&!rcGPUFault?'GPU density':'CPU density')+(rcThicknessEnabled?' · SS thickness':'')+(whitewaterVolumeEnabled?' · WW '+(wwGPUFrames&&!wwGPUFault?'GPU':'CPU'):''):apStats.after.toFixed(2)+' div'):'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
+   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · aeration '+(turbulenceGPUFault?'CPU fallback':turbulenceGPUFrames?(turbulenceGPU?.resident?'GPU resident ':'GPU hybrid ')+turbulenceGPUFrames:'CPU')+' / '+turbulencePeak.toFixed(2)+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · rock waves '+(owPeak*100).toFixed(1)+' cm · run-up '+(runupPeak*100).toFixed(0)+' cm / '+runupSpills+' spills · hull wall '+hullWaveCells+' / '+hullClipCount+' clipped · hull splashes '+hullSplashHits+' · hull run-up '+(hullRunupPeak*100).toFixed(0)+' cm / '+hullOvertops+' spills · sheet '+hullSheetCells+' cells / '+hullSheetTears+' tears · hull APIC '+(hullAPFault?'fallback':hullAP?(hullGPUFrames&&!hullGPUFault?'GPU ':'CPU ')+hullAP.particles.length+'p / '+hullAPContacts+' contacts / '+hullAPReturns+' returns':'idle')+' · AP load '+Math.hypot(hullReaction.x,hullReaction.y,hullReaction.z).toFixed(0)+' N · deck '+deckMass.toFixed(1)+' kg / '+deckFlowPeak.toFixed(2)+' m/s / '+deckSpills+' drains · screen hull '+hullVolumeTriangles+' tris / '+(hullDensityFrames&&!hullDensityFault?'GPU density':'CPU density')+' / '+(hullScreenFault?'mesh fallback':hullScreenFrames?'SS normals '+hullScreenFrames:'SS idle')+' · rock eddies '+objectVortexCount+' · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?(apGPUFrames&&!apGPUFault?'GPU ':'CPU ')+apGrid.particles.length+'p '+(apGPUFrames&&!apGPUFault?apGPUFrames+' steps · mesh '+rcTriangles+' tris · '+(rcGPUFrames&&!rcGPUFault?'GPU density':'CPU density')+(rcThicknessEnabled?' · SS thickness':'')+(whitewaterVolumeEnabled?' · WW '+(wwGPUFrames&&!wwGPUFault?'GPU':'CPU'):''):apStats.after.toFixed(2)+' div'):'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
    $('fps').textContent='FPS: '+Math.round(measured);
    adjustSimulationBudget(measured,now);adjustAdaptivePerformance(measured,now);
    last=now;samples=0;

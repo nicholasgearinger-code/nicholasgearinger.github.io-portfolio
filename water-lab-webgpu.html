@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.4 restored cellular foam optics</title>
+<title>Rift Water Lab · WebGPU 28.5.5 offshore GPU mesh experiment and CPU cleanup</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.4</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.5</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.4 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.5 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -1633,7 +1633,64 @@ function createSeabed(){
  return waterFloor;
 }
 
+
+let offshoreGPU=null,offshoreGPUFault='';
+function setupOffshoreGPU(mat,geo){
+ offshoreGPU=null;
+ if(!oceanTSL||!mat.isNodeMaterial||!new URLSearchParams(location.search).has('gpuOcean'))return;
+ try{
+  const {Fn,If,float,vec2,vec3,vec4,uniform,attribute,positionGeometry,normalLocal,texture}=oceanTSL;
+  const count=geo.attributes.position.count,mask=new Float32Array(count);
+  for(let i=0;i<count;i++)mask[i]=Math.hypot(nearBase[i*3],nearBase[i*3+2])>=38?1:0;
+  geo.setAttribute('offshoreMask',new THREE.BufferAttribute(mask,1));
+  const fftTex=new THREE.DataTexture(new Uint8Array(64*64*4),64,64,THREE.RGBAFormat);
+  fftTex.wrapS=fftTex.wrapT=THREE.RepeatWrapping;fftTex.minFilter=fftTex.magFilter=THREE.LinearFilter;fftTex.generateMipmaps=false;fftTex.needsUpdate=true;
+  const origin=uniform(new THREE.Vector2()),controls=uniform(new THREE.Vector4()),extra=uniform(new THREE.Vector4());
+  const fftSample=(x,z)=>{const v=texture(fftTex,vec2(x,z).div(96).add(1/128)).level(0);return v.r.mul(255*256).add(v.g.mul(255)).div(65535).mul(24).sub(12);};
+  mat.positionNode=Fn(()=>{
+   const pos=positionGeometry.toVar();
+   If(attribute('offshoreMask','float').greaterThan(.5),()=>{
+    const x=pos.x.add(origin.x),z=pos.z.add(origin.y);
+    const h=float(0).toVar(),dx=float(0).toVar(),dz=float(0).toVar(),sx=float(0).toVar(),sz=float(0).toVar();
+    const harmonic=controls.z.mul(.095);
+    for(const w of waveComponents){
+     const phase=x.mul(w.kx).add(z.mul(w.kz)).sub(controls.x.mul(w.omega)).add(w.phase);
+     const sn=phase.sin(),cs=phase.cos(),sharp=sn.add(harmonic.mul(cs.mul(cs).sub(sn.mul(sn))));
+     const deriv=cs.sub(harmonic.mul(4).mul(sn).mul(cs));
+     const a=controls.y.mul(w.amplitude).mul(extra.x).mul(w.dirX<-.48?extra.y:1);
+     h.addAssign(a.mul(sharp));sx.addAssign(a.mul(w.kx).mul(deriv));sz.addAssign(a.mul(w.kz).mul(deriv));
+     const chop=a.mul(controls.w).abs().min(w.chopLimit).mul(controls.z.mul(.12).add(1));
+     const shoulder=sharp.sub(.32).mul(1.3).clamp(0,1);
+     const lip=shoulder.mul(shoulder).mul(extra.z).mul(a.abs().mul(.12).min(.20)).mul(cs.max(0));
+     const lateral=chop.mul(cs).add(lip);dx.addAssign(lateral.mul(w.dirX));dz.addAssign(lateral.mul(w.dirZ));
+    }
+    const fx=fftSample(x.add(.72),z).sub(fftSample(x.sub(.72),z)).div(1.44).mul(extra.w);
+    const fz=fftSample(x,z.add(.72)).sub(fftSample(x,z.sub(.72))).div(1.44).mul(extra.w);
+    h.addAssign(fftSample(x,z).mul(extra.w));
+    If(controls.w.greaterThan(.005),()=>{sx.addAssign(fx);sz.addAssign(fz);dx.subAssign(fx.mul(controls.w).mul(.35));dz.subAssign(fz.mul(controls.w).mul(.35));});
+    pos.assign(vec3(pos.x.add(dx),h,pos.z.add(dz)));
+    normalLocal.assign(vec3(sx.negate(),1,sz.negate()).normalize());
+   });
+   return pos;
+  })();
+  offshoreGPU={origin,controls,extra,fftTex,mask,lastFFT:-1,lastFFTObject:null,lastTint:-100};
+  mat.needsUpdate=true;
+ }catch(e){offshoreGPUFault=String(e?.message||e);mat.positionNode=null;offshoreGPU=null;console.warn('Offshore GPU fallback',e);}
+}
+function updateOffshoreGPU(t,cx,cz){
+ const g=offshoreGPU;if(!g)return;
+ const hasFFT=fftMix>.0005&&gpuFFT?.ready&&!fftFault&&Number.isFinite(gpuFFT.rms);
+ g.origin.value.set(cx,cz);g.controls.value.set(t,waveHeight,crestAsymmetry,waveChop);
+ g.extra.value.set(1-(hasFFT?fftMix*(waveEngine==='fft'?.80:.30):0),crossingSwell,breakingMode==='advanced'&&breakingIntensity>.01?breakingIntensity:0,hasFFT?fftEnergy*waveHeight*fftMix:0);
+ if(hasFFT&&(g.lastFFT!==gpuFFT.frameCount||g.lastFFTObject!==gpuFFT)){
+  const p=g.fftTex.image.data;
+  for(let j=0;j<64;j++)for(let i=0;i<64;i++){const q=(j*64+i)*4,v=Math.round((Math.max(-12,Math.min(12,gpuFFT.sample(i*96/64,j*96/64)))+12)/24*65535);p[q]=v>>8;p[q+1]=v&255;p[q+2]=0;p[q+3]=255;}
+  g.fftTex.needsUpdate=true;g.lastFFT=gpuFFT.frameCount;g.lastFFTObject=gpuFFT;
+ }
+}
+
 function makeSurface(){
+ if(offshoreGPU){offshoreGPU.fftTex.dispose();offshoreGPU=null;}
  if(water&&water!==nearWater)disposeSurface(water);disposeSurface(nearWater);
  const segments=levels[detailIndex];
  // Physics resolution is independent of distant scenery and stays near boat.
@@ -1665,6 +1722,7 @@ function makeSurface(){
   clearcoatNormalScale:new THREE.Vector2(.22,.22),
   side:THREE.DoubleSide
  });
+ setupOffshoreGPU(nearMat,nearGeometry);
  waterNearMaterial=nearMat;
  nearWater=new THREE.Mesh(nearGeometry,nearMat);
  nearWater.frustumCulled=false;scene.add(nearWater);
@@ -1672,7 +1730,7 @@ function makeSurface(){
  geometry=nearGeometry;base=nearBase;water=nearWater;waterFarMaterial=null;
  syncWaterDetail();
  applyReflectionMode();
- $('resolution').textContent='Ocean: '+nearGeometry.attributes.position.count.toLocaleString()+' shared verts';
+ $('resolution').textContent='Ocean: '+nearGeometry.attributes.position.count.toLocaleString()+' shared verts'+(offshoreGPU?' · GPU offshore':'');
  $('wakeStatus').textContent='Wake: local 32 m';
 }
 // Independent deep-water wave components use gravity-based dispersion.
@@ -3805,7 +3863,7 @@ function updateFoamSkin(t){
   // texels outside its support rather than a circular draw boundary.
   let count=0;const b=nearBase;while(count<b.length/3&&Math.hypot(b[count*3],b[count*3+2])<=Math.SQRT2*FOAM_SPAN*.5+2)count++;
   const srcIndex=nearGeometry.index.array;let end=0;while(end<srcIndex.length&&srcIndex[end]<count&&srcIndex[end+1]<count&&srcIndex[end+2]<count)end+=3;
-  geo.setDrawRange(0,end);
+  geo.setDrawRange(0,end);geo.userData.activeFoamVertices=count;
   const n=geo.attributes.position.count;
   geo.deleteAttribute('color');
   geo.setAttribute('uv',nearGeometry.attributes.uv1.clone());
@@ -3891,14 +3949,15 @@ function updateFoamSkin(t){
   }
   foamOpticalMap.needsUpdate=true;
  }
- for(let i=0,j=0;i<src.length;i+=3,j+=2){
+ const activeLength=Math.min(src.length,(geo.userData.activeFoamVertices||src.length/3)*3);
+ for(let i=0,j=0;i<activeLength;i+=3,j+=2){
   const x=src[i]+cx,z=src[i+2]+cz,d=sampleFoamDensity(x,z),sub=foamLayer(x,z,1);
   p[i]=src[i];p[i+1]=src[i+1]+.009+.024*Math.min(1,d*.8+sub*.35);p[i+2]=src[i+2];
   uv[j]=.5+(x-foamOpticalX)/FOAM_SPAN;uv[j+1]=.5+(z-foamOpticalZ)/FOAM_SPAN;
   detailUV[j]=(x-foamLayer(x,z,0,foamDriftX))/(LOCAL_RADIUS*2);detailUV[j+1]=(z-foamLayer(x,z,0,foamDriftZ))/(LOCAL_RADIUS*2);
  }
  geo.attributes.position.needsUpdate=true;geo.attributes.uv.needsUpdate=true;geo.attributes.uv1.needsUpdate=true;
- geo.attributes.normal.array.set(norm);geo.attributes.normal.needsUpdate=true;
+ geo.attributes.normal.array.set(norm.subarray(0,activeLength));geo.attributes.normal.needsUpdate=true;
 }
 // Local parametric overturning sheets: independent of the single-valued
 // ocean height field. Fixed pooled geometry, bounded event lifetime.
@@ -5336,6 +5395,8 @@ function animateWaves(t){
  const cx=boat.position.x,cz=boat.position.z;
  water.position.set(cx,0,cz);
  nearWater.position.set(cx,0,cz);
+ updateOffshoreGPU(t,cx,cz);
+ const offshoreTint=offshoreGPU&&t-offshoreGPU.lastTint>=.25;if(offshoreTint)offshoreGPU.lastTint=t;
  const farArr=geometry.attributes.position.array;
  const farNormals=geometry.attributes.normal.array,farColor=geometry.attributes.color.array;
  for(let i=0;water!==nearWater&&i<farArr.length;i+=3){
@@ -5347,8 +5408,7 @@ function animateWaves(t){
   smoothWaterNormal(farNormals,i,wave.slopeX,wave.slopeZ);
   oceanSpectralTint(x,z,wave.height,wave.slopeX,wave.slopeZ,farColor,i);
  }
- geometry.attributes.position.needsUpdate=true;
- geometry.attributes.normal.needsUpdate=true;geometry.attributes.color.needsUpdate=true;
+ if(water!==nearWater){geometry.attributes.position.needsUpdate=true;geometry.attributes.normal.needsUpdate=true;geometry.attributes.color.needsUpdate=true;}
  const arr=nearGeometry.attributes.position.array;
  const nearNormals=nearGeometry.attributes.normal.array;
  if(!nearGeometry.userData.deformationWeights)nearGeometry.userData.deformationWeights=new Float32Array(arr.length/3);
@@ -5357,6 +5417,7 @@ function animateWaves(t){
  for(let i=0;i<arr.length;i+=3){
   const px=nearBase[i],pz=nearBase[i+2];
   const x=px+cx,z=pz+cz;
+  if(offshoreGPU?.mask[i/3]){if(offshoreTint){const w=waveField(x,z,t);oceanSpectralTint(x,z,w.height,w.slopeX,w.slopeZ,nearColorData,i);}deformationWeights[i/3]=0;continue;}
   const wave=waveField(x,z,t);
   const wx=x+wave.dx,wz=z+wave.dz;
   const radial=Math.hypot(px,pz);
@@ -5381,52 +5442,7 @@ function animateWaves(t){
   // The wake influence fades near the seam between radial patches.
   smoothWaterNormal(nearNormals,i,wave.slopeX+wakeSlopeX,
      wave.slopeZ+wakeSlopeZ);
-  const slope=Math.abs(wakeSlopeX)+Math.abs(wakeSlopeZ);
-  const foam=sampleFoamDensity(wx,wz)*oceanFoamSupport(wx,wz);
-  // Foam is restricted to locally steep crests and intermittent folds,
-  // not stamped uniformly on every passing swell.
-  const breaking=Math.max(0,Math.min(1,
-    (wave.steepness-0.24)/.40))*Math.max(0,Math.min(1,(wave.height+.1)/1.7));
-  const irregular=.65+.35*Math.sin(wx*.73+wz*.41+t*.47)*
-                              Math.cos(wx*.32-wz*.61-t*.30);
-  const whitecap=whitecapIntensity*breaking*irregular;
-  const shine=Math.min(1,Math.abs(disturbance)*.28+slope*.42+
-    foam*.62+whitecap*.24);
-  // Coastal-depth color modulation: deeper shelves absorb warm light,
-  // while shallow water exposes brighter turquoise transmitted seafloor.
-  // This is only coloration; geometry and wake physics are unchanged.
-  const localX=wx-(waterFloor?.position.x||0),localZ=wz-(waterFloor?.position.z||0);
-  const shelfRange=Math.hypot(localX*.83,(localZ+11)*.92);
-  const shallow=Math.max(0,Math.min(1,(100-shelfRange)/84));
-  // Approximate forward subsurface scattering through thin wave crests.
-  // Light travels through less water at high, backlit crests. This is a
-  // low-cost view/lighting approximation, not true volume path tracing.
-  const sunX=.407,sunY=.891,sunZ=.204;
-  const normalX=wave.slopeX+fade*wakeSlopeX;
-  const normalZ=wave.slopeZ+fade*wakeSlopeZ;
-  const slopeDotSun=(-normalX*sunX+sunY-normalZ*sunZ)/
-       Math.hypot(normalX,1,normalZ);
-  // Dark-facing wave flanks lose direct sunlight; near-normal facets
-  // remain bright. This modulates existing vertex color instead of
-  // producing an opaque shadow map over the transparent ocean.
-  const flank=Math.max(0,Math.min(1,(.96-slopeDotSun)*3.0));
-  const waveShade=1-Math.min(.52,flank*.43*waveShadowStrength);
-  const backlit=Math.max(0,Math.min(1,.45-slopeDotSun*.55));
-  const crest=Math.max(0,Math.min(1,(wave.height+.22)/2.4));
-  const thinness=Math.max(0,Math.min(1,1-shallow*.4));
-  const subsurface=subsurfaceLight*crest*backlit*(.12+.18*thinness)*
-    (1+.28*crestAsymmetry);
-  // Shallow water transmits more green/blue seabed light, while deep
-  // water is more absorptive. Vertex color stays low-frequency; the
-  // separate normal maps own the small optical ripples.
-  // Both meshes now use identical base optical parameters. Vertex color
-  // is a subtle multiplier only; white at the shared ring is exact parity.
-  const light=Math.max(.86,Math.min(1,waveShade+shine*.12+subsurface*.12));
   oceanSpectralTint(x,z,wave.height,wave.slopeX,wave.slopeZ,nearColorData,i);
-  // Local shading is driven only by actual disturbance, never radius alone.
-  const interaction=Math.min(1,Math.abs(disturbance)*5+slope*.6+foam*.35+Math.abs(liquidLift)*4);
-  // Base water color is identical at every distance. Local fluid only
-  // adds achromatic aeration, never a separate green water tint.
   // Approximate subsurface gas scattering in the continuous water surface.
   if(foamFieldReady&&fade>0&&foamStrength>.01){
    const a0=foamLayer(wx,wz,0,entrainedAir),a1=foamLayer(wx,wz,1,entrainedAir),a2=foamLayer(wx,wz,2,entrainedAir);

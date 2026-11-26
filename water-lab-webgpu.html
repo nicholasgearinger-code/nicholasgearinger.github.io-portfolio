@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.3 unified dielectric water optics</title>
+<title>Rift Water Lab · WebGPU 28.3.1 continuous ocean surface</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.3</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.3.1</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.3 · unified water optics</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.3.1 · continuous ocean</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -915,7 +915,7 @@ function smoothOceanRadii(){
  const radii=[LOCAL_RADIUS];
  let r=LOCAL_RADIUS;
  while(r<350){
-  const step=r<38?1.15:r<82?2.5:r<160?5.5:r<250?10:18;
+  const step=r<38?.70+(r-16)*.035:r<82?1.5+(r-38)*.023:r<160?2.5+(r-82)*.038:r<250?5.5+(r-160)*.05:10+(r-250)*.08;
   r=Math.min(350,r+step);
   radii.push(r);
  }
@@ -1000,7 +1000,9 @@ function syncWaterDetail(){
   mat.ior=WATER_IOR;mat.specularIntensity=1;mat.specularColor.setHex(0xffffff);
   mat.thickness=opticalPath(undersideMode==='enhanced'?underwaterBlend:0);
   if(isNear&&physical&&hullOpticsEnabled&&!hullOpticalThickness)hullOpticalThickness=createHullOpticalThickness();
-  mat.thicknessMap=isNear&&physical&&hullOpticsEnabled?hullOpticalThickness:null;
+  // Both ocean regions must use the same optical path. The old radial
+  // hull thickness mask made an artificial clear patch during immersion.
+  mat.thicknessMap=null;
   mat.attenuationDistance=profile.distance;
   mat.attenuationColor.copy(absorption);
   mat.depthWrite=!physical;
@@ -5077,6 +5079,8 @@ function animateWaves(t){
  geometry.attributes.normal.needsUpdate=true;geometry.attributes.color.needsUpdate=true;
  const arr=nearGeometry.attributes.position.array;
  const nearNormals=nearGeometry.attributes.normal.array;
+ if(!nearGeometry.userData.deformationWeights)nearGeometry.userData.deformationWeights=new Float32Array(arr.length/3);
+ const deformationWeights=nearGeometry.userData.deformationWeights;
  let rippleSum=0,rippleMax=0;crestVertices=0;hullClipCount=0;if(!hullClipQ){hullClipQ=new THREE.Quaternion();hullClipP=new THREE.Vector3();}hullClipQ.copy(boat.quaternion).invert();
  for(let i=0;i<arr.length;i+=3){
   const px=nearBase[i],pz=nearBase[i+2];
@@ -5090,8 +5094,9 @@ function animateWaves(t){
   const liquidLift=rcSurfaceOffset(wx,wz)*fade;
   arr[i+1]=wave.height+disturbance+liquidLift;
   if(liquidLift>.002)crestVertices++;
-  if(plungePool.length&&deformConnectedCrest(x,z,arr,i,fade))crestVertices++;
-  if(hullClipSurface(arr,i,cx,cz))hullClipCount++;
+  const folded=plungePool.length&&deformConnectedCrest(x,z,arr,i,fade);if(folded)crestVertices++;
+  const clipped=hullClipSurface(arr,i,cx,cz);if(clipped)hullClipCount++;
+  deformationWeights[i/3]=fade*Math.min(1,Math.max(folded?.85:0,clipped?.65:0,Math.abs(liquidLift)*8));
   // Local crest highlights follow the same pressure field; no fake
   // particle sprites or V-shaped lines.
   let wakeSlopeX=0,wakeSlopeZ=0;
@@ -5145,9 +5150,11 @@ function animateWaves(t){
   // is a subtle multiplier only; white at the shared ring is exact parity.
   const light=Math.max(.86,Math.min(1,waveShade+shine*.12+subsurface*.12));
   oceanSpectralTint(x,z,wave.height,wave.slopeX,wave.slopeZ,nearColorData,i);
-  nearColorData[i]*=1-fade*(1-light)*.20;
-  nearColorData[i+1]*=1-fade*(1-light)*.15;
-  nearColorData[i+2]*=1-fade*(1-light)*.10;
+  // Local shading is driven only by actual disturbance, never radius alone.
+  const interaction=Math.min(1,Math.abs(disturbance)*5+slope*.6+foam*.35+Math.abs(liquidLift)*4);
+  nearColorData[i]*=1-fade*interaction*(1-light)*.12;
+  nearColorData[i+1]*=1-fade*interaction*(1-light)*.09;
+  nearColorData[i+2]*=1-fade*interaction*(1-light)*.06;
   // Approximate subsurface gas scattering in the continuous water surface.
   if(foamFieldReady&&fade>0&&foamStrength>.01){
    const a0=foamLayer(wx,wz,0,entrainedAir),a1=foamLayer(wx,wz,1,entrainedAir),a2=foamLayer(wx,wz,2,entrainedAir);
@@ -5167,7 +5174,14 @@ function animateWaves(t){
   rippleSum+=Math.abs(disturbance);rippleMax=Math.max(rippleMax,Math.abs(disturbance));
  }
  lastRipple=rippleMax;
- if(crestVertices>0||(!hullOpticsEnabled&&hullClipCount>0))nearGeometry.computeVertexNormals();
+ // Never replace the entire near disk's analytic normals just because
+ // one local crest is active. Blend geometric normals only at displaced
+ // vertices; the shared outer ring retains exact spectral normals.
+ if(crestVertices>0||hullClipCount>0){
+  if(!nearGeometry.userData.spectralNormals||nearGeometry.userData.spectralNormals.length!==nearNormals.length)nearGeometry.userData.spectralNormals=new Float32Array(nearNormals.length);
+  const saved=nearGeometry.userData.spectralNormals;saved.set(nearNormals);nearGeometry.computeVertexNormals();
+  for(let i=0;i<nearNormals.length;i+=3){const w=nearGeometry.userData.deformationWeights?.[i/3]||0;const x=saved[i]*(1-w)+nearNormals[i]*w,y=saved[i+1]*(1-w)+nearNormals[i+1]*w,z=saved[i+2]*(1-w)+nearNormals[i+2]*w,l=Math.hypot(x,y,z)||1;nearNormals[i]=x/l;nearNormals[i+1]=y/l;nearNormals[i+2]=z/l;}
+ }
  nearGeometry.attributes.position.needsUpdate=true;
  nearGeometry.attributes.color.needsUpdate=true;
  nearGeometry.attributes.normal.needsUpdate=true;

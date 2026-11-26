@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.59 Multi-scale refractive light focusing</title>
+<title>Rift Water Lab · WebGPU 28.5.60 Shared fine-scale caustic optics</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.59</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.60</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -152,7 +152,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.59 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.60 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -475,6 +475,7 @@ const enhancedUnderwaterLight=!new URLSearchParams(location.search).has('classic
 const photoOptics=!new URLSearchParams(location.search).has('legacyPhotoOptics');
 const recoveredRadiance=!new URLSearchParams(location.search).has('legacyRadiance');
 const multiscaleRadiance=!new URLSearchParams(location.search).has('baselineRadiance');
+const fineCausticOptics=!new URLSearchParams(location.search).has('noFineCaustics');
 const waterProfiles={
  lagoon:photoOptics?{absorption:[.155,.058,.031],scattering:.026,color:0x2589bc}:{absorption:[.19,.070,.040],scattering:.022,color:0x175e8a},
  coastal:{absorption:[.30,.135,.080],scattering:.043,color:0x285a65},
@@ -1264,6 +1265,27 @@ function seabedDepth(x,z){
 // seafloor so all local geometry follows the same translated floor tile.
 const surfaceFoamObjects=[],activeObjectFoam=[];
 let objectFoamLast=-100,objectFoamHits=0;
+// Shared finite-source micro-focusing term. Perturb the wave Hessian rather
+// than overlaying an independent pattern. A bounded signed difference
+// redistributes light around existing focal regions.
+function fineCausticRadiance(sx,sz,t,amplitude,bend,a,b,shear,warpX,warpZ,det,softDepth,eyeDistance){
+ const {float,smoothstep}=oceanTSL;
+ let dx=float(0),dz=float(0),ds=float(0);
+ for(const [kx,kz,amp,phase0] of [[6.1,2.3,.0018,.73],[-3.4,7.2,.00115,2.93],[8.1,-4.2,.00082,5.11],[10.2,3.8,.00046,1.67],[-5.6,10.9,.00032,4.31]]){
+  const k=Math.hypot(kx,kz),omega=Math.sqrt(9.81*k+.000074*k*k*k);
+  const phase=sx.mul(kx).add(sz.mul(kz)).add(warpX.mul(.65)).sub(warpZ.mul(.48)).sub(t.mul(omega)).add(phase0);
+  const h=phase.sin().mul(-amp).mul(amplitude).mul(bend);
+  dx=dx.add(h.mul(kx*kx));dz=dz.add(h.mul(kz*kz));ds=ds.add(h.mul(kx*kz));
+ }
+ const revised=a.sub(dx).mul(b.sub(dz)).sub(shear.add(ds).pow(2));
+ // Finite optical width; distant or deeply submerged filaments lose contrast.
+ const width=softDepth.mul(.09).add(.105);
+ const response=d=>float(1).div(d.mul(d).add(width.mul(width)).sqrt()).sub(1.25).max(0);
+ const base=float(1).sub(response(det).mul(-.38).exp()).pow(2);
+ const detail=float(1).sub(response(revised).mul(-.38).exp()).pow(2);
+ const fade=float(1).sub(smoothstep(5,23,eyeDistance)).mul(float(1).sub(softDepth.mul(.80)));
+ return detail.sub(base).mul(.24).add(base.mul(detail).mul(.23)).mul(fade);
+}
 function createUnderwaterReceiver(options){
  if(!enhancedUnderwaterLight||!oceanTSL||!THREE.MeshStandardNodeMaterial||!causticMap)return new THREE.MeshStandardMaterial(options);
  let mat;
@@ -1322,7 +1344,13 @@ function createUnderwaterReceiver(options){
   const secondary=float(1).sub(detailedDet.add(fine.mul(.19)).abs().div(softDepth.mul(.07).add(.23)).clamp(0,1)).pow(2).mul(float(1).sub(softDepth.mul(.65)));
   const primary=float(1).sub(det.abs().div(.48).clamp(0,1)).pow(1.5);
   const focus=primary.mul(.22).add(core.mul(.72)).add(secondary.mul(.30)).mul(envelope.mul(.45).add(.55));
-  const analytic=vec3(.93,.99,1).mul(focus).mul(depth.mul(-.055).div(u.controls.z).exp());
+  let analytic=vec3(.93,.99,1).mul(focus).mul(depth.mul(-.055).div(u.controls.z).exp());
+  if(fineCausticOptics){
+   const a=float(1).sub(fineXX.mul(bend)),b=float(1).sub(fineZZ.mul(bend)),shear=fineXZ.mul(bend);
+   const eyeDistance=oceanTSL.cameraPosition.sub(positionWorld).length();
+   const detail=fineCausticRadiance(sx,sz,u.optics.x,u.optics.y,bend,a,b,shear,warpX,warpZ,detailedDet,softDepth,eyeDistance);
+   analytic=analytic.add(vec3(.98,1,1).mul(detail).mul(depth.mul(-.055).div(u.controls.z).exp())).max(vec3(0));
+  }
   // Floor photons become a less reliable proxy higher in the water.
   // Match the floor's radial transition, so receivers do not reveal the square photon tile.
   const radial=float(1).sub(smoothstep(.27,.47,q.length()));
@@ -2510,6 +2538,10 @@ function setupContinuousFloor(mat,detail){
     const fineDifference=refinedFocus.sub(focused).mul(.24).add(localConvergence);
     const fineRadiance=fineDifference.mul(nearDetail).mul(envelope.mul(.35).add(.65));
     light=light.add(vec3(.98,1,1).mul(fineRadiance).mul(depth.mul(-.055).div(controls.w).exp())).max(vec3(0));
+    if(fineCausticOptics){
+     const micro=fineCausticRadiance(sx,sz,t,lens.x,bend,a,b,shear,warpX,warpZ,det,softDepth,eyeDistance);
+     light=light.add(vec3(.98,1,1).mul(micro).mul(.78).mul(depth.mul(-.055).div(controls.w).exp())).max(vec3(0));
+    }
    }
   }
   const sandA=texture(detail.albedo,xz.div(5.5)).r;
@@ -7348,7 +7380,7 @@ function disableVolumeMarch(error){
  volumeMarchFault=String(error?.message||error);volumeMarchActive=false;
  screenLightPipeline.outputNode=volumeMarchBase;screenLightPipeline.needsUpdate=true;
  console.warn('Volume march fallback to existing screen scattering',error);
- status('28.5.59 volumetric fallback: '+volumeMarchFault);
+ status('28.5.60 volumetric fallback: '+volumeMarchFault);
  return true;
 }
 async function initScreenSpaceLighting(){
@@ -7391,7 +7423,7 @@ async function initScreenSpaceLighting(){
   screenBlendColor=blendColor;
   screenSpaceReady=true;
   applyScreenScatteringQuality();
-  status(volumeMarchActive?'28.5.59 multi-scale refractive light focusing initialized.':'24.7 depth-aware screen-space scattering initialized.');
+  status(volumeMarchActive?'28.5.60 shared fine-scale caustic optics initialized.':'24.7 depth-aware screen-space scattering initialized.');
  }catch(error){
   screenSpaceFault=String(error?.message||error);
   screenSpaceFailed=true;

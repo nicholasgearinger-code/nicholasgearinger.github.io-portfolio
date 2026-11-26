@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.43 FFT-synchronized receiver caustics</title>
+<title>Rift Water Lab · WebGPU 28.5.44 Depth-dependent caustic optics</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.43</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.44</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -150,7 +150,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.43 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.44 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -1247,8 +1247,12 @@ function createUnderwaterReceiver(options){
   }
   const detailedDet=float(1).sub(fineXX.mul(bend)).mul(float(1).sub(fineZZ.mul(bend))).sub(fineXZ.mul(fineXZ).mul(bend).mul(bend));
   const fine=sx.mul(7.13).sub(sz.mul(3.81)).add(warpZ.mul(1.6)).sub(u.optics.x.mul(8.9)).sin();
-  const core=float(1).sub(detailedDet.abs().div(.44).clamp(0,1)).pow(1.65);
-  const secondary=float(1).sub(detailedDet.add(fine.mul(.19)).abs().div(.23).clamp(0,1)).pow(2);
+  // Finite solar angular diameter and scattering soften distant optical folds.
+  // Leave the successful shallow-water profile unchanged below a six metre optical path.
+  const opticalPath=depth.div(u.controls.z).mul(u.controls.w.max(0));
+  const softDepth=smoothstep(6,24,opticalPath);
+  const core=float(1).sub(detailedDet.abs().div(softDepth.mul(.13).add(.44)).clamp(0,1)).pow(1.65).mul(float(1).sub(softDepth.mul(.28)));
+  const secondary=float(1).sub(detailedDet.add(fine.mul(.19)).abs().div(softDepth.mul(.07).add(.23)).clamp(0,1)).pow(2).mul(float(1).sub(softDepth.mul(.65)));
   const primary=float(1).sub(det.abs().div(.48).clamp(0,1)).pow(1.5);
   const focus=primary.mul(.22).add(core.mul(.72)).add(secondary.mul(.30)).mul(envelope.mul(.45).add(.55));
   const analytic=vec3(.93,.99,1).mul(focus).mul(depth.mul(-.055).div(u.controls.z).exp());
@@ -1264,7 +1268,10 @@ function createUnderwaterReceiver(options){
   const transmission=waveTransmissionTexture?texture(waveTransmissionTexture,uv.clamp(.001,.999)).r:float(1);
   const visibility=float(1).sub(float(1).sub(transmission).mul(inside).mul(radial).mul(u.optics.w));
   // Apply the same soft occlusion response as the sand; preserve surface gating.
-  const irradiance=light.mul(incidence).mul(submerged).mul(visibility.pow(.85)).mul(u.controls.y);
+  // Relative spectral extinction above the preserved shallow baseline.
+  const spectralPath=opticalPath.sub(6).max(0);
+  const spectralTint=vec3(.065,.022,.008).mul(spectralPath.negate()).exp();
+  const irradiance=light.mul(spectralTint).mul(incidence).mul(submerged).mul(visibility.pow(.85)).mul(u.controls.y);
   mat=new THREE.MeshStandardNodeMaterial(options);
   mat.emissiveNode=materialEmissive.add(irradiance.mul(materialColor.rgb.mul(.65).add(vec3(.35))));
   mat.userData.projectedCaustics=true;return mat;
@@ -2012,7 +2019,7 @@ function updateCausticLighting(cameraDepth=0){
  const emphasis=causticMode==='wave'?causticContrast:1;
  const emission=Math.max(0,Math.min(1.8,strength*(causticMode==='wave'?1.05:.75)*emphasis));
  floorCausticMaterial.emissiveIntensity=emission;
- if(continuousFloor){continuousFloor.origin.value.set(Number.isFinite(causticProjectionX)?causticProjectionX:0,Number.isFinite(causticProjectionZ)?causticProjectionZ:0);continuousFloor.controls.value.set(causticProjectionWidth,causticMode==='wave'&&enabled?emission:0,clockTime,Math.max(.4,waterClarity));continuousFloor.wave.value=causticMode==='wave'?1:0;continuousFloor.shadow.value=waveTransmissionMaterialActive?1:0;continuousFloor.lens.value.set(waveHeight,causticFocus);updateFloorFFTCurvature();}
+ if(continuousFloor){continuousFloor.origin.value.set(Number.isFinite(causticProjectionX)?causticProjectionX:0,Number.isFinite(causticProjectionZ)?causticProjectionZ:0);continuousFloor.controls.value.set(causticProjectionWidth,causticMode==='wave'&&enabled?emission:0,clockTime,Math.max(.4,waterClarity));continuousFloor.wave.value=causticMode==='wave'?1:0;continuousFloor.shadow.value=waveTransmissionMaterialActive?1:0;continuousFloor.lens.value.set(waveHeight,causticFocus);continuousFloor.absorption.value=Math.max(0,depthAbsorption);updateFloorFFTCurvature();}
  floorCausticMaterial.color.setScalar(causticMode==='wave'&&enabled?
    Math.max(.72,1-.12*causticContrast):1);
  // This projection is mapped only onto the sand. Rock UVs do not
@@ -2074,7 +2081,7 @@ function setupContinuousFloor(mat,detail){
  if(!mat.isNodeMaterial||!oceanTSL||!causticMap||!waveTransmissionTexture)return;
  try{
   const {uniform,float,vec2,vec3,texture,positionWorld,materialColor,materialEmissive,smoothstep}=oceanTSL;
-  const origin=uniform(new THREE.Vector2()),controls=uniform(new THREE.Vector4(64,0,0,1)),wave=uniform(1),shadow=uniform(0),lens=uniform(new THREE.Vector2(1,1.2));
+  const origin=uniform(new THREE.Vector2()),controls=uniform(new THREE.Vector4(64,0,0,1)),wave=uniform(1),shadow=uniform(0),lens=uniform(new THREE.Vector2(1,1.2)),absorption=uniform(1);
   // Independent persistent texture avoids dangling references when ocean LOD is rebuilt.
   const curvaturePixels=new Uint8Array(64*64*4);curvaturePixels.fill(128);
   const curvatureTex=new THREE.DataTexture(curvaturePixels,64,64,THREE.RGBAFormat);
@@ -2123,8 +2130,10 @@ function setupContinuousFloor(mat,detail){
   // Separate the low-frequency convergence from the narrow fold highlight.
   // A second, smaller optical fold splits and reconnects with the primary.
   const fine=sx.mul(7.13).sub(sz.mul(3.81)).add(warpZ.mul(1.6)).sub(t.mul(8.9)).sin();
-  const core=float(1).sub(det.abs().div(.44).clamp(0,1)).pow(1.65);
-  const secondary=float(1).sub(det.add(fine.mul(.19)).abs().div(.23).clamp(0,1)).pow(2);
+  const opticalPath=depth.div(controls.w).mul(absorption.max(0));
+  const softDepth=smoothstep(6,24,opticalPath);
+  const core=float(1).sub(det.abs().div(softDepth.mul(.13).add(.44)).clamp(0,1)).pow(1.65).mul(float(1).sub(softDepth.mul(.28)));
+  const secondary=float(1).sub(det.add(fine.mul(.19)).abs().div(softDepth.mul(.07).add(.23)).clamp(0,1)).pow(2).mul(float(1).sub(softDepth.mul(.65)));
   const shoulder=float(1).sub(focus.mul(-.22).exp()).pow(2);
   const band=core.mul(.87).add(secondary.mul(.38)).add(shoulder.mul(.10)).mul(envelope.mul(.45).add(.55));
   const outer=vec3(.93,.99,1).mul(band).mul(depth.mul(-.055).div(controls.w).exp());
@@ -2136,11 +2145,12 @@ function setupContinuousFloor(mat,detail){
   mat.colorNode=materialColor.rgb.mul(grain).mul(shaded);
   // Classic mode retains the existing emissive map; wave mode replaces it.
   // Focused light must obey the same occlusion as diffuse sunlight.
-  const litCaustic=light.mul(shaded.pow(.85)).mul(grain).mul(controls.y);
+  const spectralTint=vec3(.065,.022,.008).mul(opticalPath.sub(6).max(0).negate()).exp();
+  const litCaustic=light.mul(spectralTint).mul(shaded.pow(.85)).mul(grain).mul(controls.y);
   // Approximate added diffuse irradiance using receiver albedo and orientation.
   const receiver=oceanTSL.normalWorld.normalize().dot(vec3(16,35,8).normalize()).max(0);
   mat.emissiveNode=materialEmissive.mul(float(1).sub(wave)).add(litCaustic.mul(materialColor.rgb.mul(.55).add(vec3(.45))).mul(receiver.mul(.75).add(.25)).mul(vec3(.90,.98,1)));
-  mat.userData.continuousFloor=true;continuousFloor={origin,controls,wave,shadow,lens,curvatureTex,curvaturePixels,fftCurvatureMix,fftFrame:-1,fftOwner:null};
+  mat.userData.continuousFloor=true;continuousFloor={origin,controls,wave,shadow,lens,absorption,curvatureTex,curvaturePixels,fftCurvatureMix,fftFrame:-1,fftOwner:null};
   mat.needsUpdate=true;
  }catch(e){continuousFloor=null;mat.colorNode=null;mat.emissiveNode=null;console.warn('Continuous floor fallback',e);}
 }

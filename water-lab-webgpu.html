@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.51 Adaptive caustic volume integration</title>
+<title>Rift Water Lab · WebGPU 28.5.52 Depth-resolved solid light occlusion</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.51</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.52</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -151,7 +151,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.51 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.52 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -1338,7 +1338,7 @@ function createUnderwaterReceiver(options){
   // Relative spectral extinction above the preserved shallow baseline.
   const spectralPath=opticalPath.sub(6).max(0);
   const spectralTint=vec3(.065,.022,.008).mul(spectralPath.negate()).exp();
-  const irradiance=light.mul(spectralTint).mul(incidence).mul(submerged).mul(visibility.pow(.85)).mul(u.controls.y);
+  const irradiance=light.mul(spectralTint).mul(incidence).mul(submerged).mul(visibility.pow(.85)).mul(solidLightVisibility(positionWorld)).mul(u.controls.y);
   mat=new THREE.MeshStandardNodeMaterial(options);
   mat.emissiveNode=materialEmissive.add(irradiance.mul(materialColor.rgb.mul(.40).add(vec3(.60))));
   mat.userData.projectedCaustics=true;return mat;
@@ -1418,7 +1418,75 @@ function sampleLightField(position){
  const mask=float(1).sub(smoothstep(.28,.46,q.length())).mul(smoothstep(.25,.75,depth)).mul(float(1).sub(smoothstep(9.5,11.75,depth))).mul(u.w);
  return {energy,mask};
 }
+// A small orthographic optical blocker atlas. Each texel stores the highest
+// solid intersection along the mean refracted sunlight direction.
+const BLOCK_N=192,BLOCK_WIDTH=64;
+let blockerMap=null,blockerPixels=null,blockerControls=null,blockerLast=-100;
+const solidOcclusionEnabled=!new URLSearchParams(location.search).has('noSolidOcclusion');
+function initSolidOcclusion(){
+ if(!solidOcclusionEnabled||!oceanTSL||blockerMap)return;
+ blockerPixels=new Uint8Array(BLOCK_N*BLOCK_N*4);
+ blockerMap=new THREE.DataTexture(blockerPixels,BLOCK_N,BLOCK_N,THREE.RGBAFormat);
+ blockerMap.minFilter=blockerMap.magFilter=THREE.LinearFilter;
+ blockerMap.wrapS=blockerMap.wrapT=THREE.ClampToEdgeWrapping;
+ blockerMap.generateMipmaps=false;blockerMap.needsUpdate=true;
+ blockerControls=oceanTSL.uniform(new THREE.Vector4(0,0,BLOCK_WIDTH,0));
+}
+function solidLightVisibility(position){
+ if(!blockerMap||!blockerControls)return oceanTSL.float(1);
+ const {float,vec2,texture,smoothstep}=oceanTSL,u=blockerControls;
+ // Points on the same downward refracted ray share this projected coordinate.
+ const q=position.xz.sub(vec2(.326,.163).mul(position.y)).sub(u.xy).div(u.z);
+ const uv=vec2(q.x.add(.5),float(.5).sub(q.y));
+ const edge=float(1).sub(smoothstep(.40,.49,q.length()));
+ const encoded=texture(blockerMap,uv.clamp(.001,.999)).r;
+ const highest=encoded.mul(36).sub(32);
+ const blocked=smoothstep(.30,.95,highest.sub(position.y)).mul(smoothstep(.001,.025,encoded));
+ return float(1).sub(blocked.mul(edge).mul(u.w).mul(.92));
+}
+function updateSolidOcclusion(t){
+ if(!blockerMap||!boat||!waterFloor)return;
+ if(t-blockerLast<.10&&t>=blockerLast)return;
+ blockerLast=t;
+ const cx=boat.position.x,cz=boat.position.z,fx=waterFloor.position.x,fz=waterFloor.position.z;
+ const pixels=blockerPixels;pixels.fill(0);
+ const step=BLOCK_WIDTH/BLOCK_N;
+ // Rasterize conservative ellipsoidal proxies in sun-projected coordinates.
+ // Height is encoded only for occupied pixels; empty rays transmit sunlight.
+ function stamp(x,y,z,rx,ry,rz,heading=0){
+  const px=x-.326*y,pz=z-.163*y;
+  const c=Math.cos(heading),sn=Math.sin(heading),r=Math.max(rx,rz)+ry*.37+step;
+  const ix=Math.floor((px-cx+BLOCK_WIDTH*.5)/step),iz=Math.floor((cz-pz+BLOCK_WIDTH*.5)/step),n=Math.ceil(r/step);
+  for(let j=Math.max(0,iz-n);j<=Math.min(BLOCK_N-1,iz+n);j++)for(let i=Math.max(0,ix-n);i<=Math.min(BLOCK_N-1,ix+n);i++){
+   const dx=cx+(i+.5-BLOCK_N*.5)*step-px,dz=cz-(j+.5-BLOCK_N*.5)*step-pz;
+   const lx=c*dx-sn*dz,lz=sn*dx+c*dz;
+   const d2=(lx/(rx+ry*.22+step*.35))**2+(lz/(rz+ry*.15+step*.35))**2;
+   if(d2>=1)continue;
+   const h=y+ry*Math.sqrt(1-d2),value=Math.max(1,Math.min(255,Math.round((h+32)/36*255))),k=(j*BLOCK_N+i)*4;
+   if(value>pixels[k]){pixels[k]=value;pixels[k+3]=255;}
+  }
+ }
+ if(underwaterObjects?.visible){
+  for(let i=0;i<underwaterRockLocations.length;i++){
+   const [x,z]=underwaterRockLocations[i],scale=.5+.9*(.5+.5*Math.sin(i*8.31));
+   stamp(x+fx,-seabedDepth(x,z)+scale*.4,z+fz,scale*1.08,scale*.55,scale*.83,i*1.2);
+  }
+  for(const [x,z,r] of [[-8,-18,1.15],[5,-21,.9],[9,-8,1.25]]){
+   const d=seabedDepth(x,z),h=d+.38;
+   stamp(x+fx,-d+h*.5,z+fz,r*.90,h*.46,r*.78,x*.4);
+  }
+  // Wreck timber proxies, using the same transformed locations as the mesh.
+  const wy=-seabedDepth(13,-25)+.5,c=Math.cos(.35),sn=Math.sin(.35);
+  for(let i=0;i<8;i++){const z=(i-3.5)*1.15;for(const x of [-2,2]){
+   stamp(fx+13+c*x+sn*z,wy+.2,fz-25-sn*x+c*z,.13,.72,.13);
+  }}
+ }
+ stamp(cx,boat.position.y-.12,cz,.94,.35,2.15,boatHeading);
+ blockerMap.needsUpdate=true;
+ blockerControls.value.set(cx,cz,BLOCK_WIDTH,Math.max(0,Math.min(1,scatteringShadows)));
+}
 function makeCausticTexture(){
+ initSolidOcclusion();
  initLightAtlas();
  const n=CAUSTIC_SIZE;causticPixels=new Uint8Array(n*n*4);
  const tex=new THREE.DataTexture(causticPixels,n,n,THREE.RGBAFormat);
@@ -2181,6 +2249,8 @@ function updateUnifiedVisibility(cameraDepth=0){
  colors.needsUpdate=true;
 }
 function updateCausticLighting(cameraDepth=0){
+ updateSolidOcclusion(clockTime);
+ if(blockerControls)blockerControls.value.w=causticMode==='wave'&&opticalMode!=='legacy'&&atmospherePreset!=='off'?Math.max(0,Math.min(1,scatteringShadows)):0;
  if(lightControls)lightControls.value.w=lightFrames>0&&!lightFault&&causticGPU===lightGPU?.owner&&causticMode==='wave'&&underwaterActive&&opticalMode!=='legacy'&&atmospherePreset!=='off'?1:0;
  if(!floorCausticMaterial)return;
  const enabled=opticalMode!=='legacy'&&atmospherePreset!=='off'&&causticMode!=='off';
@@ -2322,7 +2392,7 @@ function setupContinuousFloor(mat,detail){
   // Classic mode retains the existing emissive map; wave mode replaces it.
   // Focused light must obey the same occlusion as diffuse sunlight.
   const spectralTint=vec3(.065,.022,.008).mul(opticalPath.sub(6).max(0).negate()).exp();
-  const litCaustic=light.mul(spectralTint).mul(shaded.pow(.85)).mul(grain).mul(controls.y);
+  const litCaustic=light.mul(spectralTint).mul(shaded.pow(.85)).mul(grain).mul(controls.y).mul(solidLightVisibility(positionWorld));
   // Approximate added diffuse irradiance using receiver albedo and orientation.
   const receiver=oceanTSL.normalWorld.normalize().dot(vec3(16,35,8).normalize()).max(0);
   mat.emissiveNode=materialEmissive.mul(float(1).sub(wave)).add(litCaustic.mul(materialColor.rgb.mul(.55).add(vec3(.45))).mul(receiver.mul(.75).add(.25)).mul(vec3(.90,.98,1)));
@@ -7115,7 +7185,7 @@ function buildVolumeMarch(composed,sceneDepth){
    // Integrate the extinction over the whole step, not just its midpoint.
    const integral=float(1).sub(step.mul(controls.y).negate().exp()).div(controls.y.max(.0001));
    const startTransmission=distance.sub(step.mul(jitter)).max(0).mul(controls.y).negate().exp();
-   const energy=field.energy.pow(1.25).mul(field.mask).mul(wet).mul(phase).mul(startTransmission).mul(integral).mul(controls.x);
+   const energy=field.energy.pow(1.25).mul(field.mask).mul(wet).mul(phase).mul(startTransmission).mul(integral).mul(controls.x).mul(solidLightVisibility(point));
    accumulated.addAssign(vec3(.72,.96,1).mul(spectral).mul(energy));
   });
   });
@@ -7139,7 +7209,7 @@ function disableVolumeMarch(error){
  volumeMarchFault=String(error?.message||error);volumeMarchActive=false;
  screenLightPipeline.outputNode=volumeMarchBase;screenLightPipeline.needsUpdate=true;
  console.warn('Volume march fallback to existing screen scattering',error);
- status('28.5.51 volumetric fallback: '+volumeMarchFault);
+ status('28.5.52 volumetric fallback: '+volumeMarchFault);
  return true;
 }
 async function initScreenSpaceLighting(){
@@ -7182,7 +7252,7 @@ async function initScreenSpaceLighting(){
   screenBlendColor=blendColor;
   screenSpaceReady=true;
   applyScreenScatteringQuality();
-  status(volumeMarchActive?'28.5.51 adaptive depth-resolved volumetric ray marching initialized.':'24.7 depth-aware screen-space scattering initialized.');
+  status(volumeMarchActive?'28.5.52 depth-resolved solid light occlusion initialized.':'24.7 depth-aware screen-space scattering initialized.');
  }catch(error){
   screenSpaceFault=String(error?.message||error);
   screenSpaceFailed=true;

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.8 GPU foam topology and optical CPU cleanup</title>
+<title>Rift Water Lab · WebGPU 28.5.9 Cached hull wetness and telemetry optimization</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.8</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.9</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -150,7 +150,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.8 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.9 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -2321,6 +2321,7 @@ const hullSheetOrder=[0,2,4,6,8,10,12,11,9,7,5,3,1,0];
 const HULL_SHEET_ROWS=5,HULL_SHEET_COLS=4;
 let hullSheet=null,hullSheetPoint=null,hullSheetNormal=null,hullSheetCells=0;
 let hullSheetTears=0,hullSheetLastEmit=-100,hullWetMesh=null,hullWetClock=0;
+let hullWetCache=null;
 const hullWetValues=new Float32Array(13);
 function createHullSheet(){
  const g=new THREE.BufferGeometry(),n=(hullSheetOrder.length-1)*HULL_SHEET_ROWS*HULL_SHEET_COLS;
@@ -2348,15 +2349,25 @@ function updateHullWetness(dt){
   average+=hullWetValues[i];
  }
  const g=hullWetMesh.geometry,positions=g.attributes.position.array,colors=g.attributes.color.array;
- for(let i=0;i<positions.length;i+=3){
-  // Visual hull is rotated PI relative to physics root.
-  const x=-positions[i],z=-positions[i+2],y=positions[i+1]+.35;
-  let sum=0,weight=0;
-  for(let k=0;k<hullSplashProbes.length;k++){
-   const p=hullSplashProbes[k],w=1/(.12+(x-p.x)**2+(z-p.z)**2);
-   sum+=w*hullWetValues[k];weight+=w;
+ const count=positions.length/3, probes=hullSplashProbes.length;
+ // Hull geometry and probe positions are fixed in local space. Cache the
+ // exact normalized interpolation weights instead of recomputing distances.
+ if(!hullWetCache||hullWetCache.geometry!==g||hullWetCache.probes!==probes){
+  const weights=new Float64Array(count*probes),fade=new Float64Array(count);
+  for(let v=0;v<count;v++){
+   const i=v*3,x=-positions[i],z=-positions[i+2],y=positions[i+1]+.35;
+   let total=0;
+   for(let k=0;k<probes;k++){const p=hullSplashProbes[k],w=1/(.12+(x-p.x)**2+(z-p.z)**2);weights[v*probes+k]=w;total+=w;}
+   for(let k=0;k<probes;k++)weights[v*probes+k]/=Math.max(.001,total);
+   fade[v]=Math.max(0,Math.min(1,(.48-y)/.26));
   }
-  const wet=Math.min(1,sum/Math.max(.001,weight))*Math.max(0,Math.min(1,(.48-y)/.26));
+  hullWetCache={geometry:g,probes,weights,fade};
+ }
+ const {weights,fade}=hullWetCache;
+ for(let v=0;v<count;v++){
+  const i=v*3;let sum=0;
+  for(let k=0;k<probes;k++)sum+=weights[v*probes+k]*hullWetValues[k];
+  const wet=Math.min(1,sum)*fade[v];
   colors[i]=1-.29*wet;colors[i+1]=1-.36*wet;colors[i+2]=1-.40*wet;
  }
  g.attributes.color.needsUpdate=true;
@@ -6475,7 +6486,7 @@ async function init3D(forceWebGL=false){
  bindCameraGestures(renderer.domElement);
  const profile={count:0,total:0,physics:0,aeration:0,geometry:0,foam:0,lighting:0,submit:0,queue:0,queueCount:0,queuePending:false,lastQueue:-100};
  const profileDevice=rendererGPUDevice();
- let time=0,previousFrame=performance.now();
+ let time=0,previousFrame=performance.now(),lastTelemetry=-Infinity;
  const render=()=>{
   const nowFrame=performance.now(),dt=Math.min(.04,Math.max(0,(nowFrame-previousFrame)/1000));
   profile.total+=nowFrame-previousFrame;profile.count++;
@@ -6552,7 +6563,9 @@ async function init3D(forceWebGL=false){
   }
   if(skyDome)skyDome.position.copy(camera.position);
   const hint=$('cameraHint');
-  if(hint){const opacity=Math.max(0,1-(performance.now()-cameraIntroStart-1600)/1300);hint.style.opacity=String(Math.max(0,opacity));}
+  if(hint&&hint.style.opacity!=='0'){const opacity=Math.max(0,Math.min(1,1-(nowFrame-cameraIntroStart-1600)/1300));hint.style.opacity=String(opacity);}
+  // Telemetry is independent of simulation and rendering. Update at 5 Hz.
+  if(nowFrame-lastTelemetry>=200){lastTelemetry=nowFrame;
   $('boatSpeed').textContent='Speed: '+boatSpeed.toFixed(1)+' m/s';
   $('distanceStatus').textContent='Travel: '+totalTravel.toFixed(1)+' m';
   $('wakeSignal').textContent='Peak ripple: '+(lastRipple*100).toFixed(0)+' cm';
@@ -6567,6 +6580,7 @@ async function init3D(forceWebGL=false){
   }
   // Foam count is set by the whitewater generator, not by boat speed.
   $('heading').textContent='Heading: '+((boatHeading*180/Math.PI%360+360)%360).toFixed(0)+'°';
+  }
   profile.lighting+=performance.now()-profileMark;profileMark=performance.now();
   try{
    const useScreen=updateScreenSpaceLighting();

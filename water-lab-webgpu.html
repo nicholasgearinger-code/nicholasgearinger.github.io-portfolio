@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.37.2 Lightweight shared photon receivers</title>
+<title>Rift Water Lab · WebGPU 28.5.37.3 Restored seabed baseline and independent receiver controls</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.37.2</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.37.3</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -128,7 +128,8 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Atmosphere preset <select id="atmospherePreset"><option value="lagoon" selected>Tropical lagoon</option><option value="coastal">Coastal haze</option><option value="deep">Deep blue</option><option value="off">Off · comparison</option></select></label></div>
 <div class="row"><label>Underwater environment <select id="underwaterScene"><option value="reef">Rocks and shipwreck</option><option value="sand">Sand only · performance</option></select></label></div>
 <div class="row"><label>Caustic model <select id="causticMode"><option value="wave" selected>24.5.3 · refracted ray network</option><option value="classic">24.4 · tiled comparison</option><option value="off">Off</option></select></label></div>
-<div class="row"><label>Wave caustics <input id="causticStrength" aria-label="Wave caustics" type="range" min="0" max="1.5" step=".05" value=".8"></label><output id="causticStrengthOut">0.80</output></div>
+<div class="row"><label>Seabed caustics <input id="causticStrength" aria-label="Wave caustics" type="range" min="0" max="1.5" step=".05" value=".8"></label><output id="causticStrengthOut">0.80</output></div>
+<div class="row"><label>Object caustics <input id="objectCausticStrength" aria-label="Object caustic intensity" type="range" min="0" max="2.5" step=".05" value="1.45"></label><output id="objectCausticStrengthOut">1.45</output></div>
 <div class="row"><label>Caustic focusing <input id="causticFocus" aria-label="Caustic focusing" type="range" min=".4" max="2" step=".1" value="1.2"></label><output id="causticFocusOut">1.20</output></div>
 <div class="row"><label>Caustic contrast <input id="causticContrast" aria-label="Caustic contrast against sand" type="range" min="0" max="2.5" step=".05" value="1.45"></label><output id="causticContrastOut">1.45</output></div>
 <div class="row"><label>Caustic refresh <select id="causticRate"><option value="8">Battery saver · 8 Hz</option><option value="12" selected>Balanced · 12 Hz</option><option value="18">Smooth · 18 Hz</option></select></label></div>
@@ -150,7 +151,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.37.2 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.37.3 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -443,6 +444,7 @@ let opticalMode='lagoon',waterClarity=1.10,waterFloor=null,renderQuality='balanc
 let depthRefraction=1,underwaterScatter=1,waveSmoothness=1,reflectionStrength=1,subsurfaceLight=.85;
 let thicknessTexture=null,thicknessPixels=null,lastThicknessX=Infinity,lastThicknessZ=Infinity;
 let underwaterActive=false,underwaterFog=null,dayFog=null,waterDepthAtBoat=4,underwaterBlend=0,underwaterSceneMode='reef',underwaterObjects=null,causticStrength=.8,causticMap=null,causticPixels=null,lastCausticUpdate=-100;
+let objectCausticStrength=1.45;
 let causticMode='wave',causticFocus=1.2,causticContrast=1.45,
  causticRate=12,causticDetail=96,causticValidated=true,causticLastError='';
 const CAUSTIC_SIZE=new URLSearchParams(location.search).has('caustics128')?128:256;
@@ -1757,7 +1759,7 @@ function updateWaveTransmissionObjects(t){
  }
 }
 
-// 28.5.37.2: same transmission model in a parallel compute pass.
+// 28.5.37.3: same transmission model in a parallel compute pass.
 // Keep the existing texture and CPU fallback; no blocking GPU readback.
 let transmissionGPU=null,transmissionGPUStarting=false,transmissionGPUFault='',transmissionGPUFrames=0;
 const transmissionWGSL=`
@@ -1991,7 +1993,7 @@ function updateCausticLighting(cameraDepth=0){
  // represent the same world coordinates; avoid a uniform glow on them.
  for(const material of underwaterObjectMaterials)
   material.emissiveIntensity=causticMode==='wave'?0:emission*.55;
- if(causticObjectUniforms){const u=causticObjectUniforms;u.origin.value.set(Number.isFinite(causticProjectionX)?causticProjectionX:0,Number.isFinite(causticProjectionZ)?causticProjectionZ:0);u.controls.value.set(causticProjectionWidth,enabled&&causticMode==='wave'?Math.min(2.4,emission*1.45):0,Math.max(.4,waterClarity),depthAbsorption);u.floorOrigin.value.set(waterFloor?.position.x||0,waterFloor?.position.z||0);u.optics.value.set(clockTime,waveHeight,causticFocus,waveTransmissionMaterialActive?1:0);}
+ if(causticObjectUniforms){const u=causticObjectUniforms;u.origin.value.set(Number.isFinite(causticProjectionX)?causticProjectionX:0,Number.isFinite(causticProjectionZ)?causticProjectionZ:0);u.controls.value.set(causticProjectionWidth,enabled&&causticMode==='wave'?Math.min(2.4,objectCausticStrength*.8*1.05*1.45*(1-.55*opticalAir)*sunPath*(enhancedUnderwaterLight?Math.exp(-cameraDepth*.024*Math.max(0,depthAbsorption)/Math.max(.4,waterClarity)):(1-.35*Math.min(1,cameraDepth/25)))):0,Math.max(.4,waterClarity),depthAbsorption);u.floorOrigin.value.set(waterFloor?.position.x||0,waterFloor?.position.z||0);u.optics.value.set(clockTime,waveHeight,causticFocus,waveTransmissionMaterialActive?1:0);}
 }
 // Static, tileable sand microstructure. Independent UV channel keeps
 // grain detail stationary when the moving caustic projection is recentered.
@@ -2100,7 +2102,7 @@ function setupContinuousFloor(mat,detail){
   const shoulder=float(1).sub(focus.mul(-.22).exp()).pow(2);
   const band=core.mul(.87).add(secondary.mul(.38)).add(shoulder.mul(.10)).mul(envelope.mul(.45).add(.55));
   const outer=vec3(.93,.99,1).mul(band).mul(depth.mul(-.055).div(controls.w).exp());
-  const light=outer.mul(float(1).sub(localMask.mul(.20))).mul(2.1).add(local.mul(localMask).mul(1.18));
+  const light=outer.mul(float(1).sub(localMask.mul(.20))).mul(2.1).add(local.mul(localMask).mul(.95));
   const sandA=texture(detail.albedo,xz.div(5.5)).r;
   const grain=sandA.mul(.24).add(.76);
   const transmission=texture(waveTransmissionTexture,uv.clamp(.001,.999)).r;
@@ -6693,6 +6695,7 @@ $('causticContrast').oninput=()=>{
  $('causticContrastOut').textContent=causticContrast.toFixed(2);
  updateCausticLighting();
 };
+$('objectCausticStrength').oninput=()=>{objectCausticStrength=Number($('objectCausticStrength').value);$('objectCausticStrengthOut').textContent=objectCausticStrength.toFixed(2);};
 $('causticStrength').oninput=()=>{
  causticStrength=Number($('causticStrength').value);
  $('causticStrengthOut').textContent=causticStrength.toFixed(2);

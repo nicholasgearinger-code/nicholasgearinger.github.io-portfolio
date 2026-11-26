@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.64 Directional object light transport</title>
+<title>Rift Water Lab · WebGPU 28.5.65 Fine photon reconstruction on objects</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.64</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.65</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -152,7 +152,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.64 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.65 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -479,6 +479,7 @@ const fineCausticOptics=!new URLSearchParams(location.search).has('noFineCaustic
 const tensorCaustics=new URLSearchParams(location.search).has('experimentalTensorCaustics');
 const improvedObjectCaustics=!new URLSearchParams(location.search).has('legacyObjectCaustics');
 const directionalObjectLight=improvedObjectCaustics&&!new URLSearchParams(location.search).has('noDirectionalObjectLight');
+const detailedObjectPhotons=directionalObjectLight&&!new URLSearchParams(location.search).has('noDetailedObjectPhotons');
 const waterProfiles={
  lagoon:photoOptics?{absorption:[.155,.058,.031],scattering:.026,color:0x2589bc}:{absorption:[.19,.070,.040],scattering:.022,color:0x175e8a},
  coastal:{absorption:[.30,.135,.080],scattering:.043,color:0x285a65},
@@ -1408,7 +1409,19 @@ function createUnderwaterReceiver(options){
   const rayLight=texture(causticMap,uv.clamp(.001,.999)).rgb;
   let light=analytic.mul(float(1).sub(floorWeight)).mul(1.45).add(rayLight.mul(floorWeight).mul(1.35));
   const field=sampleLightField(positionWorld);
-  if(field)light=light.mul(float(1).sub(field.mask.mul(improvedObjectCaustics?.12:.30))).add(vec3(.93,.99,1).mul(field.energy).mul(field.mask).mul(improvedObjectCaustics?.65:.85));
+  if(field){
+   light=light.mul(float(1).sub(field.mask.mul(improvedObjectCaustics?.12:.30))).add(vec3(.93,.99,1).mul(field.energy).mul(field.mask).mul(improvedObjectCaustics?.65:.85));
+   if(detailedObjectPhotons){
+    const eyeDistance=oceanTSL.cameraPosition.sub(positionWorld).length();
+    const nearDetail=float(1).sub(smoothstep(7,30,eyeDistance));
+    // Reconstruct photon contrast relative to the diffuse field, not a
+    // painted outline. The existing red and green channels are unchanged.
+    const contrast=field.finePhoton.sub(field.diffuse.mul(.36)).max(0);
+    const detail=contrast.pow(1.45).mul(field.mask).mul(nearDetail);
+    const peaks=field.finePhoton.sub(field.energy.mul(.65)).max(0).mul(field.mask).mul(nearDetail);
+    light=light.add(vec3(.98,1,1).mul(detail.mul(1.55).add(peaks.mul(.60))));
+   }
+  }
   // Refracted sunlight is closer to vertical than the incident air ray.
   const receiverCos=normalWorld.normalize().dot(vec3(.326,1,.163).normalize());
   // Refracted angular spread illuminates near-vertical facets without lighting backsides.
@@ -1547,8 +1560,9 @@ function sampleLightField(position){
  // The green channel stores a broad local irradiance estimate from the same
  // photon reconstruction. Interpolate both fields identically in world depth.
  const diffuse=a.g.add(b.g.sub(a.g).mul(layer.sub(lo)));
+ const finePhoton=a.b.add(b.b.sub(a.b).mul(layer.sub(lo)));
  const mask=float(1).sub(smoothstep(.28,.46,q.length())).mul(smoothstep(.15,LIGHT_DEPTHS[0],depth)).mul(float(1).sub(smoothstep(LIGHT_DEPTHS[LIGHT_LAYERS-2],LIGHT_DEPTHS[LIGHT_LAYERS-1]+1,depth))).mul(u.w);
- return {energy,mask,diffuse};
+ return {energy,mask,diffuse,finePhoton};
 }
 // A small orthographic optical blocker atlas. Each texel stores the highest
 // solid intersection along the mean refracted sunlight direction.
@@ -1873,7 +1887,12 @@ fn shade(@builtin(global_invocation_id) id:vec3u){
   broad=mean*0.45+ring*0.55;
  }
  let diffuse=u32(round(255.0*clamp(1.0-exp(-broad*0.75),0.0,1.0)));
- result[k]=v|(diffuse<<8u)|(v<<16u)|0xff000000u;
+ // Preserve a separate high-frequency photon channel for solid receivers.
+ // Require neighbor support to suppress isolated undersampled deposits.
+ let finePeak=mix(mean,min(center,mean*2.8+0.18),mix(0.28,0.82,smoothstep(0.23,0.67,support)));
+ let fineExcess=max(0.0,finePeak-max(expected*0.88,broad*0.68));
+ let finePhoton=u32(round(255.0*clamp(1.0-exp(-fineExcess*2.8),0.0,1.0)));
+ result[k]=v|(diffuse<<8u)|(finePhoton<<16u)|0xff000000u;
 }
 `;
 }
@@ -7470,7 +7489,7 @@ function disableVolumeMarch(error){
  volumeMarchFault=String(error?.message||error);volumeMarchActive=false;
  screenLightPipeline.outputNode=volumeMarchBase;screenLightPipeline.needsUpdate=true;
  console.warn('Volume march fallback to existing screen scattering',error);
- status('28.5.64 volumetric fallback: '+volumeMarchFault);
+ status('28.5.65 volumetric fallback: '+volumeMarchFault);
  return true;
 }
 async function initScreenSpaceLighting(){
@@ -7513,7 +7532,7 @@ async function initScreenSpaceLighting(){
   screenBlendColor=blendColor;
   screenSpaceReady=true;
   applyScreenScatteringQuality();
-  status(volumeMarchActive?'28.5.64 directional object light transport initialized.':'24.7 depth-aware screen-space scattering initialized.');
+  status(volumeMarchActive?'28.5.65 fine object photon reconstruction initialized.':'24.7 depth-aware screen-space scattering initialized.');
  }catch(error){
   screenSpaceFault=String(error?.message||error);
   screenSpaceFailed=true;

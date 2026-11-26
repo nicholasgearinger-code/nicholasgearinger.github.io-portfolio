@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.37.1 Visible depth-aware object caustics</title>
+<title>Rift Water Lab · WebGPU 28.5.37.2 Lightweight shared photon receivers</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.37.1</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.37.2</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -150,7 +150,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.37.1 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.37.2 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -1198,7 +1198,7 @@ function seabedDepth(x,z){
 const surfaceFoamObjects=[],activeObjectFoam=[];
 let objectFoamLast=-100,objectFoamHits=0;
 function createUnderwaterReceiver(options){
- if(!enhancedUnderwaterLight||!oceanTSL||!THREE.MeshStandardNodeMaterial||!causticMap)return new THREE.MeshStandardMaterial(options);
+ if(!enhancedUnderwaterLight||!oceanTSL||!THREE.MeshStandardNodeMaterial||!causticMap||new URLSearchParams(location.search).has('noObjectCaustics'))return new THREE.MeshStandardMaterial(options);
  let mat;
  try{
   const {uniform,float,vec2,vec3,texture,positionWorld,normalWorld,materialColor,materialEmissive,smoothstep}=oceanTSL;
@@ -1217,44 +1217,24 @@ function createUnderwaterReceiver(options){
   const uv=vec2(q.x.add(.5),float(.5).sub(q.y));
   const edge=uv.min(float(1).sub(uv));
   const inside=smoothstep(.005,.08,edge.x.min(edge.y));
-  const sx=positionWorld.x.add(depth.mul(.326)),sz=positionWorld.z.add(depth.mul(.163));
-  let xx=float(0),zz=float(0),xz=float(0),surface=float(0);
-  for(const w of waveComponents.concat(opticalRipples)){
-   const phase=sx.mul(w.kx).add(sz.mul(w.kz)).sub(u.optics.x.mul(w.omega)).add(w.phase);
-   const h=phase.sin().mul(w.amplitude).mul(u.optics.y);
-   xx=xx.sub(h.mul(w.kx*w.kx));zz=zz.sub(h.mul(w.kz*w.kz));xz=xz.sub(h.mul(w.kx*w.kz));
-   // A separate wave elevation at the receiver gates surface-piercing objects.
+  // Reuse the already reconstructed photons rather than repeating the
+  // entire wave spectrum for every fragment on every receiver.
+  let surface=float(0);
+  for(const w of waveComponents.slice(0,3)){
    const wp=positionWorld.x.mul(w.kx).add(positionWorld.z.mul(w.kz)).sub(u.optics.x.mul(w.omega)).add(w.phase);
    surface=surface.add(wp.sin().mul(w.amplitude).mul(u.optics.y));
   }
-  // Match the successful floor's directional short-wave optical spectrum.
-  const warpX=sx.mul(.71).add(sz.mul(.37)).sub(u.optics.x.mul(.83)).sin();
-  const warpZ=sz.mul(.59).sub(sx.mul(.43)).add(u.optics.x.mul(.69)).sin();
-  const envelope=warpX.mul(warpZ).mul(.22).add(.94);
-  for(const [kx,kz,amp,phase0] of [[2.71,1.19,.021,1.13],[-1.42,3.63,.012,4.27],[4.13,-2.57,.0075,2.06],[.83,5.19,.0048,5.81],[-4.91,-1.67,.0042,.43],[3.24,3.87,.0051,3.14]]){
-   const phase=sx.mul(kx).add(sz.mul(kz)).add(warpX.mul(kx*.31)).add(warpZ.mul(kz*.31)).sub(u.optics.x.mul(Math.sqrt(9.81*Math.hypot(kx,kz)))).add(phase0);
-   const h=phase.sin().mul(-amp).mul(u.optics.y).mul(envelope);
-   xx=xx.add(h.mul(kx*kx));zz=zz.add(h.mul(kz*kz));xz=xz.add(h.mul(kx*kz));
-  }
   const immersion=surface.sub(positionWorld.y);
-  const bend=immersion.max(0).min(18).mul(1-1/1.333).mul(u.optics.z);
-  const det=float(1).sub(xx.mul(bend)).mul(float(1).sub(zz.mul(bend))).sub(xz.mul(xz).mul(bend).mul(bend));
-  const core=float(1).sub(det.abs().div(.44).clamp(0,1)).pow(1.65);
-  const fine=sx.mul(7.13).sub(sz.mul(3.81)).add(warpZ.mul(1.6)).sub(u.optics.x.mul(8.9)).sin();
-  const branch=float(1).sub(det.add(fine.mul(.19)).abs().div(.23).clamp(0,1)).pow(2);
-  const analytic=vec3(.93,.99,1).mul(core.add(branch.mul(.38))).mul(depth.mul(-.055).div(u.controls.z).exp());
-  // A depth-shifted floor projection is an approximation of focused light
-  // at elevated receivers; retain a bounded contribution to illuminate hulls.
-  const floorWeight=inside.mul(height.mul(-.19).exp());
+  const floorWeight=inside.mul(height.mul(-.12).exp());
   const rayLight=texture(causticMap,uv.clamp(.001,.999)).rgb;
-  const light=analytic.mul(1.75).add(rayLight.mul(floorWeight).mul(1.8));
+  const light=rayLight.mul(floorWeight).mul(3.0);
   const n=normalWorld.normalize();
   const direct=n.dot(vec3(16,35,8).normalize()).max(0);
   // Side and underside illumination represents scattered/reflected light,
   // not direct sunlight passing through the solid object.
   const scattered=float(.13).add(n.y.abs().mul(.07));
   const incidence=direct.mul(.85).add(scattered);
-  const submerged=smoothstep(.015,.20,immersion);
+  const submerged=smoothstep(-.05,.20,immersion);
   const transmission=waveTransmissionTexture?texture(waveTransmissionTexture,uv.clamp(.001,.999)).r:float(1);
   const visibility=float(1).sub(float(1).sub(transmission).mul(inside).mul(u.optics.w)).max(.22);
   const irradiance=light.mul(incidence).mul(submerged).mul(visibility).mul(u.controls.y);
@@ -1777,7 +1757,7 @@ function updateWaveTransmissionObjects(t){
  }
 }
 
-// 28.5.37.1: same transmission model in a parallel compute pass.
+// 28.5.37.2: same transmission model in a parallel compute pass.
 // Keep the existing texture and CPU fallback; no blocking GPU readback.
 let transmissionGPU=null,transmissionGPUStarting=false,transmissionGPUFault='',transmissionGPUFrames=0;
 const transmissionWGSL=`
@@ -2120,7 +2100,7 @@ function setupContinuousFloor(mat,detail){
   const shoulder=float(1).sub(focus.mul(-.22).exp()).pow(2);
   const band=core.mul(.87).add(secondary.mul(.38)).add(shoulder.mul(.10)).mul(envelope.mul(.45).add(.55));
   const outer=vec3(.93,.99,1).mul(band).mul(depth.mul(-.055).div(controls.w).exp());
-  const light=outer.mul(float(1).sub(localMask.mul(.20))).mul(2.1).add(local.mul(localMask).mul(.95));
+  const light=outer.mul(float(1).sub(localMask.mul(.20))).mul(2.1).add(local.mul(localMask).mul(1.18));
   const sandA=texture(detail.albedo,xz.div(5.5)).r;
   const grain=sandA.mul(.24).add(.76);
   const transmission=texture(waveTransmissionTexture,uv.clamp(.001,.999)).r;

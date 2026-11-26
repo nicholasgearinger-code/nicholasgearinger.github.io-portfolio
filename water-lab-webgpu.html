@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.1 capillary hull liquid</title>
+<title>Rift Water Lab · WebGPU 28.2 GPU surface depth and normal reconstruction</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.1</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.2</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.1 · surface tension</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.2 · reconstructed normals</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -4199,8 +4199,8 @@ let hullScreen=null,hullScreenFault='',hullScreenFrames=0;
 function setupHullScreen(geo,fallback){
  if(!hullScreenEnabled||!oceanTSL||!THREE.MeshPhysicalNodeMaterial||!THREE.MeshBasicNodeMaterial||!isWebGPU)return fallback;
  try{
-  const {float,vec2,vec3,texture,screenUV,positionView,uniform,mix}=oceanTSL;
-  if(!float||!vec2||!vec3||!texture||!screenUV||!positionView||!uniform||!mix)return fallback;
+  const {float,vec2,vec3,texture,screenUV,positionView,uniform,mix,normalView}=oceanTSL;
+  if(!float||!vec2||!vec3||!texture||!screenUV||!positionView||!uniform||!mix||!normalView||!THREE.QuadMesh)return fallback;
   const front=new THREE.RenderTarget(256,144,{type:THREE.HalfFloatType,depthBuffer:true,minFilter:THREE.NearestFilter,magFilter:THREE.NearestFilter});
   const back=new THREE.RenderTarget(256,144,{type:THREE.HalfFloatType,depthBuffer:true,minFilter:THREE.NearestFilter,magFilter:THREE.NearestFilter});
   const texel=uniform(new THREE.Vector2(1/256,1/144)),ready=uniform(0);
@@ -4228,8 +4228,38 @@ function setupHullScreen(geo,fallback){
   material.colorNode=mix(vec3(.88,.96,.98),tint,valid);
   material.opacityNode=mix(float(.36),float(1).sub(path.mul(-2.4).exp()).mul(.64).add(.10),valid);
   material.roughnessNode=mix(float(.15),smoothDepth.sub(center.r).abs().mul(1.5).add(.075).clamp(.075,.23),valid);
+
+  // A dedicated full-screen pass stores smoothed front depth, coverage
+  // and optical thickness. Geometry remains the conservative visibility mask.
+  const filtered=new THREE.RenderTarget(256,144,{type:THREE.HalfFloatType,depthBuffer:false,minFilter:THREE.NearestFilter,magFilter:THREE.NearestFilter});
+  const projection=uniform(new THREE.Vector2(1,1));
+  const filterMat=new THREE.MeshBasicNodeMaterial({depthTest:false,depthWrite:false,toneMapped:false});
+  const raw=texture(front.texture,screenUV),rawBack=texture(back.texture,screenUV);
+  let fd=raw.r,fw=float(1),ft=rawBack.r.sub(raw.r).max(0).mul(rawBack.g),ftw=rawBack.g;
+  for(const [x,y] of [[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,1],[1,-1],[-1,-1],[2,0],[-2,0],[0,2],[0,-2]]){
+   const u=screenUV.add(texel.mul(vec2(x,y))),a=texture(front.texture,u),b=texture(back.texture,u);
+   const w=a.g.mul(a.r.sub(raw.r).abs().mul(-14).exp()).mul(Math.abs(x)+Math.abs(y)===1?.72:.35);
+   fd=fd.add(a.r.mul(w));fw=fw.add(w);ft=ft.add(b.r.sub(a.r).max(0).mul(w).mul(b.g));ftw=ftw.add(w.mul(b.g));
+  }
+  filterMat.colorNode=vec3(fd.div(fw.max(.001)).mul(raw.g),raw.g,ft.div(ftw.max(.001)).clamp(0,.85).mul(raw.g));
+  const quad=new THREE.QuadMesh(filterMat);
+  const filteredCenter=texture(filtered.texture,screenUV);
+  const centerZ=filteredCenter.r;
+  const tap=(x,y)=>{
+   const u=screenUV.add(texel.mul(vec2(x,y))),d=texture(filtered.texture,u);
+   const confidence=d.g.mul(d.r.sub(centerZ).abs().lessThan(.18).select(1,0));
+   const z=mix(centerZ,d.r,confidence);
+   return vec3(u.x.mul(2).sub(1).mul(z).div(projection.x),float(1).sub(u.y.mul(2)).mul(z).div(projection.y),z.negate());
+  };
+  const tx=tap(1,0).sub(tap(-1,0)),ty=tap(0,-1).sub(tap(0,1));
+  const reconstructed=tx.cross(ty).add(vec3(0,0,.0000001)).normalize();
+  const oriented=reconstructed.z.lessThan(0).select(reconstructed.negate(),reconstructed);
+  const normalConfidence=ready.mul(filteredCenter.g).mul(centerZ.sub(positionView.z.negate()).abs().lessThan(.22).select(1,0));
+  // Screen normal is view-space, matching the physical node material.
+  material.normalNode=mix(normalView,oriented,normalConfidence.mul(.78)).normalize();
+
   material.side=THREE.FrontSide;
-  hullScreen={front,back,proxyScene,proxy,depthMat,backMat,texel,ready,material,fallback};
+  hullScreen={front,back,filtered,quad,projection,proxyScene,proxy,depthMat,backMat,texel,ready,material,fallback};
   return material;
  }catch(e){hullScreenFault=String(e?.message||e);console.warn('Hull screen setup fallback',e);return fallback;}
 }
@@ -4239,12 +4269,14 @@ function updateHullScreen(t){
  const fail=e=>{hullScreenFault=String(e?.message||e);f.ready.value=0;if(hullVolumeMesh)hullVolumeMesh.material=f.fallback;console.warn('Hull screen runtime fallback',e);};
  try{
   const w=simTier===2?192:simTier===1?256:320,h=Math.max(96,Math.round(w/camera.aspect));
-  if(f.front.width!==w||f.front.height!==h){f.front.setSize(w,h);f.back.setSize(w,h);f.texel.value.set(1/w,1/h);}
+  if(f.front.width!==w||f.front.height!==h){f.front.setSize(w,h);f.back.setSize(w,h);f.filtered.setSize(w,h);f.texel.value.set(1/w,1/h);}
   renderer.setClearColor(0,0);
   f.proxy.material=f.depthMat;renderer.setRenderTarget(f.front);renderer.clear();
   const a=renderer.render(f.proxyScene,camera);if(a?.catch)a.catch(fail);
   f.proxy.material=f.backMat;renderer.setRenderTarget(f.back);renderer.clear();
   const b=renderer.render(f.proxyScene,camera);if(b?.catch)b.catch(fail);
+  f.projection.value.set(camera.projectionMatrix.elements[0],camera.projectionMatrix.elements[5]);
+  renderer.setRenderTarget(f.filtered);renderer.clear();const smooth=f.quad.render(renderer);if(smooth?.catch)smooth.catch(fail);
   f.ready.value=1;hullScreenFrames++;
  }catch(e){fail(e);}finally{renderer.setRenderTarget(prev);renderer.setClearColor(color,alpha);}
 }
@@ -6141,7 +6173,7 @@ async function init3D(forceWebGL=false){
   const now=performance.now();
   if(now-last>1100){
    const measured=samples*1000/(now-last);
-   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · rock waves '+(owPeak*100).toFixed(1)+' cm · run-up '+(runupPeak*100).toFixed(0)+' cm / '+runupSpills+' spills · hull wall '+hullWaveCells+' / '+hullClipCount+' clipped · hull splashes '+hullSplashHits+' · hull run-up '+(hullRunupPeak*100).toFixed(0)+' cm / '+hullOvertops+' spills · sheet '+hullSheetCells+' cells / '+hullSheetTears+' tears · hull APIC '+(hullAPFault?'fallback':hullAP?(hullGPUFrames&&!hullGPUFault?'GPU ':'CPU ')+hullAP.particles.length+'p / '+hullAPContacts+' contacts / '+hullAPReturns+' returns':'idle')+' · AP load '+Math.hypot(hullReaction.x,hullReaction.y,hullReaction.z).toFixed(0)+' N · deck '+deckMass.toFixed(1)+' kg / '+deckFlowPeak.toFixed(2)+' m/s / '+deckSpills+' drains · screen hull '+hullVolumeTriangles+' tris / '+(hullDensityFrames&&!hullDensityFault?'GPU density':'CPU density')+' / '+(hullScreenFault?'mesh fallback':hullScreenFrames?'SS '+hullScreenFrames:'SS idle')+' · rock eddies '+objectVortexCount+' · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?(apGPUFrames&&!apGPUFault?'GPU ':'CPU ')+apGrid.particles.length+'p '+(apGPUFrames&&!apGPUFault?apGPUFrames+' steps · mesh '+rcTriangles+' tris · '+(rcGPUFrames&&!rcGPUFault?'GPU density':'CPU density')+(rcThicknessEnabled?' · SS thickness':'')+(whitewaterVolumeEnabled?' · WW '+(wwGPUFrames&&!wwGPUFault?'GPU':'CPU'):''):apStats.after.toFixed(2)+' div'):'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
+   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · rock waves '+(owPeak*100).toFixed(1)+' cm · run-up '+(runupPeak*100).toFixed(0)+' cm / '+runupSpills+' spills · hull wall '+hullWaveCells+' / '+hullClipCount+' clipped · hull splashes '+hullSplashHits+' · hull run-up '+(hullRunupPeak*100).toFixed(0)+' cm / '+hullOvertops+' spills · sheet '+hullSheetCells+' cells / '+hullSheetTears+' tears · hull APIC '+(hullAPFault?'fallback':hullAP?(hullGPUFrames&&!hullGPUFault?'GPU ':'CPU ')+hullAP.particles.length+'p / '+hullAPContacts+' contacts / '+hullAPReturns+' returns':'idle')+' · AP load '+Math.hypot(hullReaction.x,hullReaction.y,hullReaction.z).toFixed(0)+' N · deck '+deckMass.toFixed(1)+' kg / '+deckFlowPeak.toFixed(2)+' m/s / '+deckSpills+' drains · screen hull '+hullVolumeTriangles+' tris / '+(hullDensityFrames&&!hullDensityFault?'GPU density':'CPU density')+' / '+(hullScreenFault?'mesh fallback':hullScreenFrames?'SS normals '+hullScreenFrames:'SS idle')+' · rock eddies '+objectVortexCount+' · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?(apGPUFrames&&!apGPUFault?'GPU ':'CPU ')+apGrid.particles.length+'p '+(apGPUFrames&&!apGPUFault?apGPUFrames+' steps · mesh '+rcTriangles+' tris · '+(rcGPUFrames&&!rcGPUFault?'GPU density':'CPU density')+(rcThicknessEnabled?' · SS thickness':'')+(whitewaterVolumeEnabled?' · WW '+(wwGPUFrames&&!wwGPUFault?'GPU':'CPU'):''):apStats.after.toFixed(2)+' div'):'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
    $('fps').textContent='FPS: '+Math.round(measured);
    adjustSimulationBudget(measured,now);adjustAdaptivePerformance(measured,now);
    last=now;samples=0;

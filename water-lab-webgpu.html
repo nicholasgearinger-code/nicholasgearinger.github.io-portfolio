@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.26 Restored surface microstructure and reflection balance</title>
+<title>Rift Water Lab · WebGPU 28.5.27 Unified optical contrast and shadowed caustics</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.26</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.27</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -150,7 +150,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.26 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.27 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -359,14 +359,14 @@ function createOceanMaterial(options){
    .add(float(1).sub(detailFade).mul(.055))
    .add(oceanRoughnessControls.y.mul(.022)).clamp(.045,.24);
   mat.roughnessNode=physicalRoughness.add(sculpted.mul(.18)).clamp(.045,.42);
-  const alpha=physicalRoughness;
+  const alpha=physicalRoughness.add(microVariance.mul(.035)).clamp(.045,.28);
   const a2=alpha.mul(alpha);
   const denom=nh.mul(nh).mul(a2.sub(1)).add(1);
   const distribution=a2.div(denom.mul(denom).mul(Math.PI).max(.000001));
   const k=alpha.add(1).pow(2).mul(.125);
   const geometryTerm=nl.div(nl.mul(float(1).sub(k)).add(k)).mul(nv.div(nv.mul(float(1).sub(k)).add(k)));
   const glint=distribution.mul(geometryTerm).mul(f).div(nv.mul(4).max(.08)).clamp(0,1.7)
-   .mul(nl.greaterThan(0).select(1,0)).mul(oceanGlintControls.y.clamp(0,2)).mul(.43).mul(above);
+   .mul(nl.greaterThan(0).select(1,0)).mul(oceanGlintControls.y.clamp(0,2)).mul(.34).mul(above);
   // Forward scattering through thin, backlit crests. Continuous height
   // and lighting dependence, independent of the local simulation domain.
   const crest=oceanTSL.smoothstep(.12,1.3,positionWorld.y);
@@ -405,7 +405,7 @@ function createOceanMaterial(options){
     const warp=xx.sub(zz).mul(2.6).add(xz.mul(3.1));
     const capillary=fineA.add(warp).sin().mul(.65).add(fineB.sub(warp).sin().mul(.35));
     const fineFade=float(1).sub(oceanTSL.smoothstep(8,32,viewDistance));
-    const fineDet=determinant.add(capillary.mul(.32).mul(fineFade));
+    const fineDet=determinant.add(capillary.mul(.48).mul(fineFade));
     const cells=float(1).sub(fineDet.abs().div(.72).clamp(0,1)).pow(1.6);
     const pools=float(1).sub(determinant.abs().div(1.15).clamp(0,1)).pow(1.2);
     const rimFocus=float(1).sub(determinant.abs().div(.48).clamp(0,1)).pow(2);
@@ -424,12 +424,12 @@ function createOceanMaterial(options){
     const rim=oceanTSL.smoothstep(.12,.74,slope).mul(.16);
     const upward=oceanTSL.smoothstep(.005,.32,v.y.negate());
     const window=float(1).sub(reflectance).mul(.72).add(reflectance.mul(.28));
-    const illumination=cells.mul(1.05).add(pools.mul(.30)).add(rimFocus.mul(.22)).mul(broad.mul(.62).add(.38)).mul(window).mul(detailFade.mul(.95).add(.05));
+    const illumination=cells.mul(1.18).add(pools.mul(.18)).add(rimFocus.mul(.30)).mul(broad.mul(.72).add(.28)).mul(window).mul(detailFade.mul(.98).add(.02));
     const transmittedSky=skyLobe.mul(pools.mul(.6).add(.22)).mul(float(1).sub(reflectance));
     const depthFade=oceanAngleDepth.mul(-.035).exp();
-    const spectral=vec3(.035,.66,1.35).mul(eyeTransmission);
+    const spectral=vec3(.055,.76,1.25).mul(eyeTransmission);
     const blueBase=vec3(.002,.012,.038).mul(eyeTransmission).mul(wet);
-    const incoming=vec3(.19,.65,1.05).mul(eyeTransmission).mul(transmittedSky).mul(.85);
+    const incoming=vec3(.12,.48,.90).mul(eyeTransmission).mul(transmittedSky).mul(.62);
     result.assign(blueBase.add(spectral.mul(illumination).add(incoming).mul(upward).mul(wet).mul(depthFade).mul(undersideLensControls.z)).mul(undersideLensControls.w));
    });
    return result;
@@ -1682,7 +1682,7 @@ function updateWaveTransmissionObjects(t){
  }
 }
 
-// 28.5.26: same transmission model in a parallel compute pass.
+// 28.5.27: same transmission model in a parallel compute pass.
 // Keep the existing texture and CPU fallback; no blocking GPU readback.
 let transmissionGPU=null,transmissionGPUStarting=false,transmissionGPUFault='',transmissionGPUFrames=0;
 const transmissionWGSL=`
@@ -1969,14 +1969,16 @@ function setupContinuousFloor(mat,detail){
   const branches=float(1).sub(fold.add(cross.mul(.38)).abs().div(.23).clamp(0,1)).pow(2).mul(c.mul(.5).add(.5));
   const outer=vec3(.82,.96,1).mul(ribbon.mul(ripple.mul(.24).add(.76)).add(branches.mul(.35))).mul(depth.mul(-.055).div(controls.w).exp()).mul(1.35);
   // Retain a continuous optical network even where the sparse ray field is dark.
-  const light=outer.mul(.82).add(local.mul(localMask).mul(1.35));
+  const light=outer.mul(.72).add(local.mul(localMask).mul(1.5));
   const sandA=texture(detail.albedo,xz.div(5.5)).r;
-  const grain=sandA.mul(.29).add(.71);
+  const grain=sandA.mul(.38).add(.62);
   const transmission=texture(waveTransmissionTexture,uv.clamp(.001,.999)).r;
   const shaded=float(1).sub(float(1).sub(transmission).mul(localMask).mul(shadow));
   mat.colorNode=materialColor.rgb.mul(grain).mul(shaded);
   // Classic mode retains the existing emissive map; wave mode replaces it.
-  mat.emissiveNode=materialEmissive.mul(float(1).sub(wave)).add(light.mul(vec3(.94,1,1)).mul(controls.y));
+  // Focused light must obey the same occlusion as diffuse sunlight.
+  const litCaustic=light.mul(shaded.pow(1.6)).mul(grain).mul(controls.y);
+  mat.emissiveNode=materialEmissive.mul(float(1).sub(wave)).add(litCaustic.mul(vec3(.90,.98,1)));
   mat.userData.continuousFloor=true;continuousFloor={origin,controls,wave,shadow};
   mat.needsUpdate=true;
  }catch(e){continuousFloor=null;mat.colorNode=null;mat.emissiveNode=null;console.warn('Continuous floor fallback',e);}

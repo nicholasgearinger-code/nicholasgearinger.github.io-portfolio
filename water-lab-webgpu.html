@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.44 Depth-dependent caustic optics</title>
+<title>Rift Water Lab · WebGPU 28.5.45 Directional underwater scattering</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.44</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.45</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -150,7 +150,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.44 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.45 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -376,7 +376,13 @@ function createOceanMaterial(options){
   underwaterPathOptics=uniform(new THREE.Vector4(.19,.070,.040,.022));
   const eyePath=viewDistance.mul(.75).min(150);
   const eyeTransmission=underwaterPathOptics.xyz.mul(eyePath).negate().exp();
-  const opticalFog=vec3(.004,.025,.055).mul(float(1).sub(eyePath.mul(underwaterPathOptics.w).negate().exp()));
+  // Bounded two-lobe Henyey-Greenstein approximation. v points toward the eye;
+  // incoming refracted sunlight travels downward, so looking up gives forward scattering.
+  const mu=v.dot(vec3(-.326,-1,-.163).normalize()).clamp(-1,1);
+  const forward=float(.64).div(float(1.36).sub(mu.mul(1.2)).max(.16).pow(1.5));
+  const backward=float(.9375).div(float(1.0625).add(mu.mul(.5)).max(.5625).pow(1.5));
+  const phase=forward.mul(.78).add(backward.mul(.22)).clamp(.25,3.2);
+  const opticalFog=vec3(.004,.025,.055).mul(float(1).sub(eyePath.mul(underwaterPathOptics.w).negate().exp())).mul(phase.mul(.45).add(.55));
   const reflected=enhancedUnderwaterLight?radiance.mul(vec3(.12,.35,.58)).mul(eyeTransmission).add(opticalFog):radiance;
   // Separate underside lens field: broad curvature cells, evaluated directly
   // on the moving interface. No CPU texture, extra mesh or render pass.
@@ -877,6 +883,7 @@ function updateSoftVolumetricShafts(t){
  const cameraDepth=opticalDepth;
  const clarity=Math.max(.45,waterClarity);
  const waterFade=Math.exp(-cameraDepth*(opticalMode==='deep'?.13:.074)/clarity);
+ const directionalPhase=underwaterDirectionalPhase();
  const cx=camera.position.x,cz=camera.position.z;
  // One temporary quaternion per update, not per plane.
  for(let i=0;i<softShaftMeshes.length;i++){
@@ -896,7 +903,7 @@ function updateSoftVolumetricShafts(t){
   const focusing=(.45+.55*facing)*exposure*(.75+.25*Math.sin(phase*1.8+t*.35*scatteringMotion+wave.height*.9));
   const axial=Math.exp(-Math.pow(rad/23,2));
   const target=Math.min(.16,.036*volumetricStrength*underwaterBlend*
-    waterFade*focusing*axial*(opticalMode==='deep'?.62:1));
+    waterFade*focusing*axial*directionalPhase*(opticalMode==='deep'?.62:1));
   mesh.userData.smoothed+=(target-mesh.userData.smoothed)*
     (1-Math.exp(-Math.max(.001,clockDelta)*5));
   mesh.material.opacity=mesh.userData.smoothed;
@@ -910,6 +917,17 @@ function updateSoftVolumetricShafts(t){
  }
 }
 const sunDirection={x:16/39.3,z:8/39.3};
+// Normalized directional scattering relative to the isotropic phase.
+// Evaluated once per update for the existing shaft approximation.
+let scatteringView=null;
+function underwaterDirectionalPhase(){
+ if(!camera)return 1;
+ if(!scatteringView)scatteringView=new THREE.Vector3();
+ camera.getWorldDirection(scatteringView);
+ const mu=Math.max(-1,Math.min(1,(scatteringView.x*.326+scatteringView.y+scatteringView.z*.163)/Math.hypot(.326,1,.163)));
+ const hg=g=>(1-g*g)/Math.pow(Math.max(.04,1+g*g-2*g*mu),1.5);
+ return Math.max(.35,Math.min(2.5,.55+.45*(.78*hg(.60)+.22*hg(-.25))));
+}
 function createVolumetricShafts(){
  createClassicVolumetricShafts();
  createSoftVolumetricShafts();
@@ -6954,9 +6972,15 @@ function updateScreenSpaceLighting(){
  const depth=Math.max(0,-camera.position.y),clarity=Math.max(.4,waterClarity);
  const extinction=Math.exp(-depth*(opticalMode==='deep'?.16:.085)/clarity);
  screenGodrays.density.value=Math.min(.9,.32*underwaterBlend*
-  volumetricStrength*extinction);
+  volumetricStrength*extinction*underwaterDirectionalPhase());
  screenGodrays.maxDensity.value=Math.min(.65,.22*volumetricStrength);
  screenGodrays.distanceAttenuation.value=1.1+scatteringDiffusion*.5;
+ // Spectral shift of the existing volumetric composite, not another light pass.
+ const path=Math.max(0,depth-5)*Math.max(0,depthAbsorption)/clarity;
+ screenBlendColor.value.set(0x9be8de);
+ screenBlendColor.value.r*=Math.exp(-path*.065);
+ screenBlendColor.value.g*=Math.exp(-path*.022);
+ screenBlendColor.value.b*=Math.exp(-path*.008);
  // Shadow influence scales attenuation/fog contrast rather than a
  // second, unbounded full-screen light pass.
  screenGodrays.density.value*=Math.max(.1,scatteringShadows);

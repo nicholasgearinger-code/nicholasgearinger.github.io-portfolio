@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.70 Photon-led seabed illumination</title>
+<title>Rift Water Lab · WebGPU 28.5.71 Spectral photon transport refinement</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.70</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.71</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -152,7 +152,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.70 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.71 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -485,6 +485,7 @@ const reefMicrostructure=!new URLSearchParams(location.search).has('simpleReef')
 const floorMicrostructure=!new URLSearchParams(location.search).has('noFloorMicrostructure');
 const aperiodicFloorOptics=!new URLSearchParams(location.search).has('regularFloorOptics');
 const photonLedFloor=!new URLSearchParams(location.search).has('analyticFloor');
+const refinedPhotonTransport=!new URLSearchParams(location.search).has('legacyPhotonTransport');
 const waterProfiles={
  lagoon:photoOptics?{absorption:[.155,.058,.031],scattering:.026,color:0x2589bc}:{absorption:[.19,.070,.040],scattering:.022,color:0x175e8a},
  coastal:{absorption:[.30,.135,.080],scattering:.043,color:0x285a65},
@@ -1866,11 +1867,34 @@ fn trace(@builtin(global_invocation_id) id:vec3u){
  }
  if(p[7]>0.0){
   elevation+=spectral(world)*p[7];
-  slope+=vec2f(spectral(world+vec2f(0.85,0.0))-spectral(world-vec2f(0.85,0.0)),spectral(world+vec2f(0.0,0.85))-spectral(world-vec2f(0.0,0.85)))*p[7]/1.7;
+  let h=select(0.85,0.60,p[10]>0.5);
+  slope+=vec2f(spectral(world+vec2f(h,0.0))-spectral(world-vec2f(h,0.0)),spectral(world+vec2f(0.0,h))-spectral(world-vec2f(0.0,h)))*p[7]/(2.0*h);
  }
  // Refract the incident sunlight at the actual wave normal.
+ // Resolve additional optical ripple slopes directly in the ray normal.
+ // These are low-amplitude gravity-capillary components, not receiver patterns.
+ if(p[10]>0.5){
+  let kx=array<vec2f,5>(vec2f(4.4,2.1),vec2f(-2.8,5.7),vec2f(6.9,-3.6),vec2f(1.9,8.1),vec2f(-7.2,5.1));
+  let amp=array<f32,5>(0.0048,0.0033,0.0021,0.00135,0.00111);
+  let phase0=array<f32,5>(0.42,2.7,4.3,1.8,5.4);
+  for(var j=0u;j<5u;j++){
+   let wave=kx[j];let k=length(wave);
+   let phase=dot(wave,world)-sqrt(9.81*k+0.000074*k*k*k)*p[4]+phase0[j];
+   let a=amp[j]*p[11];
+   slope+=wave*a*cos(phase);elevation+=a*sin(phase);
+  }
+ }
  let normal=normalize(vec3f(-slope.x,1.0,-slope.y));
- let incident=normalize(vec3f(-16.0,-35.0,-8.0));
+ var incident=normalize(vec3f(-16.0,-35.0,-8.0));
+ // Stratified finite solar disc (0.266 degree angular radius).
+ // Stable per-ray samples avoid temporal noise from independent frame jitter.
+ if(p[10]>0.5){
+  let angle=6.2831853*rayHash(key*4u+71u);
+  let radius=0.00465*sqrt(rayHash(key*4u+72u));
+  let tangent=normalize(cross(incident,vec3f(0.0,1.0,0.0)));
+  let bitangent=normalize(cross(incident,tangent));
+  incident=normalize(incident+radius*(cos(angle)*tangent+sin(angle)*bitangent));
+ }
  let ray=refract(incident,normal,1.0/1.333);
  let flatRay=refract(incident,vec3f(0.0,1.0,0.0),1.0/1.333);
  let flatShift=flatRay.xz/max(0.15,-flatRay.y);
@@ -1903,7 +1927,7 @@ fn shade(@builtin(global_invocation_id) id:vec3u){
  let centerEnergy=f32(atomicLoad(&energy[k]))/65536.0;
  // Sparse ray sets need more neighborhood support; dense sets preserve peaks.
  let support=clamp(filteredEnergy/(centerEnergy+0.0001),0.0,1.0);
- let centerWeight=mix(0.12,0.40,smoothstep(0.45,0.85,p[0]/NF))*mix(0.35,1.0,smoothstep(0.22,0.65,support));
+ let centerWeight=mix(0.12,select(0.40,0.57,p[10]>0.5),smoothstep(0.45,0.95,p[0]/NF))*mix(0.35,1.0,smoothstep(0.22,0.65,support));
  let focused=mix(filteredEnergy,clamp(centerEnergy,0.0,filteredEnergy*3.0+0.35),centerWeight);
  // Extract local concentration above diffuse ray density, retaining a soft shoulder.
  // Reject diffuse background using expected attenuated flat-water irradiance.
@@ -2085,12 +2109,13 @@ function dispatchCausticGPU(t){
  if(f.pending)return true;
  const cx=causticProjectionX,cz=causticProjectionZ,quality=causticDetail,width=causticProjectionWidth;
  // Scale the source grid moderately, not fourfold: 120/160/200 on 256.
- const source=CAUSTIC_SIZE===256?Math.round(quality*5/3):quality;
+ const source=CAUSTIC_SIZE===256?Math.round(quality*(refinedPhotonTransport?2:5/3)):quality;
  if(!Number.isFinite(cx)||!Number.isFinite(cz))return false;
  const hasFFT=fftMix>.001&&gpuFFT?.ready&&!fftFault&&Number.isFinite(gpuFFT.rms);
  const analyticWeight=1-(hasFFT?fftMix*(waveEngine==='fft'?.80:.30):0);
  const a=f.p;a.set([source,cx,cz,width,t,(1-1/1.333)*causticFocus,(atmospherePreset==='coastal'?.10:.045)/Math.max(.4,waterClarity),hasFFT?fftEnergy*waveHeight*fftMix:0]);
  a[8]=waterFloor?.position.x||0;a[9]=waterFloor?.position.z||0;
+ a[10]=refinedPhotonTransport?1:0;a[11]=waveHeight;
  const waves=waveComponents.concat(opticalRipples);
  for(let k=0;k<waves.length;k++){const w=waves[k];a.set([w.kx,w.kz,w.omega,w.phase,w.amplitude*waveHeight*(w.amplitude>.04?analyticWeight:1)],16+k*5);}
  let scoped=false;
@@ -2116,9 +2141,20 @@ function dispatchCausticGPU(t){
     if(causticGPU===f&&causticMode==='wave'&&quality===causticDetail&&cx===causticProjectionX&&cz===causticProjectionZ){
      const next=new Uint8Array(f.stage.getMappedRange());
      // Blend only in a matching world-space projection; never drag history with the boat.
-     if(f.historyX===cx&&f.historyZ===cz&&f.historySource===source){for(let i=0;i<next.length;i+=4){causticPixels[i]=(causticPixels[i]+next[i]*3+2)>>2;causticPixels[i+1]=(causticPixels[i+1]+next[i+1]*3+2)>>2;causticPixels[i+2]=(causticPixels[i+2]+next[i+2]*3+2)>>2;causticPixels[i+3]=255;}}
+     if(f.historyX===cx&&f.historyZ===cz&&f.historySource===source&&(!refinedPhotonTransport||t-f.historyTime<.24)){
+      for(let i=0;i<next.length;i+=4){
+       if(refinedPhotonTransport){
+        // Reject history on rapidly moving focal peaks, retain it only
+        // in stable neighborhoods to avoid streaks and boiling.
+        const difference=Math.abs(next[i+2]-causticPixels[i+2]);
+        const history=.30*Math.max(0,1-difference/72);
+        for(let c=0;c<3;c++)causticPixels[i+c]=Math.round(causticPixels[i+c]*history+next[i+c]*(1-history));
+       }else for(let c=0;c<3;c++)causticPixels[i+c]=(causticPixels[i+c]+next[i+c]*3+2)>>2;
+       causticPixels[i+3]=255;
+      }
+     }
      else causticPixels.set(next);
-     f.historyX=cx;f.historyZ=cz;f.historySource=source;
+     f.historyX=cx;f.historyZ=cz;f.historySource=source;f.historyTime=t;
      causticMap.needsUpdate=true;causticGPUFrames++;causticValidated=true;
     }
    }finally{f.stage.unmap();}
@@ -7588,7 +7624,7 @@ function disableVolumeMarch(error){
  volumeMarchFault=String(error?.message||error);volumeMarchActive=false;
  screenLightPipeline.outputNode=volumeMarchBase;screenLightPipeline.needsUpdate=true;
  console.warn('Volume march fallback to existing screen scattering',error);
- status('28.5.70 volumetric fallback: '+volumeMarchFault);
+ status('28.5.71 volumetric fallback: '+volumeMarchFault);
  return true;
 }
 async function initScreenSpaceLighting(){
@@ -7631,7 +7667,7 @@ async function initScreenSpaceLighting(){
   screenBlendColor=blendColor;
   screenSpaceReady=true;
   applyScreenScatteringQuality();
-  status(volumeMarchActive?'28.5.70 photon-led seabed illumination initialized.':'24.7 depth-aware screen-space scattering initialized.');
+  status(volumeMarchActive?'28.5.71 spectral photon transport initialized.':'24.7 depth-aware screen-space scattering initialized.');
  }catch(error){
   screenSpaceFault=String(error?.message||error);
   screenSpaceFailed=true;

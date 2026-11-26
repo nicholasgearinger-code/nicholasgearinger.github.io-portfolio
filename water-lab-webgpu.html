@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 27.7.4.3 planar deck optics and strict liquid separation</title>
+<title>Rift Water Lab · WebGPU 27.7.5 anisotropic hull liquid reconstruction</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.7.4.3</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.7.5</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.7.4.3 · clear deck water</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.7.5 · anisotropic liquid</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -4133,7 +4133,31 @@ const hullAPFlow={};
 
 // Keep the coarse hull isosurface opt-in until a sheet-aware reconstruction
 // can represent thin liquid without spherical kernel artifacts.
-const hullVolumeEnabled=new URLSearchParams(location.search).has('hullVolume')&&!new URLSearchParams(location.search).has('noHullVolume');
+const hullVolumeEnabled=!new URLSearchParams(location.search).has('noHullVolume');
+const hullAnisotropicCode="\nstruct P {pos:vec4f,vel:vec4f,c0:vec4f,c1:vec4f,c2:vec4f}\nstruct Cfg {count:u32,radius:f32,pad0:f32,pad1:f32}\n@group(0) @binding(0) var<uniform> cfg:Cfg;\n@group(0) @binding(1) var<storage,read> particles:array<P>;\n@group(0) @binding(2) var<storage,read> tags:array<u32>;\n@group(0) @binding(3) var<storage,read_write> density:array<atomic<u32>>;\nfn unit(v:vec3f,f:vec3f)->vec3f{if(dot(v,v)<.000001){return f;}return normalize(v);}\n@compute @workgroup_size(64) fn clear(@builtin(global_invocation_id) id:vec3u){if(id.x<15625u){atomicStore(&density[id.x],0u);}}\n@compute @workgroup_size(64) fn splat(@builtin(global_invocation_id) id:vec3u){\n if(id.x>=cfg.count||tags[id.x]==0u){return;}\n let p=particles[id.x];var mean=vec3f(0);var weight=0.;var neighbors=0u;\n for(var j=0u;j<cfg.count;j++){if(j==id.x){continue;}let d=particles[j].pos.xyz-p.pos.xyz;let r=dot(d,d)/.49;if(r>=1.){continue;}let w=(1.-r)*(1.-r);mean+=w*d;weight+=w;neighbors++;}\n if(neighbors<3u||weight<.12){return;}mean/=weight;\n var xx=0.;var xy=0.;var xz=0.;var yy=0.;var yz=0.;var zz=0.;\n for(var j=0u;j<cfg.count;j++){if(j==id.x){continue;}let d=particles[j].pos.xyz-p.pos.xyz;let r=dot(d,d)/.49;if(r>=1.){continue;}let w=(1.-r)*(1.-r);let v=d-mean;xx+=w*v.x*v.x;xy+=w*v.x*v.y;xz+=w*v.x*v.z;yy+=w*v.y*v.y;yz+=w*v.y*v.z;zz+=w*v.z*v.z;}\n let m=mat3x3f(vec3f(xx,xy,xz),vec3f(xy,yy,yz),vec3f(xz,yz,zz))*(1./weight);\n var e=unit(p.vel.xyz+vec3f(.13,.07,.19),vec3f(1,0,0));\n for(var k=0;k<7;k++){e=unit(m*e,e);}\n let l0=max(0.,dot(e,m*e));var v=unit(cross(e,select(vec3f(0,1,0),vec3f(1,0,0),abs(e.y)>.8)),vec3f(0,0,1));\n for(var k=0;k<7;k++){let q=m*v;v=unit(q-e*dot(q,e),v);}\n let n=unit(cross(e,v),vec3f(0,1,0));v=unit(cross(n,e),v);\n let l1=max(0.,dot(v,m*v));let l2=max(0.,dot(n,m*n));let scale=max(.004,l0);\n let a=cfg.radius*1.30;let b=cfg.radius*clamp(sqrt((l1+.003)/(scale+.003)),.52,1.12);let c=cfg.radius*clamp(sqrt((l2+.002)/(scale+.003)),.40,.80);\n let center=p.pos.xyz+mean*.22;let h=5.6/24.;let base=vec3i(floor(center/h));let reach=i32(ceil(a/h))+1;\n for(var z=-reach;z<=reach;z++){for(var y=-reach;y<=reach;y++){for(var x=-reach;x<=reach;x++){\n let q=base+vec3i(x,y,z);if(any(q<vec3i(1))||any(q>vec3i(23))){continue;}\n let d=vec3f(q)*h-center;let qv=vec3f(dot(d,e)/a,dot(d,v)/b,dot(d,n)/c);let d2=dot(qv,qv);\n if(d2<1.){let w=(1.-d2)*(1.-d2);atomicAdd(&density[u32((q.z*25+q.y)*25+q.x)],u32(round(w*65536.)));}\n }}}\n}";
+
+function hullAnisotropicSplat(particles,field,radius){
+ field.fill(0);
+ const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2],cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],unit=(v,f)=>{const l=Math.hypot(...v);return l>1e-3?v.map(x=>x/l):f;},clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+ for(const p of particles){
+  const neighbors=[];let weight=0,mean=[0,0,0];
+  for(const q of particles){if(p===q)continue;const d=[q.x-p.x,q.y-p.y,q.z-p.z],r=dot(d,d)/.49;if(r>=1)continue;const w=(1-r)**2;neighbors.push([d,w]);weight+=w;for(let k=0;k<3;k++)mean[k]+=d[k]*w;}
+  if(neighbors.length<3||weight<.12)continue;
+  mean=mean.map(x=>x/weight);const m=[0,0,0,0,0,0,0,0,0];
+  for(const [d,w] of neighbors){const v=d.map((x,k)=>x-mean[k]);for(let i=0;i<3;i++)for(let j=0;j<3;j++)m[i*3+j]+=w*v[i]*v[j]/weight;}
+  const mul=v=>[dot(m.slice(0,3),v),dot(m.slice(3,6),v),dot(m.slice(6,9),v)];
+  let e=unit([p.v[0]+.13,p.v[1]+.07,p.v[2]+.19],[1,0,0]);for(let k=0;k<7;k++)e=unit(mul(e),e);
+  const l0=Math.max(0,dot(e,mul(e)));let v=unit(cross(e,Math.abs(e[1])>.8?[1,0,0]:[0,1,0]),[0,0,1]);
+  for(let k=0;k<7;k++){const q=mul(v),d=dot(q,e);v=unit(q.map((x,i)=>x-d*e[i]),v);}
+  const n=unit(cross(e,v),[0,1,0]);v=unit(cross(n,e),v);
+  const l1=Math.max(0,dot(v,mul(v))),l2=Math.max(0,dot(n,mul(n))),scale=Math.max(.004,l0);
+  const a=radius*1.3,b=radius*clamp(Math.sqrt((l1+.003)/(scale+.003)),.52,1.12),c=radius*clamp(Math.sqrt((l2+.002)/(scale+.003)),.40,.80),center=[p.x+mean[0]*.22,p.y+mean[1]*.22,p.z+mean[2]*.22];
+  for(let z=Math.max(1,Math.floor((center[2]-a)/RC_H));z<=Math.min(RC_N-2,Math.ceil((center[2]+a)/RC_H));z++)
+  for(let y=Math.max(1,Math.floor((center[1]-a)/RC_H));y<=Math.min(RC_N-2,Math.ceil((center[1]+a)/RC_H));y++)
+  for(let x=Math.max(1,Math.floor((center[0]-a)/RC_H));x<=Math.min(RC_N-2,Math.ceil((center[0]+a)/RC_H));x++){const d=[x*RC_H-center[0],y*RC_H-center[1],z*RC_H-center[2]],q=(dot(d,e)/a)**2+(dot(d,v)/b)**2+(dot(d,n)/c)**2;if(q<1)field[rcIndex(x,y,z)]+=(1-q)**2;}
+ }
+}
+
 let hullDensityGPU=null,hullDensityStarting=false,hullDensityFault='',hullDensityFrames=0;
 let hullVolumeMesh=null,hullVolumeTriangles=0,hullVolumeLast=-100,hullVolumeFault='',hullVolumeFrame=null;
 const HULL_VOLUME_MAX=9000,hullDensityField=new Float32Array(RC_SIZE);
@@ -4142,7 +4166,7 @@ async function initHullDensity(){
  hullDensityStarting=true;const allocated=[];
  try{
   const owner=hullGPU,d=owner.d;
-  const source=rcGPUCode.replace('if(min(min(p.x,p.z),min(5.6-p.x,5.6-p.z))<.75){return;}','if(min(min(p.x,p.z),min(5.6-p.x,5.6-p.z))<.10){return;}');
+  const source=hullAnisotropicCode;
   const m=d.createShaderModule({code:source}),info=await m.getCompilationInfo();
   const errors=info.messages.filter(x=>x.type==='error');if(errors.length)throw Error(errors.map(x=>x.message).join('; '));
   const layout=d.createBindGroupLayout({entries:[{binding:0,visibility:GPUShaderStage.COMPUTE,buffer:{type:'uniform'}},...['read-only-storage','read-only-storage','storage'].map((type,i)=>({binding:i+1,visibility:GPUShaderStage.COMPUTE,buffer:{type}}))]});
@@ -4157,7 +4181,7 @@ async function initHullDensity(){
 }
 function encodeHullDensity(enc,g,t){
  const f=hullDensityGPU;if(!hullVolumeEnabled||!f||f.owner!==hullGPU||f.pending||t-hullVolumeLast<(simTier===2?.27:.18))return null;
- const count=g.particles.length,u=new ArrayBuffer(16);new Uint32Array(u)[0]=count;new Float32Array(u)[1]=simTier===2?.46:.40;
+ const count=g.particles.length,u=new ArrayBuffer(16);new Uint32Array(u)[0]=count;new Float32Array(u)[1]=simTier===2?.43:.39;
  f.d.queue.writeBuffer(f.params,0,u);f.d.queue.writeBuffer(f.tags,0,new Uint32Array(count).fill(1));
  for(const [pipeline,n] of [[f.clear,Math.ceil(RC_SIZE/64)],[f.splat,Math.ceil(count/64)]]){const p=enc.beginComputePass();p.setPipeline(pipeline);p.setBindGroup(0,f.group);p.dispatchWorkgroups(n);p.end();}
  enc.copyBufferToBuffer(f.density,0,f.stage,0,RC_SIZE*4);
@@ -4183,10 +4207,7 @@ function reconstructHullVolume(g,t,gpuField=null){
  try{
   const n=RC_N,h=RC_H,field=hullDensityField;
   if(gpuField)field.set(gpuField);else{
-   field.fill(0);const radius=simTier===2?.46:.40,r2=radius*radius;
-   for(const p of g.particles)for(let z=Math.max(1,Math.floor((p.z-radius)/h));z<=Math.min(n-2,Math.ceil((p.z+radius)/h));z++)for(let y=Math.max(1,Math.floor((p.y-radius)/h));y<=Math.min(n-2,Math.ceil((p.y+radius)/h));y++)for(let x=Math.max(1,Math.floor((p.x-radius)/h));x<=Math.min(n-2,Math.ceil((p.x+radius)/h));x++){
-    const q=((x*h-p.x)**2+(y*h-p.y)**2+(z*h-p.z)**2)/r2;if(q<1)field[rcIndex(x,y,z)]+=(1-q)**2;
-   }
+   hullAnisotropicSplat(g.particles,field,simTier===2?.43:.39);
   }
   // Remove density in the solid hull and deep below the receiving sea.
   const sea=new Float32Array(n*n);
@@ -4198,7 +4219,7 @@ function reconstructHullVolume(g,t,gpuField=null){
    if(y*h<sea[z*n+x]-.22||deckInterior||hullAPSolid(g,x*h,y*h,z*h))field[k]=0;
   }
   const seaAt=(x,z)=>sea[Math.max(0,Math.min(n-1,Math.round(z/h)))*n+Math.max(0,Math.min(n-1,Math.round(x/h)))];
-  const iso=.78,bounds=rcKeepAttached(field,iso,seaAt,10);
+  const iso=.65,bounds=rcKeepAttached(field,iso,seaAt,12);
   if(!bounds){hideHullVolume();return;}
   if(!hullVolumeMesh)createHullVolume();
   const geo=hullVolumeMesh.geometry,pos=geo.attributes.position.array,normal=geo.attributes.normal.array,col=geo.attributes.color.array;
@@ -4216,17 +4237,17 @@ function reconstructHullVolume(g,t,gpuField=null){
     const nx=densityAt(x-1,y,z)-densityAt(x+1,y,z),ny=densityAt(x,y-1,z)-densityAt(x,y+1,z),nz=densityAt(x,y,z-1)-densityAt(x,y,z+1),len=Math.hypot(nx,ny,nz);
     pos[i]=g.ox+p[0];pos[i+1]=g.oy+p[1];pos[i+2]=g.oz+p[2];normal[i]=len>.001?nx/len:0;normal[i+1]=len>.001?ny/len:1;normal[i+2]=len>.001?nz/len:0;
     const foam=Math.min(.32,Math.max(0,p[1]-seaAt(p[0],p[2]))*.35);
-    col[i]=.46+foam;col[i+1]=.76+foam*.45;col[i+2]=.81+foam*.4;
+    col[i]=.82+foam*.35;col[i+1]=.94+foam*.15;col[i+2]=.97+foam*.08;
    }
   },bounds);
   geo.setDrawRange(0,count);for(const key of ['position','normal','color'])geo.attributes[key].needsUpdate=true;
-  hullVolumeTriangles=count/3;hullVolumeMesh.visible=count>0;hullVolumeFrame={t,x:boat.position.x,y:boat.position.y,z:boat.position.z};
+  hullVolumeTriangles=count/3;hullVolumeMesh.visible=count>0;hullVolumeFrame={t,x:boat.position.x,y:boat.position.y,z:boat.position.z,heading:boatHeading};
  }catch(e){hullVolumeFault=String(e?.message||e);hideHullVolume();console.warn('Hull volume mesh fallback',e);}
 }
 function updateHullVolumeVisibility(t){
  if(!hullVolumeMesh?.visible)return;
  const f=hullVolumeFrame;
- if(!f||!boat||breakingMode!=='advanced'||!hullAP||t-f.t>.30||Math.hypot(boat.position.x-f.x,boat.position.y-f.y,boat.position.z-f.z)>.45)hideHullVolume();
+ if(!f||!boat||breakingMode!=='advanced'||!hullAP||t-f.t>.30||Math.abs(Math.sin((boatHeading-f.heading)*.5))>.065||Math.hypot(boat.position.x-f.x,boat.position.y-f.y,boat.position.z-f.z)>.30)hideHullVolume();
 }
 
 
@@ -6048,7 +6069,7 @@ async function init3D(forceWebGL=false){
   const now=performance.now();
   if(now-last>1100){
    const measured=samples*1000/(now-last);
-   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · rock waves '+(owPeak*100).toFixed(1)+' cm · run-up '+(runupPeak*100).toFixed(0)+' cm / '+runupSpills+' spills · hull wall '+hullWaveCells+' / '+hullClipCount+' clipped · hull splashes '+hullSplashHits+' · hull run-up '+(hullRunupPeak*100).toFixed(0)+' cm / '+hullOvertops+' spills · sheet '+hullSheetCells+' cells / '+hullSheetTears+' tears · hull APIC '+(hullAPFault?'fallback':hullAP?(hullGPUFrames&&!hullGPUFault?'GPU ':'CPU ')+hullAP.particles.length+'p / '+hullAPContacts+' contacts / '+hullAPReturns+' returns':'idle')+' · AP load '+Math.hypot(hullReaction.x,hullReaction.y,hullReaction.z).toFixed(0)+' N · deck '+deckMass.toFixed(1)+' kg / '+deckFlowPeak.toFixed(2)+' m/s / '+deckSpills+' drains · hull volume '+hullVolumeTriangles+' tris / '+(hullDensityFrames&&!hullDensityFault?'GPU density':'CPU density')+' · rock eddies '+objectVortexCount+' · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?(apGPUFrames&&!apGPUFault?'GPU ':'CPU ')+apGrid.particles.length+'p '+(apGPUFrames&&!apGPUFault?apGPUFrames+' steps · mesh '+rcTriangles+' tris · '+(rcGPUFrames&&!rcGPUFault?'GPU density':'CPU density')+(rcThicknessEnabled?' · SS thickness':'')+(whitewaterVolumeEnabled?' · WW '+(wwGPUFrames&&!wwGPUFault?'GPU':'CPU'):''):apStats.after.toFixed(2)+' div'):'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
+   const hud=$('fluidHud');if(hud){hud.textContent=breakingMode==='advanced'?fluid3Diagnostic()+' · eddies '+foamVortices.length+' · surface '+(fsPeak*100).toFixed(1)+' cm · rock waves '+(owPeak*100).toFixed(1)+' cm · run-up '+(runupPeak*100).toFixed(0)+' cm / '+runupSpills+' spills · hull wall '+hullWaveCells+' / '+hullClipCount+' clipped · hull splashes '+hullSplashHits+' · hull run-up '+(hullRunupPeak*100).toFixed(0)+' cm / '+hullOvertops+' spills · sheet '+hullSheetCells+' cells / '+hullSheetTears+' tears · hull APIC '+(hullAPFault?'fallback':hullAP?(hullGPUFrames&&!hullGPUFault?'GPU ':'CPU ')+hullAP.particles.length+'p / '+hullAPContacts+' contacts / '+hullAPReturns+' returns':'idle')+' · AP load '+Math.hypot(hullReaction.x,hullReaction.y,hullReaction.z).toFixed(0)+' N · deck '+deckMass.toFixed(1)+' kg / '+deckFlowPeak.toFixed(2)+' m/s / '+deckSpills+' drains · anisotropic hull '+hullVolumeTriangles+' tris / '+(hullDensityFrames&&!hullDensityFault?'GPU density':'CPU density')+' · rock eddies '+objectVortexCount+' · '+['Full','Balanced','Reduced'][simTier]+' · foam '+FOAM_MASK+'² · breakers '+plungePool.filter(p=>p.active).length+'/'+plungeImpacts+' · FLIP '+(apFault?'fallback':apGrid?(apGPUFrames&&!apGPUFault?'GPU ':'CPU ')+apGrid.particles.length+'p '+(apGPUFrames&&!apGPUFault?apGPUFrames+' steps · mesh '+rcTriangles+' tris · '+(rcGPUFrames&&!rcGPUFault?'GPU density':'CPU density')+(rcThicknessEnabled?' · SS thickness':'')+(whitewaterVolumeEnabled?' · WW '+(wwGPUFrames&&!wwGPUFault?'GPU':'CPU'):''):apStats.after.toFixed(2)+' div'):'idle'):'3D fluid: inactive';hud.style.color=fluid3Fault?'#ffc1ad':fluid3Frames?'#a2f5da':'#a9dce5';}
    $('fps').textContent='FPS: '+Math.round(measured);
    adjustSimulationBudget(measured,now);adjustAdaptivePerformance(measured,now);
    last=now;samples=0;

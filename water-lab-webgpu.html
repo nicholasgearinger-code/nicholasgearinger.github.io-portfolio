@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 27.7.3 deck flooding and drainage</title>
+<title>Rift Water Lab · WebGPU 27.7.3.1 deck initialization hotfix</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.7.3</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.7.3.1</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.7.3 · deck flooding</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.7.3.1 · deck flooding</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -4231,7 +4231,8 @@ const deckFloodEnabled=!new URLSearchParams(location.search).has('noDeckFlood');
 const DECK_X=7,DECK_Z=15,DECK_DX=1.7/DECK_X,DECK_DZ=3.55/DECK_Z,DECK_AREA=DECK_DX*DECK_DZ;
 const deckDepths=new Float32Array(DECK_X*DECK_Z),deckDelta=new Float32Array(deckDepths.length),deckWet=new Float32Array(deckDepths.length);
 let deckWaterMesh=null,deckWoodMesh=null,deckMass=0,deckSpills=0,deckClock=0,deckWetMean=0;
-const deckWorld=new THREE.Vector3();
+// THREE is imported asynchronously in init3D; allocate only after startup.
+let deckWorld=null;
 function clearDeckFlood(){
  deckDepths.fill(0);deckDelta.fill(0);deckWet.fill(0);deckMass=deckSpills=deckClock=deckWetMean=0;
  if(deckWaterMesh)deckWaterMesh.visible=false;
@@ -4284,6 +4285,7 @@ function updateDeckFlood(dt,t){
     remaining-=transfer;deckDelta[k]-=transfer;
     if(inside)deckDelta[next]+=transfer;
     else if(emitted<2&&transfer*DECK_AREA>.000015){
+     if(!deckWorld)deckWorld=new THREE.Vector3();
      deckWorld.set(x+di*.18,.44+d,z+dj*.18).applyQuaternion(boat.quaternion).add(boat.position);
      const c=Math.cos(boatHeading),sn=Math.sin(boatHeading),nx=c*di+sn*dj,nz=-sn*di+c*dj;
      if(whitewaterSpray.length<(simTier===2?138:simTier===1?218:358)){

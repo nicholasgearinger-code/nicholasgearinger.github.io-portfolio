@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.3.2 single continuous ocean mesh</title>
+<title>Rift Water Lab · WebGPU 28.3.3 disturbance-based ocean blending</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.3.2</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.3.3</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.3.2 · seamless ocean</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.3.3 · disturbance blending</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -1735,7 +1735,7 @@ function oceanHeight(x,z,t){
   }
  }
  const y=waveField(bx,bz,t).height;
- const result=y+(wakeSolver?wakeSolver.sample(x,z):0);
+ const result=y+(boat?oceanWakeOffset(x,z):0);
  return Number.isFinite(result)?result:0;
 }
 // Both patches are re-centered on the player and use the same long waves.
@@ -3427,6 +3427,7 @@ function makeFoamDetailAlpha(){
 function makeFoamOpticalMap(){
  const data=new Uint8Array(FOAM_MASK*FOAM_MASK*4);
  const tex=new THREE.DataTexture(data,FOAM_MASK,FOAM_MASK,THREE.RGBAFormat);
+ tex.wrapS=tex.wrapT=THREE.ClampToEdgeWrapping;
  tex.minFilter=THREE.LinearFilter;tex.magFilter=THREE.LinearFilter;
  tex.generateMipmaps=false;tex.needsUpdate=true;return tex;
 }
@@ -3551,7 +3552,9 @@ function updateFoamSkin(t){
   const geo=nearGeometry.clone();
   // Only the local rings participate in the foam overlay; never draw the
   // full ocean twice. Index order is center fan followed by ring strips.
-  const count=nearGeometry.userData.innerCount||geo.attributes.position.count;
+  // Extend overlay to the square solver corners, with transparent
+  // texels outside its support rather than a circular draw boundary.
+  let count=0;const b=nearBase;while(count<b.length/3&&Math.hypot(b[count*3],b[count*3+2])<=Math.SQRT2*FOAM_SPAN*.5+2)count++;
   const srcIndex=nearGeometry.index.array;let end=0;while(end<srcIndex.length&&srcIndex[end]<count&&srcIndex[end+1]<count&&srcIndex[end+2]<count)end+=3;
   geo.setDrawRange(0,end);
   const n=geo.attributes.position.count;
@@ -3584,9 +3587,10 @@ function updateFoamSkin(t){
   const dir=waveComponents[0],fx=-Math.sin(boatHeading),fz=-Math.cos(boatHeading);
   const speed=Math.abs(boatSpeed),power=Math.min(1,speed/3)*wakeAmount*hullContact;
   for(let j=0;j<FOAM_MASK;j++)for(let i=0;i<FOAM_MASK;i++){
-   const lx=((i+.5)/FOAM_MASK-.5)*LOCAL_RADIUS*2,lz=((j+.5)/FOAM_MASK-.5)*LOCAL_RADIUS*2;
+   const lx=((i+.5)/FOAM_MASK-.5)*FOAM_SPAN,lz=((j+.5)/FOAM_MASK-.5)*FOAM_SPAN;
    const x=cx+lx,z=cz+lz,k=(j*FOAM_MASK+i)*4;
-   const fade=localWaterBlend(Math.hypot(lx,lz));
+   const border=Math.max(0,Math.min(1,Math.min(i,j,FOAM_MASK-1-i,FOAM_MASK-1-j)/4));
+   const fade=oceanFoamSupport(x,z)*border;
    const hx=x-boat.position.x,hz=z-boat.position.z,cs=Math.cos(boatHeading),sn=Math.sin(boatHeading);
    if(hullWaveEnabled&&hullFootprint(cs*hx-sn*hz,sn*hx+cs*hz,.02)){data[k]=data[k+1]=data[k+2]=255;data[k+3]=0;continue;}
    if(fade<=0){data[k]=data[k+1]=data[k+2]=255;data[k+3]=0;continue;}
@@ -3635,7 +3639,7 @@ function updateFoamSkin(t){
  for(let i=0,j=0;i<src.length;i+=3,j+=2){
   const x=src[i]+cx,z=src[i+2]+cz,d=sampleFoamDensity(x,z),sub=foamLayer(x,z,1);
   p[i]=src[i];p[i+1]=src[i+1]+.009+.024*Math.min(1,d*.8+sub*.35);p[i+2]=src[i+2];
-  uv[j]=.5+(x-foamOpticalX)/(LOCAL_RADIUS*2);uv[j+1]=.5+(z-foamOpticalZ)/(LOCAL_RADIUS*2);
+  uv[j]=.5+(x-foamOpticalX)/FOAM_SPAN;uv[j+1]=.5+(z-foamOpticalZ)/FOAM_SPAN;
   detailUV[j]=(x-foamLayer(x,z,0,foamDriftX))/(LOCAL_RADIUS*2);detailUV[j+1]=(z-foamLayer(x,z,0,foamDriftZ))/(LOCAL_RADIUS*2);
  }
  geo.attributes.position.needsUpdate=true;geo.attributes.uv.needsUpdate=true;geo.attributes.uv1.needsUpdate=true;
@@ -5042,6 +5046,25 @@ function oceanSpectralTint(x,z,h,sx,sz,out,i){
  out[i+2]=Math.min(1,(.36+.58*bl)*(1-shade*.67)+glow*.12);
 }
 function aeratedOpticalMix(a,b,c,strength){const opticalDepth=Math.max(0,a*.9+b*.65+c*.30-.11)*Math.max(0,strength);return Math.min(.72,1-Math.exp(-opticalDepth*1.6));}
+
+ // The solver support is a numerical boundary, not a visual water type.
+ // Taper only the sampled disturbance near the actual rectangular field edge.
+function oceanFieldSupport(x,z,span,edge){
+ const dx=Math.abs(x-boat.position.x),dz=Math.abs(z-boat.position.z);
+ const a=Math.max(0,Math.min(1,(span*.5-Math.max(dx,dz))/edge));
+ return a*a*(3-2*a);
+}
+function oceanWakeOffset(x,z){
+ if(!wakeSolver||!boat)return 0;
+ return (wakeSolver.sample(x,z)||0)*oceanFieldSupport(x,z,34,5);
+}
+function oceanFoamSupport(x,z){
+ if(!foamFieldReady)return 0;
+ const u=(x-foamOriginX)/FOAM_STEP,v=(z-foamOriginZ)/FOAM_STEP;
+ const a=Math.max(0,Math.min(1,Math.min(u,v,FOAM_GRID-1-u,FOAM_GRID-1-v)/5));
+ return a*a*(3-2*a);
+}
+
 function animateWaves(t){
  if(!boat)return;
  refreshSpectralLUT();rebuildWaveShadows(t);rcAdvanceHeight(t);
@@ -5081,29 +5104,29 @@ function animateWaves(t){
   const wave=waveField(x,z,t);
   const wx=x+wave.dx,wz=z+wave.dz;
   const radial=Math.hypot(px,pz);
-  const fade=localWaterBlend(radial);
+  const fade=oceanFieldSupport(wx,wz,36,4);
   if(fade<=0){arr[i]=px+wave.dx;arr[i+1]=wave.height;arr[i+2]=pz+wave.dz;smoothWaterNormal(nearNormals,i,wave.slopeX,wave.slopeZ);oceanSpectralTint(x,z,wave.height,wave.slopeX,wave.slopeZ,nearColorData,i);deformationWeights[i/3]=0;continue;}
-  const disturbance=fade*(wakeSolver?.sample(wx,wz)||0);
+  const disturbance=oceanWakeOffset(wx,wz);
   arr[i]=px+wave.dx;arr[i+2]=pz+wave.dz;
-  const liquidLift=rcSurfaceOffset(wx,wz)*fade;
+  const liquidLift=rcSurfaceOffset(wx,wz);
   arr[i+1]=wave.height+disturbance+liquidLift;
   if(liquidLift>.002)crestVertices++;
   const folded=plungePool.length&&deformConnectedCrest(x,z,arr,i,fade);if(folded)crestVertices++;
   const clipped=hullClipSurface(arr,i,cx,cz);if(clipped)hullClipCount++;
-  deformationWeights[i/3]=fade*Math.min(1,Math.max(folded?.85:0,clipped?.65:0,Math.abs(liquidLift)*8));
+  deformationWeights[i/3]=Math.min(1,Math.max(folded?.85:0,clipped?.65:0,Math.abs(liquidLift)*8));
   // Local crest highlights follow the same pressure field; no fake
   // particle sprites or V-shaped lines.
   let wakeSlopeX=0,wakeSlopeZ=0;
-  if(radial<LOCAL_RADIUS&&wakeSolver){
+  if(wakeSolver){
    const dx=.33;
-   wakeSlopeX=(wakeSolver.sample(wx+dx,wz)-wakeSolver.sample(wx-dx,wz))/(2*dx);
-   wakeSlopeZ=(wakeSolver.sample(wx,wz+dx)-wakeSolver.sample(wx,wz-dx))/(2*dx);
+   wakeSlopeX=(oceanWakeOffset(wx+dx,wz)-oceanWakeOffset(wx-dx,wz))/(2*dx);
+   wakeSlopeZ=(oceanWakeOffset(wx,wz+dx)-oceanWakeOffset(wx,wz-dx))/(2*dx);
   }
   // The wake influence fades near the seam between radial patches.
-  smoothWaterNormal(nearNormals,i,wave.slopeX+fade*wakeSlopeX,
-     wave.slopeZ+fade*wakeSlopeZ);
-  const slope=(Math.abs(wakeSlopeX)+Math.abs(wakeSlopeZ))*fade;
-  const foam=radial<15?sampleFoamDensity(wx,wz)*fade:0;
+  smoothWaterNormal(nearNormals,i,wave.slopeX+wakeSlopeX,
+     wave.slopeZ+wakeSlopeZ);
+  const slope=Math.abs(wakeSlopeX)+Math.abs(wakeSlopeZ);
+  const foam=sampleFoamDensity(wx,wz)*oceanFoamSupport(wx,wz);
   // Foam is restricted to locally steep crests and intermittent folds,
   // not stamped uniformly on every passing swell.
   const breaking=Math.max(0,Math.min(1,
@@ -5146,18 +5169,17 @@ function animateWaves(t){
   oceanSpectralTint(x,z,wave.height,wave.slopeX,wave.slopeZ,nearColorData,i);
   // Local shading is driven only by actual disturbance, never radius alone.
   const interaction=Math.min(1,Math.abs(disturbance)*5+slope*.6+foam*.35+Math.abs(liquidLift)*4);
-  nearColorData[i]*=1-fade*interaction*(1-light)*.12;
-  nearColorData[i+1]*=1-fade*interaction*(1-light)*.09;
-  nearColorData[i+2]*=1-fade*interaction*(1-light)*.06;
+  // Base water color is identical at every distance. Local fluid only
+  // adds achromatic aeration, never a separate green water tint.
   // Approximate subsurface gas scattering in the continuous water surface.
   if(foamFieldReady&&fade>0&&foamStrength>.01){
    const a0=foamLayer(wx,wz,0,entrainedAir),a1=foamLayer(wx,wz,1,entrainedAir),a2=foamLayer(wx,wz,2,entrainedAir);
-   let scatter=aeratedOpticalMix(a0,a1,a2,foamStrength)*fade;
-   let cr=.72,cg=.83,cb=.86;
+   const support=oceanFoamSupport(wx,wz);let scatter=aeratedOpticalMix(a0,a1,a2,foamStrength)*support*.32;
+   let cr=.86,cg=.88,cb=.90;
    if(whitewaterVolumeEnabled&&a0+a1+a2>.20){
     const dy=Math.abs(camera.position.y-arr[i+1]),cosine=Math.max(.32,dy/Math.max(.01,Math.hypot(camera.position.x-wx,dy,camera.position.z-wz)));
     const vol=sampleWhitewaterVolume(wx,wz,0,cosine,shadowReady?shadowSample(shadowField,wx,wz,1):1,foamStrength,whitewaterResult);
-    scatter=Math.min(.48,vol.alpha*.58)*fade;
+    scatter=Math.min(.22,vol.alpha*.24)*support;
     const den=Math.max(.08,vol.alpha);
     cr=Math.min(.88,vol.r/den*1.08);cg=Math.min(.93,vol.g/den*1.12);cb=Math.min(.97,vol.b/den*1.16);
    }

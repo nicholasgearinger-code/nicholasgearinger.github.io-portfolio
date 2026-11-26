@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.3.5 tropical ocean spectral palette</title>
+<title>Rift Water Lab · WebGPU 28.3.6 natural teal water and optical contrast</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.3.5</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.3.6</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.3.5 · tropical ocean</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.3.6 · natural ocean</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -288,7 +288,7 @@ function createOceanMaterial(options){
   // Separate optical extinction from geometric refraction offset. The
   // latter stays zero above water to avoid ghost copies of the boat.
   const profile=waterOpticalProfile();
-  oceanColumnSigma=uniform(profile.sigma[0]*.2126+profile.sigma[1]*.7152+profile.sigma[2]*.0722+.105/Math.max(.4,waterClarity));
+  oceanColumnSigma=uniform(profile.sigma[0]*.2126+profile.sigma[1]*.7152+profile.sigma[2]*.0722+.065/Math.max(.4,waterClarity));
   oceanColumnEnabled=uniform(opticalMode==='legacy'?0:1);
   // Match the stationary world-space seabed profile (not boat position).
   const x=positionWorld.x,z=positionWorld.z;
@@ -301,7 +301,9 @@ function createOceanMaterial(options){
   const above=oceanTSL.smoothstep(-.04,.08,v.y).mul(oceanColumnEnabled);
   const bottomVisibility=path.mul(oceanColumnSigma).negate().exp();
   const airFresnel=float(WATER_F0).add(float(1-WATER_F0).mul(float(1).sub(cosine).pow(5)));
-  const columnTransmission=float(1).sub(above.mul(float(1).sub(bottomVisibility.mul(float(1).sub(airFresnel)))));
+  // Preserve transparent near-normal views without reintroducing an unattenuated pool.
+  const visibleBottom=bottomVisibility.mul(.84).add(.16).mul(float(1).sub(airFresnel));
+  const columnTransmission=float(1).sub(above.mul(float(1).sub(visibleBottom)));
   mat.transmissionNode=materialTransmission.mul(columnTransmission).mul(float(1).sub(wet.mul(reflectance)));
   // Approximate reflected underwater radiance, not a second scene capture.
   let radiance=vec3(.045,.19,.24).mul(oceanAngleDepth.mul(-.065).exp());
@@ -339,8 +341,8 @@ let lastUndersideMix=-1,underwaterSunlight=null,underwaterAmbient=null,clockDelt
 let underwaterLensing=1,lastWaveLensUpdate=-100,waveLensFactor=1;
 let floorCausticMaterial=null,underwaterObjectMaterials=[],underwaterBackgroundColor=null;
 const waterProfiles={
- lagoon:{absorption:[.19,.083,.034],scattering:.022,color:0x247b98},
- coastal:{absorption:[.30,.15,.074],scattering:.043,color:0x356e85},
+ lagoon:{absorption:[.19,.070,.040],scattering:.022,color:0x175b67},
+ coastal:{absorption:[.30,.135,.080],scattering:.043,color:0x285a65},
  deep:{absorption:[.28,.13,.040],scattering:.029,color:0x103f66}
 };
 let volumetricStrength=.85,shaftQuality='medium',lightShafts=null,shaftMeshes=[],volumetricFault=false;
@@ -882,7 +884,7 @@ function updateUndersideOptics(){
  const enhanced=undersideMode==='enhanced'&&opticalMode!=='legacy';
  const blend=enhanced?underwaterBlend:0;
  if(oceanAngleBlend){oceanAngleBlend.value=blend*Math.min(1,underwaterFresnel);oceanAngleDepth.value=opticalDepth;}
- if(oceanColumnSigma&&oceanColumnEnabled){const p=waterOpticalProfile();oceanColumnSigma.value=p.sigma[0]*.2126+p.sigma[1]*.7152+p.sigma[2]*.0722+.105/Math.max(.4,waterClarity);oceanColumnEnabled.value=opticalMode==='legacy'?0:1;}
+ if(oceanColumnSigma&&oceanColumnEnabled){const p=waterOpticalProfile();oceanColumnSigma.value=p.sigma[0]*.2126+p.sigma[1]*.7152+p.sigma[2]*.0722+.065/Math.max(.4,waterClarity);oceanColumnEnabled.value=opticalMode==='legacy'?0:1;}
  // Keep depth-dependent light current even when immersion is stable.
  const updateMaterials=Math.abs(blend-lastUndersideMix)>=.012;
  if(updateMaterials)lastUndersideMix=blend;
@@ -1025,7 +1027,7 @@ function syncWaterDetail(){
   mat.attenuationColor.copy(absorption);
   mat.depthWrite=!physical;
   mat.transparent=false;
-  mat.color.setHex(physical?0xa5d9ed:0x168f90);
+  mat.color.setHex(physical?0x9ccdcc:0x168f90);
   mat.vertexColors=true;
   mat.side=THREE.DoubleSide;
   mat.envMapIntensity=(reflectionMode==='enhanced'?1.12+surfaceGlitter*.56:.75+surfaceGlitter*.55)*reflectionStrength;
@@ -5054,13 +5056,14 @@ function oceanSpectralTint(x,z,h,sx,sz,out,i){
  const a=Math.max(0,Math.min(1,(depth-1.5)/18)),deepMix=a*a*(3-2*a),shallowMix=1-deepMix;
  const path=Math.max(.45,Math.min(12,3.6+depth*.11+trough*.55-crest*.55-backlight*.35));
  const k=Math.round(path*128/12)*3,r=spectralLUT[k],g=spectralLUT[k+1],b=spectralLUT[k+2];
- const R=(.18+.30*r)*shallowMix+(.08+.22*r)*deepMix;
- const G=(.42+.40*g)*shallowMix+(.23+.30*g)*deepMix;
- const B=(.55+.42*b)*shallowMix+(.50+.46*b)*deepMix;
+ const R=(.065+.22*r)*shallowMix+(.045+.16*r)*deepMix;
+ const G=(.22+.29*g)*shallowMix+(.13+.23*g)*deepMix;
+ const B=(.24+.32*b)*shallowMix+(.22+.30*b)*deepMix;
  const glow=Math.min(.42,crest*backlight*subsurfaceLight*.72)*(1-.42*shade);
- out[i]=Math.min(1,R*(1-shade)+glow*.05+direct*.03);
- out[i+1]=Math.min(1,G*(1-shade*.82)+glow*.14);
- out[i+2]=Math.min(1,B*(1-shade*.62)+glow*.16);
+ const troughShade=1-.20*trough;
+ out[i]=Math.min(1,R*(1-shade)*troughShade+glow*.035+direct*.012);
+ out[i+1]=Math.min(1,G*(1-shade*.92)*troughShade+glow*.12);
+ out[i+2]=Math.min(1,B*(1-shade*.84)*troughShade+glow*.11);
 }
 function aeratedOpticalMix(a,b,c,strength){const opticalDepth=Math.max(0,a*.9+b*.65+c*.30-.11)*Math.max(0,strength);return Math.min(.72,1-Math.exp(-opticalDepth*1.6));}
 

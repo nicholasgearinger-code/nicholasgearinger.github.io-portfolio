@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.3.7 distance-blended ocean optics and ripple shading</title>
+<title>Rift Water Lab · WebGPU 28.3.8 directional sunlight glitter and translucent crests</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.3.7</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.3.8</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.3.7 · natural wave shading</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.3.8 · sunlight and crest optics</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -230,7 +230,7 @@ let foamMesh=null,foamPositions=null,foamColors=null,foamCapacity=280,foamStreng
 let surfaceNormalMap=null,surfaceFineNormalMap=null,reflectionEnvironment=null;
 let surfaceDetail=.90,surfaceGlitter=1.0,fineRipple=.45,reflectionMode='enhanced';
 let waterNearMaterial=null,waterFarMaterial=null;
-let oceanTSL=null,oceanAngleBlend=null,oceanAngleDepth=null,oceanColumnSigma=null,oceanColumnEnabled=null;
+let oceanTSL=null,oceanAngleBlend=null,oceanAngleDepth=null,oceanColumnSigma=null,oceanColumnEnabled=null,oceanGlintControls=null;
 let underwaterMirror=null,mirrorCamera=null,mirrorMatrix=null,mirrorWeight=null,mirrorLast=-100,mirrorFailed=false;
 function setupUnderwaterMirror(){
  if(underwaterMirror||mirrorFailed||!oceanTSL||new URLSearchParams(location.search).has('noMirror'))return;
@@ -321,7 +321,42 @@ function createOceanMaterial(options){
    const capture=texture(underwaterMirror.texture,distorted.clamp(.001,.999)).rgb;
    radiance=radiance.mul(float(1).sub(mask)).add(capture.mul(mask).mul(.85));
   }
-  mat.emissiveNode=materialEmissive.add(radiance.mul(reflectance).mul(wet));
+  // A bounded, directional microfacet highlight supplements the existing
+  // physical BRDF. It uses world-space capillary slopes, not white textures
+  // or boat-centered masks. No additional scene capture.
+  oceanGlintControls=uniform(new THREE.Vector4(0,surfaceGlitter,fineRipple,subsurfaceLight));
+  const time=oceanGlintControls.x;
+  const microX=x.mul(11.7).add(z.mul(7.3)).add(time.mul(3.1)).sin().mul(.58)
+   .add(x.mul(24.1).sub(z.mul(13.8)).sub(time.mul(4.7)).sin().mul(.26));
+  const microZ=z.mul(15.2).sub(x.mul(5.4)).sub(time.mul(2.8)).sin().mul(.55)
+   .add(z.mul(28.6).add(x.mul(9.7)).add(time.mul(5.4)).sin().mul(.25));
+  const n=normalWorld.normalize();
+  const viewDistance=cameraPosition.sub(positionWorld).length();
+  const detailFade=float(1).sub(oceanTSL.smoothstep(18,85,viewDistance));
+  const ripple=oceanGlintControls.z.clamp(0,2).mul(.11).mul(detailFade);
+  const microNormal=n.add(vec3(microX.mul(ripple),0,microZ.mul(ripple))).normalize();
+  const sun=vec3(16,35,8).normalize(),halfVector=sun.add(v).normalize();
+  const nh=microNormal.dot(halfVector).max(0).clamp(0,1);
+  const nl=microNormal.dot(sun).max(0).clamp(0,1);
+  const nv=microNormal.dot(v).max(.02).clamp(.02,1);
+  const vh=v.dot(halfVector).clamp(0,1);
+  const f=float(.02037).add(float(.97963).mul(float(1).sub(vh).pow(5)));
+  // Broadens unresolved glints offshore to reduce temporal aliasing.
+  const alpha=float(.055).add(float(1).sub(detailFade).mul(.085));
+  const a2=alpha.mul(alpha);
+  const denom=nh.mul(nh).mul(a2.sub(1)).add(1);
+  const distribution=a2.div(denom.mul(denom).mul(Math.PI).max(.000001));
+  const k=alpha.add(1).pow(2).mul(.125);
+  const geometryTerm=nl.div(nl.mul(float(1).sub(k)).add(k)).mul(nv.div(nv.mul(float(1).sub(k)).add(k)));
+  const glint=distribution.mul(geometryTerm).mul(f).div(nv.mul(4).max(.08)).clamp(0,1.7)
+   .mul(nl.greaterThan(0).select(1,0)).mul(oceanGlintControls.y.clamp(0,2)).mul(.26).mul(above);
+  // Forward scattering through thin, backlit crests. Continuous height
+  // and lighting dependence, independent of the local simulation domain.
+  const crest=oceanTSL.smoothstep(.12,1.3,positionWorld.y);
+  const backlight=v.dot(sun).max(0).pow(3);
+  const thin=crest.mul(backlight).mul(float(1).sub(n.dot(sun).abs().clamp(0,1))).mul(oceanGlintControls.w.clamp(0,2)).mul(.16).mul(above);
+  mat.emissiveNode=materialEmissive.add(radiance.mul(reflectance).mul(wet))
+   .add(vec3(1,.96,.88).mul(glint)).add(vec3(.045,.33,.38).mul(thin));
   return mat;
  }catch(e){mat?.dispose();console.warn('Angle optics fallback:',e);return new THREE.MeshPhysicalMaterial(options);}
 }
@@ -472,7 +507,7 @@ function createWaveNormalMap(fine=false){
 // It is computed once on the CPU, not updated every frame.
 function createReflectionEnvironment(){
  const width=512,height=256,pixels=new Float32Array(width*height*4);
- const sunX=16/39.3,sunY=35/39.3,sunZ=8/39.3;
+ const sunLength=Math.hypot(16,35,8),sunX=16/sunLength,sunY=35/sunLength,sunZ=8/sunLength;
  const mix=(a,b,t)=>a*(1-t)+b*t;
  const clamp=x=>Math.max(0,Math.min(1,x));
  for(let y=0;y<height;y++){
@@ -488,11 +523,11 @@ function createReflectionEnvironment(){
    const cloudBand=Math.sin(phi*6+Math.sin(theta*8)*2.4)*.45+
      Math.sin(phi*13-theta*17)*.25+Math.sin(phi*25+theta*10)*.15;
    const cloud=clamp((cloudBand+.15)*2)*clamp((sy-.12)*4);
-   const cloudOpacity=cloud*.63;
+   const cloudOpacity=cloud*.53;
    r=mix(r,.94,cloudOpacity);g=mix(g,.95,cloudOpacity);b=mix(b,.96,cloudOpacity);
    // Sharp sunny region is bright and directional in reflected wave facets.
    const d=Math.max(0,dx*sunX+sy*sunY+dz*sunZ);
-   const glow=Math.pow(d,65)*.32+Math.pow(d,900)*3.8;
+   const glow=Math.pow(d,65)*.25+Math.pow(d,1100)*4.2;
    r+=glow;g+=glow*.85;b+=glow*.58;
    if(sy<0){const deep=clamp(-sy*5);r=mix(r,.025,deep);g=mix(g,.13,deep);b=mix(b,.18,deep);}
    const idx=(y*width+x)*4;
@@ -888,6 +923,7 @@ function updateUndersideOptics(){
  const enhanced=undersideMode==='enhanced'&&opticalMode!=='legacy';
  const blend=enhanced?underwaterBlend:0;
  if(oceanAngleBlend){oceanAngleBlend.value=blend*Math.min(1,underwaterFresnel);oceanAngleDepth.value=opticalDepth;}
+ if(oceanGlintControls)oceanGlintControls.value.set(clockTime,reflectionMode==='enhanced'?surfaceGlitter*reflectionStrength:0,fineRipple*windRipples,subsurfaceLight);
  if(oceanColumnSigma&&oceanColumnEnabled){const p=waterOpticalProfile();oceanColumnSigma.value=p.sigma[0]*.2126+p.sigma[1]*.7152+p.sigma[2]*.0722+.065/Math.max(.4,waterClarity);oceanColumnEnabled.value=opticalMode==='legacy'?0:1;}
  // Keep depth-dependent light current even when immersion is stable.
  const updateMaterials=Math.abs(blend-lastUndersideMix)>=.012;
@@ -6080,7 +6116,7 @@ async function init3D(forceWebGL=false){
  if(!forceWebGL)initFluid3();else fluid3State='WebGL fallback';
  const backend=forceWebGL?'WebGLRenderer':renderer.backend?.constructor?.name||'WebGPU (unknown backend)';
  isWebGPU=!forceWebGL&&/webgpu/i.test(backend);
- oceanTSL=null;oceanAngleBlend=null;oceanAngleDepth=null;oceanColumnSigma=null;oceanColumnEnabled=null;
+ oceanTSL=null;oceanAngleBlend=null;oceanAngleDepth=null;oceanColumnSigma=null;oceanColumnEnabled=null;oceanGlintControls=null;
  underwaterMirror=null;mirrorCamera=null;mirrorMatrix=null;mirrorWeight=null;mirrorFailed=false;mirrorLast=-100;
  if(isWebGPU&&!safeStartup&&!new URLSearchParams(location.search).has('classicOptics')){
   try{oceanTSL=await import('three/tsl');}catch(e){console.warn('Angle optics unavailable',e);}

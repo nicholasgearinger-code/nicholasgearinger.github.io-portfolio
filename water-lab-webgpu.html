@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.58 Wave-focused radiance recovery</title>
+<title>Rift Water Lab · WebGPU 28.5.59 Multi-scale refractive light focusing</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.58</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.59</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -152,7 +152,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.58 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.59 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -474,6 +474,7 @@ let underwaterPathOptics=null,causticObjectUniforms=null,undersideLensControls=n
 const enhancedUnderwaterLight=!new URLSearchParams(location.search).has('classicUnderwater');
 const photoOptics=!new URLSearchParams(location.search).has('legacyPhotoOptics');
 const recoveredRadiance=!new URLSearchParams(location.search).has('legacyRadiance');
+const multiscaleRadiance=!new URLSearchParams(location.search).has('baselineRadiance');
 const waterProfiles={
  lagoon:photoOptics?{absorption:[.155,.058,.031],scattering:.026,color:0x2589bc}:{absorption:[.19,.070,.040],scattering:.022,color:0x175e8a},
  coastal:{absorption:[.30,.135,.080],scattering:.043,color:0x285a65},
@@ -2486,6 +2487,30 @@ function setupContinuousFloor(mat,detail){
    const radiance=focused.mul(.90).add(broadFlux.mul(.32)).mul(envelope.mul(.35).add(.65));
    const transmitted=vec3(.98,1,1).mul(radiance).mul(depth.mul(-.055).div(controls.w).exp());
    light=transmitted.mul(1.35).add(originalLight.mul(.65));
+   if(multiscaleRadiance){
+    // A small high-frequency Hessian perturbation from additional directional
+    // capillary-gravity wave bands. Evaluate the radiance difference rather than
+    // drawing another independent line network. All phases remain world anchored.
+    let dx=float(0),dz=float(0),ds=float(0);
+    for(const [kx,kz,amp,phase0] of [[6.1,2.3,.0018,.73],[-3.4,7.2,.00115,2.93],[8.1,-4.2,.00082,5.11]]){
+     const k=Math.hypot(kx,kz),omega=Math.sqrt(9.81*k+.000074*k*k*k);
+     const phase=sx.mul(kx).add(sz.mul(kz)).add(warpX.mul(.65)).sub(warpZ.mul(.48)).sub(t.mul(omega)).add(phase0);
+     const curvature=phase.sin().mul(-amp).mul(lens.x).mul(bend);
+     dx=dx.add(curvature.mul(kx*kx));dz=dz.add(curvature.mul(kz*kz));ds=ds.add(curvature.mul(kx*kz));
+    }
+    const refinedDet=a.sub(dx).mul(b.sub(dz)).sub(shear.add(ds).pow(2));
+    const refinedFlux=jacobianRadiance(refinedDet).mul(.50)
+     .add(jacobianRadiance(refinedDet.add(delta)).mul(.25))
+     .add(jacobianRadiance(refinedDet.sub(delta)).mul(.25));
+    // Only redistribute a minority of existing focused radiance; keep the
+    // established broad folds, avoiding a new diffuse white blanket.
+    const refinedFocus=float(1).sub(refinedFlux.mul(-.64).exp()).pow(1.55);
+    const nearDetail=detailFade.mul(float(1).sub(softDepth.mul(.72)));
+    const localConvergence=focused.mul(refinedFocus).mul(.13);
+    const fineDifference=refinedFocus.sub(focused).mul(.24).add(localConvergence);
+    const fineRadiance=fineDifference.mul(nearDetail).mul(envelope.mul(.35).add(.65));
+    light=light.add(vec3(.98,1,1).mul(fineRadiance).mul(depth.mul(-.055).div(controls.w).exp())).max(vec3(0));
+   }
   }
   const sandA=texture(detail.albedo,xz.div(5.5)).r;
   const grain=sandA.mul(.24).add(.76);
@@ -7323,7 +7348,7 @@ function disableVolumeMarch(error){
  volumeMarchFault=String(error?.message||error);volumeMarchActive=false;
  screenLightPipeline.outputNode=volumeMarchBase;screenLightPipeline.needsUpdate=true;
  console.warn('Volume march fallback to existing screen scattering',error);
- status('28.5.58 volumetric fallback: '+volumeMarchFault);
+ status('28.5.59 volumetric fallback: '+volumeMarchFault);
  return true;
 }
 async function initScreenSpaceLighting(){
@@ -7366,7 +7391,7 @@ async function initScreenSpaceLighting(){
   screenBlendColor=blendColor;
   screenSpaceReady=true;
   applyScreenScatteringQuality();
-  status(volumeMarchActive?'28.5.58 wave-focused radiance initialized.':'24.7 depth-aware screen-space scattering initialized.');
+  status(volumeMarchActive?'28.5.59 multi-scale refractive light focusing initialized.':'24.7 depth-aware screen-space scattering initialized.');
  }catch(error){
   screenSpaceFault=String(error?.message||error);
   screenSpaceFailed=true;

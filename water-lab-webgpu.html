@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.50 Volumetric refractive ray marching</title>
+<title>Rift Water Lab · WebGPU 28.5.51 Adaptive caustic volume integration</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.50</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.51</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -151,7 +151,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.50 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.51 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -942,8 +942,9 @@ function updateSoftVolumetricShafts(t){
   const fold=Math.pow(Math.max(0,1-Math.abs(det)/.65),1.5);
   const focusing=(.45+.55*facing)*exposure*(.28+.72*fold);
   const axial=Math.exp(-Math.pow(rad/23,2));
+  const volumeReady=scatteringMode==='screen'&&volumeMarchActive&&lightFrames>0&&!lightFault&&causticMode==='wave';
   const target=Math.min(.16,.036*volumetricStrength*underwaterBlend*
-    waterFade*focusing*axial*directionalPhase*(opticalMode==='deep'?.62:1)*(scatteringMode==='screen'?.62:1));
+    waterFade*focusing*axial*directionalPhase*(opticalMode==='deep'?.62:1)*(scatteringMode==='screen'?(volumeReady?.22:.62):1));
   mesh.userData.smoothed+=(target-mesh.userData.smoothed)*
     (1-Math.exp(-Math.max(.001,clockDelta)*5));
   mesh.material.opacity=mesh.userData.smoothed;
@@ -7060,15 +7061,16 @@ function setScreenShadowState(enabled){
 // A bounded camera-ray integral through the depth-resolved photon atlas.
 // No additional scene render: the existing beauty pass supplies geometry depth.
 const volumeMarchEnabled=!new URLSearchParams(location.search).has('noVolumeMarch');
-let volumeMarchControls=null,volumeMarchCamera=null,volumeMarchProjection=null;
+let volumeMarchControls=null,volumeMarchCamera=null,volumeMarchProjection=null,volumeMarchSteps=null;
 let volumeMarchActive=false,volumeMarchFault='',volumeMarchBase=null;
 function buildVolumeMarch(composed,sceneDepth){
  if(!volumeMarchEnabled||!lightAtlas||!lightControls||!oceanTSL)return composed;
- const {Fn,Loop,float,vec2,vec3,vec4,uniform,screenUV,smoothstep}=oceanTSL;
- if(!Fn||!Loop||!screenUV)return composed;
+ const {Fn,Loop,If,int,float,vec2,vec3,vec4,uniform,screenUV,smoothstep}=oceanTSL;
+ if(!Fn||!Loop||!If||!int||!screenUV||!causticObjectUniforms)return composed;
  volumeMarchControls=uniform(new THREE.Vector4(0,.08,1,1));
  volumeMarchCamera=uniform(new THREE.Matrix4());
  volumeMarchProjection=uniform(new THREE.Matrix4());
+ volumeMarchSteps=uniform(16,'int');
  const controls=volumeMarchControls,worldMatrix=volumeMarchCamera,projection=volumeMarchProjection;
  const march=Fn(()=>{
   const uv=screenUV;
@@ -7079,14 +7081,29 @@ function buildVolumeMarch(composed,sceneDepth){
   const endView=view.xyz.div(view.w.max(.00001));
   const ray=worldMatrix.mul(vec4(endView.normalize(),0)).xyz.normalize();
   const origin=worldMatrix.mul(vec4(0,0,0,1)).xyz;
+  // Clip the integration interval to the atlas depth domain, not merely scene depth.
   const length=endView.length().min(24);
-  const step=length.div(16);
+  const safeY=ray.y.abs().max(.0001).mul(ray.y.greaterThanEqual(0).select(1,-1));
+  const top=float(-.25).sub(origin.y).div(safeY);
+  const bottom=float(-11.75).sub(origin.y).div(safeY);
+  const near=top.min(bottom).max(0).min(length);
+  const far=top.max(bottom).min(length).max(near);
+  const horizontal=ray.y.abs().lessThan(.0001);
+  const inside=origin.y.lessThanEqual(-.25).and(origin.y.greaterThanEqual(-11.75));
+  const begin=horizontal.select(float(0),near);
+  const finish=horizontal.select(inside.select(length,float(0)),far);
+  const span=finish.sub(begin).max(0);
+  const count=span.div(.55).ceil().clamp(4,float(volumeMarchSteps));
+  const step=span.div(count);
+  // Static subpixel dither avoids regular marching bands without frame flicker.
+  const jitter=uv.dot(vec2(127.1,311.7)).sin().mul(43758.5453).fract().mul(.7).add(.15);
   const mu=ray.dot(vec3(.326,1,.163).normalize()).clamp(-1,1);
   const phase=float(.64).div(float(1.36).sub(mu.mul(1.2)).max(.16).pow(1.5)).mul(.78)
    .add(float(.9375).div(float(1.0625).add(mu.mul(.5)).max(.5625).pow(1.5)).mul(.22)).clamp(.25,3);
   const accumulated=vec3(0).toVar();
-  Loop(16,({i})=>{
-   const distance=float(i).add(.5).mul(step);
+  If(span.greaterThan(.01).and(controls.x.greaterThan(0)).and(lightControls.w.greaterThan(0)),()=>{
+  Loop({start:int(0),end:int(count),type:'int',condition:'<'},({i})=>{
+   const distance=begin.add(float(i).add(jitter).mul(step));
    const point=origin.add(ray.mul(distance));
    const field=sampleLightField(point);
    const depth=point.y.negate().max(0);
@@ -7094,10 +7111,13 @@ function buildVolumeMarch(composed,sceneDepth){
    const shelf=smoothstep(16,111,vec2(lx.mul(.83),lz.add(11).mul(.92)).length());
    const bottom=float(3.8).add(shelf.mul(27)).add(lx.mul(.085).add(lz.mul(.041)).sin().mul(lz.mul(.072).sub(lx.mul(.028)).cos()).mul(.48).mul(float(1).sub(shelf)));
    const wet=smoothstep(.05,.45,depth).mul(smoothstep(0,.5,bottom.sub(depth)));
-   const extinction=distance.mul(controls.y).negate().exp();
    const spectral=vec3(.065,.022,.008).mul(depth.div(controls.z).mul(controls.w).negate()).exp();
-   const energy=field.energy.mul(field.mask).mul(wet).mul(phase).mul(extinction).mul(step).mul(controls.x);
+   // Integrate the extinction over the whole step, not just its midpoint.
+   const integral=float(1).sub(step.mul(controls.y).negate().exp()).div(controls.y.max(.0001));
+   const startTransmission=distance.sub(step.mul(jitter)).max(0).mul(controls.y).negate().exp();
+   const energy=field.energy.pow(1.25).mul(field.mask).mul(wet).mul(phase).mul(startTransmission).mul(integral).mul(controls.x);
    accumulated.addAssign(vec3(.72,.96,1).mul(spectral).mul(energy));
+  });
   });
   return accumulated.clamp(0,.48);
  })();
@@ -7109,6 +7129,8 @@ function updateVolumeMarch(){
  const clarity=Math.max(.4,waterClarity);
  const strength=underwaterActive&&causticMode==='wave'&&lightFrames>0&&!lightFault?Math.min(.24,.085*volumetricStrength*underwaterBlend):0;
  volumeMarchControls.value.set(strength,(.045+.035*Math.max(0,depthAbsorption)+.025*underwaterScatter)/clarity,clarity,Math.max(0,depthAbsorption));
+ volumeMarchSteps.value=screenScatteringQuality==='high'?24:screenScatteringQuality==='low'?12:16;
+ camera.updateMatrixWorld();
  volumeMarchCamera.value.copy(camera.matrixWorld);
  volumeMarchProjection.value.copy(camera.projectionMatrixInverse);
 }
@@ -7117,7 +7139,7 @@ function disableVolumeMarch(error){
  volumeMarchFault=String(error?.message||error);volumeMarchActive=false;
  screenLightPipeline.outputNode=volumeMarchBase;screenLightPipeline.needsUpdate=true;
  console.warn('Volume march fallback to existing screen scattering',error);
- status('28.5.50 volumetric fallback: '+volumeMarchFault);
+ status('28.5.51 volumetric fallback: '+volumeMarchFault);
  return true;
 }
 async function initScreenSpaceLighting(){
@@ -7160,7 +7182,7 @@ async function initScreenSpaceLighting(){
   screenBlendColor=blendColor;
   screenSpaceReady=true;
   applyScreenScatteringQuality();
-  status(volumeMarchActive?'28.5.50 depth-resolved volumetric ray marching initialized.':'24.7 depth-aware screen-space scattering initialized.');
+  status(volumeMarchActive?'28.5.51 adaptive depth-resolved volumetric ray marching initialized.':'24.7 depth-aware screen-space scattering initialized.');
  }catch(error){
   screenSpaceFault=String(error?.message||error);
   screenSpaceFailed=true;

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 27.7.4 resolved hull pressure and deck load</title>
+<title>Rift Water Lab · WebGPU 27.7.4.1 thin deck water film</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.7.4</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">27.7.4.1</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
@@ -149,7 +149,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.7.4 · pressure coupling</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>27.7.4.1 · thin deck film</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -4191,7 +4191,9 @@ function reconstructHullVolume(g,t,gpuField=null){
   for(let z=0;z<n;z++)for(let x=0;x<n;x++)sea[z*n+x]=oceanHeight(g.ox+x*h,g.oz+z*h,t)-g.oy;
   for(let z=1;z<n-1;z++)for(let y=1;y<n-1;y++)for(let x=1;x<n-1;x++){
    const k=rcIndex(x,y,z);if(field[k]===0)continue;
-   if(y*h<sea[z*n+x]-.22||hullAPSolid(g,x*h,y*h,z*h))field[k]=0;
+   const local=deckLocal(g,{x:x*h,y:y*h,z:z*h});
+   const deckInterior=deckFloodEnabled&&Math.abs(local.x)<.88&&local.z> -1.56&&local.z<2.06&&local.y<.74;
+   if(y*h<sea[z*n+x]-.22||deckInterior||hullAPSolid(g,x*h,y*h,z*h))field[k]=0;
   }
   const seaAt=(x,z)=>sea[Math.max(0,Math.min(n-1,Math.round(z/h)))*n+Math.max(0,Math.min(n-1,Math.round(x/h)))];
   const iso=.78,bounds=rcKeepAttached(field,iso,seaAt,10);
@@ -4205,7 +4207,8 @@ function reconstructHullVolume(g,t,gpuField=null){
    // Keep the receiving ocean in charge of the lower interface.
    if([a,b,c].every(p=>p[1]<seaAt(p[0],p[2])-.035))return;
    const center=[(a[0]+b[0]+c[0])/3,(a[1]+b[1]+c[1])/3,(a[2]+b[2]+c[2])/3];
-   if(hullAPSolid(g,...center))return;
+   const local=deckLocal(g,{x:center[0],y:center[1],z:center[2]});
+   if(hullAPSolid(g,...center)||(deckFloodEnabled&&Math.abs(local.x)<.88&&local.z> -1.56&&local.z<2.06&&local.y<.74))return;
    for(const p of [a,b,c]){
     const i=count++*3,x=Math.round(p[0]/h),y=Math.round(p[1]/h),z=Math.round(p[2]/h);
     const nx=densityAt(x-1,y,z)-densityAt(x+1,y,z),ny=densityAt(x,y-1,z)-densityAt(x,y+1,z),nz=densityAt(x,y,z-1)-densityAt(x,y,z+1),len=Math.hypot(nx,ny,nz);
@@ -4228,7 +4231,7 @@ function updateHullVolumeVisibility(t){
  // Shallow, conservative deck reservoir: separate from the 3D airborne
  // patch because its .35 m cells cannot resolve centimeter-scale films.
 const deckFloodEnabled=!new URLSearchParams(location.search).has('noDeckFlood');
-const DECK_X=7,DECK_Z=15,DECK_DX=1.7/DECK_X,DECK_DZ=3.55/DECK_Z,DECK_AREA=DECK_DX*DECK_DZ;
+const DECK_X=11,DECK_Z=23,DECK_DX=1.7/DECK_X,DECK_DZ=3.55/DECK_Z,DECK_AREA=DECK_DX*DECK_DZ;
 const deckDepths=new Float32Array(DECK_X*DECK_Z),deckDelta=new Float32Array(deckDepths.length),deckWet=new Float32Array(deckDepths.length);
 let deckWaterMesh=null,deckWoodMesh=null,deckMass=0,deckSpills=0,deckClock=0,deckWetMean=0;
 // THREE is imported asynchronously in init3D; allocate only after startup.
@@ -4250,15 +4253,42 @@ function captureDeckParticle(g,p){
  // Each emitted tracer represents a bounded effective parcel, not a full grid cell.
  const added=.00065/DECK_AREA;
  if(deckDepths[k]+added>.075||deckMass>23)return false;
- deckDepths[k]+=added;deckMass+=.65;return true;
+ // Spread each captured parcel over neighboring cells, conserving volume.
+ const candidates=[];let weight=0;
+ for(let dz=-1;dz<=1;dz++)for(let dx=-1;dx<=1;dx++){const I=i+dx,J=j+dz;if(I<0||I>=DECK_X||J<0||J>=DECK_Z)continue;const w=dx===0&&dz===0?4:dx===0||dz===0?2:1;candidates.push([J*DECK_X+I,w]);weight+=w;}
+ for(const [index,w] of candidates)deckDepths[index]+=added*w/weight;
+ deckMass+=.65;return true;
+}
+const DECK_RENDER_X=21,DECK_RENDER_Z=45;
+function deckSample(x,z,field=deckDepths){
+ const u=Math.max(0,Math.min(DECK_X-1.001,(x+.85)/DECK_DX-.5)),v=Math.max(0,Math.min(DECK_Z-1.001,(z+1.525)/DECK_DZ-.5)),i=Math.floor(u),j=Math.floor(v),a=u-i,b=v-j,k=j*DECK_X+i;
+ return (field[k]*(1-a)+field[k+1]*a)*(1-b)+(field[k+DECK_X]*(1-a)+field[k+DECK_X+1]*a)*b;
 }
 function makeDeckWater(){
- const g=new THREE.BufferGeometry(),p=new Float32Array((DECK_X+1)*(DECK_Z+1)*3),color=new Float32Array((DECK_X+1)*(DECK_Z+1)*4),idx=[];
- for(let j=0;j<=DECK_Z;j++)for(let i=0;i<=DECK_X;i++){const k=j*(DECK_X+1)+i;p.set([-.85+i*DECK_DX,.435,-1.525+j*DECK_DZ],k*3);color.set([.57,.83,.87,0],k*4);}
- for(let j=0;j<DECK_Z;j++)for(let i=0;i<DECK_X;i++){const a=j*(DECK_X+1)+i,b=a+DECK_X+1;idx.push(a,b,a+1,a+1,b,b+1);}
- g.setAttribute('position',new THREE.BufferAttribute(p,3).setUsage(THREE.DynamicDrawUsage));g.setAttribute('color',new THREE.BufferAttribute(color,4).setUsage(THREE.DynamicDrawUsage));g.setIndex(idx);g.computeVertexNormals();
- const m=new THREE.MeshPhysicalMaterial({color:0xffffff,vertexColors:true,ior:1.333,roughness:.13,metalness:0,transmission:0,transparent:true,opacity:.78,depthWrite:false,side:THREE.DoubleSide,forceSinglePass:true});
+ const g=new THREE.BufferGeometry(),n=(DECK_RENDER_X+1)*(DECK_RENDER_Z+1),p=new Float32Array(n*3),color=new Float32Array(n*4),uv=new Float32Array(n*2),idx=[];
+ for(let j=0;j<=DECK_RENDER_Z;j++)for(let i=0;i<=DECK_RENDER_X;i++){const k=j*(DECK_RENDER_X+1)+i;p.set([-.85+i*1.7/DECK_RENDER_X,.433,-1.525+j*3.55/DECK_RENDER_Z],k*3);color.set([.94,.98,1,0],k*4);uv.set([i/DECK_RENDER_X*2,j/DECK_RENDER_Z*4],k*2);}
+ for(let j=0;j<DECK_RENDER_Z;j++)for(let i=0;i<DECK_RENDER_X;i++){const a=j*(DECK_RENDER_X+1)+i,b=a+DECK_RENDER_X+1;idx.push(a,b,a+1,a+1,b,b+1);}
+ g.setAttribute('position',new THREE.BufferAttribute(p,3).setUsage(THREE.DynamicDrawUsage));g.setAttribute('color',new THREE.BufferAttribute(color,4).setUsage(THREE.DynamicDrawUsage));g.setAttribute('uv',new THREE.BufferAttribute(uv,2).setUsage(THREE.DynamicDrawUsage));g.setIndex(idx);g.computeVertexNormals();
+ const m=new THREE.MeshPhysicalMaterial({color:0xffffff,vertexColors:true,ior:1.333,roughness:.085,metalness:0,transmission:0,transparent:true,opacity:.68,depthWrite:false,side:THREE.FrontSide,normalMap:surfaceFineNormalMap||null,normalScale:new THREE.Vector2(.065,.065)});
  deckWaterMesh=new THREE.Mesh(g,m);deckWaterMesh.frustumCulled=false;deckWaterMesh.renderOrder=2;deckWaterMesh.visible=false;boat.add(deckWaterMesh);
+}
+function renderDeckFilm(t){
+ if(!deckWaterMesh)makeDeckWater();
+ const g=deckWaterMesh.geometry,p=g.attributes.position.array,c=g.attributes.color.array,uv=g.attributes.uv.array;
+ const sx=Math.sin(boat.rotation.z),sz=-Math.sin(boat.rotation.x);
+ for(let k=0;k<g.attributes.position.count;k++){
+  const x=p[k*3],z=p[k*3+2],d=deckSample(x,z);
+  const dx=(deckSample(x+.06,z)-deckSample(x-.06,z))/.12,dz=(deckSample(x,z+.06)-deckSample(x,z-.06))/.12;
+  const ripple=Math.sin(x*35+z*17-t*9)*Math.sin(z*42-x*9-t*6);
+  const wet=Math.min(1,d/.003),height=Math.min(.018,d*.36);
+  p[k*3+1]=.433+height+wet*ripple*.0009;
+  // Clear film with gently feathered contact line, rather than cyan lumps.
+  const rim=Math.min(.10,Math.hypot(dx,dz)*.25);
+  c[k*4]=.91+rim*.5;c[k*4+1]=.96+rim*.3;c[k*4+2]=1;
+  c[k*4+3]=wet*Math.min(.35,.055+d*7+rim)*(.93+.07*ripple);
+  uv[k*2]=x*2+t*sx*.22;uv[k*2+1]=z*2+t*sz*.22;
+ }
+ g.attributes.position.needsUpdate=true;g.attributes.color.needsUpdate=true;g.attributes.uv.needsUpdate=true;g.computeVertexNormals();deckWaterMesh.visible=true;
 }
 function updateDeckFlood(dt,t){
  if(!boat)return;
@@ -4280,7 +4310,7 @@ function updateDeckFlood(dt,t){
     // Side rails retain shallow films; open ends and small scuppers drain.
     const barrier=di!==0?.045:.008;
     const other=inside?deckDepths[next]+slopeX*(x+di*DECK_DX)+slopeZ*(z+dj*DECK_DZ):slopeX*x+slopeZ*z+barrier;
-    const transfer=Math.min(remaining*.35,Math.max(0,head-other)*h*3.5);
+    const transfer=Math.min(remaining*.35,Math.max(0,head-other)*h*4.5);
     if(transfer<=0)continue;
     remaining-=transfer;deckDelta[k]-=transfer;
     if(inside)deckDelta[next]+=transfer;
@@ -4303,13 +4333,7 @@ function updateDeckFlood(dt,t){
  deckMass=Math.min(24,total*DECK_AREA*1000);deckWetMean=wetSum/deckWet.length;applyDeckMoments();
  if(deckWoodMesh){deckWoodMesh.material.color.setRGB(1-.22*deckWetMean,.737*(1-.29*deckWetMean),.537*(1-.32*deckWetMean));deckWoodMesh.material.roughness=.67-.29*deckWetMean;}
  if(deckMass<.10){if(deckWaterMesh)deckWaterMesh.visible=false;return;}
- if(!deckWaterMesh)makeDeckWater();
- const g=deckWaterMesh.geometry,p=g.attributes.position.array,c=g.attributes.color.array;
- for(let j=0;j<=DECK_Z;j++)for(let i=0;i<=DECK_X;i++){
-  let sum=0,n=0;for(let dz=-1;dz<=0;dz++)for(let dx=-1;dx<=0;dx++){const I=i+dx,J=j+dz;if(I>=0&&I<DECK_X&&J>=0&&J<DECK_Z){sum+=deckDepths[J*DECK_X+I];n++;}}
-  const d=sum/Math.max(1,n),k=j*(DECK_X+1)+i;p[k*3+1]=.435+d;c[k*4+3]=Math.min(.72,d*18);
- }
- g.attributes.position.needsUpdate=true;g.attributes.color.needsUpdate=true;g.computeVertexNormals();deckWaterMesh.visible=true;
+ renderDeckFilm(t);
 }
 
 

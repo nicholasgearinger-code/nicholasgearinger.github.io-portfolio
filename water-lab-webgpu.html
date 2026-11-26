@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.66 Visible object caustic recovery</title>
+<title>Rift Water Lab · WebGPU 28.5.67 Reef geometry and optical microstructure</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.66</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.67</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -152,7 +152,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.66 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.67 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -481,6 +481,7 @@ const improvedObjectCaustics=!new URLSearchParams(location.search).has('legacyOb
 const directionalObjectLight=improvedObjectCaustics&&!new URLSearchParams(location.search).has('noDirectionalObjectLight');
 const detailedObjectPhotons=directionalObjectLight&&!new URLSearchParams(location.search).has('noDetailedObjectPhotons');
 const visibleObjectCaustics=improvedObjectCaustics&&!new URLSearchParams(location.search).has('oldObjectResponse');
+const reefMicrostructure=!new URLSearchParams(location.search).has('simpleReef');
 const waterProfiles={
  lagoon:photoOptics?{absorption:[.155,.058,.031],scattering:.026,color:0x2589bc}:{absorption:[.19,.070,.040],scattering:.022,color:0x175e8a},
  coastal:{absorption:[.30,.135,.080],scattering:.043,color:0x285a65},
@@ -1473,6 +1474,26 @@ function createUnderwaterReceiver(options){
    const wet=smoothstep(-.03,.18,surface.sub(positionWorld.y));
    const projectedLight=vec3(.98,1,1).mul(shape).mul(depthConfidence).mul(facing).mul(transport).mul(wet).mul(spectralTint).mul(u.controls.y);
    irradiance=irradiance.mul(1.28).add(projectedLight.mul(1.65));
+   if(reefMicrostructure){
+    // Resolve narrow optical folds at the receiver's own depth, with a
+    // minimum effective propagation length for near-surface reef faces.
+    // This is a short-wave lens approximation, not a traced intersection.
+    const propagation=depth.max(.85).min(12).mul(1-1/1.333).mul(u.optics.z);
+    let hx=float(0),hz=float(0),hs=float(0);
+    for(const [kx,kz,amp,phase0] of [[4.4,2.1,.016,.42],[-2.8,5.7,.011,2.7],[6.9,-3.6,.007,4.3],[1.9,8.1,.0045,1.8],[-7.2,5.1,.0037,5.4]]){
+     const phase=sx.mul(kx).add(sz.mul(kz)).add(warpX.mul(.85)).add(warpZ.mul(.64)).sub(u.optics.x.mul(Math.sqrt(9.81*Math.hypot(kx,kz)))).add(phase0);
+     const curvature=phase.sin().mul(-amp).mul(u.optics.y).mul(propagation);
+     hx=hx.add(curvature.mul(kx*kx));hz=hz.add(curvature.mul(kz*kz));hs=hs.add(curvature.mul(kx*kz));
+    }
+    const fold=float(1).sub(hx).mul(float(1).sub(hz)).sub(hs.mul(hs));
+    const eye=oceanTSL.cameraPosition.sub(positionWorld).length();
+    const blur=smoothstep(6,28,eye);
+    const core=float(1).sub(fold.abs().div(blur.mul(.14).add(.16)).clamp(0,1)).pow(1.5);
+    const shoulder=float(1).sub(fold.abs().div(.46).clamp(0,1)).pow(2.4);
+    const optical=core.mul(1.25).add(shoulder.mul(.38)).mul(float(1).sub(blur.mul(.75)));
+    const detail=vec3(.98,1,1).mul(optical).mul(facing).mul(transport).mul(wet).mul(spectralTint).mul(u.controls.y);
+    irradiance=irradiance.mul(.80).add(detail.mul(.95));
+   }
   }
   mat=new THREE.MeshStandardNodeMaterial(options);
   if(directionalObjectLight){
@@ -1488,11 +1509,29 @@ function createUnderwaterReceiver(options){
   mat.userData.projectedCaustics=true;return mat;
  }catch(e){mat?.dispose();console.warn('Projected object caustics fallback',e);return new THREE.MeshStandardMaterial(options);}
 }
+// Low-poly count, irregular eroded silhouette with baked mineral variation.
+function makeReefStone(seed=1,tall=false){
+ const geo=new THREE.IcosahedronGeometry(1,reefMicrostructure?5:1);
+ if(!reefMicrostructure)return geo;
+ const p=geo.attributes.position,colors=new Float32Array(p.count*3);
+ for(let i=0;i<p.count;i++){
+  const x=p.getX(i),y=p.getY(i),z=p.getZ(i);
+  const broad=Math.sin(x*3.4+y*2.1+seed)*Math.sin(z*4.2-y*1.6+seed*.7);
+  const ridges=Math.sin(x*8.7+z*5.2+Math.sin(y*5.3)*1.5+seed);
+  const erosion=Math.sin(y*12.3+x*5.2+z*3.7+seed)*Math.sin(z*11.1-x*3.9);
+  const radius=1+.14*broad+.065*ridges+.025*erosion;
+  const taper=tall?1-.32*Math.pow(Math.max(0,y),2):1;
+  p.setXYZ(i,(x*radius+.08*Math.sin(y*4+seed))*taper,y*radius,z*radius*taper);
+  const grain=.89+.075*broad+.035*ridges+.035*erosion;
+  colors[i*3]=grain*.98;colors[i*3+1]=grain;colors[i*3+2]=grain*.96;
+ }
+ p.needsUpdate=true;geo.computeVertexNormals();geo.setAttribute('color',new THREE.BufferAttribute(colors,3));return geo;
+}
 function buildUnderwaterScene(){
  surfaceFoamObjects.length=0;activeObjectFoam.length=0;
  const group=new THREE.Group();
- const rockGeometry=new THREE.IcosahedronGeometry(1,1);
- const rockMaterial=createUnderwaterReceiver({color:0x667b73,roughness:.95});
+ const rockGeometry=makeReefStone(2.4);
+ const rockMaterial=createUnderwaterReceiver({color:0x667b73,roughness:.95,vertexColors:reefMicrostructure});
  underwaterObjectMaterials.push(rockMaterial);
  underwaterSceneMaterials.push({material:rockMaterial,base:rockMaterial.color.clone()});
  const rocks=new THREE.InstancedMesh(rockGeometry,rockMaterial,40);
@@ -1512,7 +1551,7 @@ function buildUnderwaterScene(){
  // A few actual surface-piercing reef rocks provide test subjects for
  // obstacle whitewater; the original submerged reef stays unchanged.
  for(const [x,z,r] of [[-8,-18,1.15],[5,-21,.9],[9,-8,1.25]]){
-  const rock=new THREE.Mesh(rockGeometry,rockMaterial),depth=seabedDepth(x,z);
+  const rock=new THREE.Mesh(reefMicrostructure?makeReefStone(x*.73+z*.31,true):rockGeometry,rockMaterial),depth=seabedDepth(x,z);
   const height=depth+.38;
   rock.position.set(x,-depth+height*.5,z);rock.scale.set(r,height*.5,r*.85);rock.rotation.y=x*.4;
   group.add(rock);surfaceFoamObjects.push({mesh:rock,x,z,r,top:-depth+height,last:-100,wet:0});
@@ -7506,7 +7545,7 @@ function disableVolumeMarch(error){
  volumeMarchFault=String(error?.message||error);volumeMarchActive=false;
  screenLightPipeline.outputNode=volumeMarchBase;screenLightPipeline.needsUpdate=true;
  console.warn('Volume march fallback to existing screen scattering',error);
- status('28.5.66 volumetric fallback: '+volumeMarchFault);
+ status('28.5.67 volumetric fallback: '+volumeMarchFault);
  return true;
 }
 async function initScreenSpaceLighting(){
@@ -7549,7 +7588,7 @@ async function initScreenSpaceLighting(){
   screenBlendColor=blendColor;
   screenSpaceReady=true;
   applyScreenScatteringQuality();
-  status(volumeMarchActive?'28.5.66 visible object caustic recovery initialized.':'24.7 depth-aware screen-space scattering initialized.');
+  status(volumeMarchActive?'28.5.67 reef optical microstructure initialized.':'24.7 depth-aware screen-space scattering initialized.');
  }catch(error){
   screenSpaceFault=String(error?.message||error);
   screenSpaceFailed=true;

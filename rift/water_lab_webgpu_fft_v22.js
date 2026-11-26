@@ -3,13 +3,14 @@
 // two radix-2 inverse FFT axes, and keeps its height field resident in storage.
 // Separate GPU device from Three.js: readback currently supplies mesh/boat
 // sampling, until native Three.js WebGPU buffer sharing is implemented.
-export async function createGPUFFTOcean({resolution=64,domain=96,onError=()=>{}}={}){
+export async function createGPUFFTOcean({resolution=64,domain=96,onError=()=>{},sharedDevice=null}={}){
  if(!navigator.gpu)throw Error('WebGPU API unavailable');
  const n=resolution|0;
  if(![64,128].includes(n))throw Error('FFT grid must be 64 or 128');
- const adapter=await navigator.gpu.requestAdapter({powerPreference:'high-performance'});
- if(!adapter)throw Error('WebGPU compute adapter unavailable');
- const device=await adapter.requestDevice();
+ const ownsDevice=!sharedDevice;
+ const adapter=ownsDevice?await navigator.gpu.requestAdapter({powerPreference:'high-performance'}):null;
+ if(ownsDevice&&!adapter)throw Error('WebGPU compute adapter unavailable');
+ const device=sharedDevice||await adapter.requestDevice();
  const cells=n*n,bytes=cells*8,stages=Math.log2(n),tau=Math.PI*2;
  let rng=0x7b5d32e1;
  function random(){
@@ -135,6 +136,46 @@ fn main(@builtin(global_invocation_id) id:vec3u){
  device.lost.then(info=>{
   if(!disposed){disposed=true;onError('GPU compute device lost: '+info.message);}
  }).catch(()=>{});
+
+ let renderTarget=null,packPipeline=null,packBuffer=null,packGroup=null,renderFrames=0,renderFault='',renderPending=false;
+ async function attachRenderTexture(texture){
+  if(disposed||!texture||texture.format!=='rgba8unorm'||texture.width!==n||texture.height!==n||!(texture.usage&GPUTextureUsage.COPY_DST))return false;
+  if(renderTarget===texture&&packPipeline)return true;
+  if(renderPending)return false;renderPending=true;
+  try{
+   if(!packPipeline){
+    const module=device.createShaderModule({code:`
+@group(0) @binding(0) var<storage,read> field:array<vec2f>;
+@group(0) @binding(1) var<storage,read_write> pixels:array<u32>;
+@compute @workgroup_size(64) fn pack(@builtin(global_invocation_id) id:vec3u){
+ let i=id.x;if(i>=${cells}u){return;}
+ let h=clamp(field[i].x/f32(${cells}u),-12.,12.);
+ let v=u32(round((h+12.)/24.*65535.));
+ pixels[i]=(v>>8u)|((v&255u)<<8u)|0xff000000u;
+}`});
+    const info=await module.getCompilationInfo();if(info.messages.some(m=>m.type==='error'))throw Error('FFT texture pack shader compilation');
+    packPipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'pack'}});
+    if(disposed)return false;
+    packBuffer=device.createBuffer({size:cells*4,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC});
+    packGroup=device.createBindGroup({layout:packPipeline.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:src}},{binding:1,resource:{buffer:packBuffer}}]});
+   }
+   renderTarget=texture;renderFrames=0;return true;
+  }catch(e){renderFault=String(e?.message||e);return false;}finally{renderPending=false;}
+ }
+ function detachRenderTexture(texture){if(!texture||renderTarget===texture){renderTarget=null;renderFrames=0;}}
+ function publishRenderTexture(){
+  if(!renderTarget||!packPipeline||renderFault)return;
+  let scoped=false;
+  try{
+   device.pushErrorScope('validation');scoped=true;
+   const enc=device.createCommandEncoder(),pass=enc.beginComputePass();pass.setPipeline(packPipeline);pass.setBindGroup(0,packGroup);pass.dispatchWorkgroups(Math.ceil(cells/64));pass.end();
+   enc.copyBufferToTexture({buffer:packBuffer,bytesPerRow:n*4,rowsPerImage:n},{texture:renderTarget},{width:n,height:n,depthOrArrayLayers:1});
+   device.queue.submit([enc.finish()]);const target=renderTarget;
+   const validation=device.popErrorScope();scoped=false;
+   validation.then(err=>{if(err){renderFault=err.message;renderFrames=0;}else if(renderTarget===target&&!disposed)renderFrames++;}).catch(e=>{renderFault=String(e);renderFrames=0;});
+  }catch(e){if(scoped)device.popErrorScope().catch(()=>{});renderFault=String(e);renderFrames=0;}
+ }
+
  function request(t,{power=1}={}){
   if(disposed||busy||t-lastRequest<.10)return;
   busy=true;lastRequest=t;
@@ -153,7 +194,7 @@ fn main(@builtin(global_invocation_id) id:vec3u){
    encoder.copyBufferToBuffer(src,0,staging,0,bytes);
    device.queue.submit([encoder.finish()]);
    staging.mapAsync(GPUMapMode.READ).then(()=>{
-    if(disposed)return;
+    if(disposed){staging.unmap();staging.destroy();return;}
     const candidate=new Float32Array(staging.getMappedRange()).slice();
     staging.unmap();
     let squares=0,imagSquares=0,nextPeak=0,finite=true;
@@ -170,7 +211,7 @@ fn main(@builtin(global_invocation_id) id:vec3u){
      return;
     }
     latest=candidate;rms=nextRms;peak=nextPeak;imaginaryLeak=nextLeak;
-    frameCount++;verifiedFrames++;busy=false;
+    frameCount++;verifiedFrames++;publishRenderTexture();busy=false;
    }).catch(error=>{busy=false;failures++;if(failures<=2)onError(String(error));});
   }catch(error){busy=false;failures++;if(failures<=2)onError(String(error));}
  }
@@ -185,11 +226,11 @@ fn main(@builtin(global_invocation_id) id:vec3u){
   return Number.isFinite(result)?Math.max(-12,Math.min(12,result)):0;
  }
  function dispose(){
-  disposed=true;h0.destroy();a.destroy();b.destroy();params.destroy();
+  disposed=true;renderTarget=null;packBuffer?.destroy();h0.destroy();a.destroy();b.destroy();params.destroy();
   for(const uniform of uniforms)uniform.destroy();
-  if(!busy)staging.destroy();device.destroy();
+  if(!busy)staging.destroy();if(ownsDevice)device.destroy();
  }
- return {request,sample,dispose,get ready(){return latest!==null&&verifiedFrames>=3;},
+ return {request,sample,dispose,device,shared:!ownsDevice,attachRenderTexture,detachRenderTexture,get renderFrames(){return renderFrames;},get renderFault(){return renderFault;} ,get ready(){return latest!==null&&verifiedFrames>=3;},
   get validationFrames(){return verifiedFrames;},get rms(){return rms;},
   get peak(){return peak;},get imaginaryLeak(){return imaginaryLeak;},
   get frameCount(){return frameCount;},get failures(){return failures;},

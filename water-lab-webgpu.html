@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.45 Directional underwater scattering</title>
+<title>Rift Water Lab · WebGPU 28.5.46 World-space caustic sun shafts</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.45</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.46</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -150,7 +150,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.45 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.46 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -806,6 +806,38 @@ function makeSoftShaftTexture(){
  texture.generateMipmaps=false;
  texture.needsUpdate=true;return texture;
 }
+// World-space refracted shafts share the existing photon texture and optical controls.
+// This is a depth-tested light-sheet approximation, not a full volume raymarch.
+function makeCausticShaftMaterial(options){
+ if(!oceanTSL||!THREE.MeshBasicNodeMaterial||!causticMap||!causticObjectUniforms)return new THREE.MeshBasicMaterial(options);
+ let mat;
+ try{
+  const {float,vec2,vec3,texture,positionWorld,uv,smoothstep,materialOpacity}=oceanTSL;
+  const u=causticObjectUniforms;
+  const depth=positionWorld.y.negate().max(0);
+  const local=positionWorld.xz.sub(u.floorOrigin),lx=local.x,lz=local.y;
+  const shelf=smoothstep(16,111,vec2(lx.mul(.83),lz.add(11).mul(.92)).length());
+  const floorDepth=float(3.8).add(shelf.mul(27)).add(lx.mul(.085).add(lz.mul(.041)).sin().mul(lz.mul(.072).sub(lx.mul(.028)).cos()).mul(.48).mul(float(1).sub(shelf)));
+  const height=floorDepth.sub(depth).max(0).min(30);
+  const projected=positionWorld.xz.sub(vec2(.326,.163).mul(height));
+  const q=projected.sub(u.origin).div(u.controls.x);
+  const mapUV=vec2(q.x.add(.5),float(.5).sub(q.y));
+  const radial=float(1).sub(smoothstep(.27,.47,q.length()));
+  const photon=texture(causticMap,mapUV.clamp(.001,.999)).rgb.dot(vec3(.2126,.7152,.0722));
+  const transmission=waveTransmissionTexture?texture(waveTransmissionTexture,mapUV.clamp(.001,.999)).r:float(1);
+  const visibility=float(1).sub(float(1).sub(transmission).mul(radial).mul(u.optics.w));
+  const path=depth.div(u.controls.z).mul(u.controls.w.max(0));
+  const spectral=vec3(.065,.022,.008).mul(path.sub(5).max(0).negate()).exp();
+  const gate=smoothstep(.08,.65,depth).mul(smoothstep(0,.55,floorDepth.sub(depth)));
+  mat=new THREE.MeshBasicNodeMaterial({...options,map:null});
+  mat.colorNode=vec3(.66,.92,.93).mul(spectral);
+  // Keep a subtle continuous shaft outside the local photon field.
+  const structure=float(.55).add(photon.mul(1.35).mul(radial)).clamp(.55,1.9);
+  mat.opacityNode=texture(softShaftTexture,uv()).a.mul(materialOpacity).mul(structure).mul(visibility).mul(gate).mul(path.mul(-.035).exp());
+  return mat;
+ }catch(e){mat?.dispose();console.warn('Caustic shaft material fallback',e);return new THREE.MeshBasicMaterial(options);}
+}
+let shaftAxis=null,shaftRight=null,shaftNormal=null,shaftBasis=null,shaftView=null;
 function createSoftVolumetricShafts(){
  if(softShafts){
   scene.remove(softShafts);
@@ -818,7 +850,7 @@ function createSoftVolumetricShafts(){
  // tessellated cones; all wisps share one four-vertex geometry and map.
  const count=16;
  for(let i=0;i<count;i++){
-  const material=new THREE.MeshBasicMaterial({
+  const material=makeCausticShaftMaterial({
    map:softShaftTexture,color:0xaff5ef,transparent:true,
    opacity:0,blending:THREE.AdditiveBlending,depthWrite:false,
    depthTest:true,side:THREE.DoubleSide,fog:false,
@@ -875,8 +907,8 @@ function updateUnderwaterParticles(t){
 }
 function updateSoftVolumetricShafts(t){
  if(!softShafts||!camera)return;
- const enabled=scatteringMode==='soft'&&volumetricStrength>.01&&
-  underwaterActive&&underwaterBlend>.08&&opticalMode!=='legacy';
+ const enabled=(scatteringMode==='soft'||scatteringMode==='screen')&&volumetricStrength>.01&&
+  underwaterActive&&underwaterBlend>.08&&opticalMode!=='legacy'&&atmospherePreset!=='off';
  softShafts.visible=enabled;
  if(!enabled)return;
  const max=shaftQuality==='high'?16:shaftQuality==='low'?6:11;
@@ -885,13 +917,14 @@ function updateSoftVolumetricShafts(t){
  const waterFade=Math.exp(-cameraDepth*(opticalMode==='deep'?.13:.074)/clarity);
  const directionalPhase=underwaterDirectionalPhase();
  const cx=camera.position.x,cz=camera.position.z;
- // One temporary quaternion per update, not per plane.
+ if(!shaftAxis){shaftAxis=new THREE.Vector3(.326,1,.163).normalize();shaftRight=new THREE.Vector3();shaftNormal=new THREE.Vector3();shaftBasis=new THREE.Matrix4();shaftView=new THREE.Vector3();}
+ // World-oriented shaft axes; only the cross-section faces the eye.
  for(let i=0;i<softShaftMeshes.length;i++){
   const mesh=softShaftMeshes[i];
   if(i>=max){mesh.visible=false;continue;}
   const phase=mesh.userData.seed,rad=mesh.userData.radius;
-  const x=cx+Math.cos(phase+t*.035*scatteringMotion)*rad;
-  const z=cz+Math.sin(phase+t*.032*scatteringMotion)*rad;
+  const x=cx+Math.cos(phase)*rad;
+  const z=cz+Math.sin(phase)*rad;
   const surface=oceanHeight(x,z,t);
   const depth=Math.max(0,surface+seabedDepth(
     x-(waterFloor?.position.x||0),z-(waterFloor?.position.z||0)));
@@ -900,20 +933,26 @@ function updateSoftVolumetricShafts(t){
   const wave=waveField(x,z,t,{});
   const exposure=shadowReady?shadowSample(shadowField,x,z,1):1;
   const facing=Math.max(0,(-wave.slopeX*.407+.891-wave.slopeZ*.204)/Math.hypot(1,wave.slopeX,wave.slopeZ));
-  const focusing=(.45+.55*facing)*exposure*(.75+.25*Math.sin(phase*1.8+t*.35*scatteringMotion+wave.height*.9));
+  const c=waveCausticCurvature(x,z,t),bend=(1-1/1.333)*Math.min(depth,12)*causticFocus;
+  const det=(1-bend*c.xx)*(1-bend*c.zz)-(bend*c.xz)**2;
+  const fold=Math.pow(Math.max(0,1-Math.abs(det)/.65),1.5);
+  const focusing=(.45+.55*facing)*exposure*(.28+.72*fold);
   const axial=Math.exp(-Math.pow(rad/23,2));
   const target=Math.min(.16,.036*volumetricStrength*underwaterBlend*
-    waterFade*focusing*axial*directionalPhase*(opticalMode==='deep'?.62:1));
+    waterFade*focusing*axial*directionalPhase*(opticalMode==='deep'?.62:1)*(scatteringMode==='screen'?.62:1));
   mesh.userData.smoothed+=(target-mesh.userData.smoothed)*
     (1-Math.exp(-Math.max(.001,clockDelta)*5));
   mesh.material.opacity=mesh.userData.smoothed;
   const span=Math.min(depth,15);
-  mesh.position.set(x-sunDirection.x*span*.24,surface-span*.49,
-    z-sunDirection.z*span*.24);
-  const width=(1.5+rad*.08)*scatteringDiffusion;
-  mesh.scale.set(width,span,1);
-  // Face the view while preserving the approximate direction of sunlight.
-  mesh.quaternion.copy(camera.quaternion);
+  mesh.position.set(x-.326*span*.5,surface-span*.5,z-.163*span*.5);
+  const width=(.85+rad*.055)*scatteringDiffusion;
+  mesh.scale.set(width,span/shaftAxis.y,1);
+  shaftView.copy(camera.position).sub(mesh.position).normalize();
+  shaftRight.crossVectors(shaftAxis,shaftView);
+  if(shaftRight.lengthSq()<1e-6)shaftRight.set(1,-.326,0);
+  shaftRight.normalize();shaftNormal.crossVectors(shaftRight,shaftAxis).normalize();
+  shaftBasis.makeBasis(shaftRight,shaftAxis,shaftNormal);
+  mesh.quaternion.setFromRotationMatrix(shaftBasis);
  }
 }
 const sunDirection={x:16/39.3,z:8/39.3};
@@ -936,9 +975,9 @@ function createVolumetricShafts(){
 }
 function updateVolumetricShafts(t){
  if(scatteringMode!=='classic'&&lightShafts)lightShafts.visible=false;
- if(scatteringMode!=='soft'&&softShafts)softShafts.visible=false;
+ if(scatteringMode!=='soft'&&scatteringMode!=='screen'&&softShafts)softShafts.visible=false;
  if(scatteringMode==='classic')updateClassicVolumetricShafts(t);
- else if(scatteringMode==='soft')updateSoftVolumetricShafts(t);
+ else if(scatteringMode==='soft'||scatteringMode==='screen')updateSoftVolumetricShafts(t);
  updateUnderwaterParticles(t);
 }
 // Exponential fog models scattering/visibility across the scene. The
@@ -6184,9 +6223,9 @@ function makeBoat(){
  // leave the physics root, rudder, wake and chase camera coordinates intact.
  const boatVisual=new THREE.Group();boatVisual.rotation.y=Math.PI;
  boat.add(boatVisual);
- const hullMaterial=new THREE.MeshStandardMaterial({color:0x815138,roughness:.74});
- const trim=new THREE.MeshStandardMaterial({color:0xe7bc89,roughness:.67});
- const sailMaterial=new THREE.MeshStandardMaterial({color:0xf5e9ce,side:THREE.DoubleSide,roughness:.8});
+ const hullMaterial=createUnderwaterReceiver({color:0x815138,roughness:.74});
+ const trim=createUnderwaterReceiver({color:0xe7bc89,roughness:.67});
+ const sailMaterial=createUnderwaterReceiver({color:0xf5e9ce,side:THREE.DoubleSide,roughness:.8});
  const outline=new THREE.Shape();
  outline.moveTo(-1.05,-2.2);outline.lineTo(-1.05,1.3);outline.lineTo(-.62,2.15);
  outline.lineTo(0,2.65);outline.lineTo(.62,2.15);outline.lineTo(1.05,1.3);
@@ -6196,7 +6235,7 @@ function makeBoat(){
  const wetMaterial=createUnderwaterReceiver({color:0x815138,roughness:.74,vertexColors:true});
  const wetColors=new Float32Array(hullGeo.attributes.position.count*3).fill(1);hullGeo.setAttribute('color',new THREE.BufferAttribute(wetColors,3).setUsage(THREE.DynamicDrawUsage));
  const hull=new THREE.Mesh(hullGeo,wetMaterial);hull.position.y=.35;boatVisual.add(hull);hullWetMesh=hull;
- const deck=new THREE.Mesh(new THREE.BoxGeometry(1.7,.1,3.55),trim.clone());deck.position.set(0,.38,-.25);boatVisual.add(deck);deckWoodMesh=deck;
+ const deck=new THREE.Mesh(new THREE.BoxGeometry(1.7,.1,3.55),createUnderwaterReceiver({color:0xe7bc89,roughness:.67}));deck.position.set(0,.38,-.25);boatVisual.add(deck);deckWoodMesh=deck;
  for(const side of [-1,1]){
   const rail=new THREE.Mesh(new THREE.BoxGeometry(.085,.17,3.6),trim);
   rail.position.set(side*.94,.54,-.25);boatVisual.add(rail);
@@ -6667,7 +6706,7 @@ $('scatteringMode').onchange=()=>{
  }
  volumetricFault=false;
  if(scatteringMode!=='classic'&&lightShafts)lightShafts.visible=false;
- if(scatteringMode!=='soft'&&softShafts)softShafts.visible=false;
+ if(scatteringMode!=='soft'&&scatteringMode!=='screen'&&softShafts)softShafts.visible=false;
 };
 $('screenScatteringQuality').onchange=()=>{
  screenScatteringQuality=$('screenScatteringQuality').value;

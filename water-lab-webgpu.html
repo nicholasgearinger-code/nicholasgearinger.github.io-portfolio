@@ -2986,7 +2986,7 @@ function createIslandLandmass(){
   const s=j/nz;
   for(let i=0;i<=nx;i++){
    const u=i/nx,x=(u*2-1)*xHalf,coastZ=-39+(x*x)/155;
-   const z=coastZ-.48-s*depth,y=heightAt(x,s);
+   const z=coastZ+.18-s*depth,y=heightAt(x,s);
    positions.push(x,y,z);
    const blend=Math.max(0,Math.min(1,(y-.32)/1.35));
    c.copy(sand).lerp(grass,blend);
@@ -3036,7 +3036,7 @@ function createIslandLandmass(){
  const leafMat=new THREE.MeshStandardMaterial({color:0x39784a,roughness:.9,side:THREE.DoubleSide});
  const palmSites=[[-29,.49],[-19,.34],[-9,.67],[5,.38],[16,.63],[27,.43]];
  for(const [x,s] of palmSites){
-  const z=-39+x*x/155-.48-s*depth,y=heightAt(x,s),tree=new THREE.Group();
+  const z=-39+x*x/155+.18-s*depth,y=heightAt(x,s),tree=new THREE.Group();
   const trunk=new THREE.Mesh(new THREE.CylinderGeometry(.13,.23,3.5,7),trunkMat);
   trunk.position.y=1.72;trunk.rotation.z=.07;tree.add(trunk);
   for(let k=0;k<7;k++){

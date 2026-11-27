@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.8.2 Shoreline enabled</title>
+<title>Rift Water Lab · WebGPU 28.8.3 Shoreline enabled</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.8.2</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.8.3</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -1342,10 +1342,22 @@ function chooseOptics(mode){
  $('opticsFallback').textContent=mode==='legacy'?'Safe mode active':'Safe water mode';
 }
 function seabedDepth(x,z){
+ // Broad offshore basin, retained as the deep-water baseline.
  const distance=Math.hypot(x*.83,(z+11)*.92);
  const t=Math.max(0,Math.min(1,(distance-16)/95));
- const shelf=t*t*(3-2*t);
- return 3.8+27*shelf+.48*Math.sin(x*.085+z*.041)*Math.cos(z*.072-x*.028)*(1-t);
+ const basin=3.8+27*(t*t*(3-2*t));
+ // A continuous submerged beach shelf follows the actual island coast.
+ // It eases from ankle-deep water at the waterline into the existing basin.
+ const coast=islandCoastZ(x);
+ const shoreDistance=Math.abs(z-coast);
+ const shoreT=Math.max(0,Math.min(1,shoreDistance/25));
+ const shoreEase=shoreT*shoreT*(3-2*shoreT);
+ const shelfDepth=.22+5.1*shoreEase;
+ const coastWidth=Math.max(0,Math.min(1,(65-Math.abs(x))/9));
+ const shelfMask=coastWidth*coastWidth*(3-2*coastWidth);
+ const depth=basin+(Math.min(basin,shelfDepth)-basin)*shelfMask;
+ const rippled=depth+.10*Math.sin(x*.085+z*.041)*Math.cos(z*.072-x*.028);
+ return Math.max(.16,rippled);
 }
 // Test subjects reveal actual water transmission/attenuation. Parent to
 // seafloor so all local geometry follows the same translated floor tile.
@@ -3092,7 +3104,7 @@ function resolveIslandBoatCollision(previousX,previousZ){
 }
 
 function createSeabed(){
- const n=120,geo=new THREE.PlaneGeometry(420,420,n,n);
+ const n=160,geo=new THREE.PlaneGeometry(420,420,n,n);
  geo.rotateX(-Math.PI/2);
  const a=geo.attributes.position,colors=new Float32Array(a.count*3);
  const sand=new THREE.Color(0xf4efdf),seaGrass=new THREE.Color(0xc1c9b9),deep=new THREE.Color(0x536e80),color=new THREE.Color();
@@ -3101,8 +3113,10 @@ function createSeabed(){
   a.setY(i,-d);
   const mottling=Math.sin(x*.25+Math.cos(z*.19)*2.0)*Math.cos(z*.31-x*.15);
   const grass=Math.max(0,Math.min(1,(mottling-.3)*1.5))*.12;
-  const fade=Math.max(0,Math.min(1,(d-8)/27));
-  color.copy(sand).lerp(seaGrass,grass).lerp(deep,fade*.65);
+  const fade=Math.max(0,Math.min(1,(d-3.5)/25));
+  const shallow=Math.max(0,Math.min(1,(d-.35)/5.2));
+  color.copy(sand).lerp(seaGrass,grass).lerp(new THREE.Color(0x9bc9b8),.16*(1-shallow))
+   .lerp(deep,fade*.65);
   colors[i*3]=color.r;colors[i*3+1]=color.g;colors[i*3+2]=color.b;
  }
  a.needsUpdate=true;geo.computeVertexNormals();

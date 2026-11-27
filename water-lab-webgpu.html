@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.6.0 Physically coherent underwater lighting</title>
+<title>Rift Water Lab · WebGPU 28.6.1 Refined shallow-water caustics</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.6.0</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.6.1</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -418,8 +418,9 @@ function createOceanMaterial(options){
     const capillary=fineA.add(warp).sin().mul(.65).add(fineB.sub(warp).sin().mul(.35));
     const fineFade=float(1).sub(oceanTSL.smoothstep(8,32,viewDistance));
     const fineDet=determinant.add(capillary.mul(.48).mul(fineFade));
-    const cells=float(1).sub(fineDet.abs().div(.72).clamp(0,1)).pow(1.6);
-    const pools=float(1).sub(determinant.abs().div(1.15).clamp(0,1)).pow(1.2);
+    // Tighten the broad underside lens so it reads as refracted detail, not cloudy patches.
+    const cells=float(1).sub(fineDet.abs().div(.66).clamp(0,1)).pow(1.9);
+    const pools=float(1).sub(determinant.abs().div(1.02).clamp(0,1)).pow(1.35);
     const rimFocus=float(1).sub(determinant.abs().div(.48).clamp(0,1)).pow(2);
     // Fine refracted glints follow the moving surface normal; broad cells
     // remain the dominant structure rather than a repeating line texture.
@@ -436,7 +437,7 @@ function createOceanMaterial(options){
     const rim=oceanTSL.smoothstep(.12,.74,slope).mul(.16);
     const upward=oceanTSL.smoothstep(.005,.32,v.y.negate());
     const window=float(1).sub(reflectance).mul(.72).add(reflectance.mul(.28));
-    const illumination=cells.mul(1.18).add(pools.mul(.18)).add(rimFocus.mul(.30)).mul(broad.mul(.72).add(.28)).mul(window).mul(detailFade.mul(.98).add(.02));
+    const illumination=cells.mul(1.24).add(pools.mul(.12)).add(rimFocus.mul(.34)).mul(broad.mul(.72).add(.28)).mul(window).mul(detailFade.mul(.98).add(.02));
     const transmittedSky=skyLobe.mul(pools.mul(.6).add(.22)).mul(float(1).sub(reflectance));
     const depthFade=oceanAngleDepth.mul(-.035).exp();
     // Clear-water surface glints carry broadband sky radiance, not a saturated blue emissive stripe.
@@ -479,7 +480,7 @@ function createOceanMaterial(options){
      const soft=float(1).sub(flux.mul(-.27).exp());
      // Smooth transition around Snell's window, using the same local normal.
      const critical=float(1).sub(disc.abs().div(.12).clamp(0,1)).pow(1.6).mul(fineFade);
-     const silver=vec3(.84,.96,1).mul(focal.mul(.70).add(soft.mul(.28))).mul(float(.35).add(transmissionFine.mul(.65)));
+     const silver=vec3(.84,.96,1).mul(focal.mul(.78).add(soft.mul(.20))).mul(float(.35).add(transmissionFine.mul(.65)));
      const rimLight=vec3(.46,.72,.91).mul(critical).mul(focal.mul(.52).add(.10));
      const skyLight=vec3(.18,.46,.77).mul(sky).mul(.48);
      const refined= silver.add(rimLight).add(skyLight).mul(eyeTransmission);
@@ -507,7 +508,7 @@ function createOceanMaterial(options){
       const active=upward.mul(wet).mul(depthFade).mul(undersideLensControls.z).mul(undersideLensControls.w);
       // Restore the previous fine lens appearance, retaining only a small
       // directional radiance contribution. Avoid a broad bright sky wash.
-      const previous=blueBase.add(oldLight.mul(.58).add(refined.mul(.85)).mul(upward).mul(wet).mul(depthFade).mul(undersideLensControls.z)).mul(undersideLensControls.w);
+      const previous=blueBase.add(oldLight.mul(.50).add(refined.mul(.92)).mul(upward).mul(wet).mul(depthFade).mul(undersideLensControls.z)).mul(undersideLensControls.w);
       const directional=interfaceLight.mul(eyeTransmission).mul(active);
       result.assign(previous.mul(.80).add(directional.mul(.16)));
      }else result.assign(blueBase.add(oldLight.mul(.58).add(refined.mul(.85)).mul(upward).mul(wet).mul(depthFade).mul(undersideLensControls.z)).mul(undersideLensControls.w));
@@ -2810,9 +2811,9 @@ function setupContinuousFloor(mat,detail){
   // highlight plus a soft shoulder around them, rather than filling cells.
   const eyeDistance=oceanTSL.cameraPosition.sub(positionWorld).length();
   const detailFade=float(1).sub(smoothstep(8,36,eyeDistance));
-  const brightRim=float(1).sub(det.abs().div(.19).clamp(0,1)).pow(1.35);
+  const brightRim=float(1).sub(det.abs().div(.17).clamp(0,1)).pow(1.35);
   const softRim=float(1).sub(det.abs().div(.72).clamp(0,1)).pow(2.45);
-  const originalBand=core.mul(.82).add(secondary.mul(.34)).add(shoulder.mul(.12));
+  const originalBand=core.mul(.88).add(secondary.mul(.34)).add(shoulder.mul(.10));
   const band=(photoOptics?originalBand.add(brightRim.mul(.20).mul(detailFade)).add(softRim.mul(.19)):originalBand).mul(envelope.mul(.45).add(.55));
   const outer=vec3(.93,.99,1).mul(band).mul(depth.mul(-.055).div(controls.w).exp());
   const originalLight=outer.mul(float(1).sub(localMask.mul(.20))).mul(photoOptics?2.15:2.1).add(local.mul(localMask).mul(.95));
@@ -2832,9 +2833,9 @@ function setupContinuousFloor(mat,detail){
     .add(jacobianRadiance(det.sub(delta)).mul(.25));
    const focused=float(1).sub(flux.mul(-.64).exp()).pow(1.55);
    const broadFlux=float(1).sub(flux.mul(-.19).exp()).pow(2);
-   const radiance=focused.mul(.90).add(broadFlux.mul(.32)).mul(envelope.mul(.35).add(.65));
+   const radiance=focused.mul(1.08).add(broadFlux.mul(.25)).mul(envelope.mul(.35).add(.65));
    const transmitted=vec3(.98,1,1).mul(radiance).mul(depth.mul(-.055).div(controls.w).exp());
-   light=transmitted.mul(1.35).add(originalLight.mul(.65));
+   light=transmitted.mul(1.48).add(originalLight.mul(.52));
    if(multiscaleRadiance){
     // A small high-frequency Hessian perturbation from additional directional
     // capillary-gravity wave bands. Evaluate the radiance difference rather than
@@ -7744,7 +7745,7 @@ function disableVolumeMarch(error){
  volumeMarchFault=String(error?.message||error);volumeMarchActive=false;
  screenLightPipeline.outputNode=volumeMarchBase;screenLightPipeline.needsUpdate=true;
  console.warn('Volume march fallback to existing screen scattering',error);
- status('28.6.0 volumetric fallback: '+volumeMarchFault);
+ status('28.6.1 volumetric fallback: '+volumeMarchFault);
  return true;
 }
 async function initScreenSpaceLighting(){
@@ -7787,7 +7788,7 @@ async function initScreenSpaceLighting(){
   screenBlendColor=blendColor;
   screenSpaceReady=true;
   applyScreenScatteringQuality();
-  status(volumeMarchActive?'28.6.0 wave-coupled underwater light transport initialized.':'24.7 depth-aware screen-space scattering initialized.');
+  status(volumeMarchActive?'28.6.1 refined underwater optics initialized.':'24.7 depth-aware screen-space scattering initialized.');
  }catch(error){
   screenSpaceFault=String(error?.message||error);
   screenSpaceFailed=true;

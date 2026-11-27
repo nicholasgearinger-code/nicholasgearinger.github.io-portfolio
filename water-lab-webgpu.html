@@ -3107,7 +3107,7 @@ function createSeabed(){
  const n=160,geo=new THREE.PlaneGeometry(420,420,n,n);
  geo.rotateX(-Math.PI/2);
  const a=geo.attributes.position,colors=new Float32Array(a.count*3);
- const sand=new THREE.Color(0xf4efdf),seaGrass=new THREE.Color(0xc1c9b9),deep=new THREE.Color(0x536e80),color=new THREE.Color();
+ const sand=new THREE.Color(0xf4efdf),seaGrass=new THREE.Color(0xc1c9b9),deep=new THREE.Color(0x536e80),lagoon=new THREE.Color(0x9bc9b8),color=new THREE.Color();
  for(let i=0;i<a.count;i++){
   const x=a.getX(i),z=a.getZ(i),d=seabedDepth(x,z);
   a.setY(i,-d);
@@ -3115,7 +3115,7 @@ function createSeabed(){
   const grass=Math.max(0,Math.min(1,(mottling-.3)*1.5))*.12;
   const fade=Math.max(0,Math.min(1,(d-3.5)/25));
   const shallow=Math.max(0,Math.min(1,(d-.35)/5.2));
-  color.copy(sand).lerp(seaGrass,grass).lerp(new THREE.Color(0x9bc9b8),.16*(1-shallow))
+  color.copy(sand).lerp(seaGrass,grass).lerp(lagoon,.16*(1-shallow))
    .lerp(deep,fade*.65);
   colors[i*3]=color.r;colors[i*3+1]=color.g;colors[i*3+2]=color.b;
  }

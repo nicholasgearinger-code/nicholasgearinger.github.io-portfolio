@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.8.0 Shoreline enabled</title>
+<title>Rift Water Lab · WebGPU 28.8.1 Shoreline enabled</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.8.0</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.8.1</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -2916,7 +2916,7 @@ function setupContinuousFloor(mat,detail){
 // not interfere with boat physics or the established seabed caustics.
 let shorelineFoamTexture=null,shorelineFoamMaterial=null,shorelineLast=-1;
 function createTropicalShoreline(){
- const segments=160,across=18,xMin=-43,xMax=43;
+ const segments=190,across=18,xMin=-65,xMax=65;
  const shoreZ=x=>-39+(x*x)/155;
  const buildBand=(inner,outer,heightFn,colorFn,material)=>{
   const positions=[],colors=[],uvs=[],indices=[];
@@ -2969,15 +2969,15 @@ function createTropicalShoreline(){
 function createIslandLandmass(){
  // A closed, gently irregular terrain mass whose front contour follows the
  // existing curved beach. The coast and island share the same world-space line.
- const nx=128,nz=64,xHalf=47,depth=56,frontY=.24;
+ const nx=160,nz=88,xHalf=62,depth=82,frontY=.24;
  const positions=[],colors=[],indices=[];
  const sand=new THREE.Color(0xe9d5ad),grass=new THREE.Color(0x587b48),
        highGrass=new THREE.Color(0x466b40),rock=new THREE.Color(0x77796f),c=new THREE.Color();
  const heightAt=(x,s)=>{
-  const ridge=8.8*Math.exp(-((x/25)**2+((s-.54)/.31)**2)*1.48);
-  const west=2.25*Math.exp(-(((x+18)/11)**2+((s-.62)/.17)**2)*1.7);
-  const east=1.65*Math.exp(-(((x-20)/10)**2+((s-.48)/.19)**2)*1.7);
-  const shoulder=.72*Math.exp(-(((x+2)/34)**2+((s-.82)/.12)**2)*2);
+  const ridge=5.5*Math.exp(-((x/34)**2+((s-.53)/.36)**2)*1.42);
+  const west=1.45*Math.exp(-(((x+27)/17)**2+((s-.62)/.23)**2)*1.55);
+  const east=1.25*Math.exp(-(((x-28)/15)**2+((s-.45)/.25)**2)*1.55);
+  const shoulder=.55*Math.exp(-(((x+4)/43)**2+((s-.82)/.17)**2)*1.8);
   const undulation=.20*Math.sin(x*.21+s*13)*Math.sin(x*.095-s*19);
   return Math.max(frontY,frontY+ridge+west+east+shoulder+undulation);
  };
@@ -3025,8 +3025,8 @@ function createIslandLandmass(){
  const rockMat=new THREE.MeshStandardMaterial({color:0x777b70,roughness:.94});
  let seed=7319;const rand=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};
  const boulderGeo=new THREE.IcosahedronGeometry(1,1);
- for(let n=0;n<24;n++){
-  const x=(rand()*2-1)*43,s=.04+rand()*.28,z=-39+x*x/155-.65-s*depth;
+ for(let n=0;n<30;n++){
+  const x=(rand()*2-1)*57,s=.04+rand()*.28,z=-39+x*x/155+.18-s*depth;
   const r=.65+rand()*1.65,mesh=new THREE.Mesh(boulderGeo,rockMat);
   mesh.position.set(x,heightAt(x,s)+r*.30,z);mesh.scale.set(r*1.35,r*.72,r);
   mesh.rotation.set(rand()*.5,rand()*Math.PI,rand()*.35);scene.add(mesh);
@@ -3034,7 +3034,7 @@ function createIslandLandmass(){
  // Small clustered palms establish scale while keeping draw calls modest.
  const trunkMat=new THREE.MeshStandardMaterial({color:0x806044,roughness:1});
  const leafMat=new THREE.MeshStandardMaterial({color:0x39784a,roughness:.9,side:THREE.DoubleSide});
- const palmSites=[[-29,.49],[-19,.34],[-9,.67],[5,.38],[16,.63],[27,.43]];
+ const palmSites=[[-43,.49],[-29,.34],[-13,.67],[7,.38],[24,.63],[43,.43]];
  for(const [x,s] of palmSites){
   const z=-39+x*x/155+.18-s*depth,y=heightAt(x,s),tree=new THREE.Group();
   const trunk=new THREE.Mesh(new THREE.CylinderGeometry(.13,.23,3.5,7),trunkMat);
@@ -3055,6 +3055,33 @@ function updateTropicalShoreline(t){
  if(t-shorelineLast<.025)return;shorelineLast=t;
  shorelineFoamTexture.offset.x=(t*.012)%1;
  shorelineFoamTexture.offset.y=(Math.sin(t*.22)*.018);
+}
+
+
+function islandContainsWorldPoint(x,z){
+ const xHalf=62,depth=82;
+ if(Math.abs(x)>xHalf)return false;
+ const coastZ=-39+(x*x)/155+.18;
+ const along=(coastZ-z)/depth;
+ return along>=-.015&&along<=1.015;
+}
+function resolveIslandBoatCollision(previousX,previousZ){
+ if(!boat)return false;
+ // Test the hull footprint, not just the boat origin, so the bow cannot
+ // clip through the beach while the centre is still offshore.
+ const c=Math.cos(boatHeading),sn=Math.sin(boatHeading);
+ const probes=[[0,0],[-.82,-2.15],[.82,-2.15],[-.82,2.05],[.82,2.05]];
+ let blocked=false;
+ for(const [lx,lz] of probes){
+  const wx=boat.position.x+lx*c+lz*sn;
+  const wz=boat.position.z-lx*sn+lz*c;
+  if(islandContainsWorldPoint(wx,wz)){blocked=true;break;}
+ }
+ if(!blocked)return false;
+ boat.position.x=previousX;boat.position.z=previousZ;
+ boatSpeed=Math.min(boatSpeed,0.12);
+ hullSlipX=0;hullSlipZ=0;
+ return true;
 }
 
 function createSeabed(){
@@ -7126,8 +7153,10 @@ function stepBoatClassic(dt,t){
     boatSpeed+(thrust-drag-braking)*h));
   // Rudder responds to forward flow; preserve low-speed steering assist.
   boatHeading+=rudder*(.24+.12*boatSpeed)*h;
+  const priorBoatX=boat.position.x,priorBoatZ=boat.position.z;
   boat.position.x+=(-Math.sin(boatHeading)*boatSpeed+hullSlipX)*h;
   boat.position.z+=(-Math.cos(boatHeading)*boatSpeed+hullSlipZ)*h;
+  resolveIslandBoatCollision(priorBoatX,priorBoatZ);
   totalTravel+=boatSpeed*h;
   boat.rotation.y=boatHeading;
   const dynamic=hullPhysics==='dynamic';
@@ -7264,8 +7293,10 @@ function stepBoat(dt,t){
   hullYawRate=Math.max(-.9,Math.min(.9,hullYawRate+yaw/Iy*h));
   boatHeading+=hullYawRate*h;
   hullSlipX=Math.cos(boatHeading)*sideBound;hullSlipZ=-Math.sin(boatHeading)*sideBound;
+  const priorBoatX=boat.position.x,priorBoatZ=boat.position.z;
   boat.position.x+=(-Math.sin(boatHeading)*boatSpeed+hullSlipX)*h;
   boat.position.z+=(-Math.cos(boatHeading)*boatSpeed+hullSlipZ)*h;
+  resolveIslandBoatCollision(priorBoatX,priorBoatZ);
   totalTravel+=Math.hypot(boatSpeed,sideBound)*h;
   // Reserve buoyancy represents enclosed displacement when the deck is awash.
   // It is a bounded safety force, not a position snap.

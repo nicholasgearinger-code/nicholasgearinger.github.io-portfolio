@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.7.0 Curved tropical shoreline</title>
+<title>Rift Water Lab · WebGPU 28.7.1 Shoreline enabled</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.7.0</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.7.1</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -7973,6 +7973,7 @@ async function init3D(forceWebGL=false){
  underwaterSunlight.position.set(16,35,8);scene.add(underwaterSunlight);
  underwaterAmbient=new THREE.HemisphereLight(0xb3ecf5,0x1b5b63,0);
  scene.add(underwaterAmbient);
+ createTropicalShoreline();
  const floor=createSeabed();
  makeBoat();makeSurface();createFoamField();createVolumetricShafts();resetCamera();
  if(!isWebGPU&&scatteringMode==='screen'){

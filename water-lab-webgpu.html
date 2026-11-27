@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.5.77 Volumetric stability fix</title>
+<title>Rift Water Lab · WebGPU 28.5.78 Soft-source underwater optics</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.77</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.5.78</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -152,7 +152,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Crossing swells <input id="crossingSwell" aria-label="Secondary crossing wave trains" type="range" min="0" max="2" step=".05" value="1"></label><output id="crossingSwellOut">1.00</output></div>
 <div class="row"><label>Wind ripple detail <input id="windRipples" aria-label="Fine wind-driven ripples" type="range" min="0" max="2" step=".05" value="1"></label><output id="windRipplesOut">1.00</output></div>
 <div class="row"><label>Natural whitecaps <input id="whitecapIntensity" aria-label="Steep crest whitecap intensity" type="range" min="0" max="2" step=".05" value=".85"></label><output id="whitecapIntensityOut">0.85</output></div>
-<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.77 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
+<div class="row"><label>Breaking wave detail <select id="breakingMode"><option value="advanced" selected>28.5.78 · cellular foam</option><option value="classic">24.9 · whitecap highlights</option><option value="off">Off · performance</option></select></label></div>
 <div class="row"><label>Breaking intensity <input id="breakingIntensity" aria-label="Breaking wave intensity" type="range" min="0" max="2" step=".05" value="1"></label><output id="breakingIntensityOut">1.00</output></div>
 <div class="row"><label>Wave smoothness <input id="waveSmoothness" aria-label="Wave smoothness" type="range" min="0" max="2" step=".25" value="1"></label><output id="waveSmoothnessOut">1.00</output></div>
 <div class="row"><label>Boat propulsion <select id="propulsionMode"><option value="sail">Sailboat · gentler wake</option><option value="power" selected>Powered wake test · stronger wake</option></select></label></div>
@@ -470,12 +470,12 @@ function createOceanMaterial(options){
      const d=undersideLensControls.y.mul(2.1);
      const fold=float(1).add(hxx.mul(d)).mul(float(1).add(hzz.mul(d))).sub(hxz.mul(d).pow(2));
      const flux=float(1).div(fold.mul(fold).add(.045).sqrt()).sub(1.10).max(0);
-     const focal=float(1).sub(flux.mul(-.75).exp()).pow(1.45);
-     const soft=float(1).sub(flux.mul(-.22).exp());
+     const focal=float(1).sub(flux.mul(-.68).exp()).pow(1.35);
+     const soft=float(1).sub(flux.mul(-.27).exp());
      // Smooth transition around Snell's window, using the same local normal.
      const critical=float(1).sub(disc.abs().div(.12).clamp(0,1)).pow(1.6).mul(fineFade);
-     const silver=vec3(.84,.96,1).mul(focal.mul(.82).add(soft.mul(.16))).mul(float(.35).add(transmissionFine.mul(.65)));
-     const rimLight=vec3(.46,.72,.91).mul(critical).mul(focal.mul(.65).add(.12));
+     const silver=vec3(.84,.96,1).mul(focal.mul(.70).add(soft.mul(.28))).mul(float(.35).add(transmissionFine.mul(.65)));
+     const rimLight=vec3(.46,.72,.91).mul(critical).mul(focal.mul(.52).add(.10));
      const skyLight=vec3(.18,.46,.77).mul(sky).mul(.48);
      const refined= silver.add(rimLight).add(skyLight).mul(eyeTransmission);
      const oldLight=spectral.mul(illumination).add(incoming);
@@ -2798,17 +2798,17 @@ function setupContinuousFloor(mat,detail){
   const fine=sx.mul(7.13).sub(sz.mul(3.81)).add(warpZ.mul(1.6)).sub(t.mul(8.9)).sin();
   const opticalPath=depth.div(controls.w).mul(absorption.max(0));
   const softDepth=smoothstep(6,24,opticalPath);
-  const core=float(1).sub(det.abs().div(softDepth.mul(.13).add(.44)).clamp(0,1)).pow(1.65).mul(float(1).sub(softDepth.mul(.28)));
+  const core=float(1).sub(det.abs().div(softDepth.mul(.15).add(.48)).clamp(0,1)).pow(1.55).mul(float(1).sub(softDepth.mul(.28)));
   const secondary=float(1).sub(det.add(fine.mul(.19)).abs().div(softDepth.mul(.07).add(.23)).clamp(0,1)).pow(2).mul(float(1).sub(softDepth.mul(.65)));
   const shoulder=float(1).sub(focus.mul(-.22).exp()).pow(2);
   // Retain the original optical folds and add a narrow, distance-filtered
   // highlight plus a soft shoulder around them, rather than filling cells.
   const eyeDistance=oceanTSL.cameraPosition.sub(positionWorld).length();
   const detailFade=float(1).sub(smoothstep(8,36,eyeDistance));
-  const brightRim=float(1).sub(det.abs().div(.17).clamp(0,1)).pow(1.3);
-  const softRim=float(1).sub(det.abs().div(.68).clamp(0,1)).pow(2.6);
-  const originalBand=core.mul(.87).add(secondary.mul(.38)).add(shoulder.mul(.10));
-  const band=(photoOptics?originalBand.add(brightRim.mul(.28).mul(detailFade)).add(softRim.mul(.15)):originalBand).mul(envelope.mul(.45).add(.55));
+  const brightRim=float(1).sub(det.abs().div(.19).clamp(0,1)).pow(1.35);
+  const softRim=float(1).sub(det.abs().div(.72).clamp(0,1)).pow(2.45);
+  const originalBand=core.mul(.82).add(secondary.mul(.34)).add(shoulder.mul(.12));
+  const band=(photoOptics?originalBand.add(brightRim.mul(.20).mul(detailFade)).add(softRim.mul(.19)):originalBand).mul(envelope.mul(.45).add(.55));
   const outer=vec3(.93,.99,1).mul(band).mul(depth.mul(-.055).div(controls.w).exp());
   const originalLight=outer.mul(float(1).sub(localMask.mul(.20))).mul(photoOptics?2.15:2.1).add(local.mul(localMask).mul(.95));
   let light=originalLight;
@@ -7728,7 +7728,7 @@ function disableVolumeMarch(error){
  volumeMarchFault=String(error?.message||error);volumeMarchActive=false;
  screenLightPipeline.outputNode=volumeMarchBase;screenLightPipeline.needsUpdate=true;
  console.warn('Volume march fallback to existing screen scattering',error);
- status('28.5.77 volumetric fallback: '+volumeMarchFault);
+ status('28.5.78 volumetric fallback: '+volumeMarchFault);
  return true;
 }
 async function initScreenSpaceLighting(){
@@ -7771,7 +7771,7 @@ async function initScreenSpaceLighting(){
   screenBlendColor=blendColor;
   screenSpaceReady=true;
   applyScreenScatteringQuality();
-  status(volumeMarchActive?'28.5.77 stable volumetric illumination initialized.':'24.7 depth-aware screen-space scattering initialized.');
+  status(volumeMarchActive?'28.5.78 soft-source underwater optics initialized.':'24.7 depth-aware screen-space scattering initialized.');
  }catch(error){
   screenSpaceFault=String(error?.message||error);
   screenSpaceFailed=true;

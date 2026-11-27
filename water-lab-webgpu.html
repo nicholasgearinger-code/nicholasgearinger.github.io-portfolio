@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.6.1 Refined shallow-water caustics</title>
+<title>Rift Water Lab · WebGPU 28.6.2 Brighter shallow-water caustics</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.6.1</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.6.2</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -129,7 +129,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Atmosphere preset <select id="atmospherePreset"><option value="lagoon" selected>Tropical lagoon</option><option value="coastal">Coastal haze</option><option value="deep">Deep blue</option><option value="off">Off · comparison</option></select></label></div>
 <div class="row"><label>Underwater environment <select id="underwaterScene"><option value="reef">Rocks and shipwreck</option><option value="sand">Sand only · performance</option></select></label></div>
 <div class="row"><label>Caustic model <select id="causticMode"><option value="wave" selected>24.5.3 · refracted ray network</option><option value="classic">24.4 · tiled comparison</option><option value="off">Off</option></select></label></div>
-<div class="row"><label>Wave caustics <input id="causticStrength" aria-label="Wave caustics" type="range" min="0" max="1.5" step=".05" value=".8"></label><output id="causticStrengthOut">0.80</output></div>
+<div class="row"><label>Wave caustics <input id="causticStrength" aria-label="Wave caustics" type="range" min="0" max="1.5" step=".05" value="1.1"></label><output id="causticStrengthOut">1.10</output></div>
 <div class="row"><label>Caustic focusing <input id="causticFocus" aria-label="Caustic focusing" type="range" min=".4" max="2" step=".1" value="1.2"></label><output id="causticFocusOut">1.20</output></div>
 <div class="row"><label>Caustic contrast <input id="causticContrast" aria-label="Caustic contrast against sand" type="range" min="0" max="2.5" step=".05" value="1.45"></label><output id="causticContrastOut">1.45</output></div>
 <div class="row"><label>Object caustics <input id="objectCausticStrength" aria-label="Independent caustic strength on underwater objects" type="range" min="0" max="3" step=".05" value="1.65"></label><output id="objectCausticStrengthOut">1.65</output></div>
@@ -524,7 +524,7 @@ function createOceanMaterial(options){
 let opticalMode='lagoon',waterClarity=1.10,waterFloor=null,renderQuality='balanced';
 let depthRefraction=1,underwaterScatter=1,waveSmoothness=1,reflectionStrength=1,subsurfaceLight=.85;
 let thicknessTexture=null,thicknessPixels=null,lastThicknessX=Infinity,lastThicknessZ=Infinity;
-let underwaterActive=false,underwaterFog=null,dayFog=null,waterDepthAtBoat=4,underwaterBlend=0,underwaterSceneMode='reef',underwaterObjects=null,causticStrength=.8,causticMap=null,causticPixels=null,lastCausticUpdate=-100;
+let underwaterActive=false,underwaterFog=null,dayFog=null,waterDepthAtBoat=4,underwaterBlend=0,underwaterSceneMode='reef',underwaterObjects=null,causticStrength=1.1,causticMap=null,causticPixels=null,lastCausticUpdate=-100;
 let objectCausticStrength=1.65;
 let causticMode='wave',causticFocus=1.2,causticContrast=1.45,
  causticRate=12,causticDetail=96,causticValidated=true,causticLastError='';
@@ -2687,7 +2687,7 @@ function updateCausticLighting(cameraDepth=0){
  // Boost only the focused light and lower the sand albedo slightly.
  // Both changes are reversible when comparing the original caustics.
  const emphasis=causticMode==='wave'?causticContrast:1;
- const emission=Math.max(0,Math.min(1.8,strength*(causticMode==='wave'?1.05:.75)*emphasis));
+ const emission=Math.max(0,Math.min(2.2,strength*(causticMode==='wave'?1.22:.75)*emphasis));
  floorCausticMaterial.emissiveIntensity=emission;
  if(floorCausticMaterial.userData.floorPhotonValid)floorCausticMaterial.userData.floorPhotonValid.value=causticGPUFrames>0&&causticGPU&&!causticGPUFault&&causticMode==='wave'?1:0;
  if(continuousFloor){continuousFloor.origin.value.set(Number.isFinite(causticProjectionX)?causticProjectionX:0,Number.isFinite(causticProjectionZ)?causticProjectionZ:0);continuousFloor.controls.value.set(causticProjectionWidth,causticMode==='wave'&&enabled?emission:0,clockTime,Math.max(.4,waterClarity));continuousFloor.wave.value=causticMode==='wave'?1:0;continuousFloor.shadow.value=waveTransmissionMaterialActive?1:0;continuousFloor.lens.value.set(waveHeight,causticFocus);continuousFloor.absorption.value=Math.max(0,depthAbsorption);updateFloorFFTCurvature();}
@@ -2903,7 +2903,7 @@ function setupContinuousFloor(mat,detail){
   // Classic mode retains the existing emissive map; wave mode replaces it.
   // Focused light must obey the same occlusion as diffuse sunlight.
   const spectralTint=vec3(.065,.022,.008).mul(opticalPath.sub(6).max(0).negate()).exp();
-  const litCaustic=light.mul(spectralTint).mul(shaded.pow(.85)).mul(grain).mul(controls.y).mul(solidLightVisibility(positionWorld));
+  const litCaustic=light.mul(spectralTint).mul(shaded.pow(.85)).mul(grain).mul(controls.y).mul(1.25).mul(solidLightVisibility(positionWorld));
   // Approximate added diffuse irradiance using receiver albedo and orientation.
   const receiver=oceanTSL.normalWorld.normalize().dot(vec3(16,35,8).normalize()).max(0);
   mat.emissiveNode=materialEmissive.mul(float(1).sub(wave)).add(litCaustic.mul(materialColor.rgb.mul(.55).add(vec3(.45))).mul(receiver.mul(.75).add(.25)).mul(photoOptics?vec3(.98,1,1):vec3(.90,.98,1)));
@@ -7745,7 +7745,7 @@ function disableVolumeMarch(error){
  volumeMarchFault=String(error?.message||error);volumeMarchActive=false;
  screenLightPipeline.outputNode=volumeMarchBase;screenLightPipeline.needsUpdate=true;
  console.warn('Volume march fallback to existing screen scattering',error);
- status('28.6.1 volumetric fallback: '+volumeMarchFault);
+ status('28.6.2 volumetric fallback: '+volumeMarchFault);
  return true;
 }
 async function initScreenSpaceLighting(){
@@ -7788,7 +7788,7 @@ async function initScreenSpaceLighting(){
   screenBlendColor=blendColor;
   screenSpaceReady=true;
   applyScreenScatteringQuality();
-  status(volumeMarchActive?'28.6.1 refined underwater optics initialized.':'24.7 depth-aware screen-space scattering initialized.');
+  status(volumeMarchActive?'28.6.2 brighter shallow-water caustics initialized.':'24.7 depth-aware screen-space scattering initialized.');
  }catch(error){
   screenSpaceFault=String(error?.message||error);
   screenSpaceFailed=true;

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.6.2 Brighter shallow-water caustics</title>
+<title>Rift Water Lab · WebGPU 28.7.0 Curved tropical shoreline</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -2911,6 +2911,66 @@ function setupContinuousFloor(mat,detail){
   mat.needsUpdate=true;
  }catch(e){continuousFloor=null;mat.colorNode=null;mat.emissiveNode=null;console.warn('Continuous floor fallback',e);}
 }
+// Curved tropical cove: a shallow sloping beach, damp sand and a broken
+// foam fringe. The shore sits beyond the local test-water area so it does
+// not interfere with boat physics or the established seabed caustics.
+let shorelineFoamTexture=null,shorelineFoamMaterial=null,shorelineLast=-1;
+function createTropicalShoreline(){
+ const segments=160,across=18,xMin=-43,xMax=43;
+ const shoreZ=x=>-39+(x*x)/155;
+ const buildBand=(inner,outer,heightFn,colorFn,material)=>{
+  const positions=[],colors=[],uvs=[],indices=[];
+  for(let j=0;j<=across;j++){
+   const v=j/across;
+   for(let i=0;i<=segments;i++){
+    const u=i/segments,x=xMin+(xMax-xMin)*u,z0=shoreZ(x);
+    const z=z0+inner+(outer-inner)*v;
+    const y=heightFn(x,v,z);
+    positions.push(x,y,z);uvs.push(u*8,v*3);
+    const c=colorFn(x,v,z);colors.push(c.r,c.g,c.b);
+   }
+  }
+  for(let j=0;j<across;j++)for(let i=0;i<segments;i++){
+   const a=j*(segments+1)+i,b=a+1,c=a+segments+1,d=c+1;
+   indices.push(a,c,b,b,c,d);
+  }
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
+  geo.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
+  geo.setAttribute('uv',new THREE.Float32BufferAttribute(uvs,2));
+  geo.setIndex(indices);geo.computeVertexNormals();
+  const mesh=new THREE.Mesh(geo,material);mesh.frustumCulled=false;scene.add(mesh);return mesh;
+ };
+ const sandMat=new THREE.MeshStandardMaterial({color:0xffffff,vertexColors:true,roughness:.92,metalness:0});
+ const sand=new THREE.Color(0xf1dfb8),warm=new THREE.Color(0xe8d1a7);
+ buildBand(.18,20,(x,v,z)=>.10+v*2.35+.10*Math.sin(x*.17+v*4)*Math.sin(z*.13),
+  (x,v)=>sand.clone().lerp(warm,Math.max(0,Math.min(.32,.12+.12*Math.sin(x*.11+v*8)))),sandMat);
+ const wetMat=new THREE.MeshStandardMaterial({color:0xffffff,vertexColors:true,roughness:.27,metalness:.03});
+ const wetA=new THREE.Color(0x9b9b7d),wetB=new THREE.Color(0xc3b38d);
+ buildBand(-.08,.72,(x,v)=>.025+v*.045,
+  (x,v)=>wetA.clone().lerp(wetB,v*.65).multiplyScalar(.88+.08*Math.sin(x*.32)),wetMat);
+ const n=512,data=new Uint8Array(n*64*4);
+ for(let y=0;y<64;y++)for(let x=0;x<n;x++){
+  const u=x/n,noise=.5+.25*Math.sin(x*.17+y*.61)+.15*Math.sin(x*.047-y*.29)+.1*Math.sin(x*.39+y*.13);
+  const edge=.5+.22*Math.sin(x*.031)+.12*Math.sin(x*.083+y*.22);
+  const alpha=Math.max(0,Math.min(1,(noise-edge+.22)*2.8));
+  const k=(y*n+x)*4;data[k]=225;data[k+1]=250;data[k+2]=244;data[k+3]=Math.round(alpha*235);
+ }
+ shorelineFoamTexture=new THREE.DataTexture(data,n,64,THREE.RGBAFormat);
+ shorelineFoamTexture.wrapS=THREE.RepeatWrapping;shorelineFoamTexture.wrapT=THREE.ClampToEdgeWrapping;
+ shorelineFoamTexture.minFilter=THREE.LinearMipmapLinearFilter;shorelineFoamTexture.magFilter=THREE.LinearFilter;
+ shorelineFoamTexture.generateMipmaps=true;shorelineFoamTexture.needsUpdate=true;
+ shorelineFoamMaterial=new THREE.MeshBasicMaterial({map:shorelineFoamTexture,transparent:true,opacity:.78,depthWrite:false,side:THREE.DoubleSide});
+ buildBand(-.10,.42,(x,v)=>.075+v*.025,
+  ()=>new THREE.Color(0xffffff),shorelineFoamMaterial);
+}
+function updateTropicalShoreline(t){
+ if(!shorelineFoamTexture)return;
+ if(t-shorelineLast<.025)return;shorelineLast=t;
+ shorelineFoamTexture.offset.x=(t*.012)%1;
+ shorelineFoamTexture.offset.y=(Math.sin(t*.22)*.018);
+}
+
 function createSeabed(){
  const n=120,geo=new THREE.PlaneGeometry(420,420,n,n);
  geo.rotateX(-Math.PI/2);

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.8.1 Shoreline enabled</title>
+<title>Rift Water Lab · WebGPU 28.8.2 Shoreline enabled</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.8.1</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.8.2</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -2915,9 +2915,17 @@ function setupContinuousFloor(mat,detail){
 // foam fringe. The shore sits beyond the local test-water area so it does
 // not interfere with boat physics or the established seabed caustics.
 let shorelineFoamTexture=null,shorelineFoamMaterial=null,shorelineLast=-1;
+// Shared shoreline profile keeps the beach, terrain and hull boundary aligned.
+function islandCoastZ(x){
+ return -39+(x*x)/155+1.05*Math.sin(x*.105)+.42*Math.sin(x*.235+1.1);
+}
+function islandWidthFactor(s){
+ return .88+.09*Math.sin(s*4.8-.35)+.055*Math.sin(s*10.5+1.0);
+}
+
 function createTropicalShoreline(){
  const segments=190,across=18,xMin=-65,xMax=65;
- const shoreZ=x=>-39+(x*x)/155;
+ const shoreZ=x=>islandCoastZ(x);
  const buildBand=(inner,outer,heightFn,colorFn,material)=>{
   const positions=[],colors=[],uvs=[],indices=[];
   for(let j=0;j<=across;j++){
@@ -2985,7 +2993,7 @@ function createIslandLandmass(){
  for(let j=0;j<=nz;j++){
   const s=j/nz;
   for(let i=0;i<=nx;i++){
-   const u=i/nx,x=(u*2-1)*xHalf,coastZ=-39+(x*x)/155;
+   const u=i/nx,x=(u*2-1)*xHalf*islandWidthFactor(s),coastZ=islandCoastZ(x);
    const z=coastZ+.18-s*depth,y=heightAt(x,s);
    positions.push(x,y,z);
    const blend=Math.max(0,Math.min(1,(y-.32)/1.35));
@@ -3026,7 +3034,7 @@ function createIslandLandmass(){
  let seed=7319;const rand=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};
  const boulderGeo=new THREE.IcosahedronGeometry(1,1);
  for(let n=0;n<30;n++){
-  const x=(rand()*2-1)*57,s=.04+rand()*.28,z=-39+x*x/155+.18-s*depth;
+  const s=.04+rand()*.28,x=(rand()*2-1)*57*islandWidthFactor(s),z=islandCoastZ(x)+.18-s*depth;
   const r=.65+rand()*1.65,mesh=new THREE.Mesh(boulderGeo,rockMat);
   mesh.position.set(x,heightAt(x,s)+r*.30,z);mesh.scale.set(r*1.35,r*.72,r);
   mesh.rotation.set(rand()*.5,rand()*Math.PI,rand()*.35);scene.add(mesh);
@@ -3036,7 +3044,7 @@ function createIslandLandmass(){
  const leafMat=new THREE.MeshStandardMaterial({color:0x39784a,roughness:.9,side:THREE.DoubleSide});
  const palmSites=[[-43,.49],[-29,.34],[-13,.67],[7,.38],[24,.63],[43,.43]];
  for(const [x,s] of palmSites){
-  const z=-39+x*x/155+.18-s*depth,y=heightAt(x,s),tree=new THREE.Group();
+  const z=islandCoastZ(x)+.18-s*depth,y=heightAt(x,s),tree=new THREE.Group();
   const trunk=new THREE.Mesh(new THREE.CylinderGeometry(.13,.23,3.5,7),trunkMat);
   trunk.position.y=1.72;trunk.rotation.z=.07;tree.add(trunk);
   for(let k=0;k<7;k++){
@@ -3059,11 +3067,10 @@ function updateTropicalShoreline(t){
 
 
 function islandContainsWorldPoint(x,z){
- const xHalf=62,depth=82;
- if(Math.abs(x)>xHalf)return false;
- const coastZ=-39+(x*x)/155+.18;
+ const depth=82,coastZ=islandCoastZ(x)+.18;
  const along=(coastZ-z)/depth;
- return along>=-.015&&along<=1.015;
+ if(along<-.015||along>1.015)return false;
+ return Math.abs(x)<=62*islandWidthFactor(Math.max(0,Math.min(1,along)))+.45;
 }
 function resolveIslandBoatCollision(previousX,previousZ){
  if(!boat)return false;
